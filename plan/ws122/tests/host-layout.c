@@ -7,7 +7,8 @@
 
 /*
  * ws122-p004: checks that the decoding add-in's view of the first fields
- * of AVPacket and AVFrame (userland/desktop/videoplayer/codec-layout.h)
+ * of AVPacket, AVFrame, AVCodecParameters and AVCodec
+ * (userland/desktop/libmedia/avcodec-layout.h)
  * matches FFmpeg's public headers of one version.  Compiled once for each
  * version the add-in knows, against that version's headers (the host's
  * Debian 13 FFmpeg 7, libavcodec 61; the image's FFmpeg 9.0.2 package,
@@ -17,7 +18,7 @@
  *   host-layout MAJOR      prints "host-layout: PASS major=N" or FAIL
  */
 
-#include "userland/desktop/videoplayer/codec-layout.h"
+#include "userland/desktop/libmedia/avcodec-layout.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>
@@ -65,6 +66,19 @@ main(
 	same("AVFrame.height", offsetof(struct codec_frame, height), offsetof(AVFrame, height));
 	same("AVFrame.nb_samples", offsetof(struct codec_frame, nb_samples), offsetof(AVFrame, nb_samples));
 	same("AVFrame.format", offsetof(struct codec_frame, format), offsetof(AVFrame, format));
+
+	/* AVCodecParameters' and AVCodec's first fields (ws177-p031: the extradata of Vorbis and Theora). */
+	same("AVCodecParameters.codec_type", offsetof(struct codec_parameters, codec_type), offsetof(AVCodecParameters, codec_type));
+	same("AVCodecParameters.codec_id", offsetof(struct codec_parameters, codec_id), offsetof(AVCodecParameters, codec_id));
+	same("AVCodecParameters.codec_tag", offsetof(struct codec_parameters, codec_tag), offsetof(AVCodecParameters, codec_tag));
+	same("AVCodecParameters.extradata", offsetof(struct codec_parameters, extradata), offsetof(AVCodecParameters, extradata));
+	same("AVCodecParameters.extradata_size", offsetof(struct codec_parameters, extradata_size), offsetof(AVCodecParameters, extradata_size));
+	same("AVCodec.name", offsetof(struct codec_head, name), offsetof(AVCodec, name));
+	same("AVCodec.long_name", offsetof(struct codec_head, long_name), offsetof(AVCodec, long_name));
+	same("AVCodec.type", offsetof(struct codec_head, type), offsetof(AVCodec, type));
+	same("AVCodec.id", offsetof(struct codec_head, id), offsetof(AVCodec, id));
+	same("enum AVMediaType", sizeof(int), sizeof(enum AVMediaType));
+	same("enum AVCodecID", sizeof(int), sizeof(enum AVCodecID));
 
 	/* The verdict. */
 	if (failures != 0) {

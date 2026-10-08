@@ -6,16 +6,17 @@
  */
 
 /*
- * The first fields of FFmpeg's AVPacket and AVFrame the decoding add-in
- * (codec.c, WS122 p004) touches, as the order of FFmpeg's public headers
- * gives them for the major versions in codec.c's add_versions.  The layout
+ * The first fields of FFmpeg's AVPacket, AVFrame, AVCodecParameters and
+ * AVCodec the decoding add-in (avcodec.c, WS122 p004, ws177-p031)
+ * touches, as the order of FFmpeg's public headers gives them for the
+ * major versions in avcodec.c's add_versions.  The layout
  * is a fact of FFmpeg's public interface; no FFmpeg code is copied.
  * plan/ws122/tests/host-layout.c compiles a check of these against each
  * version's headers.
  */
 
-#ifndef VIDEOPLAYER_CODEC_LAYOUT_H
-#define VIDEOPLAYER_CODEC_LAYOUT_H
+#ifndef LIBMEDIA_AVCODEC_LAYOUT_H
+#define LIBMEDIA_AVCODEC_LAYOUT_H
 
 #include <stdint.h>
 
@@ -48,6 +49,31 @@ struct codec_frame {
 	int height;
 	int nb_samples;
 	int format;
+};
+
+/*
+ * The first fields of AVCodecParameters (ws177-p031: the extradata of
+ * Vorbis and Theora), in the order of FFmpeg's public header for every
+ * major version in add_versions (checked by host-layout.c).  The enums
+ * are ints.
+ */
+struct codec_parameters {
+	int codec_type;
+	int codec_id;
+	uint32_t codec_tag;
+	uint8_t *extradata;
+	int extradata_size;
+};
+
+/*
+ * The first fields of AVCodec: a decoder's names, its media type and its
+ * codec ID, read to fill codec_parameters (checked by host-layout.c).
+ */
+struct codec_head {
+	const char *name;
+	const char *long_name;
+	int type;
+	int id;
 };
 
 #endif

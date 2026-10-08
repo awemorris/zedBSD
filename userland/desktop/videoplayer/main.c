@@ -108,9 +108,9 @@ struct vp_player {
 	struct vp_media media;
 
 	/* The picture shown, its time, the converter that fits it, and how many were shown. */
-	struct vp_frame *picture;
+	struct media_frame *picture;
 	double picture_time;
-	void *scaler;
+	struct media_scaler *scaler;
 
 	/* What the window says instead of a picture when a file could not be played ("" for nothing). */
 	char notice[160];
@@ -156,6 +156,7 @@ static const struct kl_file_filter vp_filters[] = {
 };
 
 static int vp_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **file);
+static void vp_media_log(void *context, const char *line);
 static int vp_loop(struct vp_player *player, unsigned timeout);
 static void vp_input(struct vp_player *player, const struct kl_window_event *event);
 static void vp_action(struct vp_player *player, uint32_t action);
@@ -196,6 +197,9 @@ main(
 	unsigned height;
 	int status;
 	int error;
+
+	/* libmedia's log lines (the reader's and the decoders') among the player's. */
+	media_set_log(vp_media_log, NULL);
 
 	/* The command line. */
 	status = vp_parse(argc, argv, &width, &height, &timeout, &file);
@@ -253,8 +257,8 @@ main(
 	/* Everything goes. */
 	vp_media_close(&player.media);
 	vp_audio_close(&player.audio);
-	vp_frame_free(&player.picture);
-	vp_scaler_free(player.scaler);
+	media_frame_free(&player.picture);
+	media_scaler_free(player.scaler);
 	kl_file_chooser_destroy(player.chooser);
 	kl_ui_destroy(player.ui);
 	if (player.canvas_made)
@@ -283,6 +287,18 @@ vp_log(
 	vfprintf(stderr, format, arguments);
 	fputc('\n', stderr);
 	va_end(arguments);
+}
+
+/* Writes one of libmedia's log lines as a Video Player line. */
+static void
+vp_media_log(
+	void *context,
+	const char *line)
+{
+	(void)context;
+
+	/* The line, after the player's word. */
+	fprintf(stderr, "VIDEOPLAYER %s\n", line);
 }
 
 /* Reads the command line; nonzero when it cannot be read. */
@@ -529,7 +545,7 @@ vp_action(
 		break;
 	case VP_ACTION_CLOSE:
 		vp_media_close(&player->media);
-		vp_frame_free(&player->picture);
+		media_frame_free(&player->picture);
 		player->notice[0] = '\0';
 		vp_log("CLOSE");
 		break;
@@ -580,7 +596,7 @@ vp_open(
 	int error;
 
 	/* The media; the picture shown before goes. */
-	vp_frame_free(&player->picture);
+	media_frame_free(&player->picture);
 	player->notice[0] = '\0';
 	error = vp_media_open(&player->media, path);
 	vp_log("OPENED path=%s error=%d codec=%d", path, error, player->media.codec_problem);
@@ -731,7 +747,7 @@ vp_draw(
 	struct vp_player *player,
 	uint64_t now_us)
 {
-	struct vp_frame *picture;
+	struct media_frame *picture;
 	uint64_t shown_us;
 	uint64_t after_ms;
 	double clock;
@@ -745,7 +761,7 @@ vp_draw(
 	if (picture == NULL && player->need_picture && next >= 0.0)
 		picture = vp_media_take(&player->media, next, &time, &next);
 	if (picture != NULL) {
-		vp_frame_free(&player->picture);
+		media_frame_free(&player->picture);
 		player->picture = picture;
 		player->picture_time = time;
 		player->need_picture = 0;
@@ -805,7 +821,7 @@ vp_draw_picture(
 {
 	struct kl_rect whole;
 	struct kl_text_line line;
-	struct vp_frame *picture;
+	struct media_frame *picture;
 	double aspect;
 	int picture_width;
 	int picture_height;
@@ -836,7 +852,7 @@ vp_draw_picture(
 	}
 
 	/* The picture's shape (square samples: the add-in reads no aspect field), fitted to the window. */
-	vp_frame_size(picture, &picture_width, &picture_height);
+	media_frame_size(picture, &picture_width, &picture_height);
 	if (picture_width <= 0 || picture_height <= 0)
 		return;
 	aspect = (double)picture_width / (double)picture_height;
@@ -854,7 +870,7 @@ vp_draw_picture(
 	y = ((int)player->height - height) / 2;
 
 	/* Scaled straight into the frame (BGRA is the canvas's 0xAARRGGBB, opaque); the scaler is remade when the sizes change. */
-	status = vp_frame_scale(picture, &player->scaler, player->pixels + (size_t)y * player->width + (size_t)x,
+	status = media_frame_scale(picture, &player->scaler, player->pixels + (size_t)y * player->width + (size_t)x,
 	    player->width * sizeof(uint32_t), width, height);
 	if (status != 0)
 		vp_log("SCALE failed width=%d height=%d", picture_width, picture_height);
@@ -869,13 +885,13 @@ vp_notice(
 {
 	/* The add-in's problem, or the file's. */
 	switch (problem) {
-	case VP_CODEC_MISSING:
+	case MEDIA_PROBLEM_MISSING:
 		(void)snprintf(player->notice, sizeof(player->notice), "Playing video needs FFmpeg's libavcodec, which is not installed.");
 		break;
-	case VP_CODEC_VERSION:
+	case MEDIA_PROBLEM_VERSION:
 		(void)snprintf(player->notice, sizeof(player->notice), "This version of libavcodec is not supported.");
 		break;
-	case VP_CODEC_FORMAT:
+	case MEDIA_PROBLEM_FORMAT:
 		(void)snprintf(player->notice, sizeof(player->notice), "The video's format is not supported.");
 		break;
 	default:

@@ -15,7 +15,7 @@
  *     host-mediafile FILE [SEEK_US]
  *
  * With HOST_MEDIAFILE_SOURCE=1 in the environment, the file is opened
- * through a source (mf_open_source, ws121-p002) whose reader is pread.
+ * through a source (media_file_open_source, ws121-p002) whose reader is pread.
  * Prints the format, each track, and each packet (track, times, keyframe,
  * size, the sum of its bytes); with SEEK_US, then seeks there and prints
  * the next three packets.  A file the reader refuses prints "OPEN error=N"
@@ -31,8 +31,8 @@
 #include <unistd.h>
 
 int main(int argc, char **argv);
-static void print_packet(const char *tag, const struct mf_packet *packet);
-static int open_source(const char *path, struct mf_file **file);
+static void print_packet(const char *tag, const struct media_packet *packet);
+static int open_source(const char *path, struct media_file **file);
 static int source_read_at(void *context, uint64_t offset, void *data, size_t size);
 
 /* The descriptor the source reads (HOST_MEDIAFILE_SOURCE). */
@@ -46,9 +46,9 @@ main(
 	int argc,
 	char **argv)
 {
-	const struct mf_track *track;
-	struct mf_file *file;
-	struct mf_packet packet;
+	const struct media_track *track;
+	struct media_file *file;
+	struct media_packet packet;
 	long long seek_us;
 	unsigned i;
 	unsigned count;
@@ -65,21 +65,21 @@ main(
 	if (getenv("HOST_MEDIAFILE_SOURCE") != NULL)
 		error = open_source(argv[1], &file);
 	else
-		error = mf_open(argv[1], &file);
+		error = media_file_open(argv[1], &file);
 	if (error != 0) {
 		printf("OPEN error=%d\n", error);
 		return 1;
 	}
 
 	/* The format, the length and each track. */
-	tracks = mf_track_count(file);
+	tracks = media_file_track_count(file);
 	printf("FORMAT %s duration_us=%lld tracks=%u\n",
-	       mf_format_name(file),
-	       (long long)mf_duration_us(file),
+	       media_file_format_name(file),
+	       (long long)media_file_duration_us(file),
 	       tracks);
 	for (i = 0; i < tracks; i++) {
 		/* One track. */
-		track = mf_track(file, i);
+		track = media_file_track(file, i);
 		printf("TRACK %u kind=%u codec=%u name=%s width=%u height=%u rate=%u channels=%u private=%zu packets=%llu\n",
 		       i,
 		       track->kind,
@@ -97,7 +97,7 @@ main(
 	count = 0;
 	for (;;) {
 		/* The next one, or the end. */
-		error = mf_read(file, &packet);
+		error = media_file_read(file, &packet);
 		if (error != 0)
 			break;
 
@@ -112,11 +112,11 @@ main(
 	/* The seek, and the three packets after it. */
 	if (argc >= 3) {
 		seek_us = strtoll(argv[2], NULL, 10);
-		error = mf_seek(file, (int64_t)seek_us);
+		error = media_file_seek(file, (int64_t)seek_us);
 		printf("SEEK %lld error=%d\n", seek_us, error);
 		for (i = 0; i < 3U; i++) {
 			/* One packet after the seek. */
-			error = mf_read(file, &packet);
+			error = media_file_read(file, &packet);
 			if (error != 0)
 				break;
 
@@ -126,7 +126,7 @@ main(
 	}
 
 	/* Succeeded: everything is printed. */
-	mf_close(file);
+	media_file_close(file);
 	if (source_fd >= 0)
 		(void)close(source_fd);
 	return 0;
@@ -136,9 +136,9 @@ main(
 static int
 open_source(
 	const char *path,
-	struct mf_file **file)
+	struct media_file **file)
 {
-	struct mf_source source;
+	struct media_source source;
 	struct stat status;
 
 	/* The descriptor and the size. */
@@ -152,7 +152,7 @@ open_source(
 	source.read_at = source_read_at;
 	source.size = (uint64_t)status.st_size;
 	source.context = &source_fd;
-	return mf_open_source(&source, file);
+	return media_file_open_source(&source, file);
 }
 
 /* Reads all the bytes asked at an offset. */
@@ -181,7 +181,7 @@ source_read_at(
 static void
 print_packet(
 	const char *tag,
-	const struct mf_packet *packet)
+	const struct media_packet *packet)
 {
 	unsigned long sum;
 	size_t i;

@@ -27,7 +27,7 @@
 /* The largest codec private data kept. */
 #define MF_PRIVATE_MAX		(1024U * 1024U)
 
-struct mf_file;
+struct media_file;
 
 /*
  * A format's reader: it reads the file's header and index (open), hands out
@@ -37,10 +37,10 @@ struct mf_file;
  */
 struct mf_format {
 	const char *name;
-	int (*open)(struct mf_file *file);
-	int (*read)(struct mf_file *file, struct mf_packet *packet);
-	int (*seek)(struct mf_file *file, int64_t time_us);
-	void (*close)(struct mf_file *file);
+	int (*open)(struct media_file *file);
+	int (*read)(struct media_file *file, struct media_packet *packet);
+	int (*seek)(struct media_file *file, int64_t time_us);
+	void (*close)(struct media_file *file);
 };
 
 /*
@@ -48,13 +48,13 @@ struct mf_format {
  * its format and that format's state, the tracks found, the length of the
  * presentation, and the buffer the last packet was read into.
  */
-struct mf_file {
+struct media_file {
 	int fd;
-	struct mf_source source;
+	struct media_source source;
 	uint64_t size;
 	const struct mf_format *format;
 	void *state;
-	struct mf_track tracks[MF_TRACK_MAX];
+	struct media_track tracks[MF_TRACK_MAX];
 	unsigned track_count;
 	int64_t duration_us;
 	unsigned char *buffer;
@@ -71,10 +71,10 @@ int mf_ts_detect(const unsigned char *head, size_t length);
 int mf_ogg_detect(const unsigned char *head, size_t length);
 int mf_avi_detect(const unsigned char *head, size_t length);
 
-int mf_read_at(struct mf_file *file, uint64_t offset, void *data, size_t size);
-int mf_packet_room(struct mf_file *file, size_t size);
-int mf_keep_private(struct mf_track *track, const unsigned char *data, size_t size);
-void mf_set_codec_name(struct mf_track *track, const char *name, size_t length);
+int mf_read_at(struct media_file *file, uint64_t offset, void *data, size_t size);
+int mf_packet_room(struct media_file *file, size_t size);
+int mf_keep_private(struct media_track *track, const unsigned char *data, size_t size);
+void mf_set_codec_name(struct media_track *track, const char *name, size_t length);
 int64_t mf_scale_us(int64_t value, uint64_t units_per_second);
 uint16_t mf_be16(const unsigned char *data);
 uint32_t mf_be32(const unsigned char *data);

@@ -103,7 +103,8 @@ struct ipp_message {
  * What a response said: the HTTP status, the IPP status and request-id,
  * the job's id and state (-1 for none), whether the printer lists PDF,
  * application/octet-stream (it guesses the format: many printers that take
- * PDF list only that, BUG-271) and formats at all, and its info and model.
+ * PDF list only that, BUG-271) and formats at all, its info and model,
+ * and the job's state reasons (keywords joined by commas, for the log).
  */
 struct ipp_answer {
 	int http;
@@ -116,6 +117,7 @@ struct ipp_answer {
 	int has_formats;
 	char info[PD_NAME_MAX];
 	char model[PD_NAME_MAX];
+	char reasons[128];
 };
 
 /*
@@ -174,6 +176,7 @@ static int ipp_stream_field(struct ipp_stream *stream);
 static void ipp_stream_attribute(struct ipp_stream *stream);
 static int ipp_header_is(const char *line, const char *name, const char **value);
 static int ipp_named(const char *name);
+static void ipp_add_reason(struct ipp_answer *answer, const unsigned char *value, size_t length);
 static void ipp_take_text(const unsigned char *value, size_t size, unsigned tag, char *text, size_t room);
 static const char *ipp_detail(const struct ipp_answer *answer);
 static uint32_t ipp_request_id(void);
@@ -199,6 +202,10 @@ pd_ipp_job(
 	int job_id;
 	int stop;
 	int same;
+	int last_state;
+	int reasons_same;
+	int taken;
+	char last_reasons[128];
 
 	/* The printer, at its path. */
 	status = ipp_find_path(job->host, job->port, job->path, path, sizeof(path), &answer, &minor, &detail);
@@ -242,9 +249,13 @@ pd_ipp_job(
 			return;
 		}
 
-		/* A busy printer is tried again later; a job asked to stop meanwhile was not taken. */
+		/* A busy printer is tried again later, unless it made the job all the same (it has a job-id). */
 		if (answer.status != IPP_BUSY || tries + 1 >= IPP_BUSY_TRIES)
 			break;
+		if (answer.job_id > 0)
+			break;
+
+		/* A job asked to stop meanwhile was not taken. */
 		stop = pd_wait(job, IPP_BUSY_WAIT);
 		if (stop) {
 			pd_send("STATE %lu cancelled", (unsigned long)job->job);
@@ -252,8 +263,15 @@ pd_ipp_job(
 		}
 	}
 
+	/* Taken: a success, or a busy answer that made the job all the same (its job-id is watched, not sent again). */
+	taken = 0;
+	if (answer.http == 200 && answer.status <= 0x00ffU)
+		taken = 1;
+	if (answer.http == 200 && answer.status == IPP_BUSY && answer.job_id > 0)
+		taken = 1;
+
 	/* Refused. */
-	if (answer.http != 200 || answer.status > 0x00ffU) {
+	if (!taken) {
 		pd_send("STATE %lu failed %s", (unsigned long)job->job, ipp_detail(&answer));
 		return;
 	}
@@ -274,6 +292,8 @@ pd_ipp_job(
 
 	/* Watched until it ends, asked to stop, or half an hour went. */
 	started = time(NULL);
+	last_state = -1;
+	last_reasons[0] = '\0';
 	for (;;) {
 		/* Asked to stop: Cancel-Job. */
 		stop = pd_cancelled(job);
@@ -288,6 +308,16 @@ pd_ipp_job(
 
 		/* Its state; a printer that does not tell it is done, not confirmed. */
 		status = ipp_ask(job->host, job->port, job->path, IPP_GET_JOB, minor, job_id, NULL, NULL, &answer, &detail);
+
+		/* The printer's word on the job, logged when it changes (BUG-271: a job left "job-incoming"). */
+		reasons_same = strcmp(answer.reasons, last_reasons);
+		if (status == 0 && (answer.job_state != last_state || reasons_same != 0)) {
+			pd_log("job %lu printer state %d reasons %s", (unsigned long)job->job, answer.job_state, answer.reasons);
+			last_state = answer.job_state;
+			(void)snprintf(last_reasons, sizeof(last_reasons), "%s", answer.reasons);
+		}
+
+		/* A job whose state the printer does not tell. */
 		if (status == 0 && answer.job_state < 0) {
 			pd_send("STATE %lu done unconfirmed", (unsigned long)job->job);
 			return;
@@ -647,18 +677,34 @@ ipp_exchange(
 	if (status != 0)
 		return status;
 
-	/* The request's header and the message, then the document. */
+	/*
+	 * The request's header and the message.  A message with a document is
+	 * sent in chunks (Transfer-Encoding: chunked, which IPP requires every
+	 * printer to take, as CUPS sends it): a Brother MFC-L3770CDW took a
+	 * Print-Job sent with a Content-Length and then waited for its document
+	 * with the job "incoming" (BUG-271, T1-466).
+	 */
 	length = message->length;
-	if (document != NULL)
-		length += document->size;
-	(void)snprintf(header, sizeof(header),
-	    "POST %s HTTP/1.1\r\nHost: %s:%u\r\nContent-Type: application/ipp\r\nContent-Length: %llu\r\nConnection: close\r\n\r\n",
-	    path, host, port, (unsigned long long)length);
+	if (document == NULL) {
+		(void)snprintf(header, sizeof(header),
+		    "POST %s HTTP/1.1\r\nHost: %s:%u\r\nContent-Type: application/ipp\r\nContent-Length: %llu\r\nConnection: close\r\n\r\n",
+		    path, host, port, (unsigned long long)length);
+	} else {
+		(void)snprintf(header, sizeof(header),
+		    "POST %s HTTP/1.1\r\nHost: %s:%u\r\nContent-Type: application/ipp\r\nTransfer-Encoding: chunked\r\nConnection: close\r\n\r\n%llx\r\n",
+		    path, host, port, (unsigned long long)length);
+	}
+
+	/* Sent: the header, the message. */
 	status = pd_write_all(fd, header, strlen(header));
 	if (status == 0)
 		status = pd_write_all(fd, message->data, message->length);
+
+	/* The document: the message's chunk ended, then the file's chunks and the last one. */
 	if (status == 0 && document != NULL)
-		status = pd_send_file(fd, document);
+		status = pd_write_all(fd, "\r\n", 2U);
+	if (status == 0 && document != NULL)
+		status = pd_send_file_chunked(fd, document);
 	if (status != 0) {
 		(void)close(fd);
 		*detail = "io";
@@ -1184,6 +1230,8 @@ ipp_stream_attribute(
 		ipp_take_text(value, length, stream->tag, answer->info, sizeof(answer->info));
 	} else if (which == 5 && answer->model[0] == '\0') {
 		ipp_take_text(value, length, stream->tag, answer->model, sizeof(answer->model));
+	} else if (which == 6 && stream->tag == IPP_KEYWORD) {
+		ipp_add_reason(answer, value, length);
 	}
 }
 
@@ -1235,7 +1283,7 @@ static int
 ipp_named(
 	const char *name)
 {
-	static const char *const names[] = { "job-id", "job-state", "document-format-supported", "printer-info", "printer-make-and-model" };
+	static const char *const names[] = { "job-id", "job-state", "document-format-supported", "printer-info", "printer-make-and-model", "job-state-reasons" };
 	size_t index;
 	int same;
 
@@ -1353,4 +1401,36 @@ ipp_be32(
 	number |= (uint32_t)bytes[2] << 8;
 	number |= (uint32_t)bytes[3];
 	return number;
+}
+
+/*
+ * Adds a job state reason (a keyword) to the answer's list, after a comma;
+ * one that does not fit, or is not printable, is left out.
+ */
+static void
+ipp_add_reason(
+	struct ipp_answer *answer,
+	const unsigned char *value,
+	size_t length)
+{
+	size_t used;
+	size_t i;
+
+	/* Room for it and its comma. */
+	used = strlen(answer->reasons);
+	if (length == 0 || used + length + 2U > sizeof(answer->reasons))
+		return;
+
+	/* Only printable characters (a keyword is ASCII). */
+	for (i = 0; i < length; i++) {
+		/* Not printable: left out. */
+		if (value[i] < 0x21U || value[i] > 0x7eU)
+			return;
+	}
+
+	/* After a comma when it is not the first. */
+	if (used != 0)
+		answer->reasons[used++] = ',';
+	memcpy(answer->reasons + used, value, length);
+	answer->reasons[used + length] = '\0';
 }

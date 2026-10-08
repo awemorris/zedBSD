@@ -26,28 +26,28 @@
 #include <stdint.h>
 
 /* The kinds of track. */
-#define MF_TRACK_OTHER		0U
-#define MF_TRACK_VIDEO		1U
-#define MF_TRACK_AUDIO		2U
+#define MEDIA_TRACK_OTHER		0U
+#define MEDIA_TRACK_VIDEO		1U
+#define MEDIA_TRACK_AUDIO		2U
 
 /* The codecs a track can be known to carry. */
-#define MF_CODEC_UNKNOWN	0U
-#define MF_CODEC_H264		1U
-#define MF_CODEC_HEVC		2U
-#define MF_CODEC_AV1		3U
-#define MF_CODEC_VP9		4U
-#define MF_CODEC_VP8		5U
-#define MF_CODEC_MPEG4		6U
-#define MF_CODEC_AAC		7U
-#define MF_CODEC_OPUS		8U
-#define MF_CODEC_MP3		9U
-#define MF_CODEC_VORBIS		10U
-#define MF_CODEC_THEORA		11U
-#define MF_CODEC_MJPEG		12U
-#define MF_CODEC_PCM		13U
+#define MEDIA_CODEC_UNKNOWN	0U
+#define MEDIA_CODEC_H264		1U
+#define MEDIA_CODEC_HEVC		2U
+#define MEDIA_CODEC_AV1		3U
+#define MEDIA_CODEC_VP9		4U
+#define MEDIA_CODEC_VP8		5U
+#define MEDIA_CODEC_MPEG4		6U
+#define MEDIA_CODEC_AAC		7U
+#define MEDIA_CODEC_OPUS		8U
+#define MEDIA_CODEC_MP3		9U
+#define MEDIA_CODEC_VORBIS		10U
+#define MEDIA_CODEC_THEORA		11U
+#define MEDIA_CODEC_MJPEG		12U
+#define MEDIA_CODEC_PCM		13U
 
 /* The longest codec name a track keeps (an MP4 four-character code or a Matroska CodecID). */
-#define MF_CODEC_NAME_MAX	32U
+#define MEDIA_CODEC_NAME_MAX	32U
 
 /*
  * One track: its kind and codec (and the container's name for the codec),
@@ -59,10 +59,10 @@
  * left out because they lie outside the file (a file cut short or a
  * damaged index; ws177-p027).
  */
-struct mf_track {
+struct media_track {
 	unsigned kind;
 	unsigned codec;
-	char codec_name[MF_CODEC_NAME_MAX];
+	char codec_name[MEDIA_CODEC_NAME_MAX];
 	uint32_t width;
 	uint32_t height;
 	uint32_t sample_rate;
@@ -77,9 +77,9 @@ struct mf_track {
 /*
  * One packet: its track's index, its presentation and decoding times, whether
  * a decoder can start at it, and its bytes, which stay valid until the
- * next mf_read, mf_seek or mf_close.
+ * next media_file_read, media_file_seek or media_file_close.
  */
-struct mf_packet {
+struct media_packet {
 	unsigned track;
 	int64_t pts_us;
 	int64_t dts_us;
@@ -95,22 +95,23 @@ struct mf_packet {
  * they cannot be had, EINVAL past the end), the whole size, and the
  * reader's context.  It is called from the thread that reads the file.
  */
-struct mf_source {
+struct media_source {
 	int (*read_at)(void *context, uint64_t offset, void *data, size_t size);
 	uint64_t size;
 	void *context;
 };
 
-struct mf_file;
+struct media_file;
 
-int mf_open(const char *path, struct mf_file **file);
-int mf_open_source(const struct mf_source *source, struct mf_file **file);
-unsigned mf_track_count(const struct mf_file *file);
-const struct mf_track *mf_track(const struct mf_file *file, unsigned index);
-int64_t mf_duration_us(const struct mf_file *file);
-const char *mf_format_name(const struct mf_file *file);
-int mf_read(struct mf_file *file, struct mf_packet *packet);
-int mf_seek(struct mf_file *file, int64_t time_us);
-void mf_close(struct mf_file *file);
+int media_file_open(const char *path, struct media_file **file);
+int media_file_open_source(const struct media_source *source, struct media_file **file);
+unsigned media_file_track_count(const struct media_file *file);
+const struct media_track *media_file_track(const struct media_file *file, unsigned index);
+int64_t media_file_duration_us(const struct media_file *file);
+const char *media_file_format_name(const struct media_file *file);
+uint64_t media_file_dropped(const struct media_file *file);
+int media_file_read(struct media_file *file, struct media_packet *packet);
+int media_file_seek(struct media_file *file, int64_t time_us);
+void media_file_close(struct media_file *file);
 
 #endif

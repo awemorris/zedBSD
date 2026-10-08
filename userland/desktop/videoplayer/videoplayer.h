@@ -7,10 +7,10 @@
 
 /*
  * Video Player (WS122): opens a file, plays it, pauses, stops and seeks.
- * The container is read by the player's own reader (mediafile, WS122 p003);
- * the decoding is an add-in (codec.c, p004): FFmpeg's libavcodec, libavutil
- * and libswscale, when the system has them, opened with dlopen and called
- * through dlsym without FFmpeg's headers.  Without them the player says
+ * The container is read and decoded by libmedia (ws177-p031): its reader
+ * (mediafile, WS122 p003) and its decoders (the add-in that opens FFmpeg's
+ * libavcodec, libavutil and libswscale, when the system has them, with
+ * dlopen and without FFmpeg's headers, p004).  Without them the player says
  * that playing needs libavcodec.  The sound goes to libkeiland's sound
  * stream (audio.c, WS191); the window, its menu and the controls are
  * libkeiland's.
@@ -25,7 +25,7 @@
 #ifndef VIDEOPLAYER_VIDEOPLAYER_H
 #define VIDEOPLAYER_VIDEOPLAYER_H
 
-#include "userland/desktop/mediafile/mediafile.h"
+#include "userland/desktop/libmedia/media.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -39,39 +39,6 @@
 #define VP_PLAYING		1U
 #define VP_PAUSED		2U
 #define VP_ENDED		3U	/* played to its end */
-
-/* A decoded picture of the add-in (an AVFrame reference inside codec.c), and a track's decoder. */
-struct vp_frame;
-struct vp_decoder;
-
-/* The largest packet the bitstream conversion builds (mediafile's 64 MiB and the prefix). */
-#define VP_BITSTREAM_MAX	(65U * 1024U * 1024U)
-
-/*
- * The conversion of a track's packets into what a decoder reads without
- * private data (bitstream.c): the codec, the size of the NAL units'
- * lengths (0: not length-prefixed), the bytes put before each key frame
- * (parameter sets or headers), the ADTS header's fields, and the output
- * being built.
- */
-struct vp_bitstream {
-	unsigned codec;
-	unsigned length_size;
-	unsigned char *prefix;
-	size_t prefix_size;
-	int adts;
-	unsigned adts_profile;
-	unsigned adts_rate_index;
-	unsigned adts_channels;
-	unsigned char *output;
-	size_t output_size;
-	size_t output_room;
-};
-
-/* Why the add-in or a decoder could not be used (vp_codec_load, vp_decoder_open). */
-#define VP_CODEC_MISSING	1	/* libavcodec is not installed */
-#define VP_CODEC_VERSION	2	/* a version of libavcodec the add-in does not know */
-#define VP_CODEC_FORMAT		3	/* the file's codec has no decoder */
 
 struct kl_audio_stream;
 
@@ -116,11 +83,11 @@ struct vp_media {
 	unsigned state;
 	int eof;
 
-	/* Why the last open failed (VP_CODEC_*, 0 for another reason or none). */
+	/* Why the last open failed (MEDIA_PROBLEM_*, 0 for another reason or none). */
 	int codec_problem;
 
 	/* The pictures decoded ahead (a ring of references), with their times (seconds). */
-	struct vp_frame *pictures[VP_PICTURES];
+	struct media_frame *pictures[VP_PICTURES];
 	double picture_times[VP_PICTURES];
 	unsigned picture_first;
 	unsigned picture_count;
@@ -157,28 +124,7 @@ void vp_media_play(struct vp_media *media);
 void vp_media_pause(struct vp_media *media);
 void vp_media_seek(struct vp_media *media, double seconds);
 double vp_media_clock(struct vp_media *media);
-struct vp_frame *vp_media_take(struct vp_media *media, double clock, double *time, double *next);
-
-/* The bitstream conversion (bitstream.c). */
-int vp_bitstream_open(struct vp_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);
-int vp_bitstream_convert(struct vp_bitstream *stream, const unsigned char *data, size_t size, int keyframe, const unsigned char **result, size_t *result_size);
-void vp_bitstream_close(struct vp_bitstream *stream);
-
-/* The decoding add-in (codec.c). */
-int vp_codec_load(void);
-const char *vp_codec_reason(void);
-int vp_decoder_open(const struct mf_track *track, struct vp_decoder **decoder);
-const char *vp_decoder_name(const struct vp_decoder *decoder);
-int vp_decoder_send(struct vp_decoder *decoder, const struct mf_packet *packet);
-int vp_decoder_receive(struct vp_decoder *decoder, int64_t *time_us);
-struct vp_frame *vp_decoder_picture(struct vp_decoder *decoder);
-size_t vp_decoder_sound(struct vp_decoder *decoder, int16_t *samples, size_t capacity, uint32_t rate);
-void vp_decoder_flush(struct vp_decoder *decoder);
-void vp_decoder_close(struct vp_decoder *decoder);
-void vp_frame_free(struct vp_frame **frame);
-void vp_frame_size(const struct vp_frame *frame, int *width, int *height);
-int vp_frame_scale(const struct vp_frame *frame, void **scaler, uint32_t *pixels, size_t stride, int width, int height);
-void vp_scaler_free(void *scaler);
+struct media_frame *vp_media_take(struct vp_media *media, double clock, double *time, double *next);
 
 /* The log the tests read (main.c). */
 void vp_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
