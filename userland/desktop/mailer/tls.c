@@ -17,6 +17,13 @@
  * certificate's name against the server's host.  A failure is EPROTO,
  * its reason kept for ml_tls_error.
  *
+ * ws177-p015: the handshake runs to its end whatever the verification
+ * says, and the outcome is decided after it, before a byte is sent: a
+ * certificate that does not verify is ML_ERROR_UNTRUSTED, with its
+ * SHA-256 fingerprint kept for ml_tls_fingerprint so that the user can be
+ * asked whether to trust it (a self-signed server of one's own); a
+ * certificate whose fingerprint is the server's pin is taken.
+ *
  * Only the connection thread of Mail (sync.c) makes connections; the
  * library is loaded under a lock so that a second thread would not load
  * it twice.
@@ -55,6 +62,9 @@
 /* The most extra CA files the tests may add. */
 #define TLS_CA_FILES_MAX	4U
 
+/* The length of a SHA-256 digest, in bytes. */
+#define TLS_DIGEST_BYTES	32U
+
 /*
  * The library's functions, found with dlsym.  The pointers are set once,
  * when the libraries are loaded, and never change after.
@@ -64,7 +74,7 @@ struct tls_library {
 	void *(*ctx_new)(const void *method);
 	int (*ctx_set_default_verify_paths)(void *ctx);
 	int (*ctx_load_verify_locations)(void *ctx, const char *file, const char *path);
-	void (*ctx_set_verify)(void *ctx, int mode, void *callback);
+	void (*ctx_set_verify)(void *ctx, int mode, int (*callback)(int preverified, void *store));
 	long (*ctx_ctrl)(void *ctx, int command, long number, void *pointer);
 	uint64_t (*ctx_set_options)(void *ctx, uint64_t options);
 	void *(*ssl_new)(void *ctx);
@@ -83,6 +93,10 @@ struct tls_library {
 	unsigned long (*err_get_error)(void);
 	void (*err_error_string_n)(unsigned long error, char *text, size_t length);
 	void (*err_clear_error)(void);
+	void *(*peer_certificate)(const void *ssl);
+	int (*x509_digest)(const void *certificate, const void *digest, unsigned char *bytes, unsigned *length);
+	const void *(*sha256)(void);
+	void (*x509_free)(void *certificate);
 };
 
 /*
@@ -119,7 +133,10 @@ static const struct tls_symbol tls_symbols[] = {
 	{ 1, "X509_verify_cert_error_string", offsetof(struct tls_library, verify_error_string) },
 	{ 1, "ERR_get_error", offsetof(struct tls_library, err_get_error) },
 	{ 1, "ERR_error_string_n", offsetof(struct tls_library, err_error_string_n) },
-	{ 1, "ERR_clear_error", offsetof(struct tls_library, err_clear_error) }
+	{ 1, "ERR_clear_error", offsetof(struct tls_library, err_clear_error) },
+	{ 1, "X509_digest", offsetof(struct tls_library, x509_digest) },
+	{ 1, "EVP_sha256", offsetof(struct tls_library, sha256) },
+	{ 1, "X509_free", offsetof(struct tls_library, x509_free) }
 };
 
 /* The loaded library's functions, set once while tls_lock is held and read only after. */
@@ -140,6 +157,14 @@ static size_t tls_ca_file_count;
 /* The reason of the last failure, for ml_tls_error (one connection thread writes it). */
 static char tls_reason[ML_TEXT_MAX];
 
+/*
+ * The SHA-256 fingerprint (hex) of the last certificate that did not
+ * verify, for ml_tls_fingerprint; empty after a connection that did.  The
+ * connection thread writes it, and the window reads it from the result
+ * the thread copies it into.
+ */
+static char tls_fingerprint[ML_PIN_MAX];
+
 /* Keeps two threads from loading the library at once; held only while it loads. */
 static pthread_mutex_t tls_lock = PTHREAD_MUTEX_INITIALIZER;
 
@@ -150,6 +175,10 @@ static int tls_find_all(void *ssl, void *crypto);
 static int tls_make_context(void);
 static int tls_set_host(void *ssl, const char *host);
 static void tls_fail(const char *what, void *ssl, int result);
+static int tls_verify_later(int preverified, void *store);
+static int tls_find_peer_certificate(void *ssl);
+static int tls_decide(void *ssl, const char *pin);
+static int tls_digest(void *ssl, char *text, size_t size);
 
 /*
  * Trusts the CA certificates of a PEM file besides the default roots (the
@@ -171,13 +200,17 @@ ml_tls_add_ca_file(
 
 /*
  * Starts TLS on a connected socket to a host: the handshake, the chain and
- * the name.  Returns 0 with the connection's state, EPROTONOSUPPORT
- * without the library, ENOMEM, or EPROTO (ml_tls_error says why).
+ * the name, or else the pin (the fingerprint of a certificate the user
+ * trusts; NULL or empty for none).  Returns 0 with the connection's state,
+ * EPROTONOSUPPORT without the library, ENOMEM, EPROTO, or
+ * ML_ERROR_UNTRUSTED (ml_tls_error says why, ml_tls_fingerprint gives the
+ * certificate's fingerprint).
  */
 int
 ml_tls_open(
 	int fd,
 	const char *host,
+	const char *pin,
 	void **tls)
 {
 	void *ssl;
@@ -187,6 +220,7 @@ ml_tls_open(
 	/* The library and the shared context. */
 	*tls = NULL;
 	tls_reason[0] = '\0';
+	tls_fingerprint[0] = '\0';
 	error = tls_load();
 	if (error != 0)
 		return error;
@@ -213,12 +247,20 @@ ml_tls_open(
 		return error;
 	}
 
-	/* The handshake, which verifies the chain and the name. */
+	/* The handshake, which verifies the chain and the name but leaves the outcome to tls_decide. */
 	result = tls_library.connect(ssl);
 	if (result != 1) {
 		tls_fail("handshake", ssl, result);
 		tls_library.ssl_free(ssl);
 		return EPROTO;
+	}
+
+	/* The certificate verified, or pinned; else nothing is sent over the connection. */
+	error = tls_decide(ssl, pin);
+	if (error != 0) {
+		(void)tls_library.shutdown(ssl);
+		tls_library.ssl_free(ssl);
+		return error;
 	}
 
 	/* Succeeded: the connection is secure. */
@@ -361,6 +403,17 @@ ml_tls_error(void)
 	return tls_reason;
 }
 
+/*
+ * Reports the SHA-256 fingerprint (hex) of the certificate of the last
+ * connection that failed with ML_ERROR_UNTRUSTED, or "".
+ */
+const char *
+ml_tls_fingerprint(void)
+{
+	/* The text kept by tls_decide. */
+	return tls_fingerprint;
+}
+
 /* Loads the libraries and makes the context, once; returns 0 or EPROTONOSUPPORT. */
 static int
 tls_load(void)
@@ -466,6 +519,7 @@ tls_find_all(
 	void *library;
 	void *found;
 	size_t index;
+	int error;
 
 	/* Each symbol, from libcrypto or libssl, into its member. */
 	for (index = 0; index < sizeof(tls_symbols) / sizeof(tls_symbols[0]); index++) {
@@ -484,6 +538,11 @@ tls_find_all(
 		/* Stored through the member's address (a data pointer copied into a function pointer). */
 		memcpy((char *)&tls_library + tls_symbols[index].offset, &found, sizeof(found));
 	}
+
+	/* The peer's certificate, by OpenSSL 3's name or 1.1's. */
+	error = tls_find_peer_certificate(ssl);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: every function is there. */
 	return 0;
@@ -513,8 +572,8 @@ tls_make_context(void)
 		return EPROTO;
 	}
 
-	/* The peer must verify; a close without close_notify reads as the end. */
-	tls_library.ctx_set_verify(tls_context, TLS_VERIFY_PEER, NULL);
+	/* The peer is verified, its outcome decided after the handshake (tls_decide); a close without close_notify reads as the end. */
+	tls_library.ctx_set_verify(tls_context, TLS_VERIFY_PEER, tls_verify_later);
 	(void)tls_library.ctx_set_options(tls_context, TLS_OP_IGNORE_UNEXPECTED_EOF);
 
 	/* The default roots (a missing file only leaves them empty). */
@@ -590,4 +649,134 @@ tls_fail(
 	/* No queued error: the connection ended or failed underneath. */
 	reason = tls_library.get_error(ssl, result);
 	snprintf(tls_reason, sizeof(tls_reason), "%s: failed (OpenSSL error %d)", what, reason);
+}
+
+/*
+ * Lets the handshake go on whatever the verification of the chain says:
+ * the outcome, kept by OpenSSL, is decided after it (tls_decide), so that
+ * the certificate of a server that does not verify can be shown.
+ */
+static int
+tls_verify_later(
+	int preverified,
+	void *store)
+{
+	UNUSED_PARAMETER(preverified);
+	UNUSED_PARAMETER(store);
+
+	/* Go on. */
+	return 1;
+}
+
+/* Finds the function that gives the peer's certificate: OpenSSL 3's SSL_get1_peer_certificate, or 1.1's name. */
+static int
+tls_find_peer_certificate(
+	void *ssl)
+{
+	void *found;
+
+	/* OpenSSL 3's name. */
+	found = dlsym(ssl, "SSL_get1_peer_certificate");
+
+	/* Else 1.1's. */
+	if (found == NULL)
+		found = dlsym(ssl, "SSL_get_peer_certificate");
+	if (found == NULL) {
+		snprintf(tls_reason, sizeof(tls_reason), "OpenSSL has no SSL_get1_peer_certificate");
+		return ENOENT;
+	}
+
+	/* Stored as the other functions are. */
+	memcpy(&tls_library.peer_certificate, &found, sizeof(found));
+
+	/* Succeeded: the certificate can be read. */
+	return 0;
+}
+
+/*
+ * Decides a finished handshake: a chain and a name that verified, or a
+ * certificate whose fingerprint is the pin.  Returns 0, or
+ * ML_ERROR_UNTRUSTED with the reason and the fingerprint kept.
+ */
+static int
+tls_decide(
+	void *ssl,
+	const char *pin)
+{
+	const char *described;
+	long verified;
+	int error;
+	int same;
+
+	/* Verified. */
+	verified = tls_library.get_verify_result(ssl);
+	if (verified == TLS_VERIFY_OK)
+		return 0;
+
+	/* Not verified: the certificate's fingerprint, for the pin and for the user. */
+	described = tls_library.verify_error_string(verified);
+	snprintf(tls_reason, sizeof(tls_reason), "certificate verify failed: %s", described);
+	tls_library.err_clear_error();
+	error = tls_digest(ssl, tls_fingerprint, sizeof(tls_fingerprint));
+	if (error != 0)
+		return ML_ERROR_UNTRUSTED;
+
+	/* A certificate the user trusts is taken. */
+	if (pin != NULL && pin[0] != '\0') {
+		same = strcmp(pin, tls_fingerprint);
+		if (same == 0) {
+			tls_reason[0] = '\0';
+			tls_fingerprint[0] = '\0';
+			return 0;
+		}
+	}
+
+	/* Not trusted. */
+	return ML_ERROR_UNTRUSTED;
+}
+
+/* Writes the SHA-256 fingerprint of the peer's certificate in hex (64 small letters and digits). */
+static int
+tls_digest(
+	void *ssl,
+	char *text,
+	size_t size)
+{
+	static const char digits[] = "0123456789abcdef";
+	unsigned char bytes[TLS_DIGEST_BYTES];
+	unsigned length;
+	const void *method;
+	void *certificate;
+	size_t index;
+	int result;
+
+	/* Nothing yet. */
+	text[0] = '\0';
+	if (size < TLS_DIGEST_BYTES * 2U + 1U)
+		return ENOSPC;
+
+	/* The certificate the server showed. */
+	certificate = tls_library.peer_certificate(ssl);
+	if (certificate == NULL)
+		return ENOENT;
+
+	/* Its digest. */
+	length = 0;
+	method = tls_library.sha256();
+	result = tls_library.x509_digest(certificate, method, bytes, &length);
+	tls_library.x509_free(certificate);
+	if (result != 1 || length != TLS_DIGEST_BYTES)
+		return EPROTO;
+
+	/* In hex. */
+	for (index = 0; index < TLS_DIGEST_BYTES; index++) {
+		text[index * 2U] = digits[bytes[index] >> 4];
+		text[index * 2U + 1U] = digits[bytes[index] & 0x0fU];
+	}
+
+	/* Its end. */
+	text[TLS_DIGEST_BYTES * 2U] = '\0';
+
+	/* Succeeded: the fingerprint is written. */
+	return 0;
 }

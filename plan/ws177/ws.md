@@ -43,3 +43,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p012](phase012/phase.md) | 案 K（Notes の側）: 文字の box が zoom・scroll・窓に付いて動く、指、Ctrl+S・W、長い行、font の無い時（回転は未実装） | test-wait（2026-10-08 P1 q887 実装・build、AAT と UAT） | — |
 | [ws177-p013](phase013/phase.md) | 案 K の 9: libkeiland の field・text area の undo・redo（打鍵ごと）、clipboard、語の移動（KL_VERSION 67、全ての app） | test-wait（2026-10-08 P1 q887 実装・host PASS・build） | — |
 | [ws177-p014](phase014/phase.md) | 案 N4: Browser の sign-in code（欄が無い時は clipboard、別の窓は通知に page の名、英字の code、語の境、2 分で起きて取り下げ、通知の click の AAT。one-time-code の欄は libbrowser の判断待ち） | test-wait（2026-10-08 P1 q889 実装・host PASS・build） | ws169-p005・ws156-p003 |
+| [ws177-p015](phase015/phase.md) | 案 N2: Mail の基本の操作（TLS の失敗の理由と自己署名の信頼、Trash の完全な削除・Gmail の Sent、account の編集・削除・16 個、日付の語、512 通の上限） | test-wait（2026-10-08 P1 q889 実装・host PASS・build） | ws169-p003・p004 |
