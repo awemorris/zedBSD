@@ -424,6 +424,13 @@ struct kwl_object {
 	int32_t pending_dy;
 	int32_t offset_x;
 	int32_t offset_y;
+	/*
+	 * 1 once a start_drag named the surface as its icon, whether the drag
+	 * began or was refused (T1-436 F6: a drag refused because the button
+	 * was already up still has its icon attached with an offset, which is
+	 * then ignored rather than ending the client).
+	 */
+	unsigned drag_icon;
 	unsigned ready;
 	unsigned configured;
 	unsigned acknowledged;
