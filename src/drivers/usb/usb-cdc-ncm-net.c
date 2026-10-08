@@ -1878,11 +1878,20 @@ ncm_poll_receive(
 		if (!completed)
 			continue;
 
-		/* Handles the kind condition. */
-		if (kind == NCM_COMPLETION_NOTIFICATION)
+		/*
+		 * A block received is handed up whole at once (the stack's
+		 * input queue takes it), so that the receive transfer goes back
+		 * on in this same poll: waiting for a later poll to deliver the
+		 * rest kept the device without a transfer while the stack worked
+		 * on the block before, and a fast link overflows the device's
+		 * buffer meanwhile (BUG-222).
+		 */
+		if (kind == NCM_COMPLETION_NOTIFICATION) {
 			notification_completed = 1;
-		else if (kind == NCM_COMPLETION_RX)
+		} else if (kind == NCM_COMPLETION_RX) {
 			rx_progress = 1;
+			(void)ncm_deliver_queued(adapter, NCM_RX_QUEUE_MAX);
+		}
 		work++;
 		irq = spin_lock_irqsave(&adapter->lock);
 		adapter->poll_cursor = (kind + 1U) % NCM_COMPLETION_KINDS;

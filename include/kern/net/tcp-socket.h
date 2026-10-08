@@ -38,6 +38,12 @@ enum tcp_state {
 #endif
 #define TCP_SEND_QUEUE_MAX ((unsigned)CONFIG_TCP_SEND_QUEUE_MAX)
 
+/*
+ * How many segments that came ahead of a gap a connection keeps until the
+ * gap is filled (BUG-222).
+ */
+#define TCP_REORDER_MAX 16U
+
 struct tcp_pending {
 	struct packet_buf *packet;
 	uint32_t sequence;
@@ -87,6 +93,16 @@ struct tcp_socket {
 	struct tcp_socket *half_open_head;
 	struct tcp_socket *accept_head;
 	struct tcp_socket *accept_tail;
+	/*
+	 * Segments that came ahead of receive_next (BUG-222): their payloads
+	 * (the header pulled off), sequence numbers and lengths, ordered by
+	 * sequence, kept until the gap before them is filled so that one lost
+	 * segment costs the peer one resend, not the whole window.
+	 */
+	struct packet_buf *reorder[TCP_REORDER_MAX];
+	uint32_t reorder_sequence[TCP_REORDER_MAX];
+	uint32_t reorder_length[TCP_REORDER_MAX];
+	unsigned reorder_count;
 };
 
 int
