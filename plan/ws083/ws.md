@@ -56,7 +56,7 @@ Resume point: 2026-10-08 午後 P2（q897）: 人の判断 H1〜H5・HD1〜HD6 �
 
 ## 設計と実装の照合の review（2026-10-08 q897、design-reviewer、HEAD 40766787a、読むだけ）
 
-blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slice の開始と長さ・zig-zag と default の表・wire の並び・NV12 の pitch と Y offset・GRDOM 0x20 は Mesa の genxml・ANV と一致。残りの指摘（未対応、p005 の前に直すかは Q1 の判断待ち）:
+blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slice の開始と長さ・zig-zag と default の表・wire の並び・NV12 の pitch と Y offset・GRDOM 0x20 は Mesa の genxml・ANV と一致。指摘と対応（2026-10-08 Q1 の判断 (a): R-S1・S2・S3・S5・S6 を p005 の前に q897 で直す、R-S4 は実機で）:
 
 | ID | 内容 | 所在 | 案 |
 | --- | --- | --- | --- |
@@ -67,3 +67,12 @@ blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slic
 | R-S5 | VCS も RCS 用の 10 秒の timeout、worker 1 本なので desktop が止まる | worker.c | VCS0 は 1 秒程度 |
 | R-S6 | 試験の空白: libvulkan の native の経路（context.c の 176 byte、`physical_load_video`、D3、device.c の依存）は host 試験が無い／D17 の 1〜4・7〜9 の境界試験が無い／Tile Y の試験は同じ関数で往復／golden は同じ判断（D21・upper bound・MOCS）から | plan/ws083/tests | native の経路の stub の host 試験、D17 の境界試験、実機で 64x64 の tile 0 の生の bytes を ffmpeg の plane と比べる手順 |
 | R-M1〜M9 | setup の slot が参照と同じでも拒まない、4 byte の start code の直後の次の slice で BSD の長さ 0、skew＋開始の 29 bit の切り捨てを検べない、1 submit に session 5 つ以上で DEVICE_LOST、`i915_video_write` の ENOSPC が DEVICE_LOST、skip の log の static の数え上げ（32 回で無言）、parameters NULL の decode が skip（D18 が筋）、design §3.2 の event・ExecuteCommands と実装の違い、§6.2 の flush と 1 decode ごとの run | render/video.c ほか | 各々の案は review の原文（Q1 への報告）に |
+
+対応（q897、2026-10-08 午後 P2、host・build）:
+- R-S1（p004 の直し）: `render/video.c` の upper bound を buffer の終わりの page の終わりに切り上げ（memory は page で bind されるので同じ memory の中）。試験: roundtrip で 4000 byte の buffer の `MFX_IND_OBJ_BASE_ADDR_STATE` の upper bound が page の終わり。
+- R-S2（p007 の直し）: worker は video が止まった後の VCS0 の request を `ECANCELED`（何も走らせない）で返し、`i915_video_run` は ECANCELED を quarantine にせず EIO（submit は DEVICE_LOST）。試験: roundtrip（quarantine にならない、log）、vcs-worker（止まった後の run は ECANCELED）。
+- R-S3（p007 の直し）: quarantine の session は video の submit が DEVICE_LOST（log）、video session の create が INITIALIZATION_FAILED。試験: roundtrip（hang の後、engine が戻っても submit・create を拒む）。render の側の quarantine の門は WS083 の外（未対応、Q1 へ）。
+- R-S5（p007 の直し）: VCS0 の request の timeout を 1 秒（`I915_WORKER_VIDEO_TIMEOUT_MS`）、RCS は 10 秒のまま。hang の log の ms は使った timeout。
+- R-S6: (1) 新 `run-host-libvulkan-native.sh`: `host-libvulkan-native.c`（instance.c・device.c を取り込み、physical_load_queues・physical_load_video・D3 の濾し・拡張の列挙・device_validate の依存）と `host-libvulkan-capset.c`（context.c の 176 byte の native の語、open と ioctl を stand-in に）。(2) D17 の境界: 値の検べを `drv_i915_video_mfx_check_sets`（video-mfx.c へ移した、動作は同じ）にして `host-mfx-avc.c` の `case_set_bounds` で各値の最後に通る値と最初に断る値、roundtrip で item 3（image より大きい picture）・7（page に揃わない picture）・5（buffer を越える range）。item 8 の slice の長さと 9 の 256 を越える slice は wire の stream を変える必要があり未。(3) Tile Y の生の bytes の比べは実機の手順（T1-435 に足す文を Q1 へ）。(4) golden が同じ判断から作られている点は記録のみ。
+- 他の WS の runner: `plan/ws101/tests/host/run.sh` の executor の list に `forget`（BUG-260 で増えた file、無いと link できない、main の時点で壊れていた）を足した。
+- 確認: run-host-libvulkan-native・-status・-video、run-host-video-roundtrip、run-host-mfx-avc、run-host-vcs-worker、run-host-boot-video、ws031 run-vk-host-tests、ws075 run-host-layered、ws101 host/run.sh すべて PASS。`make -j16 BUILD=build/p2-k ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_USER_PROGRAMS="libvulkan vkvideo-probe" build/p2-k/vmunix build/p2-k/dynamic/libvulkan.so build/p2-k/bin/vkvideo-probe` warning 0。実機は未。

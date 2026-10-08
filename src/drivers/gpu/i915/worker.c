@@ -80,8 +80,14 @@
 /* The ring size of a session context. */
 #define I915_WORKER_RING_BYTES		16384U
 
-/* How long a request may run before it is failed as a hang. */
+/*
+ * How long a request may run before it is failed as a hang: a render
+ * request, and a video request (ws083 R-S5: one decode takes tens of
+ * milliseconds even at level 5.1, and the one worker holds the desktop's
+ * drawing while it waits, so a hung decode is given up sooner).
+ */
 #define I915_WORKER_TIMEOUT_MS		10000U
+#define I915_WORKER_VIDEO_TIMEOUT_MS	1000U
 
 /*
  * The longest sleep between two looks at the context status buffer, in
@@ -1637,12 +1643,16 @@ i915_worker_run(
 		return ENOTSUP;
 	}
 
-	/* The video engine runs nothing once it is stopped for good, nor on a GT without it. */
+	/*
+	 * The video engine runs nothing once it is stopped for good, nor on a
+	 * GT without it.  The stop is ECANCELED, not EIO: nothing ran, so the
+	 * caller must not take it for a hang of its own request (ws083 R-S2).
+	 */
 	if (context->engine->index == I915_ENGINE_VCS0) {
 		if (gt_index < 0)
 			return ENODEV;
 		if (worker->video_dead != 0)
-			return EIO;
+			return ECANCELED;
 	}
 
 	/* Finds the hardware context behind the session context. */
@@ -1787,6 +1797,7 @@ i915_worker_wait(
 	uint64_t deadline;
 	uint64_t observed;
 	uint64_t now;
+	uint32_t timeout_ms;
 	int completed;
 	int error;
 
@@ -1794,8 +1805,13 @@ i915_worker_wait(
 	ge = &device->gt.engines.ge[gt_index];
 	el = &device->gt.engines.el[gt_index];
 
+	/* The engine's timeout: the video engine's shorter one (ws083 R-S5). */
+	timeout_ms = I915_WORKER_TIMEOUT_MS;
+	if (gt_index == worker->video_index)
+		timeout_ms = I915_WORKER_VIDEO_TIMEOUT_MS;
+
 	/* Looks at the status buffer until the request ends, for at most the timeout. */
-	deadline = sched_ticks() + KERN_MS_TO_TICKS(I915_WORKER_TIMEOUT_MS);
+	deadline = sched_ticks() + KERN_MS_TO_TICKS(timeout_ms);
 	for (;;) {
 		/* Notes the engine interrupts so far before the look, so one during the look is not missed. */
 		observed = drv_i915_irq_engine_sequence(&device->gt.irq);
@@ -1853,7 +1869,7 @@ i915_worker_wait(
 	    "(no recovery path; hwsp=%u last_csb=%08x:%08x)\n",
 	    label,
 	    (unsigned long long)batch_va,
-	    I915_WORKER_TIMEOUT_MS,
+	    (unsigned)timeout_ms,
 	    (unsigned)*rq->hwsp_cpu,
 	    el->last_csb_hi,
 	    el->last_csb_lo);

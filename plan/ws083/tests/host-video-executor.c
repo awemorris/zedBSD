@@ -21,6 +21,7 @@
 
 #include "../../../src/drivers/gpu/i915/render/instance.h"
 #include "../../../src/drivers/gpu/i915/render/video.h"
+#include "../../../src/drivers/gpu/i915/intel/genxml-video.h"
 
 #define FIXTURE_QUEUE_SUBMIT			18U
 #define FIXTURE_ALLOCATE_MEMORY			21U
@@ -86,6 +87,7 @@ static void fixture_query_record(const char *name, uint32_t opcode, uint64_t poo
 static uint32_t fixture_statuses(int64_t *statuses);
 static uint32_t fixture_status32(uint32_t *status);
 static void test_status_queries(void);
+static uint64_t fixture_upper_bound(void);
 static void fixture_batch_expect(void);
 static void test_layouts(void);
 static void fixture_layout(uint32_t width, uint32_t height, uint32_t pitch, uint32_t rows, uint64_t chroma_offset, uint64_t bytes);
@@ -491,6 +493,7 @@ test_submissions(void)
 	static const char *const reference[] = { "begin2", "decode2", "end" };
 	static const char *const deactivate[] = { "begin3", "end" };
 	static const char *const open_scope[] = { "begin1", "control" };
+	struct i915_gfx_buffer *buffer;
 	struct i915_gfx_image *image;
 	uint32_t result;
 
@@ -538,6 +541,30 @@ test_submissions(void)
 	assert(strstr(stub_log, "skip decode: picture not NV12") != NULL);
 	image->format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
 
+	/* An output smaller than the picture, and one not at a page, skip the picture (design §6.6, items 3 and 7; R-S6). */
+	image->width = 32U;
+	fixture_record(idr, 7U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	assert(strstr(stub_log, "skip decode: picture larger than its image") != NULL);
+	image->width = 64U;
+	image->offset = FIXTURE_IMAGE_A_OFFSET + 0x40U;
+	fixture_record(idr, 7U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	assert(strstr(stub_log, "skip decode: picture address not page-aligned") != NULL);
+	image->offset = FIXTURE_IMAGE_A_OFFSET;
+
+	/* A bitstream range past its buffer skips the picture (item 5). */
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	assert(buffer != NULL);
+	buffer->size = 64U;
+	fixture_record(idr, 7U);
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	assert(strstr(stub_log, "skip decode: bitstream range past the buffer") != NULL);
+	buffer->size = 4096U;
+
 	/* A reference laid out unlike the output skips the picture that reads it. */
 	image = drv_i915_object_lookup(stub_session, I915_VK_OBJ_IMAGE, FIXTURE_IMAGE_B);
 	assert(image != NULL);
@@ -571,12 +598,38 @@ test_submissions(void)
 	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
 	assert(result == VK_SUCCESS);
 
+	/* A video engine stopped before the decode (nothing ran) loses the submission without quarantining the session (R-S2). */
+	stub_batch_run_error = ECANCELED;
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(stub_gpu.quarantined == 0U);
+	assert(strstr(stub_log, "the video engine is stopped") != NULL);
+
+	/* The bitstream's upper bound is the end of the buffer's page, also for a buffer shorter than its page (R-S1). */
+	buffer = drv_i915_object_lookup(stub_session, I915_VK_OBJ_BUFFER, FIXTURE_BUFFER);
+	assert(buffer != NULL);
+	buffer->size = 4000U;
+	stub_batch_run_error = 0;
+	stub_batch_count = 0U;
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == VK_SUCCESS);
+	assert(fixture_upper_bound() == FIXTURE_STORAGE_VA + FIXTURE_BUFFER_OFFSET + 4096U);
+	buffer->size = 4096U;
+
 	/* A decode that hangs loses the device and quarantines the session (ws083-p007). */
 	stub_batch_run_error = ETIMEDOUT;
 	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
 	assert(result == (uint32_t)VK_ERROR_DEVICE_LOST);
 	assert(stub_gpu.quarantined == 1U);
 	assert(strstr(stub_log, "session quarantined") != NULL);
+
+	/* The quarantined session decodes nothing more and makes no new video session, though the engine works again (R-S3). */
+	stub_batch_run_error = 0;
+	result = fixture_submit(FIXTURE_VIDEO_QUEUE);
+	assert(result == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(strstr(stub_log, "the session is quarantined after a hang") != NULL);
+	(void)fixture_run("session");
+	assert(stub_get32(stub_reply, 4U) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
 
 	/* destroy_parameters and destroy_session withdraw both; the quarantined session's batch is retained. */
 	(void)fixture_run("destroy_parameters");
@@ -827,6 +880,25 @@ test_status_queries(void)
 	assert(strstr(stub_log, "result status query begun or ended outside a video coding scope") != NULL);
 	result = fixture_statuses(statuses);
 	assert(result == VK_NOT_READY);
+}
+
+/* Finds the bitstream object's upper bound in the batch the last decode wrote (MFX_IND_OBJ_BASE_ADDR_STATE, dwords 4 and 5). */
+static uint64_t
+fixture_upper_bound(void)
+{
+	uint32_t header;
+	unsigned index;
+
+	/* The command's header, then its upper bound's two dwords. */
+	header = GEN12_VIDEO_HEADER(GEN12_VIDEO_MFX_IND_OBJ_BASE_ADDR_STATE, GEN12_VIDEO_MFX_IND_OBJ_BASE_ADDR_STATE_DWORDS);
+	for (index = 0U; index + 5U < stub_batch_count; index++) {
+		if (stub_batch_words[index] == header)
+			return (uint64_t)stub_batch_words[index + 4U] | ((uint64_t)stub_batch_words[index + 5U] << 32);
+	}
+
+	/* No such command. */
+	assert(0);
+	return 0U;
 }
 
 /* Writes a field check of the two decodes' batch for genxml-decode.py. */

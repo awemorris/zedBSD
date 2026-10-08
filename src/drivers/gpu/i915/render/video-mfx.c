@@ -111,6 +111,56 @@ drv_i915_video_mfx_matrices(
 }
 
 /*
+ * Checks the values of a picture's sequence and picture sets against what
+ * the decoder takes (design §6.6, items 2 and 4, and the frame size of 3):
+ * returns NULL, or why the picture is skipped.
+ */
+const char *
+drv_i915_video_mfx_check_sets(
+	const struct i915_video_sps *sps,
+	const struct i915_video_pps *pps)
+{
+	uint32_t width;
+	uint32_t height;
+
+	/* 8-bit 4:2:0 frames only. */
+	if (sps->chroma_format_idc != 1U)
+		return "chroma format is not 4:2:0";
+	if (sps->bit_depth_luma_minus8 != 0U || sps->bit_depth_chroma_minus8 != 0U)
+		return "bit depth is not 8";
+	if ((sps->flags & I915_VIDEO_SPS_FRAME_MBS_ONLY) == 0U)
+		return "not frames only";
+
+	/* The numbering the decoder can follow. */
+	if (sps->pic_order_cnt_type > 2U)
+		return "picture order count type past 2";
+	if (sps->log2_max_frame_num_minus4 > 12U || sps->log2_max_pic_order_cnt_lsb_minus4 > 12U)
+		return "frame or order count width past 16 bits";
+
+	/* At most 36864 macroblocks (level 5.1's frame size, the 16-bit Frame Size field). */
+	width = sps->pic_width_in_mbs_minus1 + 1U;
+	height = sps->pic_height_in_map_units_minus1 + 1U;
+	if (width > I915_VIDEO_MFX_MAX_SIDE_MBS || height > I915_VIDEO_MFX_MAX_SIDE_MBS)
+		return "picture wider or taller than 4096";
+	if (width * height > I915_VIDEO_MFX_MAX_FRAME_MBS)
+		return "picture larger than 36864 macroblocks";
+
+	/* The picture set's ranges. */
+	if (pps->num_ref_idx_l0_default_active_minus1 > 31U || pps->num_ref_idx_l1_default_active_minus1 > 31U)
+		return "reference index count past 32";
+	if (pps->weighted_bipred_idc > 2U)
+		return "weighted bi-prediction mode past 2";
+	if (pps->pic_init_qp_minus26 < -26 || pps->pic_init_qp_minus26 > 25)
+		return "initial quantizer out of range";
+	if (pps->chroma_qp_index_offset < -12 || pps->chroma_qp_index_offset > 12 ||
+	    pps->second_chroma_qp_index_offset < -12 || pps->second_chroma_qp_index_offset > 12)
+		return "chroma quantizer offset out of range";
+
+	/* Succeeded: the decoder takes the values. */
+	return NULL;
+}
+
+/*
  * Writes the MFX commands that decode one picture into a batch.
  *
  * The batch keeps counting past its room, so a caller sees an overflow in

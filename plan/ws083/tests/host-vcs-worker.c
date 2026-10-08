@@ -280,7 +280,7 @@ fixture_hang(void)
 	error = drv_i915_worker_context_attach(&fixture_device, &later);
 	assert(error == EIO);
 	error = i915_worker_run(worker, &later, 0x1000U, 1, 3U);
-	assert(error == EIO);
+	assert(error == ECANCELED);
 	fixture_device_free();
 }
 

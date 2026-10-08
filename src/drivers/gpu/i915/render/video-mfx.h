@@ -45,6 +45,10 @@
 #define I915_VIDEO_SPS_DIRECT_8X8_INFERENCE	(1U << 6)
 #define I915_VIDEO_SPS_MB_ADAPTIVE		(1U << 7)
 #define I915_VIDEO_SPS_FRAME_MBS_ONLY		(1U << 8)
+
+/* The largest picture the decoder takes: 256 macroblocks a side (4096 pixels), 36864 in all (level 5.1, the 16-bit Frame Size field). */
+#define I915_VIDEO_MFX_MAX_SIDE_MBS		256U
+#define I915_VIDEO_MFX_MAX_FRAME_MBS		36864U
 #define I915_VIDEO_SPS_DELTA_ALWAYS_ZERO	(1U << 9)
 #define I915_VIDEO_SPS_SCALING_MATRIX		(1U << 14)
 
@@ -214,5 +218,6 @@ extern const uint8_t drv_i915_video_default8_inter[64];
 
 void drv_i915_video_mfx_matrices(const struct i915_video_sps *sps, const struct i915_video_pps *pps, struct i915_video_matrices *matrices);
 void drv_i915_video_mfx_build(struct i915_gfx_batch *batch, const struct i915_video_mfx_decode *decode);
+const char *drv_i915_video_mfx_check_sets(const struct i915_video_sps *sps, const struct i915_video_pps *pps);
 
 #endif
