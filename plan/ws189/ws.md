@@ -38,6 +38,7 @@ Queue: q892（P1 の新しい世代）
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 設計: 画像の型（image/png）の source と offer、libkeiland の口（kl_window_drag_image・KL_DROP_IMAGE、受け入れの答え）、compositor の badge の見た目（コピー可・不可）、app の落とす場所の光らせ方、dock の spring-loaded、desktop への file の保存、画面をまたぐ drag、試験（AAT）。design-reviewer | planned | — |
+| [p001](phase001/phase.md) | 設計: 画像の型（image/png）の source と offer、libkeiland の口（kl_window_drag_image・KL_DROP_IMAGE、受け入れの答え）、compositor の badge の見た目（コピー可・不可）、app の落とす場所の光らせ方、dock の spring-loaded、desktop への file の保存、画面をまたぐ drag、試験（AAT）。design-reviewer | planned | — |
 | p002 | libkeiland と compositor（画像の型、badge、dock の spring-loaded、画面をまたぐ） | planned | p001 |
-| p003 | app: 画像の drag の元（Photos・Notes・PDF Viewer・Browser）と受け（Notes・Mail の添付・desktop の file）、文字の drag の元（Text Editor など） | planned | p002 |
+| p003 | app: 画像の drag の元（Photos・Notes・PDF Viewer・Browser）と受け（Notes・desktop の file）、文字の drag の元と受け（Text Editor・PDF Viewer） | planned | p002 |
+| p004 | Mail の作成の添付（multipart/mixed・base64、添付の一覧の UI）と drop の受け（2026-10-08 ユーザーの決定「WS189 で添付も作る」） | planned | p002・p003 |

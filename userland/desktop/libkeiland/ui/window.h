@@ -33,8 +33,8 @@
 /* The most tools of a pen tablet a window follows (WS131 p018, Notes' tablet.c moved here). */
 #define KEIUI_TABLET_TOOLS	4U
 
-/* The most types a drag of the window's own offers (WS131 p020: Files' file names and their text). */
-#define KEIUI_DRAG_TYPES	4U
+/* The most types a drag of the window's own offers (WS131 p020: Files' file names and their text; ws189: a picture, its file and text beside them). */
+#define KEIUI_DRAG_TYPES	6U
 
 /* How many inputs wait at most (the oldest is dropped past it). */
 #define KEIUI_WINDOW_EVENTS	512U
@@ -354,10 +354,24 @@ struct kl_window {
 	 */
 	unsigned drop_types;
 	int pending_uris;
+	int pending_image;
+	int pending_utf8;
 	struct wl_data_offer *drop_offer;
 	uint32_t drop_serial;
 	unsigned drop_offered;
 	int drop_pending;
+
+	/*
+	 * The last answer sent for the drag over the window (ws189-p002): an
+	 * answer the application repeats at each motion is not sent again.
+	 * drop_answered is 0 until the first answer to the drag's enter.
+	 */
+	int drop_answered;
+	unsigned drop_answer_actions;
+	unsigned drop_answer_preferred;
+
+	/* Whether the drag over the window offers UTF-8 text (else its text is read as plain text, ws189-p002). */
+	int drop_utf8;
 
 	/*
 	 * A pen tablet (tablet.c, WS131 p018): the manager and the seat's
@@ -386,6 +400,14 @@ struct kl_window {
 	size_t drag_lengths[KEIUI_DRAG_TYPES];
 	unsigned drag_count;
 	unsigned drag_action;
+
+	/*
+	 * The picture carried under the pointer by the window's own drag
+	 * (ws189-p002): a surface of no role and its buffer, NULL while the
+	 * drag has none; both go when the drag ends.
+	 */
+	struct wl_surface *drag_icon;
+	struct keiui_shm_buffer drag_icon_buffer;
 
 	/* The compositor's content type manager and the surface's content type object (ws122-p005b), NULL until bound and asked. */
 	struct wp_content_type_manager_v1 *content_manager;
@@ -540,6 +562,8 @@ void keiui_present_close(struct keiui_present *present);
 
 /* The shared-memory presenter (present-shm.c). */
 int keiui_shm_present(struct kl_window *window, const uint32_t *pixels, size_t stride);
+int keiui_shm_make(struct kl_window *window, struct keiui_shm_buffer *buffer, int width, int height);
+void keiui_shm_free(struct keiui_shm_buffer *buffer);
 void keiui_shm_close(struct kl_window *window);
 
 /* The clipboard (clipboard.c) and the primary selection (primary.c). */

@@ -36,6 +36,14 @@
  * at once, and a second click hides them.  A click on a preview brings its
  * window; on its close button closes it.  Esc, and a press elsewhere, hide
  * the previews (the press goes on to what is under it).
+ *
+ * During a drag and drop (ws189-p002, plan/ws189/phase001/phase.md
+ * section 3.3) the bar is spring-loaded: the drag resting SPRING_MS on an
+ * application's icon brings its window forward (switched to as a click
+ * would), or shows the previews of its windows, on one of which a rest of
+ * SPRING_MS brings that window.  The icon lights up more as the rest goes
+ * on.  The drag goes on; the window that came forward takes the drop when
+ * the pointer goes onto it.
  */
 
 #include "kwl.h"
@@ -56,6 +64,9 @@
 #define HOVER_MS		400U
 #define LEAVE_MS		300U
 
+/* How long a drag and drop rests on an icon or a preview before its window comes forward (milliseconds). */
+#define SPRING_MS		700U
+
 /* How far a press moves before it is the icon's drag (pixels). */
 #define DRAG_START		8
 
@@ -73,6 +84,7 @@ static void log_bar(struct kwl_server *server, const struct apps_view *view);
 static int view_collect_on(struct kwl_server *server, unsigned slot, int every, struct apps_view *view);
 static void draw_more(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, unsigned hidden, float light);
 static void draw_light(struct kwl_server *server, VkCommandBuffer command, const struct apps_rect *rect, float strength);
+static void spring_tick(struct kwl_server *server);
 
 /*
  * Draws the applications' icons in an output's bar (draw_system_bar, or a
@@ -98,6 +110,7 @@ kwl_apps_bar_draw(
 	int32_t middle;
 	int32_t pill_x;
 	int32_t pill_width;
+	uint64_t rest;
 	float alpha;
 	float light;
 	int mine;
@@ -148,6 +161,15 @@ kwl_apps_bar_draw(
 			light = 1.0f;
 		if (mine && same == 0 && state->state == KWL_APPS_ARMED)
 			light = 0.6f;
+
+		/* A drag and drop resting on it lights it more as the rest goes on (spring-loading). */
+		same = strcmp(app->key, state->spring_key);
+		if (mine && server->dnd_active && state->spring_key[0] != '\0' && same == 0) {
+			rest = kwl_milliseconds() - state->spring_since_ms;
+			light = 1.0f;
+			if (rest < SPRING_MS)
+				light = 0.5f + 0.5f * (float)rest / (float)SPRING_MS;
+		}
 
 		/* The icon being dragged follows the pointer. */
 		same = strcmp(app->key, state->press_key);
@@ -603,8 +625,12 @@ kwl_apps_bar_tick(
 	uint64_t now;
 	int built;
 
-	/* Nothing waits while idle. */
+	/* A drag and drop's rest on the icons or the previews (spring-loading). */
 	state = &server->apps_bar;
+	if (server->dnd_active)
+		spring_tick(server);
+
+	/* Nothing waits while idle. */
 	if (state->state == KWL_APPS_IDLE)
 		return;
 
@@ -624,10 +650,119 @@ kwl_apps_bar_tick(
 
 	/* The absence from the icons and the panel hides what the rest showed (a click's previews stay). */
 	if (state->state == KWL_APPS_SHOWN &&
-	    state->via == KWL_APPS_VIA_HOVER &&
+	    (state->via == KWL_APPS_VIA_HOVER || state->via == KWL_APPS_VIA_SPRING) &&
 	    state->left &&
 	    now - state->since_ms >= LEAVE_MS)
 		kwl_apps_bar_hide(server, "leave");
+}
+
+/*
+ * Follows a drag and drop over the bars (data.c, before it finds the
+ * drag's target): the rest on an application's icon, or on a preview of
+ * the previews spring-loading showed.  Returns 1 while the drag is on an
+ * icon or those previews (the drag's mark then says nothing), 0 elsewhere.
+ */
+int
+kwl_apps_bar_drag_motion(
+	struct kwl_server *server)
+{
+	struct kwl_apps_bar *state;
+	struct apps_view view;
+	struct apps_panel panel;
+	uint64_t now;
+	int built;
+	int slot;
+	int tile;
+	int same;
+	int in_panel;
+
+	/* The icons of the bar the pointer is on, and what is under it. */
+	state = &server->apps_bar;
+	now = kwl_milliseconds();
+	slot = SLOT_NONE;
+	built = kwl_apps_view_build_on(server, server->pointer_output, &view);
+	if (built)
+		slot = slot_at(&view, server->pointer_x, server->pointer_y);
+
+	/* The previews spring-loading showed, and whether the pointer is over them. */
+	in_panel = 0;
+	if (state->state == KWL_APPS_SHOWN && state->via == KWL_APPS_VIA_SPRING) {
+		built = kwl_apps_view_build_on(server, state->output, &view);
+		if (built)
+			built = panel_build(server, &view, state->key, &panel);
+		if (built)
+			in_panel = kwl_apps_inside(&panel.rect, server->pointer_x, server->pointer_y);
+	}
+
+	/* An application's icon: a new one starts the rest again. */
+	if (slot >= 0) {
+		built = kwl_apps_view_build_on(server, server->pointer_output, &view);
+		same = strcmp(view.apps.apps[slot].key, state->spring_key);
+		if (same != 0) {
+			(void)snprintf(state->spring_key, sizeof(state->spring_key), "%s", view.apps.apps[slot].key);
+			state->spring_since_ms = now;
+			state->spring_done = 0;
+			state->output = view.output;
+			server->dirty = 1;
+		}
+
+		/* On an icon, no preview rests. */
+		state->spring_tile = -1;
+		state->left = 0;
+		return 1;
+	}
+
+	/* The icon is left: its rest is over. */
+	if (state->spring_key[0] != '\0') {
+		state->spring_key[0] = '\0';
+		state->spring_done = 0;
+		server->dirty = 1;
+	}
+
+	/* A preview: a new one starts its rest. */
+	if (in_panel) {
+		tile = kwl_apps_tile_at(panel.tiles, panel.count, server->pointer_x, server->pointer_y);
+		if (tile != state->spring_tile) {
+			state->spring_tile = tile;
+			state->spring_tile_since_ms = now;
+		}
+
+		/* The previews stay while the drag is over them. */
+		state->left = 0;
+		server->dirty = 1;
+		return 1;
+	}
+
+	/* Away from both: the previews go after LEAVE_MS (kwl_apps_bar_tick). */
+	state->spring_tile = -1;
+	if (state->state == KWL_APPS_SHOWN && state->via == KWL_APPS_VIA_SPRING && !state->left) {
+		state->left = 1;
+		state->since_ms = now;
+	}
+
+	/* Succeeded: the drag is not on the bar. */
+	return 0;
+}
+
+/*
+ * Ends spring-loading with the drag and drop (dropped, given up): the rest
+ * is forgotten and the previews it showed go.
+ */
+void
+kwl_apps_bar_drag_end(
+	struct kwl_server *server)
+{
+	struct kwl_apps_bar *state;
+
+	/* The rests. */
+	state = &server->apps_bar;
+	state->spring_key[0] = '\0';
+	state->spring_done = 0;
+	state->spring_tile = -1;
+
+	/* The previews spring-loading showed. */
+	if (state->state == KWL_APPS_SHOWN && state->via == KWL_APPS_VIA_SPRING)
+		kwl_apps_bar_hide(server, "drag-end");
 }
 
 /*
@@ -1103,6 +1238,8 @@ kwl_apps_bar_show(
 		how = "click";
 	if (via == KWL_APPS_VIA_SWITCH)
 		how = "switch";
+	if (via == KWL_APPS_VIA_SPRING)
+		how = "spring";
 	printf("KWL APPS preview app=%s windows=%u via=%s at_ms=%llu\n", key, panel.count, how, (unsigned long long)kwl_milliseconds());
 	for (index = 0; index < panel.count; index++)
 		printf("KWL APPS preview window surface=%u x=%d y=%d width=%d height=%d client=%llu\n", panel.surfaces[index]->id, panel.tiles[index].x, panel.tiles[index].y, panel.tiles[index].width, panel.tiles[index].height, (unsigned long long)panel.surfaces[index]->client->number);
@@ -1225,4 +1362,75 @@ draw_light(
 	memcpy(colour, colours.lit, sizeof(colour));
 	colour[3] = colours.lit[3] * strength;
 	glass_draw_solid(server, command, (float)(rect->x + 2), (float)(rect->y + KWL_GLASS_BAR / 2 - ICON_WIDTH / 2 + 2), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4), (float)(ICON_WIDTH - 4) * GLASS_ICON_TILE_RADIUS, colour);
+}
+
+/*
+ * Lets a drag and drop's rest bring a window forward: SPRING_MS on an
+ * application's icon switches to its one window, or shows the previews of
+ * its windows; SPRING_MS on one of those previews switches to that window.
+ */
+static void
+spring_tick(
+	struct kwl_server *server)
+{
+	struct kwl_apps_bar *state;
+	struct kwl_object *surface;
+	struct apps_view view;
+	struct apps_panel panel;
+	const struct kwl_app *app;
+	uint64_t now;
+	int found;
+	int built;
+
+	/* A rest on an icon not answered yet lights it more at each frame. */
+	state = &server->apps_bar;
+	now = kwl_milliseconds();
+	if (state->spring_key[0] != '\0' && !state->spring_done)
+		server->dirty = 1;
+
+	/* A rest on an icon long enough, not answered yet. */
+	if (state->spring_key[0] != '\0' &&
+	    !state->spring_done &&
+	    now - state->spring_since_ms >= SPRING_MS) {
+		state->spring_done = 1;
+		built = kwl_apps_view_build_on(server, state->output, &view);
+		found = -1;
+		if (built)
+			found = kwl_apps_find(&view.apps, state->spring_key);
+		if (found < 0)
+			return;
+
+		/* One window: it comes forward. */
+		app = &view.apps.apps[found];
+		if (app->window_count == 1U) {
+			surface = view.surfaces[app->windows[0]];
+			kwl_apps_bar_hide(server, "spring");
+			kwl_glass_switch_to(server, surface, "spring");
+			printf("KWL APPS spring app=%s surface=%u\n", app->key, surface->id);
+			return;
+		}
+
+		/* More: their previews show. */
+		kwl_apps_bar_show(server, &view, app->key, KWL_APPS_VIA_SPRING);
+		printf("KWL APPS spring app=%s previews=%u\n", app->key, app->window_count);
+		return;
+	}
+
+	/* A rest on a preview long enough: its window comes forward. */
+	if (state->state != KWL_APPS_SHOWN || state->via != KWL_APPS_VIA_SPRING)
+		return;
+	if (state->spring_tile < 0 || now - state->spring_tile_since_ms < SPRING_MS)
+		return;
+	built = kwl_apps_view_build_on(server, state->output, &view);
+	if (built)
+		built = panel_build(server, &view, state->key, &panel);
+	if (!built || state->spring_tile >= (int)panel.count)
+		return;
+
+	/* Succeeded: the window, with the previews gone. */
+	surface = panel.surfaces[state->spring_tile];
+	state->spring_tile = -1;
+	printf("KWL APPS spring app=%s surface=%u\n", state->key, surface->id);
+	kwl_apps_bar_hide(server, "spring");
+	kwl_glass_switch_to(server, surface, "spring");
 }

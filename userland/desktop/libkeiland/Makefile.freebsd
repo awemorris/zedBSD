@@ -26,6 +26,7 @@ KEILAND_FREEBSD_KEILAND_SOURCES := userland/desktop/libkeiland/version.c \
 	userland/desktop/settings-keys/settings-keys.c \
 	\
 	userland/desktop/libkeiland/ui/canvas.c \
+	userland/desktop/libkeiland/ui/drop-look.c \
 	userland/desktop/libkeiland/ui/text.c \
 	userland/desktop/libkeiland/ui/icons.c \
 	userland/desktop/libkeiland/ui/icons-line.c \

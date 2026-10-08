@@ -71,6 +71,20 @@
 /* How many cursor images the compositor draws for the shapes clients ask for (cursor.c). */
 #define KWL_CURSOR_IMAGES	10U
 
+/* The most data devices of one client a drag is told to (data.c, ws189-p002: one a window of a program). */
+#define KWL_DND_DEVICES		16U
+
+/*
+ * The mark a drag shows of what its drop would do (data.c decides it,
+ * shell.c draws it, ws189-p002): nothing yet, a copy, a move, a choice to
+ * be asked, or no drop.
+ */
+#define KWL_DND_STATE_NEUTRAL	0U
+#define KWL_DND_STATE_COPY	1U
+#define KWL_DND_STATE_MOVE	2U
+#define KWL_DND_STATE_ASK	3U
+#define KWL_DND_STATE_REFUSED	4U
+
 /*
  * Bound the evdev nodes the seat reads and the events one report may carry.
  * The nodes are as many as the kernel's input devices (INPUT_DEVICE_MAX in
@@ -399,6 +413,15 @@ struct kwl_object {
 	struct kwl_object *committed_callbacks;
 	struct kwl_object *callback_next;
 	unsigned attached;
+	/*
+	 * ws189-p002: a surface of no role (a drag's icon) may be attached with
+	 * an offset; the offsets attached since the last commit, and their sum
+	 * over the commits, which places a drag's icon from the pointer.
+	 */
+	int32_t pending_dx;
+	int32_t pending_dy;
+	int32_t offset_x;
+	int32_t offset_y;
 	unsigned ready;
 	unsigned configured;
 	unsigned acknowledged;
@@ -837,6 +860,7 @@ uint64_t kwl_cycles(void);
 #define KWL_APPS_VIA_HOVER	0U
 #define KWL_APPS_VIA_CLICK	1U
 #define KWL_APPS_VIA_SWITCH	2U
+#define KWL_APPS_VIA_SPRING	3U
 
 /*
  * The bars' applications (apps-bar.c): each desktop's bar order (one for
@@ -860,6 +884,18 @@ struct kwl_apps_bar {
 	int32_t press_x;
 	unsigned dragging;
 	char logged[KWL_PLANE_SLOTS][512];
+	/*
+	 * Spring-loading during a drag and drop (ws189-p002): the application
+	 * whose icon the drag rests on (empty for none) and since when, whether
+	 * its rest has brought its window or its previews already (not again
+	 * until the drag leaves the icon), and the preview the drag rests on
+	 * (-1 for none) and since when.
+	 */
+	char spring_key[KWL_APPS_KEY];
+	uint64_t spring_since_ms;
+	unsigned spring_done;
+	int spring_tile;
+	uint64_t spring_tile_since_ms;
 };
 
 struct kwl_server {
@@ -1482,6 +1518,20 @@ struct kwl_server {
 	struct kwl_object *dnd_target_device;
 	struct kwl_object *dnd_offer;
 	struct kwl_object *dnd_titlebar;
+	/*
+	 * ws189-p002: every data device of the target's client hears the drag
+	 * (a program's windows each have one), each with an offer of its own;
+	 * dnd_target_device and dnd_offer above are the pair whose window
+	 * accepted a type (else the first).  A device or an offer that goes is
+	 * taken out (NULL).  dnd_state is the mark last drawn on the drag
+	 * (KWL_DND_STATE_*), logged when it changes.
+	 */
+	struct kwl_object *dnd_devices[KWL_DND_DEVICES];
+	struct kwl_object *dnd_offers[KWL_DND_DEVICES];
+	unsigned dnd_device_count;
+	unsigned dnd_state;
+	/* Whether the drag rests on the bar's applications or their previews (apps-bar.c's spring-loading, ws189-p002). */
+	unsigned dnd_on_bar;
 	uint32_t dnd_part_id;
 	uint32_t dnd_part_detail;
 	/*
