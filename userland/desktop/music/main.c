@@ -36,6 +36,13 @@
 #define MU_IDLE_MS		1000
 #define MU_MOVING_MS		10
 
+/*
+ * How long a lost stream is tried again while the sound service starts
+ * again, and how often (microseconds; T1-452: it answered EAGAIN at once).
+ */
+#define MU_REOPEN_US		10000000U
+#define MU_REOPEN_EVERY_US	500000U
+
 /* The most glass panels of a frame. */
 #define MU_PANELS_MAX		4U
 
@@ -57,7 +64,10 @@
  * last two seconds of the position told (for the frames and the log),
  * when the folder was last looked at for a change, a song to play at the
  * next round (-1 for none: the one after a song that could not go on), and
- * how many songs in a row could not go on (ws177-p021).
+ * how many songs in a row could not go on (ws177-p021).  A song whose
+ * stream was lost and could not be opened again at once is tried again:
+ * the song, where it was, whether it was paused, until when and when next
+ * (reopen_until 0 for none).
  */
 struct mu_window {
 	struct kl_app *app;
@@ -81,6 +91,11 @@ struct mu_window {
 	uint64_t looked;
 	long pending;
 	size_t failed;
+	long reopen_song;
+	double reopen_position;
+	unsigned reopen_state;
+	uint64_t reopen_until;
+	uint64_t reopen_next;
 };
 
 /* The window's menu. */
@@ -106,6 +121,7 @@ static void mu_gone(struct mu_window *music, long song, uint64_t now_us);
 static void mu_failed(struct mu_window *music, int failure, uint64_t now_us);
 static void mu_advance(struct mu_window *music, long song);
 static void mu_lost(struct mu_window *music, unsigned state, uint64_t now_us);
+static int mu_reopen(struct mu_window *music, uint64_t now_us);
 static void mu_toggle(struct mu_window *music, uint64_t now_us);
 static void mu_step(struct mu_window *music, int step, uint64_t now_us);
 static void mu_follow(struct mu_window *music, uint64_t now_us);
@@ -601,6 +617,9 @@ mu_play_song(
 	if (song < 0 || (size_t)song >= count)
 		return;
 
+	/* A song chosen ends the trying again of a lost one. */
+	music->reopen_until = 0;
+
 	/* Opened and playing. */
 	error = mu_player_open(&music->player, songs[song].path);
 	mu_log("PLAY song=%ld error=%d problem=%d", song, error, music->player.problem);
@@ -736,35 +755,86 @@ mu_lost(
 	unsigned state,
 	uint64_t now_us)
 {
-	const struct mu_song *songs;
 	size_t count;
 	double position;
 	long song;
-	int error;
 
 	/* The song and where it was. */
-	songs = mu_songs(&count);
+	(void)mu_songs(&count);
 	song = music->view.playing;
 	if (song < 0 || (size_t)song >= count)
 		return;
 	position = mu_player_position(&music->player);
 	mu_log("AUDIO lost song=%ld ms=%lld", song, (long long)(position * 1000.0));
 
+	/* Remembered, to be tried again while the service starts again. */
+	music->reopen_song = song;
+	music->reopen_position = position;
+	music->reopen_state = state;
+	music->reopen_until = now_us + MU_REOPEN_US;
+	music->reopen_next = now_us;
+
+	/* Opened again at once when the service is there. */
+	(void)mu_reopen(music, now_us);
+}
+
+/*
+ * Tries to open a lost song's stream again (its song from where it was,
+ * paused when it was).  While the sound service is not there yet
+ * (ENODEV) it is tried again every MU_REOPEN_EVERY_US until
+ * MU_REOPEN_US went; then the song stops and says why.  Returns 1 when
+ * the song plays on.
+ */
+static int
+mu_reopen(
+	struct mu_window *music,
+	uint64_t now_us)
+{
+	const struct mu_song *songs;
+	size_t count;
+	long song;
+	int error;
+
+	/* Nothing to try again, or not yet. */
+	if (music->reopen_until == 0U || now_us < music->reopen_next)
+		return 0;
+
+	/* The song, still in the collection. */
+	songs = mu_songs(&count);
+	song = music->reopen_song;
+	if (song < 0 || (size_t)song >= count) {
+		music->reopen_until = 0;
+		return 0;
+	}
+
 	/* Opened again (the stream with it). */
 	error = mu_player_open(&music->player, songs[song].path);
-	mu_log("AUDIO reopened song=%ld error=%d", song, error);
 	music->dirty = 1;
+
+	/* The service not there yet: tried again a little later, until the time is up. */
+	if (error == ENODEV && now_us < music->reopen_until) {
+		music->view.state = MU_STOPPED;
+		music->reopen_next = now_us + MU_REOPEN_EVERY_US;
+		return 0;
+	}
+
+	/* Tried for the last time. */
+	music->reopen_until = 0;
+	mu_log("AUDIO reopened song=%ld error=%d", song, error);
 	if (error != 0) {
 		music->view.state = MU_STOPPED;
 		mu_tell(music, error, now_us);
-		return;
+		return 0;
 	}
 
 	/* From where it was, and paused when it was. */
-	if (position > 0.0)
-		mu_player_seek(&music->player, position);
-	if (state == MU_PAUSED)
+	if (music->reopen_position > 0.0)
+		mu_player_seek(&music->player, music->reopen_position);
+	if (music->reopen_state == MU_PAUSED)
 		mu_player_pause(&music->player);
+
+	/* Succeeded: the song plays on. */
+	return 1;
 }
 
 /* Plays or pauses the song; a song that ended plays again from its start. */
@@ -860,6 +930,9 @@ mu_follow(
 	int failure;
 	int ended;
 	int lost;
+
+	/* A lost song's stream tried again while its service starts again (T1-452). */
+	(void)mu_reopen(music, now_us);
 
 	/* A song waiting to play, after one that could not go on (ws177-p021). */
 	if (music->pending >= 0) {
