@@ -3,7 +3,7 @@
 # ws177-p031: videoplayer・Music を libmedia へ移す（案 T の 5）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2 q906 実装・host PASS・build）
+Status: test-wait（T1-469、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q906（P2、承認: ユーザー 2026-10-08 夜「Tは通常優先度でスケジューリングをお願いします」）
