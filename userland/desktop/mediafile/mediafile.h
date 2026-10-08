@@ -8,7 +8,7 @@
 /*
  * Reads a media file's container without FFmpeg (WS122 p003): MP4 and MOV
  * (ISO BMFF, also fragmented, ws177-p027), Matroska and WebM, MPEG-TS
- * (ws177-p028).  It finds the tracks and hands out their
+ * (ws177-p028) and Ogg (ws177-p029).  It finds the tracks and hands out their
  * packets, the compressed frames, with their times, in the order the file
  * stores them; it does not decode.  The player chooses a decoder from a
  * track's codec and private data (the H.264 avcC, the AAC
@@ -41,6 +41,8 @@
 #define MF_CODEC_AAC		7U
 #define MF_CODEC_OPUS		8U
 #define MF_CODEC_MP3		9U
+#define MF_CODEC_VORBIS		10U
+#define MF_CODEC_THEORA		11U
 
 /* The longest codec name a track keeps (an MP4 four-character code or a Matroska CodecID). */
 #define MF_CODEC_NAME_MAX	32U

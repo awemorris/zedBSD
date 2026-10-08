@@ -156,6 +156,8 @@ static const struct mkv_id_codec id_codecs[] = {
 	{ "A_AAC", 1U, MF_CODEC_AAC },
 	{ "A_OPUS", 0U, MF_CODEC_OPUS },
 	{ "A_MPEG/L3", 0U, MF_CODEC_MP3 },
+	{ "A_VORBIS", 0U, MF_CODEC_VORBIS },
+	{ "V_THEORA", 0U, MF_CODEC_THEORA },
 };
 
 /* The reader as mediafile.c calls it. */

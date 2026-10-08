@@ -1980,7 +1980,9 @@ h264_size(
 		crop[i] = bits_golomb(&bits);
 
 	/* Refuses a set that could not be read or a size no picture has. */
-	if (bits.failed || width_mbs > 1024U || height_units > 1024U)
+	if (bits.failed ||
+	    width_mbs > 1024U ||
+	    height_units > 1024U)
 		return EINVAL;
 
 	/* The cropping units: two samples across for 4:2:0 and 4:2:2, two down for 4:2:0, doubled for fields. */
@@ -2178,7 +2180,9 @@ find_h264_sps(
 		end = size;
 		for (i = start; i + 2U < size; i++) {
 			/* Two zero bytes and a 0 or 1 end it. */
-			if (data[i] == 0 && data[i + 1] == 0 && data[i + 2] <= 1U) {
+			if (data[i] == 0 &&
+			    data[i + 1] == 0 &&
+			    data[i + 2] <= 1U) {
 				end = i;
 				break;
 			}

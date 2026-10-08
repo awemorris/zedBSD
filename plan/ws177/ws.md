@@ -57,6 +57,6 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p026](phase026/phase.md) | 案 A2: Settings の Notifications の頁（Mail・Calendar・Phone・Browser の通知の switch と compositor の門、Browser の sign-in の code の switch）（backlog-p2 67） | in-progress（2026-10-08 P2 実装・host PASS・build） | ws156-p002・ws169-p002 |
 | [ws177-p027](phase027/phase.md) | 案 T の 1: mediafile の fragmented MP4（mvex/trex、moof の tfhd・tfdt・trun、tkhd の track_ID）と壊れた index（file の外の sample を落として数える、dropped_count）（backlog-p2 116） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws122-p003 |
 | [ws177-p028](phase028/phase.md) | 案 T の 2: MPEG-TS の reader（PAT/PMT、PES、H.264・AAC の ADTS、90 kHz、PTS で seek） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p027 |
-| [ws177-p029](phase029/phase.md) | 案 T の 3: Ogg の reader（Opus・Vorbis・Theora、granule、二分の seek） | planned | ws177-p028 |
+| [ws177-p029](phase029/phase.md) | 案 T の 3: Ogg の reader（Opus・Vorbis・Theora、granule、二分の seek） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p028 |
 | [ws177-p030](phase030/phase.md) | 案 T の 4: AVI の reader（RIFF・hdrl/strl・movi・idx1） | planned | ws177-p029 |
 | [ws177-p031](phase031/phase.md) | 案 T の 5: videoplayer・Music を libmedia へ（media_ の接頭辞、decoder の ops の表、落とした packet の知らせ）（backlog-p2 119） | planned | ws177-p030 |

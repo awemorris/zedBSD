@@ -134,10 +134,18 @@ def compare(name, got, streams, dropped=None, fmt=None, seeks=(), ignore=()):
 
 
 def check_seek(after, streams):
-    """The first video packet after a seek is the last key frame at or before the time (the first one when none is)."""
+    """The first video packet after a seek is the last key frame at or before the time (the first one when none is);
+    without video, the first track's first packet is at or before the time and not more than 2 s before it."""
     problems = []
     if after["error"] != 0:
         return ["seek %d: error %d" % (after["time"], after["error"])]
+    if not any(stream["type"] == "video" for stream in streams):
+        got = after["packets"].get(0)
+        last = streams[0]["packets"][-1]["pts"]
+        if got is None or got["pts"] > max(after["time"], streams[0]["packets"][0]["pts"]) or \
+                got["pts"] < min(after["time"], last) - 2000000:
+            problems.append("seek %d: first sound packet %s" % (after["time"], got))
+        return problems
     for index, stream in enumerate(streams):
         if stream["type"] != "video":
             continue
@@ -411,6 +419,54 @@ def group_ts():
         problems.append("audio: dropped %s, %d of %d packets" % (got["tracks"][1]["dropped"], len(audio),
                                                                   len(streams[1]["packets"])))
     report("ts-lost", problems)
+
+
+def group_ogg():
+    """ws177-p029: Ogg with Opus, Vorbis and Theora."""
+    seeks = (0, 1000000, 1550000, 2900000, 10000000)
+    cases = (("ogg-opus", "opus", ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3",
+                                   "-c:a", "libopus", "-b:a", "32k"]),
+             ("ogg-vorbis", "ogg", ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=44100", "-t", "3",
+                                    "-c:a", "libvorbis"]),
+             ("ogg-theora", "ogv", VIDEO_IN + ["-f", "lavfi", "-i", "sine=sample_rate=44100", "-t", "3",
+                                               "-c:v", "libtheora", "-g", "10", "-c:a", "libvorbis"]),
+             ("ogg-theora-opus", "ogv", VIDEO_IN + ["-f", "lavfi", "-i", "sine=sample_rate=48000", "-t", "3",
+                                                    "-c:v", "libtheora", "-g", "7", "-c:a", "libopus"]))
+    made = {}
+    for name, extension, args in cases:
+        made[name] = ffmpeg(name + "." + extension, args)
+        streams = probe(made[name])
+        report(name, compare(name, run(made[name], seeks), streams, fmt="ogg", seeks=seeks))
+
+    # A page in the middle damaged (one byte of its body): its packets are left out and counted, the rest read.
+    source = made["ogg-theora"]
+    streams = probe(source)
+    data = open(source, "rb").read()
+    pages = []
+    position = 0
+    while True:
+        position = data.find(b"OggS", position)
+        if position < 0:
+            break
+        pages.append(position)
+        position += 4
+    damaged = pages[len(pages) // 2]
+    path = mutate(source, "ogg-crc.ogv", lambda d: d.__setitem__(damaged + 40, d[damaged + 40] ^ 0xff))
+    got = run(path)
+    problems = []
+    if got["open"] != 0 or got["end"] != 61:
+        problems.append("open %s end %s" % (got["open"], got.get("end")))
+    else:
+        lost = sum(len(stream["packets"]) - len(got["packets"][index]) for index, stream in enumerate(streams))
+        dropped = sum(int(track["dropped"]) for track in got["tracks"])
+        if not 0 < lost <= 64 or dropped < 1:
+            problems.append("lost %d packets, dropped %d" % (lost, dropped))
+    report("ogg-crc", problems)
+
+    # Cut in the middle of a page: each track's packets are ffprobe's first ones.
+    length = len(data) * 6 // 10 + 11
+    path = mutate(source, "ogg-cut.ogv", lambda d: d.__delitem__(slice(length, None)))
+    report("ogg-cut", prefix("ogg-cut", run(path, (0, 1000000)), streams))
 
 
 def main():
