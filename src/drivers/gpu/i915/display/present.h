@@ -57,6 +57,10 @@ int drv_i915_present_display_release(void *device, void *session, const struct g
 int drv_i915_present_relight_begin(struct i915_device *device);
 void drv_i915_present_retrain_request(struct i915_display *display);
 
+/* Leaves the window at once when the display the resident output was moved to is unplugged (the hotplug path). */
+void drv_i915_present_unplugged(struct i915_display *display, unsigned connector);
+int drv_i915_present_unplug_pending(struct i915_device *device);
+
 /* Prepares the display lease once (its mutex and numbering). */
 void drv_i915_present_lease_init(struct i915_display *display);
 

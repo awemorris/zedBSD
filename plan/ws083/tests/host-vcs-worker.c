@@ -735,6 +735,7 @@ int drv_i915_present_blob_frame(struct i915_device *device, const struct i915_wo
 unsigned drv_i915_present_count(struct i915_device *device) { (void)device; FIXTURE_UNREACHED("drv_i915_present_count"); }
 int drv_i915_present_frame(struct i915_device *device, const struct i915_worker_present *frame) { (void)device; (void)frame; FIXTURE_UNREACHED("drv_i915_present_frame"); }
 int drv_i915_present_hold_over(struct i915_device *device) { (void)device; FIXTURE_UNREACHED("drv_i915_present_hold_over"); }
+int drv_i915_present_unplug_pending(struct i915_device *device) { (void)device; return 0; }
 void drv_i915_present_hold_prepare(struct i915_device *device) { (void)device; FIXTURE_UNREACHED("drv_i915_present_hold_prepare"); }
 int drv_i915_present_hold_start(struct i915_device *device) { (void)device; FIXTURE_UNREACHED("drv_i915_present_hold_start"); }
 void drv_i915_present_window(struct i915_device *device) { (void)device; FIXTURE_UNREACHED("drv_i915_present_window"); }

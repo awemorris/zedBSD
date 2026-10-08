@@ -14,7 +14,7 @@ Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §7（第 4 版�
 - `libmedia/engine.c`・`media.h`・`Makefile`・`exports.map`: 音を外した（stream を開かない、時計は monotonic、videoplayer/audio.c を build しない）。NEEDED は libc だけのまま（`llvm-readelf -d`）、kl_・wl_ の未定義の symbol 0。
 - `plan/tools/keiland-os-boundary/app-allow.tsv`: audiod の PENDING 3 行を外した。
 - 他の WS の試験（Q1 の許可）: `plan/ws074/tests/host-build.sh`・`plan/ws121/tests/run-host-engine.sh` から videoplayer/audio.c を外した。AAT の `tests/scenarios/apps/music/play.md` の audiod の記述を直した。
-- 試験の image: `plan/ws191/tests/config-amd64-sound.mk`（current-uat の image に sample.mp4）。
+- 試験の image: `plan/ws191/tests/config-amd64-sound.mk`（AAT の image（aat-input・screen の capture）に sample.mp4。2026-10-08 T1-444 の後に current-uat から AAT の config の上へ作り直し: pause・seek を操作できるように）。作り方: `plan/tools/guest/test-image.sh plan/ws191/tests/config-amd64-sound.mk build/ws191-sound`。
 
 ## 確かめたこと
 

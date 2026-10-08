@@ -80,6 +80,7 @@ int drv_i915_hpd_connector_status(struct i915_display *display, unsigned idx);
  */
 
 uint64_t drv_i915_hpd_topology_sequence(struct i915_display *display);
+void drv_i915_hpd_topology_touch(struct i915_display *display);
 
 /*
  * ==== The connectors for the display inventory (ws113-p002) ====

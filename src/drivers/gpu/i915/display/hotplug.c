@@ -1096,6 +1096,32 @@ drv_i915_hpd_topology_sequence(
 }
 
 /*
+ * Tells the display sessions that the inventory changed without a
+ * connector's change: the resident output moved back to the firmware's
+ * (BUG-268), so index 0 names another display.
+ */
+void
+drv_i915_hpd_topology_touch(
+	struct i915_display *display)
+{
+	struct i915_hpd_world *world;
+	unsigned long irq;
+
+	/* A display without a hotplug world has no sessions to tell. */
+	world = i915_hpd_display_world(display);
+	if (world == NULL)
+		return;
+
+	/* A new sequence, under the short topology lock. */
+	irq = spin_lock_irqsave(&world->topology_lock);
+	world->topology_sequence++;
+	spin_unlock_irqrestore(&world->topology_lock, irq);
+
+	/* A display session waiting for the change hears of it. */
+	poll_notify();
+}
+
+/*
  * Describes one connector of the hotplug path for the display inventory
  * (ws113-p002): its kind, port, whether a sink is connected, its
  * generation and its name.  0, or ENOENT for a connector the path does not
@@ -3564,6 +3590,10 @@ i915_hpd_hotplug_recorded(
 	/* Publishes the change to the display sessions. */
 	if (topology_changed)
 		i915_hpd_topology_update(world, idx, 1);
+
+	/* The display the resident output was moved to went: its output stops at once (BUG-268). */
+	if (old == connector_status_connected && connector->base.status != connector_status_connected && world->dp_display != NULL)
+		drv_i915_present_unplugged(world->dp_display, idx);
 
 	/* Counts the HDMI connector's transitions. */
 	if ((int)idx == world->hpd.hdmi && old != (int)connector->base.status) {

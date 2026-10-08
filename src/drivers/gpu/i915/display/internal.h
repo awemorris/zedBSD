@@ -3442,6 +3442,15 @@ struct i915_present_window {
 	 * lock for it.
 	 */
 	int retrain;
+
+	/*
+	 * Nonzero asks the window to be left at once because the display the
+	 * resident output was moved to was unplugged (BUG-268): the hotplug
+	 * path sets it, the worker leaves the window, the output is stopped
+	 * and the firmware's output comes back at the window's end, which
+	 * clears it.  The device IRQ lock guards it.
+	 */
+	int unplugged;
 };
 
 /*
