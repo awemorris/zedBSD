@@ -16,7 +16,9 @@
  *
  * Each answer is a "PRINTTEST result" line; list prints the printers and
  * the jobs; print waits for its job to end (done, failed or cancelled)
- * and prints its states as they change.  Exits with 0 when the request was
+ * and prints its states as they change.  The wait is 30 seconds, 300 for
+ * print (a real printer warms up and prints for minutes, T1-460), unless
+ * --timeout-s says.  Exits with 0 when the request was
  * taken (and a print's job was done), 1 otherwise.
  */
 
@@ -30,6 +32,10 @@
 #include <stdlib.h>
 #include <string.h>
 #include <time.h>
+
+/* How long a command waits for its answer, and a print for its job's end (a real printer's), in seconds. */
+#define PRINTTEST_WAIT_SECONDS		30
+#define PRINTTEST_PRINT_SECONDS		300
 
 int main(int argc, char **argv);
 static int test_command(struct wl_display *display, struct kl_system *system, int count, char **words, int seconds);
@@ -53,9 +59,9 @@ main(
 	int same;
 	int arg;
 
-	/* Each line as it is made, and the time out. */
+	/* Each line as it is made, and the time out (0: the command's own). */
 	setvbuf(stdout, NULL, _IOLBF, 0);
-	seconds = 30;
+	seconds = 0;
 	arg = 1;
 	if (arg < argc) {
 		same = strncmp(argv[arg], "--timeout-s=", 12U);
@@ -69,6 +75,14 @@ main(
 	if (arg >= argc) {
 		fprintf(stderr, "usage: printtest [--timeout-s=N] list|add|default|remove|cancel|edit|print ...\n");
 		return 2;
+	}
+
+	/* The command's own time out: a print's job is waited for longer. */
+	if (seconds <= 0) {
+		seconds = PRINTTEST_WAIT_SECONDS;
+		same = strcmp(argv[arg], "print");
+		if (same == 0)
+			seconds = PRINTTEST_PRINT_SECONDS;
 	}
 
 	/* The compositor. */
