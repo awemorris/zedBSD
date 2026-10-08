@@ -35,3 +35,10 @@ Origin: [backlog-p1](../backlog-p1.md) の 12・13・29〜32（ws131-p025・ws09
 ## Event
 
 2026-10-08 / q890-i03（P1）: 実装と host・build の確認。
+
+## T1-425 の判定（2026-10-08 Q1）
+
+(a) 日本語の IME の合成は欄に出る（候補の popup は見えない）、(c) 選んだ文節の太い下線、(e) textarea の value の get・set は確認。**残り 2 件**（直す Queue を後で立てる）:
+- (b) 画面 keyboard が email・numeric・text で種類に従わない（QWERTY の letters のまま、面の切替・content type の log 無し）。kl_window_text_context は content type を送るが、OSK の側（WS102）が受けて面を変えていない見込み。
+- (d) 合成中に**別の欄**を click すると、元の欄の value に入らず input も出ない（同じ欄の中の click は ok）。後で同じ欄を操作した時にまとめて入る。
+PNG は /home/awe/zedBSD-worktrees/t1/build/t1-425/shots/。
