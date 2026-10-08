@@ -262,6 +262,7 @@ static void touch_down(struct kwl_server *server, struct touch_screen *screen, u
 static void cancel_clients(const char *reason);
 static void cancel_client(struct kwl_client *client, const char *reason);
 static void place_pointer(struct kwl_server *server, int32_t x, int32_t y);
+static void hide_cursor(struct kwl_server *server);
 static void send_touch(struct kwl_client *client, uint32_t opcode, const void *payload, size_t size);
 static void report_heard(struct touch_report *report, struct kwl_client *client);
 static uint32_t contact_id(const struct touch_screen *screen, unsigned slot);
@@ -808,6 +809,9 @@ contact_begin(
 
 	/* A touch while the Windows key is down: no tap of its own (ws142-p002). */
 	kwl_super_tap_cancel(&server->super_tap);
+
+	/* The cursor hides while the fingers drive the pointer, until a mouse or a touch pad moves it (BUG-267). */
+	hide_cursor(server);
 
 	/* Where the finger touched. */
 	contact = &screen->contacts[slot];
@@ -1856,6 +1860,27 @@ place_pointer(
 	server->pointer_x = x;
 	server->pointer_y = y;
 	kwl_damage_pointer(server, old_x, old_y);
+}
+
+/*
+ * Hides the cursor for a finger on the touch screen (BUG-267: the user's
+ * "タッチパネルにタッチされたらマウスカーソルを非表示に"): the pointer is
+ * taken as not moved by a pointing device again, which input.c undoes when
+ * a mouse, a touch pad or a tablet moves it.  The place it was drawn is
+ * redrawn without it.
+ */
+static void
+hide_cursor(
+	struct kwl_server *server)
+{
+	/* Already hidden. */
+	if (server->pointer_unmoved)
+		return;
+
+	/* Not drawn from the next frame; where it was is drawn again. */
+	server->pointer_unmoved = 1U;
+	kwl_damage_pointer(server, server->pointer_x, server->pointer_y);
+	printf("KWL CURSOR hidden by=touch\n");
 }
 
 /* Sends one event to every live wl_touch of a client. */
