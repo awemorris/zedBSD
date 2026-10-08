@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p001 -->
 # ws188-p001: 設計: Settings の OS の読みを libkeiland → compositor → backend へ
 
-Status: in-progress（q891-i01、P2、2026-10-08。第 2 版: design-reviewer の指摘 M1〜M8・m1〜m15 を反映）
+Status: 設計の完了（Q1 の判定待ち。q891-i01、P2、2026-10-08。第 3 版: 第 1 版の M1〜M8・m1〜m15、第 2 版の MJ1・MJ2・m1〜m12 を反映。Q1 の判断 3 点を受けた）
 Disposition: normal
 Parent: [WS188](../ws.md)
 
@@ -102,7 +102,7 @@ size_t kl_system_machine_users(const struct kl_system *system, struct kl_machine
 int kl_system_machine_login_language(const struct kl_system *system, char *code, size_t size);
 ```
 
-- `kl_system_machine_query`: 0（頼んだ）、ENOTSUP（`KL_SYSTEM_HAS_MACHINE` が無い）、EINVAL。答えの終わりは `kl_system_take_result` の result（OK、BUSY は EBUSY、UNAVAILABLE は EAGAIN、FAILED は EIO、INVALID は EINVAL）と、OK の答えの写しの時の `KL_SYSTEM_CHANGED_MACHINE`。
+- `kl_system_machine_query`: 0（頼んだ）、ENOTSUP（`KL_SYSTEM_HAS_MACHINE` が無い）、EINVAL。答えの終わりは `kl_system_take_result` の result（OK、BUSY は EBUSY、UNAVAILABLE は ENODEV（既存の写し、system-view.c）、FAILED は EIO、INVALID は EINVAL）と、OK の答えの写しの時の `KL_SYSTEM_CHANGED_MACHINE`。
 - 受け: `parts` で受けの作業の list（その部分の分）を空にし、その request と部分を覚える。event は作業の list に貯める。同じ request の `result(OK)` で、`parts` の部分だけを表示の view に写し、部分ごとの serial を 1 進め、known に bit を足す。`parts` の無い result（失敗）・別の request の result・`parts` の後に来た別の `parts`（途中で切れた答え）では写さない（作業の list は捨てる）。
 - `kl_system_machine_serial(system, part)`（M8）: 部分ごとの写しの回数（0 は未だ）。app は serial の変化で、変わった部分だけを写し直す。
 - `kl_system_machine_known` は 1 回でも OK の答えが来た部分の bit。`_about`・`_login_language` は known でなければ ENOENT。list の 2 つは写した数（known でなければ 0）。
@@ -164,7 +164,7 @@ size_t kl_backend_users_read(struct kl_backend_user *list, size_t capacity, unsi
 ## D6: Settings の側（p002 の実装の形）
 
 - **要求と写し**: Settings は自分の request の番号と頼んだ部分を覚え、写しは部分ごとの serial（`kl_system_machine_serial`）が変わった部分だけ行う（M8）。log もその部分の写しの時だけ出す。
-- **やり直し**（M7）: 部分ごとに「出している request」と「最後に出した時刻」を持つ。失敗の result（EBUSY・EAGAIN・EIO）の後は 2 秒の間を置いて、その部分を要る頁が描かれる時にやり直す。known でない USERS・LOGIN_LANGUAGE・ABOUT は、要る頁を描く時に同じ間隔で頼み直す。
+- **やり直し**（M7）: 部分ごとに「出している request」と「最後に出した時刻」を持つ。失敗の result（EBUSY・ENODEV・EIO）の後は 2 秒の間を置いて、その部分を要る頁が描かれる時にやり直す。known でない USERS・LOGIN_LANGUAGE・ABOUT は、要る頁を描く時に同じ間隔で頼み直す。
 - **起動**: `se_system_open` の後に `query(ABOUT | USERS | LOGIN_LANGUAGE)` を 1 回。
 - **About**（m2）: `settings/about.c` を消す（Q1 に削除を依頼、3 つの Makefile から外す）。ABOUT の写しは `se_about` の system・kernel・machine・processor・host・cores の 6 つの欄だけを上書きし、window が入れる graphics・display と monitor の memory には触れない。答えの前は値の行が空（今の「読めない値は空」と同じ見え）。
 - **Storage・Home**: `se_look_volumes` は statvfs をやめ、「FILESYSTEMS の最後の写しが 2 秒より古く、出している request が無ければ query」と「最新の写し」だけにする。最初の答えまでは Storage の頁は「Reading the disks…」、Home の Storage の tile は空き容量を出さない。
@@ -195,3 +195,26 @@ size_t kl_backend_users_read(struct kl_backend_user *list, size_t capacity, unsi
 
 - 2026-10-08 第 1 版のレビュー（design-reviewer、読むだけ）: major 8（M1 KL_VERSION 68 の衝突、M2 名前の欄 32 で切れた名前が別の利用者を指す、M3 login-language の AAT の `system=1`、M4 行の番号の選択、M5 読みの thread の join と NFS、M6 Settings の外の getpw*・statvfs、M7 失敗の後のやり直し、M8 変わった部分が分からない）、minor 15（m1 変更の場所の抜け、m2 About の写しの範囲、m3 待ちの上限の共有、m4 getgrnam の thread、m5 言語の読みの 2 通り、m6 Linux・FreeBSD の表示の変化、m7 行と数の決まり、m8 他人の home、m9 待ちの host 試験、m10 AAT の撮影の時、m11 ws089 の試験の範囲、m12 exports.py は生成、m13 古い compositor の後退、m14 monitor と重なる値、m15 D5 は妥当・Terminal の例は不適）。
 - 第 2 版で全てを反映: M1 は番号を仮にして Q1 の割り当てへ、M2 は欄 64・128 と名前を切らずに外す、M3 は結果の log を答えの写しで出す、M4 は名前の選択と読み直しの間の操作の停止、M5 は `kwl_machine_close` の detach、M6 は Q1 の判断へ、M7 は部分ごとの request と時刻のやり直し、M8 は部分ごとの serial。m1〜m15 は各節に。
+
+## 第 3 版（2026-10-08、第 2 版のレビューと Q1 の判断を受けて）
+
+Q1 の判断（2026-10-08）:
+1. 番号: **KL_VERSION 69**（68 は ws177-p019 が main に入れた）。manager の version 21・request 14・能力の bit 0x8000・`KL_SYSTEM_HAS_MACHINE 0x10000`・`KL_SYSTEM_CHANGED_MACHINE 0x8000` は WS188 に割り当て（WS143 p006 はその次）。merge の前に main を取り込んで衝突を確かめる。
+2. p003: `libkeiland/settings.c` の getpwuid と Files の getpwuid・getgrgid は許可の表。**Files の statvfs（Home の空き容量）は machine の FILESYSTEMS で移す小さい Phase ws188-p002a を足す**。
+3. Future Work F-085（compositor の app の起動の要求、activation の token 付き）。D5 は了解。
+
+第 2 版のレビューの反映:
+- **MJ1（止まった読み）**: 読みの job は読みごとに heap に作り、thread は detach で作る（join しない）。job の lock は static の 1 つの mutex。thread は終わりに lock の下で、見捨てられていれば job を free し見捨ての数を減らし、そうでなければ done を立てる。event loop は 1 pass ごとに done を見る。**10 秒**で終わらない読みは見捨てる: その読みの query に `result(FAILED)` を答え、job に見捨ての印を付けて手放す。見捨てた thread が 1 つ残っている間に来た query は読まずに `FAILED`（thread が増え続けない）。`kwl_machine_close` も同じく見捨てるだけで待たない（static の mutex は壊さない）。Settings の側も request に 15 秒の上限を置き、過ぎたら出していない扱いに戻す（Users の操作の停止が永久に続かない）。
+- **MJ2**: UNAVAILABLE は ENODEV。Settings のやり直しは EBUSY・ENODEV・EIO の後。
+- m1: Languages の結果の log は、管理の OK の後に**必ず新しい** `query(USERS | LOGIN_LANGUAGE)` を出し、`kl_system_take_result` がその request を errno 0 で返した時の view の値で出す（compositor は読みの最中の query を次の読みに回すので、値は管理の後のもの）。
+- m2: Settings の main の poll の timeout に machine のやり直しの時刻を足す（`se_machine_wait`）。
+- m3: 自分の行は必ず入る（人の上限は capacity − 1、自分が人の中にいれば SELF を付け、いなければ最後に足す）。自分の名前が 64 byte を超える時は自分の行が無い（Settings は「you」「there」のまま）。
+- m4: group と自分の行は 4096 から倍にして上限 64 KiB の buffer で `_r` の形で読む。上限を超えた group は無い物とする。
+- m5: 待ちの entry は「読みに入った」印を持ち、読みの最中に足された query は次の読み。上限（全体 16・client 4）は読みの最中の entry も数える。object の消滅は entry を外す（読みの最中でも）。
+- m6: libkeiland は parts に無い部分の event・parts の前の event・容量を超えた event を無視する。`kl_system_machine_serial` は 1 つの部分の bit 以外に 0。
+- m7: UNAVAILABLE の判定は parts・各 event・result の合計（header を含む）で事前に行う。途中の送りの失敗は `kwl_emit` の既存の扱い（client を fatal）に任せる。
+- m8: kernel の欄は 160（utsname の sysname と release の 65+65）。Settings の `se_users.home` を 256 に。
+- m9: root・sudo で動く Settings は compositor に system の拡張を見せてもらえない（他の uid）ので About・Users・Storage が空になる（今は自分で読めた）。意図した後退として記す。D4 の「root で動く Settings でも管理の card」は誤りで、管理者の判定は自分の行の `ADMIN`（uid が 1000 未満の管理者の account でも、compositor と同じ uid なら出る）。
+- m10: AAT の manage-users の「一覧に出る」も `USERS list count` の行を待つ。
+- m11: libkeiland の view が約 58 KB 増える（全ての app）。受け入れる（kl_system は heap、app の大きさに比べて小さい）。
+- m12: ws.md の射影は Q1。
