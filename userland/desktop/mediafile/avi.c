@@ -20,7 +20,7 @@
  * (each chunk a frame).  An empty chunk (a frame dropped) takes its time
  * without a packet.  The packets are handed out in the file's order; an
  * index entry that points outside the file is left out and counted
- * (mf_track.dropped_count).
+ * (media_file_track.dropped_count).
  */
 
 #include "mediafile-private.h"
@@ -97,25 +97,25 @@ struct avi_chunk {
 	uint64_t size;
 };
 
-static int avi_open(struct mf_file *file);
-static int avi_read(struct mf_file *file, struct mf_packet *packet);
-static int avi_seek(struct mf_file *file, int64_t time_us);
-static void avi_close(struct mf_file *file);
-static int chunk_at(struct mf_file *file, uint64_t position, uint64_t end, struct avi_chunk *chunk);
+static int avi_open(struct media_file *file);
+static int avi_read(struct media_file *file, struct media_packet *packet);
+static int avi_seek(struct media_file *file, int64_t time_us);
+static void avi_close(struct media_file *file);
+static int chunk_at(struct media_file *file, uint64_t position, uint64_t end, struct avi_chunk *chunk);
 static uint64_t chunk_next(const struct avi_chunk *chunk);
 static uint32_t le32(const unsigned char *bytes);
 static uint16_t le16(const unsigned char *bytes);
-static int read_hdrl(struct mf_file *file, struct avi_state *state, const struct avi_chunk *hdrl);
-static int read_strl(struct mf_file *file, struct avi_state *state, const unsigned char *data, size_t size);
-static void read_video_format(struct mf_track *info, const unsigned char *strf, size_t size);
+static int read_hdrl(struct media_file *file, struct avi_state *state, const struct avi_chunk *hdrl);
+static int read_strl(struct media_file *file, struct avi_state *state, const unsigned char *data, size_t size);
+static void read_video_format(struct media_track *info, const unsigned char *strf, size_t size);
 static int is_data_id(const char *id);
-static void read_sound_format(struct mf_track *info, const unsigned char *strf, size_t size);
+static void read_sound_format(struct media_track *info, const unsigned char *strf, size_t size);
 static int same_code(const unsigned char *code, const char *name);
-static int read_idx1(struct mf_file *file, struct avi_state *state, const struct avi_chunk *idx1, uint64_t movi);
-static int scan_movi(struct mf_file *file, struct avi_state *state, uint64_t start, uint64_t end, int depth);
+static int read_idx1(struct media_file *file, struct avi_state *state, const struct avi_chunk *idx1, uint64_t movi);
+static int scan_movi(struct media_file *file, struct avi_state *state, uint64_t start, uint64_t end, int depth);
 static int stream_of_id(const char *id, unsigned *stream);
-static int add_packet(struct mf_file *file, struct avi_state *state, unsigned stream, uint64_t offset, uint64_t size, int key);
-static int chunk_key(struct mf_file *file, const struct mf_track *info, uint64_t offset, uint64_t size);
+static int add_packet(struct media_file *file, struct avi_state *state, unsigned stream, uint64_t offset, uint64_t size, int key);
+static int chunk_key(struct media_file *file, const struct media_track *info, uint64_t offset, uint64_t size);
 static int64_t packet_us(const struct avi_state *state, const struct avi_packet *packet);
 
 /* The reader as mediafile.c calls it. */
@@ -156,11 +156,11 @@ mf_avi_detect(
  */
 static int
 avi_open(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct avi_state *state;
 	struct avi_stream *stream;
-	struct mf_track *info;
+	struct media_track *info;
 	struct avi_chunk chunk;
 	struct avi_chunk hdrl;
 	struct avi_chunk idx1;
@@ -176,7 +176,7 @@ avi_open(
 	int compared;
 	int error;
 
-	/* The state, kept in the file so that mf_close frees it on any failure. */
+	/* The state, kept in the file so that media_file_close frees it on any failure. */
 	state = calloc(1, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
@@ -296,8 +296,8 @@ avi_open(
  */
 static int
 avi_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	struct avi_state *state;
 	struct avi_packet *next;
@@ -337,7 +337,7 @@ avi_read(
  */
 static int
 avi_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	int64_t time_us)
 {
 	struct avi_state *state;
@@ -353,7 +353,7 @@ avi_seek(
 	lead = 0;
 	for (t = file->track_count; t > 0; t--) {
 		/* A video track before the one found so far. */
-		if (file->tracks[t - 1U].kind == MF_TRACK_VIDEO)
+		if (file->tracks[t - 1U].kind == MEDIA_TRACK_VIDEO)
 			lead = t - 1U;
 	}
 
@@ -384,7 +384,7 @@ avi_seek(
  */
 static void
 avi_close(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct avi_state *state;
 
@@ -402,7 +402,7 @@ avi_close(
  */
 static int
 chunk_at(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t position,
 	uint64_t end,
 	struct avi_chunk *chunk)
@@ -463,7 +463,7 @@ le16(
  */
 static int
 read_hdrl(
-	struct mf_file *file,
+	struct media_file *file,
 	struct avi_state *state,
 	const struct avi_chunk *hdrl)
 {
@@ -524,13 +524,13 @@ read_hdrl(
  */
 static int
 read_strl(
-	struct mf_file *file,
+	struct media_file *file,
 	struct avi_state *state,
 	const unsigned char *data,
 	size_t size)
 {
 	struct avi_stream *stream;
-	struct mf_track *info;
+	struct media_track *info;
 	const unsigned char *strh;
 	const unsigned char *strf;
 	size_t strf_size;
@@ -595,7 +595,7 @@ read_strl(
 		read_sound_format(info, strf, strf_size);
 
 	/* A codec not known: no track. */
-	if (info->codec == MF_CODEC_UNKNOWN) {
+	if (info->codec == MEDIA_CODEC_UNKNOWN) {
 		free((void *)info->private_data);
 		memset(info, 0, sizeof(*info));
 		return 0;
@@ -617,7 +617,7 @@ read_strl(
  */
 static void
 read_video_format(
-	struct mf_track *info,
+	struct media_track *info,
 	const unsigned char *strf,
 	size_t size)
 {
@@ -632,7 +632,7 @@ read_video_format(
 	/* The header's 40 bytes. */
 	if (size < 40U)
 		return;
-	info->kind = MF_TRACK_VIDEO;
+	info->kind = MEDIA_TRACK_VIDEO;
 	info->width = le32(strf + 4);
 	height = (int32_t)le32(strf + 8);
 	if (height < 0)
@@ -645,30 +645,30 @@ read_video_format(
 	for (i = 0; i < sizeof(mpeg4) / sizeof(mpeg4[0]); i++) {
 		same = same_code(code, mpeg4[i]);
 		if (same)
-			info->codec = MF_CODEC_MPEG4;
+			info->codec = MEDIA_CODEC_MPEG4;
 	}
 
 	/* H.264. */
 	for (i = 0; i < sizeof(h264) / sizeof(h264[0]); i++) {
 		same = same_code(code, h264[i]);
 		if (same)
-			info->codec = MF_CODEC_H264;
+			info->codec = MEDIA_CODEC_H264;
 	}
 
 	/* H.265. */
 	for (i = 0; i < sizeof(hevc) / sizeof(hevc[0]); i++) {
 		same = same_code(code, hevc[i]);
 		if (same)
-			info->codec = MF_CODEC_HEVC;
+			info->codec = MEDIA_CODEC_HEVC;
 	}
 
 	/* Motion JPEG. */
 	same = same_code(code, "MJPG");
 	if (same)
-		info->codec = MF_CODEC_MJPEG;
+		info->codec = MEDIA_CODEC_MJPEG;
 
 	/* MPEG-4's headers after the format (H.264 in AVI carries its own in the stream). */
-	if (info->codec == MF_CODEC_MPEG4 && size > 40U)
+	if (info->codec == MEDIA_CODEC_MPEG4 && size > 40U)
 		(void)mf_keep_private(info, strf + 40, size - 40U);
 }
 
@@ -678,7 +678,7 @@ read_video_format(
  */
 static void
 read_sound_format(
-	struct mf_track *info,
+	struct media_track *info,
 	const unsigned char *strf,
 	size_t size)
 {
@@ -689,7 +689,7 @@ read_sound_format(
 	/* The format's 16 bytes. */
 	if (size < 16U)
 		return;
-	info->kind = MF_TRACK_AUDIO;
+	info->kind = MEDIA_TRACK_AUDIO;
 	tag = le16(strf);
 	info->channels = le16(strf + 2);
 	info->sample_rate = le32(strf + 4);
@@ -697,7 +697,7 @@ read_sound_format(
 
 	/* The codec by its tag; PCM's name says its samples. */
 	if (tag == AVI_FORMAT_PCM) {
-		info->codec = MF_CODEC_PCM;
+		info->codec = MEDIA_CODEC_PCM;
 		if (bits == 8U)
 			mf_set_codec_name(info, "pcm_u8", 6U);
 		else if (bits == 24U)
@@ -705,13 +705,13 @@ read_sound_format(
 		else
 			mf_set_codec_name(info, "pcm_s16le", 9U);
 	} else if (tag == AVI_FORMAT_MP3) {
-		info->codec = MF_CODEC_MP3;
+		info->codec = MEDIA_CODEC_MP3;
 		mf_set_codec_name(info, "mp3", 3U);
 	} else if (tag == AVI_FORMAT_AAC || tag == AVI_FORMAT_AAC_LATM) {
-		info->codec = MF_CODEC_AAC;
+		info->codec = MEDIA_CODEC_AAC;
 		mf_set_codec_name(info, "aac", 3U);
 	} else if (tag == AVI_FORMAT_ADTS) {
-		info->codec = MF_CODEC_AAC;
+		info->codec = MEDIA_CODEC_AAC;
 		mf_set_codec_name(info, "adts", 4U);
 	}
 
@@ -754,7 +754,7 @@ same_code(
  */
 static int
 read_idx1(
-	struct mf_file *file,
+	struct media_file *file,
 	struct avi_state *state,
 	const struct avi_chunk *idx1,
 	uint64_t movi)
@@ -836,7 +836,7 @@ read_idx1(
  */
 static int
 scan_movi(
-	struct mf_file *file,
+	struct media_file *file,
 	struct avi_state *state,
 	uint64_t start,
 	uint64_t end,
@@ -953,7 +953,7 @@ is_data_id(
  */
 static int
 add_packet(
-	struct mf_file *file,
+	struct media_file *file,
 	struct avi_state *state,
 	unsigned stream_number,
 	uint64_t offset,
@@ -962,7 +962,7 @@ add_packet(
 {
 	struct avi_stream *stream;
 	struct avi_packet *packets;
-	struct mf_track *info;
+	struct media_track *info;
 	size_t capacity;
 	int64_t time;
 
@@ -1023,8 +1023,8 @@ add_packet(
  */
 static int
 chunk_key(
-	struct mf_file *file,
-	const struct mf_track *info,
+	struct media_file *file,
+	const struct media_track *info,
 	uint64_t offset,
 	uint64_t size)
 {
@@ -1034,9 +1034,9 @@ chunk_key(
 	int error;
 
 	/* Sound, and video without inner frames. */
-	if (info->kind != MF_TRACK_VIDEO)
+	if (info->kind != MEDIA_TRACK_VIDEO)
 		return 1;
-	if (info->codec != MF_CODEC_H264 && info->codec != MF_CODEC_MPEG4)
+	if (info->codec != MEDIA_CODEC_H264 && info->codec != MEDIA_CODEC_MPEG4)
 		return 1;
 
 	/* The chunk's first bytes; an empty frame repeats the one before. */
@@ -1058,13 +1058,13 @@ chunk_key(
 			continue;
 
 		/* H.264: an IDR slice (5) is key, another slice (1) is not. */
-		if (info->codec == MF_CODEC_H264 && (bytes[i + 3] & 0x1fU) == 5U)
+		if (info->codec == MEDIA_CODEC_H264 && (bytes[i + 3] & 0x1fU) == 5U)
 			return 1;
-		if (info->codec == MF_CODEC_H264 && (bytes[i + 3] & 0x1fU) == 1U)
+		if (info->codec == MEDIA_CODEC_H264 && (bytes[i + 3] & 0x1fU) == 1U)
 			return 0;
 
 		/* MPEG-4: a VOP (B6) is key when its coding type (the next two bits) is I (0). */
-		if (info->codec == MF_CODEC_MPEG4 && bytes[i + 3] == 0xb6U)
+		if (info->codec == MEDIA_CODEC_MPEG4 && bytes[i + 3] == 0xb6U)
 			return (bytes[i + 4] >> 6) == 0;
 	}
 

@@ -19,7 +19,7 @@
  * runs (traf: tfhd, tfdt, trun) are added to the samples of the track
  * whose tkhd has the same track_ID, with the defaults of its trex.  A
  * sample the index places outside the file (a file cut short, a damaged
- * table) is left out and counted (mf_track.dropped_count).
+ * table) is left out and counted (media_file_track.dropped_count).
  */
 
 #include "mediafile-private.h"
@@ -154,23 +154,23 @@ struct mp4_tables {
 	unsigned wide_offsets;
 };
 
-static int mp4_open(struct mf_file *file);
-static int mp4_read(struct mf_file *file, struct mf_packet *packet);
-static int mp4_seek(struct mf_file *file, int64_t time_us);
-static void mp4_close(struct mf_file *file);
-static int find_moov(struct mf_file *file, uint64_t *offset, uint64_t *size);
-static int top_box(struct mf_file *file, uint64_t position, char *type, uint64_t *header_size, uint64_t *box_size);
+static int mp4_open(struct media_file *file);
+static int mp4_read(struct media_file *file, struct media_packet *packet);
+static int mp4_seek(struct media_file *file, int64_t time_us);
+static void mp4_close(struct media_file *file);
+static int find_moov(struct media_file *file, uint64_t *offset, uint64_t *size);
+static int top_box(struct media_file *file, uint64_t position, char *type, uint64_t *header_size, uint64_t *box_size);
 static int box_next(const unsigned char *data, size_t size, size_t *offset, struct mp4_box *box);
 static int box_find(const unsigned char *data, size_t size, const char *type, struct mp4_box *box);
-static int read_movie_header(struct mp4_state *state, struct mf_file *file);
-static int read_track(struct mf_file *file, struct mp4_state *state, const struct mp4_box *trak);
-static int read_media_header(const struct mp4_box *mdia, struct mp4_track *track, struct mf_track *info);
-static int read_sample_entry(const struct mp4_box *stbl, struct mf_track *info);
-static int read_visual_entry(const struct mp4_box *entry, struct mf_track *info);
-static int read_audio_entry(const struct mp4_box *entry, struct mf_track *info);
-static int read_esds(const struct mp4_box *esds, struct mf_track *info);
+static int read_movie_header(struct mp4_state *state, struct media_file *file);
+static int read_track(struct media_file *file, struct mp4_state *state, const struct mp4_box *trak);
+static int read_media_header(const struct mp4_box *mdia, struct mp4_track *track, struct media_track *info);
+static int read_sample_entry(const struct mp4_box *stbl, struct media_track *info);
+static int read_visual_entry(const struct mp4_box *entry, struct media_track *info);
+static int read_audio_entry(const struct mp4_box *entry, struct media_track *info);
+static int read_esds(const struct mp4_box *esds, struct media_track *info);
 static int descriptor_next(const unsigned char *data, size_t size, size_t *offset, unsigned *tag, size_t *length);
-static void codec_of(struct mf_track *info, const char *type);
+static void codec_of(struct media_track *info, const char *type);
 static int is_configuration(const char *type);
 static void read_edit_list(const struct mp4_box *trak, uint32_t movie_timescale, struct mp4_track *track);
 static int find_tables(const struct mp4_box *stbl, struct mp4_tables *tables);
@@ -182,17 +182,17 @@ static int fill_sync(const struct mp4_tables *tables, struct mp4_track *track);
 static int64_t sample_pts_us(const struct mp4_track *track, const struct mp4_sample *sample);
 static int64_t sample_dts_us(const struct mp4_track *track, const struct mp4_sample *sample);
 static void read_track_id(const struct mp4_box *trak, struct mp4_track *track);
-static void read_extends(struct mf_file *file, struct mp4_state *state);
-static struct mp4_track *track_by_id(struct mf_file *file, struct mp4_state *state, uint32_t id);
-static int read_fragments(struct mf_file *file, struct mp4_state *state);
-static int read_moof(struct mf_file *file, struct mp4_state *state, uint64_t moof_offset, uint64_t size);
-static int read_traf(struct mf_file *file, struct mp4_state *state, const struct mp4_box *traf, uint64_t moof_offset, uint64_t *implicit);
-static int read_tfhd(struct mf_file *file, struct mp4_state *state, const struct mp4_box *tfhd, uint64_t moof_offset, uint64_t implicit, struct mp4_fragment *fragment);
+static void read_extends(struct media_file *file, struct mp4_state *state);
+static struct mp4_track *track_by_id(struct media_file *file, struct mp4_state *state, uint32_t id);
+static int read_fragments(struct media_file *file, struct mp4_state *state);
+static int read_moof(struct media_file *file, struct mp4_state *state, uint64_t moof_offset, uint64_t size);
+static int read_traf(struct media_file *file, struct mp4_state *state, const struct mp4_box *traf, uint64_t moof_offset, uint64_t *implicit);
+static int read_tfhd(struct media_file *file, struct mp4_state *state, const struct mp4_box *tfhd, uint64_t moof_offset, uint64_t implicit, struct mp4_fragment *fragment);
 static void read_tfdt(const struct mp4_box *tfdt, struct mp4_fragment *fragment);
 static int read_trun(const struct mp4_box *trun, struct mp4_fragment *fragment);
 static int append_sample(struct mp4_track *track, const struct mp4_sample *sample);
-static void drop_outside(const struct mf_file *file, struct mp4_track *track, struct mf_track *info);
-static void finish_tracks(struct mf_file *file, struct mp4_state *state);
+static void drop_outside(const struct media_file *file, struct mp4_track *track, struct media_track *info);
+static void finish_tracks(struct media_file *file, struct mp4_state *state);
 
 /* A sample entry's type and the codec it carries. */
 struct mp4_entry_codec {
@@ -202,17 +202,17 @@ struct mp4_entry_codec {
 
 /* The sample entry types this reader knows, by codec. */
 static const struct mp4_entry_codec entry_codecs[] = {
-	{ "avc1", MF_CODEC_H264 },
-	{ "avc3", MF_CODEC_H264 },
-	{ "hvc1", MF_CODEC_HEVC },
-	{ "hev1", MF_CODEC_HEVC },
-	{ "av01", MF_CODEC_AV1 },
-	{ "vp09", MF_CODEC_VP9 },
-	{ "vp08", MF_CODEC_VP8 },
-	{ "mp4v", MF_CODEC_MPEG4 },
-	{ "mp4a", MF_CODEC_AAC },
-	{ "Opus", MF_CODEC_OPUS },
-	{ ".mp3", MF_CODEC_MP3 },
+	{ "avc1", MEDIA_CODEC_H264 },
+	{ "avc3", MEDIA_CODEC_H264 },
+	{ "hvc1", MEDIA_CODEC_HEVC },
+	{ "hev1", MEDIA_CODEC_HEVC },
+	{ "av01", MEDIA_CODEC_AV1 },
+	{ "vp09", MEDIA_CODEC_VP9 },
+	{ "vp08", MEDIA_CODEC_VP8 },
+	{ "mp4v", MEDIA_CODEC_MPEG4 },
+	{ "mp4a", MEDIA_CODEC_AAC },
+	{ "Opus", MEDIA_CODEC_OPUS },
+	{ ".mp3", MEDIA_CODEC_MP3 },
 };
 
 /* The reader as mediafile.c calls it. */
@@ -229,7 +229,7 @@ const struct mf_format mf_mp4_format = {
  */
 static int
 mp4_open(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct mp4_state *state;
 	struct mp4_box trak;
@@ -245,7 +245,7 @@ mp4_open(
 	if (state == NULL)
 		return ENOMEM;
 
-	/* Kept in the file, so that mf_close frees it on any failure. */
+	/* Kept in the file, so that media_file_close frees it on any failure. */
 	file->state = state;
 
 	/* Where the movie box is. */
@@ -326,8 +326,8 @@ mp4_open(
  */
 static int
 mp4_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	struct mp4_state *state;
 	struct mp4_track *track;
@@ -390,7 +390,7 @@ mp4_read(
  */
 static int
 mp4_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	int64_t time_us)
 {
 	struct mp4_state *state;
@@ -409,7 +409,7 @@ mp4_seek(
 	lead_index = 0;
 	for (t = 0; t < file->track_count; t++) {
 		/* The first video track with samples. */
-		if (file->tracks[t].kind == MF_TRACK_VIDEO && state->tracks[t].count != 0) {
+		if (file->tracks[t].kind == MEDIA_TRACK_VIDEO && state->tracks[t].count != 0) {
 			lead_index = t;
 			break;
 		}
@@ -464,7 +464,7 @@ mp4_seek(
  */
 static void
 mp4_close(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct mp4_state *state;
 	unsigned i;
@@ -486,7 +486,7 @@ mp4_close(
  */
 static int
 find_moov(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t *offset,
 	uint64_t *size)
 {
@@ -528,7 +528,7 @@ find_moov(
  */
 static int
 top_box(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t position,
 	char *type,
 	uint64_t *header_size,
@@ -657,7 +657,7 @@ box_find(
 static int
 read_movie_header(
 	struct mp4_state *state,
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct mp4_box mvhd;
 	uint64_t duration;
@@ -694,12 +694,12 @@ read_movie_header(
  */
 static int
 read_track(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state,
 	const struct mp4_box *trak)
 {
 	struct mp4_track *track;
-	struct mf_track *info;
+	struct media_track *info;
 	struct mp4_tables tables;
 	struct mp4_box mdia;
 	struct mp4_box minf;
@@ -779,7 +779,7 @@ static int
 read_media_header(
 	const struct mp4_box *mdia,
 	struct mp4_track *track,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	struct mp4_box mdhd;
 	struct mp4_box hdlr;
@@ -819,12 +819,12 @@ read_media_header(
 	/* A video track. */
 	compared = memcmp(hdlr.payload + 8, "vide", 4);
 	if (compared == 0)
-		info->kind = MF_TRACK_VIDEO;
+		info->kind = MEDIA_TRACK_VIDEO;
 
 	/* A sound track. */
 	compared = memcmp(hdlr.payload + 8, "soun", 4);
 	if (compared == 0)
-		info->kind = MF_TRACK_AUDIO;
+		info->kind = MEDIA_TRACK_AUDIO;
 
 	/* Succeeded: the header is read. */
 	return 0;
@@ -837,7 +837,7 @@ read_media_header(
 static int
 read_sample_entry(
 	const struct mp4_box *stbl,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	struct mp4_box stsd;
 	struct mp4_box entry;
@@ -860,13 +860,13 @@ read_sample_entry(
 	codec_of(info, entry.type);
 
 	/* A video entry's size and configuration. */
-	if (info->kind == MF_TRACK_VIDEO) {
+	if (info->kind == MEDIA_TRACK_VIDEO) {
 		error = read_visual_entry(&entry, info);
 		return error;
 	}
 
 	/* A sound entry's format and configuration. */
-	if (info->kind == MF_TRACK_AUDIO) {
+	if (info->kind == MEDIA_TRACK_AUDIO) {
 		error = read_audio_entry(&entry, info);
 		return error;
 	}
@@ -882,7 +882,7 @@ read_sample_entry(
 static int
 read_visual_entry(
 	const struct mp4_box *entry,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	struct mp4_box child;
 	size_t offset;
@@ -930,7 +930,7 @@ read_visual_entry(
 static int
 read_audio_entry(
 	const struct mp4_box *entry,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	struct mp4_box child;
 	uint64_t bits;
@@ -996,7 +996,7 @@ read_audio_entry(
 static int
 read_esds(
 	const struct mp4_box *esds,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	const unsigned char *data;
 	size_t size;
@@ -1045,11 +1045,11 @@ read_esds(
 	/* The object type: AAC, MP3 or MPEG-4 video. */
 	object = data[offset];
 	if (object == 0x40U || object == 0x66U || object == 0x67U || object == 0x68U)
-		info->codec = MF_CODEC_AAC;
+		info->codec = MEDIA_CODEC_AAC;
 	else if (object == 0x69U || object == 0x6bU)
-		info->codec = MF_CODEC_MP3;
+		info->codec = MEDIA_CODEC_MP3;
 	else if (object == 0x20U)
-		info->codec = MF_CODEC_MPEG4;
+		info->codec = MEDIA_CODEC_MPEG4;
 
 	/* The decoder-specific information after the configuration's 13 bytes. */
 	offset += 13U;
@@ -1114,7 +1114,7 @@ descriptor_next(
  */
 static void
 codec_of(
-	struct mf_track *info,
+	struct media_track *info,
 	const char *type)
 {
 	size_t i;
@@ -1652,7 +1652,7 @@ read_track_id(
  */
 static void
 read_extends(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state)
 {
 	struct mp4_box mvex;
@@ -1699,7 +1699,7 @@ read_extends(
  */
 static struct mp4_track *
 track_by_id(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state,
 	uint32_t id)
 {
@@ -1728,7 +1728,7 @@ track_by_id(
  */
 static int
 read_fragments(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state)
 {
 	char type[4];
@@ -1772,7 +1772,7 @@ read_fragments(
  */
 static int
 read_moof(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state,
 	uint64_t moof_offset,
 	uint64_t size)
@@ -1851,7 +1851,7 @@ read_moof(
  */
 static int
 read_traf(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state,
 	const struct mp4_box *traf,
 	uint64_t moof_offset,
@@ -1921,7 +1921,7 @@ read_traf(
  */
 static int
 read_tfhd(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state,
 	const struct mp4_box *tfhd,
 	uint64_t moof_offset,
@@ -2203,9 +2203,9 @@ append_sample(
  */
 static void
 drop_outside(
-	const struct mf_file *file,
+	const struct media_file *file,
 	struct mp4_track *track,
-	struct mf_track *info)
+	struct media_track *info)
 {
 	const struct mp4_sample *sample;
 	uint64_t kept;
@@ -2240,11 +2240,11 @@ drop_outside(
  */
 static void
 finish_tracks(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mp4_state *state)
 {
 	struct mp4_track *track;
-	struct mf_track *info;
+	struct media_track *info;
 	int64_t length_us;
 	unsigned from_tracks;
 	unsigned i;

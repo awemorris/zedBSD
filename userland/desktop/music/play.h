@@ -28,7 +28,7 @@
  * the decoder drained, 2 told), the song's length (seconds), the
  * position's anchor (the time at the stream's position heard), a seek asked
  * for, the end of the thread, why the last song could not be played
- * (VP_CODEC_*, 0 for another reason or none), and why the song stopped
+ * (MEDIA_PROBLEM_*, 0 for another reason or none), and why the song stopped
  * while it played (MU_FAIL_*, taken by mu_player_failure).
  */
 struct mu_player {

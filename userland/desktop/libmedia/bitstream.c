@@ -21,10 +21,11 @@
  *     they go before each key frame.
  *
  * Everything here works on bytes alone and is tested on the host
- * (plan/ws122/tests/host-bitstream.c).
+ * (plan/ws122/tests/host-bitstream.c).  Moved into libmedia from Video
+ * Player (ws177-p031).
  */
 
-#include "videoplayer.h"
+#include "media-private.h"
 
 #include <errno.h>
 #include <stdlib.h>
@@ -38,18 +39,18 @@ static const uint32_t bitstream_rates[13] = {
 	96000U, 88200U, 64000U, 48000U, 44100U, 32000U, 24000U, 22050U, 16000U, 12000U, 11025U, 8000U, 7350U
 };
 
-static int bitstream_put(struct vp_bitstream *stream, const unsigned char *bytes, size_t size);
-static int bitstream_avcc(struct vp_bitstream *stream, const unsigned char *data, size_t size);
-static int bitstream_hvcc(struct vp_bitstream *stream, const unsigned char *data, size_t size);
-static int bitstream_asc(struct vp_bitstream *stream, const unsigned char *data, size_t size);
+static int bitstream_put(struct media_bitstream *stream, const unsigned char *bytes, size_t size);
+static int bitstream_avcc(struct media_bitstream *stream, const unsigned char *data, size_t size);
+static int bitstream_hvcc(struct media_bitstream *stream, const unsigned char *data, size_t size);
+static int bitstream_asc(struct media_bitstream *stream, const unsigned char *data, size_t size);
 
 /*
  * Prepares the conversion of a track's packets from its codec and private
  * data.  Returns 0, or EINVAL for private data that cannot be read.
  */
 int
-vp_bitstream_open(
-	struct vp_bitstream *stream,
+media_bitstream_open(
+	struct media_bitstream *stream,
 	unsigned codec,
 	const unsigned char *private_data,
 	size_t private_size)
@@ -64,16 +65,16 @@ vp_bitstream_open(
 
 	/* Each codec's record. */
 	switch (codec) {
-	case MF_CODEC_H264:
+	case MEDIA_CODEC_H264:
 		error = bitstream_avcc(stream, private_data, private_size);
 		break;
-	case MF_CODEC_HEVC:
+	case MEDIA_CODEC_HEVC:
 		error = bitstream_hvcc(stream, private_data, private_size);
 		break;
-	case MF_CODEC_AAC:
+	case MEDIA_CODEC_AAC:
 		error = bitstream_asc(stream, private_data, private_size);
 		break;
-	case MF_CODEC_MPEG4:
+	case MEDIA_CODEC_MPEG4:
 		/* The VOS and VOL headers as they are, before each key frame. */
 		error = bitstream_put(stream, private_data, private_size);
 		if (error == 0) {
@@ -93,7 +94,7 @@ vp_bitstream_open(
 
 	/* Reports a record that could not be read. */
 	if (error != 0) {
-		vp_bitstream_close(stream);
+		media_bitstream_close(stream);
 		return error;
 	}
 
@@ -107,8 +108,8 @@ vp_bitstream_open(
  * or ENOMEM.
  */
 int
-vp_bitstream_convert(
-	struct vp_bitstream *stream,
+media_bitstream_convert(
+	struct media_bitstream *stream,
 	const unsigned char *data,
 	size_t size,
 	int keyframe,
@@ -198,8 +199,8 @@ vp_bitstream_convert(
  * Frees what the conversion holds.
  */
 void
-vp_bitstream_close(
-	struct vp_bitstream *stream)
+media_bitstream_close(
+	struct media_bitstream *stream)
 {
 	/* The prefix and the output. */
 	free(stream->prefix);
@@ -210,7 +211,7 @@ vp_bitstream_close(
 /* Appends bytes to the output, making room; 0 or ENOMEM. */
 static int
 bitstream_put(
-	struct vp_bitstream *stream,
+	struct media_bitstream *stream,
 	const unsigned char *bytes,
 	size_t size)
 {
@@ -218,7 +219,7 @@ bitstream_put(
 	size_t room;
 
 	/* Room, doubled as it is needed (64 MiB at most, the largest packet mediafile hands out with its prefix). */
-	if (size > VP_BITSTREAM_MAX || stream->output_size > VP_BITSTREAM_MAX - size)
+	if (size > MEDIA_BITSTREAM_MAX || stream->output_size > MEDIA_BITSTREAM_MAX - size)
 		return ENOMEM;
 	if (stream->output_size + size > stream->output_room) {
 		room = stream->output_room;
@@ -242,7 +243,7 @@ bitstream_put(
 /* Reads an avcC record: the length's size and the SPS and PPS as Annex B; 0 or EINVAL. */
 static int
 bitstream_avcc(
-	struct vp_bitstream *stream,
+	struct media_bitstream *stream,
 	const unsigned char *data,
 	size_t size)
 {
@@ -300,7 +301,7 @@ bitstream_avcc(
 /* Reads an hvcC record: the length's size and the VPS, SPS and PPS as Annex B; 0 or EINVAL. */
 static int
 bitstream_hvcc(
-	struct vp_bitstream *stream,
+	struct media_bitstream *stream,
 	const unsigned char *data,
 	size_t size)
 {
@@ -363,7 +364,7 @@ bitstream_hvcc(
  */
 static int
 bitstream_asc(
-	struct vp_bitstream *stream,
+	struct media_bitstream *stream,
 	const unsigned char *data,
 	size_t size)
 {

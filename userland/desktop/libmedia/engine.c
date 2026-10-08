@@ -17,12 +17,12 @@
  * drops what is decoded and queued, and starts the clock again at the time
  * sought.
  *
- * Built on Video Player's player (userland/desktop/videoplayer/media.c),
+ * Built like Video Player's player (userland/desktop/videoplayer/media.c),
  * with the opening moved to the thread and the pictures made optional.
  */
 
 #include "media.h"
-#include "userland/desktop/videoplayer/videoplayer.h"
+#include "media-private.h"
 
 #include <errno.h>
 #include <fcntl.h>
@@ -66,19 +66,19 @@ struct media_engine {
 	pthread_t thread;
 	int thread_started;
 	char *path;
-	struct mf_source source;
+	struct media_source source;
 	unsigned flags;
 	int wake[2];
 
-	struct mf_file *file;
-	struct vp_decoder *video;
-	struct vp_decoder *sound;
+	struct media_file *file;
+	struct media_decoder *video;
+	struct media_decoder *sound;
 	unsigned video_track;
 	unsigned sound_track;
 	double skip_before;
 
-	struct vp_frame *shown;
-	void *scaler;
+	struct media_frame *shown;
+	struct media_scaler *scaler;
 	int scaled_width;
 	int scaled_height;
 
@@ -91,7 +91,7 @@ struct media_engine {
 	int height;
 	double duration;
 	int has_audio;
-	struct vp_frame *pictures[ENGINE_PICTURES];
+	struct media_frame *pictures[ENGINE_PICTURES];
 	double picture_times[ENGINE_PICTURES];
 	unsigned picture_first;
 	unsigned picture_count;
@@ -110,10 +110,10 @@ static void *engine_log_context;
 
 static void *engine_run(void *argument);
 static int engine_open_file(struct media_engine *engine);
-static int engine_decoder(struct media_engine *engine, unsigned kind, struct vp_decoder **result, unsigned *track);
-static int engine_feed(struct media_engine *engine, struct vp_decoder *decoder, const struct mf_packet *packet);
-static int engine_drain(struct media_engine *engine, struct vp_decoder *decoder);
-static int engine_picture(struct media_engine *engine, struct vp_frame *picture, double time);
+static int engine_decoder(struct media_engine *engine, unsigned kind, struct media_decoder **result, unsigned *track);
+static int engine_feed(struct media_engine *engine, struct media_decoder *decoder, const struct media_packet *packet);
+static int engine_drain(struct media_engine *engine, struct media_decoder *decoder);
+static int engine_picture(struct media_engine *engine, struct media_frame *picture, double time);
 static int engine_seek(struct media_engine *engine);
 static void engine_end(struct media_engine *engine);
 static double engine_clock(struct media_engine *engine);
@@ -137,11 +137,11 @@ media_set_log(
 }
 
 /*
- * Writes a log line of the library's: the engine's, and the decoding
- * add-in's, which Video Player's sources write through vp_log.
+ * Writes a log line of the library's (the engine's, the decoders' and the
+ * readers') to the caller's function.
  */
 void
-vp_log(
+media_log(
 	const char *format,
 	...)
 {
@@ -168,7 +168,7 @@ vp_log(
 int
 media_engine_open(
 	const char *path,
-	const struct mf_source *source,
+	const struct media_source *source,
 	unsigned flags,
 	struct media_engine **engine)
 {
@@ -301,7 +301,7 @@ media_engine_play(
 	engine->state = MEDIA_PLAYING;
 	(void)pthread_cond_broadcast(&engine->ready);
 	(void)pthread_mutex_unlock(&engine->lock);
-	vp_log("MEDIA play position_ms=%lld", (long long)(engine->clock_time * 1000.0));
+	media_log("MEDIA play position_ms=%lld", (long long)(engine->clock_time * 1000.0));
 	engine_wake(engine);
 }
 
@@ -326,7 +326,7 @@ media_engine_pause(
 	engine->state = MEDIA_PAUSED;
 	engine->clock_time = now;
 	(void)pthread_mutex_unlock(&engine->lock);
-	vp_log("MEDIA pause position_ms=%lld", (long long)(now * 1000.0));
+	media_log("MEDIA pause position_ms=%lld", (long long)(now * 1000.0));
 	engine_wake(engine);
 }
 
@@ -375,7 +375,7 @@ media_engine_picture(
 	int height,
 	double *next)
 {
-	struct vp_frame *taken;
+	struct media_frame *taken;
 	double clock;
 	unsigned slot;
 	int status;
@@ -395,7 +395,7 @@ media_engine_picture(
 		}
 
 		/* Due (or the first of all, shown at once). */
-		vp_frame_free(&taken);
+		media_frame_free(&taken);
 		taken = engine->pictures[slot];
 		engine->pictures[slot] = NULL;
 		engine->picture_first = (slot + 1U) % ENGINE_PICTURES;
@@ -410,7 +410,7 @@ media_engine_picture(
 
 	/* A new picture is kept for drawing again. */
 	if (taken != NULL) {
-		vp_frame_free(&engine->shown);
+		media_frame_free(&engine->shown);
 		engine->shown = taken;
 	}
 
@@ -421,7 +421,7 @@ media_engine_picture(
 		return 0;
 
 	/* Scaled into the pixels. */
-	status = vp_frame_scale(engine->shown, &engine->scaler, pixels, stride * sizeof(pixels[0]), width, height);
+	status = media_frame_scale(engine->shown, &engine->scaler, pixels, stride * sizeof(pixels[0]), width, height);
 	drawn = 0;
 	if (status == 0) {
 		engine->scaled_width = width;
@@ -453,7 +453,7 @@ media_engine_redraw(
 		return 0;
 
 	/* Scaled into the pixels. */
-	status = vp_frame_scale(engine->shown, &engine->scaler, pixels, stride * sizeof(pixels[0]), width, height);
+	status = media_frame_scale(engine->shown, &engine->scaler, pixels, stride * sizeof(pixels[0]), width, height);
 	if (status != 0)
 		return 0;
 	engine->scaled_width = width;
@@ -482,8 +482,8 @@ media_engine_close(
 	}
 
 	/* What the caller held, and the pictures waiting. */
-	vp_frame_free(&engine->shown);
-	vp_scaler_free(engine->scaler);
+	media_frame_free(&engine->shown);
+	media_scaler_free(engine->scaler);
 	engine_drop_pictures(engine);
 
 	/* The wake, the lock, the path, the engine. */
@@ -503,7 +503,7 @@ engine_run(
 	void *argument)
 {
 	struct media_engine *engine;
-	struct mf_packet packet;
+	struct media_packet packet;
 	int sought;
 	int status;
 	int read;
@@ -538,7 +538,7 @@ engine_run(
 			continue;
 
 		/* The next packet; the end of the file drains the decoders and waits. */
-		read = mf_read(engine->file, &packet);
+		read = media_file_read(engine->file, &packet);
 		if (read != 0) {
 			engine_end(engine);
 			continue;
@@ -552,12 +552,12 @@ engine_run(
 	}
 
 	/* What the thread opened goes with it. */
-	vp_decoder_close(engine->video);
+	media_decoder_close(engine->video);
 	engine->video = NULL;
-	vp_decoder_close(engine->sound);
+	media_decoder_close(engine->sound);
 	engine->sound = NULL;
 	if (engine->file != NULL)
-		mf_close(engine->file);
+		media_file_close(engine->file);
 	engine->file = NULL;
 	return NULL;
 }
@@ -565,15 +565,15 @@ engine_run(
 /*
  * Opens the file and the decoder of its first video track.  A file needs
  * pictures or sound the add-in decodes (the sound is not played).  Returns 0, or an errno value (engine->problem
- * says a decoding problem, VP_CODEC_*).
+ * says a decoding problem, MEDIA_PROBLEM_*).
  */
 static int
 engine_open_file(
 	struct media_engine *engine)
 {
-	const struct mf_track *track;
+	const struct media_track *track;
 	int64_t length_us;
-	struct vp_decoder *probe;
+	struct media_decoder *probe;
 	unsigned probe_track;
 	int video_status;
 	int sound_status;
@@ -582,16 +582,16 @@ engine_open_file(
 
 	/* The container. */
 	if (engine->path != NULL)
-		status = mf_open(engine->path, &engine->file);
+		status = media_file_open(engine->path, &engine->file);
 	else
-		status = mf_open_source(&engine->source, &engine->file);
+		status = media_file_open_source(&engine->source, &engine->file);
 	if (status != 0) {
-		vp_log("MEDIA open error=%d", status);
+		media_log("MEDIA open error=%d", status);
 		return status;
 	}
 
 	/* The pictures, when there are some. */
-	video_status = engine_decoder(engine, MF_TRACK_VIDEO, &engine->video, &engine->video_track);
+	video_status = engine_decoder(engine, MEDIA_TRACK_VIDEO, &engine->video, &engine->video_track);
 
 	/*
 	 * No sound is played (WS191, design D11), MEDIA_SOUND or not: a file of
@@ -601,9 +601,9 @@ engine_open_file(
 	sound_status = ENOENT;
 	silent = 0;
 	if (engine->video == NULL && engine->sound == NULL) {
-		sound_status = engine_decoder(engine, MF_TRACK_AUDIO, &probe, &probe_track);
+		sound_status = engine_decoder(engine, MEDIA_TRACK_AUDIO, &probe, &probe_track);
 		if (sound_status == 0) {
-			vp_decoder_close(probe);
+			media_decoder_close(probe);
 			silent = 1;
 		}
 	}
@@ -615,14 +615,14 @@ engine_open_file(
 			engine->problem = sound_status;
 		if (engine->problem == ENOENT || engine->problem == ENOMEM || engine->problem == ENODEV)
 			engine->problem = 0;
-		vp_log("MEDIA open error=%d problem=%d", ENOTSUP, engine->problem);
+		media_log("MEDIA open error=%d problem=%d", ENOTSUP, engine->problem);
 		return ENOTSUP;
 	}
 
 	/* What is known of the file. */
 	(void)pthread_mutex_lock(&engine->lock);
 	if (engine->video != NULL) {
-		track = mf_track(engine->file, engine->video_track);
+		track = media_file_track(engine->file, engine->video_track);
 		engine->width = (int)track->width;
 		engine->height = (int)track->height;
 		if (engine->width > ENGINE_SIDE_MAX || engine->height > ENGINE_SIDE_MAX) {
@@ -632,31 +632,31 @@ engine_open_file(
 	}
 
 	/* Its length, and whether it sounds. */
-	length_us = mf_duration_us(engine->file);
+	length_us = media_file_duration_us(engine->file);
 	if (length_us > 0)
 		engine->duration = (double)length_us / 1000000.0;
 	engine->has_audio = engine->sound != NULL;
 	(void)pthread_mutex_unlock(&engine->lock);
 
 	/* Succeeded: the log line the tests read. */
-	vp_log("MEDIA open width=%d height=%d duration_ms=%lld video=%s audio=%s container=%s", engine->width, engine->height,
-	    (long long)(length_us / 1000), vp_decoder_name(engine->video), vp_decoder_name(engine->sound), mf_format_name(engine->file));
+	media_log("MEDIA open width=%d height=%d duration_ms=%lld video=%s audio=%s container=%s", engine->width, engine->height,
+	    (long long)(length_us / 1000), media_decoder_name(engine->video), media_decoder_name(engine->sound), media_file_format_name(engine->file));
 	return 0;
 }
 
 /*
  * Opens the decoder of the file's first track of a kind that has one.
- * Returns 0, the last VP_CODEC_* problem, or ENOENT when there is no track
+ * Returns 0, the last MEDIA_PROBLEM_* problem, or ENOENT when there is no track
  * of the kind.
  */
 static int
 engine_decoder(
 	struct media_engine *engine,
 	unsigned kind,
-	struct vp_decoder **result,
+	struct media_decoder **result,
 	unsigned *track)
 {
-	const struct mf_track *found;
+	const struct media_track *found;
 	unsigned count;
 	unsigned index;
 	int problem;
@@ -664,15 +664,15 @@ engine_decoder(
 
 	/* Each track of the kind, in the file's order. */
 	problem = ENOENT;
-	count = mf_track_count(engine->file);
+	count = media_file_track_count(engine->file);
 	for (index = 0; index < count; index++) {
 		/* A track of the kind. */
-		found = mf_track(engine->file, index);
+		found = media_file_track(engine->file, index);
 		if (found == NULL || found->kind != kind)
 			continue;
 
 		/* Its decoder. */
-		status = vp_decoder_open(found, result);
+		status = media_decoder_open(found, result);
 		if (status == 0) {
 			*track = index;
 			return 0;
@@ -680,7 +680,7 @@ engine_decoder(
 
 		/* The add-in missing ends the search; another codec may still have a decoder. */
 		problem = status;
-		if (status == VP_CODEC_MISSING || status == VP_CODEC_VERSION)
+		if (status == MEDIA_PROBLEM_MISSING || status == MEDIA_PROBLEM_VERSION)
 			break;
 	}
 
@@ -692,15 +692,15 @@ engine_decoder(
 static int
 engine_feed(
 	struct media_engine *engine,
-	struct vp_decoder *decoder,
-	const struct mf_packet *packet)
+	struct media_decoder *decoder,
+	const struct media_packet *packet)
 {
 	int status;
 	int tries;
 
 	/* Sent; a full decoder gives its pictures or sound first, then takes the packet. */
 	for (tries = 0; tries < 2; tries++) {
-		status = vp_decoder_send(decoder, packet);
+		status = media_decoder_send(decoder, packet);
 		if (status != EAGAIN)
 			break;
 		status = engine_drain(engine, decoder);
@@ -717,23 +717,23 @@ engine_feed(
 static int
 engine_drain(
 	struct media_engine *engine,
-	struct vp_decoder *decoder)
+	struct media_decoder *decoder)
 {
-	struct vp_frame *picture;
+	struct media_frame *picture;
 	int64_t time_us;
 	int received;
 	int status;
 
 	/* Each one. */
 	for (;;) {
-		received = vp_decoder_receive(decoder, &time_us);
+		received = media_decoder_receive(decoder, &time_us);
 		if (!received)
 			return 0;
 		if (decoder != engine->video)
 			continue;
 
 		/* A picture, queued at its time. */
-		picture = vp_decoder_picture(decoder);
+		picture = media_decoder_picture(decoder);
 		if (picture == NULL)
 			continue;
 		status = engine_picture(engine, picture, (double)time_us / 1000000.0);
@@ -748,7 +748,7 @@ engine_drain(
 static int
 engine_picture(
 	struct media_engine *engine,
-	struct vp_frame *picture,
+	struct media_frame *picture,
 	double time)
 {
 	struct timespec until;
@@ -756,7 +756,7 @@ engine_picture(
 
 	/* A picture before the time sought is passed over. */
 	if (time < engine->skip_before) {
-		vp_frame_free(&picture);
+		media_frame_free(&picture);
 		return 0;
 	}
 
@@ -777,7 +777,7 @@ engine_picture(
 	/* Interrupted. */
 	if (engine->quit || engine->seek_wanted) {
 		(void)pthread_mutex_unlock(&engine->lock);
-		vp_frame_free(&picture);
+		media_frame_free(&picture);
 		return 1;
 	}
 
@@ -812,11 +812,11 @@ engine_seek(
 		return 0;
 
 	/* The file at the key frame before it, the decoders and the sound emptied. */
-	(void)mf_seek(engine->file, (int64_t)(seconds * 1000000.0));
+	(void)media_file_seek(engine->file, (int64_t)(seconds * 1000000.0));
 	if (engine->video != NULL)
-		vp_decoder_flush(engine->video);
+		media_decoder_flush(engine->video);
 	if (engine->sound != NULL)
-		vp_decoder_flush(engine->sound);
+		media_decoder_flush(engine->sound);
 
 	/* What decodes before the time sought is passed over. */
 	engine->skip_before = seconds;
@@ -829,7 +829,7 @@ engine_seek(
 	engine->eof = 0;
 	engine->seek_wanted = 0;
 	(void)pthread_mutex_unlock(&engine->lock);
-	vp_log("MEDIA seek to_ms=%lld", (long long)(seconds * 1000.0));
+	media_log("MEDIA seek to_ms=%lld", (long long)(seconds * 1000.0));
 	engine_wake(engine);
 
 	/* Carried out. */
@@ -877,7 +877,8 @@ engine_end(
 
 	/* The end told once. */
 	if (ended) {
-		vp_log("MEDIA ended position_ms=%lld", (long long)(clock * 1000.0));
+		media_log("MEDIA ended position_ms=%lld dropped=%llu", (long long)(clock * 1000.0),
+		    (unsigned long long)media_file_dropped(engine->file));
 		engine_wake(engine);
 	}
 
@@ -921,7 +922,7 @@ engine_drop_pictures(
 
 	/* Each. */
 	for (index = 0; index < ENGINE_PICTURES; index++)
-		vp_frame_free(&engine->pictures[index]);
+		media_frame_free(&engine->pictures[index]);
 	engine->picture_first = 0;
 	engine->picture_count = 0;
 }

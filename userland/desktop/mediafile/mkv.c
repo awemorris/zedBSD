@@ -110,33 +110,33 @@ struct mkv_state {
 	unsigned waiting[MF_TRACK_MAX];
 };
 
-static int mkv_open(struct mf_file *file);
-static int mkv_read(struct mf_file *file, struct mf_packet *packet);
-static int mkv_seek(struct mf_file *file, int64_t time_us);
-static void mkv_close(struct mf_file *file);
-static int element_at(struct mf_file *file, uint64_t position, struct mkv_element *element);
+static int mkv_open(struct media_file *file);
+static int mkv_read(struct media_file *file, struct media_packet *packet);
+static int mkv_seek(struct media_file *file, int64_t time_us);
+static void mkv_close(struct media_file *file);
+static int element_at(struct media_file *file, uint64_t position, struct mkv_element *element);
 static int vint_in(const unsigned char *data, size_t size, size_t *offset, uint64_t *value, int marker);
 static int child_next(const unsigned char *data, size_t size, size_t *offset, uint32_t *id, const unsigned char **value, size_t *length);
 static uint64_t uint_of(const unsigned char *data, size_t length);
 static double float_of(const unsigned char *data, size_t length);
-static int read_whole(struct mf_file *file, const struct mkv_element *element, unsigned char **data);
-static int check_header(struct mf_file *file, uint64_t *next);
-static int read_top(struct mf_file *file, struct mkv_state *state);
-static int read_info(struct mf_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
-static int read_tracks(struct mf_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
-static int read_track_entry(struct mf_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
-static void read_track_detail(struct mf_track *track, uint32_t id, const unsigned char *data, size_t size);
-static void codec_of(struct mf_track *track);
+static int read_whole(struct media_file *file, const struct mkv_element *element, unsigned char **data);
+static int check_header(struct media_file *file, uint64_t *next);
+static int read_top(struct media_file *file, struct mkv_state *state);
+static int read_info(struct media_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
+static int read_tracks(struct media_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
+static int read_track_entry(struct media_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
+static void read_track_detail(struct media_track *track, uint32_t id, const unsigned char *data, size_t size);
+static void codec_of(struct media_track *track);
 static void read_seek_head(struct mkv_state *state, const unsigned char *data, size_t size);
-static int read_cues(struct mf_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
+static int read_cues(struct media_file *file, struct mkv_state *state, const unsigned char *data, size_t size);
 static int cue_point(struct mkv_state *state, uint64_t lead, const unsigned char *data, size_t size);
-static int take_block(struct mf_file *file, struct mkv_state *state, const struct mkv_element *element);
-static int open_block(struct mf_file *file, struct mkv_state *state, size_t start, size_t size, int key);
+static int take_block(struct media_file *file, struct mkv_state *state, const struct mkv_element *element);
+static int open_block(struct media_file *file, struct mkv_state *state, size_t start, size_t size, int key);
 static int read_laces(struct mkv_state *state, const unsigned char *data, size_t size, size_t *offset, unsigned flags);
-static int next_lace(struct mf_file *file, struct mkv_state *state, struct mf_packet *packet);
+static int next_lace(struct media_file *file, struct mkv_state *state, struct media_packet *packet);
 static int64_t ticks_us(const struct mkv_state *state, int64_t ticks);
-static int uint_at(struct mf_file *file, uint64_t position, uint64_t size, int64_t *value);
-static int cluster_time_at(struct mf_file *file, uint64_t position, uint64_t end, int64_t *time);
+static int uint_at(struct media_file *file, uint64_t position, uint64_t size, int64_t *value);
+static int cluster_time_at(struct media_file *file, uint64_t position, uint64_t end, int64_t *time);
 
 /* A Matroska CodecID (or its prefix) and the codec it names. */
 struct mkv_id_codec {
@@ -147,17 +147,17 @@ struct mkv_id_codec {
 
 /* The CodecIDs this reader knows. */
 static const struct mkv_id_codec id_codecs[] = {
-	{ "V_MPEG4/ISO/AVC", 0U, MF_CODEC_H264 },
-	{ "V_MPEGH/ISO/HEVC", 0U, MF_CODEC_HEVC },
-	{ "V_AV1", 0U, MF_CODEC_AV1 },
-	{ "V_VP9", 0U, MF_CODEC_VP9 },
-	{ "V_VP8", 0U, MF_CODEC_VP8 },
-	{ "V_MPEG4/ISO/", 1U, MF_CODEC_MPEG4 },
-	{ "A_AAC", 1U, MF_CODEC_AAC },
-	{ "A_OPUS", 0U, MF_CODEC_OPUS },
-	{ "A_MPEG/L3", 0U, MF_CODEC_MP3 },
-	{ "A_VORBIS", 0U, MF_CODEC_VORBIS },
-	{ "V_THEORA", 0U, MF_CODEC_THEORA },
+	{ "V_MPEG4/ISO/AVC", 0U, MEDIA_CODEC_H264 },
+	{ "V_MPEGH/ISO/HEVC", 0U, MEDIA_CODEC_HEVC },
+	{ "V_AV1", 0U, MEDIA_CODEC_AV1 },
+	{ "V_VP9", 0U, MEDIA_CODEC_VP9 },
+	{ "V_VP8", 0U, MEDIA_CODEC_VP8 },
+	{ "V_MPEG4/ISO/", 1U, MEDIA_CODEC_MPEG4 },
+	{ "A_AAC", 1U, MEDIA_CODEC_AAC },
+	{ "A_OPUS", 0U, MEDIA_CODEC_OPUS },
+	{ "A_MPEG/L3", 0U, MEDIA_CODEC_MP3 },
+	{ "A_VORBIS", 0U, MEDIA_CODEC_VORBIS },
+	{ "V_THEORA", 0U, MEDIA_CODEC_THEORA },
 };
 
 /* The reader as mediafile.c calls it. */
@@ -175,7 +175,7 @@ const struct mf_format mf_mkv_format = {
  */
 static int
 mkv_open(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct mkv_state *state;
 	struct mkv_element segment;
@@ -187,7 +187,7 @@ mkv_open(
 	if (state == NULL)
 		return ENOMEM;
 
-	/* Kept in the file, so that mf_close frees it on any failure. */
+	/* Kept in the file, so that media_file_close frees it on any failure. */
 	file->state = state;
 	state->timecode_scale = 1000000U;
 
@@ -227,8 +227,8 @@ mkv_open(
  */
 static int
 mkv_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	struct mkv_state *state;
 	struct mkv_element element;
@@ -295,7 +295,7 @@ mkv_read(
  */
 static int
 mkv_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	int64_t time_us)
 {
 	struct mkv_state *state;
@@ -356,7 +356,7 @@ mkv_seek(
 	/* The video tracks wait for a keyframe. */
 	for (t = 0; t < file->track_count; t++) {
 		state->waiting[t] = 0;
-		if (file->tracks[t].kind == MF_TRACK_VIDEO)
+		if (file->tracks[t].kind == MEDIA_TRACK_VIDEO)
 			state->waiting[t] = 1U;
 	}
 
@@ -369,7 +369,7 @@ mkv_seek(
  */
 static void
 mkv_close(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct mkv_state *state;
 
@@ -388,7 +388,7 @@ mkv_close(
  */
 static int
 element_at(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t position,
 	struct mkv_element *element)
 {
@@ -588,7 +588,7 @@ float_of(
  */
 static int
 read_whole(
-	struct mf_file *file,
+	struct media_file *file,
 	const struct mkv_element *element,
 	unsigned char **data)
 {
@@ -623,7 +623,7 @@ read_whole(
  */
 static int
 check_header(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t *next)
 {
 	struct mkv_element header;
@@ -691,7 +691,7 @@ check_header(
  */
 static int
 read_top(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state)
 {
 	struct mkv_element element;
@@ -770,7 +770,7 @@ read_top(
  */
 static int
 read_info(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	const unsigned char *data,
 	size_t size)
@@ -821,7 +821,7 @@ read_info(
  */
 static int
 read_tracks(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	const unsigned char *data,
 	size_t size)
@@ -864,12 +864,12 @@ read_tracks(
  */
 static int
 read_track_entry(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	const unsigned char *data,
 	size_t size)
 {
-	struct mf_track *track;
+	struct media_track *track;
 	const unsigned char *value;
 	const unsigned char *inner;
 	size_t offset;
@@ -907,9 +907,9 @@ read_track_entry(
 		if (id == MKV_TRACKTYPE) {
 			type = uint_of(value, length);
 			if (type == 1U)
-				track->kind = MF_TRACK_VIDEO;
+				track->kind = MEDIA_TRACK_VIDEO;
 			else if (type == 2U)
-				track->kind = MF_TRACK_AUDIO;
+				track->kind = MEDIA_TRACK_AUDIO;
 		}
 
 		/* Its codec's name and private data. */
@@ -958,7 +958,7 @@ read_track_entry(
  */
 static void
 read_track_detail(
-	struct mf_track *track,
+	struct media_track *track,
 	uint32_t id,
 	const unsigned char *data,
 	size_t size)
@@ -990,7 +990,7 @@ read_track_detail(
  */
 static void
 codec_of(
-	struct mf_track *track)
+	struct media_track *track)
 {
 	size_t length;
 	size_t i;
@@ -1077,7 +1077,7 @@ read_seek_head(
  */
 static int
 read_cues(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	const unsigned char *data,
 	size_t size)
@@ -1094,7 +1094,7 @@ read_cues(
 	lead = 0;
 	for (t = 0; t < file->track_count; t++) {
 		/* The first video track. */
-		if (file->tracks[t].kind == MF_TRACK_VIDEO) {
+		if (file->tracks[t].kind == MEDIA_TRACK_VIDEO) {
 			lead = state->numbers[t];
 			break;
 		}
@@ -1220,7 +1220,7 @@ cue_point(
  */
 static int
 take_block(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	const struct mkv_element *element)
 {
@@ -1288,7 +1288,7 @@ take_block(
  */
 static int
 open_block(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
 	size_t start,
 	size_t size,
@@ -1460,9 +1460,9 @@ read_laces(
  */
 static int
 next_lace(
-	struct mf_file *file,
+	struct media_file *file,
 	struct mkv_state *state,
-	struct mf_packet *packet)
+	struct media_packet *packet)
 {
 	size_t size;
 
@@ -1512,7 +1512,7 @@ ticks_us(
  */
 static int
 uint_at(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t position,
 	uint64_t size,
 	int64_t *value)
@@ -1540,7 +1540,7 @@ uint_at(
  */
 static int
 cluster_time_at(
-	struct mf_file *file,
+	struct media_file *file,
 	uint64_t position,
 	uint64_t end,
 	int64_t *time)

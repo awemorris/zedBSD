@@ -28,7 +28,7 @@
  * positions (the first video stream's: then it goes back to the key frame
  * the granule position names, and the frames before it are not handed
  * out).  A page whose CRC is wrong is passed over, and the packet it broke
- * is left out and counted (mf_track.dropped_count).
+ * is left out and counted (media_file_track.dropped_count).
  */
 
 #include "mediafile-private.h"
@@ -166,27 +166,27 @@ struct ogg_back_bits {
 	size_t bit;
 };
 
-static int ogg_open(struct mf_file *file);
-static int ogg_read(struct mf_file *file, struct mf_packet *packet);
-static int ogg_seek(struct mf_file *file, int64_t time_us);
-static void ogg_close(struct mf_file *file);
-static int read_page(struct mf_file *file, struct ogg_state *state, uint64_t offset);
-static int next_page(struct mf_file *file, struct ogg_state *state);
-static int find_page(struct mf_file *file, struct ogg_state *state, uint64_t offset, uint64_t limit, uint64_t *found);
+static int ogg_open(struct media_file *file);
+static int ogg_read(struct media_file *file, struct media_packet *packet);
+static int ogg_seek(struct media_file *file, int64_t time_us);
+static void ogg_close(struct media_file *file);
+static int read_page(struct media_file *file, struct ogg_state *state, uint64_t offset);
+static int next_page(struct media_file *file, struct ogg_state *state);
+static int find_page(struct media_file *file, struct ogg_state *state, uint64_t offset, uint64_t limit, uint64_t *found);
 static uint32_t page_crc(const unsigned char *page, size_t size);
 static uint32_t le32(const unsigned char *bytes);
 static int64_t le64(const unsigned char *bytes);
 static struct ogg_stream *stream_of(struct ogg_state *state, uint32_t serial, unsigned *index);
-static int read_headers(struct mf_file *file, struct ogg_state *state);
-static int begin_stream(struct mf_file *file, struct ogg_state *state, const unsigned char *packet, size_t size);
-static int keep_header(struct mf_file *file, struct ogg_state *state, unsigned index, const unsigned char *packet, size_t size);
-static int read_vorbis_id(struct ogg_stream *stream, struct mf_track *info, const unsigned char *packet, size_t size);
-static int read_theora_id(struct ogg_stream *stream, struct mf_track *info, const unsigned char *packet, size_t size);
+static int read_headers(struct media_file *file, struct ogg_state *state);
+static int begin_stream(struct media_file *file, struct ogg_state *state, const unsigned char *packet, size_t size);
+static int keep_header(struct media_file *file, struct ogg_state *state, unsigned index, const unsigned char *packet, size_t size);
+static int read_vorbis_id(struct ogg_stream *stream, struct media_track *info, const unsigned char *packet, size_t size);
+static int read_theora_id(struct ogg_stream *stream, struct media_track *info, const unsigned char *packet, size_t size);
 static void read_vorbis_modes(struct ogg_stream *stream, const unsigned char *packet, size_t size);
 static unsigned back_bits(struct ogg_back_bits *bits, unsigned count);
-static int keep_private(struct mf_file *file, struct ogg_stream *stream);
-static int take_page(struct mf_file *file, struct ogg_state *state, int headers);
-static int finish_packet(struct mf_file *file, struct ogg_state *state, unsigned index, int headers);
+static int keep_private(struct media_file *file, struct ogg_stream *stream);
+static int take_page(struct media_file *file, struct ogg_state *state, int headers);
+static int finish_packet(struct media_file *file, struct ogg_state *state, unsigned index, int headers);
 static void time_packets(struct ogg_state *state, unsigned index, unsigned first);
 static int64_t packet_length(struct ogg_stream *stream, const unsigned char *data, size_t size);
 static int64_t opus_samples(const unsigned char *data, size_t size);
@@ -194,11 +194,11 @@ static int64_t vorbis_samples(struct ogg_stream *stream, const unsigned char *da
 static int64_t granule_end(const struct ogg_stream *stream, int64_t granule);
 static int64_t granule_us(const struct ogg_stream *stream, int64_t start);
 static int packet_key(const struct ogg_stream *stream, const unsigned char *data, size_t size);
-static void find_length(struct mf_file *file, struct ogg_state *state);
+static void find_length(struct media_file *file, struct ogg_state *state);
 static void reset_streams(struct ogg_state *state);
-static int lead_page_at(struct mf_file *file, struct ogg_state *state, uint64_t offset, uint64_t *page, int64_t *granule);
-static int seek_place(struct mf_file *file, struct ogg_state *state, int64_t target, uint64_t *place, int64_t *granule);
-static void drop_open(struct mf_file *file, struct ogg_state *state);
+static int lead_page_at(struct media_file *file, struct ogg_state *state, uint64_t offset, uint64_t *page, int64_t *granule);
+static int seek_place(struct media_file *file, struct ogg_state *state, int64_t target, uint64_t *place, int64_t *granule);
+static void drop_open(struct media_file *file, struct ogg_state *state);
 
 /* The reader as mediafile.c calls it. */
 const struct mf_format mf_ogg_format = {
@@ -237,12 +237,12 @@ mf_ogg_detect(
  */
 static int
 ogg_open(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct ogg_state *state;
 	int error;
 
-	/* The state, kept in the file so that mf_close frees it on any failure. */
+	/* The state, kept in the file so that media_file_close frees it on any failure. */
 	state = calloc(1, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
@@ -284,8 +284,8 @@ ogg_open(
  */
 static int
 ogg_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	struct ogg_state *state;
 	struct ogg_stream *stream;
@@ -344,7 +344,7 @@ ogg_read(
  */
 static int
 ogg_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	int64_t time_us)
 {
 	struct ogg_state *state;
@@ -422,7 +422,7 @@ ogg_seek(
  */
 static void
 ogg_close(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct ogg_state *state;
 	unsigned i;
@@ -452,7 +452,7 @@ ogg_close(
  */
 static int
 read_page(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	uint64_t offset)
 {
@@ -524,7 +524,7 @@ read_page(
  */
 static int
 next_page(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state)
 {
 	struct ogg_stream *stream;
@@ -583,7 +583,7 @@ next_page(
  */
 static void
 drop_open(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state)
 {
 	unsigned i;
@@ -605,7 +605,7 @@ drop_open(
  */
 static int
 find_page(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	uint64_t offset,
 	uint64_t limit,
@@ -755,7 +755,7 @@ stream_of(
  */
 static int
 read_headers(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state)
 {
 	unsigned waiting;
@@ -796,7 +796,7 @@ read_headers(
 	for (i = 0; i < state->stream_count; i++) {
 		/* One whose headers did not all come. */
 		if (state->streams[i].headers_wanted != 0)
-			file->tracks[state->streams[i].track].kind = MF_TRACK_OTHER;
+			file->tracks[state->streams[i].track].kind = MEDIA_TRACK_OTHER;
 	}
 
 	/* The stream that decides a seek. */
@@ -818,13 +818,13 @@ read_headers(
  */
 static int
 begin_stream(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	const unsigned char *packet,
 	size_t size)
 {
 	struct ogg_stream *stream;
-	struct mf_track *info;
+	struct media_track *info;
 	unsigned index;
 	int compared;
 	int error;
@@ -847,8 +847,8 @@ begin_stream(
 		stream->headers_wanted = 2U;
 		stream->rate = 48000U;
 		stream->preskip = (uint32_t)packet[10] | ((uint32_t)packet[11] << 8);
-		info->kind = MF_TRACK_AUDIO;
-		info->codec = MF_CODEC_OPUS;
+		info->kind = MEDIA_TRACK_AUDIO;
+		info->codec = MEDIA_CODEC_OPUS;
 		info->sample_rate = 48000U;
 		info->channels = packet[9];
 		mf_set_codec_name(info, "opus", 4U);
@@ -899,7 +899,7 @@ begin_stream(
 static int
 read_vorbis_id(
 	struct ogg_stream *stream,
-	struct mf_track *info,
+	struct media_track *info,
 	const unsigned char *packet,
 	size_t size)
 {
@@ -926,8 +926,8 @@ read_vorbis_id(
 		return EINVAL;
 
 	/* The track. */
-	info->kind = MF_TRACK_AUDIO;
-	info->codec = MF_CODEC_VORBIS;
+	info->kind = MEDIA_TRACK_AUDIO;
+	info->codec = MEDIA_CODEC_VORBIS;
 	info->sample_rate = stream->rate;
 	info->channels = packet[11];
 	mf_set_codec_name(info, "vorbis", 6U);
@@ -940,7 +940,7 @@ read_vorbis_id(
 static int
 read_theora_id(
 	struct ogg_stream *stream,
-	struct mf_track *info,
+	struct media_track *info,
 	const unsigned char *packet,
 	size_t size)
 {
@@ -963,8 +963,8 @@ read_theora_id(
 	stream->rate = stream->frame_rate;
 
 	/* The track, its picture's size (24 bits each). */
-	info->kind = MF_TRACK_VIDEO;
-	info->codec = MF_CODEC_THEORA;
+	info->kind = MEDIA_TRACK_VIDEO;
+	info->codec = MEDIA_CODEC_THEORA;
 	info->width = ((uint32_t)packet[14] << 16) | ((uint32_t)packet[15] << 8) | packet[16];
 	info->height = ((uint32_t)packet[17] << 16) | ((uint32_t)packet[18] << 8) | packet[19];
 	mf_set_codec_name(info, "theora", 6U);
@@ -980,7 +980,7 @@ read_theora_id(
  */
 static int
 keep_header(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	unsigned index,
 	const unsigned char *packet,
@@ -1145,10 +1145,10 @@ back_bits(
  */
 static int
 keep_private(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_stream *stream)
 {
-	struct mf_track *info;
+	struct media_track *info;
 	unsigned char *laced;
 	size_t length;
 	size_t at;
@@ -1207,7 +1207,7 @@ keep_private(
  */
 static int
 take_page(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	int headers)
 {
@@ -1338,7 +1338,7 @@ take_page(
  */
 static int
 finish_packet(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	unsigned index,
 	int headers)
@@ -1659,11 +1659,11 @@ packet_key(
  */
 static void
 find_length(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state)
 {
 	struct ogg_stream *stream;
-	struct mf_track *info;
+	struct media_track *info;
 	uint64_t offset;
 	uint64_t found;
 	int64_t length;
@@ -1729,7 +1729,7 @@ reset_streams(
  */
 static int
 lead_page_at(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	uint64_t offset,
 	uint64_t *page,
@@ -1769,7 +1769,7 @@ lead_page_at(
  */
 static int
 seek_place(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ogg_state *state,
 	int64_t target,
 	uint64_t *place,

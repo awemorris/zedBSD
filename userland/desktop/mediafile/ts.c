@@ -22,7 +22,7 @@
  * then goes back to the key frame before it (the adaptation field's random
  * access indicator, or an IDR or IRAP picture).  A packet whose sync byte
  * is lost is found again; a PES left unfinished by lost packets or by the
- * end of the file is left out and counted (mf_track.dropped_count).
+ * end of the file is left out and counted (media_file_track.dropped_count).
  */
 
 #include "mediafile-private.h"
@@ -224,34 +224,34 @@ static const uint16_t ts_mpeg_bitrates[2][3][15] = {
 /* MPEG audio's sampling rates of version 1, by index (version 2 halves them, 2.5 quarters them). */
 static const uint32_t ts_mpeg_rates[3] = { 44100U, 48000U, 32000U };
 
-static int ts_open(struct mf_file *file);
-static int ts_read(struct mf_file *file, struct mf_packet *packet);
-static int ts_seek(struct mf_file *file, int64_t time_us);
-static void ts_close(struct mf_file *file);
-static int find_sync(struct mf_file *file, struct ts_state *state);
-static int packet_at(struct mf_file *file, struct ts_state *state, uint64_t offset, const unsigned char **bytes);
+static int ts_open(struct media_file *file);
+static int ts_read(struct media_file *file, struct media_packet *packet);
+static int ts_seek(struct media_file *file, int64_t time_us);
+static void ts_close(struct media_file *file);
+static int find_sync(struct media_file *file, struct ts_state *state);
+static int packet_at(struct media_file *file, struct ts_state *state, uint64_t offset, const unsigned char **bytes);
 static int parse_packet(const struct ts_state *state, const unsigned char *bytes, struct ts_packet *packet);
-static int next_packet(struct mf_file *file, struct ts_state *state, struct ts_packet *packet);
-static int resync(struct mf_file *file, struct ts_state *state);
-static int sync_from(struct mf_file *file, struct ts_state *state, uint64_t offset, uint64_t *found);
-static int scan_packet(struct mf_file *file, struct ts_state *state, uint64_t *offset, struct ts_packet *packet);
+static int next_packet(struct media_file *file, struct ts_state *state, struct ts_packet *packet);
+static int resync(struct media_file *file, struct ts_state *state);
+static int sync_from(struct media_file *file, struct ts_state *state, uint64_t offset, uint64_t *found);
+static int scan_packet(struct media_file *file, struct ts_state *state, uint64_t *offset, struct ts_packet *packet);
 static void read_pat(struct ts_state *state, const struct ts_packet *packet);
-static void read_pmt(struct mf_file *file, struct ts_state *state, const struct ts_packet *packet);
-static void add_track(struct mf_file *file, struct ts_state *state, unsigned stream_type, uint16_t pid);
-static int track_of(const struct mf_file *file, const struct ts_state *state, uint16_t pid);
-static int next_pes(struct mf_file *file, struct ts_state *state);
-static int feed(struct mf_file *file, struct ts_state *state, unsigned index, const struct ts_packet *packet, int *finished);
+static void read_pmt(struct media_file *file, struct ts_state *state, const struct ts_packet *packet);
+static void add_track(struct media_file *file, struct ts_state *state, unsigned stream_type, uint16_t pid);
+static int track_of(const struct media_file *file, const struct ts_state *state, uint16_t pid);
+static int next_pes(struct media_file *file, struct ts_state *state);
+static int feed(struct media_file *file, struct ts_state *state, unsigned index, const struct ts_packet *packet, int *finished);
 static int pes_append(struct ts_track *track, const unsigned char *data, size_t size);
-static void finish_pes(struct mf_file *file, struct ts_state *state, unsigned index);
+static void finish_pes(struct media_file *file, struct ts_state *state, unsigned index);
 static int pes_times(const unsigned char *pes, size_t size, size_t *payload, int64_t *pts, int64_t *dts);
 static int64_t pes_time(const unsigned char *bytes);
 static void discard_pes(struct ts_state *state);
-static int probe(struct mf_file *file, struct ts_state *state);
-static void probe_info(struct mf_file *file, struct ts_state *state);
-static void find_length(struct mf_file *file, struct ts_state *state);
+static int probe(struct media_file *file, struct ts_state *state);
+static void probe_info(struct media_file *file, struct ts_state *state);
+static void find_length(struct media_file *file, struct ts_state *state);
 static int64_t relative(const struct ts_state *state, int64_t raw);
 static int64_t time_us(const struct ts_state *state, int64_t raw);
-static int hand_out_audio(struct mf_file *file, struct ts_state *state, struct mf_packet *packet);
+static int hand_out_audio(struct media_file *file, struct ts_state *state, struct media_packet *packet);
 static int adts_frame(const unsigned char *data, size_t size, size_t *length, uint32_t *rate, uint32_t *channels, uint32_t *samples);
 static int mpeg_audio_frame(const unsigned char *data, size_t size, size_t *length, uint32_t *rate, uint32_t *channels, uint32_t *samples);
 static int is_key_picture(unsigned codec, const unsigned char *data, size_t size);
@@ -266,8 +266,8 @@ static unsigned bits_read(struct ts_bits *bits, unsigned count);
 static uint32_t bits_golomb(struct ts_bits *bits);
 static void bits_skip_scaling(struct ts_bits *bits, unsigned size);
 static int find_h264_sps(const unsigned char *data, size_t size, const unsigned char **sps, size_t *sps_size);
-static int lead_time_at(struct mf_file *file, struct ts_state *state, uint64_t offset, int64_t *time);
-static int find_key(struct mf_file *file, struct ts_state *state, uint64_t from, uint64_t limit, int64_t target, uint64_t *found);
+static int lead_time_at(struct media_file *file, struct ts_state *state, uint64_t offset, int64_t *time);
+static int find_key(struct media_file *file, struct ts_state *state, uint64_t from, uint64_t limit, int64_t target, uint64_t *found);
 static void walk_finish(const struct ts_walk *walk, int64_t target, uint64_t *found, unsigned *have);
 
 /* The reader as mediafile.c calls it. */
@@ -314,12 +314,12 @@ mf_ts_detect(
  */
 static int
 ts_open(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct ts_state *state;
 	int error;
 
-	/* The state, kept in the file so that mf_close frees it on any failure. */
+	/* The state, kept in the file so that media_file_close frees it on any failure. */
 	state = calloc(1, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
@@ -362,11 +362,11 @@ ts_open(
  */
 static int
 ts_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	struct ts_state *state;
-	const struct mf_track *info;
+	const struct media_track *info;
 	int error;
 
 	/* The PES being handed out, or the next one. */
@@ -381,7 +381,7 @@ ts_read(
 
 		/* An audio PES is handed out a frame at a time; a damaged one is let go. */
 		info = &file->tracks[state->ready.track];
-		if (info->kind == MF_TRACK_AUDIO) {
+		if (info->kind == MEDIA_TRACK_AUDIO) {
 			error = hand_out_audio(file, state, packet);
 			if (error == EAGAIN)
 				continue;
@@ -423,7 +423,7 @@ ts_read(
  */
 static int
 ts_seek(
-	struct mf_file *file,
+	struct media_file *file,
 	int64_t time_us)
 {
 	struct ts_state *state;
@@ -499,7 +499,7 @@ ts_seek(
  */
 static void
 ts_close(
-	struct mf_file *file)
+	struct media_file *file)
 {
 	struct ts_state *state;
 	unsigned i;
@@ -523,7 +523,7 @@ ts_close(
  */
 static int
 find_sync(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
 	static const unsigned sizes[2] = { TS_PACKET, TS_PACKET_M2TS };
@@ -583,7 +583,7 @@ find_sync(
  */
 static int
 packet_at(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	uint64_t offset,
 	const unsigned char **bytes)
@@ -681,7 +681,7 @@ parse_packet(
  */
 static int
 next_packet(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	struct ts_packet *packet)
 {
@@ -721,7 +721,7 @@ next_packet(
  */
 static int
 resync(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
 	uint64_t found;
@@ -744,7 +744,7 @@ resync(
  */
 static int
 sync_from(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	uint64_t offset,
 	uint64_t *found)
@@ -803,7 +803,7 @@ sync_from(
  */
 static int
 scan_packet(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	uint64_t *offset,
 	struct ts_packet *packet)
@@ -890,7 +890,7 @@ read_pat(
  */
 static void
 read_pmt(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	const struct ts_packet *packet)
 {
@@ -940,13 +940,13 @@ read_pmt(
  */
 static void
 add_track(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	unsigned stream_type,
 	uint16_t pid)
 {
 	struct ts_track *track;
-	struct mf_track *info;
+	struct media_track *info;
 
 	/* No more room. */
 	if (file->track_count == MF_TRACK_MAX)
@@ -960,29 +960,29 @@ add_track(
 	/* The kind and codec of each stream type known. */
 	switch (stream_type) {
 	case TS_TYPE_H264:
-		info->kind = MF_TRACK_VIDEO;
-		info->codec = MF_CODEC_H264;
+		info->kind = MEDIA_TRACK_VIDEO;
+		info->codec = MEDIA_CODEC_H264;
 		mf_set_codec_name(info, "h264", 4U);
 		break;
 	case TS_TYPE_HEVC:
-		info->kind = MF_TRACK_VIDEO;
-		info->codec = MF_CODEC_HEVC;
+		info->kind = MEDIA_TRACK_VIDEO;
+		info->codec = MEDIA_CODEC_HEVC;
 		mf_set_codec_name(info, "hevc", 4U);
 		break;
 	case TS_TYPE_ADTS:
-		info->kind = MF_TRACK_AUDIO;
-		info->codec = MF_CODEC_AAC;
+		info->kind = MEDIA_TRACK_AUDIO;
+		info->codec = MEDIA_CODEC_AAC;
 		mf_set_codec_name(info, "adts", 4U);
 		break;
 	case TS_TYPE_MPEG1_AUDIO:
 	case TS_TYPE_MPEG2_AUDIO:
-		info->kind = MF_TRACK_AUDIO;
-		info->codec = MF_CODEC_MP3;
+		info->kind = MEDIA_TRACK_AUDIO;
+		info->codec = MEDIA_CODEC_MP3;
 		mf_set_codec_name(info, "mpeg-audio", 10U);
 		break;
 	case TS_TYPE_PRIVATE:
-		info->kind = MF_TRACK_OTHER;
-		info->codec = MF_CODEC_UNKNOWN;
+		info->kind = MEDIA_TRACK_OTHER;
+		info->codec = MEDIA_CODEC_UNKNOWN;
 		mf_set_codec_name(info, "private", 7U);
 		break;
 	default:
@@ -1001,7 +1001,7 @@ add_track(
 /* Finds the track of a PID: its index, or -1 for a PID of no track. */
 static int
 track_of(
-	const struct mf_file *file,
+	const struct media_file *file,
 	const struct ts_state *state,
 	uint16_t pid)
 {
@@ -1026,7 +1026,7 @@ track_of(
  */
 static int
 next_pes(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
 	struct ts_packet packet;
@@ -1107,7 +1107,7 @@ next_pes(
  */
 static int
 feed(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	unsigned index,
 	const struct ts_packet *packet,
@@ -1215,7 +1215,7 @@ pes_append(
  */
 static void
 finish_pes(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	unsigned index)
 {
@@ -1291,7 +1291,7 @@ finish_pes(
 	state->ready.key = 1U;
 
 	/* A picture is a key frame when its adaptation field said so or it is an IDR or IRAP picture. */
-	if (file->tracks[index].kind == MF_TRACK_VIDEO && !track->pes_random) {
+	if (file->tracks[index].kind == MEDIA_TRACK_VIDEO && !track->pes_random) {
 		state->ready.key = (unsigned)is_key_picture(file->tracks[index].codec,
 							    state->ready.data,
 							    state->ready.size);
@@ -1394,7 +1394,7 @@ discard_pes(
  */
 static int
 probe(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
 	unsigned i;
@@ -1459,7 +1459,7 @@ probe(
 	state->lead = 0;
 	for (i = file->track_count; i > 0; i--) {
 		/* A video track before the one found so far. */
-		if (file->tracks[i - 1U].kind == MF_TRACK_VIDEO)
+		if (file->tracks[i - 1U].kind == MEDIA_TRACK_VIDEO)
 			state->lead = i - 1U;
 	}
 
@@ -1474,10 +1474,10 @@ probe(
  */
 static void
 probe_info(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
-	struct mf_track *info;
+	struct media_track *info;
 	size_t length;
 	uint32_t samples;
 	int error;
@@ -1488,26 +1488,26 @@ probe_info(
 		return;
 
 	/* A private stream whose PES starts with an ADTS frame is AAC. */
-	if (state->tracks[state->ready.track].stream_type == TS_TYPE_PRIVATE && info->codec == MF_CODEC_UNKNOWN) {
+	if (state->tracks[state->ready.track].stream_type == TS_TYPE_PRIVATE && info->codec == MEDIA_CODEC_UNKNOWN) {
 		error = adts_frame(state->ready.data, state->ready.size, &length, &info->sample_rate, &info->channels, &samples);
 		if (error != 0)
 			return;
 
 		/* The track is sound, in ADTS. */
-		info->kind = MF_TRACK_AUDIO;
-		info->codec = MF_CODEC_AAC;
+		info->kind = MEDIA_TRACK_AUDIO;
+		info->codec = MEDIA_CODEC_AAC;
 		mf_set_codec_name(info, "adts", 4U);
 		return;
 	}
 
 	/* The size of an H.264 picture. */
-	if (info->codec == MF_CODEC_H264) {
+	if (info->codec == MEDIA_CODEC_H264) {
 		(void)h264_size(state->ready.data, state->ready.size, &info->width, &info->height);
 		return;
 	}
 
 	/* The rate and channels of an ADTS frame. */
-	if (info->codec == MF_CODEC_AAC) {
+	if (info->codec == MEDIA_CODEC_AAC) {
 		error = adts_frame(state->ready.data, state->ready.size, &length, &info->sample_rate, &info->channels, &samples);
 		if (error != 0)
 			info->sample_rate = 0;
@@ -1515,7 +1515,7 @@ probe_info(
 	}
 
 	/* The rate and channels of an MPEG audio frame. */
-	if (info->codec == MF_CODEC_MP3) {
+	if (info->codec == MEDIA_CODEC_MP3) {
 		error = mpeg_audio_frame(state->ready.data, state->ready.size, &length, &info->sample_rate, &info->channels, &samples);
 		if (error != 0)
 			info->sample_rate = 0;
@@ -1528,7 +1528,7 @@ probe_info(
  */
 static void
 find_length(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state)
 {
 	struct ts_packet packet;
@@ -1624,11 +1624,11 @@ time_us(
  */
 static int
 hand_out_audio(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
-	struct mf_packet *packet)
+	struct media_packet *packet)
 {
-	struct mf_track *info;
+	struct media_track *info;
 	const unsigned char *frame;
 	size_t left;
 	size_t length;
@@ -1644,7 +1644,7 @@ hand_out_audio(
 	left = state->ready.size - state->ready.next;
 
 	/* The frame's header: its length and samples. */
-	if (info->codec == MF_CODEC_AAC)
+	if (info->codec == MEDIA_CODEC_AAC)
 		error = adts_frame(frame, left, &length, &rate, &channels, &samples);
 	else
 		error = mpeg_audio_frame(frame, left, &length, &rate, &channels, &samples);
@@ -1883,7 +1883,7 @@ key_nal(
 
 	/* H.265: the type is bits 1 to 6; 0 to 9 are slices of other pictures, 16 to 21 of IRAP pictures. */
 	*key = 0;
-	if (codec == MF_CODEC_HEVC) {
+	if (codec == MEDIA_CODEC_HEVC) {
 		type = (header >> 1) & 0x3fU;
 		if (type >= 16U && type <= 21U) {
 			*key = 1U;
@@ -2302,7 +2302,7 @@ bits_skip_scaling(
  */
 static int
 lead_time_at(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	uint64_t offset,
 	int64_t *time)
@@ -2353,7 +2353,7 @@ lead_time_at(
  */
 static int
 find_key(
-	struct mf_file *file,
+	struct media_file *file,
 	struct ts_state *state,
 	uint64_t from,
 	uint64_t limit,
@@ -2363,7 +2363,7 @@ find_key(
 	struct ts_packet packet;
 	struct ts_walk walk;
 	struct ts_track *lead;
-	struct mf_track *info;
+	struct media_track *info;
 	uint64_t offset;
 	unsigned have;
 	size_t payload;
@@ -2394,7 +2394,7 @@ find_key(
 
 		/* A packet in the middle of a PES: more of its picture for the scanner. */
 		if (!packet.unit_start) {
-			if (walk.open && info->kind == MF_TRACK_VIDEO)
+			if (walk.open && info->kind == MEDIA_TRACK_VIDEO)
 				(void)nal_feed(&walk, info->codec, packet.payload, packet.payload_size);
 			continue;
 		}
@@ -2416,13 +2416,13 @@ find_key(
 		walk.position = offset;
 		walk.key = packet.random;
 		walk.decided = packet.random;
-		if (info->kind != MF_TRACK_VIDEO) {
+		if (info->kind != MEDIA_TRACK_VIDEO) {
 			walk.key = 1U;
 			walk.decided = 1U;
 		}
 
 		/* The picture's first bytes for the scanner. */
-		if (payload < packet.payload_size && info->kind == MF_TRACK_VIDEO)
+		if (payload < packet.payload_size && info->kind == MEDIA_TRACK_VIDEO)
 			(void)nal_feed(&walk, info->codec, packet.payload + payload, packet.payload_size - payload);
 	}
 

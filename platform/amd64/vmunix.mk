@@ -1738,14 +1738,15 @@ $(BUILD)/bin/imageview: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libpng-compat.so --needed libz-compat.so --needed libjpeg-compat.so --needed libgif-compat.so \
  --needed libc.so $@
 
-# Video Player (WS122) imports standard Wayland, Vulkan, TrueType and C library entry points, and the window and
-# the widgets through libkeiland.  It is not linked to FFmpeg: its decoding add-in (WS122 p004) opens libavcodec,
-# libavutil and libswscale with dlopen when the system has them (the libavcodec package), without FFmpeg's headers.
+# Video Player (WS122) imports standard Wayland, Vulkan, TrueType and C library entry points, the window and the
+# widgets through libkeiland, and the container reader and the decoders through libmedia (ws177-p031).  It is not
+# linked to FFmpeg: libmedia's decoding add-in (WS122 p004) opens libavcodec, libavutil and libswscale with dlopen
+# when the system has them (the libavcodec package), without FFmpeg's headers.
 DYNAMIC_VIDEOPLAYER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,videoplayer)
 
 $(BUILD)/bin/videoplayer: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 	$(DYNAMIC_VIDEOPLAYER_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
-	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so \
+	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libmedia.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
@@ -1754,20 +1755,21 @@ $(BUILD)/bin/videoplayer: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -Wl,--dynamic-linker=/lib/ld.so \
  $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_VIDEOPLAYER_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
- -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libc.so -o $@
+ -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libmedia.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
  --needed libvulkan.so --needed libwayland-client.so --needed libkeiland.so --needed libtruetype.so \
- --needed libc.so $@
+ --needed libmedia.so --needed libc.so $@
 
 # Music (WS120) imports standard Wayland, Vulkan, TrueType and C library entry points, the window and the widgets
 # through libkeiland, and the covers' decoding through libjpeg-compat and libpng-compat (picture.c's GIF part needs
-# libgif-compat).  Like Video Player it is not linked to FFmpeg: the decoding add-in opens libavcodec with dlopen.
+# libgif-compat), and the container reader and the decoders through libmedia (ws177-p031).  Like Video Player it is
+# not linked to FFmpeg: libmedia's decoding add-in opens libavcodec with dlopen.
 DYNAMIC_MUSIC_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,music)
 
 $(BUILD)/bin/music: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 	$(DYNAMIC_MUSIC_OBJS) $(DYNAMIC_DIR)/libvulkan.so $(DYNAMIC_DIR)/libwayland-client.so \
 	$(DYNAMIC_DIR)/libkeiland.so $(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libpng-compat.so $(DYNAMIC_DIR)/libz-compat.so \
-	$(DYNAMIC_DIR)/libjpeg-compat.so $(DYNAMIC_DIR)/libgif-compat.so \
+	$(DYNAMIC_DIR)/libjpeg-compat.so $(DYNAMIC_DIR)/libgif-compat.so $(DYNAMIC_DIR)/libmedia.so \
 	$(DYNAMIC_DIR)/libc.so $(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
 	@mkdir -p $(dir $@)
 	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
@@ -1777,10 +1779,11 @@ $(BUILD)/bin/music: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_MUSIC_OBJS) \
  -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
  -l:libvulkan.so -l:libwayland-client.so -l:libkeiland.so -l:libtruetype.so -l:libpng-compat.so -l:libz-compat.so \
- -l:libjpeg-compat.so -l:libgif-compat.so -l:libc.so -o $@
+ -l:libjpeg-compat.so -l:libgif-compat.so -l:libmedia.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
  --needed libvulkan.so --needed libwayland-client.so --needed libkeiland.so --needed libtruetype.so \
- --needed libpng-compat.so --needed libz-compat.so --needed libjpeg-compat.so --needed libgif-compat.so --needed libc.so $@
+ --needed libpng-compat.so --needed libz-compat.so --needed libjpeg-compat.so --needed libgif-compat.so --needed libmedia.so \
+ --needed libc.so $@
 
 # Photos (WS157) imports standard Wayland, Vulkan, TrueType and C library entry points, the window and the widgets
 # through libkeiland, and the pictures' decoding through libjpeg-compat, libpng-compat and libgif-compat.
