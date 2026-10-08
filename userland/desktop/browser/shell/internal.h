@@ -274,6 +274,7 @@ void shell_titlebar_close(struct shell_titlebar *titlebar);
 /* The sign-in codes of mail (mail.c). */
 void shell_mail_open(struct shell_mail *mail, struct kl_app *app);
 int shell_mail_round(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar, uint64_t now_ms);
+int shell_mail_timeout(const struct shell_mail *mail, uint64_t now_ms);
 void shell_mail_fill(struct shell_mail *mail, struct browser_view *view, struct shell_titlebar *titlebar);
 void shell_mail_close(struct shell_mail *mail, struct shell_titlebar *titlebar);
 

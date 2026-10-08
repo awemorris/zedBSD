@@ -236,14 +236,23 @@ notes_box_initial(
 	return box->initial;
 }
 
-/* Puts the words back as the box was opened with (an undo before the box is done). */
+/*
+ * Gives the box's widget a key as if it was pressed and released (the
+ * menu's Undo and Redo, ws177-p013: its history takes the change back).
+ */
 void
-notes_box_revert(
-	struct notes_box *box)
+notes_box_key(
+	struct notes_box *box,
+	uint32_t code,
+	unsigned modifiers)
 {
-	/* The first words, the caret at their end. */
-	kl_field_set(&box->field, box->initial);
-	kl_text_area_set(&box->area, box->initial);
+	/* While it is open. */
+	if (!box->open || box->ui == NULL)
+		return;
+
+	/* Pressed, then released. */
+	(void)kl_ui_key(box->ui, code, 1, modifiers);
+	(void)kl_ui_key(box->ui, code, 0, modifiers);
 }
 
 /* Gives the keyboard back to the box's widget (after a press outside it that did not close it). */

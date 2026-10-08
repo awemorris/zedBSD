@@ -23,6 +23,7 @@
  */
 
 #include "window.h"
+#include "internal.h"
 
 #include <wayland/text-input-unstable-v3-client-protocol.h>
 
@@ -405,15 +406,20 @@ kl_ui_window_input(
 
 /*
  * Asks for a window's text input while the focused widget of the frame
- * shown takes text, and tells where its caret is, after each frame.
+ * shown takes text, and tells where its caret is, after each frame.  It
+ * also ties the input to the window, whose clipboard the text widgets'
+ * Ctrl+C, Ctrl+X and Ctrl+V use (KL_VERSION 67, ws177-p013).
  */
 void
 kl_ui_window_text(
-	const struct kl_ui *ui,
+	struct kl_ui *ui,
 	struct kl_window *window)
 {
 	struct kl_rect caret;
 	int wanted;
+
+	/* The window, for the clipboard. */
+	keiui_ui_set_window(ui, window, kl_window_copy, kl_window_paste);
 
 	/* On while a field has the keyboard, off otherwise. */
 	wanted = kl_ui_text_wanted(ui, &caret);

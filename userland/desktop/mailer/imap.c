@@ -13,6 +13,12 @@
  * flags, moves a message (COPY, \Deleted, EXPUNGE), appends a sent one,
  * and waits for new mail with IDLE (RFC 2177).
  *
+ * ws177-p015: what the server can do is asked after the login
+ * (CAPABILITY: MOVE, UIDPLUS, Gmail's extensions); a message is deleted
+ * for good (\Deleted, then UID EXPUNGE, or EXPUNGE without UIDPLUS); a
+ * plain port whose server refuses STARTTLS is ML_ERROR_NO_TLS; and the
+ * words of a server's goodbye (BYE) are kept as the failure's.
+ *
  * A command is sent with its tag ("A0001") and its answer read up to the
  * tagged line; the untagged lines before it go to the command's reader.
  * A line that ends in a literal ("{123}") is followed by that many bytes
@@ -63,6 +69,7 @@ static int imap_run(struct ml_imap *imap, imap_reader_fn reader, void *data, con
 static int imap_literal(const char *line, size_t *size);
 static int imap_skip_literal(struct ml_imap *imap, size_t size);
 static int imap_read_exists(struct ml_imap *imap, const char *line, void *data, int *took_literal);
+static int imap_read_capability(struct ml_imap *imap, const char *line, void *data, int *took_literal);
 static int imap_read_list(struct ml_imap *imap, const char *line, void *data, int *took_literal);
 static int imap_read_fetch(struct ml_imap *imap, const char *line, void *data, int *took_literal);
 static void imap_fetch_items(const char *text, uint32_t *uid, unsigned *flags, size_t *size, int *seen_flags);
@@ -94,7 +101,9 @@ ml_imap_open(
 	/* The connection. */
 	error = ml_conn_open(&imap->conn, &account->imap);
 	if (error != 0) {
-		(void)snprintf(imap->error, sizeof(imap->error), "%s", ml_tls_error());
+		/* OpenSSL's words for a failure of TLS (another failure's are the errno value's). */
+		if (error == EPROTO || error == ML_ERROR_UNTRUSTED || error == EPROTONOSUPPORT)
+			(void)snprintf(imap->error, sizeof(imap->error), "%s", ml_tls_error());
 		return error;
 	}
 
@@ -108,18 +117,25 @@ ml_imap_open(
 	/* A greeting that is not OK (BYE, or PREAUTH, which this client does not take). */
 	same = strncmp(greeting, "* OK", 4U);
 	if (same != 0) {
-		(void)snprintf(imap->error, sizeof(imap->error), "%.200s", greeting);
+		(void)snprintf(imap->error, sizeof(imap->error), "the server turned the connection away: %.200s", greeting);
 		ml_imap_close(imap);
 		return EPROTO;
 	}
 
-	/* A plain port: TLS first, with STARTTLS. */
+	/* A plain port: TLS first, with STARTTLS; a server that refuses it never gets the password. */
 	if (!account->imap.secure) {
 		error = imap_run(imap, NULL, NULL, "STARTTLS");
+		if (error == EACCES || error == EPROTO) {
+			(void)snprintf(imap->error, sizeof(imap->error), "the server does not offer TLS (STARTTLS)");
+			ml_imap_close(imap);
+			return ML_ERROR_NO_TLS;
+		}
+
+		/* The handshake over the plain connection. */
 		if (error == 0)
-			error = ml_conn_start_tls(&imap->conn, account->imap.host);
+			error = ml_conn_start_tls(&imap->conn, &account->imap);
 		if (error != 0) {
-			(void)snprintf(imap->error, sizeof(imap->error), "STARTTLS: %s", ml_tls_error());
+			(void)snprintf(imap->error, sizeof(imap->error), "%s", ml_tls_error());
 			ml_imap_close(imap);
 			return error;
 		}
@@ -141,6 +157,12 @@ ml_imap_open(
 		ml_imap_close(imap);
 		return error;
 	}
+
+	/* What the server can do (a server that does not say can do nothing more). */
+	imap->capabilities = 0;
+	error = imap_run(imap, imap_read_capability, NULL, "CAPABILITY");
+	if (error != 0)
+		imap->capabilities = 0;
 
 	/* Succeeded: the session is logged in. */
 	return 0;
@@ -314,6 +336,38 @@ ml_imap_move(
 		return error;
 
 	/* Succeeded: the message is in the other folder. */
+	return 0;
+}
+
+/*
+ * Deletes a message of the selected folder for good: marked deleted and
+ * expunged, by its UID alone when the server has UIDPLUS (without it,
+ * EXPUNGE also takes the folder's other messages marked deleted).
+ */
+int
+ml_imap_delete(
+	struct ml_imap *imap,
+	uint32_t uid)
+{
+	int error;
+
+	/* Marked deleted. */
+	error = ml_imap_flag(imap, uid, "\\Deleted", 1);
+	if (error != 0)
+		return error;
+
+	/* Expunged: this message alone, or every one marked. */
+	if ((imap->capabilities & ML_IMAP_CAN_UIDPLUS) != 0U) {
+		error = imap_run(imap, imap_read_exists, NULL, "UID EXPUNGE %lu", (unsigned long)uid);
+	} else {
+		error = imap_run(imap, imap_read_exists, NULL, "EXPUNGE");
+	}
+
+	/* Reports a refused expunge. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is gone. */
 	return 0;
 }
 
@@ -556,6 +610,11 @@ imap_wait(
 		if (same == 0)
 			break;
 
+		/* A goodbye's words, kept for the failure that follows (the server closes after it). */
+		same = strncmp(line, "* BYE", 5U);
+		if (same == 0)
+			(void)snprintf(imap->error, sizeof(imap->error), "the server ended the session: %.200s", line + 5);
+
 		/* An untagged line to the reader. */
 		took = 0;
 		if (reader != NULL && line[0] == '*') {
@@ -704,6 +763,66 @@ imap_read_exists(
 	has = imap_has(line, " EXPUNGE");
 	if (has && imap->exists > 0U)
 		imap->exists--;
+	return 0;
+}
+
+/* Reads "* CAPABILITY ..." into what the server can do (ML_IMAP_*). */
+static int
+imap_read_capability(
+	struct ml_imap *imap,
+	const char *line,
+	void *data,
+	int *took_literal)
+{
+	char word[64];
+	size_t start;
+	size_t length;
+	int same;
+
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(took_literal);
+
+	/* Only the capability line. */
+	same = strncmp(line, "* CAPABILITY ", 13U);
+	if (same != 0)
+		return 0;
+
+	/* Each word after it. */
+	start = 13;
+	while (line[start] != '\0') {
+		/* The word, up to a space. */
+		length = 0;
+		while (line[start + length] != '\0' && line[start + length] != ' ')
+			length++;
+		if (length < sizeof(word)) {
+			memcpy(word, line + start, length);
+			word[length] = '\0';
+		} else {
+			word[0] = '\0';
+		}
+
+		/* MOVE. */
+		same = imap_same(word, "MOVE");
+		if (same)
+			imap->capabilities |= ML_IMAP_CAN_MOVE;
+
+		/* UIDPLUS. */
+		same = imap_same(word, "UIDPLUS");
+		if (same)
+			imap->capabilities |= ML_IMAP_CAN_UIDPLUS;
+
+		/* Gmail's extensions. */
+		same = imap_same(word, "X-GM-EXT-1");
+		if (same)
+			imap->capabilities |= ML_IMAP_GMAIL;
+
+		/* The next word. */
+		start += length;
+		while (line[start] == ' ')
+			start++;
+	}
+
+	/* Succeeded: the line is read. */
 	return 0;
 }
 

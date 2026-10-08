@@ -11,6 +11,9 @@
  * (465) or after STARTTLS (587), EHLO, AUTH PLAIN (RFC 4616), MAIL FROM,
  * RCPT TO for each receiver, DATA with the lines that start with a dot
  * doubled, and QUIT.
+ *
+ * ws177-p015: a plain port whose server does not offer STARTTLS is
+ * ML_ERROR_NO_TLS (the password is never sent in the clear).
  */
 
 #include "mail.h"
@@ -65,7 +68,9 @@ ml_smtp_send(
 	error_text[0] = '\0';
 	error = ml_conn_open(&session.conn, &account->smtp);
 	if (error != 0) {
-		(void)snprintf(error_text, size, "%s", ml_tls_error());
+		/* OpenSSL's words for a failure of TLS (another failure's are the errno value's). */
+		if (error == EPROTO || error == ML_ERROR_UNTRUSTED || error == EPROTONOSUPPORT)
+			(void)snprintf(error_text, size, "%s", ml_tls_error());
 		return error;
 	}
 
@@ -74,11 +79,17 @@ ml_smtp_send(
 	if (error == 0)
 		error = smtp_hello(&session);
 
+	/* A plain port whose server does not offer STARTTLS goes no further. */
+	if (error == 0 && !account->smtp.secure && !session.starttls) {
+		(void)snprintf(session.reply, sizeof(session.reply), "the server does not offer TLS (STARTTLS)");
+		error = ML_ERROR_NO_TLS;
+	}
+
 	/* A plain port: STARTTLS, then EHLO again over TLS. */
 	if (error == 0 && !account->smtp.secure) {
 		error = smtp_command(&session, 220, "STARTTLS");
 		if (error == 0)
-			error = ml_conn_start_tls(&session.conn, account->smtp.host);
+			error = ml_conn_start_tls(&session.conn, &account->smtp);
 		if (error == 0)
 			error = smtp_hello(&session);
 	}
@@ -101,7 +112,7 @@ ml_smtp_send(
 	if (error == 0)
 		(void)smtp_command(&session, 221, "QUIT");
 	(void)snprintf(error_text, size, "%s", session.reply);
-	if (error != 0 && session.reply[0] == '\0')
+	if (error != 0 && session.reply[0] == '\0' && (error == EPROTO || error == ML_ERROR_UNTRUSTED || error == EPROTONOSUPPORT))
 		(void)snprintf(error_text, size, "%s", ml_tls_error());
 	ml_conn_close(&session.conn);
 	if (error != 0)

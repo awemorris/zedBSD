@@ -560,7 +560,7 @@ int notes_box_draw(struct notes_box *box, struct notes_renderer *renderer, struc
 unsigned notes_box_take(struct notes_box *box);
 const char *notes_box_text(const struct notes_box *box);
 const char *notes_box_initial(const struct notes_box *box);
-void notes_box_revert(struct notes_box *box);
+void notes_box_key(struct notes_box *box, uint32_t code, unsigned modifiers);
 void notes_box_focus(struct notes_box *box);
 int notes_box_hit(const struct notes_box *box, float x, float y);
 void notes_box_free(struct notes_box *box);

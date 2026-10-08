@@ -20,6 +20,13 @@
  * woken by another (a byte for each batch of results), whose reading end
  * it watches with kl_app_watch_fd.  The queues are lists under one lock;
  * a job's and a result's memory goes with it from one thread to the other.
+ *
+ * ws177-p015: a message of the trash is deleted for good, an account's
+ * new settings are tried without being taken (the window starts the
+ * thread again with them), a server that keeps the sent messages by
+ * itself (Gmail) gets no copy appended to Sent, and a failure says in
+ * words what failed on which server (and gives an untrusted
+ * certificate's fingerprint for the user to trust).
  */
 
 #include "sync.h"
@@ -100,7 +107,10 @@ static void sync_refresh_account(struct ml_sync *sync, int account);
 static void sync_fetched(void *data, uint32_t uid, unsigned flags, size_t size, const char *raw, size_t length);
 static void sync_idle_all(struct ml_sync *sync);
 static void sync_idle_stop_all(struct ml_sync *sync);
-static void sync_failed(struct ml_sync *sync, int account, const char *what, int error, const char *words);
+static void sync_check(struct ml_sync *sync, struct ml_job *job);
+static void sync_send(struct ml_sync *sync, struct ml_job *job);
+static void sync_failed(struct ml_sync *sync, int account, const char *what, int error, const char *words, const struct ml_server *server);
+static void sync_reason(int error, const char *words, char *text, size_t size);
 static struct ml_result *sync_result(enum ml_result_kind kind, int account);
 static void sync_post(struct ml_sync *sync, struct ml_result *result);
 static uint64_t sync_now_ms(void);
@@ -449,7 +459,7 @@ sync_wait(
 		/* What it said. */
 		error = ml_imap_idle_take(&sync->accounts[accounts[index]].imap, &arrived);
 		if (error != 0) {
-			sync_failed(sync, accounts[index], "idle", error, sync->accounts[accounts[index]].imap.error);
+			sync_failed(sync, accounts[index], "Lost the connection to", error, sync->accounts[accounts[index]].imap.error, &sync->accounts[accounts[index]].config.imap);
 			sync_close(sync, accounts[index]);
 			continue;
 		}
@@ -478,19 +488,14 @@ sync_do(
 	struct ml_sync *sync,
 	struct ml_job *job)
 {
-	const char *receivers[32];
-	char addresses[32][ML_TEXT_MAX];
-	char words[ML_TEXT_MAX];
 	struct ml_result *result;
 	struct sync_account *account;
-	size_t count;
-	size_t index;
 	int error;
 
 	/* A new account: its login and folders tried; taken when they work. */
 	if (job->kind == ML_JOB_SIGN_IN) {
 		if (sync->account_count == ML_ACCOUNTS_MAX) {
-			sync_failed(sync, -1, "sign-in", ENOSPC, "There are too many accounts.");
+			sync_failed(sync, -1, "Cannot add", ENOSPC, "Mail has as many accounts as it can keep", &job->config.imap);
 			return;
 		}
 
@@ -502,7 +507,7 @@ sync_do(
 		sync->account_count++;
 		error = sync_open(sync, (int)sync->account_count - 1);
 		if (error != 0) {
-			sync_failed(sync, -1, "sign-in", error, account->imap.error);
+			sync_failed(sync, -1, "Cannot sign in to", error, account->imap.error, &account->config.imap);
 			sync_close(sync, (int)sync->account_count - 1);
 			sync->account_count--;
 			return;
@@ -518,6 +523,12 @@ sync_do(
 		return;
 	}
 
+	/* An account's new settings: tried, not taken. */
+	if (job->kind == ML_JOB_CHECK) {
+		sync_check(sync, job);
+		return;
+	}
+
 	/* The other jobs are an account's. */
 	if (job->account < 0 || (size_t)job->account >= sync->account_count)
 		return;
@@ -529,35 +540,9 @@ sync_do(
 		return;
 	}
 
-	/* Send: by SMTP, then a copy appended to Sent and got. */
+	/* Send: by SMTP, then a copy in Sent. */
 	if (job->kind == ML_JOB_SEND) {
-		error = ml_mime_address_list(job->receivers, addresses, 32U, &count);
-		if (error == 0 && count == 0U)
-			error = EINVAL;
-		for (index = 0; index < count; index++)
-			receivers[index] = addresses[index];
-		words[0] = '\0';
-		if (error == 0)
-			error = ml_smtp_send(&account->config, receivers, count, job->raw, job->length, words, sizeof(words));
-		if (error != 0) {
-			sync_failed(sync, job->account, "send", error, words);
-			return;
-		}
-
-		/* Sent: told to the window. */
-		result = sync_result(ML_RESULT_SENT, job->account);
-		if (result != NULL)
-			sync_post(sync, result);
-
-		/* The copy in Sent (a server that keeps one itself makes two; plan/ws177/backlog-p2.md). */
-		error = sync_open(sync, job->account);
-		if (error == 0 && account->folders[ML_SENT][0] != '\0') {
-			error = ml_imap_append(&account->imap, account->folders[ML_SENT], job->raw, job->length);
-			if (error == 0)
-				sync_refresh(sync, job->account, ML_SENT, 0);
-		}
-
-		/* The send is done. */
+		sync_send(sync, job);
 		return;
 	}
 
@@ -567,7 +552,7 @@ sync_do(
 		if (error == 0)
 			error = ml_imap_flag(&account->imap, job->uid, "\\Seen", 1);
 		if (error != 0)
-			sync_failed(sync, job->account, "seen", error, account->imap.error);
+			sync_failed(sync, job->account, "Cannot mark the message read on", error, account->imap.error, &account->config.imap);
 		return;
 	}
 
@@ -579,13 +564,117 @@ sync_do(
 		if (error == 0)
 			error = ml_imap_move(&account->imap, job->uid, account->folders[job->to_folder]);
 		if (error != 0) {
-			sync_failed(sync, job->account, "move", error, account->imap.error);
+			sync_failed(sync, job->account, "Cannot move the message on", error, account->imap.error, &account->config.imap);
 			return;
 		}
 
 		/* The folder it went to, got. */
 		sync_refresh(sync, job->account, job->to_folder, 0);
+		return;
 	}
+
+	/* Delete for good: a message of the trash (the window has hidden it already). */
+	if (job->kind == ML_JOB_DELETE) {
+		error = sync_select(sync, job->account, job->folder);
+		if (error == 0)
+			error = ml_imap_delete(&account->imap, job->uid);
+		if (error != 0)
+			sync_failed(sync, job->account, "Cannot delete the message on", error, account->imap.error, &account->config.imap);
+	}
+}
+
+/* Tries an account's new settings on a session of their own, closed after; tells the window whether they work. */
+static void
+sync_check(
+	struct ml_sync *sync,
+	struct ml_job *job)
+{
+	static struct ml_imap trial;
+	static char folders[ML_FOLDERS][ML_MAILBOX_MAX];
+	struct ml_result *result;
+	int error;
+
+	/* The login. */
+	error = ml_imap_open(&trial, &job->config);
+	if (error != 0) {
+		sync_failed(sync, -1, "Cannot sign in to", error, trial.error, &job->config.imap);
+		return;
+	}
+
+	/* The folders. */
+	error = ml_imap_folders(&trial, folders);
+	ml_imap_close(&trial);
+	if (error != 0) {
+		sync_failed(sync, -1, "Cannot read the folders on", error, trial.error, &job->config.imap);
+		return;
+	}
+
+	/* They work: told to the window, which takes them. */
+	result = sync_result(ML_RESULT_CHECKED, job->account);
+	if (result != NULL)
+		sync_post(sync, result);
+}
+
+/* Sends a message by SMTP, then keeps a copy in Sent (a server that keeps one itself, Gmail, gets none) and gets Sent. */
+static void
+sync_send(
+	struct ml_sync *sync,
+	struct ml_job *job)
+{
+	const char *receivers[32];
+	char addresses[32][ML_TEXT_MAX];
+	char words[ML_TEXT_MAX];
+	struct ml_result *result;
+	struct sync_account *account;
+	size_t count;
+	size_t index;
+	int error;
+
+	/* The receivers. */
+	account = &sync->accounts[job->account];
+	error = ml_mime_address_list(job->receivers, addresses, 32U, &count);
+	if (error == 0 && count == 0U)
+		error = EINVAL;
+	if (error != 0) {
+		sync_failed(sync, job->account, "Cannot send through", error, "the receivers are not written right", &account->config.smtp);
+		return;
+	}
+
+	/* Their addresses for SMTP. */
+	for (index = 0; index < count; index++)
+		receivers[index] = addresses[index];
+
+	/* Sent. */
+	words[0] = '\0';
+	error = ml_smtp_send(&account->config, receivers, count, job->raw, job->length, words, sizeof(words));
+	if (error != 0) {
+		sync_failed(sync, job->account, "Cannot send through", error, words, &account->config.smtp);
+		return;
+	}
+
+	/* Sent: told to the window. */
+	result = sync_result(ML_RESULT_SENT, job->account);
+	if (result != NULL)
+		sync_post(sync, result);
+
+	/* The session for the copy. */
+	error = sync_open(sync, job->account);
+	if (error != 0)
+		return;
+
+	/* A server without Sent keeps no copy. */
+	if (account->folders[ML_SENT][0] == '\0')
+		return;
+
+	/* The copy appended, unless the server keeps one itself (it would be there twice). */
+	if ((account->imap.capabilities & ML_IMAP_GMAIL) == 0U) {
+		error = ml_imap_append(&account->imap, account->folders[ML_SENT], job->raw, job->length);
+		if (error != 0)
+			return;
+	}
+
+	/* Sent got, with the copy. */
+	sync_refresh(sync, job->account, ML_SENT, 0);
 }
 
 /* Opens an account's session when it is not open: the login and the folders' names. */
@@ -698,7 +787,7 @@ sync_refresh(
 	if (error == ENOENT && kept->open)
 		return;
 	if (error != 0) {
-		sync_failed(sync, account, "select", error, kept->imap.error);
+		sync_failed(sync, account, "Cannot get mail from", error, kept->imap.error, &kept->config.imap);
 		sync_close(sync, account);
 		return;
 	}
@@ -716,7 +805,7 @@ sync_refresh(
 		first = kept->last_uid[folder] + 1U;
 	error = ml_imap_fetch(&kept->imap, first, SYNC_LATEST, sync_fetched, &fetch);
 	if (error != 0) {
-		sync_failed(sync, account, "fetch", error, kept->imap.error);
+		sync_failed(sync, account, "Cannot get mail from", error, kept->imap.error, &kept->config.imap);
 		sync_close(sync, account);
 	}
 }
@@ -839,24 +928,110 @@ sync_idle_stop_all(
 	}
 }
 
-/* Tells the window that something failed: the step, the errno value and the server's words. */
+/*
+ * Tells the window that something failed, in words: what could not be
+ * done on which server, and why (the server's or OpenSSL's words, or the
+ * failure's meaning).  An untrusted certificate's fingerprint goes with
+ * it, and whether the server is the account's SMTP one.
+ */
 static void
 sync_failed(
 	struct ml_sync *sync,
 	int account,
 	const char *what,
 	int error,
-	const char *words)
+	const char *words,
+	const struct ml_server *server)
 {
 	struct ml_result *result;
+	char reason[ML_TEXT_MAX];
 
 	/* The result. */
 	result = sync_result(ML_RESULT_FAILED, account);
 	if (result == NULL)
 		return;
 	result->error = error;
-	(void)snprintf(result->text, sizeof(result->text), "%s: %.200s", what, words);
+
+	/* Why, in words. */
+	sync_reason(error, words, reason, sizeof(reason));
+	(void)snprintf(result->text, sizeof(result->text), "%s %.80s: %.150s.", what, server->host, reason);
+
+	/* The server: the account's SMTP one, or its IMAP one (a new account's is always IMAP). */
+	(void)snprintf(result->host, sizeof(result->host), "%s", server->host);
+	if (account >= 0 && server == &sync->accounts[account].config.smtp)
+		result->smtp = 1;
+
+	/* The certificate to trust. */
+	if (error == ML_ERROR_UNTRUSTED)
+		(void)snprintf(result->fingerprint, sizeof(result->fingerprint), "%s", ml_tls_fingerprint());
+
+	/* To the window. */
 	sync_post(sync, result);
+}
+
+/* Says why something failed: the server's or OpenSSL's words when there are any, else the failure's meaning. */
+static void
+sync_reason(
+	int error,
+	const char *words,
+	char *text,
+	size_t size)
+{
+	const char *meaning;
+
+	/* An untrusted certificate, with OpenSSL's words. */
+	if (error == ML_ERROR_UNTRUSTED) {
+		(void)snprintf(text, size, "its certificate is not trusted (%.120s)", words);
+		return;
+	}
+
+	/* The words of the server or of OpenSSL. */
+	if (words != NULL && words[0] != '\0') {
+		(void)snprintf(text, size, "%s", words);
+		return;
+	}
+
+	/* The meaning of the failure. */
+	switch (error) {
+	case ML_ERROR_NO_TLS:
+		meaning = "the server does not offer TLS, so the password is not sent";
+		break;
+	case ENOENT:
+		meaning = "the server's name was not found";
+		break;
+	case ETIMEDOUT:
+		meaning = "the server did not answer in time";
+		break;
+	case ECONNREFUSED:
+		meaning = "the server refused the connection";
+		break;
+	case ENETUNREACH:
+	case EHOSTUNREACH:
+		meaning = "the network cannot reach the server";
+		break;
+	case EPIPE:
+	case ECONNRESET:
+		meaning = "the server closed the connection";
+		break;
+	case EPROTONOSUPPORT:
+		meaning = "TLS is not available (the OpenSSL package is not installed)";
+		break;
+	case EACCES:
+		meaning = "the server refused the user name or the password";
+		break;
+	default:
+		meaning = NULL;
+		break;
+	}
+
+	/* A failure without a meaning of its own, by its number. */
+	if (meaning == NULL) {
+		(void)snprintf(text, size, "it failed (%d)", error);
+		return;
+	}
+
+	/* The meaning. */
+	(void)snprintf(text, size, "%s", meaning);
 }
 
 /* Makes a result of a kind for an account (NULL without memory). */

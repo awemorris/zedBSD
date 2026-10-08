@@ -8,8 +8,9 @@
 /*
  * Mail's accounts on the disk (WS169 p004): ~/.config/keiland/mailer.conf
  * holds what is not secret, an "account" line starting each account and
- * its "key=value" lines after (name, address, user, imap, smtp); the
- * passwords are secret.c's.  The file is written anew beside the old one
+ * its "key=value" lines after (name, address, user, imap, smtp, and
+ * imap_pin and smtp_pin for the certificates the user trusts though they
+ * do not verify, ws177-p015); the passwords are secret.c's.  The file is written anew beside the old one
  * and renamed over it.
  */
 
@@ -159,6 +160,12 @@ ml_accounts_save(
 		account_server_text(&accounts[index].smtp, smtp, sizeof(smtp));
 		(void)fprintf(file, "account\nname=%s\naddress=%s\nuser=%s\nimap=%s\nsmtp=%s\n",
 		    accounts[index].name, accounts[index].address, accounts[index].user, imap, smtp);
+
+		/* The certificates the user trusts. */
+		if (accounts[index].imap.pin[0] != '\0')
+			(void)fprintf(file, "imap_pin=%s\n", accounts[index].imap.pin);
+		if (accounts[index].smtp.pin[0] != '\0')
+			(void)fprintf(file, "smtp_pin=%s\n", accounts[index].smtp.pin);
 	}
 
 	/* Written out, and in place of the old one. */
@@ -198,6 +205,7 @@ account_set(
 	const char *key,
 	const char *value)
 {
+	char pin[ML_PIN_MAX];
 	int same;
 
 	/* The user's name. */
@@ -221,15 +229,33 @@ account_set(
 		return;
 	}
 
-	/* The IMAP server. */
+	/* The IMAP server (its pin, read before or after it, is kept). */
 	same = strcmp(key, "imap");
 	if (same == 0) {
+		(void)snprintf(pin, sizeof(pin), "%s", account->imap.pin);
 		(void)ml_server_parse(value, 993U, &account->imap);
+		(void)snprintf(account->imap.pin, sizeof(account->imap.pin), "%s", pin);
 		return;
 	}
 
-	/* The SMTP server. */
+	/* The SMTP server (likewise). */
 	same = strcmp(key, "smtp");
-	if (same == 0)
+	if (same == 0) {
+		(void)snprintf(pin, sizeof(pin), "%s", account->smtp.pin);
 		(void)ml_server_parse(value, 465U, &account->smtp);
+		(void)snprintf(account->smtp.pin, sizeof(account->smtp.pin), "%s", pin);
+		return;
+	}
+
+	/* The IMAP server's trusted certificate. */
+	same = strcmp(key, "imap_pin");
+	if (same == 0) {
+		(void)snprintf(account->imap.pin, sizeof(account->imap.pin), "%s", value);
+		return;
+	}
+
+	/* The SMTP server's. */
+	same = strcmp(key, "smtp_pin");
+	if (same == 0)
+		(void)snprintf(account->smtp.pin, sizeof(account->smtp.pin), "%s", value);
 }

@@ -12,6 +12,11 @@
  * ML_FOLDERS), so that an index the view keeps names the same message for
  * the run; the list sorts them by date as it shows them.  Only the
  * window's thread touches the store.
+ *
+ * ws177-p015: the short dates are written again when the day changes
+ * ("09:41" becomes "Yesterday"), and an account is changed or removed,
+ * its messages going with it (the only times messages leave the store;
+ * the view forgets the message it showed then).
  */
 
 #include "mailer.h"
@@ -47,10 +52,19 @@ static struct ml_message *store_messages;
 static size_t store_message_count;
 static size_t store_message_capacity;
 
+/*
+ * The local day the short dates were written for (the year times 1000
+ * and the day of the year), -1 before ml_store_redate first wrote them;
+ * when today is another day they are written again.
+ */
+static long store_dates_day = -1;
+
 static char *store_copy(const char *text, int *failed);
 static void store_free_message(struct ml_message *message);
 static void store_dates(time_t date, time_t now, char *short_text, size_t short_size, char *long_text, size_t long_size);
 static kl_color store_color(const char *address);
+static void store_drop(int account, int renumber);
+static long store_day(time_t now);
 
 /*
  * Reports the accounts and how many there are.
@@ -110,6 +124,106 @@ ml_store_add_account(
 	store_accounts[index] = *config;
 	store_account_count++;
 	return index;
+}
+
+/*
+ * Changes an account's settings (its messages stay; the caller drops them
+ * when they came from other servers).  Returns 0 or EINVAL.
+ */
+int
+ml_store_set_account(
+	int index,
+	const struct ml_account_config *config)
+{
+	/* An account that is not there. */
+	if (index < 0 || (size_t)index >= store_account_count)
+		return EINVAL;
+
+	/* Its new settings. */
+	store_accounts[index] = *config;
+
+	/* Succeeded: the account is changed. */
+	return 0;
+}
+
+/*
+ * Removes an account and its messages; the later accounts move up one
+ * place, and their messages with them.  Returns 0 or EINVAL.
+ */
+int
+ml_store_remove_account(
+	int index)
+{
+	size_t at;
+
+	/* An account that is not there. */
+	if (index < 0 || (size_t)index >= store_account_count)
+		return EINVAL;
+
+	/* Its messages go, and the later accounts' messages are renumbered. */
+	store_drop(index, 1);
+
+	/* The later accounts move up, and the last place is wiped (its password goes). */
+	for (at = (size_t)index; at + 1U < store_account_count; at++)
+		store_accounts[at] = store_accounts[at + 1U];
+	store_account_count--;
+	memset(&store_accounts[store_account_count], 0, sizeof(store_accounts[0]));
+
+	/* Succeeded: the account is gone. */
+	return 0;
+}
+
+/*
+ * Drops an account's messages (its settings changed: they are got again
+ * from its servers).
+ */
+void
+ml_store_drop_messages(
+	int account)
+{
+	/* The account's messages, the others kept as they are. */
+	store_drop(account, 0);
+}
+
+/*
+ * Writes the short dates of every message again when today is another
+ * day than the one they were written for.  Returns 1 when they were
+ * written (the list is drawn again), 0 when today is the same day.
+ */
+int
+ml_store_redate(
+	time_t now)
+{
+	char date_short[32];
+	char date_long[96];
+	struct ml_message *message;
+	char *written;
+	size_t index;
+	long day;
+	int failed;
+
+	/* The same day: nothing changes. */
+	day = store_day(now);
+	if (day == store_dates_day)
+		return 0;
+	store_dates_day = day;
+
+	/* Each message's dates from today. */
+	for (index = 0; index < store_message_count; index++) {
+		message = &store_messages[index];
+		store_dates(message->date, now, date_short, sizeof(date_short), date_long, sizeof(date_long));
+
+		/* The short date, in place of the old one (kept when there is no memory). */
+		failed = 0;
+		written = store_copy(date_short, &failed);
+		if (failed)
+			continue;
+		free(message->date_short);
+		message->date_short = written;
+	}
+
+	/* Succeeded: the dates are today's. */
+	return 1;
 }
 
 /*
@@ -310,6 +424,7 @@ ml_store_release(void)
 	store_message_count = 0;
 	store_message_capacity = 0;
 	store_account_count = 0;
+	store_dates_day = -1;
 }
 
 /* Copies a string (NULL stays NULL); a failure is noted. */
@@ -432,4 +547,52 @@ store_color(
 
 	/* One of the colors. */
 	return store_colors[hash % 8UL];
+}
+
+/*
+ * Frees an account's messages and closes the gaps they leave; with
+ * renumber, the messages of the later accounts move to the account one
+ * place before (the account is being removed).
+ */
+static void
+store_drop(
+	int account,
+	int renumber)
+{
+	size_t kept;
+	size_t index;
+
+	/* Each message: the account's freed, the others moved down over the gaps. */
+	kept = 0;
+	for (index = 0; index < store_message_count; index++) {
+		if (store_messages[index].account == account) {
+			store_free_message(&store_messages[index]);
+			continue;
+		}
+
+		/* A later account's message, renumbered when that account moves up. */
+		if (renumber && store_messages[index].account > account)
+			store_messages[index].account--;
+
+		/* Kept, in the next place. */
+		store_messages[kept] = store_messages[index];
+		kept++;
+	}
+
+	/* How many are left. */
+	store_message_count = kept;
+}
+
+/* Gives the local day of a time: its year times 1000 and its day of the year. */
+static long
+store_day(
+	time_t now)
+{
+	struct tm today;
+
+	/* The local time. */
+	(void)localtime_r(&now, &today);
+
+	/* The day. */
+	return (long)today.tm_year * 1000L + (long)today.tm_yday;
 }
