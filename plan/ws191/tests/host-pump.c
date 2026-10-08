@@ -62,6 +62,7 @@ expect(struct kl_backend_audio_stream *stream, unsigned what, struct kl_backend_
 {
 	unsigned waited;
 
+	/* Polls reports until the expected kind arrives or a deadline passes. */
 	for (waited = 0U; waited < ms; waited += 5U) {
 		while (kl_backend_audio_stream_next(stream, report)) {
 			if (report->what == what)
@@ -69,8 +70,10 @@ expect(struct kl_backend_audio_stream *stream, unsigned what, struct kl_backend_
 			if (report->what == KL_BACKEND_AUDIO_READY && report->fd >= 0)
 				close(report->fd);
 		}
+
 		pause_ms(5);
 	}
+
 	return 0;
 }
 
@@ -196,6 +199,7 @@ main(void)
 		fake_play(4000U);
 		drained = expect(stream, KL_BACKEND_AUDIO_DRAINED, &report, 30U);
 	}
+
 	CHECK(drained && report.request == 3U, "drained");
 	CHECK(played(ring) == 3800U, "all heard: %llu", (unsigned long long)played(ring));
 
@@ -219,10 +223,12 @@ main(void)
 	kl_backend_audio_stream_reap_all();
 	CHECK(fake_opened() == 0, "all PCMs closed");
 
+	/* Reports any failures. */
 	if (failures != 0) {
 		printf("host-pump: %d checks failed\n", failures);
 		return 1;
 	}
+
 	printf("host-pump: PASS\n");
 	return 0;
 }
