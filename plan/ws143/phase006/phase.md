@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws143-p006 -->
 # ws143-p006: desktop — backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓
 
-Status: test-wait（2026-10-08 q902 P1 の照合: T1-438 一部 PASS（bar の menu は全部、Settings の頁は 4 を除き確認、差 2 点）、直しの再試験 T1-446 は未実行）（旧: test-wait（q896、P1、2026-10-08 夕。実装・host 試験済み、QEMU の AAT は T1 へ））
+Status: cleared（2026-10-08 Q1: T1-438・T1-446 PASS。4 の errno=25 は zedBSD の EACCES（include/uapi/errno.h）で正しく、シナリオの「13」は Linux の値の誤り → シナリオを EACCES の名で直す（P1、小）。未実施: bt-daemon-p003 の scan（btuser の image）、connect・disconnect は p005 i02 の後）
 Disposition: normal
 Parent: [WS143](../ws.md)
 Queue: q896（P1、2026-10-08 午後、ユーザーの決定「Mail の添付より先に WS143 p006」、Q1 の投入）
