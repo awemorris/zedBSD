@@ -27,13 +27,32 @@
 #define FEEDBACK_RISE_MS	5U
 #define FEEDBACK_PEAK		536870912.0
 
-/*
- * The device volume audiod applies itself, per percent: a 60 dB range in
- * even steps (0.6 dB a percent, each step 10^(-0.03) of the one above, in
- * 1/65536), 0 silent (ws100-p002).
- */
+/* The factor of full volume (1/65536), and the percents the device volume has (0..100). */
 #define SOFT_UNITY		65536U
-#define SOFT_STEP		61162U
+#define SOFT_PERCENTS		101U
+
+/*
+ * The device volume audiod applies itself, per percent, in 1/65536 (ws100-p009):
+ * the curve dB(p) = 50 * log10(p / 100), so 25, 50 and 75 % are -30, -15
+ * and -6 dB and the steps sound even; 0 is silent.  Made by
+ * `python3 plan/ws100/tests/volume-curve.py table` (its `verify` checks
+ * this copy); read only, for the process.
+ */
+static const uint32_t volume_factors[SOFT_PERCENTS] = {
+	0U, 1U, 4U, 10U, 21U, 37U, 58U, 85U,
+	119U, 159U, 207U, 263U, 327U, 399U, 481U, 571U,
+	671U, 781U, 901U, 1031U, 1172U, 1324U, 1488U, 1663U,
+	1849U, 2048U, 2259U, 2483U, 2719U, 2968U, 3231U, 3507U,
+	3796U, 4100U, 4418U, 4750U, 5096U, 5457U, 5834U, 6225U,
+	6632U, 7054U, 7492U, 7946U, 8416U, 8902U, 9405U, 9925U,
+	10461U, 11015U, 11585U, 12173U, 12779U, 13402U, 14043U, 14702U,
+	15380U, 16076U, 16790U, 17523U, 18275U, 19046U, 19836U, 20646U,
+	21475U, 22324U, 23192U, 24081U, 24989U, 25918U, 26867U, 27837U,
+	28828U, 29839U, 30872U, 31925U, 33000U, 34096U, 35214U, 36354U,
+	37515U, 38698U, 39904U, 41132U, 42382U, 43654U, 44950U, 46268U,
+	47609U, 48973U, 50360U, 51771U, 53205U, 54662U, 56144U, 57649U,
+	59178U, 60731U, 62308U, 63910U, 65536U,
+};
 
 static void fetch(const struct audiod_stream *stream, uint64_t position, int64_t sample[2]);
 static void store(struct audiod_stream *stream, uint64_t position, const int64_t sample[2]);
@@ -608,27 +627,17 @@ soft_volume(
 	}
 }
 
-/* Gives the factor (in 1/65536) of a volume in percent: SOFT_STEP less per percent below 100, 0 at 0. */
+/* Gives the factor (in 1/65536) of a volume in percent from the curve's table, full from 100 up. */
 static uint32_t
 soft_gain(
 	uint32_t percent)
 {
-	uint32_t gain;
-	uint32_t step;
-
-	/* Silence, and full. */
-	if (percent == 0U)
-		return 0U;
+	/* Full at 100 and above. */
 	if (percent >= 100U)
 		return SOFT_UNITY;
 
-	/* Down from full, one step a percent. */
-	gain = SOFT_UNITY;
-	for (step = percent; step < 100U; step++)
-		gain = (uint32_t)(((uint64_t)gain * SOFT_STEP) >> 16);
-
-	/* Succeeded: the factor. */
-	return gain;
+	/* Succeeded: the curve's factor, 0 at 0. */
+	return volume_factors[percent];
 }
 
 /* Gives cos(x) for a small x (under 1) by its series, to x^14. */

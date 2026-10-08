@@ -129,6 +129,14 @@
 
 /* Amplifier capability and SET_AMP payload bits. */
 #define HDA_AMP_CAP_MUTE		0x80000000U
+#define HDA_AMP_CAP_OFFSET_MASK		0x7fU
+#define HDA_AMP_CAP_STEPS_SHIFT		8U
+#define HDA_AMP_CAP_STEPS_MASK		0x7fU
+#define HDA_AMP_CAP_SIZE_SHIFT		16U
+#define HDA_AMP_CAP_SIZE_MASK		0x7fU
+
+/* The percents a volume has (0..100), for the curve's table. */
+#define HDA_VOLUME_PERCENTS		101U
 #define HDA_AMP_SET_OUTPUT		0x8000U
 #define HDA_AMP_SET_INPUT		0x4000U
 #define HDA_AMP_SET_LEFT		0x2000U
@@ -267,6 +275,12 @@ struct hda_controller {
 	uint8_t volume_nid;
 	unsigned volume_steps;
 	unsigned volume_mute;
+
+	/*
+	 * The size of one step of the volume's amplifier in quarter dB (the
+	 * amp caps' stepsize + 1, ws100-p009); the curve's dB become steps by it.
+	 */
+	unsigned volume_step_quarters;
 	struct audio_volume volume;
 	struct hda_format formats[HDA_FORMATS_MAX];
 	struct audio_format format_list[HDA_FORMATS_MAX];
@@ -281,6 +295,28 @@ struct hda_controller {
 	 * held in reset, and a stream is neither prepared nor started.
 	 */
 	unsigned suspended;
+};
+
+/*
+ * The volume curve, per percent, in quarter dB below full (ws100-p009):
+ * dB(p) = 50 * log10(p / 100), so 25, 50 and 75 % are -30, -15 and -6 dB
+ * and the codec's steps sound even.  0 % is muted by the caller (its value
+ * is only the table's floor).  Made by `python3
+ * plan/ws100/tests/volume-curve.py quarters` (its `verify` checks this
+ * copy); read only.
+ */
+static const int16_t hda_volume_quarters[HDA_VOLUME_PERCENTS] = {
+	-400, -400, -340, -305, -280, -260, -244, -231, -219, -209,
+	-200, -192, -184, -177, -171, -165, -159, -154, -149, -144,
+	-140, -136, -132, -128, -124, -120, -117, -114, -111, -108,
+	-105, -102, -99, -96, -94, -91, -89, -86, -84, -82,
+	-80, -77, -75, -73, -71, -69, -67, -66, -64, -62,
+	-60, -58, -57, -55, -54, -52, -50, -49, -47, -46,
+	-44, -43, -42, -40, -39, -37, -36, -35, -33, -32,
+	-31, -30, -29, -27, -26, -25, -24, -23, -22, -20,
+	-19, -18, -17, -16, -15, -14, -13, -12, -11, -10,
+	-9, -8, -7, -6, -5, -4, -4, -3, -2, -1,
+	0,
 };
 
 /*
@@ -330,6 +366,7 @@ static int hda_input_find(struct hda_controller *controller);
 static int hda_path_program(struct hda_controller *controller, const struct hda_path *path, int capture);
 static void hda_volume_target_find(struct hda_controller *controller);
 static int hda_volume_write(struct hda_controller *controller, const struct audio_volume *volume);
+static uint32_t hda_volume_step(const struct hda_controller *controller, uint32_t percent);
 static int hda_formats_build(struct hda_controller *controller);
 static int hda_streams_start(struct hda_controller *controller);
 static int hda_stream_reset(struct hda_controller *controller, const struct hda_stream *stream);
@@ -2094,14 +2131,23 @@ hda_volume_target_find(
 		if ((widget->caps & HDA_WIDGET_OUT_AMP) == 0U)
 			continue;
 
-		steps = (widget->amp_out_caps >> 8) & 0x7fU;
+		steps = (widget->amp_out_caps >> HDA_AMP_CAP_STEPS_SHIFT) & HDA_AMP_CAP_STEPS_MASK;
 		if (steps == 0U)
 			continue;
 
+		/* The amplifier, its steps and the size of a step (quarter dB). */
 		controller->volume_nid = path->nids[index - 1U];
 		controller->volume_steps = steps;
+		controller->volume_step_quarters = ((widget->amp_out_caps >> HDA_AMP_CAP_SIZE_SHIFT) & HDA_AMP_CAP_SIZE_MASK) + 1U;
 		if ((widget->amp_out_caps & HDA_AMP_CAP_MUTE) != 0U)
 			controller->volume_mute = 1U;
+
+		/* The log says how the curve maps onto this codec (the hardware's check of ws100-p009). */
+		kern_logf("hda: volume nid %u steps %u step %u/4 dB offset %u\n",
+		    controller->volume_nid,
+		    steps,
+		    controller->volume_step_quarters,
+		    widget->amp_out_caps & HDA_AMP_CAP_OFFSET_MASK);
 		return;
 	}
 }
@@ -2117,9 +2163,10 @@ hda_volume_write(
 	uint32_t mute;
 	int error;
 
-	/* Maps 0..100 onto 0..steps. */
-	left = volume->left * controller->volume_steps / 100U;
-	right = volume->right * controller->volume_steps / 100U;
+	/* Maps 0..100 onto the codec's steps by the curve (ws100-p009). */
+	left = hda_volume_step(controller, volume->left);
+	right = hda_volume_step(controller, volume->right);
+	kern_logf("hda: volume %u%% -> step %u/%u\n", volume->left, left, controller->volume_steps);
 
 	/* Mutes with the mute bit, or with the lowest gain when there is none. */
 	mute = 0U;
@@ -2146,6 +2193,39 @@ hda_volume_write(
 
 	/* Succeeded: the amplifier holds the volume. */
 	return 0;
+}
+
+/*
+ * Gives the codec's step for a percent by the curve: the top step at 100 %
+ * and above, below it as many steps as the curve's quarter dB make (rounded
+ * to the nearest), never under the lowest step; 0 % is the lowest step.
+ */
+static uint32_t
+hda_volume_step(
+	const struct hda_controller *controller,
+	uint32_t percent)
+{
+	uint32_t down;
+	uint32_t size;
+
+	/* Full at 100 % and above; silent (the lowest step) at 0. */
+	if (percent >= 100U)
+		return controller->volume_steps;
+	if (percent == 0U)
+		return 0U;
+
+	/* The steps below full: the curve's quarter dB over a step's, rounded. */
+	size = controller->volume_step_quarters;
+	if (size == 0U)
+		size = 1U;
+	down = ((uint32_t)(-hda_volume_quarters[percent]) + size / 2U) / size;
+
+	/* The lowest step when the curve goes below it. */
+	if (down >= controller->volume_steps)
+		return 0U;
+
+	/* Succeeded: the step. */
+	return controller->volume_steps - down;
 }
 
 /*

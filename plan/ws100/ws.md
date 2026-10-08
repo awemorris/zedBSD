@@ -3,7 +3,7 @@
 # WS100: system bar の音量（icon・slider・確かめの音）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p013 を cleared。2026-10-08 q910 P2 の照合: p008 は表の cleared（Q1 2026-09-30）に phase.md を合わせた、p013 は T1-087 PASS で Q1 の判定待ち。残り: p006（5330 の HDA、実機）、p009（L3 の音量の曲線、planned））
+Status: incomplete（2026-10-08 P2: p009（音量の曲線）を実装・host・build、QEMU は T1。2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p013 を cleared。2026-10-08 q910 P2 の照合: p008 は表の cleared（Q1 2026-09-30）に phase.md を合わせた、p013 は T1-087 PASS で Q1 の判定待ち。残り: p006（5330 の HDA、実機）、p009（L3 の音量の曲線、planned））
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2
