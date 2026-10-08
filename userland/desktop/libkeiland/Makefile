@@ -35,6 +35,7 @@ LIBKEILAND_SOURCES += \
 	userland/desktop/libkeiland/ui/scroll.c \
 	userland/desktop/libkeiland/ui/scroll-bar.c \
 	userland/desktop/libkeiland/ui/text-touch.c \
+	userland/desktop/libkeiland/ui/text-bar.c \
 	userland/desktop/libkeiland/ui/ui.c \
 	userland/desktop/libkeiland/ui/window.c \
 	userland/desktop/libkeiland/ui/app.c \

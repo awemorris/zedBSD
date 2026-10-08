@@ -295,7 +295,14 @@
 		kl_text_touch_drag_end;
 		kl_text_touch_edge;
 		kl_text_touch_take;
+		kl_text_touch_select;
+		kl_text_touch_hide_bar;
+		kl_text_touch_toggle_bar;
 		kl_text_touch_draw_handles;
+		kl_text_bar_buttons;
+		kl_text_bar_layout;
+		kl_text_bar_hit;
+		kl_text_bar_draw;
 		kl_ui_create;
 		kl_ui_destroy;
 		kl_ui_pointer_motion;

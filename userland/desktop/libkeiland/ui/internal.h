@@ -61,6 +61,19 @@ struct wl_registry *keiui_app_global(struct wl_display *display, const char *int
 #define KEIUI_DRAGGABLE		2U
 #define KEIUI_MODAL		4U
 
+/*
+ * ws190-p002: a press on a widget that keeps the focus where it is (the
+ * bar's buttons: a press there does not take the keyboard from the field
+ * whose selection it acts on), and a widget a finger's drag that starts on
+ * it does nothing for (neither a selection nor a scroll begins).
+ */
+#define KEIUI_KEEP_FOCUS	8U
+#define KEIUI_NO_DRAG		16U
+
+/* The ids of the library's own records (ws190-p002): the bar of a field's selection and its handles; programs use none from 0xfffffff0 up. */
+#define KEIUI_TEXT_BAR_ID	0xfffffffdU
+#define KEIUI_TEXT_HANDLE_ID	0xfffffffcU
+
 /* Records a widget with its flags and reports what the input did to it (ui.c, KL_HIT_* bits). */
 unsigned keiui_ui_widget(struct kl_ui *ui, uint32_t id, uint32_t index, const struct kl_rect *rect, unsigned flags);
 
@@ -158,6 +171,9 @@ int keiui_ui_focus_ring(const struct kl_ui *ui);
  * text view's caret in sight (the library runs on one thread).
  */
 void keiui_ui_inset_note(uint32_t width, uint32_t height, int right, int bottom, unsigned reason, const int32_t *caret);
+
+/* Begins a finger's drag of a named end's handle (text-touch.c; KL_TEXT_HANDLE_ANCHOR or _CARET), at a point of the view's content. */
+void keiui_text_touch_hold(struct kl_text_touch *touch, int end, double x, double y);
 
 /* Reports the time of the frame being drawn (ui.c, the time kl_ui_begin was given). */
 uint64_t keiui_ui_now(const struct kl_ui *ui);

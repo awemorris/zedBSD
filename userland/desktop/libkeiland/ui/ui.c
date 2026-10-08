@@ -2162,7 +2162,10 @@ ui_gesture(
 		ui->finger_x = gesture->x;
 		ui->finger_y = gesture->y;
 		ui->edge_us = now_us;
-		if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_DRAGGABLE) != 0U) {
+		if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_NO_DRAG) != 0U) {
+			/* A drag that starts on the bar's buttons does nothing (ws190-p002). */
+			ui->drag = UI_DRAG_NONE;
+		} else if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_DRAGGABLE) != 0U) {
 			ui->drag = UI_DRAG_WIDGET;
 			ui->active = ui->touch_hit;
 			ui->pointer_x = gesture->x;
@@ -2340,6 +2343,10 @@ ui_focus_press(
 {
 	const struct ui_record *owner;
 	struct ui_key key;
+
+	/* A widget that keeps the focus where it is (the bar's buttons, ws190-p002). */
+	if (record != NULL && record->kind == UI_KIND_HIT && (record->flags & KEIUI_KEEP_FOCUS) != 0U)
+		return;
 
 	/* The widget pressed, or the one of the same id under it that takes the keyboard. */
 	owner = NULL;
