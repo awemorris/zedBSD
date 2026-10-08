@@ -724,6 +724,7 @@ event_loop(
 	struct pollfd *descriptors;
 	uint64_t started;
 	uint64_t now;
+	uint64_t scan_period;
 	size_t count;
 	size_t index;
 	size_t first_input;
@@ -761,8 +762,11 @@ event_loop(
 		    (server->max_frames != 0 && server->frame >= server->max_frames))
 			break;
 
-		/* Evdev nodes that appeared since the last scan join the seat. */
-		if (server->os_paused == 0 && now - server->input_scan_time >= KWL_INPUT_SCAN_MS)
+		/* Evdev nodes that appeared since the last scan join the seat, soon after a device's event more often. */
+		scan_period = KWL_INPUT_SCAN_MS;
+		if (now < server->input_settle_until)
+			scan_period = KWL_INPUT_SETTLE_SCAN_MS;
+		if (server->os_paused == 0 && now - server->input_scan_time >= scan_period)
 			kwl_input_scan(server);
 
 		/* The touch pads' timers: a tap's click completes when no drag came (input.c, ws159-p004). */

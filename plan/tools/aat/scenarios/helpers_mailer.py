@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""The automatic helpers of tests/scenarios/apps/mailer/ beyond open-from-home (WS169 p004, p005).
+"""The automatic helpers of tests/scenarios/apps/mailer/ beyond open-from-home (WS169 p004, p005; ws177-p014).
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
@@ -240,13 +240,30 @@ def sign_in_code(item):
 		item.check(arrived and told and offered, "the code did not reach Browser")
 		code_lines = [line for line in run.lines(r"(MAIL|KWL MAIL|ZBROWSER MAIL)", mark) if "7351" in line]
 		item.check(not code_lines, "the code is in the log")
-		# Browser in front: its titlebar's first control is the code.
+		# The notification's board (ws156-p003: the bottom middle, 76 high, 48 above the edge) clicked while it stays
+		# (ws177-p014): the code goes into the page's field, which still has the page's focus behind Mail.
+		shown = run.wait(r'KWL NOTIFY show id=\d+ client=\d+ urgent=\d title="Sign-in code from', mark, 10)
+		item.step("the notification of the code showed", shown or "")
+		item.check(shown, "the notification of the code did not show")
+		if shown:
+			number = re.search(r"id=(\d+)", shown).group(1)
+			time.sleep(0.5)
+			run.shot(item, "notification")
+			width, height = run.screen()
+			mark = run.mark()
+			run.click(width // 2, height - 48 - 38)
+			activated = run.wait(rf"KWL NOTIFY activate id={number}$", mark, 5)
+			filled = run.wait(r"ZBROWSER MAIL fill length=4 error=0", mark, 5)
+			typed = run.wait(r"ZBROWSER CONSOLE level=\d+ code-length=4", mark, 5)
+			removed = run.wait(r"ZBROWSER TITLEBAR code=0", mark, 5)
+			item.step("clicked the notification", f"{activated}; {filled}; {typed}; {removed}")
+			item.check(activated and filled and typed and removed, "the notification's click did not fill the field in")
+		# Browser in front: the field shows the code, and the titlebar has no code's control any more.
 		run.close(item, window)
 		run.click(*field_point(browser))
 		time.sleep(0.8)
-		run.shot(item, "offered")
-		item.person("Browser's titlebar shows a control 'Code 7351' at the front; click it: the field gets 7351 "
-			"(ZBROWSER MAIL fill length=4 error=0, ZBROWSER CONSOLE code-length=4)")
+		run.shot(item, "filled")
+		item.person("the field shows 7351 and Browser's titlebar has no 'Code' control")
 	finally:
 		server.stop()
 

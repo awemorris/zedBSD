@@ -113,6 +113,7 @@ shell_run(
 	int changed;
 	int timeout;
 	int network;
+	int mail_due;
 	int status;
 	int taken;
 	int error;
@@ -231,13 +232,16 @@ shell_run(
 			state.dirty = 0;
 		}
 
-		/* Waits for the compositor, the view's descriptors, or the view's next work (a held key's repeat waits less, within the dispatch). */
+		/* Waits for the compositor, the view's descriptors, the view's next work or the end of a code's offer (a held key's repeat waits less, within the dispatch). */
 		timeout = -1;
 		network = browser_view_timeout(state.view);
 		if (network >= 0 && (timeout < 0 || network < timeout))
 			timeout = network;
 		if (state.touch_due >= 0 && (timeout < 0 || state.touch_due < timeout))
 			timeout = state.touch_due;
+		mail_due = shell_mail_timeout(&state.mail, shell_clock());
+		if (mail_due >= 0 && (timeout < 0 || mail_due < timeout))
+			timeout = mail_due;
 		net_count = browser_view_poll_fds(state.view, net_fds, SHELL_NET_FDS);
 		status = shell_window_dispatch(&state.window, timeout, net_fds, net_count);
 		if (status != 0) {

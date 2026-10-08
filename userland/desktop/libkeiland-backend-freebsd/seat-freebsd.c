@@ -33,8 +33,8 @@
 #include <string.h>
 #include <unistd.h>
 
-/* The leases: slot zero is the primary node's, the others the input devices' (the compositor reads at most 16, KWL_INPUT_MAX). */
-#define SEAT_LEASE_MAX 17U
+/* The leases: slot zero is the primary node's, the others the input devices' (the compositor reads at most 32, KWL_INPUT_MAX). */
+#define SEAT_LEASE_MAX 33U
 
 /* The longest device path kept. */
 #define SEAT_PATH_MAX 4096U

@@ -164,17 +164,25 @@ kwl_backend_input_found(
 
 /*
  * An input device came or went (ws132-p003): the devices are scanned again
- * in the event loop's next pass instead of at the next KWL_INPUT_SCAN_MS.
+ * in the event loop's next pass instead of at the next KWL_INPUT_SCAN_MS,
+ * and then every KWL_INPUT_SETTLE_SCAN_MS for a while, because the new node
+ * may not be the seat's user's yet (BUG-264).
  */
 void
 kwl_backend_input_changed(
 	void *data)
 {
 	struct kwl_server *server;
+	uint64_t now;
 
 	/* The next pass scans (main.c compares the time of the last scan). */
 	server = data;
 	server->input_scan_time = 0;
+
+	/* The quick scans that follow; a failed clock leaves the ordinary ones. */
+	now = kwl_milliseconds();
+	if (now != UINT64_MAX)
+		server->input_settle_until = now + KWL_INPUT_SETTLE_MS;
 	printf("KWL EVENT input changed\n");
 }
 

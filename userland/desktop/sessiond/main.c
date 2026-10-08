@@ -154,6 +154,9 @@ main(
 	/* A client of the session writing to a closed pipe must not stop sessiond. */
 	(void)signal(SIGPIPE, SIG_IGN);
 
+	/* A device plugged in later is the seat's user's at once (BUG-264). */
+	sessiond_seat_events_open();
+
 	/* The greeter, then a session for each login, until stopped. */
 	sessiond_log("SESSIOND START greeter=%s session=%s pid=%ld", daemon.greeter, daemon.session, (long)getpid());
 	failures = 0;

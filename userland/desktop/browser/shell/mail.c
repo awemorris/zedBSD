@@ -16,6 +16,17 @@
  * as the keyboard would.  An offer lasts two minutes, and a newer code
  * replaces it.
  *
+ * ws177-p014: a page whose focus is in no field that takes text (the
+ * click went outside the field, or the page has none) is not typed into,
+ * so that its own keys (its shortcuts) do not fire: the code goes to the
+ * clipboard instead, and a notification says to paste it.  A code with
+ * letters is typed with the letters' DOM names ("KeyK", Shift for a
+ * capital).  Each browser window hears the arrival and offers the code,
+ * and the notification names the window's page, so the user chooses the
+ * window by clicking its control or its notification.  The main loop
+ * wakes when an offer runs out (shell_mail_timeout), so that the offer is
+ * taken back on time.
+ *
  * The page's drawing and engine are not touched: the code goes in through
  * browser_view_key.  The code is never written to the log, only its
  * length.
@@ -33,8 +44,13 @@
 /* The name the browser listens under (the setting is mail.codes.browser). */
 #define SHELL_MAIL_READER	"browser"
 
-static void shell_mail_offer(struct shell_mail *mail, const struct kl_mail_event *arrival, struct shell_titlebar *titlebar, uint64_t now_ms);
+/* The most bytes of the page's title the notification names. */
+#define SHELL_MAIL_TITLE_MAX	120
+
+static void shell_mail_offer(struct shell_mail *mail, const struct kl_mail_event *arrival, struct browser_view *view, struct shell_titlebar *titlebar, uint64_t now_ms);
 static void shell_mail_withdraw(struct shell_mail *mail, struct shell_titlebar *titlebar);
+static int shell_mail_type(const char *code, struct browser_view *view);
+static void shell_mail_copy(struct shell_mail *mail, struct shell_titlebar *titlebar);
 
 /*
  * Starts listening to the arrivals of mail through the application's
@@ -120,7 +136,7 @@ shell_mail_round(
 		/* A message without a code is not the browser's. */
 		if (arrival.code[0] == '\0')
 			continue;
-		shell_mail_offer(mail, &arrival, titlebar, now_ms);
+		shell_mail_offer(mail, &arrival, view, titlebar, now_ms);
 		offered = 1;
 	}
 
@@ -159,6 +175,36 @@ shell_mail_round(
 }
 
 /*
+ * Tells in how many milliseconds the offer runs out, for the main loop's
+ * wait: -1 without an offer, 0 when it has run out already.
+ */
+int
+shell_mail_timeout(
+	const struct shell_mail *mail,
+	uint64_t now_ms)
+{
+	uint64_t left;
+
+	/* No offer waits for nothing. */
+	if (mail->system == NULL)
+		return -1;
+	if (mail->code[0] == '\0')
+		return -1;
+
+	/* An offer that ran out is due now. */
+	if (now_ms >= mail->until_ms)
+		return 0;
+
+	/* The time left, which an offer of two minutes keeps within an int. */
+	left = mail->until_ms - now_ms;
+	if (left > SHELL_MAIL_OFFER_MS)
+		left = SHELL_MAIL_OFFER_MS;
+
+	/* Succeeded: the milliseconds until the offer is taken back. */
+	return (int)left;
+}
+
+/*
  * Stops listening: an offer still shown is taken back.
  */
 void
@@ -174,17 +220,60 @@ shell_mail_close(
 	memset(mail, 0, sizeof(*mail));
 }
 
-/* Offers a code as the titlebar's control and as a notification, in place of an earlier one. */
+/*
+ * Types the offered code into the page's focused field, key by key, and
+ * forgets it (the titlebar's control and the notification go).  A page
+ * whose focus is in no field that takes text gets nothing: the code goes
+ * to the clipboard instead (ws177-p014).
+ */
+void
+shell_mail_fill(
+	struct shell_mail *mail,
+	struct browser_view *view,
+	struct shell_titlebar *titlebar)
+{
+	float caret[4];
+	size_t length;
+	int target;
+	int error;
+
+	/* Nothing offered. */
+	length = strlen(mail->code);
+	if (length == 0U)
+		return;
+
+	/* The page has the keyboard again (the click went to the notification or the titlebar). */
+	(void)browser_view_focus(view, 1);
+
+	/* A page without a field to take it: the clipboard (its keys would be the page's shortcuts). */
+	target = browser_view_text_target(view, caret);
+	if (target != 1) {
+		shell_mail_copy(mail, titlebar);
+		return;
+	}
+
+	/* The code typed into the field. */
+	error = shell_mail_type(mail->code, view);
+
+	/* The log the tests read (its length only), and the code forgotten. */
+	printf("ZBROWSER MAIL fill length=%lu error=%d\n", (unsigned long)length, error);
+	fflush(stdout);
+	shell_mail_withdraw(mail, titlebar);
+}
+
+/* Offers a code as the titlebar's control and as a notification naming the window's page, in place of an earlier one. */
 static void
 shell_mail_offer(
 	struct shell_mail *mail,
 	const struct kl_mail_event *arrival,
+	struct browser_view *view,
 	struct shell_titlebar *titlebar,
 	uint64_t now_ms)
 {
 	struct kl_notification notification;
 	char title[KL_MAIL_TEXT_MAX + 32U];
-	char body[KL_MAIL_CODE_MAX + 64U];
+	char body[KL_MAIL_CODE_MAX + SHELL_MAIL_TITLE_MAX + 64U];
+	const char *page;
 	int shown;
 	int error;
 
@@ -196,9 +285,18 @@ shell_mail_offer(
 	(void)snprintf(mail->label, sizeof(mail->label), "Code %s", arrival->code);
 	shown = shell_titlebar_offer_code(titlebar, mail->label);
 
+	/* The page's title, which tells this window's notification from another window's. */
+	page = browser_view_title(view);
+	if (page == NULL)
+		page = "";
+
 	/* The notification's words. */
 	(void)snprintf(title, sizeof(title), "Sign-in code from %s", arrival->from);
-	(void)snprintf(body, sizeof(body), "Click to fill in %s in Browser.", arrival->code);
+	if (page[0] != '\0') {
+		(void)snprintf(body, sizeof(body), "Click to fill in %s on %.*s.", arrival->code, SHELL_MAIL_TITLE_MAX, page);
+	} else {
+		(void)snprintf(body, sizeof(body), "Click to fill in %s in Browser.", arrival->code);
+	}
 
 	/* Posted with an action, in place of the earlier offer. */
 	memset(&notification, 0, sizeof(notification));
@@ -210,49 +308,6 @@ shell_mail_offer(
 	memset(body, 0, sizeof(body));
 	printf("ZBROWSER MAIL code length=%lu titlebar=%d notified=%d\n", (unsigned long)strlen(mail->code), shown == 0, error == 0);
 	fflush(stdout);
-}
-
-/*
- * Types the offered code into the page's focused field, key by key, and
- * forgets it (the titlebar's control and the notification go).
- */
-void
-shell_mail_fill(
-	struct shell_mail *mail,
-	struct browser_view *view,
-	struct shell_titlebar *titlebar)
-{
-	char key[2];
-	char code[8];
-	size_t length;
-	size_t index;
-	int error;
-
-	/* Nothing offered. */
-	length = strlen(mail->code);
-	if (length == 0U)
-		return;
-
-	/* The page has the keyboard again (the click went to the notification). */
-	(void)browser_view_focus(view, 1);
-
-	/* Each character pressed and let go, a digit with its DOM code. */
-	error = 0;
-	for (index = 0; index < length && error == 0; index++) {
-		key[0] = mail->code[index];
-		key[1] = '\0';
-		code[0] = '\0';
-		if (key[0] >= '0' && key[0] <= '9')
-			(void)snprintf(code, sizeof(code), "Digit%c", key[0]);
-		error = browser_view_key(view, key, code, key, 1, 0, 0U);
-		if (error == 0)
-			error = browser_view_key(view, key, code, key, 0, 0, 0U);
-	}
-
-	/* The log the tests read (its length only), and the code forgotten. */
-	printf("ZBROWSER MAIL fill length=%lu error=%d\n", (unsigned long)length, error);
-	fflush(stdout);
-	shell_mail_withdraw(mail, titlebar);
 }
 
 /* Takes back the titlebar's control and the notification of the offer, and forgets the code. */
@@ -272,4 +327,86 @@ shell_mail_withdraw(
 	memset(mail->code, 0, sizeof(mail->code));
 	memset(mail->label, 0, sizeof(mail->label));
 	mail->notification = 0;
+}
+
+/*
+ * Presses and lets go of each character of a code, with the DOM's names
+ * of its key: a digit's "DigitN", a letter's "KeyX" (with Shift for a
+ * capital).  Returns 0, or why the page refused a key.
+ */
+static int
+shell_mail_type(
+	const char *code,
+	struct browser_view *view)
+{
+	char key[2];
+	char name[8];
+	uint32_t modifiers;
+	size_t index;
+	int error;
+
+	/* Each character, while the page takes them. */
+	for (index = 0; code[index] != '\0'; index++) {
+		key[0] = code[index];
+		key[1] = '\0';
+		name[0] = '\0';
+		modifiers = 0U;
+
+		/* The key's DOM name: a digit's, a small letter's, or a capital's with Shift held. */
+		if (key[0] >= '0' && key[0] <= '9') {
+			(void)snprintf(name, sizeof(name), "Digit%c", key[0]);
+		} else if (key[0] >= 'a' && key[0] <= 'z') {
+			(void)snprintf(name, sizeof(name), "Key%c", key[0] - 'a' + 'A');
+		} else if (key[0] >= 'A' && key[0] <= 'Z') {
+			(void)snprintf(name, sizeof(name), "Key%c", key[0]);
+			modifiers = BROWSER_MOD_SHIFT;
+		}
+
+		/* Pressed. */
+		error = browser_view_key(view, key, name, key, 1, 0, modifiers);
+		if (error != 0)
+			return error;
+
+		/* Let go. */
+		error = browser_view_key(view, key, name, key, 0, 0, modifiers);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the whole code was typed. */
+	return 0;
+}
+
+/*
+ * Puts the offered code on the clipboard for a page without a field to
+ * take it, takes the offer back, and says so in a notification without
+ * the code.
+ */
+static void
+shell_mail_copy(
+	struct shell_mail *mail,
+	struct shell_titlebar *titlebar)
+{
+	struct kl_notification notification;
+	uint32_t request;
+	size_t length;
+	int error;
+
+	/* The code on the clipboard, as a copy from the window would put it. */
+	length = strlen(mail->code);
+	if (titlebar->kui != NULL)
+		kl_window_copy(titlebar->kui, mail->code, length);
+
+	/* The offer taken back and the code forgotten. */
+	shell_mail_withdraw(mail, titlebar);
+
+	/* The user told where the code went. */
+	memset(&notification, 0, sizeof(notification));
+	notification.title = "Sign-in code copied";
+	notification.body = "No field on the page takes it: click the field and paste with Ctrl+V.";
+	error = kl_system_notify(mail->system, &notification, &request);
+
+	/* The log the tests read (its length only). */
+	printf("ZBROWSER MAIL copied length=%lu clipboard=%d notified=%d\n", (unsigned long)length, titlebar->kui != NULL, error == 0);
+	fflush(stdout);
 }
