@@ -6,7 +6,8 @@
  */
 
 /*
- * The oracle of plan/ws143/tests/hid-input-host-test.c (ws143-p005 i01a):
+ * The oracle of plan/ws143/tests/hid-input-host-test.c (ws143-p005 i01a,
+ * and i01c for i2c-hid at the end of the file):
  * the report handling of src/drivers/usb/usb-hid.c as it was before the
  * HID input glue (git a6988363c), copied for the test only.  The bodies of
  * usb_hid_fetch_layout (after the descriptor is read; no raw branch, no
@@ -446,4 +447,129 @@ int
 old_hid_enodev(void)
 {
 	return ENODEV;
+}
+
+/*
+ * The old i2c-hid's report handling (git aef0dead1): read_report_descriptor's
+ * parse, device_start's touch check, publish (the touch device alone) and
+ * take_report, statement for statement with the I2C fields taken out.
+ */
+
+int
+old_i2c_prepare(struct old_i2c *device, const uint8_t *descriptor, size_t length)
+{
+	int error;
+
+	kern_memset(device, 0, sizeof(*device));
+
+	/* Parses it with the HID layer. */
+	error = drv_hid_report_layout_parse(descriptor, length, &device->layout);
+
+	/* Reports a descriptor that could not be read or parsed. */
+	if (error != 0)
+		return error;
+
+	/* A device with no fingers is not one this driver publishes. */
+	error = drv_hid_report_layout_get_touch(device->layout, &device->touch);
+	if (error != 0) {
+		return ENODEV;
+	}
+	return 0;
+}
+
+int
+old_i2c_publish(
+	struct old_i2c *device, const char *path, uint16_t vendor, uint16_t product, uint16_t version)
+{
+	struct input_device_info info;
+	const char *kind;
+	int error;
+
+	/* The capabilities, axes and properties of a touch pad or a touch screen. */
+	error = drv_hid_touch_describe(&device->touch, &device->description);
+	if (error != 0)
+		return error;
+
+	/* No finger touches yet; the Scan Time and the pad's mode are known. */
+	drv_hid_touch_reset(&device->state, device->description.slots);
+	drv_hid_touch_set_scan_time(&device->state, &device->touch);
+	drv_hid_touch_set_pad(&device->state, &device->touch);
+
+	/* Its name, as "vendor:product Touchpad". */
+	kind = "Touchscreen";
+	if (device->touch.pad)
+		kind = "Touchpad";
+	(void)kern_snprintf(device->name, sizeof(device->name), "%04X:%04X %s", vendor, product, kind);
+
+	/* Registers it. */
+	kern_memset(&info, 0, sizeof(info));
+	info.name = device->name;
+	info.physical_path = path;
+	info.id.bustype = BUS_I2C;
+	info.id.vendor = vendor;
+	info.id.product = product;
+	info.id.version = version;
+	info.capabilities = device->description.capabilities;
+	info.capability_count = device->description.capability_count;
+	info.absolute_axes = device->description.axes;
+	info.absolute_axis_count = device->description.axis_count;
+	info.properties = device->description.properties;
+	error = drv_input_device_register(&info, &device->input);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: readers can open the device. */
+	return 0;
+}
+
+void
+old_i2c_report(
+	struct old_i2c *device,
+	const uint8_t *report,
+	size_t length,
+	uint64_t now)
+{
+	size_t index;
+	int is_touch;
+	int error;
+
+	/* Decodes the report; one the layout does not know is dropped. */
+	error = drv_hid_report_decode(device->layout, report, length, &device->decoded);
+	if (error != 0)
+		return;
+
+	/* Only the reports of the fingers go to the touch state machine (the mouse report is not published). */
+	is_touch = drv_hid_touch_report_is_touch(&device->decoded);
+	if (!is_touch)
+		return;
+
+	/* Turns the report into events at the time it arrived. */
+	error = drv_hid_touch_translate_at(&device->state, &device->decoded, now, &device->output);
+	if (error != 0)
+		return;
+
+	/* Emits them in order. */
+	for (index = 0; index < device->output.event_count; index++) {
+		drv_input_device_emit_at(device->input,
+					 device->output.events[index].type,
+					 device->output.events[index].code,
+					 device->output.events[index].value,
+					 now);
+	}
+}
+
+void
+old_i2c_unpublish(struct old_i2c *device)
+{
+	if (device->input != NULL)
+		drv_input_device_unregister(device->input);
+	device->input = NULL;
+}
+
+void
+old_i2c_destroy(struct old_i2c *device)
+{
+	if (device->layout != NULL)
+		drv_hid_report_layout_destroy(device->layout);
+	device->layout = NULL;
 }
