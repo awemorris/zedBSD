@@ -12,6 +12,11 @@
  * In-Reply-To and References for a reply) and the words as UTF-8 text
  * in quoted-printable, every line ended with CR LF.
  *
+ * ws189-p004: a message with files attached is multipart/mixed: the words
+ * as the first part, then each file in base64 (lines of 76), its name a
+ * quoted string, or in RFC 2231's form (filename*=UTF-8''%XX) when it is
+ * not plain ASCII.
+ *
  * ws177-p016: the names of To and Cc that are not ASCII are encoded words
  * too ("=?UTF-8?B?...?= <addr>"), a long encoded value is split into words
  * of whole characters, and the long fields are folded (a line end and a
@@ -33,6 +38,9 @@
 
 /* The longest line of a header field before it is folded (RFC 5322 2.1.1 asks for 78). */
 #define COMPOSE_FIELD_MAX	78U
+
+/* The longest line of base64 (RFC 2045 section 6.8). */
+#define COMPOSE_BASE64_LINE	76U
 
 /* The most bytes of text in one encoded word (60 of base64, a word of 72 with its "=?UTF-8?B?" and "?="). */
 #define COMPOSE_WORD_BYTES	45U
@@ -68,6 +76,9 @@ static void compose_subject(struct compose_text *text, const char *subject);
 static void compose_field_bytes(struct compose_text *text, const char *bytes, size_t length);
 static void compose_body(struct compose_text *text, const char *body);
 static int compose_is_ascii(const char *text);
+static void compose_attachment(struct compose_text *text, const char *boundary, const struct ml_attachment *attachment);
+static void compose_parameter(struct compose_text *text, const char *name, const char *value);
+static void compose_base64(struct compose_text *text, const unsigned char *data, size_t length);
 
 /*
  * Writes a message from an account: to, cc (may be empty), its subject
@@ -86,16 +97,51 @@ ml_compose(
 	char **raw,
 	size_t *length)
 {
+	int error;
+
+	/* The same message with no file attached. */
+	error = ml_compose_with(account, to, cc, subject, body, reply_to_id, NULL, 0U, now, raw, length);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the message is written. */
+	return 0;
+}
+
+/*
+ * Writes a message as ml_compose does, with files attached (ws189-p004):
+ * multipart/mixed when there are any.  Returns 0 with the bytes (the
+ * caller frees them), EINVAL for more than ML_ATTACH_MAX files, or ENOMEM.
+ */
+int
+ml_compose_with(
+	const struct ml_account_config *account,
+	const char *to,
+	const char *cc,
+	const char *subject,
+	const char *body,
+	const char *reply_to_id,
+	const struct ml_attachment *attachments,
+	size_t count,
+	time_t now,
+	char **raw,
+	size_t *length)
+{
 	struct compose_text text;
 	struct tm parts;
 	const char *domain;
 	char line[ML_TEXT_MAX * 2U];
+	char boundary[96];
+	size_t index;
 	int ascii;
 
-	/* Nothing yet. */
+	/* Nothing yet, and no more files than a message takes. */
 	memset(&text, 0, sizeof(text));
 	*raw = NULL;
 	*length = 0;
+	if (count > ML_ATTACH_MAX)
+		return EINVAL;
+	boundary[0] = '\0';
 
 	/* From: the user's name (quoted, or an encoded word) and address. */
 	compose_string(&text, "From: ");
@@ -141,12 +187,29 @@ ml_compose(
 		compose_field(&text, "References", reply_to_id);
 	}
 
-	/* The words: UTF-8 text in quoted-printable. */
+	/* A message with files: the parts' boundary, a line no file's base64 or the words' quoted-printable can hold ("=_" starts no such line). */
 	compose_string(&text, "MIME-Version: 1.0\r\n");
+	if (count > 0U) {
+		(void)snprintf(boundary, sizeof(boundary), "=_keiland_%lld_%ld_%lu", (long long)now, (long)getpid(), compose_serial);
+		(void)snprintf(line, sizeof(line), "Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", boundary);
+		compose_string(&text, line);
+		(void)snprintf(line, sizeof(line), "--%s\r\n", boundary);
+		compose_string(&text, line);
+	}
+
+	/* The words: UTF-8 text in quoted-printable. */
 	compose_string(&text, "Content-Type: text/plain; charset=utf-8\r\n");
 	compose_string(&text, "Content-Transfer-Encoding: quoted-printable\r\n");
 	compose_string(&text, "\r\n");
 	compose_body(&text, body);
+
+	/* Each file, then the parts' end. */
+	for (index = 0; index < count; index++)
+		compose_attachment(&text, boundary, &attachments[index]);
+	if (count > 0U) {
+		(void)snprintf(line, sizeof(line), "--%s--\r\n", boundary);
+		compose_string(&text, line);
+	}
 
 	/* Growing failed somewhere. */
 	if (text.failed) {
@@ -560,4 +623,141 @@ compose_is_ascii(
 
 	/* All ASCII. */
 	return 1;
+}
+
+/*
+ * Writes one file of the message as a part: its boundary, its type and
+ * name, its disposition with its name, and its bytes in base64.
+ */
+static void
+compose_attachment(
+	struct compose_text *text,
+	const char *boundary,
+	const struct ml_attachment *attachment)
+{
+	char line[ML_TEXT_MAX];
+	const char *type;
+
+	/* The part's start. */
+	(void)snprintf(line, sizeof(line), "--%s\r\n", boundary);
+	compose_string(text, line);
+
+	/* Its type, with its name. */
+	type = attachment->type;
+	if (type[0] == '\0')
+		type = "application/octet-stream";
+	compose_string(text, "Content-Type: ");
+	compose_string(text, type);
+	compose_parameter(text, "name", attachment->name);
+	compose_string(text, "\r\n");
+
+	/* Its disposition, with its name again. */
+	compose_string(text, "Content-Disposition: attachment");
+	compose_parameter(text, "filename", attachment->name);
+	compose_string(text, "\r\n");
+
+	/* Its bytes in base64, after a blank line. */
+	compose_string(text, "Content-Transfer-Encoding: base64\r\n\r\n");
+	compose_base64(text, attachment->data, attachment->length);
+}
+
+/*
+ * Writes a parameter of a header field on a line of its own (folded): as
+ * a quoted string when its value is printable ASCII without '"' and '\\',
+ * else in RFC 2231's form, UTF-8 with the other bytes as %XX.
+ */
+static void
+compose_parameter(
+	struct compose_text *text,
+	const char *name,
+	const char *value)
+{
+	const unsigned char *byte;
+	char escape[3];
+	int plain;
+
+	/* Whether the value can be a quoted string. */
+	plain = 1;
+	for (byte = (const unsigned char *)value; *byte != '\0'; byte++) {
+		/* A control, a byte past ASCII, a quote or a backslash cannot. */
+		if (*byte < 32U || *byte > 126U || *byte == '"' || *byte == '\\') {
+			plain = 0;
+			break;
+		}
+	}
+
+	/* A quoted string. */
+	compose_string(text, ";\r\n\t");
+	compose_string(text, name);
+	if (plain) {
+		compose_string(text, "=\"");
+		compose_string(text, value);
+		compose_string(text, "\"");
+		return;
+	}
+
+	/* RFC 2231: the charset, no language, then the bytes, unreserved ones as they are. */
+	compose_string(text, "*=UTF-8''");
+	for (byte = (const unsigned char *)value; *byte != '\0'; byte++) {
+		/* Letters, digits and "-._~" stand for themselves. */
+		if ((*byte >= 'a' && *byte <= 'z') ||
+		    (*byte >= 'A' && *byte <= 'Z') ||
+		    (*byte >= '0' && *byte <= '9') ||
+		    *byte == '-' || *byte == '.' || *byte == '_' || *byte == '~') {
+			compose_append(text, (const char *)byte, 1U);
+			continue;
+		}
+
+		/* Any other byte as %XX. */
+		escape[0] = '%';
+		escape[1] = compose_hex[*byte >> 4];
+		escape[2] = compose_hex[*byte & 0x0fU];
+		compose_append(text, escape, 3U);
+	}
+}
+
+/* Writes bytes in base64, lines of COMPOSE_BASE64_LINE ended with CR LF. */
+static void
+compose_base64(
+	struct compose_text *text,
+	const unsigned char *data,
+	size_t length)
+{
+	static const char alphabet[] = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+	char quad[4];
+	uint32_t group;
+	size_t index;
+	size_t column;
+	size_t left;
+
+	/* Each group of three bytes as four characters, the last padded with '='. */
+	column = 0;
+	for (index = 0; index < length; index += 3U) {
+		left = length - index;
+		group = (uint32_t)data[index] << 16;
+		if (left > 1U)
+			group |= (uint32_t)data[index + 1U] << 8;
+		if (left > 2U)
+			group |= (uint32_t)data[index + 2U];
+		quad[0] = alphabet[(group >> 18) & 0x3fU];
+		quad[1] = alphabet[(group >> 12) & 0x3fU];
+		quad[2] = '=';
+		quad[3] = '=';
+		if (left > 1U)
+			quad[2] = alphabet[(group >> 6) & 0x3fU];
+		if (left > 2U)
+			quad[3] = alphabet[group & 0x3fU];
+		compose_append(text, quad, 4U);
+
+		/* A full line ends. */
+		column += 4U;
+		if (column >= COMPOSE_BASE64_LINE) {
+			compose_string(text, "\r\n");
+			column = 0;
+		}
+	}
+
+	/* The last line's end. */
+	if (column != 0U || length == 0U)
+		compose_string(text, "\r\n");
 }

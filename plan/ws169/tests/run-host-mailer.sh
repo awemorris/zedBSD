@@ -18,7 +18,7 @@ K=$U/libkeiland/ui
 L=$U/libkeiland
 cc -std=c11 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -I"$dir/inc" -I. -I$K -I$U/libtruetype \
 	plan/ws169/tests/host-mailer.c plan/ws169/tests/host-mailer-data.c $U/mailer/view.c $U/mailer/store.c \
-	$K/canvas.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
+	$K/canvas.c $K/drop-look.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
 	$K/text-touch.c $K/ui.c $K/widgets.c $K/field.c $K/text-area.c $K/list.c $K/cards.c \
 	$L/gesture.c $L/motion.c $L/scroll.c \
 	$U/libtruetype/*.c $U/picture/color-glyph.c \

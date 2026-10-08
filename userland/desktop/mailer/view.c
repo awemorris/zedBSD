@@ -34,6 +34,7 @@
 
 #include "mailer.h"
 
+#include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -91,6 +92,8 @@
 #define ML_ID_SIDEBAR		25U
 #define ML_ID_DIALOG		26U
 #define ML_ID_REMOVE		27U
+#define ML_ID_ATTACH		28U
+#define ML_ID_ATTACH_REMOVE	100U
 
 /* Where the accounts' folders start below the sidebar's top, and how far above its bottom they end (Add Account, Get Mail). */
 #define ML_VIEW_FOLDERS_TOP	104
@@ -131,6 +134,7 @@ static void view_sidebar(struct ml_view *view, struct kl_ui *ui, const struct kl
 static void view_list(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
 static void view_row(struct ml_view *view, const struct kl_style *style, size_t index, const struct kl_rect *row, int chosen);
 static void view_reader(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
+static void view_attachments(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *row);
 static void view_compose(struct ml_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
 static int view_words(const struct kl_style *style, const char *text, int x, int y, int width, unsigned pixels, kl_color color, int draw);
 static void view_avatar(const struct kl_style *style, const char *name, kl_color color, int cx, int cy, int radius);
@@ -212,6 +216,88 @@ ml_view_release(
 	free(view->shown);
 	view->shown = NULL;
 	view->shown_capacity = 0;
+
+	/* The files attached. */
+	ml_view_attach_clear(view);
+}
+
+/*
+ * Attaches a file to the message being written (ws189-p004): a copy of its
+ * bytes, under its name and type.  Returns 0, ENOSPC past ML_ATTACH_MAX,
+ * EFBIG past ML_ATTACH_TOTAL_MAX in all, or ENOMEM.
+ */
+int
+ml_view_attach(
+	struct ml_view *view,
+	const char *name,
+	const char *type,
+	const unsigned char *data,
+	size_t length)
+{
+	struct ml_attachment *attachment;
+
+	/* Room for one more, within the bytes a message takes. */
+	if (view->attachment_count >= ML_ATTACH_MAX)
+		return ENOSPC;
+	if (length > ML_ATTACH_TOTAL_MAX - view->attachment_bytes)
+		return EFBIG;
+
+	/* The copy of its bytes. */
+	attachment = &view->attachments[view->attachment_count];
+	memset(attachment, 0, sizeof(*attachment));
+	attachment->data = malloc(length + 1U);
+	if (attachment->data == NULL)
+		return ENOMEM;
+	if (length != 0U)
+		memcpy(attachment->data, data, length);
+
+	/* Its name, type and length. */
+	(void)snprintf(attachment->name, sizeof(attachment->name), "%s", name);
+	(void)snprintf(attachment->type, sizeof(attachment->type), "%s", type);
+	attachment->length = length;
+	view->attachment_count++;
+	view->attachment_bytes += length;
+
+	/* Succeeded: the file goes with the message. */
+	ml_log("ATTACH add name=%s type=%s bytes=%zu count=%zu", attachment->name, attachment->type, length, view->attachment_count);
+	return 0;
+}
+
+/*
+ * Takes a file off the message being written.
+ */
+void
+ml_view_attach_remove(
+	struct ml_view *view,
+	size_t index)
+{
+	/* Only a file attached. */
+	if (index >= view->attachment_count)
+		return;
+
+	/* Its bytes, and the later ones moved up. */
+	view->attachment_bytes -= view->attachments[index].length;
+	free(view->attachments[index].data);
+	memmove(&view->attachments[index], &view->attachments[index + 1U], (view->attachment_count - index - 1U) * sizeof(view->attachments[0]));
+	view->attachment_count--;
+	ml_log("ATTACH remove index=%zu count=%zu", index, view->attachment_count);
+}
+
+/*
+ * Takes every file off the message being written.
+ */
+void
+ml_view_attach_clear(
+	struct ml_view *view)
+{
+	size_t index;
+
+	/* Each file's bytes. */
+	for (index = 0; index < view->attachment_count; index++)
+		free(view->attachments[index].data);
+	memset(view->attachments, 0, sizeof(view->attachments));
+	view->attachment_count = 0;
+	view->attachment_bytes = 0;
 }
 
 /*
@@ -237,6 +323,7 @@ ml_view_action(
 		kl_field_set(&view->cc, "");
 		kl_field_set(&view->subject, "");
 		kl_text_area_set(&view->body, "");
+		ml_view_attach_clear(view);
 		ml_log("COMPOSE kind=new");
 		break;
 	case ML_ACTION_REPLY:
@@ -1078,6 +1165,7 @@ view_compose(
 	struct kl_rect button;
 	struct kl_rect field;
 	struct kl_rect body;
+	struct kl_rect row;
 	int clicked;
 	int x;
 	int y;
@@ -1126,8 +1214,87 @@ view_compose(
 	body.height = area->y + area->height - body.y - 36;
 	(void)kl_text_area(ui, style, ML_ID_BODY, &body, &view->body, "Write your message here.");
 
-	/* What the mock leaves out. */
-	(void)kl_text_draw_fit(style->text, style->canvas, x, area->y + area->height - 14, "Attachments and drafts are not kept yet.", 11U, 0, area->width - 2 * ML_VIEW_PAD, style->theme->text_faint);
+	/* The files attached, under the words (ws189-p004). */
+	row.x = area->x + 8;
+	row.y = area->y + area->height - 34;
+	row.width = area->width - 16;
+	row.height = 30;
+	view_attachments(view, ui, style, &row);
+}
+
+/*
+ * Draws the files attached to the message being written (ws189-p004):
+ * Attach..., then a chip for each file (its name and size, a button that
+ * takes it off), "+N" for those without room; lit as every application
+ * lights a drop's place while a drag of files or a picture is over the
+ * message.
+ */
+static void
+view_attachments(
+	struct ml_view *view,
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	const struct kl_rect *row)
+{
+	const struct ml_attachment *attachment;
+	struct kl_rect button;
+	char label[ML_TEXT_MAX + 32];
+	char more[16];
+	size_t index;
+	int clicked;
+	int width;
+	int x;
+
+	/* Where it is, for the window's drops; lit while a drop is over the message. */
+	view->attach_row = *row;
+	if (view->drop_over)
+		kl_drop_frame(style->canvas, style->theme, (float)row->x, (float)row->y, (float)row->width, (float)row->height, 6.0f);
+
+	/* Attach... */
+	button.x = row->x + 4;
+	button.y = row->y + 2;
+	button.height = row->height - 4;
+	button.width = kl_button_width(style, "Attach...");
+	clicked = kl_button(ui, style, ML_ID_ATTACH, &button, "Attach...", 0U);
+	if (clicked) {
+		view->attach_asked = 1;
+		ml_log("ATTACH asked");
+	}
+
+	/* Each file: its chip, then its button that takes it off. */
+	x = button.x + button.width + 8;
+	for (index = 0; index < view->attachment_count; index++) {
+		attachment = &view->attachments[index];
+		(void)snprintf(label, sizeof(label), "%s (%zu KB)", attachment->name, (attachment->length + 1023U) / 1024U);
+		width = kl_text_width(style->text, label, strlen(label), ML_VIEW_TEXT_BODY - 2U, 0) + 16;
+		if (width > 220)
+			width = 220;
+
+		/* No room: the rest counted. */
+		if (x + width + 26 > row->x + row->width) {
+			(void)snprintf(more, sizeof(more), "+%zu", view->attachment_count - index);
+			(void)kl_text_draw(style->text, style->canvas, x, row->y + 20, more, strlen(more), ML_VIEW_TEXT_BODY - 2U, 0, style->theme->text_secondary);
+			break;
+		}
+
+		/* The chip with its name and size. */
+		kl_canvas_round(style->canvas, (float)x, (float)(row->y + 3), (float)(width + 24), (float)(row->height - 6), 6.0f, style->theme->control);
+		(void)kl_text_draw_fit(style->text, style->canvas, x + 8, row->y + 20, label, ML_VIEW_TEXT_BODY - 2U, 0, width - 12, style->theme->text);
+
+		/* Its button that takes it off. */
+		button.x = x + width;
+		button.y = row->y + 5;
+		button.width = 20;
+		button.height = row->height - 10;
+		clicked = kl_button(ui, style, ML_ID_ATTACH_REMOVE + (uint32_t)index, &button, "x", KL_BUTTON_QUIET);
+		if (clicked) {
+			ml_view_attach_remove(view, index);
+			break;
+		}
+
+		/* The next chip's place. */
+		x += width + 32;
+	}
 }
 
 /*
@@ -1550,7 +1717,8 @@ view_reply(
 	view->body.caret = 0;
 	view->body.anchor = 0;
 
-	/* Written in the third pane. */
+	/* Written in the third pane, with no file attached yet. */
+	ml_view_attach_clear(view);
 	view->composing = 1;
 	view->opened = 1;
 	ml_log("COMPOSE kind=%s", kind);
