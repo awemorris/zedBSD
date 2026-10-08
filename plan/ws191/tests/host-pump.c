@@ -42,6 +42,7 @@ static int failures;
 
 static void (*fake_play)(unsigned long frames);
 static void (*fake_fail_open)(int error);
+static void (*fake_fail_set_params)(int error, int times);
 static unsigned long (*fake_written)(void);
 static int (*fake_opened)(void);
 
@@ -102,6 +103,7 @@ main(void)
 		return 1;
 	fake_play = (void (*)(unsigned long))dlsym(library, "fake_alsa_play");
 	fake_fail_open = (void (*)(int))dlsym(library, "fake_alsa_fail_open");
+	fake_fail_set_params = (void (*)(int, int))dlsym(library, "fake_alsa_fail_set_params");
 	fake_written = (unsigned long (*)(void))dlsym(library, "fake_alsa_written");
 	fake_opened = (int (*)(void))dlsym(library, "fake_alsa_opened");
 
@@ -119,6 +121,27 @@ main(void)
 	CHECK(stream != NULL, "a stream record");
 	CHECK(expect(stream, KL_BACKEND_AUDIO_FAILED, &report, 500U) && report.error == KL_BACKEND_AUDIO_ERROR_NO_DEVICE, "no device: %u", report.error);
 	kl_backend_audio_stream_close(stream);
+
+	/* 2b. A service not ready yet (T1-451): a refused open, then a refused format, are tried again until READY. */
+	fake_fail_open(EBUSY);
+	stream = kl_backend_audio_stream_open(&format);
+	CHECK(expect(stream, KL_BACKEND_AUDIO_READY, &report, 2000U), "ready after a refused open");
+	if (report.what == KL_BACKEND_AUDIO_READY && report.fd >= 0)
+		close(report.fd);
+	kl_backend_audio_stream_close(stream);
+	fake_fail_set_params(EIO, 2);
+	stream = kl_backend_audio_stream_open(&format);
+	CHECK(expect(stream, KL_BACKEND_AUDIO_READY, &report, 2000U), "ready after two refused formats");
+	if (report.what == KL_BACKEND_AUDIO_READY && report.fd >= 0)
+		close(report.fd);
+	kl_backend_audio_stream_close(stream);
+
+	/* 2c. A format refused every time: FAILED, INVALID, after the tries. */
+	fake_fail_set_params(EINVAL, 100);
+	stream = kl_backend_audio_stream_open(&format);
+	CHECK(expect(stream, KL_BACKEND_AUDIO_FAILED, &report, 3000U) && report.error == KL_BACKEND_AUDIO_ERROR_INVALID, "invalid: %u", report.error);
+	kl_backend_audio_stream_close(stream);
+	fake_fail_set_params(0, 0);
 
 	/* 3. Made: READY with the ring, sealed against a change of size. */
 	stream = kl_backend_audio_stream_open(&format);
