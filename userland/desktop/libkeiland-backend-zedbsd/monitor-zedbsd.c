@@ -20,10 +20,12 @@
  *   the disks    sysctl hw.diskstats (ws134-p006): each physical disk
  *   the GPUs     sysctl hw.gputelemetry (ws134-p007): what their drivers
  *                keep (none on the virtual GPU)
+ *   the CPU's    sysctl hw.thermal (ws134-p009): the processor's sensor,
+ *   temperature  else the first ACPI thermal zone (none on QEMU's q35)
  *
  * Nothing here touches struct kl_backend: the compositor samples on a
- * thread of its own.  The temperatures and the power have no source on
- * zedBSD yet (design.md section 1.5) and stay out of valid.
+ * thread of its own.  The GPUs' temperatures and the power have no source
+ * on zedBSD yet (design.md section 1.5) and stay out of valid.
  */
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
@@ -74,6 +76,7 @@ static void monitor_memory(struct kl_backend_monitor *monitor, uint64_t now);
 static unsigned monitor_links(struct kl_backend_monitor_link *links, struct kl_backend_monitor_link_info *infos);
 static int monitor_disks(struct kl_backend_monitor *monitor, struct kl_backend_monitor_sample *sample, struct kl_backend_monitor_info *info);
 static int monitor_gpus(struct kl_backend_monitor *monitor, struct kl_backend_monitor_sample *sample, struct kl_backend_monitor_info *info);
+static void monitor_temperature(struct kl_backend_monitor *monitor, struct kl_backend_monitor_sample *sample);
 static uint64_t monitor_name_id(const char *name);
 
 /*
@@ -202,6 +205,9 @@ kl_backend_monitor_sample(
 		sample->valid |= KL_MONITOR_HAVE_DISKS;
 	(void)monitor_gpus(monitor, sample, info);
 	free(info);
+
+	/* The CPU's temperature, where the machine has a sensor. */
+	monitor_temperature(monitor, sample);
 
 	/* Nothing at all. */
 	if (sample->valid == 0U)
@@ -630,6 +636,59 @@ monitor_gpus(
 
 	/* Succeeded: the GPUs. */
 	return 0;
+}
+
+/*
+ * Reads the CPU's temperature into a sample (ws134-p009): the sensor
+ * hw.thermal marks the processor's, else the first thermal zone, when it
+ * has a temperature.  A kernel without hw.thermal, or a machine without a
+ * sensor, leaves the sample without one.
+ */
+static void
+monitor_temperature(
+	struct kl_backend_monitor *monitor,
+	struct kl_backend_monitor_sample *sample)
+{
+	const struct thermal_header *header;
+	const struct thermal_entry *entry;
+	const struct thermal_entry *chosen;
+	size_t length;
+	uint32_t count;
+	uint32_t index;
+	int error;
+
+	/* The value, of the known layout. */
+	error = monitor_fetch(monitor, "hw.thermal", &length);
+	if (error != 0)
+		return;
+	error = monitor_entries(monitor, length, THERMAL_VERSION, sizeof(*entry), &count);
+	if (error != 0)
+		return;
+
+	/* The processor's sensor, else the first zone, among those with a temperature. */
+	header = (const struct thermal_header *)(const void *)monitor->buffer;
+	chosen = NULL;
+	for (index = 0; index < count; index++) {
+		entry = (const struct thermal_entry *)(const void *)(monitor->buffer + header->struct_size + (size_t)index * sizeof(*entry));
+		if ((entry->valid & THERMAL_HAVE_TEMPERATURE) == 0U)
+			continue;
+		if ((entry->flags & THERMAL_FLAG_CPU) != 0U) {
+			chosen = entry;
+			break;
+		}
+
+		/* Else the first zone, kept while no processor's sensor comes. */
+		if (chosen == NULL && entry->kind == THERMAL_KIND_ZONE)
+			chosen = entry;
+	}
+
+	/* None. */
+	if (chosen == NULL)
+		return;
+
+	/* Succeeded: its temperature. */
+	sample->cpu_milli_celsius = chosen->milli_celsius;
+	sample->valid |= KL_MONITOR_HAVE_TEMPERATURE;
 }
 
 /* A link's id from its name (FNV-1a), the same for the same name; never 0. */

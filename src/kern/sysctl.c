@@ -50,6 +50,7 @@ static const struct sysctl_leaf leaves[] = {
 	{{ CTL_HW, HW_CPUTIMES, 0 }, 2, "hw.cputimes"},
 	{{ CTL_HW, HW_DISKSTATS, 0 }, 2, "hw.diskstats"},
 	{{ CTL_HW, HW_GPUTELEMETRY, 0 }, 2, "hw.gputelemetry"},
+	{{ CTL_HW, HW_THERMAL, 0 }, 2, "hw.thermal"},
 	{{ CTL_KERN, KERN_MSGBUF, 0 }, 2, "kern.msgbuf"},
 	{{ CTL_KERN, KERN_MSGBUF_SIZE, 0 }, 2, "kern.msgbuf_size"},
 	{{ CTL_KERN, KERN_MSGBUF_DROPPED, 0 }, 2, "kern.msgbuf_dropped"},
@@ -123,6 +124,26 @@ static struct gpu_telemetry_source gpu_telemetry_sources[GPU_TELEMETRY_MAX];
 static atomic_uint_t gpu_telemetry_count;
 static struct spinlock gpu_telemetry_lock;
 
+/* The most sources hw.thermal lists, and the most sensors one source gives. */
+#define THERMAL_SOURCES_MAX	4U
+#define THERMAL_SOURCE_SENSORS	16U
+
+/* One source hw.thermal lists: the function that reads its sensors, and its context. */
+struct thermal_source {
+	kern_thermal_read_t read;
+	void *context;
+};
+
+/*
+ * The sources hw.thermal lists (ws134-p009), appended and published as
+ * the GPUs of hw.gputelemetry are: under thermal_lock, by raising
+ * thermal_count with release; never taken out.
+ */
+static struct thermal_source thermal_sources[THERMAL_SOURCES_MAX];
+static atomic_uint_t thermal_count;
+static struct spinlock thermal_lock;
+
+static int sysctl_thermal(void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
 static int sysctl_gpu_start(void *oldp, size_t *oldlenp, const void *newp, size_t newlen, int superuser);
 static int sysctl_cputimes(void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
 static int sysctl_diskstats(void *oldp, size_t *oldlenp, const void *newp, size_t newlen);
@@ -142,6 +163,58 @@ sysctl_init(
 {
 	spin_init(&hostname_lock, LOCK_RANK_DEVICE, "hostname");
 	spin_init(&gpu_telemetry_lock, LOCK_RANK_DEVICE, "gpu telemetry");
+	spin_init(&thermal_lock, LOCK_RANK_DEVICE, "thermal");
+}
+
+/*
+ * Lists a source of temperatures in hw.thermal (ws134-p009): the function
+ * that reads its sensors and its context, which live as long as the
+ * kernel.  A context already listed is not listed again.  Returns 0, or
+ * ENOSPC when the list is full, EINVAL without a function.
+ */
+int
+kern_thermal_register(
+	kern_thermal_read_t read,
+	void *context)
+{
+	struct thermal_source *source;
+	unsigned long irq;
+	unsigned count;
+	unsigned index;
+
+	/* A source needs its function. */
+	if (read == NULL)
+		return EINVAL;
+
+	/* Appended under the lock, published by the count. */
+	irq = spin_lock_irqsave(&thermal_lock);
+
+	/* A context already listed stays as it is. */
+	count = atomic_load_acquire(&thermal_count);
+	for (index = 0; index < count; index++) {
+		if (thermal_sources[index].context == context) {
+			spin_unlock_irqrestore(&thermal_lock, irq);
+			return 0;
+		}
+	}
+
+	/* A full list. */
+	if (count >= THERMAL_SOURCES_MAX) {
+		spin_unlock_irqrestore(&thermal_lock, irq);
+		return ENOSPC;
+	}
+
+	/* The new source, whole before the count shows it. */
+	source = &thermal_sources[count];
+	source->read = read;
+	source->context = context;
+	atomic_store_release(&thermal_count, count + 1U);
+
+	/* Another source may be listed now. */
+	spin_unlock_irqrestore(&thermal_lock, irq);
+
+	/* Succeeded: the source is listed. */
+	return 0;
 }
 
 /*
@@ -334,6 +407,12 @@ kern_sysctl(
 	/* Reports each GPU's work as its driver keeps it. */
 	if (namelen == 2 && name[0] == CTL_HW && name[1] == HW_GPUTELEMETRY) {
 		error = sysctl_gputelemetry(oldp, oldlenp, newp, newlen);
+		return error;
+	}
+
+	/* Reports the temperature sensors as their sources keep them. */
+	if (namelen == 2 && name[0] == CTL_HW && name[1] == HW_THERMAL) {
+		error = sysctl_thermal(oldp, oldlenp, newp, newlen);
 		return error;
 	}
 
@@ -855,6 +934,83 @@ sysctl_gputelemetry(
 	header.count = count;
 	kern_memcpy(output, &header, sizeof(header));
 	*oldlenp = sizeof(header) + (size_t)count * sizeof(entry);
+
+	/* Succeeded: the value is in the buffer. */
+	return 0;
+}
+
+/*
+ * Reads hw.thermal: the header and each listed source's sensors as it
+ * keeps them (ws134-p009).  A source that fails is left out.  The length
+ * asked for is room for every source's most sensors, so a reader that asks
+ * again with it has room; the length given back is what was filled.
+ */
+static int
+sysctl_thermal(
+	void *oldp,
+	size_t *oldlenp,
+	const void *newp,
+	size_t newlen)
+{
+	struct thermal_header header;
+	struct thermal_entry *entries;
+	const struct thermal_source *source;
+	uint8_t *output;
+	unsigned listed;
+	unsigned index;
+	unsigned filled;
+	uint32_t count;
+	size_t needed;
+	size_t capacity;
+	int error;
+
+	/* Read-only. */
+	if (newp != NULL || newlen != 0)
+		return EPERM;
+
+	/* The length every listed source's most sensors take. */
+	listed = atomic_load_acquire(&thermal_count);
+	needed = sizeof(header) + (size_t)listed * THERMAL_SOURCE_SENSORS * sizeof(struct thermal_entry);
+
+	/* Without a length there is nothing to size or copy. */
+	if (oldlenp == NULL) {
+		if (oldp == NULL)
+			return 0;
+		return EINVAL;
+	}
+
+	/* The length needed, and nothing more without a buffer or with one too small. */
+	capacity = *oldlenp;
+	*oldlenp = needed;
+	if (oldp == NULL)
+		return 0;
+	if (capacity < needed)
+		return ENOMEM;
+
+	/* Each source's sensors, after the header's place and the sensors before them. */
+	output = oldp;
+	count = 0;
+	for (index = 0; index < listed; index++) {
+		source = &thermal_sources[index];
+		entries = (struct thermal_entry *)(void *)(output + sizeof(header) + (size_t)count * sizeof(*entries));
+		kern_memset(entries, 0, THERMAL_SOURCE_SENSORS * sizeof(*entries));
+		filled = 0;
+		error = source->read(source->context, entries, THERMAL_SOURCE_SENSORS, &filled);
+		if (error != 0)
+			continue;
+		if (filled > THERMAL_SOURCE_SENSORS)
+			filled = THERMAL_SOURCE_SENSORS;
+		count += filled;
+	}
+
+	/* The header, with the sensors read; the length is theirs. */
+	kern_memset(&header, 0, sizeof(header));
+	header.version = THERMAL_VERSION;
+	header.struct_size = sizeof(header);
+	header.element_size = sizeof(struct thermal_entry);
+	header.count = count;
+	kern_memcpy(output, &header, sizeof(header));
+	*oldlenp = sizeof(header) + (size_t)count * sizeof(struct thermal_entry);
 
 	/* Succeeded: the value is in the buffer. */
 	return 0;
