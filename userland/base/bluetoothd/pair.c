@@ -69,8 +69,9 @@
 #define PAIR_EVENT_PASSKEY_SHOWN	0x3bU
 #define PAIR_EVENT_LE_META		0x3eU
 
-/* LE's subevents: Connection Complete, Read Local P-256 Public Key Complete, Generate DHKey Complete. */
+/* LE's subevents: Connection Complete (and Enhanced, which replaces it once its mask bit is on, ws143-p005 i03), Read Local P-256 Public Key Complete, Generate DHKey Complete. */
 #define PAIR_LE_CONNECTED		0x01U
+#define PAIR_LE_ENHANCED		0x0aU
 #define PAIR_LE_P256_DONE		0x08U
 #define PAIR_LE_DHKEY_DONE		0x09U
 
@@ -769,6 +770,8 @@ pair_le_meta(
 	/* Each subevent the pairing uses. */
 	switch (parameters[0]) {
 	case PAIR_LE_CONNECTED:
+	case PAIR_LE_ENHANCED:
+		/* The same fields up to the device's address (Enhanced's resolved identity there). */
 		pair_le_connected(pair, parameters, length);
 		break;
 	case PAIR_LE_P256_DONE:

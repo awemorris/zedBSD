@@ -10,7 +10,9 @@
  */
 
 #include "userland/base/bluetoothd/hidcache.h"
+#include "userland/base/bluetoothd/keys.h"
 
+#include <dirent.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <stdio.h>
@@ -453,6 +455,103 @@ btd_hidcache_forget(
 		return errno;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/* How many records one pruning looks at. */
+#define HIDCACHE_PRUNE_MAX	32U
+
+/*
+ * Removes the records of the controller's folder whose bond is not among
+ * the bonds given (a bond forgotten while the daemon did not run,
+ * phase005 section 9.3).  Returns 0, or the error of reading the folder.
+ */
+int
+btd_hidcache_prune(
+	const char *folder,
+	const uint8_t *controller,
+	const struct btd_bond *bonds,
+	unsigned count)
+{
+	uint8_t addresses[HIDCACHE_PRUNE_MAX][BTD_ADDRESS_BYTES];
+	unsigned types[HIDCACHE_PRUNE_MAX];
+	struct dirent *entry;
+	char own[24];
+	char path[256];
+	char address_text[18];
+	char type_text[16];
+	const char *dash;
+	const char *dot;
+	unsigned found;
+	unsigned index;
+	unsigned bond;
+	unsigned type;
+	int bonded;
+	int same;
+	int written;
+	int error;
+	DIR *directory;
+
+	/* The controller's folder; none is nothing to prune. */
+	btd_format_address(controller, own, sizeof(own));
+	written = snprintf(path, sizeof(path), "%s/%s", folder, own);
+	if (written < 0 || (size_t)written >= sizeof(path))
+		return ENAMETOOLONG;
+	directory = opendir(path);
+	if (directory == NULL) {
+		error = errno;
+		if (error == ENOENT)
+			return 0;
+		return error;
+	}
+
+	/* Each file named ADDRESS-TYPE.hid without its bond, noted (removed after the folder is read). */
+	found = 0U;
+	for (;;) {
+		entry = readdir(directory);
+		if (entry == NULL || found >= HIDCACHE_PRUNE_MAX)
+			break;
+
+		/* The address, 17 characters before the dash, and the type up to ".hid". */
+		dash = strchr(entry->d_name, '-');
+		dot = strrchr(entry->d_name, '.');
+		if (entry->d_name[0] == '.' || dash == NULL || dash - entry->d_name != 17 || dot == NULL || dot < dash)
+			continue;
+		same = strcmp(dot, ".hid");
+		if (same != 0 || (size_t)(dot - dash - 1) >= sizeof(type_text))
+			continue;
+		memcpy(address_text, entry->d_name, 17U);
+		address_text[17] = '\0';
+		memcpy(type_text, dash + 1, (size_t)(dot - dash - 1));
+		type_text[dot - dash - 1] = '\0';
+		error = btd_address_parse(address_text, addresses[found]);
+		if (error != 0)
+			continue;
+		error = btd_address_type_parse(type_text, &type);
+		if (error != 0)
+			continue;
+
+		/* Its bond, when there is one. */
+		bonded = 0;
+		for (bond = 0U; bond < count; bond++) {
+			same = memcmp(bonds[bond].address, addresses[found], BTD_ADDRESS_BYTES);
+			if (same == 0 && bonds[bond].type == type)
+				bonded = 1;
+		}
+
+		/* None: noted. */
+		if (!bonded) {
+			types[found] = type;
+			found++;
+		}
+	}
+
+	/* The folder is read. */
+	(void)closedir(directory);
+
+	/* Succeeded: the records without a bond go. */
+	for (index = 0U; index < found; index++)
+		(void)btd_hidcache_forget(folder, controller, addresses[index], types[index]);
 	return 0;
 }
 

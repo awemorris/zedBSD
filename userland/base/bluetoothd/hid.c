@@ -17,6 +17,7 @@
  */
 
 #include "userland/base/bluetoothd/hid.h"
+#include "userland/base/bluetoothd/crypto.h"
 #include "userland/base/bluetoothd/hidp.h"
 
 #include <errno.h>
@@ -39,6 +40,16 @@
 #define HID_SET_ENCRYPTION		0x0413U
 #define HID_WRITE_SCAN_ENABLE		0x0c1aU
 #define HID_READ_KEY_SIZE		0x1408U
+#define HID_CREATE_CANCEL		0x0408U
+#define HID_LE_CREATE			0x200dU
+#define HID_LE_CANCEL			0x200eU
+#define HID_LE_CLEAR_LIST		0x2010U
+#define HID_LE_ADD_LIST			0x2011U
+#define HID_LE_UPDATE			0x2013U
+#define HID_LE_ENCRYPT			0x2019U
+#define HID_LE_ADD_RESOLVING		0x2027U
+#define HID_LE_CLEAR_RESOLVING		0x2029U
+#define HID_LE_RESOLUTION		0x202dU
 
 /* The events the HID host takes. */
 #define HID_EVENT_CONNECTED		0x03U
@@ -48,6 +59,23 @@
 #define HID_EVENT_ENCRYPTION		0x08U
 #define HID_EVENT_KEY_REQUEST		0x17U
 #define HID_EVENT_ENCRYPTION_V2		0x59U
+#define HID_EVENT_LE_META		0x3eU
+
+/* LE's subevents the HID host takes: Connection Complete, Enhanced Connection Complete. */
+#define HID_LE_CONNECTED		0x01U
+#define HID_LE_ENHANCED			0x0aU
+
+/* LE's fixed channels: ATT, the LE signalling, the Security Manager; SMP's codes and the refusal's reason (Pairing Not Supported). */
+#define HID_CID_ATT			0x0004U
+#define HID_CID_LE_SIGNALLING		0x0005U
+#define HID_CID_SMP			0x0006U
+#define HID_SMP_PAIRING_REQUEST		0x01U
+#define HID_SMP_PAIRING_FAILED		0x05U
+#define HID_SMP_SECURITY_REQUEST	0x0bU
+#define HID_SMP_NOT_SUPPORTED		0x05U
+
+/* The appearance's category of a HID device (bits 15 to 6, review M5). */
+#define HID_APPEARANCE_HID		0x00fU
 
 /* The status of an authentication whose key the device does not have (PIN or Key Missing). */
 #define HID_STATUS_KEY_MISSING		0x06U
@@ -73,8 +101,24 @@
 #define HID_BONDS_MAX			32U
 
 static struct btd_hid_device *hid_find(struct btd_hid *hid, const uint8_t *address);
+static struct btd_hid_device *hid_find_type(struct btd_hid *hid, const uint8_t *address, unsigned type);
 static struct btd_hid_device *hid_by_handle(struct btd_hid *hid, uint16_t handle);
-static struct btd_hid_device *hid_slot(struct btd_hid *hid, const uint8_t *address);
+static struct btd_hid_device *hid_slot(struct btd_hid *hid, const uint8_t *address, unsigned type);
+static void hid_le_meta(struct btd_hid *hid, const uint8_t *parameters, size_t length);
+static void hid_le_connected(struct btd_hid *hid, const uint8_t *parameters, size_t length);
+static struct btd_hid_device *hid_le_resolve(struct btd_hid *hid, const uint8_t *address);
+static void hid_le_encrypt(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_le_frame(struct btd_hid *hid, struct btd_hid_device *device, uint16_t cid, const uint8_t *payload, size_t length);
+static void hid_le_page(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_le_arm(struct btd_hid *hid);
+static void hid_le_disarm(struct btd_hid *hid);
+static int hid_le_waiting(const struct btd_hid *hid);
+static void hid_gatt_start(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_gatt(struct btd_hid *hid, struct btd_hid_device *device, unsigned actions);
+static void hid_open(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_cancel_page(struct btd_hid *hid, struct btd_hid_device *device);
+static int hid_le_type(unsigned type);
+static void hid_send_fixed(struct btd_hid *hid, struct btd_hid_device *device, uint16_t cid, const uint8_t *payload, size_t length);
 static void hid_event(struct btd_hid *hid, const uint8_t *parameters, size_t length, uint8_t code);
 static void hid_request(struct btd_hid *hid, const uint8_t *parameters, size_t length);
 static void hid_connected(struct btd_hid *hid, const uint8_t *parameters, size_t length);
@@ -148,10 +192,11 @@ btd_hid_init(
 }
 
 /*
- * Reads the records of the controller's bonded BR/EDR devices into the
- * table (each wanted back, a device in the table kept as it is), turns
- * page scan on when there is one, and pages at once those bluetoothd
- * connects to (not those that connect by themselves).
+ * Reads the records of the controller's bonded HID devices into the table
+ * (each wanted back, a device in the table kept as it is), forgets the
+ * records whose bond went, turns page scan on when a BR/EDR device may
+ * come by itself, and pages at once those bluetoothd connects to; LE's
+ * come through the auto-connect (the tick sets it).
  */
 void
 btd_hid_refresh(
@@ -165,31 +210,30 @@ btd_hid_refresh(
 	unsigned found;
 	int error;
 
-	/* The controller's bonds. */
+	/* The controller's bonds; records without one go (phase005 section 9.3). */
 	error = btd_keys_list(hid->keys_folder, hid->session->address, bonds, HID_BONDS_MAX, &count);
 	if (error != 0)
 		count = 0U;
+	if (error == 0)
+		(void)btd_hidcache_prune(hid->keys_folder, hid->session->address, bonds, count);
 
-	/* Each BR/EDR bond with a HID record: in the table. */
+	/* Each bond with a HID record: in the table. */
 	found = 0U;
 	for (index = 0U; index < count; index++) {
-		/* Only BR/EDR (LE is i03's). */
-		if (bonds[index].type != BTD_ADDRESS_BREDR)
-			continue;
-
 		/* Its record, when it has one. */
-		error = btd_hidcache_read(hid->keys_folder, hid->session->address, bonds[index].address, BTD_ADDRESS_BREDR, &record);
+		error = btd_hidcache_read(hid->keys_folder, hid->session->address, bonds[index].address, bonds[index].type, &record);
 		if (error != 0)
 			continue;
-		found++;
+		if (bonds[index].type == BTD_ADDRESS_BREDR)
+			found++;
 
 		/* A device in the table already stays as it is. */
-		device = hid_find(hid, bonds[index].address);
+		device = hid_find_type(hid, bonds[index].address, bonds[index].type);
 		if (device != NULL)
 			continue;
 
 		/* A new one, wanted back; one that does not fit is not taken. */
-		device = hid_slot(hid, bonds[index].address);
+		device = hid_slot(hid, bonds[index].address, bonds[index].type);
 		if (device == NULL)
 			continue;
 		device->record = record;
@@ -197,13 +241,14 @@ btd_hid_refresh(
 			device->have_descriptor = 1;
 		device->wanted = 1;
 
-		/* bluetoothd pages a device that does not connect by itself, or that says it can be connected to. */
-		if (!record.reconnect_initiate || record.normally_connectable)
+		/* bluetoothd pages a BR/EDR device that does not connect by itself, or that says it can be connected to. */
+		if (bonds[index].type == BTD_ADDRESS_BREDR && (!record.reconnect_initiate || record.normally_connectable))
 			device->retry_at = btd_now_ms();
 	}
 
-	/* The keys read are not kept. */
+	/* The keys read are not kept; the auto-connect is set again with the table as it is now. */
 	memset(bonds, 0, sizeof(bonds));
+	hid_le_disarm(hid);
 
 	/* Succeeded: page scan while a device may connect by itself. */
 	if (found != 0U)
@@ -220,25 +265,41 @@ int
 btd_hid_connect(
 	struct btd_hid *hid,
 	const uint8_t *address,
+	unsigned type,
 	char *answer,
 	size_t size)
 {
 	struct btd_hid_device *device;
 	struct btd_bond bond;
+	int keyed;
+	int le;
 	int error;
 
-	/* The bond and its link key. */
-	error = btd_keys_read(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR, &bond);
+	/* The bond and its key (a link key, or LE's LTK of 16 bytes, KNOB). */
+	le = hid_le_type(type);
+	error = btd_keys_read(hid->keys_folder, hid->session->address, address, type, &bond);
+	keyed = 0;
+	if (error == 0 && !le && bond.have_link_key)
+		keyed = 1;
+	if (error == 0 && le && bond.have_ltk)
+		keyed = 1;
 	memset(bond.link_key, 0, sizeof(bond.link_key));
-	if (error != 0 || !bond.have_link_key) {
+	memset(bond.ltk, 0, sizeof(bond.ltk));
+	if (!keyed) {
 		(void)snprintf(answer, size, "%s", "ERROR not-bonded");
 		return 1;
 	}
 
+	/* An LE bond with a shorter key is refused at once. */
+	if (le && bond.key_size != HID_KEY_SIZE) {
+		(void)snprintf(answer, size, "%s", "ERROR key-size");
+		return 1;
+	}
+
 	/* Its device, in the table or new. */
-	device = hid_find(hid, address);
+	device = hid_find_type(hid, address, type);
 	if (device == NULL)
-		device = hid_slot(hid, address);
+		device = hid_slot(hid, address, type);
 	if (device == NULL) {
 		(void)snprintf(answer, size, "%s", "ERROR limit");
 		return 1;
@@ -265,15 +326,19 @@ btd_hid_connect(
 		return 1;
 	}
 
-	/* The controller pages one device at a time. */
+	/* The controller pages (or connects LE to) one device at a time. */
 	error = hid_paging(hid);
 	if (error) {
 		(void)snprintf(answer, size, "%s", "ERROR busy");
 		return 1;
 	}
 
-	/* Succeeded: paged, the answer at the connection's end. */
+	/* Succeeded: paged (LE: connected directly), the answer at the connection's end. */
 	device->asked = 1;
+	if (le) {
+		hid_le_page(hid, device);
+		return 0;
+	}
 	hid_page(hid, device);
 	return 0;
 }
@@ -286,7 +351,8 @@ btd_hid_connect(
 int
 btd_hid_disconnect(
 	struct btd_hid *hid,
-	const uint8_t *address)
+	const uint8_t *address,
+	unsigned type)
 {
 	struct btd_hid_device *device;
 	uint8_t request[16];
@@ -294,18 +360,20 @@ btd_hid_disconnect(
 	size_t length;
 	int error;
 
-	/* The device, not wanted back from now on. */
-	device = hid_find(hid, address);
+	/* The device, not wanted back from now on (the auto-connect is set again without it). */
+	device = hid_find_type(hid, address, type);
 	if (device == NULL)
 		return ENOTCONN;
 	device->wanted = btd_hid_policy_after_disconnect();
 	device->retry_at = 0U;
+	if (hid_le_type(type))
+		hid_le_disarm(hid);
 
 	/* Not connected. */
 	if (!device->connected || device->state == BTD_HID_CLOSING)
 		return ENOTCONN;
 
-	/* The interrupt channel, then the control channel (no VIRTUAL_CABLE_UNPLUG: that would unpair). */
+	/* BR/EDR's interrupt channel, then its control channel (no VIRTUAL_CABLE_UNPLUG: that would unpair). */
 	error = btd_l2cap_disconnect(&device->l2cap, device->interrupt_cid, request, sizeof(request), &length);
 	if (error == 0)
 		hid_send(hid, device, BTD_CID_SIGNALLING, request, length);
@@ -327,27 +395,30 @@ btd_hid_disconnect(
 
 /*
  * Forgets a device whose bond goes (FORGET, or the device's own unplug):
- * a connected one hears VIRTUAL_CABLE_UNPLUG on its control channel
+ * a connected BR/EDR one hears VIRTUAL_CABLE_UNPLUG on its control channel
  * (design section 6.3) and is disconnected; its record goes and its slot
  * is freed.
  */
 void
 btd_hid_forget(
 	struct btd_hid *hid,
-	const uint8_t *address)
+	const uint8_t *address,
+	unsigned type)
 {
 	struct btd_hid_device *device;
 
 	/* The record goes in any case. */
-	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
+	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, type);
 
 	/* Nothing more for a device not in the table. */
-	device = hid_find(hid, address);
+	device = hid_find_type(hid, address, type);
 	if (device == NULL)
 		return;
 
-	/* Succeeded: a connected device hears the unplug, and the device goes. */
+	/* Succeeded: a connected device hears the unplug, and the device goes (and leaves the auto-connect). */
 	hid_drop(hid, device, 1);
+	if (hid_le_type(type))
+		hid_le_disarm(hid);
 }
 
 /*
@@ -358,18 +429,21 @@ btd_hid_forget(
 void
 btd_hid_release(
 	struct btd_hid *hid,
-	const uint8_t *address)
+	const uint8_t *address,
+	unsigned type)
 {
 	struct btd_hid_device *device;
 
 	/* Nothing for a device not in the table. */
-	device = hid_find(hid, address);
+	device = hid_find_type(hid, address, type);
 	if (device == NULL)
 		return;
 
 	/* Succeeded: its record goes, and the device without an unplug (its bond stays for the pairing). */
-	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
+	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, type);
 	hid_drop(hid, device, 0);
+	if (hid_le_type(type))
+		hid_le_disarm(hid);
 }
 
 /*
@@ -387,8 +461,10 @@ btd_hid_status(
 	char address[24];
 	char name[BTD_NAME_MAX * 4U];
 	char input[32];
+	char battery[16];
 	const char *reconnect;
 	const char *last;
+	const char *transport;
 	uint64_t seconds;
 	int error;
 
@@ -420,20 +496,31 @@ btd_hid_status(
 	if (device->since_ms != 0U)
 		seconds = (btd_now_ms() - device->since_ms) / 1000U;
 
+	/* HID's or HOGP's, and LE's battery when it was read. */
+	transport = "hid";
+	(void)snprintf(battery, sizeof(battery), "%s", "-");
+	if (hid_le_type(device->type))
+		transport = "hog";
+	if (hid_le_type(device->type) && device->hog.battery >= 0)
+		(void)snprintf(battery, sizeof(battery), "%d", device->hog.battery);
+
 	/* Succeeded: the line. */
 	(void)snprintf(line,
 		       size,
-		       "HID address=%s type=bredr transport=hid state=%s input=%s name=\"%s\" reconnect=%s battery=- since=%llu last=%s reports=%u malformed=%u oversize=%u",
+		       "HID address=%s type=%s transport=%s state=%s input=%s name=\"%s\" reconnect=%s battery=%s since=%llu last=%s reports=%u malformed=%u oversize=%u",
 		       address,
+		       btd_address_type_name(device->type),
+		       transport,
 		       hid_state_word(device),
 		       input,
 		       name,
 		       reconnect,
+		       battery,
 		       (unsigned long long)seconds,
 		       last,
 		       device->reports,
 		       device->malformed,
-		       device->oversize);
+		       device->oversize + device->hog.oversize);
 }
 
 /*
@@ -494,13 +581,18 @@ btd_hid_hold(
 	struct btd_hid *hid,
 	int held)
 {
+	/* A hold that starts cancels the auto-connect (the tick sets it again after, review S4). */
+	if (held && !hid->held)
+		hid_le_disarm(hid);
+
 	/* The pages wait while it is set. */
 	hid->held = held;
 }
 
 /*
- * Ends what passed its deadline (the connection's parts, the handshake)
- * and pages a wanted device whose time came.
+ * Ends what passed its deadline (the connection's parts, the handshake,
+ * LE's discovery, a resumed link's Echo Request), pages a wanted device
+ * whose time came, and sets LE's auto-connect when a device waits for it.
  */
 void
 btd_hid_tick(
@@ -508,14 +600,32 @@ btd_hid_tick(
 	uint64_t now)
 {
 	struct btd_hid_device *device;
+	unsigned actions;
 	unsigned index;
 	int paging;
+	int waiting;
 
 	/* Each device in the table. */
 	for (index = 0U; index < BTD_HID_MAX; index++) {
 		device = &hid->devices[index];
 		if (!device->used)
 			continue;
+
+		/* A resumed link that did not answer its Echo Request: ended, to be paged again (review S5). */
+		if (device->state == BTD_HID_OPEN && device->echo_deadline != 0U && now >= device->echo_deadline) {
+			device->echo_deadline = 0U;
+			hid_fail(hid, device, "lost");
+			continue;
+		}
+
+		/* LE's discovery's own times. */
+		if (device->state == BTD_HID_GATT || device->state == BTD_HID_SUBSCRIBE) {
+			actions = btd_hog_tick(&device->hog, now);
+			if (actions != 0U) {
+				hid_gatt(hid, device, actions);
+				continue;
+			}
+		}
 
 		/* A handshake that did not come, or a setup to write again: the input device is made now. */
 		if (device->state == BTD_HID_HANDSHAKE || device->state == BTD_HID_SETUP) {
@@ -549,6 +659,11 @@ btd_hid_tick(
 			continue;
 		hid_page(hid, device);
 	}
+
+	/* Succeeded: LE's auto-connect, when a device waits for it and nothing holds it. */
+	waiting = hid_le_waiting(hid);
+	if (waiting && !hid->le_armed && !hid->held)
+		hid_le_arm(hid);
 }
 
 /*
@@ -561,9 +676,10 @@ btd_hid_deadline(
 {
 	const struct btd_hid_device *device;
 	uint64_t earliest;
+	uint64_t discovery;
 	unsigned index;
 
-	/* Each device's deadlines and its page's time. */
+	/* Each device's deadlines (its discovery's and its Echo Request's too) and its page's time. */
 	earliest = 0U;
 	for (index = 0U; index < BTD_HID_MAX; index++) {
 		device = &hid->devices[index];
@@ -573,6 +689,11 @@ btd_hid_deadline(
 			earliest = device->state_deadline;
 		if (device->total_deadline != 0U && (earliest == 0U || device->total_deadline < earliest))
 			earliest = device->total_deadline;
+		if (device->echo_deadline != 0U && (earliest == 0U || device->echo_deadline < earliest))
+			earliest = device->echo_deadline;
+		discovery = btd_hog_deadline(&device->hog);
+		if (discovery != 0U && (earliest == 0U || discovery < earliest))
+			earliest = discovery;
 		if (device->state == BTD_HID_IDLE && device->wanted && !device->paused && device->retry_at != 0U) {
 			if (earliest == 0U || device->retry_at < earliest)
 				earliest = device->retry_at;
@@ -614,15 +735,63 @@ btd_hid_lost(
 		device->retry_at = 0U;
 	}
 
-	/* The next controller's page scan is set again. */
+	/* The next controller's page scan and auto-connect are set again. */
 	hid->page_scan = 0;
+	hid->le_armed = 0;
+}
+
+/*
+ * Checks the links after the system's sleep (sleep.end, review S5): each
+ * open BR/EDR link is asked an Echo Request (no answer within
+ * BTD_HID_ECHO_MS ends it, to be paged again), the pages that stopped
+ * start again, and LE's auto-connect is set again.
+ */
+void
+btd_hid_resume(
+	struct btd_hid *hid)
+{
+	struct btd_hid_device *device;
+	uint8_t request[16];
+	size_t length;
+	uint64_t now;
+	unsigned index;
+	int error;
+
+	/* Each device in the table. */
+	now = btd_now_ms();
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		device = &hid->devices[index];
+		if (!device->used)
+			continue;
+
+		/* A wanted device's pages from the first again. */
+		if (device->wanted && device->state == BTD_HID_IDLE) {
+			device->paused = 0;
+			device->retries = 0U;
+			if (!hid_le_type(device->type) && (!device->record.reconnect_initiate || device->record.normally_connectable))
+				device->retry_at = now;
+		}
+
+		/* An open BR/EDR link is asked whether its device is still there. */
+		if (device->state != BTD_HID_OPEN || hid_le_type(device->type))
+			continue;
+		error = btd_l2cap_echo(&device->l2cap, request, sizeof(request), &length);
+		if (error != 0)
+			continue;
+		hid_send(hid, device, BTD_CID_SIGNALLING, request, length);
+		device->echo_deadline = now + BTD_HID_ECHO_MS;
+	}
+
+	/* Succeeded: the auto-connect is set again by the tick. */
+	hid_le_disarm(hid);
 }
 
 /*
  * Takes over the connection of a pairing that succeeded (the pairing's
  * handoff, phase005 section 9.2): a BR/EDR device whose class is a
- * peripheral's goes on to its HID records on the same link, its record a
- * candidate until SDP confirms it.  Returns 1 when taken, 0 when the
+ * peripheral's goes on to its HID records on the same link, an LE device
+ * whose appearance is a HID device's to its attributes; its record is a
+ * candidate until that confirms it.  Returns 1 when taken, 0 when the
  * pairing should end the connection.
  */
 int
@@ -637,42 +806,60 @@ btd_hid_handoff(
 	struct btd_hid_device *device;
 	const struct btd_device *seen;
 	uint32_t device_class;
+	uint16_t appearance;
 	unsigned index;
+	int keyed;
 	int same;
 	int policy;
+	int le;
 	int error;
 
-	/* Only BR/EDR (LE is i03's), with its link key. */
+	/* A bond with its key: BR/EDR's link key, or LE's LTK of 16 bytes. */
 	hid = context;
-	if (type != BTD_ADDRESS_BREDR || !bond->have_link_key)
+	le = hid_le_type(type);
+	keyed = 0;
+	if (!le && bond->have_link_key)
+		keyed = 1;
+	if (le && bond->have_ltk && bond->key_size == HID_KEY_SIZE)
+		keyed = 1;
+	if (!keyed)
 		return 0;
 
-	/* The class the last scan saw for it. */
+	/* The class or the appearance the last scan saw for it. */
 	device_class = 0U;
+	appearance = 0U;
 	for (index = 0U; index < hid->session->devices.count; index++) {
 		seen = &hid->session->devices.entries[index];
 		same = memcmp(seen->address, address, BTD_ADDRESS_BYTES);
-		if (same == 0 && seen->type == BTD_ADDRESS_BREDR && seen->has_class)
+		if (same != 0 || seen->type != type)
+			continue;
+		if (seen->has_class)
 			device_class = seen->class_of_device;
+		if (seen->has_appearance)
+			appearance = seen->appearance;
 	}
 
 	/* Only a device that looks like a HID device (phase005 Q4, Q26). */
 	policy = btd_hid_policy_after_pair(device_class);
+	if (le)
+		policy = btd_hid_policy_after_le_pair(appearance);
 	if (!policy)
 		return 0;
 
-	/* Its slot (a full table leaves the connection to the pairing to end). */
-	device = hid_find(hid, address);
+	/* Its slot, under its bond's address (an LE device's identity) (a full table leaves the connection to the pairing to end). */
+	device = hid_find_type(hid, bond->address, bond->type);
 	if (device == NULL)
-		device = hid_slot(hid, address);
+		device = hid_slot(hid, bond->address, bond->type);
 	if (device == NULL || device->state != BTD_HID_IDLE)
 		return 0;
 
 	/* Its record: a candidate, named after the bond. */
 	memset(&device->record, 0, sizeof(device->record));
-	memcpy(device->record.address, address, BTD_ADDRESS_BYTES);
-	device->record.type = BTD_ADDRESS_BREDR;
+	memcpy(device->record.address, bond->address, BTD_ADDRESS_BYTES);
+	device->record.type = bond->type;
+	device->record.le = le;
 	device->record.device_class = device_class;
+	device->record.appearance = appearance;
 	(void)snprintf(device->record.name, sizeof(device->record.name), "%s", bond->name);
 	device->have_descriptor = 0;
 	error = btd_hidcache_write(hid->keys_folder, hid->session->address, &device->record);
@@ -695,7 +882,13 @@ btd_hid_handoff(
 		return 0;
 	}
 
-	/* Succeeded: its HID records next; from now on it may connect by itself (section 9.2). */
+	/* LE: its attributes next. */
+	if (le) {
+		hid_gatt_start(hid, device);
+		return 1;
+	}
+
+	/* Succeeded: BR/EDR's HID records next; from now on it may connect by itself (section 9.2). */
 	hid_page_scan(hid);
 	hid_sdp_start(hid, device);
 	return 1;
@@ -740,14 +933,22 @@ btd_hid_claims(
 	struct btd_hid *hid;
 	struct btd_hid_device *device;
 
-	/* The device, paging or accepting. */
+	/* The device (an LE one may come under its resolvable private address), paging or accepting. */
 	hid = context;
 	device = hid_find(hid, address);
-	if (device == NULL || device->state != BTD_HID_PAGING)
+	if (device == NULL)
+		device = hid_le_resolve(hid, address);
+	if (device == NULL)
 		return 0;
+	if (device->state == BTD_HID_PAGING)
+		return 1;
 
-	/* Succeeded: the HID host's. */
-	return 1;
+	/* An LE device the auto-connect waits for (the controller connects it from the list). */
+	if (hid_le_type(device->type) && hid->le_armed && device->wanted && device->state == BTD_HID_IDLE)
+		return 1;
+
+	/* Not the HID host's. */
+	return 0;
 }
 
 /*
@@ -800,6 +1001,23 @@ btd_hid_policy_after_pair(
 }
 
 /*
+ * Tells whether an LE device just paired goes on to HOGP on the same link
+ * (phase005 section 9.2): a device whose appearance's category is a HID
+ * device's (0x03C0 to 0x03FF, review M5).
+ */
+int
+btd_hid_policy_after_le_pair(
+	uint16_t appearance)
+{
+	/* The category, the top 10 bits. */
+	if ((appearance >> 6) == HID_APPEARANCE_HID)
+		return 1;
+
+	/* Not a HID device as far as its appearance says. */
+	return 0;
+}
+
+/*
  * Tells whether a device the user disconnected is wanted back (the user's
  * decision Q5: no, until connected again).
  */
@@ -833,6 +1051,29 @@ hid_find(
 	return NULL;
 }
 
+/* Finds a device of the table by its address and type, or NULL. */
+static struct btd_hid_device *
+hid_find_type(
+	struct btd_hid *hid,
+	const uint8_t *address,
+	unsigned type)
+{
+	unsigned index;
+	int same;
+
+	/* Each slot in use. */
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		if (!hid->devices[index].used || hid->devices[index].type != type)
+			continue;
+		same = memcmp(hid->devices[index].address, address, BTD_ADDRESS_BYTES);
+		if (same == 0)
+			return &hid->devices[index];
+	}
+
+	/* None. */
+	return NULL;
+}
+
 /* Finds the device of a connection, or NULL. */
 static struct btd_hid_device *
 hid_by_handle(
@@ -855,7 +1096,8 @@ hid_by_handle(
 static struct btd_hid_device *
 hid_slot(
 	struct btd_hid *hid,
-	const uint8_t *address)
+	const uint8_t *address,
+	unsigned type)
 {
 	struct btd_hid_device *device;
 	unsigned index;
@@ -871,7 +1113,11 @@ hid_slot(
 		device->used = 1;
 		memcpy(device->address, address, BTD_ADDRESS_BYTES);
 		memcpy(device->record.address, address, BTD_ADDRESS_BYTES);
-		device->record.type = BTD_ADDRESS_BREDR;
+		device->type = type;
+		device->record.type = type;
+		if (hid_le_type(type))
+			device->record.le = 1;
+		btd_hog_init(&device->hog);
 		device->bridge = -1;
 		device->event = -1;
 		device->touch_event = -1;
@@ -914,6 +1160,9 @@ hid_event(
 		break;
 	case HID_EVENT_DISCONNECTED:
 		hid_disconnected(hid, parameters, length);
+		break;
+	case HID_EVENT_LE_META:
+		hid_le_meta(hid, parameters, length);
 		break;
 	default:
 		hid->refused++;
@@ -1100,8 +1349,12 @@ hid_encryption(
 	if (device == NULL)
 		return;
 
-	/* Not encrypted (or no longer). */
-	if (parameters[0] != 0U || parameters[3] == 0U) {
+	/* The key the device no longer has (LE's PIN or Key Missing), or not encrypted (or no longer). */
+	device->le_encrypting = 0;
+	if (parameters[0] == HID_STATUS_KEY_MISSING) {
+		hid_fail(hid, device, "key-missing");
+		return;
+	} else if (parameters[0] != 0U || parameters[3] == 0U) {
 		hid_fail(hid, device, "security");
 		return;
 	}
@@ -1110,7 +1363,15 @@ hid_encryption(
 	if (device->state != BTD_HID_AUTHENTICATING && device->state != BTD_HID_ENCRYPTING)
 		return;
 
-	/* Succeeded: the key's size. */
+	/* LE: the bond's key was 16 bytes (CONNECT checked it); its attributes next. */
+	if (hid_le_type(device->type)) {
+		device->encrypted = 1;
+		device->key_size = HID_KEY_SIZE;
+		hid_gatt_start(hid, device);
+		return;
+	}
+
+	/* Succeeded: BR/EDR's key's size. */
 	hid_key_size(hid, device);
 }
 
@@ -1219,6 +1480,12 @@ hid_acl(
 	payload_length = device->reassembly.expected - BTD_L2CAP_HEADER;
 	cid = (uint16_t)(device->reassembly.frame[2] | (device->reassembly.frame[3] << 8));
 
+	/* LE's fixed channels. */
+	if (hid_le_type(device->type)) {
+		hid_le_frame(hid, device, cid, payload, payload_length);
+		return;
+	}
+
 	/* Each channel: the signalling, SDP's, the control's, the interrupt's; anything else is passed over. */
 	if (cid == BTD_CID_SIGNALLING) {
 		hid_signal(hid, device, payload, payload_length);
@@ -1251,10 +1518,12 @@ hid_signal(
 	uint16_t cid;
 	int error;
 
-	/* The commands, answered. */
+	/* The commands, answered; the answer to a resumed link's Echo Request ends its wait. */
 	(void)btd_l2cap_signal(&device->l2cap, device->handle, 0, payload, length, answer, sizeof(answer), &answer_length, &effect);
 	if (answer_length != 0U)
 		hid_send(hid, device, BTD_CID_SIGNALLING, answer, answer_length);
+	if (effect.echo)
+		device->echo_deadline = 0U;
 
 	/* A channel asked for before the encryption: bluetoothd authenticates the link now (section 9.8). */
 	if (!device->encrypted && !device->authenticating && device->state == BTD_HID_AUTHENTICATING) {
@@ -1718,16 +1987,15 @@ hid_report(
 
 /*
  * Makes the input device: the bridge opened by the parent, the setup with
- * the descriptor written, its nodes read; the record is confirmed, the
- * connection is open and the reports kept meanwhile go on.
+ * the descriptor written, its nodes read; a BR/EDR device is open then, an
+ * LE one turns its notifications on first.
  */
 static void
 hid_setup(
 	struct btd_hid *hid,
 	struct btd_hid_device *device)
 {
-	char line[BTD_HID_ANSWER_MAX];
-	unsigned index;
+	unsigned actions;
 	int error;
 
 	/* A device without its descriptor cannot be made. */
@@ -1755,9 +2023,41 @@ hid_setup(
 		return;
 	}
 
+	/* LE: its notifications are turned on before it is open. */
+	if (hid_le_type(device->type)) {
+		device->state = BTD_HID_SUBSCRIBE;
+		device->state_deadline = 0U;
+		actions = btd_hog_resume(&device->hog, btd_now_ms());
+		hid_gatt(hid, device, actions);
+		return;
+	}
+
+	/* Succeeded: BR/EDR is open. */
+	hid_open(hid, device);
+}
+
+/*
+ * Opens a device whose input device is made: the record is confirmed (LE's
+ * without its map, read at each connection), the connection's deadlines
+ * end, its pages start again from the first, the reports kept meanwhile go
+ * on and a client waiting hears it.
+ */
+static void
+hid_open(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	static struct btd_hidcache record;
+	char line[BTD_HID_ANSWER_MAX];
+	unsigned index;
+	int next;
+
 	/* The record is confirmed (written whole again). */
 	device->record.confirmed = 1;
-	(void)btd_hidcache_write(hid->keys_folder, hid->session->address, &device->record);
+	record = device->record;
+	if (hid_le_type(device->type))
+		record.descriptor_size = 0U;
+	(void)btd_hidcache_write(hid->keys_folder, hid->session->address, &record);
 
 	/* Open: the connection's deadlines end, its pages start again from the first. */
 	device->state = BTD_HID_OPEN;
@@ -1769,10 +2069,16 @@ hid_setup(
 	device->last = NULL;
 	device->since_ms = btd_now_ms();
 
-	/* The reports kept meanwhile, in order. */
+	/* The reports kept meanwhile, in order (LE's notifications too). */
 	for (index = 0U; index < device->queued; index++)
 		hid_report(device, device->queue[index].bytes, device->queue[index].length);
 	device->queued = 0U;
+	for (;;) {
+		next = btd_hog_next(&device->hog);
+		if (!next)
+			break;
+		hid_report(device, device->hog.report, device->hog.report_length);
+	}
 
 	/* Succeeded: a client waiting hears it. */
 	if (device->asked) {
@@ -1843,6 +2149,7 @@ hid_numbers(
 	struct btd_hid_device *device)
 {
 	struct input_bridge_device made;
+	int reported;
 	int status;
 
 	/* Not known unless the kernel says. */
@@ -1853,9 +2160,18 @@ hid_numbers(
 	if (status != 0)
 		return;
 
-	/* Succeeded: the nodes. */
+	/* The nodes. */
 	device->event = made.event;
 	device->touch_event = made.touch_event;
+
+	/* Succeeded: LE's reports carry an ID as the kernel read the map (review M8). */
+	if (!hid_le_type(device->type))
+		return;
+	reported = 0;
+	if ((made.flags & INPUT_BRIDGE_FLAG_REPORT_IDS) != 0U)
+		reported = 1;
+	if (reported != device->hog.uses_ids)
+		btd_hog_set_ids(&device->hog, reported);
 }
 
 /*
@@ -1886,8 +2202,10 @@ hid_fail(
 	if (error == 0 && length != 0U && device->connected)
 		hid_send(hid, device, BTD_CID_SIGNALLING, answer, length);
 
-	/* No connection: the end now. */
+	/* No connection: a page under way is cancelled, and the end is now. */
 	if (!device->connected) {
+		if (device->state == BTD_HID_PAGING && !device->inbound)
+			hid_cancel_page(hid, device);
 		hid_ended(hid, device, why);
 		return;
 	}
@@ -1939,7 +2257,9 @@ hid_ended(
 		hid_answer(hid, device, line);
 	}
 
-	/* Succeeded: a wanted device that bluetoothd pages is paged again later. */
+	/* Succeeded: a wanted BR/EDR device that bluetoothd pages is paged again later (LE's come through the auto-connect). */
+	if (hid_le_type(device->type))
+		return;
 	if (device->wanted && (!device->record.reconnect_initiate || device->record.normally_connectable))
 		hid_retry_later(device, now);
 }
@@ -2129,8 +2449,10 @@ hid_connected_line(
 	/* Succeeded: the line. */
 	(void)snprintf(line,
 		       size,
-		       "CONNECTED address=%s type=bredr transport=hid input=/dev/input/event%d%s name=\"%s\" legacy=0 vendor=%04X product=%04X",
+		       "CONNECTED address=%s type=%s transport=%s input=/dev/input/event%d%s name=\"%s\" legacy=0 vendor=%04X product=%04X",
 		       address,
+		       btd_address_type_name(device->type),
+		       hid_le_type(device->type) ? "hog" : "hid",
 		       (int)device->event,
 		       touch,
 		       name,
@@ -2241,6 +2563,9 @@ hid_reset_link(
 	device->pnp_asked = 0;
 	device->queued = 0U;
 	device->setup_tries = 0U;
+	device->le_encrypting = 0;
+	device->echo_deadline = 0U;
+	btd_hog_init(&device->hog);
 	memset(&device->reassembly, 0, sizeof(device->reassembly));
 	btd_l2cap_init(&device->l2cap);
 	btd_l2cap_set_accept(&device->l2cap, hid_accept, device);
@@ -2273,6 +2598,519 @@ hid_name(
 	/* Succeeded: the name. */
 	memcpy(to, from, length);
 	to[length] = '\0';
+}
+
+/* Takes LE's meta events of the HID host's connections: its connections made. */
+static void
+hid_le_meta(
+	struct btd_hid *hid,
+	const uint8_t *parameters,
+	size_t length)
+{
+	/* A subevent at all. */
+	if (length < 1U)
+		return;
+
+	/* Connection Complete, or Enhanced Connection Complete; any other is passed over. */
+	if (parameters[0] == HID_LE_CONNECTED || parameters[0] == HID_LE_ENHANCED)
+		hid_le_connected(hid, parameters, length);
+}
+
+/*
+ * Takes LE's (Enhanced) Connection Complete (subevent, status, handle,
+ * role, the device's address type and address, ...) of a device connected
+ * directly or by the auto-connect: the link is encrypted with the bond's
+ * LTK next.  A failed direct connection is tried again only by the user.
+ */
+static void
+hid_le_connected(
+	struct btd_hid *hid,
+	const uint8_t *parameters,
+	size_t length)
+{
+	struct btd_hid_device *device;
+	size_t least;
+	uint64_t now;
+
+	/* A whole event of its subevent. */
+	least = 19U;
+	if (parameters[0] == HID_LE_ENHANCED)
+		least = 31U;
+	if (length < least)
+		return;
+
+	/* The device, by its address or its resolvable private address. */
+	device = hid_find(hid, parameters + 6);
+	if (device == NULL)
+		device = hid_le_resolve(hid, parameters + 6);
+
+	/* A failed one: a direct connection ends (a cancelled auto-connect carries no device). */
+	if (parameters[1] != 0U) {
+		if (device != NULL && hid_le_type(device->type) && device->state == BTD_HID_PAGING)
+			hid_ended(hid, device, "unreachable");
+		return;
+	}
+
+	/* Only an LE device of the table, connected directly or waited for. */
+	if (device == NULL || !hid_le_type(device->type))
+		return;
+	if (device->state != BTD_HID_PAGING && device->state != BTD_HID_IDLE)
+		return;
+
+	/* The controller left its initiating state; a device waited for came by the auto-connect. */
+	hid->le_armed = 0;
+	now = btd_now_ms();
+	if (device->state == BTD_HID_IDLE) {
+		device->inbound = 1;
+		device->total_deadline = now + BTD_HID_TOTAL_MS;
+	}
+
+	/* Succeeded: connected, the encryption next. */
+	hid_reset_link(device);
+	device->connected = 1;
+	device->handle = hid_handle_at(parameters + 2);
+	device->state = BTD_HID_ENCRYPTING;
+	device->state_deadline = now + BTD_HID_SECURITY_MS;
+	hid_le_encrypt(hid, device);
+}
+
+/*
+ * Finds the LE device of the table whose IRK resolves a resolvable
+ * private address (its top two bits 01), or NULL.
+ */
+static struct btd_hid_device *
+hid_le_resolve(
+	struct btd_hid *hid,
+	const uint8_t *address)
+{
+	struct btd_hid_device *device;
+	struct btd_bond bond;
+	uint8_t irk[16];
+	uint8_t prand[3];
+	uint8_t hash[3];
+	uint8_t expected[3];
+	unsigned index;
+	unsigned byte;
+	int same;
+	int error;
+
+	/* Only a resolvable private address. */
+	if ((address[5] & 0xc0U) != 0x40U)
+		return NULL;
+
+	/* prand (the top three bytes) and the hash (the bottom three), most significant first. */
+	prand[0] = address[5];
+	prand[1] = address[4];
+	prand[2] = address[3];
+	expected[0] = address[2];
+	expected[1] = address[1];
+	expected[2] = address[0];
+
+	/* Each LE device's bond with an IRK (stored least significant first). */
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		device = &hid->devices[index];
+		if (!device->used || !hid_le_type(device->type))
+			continue;
+		error = btd_keys_read(hid->keys_folder, hid->session->address, device->address, device->type, &bond);
+		if (error != 0 || !bond.have_irk)
+			continue;
+		for (byte = 0U; byte < sizeof(irk); byte++)
+			irk[byte] = bond.irk[sizeof(irk) - 1U - byte];
+		memset(&bond, 0, sizeof(bond));
+		btd_smp_ah(irk, prand, hash);
+		memset(irk, 0, sizeof(irk));
+		same = memcmp(hash, expected, sizeof(hash));
+		if (same == 0)
+			return device;
+	}
+
+	/* No device's. */
+	return NULL;
+}
+
+/* Starts LE's encryption with the bond's key (LE Enable Encryption: handle, Rand, EDIV, the LTK); Encryption Change answers it. */
+static void
+hid_le_encrypt(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	struct btd_bond bond;
+	uint8_t encrypt[28];
+	int error;
+
+	/* The bond's key. */
+	error = btd_keys_read(hid->keys_folder, hid->session->address, device->address, device->type, &bond);
+	if (error != 0 || !bond.have_ltk) {
+		memset(&bond, 0, sizeof(bond));
+		hid_fail(hid, device, "key-missing");
+		return;
+	}
+
+	/* The command; the keys are not kept. */
+	hid_put16(encrypt, device->handle);
+	memcpy(encrypt + 2, bond.rand, 8U);
+	hid_put16(encrypt + 10, bond.ediv);
+	memcpy(encrypt + 12, bond.ltk, 16U);
+	memset(&bond, 0, sizeof(bond));
+	device->le_encrypting = 1;
+	error = hid_command(hid, HID_LE_ENCRYPT, encrypt, sizeof(encrypt));
+	memset(encrypt, 0, sizeof(encrypt));
+	if (error != 0) {
+		hid_fail(hid, device, "security");
+		return;
+	}
+}
+
+/*
+ * Takes a frame of an LE device's fixed channels: ATT (the device's
+ * requests answered by the smallest server, the rest to the discovery),
+ * LE signalling (a connection parameter update carried out), and the
+ * Security Manager (a pairing refused, review B6; a Security Request
+ * answered by the encryption).
+ */
+static void
+hid_le_frame(
+	struct btd_hid *hid,
+	struct btd_hid_device *device,
+	uint16_t cid,
+	const uint8_t *payload,
+	size_t length)
+{
+	struct btd_signal_effect effect;
+	uint8_t answer[BTD_ATT_MTU];
+	uint8_t update[14];
+	size_t answer_length;
+	unsigned actions;
+	int error;
+
+	/* ATT: a request of the device (an even opcode) to bluetoothd's server, the rest to the discovery. */
+	if (cid == HID_CID_ATT && length != 0U) {
+		if ((payload[0] & 1U) == 0U) {
+			error = btd_att_answer(payload, length, answer, sizeof(answer), &answer_length);
+			if (error == 0 && answer_length != 0U)
+				hid_send_fixed(hid, device, HID_CID_ATT, answer, answer_length);
+			return;
+		}
+
+		/* A response, a notification, an indication. */
+		actions = btd_hog_input(&device->hog, payload, length, btd_now_ms());
+		hid_gatt(hid, device, actions);
+		return;
+	}
+
+	/* LE signalling: answered, and a parameter update carried out (as the pairing does). */
+	if (cid == HID_CID_LE_SIGNALLING) {
+		(void)btd_l2cap_signal(&device->l2cap, device->handle, 1, payload, length, answer, sizeof(answer), &answer_length, &effect);
+		if (answer_length != 0U)
+			hid_send_fixed(hid, device, HID_CID_LE_SIGNALLING, answer, answer_length);
+		if (!effect.update)
+			return;
+		hid_put16(update, device->handle);
+		hid_put16(update + 2, effect.interval_min);
+		hid_put16(update + 4, effect.interval_max);
+		hid_put16(update + 6, effect.latency);
+		hid_put16(update + 8, effect.timeout);
+		hid_put16(update + 10, 0x0000U);
+		hid_put16(update + 12, 0x0000U);
+		(void)hid_command(hid, HID_LE_UPDATE, update, sizeof(update));
+		return;
+	}
+
+	/* Anything but the Security Manager is passed over. */
+	if (cid != HID_CID_SMP || length == 0U)
+		return;
+
+	/* A pairing outside the pairing's mode is refused (design section 6.5). */
+	if (payload[0] == HID_SMP_PAIRING_REQUEST) {
+		answer[0] = HID_SMP_PAIRING_FAILED;
+		answer[1] = HID_SMP_NOT_SUPPORTED;
+		hid_send_fixed(hid, device, HID_CID_SMP, answer, 2U);
+		return;
+	}
+
+	/* Succeeded: a Security Request is answered by the bond's encryption, once. */
+	if (payload[0] == HID_SMP_SECURITY_REQUEST && !device->encrypted && !device->le_encrypting && device->connected)
+		hid_le_encrypt(hid, device);
+}
+
+/*
+ * Connects an LE device directly (CONNECT): the auto-connect is cancelled
+ * first, then LE Create Connection with the pairing's parameters.
+ */
+static void
+hid_le_page(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	uint8_t parameters[25];
+	uint64_t now;
+	int error;
+
+	/* The controller initiates one connection at a time. */
+	hid_le_disarm(hid);
+
+	/*
+	 * LE Create Connection: scan interval 60 ms and window 30 ms, no
+	 * filter, the device, bluetoothd's public address, a connection
+	 * interval of 30 to 50 ms, no latency, a supervision timeout of 5 s.
+	 */
+	memset(parameters, 0, sizeof(parameters));
+	hid_put16(parameters + 0, 0x0060U);
+	hid_put16(parameters + 2, 0x0030U);
+	parameters[4] = 0x00U;
+	parameters[5] = 0x00U;
+	if (device->type == BTD_ADDRESS_LE_RANDOM)
+		parameters[5] = 0x01U;
+	memcpy(parameters + 6, device->address, BTD_ADDRESS_BYTES);
+	parameters[12] = 0x00U;
+	hid_put16(parameters + 13, 0x0018U);
+	hid_put16(parameters + 15, 0x0028U);
+	hid_put16(parameters + 17, 0x0000U);
+	hid_put16(parameters + 19, 0x01f4U);
+
+	/* The connection under way. */
+	now = btd_now_ms();
+	device->inbound = 0;
+	device->state = BTD_HID_PAGING;
+	device->state_deadline = now + BTD_HID_PAGE_MS;
+	device->total_deadline = now + BTD_HID_TOTAL_MS;
+	error = hid_command(hid, HID_LE_CREATE, parameters, sizeof(parameters));
+	if (error == 0)
+		return;
+
+	/* Refused. */
+	hid_ended(hid, device, "unreachable");
+}
+
+/*
+ * Sets LE's auto-connect (section 4.9): the filter accept list holds the
+ * LE devices waited for (their IRKs in the resolving list), and LE Create
+ * Connection from that list waits with a low duty (review S4).  A refusal
+ * is tried again later.
+ */
+static void
+hid_le_arm(
+	struct btd_hid *hid)
+{
+	static struct btd_bond bond;
+	struct btd_hid_device *device;
+	uint8_t parameters[39];
+	unsigned index;
+	unsigned resolving;
+	int error;
+
+	/* A list of its own, and the resolving list emptied while resolution is off. */
+	hid->le_retry_at = btd_now_ms() + BTD_HID_RETRY_FIRST_MS;
+	error = hid_command(hid, HID_LE_CLEAR_LIST, NULL, 0U);
+	if (error != 0)
+		return;
+	parameters[0] = 0x00U;
+	(void)hid_command(hid, HID_LE_RESOLUTION, parameters, 1U);
+	(void)hid_command(hid, HID_LE_CLEAR_RESOLVING, NULL, 0U);
+
+	/* Each LE device waited for: its identity in the list, its IRK in the resolving list. */
+	resolving = 0U;
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		device = &hid->devices[index];
+		if (!device->used || !hid_le_type(device->type) || !device->wanted || device->state != BTD_HID_IDLE)
+			continue;
+		parameters[0] = 0x00U;
+		if (device->type == BTD_ADDRESS_LE_RANDOM)
+			parameters[0] = 0x01U;
+		memcpy(parameters + 1, device->address, BTD_ADDRESS_BYTES);
+		error = hid_command(hid, HID_LE_ADD_LIST, parameters, 7U);
+		if (error != 0)
+			continue;
+
+		/* Its IRK, when the bond has one (the local IRK is none, 0). */
+		error = btd_keys_read(hid->keys_folder, hid->session->address, device->address, device->type, &bond);
+		if (error != 0 || !bond.have_irk) {
+			memset(&bond, 0, sizeof(bond));
+			continue;
+		}
+		memset(parameters, 0, sizeof(parameters));
+		parameters[0] = 0x00U;
+		if (device->type == BTD_ADDRESS_LE_RANDOM)
+			parameters[0] = 0x01U;
+		memcpy(parameters + 1, device->address, BTD_ADDRESS_BYTES);
+		memcpy(parameters + 7, bond.irk, 16U);
+		memset(&bond, 0, sizeof(bond));
+		error = hid_command(hid, HID_LE_ADD_RESOLVING, parameters, sizeof(parameters));
+		memset(parameters, 0, sizeof(parameters));
+		if (error == 0)
+			resolving++;
+	}
+
+	/* Resolution on when an IRK went in (a controller without it resolves nothing: such a bond's device comes only by CONNECT). */
+	if (resolving != 0U) {
+		parameters[0] = 0x01U;
+		(void)hid_command(hid, HID_LE_RESOLUTION, parameters, 1U);
+	}
+
+	/* LE Create Connection from the list: 1.28 s and 11.25 ms, the pairing's connection parameters. */
+	memset(parameters, 0, sizeof(parameters));
+	hid_put16(parameters + 0, BTD_HID_LE_INTERVAL);
+	hid_put16(parameters + 2, BTD_HID_LE_WINDOW);
+	parameters[4] = 0x01U;
+	parameters[12] = 0x00U;
+	hid_put16(parameters + 13, 0x0018U);
+	hid_put16(parameters + 15, 0x0028U);
+	hid_put16(parameters + 17, 0x0000U);
+	hid_put16(parameters + 19, 0x01f4U);
+	error = hid_command(hid, HID_LE_CREATE, parameters, 25U);
+	if (error != 0)
+		return;
+
+	/* Succeeded: waiting for the devices. */
+	hid->le_armed = 1;
+	hid->le_arms++;
+	hid->le_retry_at = 0U;
+}
+
+/* Cancels LE's auto-connect (before a pairing, a scan, a direct connection or a change of the list); the tick sets it again. */
+static void
+hid_le_disarm(
+	struct btd_hid *hid)
+{
+	/* Nothing set. */
+	hid->le_retry_at = 0U;
+	if (!hid->le_armed)
+		return;
+
+	/* Succeeded: LE Create Connection Cancel (a refusal means it ended already). */
+	(void)hid_command(hid, HID_LE_CANCEL, NULL, 0U);
+	hid->le_armed = 0;
+}
+
+/* Tells whether an LE device waits for the auto-connect (wanted, not connected) and its time came. */
+static int
+hid_le_waiting(
+	const struct btd_hid *hid)
+{
+	const struct btd_hid_device *device;
+	unsigned index;
+
+	/* After a refusal, a while. */
+	if (hid->le_retry_at != 0U && btd_now_ms() < hid->le_retry_at)
+		return 0;
+
+	/* Each LE device. */
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		device = &hid->devices[index];
+		if (!device->used || !hid_le_type(device->type) || !device->wanted || device->state != BTD_HID_IDLE)
+			continue;
+
+		/* One waits, unless a direct connection is under way. */
+		if (hid_paging(hid))
+			return 0;
+		return 1;
+	}
+
+	/* None waits. */
+	return 0;
+}
+
+/* Starts LE's discovery on the encrypted link (notifications that came already wait in it). */
+static void
+hid_gatt_start(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	unsigned actions;
+
+	/* Its own times (ATT's transaction, the whole discovery) rule now. */
+	device->state = BTD_HID_GATT;
+	device->state_deadline = 0U;
+
+	/* Succeeded: the first request. */
+	actions = btd_hog_start(&device->hog, btd_now_ms());
+	hid_gatt(hid, device, actions);
+}
+
+/*
+ * Carries out what the discovery asks: a PDU sent, the input device made
+ * (the map as its descriptor, the PnP numbers), open, a report passed on,
+ * or the end with why.
+ */
+static void
+hid_gatt(
+	struct btd_hid *hid,
+	struct btd_hid_device *device,
+	unsigned actions)
+{
+	/* A PDU to send first (the report protocol's command comes with the setup). */
+	if ((actions & BTD_HOG_SEND) != 0U)
+		hid_send_fixed(hid, device, HID_CID_ATT, device->hog.out, device->hog.out_length);
+
+	/* The end with why (a changed service too: the device is waited for again). */
+	if ((actions & BTD_HOG_FAILED) != 0U) {
+		hid_fail(hid, device, device->hog.why);
+		return;
+	}
+
+	/* The input device, from the map. */
+	if ((actions & BTD_HOG_SETUP) != 0U) {
+		memcpy(device->record.descriptor, device->hog.map, device->hog.map_size);
+		device->record.descriptor_size = device->hog.map_size;
+		device->record.vendor = device->hog.vendor;
+		device->record.product = device->hog.product;
+		device->record.version = device->hog.version;
+		device->have_descriptor = 1;
+		hid_setup(hid, device);
+		return;
+	}
+
+	/* Open. */
+	if ((actions & BTD_HOG_OPEN) != 0U) {
+		hid_open(hid, device);
+		return;
+	}
+
+	/* Succeeded: a report passed on. */
+	if ((actions & BTD_HOG_REPORT) != 0U)
+		hid_report(device, device->hog.report, device->hog.report_length);
+}
+
+/* Cancels a page that did not end in time: Create Connection Cancel (BR/EDR), LE Create Connection Cancel (LE). */
+static void
+hid_cancel_page(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	/* LE's. */
+	if (hid_le_type(device->type)) {
+		(void)hid_command(hid, HID_LE_CANCEL, NULL, 0U);
+		return;
+	}
+
+	/* Succeeded: BR/EDR's, by the device's address. */
+	(void)hid_command(hid, HID_CREATE_CANCEL, device->address, BTD_ADDRESS_BYTES);
+}
+
+/* Tells whether an address type is LE's. */
+static int
+hid_le_type(
+	unsigned type)
+{
+	/* LE's public or random. */
+	if (type == BTD_ADDRESS_LE_PUBLIC || type == BTD_ADDRESS_LE_RANDOM)
+		return 1;
+
+	/* BR/EDR's. */
+	return 0;
+}
+
+/* Sends a frame on one of LE's fixed channels (a failure is the connection's end to show). */
+static void
+hid_send_fixed(
+	struct btd_hid *hid,
+	struct btd_hid_device *device,
+	uint16_t cid,
+	const uint8_t *payload,
+	size_t length)
+{
+	/* Succeeded: queued for the controller's LE buffers. */
+	(void)btd_session_send(hid->session, device->handle, cid, payload, length);
 }
 
 /* Writes a 16-bit value least significant byte first. */

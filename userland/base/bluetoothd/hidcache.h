@@ -26,6 +26,8 @@
 #include <stddef.h>
 #include <stdint.h>
 
+struct btd_bond;
+
 /* The longest report descriptor kept, and the bytes of one of its lines. */
 #define BTD_HIDCACHE_DESCRIPTOR_MAX	4096U
 #define BTD_HIDCACHE_LINE_BYTES		128U
@@ -60,5 +62,6 @@ int btd_hidcache_parse(const char *text, size_t length, struct btd_hidcache *rec
 int btd_hidcache_write(const char *folder, const uint8_t *controller, const struct btd_hidcache *record);
 int btd_hidcache_read(const char *folder, const uint8_t *controller, const uint8_t *address, unsigned type, struct btd_hidcache *record);
 int btd_hidcache_forget(const char *folder, const uint8_t *controller, const uint8_t *address, unsigned type);
+int btd_hidcache_prune(const char *folder, const uint8_t *controller, const struct btd_bond *bonds, unsigned count);
 
 #endif
