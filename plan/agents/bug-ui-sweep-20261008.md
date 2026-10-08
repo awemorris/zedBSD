@@ -82,6 +82,7 @@
 
 - UI でない open: BUG-013・023・024・025（PC-98・LX6、ベータ4）、036・041（QEMU の USB・NVMe）、052（Q2）、095・105・119・249（電源・USB の mouse）、145（AX211 の DHCP）、165・195・196（ACPI）、199（host 試験）、238（emacs -nw、既存の `apps.emacs.edit-save` が見る）、251・272（起動の Ctrl+Shift）、258・269（USB・ESP）、261（GPIO）、263（AF_UNIX）、271（印刷）。
 - Board の行が ticket より古い（Q1 が直す）: BUG-246（ticket は resolved、5320 でユーザーが確認）、BUG-248（resolved、T1-360）、BUG-099（resolved、2026-10-04 close）、「優先度と依存」の表の BUG-135・143・144（各 ticket は resolved）。BUG-203・204 の行の「Mailer・Calendar は未実施」も古い（T1-260・T1-317 で確認、ticket の q869）。
+  → 2026-10-08 Q1 の依頼で P2 が Board の行を ticket に合わせて直した（BUG-246・248・099・036・041 の行、優先度の表の 158・135・143・052・095・041・144/124・036/033/027/103、BUG-203・204 の行）。
 
 ## T1 への依頼（1 回の QEMU）
 
