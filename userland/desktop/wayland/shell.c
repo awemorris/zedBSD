@@ -7187,13 +7187,21 @@ bar_press(
 		return 1;
 	}
 
-	/* Otherwise only a docked window acts. */
+	/* Otherwise only a docked window acts, through the button under the press. */
 	surface = docked_window(server, KWL_PLANE_ANCHOR);
-	if (surface == NULL)
+	pressed = bar_button_at(&bar, server->pointer_x, server->pointer_y);
+	if (surface == NULL) {
+		/*
+		 * A press on the buttons' place while no docked window takes it (one
+		 * still in its docking animation, or not on top) is said, for the
+		 * tests that press the close button (BUG-273).
+		 */
+		if (pressed >= 0)
+			printf("KWL GLASS bar button=%d without a docked window x=%d anim=%d\n", pressed, server->pointer_x, server->anim != NULL);
 		return 1;
+	}
 
 	/* Its buttons. */
-	pressed = bar_button_at(&bar, server->pointer_x, server->pointer_y);
 	if (pressed == BUTTON_CLOSE) {
 		(void)kwl_emit(surface->client, surface->role->top->id, 1U, NULL, 0U);
 		printf("KWL GLASS close surface=%u client=%llu\n", surface->id, (unsigned long long)surface->client->number);
