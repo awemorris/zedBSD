@@ -139,3 +139,4 @@ verdict は runner の物（pass・fail・needs-person）。「再現した」�
 - ユーザー「Touchpadは動作確認できたので、下記をすべてclose します。…」→ (B) の touchpad の BUG-156・166・167・178・190・211・215・216・228・247・254 は resolved。BUG-218 は touchpad の部分だけ閉じ、Phone の padding（bugs.phone-padding）は T1-481 の結果待ち。
 - BUG-253 は Board の resolved を scheduled（実機の確認待ち）に戻した（BUG-255 の診断の UAT では蓋の事象が届かない起動があった）。
 - ユーザー「BUG-221, 226, 239はcloesします。」→ (B) の描画の遅れの BUG-221・226・239 は resolved。
+- ユーザー（network）: BUG-157・169・183・185・187・213 は close（resolved）。BUG-174 は「これはNATの向こう側だからです。closeします。」（resolved）。BUG-189・212 は「継続。再現しなければclose」（tracking、次の 5330 の UAT で再現しなければ close）。BUG-222 は「直ってないです。継続」（tracking に戻す、SCP の速さが直っていない）。
