@@ -7,8 +7,9 @@
 # processes before and after the stop are kept in OUTDIR/ps.txt.  The mouse and keys through QMP, the touch pad
 # through touchinject's "pad" scripts (1336x760 units at 12 a millimetre; each waits 2.6 s for the compositor's scan).
 # A guest without /bin/calendar is given one for the run: a script that opens a wltest window (app id calendar).
-#  7. The desktops' pill is in the bar's right half, just left of the status ("KWL GLASS desktops x=" past 640);
-#     p009-bar.png.
+#  7. The desktops' pill is in the middle of the bar while no window is docked (ws181-p011, the 2026-10-08 UAT; its first
+#     slot "KWL GLASS desktops x=" 591 on 1280: the pill 118 wide from 581); p009-bar.png.  (Docked, it is left of the
+#     status: ws181-guest.sh B9.)
 #  1. The arrangement menu: the pointer on "rows" lights it ("KWL ARRANGE menu lit item=rows"); moved on into the gap
 #     between "columns" and "rows", "columns" is not lit (no "lit item=columns"); p009-menu-gap.png shows "rows" lit.
 #     Esc closes the menu; "Side by Side" (columns) arranges a and b ("KWL ARRANGE apply layout=columns ... windows=2").
@@ -100,10 +101,10 @@ open_app apps.a f4d0d0 380x260
 open_app apps.b d0f4d0 400x280
 pointer move 640 600 sleep 300
 
-# 7. The desktops' pill left of the status, in the bar's right half.
+# 7. The desktops' pill in the middle of the bar (no window docked, ws181-p011).
 set -- $(last 'KWL GLASS desktops x=' | sed -n 's/.* x=\([0-9]*\) .*/\1/p')
 pill=${1:-0}
-if [ "$pill" -gt 640 ] 2>/dev/null; then pass "pill-right ($pill)"; else fail "pill-right (x=$pill, expected past 640)"; fi
+if [ "$pill" -ge 589 ] 2>/dev/null && [ "$pill" -le 593 ]; then pass "pill-middle ($pill)"; else fail "pill-middle (x=$pill, expected 591)"; fi
 shot p009-bar
 
 # 1. The menu: "rows" lit, then the gap: "columns" not lit; Esc; then Side by Side arranges a and b.

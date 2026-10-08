@@ -218,8 +218,12 @@ expect_count band-menu 'KWL ARRANGE menu open' $((${menus:-0} + 1))
 tap esc
 expect_some menu-esc 'KWL ARRANGE menu close via=key'
 
-# B9. b docked, its title pulled sideways in the bar and let go there: it comes off, moves, not docked again.
+# B9. b docked, its title pulled sideways in the bar and let go there: it comes off, moves, not docked again.  While
+# it is docked the desktops' pill has moved from the middle to left of the status (ws181-p011): its first slot past 640.
 title_double_click "${b:-0}"
+sleep 1
+set -- $(last 'KWL GLASS desktops x=' | sed -n 's/.* x=\([0-9]*\) .*/\1/p')
+if [ "${1:-0}" -gt 640 ] 2>/dev/null; then pass "pill-docked-right (${1:-0})"; else fail "pill-docked-right (x=${1:-0}, expected past 640)"; fi
 drags=$(count 'KWL GLASS dock surface=[0-9]* via=drag')
 set -- $(last 'KWL GLASS dock surface=' | sed -n 's/.* title=\([0-9]*\).*/\1/p')
 pointer $(stroke $((${1:-200} + 60)) 30 $((${1:-200} + 260)) 30 10 30) up sleep 1500

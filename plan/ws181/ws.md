@@ -42,6 +42,7 @@ Primary Milestone: MG006
 | [p008](phase008/phase.md) | UAT 2026-10-07 の 5 回目: App Home への遷移を iOS と同じ奥へ・奥から、touchpad の端の 2 本指 swipe は 1 本が端なら、上端の swipe down を App Home へ、左上の角の drag を外す | in-progress（実装・host まで、QEMU は T1） |
 | [p009](phase009/phase.md) | UAT 2026-10-07 の 6 回目（5320）: 整列の popup のちらつき、描画の重さ、App Home の下端の 2 本指で戻る・頁の端・日付、整列モードの calendar、仮想 desktop の island を通知の左へ | cleared（T1-362 QEMU） | p008 |
 | [p010](phase010/phase.md) | Alt+Shift+左右で仮想 desktop を移る（2026-10-08 ユーザー「では、Alt+Shift+左右で仮想デスクトップ移動、ではどうですか？」、Ctrl+Shift+左右は app の単語の選択と重なるので変えた）。compositor に既存の Alt+Shift+矢印の bind は無い。Emacs の M-S-左右（shift-select の単語）と terminal の Alt+Shift+矢印の escape は compositor が取ると app に届かなくなる | test-wait（2026-10-08 P1 q875 実装・build、QEMU は p010-guest.sh を T1 へ） | p009 |
+| [p011](phase011/phase.md) | 2026-10-08 夜 の UAT: bar の仮想 desktop の island を bar の中央に、窓が dock している時は今の位置（status のすぐ左）のまま、dock の animation で 2 つの位置の間を動く | in-progress（2026-10-08 P2 実装・build、QEMU と撮影は T1） | p009 |
 
 ## 関連
 
@@ -51,4 +52,4 @@ Primary Milestone: MG006
 ## 追加の要望（2026-10-08 夜 ユーザーの UAT）
 
 - ユーザー:「ドックバーの仮想デスクトップのislandなのですが、使ってみたところ、やっぱりdockバーの中央がいい気がしました。ただ、dockingしたときは、今の位置にするのがいいと思います。試作の繰り返しで申し訳なく思いますが、通常優先度でスケジューリングしておいて、あとで見せてください！」
-- → 新しい Phase（次の番号、案）: bar の仮想 desktop の island を bar の中央に置く。窓が bar に dock している時は今の位置のまま。実装したら撮影をユーザーに見せる。優先度は通常（q906 以降で担当を割り当てる）。
+- → [p011](phase011/phase.md)（2026-10-08 夜 P2）: bar の仮想 desktop の island を bar の中央に置く。窓が bar に dock している時は今の位置のまま。実装したら撮影をユーザーに見せる。
