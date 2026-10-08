@@ -442,3 +442,57 @@ kl_system_machine_login_language(const struct kl_system *system, char *code, siz
 	(void)size;
 	return ENOENT;
 }
+
+/* Bluetooth (ws143-p006): not offered without a compositor, so the page says it is not available. */
+int
+kl_system_bluetooth_state(const struct kl_system *system, struct kl_bluetooth_state *state)
+{
+	(void)system;
+	memset(state, 0, sizeof(*state));
+	return ENOTSUP;
+}
+
+size_t
+kl_system_bluetooth_devices(const struct kl_system *system, struct kl_bluetooth_device *devices, size_t capacity)
+{
+	(void)system;
+	(void)devices;
+	(void)capacity;
+	return 0U;
+}
+
+int
+kl_system_bluetooth_watch(struct kl_system *system, unsigned on)
+{
+	(void)system;
+	(void)on;
+	return ENOTSUP;
+}
+
+int
+kl_system_bluetooth_scan(struct kl_system *system, unsigned on)
+{
+	(void)system;
+	(void)on;
+	return ENOTSUP;
+}
+
+int
+kl_system_bluetooth_power(struct kl_system *system, unsigned on, uint32_t *request)
+{
+	(void)system;
+	(void)on;
+	(void)request;
+	return ENOTSUP;
+}
+
+int
+kl_system_bluetooth_device(struct kl_system *system, unsigned action, const char *address, unsigned type, uint32_t *request)
+{
+	(void)system;
+	(void)action;
+	(void)address;
+	(void)type;
+	(void)request;
+	return ENOTSUP;
+}

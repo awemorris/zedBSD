@@ -393,6 +393,7 @@ bluetooth_list(
 	int button;
 	int right;
 	int height;
+	int written;
 	int y;
 
 	/* The devices of the card. */
@@ -450,9 +451,13 @@ bluetooth_list(
 		legacy = "";
 		if ((device->flags & KL_BLUETOOTH_LEGACY) != 0U)
 			legacy = "  Paired the old, less safe way";
-		(void)snprintf(line, sizeof(line), "%s%s%s%s", bluetooth_kind_words(device->kind), connected, battery, legacy);
+		written = snprintf(line, sizeof(line), "%s%s%s%s", bluetooth_kind_words(device->kind), connected, battery, legacy);
 		if (!paired)
-			(void)snprintf(line, sizeof(line), "%s  %s", bluetooth_kind_words(device->kind), device->address);
+			written = snprintf(line, sizeof(line), "%s  %s", bluetooth_kind_words(device->kind), device->address);
+
+		/* A line longer than the room is cut (the drawing fits it to its width anyway). */
+		if (written < 0)
+			line[0] = '\0';
 		(void)kl_text_draw_fit(app->text, canvas, x + BLUETOOTH_PAD, y + 42, line, BLUETOOTH_TEXT_SUB, 0, width / 2 + 60, SE_COLOR_TEXT_SECONDARY);
 
 		/* Pair, or Remove and Connect or Disconnect, from the right. */
