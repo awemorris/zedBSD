@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p004 -->
 # ws188-p004: Files の mount の一覧を kl_system_machine の要求へ
 
-Status: in-progress（q894、P2、2026-10-08）
+Status: cleared（2026-10-08 Q1: T1-429 host-model PASS、T1-430 QEMU の USB の mount・Trash・Empty Trash PASS（PNG を Q1 が目視）、T1-431 FreeBSD の build PASS。取り出しの後の Devices の消え方は未実施）
 Disposition: normal
 Parent: [WS188](../ws.md)
 由来: ユーザーの決定（2026-10-08 昼）「Files の mount の表は kl_system に移す」。p003 の走査で見つかった Files の `files/mntent/mounts-mntent.c`（getmntent、zedBSD と Linux）・`files/freebsd/mounts-freebsd.c`（getfsstat）。使う所は Places の mount の volume（places.c の `places_mounts`）と Trash の volume ごとの `.Trash` の発見（trash.c の `fm_trash_list`）。
