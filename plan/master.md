@@ -8,31 +8,29 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
--->
-<!-- master:agents:start -->
-- **2026-10-08 夜（ユーザー就寝中、自走）**: N=2（P1・P2）＋T1。
-  - **P1**（新しい世代、q875）: 小さい物の束（ws181-p010 Alt+Shift+左右 → ws090-p018 Phone の hover → WS164 H3 → ws102-p025 → ws168-p004 → ws179-p003 → ws078-p004）。前の世代は q862・q865・q866・q871・q873 を終えて終了。
-  - **P2**（q870 の BUG-239）: T1-390 の内訳（import_us が主）で Vulkan の解放を frame の後へ。終えたらラップアップ、次は新しい世代。
-  - **T1**: 台帳の未実行は無し（T1-379〜390 済み）。
-  - **5330**: 応答なし（No route to host、スリープか電源オフ）。1 分ごとの ping で見張り、戻ったら SSH 鍵・入れ替え（build/q1-uat2 に main 2554b2d72 の vmunix・wayland・settings・libkeiland・files・pdfviewer・libpdf・terminal・notes・browser・Dawn）・再起動（ユーザーの許可 2026-10-08 夜）。
-  - ベータ2 の Phase の洗い出し: plan/agents/sweep-20261008.md（P1 q874）。
+- **2026-10-08 夕のラップアップ（ユーザー「いったんラップアップしてください」）**: P1・P2・T1 は全部終了、未統合の commit も未 commit の差分も無い（main b63777dec 以降）。次は新しい世代で起動する。
+  - **P1**: q904 WS143 p005 i02（BR/EDR の HID host）の i02a（純粋な部品、bt-hid-host-test 75 checks）まで。再開は plan/ws143/phase005/phase.md の「i02a の記録」→ i02b（router・l2cap の inbound/Pending・pair の handoff）→ i02c → i02d（loopback と bt-hid-p005.sh、T1）。小さい残り: apps.settings.bluetooth-pair 4 のシナリオの errno を EACCES の名に（zedBSD は 25）。
+  - **P2**: q903 WS177 案 M の p020（cleared 待ち、T1 未）と p021（985979c6a、実装の途中か済みかは phase021/phase.md を読む。ユーザーの指示で止めた）。BUG-268 の直しは main に入ったが 5330 に未導入。
+  - **T1**: 台帳の未実行は T1-435（5330、保留）だけ。p020・p021 の T1 の依頼は P2 から未着。
+  - **残る T1 の観察**: T1-447 で kei（uid 1000）から compositor の audio stream を開くと ENOTSUP（95）、root は PASS → WS191 の uid の門（compositor と同じ uid の client だけに global を見せる）の扱い。Video Player の時計 2 倍は未確認（P2 は code の単位の誤り無しと判断、log の POSITION と host の時計で測る）。
+  - 共有の stash@{0}（agent/p1 の古い世代の物）が残っている。触らない。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- main 7e8e20a10 以降（2026-10-08 夜）。今日の統合: ws183-p002・WS187 p001〜p003・ws113-p015・ws090-p015・BUG-258・BUG-259・WS143 p002・BUG-221・BUG-226・BUG-240・BUG-238・BUG-244・BUG-260・BUG-239 の測定、Dawn の既定の壁紙。
-- 実機（5330）の確認待ち: dmesg の `typec: display port TC1:`・`TC2:`（ws050-p005 の GNVS の値）、BUG-261 の intel-gpio の log、ws083-p007 の VCS0 の reset、ws183-p002 のタップ、WS187 の touchpad・PIN・Security Key、ws113-p015 の head の bar の押下、BUG-258 の Kioxia と card reader、BUG-259・221・226 の体感、BUG-231、BUG-225 の icon の刻み。
-- `codex/fix-bug202-boot-worker`・`codex/merge-bug202` の古い branch の整理（以前からの残り）。
+- main b63777dec（2026-10-08 夕）。今日の後半の統合: WS188 完了（host-machine は plan/tools/keiland-machine へ）、WS189 p002〜p004（DnD・Mail の添付）、WS190 p001〜p003（指の選択、KL_VERSION 74）、WS191 p001〜p004（kl_audio_stream、KL_VERSION 73、Linux alsa-lib の dlopen・FreeBSD OSS）、WS143 p006（Bluetooth の desktop、KL_VERSION 72）、BUG-256・BUG-265・BUG-266（resolved / 実機待ち）、BUG-267・BUG-268 の直し、WS083 p008 と照合の review の直し、WS177 p020・p021（Music）。
+- 5330 の状態: 最後の kernel の書き込み（BUG-267 の直し、cksum 180880581）の後に SSH が応答しなくなり（BUG-269）、ユーザーが再起動した直後。どの kernel で起動したかは未確認（ユーザーが SSH の見張りを止めた）。build/q1-uat2/vmunix（2563124650）は BUG-267 と BUG-268 の両方入り、/bin/wayland は 1600740716（BUG-266 の直し入り）。boot の行に `usbhid.dump=1`（診断、BUG-267 の後に外す）。
+- ユーザーへの確認待ち: BUG-267 の 2 本指（interface 1 の attach、contact=1）、BUG-268 の DP を抜いた後の eDP の戻り（1〜2 秒）、BUG-265 の実機の tap-drag、ws090-p009・p018・p020・p021 の PNG、`kl_audio_stream_*` を `kl_audio_*` に縮めるか（Q1 が問うた、未回答）。
 <!-- master:merge:end -->
 
 ### Q1 の次の手順
 
 <!-- master:next:start -->
-1. plan/agents/wrapup-20261008.md を読み、P1・P2 を新しい世代で起動（再開の順は上の agents）。P2 の WIP は worktree の差分のまま、無ければ plan/ws143/wip-20261008/ から戻す。
-2. **5330**（zedBSD 単独起動中、ユーザー「いつでも再起動OK、アップデートもOK」）: 入れ替えは未実施。5330 の /tmp に vmunix.q1（main fc5cad676、BUG-256 の診断入り）・wayland.q1・settings.q1・libkeiland.q1 があり、ESP は /tmp/esp に mount したまま（/esp は無い）。新しい main で build し直して入れ替え（vmunix.prev を残す）、再起動はユーザーに頼む（reboot command は 5330 で効かない）。その後ユーザーに TC2 へ DP の monitor を挿してもらい `i915: aux`・`TCn AUX failed` の行を P2 へ（BUG-256）。BUG-258 の再現の dmesg もこの時に。
-3. merge は `source plan/tools/merge_one.sh && merge_one SHA`、`&&` で繋ぐ。
-4. PDF viewer のリサイズの重さ（2026-10-08 UAT）は [BUG-259](bugs/BUG-259.md)、未割当。
+1. P1・P2・T1 を新しい世代で起動（再開点は上の agents）。merge は `source plan/tools/merge_one.sh && merge_one SHA`。
+2. **5330**（ユーザー「アップデートや再起動は自由にどうぞ」、SSH は kei@10.0.30.3、鍵は登録済み、sudo は `echo kei | sudo -S`）: まず起動中の kernel を確かめる。ESP への書き込みは BUG-269 で SSH が止まるので、書く前にユーザーに一言、書いたら電源の再投入を頼む。手順は script を /tmp に置き `nohup sh` で流し、終わりの印の file を見る。
+3. ベータ2 の残り: plan/agents/sweep-beta2-rc-20261008.md の §5（約 16.6 LW、WS143 が最大）。
+4. ユーザーの判断待ち: 上の merge の block の「ユーザーへの確認待ち」。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断
