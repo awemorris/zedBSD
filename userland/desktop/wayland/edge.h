@@ -55,6 +55,13 @@
 #define KWL_EDGE_BAND_START		12
 #define KWL_EDGE_BAND_SLIP		8
 
+/*
+ * How long a press in the band rests before it is a long press of what is
+ * under it (ws177-p033: the bar's applications show their previews), in
+ * milliseconds: a swipe down starts well before.
+ */
+#define KWL_EDGE_BAND_HOLD_MS		500U
+
 /* Where a press is: nowhere special, the bottom edge's strip, or the top edge's band. */
 #define KWL_EDGE_NONE			0U
 #define KWL_EDGE_BOTTOM_STRIP		1U
@@ -131,6 +138,7 @@ struct kwl_edge_depth {
 unsigned kwl_edge_classify(int32_t x, int32_t y, int32_t width, int32_t height, int touch);
 unsigned kwl_edge_classify_band(int32_t x, int32_t y, int32_t width, int32_t height, int32_t depth);
 unsigned kwl_edge_band_motion(int32_t dx, int32_t dy);
+int kwl_edge_band_held(uint64_t held_ms);
 unsigned kwl_edge_drag_axis(int32_t dx, int32_t dy);
 int32_t kwl_edge_distance(int32_t dx, int32_t dy);
 void kwl_edge_home_desktop(float progress, int32_t width, int32_t height, struct kwl_edge_depth *depth);

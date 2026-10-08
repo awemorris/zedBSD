@@ -470,6 +470,7 @@ kwl_apps_bar_button(
 	int tile;
 	int same;
 	int in_panel;
+	unsigned held;
 
 	/* The release of a press on an icon (of the bar it was pressed on): the drag's end, or the click. */
 	state = &server->apps_bar;
@@ -480,6 +481,8 @@ kwl_apps_bar_button(
 		built = kwl_apps_view_build_on(server, state->output, &view);
 
 		/* A drag ends where it is. */
+		held = state->press_held;
+		state->press_held = 0;
 		if (state->dragging) {
 			state->dragging = 0;
 			found = -1;
@@ -489,6 +492,10 @@ kwl_apps_bar_button(
 			server->dirty = 1;
 			return 1;
 		}
+
+		/* A finger's long press showed the previews already; its lift leaves them. */
+		if (held)
+			return 1;
 
 		/* The "+N" place opens Wiseview. */
 		same = strcmp(state->press_key, MORE_KEY);
@@ -513,10 +520,10 @@ kwl_apps_bar_button(
 			return 1;
 		}
 
-		/* More: a second click on the shown icon hides its previews, otherwise they show at once. */
+		/* More: a second click on the shown icon (shown by a click or a long press) hides its previews, otherwise they show at once. */
 		same = strcmp(state->key, app->key);
 		if (state->state == KWL_APPS_SHOWN &&
-		    state->via == KWL_APPS_VIA_CLICK &&
+		    (state->via == KWL_APPS_VIA_CLICK || state->via == KWL_APPS_VIA_HOLD) &&
 		    same == 0) {
 			kwl_apps_bar_hide(server, "click");
 			return 1;
@@ -574,10 +581,23 @@ kwl_apps_bar_button(
 		state->output = view.output;
 		state->pressed = 1;
 		state->dragging = 0;
+		state->press_held = 0;
 		state->press_x = server->pointer_x;
 		(void)snprintf(state->press_key, sizeof(state->press_key), "%s", MORE_KEY);
 		if (slot >= 0)
 			(void)snprintf(state->press_key, sizeof(state->press_key), "%s", view.apps.apps[slot].key);
+
+		/*
+		 * A finger's long press on an application's icon (the top band's
+		 * hold, ws177-p033) shows its previews at once, as a pointer's rest
+		 * does; they stay after the lift, as a click's do.
+		 */
+		if (server->band_held && slot >= 0) {
+			state->press_held = 1;
+			kwl_apps_bar_show(server, &view, view.apps.apps[slot].key, KWL_APPS_VIA_HOLD);
+		}
+
+		/* The press is the icon's. */
 		return 1;
 	}
 
@@ -1240,6 +1260,8 @@ kwl_apps_bar_show(
 		how = "switch";
 	if (via == KWL_APPS_VIA_SPRING)
 		how = "spring";
+	if (via == KWL_APPS_VIA_HOLD)
+		how = "hold";
 	printf("KWL APPS preview app=%s windows=%u via=%s at_ms=%llu\n", key, panel.count, how, (unsigned long long)kwl_milliseconds());
 	for (index = 0; index < panel.count; index++)
 		printf("KWL APPS preview window surface=%u x=%d y=%d width=%d height=%d client=%llu\n", panel.surfaces[index]->id, panel.tiles[index].x, panel.tiles[index].y, panel.tiles[index].width, panel.tiles[index].height, (unsigned long long)panel.surfaces[index]->client->number);

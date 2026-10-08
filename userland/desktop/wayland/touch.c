@@ -708,6 +708,120 @@ kwl_touch_drag_start(
 	return 1;
 }
 
+/*
+ * Gives the finger the shell holds to the surface under the point it
+ * touched, as if the shell had never taken it (the top band's press over a
+ * fullscreen window that is no swipe, shell.c, ws177-p034): it touches
+ * down there (by wl_touch, or as the pointer's left press), and then moves
+ * to where it is now; one that has lifted already (a tap) lifts there too.
+ * The events carry the time given.
+ *
+ * Returns 1 when a finger was given, 0 when the shell holds none.
+ */
+int
+kwl_touch_shell_handback(
+	struct kwl_server *server,
+	int32_t x,
+	int32_t y,
+	uint32_t time,
+	int lifted)
+{
+	struct touch_report report;
+	struct touch_screen *screen;
+	struct touch_contact *contact;
+	struct kwl_object *surface;
+	uint32_t words[3];
+	int32_t place_x;
+	int32_t place_y;
+	unsigned index;
+	unsigned slot;
+	unsigned found;
+
+	/* The finger the shell holds (only one: no other finger is the pointer while it is). */
+	screen = NULL;
+	found = 0U;
+	for (index = 0; index < TOUCH_SCREENS && screen == NULL; index++) {
+		/* A free slot of the table has no fingers. */
+		if (screens[index].input == NULL)
+			continue;
+
+		/* Each finger of the screen. */
+		for (slot = 0; slot < TOUCH_SLOTS; slot++) {
+			if (screens[index].contacts[slot].route != ROUTE_SHELL)
+				continue;
+			screen = &screens[index];
+			found = slot;
+			break;
+		}
+	}
+
+	/* None: nothing to give. */
+	if (screen == NULL)
+		return 0;
+
+	/* The shell lets it go: the pointer follows it no more, and it is where it is. */
+	contact = &screen->contacts[found];
+	contact->following = 0;
+	contact->offset_x = 0;
+	contact->offset_y = 0;
+
+	/* Its down at the point it touched, kept where it is now meanwhile. */
+	memset(&report, 0, sizeof(report));
+	report.time = time;
+	place_x = contact->place_x;
+	place_y = contact->place_y;
+	contact->place_x = x * 256;
+	contact->place_y = y * 256;
+	place_pointer(server, x, y);
+	deliver_first(server, screen, found, &report);
+	contact->place_x = place_x;
+	contact->place_y = place_y;
+
+	/*
+	 * Lifted already: the client hears it lift where it touched, and the
+	 * finger goes nowhere until its slot is free.  Still down: it moves
+	 * to where it is now.
+	 */
+	surface = contact->surface;
+	if (lifted && contact->route == ROUTE_CLIENT) {
+		if (surface != NULL && !surface->dead) {
+			words[0] = kwl_next_serial(server);
+			words[1] = time;
+			words[2] = contact_id(screen, found);
+			send_touch(surface->client, TOUCH_UP, words, sizeof(words));
+			report_heard(&report, surface->client);
+		}
+
+		/* The finger goes nowhere until its slot is free. */
+		contact->route = ROUTE_IGNORED;
+		contact->surface = NULL;
+	} else if (lifted && contact->route == ROUTE_POINTER) {
+		kwl_seat_button_deliver(server, time, KWL_BUTTON_LEFT, 0U);
+		report.pointer_activity = 1;
+		contact->route = ROUTE_IGNORED;
+
+		/* The press just given is over: it authorizes no move or menu the client asks for any more. */
+		server->press_surface = NULL;
+		server->press_button = 0U;
+	} else if (contact->route == ROUTE_CLIENT) {
+		contact_move(server, screen, found, &report);
+	} else if (contact->route == ROUTE_POINTER) {
+		place_pointer(server, contact->place_x / 256, contact->place_y / 256);
+		kwl_seat_motion_deliver(server, time);
+		report.pointer_activity = 1;
+	}
+
+	/* Every client told something hears where the group ends, and the pointer's events end with its frame. */
+	for (index = 0; index < report.heard_count; index++)
+		send_touch(report.heard[index], TOUCH_FRAME, NULL, 0U);
+	if (report.pointer_activity)
+		kwl_seat_frame(server);
+
+	/* Succeeded: the finger is the surface's (a test sees it go). */
+	printf("KWL TOUCH handback contact=%u x=%d y=%d lifted=%d route=%d\n", contact_id(screen, found), x, y, lifted, contact->route);
+	return 1;
+}
+
 /* Finds the touch screen slot of an input device, NULL when there is none. */
 static struct touch_screen *
 screen_of(
@@ -1132,6 +1246,15 @@ contact_end(
 	/* The finger and where it went. */
 	contact = &screen->contacts[slot];
 
+	/*
+	 * A finger the shell has goes to where it was last reported first;
+	 * that motion may hand it back to the client under where it touched
+	 * (the top band over a fullscreen window, ws177-p034), and it then
+	 * ends as that client's.
+	 */
+	if (contact->route == ROUTE_SHELL)
+		shell_motion(server, contact, report->time);
+
 	/* Each route ends in its own way. */
 	switch (contact->route) {
 	case ROUTE_CLIENT:
@@ -1146,8 +1269,7 @@ contact_end(
 		report_heard(report, surface->client);
 		break;
 	case ROUTE_SHELL:
-		/* The pointer goes to where the finger was last reported, and the shell hears the release there. */
-		shell_motion(server, contact, report->time);
+		/* The shell hears the release where the finger was last reported (the pointer went there above). */
 		(void)shell_press(server, contact->place_x / 256 + contact->offset_x, contact->place_y / 256 + contact->offset_y, report->time, 0U);
 		break;
 	case ROUTE_POINTER:

@@ -12,8 +12,9 @@
  * Checks: where a press is (the bottom strip for any pointer, the top band
  * for a touch only, not over the launcher or the top-right corner); what a
  * press held in the band is after a motion; what a drag on Home is; the
- * distance a docked title is pulled; and (ws181-p008) how deep the desktop
- * layer and Home's content are on Home's way in and out.
+ * distance a docked title is pulled; (ws181-p008) how deep the desktop
+ * layer and Home's content are on Home's way in and out; and (ws177-p033)
+ * when a press resting in the band is a long press.
  *
  *   plan/ws181/tests/run-host-edge.sh
  */
@@ -127,6 +128,7 @@ main(void)
 	unsigned index;
 	unsigned answer;
 	int32_t distance;
+	int held;
 
 	/* 1. Where a press is. */
 	for (index = 0U; index < sizeof(place_cases) / sizeof(place_cases[0]); index++) {
@@ -139,6 +141,16 @@ main(void)
 		answer = kwl_edge_band_motion(band_cases[index].dx, band_cases[index].dy);
 		check(answer == band_cases[index].kind, band_cases[index].what, "band");
 	}
+
+	/* 2b. A press held in the band that rests (ws177-p033): a long press from KWL_EDGE_BAND_HOLD_MS. */
+	held = kwl_edge_band_held(0U);
+	check(held == 0, "just pressed", "hold");
+	held = kwl_edge_band_held(499U);
+	check(held == 0, "a moment short of the hold", "hold");
+	held = kwl_edge_band_held(500U);
+	check(held == 1, "held long enough", "hold");
+	held = kwl_edge_band_held(5000U);
+	check(held == 1, "held long", "hold");
 
 	/* 3. A drag on Home. */
 	for (index = 0U; index < sizeof(drag_cases) / sizeof(drag_cases[0]); index++) {
