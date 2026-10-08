@@ -3,7 +3,7 @@
 # ws177-p020: 音楽の準正常系の 1 — collection と cover（案 M）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-450、2026-10-08 夜 Q1）
+Status: cleared（2026-10-08 夜 Q1: T1-450 の apps.music.play は fail なし、`MUSIC COVER album=0 error=0`・`MUSIC RESCAN songs=3 albums=2 error=0`）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q903（P2、2026-10-08 夜、承認済み）

@@ -72,11 +72,12 @@
 #define KWL_EDGE_SIDE_BOTTOM		3U
 
 /*
- * The group of fingers: the finger nearest the edge touches within
- * KWL_EDGE_GROUP_BAND of it (two fingers side by side do not both fit in
- * the one finger's strip), each of the others within KWL_EDGE_GROUP_REACH,
- * all within KWL_EDGE_GROUP_MS of the first; every finger then moves in by
- * KWL_EDGE_GROUP_START, more in than across.
+ * The group of fingers: the finger nearest an edge (looked for within
+ * KWL_EDGE_GROUP_REACH of each) touches within KWL_EDGE_GROUP_BAND of it
+ * (two fingers side by side do not both fit in the one finger's strip),
+ * the others anywhere (the 2026-10-08 user's decision), all within
+ * KWL_EDGE_GROUP_MS of the first; every finger then moves in from that
+ * edge by KWL_EDGE_GROUP_START, more in than across.
  */
 #define KWL_EDGE_GROUP_BAND		64
 #define KWL_EDGE_GROUP_REACH		192

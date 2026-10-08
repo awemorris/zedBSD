@@ -109,6 +109,8 @@ static void test_joined_shell(void);
 static void test_late_finger(void);
 static void test_single_strip(void);
 static void test_lift_before_in(void);
+static void test_other_in_middle(void);
+static void test_joined_far(void);
 
 /* Runs every scenario and reports how many checks failed. */
 int
@@ -151,6 +153,8 @@ main(
 	test_late_finger();
 	test_single_strip();
 	test_lift_before_in();
+	test_other_in_middle();
+	test_joined_far();
 
 	/* The touch screen goes. */
 	kwl_touch_remove(&server, &input, 1);
@@ -1151,4 +1155,68 @@ kwl_surface_size(
 	/* Succeeded: the output's size. */
 	*width = OUTPUT_WIDTH;
 	*height = OUTPUT_HEIGHT;
+}
+
+/*
+ * The user's decision (2026-10-08): with the outermost finger at the edge,
+ * the others may be anywhere.  (1890, 600) at the right edge and
+ * (900, 700) in the middle swipe left: the right edge's swipe, led by the
+ * outer finger.
+ */
+static void
+test_other_in_middle(
+	void)
+{
+	unsigned step;
+
+	/* Both touch; the client hears both. */
+	scenario_begin("outer finger at the right edge, the other in the middle");
+	finger_down(0, 201, 900, 700);
+	finger_down(1, 202, 1890, 600);
+	report_send(11000);
+	check(seen.downs == 2, "middle-other: the client hears both fingers touch");
+
+	/* Both move left. */
+	for (step = 1; step <= 6; step++) {
+		finger_move(0, 900 - 25 * (int32_t)step, 700);
+		finger_move(1, 1890 - 25 * (int32_t)step, 600);
+		report_send(11000 + 16 * step);
+	}
+
+	/* The shell took them, from the outer finger's row on the edge. */
+	check(seen.cancels == 1, "middle-other: the client hears cancel");
+	check(seen.shell_presses == 1, "middle-other: the shell hears one press");
+	check(seen.press_x == OUTPUT_WIDTH - 1, "middle-other: the press is on the right edge");
+	check(seen.press_y == 600, "middle-other: the press is the outer finger's row");
+	check(seen.motion_x == OUTPUT_WIDTH - 1 - 150, "middle-other: the pointer went the outer finger's way");
+
+	/* They lift. */
+	finger_up(0);
+	finger_up(1);
+	report_send(11200);
+	check(seen.shell_releases == 1, "middle-other: the shell hears the release");
+}
+
+/* The outer finger in the strip, the shell's; a finger soon after in the middle goes nowhere. */
+static void
+test_joined_far(
+	void)
+{
+	/* The outer finger: the shell's. */
+	scenario_begin("outer finger in the strip, the other in the middle");
+	finger_down(0, 211, 3, 700);
+	report_send(12000);
+	check(seen.shell_presses == 1, "joined-far: the shell takes the outer finger");
+
+	/* A finger in the middle 40 ms later: nobody hears it. */
+	finger_down(1, 212, 900, 650);
+	report_send(12040);
+	check(seen.downs == 0, "joined-far: the client hears no down");
+
+	/* Both lift. */
+	finger_up(1);
+	finger_up(0);
+	report_send(12200);
+	check(seen.downs == 0, "joined-far: the client never hears the middle finger");
+	check(seen.shell_releases == 1, "joined-far: the shell hears the release");
 }
