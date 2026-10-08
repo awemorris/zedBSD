@@ -3,7 +3,8 @@
 # (under ASan and UBSan) and runs plan/ws143/tests/bt-daemon-host-test.c (p003: the parsers, the Intel load's plan, a
 # scripted controller's sessions, a fixed-seed fuzz) and bt-pair-host-test.c (p004: the cryptography against FIPS-197,
 # RFC 4493 and the Core's sample data, ACL, L2CAP, SMP against a scripted responder, the bonds, a fuzz).  The synthetic
-# firmware files and the bonds go in new folders of the build.
+# firmware files and the bonds go in new folders of the build.  With the intelbt-firmware package's cache (INTELBT_CACHE, or the
+# default path below), the real Solar .sfi/.ddc files are planned and loaded into the scripted bootloader as well.
 # usage: plan/ws143/tests/bt-daemon-host-test.sh   (from the repository's top; OUT= to choose the build folder)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -15,7 +16,14 @@ flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wdeclaration-after-statem
 cc $flags -o "$OUT/bt-daemon-host-test" plan/ws143/tests/bt-daemon-host-test.c \
 	userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/session.c \
 	userland/base/bluetoothd/acl.c -lpthread
-timeout 120 "$OUT/bt-daemon-host-test" "$firmware"
+# The intelbt-firmware package's verified cache (make -C userland/firmware/intelbt intelbt-firmware), when it is there:
+# the real .sfi and .ddc files are planned and loaded into the scripted bootloader too (ws143-p003 i02).
+intelbt=${INTELBT_CACHE:-build/sources/firmware/intelbt/dc85ccedc9c973682fbcf4d628ca61174bcc3120}
+if [ -f "$intelbt/ibt-0040-0041.sfi" ]; then
+	timeout 300 "$OUT/bt-daemon-host-test" "$firmware" "$intelbt"
+else
+	timeout 120 "$OUT/bt-daemon-host-test" "$firmware"
+fi
 cc $flags -o "$OUT/bt-pair-host-test" plan/ws143/tests/bt-pair-host-test.c userland/base/bluetoothd/crypto.c \
 	userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c \
 	userland/base/bluetoothd/keys.c userland/base/bluetoothd/hci.c
