@@ -21,3 +21,9 @@ Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §6.4（第 5 �
 - `make keiland-linux` warning 0、compositor は libasound を link しない（dlopen と memfd_create だけ）。境界の検査 PASS。
 - tone.c は Linux の keiland の build の libkeiland に link できる、tone-backend.c は Linux の backend で build できる。
 - 未実施: Linux の guest・FreeBSD の guest での音（T1）、FreeBSD の native build。
+
+## T1-447 の結果の読み（2026-10-08 夜 P2 の新しい世代）
+
+- T1-447: root の direct の compositor に root の `tone` は PASS、backend 直の `tone-backend-linux` は root・kei とも PASS。kei（uid 1000）の `tone` を **root の compositor**（socket を 777 にした）に繋ぐと `TONE open error=95`（ENOTSUP）。
+- これは設計どおり: `kl_audio_v1` は compositor と同じ uid の client だけに見せる（[design.md](../design.md) の M-6、`userland/desktop/wayland/settings.c` の `kwl_settings_global_visible`、uid は `kl_backend_peer_uid` の SO_PEERCRED と `getuid()` の比較）。global が見えないので libkeiland の open は ENOTSUP。code を読んで、kei の compositor（uid 1000）なら kei の client に global を見せない理由は無い（settings が有り（`--session`）、backend の supported は alsa の dlopen だけで uid に依らない）。kei の session の compositor での確認を T1 に依頼する（gdm の variant の自動 login の Keiland の session、logind の seat、ALSA の default は kei の PipeWire を通る）。
+- 依頼の cc の行が通らなかった件: `plan/ws191/tests/build-tone-linux.sh OUT [KEILAND_LINUX_BUILD]` を作った（tone は `-Wl,-rpath-link,$build/lib`（libkeiland の NEEDED の libwayland-client.so を build の物で解く。`-l:libwayland-client.so` は as-needed で落ちるので不要）、tone-backend-linux は `-D_GNU_SOURCE -ldl`）。`make -j16 keiland-linux` の後に `sh plan/ws191/tests/build-tone-linux.sh build/ws191-tone2` → 2 つとも build、tone の NEEDED は libkeiland・libm・libc、RUNPATH /opt/keiland/lib。
