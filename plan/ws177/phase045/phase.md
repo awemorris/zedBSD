@@ -3,7 +3,7 @@
 # ws177-p045: networkd の IPv6 の準正常系・異常系（案 R）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q909: 実装・host PASS・build warning 0。T1 の試験は p046 と一緒に依頼する）
+Status: in-progress（2026-10-08 夜 P1 q909: 実装・host PASS・build warning 0。T1 の依頼文を Q1 へ（p046 と一緒に `ipv6-r-dnsmasq.sh`））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q909（P1、承認は p044 と同じ）
@@ -75,8 +75,10 @@ Origin: [backlog-p1](../backlog-p1.md) 17・20〜24・27 行（WS130 ws130-p005�
 | `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat build/p1-uat/bin/networkd build/p1-uat/bin/net` | rc 0、warning 0 |
 | `python3 plan/tools/style-check.py`（ipv6.c・resolver6.[ch]・host-ipv6-r.c、reconcile.c の新しい行） | 指摘 0（networkd/main.c・net/main.c の既存の長い if-else の鎖に足した枝は鎖の書き方のまま） |
 
-未実施（T1、p046 と一緒に依頼）: QEMU の dnsmasq の guest での resolv.conf の足し戻し、DAD の作り直し、既定の route が 1 つ、
-carrier down の掃除、net commit の取り去り。
+未実施（T1、p046 と一緒に依頼、`plan/ws177/tests/ipv6-r-dnsmasq.sh`）: dnsmasq の guest での既定の route が 1 つ、resolv.conf の
+足し戻し（先頭の行を保つ）、DAD の作り直し、carrier down の掃除（usb-net が carrier を伝えない時は「判定せず」）、dhcpc -6 の非同期の
+実行（dnsmasq の log の SOLICIT・REPLY）。net commit の取り去り（17）は host だけ: net の console に IPv6 の文法が無く、candidate で
+IPv6 の address を落とす経路を guest で起こせない。
 
 ## 確認の予定（元の案）
 

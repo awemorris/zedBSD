@@ -323,7 +323,11 @@ slaac_rdnss(
 	}
 }
 
-/* Keeps a DNSSL option's names, separated by spaces, as far as they fit. */
+/*
+ * Keeps a DNSSL option's names after any kept before, separated by spaces, as
+ * far as they fit; a name with a label that is not a host name's is
+ * dropped whole.
+ */
 static void
 slaac_dnssl(
 	const uint8_t *option,
@@ -332,25 +336,49 @@ slaac_dnssl(
 {
 	size_t offset;
 	size_t used;
+	size_t start;
 	unsigned label;
+	int dropping;
+	int valid;
 
 	/* The lifetime, then the names in DNS's label form after the first eight bytes; a zero label ends each. */
 	ra->search_lifetime = slaac_read32(option + 4);
 	used = strlen(ra->search);
+	if (used != 0U && used + 1U < SLAAC_SEARCH_MAX)
+		ra->search[used++] = ' ';
+	start = used;
+	dropping = 0;
 	offset = 8U;
 	while (offset < length) {
 		label = option[offset++];
 
-		/* The end of a name: a space before the next; padding of zeros ends the list. */
+		/* The end of a name: a space before the next, which starts there; padding of zeros ends the list. */
 		if (label == 0U) {
 			if (used != 0U && ra->search[used - 1U] != ' ' && used + 1U < SLAAC_SEARCH_MAX)
 				ra->search[used++] = ' ';
+			start = used;
+			dropping = 0;
 			continue;
 		}
-		if (label > 63U || offset + label > length || used + label + 2U >= SLAAC_SEARCH_MAX)
+
+		/* A label past the option's end: the name, and what follows, dropped. */
+		if (label > 63U || offset + label > length) {
+			used = start;
 			break;
-		if (!slaac_label_valid(option + offset, label))
-			break;
+		}
+
+		/* A label not a host name's, or no room for it: the whole name dropped (ws177-p046), the next one read. */
+		valid = slaac_label_valid(option + offset, label);
+		if (!valid || used + label + 2U >= SLAAC_SEARCH_MAX) {
+			used = start;
+			dropping = 1;
+		}
+
+		/* A name being dropped: its labels passed over. */
+		if (dropping) {
+			offset += label;
+			continue;
+		}
 
 		/* A label, after a dot when the name has one already. */
 		if (used != 0U && ra->search[used - 1U] != ' ')

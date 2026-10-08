@@ -13,6 +13,16 @@
  * time given runs out.  The address taken is /128 with the lease's
  * lifetimes (the kernel removes it when they run out); the DNS servers go
  * in resolv.conf after those there (H5: DHCPv4's, then the RDNSS ones).
+ *
+ * ws177-p046: a lease recorded before is renewed with its server before
+ * T2 and rebound with any server after (RFC 8415 section 18.2.5), and a
+ * new one solicited when neither answers or it is over; an address that
+ * changes takes the one before off.  -r gives the lease back (Release)
+ * and -D declines its address (Decline: another node has it) before
+ * soliciting another; both take the address off and forget the record.
+ * Reconfigure (section 18.2.11) is not taken: dhcpc runs once and does
+ * not listen between runs, and a Reconfigure needs the key of RFC 8415's
+ * authentication, which dhcpc does not do; networkd runs it again at T1.
  */
 
 #include "userland/base/dhcpc/inet6.h"
@@ -65,6 +75,19 @@
 #define INET6_ELAPSED_UNIT_US	10000U
 #define INET6_ELAPSED_MAX	0xffffU
 
+/*
+ * A lease recorded before: its server and address, when it was taken
+ * (seconds of the wall clock; 0 for a record that does not say), its T2
+ * and its valid lifetime (DHCP6_INFINITE for a record that does not say).
+ */
+struct inet6_lease {
+	struct dhcp6_duid server;
+	struct in6_addr address;
+	uint64_t obtained;
+	uint32_t t2;
+	uint32_t valid;
+};
+
 /* One run: the interface and its index, the client's identifier, the socket, and when it gives up. */
 struct inet6_session {
 	const char *interface;
@@ -82,11 +105,16 @@ static int inet6_exchange(struct inet6_session *session, struct dhcp6_request *r
 static int inet6_send(struct inet6_session *session, const uint8_t *packet, size_t length, uint64_t deadline);
 static ssize_t inet6_receive(struct inet6_session *session, uint8_t *packet, size_t capacity, uint64_t until);
 static int inet6_usable(const struct dhcp6_reply *reply);
-static int inet6_finish(struct inet6_session *session, const struct dhcp6_reply *reply, int stateful, int resolver);
+static int inet6_rebound(struct inet6_session *session, struct dhcp6_request *request, const struct inet6_lease *lease, struct dhcp6_reply *reply);
+static void inet6_give_back(struct inet6_session *session, struct dhcp6_request *request, const struct inet6_lease *lease, unsigned type, uint64_t deadline);
+static int inet6_finish(struct inet6_session *session, const struct dhcp6_reply *reply, int stateful, int resolver, const struct in6_addr *previous);
 static int inet6_address(const char *interface, const struct dhcp6_reply *reply);
+static void inet6_address_remove(const char *interface, const struct in6_addr *address);
 static int inet6_resolver(const char *interface, const struct dhcp6_reply *reply);
-static int inet6_record(const char *interface, int stateful, uint32_t renew, const struct dhcp6_reply *reply);
-static int inet6_recorded(const char *interface, struct dhcp6_duid *server, struct in6_addr *address);
+static int inet6_record(const char *interface, int stateful, uint32_t renew, uint32_t t2, const struct dhcp6_reply *reply);
+static int inet6_recorded(const char *interface, struct inet6_lease *lease);
+static int inet6_number(const char *line, const char *name, uint64_t *value);
+static void inet6_forget(const char *interface);
 static int inet6_replace(const char *path, const char *text);
 static void inet6_hex(const struct dhcp6_duid *duid, char *text);
 static int inet6_unhex(const char *text, struct dhcp6_duid *duid);
@@ -94,15 +122,17 @@ static int inet6_digit(char letter);
 static void inet6_server(const char *interface, const struct in6_addr *address, char *text);
 
 /*
- * Runs DHCPv6 on an interface: with information, an Information-Request;
- * otherwise a Renew of the lease recorded before (in half the time), then
- * Solicit and Request.  With resolver, the DNS servers are written.
- * Returns 0, or 1 when nothing was obtained.
+ * Runs DHCPv6 on an interface as the mode says: only the information, by
+ * an Information-Request; a lease, by a Renew or a Rebind of the lease
+ * recorded before (in half the time), then Solicit and Request; the lease
+ * given back (Release); or its address declined (Decline) and another
+ * lease solicited.  With resolver, the DNS servers are written.  Returns
+ * 0, or 1 when nothing was obtained.
  */
 int
 dhcpc_inet6(
 	const char *interface,
-	int information,
+	unsigned mode,
 	int resolver,
 	unsigned timeout_seconds,
 	int verbose)
@@ -111,14 +141,15 @@ dhcpc_inet6(
 	struct dhcp6_request request;
 	struct dhcp6_reply advertise;
 	struct dhcp6_reply reply;
-	struct dhcp6_duid server;
-	struct in6_addr previous;
+	struct inet6_lease lease;
+	const struct in6_addr *previous;
 	uint64_t now;
-	uint64_t renew_deadline;
+	uint64_t half;
+	int recorded;
 	int status;
 	int bound;
 
-	/* The interface, the client's identifier, and the socket. */
+	/* The interface. */
 	memset(&session, 0, sizeof(session));
 	session.interface = interface;
 	session.verbose = verbose;
@@ -128,53 +159,78 @@ dhcpc_inet6(
 		fprintf(stderr, "dhcpc: %s: %s\n", interface, strerror(errno));
 		return 1;
 	}
+
+	/* The lease recorded before, when there is one. */
+	status = inet6_recorded(interface, &lease);
+	recorded = 0;
+	if (status == 0)
+		recorded = 1;
+
+	/* Nothing to give back. */
+	if (mode == DHCPC_INET6_RELEASE && !recorded) {
+		printf("dhcpc: %s: no DHCPv6 lease to release\n", interface);
+		return 0;
+	}
+
+	/* The client's identifier. */
 	status = inet6_duid(&session.client);
 	if (status != 0) {
 		fprintf(stderr, "dhcpc: DUID: %s\n", strerror(errno));
 		return 1;
 	}
+
+	/* The run's time, its half, and the socket. */
 	now = netutil_monotonic_us();
 	session.deadline = now + (uint64_t)timeout_seconds * 1000000U;
+	half = now + (session.deadline - now) / 2U;
 	status = inet6_open(&session);
 	if (status != 0) {
 		fprintf(stderr, "dhcpc: %s: DHCPv6 socket: %s\n", interface, strerror(errno));
 		return 1;
 	}
+
+	/* The messages' common part. */
 	memset(&request, 0, sizeof(request));
 	request.client = &session.client;
 	request.iaid = dhcp6_iaid(interface);
 
 	/* Only the information: Information-Request and Reply. */
-	if (information) {
+	if (mode == DHCPC_INET6_INFORMATION) {
 		request.type = DHCP6_INFORMATION;
 		status = inet6_exchange(&session, &request, DHCP6_REPLY, 0, session.deadline, &reply);
 		if (status == 0 && reply.status != DHCP6_STATUS_NONE && reply.status != DHCP6_STATUS_SUCCESS) {
 			errno = EACCES;
 			status = -1;
 		}
+
+		/* Applied, or the failure said; then the socket let go. */
 		if (status == 0)
-			status = inet6_finish(&session, &reply, 0, resolver);
+			status = inet6_finish(&session, &reply, 0, resolver, NULL);
 		else
 			fprintf(stderr, "dhcpc: %s: information-request: %s\n", interface, strerror(errno));
 		close(session.socket);
-		return status == 0 ? 0 : 1;
+		if (status != 0)
+			return 1;
+		return 0;
 	}
 
-	/* The lease recorded before, renewed within half the time. */
-	bound = 0;
-	status = inet6_recorded(interface, &server, &previous);
-	if (status == 0) {
-		request.type = DHCP6_RENEW;
-		request.server = &server;
-		request.with_ia = 1;
-		request.with_address = 1;
-		request.address = previous;
-		renew_deadline = now + (session.deadline - now) / 2U;
-		status = inet6_exchange(&session, &request, DHCP6_REPLY, 0, renew_deadline, &reply);
-		bound = status == 0 && inet6_usable(&reply);
-		if (verbose)
-			printf("dhcpc: %s: renew %s\n", interface, bound ? "taken" : "not taken");
+	/* Given back: the lease is over whether the server answered or not. */
+	if (mode == DHCPC_INET6_RELEASE) {
+		inet6_give_back(&session, &request, &lease, DHCP6_RELEASE, session.deadline);
+		close(session.socket);
+		return 0;
 	}
+
+	/* Declined: over too, and another one solicited. */
+	if (mode == DHCPC_INET6_DECLINE && recorded) {
+		inet6_give_back(&session, &request, &lease, DHCP6_DECLINE, half);
+		recorded = 0;
+	}
+
+	/* The lease recorded before, renewed or rebound within half the time. */
+	bound = 0;
+	if (recorded)
+		bound = inet6_rebound(&session, &request, &lease, &reply);
 
 	/* Otherwise Solicit and Advertise, then Request and Reply. */
 	if (!bound) {
@@ -189,21 +245,132 @@ dhcpc_inet6(
 			request.with_address = 1;
 			request.address = advertise.address;
 			status = inet6_exchange(&session, &request, DHCP6_REPLY, 0, session.deadline, &reply);
-			bound = status == 0 && inet6_usable(&reply);
+			if (status == 0)
+				bound = inet6_usable(&reply);
 			if (status == 0 && !bound)
 				errno = EACCES;
 		}
 	}
+
+	/* None taken. */
 	if (!bound) {
 		fprintf(stderr, "dhcpc: %s: DHCPv6 lease: %s\n", interface, strerror(errno));
 		close(session.socket);
 		return 1;
 	}
 
-	/* Succeeded: the address, the resolver and the record. */
-	status = inet6_finish(&session, &reply, 1, resolver);
+	/* Succeeded: the address (the one before off when it changed), the resolver and the record. */
+	previous = NULL;
+	if (recorded)
+		previous = &lease.address;
+	status = inet6_finish(&session, &reply, 1, resolver, previous);
 	close(session.socket);
-	return status == 0 ? 0 : 1;
+	if (status != 0)
+		return 1;
+	return 0;
+}
+
+/*
+ * Renews the lease recorded before with its server before T2, or rebinds
+ * it with any server before its valid lifetime ends, within half the
+ * run's time.  Returns 1 when a Reply gave an address, or 0 (none came, a
+ * server refused, or the lease is over).
+ */
+static int
+inet6_rebound(
+	struct inet6_session *session,
+	struct dhcp6_request *request,
+	const struct inet6_lease *lease,
+	struct dhcp6_reply *reply)
+{
+	const char *what;
+	uint64_t elapsed;
+	uint64_t clock;
+	uint64_t half;
+	unsigned step;
+	int status;
+	int bound;
+
+	/* The seconds since it was taken (none known: 0), and what they call for. */
+	clock = (uint64_t)time(NULL);
+	elapsed = 0;
+	if (lease->obtained != 0U && clock > lease->obtained)
+		elapsed = clock - lease->obtained;
+	step = dhcp6_lease_next(elapsed, lease->t2, lease->valid);
+	if (step == DHCP6_SOLICIT)
+		return 0;
+
+	/* A Renew names its server; a Rebind goes to any. */
+	request->type = step;
+	request->server = NULL;
+	if (step == DHCP6_RENEW)
+		request->server = &lease->server;
+	request->with_ia = 1;
+	request->with_address = 1;
+	request->address = lease->address;
+	half = netutil_monotonic_us();
+	half += (session->deadline - half) / 2U;
+	status = inet6_exchange(session, request, DHCP6_REPLY, 0, half, reply);
+
+	/* Taken when the Reply gives an address. */
+	bound = 0;
+	if (status == 0)
+		bound = inet6_usable(reply);
+
+	/* Said with -v. */
+	what = "renew";
+	if (step == DHCP6_REBIND)
+		what = "rebind";
+	if (session->verbose && bound)
+		printf("dhcpc: %s: %s taken\n", session->interface, what);
+	else if (session->verbose)
+		printf("dhcpc: %s: %s not taken\n", session->interface, what);
+	return bound;
+}
+
+/*
+ * Gives a lease back (a Release) or declines its address (a Decline) to
+ * its server, then takes the address off and forgets the record whether
+ * the server answered or not (RFC 8415 sections 18.2.7 and 18.2.8: the
+ * client stops using it in any case).
+ */
+static void
+inet6_give_back(
+	struct inet6_session *session,
+	struct dhcp6_request *request,
+	const struct inet6_lease *lease,
+	unsigned type,
+	uint64_t deadline)
+{
+	struct dhcp6_reply reply;
+	char text[INET6_ADDRSTRLEN];
+	const char *written;
+	const char *what;
+	const char *answer;
+	int status;
+
+	/* The message: the server's identifier and the address. */
+	request->type = type;
+	request->server = &lease->server;
+	request->with_ia = 1;
+	request->with_address = 1;
+	request->address = lease->address;
+	status = inet6_exchange(session, request, DHCP6_REPLY, 0, deadline, &reply);
+
+	/* The address off, the record gone, and the outcome said. */
+	inet6_address_remove(session->interface, &lease->address);
+	inet6_forget(session->interface);
+	what = "release";
+	if (type == DHCP6_DECLINE)
+		what = "decline";
+	answer = "answered";
+	if (status != 0)
+		answer = "not answered";
+	written = inet_ntop(AF_INET6, &lease->address, text, sizeof(text));
+	if (written == NULL)
+		(void)snprintf(text, sizeof(text), "?");
+	printf("dhcpc: %s: %s %s/128 %s\n", session->interface, what, text, answer);
+	fflush(stdout);
 }
 
 /* Reads the client's DUID, making a DUID-UUID and keeping it the first time (H7); 0, or -1. */
@@ -481,37 +648,57 @@ inet6_usable(
 }
 
 /*
- * Applies what a Reply gave: the address (stateful), the DNS servers when
- * the resolver is dhcpc's to write, and the record of when to run again
- * (T1, or the information refresh time).  Returns 0, or -1.
+ * Applies what a Reply gave: the address (stateful; the one before, when
+ * another, taken off), the DNS servers when the resolver is dhcpc's to
+ * write, and the record of when to run again (T1, or the information
+ * refresh time) with T2 and the valid lifetime.  Returns 0, or -1.
  */
 static int
 inet6_finish(
 	struct inet6_session *session,
 	const struct dhcp6_reply *reply,
 	int stateful,
-	int resolver)
+	int resolver,
+	const struct in6_addr *previous)
 {
 	char text[INET6_ADDRSTRLEN];
 	char server[INET6_SERVER_TEXT];
 	const char *written;
+	const char *what;
 	uint32_t renew;
+	uint32_t rebind;
 	unsigned index;
 	int status;
+	int same;
 
-	/* The address, and T1: the server's, or half the preferred lifetime (RFC 8415 section 21.4). */
+	/* The address; T1 and T2 are the server's, or of the preferred lifetime (RFC 8415 section 21.4). */
+	rebind = 0;
 	if (stateful) {
 		status = inet6_address(session->interface, reply);
 		if (status != 0) {
 			fprintf(stderr, "dhcpc: %s: address: %s\n", session->interface, strerror(errno));
 			return -1;
 		}
-		renew = reply->t1;
-		if (renew == 0U || (reply->t2 != 0U && renew > reply->t2))
-			renew = reply->preferred / 2U;
+
+		/* T1 and T2, and the address said in the log. */
+		dhcp6_lease_times(reply, &renew, &rebind);
 		written = inet_ntop(AF_INET6, &reply->address, text, sizeof(text));
-		printf("dhcpc: %s: address %s/128 valid %u preferred %u\n", session->interface,
-		    written != NULL ? text : "?", (unsigned)reply->valid, (unsigned)reply->preferred);
+		if (written == NULL)
+			(void)snprintf(text, sizeof(text), "?");
+		printf("dhcpc: %s: address %s/128 valid %u preferred %u\n", session->interface, text, (unsigned)reply->valid,
+		    (unsigned)reply->preferred);
+
+		/* The address before, when it is another, off (ws177-p046). */
+		same = 0;
+		if (previous != NULL)
+			same = memcmp(previous, &reply->address, sizeof(*previous));
+		if (same != 0) {
+			inet6_address_remove(session->interface, previous);
+			written = inet_ntop(AF_INET6, previous, text, sizeof(text));
+			if (written == NULL)
+				(void)snprintf(text, sizeof(text), "?");
+			printf("dhcpc: %s: previous address %s/128 removed\n", session->interface, text);
+		}
 	} else {
 		/* The information refresh time: the server's, at least the least (RFC 8415 section 21.23). */
 		renew = reply->refresh;
@@ -520,6 +707,8 @@ inet6_finish(
 		if (renew < DHCP6_REFRESH_MINIMUM)
 			renew = DHCP6_REFRESH_MINIMUM;
 	}
+
+	/* An infinite time: not again. */
 	if (renew == DHCP6_INFINITE)
 		renew = 0U;
 
@@ -528,6 +717,8 @@ inet6_finish(
 		inet6_server(session->interface, &reply->dns[index], server);
 		printf("dhcpc: %s: dns %s\n", session->interface, server);
 	}
+
+	/* Said, and written when the resolver is dhcpc's. */
 	if (reply->search[0] != '\0')
 		printf("dhcpc: %s: search %s\n", session->interface, reply->search);
 	if (resolver && (reply->dns_count != 0U || reply->search[0] != '\0')) {
@@ -537,10 +728,13 @@ inet6_finish(
 	}
 
 	/* Succeeded: when to run again recorded for networkd. */
-	status = inet6_record(session->interface, stateful, renew, reply);
+	status = inet6_record(session->interface, stateful, renew, rebind, reply);
 	if (status != 0)
 		fprintf(stderr, "dhcpc: %s: record: %s\n", session->interface, strerror(errno));
-	printf("dhcpc: %s: DHCPv6 %s renew %u\n", session->interface, stateful ? "bound" : "information", (unsigned)renew);
+	what = "information";
+	if (stateful)
+		what = "bound";
+	printf("dhcpc: %s: DHCPv6 %s renew %u\n", session->interface, what, (unsigned)renew);
 	fflush(stdout);
 	return 0;
 }
@@ -579,6 +773,30 @@ inet6_address(
 	close(descriptor);
 	errno = saved;
 	return status == 0 ? 0 : -1;
+}
+
+/* Takes an address off the interface (one already gone is the same). */
+static void
+inet6_address_remove(
+	const char *interface,
+	const struct in6_addr *address)
+{
+	struct in6_aliasreq request;
+	int descriptor;
+
+	/* The interface and the address. */
+	memset(&request, 0, sizeof(request));
+	(void)snprintf(request.ifra_name, sizeof(request.ifra_name), "%s", interface);
+	request.ifra_addr.sin6_family = AF_INET6;
+	request.ifra_addr.sin6_addr = *address;
+	request.ifra_prefixlen = 128U;
+
+	/* Taken off. */
+	descriptor = socket(AF_INET6, SOCK_DGRAM | SOCK_CLOEXEC, 0);
+	if (descriptor < 0)
+		return;
+	(void)ioctl(descriptor, SIOCDIFADDR_IN6, &request);
+	close(descriptor);
 }
 
 /*
@@ -677,18 +895,23 @@ inet6_resolver(
 	return inet6_replace(INET6_RESOLV_PATH, text);
 }
 
-/* Records when networkd runs dhcpc -6 again, and a lease's server and address for the Renew; 0, or -1. */
+/*
+ * Records when networkd runs dhcpc -6 again, and a lease's server and
+ * address for the Renew, with when it was taken, its T2 and its valid
+ * lifetime for the Rebind; 0, or -1.
+ */
 static int
 inet6_record(
 	const char *interface,
 	int stateful,
 	uint32_t renew,
+	uint32_t t2,
 	const struct dhcp6_reply *reply)
 {
 	char path[INET6_PATH_MAX];
 	char duid[INET6_DUID_TEXT];
 	char address[INET6_ADDRSTRLEN];
-	char text[INET6_DUID_TEXT + INET6_ADDRSTRLEN + 64U];
+	char text[INET6_DUID_TEXT + INET6_ADDRSTRLEN + 128U];
 	const char *written;
 	int length;
 
@@ -707,8 +930,8 @@ inet6_record(
 		written = inet_ntop(AF_INET6, &reply->address, address, sizeof(address));
 		if (written == NULL)
 			return -1;
-		(void)snprintf(text, sizeof(text), "mode stateful\nrenew %u\nserver %s\naddress %s\n", (unsigned)renew, duid,
-		    address);
+		(void)snprintf(text, sizeof(text), "mode stateful\nrenew %u\nserver %s\naddress %s\nobtained %llu\nt2 %u\nvalid %u\n",
+		    (unsigned)renew, duid, address, (unsigned long long)time(NULL), (unsigned)t2, (unsigned)reply->valid);
 	}
 
 	/* Succeeded when it is in place. */
@@ -717,20 +940,27 @@ inet6_record(
 	return inet6_replace(path, text);
 }
 
-/* Reads the record of a stateful lease: its server and its address; 0, or -1 when there is none. */
+/*
+ * Reads the record of a stateful lease: its server and its address, and
+ * when it was taken, its T2 and its valid lifetime (a record written
+ * before ws177-p046 has none: 0, and DHCP6_INFINITE).  Returns 0, or -1
+ * when there is none.
+ */
 static int
 inet6_recorded(
 	const char *interface,
-	struct dhcp6_duid *server,
-	struct in6_addr *address)
+	struct inet6_lease *lease)
 {
 	char path[INET6_PATH_MAX];
 	char line[INET6_LINE];
+	uint64_t value;
+	char *got;
 	char *end;
 	FILE *input;
 	int stateful;
 	int found;
 	int status;
+	int same;
 
 	/* The file of the interface. */
 	status = snprintf(path, sizeof(path), "%s/%s.dhcp6", INET6_STATE_DIRECTORY, interface);
@@ -740,25 +970,103 @@ inet6_recorded(
 	if (input == NULL)
 		return -1;
 
-	/* Its lines: the mode, the server, the address. */
+	/* Its lines: the mode, the server, the address, and the times. */
+	memset(lease, 0, sizeof(*lease));
+	lease->t2 = DHCP6_INFINITE;
+	lease->valid = DHCP6_INFINITE;
 	stateful = 0;
 	found = 0;
-	server->length = 0;
-	while (fgets(line, sizeof(line), input) != NULL) {
+	for (;;) {
+		got = fgets(line, sizeof(line), input);
+		if (got == NULL)
+			break;
 		end = strchr(line, '\n');
 		if (end != NULL)
 			*end = '\0';
-		if (strcmp(line, "mode stateful") == 0)
+
+		/* The mode. */
+		same = strcmp(line, "mode stateful");
+		if (same == 0) {
 			stateful = 1;
-		else if (strncmp(line, "server ", 7) == 0)
-			(void)inet6_unhex(line + 7, server);
-		else if (strncmp(line, "address ", 8) == 0)
-			found = inet_pton(AF_INET6, line + 8, address) == 1;
+			continue;
+		}
+
+		/* The server. */
+		same = strncmp(line, "server ", 7);
+		if (same == 0) {
+			(void)inet6_unhex(line + 7, &lease->server);
+			continue;
+		}
+
+		/* The address. */
+		same = strncmp(line, "address ", 8);
+		if (same == 0) {
+			status = inet_pton(AF_INET6, line + 8, &lease->address);
+			if (status == 1)
+				found = 1;
+			continue;
+		}
+
+		/* The times: when it was taken, T2, the valid lifetime. */
+		status = inet6_number(line, "obtained ", &value);
+		if (status == 0)
+			lease->obtained = value;
+		status = inet6_number(line, "t2 ", &value);
+		if (status == 0 && value <= DHCP6_INFINITE)
+			lease->t2 = (uint32_t)value;
+		status = inet6_number(line, "valid ", &value);
+		if (status == 0 && value <= DHCP6_INFINITE)
+			lease->valid = (uint32_t)value;
 	}
+
+	/* The file let go. */
 	fclose(input);
 
-	/* Succeeded when it has all three. */
-	return stateful && found && server->length != 0U ? 0 : -1;
+	/* Succeeded when it has the mode, the server and the address. */
+	if (!stateful || !found || lease->server.length == 0U)
+		return -1;
+	return 0;
+}
+
+/* Reads a record's line "NAME NUMBER" (the name with its space); 0 with the number, or -1 when it is not that line. */
+static int
+inet6_number(
+	const char *line,
+	const char *name,
+	uint64_t *value)
+{
+	unsigned long long number;
+	size_t length;
+	char *end;
+	int same;
+
+	/* The name. */
+	length = strlen(name);
+	same = strncmp(line, name, length);
+	if (same != 0)
+		return -1;
+
+	/* Succeeded when all the rest is the number. */
+	number = strtoull(line + length, &end, 10);
+	if (end == line + length || *end != '\0')
+		return -1;
+	*value = (uint64_t)number;
+	return 0;
+}
+
+/* Forgets an interface's record (a lease given back or declined); none there is the same. */
+static void
+inet6_forget(
+	const char *interface)
+{
+	char path[INET6_PATH_MAX];
+	int status;
+
+	/* The file of the interface, removed. */
+	status = snprintf(path, sizeof(path), "%s/%s.dhcp6", INET6_STATE_DIRECTORY, interface);
+	if (status < 0 || (size_t)status >= sizeof(path))
+		return;
+	(void)unlink(path);
 }
 
 /* Puts a file's text in place: a temporary twin written and synced, then renamed over it; 0, or -1. */

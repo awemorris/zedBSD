@@ -92,7 +92,8 @@ main(
 	size_t packet_length;
 	const char *failure_stage;
 	int control, socket_, verbose, arg, got_offer;
-	int inet6, information, resolver;
+	int inet6, inet6_only, resolver;
+	unsigned inet6_mode;
 	int got_ack, interface_prepared;
 	int previous_default_present, route_prepared, rollback_error;
 
@@ -101,7 +102,8 @@ main(
 	socket_ = -1;
 	verbose = 0;
 	inet6 = 0;
-	information = 0;
+	inet6_only = 0;
+	inet6_mode = DHCPC_INET6_LEASE;
 	resolver = 1;
 	arg = 1;
 	got_offer = 0;
@@ -122,7 +124,17 @@ main(
 			inet6 = 1;
 			arg++;
 		} else if (strcmp(argv[arg], "-i") == 0) {
-			information = 1;
+			inet6_only = 1;
+			inet6_mode = DHCPC_INET6_INFORMATION;
+			arg++;
+		} else if (strcmp(argv[arg], "-r") == 0) {
+			/* DHCPv6 (ws177-p046): -r gives the lease back, -D declines its address. */
+			inet6_only = 1;
+			inet6_mode = DHCPC_INET6_RELEASE;
+			arg++;
+		} else if (strcmp(argv[arg], "-D") == 0) {
+			inet6_only = 1;
+			inet6_mode = DHCPC_INET6_DECLINE;
 			arg++;
 		} else if (strcmp(argv[arg], "-n") == 0) {
 			resolver = 0;
@@ -149,8 +161,8 @@ main(
 		}
 	}
 
-	/* Validates the command-line arguments: -i and -n are DHCPv6's. */
-	if (arg + 1 < argc || (!inet6 && (information || !resolver))) {
+	/* Validates the command-line arguments: -i, -r, -D and -n are DHCPv6's. */
+	if (arg + 1 < argc || (!inet6 && (inet6_only || !resolver))) {
 		/* Obtains the usage result. */
 		function_result = usage();
 
@@ -192,7 +204,7 @@ main(
 	/* DHCPv6 is done apart (ws130-p007). */
 	if (inet6) {
 		close(control);
-		return dhcpc_inet6(interface, information, resolver, timeout_seconds, verbose);
+		return dhcpc_inet6(interface, inet6_mode, resolver, timeout_seconds, verbose);
 	}
 	memset(&previous_default, 0, sizeof(previous_default));
 	deadline =
@@ -532,7 +544,7 @@ static int
 usage(
 	void)
 {
-	puts("usage: dhcpc [-v] [-t seconds] [interface]\n       dhcpc -6 [-i] [-n] [-v] [-t seconds] [interface]");
+	puts("usage: dhcpc [-v] [-t seconds] [interface]\n       dhcpc -6 [-i | -r | -D] [-n] [-v] [-t seconds] [interface]");
 
 	/* Reports operation failure. */
 	return 2;
