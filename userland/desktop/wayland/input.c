@@ -742,6 +742,7 @@ apply_frame(
 	     delta_y != 0)) {
 		server->pointer_unmoved = 0U;
 		kwl_damage_pointer(server, server->pointer_x, server->pointer_y);
+		printf("KWL CURSOR shown by=pointer device=%s\n", device->path);
 	}
 
 	/* An absolute report places the pointer; relative movement is added and clamped. */
@@ -1042,6 +1043,7 @@ pointer_move(
 	if (server->pointer_unmoved && (delta_x != 0 || delta_y != 0)) {
 		server->pointer_unmoved = 0U;
 		kwl_damage_pointer(server, server->pointer_x, server->pointer_y);
+		printf("KWL CURSOR shown by=touchpad\n");
 	}
 
 	/* The motion at the touch pads' speed (ws089-p007, p024, a percentage), the hundredths carried. */

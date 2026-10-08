@@ -1439,7 +1439,9 @@ struct kwl_server {
 	/*
 	 * Nonzero from the start until the pointer first moves (input.c): the
 	 * cursor is not drawn before, so a touch screen shows no arrow resting
-	 * in the middle of the greeter or the desktop (ws035-p116).
+	 * in the middle of the greeter or the desktop (ws035-p116).  A finger
+	 * on a touch screen sets it again (touch.c, BUG-267), and a mouse, a
+	 * touch pad or a tablet that moves the pointer clears it.
 	 */
 	unsigned pointer_unmoved;
 	/*
