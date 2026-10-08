@@ -507,6 +507,17 @@ unix_socket_receive_begin(
 			return 0;
 		}
 
+		/*
+		 * A datagram socket with nothing queued whose read side is shut
+		 * (its own SHUT_RD, or the other end of its pair closed or shut
+		 * its writing) is at its end too: poll already says POLLIN and
+		 * POLLHUP, so the receive must not wait (BUG-263).
+		 */
+		if (datagram && packet == NULL && socket->read_shutdown) {
+			spin_unlock_irqrestore(&socket->lock, irq);
+			return 0;
+		}
+
 		if (socket->error != 0) {
 			error = socket->error;
 			socket->error = 0;
@@ -872,8 +883,15 @@ unix_socket_receive_message(
 	/* Runs the transaction, committing unless the caller only peeked. */
 	capacity = *file_count;
 	result = unix_socket_receive_begin(socket, buffer, length, flags, address, address_length, capacity, &transaction);
-	if (result < 0 || !transaction.active)
+	if (result < 0)
 		return result;
+
+	/* An end of file carries no files (the caller's capacity is not a count). */
+	if (!transaction.active) {
+		*file_count = 0;
+		*control_truncated = 0;
+		return result;
+	}
 
 	/* File-only callers must not accidentally receive an arbitrary handle pointer. */
 	for (index = 0; index < transaction.file_count; index++) {
