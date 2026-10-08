@@ -35,6 +35,9 @@
 /* How many phone events wait for kl_system_take_phone_event (ws170-p004). */
 #define SYSTEM_VIEW_PHONE_EVENTS	16U
 
+/* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language. */
+#define SYSTEM_VIEW_MACHINE_PARTS	4U
+
 /* How many prints' jobs are kept for kl_system_print_job_of (ws145-p003), as many as the results. */
 #define SYSTEM_VIEW_PRINT_QUEUED	SYSTEM_VIEW_RESULTS
 
@@ -159,6 +162,31 @@ struct system_view {
 	unsigned displays_open;
 	uint32_t displays_serial;
 	unsigned displays_mode;
+	/*
+	 * What Settings reads of the computer (ws188-p002): the parts in
+	 * effect, which of them were ever answered (machine_known, the
+	 * KL_MACHINE_* bits) and how often each was put into effect
+	 * (machine_serials, by the part's bit's place); and the answer being
+	 * received: open from its parts event until its result, for request,
+	 * holding the parts it named, whose events fill the pending copies.
+	 */
+	struct kl_machine_about machine_about;
+	struct kl_machine_filesystem machine_filesystems[KL_MACHINE_FILESYSTEMS_MAX];
+	size_t machine_filesystem_count;
+	struct kl_machine_user machine_users[KL_MACHINE_USERS_MAX];
+	size_t machine_user_count;
+	char machine_language[KL_SYSTEM_MACHINE_CODE_MAX];
+	unsigned machine_known;
+	uint32_t machine_serials[SYSTEM_VIEW_MACHINE_PARTS];
+	unsigned machine_open;
+	uint32_t machine_request;
+	unsigned machine_parts;
+	struct kl_machine_about machine_about_pending;
+	struct kl_machine_filesystem machine_filesystems_pending[KL_MACHINE_FILESYSTEMS_MAX];
+	size_t machine_filesystems_pending_count;
+	struct kl_machine_user machine_users_pending[KL_MACHINE_USERS_MAX];
+	size_t machine_users_pending_count;
+	char machine_language_pending[KL_SYSTEM_MACHINE_CODE_MAX];
 };
 
 /*
@@ -272,6 +300,12 @@ void system_view_printers_done(struct system_view *view);
 void system_view_print_queued(struct system_view *view, uint32_t request, uint32_t job);
 void system_view_display(struct system_view *view, const struct kl_display *display);
 void system_view_displays_done(struct system_view *view, uint32_t serial, uint32_t mode);
+void system_view_machine_parts(struct system_view *view, uint32_t request, uint32_t what);
+void system_view_machine_about(struct system_view *view, const struct kl_machine_about *about);
+void system_view_machine_filesystem(struct system_view *view, const struct kl_machine_filesystem *filesystem);
+void system_view_machine_user(struct system_view *view, const struct kl_machine_user *user);
+void system_view_machine_login_language(struct system_view *view, const char *code);
+void system_view_machine_result(struct system_view *view, uint32_t request, uint32_t applied);
 int system_view_print_job_of(const struct system_view *view, uint32_t request, uint32_t *job);
 unsigned system_view_take_changed(struct system_view *view);
 int system_view_error_of(uint32_t applied);

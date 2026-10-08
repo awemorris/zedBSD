@@ -153,6 +153,13 @@
 		kl_system_displays_apply;
 		kl_system_displays_set_brightness;
 		kl_system_displays_set_shown;
+		kl_system_machine_query;
+		kl_system_machine_known;
+		kl_system_machine_serial;
+		kl_system_machine_about;
+		kl_system_machine_filesystems;
+		kl_system_machine_users;
+		kl_system_machine_login_language;
 		kl_system_network_get_links;
 		kl_system_network_get_dns;
 		kl_system_network_get_saved;

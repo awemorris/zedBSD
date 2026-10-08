@@ -351,6 +351,10 @@ kwl_dispatch(
 		/* Keiland's system extension: the monitor (sysmon.c, WS134 p012). */
 		error = kwl_sysmon_request(object, opcode, bytes, size);
 		break;
+	case KWL_SYSTEM_MACHINE:
+		/* Keiland's system extension: the computer (machine-shell.c, ws188-p002). */
+		error = kwl_machine_request(object, opcode, bytes, size);
+		break;
 	case KWL_ACTIVATION_MANAGER:
 	case KWL_ACTIVATION_TOKEN:
 		/* xdg_activation_v1 and its tokens (activation.c, ws089-p016). */

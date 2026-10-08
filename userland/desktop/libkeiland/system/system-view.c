@@ -890,3 +890,157 @@ system_view_print_job_of(
 	/* None. */
 	return 0;
 }
+
+/*
+ * Starts receiving an answer of the computer's query (ws188-p002): its
+ * request and the parts it holds, whose pending copies start empty.  An
+ * answer that was still open is dropped (it never came whole).
+ */
+void
+system_view_machine_parts(
+	struct system_view *view,
+	uint32_t request,
+	uint32_t what)
+{
+	/* The answer, open until its result, with nothing of it yet. */
+	view->machine_open = 1U;
+	view->machine_request = request;
+	view->machine_parts = what & KL_SYSTEM_MACHINE_PARTS;
+	memset(&view->machine_about_pending, 0, sizeof(view->machine_about_pending));
+	view->machine_filesystems_pending_count = 0U;
+	view->machine_users_pending_count = 0U;
+	view->machine_language_pending[0] = '\0';
+}
+
+/*
+ * Keeps the system's names of the answer being received.
+ */
+void
+system_view_machine_about(
+	struct system_view *view,
+	const struct kl_machine_about *about)
+{
+	/* Only an open answer that holds them. */
+	if (!view->machine_open || (view->machine_parts & KL_SYSTEM_MACHINE_ABOUT) == 0U)
+		return;
+
+	/* The names. */
+	view->machine_about_pending = *about;
+}
+
+/*
+ * Adds a file system to the answer being received, while there is room.
+ */
+void
+system_view_machine_filesystem(
+	struct system_view *view,
+	const struct kl_machine_filesystem *filesystem)
+{
+	/* Only an open answer that holds them. */
+	if (!view->machine_open || (view->machine_parts & KL_SYSTEM_MACHINE_FILESYSTEMS) == 0U)
+		return;
+
+	/* A file system more than the room is not kept. */
+	if (view->machine_filesystems_pending_count >= KL_MACHINE_FILESYSTEMS_MAX)
+		return;
+
+	/* The file system. */
+	view->machine_filesystems_pending[view->machine_filesystems_pending_count] = *filesystem;
+	view->machine_filesystems_pending_count++;
+}
+
+/*
+ * Adds an account to the answer being received, while there is room.
+ */
+void
+system_view_machine_user(
+	struct system_view *view,
+	const struct kl_machine_user *user)
+{
+	/* Only an open answer that holds them. */
+	if (!view->machine_open || (view->machine_parts & KL_SYSTEM_MACHINE_USERS) == 0U)
+		return;
+
+	/* An account more than the room is not kept. */
+	if (view->machine_users_pending_count >= KL_MACHINE_USERS_MAX)
+		return;
+
+	/* The account. */
+	view->machine_users_pending[view->machine_users_pending_count] = *user;
+	view->machine_users_pending_count++;
+}
+
+/*
+ * Keeps the login screen's language of the answer being received.
+ */
+void
+system_view_machine_login_language(
+	struct system_view *view,
+	const char *code)
+{
+	/* Only an open answer that holds it. */
+	if (!view->machine_open || (view->machine_parts & KL_SYSTEM_MACHINE_LOGIN_LANGUAGE) == 0U)
+		return;
+
+	/* The language's code. */
+	system_view_copy(view->machine_language_pending, sizeof(view->machine_language_pending), code);
+}
+
+/*
+ * Ends an answer of the computer's query with its result: an answer that
+ * came whole (ok, for the request its parts named) puts its parts into
+ * effect, each one's serial grows and the change is told; any other
+ * result drops what was received.  Then the result waits to be taken like
+ * every request's.
+ */
+void
+system_view_machine_result(
+	struct system_view *view,
+	uint32_t request,
+	uint32_t applied)
+{
+	unsigned parts;
+
+	/* What the open answer holds, when it is this request's and came whole. */
+	parts = 0U;
+	if (view->machine_open &&
+	    view->machine_request == request &&
+	    applied == KL_SYSTEM_RESULT_OK)
+		parts = view->machine_parts;
+	view->machine_open = 0U;
+
+	/* The system's names. */
+	if ((parts & KL_SYSTEM_MACHINE_ABOUT) != 0U) {
+		view->machine_about = view->machine_about_pending;
+		view->machine_serials[0]++;
+	}
+
+	/* The file systems, as one list. */
+	if ((parts & KL_SYSTEM_MACHINE_FILESYSTEMS) != 0U) {
+		memcpy(view->machine_filesystems, view->machine_filesystems_pending, view->machine_filesystems_pending_count * sizeof(view->machine_filesystems[0]));
+		view->machine_filesystem_count = view->machine_filesystems_pending_count;
+		view->machine_serials[1]++;
+	}
+
+	/* The accounts, as one list. */
+	if ((parts & KL_SYSTEM_MACHINE_USERS) != 0U) {
+		memcpy(view->machine_users, view->machine_users_pending, view->machine_users_pending_count * sizeof(view->machine_users[0]));
+		view->machine_user_count = view->machine_users_pending_count;
+		view->machine_serials[2]++;
+	}
+
+	/* The login screen's language. */
+	if ((parts & KL_SYSTEM_MACHINE_LOGIN_LANGUAGE) != 0U) {
+		memcpy(view->machine_language, view->machine_language_pending, sizeof(view->machine_language));
+		view->machine_serials[3]++;
+	}
+
+	/* The parts now known, and the change told. */
+	if (parts != 0U) {
+		view->machine_known |= parts;
+		view->changed |= KL_SYSTEM_CHANGED_MACHINE;
+	}
+
+	/* The result, as every request's. */
+	system_view_result(view, request, applied);
+}

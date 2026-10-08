@@ -364,6 +364,10 @@ kwl_object_destroy(
 	if (object->kind == KWL_SYSTEM_NETWORK)
 		kwl_system_network_gone(object);
 
+	/* A machine object's queries are not answered any more (machine-shell.c, ws188-p002). */
+	if (object->kind == KWL_SYSTEM_MACHINE)
+		kwl_machine_gone(object);
+
 	/* A toplevel's keyboard insets name nothing (inset.c). */
 	if (object->kind == KWL_TOPLEVEL)
 		kwl_inset_object_gone(object);

@@ -35,32 +35,60 @@ void
 kwl_language_system(
 	struct kwl_server *server)
 {
+	char word[LANGUAGE_LINE_MAX];
+	int error;
+
+	/* The file's first line; no file, or an empty one, is English. */
+	error = kwl_language_system_word(word, sizeof(word));
+	if (error != 0) {
+		language_open(server, "en", "system");
+		return;
+	}
+
+	/* Succeeded: the language it names (a name the catalogs refuse is English). */
+	language_open(server, word, "system");
+}
+
+/*
+ * Reads the first line of the system's language file without its end, as
+ * it is (ws188-p002: the machine's answer and the login screen share it).
+ * Returns 0 with the line, or ENOENT when the file cannot be read or has
+ * no line (the word is then empty).  It only reads a file, so the
+ * machine's thread may call it.
+ */
+int
+kwl_language_system_word(
+	char *word,
+	size_t size)
+{
 	char line[LANGUAGE_LINE_MAX];
 	FILE *file;
 	char *read;
 	size_t length;
 
-	/* No file is English. */
+	/* Nothing yet. */
+	word[0] = '\0';
+
+	/* The file. */
 	file = fopen(KWL_LANGUAGE_SYSTEM_PATH, "r");
-	if (file == NULL) {
-		language_open(server, "en", "system");
-		return;
-	}
+	if (file == NULL)
+		return ENOENT;
 
 	/* Its first line. */
 	read = fgets(line, sizeof(line), file);
 	(void)fclose(file);
-	if (read == NULL) {
-		language_open(server, "en", "system");
-		return;
-	}
+	if (read == NULL)
+		return ENOENT;
 
-	/* The line without its end. */
+	/* The line without its end, cut to the room. */
 	length = strcspn(line, "\r\n");
-	line[length] = '\0';
+	if (length >= size)
+		length = size - 1U;
+	memcpy(word, line, length);
+	word[length] = '\0';
 
-	/* Succeeded: the language it names (a name the catalogs refuse is English). */
-	language_open(server, line, "system");
+	/* Succeeded: the line as it is. */
+	return 0;
 }
 
 /*

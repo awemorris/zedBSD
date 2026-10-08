@@ -369,6 +369,10 @@ kwl_system_bind(
 	if (manager->version >= KL_SYSTEM_SINCE_DISPLAYS)
 		bits |= KL_SYSTEM_CAPABILITY_DISPLAYS;
 
+	/* What Settings reads of the computer, at version 21 (ws188-p002). */
+	if (manager->version >= KL_SYSTEM_SINCE_MACHINE)
+		bits |= KL_SYSTEM_CAPABILITY_MACHINE;
+
 	/* The administration of the accounts, at version 8 where the system has its tool (ws089-p026). */
 	administer = kl_backend_account_can_administer();
 	if (manager->version >= KL_SYSTEM_SINCE_ADMINISTER && administer)
@@ -496,6 +500,9 @@ kwl_system_tick(
 
 	/* The printers: the daemon's news and the answers (printers-shell.c, ws145-p003). */
 	kwl_printers_tick(server);
+
+	/* The computer's readings: the answers, a reading given up, the next (machine-shell.c, ws188-p002). */
+	kwl_machine_tick(server);
 
 	/* The removable media: a new list to every devices object, and volumed's answers (media.c, ws132-p004). */
 	changed = kwl_media_tick(server);
@@ -645,8 +652,9 @@ kwl_system_close(
 {
 	UNUSED_PARAMETER(server);
 
-	/* The monitor's sampling. */
+	/* The monitor's sampling, and the computer's reading under way let go (ws188-p002). */
 	kwl_sysmon_close(server);
+	kwl_machine_close(server);
 
 	/* A job under way ends on its own (a file read or written to its end, a bus call answered). */
 	system_job_wait(&system_state.network_job);
@@ -744,6 +752,16 @@ system_manager_request(
 		if (manager->version < KL_SYSTEM_SINCE_DISPLAYS)
 			return EPROTO;
 		error = kwl_displays_create(manager, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* The computer is machine-shell.c's, since version 21 (ws188-p002). */
+	if (opcode == KL_SYSTEM_MANAGER_GET_MACHINE) {
+		if (manager->version < KL_SYSTEM_SINCE_MACHINE)
+			return EPROTO;
+		error = kwl_machine_create(manager, bytes, size);
 		if (error != 0)
 			return error;
 		return 0;

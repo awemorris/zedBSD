@@ -822,6 +822,97 @@ int kl_backend_monitor_sample(struct kl_backend_monitor *monitor, struct kl_back
 void kl_backend_monitor_close(struct kl_backend_monitor *monitor);
 
 /*
+ * The computer as Settings shows it (ws188-p002, plan/ws188/phase001/
+ * phase.md section D4): the system's names, the file systems' sizes and
+ * the people's accounts, read when a client asks (kl_system_machine_v1).
+ *
+ * Like the monitor, nothing here touches struct kl_backend or calls the
+ * host: the compositor calls these on a thread of its own, since a file
+ * system's size (a network mount) and the accounts (a directory service)
+ * may wait.  Only that thread enumerates the accounts.
+ */
+
+/* The lengths of the texts, with their NULs. */
+#define KL_BACKEND_MACHINE_SYSTEM	128U
+#define KL_BACKEND_MACHINE_KERNEL	160U
+#define KL_BACKEND_MACHINE_ARCH		32U
+#define KL_BACKEND_MACHINE_PROCESSOR	64U
+#define KL_BACKEND_MACHINE_HOST		64U
+#define KL_BACKEND_FILESYSTEM_PATH	64U
+#define KL_BACKEND_USER_NAME		64U
+#define KL_BACKEND_USER_FULL_NAME	128U
+#define KL_BACKEND_USER_HOME		256U
+
+/* The most file systems and accounts one reading gives. */
+#define KL_BACKEND_FILESYSTEMS_MAX	8U
+#define KL_BACKEND_USERS_MAX		64U
+
+/*
+ * The system's names: its version's name (PRETTY_NAME of os-release), the
+ * kernel's name and release, the architecture, the processor's name (empty
+ * where the processor does not tell it), the computer's name, and how many
+ * processors are online (0 when not known).
+ */
+struct kl_backend_machine {
+	char system[KL_BACKEND_MACHINE_SYSTEM];
+	char kernel[KL_BACKEND_MACHINE_KERNEL];
+	char architecture[KL_BACKEND_MACHINE_ARCH];
+	char processor[KL_BACKEND_MACHINE_PROCESSOR];
+	char host[KL_BACKEND_MACHINE_HOST];
+	unsigned cpus;
+};
+
+/* One file system: where it is mounted, and its sizes in bytes. */
+struct kl_backend_filesystem {
+	char path[KL_BACKEND_FILESYSTEM_PATH];
+	uint64_t total;
+	uint64_t available;
+	uint64_t used;
+};
+
+/* An account's flags: a person's, the compositor's own user's, an administrator's, allowed to control Wi-Fi. */
+#define KL_BACKEND_USER_PERSON		0x1U
+#define KL_BACKEND_USER_SELF		0x2U
+#define KL_BACKEND_USER_ADMIN		0x4U
+#define KL_BACKEND_USER_NETWORK		0x8U
+
+/*
+ * One account: its name (never cut: an account whose name does not fit is
+ * left out), its full name (the comment's first field, cut at a character's
+ * boundary), its home (the compositor's own user's only; empty for the
+ * others) and its KL_BACKEND_USER_* flags.
+ */
+struct kl_backend_user {
+	char name[KL_BACKEND_USER_NAME];
+	char full_name[KL_BACKEND_USER_FULL_NAME];
+	char home[KL_BACKEND_USER_HOME];
+	unsigned flags;
+};
+
+/*
+ * Reads the system's names; a value that cannot be read is left empty.
+ * Returns 0.
+ */
+int kl_backend_machine_read(struct kl_backend_machine *machine);
+
+/*
+ * Reads the sizes of the file systems of the usual places ("/", "/home",
+ * "/usr", "/var", "/tmp", "/boot"), each file system once.  Returns how
+ * many were copied (at most capacity).
+ */
+size_t kl_backend_filesystems_read(struct kl_backend_filesystem *list, size_t capacity);
+
+/*
+ * Reads the people's accounts (a user ID from 1000 that is not nobody's,
+ * with a shell that lets it log in), then the compositor's own user's when
+ * it is not one of them.  Each operating system names its administrators'
+ * groups.  Returns how many were copied (at most capacity; the own user's
+ * always has room when capacity is not 0), and in skipped how many people
+ * were left out (no room, or a name that does not fit).
+ */
+size_t kl_backend_users_read(struct kl_backend_user *list, size_t capacity, unsigned *skipped);
+
+/*
  * The peer of a client's connection (WS135, plan/ws135/design.md section
  * 4.2): which user runs the process at the other end of a connected local
  * socket, so that the compositor shows its system extension only to its
