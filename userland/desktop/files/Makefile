@@ -8,7 +8,7 @@ KEILAND_FILES_SOURCES := userland/desktop/files/main.c \
 	userland/desktop/files/ui.c userland/desktop/files/palette.c \
 	userland/desktop/files/ui-tabs.c \
 	userland/desktop/files/ui-grid.c userland/desktop/files/dir.c \
-	userland/desktop/files/mime.c userland/desktop/files/places.c userland/desktop/files/devices.c userland/desktop/files/mntent/mounts-mntent.c \
+	userland/desktop/files/mime.c userland/desktop/files/places.c userland/desktop/files/devices.c userland/desktop/files/mounts.c \
 	userland/desktop/files/ui-input.c userland/desktop/files/ui-list.c \
 	userland/desktop/files/ui-scrollbar.c userland/desktop/libkeiland/ui/scroll-bar.c \
 	userland/desktop/files/ui-field.c userland/desktop/files/rename.c userland/desktop/files/ui-widgets.c userland/desktop/files/select.c \

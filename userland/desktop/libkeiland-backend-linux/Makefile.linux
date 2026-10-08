@@ -8,6 +8,8 @@ KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \
 	userland/desktop/libkeiland-backend/machine/users.c \
+	userland/desktop/libkeiland-backend/machine/mounts.c \
+	userland/desktop/libkeiland-backend/machine/mounts-mntent.c \
 	userland/desktop/libkeiland-backend-linux/users-linux.c \
 	userland/desktop/libkeiland-backend/wpa/network-wpa.c \
 	userland/desktop/libkeiland-backend/wpa/network-config-wpa.c \

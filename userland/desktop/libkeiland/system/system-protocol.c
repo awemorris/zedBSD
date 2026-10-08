@@ -109,7 +109,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: fifteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: fifteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
@@ -475,14 +475,15 @@ static const struct wl_message system_machine_events[] = {
 	{ "user", "sssu", system_plain_types },
 	{ "login_language", "s", system_plain_types },
 	{ "result", "uuu", system_plain_types },
+	{ "mount", "22ss", system_plain_types },
 };
 
-/* kl_system_machine_v1, made at the manager's version (21, ws188-p002): two requests and six events.  It lives for the program. */
+/* kl_system_machine_v1, made at the manager's version (21, ws188-p002; the mounts since 22, ws188-p004): two requests and seven events.  It lives for the program. */
 const struct wl_interface kl_system_machine_v1_interface = {
 	KL_SYSTEM_MACHINE_NAME,
-	KL_SYSTEM_SINCE_MACHINE,
+	KL_SYSTEM_SINCE_MOUNTS,
 	2,
 	system_machine_requests,
-	6,
+	7,
 	system_machine_events
 };

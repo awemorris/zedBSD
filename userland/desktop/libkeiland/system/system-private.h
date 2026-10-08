@@ -35,8 +35,8 @@
 /* How many phone events wait for kl_system_take_phone_event (ws170-p004). */
 #define SYSTEM_VIEW_PHONE_EVENTS	16U
 
-/* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language. */
-#define SYSTEM_VIEW_MACHINE_PARTS	4U
+/* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language, the mounts (ws188-p004). */
+#define SYSTEM_VIEW_MACHINE_PARTS	5U
 
 /* How many prints' jobs are kept for kl_system_print_job_of (ws145-p003), as many as the results. */
 #define SYSTEM_VIEW_PRINT_QUEUED	SYSTEM_VIEW_RESULTS
@@ -187,6 +187,10 @@ struct system_view {
 	struct kl_machine_user machine_users_pending[KL_MACHINE_USERS_MAX];
 	size_t machine_users_pending_count;
 	char machine_language_pending[KL_SYSTEM_MACHINE_CODE_MAX];
+	struct kl_machine_mount machine_mounts[KL_MACHINE_MOUNTS_MAX];
+	size_t machine_mount_count;
+	struct kl_machine_mount machine_mounts_pending[KL_MACHINE_MOUNTS_MAX];
+	size_t machine_mounts_pending_count;
 };
 
 /*
@@ -305,6 +309,7 @@ void system_view_machine_about(struct system_view *view, const struct kl_machine
 void system_view_machine_filesystem(struct system_view *view, const struct kl_machine_filesystem *filesystem);
 void system_view_machine_user(struct system_view *view, const struct kl_machine_user *user);
 void system_view_machine_login_language(struct system_view *view, const char *code);
+void system_view_machine_mount(struct system_view *view, const struct kl_machine_mount *mount);
 void system_view_machine_result(struct system_view *view, uint32_t request, uint32_t applied);
 int system_view_print_job_of(const struct system_view *view, uint32_t request, uint32_t *job);
 unsigned system_view_take_changed(struct system_view *view);

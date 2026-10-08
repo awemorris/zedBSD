@@ -16,9 +16,6 @@ A3	userland/desktop/files/dir.c	getgrgid	a file's group's name in the listing (Q
 A3	userland/desktop/files/ui-info.c	getpwuid	a file's owner's name in Get Info (Q1 2026-10-08)
 A3	userland/desktop/files/ui-info.c	getgrgid	a file's group's name in Get Info (Q1 2026-10-08)
 A3	userland/desktop/files/ui.c	getpwuid	the name Today greets (the file manager's own window; Q1 2026-10-08)
-A3	userland/desktop/files/mntent/mounts-mntent.c	*	PENDING (Q1 2026-10-08, ws188-p003): the file manager reads the mount table for Places and the volumes' Trash
-A5	userland/desktop/files/mntent/mounts-mntent.c	mntent.h	PENDING (as above)
-A3	userland/desktop/files/freebsd/mounts-freebsd.c	*	PENDING (as above): FreeBSD's mount table for the same
 A2	userland/desktop/videoplayer/audio.c	*	PENDING (Q1 2026-10-08, ws188-p003): the playback stream to audiod (Video Player, Music and libmedia share it)
 A1	userland/desktop/videoplayer/audio.c	*	PENDING (as above)
 A5	userland/desktop/videoplayer/audio.c	userland/base/audiod/protocol.h	PENDING (as above)

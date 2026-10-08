@@ -10,8 +10,9 @@
  * sections D1 and D3; libkeiland/system/kl-system-protocol.h's
  * kl_system_machine_v1): what Settings reads of the computer -- the
  * system's names, the file systems' sizes, the people's accounts and the
- * login screen's language -- read by libkeiland-backend's machine area
- * and the language file when a client asks.
+ * login screen's language, and the mounted file systems of the file
+ * manager (ws188-p004) -- read by libkeiland-backend's machine area and
+ * the language file when a client asks.
  *
  * A file system's size (a network mount) and the accounts (a directory
  * service) may wait, so a reading runs on a thread of its own, one at a
@@ -73,6 +74,9 @@ struct machine_job {
 	size_t user_count;
 	unsigned skipped;
 	char language[KL_SYSTEM_MACHINE_CODE_MAX];
+	struct kl_backend_mount mounts[KL_BACKEND_MOUNTS_MAX];
+	size_t mount_count;
+	unsigned mounts_skipped;
 };
 
 /*
@@ -148,6 +152,7 @@ kwl_machine_request(
 {
 	uint32_t request;
 	uint32_t what;
+	uint32_t known;
 	unsigned given_up;
 	int error;
 
@@ -168,8 +173,11 @@ kwl_machine_request(
 	what = machine_word(bytes, 4U);
 	printf("KWL SYSTEM machine query client=%llu request=%u what=%u\n", (unsigned long long)object->client->number, request, what);
 
-	/* No part, or a part this compositor does not know. */
-	if (what == 0U || (what & ~(uint32_t)KL_SYSTEM_MACHINE_PARTS) != 0U) {
+	/* No part, or a part this object's version does not have (the mounts since 22, ws188-p004). */
+	known = KL_SYSTEM_MACHINE_PARTS_21;
+	if (object->version >= KL_SYSTEM_SINCE_MOUNTS)
+		known = KL_SYSTEM_MACHINE_PARTS;
+	if (what == 0U || (what & ~known) != 0U) {
 		machine_result(object->client, object->id, request, KL_SYSTEM_RESULT_INVALID);
 		return 0;
 	}
@@ -376,6 +384,10 @@ machine_run(
 		machine_language_code(word, job->language, sizeof(job->language));
 	}
 
+	/* The mounted file systems of files (ws188-p004). */
+	if ((job->what & KL_SYSTEM_MACHINE_MOUNTS) != 0U)
+		job->mount_count = kl_backend_mounts_read(job->mounts, KL_BACKEND_MOUNTS_MAX, &job->mounts_skipped);
+
 	/* Done; a job given up is this thread's to free. */
 	(void)pthread_mutex_lock(&machine_lock);
 	if (job->given_up) {
@@ -455,9 +467,9 @@ machine_answer(
 
 	/* The parts and the ok. */
 	error = machine_send(client, query->object, job, query->what, query->request);
-	printf("KWL SYSTEM machine answer client=%llu request=%u what=%u result=%d users=%u filesystems=%u skipped=%u\n",
+	printf("KWL SYSTEM machine answer client=%llu request=%u what=%u result=%d users=%u filesystems=%u skipped=%u mounts=%u mounts_skipped=%u\n",
 	       (unsigned long long)client->number, query->request, query->what, error, (unsigned)job->user_count,
-	       (unsigned)job->filesystem_count, job->skipped);
+	       (unsigned)job->filesystem_count, job->skipped, (unsigned)job->mount_count, job->mounts_skipped);
 }
 
 /* Counts the bytes an answer of some parts takes on the wire, the headers included. */
@@ -501,6 +513,15 @@ machine_answer_bytes(
 	/* The language's code. */
 	if ((what & KL_SYSTEM_MACHINE_LOGIN_LANGUAGE) != 0U)
 		bytes += MACHINE_HEADER + machine_string_bytes(job->language);
+
+	/* Each mount: its path and its type. */
+	if ((what & KL_SYSTEM_MACHINE_MOUNTS) != 0U) {
+		for (index = 0; index < job->mount_count; index++) {
+			bytes += MACHINE_HEADER;
+			bytes += machine_string_bytes(job->mounts[index].path);
+			bytes += machine_string_bytes(job->mounts[index].type);
+		}
+	}
 
 	/* Succeeded: the answer's size. */
 	return bytes;
@@ -577,6 +598,15 @@ machine_send(
 	if ((what & KL_SYSTEM_MACHINE_LOGIN_LANGUAGE) != 0U) {
 		offset = machine_put_string(payload, 0U, job->language);
 		error = kwl_emit(client, id, KL_SYSTEM_MACHINE_EVENT_LOGIN_LANGUAGE, payload, offset);
+		if (error != 0)
+			return error;
+	}
+
+	/* Each mount (ws188-p004). */
+	for (index = 0; (what & KL_SYSTEM_MACHINE_MOUNTS) != 0U && index < job->mount_count; index++) {
+		offset = machine_put_string(payload, 0U, job->mounts[index].path);
+		offset = machine_put_string(payload, offset, job->mounts[index].type);
+		error = kwl_emit(client, id, KL_SYSTEM_MACHINE_EVENT_MOUNT, payload, offset);
 		if (error != 0)
 			return error;
 	}

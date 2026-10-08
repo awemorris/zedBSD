@@ -1519,6 +1519,7 @@ test_both_ends(void)
 	struct kl_machine_about machine_about;
 	struct kl_machine_filesystem machine_filesystems[KL_MACHINE_FILESYSTEMS_MAX];
 	struct kl_machine_user machine_users[KL_MACHINE_USERS_MAX];
+	struct kl_machine_mount machine_mounts[KL_MACHINE_MOUNTS_MAX];
 	char machine_code[8];
 	size_t machine_count;
 	size_t machine_index;
@@ -1705,9 +1706,11 @@ test_both_ends(void)
 	CHECK((kl_system_capabilities(system) & KL_SYSTEM_HAS_MACHINE) != 0U, "machine offered");
 	CHECK(kl_system_machine_known(system) == 0U, "machine: nothing known before a query");
 	CHECK(kl_system_machine_about(system, &machine_about) == ENOENT, "machine: about not known");
-	CHECK(kl_system_machine_query(system, KL_MACHINE_ABOUT | KL_MACHINE_FILESYSTEMS | KL_MACHINE_USERS | KL_MACHINE_LOGIN_LANGUAGE, &first) == 0, "machine asked");
+	CHECK(kl_system_machine_query(system, KL_MACHINE_ABOUT | KL_MACHINE_FILESYSTEMS | KL_MACHINE_USERS | KL_MACHINE_LOGIN_LANGUAGE | KL_MACHINE_MOUNTS, &first) == 0, "machine asked");
 	expect_result(display, system, first, 0, "machine answered");
-	CHECK(kl_system_machine_known(system) == 0xfU, "machine: all four known (0x%x)", kl_system_machine_known(system));
+	CHECK(kl_system_machine_known(system) == 0x1fU, "machine: all five known (0x%x)", kl_system_machine_known(system));
+	machine_count = kl_system_machine_mounts(system, machine_mounts, KL_MACHINE_MOUNTS_MAX);
+	CHECK(machine_count >= 1U && kl_system_machine_serial(system, KL_MACHINE_MOUNTS) == 1U, "machine: the mounts told (%u)", (unsigned)machine_count);
 	CHECK(kl_system_machine_about(system, &machine_about) == 0 && machine_about.kernel[0] != '\0' && machine_about.architecture[0] != '\0' && machine_about.cpus > 0U, "machine: about read (%s, %s, %u)", machine_about.kernel, machine_about.architecture, machine_about.cpus);
 	machine_count = kl_system_machine_filesystems(system, machine_filesystems, KL_MACHINE_FILESYSTEMS_MAX);
 	CHECK(machine_count >= 1U && strcmp(machine_filesystems[0].path, "/") == 0 && machine_filesystems[0].total > 0U, "machine: the root file system");
@@ -1727,7 +1730,7 @@ test_both_ends(void)
 	CHECK(kl_system_machine_serial(system, KL_MACHINE_FILESYSTEMS) == 2U && kl_system_machine_serial(system, KL_MACHINE_USERS) == 1U, "machine: only the file systems' serial moved");
 	CHECK(kl_system_machine_serial(system, KL_MACHINE_USERS | KL_MACHINE_ABOUT) == 0U, "machine: two parts are no part");
 	CHECK(kl_system_machine_query(system, 0U, NULL) == EINVAL, "machine: no part refused");
-	CHECK(kl_system_machine_query(system, 0x10U, NULL) == EINVAL, "machine: an unknown part refused");
+	CHECK(kl_system_machine_query(system, 0x20U, NULL) == EINVAL, "machine: an unknown part refused");
 
 	/* The notifications (ws156-p002): a post numbered, new words for it, a body too long refused, a withdrawal closed and answered. */
 	CHECK((kl_system_capabilities(system) & KL_SYSTEM_HAS_NOTIFY) != 0U, "notify offered");

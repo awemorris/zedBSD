@@ -43,12 +43,6 @@ static const struct places_folder places_folders[] = {
     {"Music", "Music", KL_ICON_MUSIC},
     {"Movies", "Movies", KL_ICON_MOVIES}};
 
-/* The file systems whose mounts are not shown as places (virtual ones). */
-static const char *const places_hidden_types[] = {
-    "tmpfs", "devfs", "proc", "procfs", "sysfs", "devpts", "kernfs", "fdesc", "swap", "bind",
-    "cgroup", "cgroup2", "efivarfs", "securityfs", "pstore", "bpf", "tracefs", "debugfs", "mqueue",
-    "hugetlbfs", "fusectl", "configfs", "autofs", "binfmt_misc", "nsfs", "rpc_pipefs", "overlay", "squashfs"};
-
 /* The folders whose mounts belong to the system rather than to the user. */
 static const char *const places_system_folders[] = {
     "/sys", "/proc", "/dev", "/run", "/boot", "/snap", "/var/lib"};
@@ -473,7 +467,7 @@ places_mounts(
 	int error;
 	int available;
 
-	/* Acquires the selected OS's real mount enumeration without exposing its native storage. */
+	/* The mounts as the desktop last told them (mounts.c, ws188-p004); none before its first answer. */
 	table = NULL;
 	error = fm_mounts_open(&table);
 	if (error != 0)
@@ -490,13 +484,8 @@ places_mounts(
 		if (match == 0)
 			continue;
 
-		/* Virtual filesystems remain absent from the user's mounted-volume sidebar. */
+		/* The desktop told only file systems of files (the virtual ones are left out by libkeiland-backend, ws188-p004). */
 		hidden = 0;
-		for (index = 0; index < sizeof(places_hidden_types) / sizeof(places_hidden_types[0]); index++) {
-			match = strcmp(mount.type, places_hidden_types[index]);
-			if (match == 0)
-				hidden = 1;
-		}
 
 		/* Preserves the existing system-directory prefix policy for mount locations. */
 		for (index = 0; index < sizeof(places_system_folders) / sizeof(places_system_folders[0]); index++) {
