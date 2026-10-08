@@ -73,6 +73,23 @@
 /* The descriptors read from the command line. */
 #define FILES_MAX		8U
 
+/*
+ * The Latitude 5330's touchpad's finger report (report ID 3, 30 bytes with
+ * the ID, plan/ws159/tests/latitude5330-linux/rdesc.txt): five fingers of
+ * 40 bits (confidence, tip, a contact ID of 3 bits, X 0..1336 and Y 0..760
+ * of 16 bits each), the Scan Time at bit 200, the Contact Count at 216 and
+ * the button at 224.
+ */
+#define PAD_REPORT_ID		3U
+#define PAD_REPORT_BYTES	30U
+#define PAD_FINGERS		5U
+#define PAD_FINGER_BITS		40U
+#define PAD_X_MAX		1336
+#define PAD_Y_MAX		760
+#define PAD_SCAN_TIME_BIT	200U
+#define PAD_COUNT_BIT		216U
+#define PAD_BUTTON_BIT		224U
+
 /* What a recorded event belongs to: the main device or the touch device of one side. */
 #define ROLE_MAIN		0U
 #define ROLE_TOUCH		1U
@@ -113,6 +130,13 @@ struct role_event {
 	uint64_t milliseconds;
 };
 
+/* One simulated finger of the 5330's touchpad: whether it touches, and where. */
+struct pad_finger {
+	int down;
+	int x;
+	int y;
+};
+
 /* One descriptor under test: its name for the messages, and its bytes. */
 struct descriptor {
 	const char *name;
@@ -142,15 +166,27 @@ static struct role_event new_events[FAKE_EVENTS_MAX];
 /* The old side's record (large, so not on the stack). */
 static struct old_hid old_side;
 
+/* The old i2c-hid's record (ws143-p005 i01c). */
+static struct old_i2c old_i2c_side;
+
+/* The descriptors the old i2c-hid took and the glue refuses (its stricter limits), counted, not failed. */
+static unsigned long i2c_stricter;
+
 /* The checks that failed, and the comparisons made. */
 static unsigned failures;
 static unsigned long comparisons;
 
-/* The events the comparisons covered (each side's). */
+/* The events the comparisons covered (each side's), and those of the i2c comparisons. */
 static unsigned long events_compared;
+static unsigned long i2c_events_compared;
 
 /* The fuzzer's random state (a fixed seed makes a run repeatable). */
 static uint64_t random_state = 0x9e3779b97f4a7c15ULL;
+
+/* The simulated fingers of the 5330's touchpad, its Scan Time and its button, carried from frame to frame. */
+static struct pad_finger pad_fingers[PAD_FINGERS];
+static unsigned pad_scan_time;
+static int pad_button;
 
 /* The descriptors of the command line. */
 static struct descriptor file_descriptors[FILES_MAX];
@@ -239,8 +275,14 @@ static size_t take_new_events(const struct hid_input *input);
 static int compare_devices(const struct input_device *old_device, int new_number, const char *what);
 static int axis_differs(const struct input_abs_axis *old_axis, const struct input_abs_axis *new_axis);
 static int compare_side_by_side(const struct descriptor *descriptor, unsigned reports, int quiet);
-static void compare_reports(const struct descriptor *descriptor, struct hid_input *input, unsigned reports);
+static int compare_i2c_side_by_side(const struct descriptor *descriptor, unsigned reports, int quiet);
+static size_t take_old_i2c_events(void);
+static int i2c_prepare_new(const struct descriptor *descriptor, struct hid_input **result);
+static int i2c_publish_new(struct hid_input *input);
+static void compare_reports(const struct descriptor *descriptor, struct hid_input *input, unsigned reports, int i2c);
 static size_t random_report(const struct hid_input *input, uint8_t *report);
+static size_t pad_report(uint8_t *report);
+static void pad_put(uint8_t *report, unsigned offset, unsigned bits, unsigned value);
 static uint32_t random_next(void);
 static void set_descriptor(struct descriptor *descriptor, const char *name, const uint8_t *bytes, size_t size);
 static void check_keyboard(void);
@@ -411,6 +453,7 @@ drv_input_device_register(
 	struct input_device **result)
 {
 	struct fake_device *device;
+	const char *unique_id;
 	size_t name_length;
 	size_t path_length;
 	size_t unique_length;
@@ -420,10 +463,13 @@ drv_input_device_register(
 	if (fake_registrations_left == 0U)
 		return ENOSPC;
 
-	/* The texts the input layer refuses. */
+	/* The texts the input layer refuses (no unique ID is an empty one, as input.c takes it). */
+	unique_id = info->unique_id;
+	if (unique_id == NULL)
+		unique_id = "";
 	name_length = strlen(info->name);
 	path_length = strlen(info->physical_path);
-	unique_length = strlen(info->unique_id);
+	unique_length = strlen(unique_id);
 	if (name_length >= FAKE_TEXT_MAX)
 		return ENAMETOOLONG;
 	if (path_length >= FAKE_TEXT_MAX)
@@ -454,7 +500,7 @@ drv_input_device_register(
 	device->used = 1;
 	snprintf(device->name, sizeof(device->name), "%s", info->name);
 	snprintf(device->physical_path, sizeof(device->physical_path), "%s", info->physical_path);
-	snprintf(device->unique_id, sizeof(device->unique_id), "%s", info->unique_id);
+	snprintf(device->unique_id, sizeof(device->unique_id), "%s", unique_id);
 	device->id = info->id;
 	memcpy(device->capabilities, info->capabilities, info->capability_count * sizeof(info->capabilities[0]));
 	device->capability_count = info->capability_count;
@@ -566,8 +612,21 @@ run_check(
 	for (index = 0; index < file_descriptor_count; index++)
 		(void)compare_side_by_side(&file_descriptors[index], CHECK_REPORTS, 0);
 
+	/* The old i2c-hid and the glue's touch device alone (i01c): the touch screen and the files (the 5330's touchpad). */
+	set_descriptor(&fixed, "touch screen (i2c)", touch_screen, sizeof(touch_screen));
+	(void)compare_i2c_side_by_side(&fixed, CHECK_REPORTS, 0);
+	set_descriptor(&fixed, "boot keyboard (i2c)", boot_keyboard, sizeof(boot_keyboard));
+	(void)compare_i2c_side_by_side(&fixed, CHECK_REPORTS, 0);
+	for (index = 0; index < file_descriptor_count; index++)
+		(void)compare_i2c_side_by_side(&file_descriptors[index], CHECK_REPORTS, 0);
+
 	/* The verdict. */
-	printf("hid-input-host-test: %lu comparisons, %lu events, %u failures\n", comparisons, events_compared, failures);
+	printf("hid-input-host-test: %lu comparisons, %lu events (%lu of the i2c comparisons), %u failures, %lu i2c stricter\n",
+	       comparisons,
+	       events_compared,
+	       i2c_events_compared,
+	       failures,
+	       i2c_stricter);
 	if (failures != 0U) {
 		printf("hid-input-host-test: FAIL\n");
 		return 1;
@@ -630,15 +689,17 @@ run_fuzz(
 
 		/* The two sides on it, quietly unless they disagree. */
 		accepted += (unsigned long)compare_side_by_side(&fuzzed, FUZZ_REPORTS, 1);
+		(void)compare_i2c_side_by_side(&fuzzed, FUZZ_REPORTS, 1);
 	}
 
 	/* The verdict. */
-	printf("hid-report-fuzz: %lu descriptors (%lu accepted), %lu comparisons, %lu events, %u failures\n",
+	printf("hid-report-fuzz: %lu descriptors (%lu accepted), %lu comparisons, %lu events, %u failures, %lu i2c stricter\n",
 	       iterations,
 	       accepted,
 	       comparisons,
 	       events_compared,
-	       failures);
+	       failures,
+	       i2c_stricter);
 	if (failures != 0U) {
 		printf("hid-report-fuzz: FAIL\n");
 		return 1;
@@ -987,7 +1048,7 @@ compare_side_by_side(
 
 	/* The reports, when both published. */
 	if (old_error == 0 && new_error == 0)
-		compare_reports(descriptor, input, reports);
+		compare_reports(descriptor, input, reports, 0);
 
 	/* Both take their devices back and free them. */
 	old_hid_unpublish(&old_side);
@@ -1003,12 +1064,192 @@ compare_side_by_side(
 	return 1;
 }
 
+/*
+ * Prepares, publishes and feeds random reports to the old i2c-hid and to
+ * the glue publishing the touch device alone (i01c), and compares every
+ * step.  The glue's stricter limits may refuse a descriptor the old took:
+ * counted, not failed.  Reports 1 when both accepted it.
+ */
+static int
+compare_i2c_side_by_side(
+	const struct descriptor *descriptor,
+	unsigned reports,
+	int quiet)
+{
+	struct hid_input *input;
+	struct input_id id;
+	int old_error;
+	int new_error;
+	int ids_error;
+	int event;
+	int touch_event;
+	char message[160];
+
+	/* Both sides parse it and look for the fingers (ENODEV without them). */
+	input = NULL;
+	old_error = old_i2c_prepare(&old_i2c_side, descriptor->bytes, descriptor->size);
+	new_error = i2c_prepare_new(descriptor, &input);
+	comparisons++;
+
+	/* The glue refusing what the old took is its stricter limits, counted. */
+	if (old_error == 0 && new_error != 0) {
+		i2c_stricter++;
+		if (!quiet)
+			printf("note: %s: the old i2c-hid takes it, the glue refuses it (%d)\n", descriptor->name, new_error);
+		old_i2c_destroy(&old_i2c_side);
+		return 0;
+	}
+
+	/* The glue taking what the old refused would be new behaviour. */
+	if (old_error != 0 && new_error == 0) {
+		snprintf(message, sizeof(message), "%s: i2c prepare old=%d new=0", descriptor->name, old_error);
+		check(0, message);
+		old_i2c_destroy(&old_i2c_side);
+		drv_hid_input_destroy(input);
+		return 0;
+	}
+
+	/* Both refuse it. */
+	if (old_error != 0) {
+		old_i2c_destroy(&old_i2c_side);
+		if (!quiet)
+			printf("ok: %s (%zu bytes): both i2c sides refuse it (old %d, new %d)\n", descriptor->name, descriptor->size, old_error, new_error);
+		return 0;
+	}
+
+	/* Both publish the touch device under the same identity, or both fail. */
+	memset(&id, 0, sizeof(id));
+	id.vendor = 0x06cb;
+	id.product = 0xce65;
+	id.version = 0x0100;
+	old_error = old_i2c_publish(&old_i2c_side, "\\_SB.PC00.I2C1.TPD0", id.vendor, id.product, id.version);
+	new_error = i2c_publish_new(input);
+	snprintf(message, sizeof(message), "%s: i2c publish old=%d new=%d", descriptor->name, old_error, new_error);
+	check((old_error == 0) == (new_error == 0), message);
+	drv_hid_input_numbers(input, &event, &touch_event);
+	snprintf(message, sizeof(message), "%s: i2c no main device", descriptor->name);
+	check(event == -1, message);
+	snprintf(message, sizeof(message), "%s: i2c touch device", descriptor->name);
+	(void)compare_devices(old_i2c_side.input, touch_event, message);
+
+	/* The reports, with the report IDs of the usb-hid oracle's parse when it takes the descriptor. */
+	ids_error = old_hid_prepare(&old_side, descriptor->bytes, descriptor->size);
+	if (old_error == 0 && new_error == 0 && ids_error == 0)
+		compare_reports(descriptor, input, reports, 1);
+	old_hid_destroy(&old_side);
+
+	/* Both take their devices back and free them. */
+	old_i2c_unpublish(&old_i2c_side);
+	old_i2c_destroy(&old_i2c_side);
+	drv_hid_input_unpublish(input);
+	drv_hid_input_destroy(input);
+
+	/* A summary line for a fixed descriptor. */
+	if (!quiet)
+		printf("ok: %s (%zu bytes): the old i2c-hid and the glue agree on %u reports\n", descriptor->name, descriptor->size, reports);
+
+	/* Succeeded: the descriptor was accepted. */
+	return 1;
+}
+
+/* Moves the log into the old side's events, by role, for the old i2c-hid (its one device is the touch device). */
+static size_t
+take_old_i2c_events(
+	void)
+{
+	size_t index;
+	unsigned slot;
+
+	/* Each recorded event. */
+	for (index = 0; index < fake_event_count; index++) {
+		old_events[index].role = ROLE_OTHER;
+		if (old_i2c_side.input != NULL) {
+			slot = device_slot(old_i2c_side.input);
+			if (slot == fake_events[index].device)
+				old_events[index].role = ROLE_TOUCH;
+		}
+
+		/* The event itself. */
+		old_events[index].type = fake_events[index].type;
+		old_events[index].code = fake_events[index].code;
+		old_events[index].value = fake_events[index].value;
+		old_events[index].milliseconds = fake_events[index].milliseconds;
+	}
+
+	/* The number of events. */
+	return fake_event_count;
+}
+
+/* Prepares the glue as the new i2c-hid does: the description, then the fingers (ENODEV without them). */
+static int
+i2c_prepare_new(
+	const struct descriptor *descriptor,
+	struct hid_input **result)
+{
+	struct hid_report_touch_info touch;
+	struct hid_input *input;
+	int error;
+
+	/* The description. */
+	error = drv_hid_input_prepare(descriptor->bytes, descriptor->size, &input);
+	if (error != 0)
+		return error;
+
+	/* A device with no fingers is not one i2c-hid publishes. */
+	error = drv_hid_input_touch(input, &touch);
+	if (error != 0) {
+		drv_hid_input_destroy(input);
+		return ENODEV;
+	}
+
+	/* Succeeded: the caller owns the description. */
+	*result = input;
+	return 0;
+}
+
+/* Publishes the glue as the new i2c-hid does: the touch device alone, named after the pad or the screen. */
+static int
+i2c_publish_new(
+	struct hid_input *input)
+{
+	static char name[FAKE_TEXT_MAX];
+	struct hid_input_identity identity;
+	struct hid_report_touch_info touch;
+	const char *kind;
+	int error;
+
+	/* The name, as "vendor:product Touchpad". */
+	(void)drv_hid_input_touch(input, &touch);
+	kind = "Touchscreen";
+	if (touch.pad)
+		kind = "Touchpad";
+	snprintf(name, sizeof(name), "%04X:%04X %s", 0x06cbU, 0xce65U, kind);
+
+	/* The identity i2c-hid gives. */
+	memset(&identity, 0, sizeof(identity));
+	identity.name = name;
+	identity.physical_path = "\\_SB.PC00.I2C1.TPD0";
+	identity.unique_id = NULL;
+	identity.touch_name = name;
+	identity.touch_physical_path = "\\_SB.PC00.I2C1.TPD0";
+	identity.id.bustype = BUS_I2C;
+	identity.id.vendor = 0x06cb;
+	identity.id.product = 0xce65;
+	identity.id.version = 0x0100;
+	identity.flags = HID_INPUT_TOUCH_ONLY;
+
+	/* The glue's publication. */
+	error = drv_hid_input_publish(input, &identity);
+	return error;
+}
+
 /* Feeds random reports to both sides and compares the events of each. */
 static void
 compare_reports(
 	const struct descriptor *descriptor,
 	struct hid_input *input,
-	unsigned reports)
+	unsigned reports,
+	int i2c)
 {
 	static uint8_t report[REPORT_BYTES_MAX];
 	size_t old_count;
@@ -1018,19 +1259,38 @@ compare_reports(
 	unsigned number;
 	uint64_t milliseconds;
 	char message[160];
+	const char *named;
+	uint32_t choice;
 	int differs;
 	int events;
+	int pad;
 
-	/* Each report, at a later time each. */
+	/* Each report, at a later time each: the 5330's touchpad mostly gets fingers that move, the rest random bytes. */
 	milliseconds = 1000;
+	pad = 0;
+	named = strstr(descriptor->name, "synaptics");
+	if (named != NULL)
+		pad = 1;
+	memset(pad_fingers, 0, sizeof(pad_fingers));
 	for (number = 0; number < reports; number++) {
-		length = random_report(input, report);
+		choice = random_next() % 10U;
+		if (pad && choice < 7U)
+			length = pad_report(report);
+		else
+			length = random_report(input, report);
 		milliseconds += 1 + (random_next() % 20U);
 
-		/* The old side's events. */
+		/* The old side's events: the old usb-hid's, or the old i2c-hid's. */
 		log_reset();
-		old_hid_report(&old_side, report, length, milliseconds);
-		old_count = take_old_events();
+		if (i2c) {
+			old_i2c_report(&old_i2c_side, report, length, milliseconds);
+			old_count = take_old_i2c_events();
+		} else {
+			old_hid_report(&old_side, report, length, milliseconds);
+			old_count = take_old_events();
+		}
+
+		/* A log that held every event. */
 		check(!fake_overflow, "old event log overflow");
 
 		/* The new side's. */
@@ -1066,6 +1326,8 @@ compare_reports(
 
 		/* Every event stays within the event types and the key codes. */
 		events_compared += new_count;
+		if (i2c)
+			i2c_events_compared += new_count;
 		for (index = 0; index < new_count; index++) {
 			check(new_events[index].role != ROLE_OTHER, "an event of no device of this side");
 			check(new_events[index].type <= EV_MAX, "an event type beyond EV_MAX");
@@ -1360,12 +1622,16 @@ check_full_layer(
 	int touch_event;
 	int error;
 	int left;
+	const char *named;
 	int found;
 
 	/* The 5330's touchpad (a main device and a touch device) from the command line. */
 	pad = NULL;
 	for (index = 0; index < file_descriptor_count; index++) {
-		found = strstr(file_descriptors[index].name, "synaptics") != NULL;
+		found = 0;
+		named = strstr(file_descriptors[index].name, "synaptics");
+		if (named != NULL)
+			found = 1;
 		if (found)
 			pad = &file_descriptors[index];
 	}
@@ -1712,4 +1978,94 @@ check_setup(
 	bad.name[sizeof(bad.name) - 1U] = '\0';
 	check(drv_input_bridge_setup_valid(&bad) == 1, "setup: a name of 63 bytes");
 	printf("ok: input bridge setup\n");
+}
+
+/*
+ * Makes the 5330's touchpad's next finger report: each finger may touch or
+ * lift, a finger that touches moves a little, now and then off the pad's
+ * edges; the count is the fingers down, sometimes wrong; the button is
+ * pressed now and then.
+ */
+static size_t
+pad_report(
+	uint8_t *report)
+{
+	struct pad_finger *finger;
+	unsigned index;
+	unsigned count;
+	unsigned slot;
+	uint32_t choice;
+
+	/* The fingers of this frame. */
+	memset(report, 0, PAD_REPORT_BYTES);
+	report[0] = PAD_REPORT_ID;
+	count = 0;
+	slot = 0;
+	for (index = 0; index < PAD_FINGERS; index++) {
+		finger = &pad_fingers[index];
+
+		/* A finger touches or lifts now and then. */
+		choice = random_next() % 16U;
+		if (choice == 0U) {
+			finger->down = !finger->down;
+			finger->x = (int)(random_next() % (PAD_X_MAX + 1));
+			finger->y = (int)(random_next() % (PAD_Y_MAX + 1));
+		}
+
+		/* A finger down moves a little, sometimes past an edge. */
+		if (finger->down) {
+			finger->x += (int)(random_next() % 21U) - 10;
+			finger->y += (int)(random_next() % 21U) - 10;
+		}
+
+		/* Only the fingers down (and some just lifted) are in the report, in the slots from the first. */
+		choice = random_next() % 4U;
+		if (!finger->down && choice != 0U)
+			continue;
+		pad_put(report, slot * PAD_FINGER_BITS, 1U, 1U);
+		pad_put(report, slot * PAD_FINGER_BITS + 1U, 1U, (unsigned)finger->down);
+		pad_put(report, slot * PAD_FINGER_BITS + 2U, 3U, index);
+		pad_put(report, slot * PAD_FINGER_BITS + 8U, 16U, (unsigned)finger->x & 0xffffU);
+		pad_put(report, slot * PAD_FINGER_BITS + 24U, 16U, (unsigned)finger->y & 0xffffU);
+		slot++;
+		count++;
+	}
+
+	/* The Scan Time moves on; the count is the slots used, now and then wrong. */
+	pad_scan_time += 50U + random_next() % 200U;
+	pad_put(report, PAD_SCAN_TIME_BIT, 16U, pad_scan_time & 0xffffU);
+	choice = random_next() % 20U;
+	if (choice == 0U)
+		count = random_next() % 8U;
+	pad_put(report, PAD_COUNT_BIT, 8U, count);
+
+	/* The button, pressed or released now and then. */
+	choice = random_next() % 12U;
+	if (choice == 0U)
+		pad_button = !pad_button;
+	pad_put(report, PAD_BUTTON_BIT, 1U, (unsigned)pad_button);
+
+	/* The report's length, its ID's byte included. */
+	return PAD_REPORT_BYTES;
+}
+
+/* Puts some bits of a value into a pad report at a bit offset after its ID's byte. */
+static void
+pad_put(
+	uint8_t *report,
+	unsigned offset,
+	unsigned bits,
+	unsigned value)
+{
+	unsigned index;
+	unsigned bit;
+
+	/* One bit at a time. */
+	for (index = 0; index < bits; index++) {
+		/* A clear bit leaves the report as it is. */
+		if (((value >> index) & 1U) == 0U)
+			continue;
+		bit = offset + index;
+		report[1U + bit / 8U] = (uint8_t)(report[1U + bit / 8U] | (1U << (bit % 8U)));
+	}
 }

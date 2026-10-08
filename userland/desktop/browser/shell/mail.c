@@ -18,8 +18,11 @@
  *
  * ws177-p014: a page whose focus is in no field that takes text (the
  * click went outside the field, or the page has none) is not typed into,
- * so that its own keys (its shortcuts) do not fire: the code goes to the
- * clipboard instead, and a notification says to paste it.  A code with
+ * so that its own keys (its shortcuts) do not fire.  ws177-p018: the
+ * code then goes into the page's field for one-time codes
+ * (autocomplete="one-time-code", browser_view_focus_field), and only a
+ * page without one gets nothing: the code goes to the clipboard instead,
+ * and a notification says to paste it.  A code with
  * letters is typed with the letters' DOM names ("KeyK", Shift for a
  * capital).  Each browser window hears the arrival and offers the code,
  * and the notification names the window's page, so the user chooses the
@@ -245,11 +248,16 @@ shell_mail_fill(
 	/* The page has the keyboard again (the click went to the notification or the titlebar). */
 	(void)browser_view_focus(view, 1);
 
-	/* A page without a field to take it: the clipboard (its keys would be the page's shortcuts). */
+	/* No field with the focus: the page's field for one-time codes, else the clipboard (keys would be the page's shortcuts). */
 	target = browser_view_text_target(view, caret);
 	if (target != 1) {
-		shell_mail_copy(mail, titlebar);
-		return;
+		error = browser_view_focus_field(view, "one-time-code");
+		printf("ZBROWSER MAIL one-time-code-field error=%d\n", error);
+		fflush(stdout);
+		if (error != 0) {
+			shell_mail_copy(mail, titlebar);
+			return;
+		}
 	}
 
 	/* The code typed into the field. */

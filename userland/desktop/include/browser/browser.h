@@ -319,6 +319,19 @@ int browser_view_focus(struct browser_view *view, int focused);
  * when the page's scripts failed.
  */
 int browser_view_text_target(struct browser_view *view, float caret[4]);
+
+/*
+ * A field by its purpose (ws177-p017): the focus moves, with its ring, to
+ * the first control in the document's order that takes text (a text or
+ * password field, a textarea), can be focused, is drawn, and whose
+ * autocomplete attribute holds the token (ASCII, any case; for example
+ * "one-time-code"), and the view scrolls it into view, as Tab would.  The
+ * page's focus events fire.  Reports 0 when one has the focus, ENOENT
+ * when there is none (the focus stays where it was), or an errno value
+ * when the page's scripts or its layout failed.  It is a mutation of the
+ * view, not to be called from within one of its callbacks.
+ */
+int browser_view_focus_field(struct browser_view *view, const char *autocomplete);
 int browser_view_compose(struct browser_view *view, const char *preedit, int begin, int end);
 int browser_view_commit_text(struct browser_view *view, const char *text, uint32_t delete_before, uint32_t delete_after);
 

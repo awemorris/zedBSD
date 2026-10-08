@@ -1148,6 +1148,47 @@ browser_view_focus(
 }
 
 /*
+ * Moves the focus to the first control that takes text and whose
+ * autocomplete attribute holds a token ("one-time-code"), with its ring,
+ * and scrolls it into view.  Returns 0 when one has the focus, ENOENT
+ * when the page has none, or an errno value when the page's scripts or
+ * its layout failed.
+ */
+int
+browser_view_focus_field(
+	struct browser_view *view,
+	const char *autocomplete)
+{
+	int focused;
+	int error;
+
+	/* No page has no field. */
+	if (view->page == NULL)
+		return ENOENT;
+
+	/* The page laid out as it is now (only drawn controls are taken). */
+	error = view_update(view);
+	if (error != 0)
+		return error;
+
+	/* The control, focused. */
+	focused = page_focus_field(view->page, autocomplete);
+	if (focused < 0)
+		return -focused;
+	if (focused == 0)
+		return ENOENT;
+	view_changed(view);
+
+	/* In view. */
+	error = view_scroll_into_view(view);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the control has the focus. */
+	return 0;
+}
+
+/*
  * Tells whether the focused element takes an input method's text: a text
  * field or a textarea that takes typing (a password field does not).
  * caret gets the caret's rectangle in the view's pixels as the last

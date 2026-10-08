@@ -628,9 +628,17 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 
 **確かめ（P2、host）**: `config/ci/config-amd64.mk`・`config-amd64-bt.mk`（vmunix、input-bridge-probe）・`config-rpi4.mk` は exit 0、warning 0。pcat は compile の error・warning 0、link は既知の sandbox の未定義で失敗（Q1 の既知）。style-check: input-bridge.c・input-bridge-setup.c・input-bridge.h（uapi・driver）・input-bridge-probe・試験の C は 0 件。`hid-input-host-test.sh` PASS（setup と短い report の検査を含む）、`hid-report-fuzz.sh` PASS。**未実施**: QEMU（T1: `input-bridge-p005.sh`）。
 
-## i01c（予定、Q1 の決定 2026-10-08: 「i2c-hid も共有の glue に乗せる」）
+## i01c の記録（2026-10-08、P2、q888。ユーザーの決定（Q1 経由）: 「i2c-hid も共有の glue に乗せる」、推しと逆）
 
-ユーザーの決定は推しと逆で、i2c-hid も hid-input に乗せる。touchpad の経路の作り替えなので、host で旧と新の event 列の突き合わせ（i01a と同じ方法、5330 の touchpad の descriptor）を必ず行い、実機の回帰は UAT で。設計 §5.2 の文言は元のまま。i01b の後に行う。
+touchpad の経路の作り替え。host で旧と新の event 列を突き合わせ（i01a と同じ方法、5330 の touchpad の descriptor）、実機の回帰は UAT。設計 §5.2 の文言は元のまま。
+
+**作った物**:
+- glue: `struct hid_input_identity` に `flags`、`HID_INPUT_TOUCH_ONLY`（touch の device だけを登録し、main device（Precision Touchpad の mouse の collection）は登録しない。その report は main device が無いので何も出ない = 旧の「touch でない report は捨てる」と同じ）。`drv_hid_input_touch()`（layout の touch の情報）、`drv_hid_input_feature()`（feature report の field の位置、touchpad の mode の設定に使う）。
+- `src/drivers/i2c/i2c-hid.c`: layout・touch の description・状態機械・decode の作業領域・input device の field を `struct hid_input *hidinput` に置き換えた。`read_report_descriptor` は `drv_hid_input_prepare`、`device_start` の touch の判定は `drv_hid_input_touch`、`set_feature` は `drv_hid_input_feature`、`publish` は identity（名前「VVVV:PPPP Touchpad|Touchscreen」、path は ACPI の path、unique_id は NULL、BUS_I2C、`HID_INPUT_TOUCH_ONLY`）で `drv_hid_input_publish`、`take_report` は `drv_hid_input_report`（時刻は読んだ時の `clock_milliseconds`）。I2C・ACPI・GPIO・IRQ の部分は変えていない。
+- 振る舞いの違い（意図した物）: (1) glue の prepare は旧の parse より厳しい（report の数 0・32 超、capability 257 超、axis 65 超、report の長さ 0・1025 超で断る）。実の touchpad では起きない見込みで、fuzz では 0 件（`i2c stricter` で数える）。(2) 壊れた report と touch の状態機械の失敗に kernel の log の行（最初の 16 回、`hid-input: malformed input <path> …`）が出る（旧は黙って捨てた）。(3) touch の describe が失敗した時の errno は ENODEV（旧は describe の errno）。
+- 試験: `hid-input-old.c` に旧の i2c-hid の parse・touch の判定・publish・take_report の写し（git aef0dead1）、`hid-input-host-test.c` に `compare_i2c_side_by_side`（旧の i2c-hid と、touch だけを出す glue を、登録の情報・main device が無いこと・event の列で突き合わせる。check と fuzz の両方）と、5330 の touchpad の指の report の生成（5 本の指の down・move・lift、端の外、Scan Time、Contact Count（時に誤り）、button）。`plan/ws159/tests/run-host-i2c-hid.sh`・`host-i2c-hid.c` を追従（hid-input.o を link、`kern_malloc`・`drv_input_device_unregister`・NULL の device の emit を捨てる stand-in。既存の壊れ（ws183-p001 以来の `kern_irq_*` の未定義）も stand-in を足して直した）。
+
+**確かめ（P2、host）**: `config/ci/config-amd64.mk`・`config-amd64-bt.mk` の vmunix は exit 0、warning 0。style-check: i2c-hid.c・hid-input.[ch]・試験の C は 0 件（host-i2c-hid.c の setjmp の既存の 1 件は除く）。`hid-input-host-test.sh` PASS（200026 comparisons、1488468 events のうち i2c の突き合わせ 151044、0 failures、i2c stricter 0。5330 の touchpad は旧の i2c-hid と glue が 20000 report で一致、touch screen も一致）。`hid-report-fuzz.sh` PASS（1000000 descriptor、0 failures、i2c stricter 0）。`run-host-i2c-hid.sh` は line 74・sample 81・irq 75 checks で ok（phase006 の記録と同じ数）、ASan・UBSan でも ok。**未実施**: QEMU（i2c の device は QEMU に無い。boot-test の login prompt だけ T1 で）、実機（5330 の touchpad、UAT）。
 
 ## 再開点（次の担当がこの file だけで i01a に入れる形）
 

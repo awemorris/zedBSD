@@ -12,13 +12,14 @@
  * Each device's _CRS gives its bus (the controller's ACPI path), its
  * address and its speed, and its _DSM gives the register of its HID
  * descriptor.  A thread of its own reads the descriptor, powers the device
- * on, resets it, reads its report descriptor and parses it with the HID
- * layer shared with USB (hid-report.c).  A Windows Precision Touchpad is
- * then put in its touch pad mode (Device Mode 3) with its surface and its
- * button switched on, which is what makes it report its fingers rather
- * than a mouse's motion.  The fingers go through the touch state machine
- * (hid-touch.c), and the device is published as an evdev node that speaks
- * multitouch protocol B.
+ * on, resets it, reads its report descriptor and describes it with the HID
+ * input glue shared with USB and the input bridge (hid-input.c,
+ * ws143-p005).  A Windows Precision Touchpad is then put in its touch pad
+ * mode (Device Mode 3) with its surface and its button switched on, which
+ * is what makes it report its fingers rather than a mouse's motion.  The
+ * glue's touch state machine (hid-touch.c) takes the fingers, and the
+ * touch device alone is published as an evdev node that speaks multitouch
+ * protocol B (the pad's mouse collection is not).
  *
  * The device's interrupt line (its GpioInt) is taken as an interrupt when
  * it is on an Intel PCH GPIO pad that can interrupt (intel-gpio.c,
@@ -50,12 +51,11 @@
 
 #include <drivers/acpi/acpi.h>
 #include <drivers/generic/hid-report.h>
-#include <drivers/generic/hid-touch.h>
+#include <drivers/generic/hid-input.h>
 #include <drivers/gpio/intel-gpio.h>
 #include <drivers/i2c/i2c.h>
 #include <drivers/i2c/i2c-hid.h>
 #include <kern/clock.h>
-#include <kern/input-device.h>
 #include <kern/irq.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
@@ -176,13 +176,13 @@ struct i2c_hid_device {
 	uint16_t vendor;
 	uint16_t product;
 	uint16_t version;
-	struct hid_report_layout *layout;
+	/*
+	 * The devices its report descriptor declares and its reports' events
+	 * (the HID input glue, ws143-p005), and what the descriptor says about
+	 * its fingers.
+	 */
+	struct hid_input *hidinput;
 	struct hid_report_touch_info touch;
-	struct hid_touch_description description;
-	struct hid_touch_state state;
-	struct hid_report_input decoded;
-	struct hid_touch_output output;
-	struct input_device *input;
 	char name[I2C_HID_TEXT_MAX];
 	uint8_t input_buffer[I2C_HID_INPUT_MAX];
 	struct thread *thread;
@@ -1016,7 +1016,7 @@ device_start(
 		return error;
 
 	/* A device with no fingers is not one this driver publishes. */
-	error = drv_hid_report_layout_get_touch(device->layout, &device->touch);
+	error = drv_hid_input_touch(device->hidinput, &device->touch);
 	if (error != 0) {
 		kern_logf("i2c-hid: %s %04x:%04x has no touch pad or touch screen\n", device->path, device->vendor, device->product);
 		return ENODEV;
@@ -1114,7 +1114,7 @@ send_command(
 	return 0;
 }
 
-/* Reads the report descriptor and parses it into the device's layout. */
+/* Reads the report descriptor and describes the devices it declares. */
 static int
 read_report_descriptor(
 	struct i2c_hid_device *device)
@@ -1135,16 +1135,16 @@ read_report_descriptor(
 
 	/* Parses it with the HID layer. */
 	if (error == 0)
-		error = drv_hid_report_layout_parse(descriptor, device->report_descriptor_length, &device->layout);
+		error = drv_hid_input_prepare(descriptor, device->report_descriptor_length, &device->hidinput);
 
-	/* The bytes are no longer needed; the layout keeps what it uses. */
+	/* The bytes are no longer needed; the description keeps what it uses. */
 	kern_free(descriptor);
 
 	/* Reports a descriptor that could not be read or parsed. */
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the layout is ready. */
+	/* Succeeded: the description is ready. */
 	return 0;
 }
 
@@ -1190,7 +1190,7 @@ set_feature(
 	int error;
 
 	/* Where the field is; a descriptor without it has nothing to set. */
-	error = drv_hid_report_layout_get_feature(device->layout, usage, &feature);
+	error = drv_hid_input_feature(device->hidinput, usage, &feature);
 	if (error != 0)
 		return error;
 	if (feature.data_size == 0U || feature.data_size > I2C_HID_FEATURE_MAX)
@@ -1227,10 +1227,10 @@ set_feature(
 
 	/* The surface switch and the button switch share a report: both are turned on together. */
 	if (usage == HID_REPORT_USAGE_SURFACE_SWITCH || usage == HID_REPORT_USAGE_BUTTON_SWITCH) {
-		error = drv_hid_report_layout_get_feature(device->layout, HID_REPORT_USAGE_SURFACE_SWITCH, &other);
+		error = drv_hid_input_feature(device->hidinput, HID_REPORT_USAGE_SURFACE_SWITCH, &other);
 		if (error == 0 && other.report_id == feature.report_id)
 			put_bits(data, other.bit_offset, other.bit_size, I2C_HID_SWITCH_ON);
-		error = drv_hid_report_layout_get_feature(device->layout, HID_REPORT_USAGE_BUTTON_SWITCH, &other);
+		error = drv_hid_input_feature(device->hidinput, HID_REPORT_USAGE_BUTTON_SWITCH, &other);
 		if (error == 0 && other.report_id == feature.report_id)
 			put_bits(data, other.bit_offset, other.bit_size, I2C_HID_SWITCH_ON);
 	}
@@ -1244,24 +1244,18 @@ set_feature(
 	return 0;
 }
 
-/* Describes the device to the touch state machine and registers its input device. */
+/*
+ * Registers the touch pad's or touch screen's device through the HID input
+ * glue: the touch device alone (a Precision Touchpad's mouse collection is
+ * left unpublished, its reports dropped).
+ */
 static int
 publish(
 	struct i2c_hid_device *device)
 {
-	struct input_device_info info;
+	struct hid_input_identity identity;
 	const char *kind;
 	int error;
-
-	/* The capabilities, axes and properties of a touch pad or a touch screen. */
-	error = drv_hid_touch_describe(&device->touch, &device->description);
-	if (error != 0)
-		return error;
-
-	/* No finger touches yet; the Scan Time and the pad's mode are known. */
-	drv_hid_touch_reset(&device->state, device->description.slots);
-	drv_hid_touch_set_scan_time(&device->state, &device->touch);
-	drv_hid_touch_set_pad(&device->state, &device->touch);
 
 	/* Its name, as "vendor:product Touchpad". */
 	kind = "Touchscreen";
@@ -1269,20 +1263,21 @@ publish(
 		kind = "Touchpad";
 	(void)kern_snprintf(device->name, sizeof(device->name), "%04X:%04X %s", device->vendor, device->product, kind);
 
+	/* The touch device's identity: the name and the device's ACPI path, no unique ID. */
+	kern_memset(&identity, 0, sizeof(identity));
+	identity.name = device->name;
+	identity.physical_path = device->path;
+	identity.unique_id = NULL;
+	identity.touch_name = device->name;
+	identity.touch_physical_path = device->path;
+	identity.id.bustype = BUS_I2C;
+	identity.id.vendor = device->vendor;
+	identity.id.product = device->product;
+	identity.id.version = device->version;
+	identity.flags = HID_INPUT_TOUCH_ONLY;
+
 	/* Registers it. */
-	kern_memset(&info, 0, sizeof(info));
-	info.name = device->name;
-	info.physical_path = device->path;
-	info.id.bustype = BUS_I2C;
-	info.id.vendor = device->vendor;
-	info.id.product = device->product;
-	info.id.version = device->version;
-	info.capabilities = device->description.capabilities;
-	info.capability_count = device->description.capability_count;
-	info.absolute_axes = device->description.axes;
-	info.absolute_axis_count = device->description.axis_count;
-	info.properties = device->description.properties;
-	error = drv_input_device_register(&info, &device->input);
+	error = drv_hid_input_publish(device->hidinput, &identity);
 	if (error != 0)
 		return error;
 
@@ -1325,7 +1320,7 @@ poll_input(
 	return 0;
 }
 
-/* Decodes one input report and emits what the touch state machine makes of it. */
+/* Hands one input report to the HID input glue, at the time it arrived. */
 static void
 take_report(
 	struct i2c_hid_device *device,
@@ -1333,34 +1328,10 @@ take_report(
 	size_t length)
 {
 	uint64_t now;
-	size_t index;
-	int is_touch;
-	int error;
 
-	/* Decodes the report; one the layout does not know is dropped. */
-	error = drv_hid_report_decode(device->layout, report, length, &device->decoded);
-	if (error != 0)
-		return;
-
-	/* Only the reports of the fingers go to the touch state machine (the mouse report is not published). */
-	is_touch = drv_hid_touch_report_is_touch(&device->decoded);
-	if (!is_touch)
-		return;
-
-	/* Turns the report into events at the time it arrived. */
+	/* The glue decodes it and the touch state machine makes its events; other reports are dropped. */
 	now = clock_milliseconds(NULL);
-	error = drv_hid_touch_translate_at(&device->state, &device->decoded, now, &device->output);
-	if (error != 0)
-		return;
-
-	/* Emits them in order. */
-	for (index = 0; index < device->output.event_count; index++) {
-		drv_input_device_emit_at(device->input,
-					 device->output.events[index].type,
-					 device->output.events[index].code,
-					 device->output.events[index].value,
-					 now);
-	}
+	drv_hid_input_report(device->hidinput, report, length, now);
 }
 
 /* Reads a 16-bit little-endian field. */

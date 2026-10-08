@@ -62,6 +62,7 @@ static int input_focusable(struct page *page, const struct dom_element *element,
 static int input_tabindex(struct page *page, const struct dom_element *element, long *value);
 static int input_has_attribute(struct page *page, const struct dom_element *element, const char *name, struct dom_attribute **attribute);
 static int input_equal_folded(const struct vm_string *string, const char *ascii);
+static int input_has_token(const struct vm_string *string, const char *token);
 static int input_rendered(struct page *page, const struct dom_node *node);
 static struct dom_node *input_next(const struct dom_node *node, const struct dom_node *root);
 static int input_link_of(struct page *page, const struct dom_node *node, struct wb_buffer *href, int *found);
@@ -339,6 +340,76 @@ page_focus_move(
 
 	/* Succeeded: the focus moved. */
 	return 0;
+}
+
+/*
+ * Moves the focus, with its ring, to the first control in the document's
+ * order that takes text (a text field, a password field or a textarea),
+ * can be focused, is drawn, and whose autocomplete attribute holds a
+ * token (ASCII, in any case; "one-time-code").  Reports 1 when one took
+ * the focus, 0 when there is none (the focus stays), or a negative errno
+ * value when its listeners failed.
+ */
+int
+page_focus_field(
+	struct page *page,
+	const char *token)
+{
+	struct dom_attribute *attribute;
+	struct dom_element *element;
+	struct dom_node *node;
+	long order;
+	int focusable;
+	int rendered;
+	int found;
+	int kind;
+	int held;
+	int error;
+
+	/* Each element in the document's order. */
+	for (node = page->document->node.first_child;
+	     node != NULL;
+	     node = input_next(node, &page->document->node)) {
+		if (node->type != DOM_ELEMENT)
+			continue;
+		element = (struct dom_element *)node;
+
+		/* A control that takes text. */
+		kind = dom_control_kind(element);
+		if (kind != DOM_CONTROL_TEXT && kind != DOM_CONTROL_PASSWORD && kind != DOM_CONTROL_TEXTAREA)
+			continue;
+
+		/* With the token in its autocomplete attribute. */
+		found = input_has_attribute(page, element, "autocomplete", &attribute);
+		if (!found)
+			continue;
+		held = input_has_token(attribute->value, token);
+		if (!held)
+			continue;
+
+		/* One that can be focused and is drawn. */
+		focusable = input_focusable(page, element, &order);
+		if (!focusable)
+			continue;
+		rendered = input_rendered(page, node);
+		if (rendered)
+			break;
+	}
+
+	/* None. */
+	if (node == NULL)
+		return 0;
+
+	/* The focus moves there, with its ring, and typing goes after its text. */
+	error = input_set_focus(page, element, 1);
+	if (error != 0)
+		return -error;
+	error = page_caret_to_end(page);
+	if (error != 0)
+		return -error;
+
+	/* Succeeded: the control has the focus. */
+	return 1;
 }
 
 /*
@@ -1020,6 +1091,62 @@ input_equal_folded(
 
 	/* The same word. */
 	return 1;
+}
+
+/* Tells whether a string's tokens (between ASCII spaces) hold a word, in any ASCII case (the word is in lower case). */
+static int
+input_has_token(
+	const struct vm_string *string,
+	const char *token)
+{
+	const unsigned char *latin1;
+	unsigned char character;
+	size_t length;
+	size_t start;
+	size_t index;
+	size_t end;
+
+	/* Tokens are ASCII; a string of wide characters is not read. */
+	if ((string->flags & VM_STRING_WIDE) != 0U)
+		return 0;
+	latin1 = vm_string_latin1(string);
+	length = strlen(token);
+
+	/* Each token. */
+	start = 0;
+	while (start < string->length) {
+		/* Its spaces before it. */
+		if (latin1[start] == ' ' || latin1[start] == '\t' || latin1[start] == '\n' || latin1[start] == '\f' || latin1[start] == '\r') {
+			start++;
+			continue;
+		}
+
+		/* Its end. */
+		end = start;
+		while (end < string->length && latin1[end] != ' ' && latin1[end] != '\t' && latin1[end] != '\n' && latin1[end] != '\f' && latin1[end] != '\r')
+			end++;
+
+		/* The word, compared folded. */
+		if (end - start == length) {
+			for (index = 0; index < length; index++) {
+				character = latin1[start + index];
+				if (character >= 'A' && character <= 'Z')
+					character = (unsigned char)(character - 'A' + 'a');
+				if (character != (unsigned char)token[index])
+					break;
+			}
+
+			/* The whole word. */
+			if (index == length)
+				return 1;
+		}
+
+		/* The next token. */
+		start = end;
+	}
+
+	/* Not held. */
+	return 0;
 }
 
 /* Tells whether a node has a box on the laid out page. */
