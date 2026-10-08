@@ -21,6 +21,8 @@ Origin: [backlog-p2](../backlog-p2.md) の 85・86・87・88・115（WS169 ws169
 
 ## 判断が要る点（ユーザー、記録して先へ）
 
+2026-10-08 朝 ユーザー「libbrowser に口を足してよい」→ [ws177-p017](../phase017/phase.md)（口）・[ws177-p018](../phase018/phase.md)（欄に入れる）で実装した。以下は当時の記録。
+
 - **86 の後半: `autocomplete="one-time-code"` の欄を探して入れる**は未実装。browser の shell が使える libbrowser の公開の API（`include/browser/browser.h`）には、属性で要素を探す・focus を移す口が無い。layout・DOM の text の dump を照らし合わせる方法は表示されない input があると要素を取り違えるので採らない。案: libbrowser に `int browser_view_focus_field(struct browser_view *view, const char *autocomplete)`（autocomplete の token を持つ最初の focus できる text の欄に focus を移し、見える所へ scroll、無ければ ENOENT）を足し、shell は `text_target` が 0 の時にまずそれを試し、無ければ clipboard。libbrowser（WS074）は止めているので、手を入れてよいかはユーザーの判断（[案](../phasing-20261008.md) の「O・p1 32・p2 89」と同じ問い）。それまでは clipboard に置く。
 
 ## 確認（host・build、2026-10-08）

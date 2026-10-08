@@ -50,6 +50,7 @@ static struct {
 	char label[32];
 	unsigned offers;
 	int text_target;
+	int one_time_field;
 	char copied[32];
 	unsigned shifted;
 	int bad_key;
@@ -191,6 +192,17 @@ browser_view_title(
 }
 
 int
+browser_view_focus_field(
+	struct browser_view *view,
+	const char *autocomplete)
+{
+	UNUSED_PARAMETER(view);
+	if (strcmp(autocomplete, "one-time-code") != 0 || !fake.one_time_field)
+		return ENOENT;
+	return 0;
+}
+
+int
 browser_view_text_target(
 	struct browser_view *view,
 	float caret[4])
@@ -265,6 +277,7 @@ main(void)
 	unsigned flags_first;
 	char typed_before_copy[32];
 	char typed_by_titlebar[32];
+	char typed_in_field[32];
 	unsigned releases_by_titlebar;
 	int due_offered;
 	int due_none;
@@ -344,6 +357,18 @@ main(void)
 	shell_mail_fill(&mail, view, &titlebar);
 	(void)snprintf(typed_before_copy, sizeof(typed_before_copy), "%s", fake.typed);
 
+	/* No field with the focus, but one for one-time codes: typed there (ws177-p018). */
+	(void)snprintf(fake.mails[0].from, sizeof(fake.mails[0].from), "Club");
+	(void)snprintf(fake.mails[0].code, sizeof(fake.mails[0].code), "135790");
+	fake.mail_count = 1;
+	shell_mail_round(&mail, view, &titlebar, 350000U);
+	fake.text_target = 0;
+	fake.one_time_field = 1;
+	fake.typed[0] = '\0';
+	shell_mail_fill(&mail, view, &titlebar);
+	(void)snprintf(typed_in_field, sizeof(typed_in_field), "%s", fake.typed);
+	fake.one_time_field = 0;
+
 	/* A page without a field: the clipboard, nothing typed. */
 	(void)snprintf(fake.mails[0].from, sizeof(fake.mails[0].from), "Club");
 	(void)snprintf(fake.mails[0].code, sizeof(fake.mails[0].code), "246810");
@@ -365,19 +390,20 @@ main(void)
 
 	/* The checks. */
 	test_check("listen", strcmp(fake.listened, "browser") == 0, fake.listened);
-	test_check("offered-once-each", fake.next_request == 6U, "");
+	test_check("offered-once-each", fake.next_request == 7U, "");
 	test_check("offer-names-page", strstr(body_first, "on Example Bank - Sign in.") != NULL, body_first);
 	test_check("timeout", due_offered == 90 * 1000 && due_over == 0 && due_none == -1, "");
 	test_check("offer-titlebar", strcmp(label_first, "Code 482913") == 0, label_first);
 	test_check("offer-action", flags_first == KL_NOTIFY_ACTION && strcmp(title_first, "Sign-in code from Example Bank") == 0, title_first);
 	test_check("lettered", strcmp(typed_before_copy, "X7K2PQ") == 0 && fake.shifted == 4U && !fake.bad_key, typed_before_copy);
+	test_check("one-time-code-field", strcmp(typed_in_field, "135790") == 0 && strstr(log_text, "ZBROWSER MAIL one-time-code-field error=0") != NULL, typed_in_field);
 	test_check("no-field-copied", strcmp(fake.copied, "246810") == 0 && fake.typed[0] == '\0' && fake.label[0] == '\0', fake.copied);
 	test_check("no-field-told", fake.flags == 0U && strcmp(fake.title, "Sign-in code copied") == 0 && strstr(fake.body, "246810") == NULL, fake.title);
 	test_check("typed-by-notification", strcmp(typed_by_notification, "482913") == 0 && fake.focused == 1 && label_after_fill[0] == '\0', typed_by_notification);
 	test_check("ran-out", fake.withdrawn == 78U, "");
 	test_check("typed-by-titlebar", strcmp(typed_by_titlebar, "123456") == 0 && releases_by_titlebar == 12U, typed_by_titlebar);
 	test_check("no-code-in-log", strstr(log_text, "482913") == NULL && strstr(log_text, "7351") == NULL && strstr(log_text, "123456") == NULL &&
-	    strstr(log_text, "X7K2PQ") == NULL && strstr(log_text, "246810") == NULL, "");
+	    strstr(log_text, "X7K2PQ") == NULL && strstr(log_text, "246810") == NULL && strstr(log_text, "135790") == NULL, "");
 	test_check("log-lengths", strstr(log_text, "ZBROWSER MAIL fill length=6 error=0") != NULL &&
 	    strstr(log_text, "ZBROWSER MAIL copied length=6 clipboard=1 notified=1") != NULL, "");
 
