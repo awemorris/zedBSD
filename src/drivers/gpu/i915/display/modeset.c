@@ -1822,6 +1822,7 @@ drv_i915_lcd_kernel_resident_run(
 	int way_error;
 	int fallback_error;
 	int debug;
+	int unplugged;
 	int kept;
 	unsigned domain;
 
@@ -2001,9 +2002,13 @@ drv_i915_lcd_kernel_resident_run(
 	 */
 	passed = i915_resident_passed(rep);
 	debug = drv_i915_lcd_debug_enabled();
-	if (!passed || !released || held != 0 || debug) {
+	unplugged = __atomic_load_n(&display->window.unplugged, __ATOMIC_ACQUIRE);
+	if (debug || ((!passed || !released || held != 0) && !unplugged)) {
 		drv_i915_lcd_log_trace(rep->trace);
 		drv_i915_lcd_log_observer(&rep->obs);
+	} else if (unplugged) {
+		/* A run whose display was unplugged fails as expected (BUG-268): its log would only delay the output's return. */
+		kern_logf("i915: resident display: run log not printed: its display was unplugged (%u entries kept)\n", rep->trace->n);
 	} else {
 		kern_logf("i915: resident display: run log %u writes, %u rmw, %u waits (0 timed out), 0 errors, 0 unresolved steps (%u entries kept, %u not kept)\n",
 		    rep->trace->writes,

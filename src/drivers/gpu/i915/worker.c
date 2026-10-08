@@ -1291,6 +1291,7 @@ i915_worker_loop(
 	int holding;
 	int hold_over;
 	int relight;
+	int unplugged;
 
 	device = worker->device;
 
@@ -1309,6 +1310,15 @@ i915_worker_loop(
 		if (action == I915_PARK_PARK) {
 			spin_unlock_irqrestore(&device->irq_lock, irq);
 			return I915_WORKER_SERVE_PARK;
+		}
+
+		/* The output the window lights was unplugged (BUG-268): the window is left before more work; the work waits. */
+		if (in_display) {
+			unplugged = drv_i915_present_unplug_pending(device);
+			if (unplugged) {
+				spin_unlock_irqrestore(&device->irq_lock, irq);
+				return I915_WORKER_SERVE_LEAVE_DISPLAY;
+			}
 		}
 
 		/* Sleeps in bounded steps until work arrives, a stop or a park is asked for. */

@@ -55,6 +55,7 @@
 #include "scanout.h"
 #include "control.h"
 #include "head.h"
+#include "hotplug.h"
 #include <kern/kcrt.h>
 
 #include "../i915.h"
@@ -125,6 +126,7 @@ static int i915_present_shared(struct i915_device *device, void *session, void *
 static int i915_present_head(struct i915_device *device, void *session, void *object, struct gpu_display_present *request);
 static int i915_present_head_wait(struct i915_device *device, void *session, struct gpu_display_wait *request);
 static int i915_present_window_retry(struct i915_display *display, int error, int *spared);
+static int i915_present_unplug_take(struct i915_display *display);
 static int i915_present_window_serve(void *ctx);
 static void i915_present_check_frame(struct i915_display *display, const struct i915_worker_present *frame, struct i915_scanout *back, unsigned index);
 static struct i915_scanout *i915_present_target(struct i915_display *display, int *flip);
@@ -729,6 +731,8 @@ drv_i915_present_window(
 	unsigned long irq;
 	int after_resume;
 	int moved;
+	int moved_after;
+	int unplugged;
 	int retry;
 	int spared;
 	int error;
@@ -749,10 +753,16 @@ drv_i915_present_window(
 	moved = drv_i915_display_output_moved(display);
 	spared = 0;
 	error = drv_i915_lcd_kernel_resident_run(display, display->rctx.lcd, i915_present_window_serve, display);
-	retry = i915_present_window_retry(display, error, &spared);
+	unplugged = i915_present_unplug_take(display);
+	retry = 0;
+	if (!unplugged)
+		retry = i915_present_window_retry(display, error, &spared);
 	while (retry) {
 		error = drv_i915_lcd_kernel_resident_run(display, display->rctx.lcd, i915_present_window_serve, display);
-		retry = i915_present_window_retry(display, error, &spared);
+		unplugged = i915_present_unplug_take(display);
+		retry = 0;
+		if (!unplugged)
+			retry = i915_present_window_retry(display, error, &spared);
 	}
 
 	/*
@@ -770,12 +780,21 @@ drv_i915_present_window(
 		error = drv_i915_lcd_kernel_resident_run(display, display->rctx.lcd, i915_present_window_serve, display);
 	}
 
-	/* A moved output that failed gives the firmware's output back (ws113-p011a), and the rest of its lease fails. */
-	if (error != 0 && moved)
+	/*
+	 * A moved output that failed, or whose display was unplugged (BUG-268),
+	 * gives the firmware's output back (ws113-p011a), and the rest of its
+	 * lease fails.
+	 */
+	if ((error != 0 || unplugged) && moved)
 		drv_i915_display_output_fail_back(device);
 
 	/* A moved output whose last hold ended without a lease gives the firmware's back (ws113-p011a), before the hold is over. */
 	drv_i915_display_output_back(device);
+
+	/* The output moved back: the display sessions list the displays again now, an idle desktop too (BUG-268). */
+	moved_after = drv_i915_display_output_moved(display);
+	if (moved && !moved_after)
+		drv_i915_hpd_topology_touch(display);
 
 	/*
 	 * The output is stopped: no picture is held any more (a shutdown waiting
@@ -853,6 +872,10 @@ drv_i915_present_hold_over(
 
 	display = device->display;
 
+	/* The output the window lights was unplugged (BUG-268): left at once, held or not. */
+	if (display->window.unplugged)
+		return 1;
+
 	/* Nothing is held. */
 	if (!display->window.holding)
 		return 0;
@@ -916,6 +939,66 @@ drv_i915_present_retrain_request(
 	display->window.retrain = 1;
 
 	spin_unlock_irqrestore(&device->irq_lock, irq);
+}
+
+/*
+ * Asks the window to be left at once because a connector's display was
+ * unplugged, when the resident output was moved to it and is lit
+ * (BUG-268): the output is stopped, the firmware's output comes back and
+ * the display sessions are told, without waiting for the lease's next
+ * frame, a hold to run out or the Type-C link's reset.  Runs from the
+ * hotplug path.
+ */
+void
+drv_i915_present_unplugged(
+	struct i915_display *display,
+	unsigned connector)
+{
+	struct i915_device *device;
+	unsigned long irq;
+	int moved;
+	int asked;
+
+	/* The device, whose IRQ lock guards the mark. */
+	device = display->device;
+
+	/* Only the connector of a moved output that is lit now. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	asked = 0;
+	moved = drv_i915_display_output_moved(display);
+	if (moved &&
+	    display->resident_up &&
+	    display->output.has_connector &&
+	    display->output.connector == connector &&
+	    !display->window.unplugged) {
+		display->window.unplugged = 1;
+		asked = 1;
+	}
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Another connector, or nothing lit on it. */
+	if (!asked)
+		return;
+
+	/* Wakes the worker to leave the window. */
+	kern_logf("i915: resident display: the %s display was unplugged; the window is left and the firmware's output comes back\n", drv_i915_display_output_name(display));
+	drv_i915_worker_wake(device);
+}
+
+/*
+ * Reports whether the window is to be left because its output was
+ * unplugged (BUG-268).  Runs on the worker with the device IRQ lock held.
+ */
+int
+drv_i915_present_unplug_pending(
+	struct i915_device *device)
+{
+	/* The mark the hotplug path set. */
+	if (device->display == NULL)
+		return 0;
+	return device->display->window.unplugged;
 }
 
 /*
@@ -1929,4 +2012,28 @@ i915_present_window_retry(
 
 	/* Succeeded: the run never reached the display, and is tried again at once for one pipe. */
 	return 1;
+}
+
+/* Takes the mark of an unplugged output after a run (BUG-268): 1 when it was set, and it is cleared. */
+static int
+i915_present_unplug_take(
+	struct i915_display *display)
+{
+	struct i915_device *device;
+	unsigned long irq;
+	int unplugged;
+
+	/* The device, whose IRQ lock guards the mark. */
+	device = display->device;
+
+	/* The mark, read and cleared under the lock the hotplug path sets it under. */
+	irq = spin_lock_irqsave(&device->irq_lock);
+
+	unplugged = display->window.unplugged;
+	display->window.unplugged = 0;
+
+	spin_unlock_irqrestore(&device->irq_lock, irq);
+
+	/* Succeeded: whether the run's output was unplugged. */
+	return unplugged;
 }
