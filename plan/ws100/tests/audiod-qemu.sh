@@ -10,6 +10,9 @@
 #   mute          mute, FEEDBACK -> silence; volume 100, FEEDBACK -> sound
 #   hardware      hda-duplex, mixer on: volume 100, 50, 10 then FEEDBACK each: the codec's amplifier (QEMU applies it to
 #                 the WAV) lowers the sound; the peaks are reported (how pci-hda maps percent to the codec's steps)
+#   curve         ws100-p009: mixer=off, volume 100, 75, 50, 25 then FEEDBACK each: the peaks are -6, -15, -30 dB below
+#                 the first +- 3 dB (plan/ws100/tests/volume-curve.py wav); mixer on, the same volumes: the steps pci-hda
+#                 chose (dmesg's "hda: volume" lines) are the curve's (volume-curve.py dmesg)
 #   no-device     no HD Audio: FEEDBACK is answered (DONE) and nothing breaks
 #   unknown       raw 99 -> ERROR EINVAL (3 in zedBSD)
 #   RUN=build/ws100-run IMG=build/ws100-audiod.img plan/ws100/tests/audiod-qemu.sh [OUT] [CASE...]
@@ -20,7 +23,7 @@ set -u
 cd "$(dirname -- "$0")/../../.."
 out=${1:-build/ws100-audiod}
 [ $# -ge 1 ] && shift
-cases=${*:-"feedback restart soft mute hardware no-device unknown"}
+cases=${*:-"feedback restart soft mute hardware curve no-device unknown"}
 D=${RUN:-$(pwd)/build/ws100-run}
 IMG=${IMG:-build/ws100-audiod.img}
 mkdir -p "$out" "$D"
@@ -71,12 +74,12 @@ boot() {
 	return 1
 }
 
-# One case: boots, runs the client's words, stops QEMU, and keeps the transcript.
+# One case: boots, runs the client's words (and an extra command after them), stops QEMU, and keeps the transcript.
 run() {
-	name=$1 devices=$2 words=$3
+	name=$1 devices=$2 words=$3 extra=${4:-true}
 	echo "=== $name" > "$out/$name.txt"
 	boot "$devices" >> "$out/$name.txt" 2>&1 || { status=1; return; }
-	timeout 150 $G run "service status audiod; audiod-feedback $words; echo client-status=\$?" > "$D/guest.txt" 2>&1
+	timeout 150 $G run "service status audiod; audiod-feedback $words; echo client-status=\$?; $extra" > "$D/guest.txt" 2>&1
 	tr -d '\r' < "$D/guest.txt" >> "$out/$name.txt"
 	stop_qemu
 	[ -f "$D/out.wav" ] && cp "$D/out.wav" "$out/$name.wav"
@@ -150,6 +153,19 @@ for case in $cases; do
 		echo "hardware: windows with sound: $peaks"
 		n=$(echo "$peaks" | wc -w)
 		[ "$n" -ge 2 ] && verdict ok "hardware: the sounds are recorded" || verdict no "hardware: the sounds are recorded"
+		;;
+	curve)
+		# ws100-p009: audiod's own volume (mixer=off) at 100, 75, 50 and 25 %: the peaks' dB against the curve.
+		run curve-soft "$DUPLEX_OFF" "volume 100 sleep 500 feedback sleep 1000 volume 75 feedback sleep 1000 volume 50 feedback sleep 1000 volume 25 feedback sleep 1000 get"
+		python3 "$C" windows "$out/curve-soft.wav" > "$out/curve-soft-windows.txt" 2>&1
+		python3 plan/ws100/tests/volume-curve.py wav "$out/curve-soft-windows.txt" > "$out/curve-soft-db.txt" 2>&1
+		sed 's/^/curve-soft: /' "$out/curve-soft-db.txt"
+		grep -q 'volume-curve: PASS' "$out/curve-soft-db.txt" && verdict ok "curve: audiod's volume on the curve" || verdict no "curve: audiod's volume on the curve"
+		# The codec's amplifier (mixer on): the steps pci-hda chose (its lines, read with dmesg on the guest's shell).
+		run curve-codec "$DUPLEX" "volume 100 sleep 300 volume 75 sleep 300 volume 50 sleep 300 volume 25 sleep 300 get" "dmesg | grep 'hda: volume'"
+		python3 plan/ws100/tests/volume-curve.py dmesg "$out/curve-codec.txt" > "$out/curve-codec-db.txt" 2>&1
+		sed 's/^/curve-codec: /' "$out/curve-codec-db.txt"
+		grep -q 'volume-curve: PASS' "$out/curve-codec-db.txt" && verdict ok "curve: the codec's steps on the curve" || verdict no "curve: the codec's steps on the curve"
 		;;
 	no-device)
 		run no-device "" "feedback sleep 300 feedback get"
