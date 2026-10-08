@@ -39,17 +39,18 @@
  *   otherwise as the pointer's left button, the finger moving the pointer.
  * - While a finger has the pointer or the title bar, another finger goes
  *   only to a client with wl_touch under it, or nowhere.
- * - Two or more fingers that touch near the left, right or bottom edge
- *   within KWL_EDGE_GROUP_MS of each other and all move in from it are
- *   that edge's swipe, as one finger from the edge is (BUG-267, the
+ * - Two or more fingers that touch within KWL_EDGE_GROUP_MS of each other,
+ *   the outermost within KWL_EDGE_GROUP_BAND of the left, right or bottom
+ *   edge and the others anywhere, and that all move in from that edge are
+ *   the edge's swipe, as one finger from the edge is (BUG-267, the
  *   2026-10-08 UAT: the user swipes with two fingers, whose outer one
- *   lands beyond the one finger's strip).  Until they move in they are the
- *   clients' (a pinch or a scroll near the edge stays theirs); then the
- *   clients hear wl_touch.cancel and the shell hears the press on the edge
- *   where the finger nearest it would have started, and follows that
- *   finger.  A finger that touches near the edge soon after the shell took
- *   one there for its swipe goes nowhere (the same hand's, no tap in the
- *   window under it).
+ *   lands beyond the one finger's strip; the user's decision: the others
+ *   may be anywhere).  Until they move in they are the clients' (a pinch
+ *   or a scroll stays theirs, and so do fingers in the middle alone); then
+ *   the clients hear wl_touch.cancel and the shell hears the press on the
+ *   edge where the outermost finger would have started, and follows that
+ *   finger.  A finger that touches soon after the shell took one at an
+ *   edge goes nowhere (the same hand's, no tap in the window under it).
  * - A finger on the open on-screen keyboard's panel is the keyboard's own
  *   press (ROUTE_OSK, ws102-p009), whatever the other fingers do: each
  *   finger presses its key, and a second finger touching while the first
@@ -300,8 +301,8 @@ static void title_refuse(const char *reason, uint32_t elapsed);
 static void title_promote(struct kwl_server *server, uint32_t time);
 static void title_tap(struct kwl_server *server, uint32_t time);
 static void group_lead(struct kwl_server *server, struct touch_screen *screen, unsigned slot, uint32_t time);
-static int group_join(struct kwl_server *server, struct touch_screen *screen, unsigned slot, uint32_t time);
-static void group_gather(struct kwl_server *server, struct touch_screen *screen, unsigned slot, uint32_t time);
+static int group_join(struct touch_screen *screen, unsigned slot, uint32_t time);
+static void group_gather(struct touch_screen *screen, unsigned slot, uint32_t time);
 static void group_check(struct kwl_server *server, uint32_t time);
 static void group_take(struct kwl_server *server, unsigned leader, unsigned count, uint32_t time);
 static void group_lift(struct touch_screen *screen, unsigned slot);
@@ -938,7 +939,7 @@ contact_begin(
 	busy = shell_busy();
 	if (busy) {
 		/* A finger joining the shell's swipe from an edge there is the same hand's, and goes nowhere. */
-		joined = group_join(server, screen, slot, report->time);
+		joined = group_join(screen, slot, report->time);
 		if (joined) {
 			contact->route = ROUTE_IGNORED;
 			printf("KWL TOUCH edge joined contact=%u x=%d y=%d\n", contact_id(screen, slot), x, y);
@@ -996,7 +997,7 @@ contact_begin(
 	deliver_first(server, screen, slot, report);
 
 	/* Succeeded: a finger a client has near an edge may be one of a group swiping in from it. */
-	group_gather(server, screen, slot, report->time);
+	group_gather(screen, slot, report->time);
 }
 
 /*
@@ -1456,7 +1457,7 @@ title_tap(
 
 /*
  * Notes a finger the shell took near an edge as the start of a group: the
- * fingers that touch near that edge soon after are the same hand's swipe
+ * fingers that touch soon after, anywhere, are the same hand's swipe
  * (group_join).  Fingers gathering there for clients (cancelled by the
  * shell's taking this one) stay in the group until they lift.
  */
@@ -1486,7 +1487,7 @@ group_lead(
 	if (side == KWL_EDGE_SIDE_NONE)
 		return;
 
-	/* Near enough that a finger beside it touches within reach. */
+	/* Near enough to lead a swipe from the edge. */
 	distance = kwl_edge_group_distance(side, contact->start_x, contact->start_y, (int32_t)server->width, (int32_t)server->height,
 					   KWL_GLASS_BAR);
 	if (distance > KWL_EDGE_GROUP_BAND)
@@ -1506,18 +1507,16 @@ group_lead(
 
 /*
  * Takes a finger that touches while the shell has a group's swipe into the
- * group when it touches soon after the group's first finger, near the same
- * edge; reports whether it did.
+ * group when it touches soon after the group's first finger, wherever it
+ * is (the 2026-10-08 user's decision: with the outermost finger on the
+ * edge, the others may be anywhere); reports whether it did.
  */
 static int
 group_join(
-	struct kwl_server *server,
 	struct touch_screen *screen,
 	unsigned slot,
 	uint32_t time)
 {
-	struct touch_contact *contact;
-	int32_t distance;
 	uint32_t elapsed;
 
 	/* Only a group the shell has, on this screen. */
@@ -1531,33 +1530,24 @@ group_join(
 	if (elapsed > KWL_EDGE_GROUP_MS)
 		return 0;
 
-	/* Only near the same edge. */
-	contact = &screen->contacts[slot];
-	distance = kwl_edge_group_distance(group.side, contact->start_x, contact->start_y, (int32_t)server->width,
-					   (int32_t)server->height, KWL_GLASS_BAR);
-	if (distance < 0 || distance > KWL_EDGE_GROUP_REACH)
-		return 0;
-
 	/* Succeeded: the finger is the group's. */
 	group.fingers |= 1U << slot;
 	return 1;
 }
 
 /*
- * Notes a finger a client has just heard touch: near an edge it may start
- * a group, or join the one gathering there when it touches soon after the
- * first, near the same edge.
+ * Notes a finger a client has just heard touch: with no group it starts
+ * one, and it joins the one gathering on its screen when it touches soon
+ * after the first.  Which edge the group swipes in from is decided by the
+ * finger nearest an edge (group_check); the others may be anywhere.
  */
 static void
 group_gather(
-	struct kwl_server *server,
 	struct touch_screen *screen,
 	unsigned slot,
 	uint32_t time)
 {
 	struct touch_contact *contact;
-	unsigned side;
-	int32_t distance;
 	uint32_t elapsed;
 
 	/* Only a finger a client hears by wl_touch (the others' presses cannot be taken back). */
@@ -1565,15 +1555,11 @@ group_gather(
 	if (contact->route != ROUTE_CLIENT)
 		return;
 
-	/* With no group, a finger near an edge starts one. */
+	/* With no group, the finger starts one. */
 	if (group.state == GROUP_NONE) {
-		side = kwl_edge_group_side(contact->start_x, contact->start_y, (int32_t)server->width, (int32_t)server->height,
-					   KWL_GLASS_BAR);
-		if (side == KWL_EDGE_SIDE_NONE)
-			return;
 		group.state = GROUP_GATHER;
 		group.screen = screen;
-		group.side = side;
+		group.side = KWL_EDGE_SIDE_NONE;
 		group.fingers = 1U << slot;
 		group.first_time = time;
 		return;
@@ -1590,22 +1576,19 @@ group_gather(
 	if (elapsed > KWL_EDGE_GROUP_MS)
 		return;
 
-	/* Only near the same edge. */
-	distance = kwl_edge_group_distance(group.side, contact->start_x, contact->start_y, (int32_t)server->width,
-					   (int32_t)server->height, KWL_GLASS_BAR);
-	if (distance < 0 || distance > KWL_EDGE_GROUP_REACH)
-		return;
-
 	/* Succeeded: the finger is the group's. */
 	group.fingers |= 1U << slot;
 }
 
 /*
  * Judges a gathering group once its fingers are where the report put
- * them: two or more that have all moved in from the edge, the nearest of
- * which touched within KWL_EDGE_GROUP_BAND of it, are the edge's swipe;
- * one that went another way, or that a client no longer hears, makes the
- * group no swipe.
+ * them.  The finger that touched nearest an edge leads, and its edge is
+ * the group's: when it touched within KWL_EDGE_GROUP_BAND of it, two or
+ * more fingers that have all moved in from that edge are the edge's swipe,
+ * wherever the others touched.  A group whose nearest finger is farther
+ * (fingers in the middle) is no swipe once no finger can join it any
+ * more; one with a finger gone another way (a pinch), or that a client no
+ * longer hears, is no swipe.
  */
 static void
 group_check(
@@ -1619,7 +1602,9 @@ group_check(
 	unsigned waiting;
 	unsigned astray;
 	unsigned leader;
+	unsigned side;
 	unsigned motion;
+	uint32_t elapsed;
 	int32_t distance;
 	int32_t nearest;
 
@@ -1628,12 +1613,12 @@ group_check(
 		return;
 	screen = group.screen;
 
-	/* Each finger of the group: how many, which touched nearest the edge, and which way each has gone. */
+	/* The group's fingers: how many, whether a client still hears each, and which touched nearest an edge. */
 	count = 0;
-	waiting = 0;
 	astray = 0;
 	leader = 0;
 	nearest = KWL_EDGE_GROUP_REACH + 1;
+	group.side = KWL_EDGE_SIDE_NONE;
 	for (slot = 0; slot < TOUCH_SLOTS; slot++) {
 		/* Only the group's fingers. */
 		if ((group.fingers & (1U << slot)) == 0U)
@@ -1647,15 +1632,49 @@ group_check(
 			continue;
 		}
 
-		/* The finger that touched nearest the edge leads. */
-		distance = kwl_edge_group_distance(group.side, contact->start_x, contact->start_y, (int32_t)server->width,
-						   (int32_t)server->height, KWL_GLASS_BAR);
-		if (distance >= 0 && distance < nearest) {
+		/* The edge the finger touched nearest, and how near. */
+		side = kwl_edge_group_side(contact->start_x, contact->start_y, (int32_t)server->width, (int32_t)server->height, KWL_GLASS_BAR);
+		if (side == KWL_EDGE_SIDE_NONE)
+			continue;
+		distance = kwl_edge_group_distance(side, contact->start_x, contact->start_y, (int32_t)server->width, (int32_t)server->height,
+						   KWL_GLASS_BAR);
+
+		/* The nearest finger yet leads, and its edge is the group's. */
+		if (distance < nearest) {
 			nearest = distance;
 			leader = slot;
+			group.side = side;
 		}
+	}
 
-		/* Which way the finger has gone since it touched. */
+	/* A finger gone from its client: the others stay their clients' until they lift. */
+	if (astray != 0U) {
+		group.state = GROUP_DONE;
+		if (count >= 2U)
+			printf("KWL TOUCH edge none contacts=%u reason=route\n", count);
+		return;
+	}
+
+	/* No finger near enough an edge: no swipe, once no other finger can join. */
+	if (nearest > KWL_EDGE_GROUP_BAND) {
+		elapsed = time - group.first_time;
+		if (elapsed <= KWL_EDGE_GROUP_MS)
+			return;
+		group.state = GROUP_DONE;
+		if (count >= 2U)
+			printf("KWL TOUCH edge none contacts=%u reason=far nearest=%d\n", count, nearest);
+		return;
+	}
+
+	/* Which way each finger has gone since it touched, as seen from the group's edge. */
+	waiting = 0;
+	for (slot = 0; slot < TOUCH_SLOTS; slot++) {
+		/* Only the group's fingers. */
+		if ((group.fingers & (1U << slot)) == 0U)
+			continue;
+		contact = &screen->contacts[slot];
+
+		/* In, waiting, or another way. */
 		motion = kwl_edge_group_motion(group.side, contact->place_x / 256 - contact->start_x, contact->place_y / 256 - contact->start_y);
 		if (motion == KWL_EDGE_GROUP_OTHER) {
 			astray++;
@@ -1664,7 +1683,7 @@ group_check(
 		}
 	}
 
-	/* A finger gone another way: the fingers stay their clients' until they lift. */
+	/* A finger gone another way (a pinch, a scroll along the edge): the fingers stay their clients'. */
 	if (astray != 0U) {
 		group.state = GROUP_DONE;
 		if (count >= 2U)
@@ -1680,14 +1699,7 @@ group_check(
 	if (waiting != 0U)
 		return;
 
-	/* The nearest finger touched too far from the edge for a swipe in from it. */
-	if (nearest > KWL_EDGE_GROUP_BAND) {
-		group.state = GROUP_DONE;
-		printf("KWL TOUCH edge none side=%s contacts=%u reason=far nearest=%d\n", side_name(group.side), count, nearest);
-		return;
-	}
-
-	/* Succeeded: the fingers are the edge's swipe, led by the nearest. */
+	/* Succeeded: the fingers are the edge's swipe, led by the one nearest the edge. */
 	group_take(server, leader, count, time);
 }
 
