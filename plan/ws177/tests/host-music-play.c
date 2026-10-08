@@ -40,7 +40,7 @@ static int64_t test_time_us;
 static uint64_t test_written;
 static int test_failures;
 
-static const struct mf_track test_track = { .kind = MF_TRACK_AUDIO, .codec_name = "aac", .sample_rate = 48000U, .channels = 2U };
+static const struct media_track test_track = { .kind = MEDIA_TRACK_AUDIO, .codec_name = "aac", .sample_rate = 48000U, .channels = 2U };
 static unsigned char test_byte;
 
 static void test_check(const char *name, int passed);
@@ -65,27 +65,27 @@ mu_log(
 
 /* The container's stand-ins. */
 int
-mf_open(
+media_file_open(
 	const char *path,
-	struct mf_file **file)
+	struct media_file **file)
 {
 	(void)path;
 	test_next = 0U;
-	*file = (struct mf_file *)&test_byte;
+	*file = (struct media_file *)&test_byte;
 	return 0;
 }
 
 unsigned
-mf_track_count(
-	const struct mf_file *file)
+media_file_track_count(
+	const struct media_file *file)
 {
 	(void)file;
 	return 1U;
 }
 
-const struct mf_track *
-mf_track(
-	const struct mf_file *file,
+const struct media_track *
+media_file_track(
+	const struct media_file *file,
 	unsigned index)
 {
 	(void)file;
@@ -94,25 +94,25 @@ mf_track(
 }
 
 int64_t
-mf_duration_us(
-	const struct mf_file *file)
+media_file_duration_us(
+	const struct media_file *file)
 {
 	(void)file;
 	return (int64_t)test_song.packets * 20000;
 }
 
 const char *
-mf_format_name(
-	const struct mf_file *file)
+media_file_format_name(
+	const struct media_file *file)
 {
 	(void)file;
 	return "test";
 }
 
 int
-mf_read(
-	struct mf_file *file,
-	struct mf_packet *packet)
+media_file_read(
+	struct media_file *file,
+	struct media_packet *packet)
 {
 	(void)file;
 	if (test_next >= test_song.packets)
@@ -127,8 +127,8 @@ mf_read(
 }
 
 int
-mf_seek(
-	struct mf_file *file,
+media_file_seek(
+	struct media_file *file,
 	int64_t time_us)
 {
 	(void)file;
@@ -137,35 +137,35 @@ mf_seek(
 }
 
 void
-mf_close(
-	struct mf_file *file)
+media_file_close(
+	struct media_file *file)
 {
 	(void)file;
 }
 
 /* The decoder's stand-ins: a scripted packet does not decode; the others give a little sound each. */
 int
-vp_decoder_open(
-	const struct mf_track *track,
-	struct vp_decoder **decoder)
+media_decoder_open(
+	const struct media_track *track,
+	struct media_decoder **decoder)
 {
 	(void)track;
-	*decoder = (struct vp_decoder *)&test_byte;
+	*decoder = (struct media_decoder *)&test_byte;
 	return 0;
 }
 
 const char *
-vp_decoder_name(
-	const struct vp_decoder *decoder)
+media_decoder_name(
+	const struct media_decoder *decoder)
 {
 	(void)decoder;
 	return "test";
 }
 
 int
-vp_decoder_send(
-	struct vp_decoder *decoder,
-	const struct mf_packet *packet)
+media_decoder_send(
+	struct media_decoder *decoder,
+	const struct media_packet *packet)
 {
 	(void)decoder;
 	if (packet == NULL)
@@ -178,8 +178,8 @@ vp_decoder_send(
 }
 
 int
-vp_decoder_receive(
-	struct vp_decoder *decoder,
+media_decoder_receive(
+	struct media_decoder *decoder,
 	int64_t *time_us)
 {
 	(void)decoder;
@@ -191,8 +191,8 @@ vp_decoder_receive(
 }
 
 size_t
-vp_decoder_sound(
-	struct vp_decoder *decoder,
+media_decoder_sound(
+	struct media_decoder *decoder,
 	int16_t *samples,
 	size_t capacity,
 	uint32_t rate)
@@ -206,16 +206,16 @@ vp_decoder_sound(
 }
 
 void
-vp_decoder_flush(
-	struct vp_decoder *decoder)
+media_decoder_flush(
+	struct media_decoder *decoder)
 {
 	(void)decoder;
 	test_pending = 0;
 }
 
 void
-vp_decoder_close(
-	struct vp_decoder *decoder)
+media_decoder_close(
+	struct media_decoder *decoder)
 {
 	(void)decoder;
 }

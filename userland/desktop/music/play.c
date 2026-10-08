@@ -41,8 +41,8 @@
  */
 struct play_reader {
 	struct mu_player *player;
-	struct mf_file *file;
-	struct vp_decoder *decoder;
+	struct media_file *file;
+	struct media_decoder *decoder;
 	unsigned track;
 	double skip_before;
 	unsigned bad;
@@ -52,7 +52,7 @@ struct play_reader {
 static void *play_run(void *argument);
 static int play_reader_open(struct play_reader *reader, const char *path);
 static void play_reader_close(struct play_reader *reader);
-static int play_feed(struct play_reader *reader, const struct mf_packet *packet);
+static int play_feed(struct play_reader *reader, const struct media_packet *packet);
 static int play_sound(struct play_reader *reader, double time);
 static int play_seek(struct play_reader *reader);
 static void play_end(struct play_reader *reader);
@@ -97,7 +97,7 @@ mu_player_release(
 /*
  * Opens a song and plays it from its start.  Returns 0, or an errno
  * value: ENODEV without sound, ENOTSUP when it has no sound the add-in
- * decodes (player->problem then says why, VP_CODEC_*), or the file's.
+ * decodes (player->problem then says why, MEDIA_PROBLEM_*), or the file's.
  */
 int
 mu_player_open(
@@ -131,7 +131,7 @@ mu_player_open(
 	/* What is known of it, playing from its start. */
 	(void)pthread_mutex_lock(&player->lock);
 	player->duration = 0.0;
-	length_us = mf_duration_us(reader->file);
+	length_us = media_file_duration_us(reader->file);
 	if (length_us > 0)
 		player->duration = (double)length_us / 1000000.0;
 	player->state = MU_PLAYING;
@@ -337,7 +337,7 @@ play_run(
 {
 	struct play_reader *reader;
 	struct mu_player *player;
-	struct mf_packet packet;
+	struct media_packet packet;
 	int status;
 	int stop;
 
@@ -354,7 +354,7 @@ play_run(
 			continue;
 
 		/* The next packet; at the end of the file the song ends when its sound is played out. */
-		status = mf_read(reader->file, &packet);
+		status = media_file_read(reader->file, &packet);
 		if (status == ENODATA) {
 			play_end(reader);
 			continue;
@@ -384,34 +384,34 @@ play_reader_open(
 	struct play_reader *reader,
 	const char *path)
 {
-	const struct mf_track *track;
+	const struct media_track *track;
 	unsigned count;
 	unsigned index;
 	int status;
 
 	/* The container. */
-	status = mf_open(path, &reader->file);
+	status = media_file_open(path, &reader->file);
 	if (status != 0)
 		return status;
 
 	/* The first sound track with a decoder. */
 	status = ENOENT;
-	count = mf_track_count(reader->file);
+	count = media_file_track_count(reader->file);
 	for (index = 0; index < count; index++) {
 		/* A sound track. */
-		track = mf_track(reader->file, index);
-		if (track == NULL || track->kind != MF_TRACK_AUDIO)
+		track = media_file_track(reader->file, index);
+		if (track == NULL || track->kind != MEDIA_TRACK_AUDIO)
 			continue;
 
 		/* Its decoder; the add-in missing ends the search. */
-		status = vp_decoder_open(track, &reader->decoder);
+		status = media_decoder_open(track, &reader->decoder);
 		if (status == 0) {
 			reader->track = index;
 			break;
 		}
 
 		/* Without the add-in no other track decodes either. */
-		if (status == VP_CODEC_MISSING || status == VP_CODEC_VERSION)
+		if (status == MEDIA_PROBLEM_MISSING || status == MEDIA_PROBLEM_VERSION)
 			break;
 	}
 
@@ -424,8 +424,8 @@ play_reader_open(
 	}
 
 	/* Succeeded: the log line the tests read. */
-	mu_log("PLAY open codec=%s container=%s duration_ms=%lld", vp_decoder_name(reader->decoder),
-	    mf_format_name(reader->file), (long long)(mf_duration_us(reader->file) / 1000));
+	mu_log("PLAY open codec=%s container=%s duration_ms=%lld", media_decoder_name(reader->decoder),
+	    media_file_format_name(reader->file), (long long)(media_file_duration_us(reader->file) / 1000));
 	return 0;
 }
 
@@ -435,10 +435,10 @@ play_reader_close(
 	struct play_reader *reader)
 {
 	/* The decoder and the file, when they were opened. */
-	vp_decoder_close(reader->decoder);
+	media_decoder_close(reader->decoder);
 	reader->decoder = NULL;
 	if (reader->file != NULL)
-		mf_close(reader->file);
+		media_file_close(reader->file);
 	reader->file = NULL;
 }
 
@@ -449,7 +449,7 @@ play_reader_close(
 static int
 play_feed(
 	struct play_reader *reader,
-	const struct mf_packet *packet)
+	const struct media_packet *packet)
 {
 	int64_t time_us;
 	int received;
@@ -459,13 +459,13 @@ play_feed(
 	/* Sent; a full decoder gives its sound first, then takes the packet. */
 	status = 0;
 	for (tries = 0; tries < 2; tries++) {
-		status = vp_decoder_send(reader->decoder, packet);
+		status = media_decoder_send(reader->decoder, packet);
 		if (status != EAGAIN)
 			break;
 
 		/* What it holds, written. */
 		for (;;) {
-			received = vp_decoder_receive(reader->decoder, &time_us);
+			received = media_decoder_receive(reader->decoder, &time_us);
 			if (!received)
 				break;
 			status = play_sound(reader, (double)time_us / 1000000.0);
@@ -489,7 +489,7 @@ play_feed(
 
 	/* What comes out of it. */
 	for (;;) {
-		received = vp_decoder_receive(reader->decoder, &time_us);
+		received = media_decoder_receive(reader->decoder, &time_us);
 		if (!received)
 			return 0;
 		status = play_sound(reader, (double)time_us / 1000000.0);
@@ -516,7 +516,7 @@ play_sound(
 		return 0;
 
 	/* Converted. */
-	converted = vp_decoder_sound(reader->decoder, reader->samples, PLAY_FRAMES, player->audio.rate);
+	converted = media_decoder_sound(reader->decoder, reader->samples, PLAY_FRAMES, player->audio.rate);
 	if (converted == 0U)
 		return 0;
 
@@ -567,8 +567,8 @@ play_seek(
 		return 0;
 
 	/* The file before it, the decoder and the sound emptied. */
-	(void)mf_seek(reader->file, (int64_t)(seconds * 1000000.0));
-	vp_decoder_flush(reader->decoder);
+	(void)media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
+	media_decoder_flush(reader->decoder);
 	(void)vp_audio_flush(&player->audio);
 
 	/* What decodes before the time sought is passed over. */
