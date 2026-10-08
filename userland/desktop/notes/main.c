@@ -3877,8 +3877,9 @@ app_place_image(
 	unsigned status;
 	int error;
 
-	/* In the chosen object's place. */
+	/* In the chosen object's place (the state empty until the object's is read). */
 	if (purpose == MAIN_CHOOSE_REPLACE) {
+		memset(&state, 0, sizeof(state));
 		error = app_selected_state(app, &state);
 		state.flags |= NOTES_EDIT_IMAGE;
 		state.image = image;

@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p002 -->
 # ws189-p002: libkeiland と compositor — 画像の型、受け入れの印、icon、dock の spring-loaded、画面をまたぐ、複数の data device
 
-Status: in-progress（q892、P1、2026-10-08: 実装・build・host 試験まで。QEMU の AAT は T1 に依頼（Q1 経由）、結果待ち）
+Status: test-wait（T1-433、2026-10-08 Q1 が依頼。実装・build・host 試験は済み）
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1、2026-10-08）

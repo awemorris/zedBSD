@@ -23,6 +23,7 @@
  */
 
 #include "window.h"
+#include "../picture/png-write.h"
 
 #include "userland/desktop/paths.h"
 
@@ -49,6 +50,10 @@
 
 /* The application's identity in the compositor and the recent files. */
 #define MAIN_APPLICATION	"pdfviewer"
+
+/* An image dragged out of the window: drawn at twice the page's points, its longer side at most this (ws189-p003). */
+#define MAIN_DRAG_SCALE		2.0
+#define MAIN_DRAG_SIDE		2048.0
 
 /*
  * What the command line asked for.
@@ -158,6 +163,8 @@ static void main_print(void);
 static void main_print_follow(void);
 static void main_appearance_changed(void);
 static void main_accent(void);
+static void main_drag(void);
+static int main_drag_image_pixels(uint32_t **pixels, int *width, int *height);
 
 /*
  * Runs PDF Viewer.
@@ -519,6 +526,10 @@ main_loop(
 			main_app.want_find_focus = 0;
 			pv_titlebar_focus_find(&main_titlebar);
 		}
+
+		/* A drag out of the window the view asked for: the selection's words or an image (ws189-p003). */
+		if (main_app.drag_request != PV_DRAG_NONE)
+			main_drag();
 
 		/* The words copied, on the clipboard. */
 		if (main_app.copy_text != NULL) {
@@ -1099,4 +1110,163 @@ main_print_follow(void)
 		else
 			pv_app_message(&main_app, "The printer could not print the document.", 5000U);
 	}
+}
+
+/*
+ * Starts the drag out of the window the view asked for (ws189-p003): the
+ * selection's words as text, or the image under a press held still as a
+ * picture (the page drawn within its corners, a PNG), with the picture
+ * under the pointer.  The press is the drag's from here.
+ */
+static void
+main_drag(void)
+{
+	struct kl_drag_data data;
+	struct kl_drag_icon icon;
+	unsigned char *png;
+	uint32_t *pixels;
+	char *text;
+	size_t length;
+	size_t size;
+	uint32_t serial;
+	int request;
+	int width;
+	int height;
+	int error;
+
+	/* What was asked, once. */
+	request = main_app.drag_request;
+	main_app.drag_request = PV_DRAG_NONE;
+	serial = kl_window_press_serial(main_window.kui);
+
+	/* The words: the selection's text, taken from the copy (not the clipboard). */
+	if (request == PV_DRAG_TEXT) {
+		pv_select_copy(&main_app);
+		text = main_app.copy_text;
+		length = main_app.copy_length;
+		main_app.copy_text = NULL;
+		if (text == NULL)
+			return;
+		error = kl_window_drag_text(main_window.kui, text, length, serial);
+		free(text);
+		pv_log("DND drag text bytes=%lu errno=%d", (unsigned long)length, error);
+		return;
+	}
+
+	/* The image: the page drawn within its corners. */
+	error = main_drag_image_pixels(&pixels, &width, &height);
+	if (error != 0) {
+		pv_log("DND drag image failed errno=%d", error);
+		return;
+	}
+
+	/* The drag, the picture under the pointer at its middle; its PNG filled in after it starts. */
+	data.type = "image/png";
+	data.data = NULL;
+	data.length = 0;
+	icon.pixels = pixels;
+	icon.width = width;
+	icon.height = height;
+	icon.hot_x = width / 2;
+	icon.hot_y = height / 2;
+	error = kl_window_start_drag_icon(main_window.kui, &data, 1U, KL_DND_COPY, serial, &icon);
+	if (error != 0) {
+		free(pixels);
+		pv_log("DND drag image failed errno=%d", error);
+		return;
+	}
+
+	/* The PNG. */
+	png = NULL;
+	size = 0;
+	error = kl_picture_png(pixels, width, height, (size_t)width, &png, &size);
+	if (error == 0)
+		error = kl_window_drag_fill(main_window.kui, "image/png", png, size);
+	free(png);
+	free(pixels);
+
+	/* The log line the tests read. */
+	pv_log("DND drag image page=%lu size=%dx%d bytes=%lu errno=%d", (unsigned long)main_app.drag_page, width, height, (unsigned long)size, error);
+}
+
+/*
+ * Draws the part of the page within the dragged image's corners on white:
+ * at MAIN_DRAG_SCALE, its longer side at most MAIN_DRAG_SIDE.  Returns 0
+ * with the pixels (the caller frees them), or an errno value.
+ */
+static int
+main_drag_image_pixels(
+	uint32_t **pixels,
+	int *width,
+	int *height)
+{
+	struct pdf_display_list *list;
+	double left;
+	double top;
+	double right;
+	double bottom;
+	double scale;
+	size_t count;
+	size_t index;
+	unsigned corner;
+	int error;
+
+	/* The corners' bounds on the page. */
+	*pixels = NULL;
+	left = main_app.drag_quad[0];
+	right = left;
+	top = main_app.drag_quad[1];
+	bottom = top;
+	for (corner = 1U; corner < 4U; corner++) {
+		if (main_app.drag_quad[corner * 2U] < left)
+			left = main_app.drag_quad[corner * 2U];
+		if (main_app.drag_quad[corner * 2U] > right)
+			right = main_app.drag_quad[corner * 2U];
+		if (main_app.drag_quad[corner * 2U + 1U] < top)
+			top = main_app.drag_quad[corner * 2U + 1U];
+		if (main_app.drag_quad[corner * 2U + 1U] > bottom)
+			bottom = main_app.drag_quad[corner * 2U + 1U];
+	}
+
+	/* An image too small to draw is none. */
+	if (right - left < 1.0 || bottom - top < 1.0)
+		return EINVAL;
+
+	/* The scale: twice the points, the longer side within the limit. */
+	scale = MAIN_DRAG_SCALE;
+	if ((right - left) * scale > MAIN_DRAG_SIDE)
+		scale = MAIN_DRAG_SIDE / (right - left);
+	if ((bottom - top) * scale > MAIN_DRAG_SIDE)
+		scale = MAIN_DRAG_SIDE / (bottom - top);
+	*width = (int)((right - left) * scale + 0.5);
+	*height = (int)((bottom - top) * scale + 0.5);
+	if (*width < 1)
+		*width = 1;
+	if (*height < 1)
+		*height = 1;
+
+	/* White pixels to draw on. */
+	count = (size_t)*width * (size_t)*height;
+	*pixels = malloc(count * sizeof(**pixels));
+	if (*pixels == NULL)
+		return ENOMEM;
+	for (index = 0; index < count; index++)
+		(*pixels)[index] = 0xffffffffU;
+
+	/* The page's drawing, moved so that the corners' top left is the pixels' (a page point p lands on p * scale + offset). */
+	error = pdf_page_render(main_app.document.document, main_app.drag_page, &list);
+	if (error == 0) {
+		error = pdf_display_list_rasterize(list, *pixels, (size_t)*width, (size_t)*width, (size_t)*height, scale, -left * scale, -top * scale);
+		pdf_display_list_destroy(list);
+	}
+
+	/* A page that cannot be drawn gives no image. */
+	if (error != 0) {
+		free(*pixels);
+		*pixels = NULL;
+		return error;
+	}
+
+	/* Succeeded: the image's pixels. */
+	return 0;
 }

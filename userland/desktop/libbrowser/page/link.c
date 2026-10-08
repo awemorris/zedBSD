@@ -24,6 +24,8 @@
 /* The deepest element nesting searched for a link (the parser caps nesting too). */
 #define LINK_DEPTH 512
 
+static const struct layout_box *link_image_box(const struct layout_tree *tree, const struct layout_box *box, layout_unit x, layout_unit y, int depth);
+
 static int link_resolve(const char *base, const char *href, struct net_url *target);
 static int link_named(const char *scheme, const char *name);
 static const char *link_file_mime(const char *path);
@@ -583,4 +585,112 @@ link_file_mime(
 
 	/* Unrecognized local formats cannot silently become HTML or XML documents. */
 	return "application/octet-stream";
+}
+
+/*
+ * Finds the image shown at a point of the document (whole pixels, the
+ * scroll included; ws189-p003, a picture dragged out of the browser): its
+ * decoded bitmap (the page's, borrowed while the page lives) and the
+ * absolute URL of its source (empty when its element has no src).
+ * Returns 0, ENOENT when no image is there, or an errno value.
+ */
+int
+page_image_at(
+	struct page *page,
+	int x,
+	int y,
+	const struct img_bitmap **bitmap,
+	struct wb_buffer *source)
+{
+	const struct layout_box *box;
+	const struct dom_attribute *attribute;
+	struct wb_buffer written;
+	struct vm_string *name;
+	int is_element;
+	int error;
+
+	/* Nothing yet; an unlaid page has no image geometry. */
+	*bitmap = NULL;
+	if (!page->laid_out || page->layout.root == NULL)
+		return ENOENT;
+
+	/* The last replaced box with an image under the point (the one drawn on top among those of the flow). */
+	box = link_image_box(&page->layout, page->layout.root, (layout_unit)x * LAYOUT_UNIT, (layout_unit)y * LAYOUT_UNIT, 0);
+	if (box == NULL)
+		return ENOENT;
+	*bitmap = box->image;
+
+	/* Its element's src, as written. */
+	is_element = 0;
+	if (box->node != NULL && box->node->type == DOM_ELEMENT)
+		is_element = 1;
+	if (!is_element)
+		return 0;
+	name = vm_atom_from_ascii(page->heap, "src");
+	if (name == NULL)
+		return ENOMEM;
+	attribute = dom_element_find_attribute((const struct dom_element *)box->node, DOM_NS_NONE, name);
+	if (attribute == NULL)
+		return 0;
+	wb_buffer_init(&written);
+	error = vm_string_to_utf8(attribute->value, &written);
+	if (error != 0) {
+		wb_buffer_release(&written);
+		return error;
+	}
+
+	/* Made absolute against the page's location (as written when it cannot be). */
+	error = EINVAL;
+	if (page->base != NULL)
+		error = page_resolve_location(page->base, wb_buffer_string(&written), source);
+	if (error != 0)
+		error = wb_buffer_append(source, wb_buffer_string(&written), strlen(wb_buffer_string(&written)));
+	wb_buffer_release(&written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the image and its source. */
+	return 0;
+}
+
+/* Searches a box and its descendants for the last replaced box with an image whose border box holds a point. */
+static const struct layout_box *
+link_image_box(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	layout_unit x,
+	layout_unit y,
+	int depth)
+{
+	const struct layout_box *child;
+	const struct layout_box *found;
+	const struct layout_box *deeper;
+	struct layout_rect rect;
+	int bounded;
+
+	/* Stops at the depth the layout stops at. */
+	if (depth > LAYOUT_DEPTH_MAX)
+		return NULL;
+
+	/* The box itself, when it is an image with its node's bounds around the point. */
+	found = NULL;
+	if (box->replaced && box->image != NULL && box->node != NULL) {
+		bounded = layout_node_bounds(tree, box->node, &rect);
+		if (bounded &&
+		    x >= rect.x &&
+		    y >= rect.y &&
+		    x < rect.x + rect.width &&
+		    y < rect.y + rect.height)
+			found = box;
+	}
+
+	/* Its children, a later one over an earlier one. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		deeper = link_image_box(tree, child, x, y, depth + 1);
+		if (deeper != NULL)
+			found = deeper;
+	}
+
+	/* Succeeded: the image found, or NULL. */
+	return found;
 }
