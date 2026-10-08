@@ -7,3 +7,5 @@
 include plan/tools/files/config-amd64-files.mk
 CONFIG_BT_TEST_LOOPBACK := y
 ZEDBSD_USER_PROGRAMS += bt-probe runas bluetoothd bt
+# ws143-p005: the evdev probe of the HID input glue's checks (hid-usb-p005.sh).
+ZEDBSD_USER_PROGRAMS += evdev-probe

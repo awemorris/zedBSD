@@ -92,7 +92,8 @@ ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
 ARM64_USB_SOURCES += src/drivers/pci/pci-xhci.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
-ARM64_USB_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c
+ARM64_USB_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
+	src/drivers/generic/hid-input.c
 endif
 ifeq ($(CONFIG_DRIVER_USB_HUB),y)
 ARM64_USB_SOURCES += src/drivers/usb/usb-hub.c

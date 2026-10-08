@@ -11,14 +11,12 @@
  * USB Human Interface Device input driver
  */
 
-#include <drivers/generic/hid-digitizer.h>
+#include <drivers/generic/hid-input.h>
 #include <drivers/generic/hidraw.h>
-#include <drivers/generic/hid-touch.h>
 #include <drivers/generic/hid-report.h>
 #include <drivers/usb/usb-hid.h>
 #include <drivers/usb/usb.h>
 #include <kern/clock.h>
-#include <kern/input-device.h>
 #include <kern/lock.h>
 #include <kern/sched.h>
 #include <kern/thread.h>
@@ -49,54 +47,33 @@
 #define USB_HID_WORK_ARM		(1U << 0)
 #define USB_HID_WORK_COMPLETE		(1U << 1)
 
-struct usb_hid_report_state {
-	uint8_t id;
-	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
-};
-
 struct usb_hid {
 	struct drv_usb_interface *interface;
 	struct drv_usb_device *device;
 	struct drv_usb_endpoint *endpoint;
 	struct drv_usb_urb *urb;
-	struct hid_report_layout *layout;
-	struct input_device *input;
+	/*
+	 * The devices the report descriptor declares and the events of its
+	 * reports (the HID input glue, ws143-p005), NULL for a raw interface.
+	 */
+	struct hid_input *hidinput;
 	struct thread *worker;
 	struct spinlock lock;
 	struct usb_hid *pending_next;
 	uint8_t *buffer;
 	size_t buffer_size;
-	struct input_capability capabilities[HID_REPORT_FIELD_COUNT_MAX + 1U];
-	struct input_abs_axis absolute_axes[ABS_MAX + 1U];
-	struct usb_hid_report_state reports[HID_REPORT_ID_COUNT_MAX];
-	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
-	/* What the pen state machine has already told readers (pen devices only). */
-	struct hid_digitizer_state digitizer;
-	unsigned pen;
-	/*
-	 * The touch screen, published as a device of its own beside the rest
-	 * of the interface (touch screens only): its device, what its state
-	 * machine has told readers, and what it declares.
-	 */
-	struct input_device *touch_input;
-	struct hid_touch_state touch;
-	struct hid_touch_description touch_description;
-	unsigned touch_present;
+	/* The name and the place of the touch screen's or pad's device of its own. */
 	char touch_name[USB_HID_TEXT_MAX];
 	char touch_physical_path[USB_HID_TEXT_MAX];
-	size_t capability_count;
-	size_t absolute_axis_count;
-	size_t report_count;
 	unsigned work_pending;
 	/*
 	 * When the last transfer finished (CLOCK_MONOTONIC milliseconds): the
-	 * completion sets it under the lock, and the worker takes it into
-	 * report_milliseconds, the time of every event of the report it
-	 * publishes.  The one URB is not submitted again before the worker has
-	 * published its report, so the time always belongs to the buffer.
+	 * completion sets it under the lock, and the worker takes it for the
+	 * time of every event of the report it publishes.  The one URB is not
+	 * submitted again before the worker has published its report, so the
+	 * time always belongs to the buffer.
 	 */
 	uint64_t completed_milliseconds;
-	uint64_t report_milliseconds;
 	unsigned stopping;
 	unsigned submit_active;
 	unsigned activating;
@@ -142,13 +119,11 @@ static int usb_hid_endpoint_capacity(struct drv_usb_interface *interface, struct
 static int usb_hid_find_endpoint(struct drv_usb_interface *interface, struct drv_usb_endpoint **result);
 static int usb_hid_fetch_layout(struct usb_hid *hid);
 static int usb_hid_set_report_protocol(struct usb_hid *hid);
-static int usb_hid_has_capability(const struct usb_hid *hid, uint16_t type, uint16_t code);
 static void usb_hid_identity(struct usb_hid *hid);
 static void usb_hid_completion(struct drv_usb_urb *urb, void *argument);
 static int usb_hid_begin_submit(struct usb_hid *hid);
 static void usb_hid_end_submit(struct usb_hid *hid);
 static int usb_hid_arm(struct usb_hid *hid);
-static struct usb_hid_report_state * usb_hid_report_state(struct usb_hid *hid, uint8_t report_id);
 static void usb_hid_publish_report(struct usb_hid *hid, const uint8_t *buffer, size_t length);
 static unsigned usb_hid_take_work(struct usb_hid *hid, int *stopping);
 static void usb_hid_unpublish(struct usb_hid *hid);
@@ -157,9 +132,9 @@ static void usb_hid_worker(void *argument);
 static int usb_hid_join_worker(struct usb_hid *hid);
 static void usb_hid_close_admission(struct usb_hid *hid);
 static int usb_hid_activate(struct usb_hid *hid, int activation_claimed);
+static int usb_hid_activate_start(struct usb_hid *hid);
+static void usb_hid_activate_undo(struct usb_hid *hid, struct thread *worker);
 static void usb_hid_pending_remove(struct usb_hid *hid);
-static void usb_hid_publish_pen_report(struct usb_hid *hid, const struct hid_report_input *decoded);
-static void usb_hid_publish_touch_report(struct usb_hid *hid, const struct hid_report_input *decoded);
 static int usb_hid_raw_prepare(struct usb_hid *hid);
 static int usb_hid_raw_publish(struct usb_hid *hid);
 static int usb_hid_raw_output(void *context, const uint8_t *report, size_t length);
@@ -648,40 +623,41 @@ usb_hid_find_endpoint(
 	return 0;
 }
 
-/* Reads the report descriptor and parses it into a layout. */
+/* Reads the report descriptor and describes the devices it declares. */
 static int
 usb_hid_fetch_layout(
 	struct usb_hid *hid)
 {
-	struct hid_report_report_info report;
-	struct hid_report_layout_info info;
-	struct hid_report_touch_info touch_info;
 	uint8_t *descriptor;
-	size_t descriptor_length, actual = 0, index, capacity;
-	size_t maximum_report = 0;
+	size_t descriptor_length;
+	size_t actual;
+	size_t capacity;
+	size_t maximum_report;
 	int raw;
 	int error;
 
-	/* Checks the operation status. */
-	error = usb_hid_report_descriptor_length(hid->interface,
-						 &descriptor_length);
+	/* How long the report descriptor is. */
+	error = usb_hid_report_descriptor_length(hid->interface, &descriptor_length);
 	if (error != 0)
 		return error;
 
-	/* Handles the descriptor availability. */
+	/* Room for the descriptor. */
 	descriptor = kern_malloc(descriptor_length);
 	if (descriptor == NULL)
 		return ENOMEM;
 
-	/* Checks the operation status. */
+	/* The descriptor, read whole from the interface. */
+	actual = 0;
 	error = drv_usb_control(
 		hid->device,
-		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD |
-			DRV_USB_RECIP_INTERFACE,
+		DRV_USB_DIR_IN | DRV_USB_REQUEST_STANDARD | DRV_USB_RECIP_INTERFACE,
 		USB_REQUEST_GET_DESCRIPTOR,
 		(uint16_t)(USB_HID_REPORT_DESCRIPTOR << 8U),
-		(uint16_t)drv_usb_interface_number(hid->interface), descriptor,
-		descriptor_length, USB_HID_CONTROL_TIMEOUT_MS, &actual);
+		(uint16_t)drv_usb_interface_number(hid->interface),
+		descriptor,
+		descriptor_length,
+		USB_HID_CONTROL_TIMEOUT_MS,
+		&actual);
 	if (error == 0 && actual != descriptor_length)
 		error = EIO;
 
@@ -702,94 +678,27 @@ usb_hid_fetch_layout(
 		}
 	}
 
-	/* Any other interface's descriptor is parsed for its input. */
-	if (error == 0) {
-		error = drv_hid_report_layout_parse(
-			descriptor, descriptor_length, &hid->layout);
-	}
-
+	/* Any other interface's descriptor is parsed for its input, and is no longer needed. */
+	if (error == 0)
+		error = drv_hid_input_prepare(descriptor, descriptor_length, &hid->hidinput);
 	kern_free(descriptor);
 
-	/* Checks the operation status. */
+	/* A descriptor that could not be read or described. */
 	if (error != 0)
 		return error;
 
-	/* Checks the operation status. */
-	error = drv_hid_report_layout_get_info(hid->layout, &info);
-	if (error != 0 || info.report_count == 0U ||
-	    info.report_count > HID_REPORT_ID_COUNT_MAX ||
-	    info.capability_count > HID_REPORT_FIELD_COUNT_MAX + 1U ||
-	    info.absolute_axis_count > ABS_MAX + 1U) {
-		/* Returns the computed result. */
-		return error != 0 ? error : EINVAL;
-	}
-	hid->report_count = info.report_count;
-	hid->capability_count = info.capability_count;
-	hid->absolute_axis_count = info.absolute_axis_count;
-
-	/* A pen device starts with no tool in range. */
-	hid->pen = info.pen;
-	drv_hid_digitizer_reset(&hid->digitizer);
-
-	/* A touch screen is described for a device of its own, with no finger down. */
-	error = drv_hid_report_layout_get_touch(hid->layout, &touch_info);
-	if (error == 0) {
-		error = drv_hid_touch_describe(&touch_info, &hid->touch_description);
-		if (error == 0) {
-			hid->touch_present = 1U;
-			drv_hid_touch_reset(&hid->touch, hid->touch_description.slots);
-			drv_hid_touch_set_scan_time(&hid->touch, &touch_info);
-			drv_hid_touch_set_pad(&hid->touch, &touch_info);
-		}
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < info.report_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_report(hid->layout, index,
-							 &report);
-		if (error != 0 || report.minimum_size == 0U ||
-		    report.minimum_size > HID_REPORT_BITS_MAX / 8U + 1U) {
-			/* Returns the computed result. */
-			return error != 0 ? error : EINVAL;
-		}
-		hid->reports[index].id = report.report_id;
-
-		/* Handles the report condition. */
-		if (report.minimum_size > maximum_report)
-			maximum_report = report.minimum_size;
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < info.capability_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_capability(
-			hid->layout, index, &hid->capabilities[index]);
-		if (error != 0)
-			return error;
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < info.absolute_axis_count; index++) {
-		/* Checks the operation status. */
-		error = drv_hid_report_layout_get_absolute_axis(
-			hid->layout, index, &hid->absolute_axes[index]);
-		if (error != 0)
-			return error;
-	}
-
-	/* Checks the operation status. */
-	error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint,
-					  &capacity);
+	/* The interrupt endpoint's room for one transfer. */
+	error = usb_hid_endpoint_capacity(hid->interface, hid->endpoint, &capacity);
 	if (error != 0)
 		return error;
 
-	/* Handles the maximum report condition. */
+	/* The longest report must fit one transfer, which is the buffer's size. */
+	maximum_report = drv_hid_input_report_max(hid->hidinput);
 	if (maximum_report > capacity)
 		return EOVERFLOW;
 	hid->buffer_size = maximum_report;
 
-	/* Succeeded. */
+	/* Succeeded: the devices are described and the buffer's size is known. */
 	return 0;
 }
 
@@ -824,91 +733,92 @@ usb_hid_set_report_protocol(
 	return error;
 }
 
-/* Asks whether a layout reports one particular thing. */
-static int
-usb_hid_has_capability(
-	const struct usb_hid *hid,
-	uint16_t type,
-	uint16_t code)
-{
-	size_t index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < hid->capability_count; index++) {
-		/* Handles the hid condition. */
-		if (hid->capabilities[index].type == type &&
-		    hid->capabilities[index].code == code) {
-			/* Reports operation failure. */
-			return 1;
-		}
-	}
-
-	/* Succeeded. */
-	return 0;
-}
-
 /* Builds the name this device is presented to the kernel under. */
 static void
 usb_hid_identity(
 	struct usb_hid *hid)
 {
 	const struct drv_usb_device_descriptor *descriptor;
-	unsigned bus, address, port, interface_number;
+	unsigned bus;
+	unsigned address;
+	unsigned port;
+	unsigned interface_number;
+	unsigned kind;
 	int error;
 
-	/* Renders the topology as the physical path of the device. */
+	/* Renders the topology as the physical path of the device and of its touch device. */
 	descriptor = drv_usb_device_descriptor(hid->device);
 	bus = drv_usb_bus_number(drv_usb_device_bus(hid->device));
 	address = drv_usb_device_address(hid->device);
 	port = drv_usb_device_port(hid->device);
 	interface_number = drv_usb_interface_number(hid->interface);
-	(void)kern_snprintf(hid->physical_path, sizeof(hid->physical_path),
-		       "usb%u/port%u/device%u/interface%u", bus, port, address,
-		       interface_number);
+	(void)kern_snprintf(hid->physical_path,
+			    sizeof(hid->physical_path),
+			    "usb%u/port%u/device%u/interface%u",
+			    bus,
+			    port,
+			    address,
+			    interface_number);
 	(void)kern_snprintf(hid->touch_physical_path,
 			    sizeof(hid->touch_physical_path),
-			    "usb%u/port%u/device%u/interface%u/touch", bus, port,
-			    address, interface_number);
-	hid->unique_id[0] = '\0';
+			    "usb%u/port%u/device%u/interface%u/touch",
+			    bus,
+			    port,
+			    address,
+			    interface_number);
 
-	/* Checks the file descriptor. */
+	/* The serial number is the unique ID, when the device has one. */
+	hid->unique_id[0] = '\0';
 	if (descriptor->serial_string != 0U) {
-		(void)drv_usb_device_get_string(
-			hid->device, descriptor->serial_string, 0,
-			hid->unique_id, sizeof(hid->unique_id));
+		(void)drv_usb_device_get_string(hid->device,
+						descriptor->serial_string,
+						0,
+						hid->unique_id,
+						sizeof(hid->unique_id));
 	}
 
+	/* The product's name, when the device has one. */
 	hid->name[0] = '\0';
+	error = ENOENT;
+	if (descriptor->product_string != 0U) {
+		error = drv_usb_device_get_string(hid->device,
+						  descriptor->product_string,
+						  0,
+						  hid->name,
+						  sizeof(hid->name));
+	}
 
-	/* Checks the operation status. */
-	error = descriptor->product_string == 0U
-			? ENOENT
-			: drv_usb_device_get_string(
-				  hid->device, descriptor->product_string, 0,
-				  hid->name, sizeof(hid->name));
+	/* A named product's touch screen is the product's touch screen. */
 	if (error == 0 && hid->name[0] != '\0') {
-		/* The touch screen is the product's touch screen. */
-		(void)kern_snprintf(hid->touch_name, sizeof(hid->touch_name),
-				    "%s Touchscreen", hid->name);
+		(void)kern_snprintf(hid->touch_name, sizeof(hid->touch_name), "%s Touchscreen", hid->name);
 		return;
 	}
 
 	/* A touch screen without a product name. */
-	(void)kern_snprintf(hid->touch_name, sizeof(hid->touch_name),
-			    "USB HID touchscreen");
+	(void)kern_snprintf(hid->touch_name, sizeof(hid->touch_name), "USB HID touchscreen");
 
-	/* Names a device with a pen collection after its pen, and a raw one after what it is. */
-	if (hid->raw)
+	/* A raw interface is named after what it is. */
+	if (hid->raw) {
 		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB FIDO authenticator");
-	else if (hid->pen != HID_REPORT_PEN_NONE)
+		return;
+	}
+
+	/* Any other device without a name is named after what it chiefly is. */
+	kind = drv_hid_input_kind(hid->hidinput);
+	switch (kind) {
+	case HID_INPUT_KIND_PEN:
 		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID pen");
-	else if (usb_hid_has_capability(hid, EV_ABS, ABS_X))
+		break;
+	case HID_INPUT_KIND_TABLET:
 		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID tablet");
-	else if (usb_hid_has_capability(hid, EV_REL, REL_X))
+		break;
+	case HID_INPUT_KIND_MOUSE:
 		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID mouse");
-	else
-		(void)kern_snprintf(hid->name, sizeof(hid->name),
-			       "USB HID keyboard");
+		break;
+	default:
+		(void)kern_snprintf(hid->name, sizeof(hid->name), "USB HID keyboard");
+		break;
+	}
 }
 
 /* Takes one finished interrupt transfer. */
@@ -1007,47 +917,14 @@ usb_hid_arm(
 	return 0;
 }
 
-/* Reports where one report stands in its handling. */
-static struct usb_hid_report_state *
-usb_hid_report_state(
-	struct usb_hid *hid,
-	uint8_t report_id)
-{
-	size_t index;
-
-	/* Process each remaining element. */
-	for (index = 0; index < hid->report_count; index++) {
-		/* Handles the hid condition. */
-		if (hid->reports[index].id == report_id)
-			return &hid->reports[index];
-	}
-
-	/* Reports that no result is available. */
-	return NULL;
-}
-
-/* Publishes one decoded report to the input subsystem. */
+/* Hands one received report on: a raw interface's to hidraw, any other's to the input glue. */
 static void
 usb_hid_publish_report(
 	struct usb_hid *hid,
 	const uint8_t *buffer,
 	size_t length)
 {
-	const struct hid_report_value *value_local;
-	const struct hid_report_value *value_local1;
-	size_t word;
-	unsigned long bit;
-	int old_value;
-	int new_value;
-	struct hid_report_input decoded;
-	struct usb_hid_report_state *state;
-	unsigned long current[INPUT_BIT_WORDS(KEY_MAX)];
-	unsigned long aggregate[INPUT_BIT_WORDS(KEY_MAX)];
-	size_t index;
-	unsigned code;
-	int is_pen;
-	int is_touch;
-	int error, emitted = 0;
+	uint64_t milliseconds;
 	unsigned long irq;
 
 	/* A raw interface's report goes to its readers as it came. */
@@ -1059,109 +936,12 @@ usb_hid_publish_report(
 	/* Every event of the report is stamped with the time its transfer finished. */
 	irq = spin_lock_irqsave(&hid->lock);
 
-	hid->report_milliseconds = hid->completed_milliseconds;
+	milliseconds = hid->completed_milliseconds;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
-	/* Checks the operation status. */
-	error = drv_hid_report_decode(hid->layout, buffer, length, &decoded);
-	if (error != 0) {
-		/* Checks the operation status. */
-		if (hid->error_markers++ < USB_HID_ERROR_MARKERS) {
-			kern_logf("usb-hid: malformed input usb%u device=%u "
-				   "interface=%u length=%u error=%d\n",
-				   drv_usb_bus_number(
-					   drv_usb_device_bus(hid->device)),
-				   drv_usb_device_address(hid->device),
-				   drv_usb_interface_number(hid->interface),
-				   (unsigned)length, error);
-		}
-
-		/* Returns the computed result. */
-		return;
-	}
-
-	/* A touch report goes through the touch state machine to the touch screen's device. */
-	is_touch = drv_hid_touch_report_is_touch(&decoded);
-	if (is_touch) {
-		usb_hid_publish_touch_report(hid, &decoded);
-		return;
-	}
-
-	/* A pen report goes through the pen state machine instead. */
-	is_pen = drv_hid_digitizer_report_is_pen(&decoded);
-	if (is_pen) {
-		usb_hid_publish_pen_report(hid, &decoded);
-		return;
-	}
-
-	/* Handles the state availability. */
-	state = usb_hid_report_state(hid, decoded.report_id);
-	if (state == NULL)
-		return;
-	kern_memset(current, 0, sizeof(current));
-	/* Process each remaining element. */
-	for (index = 0; index < decoded.value_count; index++) {
-		/* Handles the value local condition. */
-		value_local = &decoded.values[index];
-		if (value_local->type == EV_KEY &&
-		    value_local->code <= KEY_MAX) {
-			current[value_local->code / INPUT_BITS_PER_WORD] |=
-				1UL
-				<< (value_local->code % INPUT_BITS_PER_WORD);
-		}
-	}
-
-	/* Checks the operation status. */
-	if (!decoded.keyboard_error) {
-		kern_memcpy(state->held, current, sizeof(state->held));
-		kern_memset(aggregate, 0, sizeof(aggregate));
-		/* Process each remaining element. */
-		for (index = 0; index < hid->report_count; index++) {
-			/* Process each element required by the operation. */
-			for (word = 0; word < INPUT_BIT_WORDS(KEY_MAX);
-			     word++) {
-				aggregate[word] |=
-					hid->reports[index].held[word];
-			}
-		}
-
-		/* Process each element required by the operation. */
-		for (code = 0; code <= KEY_MAX; code++) {
-			bit = 1UL << (code % INPUT_BITS_PER_WORD);
-			old_value = (hid->held[code / INPUT_BITS_PER_WORD] &
-				     bit) != 0;
-
-			/* Handles the old value condition. */
-			new_value = (aggregate[code / INPUT_BITS_PER_WORD] &
-				     bit) != 0;
-			if (old_value == new_value)
-				continue;
-			drv_input_device_emit_at(hid->input, EV_KEY,
-						 (uint16_t)code, new_value,
-						 hid->report_milliseconds);
-			emitted = 1;
-		}
-
-		kern_memcpy(hid->held, aggregate, sizeof(hid->held));
-	}
-
-	/* Process each remaining element. */
-	for (index = 0; index < decoded.value_count; index++) {
-		/* Handles the value local1 condition. */
-		value_local1 = &decoded.values[index];
-		if (value_local1->type == EV_KEY ||
-		    (value_local1->type == EV_REL && value_local1->value == 0))
-			continue;
-		drv_input_device_emit_at(hid->input, value_local1->type,
-					 value_local1->code, value_local1->value,
-					 hid->report_milliseconds);
-		emitted = 1;
-	}
-
-	/* Handles the emitted condition. */
-	if (emitted)
-		drv_input_device_emit_at(hid->input, EV_SYN, SYN_REPORT, 0, hid->report_milliseconds);
+	/* The glue decodes the report and tells the devices what changed. */
+	drv_hid_input_report(hid->hidinput, buffer, length, milliseconds);
 }
 
 /* Takes whatever the worker thread has to do next. */
@@ -1187,19 +967,14 @@ static void
 usb_hid_unpublish(
 	struct usb_hid *hid)
 {
-	struct input_device *input;
-	struct input_device *touch_input;
 	struct drv_hidraw *hidraw;
 	unsigned long irq;
 
+	/* The interface is no longer active, and its raw node is taken. */
 	irq = spin_lock_irqsave(&hid->lock);
 
-	input = hid->input;
-	touch_input = hid->touch_input;
 	hidraw = hid->hidraw;
 	hid->hidraw = NULL;
-	hid->input = NULL;
-	hid->touch_input = NULL;
 	hid->active = 0U;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
@@ -1208,13 +983,9 @@ usb_hid_unpublish(
 	if (hidraw != NULL)
 		drv_hidraw_unregister(hidraw);
 
-	/* Handles the input availability. */
-	if (input != NULL)
-		drv_input_device_unregister(input);
-
-	/* The touch screen's device goes with it. */
-	if (touch_input != NULL)
-		drv_input_device_unregister(touch_input);
+	/* The input devices go, and the input layer releases what they held (a second call finds none). */
+	if (hid->hidinput != NULL)
+		drv_hid_input_unpublish(hid->hidinput);
 }
 
 /* Stops the transfers and the worker this device runs. */
@@ -1428,46 +1199,80 @@ usb_hid_activate(
 	struct usb_hid *hid,
 	int activation_claimed)
 {
+	unsigned long irq;
+	int error;
+
+	/* The activation is claimed here unless the caller already holds the claim. */
+	if (!activation_claimed) {
+		irq = spin_lock_irqsave(&hid->lock);
+
+		/* A stopping, active or activating interface is not activated again. */
+		if (hid->stopping || hid->active || hid->activating) {
+			error = EBUSY;
+			if (hid->active)
+				error = 0;
+			spin_unlock_irqrestore(&hid->lock, irq);
+
+			/* An active interface is already in service; any other is busy. */
+			return error;
+		}
+
+		/* The claim: detach waits for it to be given back. */
+		hid->activating = 1U;
+
+		spin_unlock_irqrestore(&hid->lock, irq);
+	}
+
+	/* The worker, the devices and the first transfer. */
+	error = usb_hid_activate_start(hid);
+
+	/* The claim is given back, whatever happened. */
+	irq = spin_lock_irqsave(&hid->lock);
+
+	hid->activating = 0U;
+
+	spin_unlock_irqrestore(&hid->lock, irq);
+
+	/* Reports why the interface could not be brought into service. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the interface is in service. */
+	return 0;
+}
+/*
+ * Starts an interface whose activation is claimed: makes its worker,
+ * publishes its devices or its raw node, and arms the first transfer.  A
+ * failure leaves nothing published and no worker.
+ */
+static int
+usb_hid_activate_start(
+	struct usb_hid *hid)
+{
 	const struct drv_usb_device_descriptor *usb_descriptor;
-	struct input_device_info info;
+	struct hid_input_identity identity;
 	struct thread *worker;
 	unsigned long irq;
 	int error;
 
-	/* Handles the activation claimed condition. */
-	if (!activation_claimed) {
-		/* Handles the hid condition. */
-		irq = spin_lock_irqsave(&hid->lock);
-		if (hid->stopping || hid->active || hid->activating) {
-			spin_unlock_irqrestore(&hid->lock, irq);
-
-			/* Returns the computed result. */
-			return hid->active ? 0 : EBUSY;
-		}
-
-		hid->activating = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-	}
-
-	/* Checks the operation status. */
-	error = kthread_create(usb_hid_worker, hid, SCHED_PRIORITY_DEFAULT,
-			       &worker);
+	/* The worker that decodes the reports, not started yet. */
+	error = kthread_create(usb_hid_worker, hid, SCHED_PRIORITY_DEFAULT, &worker);
 	if (error != 0)
-		goto out;
+		return error;
 	hid->worker = worker;
+
+	/* How the devices are named, from the interface's identity. */
 	usb_descriptor = drv_usb_device_descriptor(hid->device);
-	kern_memset(&info, 0, sizeof(info));
-	info.name = hid->name;
-	info.physical_path = hid->physical_path;
-	info.unique_id = hid->unique_id;
-	info.id.bustype = BUS_USB;
-	info.id.vendor = usb_descriptor->vendor;
-	info.id.product = usb_descriptor->product;
-	info.id.version = usb_descriptor->device_release;
-	info.capabilities = hid->capabilities;
-	info.capability_count = hid->capability_count;
-	info.absolute_axes = hid->absolute_axes;
-	info.absolute_axis_count = hid->absolute_axis_count;
+	kern_memset(&identity, 0, sizeof(identity));
+	identity.name = hid->name;
+	identity.physical_path = hid->physical_path;
+	identity.unique_id = hid->unique_id;
+	identity.touch_name = hid->touch_name;
+	identity.touch_physical_path = hid->touch_physical_path;
+	identity.id.bustype = BUS_USB;
+	identity.id.vendor = usb_descriptor->vendor;
+	identity.id.product = usb_descriptor->product;
+	identity.id.version = usb_descriptor->device_release;
 
 	/*
 	 * The interface's own device, unless the interface is a touch screen
@@ -1477,34 +1282,13 @@ usb_hid_activate(
 	error = 0;
 	if (hid->raw)
 		error = usb_hid_raw_publish(hid);
-	else if (hid->capability_count > 1U)
-		error = drv_input_device_register(&info, &hid->input);
-
-	/* The touch screen's device beside it, under the same identity. */
-	if (error == 0 && hid->touch_present) {
-		info.name = hid->touch_name;
-		info.physical_path = hid->touch_physical_path;
-		info.capabilities = hid->touch_description.capabilities;
-		info.capability_count = hid->touch_description.capability_count;
-		info.absolute_axes = hid->touch_description.axes;
-		info.absolute_axis_count = hid->touch_description.axis_count;
-		info.properties = hid->touch_description.properties;
-		error = drv_input_device_register(&info, &hid->touch_input);
-	}
-
-	/* An interface with no device has nothing to publish. */
-	if (error == 0 && hid->input == NULL && hid->touch_input == NULL && hid->hidraw == NULL)
-		error = ENODEV;
+	else
+		error = drv_hid_input_publish(hid->hidinput, &identity);
 
 	/* A failed publication takes back what was published and stops the worker. */
 	if (error != 0) {
-		usb_hid_unpublish(hid);
-		irq = spin_lock_irqsave(&hid->lock);
-		hid->stopping = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-		thread_start(worker);
-		(void)usb_hid_join_worker(hid);
-		goto out;
+		usb_hid_activate_undo(hid, worker);
+		return error;
 	}
 
 	/*
@@ -1513,48 +1297,54 @@ usb_hid_activate(
 	 * attachment.  Synchronous completion is safe: its callback only
 	 * records work for the worker which is started below.
 	 */
-
-	/* Checks the operation status. */
 	error = usb_hid_arm(hid);
 	if (error != 0) {
-		usb_hid_unpublish(hid);
-		irq = spin_lock_irqsave(&hid->lock);
-		hid->stopping = 1U;
-		spin_unlock_irqrestore(&hid->lock, irq);
-		thread_start(worker);
-		(void)usb_hid_join_worker(hid);
-		goto out;
+		usb_hid_activate_undo(hid, worker);
+		return error;
 	}
 
+	/* The interface is in service: detach now unpublishes it. */
 	irq = spin_lock_irqsave(&hid->lock);
 
 	hid->active = 1U;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
+	/* The worker takes the reports from now on. */
 	thread_start(worker);
-	kern_logf("usb-hid: event device usb%u device=%u interface=%u "
-		   "endpoint=%02x report-bytes=%u\n",
-		   drv_usb_bus_number(drv_usb_device_bus(hid->device)),
-		   drv_usb_device_address(hid->device),
-		   drv_usb_interface_number(hid->interface),
-		   drv_usb_endpoint_address(hid->endpoint),
-		   (unsigned)hid->buffer_size);
+	kern_logf("usb-hid: event device usb%u device=%u interface=%u endpoint=%02x report-bytes=%u\n",
+		  drv_usb_bus_number(drv_usb_device_bus(hid->device)),
+		  drv_usb_device_address(hid->device),
+		  drv_usb_interface_number(hid->interface),
+		  drv_usb_endpoint_address(hid->endpoint),
+		  (unsigned)hid->buffer_size);
 
-out:
+	/* Succeeded: the interface is in service. */
+	return 0;
+}
+
+/* Takes back a failed activation: what was published goes, and the worker ends unstarted. */
+static void
+usb_hid_activate_undo(
+	struct usb_hid *hid,
+	struct thread *worker)
+{
+	unsigned long irq;
+
+	/* The devices or the raw node go. */
+	usb_hid_unpublish(hid);
+
+	/* The worker is told to stop, started so it can see that, and joined. */
 	irq = spin_lock_irqsave(&hid->lock);
 
-	hid->activating = 0U;
+	hid->stopping = 1U;
 
 	spin_unlock_irqrestore(&hid->lock, irq);
 
-	/* Reports the failure. */
-	if (error != 0)
-		return error;
-
-	/* Succeeded. */
-	return 0;
+	thread_start(worker);
+	(void)usb_hid_join_worker(hid);
 }
+
 
 /* Takes this device off the list of those waiting to activate. */
 static void
@@ -1581,70 +1371,6 @@ usb_hid_pending_remove(
 	}
 
 	spin_unlock_irqrestore(&usb_hid_pending_lock, irq);
-}
-
-/* Publishes one pen report through the pen state machine. */
-static void
-usb_hid_publish_pen_report(
-	struct usb_hid *hid,
-	const struct hid_report_input *decoded)
-{
-	struct hid_digitizer_output output;
-	const struct hid_digitizer_event *event;
-	size_t index;
-	int error;
-
-	/* Turns the switches and axes into ordered tool and contact frames. */
-	error = drv_hid_digitizer_translate(&hid->digitizer, decoded, &output);
-	if (error != 0) {
-		/* Leaves a marker for the first reports that did not fit. */
-		if (hid->error_markers < USB_HID_ERROR_MARKERS) {
-			hid->error_markers++;
-			kern_logf("usb-hid: pen report dropped error=%d\n", error);
-		}
-
-		/* The report is dropped; the next one continues the frames. */
-		return;
-	}
-
-	/* Hands every event of the frames to the input layer in order. */
-	for (index = 0; index < output.event_count; index++) {
-		event = &output.events[index];
-		drv_input_device_emit_at(hid->input, event->type, event->code,
-					 event->value, hid->report_milliseconds);
-	}
-}
-
-/* Publishes one touch report through the touch state machine. */
-static void
-usb_hid_publish_touch_report(
-	struct usb_hid *hid,
-	const struct hid_report_input *decoded)
-{
-	struct hid_touch_output output;
-	const struct hid_touch_event *event;
-	size_t index;
-	int error;
-
-	/* Turns the fingers into protocol B frames, at the time the report arrived. */
-	error = drv_hid_touch_translate_at(&hid->touch, decoded, hid->report_milliseconds, &output);
-	if (error != 0) {
-		/* Leaves a marker for the first reports that did not fit. */
-		if (hid->error_markers < USB_HID_ERROR_MARKERS) {
-			hid->error_markers++;
-			kern_logf("usb-hid: touch report dropped error=%d\n", error);
-		}
-
-		/* The report is dropped; the next frame starts again. */
-		return;
-	}
-
-	/* Hands every event of the frames to the touch screen's device in order. */
-	for (index = 0; index < output.event_count; index++) {
-		event = &output.events[index];
-		drv_input_device_emit_at(hid->touch_input, event->type, event->code,
-					 event->value, hid->report_milliseconds);
-	}
 }
 
 /*
@@ -1789,9 +1515,9 @@ usb_hid_free(
 	if (hid->out_buffer != NULL)
 		kern_free(hid->out_buffer);
 
-	/* The parsed layout, or a raw interface's descriptor. */
-	if (hid->layout != NULL)
-		drv_hid_report_layout_destroy(hid->layout);
+	/* The described devices (unpublished by now), or a raw interface's descriptor. */
+	if (hid->hidinput != NULL)
+		drv_hid_input_destroy(hid->hidinput);
 	if (hid->raw_descriptor != NULL)
 		kern_free(hid->raw_descriptor);
 
