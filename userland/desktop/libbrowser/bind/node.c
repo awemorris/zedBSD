@@ -1470,6 +1470,13 @@ node_prototype_index(
 		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_OBJECT)
 			return BIND_HTML_OBJECT_ELEMENT;
 
+		/* A textarea's value (ws177-p019), by its exact local name. */
+		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_TEXTAREA) {
+			form = vm_string_equal_ascii(element->local_name, "textarea");
+			if (form)
+				return BIND_HTML_TEXT_AREA_ELEMENT;
+		}
+
 		/* Inputs use exact local identity independently of XML's folded internal tag. */
 		if (element->ns == DOM_NS_HTML && element->tag == DOM_TAG_INPUT) {
 			form = vm_string_equal_ascii(element->local_name, "input");

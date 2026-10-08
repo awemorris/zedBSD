@@ -425,6 +425,20 @@ struct kl_window {
 	uint32_t text_after;
 
 	/*
+	 * What an input method reads around the caret (KL_VERSION 68,
+	 * kl_window_text_context): whether the application told a text, the
+	 * text (cut around the caret), the caret's and the anchor's byte
+	 * offsets in it, and the field's hints and purpose (NONE and NORMAL
+	 * until told).
+	 */
+	int text_context_set;
+	char text_surrounding[KL_TEXT_SURROUNDING_MAX];
+	uint32_t text_surrounding_cursor;
+	uint32_t text_surrounding_anchor;
+	uint32_t text_hint;
+	uint32_t text_purpose;
+
+	/*
 	 * A window on another's connection (a file chooser's, ws090-p006): the
 	 * connection is the application's and stays open, and the owner hears
 	 * of queued input and of a buffer given back from a wl_display.sync

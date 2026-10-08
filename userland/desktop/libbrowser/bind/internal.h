@@ -117,6 +117,7 @@ enum bind_interface_index {
 	BIND_HTML_MEDIA_ELEMENT,
 	BIND_HTML_VIDEO_ELEMENT,
 	BIND_HTML_AUDIO_ELEMENT,
+	BIND_HTML_TEXT_AREA_ELEMENT,
 	BIND_INTERFACES
 };
 
@@ -415,6 +416,7 @@ extern const struct bind_interface bind_html_image_element_interface;
 extern const struct bind_interface bind_html_media_element_interface;
 extern const struct bind_interface bind_html_video_element_interface;
 extern const struct bind_interface bind_html_audio_element_interface;
+extern const struct bind_interface bind_html_text_area_element_interface;
 extern const struct bind_interface bind_html_script_element_interface;
 extern const struct bind_interface bind_dom_token_list_interface;
 extern const struct bind_interface bind_dom_string_map_interface;
