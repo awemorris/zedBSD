@@ -149,9 +149,10 @@
 #define I915_GFX_PS_SCRATCH_IDS_PER_SLICE	(128U * 8U)
 
 /*
- * The session's scratch buffer: an unused first page, so neither stage's
- * scratch pointer is zero, then the vertex stage's part, then the pixel
- * stage's, each page-aligned.  A draw whose kernels spill makes the buffer
+ * The session's scratch buffer: an unused first page, so no stage's
+ * scratch pointer is zero, then the vertex stage's part, the pixel
+ * stage's, the compute stage's and the geometry stage's, each
+ * page-aligned.  A draw whose kernels spill makes the buffer
  * the general state base, whose size is 4 GiB less a page.
  */
 #define I915_GFX_SCRATCH_GUARD			4096U
@@ -165,6 +166,13 @@
  * (ws101-p004).
  */
 #define I915_GFX_CS_SCRATCH_IDS			(16U * 8U * 6U)
+
+/*
+ * The thread ids the scratch memory of the geometry stage has to cover:
+ * its max_gs_threads (Mesa 25.0.7 intel_device_info.c,
+ * init_max_scratch_ids(), as for the vertex stage) (ws075-p007b b4).
+ */
+#define I915_GFX_GS_SCRATCH_IDS			I915_GFX_MAX_GS_THREADS
 
 /*
  * Where a dispatch writes in its slot (ws101-p004), as offsets from the

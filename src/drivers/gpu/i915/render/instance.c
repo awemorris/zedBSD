@@ -366,6 +366,17 @@ i915_instance_limits(
 	limits->maxVertexInputAttributeOffset = 2047U;
 	limits->maxVertexInputBindingStride = 2048U;
 	limits->maxVertexOutputComponents = 64U;
+
+	/*
+	 * The geometry stage (ws075-p007b b4, design §5.5): Vulkan's least
+	 * invocations and total output (the compiler refuses Invocations past
+	 * 1 and logs it), 16 vec4 in and out as the vertex stage, 256 vertices.
+	 */
+	limits->maxGeometryShaderInvocations = 32U;
+	limits->maxGeometryInputComponents = 64U;
+	limits->maxGeometryOutputComponents = 64U;
+	limits->maxGeometryOutputVertices = 256U;
+	limits->maxGeometryTotalOutputComponents = 1024U;
 	limits->maxFragmentInputComponents = 64U;
 	limits->maxFragmentOutputAttachments = 4U;
 	limits->maxFragmentCombinedOutputResources = 4U;
@@ -447,9 +458,11 @@ i915_instance_limits(
 /*
  * vkGetPhysicalDeviceFeatures: [physical][present] -> [present][VkPhysicalDeviceFeatures].
  * The optional features claimed are vertexPipelineStoresAndAtomics (a
- * vertex shader stores to and loads from storage buffers, ws075-p006) and
- * logicOp (the blend's logic operation, ws031-p032) and shaderInt16
- * (16-bit integers carried in 32-bit values, ws031-p039).  XXX: the vertex
+ * vertex shader stores to and loads from storage buffers, ws075-p006),
+ * logicOp (the blend's logic operation, ws031-p032), shaderInt16 (16-bit
+ * integers carried in 32-bit values, ws031-p039) and geometryShader (the
+ * geometry stage, ws075-p007; its point size is not, so
+ * shaderTessellationAndGeometryPointSize stays off).  XXX: the vertex
  * stage's atomics are not compiled.
  */
 static int
@@ -466,13 +479,14 @@ i915_instance_features(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Takes a zeroed record from the arena: every feature is off but the vertex stage's stores, the logic operation and Int16. */
+	/* Takes a zeroed record from the arena: every feature is off but the vertex stage's stores, the logic operation, Int16 and the geometry stage. */
 	features = i915_vkc_array(reader, &session->arena, 1U, sizeof(*features));
 	if (features == NULL)
 		return ENOMEM;
 	features->vertexPipelineStoresAndAtomics = VK_TRUE;
 	features->logicOp = VK_TRUE;
 	features->shaderInt16 = VK_TRUE;
+	features->geometryShader = VK_TRUE;
 
 	/* Replies the present word and the record. */
 	drv_i915_wire_reply_u64(reply, 1U);

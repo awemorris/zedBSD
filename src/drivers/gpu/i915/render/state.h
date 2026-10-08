@@ -127,6 +127,12 @@ struct i915_gfx_kernels {
 	uint32_t ps_point_sprite_mask;
 
 	/*
+	 * Bit n: fragment input n is gl_PrimitiveID, which no stage before
+	 * writes, so the setup gives it (ws075-p007b b4; 0 for a rectangle).
+	 */
+	uint32_t ps_primitive_id_mask;
+
+	/*
 	 * Nonzero when the pixel kernel's payload carries the linear
 	 * barycentrics, the source depth and the source w (0 for a rectangle).
 	 */

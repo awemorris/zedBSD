@@ -2,7 +2,7 @@
 
 # ws075-p007b: GL 3.2 の stage の実行器（render/）: 増分 b1〜b5
 
-Status: in-progress（q833、P1。2026-10-07 夜 b3、2026-10-07 b1・b2 を実装と host 試験。次は b4。2026-10-07 ユーザーの指示で WS113 の display（q855）へ切り替えて中断）
+Status: in-progress（q833、P1。b3・b1・b2・b4 を実装と host 試験（b4 は 2026-10-09 P1、ベータ3 の合間の仕事）。次は b5（T1 の場面と依頼文、実機の 5330 の i915 が要る））
 Disposition: normal
 Parent: [WS075](../ws.md)
 設計: [phase007/design.md](../phase007/design.md)（§5・§14 が優先）、増分の表は [phase007/phase.md](../phase007/phase.md)。
@@ -70,6 +70,24 @@ Q1（2026-10-07）: 判断 1〜8 を既定どおりで承認、Phase の ID は 
 | style-check（変えた file）、`git diff --check` | 増えない、問題無し |
 
 - 未実施: 実機（b5 で T1、GS の hang があれば engine reset で device lost）。draw.c の `i915_draw_geometry_check` と URB の refuse の log は host で通らない（draw.c は host の fixture に入らない、読んで確かめた）。
+
+- 2026-10-09 増分 b4（P1 の新しい世代、base main 0e5e63cac。始める前に 10 個の host 試験を流し全て PASS）:
+  - PrimitiveID（§5.4・§14 S4）: `render/pipeline-prepare.c` の fit の照合で、最後の stage が書かない gl_PrimitiveID（location 69）を除く。`drv_i915_gfx_pipeline_kernels` はその FS の入力に `kernels->ps_primitive_id_mask`（`state.h` の新しい field）の bit を立てる。`render/state.c` の `drv_i915_gfx_emit_pixel_shader` で、SBE_SWIZ のその attribute を `GEN12_SBE_SWIZ_PRIMITIVE_ID`（Constant Source PRIM_ID 3 << 9、Component Override X..W 0xF << 12 = 0xF600）にし、3DSTATE_SBE dword 1 に Primitive ID Override（attribute select bits 4:0、X..W bits 19:16、新しい `i915_state_primitive_id_override`）を足した（anv の `emit_3dstate_sbe()` と同じ。出典は `intel/genxml.h` の注に gen90.xml・gen60.xml・genX_pipeline.c の sha256）。
+  - GS の scratch（§5.2 の scratch の行）: `render/draw.c` の scratch の buffer に geometry の部分（`I915_DRAW_SCRATCH_GEOMETRY`、thread id は `I915_GFX_GS_SCRATCH_IDS` = max_gs_threads 336、`heap.h`）を compute の部分の後に足した（`draw.h` の配列 3 → 4）。`kernels->gs_scratch_offset` を渡す。`i915_draw_geometry_check` の「not given scratch space yet」の refuse を外した。3DSTATE_GS の dword 4〜5 は b2 の emitter のまま（`i915_state_scratch`）。
+  - log: GS が sample する時の refuse に理由の行（「the geometry shader samples N images, which the geometry stage cannot yet (no binding table)」）。GS の無い adjacency は今の「XXX unimplemented path: primitive topology N」のまま。
+  - feature と limit（§5.5・S8）: `render/instance.c` で `geometryShader = VK_TRUE`、`maxGeometryShaderInvocations` 32・`maxGeometryInputComponents` 64・`maxGeometryOutputComponents` 64・`maxGeometryOutputVertices` 256・`maxGeometryTotalOutputComponents` 1024。`shaderTessellationAndGeometryPointSize` は FALSE のまま。libegl はこの feature を device に有効にするだけで、GS を使わない app の経路は変わらない（`userland/desktop/libegl/vulkan.c` を読んだ）。
+  - 試験: pipe fixture の `test_geometry_interfaces`（GS の無い cells.vert + primitive-id.frag が refuse されず、mask 1、slot 0、SBE dword 1 の select 0 と bits 19:16 = 0xF、SWIZ = 0xf600）と `test_geometry_state`（spill する GS の dword 4 = offset | 1、dword 5 = 0。points.geom の kernels に 2 KiB を与えた形）。
+  - 分かったこと: compiler の spill.geom（96 値）の code は 38560 byte で、GS の window の枠（16 KiB）に入らず、pipeline の fit で refuse される。spill する大きな GS は scratch の前に window の枠で止まる（GS の枠を広げるのは後の候補）。
+
+| コマンド（b4） | 結果 |
+| --- | --- |
+| `sh plan/ws031/tests/run-vk-host-tests.sh`（10 個、b4 の前） | 全て PASS |
+| `sh plan/ws031/tests/run-vk-host-tests.sh "pipe cmdbuf res resdispatch sync cmd"`（b4 の後、plain・ASan/UBSan） | PASS |
+| `sh plan/ws075/tests/run-host-layered.sh` | PASS |
+| `make ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p1-ws177 build/p1-ws177/vmunix`（-Werror） | 成功 warning 0 |
+| style-check（変えた file）、`git diff --check` | 数は前と同じ、問題無し |
+
+- 未実施: 実機（b5 で T1、5330 の i915。ユーザーの規則で UAT 待ち）。draw.c の scratch の geometry の部分は host の fixture に入らない（読んで確かめた）。feature の reply の host 試験は無い。
 
 ### 再開の情報（2026-10-07、P1。b2 の後に更新、ユーザーの指示で q855 へ切り替え）
 
