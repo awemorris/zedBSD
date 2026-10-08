@@ -3653,9 +3653,10 @@ dispatch_request(
 	}
 
 	/* Serializes every wired mutation with the volatile transaction owner. */
-	if (request->header.opcode >= NETWORKD_OP_UP &&
-	    request->header.opcode <= NETWORKD_OP_ROUTE6_CLEAR &&
-	    request->header.opcode != NETWORKD_OP_RELOAD &&
+	if (((request->header.opcode >= NETWORKD_OP_UP &&
+	    request->header.opcode <= NETWORKD_OP_STATIC6_REMOVE &&
+	    request->header.opcode != NETWORKD_OP_RELOAD) ||
+	    request->header.opcode == NETWORKD_OP_ROUTE6_REMOVE) &&
 	    networkd_confirmed_check(&confirmed, request->token) != 0) {
 		error = errno != 0 ? errno : EBUSY;
 		send_response(client, request->header.request_id,
@@ -3749,6 +3750,7 @@ execute_wired_request(
 	char *dns[8];
 	unsigned index;
 	int present;
+	int missing;
 	int result;
 
 	if (request == NULL || diagnostic == NULL ||
@@ -3886,6 +3888,30 @@ execute_wired_request(
 		diagnostic[0] = '\0';
 		result = run_command_until(arguments, 10, deadline, diagnostic);
 		*error = errno;
+	} else if (request->header.opcode == NETWORKD_OP_STATIC6_REMOVE) {
+		/* A static IPv6 address net.conf no longer names, taken away; one already gone is the same (ws177-p045). */
+		arguments[0] = "/sbin/ifconfig";
+		arguments[1] = request->interface;
+		arguments[2] = "-inet6";
+		arguments[3] = request->address;
+		arguments[4] = NULL;
+		missing = interface_exists(request->interface);
+		if (missing == 0)
+			(void)run_command_until(arguments, 10, deadline, diagnostic);
+		diagnostic[0] = '\0';
+		result = 0;
+		*error = 0;
+	} else if (request->header.opcode == NETWORKD_OP_ROUTE6_REMOVE) {
+		/* An IPv6 route net.conf no longer names, taken away; none there is the same (ws177-p045). */
+		arguments[0] = "/sbin/route";
+		arguments[1] = "-6";
+		arguments[2] = "delete";
+		arguments[3] = request->address;
+		arguments[4] = NULL;
+		(void)run_command_until(arguments, 10, deadline, diagnostic);
+		diagnostic[0] = '\0';
+		result = 0;
+		*error = 0;
 	} else if (request->header.opcode == NETWORKD_OP_ROUTE6_CLEAR) {
 		/* The IPv6 default route removed; none there is the same. */
 		arguments[0] = "/sbin/route";
@@ -4057,13 +4083,24 @@ rollback_parse(
 			ROLLBACK_REJECT("invalid rollback default route");
 		request->header.opcode = NETWORKD_OP_DEFAULT_ROUTE;
 		strcpy(request->gateway, word[2]);
-	} else if ((strcmp(word[1], "IPV6") == 0 || strcmp(word[1], "STATIC6") == 0) && count == 4U) {
-		/* IPv6 (ws130-p005): the interface, and "on"/"off" or the address with its length. */
+	} else if ((strcmp(word[1], "IPV6") == 0 || strcmp(word[1], "STATIC6") == 0 ||
+	    strcmp(word[1], "STATIC6_REMOVE") == 0) && count == 4U) {
+		/* IPv6 (ws130-p005): the interface, and "on"/"off" or the address with its length (added or, ws177-p045, taken away). */
 		if (strlen(word[2]) >= sizeof(request->interface) || strlen(word[3]) >= sizeof(request->address))
 			ROLLBACK_REJECT("invalid rollback IPv6 operation");
-		request->header.opcode = strcmp(word[1], "IPV6") == 0 ? NETWORKD_OP_IPV6 : NETWORKD_OP_STATIC6;
+		request->header.opcode = NETWORKD_OP_STATIC6;
+		if (strcmp(word[1], "IPV6") == 0)
+			request->header.opcode = NETWORKD_OP_IPV6;
+		else if (strcmp(word[1], "STATIC6_REMOVE") == 0)
+			request->header.opcode = NETWORKD_OP_STATIC6_REMOVE;
 		strcpy(request->interface, word[2]);
 		strcpy(request->address, word[3]);
+	} else if (strcmp(word[1], "ROUTE6_REMOVE") == 0 && count == 3U) {
+		/* An IPv6 route taken away: its destination (ws177-p045). */
+		if (strlen(word[2]) >= sizeof(request->address))
+			ROLLBACK_REJECT("invalid rollback IPv6 route");
+		request->header.opcode = NETWORKD_OP_ROUTE6_REMOVE;
+		strcpy(request->address, word[2]);
 	} else if (strcmp(word[1], "ROUTE6") == 0 && (count == 4U || count == 5U)) {
 		/* An IPv6 route: the destination, the gateway, and the interface of a link-local one. */
 		if (strlen(word[2]) >= sizeof(request->address) || strlen(word[3]) >= sizeof(request->gateway))
@@ -4101,7 +4138,8 @@ rollback_parse(
 	    request->header.opcode == NETWORKD_OP_DHCP ||
 	    request->header.opcode == NETWORKD_OP_STATIC ||
 	    request->header.opcode == NETWORKD_OP_IPV6 ||
-	    request->header.opcode == NETWORKD_OP_STATIC6) &&
+	    request->header.opcode == NETWORKD_OP_STATIC6 ||
+	    request->header.opcode == NETWORKD_OP_STATIC6_REMOVE) &&
 	    (request->interface[0] == '\0' ||
 	    strspn(request->interface,
 	    "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789_-") !=
@@ -5964,8 +6002,11 @@ decode_request(
 	    request->header.opcode == NETWORKD_OP_ROUTE6_CLEAR) &&
 	    (seen == 0U || seen == 128U) && request->dns_count == 0U) ||
 	    ((request->header.opcode == NETWORKD_OP_IPV6 ||
-	    request->header.opcode == NETWORKD_OP_STATIC6) &&
+	    request->header.opcode == NETWORKD_OP_STATIC6 ||
+	    request->header.opcode == NETWORKD_OP_STATIC6_REMOVE) &&
 	    (seen == 5U || seen == (5U | 128U)) && request->dns_count == 0U) ||
+	    (request->header.opcode == NETWORKD_OP_ROUTE6_REMOVE &&
+	    (seen == 4U || seen == (4U | 128U)) && request->dns_count == 0U) ||
 	    (request->header.opcode == NETWORKD_OP_ROUTE6 &&
 	    (seen == 20U || seen == 21U || seen == (20U | 128U) || seen == (21U | 128U)) &&
 	    request->dns_count == 0U) ||
@@ -6043,6 +6084,10 @@ operation_name(
 		return "ROUTE6";
 	if (opcode == NETWORKD_OP_ROUTE6_CLEAR)
 		return "ROUTE6_CLEAR";
+	if (opcode == NETWORKD_OP_STATIC6_REMOVE)
+		return "STATIC6_REMOVE";
+	if (opcode == NETWORKD_OP_ROUTE6_REMOVE)
+		return "ROUTE6_REMOVE";
 	if (opcode == NETWORKD_OP_LAN_ENABLE)
 		return "LAN_ENABLE";
 	if (opcode == NETWORKD_OP_LAN_DISABLE)
@@ -8649,16 +8694,32 @@ unlink_owned_resolver(
 	return result;
 }
 
-/* Runs a command for networkd's IPv6 (ws130-p007), bounded by its time; 0, or -1. */
-int
-networkd_run_command(
-	char *const arguments[],
-	unsigned timeout_seconds)
+/*
+ * Gives an interface's rank for IPv6's default route and DNS servers
+ * (ws177-p045, ws005-p019's choice): a wired interface networkd manages
+ * by its place, then any other interface, then the Wi-Fi connection's.
+ */
+unsigned
+networkd_interface_rank(
+	const char *name)
 {
-	char diagnostic[CHILD_OUTPUT_MAX];
+	size_t index;
+	int same;
 
-	/* No transaction's deadline. */
-	return run_command_until(arguments, timeout_seconds, 0U, diagnostic);
+	/* A managed wired interface: its place. */
+	for (index = 0U; index < managed_lan.interface_count; index++) {
+		same = strcmp(managed_lan.interfaces[index].name, name);
+		if (same == 0)
+			return (unsigned)index;
+	}
+
+	/* The Wi-Fi connection's interface: last. */
+	same = strcmp(managed_wlan.connection.interface, name);
+	if (same == 0)
+		return NETWORKD_LAN_MAX + 1U;
+
+	/* Any other: after the managed wired ones. */
+	return NETWORKD_LAN_MAX;
 }
 
 /* Runs one child with both an operation bound and an optional transaction deadline. */

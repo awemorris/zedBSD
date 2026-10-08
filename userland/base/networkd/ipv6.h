@@ -13,7 +13,10 @@
  * default route, and the DNS servers (RDNSS, after the IPv4 ones in
  * resolv.conf, H5), and DHCPv6 (ws130-p007) as the advertisements' M and
  * O flags and net.conf ask: `dhcpc -6` run then, and again at T1 or the
- * information refresh time.
+ * information refresh time.  ws177-p045: duplicates made again, temporary
+ * addresses made anew before they stop being preferred, the preferred
+ * interface's router alone as the default route, the RDNSS servers put
+ * back into resolv.conf after another writer, and dhcpc run as a child.
  */
 
 #ifndef NETWORKD_IPV6_H
@@ -26,7 +29,7 @@ int networkd_ipv6_link_local(const char *name);
 int networkd_ipv6_poll_timeout(void);
 void networkd_ipv6_run_due(void);
 
-/* From main.c: runs a command, bounded by its time; 0 when it exited 0, or -1. */
-int networkd_run_command(char *const arguments[], unsigned timeout_seconds);
+/* From main.c: an interface's rank for the default route and the DNS servers (the lower is preferred: wired before Wi-Fi). */
+unsigned networkd_interface_rank(const char *name);
 
 #endif

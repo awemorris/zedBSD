@@ -44,7 +44,7 @@ struct slaac_prefix {
  * What an advertisement says: its M and O flags, its router lifetime
  * (seconds; 0 is not a default router), its prefixes, its DNS servers
  * (RDNSS) with their lifetime, and its search list (DNSSL, the names
- * separated by spaces).
+ * separated by spaces) with its lifetime.
  */
 struct slaac_ra {
 	unsigned flags;
@@ -55,11 +55,37 @@ struct slaac_ra {
 	unsigned dns_count;
 	uint32_t dns_lifetime;
 	char search[SLAAC_SEARCH_MAX];
+	uint32_t search_lifetime;
 };
 
 /* The longest a temporary address lives (RFC 8981: two days valid, one day preferred), in seconds. */
 #define SLAAC_TEMPORARY_VALID		(2U * 86400U)
 #define SLAAC_TEMPORARY_PREFERRED	86400U
+
+/*
+ * RFC 8981 section 3.8: the most the preferred lifetime is shortened by
+ * (MAX_DESYNC_FACTOR, 0.4 of it), and how long before it runs out the
+ * next temporary address is made (REGEN_ADVANCE: 2 seconds, and 3 tries
+ * of one detection of a second each).
+ */
+#define SLAAC_TEMPORARY_DESYNC_MAX	34560U
+#define SLAAC_TEMPORARY_REGEN_ADVANCE	5U
+
+/* How many times a stable or a temporary identifier is made again after its address was a duplicate (IDGEN_RETRIES). */
+#define SLAAC_IDGEN_RETRIES		3U
+
+/*
+ * A router an advertisement gave: its interface, its address, when its
+ * lifetime ends (monotonic microseconds), and its interface's rank (the
+ * lower is preferred: wired before Wi-Fi), which the caller fills.
+ */
+struct slaac_router {
+	int used;
+	unsigned ifindex;
+	struct in6_addr address;
+	uint64_t expires;
+	unsigned rank;
+};
 
 int slaac_parse(const uint8_t *message, size_t length, struct slaac_ra *ra);
 void slaac_stable_iid(const uint8_t *secret, size_t secret_length, const struct in6_addr *prefix, const char *interface,
@@ -67,5 +93,10 @@ void slaac_stable_iid(const uint8_t *secret, size_t secret_length, const struct 
 void slaac_address(const struct in6_addr *prefix, const uint8_t *iid, struct in6_addr *address);
 void slaac_temporary_lifetimes(uint32_t valid, uint32_t preferred, uint32_t desync, uint32_t *temporary_valid,
     uint32_t *temporary_preferred);
+void slaac_temporary_aged(uint32_t valid, uint32_t preferred, uint32_t desync, uint64_t age, uint32_t *temporary_valid,
+    uint32_t *temporary_preferred);
+uint32_t slaac_temporary_desync(uint32_t random);
+uint64_t slaac_temporary_regenerate(uint32_t desync);
+int slaac_router_choose(const struct slaac_router *routers, unsigned count, uint64_t now, int current);
 
 #endif
