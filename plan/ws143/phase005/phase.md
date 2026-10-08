@@ -673,3 +673,7 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 ## T1-419（2026-10-08 Q1）
 
 i01a: hid-usb-p005 PASS、boot-test PASS、fidoctl-p004 PASS（USB の HID の乗せ替えの回帰なし）。
+
+## ユーザーの決定（2026-10-08 朝）: 名前の変更
+
+`/dev/hid-host` → `/dev/input/bridge`、UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct hid_host_* → input_bridge_*、cdev・driver の file の名前も合わせる）。`/dev/btN` → `/dev/bluetoothN`（node の名前だけ。bluetooth.h・BT_IOC_* はそのまま）。i01c の前に行い、試験・文書・bluetoothd・bt-probe・hid-host-probe（→ 名前を合わせる）を追従させる。

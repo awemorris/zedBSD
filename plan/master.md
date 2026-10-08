@@ -516,6 +516,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 朝 ユーザー:「/dev/hid-hostは、/dev/input/bridgeに変更し、/dev/bt0は、/dev/bluetooth0に変更できますか？」→ クリックの回答「揃える」: node を `/dev/input/bridge`・`/dev/bluetoothN` に。UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct も input_bridge_*）。bluetooth.h と BT_IOC_* は元から Bluetooth の名前なのでそのまま。P2 が i01c の前に行う。
 - 2026-10-08 朝 ユーザー（クリックの回答）: USB メモリは最新 main で UAT の image を作る（Q1 が build、書き込みはユーザー）。WS143 B6: account が無い install では bluetoothd は起動しない（今の暫定のまま）。ws143-p005 Q4: ペアリングの後に自動で接続する。Q5: 人が切断した機器からの再接続は断る。Q2: `/dev/hid-host` に HID_HOST_GET_DEVICE を足す。Q1: i2c-hid も共有の HID の glue（hid-input）に乗せる（推しと逆、F-084 を実施に）。libbrowser に要素を探して focus する口を足してよい（描画の改善は止めたまま）。BUG-241 はベータ3。BUG-225 は実機の UAT で見てから。Music のプレイリストなど（backlog-p2 111）は範囲外（後で）。
 - 2026-10-08 夜 ユーザー:「5330はsudoを勝手に使ってよいです。SSH鍵も勝手に更新してください。アップデートして再起動もお願いします。」「BUG-244: はい、優先度を上げてください。」「BUG-200:は解決でOKです。」「BUG-201は保留します。」「BUG-224はいったん閉じてください。」「切り替えのつまみがなんなのかは保留です。」「いったん寝ます。判断事項は起きたらお願いします。ブロッキングしても自走をお願いします。」
 - 2026-10-08 ユーザー: WS005 completed（記録のミス）。規約の整形（各 WS の全文規約の Phase）はベータ3。WS172 はベータ3。WS187 にロック画面の解除（下部から上のスワイプ・wheel の上、自動の lock の後の一定時間は認証なし、手動の lock は常に認証、Password・PIN・Hardware Key の選択）を追加。
