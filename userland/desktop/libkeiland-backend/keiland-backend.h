@@ -925,14 +925,19 @@ size_t kl_backend_filesystems_read(struct kl_backend_filesystem *list, size_t ca
 size_t kl_backend_users_read(struct kl_backend_user *list, size_t capacity, unsigned *skipped);
 
 /*
- * Reads the mounted file systems a user may keep files on (ws188-p004):
- * the system's virtual ones (the kernel's, the devices', the memory's) are
- * left out.  Returns how many were copied (at most capacity), and in
- * skipped how many were left out for want of room or a path too long.
- * Each operating system reads its own mount table (zedBSD and Linux the
- * mntent table, FreeBSD getfsstat).
+ * Reads the mounted file systems (ws188-p004): every mount with files in
+ * it, tmpfs and overlays included (zedBSD's root is an overlay; a user's
+ * own tmpfs keeps a Trash); only the pseudo file systems without files of
+ * their own (the kernel's and the devices' views, control files) are left
+ * out.  The mounts outside the system's trees (/dev, /proc, /sys, /run,
+ * /snap, /var/lib) come first, so a full list loses those last.  Returns 0
+ * with count copied (at most capacity) and skipped left out for want of
+ * room or a path too long, or an errno value when the table could not be
+ * read.  Each operating system reads its own mount table (zedBSD and Linux
+ * the mntent table, FreeBSD getfsstat); only the machine thread reads it
+ * (getmntent's storage is static).
  */
-size_t kl_backend_mounts_read(struct kl_backend_mount *list, size_t capacity, unsigned *skipped);
+int kl_backend_mounts_read(struct kl_backend_mount *list, size_t capacity, size_t *count, unsigned *skipped);
 
 /*
  * The peer of a client's connection (WS135, plan/ws135/design.md section

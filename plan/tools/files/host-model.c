@@ -18,6 +18,7 @@
  */
 
 #include "files.h"
+#include "mounts.h"
 
 #include <keiland/keiland.h>
 
@@ -54,6 +55,7 @@ main(
 	char *targets[4];
 	char *sources_merge[2];
 	char *volume_items[2];
+	struct kl_machine_mount volume_mount[1];
 	char text[512];
 	int descriptor;
 	char **paths;
@@ -494,6 +496,11 @@ main(
 			check(length > 0 && strstr(text, "\nPath=/") == NULL && strstr(text, "\nPath=") != NULL, "volume trash: the record's path is relative to the volume's top");
 			error = fm_trash_info_read(other, "Notes.txt", original, sizeof(original), &deleted);
 			check(error == 0 && strcmp(original, volume_items[0]) == 0, "volume trash: the record reads back as the whole path");
+			/* The desktop's mounts with the user's tmpfs among them (ws188-p004: Files reads no mount table itself). */
+			memset(volume_mount, 0, sizeof(volume_mount));
+			snprintf(volume_mount[0].path, sizeof(volume_mount[0].path), "%s", argv[3]);
+			snprintf(volume_mount[0].type, sizeof(volume_mount[0].type), "%s", "tmpfs");
+			fm_mounts_set(volume_mount, 1U);
 			memset(&listing, 0, sizeof(listing));
 			error = fm_dir_read_trash(&listing);
 			shown = 0;

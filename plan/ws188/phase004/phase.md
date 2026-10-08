@@ -56,6 +56,15 @@ Parent: [WS188](../ws.md)
 
 削除の依頼（Q1）: `userland/desktop/files/mntent/mounts-mntent.c`（と directory）、`userland/desktop/files/freebsd/mounts-freebsd.c`（と directory）。
 
-## design-reviewer
+## design-reviewer（2026-10-08）と第 2 版
 
-（実施中）
+レビュー: blocker 1・major 3・minor 8。反映:
+- **B1**: backend が tmpfs・overlay を外すと利用者の tmpfs の Trash（ws127-p003、host-model の 8b）と zedBSD の `/`（overlay）が消える → backend は**中身を持たない疑似の file system だけ**を外す（proc・procfs・sysfs・devfs・devpts・kernfs・fdesc・fdescfs・linprocfs・linsysfs・swap・cgroup・cgroup2・nsfs・mqueue・mqueuefs・tracefs・debugfs・securityfs・pstore・bpf・efivarfs・configfs・fusectl・binfmt_misc・rpc_pipefs・hugetlbfs・autofs）。tmpfs・overlay・squashfs などは Files の Places の表示の方針（`places_hidden_types`、元に戻した）で隠す。上限 64 で落ちる物が利用者の mount にならないよう、system の木（/dev・/proc・/sys・/run・/snap・/var/lib）の下の mount を後に並べる（table を 2 回読む、FreeBSD は snapshot を 2 回巡る）。
+- **M1**: `plan/tools/files/host-build.sh` の `$src/mntent/*.c` を外した。`plan/tools/files/host-model.c` の 8b は `fm_mounts_set` で利用者の tmpfs を desktop の答えとして渡す。
+- **M2**: 古い一覧: `files/mounts.c` の walk（Places の作り直し・Trash の読み）が 2 秒より古い写しを見たら読み直しを頼む（`fm_mounts_wanted`、main が query）。答えの walk 自身は頼まない（新しいので）。eject の直後は答えが来るまでの短い間だけ古い写し。
+- **M3**: MOUNTS は単独の query、同時に 1 つ、待つ間の要求は印にして答えの後に出す。FAILED・BUSY・ENOTSUP は前の写しを残す。Today の `main_home_free_take` は FILESYSTEMS の serial が変わった時だけ。
+- m1: `kl_backend_mounts_read` は 0／errno を返し、読めなければ compositor は MOUNTS を頼んだ query に FAILED（Files は前の写しを残す）。m3: 種類の表は上に書いた（mqueuefs を含む）。m5: Keiland でない・古い compositor では Places に volume が出ず Trash は home の物だけ（境界の規則による後退）。m6: exports.map は exports.py で作り直し済み。m7: FILESYSTEMS と同じ読みに相乗りすると statvfs の止まりで MOUNTS も失敗しうる（受け入れ、Files は MOUNTS を単独で頼む）。m8: getmntent は machine の thread だけ（machine/mounts-mntent.c の注記）。m4: T1 の依頼は USB の fat の volume の Trash の流れ（下）。
+
+再確認（第 2 版）: zedBSD build（libkeiland.so・wayland・files・imageview・settings）rc 0 warning 0、keiland-linux all rc 0 warning 0、host-machine 118 PASS、ws131 host-system PASS（mounts=17）、host-share PASS、files の host-build rc 0（host-model.sh は sudo の mount と test の中の削除を含むので P2 は流していない → T1／Q1）。check.sh は削除待ちの 2 file の A3・A5 だけ FAIL。
+
+T1 の依頼の案: (1) `sh plan/tools/files/host-model.sh`（host、8b の volume trash）、(2) QEMU: AAT の apps.files.mount-usb の流れで USB の fat を mount → その上の file を Trash へ → Trash の tab に出る → Empty Trash、Files の log `FILES MOUNTS count=N`、Places に USB は Devices に出て Locations に重ならない、(3) FreeBSD の build。

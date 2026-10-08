@@ -31,5 +31,7 @@ int fm_mounts_next(struct fm_mounts *mounts, struct fm_mount *mount);
 void fm_mounts_close(struct fm_mounts *mounts);
 /* Puts the desktop's last answer (libkeiland's kl_system_machine_mounts) in place of the mounts known. */
 void fm_mounts_set(const struct kl_machine_mount *list, size_t count);
+/* Tells once whether a walk found the mounts old and wants a new reading (main.c asks the desktop). */
+int fm_mounts_wanted(void);
 
 #endif

@@ -121,11 +121,13 @@ void kl_backend_machine_copy(char *to, size_t size, const char *from, size_t len
 
 /*
  * The shared part of the mount tables (ws188-p004, machine/mounts.c):
- * whether a file system's type is one a user may keep files on (not a
- * virtual one), and the copy of one mount into the list (0 when its path
- * or type does not fit; the list is not touched then).
+ * whether a file system's type has files (not a pseudo one), whether a
+ * mount is in one of the system's trees (listed last), and the copy of
+ * one mount into the list (0 when its path or type does not fit; the list
+ * is not touched then).
  */
 int kl_backend_mounts_keep(const char *type);
+int kl_backend_mounts_system(const char *path);
 int kl_backend_mounts_add(struct kl_backend_mount *mount, const char *path, const char *type);
 size_t kl_backend_users_posix(struct kl_backend_user *list, size_t capacity, unsigned *skipped, const char *const *admin_groups);
 

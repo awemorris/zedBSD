@@ -22,8 +22,13 @@
 #include <keiland/keiland.h>
 
 #include <errno.h>
+#include <stdint.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
+
+/* How old the mounts known may be before a walk asks for a new reading, in milliseconds. */
+#define MOUNTS_FRESH_MS		2000U
 
 /*
  * One walk of the mounts: its own copy of the list, how many, and the
@@ -43,6 +48,19 @@ static struct kl_machine_mount mounts_known[KL_MACHINE_MOUNTS_MAX];
 static size_t mounts_known_count;
 
 /*
+ * When the mounts known came (CLOCK_MONOTONIC, ms; 0: none yet), and
+ * whether a walk found them older than MOUNTS_FRESH_MS and wants a new
+ * reading (main.c takes it with fm_mounts_wanted).  So a mount made
+ * elsewhere (a terminal, the network) shows the next time Places or the
+ * Trash is gone through, and the walks the answer itself starts ask for
+ * nothing.
+ */
+static uint64_t mounts_known_ms;
+static int mounts_wanted;
+
+static uint64_t mounts_now(void);
+
+/*
  * Puts the desktop's last answer in place of the mounts known.
  */
 void
@@ -55,6 +73,24 @@ fm_mounts_set(
 		count = KL_MACHINE_MOUNTS_MAX;
 	memcpy(mounts_known, list, count * sizeof(mounts_known[0]));
 	mounts_known_count = count;
+	mounts_known_ms = mounts_now();
+}
+
+/*
+ * Tells whether a walk wants a new reading of the mounts, once.
+ */
+int
+fm_mounts_wanted(
+	void)
+{
+	int wanted;
+
+	/* Taken: asked once. */
+	wanted = mounts_wanted;
+	mounts_wanted = 0;
+
+	/* Succeeded: whether a reading is wanted. */
+	return wanted;
 }
 
 /*
@@ -65,10 +101,16 @@ fm_mounts_open(
 	struct fm_mounts **result)
 {
 	struct fm_mounts *mounts;
+	uint64_t now;
 
 	/* A missing place for the walk. */
 	if (result == NULL)
 		return EINVAL;
+
+	/* Mounts never told, or told a while ago, are asked for again. */
+	now = mounts_now();
+	if (mounts_known_ms == 0U || now - mounts_known_ms >= MOUNTS_FRESH_MS)
+		mounts_wanted = 1;
 
 	/* The walk. */
 	mounts = calloc(1, sizeof(*mounts));
@@ -133,4 +175,21 @@ fm_mounts_close(
 	/* Its copy and itself. */
 	free(mounts->list);
 	free(mounts);
+}
+
+/* Reads the monotonic clock in milliseconds (0 when it cannot be read). */
+static uint64_t
+mounts_now(
+	void)
+{
+	struct timespec now;
+	int error;
+
+	/* A clock that fails reads as zero. */
+	error = clock_gettime(CLOCK_MONOTONIC, &now);
+	if (error != 0)
+		return 0;
+
+	/* Succeeded: the time. */
+	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 }

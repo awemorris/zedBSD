@@ -371,13 +371,16 @@ test_mounts(void)
 	size_t count;
 	size_t index;
 	unsigned skipped;
+	int seen_system;
 	int root;
 	int added;
 	int error;
 	int next;
 
 	/* The virtual file systems are left out, the file systems of files kept. */
-	check(!kl_backend_mounts_keep("proc") && !kl_backend_mounts_keep("tmpfs") && !kl_backend_mounts_keep("squashfs"), "mounts: virtual ones left out");
+	check(!kl_backend_mounts_keep("proc") && !kl_backend_mounts_keep("sysfs") && !kl_backend_mounts_keep("devfs") && !kl_backend_mounts_keep("mqueuefs"), "mounts: pseudo ones left out");
+	check(kl_backend_mounts_keep("tmpfs") && kl_backend_mounts_keep("overlay"), "mounts: tmpfs and overlays have files (zedBSD's root, a user's tmpfs Trash)");
+	check(kl_backend_mounts_system("/dev/shm") && kl_backend_mounts_system("/run") && !kl_backend_mounts_system("/runner") && !kl_backend_mounts_system("/media/USB"), "mounts: the system's trees");
 	check(kl_backend_mounts_keep("ext4") && kl_backend_mounts_keep("ufs") && kl_backend_mounts_keep("msdosfs") && kl_backend_mounts_keep("vfat"), "mounts: file systems of files kept");
 
 	/* A path too long is left out, never cut. */
@@ -388,16 +391,22 @@ test_mounts(void)
 	check(!added, "mounts: a path too long refused");
 
 	/* This host's table: the root is there, nothing virtual, each with a type. */
-	count = kl_backend_mounts_read(mounts, KL_BACKEND_MOUNTS_MAX, &skipped);
+	error = kl_backend_mounts_read(mounts, KL_BACKEND_MOUNTS_MAX, &count, &skipped);
+	check(error == 0, "mounts: the table read");
 	root = 0;
+	seen_system = 0;
 	for (index = 0; index < count; index++) {
 		if (strcmp(mounts[index].path, "/") == 0)
 			root = 1;
-		check(kl_backend_mounts_keep(mounts[index].type), "mounts: %s (%s) is not virtual", mounts[index].path, mounts[index].type);
+		check(kl_backend_mounts_keep(mounts[index].type), "mounts: %s (%s) is not a pseudo one", mounts[index].path, mounts[index].type);
+		if (kl_backend_mounts_system(mounts[index].path))
+			seen_system = 1;
+		else
+			check(!seen_system, "mounts: %s after a system tree's mount", mounts[index].path);
 	}
 	check(root, "mounts: the root among %u (skipped %u)", (unsigned)count, skipped);
-	count = kl_backend_mounts_read(mounts, 1U, &skipped);
-	check(count == 1U, "mounts: one with room for one");
+	error = kl_backend_mounts_read(mounts, 1U, &count, &skipped);
+	check(error == 0 && count == 1U, "mounts: one with room for one");
 
 	/* The view's fifth part, its own serial. */
 	system_view_init(&view);

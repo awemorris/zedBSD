@@ -77,6 +77,7 @@ struct machine_job {
 	struct kl_backend_mount mounts[KL_BACKEND_MOUNTS_MAX];
 	size_t mount_count;
 	unsigned mounts_skipped;
+	int mounts_error;
 };
 
 /*
@@ -386,7 +387,7 @@ machine_run(
 
 	/* The mounted file systems of files (ws188-p004). */
 	if ((job->what & KL_SYSTEM_MACHINE_MOUNTS) != 0U)
-		job->mount_count = kl_backend_mounts_read(job->mounts, KL_BACKEND_MOUNTS_MAX, &job->mounts_skipped);
+		job->mounts_error = kl_backend_mounts_read(job->mounts, KL_BACKEND_MOUNTS_MAX, &job->mount_count, &job->mounts_skipped);
 
 	/* Done; a job given up is this thread's to free. */
 	(void)pthread_mutex_lock(&machine_lock);
@@ -454,6 +455,13 @@ machine_answer(
 	if (applied != KL_SYSTEM_RESULT_OK || job == NULL) {
 		machine_result(client, query->object, query->request, applied);
 		printf("KWL SYSTEM machine answer client=%llu request=%u what=%u result=%u\n", (unsigned long long)client->number, query->request, query->what, applied);
+		return;
+	}
+
+	/* A mount table that could not be read fails the query that asked it (the client keeps the mounts it had). */
+	if ((query->what & KL_SYSTEM_MACHINE_MOUNTS) != 0U && job->mounts_error != 0) {
+		machine_result(client, query->object, query->request, KL_SYSTEM_RESULT_FAILED);
+		printf("KWL SYSTEM machine answer client=%llu request=%u what=%u result=%u mounts_error=%d\n", (unsigned long long)client->number, query->request, query->what, (unsigned)KL_SYSTEM_RESULT_FAILED, job->mounts_error);
 		return;
 	}
 

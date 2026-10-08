@@ -154,6 +154,9 @@ static int main_mounts_wanted = 1;
 static uint32_t main_mounts_request;
 static uint32_t main_mounts_serial;
 
+/* The serial of the file systems last taken for Today's space left. */
+static uint32_t main_home_free_serial;
+
 /* The desktop's appearance watched for the window (ws089-p017): Files draws in its colours (palette.c); NULL without it. */
 static struct kl_appearance *main_appearance;
 
@@ -1617,6 +1620,7 @@ main_home_free_take(
 	void)
 {
 	struct kl_machine_filesystem list[KL_MACHINE_FILESYSTEMS_MAX];
+	uint32_t serial;
 	size_t count;
 	size_t index;
 	size_t length;
@@ -1624,6 +1628,12 @@ main_home_free_take(
 	size_t best_length;
 	int found;
 	int same;
+
+	/* Only an answer with new file systems (the mounts' answers are not theirs). */
+	serial = kl_system_machine_serial(main_system, KL_MACHINE_FILESYSTEMS);
+	if (serial == main_home_free_serial)
+		return;
+	main_home_free_serial = serial;
 
 	/* The file systems of the last answer. */
 	count = kl_system_machine_filesystems(main_system, list, KL_MACHINE_FILESYSTEMS_MAX);
@@ -1671,7 +1681,13 @@ main_mounts_ask(
 	void)
 {
 	uint32_t request;
+	int wanted;
 	int error;
+
+	/* A walk of Places or the Trash that found the mounts old wants them too. */
+	wanted = fm_mounts_wanted();
+	if (wanted)
+		main_mounts_wanted = 1;
 
 	/* Not wanted, or a reading already waits for its answer (the change after it is asked next). */
 	if (!main_mounts_wanted || main_mounts_request != 0U)
