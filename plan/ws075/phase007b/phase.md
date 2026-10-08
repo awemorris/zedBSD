@@ -2,7 +2,7 @@
 
 # ws075-p007b: GL 3.2 の stage の実行器（render/）: 増分 b1〜b5
 
-Status: in-progress（q833、P1。b3・b1・b2・b4 を実装と host 試験（b4 は 2026-10-09 P1、ベータ3 の合間の仕事）。次は b5（T1 の場面と依頼文、実機の 5330 の i915 が要る））
+Status: blocked（UAT 待ち）（q833、P1。b3・b1・b2・b4 を実装と host 試験（b4 は 2026-10-09 P1、ベータ3 の合間の仕事）。残りは b5（gl32 の場面と実機の 5330 の i915 の確かめ。ユーザーの規則 2026-10-08 夜で UAT 待ち））
 Disposition: normal
 Parent: [WS075](../ws.md)
 設計: [phase007/design.md](../phase007/design.md)（§5・§14 が優先）、増分の表は [phase007/phase.md](../phase007/phase.md)。

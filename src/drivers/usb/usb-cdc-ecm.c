@@ -137,6 +137,7 @@ static int ecm_get_mac(const struct ecm_binding *binding, uint8_t mac[6]);
 static int ecm_control(struct ecm_adapter *adapter, uint8_t request_type, uint8_t request, uint16_t value, void *buffer, size_t length, size_t *actual);
 static int ecm_program_packet_filter(struct ecm_adapter *adapter);
 static int ecm_urb_status_error(enum drv_usb_urb_status status);
+static int ecm_tx_status_is_error(enum drv_usb_urb_status status);
 static void ecm_completion(struct drv_usb_urb *urb, void *argument);
 static int ecm_start_urb(struct ecm_adapter *adapter, struct drv_usb_urb *urb, void *buffer, size_t length, unsigned flags);
 static int ecm_cancel_and_drain(struct drv_usb_urb *urb);
@@ -767,7 +768,27 @@ ecm_urb_status_error(
 	return EIO;
 }
 
-/* Takes one finished transfer. */
+/*
+ * Asks whether a transmit status is a genuine failure to count (ws004-p034,
+ * as CDC NCM counts it): a stall, a timeout, a disconnection or an I/O
+ * error; a cancellation by close, detach or shutdown is not one.
+ */
+static int
+ecm_tx_status_is_error(
+	enum drv_usb_urb_status status)
+{
+	/* Succeeded or not as the status is one of the four. */
+	return status == DRV_USB_URB_STALL || status == DRV_USB_URB_TIMEOUT ||
+	       status == DRV_USB_URB_DISCONNECTED ||
+	       status == DRV_USB_URB_IO_ERROR;
+}
+
+/*
+ * Takes one finished transfer.  A transmit that ended in a genuine failure
+ * adds one tx_errors (ws004-p034) before the poll is scheduled, so a close
+ * or detach after it cannot lose it; the frame's packets and bytes, counted
+ * when it was accepted, stay, and tx_dropped is not touched.
+ */
 static void
 ecm_completion(
 	struct drv_usb_urb *urb,
@@ -775,17 +796,23 @@ ecm_completion(
 {
 	struct ecm_adapter *adapter = argument;
 	unsigned long irq = spin_lock_irqsave(&adapter->lock);
+	int tx_error = 0;
 
 	/* Handles the urb condition. */
-	if (urb == adapter->notification_urb)
+	if (urb == adapter->notification_urb) {
 		adapter->notification_ready = 1;
-	else if (urb == adapter->rx_urb)
+	} else if (urb == adapter->rx_urb) {
 		adapter->rx_ready = 1;
-	else if (urb == adapter->tx_urb)
+	} else if (urb == adapter->tx_urb) {
 		adapter->tx_ready = 1;
+		tx_error = ecm_tx_status_is_error(drv_usb_urb_status(urb));
+	}
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
+	/* A genuine transmit failure, counted once outside the lock. */
+	if (tx_error)
+		net_device_tx_error(adapter->net_device);
 	net_device_schedule_poll(adapter->net_device);
 }
 

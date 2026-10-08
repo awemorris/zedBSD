@@ -42,4 +42,4 @@ Related: [WS161](../ws161/ws.md)（hidraw・smartcard・libpasskey）、[WS162](
 | p004b | `/dev/securityN` の UAPI の設計（p004 の結論から）と、TPM 2.0（5330 の PTT、QEMU の swtpm）の driver の設計、passkey の chip の方式 | planning | p004、ユーザーの review |
 | p005 | OpenSSL を独自の暗号に置き換える（リリースの前） | planning | p003 |
 | p006 | 全文規約の見直し（WS の終わり） | planning | p005 まで |
-| [p007](phase007/phase.md) | greeter で認証の方式を選ぶ UI（PIN・Password・Hardware Key、2026-10-08 ユーザー。lock の分は WS187 p003） | planned（ベータ3） | p002（PIN）cleared、Hardware Key は p003 |
+| [p007](phase007/phase.md) | greeter で認証の方式を選ぶ UI（PIN・Password・Hardware Key、2026-10-08 ユーザー。lock の分は WS187 p003） | test-wait（2026-10-09 P1 実装、T1 待ち） | p002（PIN）cleared、Hardware Key は p003 |

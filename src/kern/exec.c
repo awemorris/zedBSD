@@ -104,6 +104,7 @@ static int process_exec_file(struct process *process, const char *path, struct f
 static int exec_thread_retired(const struct thread *thread);
 static int exec_sandbox_start(struct process *parent, struct sandbox_spawn_plan *plan, struct exec_sandbox_build *build);
 static void exec_sandbox_limit(struct rlimit_record *record, uint64_t requested);
+static void exec_set_arguments(struct process *process, char *const argv[]);
 
 /*
  * Parses a #! line at the start of a file.
@@ -691,6 +692,7 @@ process_spawn_from(
 	stage = "create initial thread";
 	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
+	exec_set_arguments(process, argv);
 
 	/* Kept apart so that setproctitle can put the original back. */
 	kern_memcpy(process->command_initial, process->command,
@@ -894,6 +896,7 @@ exec_sandbox_start(
 	build->stage = "create initial thread";
 	kern_strncpy(process->command, plan->argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
+	exec_set_arguments(process, plan->argv);
 	kern_memcpy(process->command_initial, process->command, sizeof(process->command_initial));
 	error = thread_create(process, image.entry, sp, &thread);
 	if (error != 0)
@@ -1705,6 +1708,7 @@ process_exec_file(
 	process->did_exec = 1;
 	kern_strncpy(process->command, argv[0], sizeof(process->command) - 1U);
 	process->command[sizeof(process->command) - 1U] = '\0';
+	exec_set_arguments(process, argv);
 
 	/* Kept apart so that setproctitle can put the original back. */
 	kern_memcpy(process->command_initial, process->command,
@@ -1787,4 +1791,36 @@ exec_sandbox_limit(
 		record->current = requested;
 	if (requested < record->maximum)
 		record->maximum = requested;
+}
+
+/*
+ * Keeps a process's command line as exec gave it (BUG-274): argv[0] and
+ * each argument after it behind one space, cut to fit the field with its
+ * terminating NUL.  ps shows it as the args of the process.
+ */
+static void
+exec_set_arguments(
+	struct process *process,
+	char *const argv[])
+{
+	size_t used;
+	size_t length;
+	size_t room;
+	unsigned index;
+
+	/* Each argument in turn, a space before every one but the first, while there is room. */
+	used = 0U;
+	room = sizeof(process->arguments) - 1U;
+	for (index = 0U; argv != NULL && argv[index] != NULL && used < room; index++) {
+		if (index != 0U)
+			process->arguments[used++] = ' ';
+		length = kern_strlen(argv[index]);
+		if (length > room - used)
+			length = room - used;
+		kern_memcpy(process->arguments + used, argv[index], length);
+		used += length;
+	}
+
+	/* Succeeded: the line ends where it was cut. */
+	process->arguments[used] = '\0';
 }

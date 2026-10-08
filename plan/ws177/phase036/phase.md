@@ -29,3 +29,9 @@ Origin: [backlog-p2](../backlog-p2.md) の WS181 ws181-p004 の行（整列中�
 | QEMU（T1、u-guest.sh の U5: メニューを先に閉じる、desktop の切り替えで swap の取り消し） | 未実施 |
 | 出力の大きさの変更（解像度・HDMI への移動）での整列し直し | 未実施（QEMU の 1 画面では起こせない。5330 の UAT: 整列中に HDMI へ出力を移す） |
 | lock での swap の取り消し | 未実施（`--testing` の compositor は session manager が無く lock しない。5330 の UAT） |
+
+## T1-485 の FAIL（swap-cancel）の調べと直し（2026-10-09 P1）
+
+- FAIL: `swap-cancel (…reason=desktop: none)`（2 回とも）。log（t1 の `build/t1-485/u/zdesktop.log`）では、U5 の drag の間に `swap-start` が無く、desktop の切り替え（`KWL GLASS desktop=3 via=alt-shift`）の前に swap が始まっていなかった。
+- 原因は試験の側。T1-475 の直しで u.a の窓が消えて、整列が 2 窓（`clients=7;5`）になった。slot 0 は大きさが 1 つの窓 x（client 7、300x200）で、slot の中に置かれ、slot の角には居ない。試験は slot 0 の角 +(60, 22) を押していたので、窓の title に当たらなかった。code は正しい。
+- 直し: `plan/ws177/tests/u-guest.sh` に `slot_xy CLIENT`（`KWL ARRANGE clients` の行で client の slot を探し、apply の行の角を出す）を足した。U5 の drag は b（slot をいっぱいに使う窓）の slot の角から始める。T1-485 の log を写した dry run で、`slot_xy 5` が 644 52（1 回目の整列）と 16 52（recall の後）を返すことを確かめた。`sh -n` ok。

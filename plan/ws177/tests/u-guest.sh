@@ -96,6 +96,18 @@ arrange() {
 	set -- $(last "KWL ARRANGE menu item=$layout " | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\).*/\1 \2/p')
 	pointer move ${1:-640} ${2:-200} sleep 300 down sleep 60 up sleep 1500
 }
+# The top left corner (x y) of the slot of a client in the latest arrangement (its place in the clients line).
+slot_xy() {
+	slots=$(last 'KWL ARRANGE apply layout=' | sed -n 's/.*slots=//p')
+	i=1
+	for c in $(last 'KWL ARRANGE clients desktop=' | sed -n 's/.*clients=//p' | tr ';' ' '); do
+		if [ "$c" = "$1" ]; then
+			echo "$slots" | cut -d';' -f$i | sed -n 's/^[0-9]*@\([0-9]*\),\([0-9]*\),.*/\1 \2/p'
+			return
+		fi
+		i=$((i + 1))
+	done
+}
 # The clients of the latest arrangement's slots, in the slots' order ("A;B"; a surface's id is the same in every client).
 slot_ids() { last 'KWL ARRANGE clients desktop=' | sed -n 's/.*clients=//p'; }
 : > "$out/qmp.txt"
@@ -193,8 +205,8 @@ pointer move $((${1:-1100} + ${3:-20} / 2)) $((${2:-10} + ${4:-20} / 2)) sleep 3
 expect_some menu-closes-first 'KWL ARRANGE menu close via=bar'
 expect_some volume-opens 'KWL VOLUME popup open'
 tap esc
-line=$(last 'KWL ARRANGE apply layout=columns')
-set -- $(echo "$line" | sed -n 's/.*slots=[0-9]*@\([0-9]*\),\([0-9]*\),.*/\1 \2/p')
+# The drag starts on b's title: b fills its slot (x, the window of one size, sits inside its slot, not at its corner).
+set -- $(slot_xy "$b")
 pointer $(stroke $((${1:-24} + 60)) $((${2:-60} + 22)) $((${1:-24} + 200)) $((${2:-60} + 160)) 6 30) sleep 300
 key alt true; key shift true
 tap right
