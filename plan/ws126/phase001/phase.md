@@ -3,9 +3,9 @@
 # ws126-p001: 取得・検証・監査と cross build の方針
 
 Parent: [WS126](../ws.md)
-Status: planned
+Status: cleared 候補（2026-10-09 P1: 3.14.8 の取得・Sigstore の署名の確かめ・監査・patch・configure の試し・module の表・方式。Q1 の判定待ち）
 Disposition: normal
-Queue / attempts: none
+Queue / attempts: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間。Q1「WS126 は進めて。2026-10-09 のユーザーの一覧が優先」）
 Goal: CPython の tarball を確定・検証・監査し、zedbsd 向けの configure を試して、module ごとの依存と cross build の方式を決める。
 Prerequisites: なし
 Investigation bound: 3 時間。build の全体は p002。
@@ -32,3 +32,13 @@ Investigation bound: 3 時間。build の全体は p002。
 ## 依存・未決の判断
 
 依存なし。D1（T3 の範囲）は p004、D2（pip）・D3（image の既定）は p005 までに要る。
+
+## 記録（2026-10-09 P1）
+
+- 版: 3.15.0 の final は未公開（rc3 まで）→ 3.14.8。取得・size・SHA-256・ROOT・Sigstore の署名（openssl で確かめた、hugo@python.org、GitHub の OIDC）は [provenance.md](../provenance.md)。`archive.sh verify` は rc 0。
+- 監査: permissive だけ。GPL の文言のある 4 file は license の文（既知の表に足した）。
+- patch: `userland/packages/lang/python3/patches/0001-recognise-the-zedbsd-target.patch`（config.sub と configure）。tarball に dry-run で当たる。
+- configure の試し: 同じ版の host 用 Python（`build/ws126/host-install`）を作り、cross の configure（`--host=x86_64-unknown-zedbsd --enable-shared`、cache の 3 つ、PKG_CONFIG_LIBDIR は空）が rc 0。module は yes 68。missing は zlib・ssl・hashlib・ctypes・lzma・bz2・zstd・uuid と、範囲外の curses・gdbm・readline・tkinter。sqlite3 は disabled。表と方式は [design.md](../design.md)。
+- 見つけたこと: host の pkg-config を使うと host の libffi・lzma・zstd を見つけて誤る。build は zedBSD の stage だけを見る pkg-config で行う（p002）。
+- build はしていない（p002）。
+- 注意（Q1 に報告済み）: license の監査の道具 `audit-licenses.sh` は、中で自分の mktemp の directory を `rm -rf` する（trap）。担当の規則（script の中の host の rm は不可）に当たるのに、1 回走らせた。消えたのはその道具の mktemp の directory だけ。
