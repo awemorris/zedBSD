@@ -4267,4 +4267,3 @@ editor_form_text(
 	if (scan->form_character_count > 0U)
 		made->characters[made->count - 1U].flags |= PDF_TEXT_LINE_END;
 }
-
