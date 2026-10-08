@@ -505,6 +505,7 @@ sleep_pending(
 {
 	struct kwl_sleep *sleep;
 	enum kwl_sleep_step step;
+	const char *via_name;
 	char reason[32];
 	int locked;
 	int error;
@@ -527,7 +528,8 @@ sleep_pending(
 	 * (ws187-p002, the 2026-10-08 user decision).
 	 */
 	if (!server->greeter && !server->locked) {
-		snprintf(reason, sizeof(reason), "sleep-%s", kwl_sleep_via_name(sleep->via));
+		via_name = kwl_sleep_via_name(sleep->via);
+		snprintf(reason, sizeof(reason), "sleep-%s", via_name);
 		locked = kwl_lock(server, reason);
 		if (!locked) {
 			sleep_fail(server, "not-locked", now_ms);

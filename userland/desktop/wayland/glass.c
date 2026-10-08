@@ -272,6 +272,7 @@ static int atlas_icons(struct kwl_glass *glass, uint32_t *pen_y);
 static int atlas_mark(struct kwl_glass *glass, uint32_t *pen_y);
 static int tiles_create(struct kwl_server *server, struct kwl_glass *glass);
 static int large_fill(struct kwl_glass *glass, struct truetype_face *face, unsigned pixels);
+static void large_put(struct kwl_glass *glass, const uint8_t *bitmap, uint32_t pen_x, uint32_t width, uint32_t height);
 static const struct glass_glyph *large_glyph_of(struct kwl_glass *glass, uint32_t character);
 static void atlas_put(struct kwl_glass *glass, const uint8_t *bitmap, uint32_t x, uint32_t y, uint32_t width, uint32_t height);
 static int glass_open_face(struct kwl_glass *glass, const char *path);
@@ -2070,7 +2071,11 @@ glass_large_prepare(
 	return 0;
 }
 
-/* The width in pixels of a line of the large digits (0 while none are made; other characters count nothing). */
+/*
+ * Measures a line of the large digits in pixels.
+ *
+ * It is 0 while none are made, and other characters count nothing.
+ */
 int32_t
 glass_large_text_width(
 	struct kwl_server *server,
@@ -2098,7 +2103,11 @@ glass_large_text_width(
 	return width;
 }
 
-/* Draws a line of the large digits from x on a baseline (other characters are passed over). */
+/*
+ * Draws a line of the large digits from x on a baseline.
+ *
+ * Other characters are passed over.
+ */
 void
 glass_draw_large_text(
 	struct kwl_server *server,
@@ -2618,15 +2627,12 @@ large_fill(
 	struct truetype_face *face,
 	unsigned pixels)
 {
+	/* One glyph's coverage while it is rendered; static to keep its 64 KiB off the stack. */
 	static uint8_t bitmap[GLASS_LARGE_SIDE * GLASS_LARGE_SIDE];
 	struct truetype_glyph metrics;
 	struct glass_glyph *glyph;
-	uint32_t *row;
 	uint32_t codepoint;
 	uint32_t pen_x;
-	uint32_t x;
-	uint32_t y;
-	uint32_t value;
 	unsigned index;
 	unsigned id;
 	int error;
@@ -2670,18 +2676,14 @@ large_fill(
 		glyph->top = metrics.top;
 		glyph->advance = metrics.advance;
 
-		/* Its coverage as premultiplied white. */
+		/* Renders a glyph that has a box. */
 		if (metrics.width != 0U && metrics.height != 0U) {
 			error = truetype_render_glyph(face, id, &metrics, bitmap, metrics.width, sizeof(bitmap));
 			if (error != 0)
 				return error;
-			for (y = 0; y < metrics.height; y++) {
-				row = (uint32_t *)((unsigned char *)glass->large.map + (size_t)y * glass->large.row_pitch);
-				for (x = 0; x < metrics.width; x++) {
-					value = bitmap[y * metrics.width + x];
-					row[pen_x + x] = (value << 24) | (value << 16) | (value << 8) | value;
-				}
-			}
+
+			/* Stores its coverage as premultiplied white. */
+			large_put(glass, bitmap, pen_x, metrics.width, metrics.height);
 		}
 
 		/* The pen moves past it and a clear column. */
@@ -2690,6 +2692,33 @@ large_fill(
 
 	/* Succeeded: every glyph is drawn. */
 	return 0;
+}
+
+/* Stores a glyph's coverage as premultiplied white at a column of the large image. */
+static void
+large_put(
+	struct kwl_glass *glass,
+	const uint8_t *bitmap,
+	uint32_t pen_x,
+	uint32_t width,
+	uint32_t height)
+{
+	uint32_t *row;
+	uint32_t x;
+	uint32_t y;
+	uint32_t value;
+
+	/* Copies each row of the bitmap. */
+	for (y = 0; y < height; y++) {
+		/* Finds the image's row. */
+		row = (uint32_t *)((unsigned char *)glass->large.map + (size_t)y * glass->large.row_pitch);
+
+		/* Spreads each coverage value over the four channels. */
+		for (x = 0; x < width; x++) {
+			value = bitmap[y * width + x];
+			row[pen_x + x] = (value << 24) | (value << 16) | (value << 8) | value;
+		}
+	}
 }
 
 /* Gives the large glyph of a character: a digit or the colon (NULL for any other). */
