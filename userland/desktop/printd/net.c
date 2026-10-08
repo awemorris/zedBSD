@@ -210,6 +210,78 @@ pd_send_file(
 }
 
 /*
+ * Sends a job's spooled file as the chunks of an HTTP/1.1 body
+ * (Transfer-Encoding: chunked, BUG-271): each piece after its length in
+ * hexadecimal, then the last chunk of length 0 that ends the body.  Returns
+ * 0, ECANCELED when the job was asked to stop, or an errno value.
+ */
+int
+pd_send_file_chunked(
+	int fd,
+	struct pd_job *job)
+{
+	unsigned char *chunk;
+	char size_line[24];
+	uint64_t done;
+	ssize_t got;
+	int length;
+	int file;
+	int error;
+	int stop;
+
+	/* The file and a piece's room. */
+	file = open(job->file, O_RDONLY | O_CLOEXEC);
+	if (file < 0)
+		return errno;
+	chunk = malloc(NET_CHUNK);
+	if (chunk == NULL) {
+		(void)close(file);
+		return ENOMEM;
+	}
+
+	/* Piece by piece, each a chunk, as many bytes as were copied. */
+	done = 0;
+	error = 0;
+	while (done < job->size) {
+		/* A job asked to stop stops between two pieces. */
+		stop = pd_cancelled(job);
+		if (stop) {
+			error = ECANCELED;
+			break;
+		}
+
+		/* The next piece. */
+		got = read(file, chunk, NET_CHUNK);
+		if (got < 0 && errno == EINTR)
+			continue;
+		if (got <= 0) {
+			error = EIO;
+			break;
+		}
+
+		/* Its length's line, the piece and the line's end after it. */
+		length = snprintf(size_line, sizeof(size_line), "%lx\r\n", (unsigned long)got);
+		error = pd_write_all(fd, size_line, (size_t)length);
+		if (error == 0)
+			error = pd_write_all(fd, chunk, (size_t)got);
+		if (error == 0)
+			error = pd_write_all(fd, "\r\n", 2U);
+		if (error != 0)
+			break;
+		done += (uint64_t)got;
+	}
+
+	/* The last chunk ends the body. */
+	if (error == 0)
+		error = pd_write_all(fd, "0\r\n\r\n", 5U);
+
+	/* The file and the room go. */
+	free(chunk);
+	(void)close(file);
+	return error;
+}
+
+/*
  * Reads what is there (waiting up to the socket's time out).  Returns the
  * count, 0 at the end, or -1.
  */

@@ -86,7 +86,19 @@ def make_ipp(index):
 					break
 				key, _, value = header.decode().partition(":")
 				headers[key.strip().lower()] = value.strip()
-			body = self.rfile.read(int(headers.get("content-length", "0")))
+			if "chunked" in headers.get("transfer-encoding", "").lower():
+				# ws177-p032: printd sends a Print-Job's document in chunks.
+				body = b""
+				while True:
+					size = int(self.rfile.readline().split(b";")[0].strip() or b"0", 16)
+					if size == 0:
+						while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+							pass
+						break
+					body += self.rfile.read(size)
+					self.rfile.readline()
+			else:
+				body = self.rfile.read(int(headers.get("content-length", "0")))
 			if not line.split()[1] == b"/ipp/print":
 				self.wfile.write(b"HTTP/1.1 404 Not Found\r\nContent-Length: 0\r\n\r\n")
 				return
