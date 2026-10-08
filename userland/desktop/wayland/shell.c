@@ -1891,6 +1891,65 @@ kwl_glass_draw_drag_badge(
 }
 
 /*
+ * Draws the mark of what a drag's drop would do where the pointer is
+ * (data.c decides it, ws189-p002, plan/ws189/phase001/phase.md section
+ * 3.1): a round mark below and right of the pointer, over the drag's icon
+ * or badge -- a green one with a plus for a copy, one of the accent with
+ * three dots for a choice to be asked, a red one with a bar (no entry)
+ * where the drop would be given up, and none for a move or nothing to say.
+ */
+void
+kwl_glass_draw_drag_mark(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	unsigned state)
+{
+	static const float copy_green[4] = { 0.19f, 0.69f, 0.31f, 0.95f };
+	static const float refused_red[4] = { 0.82f, 0.19f, 0.19f, 0.95f };
+	static const float white[4] = { 1.0f, 1.0f, 1.0f, 1.0f };
+	static const float rim[4] = { 1.0f, 1.0f, 1.0f, 0.9f };
+	float accent[4];
+	unsigned kept;
+	float x;
+	float y;
+
+	/* The mark's centre, below and right of the pointer. */
+	x = (float)server->pointer_x + 18.0f;
+	y = (float)server->pointer_y + 18.0f;
+
+	/* What to draw for the state. */
+	switch (state) {
+	case KWL_DND_STATE_COPY:
+		/* A white rim, the green disc, and a plus. */
+		glass_draw_solid(server, command, x - 10.0f, y - 10.0f, 20.0f, 20.0f, 10.0f, rim);
+		glass_draw_solid(server, command, x - 9.0f, y - 9.0f, 18.0f, 18.0f, 9.0f, copy_green);
+		glass_draw_solid(server, command, x - 5.0f, y - 1.0f, 10.0f, 2.0f, 1.0f, white);
+		glass_draw_solid(server, command, x - 1.0f, y - 5.0f, 2.0f, 10.0f, 1.0f, white);
+		break;
+	case KWL_DND_STATE_ASK:
+		/* A white rim, the accent's disc, and three dots. */
+		kwl_accent_colour(server, server->dark, KWL_ACCENT_FILL, 0.95f, accent);
+		kept = kwl_accent_as_is(server);
+		glass_draw_solid(server, command, x - 10.0f, y - 10.0f, 20.0f, 20.0f, 10.0f, rim);
+		glass_draw_solid(server, command, x - 9.0f, y - 9.0f, 18.0f, 18.0f, 9.0f, accent);
+		kwl_accent_done(server, kept);
+		glass_draw_solid(server, command, x - 5.0f, y - 1.0f, 2.0f, 2.0f, 1.0f, white);
+		glass_draw_solid(server, command, x - 1.0f, y - 1.0f, 2.0f, 2.0f, 1.0f, white);
+		glass_draw_solid(server, command, x + 3.0f, y - 1.0f, 2.0f, 2.0f, 1.0f, white);
+		break;
+	case KWL_DND_STATE_REFUSED:
+		/* A white rim, the red disc, and a bar across: no entry. */
+		glass_draw_solid(server, command, x - 10.0f, y - 10.0f, 20.0f, 20.0f, 10.0f, rim);
+		glass_draw_solid(server, command, x - 9.0f, y - 9.0f, 18.0f, 18.0f, 9.0f, refused_red);
+		glass_draw_solid(server, command, x - 5.0f, y - 1.5f, 10.0f, 3.0f, 1.0f, white);
+		break;
+	default:
+		/* A move, or nothing to say: no mark. */
+		break;
+	}
+}
+
+/*
  * Tells whether the glass look is still (ws035-p055): nothing moves or
  * fades by itself -- no window animation, move, pull or drag, no Home or
  * Wiseview, no desktop sliding, no see-through bodies -- so that a change

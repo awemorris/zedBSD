@@ -35,8 +35,6 @@
 static unsigned shm_serial;
 
 static struct keiui_shm_buffer *shm_ready(struct kl_window *window);
-static int shm_make(struct kl_window *window, struct keiui_shm_buffer *buffer, int width, int height);
-static void shm_free(struct keiui_shm_buffer *buffer);
 static void shm_release(void *data, struct wl_buffer *buffer);
 
 /* A buffer given back by the compositor. */
@@ -88,43 +86,16 @@ keiui_shm_close(
 
 	/* Each buffer. */
 	for (index = 0; index < KEIUI_SHM_BUFFERS; index++)
-		shm_free(&window->buffers[index]);
+		keiui_shm_free(&window->buffers[index]);
 }
 
-/* Finds a buffer the compositor has given back, of the frame's size (remade when the size changed); NULL when none is free. */
-static struct keiui_shm_buffer *
-shm_ready(
-	struct kl_window *window)
-{
-	struct keiui_shm_buffer *buffer;
-	int index;
-	int error;
-
-	/* The first free buffer. */
-	for (index = 0; index < KEIUI_SHM_BUFFERS; index++) {
-		buffer = &window->buffers[index];
-		if (buffer->busy)
-			continue;
-
-		/* Of the size already. */
-		if (buffer->buffer != NULL && buffer->width == (int)window->shm_width && buffer->height == (int)window->shm_height)
-			return buffer;
-
-		/* Remade at the size. */
-		shm_free(buffer);
-		error = shm_make(window, buffer, (int)window->shm_width, (int)window->shm_height);
-		if (error != 0)
-			return NULL;
-		return buffer;
-	}
-
-	/* Both are the compositor's still. */
-	return NULL;
-}
-
-/* Makes a wl_shm buffer of a size in a shared memory object of its own; 0 or an errno value. */
-static int
-shm_make(
+/*
+ * Makes a wl_shm buffer of a size in a shared memory object of its own
+ * (the window's frames, and a drag's icon, clipboard.c).  Returns 0 or an
+ * errno value.
+ */
+int
+keiui_shm_make(
 	struct kl_window *window,
 	struct keiui_shm_buffer *buffer,
 	int width,
@@ -191,9 +162,11 @@ shm_make(
 	return 0;
 }
 
-/* Frees a buffer and its memory. */
-static void
-shm_free(
+/*
+ * Frees a buffer and its memory.
+ */
+void
+keiui_shm_free(
 	struct keiui_shm_buffer *buffer)
 {
 	/* The protocol object, then the memory. */
@@ -202,6 +175,37 @@ shm_free(
 	if (buffer->pixels != NULL)
 		munmap(buffer->pixels, buffer->size);
 	memset(buffer, 0, sizeof(*buffer));
+}
+
+/* Finds a buffer the compositor has given back, of the frame's size (remade when the size changed); NULL when none is free. */
+static struct keiui_shm_buffer *
+shm_ready(
+	struct kl_window *window)
+{
+	struct keiui_shm_buffer *buffer;
+	int index;
+	int error;
+
+	/* The first free buffer. */
+	for (index = 0; index < KEIUI_SHM_BUFFERS; index++) {
+		buffer = &window->buffers[index];
+		if (buffer->busy)
+			continue;
+
+		/* Of the size already. */
+		if (buffer->buffer != NULL && buffer->width == (int)window->shm_width && buffer->height == (int)window->shm_height)
+			return buffer;
+
+		/* Remade at the size. */
+		keiui_shm_free(buffer);
+		error = keiui_shm_make(window, buffer, (int)window->shm_width, (int)window->shm_height);
+		if (error != 0)
+			return NULL;
+		return buffer;
+	}
+
+	/* Both are the compositor's still. */
+	return NULL;
 }
 
 /* The compositor gave a buffer back: free to draw into. */

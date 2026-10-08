@@ -319,6 +319,7 @@ int kwl_glass_open(struct kwl_server *server);
 void kwl_glass_close(struct kwl_server *server);
 void kwl_glass_draw(struct kwl_server *server, VkCommandBuffer command, struct kwl_object **windows, unsigned count);
 void kwl_glass_draw_drag_badge(struct kwl_server *server, VkCommandBuffer command);
+void kwl_glass_draw_drag_mark(struct kwl_server *server, VkCommandBuffer command, unsigned state);
 void kwl_glass_draw_head(struct kwl_server *server, VkCommandBuffer command, struct kwl_object **windows, unsigned count);
 void kwl_compose_cursor(struct kwl_server *server, VkCommandBuffer command);
 

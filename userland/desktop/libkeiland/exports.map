@@ -386,6 +386,9 @@
 		kl_window_accept_drops;
 		kl_window_take_drop;
 		kl_window_drag_text;
+		kl_window_start_drag_icon;
+		kl_drop_frame;
+		kl_drop_caret;
 		kl_window_vulkan_surface;
 		kl_ui_key;
 		kl_ui_set_focus;

@@ -927,11 +927,17 @@ surface_request(
 		if (size != 12U)
 			return EPROTO;
 
-		/* Nonzero offsets cannot describe this full-output scanout contract. */
+		/*
+		 * Nonzero offsets cannot describe this full-output scanout
+		 * contract for a window or a cursor; a surface of no role (a
+		 * drag's icon, ws189-p002) keeps them, and they move it.
+		 */
 		x = word_at(bytes, 4);
 		y = word_at(bytes, 8);
-		if (x != 0 || y != 0)
+		if ((x != 0 || y != 0) && (surface->role != NULL || surface->cursor_role))
 			return EPROTO;
+		surface->pending_dx += (int32_t)x;
+		surface->pending_dy += (int32_t)y;
 
 		/* Only a buffer created by this connection may supply pending surface content. */
 		id = word_at(bytes, 0);
@@ -1066,6 +1072,12 @@ surface_commit(
 	role = surface->role;
 	server = surface->client->server;
 	attached = surface->attached;
+
+	/* The offsets attached since the last commit move the surface from here (a drag's icon, ws189-p002). */
+	surface->offset_x += surface->pending_dx;
+	surface->offset_y += surface->pending_dy;
+	surface->pending_dx = 0;
+	surface->pending_dy = 0;
 	if (surface->cursor_role || role == NULL) {
 		error = kwl_surface_queue(surface);
 		if (error != 0)

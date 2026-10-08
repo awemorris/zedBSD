@@ -85,6 +85,8 @@ int kwl_apps_tile_at(const struct apps_rect *tiles, unsigned count, int32_t x, i
 int kwl_apps_inside(const struct apps_rect *rect, int32_t x, int32_t y);
 void kwl_apps_bar_show(struct kwl_server *server, const struct apps_view *view, const char *key, unsigned via);
 void kwl_apps_bar_hide(struct kwl_server *server, const char *why);
+int kwl_apps_bar_drag_motion(struct kwl_server *server);
+void kwl_apps_bar_drag_end(struct kwl_server *server);
 int kwl_apps_bar_panel(struct kwl_server *server, const struct apps_view *view, const char *key, struct apps_panel *panel);
 
 #endif
