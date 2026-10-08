@@ -820,10 +820,10 @@ def emacs_shell(item):
 	run.type("shell")
 	run.key("enter")
 	time.sleep(3.0)
-	run.type("ls /")
+	run.type("stty size; ls /")
 	run.key("enter")
 	time.sleep(2.0)
-	item.step("emacs -nw, M-x shell, ls /")
+	item.step("emacs -nw, M-x shell, stty size; ls /")
 	run.shot(item, "shell-ls")
 	_, listing = run.sh("ls / | wc -l")
 	run.key("ctrl+x", "ctrl+c")
@@ -831,7 +831,7 @@ def emacs_shell(item):
 	run.type("yes")
 	run.key("enter")
 	time.sleep(1.0)
-	item.person(f"ls / in the shell buffer: {listing.strip()} names in even columns as in a terminal, nothing broken (BUG-242)")
+	item.person(f"ls / in the shell buffer: {listing.strip()} names in even columns as in a terminal, nothing broken; stty size above it 0 0 (the shell's pty has no size, BUG-242)")
 
 
 # BUG-259: PDF Viewer draws its pages again only when a resize ends.
