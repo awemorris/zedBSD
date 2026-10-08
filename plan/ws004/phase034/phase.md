@@ -4,7 +4,7 @@ Last updated: 2026-09-01
 
 Phase ID: `ws004-p034`
 
-Status: planned/deferred; nonblocking; not queued
+Status: implemented, test-wait（2026-10-09 P1: code と build まで。p019 の production-source の ECM の fixture は 2026-10-03 の repository の作り直しで tree に無い。QEMU の ECM の確かめは Q1 の判断）
 
 Parent: [WS004 hardware expansion](../ws.md)
 
@@ -77,3 +77,9 @@ Return to planning if ECM cannot adopt the q054 helper without changing the
 common counter meanings, USB terminal-claim contract, or public UAPI. Do not
 extract a shared ECM/NCM backend, add autonomous TX recovery, or turn this
 nonblocking accounting follow-up into a physical campaign.
+
+## 2026-10-09 P1（ベータ3 の合間の仕事）
+
+- 実装（`src/drivers/usb/usb-cdc-ecm.c`）: 新しい `ecm_tx_status_is_error()`（CDC NCM の `ncm_tx_status_is_error()` と同じ 4 つ: STALL・TIMEOUT・DISCONNECTED・IO_ERROR）。`ecm_completion()` は TX の URB の完了でこれを adapter の lock の中で決め、lock の外で `net_device_tx_error()` を 1 回呼んでから poll を予約する（NCM と同じ順。close・detach の前に数え終わる）。CANCELLED は数えない。tx_packets・tx_bytes（受け付けた時に数える）と tx_dropped（同期の拒否）は変えない。新しい USB・network の API は無い。
+- 確認: `make ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p1-ws177 build/p1-ws177/vmunix`（-Werror、`usb-cdc-ecm.o` を含む、warning 0）。style-check は前より 1 件少ない（新しい指摘 0）。
+- 未実施: 計画の 2・3（production-source の ECM の fixture の拡張と、ordinary・ASan/UBSan・analyzer の実行）は、fixture が tree に無いので行っていない。作るなら新しい host の fixture（ecm の source を stub の USB core と net_device で包む）が要る。QEMU の p019 の usb-net の 4 cell（`plan/ws004/tests/qemu-usb-cdc-ecm.mk`）が今の build の規則で動くかは確かめていない。
