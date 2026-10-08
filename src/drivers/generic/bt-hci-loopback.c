@@ -69,6 +69,15 @@
  * scan is on, it connects again by itself and asks for its control channel
  * before any security.  The worker sends these timed reports.
  *
+ * 0A:0B:0C:0D:0E:04 is an LE HOG mouse (ws143-p005 i03), bonded already
+ * (the test writes its bond: LTK 00 11 .. FF, EDIV 0, Rand 0) and not
+ * advertised in the scan: it connects on handle 0x044 to LE Create
+ * Connection at its address, or from the filter accept list when it is
+ * listed (with Enhanced Connection Complete when its LE mask bit is on),
+ * asks its MTU at once, takes LE Enable Encryption with that key only,
+ * serves a fixed GATT table (the HID service's reads need encryption), and
+ * once its report's CCC is on notifies X +5 every second.
+ *
  * The reset (BT_IOC_RESET) drops what is not delivered yet and queues the
  * reset's notice.  A worker thread delivers everything; a packet the class
  * has no room for waits for the room call, so nothing is dropped.
@@ -155,9 +164,11 @@
 #define LOOPBACK_HANDLE_BREDR		0x0040U
 #define LOOPBACK_HANDLE_LE		0x0041U
 #define LOOPBACK_HANDLE_MOUSE		0x0043U
+#define LOOPBACK_HANDLE_HOG		0x0044U
 #define LOOPBACK_HANDLE_PAIRING		0x0045U
 #define LOOPBACK_DEVICE_NUMERIC		0x01U
 #define LOOPBACK_DEVICE_HID_MOUSE	0x02U
+#define LOOPBACK_DEVICE_HOG		0x04U
 #define LOOPBACK_DEVICE_MOUSE		0x03U
 #define LOOPBACK_DEVICE_DEBUG		0x05U
 #define LOOPBACK_DEVICE_SHORT		0x06U
@@ -241,6 +252,33 @@
 #define LOOPBACK_MOUSE_MS		1000U
 #define LOOPBACK_MOUSE_MOVES		4U
 
+/* LE's commands of the HOG mouse: the filter accept list, LE Enable Encryption. */
+#define LOOPBACK_OP_LE_CLEAR_LIST	0x2010U
+#define LOOPBACK_OP_LE_ADD_LIST		0x2011U
+#define LOOPBACK_OP_LE_ENCRYPT		0x2019U
+
+/* The HOG mouse's ATT: its MTU, the opcodes it serves, its errors, its report's and its CCC's handles, its table's size. */
+#define LOOPBACK_ATT_MTU		23U
+#define LOOPBACK_ATT_ERROR		0x01U
+#define LOOPBACK_ATT_MTU_REQUEST	0x02U
+#define LOOPBACK_ATT_MTU_RESPONSE	0x03U
+#define LOOPBACK_ATT_FIND_INFO		0x04U
+#define LOOPBACK_ATT_READ_BY_TYPE	0x08U
+#define LOOPBACK_ATT_READ		0x0aU
+#define LOOPBACK_ATT_READ_BLOB		0x0cU
+#define LOOPBACK_ATT_READ_GROUP		0x10U
+#define LOOPBACK_ATT_WRITE		0x12U
+#define LOOPBACK_ATT_WRITE_RESPONSE	0x13U
+#define LOOPBACK_ATT_NOTIFICATION	0x1bU
+#define LOOPBACK_ATT_INVALID_HANDLE	0x01U
+#define LOOPBACK_ATT_INVALID_OFFSET	0x07U
+#define LOOPBACK_ATT_NOT_SUPPORTED	0x06U
+#define LOOPBACK_ATT_NOT_FOUND		0x0aU
+#define LOOPBACK_ATT_INSUFFICIENT	0x0fU
+#define LOOPBACK_HOG_REPORT		0x0016U
+#define LOOPBACK_HOG_REPORT_CCC		0x0017U
+#define LOOPBACK_HOG_ATTRIBUTES		21U
+
 /* The steps of the timed reports: none, the keyboard's four, the mouse's moves and its coming back. */
 #define LOOPBACK_STEP_NONE		0U
 #define LOOPBACK_STEP_RELEASE		1U
@@ -289,6 +327,30 @@ struct loopback_link {
 };
 
 /*
+ * The LE HOG mouse's connection: up, encrypted, in the filter accept
+ * list, a connection from the list waiting, its report's CCC on, and its
+ * next notification (ticks, 0: none).
+ */
+struct loopback_hog {
+	unsigned connected;
+	unsigned encrypted;
+	unsigned listed;
+	unsigned armed;
+	unsigned notifying;
+	uint64_t due;
+};
+
+/* One attribute of the HOG mouse's table: its handle, type, group end (a service), value, and whether reading it needs encryption. */
+struct loopback_attribute {
+	uint16_t handle;
+	uint16_t type;
+	uint16_t end;
+	const uint8_t *value;
+	uint8_t length;
+	uint8_t encrypted_only;
+};
+
+/*
  * The loopback controller's state, one for the kernel's life.
  *
  * lock guards the waiting packets (ring), the flood still to send, the
@@ -321,6 +383,7 @@ struct loopback_controller {
 	struct mutex peers;
 	uint8_t device[6];
 	struct loopback_link links[LOOPBACK_LINKS];
+	struct loopback_hog hog;
 	uint8_t scan_enable;
 	struct drv_bt_hci *hci;
 	struct thread *worker;
@@ -329,6 +392,62 @@ struct loopback_controller {
 
 /* The one loopback controller, zero until it is registered. */
 static struct loopback_controller loopback;
+
+/*
+ * The HOG mouse's GATT table (phase005 section 6): GAP's name; the HID
+ * service (information, the report map of a boot mouse with report ID 1,
+ * one input report with its CCC and its reference {1, input}, protocol
+ * mode); Battery (level 80, its CCC); Device Information (PnP ID: source
+ * 1, vendor 0x1209, product 0x4842, version 0x0100).  The values are as
+ * GATT has them (little-endian).
+ */
+static const uint8_t loopback_hog_gap[2] = { 0x00U, 0x18U };
+static const uint8_t loopback_hog_name_declaration[5] = { 0x02U, 0x03U, 0x00U, 0x00U, 0x2aU };
+static const uint8_t loopback_hog_name[9] = { 'H', 'O', 'G', ' ', 'M', 'o', 'u', 's', 'e' };
+static const uint8_t loopback_hog_hid[2] = { 0x12U, 0x18U };
+static const uint8_t loopback_hog_information_declaration[5] = { 0x02U, 0x12U, 0x00U, 0x4aU, 0x2aU };
+static const uint8_t loopback_hog_information[4] = { 0x11U, 0x01U, 0x00U, 0x02U };
+static const uint8_t loopback_hog_map_declaration[5] = { 0x02U, 0x14U, 0x00U, 0x4bU, 0x2aU };
+static const uint8_t loopback_hog_map[52] = {
+	0x05U, 0x01U, 0x09U, 0x02U, 0xa1U, 0x01U, 0x85U, 0x01U, 0x09U, 0x01U, 0xa1U, 0x00U, 0x05U, 0x09U, 0x19U, 0x01U,
+	0x29U, 0x03U, 0x15U, 0x00U, 0x25U, 0x01U, 0x95U, 0x03U, 0x75U, 0x01U, 0x81U, 0x02U, 0x95U, 0x01U, 0x75U, 0x05U,
+	0x81U, 0x01U, 0x05U, 0x01U, 0x09U, 0x30U, 0x09U, 0x31U, 0x15U, 0x81U, 0x25U, 0x7fU, 0x75U, 0x08U, 0x95U, 0x02U,
+	0x81U, 0x06U, 0xc0U, 0xc0U,
+};
+static const uint8_t loopback_hog_report_declaration[5] = { 0x12U, 0x16U, 0x00U, 0x4dU, 0x2aU };
+static const uint8_t loopback_hog_ccc[2] = { 0x00U, 0x00U };
+static const uint8_t loopback_hog_reference[2] = { 0x01U, 0x01U };
+static const uint8_t loopback_hog_mode_declaration[5] = { 0x06U, 0x1aU, 0x00U, 0x4eU, 0x2aU };
+static const uint8_t loopback_hog_mode[1] = { 0x01U };
+static const uint8_t loopback_hog_battery[2] = { 0x0fU, 0x18U };
+static const uint8_t loopback_hog_level_declaration[5] = { 0x12U, 0x32U, 0x00U, 0x19U, 0x2aU };
+static const uint8_t loopback_hog_level[1] = { 80U };
+static const uint8_t loopback_hog_info[2] = { 0x0aU, 0x18U };
+static const uint8_t loopback_hog_pnp_declaration[5] = { 0x02U, 0x42U, 0x00U, 0x50U, 0x2aU };
+static const uint8_t loopback_hog_pnp[7] = { 0x01U, 0x09U, 0x12U, 0x42U, 0x48U, 0x00U, 0x01U };
+static const struct loopback_attribute loopback_hog_table[LOOPBACK_HOG_ATTRIBUTES] = {
+	{ 0x0001U, 0x2800U, 0x0005U, loopback_hog_gap, 2U, 0U },
+	{ 0x0002U, 0x2803U, 0U, loopback_hog_name_declaration, 5U, 0U },
+	{ 0x0003U, 0x2a00U, 0U, loopback_hog_name, 9U, 0U },
+	{ 0x0010U, 0x2800U, 0x0020U, loopback_hog_hid, 2U, 0U },
+	{ 0x0011U, 0x2803U, 0U, loopback_hog_information_declaration, 5U, 0U },
+	{ 0x0012U, 0x2a4aU, 0U, loopback_hog_information, 4U, 1U },
+	{ 0x0013U, 0x2803U, 0U, loopback_hog_map_declaration, 5U, 0U },
+	{ 0x0014U, 0x2a4bU, 0U, loopback_hog_map, 52U, 1U },
+	{ 0x0015U, 0x2803U, 0U, loopback_hog_report_declaration, 5U, 0U },
+	{ 0x0016U, 0x2a4dU, 0U, NULL, 0U, 1U },
+	{ 0x0017U, 0x2902U, 0U, loopback_hog_ccc, 2U, 0U },
+	{ 0x0018U, 0x2908U, 0U, loopback_hog_reference, 2U, 1U },
+	{ 0x0019U, 0x2803U, 0U, loopback_hog_mode_declaration, 5U, 0U },
+	{ 0x001aU, 0x2a4eU, 0U, loopback_hog_mode, 1U, 1U },
+	{ 0x0030U, 0x2800U, 0x0033U, loopback_hog_battery, 2U, 0U },
+	{ 0x0031U, 0x2803U, 0U, loopback_hog_level_declaration, 5U, 0U },
+	{ 0x0032U, 0x2a19U, 0U, loopback_hog_level, 1U, 0U },
+	{ 0x0033U, 0x2902U, 0U, loopback_hog_ccc, 2U, 0U },
+	{ 0x0040U, 0x2800U, 0x0042U, loopback_hog_info, 2U, 0U },
+	{ 0x0041U, 0x2803U, 0U, loopback_hog_pnp_declaration, 5U, 0U },
+	{ 0x0042U, 0x2a50U, 0U, loopback_hog_pnp, 7U, 0U },
+};
 
 /*
  * The HID devices' SDP records, as the attribute lists of a
@@ -423,6 +542,12 @@ static int loopback_report(struct loopback_link *link, const uint8_t *report, si
 static int loopback_reports_start(struct loopback_link *link);
 static int loopback_step(struct loopback_link *link, uint64_t now);
 static int loopback_peers_tick(void);
+static int loopback_hog_connect(void);
+static int loopback_hog_notify(void);
+static int loopback_hog_peer(uint16_t cid, const uint8_t *payload, size_t length);
+static int loopback_hog_att(const uint8_t *pdu, size_t length);
+static size_t loopback_hog_list(const uint8_t *request, uint8_t *out);
+static size_t loopback_att_error(uint8_t *out, uint8_t request, uint16_t handle, uint8_t code);
 static uint16_t loopback_get16(const uint8_t *bytes);
 static void loopback_put16(uint8_t *bytes, uint16_t value);
 
@@ -907,7 +1032,7 @@ loopback_answer(
 	if (packet[0] == BT_PACKET_ACL) {
 		handle = (unsigned)packet[1] | ((unsigned)(packet[2] & 0x0fU) << 8);
 		link = loopback_link_of_handle(handle);
-		if (handle == LOOPBACK_HANDLE_LE || link != NULL) {
+		if (handle == LOOPBACK_HANDLE_LE || handle == LOOPBACK_HANDLE_HOG || link != NULL) {
 			error = loopback_peer_acl(packet, length);
 		} else {
 			error = loopback_queue(BT_PACKET_ACL, packet + 1, length - 1U);
@@ -1428,6 +1553,7 @@ loopback_pairing(
 		loopback_defaults();
 		for (index = 0U; index < LOOPBACK_LINKS; index++)
 			loopback_link_reset(&loopback.links[index]);
+		kern_memset(&loopback.hog, 0, sizeof(loopback.hog));
 		loopback.scan_enable = 0U;
 		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
 		break;
@@ -1594,9 +1720,12 @@ loopback_pairing(
 		/* Ended by the local host: the device's side of the connection is forgotten. */
 		if (length < 2U)
 			return EINVAL;
-		link = loopback_link_of_handle((unsigned)loopback_get16(parameters) & 0x0fffU);
+		handle = (uint16_t)(loopback_get16(parameters) & 0x0fffU);
+		link = loopback_link_of_handle(handle);
 		if (link != NULL)
 			loopback_link_reset(link);
+		if (handle == LOOPBACK_HANDLE_HOG)
+			kern_memset(&loopback.hog, 0, sizeof(loopback.hog));
 		error = loopback_status(opcode);
 		event[0] = 0x00U;
 		event[1] = parameters[0];
@@ -1606,10 +1735,31 @@ loopback_pairing(
 			error = loopback_event(LOOPBACK_EVENT_DISCONNECTED, event, 4U);
 		break;
 	case LOOPBACK_OP_LE_CONNECT:
-		/* The LE mouse (public) connects; any other address never does. */
+		/* From the filter accept list: the HOG mouse when listed, else a wait for a cancel. */
 		if (length < 12U)
 			return EINVAL;
 		error = loopback_status(opcode);
+		if (error == 0 && parameters[4] == 0x01U) {
+			loopback.hog.armed = 1U;
+			if (loopback.hog.listed)
+				error = loopback_hog_connect();
+			break;
+		}
+
+		/* The HOG mouse (public) at its address. */
+		if (error == 0 &&
+		    parameters[5] == 0x00U &&
+		    parameters[6] == LOOPBACK_DEVICE_HOG &&
+		    parameters[7] == 0x0eU &&
+		    parameters[8] == 0x0dU &&
+		    parameters[9] == 0x0cU &&
+		    parameters[10] == 0x0bU &&
+		    parameters[11] == 0x0aU) {
+			error = loopback_hog_connect();
+			break;
+		}
+
+		/* The LE mouse (public) connects; any other address never does. */
 		if (error != 0 ||
 		    parameters[5] != 0x00U ||
 		    parameters[6] != LOOPBACK_DEVICE_MOUSE ||
@@ -1633,13 +1783,57 @@ loopback_pairing(
 		error = loopback_event(LOOPBACK_EVENT_LE_META, event, 19U);
 		break;
 	case LOOPBACK_OP_LE_CANCEL:
-		/* The connection under way ends: LE Connection Complete, Unknown Connection Identifier. */
+		/* The connection under way ends (one from the list too): LE Connection Complete, Unknown Connection Identifier. */
+		loopback.hog.armed = 0U;
 		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
 		kern_memset(event, 0, sizeof(event));
 		event[0] = 0x01U;
 		event[1] = 0x02U;
 		if (error == 0)
 			error = loopback_event(LOOPBACK_EVENT_LE_META, event, 19U);
+		break;
+	case LOOPBACK_OP_LE_CLEAR_LIST:
+		/* The filter accept list emptied. */
+		loopback.hog.listed = 0U;
+		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
+		break;
+	case LOOPBACK_OP_LE_ADD_LIST:
+		/* The HOG mouse (public) listed; any other address is kept nowhere. */
+		if (length < 7U)
+			return EINVAL;
+		if (parameters[0] == 0x00U && parameters[1] == LOOPBACK_DEVICE_HOG && parameters[2] == 0x0eU && parameters[6] == 0x0aU)
+			loopback.hog.listed = 1U;
+		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
+		break;
+	case LOOPBACK_OP_LE_ENCRYPT:
+		/* The HOG mouse's encryption, with its bond's key alone (another connection's is done, nothing to say). */
+		if (length < 28U)
+			return EINVAL;
+		handle = loopback_get16(parameters);
+		if (handle != LOOPBACK_HANDLE_HOG || !loopback.hog.connected) {
+			error = loopback_complete(opcode, status_ok, sizeof(status_ok));
+			break;
+		}
+
+		/* Rand and EDIV 0, the LTK 00 11 .. FF: on; any other: PIN or Key Missing. */
+		error = loopback_status(opcode);
+		kern_memset(key, 0, sizeof(key));
+		for (index = 0U; index < 16U; index++)
+			key[index] = (uint8_t)(index * 0x11U);
+		differs = kern_memcmp(parameters + 12, key, 16U);
+		event[0] = 0x00U;
+		event[3] = 0x01U;
+		if (differs != 0 || parameters[10] != 0U || parameters[11] != 0U) {
+			event[0] = 0x06U;
+			event[3] = 0x00U;
+		} else {
+			loopback.hog.encrypted = 1U;
+		}
+
+		/* Encryption Change. */
+		loopback_put16(event + 1, LOOPBACK_HANDLE_HOG);
+		if (error == 0)
+			error = loopback_event(LOOPBACK_EVENT_ENCRYPTION, event, 4U);
 		break;
 	default:
 		/* Not the pairing's. */
@@ -1764,6 +1958,12 @@ loopback_peer_acl(
 	payload_length = loopback_get16(packet + 5);
 	if (payload_length > length - 9U)
 		payload_length = length - 9U;
+
+	/* The HOG mouse's fixed channels. */
+	if (handle == LOOPBACK_HANDLE_HOG) {
+		error = loopback_hog_peer(cid, payload, payload_length);
+		return error;
+	}
 
 	/* LE's Pairing Request: refused. */
 	if (handle == LOOPBACK_HANDLE_LE && cid == 0x0006U && payload[0] == 0x01U) {
@@ -1968,8 +2168,9 @@ loopback_links_init(
 		link->address[5] = 0x0aU;
 	}
 
-	/* No scan until the host asks. */
+	/* No scan until the host asks, the HOG mouse not connected nor listed. */
 	loopback.scan_enable = 0U;
+	kern_memset(&loopback.hog, 0, sizeof(loopback.hog));
 }
 
 /*
@@ -2709,10 +2910,327 @@ loopback_peers_tick(
 			waiting = 1;
 	}
 
+	/* The HOG mouse's notification (X +5) every second while its CCC is on. */
+	if (loopback.hog.due != 0U && now >= loopback.hog.due) {
+		loopback.hog.due = now + kern_ms_to_ticks(LOOPBACK_MOUSE_MS);
+		error = loopback_hog_notify();
+		if (error != 0)
+			loopback.hog.due = now + kern_ms_to_ticks(LOOPBACK_POLL_MS);
+	}
+
+	/* A notification still to come keeps the worker looking. */
+	if (loopback.hog.due != 0U)
+		waiting = 1;
+
 	mutex_unlock(&loopback.peers);
 
 	/* Succeeded: whether a step still waits. */
 	return waiting;
+}
+
+/*
+ * Connects the HOG mouse (peers held): LE's (Enhanced, when its mask bit
+ * is on) Connection Complete on its handle, and its own Exchange MTU
+ * Request at once (phase005 review B3).
+ */
+static int
+loopback_hog_connect(
+	void)
+{
+	static const uint8_t mtu[3] = { LOOPBACK_ATT_MTU_REQUEST, LOOPBACK_ATT_MTU, 0x00U };
+	uint8_t event[31];
+	unsigned long irq;
+	uint64_t mask;
+	size_t length;
+	int error;
+
+	/* Connected once. */
+	if (loopback.hog.connected)
+		return 0;
+	loopback.hog.connected = 1U;
+	loopback.hog.encrypted = 0U;
+	loopback.hog.armed = 0U;
+	loopback.hog.notifying = 0U;
+	loopback.hog.due = 0U;
+
+	/* Enhanced (subevent 10) when the host asked for it (LE mask bit 9). */
+	irq = spin_lock_irqsave(&loopback.lock);
+
+	mask = loopback.le_mask;
+
+	spin_unlock_irqrestore(&loopback.lock, irq);
+
+	/* The event: status 0, the handle, central, a public peer, its address, 30 ms, no latency, 5 s. */
+	kern_memset(event, 0, sizeof(event));
+	event[0] = 0x01U;
+	length = 19U;
+	if ((mask & (1ULL << 9)) != 0U) {
+		event[0] = 0x0aU;
+		length = 31U;
+	}
+
+	/* Its fields. */
+	loopback_put16(event + 2, LOOPBACK_HANDLE_HOG);
+	event[6] = LOOPBACK_DEVICE_HOG;
+	event[7] = 0x0eU;
+	event[8] = 0x0dU;
+	event[9] = 0x0cU;
+	event[10] = 0x0bU;
+	event[11] = 0x0aU;
+	loopback_put16(event + length - 7U, 0x0018U);
+	loopback_put16(event + length - 3U, 0x01f4U);
+	error = loopback_event(LOOPBACK_EVENT_LE_META, event, length);
+	if (error != 0)
+		return error;
+
+	/* Its MTU request. */
+	error = loopback_frame(LOOPBACK_HANDLE_HOG, 0x0004U, mtu, sizeof(mtu));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: connected. */
+	return 0;
+}
+
+/* Takes a frame of the host on the HOG mouse's fixed channels: ATT (its server), the rest passed over. */
+static int
+loopback_hog_peer(
+	uint16_t cid,
+	const uint8_t *payload,
+	size_t length)
+{
+	int error;
+
+	/* Only ATT. */
+	if (cid != 0x0004U || length == 0U || !loopback.hog.connected)
+		return 0;
+
+	/* Succeeded: answered. */
+	error = loopback_hog_att(payload, length);
+	if (error != 0)
+		return error;
+	return 0;
+}
+
+/*
+ * Answers one ATT PDU of the host as the HOG mouse's server (MTU 23): the
+ * discovery's requests from the table, reads (the HID service's before
+ * encryption refused, phase005 section 6), Write Request (the report's
+ * CCC turns the notifications on).  Responses and commands are passed
+ * over.
+ */
+static int
+loopback_hog_att(
+	const uint8_t *pdu,
+	size_t length)
+{
+	const struct loopback_attribute *attribute;
+	uint8_t out[LOOPBACK_ATT_MTU];
+	uint16_t handle;
+	uint16_t offset;
+	unsigned index;
+	size_t used;
+	size_t count;
+	int error;
+
+	/* Each request; anything else needs no answer. */
+	used = 0U;
+	switch (pdu[0]) {
+	case LOOPBACK_ATT_MTU_REQUEST:
+		out[0] = LOOPBACK_ATT_MTU_RESPONSE;
+		loopback_put16(out + 1, LOOPBACK_ATT_MTU);
+		used = 3U;
+		break;
+	case LOOPBACK_ATT_READ_GROUP:
+	case LOOPBACK_ATT_READ_BY_TYPE:
+	case LOOPBACK_ATT_FIND_INFO:
+		/* The range's attributes. */
+		if (length < 5U)
+			return 0;
+		used = loopback_hog_list(pdu, out);
+		break;
+	case LOOPBACK_ATT_READ:
+	case LOOPBACK_ATT_READ_BLOB:
+		/* The value from the offset, 22 bytes at most. */
+		if (length < 3U)
+			return 0;
+		handle = loopback_get16(pdu + 1);
+		offset = 0U;
+		if (pdu[0] == LOOPBACK_ATT_READ_BLOB && length >= 5U)
+			offset = loopback_get16(pdu + 3);
+		used = loopback_att_error(out, pdu[0], handle, LOOPBACK_ATT_INVALID_HANDLE);
+		for (index = 0U; index < LOOPBACK_HOG_ATTRIBUTES; index++) {
+			attribute = &loopback_hog_table[index];
+			if (attribute->handle != handle)
+				continue;
+			if (attribute->encrypted_only && !loopback.hog.encrypted) {
+				used = loopback_att_error(out, pdu[0], handle, LOOPBACK_ATT_INSUFFICIENT);
+				break;
+			}
+
+			/* Past its end. */
+			if (offset > attribute->length) {
+				used = loopback_att_error(out, pdu[0], handle, LOOPBACK_ATT_INVALID_OFFSET);
+				break;
+			}
+
+			/* The part. */
+			count = attribute->length - offset;
+			if (count > LOOPBACK_ATT_MTU - 1U)
+				count = LOOPBACK_ATT_MTU - 1U;
+			out[0] = (uint8_t)(pdu[0] + 1U);
+			if (count != 0U)
+				kern_memcpy(out + 1, attribute->value + offset, count);
+			used = 1U + count;
+			break;
+		}
+
+		/* Answered. */
+		break;
+	case LOOPBACK_ATT_WRITE:
+		/* A CCC written: the report's turns the notifications on (now and every second). */
+		if (length < 5U)
+			return 0;
+		handle = loopback_get16(pdu + 1);
+		if (handle == LOOPBACK_HOG_REPORT_CCC && pdu[3] == 0x01U && !loopback.hog.notifying) {
+			loopback.hog.notifying = 1U;
+			loopback.hog.due = sched_ticks() + kern_ms_to_ticks(LOOPBACK_MOUSE_MS);
+		}
+
+		/* Write Response. */
+		out[0] = LOOPBACK_ATT_WRITE_RESPONSE;
+		used = 1U;
+		break;
+	default:
+		/* An even opcode the server does not serve is answered so; the rest (responses, commands, confirmations) not. */
+		if ((pdu[0] & 0x41U) == 0U && pdu[0] != 0x1eU)
+			used = loopback_att_error(out, pdu[0], 0U, LOOPBACK_ATT_NOT_SUPPORTED);
+		break;
+	}
+
+	/* The answer queued, when there is one. */
+	if (used == 0U)
+		return 0;
+	error = loopback_frame(LOOPBACK_HANDLE_HOG, 0x0004U, out, used);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: answered. */
+	return 0;
+}
+
+/*
+ * Writes the answer to a discovery's request of a range (Read By Group
+ * Type of 0x2800, Read By Type of 0x2803, Find Information): the table's
+ * attributes in it, of one element length, as many as fit; none is
+ * Attribute Not Found.  Returns the answer's length.
+ */
+static size_t
+loopback_hog_list(
+	const uint8_t *request,
+	uint8_t *out)
+{
+	const struct loopback_attribute *attribute;
+	uint16_t start;
+	uint16_t end;
+	uint16_t type;
+	unsigned index;
+	size_t element;
+	size_t used;
+
+	/* The range and (but for Find Information) the type. */
+	start = loopback_get16(request + 1);
+	end = loopback_get16(request + 3);
+	type = 0U;
+	if (request[0] != LOOPBACK_ATT_FIND_INFO)
+		type = loopback_get16(request + 5);
+
+	/* The response's head: Find Information's format 1 (16-bit UUIDs), else the element's length to come. */
+	out[0] = (uint8_t)(request[0] + 1U);
+	out[1] = 0x01U;
+	used = 2U;
+	element = 0U;
+	for (index = 0U; index < LOOPBACK_HOG_ATTRIBUTES; index++) {
+		attribute = &loopback_hog_table[index];
+		if (attribute->handle < start || attribute->handle > end)
+			continue;
+		if (request[0] != LOOPBACK_ATT_FIND_INFO && attribute->type != type)
+			continue;
+
+		/* Its element: handle and type (Find Information), handle and value, or handle, group end and value. */
+		if (request[0] == LOOPBACK_ATT_FIND_INFO) {
+			if (used + 4U > LOOPBACK_ATT_MTU)
+				break;
+			loopback_put16(out + used, attribute->handle);
+			loopback_put16(out + used + 2U, attribute->type);
+			used += 4U;
+			continue;
+		}
+
+		/* One length in one response. */
+		if (element == 0U)
+			element = 2U + attribute->length;
+		if (element == 2U + attribute->length && request[0] == LOOPBACK_ATT_READ_GROUP && used == 2U)
+			element += 2U;
+		if (used + element > LOOPBACK_ATT_MTU)
+			break;
+		loopback_put16(out + used, attribute->handle);
+		used += 2U;
+		if (request[0] == LOOPBACK_ATT_READ_GROUP) {
+			loopback_put16(out + used, attribute->end);
+			used += 2U;
+		}
+
+		/* The value. */
+		kern_memcpy(out + used, attribute->value, attribute->length);
+		used += attribute->length;
+	}
+
+	/* None in the range. */
+	if (used == 2U)
+		return loopback_att_error(out, request[0], start, LOOPBACK_ATT_NOT_FOUND);
+
+	/* Succeeded: the element's length (but Find Information's format), and the answer's. */
+	if (request[0] != LOOPBACK_ATT_FIND_INFO)
+		out[1] = (uint8_t)element;
+	return used;
+}
+
+/* Writes an Error Response (the request, its handle, the code); returns its length. */
+static size_t
+loopback_att_error(
+	uint8_t *out,
+	uint8_t request,
+	uint16_t handle,
+	uint8_t code)
+{
+	/* The five bytes. */
+	out[0] = LOOPBACK_ATT_ERROR;
+	out[1] = request;
+	loopback_put16(out + 2, handle);
+	out[4] = code;
+	return 5U;
+}
+
+/* Notifies the HOG mouse's report (button 0, X +5, Y 0; no report ID, phase005 Q12) while connected (peers held). */
+static int
+loopback_hog_notify(
+	void)
+{
+	static const uint8_t notification[6] = { LOOPBACK_ATT_NOTIFICATION, 0x16U, 0x00U, 0x00U, 0x05U, 0x00U };
+	int error;
+
+	/* Only while connected with its CCC on. */
+	if (!loopback.hog.connected || !loopback.hog.notifying) {
+		loopback.hog.due = 0U;
+		return 0;
+	}
+
+	/* Succeeded: queued. */
+	error = loopback_frame(LOOPBACK_HANDLE_HOG, 0x0004U, notification, sizeof(notification));
+	if (error != 0)
+		return error;
+	return 0;
 }
 
 /* Reads a 16-bit value least significant byte first. */

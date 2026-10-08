@@ -350,12 +350,14 @@ main(
 		descriptors[count].events = POLLIN;
 		count++;
 
-		/* Each client's descriptor, then the system's events (-1: none). */
+		/* Each client's descriptor. */
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 			descriptors[count].fd = btd_clients[index].descriptor;
 			descriptors[count].events = POLLIN;
 			count++;
 		}
+
+		/* The system's events, at 3 + BTD_CLIENTS_MAX. */
 		descriptors[count].fd = btd_system;
 		descriptors[count].events = POLLIN;
 		count++;

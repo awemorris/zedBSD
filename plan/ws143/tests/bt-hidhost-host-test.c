@@ -29,6 +29,16 @@
  *               kept; its own disconnection; refused after DISCONNECT
  *   handoff     a paired connection taken over (a peripheral's class) and
  *               not (a computer's)
+ *   le          (i03) an LE HOG device: CONNECT (LE Create Connection, the
+ *               bond's LTK, the GATT discovery, the setup from the report
+ *               map, the CCC, the battery), a notification before the
+ *               discovery passed on with its report ID, the device's own
+ *               MTU request answered, its pairing refused; DISCONNECT;
+ *               the auto-connect (the filter accept list, the low duty)
+ *               after the device went, cancelled by a hold and set again;
+ *               the device coming back with a resolvable private address
+ *               (its IRK) and Enhanced Connection Complete; a lost key, a
+ *               short key; the handoff of an LE pairing (appearance)
  *   lifecycle   the pages again (5, 10, 20, 40, 60 seconds, paused after
  *               10, started again by CONNECT), the table full, the
  *               controller lost, the device's unplug, FORGET's unplug, a
@@ -38,6 +48,7 @@
  */
 
 #include "userland/base/bluetoothd/acl.h"
+#include "userland/base/bluetoothd/crypto.h"
 #include "userland/base/bluetoothd/hci.h"
 #include "userland/base/bluetoothd/hid.h"
 #include "userland/base/bluetoothd/hidcache.h"
@@ -87,6 +98,22 @@ struct build {
 	size_t used;
 	size_t open[BUILD_DEPTH];
 	unsigned depth;
+};
+
+/* The most attributes the LE device's table holds, and the longest value. */
+#define TABLE_MAX		48U
+#define VALUE_MAX		64U
+
+/* The LE device's connection handle. */
+#define FAKE_LE_HANDLE		0x0051U
+
+/* One attribute of the LE device: its handle, its type (16-bit UUID), its group's end (a service), its value. */
+struct attribute {
+	uint16_t handle;
+	uint16_t type;
+	uint16_t end;
+	uint8_t value[VALUE_MAX];
+	size_t length;
 };
 
 /*
@@ -154,6 +181,32 @@ struct fake {
 	unsigned handshakes;
 	uint8_t last_handshake;
 	unsigned host_closes;
+
+	/*
+	 * The LE HOG device (ws143-p005 i03): its address (an RPA to come
+	 * with when set), the LTK it expects, whether it is connected and
+	 * encrypted, its frames, its GATT table and what it saw (the
+	 * auto-connect's list and LE Create Connection's filter and interval,
+	 * its CCC turned on, its own MTU request answered, a pairing refused).
+	 */
+	uint8_t le_device[6];
+	uint8_t le_rpa[6];
+	int le_use_rpa;
+	int le_enhanced;
+	uint8_t le_ltk[16];
+	int le_connected;
+	int le_encrypted;
+	int le_armed;
+	uint8_t le_filter;
+	uint16_t le_interval;
+	uint8_t le_listed[6];
+	unsigned le_list_adds;
+	unsigned le_ccc_on;
+	unsigned le_mtu_answered;
+	unsigned le_pairing_refused;
+	struct btd_reassembly le_frames;
+	struct attribute attributes[TABLE_MAX];
+	unsigned attribute_count;
 };
 
 /* The checks that failed, and those that ran. */
@@ -188,6 +241,9 @@ static unsigned bridge_error_count;
 static int bridge_peer = -1;
 static unsigned bridge_opens;
 
+/* The flags the stand-in kernel reads from the map (INPUT_BRIDGE_FLAG_REPORT_IDS for the LE mouse's, which numbers its report). */
+static uint32_t bridge_flags;
+
 /* The last answer a client was given, and how many came. */
 static char answer_line[BTD_HID_ANSWER_MAX];
 static unsigned answers;
@@ -213,6 +269,18 @@ static void test_refusals(void);
 static void test_inbound(void);
 static void test_handoff(void);
 static void test_lifecycle(void);
+static void test_le(void);
+static void bond_le(uint8_t last, uint8_t key_size, int with_irk);
+static void fake_le_reset(uint8_t last);
+static void fake_le_command(uint16_t opcode, const uint8_t *body);
+static void fake_le_connected(uint8_t subevent, uint8_t status, const uint8_t *address);
+static void fake_le_frame(uint16_t cid, const uint8_t *payload, size_t length);
+static void fake_att(const uint8_t *pdu, size_t length);
+static void fake_le_send(uint16_t cid, const uint8_t *payload, size_t length);
+static void fake_le_notify(uint16_t handle, const uint8_t *value, size_t length);
+static void fake_le_advertise(void);
+static void table_add(uint16_t handle, uint16_t type, const uint8_t *value, size_t length);
+static void table_characteristic(uint16_t handle, uint8_t properties, uint16_t uuid, const uint8_t *value, size_t length);
 static void run_open(const char *part);
 static void run_close(void);
 static void settle(void);
@@ -284,6 +352,7 @@ main(
 	test_inbound();
 	test_handoff();
 	test_lifecycle();
+	test_le();
 
 	/* The verdict. */
 	if (failures != 0U) {
@@ -323,6 +392,7 @@ ioctl(
 	memset(made, 0, sizeof(*made));
 	made->event = FAKE_EVENT;
 	made->touch_event = -1;
+	made->flags = bridge_flags;
 	return 0;
 }
 
@@ -1362,6 +1432,7 @@ fake_command(
 	uint8_t parameters[16];
 	const uint8_t *body;
 	uint16_t opcode;
+	uint16_t handle;
 
 	/* The command, recorded. */
 	(void)length;
@@ -1369,6 +1440,12 @@ fake_command(
 	body = packet + 4;
 	if (fake.opcode_count < 512U)
 		fake.opcodes[fake.opcode_count++] = opcode;
+
+	/* LE's commands are the LE device's. */
+	if ((opcode & 0xfc00U) == 0x2000U) {
+		fake_le_command(opcode, body);
+		return;
+	}
 
 	/* Each command's answer. */
 	switch (opcode) {
@@ -1449,8 +1526,20 @@ fake_command(
 		fake_complete(opcode, returned, 4U);
 		break;
 	case 0x0406U:
-		/* Disconnect: the connection ends. */
+		/* Disconnect: the connection ends (the LE device's, or the BR/EDR one's). */
 		fake_status(opcode);
+		handle = get16(body);
+		if (handle == FAKE_LE_HANDLE) {
+			fake.le_connected = 0;
+			fake.le_encrypted = 0;
+			parameters[0] = 0x00U;
+			put16(parameters + 1, FAKE_LE_HANDLE);
+			parameters[3] = 0x16U;
+			fake_event(0x05U, parameters, 4U);
+			break;
+		}
+
+		/* The BR/EDR device's. */
 		fake_hang_up(0x16U);
 		break;
 	case 0x0c1aU:
@@ -1487,6 +1576,15 @@ fake_acl(
 	put16(completed + 1, acl.handle);
 	put16(completed + 3, 1U);
 	fake_event(0x13U, completed, sizeof(completed));
+
+	/* The LE device's frames. */
+	if (acl.handle == FAKE_LE_HANDLE) {
+		whole = btd_reassembly_feed(&fake.le_frames, &acl);
+		if (whole <= 0)
+			return;
+		fake_le_frame(get16(fake.le_frames.frame + 2), fake.le_frames.frame + BTD_L2CAP_HEADER, fake.le_frames.expected - BTD_L2CAP_HEADER);
+		return;
+	}
 
 	/* The frame, once whole. */
 	whole = btd_reassembly_feed(&fake.frames, &acl);
@@ -2269,6 +2367,640 @@ close_sequence(
 	length = build->used - at - 2U;
 	build->bytes[at] = (uint8_t)(length >> 8);
 	build->bytes[at + 1U] = (uint8_t)length;
+}
+
+/* An LE HOG device: connected, discovered, its reports; the auto-connect; the refusals; the handoff. */
+static void
+test_le(void)
+{
+	static struct input_bridge_setup setup;
+	static const uint8_t move[3] = { 0x00U, 0x05U, 0x00U };
+	static const uint8_t pairing[7] = { 0x01U, 0x03U, 0x00U, 0x01U, 0x10U, 0x07U, 0x07U };
+	struct btd_bond paired;
+	struct btd_device *seen;
+	uint8_t address[6];
+	uint8_t bytes[5000];
+	uint8_t prand[3];
+	uint8_t hash[3];
+	uint8_t irk[16];
+	char answer[BTD_HID_ANSWER_MAX];
+	char line[512];
+	size_t length;
+	unsigned index;
+	int answered;
+	int taken;
+	int error;
+
+	/* A bonded HOG mouse, whose map numbers its report (the kernel says so). */
+	bridge_flags = INPUT_BRIDGE_FLAG_REPORT_IDS;
+	run_open("le");
+	fake_le_reset(0x61U);
+	bond_le(0x61U, 16U, 0);
+	address_of(0x61U, address);
+
+	/* CONNECT: LE Create Connection (direct), the encryption, the discovery, the setup. */
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	settle();
+	expect(answered == 0 && answers == 1U && strstr(answer_line, "CONNECTED address=0A:0B:0C:0D:0E:61 type=le-public transport=hog input=/dev/input/event7") != NULL,
+	       "le: CONNECTED (%s)", answer_line);
+	expect(fake.le_filter == 0x00U && fake_saw(0x2019U) && fake.le_encrypted, "le: connected directly and encrypted with the bond's LTK");
+	expect(fake.le_ccc_on == 2U && fake.le_mtu_answered == 1U, "le: the notifications on (%u), the device's MTU request answered", fake.le_ccc_on);
+	error = bridge_read((uint8_t *)&setup, sizeof(setup), &length);
+	expect(error == 0 && length == sizeof(setup) && setup.vendor == 0x1209U && setup.product == 0x4842U && setup.descriptor_size == 52U,
+	       "le: the setup from the report map and the PnP ID");
+	expect(strcmp(setup.physical_path, "bluetooth/00:11:22:33:44:55/0A:0B:0C:0D:0E:61") == 0, "le: the setup's path (%s)", setup.physical_path);
+	error = bridge_read(bytes, sizeof(bytes), &length);
+	expect(error == 0 && length == 4U && bytes[0] == 0x01U && bytes[2] == 0x07U, "le: the notification before the discovery, with its ID (%zu)", length);
+	status_of(0x61U, line, sizeof(line));
+	expect(strstr(line, "type=le-public transport=hog state=open") != NULL && strstr(line, "battery=80") != NULL, "le: STATUS (%s)", line);
+
+	/* A report now; the device's pairing refused (no pairing outside the pairing's mode). */
+	(void)pthread_mutex_lock(&fake.lock);
+	fake_le_notify(0x0016U, move, sizeof(move));
+	fake_le_send(0x0006U, pairing, sizeof(pairing));
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	error = bridge_read(bytes, sizeof(bytes), &length);
+	expect(error == 0 && length == 4U && bytes[0] == 0x01U && bytes[2] == 0x05U, "le: a report (%zu)", length);
+	expect(fake.le_pairing_refused == 1U, "le: the device's pairing refused");
+
+	/* DISCONNECT: not wanted back, no auto-connect. */
+	fake.opcode_count = 0U;
+	error = btd_hid_disconnect(&host, address, BTD_ADDRESS_LE_PUBLIC);
+	settle();
+	tick_after(100U);
+	status_of(0x61U, line, sizeof(line));
+	expect(error == 0 && bridge_closed() && strstr(line, "reconnect=off") != NULL && !host.le_armed, "le: DISCONNECT (%s)", line);
+
+	/* CONNECT again, then the device goes: the auto-connect waits for it (its address listed, a low duty). */
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	settle();
+	(void)bridge_read((uint8_t *)&setup, sizeof(setup), &length);
+	fake.opcode_count = 0U;
+	(void)pthread_mutex_lock(&fake.lock);
+	fake.le_connected = 0;
+	bytes[0] = 0x00U;
+	put16(bytes + 1, FAKE_LE_HANDLE);
+	bytes[3] = 0x08U;
+	fake_event(0x05U, bytes, 4U);
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	tick_after(100U);
+	expect(answered == 0 && host.le_armed && fake.le_armed && fake.le_filter == 0x01U && fake.le_interval == BTD_HID_LE_INTERVAL,
+	       "le: the auto-connect set (filter %u, interval %u)", fake.le_filter, fake.le_interval);
+	expect(fake_saw(0x2010U) && fake.le_list_adds == 1U && memcmp(fake.le_listed, address, 6U) == 0, "le: the device in the filter accept list");
+
+	/* A hold (a pairing or a scan) cancels it; it is set again after. */
+	fake.opcode_count = 0U;
+	btd_hid_hold(&host, 1);
+	settle();
+	expect(fake_saw(0x200eU) && !host.le_armed && !fake.le_armed, "le: cancelled by a hold");
+	tick_after(100U);
+	expect(!host.le_armed, "le: not set while held");
+	btd_hid_hold(&host, 0);
+	tick_after(100U);
+	expect(host.le_armed && fake.le_armed && host.le_arms == 2U, "le: set again after the hold (%u)", host.le_arms);
+
+	/* The device comes back under the auto-connect, with Enhanced Connection Complete: open again. */
+	(void)pthread_mutex_lock(&fake.lock);
+	fake.le_enhanced = 1;
+	fake_le_advertise();
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	status_of(0x61U, line, sizeof(line));
+	expect(strstr(line, "state=open") != NULL && !host.le_armed, "le: back by the auto-connect (%s)", line);
+	run_close();
+
+	/* A bond with an IRK; the device comes back under a resolvable private address (plain Connection Complete). */
+	run_open("le-rpa");
+	fake_le_reset(0x62U);
+	bond_le(0x62U, 16U, 1);
+	address_of(0x62U, address);
+	memset(&paired, 0, sizeof(paired));
+	(void)btd_keys_read(keys_folder, controller, address, BTD_ADDRESS_LE_PUBLIC, &paired);
+	for (index = 0U; index < 16U; index++)
+		irk[index] = paired.irk[15U - index];
+	prand[0] = 0x4aU;
+	prand[1] = 0x12U;
+	prand[2] = 0x34U;
+	btd_smp_ah(irk, prand, hash);
+	fake.le_rpa[5] = prand[0];
+	fake.le_rpa[4] = prand[1];
+	fake.le_rpa[3] = prand[2];
+	fake.le_rpa[2] = hash[0];
+	fake.le_rpa[1] = hash[1];
+	fake.le_rpa[0] = hash[2];
+	fake.le_use_rpa = 1;
+	memset(&paired, 0, sizeof(paired));
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	settle();
+	(void)btd_hid_disconnect(&host, address, BTD_ADDRESS_LE_PUBLIC);
+	settle();
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	settle();
+	(void)pthread_mutex_lock(&fake.lock);
+	fake.le_connected = 0;
+	bytes[0] = 0x00U;
+	put16(bytes + 1, FAKE_LE_HANDLE);
+	bytes[3] = 0x08U;
+	fake_event(0x05U, bytes, 4U);
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	tick_after(100U);
+	(void)pthread_mutex_lock(&fake.lock);
+	fake_le_advertise();
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	status_of(0x62U, line, sizeof(line));
+	expect(fake_saw(0x2027U) && fake_saw(0x202dU) && strstr(line, "state=open") != NULL, "le: back under a resolvable private address (%s)", line);
+	run_close();
+
+	/* The refusals: a key the device lost, a key shorter than 16 bytes. */
+	run_open("le-refusals");
+	fake_le_reset(0x63U);
+	bond_le(0x63U, 16U, 0);
+	fake.le_ltk[0] ^= 0xffU;
+	address_of(0x63U, address);
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	settle();
+	expect(answered == 0 && strcmp(answer_line, "ERROR key-missing") == 0, "le: the key missing (%s)", answer_line);
+	bond_le(0x64U, 7U, 0);
+	address_of(0x64U, address);
+	answered = btd_hid_connect(&host, address, BTD_ADDRESS_LE_PUBLIC, answer, sizeof(answer));
+	expect(answered == 1 && strcmp(answer, "ERROR key-size") == 0, "le: a short key (%s)", answer);
+	run_close();
+
+	/* The handoff of an LE pairing: a HID device's appearance, its link encrypted already. */
+	run_open("le-handoff");
+	fake_le_reset(0x65U);
+	bond_le(0x65U, 16U, 0);
+	address_of(0x65U, address);
+	seen = &session->devices.entries[0];
+	memset(seen, 0, sizeof(*seen));
+	memcpy(seen->address, address, 6U);
+	seen->type = BTD_ADDRESS_LE_PUBLIC;
+	seen->has_appearance = 1;
+	seen->appearance = 0x03c2U;
+	session->devices.count = 1U;
+	claim_handoff = 1;
+	(void)pthread_mutex_lock(&fake.lock);
+	fake.le_encrypted = 1;
+	fake_le_connected(0x01U, 0x00U, fake.le_device);
+	(void)pthread_mutex_unlock(&fake.lock);
+	settle();
+	claim_handoff = 0;
+	(void)btd_keys_read(keys_folder, controller, address, BTD_ADDRESS_LE_PUBLIC, &paired);
+	taken = btd_hid_handoff(&host, address, BTD_ADDRESS_LE_PUBLIC, FAKE_LE_HANDLE, &paired);
+	memset(&paired, 0, sizeof(paired));
+	settle();
+	status_of(0x65U, line, sizeof(line));
+	expect(taken == 1 && strstr(line, "transport=hog state=open") != NULL && !fake_saw(0x2019U), "le: an LE pairing handed over (%s)", line);
+	run_close();
+	bridge_flags = 0U;
+}
+
+/* Writes an LE bond for 0A:0B:0C:0D:0E:last: the LTK 00 11 .. FF, EDIV 0, Rand 0, the key's size, an IRK when asked. */
+static void
+bond_le(
+	uint8_t last,
+	uint8_t key_size,
+	int with_irk)
+{
+	struct btd_bond made;
+	unsigned index;
+	int error;
+
+	/* The bond. */
+	memset(&made, 0, sizeof(made));
+	address_of(last, made.address);
+	made.type = BTD_ADDRESS_LE_PUBLIC;
+	(void)snprintf(made.name, sizeof(made.name), "%s", "HOG Mouse");
+	made.have_ltk = 1;
+	for (index = 0U; index < 16U; index++)
+		made.ltk[index] = (uint8_t)(index * 0x11U);
+	made.key_size = key_size;
+	made.secure = 1;
+	if (with_irk) {
+		made.have_irk = 1;
+		for (index = 0U; index < 16U; index++)
+			made.irk[index] = (uint8_t)(0xa0U + index);
+	}
+
+	/* Written. */
+	error = btd_keys_write(keys_folder, controller, &made);
+	if (error != 0) {
+		fprintf(stderr, "bt-hidhost-host-test: an LE bond not written (%d)\n", error);
+		exit(2);
+	}
+}
+
+/*
+ * Sets the LE device 0A:0B:0C:0D:0E:last: the LTK it expects (that of
+ * bond_le), not connected, and its GATT table, the loopback's HOG mouse
+ * of phase005 section 6 (GAP, HID with a report map of report ID 1, an
+ * input report with its CCC and reference, protocol mode; Battery 80;
+ * Device Information's PnP ID 0x1209, 0x4842).
+ */
+static void
+fake_le_reset(
+	uint8_t last)
+{
+	static const uint8_t map[52] = {
+		0x05, 0x01, 0x09, 0x02, 0xa1, 0x01, 0x85, 0x01, 0x09, 0x01, 0xa1, 0x00, 0x05, 0x09, 0x19, 0x01,
+		0x29, 0x03, 0x15, 0x00, 0x25, 0x01, 0x95, 0x03, 0x75, 0x01, 0x81, 0x02, 0x95, 0x01, 0x75, 0x05,
+		0x81, 0x01, 0x05, 0x01, 0x09, 0x30, 0x09, 0x31, 0x15, 0x81, 0x25, 0x7f, 0x75, 0x08, 0x95, 0x02,
+		0x81, 0x06, 0xc0, 0xc0,
+	};
+	static const uint8_t reference[2] = { 0x01U, 0x01U };
+	static const uint8_t ccc[2] = { 0x00U, 0x00U };
+	static const uint8_t level[1] = { 80U };
+	static const uint8_t pnp[7] = { 0x01U, 0x09U, 0x12U, 0x42U, 0x48U, 0x00U, 0x01U };
+	static const uint8_t mode[1] = { 0x01U };
+	static const uint8_t gap[2] = { 0x00U, 0x18U };
+	static const uint8_t hid_service[2] = { 0x12U, 0x18U };
+	static const uint8_t battery[2] = { 0x0fU, 0x18U };
+	static const uint8_t info[2] = { 0x0aU, 0x18U };
+	unsigned index;
+
+	/* The device and its key. */
+	(void)pthread_mutex_lock(&fake.lock);
+
+	address_of(last, fake.le_device);
+	for (index = 0U; index < 16U; index++)
+		fake.le_ltk[index] = (uint8_t)(index * 0x11U);
+	fake.le_use_rpa = 0;
+	fake.le_enhanced = 0;
+	fake.le_connected = 0;
+	fake.le_encrypted = 0;
+	fake.le_armed = 0;
+	fake.le_list_adds = 0U;
+	fake.le_ccc_on = 0U;
+	fake.le_mtu_answered = 0U;
+	fake.le_pairing_refused = 0U;
+	fake.opcode_count = 0U;
+
+	/* The table. */
+	fake.attribute_count = 0U;
+	table_add(0x0001U, 0x2800U, gap, sizeof(gap));
+	fake.attributes[fake.attribute_count - 1U].end = 0x0005U;
+	table_add(0x0010U, 0x2800U, hid_service, sizeof(hid_service));
+	fake.attributes[fake.attribute_count - 1U].end = 0x0020U;
+	table_characteristic(0x0013U, 0x02U, 0x2a4bU, map, sizeof(map));
+	table_characteristic(0x0015U, 0x12U, 0x2a4dU, NULL, 0U);
+	table_add(0x0017U, 0x2902U, ccc, sizeof(ccc));
+	table_add(0x0018U, 0x2908U, reference, sizeof(reference));
+	table_characteristic(0x0019U, 0x06U, 0x2a4eU, mode, sizeof(mode));
+	table_add(0x0030U, 0x2800U, battery, sizeof(battery));
+	fake.attributes[fake.attribute_count - 1U].end = 0x0033U;
+	table_characteristic(0x0031U, 0x12U, 0x2a19U, level, sizeof(level));
+	table_add(0x0033U, 0x2902U, ccc, sizeof(ccc));
+	table_add(0x0040U, 0x2800U, info, sizeof(info));
+	fake.attributes[fake.attribute_count - 1U].end = 0x0042U;
+	table_characteristic(0x0041U, 0x02U, 0x2a50U, pnp, sizeof(pnp));
+
+	(void)pthread_mutex_unlock(&fake.lock);
+
+	/* No answer yet. */
+	answers = 0U;
+	answer_line[0] = '\0';
+}
+
+/* Answers one LE command as the controller and the LE device (the lock held). */
+static void
+fake_le_command(
+	uint16_t opcode,
+	const uint8_t *body)
+{
+	static const uint8_t ok[1] = { 0x00U };
+	uint8_t parameters[4];
+	int same;
+
+	/* Each command the device answers; any other is done. */
+	switch (opcode) {
+	case 0x200dU:
+		/* LE Create Connection: directly to the device, or from the list (waiting for it). */
+		fake.le_interval = get16(body);
+		fake.le_filter = body[4];
+		fake_status(opcode);
+		if (body[4] == 0x01U) {
+			fake.le_armed = 1;
+			break;
+		}
+
+		/* Directly: the device answers its address. */
+		same = memcmp(body + 6, fake.le_device, 6U);
+		if (same == 0)
+			fake_le_connected(0x01U, 0x00U, fake.le_device);
+		break;
+	case 0x200eU:
+		/* LE Create Connection Cancel: the connection under way ends (Unknown Connection Identifier). */
+		fake_complete(opcode, ok, sizeof(ok));
+		if (fake.le_armed) {
+			fake.le_armed = 0;
+			fake_le_connected(0x01U, 0x02U, (const uint8_t *)"\0\0\0\0\0\0");
+		}
+
+		/* Done. */
+		break;
+	case 0x2011U:
+		/* LE Add Device To Filter Accept List. */
+		memcpy(fake.le_listed, body + 1, 6U);
+		fake.le_list_adds++;
+		fake_complete(opcode, ok, sizeof(ok));
+		break;
+	case 0x2010U:
+		/* LE Clear Filter Accept List. */
+		fake.le_list_adds = 0U;
+		fake_complete(opcode, ok, sizeof(ok));
+		break;
+	case 0x2019U:
+		/* LE Enable Encryption: the LTK the device expects, else PIN or Key Missing. */
+		fake_status(opcode);
+		same = memcmp(body + 12, fake.le_ltk, 16U);
+		parameters[0] = 0x00U;
+		parameters[3] = 0x01U;
+		if (same != 0) {
+			parameters[0] = 0x06U;
+			parameters[3] = 0x00U;
+		} else {
+			fake.le_encrypted = 1;
+		}
+
+		/* Encryption Change. */
+		put16(parameters + 1, FAKE_LE_HANDLE);
+		fake_event(0x08U, parameters, sizeof(parameters));
+		break;
+	default:
+		fake_complete(opcode, ok, sizeof(ok));
+		break;
+	}
+}
+
+/*
+ * Sends LE's (Enhanced) Connection Complete of the LE device, under its
+ * address or its RPA; a success connects it, and the device asks its own
+ * MTU at once (phase005 review B3), with a report notified before any
+ * discovery (review S2).
+ */
+static void
+fake_le_connected(
+	uint8_t subevent,
+	uint8_t status,
+	const uint8_t *address)
+{
+	static const uint8_t mtu[3] = { 0x02U, 23U, 0x00U };
+	static const uint8_t early[3] = { 0x00U, 0x07U, 0x00U };
+	uint8_t parameters[31];
+	size_t length;
+
+	/* The event. */
+	memset(parameters, 0, sizeof(parameters));
+	parameters[0] = subevent;
+	parameters[1] = status;
+	put16(parameters + 2, FAKE_LE_HANDLE);
+	memcpy(parameters + 6, address, 6U);
+	length = 19U;
+	if (subevent == 0x0aU)
+		length = 31U;
+	put16(parameters + length - 7U, 0x0018U);
+	put16(parameters + length - 3U, 0x01f4U);
+	fake_event(0x3eU, parameters, length);
+	if (status != 0x00U)
+		return;
+
+	/* Connected: the device's MTU request, and a report notified at once (it comes once the link is encrypted). */
+	fake.le_connected = 1;
+	memset(&fake.le_frames, 0, sizeof(fake.le_frames));
+	fake_le_send(0x0004U, mtu, sizeof(mtu));
+	fake_le_notify(0x0016U, early, sizeof(early));
+}
+
+/* The auto-connect's connection: the device advertises while the controller waits for it in the list. */
+static void
+fake_le_advertise(void)
+{
+	uint8_t subevent;
+
+	/* Only while waited for. */
+	if (!fake.le_armed)
+		return;
+	fake.le_armed = 0;
+
+	/* Succeeded: connected, under its RPA when it uses one. */
+	subevent = 0x01U;
+	if (fake.le_enhanced)
+		subevent = 0x0aU;
+	if (fake.le_use_rpa) {
+		fake_le_connected(subevent, 0x00U, fake.le_rpa);
+		return;
+	}
+
+	/* Its own address. */
+	fake_le_connected(subevent, 0x00U, fake.le_device);
+}
+
+/* Takes a frame of the host on the LE device's fixed channels: ATT, and the Security Manager's refusal. */
+static void
+fake_le_frame(
+	uint16_t cid,
+	const uint8_t *payload,
+	size_t length)
+{
+	/* ATT, or the Security Manager's Pairing Failed (Pairing Not Supported). */
+	if (cid == 0x0004U)
+		fake_att(payload, length);
+	if (cid == 0x0006U && length == 2U && payload[0] == 0x05U && payload[1] == 0x05U)
+		fake.le_pairing_refused++;
+}
+
+/* Answers one ATT PDU of the host as the HOG mouse's GATT server. */
+static void
+fake_att(
+	const uint8_t *pdu,
+	size_t length)
+{
+	const struct attribute *attribute;
+	struct btd_att_pdu parsed;
+	uint8_t out[64];
+	unsigned index;
+	size_t used;
+	size_t element;
+	int error;
+
+	/* A PDU of a known form; the answer to the device's own MTU request is noted. */
+	error = btd_att_parse(pdu, length, &parsed);
+	if (error != 0)
+		return;
+	if (parsed.opcode == BTD_ATT_MTU_RESPONSE) {
+		fake.le_mtu_answered++;
+		return;
+	}
+
+	/* Each request (MTU 23). */
+	used = 0U;
+	switch (parsed.opcode) {
+	case BTD_ATT_MTU_REQUEST:
+		out[0] = BTD_ATT_MTU_RESPONSE;
+		put16(out + 1, 23U);
+		used = 3U;
+		break;
+	case BTD_ATT_READ_GROUP_REQUEST:
+	case BTD_ATT_READ_BY_TYPE_REQUEST:
+		/* The attributes of the type in the range, of one length, as many as fit. */
+		out[0] = (uint8_t)(parsed.opcode + 1U);
+		used = 2U;
+		element = 0U;
+		for (index = 0U; index < fake.attribute_count; index++) {
+			attribute = &fake.attributes[index];
+			if (attribute->handle < parsed.handle || attribute->handle > parsed.end || attribute->type != parsed.uuid)
+				continue;
+			if (element == 0U)
+				element = 2U + attribute->length;
+			if (parsed.opcode == BTD_ATT_READ_GROUP_REQUEST && element == 2U + attribute->length)
+				element += 2U;
+			if (used + element > 23U)
+				break;
+			put16(out + used, attribute->handle);
+			used += 2U;
+			if (parsed.opcode == BTD_ATT_READ_GROUP_REQUEST) {
+				put16(out + used, attribute->end);
+				used += 2U;
+			}
+
+			/* The value. */
+			memcpy(out + used, attribute->value, attribute->length);
+			used += attribute->length;
+		}
+
+		/* None in the range. */
+		out[1] = (uint8_t)element;
+		if (element == 0U)
+			used = btd_att_build_error(out, sizeof(out), parsed.opcode, parsed.handle, BTD_ATT_NOT_FOUND);
+		break;
+	case BTD_ATT_FIND_INFO_REQUEST:
+		/* Every attribute in the range, handle and 16-bit type. */
+		out[0] = BTD_ATT_FIND_INFO_RESPONSE;
+		out[1] = BTD_ATT_FORMAT_16;
+		used = 2U;
+		for (index = 0U; index < fake.attribute_count && used + 4U <= 23U; index++) {
+			attribute = &fake.attributes[index];
+			if (attribute->handle < parsed.handle || attribute->handle > parsed.end)
+				continue;
+			put16(out + used, attribute->handle);
+			put16(out + used + 2U, attribute->type);
+			used += 4U;
+		}
+
+		/* None in the range. */
+		if (used == 2U)
+			used = btd_att_build_error(out, sizeof(out), parsed.opcode, parsed.handle, BTD_ATT_NOT_FOUND);
+		break;
+	case BTD_ATT_READ_REQUEST:
+	case BTD_ATT_READ_BLOB_REQUEST:
+		/* The value from the offset, 22 bytes at most. */
+		used = btd_att_build_error(out, sizeof(out), parsed.opcode, parsed.handle, BTD_ATT_INVALID_HANDLE);
+		for (index = 0U; index < fake.attribute_count; index++) {
+			attribute = &fake.attributes[index];
+			if (attribute->handle != parsed.handle || parsed.offset > attribute->length)
+				continue;
+			used = attribute->length - parsed.offset;
+			if (used > 22U)
+				used = 22U;
+			out[0] = (uint8_t)(parsed.opcode + 1U);
+			memcpy(out + 1, attribute->value + parsed.offset, used);
+			used++;
+		}
+
+		/* Answered. */
+		break;
+	case BTD_ATT_WRITE_REQUEST:
+		/* A CCC turned on. */
+		if (parsed.length == 2U && parsed.value[0] == 0x01U)
+			fake.le_ccc_on++;
+		out[0] = BTD_ATT_WRITE_RESPONSE;
+		used = 1U;
+		break;
+	default:
+		break;
+	}
+
+	/* Succeeded: the answer, unless none (a command). */
+	if (used != 0U)
+		fake_le_send(0x0004U, out, used);
+}
+
+/* Sends a frame of the LE device on one of its fixed channels (the lock held). */
+static void
+fake_le_send(
+	uint16_t cid,
+	const uint8_t *payload,
+	size_t length)
+{
+	uint8_t frame[80];
+	uint8_t packet[96];
+	size_t frame_length;
+	size_t packet_length;
+
+	/* The frame in one packet. */
+	frame_length = btd_l2cap_frame(frame, sizeof(frame), cid, payload, length);
+	packet_length = btd_acl_build(packet, sizeof(packet), FAKE_LE_HANDLE, 0x02U, frame, frame_length);
+	(void)write(fake.descriptor, packet, packet_length);
+}
+
+/* Sends a Handle Value Notification of the LE device (the lock held). */
+static void
+fake_le_notify(
+	uint16_t handle,
+	const uint8_t *value,
+	size_t length)
+{
+	uint8_t pdu[32];
+
+	/* The opcode, the handle, the value. */
+	pdu[0] = BTD_ATT_NOTIFICATION;
+	put16(pdu + 1, handle);
+	memcpy(pdu + 3, value, length);
+	fake_le_send(0x0004U, pdu, 3U + length);
+}
+
+/* Adds an attribute to the LE device's table (in handle order). */
+static void
+table_add(
+	uint16_t handle,
+	uint16_t type,
+	const uint8_t *value,
+	size_t length)
+{
+	struct attribute *attribute;
+
+	/* The attribute. */
+	attribute = &fake.attributes[fake.attribute_count];
+	memset(attribute, 0, sizeof(*attribute));
+	attribute->handle = handle;
+	attribute->type = type;
+	if (length != 0U)
+		memcpy(attribute->value, value, length);
+	attribute->length = length;
+	fake.attribute_count++;
+}
+
+/* Adds a characteristic: its declaration at handle, its value at handle + 1. */
+static void
+table_characteristic(
+	uint16_t handle,
+	uint8_t properties,
+	uint16_t uuid,
+	const uint8_t *value,
+	size_t length)
+{
+	uint8_t declaration[5];
+
+	/* The declaration: properties, the value's handle, the UUID; then the value. */
+	declaration[0] = properties;
+	put16(declaration + 1, (uint16_t)(handle + 1U));
+	put16(declaration + 3, uuid);
+	table_add(handle, 0x2803U, declaration, sizeof(declaration));
+	table_add((uint16_t)(handle + 1U), uuid, value, length);
 }
 
 /* Writes a 16-bit value least significant byte first. */

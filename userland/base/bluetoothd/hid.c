@@ -209,6 +209,7 @@ btd_hid_refresh(
 	unsigned count;
 	unsigned index;
 	unsigned found;
+	int again;
 	int error;
 
 	/* The controller's bonds; records without one go (phase005 section 9.3). */
@@ -231,7 +232,8 @@ btd_hid_refresh(
 		/* A device in the table already stays as it is, but a wanted BR/EDR one idle (the controller came back) is paged again. */
 		device = hid_find_type(hid, bonds[index].address, bonds[index].type);
 		if (device != NULL) {
-			if (hid_pages_again(device))
+			again = hid_pages_again(device);
+			if (again)
 				device->retry_at = btd_now_ms();
 			continue;
 		}
@@ -343,6 +345,8 @@ btd_hid_connect(
 		hid_le_page(hid, device);
 		return 0;
 	}
+
+	/* BR/EDR's page. */
 	hid_page(hid, device);
 	return 0;
 }
@@ -370,7 +374,7 @@ btd_hid_disconnect(
 		return ENOTCONN;
 	device->wanted = btd_hid_policy_after_disconnect();
 	device->retry_at = 0U;
-	if (hid_le_type(type))
+	if (device->le)
 		hid_le_disarm(hid);
 
 	/* Not connected. */
@@ -420,9 +424,9 @@ btd_hid_forget(
 		return;
 
 	/* Succeeded: a connected device hears the unplug, and the device goes (and leaves the auto-connect). */
-	hid_drop(hid, device, 1);
-	if (hid_le_type(type))
+	if (device->le)
 		hid_le_disarm(hid);
+	hid_drop(hid, device, 1);
 }
 
 /*
@@ -445,9 +449,9 @@ btd_hid_release(
 
 	/* Succeeded: its record goes, and the device without an unplug (its bond stays for the pairing). */
 	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, type);
-	hid_drop(hid, device, 0);
-	if (hid_le_type(type))
+	if (device->le)
 		hid_le_disarm(hid);
+	hid_drop(hid, device, 0);
 }
 
 /*
@@ -503,9 +507,9 @@ btd_hid_status(
 	/* HID's or HOGP's, and LE's battery when it was read. */
 	transport = "hid";
 	(void)snprintf(battery, sizeof(battery), "%s", "-");
-	if (hid_le_type(device->type))
+	if (device->le)
 		transport = "hog";
-	if (hid_le_type(device->type) && device->hog.battery >= 0)
+	if (device->le && device->hog.battery >= 0)
 		(void)snprintf(battery, sizeof(battery), "%d", device->hog.battery);
 
 	/* Succeeded: the line. */
@@ -772,12 +776,12 @@ btd_hid_resume(
 		if (device->wanted && device->state == BTD_HID_IDLE) {
 			device->paused = 0;
 			device->retries = 0U;
-			if (!hid_le_type(device->type) && (!device->record.reconnect_initiate || device->record.normally_connectable))
+			if (!device->le && (!device->record.reconnect_initiate || device->record.normally_connectable))
 				device->retry_at = now;
 		}
 
 		/* An open BR/EDR link is asked whether its device is still there. */
-		if (device->state != BTD_HID_OPEN || hid_le_type(device->type))
+		if (device->state != BTD_HID_OPEN || device->le)
 			continue;
 		error = btd_l2cap_echo(&device->l2cap, request, sizeof(request), &length);
 		if (error != 0)
@@ -948,7 +952,7 @@ btd_hid_claims(
 		return 1;
 
 	/* An LE device the auto-connect waits for (the controller connects it from the list). */
-	if (hid_le_type(device->type) && hid->le_armed && device->wanted && device->state == BTD_HID_IDLE)
+	if (device->le && hid->le_armed && device->wanted && device->state == BTD_HID_IDLE)
 		return 1;
 
 	/* Not the HID host's. */
@@ -1118,9 +1122,9 @@ hid_slot(
 		memcpy(device->address, address, BTD_ADDRESS_BYTES);
 		memcpy(device->record.address, address, BTD_ADDRESS_BYTES);
 		device->type = type;
+		device->le = hid_le_type(type);
 		device->record.type = type;
-		if (hid_le_type(type))
-			device->record.le = 1;
+		device->record.le = device->le;
 		btd_hog_init(&device->hog);
 		device->bridge = -1;
 		device->event = -1;
@@ -1368,7 +1372,7 @@ hid_encryption(
 		return;
 
 	/* LE: the bond's key was 16 bytes (CONNECT checked it); its attributes next. */
-	if (hid_le_type(device->type)) {
+	if (device->le) {
 		device->encrypted = 1;
 		device->key_size = HID_KEY_SIZE;
 		hid_gatt_start(hid, device);
@@ -1485,7 +1489,7 @@ hid_acl(
 	cid = (uint16_t)(device->reassembly.frame[2] | (device->reassembly.frame[3] << 8));
 
 	/* LE's fixed channels. */
-	if (hid_le_type(device->type)) {
+	if (device->le) {
 		hid_le_frame(hid, device, cid, payload, payload_length);
 		return;
 	}
@@ -2028,7 +2032,7 @@ hid_setup(
 	}
 
 	/* LE: its notifications are turned on before it is open. */
-	if (hid_le_type(device->type)) {
+	if (device->le) {
 		device->state = BTD_HID_SUBSCRIBE;
 		device->state_deadline = 0U;
 		actions = btd_hog_resume(&device->hog, btd_now_ms());
@@ -2059,7 +2063,7 @@ hid_open(
 	/* The record is confirmed (written whole again). */
 	device->record.confirmed = 1;
 	record = device->record;
-	if (hid_le_type(device->type))
+	if (device->le)
 		record.descriptor_size = 0U;
 	(void)btd_hidcache_write(hid->keys_folder, hid->session->address, &record);
 
@@ -2169,7 +2173,7 @@ hid_numbers(
 	device->touch_event = made.touch_event;
 
 	/* Succeeded: LE's reports carry an ID as the kernel read the map (review M8). */
-	if (!hid_le_type(device->type))
+	if (!device->le)
 		return;
 	reported = 0;
 	if ((made.flags & INPUT_BRIDGE_FLAG_REPORT_IDS) != 0U)
@@ -2262,7 +2266,7 @@ hid_ended(
 	}
 
 	/* Succeeded: a wanted BR/EDR device that bluetoothd pages is paged again later (LE's come through the auto-connect). */
-	if (hid_le_type(device->type))
+	if (device->le)
 		return;
 	if (device->wanted && (!device->record.reconnect_initiate || device->record.normally_connectable))
 		hid_retry_later(device, now);
@@ -2438,10 +2442,14 @@ hid_connected_line(
 	char address[24];
 	char name[BTD_NAME_MAX * 4U];
 	char touch[40];
+	const char *transport;
 	int error;
 
-	/* The address, the name (quoted safely), a touch device when there is one. */
+	/* The address, the name (quoted safely), a touch device when there is one, HID's or HOGP's. */
 	(void)hid;
+	transport = "hid";
+	if (device->le)
+		transport = "hog";
 	btd_format_address(device->address, address, sizeof(address));
 	error = btd_escape(device->record.name, name, sizeof(name));
 	if (error != 0)
@@ -2456,7 +2464,7 @@ hid_connected_line(
 		       "CONNECTED address=%s type=%s transport=%s input=/dev/input/event%d%s name=\"%s\" legacy=0 vendor=%04X product=%04X",
 		       address,
 		       btd_address_type_name(device->type),
-		       hid_le_type(device->type) ? "hog" : "hid",
+		       transport,
 		       (int)device->event,
 		       touch,
 		       name,
@@ -2650,13 +2658,13 @@ hid_le_connected(
 
 	/* A failed one: a direct connection ends (a cancelled auto-connect carries no device). */
 	if (parameters[1] != 0U) {
-		if (device != NULL && hid_le_type(device->type) && device->state == BTD_HID_PAGING)
+		if (device != NULL && device->le && device->state == BTD_HID_PAGING)
 			hid_ended(hid, device, "unreachable");
 		return;
 	}
 
 	/* Only an LE device of the table, connected directly or waited for. */
-	if (device == NULL || !hid_le_type(device->type))
+	if (device == NULL || !device->le)
 		return;
 	if (device->state != BTD_HID_PAGING && device->state != BTD_HID_IDLE)
 		return;
@@ -2713,7 +2721,7 @@ hid_le_resolve(
 	/* Each LE device's bond with an IRK (stored least significant first). */
 	for (index = 0U; index < BTD_HID_MAX; index++) {
 		device = &hid->devices[index];
-		if (!device->used || !hid_le_type(device->type))
+		if (!device->used || !device->le)
 			continue;
 		error = btd_keys_read(hid->keys_folder, hid->session->address, device->address, device->type, &bond);
 		if (error != 0 || !bond.have_irk)
@@ -2916,7 +2924,7 @@ hid_le_arm(
 	resolving = 0U;
 	for (index = 0U; index < BTD_HID_MAX; index++) {
 		device = &hid->devices[index];
-		if (!device->used || !hid_le_type(device->type) || !device->wanted || device->state != BTD_HID_IDLE)
+		if (!device->used || !device->le || !device->wanted || device->state != BTD_HID_IDLE)
 			continue;
 		parameters[0] = 0x00U;
 		if (device->type == BTD_ADDRESS_LE_RANDOM)
@@ -2932,6 +2940,8 @@ hid_le_arm(
 			memset(&bond, 0, sizeof(bond));
 			continue;
 		}
+
+		/* The peer's identity and IRK, the local IRK none (0); the keys are not kept. */
 		memset(parameters, 0, sizeof(parameters));
 		parameters[0] = 0x00U;
 		if (device->type == BTD_ADDRESS_LE_RANDOM)
@@ -2993,19 +3003,23 @@ hid_le_waiting(
 {
 	const struct btd_hid_device *device;
 	unsigned index;
+	uint64_t now;
+	int paging;
 
 	/* After a refusal, a while. */
-	if (hid->le_retry_at != 0U && btd_now_ms() < hid->le_retry_at)
+	now = btd_now_ms();
+	if (hid->le_retry_at != 0U && now < hid->le_retry_at)
 		return 0;
 
 	/* Each LE device. */
 	for (index = 0U; index < BTD_HID_MAX; index++) {
 		device = &hid->devices[index];
-		if (!device->used || !hid_le_type(device->type) || !device->wanted || device->state != BTD_HID_IDLE)
+		if (!device->used || !device->le || !device->wanted || device->state != BTD_HID_IDLE)
 			continue;
 
 		/* One waits, unless a direct connection is under way. */
-		if (hid_paging(hid))
+		paging = hid_paging(hid);
+		if (paging)
 			return 0;
 		return 1;
 	}
@@ -3082,7 +3096,7 @@ hid_cancel_page(
 	struct btd_hid_device *device)
 {
 	/* LE's. */
-	if (hid_le_type(device->type)) {
+	if (device->le) {
 		(void)hid_command(hid, HID_LE_CANCEL, NULL, 0U);
 		return;
 	}
