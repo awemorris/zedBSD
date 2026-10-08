@@ -1,0 +1,40 @@
+<!-- awesome-plan project=zedbsd record=ws188 -->
+
+# WS188: app の OS の操作を libkeiland → compositor → backend へ移す（Settings の残り）と境界の検査の強化
+
+<!-- awesome-plan-current:start -->
+Status: planned
+Primary Milestone: MG006
+Related Milestones: MG007
+Objectives: O2
+Parent: [Master](../master.md)
+Focused goal: fg019（ベータ2）
+Queue: なし
+<!-- awesome-plan-current:end -->
+
+## 由来（2026-10-08 ユーザー）
+
+「SettingsのBluetooth関連の操作は、libkeilandで抽象化して、zedBSD/Linux/FreeBSDで同じインタフェースで使えるようにします。libkeiland --> compositor --> コンポジタのlibkeiland-backend --> プラットフォームのデバイス操作 、です。コンポジタを通しているのは、libkeilandをプラットフォーム独立にするためです。サウンドやWiFiも同様です。libkeilandにプラットフォーム固有の操作がもし入っていれば、それはコンポジタ経由に移したいです。同様に、Settingsのディスプレイ関連の操作も、libkeilandで抽象化します。」（Guardrail の「Bluetooth と Display も compositor 経由」）
+
+## 監査の結果（2026-10-08 Q1 の依頼の読み）
+
+- libkeiland: 違反なし（daemon・device・system の file・ioctl・OS の ifdef 無し。残りは app 自身の file と POSIX）。
+- Display: Settings → libkeiland（kl_system_displays_*）→ compositor → backend（backlight-zedbsd.c、display-zedbsd.c）で境界どおり。Linux・FreeBSD の明るさは unsupported。
+- Bluetooth: 経路が無い（Settings の頁は「coming soon」）。作るのは [WS143](../ws143/ws.md) p006（kl_system_bluetooth_v1・kl_system_bluetooth_*・compositor の bluetooth-shell・kl_backend_bluetooth_*、zedBSD は /run/bluetoothd.sock、Linux は BlueZ の D-Bus）。
+- **Settings が OS に直に触っている所**（この WS で移す）:
+  - about.c: /etc/os-release・/usr/lib/os-release、uname・sysconf・gethostname、x86_64 の cpuid → system の情報の拡張（backend の monitor_info）。
+  - look.c の statvfs（"/"・"/home"・"/usr"・"/var"・"/tmp"・"/boot"、Storage の volume）→ kl_system_devices か storage の要求。
+  - page-users.c の getpwent・getgrnam（wheel・network、uid≥1000・nologin の規則）→ kl_system_account の利用者の一覧。page-sharing.c・welcome.c の getpwuid → kl_system_account に名前・full name。
+  - page-languages.c の KEILAND_SYSCONFDIR/keiland/language の読み → kl_settings か kl_system_account。
+  - preview/{zedbsd,linux,freebsd}/spawn.c（壁紙の縮小画像の sandbox の起動、Files も同じ）→ ユーザーの判断（compositor・backend の preview の口にするか、app の側の例外にするか）。
+  - main.c の posix_spawn(KEILAND_BINDIR "/files") → compositor の起動の要求（任意）。
+- 境界の検査（plan/tools/keiland-os-boundary/check.sh）が見逃す物: /dev・/proc・/sys・/run・/var・/etc の literal、sockaddr_un と daemon の socket の名前、sysctl、getpw*・getgr*、statvfs、fork・exec・posix_spawn。C1・C2 は libkeiland と compositor だけを見る。
+
+## Phase
+
+| Phase | 目的 | Status | 依存 |
+| --- | --- | --- | --- |
+| p001 | 設計: 移し先の拡張（system の情報・storage の volume・利用者の一覧・system の言語）、protocol の version、3 OS の backend、design-reviewer | planned | — |
+| p002 | 実装: Settings の About・Storage・Users・Sharing・Welcome・Languages を libkeiland 経由に | planned | p001 |
+| p003 | 境界の検査の強化（app と libkeiland の literal・socket・getpw*・statvfs・spawn、許可の表） | planned | p002（先に入れると FAIL） |
+| p004 | preview の spawn と Files の起動の扱い（ユーザーの判断の後） | planning | ユーザーの判断 |
