@@ -11,7 +11,7 @@
 #     keyboard (no KWL DESKTOP focus) and the window never got it again.
 #  4. No KWL FAILED; Text Editor runs on.
 # Files' question before Clear Recents and its view of a stopped list are the host test's
-# (plan/ws148/tests/run-host-files-recents.sh); the stamp itself is plan/ws177/tests/host-recent-stamp.sh's.
+# (plan/tools/files/run-host-files-recents.sh); the stamp itself is plan/ws177/tests/host-recent-stamp.sh's.
 # PASS: every "ok" line and the last line recents-p008: PASS.
 #   plan/ws177/tests/recents-p008.sh [OUTDIR]   (default build/ws177-p008)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib

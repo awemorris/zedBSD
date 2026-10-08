@@ -16,7 +16,7 @@ Queue: q831（2026-10-07、P2）
 
 ## 確かめ
 
-- host: `sh plan/ws122/tests/run-host-mediafile.sh` → PASS（sample.mp4 を source で読んで mf_open と同じ出力）。
+- host: `sh plan/tools/media/run-host-mediafile.sh` → PASS（sample.mp4 を source で読んで mf_open と同じ出力）。
 - host: `sh plan/ws121/tests/run-host-engine.sh` → PASS 10（sample.mp4 を source から: open の wake・320x240・20 s、停止中の最初の絵、1 秒の再生で絵が 15 枚以上・時計 0.8〜1.5 s、5 s への seek、一時停止で時計が止まる。2 s の AAC の m4a を path から: 音だけ・audiod 無しで無音の再生・終わり。MP4 でない file は MEDIA_FAILED）。ASan・UBSan、host の FFmpeg 7（major 61）を dlopen。
 - zedBSD: `make ZEDBSD_CONFIG=plan/ws120/tests/config-amd64-music.mk BUILD=build/ws120-zed build/ws120-zed/dynamic/libmedia.so` warning 0。
 - style-check 0（engine.c・media.h・mediafile.c）。

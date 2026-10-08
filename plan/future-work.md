@@ -99,6 +99,6 @@ Future Work は実行を許可しない。
 | F-090 | bluetoothd: legacy の PIN・こちらが打つ passkey（KeyboardDisplay）、client の枠の desktop への予約、BONDS に class・appearance | ws143-p006 の design review（2026-10-08） | 古い機器・keyboard の pairing の要望、再起動の後の icon |
 
 | fw-docs-ids | docs/ の本文に残る Plan の ID（WS・BUG・q の番号、2026-10-05 で 58 箇所、docs/agent は対象外）を消し、必要なら中身を言葉で書く | docs は目標の設計で plan に依らない規則 | 2026-10-05 ユーザー「消します。ただし後回しでいいです。」 | 決定済み・後回し | 空いた枠、または ws129-p005（RC）の文書の見直し | — |
-| fw-audiod-client | video player（ws122-p002）に内蔵した audiod の client（48 kHz S16 stereo）を共有の library に移し、音楽の app（WS120）や通知の音でも使う | 同じ client の重複を避ける | 2026-10-05 ws122-p002（P2） | 後回し | WS120 の着手、または 2 つ目の audiod の client が要る時 | plan/ws122/phase002/phase.md |
+| fw-audiod-client | video player（ws122-p002）に内蔵した audiod の client（48 kHz S16 stereo）を共有の library に移し、音楽の app（WS120）や通知の音でも使う | 同じ client の重複を避ける | 2026-10-05 ws122-p002（P2） | 後回し | WS120 の着手、または 2 つ目の audiod の client が要る時 | ws122-p002 の phase.md（git の履歴、2026-10-08 の WS の完了で削除） |
 
 2026-10-05 Q1（WS140 の結果の反映）: F-070（ld.so の上限の動的化）は WS140 で実装した（0484201b・360c7dbe・a555c47a、T1-164 PASS、amd64）。ws115-p010 の手順 1（定数を上げる）は不要になったので、再開の時は gtk4-widget-factory の起動から確かめる。

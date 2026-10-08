@@ -15,4 +15,4 @@ cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,unde
 	$U/libmedia/bitstream.c $U/mediafile/mediafile.c $U/mediafile/mp4.c $U/mediafile/mkv.c $U/mediafile/ts.c $U/mediafile/ogg.c $U/mediafile/avi.c \
 	-ldl -lpthread -o "$out"
 ffmpeg -loglevel error -y -f lavfi -i "sine=frequency=440:duration=2" -c:a aac -b:a 64k "$dir/song.m4a"
-timeout 60 "$out" plan/ws122/tests/sample.mp4 "$dir/song.m4a"
+timeout 60 "$out" plan/tools/media/sample.mp4 "$dir/song.m4a"
