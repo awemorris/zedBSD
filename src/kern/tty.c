@@ -1253,8 +1253,6 @@ tty_pty_register(
 		waitq_init(&pair->slave.read_waitq, "pty slave input");
 		waitq_init(&pair->slave.write_waitq, "pty slave output flow");
 		tty_default_termios(&pair->slave.termios);
-		pair->slave.winsize.ws_row = tty_console_rows();
-		pair->slave.winsize.ws_col = tty_console_columns();
 		pair->slave.association_generation = 1;
 	}
 
@@ -2979,6 +2977,14 @@ pty_master_open(
 	tty_advance_association_locked(&pair->slave);
 	tty_flush_input_locked(&pair->slave);
 	tty_default_termios(&pair->slave.termios);
+
+	/*
+	 * No size until the master's owner gives one (TIOCSWINSZ), as on other
+	 * systems: a program reading 0 columns uses COLUMNS or its own default,
+	 * not the console's size or a size left by the pair's previous life
+	 * (BUG-242).
+	 */
+	kern_memset(&pair->slave.winsize, 0, sizeof(pair->slave.winsize));
 	pair->slave.session = 0;
 	pair->slave.foreground_pgrp = 0;
 	pair->slave.hungup = 0;

@@ -43,6 +43,7 @@ expect(struct kl_backend_audio_stream *stream, unsigned what, struct kl_backend_
 {
 	unsigned waited;
 
+	/* Polls reports until the expected kind arrives or a deadline passes. */
 	for (waited = 0U; waited < ms; waited += 5U) {
 		while (kl_backend_audio_stream_next(stream, report)) {
 			printf("TONE report what=%u error=%u request=%u count=%u\n", report->what, report->error, report->request, report->count);
@@ -51,8 +52,10 @@ expect(struct kl_backend_audio_stream *stream, unsigned what, struct kl_backend_
 			if (report->what == KL_BACKEND_AUDIO_FAILED || report->what == KL_BACKEND_AUDIO_LOST)
 				return 0;
 		}
+
 		pause_ms(5);
 	}
+
 	return 0;
 }
 
@@ -93,6 +96,7 @@ main(void)
 		printf("TONE done failed map\n");
 		return 1;
 	}
+
 	capacity = ring->capacity_frames;
 	frames = (int16_t *)(void *)((unsigned char *)ring + KL_BACKEND_AUDIO_RING_HEADER);
 
@@ -111,6 +115,7 @@ main(void)
 			phase += 2.0 * M_PI * 440.0 / TONE_RATE;
 			written++;
 		}
+
 		__atomic_store_n(&ring->write_position, written, __ATOMIC_RELEASE);
 		while (kl_backend_audio_stream_next(stream, &report))
 			printf("TONE report what=%u error=%u count=%u\n", report.what, report.error, report.count);

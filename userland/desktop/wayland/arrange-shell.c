@@ -1675,6 +1675,12 @@ arrange_apply(
 	for (slot = 0U; slot < made; slot++)
 		printf("%s%u@%d,%d,%d,%d", slot == 0U ? "" : ";", arranged->slots[slot].window->id, slots[slot].x, slots[slot].y, slots[slot].width, slots[slot].height);
 	printf("\n");
+
+	/* Each slot's client, in the slots' order (a surface's id is its client's own, the same in every client). */
+	printf("KWL ARRANGE clients desktop=%u clients=", server->desktop + 1U);
+	for (slot = 0U; slot < made; slot++)
+		printf("%s%llu", slot == 0U ? "" : ";", (unsigned long long)arranged->slots[slot].window->client->number);
+	printf("\n");
 	server->dirty = 1;
 }
 

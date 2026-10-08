@@ -27,3 +27,10 @@ Origin: [backlog-p2](../backlog-p2.md) の WS181 ws181-p004 の行（整列の�
 | build（p035 と同じ） | 成功、warning 0 |
 | style-check | 新しい指摘 0 |
 | QEMU（T1、u-guest.sh の U6） | 未実施 |
+
+## T1-475 の FAIL の調べと直し（2026-10-09 P1）
+
+- FAIL: `arranged-two`（`windows=3` の 3 つの slot）、`recalled`（`windows=3`）、`recalled-order`（`6;6;6`）。原因は試験の側: U1 の後の u.a の 2 つの窓の kill が `ps -A -o pid,args | grep "[w]ltest --app-id=u.a"` で、zedBSD の ps の COMMAND は argv[0] だけ（kernel の `process->command` は argv[0] の写し、`src/kern/exec.c`）のため一致せず、u.a の 2 つが残った（compositor の log で client 2・3 の `CLIENT gone` が無く、U3 の MAP の時に `RENDER surfaces=6,6,6`）。窓が 5 つで columns の上限 4 → 大きすぎる m を外して 3。整列の code（`arrange_apply` の外して作り直す loop・`arrange_recall`）は正しく動いていた。
+- もう一つ: `slot_ids` が apply の行の surface の id を読むが、surface の id は client ごとの object の id で全ての client で 6。順の確かめが意味を持たなかった。
+- 直し: 試験 `plan/ws177/tests/u-guest.sh` の U1 の kill を `[w]ltest`（その時に動くのは u.a の 2 つだけ）にし、`u.a-gone`（`KWL CLIENT gone` が 2）を足した。compositor `arrange-shell.c` の `arrange_apply` に apply の行の直後の行 `KWL ARRANGE clients desktop=N clients=A;B`（slot の順の client の番号）を足し、`slot_ids` がそれを読む。apply の行の形は変えない（ws181 の試験が読む）。
+- 確認: `make ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p1-ws177 build/p1-ws177/bin/wayland`（-Werror、成功、warning 0）、`sh -n u-guest.sh`。QEMU は T1 の再依頼で（未実施）。

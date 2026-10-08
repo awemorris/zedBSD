@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws075-p032 -->
 # ws075-p032: i915 の GT の object の表を必要に応じて伸ばす（BUG-120）
 
-Status: in-progress（実装済み・host 試験 PASS。実機の確認は S2）
+Status: blocked（UAT 待ち）（実装済み・host 試験 PASS。i915 は QEMU に無く、実機 5330 で窓 30 個以上の確認が要る。2026-10-09 P1、ユーザーの規則 2026-10-08 夜）
 Disposition: normal
 Parent: [WS075](../ws.md)
 Bug: [BUG-120](../../bugs/BUG-120.md)
