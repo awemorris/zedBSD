@@ -8,12 +8,7 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-- **2026-10-08 夕のラップアップ（ユーザー「いったんラップアップしてください」）**: P1・P2・T1 は全部終了、未統合の commit も未 commit の差分も無い（main b63777dec 以降）。次は新しい世代で起動する。
-  - **P1**: q904 WS143 p005 i02（BR/EDR の HID host）の i02a（純粋な部品、bt-hid-host-test 75 checks）まで。再開は plan/ws143/phase005/phase.md の「i02a の記録」→ i02b（router・l2cap の inbound/Pending・pair の handoff）→ i02c → i02d（loopback と bt-hid-p005.sh、T1）。小さい残り: apps.settings.bluetooth-pair 4 のシナリオの errno を EACCES の名に（zedBSD は 25）。
-  - **P2**: q903 WS177 案 M の p020（cleared 待ち、T1 未）と p021（985979c6a、実装の途中か済みかは phase021/phase.md を読む。ユーザーの指示で止めた）。BUG-268 の直しは main に入ったが 5330 に未導入。
-  - **T1**: 台帳の未実行は T1-435（5330、保留）だけ。p020・p021 の T1 の依頼は P2 から未着。
-  - **残る T1 の観察**: T1-447 で kei（uid 1000）から compositor の audio stream を開くと ENOTSUP（95）、root は PASS → WS191 の uid の門（compositor と同じ uid の client だけに global を見せる）の扱い。Video Player の時計 2 倍は未確認（P2 は code の単位の誤り無しと判断、log の POSITION と host の時計で測る）。
-  - 共有の stash@{0}（agent/p1 の古い世代の物）が残っている。触らない。
+- **2026-10-08 夜 再開（N=2）**: P1 = BUG-267 の残り（kernel は直った、compositor の 2 本指の gesture）→ q904 WS143 p005 i02b〜d。P2 = q903 WS177 M の仕上げと T1 の依頼 → WS191 の Linux の kei の ENOTSUP → BUG-269（FAT の書き込みで sshd が止まる）。T1 は依頼が来たら新しい世代で。5330 は main 777f5e3 の image（ユーザーが入れた）、SSH は host key を無視して kei@10.0.30.3（鍵は登録済み）。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
@@ -520,6 +515,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 <!-- master:decisions-log:start -->
 - 2026-10-08 午後 ユーザー:「サウンドはlibkeiland-backendに入れてください。libkeilandのAPIはkl_audio_がいいです。」→ WS191 の音の出力は libkeiland-backend の中、公開の API は `kl_audio_*`。
 - 2026-10-08 午後 ユーザー（クリック）: WS191 の Linux の再生の経路は「alsa-lib を dlopen」（ALSA の default、普通は pipewire-alsa で PipeWire）。Q1: D4 は stream ごとの接続のまま限りは pid ごと、p004 は Linux・FreeBSD の正弦波の試験の client を入れる（plan/ws191/phase001/phase.md）。
+- 2026-10-08 夜 ユーザー:「SSHのホストキーは無視するか登録を削除していいです。」「N=2で再開します。」→ P1（BUG-267 の 2 本指の gesture → WS143 p005 i02b）、P2（WS177 M の T1 依頼 → WS191 の Linux の uid → BUG-269）を新しい世代で起動。
 - 2026-10-08 午後 ユーザー:「SSHキーは自動で削除して受け入れてオーケーです。master.mdに書いておいてください。」→ 実機（5330・5320）の SSH の host key が変わっていたら、Q1・T1 は known_hosts の古い行を消して新しい key を受け入れてよい（聞かない）。ただし利用者の鍵（~kei/.ssh/authorized_keys に Q1 の公開鍵が無い）の時は Q1 から登録できないので、ユーザーに登録か image の作り直しを頼む。
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
