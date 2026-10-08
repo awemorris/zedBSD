@@ -995,6 +995,11 @@ ZEDBSD_ROOTFS_STICKY_DIRECTORIES := tmp shm
 # a symbolic link, a directory mode, or anything a package adds to the tree
 # reaches the image because the image is that tree.
 #
+# Every directory but the sticky ones ends 0755: the ones made for a
+# package's files (/lib/firmware, /usr/share/licenses/...) would otherwise
+# take the builder's file creation mask (group-writable under 002, seen on
+# the UAT image of T1-468).
+#
 # The packages' files are expanded when the recipe runs, after the packages
 # have been staged, not when this rule is evaluated: a package whose file list
 # is read from its own stage has an empty list while make parses a fresh
@@ -1035,6 +1040,8 @@ $(BUILD)/rootfs/.stamp: $(ZEDBSD_ROOTFS_CONFIG_STAMP) $(2) \
  mkdir -p "$$$${destination%/*}"; ln -sfn "$$$$target" "$$$$destination"; \
  done
 	@$$(call ZEDBSD_ROOTFS_INSTALL_DEVELOPMENT,$(BUILD)/rootfs)
+	@find $(BUILD)/rootfs \( -path $(BUILD)/rootfs/tmp -o -path $(BUILD)/rootfs/shm \) \
+ -prune -o -type d -exec chmod 0755 {} +
 	@touch $$@
 endef
 
