@@ -25,7 +25,7 @@ libpasskey（CTAPHID・NFC の APDU・CTAP2・CBOR・PIN/UV、暗号は OpenSSL�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws161-p001](phase001/phase.md) | 要件と設計 | planning → Q1 の判定待ち（第 2 版 §9、U1〜U5 は 2026-10-05 承認、p002〜p005 がこの設計で実装・cleared） | — |
+| [ws161-p001](phase001/phase.md) | 要件と設計 | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | — |
 | [ws161-p002](phase002/phase.md) | kernel: `usb-hid` の hidraw、`include/uapi/hidraw.h`、seat の一覧、試験の loopback。T1 | cleared（2026-10-05 Q1、T1-197・T1-199。実機の xHCI の interrupt OUT は p006） | p001、U1・U3・U4 |
 | [ws161-p003](phase003/phase.md) | kernel: `usb-ccid`、`include/uapi/ccid.h`、seat の一覧。T1 | cleared（2026-10-05 Q1、T1-199。本物の USB CCID は p006） | p001、U2・U3 |
 | [ws161-p004](phase004/phase.md) | libpasskey: cbor・transport-hid・ctap2・pin・verify・os 層、道具 `fidoctl`、host 試験 | cleared（2026-10-07、T1-274） | p002（os 層だけ） |

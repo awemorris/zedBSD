@@ -4,7 +4,7 @@
 
 Phase ID: `ws051-p001`
 Parent: [WS051](../ws.md)
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 4 版、§14.5 の正解値は q848 で採取済み（p003 cleared）、p002〜p005b がこの設計で実装済み）（旧: in-progress（2026-10-07 P2: [design.md](../design.md) 第 4 版（§14、[レビュー](../design-review-2026-10-07.md) の高 2・中 7・低を反映）。§14.5 の正解値の採取の手順はユーザーの判断待ち。設計としては p002 に進める））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 4 版、§14.5 の正解値は q848 で採取済み（p003 cleared）、p002〜p005b がこの設計で実装済み）（旧: in-progress（2026-10-07 P2: [design.md](../design.md) 第 4 版（§14、[レビュー](../design-review-2026-10-07.md) の高 2・中 7・低を反映）。§14.5 の正解値の採取の手順はユーザーの判断待ち。設計としては p002 に進める）））
 Phase disposition: normal
 Queue: q680 / q680-i01（P1）
 

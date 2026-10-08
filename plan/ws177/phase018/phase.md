@@ -3,7 +3,7 @@
 # ws177-p018: sign-in code を one-time-code の欄に直に入れる（ws177-p014 の後半）
 
 Parent: [WS177](../ws.md)
-Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-424 PASS（同上、one-time-code の欄に直に入った））（旧: test-wait（2026-10-08 P1 q890 の 2: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT `apps.mailer.sign-in-code`））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-424 PASS（同上、one-time-code の欄に直に入った））（旧: test-wait（2026-10-08 P1 q890 の 2: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT `apps.mailer.sign-in-code`）））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q890 の 2（P1、2026-10-08）

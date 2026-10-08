@@ -4,7 +4,7 @@
 
 Phase ID: `ws051-p005a`
 Parent: [WS051](../ws.md)
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 の UAT 2026-10-08 午後、TC2 に挿した monitor が検出され点いた（BUG-256 の resolved）。抜き差しの繰り返しと TC1 は未）（旧: in-progress（2026-10-07 P1: 実装、host 試験 PASS、build warning 0。実機（5330 の素の起動で抜き差し）は T1 への依頼を Q1 へ））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。抜き差しの繰り返しと TC1 は未）（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 の UAT 2026-10-08 午後、TC2 に挿した monitor が検出され点いた（BUG-256 の resolved）。抜き差しの繰り返しと TC1 は未）（旧: in-progress（2026-10-07 P1: 実装、host 試験 PASS、build warning 0。実機（5330 の素の起動で抜き差し）は T1 への依頼を Q1 へ）））
 Phase disposition: normal
 Queue: q847（P1）の続き。Q1 の判断 2026-10-07: p005 を a・b に分け、p005a は p004b に依存しない（hotplug.c・dp-ext の範囲）。承認はユーザー 2026-10-07「UCSIとDP alt modeって
 もう動いてるんですか？シェーダコンパイラより優先してほしいです」（Q1 経由）。
