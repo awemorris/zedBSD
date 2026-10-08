@@ -41,6 +41,8 @@
 #define FAT_LFN_MAX_UNITS		255U
 #define FAT_LFN_MAX_ENTRIES		((FAT_LFN_MAX_UNITS + 12U) / 13U)
 #define FAT_BATCH_SECTORS		8U
+#define FAT_RUN_SECTORS			128U
+#define FAT_ZERO_SECTORS		8U
 #define FAT_BATCH_ENTRIES		32U
 #define FAT16_RESERVED_CLUSTER		0xfff0U
 #define FAT16_END_OF_CHAIN		0xffffU
@@ -340,6 +342,15 @@ static struct fat_metadata_table fat_metadata_tables[FAT_MOUNT_MAX] __attribute_
 static struct fat_inode_slot fat_inodes[FAT_INODE_MAX] __attribute__((section(".vfs_bss")));
 static struct fat_file_state fat_files[FAT_FILE_MAX] __attribute__((section(".vfs_bss")));
 
+/*
+ * Zeroes that a newly handed-out cluster is written from.
+ *
+ * Eight sectors are written per request, so a cluster or a run of clusters is
+ * cleared in a few writes rather than one per sector (BUG-269).  It is never
+ * written to.
+ */
+static const uint8_t fat_zero_block[FAT_ZERO_SECTORS * 512U];
+
 static struct fat_inode_info *fat_inode(struct inode *inode);
 static int fat_engine_write_sector_result(struct fat_mount_state *filesystem,
 	uint32_t lba, uint8_t **sector);
@@ -407,6 +418,13 @@ static int fat_sector_read(struct fat_mount_state *state, uint32_t lba,
 static int fat_sector_write(struct fat_mount_state *state, uint32_t lba,
 	const void *buffer);
 static int fat_engine_flush(struct fat_mount_state *filesystem);
+static int fat_sectors_write(struct fat_mount_state *state, uint32_t lba, uint32_t count, const void *buffer);
+static int fat_engine_forget_range(struct fat_mount_state *filesystem, uint32_t lba, uint32_t count);
+static int fat_engine_write_run(struct fat_mount_state *filesystem, uint32_t lba, uint32_t count, const uint8_t *input);
+static int fat_engine_zero_run(struct fat_mount_state *filesystem, uint32_t lba, uint32_t count);
+static int fat_raw_zero_clusters(struct fat_mount_state *filesystem, uint32_t first, uint32_t count);
+static int fat_raw_write_next_cluster(struct fat_file_state *file, uint32_t cluster, uint32_t remaining, struct fat_chain_cursor *cursor, uint32_t *next_cluster);
+static int fat_raw_write_sectors(struct fat_file_state *file, uint32_t *cluster, uint32_t sector_index, const uint8_t *input, int zero, uint32_t length, struct fat_chain_cursor *cursor, uint32_t *written);
 static void fat_engine_invalidate(struct fat_mount_state *filesystem);
 static int fat_engine_read_sector_result(struct fat_mount_state *filesystem,
 	uint32_t lba, const uint8_t **sector);
@@ -1220,6 +1238,52 @@ fat_sector_write(
 	return written;
 }
 
+/*
+ * Writes a run of whole 512-byte sectors of the volume in one request, in
+ * mount order (BUG-269: a run, not a request per sector).
+ */
+static int
+fat_sectors_write(
+	struct fat_mount_state *state,
+	uint32_t lba,
+	uint32_t count,
+	const void *buffer)
+{
+	struct io_context context;
+	int written;
+	int error;
+
+	/* A call that names no disk, nothing to write from, or no sectors. */
+	if (state == NULL ||
+	    state->disk == NULL ||
+	    buffer == NULL ||
+	    count == 0U)
+		return EINVAL;
+
+	/* A volume mounted read-only is never written to. */
+	if (state->read_only)
+		return EROFS;
+
+	/* A run that would pass the end of the volume. */
+	if (lba >= state->total_sectors || count > state->total_sectors - lba)
+		return EIO;
+
+	/* The write joins the mount's own ordering context. */
+	error = io_context_child(&context, state->write_context,
+				 IO_CONTEXT_ORDERED);
+	if (error != 0)
+		return error;
+
+	/* Writes the run out through that context. */
+	written = disk_write_filesystem_context(state->disk, lba, count, buffer,
+						&context);
+	if (written != 0)
+		return written;
+
+	/* Succeeded: the run is on the volume. */
+	return 0;
+}
+
 /* Writes the one cached sector back when it has been changed. */
 static int
 fat_engine_flush(
@@ -1267,6 +1331,139 @@ fat_engine_invalidate(
 	filesystem->sector_cache_dirty = 0;
 	kern_memset(filesystem->clean_sectors, 0, sizeof(filesystem->clean_sectors));
 	fat_chain_invalidate(filesystem);
+}
+
+/*
+ * Forgets what the sector cache and its clean slots hold of a run of
+ * sectors that is about to be written past them, writing a changed cached
+ * sector back first, so that a later read sees the run's new bytes.
+ */
+static int
+fat_engine_forget_range(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
+	uint32_t count)
+{
+	struct fat_clean_sector *slot;
+	unsigned index;
+	int inside;
+	int error;
+
+	/* Asks whether the one cached sector lies in the run. */
+	inside = 0;
+	if (filesystem->sector_cache_valid &&
+	    filesystem->sector_cache_lba >= lba &&
+	    filesystem->sector_cache_lba - lba < count)
+		inside = 1;
+
+	/* A cached sector in the run is written back, then let go. */
+	if (inside) {
+		error = fat_engine_flush(filesystem);
+		if (error != 0)
+			return error;
+
+		/* The cache holds nothing now; the next read fetches the run's bytes. */
+		filesystem->sector_cache_valid = 0;
+	}
+
+	/* A clean copy of a sector in the run would be stale after it. */
+	for (index = 0; index < FAT_CLEAN_SLOTS; index++) {
+		slot = &filesystem->clean_sectors[index];
+		if (slot->valid &&
+		    slot->lba >= lba &&
+		    slot->lba - lba < count)
+			slot->valid = 0;
+	}
+
+	/* Succeeded: nothing cached of the run is left. */
+	return 0;
+}
+
+/*
+ * Writes a run of whole sectors from a caller's bytes straight to the
+ * volume, past the one-sector cache.
+ */
+static int
+fat_engine_write_run(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
+	uint32_t count,
+	const uint8_t *input)
+{
+	int error;
+
+	/* The cache lets go of the run before it is written. */
+	error = fat_engine_forget_range(filesystem, lba, count);
+	if (error != 0)
+		return error;
+
+	/* The run is written inside one write epoch of the mount, as a cached sector is. */
+	if (filesystem->owner != NULL)
+		io_epoch_begin(&filesystem->owner->m_write_epoch);
+
+	/* Writes the caller's bytes over the run. */
+	error = fat_sectors_write(filesystem, lba, count, input);
+
+	/* The epoch closes whatever the write reported. */
+	if (filesystem->owner != NULL)
+		io_epoch_end(&filesystem->owner->m_write_epoch);
+
+	/* Reports why the run could not be written. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the run is on the volume. */
+	return 0;
+}
+
+/*
+ * Writes zeroes over a run of whole sectors, a block of zeroes at a time,
+ * past the one-sector cache.
+ */
+static int
+fat_engine_zero_run(
+	struct fat_mount_state *filesystem,
+	uint32_t lba,
+	uint32_t count)
+{
+	uint32_t done;
+	uint32_t chunk;
+	int error;
+
+	/* The cache lets go of the run before it is cleared. */
+	error = fat_engine_forget_range(filesystem, lba, count);
+	if (error != 0)
+		return error;
+
+	/* The run is cleared inside one write epoch of the mount. */
+	if (filesystem->owner != NULL)
+		io_epoch_begin(&filesystem->owner->m_write_epoch);
+
+	/* Clears the run a block of zeroes at a time. */
+	error = 0;
+	for (done = 0; done < count; done += chunk) {
+		/* The block, or what is left of the run when that is less. */
+		chunk = count - done;
+		if (chunk > FAT_ZERO_SECTORS)
+			chunk = FAT_ZERO_SECTORS;
+
+		/* Writes one block of zeroes. */
+		error = fat_sectors_write(filesystem, lba + done, chunk,
+					  fat_zero_block);
+		if (error != 0)
+			break;
+	}
+
+	/* The epoch closes whatever the writes reported. */
+	if (filesystem->owner != NULL)
+		io_epoch_end(&filesystem->owner->m_write_epoch);
+
+	/* Reports why the run could not be cleared. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the run holds zeroes. */
+	return 0;
 }
 
 /* Reads a sector into the one-sector cache and reports where it landed. */
@@ -4682,37 +4879,63 @@ fat_raw_zero_cluster(
 	struct fat_mount_state *filesystem,
 	uint32_t cluster)
 {
-	uint32_t lba;
-	uint8_t *sector;
 	int result;
-	struct fat_mount_state *fat = filesystem;
-	uint32_t index;
 
-	/* Zeroes the cluster one sector at a time. */
-	for (index = 0; index < fat->sectors_per_cluster; index++) {
-		/* Turns the cluster and the sector in it into an address. */
-		result = fat_engine_cluster_lba(filesystem, cluster, index,
-			&lba);
-		if (result != 0)
-			return result;
-
-		/* Reads the sector so it can be filled in place. */
-		result = fat_engine_write_sector_result(filesystem, lba,
-							&sector);
-		if (result != 0)
-			return result;
-
-		clear_bytes(sector, 512);
-
-		/* The zeroes reach the volume once the sector is written. */
-		result = fat_engine_mark_sector_dirty(filesystem);
-		if (result == 0)
-			result = fat_engine_flush(filesystem);
-		if (result != 0)
-			return result;
-	}
+	/* The cluster is a run of one, cleared in a few writes (BUG-269). */
+	result = fat_raw_zero_clusters(filesystem, cluster, 1U);
+	if (result != 0)
+		return result;
 
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Zeroes a run of clusters that follow each other on the volume, in a few
+ * writes rather than one per sector (BUG-269).
+ */
+static int
+fat_raw_zero_clusters(
+	struct fat_mount_state *filesystem,
+	uint32_t first,
+	uint32_t count)
+{
+	uint32_t first_lba;
+	uint32_t last_lba;
+	uint32_t last;
+	uint32_t sectors;
+	int result;
+
+	/* A run of no clusters, or one whose last number would wrap. */
+	if (count == 0U || first > UINT32_MAX - (count - 1U))
+		return EINVAL;
+
+	/* The run's last cluster. */
+	last = first + (count - 1U);
+
+	/* The first sector of the run, which has to lie on the volume. */
+	result = fat_engine_cluster_lba(filesystem, first, 0U, &first_lba);
+	if (result != 0)
+		return result;
+
+	/* And its last sector, which has to lie on it as well. */
+	result = fat_engine_cluster_lba(filesystem, last,
+					filesystem->sectors_per_cluster - 1U,
+					&last_lba);
+	if (result != 0)
+		return result;
+
+	/* Clusters in order are sectors in order: anything else is a wrong run. */
+	sectors = count * filesystem->sectors_per_cluster;
+	if (last_lba < first_lba || last_lba - first_lba + 1U != sectors)
+		return EIO;
+
+	/* Writes the zeroes over the whole run. */
+	result = fat_engine_zero_run(filesystem, first_lba, sectors);
+	if (result != 0)
+		return result;
+
+	/* Succeeded: the run holds zeroes. */
 	return 0;
 }
 
@@ -4795,6 +5018,7 @@ fat_raw_allocate_run(
 	uint32_t limit;
 	unsigned count;
 	unsigned n;
+	unsigned run_end;
 	unsigned bytes;
 	unsigned entries;
 	int combined;
@@ -4861,16 +5085,29 @@ fat_raw_allocate_run(
 		}
 
 		sector = offset / 512U;
-
-		/* A cluster handed out is zeroed before anything reads it. */
-		error = fat_raw_zero_cluster(filesystem, cluster);
-		if (error != 0)
-			return error;
 		clusters[count++] = cluster;
 
 		/* An entry that ends in another sector ends the run. */
 		if ((offset + bytes - 1U) / 512U != sector)
 			break;
+	}
+
+	/*
+	 * The clusters handed out are zeroed before anything reads them, those
+	 * that follow each other on the volume in one run (BUG-269: a request
+	 * per sector kept a USB stick busy for minutes).
+	 */
+	for (n = 0; n < count; n = run_end) {
+		/* The clusters that follow this one by number make one run. */
+		run_end = n + 1U;
+		while (run_end < count && clusters[run_end] == clusters[run_end - 1U] + 1U)
+			run_end++;
+
+		/* Clears the run. */
+		error = fat_raw_zero_clusters(filesystem, clusters[n],
+					      run_end - n);
+		if (error != 0)
+			return error;
 	}
 
 	/*
@@ -5661,9 +5898,8 @@ fat_raw_write_bytes(
 	uint32_t position = offset;
 	uint32_t cluster;
 	uint32_t wanted;
+	uint32_t written;
 	int result;
-	int valid;
-	int last;
 
 	/* A write of no bytes changes nothing. */
 	if (length == 0U)
@@ -5689,11 +5925,32 @@ fat_raw_write_bytes(
 	if (result != 0)
 		return result;
 
-	/* Writes the run one sector at a time. */
+	/* Writes the run: whole sectors in runs, a part of a sector on its own. */
 	while (length) {
 		in_cluster = position % cluster_bytes;
 		sector_index = in_cluster / 512U;
 		within = in_cluster & 511U;
+
+		/*
+		 * Whole sectors from a sector's start go to the volume in runs
+		 * across the clusters that follow each other, leaving the
+		 * cluster the write goes on in (BUG-269).
+		 */
+		if (within == 0U && length >= 512U) {
+			result = fat_raw_write_sectors(file, &cluster,
+						       sector_index, input,
+						       zero, length, cursor,
+						       &written);
+			if (result != 0)
+				return result;
+
+			/* A zeroing pass has no input of its own to advance. */
+			if (!zero)
+				input += written;
+			position += written;
+			length -= written;
+			continue;
+		}
 
 		/* The run may end inside this sector rather than at its end. */
 		chunk = 512U - within;
@@ -5741,40 +5998,183 @@ fat_raw_write_bytes(
 		 * every sector.
 		 */
 		if (length != 0U && position % cluster_bytes == 0U) {
-			/* More clusters than the volume has means a loop. */
-			if (cursor->index >= fat->cluster_count)
-				return EIO;
-
-			/* A write past the end of the chain has to grow it. */
-			result = fat_raw_next_cluster(fat, cluster, &next);
-			if (result == 0) {
-				last = fat_raw_is_end(fat, next);
-				if (last) {
-					wanted = (uint32_t)(
-						((uint64_t)length +
-						 cluster_bytes - 1U) /
-						cluster_bytes);
-					result = fat_raw_allocate_run(fat,
-						cluster, wanted, &next);
-				}
-			}
-
-			/* A chain that leaves the volume means corruption. */
-			if (result == 0) {
-				valid = fat_raw_valid_cluster(fat, next);
-				if (!valid)
-					result = EIO;
-			}
+			/* Steps on to the next cluster, growing the chain at its end. */
+			result = fat_raw_write_next_cluster(file, cluster,
+							    length, cursor,
+							    &next);
 			if (result != 0)
 				return result;
-
 			cluster = next;
-			cursor->index++;
-			cursor->cluster = cluster;
 		}
 	}
 
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Steps a write on from a cluster it filled to the one the chain goes on
+ * with, growing the chain by what is still to be written when it ends
+ * there.  The cursor follows.
+ */
+static int
+fat_raw_write_next_cluster(
+	struct fat_file_state *file,
+	uint32_t cluster,
+	uint32_t remaining,
+	struct fat_chain_cursor *cursor,
+	uint32_t *next_cluster)
+{
+	struct fat_mount_state *fat;
+	uint32_t cluster_bytes;
+	uint32_t wanted;
+	uint32_t next;
+	int result;
+	int last;
+	int valid;
+
+	/* The volume and the size of its clusters. */
+	fat = file->mount;
+	cluster_bytes = (uint32_t)fat->sectors_per_cluster * 512U;
+
+	/* More clusters than the volume has means a loop. */
+	if (cursor->index >= fat->cluster_count)
+		return EIO;
+
+	/* The cluster the chain goes on with. */
+	result = fat_raw_next_cluster(fat, cluster, &next);
+	if (result != 0)
+		return result;
+
+	/* A write past the end of the chain has to grow it. */
+	last = fat_raw_is_end(fat, next);
+	if (last) {
+		wanted = (uint32_t)(((uint64_t)remaining + cluster_bytes - 1U) /
+				    cluster_bytes);
+		result = fat_raw_allocate_run(fat, cluster, wanted, &next);
+		if (result != 0)
+			return result;
+	}
+
+	/* A chain that leaves the volume means corruption. */
+	valid = fat_raw_valid_cluster(fat, next);
+	if (!valid)
+		return EIO;
+
+	/* The cursor follows the write into the next cluster. */
+	cursor->index++;
+	cursor->cluster = next;
+	*next_cluster = next;
+
+	/* Succeeded: the write goes on in the next cluster. */
+	return 0;
+}
+
+/*
+ * Writes whole sectors of a file from a sector's start in one run, across
+ * the clusters of its chain that follow each other on the volume, up to
+ * FAT_RUN_SECTORS (BUG-269: a request per sector kept a USB stick busy for
+ * minutes).  The chain grows as the old per-sector walk grew it.  The
+ * cluster is left where the write goes on: the next one when the run filled
+ * its last cluster and bytes remain.  Reports how many bytes were written.
+ */
+static int
+fat_raw_write_sectors(
+	struct fat_file_state *file,
+	uint32_t *cluster,
+	uint32_t sector_index,
+	const uint8_t *input,
+	int zero,
+	uint32_t length,
+	struct fat_chain_cursor *cursor,
+	uint32_t *written)
+{
+	struct fat_mount_state *fat;
+	uint32_t current;
+	uint32_t wanted;
+	uint32_t sectors;
+	uint32_t take;
+	uint32_t first_lba;
+	uint32_t last_lba;
+	uint32_t next_lba;
+	uint32_t next;
+	uint32_t remaining;
+	int result;
+
+	/* The volume, the cluster the run starts in, and nothing written yet. */
+	fat = file->mount;
+	current = *cluster;
+	*written = 0U;
+
+	/* The run takes the whole sectors asked for, up to its bound. */
+	wanted = length / 512U;
+	if (wanted > FAT_RUN_SECTORS)
+		wanted = FAT_RUN_SECTORS;
+
+	/* Where the run starts on the volume. */
+	result = fat_engine_cluster_lba(fat, current, sector_index, &first_lba);
+	if (result != 0)
+		return result;
+
+	/* Gathers the sectors of each cluster while the clusters follow each other. */
+	sectors = 0U;
+	for (;;) {
+		/* The sectors of this cluster the run takes. */
+		take = fat->sectors_per_cluster - sector_index;
+		if (take > wanted - sectors)
+			take = wanted - sectors;
+
+		/* The last of them has to lie on the volume, right after the run so far. */
+		result = fat_engine_cluster_lba(fat, current,
+						sector_index + take - 1U,
+						&last_lba);
+		if (result != 0)
+			return result;
+		if (last_lba - first_lba != sectors + take - 1U)
+			return EIO;
+		sectors += take;
+
+		/* A run that ends inside this cluster leaves the write in it. */
+		if (sector_index + take < fat->sectors_per_cluster)
+			break;
+
+		/* Nothing left after this cluster: the write ends in it. */
+		remaining = length - sectors * 512U;
+		if (remaining == 0U)
+			break;
+
+		/* The write goes on in the next cluster, growing the chain at its end. */
+		result = fat_raw_write_next_cluster(file, current, remaining,
+						    cursor, &next);
+		if (result != 0)
+			return result;
+		current = next;
+		sector_index = 0U;
+
+		/* A run at its bound ends here. */
+		if (sectors == wanted)
+			break;
+
+		/* A next cluster elsewhere on the volume ends the run. */
+		result = fat_engine_cluster_lba(fat, current, 0U, &next_lba);
+		if (result != 0)
+			return result;
+		if (next_lba != first_lba + sectors)
+			break;
+	}
+
+	/* Writes the run: zeroes for a gap, or the caller's bytes. */
+	if (zero) {
+		result = fat_engine_zero_run(fat, first_lba, sectors);
+	} else {
+		result = fat_engine_write_run(fat, first_lba, sectors, input);
+	}
+	if (result != 0)
+		return result;
+
+	/* Succeeded: the run is on the volume and the write goes on from the cluster left. */
+	*cluster = current;
+	*written = sectors * 512U;
 	return 0;
 }
 
