@@ -57,3 +57,9 @@ Origin: [backlog-p2](../backlog-p2.md) の 113・114（ws120-p009）、[案](../
 - T1-452: 手順 2 は直った（step=2 requests=2 と step=1 が 2 つの両方で pass）。3 回中 1 回（out5）手順 1 が FAIL: `MUSIC AUDIO lost song=0 ms=3903` の後、開き直しの stream が `failed error=3`（UNAVAILABLE、audiod が起き直る前）→ libkeiland の EAGAIN → `mu_player_open` は ENODEV、開き直しを諦めて NOTICE「There is no sound…」。
 - 直し（`music/main.c`）: 失った曲を覚え（曲・位置・一時停止か）、`mu_reopen` が開き直す。ENODEV の間は 500 ms おきに 10 秒まで試し直し（`mu_follow` の毎回、loop は 1 秒以内に回る）、開けたら同じ位置から（一時停止なら一時停止で）続ける。10 秒たっても開けなければ止めて理由の notice。曲を選び直すと試し直しは終わる。`MUSIC AUDIO reopened` の行は最後の試しで 1 回。helper の reopened の待ちを 15 秒に。
 - 確認: music の build exit 0・warning 0、style-check 指摘なし、`run-host-music.sh`・`host-music-play.sh` PASS（開き直しは host で組めない、T1 の apps.music.failures）。
+
+## T1-455 の結果と直し（2026-10-08 夜 P2）
+
+- T1-455: 手順 1 の開き直しは 3 回とも OK（`open error=24` の後 `reopened error=0`、seek は lost の ms と同じ）。手順 3（Space）が 3 回とも FAIL。
+- 読み（log）: 数え違いではない。開き直しで Tone A（8 秒）を 3.6 秒から続けたので、手順 1 の待ちの間に Tone A が自分で終わり（`MUSIC ENDED song=0` → `PLAY song=1`）、手順 2 の Next の 2 回（`REQUEST action=2` が 2 つ、別の frame で `STEP step=1` が 2 つ）で song 2 の次へ進んで最後の曲を越え `STOP song=2`、手順 3 の Space は止まった曲の再生し直しになった。2 回の click は 2 回と数えている（host の `next-twice-two-frames` が「1 回目の click を前の frame で数えた後の DOUBLE」の case で、2 回の request を確かめている）。
+- 直し（試験の側）: この scenario の 3 曲を 20 秒に（`make_songs` に長さ、`failures.md` の準備に注記）。

@@ -13,7 +13,7 @@ since: ws177-p021
 再生中に音の service（audiod）が去った時に stream を開き直して同じ位置から続けること、曲の file が消えた時に知らせて次の曲へ進むこと、検索の field を Escape で離れた後の Space が再生・一時停止になること、Next の連打を 1 回の曲の切り替えにまとめること、Files から開いた鳴らせない file の理由を知らせることを確かめる（ws177-p021）。
 
 ## 準備
-`apps.music.play` と同じ（kei の `~/Music/AAT/` に Tone A・Tone B、QEMU は音の device 付き）。加えて 3 曲目 `03-tone-c.m4a`（同じ作り方、題 Tone C、番号 3）と、音でない file `/home/kei/not-a-song.m4a`（中身は `not an mp4`）。
+`apps.music.play` と同じ（kei の `~/Music/AAT/` に Tone A・Tone B、QEMU は音の device 付き）。加えて 3 曲目 `03-tone-c.m4a`（同じ作り方、題 Tone C、番号 3）と、音でない file `/home/kei/not-a-song.m4a`（中身は `not an mp4`）。この scenario の 3 曲は 20 秒（1 の開き直しの後も Tone A が鳴っているように。T1-455 では 8 秒の Tone A が自分で終わり、2 の Next が最後の曲を越えて止まった）。
 
 ## 操作と確認
 1. 操作: Music を開き、Play（Tone A）。3 秒待つ。root で audiod を SIGKILL で止める（zedBSD に pkill は無い: `ps -A -o pid,args` で `/sbin/audiod` の pid を探して `kill -KILL`。audiod は `restart=on-failure` で起き直る）。

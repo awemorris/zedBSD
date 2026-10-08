@@ -29,6 +29,16 @@
  * answers a line each (printd.h).  The socket does not block: what cannot
  * be sent waits in a queue.  The jobs not ended are at most 16; the last
  * 16 ended are kept for the lists.
+ *
+ * The daemon's life (ws177-p023, design §4 and §5.1): a job whose JOB line
+ * went but that the daemon had not accepted when it ended is sent again to
+ * a new daemon, twice at most; one accepted fails ("daemon"), one being
+ * cancelled is cancelled.  A daemon that ends three times in ten seconds
+ * (not after BYE) is not started again for a minute, nor one that said
+ * FATAL; the jobs meanwhile fail.  A daemon that breaks the protocol (a
+ * descriptor sent back, a line too long) is shut for writing and given ten
+ * seconds to end before its socket is closed.  The documents' descriptors
+ * belong to their jobs; a line waiting only borrows its job's.
  */
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
@@ -47,6 +57,7 @@
 #include <sys/types.h>
 #include <sys/uio.h>
 #include <dirent.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The longest line of the daemon's protocol, and the most lines waiting to be sent. */
@@ -67,22 +78,46 @@
 /* The environment's variables handed to the daemon at most. */
 #define PRINT_ENVIRONMENT_MAX	64U
 
+/*
+ * The daemon's ends counted (not after BYE), the time they are counted in
+ * and the rest after them; the times a job is sent again; and how long a
+ * daemon shut for writing is given to end (seconds).
+ */
+#define PRINT_ENDS_MAX		3U
+#define PRINT_ENDS_SECONDS	10
+#define PRINT_REST_SECONDS	60
+#define PRINT_RESENDS_MAX	2U
+#define PRINT_SHUT_SECONDS	10
+
 /* The environment, for the daemon. */
 extern char **environ;
 
-/* A line waiting to be sent: its bytes, and the descriptor that goes with it (-1 for none) and the job it is. */
+/*
+ * A line waiting to be sent: its bytes, the descriptor that goes with it
+ * (-1 for none; the job's, borrowed), the job it is, and whether any of
+ * it went (a line begun is sent to its end, never taken out).
+ */
 struct print_line {
 	char text[PRINT_LINE_MAX];
 	size_t length;
 	int fd;
 	uint32_t job;
+	int begun;
 };
 
-/* A job and what the backend holds for it: its document until the daemon took it, and whether its JOB line went. */
+/*
+ * A job and what the backend holds for it: its document until the daemon
+ * took it, whether its JOB line went (its first byte), whether the daemon
+ * accepted it, whether a CANCEL went for it, and how many times it was
+ * sent again to a new daemon.
+ */
 struct print_job {
 	struct kl_backend_print_job job;
 	int fd;
 	int sent;
+	int accepted;
+	int cancelling;
+	unsigned resends;
 	uint64_t order;
 };
 
@@ -132,6 +167,18 @@ struct kl_backend_print {
 	uint32_t next_seq;
 	uint64_t next_order;
 	unsigned changed;
+
+	/*
+	 * The daemon's life: the times its last ends were counted (monotonic
+	 * seconds, oldest first), until when it is not started, whether BYE
+	 * went to the daemon running, and when a daemon shut for writing is
+	 * given up (0 for none).
+	 */
+	time_t ends[PRINT_ENDS_MAX];
+	size_t end_count;
+	time_t rest_until;
+	int bye_sent;
+	time_t shut_until;
 };
 
 static int print_load(struct kl_backend_print *print);
@@ -152,6 +199,10 @@ static void print_line(struct kl_backend_print *print, char *line);
 static void print_job_state(struct kl_backend_print *print, uint32_t number, const char *state, const char *detail);
 static void print_named(struct kl_backend_print *print, uint32_t seq, char *rest);
 static void print_remove_spool(const char *dir);
+static int print_send_job(struct kl_backend_print *print, struct print_job *job);
+static void print_resend(struct kl_backend_print *print);
+static void print_shut(struct kl_backend_print *print);
+static time_t print_now(void);
 static int print_host_ok(const char *host);
 static void print_copy(char *to, size_t size, const char *from);
 
@@ -204,16 +255,10 @@ kl_backend_print_close(
 	if (print == NULL)
 		return;
 
-	/* The documents and the lines waiting. */
+	/* The documents (the lines waiting only borrow them). */
 	for (index = 0; index < print->job_count; index++) {
 		if (print->jobs[index].fd >= 0)
 			(void)close(print->jobs[index].fd);
-	}
-
-	/* Each queued job's descriptor. */
-	for (index = 0; index < print->queue_count; index++) {
-		if (print->queue[index].fd >= 0)
-			(void)close(print->queue[index].fd);
 	}
 
 	/* The daemon's socket: its end ends the daemon. */
@@ -248,6 +293,7 @@ kl_backend_print_update(
 	unsigned *changed)
 {
 	struct stat status;
+	time_t now;
 	int error;
 
 	/* The daemon's lines, and the lines waiting for it. */
@@ -258,6 +304,11 @@ kl_backend_print_update(
 		print_read(print);
 	if (print->socket >= 0)
 		print_flush(print);
+
+	/* A daemon shut for writing that did not end in its time: its socket closed. */
+	now = print_now();
+	if (print->socket >= 0 && print->shut_until != 0 && now >= print->shut_until)
+		print_stopped(print);
 
 	/* The settings file changed by another session. */
 	error = stat(print->config, &status);
@@ -531,7 +582,6 @@ kl_backend_print_submit(
 {
 	struct kl_backend_printer *found;
 	struct print_job *made;
-	const char *protocol;
 	size_t active;
 	size_t index;
 	int error;
@@ -577,19 +627,12 @@ kl_backend_print_submit(
 	print_result(print, *request, 0, 1);
 	print->changed |= KL_BACKEND_PRINT_CHANGED_LIST;
 
-	/* To the daemon. */
-	error = print_start(print);
-	if (error != 0) {
+	/* To the daemon, started when it is not running; one that cannot start fails the job. */
+	error = print_send_job(print, made);
+	if (error != 0)
 		print_end_job(print, made, KL_BACKEND_PRINT_FAILED, "daemon");
-		return 0;
-	}
 
-	/* The JOB line, with the document beside it. */
-	protocol = "lpd";
-	if (found->protocol == KL_BACKEND_PRINTER_IPP)
-		protocol = "ipp";
-	print_send(print, fd, made->job.job, "JOB %lu %s %s %u %s %s", (unsigned long)made->job.job, protocol, found->host, found->port,
-	    found->path, title);
+	/* Asked: the job's state follows. */
 	return 0;
 }
 
@@ -615,21 +658,28 @@ kl_backend_print_cancel(
 		return 0;
 	}
 
-	/* Its line still waiting: taken out of the queue, the job cancelled. */
-	for (index = 0; index < print->queue_count; index++) {
-		if (print->queue[index].job != job)
-			continue;
-		if (print->queue[index].fd >= 0)
-			(void)close(print->queue[index].fd);
-		memmove(&print->queue[index], &print->queue[index + 1U], (print->queue_count - index - 1U) * sizeof(print->queue[0]));
-		print->queue_count--;
-		found->fd = -1;
+	/*
+	 * Its JOB line not begun (or none, the daemon not running): taken out
+	 * of the queue, the job cancelled; the daemon never knew it.
+	 */
+	if (!found->sent) {
+		for (index = 0; index < print->queue_count; index++) {
+			if (print->queue[index].job != job || print->queue[index].begun)
+				continue;
+			memmove(&print->queue[index], &print->queue[index + 1U],
+			    (print->queue_count - index - 1U) * sizeof(print->queue[0]));
+			print->queue_count--;
+			break;
+		}
+
+		/* Cancelled, its document closed. */
 		print_end_job(print, found, KL_BACKEND_PRINT_CANCELLED, "");
 		print_result(print, *request, 0, 1);
 		return 0;
 	}
 
-	/* Asked of the daemon. */
+	/* Asked of the daemon, which tells how it ended (always a CANCEL, even before ACCEPTED). */
+	found->cancelling = 1;
 	print_send(print, -1, 0, "CANCEL %lu", (unsigned long)job);
 	print_result(print, *request, 0, 1);
 	return 0;
@@ -969,6 +1019,7 @@ print_start(
 	char runtime[600];
 	size_t count;
 	size_t index;
+	time_t now;
 	pid_t pid;
 	int pair[2];
 	int child;
@@ -980,6 +1031,14 @@ print_start(
 		return 0;
 	if (print->runtime[0] == '\0')
 		return ENOENT;
+
+	/* Resting after it ended too often or said FATAL: not started for now. */
+	now = print_now();
+	if (print->rest_until != 0 && now < print->rest_until)
+		return EAGAIN;
+
+	/* The rest is over. */
+	print->rest_until = 0;
 
 	/* The socket pair, the backend's end not blocking. */
 	status = socketpair(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0, pair);
@@ -1037,52 +1096,180 @@ print_start(
 		return status;
 	}
 
-	/* Running. */
+	/* Running: nothing said to it yet. */
 	print->daemon = pid;
 	print->socket = pair[0];
 	print->commands = 0;
 	print->input_length = 0;
 	print->spool[0] = '\0';
+	print->bye_sent = 0;
+	print->shut_until = 0;
 	return 0;
 }
 
 /*
- * The daemon ended (its socket's end): its jobs not ended fail, its lines
- * waiting go, its spool is removed.
+ * The daemon ended (its socket's end, or given up after it was shut): its
+ * lines waiting go, its spool is removed, and its jobs not ended go on as
+ * the life's table says: one whose JOB went but was not accepted is sent
+ * again to a new daemon (twice at most), one being cancelled is
+ * cancelled, the others fail.  An end not after BYE is counted: the third
+ * in ten seconds rests the daemon for a minute.
  */
 static void
 print_stopped(
 	struct kl_backend_print *print)
 {
+	struct print_job *job;
+	time_t now;
 	size_t index;
 
 	/* The socket. */
 	(void)close(print->socket);
 	print->socket = -1;
 	print->daemon = -1;
+	print->shut_until = 0;
 
-	/* The lines waiting and their documents. */
-	for (index = 0; index < print->queue_count; index++) {
-		if (print->queue[index].fd >= 0)
-			(void)close(print->queue[index].fd);
-	}
-
-	/* None waits, and no name is asked. */
+	/* None waits (the lines only borrowed their jobs' documents), and no name is asked. */
 	print->queue_count = 0;
 	print->name_count = 0;
 
-	/* The jobs not ended. */
-	for (index = 0; index < print->job_count; index++) {
-		if (print->jobs[index].job.state < KL_BACKEND_PRINT_DONE) {
-			print->jobs[index].fd = -1;
-			print_end_job(print, &print->jobs[index], KL_BACKEND_PRINT_FAILED, "daemon");
+	/* An end the backend did not ask for, counted; the third in its time rests the daemon. */
+	now = print_now();
+	if (!print->bye_sent) {
+		if (print->end_count == PRINT_ENDS_MAX) {
+			memmove(&print->ends[0], &print->ends[1], (PRINT_ENDS_MAX - 1U) * sizeof(print->ends[0]));
+			print->end_count--;
 		}
+
+		/* This end, and the rest when it is the third in its time. */
+		print->ends[print->end_count] = now;
+		print->end_count++;
+		if (print->end_count == PRINT_ENDS_MAX && now - print->ends[0] <= PRINT_ENDS_SECONDS)
+			print->rest_until = now + PRINT_REST_SECONDS;
+	}
+
+	/* The next daemon has had no BYE. */
+	print->bye_sent = 0;
+
+	/* The jobs not ended, each as the table says. */
+	for (index = 0; index < print->job_count; index++) {
+		job = &print->jobs[index];
+		if (job->job.state >= KL_BACKEND_PRINT_DONE)
+			continue;
+
+		/* Being cancelled: cancelled. */
+		if (job->cancelling) {
+			print_end_job(print, job, KL_BACKEND_PRINT_CANCELLED, "");
+			continue;
+		}
+
+		/* Not accepted, its document still held: sent again, twice at most. */
+		if (!job->accepted && job->fd >= 0 && job->resends < PRINT_RESENDS_MAX) {
+			if (job->sent)
+				job->resends++;
+			job->sent = 0;
+			continue;
+		}
+
+		/* Accepted, or sent too often: failed. */
+		print_end_job(print, job, KL_BACKEND_PRINT_FAILED, "daemon");
 	}
 
 	/* What it left in its spool. */
 	if (print->spool[0] != '\0')
 		print_remove_spool(print->spool);
 	print->spool[0] = '\0';
+
+	/* The jobs to send again, to a new daemon. */
+	print_resend(print);
+}
+
+/*
+ * Sends a job's JOB line with its document to the daemon, started when it
+ * is not running.  Returns 0, or an errno value when it cannot start or
+ * the job's printer is gone.
+ */
+static int
+print_send_job(
+	struct kl_backend_print *print,
+	struct print_job *job)
+{
+	struct kl_backend_printer *printer;
+	const char *protocol;
+	int error;
+
+	/* The job's printer, still there. */
+	printer = print_printer(print, job->job.printer);
+	if (printer == NULL)
+		return ENOENT;
+
+	/* The daemon. */
+	error = print_start(print);
+	if (error != 0)
+		return error;
+
+	/* The JOB line, with the document beside it (borrowed by the line). */
+	protocol = "lpd";
+	if (printer->protocol == KL_BACKEND_PRINTER_IPP)
+		protocol = "ipp";
+	print_send(print, job->fd, job->job.job, "JOB %lu %s %s %u %s %s", (unsigned long)job->job.job, protocol, printer->host,
+	    printer->port, printer->path, job->job.title);
+
+	/* Succeeded: the line waits or went. */
+	return 0;
+}
+
+/* Sends again the jobs not ended whose JOB line has not gone, oldest first; those that cannot go fail. */
+static void
+print_resend(
+	struct kl_backend_print *print)
+{
+	struct print_job *job;
+	size_t index;
+	int error;
+
+	/* Each job waiting for a daemon. */
+	for (index = 0; index < print->job_count; index++) {
+		job = &print->jobs[index];
+		if (job->job.state >= KL_BACKEND_PRINT_DONE || job->sent || job->fd < 0)
+			continue;
+
+		/* Its line again; no daemon, no job. */
+		error = print_send_job(print, job);
+		if (error != 0)
+			print_end_job(print, job, KL_BACKEND_PRINT_FAILED, "daemon");
+	}
+}
+
+/*
+ * Shuts a daemon that broke the protocol for writing: nothing more is
+ * sent, and it is given PRINT_SHUT_SECONDS to end before its socket is
+ * closed (so that the old and a new daemon never send the same job).
+ */
+static void
+print_shut(
+	struct kl_backend_print *print)
+{
+	/* Once. */
+	if (print->shut_until != 0)
+		return;
+
+	/* Shut, and its time given. */
+	(void)shutdown(print->socket, SHUT_WR);
+	print->shut_until = print_now() + PRINT_SHUT_SECONDS;
+}
+
+/* The monotonic clock's seconds (never 0, so that 0 can mean none). */
+static time_t
+print_now(void)
+{
+	struct timespec now;
+
+	/* The clock. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+
+	/* Succeeded: the seconds, one past them so that none is 0. */
+	return now.tv_sec + 1;
 }
 
 /* Queues a line for the daemon (with a descriptor to pass, -1 for none, and the job it is for) and sends what it can. */
@@ -1098,12 +1285,9 @@ print_send(
 	va_list arguments;
 	int length;
 
-	/* A full queue: the line is lost, its document closed. */
-	if (print->queue_count == PRINT_QUEUE_MAX) {
-		if (fd >= 0)
-			(void)close(fd);
+	/* A full queue, or a daemon shut for writing: the line is lost (a job's document stays its job's). */
+	if (print->queue_count == PRINT_QUEUE_MAX || print->shut_until != 0)
 		return;
-	}
 
 	/* The line. */
 	line = &print->queue[print->queue_count];
@@ -1118,6 +1302,7 @@ print_send(
 	line->length = (size_t)length + 1U;
 	line->fd = fd;
 	line->job = job;
+	line->begun = 0;
 	print->queue_count++;
 	print->commands++;
 
@@ -1177,8 +1362,9 @@ print_flush(
 				job->sent = 1;
 		}
 
-		/* Its descriptor is not sent again. */
+		/* Its descriptor is not sent again, and the line is begun. */
 		line->fd = -1;
+		line->begun = 1;
 
 		/* Part of it: the rest waits. */
 		if ((size_t)sent < line->length) {
@@ -1193,18 +1379,41 @@ print_flush(
 	}
 }
 
-/* Reads the daemon's lines; its end stops it. */
+/*
+ * Reads the daemon's lines; its end stops it.  A daemon that sends a
+ * descriptor back, whose control data was cut, or whose line is too long
+ * broke the protocol: it is shut (print_shut) and what it says after is
+ * not taken.
+ */
 static void
 print_read(
 	struct kl_backend_print *print)
 {
+	union {
+		struct cmsghdr header;
+		char space[CMSG_SPACE(sizeof(int) * 4U)];
+	} control;
+	struct cmsghdr *rights;
+	struct msghdr message;
+	struct iovec vector;
 	char bytes[PRINT_LINE_MAX];
+	const int *descriptors;
+	size_t count;
+	size_t taken;
 	ssize_t got;
 	ssize_t index;
+	int broken;
 
 	/* What there is. */
 	for (;;) {
-		got = recv(print->socket, bytes, sizeof(bytes), MSG_DONTWAIT);
+		memset(&message, 0, sizeof(message));
+		vector.iov_base = bytes;
+		vector.iov_len = sizeof(bytes);
+		message.msg_iov = &vector;
+		message.msg_iovlen = 1;
+		message.msg_control = control.space;
+		message.msg_controllen = sizeof(control.space);
+		got = recvmsg(print->socket, &message, MSG_DONTWAIT | MSG_CMSG_CLOEXEC);
 		if (got < 0 && errno == EINTR)
 			continue;
 		if (got < 0)
@@ -1214,10 +1423,34 @@ print_read(
 			return;
 		}
 
+		/* A descriptor sent back is closed: the daemon broke the protocol. */
+		broken = (message.msg_flags & MSG_CTRUNC) != 0;
+		for (rights = CMSG_FIRSTHDR(&message); rights != NULL; rights = CMSG_NXTHDR(&message, rights)) {
+			if (rights->cmsg_level != SOL_SOCKET || rights->cmsg_type != SCM_RIGHTS)
+				continue;
+			count = (rights->cmsg_len - CMSG_LEN(0)) / sizeof(int);
+			descriptors = (const int *)(const void *)CMSG_DATA(rights);
+			for (taken = 0; taken < count; taken++)
+				(void)close(descriptors[taken]);
+			broken = 1;
+		}
+
+		/* Broken: shut, and nothing it says is taken. */
+		if (broken)
+			print_shut(print);
+		if (print->shut_until != 0)
+			continue;
+
 		/* Line by line. */
 		for (index = 0; index < got; index++) {
-			if (print->input_length == sizeof(print->input) - 1U)
+			if (print->input_length == sizeof(print->input) - 1U) {
+				/* A line too long: the protocol broken. */
 				print->input_length = 0;
+				print_shut(print);
+				break;
+			}
+
+			/* A byte of the line. */
 			if (bytes[index] != '\n') {
 				print->input[print->input_length] = bytes[index];
 				print->input_length++;
@@ -1259,12 +1492,14 @@ print_line(
 		return;
 	}
 
-	/* A job taken into the spool, or refused. */
+	/* A job taken into the spool: its document is the daemon's copy from here. */
 	fields = sscanf(line, "ACCEPTED %lu", &number);
 	if (fields == 1) {
 		job = print_find_job(print, (uint32_t)number);
-		if (job != NULL && job->fd >= 0) {
-			(void)close(job->fd);
+		if (job != NULL) {
+			job->accepted = 1;
+			if (job->fd >= 0)
+				(void)close(job->fd);
 			job->fd = -1;
 		}
 
@@ -1272,13 +1507,22 @@ print_line(
 		return;
 	}
 
-	/* Its word, when it has one. */
+	/* Refused, with its word when it has one; a job being cancelled is cancelled. */
 	detail[0] = '\0';
 	fields = sscanf(line, "REJECTED %lu %31s", &number, detail);
 	if (fields >= 1) {
 		job = print_find_job(print, (uint32_t)number);
-		if (job != NULL && job->job.state < KL_BACKEND_PRINT_DONE)
+		if (job != NULL && job->job.state < KL_BACKEND_PRINT_DONE && job->cancelling)
+			print_end_job(print, job, KL_BACKEND_PRINT_CANCELLED, "");
+		else if (job != NULL && job->job.state < KL_BACKEND_PRINT_DONE)
 			print_end_job(print, job, KL_BACKEND_PRINT_FAILED, detail);
+		return;
+	}
+
+	/* The daemon cannot run (its runtime directory): not started again for a while. */
+	same = strncmp(line, "FATAL", 5U);
+	if (same == 0) {
+		print->rest_until = print_now() + PRINT_REST_SECONDS;
 		return;
 	}
 
@@ -1324,6 +1568,7 @@ print_line(
 		if (count == print->commands && print->queue_count == 0U) {
 			print_send(print, -1, 0, "BYE %lu", count);
 			print->commands--;
+			print->bye_sent = 1;
 		}
 
 		/* Done with this line. */
