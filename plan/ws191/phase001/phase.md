@@ -59,3 +59,4 @@ design.md として書き上げる（A/V の同期の時計、audiod の再起�
 - **H2（B-2、Linux の再生の経路）**: ユーザー（クリック）「alsa-lib を dlopen」。実行時に alsa-lib を読み、ALSA の default（普通は pipewire-alsa 経由で PipeWire）へ。alsa-lib が無ければ再生の stream を断る（音量の操作は今のまま）。
 - **D4 の再評価（S-2）**: Q1 の判断: stream ごとに自分の Wayland の接続を持つ（libmedia の thread のため）を保つ。限りは compositor が接続の相手の資格（SO_PEERCRED の pid・uid）で数え、同じ pid の stream の本数に上限を置く。
 - **p004 の受け入れ（B-3）**: Q1 の判断: Linux・FreeBSD で build できる最小の試験の client（正弦波を鳴らす、libkeiland の audio stream だけを使う）を p004 に入れる。音の観測は QEMU の wav の audiodev か backend の書いた frame の数。
+- **置き場所と名前（2026-10-08 午後 ユーザー）**:「サウンドはlibkeiland-backendに入れてください。libkeilandのAPIはkl_audio_がいいです。」→ 音の出力（zedBSD の audiod、Linux の alsa-lib の dlopen、FreeBSD の OSS）は libkeiland-backend の中に置き、compositor の本体には置かない。libkeiland の公開の API の接頭は `kl_audio_`（`kl_system_audio_stream_*` などにしない）。
