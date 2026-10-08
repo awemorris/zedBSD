@@ -17,8 +17,10 @@
  *
  * - Every /dev/input/eventN reporting REL_X+REL_Y or ABS_X+ABS_Y is a
  *   pointer and every one reporting KEY_A and KEY_Z is a keyboard.  Nodes are
- *   scanned at start-up and again every KWL_INPUT_SCAN_MS; a node that fails
- *   a read is closed.  Capabilities follow the open nodes.
+ *   scanned at start-up and again every KWL_INPUT_SCAN_MS, and every
+ *   KWL_INPUT_SETTLE_SCAN_MS for KWL_INPUT_SETTLE_MS after the system's event
+ *   of a device; a node that fails a read is closed.  Capabilities follow the
+ *   open nodes.
  * - Focus is the surface currently on the display; its client's pointer and
  *   keyboard objects get enter when it is shown and leave when it is replaced,
  *   unmapped or destroyed.  Clients without seat objects get nothing.
@@ -69,13 +71,26 @@
 /* How many cursor images the compositor draws for the shapes clients ask for (cursor.c). */
 #define KWL_CURSOR_IMAGES	10U
 
-/* Bound the evdev nodes the seat reads and the events one report may carry. */
-#define KWL_INPUT_MAX		16U
+/*
+ * Bound the evdev nodes the seat reads and the events one report may carry.
+ * The nodes are as many as the kernel's input devices (INPUT_DEVICE_MAX in
+ * src/drivers/generic/input.c, BUG-264).
+ */
+#define KWL_INPUT_MAX		32U
 #define KWL_INPUT_FRAME_MAX	64U
 #define KWL_INPUT_PATH_MAX	KL_BACKEND_INPUT_PATH_MAX
 
 /* Rescan period for evdev nodes that appear after start-up, in milliseconds. */
 #define KWL_INPUT_SCAN_MS	2000U
+
+/*
+ * After the system's event of an input device, the nodes are scanned every
+ * KWL_INPUT_SETTLE_SCAN_MS for KWL_INPUT_SETTLE_MS (milliseconds): a new
+ * node is opened as soon as sessiond has made it the seat's user's, which
+ * it does on the same event (BUG-264), instead of at the next ordinary scan.
+ */
+#define KWL_INPUT_SETTLE_MS		2000U
+#define KWL_INPUT_SETTLE_SCAN_MS	100U
 
 /* A window's place when the client chooses its size: cascaded from the centre by this step. */
 #define KWL_CASCADE_STEP	32
@@ -911,6 +926,7 @@ struct kwl_server {
 	unsigned failed;
 	struct kwl_input_device inputs[KWL_INPUT_MAX];
 	uint64_t input_scan_time;
+	uint64_t input_settle_until;
 	uint64_t input_events;
 	uint64_t seat_events;
 	unsigned capabilities;

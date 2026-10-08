@@ -15,8 +15,8 @@
 
 #include "userland/desktop/libkeiland-backend/backend-private.h"
 
-/* The leases: slot zero is the primary node's, the others the input devices' (the compositor reads at most 16). */
-#define LINUX_SEAT_DEVICES 17U
+/* The leases: slot zero is the primary node's, the others the input devices' (the compositor reads at most 32, KWL_INPUT_MAX). */
+#define LINUX_SEAT_DEVICES 33U
 
 /* The direct root seat: the primary node and the input devices opened by path. */
 int linux_direct_seat_open(void);

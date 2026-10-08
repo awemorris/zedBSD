@@ -108,17 +108,19 @@ sessiond_greeter_run(
 {
 	struct sessiond_account greeter_account;
 	struct greeter greeter;
-	struct pollfd poll_entry[3];
+	struct pollfd poll_entry[4];
 	enum sessiond_greeter_end end;
 	long long seat_ms;
 	long long now_ms;
 	nfds_t entries;
 	nfds_t sleep_slot;
+	nfds_t seat_slot;
 	int timeout;
 	int busy;
 	int ready;
 	int error;
 	int closed;
+	int plugged;
 
 	/* The greeter a Log Out started, or a new one. */
 	memset(&greeter, 0, sizeof(greeter));
@@ -169,6 +171,14 @@ sessiond_greeter_run(
 		poll_entry[sleep_slot].revents = 0;
 		if (poll_entry[sleep_slot].fd >= 0)
 			entries++;
+
+		/* A device plugged in (seat.c, BUG-264). */
+		seat_slot = entries;
+		poll_entry[seat_slot].fd = sessiond_seat_events_fd();
+		poll_entry[seat_slot].events = POLLIN;
+		poll_entry[seat_slot].revents = 0;
+		if (poll_entry[seat_slot].fd >= 0)
+			entries++;
 		busy = sessiond_exchange_busy(&greeter.exchange);
 		timeout = 1000;
 		if (busy)
@@ -190,9 +200,14 @@ sessiond_greeter_run(
 			break;
 		}
 
+		/* A device that came is heard at once; the others are looked for every GREETER_SEAT_MS. */
+		plugged = 0;
+		if (ready > 0 && seat_slot < entries && poll_entry[seat_slot].revents != 0)
+			plugged = sessiond_seat_events_collect();
+
 		/* A new input device is the greeter's (never a security key, seat.c). */
 		now_ms = sessiond_milliseconds();
-		if (now_ms - seat_ms >= GREETER_SEAT_MS) {
+		if (plugged || now_ms - seat_ms >= GREETER_SEAT_MS) {
 			sessiond_seat_give(greeter_account.passwd.pw_uid, greeter_account.passwd.pw_gid, 0);
 			seat_ms = now_ms;
 		}
