@@ -173,6 +173,19 @@ def main():
 	daemon.send("CANCEL 15")
 	check("lpd-after-control", daemon.read_until(lambda line: line.startswith("STATE 15 ") and "sending" not in line, 15) ==
 		"STATE 15 failed unconfirmed", str(daemon.lines[-3:]))
+	# 6b. A printer that lists application/octet-stream and not PDF (BUG-271): the PDF goes as octet-stream; one that
+	# lists neither fails format.
+	mode(4, "octet")
+	daemon.job(16, "ipp", ipp[4], "/ipp/print", document)
+	done = daemon.read_until(lambda line: line.startswith("STATE 16 ") and line.split()[2] in ("done", "failed"), 20)
+	formats = [path.read_bytes() for path in printers.glob("ipp-4-*.format")]
+	check("octet-stream", done == "STATE 16 done" and b"application/octet-stream" in formats, f"{done} {formats}")
+	mode(5, "raster")
+	daemon.job(17, "ipp", ipp[5], "/ipp/print", document)
+	check("no-pdf-no-octet", daemon.read_until(lambda line: line.startswith("STATE 17 failed"), 20) == "STATE 17 failed format",
+		str([line for line in daemon.lines if " 17 " in line]))
+	pdf_formats = [path.read_bytes() for path in printers.glob("ipp-0-*.format")]
+	check("pdf-stays-pdf", pdf_formats and all(value == b"application/pdf" for value in pdf_formats), str(pdf_formats))
 	status = daemon.end()
 	check("end-of-socket", status == 0, f"status {status}")
 

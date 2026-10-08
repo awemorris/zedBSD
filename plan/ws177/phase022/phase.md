@@ -29,3 +29,9 @@ Origin: [backlog-p2](../backlog-p2.md) の 124 と 125 の printd 側（ws145-p0
 - host（既存）: `sh plan/ws145/tests/run-host-printd.sh build/ws177-p022/keiland-printd` → PASS。
 - build: `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/amd64 build/amd64/bin/keiland-printd` exit 0・warning 0。style-check 指摘なし。
 - QEMU: 未実施（p022〜p024 をまとめて T1 に）。
+
+## BUG-271 の直し（2026-10-08 夜 P2）
+
+- 実の printer（Brother MFC-L3770CDW、10.0.30.6）は IPP の `document-format-supported` に application/pdf を載せず application/octet-stream・image/urf・image/jpeg・image/pwg-raster を返し、printd は `failed format` にしていた。LPD の raw の PDF は正しく印刷された（ユーザーの確認）ので、この機種は PDF を受ける。
+- 直し（`printd/ipp.c`・`printd.h`）: 一覧に PDF が無く application/octet-stream がある printer には、PDF を `document-format=application/octet-stream` で送る（job の `format`）。どちらも無ければ前どおり `failed format`。PDF がある printer は application/pdf のまま。
+- 確認: `host-printd-q.sh` に 3 項目（octet-stream の printer で done と mock が受けた document-format が octet-stream、PDF も octet-stream も無い printer は failed format、PDF の printer は application/pdf のまま）→ PASS（15 項目）。`run-host-printd.sh` PASS、keiland-printd の build exit 0・warning 0、style-check なし。

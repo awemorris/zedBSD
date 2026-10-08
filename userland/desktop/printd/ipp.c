@@ -101,8 +101,9 @@ struct ipp_message {
 
 /*
  * What a response said: the HTTP status, the IPP status and request-id,
- * the job's id and state (-1 for none), whether the printer lists PDF and
- * lists formats at all, and its info and model.
+ * the job's id and state (-1 for none), whether the printer lists PDF,
+ * application/octet-stream (it guesses the format: many printers that take
+ * PDF list only that, BUG-271) and formats at all, and its info and model.
  */
 struct ipp_answer {
 	int http;
@@ -111,6 +112,7 @@ struct ipp_answer {
 	int job_id;
 	int job_state;
 	int has_pdf;
+	int has_octet;
 	int has_formats;
 	char info[PD_NAME_MAX];
 	char model[PD_NAME_MAX];
@@ -212,8 +214,15 @@ pd_ipp_job(
 		(void)snprintf(job->path, sizeof(job->path), "%s", path);
 	}
 
-	/* A printer that lists its formats without PDF. */
-	if (answer.has_formats && !answer.has_pdf) {
+	/*
+	 * A printer that lists its formats without PDF: one that takes
+	 * application/octet-stream finds the format itself (BUG-271: a Brother
+	 * MFC-L3770CDW printed the PDF so); any other cannot take it.
+	 */
+	if (answer.has_formats && !answer.has_pdf && answer.has_octet) {
+		(void)snprintf(job->format, sizeof(job->format), "application/octet-stream");
+		pd_log("job %lu as octet-stream", (unsigned long)job->job);
+	} else if (answer.has_formats && !answer.has_pdf) {
 		pd_send("STATE %lu failed format", (unsigned long)job->job);
 		return;
 	}
@@ -444,6 +453,7 @@ ipp_ask(
 	unsigned char number[4];
 	char uri[256];
 	size_t index;
+	const char *format;
 	uint32_t request;
 	int status;
 
@@ -483,7 +493,10 @@ ipp_ask(
 		if (job_name == NULL || job_name[0] == '\0')
 			job_name = "Document";
 		ipp_text_attribute(&message, IPP_NAME, "job-name", job_name);
-		ipp_text_attribute(&message, IPP_MIME, "document-format", "application/pdf");
+		format = "application/pdf";
+		if (document != NULL && document->format[0] != '\0')
+			format = document->format;
+		ipp_text_attribute(&message, IPP_MIME, "document-format", format);
 	}
 
 	/* The printer's attributes wanted: the name once, then the other values. */
@@ -1137,6 +1150,7 @@ ipp_stream_attribute(
 	const unsigned char *value;
 	size_t length;
 	int which;
+	int octet;
 	int pdf;
 
 	/* Past the names looked at, or a value not kept whole. */
@@ -1161,6 +1175,11 @@ ipp_stream_attribute(
 			pdf = memcmp(value, "application/pdf", 15U);
 		if (pdf == 0)
 			answer->has_pdf = 1;
+		octet = 1;
+		if (length == 24U)
+			octet = memcmp(value, "application/octet-stream", 24U);
+		if (octet == 0)
+			answer->has_octet = 1;
 	} else if (which == 4 && answer->info[0] == '\0') {
 		ipp_take_text(value, length, stream->tag, answer->info, sizeof(answer->info));
 	} else if (which == 5 && answer->model[0] == '\0') {

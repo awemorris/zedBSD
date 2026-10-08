@@ -14,8 +14,11 @@ the test can shape the answers; what it does is set by a file FOLDER/mode-<index
     big         Get-Printer-Attributes after "100 Continue", chunked, with 400 attributes of 2000-byte values after
                 the ones that matter (printer-info, document-format-supported)
     header      Get-Printer-Attributes with a 20 KiB header
+    octet       lists application/octet-stream, image/urf and image/pwg-raster, not PDF (BUG-271's Brother); a
+                Print-Job whose document-format is not application/octet-stream is refused (0x040A)
+    raster      lists image/urf and image/pwg-raster only
 
-FOLDER/ipp-<index>-<n>.pdf keeps each document; FOLDER/concurrency holds "most-at-once-in-all most-at-once-one-printer".
+FOLDER/ipp-<index>-<n>.pdf keeps each document and ipp-<index>-<n>.format its document-format; FOLDER/concurrency holds "most-at-once-in-all most-at-once-one-printer".
 The LPD queue delays the answer to the data file by 2 s and records the subcommands it got in FOLDER/lpd-<n>.log
 (an "abort" line for \\001).
 """
@@ -91,7 +94,16 @@ def make_ipp(index):
 			groups = b"\x01" + attribute(0x47, "attributes-charset", "utf-8") + attribute(0x48, "attributes-natural-language", "en")
 			status = 0
 			chunked = False
-			if operation == 0x000B:
+			if operation == 0x000B and mode in ("octet", "raster"):
+				groups += b"\x04" + attribute(0x41, "printer-info", f"Mock {index}")
+				if mode == "octet":
+					groups += attribute(0x49, "document-format-supported", "application/octet-stream") + attribute(0x49, "", "image/urf")
+				else:
+					groups += attribute(0x49, "document-format-supported", "image/urf")
+				groups += attribute(0x49, "", "image/pwg-raster") + attribute(0x23, "printer-state", struct.pack(">I", 3))
+			elif operation == 0x0002 and mode == "octet" and attributes.get("document-format", [b""])[0] != b"application/octet-stream":
+				status = 0x040A
+			elif operation == 0x000B:
 				groups += b"\x04" + attribute(0x41, "printer-info", f"Mock {index}") + attribute(0x49, "document-format-supported", "application/pdf")
 				groups += attribute(0x23, "printer-state", struct.pack(">I", 3))
 				if mode == "big":
@@ -109,6 +121,7 @@ def make_ipp(index):
 						STATE["jobs"][index] = STATE["jobs"].get(index, 0) + 1
 						number = STATE["jobs"][index]
 					(FOLDER / f"ipp-{index}-{number}.pdf").write_bytes(document)
+					(FOLDER / f"ipp-{index}-{number}.format").write_bytes(attributes.get("document-format", [b""])[0])
 					record(index, -1)
 					groups += b"\x02" + attribute(0x21, "job-id", struct.pack(">I", 100 + number)) + attribute(0x23, "job-state", struct.pack(">I", 3))
 			elif operation == 0x0009:
