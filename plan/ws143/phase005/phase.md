@@ -611,3 +611,10 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - i01b: §3 と §7.3・§7.5 の `hid-host-p005.sh`。Q2 の決定が無ければ `HID_HOST_GET_DEVICE` を入れ、kernel・daemon・試験の 1 関数ずつに閉じる。`CONFIG_HID_HOST`（§2 の配置、Q24）。
 - i02（BR/EDR。p004 の cleared の後）→ i03（LE）→ i04（実機の gate、Q20）。
 - Q1（調整役）へ: Q20・Q23 の判断、tshark を host に入れるか、Future Work（LED の出力、i2c-hid の乗せ替え、sessiond の hotplug の chown と `KWL_INPUT_MAX`）の登録。
+
+## Q1 の判断（2026-10-08）
+
+- Q20: i04（実機の短い確認）を p006 の前の必須の門にする（推しのとおり、ユーザーの device が要る）。
+- Q23: sessiond の hotplug の穴は BUG-264 として立て、i01a の前に P2 の次の世代が再現と直しを行う（login の後の USB キーボードにも効くため優先）。
+- S11 の tshark: btsnoop の外部の照合が要る時に host に入れる（sudo の package の導入は許可の範囲）。
+- Future Work: LED の出力、i2c-hid の乗せ替え（Q1 の判断待ち）を F に記録。
