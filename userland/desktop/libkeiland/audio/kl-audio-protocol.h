@@ -22,7 +22,8 @@
  *   request 0 destroy
  *   request 1 start(uint request)           the device reads the ring from now
  *   request 2 stop(uint request)            a pause: what is written and not read stays in the ring
- *   request 3 flush(uint request)           drops what is written and not read
+ *   request 3 flush(uint request)           drops what is written and not read; a running stream
+ *                                           stays running, a stopped one stopped, a drain is ended
  *   request 4 drain(uint request)           plays what is written, then stops
  *   event   0 ready(fd ring, uint bytes, uint capacity_frames, uint period_frames)
  *                                           once, after the create
@@ -31,7 +32,8 @@
  *                                           exactly one for each start, stop, flush and drain
  *   event   3 drained(uint request)         that drain is complete; the stream is stopped
  *   event   4 underrun(uint count)          the device found the ring empty while running (at
- *                                           most once a second; count is the total so far)
+ *                                           most once after each start or other control; count is
+ *                                           the total so far, in the system's own unit)
  *   event   5 lost(uint error)              the stream is gone; no event follows
  *
  * The sound itself never passes the compositor: the client writes frames
@@ -111,7 +113,9 @@
 #define KL_AUDIO_RING_CAPACITY			24U
 #define KL_AUDIO_RING_PERIOD			28U
 #define KL_AUDIO_RING_WRITE_POSITION		64U	/* the client's */
+#define KL_AUDIO_RING_WRITE_SEQUENCE		72U	/* not used (audiod's, without an 8-byte atomic) */
 #define KL_AUDIO_RING_READ_POSITION		128U	/* the server's: taken from the ring */
+#define KL_AUDIO_RING_READ_SEQUENCE		136U	/* not used */
 #define KL_AUDIO_RING_PLAYED_POSITION		192U	/* the server's: heard, as it reckons */
 #define KL_AUDIO_RING_PLAYED_TIME		200U	/* the server's: CLOCK_MONOTONIC (ns) of that reckoning */
 #define KL_AUDIO_RING_PLAYED_SEQUENCE		208U	/* the server's: odd while the played pair is written */

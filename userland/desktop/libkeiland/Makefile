@@ -20,7 +20,8 @@ LIBKEILAND_SOURCES := userland/desktop/libkeiland/version.c userland/desktop/lib
 	userland/desktop/libkeiland/translate.c userland/desktop/libkeiland/translate-follow.c \
 	userland/desktop/libkeiland/system/system.c userland/desktop/libkeiland/system/system-view.c \
 	userland/desktop/libkeiland/system/system-protocol.c userland/desktop/libkeiland/system/system-monitor.c \
-	userland/desktop/libkeiland/system/system-monitor-rate.c
+	userland/desktop/libkeiland/system/system-monitor-rate.c \
+	userland/desktop/libkeiland/audio/audio.c userland/desktop/libkeiland/audio/audio-protocol.c
 
 # The desktop's shared widgets and controls (WS090; their own library until WS131 p012, named kl_ since p013,
 # <keiland/keiland.h>): the drawing layer, the scroll and the input, the window, the widgets and the file chooser.

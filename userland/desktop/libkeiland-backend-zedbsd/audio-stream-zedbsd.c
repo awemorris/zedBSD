@@ -63,6 +63,9 @@ _Static_assert(offsetof(struct audiod_shm_header, write_position) == offsetof(st
 _Static_assert(offsetof(struct audiod_shm_header, read_position) == offsetof(struct kl_backend_audio_ring, read_position), "read");
 _Static_assert(offsetof(struct audiod_shm_header, played_position) == offsetof(struct kl_backend_audio_ring, played_position), "played");
 _Static_assert(offsetof(struct audiod_shm_header, played_time_ns) == offsetof(struct kl_backend_audio_ring, played_time_ns), "played time");
+_Static_assert(offsetof(struct audiod_shm_header, played_sequence) == offsetof(struct kl_backend_audio_ring, played_sequence), "played sequence");
+_Static_assert(offsetof(struct audiod_shm_header, write_sequence) == offsetof(struct kl_backend_audio_ring, write_sequence), "write sequence");
+_Static_assert(offsetof(struct audiod_shm_header, read_sequence) == offsetof(struct kl_backend_audio_ring, read_sequence), "read sequence");
 _Static_assert(offsetof(struct audiod_shm_header, underruns) == offsetof(struct kl_backend_audio_ring, underruns), "underruns");
 _Static_assert(offsetof(struct audiod_shm_header, overruns) == offsetof(struct kl_backend_audio_ring, overruns), "overruns");
 _Static_assert(offsetof(struct audiod_shm_header, state) == offsetof(struct kl_backend_audio_ring, state), "state");
@@ -889,9 +892,6 @@ stream_error(
 	if (error == ENOMEM)
 		return KL_BACKEND_AUDIO_ERROR_NO_MEMORY;
 
-	/* Out of streams or descriptors. */
-	if (error == EMFILE)
-		return KL_BACKEND_AUDIO_ERROR_TOO_MANY;
 
 	/* Anything else. */
 	return KL_BACKEND_AUDIO_ERROR_FAILED;

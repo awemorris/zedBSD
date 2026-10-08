@@ -43,6 +43,8 @@ _Static_assert(offsetof(struct kl_backend_audio_ring, capacity_frames) == KL_AUD
 _Static_assert(offsetof(struct kl_backend_audio_ring, period_frames) == KL_AUDIO_RING_PERIOD, "period");
 _Static_assert(offsetof(struct kl_backend_audio_ring, write_position) == KL_AUDIO_RING_WRITE_POSITION, "write");
 _Static_assert(offsetof(struct kl_backend_audio_ring, read_position) == KL_AUDIO_RING_READ_POSITION, "read");
+_Static_assert(offsetof(struct kl_backend_audio_ring, write_sequence) == KL_AUDIO_RING_WRITE_SEQUENCE, "write sequence");
+_Static_assert(offsetof(struct kl_backend_audio_ring, read_sequence) == KL_AUDIO_RING_READ_SEQUENCE, "read sequence");
 _Static_assert(offsetof(struct kl_backend_audio_ring, played_position) == KL_AUDIO_RING_PLAYED_POSITION, "played");
 _Static_assert(offsetof(struct kl_backend_audio_ring, played_time_ns) == KL_AUDIO_RING_PLAYED_TIME, "played time");
 _Static_assert(offsetof(struct kl_backend_audio_ring, played_sequence) == KL_AUDIO_RING_PLAYED_SEQUENCE, "played sequence");
@@ -68,9 +70,6 @@ _Static_assert(KL_BACKEND_AUDIO_ERROR_GONE == KL_AUDIO_ERROR_GONE, "GONE");
 _Static_assert(KL_BACKEND_AUDIO_ERROR_BROKEN == KL_AUDIO_ERROR_BROKEN, "BROKEN");
 _Static_assert(KL_BACKEND_AUDIO_ERROR_FAILED == KL_AUDIO_ERROR_FAILED, "FAILED");
 
-/* How often a stream hears of underruns at most (ms). */
-#define AUDIO_UNDERRUN_MS	1000U
-
 /*
  * The table's slots: twice the streams that may hold a backend's stream,
  * since a failed or lost stream keeps its slot until its client destroys
@@ -78,8 +77,8 @@ _Static_assert(KL_BACKEND_AUDIO_ERROR_FAILED == KL_AUDIO_ERROR_FAILED, "FAILED")
  */
 #define AUDIO_SLOTS		(2U * KL_AUDIO_STREAMS_MAX)
 
-/* The controls a stream may have with the backend at once. */
-#define AUDIO_WAITING		16U
+/* The controls a stream may have with the backend at once: one, so that the backend and the compositor see one state. */
+#define AUDIO_WAITING		1U
 
 /* Marks a parameter a function does not use. */
 #define UNUSED_PARAMETER(name)	((void)(name))
@@ -104,8 +103,9 @@ struct audio_waiting {
 /*
  * One stream: its object (NULL for a free slot), the process holding it,
  * where it is, the backend's stream (NULL once failed or lost), the
- * controls waiting, and the underruns told (when, and a count not told
- * yet).  The slot is the object's from its create_stream until its
+ * controls waiting, and whether an underrun may be told (once after each
+ * start or other control, so that a stream left running at the end of a
+ * song does not fill a client that does not read).  The slot is the object's from its create_stream until its
  * destroy or its client's end (kwl_audio_object_gone).
  */
 struct audio_stream {
@@ -114,9 +114,7 @@ struct audio_stream {
 	enum audio_state state;
 	struct kl_backend_audio_stream *backend;
 	struct audio_waiting waiting[AUDIO_WAITING];
-	uint64_t underrun_ms;
-	uint32_t underrun_count;
-	unsigned underrun_waiting;
+	unsigned underrun_armed;
 };
 
 /*
@@ -135,7 +133,7 @@ static int audio_control(struct kwl_object *object, uint32_t opcode, const unsig
 static struct audio_stream *audio_find(const struct kwl_object *object);
 static unsigned audio_check(uint32_t format, uint32_t channels, uint32_t rate, uint32_t buffer, uint32_t period);
 static unsigned audio_count(pid_t pid, unsigned *all);
-static void audio_take(struct audio_stream *stream, const struct kl_backend_audio_stream_report *report, uint64_t now);
+static void audio_take(struct audio_stream *stream, const struct kl_backend_audio_stream_report *report);
 static void audio_answered(struct audio_stream *stream, uint32_t request, unsigned error);
 static void audio_end(struct audio_stream *stream, enum audio_state state, uint32_t opcode, unsigned error);
 static void audio_close_backend(struct audio_stream *stream);
@@ -226,15 +224,12 @@ kwl_audio_tick(
 {
 	struct kl_backend_audio_stream_report report;
 	struct audio_stream *stream;
-	uint32_t count;
-	uint64_t now;
 	unsigned index;
 	int taken;
 
 	UNUSED_PARAMETER(server);
 
 	/* Each stream with a backend's stream, until nothing more came. */
-	now = kwl_milliseconds();
 	for (index = 0U; index < AUDIO_SLOTS; index++) {
 		stream = &audio_state.streams[index];
 		for (;;) {
@@ -243,17 +238,7 @@ kwl_audio_tick(
 			taken = kl_backend_audio_stream_next(stream->backend, &report);
 			if (!taken)
 				break;
-			audio_take(stream, &report, now);
-		}
-
-		/* Underruns held back are told once a second has passed. */
-		if (stream->object != NULL &&
-		    stream->underrun_waiting &&
-		    now - stream->underrun_ms >= AUDIO_UNDERRUN_MS) {
-			count = stream->underrun_count;
-			stream->underrun_waiting = 0U;
-			stream->underrun_ms = now;
-			audio_event(stream, KL_AUDIO_STREAM_EVENT_UNDERRUN, &count, 1U);
+			audio_take(stream, &report);
 		}
 	}
 
@@ -388,7 +373,10 @@ audio_create(
 	/* The backend's stream; its ready or failed comes at a later tick. */
 	stream->backend = kl_backend_audio_stream_open(&format);
 	if (stream->backend == NULL) {
-		audio_end(stream, AUDIO_FAILED, KL_AUDIO_STREAM_EVENT_FAILED, KL_AUDIO_ERROR_NO_MEMORY);
+		error = KL_AUDIO_ERROR_NO_MEMORY;
+		if (errno == ENOTSUP)
+			error = KL_AUDIO_ERROR_UNSUPPORTED;
+		audio_end(stream, AUDIO_FAILED, KL_AUDIO_STREAM_EVENT_FAILED, error);
 		return 0;
 	}
 
@@ -461,9 +449,9 @@ audio_control(
 			break;
 	}
 
-	/* Every slot waits. */
+	/* A control not answered yet: one at a time. */
 	if (slot == AUDIO_WAITING) {
-		audio_answered(stream, request, KL_AUDIO_ERROR_UNAVAILABLE);
+		audio_answered(stream, request, KL_AUDIO_ERROR_STATE);
 		return 0;
 	}
 
@@ -582,8 +570,7 @@ audio_count(
 static void
 audio_take(
 	struct audio_stream *stream,
-	const struct kl_backend_audio_stream_report *report,
-	uint64_t now)
+	const struct kl_backend_audio_stream_report *report)
 {
 	struct kwl_client *client;
 	uint32_t words[3];
@@ -631,20 +618,13 @@ audio_take(
 		printf("KWL AUDIO stream client=%llu id=%u drained request=%u\n", (unsigned long long)client->number, stream->object->id, report->request);
 		break;
 	case KL_BACKEND_AUDIO_UNDERRUN:
-		/* Told at most once a second, with the latest total. */
-		if (stream->state != AUDIO_RUNNING)
+		/* Told once after each start or other control, while running. */
+		if (stream->state != AUDIO_RUNNING || !stream->underrun_armed)
 			break;
-		stream->underrun_count = report->count;
-		stream->underrun_waiting = 1U;
-		if (now - stream->underrun_ms >= AUDIO_UNDERRUN_MS) {
-			stream->underrun_waiting = 0U;
-			stream->underrun_ms = now;
-			words[0] = report->count;
-			audio_event(stream, KL_AUDIO_STREAM_EVENT_UNDERRUN, words, 1U);
-			printf("KWL AUDIO stream client=%llu id=%u underrun count=%u\n", (unsigned long long)client->number, stream->object->id, report->count);
-		}
-
-		/* Told now, or held for a later tick. */
+		stream->underrun_armed = 0U;
+		words[0] = report->count;
+		audio_event(stream, KL_AUDIO_STREAM_EVENT_UNDERRUN, words, 1U);
+		printf("KWL AUDIO stream client=%llu id=%u underrun count=%u\n", (unsigned long long)client->number, stream->object->id, report->count);
 		break;
 	case KL_BACKEND_AUDIO_LOST:
 		/* The stream is gone. */
@@ -687,9 +667,7 @@ audio_answered(
 			stream->state = AUDIO_STOPPED;
 			break;
 		case KL_BACKEND_AUDIO_FLUSH:
-			/* A flush keeps a running or stopped stream as it is, and ends a drain. */
-			if (stream->state == AUDIO_DRAINING)
-				stream->state = AUDIO_STOPPED;
+			/* A flush keeps a running or stopped stream as it is (a drain's is below). */
 			break;
 		case KL_BACKEND_AUDIO_DRAIN:
 			stream->state = AUDIO_DRAINING;
@@ -698,6 +676,14 @@ audio_answered(
 			break;
 		}
 	}
+
+	/* A drain's flush ends the drain however it was answered: audiod stops it before it flushes. */
+	if (waiting != NULL && waiting->what == KL_BACKEND_AUDIO_FLUSH && stream->state == AUDIO_DRAINING)
+		stream->state = AUDIO_STOPPED;
+
+	/* An underrun may be told once again after a control. */
+	if (waiting != NULL)
+		stream->underrun_armed = 1U;
 
 	/* The result. */
 	words[0] = request;
@@ -723,6 +709,13 @@ audio_end(
 {
 	uint32_t word;
 	const char *what;
+	unsigned slot;
+
+	/* A control not answered yet is answered first: its stream is gone (one result for each control). */
+	for (slot = 0U; slot < AUDIO_WAITING; slot++) {
+		if (stream->waiting[slot].used)
+			audio_answered(stream, stream->waiting[slot].request, KL_AUDIO_ERROR_GONE);
+	}
 
 	/* The backend's stream, and where the stream is now. */
 	audio_close_backend(stream);
