@@ -4,7 +4,7 @@
 
 Phase ID: `ws143-p004`
 Parent: [WS143](../ws.md)
-Status: test-wait（i03 の直しを T1 に再依頼、Q1 経由。i02 は T1-405 で FAIL → uncleared（下の「T1-405 と i03」）。i01 は uncleared: P2 の context の都合で部品と host 試験まで）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: i03 の直しは T1-409 PASS（同じ guest で p002→p003→p004）、T1-426 でも bt-pair-p004 PASS。i01・i02 の uncleared の記録は下のまま）（旧: test-wait（i03 の直しを T1 に再依頼、Q1 経由。i02 は T1-405 で FAIL → uncleared（下の「T1-405 と i03」）。i01 は uncleared: P2 の context の都合で部品と host 試験まで）））
 Phase disposition: normal
 Queue: q880-i01（P2、Q1 の投入「p004（L2CAP・SMP）。p003 と同じく試験の kernel の loopback で QEMU で確かめられる形に（loopback に要る答えを足してよい）。設計 → design-reviewer → 実装 → host 試験（fuzz を含む）」）、
 q883-i02（P2、Q1 の投入: 再開点の順に、review による設計の改訂 → session の queue と初期化（B1・B3・B5）→ pair.[ch] → main.c の口と `bt` →

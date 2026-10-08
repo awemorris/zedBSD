@@ -4,7 +4,7 @@
 
 Phase ID: `ws051-p004a`
 Parent: [WS051](../ws.md)
-Status: in-progress（2026-10-07 P1: 実装、host 試験 PASS、build warning 0。実機（5330 の素の起動、TC2 の DP の monitor）は T1 への依頼を Q1 へ）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。TC1 は未確認）（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 の UAT 2026-10-08 午後（BUG-256 の直しの後）でユーザー「USB-C DPでディスプレイ出力ができました！」、TC2。log は ../../bugs/BUG-256/。TC1 は未確認）（旧: in-progress（2026-10-07 P1: 実装、host 試験 PASS、build warning 0。実機（5330 の素の起動、TC2 の DP の monitor）は T1 への依頼を Q1 へ）））
 Phase disposition: normal
 Queue: q847（P1）の続き。承認: ユーザー 2026-10-07「UCSIとDP alt modeってもう動いてるんですか？シェーダコンパイラより優先してほしいです」（Q1 経由、p003 → p004a → p004b）
 

@@ -3,7 +3,7 @@
 # ws113-p012: native の power と refresh の境界（VK_EXT_display_control の下層）
 
 Parent: [WS113](../ws.md)
-Status: in-progress（2026-10-05、P2。C2 はユーザーが許可済み（2026-10-05 未明）。UAPI の差分を下に示してから実装する）
+Status: in-progress（2026-10-08 q902 P1 の照合: Venus の分は T1-135 PASS（Q1 2026-10-05）。i915 の refresh 約 60 Hz・power off の 5330 の確認は未）（旧: in-progress（2026-10-05、P2。C2 はユーザーが許可済み（2026-10-05 未明）。UAPI の差分を下に示してから実装する））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue: none

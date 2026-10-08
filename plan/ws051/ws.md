@@ -3,13 +3,13 @@
 # WS051: USB-C の DisplayPort Alternate Mode
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p001・p004a・p004b・p005a cleared。 2026-10-08 q902 P1 の照合: p002〜p003 cleared、p004a〜p005b は実装済み）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: 2026-10-07 P1: p005a を実装（HPD の長い pulse → detect → 事象、IRQ_HPD の sink の確かめ、TC の link reset の 2 秒の猶予）、実機は T1 への依頼。p004b は設計済み（code は ws113-p011a の後）。p004a は merge 済み（c7ead0ec2）、実機は Q1 とユーザー。それ以前: p004a を実装（dp-ext.c・dp-ext-kern.c、host-dpext 73/0、build warning 0）、実機は T1 への依頼（Q1 経由）。次は p004b。それ以前: 2026-10-07 Q1: p002b cleared（T1-350）。次は p003（P1、q847、正解値は q848 で 5330 から採取）。それ以前: P2: p002b を実装（host 101/0、build warning 0、ktest・実機は 5330 の後）。次は p003（正解値の後）。それ以前: p001 の design.md 第 4 版（§14、[レビュー](design-review-2026-10-07.md) を反映）。p002 を実装（host PASS、ktest は 5330 の後）。次は p002b（TC の核）。§14.5 の正解値の採取の手順はユーザーの判断待ち（Q1 経由）。それ以前: 2026-10-04 の第 1〜3 版、§10・§13 の決定
+Resume point: 2026-10-08 q902 P1 の照合: 5330 の UAT（BUG-256 の直しの後、2026-10-08 午後）でユーザー「USB-C DPでディスプレイ出力ができました！」「拡張モードで出力されました。」「ミラーもうまくいきました。」（TC2）→ p004a・p004b・p005a は Q1 の判定待ち。残り: BUG-266（拡張で eDP を off にすると TC への 1 出力の付け替えが失敗、P2）、p004c（GOP が USB-C の起動）と p005b（IRQ_HPD の retrain、範囲 2 の (b) の実装）の 5330、TC1 の確認。p001 は設計の完了の判定待ち。p006 の全文規約はベータ3。旧 resume: 2026-10-07 P1: p005a を実装（HPD の長い pulse → detect → 事象、IRQ_HPD の sink の確かめ、TC の link reset の 2 秒の猶予）、実機は T1 への依頼。p004b は設計済み（code は ws113-p011a の後）。p004a は merge 済み（c7ead0ec2）、実機は Q1 とユーザー。それ以前: p004a を実装（dp-ext.c・dp-ext-kern.c、host-dpext 73/0、build warning 0）、実機は T1 への依頼（Q1 経由）。次は p004b。それ以前: 2026-10-07 Q1: p002b cleared（T1-350）。次は p003（P1、q847、正解値は q848 で 5330 から採取）。それ以前: P2: p002b を実装（host 101/0、build warning 0、ktest・実機は 5330 の後）。次は p003（正解値の後）。それ以前: p001 の design.md 第 4 版（§14、[レビュー](design-review-2026-10-07.md) を反映）。p002 を実装（host PASS、ktest は 5330 の後）。次は p002b（TC の核）。§14.5 の正解値の採取の手順はユーザーの判断待ち（Q1 経由）。それ以前: 2026-10-04 の第 1〜3 版、§10・§13 の決定
 <!-- awesome-plan-current:end -->
 
 ## 目標
@@ -54,16 +54,16 @@ Keiland が決める）。i915 は GOP の出力先以外に自分の判断で s
 
 | Phase | 内容 | Status | 依存 | 対象 |
 | --- | --- | --- | --- | --- |
-| [ws051-p001](phase001/phase.md) | 調査と設計: i915 の TCSS・Type-C PHY（DKL）・TC PLL・DDI の手順、今の i915 の display の範囲、画面の構成、WS050 との連携 | in-progress（2026-10-07 P2: [design.md](design.md) 第 4 版（§14: §13 の決定、WS113 p002 との分担、WS050 の口、WS084）、design-reviewer に掛ける） | — | 設計文書 |
-| [ws051-p002](phase002/phase.md) | TC PLL の enable の番地（H8、sanitize の対象から TC を外す）、VBT の DVO の code の値（L1）、clone の log、新しい host の試験、ktest の期待値（GOP の引き継ぎと外部優先の廃止は WS113 p002 part A、design §14.2） | in-progress（2026-10-07 P2: 実装、host PASS、build warning 0。ktest は 5330 の後の T1、ws113-p002 の clearance 待ち） | p001、ws113-p002 の clearance | `src/drivers/gpu/i915/display/`（takeover.c・diagnostics.c）、i915 の ktest |
+| [ws051-p001](phase001/phase.md) | 調査と設計: i915 の TCSS・Type-C PHY（DKL）・TC PLL・DDI の手順、今の i915 の display の範囲、画面の構成、WS050 との連携 | in-progress → Q1 の判定待ち（第 4 版、[レビュー](design-review-2026-10-07.md) を反映済み、p002〜p005b がこの設計で実装済み） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | 設計文書 |
+| [ws051-p002](phase002/phase.md) | TC PLL の enable の番地（H8、sanitize の対象から TC を外す）、VBT の DVO の code の値（L1）、clone の log、新しい host の試験、ktest の期待値（GOP の引き継ぎと外部優先の廃止は WS113 p002 part A、design §14.2） | cleared（2026-10-07 Q1、T1-334） | p001、ws113-p002 の clearance | `src/drivers/gpu/i915/display/`（takeover.c・diagnostics.c）、i915 の ktest |
 | [ws051-p002b](phase002b/phase.md) | TC の port の核（`tc.c`）、TC の AUX の power domain（H1）、AUX_USBC の well の TC の分岐（H2）、DE の HPD の配送（H5）、診断（向きは記録だけ） | cleared（2026-10-07 T1-350 5330 ktest PASS） | p002 | `src/drivers/gpu/i915/display/` |
 | [ws051-p003](phase003/phase.md) | DKL PHY と TC PLL（ADL-P の enable の番地の分岐）、DDI の TC の clock、ADL-P の DKL の buffer translation、DP_MODE、FIA の lane 数、TC PLL・init_mode・sanitize の readout（判定は変えない） | cleared（2026-10-07 T1-354） | p002b、正解値（design §14.5、ユーザーの判断） | 同上 |
-| [ws051-p004a](phase004a/phase.md) | TC の AUX・DPCD・EDID の診断、外部 DP の object（M6）、調べた後の同期の disconnect（M2）、branch device と sink count（H7） | in-progress（2026-10-07 P1: 実装、host PASS、build warning 0。実機は T1 への依頼） | p003 | 同上 |
-| [ws051-p004b](phase004b/phase.md) | display の UAPI での出力（claim・mode・present での link training（fallback、M3）・modeset・scanout、TC PLL・TBT PLL を pool へ、TC の encoder を N1 の registry へ） | planning（2026-10-07 P1: 設計だけ。code は ws113-p011a の merge の後、Q1） | p004a、ws113-p011a（付け替えの口、R1〜R4） | 同上 |
-| [ws051-p004c](phase004c/phase.md) | GOP が USB-C の時の引き継ぎ（M5: 判定を引き継ぐに、host-gop.c の期待値） | in-progress（2026-10-08 P1 q877: 実装・host・build、実機は BUG-256 の後） | p004b | 同上 |
-| [ws051-p005a](phase005a/phase.md) | 抜き差しの検出と事象: HPD の長い pulse → detect（外部 DP の probe）→ `GPU_DISPLAY_EVENT_CHANGE`、2 秒の猶予と 5 回の retry（M4 の前半） | in-progress（2026-10-07 P1: 実装、host PASS、build warning 0。実機は T1 への依頼） | p004a（2026-10-07 Q1 の判断: p004b の依存を外し p005 を a・b に分けた） | hotplug.c・dp-ext |
-| [ws051-p005b](phase005b/phase.md) | scanout 中の抜けの停止、IRQ_HPD の retrain（M4 の後半）、S0ix の口（M10） | in-progress（2026-10-08 P1 q877: retrain を実装・host・build。抜けの停止は案（判断待ち）、S0ix はベータ3） | p004b、p005a | 同上 |
-| ws051-p006 | 規約の全文の確認と最終の確認 | planned | p002、p002b、p003、p004a、p004b、p004c、p005a、p005b | WS の全 source |
+| [ws051-p004a](phase004a/phase.md) | TC の AUX・DPCD・EDID の診断、外部 DP の object（M6）、調べた後の同期の disconnect（M2）、branch device と sink count（H7） | in-progress → Q1 の判定待ち（実装 2026-10-07 P1。5330 の UAT 2026-10-08 午後、TC2 で DP の monitor が点いた（BUG-256 の resolved）。TC1 は未確認） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。TC1 は未確認） | | 同上 |
+| [ws051-p004b](phase004b/phase.md) | display の UAPI での出力（claim・mode・present での link training（fallback、M3）・modeset・scanout、TC PLL・TBT PLL を pool へ、TC の encoder を N1 の registry へ） | in-progress → Q1 の判定待ち（D1〜D8 実装 2026-10-07 P1。5330 の UAT 2026-10-08 午後で TC2 の拡張・mirror の出力。拡張で eDP を off にした時の TC への付け替えは BUG-266） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。BUG-266 は別） | | 同上 |
+| [ws051-p004c](phase004c/phase.md) | GOP が USB-C の時の引き継ぎ（M5: 判定を引き継ぐに、host-gop.c の期待値） | in-progress（2026-10-08 P1 q877: 実装・host・build。BUG-256 は resolved、5330 の確認（GOP が USB-C の起動）が残り） | p004b | 同上 |
+| [ws051-p005a](phase005a/phase.md) | 抜き差しの検出と事象: HPD の長い pulse → detect（外部 DP の probe）→ `GPU_DISPLAY_EVENT_CHANGE`、2 秒の猶予と 5 回の retry（M4 の前半） | in-progress → Q1 の判定待ち（実装 2026-10-07 P1。5330 の UAT 2026-10-08 午後で TC2 に挿した monitor が検出され点いた。抜き差しの繰り返しと TC1 は未） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。抜き差しの繰り返しと TC1 は未） | | hotplug.c・dp-ext |
+| [ws051-p005b](phase005b/phase.md) | scanout 中の抜けの停止、IRQ_HPD の retrain（M4 の後半）、S0ix の口（M10） | in-progress（2026-10-08 P1 q877: retrain を実装・host・build。抜けの停止は Q1 が案 (b) に決定（2026-10-08）、5330 で抜き差しを試せる時に実装。S0ix はベータ3） | p004b、p005a | 同上 |
+| ws051-p006 | 規約の全文の確認と最終の確認 | planned（全文規約の分はベータ3、2026-10-08 ユーザー） | p002、p002b、p003、p004a、p004b、p004c、p005a、p005b | WS の全 source |
 
 ## 2026-10-04 予定（Q1）
 

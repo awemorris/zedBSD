@@ -2,7 +2,7 @@
 
 # ws083-p002: libvulkan の Vulkan Video の骨組み
 
-Status: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1）
+Status: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS。実機の family・拡張の列挙は T1-435 の A（未実行））（旧: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1））
 Disposition: normal
 Parent: [WS083](../ws.md)
 

@@ -3,7 +3,7 @@
 # ws113-p004: compositorの出力・表示モード
 
 Parent: [WS113](../ws.md)
-Status: planned
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: p004a は cleared（T1-357b）。p004b は q855 P1 の実装、T1-367 1) 新しい guest で displays-p004b: PASS（下の「T1-367 の判定」）。5330 のユーザーの UAT 2026-10-08「HDMIに出力されました。extendもmirrorも動いています。」（ws113-p014 の由来））（旧: planned））
 Disposition: normal
 Primary Milestone: MG006（WSから継承）
 Queue / attempts: none / 実装未承認

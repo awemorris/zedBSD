@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p003 -->
 # ws189-p003: app — 画像の drag の元と受け、文字の drag の元と受け、desktop の file
 
-Status: test-wait（T1-434、2026-10-08 Q1 が依頼。実装・build・host 試験は済み）
+Status: test-wait（2026-10-08 q902 P1 の照合: T1-434・437・439 で text-between-windows 1〜4・photo-to-notes 1〜2・apps.browser.image-drag を確認。未: apps.pdfviewer.drag-out・desktop.dnd.photo-to-notes 3〜4・text-between-windows 5〜6）（旧: test-wait（T1-434、2026-10-08 Q1 が依頼。実装・build・host 試験は済み））
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1、2026-10-08）

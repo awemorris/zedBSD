@@ -2,7 +2,7 @@
 # ws051-p005b: IRQ_HPD の retrain と scanout 中の抜けの停止（M4 の後半）
 
 Parent: [WS051](../ws.md)
-Status: in-progress（2026-10-08 P1 q877: retrain を実装・host 試験・build warning 0。scanout 中の抜けの停止は案だけ、S0ix の口はベータ3）
+Status: in-progress（2026-10-08 q902 P1 の照合: 範囲 1 の retrain は実装・host 済み、5330 の IRQ_HPD は未。範囲 2 は Q1 が案 (b) に決定、5330 で抜き差しを試せる時に実装（未着手）。S0ix はベータ3）（旧: in-progress（2026-10-08 P1 q877: retrain を実装・host 試験・build warning 0。scanout 中の抜けの停止は案だけ、S0ix の口はベータ3））
 Disposition: normal
 Queue: q877（P1、2026-10-08 Q1 の承認の 2 番、「host で進められる分。S0ix の口（WS052）はベータ3 なので除く」）
 依存: p004b（外部 DP の resident の出力）、p005a（長い・短い pulse、2 秒の猶予の log）。設計: [design.md](../design.md) §6 の hotplug・§12 の M4・M10

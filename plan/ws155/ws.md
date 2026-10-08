@@ -3,12 +3,12 @@
 # WS155: Keiland の app: カレンダー・スケジューラ・オーガナイザ（まず簡単な物）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-07 q831 で p001〜p004 を実装、T1 の QEMU 待ち。2026-10-05 ユーザーがデザイン案の画像を提出、mock（p000）は再指示を反映済み）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p000 cleared。 2026-10-08 q902 P1 の照合: p001〜p004 cleared（2026-10-07 Q1、T1-297）。ベータ2 の範囲の残りは p000 の扱いだけ、続きはベータ3）
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: T1 の結果（p002〜p004）、その後 p005（規約の見直し、後回し）。
+Resume point: 2026-10-08 q902 P1 の照合: p002〜p004 cleared（T1-297、.ics の中身は未確認）。p000（mock）は p001 の設計と p003 の app に置き換わったので Q1 が cleared か canceled かを判定。p005（全文規約）はベータ3。旧: T1 の結果（p002〜p004）、その後 p005（規約の見直し、後回し）。
 Target: **ベータ3**（続き）（2026-10-07 ユーザー「下記をベータ3に移動します。・左手デバイスOSK、ゲームパッドOSK, 写真の続き, カレンダーの続き, IMEの続き、POSIX, NVMe, make, RTL8822C, Sleep」）
 <!-- awesome-plan-current:end -->
 
@@ -55,12 +55,12 @@ Keiland の標準 app として、カレンダー・予定の管理（スケジ�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| ws155-p000 | **UI の mock**（デザイン案の要素と上の方針で。月の表示を中心に、sidebar・Add Event の panel・3D の日めくりの animation。data は固定の試験 data、保存は作らない）。ユーザーが見て再指示する | in-progress（q745、P2。実装・host の PNG・build 済み、QEMU は T1 待ち。[phase](phase000/phase.md)） | — |
+| ws155-p000 | **UI の mock**（デザイン案の要素と上の方針で。月の表示を中心に、sidebar・Add Event の panel・3D の日めくりの animation。data は固定の試験 data、保存は作らない）。ユーザーが見て再指示する | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）） | | — |
 | ws155-p001 | 外観の画像に基づく設計（画面・操作・保存・通知・試験） | cleared（q831、P2、[phase](phase001/phase.md)） | p000 の mock へのユーザーの再指示 |
 | ws155-p002 | 予定とメモの保存（`~/Documents/Calendar`、iCalendar） | cleared（2026-10-07、T1-297） | p001 |
 | ws155-p003 | app: 保存・編集・Week と Day・開始の通知 | cleared（2026-10-07、T1-297） | p002 |
 | ws155-p004 | system bar の時計から Calendar を開く | cleared（2026-10-07、T1-297） | p001 |
-| ws155-p005 | 全文規約の見直し | planning（後回し、WS177 の後） | p002〜p004 |
+| ws155-p005 | 全文規約の見直し | planning（ベータ3、2026-10-08 ユーザー「コーディング規約による整形はベータ3」） | p002〜p004 |
 
 ## mock への再指示（2026-10-05 ユーザー、T1-179 の画面を見て）
 

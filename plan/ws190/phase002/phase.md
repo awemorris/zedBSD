@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p002 -->
 # ws190-p002: libkeiland の欄と text area の指の選択（handle・編集の bar）
 
-Status: in-progress（実装・host 試験は済み、T1 の AAT の依頼を Q1 へ。T1 の結果の後に cleared の判定）
+Status: test-wait（T1-443 は 1〜5 PASS・6 は OSK の無い image で not-run。速い drag の直し（ui.c の DRAG_END、p003 の記録）の再試験に回帰を含める）（旧: test-wait（T1-443、未実行。2026-10-08 q902 P1 の照合: 実装・host 試験まで）（旧: in-progress（実装・host 試験は済み、T1 の AAT の依頼を Q1 へ。T1 の結果の後に cleared の判定）））
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q899（P1、2026-10-08）

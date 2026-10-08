@@ -2,7 +2,7 @@
 # ws051-p004c: GOP が USB-C の DP-alt に出していた時の引き継ぎ（M5）
 
 Parent: [WS051](../ws.md)
-Status: in-progress（2026-10-08 P1 q877: 実装・host 試験・kernel の build warning 0 まで。確かめは 5330 の素の起動で、BUG-256 の後）
+Status: in-progress（2026-10-08 q902 P1 の照合: BUG-256 は resolved。5330 で GOP が USB-C の起動（蓋を閉じ USB-C の monitor だけで電源を入れる）の確認が残り）（旧: in-progress（2026-10-08 P1 q877: 実装・host 試験・kernel の build warning 0 まで。確かめは 5330 の素の起動で、BUG-256 の後））
 Disposition: normal
 Queue: q877（P1、2026-10-08 Q1 の承認「USB-C・DP Alt、5330 なしで進められる host の分」の 1 番）
 依存: p004b（外部 DP の claim・mode・present、N1 の readout の TC の encoder）。設計: [design.md](../design.md) §6・§12 の M5・§14.2 の 3

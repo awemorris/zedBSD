@@ -1,6 +1,6 @@
 # ws090-p021: 全ての app の窓の中身の padding を 0 に（title bar と同じ幅、title bar との間は compositor の定数）
 
-Status: planned（2026-10-06 Q1 が作成）
+Status: test-wait（2026-10-08 q902 P1 の照合: T1-256 の (a)〜(c) PASS。(d)(e) の 13 app の PNG はユーザーが見る、未）（旧: planned（2026-10-06 Q1 が作成））
 WS: [WS090](../ws.md)
 Related: [WS099](../../ws099/ws.md)（compositor の title bar）・[BUG-218](../../bugs/BUG-218.md)（Phone の padding）
 
