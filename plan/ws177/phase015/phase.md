@@ -3,7 +3,7 @@
 # ws177-p015: Mail の app の基本の操作（案 N2）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q889 の 2: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT の回帰、新しい UI は UAT）
+Status: cleared（2026-10-08 Q1 判定、host の試験と T1-420 の回帰。新しい UI は実機の UAT）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q889 の 2（P1、2026-10-08）
@@ -34,3 +34,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 71・80・82・83・84（WS169 ws169-
 ## Event
 
 2026-10-08 / q889-i02（P1）: 実装と host・build の確認。
+
+## T1-420（2026-10-08 Q1）
+
+AAT apps.mailer.read-compose・sign-in-code が fail なし（標準の AAT の image）。

@@ -3,7 +3,7 @@
 # ws177-p013: libkeiland の field・text area の clipboard・語・undo（案 K の 9）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q887 の 3: 実装・host PASS・zedBSD と Linux の build warning 0。QEMU は T1 の AAT `apps.notes.text-box-follow`）
+Status: cleared（2026-10-08 Q1 判定、T1-416）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q887 の 3（P1、2026-10-08）
@@ -36,3 +36,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 9（WS175 ws175-p008）、[案](../ph
 ## Event
 
 2026-10-08 / q887-i03（P1）: 実装と host・build の確認。
+
+## T1-416（2026-10-08 Q1）
+
+AAT の notes・settings・textedit・files の 26 本で fail 0（pass 10・needs-person 14・by-agent 1・not-run 1）。text-box-follow の新しい段で box の bytes が 49→48→49（Ctrl+Z・Ctrl+Shift+Z）。cleared。

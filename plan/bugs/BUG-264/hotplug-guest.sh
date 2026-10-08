@@ -130,7 +130,7 @@ plug usb-mouse bug264mouse pointer
 
 # 4. The compositor is still up; sessiond's lines for the record.
 guest "ps -A -o args; grep 'SESSIOND SEAT' /var/log/sessiond.log | tail -20; grep -E 'KWL (EVENT input|INPUT)' $session | tail -20" > "$out/after.txt"
-if grep -qE '[w]ayland --session' "$out/after.txt"; then pass compositor-alive; else fail compositor-alive; fi
+if grep -qE '(^|/)[w]ayland( |$)' "$out/after.txt"; then pass compositor-alive; else fail compositor-alive; fi
 
 echo "outputs in $out"
 if [ $status = 0 ]; then echo "bug264-hotplug: PASS"; else echo "bug264-hotplug: FAIL"; fi

@@ -3,7 +3,7 @@
 # ws177-p014: Browser の sign-in code の入力（案 N4）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（2026-10-08 P1 q889 の 1: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT `apps.mailer.sign-in-code`）
+Status: cleared（2026-10-08 Q1 判定、T1-418。one-time-code の欄に直に入れる後半は q890）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q889 の 1（P1、2026-10-08）
@@ -38,3 +38,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 85・86・87・88・115（WS169 ws169
 ## Event
 
 2026-10-08 / q889-i01（P1）: 実装と host・build の確認。
+
+## T1-418（2026-10-08 Q1）
+
+apps.mailer.sign-in-code の段 1〜10 が seen、新しい段 3 で `KWL NOTIFY activate`・`ZBROWSER MAIL fill length=4 error=0`・`code-length=4`、arrived-refused 無し。

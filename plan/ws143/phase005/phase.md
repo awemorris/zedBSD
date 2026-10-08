@@ -649,3 +649,7 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - Q4: ペアリングの後に自動で接続する。
 - Q5: 人が切断した機器からの再接続は断る。
 - B6（p004 の Q4）: account が無ければ bluetoothd は起動しない（暫定のまま確定）。
+
+## T1-419（2026-10-08 Q1）
+
+i01a: hid-usb-p005 PASS、boot-test PASS、fidoctl-p004 PASS（USB の HID の乗せ替えの回帰なし）。
