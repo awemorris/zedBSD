@@ -30,7 +30,10 @@
  * (kl_tr_language_code).  welcome.done (ws164-p002) is 1 once an account
  * has taken or skipped the Welcome.  mail.codes.browser (ws169-p002) lets
  * the browser hear the arrivals of mail and their sign-in codes, off until
- * the user allows it in Mail.  phone.backend (ws170-p004) chooses the
+ * the user allows it in Mail.  notify.allow.<application> (ws177-p026)
+ * lets an application's notifications show, on unless the user turns it
+ * off on Settings' Notifications page (Mail, Calendar, Phone, Browser).
+ * phone.backend (ws170-p004) chooses the
  * phone's backend: 0 none, 1 loopback (the tests' and a demo's).  The one
  * pointer setting of before (pointer.*) is only read, to be moved to the
  * mouse's (settings.c).  Files keeps the width of each list column the
@@ -64,6 +67,10 @@ static const struct kl_settings_key settings_keys[] = {
 	{ "sound.muted", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, KL_SETTINGS_KEY_KEPT },
 	{ "sound.available", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, KL_SETTINGS_KEY_READ_ONLY },
 	{ "mail.codes.browser", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, KL_SETTINGS_KEY_KEPT },
+	{ "notify.allow.mailer", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
+	{ "notify.allow.calendar", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
+	{ "notify.allow.phone", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
+	{ "notify.allow.browser", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
 	{ "phone.backend", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 1, 0, KL_SETTINGS_KEY_KEPT },
 	{ "power.sleep.ac", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 240, 30, KL_SETTINGS_KEY_KEPT },
 	{ "power.sleep.battery", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 240, 15, KL_SETTINGS_KEY_KEPT },

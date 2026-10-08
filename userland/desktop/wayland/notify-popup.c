@@ -105,7 +105,6 @@ static void popup_draw_board(struct kwl_server *server, VkCommandBuffer command,
 static int popup_board_part(const struct popup_place *place, int32_t x, int32_t y);
 static void popup_draw_icon(struct kwl_server *server, VkCommandBuffer command, const struct kwl_notification *item, int32_t x, int32_t y, float opacity);
 static size_t popup_line_break(struct kwl_server *server, const struct kwl_notification *item, int32_t width);
-static const char *popup_app_id(const struct kwl_server *server, uint64_t client);
 
 /*
  * Moves the popup on (from the glass look's tick): what the boards'
@@ -585,7 +584,7 @@ kwl_notify_draw_card(
 	/* The application's name (its window's ID when it gave none), faint, then the title on the same line. */
 	app = item->app;
 	if (app[0] == '\0')
-		app = popup_app_id(server, item->client);
+		app = kwl_notify_app_id(server, item->client);
 	app_width = 0;
 	if (app[0] != '\0') {
 		glass_draw_text(server, command, SIZE_BAR, text_left, top + 22, app, text_width / 3, faint);
@@ -681,7 +680,7 @@ popup_draw_icon(
 	}
 
 	/* The application's picture, by its window's ID or by the name it gave. */
-	name = popup_app_id(server, item->client);
+	name = kwl_notify_app_id(server, item->client);
 	picture = -1;
 	if (name[0] != '\0')
 		picture = kwl_icon_for_app_id(name);
@@ -761,28 +760,3 @@ popup_line_break(
 	return popup.line_break.at;
 }
 
-/* Finds the application ID of a client's mapped window ("" when it has none). */
-static const char *
-popup_app_id(
-	const struct kwl_server *server,
-	uint64_t client_number)
-{
-	struct kwl_client *client;
-	struct kwl_object *surface;
-
-	/* The client, then its first mapped window with an ID. */
-	for (client = server->clients; client != NULL; client = client->next) {
-		if (client->number != client_number || client->fatal)
-			continue;
-		for (surface = client->objects; surface != NULL; surface = surface->next) {
-			if (surface->kind != KWL_SURFACE || surface->dead || !surface->mapped)
-				continue;
-			if (surface->role == NULL || surface->app_id[0] == '\0')
-				continue;
-			return surface->app_id;
-		}
-	}
-
-	/* Succeeded: no ID. */
-	return "";
-}

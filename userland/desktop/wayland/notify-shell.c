@@ -25,6 +25,10 @@
  * (p003 draws it).  The compositor's own notifications (a device plugged
  * in, p003) come by kwl_notify_post_system as client 0.  A closed
  * notification whose client or object went is told to nobody.
+ *
+ * An application the user turned off on Settings' Notifications page
+ * (notify.allow.<its name> 0, ws177-p026) is refused: result(request,
+ * DENIED); its name is the post's, or its window's app_id.
  */
 
 #include "kwl.h"
@@ -46,6 +50,7 @@ static int notify_ready;
 static void notify_open(void);
 static void notify_left(uint64_t client, uint32_t object);
 static int notify_post(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int notify_allowed(struct kwl_object *object, const char *app);
 static int notify_withdraw(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static void notify_tell_closed(struct kwl_server *server, const struct kwl_notify_closed *closed);
 static void notify_result(struct kwl_object *object, uint32_t request, uint32_t applied);
@@ -158,6 +163,35 @@ kwl_notify_post_system(
 		notify_tell_closed(server, &closed[0]);
 	printf("KWL NOTIFY post client=0 id=%u flags=%u title=\"%.40s\" waiting=%lu\n", id, flags, title, (unsigned long)kwl_notify_waiting(&notify_model));
 	return id;
+}
+
+/*
+ * Finds the application ID of a client's mapped window ("" when it has
+ * none): the name of a notification that has none of its own.
+ */
+const char *
+kwl_notify_app_id(
+	const struct kwl_server *server,
+	uint64_t client_number)
+{
+	struct kwl_client *client;
+	struct kwl_object *surface;
+
+	/* The client, then its first mapped window with an ID. */
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->number != client_number || client->fatal)
+			continue;
+		for (surface = client->objects; surface != NULL; surface = surface->next) {
+			if (surface->kind != KWL_SURFACE || surface->dead || !surface->mapped)
+				continue;
+			if (surface->role == NULL || surface->app_id[0] == '\0')
+				continue;
+			return surface->app_id;
+		}
+	}
+
+	/* Succeeded: no ID. */
+	return "";
 }
 
 /*
@@ -337,6 +371,7 @@ notify_post(
 	uint32_t flags;
 	uint32_t words[2];
 	uint32_t id;
+	int allowed;
 	int error;
 
 	/* The arguments. */
@@ -358,6 +393,14 @@ notify_post(
 	if (error != 0) {
 		printf("KWL NOTIFY refused client=%llu request=%u error=%d rate=1\n", (unsigned long long)object->client->number, request, error);
 		notify_result(object, request, KL_SYSTEM_RESULT_BUSY);
+		return 0;
+	}
+
+	/* An application the user turned off (ws177-p026). */
+	allowed = notify_allowed(object, app);
+	if (!allowed) {
+		printf("KWL NOTIFY denied client=%llu request=%u app=\"%.40s\"\n", (unsigned long long)object->client->number, request, app);
+		notify_result(object, request, KL_SYSTEM_RESULT_DENIED);
 		return 0;
 	}
 
@@ -383,6 +426,40 @@ notify_post(
 	printf("KWL NOTIFY post client=%llu id=%u replaces=%u flags=%u app=\"%.40s\" title=\"%.40s\" waiting=%lu\n",
 	       (unsigned long long)object->client->number, id, replaces, flags, app, title, (unsigned long)kwl_notify_waiting(&notify_model));
 	return 0;
+}
+
+/*
+ * Tells whether the user lets an application notify: its setting
+ * notify.allow.<name> (the post's name, or its window's app_id) is not 0;
+ * a name without a setting is let.
+ */
+static int
+notify_allowed(
+	struct kwl_object *object,
+	const char *app)
+{
+	const char *name;
+	char key[96];
+	int number;
+	int error;
+
+	/* The application's name. */
+	name = app;
+	if (name[0] == '\0')
+		name = kwl_notify_app_id(object->client->server, object->client->number);
+	if (name[0] == '\0')
+		return 1;
+
+	/* Its setting; none (or no settings) lets it. */
+	(void)snprintf(key, sizeof(key), "notify.allow.%s", name);
+	error = kwl_settings_number(object->client->server, key, &number);
+	if (error != 0)
+		return 1;
+
+	/* Succeeded: whether it is let. */
+	if (number == 0)
+		return 0;
+	return 1;
 }
 
 /* Carries out withdraw(request, id). */

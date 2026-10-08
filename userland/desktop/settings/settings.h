@@ -1473,6 +1473,8 @@ int se_sound_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, 
 void se_input_press(struct se_app *app, int index);
 void se_input_drag(struct se_app *app, int index, int x, unsigned phase);
 int se_power_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+int se_notifications_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+void se_notifications_press(struct se_app *app, int index);
 void se_power_drag(struct se_app *app, int index, int x, unsigned phase);
 
 /* The sound's volume (sound.c, ws100-p005), and its page's controls (hit indices). */

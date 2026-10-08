@@ -80,3 +80,8 @@ msg	Orange
 msg	Yellow
 msg	Green
 msg	Graphite
+# The applications of the Notifications page (page-notifications.c notifications_apps, ws177-p026).
+msg	Mail
+msg	Calendar
+msg	Phone
+msg	Browser
