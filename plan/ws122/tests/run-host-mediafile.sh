@@ -15,7 +15,7 @@ mkdir -p "$out/media"
 status=0
 cc -std=gnu89 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
     plan/ws122/tests/host-mediafile.c userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
-    userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c -o "$out/host-mediafile" || { echo "host-mediafile: FAIL (build)"; exit 1; }
+    userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c -o "$out/host-mediafile" || { echo "host-mediafile: FAIL (build)"; exit 1; }
 python3 plan/ws122/tests/make-media.py "$out/media" || { echo "host-mediafile: FAIL (make-media)"; exit 1; }
 
 # Each made file against what it was made with.
