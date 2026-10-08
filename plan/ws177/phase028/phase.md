@@ -3,7 +3,7 @@
 # ws177-p028: MPEG-TS の reader（案 T の 2）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-469、2026-10-08 夜 Q1）
+Status: cleared（2026-10-08 夜 Q1: T1-469、4 つの container が OPENED error=0・PLAY・dropped=0・絵が出た。回帰の videoplayer・music は fail なし。apps.browser.video の音なしは H3 (c)（browser の音はベータ3）で想定どおり、scenario の期待を直す）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q906（P2、承認: ユーザー 2026-10-08 夜「Tは通常優先度でスケジューリングをお願いします」）
