@@ -29,6 +29,9 @@
 #define OSS_DEVICE		"/dev/dsp"
 #define OSS_FRAGMENTS		4U
 
+/* Marks a parameter a function does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
 /* One OSS device, a pump's: its descriptor and the bytes of a frame it takes. */
 struct pump_device {
 	int fd;
@@ -260,9 +263,8 @@ oss_pause(
 	struct pump_device *device,
 	int on)
 {
-	/* Nothing to do on the device. */
-	(void)device;
-	(void)on;
+	UNUSED_PARAMETER(device);
+	UNUSED_PARAMETER(on);
 }
 
 /* Drops what the device holds. */
@@ -279,8 +281,7 @@ static void
 oss_start(
 	struct pump_device *device)
 {
-	/* Nothing to do on the device. */
-	(void)device;
+	UNUSED_PARAMETER(device);
 }
 
 /* Tells whether the device played out what it held. */
@@ -314,8 +315,9 @@ static int
 oss_format(
 	unsigned format)
 {
+	UNUSED_PARAMETER(format);
+
 	/* A system without the 32-bit and float formats does not look at it. */
-	(void)format;
 
 #ifdef AFMT_S32_LE
 	/* 32-bit. */
