@@ -464,6 +464,145 @@ int kl_backend_audio_feedback(struct kl_backend_audio *audio);
 int kl_backend_audio_available(void);
 
 /*
+ * The sound's playback streams (WS191, plan/ws191/design.md).
+ *
+ * A stream is a ring of frames in shared memory that the backend makes and
+ * reads, and that the compositor hands to a client to write into: audiod's
+ * shared memory on zedBSD, and on Linux and FreeBSD a sealed memfd a pump
+ * thread of the backend's carries to ALSA (alsa-lib, opened with dlopen)
+ * or OSS.  Nothing here waits: an open, a control and a close only start
+ * their work, and kl_backend_audio_stream_next hands over what came of it.
+ */
+struct kl_backend_audio_stream;
+
+/*
+ * The first page of a stream's memory: what the frames are, and the
+ * positions, each writer's on its own cache line.  A position is a count of
+ * frames that only grows, read with an 8-byte acquire load and written with
+ * an 8-byte release store by its one writer; the sequence words stay 0 (they
+ * are audiod's, for systems without an 8-byte atomic).  libkeiland's
+ * kl-audio-protocol.h gives the same layout as offsets; the compositor
+ * checks that the two agree.
+ */
+struct kl_backend_audio_ring {
+	uint32_t tag;
+	uint32_t version;
+	uint32_t format;
+	uint32_t channels;
+	uint32_t rate;
+	uint32_t frame_bytes;
+	uint32_t capacity_frames;
+	uint32_t period_frames;
+	_Alignas(64) uint64_t write_position;
+	uint32_t write_sequence;
+	_Alignas(64) uint64_t read_position;
+	uint32_t read_sequence;
+	_Alignas(64) uint64_t played_position;
+	int64_t played_time_ns;
+	uint32_t played_sequence;
+	uint32_t underruns;
+	uint32_t overruns;
+	uint32_t state;
+};
+
+/* The ring's page, its version, and its state's values. */
+#define KL_BACKEND_AUDIO_RING_HEADER		4096U
+#define KL_BACKEND_AUDIO_RING_VERSION		1U
+#define KL_BACKEND_AUDIO_STATE_STOPPED		0U
+#define KL_BACKEND_AUDIO_STATE_RUNNING		1U
+#define KL_BACKEND_AUDIO_STATE_DRAINING		2U
+
+/* The sample formats. */
+#define KL_BACKEND_AUDIO_FORMAT_S16_LE		1U
+#define KL_BACKEND_AUDIO_FORMAT_S32_LE		2U
+#define KL_BACKEND_AUDIO_FORMAT_F32_LE		3U
+
+/* What a stream is asked to be (checked by the compositor before it opens one). */
+struct kl_backend_audio_stream_format {
+	unsigned format;	/* KL_BACKEND_AUDIO_FORMAT_* */
+	unsigned channels;	/* 1 or 2 */
+	unsigned rate;		/* 8000 to 192000 */
+	unsigned buffer_frames;	/* the ring's frames, 0 for the backend's choice */
+	unsigned period_frames;	/* 0 for the backend's choice */
+};
+
+/* The controls. */
+#define KL_BACKEND_AUDIO_START			1U
+#define KL_BACKEND_AUDIO_STOP			2U
+#define KL_BACKEND_AUDIO_FLUSH			3U
+#define KL_BACKEND_AUDIO_DRAIN			4U
+
+/* What came of a stream: kl_backend_audio_stream_report's what. */
+#define KL_BACKEND_AUDIO_READY			1U	/* fd, bytes, capacity_frames, period_frames */
+#define KL_BACKEND_AUDIO_FAILED			2U	/* error; nothing follows */
+#define KL_BACKEND_AUDIO_RESULT			3U	/* request, error */
+#define KL_BACKEND_AUDIO_DRAINED		4U	/* request */
+#define KL_BACKEND_AUDIO_UNDERRUN		5U	/* count, the total so far */
+#define KL_BACKEND_AUDIO_LOST			6U	/* error; nothing follows */
+
+/* The errors (the values of kl-audio-protocol.h's KL_AUDIO_ERROR_*, which the compositor checks). */
+#define KL_BACKEND_AUDIO_ERROR_NONE		0U
+#define KL_BACKEND_AUDIO_ERROR_INVALID		1U
+#define KL_BACKEND_AUDIO_ERROR_NO_DEVICE	2U
+#define KL_BACKEND_AUDIO_ERROR_UNAVAILABLE	3U
+#define KL_BACKEND_AUDIO_ERROR_UNSUPPORTED	4U
+#define KL_BACKEND_AUDIO_ERROR_NO_MEMORY	5U
+#define KL_BACKEND_AUDIO_ERROR_TOO_MANY		6U
+#define KL_BACKEND_AUDIO_ERROR_STATE		7U
+#define KL_BACKEND_AUDIO_ERROR_GONE		8U
+#define KL_BACKEND_AUDIO_ERROR_BROKEN		9U
+#define KL_BACKEND_AUDIO_ERROR_FAILED		10U
+
+/* One thing that came of a stream. */
+struct kl_backend_audio_stream_report {
+	unsigned what;			/* KL_BACKEND_AUDIO_READY ... _LOST */
+	unsigned error;			/* KL_BACKEND_AUDIO_ERROR_* */
+	uint32_t request;		/* RESULT and DRAINED: the control's request */
+	uint32_t count;			/* UNDERRUN */
+	int fd;				/* READY: the ring's memory, now the caller's to close */
+	uint32_t bytes;			/* READY: the memory's size */
+	uint32_t capacity_frames;	/* READY */
+	uint32_t period_frames;		/* READY */
+};
+
+/*
+ * Tells whether this backend can make streams: 1 when it can, 0 when it
+ * cannot (no such code, or Linux without alsa-lib).
+ */
+int kl_backend_audio_stream_supported(void);
+
+/*
+ * Starts making a stream; READY or FAILED comes through
+ * kl_backend_audio_stream_next.  Returns NULL with errno (ENOMEM) when it
+ * could not even start.
+ */
+struct kl_backend_audio_stream *kl_backend_audio_stream_open(const struct kl_backend_audio_stream_format *format);
+
+/*
+ * Sends a control (KL_BACKEND_AUDIO_START ... _DRAIN) with the client's
+ * request number; its RESULT comes through kl_backend_audio_stream_next.
+ * Returns 0, ENOTCONN (not ready, or ended) or EAGAIN (the service's queue
+ * is full).
+ */
+int kl_backend_audio_stream_control(struct kl_backend_audio_stream *stream, unsigned what, uint32_t request);
+
+/*
+ * Takes the next thing that came of the stream without waiting.  Returns
+ * 1 with *report filled, or 0 when nothing more has come.
+ */
+int kl_backend_audio_stream_next(struct kl_backend_audio_stream *stream, struct kl_backend_audio_stream_report *report);
+
+/*
+ * Ends a stream without waiting (a pump thread is let go and joined later).
+ */
+void kl_backend_audio_stream_close(struct kl_backend_audio_stream *stream);
+
+/*
+ * Lets every ended pump thread go (the compositor calls it each pass).
+ */
+void kl_backend_audio_stream_reap(void);
+
+/*
  * The removable media (ws132-p004): the volumes zedBSD's volumed lists (a
  * USB stick's FAT or UFS filesystem), mounted only when the user asks.
  * Like the sound, nothing here waits: kl_backend_volumes_update reads what
@@ -1120,6 +1259,13 @@ int kl_backend_mounts_read(struct kl_backend_mount *list, size_t capacity, size_
  * peer as another user).
  */
 int kl_backend_peer_uid(int descriptor, uid_t *uid);
+
+/*
+ * The process at the other end of a client's connection (WS191): the one
+ * the kernel recorded when the connection was made, so that the compositor
+ * counts a process's sound streams.  Returns 0, or an errno value.
+ */
+int kl_backend_peer_pid(int descriptor, pid_t *pid);
 
 /*
  * The power (ws131-p005).

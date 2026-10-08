@@ -2,7 +2,7 @@
 
 # ws191-p001: 再生の音の stream の口の設計
 
-Status: in-progress（q895、P2。2026-10-08 夕 設計の第 1 版（c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。2026-10-08 夜 P2 の新しい世代が review と午後の判断を反映した**第 2 版**（[design.md](../design.md)、§12 に対応表）。次は第 2 版の design-reviewer）
+Status: in-progress（q895、P2。2026-10-08 夕 設計の第 1 版（c9b8ccefa）と design-reviewer の review（blocking 3・should-fix 12・minor 12、下）。2026-10-08 夜 P2 の新しい世代が review と午後の判断を反映した**第 2 版**（[design.md](../design.md)、§12 に対応表）。第 2 版の design-reviewer を起動した（結果は下の「第 2 版への review」に追記）。2026-10-08 夜 Q1 の割り込み（q900 BUG-266 が最優先）で区切った）
 Disposition: normal
 Parent: [WS191](../ws.md)
 
@@ -60,3 +60,12 @@ minor: M-1 zedBSD の played_position は mix の時点の read_position と同�
 - **D4 の再評価（S-2）**: Q1 の判断: stream ごとに自分の Wayland の接続を持つ（libmedia の thread のため）を保つ。限りは compositor が接続の相手の資格（SO_PEERCRED の pid・uid）で数え、同じ pid の stream の本数に上限を置く。
 - **p004 の受け入れ（B-3）**: Q1 の判断: Linux・FreeBSD で build できる最小の試験の client（正弦波を鳴らす、libkeiland の audio stream だけを使う）を p004 に入れる。音の観測は QEMU の wav の audiodev か backend の書いた frame の数。
 - **置き場所と名前（2026-10-08 午後 ユーザー）**:「サウンドはlibkeiland-backendに入れてください。libkeilandのAPIはkl_audio_がいいです。」→ 音の出力（zedBSD の audiod、Linux の alsa-lib の dlopen、FreeBSD の OSS）は libkeiland-backend の中に置き、compositor の本体には置かない。libkeiland の公開の API の接頭は `kl_audio_`（`kl_system_audio_stream_*` などにしない）。
+- **H3（browser の音）**: Q1 の決定（2026-10-08 夜、ユーザー「ブラウザはベータ3に移します」）: (c)。libmedia は kl_audio_* を直に呼ばず出力の関数の表（media_set_audio_output）だけを持ち、videoplayer・music が kl_audio_* で埋める。browser は埋めない（音無し）、ベータ 3 で browser.h に足す。design.md D11・§10 に反映。
+
+## 区切り（2026-10-08 夜、q900 BUG-266 の割り込み）
+
+p002 の先行の WIP（未 build・未登録、Makefile の source 一覧に入れていない）:
+- `userland/desktop/libkeiland/audio/kl-audio-protocol.h`（新、§3・§4 の定数）
+- `userland/desktop/libkeiland-backend/keiland-backend.h` に stream の節（`struct kl_backend_audio_ring`・report・`kl_backend_audio_stream_*`・`_reap`）と `kl_backend_peer_pid`
+- `libkeiland-backend-zedbsd/audio-stream-zedbsd.c`（新、host の cc の -fsyntax-only は通る。style-check の残り: 517・566・599 の blank-after-brace、524 の CMSG_LEN の call-in-condition）、`peer-zedbsd.c`（新）、`libkeiland-backend-freebsd/peer-freebsd.c`（新）、`libkeiland-backend-linux/peer-linux.c` に `kl_backend_peer_pid`（Linux の keiland の build に入る）
+- 再開: 第 2 版の review の結果をここに記録 → blocking を直す → Q1 の判定 → p002 の残り（style の直し、sources.mk・Makefile.linux・Makefile.freebsd への登録、unsupported の stream、compositor の audio-stream.c、libkeiland の audio.c・keiland.h・exports、host 試験）。
