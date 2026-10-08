@@ -120,6 +120,7 @@ struct btd_hid_device {
 	int used;
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
+	int le;
 	struct btd_hidcache record;
 	int have_descriptor;
 
