@@ -27,6 +27,10 @@
  * itself (Gmail) gets no copy appended to Sent, and a failure says in
  * words what failed on which server (and gives an untrusted
  * certificate's fingerprint for the user to trust).
+ *
+ * ws177-p016: a message larger than ML_FETCH_BYTES is not read from the
+ * start the fetch gave; after the fetch it is fetched again by its
+ * structure (its header and its words alone, ml_imap_fetch_large).
  */
 
 #include "sync.h"
@@ -45,6 +49,9 @@
 
 /* How long one IDLE lasts before it is started again (RFC 2177 asks for less than 29 minutes), in ms. */
 #define SYNC_IDLE_MS		(25 * 60 * 1000)
+
+/* The most messages larger than ML_FETCH_BYTES a fetch keeps to fetch by their structure (the others are read from their start). */
+#define SYNC_LARGE_MAX		16U
 
 /* How long the thread waits before it tries an account that failed again, in ms. */
 #define SYNC_RETRY_MS		(5 * 60 * 1000)
@@ -87,13 +94,26 @@ struct ml_sync {
 	size_t account_count;
 };
 
-/* What a fetch's callback carries: the thread, the account and the folder, and whether the messages are new arrivals. */
+/* A message larger than ML_FETCH_BYTES, to fetch by its structure after the fetch: its UID, flags and size. */
+struct sync_large {
+	uint32_t uid;
+	unsigned flags;
+	size_t size;
+};
+
+/*
+ * What a fetch's callback carries: the thread, the account and the
+ * folder, whether the messages are new arrivals, how many were handed
+ * on, and the large messages kept for after the fetch.
+ */
 struct sync_fetch {
 	struct ml_sync *sync;
 	int account;
 	enum ml_folder folder;
 	int arrived;
 	unsigned count;
+	struct sync_large large[SYNC_LARGE_MAX];
+	size_t large_count;
 };
 
 static void *sync_run(void *argument);
@@ -105,6 +125,7 @@ static int sync_select(struct ml_sync *sync, int account, enum ml_folder folder)
 static void sync_refresh(struct ml_sync *sync, int account, enum ml_folder folder, int arrived);
 static void sync_refresh_account(struct ml_sync *sync, int account);
 static void sync_fetched(void *data, uint32_t uid, unsigned flags, size_t size, const char *raw, size_t length);
+static void sync_fetch_large(struct sync_fetch *fetch);
 static void sync_idle_all(struct ml_sync *sync);
 static void sync_idle_stop_all(struct ml_sync *sync);
 static void sync_check(struct ml_sync *sync, struct ml_job *job);
@@ -800,6 +821,7 @@ sync_refresh(
 	if (arrived && kept->last_uid[folder] != 0U)
 		fetch.arrived = 1;
 	fetch.count = 0;
+	fetch.large_count = 0;
 	first = 0;
 	if (kept->last_uid[folder] != 0U)
 		first = kept->last_uid[folder] + 1U;
@@ -807,7 +829,11 @@ sync_refresh(
 	if (error != 0) {
 		sync_failed(sync, account, "Cannot get mail from", error, kept->imap.error, &kept->config.imap);
 		sync_close(sync, account);
+		return;
 	}
+
+	/* The large ones, by their structure. */
+	sync_fetch_large(&fetch);
 }
 
 /* Gets every folder of an account, then tells the window it is done. */
@@ -848,6 +874,15 @@ sync_fetched(
 	if (uid > fetch->sync->accounts[fetch->account].last_uid[fetch->folder])
 		fetch->sync->accounts[fetch->account].last_uid[fetch->folder] = uid;
 
+	/* A large one waits for the fetch's end (only its start came). */
+	if (size > ML_FETCH_BYTES && fetch->large_count < SYNC_LARGE_MAX) {
+		fetch->large[fetch->large_count].uid = uid;
+		fetch->large[fetch->large_count].flags = flags;
+		fetch->large[fetch->large_count].size = size;
+		fetch->large_count++;
+		return;
+	}
+
 	/* The message, read. */
 	result = sync_result(ML_RESULT_MESSAGE, fetch->account);
 	if (result == NULL)
@@ -866,6 +901,44 @@ sync_fetched(
 	/* To the window. */
 	sync_post(fetch->sync, result);
 	fetch->count++;
+}
+
+/* Fetches the large messages a fetch kept, each by its structure, and hands them to the window. */
+static void
+sync_fetch_large(
+	struct sync_fetch *fetch)
+{
+	struct sync_account *kept;
+	struct ml_result *result;
+	size_t index;
+	int error;
+
+	/* Each large message. */
+	kept = &fetch->sync->accounts[fetch->account];
+	for (index = 0; index < fetch->large_count; index++) {
+		/* Its result. */
+		result = sync_result(ML_RESULT_MESSAGE, fetch->account);
+		if (result == NULL)
+			return;
+		result->folder = fetch->folder;
+		result->uid = fetch->large[index].uid;
+		result->flags = fetch->large[index].flags;
+		result->size = fetch->large[index].size;
+		result->arrived = fetch->arrived;
+
+		/* Its header and words. */
+		error = ml_imap_fetch_large(&kept->imap, fetch->large[index].uid, &result->parsed);
+		if (error != 0) {
+			ml_mime_release(&result->parsed);
+			free(result);
+			sync_failed(fetch->sync, fetch->account, "Cannot get a large message from", error, kept->imap.error, &kept->config.imap);
+			return;
+		}
+
+		/* To the window. */
+		sync_post(fetch->sync, result);
+		fetch->count++;
+	}
 }
 
 /* Starts IDLE on every account's inbox that is not idling (an account that failed only after its retry time). */

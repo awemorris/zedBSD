@@ -64,7 +64,7 @@
 /* The longest sign-in code, with its NUL (keiland.h's KL_MAIL_CODE_MAX). */
 #define ML_CODE_MAX		16U
 
-/* How much of a message is fetched (a larger one is read up to here; its files are only named). */
+/* How much of a message is fetched (a larger one's words alone are fetched by its structure, ws177-p016). */
 #define ML_FETCH_BYTES		1048576U
 
 /* The folders of an account, in the sidebar's order. */
@@ -157,6 +157,31 @@ struct ml_imap {
 	char error[ML_TEXT_MAX];
 };
 
+/*
+ * One part of a message as its structure names it (structure.c,
+ * ws177-p016): its section for BODY[] ("1", "2.1"; empty for none), its
+ * type ("text/plain"), its character set and its transfer encoding (small
+ * letters).
+ */
+struct ml_structure_part {
+	char section[32];
+	char type[64];
+	char charset[64];
+	char encoding[32];
+};
+
+/*
+ * A message's structure: its first text/plain and text/html parts, and
+ * the name and size (as decoded) of the first file it carries (empty and
+ * 0 for none).
+ */
+struct ml_structure {
+	struct ml_structure_part text;
+	struct ml_structure_part html;
+	char file_name[ML_TEXT_MAX];
+	size_t file_size;
+};
+
 /* What a FETCH gives for each message: its UID, its ML_* flags, its size, and its bytes (up to ML_FETCH_BYTES). */
 typedef void (*ml_imap_fetched_fn)(void *data, uint32_t uid, unsigned flags, size_t size, const char *raw, size_t length);
 
@@ -189,6 +214,9 @@ int ml_imap_flag(struct ml_imap *imap, uint32_t uid, const char *flag, int add);
 int ml_imap_move(struct ml_imap *imap, uint32_t uid, const char *mailbox);
 int ml_imap_delete(struct ml_imap *imap, uint32_t uid);
 int ml_imap_append(struct ml_imap *imap, const char *mailbox, const char *raw, size_t length);
+int ml_imap_section(struct ml_imap *imap, uint32_t uid, const char *section, char **bytes, size_t *length);
+int ml_imap_structure(struct ml_imap *imap, uint32_t uid, struct ml_structure *structure);
+int ml_imap_fetch_large(struct ml_imap *imap, uint32_t uid, struct ml_parsed *parsed);
 int ml_imap_idle_start(struct ml_imap *imap);
 int ml_imap_idle_take(struct ml_imap *imap, int *arrived);
 int ml_imap_idle_stop(struct ml_imap *imap);
@@ -199,9 +227,19 @@ int ml_smtp_send(const struct ml_account_config *account, const char *const *rec
 
 /* Reading and writing a message (mime.c, compose.c). */
 int ml_mime_parse(const char *raw, size_t length, struct ml_parsed *parsed);
+int ml_mime_parse_large(const char *header, size_t header_length, const struct ml_structure *structure, const struct ml_structure_part *part, const char *body, size_t body_length, struct ml_parsed *parsed);
+int ml_structure_parse(const char *text, struct ml_structure *structure);
 void ml_mime_release(struct ml_parsed *parsed);
 int ml_mime_address_list(const char *list, char (*addresses)[ML_TEXT_MAX], size_t capacity, size_t *count);
 int ml_compose(const struct ml_account_config *account, const char *to, const char *cc, const char *subject, const char *body, const char *reply_to_id, time_t now, char **raw, size_t *length);
+
+/* The Japanese character sets (jis.c, ws177-p016): which one a charset name is, and its next character. */
+#define ML_JIS_NONE		0
+#define ML_JIS_ISO2022		1
+#define ML_JIS_SHIFT		2
+#define ML_JIS_EUC		3
+int ml_jis_charset(const char *name);
+int ml_jis_next(int charset, const unsigned char *bytes, size_t length, size_t *at, int *state, unsigned long *code_point);
 
 /* The sign-in code (code.c). */
 int ml_code_find(const char *subject, const char *body, char *code, size_t size);

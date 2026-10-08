@@ -16,7 +16,7 @@ M=$repo/userland/desktop/mailer
 cd "$repo"
 ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer -I. -Iuserland/desktop/include \
-	plan/ws177/tests/host-mail-n2.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/compose.c $M/code.c \
+	plan/ws177/tests/host-mail-n2.c $M/tls.c $M/conn.c $M/imap.c $M/smtp.c $M/mime.c $M/jis.c $M/structure.c $M/compose.c $M/code.c \
 	$M/store.c $M/account.c $M/secret.c -ldl -o "$out/host-mail-n2"
 # The CA (not given to Mail) and the server's certificate for localhost.
 openssl req -x509 -newkey rsa:2048 -nodes -days 2 -subj /CN=ws177-test-ca -keyout "$out/ca.key" -out "$out/ca.pem" \
