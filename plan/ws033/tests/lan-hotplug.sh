@@ -5,7 +5,9 @@
 # chooses (the controller has 8+8 ports).  Judged over SSH only (ifconfig, net show, netstat), never the console.
 #  1. Plugged in: a new interface appears with the adapter's MAC, and within 40 s networkd brings it up and DHCP gives
 #     it a 10.0.5.x address (BUG-168: it stayed down, or fell back to 169.254 with RX packets 0).
-#  2. Its counters move (RX packets > 0): the data interface works after a late attach.
+#  2. Its counters move (RX packets > 0): the data interface works after a late attach.  fetch over it (L1): the guest
+#     fetches a 1 MiB file from a server the test starts on the host's loopback, through the adapter's network
+#     (QEMU's user network takes 10.0.5.2 to the host), and its cksum is the host's.
 #  3. Pulled out: the interface goes, the guest still answers over SSH (tried for 60 s; T1-140), networkd stays up;
 #     plugged in again: an address again.
 # Each poll's ifconfig, net show and the kernel's usb/net lines go to OUTDIR for the analysis when a step fails.
@@ -21,6 +23,7 @@ mkdir -p "$out"
 guest() { timeout 60 python3 plan/tools/guest/guest.py run "$1" 2>&1; }
 send() { timeout 40 python3 plan/ws049/tests/qmp-send.py "$qmp" "$@" >> "$out/qmp.txt" 2>&1; }
 mac=52:54:00:33:00:05
+server_pid=
 status=0
 pass() { echo "$1: ok"; }
 fail() { echo "$1: FAILED"; status=1; }
@@ -49,6 +52,14 @@ wait_address() {
 	return 1
 }
 
+# A file and an HTTP server on the host's loopback, for fetch (stopped at the end).
+mkdir -p "$out/www"
+head -c 1048576 /dev/urandom > "$out/www/hot.bin"
+port=$(python3 -c 'import socket; s = socket.socket(); s.bind(("127.0.0.1", 0)); print(s.getsockname()[1])')
+python3 -m http.server "$port" --bind 127.0.0.1 --directory "$out/www" > "$out/http.txt" 2>&1 &
+server_pid=$!
+trap '[ -n "$server_pid" ] && kill "$server_pid" 2>/dev/null' EXIT
+
 # The before state.
 guest "ifconfig -a; net show; dmesg | tail -40" > "$out/before.txt"
 
@@ -69,6 +80,14 @@ if [ -n "$name" ]; then
 	# A failed address: what a manual DHCP gets, for the analysis (not judged).
 	[ $got -eq 0 ] || guest "net dhcp $name --timeout=20; ifconfig $name" > "$out/plug1-manual-dhcp.txt"
 fi
+
+# fetch through the plugged adapter's network.
+want=$(cksum < "$out/www/hot.bin" | awk '{print $1, $2}')
+guest "fetch -q -o /tmp/hot.bin http://10.0.5.2:$port/hot.bin; echo exit=\$?; cksum < /tmp/hot.bin" > "$out/plug1-fetch.txt"
+cat "$out/plug1-fetch.txt"
+have=$(grep -v '^exit=' "$out/plug1-fetch.txt" | awk 'NF >= 2 {print $1, $2}' | tail -1)
+echo "cksum: host $want, guest ${have:-none}"
+grep -q '^exit=0' "$out/plug1-fetch.txt" && [ "$have" = "$want" ] && pass plugged-fetch || fail plugged-fetch
 
 # 3. Pulled out, networkd stays; plugged in again.  The routes before the pull are kept (T1-140: once the guest's SSH,
 # which goes through the harness's adapter ue0, stopped answering after the pull).
