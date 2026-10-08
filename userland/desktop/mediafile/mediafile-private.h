@@ -6,7 +6,7 @@
  */
 
 /*
- * What the container readers (mp4.c, mkv.c) share with mediafile.c: the
+ * What the container readers (mp4.c, mkv.c, ts.c) share with mediafile.c: the
  * open file, its tracks, the packet buffer, the reader of each format,
  * and the helpers that read the file and its big-endian numbers.
  */
@@ -63,6 +63,9 @@ struct mf_file {
 
 extern const struct mf_format mf_mp4_format;
 extern const struct mf_format mf_mkv_format;
+extern const struct mf_format mf_ts_format;
+
+int mf_ts_detect(const unsigned char *head, size_t length);
 
 int mf_read_at(struct mf_file *file, uint64_t offset, void *data, size_t size);
 int mf_packet_room(struct mf_file *file, size_t size);

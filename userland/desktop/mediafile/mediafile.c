@@ -8,7 +8,7 @@
 /*
  * The media file reader's common part (WS122 p003): it opens the file,
  * tells its format from the first bytes, hands the work to that format's
- * reader (mp4.c, mkv.c) and gives the helpers both use.
+ * reader (mp4.c, mkv.c, ts.c) and gives the helpers both use.
  */
 
 #include "mediafile-private.h"
@@ -19,12 +19,15 @@
 #include <sys/stat.h>
 #include <unistd.h>
 
+/* The first bytes of a file read to tell its format: three transport packets of 192 bytes. */
+#define MF_HEAD_SIZE		(3U * 192U + 8U)
+
 static const struct mf_format *format_of(const unsigned char *head, size_t length);
 static int mediafile_start(struct mf_file *opened);
 
 /*
  * Opens a media file and reads its tracks.  Returns 0 with *file set, or
- * an errno value: EINVAL for a file that is not MP4 or Matroska, or that
+ * an errno value: EINVAL for a file of no format this reader knows, or one that
  * is damaged.
  */
 int
@@ -422,14 +425,16 @@ mf_be64(
 }
 
 /*
- * Tells a file's format from its first bytes: Matroska's EBML header, or
- * an MP4 box whose type is one an MP4 starts with.  NULL for neither.
+ * Tells a file's format from its first bytes: Matroska's EBML header, an
+ * MP4 box whose type is one an MP4 starts with, or a transport stream's
+ * packets.  NULL for none of them.
  */
 static const struct mf_format *
 format_of(
 	const unsigned char *head,
 	size_t length)
 {
+	int transport;
 	int compared;
 
 	/* Too short for either header. */
@@ -455,6 +460,11 @@ format_of(
 	if (compared == 0)
 		return &mf_mp4_format;
 
+	/* A transport stream: packets of 188 or 192 bytes, each with its sync byte (ws177-p028). */
+	transport = mf_ts_detect(head, length);
+	if (transport)
+		return &mf_ts_format;
+
 	/* Neither format. */
 	return NULL;
 }
@@ -464,16 +474,20 @@ static int
 mediafile_start(
 	struct mf_file *opened)
 {
-	unsigned char head[12];
+	unsigned char head[MF_HEAD_SIZE];
+	size_t length;
 	int error;
 
-	/* The first bytes tell the format. */
-	error = mf_read_at(opened, 0, head, sizeof(head));
+	/* The first bytes tell the format (a short file has fewer). */
+	length = sizeof(head);
+	if (opened->size < length)
+		length = (size_t)opened->size;
+	error = mf_read_at(opened, 0, head, length);
 	if (error != 0)
 		return error;
 
 	/* Refuses a format this reader does not know. */
-	opened->format = format_of(head, sizeof(head));
+	opened->format = format_of(head, length);
 	if (opened->format == NULL)
 		return EINVAL;
 

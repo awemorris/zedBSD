@@ -12,6 +12,6 @@ fresh_out build/ws177-media-t
 out=build/ws177-media-t
 M=userland/desktop/mediafile
 cc -std=gnu89 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
-    plan/ws177/tests/host-media-t.c $M/mediafile.c $M/mp4.c $M/mkv.c \
+    plan/ws177/tests/host-media-t.c $M/mediafile.c $M/mp4.c $M/mkv.c $M/ts.c \
     -o "$out/host-media-t" || { echo "host-media-t: FAIL (build)"; exit 1; }
 UBSAN_OPTIONS=halt_on_error=1 python3 -I plan/ws177/tests/host-media-t.py "$out/host-media-t" "$out/media" "$@"

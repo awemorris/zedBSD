@@ -7,7 +7,8 @@
 
 /*
  * Reads a media file's container without FFmpeg (WS122 p003): MP4 and MOV
- * (ISO BMFF, also fragmented, ws177-p027), Matroska and WebM.  It finds the tracks and hands out their
+ * (ISO BMFF, also fragmented, ws177-p027), Matroska and WebM, MPEG-TS
+ * (ws177-p028).  It finds the tracks and hands out their
  * packets, the compressed frames, with their times, in the order the file
  * stores them; it does not decode.  The player chooses a decoder from a
  * track's codec and private data (the H.264 avcC, the AAC
