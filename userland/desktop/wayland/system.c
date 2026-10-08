@@ -441,6 +441,9 @@ kwl_system_request(
 	case KWL_SYSTEM_DISPLAYS:
 		error = kwl_displays_request(object, opcode, bytes, size);
 		break;
+	case KWL_SYSTEM_MACHINE:
+		error = kwl_machine_request(object, opcode, bytes, size);
+		break;
 	default:
 		error = EPROTO;
 		break;

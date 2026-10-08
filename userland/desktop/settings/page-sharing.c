@@ -20,10 +20,8 @@
 #include "settings.h"
 
 #include <errno.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <string.h>
-#include <unistd.h>
 
 /* The switch (hit index). */
 #define SHARING_SWITCH		1
@@ -240,17 +238,15 @@ sharing_address(
 	size_t size)
 {
 	const struct se_network *network;
-	const struct passwd *account;
 	const char *user;
 	const char *address;
 	size_t index;
 	int differs;
 
-	/* The user. */
+	/* The user, as the desktop told the account (ws188-p002). */
 	user = "you";
-	account = getpwuid(getuid());
-	if (account != NULL && account->pw_name != NULL)
-		user = account->pw_name;
+	if (app->users.name[0] != '\0')
+		user = app->users.name;
 
 	/* The address of the interface in use, else the first that has one (not the loopback). */
 	network = &app->network;

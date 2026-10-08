@@ -228,13 +228,15 @@ def settings_single(item):
 
 @run.define("apps.settings.users-page")
 def settings_users(item):
+	# The account and the list are the desktop's answer to Settings (ws188-p002): waited for from the launch on.
+	start = run.mark()
 	window, since = run.settings(item, "users")
-	account = run.lines(rf"ZSETTINGS USERS account name={aatlib.USER}\b", None)
-	listed = run.lines(r"ZSETTINGS USERS list count=\d+", None)
-	item.step("read the Users page", f"{account[-1] if account else 'no account'}; {listed[-1] if listed else 'no list'}")
+	account = run.wait(rf"ZSETTINGS USERS account name={aatlib.USER}\b", start, 10)
+	listed = run.wait(r"ZSETTINGS USERS list count=\d+", start, 10)
+	item.step("read the Users page", f"{account or 'no account'}; {listed or 'no list'}")
 	run.shot(item, "users")
 	item.check(account, f"no account line for {aatlib.USER}")
-	item.check(listed and aatlib.number(listed[-1], "count") >= 1, "no users listed")
+	item.check(listed and aatlib.number(listed, "count") >= 1, "no users listed")
 	item.person("Your account, the three password fields and the list in the screenshot")
 
 
@@ -357,6 +359,8 @@ def settings_manage(item):
 			item.check(result and f"reason={expected}" in result and count.strip() == "0", f"{what}: {result}")
 		else:
 			item.check(result and "errno=0" in result and count.strip() == "1", f"{what}: {result}")
+	# The list read again by the desktop after the addition (ws188-p002).
+	run.wait(r"ZSETTINGS USERS list count=\d+", mark, 10)
 	time.sleep(1.0)
 	since = run.mark()
 	run.as_user("/bin/settings users")
