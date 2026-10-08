@@ -198,16 +198,16 @@ typedef u16 __be16;
 /*
  * Reports one parser message.
  *
- * The kernel has no vsnprintf, and the Linux text uses conversions the kernel
- * logger does not promise (%zu, %.*s), so a message is reported as its format
- * text only.  The arguments are type-checked against the format and never
- * evaluated.  Every error-level message is counted in the parser's counters.
+ * Every error-level message is counted in the parser's counters.  Only a
+ * message whose level is shown has its arguments evaluated; it is formatted
+ * with the kernel's printf subset, where a conversion outside it (%.*s) is
+ * shown as written and its argument consumed (BUG-256: the format text
+ * alone was shown before).
  */
 #define I915_VBT_LOG(level, fmt, ...) \
 	do { \
-		if (0) \
-			(void)drv_i915_vbt_fmtcheck(fmt, ##__VA_ARGS__); \
-		drv_i915_vbt_note(level, fmt); \
+		if (drv_i915_vbt_log_enabled(level)) \
+			drv_i915_vbt_notef(fmt, ##__VA_ARGS__); \
 	} while (0)
 
 /*
@@ -526,10 +526,10 @@ void drv_i915_vbt_free(void *p);
  * The parser's message counters (vbt.c).
  *
  * drv_i915_vbt_log_enabled() counts an error-level message and tells whether the
- * level is shown; drv_i915_vbt_note() counts and shows one message's format text.
+ * level is shown; drv_i915_vbt_notef() formats and shows one shown message.
  */
 int drv_i915_vbt_log_enabled(int level);
-void drv_i915_vbt_note(int level, const char *fmt);
+void drv_i915_vbt_notef(const char *fmt, ...) __attribute__((format(printf, 1, 2)));
 
 /*
  * The message hooks bios.c supplies.
