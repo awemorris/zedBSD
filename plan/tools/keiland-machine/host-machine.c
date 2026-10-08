@@ -19,7 +19,7 @@
  *     into effect at its result, a failure or another request's result
  *     dropping it, events outside an answer ignored, the serials.
  *
- *   sh plan/ws188/tests/host-machine.sh
+ *   sh plan/tools/keiland-machine/host-machine.sh
  */
 
 #include "userland/desktop/libkeiland-backend/backend-private.h"
