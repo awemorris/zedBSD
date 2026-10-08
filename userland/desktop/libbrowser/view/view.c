@@ -1761,6 +1761,9 @@ browser_view_image_at(
 	const char *url;
 	uint32_t pixel;
 	uint32_t alpha;
+	uint32_t red;
+	uint32_t green;
+	uint32_t blue;
 	size_t count;
 	size_t index;
 	int error;
@@ -1774,7 +1777,9 @@ browser_view_image_at(
 	view_pointer_at(view, x, y, BROWSER_BUTTON_PRIMARY, 0U, &pointer);
 	wb_buffer_init(&source);
 	error = page_image_at(view->page, pointer.x, pointer.y, &bitmap, &source);
-	if (error != 0 || bitmap == NULL || bitmap->pixels == NULL) {
+	if (error != 0 ||
+	    bitmap == NULL ||
+	    bitmap->pixels == NULL) {
 		wb_buffer_release(&source);
 		if (error != 0)
 			return error;
@@ -1793,10 +1798,10 @@ browser_view_image_at(
 	for (index = 0; index < count; index++) {
 		pixel = bitmap->pixels[index];
 		alpha = pixel >> 24;
-		image->pixels[index] = (alpha << 24) |
-				       ((((pixel >> 16) & 0xffU) * alpha + 127U) / 255U) << 16 |
-				       ((((pixel >> 8) & 0xffU) * alpha + 127U) / 255U) << 8 |
-				       (((pixel & 0xffU) * alpha + 127U) / 255U);
+		red = (((pixel >> 16) & 0xffU) * alpha + 127U) / 255U;
+		green = (((pixel >> 8) & 0xffU) * alpha + 127U) / 255U;
+		blue = ((pixel & 0xffU) * alpha + 127U) / 255U;
+		image->pixels[index] = (alpha << 24) | (red << 16) | (green << 8) | blue;
 	}
 
 	/* Its size. */
@@ -2322,6 +2327,8 @@ view_commit_document(
 			if (error != 0)
 				break;
 		}
+
+		/* Destroys the page if prefetch loading failed. */
 		if (error != 0)
 			page_destroy(page);
 	}
@@ -2375,6 +2382,8 @@ view_prefetch_start(
 			location = *(char **)wb_vector_at(&locations, index);
 			free(location);
 		}
+
+		/* Releases the locations vector. */
 		wb_vector_release(&locations);
 		return error;
 	}
@@ -2404,6 +2413,8 @@ view_prefetch_start(
 			error = ENOMEM;
 			continue;
 		}
+
+		/* Initializes the script object with view and location. */
 		script->view = view;
 		script->location = location;
 		wb_buffer_init(&script->bytes);
@@ -2433,6 +2444,8 @@ view_prefetch_start(
 		 */
 		view->prefetch_waiting++;
 	}
+
+	/* Releases the locations vector. */
 	wb_vector_release(&locations);
 
 	/* Without memory the waiting ends: the scripts started are cancelled and the parser reads them. */

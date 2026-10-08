@@ -187,8 +187,10 @@ ml_compose_with(
 		compose_field(&text, "References", reply_to_id);
 	}
 
-	/* A message with files: the parts' boundary, a line no file's base64 or the words' quoted-printable can hold ("=_" starts no such line). */
+	/* The MIME version. */
 	compose_string(&text, "MIME-Version: 1.0\r\n");
+
+	/* A message with files: the parts' boundary, a line no file's base64 or the words' quoted-printable can hold ("=_" starts no such line). */
 	if (count > 0U) {
 		(void)snprintf(boundary, sizeof(boundary), "=_keiland_%lld_%ld_%lu", (long long)now, (long)getpid(), compose_serial);
 		(void)snprintf(line, sizeof(line), "Content-Type: multipart/mixed; boundary=\"%s\"\r\n\r\n", boundary);
@@ -203,9 +205,11 @@ ml_compose_with(
 	compose_string(&text, "\r\n");
 	compose_body(&text, body);
 
-	/* Each file, then the parts' end. */
+	/* Each file as a part of its own. */
 	for (index = 0; index < count; index++)
 		compose_attachment(&text, boundary, &attachments[index]);
+
+	/* The parts' end. */
 	if (count > 0U) {
 		(void)snprintf(line, sizeof(line), "--%s--\r\n", boundary);
 		compose_string(&text, line);
@@ -680,7 +684,10 @@ compose_parameter(
 	plain = 1;
 	for (byte = (const unsigned char *)value; *byte != '\0'; byte++) {
 		/* A control, a byte past ASCII, a quote or a backslash cannot. */
-		if (*byte < 32U || *byte > 126U || *byte == '"' || *byte == '\\') {
+		if (*byte < 32U ||
+		    *byte > 126U ||
+		    *byte == '"' ||
+		    *byte == '\\') {
 			plain = 0;
 			break;
 		}
@@ -703,7 +710,10 @@ compose_parameter(
 		if ((*byte >= 'a' && *byte <= 'z') ||
 		    (*byte >= 'A' && *byte <= 'Z') ||
 		    (*byte >= '0' && *byte <= '9') ||
-		    *byte == '-' || *byte == '.' || *byte == '_' || *byte == '~') {
+		    *byte == '-' ||
+		    *byte == '.' ||
+		    *byte == '_' ||
+		    *byte == '~') {
 			compose_append(text, (const char *)byte, 1U);
 			continue;
 		}
@@ -733,12 +743,15 @@ compose_base64(
 	/* Each group of three bytes as four characters, the last padded with '='. */
 	column = 0;
 	for (index = 0; index < length; index += 3U) {
+		/* The group's bytes (a short last group is padded with zero bits). */
 		left = length - index;
 		group = (uint32_t)data[index] << 16;
 		if (left > 1U)
 			group |= (uint32_t)data[index + 1U] << 8;
 		if (left > 2U)
 			group |= (uint32_t)data[index + 2U];
+
+		/* Their four characters, '=' where the group had no byte. */
 		quad[0] = alphabet[(group >> 18) & 0x3fU];
 		quad[1] = alphabet[(group >> 12) & 0x3fU];
 		quad[2] = '=';

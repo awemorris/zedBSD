@@ -239,6 +239,8 @@ kwl_data_object_gone(
 
 		/* One of the target's devices or offers: the others go on (ws189-p002). */
 		drag_forget(server, object);
+
+		/* What the drop would do may have changed with the target's devices. */
 		if (server->dnd_active)
 			kwl_data_drag_mark(server);
 
@@ -1292,7 +1294,7 @@ offer_set_actions(
 		return 0;
 	}
 
-	/* Succeeded: the drag's action is chosen again when this is one of its target's offers. */
+	/* The drag's action is chosen again when this is one of its target's offers. */
 	server = offer->client->server;
 	slot = drag_offer_slot(server, offer);
 	if (server->dnd_active && slot >= 0) {
@@ -1927,6 +1929,8 @@ drag_pick(
 	/* A drag with a source whose offers have all gone has no target device; one without a source takes the first device. */
 	if (server->dnd_source != NULL)
 		return;
+
+	/* Without a source the first device still there takes it. */
 	for (index = 0; index < server->dnd_device_count; index++) {
 		if (server->dnd_devices[index] == NULL)
 			continue;

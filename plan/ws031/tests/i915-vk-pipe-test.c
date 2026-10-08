@@ -553,14 +553,8 @@ test_graphics_pipeline(void)
 	pipeline = drv_i915_object_lookup(stub_session, I915_VK_OBJ_PIPELINE, FIXTURE_BAD_PIPELINE);
 	assert(pipeline == NULL);
 
-	/*
-	 * XXX: the refused pipeline's record is neither published nor freed
-	 * (render/pipeline.c, "happy path only"): exactly that one block is
-	 * left behind, and its kernels were released.  The fixture reclaims it
-	 * so the rest of the run starts clean.
-	 */
-	assert(stub_live_since(mark) == 1U);
-	assert(stub_release_since(mark) == 1U);
+	/* The refused pipeline's record and kernels are freed with the refusal (ws031-p026): nothing is left behind. */
+	assert(stub_live_since(mark) == 0U);
 
 	/* The pipeline made from the shipped shaders: [65][VK_SUCCESS][count 1][identity]. */
 	stub_wire_begin(&fixture_wire);
@@ -1087,6 +1081,10 @@ test_geometry_interfaces(void)
 {
 	struct i915_gfx_pipeline pipeline;
 	struct i915_gfx_kernels kernels;
+	struct i915_gfx_batch batch;
+	uint32_t commands[256];
+	unsigned used;
+	int found;
 	int error;
 
 	/*
@@ -1105,10 +1103,30 @@ test_geometry_interfaces(void)
 	assert(kernels.vs_varyings == pipeline.vs_binary->varying_count && kernels.vs_varyings == 3U);
 	drv_i915_gfx_pipeline_release(&pipeline);
 
-	/* Without the geometry stage nothing writes gl_PrimitiveID: refused (until the setup makes it, b4). */
+	/*
+	 * Without the geometry stage nothing writes gl_PrimitiveID: the setup
+	 * gives it (b4): input 0 is the primitive's number in SBE_SWIZ (constant
+	 * source PRIM_ID, all four components overridden) and SBE dword 1's
+	 * Primitive ID Override selects attribute 0 with X..W, as anv does.
+	 */
 	error = fixture_prepare_three("cells.vert.spv", NULL, "primitive-id.frag.spv", &pipeline);
-	assert(error == ENOTSUP && pipeline.kernels_ready == 0);
-	assert(pipeline.vs_binary == NULL && pipeline.gs_binary == NULL && pipeline.fs_binary == NULL);
+	assert(error == 0 && pipeline.kernels_ready != 0);
+	drv_i915_gfx_pipeline_kernels(&pipeline, &kernels);
+	assert(kernels.ps_input_count == 1U && kernels.ps_primitive_id_mask == 1U && kernels.ps_input_slots[0] == 0U);
+	memset(commands, 0, sizeof(commands));
+	batch.cmds = commands;
+	batch.count = 0U;
+	batch.capacity = 256U;
+	batch.overflow = 0;
+	drv_i915_gfx_emit_pixel_shader(&batch, &kernels);
+	assert(batch.overflow == 0);
+	used = batch.count;
+	found = fixture_find_command(commands, used, GEN12_CMD_3DSTATE_SBE);
+	assert(found >= 0 && (commands[found + 1] & 0x1fU) == 0U && ((commands[found + 1] >> 16) & 0xfU) == 0xfU);
+	assert(((commands[found + 1] >> 22) & 0x3fU) == 1U);
+	found = fixture_find_command(commands, used, GEN12_CMD_3DSTATE_SBE_SWIZ);
+	assert(found >= 0 && (commands[found + 1] & 0xffffU) == 0xf600U);
+	drv_i915_gfx_pipeline_release(&pipeline);
 
 	/* cells.vert writes location 0 only: varyings.geom's reads of 1 and 2 have no source, refused before the compiler. */
 	stub_log[0] = '\0';
@@ -1134,8 +1152,8 @@ test_geometry_interfaces(void)
 	assert(strstr(stub_log, "geometry shader refused by the compiler") != NULL);
 	assert(strstr(stub_log, "the refused geometry shader: 1 vertices in, at most 256 vertices out (topology 1)") != NULL);
 	assert(pipeline.vs_binary == NULL && pipeline.gs_binary == NULL && pipeline.fs_binary == NULL);
-	printf("  geometry interfaces (ws075-p007b b1): gl_PrimitiveID from the geometry VUE's slot 2; a geometry input, a fragment input "
-	       "the last stage does not write and a 72 KiB URB entry refused\n");
+	printf("  geometry interfaces (ws075-p007b b1, b4): gl_PrimitiveID from the geometry VUE's slot 2, or from the setup without a geometry stage "
+	       "(SBE_SWIZ 0xf600, SBE's override); a geometry input, a fragment input the last stage does not write and a 72 KiB URB entry refused\n");
 }
 
 /*
@@ -1205,6 +1223,20 @@ test_geometry_state(void)
 	drv_i915_gfx_emit_geometry_shader(&batch, &plain_kernels);
 	assert(commands[3] == 1U && (commands[7] & (1U << 4)) == 0U && (commands[8] >> 31) == 0U);
 	assert(((commands[6] >> 17) & 0x3fU) == GEN12_3DPRIM_TRISTRIP && plain_kernels.gs_control_format == 0U);
+
+	/*
+	 * A geometry kernel that spills (b4; points.geom's kernels given 2 KiB
+	 * a thread, as spill.geom's 38 KiB of code does not fit the window):
+	 * its part of the scratch buffer lands in dwords 4-5 as the Scratch
+	 * Space Base Pointer (bits 63:10, an offset from the general state
+	 * base) and the Per-Thread Scratch Space (1 KiB << 1).
+	 */
+	plain_kernels.gs_scratch_bytes = 2048U;
+	plain_kernels.scratch_base = 0x123450000ULL;
+	plain_kernels.gs_scratch_offset = 0x00abc000ULL;
+	batch.count = 0U;
+	drv_i915_gfx_emit_geometry_shader(&batch, &plain_kernels);
+	assert(commands[4] == (0x00abc000U | 1U) && commands[5] == 0U);
 	drv_i915_gfx_pipeline_release(&plain);
 
 	/* The URB: VS from chunk 4 in its 21 chunks, GS from chunk 25, entries of its size, a multiple of 8 below nine units. */

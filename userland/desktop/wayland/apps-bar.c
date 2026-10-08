@@ -164,7 +164,10 @@ kwl_apps_bar_draw(
 
 		/* A drag and drop resting on it lights it more as the rest goes on (spring-loading). */
 		same = strcmp(app->key, state->spring_key);
-		if (mine && server->dnd_active && state->spring_key[0] != '\0' && same == 0) {
+		if (mine &&
+		    server->dnd_active &&
+		    state->spring_key[0] != '\0' &&
+		    same == 0) {
 			rest = kwl_milliseconds() - state->spring_since_ms;
 			light = 1.0f;
 			if (rest < SPRING_MS)

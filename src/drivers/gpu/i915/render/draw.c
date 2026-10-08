@@ -54,6 +54,7 @@ extern void drv_i915_gfx_draw_checkpoint(const struct i915_gfx_image *target, un
 #define I915_DRAW_SCRATCH_VERTEX	0U
 #define I915_DRAW_SCRATCH_PIXEL		1U
 #define I915_DRAW_SCRATCH_COMPUTE	2U
+#define I915_DRAW_SCRATCH_GEOMETRY	3U
 
 static int i915_draw_object_create(struct i915_render_session *session, uint64_t bytes, struct i915_gem_object **result);
 static int i915_draw_scratch(struct i915_render_session *session, struct i915_gfx_session *work, struct i915_gfx_kernels *kernels);
@@ -548,7 +549,7 @@ drv_i915_gfx_draw(
 	/* Takes the pipeline's kernels and their push data layouts. */
 	drv_i915_gfx_pipeline_kernels(state->pipeline, &kernels);
 
-	/* Refuses a geometry stage the draw cannot run: its input primitive, or its scratch. */
+	/* Refuses a geometry stage the draw cannot run: its input primitive. */
 	if (kernels.gs_code != NULL) {
 		error = i915_draw_geometry_check(state->pipeline, &kernels);
 		if (error != 0)
@@ -725,8 +726,7 @@ i915_draw_writes_storage(
 /*
  * Checks that a draw can run its pipeline's geometry kernel: the primitives
  * of the draw's topology must have the vertices the kernel expects of its
- * input primitive, and the kernel must not spill (XXX: the geometry stage's
- * scratch, ws075-p007b b4).  Returns 0, or ENOTSUP with the reason logged.
+ * input primitive.  Returns 0, or ENOTSUP with the reason logged.
  */
 static int
 i915_draw_geometry_check(
@@ -746,13 +746,6 @@ i915_draw_geometry_check(
 			  pipeline->topology,
 			  vertices,
 			  kernels->gs_vertices_in);
-		return ENOTSUP;
-	}
-
-	/* XXX: a geometry kernel that spills has no scratch space yet. */
-	if (kernels->gs_scratch_bytes != 0U) {
-		kern_logf("i915: vk: draw refused: the geometry shader spills %u bytes a thread, which is not given scratch space yet\n",
-			  kernels->gs_scratch_bytes);
 		return ENOTSUP;
 	}
 
@@ -829,6 +822,7 @@ i915_draw_scratch(
 
 	/* Kernels that spill nothing need no buffer, and the general state base stays zero. */
 	if (kernels->vs_scratch_bytes == 0U &&
+	    kernels->gs_scratch_bytes == 0U &&
 	    kernels->ps_scratch_bytes == 0U &&
 	    kernels->cs_scratch_bytes == 0U)
 		return 0;
@@ -837,6 +831,7 @@ i915_draw_scratch(
 	roomy = 0;
 	if (work->scratch != NULL &&
 	    kernels->vs_scratch_bytes <= work->scratch_per_thread[I915_DRAW_SCRATCH_VERTEX] &&
+	    kernels->gs_scratch_bytes <= work->scratch_per_thread[I915_DRAW_SCRATCH_GEOMETRY] &&
 	    kernels->ps_scratch_bytes <= work->scratch_per_thread[I915_DRAW_SCRATCH_PIXEL] &&
 	    kernels->cs_scratch_bytes <= work->scratch_per_thread[I915_DRAW_SCRATCH_COMPUTE])
 		roomy = 1;
@@ -851,6 +846,7 @@ i915_draw_scratch(
 	/* Points the kernels at the buffer and their parts of it. */
 	kernels->scratch_base = work->scratch->va;
 	kernels->vs_scratch_offset = work->scratch_offset[I915_DRAW_SCRATCH_VERTEX];
+	kernels->gs_scratch_offset = work->scratch_offset[I915_DRAW_SCRATCH_GEOMETRY];
 	kernels->ps_scratch_offset = work->scratch_offset[I915_DRAW_SCRATCH_PIXEL];
 	kernels->cs_scratch_offset = work->scratch_offset[I915_DRAW_SCRATCH_COMPUTE];
 
@@ -864,7 +860,8 @@ i915_draw_scratch(
  * every thread id of their stages.
  *
  * The vertex stage uses 546 thread ids, the pixel stage 1024 for every
- * slice present (heap.h).  The operations recorded so far may still point
+ * slice present, the compute stage 768 and the geometry stage 336
+ * (heap.h).  The operations recorded so far may still point
  * at the old buffer, so they run first.  Returns 0, the error of that run,
  * the object's creation error, or ENOTSUP for a buffer larger than the
  * general state.
@@ -880,11 +877,13 @@ i915_draw_scratch_grow(
 	uint32_t vertex_bytes;
 	uint32_t pixel_bytes;
 	uint32_t compute_bytes;
+	uint32_t geometry_bytes;
 	uint32_t slice_mask;
 	uint32_t slices;
 	uint64_t pixel_ids;
 	uint64_t pixel_offset;
 	uint64_t compute_offset;
+	uint64_t geometry_offset;
 	uint64_t bytes;
 	int error;
 
@@ -909,6 +908,9 @@ i915_draw_scratch_grow(
 	compute_bytes = work->scratch_per_thread[I915_DRAW_SCRATCH_COMPUTE];
 	if (kernels->cs_scratch_bytes > compute_bytes)
 		compute_bytes = kernels->cs_scratch_bytes;
+	geometry_bytes = work->scratch_per_thread[I915_DRAW_SCRATCH_GEOMETRY];
+	if (kernels->gs_scratch_bytes > geometry_bytes)
+		geometry_bytes = kernels->gs_scratch_bytes;
 
 	/* Counts the slices the fuses left: the pixel stage's thread ids grow with them. */
 	device = session->vk->i915;
@@ -921,12 +923,14 @@ i915_draw_scratch_grow(
 		slices = 1U;
 	pixel_ids = (uint64_t)I915_GFX_PS_SCRATCH_IDS_PER_SLICE * slices;
 
-	/* Lays the buffer out: the guard page, the vertex part, the pixel part, the compute part, each page-aligned. */
+	/* Lays the buffer out: the guard page, the vertex, pixel, compute and geometry parts, each page-aligned. */
 	pixel_offset = I915_GFX_SCRATCH_GUARD + (uint64_t)vertex_bytes * I915_GFX_VS_SCRATCH_IDS;
 	pixel_offset = (pixel_offset + I915_GFX_SCRATCH_ALIGN - 1U) & ~(uint64_t)(I915_GFX_SCRATCH_ALIGN - 1U);
 	compute_offset = pixel_offset + (uint64_t)pixel_bytes * pixel_ids;
 	compute_offset = (compute_offset + I915_GFX_SCRATCH_ALIGN - 1U) & ~(uint64_t)(I915_GFX_SCRATCH_ALIGN - 1U);
-	bytes = compute_offset + (uint64_t)compute_bytes * I915_GFX_CS_SCRATCH_IDS;
+	geometry_offset = compute_offset + (uint64_t)compute_bytes * I915_GFX_CS_SCRATCH_IDS;
+	geometry_offset = (geometry_offset + I915_GFX_SCRATCH_ALIGN - 1U) & ~(uint64_t)(I915_GFX_SCRATCH_ALIGN - 1U);
+	bytes = geometry_offset + (uint64_t)geometry_bytes * I915_GFX_GS_SCRATCH_IDS;
 
 	/* A buffer beyond the general state's size cannot be addressed. */
 	if (bytes > I915_GFX_GENERAL_STATE_BYTES) {
@@ -949,7 +953,10 @@ i915_draw_scratch_grow(
 	work->scratch_offset[I915_DRAW_SCRATCH_PIXEL] = pixel_offset;
 	work->scratch_per_thread[I915_DRAW_SCRATCH_COMPUTE] = compute_bytes;
 	work->scratch_offset[I915_DRAW_SCRATCH_COMPUTE] = compute_offset;
-	kern_logf("i915: vk: scratch: %llu bytes at 0x%llx: vertex %u bytes a thread for %u ids at +0x%x, pixel %u for %llu ids at +0x%llx, compute %u for %u ids at +0x%llx\n",
+	work->scratch_per_thread[I915_DRAW_SCRATCH_GEOMETRY] = geometry_bytes;
+	work->scratch_offset[I915_DRAW_SCRATCH_GEOMETRY] = geometry_offset;
+	kern_logf("i915: vk: scratch: %llu bytes at 0x%llx: vertex %u bytes a thread for %u ids at +0x%x, pixel %u for %llu ids at +0x%llx, "
+		  "compute %u for %u ids at +0x%llx, geometry %u for %u ids at +0x%llx\n",
 		  (unsigned long long)bytes,
 		  (unsigned long long)object->va,
 		  vertex_bytes,
@@ -960,7 +967,10 @@ i915_draw_scratch_grow(
 		  (unsigned long long)pixel_offset,
 		  compute_bytes,
 		  I915_GFX_CS_SCRATCH_IDS,
-		  (unsigned long long)compute_offset);
+		  (unsigned long long)compute_offset,
+		  geometry_bytes,
+		  I915_GFX_GS_SCRATCH_IDS,
+		  (unsigned long long)geometry_offset);
 
 	/* Succeeded: the buffer has room for every kernel. */
 	return 0;

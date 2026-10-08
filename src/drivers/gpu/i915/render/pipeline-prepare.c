@@ -348,6 +348,10 @@ drv_i915_gfx_pipeline_kernels(
 		if (found != 0)
 			slot = 0U;
 		kernels->ps_input_slots[index] = slot;
+
+		/* gl_PrimitiveID that no stage writes is the setup's (anv's slot -1). */
+		if (found != 0 && fragment->input_locations[index] == I915_SHADER_LOCATION_PRIMITIVE_ID)
+			kernels->ps_primitive_id_mask |= 1U << index;
 	}
 
 	/* Takes what the pixel kernel's payload carries beyond the perspective barycentrics. */
@@ -508,15 +512,17 @@ i915_pipeline_kernels_fit(
 	/*
 	 * The stages' interfaces must agree: every location the fragment kernel
 	 * reads is one the last stage before it writes (it may read only some of
-	 * them, in any order), but for gl_PointCoord, which the setup makes.
-	 * XXX: gl_PrimitiveID without a geometry stage that writes it is
-	 * refused here until the setup makes it (ws075-p007b b4).
+	 * them, in any order), but for gl_PointCoord, which the setup makes, and
+	 * gl_PrimitiveID, which the setup makes when no stage writes it
+	 * (ws075-p007b b4).
 	 */
 	last = i915_pipeline_last_stage(pipeline);
 	for (index = 0U; index < pipeline->fs_binary->input_count; index++) {
 		if (pipeline->fs_binary->input_locations[index] == I915_SHADER_LOCATION_POINT_COORD)
 			continue;
 		found = i915_pipeline_input_slot(last, pipeline->fs_binary->input_locations[index], &slot);
+		if (found != 0 && pipeline->fs_binary->input_locations[index] == I915_SHADER_LOCATION_PRIMITIVE_ID)
+			continue;
 		if (found != 0) {
 			kern_logf("i915: vk: the fragment shader reads location %u, which the %s shader does not write\n",
 				  pipeline->fs_binary->input_locations[index],
@@ -618,8 +624,11 @@ i915_pipeline_geometry_fits(
 		return 0;
 
 	/* XXX: the geometry stage has no binding table, so a geometry kernel does not sample. */
-	if (geometry->sampler_count != 0U)
+	if (geometry->sampler_count != 0U) {
+		kern_logf("i915: vk: the geometry shader samples %u images, which the geometry stage cannot yet (no binding table)\n",
+			  geometry->sampler_count);
 		return 0;
+	}
 
 	/* Succeeded: the draw path can place the geometry kernel. */
 	return 1;

@@ -3336,11 +3336,13 @@ i915_sample_rect(
 /*
  * Runs one vkCmdCopyBuffer region as GPU copies.
  *
- * The bytes are copied as four-byte texels between two linear surfaces over
- * the buffers: full rows of 4096 texels, at most 4096 rows to a rectangle,
- * then the rest as one short row.  An R8G8B8A8_UNORM texel read and written
- * back keeps its four bytes exactly.
- * XXX: a region whose offsets or size are not multiples of four is refused.
+ * The bytes are copied as texels between two linear surfaces over the
+ * buffers: full rows of 4096 texels, at most 4096 rows to a rectangle, then
+ * the rest as one short row.  A texel is four bytes (R8G8B8A8_UNORM) when
+ * both offsets and the size are multiples of four, else two (R8G8_UNORM)
+ * when they are even, else one (R8_UNORM): vkCmdCopyBuffer asks no
+ * alignment, and a linear surface needs its address and pitch only in whole
+ * texels.  An UNORM texel read and written back keeps its bytes exactly.
  */
 static int
 i915_execute_buffer_copy(
@@ -3357,6 +3359,8 @@ i915_execute_buffer_copy(
 	uint64_t done;
 	uint64_t rows;
 	uint32_t width;
+	uint32_t texel_bytes;
+	uint32_t format;
 	int error;
 
 	/* Refuses a copy whose buffers do not exist. */
@@ -3378,19 +3382,23 @@ i915_execute_buffer_copy(
 	if (region->dstOffset > dst->size || region->size > dst->size - region->dstOffset)
 		return EINVAL;
 
-	/* Refuses a region that is not whole four-byte texels. */
-	if ((region->srcOffset % 4U) != 0U ||
-	    (region->dstOffset % 4U) != 0U ||
-	    (region->size % 4U) != 0U) {
-		kern_logf("i915: vk: XXX unimplemented path: a buffer copy of %llu bytes from offset %llu to offset %llu (not multiples of 4)\n",
-			  (unsigned long long)region->size,
-			  (unsigned long long)region->srcOffset,
-			  (unsigned long long)region->dstOffset);
-		return ENOTSUP;
+	/* The largest texel that the offsets and the size are whole multiples of. */
+	texel_bytes = 1U;
+	format = VK_FORMAT_R8_UNORM;
+	if ((region->srcOffset % 4U) == 0U &&
+	    (region->dstOffset % 4U) == 0U &&
+	    (region->size % 4U) == 0U) {
+		texel_bytes = 4U;
+		format = VK_FORMAT_R8G8B8A8_UNORM;
+	} else if ((region->srcOffset % 2U) == 0U &&
+		   (region->dstOffset % 2U) == 0U &&
+		   (region->size % 2U) == 0U) {
+		texel_bytes = 2U;
+		format = VK_FORMAT_R8G8_UNORM;
 	}
 
 	/* Copies the region one rectangle at a time. */
-	texels = region->size / 4U;
+	texels = region->size / texel_bytes;
 	done = 0U;
 	while (done < texels) {
 		/* Takes as many full rows as one rectangle covers, or the short row that is left. */
@@ -3404,19 +3412,19 @@ i915_execute_buffer_copy(
 			rows = 1U;
 		}
 
-		/* Describes the source bytes as a linear surface of four-byte texels. */
-		src_surface.va = drv_i915_gfx_memory_va(src->memory, src->offset + region->srcOffset + done * 4U);
+		/* Describes the source bytes as a linear surface of those texels. */
+		src_surface.va = drv_i915_gfx_memory_va(src->memory, src->offset + region->srcOffset + done * texel_bytes);
 		src_surface.width = width;
 		src_surface.height = (uint32_t)rows;
-		src_surface.pitch = width * 4U;
-		src_surface.format = VK_FORMAT_R8G8B8A8_UNORM;
+		src_surface.pitch = width * texel_bytes;
+		src_surface.format = format;
 		src_surface.tiled = 0U;
 		if (src_surface.va == 0U)
 			return EINVAL;
 
 		/* Describes the destination bytes the same way. */
 		dst_surface = src_surface;
-		dst_surface.va = drv_i915_gfx_memory_va(dst->memory, dst->offset + region->dstOffset + done * 4U);
+		dst_surface.va = drv_i915_gfx_memory_va(dst->memory, dst->offset + region->dstOffset + done * texel_bytes);
 		if (dst_surface.va == 0U)
 			return EINVAL;
 

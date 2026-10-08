@@ -41,6 +41,14 @@
 #define WINDOW_REPEAT_DELAY	400U
 #define WINDOW_REPEAT_INTERVAL	40U
 
+/*
+ * How far behind a held key's repeats are caught up (BUG-191): a loop that
+ * wakes less often than the rate (a slow redraw) types every repeat that
+ * came due since, so the rate the user set holds; a loop stalled longer
+ * than this starts again from now instead of typing a burst.
+ */
+#define WINDOW_REPEAT_CATCH_UP	250U
+
 /* How many pixels one unit of scrolling moves (the compositor sends 15 units a wheel notch). */
 #define WINDOW_SCROLL_SCALE	4.0
 
@@ -501,23 +509,25 @@ kl_window_repeat(
 	if (now < window->repeat_at)
 		return (int)(window->repeat_at - now);
 
-	/* The key once more. */
-	event = window_push(window, KL_WINDOW_KEY);
-	if (event != NULL) {
-		event->code = window->repeat_key;
-		event->pressed = 1;
-		event->repeated = 1;
-		keiui_edit_key(window, event);
-	}
+	/* A loop stalled past the catch-up types one repeat and starts again from now. */
+	if (now - window->repeat_at > WINDOW_REPEAT_CATCH_UP)
+		window->repeat_at = now;
 
 	/*
-	 * The next repeat is one interval after this one was due, so a loop that
-	 * woke a little late keeps the pace (BUG-172); one that fell a whole
-	 * interval behind starts again from now instead of catching up in a burst.
+	 * The key once more for every repeat due by now, each one interval after
+	 * the one before, so a loop that wakes late or seldom keeps the rate
+	 * (BUG-172, BUG-191).
 	 */
-	window->repeat_at += window->repeat_interval;
-	if (window->repeat_at <= now)
-		window->repeat_at = now + window->repeat_interval;
+	while (window->repeat_at <= now) {
+		event = window_push(window, KL_WINDOW_KEY);
+		if (event != NULL) {
+			event->code = window->repeat_key;
+			event->pressed = 1;
+			event->repeated = 1;
+			keiui_edit_key(window, event);
+		}
+		window->repeat_at += window->repeat_interval;
+	}
 
 	/* Reports the wait until the next repeat. */
 	return (int)(window->repeat_at - now);
@@ -2293,6 +2303,10 @@ window_keyboard_repeat(
 	window = data;
 	if (rate > 0)
 		window->repeat_interval = 1000U / (uint32_t)rate;
+
+	/* A rate past 1000 a second repeats every millisecond (an interval of 0 would never advance). */
+	if (window->repeat_interval == 0U)
+		window->repeat_interval = 1U;
 	if (delay > 0)
 		window->repeat_delay = (uint32_t)delay;
 }

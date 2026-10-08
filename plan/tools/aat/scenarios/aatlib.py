@@ -91,12 +91,17 @@ PROGRAMS = ("files", "notes", "settings", "terminal", "pdfviewer", "imageview", 
 	"phone", "calendar", "mailer", "textedit", "monitor", "browser", "emacs")
 
 
-def stop_programs_command() -> str:
-	"""The shell command that ends the PROGRAMS running on the target, all but the desktop program (files --desktop)."""
+def stop_programs_command(session_log: str) -> str:
+	"""The shell command that ends the PROGRAMS running on the target, all but the desktop program (files --desktop).
+	zedBSD's ps shows a process's argv[0] alone, so the desktop program is known by the pid of the compositor's latest
+	"KWL DESKTOP start pid=N" line in the session's log (T1-481: the old test of ps's "--desktop" never matched and the
+	desktop's icons went away after the first scenario that stopped Files)."""
 	pattern = "|".join(PROGRAMS)
+	log = shlex.quote(session_log)
 	return (
-		"for p in $(ps -A -o pid,args | awk '{n = $2; sub(/.*\\//, \"\", n); "
-		f"if (n ~ /^({pattern})$/ && !(n == \"files\" && $3 == \"--desktop\")) print $1}}'); "
+		f"desk=$(grep 'KWL DESKTOP start pid=' {log} 2>/dev/null | tail -1 | sed -n 's/.*pid=\\([0-9]*\\).*/\\1/p'); "
+		"for p in $(ps -A -o pid,args | awk -v desk=\"$desk\" '{n = $2; sub(/.*\\//, \"\", n); "
+		f"if (n ~ /^({pattern})$/ && $1 != desk && !(n == \"files\" && $3 == \"--desktop\")) print $1}}'); "
 		"do kill $p 2>/dev/null; done"
 	)
 
@@ -530,7 +535,7 @@ class Run:
 		# Never on this host (--local, the runner's own test): the names are common ones.
 		if "--local" in self.target:
 			return
-		self.sh(stop_programs_command() + "; sleep 1; true")
+		self.sh(stop_programs_command(self.session_log()) + "; sleep 1; true")
 
 	# The session's log of each scenario.
 

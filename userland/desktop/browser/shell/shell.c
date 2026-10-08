@@ -46,6 +46,10 @@
 #define SHELL_KEY_W		17U
 #define SHELL_KEY_L		38U
 
+/* How far a press moves before the image under it is dragged out of the window, and the picture's longest side (ws189-p003). */
+#define SHELL_DRAG_DISTANCE	8
+#define SHELL_DRAG_SIDE		2048
+
 /*
  * What the window mode holds while it runs: the view, the window with its
  * titlebar and presenter, whether the view must be drawn again, and
@@ -80,10 +84,6 @@ struct shell_state {
 	int drag_press_y;
 	uint64_t text_session;
 };
-
-/* How far a press moves before the image under it is dragged out of the window, and the picture's longest side (ws189-p003). */
-#define SHELL_DRAG_DISTANCE	8
-#define SHELL_DRAG_SIDE		2048
 
 static void shell_show_state(struct shell_state *state);
 static void shell_input(struct shell_state *state, const struct shell_event *event);
@@ -373,7 +373,9 @@ shell_input(
 		/* A left press on an image moved far enough drags the image out of the window (ws189-p003). */
 		distance_x = abs(event->x - state->drag_press_x);
 		distance_y = abs(event->y - state->drag_press_y);
-		if (state->drag_armed && (distance_x > SHELL_DRAG_DISTANCE || distance_y > SHELL_DRAG_DISTANCE)) {
+		if (state->drag_armed &&
+		    (distance_x > SHELL_DRAG_DISTANCE ||
+		     distance_y > SHELL_DRAG_DISTANCE)) {
 			state->drag_armed = 0;
 			dragged = shell_drag_image(state);
 			if (dragged)
