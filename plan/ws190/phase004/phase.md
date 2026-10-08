@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p004 -->
 # ws190-p004: 規約の全文の見直し（WS190 の C コード）
 
-Status: cleared
+Status: cleared（2026-10-09 Q1 の判定: P3（Haiku）の 12a2891e6、build と host 試験 PASS。Q1 が text-area.c の誤った注釈 2 つ（Up・Down を「scroll」と書いた）を直した）
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q902（P3、2026-10-09）

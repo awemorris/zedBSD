@@ -579,13 +579,13 @@ area_key(
 	/* Up and Down keep the place across; every other key forgets it. */
 	shift = modifiers & KL_MOD_SHIFT;
 
-	/* Scrolls up one line, preserving the column. */
+	/* Up moves the caret a line up, keeping its place across. */
 	if (code == KL_KEY_UP) {
 		area_vertical(area, style, width, -1, shift);
 		return 0;
 	}
 
-	/* Scrolls down one line, preserving the column. */
+	/* Down moves the caret a line down, keeping its place across. */
 	if (code == KL_KEY_DOWN) {
 		area_vertical(area, style, width, 1, shift);
 		return 0;
