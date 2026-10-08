@@ -24,7 +24,9 @@ enum ml_job_kind {
 	ML_JOB_REFRESH,		/* an account's folders' new messages got */
 	ML_JOB_SEND,		/* a written message sent (receivers, raw) and kept in Sent */
 	ML_JOB_SEEN,		/* a message marked read (folder, uid) */
-	ML_JOB_MOVE		/* a message moved (folder, uid, to_folder) */
+	ML_JOB_MOVE,		/* a message moved (folder, uid, to_folder) */
+	ML_JOB_DELETE,		/* a message of the trash deleted for good (folder, uid; ws177-p015) */
+	ML_JOB_CHECK		/* an account's new settings tried (config), not taken (ws177-p015) */
 };
 
 /*
@@ -53,14 +55,17 @@ enum ml_result_kind {
 	ML_RESULT_MESSAGE,	/* a message got (folder, uid, flags, size, parsed; arrived: new in IDLE) */
 	ML_RESULT_REFRESHED,	/* an account's Get Mail is done */
 	ML_RESULT_SENT,		/* a message was sent */
-	ML_RESULT_FAILED	/* something failed (error, text; account -1 for a new account) */
+	ML_RESULT_FAILED,	/* something failed (error, text; account -1 for the form's account, new or edited) */
+	ML_RESULT_CHECKED	/* an account's new settings work (ws177-p015) */
 };
 
 /*
  * One result: its kind and account, a message's folder, UID, flags and
  * size, whether it arrived while idling, an errno value and words of a
  * failure, and the message read (its body allocated; ml_sync_release
- * frees it).  next links the queue.
+ * frees it).  A failure of ML_ERROR_UNTRUSTED also has the server's host,
+ * whether it is the SMTP one, and its certificate's fingerprint, for the
+ * user to trust (ws177-p015).  next links the queue.
  */
 struct ml_result {
 	enum ml_result_kind kind;
@@ -72,6 +77,9 @@ struct ml_result {
 	int arrived;
 	int error;
 	char text[ML_TEXT_MAX];
+	char host[ML_TEXT_MAX];
+	int smtp;
+	char fingerprint[ML_PIN_MAX];
 	struct ml_parsed parsed;
 	struct ml_result *next;
 };

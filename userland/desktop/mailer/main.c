@@ -21,6 +21,14 @@
  * happens is logged on standard error as "MAIL" lines for the tests, the
  * words of a message never.
  *
+ * ws177-p015: a message of the trash is deleted for good; Edit Account
+ * changes or removes an account (its new settings tried first; the thread
+ * is started again with the accounts as they are then); a server whose
+ * certificate does not verify is named with its fingerprint, and the
+ * user may trust it (kept with the account); the dates' words follow
+ * the day; and a question over the window takes the input while it is
+ * asked.
+ *
  *   mailer [--width=N] [--height=N] [--timeout-s=N]
  */
 
@@ -62,6 +70,9 @@ struct ml_window {
 	struct kl_app *app;
 	struct kl_window *window;
 	struct kl_ui *ui;
+
+	/* The input of the question asked over the window (ws177-p015): it takes the pointer and the keys while one is asked. */
+	struct kl_ui *dialog_ui;
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
@@ -94,6 +105,17 @@ struct ml_window {
 	char folder[ML_PATH_MAX];
 	struct ml_account_config pending;
 	struct kl_settings *settings;
+
+	/*
+	 * The certificate the user is asked to trust (ws177-p015): the account
+	 * (-1 for the form's), whether it is the SMTP server's, and its
+	 * fingerprint (empty while nothing is asked); and the last one the
+	 * user did not trust, which is not asked again in the run.
+	 */
+	int trust_account;
+	int trust_smtp;
+	char trust_fingerprint[ML_PIN_MAX];
+	char declined[ML_PIN_MAX];
 };
 
 /* The window's menu. */
@@ -102,6 +124,7 @@ static const struct kl_menu_entry ml_menu[] = {
 	{ 2U, 1U, KL_MENU_ITEM_NORMAL, "New Message", ML_ACTION_NEW, KL_MENU_ROLE_NONE, KL_MENU_CTRL, 'n' },
 	{ 3U, 1U, KL_MENU_ITEM_NORMAL, "Get Mail", ML_ACTION_GET, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ 14U, 1U, KL_MENU_ITEM_NORMAL, "Add Account", ML_ACTION_ADD_ACCOUNT, KL_MENU_ROLE_NONE, 0U, 0U },
+	{ 15U, 1U, KL_MENU_ITEM_NORMAL, "Edit Account", ML_ACTION_EDIT_ACCOUNT, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ 4U, 1U, KL_MENU_ITEM_SEPARATOR, "", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
 	{ 5U, 1U, KL_MENU_ITEM_NORMAL, "Quit Mail", ML_ACTION_QUIT, KL_MENU_ROLE_QUIT, KL_MENU_CTRL, 'q' },
 	{ 6U, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Message", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
@@ -131,6 +154,15 @@ static void ml_request_sign_in(struct ml_window *mailer);
 static void ml_refresh_all(struct ml_window *mailer);
 static void ml_status_time(struct ml_window *mailer, const char *what);
 static void ml_codes_changed(void *data, const char *key, const char *value, unsigned flags);
+static void ml_sync_begin(struct ml_window *mailer);
+static void ml_servers_restart(struct ml_window *mailer);
+static int ml_form_config(struct ml_window *mailer, struct ml_account_config *config);
+static void ml_request_check(struct ml_window *mailer);
+static void ml_edited(struct ml_window *mailer, int index);
+static void ml_remove_account(struct ml_window *mailer, int index);
+static void ml_ask_trust(struct ml_window *mailer, const struct ml_result *result);
+static void ml_trust(struct ml_window *mailer, int trusted);
+static void ml_draw_question(struct ml_window *mailer, uint64_t now_us);
 
 /*
  * Runs Mail.
@@ -201,6 +233,16 @@ main(
 		return 1;
 	}
 
+	/* The input of its questions. */
+	mailer.dialog_ui = kl_ui_create();
+	if (mailer.dialog_ui == NULL) {
+		ml_log("FAILED operation=ui error=%d", errno);
+		kl_ui_destroy(mailer.ui);
+		kl_app_close(mailer.app);
+		ml_view_release(&mailer.view);
+		return 1;
+	}
+
 	/* The menu and the style (opaque until the first frame finds whether the window can stand on glass). */
 	(void)kl_window_set_menu(mailer.window, ml_menu, sizeof(ml_menu) / sizeof(ml_menu[0]));
 	mailer.style.text = &mailer.text;
@@ -218,6 +260,7 @@ main(
 	ml_sync_stop(mailer.sync);
 	if (mailer.settings != NULL)
 		kl_settings_close(mailer.settings);
+	kl_ui_destroy(mailer.dialog_ui);
 	kl_ui_destroy(mailer.ui);
 	if (mailer.canvas_made)
 		kl_canvas_release(&mailer.canvas);
@@ -319,6 +362,7 @@ ml_loop(
 	struct kl_app_event event;
 	uint64_t started;
 	uint64_t now;
+	int redated;
 	int status;
 	int taken;
 	int wait;
@@ -400,6 +444,11 @@ ml_loop(
 				return -1;
 		}
 
+		/* Another day: the dates' words from today ("Yesterday" for what was today). */
+		redated = ml_store_redate(time(NULL));
+		if (redated)
+			mailer->dirty = 1;
+
 		/* The view's notice gone: drawn without it. */
 		if (mailer->view.notice[0] != '\0' && now >= mailer->view.notice_until) {
 			mailer->view.notice[0] = '\0';
@@ -423,6 +472,7 @@ ml_input(
 	struct ml_window *mailer,
 	const struct kl_window_event *event)
 {
+	struct kl_ui *ui;
 	int redraw;
 	int taken;
 
@@ -434,18 +484,25 @@ ml_input(
 	if (event->kind != KL_WINDOW_MOTION)
 		mailer->dirty = 1;
 
+	/* A question asked takes the input, and every input draws it again (ws177-p015). */
+	ui = mailer->ui;
+	if (mailer->view.question != ML_QUESTION_NONE) {
+		ui = mailer->dialog_ui;
+		mailer->dirty = 1;
+	}
+
 	/* Each kind of input. */
 	switch (event->kind) {
 	case KL_WINDOW_MOTION:
 		/* A drag draws the whole window; another lit widget only its part (BUG-226). */
-		redraw = kl_ui_pointer_motion(mailer->ui, event->x, event->y);
+		redraw = kl_ui_pointer_motion(ui, event->x, event->y);
 		if (mailer->buttons_held != 0U)
 			mailer->dirty = 1;
 		else if (redraw)
 			mailer->lit_changed = 1;
 		break;
 	case KL_WINDOW_LEAVE:
-		(void)kl_ui_pointer_leave(mailer->ui);
+		(void)kl_ui_pointer_leave(ui);
 		break;
 	case KL_WINDOW_BUTTON:
 		/* The buttons held, for the motions of a drag. */
@@ -455,28 +512,28 @@ ml_input(
 			mailer->buttons_held--;
 
 		/* The left button presses the widgets. */
-		(void)kl_ui_pointer_motion(mailer->ui, event->x, event->y);
+		(void)kl_ui_pointer_motion(ui, event->x, event->y);
 		if (event->code == KL_BUTTON_LEFT)
-			(void)kl_ui_pointer_button(mailer->ui, event->pressed, event->arrival_us);
+			(void)kl_ui_pointer_button(ui, event->pressed, event->arrival_us);
 		break;
 	case KL_WINDOW_AXIS:
 	case KL_WINDOW_AXIS_STOP:
 		/* The wheel glides; a touch pad's fingers hold the content, and it flies on when they lift (BUG-211). */
-		taken = kl_ui_axis(mailer->ui, event);
+		taken = kl_ui_axis(ui, event);
 		if (taken == KL_UI_AXIS_FLUNG)
 			ml_log("KINETIC fling source=finger");
 		break;
 	case KL_WINDOW_TOUCH_DOWN:
-		(void)kl_ui_touch_down(mailer->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_down(ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
 		break;
 	case KL_WINDOW_TOUCH_MOTION:
-		(void)kl_ui_touch_motion(mailer->ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
+		(void)kl_ui_touch_motion(ui, event->id, event->time_us, event->arrival_us, event->x, event->y);
 		break;
 	case KL_WINDOW_TOUCH_UP:
-		(void)kl_ui_touch_up(mailer->ui, event->id, event->time_us, event->arrival_us);
+		(void)kl_ui_touch_up(ui, event->id, event->time_us, event->arrival_us);
 		break;
 	case KL_WINDOW_TOUCH_CANCEL:
-		(void)kl_ui_touch_cancel(mailer->ui, event->arrival_us);
+		(void)kl_ui_touch_cancel(ui, event->arrival_us);
 		break;
 	case KL_WINDOW_KEY:
 		/* Ctrl+Q quits; the other keys go to the widgets, and those no widget takes to the view. */
@@ -485,13 +542,13 @@ ml_input(
 		    event->code == ML_KEY_Q)
 			mailer->view.quit = 1;
 		else
-			(void)kl_ui_key(mailer->ui, event->code, event->pressed, event->modifiers);
+			(void)kl_ui_key(ui, event->code, event->pressed, event->modifiers);
 		break;
 	case KL_WINDOW_TEXT_COMMIT:
 	case KL_WINDOW_TEXT_PREEDIT:
 	case KL_WINDOW_TEXT_DELETE:
 		/* Text from an input method or the on-screen keyboard, for the field with the keyboard (BUG-203, BUG-204). */
-		(void)kl_ui_text(mailer->ui, event);
+		(void)kl_ui_text(ui, event);
 		break;
 	case KL_WINDOW_RESIZE:
 		mailer->resized = 1;
@@ -589,7 +646,7 @@ ml_draw(
 	 * when the part cannot be told).
 	 */
 	partial = 0;
-	if (!mailer->dirty && !mailer->moving && mailer->lit_changed)
+	if (!mailer->dirty && !mailer->moving && mailer->lit_changed && mailer->view.question == ML_QUESTION_NONE)
 		partial = kl_ui_take_damage(mailer->ui, &part);
 	mailer->lit_changed = 0;
 
@@ -602,6 +659,9 @@ ml_draw(
 	mailer->moving = kl_ui_end(mailer->ui, now_us);
 	if (partial)
 		kl_canvas_clip_pop(&mailer->canvas);
+
+	/* The question over it. */
+	ml_draw_question(mailer, now_us);
 
 	/*
 	 * The text input is asked for while a field has the keyboard, and told
@@ -712,7 +772,22 @@ ml_servers_start(
 		(void)kl_settings_watch(mailer->settings, ML_CODES_SETTING, ml_codes_changed, mailer, NULL);
 	}
 
-	/* The thread, its results watched. */
+	/* The thread, which gets every account's mail first by itself. */
+	mailer->trust_account = -1;
+	ml_sync_begin(mailer);
+}
+
+/* Starts the thread with the accounts of the store and watches its results. */
+static void
+ml_sync_begin(
+	struct ml_window *mailer)
+{
+	const struct ml_account_config *accounts;
+	size_t count;
+	int error;
+
+	/* The thread. */
+	accounts = ml_accounts(&count);
 	error = ml_sync_start(accounts, count, &mailer->sync);
 	if (error != 0) {
 		ml_log("SYNC failed error=%d", error);
@@ -729,6 +804,27 @@ ml_servers_start(
 	/* The thread gets every account's mail first by itself. */
 	if (count != 0U)
 		(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "Getting mail...");
+}
+
+/*
+ * Starts the thread again with the accounts as they are now (an account
+ * changed, removed or trusted): the old one ends its sessions, and the
+ * new one gets every account's mail (the store keeps what it has).
+ */
+static void
+ml_servers_restart(
+	struct ml_window *mailer)
+{
+	/* The old thread, its descriptor no longer watched. */
+	if (mailer->sync != NULL) {
+		(void)kl_app_watch_fd(mailer->app, ml_sync_fd(mailer->sync), 0U);
+		ml_sync_stop(mailer->sync);
+		mailer->sync = NULL;
+	}
+
+	/* The new one. */
+	ml_sync_begin(mailer);
+	ml_log("SYNC restarted");
 }
 
 /* Takes the thread's results into the store and the view. */
@@ -784,11 +880,17 @@ ml_results(
 			/* The tried account is not needed after (its password goes). */
 			memset(&mailer->pending, 0, sizeof(mailer->pending));
 			break;
+		case ML_RESULT_CHECKED:
+			/* An account's new settings work: taken. */
+			ml_edited(mailer, result.account);
+			break;
 		case ML_RESULT_FAILED:
-			/* What failed, in the status and as a notice. */
+			/* What failed, in the status and as a notice; a certificate the user may trust is asked about. */
 			ml_log("FAILED account=%d error=%d", result.account, result.error);
 			(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "%s", result.text);
 			ml_view_notice(&mailer->view, result.text, kl_clock_us());
+			if (result.error == ML_ERROR_UNTRUSTED)
+				ml_ask_trust(mailer, &result);
 			break;
 		default:
 			break;
@@ -882,6 +984,18 @@ ml_requests(
 			continue;
 		}
 
+		/* An account removed (the thread is started again without it). */
+		if (request.action == ML_ACTION_REMOVE_ACCOUNT) {
+			ml_remove_account(mailer, (int)request.message);
+			continue;
+		}
+
+		/* The answer about a certificate. */
+		if (request.action == ML_ACTION_TRUST) {
+			ml_trust(mailer, (int)request.message);
+			continue;
+		}
+
 		/* Without the thread nothing reaches a server. */
 		if (mailer->sync == NULL) {
 			ml_view_notice(&mailer->view, "Mail cannot reach the servers.", kl_clock_us());
@@ -915,6 +1029,13 @@ ml_requests(
 			(void)ml_sync_queue(mailer->sync, &job);
 			break;
 		case ML_ACTION_SIGN_IN:
+			/* A new account signs in; an account edited has its new settings tried. */
+			if (mailer->view.editing >= 0) {
+				ml_request_check(mailer);
+				break;
+			}
+
+			/* A new account. */
 			ml_request_sign_in(mailer);
 			break;
 		default:
@@ -972,7 +1093,11 @@ ml_request_send(
 	ml_log("SEND queued bytes=%zu", job.length);
 }
 
-/* Moves a message to the archive or the trash: hidden at once, moved on the server. */
+/*
+ * Moves a message to the archive or the trash: hidden at once, moved on
+ * the server.  A message of the trash deleted is deleted for good
+ * (ws177-p015).
+ */
 static void
 ml_request_move(
 	struct ml_window *mailer,
@@ -982,9 +1107,31 @@ ml_request_move(
 	struct ml_message *message;
 	struct ml_job job;
 
-	/* The message, not already in that folder. */
+	/* The message. */
 	message = ml_store_at(index);
-	if (message == NULL || message->folder == to_folder)
+	if (message == NULL)
+		return;
+
+	/* Deleted in the trash: for good, on the server too. */
+	if (message->folder == ML_TRASH && to_folder == ML_TRASH) {
+		if (message->uid != 0U) {
+			memset(&job, 0, sizeof(job));
+			job.kind = ML_JOB_DELETE;
+			job.account = message->account;
+			job.folder = message->folder;
+			job.uid = message->uid;
+			(void)ml_sync_queue(mailer->sync, &job);
+		}
+
+		/* Hidden here. */
+		message->folder = ML_FOLDERS;
+		ml_log("DELETE message=%ld", index);
+		ml_view_notice(&mailer->view, "The message is deleted for good.", kl_clock_us());
+		return;
+	}
+
+	/* Already in that folder. */
+	if (message->folder == to_folder)
 		return;
 
 	/* On the server (the copy comes back as the folder's new message). */
@@ -1003,52 +1150,19 @@ ml_request_move(
 	ml_log("MOVE message=%ld to=%s", index, ml_folder_name(to_folder));
 }
 
-/* Asks the thread to try the form's account: the servers by the address's domain when they are not written. */
+/* Asks the thread to try the form's new account; it is kept when it works. */
 static void
 ml_request_sign_in(
 	struct ml_window *mailer)
 {
 	struct ml_account_config config;
-	const char *domain;
-	char server[ML_TEXT_MAX + 8U];
 	struct ml_job job;
 	int error;
 
-	/* An address with a domain, and a password. */
-	domain = strchr(mailer->view.setup_address.text, '@');
-	if (domain == NULL || domain[1] == '\0' || mailer->view.setup_password.length == 0U) {
-		(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "Write the email address and its password.");
+	/* The form's account. */
+	error = ml_form_config(mailer, &config);
+	if (error != 0)
 		return;
-	}
-
-	/* The domain after the at sign. */
-	domain++;
-
-	/* The account. */
-	memset(&config, 0, sizeof(config));
-	(void)snprintf(config.name, sizeof(config.name), "%s", mailer->view.setup_name.text);
-	if (config.name[0] == '\0')
-		(void)snprintf(config.name, sizeof(config.name), "%s", mailer->view.setup_address.text);
-	(void)snprintf(config.address, sizeof(config.address), "%s", mailer->view.setup_address.text);
-	(void)snprintf(config.user, sizeof(config.user), "%s", mailer->view.setup_address.text);
-	(void)snprintf(config.password, sizeof(config.password), "%s", mailer->view.setup_password.text);
-
-	/* The IMAP server, imap.<domain> when it is not written. */
-	(void)snprintf(server, sizeof(server), "%s", mailer->view.setup_imap.text);
-	if (server[0] == '\0')
-		(void)snprintf(server, sizeof(server), "imap.%s", domain);
-	error = ml_server_parse(server, 993U, &config.imap);
-
-	/* The SMTP server, smtp.<domain> when it is not written. */
-	(void)snprintf(server, sizeof(server), "%s", mailer->view.setup_smtp.text);
-	if (server[0] == '\0')
-		(void)snprintf(server, sizeof(server), "smtp.%s", domain);
-	if (error == 0)
-		error = ml_server_parse(server, 465U, &config.smtp);
-	if (error != 0) {
-		(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "A server is not written right.");
-		return;
-	}
 
 	/* Tried by the thread; kept when it works. */
 	memset(&job, 0, sizeof(job));
@@ -1063,6 +1177,365 @@ ml_request_sign_in(
 		return;
 	(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "Signing in...");
 	ml_log("SIGN-IN queued");
+}
+
+/* Asks the thread to try the form's new settings of the account edited; they are taken when they work. */
+static void
+ml_request_check(
+	struct ml_window *mailer)
+{
+	const struct ml_account_config *accounts;
+	struct ml_account_config config;
+	struct ml_job job;
+	size_t count;
+	int same;
+	int error;
+
+	/* The account edited. */
+	accounts = ml_accounts(&count);
+	if (mailer->view.editing < 0 || (size_t)mailer->view.editing >= count)
+		return;
+
+	/* The form's settings. */
+	error = ml_form_config(mailer, &config);
+	if (error != 0)
+		return;
+
+	/* A server that stays the same keeps the certificate the user trusted. */
+	same = strcmp(config.imap.host, accounts[mailer->view.editing].imap.host);
+	if (same == 0 && config.imap.port == accounts[mailer->view.editing].imap.port)
+		(void)snprintf(config.imap.pin, sizeof(config.imap.pin), "%s", accounts[mailer->view.editing].imap.pin);
+	same = strcmp(config.smtp.host, accounts[mailer->view.editing].smtp.host);
+	if (same == 0 && config.smtp.port == accounts[mailer->view.editing].smtp.port)
+		(void)snprintf(config.smtp.pin, sizeof(config.smtp.pin), "%s", accounts[mailer->view.editing].smtp.pin);
+
+	/* Tried by the thread on a session of its own. */
+	memset(&job, 0, sizeof(job));
+	job.kind = ML_JOB_CHECK;
+	job.account = mailer->view.editing;
+	job.config = config;
+	mailer->pending = config;
+	error = ml_sync_queue(mailer->sync, &job);
+	memset(&config, 0, sizeof(config));
+	memset(&job, 0, sizeof(job));
+	if (error != 0)
+		return;
+	(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "Checking the account...");
+	ml_log("CHECK queued account=%d", mailer->view.editing);
+}
+
+/*
+ * Reads the form into an account: the servers by the address's domain when
+ * they are not written.  Returns 0, or -1 with the status saying what is
+ * missing.
+ */
+static int
+ml_form_config(
+	struct ml_window *mailer,
+	struct ml_account_config *config)
+{
+	const char *domain;
+	char server[ML_TEXT_MAX + 8U];
+	int error;
+
+	/* An address with a domain, and a password. */
+	domain = strchr(mailer->view.setup_address.text, '@');
+	if (domain == NULL || domain[1] == '\0' || mailer->view.setup_password.length == 0U) {
+		(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "Write the email address and its password.");
+		return -1;
+	}
+
+	/* The domain after the at sign. */
+	domain++;
+
+	/* The account. */
+	memset(config, 0, sizeof(*config));
+	(void)snprintf(config->name, sizeof(config->name), "%s", mailer->view.setup_name.text);
+	if (config->name[0] == '\0')
+		(void)snprintf(config->name, sizeof(config->name), "%s", mailer->view.setup_address.text);
+	(void)snprintf(config->address, sizeof(config->address), "%s", mailer->view.setup_address.text);
+	(void)snprintf(config->user, sizeof(config->user), "%s", mailer->view.setup_address.text);
+	(void)snprintf(config->password, sizeof(config->password), "%s", mailer->view.setup_password.text);
+
+	/* The IMAP server, imap.<domain> when it is not written. */
+	(void)snprintf(server, sizeof(server), "%s", mailer->view.setup_imap.text);
+	if (server[0] == '\0')
+		(void)snprintf(server, sizeof(server), "imap.%s", domain);
+	error = ml_server_parse(server, 993U, &config->imap);
+
+	/* The SMTP server, smtp.<domain> when it is not written. */
+	(void)snprintf(server, sizeof(server), "%s", mailer->view.setup_smtp.text);
+	if (server[0] == '\0')
+		(void)snprintf(server, sizeof(server), "smtp.%s", domain);
+	if (error == 0)
+		error = ml_server_parse(server, 465U, &config->smtp);
+	if (error != 0) {
+		(void)snprintf(mailer->view.status, sizeof(mailer->view.status), "A server is not written right.");
+		return -1;
+	}
+
+	/* Succeeded: the form's account is read. */
+	return 0;
+}
+
+/*
+ * Takes the new settings of an account edited that work: kept in place of
+ * the old ones, its messages got again from its servers (the thread is
+ * started again), and the password of an address it no longer has
+ * forgotten.
+ */
+static void
+ml_edited(
+	struct ml_window *mailer,
+	int index)
+{
+	struct ml_account_config old;
+	const struct ml_account_config *accounts;
+	size_t count;
+	int same;
+	int error;
+
+	/* The account as it was. */
+	accounts = ml_accounts(&count);
+	if (index < 0 || (size_t)index >= count)
+		return;
+	old = accounts[index];
+
+	/* Its new settings, its old messages gone. */
+	(void)ml_store_set_account(index, &mailer->pending);
+	ml_store_drop_messages(index);
+	memset(&mailer->pending, 0, sizeof(mailer->pending));
+
+	/* Kept on the disk; a changed address's password forgotten. */
+	accounts = ml_accounts(&count);
+	error = ml_accounts_save(mailer->folder, accounts, count);
+	if (error != 0)
+		ml_log("ACCOUNTS save-failed error=%d", error);
+	same = strcmp(old.address, accounts[index].address);
+	if (same != 0)
+		(void)ml_secret_save(mailer->folder, old.address, "");
+	memset(&old, 0, sizeof(old));
+
+	/* The view: the form closed and emptied (the password goes from it), the account's inbox. */
+	ml_view_action(&mailer->view, ML_ACTION_CANCEL, kl_clock_us());
+	mailer->view.account = index;
+	mailer->view.folder = ML_INBOX;
+	mailer->view.selected = -1;
+	ml_log("EDITED account=%d", index);
+	ml_view_notice(&mailer->view, "The account is changed.", kl_clock_us());
+
+	/* Its mail got again. */
+	ml_servers_restart(mailer);
+}
+
+/*
+ * Removes an account: from the store with its messages, from the disk
+ * with its password, and from the thread (started again without it).
+ */
+static void
+ml_remove_account(
+	struct ml_window *mailer,
+	int index)
+{
+	char address[ML_TEXT_MAX];
+	const struct ml_account_config *accounts;
+	size_t count;
+	int error;
+
+	/* The account. */
+	accounts = ml_accounts(&count);
+	if (index < 0 || (size_t)index >= count)
+		return;
+	(void)snprintf(address, sizeof(address), "%s", accounts[index].address);
+
+	/* Gone from the store, with its messages. */
+	error = ml_store_remove_account(index);
+	if (error != 0)
+		return;
+
+	/* Gone from the disk, and its password forgotten. */
+	accounts = ml_accounts(&count);
+	error = ml_accounts_save(mailer->folder, accounts, count);
+	if (error != 0)
+		ml_log("ACCOUNTS save-failed error=%d", error);
+	(void)ml_secret_save(mailer->folder, address, "");
+
+	/* The view: the form closed and emptied, the first account's inbox, or the form of a new one when none is left. */
+	ml_view_action(&mailer->view, ML_ACTION_CANCEL, kl_clock_us());
+	mailer->view.account = 0;
+	mailer->view.folder = ML_INBOX;
+	mailer->view.selected = -1;
+	if (count == 0U)
+		mailer->view.adding = 1;
+	ml_log("REMOVED account=%d count=%zu", index, count);
+	ml_view_notice(&mailer->view, "The account is removed.", kl_clock_us());
+
+	/* The thread without it. */
+	ml_servers_restart(mailer);
+}
+
+/*
+ * Asks the user whether to trust a server's certificate that does not
+ * verify, naming the server and the certificate's fingerprint (one the
+ * user did not trust in this run is not asked about again).
+ */
+static void
+ml_ask_trust(
+	struct ml_window *mailer,
+	const struct ml_result *result)
+{
+	char grouped[ML_PIN_MAX + ML_PIN_MAX / 2U];
+	char body[ML_TEXT_MAX * 2U];
+	char title[ML_TEXT_MAX + 32U];
+	size_t index;
+	size_t at;
+	int same;
+
+	/* Nothing to trust without the certificate's fingerprint. */
+	if (result->fingerprint[0] == '\0')
+		return;
+
+	/* Not trusted before in this run. */
+	same = strcmp(result->fingerprint, mailer->declined);
+	if (same == 0)
+		return;
+
+	/* What would be trusted. */
+	mailer->trust_account = result->account;
+	mailer->trust_smtp = result->smtp;
+	(void)snprintf(mailer->trust_fingerprint, sizeof(mailer->trust_fingerprint), "%s", result->fingerprint);
+
+	/* The fingerprint in pairs, as certificates' viewers show it. */
+	at = 0;
+	for (index = 0; result->fingerprint[index] != '\0' && at + 3U < sizeof(grouped); index++) {
+		if (index != 0U && index % 2U == 0U) {
+			grouped[at] = ':';
+			at++;
+		}
+
+		/* The digit. */
+		grouped[at] = result->fingerprint[index];
+		at++;
+	}
+
+	/* Its end. */
+	grouped[at] = '\0';
+
+	/* The question. */
+	(void)snprintf(title, sizeof(title), "Trust the certificate of %.200s?", result->host);
+	(void)snprintf(body, sizeof(body),
+	    "Mail cannot verify it: %.200s Trust it only for a server you know, such as your own. SHA-256 %s",
+	    result->text, grouped);
+	ml_view_ask(&mailer->view, ML_QUESTION_TRUST, title, body);
+}
+
+/*
+ * Carries out the answer about a certificate: trusted, it is kept with
+ * the account (the form's account is tried again with it; an account's
+ * is kept on the disk and the thread is started again); not trusted, it
+ * is not asked about again in the run.
+ */
+static void
+ml_trust(
+	struct ml_window *mailer,
+	int trusted)
+{
+	struct ml_account_config config;
+	const struct ml_account_config *accounts;
+	struct ml_server *server;
+	struct ml_job job;
+	size_t count;
+	int error;
+
+	/* Not trusted. */
+	if (!trusted) {
+		(void)snprintf(mailer->declined, sizeof(mailer->declined), "%s", mailer->trust_fingerprint);
+		mailer->trust_fingerprint[0] = '\0';
+		ml_log("TRUST trusted=0");
+		return;
+	}
+
+	/* The form's account (new or edited): tried again with the certificate. */
+	if (mailer->trust_account < 0) {
+		(void)snprintf(mailer->pending.imap.pin, sizeof(mailer->pending.imap.pin), "%s", mailer->trust_fingerprint);
+		memset(&job, 0, sizeof(job));
+		job.kind = ML_JOB_SIGN_IN;
+		job.account = -1;
+		if (mailer->view.editing >= 0) {
+			job.kind = ML_JOB_CHECK;
+			job.account = mailer->view.editing;
+		}
+
+		/* The account with the certificate, tried again. */
+		job.config = mailer->pending;
+		error = 0;
+		if (mailer->sync != NULL)
+			error = ml_sync_queue(mailer->sync, &job);
+		memset(&job, 0, sizeof(job));
+		mailer->trust_fingerprint[0] = '\0';
+		ml_log("TRUST trusted=1 account=-1 error=%d", error);
+		return;
+	}
+
+	/* An account's server. */
+	accounts = ml_accounts(&count);
+	if ((size_t)mailer->trust_account >= count)
+		return;
+	config = accounts[mailer->trust_account];
+	server = &config.imap;
+	if (mailer->trust_smtp)
+		server = &config.smtp;
+	(void)snprintf(server->pin, sizeof(server->pin), "%s", mailer->trust_fingerprint);
+
+	/* Kept, on the disk too. */
+	(void)ml_store_set_account(mailer->trust_account, &config);
+	memset(&config, 0, sizeof(config));
+	accounts = ml_accounts(&count);
+	error = ml_accounts_save(mailer->folder, accounts, count);
+	if (error != 0)
+		ml_log("ACCOUNTS save-failed error=%d", error);
+	ml_log("TRUST trusted=1 account=%d smtp=%d", mailer->trust_account, mailer->trust_smtp);
+	mailer->trust_fingerprint[0] = '\0';
+
+	/* A message that could not be sent is sent again by the user. */
+	if (mailer->trust_smtp)
+		ml_view_notice(&mailer->view, "The certificate is trusted. Send the message again.", kl_clock_us());
+
+	/* The thread with it. */
+	ml_servers_restart(mailer);
+}
+
+/* Draws the question asked over the window, on the question's own input (ws177-p015). */
+static void
+ml_draw_question(
+	struct ml_window *mailer,
+	uint64_t now_us)
+{
+	struct kl_event event;
+	int moving;
+	int taken;
+
+	/* No question. */
+	if (mailer->view.question == ML_QUESTION_NONE)
+		return;
+
+	/* The dialog. */
+	kl_ui_begin(mailer->dialog_ui, now_us);
+	ml_view_question(&mailer->view, mailer->dialog_ui, &mailer->style, (int)mailer->width, (int)mailer->height, now_us);
+	moving = kl_ui_end(mailer->dialog_ui, now_us);
+	if (moving)
+		mailer->moving = 1;
+
+	/* What it did not take is nothing. */
+	for (;;) {
+		taken = kl_ui_take(mailer->dialog_ui, &event);
+		if (!taken)
+			break;
+	}
+
+	/* An answer: the window without the question is drawn next. */
+	if (mailer->view.question == ML_QUESTION_NONE)
+		mailer->dirty = 1;
 }
 
 /* Asks the thread for every account's mail. */

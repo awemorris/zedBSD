@@ -32,8 +32,25 @@
 /* The longest list of receivers kept (To, Cc), with its NUL. */
 #define ML_LIST_MAX		1024U
 
-/* The most accounts. */
-#define ML_ACCOUNTS_MAX		4U
+/* The most accounts (ws177-p015: 16, from 4). */
+#define ML_ACCOUNTS_MAX		16U
+
+/* The longest fingerprint of a certificate the user trusts (SHA-256 in hex), with its NUL. */
+#define ML_PIN_MAX		65U
+
+/*
+ * The failures of Mail's own beyond the errno values (ws177-p015): the
+ * server's certificate does not verify (ml_tls_fingerprint gives it, for
+ * the user to trust), and a server on a plain port that does not offer
+ * STARTTLS (a password is never sent in the clear).
+ */
+#define ML_ERROR_UNTRUSTED	0x10001
+#define ML_ERROR_NO_TLS		0x10002
+
+/* What an IMAP server can do (its CAPABILITY, ws177-p015). */
+#define ML_IMAP_CAN_MOVE	1U	/* MOVE (RFC 6851) */
+#define ML_IMAP_CAN_UIDPLUS	2U	/* UID EXPUNGE (RFC 4315) */
+#define ML_IMAP_GMAIL		4U	/* Gmail's extensions: it keeps a sent message in Sent by itself */
 
 /* The longest IMAP folder name kept, with its NUL. */
 #define ML_MAILBOX_MAX		128U
@@ -65,13 +82,16 @@ enum ml_folder {
 #define ML_ATTACHMENT		2U	/* it carries a file */
 
 /*
- * A mail server: its host, its port, and whether the connection is TLS
- * from its start (993, 465) or is upgraded with STARTTLS (143, 587).
+ * A mail server: its host, its port, whether the connection is TLS from
+ * its start (993, 465) or is upgraded with STARTTLS (143, 587), and the
+ * fingerprint of a certificate the user trusts though it does not verify
+ * (empty for none; ws177-p015).
  */
 struct ml_server {
 	char host[ML_TEXT_MAX];
 	unsigned port;
 	int secure;
+	char pin[ML_PIN_MAX];
 };
 
 /*
@@ -125,13 +145,15 @@ struct ml_parsed {
 /*
  * An IMAP session: the connection, the number of the next command's tag,
  * the tag of an IDLE going on (0 for none), how many messages the folder
- * selected has, and the server's words of the last failure.
+ * selected has, what the server can do (ML_IMAP_*), and the server's
+ * words of the last failure (or of its goodbye).
  */
 struct ml_imap {
 	struct ml_conn conn;
 	unsigned tag;
 	unsigned idle_tag;
 	uint32_t exists;
+	unsigned capabilities;
 	char error[ML_TEXT_MAX];
 };
 
@@ -140,17 +162,18 @@ typedef void (*ml_imap_fetched_fn)(void *data, uint32_t uid, unsigned flags, siz
 
 /* The TLS of the OpenSSL package (tls.c). */
 int ml_tls_add_ca_file(const char *path);
-int ml_tls_open(int fd, const char *host, void **tls);
+int ml_tls_open(int fd, const char *host, const char *pin, void **tls);
 int ml_tls_read(void *tls, unsigned char *bytes, size_t length, size_t *received);
 int ml_tls_write(void *tls, const unsigned char *bytes, size_t length);
 int ml_tls_pending(void *tls);
 void ml_tls_close(void *tls);
 const char *ml_tls_error(void);
+const char *ml_tls_fingerprint(void);
 
 /* A connection (conn.c). */
 int ml_server_parse(const char *text, unsigned fallback_port, struct ml_server *server);
 int ml_conn_open(struct ml_conn *conn, const struct ml_server *server);
-int ml_conn_start_tls(struct ml_conn *conn, const char *host);
+int ml_conn_start_tls(struct ml_conn *conn, const struct ml_server *server);
 int ml_conn_write(struct ml_conn *conn, const char *bytes, size_t length);
 int ml_conn_line(struct ml_conn *conn, char *line, size_t size);
 int ml_conn_bytes(struct ml_conn *conn, char *bytes, size_t count);
@@ -164,6 +187,7 @@ int ml_imap_select(struct ml_imap *imap, const char *mailbox, uint32_t *exists);
 int ml_imap_fetch(struct ml_imap *imap, uint32_t first_uid, unsigned most, ml_imap_fetched_fn fetched, void *data);
 int ml_imap_flag(struct ml_imap *imap, uint32_t uid, const char *flag, int add);
 int ml_imap_move(struct ml_imap *imap, uint32_t uid, const char *mailbox);
+int ml_imap_delete(struct ml_imap *imap, uint32_t uid);
 int ml_imap_append(struct ml_imap *imap, const char *mailbox, const char *raw, size_t length);
 int ml_imap_idle_start(struct ml_imap *imap);
 int ml_imap_idle_take(struct ml_imap *imap, int *arrived);

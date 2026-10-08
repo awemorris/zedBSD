@@ -23,11 +23,19 @@
  * Add Account, the list and the message give way to the form of a new
  * account: the user's name, the address, the password and the two
  * servers, Sign In, and whether the browser may fill in sign-in codes.
+ *
+ * ws177-p015: Edit Account shows the same form with the account shown,
+ * Save and Remove Account (asked first); a question (a certificate to
+ * trust, an account to remove) is asked over the window with libkeiland's
+ * dialog, drawn by ml_view_question on an input of its own; the accounts'
+ * folders scroll when they do not fit; and the list shows every message
+ * of the folder.
  */
 
 #include "mailer.h"
 
 #include <stdio.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The width under which the folders are left out and the list or the message is shown alone. */
@@ -80,6 +88,13 @@
 #define ML_ID_SIGN_IN		22U
 #define ML_ID_CODES		23U
 #define ML_ID_SETUP_CANCEL	24U
+#define ML_ID_SIDEBAR		25U
+#define ML_ID_DIALOG		26U
+#define ML_ID_REMOVE		27U
+
+/* Where the accounts' folders start below the sidebar's top, and how far above its bottom they end (Add Account, Get Mail). */
+#define ML_VIEW_FOLDERS_TOP	104
+#define ML_VIEW_FOLDERS_BOTTOM	112
 
 /* The colors: the folders' ground on an opaque window, white, and a code's tint. */
 #define ML_COLOR_SIDEBAR	kl_theme_choose(KL_RGB(0xf4f6f9), KL_RGB(0x1f232a))
@@ -99,6 +114,13 @@ struct view_layout {
 /* The folders' icons. */
 static const enum kl_icon view_folder_icons[ML_FOLDERS] = { KL_ICON_DOWNLOADS, KL_ICON_SHARE, KL_ICON_DOCUMENTS, KL_ICON_FOLDER_LINE, KL_ICON_TRASH };
 
+/*
+ * The messages the list is being sorted among, for view_order (qsort's
+ * comparison has no data of its own); set by view_shown just before it
+ * sorts and only read while it does.
+ */
+static const struct ml_message *view_sort_messages;
+
 /* The message's tools: their words and actions. */
 static const char *const view_tools[] = { "Reply", "Reply All", "Forward" };
 static const unsigned view_tool_actions[] = { ML_ACTION_REPLY, ML_ACTION_REPLY_ALL, ML_ACTION_FORWARD };
@@ -114,7 +136,11 @@ static int view_words(const struct kl_style *style, const char *text, int x, int
 static void view_avatar(const struct kl_style *style, const char *name, kl_color color, int cx, int cy, int radius);
 static void view_clip(struct kl_canvas *canvas, float x, float y, float size, kl_color color);
 static void view_edge(const struct ml_view *view, const struct kl_style *style, int x, int y, int width);
-static size_t view_shown(const struct ml_view *view, size_t *indices, size_t size);
+static size_t view_shown(struct ml_view *view);
+static int view_order(const void *a, const void *b);
+static void view_edit(struct ml_view *view);
+static void view_server_text(const struct ml_server *server, char *text, size_t size);
+static void view_setup_clear(struct ml_view *view);
 static size_t view_unread(const struct ml_view *view, int account, enum ml_folder folder);
 static int view_is_unread(const struct ml_view *view, size_t index);
 static int view_contains(const char *text, const char *part);
@@ -139,6 +165,7 @@ ml_view_init(
 	/* Nothing yet; the password's characters show as dots. */
 	memset(view, 0, sizeof(view[0]));
 	view->selected = -1;
+	view->editing = -1;
 	view->setup_password.secret = 1;
 	view->setup_address.plain = 1;
 	view->setup_imap.plain = 1;
@@ -156,6 +183,14 @@ ml_view_init(
 		return error;
 	}
 
+	/* The accounts' folders' scroll, down only. */
+	error = kl_scroll_init(&view->sidebar_scroll, KL_SCROLL_Y);
+	if (error != 0) {
+		kl_scroll_release(&view->reader_scroll);
+		kl_scroll_release(&view->list_scroll);
+		return error;
+	}
+
 	/* Succeeded: the inbox's first message shown (a narrow window shows the list first). */
 	view_open(view, 0);
 	return 0;
@@ -169,8 +204,14 @@ ml_view_release(
 	struct ml_view *view)
 {
 	/* The scrolls. */
+	kl_scroll_release(&view->sidebar_scroll);
 	kl_scroll_release(&view->reader_scroll);
 	kl_scroll_release(&view->list_scroll);
+
+	/* The list's messages. */
+	free(view->shown);
+	view->shown = NULL;
+	view->shown_capacity = 0;
 }
 
 /*
@@ -225,11 +266,24 @@ ml_view_action(
 		view->opened = 0;
 		break;
 	case ML_ACTION_ADD_ACCOUNT:
-		/* The form of a new account. */
+		/* The form of a new account, empty (an account edited or tried before leaves nothing in it). */
+		view_setup_clear(view);
+		view->editing = -1;
 		view->adding = 1;
 		view->composing = 0;
 		view->opened = 1;
 		ml_log("SETUP open");
+		break;
+	case ML_ACTION_EDIT_ACCOUNT:
+		/* The form with the account shown. */
+		view_edit(view);
+		break;
+	case ML_ACTION_ASK_REMOVE:
+		/* The account edited is removed only when the user says so again. */
+		if (view->editing < 0)
+			break;
+		ml_view_ask(view, ML_QUESTION_REMOVE, "Remove this account?",
+		    "Mail forgets the account and its password on this computer. Its messages stay on the server.");
 		break;
 	case ML_ACTION_SIGN_IN:
 		/* The form's account, for the window to try. */
@@ -237,9 +291,12 @@ ml_view_action(
 		ml_log("REQUEST action=sign-in address=%zu imap=%zu smtp=%zu", view->setup_address.length, view->setup_imap.length, view->setup_smtp.length);
 		break;
 	case ML_ACTION_CANCEL:
-		/* The message written goes (no drafts are kept), or the form of a new account closes. */
+		/* The message written goes (no drafts are kept), or the form of an account closes (an edited one's words go). */
+		if (view->editing >= 0)
+			view_setup_clear(view);
 		view->composing = 0;
 		view->adding = 0;
+		view->editing = -1;
 		ml_log("COMPOSE kind=cancel");
 		break;
 	case ML_ACTION_QUIT:
@@ -262,7 +319,6 @@ ml_view_key(
 	unsigned modifiers,
 	uint64_t now_us)
 {
-	size_t indices[ML_MESSAGES_MAX];
 	size_t count;
 	size_t at;
 	size_t i;
@@ -285,7 +341,7 @@ ml_view_key(
 	}
 
 	/* Up and Down alone move, through the messages the list shows. */
-	count = view_shown(view, indices, ML_MESSAGES_MAX);
+	count = view_shown(view);
 	if ((key != KL_KEY_UP && key != KL_KEY_DOWN) || count == 0U)
 		return;
 
@@ -293,7 +349,7 @@ ml_view_key(
 	at = 0;
 	for (i = 0; i < count; i++) {
 		/* The message shown. */
-		if ((long)indices[i] == view->selected)
+		if ((long)view->shown[i] == view->selected)
 			at = i;
 	}
 
@@ -302,7 +358,7 @@ ml_view_key(
 		at--;
 	else if (key == KL_KEY_DOWN && at + 1U < count)
 		at++;
-	view_open(view, (long)indices[at]);
+	view_open(view, (long)view->shown[at]);
 }
 
 /*
@@ -577,6 +633,7 @@ view_sidebar(
 	uint64_t now_us)
 {
 	const struct ml_account_config *accounts;
+	struct kl_rect viewport;
 	struct kl_rect button;
 	struct kl_rect row;
 	char count_text[24];
@@ -587,6 +644,7 @@ view_sidebar(
 	int current;
 	int width;
 	int folder;
+	int top;
 	int y;
 
 	/* The title, and New Message under it. */
@@ -599,9 +657,24 @@ view_sidebar(
 	if (clicked)
 		ml_view_action(view, ML_ACTION_NEW, now_us);
 
+	/*
+	 * The accounts' folders between New Message and Add Account, scrolled
+	 * when they do not fit (ws177-p015): their height is the last frame's.
+	 */
+	viewport.x = area->x;
+	viewport.y = area->y + ML_VIEW_FOLDERS_TOP;
+	viewport.width = area->width;
+	viewport.height = area->height - ML_VIEW_FOLDERS_TOP - ML_VIEW_FOLDERS_BOTTOM;
+	if (viewport.height < 0)
+		viewport.height = 0;
+	kl_scroll_set_size(&view->sidebar_scroll, (double)viewport.width, (double)view->sidebar_height, (double)viewport.width, (double)viewport.height);
+	kl_ui_scroll_region(ui, ML_ID_SIDEBAR, &viewport, &view->sidebar_scroll);
+	kl_canvas_clip_push(style->canvas, &viewport);
+
 	/* Each account: its name and address, and its folders. */
 	accounts = ml_accounts(&account_count);
-	y = area->y + 104;
+	top = viewport.y - (int)view->sidebar_scroll.y;
+	y = top;
 	for (a = 0; a < account_count; a++) {
 		/* The account's name, and its address under it. */
 		y = kl_sidebar_section(style, area->x + 8, y, area->width - 16, accounts[a].name);
@@ -616,8 +689,12 @@ view_sidebar(
 			current = 0;
 			if ((int)a == view->account && folder == (int)view->folder)
 				current = 1;
-			clicked = kl_sidebar_item(ui, style, ML_ID_FOLDER, (uint32_t)(a * ML_FOLDERS + (size_t)folder), &row, view_folder_icons[folder], ml_folder_name((enum ml_folder)folder), current);
 			y += 32;
+
+			/* A row not wholly in the viewport is neither drawn nor pressed (Add Account is under it). */
+			if (row.y < viewport.y || row.y + row.height > viewport.y + viewport.height)
+				continue;
+			clicked = kl_sidebar_item(ui, style, ML_ID_FOLDER, (uint32_t)(a * ML_FOLDERS + (size_t)folder), &row, view_folder_icons[folder], ml_folder_name((enum ml_folder)folder), current);
 
 			/* The count of unread messages at the right. */
 			unread = view_unread(view, (int)a, (enum ml_folder)folder);
@@ -641,6 +718,11 @@ view_sidebar(
 		/* Space before the next account. */
 		y += 10;
 	}
+
+	/* Their height for the next frame's scroll, the clip gone, and the bar while they move. */
+	view->sidebar_height = y - top;
+	kl_canvas_clip_pop(style->canvas);
+	(void)kl_scroll_draw_bars(&view->sidebar_scroll, style->canvas, &viewport, style->theme, now_us);
 
 	/* Add Account above Get Mail. */
 	button.x = area->x + 14;
@@ -672,7 +754,6 @@ view_list(
 	uint64_t now_us)
 {
 	const struct ml_account_config *accounts;
-	size_t indices[ML_MESSAGES_MAX];
 	struct kl_rect field;
 	struct kl_rect list;
 	struct kl_rect row;
@@ -695,7 +776,7 @@ view_list(
 	(void)kl_text_draw(style->text, style->canvas, left, area->y + 36, title, strlen(title), ML_VIEW_TEXT_TITLE, 1, style->theme->text);
 
 	/* The counts beside the account. */
-	shown = view_shown(view, indices, ML_MESSAGES_MAX);
+	shown = view_shown(view);
 	unread = view_unread(view, view->account, view->folder);
 	counts[0] = '\0';
 	if ((size_t)view->account < account_count)
@@ -744,9 +825,9 @@ view_list(
 			continue;
 
 		/* Its input. */
-		hit = kl_ui_hit(ui, ML_ID_ROW, (uint32_t)indices[i], &row);
+		hit = kl_ui_hit(ui, ML_ID_ROW, (uint32_t)view->shown[i], &row);
 		if ((hit & KL_HIT_CLICKED) != 0U) {
-			view_open(view, (long)indices[i]);
+			view_open(view, (long)view->shown[i]);
 			view->opened = 1;
 		}
 
@@ -756,9 +837,9 @@ view_list(
 
 		/* The row's content; the chosen one is not marked in a narrow window, where the list stands alone. */
 		chosen = 0;
-		if ((long)indices[i] == view->selected && !view->narrow && !view->composing)
+		if ((long)view->shown[i] == view->selected && !view->narrow && !view->composing)
 			chosen = 1;
-		view_row(view, style, indices[i], &row, chosen);
+		view_row(view, style, view->shown[i], &row, chosen);
 	}
 
 	/* The clip goes, the bar shows while the list moves, and a word for an empty list. */
@@ -1182,28 +1263,34 @@ view_edge(
 
 /*
  * Finds the messages of the folder shown that the search lets through
- * (its words in the sender, the subject or the words), and reports how
- * many.
+ * (its words in the sender, the subject or the words) into view->shown,
+ * the newest first, and reports how many.  The room grows with the
+ * store; when it cannot, the list shows as many as there is room for.
  */
 static size_t
 view_shown(
-	const struct ml_view *view,
-	size_t *indices,
-	size_t size)
+	struct ml_view *view)
 {
 	const struct ml_message *messages;
+	size_t *grown;
 	size_t count;
 	size_t found;
-	size_t moved;
-	size_t at;
 	size_t i;
 	int held;
-	int newer;
 
-	/* Each message of the folder. */
+	/* Room for every message of the store. */
 	messages = ml_messages(&count);
+	if (view->shown_capacity < count) {
+		grown = realloc(view->shown, count * sizeof(grown[0]));
+		if (grown != NULL) {
+			view->shown = grown;
+			view->shown_capacity = count;
+		}
+	}
+
+	/* Each message of the folder, while there is room. */
 	found = 0;
-	for (i = 0; i < count && found < size; i++) {
+	for (i = 0; i < count && found < view->shown_capacity; i++) {
 		/* Another account's or folder's. */
 		if (messages[i].account != view->account || messages[i].folder != view->folder)
 			continue;
@@ -1221,29 +1308,47 @@ view_shown(
 
 		/* Let through. */
 		if (held) {
-			indices[found] = i;
+			view->shown[found] = i;
 			found++;
 		}
 	}
 
-	/* The newest first: each one moved up past the older ones before it. */
-	for (i = 1; i < found; i++) {
-		moved = indices[i];
-		at = i;
-		while (at > 0U) {
-			newer = view_newer(messages, moved, indices[at - 1U]);
-			if (!newer)
-				break;
-			indices[at] = indices[at - 1U];
-			at--;
-		}
-
-		/* Its place. */
-		indices[at] = moved;
+	/* The newest first. */
+	if (found > 1U) {
+		view_sort_messages = messages;
+		qsort(view->shown, found, sizeof(view->shown[0]), view_order);
+		view_sort_messages = NULL;
 	}
 
 	/* The number found. */
 	return found;
+}
+
+/* Orders two messages of the list for qsort: the newer first. */
+static int
+view_order(
+	const void *a,
+	const void *b)
+{
+	size_t first;
+	size_t second;
+	int newer;
+
+	/* The two messages' indices. */
+	first = *(const size_t *)a;
+	second = *(const size_t *)b;
+
+	/* The same message. */
+	if (first == second)
+		return 0;
+
+	/* The first is newer: it goes before. */
+	newer = view_newer(view_sort_messages, first, second);
+	if (newer)
+		return -1;
+
+	/* The second is newer. */
+	return 1;
 }
 
 /*
@@ -1504,7 +1609,8 @@ view_newer(
 /*
  * Draws the form of a new account: its fields, Sign In (and Cancel when
  * an account is there already), the status, and whether the browser may
- * fill in sign-in codes from Mail.
+ * fill in sign-in codes from Mail.  The form of an account edited has
+ * Save, Cancel and Remove Account (ws177-p015).
  */
 static void
 view_setup(
@@ -1520,6 +1626,8 @@ view_setup(
 	struct kl_rect field;
 	struct kl_rect button;
 	size_t account_count;
+	const char *title;
+	const char *done;
 	int clicked;
 	int width;
 	int on;
@@ -1527,13 +1635,21 @@ view_setup(
 	int y;
 	int i;
 
+	/* The form's title and its main button: a new account's, or an account edited. */
+	title = "Add an Account";
+	done = "Sign In";
+	if (view->editing >= 0) {
+		title = "Edit Account";
+		done = "Save";
+	}
+
 	/* The title and what the form is for. */
 	width = area->width - 2 * ML_VIEW_PAD;
 	if (width > 560)
 		width = 560;
 	x = area->x + (area->width - width) / 2;
 	y = area->y + 60;
-	(void)kl_text_draw(style->text, style->canvas, x, y, "Add an Account", strlen("Add an Account"), 22U, 1, style->theme->text);
+	(void)kl_text_draw(style->text, style->canvas, x, y, title, strlen(title), 22U, 1, style->theme->text);
 	(void)kl_text_draw_fit(style->text, style->canvas, x, y + 26, "Mail reads with IMAP and sends with SMTP. With Gmail, use an app password.", ML_VIEW_TEXT_SMALL, 0, width, style->theme->text_secondary);
 	y += 52;
 
@@ -1559,7 +1675,7 @@ view_setup(
 	button.height = 34;
 	button.x = x + width - button.width;
 	button.y = y;
-	clicked = kl_button(ui, style, ML_ID_SIGN_IN, &button, "Sign In", KL_BUTTON_PRIMARY);
+	clicked = kl_button(ui, style, ML_ID_SIGN_IN, &button, done, KL_BUTTON_PRIMARY);
 	if (clicked)
 		ml_view_action(view, ML_ACTION_SIGN_IN, now_us);
 	(void)ml_accounts(&account_count);
@@ -1568,6 +1684,16 @@ view_setup(
 		clicked = kl_button(ui, style, ML_ID_SETUP_CANCEL, &button, "Cancel", 0U);
 		if (clicked)
 			ml_view_action(view, ML_ACTION_CANCEL, now_us);
+	}
+
+	/* An account edited can be removed, at the left (asked first). */
+	if (view->editing >= 0) {
+		button.x = x;
+		button.width = 150;
+		clicked = kl_button(ui, style, ML_ID_REMOVE, &button, "Remove Account", KL_BUTTON_DANGER);
+		if (clicked)
+			ml_view_action(view, ML_ACTION_ASK_REMOVE, now_us);
+		y += 44;
 	}
 
 	/* What the last try said. */
@@ -1584,6 +1710,86 @@ view_setup(
 		view_request(view, ML_ACTION_CODES, -1);
 		ml_log("CODES allowed=%d", on);
 	}
+}
+
+/*
+ * Asks a question over the window (ML_QUESTION_*), in place of one asked
+ * before; ml_view_question draws it until it is answered.
+ */
+void
+ml_view_ask(
+	struct ml_view *view,
+	unsigned question,
+	const char *title,
+	const char *body)
+{
+	/* The question and its words. */
+	view->question = question;
+	(void)snprintf(view->question_title, sizeof(view->question_title), "%s", title);
+	(void)snprintf(view->question_body, sizeof(view->question_body), "%s", body);
+	ml_log("QUESTION kind=%u", question);
+}
+
+/*
+ * Draws the question asked over a window of a size, between the caller's
+ * kl_ui_begin and kl_ui_end of the question's own input, and takes its
+ * answer: the window gets it as a request (ML_ACTION_TRUST, or
+ * ML_ACTION_REMOVE_ACCOUNT when the removal is confirmed).
+ */
+void
+ml_view_question(
+	struct ml_view *view,
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	int width,
+	int height,
+	uint64_t now_us)
+{
+	static const char *const trust_labels[] = { "Trust", "Cancel" };
+	static const char *const remove_labels[] = { "Remove", "Cancel" };
+	const char *const *labels;
+	struct kl_rect area;
+	unsigned question;
+	long trusted;
+	int answer;
+
+	UNUSED_PARAMETER(now_us);
+
+	/* No question. */
+	if (view->question == ML_QUESTION_NONE)
+		return;
+
+	/* Its buttons. */
+	labels = trust_labels;
+	if (view->question == ML_QUESTION_REMOVE)
+		labels = remove_labels;
+
+	/* Over the whole window. */
+	area.x = 0;
+	area.y = 0;
+	area.width = width;
+	area.height = height;
+	answer = kl_dialog(ui, style, ML_ID_DIALOG, &area, view->question_title, view->question_body, labels, 2);
+	if (answer < 0)
+		return;
+
+	/* Answered: the question goes. */
+	question = view->question;
+	view->question = ML_QUESTION_NONE;
+	ml_log("ANSWER kind=%u choice=%d", question, answer);
+
+	/* A certificate: trusted (the first button) or not, for the window. */
+	if (question == ML_QUESTION_TRUST) {
+		trusted = 0;
+		if (answer == 0)
+			trusted = 1;
+		view_request(view, ML_ACTION_TRUST, trusted);
+		return;
+	}
+
+	/* An account: removed when the user said so. */
+	if (question == ML_QUESTION_REMOVE && answer == 0)
+		view_request(view, ML_ACTION_REMOVE_ACCOUNT, view->editing);
 }
 
 /*
@@ -1641,4 +1847,62 @@ view_clip(
 
 	/* The inner wire, from near the bottom up to two thirds. */
 	kl_canvas_line(canvas, left + 0.5f * width, y + 0.30f * size, left + 0.5f * width, y + 0.78f * size, 1.5f, color);
+}
+
+/* Opens the form with the account shown, its settings in the fields. */
+static void
+view_edit(
+	struct ml_view *view)
+{
+	const struct ml_account_config *accounts;
+	char server[ML_TEXT_MAX + 16U];
+	size_t count;
+
+	/* An account to edit. */
+	accounts = ml_accounts(&count);
+	if (view->account < 0 || (size_t)view->account >= count)
+		return;
+
+	/* Its name, address and password. */
+	kl_field_set(&view->setup_name, accounts[view->account].name);
+	kl_field_set(&view->setup_address, accounts[view->account].address);
+	kl_field_set(&view->setup_password, accounts[view->account].password);
+
+	/* Its servers, as "host:port". */
+	view_server_text(&accounts[view->account].imap, server, sizeof(server));
+	kl_field_set(&view->setup_imap, server);
+	view_server_text(&accounts[view->account].smtp, server, sizeof(server));
+	kl_field_set(&view->setup_smtp, server);
+
+	/* The form shows it. */
+	view->editing = view->account;
+	view->adding = 1;
+	view->composing = 0;
+	view->opened = 1;
+	view->status[0] = '\0';
+	ml_log("SETUP open edit=%d", view->editing);
+}
+
+/* Writes a server as "host:port", as the form takes it. */
+static void
+view_server_text(
+	const struct ml_server *server,
+	char *text,
+	size_t size)
+{
+	/* The host and its port. */
+	(void)snprintf(text, size, "%s:%u", server->host, server->port);
+}
+
+/* Empties the form's fields (an account's password goes from them). */
+static void
+view_setup_clear(
+	struct ml_view *view)
+{
+	/* Each field. */
+	kl_field_set(&view->setup_name, "");
+	kl_field_set(&view->setup_address, "");
+	kl_field_set(&view->setup_password, "");
+	kl_field_set(&view->setup_imap, "");
+	kl_field_set(&view->setup_smtp, "");
 }
