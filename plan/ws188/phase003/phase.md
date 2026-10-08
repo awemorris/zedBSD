@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p003 -->
 # ws188-p003: 境界の検査の強化（app と libkeiland の OS の操作）
 
-Status: in-progress（q891-i01、P2、2026-10-08。実装と確認まで。判断待ち 2 つと B3 の案を Q1 へ）
+Status: cleared（2026-10-08 Q1: B3 の直し ebca7b0dd と p004 の後、check.sh が main c671551fe で PASS。残る PENDING は audiod の 3 行で WS191 の範囲）
 Disposition: normal
 Parent: [WS188](../ws.md)
 
