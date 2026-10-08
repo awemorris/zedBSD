@@ -15,7 +15,8 @@
  * stacked, one on the right or left, the grid's last row widened).  And the
  * assignment: windows side by side keep their order across, the four
  * corners' windows go to the grid's corners, and the result is the least
- * of every assignment tried by brute force.
+ * of every assignment tried by brute force.  And (ws177-p035) where a
+ * window of limited size goes in its slot's body, and when it is too large.
  *
  *   plan/ws181/tests/run-host-arrange.sh
  */
@@ -60,6 +61,10 @@ main(void)
 	long long least;
 	long long found;
 	char what[96];
+	struct kwl_arrange_rect body;
+	struct kwl_arrange_rect placed;
+	int32_t limits[4];
+	int fits;
 
 	/* The work area. */
 	area.x = AREA_X;
@@ -175,6 +180,57 @@ main(void)
 	/* The names. */
 	check(strcmp(kwl_arrange_name(KWL_ARRANGE_RIGHT_MAIN), "right-main") == 0, "the right-main name", "name");
 	check(strcmp(kwl_arrange_name(KWL_ARRANGE_GRID), "grid") == 0, "the grid name", "name");
+
+	/* 4. A window of limited size in its slot's body (ws177-p035): the body 600x400 at (100, 50). */
+	body.x = 100;
+	body.y = 50;
+	body.width = 600;
+	body.height = 400;
+
+	/* No limits: the whole body. */
+	memset(limits, 0, sizeof(limits));
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 1 && placed.x == 100 && placed.y == 50 && placed.width == 600 && placed.height == 400, "no limits", "fit");
+
+	/* A smallest size within the body: still the whole body. */
+	limits[0] = 300;
+	limits[1] = 200;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 1 && placed.width == 600 && placed.height == 400, "a small smallest size", "fit");
+
+	/* A fixed size smaller than the body: its size, in the middle (letterboxed). */
+	limits[0] = 320;
+	limits[1] = 240;
+	limits[2] = 320;
+	limits[3] = 240;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 1 && placed.x == 240 && placed.y == 130 && placed.width == 320 && placed.height == 240, "a fixed size", "fit");
+
+	/* A largest width only: that width in the middle across, the whole height. */
+	memset(limits, 0, sizeof(limits));
+	limits[2] = 500;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 1 && placed.x == 150 && placed.y == 50 && placed.width == 500 && placed.height == 400, "a largest width", "fit");
+
+	/* A smallest width larger than the body: too large, at its smallest size about the middle. */
+	memset(limits, 0, sizeof(limits));
+	limits[0] = 700;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 0 && placed.width == 700 && placed.x == 50 && placed.height == 400, "a smallest width too large", "fit");
+
+	/* A smallest height larger than the body: too large too. */
+	memset(limits, 0, sizeof(limits));
+	limits[1] = 401;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 0 && placed.height == 401, "a smallest height too large", "fit");
+
+	/* A fixed size larger than the body: too large. */
+	limits[0] = 800;
+	limits[1] = 500;
+	limits[2] = 800;
+	limits[3] = 500;
+	fits = kwl_arrange_fit(&body, limits, &placed);
+	check(fits == 0 && placed.width == 800 && placed.height == 500, "a fixed size too large", "fit");
 
 	/* The result. */
 	printf("WS181 host-arrange checks=%d failures=%d\n", checks, failures);

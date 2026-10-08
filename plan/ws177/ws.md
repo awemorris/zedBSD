@@ -63,7 +63,7 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p032](phase032/phase.md) | printd の IPP の Print-Job の本体を chunked で、job-state-reasons の log、busy でも job-id があれば送り直さない（BUG-271、実機は未実施） | in-progress（2026-10-08 P2 実装・host（mock）PASS・build） | ws177-p022 |
 | [ws177-p033](phase033/phase.md) | 案 U の 1: 上端の帯の長押し（500 ms で press を流し直す、apps bar は preview）、Home が開ききった後の desktop の層を描かない（backlog-p2 151） | in-progress（2026-10-08 P2 q908 実装・host・build） | ws181-p003 |
 | [ws177-p034](phase034/phase.md) | 案 U の 2: 全画面の app へ上端の帯の press を流し直す（touch.c の `kwl_touch_shell_handback`）（backlog-p2 151） | in-progress（2026-10-08 P2 q908 実装・build） | ws177-p033 |
-| [ws177-p035](phase035/phase.md) | 案 U の 3: 整列の枠より大きい最小の大きさの窓は外して詰め直す、大きさの固定の窓は枠の中に置く（letterbox）、枠の左右を desktop の swipe の帯の外へ（backlog-p2 152） | planned | ws181-p004 |
-| [ws177-p036](phase036/phase.md) | 案 U の 4: 出力の大きさの変更で整列の枠を計算し直す、メニューの間の network・volume の press でメニューを先に閉じる、swap の途中の desktop の切り替え・lock で swap を取り消す（backlog-p2 152） | planned | ws177-p035 |
-| [ws177-p037](phase037/phase.md) | 案 U の 5: 整列の記憶（同じ desktop で同じ形を選び直すと前の窓を前の枠へ、compositor の中だけ。2026-10-08 ユーザーの決定 (b)）、Super+矢印で鍵盤だけの入れ替え（backlog-p2 152） | planned | ws177-p036 |
-| [ws177-p038](phase038/phase.md) | 案 U の 6: Home が開く・閉じる途中の bar の fade、Home の上の status の pill の隙間の press を Home へ、明るい壁紙の Home の白の文字（backlog-p2 154） | planned | ws181-p005 |
+| [ws177-p035](phase035/phase.md) | 案 U の 3: 整列の枠より大きい最小の大きさの窓は外して詰め直す、大きさの固定の窓は枠の中に置く（letterbox）、枠の左右を desktop の swipe の帯の外へ（backlog-p2 152） | in-progress（2026-10-08 P2 q908 実装・host・build） | ws181-p004 |
+| [ws177-p036](phase036/phase.md) | 案 U の 4: 出力の大きさの変更で整列の枠を計算し直す、メニューの間の network・volume の press でメニューを先に閉じる、swap の途中の desktop の切り替え・lock で swap を取り消す（backlog-p2 152） | in-progress（2026-10-08 P2 q908 実装・build。出力の変更・lock は実機） | ws177-p035 |
+| [ws177-p037](phase037/phase.md) | 案 U の 5: 整列の記憶（同じ desktop で同じ形を選び直すと前の窓を前の枠へ、compositor の中だけ。2026-10-08 ユーザーの決定 (b)）、Super+矢印で鍵盤だけの入れ替え（backlog-p2 152） | in-progress（2026-10-08 P2 q908 実装・build） | ws177-p036 |
+| [ws177-p038](phase038/phase.md) | 案 U の 6: Home が開く・閉じる途中の bar の fade、Home の上の status の pill の隙間の press を Home へ、明るい壁紙の Home の白の文字（backlog-p2 154） | in-progress（2026-10-08 P2 q908 実装・build） | ws181-p005 |

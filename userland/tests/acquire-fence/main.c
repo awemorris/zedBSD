@@ -119,7 +119,7 @@ run_test(
 
 	/* The window, as wltest makes it. */
 	run->step = "window";
-	status = wltest_window_open(&run->window, NULL, run->options.width, run->options.height, 0, 0, "wltest");
+	status = wltest_window_open(&run->window, NULL, run->options.width, run->options.height, 0, 0, NULL, "wltest");
 	if (status != 0)
 		return -1;
 

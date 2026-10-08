@@ -53,6 +53,7 @@ wltest_window_open(
 	uint32_t height,
 	int fullscreen,
 	int fixed,
+	const uint32_t *minimum,
 	const char *app_id)
 {
 	int status;
@@ -62,6 +63,12 @@ wltest_window_open(
 	window->width = width;
 	window->height = height;
 	window->fixed = fixed;
+
+	/* A smallest size, when one was asked for (minimum: width and height, or NULL). */
+	if (minimum != NULL) {
+		window->min_width = minimum[0];
+		window->min_height = minimum[1];
+	}
 
 	/* This window owns the original connection until its renderer and roles have retired. */
 	window->display = wl_display_connect(display);
@@ -123,6 +130,10 @@ wltest_window_open(
 		xdg_toplevel_set_min_size(window->toplevel, (int32_t)width, (int32_t)height);
 		xdg_toplevel_set_max_size(window->toplevel, (int32_t)width, (int32_t)height);
 	}
+
+	/* A smallest size says so too (ws177-p035). */
+	if (window->min_width > 0U || window->min_height > 0U)
+		xdg_toplevel_set_min_size(window->toplevel, (int32_t)window->min_width, (int32_t)window->min_height);
 
 	/* The fullscreen preference, unless a window was asked for. */
 	if (fullscreen)
@@ -367,6 +378,12 @@ window_toplevel_configure(
 	/* A zero height independently preserves the application's existing choice. */
 	if (height > 0)
 		window->height = (uint32_t)height;
+
+	/* Never smaller than its smallest size, as an application that cannot be smaller draws. */
+	if (window->width < window->min_width)
+		window->width = window->min_width;
+	if (window->height < window->min_height)
+		window->height = window->min_height;
 
 	/* Succeeded: each specified extent is ready for the following role configure. */
 	return;

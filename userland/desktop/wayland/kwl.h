@@ -2094,6 +2094,10 @@ void kwl_arrange_mapped(struct kwl_server *server, struct kwl_object *surface);
 void kwl_arrange_join_prepare(struct kwl_server *server);
 void kwl_arrange_join_opened(struct kwl_server *server, int error, int running);
 void kwl_arrange_moved(struct kwl_server *server, struct kwl_object *surface, unsigned from);
+void kwl_arrange_output_resized(struct kwl_server *server, unsigned output);
+int kwl_arrange_bar_press(struct kwl_server *server, uint32_t button, uint32_t state);
+void kwl_arrange_swap_cancel(struct kwl_server *server, const char *reason);
+int kwl_arrange_key_swap(struct kwl_server *server, struct kwl_object *surface, uint32_t key, uint32_t state, int super);
 void kwl_glass_committed(struct kwl_server *server, struct kwl_object *surface);
 int kwl_glass_key(struct kwl_server *server, uint32_t key, uint32_t state);
 
