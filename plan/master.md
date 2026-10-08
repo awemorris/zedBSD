@@ -490,6 +490,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS187](ws187/ws.md) | MG006 | ロック画面（大きな時計、下部から上へのスワイプ・wheel での解除、自動の lock の猶予、Password・PIN・Hardware Key の選択、2026-10-08 ユーザー） | incomplete | p001（q864、P2）→ p002 → p003 |
 | [WS188](ws188/ws.md) | MG006 | app の OS の操作を libkeiland → compositor → backend へ（Settings の About・Storage・Users・Languages の残り）と境界の検査の強化（2026-10-08 ユーザー） | planned | p001 設計 |
 | [WS189](ws189/ws.md) | MG006 | app の間の drag and drop（画像、受け入れの見た目、dock の spring-loaded、desktop に file、画面をまたぐ）（2026-10-08 ユーザー） | planned | p001 設計（q892） |
+| [WS190](ws190/ws.md) | MG006 | 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・コピー・切り取り・貼り付け・すべて選択の popup）（2026-10-08 ユーザー、WS189 の後） | planned | p001 設計 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
