@@ -479,8 +479,12 @@ struct kl_backend_audio_stream;
  * The first page of a stream's memory: what the frames are, and the
  * positions, each writer's on its own cache line.  A position is a count of
  * frames that only grows, read with an 8-byte acquire load and written with
- * an 8-byte release store by its one writer; the sequence words stay 0 (they
- * are audiod's, for systems without an 8-byte atomic).  libkeiland's
+ * an 8-byte release store by its one writer; the write and read sequence
+ * words are not used (audiod's, for systems without an 8-byte atomic).  The
+ * played position and its time are one pair under played_sequence, a
+ * sequence lock: the writer makes it odd, writes the two, and makes it even
+ * again; a reader reads again until it finds the same even value before and
+ * after (as audiod writes them).  libkeiland's
  * kl-audio-protocol.h gives the same layout as offsets; the compositor
  * checks that the two agree.
  */
