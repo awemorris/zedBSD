@@ -3,7 +3,7 @@
 # ws177-p024: 印刷の堅牢化の 3 — 設定の writer の thread、title の検め、dispatch の層の試験（案 Q）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-457、2026-10-08 夜 Q1）
+Status: cleared（2026-10-08 夜 Q1: T1-457 apps.settings.printers を 2 回 fail なし、IPP・LPD・PDF Viewer の Ctrl+P が state=4、mock の受けた file が試料と一致。並行・名前解決・取り消し・寿命は host の試験）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q905（P2、2026-10-08 夜、承認済み）
