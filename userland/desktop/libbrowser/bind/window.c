@@ -161,7 +161,8 @@ static const struct bind_interface *const window_interfaces[BIND_INTERFACES] = {
 	&bind_svg_length_interface,
 	&bind_html_media_element_interface,
 	&bind_html_video_element_interface,
-	&bind_html_audio_element_interface
+	&bind_html_audio_element_interface,
+	&bind_html_text_area_element_interface
 };
 
 static int window_make_interface(struct bind_window *window, int index, struct vm_function **constructors);
