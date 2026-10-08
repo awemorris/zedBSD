@@ -40,6 +40,14 @@
 /* The ring's positions are 8-byte atomics; a system without lock-free ones is not one the streams run on. */
 _Static_assert(__GCC_ATOMIC_LLONG_LOCK_FREE == 2, "8-byte atomics must be lock-free");
 
+/* The public formats are the wire's. */
+_Static_assert(KL_AUDIO_FORMAT_S16_LE == KL_AUDIO_WIRE_FORMAT_S16_LE, "S16_LE");
+_Static_assert(KL_AUDIO_FORMAT_S32_LE == KL_AUDIO_WIRE_FORMAT_S32_LE, "S32_LE");
+_Static_assert(KL_AUDIO_FORMAT_F32_LE == KL_AUDIO_WIRE_FORMAT_F32_LE, "F32_LE");
+
+/* How many times a reader looks again at a position its writer is in the middle of before it gives up (a writer that died). */
+#define AUDIO_RETRIES		1000U
+
 /* How long an open or a control waits for the compositor (ms). */
 #define AUDIO_WAIT_MS		2000
 
@@ -90,8 +98,9 @@ struct kl_audio_stream {
 	uint32_t answer_error;
 	unsigned events;
 
-	/* Whether the stream runs (as the last control left it), for the sink. */
+	/* Whether the stream runs and drains (as the last controls left it), for the sink. */
 	unsigned running;
+	unsigned draining;
 
 	/* The silent sink: lost (atomic), and its anchors under sink_sequence. */
 	unsigned lost;
@@ -105,6 +114,8 @@ struct kl_audio_stream {
 static int audio_connect(struct kl_audio_stream *stream, const struct kl_audio_format *format);
 static int audio_map(struct kl_audio_stream *stream, const struct kl_audio_format *format);
 static int audio_control(struct kl_audio_stream *stream, uint32_t opcode, unsigned starts, unsigned stops);
+static void audio_sink_control(struct kl_audio_stream *stream, uint32_t opcode, unsigned starts, unsigned stops);
+static void audio_sink_set(struct kl_audio_stream *stream, uint64_t consumed, uint64_t played);
 static int audio_wait(struct kl_audio_stream *stream, int (*done)(const struct kl_audio_stream *stream));
 static int audio_read(struct kl_audio_stream *stream, int timeout_ms);
 static void audio_lose(struct kl_audio_stream *stream);
@@ -328,10 +339,26 @@ kl_audio_stream_write(
 	size_t room;
 	size_t first;
 	size_t index;
+	unsigned lost;
 	int status;
 
-	/* The room: the ring less what is written and not consumed. */
+	/*
+	 * A lost stream's sink that took everything written stood still since:
+	 * its anchors move to now before more is written, so that it does not
+	 * take the new frames at once (another thread holding the stream does
+	 * it later).
+	 */
+	lost = __atomic_load_n(&stream->lost, __ATOMIC_ACQUIRE);
 	consumed = kl_audio_stream_consumed(stream);
+	if (lost && consumed == stream->written) {
+		status = pthread_mutex_trylock(&stream->lock);
+		if (status == 0) {
+			audio_sink_anchor(stream, stream->running);
+			pthread_mutex_unlock(&stream->lock);
+		}
+	}
+
+	/* The room: the ring less what is written and not consumed. */
 	held = stream->written - consumed;
 	room = 0U;
 	if (held < stream->capacity)
@@ -436,10 +463,12 @@ kl_audio_stream_position(
 		audio_ring_played(stream, &played, &when);
 	}
 
-	/* Never behind what a flush dropped (the device side reckons the position only while it plays). */
+	/* Never behind what a flush dropped (the device side reckons the position only while it plays); the floor is now's. */
 	floor = __atomic_load_n(&stream->flush_floor, __ATOMIC_ACQUIRE);
-	if (played < floor)
+	if (played < floor) {
 		played = floor;
+		when = audio_now_ns();
+	}
 
 	/* The time, when asked for. */
 	if (time_ns != NULL)
@@ -642,13 +671,7 @@ audio_control(
 
 	/* A lost stream: the sink takes the control. */
 	if (stream->lost) {
-		if (starts)
-			stream->running = 1U;
-		if (stops)
-			stream->running = 0U;
-		audio_sink_anchor(stream, stream->running);
-		if (opcode == KL_AUDIO_STREAM_DRAIN)
-			stream->events |= KL_AUDIO_EVENT_DRAINED;
+		audio_sink_control(stream, opcode, starts, stops);
 		pthread_mutex_unlock(&stream->lock);
 		return EPIPE;
 	}
@@ -661,23 +684,43 @@ audio_control(
 	if (error == 0)
 		error = audio_errno(stream->answer_error);
 
+	/*
+	 * No answer in time: the stream's state is not known any more, so it is
+	 * given up -- destroyed, its backend side with it -- and the sink takes
+	 * this control and the rest (a late answer would otherwise leave the
+	 * compositor and the stream apart).
+	 */
+	if (error == ETIMEDOUT) {
+		(void)wl_proxy_marshal_flags(stream->stream, KL_AUDIO_STREAM_DESTROY, NULL, KL_AUDIO_VERSION, WL_MARSHAL_FLAG_DESTROY);
+		stream->stream = NULL;
+		(void)wl_display_flush(stream->display);
+		audio_lose(stream);
+		error = EPIPE;
+	}
+
 	/* The service went meanwhile: the sink takes the control. */
 	if (error == EPIPE) {
 		if (!stream->lost)
 			audio_lose(stream);
-		if (starts)
-			stream->running = 1U;
-		if (stops)
-			stream->running = 0U;
-		audio_sink_anchor(stream, stream->running);
+		audio_sink_control(stream, opcode, starts, stops);
 	}
 
-	/* A success: the running, and after a flush the floor of the position. */
+	/* A success: the running and draining as the stream's state moved (the design's section 3), and after a flush the floor of the position. */
 	if (error == 0) {
+		if (opcode == KL_AUDIO_STREAM_FLUSH && stream->draining) {
+			stream->running = 0U;
+			stream->draining = 0U;
+		}
+
+		/* start and drain run the stream, stop stops it; either ends a drain, and a drain begins one. */
 		if (starts)
 			stream->running = 1U;
 		if (stops)
 			stream->running = 0U;
+		if (starts || stops)
+			stream->draining = 0U;
+		if (opcode == KL_AUDIO_STREAM_DRAIN)
+			stream->draining = 1U;
 		if (opcode == KL_AUDIO_STREAM_FLUSH) {
 			consumed = audio_ring_load(stream, KL_AUDIO_RING_READ_POSITION);
 			__atomic_store_n(&stream->flush_floor, consumed, __ATOMIC_RELEASE);
@@ -692,6 +735,46 @@ audio_control(
 
 	/* Succeeded: the control was carried out. */
 	return 0;
+}
+
+/*
+ * Carries out a control on a lost stream's sink; the lock is held.  A
+ * flush takes what is written as consumed and heard; a drain ends at once
+ * (the sink has nothing to play out).
+ */
+static void
+audio_sink_control(
+	struct kl_audio_stream *stream,
+	uint32_t opcode,
+	unsigned starts,
+	unsigned stops)
+{
+	uint64_t written;
+
+	/* The running from now. */
+	if (starts)
+		stream->running = 1U;
+	if (stops)
+		stream->running = 0U;
+	stream->draining = 0U;
+
+	/* A drain: told as done; the sink stands. */
+	if (opcode == KL_AUDIO_STREAM_DRAIN) {
+		stream->running = 0U;
+		stream->events |= KL_AUDIO_EVENT_DRAINED;
+	}
+
+	/* The anchors from now (a stream not made yet has no sink). */
+	if (stream->ring == NULL)
+		return;
+	audio_sink_anchor(stream, stream->running);
+
+	/* A flush: what is written is taken at once. */
+	if (opcode == KL_AUDIO_STREAM_FLUSH) {
+		written = __atomic_load_n(&stream->written, __ATOMIC_ACQUIRE);
+		audio_sink_set(stream, written, written);
+		__atomic_store_n(&stream->flush_floor, written, __ATOMIC_RELEASE);
+	}
 }
 
 /* Reads and dispatches until done says so, for at most AUDIO_WAIT_MS; the lock is held. Returns 0, ETIMEDOUT or EPIPE. */
@@ -797,8 +880,9 @@ audio_lose(
 	if (stream->lost)
 		return;
 
-	/* The sink starts where the ring is, running as the stream was. */
-	audio_sink_anchor(stream, stream->running);
+	/* The sink starts where the ring is, running as the stream was (a stream not made yet has no ring and no sink). */
+	if (stream->ring != NULL)
+		audio_sink_anchor(stream, stream->running);
 	stream->events |= KL_AUDIO_EVENT_LOST;
 
 	/*
@@ -817,7 +901,6 @@ audio_sink_anchor(
 	uint64_t consumed;
 	uint64_t played;
 	int64_t when;
-	uint32_t sequence;
 	unsigned lost;
 
 	/* The positions now: the sink's own, or the ring's when the stream is just lost. */
@@ -829,6 +912,20 @@ audio_sink_anchor(
 		audio_ring_played(stream, &played, &when);
 	}
 
+	/* The running from now, then the anchors at the positions now. */
+	__atomic_store_n(&stream->sink_running, running, __ATOMIC_RELAXED);
+	audio_sink_set(stream, consumed, played);
+}
+
+/* Sets the sink's anchors to positions at the time now; the lock is held. */
+static void
+audio_sink_set(
+	struct kl_audio_stream *stream,
+	uint64_t consumed,
+	uint64_t played)
+{
+	uint32_t sequence;
+
 	/* Written as one: the sequence is odd meanwhile. */
 	sequence = stream->sink_sequence;
 	__atomic_store_n(&stream->sink_sequence, sequence + 1U, __ATOMIC_RELAXED);
@@ -836,7 +933,6 @@ audio_sink_anchor(
 	__atomic_store_n(&stream->sink_consumed, consumed, __ATOMIC_RELAXED);
 	__atomic_store_n(&stream->sink_played, played, __ATOMIC_RELAXED);
 	__atomic_store_n(&stream->sink_ns, audio_now_ns(), __ATOMIC_RELAXED);
-	__atomic_store_n(&stream->sink_running, running, __ATOMIC_RELAXED);
 	__atomic_store_n(&stream->sink_sequence, sequence + 2U, __ATOMIC_RELEASE);
 }
 
@@ -918,20 +1014,23 @@ audio_ring_played(
 	const int64_t *when;
 	uint32_t before;
 	uint32_t after;
+	unsigned tries;
 
 	/* The pair and its sequence in the ring's page. */
 	sequence = (const uint32_t *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_SEQUENCE);
 	position = (const uint64_t *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_POSITION);
 	when = (const int64_t *)(const void *)(stream->ring + KL_AUDIO_RING_PLAYED_TIME);
 
-	/* Read again until the server was not in the middle of writing it. */
+	/* Read again until the server was not in the middle of writing it (a server that died there leaves it odd: the last values read stand). */
+	tries = 0U;
 	do {
 		before = __atomic_load_n(sequence, __ATOMIC_ACQUIRE);
 		*played = __atomic_load_n(position, __ATOMIC_RELAXED);
 		*time_ns = __atomic_load_n(when, __ATOMIC_RELAXED);
 		__atomic_thread_fence(__ATOMIC_ACQUIRE);
 		after = __atomic_load_n(sequence, __ATOMIC_RELAXED);
-	} while ((before & 1U) != 0U || before != after);
+		tries++;
+	} while (((before & 1U) != 0U || before != after) && tries < AUDIO_RETRIES);
 }
 
 /* Gives the monotonic clock in nanoseconds. */
@@ -1146,6 +1245,7 @@ audio_on_drained(
 	(void)request;
 	stream = data;
 	stream->running = 0U;
+	stream->draining = 0U;
 	stream->events |= KL_AUDIO_EVENT_DRAINED;
 }
 

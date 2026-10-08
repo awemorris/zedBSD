@@ -22,11 +22,11 @@
 #include <pthread.h>
 
 /*
- * The player: the thread, the sound (audiod's stream), and under the lock
+ * The player: the thread, the sound (libkeiland's stream), and under the lock
  * the state (MU_*), whether the song was played to its end (taken by
  * mu_player_state) and how far the end's draining went (0 not begun, 1
  * the decoder drained, 2 told), the song's length (seconds), the
- * position's anchor (the time at audiod's read position), a seek asked
+ * position's anchor (the time at the stream's position heard), a seek asked
  * for, the end of the thread, and why the last song could not be played
  * (VP_CODEC_*, 0 for another reason or none).
  */

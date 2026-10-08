@@ -11,14 +11,15 @@
  * the decoding is an add-in (codec.c, p004): FFmpeg's libavcodec, libavutil
  * and libswscale, when the system has them, opened with dlopen and called
  * through dlsym without FFmpeg's headers.  Without them the player says
- * that playing needs libavcodec.  The sound goes to audiod (audio.c); the
- * window, its menu and the controls are libkeiland's.
+ * that playing needs libavcodec.  The sound goes to libkeiland's sound
+ * stream (audio.c, WS191); the window, its menu and the controls are
+ * libkeiland's.
  *
  * Two threads: the window's (main.c), which draws the picture whose time
  * has come and takes the input, and the media thread (media.c), which reads
  * and decodes ahead, keeps a few pictures and writes the sound.  The clock
- * is the sound's (audiod's read position) when there is sound, otherwise
- * the monotonic clock.
+ * is the sound's (the position the stream has played) when there is sound,
+ * otherwise the monotonic clock.
  */
 
 #ifndef VIDEOPLAYER_VIDEOPLAYER_H
@@ -72,27 +73,21 @@ struct vp_bitstream {
 #define VP_CODEC_VERSION	2	/* a version of libavcodec the add-in does not know */
 #define VP_CODEC_FORMAT		3	/* the file's codec has no decoder */
 
+struct kl_audio_stream;
+
 /*
- * A connection to audiod and one playback stream (audio.c): the socket,
- * the stream's shared memory (its header and ring), the format, and the
- * serial of the next request.  The lock keeps the requests of the two
- * threads apart.
+ * The player's playback stream (audio.c): libkeiland's sound stream
+ * (kl_audio_stream_*, WS191), its format, and whether it was made and
+ * runs.  created and rate are read by the players' clocks; running is the
+ * state the last start or stop left.
  */
 struct vp_audio {
-	int socket;
-	pthread_mutex_t lock;
-	uint32_t serial;
-	void *shm;
-	size_t shm_bytes;
+	struct kl_audio_stream *stream;
 	uint32_t rate;
 	uint32_t channels;
 	uint32_t capacity;
 	int created;
 	int running;
-
-	/* What audiod sent and is not read yet (a stream socket of whole messages). */
-	unsigned char input[256];
-	size_t input_used;
 };
 
 /*
@@ -130,7 +125,7 @@ struct vp_media {
 	unsigned picture_first;
 	unsigned picture_count;
 
-	/* The clock: the time at an anchor, and the anchor (audiod's read position, or the monotonic time). */
+	/* The clock: the time at an anchor, and the anchor (the stream's position heard, or the monotonic time). */
 	double clock_time;
 	uint64_t clock_frames;
 	uint64_t clock_us;
@@ -149,6 +144,8 @@ int vp_audio_stop(struct vp_audio *audio);
 int vp_audio_flush(struct vp_audio *audio);
 uint64_t vp_audio_read_position(const struct vp_audio *audio);
 uint64_t vp_audio_write_position(const struct vp_audio *audio);
+uint64_t vp_audio_clock_position(const struct vp_audio *audio);
+void vp_audio_renew(struct vp_audio *audio);
 size_t vp_audio_write(struct vp_audio *audio, const int16_t *samples, size_t frames);
 
 /* The media (media.c). */

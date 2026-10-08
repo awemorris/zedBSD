@@ -32,7 +32,7 @@
  * configuration travels in the stream (bitstream.c).  Pictures keep their
  * order of presentation by the times of the packets sent (the smallest
  * time waiting goes with the next picture), so no time field of AVFrame is
- * read.  The sound is turned into 16-bit stereo at audiod's rate here.
+ * read.  The sound is turned into 16-bit stereo at the stream's rate here.
  */
 
 #include "videoplayer.h"

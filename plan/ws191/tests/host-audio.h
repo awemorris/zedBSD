@@ -29,6 +29,8 @@ struct host_audio_world {
 	unsigned underrun;		/* a count every stream reports at the next pass */
 	unsigned drained;		/* every draining stream completes at the next pass */
 	unsigned lose;			/* every stream is lost at the next pass */
+	unsigned close_on_create;	/* the next create_stream's connection is closed (the compositor went) */
+	unsigned bad_version;		/* the next ring says another version */
 	unsigned stop;
 };
 

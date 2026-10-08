@@ -120,8 +120,14 @@ def launch(seed=None):
 	else:
 		drives += ['-drive', f'file={GUEST_IMAGE},format=qcow2,if=virtio',
 			'-drive', f'file={Path(seed).resolve()},format=raw,media=cdrom,readonly=on']
+	# A sound device only for the sound tests (WS191 p004): GUEST_AUDIO_WAV names the WAV the guest's playback goes to.
+	sound = []
+	wav = os.environ.get('GUEST_AUDIO_WAV')
+	if wav:
+		sound = ['-audiodev', f'wav,id=snd0,path={Path(wav).resolve()},out.frequency=48000,out.channels=2,out.format=s16',
+			'-device', 'intel-hda', '-device', 'hda-duplex,audiodev=snd0']
 	run(['qemu-system-x86_64', '-machine', 'q35', *accelerator(), '-m', MEMORY, '-smp', CPUS,
-		*drives, '-device', 'virtio-vga,id=video0', '-device', 'qemu-xhci,id=xhci',
+		*drives, *sound, '-device', 'virtio-vga,id=video0', '-device', 'qemu-xhci,id=xhci',
 		'-device', 'usb-tablet,bus=xhci.0', '-device', 'usb-kbd,bus=xhci.0',
 		'-netdev', f'user,id=n0,hostfwd=tcp:127.0.0.1:{PORT}-:22', '-device', 'virtio-net-pci,netdev=n0',
 		'-display', 'none', '-serial', 'null', '-monitor', 'none',

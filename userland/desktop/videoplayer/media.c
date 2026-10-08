@@ -10,7 +10,7 @@
  * the decoding add-in (codec.c, p004) decodes its first video track and its
  * first audio track it has a decoder for.  The pictures wait in a small
  * ring for the window to take them at their time; the sound is converted
- * to 16-bit stereo at audiod's rate and written into the stream's ring,
+ * to 16-bit stereo at the stream's rate and written into the stream's ring,
  * which paces the reading.  A seek drops what is decoded and queued, and
  * starts the clock again at the time sought.
  */
@@ -89,8 +89,10 @@ vp_media_open(
 	int64_t length_us;
 	int error;
 
-	/* What was open goes. */
+	/* What was open goes; the sound is opened again when its service went or came (WS191). */
 	vp_media_close(media);
+	if (media->audio != NULL)
+		vp_audio_renew(media->audio);
 
 	/* The reader, opened here so that a file that cannot be played is told at once. */
 	reader = calloc(1, sizeof(*reader));
@@ -120,7 +122,7 @@ vp_media_open(
 	media->quit = 0;
 	media->seek_wanted = 0;
 	media->clock_time = 0.0;
-	media->clock_frames = vp_audio_write_position(media->audio);
+	media->clock_frames = vp_audio_clock_position(media->audio);
 	media->clock_us = media_now_us();
 	(void)pthread_mutex_unlock(&media->lock);
 
@@ -190,7 +192,7 @@ vp_media_play(
 	/* The clock goes on from where it stood. */
 	(void)pthread_mutex_lock(&media->lock);
 	media->clock_time = vp_media_clock(media);
-	media->clock_frames = vp_audio_read_position(media->audio);
+	media->clock_frames = vp_audio_clock_position(media->audio);
 	media->clock_us = media_now_us();
 	media->state = VP_PLAYING;
 	(void)pthread_cond_broadcast(&media->wake);
@@ -273,7 +275,7 @@ vp_media_clock(
 
 	/* The sound read since the anchor. */
 	if (media->has_audio && media->audio != NULL && media->audio->created) {
-		frames = vp_audio_read_position(media->audio);
+		frames = vp_audio_clock_position(media->audio);
 		if (frames < media->clock_frames)
 			return media->clock_time;
 		return media->clock_time + (double)(frames - media->clock_frames) / (double)media->audio->rate;
@@ -409,7 +411,7 @@ media_reader_open(
 		return ENOTSUP;
 	}
 
-	/* The sound, when there is a track it decodes and audiod plays. */
+	/* The sound, when there is a track it decodes and a stream plays it. */
 	if (reader->media->audio != NULL && reader->media->audio->created) {
 		status = media_decoder(reader, MF_TRACK_AUDIO, &reader->sound, &reader->sound_track);
 		if (status != 0)
@@ -670,7 +672,7 @@ media_seek(
 	(void)pthread_mutex_lock(&media->lock);
 	media_drop_pictures(media);
 	media->clock_time = seconds;
-	media->clock_frames = vp_audio_write_position(media->audio);
+	media->clock_frames = vp_audio_clock_position(media->audio);
 	media->clock_us = media_now_us();
 	media->eof = 0;
 	media->seek_wanted = 0;

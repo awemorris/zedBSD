@@ -171,11 +171,14 @@ kl_backend_audio_stream_open(const struct kl_backend_audio_stream_format *format
 	struct kl_backend_audio_stream *stream;
 	unsigned frame_bytes;
 	unsigned fail;
+	unsigned bad;
 
 	pthread_mutex_lock(&host_audio.lock);
 	host_audio.opens++;
 	fail = host_audio.fail_next_open;
 	host_audio.fail_next_open = 0U;
+	bad = host_audio.bad_version;
+	host_audio.bad_version = 0U;
 	pthread_mutex_unlock(&host_audio.lock);
 
 	stream = calloc(1, sizeof(*stream));
@@ -198,7 +201,7 @@ kl_backend_audio_stream_open(const struct kl_backend_audio_stream_format *format
 			return NULL;
 		}
 		stream->ring = mmap(NULL, stream->bytes, PROT_READ | PROT_WRITE, MAP_SHARED, stream->fd, 0);
-		stream->ring->version = KL_BACKEND_AUDIO_RING_VERSION;
+		stream->ring->version = bad ? KL_BACKEND_AUDIO_RING_VERSION + 1U : KL_BACKEND_AUDIO_RING_VERSION;
 		stream->ring->format = format->format;
 		stream->ring->channels = format->channels;
 		stream->ring->rate = format->rate;
@@ -443,6 +446,7 @@ serve_message(struct server_client *client, uint32_t id, uint32_t opcode, const 
 	uint32_t word;
 	uint32_t length;
 	size_t offset;
+	int closing;
 	int error;
 
 	/* wl_display: sync (done, then delete_id), get_registry (kl_audio_v1 announced). */
@@ -485,6 +489,17 @@ serve_message(struct server_client *client, uint32_t id, uint32_t opcode, const 
 	object = kwl_find(&client->client, id);
 	if (object == NULL)
 		return;
+
+	/* The compositor going before ready, on command: the connection ends. */
+	pthread_mutex_lock(&host_audio.lock);
+	closing = host_audio.close_on_create && object->kind == KWL_AUDIO && opcode == KL_AUDIO_CREATE_STREAM;
+	if (closing)
+		host_audio.close_on_create = 0U;
+	pthread_mutex_unlock(&host_audio.lock);
+	if (closing) {
+		shutdown(client->client.fd, SHUT_RDWR);
+		return;
+	}
 	error = kwl_audio_request(object, opcode, bytes, size);
 	if (error != 0) {
 		printf("FAIL serve: object %u opcode %u error %d\n", id, opcode, error);
