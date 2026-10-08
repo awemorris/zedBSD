@@ -134,7 +134,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-264](bugs/BUG-264.md) | login の後に現れた入力の device を compositor が使うまで約 2 秒遅れる（当初の「開けない」は誤り: sessiond は毎秒与え直す） | resolved（QEMU） | P2 ws143-p005 の Q23 2026-10-08 | P2 a6988363c、T1-417（試験の判定の直しは Q1） |
 | [BUG-265](bugs/BUG-265.md) | 浮いた titlebar でダブルタップからドラッグすると最大化（dock）される。2 回目を離した時に判定する | reproduced（実機） / scheduled | 2026-10-08 ユーザーの UAT | P1（ws189-p004 の前） |
 | [BUG-266](bugs/BUG-266.md) | 拡張で eDP を off にすると Wayland の session が落ちる（DP-alt の TC への 1 出力の付け替えが WARN_ON(legacy mode) で失敗、compositor は DEVICE_LOST で終わる） | resolved（2026-10-08 夕 ユーザーの UAT、P2 の直し） | 2026-10-08 ユーザーの UAT | P2（最優先） |
-| [BUG-268](bugs/BUG-268.md) | eDP を off にして USB-C の DP だけの時、DP を抜くと eDP が戻るまで約 10 秒 | reproduced（実機） / scheduled | 2026-10-08 ユーザーの UAT | P2 |
+| [BUG-268](bugs/BUG-268.md) | eDP を off にして USB-C の DP だけの時、DP を抜くと eDP が戻るまで約 10 秒 | resolved（2026-10-08 夕 ユーザーの UAT） | 2026-10-08 ユーザーの UAT | P2 |
 | [BUG-267](bugs/BUG-267.md) | USB の外付け touchscreen で multitouch が効かない（interface 1 が attach-failed、contact=0 だけ）、触ると cursor が飛ぶ → 10 点の multitouch、touch で cursor を隠す | reproduced（実機） / scheduled（2026-10-08 夜 P1 修正: Contact Identifier の宣言の範囲を見ない・interface 1 の軸の重複の application を外す、host 試験 PASS、5330 の確認待ち） | 2026-10-08 ユーザーの UAT | P1 |
 | [BUG-269](bugs/BUG-269.md) | 5330 で ESP（FAT）に vmunix を cp・sync・umount すると sshd が応答しなくなる | reproduced（実機） / tracking | 2026-10-08 Q1 | 未割当 |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
