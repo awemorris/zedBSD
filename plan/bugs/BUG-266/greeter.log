@@ -1,0 +1,263 @@
+KWL LANGUAGE language=en from=system error=0
+KL EVENTS subscribed classes=0x2f
+KWL POWER source=ac percent=100 charging=0
+KWL DISPLAY device=zedBSD i915 (Gen12 Xe) width=1920 height=1080 refresh_mhz=60011
+KWL STARTUP step=vulkan-device ms=7
+KWL STARTUP step=vulkan-objects-arrow ms=1
+KWL STARTUP step=wallpaper-picture ms=10
+KWL STARTUP step=wallpaper ms=204
+KWL STARTUP step=glyphs-text ms=20
+KWL STARTUP step=glyphs-icons ms=8
+KWL STARTUP step=glyphs-mark ms=20
+KWL GLASS atlas cache-top=344 cells=294 faces=1
+KWL STARTUP step=glyphs ms=51
+KWL STARTUP step=tiles ms=84
+KWL GLASS ready text=1
+KWL STARTUP step=compose ms=349 at_ms=2614740
+KWL INPUT device=/dev/input/event0 kind=pointer abs=0
+KWL INPUT device=/dev/input/event1 kind=keyboard abs=0
+KWL INPUT device=/dev/input/event2 kind=touchpad abs=0 resolution=12,12 size=1336,760
+KWL STARTUP step=input ms=6 at_ms=2614746
+KWL KEYMAP format=xkb_v1 errno=0
+KWL STARTUP step=keymap ms=0 at_ms=2614746
+KWL GREETER open users=1 selected=kei
+KWL READY socket=/tmp/wayland-0 width=1920 height=1080 timeout_ms=18446744073709551615 pid=619 role=greeter
+KWL STARTUP step=output-display ms=1
+KWL STARTUP step=output-pipelines ms=7
+KWL HANDOFF go=1 waited_ms=0 at_ms=2614765
+KWL STARTUP step=output-swapchain ms=11
+KWL STARTUP step=output-targets ms=0
+KWL OUTPUT open width=1920 height=1080 images=3 format=37
+KWL MODE window switch_ms=35 at_ms=2614792
+KWL GLASS large pixels=172
+KWL GLASS glyph codepoint=U+2192 size=4 face=0 cell=0
+KWL MEDIA volumes=0 fresh=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT displays count=1
+KWL GREETER styles=1
+KWL GREETER link x=794 y=713 width=332 height=28
+KWL PERF 5006ms: passes=495 timeouts=495 | poll 99.3% work 2.0%
+KWL PERF compose frames=3 draw_ms=16.07 (acquire 0.05 submit+present 12.65) frame_ms=18.54
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=499 timeouts=499 | poll 99.3% work 0.6%
+KWL PERF compose frames=1 draw_ms=17.06 (acquire 0.03 submit+present 16.77) frame_ms=19.20
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.5% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.5% work 0.4%
+KWL OUTPUT closed
+KWL EXIT frames=4 error=0 cleanup_failed=0 pid=619 input_events=0 seat_events=0 at_ms=2666812
+KWL LANGUAGE language=en from=system error=0
+KL EVENTS subscribed classes=0x2f
+KWL POWER source=ac percent=100 charging=0
+KWL DISPLAY device=zedBSD i915 (Gen12 Xe) width=1920 height=1080 refresh_mhz=60011
+KWL STARTUP step=vulkan-device ms=3
+KWL STARTUP step=vulkan-objects-arrow ms=1
+KWL STARTUP step=wallpaper-picture ms=20
+KWL STARTUP step=wallpaper ms=375
+KWL STARTUP step=glyphs-text ms=30
+KWL STARTUP step=glyphs-icons ms=10
+KWL STARTUP step=glyphs-mark ms=33
+KWL GLASS atlas cache-top=344 cells=294 faces=1
+KWL STARTUP step=glyphs ms=74
+KWL STARTUP step=tiles ms=137
+KWL GLASS ready text=1
+KWL STARTUP step=compose ms=594 at_ms=134798
+KWL INPUT device=/dev/input/event0 kind=pointer abs=0
+KWL INPUT device=/dev/input/event1 kind=keyboard abs=0
+KWL INPUT device=/dev/input/event2 kind=touchpad abs=0 resolution=12,12 size=1336,760
+KWL TOUCH added device=/dev/input/event3 x=0..10368 y=0..6912
+KWL INPUT device=/dev/input/event3 kind=touch abs=1
+KWL STARTUP step=input ms=2 at_ms=134800
+KWL KEYMAP format=xkb_v1 errno=0
+KWL STARTUP step=keymap ms=0 at_ms=134800
+KWL GREETER open users=1 selected=kei
+KWL READY socket=/tmp/wayland-0 width=1920 height=1080 timeout_ms=18446744073709551615 pid=79 role=greeter
+KWL STARTUP step=output-display ms=0
+KWL STARTUP step=output-pipelines ms=6
+KWL HANDOFF go=1 waited_ms=0 at_ms=134817
+KWL STARTUP step=output-swapchain ms=13
+KWL STARTUP step=output-targets ms=0
+KWL OUTPUT open width=1920 height=1080 images=3 format=37
+KWL MODE window switch_ms=1052 at_ms=135863
+KWL GLASS large pixels=172
+KWL GLASS glyph codepoint=U+2192 size=4 face=0 cell=0
+KWL MEDIA volumes=0 fresh=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT display index=1 name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 internal=0 shown=0 width=1920 height=1280
+KWL OUTPUT displays count=2
+KWL OUTPUT head open name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 width=1920 height=1280 refresh_mhz=59999 x=1920 y=0 images=3
+KWL GREETER styles=1
+KWL GREETER link x=794 y=713 width=332 height=28
+KWL PERF 5007ms: passes=174 timeouts=170 | poll 42.4% work 85.2%
+KWL PERF compose frames=5 draw_ms=424.13 (acquire 399.70 submit+present 22.19) frame_ms=426.90
+KWL GREETER auth user=kei style=1
+KWL GREETER answer=OK reason=
+KWL GREETER starting
+KWL GREETER closed at_ms=141188
+KWL OUTPUT head closed name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2
+KWL OUTPUT closed
+KWL HANDOFF released at_ms=141222
+KWL TOUCH removed device=/dev/input/event3
+KWL EXIT frames=8 error=0 cleanup_failed=0 pid=79 input_events=8 seat_events=0 at_ms=141244
+KWL LANGUAGE language=en from=system error=0
+KL EVENTS subscribed classes=0x2f
+KWL POWER source=ac percent=100 charging=0
+KWL DISPLAY device=zedBSD i915 (Gen12 Xe) width=1920 height=1080 refresh_mhz=60011
+KWL STARTUP step=vulkan-device ms=4
+KWL STARTUP step=vulkan-objects-arrow ms=1
+KWL STARTUP step=wallpaper-picture ms=19
+KWL STARTUP step=wallpaper ms=359
+KWL STARTUP step=glyphs-text ms=31
+KWL STARTUP step=glyphs-icons ms=10
+KWL STARTUP step=glyphs-mark ms=31
+KWL GLASS atlas cache-top=344 cells=294 faces=1
+KWL STARTUP step=glyphs ms=73
+KWL STARTUP step=tiles ms=127
+KWL GLASS ready text=1
+KWL STARTUP step=compose ms=566 at_ms=145704
+KWL INPUT device=/dev/input/event0 kind=pointer abs=0
+KWL INPUT device=/dev/input/event1 kind=keyboard abs=0
+KWL INPUT device=/dev/input/event2 kind=touchpad abs=0 resolution=12,12 size=1336,760
+KWL TOUCH added device=/dev/input/event3 x=0..10368 y=0..6912
+KWL INPUT device=/dev/input/event3 kind=touch abs=1
+KWL STARTUP step=input ms=1 at_ms=145705
+KWL KEYMAP format=xkb_v1 errno=0
+KWL STARTUP step=keymap ms=0 at_ms=145705
+KWL GREETER open users=1 selected=kei
+KWL READY socket=/tmp/wayland-0 width=1920 height=1080 timeout_ms=18446744073709551615 pid=99 role=greeter
+KWL STARTUP step=output-display ms=0
+KWL STARTUP step=output-pipelines ms=8
+KWL HANDOFF go=1 waited_ms=0 at_ms=145724
+KWL STARTUP step=output-swapchain ms=10
+KWL STARTUP step=output-targets ms=0
+KWL OUTPUT open width=1920 height=1080 images=3 format=37
+KWL MODE window switch_ms=18 at_ms=145734
+KWL GLASS large pixels=172
+KWL GLASS glyph codepoint=U+2192 size=4 face=0 cell=0
+KWL MEDIA volumes=0 fresh=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT display index=1 name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 internal=0 shown=0 width=1920 height=1280
+KWL OUTPUT displays count=2
+KWL OUTPUT head open name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 width=1920 height=1280 refresh_mhz=59999 x=1920 y=0 images=3
+KWL GREETER styles=1
+KWL GREETER link x=794 y=713 width=332 height=28
+KWL EVENT input changed
+KWL INPUT_CLOSED device=/dev/input/event3 errno=5
+KWL TOUCH removed device=/dev/input/event3
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT displays count=1
+KWL OUTPUT head closed name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2
+KWL GREETER auth user=kei style=1
+KWL GREETER answer=OK reason=
+KWL GREETER starting
+KWL PERF 5007ms: passes=272 timeouts=263 | poll 45.7% work 65.7%
+KWL PERF compose frames=9 draw_ms=237.43 (acquire 153.96 submit+present 82.72) frame_ms=239.45
+KWL GREETER closed at_ms=150952
+KWL OUTPUT closed
+KWL HANDOFF released at_ms=150967
+KWL EXIT frames=9 error=0 cleanup_failed=0 pid=99 input_events=8 seat_events=0 at_ms=150993
+KWL LANGUAGE language=en from=system error=0
+KL EVENTS subscribed classes=0x2f
+KWL POWER source=ac percent=100 charging=0
+KWL DISPLAY device=zedBSD i915 (Gen12 Xe) width=1920 height=1080 refresh_mhz=60011
+KWL STARTUP step=vulkan-device ms=4
+KWL STARTUP step=vulkan-objects-arrow ms=1
+KWL STARTUP step=wallpaper-picture ms=18
+KWL STARTUP step=wallpaper ms=260
+KWL STARTUP step=glyphs-text ms=27
+KWL STARTUP step=glyphs-icons ms=10
+KWL STARTUP step=glyphs-mark ms=30
+KWL GLASS atlas cache-top=344 cells=294 faces=1
+KWL STARTUP step=glyphs ms=68
+KWL STARTUP step=tiles ms=120
+KWL GLASS ready text=1
+KWL STARTUP step=compose ms=455 at_ms=209897
+KWL INPUT device=/dev/input/event0 kind=pointer abs=0
+KWL INPUT device=/dev/input/event1 kind=keyboard abs=0
+KWL INPUT device=/dev/input/event2 kind=touchpad abs=0 resolution=12,12 size=1336,760
+KWL TOUCH added device=/dev/input/event3 x=0..10368 y=0..6912
+KWL INPUT device=/dev/input/event3 kind=touch abs=1
+KWL STARTUP step=input ms=2 at_ms=209899
+KWL KEYMAP format=xkb_v1 errno=0
+KWL STARTUP step=keymap ms=0 at_ms=209899
+KWL GREETER open users=1 selected=kei
+KWL READY socket=/tmp/wayland-0 width=1920 height=1080 timeout_ms=18446744073709551615 pid=125 role=greeter
+KWL STARTUP step=output-display ms=0
+KWL STARTUP step=output-pipelines ms=7
+KWL HANDOFF go=1 waited_ms=0 at_ms=209916
+KWL STARTUP step=output-swapchain ms=12
+KWL STARTUP step=output-targets ms=0
+KWL OUTPUT open width=1920 height=1080 images=3 format=37
+KWL MODE window switch_ms=19 at_ms=209928
+KWL GLASS large pixels=172
+KWL GLASS glyph codepoint=U+2192 size=4 face=0 cell=0
+KWL MEDIA volumes=0 fresh=0
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT display index=1 name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 internal=0 shown=0 width=1920 height=1280
+KWL OUTPUT displays count=2
+KWL OUTPUT head open name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2 width=1920 height=1280 refresh_mhz=59999 x=1920 y=0 images=3
+KWL GREETER styles=1
+KWL GREETER link x=794 y=713 width=332 height=28
+KWL EVENT input changed
+KWL INPUT_CLOSED device=/dev/input/event3 errno=5
+KWL TOUCH removed device=/dev/input/event3
+KWL OUTPUT display index=0 name=zedbsd-port-v1:pci:0000:00:02.0:edp:A internal=1 shown=1 width=1920 height=1080
+KWL OUTPUT displays count=1
+KWL OUTPUT head closed name=zedbsd-port-v1:pci:0000:00:02.0:dp:TC2
+KWL PERF 5006ms: passes=264 timeouts=263 | poll 52.4% work 48.7%
+KWL PERF compose frames=4 draw_ms=421.82 (acquire 401.37 submit+present 18.31) frame_ms=424.07
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5003ms: passes=499 timeouts=499 | poll 99.4% work 0.5%
+KWL PERF compose frames=1 draw_ms=19.55 (acquire 0.02 submit+present 19.33) frame_ms=22.07
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.5% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5001ms: passes=499 timeouts=499 | poll 99.2% work 0.7%
+KWL PERF compose frames=1 draw_ms=19.12 (acquire 0.02 submit+present 18.87) frame_ms=21.08
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.7% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5004ms: passes=499 timeouts=499 | poll 99.3% work 0.6%
+KWL PERF compose frames=1 draw_ms=19.47 (acquire 0.02 submit+present 19.23) frame_ms=22.13
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.5% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5006ms: passes=465 timeouts=465 | poll 99.7% work 0.2%
+KWL PERF 5006ms: passes=495 timeouts=495 | poll 99.6% work 0.3%
+KWL PERF 5007ms: passes=493 timeouts=493 | poll 99.6% work 0.3%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.6% work 0.4%
+KWL PERF 5004ms: passes=471 timeouts=471 | poll 99.7% work 0.2%
+KWL PERF 5010ms: passes=461 timeouts=461 | poll 99.3% work 0.6%
+KWL PERF compose frames=1 draw_ms=19.41 (acquire 0.03 submit+present 19.17) frame_ms=22.12
+KWL PERF 5007ms: passes=470 timeouts=470 | poll 99.7% work 0.2%
+KWL PERF 5008ms: passes=497 timeouts=497 | poll 99.8% work 0.1%
+KWL PERF 5001ms: passes=492 timeouts=492 | poll 99.7% work 0.2%
+KWL PERF 5000ms: passes=500 timeouts=500 | poll 99.8% work 0.1%
+KWL PERF 5002ms: passes=496 timeouts=496 | poll 99.8% work 0.1%
