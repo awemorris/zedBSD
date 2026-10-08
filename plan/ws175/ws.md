@@ -2,7 +2,7 @@
 # WS175: Notes で PDF の画像と文字を編集する
 
 Master: [master](../master.md)
-Status: incomplete（2026-10-06: p001・p003・p004・p005・p006・p007 cleared、p002（a・b）実装。p008 は画像の段 cleared、文字の段（ws079-p017 と一つ）を実装し host PASS、画面は p010。次は p010 の T1）
+Status: incomplete（2026-10-08 q910 P2 の照合: p002（走査・抽出）と p010（T1-265b で fail 0・needs-person 2）は Q1 の判定。準正常系は WS177 の案 K）（2026-10-06: p001・p003・p004・p005・p006・p007 cleared、p002（a・b）実装。p008 は画像の段 cleared、文字の段（ws079-p017 と一つ）を実装し host PASS、画面は p010。次は p010 の T1）
 Primary Milestone: MG006
 
 ## 由来

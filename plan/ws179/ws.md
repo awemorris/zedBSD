@@ -2,7 +2,7 @@
 
 # WS179: UI のアクセントカラーを選べるように
 
-Status: incomplete（2026-10-07 追加、ベータ2。p001 を P1 が実行中）
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p003 は cleared（表を直した）。WS の完了を Q1 が判定（BUG-262 は別））（2026-10-07 追加、ベータ2。p001 を P1 が実行中）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -22,6 +22,6 @@ Primary Milestone: MG006
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計（[design.md](design.md)、色の表、accent を使う所の一覧、伝え方、KL の API）と実装: libkeiland・compositor の UI・Settings（Appearance の選択）・Files、host の試験と T1 の撮影 | in-progress（P1、実装と host 試験済み、T1-335 待ち） | — |
-| [p002](phase002/phase.md) | Calendar・PDF Viewer・Phone・Mailer・Notes・Image Viewer の独自の accent を theme に従わせる（2026-10-07 Q1: p001 の直後、ベータ2 の中） | in-progress（P1、実装と host 試験済み、T1 待ち） | p001 |
-| [p003](phase003/phase.md) | 規約の全文の見直し（WS の変えた C の全部、ベータ3）、AAT のシナリオ（`tests/scenarios/desktop/appearance/`）に accent | in-progress（2026-10-08 P1 q875: AAT のシナリオと helper、QEMU は T1。規約はベータ3） | p001、p002 |
+| [p001](phase001/phase.md) | 設計（[design.md](design.md)、色の表、accent を使う所の一覧、伝え方、KL の API）と実装: libkeiland・compositor の UI・Settings（Appearance の選択）・Files、host の試験と T1 の撮影 | cleared（2026-10-07 Q1 の判定: T1-335・339（QEMU、light の 4 色と dark の 5 色の Settings・Files・検索・OSK・bar、主の button の文字、App Home の tile が変わらない、Files の d…））（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（P1、実装と host 試験済み、T1-335 待ち）） | — |
+| [p002](phase002/phase.md) | Calendar・PDF Viewer・Phone・Mailer・Notes・Image Viewer の独自の accent を theme に従わせる（2026-10-07 Q1: p001 の直後、ベータ2 の中） | cleared（2026-10-07 Q1 の判定: T1-337 の purple・yellow で Calendar・PDF Viewer・Phone・Mailer・Notes・Image Viewer・Music が accent に従う（Q1 が PNG を目視）。PDF…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（P1、実装と host 試験済み、T1 待ち）） | p001 |
+| [p003](phase003/phase.md) | 規約の全文の見直し（WS の変えた C の全部、ベータ3）、AAT のシナリオ（`tests/scenarios/desktop/appearance/`）に accent | cleared（2026-10-08 Q1 判定、T1-396。BUG-262 は別）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（2026-10-08 P1 q875: AAT のシナリオと helper、QEMU は T1。規約はベータ3）） | p001、p002 |

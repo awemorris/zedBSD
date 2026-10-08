@@ -3,7 +3,7 @@
 # WS078: Kei Operating System への名前の移行
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p004・p007・p008 は cleared（2026-10-08、表の p004 を直した）。残りは古い p001（planning、Q1 の判定）と p005（規約、ベータ3）。WS の完了を Q1 が判定）
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1
@@ -58,7 +58,7 @@ Resume point: 2026-09-28 の周期の終わり: p002・p003・p006 は cleared�
 | ws078-p002 | kernel・driver・UAPI・libc・bootloader の識別子の改名（`KERN_` 等。機械的。build の warning 0 と boot test） | cleared（2026-09-28、main。`__ZEDBSD_*`→`__KERN_*`、`__zedbsd_*`→`__kern_*`、`ZEDBSD_*`→`KERN_*`（header の guard・UAPI の古い名前・試験）、`zbl_uefi_zedbsd_config*`→`zbl_uefi_kern_config*`、`ZBL_ZEDBSD_CONFIG_*`→`ZBL_KERN_CONFIG_*`、`zedbsd_peercred`→`kern_peercred` 等。make の変数・`__ZEDBSD__`・file 名（zedbsd.cfg、bootloader/uefi/zedbsd-config.c）・toolchain の target は残す。amd64 の image と boot test PASS、pcat・rpi4 の build は未実施） | — |
 | [ws078-p003](phase003/phase.md) | 実行ファイルと source の directory の改名（userland/desktop/、`/bin/wayland` 等）と参照 | cleared（2026-09-28、6d8ca152。Venus の graphical な確認は未実施） | — |
 | ws078-p006 | データの path（/etc/keiland、/usr/share/keiland、font の keiland*.ttf、/usr/libexec/keiland-x11）、API・protocol（`keiland_`・`KEILAND_`・`keiland.h`、`zed_*_v1` → `keiland_*_v1`）の改名 | cleared（2026-09-28、main、35177e46。image の build と boot test PASS。Venus の graphical な確認は未実施） | p003 |
-| ws078-p004 | 見える文字列: boot の logo（Kei）・greeter・lock・banner・os-release 等 | incomplete（2026-09-28: boot の logo を Kei の印・語・「powered by zedBSD」に描き直した（b3f5c5f9、[kei-identity-design.md](../ws035/kei-identity-design.md) の段階 1）。graphical な起動での表示の確認は未実施。File Manager の help・terminal の About・システムバーの名前・tool の `--version` の「(Kei)」・fetch と browser の User-Agent・EGL・GLES・GLX・X server の vendor・installer の文言と SVG・service console・既定の hostname `kei` を Kei に。user の data の path（`~/.local/share/keiland`、`~/.config/keiland`、xattr `user.keiland.tags`）、menu の label、試験の process 名の pattern も（Venus: zdesktop-p062 PASS、files-p012 PASS（lean image）、システムバーに Kei）。残し: uname の sysname と version（kernel の名前）、disk の format の印（UFS・FAT）、GPT の partition 名、kernel と loader の文言、source の copyright の header。残り: 全画面の起動画面、注釈と log の名前（`zdesktop.log` 等、内部）、X11 の retro の program（zterm・zwm・zgears・zshell・Xzed）と installer（zedinst）の名前はユーザーの判断待ち） | p001 |
+| ws078-p004 | 見える文字列: boot の logo（Kei）・greeter・lock・banner・os-release 等 | cleared（2026-10-08 Q1 判定、T1-397 PASS。p007・p008（make の変数・protocol の header の改名）も cleared（T1-401・403）（2026-10-08 q910 P2 の照合。旧: incomplete（2026-09-28: boot の logo を Kei の印・語・「powered by ze…） | p001 |
 | ws078-p005 | 全文規約確認と回帰（必須の最終確認） | planning | 全 Phase |
 
 改名は作業中の agent と衝突しやすい。p002・p003 は他の agent が merge を終えた静かな時点で main か 1 つの agent が一度に行い、

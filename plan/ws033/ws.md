@@ -3,7 +3,7 @@
 # WS033: networking サービスと有線インタフェースの管理
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001 は uncleared（q598-i01 で中断、表を phase.md に合わせた）。残り: p001 の QEMU の USB の LAN の後挿し、p002 は実機、p003 は規約（ベータ3））
 Primary Milestone: MG005
 Related Milestones: MG003
 Objectives: O1, O2, O3
@@ -51,7 +51,7 @@ Resume point: [p001](phase001/phase.md)（USB の LAN の後挿し・抜去・ca
 
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | USB の LAN の後挿し・抜去・carrier の変化と `networking.wait` を QEMU で通す（L1〜L3）。見つかった不具合を直す | planned | なし（ws005-p019 と `userland/base/networkd/`・`net/` が重なるので同時に走らせない） | 2〜3h |
+| [p001](phase001/phase.md) | USB の LAN の後挿し・抜去・carrier の変化と `networking.wait` を QEMU で通す（L1〜L3）。見つかった不具合を直す | uncleared（q598-i01、2026-10-02 優先の変更で中断。phase.md に合わせた（2026-10-08 q910 P2 の照合）。旧: planned） | なし（ws005-p019 と `userland/base/networkd/`・`net/` が重なるので同時に走らせない） | 2〜3h |
 | [p003](phase003/phase.md) | WS033 で書いた source（`managed-lan.c`、`net lan`・`net startup`、init の setting の表）の全文規約の確認 | planned | p001 の修正の後（独立に先に走らせてもよいが、p001 の修正を含めて 1 回にする） | 2h |
 | [p002](phase002/phase.md) | 実機の確認 L4（ユーザーと一緒に、ws005-p023 と同じ日にまとめる） | planning | p001、ユーザーの時期 | 1h（立会い） |
 

@@ -3,7 +3,7 @@
 # WS182: 電源ボタンのメニュー（Log Out・Shut Down などを選ぶ）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001（設計、D1 はユーザーの確認）は Q1 の判定、p002 は T1-377 QEMU PASS で 5320・5330 の短押し・長押しの実機待ち）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O1

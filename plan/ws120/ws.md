@@ -3,7 +3,7 @@
 # WS120: 音楽アプリ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-07 q831 P2: p001 の決定で m4a＋libavcodec の add-in の local の player に。p008・p009 を実装）
+Status: incomplete（2026-10-08 q910 P2 の照合: p001・p008・p009 cleared。p002〜p007（2026-10-02 の WAV・FLAC・MP3・Ogg・独自 AAC の計画）は 2026-10-07 の決定（m4a＋libavcodec の add-in）で置き換わった → canceled にするかは Q1。service の連携はベータ4）（2026-10-07 q831 P2: p001 の決定で m4a＋libavcodec の add-in の local の player に。p008・p009 を実装）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)

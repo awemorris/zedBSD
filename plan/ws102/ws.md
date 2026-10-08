@@ -3,7 +3,7 @@
 # WS102: スクリーンキーボード（compositor に直接、flick と QWERTY と手書き）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: 全 Phase が cleared（p022 の表を直した）。WS の完了を Q1 が判定（ユーザーが優先を下げたまま））
 Primary Milestone: MG006
 Related Milestones: MG006
 Objectives: O2
@@ -70,7 +70,7 @@ Resume point: L1 を満たした。L2 の p006・p007・p008・p009・p015・p01
 | [ws102-p023](phase023/phase.md) | L2 | Text Editor が本当の編集の状態（選択がある・貼れる・取り消せる・やり直せる）を `kui_window_edit_state` で言う（p017 の灰色の表示を正しくする） | cleared（2026-09-30 P6: 開いた時 0x0 → 全選択 0x1 → 複写 0x3 → 打つ 0x6 → 取り消し 0xb、`edit-guest.sh` の期待値を本当の状態に更新して PASS、inset・host-core PASS） | p017 |
 | [ws102-p019](phase019/phase.md) | L3 | 色付きの絵文字 その 1（2026-09-30 ユーザー「色付きにする」）: font の選定（Noto Color Emoji の CBDT か COLRv1）と license の監査、userland/desktop/fonts への追加、libtruetype の色の glyph、libkeiui と compositor の文字の描画の fallback で色の絵文字を描く。Text Editor に貼った絵文字が色で出る | cleared（2026-09-30、QEMU と host: CBDT の Noto Color Emoji（OFL-1.1、取得と検証の package）、libtruetype の `truetype_color_glyph`、libkeiui（KUI_VERSION 9）・compositor・Text Editor の fallback で色の絵文字、C7・C9・boot PASS、rootfs +10.7 MB） | p016 の前でよい（keyboard に依らない） |
 | [ws102-p024](phase024/phase.md) | L2 | 右の列の道具の面の「履歴」の tab（p018 の `zwl_clipboard_history_*` を一覧にし、tap で貼る。2 段の操作） | cleared（2026-09-30 QEMU: 3 つの app で複写 → 履歴の 2 番目を tap で receive.txt が bravo。全手順の回帰・C9・boot はユーザーの指示のラップアップで未実施。優先を下げ、再開はユーザーが言うとき） | p016・p018 |
-| [ws102-p022](phase022/phase.md) | L3 | 色付きの絵文字 その 2: keyboard の絵文字の面（種類の tab と格子、tap で text-input の commit、text-input の無い app へは送らない） | in-progress（2026-10-05 P1 q736: 実装・host 試験（host-keyboard・host-emoji PASS）・build warning 0。T1 待ち） | p019・p016 |
+| [ws102-p022](phase022/phase.md) | L3 | 色付きの絵文字 その 2: keyboard の絵文字の面（種類の tab と格子、tap で text-input の commit、text-input の無い app へは送らない） | cleared（2026-10-05 Q1: T1-175 の FAIL（2 つ目以降の絵文字が空、glass_cache_glyph の欠陥と試験の grep）を e2e76062 で直し、T1-175b で osk-guest PASS、20 個が全部描かれることを目視）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（2026-10-05 P1 q736: 実装・host 試験（host-keyboard・host-emoji PASS）・build …） | p019・p016 |
 | [ws102-p021](phase021/phase.md) | L2 | 縁に組み込んだ見た目（design.md §2.3 の改め、2026-09-30 ユーザー）: flick の panel を右の列の全体に、QWERTY・手書きを下端の全幅に、余白・外の角丸・影をやめ内側に 1 px の区切り、縁から伸び出す動き。1280x800・1920x1080 で panel の外の辺が画面の縁と 0 px で接する（log の矩形と画面） | cleared（2026-09-30: flick は右の列の全体（1280x800 で 962,34 318×766）、QWERTY・手書きは下端の全幅（0,496 1280×304）、1920x1080 も縁に 0 px。影・外の角丸をやめ内側に 1 px の線、200 ms の伸び出し。全手順・p010・C9・boot test PASS） | p008 |
 | [ws102-p020](phase020/phase.md) | L2 | QWERTY の面の補助の key の列（Esc・Tab・Ctrl・`|`・`~`・矢印、一度だけ効く修飾） | cleared（2026-09-30: 補助の列 Esc・Tab・Ctrl・Alt・\|・~・/・-・Home・End・PgUp・PgDn、Ctrl・Alt は次の 1 key だけ。Text Editor で abc\|<tab>、Ctrl+A → z で z。全手順・p010・C9・boot test PASS） | p006 |
 | ws102-p014 | — | 全文の規約と回帰（WS の最後） | planned | 最後の段 |

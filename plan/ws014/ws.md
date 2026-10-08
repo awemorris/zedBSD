@@ -3,7 +3,7 @@
 # WS014: virtio-gpu bring-up
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p011 は cleared（表を直した）。残りは p004（最終 API と規約の全文、規約はベータ3）と古い設計の p001（planning のまま、Q1 の判定）。実装の残りは無い）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2, O4
@@ -40,7 +40,7 @@ i915実機対応、GLES2実装、デスクトップ全体の移植はこの単�
 | ws014-p009 | [GPUレビュー対応とフレームワーク共通化](https://github.com/awemorris/zedBSD/issues/396) | cleared | q312-i01、R1–R6とGPU共通の待機/期限/所有権、backend停止契約・WSI改善と受入 |
 | ws014-p010 | [GPU監督の共通化仕上げと局所隔離](https://github.com/awemorris/zedBSD/issues/397) | cleared | q313-i01、self-review D1–D4/B3–B6とVenus→framework移管、session隔離、実QEMU受入 |
 | ws014-p004 | [ws014-p004](https://github.com/awemorris/zedBSD/issues/385) | planning | p010後の最終API整理・規約全文確認 |
-| [ws014-p011](phase011/phase.md) | BUG-144: Model viewer の 8 個目の vkAllocateMemory -4 の memory の量と上限の測定（BUG-120 との関係） | in-progress（q643、P1。測定の準備済み・T1 の測定待ち、修正は user の助言の後） | — |
+| [ws014-p011](phase011/phase.md) | BUG-144: Model viewer の 8 個目の vkAllocateMemory -4 の memory の量と上限の測定（BUG-120 との関係） | cleared（Q1 判定 2026-10-03、2026-10-03 user「(A) 1 GiB に広げたことで十分として、BUG-144・124 を閉じる。」。T2-001: boot-test PASS、hostmem 1G で mview 14 個起動、256M は 4…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（q643、P1。測定の準備済み・T1 の測定待ち、修正は user の助言の後）） | — |
 
 ## 制約・再開点
 

@@ -3,7 +3,7 @@
 # WS132: /dev/system の電源管理と PnP の通知、自動 mount、Files の eject
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p002〜p005・p009 cleared。p001（設計、D1〜D3）は Q1 の判定、p008（蓋の事象）は実機（蓋の自動の切り替えはベータ3））
 Primary Milestone: MG006
 Related Milestones: MG003、MG004
 Objectives: O2, O3

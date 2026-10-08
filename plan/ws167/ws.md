@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws167 -->
 # WS167: GPU の command の protocol の独自化
 
-Status: incomplete（2026-10-07 p002 実装、T1 待ち。2026-10-05 追加、**ベータ2**（2026-10-05 ユーザー）、見積もり 2 LW。p001 の設計の第 1 版あり）
+Status: incomplete（2026-10-08 q910 P2 の照合: p002 cleared（T1-313）、p001（設計）は Q1 の判定、p003（規約）はベータ3。WS の完了を Q1 が判定）（2026-10-07 p002 実装、T1 待ち。2026-10-05 追加、**ベータ2**（2026-10-05 ユーザー）、見積もり 2 LW。p001 の設計の第 1 版あり）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
