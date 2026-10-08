@@ -71,6 +71,7 @@ static int i915_query_pool_create(struct i915_render_session *session, struct i9
 static int i915_query_pool_destroy(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_query_pool_results(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void i915_query_reply_zeros(struct i915_wire_writer *reply, const uint8_t *zeros, uint64_t bytes);
+static void i915_query_status_reset(struct i915_gfx_query_pool *pool, uint32_t first, uint32_t count);
 
 /*
  * Runs one fence command.
@@ -347,11 +348,21 @@ i915_fence_status(
  * vkQueueSubmit replies, so vkGetQueryPoolResults reads the counters on the
  * CPU.  XXX: only occlusion pools; timestamp and pipeline statistics pools
  * are refused.
+ *
+ * A video decode's result status pool (ws083-p008, a video device only)
+ * has the same layout: query q's status (a VkQueryResultStatusKHR, as a
+ * 64-bit two's complement word) at byte 16 q + 8, zero at 16 q, so the
+ * results' end less begin is the status.  The CPU writes it, not a batch:
+ * the video walk ends a query after the decode in it has run on VCS0 (the
+ * decode is synchronous), and a reset of such a pool clears it on the CPU
+ * in the order of the operations, whichever family runs it (a render
+ * batch would run after the video walk).
  * ------------------------------------------------------------------------
  */
 
-/* VK_QUERY_TYPE_OCCLUSION, and the result flags vkGetQueryPoolResults takes. */
+/* VK_QUERY_TYPE_OCCLUSION and VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR, and the result flags vkGetQueryPoolResults takes. */
 #define I915_QUERY_TYPE_OCCLUSION	0U
+#define I915_QUERY_TYPE_RESULT_STATUS	1000023000U
 #define I915_QUERY_RESULT_64		1U
 #define I915_QUERY_RESULT_AVAILABILITY	4U
 
@@ -363,14 +374,15 @@ i915_fence_status(
 #define I915_QUERY_PC_DEPTH_COUNT	(2U << 14)
 
 /*
- * One occlusion query pool.
+ * One occlusion or result status query pool.
  *
  * The object table owns it from vkCreateQueryPool to vkDestroyQueryPool.
  */
 struct i915_gfx_query_pool {
-	/* The GPU object of the counters, and how many queries it holds. */
+	/* The GPU object of the counters, how many queries it holds, and its type (I915_QUERY_TYPE_*). */
 	struct i915_gem_object *object;
 	uint32_t count;
+	uint32_t type;
 };
 
 /*
@@ -389,6 +401,7 @@ i915_query_pool_create(
 	uint32_t type;
 	uint32_t count;
 	uint64_t bytes;
+	int supported;
 	int error;
 
 	/* Decodes the type, the count and the identity. */
@@ -406,11 +419,16 @@ i915_query_pool_create(
 	if (reader->error != 0)
 		return EINVAL;
 
-	/* Only an occlusion pool of a bounded number of queries. */
+	/* Only an occlusion pool, or a result status pool on a video device, of a bounded number of queries. */
 	error = 0;
 	pool = NULL;
-	if (type != I915_QUERY_TYPE_OCCLUSION || count == 0U || count > I915_QUERY_MAX) {
-		kern_logf("i915: vk: XXX vkCreateQueryPool refused: type %u, %u queries (occlusion only)\n", type, count);
+	supported = 0;
+	if (type == I915_QUERY_TYPE_OCCLUSION)
+		supported = 1;
+	if (type == I915_QUERY_TYPE_RESULT_STATUS && session->vk->video)
+		supported = 1;
+	if (!supported || count == 0U || count > I915_QUERY_MAX) {
+		kern_logf("i915: vk: XXX vkCreateQueryPool refused: type %u, %u queries (occlusion, or result status on a video device)\n", type, count);
 		error = ENOTSUP;
 	} else {
 		pool = kern_calloc(1U, sizeof(*pool));
@@ -421,6 +439,7 @@ i915_query_pool_create(
 	/* Makes the counters' object, every query unavailable. */
 	if (pool != NULL) {
 		pool->count = count;
+		pool->type = type;
 		bytes = ((uint64_t)count * 24U + 4095U) & ~(uint64_t)4095U;
 		error = drv_i915_gfx_object_create(session, bytes, &pool->object);
 		if (error == 0) {
@@ -624,6 +643,21 @@ drv_i915_gfx_query_execute(
 	if (pool == NULL || op->u.query.first > pool->count || op->u.query.count > pool->count - op->u.query.first)
 		return EINVAL;
 
+	/*
+	 * A result status pool is reset on the CPU, in the order of the
+	 * operations (ws083-p008); its begin and end belong to a video coding
+	 * scope, and outside one they break the API's rules (the submission is
+	 * lost, as a video command on the graphics family).
+	 */
+	if (pool->type == I915_QUERY_TYPE_RESULT_STATUS) {
+		if (op->kind != I915_GFX_OP_QUERY_RESET) {
+			kern_logf("i915: vk: result status query begun or ended outside a video coding scope\n");
+			return EIO;
+		}
+		i915_query_status_reset(pool, op->u.query.first, op->u.query.count);
+		return 0;
+	}
+
 	/* Takes the batch. */
 	work = drv_i915_gfx_session_get(session);
 	if (work == NULL)
@@ -664,6 +698,74 @@ drv_i915_gfx_query_execute(
 	return error;
 }
 
+/*
+ * Tells whether a recorded query names a result status pool and a query
+ * within it (ws083-p008): the video walk takes only such a query.
+ */
+int
+drv_i915_gfx_query_status_pool(
+	const struct i915_gfx_query_pool *pool,
+	uint32_t query)
+{
+	/* A pool that went (BUG-260) or another type is not one. */
+	if (pool == NULL || pool->type != I915_QUERY_TYPE_RESULT_STATUS)
+		return 0;
+
+	/* A query past the pool is not in it. */
+	if (query >= pool->count)
+		return 0;
+
+	/* The query of a result status pool. */
+	return 1;
+}
+
+/*
+ * Tells whether a recorded query command names a pool that is still there
+ * and a range within it (a begin or an end is a range of one), so the video
+ * walk refuses a range past the pool before anything runs (ws083-p008).
+ */
+int
+drv_i915_gfx_query_in_range(
+	const struct i915_gfx_query_pool *pool,
+	uint32_t first,
+	uint32_t count)
+{
+	/* A pool that went (BUG-260) has no range. */
+	if (pool == NULL)
+		return 0;
+
+	/* The range must lie within the pool's queries. */
+	if (first > pool->count || count > pool->count - first)
+		return 0;
+
+	/* The range is the pool's. */
+	return 1;
+}
+
+/*
+ * Ends a result status query with its status (VkQueryResultStatusKHR):
+ * the status, then the availability, written on the CPU and flushed for
+ * vkGetQueryPoolResults.  The caller has checked the query
+ * (drv_i915_gfx_query_status_pool).
+ */
+void
+drv_i915_gfx_query_status_end(
+	struct i915_gfx_query_pool *pool,
+	uint32_t query,
+	int32_t status)
+{
+	uint64_t *counters;
+
+	/* The begin's word is zero and the end's the status, so their difference is the status. */
+	counters = pool->object->address;
+	counters[2U * query] = 0U;
+	counters[2U * query + 1U] = (uint64_t)(int64_t)status;
+
+	/* Available from now. */
+	counters[2U * pool->count + query] = 1U;
+	drv_i915_gt_clflush(counters, (size_t)pool->count * 24U);
+}
+
 /* Writes `bytes` zero bytes to a reply, a block of `zeros` at a time. */
 static void
 i915_query_reply_zeros(
@@ -681,4 +783,26 @@ i915_query_reply_zeros(
 		drv_i915_wire_reply_bytes(reply, zeros, (size_t)chunk);
 		bytes -= chunk;
 	}
+}
+
+/* Makes a range of a result status pool's queries unavailable with no status, on the CPU. */
+static void
+i915_query_status_reset(
+	struct i915_gfx_query_pool *pool,
+	uint32_t first,
+	uint32_t count)
+{
+	uint64_t *counters;
+	uint32_t query;
+
+	/* Each query of the range: its two words and its availability. */
+	counters = pool->object->address;
+	for (query = first; query < first + count; query++) {
+		counters[2U * query] = 0U;
+		counters[2U * query + 1U] = 0U;
+		counters[2U * pool->count + query] = 0U;
+	}
+
+	/* What the reads see. */
+	drv_i915_gt_clflush(counters, (size_t)pool->count * 24U);
 }

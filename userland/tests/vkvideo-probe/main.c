@@ -24,7 +24,9 @@
  * window as ffmpeg hashes a raw NV12 frame (frame.c).  The frames are
  * printed in display order: by their order counts, between IDR pictures.
  * With --expect, each frame is compared with the file's line, and the exit
- * status says whether all matched.
+ * status says whether all matched.  Where the video family reports result
+ * status (ws083-p008), each decode is in a result status query, and a
+ * decode that did not complete is named and fails the run.
  */
 
 #include "h264.h"
@@ -58,12 +60,13 @@ struct probe_frame {
 	char hash[65];
 };
 
-/* The frames decoded and not yet printed, and what was printed and matched. */
+/* The frames decoded and not yet printed, what was printed and matched, and the decodes that did not complete. */
 struct probe_output {
 	struct probe_frame pending[PROBE_PENDING];
 	uint32_t pending_count;
 	uint32_t printed;
 	uint32_t matched;
+	uint32_t failed;
 	FILE *expect;
 };
 
@@ -119,6 +122,15 @@ struct probe {
 	VkCommandPool pool;
 	VkCommandBuffer command;
 	VkFence fence;
+
+	/*
+	 * Whether the video family reports result status, the pool of the one
+	 * query each decode is in (VK_NULL_HANDLE without one), and the status
+	 * of the last decode (COMPLETE without a pool).
+	 */
+	VkBool32 status_supported;
+	VkQueryPool status_pool;
+	int32_t status;
 };
 
 static int probe_arguments(int argc, char **argv, struct probe_options *options);
@@ -135,6 +147,7 @@ static int probe_bitstream(struct probe *probe, size_t bytes);
 static int probe_session(struct probe *probe);
 static int probe_parameters(struct probe *probe, const struct h264_stream *stream);
 static int probe_commands(struct probe *probe);
+static void probe_status_pool(struct probe *probe);
 static int probe_decode(struct probe *probe, const struct h264_stream *stream, const struct h264_picture *picture, const struct dpb_plan *plan);
 static void probe_hash(struct probe *probe, uint32_t slot, const StdVideoH264SequenceParameterSet *sps, char text[65]);
 static void probe_output_add(struct probe_output *output, int32_t poc, const char *hash);
@@ -361,17 +374,21 @@ probe_video_family(
 {
 	VkQueueFamilyProperties2 families[PROBE_FAMILIES];
 	VkQueueFamilyVideoPropertiesKHR video[PROBE_FAMILIES];
+	VkQueueFamilyQueryResultStatusPropertiesKHR status[PROBE_FAMILIES];
 	uint32_t count;
 	uint32_t index;
 
-	/* The families with their video properties. */
+	/* The families with their video properties and whether they report result status. */
 	count = PROBE_FAMILIES;
 	memset(families, 0, sizeof(families));
 	memset(video, 0, sizeof(video));
+	memset(status, 0, sizeof(status));
 	for (index = 0U; index < PROBE_FAMILIES; index++) {
 		families[index].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_PROPERTIES_2;
 		families[index].pNext = &video[index];
 		video[index].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_VIDEO_PROPERTIES_KHR;
+		video[index].pNext = &status[index];
+		status[index].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR;
 	}
 	vkGetPhysicalDeviceQueueFamilyProperties2KHR(probe->physical, &count, families);
 
@@ -382,6 +399,7 @@ probe_video_family(
 		if ((video[index].videoCodecOperations & VK_VIDEO_CODEC_OPERATION_DECODE_H264_BIT_KHR) == 0U)
 			continue;
 		*family = index;
+		probe->status_supported = status[index].queryResultStatusSupport;
 		return 0;
 	}
 
@@ -835,8 +853,41 @@ probe_commands(
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkCreateFence");
 
+	/* The result status query, where the family has it. */
+	probe_status_pool(probe);
+
 	/* Succeeded: the commands. */
 	return 0;
+}
+
+/*
+ * Makes the pool of the one result status query each decode is in, where
+ * the video family reports result status; without it (or when the pool
+ * cannot be made) the decodes run without a query.
+ */
+static void
+probe_status_pool(
+	struct probe *probe)
+{
+	VkQueryPoolCreateInfo info;
+	VkResult result;
+
+	/* No status: every decode counts as complete. */
+	probe->status = VK_QUERY_RESULT_STATUS_COMPLETE_KHR;
+	if (!probe->status_supported)
+		return;
+
+	/* One query of the decode's profile. */
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_QUERY_POOL_CREATE_INFO;
+	info.pNext = &probe->profile;
+	info.queryType = VK_QUERY_TYPE_RESULT_STATUS_ONLY_KHR;
+	info.queryCount = 1U;
+	result = vkCreateQueryPool(probe->device, &info, NULL, &probe->status_pool);
+	if (result != VK_SUCCESS) {
+		probe->status_pool = VK_NULL_HANDLE;
+		printf("vkvideo-probe: no result status query (%d); decoding without\n", (int)result);
+	}
 }
 
 /*
@@ -910,6 +961,10 @@ probe_decode(
 	result = vkBeginCommandBuffer(probe->command, &record);
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkBeginCommandBuffer");
+
+	/* The status query starts unavailable, outside the scope. */
+	if (probe->status_pool != VK_NULL_HANDLE)
+		vkCmdResetQueryPool(probe->command, probe->status_pool, 0U, 1U);
 
 	/* The first decode moves every slot's image into the DPB layout. */
 	if (plan->reset) {
@@ -1010,7 +1065,11 @@ probe_decode(
 	decode.pSetupReferenceSlot = &setup;
 	decode.referenceSlotCount = plan->reference_count;
 	decode.pReferenceSlots = references;
+	if (probe->status_pool != VK_NULL_HANDLE)
+		vkCmdBeginQuery(probe->command, probe->status_pool, 0U, 0U);
 	vkCmdDecodeVideoKHR(probe->command, &decode);
+	if (probe->status_pool != VK_NULL_HANDLE)
+		vkCmdEndQuery(probe->command, probe->status_pool, 0U);
 
 	/* The scope's end. */
 	memset(&end, 0, sizeof(end));
@@ -1040,7 +1099,15 @@ probe_decode(
 	if (result != VK_SUCCESS)
 		return probe_failed(result, "vkResetCommandBuffer");
 
-	/* Succeeded: the picture is in its slot's image. */
+	/* Whether the decode completed: its query's status, when there is one. */
+	probe->status = VK_QUERY_RESULT_STATUS_COMPLETE_KHR;
+	if (probe->status_pool != VK_NULL_HANDLE) {
+		result = vkGetQueryPoolResults(probe->device, probe->status_pool, 0U, 1U, sizeof(probe->status), &probe->status, sizeof(probe->status), VK_QUERY_RESULT_WITH_STATUS_BIT_KHR | VK_QUERY_RESULT_WAIT_BIT);
+		if (result != VK_SUCCESS)
+			return probe_failed(result, "vkGetQueryPoolResults");
+	}
+
+	/* Succeeded: the picture is in its slot's image, or its status says why not. */
 	return 0;
 }
 
@@ -1290,10 +1357,14 @@ probe_run(
 			break;
 		}
 
-		/* Decodes it and hashes the frame while its slot still holds it. */
+		/* Decodes it and hashes the frame while its slot still holds it; a decode that did not complete is named. */
 		error = probe_decode(probe, &stream, &picture, &plan);
 		if (error != 0)
 			break;
+		if (probe->status != VK_QUERY_RESULT_STATUS_COMPLETE_KHR) {
+			printf("vkvideo-probe: picture %u status %d\n", frames, (int)probe->status);
+			output.failed++;
+		}
 		probe_hash(probe, (uint32_t)plan.setup, sps, text);
 
 		/* The DPB after it, and the frame's place in the display order. */
@@ -1315,11 +1386,15 @@ probe_run(
 	printf("vkvideo-probe: %u frames decoded", frames);
 	if (options->expect != NULL)
 		printf(", %u match the reference", output.matched);
+	if (output.failed != 0U)
+		printf(", %u failed", output.failed);
 	printf("\n");
 	if (error != 0)
 		return error;
 	if (options->expect != NULL && (output.matched != frames || frames == 0U))
 		return 4;
+	if (output.failed != 0U)
+		return 5;
 
 	/* Succeeded: the stream is decoded. */
 	return 0;
@@ -1335,6 +1410,8 @@ probe_close(
 	/* The device's objects, then the device. */
 	if (probe->device != VK_NULL_HANDLE) {
 		(void)vkDeviceWaitIdle(probe->device);
+		if (probe->status_pool != VK_NULL_HANDLE)
+			vkDestroyQueryPool(probe->device, probe->status_pool, NULL);
 		if (probe->fence != VK_NULL_HANDLE)
 			vkDestroyFence(probe->device, probe->fence, NULL);
 		if (probe->pool != VK_NULL_HANDLE)

@@ -29,11 +29,11 @@ Queue: q897（Q1 の dispatch、2026-10-08 午後「p008 の host の分を先�
 | ID | 決定 | 理由 |
 | --- | --- | --- |
 | S1 | video の device（`vk->video`）の実行器だけが RESULT_STATUS_ONLY の pool を作る。object の形は occlusion と同じ（query q の 2 語と availability の語）で、status は 2q+1 の語、2q の語は 0。results は今の式（end − begin）がそのまま status を返す | results の reply を変えずに済む |
-| S2 | status は GPU でなく **CPU** が書く: video の walk（apply）の中で、decode は同期に走り終わっているので、`vkCmdEndQuery` の時に CPU が status と availability 1 を書いて clflush。status pool の reset も CPU が op の順に（family に依らず、`drv_i915_gfx_query_execute` が status pool の reset を CPU で行う） | render の batch の reset は video の後に走るので、status を GPU や render の batch で書くと順が逆になる。同期の実行なので CPU の書き込みは decode の後と保証される |
-| S3 | status の値: query の間の decode が全部 MFX で走り終われば COMPLETE（1）、D17 の検べで飛ばした decode が 1 つでもあれば ERROR（−1）、decode の無い query は COMPLETE。hang・DEVICE_LOST では書かない（unavailable のまま） | ANV より情報が多い（飛ばした decode を app が知れる）。規格の ERROR は「操作が失敗した」 |
-| S4 | 検べ（模擬の walk でも）: video の family の `vkCmdBeginQuery` は scope の中・status pool・範囲内・active な query が無い時だけ、`vkCmdEndQuery` は同じ scope の active な query と同じ pool・index、scope の終わりに active な query が残れば拒否（`EBADMSG` → `VK_ERROR_DEVICE_LOST`、D18 と同じ）。graphics の family で status pool の begin・end は拒否（RCS が depth count を書くのを防ぐ）、video の family で occlusion の pool の begin・end も拒否 | 規格の VUID に沿う。誤った使い方で GPU や CPU が他の pool を書かない |
+| S2 | status は GPU でなく **CPU** が書く: video の walk（apply）の中で、decode は同期に走り終わっているので、`vkCmdEndQuery` の時に CPU が status（64 bit の 2 の補数、`(uint64_t)(int64_t)status`、2q の語は 0）と availability 1 を書いて clflush。status pool の reset も CPU が op の順に（family に依らず、`drv_i915_gfx_query_execute` が render の batch を取る前に status pool の reset を CPU で行う）。**不変条件**: END の時、その query の decode の batch は VCS0 で走り終わっている（`i915_video_run` が decode ごとに走らせ待つ）。将来 decode を 1 つの run にまとめるなら END の前にその batch を走らせる（walk に注記） | render の batch の reset は video の後に走るので、status を GPU や render の batch で書くと順が逆になる。同期の実行なので CPU の書き込みは decode の後と保証される |
+| S3 | status の値: query の decode が MFX で走り終われば COMPLETE（1）、D17 の検べで飛ばせば ERROR（−1）、decode の無い query は COMPLETE（zedBSD の選択、ANV も availability を status にするので同じ）。hang・DEVICE_LOST では書かない（unavailable のまま）。途中の ENOMEM（batch が作れない、`VK_ERROR_OUT_OF_DEVICE_MEMORY`）では、walk の前の方で終わった query は COMPLETE のまま残る（slot の遷移と同じ既存の途中適用） | ANV より情報が多い（飛ばした decode を app が知れる）。規格の ERROR は「操作が失敗した」 |
+| S4 | 検べ（模擬の walk = apply の前にも同じ検べ、§6.5 の「一部だけ走ってから拒む形にしない」）: video の family の `vkCmdResetQueryPool` は scope の外・pool の範囲内、`vkCmdBeginQuery` は scope の中・status pool・範囲内・active な query が無い時だけ、`vkCmdEndQuery` は同じ scope の active な query と同じ pool・index、1 つの query の中の 2 つ目の decode は拒否（規格は 1 query に video の操作 1 つ）、scope の終わりに active な query が残れば拒否。video の family では `EBADMSG` → `drv_i915_video_submit` が `VK_ERROR_DEVICE_LOST`（D18 と同じ）。graphics の family の status pool の begin・end は `EIO`（`i915_command_result` が DEVICE_LOST に写すのは ETIMEDOUT・EIO だけ、EBADMSG は INITIALIZATION_FAILED になるので使わない。video の命令の D18 と同じ）。video の family で occlusion の pool の begin・end も拒否 | 規格の VUID に沿う。誤った使い方で GPU や CPU が他の pool を書かない |
 | S5 | libvulkan: video の decode の family で `queryResultStatusSupport` を TRUE。status pool は result の語 1 つ（status）を持つ pool として作り（`status_only`）、`vkGetQueryPoolResults` は status pool では各 query に `available ? status : 0` を必ず書く（PARTIAL の有無に依らず、32 bit では下位 32 bit = 符号つきの値）。pNext の profile は送らない（実行器は profile を見ない、family と同じ codec しか無い） | 規格の WITH_STATUS の書き方。wire は変えない |
-| S6 | `vkvideo-probe` は family が TRUE なら 1 query の pool を作り、decode ごとに reset → begin coding → begin query → decode → end query → end coding、wait の後に WITH_STATUS で読み、COMPLETE でなければ `vkvideo-probe: picture N status S` を出し、最後の行に `, N failed` を足して exit 1 | p005・p006b の実機で、hash の不一致と D17 の飛ばしを区別できる |
+| S6 | `vkvideo-probe` は family が TRUE なら 1 query の pool を作り（作れなければ query 無しで続ける）、decode ごとに reset（scope の外）→ begin coding →（control）→ begin query → decode → end query → end coding、wait の後に WITH_STATUS で読み、COMPLETE でなければ `vkvideo-probe: picture N status S` を出し、失敗が 1 つ以上の時だけ最後の行に `, N failed` を足して exit 5（UAT の文字列 `N frames decoded, N match the reference` は失敗が無ければ変わらない） | p005・p006b の実機で、hash の不一致と D17 の飛ばしを区別できる。probe の Vulkan の経路は host 試験が無く（host-vkvideo-probe は reader・hash・DPB だけ）、実機でだけ確かめる |
 
 UAPI（gpu-op.h）・HAL・wire の形は変えない（query の op は 1.0 の物）。
 
@@ -45,4 +45,26 @@ UAPI（gpu-op.h）・HAL・wire の形は変えない（query の op は 1.0 の
 
 ## 記録
 
-- 2026-10-08 午後 P2: 設計（上）。design-reviewer の review の後に実装。
+- 2026-10-08 午後 P2: 設計（上）。design-reviewer の review（should-fix 6・minor 5、blocking 無し）を反映: F1 graphics の family は EIO（S4）、F2 64 bit の符号の書き方を明記し 32 bit・64 bit の両方を試験、F3 reset の範囲と scope の外を模擬で、F4 1 query に decode 1 つ、F5 不変条件を S2 と walk に、F6 同じ submit の中の reset の順を試験（render の batch で reset すると host でも NOT_READY にならず落ちる形）、F7 type の field と CPU の分岐を batch の前に、F8 ENOMEM の途中適用を S3 に、F9 design.md の D15・§3.2・§13、F10 probe の `, N failed` は失敗がある時だけ・begin query は control の後・pool が作れなければ無しで、F11 profile を見ない事を利用者への案内の「規格との違い」に。
+- 実装（2026-10-08 午後 P2）:
+  - libvulkan: `query.c`（status pool の `status_only`、`vkGetQueryPoolResults` は各 query に `available ? status : 0`）、`external-properties.c`（decode の family で `queryResultStatusSupport` TRUE）。
+  - 実行器: `render/fence.c`・`fence.h`（type 1000023000 を video の device だけ、pool の `type`、status pool の reset を CPU で、begin・end は EIO、`drv_i915_gfx_query_status_pool`・`drv_i915_gfx_query_in_range`・`drv_i915_gfx_query_status_end`）、`render/video.c`（walk の S4 の検べ、skip で ERROR、END で CPU が書く）。
+  - `userland/tests/vkvideo-probe/main.c`（S6）。
+  - 利用者への案内: `docs/reference/vulkan-video.md`（新、`docs/reference/README.md` から）: 使える条件（native の i915、VCS0、`i915.debug=video`）、拡張、queue family、decode できる形と上限、NV12 と plane の読み方、飛ばす decode と result status、DEVICE_LOST の場合、規格との違い、`vkvideo-probe`。
+
+## 確認（host・build、2026-10-08 P2）
+
+| コマンド | 結果 |
+| --- | --- |
+| `sh plan/ws083/tests/run-host-libvulkan-status.sh`（新、query.c） | plain・ASan/UBSan PASS: status pool の create の byte 列（type 1000023000）、32 bit で ERROR・COMPLETE・unavailable は 0 と `VK_NOT_READY`・stride の padding を保つ、64 bit の −1・1、occlusion は今まで通り |
+| `sh plan/ws083/tests/run-host-libvulkan-video.sh` | PASS（queue family の status: video の family TRUE、graphics の family FALSE） |
+| `sh plan/ws083/tests/run-host-video-roundtrip.sh` | PASS（plain・ASan/UBSan、genxml 36 instruction 89 check）。追加の `test_status_queries`: 新しい pool は NOT_READY、IDR と P の decode で COMPLETE 2 つ、video の family の reset だけの submit で NOT_READY に戻る、start code の無い slice で IDR が ERROR（64 bit で −1、32 bit で 0xffffffff）、scope の外の begin・scope で終わらない query・2 つ同時・scope の中の reset・別の query の end・occlusion の query・1 query に decode 2 つ・pool を越える reset は DEVICE_LOST で何も走らない（status は前のまま）、同じ submit の end の後の reset で NOT_READY、graphics の family で reset は走り begin は DEVICE_LOST |
+| `sh plan/ws031/tests/run-vk-host-tests.sh` | 10 個 PASS（fence.c の変更の回帰） |
+| `sh plan/ws083/tests/run-host-vkvideo-probe.sh` | PASS（reader・hash・DPB、probe の Vulkan の経路は対象外） |
+| `make -j16 BUILD=build/p2-k ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_USER_PROGRAMS="libvulkan vkvideo-probe" build/p2-k/bin/vkvideo-probe build/p2-k/dynamic/libvulkan.so build/p2-k/vmunix` | 成功 warning 0（amd64 vmunix check PASS） |
+
+未実施: 実機（status が実機の decode で COMPLETE になること、D17 の飛ばしで ERROR になることは p005・p006b の T1 の依頼で probe が自動で見る）。QEMU は門が閉じているので status の経路は通らない。
+
+## 残り
+
+- 性能（1080p の decode の時間、U6・U8）、D19 の既定化（`i915.debug=video` を外す）: 実機の p005・p006b・p007 の後。

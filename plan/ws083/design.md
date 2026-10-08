@@ -87,7 +87,7 @@
 | D12 | 実行は**既存の同期の形**: decode の batch を `drv_i915_worker_run_sync(device, &contexts[VCS0], batch_va)` で走らせる | 実行器全体が同期 | VCS だけ非同期 |
 | D13 | MFX の command の定義は **`intel/genxml-video.h`**（新、`intel/genxml.h` と同じ書き方: Mesa の genxml の値を出典・SHA 付きで転記） | WS031 と同じ license の扱い（H4） | PRM から手で起こす |
 | D14 | 公開 header: `include/libc/vulkan/vulkan_video.h`（3 拡張 + sync2 の宣言）を `tools/maintain-video.noct` が **Khronos Vulkan-Headers 1.4.309**（Debian `libvulkan-dev` 1.4.309.0-1 の `/usr/include/vulkan/vulkan_core.h`、SHA は §0）から選び、`include/libc/vulkan/vk_video/`（`vulkan_video_codecs_common.h`・`vulkan_video_codec_h264std.h`・`vulkan_video_codec_h264std_decode.h`、Apache-2.0）を同じ package から写す。network は要らない（H3） | 1.3.269 の pinned の入力は disk に無い。video の構造体の配置は 1.3.238 の確定以降変わらず、std の header は 1.0.0。core の 1.3.269 の選択とは別の file にし、混ぜない | network で 1.3.269 を取る（取れても版の違いは同じ） |
-| D15 | result status query と inline query は**最初の目標に入れない** | 規格で任意 | 最初から |
+| D15 | result status query と inline query は**最初の目標に入れない**（2026-10-08 改訂: result status query は p008 で入れた、設計は [phase008](phase008/phase.md)。inline query は無し） | 規格で任意 | 最初から |
 | D16 | 実機の判定は **frame ごとの hash**（crop 後の NV12 の Y・UV の SHA-256）を host の ffmpeg の参照と比べる。試験の stream は**小さい合成の stream を tree に**（`plan/ws083/tests/streams/`、作った script・参照の hash と一緒に）。AGENTS.md の「試験の image は tests/ の config.mk と個別の file の複写だけ」に合わせる（HD4） | stream を build/ に置くと image の規則に合わない | 実写の stream・ITU-T の conformance の stream（HD4 の選択肢） |
 | D17 | **kernel は app の値を信じない**: 実行器は MFX の command を組む前に SPS・PPS・picture・slice の値を検べ（§6.6）、合わなければ**その picture を走らせずに飛ばす**（`VK_SUCCESS`、出力の中身は未定義、log の 1 行）。規格は不正な bitstream の decode の結果を未定義とするだけ | WS121 は信頼できない stream を流す。MFX に範囲外の値を渡すと読み越し・hang の危険 | 検べない（第 1 版） |
 | D18 | app の valid usage の違反（未 bind、reset 前、family の混在、slot の image の不一致）で submit を拒む時は `VK_ERROR_DEVICE_LOST`（`vkQueueSubmit` が返せる値）にする。batch の溢れは ENOMEM → `VK_ERROR_OUT_OF_DEVICE_MEMORY`。`i915_command_result` の他の用途は変えない | EINVAL → `VK_ERROR_INITIALIZATION_FAILED` は `vkQueueSubmit` の値でない | 今の写像 |
@@ -122,7 +122,7 @@ backend が返す family を 2 つにする（`render/instance.c` の queue fami
 | 0 | GRAPHICS \| COMPUTE \| TRANSFER（今のまま） | 1 | 0 | 1,1,1 |
 | 1 | `VK_QUEUE_VIDEO_DECODE_BIT_KHR` | 1 | 0 | 0,0,0 |
 
-- `vkGetPhysicalDeviceQueueFamilyProperties2KHR` の pNext: `VkQueueFamilyVideoPropertiesKHR.videoCodecOperations`（family 1 は `DECODE_H264`、他は 0、新 op `GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_VIDEO_PROPERTIES` で 1 回取り cache）、`VkQueueFamilyQueryResultStatusPropertiesKHR.queryResultStatusSupport` は FALSE。
+- `vkGetPhysicalDeviceQueueFamilyProperties2KHR` の pNext: `VkQueueFamilyVideoPropertiesKHR.videoCodecOperations`（family 1 は `DECODE_H264`、他は 0、新 op `GPU_OP_GET_PHYSICAL_DEVICE_QUEUE_FAMILY_VIDEO_PROPERTIES` で 1 回取り cache）、`VkQueueFamilyQueryResultStatusPropertiesKHR.queryResultStatusSupport` は FALSE（2026-10-08 p008 で video の family は TRUE に、[phase008](phase008/phase.md)）。
 - 実行器は `vkGetDeviceQueue2` の **family と index を読んで queue object に覚え**（今は読み捨て、§1.2）、`vkQueueSubmit` で submit の先頭の queue の id から family を引く（今は読み捨て）。
 - family 1 の submit が受ける操作: video coding の 4 つに加え、規格が decode の queue に許す同期の command（`vkCmdPipelineBarrier`・`vkCmdSetEvent`・`vkCmdResetEvent`・`vkCmdWaitEvents`・`vkCmdExecuteCommands`（secondary の中も同じ規則）・`vkCmdResetQueryPool`）。これらは family 0 と同じ実行器の処理（barrier は何もしない、event は CPU 側の今の処理）。それ以外の graphics・compute・transfer の操作があれば D18 で拒む。family 0 に video の操作があっても拒む。`vkCmdWriteTimestamp` は `timestampValidBits` 0 なので app が使えない（規格）。
 
@@ -449,7 +449,7 @@ p003a は人の判断も wire も要らないので今から始められる。§
 
 ## 13. 範囲外
 
-encode、H.265・AV1、interlace（field・MBAFF）、配列の DPB、保護 content、result status query と inline query、decode 出力の sampler・copy（p008 と HD5）、VCS2 の利用、engine reset（HD2）、非同期の実行、Venus での video。
+encode、H.265・AV1、interlace（field・MBAFF）、配列の DPB、保護 content、inline query（result status query は p008 で入れた）、decode 出力の sampler・copy（p008 と HD5）、VCS2 の利用、engine reset（HD2）、非同期の実行、Venus での video。
 
 ## 14. 第 2 版の反映の対応（design-reviewer、2026-10-07）
 

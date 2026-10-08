@@ -705,10 +705,12 @@ external_queue_family_chain(
 			video->videoCodecOperations = physical->queue_video_operations[family];
 		}
 
-		/* No family reports the result status of a video operation. */
+		/* A family that decodes video reports its operations' result status (ws083-p008); the others do not. */
 		if (next->sType == VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR) {
 			status = (VkQueueFamilyQueryResultStatusPropertiesKHR *)next;
 			status->queryResultStatusSupport = VK_FALSE;
+			if (physical->queue_video_operations[family] != 0)
+				status->queryResultStatusSupport = VK_TRUE;
 		}
 	}
 
