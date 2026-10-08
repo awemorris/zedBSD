@@ -27,6 +27,13 @@
  * copy).  kl_window_start_drag starts a drag out of the window of the data
  * of a few types (kl_window_drag_text: of text), whose end is an input.
  *
+ * ws189-p002: a picture ("image/png", KL_DROP_IMAGE) is taken after file
+ * names and before text; the application answers for each place the drag
+ * is over (a repeated answer is not sent again); a drag out of the window
+ * may carry a picture under the pointer (kl_window_start_drag_icon), a
+ * surface of no role placed by its attach offset; and a source's writes
+ * to a reader that went away end with EPIPE, not the program.
+ *
  * Without a data device manager (another compositor) the clipboard is the
  * window's own.
  */
@@ -35,6 +42,7 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <signal.h>
 #include <stdlib.h>
 #include <string.h>
 #include <unistd.h>
@@ -43,9 +51,20 @@
 #define CLIPBOARD_TYPE_UTF8	"text/plain;charset=utf-8"
 #define CLIPBOARD_TYPE_PLAIN	"text/plain"
 #define CLIPBOARD_TYPE_URIS	"text/uri-list"
+#define CLIPBOARD_TYPE_PNG	"image/png"
 
-/* The most a drop's data may be, in bytes (WS131 p020: Files' file names). */
-#define CLIPBOARD_DROP_MAX	(1024U * 1024U)
+/* The most a drop's data may be, in bytes, by its type (WS131 p020: Files' file names; ws189: a picture, text). */
+#define CLIPBOARD_URIS_MAX	((size_t)1024U * 1024U)
+#define CLIPBOARD_IMAGE_MAX	((size_t)64U * 1024U * 1024U)
+#define CLIPBOARD_TEXT_MAX	((size_t)16U * 1024U * 1024U)
+
+/* The first room a drop's data is read into, in bytes (doubled as it grows). */
+#define CLIPBOARD_DROP_CHUNK	((size_t)16384U)
+
+/* What the drag's picture is shown at: its whole alpha in 255ths, its corner radius and its edge's alpha. */
+#define CLIPBOARD_ICON_ALPHA	217U
+#define CLIPBOARD_ICON_RADIUS	6
+#define CLIPBOARD_ICON_EDGE	64U
 
 /* The data device manager version the window uses, and how long a paste waits for the text. */
 #define CLIPBOARD_VERSION	3U
@@ -70,8 +89,14 @@ static size_t clipboard_read(struct kl_window *window, struct wl_data_offer *off
 static void clipboard_drop_input(struct kl_window *window, unsigned kind, unsigned code, double x, double y);
 static const char *clipboard_drop_type(const struct kl_window *window, unsigned *type);
 static int clipboard_own_data(const struct kl_window *window, const char *type, const char **data, size_t *length);
+static const struct kl_window *clipboard_drag_owner(const struct kl_window *window);
 static void clipboard_drag_free(struct kl_window *window);
 static void clipboard_drag_end(struct kl_window *window, unsigned dropped);
+static size_t clipboard_drop_max(unsigned type);
+static void clipboard_icon_make(struct kl_window *window, const struct kl_drag_icon *icon, int *hot_x, int *hot_y);
+static void clipboard_icon_draw(uint32_t *out, int width, int height, const struct kl_drag_icon *icon);
+static uint32_t clipboard_icon_edge(uint32_t pixel);
+static void clipboard_icon_free(struct kl_window *window);
 
 /* The data device's events. */
 static const struct wl_data_device_listener device_listener = {
@@ -261,7 +286,7 @@ kl_window_accept_drops(
 	unsigned types)
 {
 	/* A window, and only the types known. */
-	if (window == NULL || (types & ~(KL_DROP_TEXT | KL_DROP_URIS)) != 0U)
+	if (window == NULL || (types & ~(KL_DROP_TEXT | KL_DROP_URIS | KL_DROP_IMAGE)) != 0U)
 		return EINVAL;
 
 	/* Taken from the next drag that comes over the window. */
@@ -288,6 +313,15 @@ kl_window_answer_drop(
 	if (window->drop_offer == NULL)
 		return;
 
+	/* The same answer as the last one is not sent again (an application answers at each motion). */
+	if (window->drop_answered &&
+	    window->drop_answer_actions == actions &&
+	    window->drop_answer_preferred == preferred)
+		return;
+	window->drop_answered = 1;
+	window->drop_answer_actions = actions;
+	window->drop_answer_preferred = preferred;
+
 	/* Its type taken, or none. */
 	mime = clipboard_drop_type(window, &type);
 	if (actions == 0U)
@@ -303,10 +337,11 @@ kl_window_answer_drop(
 
 /*
  * Reads what was dropped on the window into memory of its own (the caller
- * frees it): the file names ("text/uri-list" as it is) or the text, and
- * tells which (KL_DROP_*).  The drop waits for kl_window_finish_drop.
- * Returns 0, ENOENT without a drop, ENOMEM, E2BIG past CLIPBOARD_DROP_MAX,
- * or ETIMEDOUT when the source wrote nothing in time.
+ * frees it): the file names ("text/uri-list" as it is), the picture (a
+ * PNG) or the text, and tells which (KL_DROP_*).  The drop waits for
+ * kl_window_finish_drop.  Returns 0, ENOENT without a drop, ENOMEM, E2BIG
+ * past the type's limit (clipboard_drop_max), or ETIMEDOUT when the
+ * source wrote nothing in time.
  */
 int
 kl_window_receive_drop(
@@ -320,6 +355,8 @@ kl_window_receive_drop(
 	const char *own;
 	size_t own_length;
 	size_t capacity;
+	size_t limit;
+	size_t room;
 	char *grown;
 	ssize_t got;
 	int pipes[2];
@@ -333,10 +370,11 @@ kl_window_receive_drop(
 	if (window->drop_offer == NULL)
 		return ENOENT;
 
-	/* The type it is read as. */
+	/* The type it is read as, and the most of it that is read. */
 	mime = clipboard_drop_type(window, type);
 	if (mime == NULL)
 		return ENOENT;
+	limit = clipboard_drop_max(*type);
 
 	/*
 	 * The window's own drag's data is taken as it is: reading it through
@@ -362,7 +400,7 @@ kl_window_receive_drop(
 	close(pipes[1]);
 	(void)wl_display_flush(window->display);
 
-	/* Everything the source writes, up to its end, the limit or the time allowed. */
+	/* Everything the source writes, up to its end, the limit or the time allowed (the room doubles as it fills). */
 	capacity = 0;
 	error = 0;
 	for (;;) {
@@ -376,23 +414,32 @@ kl_window_receive_drop(
 			break;
 		}
 
-		/* Room for more, and a NUL after. */
-		if (*length + 4096U + 1U > capacity) {
-			capacity = *length + 4096U + 1U;
+		/* Room for more, and a NUL after: the first chunk, then twice what there was. */
+		if (*length + 1U >= capacity) {
+			capacity = capacity * 2U;
+			if (capacity == 0U)
+				capacity = CLIPBOARD_DROP_CHUNK;
+
+			/* Never more than one byte past the limit (which tells it was passed) and the NUL. */
+			if (capacity > limit + 2U)
+				capacity = limit + 2U;
 			grown = realloc(*data, capacity);
 			if (grown == NULL) {
 				error = ENOMEM;
 				break;
 			}
+
+			/* The data lives in the grown room now. */
 			*data = grown;
 		}
 
-		/* The bytes; the end ends the reading. */
-		got = read(pipes[0], *data + *length, 4096U);
+		/* The bytes, as many as there is room for; the end ends the reading. */
+		room = capacity - *length - 1U;
+		got = read(pipes[0], *data + *length, room);
 		if (got <= 0)
 			break;
 		*length += (size_t)got;
-		if (*length > CLIPBOARD_DROP_MAX) {
+		if (*length > limit) {
 			error = E2BIG;
 			break;
 		}
@@ -496,8 +543,37 @@ kl_window_start_drag(
 	unsigned actions,
 	uint32_t serial)
 {
+	int error;
+
+	/* The same drag without a picture. */
+	error = kl_window_start_drag_icon(window, data, count, actions, serial, NULL);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the drag starts from the window. */
+	return 0;
+}
+
+/*
+ * Starts a drag out of the window as kl_window_start_drag does, carrying a
+ * picture under the pointer (KL_VERSION 70; NULL for none): shrunk to
+ * KL_DRAG_ICON_MAX on its longer side, a little see-through, with its hot
+ * point under the pointer.  A picture that cannot be made (no shared
+ * memory) leaves the drag without it.  Returns as kl_window_start_drag does.
+ */
+int
+kl_window_start_drag_icon(
+	struct kl_window *window,
+	const struct kl_drag_data *data,
+	size_t count,
+	unsigned actions,
+	uint32_t serial,
+	const struct kl_drag_icon *icon)
+{
 	uint32_t version;
 	size_t index;
+	int hot_x;
+	int hot_y;
 
 	/* Some types, as many as are kept. */
 	if (window == NULL ||
@@ -521,8 +597,13 @@ kl_window_start_drag(
 			clipboard_drag_free(window);
 			return ENOMEM;
 		}
-		memcpy(window->drag_data[index], data[index].data, data[index].length);
+
+		/* The data copied, kept until the drag ends (a type without data yet is filled later, kl_window_drag_fill). */
+		if (data[index].data != NULL && data[index].length != 0U)
+			memcpy(window->drag_data[index], data[index].data, data[index].length);
 		window->drag_lengths[index] = data[index].length;
+		if (data[index].data == NULL)
+			window->drag_lengths[index] = 0;
 	}
 
 	/* The source, offering the types. */
@@ -531,6 +612,8 @@ kl_window_start_drag(
 		clipboard_drag_free(window);
 		return ENOMEM;
 	}
+
+	/* Its events, and each type offered. */
 	(void)wl_data_source_add_listener(window->drag_source, &source_listener, window);
 	for (index = 0; index < count; index++)
 		wl_data_source_offer(window->drag_source, data[index].type);
@@ -541,9 +624,78 @@ kl_window_start_drag(
 	if (version >= CLIPBOARD_VERSION)
 		wl_data_source_set_actions(window->drag_source, actions);
 
-	/* Succeeded: the drag starts from the window. */
-	wl_data_device_start_drag(window->data_device, window->drag_source, window->surface, NULL, serial);
+	/* The picture's surface. */
+	hot_x = 0;
+	hot_y = 0;
+	if (icon != NULL)
+		clipboard_icon_make(window, icon, &hot_x, &hot_y);
+
+	/* The drag starts from the window. */
+	wl_data_device_start_drag(window->data_device, window->drag_source, window->surface, window->drag_icon, serial);
+
+	/*
+	 * Its picture's corner starts at the pointer; attached after the drag
+	 * names it, its offset puts the hot point under the pointer (Wayland's
+	 * rule for a drag's icon).
+	 */
+	if (window->drag_icon != NULL) {
+		wl_surface_attach(window->drag_icon, window->drag_icon_buffer.buffer, -hot_x, -hot_y);
+		wl_surface_damage(window->drag_icon, 0, 0, window->drag_icon_buffer.width, window->drag_icon_buffer.height);
+		wl_surface_commit(window->drag_icon);
+	}
+
+	/* Succeeded: the drag goes on. */
 	(void)wl_display_flush(window->display);
+	return 0;
+}
+
+/*
+ * Gives the data of a type of the window's drag that started without it
+ * (KL_VERSION 70): a program that must make it (a picture encoded) starts
+ * the drag first, while the button is still held, and fills it before it
+ * dispatches again -- the compositor asks for the data only after a drop,
+ * which the program hears in a later dispatch.  Returns 0, ENOENT without
+ * the drag or the type, or ENOMEM.
+ */
+int
+kl_window_drag_fill(
+	struct kl_window *window,
+	const char *type,
+	const void *data,
+	size_t length)
+{
+	char *copy;
+	unsigned index;
+	int same;
+
+	/* Only the window's own drag. */
+	if (window == NULL || type == NULL || window->drag_source == NULL)
+		return ENOENT;
+
+	/* The type among the drag's. */
+	for (index = 0; index < window->drag_count; index++) {
+		same = strcmp(window->drag_types[index], type);
+		if (same == 0)
+			break;
+	}
+
+	/* Not one of the drag's types. */
+	if (index == window->drag_count)
+		return ENOENT;
+
+	/* A copy of the data, in place of what was there. */
+	copy = malloc(length + 1U);
+	if (copy == NULL)
+		return ENOMEM;
+	if (data != NULL && length != 0U)
+		memcpy(copy, data, length);
+	free(window->drag_data[index]);
+	window->drag_data[index] = copy;
+	window->drag_lengths[index] = length;
+	if (data == NULL)
+		window->drag_lengths[index] = 0;
+
+	/* Succeeded: a drop reads it. */
 	return 0;
 }
 
@@ -581,7 +733,7 @@ void
 keiui_clipboard_close(
 	struct kl_window *window)
 {
-	/* The offers, the sources, the device and the manager. */
+	/* The offers, the sources, the drag's picture, the device and the manager. */
 	if (window->drop_offer != NULL)
 		wl_data_offer_destroy(window->drop_offer);
 	if (window->drag_source != NULL)
@@ -589,6 +741,7 @@ keiui_clipboard_close(
 	window->drop_offer = NULL;
 	window->drag_source = NULL;
 	clipboard_drag_free(window);
+	clipboard_icon_free(window);
 	if (window->data_offer != NULL)
 		wl_data_offer_destroy(window->data_offer);
 	if (window->data_source != NULL)
@@ -617,6 +770,8 @@ clipboard_offer(
 	window = data;
 	window->pending_text = 0;
 	window->pending_uris = 0;
+	window->pending_image = 0;
+	window->pending_utf8 = 0;
 	(void)wl_data_offer_add_listener(offer, &offer_listener, window);
 }
 
@@ -646,6 +801,7 @@ clipboard_enter(
 		wl_data_offer_destroy(window->drop_offer);
 	window->drop_offer = NULL;
 	window->drop_pending = 0;
+	window->drop_answered = 0;
 	if (offer == NULL)
 		return;
 
@@ -653,6 +809,8 @@ clipboard_enter(
 	offered = 0U;
 	if (window->pending_uris)
 		offered |= KL_DROP_URIS;
+	if (window->pending_image)
+		offered |= KL_DROP_IMAGE;
 	if (window->pending_text)
 		offered |= KL_DROP_TEXT;
 	offered &= window->drop_types;
@@ -666,6 +824,7 @@ clipboard_enter(
 	window->drop_offer = offer;
 	window->drop_serial = serial;
 	window->drop_offered = offered;
+	window->drop_utf8 = window->pending_utf8;
 	window->drop_x = wl_fixed_to_double(x);
 	window->drop_y = wl_fixed_to_double(y);
 	kl_window_answer_drop(window, KL_DND_COPY, KL_DND_COPY);
@@ -777,7 +936,7 @@ clipboard_selection(
 	}
 }
 
-/* Notes a type of the offer being described: either text type, or file names. */
+/* Notes a type of the offer being described: either text type, file names, or a picture. */
 static void
 clipboard_type(
 	void *data,
@@ -788,6 +947,7 @@ clipboard_type(
 	int utf8;
 	int plain;
 	int uris;
+	int png;
 
 	/* The UTF-8 text type, or plain text. */
 	(void)offer;
@@ -797,10 +957,19 @@ clipboard_type(
 	if (utf8 == 0 || plain == 0)
 		window->pending_text = 1;
 
+	/* Which of the two (a drop reads the one the source has, ws189-p002). */
+	if (utf8 == 0)
+		window->pending_utf8 = 1;
+
 	/* File names. */
 	uris = strcmp(mime_type, CLIPBOARD_TYPE_URIS);
 	if (uris == 0)
 		window->pending_uris = 1;
+
+	/* A picture. */
+	png = strcmp(mime_type, CLIPBOARD_TYPE_PNG);
+	if (png == 0)
+		window->pending_image = 1;
 }
 
 /* The actions the drag's source offers are not needed (the compositor chooses). */
@@ -853,11 +1022,14 @@ clipboard_send(
 	const char *mime_type,
 	int32_t fd)
 {
+	struct sigaction quiet;
+	struct sigaction before;
 	struct kl_window *window;
 	const char *text;
 	size_t length;
 	size_t written;
 	ssize_t count;
+	int ignored;
 	int own;
 
 	/* The drag's data of the type (nothing of another), or the copied text whatever the text type. */
@@ -872,6 +1044,12 @@ clipboard_send(
 		}
 	}
 
+	/* A reader that goes away ends the writing with EPIPE, not the program (ws189-p002). */
+	memset(&quiet, 0, sizeof(quiet));
+	quiet.sa_handler = SIG_IGN;
+	(void)sigemptyset(&quiet.sa_mask);
+	ignored = sigaction(SIGPIPE, &quiet, &before);
+
 	/* All of it, written as the reader takes it. */
 	written = 0;
 	while (written < length) {
@@ -882,6 +1060,10 @@ clipboard_send(
 			break;
 		written += (size_t)count;
 	}
+
+	/* SIGPIPE is handled as before again. */
+	if (ignored == 0)
+		(void)sigaction(SIGPIPE, &before, NULL);
 
 	/* The end of the data. */
 	close(fd);
@@ -1030,7 +1212,7 @@ clipboard_drop_input(
 	event->y = y;
 }
 
-/* The type the drag over the window is read as (file names first), and which (KL_DROP_*); NULL for none. */
+/* The type the drag over the window is read as (file names first, then a picture, then text), and which (KL_DROP_*); NULL for none. */
 static const char *
 clipboard_drop_type(
 	const struct kl_window *window,
@@ -1042,10 +1224,18 @@ clipboard_drop_type(
 		return CLIPBOARD_TYPE_URIS;
 	}
 
+	/* A picture. */
+	if ((window->drop_offered & KL_DROP_IMAGE) != 0U) {
+		*type = KL_DROP_IMAGE;
+		return CLIPBOARD_TYPE_PNG;
+	}
+
 	/* Text. */
 	if ((window->drop_offered & KL_DROP_TEXT) != 0U) {
 		*type = KL_DROP_TEXT;
-		return CLIPBOARD_TYPE_UTF8;
+		if (window->drop_utf8)
+			return CLIPBOARD_TYPE_UTF8;
+		return CLIPBOARD_TYPE_PLAIN;
 	}
 
 	/* Nothing the window takes. */
@@ -1053,7 +1243,7 @@ clipboard_drop_type(
 	return NULL;
 }
 
-/* Finds the window's own drag's data of a type (1), or tells there is none (0). */
+/* Finds the data of a type of the drag of the window or of another window of its program (1), or tells there is none (0). */
 static int
 clipboard_own_data(
 	const struct kl_window *window,
@@ -1061,20 +1251,22 @@ clipboard_own_data(
 	const char **data,
 	size_t *length)
 {
+	const struct kl_window *owner;
 	unsigned index;
 	int same;
 
-	/* No drag of the window's own. */
-	if (window->drag_source == NULL)
+	/* No drag of the window's own, or of another window of its program (whose source it cannot wait on in this dispatch, ws189-p002). */
+	owner = clipboard_drag_owner(window);
+	if (owner == NULL)
 		return 0;
 
 	/* The type among the drag's. */
-	for (index = 0; index < window->drag_count; index++) {
-		same = strcmp(window->drag_types[index], type);
+	for (index = 0; index < owner->drag_count; index++) {
+		same = strcmp(owner->drag_types[index], type);
 		if (same != 0)
 			continue;
-		*data = window->drag_data[index];
-		*length = window->drag_lengths[index];
+		*data = owner->drag_data[index];
+		*length = owner->drag_lengths[index];
 		return 1;
 	}
 
@@ -1108,10 +1300,11 @@ clipboard_drag_end(
 {
 	struct kl_window_event *event;
 
-	/* The source and its data. */
+	/* The source, its data and its picture. */
 	wl_data_source_destroy(window->drag_source);
 	window->drag_source = NULL;
 	clipboard_drag_free(window);
+	clipboard_icon_free(window);
 
 	/* The window's input. */
 	event = keiui_window_push(window, KL_WINDOW_DRAG_DONE);
@@ -1119,4 +1312,244 @@ clipboard_drag_end(
 		return;
 	event->code = dropped;
 	event->begin = (int32_t)window->drag_action;
+}
+
+/* The most a drop's data may be for its type (KL_DROP_*). */
+static size_t
+clipboard_drop_max(
+	unsigned type)
+{
+	/* File names are short lines. */
+	if (type == KL_DROP_URIS)
+		return CLIPBOARD_URIS_MAX;
+
+	/* A picture is the largest. */
+	if (type == KL_DROP_IMAGE)
+		return CLIPBOARD_IMAGE_MAX;
+
+	/* Text. */
+	return CLIPBOARD_TEXT_MAX;
+}
+
+/*
+ * Makes the surface of the picture a drag carries: a buffer of the
+ * picture shrunk to KL_DRAG_ICON_MAX on its longer side, and its hot
+ * point shrunk with it.  Without shared memory or a surface the drag has
+ * no picture (window->drag_icon stays NULL).
+ */
+static void
+clipboard_icon_make(
+	struct kl_window *window,
+	const struct kl_drag_icon *icon,
+	int *hot_x,
+	int *hot_y)
+{
+	int longer;
+	int width;
+	int height;
+	int error;
+
+	/* A picture, and the means to show one. */
+	if (window->compositor == NULL || window->shm == NULL)
+		return;
+	if (icon->pixels == NULL || icon->width <= 0 || icon->height <= 0)
+		return;
+
+	/* Its size, the longer side at most KL_DRAG_ICON_MAX. */
+	width = icon->width;
+	height = icon->height;
+	longer = width;
+	if (height > longer)
+		longer = height;
+	if (longer > KL_DRAG_ICON_MAX) {
+		width = (int)(((long)icon->width * KL_DRAG_ICON_MAX + longer / 2) / longer);
+		height = (int)(((long)icon->height * KL_DRAG_ICON_MAX + longer / 2) / longer);
+	}
+
+	/* A thin picture keeps a pixel of each side. */
+	if (width < 1)
+		width = 1;
+	if (height < 1)
+		height = 1;
+
+	/* The buffer, drawn from the picture. */
+	error = keiui_shm_make(window, &window->drag_icon_buffer, width, height);
+	if (error != 0)
+		return;
+	clipboard_icon_draw(window->drag_icon_buffer.pixels, width, height, icon);
+
+	/* The surface it is shown on. */
+	window->drag_icon = wl_compositor_create_surface(window->compositor);
+	if (window->drag_icon == NULL) {
+		keiui_shm_free(&window->drag_icon_buffer);
+		return;
+	}
+
+	/* The hot point at the same share of the shrunk picture, inside it. */
+	*hot_x = (int)(((long)icon->hot_x * width) / icon->width);
+	*hot_y = (int)(((long)icon->hot_y * height) / icon->height);
+	if (*hot_x < 0)
+		*hot_x = 0;
+	if (*hot_x >= width)
+		*hot_x = width - 1;
+	if (*hot_y < 0)
+		*hot_y = 0;
+	if (*hot_y >= height)
+		*hot_y = height - 1;
+}
+
+/*
+ * Draws the drag's picture into its buffer: each pixel the average of the
+ * picture's pixels it covers (premultiplied, so averaging keeps the
+ * colours right), the whole at CLIPBOARD_ICON_ALPHA, a faint dark edge,
+ * and the corners rounded off.
+ */
+static void
+clipboard_icon_draw(
+	uint32_t *out,
+	int width,
+	int height,
+	const struct kl_drag_icon *icon)
+{
+	unsigned long sums[4];
+	unsigned long count;
+	uint32_t pixel;
+	unsigned channel;
+	unsigned value;
+	int source_x0;
+	int source_x1;
+	int source_y0;
+	int source_y1;
+	int corner_x;
+	int corner_y;
+	int x;
+	int y;
+	int sx;
+	int sy;
+
+	/* Each pixel of the buffer, row by row. */
+	for (y = 0; y < height; y++) {
+		/* The rows of the picture this row covers (at least one). */
+		source_y0 = (int)(((long)y * icon->height) / height);
+		source_y1 = (int)(((long)(y + 1) * icon->height) / height);
+		if (source_y1 <= source_y0)
+			source_y1 = source_y0 + 1;
+
+		/* Each pixel of the row. */
+		for (x = 0; x < width; x++) {
+			/* The columns it covers (at least one). */
+			source_x0 = (int)(((long)x * icon->width) / width);
+			source_x1 = (int)(((long)(x + 1) * icon->width) / width);
+			if (source_x1 <= source_x0)
+				source_x1 = source_x0 + 1;
+
+			/* The average of the covered pixels, channel by channel. */
+			memset(sums, 0, sizeof(sums));
+			count = 0;
+			for (sy = source_y0; sy < source_y1; sy++) {
+				/* Each covered pixel of the picture's row. */
+				for (sx = source_x0; sx < source_x1; sx++) {
+					pixel = icon->pixels[(size_t)sy * (size_t)icon->width + (size_t)sx];
+					sums[0] += (pixel >> 24) & 0xffU;
+					sums[1] += (pixel >> 16) & 0xffU;
+					sums[2] += (pixel >> 8) & 0xffU;
+					sums[3] += pixel & 0xffU;
+					count++;
+				}
+			}
+
+			/* Each channel averaged, then made a little see-through (premultiplied: every channel scales). */
+			pixel = 0;
+			for (channel = 0; channel < 4U; channel++) {
+				value = (unsigned)(sums[channel] / count);
+				value = (value * CLIPBOARD_ICON_ALPHA + 127U) / 255U;
+				pixel |= (uint32_t)value << (24U - channel * 8U);
+			}
+
+			/* The edge: a faint black laid over the outermost pixels. */
+			if (x == 0 || y == 0 || x == width - 1 || y == height - 1)
+				pixel = clipboard_icon_edge(pixel);
+
+			/* The distance into a corner's square, from its outer edges. */
+			corner_x = CLIPBOARD_ICON_RADIUS - x;
+			if (width - 1 - x < x)
+				corner_x = CLIPBOARD_ICON_RADIUS - (width - 1 - x);
+			corner_y = CLIPBOARD_ICON_RADIUS - y;
+			if (height - 1 - y < y)
+				corner_y = CLIPBOARD_ICON_RADIUS - (height - 1 - y);
+
+			/* A pixel in a corner's square, outside its quarter circle, is clear. */
+			if (corner_x > 0 &&
+			    corner_y > 0 &&
+			    corner_x * corner_x + corner_y * corner_y > CLIPBOARD_ICON_RADIUS * CLIPBOARD_ICON_RADIUS)
+				pixel = 0;
+
+			/* The pixel into the buffer. */
+			out[(size_t)y * (size_t)width + (size_t)x] = pixel;
+		}
+	}
+}
+
+/* Lays the drag's picture's faint black edge over one premultiplied pixel. */
+static uint32_t
+clipboard_icon_edge(
+	uint32_t pixel)
+{
+	unsigned keep;
+	unsigned channel;
+	unsigned value;
+	uint32_t blended;
+
+	/* What shows through the edge's black: the pixel scaled by what the edge leaves. */
+	keep = 255U - CLIPBOARD_ICON_EDGE;
+	blended = 0;
+	for (channel = 0; channel < 4U; channel++) {
+		value = (unsigned)((pixel >> (24U - channel * 8U)) & 0xffU);
+		value = (value * keep + 127U) / 255U;
+		blended |= (uint32_t)value << (24U - channel * 8U);
+	}
+
+	/* Succeeded: the edge's own alpha added (its colour is black). */
+	return blended + ((uint32_t)CLIPBOARD_ICON_EDGE << 24);
+}
+
+/* Frees the drag's picture: its surface and its buffer. */
+static void
+clipboard_icon_free(
+	struct kl_window *window)
+{
+	/* The surface first, then the buffer it showed. */
+	if (window->drag_icon != NULL)
+		wl_surface_destroy(window->drag_icon);
+	window->drag_icon = NULL;
+	keiui_shm_free(&window->drag_icon_buffer);
+}
+
+/*
+ * Finds the window of the program whose drag goes on: the window itself,
+ * or another window of its application (one drag at a time); NULL when
+ * none of them drags.
+ */
+static const struct kl_window *
+clipboard_drag_owner(
+	const struct kl_window *window)
+{
+	const struct kl_window *other;
+
+	/* The window's own drag. */
+	if (window->drag_source != NULL)
+		return window;
+
+	/* A window alone has no other. */
+	if (window->app == NULL)
+		return NULL;
+
+	/* Another window of the application. */
+	for (other = window->app->windows; other != NULL; other = other->app_next) {
+		if (other->drag_source != NULL)
+			return other;
+	}
+
+	/* None drags. */
+	return NULL;
 }

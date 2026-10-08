@@ -38,7 +38,9 @@
  */
 
 #include "desktop.h"
+#include "apps-bar.h"
 #include "data.h"
+#include "dnd-state.h"
 #include "extras.h"
 #include "popup.h"
 #include "titlebar.h"
@@ -137,6 +139,10 @@ static void drag_action(struct kwl_server *server);
 static uint32_t drag_choose(uint32_t source_actions, uint32_t target_actions, uint32_t preferred, uint32_t modifiers);
 static void drag_place(struct kwl_server *server, struct kwl_object *surface, uint32_t *x, uint32_t *y);
 static void drag_end(struct kwl_server *server);
+static int drag_offer_slot(struct kwl_server *server, struct kwl_object *offer);
+static void drag_pick(struct kwl_server *server);
+static void drag_forget(struct kwl_server *server, struct kwl_object *object);
+static void drag_clear_target(struct kwl_server *server);
 static int emit_nullable(struct kwl_client *client, uint32_t id, uint32_t opcode, const char *text);
 
 /*
@@ -223,18 +229,18 @@ kwl_data_object_gone(
 			drag_end(server);
 		}
 
-		/* The target's surface or device: it hears nothing more (a new target is found at the next motion). */
-		if (object == server->dnd_target || object == server->dnd_target_device) {
-			server->dnd_target = NULL;
-			server->dnd_target_device = NULL;
-			server->dnd_offer = NULL;
-		}
+		/* The target's surface: it hears nothing more (a new target is found at the next motion). */
+		if (object == server->dnd_target)
+			drag_clear_target(server);
 
-		/* The icon, the offer, the titlebar told a part. */
+		/* One of the target's devices or offers: the others go on (ws189-p002). */
+		drag_forget(server, object);
+		if (server->dnd_active)
+			kwl_data_drag_mark(server);
+
+		/* The icon, the titlebar told a part. */
 		if (object == server->dnd_icon)
 			server->dnd_icon = NULL;
-		if (object == server->dnd_offer)
-			server->dnd_offer = NULL;
 		if (object == server->dnd_titlebar)
 			server->dnd_titlebar = NULL;
 	}
@@ -288,8 +294,10 @@ kwl_data_drag_motion(
 	if (!server->dnd_active)
 		return;
 
-	/* The target, and the frame (the icon or the badge moves with the pointer). */
+	/* The bar's icons first (spring-loading, apps-bar.c), then the target, its mark, and the frame (the icon or the badge moves with the pointer). */
+	server->dnd_on_bar = (unsigned)kwl_apps_bar_drag_motion(server);
 	drag_update(server, time);
+	kwl_data_drag_mark(server);
 	server->dirty = 1;
 }
 
@@ -305,7 +313,9 @@ kwl_data_drag_release(
 	struct kwl_object *offer;
 	struct kwl_object *source;
 	struct kwl_object *device;
+	struct kwl_object *other;
 	uint32_t action;
+	unsigned index;
 	unsigned drop;
 
 	/* Only while dragging. */
@@ -332,6 +342,14 @@ kwl_data_drag_release(
 			(void)kwl_emit(source->client, source->id, SOURCE_CANCELLED, NULL, 0U);
 		drag_end(server);
 		return;
+	}
+
+	/* The target client's other devices (its other windows', ws189-p002) hear leave: only the window that took the drag has the drop. */
+	for (index = 0; index < server->dnd_device_count; index++) {
+		other = server->dnd_devices[index];
+		if (other == NULL || other == device || other->dead)
+			continue;
+		(void)kwl_emit(other->client, other->id, DEVICE_LEAVE, NULL, 0U);
 	}
 
 	/* The drop: the target's device hears it, and its offer awaits the finish; its enter's serial may open a context menu (ask). */
@@ -379,6 +397,53 @@ kwl_data_drag_cancel(
 	if (source != NULL && !source->dead)
 		(void)kwl_emit(source->client, source->id, SOURCE_CANCELLED, NULL, 0U);
 	drag_end(server);
+}
+
+/*
+ * Decides the drag's mark (what its drop would do where the pointer is,
+ * dnd-state.c, ws189-p002) from its target's answer; a changed mark is
+ * logged and drawn.
+ */
+void
+kwl_data_drag_mark(
+	struct kwl_server *server)
+{
+	struct kwl_dnd_facts facts;
+	struct kwl_object *offer;
+	unsigned mark;
+
+	/* Only while dragging. */
+	if (!server->dnd_active)
+		return;
+
+	/* What is known of the drag: its source, its target, the target's answer, the bar. */
+	memset(&facts, 0, sizeof(facts));
+	if (server->dnd_source != NULL && !server->dnd_source->dead)
+		facts.has_source = 1;
+	if (server->dnd_target != NULL)
+		facts.has_target = 1;
+	if (server->dnd_target != NULL && server->dnd_target == server->dnd_origin)
+		facts.over_origin = 1;
+	offer = server->dnd_offer;
+	if (offer != NULL && offer->dnd_accepted) {
+		facts.accepted = 1;
+		facts.action = ACTION_COPY;
+		if (offer->version >= DATA_ACTIONS_VERSION)
+			facts.action = offer->dnd_action;
+	}
+
+	/* A rest on the bar's applications waits for a window to come forward. */
+	facts.on_bar = server->dnd_on_bar;
+
+	/* The mark; an unchanged one is not told. */
+	mark = kwl_dnd_mark(&facts);
+	if (mark == server->dnd_state)
+		return;
+
+	/* Succeeded: the new mark is logged (the tests read it) and drawn. */
+	server->dnd_state = mark;
+	server->dirty = 1;
+	printf("KWL DATA drag state=%s\n", kwl_dnd_mark_name(mark));
 }
 
 /*
@@ -637,6 +702,17 @@ offer_request(
 	if (offer->data_offered) {
 		printf("KWL DATA receive client=%llu mime=%s source=history\n", (unsigned long long)offer->client->number, text);
 		kwl_clipboard_offer_write(descriptor);
+		return 0;
+	}
+
+	/*
+	 * A drag's data goes only to the window it was dropped on (ws189-p002):
+	 * an offer of a drag not dropped on gets nothing (the reader sees the
+	 * end at once).
+	 */
+	if (offer->dnd_offer && !offer->dnd_dropped) {
+		close(descriptor);
+		printf("KWL DATA receive client=%llu mime=%s refused=not-dropped\n", (unsigned long long)offer->client->number, text);
 		return 0;
 	}
 
@@ -996,17 +1072,24 @@ start_drag(
 		return 0;
 	}
 
-	/* The drag, with no target yet. */
+	/* The drag, with no target yet; its icon's corner starts at the pointer (offsets attached from here move it). */
 	server->dnd_active = 1;
 	server->dnd_source = source;
 	server->dnd_origin = origin;
 	server->dnd_icon = icon;
-	server->dnd_target = NULL;
-	server->dnd_target_device = NULL;
-	server->dnd_offer = NULL;
+	if (icon != NULL) {
+		icon->offset_x = 0;
+		icon->offset_y = 0;
+		icon->pending_dx = 0;
+		icon->pending_dy = 0;
+	}
+
+	/* No target, no breadcrumb part, nothing to say yet. */
+	drag_clear_target(server);
 	server->dnd_titlebar = NULL;
 	server->dnd_part_id = 0;
 	server->dnd_part_detail = 0;
+	server->dnd_state = KWL_DND_STATE_NEUTRAL;
 
 	/* The source's types and actions (none without a source), for the log line the tests read. */
 	types = 0;
@@ -1025,8 +1108,11 @@ start_drag(
 		server->pointer_surface = NULL;
 	}
 
-	/* Succeeded: the surface under the pointer is the first target. */
+	/* Succeeded: no rest on the bar yet, the surface under the pointer is the first target, and the drag's mark is told. */
+	kwl_apps_bar_drag_end(server);
+	server->dnd_on_bar = (unsigned)kwl_apps_bar_drag_motion(server);
 	drag_update(server, 0U);
+	kwl_data_drag_mark(server);
 	server->dirty = 1;
 	return 0;
 }
@@ -1047,6 +1133,7 @@ offer_accept(
 	uint32_t length;
 	size_t next;
 	int error;
+	int slot;
 
 	/* The serial, then the type or a null string. */
 	if (size < 8U)
@@ -1059,9 +1146,10 @@ offer_accept(
 			return EPROTO;
 	}
 
-	/* Only the drag's current offer counts; a selection's or an old one's accept does nothing. */
+	/* Only the offers of the drag's target count; a selection's or an old one's accept does nothing. */
 	server = offer->client->server;
-	if (!server->dnd_active || offer != server->dnd_offer)
+	slot = drag_offer_slot(server, offer);
+	if (!server->dnd_active || slot < 0)
 		return 0;
 
 	/* Whether a type is accepted. */
@@ -1073,6 +1161,12 @@ offer_accept(
 	} else {
 		printf("KWL DATA drag accept client=%llu mime=(none)\n", (unsigned long long)offer->client->number);
 	}
+
+	/* The offer of the window that accepted becomes the drag's (ws189-p002); another window's refusal changes nothing. */
+	drag_pick(server);
+	kwl_data_drag_mark(server);
+	if (offer != server->dnd_offer)
+		return 0;
 
 	/* Succeeded: the source hears it as its target. */
 	source = offer->data_source;
@@ -1096,6 +1190,7 @@ offer_set_actions(
 	uint32_t actions;
 	uint32_t preferred;
 	int error;
+	int slot;
 
 	/* The two masks. */
 	if (size != 8U)
@@ -1134,10 +1229,16 @@ offer_set_actions(
 		return 0;
 	}
 
-	/* Succeeded: the drag's action is chosen again when this is its offer. */
+	/* Succeeded: the drag's action is chosen again when this is one of its target's offers. */
 	server = offer->client->server;
-	if (server->dnd_active && offer == server->dnd_offer)
+	slot = drag_offer_slot(server, offer);
+	if (server->dnd_active && slot >= 0) {
+		drag_pick(server);
 		drag_action(server);
+		kwl_data_drag_mark(server);
+	}
+
+	/* Succeeded: the actions are kept. */
 	return 0;
 }
 
@@ -1283,9 +1384,14 @@ drag_update(
 	uint32_t words[3];
 	uint32_t id;
 	uint32_t detail;
+	unsigned index;
 
-	/* The surface under the pointer, and the part of a breadcrumb there. */
+	/* The surface under the pointer, and the part of a breadcrumb there; none while the drag rests on the bar's applications (apps-bar.c). */
 	surface = drag_surface_at(server, &titlebar, &id, &detail);
+	if (server->dnd_on_bar) {
+		surface = NULL;
+		titlebar = NULL;
+	}
 
 	/* A drag inside its client has only that client's surfaces as targets. */
 	if (surface != NULL && server->dnd_source == NULL && surface->client != server->dnd_origin->client) {
@@ -1314,104 +1420,133 @@ drag_update(
 	}
 
 	/* No target: nobody to tell. */
-	if (surface == NULL || server->dnd_target_device == NULL)
+	if (surface == NULL || server->dnd_device_count == 0U)
 		return;
 
-	/* The same target hears the motion, and the action may change with Ctrl. */
+	/* The same target hears the motion on each of its client's devices, and the action may change with Ctrl. */
 	words[0] = time;
 	drag_place(server, surface, &words[1], &words[2]);
-	(void)kwl_emit(server->dnd_target_device->client, server->dnd_target_device->id, DEVICE_MOTION, words, sizeof(words));
+	for (index = 0; index < server->dnd_device_count; index++) {
+		device = server->dnd_devices[index];
+		if (device == NULL || device->dead)
+			continue;
+		(void)kwl_emit(device->client, device->id, DEVICE_MOTION, words, sizeof(words));
+	}
+
+	/* The action, which Ctrl and Alt may change. */
 	drag_action(server);
 }
 
 /*
- * Tells a new target the drag: a new offer with the source's types and
- * actions (none for a drag inside its client), then enter at the
- * pointer's place.
+ * Tells a new target the drag: each data device of its client (each
+ * window of a program has one, ws189-p002) hears a new offer of its own
+ * with the source's types and actions (none for a drag inside its
+ * client), then enter at the pointer's place.  The window the surface is
+ * takes the offer; the others refuse theirs.
  */
 static void
 drag_enter(
 	struct kwl_server *server,
 	struct kwl_object *surface)
 {
-	struct kwl_object *device;
+	struct kwl_object *object;
 	struct kwl_object *offer;
 	struct kwl_object *source;
 	uint32_t words[5];
 	uint32_t word;
+	uint32_t serial;
+	unsigned count;
 	unsigned index;
 
-	/* The client's data device. */
-	device = drag_device_of(surface->client);
-	if (device == NULL)
-		return;
-
-	/* The offer of the source's types, made by the compositor, when there is a source. */
-	offer = NULL;
+	/* One serial for the enter on every device (kept: a context menu may answer it after a drop). */
+	serial = kwl_next_serial(server);
+	server->dnd_enter_serial = serial;
 	source = server->dnd_source;
-	if (source != NULL && !source->dead) {
-		offer = kwl_create_server(device->client, KWL_DATA_OFFER, device->version);
-		if (offer == NULL)
-			return;
-		offer->data_source = source;
-		offer->dnd_offer = 1;
 
-		/* It is introduced with each type. */
-		word = offer->id;
-		(void)kwl_emit(device->client, device->id, DEVICE_DATA_OFFER, &word, sizeof(word));
-		for (index = 0; index < source->mime_count; index++)
-			(void)emit_string(device->client, offer->id, OFFER_OFFER, source->mime_types[index], -1);
+	/* Each live data device of the client, as many as are kept. */
+	count = 0;
+	for (object = surface->client->objects; object != NULL; object = object->next) {
+		if (object->kind != KWL_DATA_DEVICE || object->dead)
+			continue;
+		if (count == KWL_DND_DEVICES)
+			break;
 
-		/* And the source's actions (version 3; a source before that copies). */
-		word = ACTION_COPY;
-		if (source->version >= DATA_ACTIONS_VERSION)
-			word = source->dnd_actions;
-		if (offer->version >= DATA_ACTIONS_VERSION)
-			(void)kwl_emit(device->client, offer->id, OFFER_SOURCE_ACTIONS, &word, sizeof(word));
+		/* The offer of the source's types, made by the compositor, when there is a source. */
+		offer = NULL;
+		if (source != NULL && !source->dead) {
+			offer = kwl_create_server(object->client, KWL_DATA_OFFER, object->version);
+			if (offer == NULL)
+				continue;
+			offer->data_source = source;
+			offer->dnd_offer = 1;
+
+			/* It is introduced with each type. */
+			word = offer->id;
+			(void)kwl_emit(object->client, object->id, DEVICE_DATA_OFFER, &word, sizeof(word));
+			for (index = 0; index < source->mime_count; index++)
+				(void)emit_string(object->client, offer->id, OFFER_OFFER, source->mime_types[index], -1);
+
+			/* And the source's actions (version 3; a source before that copies). */
+			word = ACTION_COPY;
+			if (source->version >= DATA_ACTIONS_VERSION)
+				word = source->dnd_actions;
+			if (offer->version >= DATA_ACTIONS_VERSION)
+				(void)kwl_emit(object->client, offer->id, OFFER_SOURCE_ACTIONS, &word, sizeof(word));
+		}
+
+		/* Enter: the serial, the surface, the pointer's place on it and the offer. */
+		words[0] = serial;
+		words[1] = surface->id;
+		drag_place(server, surface, &words[2], &words[3]);
+		words[4] = 0;
+		if (offer != NULL)
+			words[4] = offer->id;
+		(void)kwl_emit(object->client, object->id, DEVICE_ENTER, words, sizeof(words));
+
+		/* The device and its offer are the target's. */
+		server->dnd_devices[count] = object;
+		server->dnd_offers[count] = offer;
+		count++;
 	}
 
-	/* Enter: a serial (kept: a context menu may answer it after a drop), the surface, the pointer's place on it and the offer. */
-	words[0] = kwl_next_serial(server);
-	server->dnd_enter_serial = words[0];
-	words[1] = surface->id;
-	drag_place(server, surface, &words[2], &words[3]);
-	words[4] = 0;
-	if (offer != NULL)
-		words[4] = offer->id;
-	(void)kwl_emit(device->client, device->id, DEVICE_ENTER, words, sizeof(words));
+	/* No device heard it: no target. */
+	if (count == 0U)
+		return;
 
-	/* Succeeded: the target, its device and its offer. */
+	/* Succeeded: the target, its devices, and the first pair until a window accepts. */
 	server->dnd_target = surface;
-	server->dnd_target_device = device;
-	server->dnd_offer = offer;
-	printf("KWL DATA drag enter client=%llu surface=%u offer=%u x=%d y=%d\n", (unsigned long long)device->client->number, surface->id, words[4], (int32_t)words[2] / 256, (int32_t)words[3] / 256);
+	server->dnd_device_count = count;
+	drag_pick(server);
+	printf("KWL DATA drag enter client=%llu surface=%u devices=%u output=%u x=%d y=%d\n", (unsigned long long)surface->client->number, surface->id, count, surface->output, (int32_t)words[2] / 256, (int32_t)words[3] / 256);
 }
 
-/* Tells the target that the drag left it (its offer is no longer the drag's). */
+/* Tells the target that the drag left it, on each of its client's devices (their offers are no longer the drag's). */
 static void
 drag_leave(
 	struct kwl_server *server)
 {
 	struct kwl_object *device;
+	unsigned index;
 
 	/* No target. */
-	device = server->dnd_target_device;
-	if (server->dnd_target == NULL || device == NULL) {
-		server->dnd_target = NULL;
-		server->dnd_target_device = NULL;
-		server->dnd_offer = NULL;
+	if (server->dnd_target == NULL) {
+		drag_clear_target(server);
 		return;
 	}
 
-	/* Its device hears leave. */
-	if (!device->dead)
+	/* Each device hears leave. */
+	for (index = 0; index < server->dnd_device_count; index++) {
+		device = server->dnd_devices[index];
+		if (device == NULL || device->dead)
+			continue;
 		(void)kwl_emit(device->client, device->id, DEVICE_LEAVE, NULL, 0U);
-	printf("KWL DATA drag leave client=%llu surface=%u\n", (unsigned long long)device->client->number, server->dnd_target->id);
+	}
+
+	/* The log line the tests read. */
+	printf("KWL DATA drag leave client=%llu surface=%u\n", (unsigned long long)server->dnd_target->client->number, server->dnd_target->id);
 
 	/* Succeeded: no target. */
-	server->dnd_target = NULL;
-	server->dnd_target_device = NULL;
-	server->dnd_offer = NULL;
+	drag_clear_target(server);
 }
 
 /*
@@ -1579,10 +1714,13 @@ drag_end(
 	server->dnd_source = NULL;
 	server->dnd_origin = NULL;
 	server->dnd_icon = NULL;
-	server->dnd_target = NULL;
-	server->dnd_target_device = NULL;
-	server->dnd_offer = NULL;
+	drag_clear_target(server);
+	server->dnd_state = KWL_DND_STATE_NEUTRAL;
+	server->dnd_on_bar = 0;
 	server->dirty = 1;
+
+	/* Spring-loading ends with it (apps-bar.c). */
+	kwl_apps_bar_drag_end(server);
 
 	/* Succeeded: the pointer's surface hears enter again. */
 	kwl_seat_pointer_update(server);
@@ -1613,4 +1751,136 @@ emit_nullable(
 
 	/* Succeeded: the event is queued. */
 	return 0;
+}
+
+/* Finds which of the drag's target's offers an offer is; -1 when it is none of them. */
+static int
+drag_offer_slot(
+	struct kwl_server *server,
+	struct kwl_object *offer)
+{
+	unsigned index;
+
+	/* Each offer the target's devices heard. */
+	for (index = 0; index < server->dnd_device_count; index++) {
+		if (server->dnd_offers[index] == offer && offer != NULL)
+			return (int)index;
+	}
+
+	/* None of them. */
+	return -1;
+}
+
+/*
+ * Chooses the target's device and offer the drag goes on with: the first
+ * whose window accepted a type; else, with a source, the first offer still
+ * there; else the first device still there (ws189-p002).
+ */
+static void
+drag_pick(
+	struct kwl_server *server)
+{
+	unsigned index;
+
+	/* Nothing chosen yet. */
+	server->dnd_target_device = NULL;
+	server->dnd_offer = NULL;
+
+	/* A window that accepted a type. */
+	for (index = 0; index < server->dnd_device_count; index++) {
+		if (server->dnd_offers[index] == NULL || !server->dnd_offers[index]->dnd_accepted)
+			continue;
+		server->dnd_target_device = server->dnd_devices[index];
+		server->dnd_offer = server->dnd_offers[index];
+		return;
+	}
+
+	/* An offer still there (its window has not answered). */
+	for (index = 0; index < server->dnd_device_count; index++) {
+		if (server->dnd_offers[index] == NULL || server->dnd_devices[index] == NULL)
+			continue;
+		server->dnd_target_device = server->dnd_devices[index];
+		server->dnd_offer = server->dnd_offers[index];
+		return;
+	}
+
+	/* A drag with a source whose offers have all gone has no target device; one without a source takes the first device. */
+	if (server->dnd_source != NULL)
+		return;
+	for (index = 0; index < server->dnd_device_count; index++) {
+		if (server->dnd_devices[index] == NULL)
+			continue;
+		server->dnd_target_device = server->dnd_devices[index];
+		return;
+	}
+}
+
+/*
+ * Takes a device or an offer that goes out of the drag's target: its slot
+ * is emptied (a device's offer with it), and the drag goes on with what is
+ * left; with no device left there is no target.
+ */
+static void
+drag_forget(
+	struct kwl_server *server,
+	struct kwl_object *object)
+{
+	unsigned index;
+	unsigned found;
+	unsigned left;
+
+	/* The slots that hold it. */
+	found = 0;
+	left = 0;
+	for (index = 0; index < server->dnd_device_count; index++) {
+		/* The device, with its offer. */
+		if (server->dnd_devices[index] == object) {
+			server->dnd_devices[index] = NULL;
+			server->dnd_offers[index] = NULL;
+			found = 1;
+		}
+
+		/* The offer alone (its window refused the drag). */
+		if (server->dnd_offers[index] == object) {
+			server->dnd_offers[index] = NULL;
+			found = 1;
+		}
+
+		/* The devices that still hear the drag. */
+		if (server->dnd_devices[index] != NULL)
+			left++;
+	}
+
+	/* Not one of the target's. */
+	if (!found)
+		return;
+
+	/* No device left: no target (a new one is found at the next motion). */
+	if (left == 0U) {
+		drag_clear_target(server);
+		return;
+	}
+
+	/* Succeeded: the drag goes on with what is left. */
+	drag_pick(server);
+}
+
+/* Forgets the drag's target, its devices and its offers. */
+static void
+drag_clear_target(
+	struct kwl_server *server)
+{
+	unsigned index;
+
+	/* Every slot, then the pair chosen. */
+	for (index = 0; index < KWL_DND_DEVICES; index++) {
+		server->dnd_devices[index] = NULL;
+		server->dnd_offers[index] = NULL;
+	}
+
+	/* No target, no pair. */
+	server->dnd_device_count = 0;
+	server->dnd_target = NULL;
+	server->dnd_target_device = NULL;
+	server->dnd_offer = NULL;
 }

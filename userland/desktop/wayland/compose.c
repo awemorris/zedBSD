@@ -2245,7 +2245,12 @@ compose_cursor(
 	int32_t hotspot_y;
 	int shown;
 
-	/* A drag and drop's icon under the cursor (its surface's corner at the pointer), or the compositor's badge in the glass look (data.c). */
+	/*
+	 * A drag and drop's icon under the cursor (its surface's corner at the
+	 * pointer moved by its attach offsets, ws189-p002), or the compositor's
+	 * badge in the glass look (data.c); in the glass look the mark of what
+	 * the drop would do over it (shell.c).
+	 */
 	if (server->dnd_active) {
 		surface = server->dnd_icon;
 		image = NULL;
@@ -2254,10 +2259,14 @@ compose_cursor(
 		if (image != NULL) {
 			alpha = *image;
 			alpha.draw = KWL_DRAW_ALPHA;
-			compose_quad(server, command, &alpha, server->pointer_x, server->pointer_y);
+			compose_quad(server, command, &alpha, server->pointer_x + surface->offset_x, server->pointer_y + surface->offset_y);
 		} else if (server->glass) {
 			kwl_glass_draw_drag_badge(server, command);
 		}
+
+		/* The mark over it. */
+		if (server->glass)
+			kwl_glass_draw_drag_mark(server, command, server->dnd_state);
 	}
 
 	/* A cursor that has not moved since the start is not drawn (ws035-p116). */

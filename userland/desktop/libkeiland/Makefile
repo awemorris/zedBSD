@@ -26,6 +26,7 @@ LIBKEILAND_SOURCES := userland/desktop/libkeiland/version.c userland/desktop/lib
 # <keiland/keiland.h>): the drawing layer, the scroll and the input, the window, the widgets and the file chooser.
 LIBKEILAND_SOURCES += \
 	userland/desktop/libkeiland/ui/canvas.c \
+	userland/desktop/libkeiland/ui/drop-look.c \
 	userland/desktop/libkeiland/ui/text.c \
 	userland/desktop/libkeiland/ui/icons.c \
 	userland/desktop/libkeiland/ui/icons-line.c \
