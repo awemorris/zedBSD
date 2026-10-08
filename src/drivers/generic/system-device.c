@@ -73,6 +73,7 @@ static int system_get_vmstat(uintptr_t argument);
 static void system_drop_caches(void);
 static int system_get_resources(uintptr_t argument);
 static int system_get_process(uintptr_t argument);
+static int system_get_process_arguments(uintptr_t argument);
 static int system_get_file_usage(uintptr_t argument);
 static int system_swap_ioctl(unsigned long request, uintptr_t argument);
 static int system_sleep(uintptr_t argument);
@@ -518,6 +519,9 @@ system_ioctl(
 		break;
 	case KERN_SYSTEM_GET_PROCESS:
 		error = system_get_process(argument);
+		break;
+	case KERN_SYSTEM_GET_PROCESS_ARGUMENTS:
+		error = system_get_process_arguments(argument);
 		break;
 	case KERN_SYSTEM_GET_FILE_USAGE:
 		error = system_get_file_usage(argument);
@@ -970,6 +974,68 @@ system_get_process(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Gives one process's command line (BUG-274): the line exec gave it, or
+ * the title it set instead (setproctitle), empty for a caller of another
+ * identity.  ENOENT when no process has the pid.
+ */
+static int
+system_get_process_arguments(
+	uintptr_t argument)
+{
+	struct system_process_arguments output;
+	struct process *process;
+	struct ucred *caller_credential;
+	struct ucred *target_credential;
+	unsigned long irq;
+	int32_t pid;
+	int titled;
+	int error;
+
+	/* Reads the pid asked for. */
+	error = copyin(argument, &output, sizeof(output));
+	if (error != 0)
+		return error;
+	pid = output.pid;
+
+	/* Finds the process. */
+	process = process_find_ref(pid);
+	if (process == NULL)
+		return ENOENT;
+
+	/* Copies the line under the process's lock: a title set since exec stands for it. */
+	caller_credential = cred_process_ref(curthread->proc);
+	target_credential = cred_process_ref(process);
+	kern_memset(&output, 0, sizeof(output));
+	irq = spin_lock_irqsave(&process->lock);
+	titled = kern_strcmp(process->command, process->command_initial) != 0;
+	if (titled) {
+		kern_memcpy(output.arguments, process->command, sizeof(process->command));
+	} else {
+		kern_memcpy(output.arguments, process->arguments, sizeof(output.arguments));
+	}
+	output.arguments[sizeof(output.arguments) - 1U] = '\0';
+	spin_unlock_irqrestore(&process->lock, irq);
+
+	/* Hides the line from a caller with another identity, as the command is. */
+	if (caller_credential == NULL ||
+	    target_credential == NULL ||
+	    (caller_credential->euid != 0 &&
+	     caller_credential->euid != target_credential->euid))
+		output.arguments[0] = '\0';
+	cred_release(target_credential);
+	cred_release(caller_credential);
+	process_release(process);
+
+	/* The answer's pid, version and size. */
+	output.pid = pid;
+	output.version = KERN_SYSTEM_PROCESS_ARGUMENTS_VERSION;
+	output.struct_size = sizeof(output);
+
+	/* Succeeded or not as the copy is. */
+	return copyout(&output, argument, sizeof(output));
 }
 
 /* Finds the next process that uses a path or a mount. */

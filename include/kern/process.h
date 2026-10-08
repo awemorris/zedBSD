@@ -147,6 +147,8 @@ struct process {
 	char command[64];
 	/* The title exec gave, which setproctitle(NULL) restores. */
 	char command_initial[64];
+	/* The command line exec gave, argv joined by spaces and cut to fit (BUG-274). */
+	char arguments[256];
 
 	/*
 	 * Tracing.

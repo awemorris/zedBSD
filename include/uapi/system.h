@@ -89,6 +89,24 @@ struct process_info {
 
 #define KERN_SYSTEM_PROCESS_INFO_VERSION 1U
 
+/*
+ * A process's command line (BUG-274): what exec gave it, the arguments
+ * after argv[0] each behind one space, cut to fit with the terminating NUL
+ * (KERN_SYSTEM_GET_PROCESS_ARGUMENTS); the title it set instead, when it set
+ * one (setproctitle).  The caller names the pid; the record carries the
+ * version and size of the answer.  Another identity's process answers an
+ * empty line, as KERN_SYSTEM_GET_PROCESS hides its command.
+ */
+#define KERN_SYSTEM_PROCESS_ARGUMENTS_MAX 256U
+#define KERN_SYSTEM_PROCESS_ARGUMENTS_VERSION 1U
+struct system_process_arguments {
+	int32_t pid;
+	uint32_t version;
+	uint32_t struct_size;
+	uint32_t reserved;
+	char arguments[KERN_SYSTEM_PROCESS_ARGUMENTS_MAX];
+};
+
 #define KERN_SYSTEM_FILE_USAGE_VERSION 1U
 #define KERN_SYSTEM_FILE_USAGE_PATH_MAX 256U
 #define KERN_SYSTEM_FILE_USAGE_QUERY_MOUNT 0x00000001U
@@ -284,6 +302,8 @@ _Static_assert(offsetof(struct system_usb_device_info, driver) == 32U,
  * cannot cut its own power answers EOPNOTSUPP, and the caller halts instead.
  */
 #define KERN_SYSTEM_POWEROFF _IO(KERN_SYSTEM_IOC_GROUP, 16)
+#define KERN_SYSTEM_GET_PROCESS_ARGUMENTS                                    \
+	_IOWR(KERN_SYSTEM_IOC_GROUP, 20, struct system_process_arguments)
 
 /*
  * The system's events (ws132-p002).  An open of /dev/system names the

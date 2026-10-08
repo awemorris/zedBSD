@@ -24,6 +24,9 @@
 #include <uapi/system.h>
 
 #define PS_MAX_PROCESSES 256
+
+/* Each process's command line, by its place in the snapshot (BUG-274; empty when the kernel gives none). */
+static char ps_arguments[PS_MAX_PROCESSES][KERN_SYSTEM_PROCESS_ARGUMENTS_MAX];
 #define PS_MAX_FIELDS 24
 #define PS_MAX_SELECTIONS 64
 
@@ -43,6 +46,7 @@ enum field_kind {
 	FIELD_TTY,
 	FIELD_SIZE,
 	FIELD_COMMAND,
+	FIELD_ARGUMENTS,
 };
 
 struct output_field {
@@ -60,8 +64,9 @@ static int field_definition(const char *name, struct output_field *field);
 static void usage(void);
 static int parse_selection(const char *text, struct selection *selection);
 static int snapshot(int descriptor, struct process_info *processes, size_t *count);
+static void snapshot_arguments(int descriptor, const struct process_info *process, char *arguments);
 static int selected(long value, const struct selection *selection);
-static void print_value(const struct output_field *field, const struct process_info *process);
+static void print_value(const struct output_field *field, const struct process_info *process, const char *arguments);
 static const char *uid_name(uid_t uid, char buffer[32]);
 static const char *gid_name(gid_t gid, char buffer[32]);
 static char state_name(unsigned state);
@@ -210,7 +215,7 @@ main(
 			/* Handles the field index condition. */
 			if (field_index != 0)
 				putchar(' ');
-			print_value(&fields[field_index], process);
+			print_value(&fields[field_index], process, ps_arguments[index]);
 		}
 		putchar('\n');
 	}
@@ -290,8 +295,8 @@ field_definition(
 	    {"tty", FIELD_TTY, "TTY"},
 	    {"vsz", FIELD_SIZE, "VSZ"},
 	    {"comm", FIELD_COMMAND, "COMMAND"},
-	    {"args", FIELD_COMMAND, "COMMAND"},
-	    {"command", FIELD_COMMAND, "COMMAND"},
+	    {"args", FIELD_ARGUMENTS, "COMMAND"},
+	    {"command", FIELD_ARGUMENTS, "COMMAND"},
 	};
 	size_t index;
 
@@ -405,12 +410,43 @@ snapshot(
 			return -1;
 		}
 		process->command[sizeof(process->command) - 1] = '\0';
+		snapshot_arguments(descriptor, process, ps_arguments[*count]);
 		cursor = process->pid;
 		(*count)++;
 	}
 
 	/* Reports successful completion. */
 	return 0;
+}
+
+/*
+ * Takes a process's command line (BUG-274): the kernel's line for args, or
+ * nothing when it gives none (a kernel without it, or a process gone or of
+ * another identity), when the command stands for it.
+ */
+static void
+snapshot_arguments(
+	int descriptor,
+	const struct process_info *process,
+	char *arguments)
+{
+	struct system_process_arguments line;
+
+	/* None until the kernel gives one. */
+	arguments[0] = '\0';
+	memset(&line, 0, sizeof(line));
+	line.pid = process->pid;
+	if (ioctl(descriptor, KERN_SYSTEM_GET_PROCESS_ARGUMENTS, &line) != 0)
+		return;
+
+	/* Only an answer of this version and size. */
+	if (line.version != KERN_SYSTEM_PROCESS_ARGUMENTS_VERSION ||
+	    line.struct_size != sizeof(line))
+		return;
+
+	/* Succeeded: the line, ended within its field. */
+	line.arguments[sizeof(line.arguments) - 1] = '\0';
+	memcpy(arguments, line.arguments, sizeof(line.arguments));
 }
 
 /* Supports the selected operation. */
@@ -440,7 +476,8 @@ selected(
 static void
 print_value(
 	const struct output_field *field,
-	const struct process_info *process)
+	const struct process_info *process,
+	const char *arguments)
 {
 	char buffer[32];
 	unsigned long long seconds;
@@ -494,6 +531,13 @@ print_value(
 		break;
 	case FIELD_COMMAND:
 		printf("%s", process->command[0] ? process->command : "kernel");
+		break;
+	case FIELD_ARGUMENTS:
+		/* The command line, or the command when there is none. */
+		if (arguments[0] != '\0')
+			printf("%s", arguments);
+		else
+			printf("%s", process->command[0] ? process->command : "kernel");
 		break;
 	}
 }
