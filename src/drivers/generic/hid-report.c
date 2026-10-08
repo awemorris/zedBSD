@@ -257,6 +257,19 @@ struct hid_parser {
 	 * and the checks of the whole descriptor run.
 	 */
 	size_t item_offset;
+	/*
+	 * The application collection being parsed (BUG-267): what the layout
+	 * held when it opened, and whether its fields are passed over because
+	 * one of its absolute axes has another range than an earlier
+	 * application declared (a touch monitor's pen next to a mouse of
+	 * absolute X and Y of its own, on one interface).
+	 */
+	size_t application_fields;
+	size_t application_capabilities;
+	size_t application_axes;
+	uint8_t application_pen;
+	int application_supported;
+	int application_skipped;
 };
 
 static uint32_t item_unsigned(const uint8_t *data, size_t size);
@@ -295,6 +308,8 @@ static int add_field(struct hid_parser *parser, struct hid_report_description *r
 static int add_keyboard_array_capabilities(struct hid_report_layout *layout, uint32_t minimum, uint32_t maximum);
 static int parse_input(struct hid_parser *parser, uint32_t flags);
 static void close_collection(struct hid_parser *parser);
+static void application_begin(struct hid_parser *parser);
+static int application_pass_over(struct hid_parser *parser, uint16_t code);
 static int parse_main(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
 static int parse_global(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
 static int parse_local(struct hid_parser *parser, unsigned tag, const uint8_t *data, size_t size);
@@ -573,11 +588,10 @@ add_absolute_axis(
 		if (axis->code != code)
 			continue;
 
-		/* Returns the computed result. */
-		return axis->info.minimum == minimum &&
-				       axis->info.maximum == maximum
-			       ? 0
-			       : EINVAL;
+		/* The same range again; another range is EEXIST (parse_input decides, BUG-267). */
+		if (axis->info.minimum == minimum && axis->info.maximum == maximum)
+			return 0;
+		return EEXIST;
 	}
 
 	/* Handles the layout condition. */
@@ -1156,6 +1170,7 @@ parse_input(
 	int in_touch;
 	int keyboard_array;
 	int found;
+	int passed;
 	int error;
 
 	/* Checks the operation status. */
@@ -1219,6 +1234,14 @@ parse_input(
 	}
 	bits = count * parser->global.report_size;
 	bit_offset = report->bit_count;
+
+	/* An application passed over keeps its reports' lengths, and nothing more. */
+	if (parser->application_skipped) {
+		report->bit_count += bits;
+
+		/* Succeeded: passed over. */
+		return 0;
+	}
 
 	/* Checks the active flags. */
 	if ((flags & HID_INPUT_CONSTANT) != 0) {
@@ -1359,6 +1382,16 @@ parse_input(
 			bit_offset + index * parser->global.report_size, usage,
 			usage, parser->global.logical_minimum, logical_max,
 			type, code, (uint8_t)parser->global.report_size, kind);
+
+		/* An axis an earlier application declared with another range: this application is passed over. */
+		if (error == EEXIST) {
+			passed = application_pass_over(parser, code);
+			if (!passed)
+				return EINVAL;
+			break;
+		}
+
+		/* Reports any other refusal of the field. */
 		if (error != 0)
 			return error;
 
@@ -1396,6 +1429,72 @@ close_collection(
 
 	/* One collection fewer is open. */
 	parser->collection_depth--;
+}
+
+/* Notes what the layout holds as an application collection opens, for application_pass_over. */
+static void
+application_begin(
+	struct hid_parser *parser)
+{
+	struct hid_report_layout *layout;
+
+	/* The counts and flags its fields would change. */
+	layout = parser->layout;
+	parser->application_fields = layout->field_count;
+	parser->application_capabilities = layout->capability_count;
+	parser->application_axes = layout->absolute_axis_count;
+	parser->application_pen = layout->pen;
+	parser->application_supported = parser->supported_field_seen;
+	parser->application_skipped = 0;
+}
+
+/*
+ * Passes over the application collection being parsed when the axis it
+ * redeclares came from an earlier application: the fields, capabilities
+ * and axes it added are taken back and its later items add nothing (its
+ * reports keep their lengths, and decode to nothing).  BUG-267: a touch
+ * monitor's second interface holds a pen (X 0..25920) and a mouse of
+ * absolute X and Y (0..32767); Linux makes them two input devices, this
+ * layout keeps the first.  Returns 1 when passed over, 0 when the axis is
+ * the application's own (the descriptor is then refused).
+ */
+static int
+application_pass_over(
+	struct hid_parser *parser,
+	uint16_t code)
+{
+	struct hid_report_layout *layout;
+	struct hid_report_description *report;
+	size_t index;
+
+	/* Only outside the first application, and only for an axis an earlier one declared. */
+	layout = parser->layout;
+	if (parser->collection_depth == 0U)
+		return 0;
+	for (index = 0; index < parser->application_axes; index++) {
+		if (layout->absolute_axes[index].code == code)
+			break;
+	}
+
+	/* An axis this application declared first is its own. */
+	if (index == parser->application_axes)
+		return 0;
+
+	/* The fields it added, taken from their reports. */
+	for (index = parser->application_fields; index < layout->field_count; index++) {
+		report = find_report(layout, layout->fields[index].report_id);
+		if (report != NULL && report->field_count > 0U)
+			report->field_count--;
+	}
+
+	/* The layout as the application found it, and nothing more from it. */
+	layout->field_count = parser->application_fields;
+	layout->capability_count = parser->application_capabilities;
+	layout->absolute_axis_count = parser->application_axes;
+	layout->pen = parser->application_pen;
+	parser->supported_field_seen = parser->application_supported;
+	parser->application_skipped = 1;
+	return 1;
 }
 
 /* Takes one main item into the layout. */
@@ -1445,6 +1544,10 @@ parse_main(
 					parser->collection_usages[parser->collection_depth] =
 						parser->local.usages[0].minimum;
 				}
+
+				/* An application collection: the layout as it opens. */
+				if (parser->collection_depth == 0U)
+					application_begin(parser);
 
 				parser->collection_depth++;
 
@@ -2953,6 +3056,8 @@ add_touch_field(
 	struct hid_report_layout *layout;
 	unsigned item;
 	uint16_t code;
+	int32_t minimum;
+	int32_t maximum;
 	int pad;
 	int error;
 
@@ -3019,9 +3124,24 @@ add_touch_field(
 		}
 	}
 
+	/*
+	 * A Contact Identifier names a finger; it is not a measure, and any
+	 * value its bits hold is taken (BUG-267: a touch monitor declares its
+	 * 16-bit identifier with the Logical Maximum 1 of the Tip Switch before
+	 * it, and its second finger's identifier 2 refused the whole report).
+	 */
+	minimum = parser->global.logical_minimum;
+	maximum = logical_maximum;
+	if (item == HID_TOUCH_ITEM_CONTACT_ID) {
+		minimum = 0;
+		maximum = INT32_MAX;
+		if (parser->global.report_size < 31U)
+			maximum = (int32_t)((UINT32_C(1) << parser->global.report_size) - 1U);
+	}
+
 	/* Adds the field; the touch state machine declares its own events. */
 	error = add_field(parser, report, bit_offset, usage, usage,
-			  parser->global.logical_minimum, logical_maximum,
+			  minimum, maximum,
 			  HID_REPORT_TYPE_TOUCH, code,
 			  (uint8_t)parser->global.report_size, HID_FIELD_TOUCH);
 	if (error != 0)
