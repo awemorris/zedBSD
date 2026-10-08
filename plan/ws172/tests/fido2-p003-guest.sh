@@ -5,7 +5,7 @@
 # up with kei (password "kei") selected.
 #  0. /usr/libexec/passkey-fido2 is root's alone (-r-x------); the _passkey account is there.
 #  1. kei gets a key's line in /etc/passkey (root's, 0600; a made-up credential: no key holds it).
-#  2. The greeter offers the password and the key (KWL GREETER styles=5): greeter.png.  A click on the link under the
+#  2. The greeter offers the password and the key (KWL GREETER styles=5): greeter.png.  A click on its pill under the
 #     field takes the key (style=4, "Security key PIN"): key.png.  A PIN of three is not sent ("at least four").
 #  3. A PIN of four is sent: passkey-fido2 finds no key that holds the credential (the test kernel's loopback key does
 #     not speak CTAP2): SESSIOND AUTH fail ... reason=no-key, the greeter says so: no-key.png.
@@ -83,11 +83,14 @@ expect_log /var/log/greeter.log 'KWL GREETER open .*selected=kei' 60
 expect_log /var/log/greeter.log 'KWL GREETER styles=5$' 10
 sleep 2
 check "$out/greeter.png" >/dev/null
-link=$(guest "grep -E 'KWL GREETER link ' /var/log/greeter.log | tail -1" | tail -1)
-x=$(printf '%s\n' "$link" | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \3/p' | awk '{print $1 + $2 / 2}')
-y=$(printf '%s\n' "$link" | sed -n 's/.* y=\([0-9]*\) width=[0-9]* height=\([0-9]*\).*/\1 \2/p' | awk '{print $1 + $2 / 2}')
-pointer move "${x:-640}" "${y:-500}" down sleep 60 up
-expect_log /var/log/greeter.log 'KWL GREETER style=4$' 5
+# The styles side by side under the field (ws172-p007): the middle of a style's pill ("KWL GREETER style-at style=N").
+style_at() {
+	guest "grep -E 'KWL GREETER style-at style=$1 ' /var/log/greeter.log | tail -1" | tail -1 |
+	    sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p' | awk '{print $1 + $3 / 2, $2 + $4 / 2}'
+}
+set -- $(style_at 4)
+pointer move "${1:-700}" "${2:-500}" down sleep 60 up
+expect_log /var/log/greeter.log 'KWL GREETER style=4( via=choice)?$' 5
 pointer move 1270 790 sleep 300
 check "$out/key.png" >/dev/null
 keys '123' '\n'
@@ -103,8 +106,9 @@ pointer move 1270 790 sleep 300
 check "$out/no-key.png" >/dev/null
 
 # 4. The password logs in; Settings' Users page lists the key.
-pointer move "${x:-640}" "${y:-500}" down sleep 60 up
-expect_log /var/log/greeter.log 'KWL GREETER style=1$' 5
+set -- $(style_at 1)
+pointer move "${1:-580}" "${2:-500}" down sleep 60 up
+expect_log /var/log/greeter.log 'KWL GREETER style=1( via=choice)?$' 5
 keys 'kei' '\n'
 expect_log /var/log/sessiond.log 'SESSIOND AUTH ok user=kei uid=1000 style=password' 10
 expect_log $session 'KWL HANDOFF go=1' 20

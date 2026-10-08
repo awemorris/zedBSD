@@ -92,7 +92,10 @@
 #define GREETER_UID_FIRST	1000U
 #define GREETER_UID_LAST	59999U
 
-/* The styles the lock screen's card may offer side by side (ws187-p003): the password, the PIN and a security key. */
+/* Marks a parameter a function does not use. */
+#define UNUSED_PARAMETER(name)	((void)(name))
+
+/* The styles the card may offer side by side (ws187-p003, ws172-p007): the password, the PIN and a security key. */
 #define GREETER_STYLES		3U
 
 /* The card: its width, its corner, a user row's height, and the password field's height. */
@@ -1101,7 +1104,7 @@ greeter_hit(
 	if (inside)
 		return GREETER_HIT_LOGIN;
 
-	/* One of the lock screen's styles, where the login screen has its link (ws187-p003). */
+	/* One of the styles offered, in the link's line (ws187-p003, ws172-p007). */
 	for (index = 0U; index < layout->style_count; index++) {
 		inside = greeter_inside(layout->styles[index], server->pointer_x, server->pointer_y);
 		if (inside) {
@@ -1110,13 +1113,13 @@ greeter_hit(
 		}
 	}
 
-	/* A lock screen that offers its styles has no link, and no power buttons. */
-	if (layout->style_count != 0U)
+	/* A lock screen has no power buttons. */
+	if (server->locked && layout->style_count != 0U)
 		return GREETER_HIT_NONE;
 
-	/* The login screen's link, and the power buttons. */
+	/* The link, where the styles are not side by side, and the login screen's power buttons. */
 	inside = greeter_inside(layout->link, server->pointer_x, server->pointer_y);
-	if (inside && (greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) != 0U)
+	if (inside && layout->style_count == 0U && (greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) != 0U)
 		return GREETER_HIT_SWITCH;
 	inside = greeter_inside(layout->restart, server->pointer_x, server->pointer_y);
 	if (inside)
@@ -1243,7 +1246,7 @@ greeter_draw_card(
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, greeter_message, GREETER_CARD_WIDTH - 32, warning);
 	}
 
-	/* The lock screen offers its styles side by side instead of the link (ws187-p003). */
+	/* The styles side by side instead of the link (ws187-p003, ws172-p007). */
 	if (layout->style_count != 0U) {
 		greeter_draw_styles(server, command, layout);
 		return;
@@ -1986,7 +1989,7 @@ greeter_styles_take(
 	greeter_layout(server, &layout);
 	printf("KWL GREETER link x=%d y=%d width=%d height=%d\n", layout.link[0], layout.link[1], layout.link[2], layout.link[3]);
 
-	/* Where the lock screen's styles are, for the tests' pointer too (ws187-p003). */
+	/* Where the styles are, for the tests' pointer too (ws187-p003, ws172-p007). */
 	for (index = 0U; index < layout.style_count; index++)
 		printf("KWL GREETER style-at style=%u x=%d y=%d width=%d height=%d\n", layout.style_bits[index], layout.styles[index][0], layout.styles[index][1], layout.styles[index][2], layout.styles[index][3]);
 
@@ -2026,10 +2029,10 @@ greeter_style_switch(
 }
 
 /*
- * Lays out the lock screen's styles side by side in the link's line
- * (ws187-p003): those sessiond offers now, in the order password, PIN,
- * security key, each an equal part of the line; none on the login screen
- * or while only the password is offered.
+ * Lays out the styles side by side in the link's line (ws187-p003 on the
+ * lock screen, ws172-p007 on the login screen): those sessiond offers the
+ * user now, in the order password, PIN, security key, each an equal part of
+ * the line; none while only the password is offered.
  */
 static void
 greeter_layout_styles(
@@ -2045,12 +2048,10 @@ greeter_layout_styles(
 	unsigned index;
 	unsigned count;
 
-	/* Offers none on the login screen. */
-	layout->style_count = 0U;
-	if (!server->locked)
-		return;
+	UNUSED_PARAMETER(server);
 
 	/* Offers none until sessiond offers more than the password. */
+	layout->style_count = 0U;
 	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) == 0U)
 		return;
 
