@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p002 -->
 # ws188-p002: 実装: Settings の About・Storage・Users・Sharing・Welcome・Languages を libkeiland 経由に
 
-Status: in-progress（q891-i01、P2、2026-10-08。実装と host の確認まで。T1 の依頼は Q1 へ）
+Status: cleared（2026-10-08 Q1、T1-427 PASS）
 Disposition: normal
 Parent: [WS188](../ws.md)
 設計: [p001](../phase001/phase.md)（第 3 版）
@@ -41,3 +41,8 @@ Parent: [WS188](../ws.md)
 - 削除の依頼（Q1）: `userland/desktop/settings/about.c`（machine.c と backend へ移した）、`plan/ws089/tests/host-about.sh`・`host-about.c`（case は plan/ws188/tests/host-machine.c へ移した）、`plan/ws089/tests/host-build-ws188tmp.sh`（P2 が確認のために誤って tree に作った写し）。
 - about.c が消えるまで `plan/ws089/tests/host-build.sh` は about.c の compile で止まる（消えれば通る）。
 - T1: AAT の apps.settings.about・users-page・login-language・manage-users・pages、FreeBSD の keiland-freebsd.mk の build。
+
+
+## Q1 の判定（2026-10-08）
+
+T1-427 PASS（標準 AAT image、tree dba0f7130）: about・login-language・single-instance・files.open-from-home が pass、users-page・manage-users・pages は needs-person（PNG を Q1 が目視、Storage の頁は disk の card が出て「Reading the disks...」でない）。`KWL SYSTEM machine answer ... result=0`。cleared。
