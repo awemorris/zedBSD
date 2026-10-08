@@ -3,7 +3,7 @@
 # ws177-p016: Mail の IMAP・SMTP の互換（案 N）
 
 Parent: [WS177](../ws.md)
-Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-422 PASS（apps.mailer.read-compose・sign-in-code が fail なし、PNG は Q1 の目視））（旧: test-wait（2026-10-08 P1 q889 の 3: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT の回帰））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-422 PASS（apps.mailer.read-compose・sign-in-code が fail なし、PNG は Q1 の目視））（旧: test-wait（2026-10-08 P1 q889 の 3: 実装・host PASS・zedBSD の build warning 0。QEMU は T1 の AAT の回帰）））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q889 の 3（P1、2026-10-08）

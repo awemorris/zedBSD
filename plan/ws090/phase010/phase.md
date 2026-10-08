@@ -2,7 +2,7 @@
 
 # ws090-p010: Files の欄を libkeiland の部品へ（名前の変更を kl_field に）
 
-Status: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-261 の regress PASS、T1-373 (2) で grid・list の日本語の改名（a.txt から 日本.txt）、同名の toast、Esc で取り消し、欄の中の click で caret、外の click で確定、desktop の icon の改名（2 回目で 日本、1 回目は IME が切れていた T1 の操作）を確認）（旧: planned（2026-10-06 P1 が作成、q817））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: test-wait → Q1 の判定待ち（2026-10-08 q902 P1 の照合: T1-261 の regress PASS、T1-373 (2) で grid・list の日本語の改名（a.txt から 日本.txt）、同名の toast、Esc で取り消し、欄の中の click で caret、外の click で確定、desktop の icon の改名（2 回目で 日本、1 回目は IME が切れていた T1 の操作）を確認）（旧: planned（2026-10-06 P1 が作成、q817）））
 Disposition: normal
 Parent: [WS090](../ws.md)、設計 [design.md](../design.md) §10
 Queue: q817

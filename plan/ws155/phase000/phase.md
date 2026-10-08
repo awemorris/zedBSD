@@ -2,7 +2,7 @@
 
 # ws155-p000: Calendar の UI の mock
 
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: mock は T1-179・T1-179c で撮影、ユーザーの再指示は p001 の設計に反映、本物の app は p002〜p004 で cleared（T1-297）。cleared か置き換えの canceled かは Q1）（旧: in-progress（実装・host の PNG と animation の GIF・build は済み。QEMU は T1 待ち。ユーザーが mock を見て再指示する））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: mock は T1-179・T1-179c で撮影、ユーザーの再指示は p001 の設計に反映、本物の app は p002〜p004 で cleared（T1-297）。cleared か置き換えの canceled かは Q1）（旧: in-progress（実装・host の PNG と animation の GIF・build は済み。QEMU は T1 待ち。ユーザーが mock を見て再指示する）））
 Disposition: normal
 Parent: [WS155](../ws.md)
 Queue: q745（2026-10-05、P2）

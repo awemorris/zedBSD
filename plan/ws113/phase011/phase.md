@@ -3,7 +3,7 @@
 # ws113-p011: i915 の 2 つ目の出力（Keiland の指示での scanout）
 
 Parent: [WS113](../ws.md)
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 のユーザーの UAT 2026-10-08「HDMIに出力されました。extendもmirrorも動いています。」（ws113-p014 の由来）で 2 出力の同時は実機で動いた。手順 (3) の HDMI の抜きの head の release・DBUF の log は未確認）（旧: in-progress（2026-10-07 q856-i01、P2: 設計・敵対的 review の反映・実装・build（warning 0）・host の規則の試験まで。実機 5330 の eDP + HDMI は未））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2）。抜きの head の release は p008 へ）（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 5330 のユーザーの UAT 2026-10-08「HDMIに出力されました。extendもmirrorも動いています。」（ws113-p014 の由来）で 2 出力の同時は実機で動いた。手順 (3) の HDMI の抜きの head の release・DBUF の log は未確認）（旧: in-progress（2026-10-07 q856-i01、P2: 設計・敵対的 review の反映・実装・build（warning 0）・host の規則の試験まで。実機 5330 の eDP + HDMI は未）））
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue: q856（q856-i01、BUG-254 の後）

@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p001 -->
 # ws190-p001: 設計 — 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・編集の bar）
 
-Status: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 2 版、review 1 を反映、§7 の Q1・Q2 は Q1 が回答、p002・p003 がこの設計で実装済み）（旧: in-progress（第 2 版: design-reviewer の review 1 を反映。§7 の Q1・Q2 は 2026-10-08 Q1 が回答。p002 は進めてよい（Q1）））
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc §2））（旧: in-progress → Q1 の判定待ち（2026-10-08 q902 P1 の照合: 第 2 版、review 1 を反映、§7 の Q1・Q2 は Q1 が回答、p002・p003 がこの設計で実装済み）（旧: in-progress（第 2 版: design-reviewer の review 1 を反映。§7 の Q1・Q2 は 2026-10-08 Q1 が回答。p002 は進めてよい（Q1））））
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q899（P1、2026-10-08 Q1 の依頼）
