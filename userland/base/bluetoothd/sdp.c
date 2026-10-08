@@ -169,6 +169,7 @@ btd_sdp_input(
 	size_t parameters;
 	size_t count;
 	size_t continuation;
+	uint16_t transaction;
 	int same;
 	int error;
 
@@ -177,6 +178,8 @@ btd_sdp_input(
 		sdp->why = "malformed";
 		return BTD_SDP_FAILED;
 	}
+
+	/* The parameters' length must be what follows the header. */
 	parameters = sdp_be16(&pdu[3]);
 	if (parameters != length - SDP_HEADER) {
 		sdp->why = "malformed";
@@ -188,7 +191,10 @@ btd_sdp_input(
 		sdp->why = "protocol";
 		return BTD_SDP_FAILED;
 	}
-	if (sdp_be16(&pdu[1]) != sdp->transaction) {
+
+	/* Another transaction is not the answer to the request out. */
+	transaction = sdp_be16(&pdu[1]);
+	if (transaction != sdp->transaction) {
 		sdp->why = "protocol";
 		return BTD_SDP_FAILED;
 	}
@@ -198,11 +204,15 @@ btd_sdp_input(
 		sdp->why = "malformed";
 		return BTD_SDP_FAILED;
 	}
+
+	/* The count within the parameters. */
 	count = sdp_be16(&pdu[SDP_HEADER]);
 	if (count > parameters - 3U) {
 		sdp->why = "malformed";
 		return BTD_SDP_FAILED;
 	}
+
+	/* The continuation state's length within the most, ending the parameters. */
 	continuation = pdu[SDP_HEADER + 2U + count];
 	if (continuation > SDP_CONTINUATION_MAX || 2U + count + 1U + continuation != parameters) {
 		sdp->why = "malformed";
@@ -214,6 +224,8 @@ btd_sdp_input(
 		sdp->why = "descriptor";
 		return BTD_SDP_FAILED;
 	}
+
+	/* Added after what came before. */
 	memcpy(&sdp->lists[sdp->used], &pdu[SDP_HEADER + 2U], count);
 	sdp->used += count;
 
@@ -483,6 +495,8 @@ sdp_check(
 			if (error != 0)
 				return error;
 		}
+
+		/* The next element. */
 		offset += element.size;
 	}
 
@@ -522,6 +536,7 @@ sdp_uuid(
 	uint32_t *value)
 {
 	static const uint8_t base[12] = { 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb };
+	int different;
 
 	/* Refuses another type. */
 	if (element->type != SDP_TYPE_UUID)
@@ -532,13 +547,16 @@ sdp_uuid(
 		*value = sdp_be16(element->value);
 		return 0;
 	}
+
+	/* The 32-bit form. */
 	if (element->length == 4U) {
 		*value = ((uint32_t)element->value[0] << 24) | ((uint32_t)element->value[1] << 16) | ((uint32_t)element->value[2] << 8) | element->value[3];
 		return 0;
 	}
 
 	/* A long one off the base UUID names no class bluetoothd knows. */
-	if (memcmp(&element->value[4], base, sizeof(base)) != 0)
+	different = memcmp(&element->value[4], base, sizeof(base));
+	if (different != 0)
 		return EINVAL;
 
 	/* Succeeded: its first 32 bits. */
