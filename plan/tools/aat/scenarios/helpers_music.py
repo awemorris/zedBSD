@@ -47,15 +47,15 @@ def sized(window, mark, regex):
 	return aatlib.Window(window.client, window.surface, window.x, window.y, width, height, window.docked)
 
 
-def make_songs(item, songs=SONGS) -> None:
-	"""The songs (the two, or more), made on this host and put in kei's Music folder."""
+def make_songs(item, songs=SONGS, seconds=8) -> None:
+	"""The songs (the two, or more, of a number of seconds), made on this host and put in kei's Music folder."""
 	folder = run.outdir / "music"
 	folder.mkdir(parents=True, exist_ok=True)
 	cover = folder / "cover.png"
 	subprocess.run(["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", "color=c=orange:s=240x240", "-frames:v",
 		"1", str(cover)], check=True, timeout=60)
 	for name, frequency, title, number in songs:
-		words = ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"sine=frequency={frequency}:duration=8"]
+		words = ["ffmpeg", "-loglevel", "error", "-y", "-f", "lavfi", "-i", f"sine=frequency={frequency}:duration={seconds}"]
 		if number == 1:
 			words += ["-i", str(cover), "-map", "0", "-map", "1", "-c:v", "png", "-disposition:v", "attached_pic"]
 		words += ["-c:a", "aac", "-b:a", "96k", "-metadata", f"title={title}", "-metadata", "artist=AAT", "-metadata",
@@ -158,7 +158,9 @@ def kill_audiod() -> str:
 @run.define("apps.music.failures")
 def failures(item):
 	try:
-		make_songs(item, SONGS + (THIRD,))
+		# Songs of 20 s: the first must still play when Next is pressed after the stream's loss and its reopening
+		# (T1-455: with 8 s songs the first ended by itself, Next went past the last song and stopped).
+		make_songs(item, SONGS + (THIRD,), seconds=20)
 		run.sh(f"printf 'not an mp4\\n' > {NOT_A_SONG}; chown kei {NOT_A_SONG}; rm -f {MOVED}")
 		mark = run.mark()
 		window = run.launch(item, "Music")
