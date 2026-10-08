@@ -111,6 +111,7 @@ void pd_spool_close(const char *dir);
 int pd_connect(const char *host, unsigned port, int *fd, const char **detail);
 int pd_write_all(int fd, const void *data, size_t size);
 int pd_send_file(int fd, struct pd_job *job);
+int pd_send_file_chunked(int fd, struct pd_job *job);
 ssize_t pd_read_some(int fd, void *data, size_t size);
 
 /* IPP (ipp.c). */

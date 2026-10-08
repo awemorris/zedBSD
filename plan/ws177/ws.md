@@ -60,3 +60,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p029](phase029/phase.md) | 案 T の 3: Ogg の reader（Opus・Vorbis・Theora、granule、二分の seek） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p028 |
 | [ws177-p030](phase030/phase.md) | 案 T の 4: AVI の reader（RIFF・hdrl/strl・movi・idx1） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p029 |
 | [ws177-p031](phase031/phase.md) | 案 T の 5: videoplayer・Music を libmedia へ（media_ の接頭辞、decoder の ops の表、落とした packet の知らせ）（backlog-p2 119） | in-progress（2026-10-08 P2 q906 実装・host PASS・build） | ws177-p030 |
+| [ws177-p032](phase032/phase.md) | printd の IPP の Print-Job の本体を chunked で、job-state-reasons の log、busy でも job-id があれば送り直さない（BUG-271、実機は未実施） | in-progress（2026-10-08 P2 実装・host（mock）PASS・build） | ws177-p022 |

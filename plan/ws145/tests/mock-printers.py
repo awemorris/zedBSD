@@ -7,7 +7,7 @@ Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
 The IPP printer answers only at /ipp/print (other paths are 404, so that the daemon looks for the path), names itself
 "Mock Printer", takes application/pdf, keeps each Print-Job's document as FOLDER/ipp-<n>.pdf and its job-name in
-FOLDER/ipp-<n>.name, and reports a job processing at the first Get-Job-Attributes and completed after.  The LPD queue
+FOLDER/ipp-<n>.name (and how its body came, "chunked" or "length", in FOLDER/ipp-<n>.transfer), and reports a job processing at the first Get-Job-Attributes and completed after.  The LPD queue
 keeps each data file as FOLDER/lpd-<n>.data and each control file as FOLDER/lpd-<n>.control.
 """
 import socketserver
@@ -55,9 +55,22 @@ class Ipp(BaseHTTPRequestHandler):
 	def log_message(self, *args):
 		pass
 
+	def read_body(self):
+		"""The request's body, sent with a Content-Length or in chunks (ws177-p032: printd sends a document so)."""
+		if "chunked" not in self.headers.get("Transfer-Encoding", "").lower():
+			return self.rfile.read(int(self.headers.get("Content-Length", "0"))), "length"
+		body = b""
+		while True:
+			size = int(self.rfile.readline().split(b";")[0].strip(), 16)
+			if size == 0:
+				while self.rfile.readline() not in (b"\r\n", b"\n", b""):
+					pass
+				return body, "chunked"
+			body += self.rfile.read(size)
+			self.rfile.readline()
+
 	def do_POST(self):
-		length = int(self.headers.get("Content-Length", "0"))
-		body = self.rfile.read(length)
+		body, transfer = self.read_body()
 		if self.path != "/ipp/print":
 			self.send_response(404)
 			self.send_header("Content-Length", "0")
@@ -76,6 +89,7 @@ class Ipp(BaseHTTPRequestHandler):
 			(FOLDER / f"ipp-{number}.pdf").write_bytes(document)
 			(FOLDER / f"ipp-{number}.name").write_bytes(attributes.get("job-name", [b""])[0])
 			(FOLDER / f"ipp-{number}.user").write_bytes(attributes.get("requesting-user-name", [b""])[0])
+			(FOLDER / f"ipp-{number}.transfer").write_text(transfer)
 			groups += b"\x02" + attribute(0x21, "job-id", struct.pack(">I", 100 + number)) + attribute(0x23, "job-state", struct.pack(">I", 3))
 		elif operation == 0x0009:
 			job = struct.unpack(">I", attributes["job-id"][0])[0]

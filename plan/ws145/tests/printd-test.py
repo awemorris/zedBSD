@@ -91,6 +91,8 @@ def main():
 	got = (printers / "ipp-1.pdf").read_bytes() if (printers / "ipp-1.pdf").exists() else b""
 	check("ipp-document", hashlib.sha256(got).hexdigest() == hashlib.sha256(document).hexdigest(), f"{len(got)} bytes")
 	check("ipp-name", (printers / "ipp-1.name").read_bytes() == b"Report one", "job-name")
+	transfer = (printers / "ipp-1.transfer").read_text() if (printers / "ipp-1.transfer").exists() else ""
+	check("ipp-chunked", transfer == "chunked", f"the Print-Job's body came by {transfer!r} (ws177-p032, BUG-271)")
 
 	# The same to the LPD queue.
 	with open(FOLDER / "doc.pdf", "rb") as file:
