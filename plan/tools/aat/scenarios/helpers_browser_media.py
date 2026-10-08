@@ -5,7 +5,8 @@ Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
     helpers_browser_media.py --outdir OUTDIR [--only REGEX] -- TARGET-OPTIONS     (--list: the ids)
 
-The video is the runner's sample (/tmp/aat-samples/sample.mp4: 12 s, MPEG-4 Part 2 640x360 and AAC); the page is
+The video is the runner's sample (/tmp/aat-samples/sample.mp4: 12 s, MPEG-4 Part 2 640x360 and AAC; the browser
+plays no sound until beta 3, WS191 H3 (c)); the page is
 written here and put in /tmp/aat-work.  The browser's libmedia lines are "BROWSER MEDIA" lines.  The page has no
 style: the video is at the body's margin (8, 8) of the page, which starts at the window's body.
 """
@@ -23,7 +24,7 @@ PAGE = f"{aatlib.WORK}/video.html"
 
 @run.define("apps.browser.video")
 def video(item):
-	# The page: the sample with controls, with sound (not muted).
+	# The page: the sample with controls, not muted (the browser plays no sound until beta 3).
 	page = run.outdir / "video.html"
 	page.write_text("<!doctype html><title>Video</title>"
 		f"<video id=v src=\"{aatlib.SAMPLES}/sample.mp4\" controls></video><p>Under the video.</p>\n")
@@ -39,7 +40,11 @@ def video(item):
 	opened = run.wait(r"BROWSER MEDIA MEDIA open width=640 height=360 .*", mark, 20)
 	item.step("the page with the video", opened or "")
 	item.check(opened and "video=mpeg4" in opened, "the video did not open")
-	item.check(opened and "audio=aac" in opened, "the video's sound did not open (audiod)")
+	# The browser has no sound until beta 3 (WS191 H3 (c): libmedia left the sound out): audio=none is the
+	# expected line now, audio=aac once the sound comes back.
+	sound = re.search(r"audio=(\S+)", opened).group(1) if opened and "audio=" in opened else ""
+	item.step("the video's sound", sound or "no audio= field")
+	item.check(sound in ("none", "aac"), f"the video's sound is neither none (until beta 3) nor aac ({sound})")
 	time.sleep(1.0)
 	run.shot(item, "paused")
 	# A click on the video plays it; a few seconds later another pauses it.
