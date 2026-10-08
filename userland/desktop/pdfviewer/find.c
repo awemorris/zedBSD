@@ -815,6 +815,81 @@ pv_select_copy(
 }
 
 /*
+ * Opens the find field inside the window (ws177-p043: Ctrl+F or Edit >
+ * Find without the titlebar's field) and asks main.c to give it the
+ * keyboard.
+ */
+void
+pv_find_bar_open(
+	struct pv_app *app)
+{
+	/* A document to look in. */
+	if (!app->has_document)
+		return;
+
+	/* Open, with the keyboard asked for (logged). */
+	app->bar_open = 1;
+	app->want_bar_focus = 1;
+	app->dirty = 1;
+	pv_log("FIND bar open");
+}
+
+/*
+ * Closes the find field inside the window (Esc in it): the marks of Find
+ * go with it.
+ */
+void
+pv_find_bar_close(
+	struct pv_app *app)
+{
+	/* Nothing open. */
+	if (!app->bar_open)
+		return;
+
+	/* Closed, the places found no longer marked (logged). */
+	app->bar_open = 0;
+	app->want_bar_focus = 0;
+	app->find_found = 0;
+	app->dirty = 1;
+	pv_log("FIND bar close");
+}
+
+/*
+ * Gives the place of the find field inside the window: its panel at the
+ * top right of the pages' part (window coordinates), and within it the
+ * field and, at its right, the room for the place's number.
+ */
+void
+pv_find_bar_place(
+	const struct pv_app *app,
+	struct pv_bar_place *place)
+{
+	int width;
+
+	/* The panel: at most PV_BAR_WIDTH, within the window less a margin either side. */
+	width = PV_BAR_WIDTH;
+	if (width > app->window_width - 2 * PV_MARGIN)
+		width = app->window_width - 2 * PV_MARGIN;
+	if (width < 0)
+		width = 0;
+	place->x = app->window_width - PV_MARGIN - width;
+	place->y = PV_MARGIN;
+	place->width = width;
+	place->height = PV_BAR_HEIGHT;
+
+	/* The field, the panel less its padding and the number's room. */
+	place->field_x = place->x + PV_BAR_PADDING;
+	place->field_y = place->y + PV_BAR_PADDING;
+	place->field_width = width - 3 * PV_BAR_PADDING - PV_BAR_STATUS;
+	if (place->field_width < 0)
+		place->field_width = 0;
+	place->field_height = PV_BAR_HEIGHT - 2 * PV_BAR_PADDING;
+
+	/* The number, right of the field. */
+	place->status_x = place->field_x + place->field_width + PV_BAR_PADDING;
+}
+
+/*
  * Lets the selection and the marks of Find go (Esc, another document).
  */
 void

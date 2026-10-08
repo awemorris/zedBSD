@@ -73,6 +73,30 @@ struct pv_titlebar {
 	int shown;
 };
 
+/*
+ * The find field inside the window (bar.c, ws177-p043): its widgets and
+ * field, its font, the canvas over the frame it is drawn on, whether the
+ * field has the keyboard, and the finger that went down on it.
+ */
+struct pv_bar {
+	struct kl_ui *ui;
+	struct kl_field field;
+	struct kl_text text;
+	int text_ready;
+	struct kl_canvas canvas;
+	int canvas_ready;
+	int focused;
+	int touching;
+	int32_t touch_id;
+};
+
+/* The find field inside the window (bar.c). */
+int pv_bar_open(struct pv_bar *bar, const char *path);
+void pv_bar_close(struct pv_bar *bar);
+void pv_bar_focus(struct pv_bar *bar, struct pv_app *app);
+int pv_bar_input(struct pv_bar *bar, struct pv_app *app, const struct kl_window_event *event);
+int pv_bar_draw(struct pv_bar *bar, struct pv_app *app, struct kl_window *window, uint32_t *pixels, size_t stride, int width, int height, uint64_t now_us);
+
 /* ws128-p004: the titlebar's find field gets the keyboard; its text's inputs go to the viewer. */
 void pv_titlebar_focus_find(struct pv_titlebar *titlebar);
 void pv_titlebar_input(struct pv_titlebar *titlebar, struct pv_app *app, const struct kl_window_event *input);

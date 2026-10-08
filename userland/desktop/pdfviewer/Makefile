@@ -6,7 +6,7 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # (ws090-p008).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 PDFVIEWER_SOURCES := userland/desktop/pdfviewer/main.c userland/desktop/pdfviewer/menu.c \
-	userland/desktop/pdfviewer/titlebar.c userland/desktop/pdfviewer/view.c userland/desktop/pdfviewer/find.c \
+	userland/desktop/pdfviewer/titlebar.c userland/desktop/pdfviewer/bar.c userland/desktop/pdfviewer/view.c userland/desktop/pdfviewer/find.c \
 	userland/desktop/pdfviewer/draw.c userland/desktop/pdfviewer/document.c \
 	userland/desktop/pdfviewer/canvas.c \
 	userland/desktop/pdfviewer/text.c userland/desktop/pdfviewer/touch.c userland/desktop/picture/png-write.c

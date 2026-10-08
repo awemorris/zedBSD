@@ -2,7 +2,7 @@
 # The independent FreeBSD build of pdfviewer; source membership mirrors the target package.
 KEILAND_FREEBSD_PDFVIEWER_SOURCES := userland/desktop/pdfviewer/main.c \
 	userland/desktop/pdfviewer/menu.c \
-	userland/desktop/pdfviewer/titlebar.c \
+	userland/desktop/pdfviewer/titlebar.c userland/desktop/pdfviewer/bar.c \
 	userland/desktop/pdfviewer/view.c \
 	userland/desktop/pdfviewer/find.c \
 	userland/desktop/pdfviewer/draw.c \

@@ -53,6 +53,7 @@ static void test_forms(void);
 static void test_find(void);
 static void test_select(void);
 static void test_turned(void);
+static void test_bar(void);
 static int open_sample(const char *name);
 static void find_expect(const char *query, size_t page, const char *expected, const char *what);
 static void matched(char *out, size_t size);
@@ -101,6 +102,7 @@ main(
 	test_find();
 	test_select();
 	test_turned();
+	test_bar();
 
 	/* The viewer's font goes. */
 	pv_text_close(&text);
@@ -418,6 +420,59 @@ test_turned(void)
 		check(pixels[corner_y * TEST_WIDTH + corner_x] == before[corner_y * TEST_WIDTH + corner_x],
 		      "turned: the box's corner outside the turned T is not");
 	}
+
+	/* The document goes. */
+	pv_app_release(&app);
+}
+
+/*
+ * The find field inside the window (ws177-p043): Ctrl+F without a
+ * titlebar asks main.c for it (want_find_focus, which main.c turns into
+ * pv_find_bar_open), it opens at the top right of the window asking for
+ * the keyboard, its words find their place and the status tells it, and
+ * Esc on the pages closes it with the marks.
+ */
+static void
+test_bar(void)
+{
+	struct pv_bar_place place;
+	char status[96];
+	int opened;
+
+	/* The document. */
+	opened = open_sample("find.pdf");
+	if (!opened)
+		return;
+
+	/* Ctrl+F asks for a find field; without a titlebar main.c opens the one inside the window. */
+	key(PV_KEY_F, PV_MOD_CTRL);
+	check(app.want_find_focus, "bar: Ctrl+F asks for a find field");
+	app.want_find_focus = 0;
+	pv_find_bar_open(&app);
+	check(app.bar_open && app.want_bar_focus, "bar: the field inside the window opens and asks for the keyboard");
+
+	/* Its place: at the top right, within the window, the field and the number's room inside it. */
+	pv_find_bar_place(&app, &place);
+	check(place.x + place.width == TEST_WIDTH - PV_MARGIN && place.y == PV_MARGIN && place.width == PV_BAR_WIDTH &&
+	      place.field_x > place.x && place.status_x + PV_BAR_STATUS + PV_BAR_PADDING == place.x + place.width,
+	      "bar: the panel at the top right, the field and the number inside it");
+
+	/* Its words are looked for and the place told. */
+	pv_find_text(&app, "lazy dog");
+	tick_until_counted();
+	pv_find_status(&app, status, sizeof(status));
+	check(app.find_found && strcmp(status, "Match 1 of 32") == 0, "bar: the words found, \"Match 1 of 32\"");
+	frame("bar-01-open");
+
+	/* A narrow window keeps the panel inside it. */
+	pv_app_resize(&app, 300, TEST_HEIGHT);
+	pv_find_bar_place(&app, &place);
+	check(place.x >= PV_MARGIN && place.x + place.width <= 300 - PV_MARGIN && place.field_width > 0, "bar: a narrow window keeps the panel within it");
+	pv_app_resize(&app, TEST_WIDTH, TEST_HEIGHT);
+
+	/* Esc on the pages closes it, the marks with it. */
+	key(PV_KEY_ESCAPE, 0);
+	check(!app.bar_open && !app.find_found, "bar: Esc closes the field and the marks");
 
 	/* The document goes. */
 	pv_app_release(&app);
