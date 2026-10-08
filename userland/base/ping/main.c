@@ -34,6 +34,7 @@ static void write64(uint8_t *p, uint64_t v);
 static uint16_t read16(const uint8_t *p);
 static uint64_t read64(const uint8_t *p);
 static int ping6(int descriptor, const struct sockaddr_in6 *peer, const char *name, uint32_t count, uint32_t interval_ms, uint32_t timeout_ms);
+static ssize_t ping6_receive(int descriptor, uint8_t *packet, size_t size, struct sockaddr_in6 *source, int *hop_limit);
 
 /*
  * Runs the ping command.
@@ -431,9 +432,9 @@ ping6(
 	uint8_t packet[2048];
 	char numeric[INET6_ADDRSTRLEN + IF_NAMESIZE + 1];
 	char zone[IF_NAMESIZE];
+	char hop_text[16];
 	const char *written;
 	const char *named;
-	socklen_t source_length;
 	ssize_t length;
 	uint64_t minimum;
 	uint64_t maximum;
@@ -449,6 +450,8 @@ ping6(
 	unsigned loss;
 	unsigned i;
 	int same;
+	int enabled;
+	int hop_limit;
 
 	/* The peer as text, a link-local one with its interface. */
 	written = inet_ntop(AF_INET6, &peer->sin6_addr, numeric, sizeof(numeric));
@@ -465,6 +468,10 @@ ping6(
 	receive_timeout.tv_sec = (time_t)(timeout_ms / 1000U);
 	receive_timeout.tv_usec = (long)(timeout_ms % 1000U) * 1000L;
 	(void)setsockopt(descriptor, SOL_SOCKET, SO_RCVTIMEO, &receive_timeout, sizeof(receive_timeout));
+
+	/* The hop limit of each reply (ws177-p044); a kernel without it shows none. */
+	enabled = 1;
+	(void)setsockopt(descriptor, IPPROTO_IPV6, IPV6_RECVHOPLIMIT, &enabled, sizeof(enabled));
 
 	/* Each echo. */
 	identifier = (uint16_t)(netutil_monotonic_us() ^ 0x5a43U);
@@ -492,8 +499,7 @@ ping6(
 			now = netutil_monotonic_us();
 			if (now >= deadline)
 				break;
-			source_length = sizeof(source);
-			length = recvfrom(descriptor, packet, sizeof(packet), 0, (struct sockaddr *)&source, &source_length);
+			length = ping6_receive(descriptor, packet, sizeof(packet), &source, &hop_limit);
 			if (length < 16)
 				break;
 			same = memcmp(&source.sin6_addr, &peer->sin6_addr, sizeof(source.sin6_addr));
@@ -514,7 +520,10 @@ ping6(
 				minimum = rtt;
 			if (rtt > maximum)
 				maximum = rtt;
-			printf("%ld bytes from %s: icmp_seq=%u time=%llu.%03llu ms\n", (long)length, numeric, sequence,
+			hop_text[0] = '\0';
+			if (hop_limit >= 0)
+				(void)snprintf(hop_text, sizeof(hop_text), " hlim=%d", hop_limit);
+			printf("%ld bytes from %s: icmp_seq=%u%s time=%llu.%03llu ms\n", (long)length, numeric, sequence, hop_text,
 			       (unsigned long long)(rtt / 1000U), (unsigned long long)(rtt % 1000U));
 			break;
 		}
@@ -544,4 +553,57 @@ ping6(
 	if (received == 0)
 		return 1;
 	return 0;
+}
+
+/*
+ * Receives one ICMPv6 message: its bytes, its sender, and the hop limit it
+ * came with (the IPV6_HOPLIMIT control message; -1 without one).
+ * Returns recvmsg's answer.
+ */
+static ssize_t
+ping6_receive(
+	int descriptor,
+	uint8_t *packet,
+	size_t size,
+	struct sockaddr_in6 *source,
+	int *hop_limit)
+{
+	union {
+		struct cmsghdr header;
+		unsigned char room[CMSG_SPACE(sizeof(int))];
+	} control;
+	struct cmsghdr *item;
+	struct msghdr message;
+	struct iovec part;
+	ssize_t length;
+	size_t needed;
+
+	/* The message, its sender and room for one control message. */
+	*hop_limit = -1;
+	part.iov_base = packet;
+	part.iov_len = size;
+	memset(&message, 0, sizeof(message));
+	message.msg_name = source;
+	message.msg_namelen = sizeof(*source);
+	message.msg_iov = &part;
+	message.msg_iovlen = 1;
+	message.msg_control = control.room;
+	message.msg_controllen = sizeof(control.room);
+	length = recvmsg(descriptor, &message, 0);
+	if (length < 0)
+		return length;
+
+	/* The hop limit among the control messages. */
+	needed = CMSG_LEN(sizeof(int));
+	for (item = CMSG_FIRSTHDR(&message);
+	     item != NULL;
+	     item = CMSG_NXTHDR(&message, item)) {
+		if (item->cmsg_level != IPPROTO_IPV6 || item->cmsg_type != IPV6_HOPLIMIT)
+			continue;
+		if (item->cmsg_len >= needed)
+			memcpy(hop_limit, CMSG_DATA(item), sizeof(int));
+	}
+
+	/* The message's length. */
+	return length;
 }

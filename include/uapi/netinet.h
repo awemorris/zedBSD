@@ -125,7 +125,9 @@ extern const struct in6_addr in6addr_loopback;
 #define IPV6_LEAVE_GROUP	13
 #define IPV6_V6ONLY		27
 #define IPV6_RECVPKTINFO	36
+#define IPV6_RECVHOPLIMIT	37
 #define IPV6_PKTINFO		46
+#define IPV6_HOPLIMIT		47
 
 /*
  * The destination address and the interface a datagram came in on: the

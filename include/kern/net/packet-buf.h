@@ -53,6 +53,13 @@ struct packet_buf {
 	 */
 	uint8_t source_address[128];
 	uint8_t source_length;
+	/*
+	 * The hop limit an IPv6 datagram came with, kept on the copy queued
+	 * for a socket that asked for it (IPV6_RECVHOPLIMIT, ws177-p044);
+	 * hop_limit_known says it was kept.
+	 */
+	uint8_t hop_limit;
+	uint8_t hop_limit_known;
 	void *control;
 	void (
 		*control_release)(

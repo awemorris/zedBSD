@@ -14,6 +14,7 @@
 #include "userland/base/libc/resolver-internal.h"
 
 #include <arpa/inet.h>
+#include <net/if.h>
 #include <netdb.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -22,7 +23,9 @@
 static int usage(void);
 static int ptr_name(struct in_addr address, char output[64]);
 static void print_result(const char *query, const struct resolver_result *result);
-static int nslookup_ask(const char *query, uint16_t type, const struct in_addr *server, unsigned long port, struct resolver_result *result);
+static int nslookup_ask(const char *query, uint16_t type, const struct resolver_server *server, unsigned long port, struct resolver_result *result);
+static int nslookup_server(const char *text, struct resolver_server *server);
+static int nslookup_ask_one(const char *query, uint16_t type, const struct resolver_server *server, unsigned long port, struct resolver_result *result);
 
 /*
  * Runs the nslookup command.
@@ -35,15 +38,17 @@ main(
 	int function_result;
 	struct resolver_result result;
 	struct resolver_result result6;
-	struct in_addr server, numeric;
+	struct in_addr numeric;
 	struct in6_addr numeric6;
-	const struct in_addr *given;
+	struct resolver_server server;
+	const struct resolver_server *given;
 	char query[254], *end;
 	unsigned long port;
 	unsigned arg;
 	uint16_t type;
 	int error;
 	int error6;
+	int parsed;
 
 	port = 53;
 	arg = 1;
@@ -93,11 +98,12 @@ main(
 		strcpy(query, argv[arg]);
 	}
 
-	/* The server named after the query, or resolv.conf's. */
+	/* The server named after the query (IPv4, or IPv6 with %zone, ws177-p044), or resolv.conf's. */
 	given = NULL;
 	if (arg + 1U < (unsigned)argc) {
 		/* Validates the command-line arguments. */
-		if (!inet_aton(argv[arg + 1], &server)) {
+		parsed = nslookup_server(argv[arg + 1], &server);
+		if (!parsed) {
 			/* Obtains the usage result. */
 			function_result = usage();
 
@@ -139,7 +145,7 @@ static int
 usage(
 	void)
 {
-	puts("usage: nslookup [-p port] name [server]");
+	puts("usage: nslookup [-p port] name [server (IPv4, or IPv6 with %zone)]");
 
 	/* Reports operation failure. */
 	return 2;
@@ -171,10 +177,26 @@ print_result(
 	const char *query,
 	const struct resolver_result *result)
 {
-	char server[16], address[INET6_ADDRSTRLEN];
+	char server[INET6_ADDRSTRLEN + IF_NAMESIZE + 2], address[INET6_ADDRSTRLEN];
+	char zone[IF_NAMESIZE];
+	const char *named;
+	size_t length;
 	unsigned i;
 
-	inet_ntop(AF_INET, &result->server, server, sizeof(server));
+	/* The server that answered: IPv4, or IPv6 with its interface (ws177-p044). */
+	if (result->server_family == AF_INET6) {
+		inet_ntop(AF_INET6, &result->server6, server, sizeof(server));
+		if (result->server6_scope != 0U) {
+			length = strlen(server);
+			named = if_indextoname(result->server6_scope, zone);
+			if (named != NULL)
+				snprintf(server + length, sizeof(server) - length, "%%%s", zone);
+			else
+				snprintf(server + length, sizeof(server) - length, "%%%u", (unsigned)result->server6_scope);
+		}
+	} else {
+		inet_ntop(AF_INET, &result->server, server, sizeof(server));
+	}
 	printf("Server: %s#%u\nName: %s\n", server, result->port, query);
 
 	/* Process each remaining element. */
@@ -202,13 +224,13 @@ print_result(
 
 /*
  * Asks one question: of the server given, of resolv.conf's servers in
- * their order (port 53), or of resolv.conf's IPv4 servers on another port.
+ * their order (port 53), or of resolv.conf's servers on another port.
  */
 static int
 nslookup_ask(
 	const char *query,
 	uint16_t type,
-	const struct in_addr *server,
+	const struct resolver_server *server,
 	unsigned long port,
 	struct resolver_result *result)
 {
@@ -218,7 +240,7 @@ nslookup_ask(
 
 	/* The server given. */
 	if (server != NULL) {
-		error = resolver_query_server(query, type, server, (uint16_t)port, result);
+		error = nslookup_ask_one(query, type, server, port, result);
 		return error;
 	}
 
@@ -228,16 +250,73 @@ nslookup_ask(
 		return error;
 	}
 
-	/* Its IPv4 servers on another port. */
+	/* Its servers on another port, IPv4 and IPv6 (ws177-p044). */
 	error = resolver_load_config(&config);
 	if (error != 0)
 		return error;
-	for (index = 0; index < config.count; index++) {
-		error = resolver_query_server(query, type, &config.servers[index], (uint16_t)port, result);
+	for (index = 0; index < config.list_count; index++) {
+		error = nslookup_ask_one(query, type, &config.list[index], port, result);
 		if (error == 0 || error == EAI_NONAME)
 			break;
 	}
 
 	/* The last answer. */
 	return error;
+}
+
+/* Asks one server, IPv4 or IPv6. */
+static int
+nslookup_ask_one(
+	const char *query,
+	uint16_t type,
+	const struct resolver_server *server,
+	unsigned long port,
+	struct resolver_result *result)
+{
+	int error;
+
+	/* An IPv6 server, with its interface, or an IPv4 one. */
+	if (server->family == AF_INET6) {
+		error = resolver_query_server6(query, type, &server->address6, server->scope, (uint16_t)port, result);
+	} else {
+		error = resolver_query_server(query, type, &server->address, (uint16_t)port, result);
+	}
+
+	/* Reports why it was not answered. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer. */
+	return 0;
+}
+
+/* Reads a server named on the command line: an IPv4 address, or an IPv6 one with "%zone"; returns 1 when it is one. */
+static int
+nslookup_server(
+	const char *text,
+	struct resolver_server *server)
+{
+	char copy[INET6_ADDRSTRLEN + IF_NAMESIZE + 2];
+	size_t length;
+	int parsed;
+
+	/* An IPv4 address. */
+	memset(server, 0, sizeof(*server));
+	parsed = inet_aton(text, &server->address);
+	if (parsed) {
+		server->family = AF_INET;
+		return 1;
+	}
+
+	/* An IPv6 one, read from a copy (the zone is cut off in place). */
+	length = strlen(text);
+	if (length >= sizeof(copy))
+		return 0;
+	strcpy(copy, text);
+	parsed = resolver_parse_server6(copy, server);
+	if (!parsed)
+		return 0;
+
+	/* Succeeded: an IPv6 server. */
+	return 1;
 }

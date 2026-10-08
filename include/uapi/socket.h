@@ -150,8 +150,16 @@ struct recvmsg_args {
 	uint32_t name_length;
 	uint32_t descriptor_count;
 	uint32_t output_flags;
-	uint32_t reserved2;
+	uint32_t hop_limit;
 };
+
+/*
+ * recvmsg_args.output_flags: hop_limit holds the hop limit the datagram
+ * came with (an IPv6 socket that asked for it with IPV6_RECVHOPLIMIT,
+ * ws177-p044); libc gives it as an IPV6_HOPLIMIT control message.
+ * hop_limit is 0 when the call is made.
+ */
+#define RECVMSG_HOP_LIMIT	0x80000000U
 
 #define SHUT_RD	0
 #define SHUT_WR	1

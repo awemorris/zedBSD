@@ -71,3 +71,4 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p041](phase041/phase.md) | 案 L の 2: PDF Viewer の検索の一致の規則（行・ハイフン・空白、Unicode の大小・全角半角・濁点・合字）、一致の数と背景の読み、U+FFFD を知らせる（backlog-p2 18・19・22・25） | in-progress（2026-10-08 夜 P1 q907） | ws177-p040 |
 | [ws177-p042](phase042/phase.md) | 案 L の 3: 選択（頁をまたぐ、語・行・全て、指の長押しと handle、回転した字の塗り）（backlog-p2 20・21・24） | in-progress（2026-10-08 夜 P1 q907） | ws177-p041 |
 | [ws177-p043](phase043/phase.md) | 案 L の 4: titlebar の無い時の窓の中の検索の欄、Enter の後の caret を末尾に（backlog-p2 23・41） | in-progress（2026-10-08 夜 P1 q907） | ws177-p042 |
+| [ws177-p044](phase044/phase.md) | 案 R2: IPv6 の libc と道具（AI_ADDRCONFIG を interface の address で、getnameinfo の NI_NOFQDN・NI_DGRAM、resolver の IPv6 の server と nslookup、ping -6 の hlim と kernel の IPV6_RECVHOPLIMIT）（backlog-p1 14・15・16・18・19） | 実装・host PASS・build（2026-10-08 夜 P1 q909）、T1 待ち | ws130-p005 |

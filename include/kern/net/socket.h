@@ -68,6 +68,13 @@ struct socket_ops {
 			  const struct sockaddr *, socklen_t);
 	ssize_t (*recvfrom)(struct socket *, void *, size_t, int,
 			    struct sockaddr *, socklen_t *);
+	/*
+	 * recvfrom that also gives the hop limit the datagram came with (-1
+	 * for none kept), for recvmsg (ws177-p044); NULL where no protocol
+	 * keeps one.
+	 */
+	ssize_t (*recvfrom_hop)(struct socket *, void *, size_t, int,
+				struct sockaddr *, socklen_t *, int *);
 	int (*shutdown)(struct socket *, int);
 	int (*getsockname)(struct socket *, struct sockaddr *, socklen_t *);
 	int (*getpeername)(struct socket *, struct sockaddr *, socklen_t *);

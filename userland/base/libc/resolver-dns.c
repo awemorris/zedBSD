@@ -492,6 +492,77 @@ resolver_inet6_preferred(
 }
 
 /*
+ * Tells whether an interface's IPv4 address (in host order) counts for
+ * AI_ADDRCONFIG (ws177-p044): any but the unspecified one and loopback's.
+ */
+int
+resolver_usable4(
+	uint32_t address)
+{
+	/* The unspecified address: none configured. */
+	if (address == 0U)
+		return 0;
+
+	/* 127.0.0.0/8, the loopback. */
+	if ((address >> 24) == 127U)
+		return 0;
+
+	/* Counts. */
+	return 1;
+}
+
+/*
+ * Tells whether an interface's IPv6 address counts for AI_ADDRCONFIG
+ * (ws177-p044, RFC 3493 with the common practice): not the unspecified
+ * one, not ::1, not a link-local one, and settled (duplicate address
+ * detection over and passed).
+ */
+int
+resolver_usable6(
+	const uint8_t *address,
+	int settled)
+{
+	static const uint8_t loopback[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 1 };
+	static const uint8_t unspecified[16] = { 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0 };
+	int same;
+
+	/* Not yet settled, or found to be another's. */
+	if (!settled)
+		return 0;
+
+	/* The unspecified address and the loopback. */
+	same = memcmp(address, unspecified, sizeof(unspecified));
+	if (same == 0)
+		return 0;
+	same = memcmp(address, loopback, sizeof(loopback));
+	if (same == 0)
+		return 0;
+
+	/* A link-local address reaches no name server off the link. */
+	if (address[0] == 0xfeU && (address[1] & 0xc0U) == 0x80U)
+		return 0;
+
+	/* Counts. */
+	return 1;
+}
+
+/*
+ * Cuts a host name to its first label (NI_NOFQDN, ws177-p044): the part
+ * before the first '.'; a name without one stays.
+ */
+void
+resolver_short_name(
+	char *name)
+{
+	char *dot;
+
+	/* The first dot ends it (a dot first leaves the name as it is). */
+	dot = strchr(name, '.');
+	if (dot != NULL && dot != name)
+		*dot = '\0';
+}
+
+/*
  * Reads a line of /etc/hosts ("ADDRESS NAME [ALIAS...]", '#' to the end
  * of the line a comment; the line is cut up in place) and tells whether it
  * names the host, ignoring case.  Returns 1 with the address and the
