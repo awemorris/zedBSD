@@ -4,6 +4,8 @@
 # plan/tmp/guest), so aat reaches root with the harness's key; the harness's /etc/net.conf is left out, because it
 # addresses QEMU's USB network adapter and would replace the machine's own network settings.
 #   plan/tools/aat/build-image.sh BUILD [ARGUMENT...]     (arguments as test-image.sh takes them)
+# AAT_CONFIG names another configuration that includes config-amd64-aat.mk (default config-amd64-aat.mk; q911:
+# config-amd64-aat-bugs.mk, the UI bugs' sweep).
 # The image is BUILD/hdd-image.img (written to the USB stick for the 5330, or booted by guest.sh for the self-test).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
@@ -25,4 +27,4 @@ for word in $files; do
 	pending=
 done
 # shellcheck disable=SC2086
-exec plan/tools/guest/test-image.sh --no-harness plan/tools/aat/config-amd64-aat.mk "$build" $keep "$@"
+exec plan/tools/guest/test-image.sh --no-harness "${AAT_CONFIG:-plan/tools/aat/config-amd64-aat.mk}" "$build" $keep "$@"
