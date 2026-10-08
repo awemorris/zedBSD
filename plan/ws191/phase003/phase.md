@@ -2,7 +2,7 @@
 
 # ws191-p003: app の移行（videoplayer・music）と libmedia から音を外す
 
-Status: in-progress（q895、P2。2026-10-08 夜 実装と host の確認。T1 の QEMU は未依頼）
+Status: in-progress（q895、P2。2026-10-08 夜 実装と host の確認。T1 の QEMU の依頼を Q1 に送った: test-wait）
 Disposition: normal
 Parent: [WS191](../ws.md)。設計は [design.md](../design.md) §7（第 4 版）、D11 は Q1 の決定（libmedia から音を外すだけ）。
 
