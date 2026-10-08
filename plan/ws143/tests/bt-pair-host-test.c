@@ -87,6 +87,8 @@ static void test_random(void *context, uint8_t *bytes, size_t length);
 static void test_crypto(void);
 static void test_acl(void);
 static void test_l2cap(void);
+static void test_l2cap_inbound(void);
+static int accept_hook(void *context, uint16_t handle, uint16_t psm, uint16_t *result, uint16_t *status);
 static void test_smp_secure(uint8_t peer_io, int agent_yes);
 static void test_smp_legacy(void);
 static void test_smp_failures(void);
@@ -127,6 +129,7 @@ main(
 	test_crypto();
 	test_acl();
 	test_l2cap();
+	test_l2cap_inbound();
 	test_smp_secure(0x03U, 1);
 	test_smp_secure(0x01U, 1);
 	test_smp_secure(0x01U, 0);
@@ -361,6 +364,176 @@ test_acl(void)
 	acl.length = 3U;
 	whole = btd_reassembly_feed(&reassembly, &acl);
 	expect(whole == -1 && reassembly.dropped >= 4U, "acl: a first packet without the L2CAP header is dropped");
+}
+
+/*
+ * The owner's answer of the inbound test (ws143-p005): PSM 0x0011
+ * accepted, 0x0013 pending, 0x0015 left to the default (the hook says no
+ * answer), anything else PSM not supported.
+ */
+static int
+accept_hook(
+	void *context,
+	uint16_t handle,
+	uint16_t psm,
+	uint16_t *result,
+	uint16_t *status)
+{
+	unsigned *calls;
+
+	/* Counted. */
+	(void)handle;
+	calls = context;
+	(*calls)++;
+	*status = 0U;
+
+	/* Each PSM's answer. */
+	if (psm == 0x0011U) {
+		*result = BTD_L2CAP_SUCCESS;
+	} else if (psm == 0x0013U) {
+		*result = BTD_L2CAP_PENDING;
+	} else if (psm == 0x0015U) {
+		return 1;
+	} else {
+		*result = BTD_L2CAP_PSM_NOT_SUPPORTED;
+	}
+
+	/* Answered. */
+	return 0;
+}
+
+/*
+ * L2CAP's channels the other side asks for (ws143-p005, phase005 sections
+ * 4.2 and 9.8): accepted, pending then answered, refused; the options of
+ * HID's devices; opened and closed; the Echo Request.
+ */
+static void
+test_l2cap_inbound(void)
+{
+	struct btd_signal_effect effect;
+	struct btd_channel *channel;
+	struct btd_l2cap l2cap;
+	uint8_t answer[BTD_SIGNAL_MAX];
+	uint8_t command[80];
+	size_t length;
+	unsigned calls;
+	unsigned index;
+	uint16_t cid;
+	int error;
+
+	/* The owner's hook. */
+	btd_l2cap_init(&l2cap);
+	calls = 0U;
+	btd_l2cap_set_accept(&l2cap, accept_hook, &calls);
+
+	/* PSM 0x11 accepted: the response with our CID 0x40, then our Configure Request to theirs (0x41). */
+	memcpy(command, "\x02\x07\x04\x00\x11\x00\x41\x00", 8U);
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	channel = btd_l2cap_channel(&l2cap, 0x0040U);
+	expect(error == 0 && calls == 1U && length == 24U && answer[0] == 0x03U && answer[1] == 0x07U && answer[4] == 0x40U &&
+	       answer[6] == 0x41U && answer[8] == 0x00U && answer[12] == 0x04U && answer[16] == 0x41U &&
+	       channel != NULL && channel->inbound && channel->state == BTD_CHANNEL_CONFIGURING,
+	       "l2cap-in: accepted, configuring (%zu)", length);
+
+	/* Their Configure Request: the MTU, a Flush Timeout, a QoS, an FCS, all taken. */
+	memset(command, 0, sizeof(command));
+	memcpy(command, "\x04\x08\x27\x00\x40\x00\x00\x00" "\x01\x02\xa0\x02" "\x02\x02\xff\xff" "\x03\x16", 18U);
+	command[18 + 22] = 0x05U;
+	command[18 + 23] = 0x01U;
+	command[18 + 24] = 0x00U;
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 43U, answer, sizeof(answer), &length, &effect);
+	expect(error == 0 && answer[0] == 0x05U && answer[8] == 0x00U && channel->have_flush_timeout && channel->flush_timeout == 0xffffU &&
+	       channel->have_qos && channel->remote_done && effect.opened_count == 0U,
+	       "l2cap-in: Flush Timeout, QoS and FCS taken");
+
+	/* Their answer to ours: open, and told. */
+	memcpy(command, "\x05\x01\x06\x00\x40\x00\x00\x00\x00\x00", 10U);
+	command[1] = 0x01U;
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 10U, answer, sizeof(answer), &length, &effect);
+	expect(error == 0 && channel->state == BTD_CHANNEL_OPEN && effect.opened_count == 1U && effect.opened[0] == 0x0040U,
+	       "l2cap-in: open, told");
+
+	/* PSM 0x13 pending: the response says so, nothing more. */
+	memcpy(command, "\x02\x09\x04\x00\x13\x00\x42\x00", 8U);
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	channel = btd_l2cap_channel(&l2cap, 0x0041U);
+	expect(error == 0 && length == 12U && answer[4] == 0x41U && answer[8] == 0x01U && answer[10] == 0x00U &&
+	       channel != NULL && channel->state == BTD_CHANNEL_PENDING,
+	       "l2cap-in: pending");
+
+	/* A configuration of a pending channel is not taken. */
+	memcpy(command, "\x04\x0a\x04\x00\x41\x00\x00\x00", 8U);
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(error == 0 && answer[0] == 0x01U, "l2cap-in: a pending channel is not configured");
+
+	/* The encryption done: the final answer under their identifier, then our Configure Request. */
+	error = btd_l2cap_answer_pending(&l2cap, 0x0040U, BTD_L2CAP_SUCCESS, answer, sizeof(answer), &length);
+	expect(error == 0 && length == 24U && answer[0] == 0x03U && answer[1] == 0x09U && answer[4] == 0x41U && answer[8] == 0x00U &&
+	       answer[12] == 0x04U && channel->state == BTD_CHANNEL_CONFIGURING,
+	       "l2cap-in: pending, then accepted");
+	error = btd_l2cap_answer_pending(&l2cap, 0x0040U, BTD_L2CAP_SUCCESS, answer, sizeof(answer), &length);
+	expect(error == 0 && length == 0U, "l2cap-in: nothing pending any more");
+
+	/* Another pending one refused for security: no CID of ours, the slot free. */
+	memcpy(command, "\x02\x0b\x04\x00\x13\x00\x43\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	cid = (uint16_t)(answer[4] | (answer[5] << 8));
+	error = btd_l2cap_answer_pending(&l2cap, 0x0040U, BTD_L2CAP_SECURITY_BLOCK, answer, sizeof(answer), &length);
+	expect(error == 0 && length == 12U && answer[1] == 0x0bU && answer[4] == 0x00U && answer[8] == 0x03U &&
+	       btd_l2cap_channel(&l2cap, cid) == NULL,
+	       "l2cap-in: pending, then a security block");
+
+	/* A source CID that is not dynamic, one taken already, and a PSM the hook leaves alone. */
+	memcpy(command, "\x02\x0c\x04\x00\x11\x00\x01\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(answer[8] == 0x06U && answer[4] == 0x00U, "l2cap-in: an invalid source CID");
+	memcpy(command, "\x02\x0d\x04\x00\x11\x00\x41\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(answer[8] == 0x07U, "l2cap-in: a source CID already taken");
+	memcpy(command, "\x02\x0e\x04\x00\x15\x00\x50\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(answer[8] == 0x02U, "l2cap-in: a PSM the hook leaves is not supported");
+
+	/* Retransmission other than the basic mode: unacceptable, the basic mode offered. */
+	memcpy(command, "\x02\x0f\x04\x00\x11\x00\x51\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	cid = (uint16_t)(answer[4] | (answer[5] << 8));
+	memset(command, 0, sizeof(command));
+	memcpy(command, "\x04\x10\x0f\x00\x00\x00\x00\x00\x04\x09\x03", 11U);
+	command[4] = (uint8_t)(cid & 0xffU);
+	error = btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 19U, answer, sizeof(answer), &length, &effect);
+	expect(error == 0 && answer[0] == 0x05U && answer[8] == 0x01U && answer[10] == 0x04U && answer[11] == 0x09U && answer[12] == 0x00U &&
+	       length == 4U + 6U + 11U,
+	       "l2cap-in: ERTM unacceptable, basic offered (%zu)", length);
+
+	/* Their close of the open channel, from another connection (passed over) and from its own (told). */
+	memcpy(command, "\x06\x11\x04\x00\x40\x00\x41\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0041U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(btd_l2cap_channel(&l2cap, 0x0040U) != NULL && effect.closed_count == 0U, "l2cap-in: another connection cannot close it");
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(btd_l2cap_channel(&l2cap, 0x0040U) == NULL && effect.closed_count == 1U && effect.closed[0] == 0x0040U &&
+	       effect.closed_reason[0] == BTD_L2CAP_CLOSED_REMOTE && answer[0] == 0x07U,
+	       "l2cap-in: closed by them, told");
+
+	/* The Echo Request, and only its own answer. */
+	error = btd_l2cap_echo(&l2cap, answer, sizeof(answer), &length);
+	memcpy(command, "\x09\x00\x00\x00", 4U);
+	command[1] = (uint8_t)(answer[1] + 1U);
+	expect(error == 0 && length == 4U && answer[0] == 0x08U, "l2cap-in: the Echo Request");
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 4U, answer + 8, sizeof(answer) - 8U, &length, &effect);
+	expect(!effect.echo, "l2cap-in: another identifier's echo is not ours");
+	command[1] = answer[1];
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 4U, answer + 8, sizeof(answer) - 8U, &length, &effect);
+	expect(effect.echo && !l2cap.echo_pending, "l2cap-in: the echo came");
+
+	/* A full table: no resources. */
+	btd_l2cap_init(&l2cap);
+	btd_l2cap_set_accept(&l2cap, accept_hook, &calls);
+	for (index = 0U; index < BTD_CHANNELS_MAX; index++)
+		(void)btd_l2cap_connect(&l2cap, 0x0040U, 0x0001U, answer, sizeof(answer), &length, &cid);
+	memcpy(command, "\x02\x12\x04\x00\x11\x00\x60\x00", 8U);
+	(void)btd_l2cap_signal(&l2cap, 0x0040U, 0, command, 8U, answer, sizeof(answer), &length, &effect);
+	expect(answer[8] == 0x04U && answer[4] == 0x00U, "l2cap-in: no resources");
 }
 
 /* L2CAP's signalling. */

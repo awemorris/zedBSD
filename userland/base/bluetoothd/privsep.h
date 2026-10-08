@@ -12,6 +12,10 @@
  * reads the air.  The child asks for a node with a datagram, and the
  * parent answers with the node's descriptor (SCM_RIGHTS).  Each side ends
  * when the other does.
+ *
+ * ws143-p005 (phase005 section 4.10): the child also asks for an open of
+ * /dev/input/bridge (OPEN-HID), one for each HID device it makes; the
+ * parent does not count them (the kernel limits the opens).
  */
 
 #ifndef BLUETOOTHD_PRIVSEP_H
@@ -22,6 +26,9 @@
 /* The daemon's account and the folder of the bonds. */
 #define BTD_ACCOUNT		"_bluetooth"
 #define BTD_DATA_PARENT		"/var/db"
+
+/* The node that makes HID devices (include/uapi/input-bridge.h). */
+#define BTD_BRIDGE_PATH		"/dev/input/bridge"
 
 /*
  * The child's ends of the separation: the datagram channel to the parent,
@@ -34,5 +41,6 @@ struct btd_privsep {
 
 int btd_privsep_start(const char *node, const char *keys_folder, int listener, struct btd_privsep *privsep);
 int btd_privsep_open(const struct btd_privsep *privsep, char *path, size_t size, int *descriptor);
+int btd_privsep_open_bridge(const struct btd_privsep *privsep, int *descriptor);
 
 #endif

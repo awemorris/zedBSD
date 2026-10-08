@@ -59,6 +59,7 @@ static void privsep_answer(int channel, const char *node);
 static int privsep_open_node(const char *node, char *path, size_t size, int *descriptor);
 static void privsep_send(int channel, const char *text, int descriptor);
 static void privsep_wait_child(pid_t child);
+static int privsep_ask(const struct btd_privsep *privsep, const char *request, char *path, size_t size, int *descriptor);
 
 /*
  * Separates the daemon: the folders made for the account, the channel and
@@ -167,6 +168,53 @@ btd_privsep_open(
 	size_t size,
 	int *descriptor)
 {
+	int error;
+
+	/* The parent's answer to OPEN. */
+	error = privsep_ask(privsep, "OPEN", path, size, descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the node. */
+	return 0;
+}
+
+/*
+ * Asks the parent for an open of /dev/input/bridge, for one HID device
+ * (ws143-p005).  Returns 0 with the descriptor, or the errno value of the
+ * open (EBUSY: the kernel's opens are all in use), or the channel's error.
+ */
+int
+btd_privsep_open_bridge(
+	const struct btd_privsep *privsep,
+	int *descriptor)
+{
+	char path[PRIVSEP_MESSAGE_MAX];
+	int error;
+
+	/* The parent's answer to OPEN-HID. */
+	error = privsep_ask(privsep, "OPEN-HID", path, sizeof(path), descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the open. */
+	return 0;
+}
+
+/*
+ * Sends a request to the parent and reads its answer: "OK PATH" with a
+ * descriptor gives 0, the path and the descriptor; "ERR ERRNO" gives the
+ * errno value; anything else EBADMSG, no answer ETIMEDOUT, a channel that
+ * went EPIPE.
+ */
+static int
+privsep_ask(
+	const struct btd_privsep *privsep,
+	const char *request,
+	char *path,
+	size_t size,
+	int *descriptor)
+{
 	union {
 		struct cmsghdr header;
 		char space[CMSG_SPACE(sizeof(int))];
@@ -177,6 +225,7 @@ btd_privsep_open(
 	struct iovec vector;
 	char answer[PRIVSEP_MESSAGE_MAX];
 	size_t least;
+	size_t request_length;
 	ssize_t length;
 	unsigned long value;
 	char *end;
@@ -185,8 +234,9 @@ btd_privsep_open(
 
 	/* The request. */
 	*descriptor = -1;
-	length = send(privsep->channel, "OPEN", 4U, 0);
-	if (length != 4)
+	request_length = strlen(request);
+	length = send(privsep->channel, request, request_length, 0);
+	if (length != (ssize_t)request_length)
 		return EPIPE;
 
 	/* The answer, within PRIVSEP_ANSWER_MS. */
@@ -371,7 +421,10 @@ privsep_end(
 	privsep_ending = signal_number;
 }
 
-/* Answers one request of the child's: "OPEN" gets the node's descriptor, or why not. */
+/*
+ * Answers one request of the child's: "OPEN" gets the node's descriptor,
+ * "OPEN-HID" an open of /dev/input/bridge (ws143-p005), or why not.
+ */
 static void
 privsep_answer(
 	int channel,
@@ -395,7 +448,23 @@ privsep_answer(
 		return;
 	request[length] = '\0';
 
-	/* Only OPEN is known. */
+	/* OPEN-HID: the bridge, opened here as root (only root may), sent, and the parent's copy closed. */
+	same = strcmp(request, "OPEN-HID");
+	if (same == 0) {
+		descriptor = open(BTD_BRIDGE_PATH, O_RDWR | O_CLOEXEC);
+		if (descriptor < 0) {
+			(void)snprintf(answer, sizeof(answer), "ERR %d", errno);
+			privsep_send(channel, answer, -1);
+			return;
+		}
+
+		/* Sent with its path. */
+		privsep_send(channel, "OK " BTD_BRIDGE_PATH, descriptor);
+		(void)close(descriptor);
+		return;
+	}
+
+	/* Otherwise only OPEN is known. */
 	same = strcmp(request, "OPEN");
 	if (same != 0) {
 		privsep_send(channel, "ERR 22", -1);

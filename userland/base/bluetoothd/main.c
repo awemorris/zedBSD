@@ -33,6 +33,7 @@
  *   bluetoothd [-f /dev/bluetoothN]   (a node of its own; else the lowest that opens)
  */
 
+#include "userland/base/bluetoothd/hid.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/privsep.h"
@@ -109,6 +110,8 @@ struct btd_client {
 	size_t used;
 	int waits_scan;
 	int waits_pair;
+	int waits_connect;
+	uint8_t connect_address[BTD_ADDRESS_BYTES];
 };
 
 static void btd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -141,6 +144,12 @@ static void btd_question_end(void);
 static void btd_ask(void *context, unsigned kind, uint32_t number);
 static void btd_paired(void *context, const char *answer);
 static int btd_permitted(uid_t uid);
+static void btd_connect(int index, const char *argument);
+static void btd_disconnect(struct btd_client *client, const char *argument);
+static void btd_status(struct btd_client *client);
+static int btd_hid_bridge(void *context, int *descriptor);
+static void btd_hid_told(void *context, const uint8_t *address, const char *line);
+static void btd_hid_holding(void);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void btd_client_close(int index);
@@ -169,6 +178,13 @@ static struct btd_pair btd_pairing;
  * node empties its routes.
  */
 static struct btd_router btd_routing;
+
+/*
+ * The HID host (ws143-p005 i02c): the router's owner of the HID devices'
+ * connections.  It lives as long as the daemon; a closed node ends its
+ * connections (the devices stay wanted).
+ */
+static struct btd_hid btd_hid_host;
 
 /*
  * The clients of a pairing: the one that asked for it, the agent that
@@ -229,6 +245,8 @@ main(
 	char **argv)
 {
 	struct pollfd descriptors[3U + BTD_CLIENTS_MAX];
+	struct btd_hid_hooks hid_hooks;
+	struct btd_router_hid router_hid;
 	unsigned count;
 	unsigned index;
 	uint64_t now;
@@ -279,6 +297,22 @@ main(
 	/* The pairing, handed the session's connection packets from each start on. */
 	btd_pair_init(&btd_pairing, &btd_session, BTD_KEYS_FOLDER, btd_ask, btd_paired, NULL, btd_random, NULL);
 	btd_router_init(&btd_routing, &btd_pairing);
+
+	/*
+	 * The HID host, the router's owner of its connections.  The pairing's
+	 * handoff (btd_hid_handoff) is given in i02d, with the loopback
+	 * controller that answers SDP (until then a paired device is ended as
+	 * in p004, which its tests expect).
+	 */
+	hid_hooks.context = NULL;
+	hid_hooks.open_bridge = btd_hid_bridge;
+	hid_hooks.answer = btd_hid_told;
+	btd_hid_init(&btd_hid_host, &btd_session, BTD_KEYS_FOLDER, &btd_routing, &hid_hooks);
+	router_hid.context = &btd_hid_host;
+	router_hid.wants = btd_hid_wants;
+	router_hid.claims = btd_hid_claims;
+	router_hid.handle = btd_hid_handle;
+	btd_router_set_hid(&btd_routing, &router_hid);
 
 	/* The controller there is now. */
 	btd_open();
@@ -337,6 +371,12 @@ main(
 		/* The pairing's deadlines. */
 		now = btd_now_ms();
 		btd_pair_tick(&btd_pairing, now);
+
+		/* The HID host's deadlines and pages (held while a pairing or a scan runs). */
+		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
+			btd_hid_holding();
+			btd_hid_tick(&btd_hid_host, now);
+		}
 
 		/* A scan that is over answers the client that asked. */
 		if (btd_session_open && btd_session.scanning && now >= btd_session.scan_end_ms)
@@ -507,9 +547,11 @@ btd_open(
 	if (btd_session.load_sent && btd_session.state == BTD_STATE_LOST)
 		btd_reappear_ms = btd_now_ms() + BTD_REAPPEAR_MS;
 
-	/* A ready start ends a run of failures; a failed one counts, and too many stop the tries. */
+	/* A ready start ends a run of failures (the HID devices are read); a failed one counts, and too many stop the tries. */
 	if (btd_session.state == BTD_STATE_READY) {
 		btd_failures = 0U;
+		if (!btd_powered_off)
+			btd_hid_refresh(&btd_hid_host);
 	} else if (btd_session.state == BTD_STATE_ERROR) {
 		btd_failures++;
 		if (btd_failures >= BTD_FAILURES_MAX) {
@@ -536,6 +578,7 @@ btd_close(
 
 	/* A pairing cannot go on without the controller (review S-f), and no connection is left. */
 	btd_pair_lost(&btd_pairing);
+	btd_hid_lost(&btd_hid_host);
 	btd_router_clear(&btd_routing);
 
 	/* A client waiting for a scan is answered. */
@@ -612,6 +655,9 @@ btd_timeout(
 		earliest = btd_session.scan_end_ms;
 	deadline = btd_pair_deadline(&btd_pairing);
 	if (deadline != 0U && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
+	deadline = btd_hid_deadline(&btd_hid_host);
+	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
 	if (!btd_session_open && !btd_stopped) {
 		deadline = btd_looked_ms + BTD_RETRY_MS;
@@ -750,8 +796,8 @@ btd_line(
 		return;
 	}
 
-	/* A client waiting for its scan or its pairing asks nothing more until it is answered. */
-	if (client->waits_scan || client->waits_pair)
+	/* A client waiting for its scan, its pairing or its connection asks nothing more until it is answered. */
+	if (client->waits_scan || client->waits_pair || client->waits_connect)
 		return;
 
 	/* SHOW. */
@@ -800,6 +846,27 @@ btd_line(
 	same = strncmp(line, "FORGET ", 7U);
 	if (same == 0) {
 		btd_forget(client, line + 7);
+		return;
+	}
+
+	/* CONNECT ADDRESS TYPE (ws143-p005). */
+	same = strncmp(line, "CONNECT ", 8U);
+	if (same == 0) {
+		btd_connect(index, line + 8);
+		return;
+	}
+
+	/* DISCONNECT ADDRESS TYPE (ws143-p005). */
+	same = strncmp(line, "DISCONNECT ", 11U);
+	if (same == 0) {
+		btd_disconnect(client, line + 11);
+		return;
+	}
+
+	/* STATUS (ws143-p005). */
+	same = strcmp(line, "STATUS");
+	if (same == 0) {
+		btd_status(client);
 		return;
 	}
 
@@ -992,7 +1059,7 @@ btd_show(
 		if (error != 0)
 			name[0] = '\0';
 		btd_write(client,
-			  "CONTROLLER node=%s vendor=%04x product=%04x name=\"%s\" address=%s hci=%u manufacturer=%u le=%d p256=%d dhkey=%d firmware=%s ssp=%d sc=%d pairing=%d\n",
+			  "CONTROLLER node=%s vendor=%04x product=%04x name=\"%s\" address=%s hci=%u manufacturer=%u le=%d p256=%d dhkey=%d firmware=%s ssp=%d sc=%d pairing=%d hid=%u page_scan=%d le_auto=0\n",
 			  btd_session.path,
 			  (unsigned)btd_session.info.vendor,
 			  (unsigned)btd_session.info.product,
@@ -1006,7 +1073,9 @@ btd_show(
 			  firmware,
 			  btd_session.ssp,
 			  btd_session.secure_connections,
-			  pairing);
+			  pairing,
+			  btd_hid_open_count(&btd_hid_host),
+			  btd_hid_host.page_scan);
 	}
 
 	/* The user's switch (ws143-p006), whatever the controller's state. */
@@ -1171,6 +1240,7 @@ btd_pair(
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
 	int permitted;
+	int busy;
 	int error;
 
 	/* Only those D8 permits. */
@@ -1200,8 +1270,9 @@ btd_pair(
 		return;
 	}
 
-	/* One pairing at a time. */
-	if (btd_pair_client != BTD_NO_CLIENT) {
+	/* One pairing at a time, none while a HID device's connection is under way (review B7). */
+	busy = btd_hid_busy(&btd_hid_host, address);
+	if (btd_pair_client != BTD_NO_CLIENT || busy) {
 		btd_write(client, "ERROR busy\nDONE\n");
 		return;
 	}
@@ -1315,6 +1386,10 @@ btd_forget(
 		btd_write(client, "ERROR %s\nDONE\n", strerror(error));
 		return;
 	}
+
+	/* A HID device's record goes too; a connected one hears the unplug and is disconnected (design section 6.3). */
+	if (type == BTD_ADDRESS_BREDR)
+		btd_hid_forget(&btd_hid_host, address);
 
 	/* Succeeded: forgotten. */
 	btd_log("bluetoothd: forgot %s\n", argument);
@@ -1619,6 +1694,7 @@ btd_client_close(
 	client->used = 0U;
 	client->waits_scan = 0;
 	client->waits_pair = 0;
+	client->waits_connect = 0;
 
 	/* The agent is gone; a question it was asked is no, and it hears no ASK-END. */
 	if (btd_agent_client == index)
@@ -1735,4 +1811,193 @@ btd_remember_load(
 	/* At the end. */
 	(void)snprintf(btd_loads[btd_load_count], sizeof(btd_loads[0]), "%s", key);
 	btd_load_count++;
+}
+
+/*
+ * Connects a bonded HID device (CONNECT ADDRESS TYPE, ws143-p005): the
+ * client waits for the connection's end (CONNECTED or ERROR), unless it is
+ * answered at once.  BR/EDR only for now (LE is i03's).
+ */
+static void
+btd_connect(
+	int index,
+	const char *argument)
+{
+	struct btd_client *client;
+	char answer[BTD_HID_ANSWER_MAX];
+	uint8_t address[BTD_ADDRESS_BYTES];
+	unsigned type;
+	int permitted;
+	int answered;
+	int error;
+
+	/* Only those D8 permits. */
+	client = &btd_clients[index];
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The device: BR/EDR's. */
+	error = btd_parse_device(argument, address, &type);
+	if (error != 0) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* LE's HID devices are not connected yet (i03). */
+	if (type != BTD_ADDRESS_BREDR) {
+		btd_write(client, "ERROR not-supported\nDONE\n");
+		return;
+	}
+
+	/* A ready controller, which the user has not turned off. */
+	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
+		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* None while the user has Bluetooth off. */
+	if (btd_powered_off) {
+		btd_write(client, "ERROR off\nDONE\n");
+		return;
+	}
+
+	/* The connection: answered now, or the client waits for its end. */
+	btd_hid_holding();
+	answered = btd_hid_connect(&btd_hid_host, address, answer, sizeof(answer));
+	if (answered) {
+		btd_write(client, "%s\nDONE\n", answer);
+		return;
+	}
+
+	/* Succeeded: the client waits. */
+	client->waits_connect = 1;
+	memcpy(client->connect_address, address, BTD_ADDRESS_BYTES);
+	btd_log("bluetoothd: connecting %s asked by uid %u\n", argument, (unsigned)client->uid);
+}
+
+/* Disconnects a HID device (DISCONNECT ADDRESS TYPE, ws143-p005); it is not wanted back until connected again. */
+static void
+btd_disconnect(
+	struct btd_client *client,
+	const char *argument)
+{
+	uint8_t address[BTD_ADDRESS_BYTES];
+	unsigned type;
+	int permitted;
+	int error;
+
+	/* Only those D8 permits. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The device. */
+	error = btd_parse_device(argument, address, &type);
+	if (error != 0 || type != BTD_ADDRESS_BREDR) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* Its disconnection. */
+	error = btd_hid_disconnect(&btd_hid_host, address);
+	if (error != 0) {
+		btd_write(client, "ERROR not-connected\nDONE\n");
+		return;
+	}
+
+	/* Succeeded: disconnecting. */
+	btd_log("bluetoothd: disconnecting %s\n", argument);
+	btd_write(client, "DONE\n");
+}
+
+/* Answers STATUS: a HID line for each device of the HID host. */
+static void
+btd_status(
+	struct btd_client *client)
+{
+	char line[512];
+	unsigned index;
+
+	/* Each device's line. */
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		btd_hid_status(&btd_hid_host, index, line, sizeof(line));
+		if (line[0] != '\0')
+			btd_write(client, "%s\n", line);
+	}
+
+	/* Succeeded: the end. */
+	btd_write(client, "DONE\n");
+}
+
+/* Opens /dev/input/bridge for the HID host, through the privileged parent. */
+static int
+btd_hid_bridge(
+	void *context,
+	int *descriptor)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The parent's open. */
+	error = btd_privsep_open_bridge(&btd_separation, descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the open. */
+	return 0;
+}
+
+/* Tells the client waiting for a device's connection its end (the HID host's answer hook). */
+static void
+btd_hid_told(
+	void *context,
+	const uint8_t *address,
+	const char *line)
+{
+	struct btd_client *client;
+	unsigned index;
+	int same;
+
+	UNUSED_PARAMETER(context);
+
+	/* Logged. */
+	btd_log("bluetoothd: hid: %s\n", line);
+
+	/* Each client waiting for that device. */
+	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+		client = &btd_clients[index];
+		if (client->descriptor < 0 || !client->waits_connect)
+			continue;
+		same = memcmp(client->connect_address, address, BTD_ADDRESS_BYTES);
+		if (same != 0)
+			continue;
+
+		/* The end. */
+		client->waits_connect = 0;
+		btd_write(client, "%s\nDONE\n", line);
+	}
+}
+
+/* Holds the HID host's pages while a pairing or a scan runs (review B7). */
+static void
+btd_hid_holding(
+	void)
+{
+	int pairing;
+	int held;
+
+	/* A pairing, or a scan. */
+	pairing = btd_pair_active(&btd_pairing);
+	held = 0;
+	if (pairing || btd_session.scanning)
+		held = 1;
+
+	/* Succeeded: told. */
+	btd_hid_hold(&btd_hid_host, held);
 }

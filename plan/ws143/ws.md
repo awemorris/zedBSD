@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG005
 Parent: [Master](../master.md)
 Queue: なし（2026-10-08 q902 の照合の時点。過去: q752・q860・q878・q883・q888（P2）、q896（P1））
-Resume point: 2026-10-08 q902 P1 の照合: p003 i01・p004（T1-409・426）・p005 i01a〜c（T1-419・426・432・423）は Q1 の判定待ち。次: T1-446（p006 の 2 点の直しの再試験）、p005 i02（BR/EDR の HID host）→ i03（LE）→ i04（5330 の門）、p003 i02（intelbt と 5330）、p008 の UAT。p007 は 10/13 以降、p009 はベータ3。旧: p001 は cleared の提案。p002 に着手。
+Resume point: 2026-10-08 夜 q904 P1: p005 i02a・i02b 済み、i02c の途中（hid.c と口、host 試験と handoff の接続は未）→ phase005 の「i02c の途中の記録」。旧 2026-10-08 q902 P1 の照合: p003 i01・p004（T1-409・426）・p005 i01a〜c（T1-419・426・432・423）は Q1 の判定待ち。次: T1-446（p006 の 2 点の直しの再試験）、p005 i02（BR/EDR の HID host）→ i03（LE）→ i04（5330 の門）、p003 i02（intelbt と 5330）、p008 の UAT。p007 は 10/13 以降、p009 はベータ3。旧: p001 は cleared の提案。p002 に着手。
 Target: **ベータ2**（2026-10-05 の朝の user の「ベータ4以降」の後、同日の再編「ベータ3とベータ3の内容を、ベータ2に移動します」で WS143 を含むベータ3・ベータ4 以降の項目をベータ2 に移した（master の記録、Q1 の確認）。前の指示: user「WS037, WS044,WS048,WS141, ... WS143, ... は、ベータ4以降としてください。」）
 <!-- awesome-plan-current:end -->
 
