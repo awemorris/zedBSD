@@ -97,6 +97,8 @@ void drv_input_core_init(void);
 int drv_input_device_register(const struct input_device_info *,
 			  struct input_device **);
 void drv_input_device_unregister(struct input_device *);
+/* The number of a registered device's node, /dev/input/eventN. */
+unsigned drv_input_device_number(const struct input_device *);
 void drv_input_device_emit(struct input_device *, uint16_t, uint16_t, int32_t);
 /*
  * Emits one event stamped with a time the caller took (CLOCK_MONOTONIC

@@ -263,11 +263,13 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
 endif
-# The HID report parser and the pen and touch state machines serve every HID
-# transport (USB, I2C-HID) and the test injector (ws159-p003).
+# The HID report parser, the pen and touch state machines and the HID input glue
+# (ws143-p005) serve every HID transport (USB, I2C-HID) and the test injector
+# (ws159-p003).
 AMD64_HID_SOURCES :=
 ifneq ($(filter y,$(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_PCI_LPSS_I2C) $(CONFIG_INPUT_TEST_INJECT)),)
-AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c
+AMD64_HID_SOURCES += src/drivers/generic/hid-report.c src/drivers/generic/hid-digitizer.c src/drivers/generic/hid-touch.c \
+	src/drivers/generic/hid-input.c
 endif
 # The USB CCID readers and the smart card slots' class (ws161-p003).
 ifeq ($(CONFIG_DRIVER_USB_CCID),y)
