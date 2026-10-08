@@ -667,14 +667,12 @@ ml_draw(
 {
 	struct kl_glass_panel panels[ML_PANELS_MAX];
 	struct kl_event event;
-	struct kl_rect caret;
 	const struct kl_rect *present_part;
 	struct kl_rect part;
 	size_t count;
 	int status;
 	int error;
 	int taken;
-	int wanted;
 	int partial;
 
 	/* Nothing changed and nothing moves: no frame. */
@@ -707,12 +705,11 @@ ml_draw(
 	/*
 	 * The text input is asked for while a field has the keyboard, and told
 	 * where its caret is, so that an input method's candidates and the
-	 * on-screen keyboard stay out of its way.
+	 * on-screen keyboard stay out of its way; the widgets' Cut, Copy and
+	 * Paste use the window's clipboard (ws190-p002: the bar of the fingers'
+	 * selection too).
 	 */
-	wanted = kl_ui_text_wanted(mailer->ui, &caret);
-	kl_window_text_input(mailer->window, wanted);
-	if (wanted)
-		kl_window_text_cursor(mailer->window, caret.x, caret.y, caret.width, caret.height);
+	kl_ui_window_text(mailer->ui, mailer->window);
 
 	/* The glass's panels for the frame; a compositor without glass leaves the window opaque from the next one. */
 	if (mailer->view.glass) {

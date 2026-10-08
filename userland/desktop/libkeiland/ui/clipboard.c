@@ -239,8 +239,10 @@ int
 kl_window_can_paste(
 	const struct kl_window *window)
 {
-	/* The window's own text. */
+	/* The window's own text (the only one without the compositor's clipboard, as kl_window_paste takes it; ws190-p002). */
 	if (window->data_source != NULL && window->clipboard_length != 0U)
+		return 1;
+	if (window->data_device == NULL && window->clipboard_length != 0U)
 		return 1;
 
 	/* Another program's offer of text. */

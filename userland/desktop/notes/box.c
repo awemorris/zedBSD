@@ -74,11 +74,17 @@ notes_box_open(
 {
 	int error;
 
-	/* The widgets' state, made once. */
+	/*
+	 * The widgets' state, made once.  The box is composed by its own
+	 * rectangle only, where the fingers' selection's bar and handles would
+	 * not show: a double tap keeps selecting the whole text (ws190-p002,
+	 * Future Work F-088).
+	 */
 	if (box->ui == NULL) {
 		box->ui = kl_ui_create();
 		if (box->ui == NULL)
 			return ENOMEM;
+		kl_ui_set_text_bar(box->ui, NULL, 0);
 	}
 
 	/*
