@@ -28,7 +28,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 71・80・82・83・84（WS169 ws169-
 ## 未実施・制限
 
 - QEMU（T1）: AAT `apps.mailer.read-compose`・`apps.mailer.sign-in-code` の回帰（main.c の入力の回し方を変えた）。Edit Account・Remove・証明書の dialog・Trash の削除・16 個の account の sidebar は QEMU・画面で見ていない（host の試験だけ、UAT）。
-- thread の作り直し（edit・remove・trust）は古い thread の今の仕事の終わりを待つ（最長で接続 15 秒・読み 30 秒、窓が止まる）。作り直すと各 folder の最新 50 通を取り直す（store は重複を除く）。
+- thread の作り直し（edit・remove・trust）は古い thread の今の仕事の終わりを待つ（最長で接続 15 秒・読み 30 秒、窓が止まる）。**残り（2026-10-08 Q1）: N の後で直す候補**（作り直しを thread の中の job にする、または古い thread を待たずに切り離す）。作り直すと各 folder の最新 50 通を取り直す（store は重複を除く）。
 - Outlook が送った物を Sent に自分で置くかは確かめていない（APPEND する）。
 
 ## Event
