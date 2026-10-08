@@ -271,6 +271,7 @@ pointer（mouse）と touch screen（first finger は shell の pointer の左 b
 | メニューでまた形を選ぶ | その形で整列し直す（モードは続く） |
 
 - 終わった後の窓は全部ただの floating で、整列の記録は残さない（`on = 0`、枠の pointer を消す）。
+  - **変更（2026-10-08 ユーザーの決定 (b)、[ws177-p037](../../ws177/phase037/phase.md)）**: 終わった時に desktop ごとの「形と各枠の窓」を compositor の中だけで覚える（再起動で消える）。同じ desktop で同じ形をまた選び、対象が同じ窓で同じ数なら、近さでなく前と同じ枠へ戻す（log `KWL ARRANGE recall`）。整列中に同じ形を選び直した時は今の枠を保つ。窓が消えたらその記憶の枠は空になり、一致しなくなる。窓は floating のまま（整列モードではない）は変わらない。
 - surface の消滅は `kwl_glass_forget()`（§1.4）が枠の窓を NULL にして `gone` を立て、次の tick で終える。
 - **検出**（S-e）: 毎 tick の `arrange_follow()` が各 desktop の整列について、枠の窓が mapped・最小化でない・全画面でない・同じ desktop にいる・`window_width/height` が枠の body のまま（縁の大きさの変更で変わる）を確かめ、外れたら理由つきで終える。新しい窓は `kwl_glass_mapped()`（display.c の map）で、適用の時に覚えた `map_order` の上限より新しい親を持たない toplevel が整列の desktop に map された時だけ終える（D7 で枠の外に残った古い窓では終えない）。他の desktop から来た窓は `window_to_desktop()` で終える。
 - **入れ替えの後始末**（minor 9）: `server->swap` は forget・`desktop_turn`・最小化・lock・`window_float_quiet`・整列の終わりで消す。swap の間の client の move の要求は無視する。整列した窓は適用の時に枠の順で前へ上げ、上限を超えた窓はその下に残す。

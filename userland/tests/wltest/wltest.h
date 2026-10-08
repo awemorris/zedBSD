@@ -33,6 +33,9 @@ struct wltest_window {
 	int closed;
 	/* A window of one size (its smallest and largest sizes the same, ws142-p010): it keeps its size whatever the compositor configures. */
 	int fixed;
+	/* Its smallest size (ws177-p035), 0 for none: a configure smaller than it is drawn at it. */
+	uint32_t min_width;
+	uint32_t min_height;
 };
 
 /* One swapchain attachment, whose VkImage is borrowed from the swapchain. */
@@ -72,7 +75,7 @@ struct wltest_renderer {
 };
 
 /* Window lifetime encloses all renderer use of the borrowed native surface. */
-int wltest_window_open(struct wltest_window *window, const char *display, uint32_t width, uint32_t height, int fullscreen, int fixed, const char *app_id);
+int wltest_window_open(struct wltest_window *window, const char *display, uint32_t width, uint32_t height, int fullscreen, int fixed, const uint32_t *minimum, const char *app_id);
 int wltest_window_dispatch(struct wltest_window *window);
 void wltest_window_close(struct wltest_window *window);
 

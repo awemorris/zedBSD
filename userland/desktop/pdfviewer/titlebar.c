@@ -163,7 +163,7 @@ pv_titlebar_focus_find(
  * Takes the find field's text: as it is typed, Find looks for it from the
  * page in view; Enter in it shows the next place and leaves the field with
  * the keyboard and its text, so that Enter again goes on (ws128-p004,
- * q826).
+ * q826), and what is typed next is added to its text (ws177-p043).
  */
 void
 pv_titlebar_input(
@@ -190,12 +190,17 @@ pv_titlebar_input(
 	/* The next place. */
 	pv_find_next(app, 1);
 
-	/* The field keeps the query (the compositor's field starts from the control's text) and takes the keyboard again. */
+	/*
+	 * The field keeps the query (the compositor's field starts from the
+	 * control's text) and takes the keyboard again to go on editing it:
+	 * the caret at its end, nothing selected, so that what is typed next
+	 * is added to the words (ws177-p043).
+	 */
 	if (!titlebar->shown)
 		return;
 	error = kl_window_set_control_text(titlebar->window->kui, CONTROL_FIND, input->text, "Find");
 	if (error == 0)
-		error = kl_window_focus_control(titlebar->window->kui, CONTROL_FIND);
+		error = kl_window_focus_control_mode(titlebar->window->kui, CONTROL_FIND, KL_FOCUS_EDIT);
 	pv_log("FIND keep error=%d", error);
 }
 

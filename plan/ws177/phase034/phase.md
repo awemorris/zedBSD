@@ -3,7 +3,7 @@
 # ws177-p034: 全画面の app へ上端の帯の press を流し直す（touch の口）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P2 q908 実装・build。QEMU は T1）
+Status: test-wait（T1-475、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908 / q908-i01

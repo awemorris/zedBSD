@@ -418,7 +418,7 @@ static void bar_dock_follow(struct kwl_server *server);
 static void draw_bar_group(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t width, int32_t height);
 static void draw_desktops(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar, const struct glass_bar_colours *colours);
 static void draw_status(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar, const float *ink);
-static void draw_home_status(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar);
+static void draw_home_status(struct kwl_server *server, VkCommandBuffer command, const struct shell_bar *bar, float opacity);
 static int home_bar_passes(struct kwl_server *server, uint32_t state);
 static void draw_battery(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t middle, int percent, unsigned charging, const float *ink);
 static void draw_dock_hint(struct kwl_server *server, VkCommandBuffer command);
@@ -479,7 +479,7 @@ static int click_quick(struct kwl_server *server, struct kwl_object *surface, ui
 static int click_docked_third(struct kwl_server *server);
 static void window_resized(struct kwl_object *surface);
 static void window_lower(struct kwl_server *server, struct kwl_object *surface, const char *via);
-static int bar_press(struct kwl_server *server);
+static int bar_press(struct kwl_server *server, uint32_t button);
 static struct kwl_object *bar_cover(struct kwl_server *server);
 static void bar_cover_log(struct kwl_server *server, const struct kwl_object *cover);
 static int home_without_bar(struct kwl_server *server, uint32_t button, uint32_t state);
@@ -540,6 +540,13 @@ static struct kwl_plane_places shell_head_bars_logged;
  * once each way.  0 at the start, when the layer is drawn.
  */
 static unsigned shell_home_layer_hidden;
+
+/*
+ * Where the system bar's status pill and clock pill were last logged (the
+ * tests press between the status's icons, ws177-p038): logged again when
+ * either moves or changes width.  All 0 before the first.
+ */
+static int32_t shell_status_logged[3];
 
 /*
  * The bottom edge's swipe over a fullscreen window: whether a contact that
@@ -989,6 +996,10 @@ kwl_glass_button(
 	if (pressed)
 		return 1;
 
+	/* An open arrangement menu closes first when the press is on another widget of its bar (arrange-shell.c, ws177-p036). */
+	if (cover == NULL || remote)
+		(void)kwl_arrange_bar_press(server, button, state);
+
 	/* The removable media's icon takes a press on it: Files on its devices (media.c). */
 	if (cover == NULL || remote) {
 		pressed = kwl_media_button(server, button, state);
@@ -1104,7 +1115,7 @@ kwl_glass_button(
 
 	/* The system bar is the compositor's, where it is drawn (on the anchor). */
 	if (server->pointer_y < KWL_GLASS_BAR && cover == NULL && !remote) {
-		pressed = bar_press(server);
+		pressed = bar_press(server, button);
 		return pressed;
 	}
 
@@ -2653,6 +2664,9 @@ kwl_glass_output_resized(
 		}
 	}
 
+	/* The anchor's arranged desktops, arranged again in its new work area (arrange-shell.c, ws177-p036). */
+	kwl_arrange_output_resized(server, KWL_PLANE_ANCHOR);
+
 	/* Everything is drawn again at the new size. */
 	server->dirty = 1;
 }
@@ -2792,9 +2806,10 @@ kwl_glass_bar_control_at(
 
 /*
  * Gives the work area an arrangement fills (WS181): under the system bar,
- * less the on-screen keyboard's settled column or row, and above the
- * bottom edge's strip where the swipe to App Home starts (a window's frame
- * there could not be pressed).
+ * less the on-screen keyboard's settled column or row, above the bottom
+ * edge's strip where the swipe to App Home starts, and inside the left and
+ * right edges' strips where the desktops' swipe starts (ws177-p035): a
+ * window's edge there could not be pressed.
  */
 void
 kwl_glass_work_area(
@@ -2824,6 +2839,14 @@ kwl_glass_work_area(
 	area->y = KWL_GLASS_BAR;
 	area->width = (int32_t)server->width - right;
 	area->height = (int32_t)server->height - KWL_GLASS_BAR - bottom - (KWL_EDGE_BOTTOM_HEIGHT - KWL_ARRANGE_MARGIN);
+
+	/* The margin keeps the slots off the left edge's strip. */
+	area->x += DESKTOP_EDGE - KWL_ARRANGE_MARGIN;
+	area->width -= DESKTOP_EDGE - KWL_ARRANGE_MARGIN;
+
+	/* And off the right edge's, unless the keyboard's column is there instead. */
+	if (right == 0)
+		area->width -= DESKTOP_EDGE - KWL_ARRANGE_MARGIN;
 }
 
 /*
@@ -2998,6 +3021,7 @@ kwl_glass_key(
 	int target;
 	int step;
 	int taken;
+	int super;
 
 	/* A pairing's question, while it shows, takes every key (bluetooth-ask.c, ws143-p006). */
 	taken = kwl_bluetooth_ask_key(server, key, state);
@@ -3060,6 +3084,15 @@ kwl_glass_key(
 
 	/* Alt+Shift with an arrow: the desktop before and after (ws181-p010). */
 	taken = desktop_alt_shift_key(server, key, state);
+	if (taken)
+		return 1;
+
+	/* Super with an arrow: the focused arranged window swaps with its neighbour that way (arrange-shell.c, ws177-p037). */
+	super = 0;
+	if ((server->modifiers & MODIFIERS_ANY) == MODIFIER_SUPER)
+		super = 1;
+	surface = sheet_owner(kwl_top_window(server));
+	taken = kwl_arrange_key_swap(server, surface, key, state, super);
 	if (taken)
 		return 1;
 
@@ -4200,7 +4233,8 @@ draw_sign(
  * pill and the clock's pill at the right.  Its ink is light; the glass's
  * colours are kept from the dark appearance's mapping while it is drawn.
  * Over App Home only the status and the clock are drawn, in white (the
- * 2026-10-07 UAT).
+ * 2026-10-07 UAT); while Home opens or closes the bar fades into them as
+ * the desktop layer fades (ws177-p038).
  */
 static void
 draw_system_bar(
@@ -4216,15 +4250,41 @@ draw_system_bar(
 	int32_t end;
 	float progress;
 	float home;
+	float shown;
+	float depth[3];
+	float layer[4];
+	unsigned layer_on;
 
 	/*
 	 * Over App Home the bar is not drawn: only the status and the clock,
-	 * in white without their pills (the 2026-10-07 UAT).
+	 * in white without their pills (the 2026-10-07 UAT).  While Home opens
+	 * or closes, the bar shows as much as the desktop layer does, and the
+	 * white status the rest (ws177-p038).
 	 */
 	home = kwl_home_progress(server);
+	shown = 1.0f;
 	if (home > 0.0f) {
-		draw_home_status(server, command, bar);
-		return;
+		kwl_home_layer(server, home, &depth[0], &depth[1], &depth[2], &shown);
+		draw_home_status(server, command, bar, 1.0f - shown);
+		if (shown <= 0.0f)
+			return;
+	}
+
+	/*
+	 * A bar fading: drawn through a layer that only fades (in place, its
+	 * own size), the layer the pass had kept to be put back after.
+	 */
+	layer_on = server->layer_on;
+	layer[0] = server->layer_x;
+	layer[1] = server->layer_y;
+	layer[2] = server->layer_scale;
+	layer[3] = server->layer_opacity;
+	if (shown < 1.0f) {
+		server->layer_on = 1;
+		server->layer_x = 0.0f;
+		server->layer_y = 0.0f;
+		server->layer_scale = 1.0f;
+		server->layer_opacity = shown;
 	}
 
 	/* The docked window, if one is on top and not moving. */
@@ -4285,8 +4345,13 @@ draw_system_bar(
 	draw_bar_group(server, command, bar->clock_pill_x, bar->clock_pill_width, BAR_GROUP_HEIGHT);
 	draw_status(server, command, bar, colours.ink);
 
-	/* The rest of the frame is drawn in the appearance's colours again. */
+	/* The rest of the frame is drawn in the appearance's colours again, and with the layer it had. */
 	server->keep_colours = 0U;
+	server->layer_on = layer_on;
+	server->layer_x = layer[0];
+	server->layer_y = layer[1];
+	server->layer_scale = layer[2];
+	server->layer_opacity = layer[3];
 }
 
 /*
@@ -4728,6 +4793,17 @@ draw_status(
 	const struct shell_bar *bar,
 	const float *ink)
 {
+	/* Where the system bar's status and clock are, when they first show and when they moved. */
+	if (bar->output == KWL_PLANE_ANCHOR &&
+	    (shell_status_logged[0] != bar->status_x ||
+	     shell_status_logged[1] != bar->status_width ||
+	     shell_status_logged[2] != bar->clock_pill_x)) {
+		shell_status_logged[0] = bar->status_x;
+		shell_status_logged[1] = bar->status_width;
+		shell_status_logged[2] = bar->clock_pill_x;
+		printf("KWL GLASS status left=%d width=%d clock=%d\n", bar->status_x, bar->status_width, bar->clock_pill_x);
+	}
+
 	/* The date and time. */
 	glass_draw_text(server, command, SIZE_BAR, bar->clock_x, bar->top + BAR_BASELINE, bar->clock, 400, ink);
 
@@ -4754,15 +4830,27 @@ draw_status(
 /*
  * Draws what the bar keeps over App Home (the 2026-10-07 UAT): the status
  * and the clock where they always are, in white, without the strip and
- * without their pills.
+ * without their pills; as far as opacity says while the bar fades into
+ * them (ws177-p038).
  */
 static void
 draw_home_status(
 	struct kwl_server *server,
 	VkCommandBuffer command,
-	const struct shell_bar *bar)
+	const struct shell_bar *bar,
+	float opacity)
 {
-	static const float white[4] = { 1.0f, 1.0f, 1.0f, 0.96f };
+	float white[4];
+
+	/* Nothing while the bar shows whole. */
+	if (opacity <= 0.0f)
+		return;
+
+	/* White, faded in with Home. */
+	white[0] = 1.0f;
+	white[1] = 1.0f;
+	white[2] = 1.0f;
+	white[3] = 0.96f * opacity;
 
 	/* White as it is, not mapped by the appearance, while it is drawn. */
 	server->keep_colours = 1U;
@@ -7060,7 +7148,8 @@ window_lower(
  */
 static int
 bar_press(
-	struct kwl_server *server)
+	struct kwl_server *server,
+	uint32_t button)
 {
 	struct kwl_object *surface;
 	struct shell_bar bar;
@@ -7075,11 +7164,16 @@ bar_press(
 
 	/*
 	 * Over App Home the bar has only the status and the clock, and nothing
-	 * acts, the clock neither (the 2026-10-07 UATs, ws181-p009).
+	 * acts, the clock neither (the 2026-10-07 UATs, ws181-p009): a press
+	 * the status's icons did not take (between them, on the clock) is
+	 * Home's, as a press beside them is (ws177-p038).
 	 */
 	home = kwl_home_progress(server);
-	if (home > 0.0f || server->home_to > 0.0f)
+	if (home > 0.0f || server->home_to > 0.0f) {
+		printf("KWL HOME bar gap x=%d\n", server->pointer_x);
+		(void)kwl_home_button(server, button, 1U);
 		return 1;
+	}
 
 	/*
 	 * The clock opens Calendar (ws155-p004, the 2026-10-04 user request);
@@ -8315,6 +8409,9 @@ desktop_turn(
 		target = 0;
 	if (target >= DESKTOPS)
 		target = DESKTOPS - 1;
+
+	/* A swap of arranged windows being dragged is given up (arrange-shell.c, ws177-p036). */
+	kwl_arrange_swap_cancel(server, "desktop");
 
 	/* From where they are to it. */
 	from = desktop_position(server);

@@ -3,7 +3,7 @@
 # ws177-p041: PDF Viewer の検索の一致の規則・数・速さ・読めない字（案 L の 2）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q907 に立てて着手）
+Status: test-wait（T1-474、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q907-i01（P1、承認は p040 と同じ）
@@ -60,3 +60,25 @@ Origin: [backlog-p2](../backlog-p2.md) 18・19・22・25 行（WS128 ws128-p004�
   濁点の結合と半角カナ・ギリシャとキリルの大文字・合字の glyph（ToUnicode で U+FB01）・ToUnicode の無い font）。各 query の
   一致の頁・範囲・数、tick で数え終える、知らせの文。既存の `plan/ws128/tests/run-host-pdfviewer-find.sh`。
 - build warning 0、style-check。QEMU（T1）は p043 の後にまとめて。
+
+## 実装と確認（2026-10-08 夜、P1 q907）
+
+- `userland/desktop/pdfviewer/find.c`: 頁の鍵（`struct pv_find_key`、`find_key_make`・`find_key_add`・`find_fold`・`find_case`・`find_compose`）、
+  鍵での一致（`find_match`、飛ばしてよい鍵）、query の鍵（`find_query_keys`）。`pv_find_tick`（`pv_app_tick` から、8 ms ずつ頁を読んで数える）、
+  `pv_find_status`（「Match k of N」、数え終える前は「Match on page P」）、見つけた時の知らせ、見つからない時に読めない字があれば
+  「Not found (some text could not be read)」、copy の U+FFFD の数の知らせと log の `unreadable=`。`viewer.h` の `pv_page`（`find_key`・
+  `find_count`・`find_generation`）と `pv_app`（鍵・数の状態）、`document.c` が鍵を放す。
+- log の形は前と同じ（`FIND found query=… page= from= length=`。COPY の行の末尾に `unreadable=` を足しただけ）で、AAT の
+  apps.pdfviewer.find-select の regex はそのまま通る。
+- 試験: host-pdf-find-l の find の群（13 の規則の query、「が」の 2 つ、見つからない時の文、32 の一致を tick で数え「Match 1 of 32」・F3 で
+  「Match 2 of 32」、全てを copy して「3 characters could not be read」）。
+
+| コマンド | 結果 |
+| --- | --- |
+| `sh plan/ws177/tests/host-pdf-find-l.sh`（libpdf と PDF Viewer の核、C89 -pedantic、plain と ASan+UBSan） | 両方 `52 passed, 0 failed`、`host-pdf-find-l: PASS` |
+| `sh plan/ws128/tests/run-host-page-text.sh`・`run-host-pdfviewer-find.sh`（既存の回帰） | PASS・PASS |
+| `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat build/p1-uat/bin/pdfviewer build/p1-uat/bin/wayland build/p1-uat/dynamic/libpdf.so` | rc 0、warning 0 |
+| `python3 plan/tools/style-check.py`（変えた file） | 指摘 0（titlebar-shell.c 1830・1838 と menu.c 139 の既存の指摘は変えていない行） |
+
+制限: 大文字・小文字は Latin-1・Latin Extended-A・ギリシャ・キリルの simple case folding の範囲。アクセントを外した一致（café と cafe）はしない。
+`pv_find_next` は数える tick が読んでいない頁を同期で読む（巨大な文書の最初の検索は今と同じ速さ）。未実施: QEMU（T1）。

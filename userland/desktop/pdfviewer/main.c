@@ -104,6 +104,9 @@ static struct pv_titlebar main_titlebar;
 /* The touch screen's gestures and scroller, made with the viewer (without them fingers do nothing). */
 static struct pv_touch main_touch;
 
+/* The find field inside the window where the compositor shows no titlebar (ws177-p043), made with the window. */
+static struct pv_bar main_bar;
+
 /*
  * libkeiland's file chooser while the viewer waits for it (File > Open), a
  * window of its own over the viewer's; NULL otherwise.
@@ -248,6 +251,11 @@ main(
 	if (error != 0)
 		pv_log("TOUCH failed errno=%d", error);
 
+	/* The find field inside the window (ws177-p043); without memory for it Ctrl+F does nothing without a titlebar. */
+	error = pv_bar_open(&main_bar, options.font);
+	if (error != 0)
+		pv_log("BAR failed errno=%d", error);
+
 	/* The menus and the titlebar; a window without them goes on with its keys. */
 	main_state(&state);
 	error = pv_menu_open(&main_menu, &main_window, &state);
@@ -272,6 +280,7 @@ main(
 	pv_titlebar_close(&main_titlebar);
 	pv_menu_close(&main_menu);
 	pv_touch_close(&main_touch);
+	pv_bar_close(&main_bar);
 	pv_app_release(&main_app);
 	free(main_pixels);
 	kl_window_close(main_window.kui);
@@ -521,10 +530,20 @@ main_loop(
 		/* The print under way followed. */
 		main_print_follow();
 
-		/* The find field asked for (Ctrl+F, ws128-p004). */
+		/* The find field asked for (Ctrl+F, ws128-p004): the titlebar's, or without it the one inside the window (ws177-p043). */
 		if (main_app.want_find_focus) {
 			main_app.want_find_focus = 0;
-			pv_titlebar_focus_find(&main_titlebar);
+			if (main_titlebar.shown) {
+				pv_titlebar_focus_find(&main_titlebar);
+			} else {
+				pv_find_bar_open(&main_app);
+			}
+		}
+
+		/* The field inside the window takes the keyboard when it is asked for. */
+		if (main_app.want_bar_focus) {
+			main_app.want_bar_focus = 0;
+			pv_bar_focus(&main_bar, &main_app);
 		}
 
 		/* A drag out of the window the view asked for: the selection's words or an image (ws189-p003). */
@@ -589,12 +608,21 @@ main_frame(void)
 	uint64_t shown;
 	unsigned stale;
 	int status;
+	int again;
 
 	/* Tries until the frame is shown, remaking a stale swapchain a few times. */
 	for (stale = 0; stale < MAIN_STALE_LIMIT; stale++) {
 		/* The frame on the CPU, shown in the window. */
 		started = pv_clock();
 		pv_draw(&main_app, &main_canvas);
+
+		/* The find field inside the window over it (ws177-p043), which may want the next frame. */
+		again = pv_bar_draw(&main_bar, &main_app, main_window.kui, main_pixels, (size_t)main_width, (int)main_width, (int)main_height,
+				    kl_clock_us());
+		if (again)
+			main_app.dirty = 1;
+
+		/* Shown. */
 		status = kl_window_present(main_window.kui, main_pixels, (size_t)main_width);
 		if (status == 0) {
 			shown = pv_clock();
@@ -685,6 +713,12 @@ main_window_event(
 	const struct kl_window_event *event)
 {
 	struct pv_event input;
+	int taken;
+
+	/* The find field inside the window takes its inputs first (ws177-p043). */
+	taken = pv_bar_input(&main_bar, &main_app, event);
+	if (taken)
+		return;
 
 	/* What it is. */
 	switch (event->kind) {

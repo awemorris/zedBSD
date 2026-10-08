@@ -337,7 +337,12 @@ struct kl_titlebar;
 #define KL_TAB_CLOSABLE		4U
 #define KL_TABS_NEW_BUTTON	1U
 
-/* How a text control takes the keyboard, and how its editing ended. */
+/*
+ * How a text control takes the keyboard (a search as a field with its text
+ * selected; with _EDIT, ws177-p043, to go on editing it, the caret at its
+ * end and nothing selected; a breadcrumb with _EDIT as a path to edit), and
+ * how its editing ended.
+ */
 #define KL_FOCUS_FIELD		0U
 #define KL_FOCUS_EDIT		1U
 #define KL_TEXT_SUBMITTED		0U
