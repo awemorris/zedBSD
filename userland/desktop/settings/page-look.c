@@ -226,10 +226,21 @@ se_storage_draw(
 	int width)
 {
 	unsigned index;
+	int offered;
+	int known;
 	int y;
 
-	/* The file systems as they are now. */
+	/* The file systems as the desktop last read them, read again while the page shows them (ws188-p002). */
 	se_look_volumes(app);
+
+	/* Not read yet: said while the first reading is under way (a desktop that reads none says none can be read). */
+	known = se_machine_known(app, KL_MACHINE_FILESYSTEMS);
+	offered = se_machine_offered(app);
+	if (!known && offered) {
+		y = look_note(app, canvas, x, top, width, "Reading the disks...");
+		y = se_storage_cards(app, canvas, x, y + LOOK_GAP, width);
+		return y;
+	}
 
 	/* None can be read. */
 	if (app->look.volume_count == 0U) {

@@ -23,7 +23,7 @@ kei は wheel。Settings の Users の頁。`aatuser` はいない。
 3. 操作: `aatuser`、Tab、`AAT User`、Tab、`aat-pass-1`、Tab、`wrong-pass`、Enter。
    確認事項: 拒否。正解: `ZSETTINGS USERS admin result … reason=bad-password`、`/etc/passwd` に `aatuser` が無い。確認方法: log、grep。
 4. 操作: もう一度「Add User」、同じ値で Your password を `kei`、Enter。
-   確認事項: 追加。正解: `ZSETTINGS USERS admin result request=N errno=0`、`/etc/passwd` に `aatuser`、一覧に出る。確認方法: log、grep、撮影。
+   確認事項: 追加。正解: `ZSETTINGS USERS admin result request=N errno=0`、`/etc/passwd` に `aatuser`、その後の `ZSETTINGS USERS list count=` の行を待ってから一覧に出る（一覧は desktop が読み直して答える、ws188-p002）。確認方法: log、grep、撮影。
 5. 操作: 一覧の `aatuser` の行を click、「Remove」、Your password に `kei`、Enter。
    確認事項: 削除。正解: `… admin start mode=3`、`… admin result … errno=0`、`/etc/passwd` に `aatuser` が無い。確認方法: log、grep。
 

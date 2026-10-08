@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 18; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 21; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -27,6 +27,7 @@
  *   request 11 get_phone(new_id kl_system_phone_v1)       since version 16 (ws170-p004)
  *   request 12 get_printers(new_id kl_system_printers_v1) since version 17 (ws145-p003)
  *   request 13 get_displays(new_id kl_system_displays_v1) since version 18 (ws113-p005)
+ *   request 14 get_machine(new_id kl_system_machine_v1)   since version 21 (ws188-p002)
  *   event   0 capabilities(uint bits)              sent when it is bound
  *
  * kl_system_settings_v1
@@ -130,6 +131,27 @@
  *   carries the flag OFF (also in the mirror, which shows it still); turning
  *   off the last display on, or any in the mirror, is invalid; a key not
  *   connected is not found.
+ *
+ * kl_system_machine_v1 (ws188-p002, plan/ws188/phase001/phase.md section D1: what Settings reads of the computer)
+ *   request 0 destroy
+ *   request 1 query(uint request, uint what)          what: KL_SYSTEM_MACHINE_ABOUT, _FILESYSTEMS, _USERS,
+ *                                                     _LOGIN_LANGUAGE (0 or another bit is invalid)
+ *   event   0 parts(uint request, uint what)          the answer of request starts: the parts it holds
+ *   event   1 about(string system, string kernel, string architecture, string processor, string host, uint cpus)
+ *   event   2 filesystem(string path, uint total_high, uint total_low, uint available_high, uint available_low,
+ *                        uint used_high, uint used_low)
+ *   event   3 user(string name, string full_name, string home, uint flags)   KL_SYSTEM_MACHINE_USER_*
+ *   event   4 login_language(string code)             "en", "ja", or "" (no file, or another word)
+ *   event   5 result(uint request, uint applied, uint saved)
+ *   The compositor reads on a thread of its own (a file system's size or a directory service may wait),
+ *   one reading at a time; a query that comes during one waits for the next (at most 16 waiting, 4 of a
+ *   client; one more is answered busy), and a reading reads what its waiting queries asked together.  An
+ *   answer is parts, the events of the parts asked (one about, the file systems and the users each whole,
+ *   replacing the earlier list, none meaning there are none, one login_language), then result ok; nothing
+ *   else of the same client comes between them.  A failure is a result alone: busy, unavailable (the
+ *   client's queue has no room for the whole answer), invalid, failed (no thread).  The users are the
+ *   people's accounts and the client's own (SELF), whose home alone is sent; a name that does not fit is
+ *   left out, never cut.
  *
  * kl_system_audio_v1
  *   request 0 destroy
@@ -259,7 +281,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		20U
+#define KL_SYSTEM_MANAGER_VERSION		21U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -277,6 +299,7 @@
 #define KL_SYSTEM_MANAGER_GET_PHONE		11U
 #define KL_SYSTEM_MANAGER_GET_PRINTERS		12U
 #define KL_SYSTEM_MANAGER_GET_DISPLAYS		13U
+#define KL_SYSTEM_MANAGER_GET_MACHINE		14U
 #define KL_SYSTEM_MANAGER_EVENT_CAPABILITIES	0U
 
 /* The capabilities' bits. */
@@ -295,6 +318,7 @@
 #define KL_SYSTEM_CAPABILITY_PHONE		0x1000U
 #define KL_SYSTEM_CAPABILITY_PRINTERS		0x2000U
 #define KL_SYSTEM_CAPABILITY_DISPLAYS		0x4000U
+#define KL_SYSTEM_CAPABILITY_MACHINE		0x8000U
 
 /* Since when the manager has get_sharing (ws089-p025), and the account administer and refused (ws089-p026). */
 #define KL_SYSTEM_SINCE_SHARING			7U
@@ -328,6 +352,9 @@
 /* Since when the mail object tells a reader whether it is allowed (ws177-p005). */
 #define KL_SYSTEM_SINCE_MAIL_ALLOWED		20U
 
+/* Since when the manager has get_machine (ws188-p002). */
+#define KL_SYSTEM_SINCE_MACHINE			21U
+
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
 #define KL_SYSTEM_AUDIO_NAME			"kl_system_audio_v1"
@@ -341,6 +368,43 @@
 #define KL_SYSTEM_PHONE_NAME			"kl_system_phone_v1"
 #define KL_SYSTEM_PRINTERS_NAME			"kl_system_printers_v1"
 #define KL_SYSTEM_DISPLAYS_NAME			"kl_system_displays_v1"
+#define KL_SYSTEM_MACHINE_NAME			"kl_system_machine_v1"
+
+/*
+ * kl_system_machine_v1's requests and events (ws188-p002), the parts a
+ * query asks, a user's flags (a person's account, the client's own, an
+ * administrator's, allowed to control Wi-Fi), and the longest texts the
+ * events carry (with their NULs).
+ */
+#define KL_SYSTEM_MACHINE_DESTROY		0U
+#define KL_SYSTEM_MACHINE_QUERY			1U
+#define KL_SYSTEM_MACHINE_EVENT_PARTS		0U
+#define KL_SYSTEM_MACHINE_EVENT_ABOUT		1U
+#define KL_SYSTEM_MACHINE_EVENT_FILESYSTEM	2U
+#define KL_SYSTEM_MACHINE_EVENT_USER		3U
+#define KL_SYSTEM_MACHINE_EVENT_LOGIN_LANGUAGE	4U
+#define KL_SYSTEM_MACHINE_EVENT_RESULT		5U
+#define KL_SYSTEM_MACHINE_ABOUT			0x1U
+#define KL_SYSTEM_MACHINE_FILESYSTEMS		0x2U
+#define KL_SYSTEM_MACHINE_USERS			0x4U
+#define KL_SYSTEM_MACHINE_LOGIN_LANGUAGE	0x8U
+#define KL_SYSTEM_MACHINE_PARTS			0xfU
+#define KL_SYSTEM_MACHINE_USER_PERSON		0x1U
+#define KL_SYSTEM_MACHINE_USER_SELF		0x2U
+#define KL_SYSTEM_MACHINE_USER_ADMIN		0x4U
+#define KL_SYSTEM_MACHINE_USER_NETWORK		0x8U
+#define KL_SYSTEM_MACHINE_SYSTEM_MAX		128U
+#define KL_SYSTEM_MACHINE_KERNEL_MAX		160U
+#define KL_SYSTEM_MACHINE_ARCH_MAX		32U
+#define KL_SYSTEM_MACHINE_PROCESSOR_MAX		64U
+#define KL_SYSTEM_MACHINE_HOST_MAX		64U
+#define KL_SYSTEM_MACHINE_PATH_MAX		64U
+#define KL_SYSTEM_MACHINE_NAME_MAX		64U
+#define KL_SYSTEM_MACHINE_FULL_NAME_MAX		128U
+#define KL_SYSTEM_MACHINE_HOME_MAX		256U
+#define KL_SYSTEM_MACHINE_CODE_MAX		8U
+#define KL_SYSTEM_MACHINE_FILESYSTEMS_MAX	8U
+#define KL_SYSTEM_MACHINE_USERS_MAX		64U
 
 /*
  * kl_system_displays_v1's requests and events (ws113-p005), the modes, a

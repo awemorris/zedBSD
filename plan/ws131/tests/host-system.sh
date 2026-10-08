@@ -17,6 +17,9 @@ ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -pthread \
 	plan/ws131/tests/host-system.c userland/desktop/wayland/system.c userland/desktop/wayland/sysmon.c \
 	userland/desktop/wayland/notify.c userland/desktop/wayland/notify-shell.c userland/desktop/wayland/mail-shell.c userland/desktop/wayland/phone-shell.c userland/desktop/wayland/printers-shell.c \
 	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/wayland/machine-shell.c userland/desktop/wayland/machine-wait.c userland/desktop/wayland/language-file.c \
+	userland/desktop/libkeiland-backend/machine/machine.c userland/desktop/libkeiland-backend/machine/filesystems.c \
+	userland/desktop/libkeiland-backend/machine/users.c userland/desktop/libkeiland-backend-linux/users-linux.c \
 	userland/desktop/libkeiland/system/system.c userland/desktop/libkeiland/system/system-view.c \
 	userland/desktop/libkeiland/system/system-protocol.c \
 	$(pkg-config --cflags --libs wayland-client) -o "$out"

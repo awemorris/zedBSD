@@ -9,7 +9,8 @@
  * The desktop's look as Settings keeps it (ws089-p004): the desktop's
  * settings (libkeiland's kl_settings_*, which the compositor holds and puts into
  * effect at once; WS135), the pictures the Wallpaper page offers with their
- * small copies, and the file systems the Storage page shows.
+ * small copies, and the file systems the Storage page shows (read by the
+ * desktop, ws188-p002: machine.c asks for them).
  *
  * Settings sets a key when the user has chosen: a picture clicked, a
  * slider let go.  A change made elsewhere (the system bar, another
@@ -32,7 +33,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -90,9 +90,6 @@ struct look_found {
  * files differ only in it (ws138: PNG and JPEG).
  */
 static const char *const look_endings[] = { ".png", ".jpg", ".jpeg" };
-
-/* The places the Storage page looks at (a place on the same file system as one before it is not shown again). */
-static const char *const look_places[] = { "/", "/home", "/usr", "/var", "/tmp", "/boot" };
 
 static void look_read(struct se_app *app);
 static void look_changed(void *data, const char *key, const char *value, unsigned flags);
@@ -409,54 +406,16 @@ se_look_scan(
 }
 
 /*
- * Reads the file systems the Storage page shows: each place's, once for a
- * file system.
+ * Keeps the file systems Home's and Storage's tiles show fresh: the
+ * desktop reads them (ws188-p002, machine.c); a page that draws them asks
+ * for a new reading every two seconds and shows the last one.
  */
 void
 se_look_volumes(
 	struct se_app *app)
 {
-	struct se_look *look;
-	struct se_volume *volume;
-	struct statvfs status;
-	uint64_t seen[SE_VOLUMES];
-	unsigned place;
-	unsigned index;
-	int result;
-	int known;
-
-	/* Each place, until the table is full. */
-	look = &app->look;
-	look->volume_count = 0;
-	for (place = 0; place < sizeof(look_places) / sizeof(look_places[0]); place++) {
-		if (look->volume_count == SE_VOLUMES)
-			break;
-
-		/* A place that is not there, or has no size, is passed over. */
-		result = statvfs(look_places[place], &status);
-		if (result != 0 || status.f_blocks == 0U)
-			continue;
-
-		/* A file system already shown is not shown again. */
-		known = 0;
-		for (index = 0; index < look->volume_count; index++) {
-			if (seen[index] == (uint64_t)status.f_fsid)
-				known = 1;
-		}
-
-		/* One already shown is passed over. */
-		if (known != 0)
-			continue;
-
-		/* Its sizes. */
-		seen[look->volume_count] = (uint64_t)status.f_fsid;
-		volume = &look->volumes[look->volume_count];
-		(void)snprintf(volume->path, sizeof(volume->path), "%s", look_places[place]);
-		volume->total = (uint64_t)status.f_blocks * (uint64_t)status.f_frsize;
-		volume->available = (uint64_t)status.f_bavail * (uint64_t)status.f_frsize;
-		volume->used = volume->total - (uint64_t)status.f_bfree * (uint64_t)status.f_frsize;
-		look->volume_count++;
-	}
+	/* The file systems are wanted while the page shows them. */
+	se_machine_want(app, KL_MACHINE_FILESYSTEMS);
 }
 
 /*

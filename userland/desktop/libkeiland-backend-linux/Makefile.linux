@@ -5,6 +5,10 @@
 # keiland-linux-sync: only userland/desktop/libkeiland-backend-linux/* the Linux backend (no zedBSD Makefile pair)
 KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend/print/print.c \
+	userland/desktop/libkeiland-backend/machine/machine.c \
+	userland/desktop/libkeiland-backend/machine/filesystems.c \
+	userland/desktop/libkeiland-backend/machine/users.c \
+	userland/desktop/libkeiland-backend-linux/users-linux.c \
 	userland/desktop/libkeiland-backend/wpa/network-wpa.c \
 	userland/desktop/libkeiland-backend/wpa/network-config-wpa.c \
 	userland/desktop/libkeiland-backend-linux/network-link-linux.c \

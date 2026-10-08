@@ -9,7 +9,7 @@ KEILAND_SETTINGS_SOURCES := userland/desktop/settings/main.c \
 	userland/desktop/settings/glass.c userland/desktop/settings/titlebar.c \
 	userland/desktop/settings/menu.c userland/desktop/settings/ui.c \
 	userland/desktop/settings/widgets.c userland/desktop/settings/glyphs.c \
-	userland/desktop/settings/pages.c userland/desktop/settings/about.c \
+	userland/desktop/settings/pages.c userland/desktop/settings/machine.c \
 	userland/desktop/settings/page-home.c userland/desktop/settings/page-about.c userland/desktop/settings/welcome.c userland/desktop/settings/page-users.c userland/desktop/settings/page-users-admin.c userland/desktop/settings/page-users-pin.c userland/desktop/settings/page-users-keys.c \
 	userland/desktop/settings/page-soon.c userland/desktop/settings/page-power.c userland/desktop/settings/page-network.c userland/desktop/settings/page-wired.c userland/desktop/settings/wired.c userland/desktop/settings/page-storage.c userland/desktop/settings/page-sharing.c userland/desktop/settings/page-printers.c userland/desktop/settings/page-languages.c userland/desktop/settings/storage.c userland/desktop/settings/storage-scan.c userland/desktop/settings/storage-trash.c \
 	userland/desktop/settings/network.c userland/desktop/settings/search.c \

@@ -35,11 +35,9 @@
 #include "settings.h"
 
 #include <errno.h>
-#include <pwd.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* The steps (Languages between Look and Keys, ws164 H3). */
 #define WELCOME_STEP_WELCOME	0
@@ -95,7 +93,7 @@ static int welcome_keys_card(struct se_app *app, struct kl_canvas *canvas, int x
 static int welcome_done(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 static int welcome_header(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width, const char *title, const char *summary);
 static void welcome_finish(struct se_app *app, int skipped);
-static void welcome_name(char *name, size_t size);
+static void welcome_name(const struct se_app *app, char *name, size_t size);
 static int welcome_lines(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width, const char *text, unsigned pixels, int bold, kl_color color, int most);
 static int welcome_network_note(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 static int welcome_no_network(const struct se_app *app);
@@ -397,8 +395,8 @@ welcome_intro(
 {
 	struct kl_text_line title;
 	struct kl_text_line line;
-	char name[64];
-	char words[128];
+	char name[128];
+	char words[192];
 	int baseline;
 	int bottom;
 
@@ -406,7 +404,7 @@ welcome_intro(
 	se_mark_draw(canvas, x, top, WELCOME_MARK, 1.0f);
 
 	/* The greeting under it, with the account's name. */
-	welcome_name(name, sizeof(name));
+	welcome_name(app, name, sizeof(name));
 	(void)kl_tr_format(words, sizeof(words), kl_tr("Welcome to Kei, {1}"), name, (const char *)NULL);
 	kl_text_metrics(app->text, WELCOME_TEXT_BIG, &title);
 	baseline = top + (int)WELCOME_MARK + 28 + title.ascent;
@@ -644,34 +642,32 @@ welcome_finish(
 	app->request = SE_REQUEST_CLOSE;
 }
 
-/* Writes the account's name for the greeting: its full name (GECOS), else its login, else "there". */
+/*
+ * Writes the account's name for the greeting: its full name, else its
+ * login, else "there" (before the desktop told the account, ws188-p002:
+ * the frame that follows its answer shows the name).
+ */
 static void
 welcome_name(
+	const struct se_app *app,
 	char *name,
 	size_t size)
 {
-	const struct passwd *account;
-	const char *comma;
-	size_t length;
+	const struct se_users *users;
 
-	/* The account of the process. */
+	/* The account as the desktop told it. */
+	users = &app->users;
+	if (users->full_name[0] != '\0') {
+		(void)snprintf(name, size, "%s", users->full_name);
+		return;
+	}
+
+	/* Without a full name, the login. */
+	if (users->name[0] != '\0') {
+		(void)snprintf(name, size, "%s", users->name);
+		return;
+	}
+
+	/* Not told yet. */
 	(void)snprintf(name, size, "%s", "there");
-	account = getpwuid(getuid());
-	if (account == NULL)
-		return;
-	(void)snprintf(name, size, "%s", account->pw_name);
-
-	/* Its full name, to the first comma, when it has one. */
-	if (account->pw_gecos == NULL || account->pw_gecos[0] == '\0')
-		return;
-	comma = strchr(account->pw_gecos, ',');
-	length = strlen(account->pw_gecos);
-	if (comma != NULL)
-		length = (size_t)(comma - account->pw_gecos);
-	if (length == 0)
-		return;
-	if (length >= size)
-		length = size - 1U;
-	memcpy(name, account->pw_gecos, length);
-	name[length] = '\0';
 }

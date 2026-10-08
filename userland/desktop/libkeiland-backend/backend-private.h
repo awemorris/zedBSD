@@ -109,4 +109,15 @@ size_t kl_backend_events_poll_count(const struct kl_backend *backend);
 void kl_backend_events_poll_fill(struct kl_backend *backend, struct pollfd *descriptors);
 void kl_backend_events_poll_done(struct kl_backend *backend, const struct pollfd *descriptors);
 
+/*
+ * The shared POSIX parts of the computer's reading (ws188-p002,
+ * machine/machine.c and machine/users.c): the PRETTY_NAME of an
+ * os-release file (0 with the name, -1 when the file has none), and the
+ * accounts read with the administrators' groups an operating system names
+ * (a list of group names ended by NULL).
+ */
+int kl_backend_machine_pretty_name(const char *path, char *name, size_t size);
+void kl_backend_machine_copy(char *to, size_t size, const char *from, size_t length);
+size_t kl_backend_users_posix(struct kl_backend_user *list, size_t capacity, unsigned *skipped, const char *const *admin_groups);
+
 #endif
