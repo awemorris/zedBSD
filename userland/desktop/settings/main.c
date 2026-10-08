@@ -249,8 +249,9 @@ main(
 	/* The loop, until the window closes. */
 	status = main_loop(&options);
 
-	/* Everything goes, the network and the sound before the system, then the titlebar, the menus and the glass before the window they belong to. */
+	/* Everything goes, the network, Bluetooth and the sound before the system, then the titlebar, the menus and the glass before the window they belong to. */
 	se_network_close(&main_app);
+	se_bluetooth_close(&main_app);
 	se_storage_close(&main_app);
 	se_sound_close(&main_app);
 	se_system_close(&main_app);
@@ -494,6 +495,7 @@ main_loop(
 		se_storage_poll(&main_app, now);
 		se_sharing_poll(&main_app);
 		se_printers_poll(&main_app);
+		se_bluetooth_poll(&main_app);
 		se_display_poll(&main_app);
 		se_sound_poll(&main_app, now);
 		if (main_app.dirty != 0)
@@ -655,6 +657,7 @@ main_timeout(
 	int look;
 	int storage;
 	int machine;
+	int bluetooth;
 	int limit;
 
 	/* A frame the last one asked for (a scroll it corrected), or the lit region's, is drawn at once. */
@@ -690,6 +693,11 @@ main_timeout(
 	machine = se_machine_wait(&main_app);
 	if (machine >= 0 && machine < limit)
 		limit = machine;
+
+	/* And while the Bluetooth page's scan is to be asked again (ws143-p006). */
+	bluetooth = se_bluetooth_wait(&main_app);
+	if (bluetooth >= 0 && bluetooth < limit)
+		limit = bluetooth;
 
 	/* The limit (a held key's repeat shortens the wait within the application's). */
 	(void)now;

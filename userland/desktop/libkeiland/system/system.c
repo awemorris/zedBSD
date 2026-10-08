@@ -62,6 +62,7 @@ struct kl_system {
 	struct wl_proxy *printers;
 	struct wl_proxy *displays;
 	struct wl_proxy *machine;
+	struct wl_proxy *bluetooth;
 	struct system_view view;
 	uint32_t next_request;
 	unsigned lost;
@@ -172,6 +173,14 @@ struct system_machine_listener {
 	void (*mount)(void *data, struct wl_proxy *proxy, const char *path, const char *type);
 };
 
+/* The listener of kl_system_bluetooth_v1's events (ws143-p006), in their order. */
+struct system_bluetooth_listener {
+	void (*state)(void *data, struct wl_proxy *proxy, uint32_t reachable, uint32_t state, uint32_t flags, uint32_t features, const char *address, const char *name);
+	void (*device)(void *data, struct wl_proxy *proxy, const char *address, uint32_t type, const char *name, uint32_t kind, uint32_t flags, int32_t battery, int32_t rssi);
+	void (*done)(void *data, struct wl_proxy *proxy, uint32_t serial);
+	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+};
+
 /* The listener of kl_system_devices_v1's events, in their order. */
 struct system_devices_listener {
 	void (*device)(void *data, struct wl_proxy *proxy, const char *id, uint32_t kind, uint32_t state, const char *name, const char *location);
@@ -202,6 +211,9 @@ static void system_machine_user(void *data, struct wl_proxy *proxy, const char *
 static void system_machine_login_language(void *data, struct wl_proxy *proxy, const char *code);
 static void system_machine_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 static void system_machine_mount(void *data, struct wl_proxy *proxy, const char *path, const char *type);
+static void system_bluetooth_state(void *data, struct wl_proxy *proxy, uint32_t reachable, uint32_t state, uint32_t flags, uint32_t features, const char *address, const char *name);
+static void system_bluetooth_device(void *data, struct wl_proxy *proxy, const char *address, uint32_t type, const char *name, uint32_t kind, uint32_t flags, int32_t battery, int32_t rssi);
+static void system_bluetooth_done(void *data, struct wl_proxy *proxy, uint32_t serial);
 static void system_print_queued(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t job);
 static int system_print_title(const char *title, char *out, size_t size);
 static void system_global_remove(void *data, struct wl_registry *registry, uint32_t name);
@@ -342,6 +354,14 @@ static const struct system_machine_listener system_machine_listener = {
 	system_machine_mount
 };
 
+/* Bluetooth's object's callbacks (ws143-p006). */
+static const struct system_bluetooth_listener system_bluetooth_listener = {
+	system_bluetooth_state,
+	system_bluetooth_device,
+	system_bluetooth_done,
+	system_result
+};
+
 /* The devices object's callbacks. */
 static const struct system_devices_listener system_devices_listener = {
 	system_device,
@@ -418,6 +438,7 @@ kl_system_close(
 	system_destroy(system->printers, KL_SYSTEM_PRINTERS_DESTROY);
 	system_destroy(system->displays, KL_SYSTEM_DISPLAYS_DESTROY);
 	system_destroy(system->machine, KL_SYSTEM_MACHINE_DESTROY);
+	system_destroy(system->bluetooth, KL_SYSTEM_BLUETOOTH_DESTROY);
 	system_destroy(system->manager, KL_SYSTEM_MANAGER_DESTROY);
 
 	/* Then the queue they lived on. */
@@ -498,6 +519,8 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_DISPLAYS;
 	if (system->machine != NULL)
 		bits |= KL_SYSTEM_HAS_MACHINE;
+	if (system->bluetooth != NULL)
+		bits |= KL_SYSTEM_HAS_BLUETOOTH;
 
 	/* The administration of the accounts, offered with the account to a manager bound at version 8 (ws089-p026). */
 	if (system->account != NULL && (system->view.capabilities & KL_SYSTEM_CAPABILITY_ADMINISTER) != 0U && system->manager_version >= KL_SYSTEM_SINCE_ADMINISTER)
@@ -1250,6 +1273,149 @@ kl_system_print_cancel(
 	/* Sent with the application's next flush. */
 	asked = system_number(system, request);
 	wl_proxy_marshal(system->printers, KL_SYSTEM_PRINTERS_CANCEL, asked, job);
+	return 0;
+}
+
+/*
+ * Copies Bluetooth's state (ws143-p006).  Returns 0, or ENOTSUP without
+ * it (the state then is unreachable).
+ */
+int
+kl_system_bluetooth_state(
+	const struct kl_system *system,
+	struct kl_bluetooth_state *state)
+{
+	/* A place to copy to. */
+	if (system == NULL || state == NULL)
+		return EINVAL;
+
+	/* Without Bluetooth: unreachable. */
+	if (system->bluetooth == NULL) {
+		memset(state, 0, sizeof(*state));
+		return ENOTSUP;
+	}
+
+	/* The state in effect. */
+	*state = system->view.bluetooth;
+	return 0;
+}
+
+/*
+ * Copies up to capacity of Bluetooth's devices (ws143-p006) and returns
+ * how many were copied.
+ */
+size_t
+kl_system_bluetooth_devices(
+	const struct kl_system *system,
+	struct kl_bluetooth_device *devices,
+	size_t capacity)
+{
+	size_t count;
+
+	/* As many as fit. */
+	if (system == NULL || devices == NULL)
+		return 0;
+	count = system->view.bluetooth_count;
+	if (count > capacity)
+		count = capacity;
+	memcpy(devices, system->view.bluetooth_devices, count * sizeof(devices[0]));
+	return count;
+}
+
+/*
+ * Has Bluetooth's state read often while it is shown (1), or not (0)
+ * (ws143-p006).
+ */
+int
+kl_system_bluetooth_watch(
+	struct kl_system *system,
+	unsigned on)
+{
+	/* The compositor's Bluetooth. */
+	if (system == NULL)
+		return EINVAL;
+	if (system->bluetooth == NULL || system->lost)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	wl_proxy_marshal(system->bluetooth, KL_SYSTEM_BLUETOOTH_WATCH, (uint32_t)(on != 0U));
+	return 0;
+}
+
+/*
+ * Looks for the devices around (1) for a minute from now, or no longer
+ * (0) (ws143-p006).
+ */
+int
+kl_system_bluetooth_scan(
+	struct kl_system *system,
+	unsigned on)
+{
+	/* The compositor's Bluetooth. */
+	if (system == NULL)
+		return EINVAL;
+	if (system->bluetooth == NULL || system->lost)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	wl_proxy_marshal(system->bluetooth, KL_SYSTEM_BLUETOOTH_SCAN, (uint32_t)(on != 0U));
+	return 0;
+}
+
+/*
+ * Turns the controller on (1) or off (0) (ws143-p006).
+ */
+int
+kl_system_bluetooth_power(
+	struct kl_system *system,
+	unsigned on,
+	uint32_t *request)
+{
+	uint32_t asked;
+
+	/* The compositor's Bluetooth. */
+	if (system == NULL)
+		return EINVAL;
+	if (system->bluetooth == NULL || system->lost)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->bluetooth, KL_SYSTEM_BLUETOOTH_POWER, asked, (uint32_t)(on != 0U));
+	return 0;
+}
+
+/*
+ * Pairs, forgets, connects or disconnects a device by its address and
+ * type (ws143-p006).
+ */
+int
+kl_system_bluetooth_device(
+	struct kl_system *system,
+	unsigned action,
+	const char *address,
+	unsigned type,
+	uint32_t *request)
+{
+	uint32_t asked;
+	size_t length;
+
+	/* An action, an address of its length, a type. */
+	if (system == NULL || address == NULL)
+		return EINVAL;
+	if (action < KL_BLUETOOTH_PAIR || action > KL_BLUETOOTH_DISCONNECT || type > KL_BLUETOOTH_LE_RANDOM)
+		return EINVAL;
+	length = strlen(address);
+	if (length != KL_BLUETOOTH_ADDRESS_MAX - 1U)
+		return EINVAL;
+
+	/* The compositor's Bluetooth. */
+	if (system->bluetooth == NULL || system->lost)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->bluetooth, KL_SYSTEM_BLUETOOTH_DEVICE, asked, (uint32_t)action, address, (uint32_t)type);
 	return 0;
 }
 
@@ -3204,6 +3370,10 @@ system_bind(
 	if (system->manager_version >= KL_SYSTEM_SINCE_MACHINE)
 		system->machine = system_make(system, KL_SYSTEM_CAPABILITY_MACHINE, KL_SYSTEM_MANAGER_GET_MACHINE, &kl_system_machine_v1_interface, &system_machine_listener);
 
+	/* Bluetooth, offered to a manager bound at version 23 (ws143-p006). */
+	if (system->manager_version >= KL_SYSTEM_SINCE_BLUETOOTH)
+		system->bluetooth = system_make(system, KL_SYSTEM_CAPABILITY_BLUETOOTH, KL_SYSTEM_MANAGER_GET_BLUETOOTH, &kl_system_bluetooth_v1_interface, &system_bluetooth_listener);
+
 	/* Waits for their first state: each object's state and its done. */
 	status = wl_display_roundtrip_queue(system->display, system->queue);
 	if (status < 0)
@@ -3416,6 +3586,83 @@ system_printers_done(
 	/* The lists, as one state. */
 	system = data;
 	system_view_printers_done(&system->view);
+}
+
+/* Bluetooth's state, the first of a new copy (ws143-p006). */
+static void
+system_bluetooth_state(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t reachable,
+	uint32_t state,
+	uint32_t flags,
+	uint32_t features,
+	const char *address,
+	const char *name)
+{
+	struct kl_system *system;
+	struct kl_bluetooth_state record;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The state as the application's record. */
+	system = data;
+	memset(&record, 0, sizeof(record));
+	record.reachable = reachable;
+	record.state = state;
+	record.flags = flags;
+	record.features = features;
+	system_view_copy(record.address, sizeof(record.address), address);
+	system_view_copy(record.name, sizeof(record.name), name);
+	system_view_bluetooth_state(&system->view, &record);
+}
+
+/* A Bluetooth device of the list being sent (ws143-p006). */
+static void
+system_bluetooth_device(
+	void *data,
+	struct wl_proxy *proxy,
+	const char *address,
+	uint32_t type,
+	const char *name,
+	uint32_t kind,
+	uint32_t flags,
+	int32_t battery,
+	int32_t rssi)
+{
+	struct kl_system *system;
+	struct kl_bluetooth_device record;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The device as the application's record. */
+	system = data;
+	memset(&record, 0, sizeof(record));
+	system_view_copy(record.address, sizeof(record.address), address);
+	record.type = type;
+	system_view_copy(record.name, sizeof(record.name), name);
+	record.kind = kind;
+	record.flags = flags;
+	record.battery = battery;
+	record.rssi = rssi;
+	system_view_bluetooth_device(&system->view, &record);
+}
+
+/* Puts Bluetooth's state and devices into effect (ws143-p006). */
+static void
+system_bluetooth_done(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t serial)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(serial);
+
+	/* As one state. */
+	system = data;
+	system_view_bluetooth_done(&system->view);
 }
 
 /* Keeps a print's job for kl_system_print_job_of (ws145-p003). */

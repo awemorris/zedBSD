@@ -688,3 +688,7 @@ i01a: hid-usb-p005 PASS、boot-test PASS、fidoctl-p004 PASS（USB の HID の�
 
 **行った（P2、q888、2026-10-08）**: `include/uapi/hid-host.h` → `include/uapi/input-bridge.h`（`INPUT_BRIDGE_*`・`struct input_bridge_setup`・`struct input_bridge_device`・`INPUT_BRIDGE_GET_DEVICE`・group は 'h' のまま）、`include/drivers/generic/input-bridge.h`、`src/drivers/generic/input-bridge.c`・`input-bridge-setup.c`（cdev 名 `bridge`、rdev `0x00130000`）、`CONFIG_INPUT_BRIDGE`、devfs の `bridge_name()`（`/dev/input` に置き、0600。root からの `/dev/bridge` は見えない）、`userland/tests/input-bridge-probe`（行の頭は `BRIDGE`）、`plan/ws143/tests/input-bridge-p005.sh`。Bluetooth の node は cdev 名 `bluetoothN`（`bt-hci.c`）、devfs の `bluetooth_name()` は `bluetooth` と数字、bluetoothd の privsep の発見・`bt-probe` の既定（`/dev/bluetooth0`）・usage の文、試験の script（bt-loopback-p002・bt-daemon-p003・bt-pair-p004）、`config-amd64-bt.mk` の注記。文書: phase001〜005・ws.md・design.md の記述を追従した（この節と review の file は履歴として元のまま）。daemon の関数の名前は `btd_bridge_numbers()`（未実装、i02）。
 確かめ: `config-amd64-bt.mk` の vmunix と input-bridge-probe・bt-probe・bluetoothd・bt・evdev-probe、`config/ci/config-amd64.mk` の vmunix は exit 0、warning 0。`hid-input-host-test.sh`・`hid-report-fuzz.sh`・`bt-daemon-host-test.sh`（daemon・pair・link）PASS。style-check 0（devfs.c の既存の指摘は除く）。QEMU は T1（`input-bridge-p005.sh` と bt-loopback-p002・bt-daemon-p003・bt-pair-p004 の回帰）。
+
+## q896（ws143-p006）からの注記（2026-10-08、P1 の design review I4、Q1 が転記）
+
+Bluetooth の off は今は daemon の flag だけ。p005 の自動の再接続・page scan・LE の自動接続は off を守ること（off の間は再接続しない、page scan を止める）。

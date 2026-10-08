@@ -27,6 +27,8 @@ host で `plan/ws157/tests/make-photos.py --view` の写真を kei の `~/AATPho
    確認事項: 外の drag と移動。正解: `NOTES DND drag start object=... errno=0`、`KWL DATA drag state=move`（頁の上、自分の頁）、`NOTES EDIT move page=0 object=...`、`NOTES DND drag done dropped=1`、画像が離した所へ動く。確認方法: log、撮影。
 4. 操作: 3 と同じく外へ出し、Photos の窓の上で止めて離す。
    確認事項: 受けない窓。正解: `KWL DATA drag state=refused`、`NOTES DND drag done dropped=0`、Notes の画像は元の所のまま。確認方法: log、撮影。
+5. 操作: Photos の grid の 1 枚目を押して 20 px 動かし、40 ms で離す（止めない）。これを 3 回。続けて Notes の頁の画像でも同じく 3 回。
+   確認事項: 重い source の即離し（T1-436 F6: 画像を作る間にボタンが上がり、start_drag が離した後に届く）。正解: drag が始まらない時は `KWL DATA drag refused` の後も `KWL CLIENT gone` が無く、Photos・Notes の窓が残る（次の操作に答える）。始まった時は drop か cancel で終わる。確認方法: log、撮影。
 
 ## 合格
-1〜4 の log、撮影の枠と印（人が見る）。
+1〜5 の log、撮影の枠と印（人が見る）。

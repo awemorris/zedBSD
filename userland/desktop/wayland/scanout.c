@@ -224,6 +224,12 @@ scanout_overlay(
 	showing = kwl_network_is_open();
 	if (showing)
 		return 1;
+	showing = kwl_bluetooth_is_open();
+	if (showing)
+		return 1;
+	showing = kwl_bluetooth_ask_showing();
+	if (showing)
+		return 1;
 	showing = kwl_volume_is_open();
 	if (showing)
 		return 1;

@@ -1091,6 +1091,9 @@ kwl_seat_key(
 		taken = kwl_network_key(server, key, state);
 		if (taken)
 			return;
+		taken = kwl_bluetooth_key(server, key, state);
+		if (taken)
+			return;
 		taken = kwl_arrange_key(server, key, state);
 		if (taken)
 			return;
