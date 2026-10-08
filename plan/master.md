@@ -38,11 +38,6 @@
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
-- **libbrowser に要素を探して focus する口を足すか**（WS074 は描画の改善を止めている）: ws177-p014 の後半（sign-in code を autocomplete="one-time-code" の欄に直に入れる）、WS177 の案 O（Browser の IME・form）、backlog の p1 32・p2 89 が同じ問い。P1 の案は libbrowser の API `browser_view_focus_field(view, autocomplete)`。決まるまで sign-in code は clipboard で渡す。
-- **WS143 p005（Bluetooth のキーボード・マウス）の 4 点**（plan/ws143/phase005/phase.md の判断の記録、P2 は推しの案で作り差し替えられる形に）: Q1 i2c-hid は共有の HID の glue に乗せない（touch だけを出すので。design §5.2 の文言の縮小）／Q2 `/dev/hid-host` に ioctl `HID_HOST_GET_DEVICE`（作った eventN の番号を知る）を足す（承認済みの D3 の形への追加）／Q4 ペアリングの後に HID らしい機器へ自動で接続する／Q5 人が切断した機器からの再接続は、CONNECT・再ペアリング・daemon の再起動まで断る。
-- **WS143 B6**（Bluetooth の bluetoothd の権限の分離の account `_bluetooth`）: ユーザーの決定 D17「account を足す、既存の install の更新を含む」に対し、既存の install に account が無い時にどうするか。(a) 既存の install に account を足す仕組みを作る、(b) 分離できない時は起動を拒む、(c) D17 を変える。P2 の設計の Q4 は決定待ち。
-- **BUG-225**（App Home の表示の遅れ）: 0.7 秒の待ちは ws099-p035c で解消済み（5330 の log で最初の frame 15 ms）。残って見えうるのは icon が 30 ms ずつ遅れて浮かぶ演出で、1 頁 12 個が揃うのに約 510 ms。実機でまだ遅く感じれば刻みを 10 ms（約 290 ms）か同時に。
-- **BUG-241**（Browser で Arabic などが □）: 載せている font に Arabic・Hebrew・Thai・Hangul・Devanagari が無く、libbrowser・libtruetype に bidi と joining が無い。P2 の案: WS074 の新しい Phase（段 1 Hebrew・Thai・Hangul の Noto（OFL、数 MB）と簡約の bidi、段 2 Arabic の joining、段 3 Indic）。font を tree に足すか、段の順、ベータ2 の後か。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
 - （解決 2026-10-08）WS005（ネットワークと WiFi）: ユーザー「記録のミス、とっくに完了」→ completed。
@@ -521,6 +516,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 朝 ユーザー（クリックの回答）: USB メモリは最新 main で UAT の image を作る（Q1 が build、書き込みはユーザー）。WS143 B6: account が無い install では bluetoothd は起動しない（今の暫定のまま）。ws143-p005 Q4: ペアリングの後に自動で接続する。Q5: 人が切断した機器からの再接続は断る。Q2: `/dev/hid-host` に HID_HOST_GET_DEVICE を足す。Q1: i2c-hid も共有の HID の glue（hid-input）に乗せる（推しと逆、F-084 を実施に）。libbrowser に要素を探して focus する口を足してよい（描画の改善は止めたまま）。BUG-241 はベータ3。BUG-225 は実機の UAT で見てから。Music のプレイリストなど（backlog-p2 111）は範囲外（後で）。
 - 2026-10-08 夜 ユーザー:「5330はsudoを勝手に使ってよいです。SSH鍵も勝手に更新してください。アップデートして再起動もお願いします。」「BUG-244: はい、優先度を上げてください。」「BUG-200:は解決でOKです。」「BUG-201は保留します。」「BUG-224はいったん閉じてください。」「切り替えのつまみがなんなのかは保留です。」「いったん寝ます。判断事項は起きたらお願いします。ブロッキングしても自走をお願いします。」
 - 2026-10-08 ユーザー: WS005 completed（記録のミス）。規約の整形（各 WS の全文規約の Phase）はベータ3。WS172 はベータ3。WS187 にロック画面の解除（下部から上のスワイプ・wheel の上、自動の lock の後の一定時間は認証なし、手動の lock は常に認証、Password・PIN・Hardware Key の選択）を追加。
 - 2026-10-08 ユーザー: (1)「2番目以降のディスプレイのdock barには、その画面に置いた window の window icon を出し、時計・状態・App Home・切り替えのつまみも表示する。」（ws113-p015）(2)「5330はいつでも再起動OKです。アップデートもOKです。」(3) UAT: タップの判定の遅れ → ws183-p002（q863）、USB メモリ → BUG-258、PDF viewer のリサイズの重さ → BUG-259。(4) 緊急のラップアップの後、週間の使用量 99% で別のセッションへ引き継ぎ（plan/agents/wrapup-20261008.md）。

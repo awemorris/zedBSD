@@ -37,7 +37,13 @@
  */
 extern void kern_system_event_post(uint32_t, uint32_t, int32_t, const char *, const char *) __attribute__((weak));
 
-#define INPUT_DEVICE_MAX 8U
+/*
+ * The input devices the system keeps at once (eventN, N below it): the
+ * keyboards, pointers, pens and touch devices of every transport, the
+ * Bluetooth daemon's (ws143-p005, six at most, a touch device beside each)
+ * among them.
+ */
+#define INPUT_DEVICE_MAX 32U
 #define INPUT_TEXT_MAX 64U
 #define INPUT_SUBSCRIBER_MAX 8U
 
@@ -645,6 +651,17 @@ drv_input_capability_state_init(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Reports the number of a registered device's node (/dev/input/eventN).
+ */
+unsigned
+drv_input_device_number(
+	const struct input_device *device)
+{
+	/* The node's number, fixed from registration to the last release. */
+	return device->number;
 }
 
 /*

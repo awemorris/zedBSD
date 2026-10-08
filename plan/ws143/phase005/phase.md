@@ -4,9 +4,9 @@
 
 Phase ID: `ws143-p005`
 Parent: [WS143](../ws.md)
-Status: planning（詳細設計の第 1 版、2026-10-08 P2。同日の 2 回目の P2 が §「事実」の出典を code と照合し直し、誤りを直した（§「確認」）。design-reviewer の review-1（[review-1.md](review-1.md)、529cbeb7c）を受け、同日の 3 回目の P2 が改訂 2 を書いた: §9「review-1 の反映」と §「design-reviewer の結果（review-1）と扱い」。code は書いていない）
+Status: in-progress / test-wait（i01a、q888 P2 2026-10-08: glue の refactor と USB の回帰を実装し host 試験 PASS。QEMU は T1 待ち。以前: 詳細設計の第 1 版と改訂 2、design-reviewer の review-1（[review-1.md](review-1.md)）を反映済み）
 Phase disposition: normal
-Queue: 設計だけ（P2、2026-10-08、Q1 の投入「ws143-p005 の詳細設計を書く。file は phase005/phase.md だけ、code は書かない」）。実装の attempt の区切りは §「attempt の区切り」。
+Queue: 設計（P2、2026-10-08）→ q888（P2、2026-10-08、承認済み）: i01a → i01b。実装の attempt の区切りは §「attempt の区切り」。
 
 ## 範囲
 
@@ -589,6 +589,29 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - 2026-10-08（P2、2 回目。Q1 は「file は作られていない」として最初からの作業を投入したが、第 1 版の file は worktree に未追跡で残っていた（最後の書き込み 08:04:04））: 第 1 版の §「事実」の 21 行の出典を全て code と照合し直した（`sed -n`・`grep` で行を読んだ。build・試験は無し）。直した物: 事実 5（input-inject の行）、10（hid-report.h の上限は 10〜16 行）、15（l2cap.h の行と表の持ち主）、16（main.c の行、`/dev/system` 未購読）、17（keys.h → keys.c の行、field の名前）、18（loopback の LE の接続の条件と行）、19（QMP と既存の道具）、§3 の sizeof（4320 → 4324）と rdev（`0x00100000` → `0x00130000`、smartcard と衝突）、§4.2 の表の持ち主の根拠（Q18）、§4.9 と範囲の外の `sleep.end` の Read Version（Q19）、§7.5 の QMP の未確認の解消。事実 22〜25、R17・R18 を足した。仕様の値（§4.3〜4.6 の **未確認**）は照合していない（仕様の PDF はこの作業では読んでいない）。
 - design-reviewer: review-1（[review-1.md](review-1.md)、529cbeb7c、B7・S13・M12）。2026-10-08（P2、3 回目）: 全部を改訂 2 で設計に入れた（§9、§「design-reviewer の結果（review-1）と扱い」）。review の根拠の行（`INPUT_DEVICE_MAX`、`KEYS_TEXT_MAX`、`btd_close`、session の ERROR、loopback の `device[6]`、LE mask、syscall の write の loop、decode の長さの規則、pcat の vmunix.mk、`response[16]`、p003・p004 の試験の期待値、sessiond の seat.c、devfs の記憶）を code と照合して事実 26〜38 に足した。Q1 の決定（Q19、Q1・Q2・Q4・Q5 は推しで作って切り替えられる形、i01 から、T1 に USB の回帰）を反映。build・試験は無し。
 
+- 2026-10-08（P2、q888 の i01a）: 下の §「i01a の記録」。
+
+## i01a の記録（2026-10-08、P2、q888）
+
+**作った物**:
+- `include/drivers/generic/hid-input.h`・`src/drivers/generic/hid-input.c`（共有の HID glue、§2）。口は §2 のとおり。設計からの違い: `drv_hid_input_numbers()` は void（番号は -1 か N）。`drv_hid_input_report_ids()` を足した（i01b の `HID_HOST_FLAG_REPORT_IDS` に使う）。identity の `touch_name` は呼び手が必ず渡す（usb-hid は名前の無い製品で「USB HID touchscreen」、有れば「<name> Touchscreen」と今のまま。NULL の既定は作らない）。`identity` の文字列は input.c が写すので glue は写しを持たない（log の行のための `physical_path` だけ持つ）。作業領域（decode の出力・pen と touch の出力・key の bit map）は `struct hid_input` の中（S8）。log の行は `hid-input: malformed input <physical_path> length= error=`（旧: `usb-hid: malformed input usbN device= interface=`。physical_path が usbN/portP/deviceD/interfaceI を含む）、pen・touch の drop は `hid-input: pen|touch report dropped`。最初の 16 回は今のまま（malformed と pen・touch の drop で共有の数え）。
+- `src/drivers/usb/usb-hid.c`: glue を呼ぶ形に。`usb_hid_fetch_layout`・`usb_hid_identity`・`usb_hid_publish_report`・`usb_hid_unpublish`・`usb_hid_activate`（`usb_hid_activate_start`・`usb_hid_activate_undo` に分けて goto を無くした）・`usb_hid_free` を規約の全文に合わせた。**FIDO の raw の分岐の行（fetch_layout・publish_report・unpublish・activate）は変えていない**（`git diff -U0` に raw の行の変更が無いことを確かめた。identity の raw の名前の行だけは if の形を直した: 範囲の 4 か所の外）。触っていない関数（match・attach・detach・descriptor_length・endpoint_capacity・worker ほか）は規約に合わせていない（file 先頭の「XXX: Need coding style fitting.」を残す）。
+- `src/drivers/generic/input.c`・`include/kern/input-device.h`: `INPUT_DEVICE_MAX` 8 → 32、`drv_input_device_number()`。
+- build の規則: `platform/amd64/vmunix.mk` の `AMD64_HID_SOURCES`、`platform/pcat/vmunix.mk` の `PCAT_USB_CLASS_OBJS`、`platform/arm64/vmunix.mk` の `ARM64_USB_SOURCES` に hid-input。
+- `userland/tests/evdev-probe/`（`-b`・`-n`・`-p`・`-N`・`-t`・`-r`・`-l`。§再開点の形から `-p`（place）・`-N`（新しい node だけ）・`-l`（数える）を足し、`-r` は「静かな時間」）。`plan/ws143/tests/config-amd64-bt.mk` に足した。
+- host 試験: `plan/ws143/tests/hid-input-host-test.{sh,c}` と旧の写し `hid-input-old.{c,h}`（2026-10-08 の usb-hid.c、git a6988363c の report の扱いを文ごとに写した物。**比べる基準なので規約に合わせない**: style-check の対象外として扱う）。`hid-report-fuzz.sh`（同じ C の fuzz の mode を ASan・UBSan で。設計の「60 秒」は **固定の数 1000000 descriptor**（約 24 秒）に改めた: 時刻で止めると同じ seed でも回数が変わり再現しない）。旧の写しと kernel の file は freestanding（errno は kernel の番号）、試験の本体は host の libc。
+- T1 の試験 `plan/ws143/tests/hid-usb-p005.sh`: 設計の `--qemu-extra` をやめ、QMP の `device_add` で USB のキーボード・マウス・tablet を足す（files-guest.sh の起動に手を入れない）。**`input-send-event` の `device` は使わない**（T1-129: この guest の text console に `device` の property が無く QEMU が abort する。`device` は表示の device を選ぶ引数で、USB の device は選べない）。QEMU は最後に足した USB キーボードに key を渡す（hid の keyboard の handler は登録の時に先頭になる）ので、足したキーボードの node で KEY_A を見る。tablet は QEMU が選ぶので、足した tablet に来なければ note だけ。
+
+**確かめ（P2、host）**:
+- `make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/ws143-p005/amd64 build/ws143-p005/amd64/vmunix` exit 0、warning 0。
+- `make -j16 ZEDBSD_CONFIG=plan/ws143/tests/config-amd64-bt.mk BUILD=build/ws143-p005/bt build/ws143-p005/bt/bin/evdev-probe build/ws143-p005/bt/vmunix` exit 0、warning 0（自分の source。openssl 等の package の既存の warning は別）。
+- `config/ci/config-rpi4.mk`（BUILD=build/ws143-p005/rpi4）exit 0、warning 0。
+- `config/ci/config-pcat.mk`（BUILD=build/ws143-p005/pcat）: hid-input.o・usb-hid.o は compile できたが **link が既存の理由で失敗**（`sandbox_create` などが未定義: pcat の vmunix.mk に `src/kern/sandbox.c` が無い。02cc81a10 以来。この Phase の変更ではない。Q1 に報告）。
+- `python3 plan/tools/style-check.py`: hid-input.c・hid-input.h・hid-input-host-test.c・evdev-probe/main.c は 0 件。usb-hid.c は触った関数に 0 件（残りは触っていない関数の既存の指摘）。input.c の指摘は unregister の既存の物。
+- `sh plan/ws143/tests/hid-input-host-test.sh`: PASS（160018 comparisons、1179517 events、0 failures。固定の 5 descriptor と 5330 の touchpad・Logitech の受信機 3 つ（if2 は旧も新も EOPNOTSUPP で断る）に 20000 report ずつ、register の情報（名前・path・uid・id・capability・axis・properties）の新旧一致、key の集約・ErrorRollOver・REL 0・touch だけ・ENOSPC からのやり直し・unpublish 2 回）。試験が誤りを捕まえることを、glue に故意の誤り（REL 0 の抑制を壊す）を入れた写しで確かめた（FAIL 5 件）。
+- `sh plan/ws143/tests/hid-report-fuzz.sh`: PASS（1000000 descriptor、6942 受理、2395601 comparisons、7753406 events、0 failures、ASan・UBSan の報告なし、約 24 秒）。
+- **未実施**: QEMU（T1: `hid-usb-p005.sh`、`plan/ws161/tests/fidoctl-p004.sh`（別の image `config-amd64-fidoctl.mk`）、`boot-test.sh`）。i2c-hid は触っていない（Q1）。実機は未実施。
+
 ## 再開点（次の担当がこの file だけで i01a に入れる形）
 
 ### i01a: kernel の glue の refactor と USB の回帰
@@ -618,3 +641,11 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - Q23: sessiond の hotplug の穴は BUG-264 として立て、i01a の前に P2 の次の世代が再現と直しを行う（login の後の USB キーボードにも効くため優先）。
 - S11 の tshark: btsnoop の外部の照合が要る時に host に入れる（sudo の package の導入は許可の範囲）。
 - Future Work: LED の出力、i2c-hid の乗せ替え（Q1 の判断待ち）を F に記録。
+
+## ユーザーの決定（2026-10-08 朝、クリックの回答）
+
+- Q1: i2c-hid も共有の glue（hid-input）に乗せる（推しと逆）。touchpad の経路の作り替えなので実機の回帰が要る。F-084 は実施へ。
+- Q2: HID_HOST_GET_DEVICE を足す。
+- Q4: ペアリングの後に自動で接続する。
+- Q5: 人が切断した機器からの再接続は断る。
+- B6（p004 の Q4）: account が無ければ bluetoothd は起動しない（暫定のまま確定）。
