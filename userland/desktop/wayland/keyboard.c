@@ -525,6 +525,18 @@ struct keyboard_state {
 	 */
 	enum keyboard_kind restore;
 	struct kwl_object *restore_focus;
+
+	/*
+	 * The field the faces follow (q893): the purpose of the text input
+	 * served when the faces last followed it (0, a text field's, when none
+	 * is served), its kind (KWL_FIELD_*), the QWERTY face that kind opens
+	 * on (the symbols' key goes back to it), and the flick face the user
+	 * last had in a text field, which the next text field gets back.
+	 */
+	uint32_t field_purpose;
+	unsigned field_kind;
+	unsigned field_qface;
+	unsigned flick_chosen;
 };
 
 /*
@@ -576,6 +588,7 @@ static const struct kwl_qwerty_key *keyboard_qwerty_key(unsigned row, unsigned i
 static void keyboard_qwerty_release(struct kwl_server *server);
 static void keyboard_qwerty_shift(void);
 static void keyboard_qwerty_log(struct kwl_server *server);
+static void keyboard_follow_field(struct kwl_server *server);
 static void keyboard_draw_qwerty(struct kwl_server *server, VkCommandBuffer command);
 static void keyboard_draw_bubble(struct kwl_server *server, VkCommandBuffer command);
 static void keyboard_band_button_rect(int32_t *rect);
@@ -931,6 +944,9 @@ kwl_keyboard_tick(
 		keyboard.leaving = PANEL_NONE;
 		server->dirty = 1;
 	}
+
+	/* The faces follow the kind of the field served (q893), open or not. */
+	keyboard_follow_field(server);
 
 	/* A panel App Home or Wiseview put away comes back when they are gone (BUG-229). */
 	home = kwl_home_progress(server);
@@ -1903,6 +1919,12 @@ keyboard_draw_panel(
 		title = "ABC";
 	if (keyboard.open == PANEL_QWERTY && keyboard.qface == KWL_QWERTY_SYMBOLS)
 		title = "?123";
+	if (keyboard.open == PANEL_QWERTY && keyboard.qface == KWL_QWERTY_EMAIL)
+		title = "ABC @";
+	if (keyboard.open == PANEL_QWERTY && keyboard.qface == KWL_QWERTY_URL)
+		title = "ABC /";
+	if (keyboard.open == PANEL_QWERTY && keyboard.qface == KWL_QWERTY_NUMBER)
+		title = "123";
 	if (keyboard.open == PANEL_QWERTY && keyboard.hand)
 		title = "手書き";
 	glass_draw_text(server, command, SIZE_TITLE, rect[0] + KEYBOARD_MARGIN + 4, rect[1] + KEYBOARD_BAND - 6, title, rect[2] - 3 * KEYBOARD_MARGIN - KEYBOARD_CLOSE, dark);
@@ -2798,8 +2820,8 @@ keyboard_qwerty_release(
 		keyboard_qwerty_shift();
 		break;
 	case KWL_FLICK_FACE:
-		/* The other face; Shift goes. */
-		keyboard.qface = (keyboard.qface + 1U) % KWL_QWERTY_FACES;
+		/* The next face for the field (the symbols, or back from them); Shift goes. */
+		keyboard.qface = kwl_qwerty_face_next(keyboard.qface, keyboard.field_qface);
 		keyboard.shift = KEYBOARD_SHIFT_OFF;
 		printf("KWL OSK qface name=%s\n", kwl_qwerty_face_name(keyboard.qface));
 		keyboard_qwerty_log(server);
@@ -2879,6 +2901,59 @@ keyboard_qwerty_log(
 			printf("KWL OSK qrect face=%s row=%u index=%u x=%d y=%d width=%d height=%d label=%s\n", kwl_qwerty_face_name(keyboard.qface), row, index, rect[0], rect[1], rect[2], rect[3], keys[index].label);
 		}
 	}
+}
+
+/*
+ * Follows the kind of the field the text input serves (q893): a field of
+ * digits gets the digits' faces, an email or a web address the letters
+ * with its sign, and a text field the faces the user chose; nothing served
+ * counts as a text field.  A key held keeps the faces until it is let go.
+ */
+static void
+keyboard_follow_field(
+	struct kwl_server *server)
+{
+	struct kwl_text_input *input;
+	uint32_t purpose;
+	unsigned kind;
+
+	/* A key held is looked up again on its face when it is let go. */
+	if (keyboard.key_active)
+		return;
+
+	/* The served field's purpose (none is a text field's). */
+	input = kwl_text_input_current(server);
+	purpose = 0;
+	if (input != NULL)
+		purpose = input->purpose;
+
+	/* Nothing to follow while the purpose stays. */
+	if (purpose == keyboard.field_purpose)
+		return;
+	keyboard.field_purpose = purpose;
+
+	/* Another purpose of the same kind keeps the faces. */
+	kind = kwl_field_kind(purpose);
+	if (kind == keyboard.field_kind)
+		return;
+
+	/* The flick face the user had in a text field is kept for the next one. */
+	if (keyboard.field_kind == KWL_FIELD_TEXT)
+		keyboard.flick_chosen = keyboard.face;
+	keyboard.field_kind = kind;
+
+	/* The faces for the kind; Shift goes. */
+	keyboard.face = kwl_field_flick_face(kind, keyboard.flick_chosen);
+	keyboard.field_qface = kwl_field_qwerty_face(kind);
+	keyboard.qface = keyboard.field_qface;
+	keyboard.shift = KEYBOARD_SHIFT_OFF;
+	server->dirty = 1;
+
+	/* The log line the tests read, and the QWERTY keys' new places while that panel shows. */
+	printf("KWL OSK field purpose=%u kind=%s face=%s qface=%s\n", (unsigned)purpose, kwl_field_kind_name(kind),
+	    kwl_flick_face_name(keyboard.face), kwl_qwerty_face_name(keyboard.qface));
+	if (keyboard.open == PANEL_QWERTY)
+		keyboard_qwerty_log(server);
 }
 
 /* Draws the QWERTY panel's keys: typing keys white, acting keys grey, Shift blue while on, the held key blue. */

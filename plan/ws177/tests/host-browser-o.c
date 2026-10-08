@@ -12,8 +12,10 @@
  * inputmode, a textarea's multiline hint, a long value cut around the
  * caret), the chosen part of a composed text under a thicker line, a
  * click that puts the composed text into the value (input fires), a
- * script's value that ends the composing, and a textarea's value from
- * script.
+ * click in another field that puts it into the first field's value before
+ * its blur (q893), a script's value that ends the composing, a textarea's
+ * value from script, and the text input's session, which changes with
+ * the focus and with each composing the page ends itself.
  *
  *     host-browser-o PAGE SANS MONO FALLBACK
  *
@@ -58,6 +60,11 @@ main(
 	static char text[32768];
 	static char longer[6000];
 	float caret[4];
+	float mail[4];
+	uint64_t session;
+	uint64_t composed;
+	const char *input_at;
+	const char *blur_at;
 	size_t cursor;
 	unsigned hints;
 	int purpose;
@@ -95,10 +102,13 @@ main(
 	test_check("load", error == 0, "");
 	test_check("textarea-value", strstr(test_console, "notes=hello\n") != NULL && strstr(test_console, "notes-set=3 true\n") != NULL, test_console);
 
-	/* An email field: its purpose. */
+	/* An email field: its purpose, and where its caret is (for a click in it later). */
+	session = browser_view_text_session(view);
 	(void)browser_view_focus_field(view, "email");
 	known = browser_view_text_context(view, text, sizeof(text), &cursor, &purpose, &hints);
 	test_check("purpose-email", known == 1 && purpose == BROWSER_TEXT_PURPOSE_EMAIL && hints == 0U && text[0] == '\0', text);
+	test_check("session-focus", browser_view_text_session(view) != session, "");
+	(void)browser_view_text_target(view, mail);
 
 	/* A numeric inputmode wins over the type. */
 	(void)browser_view_focus_field(view, "one-time-code");
@@ -126,6 +136,7 @@ main(
 	lines = test_underlines(view, 1.0);
 
 	/* A composed text with a chosen part (bytes 3 to 6 of あいう): a thin line under all, a thick one under the part. */
+	session = browser_view_text_session(view);
 	(void)browser_view_compose(view, "\xe3\x81\x82\xe3\x81\x84\xe3\x81\x86", 3, 6);
 	test_check("clause-thin", test_underlines(view, 1.0) == lines + 1, "");
 	test_check("clause-thick", test_underlines(view, 3.0) == 1, "");
@@ -134,7 +145,11 @@ main(
 	(void)browser_view_compose(view, "\xe3\x81\x82\xe3\x81\x84\xe3\x81\x86", 9, 9);
 	test_check("clause-none", test_underlines(view, 3.0) == 0, "");
 
-	/* A click in the field puts the composed text into the value, which input says. */
+	/* Composing alone keeps the session. */
+	composed = browser_view_text_session(view);
+	test_check("session-compose", composed == session, "");
+
+	/* A click in the field puts the composed text into the value, which input says, and the session changes. */
 	test_console_length = 0;
 	test_console[0] = '\0';
 	(void)browser_view_text_target(view, caret);
@@ -143,13 +158,36 @@ main(
 		error = browser_view_pointer_button(view, caret[0], caret[1] + caret[3] / 2.0f, BROWSER_BUTTON_PRIMARY, 0, 0U);
 	test_check("click-commits", error == 0 && strstr(test_console, "input name ab\xe6\x97\xa5\xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\n") != NULL &&
 	    test_underlines(view, 1.0) == lines, test_console);
+	test_check("session-click", browser_view_text_session(view) != composed, "");
 
-	/* A script's value ends what was composed. */
+	/*
+	 * A click in another field while composing (q893): the composed text
+	 * goes into the first field's value (input fires) before its blur, the
+	 * other field has the focus with nothing composed, and the session
+	 * changes.
+	 */
+	(void)browser_view_compose(view, "\xe3\x81\x8b\xe3\x81\x8d", -1, -1);
+	composed = browser_view_text_session(view);
+	test_console_length = 0;
+	test_console[0] = '\0';
+	error = browser_view_pointer_button(view, mail[0] + 4.0f, mail[1] + mail[3] / 2.0f, BROWSER_BUTTON_PRIMARY, 1, 0U);
+	if (error == 0)
+		error = browser_view_pointer_button(view, mail[0] + 4.0f, mail[1] + mail[3] / 2.0f, BROWSER_BUTTON_PRIMARY, 0, 0U);
+	input_at = strstr(test_console, "input name ab\xe6\x97\xa5\xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x8b\xe3\x81\x8d\n");
+	blur_at = strstr(test_console, "blur name ab\xe6\x97\xa5\xe3\x81\x82\xe3\x81\x84\xe3\x81\x86\xe3\x81\x8b\xe3\x81\x8d\n");
+	test_check("other-field-commits", error == 0 && input_at != NULL && blur_at != NULL && input_at < blur_at, test_console);
+	known = browser_view_text_context(view, text, sizeof(text), &cursor, &purpose, &hints);
+	test_check("other-field-focus", known == 1 && purpose == BROWSER_TEXT_PURPOSE_EMAIL && text[0] == '\0' && test_underlines(view, 1.0) == lines, text);
+	test_check("session-other-field", browser_view_text_session(view) != composed, "");
+
+	/* A script's value ends what was composed, and the session changes. */
 	(void)browser_view_focus_field(view, "nickname");
 	(void)browser_view_compose(view, "x", -1, -1);
+	composed = browser_view_text_session(view);
 	error = browser_view_settle(view, 300.0, BROWSER_SETTLE_LAYOUT);
 	known = browser_view_text_context(view, text, sizeof(text), &cursor, &purpose, &hints);
 	test_check("script-ends-compose", error == 0 && known == 1 && strcmp(text, "set") == 0 && test_underlines(view, 1.0) == lines, text);
+	test_check("session-script", browser_view_text_session(view) != composed, "");
 
 	/* The outcome. */
 	browser_view_destroy(view);

@@ -17,6 +17,7 @@ input { width: 300px; }
 <p><textarea id="notes" autocomplete="street-address" cols="24" rows="3">hello</textarea></p>
 <script>
 document.getElementById("name").addEventListener("input", function (event) { console.log("input name " + event.target.value); });
+document.getElementById("name").addEventListener("blur", function (event) { console.log("blur name " + event.target.value); });
 var notes = document.getElementById("notes");
 console.log("notes=" + notes.value);
 notes.value = "x\ny";

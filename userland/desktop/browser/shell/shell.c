@@ -60,6 +60,9 @@
  *
  * A left press that may drag a picture out of the window (ws189-p003):
  * whether one is held, and where it went down.
+ *
+ * text_session is the view's text input's session when the window's text
+ * input was last asked for (browser_view_text_session, ws177-p019).
  */
 struct shell_state {
 	struct browser_view *view;
@@ -75,6 +78,7 @@ struct shell_state {
 	int drag_armed;
 	int drag_press_x;
 	int drag_press_y;
+	uint64_t text_session;
 };
 
 /* How far a press moves before the image under it is dragged out of the window, and the picture's longest side (ws189-p003). */
@@ -511,11 +515,24 @@ shell_text_input(
 {
 	char text[KL_TEXT_SURROUNDING_MAX];
 	float caret[4];
+	uint64_t session;
 	size_t cursor;
 	unsigned hints;
 	int purpose;
 	int wanted;
 	int known;
+
+	/*
+	 * Another field, another page, or a composing the page ended itself (a
+	 * click put it into the value, ws177-p019): the text input is turned
+	 * off first, so that the input method is deactivated and drops what it
+	 * was composing, and on again below for the field that has the focus.
+	 */
+	session = browser_view_text_session(state->view);
+	if (session != state->text_session) {
+		kl_window_text_input(state->window.kui, 0);
+		state->text_session = session;
+	}
 
 	/* On while the focus is in a field or a textarea, off otherwise. */
 	wanted = browser_view_text_target(state->view, caret);

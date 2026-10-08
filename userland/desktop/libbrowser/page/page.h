@@ -262,6 +262,7 @@ int page_compose(struct page *page, const char *text, int begin, int cursor);
 int page_compose_context(struct page *page, struct wb_buffer *text, size_t *caret, int *purpose, unsigned *hints);
 int page_commit_text(struct page *page, const char *text, uint32_t before, uint32_t after);
 void page_compose_end(struct page *page, struct dom_element *element);
+int page_compose_commit(struct page *page, struct dom_element *element);
 
 /* Links (link.c). */
 int page_link_at(struct page *page, int x, int y, struct wb_buffer *href, int *found);

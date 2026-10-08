@@ -171,7 +171,9 @@ struct view_prefetch_script {
  * The input: where the pointer is (pointer_inside says it is over the
  * view), the button held down and where (press_button is -1 when none;
  * its release nearby is a click), and whether the caller's program has the
- * focus (a new page starts with it).
+ * focus (a new page starts with it).  page_serial counts the pages shown,
+ * which with the document's compose_session makes the text input's
+ * session (browser_view_text_session, ws177-p019).
  */
 struct browser_view {
 	struct page *page;
@@ -224,6 +226,7 @@ struct browser_view {
 	float press_x;
 	float press_y;
 	int has_focus;
+	uint32_t page_serial;
 };
 
 /*
@@ -1260,6 +1263,30 @@ browser_view_text_context(
 }
 
 /*
+ * Reports the text input's session: a number that changes when the focus
+ * moves to another element, when another page is shown, and when the page
+ * itself ended what an input method was composing (a click, a script's
+ * value).  The program then starts its input method's text input again,
+ * so that the input method drops what it was composing.
+ */
+uint64_t
+browser_view_text_session(
+	const struct browser_view *view)
+{
+	uint64_t session;
+
+	/* The pages shown, in the upper half. */
+	session = (uint64_t)view->page_serial << 32;
+
+	/* The changes within the page shown, in the lower half. */
+	if (view->page != NULL)
+		session |= view->page->document->compose_session;
+
+	/* Reports the session. */
+	return session;
+}
+
+/*
  * Tells whether the focused element takes an input method's text: a text
  * field or a textarea that takes typing (a password field does not).
  * caret gets the caret's rectangle in the view's pixels as the last
@@ -2137,6 +2164,7 @@ view_show_page(
 	/* The new page replaces the old one, from its top, with its own clock. */
 	page_destroy(view->page);
 	view->page = page;
+	view->page_serial++;
 	view->page_epoch = view->open_epoch;
 	free(view->path);
 	view->path = copy;

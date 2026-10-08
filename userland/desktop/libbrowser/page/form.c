@@ -777,11 +777,41 @@ page_compose_end(
 	if (element->control->preedit.length == 0)
 		return;
 
-	/* The composed text goes, and the control is painted again without it. */
+	/*
+	 * The composed text goes, and the control is painted again without it;
+	 * the session's change tells the program that the input method's own
+	 * composing must go too.
+	 */
 	wb_units_clear(&element->control->preedit);
 	element->control->preedit_cursor = 0;
 	element->control->preedit_begin = 0;
 	page->focus_generation++;
+	page->document->compose_session++;
+}
+
+/*
+ * Puts what an input method was composing in a control the focus leaves
+ * into its value at the caret, as typing would (input fires; ws177-p019);
+ * nothing when it composes nothing.
+ */
+int
+page_compose_commit(
+	struct page *page,
+	struct dom_element *element)
+{
+	int error;
+
+	/* No control has nothing to commit. */
+	if (element == NULL)
+		return 0;
+
+	/* What it was composing goes into its value. */
+	error = form_compose_finish(page, element);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the control composes nothing now. */
+	return 0;
 }
 
 /*
@@ -801,13 +831,18 @@ form_compose_finish(
 	if (element->control == NULL || element->control->preedit.length == 0)
 		return 0;
 
-	/* The composed text as UTF-8, and it goes from the control. */
+	/*
+	 * The composed text as UTF-8, and it goes from the control; the
+	 * session's change tells the program that the input method's own
+	 * composing must go too, as the page took it.
+	 */
 	wb_buffer_init(&composed);
 	error = wb_units_to_utf8(element->control->preedit.data, element->control->preedit.length, &composed);
 	wb_units_clear(&element->control->preedit);
 	element->control->preedit_cursor = 0;
 	element->control->preedit_begin = 0;
 	page->focus_generation++;
+	page->document->compose_session++;
 	if (error != 0) {
 		wb_buffer_release(&composed);
 		return error;

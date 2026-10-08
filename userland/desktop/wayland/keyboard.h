@@ -63,15 +63,20 @@
 
 /*
  * The QWERTY panel's faces (ws102-p006): the letters (with Shift, the
- * capitals and the digits' symbols) and the symbols; its rows, the most
+ * capitals and the digits' symbols) and the symbols; the letters for an
+ * email address (@ beside the space) and for a web address (/ beside the
+ * space), and the digits' pad (q893, the field's kind); its rows, the most
  * keys a row has, and a row's width in quarter keys.  The rows count from
  * the top: the extra keys (Esc, Tab, Ctrl, Alt, a few symbols, Home, End,
  * PgUp, PgDn; ws102-p020), the digits, three rows of letters (or symbols)
- * and the space row.
+ * and the space row; the pad's middle four rows are its keys.
  */
 #define KWL_QWERTY_LETTERS	0U
 #define KWL_QWERTY_SYMBOLS	1U
-#define KWL_QWERTY_FACES	2U
+#define KWL_QWERTY_EMAIL	2U
+#define KWL_QWERTY_URL		3U
+#define KWL_QWERTY_NUMBER	4U
+#define KWL_QWERTY_FACES	5U
 #define KWL_QWERTY_ROWS		6U
 #define KWL_QWERTY_EXTRA_ROW	0U
 #define KWL_QWERTY_ROW_KEYS	12U
@@ -160,6 +165,17 @@ struct kwl_hand_result {
 };
 
 /*
+ * The kinds of field the keyboard follows (q893), from the text input's
+ * purpose (text-input-v3's numbers): text, digits (digits, a number, a
+ * phone number), an email address and a web address.  A text field keeps
+ * the faces the user chose; the others open the faces made for them.
+ */
+#define KWL_FIELD_TEXT		0U
+#define KWL_FIELD_NUMBER	1U
+#define KWL_FIELD_EMAIL		2U
+#define KWL_FIELD_URL		3U
+
+/*
  * The emoji face's categories (ws102-p022): faces, hands and people,
  * things, symbols; and how many emoji a category holds at most.
  */
@@ -181,6 +197,11 @@ const char *kwl_flick_direction_name(unsigned direction);
 int kwl_flick_us_key(const char *text, unsigned *code, int *shift);
 const struct kwl_qwerty_key *kwl_qwerty_row(unsigned face, unsigned row, unsigned *count);
 const char *kwl_qwerty_face_name(unsigned face);
+unsigned kwl_qwerty_face_next(unsigned face, unsigned field_face);
+unsigned kwl_field_kind(uint32_t purpose);
+unsigned kwl_field_qwerty_face(unsigned kind);
+unsigned kwl_field_flick_face(unsigned kind, unsigned chosen);
+const char *kwl_field_kind_name(unsigned kind);
 void kwl_hand_clear(struct kwl_hand_ink *ink);
 int kwl_hand_begin(struct kwl_hand_ink *ink, int32_t x, int32_t y);
 int kwl_hand_add(struct kwl_hand_ink *ink, int32_t x, int32_t y);
