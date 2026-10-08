@@ -19,7 +19,7 @@ Status: **案**（design-reviewer の review を反映した第 2 版、§11）�
 
 ## 1. 今の main の状態（2026-10-04、読んだ事実）
 
-- **版の文字**: source に直書きの `0.0.1`（`userland/base/libc/posix.c:5324-5325` の uname、`src/hal/i386/cmain.c:42,46` の i386 の起動の表示）。一つの源は無い。Settings の About（`userland/desktop/settings/about.c`）は uname から kernel の名前と release を出す（About の版の文字は uname を直せば変わる）。
+- **版の文字**: source に直書きの `0.0.1`（`userland/base/libc/posix.c:5324-5325` の uname、`src/hal/i386/cmain.c:42,46` の i386 の起動の表示）。一つの源は無い。Settings の About（2026-10-08 から `libkeiland-backend/machine/machine.c` が compositor 経由で読む、ws188-p002）は uname から kernel の名前と release を出す（About の版の文字は uname を直せば変わる）。
 - **CI**（`.github/workflows/ci.yml`）: main への push で build → `nightly-<run_number>` の Prerelease に `zedbsd-amd64.img.gz`・`Kei-nightly.zip`。zip の段は `continue-on-error: true`。SHA-256 の file は無い。版のついた release の job・tag の trigger は無い。
   - 気づいた点（p004 で直す候補、今回は変えていない）: release の job は `keiland-linux-*` の artifact を download し、`release-source` を checkout するが、それを作る job・使う step は ci.yml に無い。本文の「Keiland Linux」の節も中身が無い。WS112 の package の job を外した名残と見える。pattern に合う artifact が無い時の `download-artifact@v4` の挙動は確かめていない。
 - **CI の image の config**（`config/ci/config-amd64.mk`）: 216 の program。Settings・audiod・Files・Notes・Text Editor・PDF Viewer・Image Viewer・browser・Terminal・emacs（REmacs、今日 `/bin/emacs` に、ws129-p012）・IME（keiland-ime・ime-dict-ja）・clang・libcxx・openssh・curl・旧インストーラ `zedinst`。AX211（`CONFIG_DRIVER_PCI_INTEL_AX211 := y` と firmware）・i915・HDA・RTL8822BU・Venus は y。`ZEDBSD_ROOTFS_DEVELOPMENT := y`（sysroot の `/usr/include`・`/usr/lib` を入れる。clang・libcxx は program の一覧の側で入る）。System Monitor（`monitor`、WS134）は CI の一覧に無い。

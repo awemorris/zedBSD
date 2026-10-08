@@ -728,6 +728,7 @@ struct fm_dashboard {
 	int folder_count;
 	char greeting[128];
 	char summary[160];
+	int opened_today;
 };
 
 /* How many thumbnails are kept, and the longest side of one. */
@@ -1187,6 +1188,17 @@ struct fm_app {
 	/* The user's home folder, and the name the Home page greets (the display name, ws035-p120). */
 	char home[FM_PATH_MAX];
 	char user[64];
+
+	/*
+	 * The space left on the home's file system as the desktop last read it
+	 * (ws188-p002: libkeiland's kl_system_machine file systems; Files does
+	 * not look at the system's mounts itself): whether it is known, the
+	 * bytes, and whether Today wants a new reading (the main loop asks the
+	 * desktop and clears it).
+	 */
+	int home_free_known;
+	uint64_t home_free;
+	int home_free_wanted;
 
 	/* How folders are shown. */
 	unsigned view;
@@ -1656,6 +1668,7 @@ void fm_search_stop(struct fm_search *search);
 
 /* Today, the dashboard (ui-home.c). */
 void fm_home_gather(struct fm_app *app);
+void fm_home_summary(struct fm_app *app);
 void fm_home_folder_opened(const char *folder);
 void fm_home_draw(struct fm_app *app, struct kl_canvas *canvas, const struct kl_rect *inner);
 int fm_home_tick(struct fm_app *app);

@@ -25,7 +25,7 @@ push・GitHub release の公開はユーザーの指示で行う。
 
 ## 既知の事実（2026-10-02、source を読んで）
 
-- 版は source に直書き: libc の `uname`（`userland/base/libc/posix.c:5324-5325`、`0.0.1`・`zedBSD 0.0.1`）、i386 の HAL の起動の表示（`src/hal/i386/cmain.c:42,46`、HAL の実装なので承認なしで直せる範囲）。Settings の About（`userland/desktop/settings/about.c`）は WS089 の file。一つの源（Makefile の変数から生成）が無い。
+- 版は source に直書き: libc の `uname`（`userland/base/libc/posix.c:5324-5325`、`0.0.1`・`zedBSD 0.0.1`）、i386 の HAL の起動の表示（`src/hal/i386/cmain.c:42,46`、HAL の実装なので承認なしで直せる範囲）。Settings の About の名前（os-release の PRETTY_NAME と uname）は 2026-10-08 から compositor 経由で libkeiland-backend の `libkeiland-backend/machine/machine.c` が読む（ws188-p002、旧 `settings/about.c`）。一つの源（Makefile の変数から生成）が無い。
 - CI（`.github/workflows/ci.yml`）: main への push ごとに build → `nightly-${run_number}`（prerelease、「Not an official release」）に `zedbsd-amd64.img.gz`・`Kei-nightly.zip`・Keiland の deb を載せる。版のついた release の job、checksum（img の SHA-256）、tag の trigger は無い。WS112 も release の job に package を足す計画（同じ file の衝突）。
 - CI の image の config `config/ci/config-amd64.mk` は `CONFIG_DRIVER_PCI_INTEL_AX211 := y`（BUG-134: driver を有効にすると 5330 で起動が止まる）で、`settings`・`audiod` を含まない（デモの config `plan/ws075/demo/config-demo-hdmi.mk` は含む）。**今の nightly は 5330 で起動が止まる可能性がある**（未確認）。
 - license: 外部 package は `plan/tools/packages/audit-licenses.sh` と `plan/ws032/provenance.md` で監査する。image に入る license の文書は package ごと（`userland/base/licenses/` は browser・AX211 の driver・llvm runtime・RTL8822B の表だけ）。image 全体の一覧（OS・package・firmware・font）は無い。

@@ -136,6 +136,13 @@ static int main_touch_due = -1;
  */
 static struct kl_system *main_system;
 
+/*
+ * The reading of the file systems asked for Today's space left
+ * (ws188-p002; 0: none waits for its answer).  The answer's file systems
+ * are copied as the change comes (main_home_free_take).
+ */
+static uint32_t main_home_free_request;
+
 /* The desktop's appearance watched for the window (ws089-p017): Files draws in its colours (palette.c); NULL without it. */
 static struct kl_appearance *main_appearance;
 
@@ -216,6 +223,8 @@ static void main_language_changed(void *data, const char *language);
 static void main_language_open(void);
 static void main_devices_poll(void);
 static void main_devices_take(int blink_all);
+static void main_home_free_ask(void);
+static void main_home_free_take(void);
 static void main_devices_ask(unsigned request);
 static void main_devices_result(uint32_t request, int error);
 
@@ -1526,6 +1535,9 @@ main_devices_poll(
 	if (main_system == NULL)
 		return;
 
+	/* Today's space left, asked of the desktop when Today wants it (ws188-p002). */
+	main_home_free_ask();
+
 	/* The news; a desktop that went leaves the list as it was. */
 	changed = 0U;
 	status = kl_system_dispatch(main_system, &changed);
@@ -1534,13 +1546,100 @@ main_devices_poll(
 	if ((changed & KL_SYSTEM_CHANGED_DEVICES) != 0U)
 		main_devices_take(0);
 
-	/* Each answer. */
+	/* The file systems the desktop read, for Today. */
+	if ((changed & KL_SYSTEM_CHANGED_MACHINE) != 0U)
+		main_home_free_take();
+
+	/* Each answer: the reading's ends its wait (its parts came before it), the others are the devices'. */
 	for (;;) {
 		taken = kl_system_take_result(main_system, &request, &error);
 		if (!taken)
 			break;
+		if (request == main_home_free_request && request != 0U) {
+			main_home_free_request = 0U;
+			fm_log("HOME free result errno=%d", error);
+			continue;
+		}
 		main_devices_result(request, error);
 	}
+}
+
+/* Asks the desktop to read the file systems when Today wants its space left and no reading waits. */
+static void
+main_home_free_ask(
+	void)
+{
+	uint32_t request;
+	int error;
+
+	/* Not wanted, or a reading already waits for its answer. */
+	if (!main_app.home_free_wanted || main_home_free_request != 0U)
+		return;
+	main_app.home_free_wanted = 0;
+
+	/* The reading (a desktop without it leaves the line without the space). */
+	error = kl_system_machine_query(main_system, KL_MACHINE_FILESYSTEMS, &request);
+	if (error != 0)
+		return;
+	main_home_free_request = request;
+}
+
+/*
+ * Takes the space left on the home's file system from the desktop's file
+ * systems: the one mounted deepest on the home's path, and writes Today's
+ * line again.
+ */
+static void
+main_home_free_take(
+	void)
+{
+	struct kl_machine_filesystem list[KL_MACHINE_FILESYSTEMS_MAX];
+	size_t count;
+	size_t index;
+	size_t length;
+	size_t best;
+	size_t best_length;
+	int found;
+	int same;
+
+	/* The file systems of the last answer. */
+	count = kl_system_machine_filesystems(main_system, list, KL_MACHINE_FILESYSTEMS_MAX);
+
+	/* The deepest place the home is under ("/" is under everything). */
+	found = 0;
+	best = 0U;
+	best_length = 0U;
+	for (index = 0; index < count; index++) {
+		/* The place a whole leading part of the home's path. */
+		length = strlen(list[index].path);
+		same = strncmp(main_app.home, list[index].path, length);
+		if (same != 0)
+			continue;
+
+		/* Not a longer name sharing its start ("/home2" is not under "/home"). */
+		if (length > 1U &&
+		    main_app.home[length] != '\0' &&
+		    main_app.home[length] != '/')
+			continue;
+
+		/* Deeper than the last found. */
+		if (!found || length > best_length) {
+			best = index;
+			best_length = length;
+			found = 1;
+		}
+	}
+
+	/* No file system holds the home: nothing is shown. */
+	if (!found)
+		return;
+
+	/* The space left, and Today's line written again. */
+	main_app.home_free = list[best].available;
+	main_app.home_free_known = 1;
+	fm_home_summary(&main_app);
+	main_app.dirty = 1;
+	fm_log("HOME free path=%s available=%llu", list[best].path, (unsigned long long)list[best].available);
 }
 
 /* Gives the file manager the desktop's list of devices. */
