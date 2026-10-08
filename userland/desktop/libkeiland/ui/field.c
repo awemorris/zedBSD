@@ -30,6 +30,14 @@
  * cut and paste through the window's clipboard (a secret field copies
  * nothing), and Ctrl+Left and Ctrl+Right move a word (with Shift, the
  * selection).
+ *
+ * KL_VERSION 74 (ws190-p002, plan/ws190/phase001/phase.md section 2.3): a
+ * finger's double tap on the text selects the word there and puts the
+ * field in the fingers' selection (kl_ui's): a handle at each end of the
+ * selection, which a finger drags, and the bar of editing buttons, whose
+ * commands come back as the keys they stand for.  A tap elsewhere, a key, a
+ * text an input method sends or composes, or a text the program sets ends
+ * it.  A mouse's double click still selects the whole text.
  */
 
 #include "internal.h"
@@ -57,6 +65,20 @@ static void field_insert(struct kl_field *field, const char *text);
 static void field_delete_around(struct kl_field *field, size_t before, size_t after);
 static size_t field_room(const struct kl_field *field);
 static size_t field_boundary(const char *text, size_t at);
+static void field_select_click(struct kl_ui *ui, const struct kl_style *style, uint32_t id, const struct kl_rect *rect, struct kl_field *field, unsigned state);
+static void field_select_after(struct kl_ui *ui, uint32_t id, struct kl_field *field, const struct keiui_input *input);
+static int field_select_check(struct kl_ui *ui, uint32_t id, struct kl_field *field);
+static void field_select_drawn(struct kl_ui *ui, const struct kl_style *style, uint32_t id, const struct kl_rect *rect, const struct kl_field *field, const char *shown, size_t length);
+static size_t field_view_position(void *data, double x, double y);
+static void field_view_caret(void *data, size_t position, struct kl_rect *rect);
+static void field_view_word(void *data, size_t position, size_t *start, size_t *end);
+
+/* The answers of a field's view to the fingers' selection, from its copy in kl_ui (ws190-p002). */
+static const struct kl_text_view field_view = {
+	field_view_position,
+	field_view_caret,
+	field_view_word
+};
 
 /*
  * Sets a field's text, with the caret at its end and nothing selected.
@@ -153,8 +175,8 @@ kl_field(
 	int width;
 	int taken;
 	int focused;
-	double pointer_x;
-	double pointer_y;
+	int holding;
+	int owned;
 
 	/* The record: it takes the keyboard. */
 	theme = style->theme;
@@ -163,17 +185,14 @@ kl_field(
 	if ((state & KL_HIT_FOCUSED) != 0U)
 		focused = 1;
 
-	/* A click or a tap puts the caret at the point (twice: the whole text selected). */
+	/*
+	 * A click or a tap puts the caret at the point (twice: the whole text
+	 * selected); a finger's double tap, or its tap in the fingers'
+	 * selection, is the selection's (ws190-p002).
+	 */
 	changes = 0;
-	if ((state & KL_HIT_CLICKED) != 0U) {
-		kl_ui_pointer(ui, &pointer_x, &pointer_y);
-		field->caret = field_at(style, field, (int)pointer_x - rect->x - FIELD_SIDE + field->scroll);
-		field->anchor = field->caret;
-		if ((state & KL_HIT_DOUBLE) != 0U) {
-			field->anchor = 0;
-			field->caret = field->length;
-		}
-	}
+	if ((state & KL_HIT_CLICKED) != 0U)
+		field_select_click(ui, style, id, rect, field, state);
 
 	/* The keys while it has the keyboard, and the text an input method sent for it, in the order they came. */
 	for (;;) {
@@ -181,7 +200,11 @@ kl_field(
 		if (!taken)
 			break;
 		changes |= field_take(ui, id, field, &input);
+		field_select_after(ui, id, field, &input);
 	}
+
+	/* The fingers' selection's ends, as the field shows them (another text the program set ends it). */
+	holding = field_select_check(ui, id, field);
 
 	/* The text an input method is composing for it (a secret field's characters do not show, so neither does it). */
 	preedit_begin = -1;
@@ -189,6 +212,14 @@ kl_field(
 	preedit = keiui_ui_preedit(ui, id, 0U, focused, &preedit_begin, &preedit_end);
 	if (field->secret || field->plain)
 		preedit = NULL;
+
+	/* A text being composed ends the fingers' selection (its handles would stand off the composed text). */
+	if (preedit != NULL) {
+		owned = keiui_ui_select_owned(ui, id, 0U);
+		if (owned)
+			keiui_ui_select_end(ui);
+		holding = 0;
+	}
 
 	/* The ground: white, with the accent's edge while it has the keyboard. */
 	kl_canvas_round(style->canvas, (float)rect->x, (float)rect->y, (float)rect->width, (float)rect->height, theme->control_radius, theme->panel);
@@ -243,11 +274,11 @@ kl_field(
 	left_x = kl_text_width(style->text, shown, field_shown(field, NULL, 0U, start), FIELD_TEXT, 0);
 	right_x = kl_text_width(style->text, shown, field_shown(field, NULL, 0U, end), FIELD_TEXT, 0);
 
-	/* The text scrolls across just enough to keep the caret inside. */
+	/* The text scrolls across just enough to keep the caret inside (a finger dragging a handle scrolls it itself). */
 	width = rect->width - 2 * FIELD_SIDE;
-	if (caret_x - field->scroll > width)
+	if (!holding && caret_x - field->scroll > width)
 		field->scroll = caret_x - width;
-	if (caret_x < field->scroll)
+	if (!holding && caret_x < field->scroll)
 		field->scroll = caret_x;
 
 	/* Inside the field: the selection, the text or the placeholder, and the caret while it has the keyboard. */
@@ -286,6 +317,9 @@ kl_field(
 		caret.height = rect->height - 16;
 		keiui_ui_text_caret(ui, &caret);
 	}
+
+	/* The fingers' selection's copy of the field, drawn in this frame. */
+	field_select_drawn(ui, style, id, rect, field, shown, length);
 
 	/* Reports what happened. */
 	return changes;
@@ -840,4 +874,293 @@ field_boundary(
 
 	/* Succeeded: a character's start. */
 	return at;
+}
+
+/*
+ * Carries out a click or a tap on a field: the caret at the point (a
+ * double click: the whole text), or for a finger (ws190-p002) the word
+ * there with the fingers' selection on a double tap, the bar shown or
+ * hidden by a tap within the selection, and the selection's end by a tap
+ * elsewhere or a click.
+ */
+static void
+field_select_click(
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	uint32_t id,
+	const struct kl_rect *rect,
+	struct kl_field *field,
+	unsigned state)
+{
+	struct keiui_select *select;
+	double pointer_x;
+	double pointer_y;
+	double x;
+	size_t position;
+	size_t start;
+	size_t end;
+	int owned;
+	int enabled;
+
+	/* Where the click is in the text. */
+	kl_ui_pointer(ui, &pointer_x, &pointer_y);
+	position = field_at(style, field, (int)pointer_x - rect->x - FIELD_SIDE + field->scroll);
+	select = keiui_ui_select(ui);
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	enabled = keiui_ui_select_enabled(ui);
+
+	/* A finger's double tap: the word there, in the fingers' selection. */
+	if ((state & KL_HIT_TOUCHED) != 0U &&
+	    (state & KL_HIT_DOUBLE) != 0U &&
+	    enabled) {
+		select->field = *field;
+		select->style = *style;
+		select->rect = *rect;
+		keiui_ui_select_begin(ui, id, 0U, KEIUI_SELECT_FIELD, &field_view, field, &keiui_text_bar_calls);
+		x = pointer_x - (double)(rect->x + FIELD_SIDE) + (double)field->scroll;
+		kl_text_touch_tap(&select->touch, x, pointer_y - (double)rect->y, 1);
+		(void)kl_text_touch_take(&select->touch);
+		field->anchor = select->touch.anchor;
+		field->caret = select->touch.caret;
+		return;
+	}
+
+	/* The selection's ends in order. */
+	start = field->anchor;
+	end = field->caret;
+	if (start > end) {
+		start = field->caret;
+		end = field->anchor;
+	}
+
+	/* A finger's tap within the fingers' selection shows or hides the bar. */
+	if ((state & KL_HIT_TOUCHED) != 0U &&
+	    owned &&
+	    start != end &&
+	    position >= start &&
+	    position <= end) {
+		kl_text_touch_toggle_bar(&select->touch);
+		return;
+	}
+
+	/* Anything else ends the fingers' selection and puts the caret at the point (twice: the whole text). */
+	if (owned)
+		keiui_ui_select_end(ui);
+	field->caret = position;
+	field->anchor = position;
+	if ((state & KL_HIT_DOUBLE) != 0U) {
+		field->anchor = 0;
+		field->caret = field->length;
+	}
+}
+
+/*
+ * Follows an input the field took with the fingers' selection
+ * (ws190-p002): the bar's Copy hides the bar, its Select All selects the
+ * whole text with handles and the bar, and its Cut and Paste, and any key
+ * or text of the keyboard's, end the selection.
+ */
+static void
+field_select_after(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_field *field,
+	const struct keiui_input *input)
+{
+	struct keiui_select *select;
+	int owned;
+
+	/* Only a field in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return;
+
+	/* The keyboard's input ends it. */
+	select = keiui_ui_select(ui);
+	if (!input->from_bar) {
+		keiui_ui_select_end(ui);
+		return;
+	}
+
+	/* Copy keeps the selection; the bar goes. */
+	if (input->code == 46U) {
+		kl_text_touch_hide_bar(&select->touch);
+		return;
+	}
+
+	/* Select All: the whole text, as the fingers' selection. */
+	if (input->code == 30U) {
+		kl_text_touch_select(&select->touch, 0, field->length);
+		(void)kl_text_touch_take(&select->touch);
+		field->anchor = 0;
+		field->caret = field->length;
+		return;
+	}
+
+	/* Cut and Paste end it at the caret. */
+	keiui_ui_select_end(ui);
+}
+
+/*
+ * Brings the fingers' selection to the field before it is drawn: a text
+ * the program set (other than the copy kept) or another field ends it;
+ * otherwise the selection's ends the fingers moved become the field's,
+ * and while a finger drags a handle the field shows the selection's scroll.
+ * Reports whether a finger holds the field's scroll.
+ */
+static int
+field_select_check(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_field *field)
+{
+	struct keiui_select *select;
+	int owned;
+	int same;
+	int difference;
+
+	/* Only a field in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return 0;
+
+	/* Whether it is the field the copy was made of, with the same text. */
+	select = keiui_ui_select(ui);
+	same = 0;
+	if (select->widget == field && select->field.length == field->length && select->field.secret == field->secret) {
+		difference = memcmp(select->field.text, field->text, field->length);
+		if (difference == 0)
+			same = 1;
+	}
+
+	/* Another widget under the id, or a text the program set: the selection ends. */
+	if (!same) {
+		keiui_ui_select_end(ui);
+		return 0;
+	}
+
+	/* The ends the fingers moved, within the text. */
+	if (select->touch.anchor > field->length)
+		select->touch.anchor = field->length;
+	if (select->touch.caret > field->length)
+		select->touch.caret = field->length;
+	field->anchor = select->touch.anchor;
+	field->caret = select->touch.caret;
+	(void)kl_text_touch_take(&select->touch);
+
+	/* No finger on a handle: the field keeps its own scroll. */
+	if (!select->touch.selecting)
+		return 0;
+
+	/* Succeeded: the finger's scroll is the field's. */
+	field->scroll = (int)select->scroll.x;
+	return 1;
+}
+
+/*
+ * Gives the fingers' selection the field as it was drawn (ws190-p002): its
+ * copy, its rectangle and text box, its style and the scroll its content
+ * is shown at, so that the handles and the bar are placed and its view
+ * answers from it until the next frame.
+ */
+static void
+field_select_drawn(
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	uint32_t id,
+	const struct kl_rect *rect,
+	const struct kl_field *field,
+	const char *shown,
+	size_t length)
+{
+	struct keiui_select *select;
+	struct kl_rect box;
+	int owned;
+	int content;
+
+	/* Only a field in the fingers' selection. */
+	owned = keiui_ui_select_owned(ui, id, 0U);
+	if (!owned)
+		return;
+
+	/* The copy, and where the text is. */
+	select = keiui_ui_select(ui);
+	select->field = *field;
+	box.x = rect->x + FIELD_SIDE;
+	box.y = rect->y;
+	box.width = rect->width - 2 * FIELD_SIDE;
+	box.height = rect->height;
+	keiui_ui_select_drawn(ui, rect, &box, style);
+
+	/* The content's scroll across: the whole text's width in the box's, at the field's scroll unless a finger holds it. */
+	content = kl_text_width(style->text, shown, length, FIELD_TEXT, 0) + 2;
+	kl_scroll_set_size(&select->scroll, (double)content, (double)box.height, (double)box.width, (double)box.height);
+	if (!select->touch.selecting)
+		kl_scroll_move_to(&select->scroll, (double)field->scroll, 0.0, 0, keiui_ui_now(ui));
+}
+
+/* Reports the text position nearest a point of the field's copy (pixels across from the text's start). */
+static size_t
+field_view_position(
+	void *data,
+	double x,
+	double y)
+{
+	struct keiui_select *select;
+	size_t position;
+
+	/* The field is one line. */
+	(void)y;
+
+	/* The nearest boundary in the copy. */
+	select = data;
+	position = field_at(&select->style, &select->field, (int)x);
+
+	/* Reports the boundary. */
+	return position;
+}
+
+/* Gives the caret's rectangle at a position of the field's copy (from the text's start and the field's top). */
+static void
+field_view_caret(
+	void *data,
+	size_t position,
+	struct kl_rect *rect)
+{
+	struct keiui_select *select;
+	char shown[KL_FIELD_MAX * 3U];
+	size_t offset;
+
+	/* The text as shown, and the position's place in it. */
+	select = data;
+	(void)field_shown(&select->field, shown, sizeof(shown), select->field.length);
+	offset = field_shown(&select->field, NULL, 0U, position);
+
+	/* The caret's line, as the field draws it. */
+	rect->x = kl_text_width(select->style.text, shown, offset, FIELD_TEXT, 0);
+	rect->y = 8;
+	rect->width = 2;
+	rect->height = select->rect.height - 16;
+}
+
+/* Gives the word around a position of the field's copy: the whole text of a secret field. */
+static void
+field_view_word(
+	void *data,
+	size_t position,
+	size_t *start,
+	size_t *end)
+{
+	struct keiui_select *select;
+
+	/* A secret field's characters show no words. */
+	select = data;
+	if (select->field.secret) {
+		*start = 0;
+		*end = select->field.length;
+		return;
+	}
+
+	/* The word of the text. */
+	keiui_select_word(select->field.text, select->field.length, position, start, end);
 }

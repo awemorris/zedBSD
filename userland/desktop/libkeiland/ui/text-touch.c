@@ -16,9 +16,15 @@
  * finger's gesture is which is kl_ui's (ui.c); the positions are the
  * view's (its three answers).  All points here are in the view's content
  * coordinates except the context menu's place, which is the window's.
+ *
+ * KL_VERSION 74 (ws190-p002, plan/ws190/phase001/phase.md section 2.1):
+ * a selection the fingers made shows the bar of editing buttons (bar) when
+ * the fingers are off it: after a double tap, and after a drag that left a
+ * selection; a drag hides it while it lasts, a tap, the keys' selection and
+ * a long press take it away.
  */
 
-#include <keiland/keiland.h>
+#include "internal.h"
 
 #include <math.h>
 #include <string.h>
@@ -26,6 +32,7 @@
 static int touch_near_handle(const struct kl_text_touch *touch, size_t position, double x, double y);
 static void touch_grip(struct kl_text_touch *touch, double x, double y);
 static double touch_edge_speed(double place, double size);
+static void touch_set_bar(struct kl_text_touch *touch, int bar);
 
 /*
  * Makes a text view's touch, with the caret at position 0.
@@ -57,6 +64,7 @@ kl_text_touch_set_selection(
 	touch->caret = caret;
 	touch->handles = 0;
 	touch->handle = KL_TEXT_HANDLE_NONE;
+	touch_set_bar(touch, 0);
 }
 
 /*
@@ -79,12 +87,13 @@ kl_text_touch_tap(
 	touch->selecting = 0;
 	touch->handle = KL_TEXT_HANDLE_NONE;
 
-	/* Once: the caret there, nothing selected. */
+	/* Once: the caret there, nothing selected, no bar. */
 	if (!twice) {
 		touch->anchor = position;
 		touch->caret = position;
 		touch->handles = 0;
 		touch->changes |= KL_TEXT_TOUCH_SELECTION;
+		touch_set_bar(touch, 0);
 		return;
 	}
 
@@ -98,6 +107,9 @@ kl_text_touch_tap(
 	if (end != start)
 		touch->handles = 1;
 	touch->changes |= KL_TEXT_TOUCH_SELECTION;
+
+	/* The bar shows, even at a caret alone (Paste, Select All). */
+	touch_set_bar(touch, 1);
 }
 
 /*
@@ -110,10 +122,11 @@ kl_text_touch_long_press(
 	double window_x,
 	double window_y)
 {
-	/* The request and its place. */
+	/* The request and its place; the menu takes the bar's place. */
 	touch->menu_x = window_x;
 	touch->menu_y = window_y;
 	touch->changes |= KL_TEXT_TOUCH_MENU;
+	touch_set_bar(touch, 0);
 }
 
 /*
@@ -136,6 +149,9 @@ kl_text_touch_drag_begin(
 	touch->handle = KL_TEXT_HANDLE_NONE;
 	touch->grip_x = 0.0;
 	touch->grip_y = 0.0;
+
+	/* The bar hides while a finger drags. */
+	touch_set_bar(touch, 0);
 
 	/* A handle under the finger: the caret is always the end that moves, so the anchor is the other one. */
 	if (touch->handles) {
@@ -201,12 +217,102 @@ kl_text_touch_drag_end(
 	if (!touch->selecting)
 		return;
 
-	/* The drag is over; a selection (not a caret) shows its handles. */
+	/* The drag is over; a selection (not a caret) shows its handles and the bar. */
 	touch->selecting = 0;
 	touch->handle = KL_TEXT_HANDLE_NONE;
 	touch->handles = 0;
 	if (touch->anchor != touch->caret)
 		touch->handles = 1;
+	touch_set_bar(touch, touch->handles);
+}
+
+/*
+ * Puts a selection as the fingers' own (KL_VERSION 74, Select All of the
+ * bar): with its handles when it is not empty, and the bar shown.
+ */
+void
+kl_text_touch_select(
+	struct kl_text_touch *touch,
+	size_t anchor,
+	size_t caret)
+{
+	/* The selection, no finger on it. */
+	touch->anchor = anchor;
+	touch->caret = caret;
+	touch->selecting = 0;
+	touch->handle = KL_TEXT_HANDLE_NONE;
+	touch->handles = 0;
+	if (anchor != caret)
+		touch->handles = 1;
+	touch->changes |= KL_TEXT_TOUCH_SELECTION;
+
+	/* The bar over it. */
+	touch_set_bar(touch, 1);
+}
+
+/*
+ * Hides the bar and keeps the selection and its handles (KL_VERSION 74,
+ * after Copy).
+ */
+void
+kl_text_touch_hide_bar(
+	struct kl_text_touch *touch)
+{
+	/* No bar. */
+	touch_set_bar(touch, 0);
+}
+
+/*
+ * Shows the bar when it is hidden and hides it when it shows (KL_VERSION
+ * 74, a tap inside the selection).
+ */
+void
+kl_text_touch_toggle_bar(
+	struct kl_text_touch *touch)
+{
+	/* The other state. */
+	if (touch->bar) {
+		touch_set_bar(touch, 0);
+		return;
+	}
+
+	/* Shown. */
+	touch_set_bar(touch, 1);
+}
+
+/*
+ * Begins a finger's drag of a named end's handle (ws190-p002: kl_ui knows
+ * which knob the finger touched, so the reach is not looked at again).  The
+ * caret is the end that moves, so the anchor's handle swaps the ends.
+ */
+void
+keiui_text_touch_hold(
+	struct kl_text_touch *touch,
+	int end,
+	double x,
+	double y)
+{
+	size_t other;
+
+	/* The finger, the bar hidden while it drags. */
+	touch->finger_x = x;
+	touch->finger_y = y;
+	touch->selecting = 1;
+	touch->grip_x = 0.0;
+	touch->grip_y = 0.0;
+	touch_set_bar(touch, 0);
+
+	/* The anchor's handle: the ends change places. */
+	touch->handle = KL_TEXT_HANDLE_CARET;
+	if (end == KL_TEXT_HANDLE_ANCHOR) {
+		other = touch->caret;
+		touch->caret = touch->anchor;
+		touch->anchor = other;
+		touch->handle = KL_TEXT_HANDLE_ANCHOR;
+	}
+
+	/* The grip on the caret's handle. */
+	touch_grip(touch, x, y);
 }
 
 /*
@@ -368,4 +474,19 @@ touch_edge_speed(
 
 	/* Away from both. */
 	return 0.0;
+}
+
+/* Shows or hides the bar, noting a change for kl_text_touch_take. */
+static void
+touch_set_bar(
+	struct kl_text_touch *touch,
+	int bar)
+{
+	/* No change. */
+	if (touch->bar == bar)
+		return;
+
+	/* The new state, told to the view. */
+	touch->bar = bar;
+	touch->changes |= KL_TEXT_TOUCH_BAR;
 }

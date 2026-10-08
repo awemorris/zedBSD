@@ -16,7 +16,7 @@ K=$U/libkeiland/ui
 cc -std=c11 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -I"$inc" -I. -I$K -I$U/libtruetype \
 	plan/ws179/tests/host-accent-widgets.c \
 	$K/canvas.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
-	$K/text-touch.c $K/ui.c $K/widgets.c $K/field.c $K/list.c $K/cards.c \
+	$K/text-touch.c $K/text-bar.c $K/text-select.c $K/ui.c $K/widgets.c $K/field.c $K/list.c $K/cards.c \
 	$U/libkeiland/gesture.c $U/libkeiland/motion.c $U/libkeiland/scroll.c \
 	$U/libtruetype/*.c $U/picture/color-glyph.c \
 	userland/base/libz-compat/inflate.c userland/base/libz-compat/checksum.c userland/base/libpng-compat/read.c -lm -o "$out"

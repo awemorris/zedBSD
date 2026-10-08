@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws190-p001 -->
 # ws190-p001: 設計 — 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・編集の bar）
 
-Status: in-progress（第 2 版: design-reviewer の review 1 を反映、Q1 の判定を待つ。§7 の判断 Q1〜Q2 が要る）
+Status: in-progress（第 2 版: design-reviewer の review 1 を反映。§7 の Q1・Q2 は 2026-10-08 Q1 が回答。p002 は進めてよい（Q1））
 Disposition: normal
 Parent: [WS190](../ws.md)
 Queue: q899（P1、2026-10-08 Q1 の依頼）
@@ -270,7 +270,20 @@ void kl_text_bar_draw(const struct kl_text_bar *bar, const struct kl_style *styl
 - 空白の無い日本語の文の語は句読点まで（形態素の区切りはしない）。
 - compositor の context menu（縦の menu）は Text Editor の long press のまま。bar を compositor の popup にしない理由: grab のある popup は出ている間の最初の touch を閉じるのに使うので、handle を続けて動かす操作と合わない。欄の library は窓の中に描く物で完結し、compositor の無い host 試験で確かめられる。
 
-## 7. Q1 の判断が要る点
+## 7. Q1 の判断（2026-10-08 Q1 の回答）
+
+- **Q1 = 入れる**: Mailer・Phone・Calendar を p002 で `kl_ui_window_text` に結ぶ。
+- **Q2 = 入れない**: Settings・Files の改名の欄の touch の経路は Future Work（下の F-087）。
+
+Future Work の候補（Q1 が台帳に載せる）:
+
+| ID | 内容 | 由来 | 再考の契機 |
+| --- | --- | --- | --- |
+| F-087 | Settings（touch を pointer に変える）と Files の改名の欄（touch を kl_ui に渡さない）で指の選択・bar を効かせる: touch を kl_ui に渡す経路の設計 | ws190-p001 review 1 M4、Q1 の判断 Q2 | Settings・Files の touch の UAT の指摘 |
+| F-088 | Notes の文字の box の中に bar を置く（`kl_ui_set_text_bar` の bounds を box の中に、box の合成の範囲を広げる） | ws190-p001 review 1 M5 | Notes の box の touch の UAT |
+| F-089 | bar の文字の翻訳（共有の domain `keiland` を program が開かなくても library が読む口） | ws190-p001 review 1 minor 6 | 日本語の UI の UAT |
+
+以下は判断の前の問い（記録として残す）。
 
 - **Q1**: Mailer・Phone・Calendar を `kl_ui_window_text` に結ぶ（数行ずつの置き換え、Cut・Copy・Paste が効くようになる）を p002 に入れるか。P1 の推し: 入れる（要望の中心になりそうな Mail の作成の欄で Copy が出ないのは不自然）。
 - **Q2**: Settings・Files の改名の欄の touch の経路を kl_ui に渡す直しを WS190 に入れるか。P1 の推し: 入れない（Settings の touch の pointer 化は別の設計、Future Work）。

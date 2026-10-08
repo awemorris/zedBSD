@@ -13,6 +13,8 @@ desktop.windows.maximize-double-click
 desktop.windows.unmaximize-drag
 desktop.windows.open-maximized
 desktop.windows.close-minimize
+desktop.widgets.*
+desktop.dnd.*
 apps.*.open-from-home
 apps.*
 os.accounts.*

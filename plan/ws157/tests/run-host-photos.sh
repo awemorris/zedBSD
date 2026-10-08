@@ -25,7 +25,7 @@ cc -std=c11 -D_GNU_SOURCE -O2 -g -Wall -Wextra -Werror -I"$dir/inc" -I. -I$K -I$
 	plan/ws157/tests/host-photos.c $M/view.c $M/thumbs.c $M/decode.c $M/library.c $M/exif.c $M/db.c $M/import.c "$dir/sha2.o" \
 	$U/picture/picture.c \
 	$K/canvas.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
-	$K/text-touch.c $K/ui.c $K/widgets.c $K/field.c $K/text-area.c $K/list.c $K/cards.c \
+	$K/text-touch.c $K/text-bar.c $K/text-select.c $K/ui.c $K/widgets.c $K/field.c $K/text-area.c $K/list.c $K/cards.c \
 	$L/gesture.c $L/motion.c $L/scroll.c \
 	$U/libtruetype/*.c $U/picture/color-glyph.c \
 	$B/libz-compat/inflate.c $B/libz-compat/checksum.c $B/libpng-compat/read.c \

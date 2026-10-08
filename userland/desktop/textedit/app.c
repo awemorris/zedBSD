@@ -316,8 +316,8 @@ te_app_event(
 	/* The line numbers may have grown a digit, which narrows the text. */
 	app_fit(app);
 
-	/* A selection the keys or the pointer changed is no longer the fingers' (their handles go). */
-	if (app->touch.handles) {
+	/* A selection the keys or the pointer changed is no longer the fingers' (their handles and bar go, ws190-p003). */
+	if (app->touch.handles || app->touch.bar) {
 		if (app->touch.anchor != app->anchor || app->touch.caret != app->cursor)
 			kl_text_touch_set_selection(&app->touch, app->anchor, app->cursor);
 	}
@@ -627,6 +627,10 @@ te_app_touch(
 		app->handles_shown = app->touch.handles;
 		app->dirty = 1;
 	}
+
+	/* The bar came or went (ws190-p003): the fingers' input lays it out, the frame draws it. */
+	if ((changes & KL_TEXT_TOUCH_BAR) != 0U)
+		app->dirty = 1;
 }
 
 /*
