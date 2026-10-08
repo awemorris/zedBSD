@@ -3,7 +3,7 @@
 # WS190: 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・コピーの popup）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -34,6 +34,6 @@ Queue: q899（P1、2026-10-08 午後、WS189 の drag の後）
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 設計: kl_field・text area への kl_text_touch の組み込み、popup の部品（位置・画面の端・画面 keyboard との重なり）、Text Editor の popup | planned | WS189 |
+| [p001](phase001/phase.md) | 設計: kl_field・text area への kl_text_touch の組み込み、popup の部品（位置・画面の端・画面 keyboard との重なり）、Text Editor の popup | in-progress（初版、design-reviewer） | WS189 |
 | p002 | libkeiland の欄 | planned | p001 |
 | p003 | Text Editor | planned | p001 |
