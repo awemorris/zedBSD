@@ -122,5 +122,5 @@ draw.c は host の試験に入っていない（GPU に出すため）ので、
 - `plan/ws031/tests/p024/gen-spill.py` が spilltex.frag（96 の値）と spillbig.frag（224 の値）を作る（GLSL と glslc の .spv を tree に置く）。どちらも、値を生かしたまま channel ごとに回数の違う loop の中で texture を sample し（reply が spill の中に着く）、生きている間に discard し、最後に t[k] * t[(7k + 5) % N] を足す。
 - `i915-vk-compile-test.c` の `test_p024_spill_mix`: EU の model（fake の sampler・scratch）で 8 channel を動かし、C で同じ順に計算した値と bit で一致を見る。discard された channel は書かれない（x = 0.3 の channel）。spillbig は 1 thread 4 KiB を超える（16384 byte）。spilltex は 2048 byte。
 - VS と PS が同時に spill する pipeline（vio16.vert と spill.frag の scratch の欄）は pipe の host 試験に既にある。scratch の作成の失敗は 2026-10-05 の読みのとおり（draw.c は host 試験に入らない）。
-- 確認: `sh plan/ws031/tests/run-vk-host-tests.sh`（全部、ordinary と ASan・UBSan）PASS、`sh plan/ws031/tests/p024/run.sh` PASS。
+- 確認: `sh plan/ws031/tests/run-vk-host-tests.sh`（全部、変更の前の main で PASS）と、変更の後の `run-vk-host-tests.sh compile`（ordinary と ASan・UBSan）PASS、`sh plan/ws031/tests/p024/run.sh` PASS。
 - 残り（blocked、UAT 待ち）: spill の組み合わせを実機の vke2 の step にすること（SPILLMIX など）。vke2 の組の kernel の余裕（2026-10-05 は 16300 KiB、上限 16384）と、実機の i915（QEMU に無い）が要る。ユーザーの規則（2026-10-08 夜）で blocked（UAT 待ち）にして先へ進む。
