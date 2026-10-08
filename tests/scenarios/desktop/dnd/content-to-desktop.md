@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.content-to-desktop
 title: 画像と文字を desktop に落とすと、Image.png と Text Clipping.txt ができて落とした所に並ぶ
-status: draft
+status: active
 areas: [compositor, dnd, files, desktop]
 paths: [userland/desktop/files/dnd.c, userland/desktop/files/ui-desktop-drag.c, userland/desktop/files/main.c, userland/desktop/files/window.c]
 machine: either

@@ -605,6 +605,7 @@ page_image_at(
 	const struct layout_box *box;
 	const struct dom_attribute *attribute;
 	struct wb_buffer written;
+	struct net_url target;
 	struct vm_string *name;
 	int is_element;
 	int error;
@@ -639,12 +640,26 @@ page_image_at(
 		return error;
 	}
 
-	/* Made absolute against the page's location (as written when it cannot be). */
+	/*
+	 * Made an absolute URL against the page's location, a local file's a
+	 * file: URL (ws189-p002 F3: another program takes the text as a URL,
+	 * not a path); as written when it cannot be.
+	 */
 	error = EINVAL;
 	if (page->base != NULL)
-		error = page_resolve_location(page->base, wb_buffer_string(&written), source);
-	if (error != 0)
+		error = link_resolve(page->base, wb_buffer_string(&written), &target);
+	if (error == 0) {
+		error = net_url_serialize(&target, 0, source);
+		net_url_release(&target);
+	}
+
+	/* As written, when it could not be made a URL. */
+	if (error != 0) {
+		wb_buffer_clear(source);
 		error = wb_buffer_append(source, wb_buffer_string(&written), strlen(wb_buffer_string(&written)));
+	}
+
+	/* The text as written is not needed any more. */
 	wb_buffer_release(&written);
 	if (error != 0)
 		return error;

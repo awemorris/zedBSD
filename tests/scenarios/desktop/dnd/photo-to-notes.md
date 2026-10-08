@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.photo-to-notes
 title: Photos の写真を Notes の頁へ drag すると、落とした点に画像が入り、Notes の画像は窓の外へ出して戻すと動く
-status: draft
+status: active
 areas: [compositor, dnd, photos, notes]
 paths: [userland/desktop/photos/, userland/desktop/notes/main.c, userland/desktop/notes/picture-file.c, userland/desktop/picture/png-write.c, userland/desktop/libkeiland/ui/clipboard.c]
 machine: either
