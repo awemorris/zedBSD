@@ -50,7 +50,7 @@ ${CC:-cc} -std=c11 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -fsanitize=address
 	-I"$out/inc" -I. -I$K -I$U/libtruetype \
 	plan/ws177/tests/host-mail-view.c $M/view.c $M/store.c $M/conn.c $M/tls.c \
 	$K/canvas.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
-	$K/text-touch.c $K/text-bar.c $K/text-select.c $K/ui.c $K/widgets.c $K/field.c $K/text-area.c $K/list.c $K/cards.c \
+	$K/text-touch.c $K/text-bar.c $K/text-select.c $K/ui.c $K/widgets.c $K/field.c $K/text-area.c $K/list.c $K/cards.c $K/drop-look.c \
 	$L/gesture.c $L/motion.c $L/scroll.c \
 	$U/libtruetype/*.c $U/picture/color-glyph.c \
 	userland/base/libz-compat/inflate.c userland/base/libz-compat/checksum.c userland/base/libpng-compat/read.c \
