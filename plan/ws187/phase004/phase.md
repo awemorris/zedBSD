@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws187-p004 -->
 # ws187-p004: 規約の全文の見直し
 
-Status: 見直し済み、Q1 の判定待ち（P3、2026-10-09）
+Status: cleared（2026-10-09 Q1 の判定: P3（Sonnet medium）の d148052da、host 試験 lock-clock 74・lock-swipe 45 ok（ASan・UBSan）、zedBSD・Linux の build 0、style-check 0）
 Disposition: normal
 Parent: [WS187](../ws.md)
 
