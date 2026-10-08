@@ -183,8 +183,9 @@ se_bluetooth_poll(
 	if (!available)
 		return;
 
-	/* A change. */
-	if ((app->system_changed & KL_SYSTEM_CHANGED_BLUETOOTH) != 0U) {
+	/* A change, or the state not logged yet (a service that is not running sends no change: T1-438). */
+	if ((app->system_changed & KL_SYSTEM_CHANGED_BLUETOOTH) != 0U || !app->bluetooth.state_logged) {
+		app->bluetooth.state_logged = 1;
 		(void)kl_system_bluetooth_state(app->system, &state);
 		se_log("BLUETOOTH state reachable=%u state=%u flags=%u features=%u", state.reachable, state.state, state.flags, state.features);
 		if (app->page == SE_PAGE_BLUETOOTH)
