@@ -11,7 +11,10 @@
  * starts before the data is there), then the control file, each answered
  * by a zero byte.  The source port is an ordinary one (the user cannot
  * bind 721 to 731).  A job asked to stop before its control file is sent
- * is dropped by closing the connection.
+ * is dropped: between two subcommands with "abort job" (\001) and the
+ * connection closed, in the middle of the data file by closing it.  One
+ * asked to stop after its control file went cannot be taken back: it is
+ * told failed, unconfirmed (ws177-p022, design §5.5).
  */
 
 #include "printd.h"
@@ -91,9 +94,17 @@ pd_lpd_job(
 	if (status == 0)
 		status = lpd_ack(fd);
 
-	/* Stopped before the control file: no job at the printer. */
+	/* Stopped in the middle of the data file: the connection closed, no job at the printer. */
+	if (status == ECANCELED) {
+		(void)close(fd);
+		pd_send("STATE %lu cancelled", (unsigned long)job->job);
+		return;
+	}
+
+	/* Stopped after the data file's answer: "abort job", then closed. */
 	stop = pd_cancelled(job);
-	if (status == ECANCELED || (status == 0 && stop)) {
+	if (status == 0 && stop) {
+		(void)pd_write_all(fd, "\001\n", 2U);
 		(void)close(fd);
 		pd_send("STATE %lu cancelled", (unsigned long)job->job);
 		return;
@@ -131,11 +142,14 @@ pd_lpd_job(
 	/* The connection ends. */
 	(void)close(fd);
 
-	/* The outcome. */
+	/* The outcome; a job asked to stop after its control file went may have printed. */
+	stop = pd_cancelled(job);
 	if (status == EPROTO)
 		pd_send("STATE %lu failed refused", (unsigned long)job->job);
 	else if (status != 0)
 		pd_send("STATE %lu failed io", (unsigned long)job->job);
+	else if (stop)
+		pd_send("STATE %lu failed unconfirmed", (unsigned long)job->job);
 	else
 		pd_send("STATE %lu done", (unsigned long)job->job);
 	pd_log("job %lu lpd status %d", (unsigned long)job->job, status);

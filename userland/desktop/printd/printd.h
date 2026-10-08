@@ -14,8 +14,11 @@
  * 1179), and tells the backend how each job goes, a line each.
  *
  * The main thread reads the commands; each job is sent by a thread of its
- * own with blocking sockets and time outs (the normal path of the design's
- * one poll loop, plan/ws145/phase002), and its lines go out under a lock.
+ * own with blocking sockets and time outs, and its lines go out under a
+ * lock.  The main thread starts the jobs in the order they came, one at a
+ * time for each printer and four at a time in all (the watching of an IPP
+ * job that was taken does not count); a host's name is looked up by a
+ * helper thread, ten seconds at most (ws177-p022, design §5.3).
  */
 
 #ifndef PRINTD_PRINTD_H
@@ -44,14 +47,22 @@
 #define PD_IPP			1
 #define PD_LPD			2
 
-/* How long a connection may take, and a send or a receive may stand still (seconds). */
+/* How long a connection and a name's look up may take, and a send or a receive may stand still (seconds). */
 #define PD_CONNECT_SECONDS	10
+#define PD_LOOKUP_SECONDS	10
 #define PD_IDLE_SECONDS		60
+
+/* The jobs sent at once in all, and the names looked up at once. */
+#define PD_SENDING_MAX		4U
+#define PD_LOOKUPS_MAX		4U
 
 /*
  * A job: the backend's number, the printer (protocol, host, port, IPP path
- * or LPD queue), the title, the spool file and its size, its thread, and
- * under the daemon's lock whether it is asked to stop and whether it ended.
+ * or LPD queue), the title, the spool file and its size, the order it was
+ * accepted in, its thread and whether it was started, and under the
+ * daemon's lock whether it is asked to stop, whether it holds one of the
+ * sending places (from its start until the printer took it or it ended)
+ * and whether it ended.
  */
 struct pd_job {
 	uint32_t job;
@@ -62,9 +73,11 @@ struct pd_job {
 	char title[PD_TITLE_MAX];
 	char file[512];
 	uint64_t size;
+	uint64_t order;
 	pthread_t thread;
 	int started;
 	int cancel;
+	int sending;
 	int ended;
 };
 
@@ -81,6 +94,8 @@ struct pd_name {
 /* The daemon (main.c). */
 void pd_send(const char *format, ...) __attribute__((format(printf, 1, 2)));
 int pd_cancelled(struct pd_job *job);
+void pd_sent(struct pd_job *job);
+int pd_wait(struct pd_job *job, unsigned seconds);
 const char *pd_user(void);
 const char *pd_host_name(void);
 void pd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));

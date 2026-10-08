@@ -238,6 +238,7 @@ kl_system_printers_v1
 
 ### 5.3 printd の内部
 
+- （2026-10-08 ws177-p022 の注記: 実装は job ごとの thread と blocking I/O・timeout のまま、main の thread が同時の数（printer ごと 1・全体 4）を数えて抑える。外から見える要件は満たし、非同期の状態機械への書き直しは見送った。Q1 了解。）
 - 1 つの thread の poll の loop。connect は nonblocking、送信は分けて書き、送信の間も読みを poll して早く来た応答（401・413・426 など）を取る。
 - 名前解決: host が IPv4 の literal ならそのまま。host 名なら名前解決ごとに補助の thread（同時に 4 つまで、結果は pipe で loop に返す）。getaddrinfo の結果を順に試し、zedBSD で AAAA の結果が EAFNOSUPPORT なら次を試す。名前解決は 10 秒で timeout（接続の 10 秒とは別）。
 - 同時に送るのは printer ごとに 1 つ、全体で 4 つ（IPP の Get-Job-Attributes の見張りはこの数に含めない。見張りの間も同じ printer の次の job を送れる）。
