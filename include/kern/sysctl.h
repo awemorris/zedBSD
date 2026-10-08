@@ -72,6 +72,26 @@ kern_gpu_telemetry_register(
 	kern_gpu_telemetry_read_t read,
 	void *context);
 
+struct thermal_entry;
+
+/*
+ * Reads a source's sensors into entries (at most capacity of them, zeroed
+ * by the caller) and gives how many it filled.  Returns 0, or an errno to
+ * leave the source out.
+ */
+typedef int (*kern_thermal_read_t)(void *context, struct thermal_entry *entries, unsigned capacity, unsigned *count);
+
+/*
+ * Lists a source of temperatures in hw.thermal (ws134-p009): the function
+ * that reads its sensors and its context, which must live as long as the
+ * kernel.  The same context is listed once.  Returns 0, ENOSPC when the
+ * list is full, or EINVAL without a function.
+ */
+int
+kern_thermal_register(
+	kern_thermal_read_t read,
+	void *context);
+
 int
 kern_sysctl(
 	const int *name,

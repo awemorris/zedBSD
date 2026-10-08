@@ -235,6 +235,66 @@ _Static_assert(sizeof(struct gpu_telemetry_header) == 24U,
 _Static_assert(sizeof(struct gpu_telemetry_entry) == 72U,
     "hw.gputelemetry entry ABI must be identical on ILP32 and LP64");
 
+/*
+ * hw.thermal: the machine's temperature sensors as the kernel reads them
+ * (ws134-p009): today the ACPI thermal zones and the ACPI devices with a
+ * _TMP (the DPTF participants of an Intel laptop).  The value is a struct
+ * thermal_header followed by count struct thermal_entry.  Read-only.  A
+ * buffer too small fails with ENOMEM and the length needed.
+ *
+ * name is the sensor's ACPI path ("\_SB_.PC00.TCPU").  valid says which of
+ * the values are there (THERMAL_HAVE_*): the temperature, and the passive
+ * and critical trip points, in thousandths of a degree Celsius.  time_ns is
+ * when the temperature was read (the kernel reads every few seconds, not
+ * at each sysctl).  THERMAL_FLAG_CPU marks the processor's sensor.
+ */
+#define HW_THERMAL	9
+
+/* The version of the hw.thermal layout. */
+#define THERMAL_VERSION	1U
+
+/* What kind of sensor an entry is. */
+#define THERMAL_KIND_ZONE	1U
+#define THERMAL_KIND_DEVICE	2U
+
+/* The values an entry has (struct thermal_entry's valid). */
+#define THERMAL_HAVE_TEMPERATURE	0x00000001U
+#define THERMAL_HAVE_PASSIVE		0x00000002U
+#define THERMAL_HAVE_CRITICAL		0x00000004U
+
+/* An entry's flags: the processor's sensor. */
+#define THERMAL_FLAG_CPU	0x00000001U
+
+/*
+ * The head of hw.thermal: the layout's version, the header's size, one
+ * entry's size and how many entries follow.  Every field has a fixed
+ * width, so one layout serves ILP32 and LP64 processes.
+ */
+struct thermal_header {
+	uint32_t version;
+	uint32_t struct_size;
+	uint32_t element_size;
+	uint32_t count;
+	uint32_t reserved[2];
+};
+
+/* One sensor in hw.thermal. */
+struct thermal_entry {
+	char name[32];
+	uint32_t kind;
+	uint32_t flags;
+	uint32_t valid;
+	int32_t milli_celsius;
+	int32_t passive_milli_celsius;
+	int32_t critical_milli_celsius;
+	uint64_t time_ns;
+};
+
+_Static_assert(sizeof(struct thermal_header) == 24U,
+    "hw.thermal header ABI must be identical on ILP32 and LP64");
+_Static_assert(sizeof(struct thermal_entry) == 64U,
+    "hw.thermal entry ABI must be identical on ILP32 and LP64");
+
 /* Firmware RAM and actually managed RAM are distinct. */
 #define MEMORY_STATS_VERSION 2U
 struct memory_stats {

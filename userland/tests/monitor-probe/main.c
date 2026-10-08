@@ -194,13 +194,14 @@ print_sample(
 	/* The line. */
 	printf("MPROBE SAMPLE n=%u time_ns=%llu valid=0x%llx cpu_hz=%llu cpus=%u user=%llu system=%llu idle=%llu other=%llu "
 	       "mem_total=%llu mem_free=%llu cache=%llu reclaimable=%llu swap_total=%llu swap_used=%llu "
-	       "links=%u rx=%llu tx=%llu disks=%u read_bytes=%llu write_bytes=%llu gpus=%u gpu_busy_ns=%llu\n",
+	       "links=%u rx=%llu tx=%llu disks=%u read_bytes=%llu write_bytes=%llu gpus=%u gpu_busy_ns=%llu cpu_mc=%d\n",
 	       number, (unsigned long long)sample->time_ns, (unsigned long long)sample->valid, (unsigned long long)sample->cpu_hz,
 	       sample->cpu_count, user, system, idle, other,
 	       (unsigned long long)sample->memory_total, (unsigned long long)sample->memory_free,
 	       (unsigned long long)sample->memory_cache, (unsigned long long)sample->memory_reclaimable,
 	       (unsigned long long)sample->swap_total, (unsigned long long)sample->swap_used,
-	       sample->link_count, rx, tx, sample->disk_count, read_bytes, write_bytes, sample->gpu_count, busy);
+	       sample->link_count, rx, tx, sample->disk_count, read_bytes, write_bytes, sample->gpu_count, busy,
+	       sample->cpu_milli_celsius);
 }
 
 /* Waits a number of milliseconds. */
