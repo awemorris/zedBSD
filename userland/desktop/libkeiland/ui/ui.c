@@ -53,6 +53,9 @@
 #define UI_KEY_X		45U
 #define UI_KEY_V		47U
 
+/* The evdev code of A, whose Ctrl+A the bar's Select All sends (ws190-p002). */
+#define UI_KEY_A		30U
+
 /* The most changes a text widget's history keeps (the oldest goes first). */
 #define UI_UNDO_STEPS		100U
 
@@ -70,7 +73,8 @@
 enum ui_kind {
 	UI_KIND_HIT,
 	UI_KIND_SCROLL,
-	UI_KIND_TEXT
+	UI_KIND_TEXT,
+	UI_KIND_HANDLE
 };
 
 /* What a touch's drag does. */
@@ -96,6 +100,16 @@ struct ui_record {
 	struct kl_rect rect;
 	struct kl_scroll *scroll;
 	struct kl_text_touch *touch;
+
+	/*
+	 * A handle of the fingers' selection (UI_KIND_HANDLE, ws190-p002): the
+	 * text box its touch's content is in (rect is the knob's reach), and
+	 * the knob's centre, around which a finger finds it.  index is the end
+	 * (KL_TEXT_HANDLE_ANCHOR or _CARET).
+	 */
+	struct kl_rect view;
+	double centre_x;
+	double centre_y;
 };
 
 /*
@@ -154,6 +168,7 @@ struct ui_press {
 	uint32_t after;
 	struct ui_key target;
 	int taken;
+	int from_bar;
 };
 
 /*
@@ -261,6 +276,26 @@ struct kl_ui {
 	void (*copy)(struct kl_window *window, const char *text, size_t length);
 	size_t (*paste)(struct kl_window *window, char *text, size_t size);
 	struct ui_undo undo;
+
+	/*
+	 * ws190-p002: the window's calls the bar asks of it (whether the
+	 * clipboard has text, the keyboard's inset; NULL before
+	 * kl_ui_window_text), the fingers' selection, whether the program
+	 * turned it off and where its bar may stand (kl_ui_set_text_bar), the
+	 * bar's command waiting for the owner (a KL_TEXT_BAR_* button, 0 for
+	 * none), and the region under a handle a finger touched (its two
+	 * fingers scroll it).
+	 */
+	int (*can_paste)(const struct kl_window *window);
+	void (*keyboard_inset)(const struct kl_window *window, int *right, int *bottom);
+	struct keiui_select select;
+	int select_made;
+	int select_off;
+	int select_bounded;
+	struct kl_rect select_bounds;
+	unsigned bar_command;
+	struct ui_record touch_below;
+	int touch_has_below;
 };
 
 /*
@@ -298,6 +333,14 @@ static void ui_record(struct kl_ui *ui, enum ui_kind kind, uint32_t id, uint32_t
 static void ui_focus_press(struct kl_ui *ui, const struct ui_record *record, double x, double y);
 static const struct ui_record *ui_focus_owner(const struct ui_key *key, const struct kl_ui *ui, double x, double y);
 static int ui_focus_move(struct kl_ui *ui, int backward);
+static const struct ui_record *ui_find_handle(const struct kl_ui *ui, double x, double y);
+static void ui_select_overlay(struct kl_ui *ui);
+static int ui_select_covered(const struct kl_ui *ui);
+static void ui_select_handles(struct kl_ui *ui);
+static void ui_select_bar(struct kl_ui *ui);
+static void ui_select_bounds(const struct kl_ui *ui, struct kl_rect *bounds);
+static void ui_select_command(struct kl_ui *ui);
+static int ui_rects_meet(const struct kl_rect *first, const struct kl_rect *second);
 static int ui_inset_center(struct kl_ui *ui, uint64_t now_us);
 static void ui_undo_forget(struct ui_undo *undo);
 static void ui_undo_drop(struct ui_undo_step *step);
@@ -313,6 +356,7 @@ struct kl_ui *
 kl_ui_create(void)
 {
 	struct kl_ui *ui;
+	int error;
 
 	/* The state. */
 	ui = calloc(1, sizeof(*ui));
@@ -340,6 +384,16 @@ kl_ui_create(void)
 		return NULL;
 	}
 
+	/* The fingers' selection's scroll (ws190-p002), which the records of a frame may point at until the input goes. */
+	error = kl_scroll_init(&ui->select.scroll, KL_SCROLL_X);
+	if (error != 0) {
+		kl_ui_destroy(ui);
+		return NULL;
+	}
+
+	/* The scroll is released with the input. */
+	ui->select_made = 1;
+
 	/* Succeeded: no frame yet, so input meets no part. */
 	return ui;
 }
@@ -354,6 +408,11 @@ kl_ui_destroy(
 	/* No state, nothing to free. */
 	if (ui == NULL)
 		return;
+
+	/* The fingers' selection's scroll and a text area's lines. */
+	if (ui->select_made)
+		kl_scroll_release(&ui->select.scroll);
+	free(ui->select.layout);
 
 	/* The text widgets' history, the gestures and the records. */
 	ui_undo_forget(&ui->undo);
@@ -647,6 +706,7 @@ kl_ui_touch_down(
 	double y)
 {
 	const struct ui_record *record;
+	const struct ui_record *handle;
 	int error;
 
 	/* The first finger: the widget under it and the scroll or text view under it. */
@@ -662,12 +722,31 @@ kl_ui_touch_down(
 
 		/* The region (a scroll's press stops a glide or a flight). */
 		ui->touch_has_region = 0;
+		ui->touch_has_below = 0;
 		ui->caught = 0;
 		record = ui_find(ui, x, y, 1);
-		if (record != NULL) {
+		handle = ui_find_handle(ui, x, y);
+		if (record != NULL && handle == NULL) {
 			ui->touch_region = *record;
 			ui->touch_has_region = 1;
 			ui->caught = kl_scroll_press(record->scroll, now_us);
+		}
+
+		/*
+		 * A handle of the fingers' selection under the finger (ws190-p002)
+		 * is the touch's region, its content in the text box; the region
+		 * under it is kept, not pressed, for two fingers, which scroll it.
+		 */
+		if (handle != NULL) {
+			ui->touch_hit.valid = 0;
+			ui->touch_region = *handle;
+			ui->touch_region.rect = handle->view;
+			ui->touch_has_region = 1;
+			(void)kl_scroll_press(handle->scroll, now_us);
+			if (record != NULL) {
+				ui->touch_below = *record;
+				ui->touch_has_below = 1;
+			}
 		}
 
 		/* No drag yet. */
@@ -772,6 +851,9 @@ kl_ui_begin(
 	/* The frame being drawn records its parts from none, and no widget of it takes text yet. */
 	ui->drawing_count = 0;
 	ui->text_drawing = 0;
+
+	/* The fingers' selection's field has not been drawn in it yet (ws190-p002). */
+	ui->select.drawn = 0;
 
 	/* A frame drawn covers the changes of the lit widget so far. */
 	ui->damage_pending = 0;
@@ -880,6 +962,9 @@ kl_ui_end(
 	int lit;
 	int moved;
 
+	/* The fingers' selection's handles and bar over the frame, or its end (ws190-p002). */
+	ui_select_overlay(ui);
+
 	/* The frame drawn is the one on the screen now. */
 	swap = ui->shown;
 	ui->shown = ui->drawing;
@@ -917,6 +1002,10 @@ kl_ui_end(
 		if (ui->keys[index].kind != KEIUI_INPUT_KEY)
 			continue;
 
+		/* The bar's command its field did not take is not the application's key (ws190-p002). */
+		if (ui->keys[index].from_bar)
+			continue;
+
 		/* The first is the application's. */
 		delivered = 1;
 		event = ui_push(ui, KL_EVENT_KEY, ui->pointer_x, ui->pointer_y);
@@ -928,6 +1017,9 @@ kl_ui_end(
 
 	/* The keys waiting; they want another frame. */
 	ui->key_count = kept;
+
+	/* The bar's command, for its field in the next frame (after the keys already waiting). */
+	ui_select_command(ui);
 
 	/* Fingers down, a drag or keys waiting want frames. */
 	moving = 0;
@@ -1061,6 +1153,7 @@ kl_ui_key(
 	ui->keys[ui->key_count].modifiers = modifiers;
 	ui->keys[ui->key_count].target = ui->focus;
 	ui->keys[ui->key_count].taken = 0;
+	ui->keys[ui->key_count].from_bar = 0;
 	ui->key_count++;
 
 	/* Succeeded: the next frame carries it out. */
@@ -1724,6 +1817,7 @@ keiui_ui_take_input(
 
 	/* Nothing taken yet. */
 	input->kind = KEIUI_INPUT_NONE;
+	input->from_bar = 0;
 
 	/* The oldest input not taken, sent while the widget had the focus. */
 	for (slot = 0; slot < ui->key_count; slot++) {
@@ -1749,6 +1843,7 @@ keiui_ui_take_input(
 		memcpy(input->text, press->text, sizeof(input->text));
 		input->before = press->before;
 		input->after = press->after;
+		input->from_bar = press->from_bar;
 
 		/* Succeeded: one input for the widget. */
 		return 1;
@@ -1823,6 +1918,234 @@ keiui_ui_now(
 	return ui->now_us;
 }
 
+/*
+ * Gives a window's input's fingers' selection (ws190-p002), which the
+ * text widgets put themselves in and draw it from.
+ */
+struct keiui_select *
+keiui_ui_select(
+	struct kl_ui *ui)
+{
+	/* Succeeded: the input's own. */
+	return &ui->select;
+}
+
+/*
+ * Tells whether a widget is in the fingers' selection's mode.
+ */
+int
+keiui_ui_select_owned(
+	struct kl_ui *ui,
+	uint32_t id,
+	uint32_t index)
+{
+	/* No mode. */
+	if (!ui->select.active)
+		return 0;
+
+	/* Another widget's. */
+	if (ui->select.id != id || ui->select.index != index)
+		return 0;
+
+	/* Succeeded: the widget's. */
+	return 1;
+}
+
+/*
+ * Puts a widget in the fingers' selection's mode: its id and index, what
+ * it is (KEIUI_SELECT_*), its view's answers (given the selection as their
+ * data) and its address, which only tells it from another widget.
+ */
+void
+keiui_ui_select_begin(
+	struct kl_ui *ui,
+	uint32_t id,
+	uint32_t index,
+	int kind,
+	const struct kl_text_view *view,
+	const void *widget,
+	const struct keiui_bar_calls *bar_calls)
+{
+	struct keiui_select *select;
+
+	/* The owner and its view, a new touch, and the bar's calls. */
+	select = &ui->select;
+	select->active = 1;
+	select->id = id;
+	select->index = index;
+	select->kind = kind;
+	select->widget = widget;
+	select->bar_calls = bar_calls;
+	kl_text_touch_init(&select->touch, view, select);
+
+	/* A field's content scrolls across, a text area's down. */
+	select->scroll.axes = KL_SCROLL_X;
+	if (kind == KEIUI_SELECT_AREA)
+		select->scroll.axes = KL_SCROLL_Y;
+}
+
+/*
+ * Takes the fingers' selection's mode away: its handles and bar go, and a
+ * finger dragging one of its ends lets go (the widget keeps its selection).
+ */
+void
+keiui_ui_select_end(
+	struct kl_ui *ui)
+{
+	struct keiui_select *select;
+
+	/* No mode. */
+	select = &ui->select;
+	if (!select->active)
+		return;
+
+	/* No owner, no handles, no bar. */
+	select->active = 0;
+	select->touch.handles = 0;
+	select->touch.bar = 0;
+	select->touch.selecting = 0;
+	ui->bar_command = 0;
+
+	/* A drag of one of its ends is over. */
+	if (ui->drag == UI_DRAG_SELECT && ui->touch_region.touch == &select->touch)
+		ui->drag = UI_DRAG_NONE;
+}
+
+/*
+ * Notes that the widget in the fingers' selection was drawn in the frame
+ * being drawn: its rectangle, its text box (window coordinates), and the
+ * style it was drawn with, copied with the canvas's clip of the moment.
+ */
+void
+keiui_ui_select_drawn(
+	struct kl_ui *ui,
+	const struct kl_rect *rect,
+	const struct kl_rect *box,
+	const struct kl_style *style)
+{
+	struct keiui_select *select;
+	size_t index;
+
+	/* Where it is and how it is drawn. */
+	select = &ui->select;
+	select->rect = *rect;
+	select->box = *box;
+	select->style = *style;
+	select->clip = style->canvas->clip;
+	select->drawn = 1;
+
+	/* Its record in the frame being drawn, the last of its id and index. */
+	select->order = ui->drawing_count;
+	for (index = ui->drawing_count; index > 0U; index--) {
+		if (ui->drawing[index - 1U].kind != UI_KIND_HIT)
+			continue;
+		if (ui->drawing[index - 1U].id != select->id || ui->drawing[index - 1U].index != select->index)
+			continue;
+		select->order = index - 1U;
+		break;
+	}
+}
+
+/*
+ * Tells whether a double tap of a finger may put a field in the fingers'
+ * selection (the program did not turn it off).
+ */
+int
+keiui_ui_select_enabled(
+	const struct kl_ui *ui)
+{
+	/* Turned off by the program. */
+	if (ui->select_off)
+		return 0;
+
+	/* Succeeded: it may. */
+	return 1;
+}
+
+/*
+ * Ties the window's calls the bar asks of it (kl_ui_window_text): whether
+ * the clipboard has text to paste, and the on-screen keyboard's inset.
+ */
+void
+keiui_ui_set_window_extras(
+	struct kl_ui *ui,
+	int (*can_paste)(const struct kl_window *),
+	void (*keyboard_inset)(const struct kl_window *, int *, int *))
+{
+	/* The calls. */
+	ui->can_paste = can_paste;
+	ui->keyboard_inset = keyboard_inset;
+}
+
+/*
+ * Turns the fingers' selection of the window's fields on (the default) or
+ * off, and gives where its bar may stand (window coordinates; NULL: the
+ * whole canvas the fields are drawn on).  KL_VERSION 74.
+ */
+void
+kl_ui_set_text_bar(
+	struct kl_ui *ui,
+	const struct kl_rect *bounds,
+	int enabled)
+{
+	/* On or off; off ends a selection under way. */
+	ui->select_off = 0;
+	if (!enabled) {
+		ui->select_off = 1;
+		keiui_ui_select_end(ui);
+	}
+
+	/* The bar's bounds, or the canvas. */
+	ui->select_bounded = 0;
+	if (bounds != NULL) {
+		ui->select_bounded = 1;
+		ui->select_bounds = *bounds;
+	}
+}
+
+/*
+ * Gives the part two rectangles share.  Returns 1 with it, 0 when they
+ * share no area (result is then untouched).
+ */
+int
+keiui_rect_intersect(
+	const struct kl_rect *first,
+	const struct kl_rect *second,
+	struct kl_rect *result)
+{
+	int left;
+	int top;
+	int right;
+	int bottom;
+
+	/* The later left and top edges. */
+	left = first->x;
+	if (second->x > left)
+		left = second->x;
+	top = first->y;
+	if (second->y > top)
+		top = second->y;
+
+	/* The earlier right and bottom edges. */
+	right = first->x + first->width;
+	if (second->x + second->width < right)
+		right = second->x + second->width;
+	bottom = first->y + first->height;
+	if (second->y + second->height < bottom)
+		bottom = second->y + second->height;
+
+	/* No area shared. */
+	if (right <= left || bottom <= top)
+		return 0;
+
+	/* Succeeded: the shared part. */
+	result->x = left;
+	result->y = top;
+	result->width = right - left;
+	result->height = bottom - top;
+	return 1;
+}
+
 /* Finds the latest record of the frame shown under a point: any kind, or (regions) only a scroll or a text view. */
 static const struct ui_record *
 ui_find(
@@ -1835,10 +2158,12 @@ ui_find(
 	size_t index;
 	int inside;
 
-	/* From the last drawn (on top) down. */
+	/* From the last drawn (on top) down; a handle is the fingers' alone (ui_find_handle). */
 	for (index = ui->shown_count; index > 0U; index--) {
 		record = &ui->shown[index - 1U];
 		if (regions && record->kind == UI_KIND_HIT)
+			continue;
+		if (record->kind == UI_KIND_HANDLE)
 			continue;
 		inside = ui_inside(&record->rect, x, y);
 		if (inside)
@@ -2099,6 +2424,7 @@ ui_gesture(
 	double x;
 	double y;
 	int twice;
+	int outside;
 
 	/* The region's scroll, if any. */
 	scroll = NULL;
@@ -2115,6 +2441,21 @@ ui_gesture(
 			twice = 1;
 		if (ui->caught)
 			break;
+
+		/* A tap on a handle of the fingers' selection keeps it as it is (ws190-p002). */
+		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE)
+			break;
+
+		/* A tap off the selection's field and its bar ends the fingers' selection (the field keeps it). */
+		if (ui->select.active) {
+			outside = 1;
+			if (ui->touch_hit.valid && ui->touch_hit.id == ui->select.id && ui->touch_hit.index == ui->select.index)
+				outside = 0;
+			if (ui->touch_hit.valid && ui->touch_hit.id == KEIUI_TEXT_BAR_ID)
+				outside = 0;
+			if (outside)
+				keiui_ui_select_end(ui);
+		}
 
 		/* A widget under it is clicked (at the tap, which takes the focus to it); else a text view puts its caret; else the application's. */
 		if (ui->touch_hit.valid) {
@@ -2144,6 +2485,10 @@ ui_gesture(
 		/* The tap is carried out. */
 		break;
 	case KL_GESTURE_LONG_PRESS:
+		/* A long press on a handle of the fingers' selection is nothing (ws190-p002). */
+		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE)
+			break;
+
 		/* A text view asks for its context menu; elsewhere the application hears it, with the region. */
 		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_TEXT && !ui->touch_hit.valid) {
 			kl_text_touch_long_press(ui->touch_region.touch, gesture->x, gesture->y);
@@ -2162,7 +2507,21 @@ ui_gesture(
 		ui->finger_x = gesture->x;
 		ui->finger_y = gesture->y;
 		ui->edge_us = now_us;
-		if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_NO_DRAG) != 0U) {
+		if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE && gesture->fingers == 1U) {
+			/* One finger on a handle of the fingers' selection drags that end (ws190-p002). */
+			ui->drag = UI_DRAG_SELECT;
+			ui_content(ui, gesture->x, gesture->y, &x, &y);
+			keiui_text_touch_hold(ui->touch_region.touch, (int)ui->touch_region.index, x, y);
+		} else if (ui->touch_has_region && ui->touch_region.kind == UI_KIND_HANDLE) {
+			/* More fingers there scroll the region under the handle, if any. */
+			ui->touch_region = ui->touch_below;
+			ui->touch_has_region = ui->touch_has_below;
+			ui->drag = UI_DRAG_NONE;
+			if (ui->touch_has_region) {
+				(void)kl_scroll_press(ui->touch_region.scroll, now_us);
+				ui->drag = UI_DRAG_SCROLL;
+			}
+		} else if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_NO_DRAG) != 0U) {
 			/* A drag that starts on the bar's buttons does nothing (ws190-p002). */
 			ui->drag = UI_DRAG_NONE;
 		} else if (ui->touch_hit.valid && (ui->touch_hit.flags & KEIUI_DRAGGABLE) != 0U) {
@@ -2660,4 +3019,409 @@ ui_word_byte(
 
 	/* Not a word's. */
 	return 0;
+}
+
+/*
+ * Finds the handle of the fingers' selection a finger at a point touches:
+ * within the reach of its knob's centre, under no bar's button.  NULL for
+ * none.
+ */
+static const struct ui_record *
+ui_find_handle(
+	const struct kl_ui *ui,
+	double x,
+	double y)
+{
+	const struct ui_record *record;
+	size_t index;
+	double dx;
+	double dy;
+	double reach;
+	int inside;
+
+	/* From the last drawn (on top) down: a widget over the point (the bar) hides the handles under it. */
+	reach = (double)KL_TEXT_HANDLE_REACH / 2.0;
+	for (index = ui->shown_count; index > 0U; index--) {
+		record = &ui->shown[index - 1U];
+		inside = ui_inside(&record->rect, x, y);
+		if (!inside)
+			continue;
+		if (record->kind == UI_KIND_HIT)
+			return NULL;
+		if (record->kind != UI_KIND_HANDLE)
+			continue;
+
+		/* Within the knob's reach. */
+		dx = x - record->centre_x;
+		dy = y - record->centre_y;
+		if (dx * dx + dy * dy <= reach * reach)
+			return record;
+	}
+
+	/* No handle there. */
+	return NULL;
+}
+
+/*
+ * Ends a frame's fingers' selection (kl_ui_end, before the frame is
+ * shown): the mode ends when its field was not drawn or lost the focus;
+ * otherwise its handles and bar are recorded over everything and drawn,
+ * unless something drawn after the field covers it.
+ */
+static void
+ui_select_overlay(
+	struct kl_ui *ui)
+{
+	struct keiui_select *select;
+	int focused;
+	int covered;
+
+	/* No mode. */
+	select = &ui->select;
+	if (!select->active)
+		return;
+
+	/* A field not drawn in the frame (gone, another page) ends the mode. */
+	if (!select->drawn) {
+		keiui_ui_select_end(ui);
+		return;
+	}
+
+	/* So does a field that lost the focus (a tap or Tab elsewhere, the program's). */
+	focused = 0;
+	if (ui->focus.valid)
+		focused = ui_same(&ui->focus, select->id, select->index);
+	if (!focused) {
+		keiui_ui_select_end(ui);
+		return;
+	}
+
+	/* A dialog or a widget drawn over the field: no handles and no bar this frame. */
+	covered = ui_select_covered(ui);
+	if (covered)
+		return;
+
+	/* The handles, then the bar over them. */
+	ui_select_handles(ui);
+	ui_select_bar(ui);
+}
+
+/* Tells whether a record after the selection's field covers it: a dialog, or a widget over the field. */
+static int
+ui_select_covered(
+	const struct kl_ui *ui)
+{
+	const struct ui_record *record;
+	size_t index;
+	int meet;
+
+	/* Each record after the field's. */
+	for (index = ui->select.order + 1U; index < ui->drawing_count; index++) {
+		record = &ui->drawing[index];
+		if (record->kind != UI_KIND_HIT)
+			continue;
+
+		/* A dialog shuts the field out. */
+		if ((record->flags & KEIUI_MODAL) != 0U)
+			return 1;
+
+		/* A widget over the field. */
+		meet = ui_rects_meet(&record->rect, &ui->select.rect);
+		if (meet)
+			return 1;
+	}
+
+	/* Nothing covers it. */
+	return 0;
+}
+
+/*
+ * Records and draws the handles of the selection's ends: each knob's
+ * reach, within the field's clip and its text box widened by a knob, for
+ * a finger to drag that end.
+ */
+static void
+ui_select_handles(
+	struct kl_ui *ui)
+{
+	struct keiui_select *select;
+	struct ui_record *record;
+	struct kl_rect place;
+	struct kl_rect grown;
+	struct kl_rect visible;
+	struct kl_rect reach;
+	struct kl_rect kept;
+	size_t ends[2];
+	double origin_x;
+	double origin_y;
+	int sides[2];
+	int index;
+	int meet;
+
+	/* Handles only for a selection, not a caret. */
+	select = &ui->select;
+	if (!select->touch.handles || select->touch.anchor == select->touch.caret)
+		return;
+
+	/* Where the handles may show: the field's clip and its box widened by a knob to the sides and below. */
+	grown.x = select->box.x - KL_TEXT_HANDLE;
+	grown.y = select->box.y;
+	grown.width = select->box.width + 2 * KL_TEXT_HANDLE;
+	grown.height = select->box.height + KL_TEXT_HANDLE;
+	meet = keiui_rect_intersect(&grown, &select->clip, &visible);
+	if (!meet)
+		return;
+
+	/* Each end's knob, recorded with its reach. */
+	origin_x = (double)select->box.x - select->scroll.x;
+	origin_y = (double)select->box.y - select->scroll.y;
+	ends[0] = select->touch.anchor;
+	ends[1] = select->touch.caret;
+	sides[0] = KL_TEXT_HANDLE_ANCHOR;
+	sides[1] = KL_TEXT_HANDLE_CARET;
+	for (index = 0; index < 2; index++) {
+		select->touch.view->caret_rect(select->touch.data, ends[index], &place);
+
+		/* The reach around the knob's centre, within where the handles show. */
+		reach.x = (int)(origin_x + (double)place.x) - KL_TEXT_HANDLE_REACH / 2;
+		reach.y = (int)(origin_y + (double)(place.y + place.height)) + KL_TEXT_HANDLE / 2 - KL_TEXT_HANDLE_REACH / 2;
+		reach.width = KL_TEXT_HANDLE_REACH;
+		reach.height = KL_TEXT_HANDLE_REACH;
+		meet = keiui_rect_intersect(&reach, &visible, &kept);
+		if (!meet)
+			continue;
+
+		/* The record, with the text box and the knob's centre. */
+		ui_record(ui, UI_KIND_HANDLE, KEIUI_TEXT_HANDLE_ID, (uint32_t)sides[index], 0U, &kept, &select->scroll, &select->touch);
+		if (ui->drawing_count == 0U)
+			continue;
+		record = &ui->drawing[ui->drawing_count - 1U];
+		if (record->kind != UI_KIND_HANDLE)
+			continue;
+		record->view = select->box;
+		record->centre_x = origin_x + (double)place.x;
+		record->centre_y = origin_y + (double)(place.y + place.height) + (double)KL_TEXT_HANDLE / 2.0;
+	}
+
+	/* The knobs, drawn where the handles may show. */
+	kl_canvas_clip_push(select->style.canvas, &visible);
+	kl_text_touch_draw_handles(&select->touch, select->style.canvas, origin_x, origin_y, select->style.theme);
+	kl_canvas_clip_pop(select->style.canvas);
+}
+
+/*
+ * Records and draws the bar of the selection, while its touch shows it
+ * and no finger drags the selection or the page; the button pressed since
+ * the last frame waits for kl_ui_end to send it to the field.
+ */
+static void
+ui_select_bar(
+	struct kl_ui *ui)
+{
+	struct keiui_select *select;
+	struct kl_text_bar bar;
+	struct kl_rect first;
+	struct kl_rect second;
+	struct kl_rect selection;
+	struct kl_rect visible;
+	struct kl_rect bounds;
+	unsigned facts;
+	unsigned buttons;
+	unsigned pressed;
+	unsigned held;
+	size_t length;
+	size_t start;
+	size_t end;
+	double origin_x;
+	double origin_y;
+	int bottom;
+	int shown;
+	int secret;
+	int can_paste;
+
+	/* Only while the touch shows the bar and nothing is dragged, with the bar's calls. */
+	select = &ui->select;
+	if (!select->touch.bar || select->touch.selecting || select->bar_calls == NULL)
+		return;
+	if (ui->drag == UI_DRAG_SCROLL || ui->drag == UI_DRAG_SELECT)
+		return;
+
+	/* The text's length and whether it is a secret field's. */
+	length = select->area.length;
+	secret = 0;
+	if (select->kind == KEIUI_SELECT_FIELD) {
+		length = select->field.length;
+		secret = select->field.secret;
+	}
+
+	/* The selection's ends in order. */
+	start = select->touch.anchor;
+	end = select->touch.caret;
+	if (start > end) {
+		start = select->touch.caret;
+		end = select->touch.anchor;
+	}
+
+	/* What the text is, for the buttons. */
+	facts = 0U;
+	if (start != end)
+		facts |= KL_TEXT_BAR_SELECTED;
+	if (start == 0U && end == length && length != 0U)
+		facts |= KL_TEXT_BAR_WHOLE;
+	if (length == 0U)
+		facts |= KL_TEXT_BAR_EMPTY;
+	if (secret)
+		facts |= KL_TEXT_BAR_SECRET;
+	if (ui->window != NULL && ui->copy != NULL && ui->paste != NULL)
+		facts |= KL_TEXT_BAR_CLIPBOARD;
+	can_paste = 0;
+	if (ui->window != NULL && ui->can_paste != NULL)
+		can_paste = ui->can_paste(ui->window);
+	if (can_paste)
+		facts |= KL_TEXT_BAR_CAN_PASTE;
+	buttons = select->bar_calls->buttons(facts);
+
+	/* The selection in the window: one line's ends, or the lines across the text box. */
+	origin_x = (double)select->box.x - select->scroll.x;
+	origin_y = (double)select->box.y - select->scroll.y;
+	select->touch.view->caret_rect(select->touch.data, start, &first);
+	select->touch.view->caret_rect(select->touch.data, end, &second);
+	selection.x = (int)(origin_x + (double)first.x);
+	selection.y = (int)(origin_y + (double)first.y);
+	selection.width = second.x - first.x;
+	selection.height = first.height;
+	if (second.y != first.y) {
+		bottom = second.y + second.height;
+		selection.x = select->box.x;
+		selection.width = select->box.width;
+		selection.height = bottom - first.y;
+	}
+
+	/* The part of the field that shows its text: its box within the clip it was drawn in. */
+	shown = keiui_rect_intersect(&select->clip, &select->box, &visible);
+	if (!shown)
+		return;
+
+	/* Laid out within the bounds, by the part of the selection the field shows. */
+	ui_select_bounds(ui, &bounds);
+	shown = select->bar_calls->layout(&bar, select->style.text, buttons, &selection, &visible, &bounds);
+	if (!shown)
+		return;
+
+	/* Recorded over everything, drawn, and the button pressed kept for the field. */
+	pressed = select->bar_calls->hit(ui, KEIUI_TEXT_BAR_ID, &bar, &held);
+	select->bar_calls->draw(&bar, &select->style, held);
+	if (pressed != 0U)
+		ui->bar_command = pressed;
+}
+
+/*
+ * Gives where the bar may stand: the canvas the field is drawn on, or the
+ * program's bounds within it, less what the on-screen keyboard covers at
+ * the right and the bottom.
+ */
+static void
+ui_select_bounds(
+	const struct kl_ui *ui,
+	struct kl_rect *bounds)
+{
+	const struct kl_canvas *canvas;
+	struct kl_rect whole;
+	int right;
+	int bottom;
+	int meet;
+
+	/* The canvas, or the program's bounds within it. */
+	canvas = ui->select.style.canvas;
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = canvas->width;
+	whole.height = canvas->height;
+	*bounds = whole;
+	if (ui->select_bounded) {
+		meet = keiui_rect_intersect(&whole, &ui->select_bounds, bounds);
+		if (!meet)
+			memset(bounds, 0, sizeof(*bounds));
+	}
+
+	/* The keyboard's inset: the window's own, else the last one heard for a window of the canvas's size. */
+	right = 0;
+	bottom = 0;
+	if (ui->window != NULL && ui->keyboard_inset != NULL) {
+		ui->keyboard_inset(ui->window, &right, &bottom);
+	} else if (ui_inset.reason != KL_KEYBOARD_INSET_NONE && (int)ui_inset.width == canvas->width && (int)ui_inset.height == canvas->height) {
+		right = ui_inset.right;
+		bottom = ui_inset.bottom;
+	}
+
+	/* The covered widths taken off the canvas's right and bottom. */
+	if (right > 0 && bounds->x + bounds->width > canvas->width - right)
+		bounds->width = canvas->width - right - bounds->x;
+	if (bottom > 0 && bounds->y + bounds->height > canvas->height - bottom)
+		bounds->height = canvas->height - bottom - bounds->y;
+	if (bounds->width < 0)
+		bounds->width = 0;
+	if (bounds->height < 0)
+		bounds->height = 0;
+}
+
+/*
+ * Sends the bar's button pressed to the selection's field as the key it
+ * stands for (Ctrl+X, Ctrl+C, Ctrl+V, Ctrl+A), after the keys waiting, so
+ * that the field's own editing carries it out in the next frame; a full
+ * queue drops it.
+ */
+static void
+ui_select_command(
+	struct kl_ui *ui)
+{
+	struct ui_press *press;
+	uint32_t code;
+
+	/* No command. */
+	if (ui->bar_command == 0U)
+		return;
+
+	/* The key of the command. */
+	code = UI_KEY_A;
+	if (ui->bar_command == KL_TEXT_BAR_CUT)
+		code = UI_KEY_X;
+	else if (ui->bar_command == KL_TEXT_BAR_COPY)
+		code = UI_KEY_C;
+	else if (ui->bar_command == KL_TEXT_BAR_PASTE)
+		code = UI_KEY_V;
+	ui->bar_command = 0;
+
+	/* No room, or no field to take it. */
+	if (ui->key_count == UI_KEYS || !ui->select.active)
+		return;
+
+	/* The key with Control, for the field, marked as the bar's. */
+	press = &ui->keys[ui->key_count];
+	memset(press, 0, sizeof(*press));
+	press->kind = KEIUI_INPUT_KEY;
+	press->code = code;
+	press->modifiers = KL_MOD_CTRL;
+	press->target.valid = 1;
+	press->target.id = ui->select.id;
+	press->target.index = ui->select.index;
+	press->target.flags = KEIUI_FOCUSABLE;
+	press->from_bar = 1;
+	ui->key_count++;
+}
+
+/* Tells whether two rectangles share any part. */
+static int
+ui_rects_meet(
+	const struct kl_rect *first,
+	const struct kl_rect *second)
+{
+	struct kl_rect shared;
+	int meet;
+
+	/* Their shared part. */
+	meet = keiui_rect_intersect(first, second, &shared);
+
+	/* Reports whether there is one. */
+	return meet;
 }

@@ -320,6 +320,7 @@
 		kl_ui_hit;
 		kl_ui_scroll_region;
 		kl_ui_text_region;
+		kl_ui_set_text_bar;
 		kl_ui_end;
 		kl_ui_take;
 		kl_ui_drag_offset;

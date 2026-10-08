@@ -458,6 +458,11 @@ kl_ui_window_input(
 	case KL_WINDOW_TEXT_DELETE:
 		(void)kl_ui_text(ui, event);
 		break;
+	case KL_WINDOW_FOCUS:
+		/* The keyboard leaving the window ends the fingers' selection (ws190-p002); the focus is the program's. */
+		if (!event->pressed)
+			keiui_ui_select_end(ui);
+		return 0;
 	default:
 		/* Not the widgets' input. */
 		return 0;
@@ -481,8 +486,9 @@ kl_ui_window_text(
 	struct kl_rect caret;
 	int wanted;
 
-	/* The window, for the clipboard. */
+	/* The window, for the clipboard, and for the bar of the fingers' selection (ws190-p002). */
 	keiui_ui_set_window(ui, window, kl_window_copy, kl_window_paste);
+	keiui_ui_set_window_extras(ui, kl_window_can_paste, kl_window_keyboard_inset);
 
 	/* On while a field has the keyboard, off otherwise. */
 	wanted = kl_ui_text_wanted(ui, &caret);

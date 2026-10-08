@@ -51,6 +51,17 @@ static const char *const bar_labels[KL_TEXT_BAR_BUTTONS] = {
 	"Select All"
 };
 
+/*
+ * The bar's calls, which a field gives kl_ui when it begins the fingers'
+ * selection (internal.h).  Constant for the library's life.
+ */
+const struct keiui_bar_calls keiui_text_bar_calls = {
+	kl_text_bar_buttons,
+	kl_text_bar_layout,
+	kl_text_bar_hit,
+	kl_text_bar_draw
+};
+
 static int bar_intersect(const struct kl_rect *first, const struct kl_rect *second, struct kl_rect *result);
 static int bar_top(const struct kl_rect *selection, const struct kl_rect *bounds);
 static int bar_left(const struct kl_rect *selection, const struct kl_rect *bounds, int width);

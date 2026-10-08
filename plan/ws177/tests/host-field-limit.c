@@ -349,6 +349,180 @@ keiui_edit_word(
 }
 
 /*
+ * The fingers' selection (ws190-p002) is ws190's host test's: here no
+ * finger selects, so the field is never in it.  test_select is the
+ * selection the stand-in gives.
+ */
+static struct keiui_select test_select;
+
+const struct keiui_bar_calls keiui_text_bar_calls;
+
+struct keiui_select *
+keiui_ui_select(
+	struct kl_ui *ui)
+{
+	(void)ui;
+	return &test_select;
+}
+
+int
+keiui_ui_select_owned(
+	struct kl_ui *ui,
+	uint32_t id,
+	uint32_t index)
+{
+	(void)ui;
+	(void)id;
+	(void)index;
+	return 0;
+}
+
+int
+keiui_ui_select_enabled(
+	const struct kl_ui *ui)
+{
+	(void)ui;
+	return 0;
+}
+
+void
+keiui_ui_select_begin(
+	struct kl_ui *ui,
+	uint32_t id,
+	uint32_t index,
+	int kind,
+	const struct kl_text_view *view,
+	const void *widget,
+	const struct keiui_bar_calls *bar_calls)
+{
+	(void)ui;
+	(void)id;
+	(void)index;
+	(void)kind;
+	(void)view;
+	(void)widget;
+	(void)bar_calls;
+}
+
+void
+keiui_ui_select_end(
+	struct kl_ui *ui)
+{
+	(void)ui;
+}
+
+void
+keiui_ui_select_drawn(
+	struct kl_ui *ui,
+	const struct kl_rect *rect,
+	const struct kl_rect *box,
+	const struct kl_style *style)
+{
+	(void)ui;
+	(void)rect;
+	(void)box;
+	(void)style;
+}
+
+uint64_t
+keiui_ui_now(
+	const struct kl_ui *ui)
+{
+	(void)ui;
+	return 0;
+}
+
+void
+keiui_select_word(
+	const char *text,
+	size_t length,
+	size_t position,
+	size_t *start,
+	size_t *end)
+{
+	(void)text;
+	(void)length;
+	*start = position;
+	*end = position;
+}
+
+void
+kl_text_touch_tap(
+	struct kl_text_touch *touch,
+	double x,
+	double y,
+	int twice)
+{
+	(void)touch;
+	(void)x;
+	(void)y;
+	(void)twice;
+}
+
+unsigned
+kl_text_touch_take(
+	struct kl_text_touch *touch)
+{
+	(void)touch;
+	return 0;
+}
+
+void
+kl_text_touch_toggle_bar(
+	struct kl_text_touch *touch)
+{
+	(void)touch;
+}
+
+void
+kl_text_touch_hide_bar(
+	struct kl_text_touch *touch)
+{
+	(void)touch;
+}
+
+void
+kl_text_touch_select(
+	struct kl_text_touch *touch,
+	size_t anchor,
+	size_t caret)
+{
+	(void)touch;
+	(void)anchor;
+	(void)caret;
+}
+
+void
+kl_scroll_set_size(
+	struct kl_scroll *scroll,
+	double content_width,
+	double content_height,
+	double viewport_width,
+	double viewport_height)
+{
+	(void)scroll;
+	(void)content_width;
+	(void)content_height;
+	(void)viewport_width;
+	(void)viewport_height;
+}
+
+void
+kl_scroll_move_to(
+	struct kl_scroll *scroll,
+	double x,
+	double y,
+	int glide,
+	uint64_t now_us)
+{
+	(void)scroll;
+	(void)x;
+	(void)y;
+	(void)glide;
+	(void)now_us;
+}
+
+/*
  * Runs the steps.
  */
 int

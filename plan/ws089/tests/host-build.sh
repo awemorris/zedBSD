@@ -44,7 +44,7 @@ done
 # libkeiland's widgets' input and text field (Settings' fields are kl_field since ws090-p007), and the light appearance
 # its theme asks for (no compositor on the host).
 for file in userland/desktop/libkeiland/ui/ui.c userland/desktop/libkeiland/ui/field.c userland/desktop/libkeiland/ui/input.c \
-    userland/desktop/libkeiland/ui/theme.c userland/desktop/libkeiland/ui/scroll.c userland/desktop/libkeiland/ui/text-touch.c \
+    userland/desktop/libkeiland/ui/theme.c userland/desktop/libkeiland/ui/scroll.c userland/desktop/libkeiland/ui/text-touch.c userland/desktop/libkeiland/ui/text-bar.c userland/desktop/libkeiland/ui/text-select.c \
     userland/desktop/libkeiland/ui/scroll-bar.c userland/desktop/libkeiland/gesture.c userland/desktop/libkeiland/motion.c \
     userland/desktop/libkeiland/ui/widgets.c userland/desktop/libkeiland/ui/cards.c \
     plan/tools/files/host-appearance.c; do

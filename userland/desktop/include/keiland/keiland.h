@@ -3296,6 +3296,21 @@ void kl_ui_begin(struct kl_ui *ui, uint64_t now_us);
 unsigned kl_ui_hit(struct kl_ui *ui, uint32_t id, uint32_t index, const struct kl_rect *rect);
 void kl_ui_scroll_region(struct kl_ui *ui, uint32_t id, const struct kl_rect *rect, struct kl_scroll *scroll);
 void kl_ui_text_region(struct kl_ui *ui, uint32_t id, const struct kl_rect *rect, struct kl_scroll *scroll, struct kl_text_touch *touch);
+
+/*
+ * KL_VERSION 74 (ws190-p002): the fingers' selection of the fields and the
+ * text areas.  A finger's double tap on a focused field's text selects the
+ * word there with a handle at each end and the bar of editing buttons
+ * (kl_text_bar_*); a finger on a handle drags that end, and the bar's
+ * buttons cut, copy, paste and select all through the window's clipboard
+ * (kl_ui_window_text ties it).  kl_ui_end draws the handles and the bar on
+ * the canvas the field was drawn on, within the clip in force then, over
+ * everything drawn before it, so a program calls it while that canvas is
+ * still the frame's.  kl_ui_set_text_bar turns the selection off (enabled
+ * 0: a double tap selects the whole text as a click's does) or gives where
+ * the bar may stand (bounds in window coordinates; NULL: the whole canvas).
+ */
+void kl_ui_set_text_bar(struct kl_ui *ui, const struct kl_rect *bounds, int enabled);
 int kl_ui_end(struct kl_ui *ui, uint64_t now_us);
 int kl_ui_take(struct kl_ui *ui, struct kl_event *event);
 int kl_ui_drag_offset(struct kl_ui *ui, uint64_t now_us, double *dx, double *dy);
