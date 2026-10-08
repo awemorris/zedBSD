@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws165 -->
 # WS165: 手書きの入力
 
-Status: incomplete（2026-10-05 追加、**ベータ2**（2026-10-05 ユーザー）、見積もり 4 LW。p001 の設計の第 1 版あり）
+Status: incomplete（2026-10-08 q910 P2 の照合: p002・p003・p005 cleared（p005 の表を直した）、p001（設計）は Q1 の判定、p004（実機の UAT と規約）は UAT と規約（ベータ3））（2026-10-05 追加、**ベータ2**（2026-10-05 ユーザー）、見積もり 4 LW。p001 の設計の第 1 版あり）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -21,4 +21,4 @@ Primary Milestone: MG006
 | [ws165-p002](phase002/phase.md) | 手本の data と点群の照合、host 試験 | cleared（2026-10-06 ユーザー H5「いったんacceptして、追加のフェーズを第2段でやりましょう。」: top-1 88%（形が同じ組を 1 字に数えて 91.7%）、top-4 98.3% で受け入れ） | p001、H1〜H3 |
 | [ws165-p003](phase003/phase.md) | compositor の `kwl_hand_recognize`、ink の記録、T1 | cleared（2026-10-07、T1-280） | p002 |
 | ws165-p004 | 実機の UAT、全文規約 | planned | p003 |
-| [ws165-p005](phase005/phase.md) | 第 2 段: 区別できない字の組を分けて認識率を上げる（2026-10-06 Q1 が作成、ユーザー H5） | in-progress（2026-10-07 P2: 書く面の大きさと位置で、そのままの top-1 90.6〜91.7%・top-4 98.4〜98.6%（host）。T1 待ち） | p003 |
+| [ws165-p005](phase005/phase.md) | 第 2 段: 区別できない字の組を分けて認識率を上げる（2026-10-06 Q1 が作成、ユーザー H5） | cleared（2026-10-07 Q1 の判定: T1-318 (c) で osk-guest: PASS（templates count=228、認識、第 1 候補「-」が key で ime-probe に届く）。host の top-1 90.6%）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（2026-10-07 P2: 書く面の大きさと位置で、そのままの top-1 90.6〜91.7%・top-4 98.4〜98.6%（h…） | p003 |

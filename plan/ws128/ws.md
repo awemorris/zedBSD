@@ -3,7 +3,7 @@
 # WS128: 標準アプリ全般のベータ1 のブラッシュアップ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p006・p009〜p011 cleared。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD は 10/13 以降）、p012（montage-4 の icon）は UAT の image で確認、p007 は実機の UAT）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)

@@ -3,7 +3,7 @@
 # WS142: デスクトップのアプリの切り替え（上部のバーのアプリの一覧とプレビュー、Alt+Tab・3 本指のタップの切り替え、Windows キー、タッチパッドのジェスチャー）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-05 Q1: p001〜p006 cleared（QEMU）。WS の受け入れは 5330 での触った感じと閾値の UAT の後）
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p010 は全部 cleared（2026-10-08）。WS の受け入れは 5330 の触った感じと閾値の UAT）（2026-10-05 Q1: p001〜p006 cleared（QEMU）。WS の受け入れは 5330 での触った感じと閾値の UAT の後）
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)

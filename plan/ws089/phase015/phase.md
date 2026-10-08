@@ -2,7 +2,7 @@
 
 # ws089-p015: 日本語の UI
 
-Status: planning（ユーザーの判断: 日本語の UI をベータ1 に入れるか）
+Status: canceled（2026-10-08 q910 P2 の照合: ws.md の表の 2026-10-05 夜の決定（WS158 の翻訳に吸収）に合わせた。WS158 はベータ3）（旧: planning（ユーザーの判断: 日本語の UI をベータ1 に入れるか））
 Disposition: canceled（2026-10-05 夜 ユーザーの決定 WS158 ⑤: [WS158](../../ws158/ws.md) に吸収。日本語の UI は WS158 の口と catalog で作る）
 Parent: [WS089](../ws.md)
 Queue: なし

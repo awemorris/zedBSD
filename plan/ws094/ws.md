@@ -3,7 +3,7 @@
 # WS094: desktop の file の icon
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p007（規約と回帰、規約はベータ3）・p009（L3 の数値、uncleared、Q1 の判断）・p012（5330 の実機）が残り。実装の残りは無い）
 Primary Milestone: MG006
 Related Milestones: MG006
 Objectives: O2

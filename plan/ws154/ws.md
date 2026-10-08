@@ -3,7 +3,7 @@
 # WS154: Settings の Languages の頁で IME を選ぶ（日本語・SKK・なし=英語）と、SKK の IME の新しい実装
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p004 は cleared（表を直した）。残りは 5330 の UAT（SKK の操作感）と範囲の判断（`>`・`/`・`#`・Tab・注釈）、規約（ベータ3））
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
@@ -40,10 +40,10 @@ Settings に Languages の頁を足して、使う IME を「日本語」「SKK�
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [ws154-p001](phase001/phase.md) | 設計（IME の切り替えの仕組み、Languages の頁、SKK の状態機械と操作の範囲、辞書の共有と path、試験の方法） | in-progress（設計済み、Q1 の確認待ち） | WS095 の今の構成 |
-| [ws154-p002](phase002/phase.md) | IME の選択の仕組みと Languages の頁（日本語・なし） | in-progress（実装済み、T1 待ち） | p001 |
-| [ws154-p003](phase003/phase.md) | SKK の IME の実装（host の試験で状態機械と変換） | in-progress（実装・host の試験済み） | p001 |
-| [ws154-p004](phase004/phase.md) | SKK を選択に加え、QEMU（T1）と実機の UAT、全文の規約 | in-progress（実装済み、T1 待ち） | p002、p003 |
+| [ws154-p001](phase001/phase.md) | 設計（IME の切り替えの仕組み、Languages の頁、SKK の状態機械と操作の範囲、辞書の共有と path、試験の方法） | cleared（2026-10-05 Q1: 設計は Q1 が確認（1・2 は技術の裁量で承認、3 の範囲はユーザーの判断待ちで Future の候補）。cleared）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（設計済み、Q1 の確認待ち）） | WS095 の今の構成 |
+| [ws154-p002](phase002/phase.md) | IME の選択の仕組みと Languages の頁（日本語・なし） | cleared（2026-10-05 Q1: T1-173b で languages-p002 PASS（ja・none・SKK の変換と確定・頁の switch）。cleared）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装済み、T1 待ち）） | p001 |
+| [ws154-p003](phase003/phase.md) | SKK の IME の実装（host の試験で状態機械と変換） | cleared（2026-10-05 Q1: host の試験に加え、T1-173b・T1-174b の QEMU で engine が動く（変換・確定・mode）。cleared）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装・host の試験済み）） | p001 |
+| [ws154-p004](phase004/phase.md) | SKK を選択に加え、QEMU（T1）と実機の UAT、全文の規約 | cleared（2026-10-05 Q1: T1-174b で languages-p004 PASS（skk-katakana・app ごとの記憶・skk-latin）。実機の操作感は UAT、全文規約は WS の最後の Phase。cleared）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: in-progress（実装済み、T1 待ち）） | p002、p003 |
 
 - 2026-10-05 Q1: p001〜p004 を cleared（T1-173b・T1-174b PASS、T1-173・174 の FAIL は試験の期待の誤りだった）。残り: 5330 の UAT の操作感、範囲の判断（`>`・`/`・`#`・Tab・注釈）、全文規約の見直し。
 - 2026-10-06 P2: `tools/release/license-components.json` に `ime-dict-skk`（Zlib、project の license の下）を登録した（license-inventory の「unlisted external package: ime-dict-skk」の解消、Q1 の依頼）。

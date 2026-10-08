@@ -3,7 +3,7 @@
 # WS031: i915ネイティブVulkan実行器
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: 空き時間だけの WS（master の Focus）。p015〜p048 は planning、p024 は合間の仕事で中断中）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O1, O2

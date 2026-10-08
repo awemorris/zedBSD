@@ -3,7 +3,7 @@
 # WS049: kernel 内の ACPI AML interpreter
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p007・p008・p016 は実機（電源ボタン・蓋・AC・EC）待ち、p017 は T1-093 PASS で Q1 の判定と ⑤ のユーザーの判断待ち。T1-086 は T1-090 で置き換わった（未実施のまま））
 Primary Milestone: MG003
 Related Milestones: MG006, MG008
 Objectives: O2, O4

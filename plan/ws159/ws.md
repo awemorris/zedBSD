@@ -3,7 +3,7 @@
 # WS159: native のタッチパッド（Intel LPSS の I2C・ACPI の I2C-HID・HID の touchpad）と compositor のタッチパッドの層
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: incomplete（2026-10-08 q910 P2 の照合: p003・p004 cleared、p001（設計）は Q1 の判定、p002・p006 は実装・host・T1-113 の boot まで（実機の I2C・GPIO の割り込みは WS183 と一緒に 5330）、p005 は実機の UAT。旧: planning）
 Primary Milestone: MG006
 Related Milestones: MG003
 Parent: [Master](../master.md)

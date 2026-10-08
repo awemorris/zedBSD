@@ -17,6 +17,8 @@
  * same sockets of the second family: every ICMPv6 message is copied to
  * them without its IPv6 header (RFC 3542 section 3), and they send
  * messages whose checksum, over the IPv6 pseudo-header, is filled in.
+ * One that asks with IPV6_RECVHOPLIMIT (ws177-p044) gets the hop limit
+ * each message came with through recvmsg.
  */
 
 #include "kern/net/inet-socket.h"
@@ -35,9 +37,15 @@
 #define ICMP_ECHO_REPLY   0U
 #define ICMP_ECHO_REQUEST 8U
 
+/*
+ * A raw ICMP or ICMPv6 socket: its inet part, the next in the registry,
+ * and whether it asked for the hop limit of each message (IPV6_RECVHOPLIMIT;
+ * written by its setsockopt, read as messages are copied to it).
+ */
 struct icmp_endpoint {
 	struct inet_socket inet;
 	struct icmp_endpoint *next;
+	int receive_hop_limit;
 };
 
 static struct icmp_endpoint *icmp_sockets;
@@ -48,6 +56,8 @@ static int icmp_bind(struct socket *socket, const struct sockaddr *address, sock
 static int icmp_connect(struct socket *socket, const struct sockaddr *address, socklen_t length, unsigned io_flags);
 static ssize_t icmp_sendto(struct socket *socket, const void *buffer, size_t length, int flags, const struct sockaddr *address, socklen_t address_length);
 static ssize_t icmp_recvfrom(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length);
+static ssize_t icmp_recvfrom_hop(struct socket *socket, void *buffer, size_t length, int flags, struct sockaddr *address, socklen_t *address_length, int *hop_limit);
+static int icmp_setsockopt(struct socket *socket, int level, int option, const void *value, socklen_t length);
 static int icmp_getsockname(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static int icmp_getpeername(struct socket *socket, struct sockaddr *address, socklen_t *length);
 static void icmp_close(struct socket *socket);
@@ -62,6 +72,8 @@ static const struct socket_ops icmp_ops = {
 	.connect = icmp_connect,
 	.sendto = icmp_sendto,
 	.recvfrom = icmp_recvfrom,
+	.recvfrom_hop = icmp_recvfrom_hop,
+	.setsockopt = icmp_setsockopt,
 	.getsockname = icmp_getsockname,
 	.getpeername = icmp_getpeername,
 	.ioctl = inet_socket_ioctl,
@@ -128,6 +140,7 @@ icmp6_raw_deliver(
 {
 	struct icmp_endpoint *endpoint;
 	struct icmp_endpoint *snapshot[SOCKET_BROADCAST_MAX];
+	const struct ipv6_wire *header;
 	struct packet_buf *copy;
 	unsigned count;
 	unsigned index;
@@ -180,6 +193,13 @@ icmp6_raw_deliver(
 		if (copy == NULL) {
 			socket_release(&endpoint->inet.socket);
 			continue;
+		}
+
+		/* The hop limit it came with, for a socket that asked (ws177-p044). */
+		if (endpoint->receive_hop_limit && packet->l3_offset != PACKET_OFFSET_NONE) {
+			header = (const struct ipv6_wire *)(packet->storage + packet->l3_offset);
+			copy->hop_limit = header->hop_limit;
+			copy->hop_limit_known = 1;
 		}
 
 		/* Names the sender, and queues the copy. */
@@ -361,12 +381,37 @@ icmp_recvfrom(
 	struct sockaddr *address,
 	socklen_t *address_length)
 {
+	ssize_t result;
+	int hop_limit;
+
+	/* The message, its hop limit not asked for. */
+	result = icmp_recvfrom_hop(socket, buffer, length, flags, address, address_length, &hop_limit);
+	return result;
+}
+
+/*
+ * Takes the next queued message: as much of it as fits, its sender, and
+ * the hop limit it came with when the socket asked for it (-1 otherwise).
+ */
+static ssize_t
+icmp_recvfrom_hop(
+	struct socket *socket,
+	void *buffer,
+	size_t length,
+	int flags,
+	struct sockaddr *address,
+	socklen_t *address_length,
+	int *hop_limit)
+{
 	struct packet_buf *packet;
 	size_t copied;
 	socklen_t actual;
 	socklen_t output;
 	ssize_t result;
 	int error;
+
+	/* No hop limit unless the message kept one. */
+	*hop_limit = -1;
 
 	/* Rejects unsupported flags. */
 	if ((flags & ~(MSG_DONTWAIT | MSG_TRUNC)) != 0)
@@ -395,6 +440,10 @@ icmp_recvfrom(
 		*address_length = actual;
 	}
 
+	/* The hop limit it came with (ws177-p044). */
+	if (packet->hop_limit_known)
+		*hop_limit = (int)packet->hop_limit;
+
 	/* With MSG_TRUNC the full packet length is reported instead. */
 	if ((flags & MSG_TRUNC) != 0)
 		result = (ssize_t)packet->length;
@@ -404,6 +453,45 @@ icmp_recvfrom(
 
 	/* Reports the received length. */
 	return result;
+}
+
+/*
+ * Sets an option: IPV6_RECVHOPLIMIT of an ICMPv6 socket (ws177-p044), or
+ * the ones every inet socket takes (IPV6_V6ONLY, SO_BINDTODEVICE).
+ */
+static int
+icmp_setsockopt(
+	struct socket *socket,
+	int level,
+	int option,
+	const void *value,
+	socklen_t length)
+{
+	struct icmp_endpoint *endpoint;
+	int enabled;
+	int error;
+
+	/* The hop limit of each message, asked for or not. */
+	endpoint = icmp_endpoint(socket);
+	if (level == IPPROTO_IPV6 && option == IPV6_RECVHOPLIMIT) {
+		if (endpoint->inet.family != AF_INET6)
+			return ENOPROTOOPT;
+		if (value == NULL || length != sizeof(enabled))
+			return EINVAL;
+		kern_memcpy(&enabled, value, sizeof(enabled));
+		endpoint->receive_hop_limit = enabled != 0;
+		return 0;
+	}
+
+	/* The inet socket's options; one it does not know is no option of this socket's (as before it had any). */
+	error = inet_socket_setsockopt(&endpoint->inet, level, option, value, length);
+	if (error == EOPNOTSUPP)
+		return ENOPROTOOPT;
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /* Reports the socket's local address. */

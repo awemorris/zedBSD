@@ -413,7 +413,10 @@ recvmsg(
 	unsigned descriptor_capacity;
 	unsigned char *buffer;
 	size_t total, offset, i, copied;
+	size_t control_room;
+	size_t needed;
 	ssize_t result;
+	int hop_limit;
 
 	descriptor_capacity = 0;
 	total = 0;
@@ -427,6 +430,11 @@ recvmsg(
 		/* Reports operation failure. */
 		return -1;
 	}
+
+	/* The room the caller gave for control messages. */
+	control_room = 0;
+	if (message->msg_control != NULL)
+		control_room = message->msg_controllen;
 
 	/* Handles a failed CMSG SPACE operation. */
 	if (message->msg_control != NULL &&
@@ -501,6 +509,27 @@ recvmsg(
 			message->msg_controllen = CMSG_SPACE(bytes);
 		} else {
 			message->msg_controllen = 0;
+		}
+
+		/*
+		 * The hop limit the datagram came with (IPV6_RECVHOPLIMIT,
+		 * ws177-p044) as an IPV6_HOPLIMIT message, where there is room
+		 * (none: MSG_CTRUNC).
+		 */
+		if ((request.output_flags & RECVMSG_HOP_LIMIT) != 0U) {
+			message->msg_flags = (int)(request.output_flags & ~RECVMSG_HOP_LIMIT);
+			needed = CMSG_SPACE(sizeof(int));
+			if (request.descriptor_count == 0U && control_room >= needed) {
+				control = message->msg_control;
+				hop_limit = (int)request.hop_limit;
+				control->cmsg_level = IPPROTO_IPV6;
+				control->cmsg_type = IPV6_HOPLIMIT;
+				control->cmsg_len = CMSG_LEN(sizeof(int));
+				memcpy(CMSG_DATA(control), &hop_limit, sizeof(int));
+				message->msg_controllen = CMSG_SPACE(sizeof(int));
+			} else {
+				message->msg_flags |= MSG_CTRUNC;
+			}
 		}
 	}
 	free(buffer);

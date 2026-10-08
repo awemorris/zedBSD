@@ -3,7 +3,7 @@
 # WS073: Bug Board の掃討（bug sweep）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-09-27 開始）
+Status: incomplete（2026-10-08 q910 P2 の照合: Bug の WS。p025・p033・p040・p045 は uncleared（BUG の tracking）、p032 は素の 5330 の確認待ち、p041 は cleared（表を直した）。Bug Board に任せて WS を閉じるかは Q1）（2026-09-27 開始）
 Primary Milestone: MG002
 Related Milestones: MG004, MG006
 Objectives: O1
@@ -73,7 +73,7 @@ BUG-027・BUG-033（性能。単独の計測を後で）。
 | [ws073-p036](phase036/phase.md) | BUG-039・BUG-031 | BUG-039: 状態は 09-27 と同じ（VFS PASS、overlay の link 125 未定義、UFS の断片が作れない）、host 試験の土台の WS へ。BUG-031: 起動の途中の画面を撮る試験（`console-midboot.py`）が修正の無い kernel で 10/10 検出、今の kernel で 21 起動 0 → resolved | cleared（2026-09-29） |
 | [ws073-p039](phase039/phase.md) | BUG-106 | `ssh -tt 'cd /bin && ls'` を修正ありの kernel で 800 回（負荷なし 300・負荷あり 500）欠け 0、red zone の修正を外した kernel では 17 回欠け（全て rc 255 ＋ SIGSEGV）→ BUG-051 の duplicate | cleared（2026-09-29） |
 | [ws073-p040](phase040/phase.md) | BUG-030 | 起動時の USB mass storage の読み取りの ETIMEDOUT の再現と原因（TCG と KVM、disk の丸読み） | uncleared（2026-09-29、wrap up。再現した（TCG 2 回に 1 回、並列の KVM 3 回に 1 回、起動の途中の CSW の時間切れだけ）、原因は未特定） |
-| [ws073-p041](phase041/phase.md) | BUG-030 | 原因の特定と修正: guest の event の取りこぼしではなく、起動時の SYNCHRONIZE CACHE に QEMU が host の image の fdatasync を待って CSW を返さず、usb-storage の CSW の 5 秒の時間切れに掛かっていた（xHCI の診断と QEMU の trace で 6 回中 6 回同じ）。BOT の段の timeout を SCSI disk の慣例（30 秒、flush 60 秒）にした | uncleared（2026-09-30。受け入れ: TCG 75 回・KVM 40 回で flush の待ちの時間切れは 0（修正前 TCG 40 回中 7 回）、丸読み 40/40、boot test PASS、serial の login 可。KVM の 1 回で usb-storage の READ が BUG-116 の機構（guest の event の取りこぼし）で時間切れになり、条件「usb-storage の error 0」は未達。扱いは main の判断） |
+| [ws073-p041](phase041/phase.md) | BUG-030 | 原因の特定と修正: guest の event の取りこぼしではなく、起動時の SYNCHRONIZE CACHE に QEMU が host の image の fdatasync を待って CSW を返さず、usb-storage の CSW の 5 秒の時間切れに掛かっていた（xHCI の診断と QEMU の trace で 6 回中 6 回同じ）。BOT の段の timeout を SCSI disk の慣例（30 秒、flush 60 秒）にした | cleared（2026-09-30 main の判断: 受け入れの条件は BUG-030 の形の時間切れ 0。KVM の 1 回は BUG-116 の形で移した）（2026-09-30、試験の担当の 2 回目の枠。受け入れ条件（main の判断で「usb-storage の e…））（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: uncleared（2026-09-30。受け入れ: TCG 75 回・KVM 40 回で flush の待ちの時間切れは 0（修正前 TCG 40 回中 7 …） |
 | [ws073-p042](phase042/phase.md) | BUG-116 | 原因の特定と修正: driver が command の poll の間 IMAN.IE を 0 にして戻していたが、QEMU の xHCI は IE=0 で MSI-X の vector を unuse し、IE=1 の復帰で「IP の再送 → use」の順なので再送が捨てられ、ring に残った event と EHB=1 のまま止まっていた（EP0 の `iman=3` と bulk の `iman=2` の両方を説明）。command の間も IE を落とさない（Linux と同じ） | cleared（2026-09-30。受け入れ: TCG 2×20（起動のみ）と KVM 2×20（丸読み 1 回）の 80 回で `xhci: cancel` 0・attach-failed 0・`error=` 0・列挙の再試行 0、usb-hid 毎回、SSH 80/80、`dd` 40/40 が 2216689664 bytes。boot test（uefi-usb）PASS、serial の login 可。BUG-116 を resolved） |
 | [ws073-p043](phase043/phase.md) | BUG-119 | Shut Down で電源が切れない: kernel に ACPI の S5 の電源断が無かった（init は HALT を送っていた）。UAPI に `KERN_SYSTEM_POWEROFF`、`/dev/system`・`kern_platform_poweroff()`・ACPI の `drv_acpi_poweroff()`（起動時に `\_S5`、電源断で `\_PTS(5)` と PM1a/b_CNT の SLP_TYP\|SLP_EN）、init は POWEROFF を送り `EOPNOTSUPP` なら HALT | cleared（2026-09-30。QEMU: `/sbin/poweroff` の 6 秒後に QEMU が `guest-shutdown` で終了、reboot は従来どおり、boot test PASS。5330 の実機は未実施） |
 | [ws073-p044](phase044/phase.md) | BUG-123 | desktop-probe が `--timeout-s=3` の後に終わらない: kernel の poll は正しく（guest で 1000 回単位の時間切れ・close の試験）、libwayland-client の `wl_display_dispatch_queue` が queue の event が来るまで時間切れ無しで待ち続けていた。標準と同じ 1 回の待ちと読みに | cleared（2026-09-30、P1。Venus の guest の restart の手順 修正前 7 回中 2 回 FAIL → 修正後 18 回 PASS、host の回帰試験。5330 の実機は未実施） |

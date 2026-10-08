@@ -3,7 +3,7 @@
 # WS134: システムモニターのアプリ（Analytic Spatial UI）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p007（T1-066 PASS）・p013（T1-070 PASS）は Q1 の判定、p003 は uncleared（fps・GPU の名前の 2 点）、p010 は規約（ベータ3）と実機の i915 の値）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2

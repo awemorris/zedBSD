@@ -3,7 +3,7 @@
 # WS029: i915ネイティブGPU実装
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p007 は全部 cleared。後続（cold VFIO attach の停止など）は登録済み。WS の完了を Q1 が判定）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2, O4

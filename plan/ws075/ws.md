@@ -3,7 +3,7 @@
 # WS075: i915 の高度化（今のデスクトップとグラフィックスを 5330 の i915 のネイティブ実行器で）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: 空き時間だけの WS（master の Focus）。p006・p007a・p007b は in-progress（中断）、p017〜p031 の uncleared は描画の高速化の再開待ち）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2

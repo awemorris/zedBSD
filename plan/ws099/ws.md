@@ -3,7 +3,7 @@
 # WS099: Keiland の compositor（zdesktop）のデモの基準
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: incomplete（2026-10-08 q910 P2 の照合: p019（T1-220）は cleared（表を直した）、p023（q609 で P2 が cleared を提案）・p034（p034b cleared）・p035（b〜d、T1-229・231）・p038（T1-264 の PNG、T1-277 PASS）は Q1 の判定待ち。残り: p012（5330 の目視、ユーザー）、p022 の回帰（criteria.sh の C9 の一覧に消えた p072 が残っている、T1-401）、p006（C6、記録だけ））
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2
@@ -69,7 +69,7 @@ WS035 を閉じた後継。ユーザー:「WS099のゴールも、明確な達�
 | [ws099-p012](phase012/phase.md) | C1 の 5330 の目視（ユーザー）と、5330 での BUG-119（電源断）・BUG-122 の確かめ。B4 | planned（agent 1h + ユーザー 15 分。WS094 p012 などと同じ回にまとめられる） | p004・p009・p010、ws073-p043、ユーザーの時間 |
 | [ws099-p014](phase014/phase.md) | C10 i915 passthroughの60分連続操作。試験script/短時間試走とsoak | cleared（q578、i915 passthrough: 3602秒/278周、errors0/restarts0、main最終確認） | p001/p002/WS075 hdmi-h4の実出力 |
 | [ws099-p017](phase017/phase.md) | BUG-125のmove/resize再現と試験同期の切り分け。実compositor defectは別Phaseへ | cleared（2026-10-03 Q1、p020・p024 の証拠） | p003/p007のC9実出力 |
-| [ws099-p019](phase019/phase.md) | ユーザー追加: 白樺・湖と発見された抽象版を共通source/3 OS release dataへ。ぼやけた湖を起動default、既存背景の選択を維持 | planned（2026-10-02 ベータ1の計画で再開可に。user の決定は済み、exact scope は [再開資料](../ws094/phase007/q593-resume.md)。3h。q593 の予約 ID の扱いは Q1） | 旧p061資産・q588安全な終端 |
+| [ws099-p019](phase019/phase.md) | ユーザー追加: 白樺・湖と発見された抽象版を共通source/3 OS release dataへ。ぼやけた湖を起動default、既存背景の選択を維持 | cleared（2026-10-06 Q1 判定: T1-220 PASS（QEMU、壁紙 7 件・既定 Birch-Lake・Settings で切り替えと既定への戻り）。抽象版は既存の緑の壁紙とユーザーが確認。実機は UAT）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: planned（2026-10-02 ベータ1の計画で再開可に。user の決定は済み、exact scope は [再開資料](../ws094/phase0…） | 旧p061資産・q588安全な終端 |
 | [ws099-p020](phase020/phase.md) | **BUG-125（blocking）**: p076 の popup の 2 症状と left resize の settle の原因を guest で弁別し、compositor（と必要なら試験の同期）を直す。B1 | cleared（2026-10-03 Q1、BUG-125 resolved） | p017 の資産（q589 の helper）、Venus の renderer |
 | [ws099-p021](phase021/phase.md) | C2 の geometry（q538: top-right の増分 20、bottom-left/left の settle）と BUG-127（最小化の直後に窓が残る）。B2 | cleared（2026-10-06 ユーザー: 再現せず非阻害で clear） | p020 cleared（同じ shell.c の周り） |
 | [ws099-p022](phase022/phase.md) | WS099 の全文規約と回帰（WS の最後）。B5 | planning（最後。p019〜p021 の後） | p019・p020・p021、p012 |
@@ -81,7 +81,7 @@ WS035 を閉じた後継。ユーザー:「WS099のゴールも、明確な達�
 | [ws099-p030](phase030/phase.md) | タイトルバーの検索欄・menu の項目のドラッグで窓を動かす（閾値 mouse 2 px・touch 8 px、離してクリック、フォーカス中の欄はキャレットと選択）。2026-10-04 user | cleared（q670、T2-026） | — |
 | [ws099-p031](phase031/phase.md) | 上部の system bar の高さを窓の title bar に揃える（34 → 44 px）（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | WS142・BUG-180 と順を合わせる |
 | [ws099-p032](phase032/phase.md) | system bar の WiFi の icon の Alt+クリックで IP address と統計の情報の popup（2026-10-04 ユーザーの要望） | cleared（2026-10-05 Q1） | ws089-p022 と同じ network の情報の口 |
-| [ws099-p034](phase034/phase.md) | 上部の bar のデザインの調整（黒い地、左の app の icon・中央の仮想 desktop の点・右の状態の icon・時刻を pill にまとめる、2026-10-06 ユーザーの画像 4 枚） | planning | |
+| [ws099-p034](phase034/phase.md) | 上部の bar のデザインの調整（黒い地、左の app の icon・中央の仮想 desktop の点・右の状態の icon・時刻を pill にまとめる、2026-10-06 ユーザーの画像 4 枚） | p034b は cleared（2026-10-06 Q1 判定、T1-228）。phase.md の頭の Status は planned のまま（p034 の第 1 版は p034b に置き換わった）→ Q1 の判定待ち（2026-10-08 q910 P2 の照合。旧: planning） | |
 | ws099-p033 | 最大化の中で新しく起動した app の窓を最大化で開く（2026-10-05 午後 UAT、ユーザー「ウィンドウを最大化している状態で、新たにアプリを起動したら、そのアプリは最大化しているのがいいです。タブレットをスクリーン全体で使っているという認識にします。」）。今の desktop で前面の窓が最大化（docked）なら、新しい toplevel の最初の configure を最大化にする。dialog・popup・大きさの固定の窓・全画面は除く。決める点: 「最大化の状態」の判定（前面の窓か、その desktop のどれかか）と、最大化を外した後に開く窓の扱い | planning（P2、q の番号は開始時） |
 
 ## ベータ1 の到達目標（2026-10-02 計画、fg019）

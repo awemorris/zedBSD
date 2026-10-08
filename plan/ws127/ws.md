@@ -3,7 +3,7 @@
 # WS127: Files のベータ1 のブラッシュアップ（最重点）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p006・p009〜p012 は cleared（p002 の表を直した）、p005 は canceled。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD の build は 10/13 以降）、p007 は実機の UAT。旧: planned）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -46,7 +46,7 @@ Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し�
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
 | [ws127-p001](phase001/phase.md) | 棚卸し: 現在の main で回帰の取り直し、spec.md と実装の照合表、QEMU での実使用の通しと不具合の表、改善の候補の一覧（価値・規模・危険・依存）。最後にユーザーが選ぶ | cleared（2026-10-02 の q595、表を 2026-10-03 Q1 が更新） | — | 3h |
-| [ws127-p002](phase002/phase.md) | p001 で見つけた不具合の直し（重い・中） | planning（p001 の不具合の表が要る） | p001 | 3h |
+| [ws127-p002](phase002/phase.md) | p001 で見つけた不具合の直し（重い・中） | cleared（2026-10-06 Q1 の照合: 実装した項目は q616-i01 で PASS、残っていた eject は ws132-p005 で Files に実装され T1-150 で cleared（fm_devices_eject）。BUG-141/142 は再現…）（2026-10-08 q910 P2 の照合で phase.md に合わせた。旧: planning（p001 の不具合の表が要る）） | p001 | 3h |
 | [ws127-p003](phase003/phase.md) | 名前の衝突と Trash の残り。F-050 の 3 つ（Replace で消さずに Trash、cut の Esc で clipboard を保つ、folder の merge）は実装済み（ws035-p110・p115）。この Phase は F-041 の一部 `$topdir/.Trash-$uid`（volume の trash） | cleared（q666、T1-077） | p001 | 3h |
 | [ws127-p004](phase004/phase.md) | thumbnail の拡張（F-035）。PDF の thumbnail と disk の cache は ws127-p002 で実装済み。この Phase は cache の上限（2000→1800）と壊れた PDF の試験。動画は WS122 の後 | cleared（q667、T1-081） | p001 | 1h |
 | [ws127-p005](phase005/phase.md) | 日本語の UI の文言と、名前の変更での IME（F-041 の残り）。Settings と共通の翻訳の仕組み | canceled（2026-10-05 夜、WS158 に吸収） | p001、WS095、WS089 p016 と仕組みを共有 | 4h |
