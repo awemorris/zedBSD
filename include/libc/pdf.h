@@ -512,7 +512,7 @@ int pdf_writer_draw_page_editor(struct pdf_writer *writer, const struct pdf_page
  * LINE_END marks the last character of each line.  A character the font
  * does not tell is U+FFFD.  After the page's own lines come the
  * characters shown inside the form XObjects it draws, in the order shown
- * and in lines of their own (ws177-p032; not the text of a Type 3 glyph's
+ * and in lines of their own (ws177-p040; not the text of a Type 3 glyph's
  * procedure, nor of annotations, which are not drawn).
  */
 #define PDF_TEXT_LINE_END	0x1U

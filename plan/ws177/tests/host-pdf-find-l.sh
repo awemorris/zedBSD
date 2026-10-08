@@ -1,5 +1,5 @@
 #!/bin/sh
-# ws177-p032 to p035 (case L): builds libpdf (the zedBSD build's C89, plain and ASan+UBSan) with PDF Viewer's core
+# ws177-p040 to p043 (case L): builds libpdf (the zedBSD build's C89, plain and ASan+UBSan) with PDF Viewer's core
 # (view, draw, document, canvas, text, find) and host-pdf-find-l.c for the host, writes the samples
 # (make-find-l.py) and runs the groups: forms (libpdf's page text with the forms' text), find (the matching rules, the
 # count, the unreadable characters), select (across pages, words and lines, all, the fingers' handles, the turned

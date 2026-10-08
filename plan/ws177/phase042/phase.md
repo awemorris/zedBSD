@@ -1,12 +1,12 @@
-<!-- awesome-plan project=zedbsd record=ws177-p034 -->
+<!-- awesome-plan project=zedbsd record=ws177-p042 -->
 
-# ws177-p034: PDF Viewer の選択（頁をまたぐ・語と行・全て・指・回転した字の塗り）（案 L の 3）
+# ws177-p042: PDF Viewer の選択（頁をまたぐ・語と行・全て・指・回転した字の塗り）（案 L の 3）
 
 Parent: [WS177](../ws.md)
 Status: in-progress（2026-10-08 夜 P1 q907 に立てて着手）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
-Queue / attempts: q907-i01（P1、承認は p032 と同じ）
+Queue / attempts: q907-i01（P1、承認は p040 と同じ）
 Origin: [backlog-p2](../backlog-p2.md) 20・21・24 行（WS128 ws128-p004）、[案](../phasing-20261008.md) の L。
 
 ## 範囲と設計
@@ -24,7 +24,7 @@ Origin: [backlog-p2](../backlog-p2.md) 20・21・24 行（WS128 ws128-p004）、
 
 ## 確認
 
-- host: `plan/ws177/tests/host-pdf-find-l.sh` の select の群（ws128 の edit-basic.pdf と p033 の PDF）: 2 頁にまたがる drag と copy、
+- host: `plan/ws177/tests/host-pdf-find-l.sh` の select の群（ws128 の edit-basic.pdf と p041 の PDF）: 2 頁にまたがる drag と copy、
   ダブル・トリプルクリック、Ctrl+A の copy、長押しの語と handle の移動（頁をまたぐ）、tap で外す、回転した頁（edit-basic の 3 頁）の
   塗りの画素（多角形の外が塗られない）。frame を PNG に。
 - build warning 0、style-check。指の実機は UAT。

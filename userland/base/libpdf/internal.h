@@ -475,7 +475,7 @@ struct pdf_scan_mark {
  * force where the content starts).  ws128-p004: each character's corners
  * in the shown space (character_quads, eight numbers a character: its
  * code's glyph from the descent to the ascent, the characters of one code
- * sharing them), for the page's text.  ws177-p032: the characters shown
+ * sharing them), for the page's text.  ws177-p040: the characters shown
  * inside the form XObjects the page draws (not inside a Type 3 glyph),
  * apart from the page's own, which the editor does not read: their corners
  * as character_quads', and what stands before each (form_breaks:

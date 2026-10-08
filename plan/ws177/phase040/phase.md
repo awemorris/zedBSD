@@ -1,6 +1,6 @@
-<!-- awesome-plan project=zedbsd record=ws177-p032 -->
+<!-- awesome-plan project=zedbsd record=ws177-p040 -->
 
-# ws177-p032: libpdf の頁の文字に form XObject の中の文字を入れる（案 L の 1）
+# ws177-p040: libpdf の頁の文字に form XObject の中の文字を入れる（案 L の 1）
 
 Parent: [WS177](../ws.md)
 Status: in-progress（2026-10-08 夜 P1 q907 に立てて着手）

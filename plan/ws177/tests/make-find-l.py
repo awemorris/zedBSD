@@ -1,5 +1,5 @@
 #!/usr/bin/env python3
-"""make-find-l.py: the PDFs of the host test of PDF Viewer's find and selection (ws177-p032 to p035, case L).
+"""make-find-l.py: the PDFs of the host test of PDF Viewer's find and selection (ws177-p040 to p043, case L).
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
@@ -10,13 +10,13 @@ code's character, so that any character can be written whatever font the host ha
 CMap and with glyph names no list knows (its characters are U+FFFD); /P is a Type 3 font whose glyph "a" shows text
 inside its procedure (the glyph's picture, not the page's text).
 
-forms.pdf (ws177-p032), one page:
+forms.pdf (ws177-p040), one page:
   the page's own lines "Page line" and the /P string "a"; the form /Fm1 shows "Form one", draws the nested /Fm2
   ("Nested two"), then shows "after nested" and, apart on the same baseline, the /P string "a"; /Fm3 is turned a
   quarter by its /Matrix and shows "Turned text".  The page text expected:
   Page line | a | Form one | Nested two | after nested a | Turned text
 
-find.pdf (ws177-p033, p034), 32 pages of 612 x 792 points:
+find.pdf (ws177-p041, p042), 32 pages of 612 x 792 points:
   1. the lines of FIND_PAGE below (a hyphen at a line's end, spaces, full and half width, kana with voiced marks,
      Greek, Cyrillic, ligatures, a sharp s, Japanese across a line's end)
   2. "Unreadable" in /N, then "page two has a lazy dog"

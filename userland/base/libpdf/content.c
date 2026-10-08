@@ -257,7 +257,7 @@ struct content_path {
  * how deep content runs nest (1 for the page's, more inside a form or a
  * Type 3 glyph), scan_saves counts the page's q by their tokens, and the
  * operator being run fills scan_object (scan_pending) when it draws one.
- * ws177-p032: text_forms counts the levels of form_depth that are forms
+ * ws177-p040: text_forms counts the levels of form_depth that are forms
  * (not Type 3 glyphs), so that the text shown in forms alone is noted;
  * form_serial changes as a form starts or ends, and form_noted_serial is
  * the one the last form character was noted under (a new one starts a
@@ -2939,7 +2939,7 @@ show_string(
 	if (scanned)
 		scan_string(run, bytes, length);
 
-	/* The text a form shows is noted apart, for the page's text (ws177-p032). */
+	/* The text a form shows is noted apart, for the page's text (ws177-p040). */
 	form_text = scan_form_here(run);
 
 	/* A substituted or unreadable font marks the list; a vertical one moves down. */
@@ -3003,7 +3003,7 @@ show_string(
 			advance_text(run, glyph.width * state->font_size + spacing);
 		}
 
-		/* The scan notes the code's characters, where its glyph was (ws128-p004), the page's own or a form's (ws177-p032). */
+		/* The scan notes the code's characters, where its glyph was (ws128-p004), the page's own or a form's (ws177-p040). */
 		if (scanned)
 			scan_code(run, code, single_byte, before);
 		if (form_text)
@@ -3823,7 +3823,7 @@ run_form(
 	run->ignored_saves = 0;
 	run->form_depth++;
 
-	/* A form's level, whose text is noted, and a new run of its text (ws177-p032). */
+	/* A form's level, whose text is noted, and a new run of its text (ws177-p040). */
 	run->text_forms++;
 	run->form_serial++;
 
@@ -4867,7 +4867,7 @@ scan_form_here(
 
 /*
  * Notes the characters one code of a form's shown string stands for, with
- * the corners of its glyph and what stands before them (ws177-p032); a
+ * the corners of its glyph and what stands before them (ws177-p040); a
  * failure of memory fails the scan.
  */
 static void

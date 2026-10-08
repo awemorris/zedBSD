@@ -1,12 +1,12 @@
-<!-- awesome-plan project=zedbsd record=ws177-p033 -->
+<!-- awesome-plan project=zedbsd record=ws177-p041 -->
 
-# ws177-p033: PDF Viewer の検索の一致の規則・数・速さ・読めない字（案 L の 2）
+# ws177-p041: PDF Viewer の検索の一致の規則・数・速さ・読めない字（案 L の 2）
 
 Parent: [WS177](../ws.md)
 Status: in-progress（2026-10-08 夜 P1 q907 に立てて着手）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
-Queue / attempts: q907-i01（P1、承認は p032 と同じ）
+Queue / attempts: q907-i01（P1、承認は p040 と同じ）
 Origin: [backlog-p2](../backlog-p2.md) 18・19・22・25 行（WS128 ws128-p004）、[案](../phasing-20261008.md) の L。
 
 ## 範囲
@@ -45,7 +45,7 @@ Origin: [backlog-p2](../backlog-p2.md) 18・19・22・25 行（WS128 ws128-p004�
   読んで数える（頁の文字の読みが重い文書でも打鍵と描画を止めない）。全ての頁を数え終えたら `FIND count query=… total=N` を log。
   まだ数え終えていない間は tick を 1 ms 後にまた求める。
 - 表示: 見つけた所へ動くたびに「Match k of N」（全ての頁を数え終え、k が分かる時）、数え終える前は「Match on page P」を
-  2 秒の知らせで出す。窓の中の検索の欄（p035）は同じ文を欄の横に常に出す。
+  2 秒の知らせで出す。窓の中の検索の欄（p043）は同じ文を欄の横に常に出す。
 - `pv_find_next` は今のまま同期で頁を読む（数える tick が先に読んだ頁は読まない）。
 
 ### 読めない字（25）
@@ -59,4 +59,4 @@ Origin: [backlog-p2](../backlog-p2.md) 18・19・22・25 行（WS128 ws128-p004�
 - host: `plan/ws177/tests/host-pdf-find-l.sh` の find の群（python で作る PDF: 行をまたぐ語・ハイフンの語・空白の多い行・全角と半角・
   濁点の結合と半角カナ・ギリシャとキリルの大文字・合字の glyph（ToUnicode で U+FB01）・ToUnicode の無い font）。各 query の
   一致の頁・範囲・数、tick で数え終える、知らせの文。既存の `plan/ws128/tests/run-host-pdfviewer-find.sh`。
-- build warning 0、style-check。QEMU（T1）は p035 の後にまとめて。
+- build warning 0、style-check。QEMU（T1）は p043 の後にまとめて。

@@ -6,7 +6,7 @@
  */
 
 /*
- * The host test of case L of WS177 (ws177-p032 to p035): libpdf's page
+ * The host test of case L of WS177 (ws177-p040 to p043): libpdf's page
  * text with the forms' text, and PDF Viewer's find and selection (find.c
  * with the viewer's core), on the PDFs of make-find-l.py.
  *
@@ -98,7 +98,7 @@ main(
 }
 
 /*
- * forms.pdf (ws177-p032): the page's own lines, then the forms' text in
+ * forms.pdf (ws177-p040): the page's own lines, then the forms' text in
  * the order shown, each run of a form's text on lines of its own; the
  * nested form's; the turned form's characters turned; not the text inside
  * the Type 3 glyph's procedure.

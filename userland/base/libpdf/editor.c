@@ -4092,7 +4092,7 @@ editor_inside(
  * strings of a line apart by more than a fifth of the size (its corners
  * the gap), and LINE_END on each line's last character; then the text the
  * form XObjects the page draws show, in the order shown, in lines of
- * their own (ws177-p032).  Returns 0, EINVAL, ENOMEM, or the failure of
+ * their own (ws177-p040).  Returns 0, EINVAL, ENOMEM, or the failure of
  * reading the page.
  */
 int
@@ -4215,7 +4215,7 @@ pdf_page_text_close(
 }
 
 /*
- * Adds the text the page's forms show (ws177-p032) after what the page's
+ * Adds the text the page's forms show (ws177-p040) after what the page's
  * text holds: a line ends before each character the scan says starts one,
  * and a space (its corners the gap) stands before each it says is apart.
  * The text has room for each character and a space before it.
