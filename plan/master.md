@@ -196,7 +196,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS066](ws066/ws.md) | ベータ2 | MG002 | 1 | 動的 link の起動の高速化 |
 | [WS068](ws068/ws.md) | ベータ3（2026-10-06 ユーザー: いったん先送り） | MG006 | 4 | EGL・OpenGL ES |
 | [WS073](ws073/ws.md) | ベータ1 | MG002 | 3 | Bug Board の掃討（UAT の Bug を含む） |
-| [WS074](ws074/ws.md) | ベータ2（2026-10-05 移動） | MG006 | 12 | Web ブラウザ（2026-10-05 Q1 に戻した、レンダリングの改善はユーザーの指示まで止める） |
+| [WS074](ws074/ws.md) | ベータ3（2026-10-08 ユーザー） | MG006 | 12 | Web ブラウザ（2026-10-05 Q1 に戻した、レンダリングの改善はユーザーの指示まで止める） |
 | [WS075](ws075/ws.md) | ベータ2 | MG006 | 4 | i915 の高度化 |
 | [WS077](ws077/ws.md) | キャンセル | MG001 | 1 | PC-98 の PCI |
 | [WS078](ws078/ws.md) | ベータ2 | MG006 | 1 | Kei の名前の移行 |
@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ユーザーの決定と Q1 の技術の決定の記録。決まった判断は先頭の open-decisions からここへ移す。各 WS の phase.md・ws.md が正本で、ここは索引。
 
 <!-- master:decisions-log:start -->
+- 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
 - 2026-10-08 午後 ユーザー（クリック）: Mail の添付（ws189-p004）より先に **WS143 p006 Bluetooth の desktop**（Settings の頁・system bar・pairing の確認の窓、app → libkeiland → compositor → backend）を P1 で。p004 はその後。（Q1 の推奨は WS083 Vulkan Video だった）
 - 2026-10-08 午後 ユーザー（クリック）: WS189 の DnD で、drop の前の wl_data_offer.receive を compositor が空にする（データは落とした窓にだけ渡す。drop の前に中身を読む GTK4 などは空を読む）→「これでよい」。ws189-p001 は Q1 の判定で cleared。
