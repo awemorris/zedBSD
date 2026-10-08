@@ -886,6 +886,18 @@ kwl_emit(struct kwl_client *client, uint32_t object, uint32_t opcode, const void
 	return 0;
 }
 
+/* The sound's streams (audio-stream.c, WS191) send a descriptor only with ready, which this test never makes. */
+int
+kwl_emit_fd(struct kwl_client *client, uint32_t object, uint32_t opcode, const void *payload, size_t size, int descriptor)
+{
+	int error;
+
+	if (descriptor >= 0)
+		(void)close(descriptor);
+	error = kwl_emit(client, object, opcode, payload, size);
+	return error;
+}
+
 struct kwl_object *
 kwl_find(struct kwl_client *client, uint32_t id)
 {

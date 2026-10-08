@@ -260,6 +260,9 @@ enum kwl_kind {
 	KWL_SYSTEM_MACHINE,
 	/* The system extension's Bluetooth (bluetooth-shell.c, ws143-p006). */
 	KWL_SYSTEM_BLUETOOTH,
+	/* The sound's playback streams, kl_audio_v1 and its streams (audio-stream.c, WS191). */
+	KWL_AUDIO,
+	KWL_AUDIO_STREAM,
 };
 
 /*
@@ -1853,6 +1856,13 @@ int kwl_settings_home(char *home, size_t size);
 int kwl_system_bind(struct kwl_object *manager);
 int kwl_system_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 void kwl_system_tick(struct kwl_server *server);
+
+/* The sound's playback streams (audio-stream.c, WS191). */
+int kwl_audio_offered(void);
+int kwl_audio_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_audio_tick(struct kwl_server *server);
+void kwl_audio_object_gone(struct kwl_object *object);
+void kwl_audio_close(struct kwl_server *server);
 void kwl_system_power_changed(struct kwl_server *server);
 void kwl_system_sharing_answer(struct kwl_server *server, int error);
 int kwl_system_pin_answer(struct kwl_server *server, int error);

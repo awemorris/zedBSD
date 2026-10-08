@@ -320,11 +320,19 @@ kwl_settings_global_visible(
 {
 	uid_t uid;
 	uid_t own;
+	int offered;
 	int error;
 
-	/* Only the system manager is limited. */
-	if (kind != KWL_SYSTEM_MANAGER)
+	/* Only the system manager and the sound's streams are limited. */
+	if (kind != KWL_SYSTEM_MANAGER && kind != KWL_AUDIO)
 		return 1;
+
+	/* The sound's streams are shown only while the backend makes them (audio-stream.c, WS191). */
+	if (kind == KWL_AUDIO) {
+		offered = kwl_audio_offered();
+		if (!offered)
+			return 0;
+	}
 
 	/* The login screen has no settings. */
 	if (client->server->settings == NULL)

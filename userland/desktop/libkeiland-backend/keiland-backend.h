@@ -607,6 +607,12 @@ void kl_backend_audio_stream_close(struct kl_backend_audio_stream *stream);
 void kl_backend_audio_stream_reap(void);
 
 /*
+ * Waits for every pump thread to end and lets it go (at the compositor's
+ * end, after every stream was closed).
+ */
+void kl_backend_audio_stream_reap_all(void);
+
+/*
  * The removable media (ws132-p004): the volumes zedBSD's volumed lists (a
  * USB stick's FAT or UFS filesystem), mounted only when the user asks.
  * Like the sound, nothing here waits: kl_backend_volumes_update reads what

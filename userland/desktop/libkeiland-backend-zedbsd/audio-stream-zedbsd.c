@@ -83,12 +83,16 @@ enum stream_stage {
 };
 
 /*
- * A control sent to audiod and not answered yet: the serial audiod answers
- * with, and the client's request it answers.  used 0 is a free slot.
+ * A control sent to audiod and not answered yet: the serials audiod
+ * answers with (two for the flush of a drain, which is STOP then FLUSH),
+ * how many answers are still to come, the first error among them, and the
+ * client's request they answer together.  used 0 is a free slot.
  */
 struct stream_waiting {
 	unsigned used;
-	uint32_t serial;
+	uint32_t serials[2];
+	unsigned remaining;
+	unsigned error;
 	uint32_t request;
 };
 
@@ -135,6 +139,9 @@ static void stream_read(struct kl_backend_audio_stream *stream);
 static int stream_receive(struct kl_backend_audio_stream *stream);
 static void stream_message(struct kl_backend_audio_stream *stream, const unsigned char *bytes, uint32_t length);
 static void stream_answer(struct kl_backend_audio_stream *stream, uint32_t serial, unsigned error);
+static int stream_drain(struct kl_backend_audio_stream *stream, uint32_t request);
+static int stream_request(struct kl_backend_audio_stream *stream, uint32_t type, struct stream_waiting *waiting);
+static uint32_t stream_type(unsigned what);
 static int stream_send(struct kl_backend_audio_stream *stream, const void *message, uint32_t length);
 static void stream_end(struct kl_backend_audio_stream *stream, unsigned what, unsigned error);
 static void stream_report(struct kl_backend_audio_stream *stream, const struct kl_backend_audio_stream_report *report);
@@ -183,7 +190,7 @@ kl_backend_audio_stream_open(
 		return stream;
 	}
 
-	/* audiod's socket: connected at once, or soon (EINPROGRESS); anything else is audiod not there. */
+	/* audiod's socket: connected at once, or soon (EINPROGRESS elsewhere); anything else (EAGAIN: its backlog is full; ENOENT: it does not run) is audiod not there. */
 	memset(&address, 0, sizeof(address));
 	address.sun_family = AF_UNIX;
 	(void)snprintf(address.sun_path, sizeof(address.sun_path), "%s", AUDIO_SOCKET_PATH);
@@ -211,13 +218,29 @@ kl_backend_audio_stream_control(
 	uint32_t request)
 {
 	struct kl_backend_audio_stream_report report;
-	struct audiod_header message;
+	struct stream_waiting *waiting;
 	unsigned slot;
 	int error;
 
 	/* Only a ready stream takes controls. */
 	if (stream->stage != STREAM_READY)
 		return ENOTCONN;
+
+	/* A drain is answered at once: audiod sends no DONE for it. */
+	if (what == KL_BACKEND_AUDIO_DRAIN) {
+		error = stream_drain(stream, request);
+		if (error != 0)
+			return error;
+
+		/* The answer the compositor sends on. */
+		memset(&report, 0, sizeof(report));
+		report.what = KL_BACKEND_AUDIO_RESULT;
+		report.error = KL_BACKEND_AUDIO_ERROR_NONE;
+		report.request = request;
+		report.fd = -1;
+		stream_report(stream, &report);
+		return 0;
+	}
 
 	/* A free slot for the answer; none is audiod not keeping up. */
 	for (slot = 0U; slot < STREAM_WAITING; slot++) {
@@ -229,63 +252,38 @@ kl_backend_audio_stream_control(
 	if (slot == STREAM_WAITING)
 		return EAGAIN;
 
-	/* The request audiod knows the control as. */
-	memset(&message, 0, sizeof(message));
-	message.length = sizeof(message);
-	message.serial = stream->next_serial++;
-	message.stream = STREAM_NUMBER;
+	/* The slot, filled as the requests go. */
+	waiting = &stream->waiting[slot];
+	memset(waiting, 0, sizeof(*waiting));
+	waiting->request = request;
 
-	/* Which request. */
-	switch (what) {
-	case KL_BACKEND_AUDIO_START:
-		message.type = AUDIOD_STREAM_START;
-		break;
-	case KL_BACKEND_AUDIO_STOP:
-		message.type = AUDIOD_STREAM_STOP;
-		break;
-	case KL_BACKEND_AUDIO_FLUSH:
-		message.type = AUDIOD_STREAM_FLUSH;
-		break;
-	case KL_BACKEND_AUDIO_DRAIN:
-		message.type = AUDIOD_STREAM_DRAIN;
-		break;
-	default:
-		return EINVAL;
+	/*
+	 * The flush of a drain under way ends the drain: STOP first (audiod's
+	 * FLUSH leaves a drain running), then FLUSH, one answer for both.
+	 */
+	if (what == KL_BACKEND_AUDIO_FLUSH && stream->draining) {
+		error = stream_request(stream, AUDIOD_STREAM_STOP, waiting);
+		if (error != 0)
+			return error;
 	}
 
-	/* Sent whole, or the connection is gone (LOST is reported). */
-	error = stream_send(stream, &message, sizeof(message));
+	/* The control itself. */
+	error = stream_request(stream, stream_type(what), waiting);
+	if (error == EAGAIN && waiting->remaining != 0U) {
+		/* The STOP went and the FLUSH did not: its answer says the flush was not done. */
+		waiting->error = KL_BACKEND_AUDIO_ERROR_UNAVAILABLE;
+		error = 0;
+	}
+
+	/* Not sent: nothing waits. */
 	if (error != 0)
 		return error;
 
-	/*
-	 * A drain is answered at once: audiod sends no DONE for it, only
-	 * DRAINED with the drain's serial once everything has been heard.  The
-	 * drain under way is this one from now (an earlier one's DRAINED no
-	 * longer counts).
-	 */
-	if (what == KL_BACKEND_AUDIO_DRAIN) {
-		stream->draining = 1U;
-		stream->drain_serial = message.serial;
-		stream->drain_request = request;
-		memset(&report, 0, sizeof(report));
-		report.what = KL_BACKEND_AUDIO_RESULT;
-		report.error = KL_BACKEND_AUDIO_ERROR_NONE;
-		report.request = request;
-		report.fd = -1;
-		stream_report(stream, &report);
-		return 0;
-	}
-
-	/* Any other control ends a drain under way: its DRAINED will not come. */
+	/* No drain is under way after a control (a flush of one ended it): a DRAINED of it is passed over. */
 	stream->draining = 0U;
 
-	/* The answer is awaited under the request's serial. */
-	stream->waiting[slot].used = 1U;
-	stream->waiting[slot].serial = message.serial;
-	stream->waiting[slot].request = request;
-
-	/* Succeeded: the control is with audiod; DONE or ERROR comes as RESULT. */
+	/* Succeeded: the answers are awaited under their serials. */
+	waiting->used = 1U;
 	return 0;
 }
 
@@ -353,6 +351,17 @@ kl_backend_audio_stream_reap(
 	void)
 {
 	/* Succeeded: nothing to let go. */
+	return;
+}
+
+/*
+ * Waits for every pump thread to end: zedBSD's streams have none.
+ */
+void
+kl_backend_audio_stream_reap_all(
+	void)
+{
+	/* Succeeded: nothing to wait for. */
 	return;
 }
 
@@ -482,6 +491,7 @@ stream_receive(
 	} control;
 	struct cmsghdr *item;
 	struct msghdr message;
+	size_t least;
 	struct iovec vector;
 	ssize_t count;
 	int descriptor;
@@ -514,6 +524,8 @@ stream_receive(
 		} else {
 			stream_end(stream, KL_BACKEND_AUDIO_FAILED, KL_BACKEND_AUDIO_ERROR_UNAVAILABLE);
 		}
+
+		/* The stream ended. */
 		return -1;
 	}
 
@@ -521,7 +533,8 @@ stream_receive(
 	for (item = CMSG_FIRSTHDR(&message); item != NULL; item = CMSG_NXTHDR(&message, item)) {
 		if (item->cmsg_level != SOL_SOCKET || item->cmsg_type != SCM_RIGHTS)
 			continue;
-		if (item->cmsg_len < CMSG_LEN(sizeof(int)))
+		least = CMSG_LEN(sizeof(int));
+		if (item->cmsg_len < least)
 			continue;
 		memcpy(&descriptor, CMSG_DATA(item), sizeof(descriptor));
 		if (stream->pending_fd >= 0) {
@@ -563,6 +576,8 @@ stream_message(
 			stream_end(stream, KL_BACKEND_AUDIO_FAILED, KL_BACKEND_AUDIO_ERROR_FAILED);
 			return;
 		}
+
+		/* The greeting's words. */
 		memcpy(&welcome, bytes, sizeof(welcome));
 
 		/* No sound device. */
@@ -596,6 +611,8 @@ stream_message(
 			stream_end(stream, KL_BACKEND_AUDIO_FAILED, KL_BACKEND_AUDIO_ERROR_FAILED);
 			return;
 		}
+
+		/* The answer's words. */
 		memcpy(&created, bytes, sizeof(created));
 
 		/* The report hands the descriptor over. */
@@ -659,7 +676,7 @@ stream_message(
 	return;
 }
 
-/* Reports the answer to a control by the serial it was sent with. */
+/* Takes audiod's answer to a control by the serial it was sent with; the last answer of a control reports it. */
 static void
 stream_answer(
 	struct kl_backend_audio_stream *stream,
@@ -667,26 +684,119 @@ stream_answer(
 	unsigned error)
 {
 	struct kl_backend_audio_stream_report report;
+	struct stream_waiting *waiting;
 	unsigned slot;
+	unsigned index;
 
 	/* The control the serial names. */
-	for (slot = 0U; slot < STREAM_WAITING; slot++) {
-		if (stream->waiting[slot].used && stream->waiting[slot].serial == serial)
-			break;
+	waiting = NULL;
+	for (slot = 0U; slot < STREAM_WAITING && waiting == NULL; slot++) {
+		if (!stream->waiting[slot].used)
+			continue;
+		for (index = 0U; index < stream->waiting[slot].remaining; index++) {
+			if (stream->waiting[slot].serials[index] == serial)
+				waiting = &stream->waiting[slot];
+		}
 	}
 
 	/* An answer to nothing awaited (HELLO's own, or a stray one) is passed over. */
-	if (slot == STREAM_WAITING)
+	if (waiting == NULL)
 		return;
 
-	/* The slot is free again; its request is answered. */
-	stream->waiting[slot].used = 0U;
+	/* The first error among the answers is the control's. */
+	if (waiting->error == KL_BACKEND_AUDIO_ERROR_NONE)
+		waiting->error = error;
+
+	/* One answer fewer to come (the serials still awaited stay at the front). */
+	waiting->remaining--;
+	if (waiting->serials[0] == serial)
+		waiting->serials[0] = waiting->serials[1];
+	if (waiting->remaining != 0U)
+		return;
+
+	/* The last answer: the slot is free again, and the request is answered. */
+	waiting->used = 0U;
 	memset(&report, 0, sizeof(report));
 	report.what = KL_BACKEND_AUDIO_RESULT;
-	report.error = error;
-	report.request = stream->waiting[slot].request;
+	report.error = waiting->error;
+	report.request = waiting->request;
 	report.fd = -1;
 	stream_report(stream, &report);
+}
+
+/* Sends DRAIN; the drain under way is this one from now (an earlier one's DRAINED no longer counts). Returns 0 or an errno value. */
+static int
+stream_drain(
+	struct kl_backend_audio_stream *stream,
+	uint32_t request)
+{
+	struct audiod_header message;
+	int error;
+
+	/* The request, under the next serial. */
+	memset(&message, 0, sizeof(message));
+	message.type = AUDIOD_STREAM_DRAIN;
+	message.length = sizeof(message);
+	message.serial = stream->next_serial++;
+	message.stream = STREAM_NUMBER;
+	error = stream_send(stream, &message, sizeof(message));
+	if (error != 0)
+		return error;
+
+	/* DRAINED comes with this serial once everything has been heard. */
+	stream->draining = 1U;
+	stream->drain_serial = message.serial;
+	stream->drain_request = request;
+
+	/* Succeeded: the drain is with audiod. */
+	return 0;
+}
+
+/* Sends one of a control's requests and awaits its answer in the slot. Returns 0 or an errno value. */
+static int
+stream_request(
+	struct kl_backend_audio_stream *stream,
+	uint32_t type,
+	struct stream_waiting *waiting)
+{
+	struct audiod_header message;
+	int error;
+
+	/* The request, under the next serial. */
+	memset(&message, 0, sizeof(message));
+	message.type = type;
+	message.length = sizeof(message);
+	message.serial = stream->next_serial++;
+	message.stream = STREAM_NUMBER;
+	error = stream_send(stream, &message, sizeof(message));
+	if (error != 0)
+		return error;
+
+	/* Its answer is awaited. */
+	waiting->serials[waiting->remaining] = message.serial;
+	waiting->remaining++;
+
+	/* Succeeded: the request is with audiod. */
+	return 0;
+}
+
+/* Gives audiod's request for a control (START, STOP or FLUSH). */
+static uint32_t
+stream_type(
+	unsigned what)
+{
+	/* Which request. */
+	switch (what) {
+	case KL_BACKEND_AUDIO_START:
+		return AUDIOD_STREAM_START;
+	case KL_BACKEND_AUDIO_STOP:
+		return AUDIOD_STREAM_STOP;
+	default:
+		break;
+	}
+
+	/* Succeeded: the flush. */
+	return AUDIOD_STREAM_FLUSH;
 }
 
 /* Writes one whole message; a connection that cannot take it ends the stream. Returns 0 or an errno value. */
@@ -775,9 +885,13 @@ stream_error(
 	if (error == EINVAL || error == ENOENT)
 		return KL_BACKEND_AUDIO_ERROR_INVALID;
 
-	/* Out of memory, or of streams. */
+	/* Out of memory. */
 	if (error == ENOMEM)
 		return KL_BACKEND_AUDIO_ERROR_NO_MEMORY;
+
+	/* Out of streams or descriptors. */
+	if (error == EMFILE)
+		return KL_BACKEND_AUDIO_ERROR_TOO_MANY;
 
 	/* Anything else. */
 	return KL_BACKEND_AUDIO_ERROR_FAILED;

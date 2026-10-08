@@ -12,6 +12,7 @@
 #include "desktop.h"
 #include "kwl.h"
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
+#include "userland/desktop/libkeiland/audio/kl-audio-protocol.h"
 #include "menu.h"
 #include "titlebar.h"
 #include "inset.h"
@@ -80,6 +81,7 @@ static const struct kwl_global globals[] = {
 	{ 26, "xdg_activation_v1", 1, KWL_ACTIVATION_MANAGER },
 	{ 27, "kl_theme_v1", 2, KWL_THEME },
 	{ 28, "wp_content_type_manager_v1", 1, KWL_CONTENT_TYPE_MANAGER },
+	{ 29, KL_AUDIO_NAME, KL_AUDIO_VERSION, KWL_AUDIO },
 };
 
 static void global_identity(const struct kwl_global *global, const char **interface, uint32_t *version);
@@ -348,6 +350,11 @@ kwl_dispatch(
 	case KWL_SYSTEM_BLUETOOTH:
 		/* Keiland's system extension: the manager, the network, the sound, the power, the devices, the account, Remote Login, the notifications, the arrivals of mail, the phone, the printers, the displays, the computer and Bluetooth (system.c, WS131 p010, ws160-p002, ws089-p025, ws156-p002, ws169-p002, ws170-p004, ws145-p003, ws113-p005, ws188-p002, ws143-p006). */
 		error = kwl_system_request(object, opcode, bytes, size);
+		break;
+	case KWL_AUDIO:
+	case KWL_AUDIO_STREAM:
+		/* The sound's playback streams (audio-stream.c, WS191). */
+		error = kwl_audio_request(object, opcode, bytes, size);
 		break;
 	case KWL_SYSTEM_MONITOR:
 		/* Keiland's system extension: the monitor (sysmon.c, WS134 p012). */

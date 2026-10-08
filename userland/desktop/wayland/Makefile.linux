@@ -68,6 +68,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/phone-shell.c \
 	userland/desktop/wayland/printers-shell.c \
 	userland/desktop/wayland/bluetooth-shell.c \
+	userland/desktop/wayland/audio-stream.c \
 	userland/desktop/wayland/bluetooth-ask.c \
 	userland/desktop/wayland/bluetooth-bar.c \
 	userland/desktop/wayland/machine-shell.c \

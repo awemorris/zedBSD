@@ -88,7 +88,7 @@
 #define KL_AUDIO_RATE_MAX			192000U
 #define KL_AUDIO_RING_BYTES_MAX			(1U << 20)
 
-/* How many streams one process, and the compositor as a whole, may hold. */
+/* How many streams one process, and the compositor as a whole, may hold (failed and lost ones not counted). */
 #define KL_AUDIO_STREAMS_PER_PROCESS		8U
 #define KL_AUDIO_STREAMS_MAX			32U
 
@@ -96,7 +96,9 @@
  * The ring: a page of positions, then the frames.  Each offset is in
  * bytes from the start of the memory.  A position is a count of frames
  * that only grows; it is read with an 8-byte acquire load and written
- * with an 8-byte release store by its one writer.
+ * with an 8-byte release store by its one writer.  The played position and
+ * its time are one pair under the played sequence, a sequence lock: odd
+ * while the server writes them.
  */
 #define KL_AUDIO_RING_HEADER			4096U
 #define KL_AUDIO_RING_VERSION_VALUE		1U
@@ -112,6 +114,7 @@
 #define KL_AUDIO_RING_READ_POSITION		128U	/* the server's: taken from the ring */
 #define KL_AUDIO_RING_PLAYED_POSITION		192U	/* the server's: heard, as it reckons */
 #define KL_AUDIO_RING_PLAYED_TIME		200U	/* the server's: CLOCK_MONOTONIC (ns) of that reckoning */
+#define KL_AUDIO_RING_PLAYED_SEQUENCE		208U	/* the server's: odd while the played pair is written */
 #define KL_AUDIO_RING_UNDERRUNS			212U
 #define KL_AUDIO_RING_OVERRUNS			216U
 #define KL_AUDIO_RING_STATE			220U

@@ -368,6 +368,10 @@ kwl_object_destroy(
 	if (object->kind == KWL_SYSTEM_MACHINE)
 		kwl_machine_gone(object);
 
+	/* A sound stream's backend side closes with it (audio-stream.c, WS191). */
+	if (object->kind == KWL_AUDIO_STREAM)
+		kwl_audio_object_gone(object);
+
 	/* A Bluetooth object lets go of its watching and scanning (bluetooth-shell.c, ws143-p006). */
 	if (object->kind == KWL_SYSTEM_BLUETOOTH)
 		kwl_bluetooth_gone(object);
