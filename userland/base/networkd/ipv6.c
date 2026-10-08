@@ -153,7 +153,7 @@ enum ipv6_dhcp_mode {
  * when it runs again (monotonic microseconds; 0: not again), and the wait
  * after the last failure; and the dhcpc that runs (its process, when it
  * started, when it was told to stop, and whether to run again when it
- * ends).
+ * ends), and whether the next run declines the leased address.
  */
 struct ipv6_dhcp {
 	int used;
@@ -166,6 +166,7 @@ struct ipv6_dhcp {
 	uint64_t started;
 	uint64_t terminated;
 	int again;
+	int decline;
 };
 
 static uint8_t ipv6_secret[IPV6_SECRET_LENGTH];
@@ -340,6 +341,23 @@ networkd_ipv6_start(void)
 	/* The list and the socket let go. */
 	free(interfaces);
 	close(descriptor);
+}
+
+/*
+ * Forgets an interface's DHCPv6 (its lease was given back as it went
+ * down or its IPv6 off: no Renew at T1); the next advertisement starts it
+ * again.
+ */
+void
+networkd_ipv6_forget(
+	const char *name)
+{
+	struct ipv6_dhcp *entry;
+
+	/* Its entry, when it has one. */
+	entry = ipv6_dhcp_find(name, 0);
+	if (entry != NULL)
+		ipv6_dhcp_forget(entry);
 }
 
 /*
@@ -808,8 +826,9 @@ ipv6_carrier_down(
  * failed (RFC 4862 section 5.4.5): it is taken off, and a temporary one
  * gets another random identifier (RFC 8981 section 3.4), a stable one
  * (and the link-local one) the next DAD counter (RFC 7217 section 6),
- * three times at most.  An EUI-64 address, a static one and DHCPv6's are
- * left as the kernel marked them (duplicated, not used).
+ * three times at most.  A DHCPv6 address is declined to its server and
+ * another one asked for (`dhcpc -6 -D`).  An EUI-64 address and a static
+ * one are left as the kernel marked them (duplicated, not used).
  */
 static void
 ipv6_duplicate(
@@ -817,6 +836,7 @@ ipv6_duplicate(
 {
 	struct netconf_interface item;
 	struct ipv6_prefix_state *state;
+	struct ipv6_dhcp *entry;
 	struct in6_addr prefix;
 	char name[IF_NAMESIZE];
 	char text[INET6_ADDRSTRLEN];
@@ -840,8 +860,18 @@ ipv6_duplicate(
 	printf("networkd: %s: duplicate IPv6 address %s\n", name, text);
 	fflush(stdout);
 
+	/* DHCPv6's: declined, and another asked for (ws177-p046). */
+	if ((record->rtm_addr_flags & IN6_IFF_DHCP) != 0U) {
+		entry = ipv6_dhcp_find(name, 0);
+		if (entry == NULL || entry->mode != IPV6_DHCP_STATEFUL)
+			return;
+		entry->decline = 1;
+		ipv6_dhcp_run(entry);
+		return;
+	}
+
 	/* Only the /64 addresses networkd makes: SLAAC's, and the link-local one. */
-	if ((record->rtm_addr_flags & IN6_IFF_DHCP) != 0U || record->rtm_prefixlen != 64U)
+	if (record->rtm_prefixlen != 64U)
 		return;
 	memset(&prefix, 0, sizeof(prefix));
 	memcpy(prefix.s6_addr, record->rtm_address.s6_addr, 8U);
@@ -1893,6 +1923,7 @@ ipv6_dhcp_forget(
 	entry->mode = IPV6_DHCP_NONE;
 	entry->due = 0;
 	entry->again = 0;
+	entry->decline = 0;
 }
 
 /*
@@ -1914,12 +1945,14 @@ ipv6_dhcp_run(
 		return;
 	}
 
-	/* dhcpc -6 [-i] [-n] -t SECONDS IF. */
+	/* dhcpc -6 [-i | -D] [-n] -t SECONDS IF. */
 	count = 0;
 	arguments[count++] = "/sbin/dhcpc";
 	arguments[count++] = "-6";
 	if (entry->mode == IPV6_DHCP_STATELESS)
 		arguments[count++] = "-i";
+	else if (entry->decline)
+		arguments[count++] = "-D";
 	if (!entry->resolver)
 		arguments[count++] = "-n";
 	arguments[count++] = "-t";
@@ -1941,11 +1974,12 @@ ipv6_dhcp_run(
 		return;
 	}
 
-	/* Succeeded: running. */
+	/* Succeeded: running (declining, when asked, done by this run). */
 	entry->child = child;
 	entry->started = netutil_monotonic_us();
 	entry->terminated = 0;
 	entry->again = 0;
+	entry->decline = 0;
 	entry->due = 0;
 }
 

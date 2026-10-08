@@ -7,7 +7,8 @@
 
 /*
  * The DHCPv6 messages of `dhcpc -6` (ws130-p007, RFC 8415): a client's
- * Solicit, Request, Renew and Information-Request built, and a server's
+ * Solicit, Request, Renew, Rebind, Release, Decline (ws177-p046) and
+ * Information-Request built, and a server's
  * Advertise and Reply read (its identifier, preference, status, the
  * address of an IA_NA with its times, the DNS servers and search list of
  * RFC 3646, and the information refresh time of RFC 8415 section 21.23).
@@ -31,7 +32,10 @@
 #define DHCP6_ADVERTISE		2U
 #define DHCP6_REQUEST		3U
 #define DHCP6_RENEW		5U
+#define DHCP6_REBIND		6U
 #define DHCP6_REPLY		7U
+#define DHCP6_RELEASE		8U
+#define DHCP6_DECLINE		9U
 #define DHCP6_INFORMATION	11U
 
 /* The status codes a client acts on (RFC 8415 section 21.13). */
@@ -67,7 +71,7 @@ struct dhcp6_duid {
 
 /*
  * A message a client sends: its type and transaction, its identifier, the
- * server's for a Request or a Renew, an IA_NA (with the address asked for
+ * server's for a Request, a Renew, a Release or a Decline, an IA_NA (with the address asked for
  * when there is one), and the elapsed time in hundredths of a second.
  */
 struct dhcp6_request {
@@ -113,5 +117,7 @@ int dhcp6_parse(const uint8_t *message, size_t length, uint32_t xid, const struc
     struct dhcp6_reply *reply);
 void dhcp6_duid_uuid(const uint8_t *random, struct dhcp6_duid *duid);
 uint32_t dhcp6_iaid(const char *interface);
+void dhcp6_lease_times(const struct dhcp6_reply *reply, uint32_t *t1, uint32_t *t2);
+unsigned dhcp6_lease_next(uint64_t elapsed, uint32_t t2, uint32_t valid);
 
 #endif

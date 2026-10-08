@@ -21,11 +21,17 @@
  *          (userland/base/networkd/resolver6.c, ws177-p045)
  *   net    the static IPv6 addresses and IPv6 routes net commit takes
  *          away (userland/base/net/reconcile.c, ws177-p045)
+ *   dhcp6  Rebind, Release and Decline built, T1 and T2, Renew or Rebind
+ *          or Solicit by the lease's age (userland/base/net/dhcp6.c,
+ *          ws177-p046)
+ *   names  a DNSSL's or a Domain Search List's name with a label that is
+ *          not a host name's dropped whole (slaac.c, dhcp6.c, ws177-p046)
  *
  *   plan/ws177/tests/host-ipv6-r.sh
  */
 
 #include "userland/base/libc/resolver-internal.h"
+#include "userland/base/net/dhcp6.h"
 #include "userland/base/net/netconf.h"
 #include "userland/base/net/reconcile.h"
 #include "userland/base/networkd/resolver6.h"
@@ -99,6 +105,10 @@ static void test_libc(void);
 static void test_slaac(void);
 static void test_dns(void);
 static void test_net(void);
+static void test_dhcp6(void);
+static void test_names(void);
+static const uint8_t *option_find(const uint8_t *message, size_t length, unsigned code, size_t *size);
+static size_t names(uint8_t *bytes, const char *const *list, unsigned count);
 static int usable6(const char *text, int settled);
 static int merge(const char *current, const char *owned, const char *wanted, const char *search, char *output, size_t capacity, struct resolver6_servers *now_owned);
 static void servers(const char *list, struct resolver6_servers *result);
@@ -118,6 +128,8 @@ main(void)
 	test_slaac();
 	test_dns();
 	test_net();
+	test_dhcp6();
+	test_names();
 
 	/* The verdict. */
 	printf("host-ipv6-r: %d passed, %d failed\n", passes, failures);
@@ -298,6 +310,207 @@ test_net(void)
 	/* Nothing changed: nothing taken away. */
 	status = reconcile(net_before, net_before);
 	check(status == 0 && strstr(program, "_REMOVE") == NULL, "net: none for the same file");
+}
+
+/* Rebind, Release and Decline, T1 and T2, and what a lease's age calls for (ws177-p046). */
+static void
+test_dhcp6(void)
+{
+	struct dhcp6_request request;
+	struct dhcp6_reply reply;
+	struct dhcp6_duid client;
+	struct dhcp6_duid server;
+	uint8_t random[16];
+	uint8_t message[512];
+	const uint8_t *ia;
+	size_t length;
+	size_t size;
+	uint32_t t1;
+	uint32_t t2;
+	unsigned next;
+	int status;
+
+	/* The identifiers. */
+	memset(random, 0x5a, sizeof(random));
+	dhcp6_duid_uuid(random, &client);
+	memset(random, 0xa5, sizeof(random));
+	dhcp6_duid_uuid(random, &server);
+
+	/* A Rebind: no server's identifier, the IA_NA with the address, the options asked for. */
+	memset(&request, 0, sizeof(request));
+	request.type = DHCP6_REBIND;
+	request.xid = 0x123456U;
+	request.client = &client;
+	request.with_ia = 1;
+	request.with_address = 1;
+	(void)inet_pton(AF_INET6, "fd00:6::150", &request.address);
+	status = dhcp6_build(message, sizeof(message), &length, &request);
+	check(status == 0 && message[0] == DHCP6_REBIND, "dhcp6: a Rebind built");
+	check(option_find(message, length, 2U, &size) == NULL, "dhcp6: a Rebind names no server");
+	ia = option_find(message, length, 3U, &size);
+	check(ia != NULL && size == 12U + 4U + 24U && memcmp(ia + 16, request.address.s6_addr, 16U) == 0,
+	    "dhcp6: a Rebind's IA_NA has the address");
+	check(option_find(message, length, 6U, &size) != NULL, "dhcp6: a Rebind asks for options");
+
+	/* A Release and a Decline: the server's identifier, the address, no options asked for. */
+	request.type = DHCP6_RELEASE;
+	request.server = &server;
+	status = dhcp6_build(message, sizeof(message), &length, &request);
+	check(status == 0 && message[0] == DHCP6_RELEASE, "dhcp6: a Release built");
+	check(option_find(message, length, 2U, &size) != NULL && size == server.length, "dhcp6: a Release names the server");
+	check(option_find(message, length, 6U, &size) == NULL, "dhcp6: a Release asks for no options");
+	request.type = DHCP6_DECLINE;
+	status = dhcp6_build(message, sizeof(message), &length, &request);
+	check(status == 0 && message[0] == DHCP6_DECLINE, "dhcp6: a Decline built");
+	request.with_address = 0;
+	status = dhcp6_build(message, sizeof(message), &length, &request);
+	check(status != 0, "dhcp6: a Decline without its address is refused");
+	request.type = DHCP6_RELEASE;
+	request.with_address = 1;
+	request.server = NULL;
+	status = dhcp6_build(message, sizeof(message), &length, &request);
+	check(status != 0, "dhcp6: a Release without the server is refused");
+
+	/* T1 and T2: the server's; else half and four fifths of the preferred lifetime. */
+	memset(&reply, 0, sizeof(reply));
+	reply.t1 = 60U;
+	reply.t2 = 96U;
+	reply.preferred = 120U;
+	dhcp6_lease_times(&reply, &t1, &t2);
+	check(t1 == 60U && t2 == 96U, "dhcp6: the server's T1 and T2");
+	reply.t1 = 0U;
+	reply.t2 = 0U;
+	dhcp6_lease_times(&reply, &t1, &t2);
+	check(t1 == 60U && t2 == 96U, "dhcp6: T1 and T2 left to the client");
+	reply.t1 = 100U;
+	reply.t2 = 50U;
+	dhcp6_lease_times(&reply, &t1, &t2);
+	check(t1 == 60U && t2 == 60U, "dhcp6: a T1 past T2 taken from the lifetime, T2 not before it");
+	reply.t1 = 0U;
+	reply.t2 = 0U;
+	reply.preferred = DHCP6_INFINITE;
+	dhcp6_lease_times(&reply, &t1, &t2);
+	check(t1 == DHCP6_INFINITE && t2 == DHCP6_INFINITE, "dhcp6: an infinite lifetime, no renewal");
+
+	/* What the lease's age calls for. */
+	next = dhcp6_lease_next(30U, 96U, 120U);
+	check(next == DHCP6_RENEW, "dhcp6: a Renew before T2");
+	next = dhcp6_lease_next(96U, 96U, 120U);
+	check(next == DHCP6_REBIND, "dhcp6: a Rebind from T2");
+	next = dhcp6_lease_next(120U, 96U, 120U);
+	check(next == DHCP6_SOLICIT, "dhcp6: a Solicit once the lease is over");
+	next = dhcp6_lease_next(1000000U, DHCP6_INFINITE, DHCP6_INFINITE);
+	check(next == DHCP6_RENEW, "dhcp6: a record without times: a Renew");
+}
+
+/* A name with a bad label dropped whole, in an RA's DNSSL and a DHCPv6 Domain Search List (ws177-p046). */
+static void
+test_names(void)
+{
+	static const char *const list[] = { "good.example", "bad.ex ample", "next.example" };
+	static const char *const tail[] = { "first.example", "half.b@d" };
+	struct dhcp6_reply reply;
+	struct slaac_ra ra;
+	uint8_t message[256];
+	uint8_t encoded[128];
+	size_t encoded_length;
+	size_t option_length;
+	size_t length;
+	int status;
+
+	/* An RA with a DNSSL: the good names kept, the bad one gone whole, the one after it kept. */
+	memset(message, 0, sizeof(message));
+	message[0] = 134U;
+	encoded_length = names(encoded, list, 3U);
+	option_length = (8U + encoded_length + 7U) / 8U * 8U;
+	message[16] = 31U;
+	message[17] = (uint8_t)(option_length / 8U);
+	message[23] = 60U;
+	memcpy(message + 24, encoded, encoded_length);
+	length = 16U + option_length;
+	status = slaac_parse(message, length, &ra);
+	check(status == 0 && strcmp(ra.search, "good.example next.example") == 0, "names: a DNSSL's bad name dropped whole");
+	check(ra.search_lifetime == 60U, "names: the DNSSL's lifetime");
+
+	/* Two DNSSL options: their names apart. */
+	memcpy(message + 16U + option_length, message + 16, option_length);
+	length = 16U + option_length * 2U;
+	status = slaac_parse(message, length, &ra);
+	check(status == 0 && strcmp(ra.search, "good.example next.example good.example next.example") == 0,
+	    "names: two DNSSL options' names apart");
+
+	/* A DHCPv6 Reply's Domain Search List: the last name's bad half not kept. */
+	memset(message, 0, sizeof(message));
+	message[0] = DHCP6_REPLY;
+	message[3] = 0x01U;
+	encoded_length = names(encoded, tail, 2U);
+	message[4] = 0U;
+	message[5] = 24U;
+	message[6] = 0U;
+	message[7] = (uint8_t)encoded_length;
+	memcpy(message + 8, encoded, encoded_length);
+	length = 8U + encoded_length;
+	status = dhcp6_parse(message, length, 0x01U, NULL, &reply);
+	check(status == 0 && strcmp(reply.search, "first.example") == 0, "names: a Domain Search List's bad name dropped whole");
+}
+
+/* Finds an option of a DHCPv6 message (after its four bytes of type and transaction); NULL when it has none. */
+static const uint8_t *
+option_find(
+	const uint8_t *message,
+	size_t length,
+	unsigned code,
+	size_t *size)
+{
+	size_t offset;
+	unsigned found;
+
+	/* Each option. */
+	offset = 4U;
+	while (offset + 4U <= length) {
+		found = (unsigned)message[offset] << 8 | message[offset + 1U];
+		*size = (size_t)message[offset + 2U] << 8 | message[offset + 3U];
+		if (found == code)
+			return message + offset + 4U;
+		offset += 4U + *size;
+	}
+
+	/* None. */
+	return NULL;
+}
+
+/* Writes names in DNS's label form (a space inside a label is kept as it is); the bytes written. */
+static size_t
+names(
+	uint8_t *bytes,
+	const char *const *list,
+	unsigned count)
+{
+	const char *label;
+	size_t used;
+	size_t size;
+	unsigned index;
+
+	/* Each name's labels, then a zero. */
+	used = 0;
+	for (index = 0; index < count; index++) {
+		label = list[index];
+		while (*label != '\0') {
+			size = strcspn(label, ".");
+			bytes[used++] = (uint8_t)size;
+			memcpy(bytes + used, label, size);
+			used += size;
+			label += size;
+			if (*label == '.')
+				label++;
+		}
+
+		/* The name's end. */
+		bytes[used++] = 0U;
+	}
+
+	/* The length. */
+	return used;
 }
 
 /* Tells whether an IPv6 address in text counts for AI_ADDRCONFIG. */

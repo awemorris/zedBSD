@@ -64,9 +64,10 @@ static int dhcp6_label_valid(const uint8_t *label, size_t length);
 
 /*
  * Builds a client's message: the client's identifier, the server's for a
- * Request or a Renew, an IA_NA for any but an Information-Request, the
- * options asked for, and the elapsed time.  Returns 0, or -1 when the
- * buffer is too small or the request lacks what its type needs.
+ * Request, a Renew, a Release or a Decline, an IA_NA for any but an
+ * Information-Request, the options asked for (none in a Release or a
+ * Decline, RFC 8415 section 21.7), and the elapsed time.  Returns 0, or -1
+ * when the buffer is too small or the request lacks what its type needs.
  */
 int
 dhcp6_build(
@@ -80,12 +81,21 @@ dhcp6_build(
 	unsigned count;
 	unsigned index;
 	int needs_server;
+	int gives_back;
 
-	/* A type a client sends, with the identifiers it needs. */
-	needs_server = request->type == DHCP6_REQUEST || request->type == DHCP6_RENEW;
-	if (request->type != DHCP6_SOLICIT && request->type != DHCP6_INFORMATION && !needs_server)
+	/* A type a client sends, with the identifiers it needs (a Release or a Decline names its address). */
+	gives_back = 0;
+	if (request->type == DHCP6_RELEASE || request->type == DHCP6_DECLINE)
+		gives_back = 1;
+	needs_server = 0;
+	if (request->type == DHCP6_REQUEST || request->type == DHCP6_RENEW || gives_back)
+		needs_server = 1;
+	if (request->type != DHCP6_SOLICIT && request->type != DHCP6_INFORMATION && request->type != DHCP6_REBIND &&
+	    !needs_server)
 		return -1;
 	if (request->client == NULL || (needs_server && request->server == NULL))
+		return -1;
+	if (gives_back && (!request->with_ia || !request->with_address))
 		return -1;
 
 	/* The type and the transaction. */
@@ -118,7 +128,7 @@ dhcp6_build(
 		}
 	}
 
-	/* The options asked for: the DNS's, and the times RFC 8415 says each type asks for. */
+	/* The options asked for: the DNS's, and the times RFC 8415 says each type asks for; none when giving back. */
 	count = 0;
 	requested[count++] = DHCP6_OPTION_DNS;
 	requested[count++] = DHCP6_OPTION_DOMAINS;
@@ -128,9 +138,11 @@ dhcp6_build(
 	} else {
 		requested[count++] = DHCP6_OPTION_SOL_MAX_RT;
 	}
-	dhcp6_option(&writer, DHCP6_OPTION_ORO, count * 2U);
-	for (index = 0; index < count; index++)
-		dhcp6_put16(&writer, requested[index]);
+	if (!gives_back) {
+		dhcp6_option(&writer, DHCP6_OPTION_ORO, count * 2U);
+		for (index = 0; index < count; index++)
+			dhcp6_put16(&writer, requested[index]);
+	}
 
 	/* The elapsed time. */
 	dhcp6_option(&writer, DHCP6_OPTION_ELAPSED, 2U);
@@ -266,6 +278,62 @@ dhcp6_iaid(
 
 	/* Succeeded. */
 	return hash;
+}
+
+/*
+ * Gives a lease's T1 and T2 (RFC 8415 section 21.4): the server's, or
+ * half and four fifths of the preferred lifetime when it leaves them to
+ * the client (or gives a T1 past T2); T2 is never before T1.
+ */
+void
+dhcp6_lease_times(
+	const struct dhcp6_reply *reply,
+	uint32_t *t1,
+	uint32_t *t2)
+{
+	/* T1. */
+	*t1 = reply->t1;
+	if (*t1 == 0U || (reply->t2 != 0U && *t1 > reply->t2)) {
+		*t1 = reply->preferred / 2U;
+		if (reply->preferred == DHCP6_INFINITE)
+			*t1 = DHCP6_INFINITE;
+	}
+
+	/* T2. */
+	*t2 = reply->t2;
+	if (*t2 == 0U) {
+		*t2 = (uint32_t)((uint64_t)reply->preferred * 4U / 5U);
+		if (reply->preferred == DHCP6_INFINITE)
+			*t2 = DHCP6_INFINITE;
+	}
+
+	/* Never before T1. */
+	if (*t2 < *t1)
+		*t2 = *t1;
+}
+
+/*
+ * Tells what a client does with the lease it has, the seconds since it
+ * was taken: a Renew to its server before T2, a Rebind to any server
+ * before its valid lifetime ends (RFC 8415 section 18.2.5), and a new
+ * Solicit after.  Returns DHCP6_RENEW, DHCP6_REBIND or DHCP6_SOLICIT.
+ */
+unsigned
+dhcp6_lease_next(
+	uint64_t elapsed,
+	uint32_t t2,
+	uint32_t valid)
+{
+	/* The lease is over. */
+	if (valid != DHCP6_INFINITE && elapsed >= valid)
+		return DHCP6_SOLICIT;
+
+	/* Past T2. */
+	if (t2 != DHCP6_INFINITE && elapsed >= t2)
+		return DHCP6_REBIND;
+
+	/* Before. */
+	return DHCP6_RENEW;
 }
 
 /* Writes bytes, or marks the message failed when they do not fit. */
@@ -464,7 +532,11 @@ dhcp6_dns(
 	}
 }
 
-/* Keeps a Domain Search List option's names, separated by spaces, as far as they fit. */
+/*
+ * Keeps a Domain Search List option's names after any kept before, separated by spaces, as
+ * far as they fit; a name with a label that is not a host name's is
+ * dropped whole.
+ */
 static void
 dhcp6_domains(
 	const uint8_t *option,
@@ -473,24 +545,48 @@ dhcp6_domains(
 {
 	size_t offset;
 	size_t used;
+	size_t start;
 	unsigned label;
+	int dropping;
+	int valid;
 
 	/* The names in DNS's label form; a zero label ends each. */
 	used = strlen(reply->search);
+	if (used != 0U && used + 1U < DHCP6_SEARCH_MAX)
+		reply->search[used++] = ' ';
+	start = used;
+	dropping = 0;
 	offset = 0;
 	while (offset < length) {
 		label = option[offset++];
 
-		/* The end of a name: a space before the next. */
+		/* The end of a name: a space before the next, which starts there. */
 		if (label == 0U) {
 			if (used != 0U && reply->search[used - 1U] != ' ' && used + 1U < DHCP6_SEARCH_MAX)
 				reply->search[used++] = ' ';
+			start = used;
+			dropping = 0;
 			continue;
 		}
-		if (label > DHCP6_LABEL_MAX || offset + label > length || used + label + 2U >= DHCP6_SEARCH_MAX)
+
+		/* A label past the option's end: the name, and what follows, dropped. */
+		if (label > DHCP6_LABEL_MAX || offset + label > length) {
+			used = start;
 			break;
-		if (!dhcp6_label_valid(option + offset, label))
-			break;
+		}
+
+		/* A label not a host name's, or no room for it: the whole name dropped (ws177-p046), the next one read. */
+		valid = dhcp6_label_valid(option + offset, label);
+		if (!valid || used + label + 2U >= DHCP6_SEARCH_MAX) {
+			used = start;
+			dropping = 1;
+		}
+
+		/* A name being dropped: its labels passed over. */
+		if (dropping) {
+			offset += label;
+			continue;
+		}
 
 		/* A label, after a dot when the name has one already. */
 		if (used != 0U && reply->search[used - 1U] != ' ')

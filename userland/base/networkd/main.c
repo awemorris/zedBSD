@@ -538,6 +538,7 @@ static int set_interface_ipv4(int, const char *, unsigned long, uint32_t);
 static int unlink_owned_resolver(const struct networkd_managed_wlan *);
 static int run_command_until(char *const [], unsigned, uint64_t,
 	char [CHILD_OUTPUT_MAX]);
+static void release_dhcp6(const char *interface, uint64_t deadline, char diagnostic[CHILD_OUTPUT_MAX]);
 static void clean_diagnostic(char *text);
 static int default_route_exists(void);
 static int write_resolver(char *const addresses[], int count);
@@ -3752,6 +3753,7 @@ execute_wired_request(
 	int present;
 	int missing;
 	int result;
+	int off;
 
 	if (request == NULL || diagnostic == NULL ||
 	    diagnostic_capacity < CHILD_OUTPUT_MAX || response_length == NULL ||
@@ -3773,6 +3775,9 @@ execute_wired_request(
 		*error = errno;
 	} else if (request->header.opcode == NETWORKD_OP_UP ||
 	    request->header.opcode == NETWORKD_OP_DOWN) {
+		/* A DHCPv6 lease given back before the interface goes down (ws177-p046). */
+		if (request->header.opcode == NETWORKD_OP_DOWN)
+			release_dhcp6(request->interface, deadline, diagnostic);
 		arguments[0] = "/sbin/ifconfig";
 		arguments[1] = request->interface;
 		arguments[2] = request->header.opcode == NETWORKD_OP_UP ?
@@ -3845,7 +3850,10 @@ execute_wired_request(
 		result = write_resolver(NULL, 0);
 		*error = errno;
 	} else if (request->header.opcode == NETWORKD_OP_IPV6) {
-		/* IPv6 on or off at an interface (ws130-p005). */
+		/* IPv6 on or off at an interface (ws130-p005); off gives a DHCPv6 lease back first (ws177-p046). */
+		off = strcmp(request->address, "off");
+		if (off == 0)
+			release_dhcp6(request->interface, deadline, diagnostic);
 		arguments[0] = "/sbin/ifconfig";
 		arguments[1] = request->interface;
 		arguments[2] = "ipv6";
@@ -8692,6 +8700,37 @@ unlink_owned_resolver(
 	networkd_protocol_clear(&current, sizeof(current));
 	errno = saved;
 	return result;
+}
+
+/*
+ * Gives an interface's DHCPv6 lease back (`dhcpc -6 -r`, which does
+ * nothing without one) and forgets its DHCPv6 schedule (ws177-p046).
+ */
+static void
+release_dhcp6(
+	const char *interface,
+	uint64_t deadline,
+	char diagnostic[CHILD_OUTPUT_MAX])
+{
+	char *arguments[8];
+	int missing;
+
+	/* An interface there. */
+	missing = interface_exists(interface);
+	if (missing != 0)
+		return;
+
+	/* dhcpc -6 -r -t 2 IF, its outcome not the request's. */
+	arguments[0] = "/sbin/dhcpc";
+	arguments[1] = "-6";
+	arguments[2] = "-r";
+	arguments[3] = "-t";
+	arguments[4] = "2";
+	arguments[5] = (char *)interface;
+	arguments[6] = NULL;
+	(void)run_command_until(arguments, 4, deadline, diagnostic);
+	diagnostic[0] = '\0';
+	networkd_ipv6_forget(interface);
 }
 
 /*
