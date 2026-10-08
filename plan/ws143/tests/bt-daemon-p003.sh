@@ -3,8 +3,8 @@
 # loopback controller /dev/bluetooth0; QEMU has no Bluetooth controller).
 #  1. bluetoothd (started here, not by rc) is ready on the loopback controller: bt show says ready, its address
 #     00:11:22:33:44:55, LE and the P-256 and DHKey commands.
-#  2. bt scan 3 finds exactly the loopback's four devices with their fields: the extended result's
-#     "Loopback Keyboard" (class 0x002540), the RSSI result (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60), the public
+#  2. bt scan 3 finds exactly the loopback's five devices with their fields: the extended result's
+#     "Loopback Keyboard" (class 0x002540), the RSSI results (0A:0B:0C:0D:0E:02, class 0x002580, RSSI -60; the Just Works 07, class 0x240404, RSSI -50), the public
 #     report's "Loopback Mouse" (appearance 0x03c2) and the random report (4A:0B:0C:0D:0E:04).
 #  3. The test account btuser (build-bt-image.sh: neither root nor wheel nor the seat's user, review S7 of ws143-p004) is
 #     refused the scan (ERROR permission) but may show.
@@ -44,9 +44,10 @@ has "the daemon logged its start" "$(guest 'cat /tmp/btd.log')" "BLUETOOTHD READ
 # 2. The scan.
 scan=$(guest '/bin/bt scan 3')
 printf '%s\n' "$scan"
-has "four devices" "$scan" "BT SCAN devices=4"
+has "five devices" "$scan" "BT SCAN devices=5"
 has "the keyboard" "$scan" 'address=0A:0B:0C:0D:0E:01 type=bredr rssi=-40 class=0x002540 name="Loopback Keyboard"'
 has "the RSSI result" "$scan" 'address=0A:0B:0C:0D:0E:02 type=bredr rssi=-60 class=0x002580 name=""'
+has "the Just Works device (T1-438)" "$scan" 'address=0A:0B:0C:0D:0E:07 type=bredr rssi=-50 class=0x240404 name=""'
 has "the mouse" "$scan" 'address=0A:0B:0C:0D:0E:03 type=le-public rssi=-50 appearance=0x03c2 name="Loopback Mouse"'
 has "the random report" "$scan" 'address=4A:0B:0C:0D:0E:04 type=le-random rssi=-70 name=""'
 

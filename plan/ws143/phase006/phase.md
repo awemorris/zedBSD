@@ -173,3 +173,9 @@ daemon が居ない・controller が無い・firmware が要る時の説明。le
   - 確認: build（amd64 wayland・libkeiland・settings、Linux all）warning 0、`keiland-os-boundary/check.sh` PASS、style の新しい指摘 0、`exports.py`、`check-scenarios.py` PASS。
   - 未実施: QEMU の AAT（T1）、FreeBSD の build（Makefile.freebsd に足しただけ）、実機。接続・切断の確かめは p005 i02 の統合の後。loopback に PASSKEY の機器が無いので
     窓の PASSKEY は host 試験だけ。
+
+### T1-438 の差の直し（2026-10-08、P1、Q1 の依頼）
+
+- (1a) daemon が無い時に `ZSETTINGS BLUETOOTH state reachable=0` が出なかった: Settings は `KL_SYSTEM_CHANGED_BLUETOOTH` の時だけ state を log していて、service が動いていなければ変化が来ない。`se_bluetooth` に `state_logged` を足し、最初の poll で一度は state を読んで log するようにした（`settings/page-bluetooth.c`・`settings.h`）。
+- (4) loopback の scan に 07 が出ず、Settings から consent→Esc を試せなかった: 試験の kernel の loopback（`src/drivers/generic/bt-hci-loopback.c`）の inquiry に、Just Works の機器 0A:0B:0C:0D:0E:07（class 0x240404、RSSI -50）の Inquiry Result with RSSI を足した（pairing の振る舞いは前から 07 を Just Works として演じている）。`plan/ws143/tests/bt-daemon-p003.sh` の scan の期待を 5 台（07 の行を足す）に直した。シナリオ `apps.settings.bluetooth-pair` は変えない（手順 4 がそのまま流せる）。
+- 確認: `CONFIG_BT_TEST_LOOPBACK` の config（plan/ws143/tests/config-amd64-bt-desktop.mk、BUILD=build/ws143-bt）の vmunix と settings、Linux all は warning 0、style の新しい指摘 0、`bt-desktop-host-test.sh` PASS、ws089 host-build ok。QEMU は T1 に（T1-438 の 1a と 4 の再試験、bt-daemon-p003 の scan）。
