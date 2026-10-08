@@ -88,6 +88,13 @@ struct btd_session;
 typedef void (*btd_handler_fn)(void *context, struct btd_session *session, const uint8_t *packet, size_t length);
 
 /*
+ * The trace of every H4 packet the session writes (received 0) or reads
+ * (received 1), the type's byte first: the daemon's btsnoop record
+ * (ws143-p005, plan/ws143/phase005/phase.md section 9.11).
+ */
+typedef void (*btd_trace_fn)(void *context, const uint8_t *packet, size_t length, int received);
+
+/*
  * One pool of the controller's ACL buffers: the longest packet's data and
  * how many packets it holds, and how many are free now.  BR/EDR has one;
  * LE has its own unless LE Read Buffer Size said it shares BR/EDR's.
@@ -198,6 +205,10 @@ struct btd_session {
 	/* The handler of the connections' packets (NULL: they are dropped), and its context. */
 	btd_handler_fn handler;
 	void *handler_context;
+
+	/* The trace of the packets (NULL: none), and its context. */
+	btd_trace_fn packet_trace;
+	void *packet_trace_context;
 
 	/*
 	 * The packets that came while a command waited, each a 2-byte length
