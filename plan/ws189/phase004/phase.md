@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p004 -->
 # ws189-p004: Mail の作成の添付（multipart/mixed・base64、添付の一覧の UI）と drop の受け
 
-Status: test-wait（q892、P1、2026-10-08 夕。実装・host 試験・自己レビュー・AAT のシナリオ済み、QEMU は T1 へ）
+Status: cleared（2026-10-08 Q1: T1-441 PASS 1〜6、eml は multipart/mixed で SHA-256 一致。差: Photos からの drop は uri-list（sample.png、type=2）でシナリオの image.png・type=4 と違う → シナリオの期待を直す（P1））
 Disposition: normal
 Parent: [WS189](../ws.md)
 Queue: q892（P1）
