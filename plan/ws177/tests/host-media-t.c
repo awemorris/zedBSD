@@ -16,7 +16,8 @@
  *
  * Prints the format and length, each track (with the packets its index
  * left out), each packet (track, times, keyframe, size, the Adler-32 of
- * its bytes, which ffprobe's -show_data_hash adler32 also prints) and how the reading ended; then, for each SEEK_US, the seek and
+ * its bytes, which ffprobe's -show_data_hash adler32 also prints), how the
+ * reading ended and the packets each track left out by then; then, for each SEEK_US, the seek and
  * the first packet of each track after it.  A file the reader refuses
  * prints "OPEN error=N" and exits with 1.
  */
@@ -78,6 +79,10 @@ main(
 
 	/* How reading ended (ENODATA at the end). */
 	printf("END error=%d packets=%u\n", error, count);
+
+	/* The packets each track left out, which a reader without an index counts as it reads. */
+	for (i = 0; i < (int)mf_track_count(file); i++)
+		printf("DROPPED track=%d count=%llu\n", i, (unsigned long long)mf_track(file, (unsigned)i)->dropped_count);
 
 	/* Each seek asked for. */
 	for (i = 2; i < argc; i++)

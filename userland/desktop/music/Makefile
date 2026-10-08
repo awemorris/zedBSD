@@ -12,5 +12,5 @@ MUSIC_SOURCES := userland/desktop/music/main.c userland/desktop/music/view.c use
 	userland/desktop/picture/picture.c \
 	userland/desktop/videoplayer/audio.c userland/desktop/videoplayer/codec.c \
 	userland/desktop/videoplayer/bitstream.c userland/desktop/mediafile/mediafile.c \
-	userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c
+	userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,music,Music,amd64,n,basic,$(MUSIC_SOURCES),y,desktop,desktop/music,desktop/libvulkan desktop/libwayland desktop/libkeiland desktop/libtruetype base/libz-compat base/libpng-compat base/libjpeg-compat base/libgif-compat,0755,program,,,bin))

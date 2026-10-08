@@ -14,7 +14,8 @@ set -u
 cd "$(dirname -- "$0")/../../.."
 out=build/ws122-host-codec
 stage=${LIBAVCODEC_STAGE:-/home/awe/zedBSD-claude1/build/packages/libavcodec/stage/usr/include}
-rm -rf "$out"
+. plan/tools/fresh-out.sh
+fresh_out "$out"
 mkdir -p "$out/media"
 status=0
 
@@ -33,7 +34,7 @@ fi
 # 2. The decoding.
 cc -std=gnu99 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
     plan/ws122/tests/host-codec.c userland/desktop/videoplayer/codec.c userland/desktop/videoplayer/bitstream.c \
-    userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c \
+    userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c \
     -ldl -lpthread -o "$out/host-codec" || { echo "run-host-codec: FAIL (build)"; exit 1; }
 files=plan/ws122/tests/sample.mp4
 if command -v ffmpeg > /dev/null 2>&1; then

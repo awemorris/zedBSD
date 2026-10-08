@@ -86,6 +86,8 @@ def run(path, seeks=()):
                                                    "adler32": fields["adler32"]})
         elif words[0] == "END":
             end = int(fields["error"])
+        elif words[0] == "DROPPED":
+            tracks[int(fields["track"])]["dropped"] = fields["count"]
         elif words[0] == "SEEK":
             afters.append({"time": int(words[1]), "error": int(fields["error"]), "packets": {}})
         elif words[0] == "AFTER":
@@ -121,7 +123,7 @@ def compare(name, got, streams, dropped=None, fmt=None, seeks=(), ignore=()):
                 problems.append("track %d packet %d: %s, expected %s" % (
                     index, i, {k: a[k] for k in diff}, {k: b[k] for k in diff}))
                 break
-        if int(got["tracks"][index]["packets"]) != len(mine):
+        if int(got["tracks"][index]["packets"]) not in (0, len(mine)):
             problems.append("track %d: packet_count %s, read %d" % (index, got["tracks"][index]["packets"], len(mine)))
         want_dropped = 0 if dropped is None else dropped[index]
         if int(got["tracks"][index]["dropped"]) != want_dropped:
@@ -291,6 +293,124 @@ def group_mp4():
     kept = [dict(streams[0], packets=[p for p in streams[0]["packets"] if p["pos"] < last])] + streams[1:]
     dropped = [len(streams[0]["packets"]) - len(kept[0]["packets"])] + [0] * (len(streams) - 1)
     report("mp4-bad-offset", compare("mp4-bad-offset", run(path, (0,)), kept, dropped=dropped))
+
+
+def ts_streams(streams):
+    """ffprobe's packets of a transport stream timed as the reader times them: from the earliest first PTS, on the
+    33-bit clock (a time just before the start is negative)."""
+    raw = [s for s in streams]
+    firsts = [s["raw"][0][0] for s in raw if s["raw"]]
+    start = firsts[0]
+    for first in firsts:
+        if relative90(first, start) < 0:
+            start = first
+    timed = []
+    for stream in raw:
+        packets = []
+        for (pts, dts), packet in zip(stream["raw"], stream["packets"]):
+            packets.append(dict(packet, pts=scale_us(relative90(pts, start), 90000),
+                                dts=scale_us(relative90(dts, start), 90000)))
+        timed.append(dict(stream, packets=packets))
+    return timed
+
+
+def relative90(raw, start):
+    """A 90 kHz time from the start on the wrapping 33-bit clock."""
+    difference = (raw - start) % (1 << 33)
+    if difference >= (1 << 33) - (1 << 30):
+        difference -= 1 << 33
+    return difference
+
+
+def probe_ts(path):
+    """ffprobe's streams of a transport stream, timed from its start."""
+    streams = probe(path)
+    out = subprocess.run(["ffprobe", "-v", "error", "-show_packets", "-show_entries", "packet=stream_index,pts,dts",
+                          "-of", "json", path], check=True, capture_output=True, text=True).stdout
+    data = json.loads(out)
+    kinds = json.loads(subprocess.run(["ffprobe", "-v", "error", "-show_streams", "-of", "json", path], check=True,
+                                      capture_output=True, text=True).stdout)["streams"]
+    order = [i for i, k in enumerate(kinds) if k["codec_type"] in ("video", "audio")]
+    raws = {i: [] for i in order}
+    for packet in data.get("packets", []):
+        if packet["stream_index"] in raws:
+            pts = int(packet.get("pts", packet.get("dts")))
+            raws[packet["stream_index"]].append((pts, int(packet.get("dts", pts))))
+    for stream, index in zip(streams, order):
+        stream["raw"] = raws[index]
+    return ts_streams(streams)
+
+
+def prefix(name, got, streams, most_dropped=1):
+    """Checks that each track's packets are the first ones ffprobe lists (a file cut short)."""
+    problems = []
+    if got["open"] != 0:
+        return ["open error %d" % got["open"]]
+    if got["end"] != 61:
+        problems.append("reading ended with %s" % got["end"])
+    for index, stream in enumerate(streams):
+        mine = got["packets"][index]
+        theirs = stream["packets"][:len(mine)]
+        if not mine or len(mine) > len(stream["packets"]):
+            problems.append("track %d: %d packets of %d" % (index, len(mine), len(stream["packets"])))
+        for i, (a, b) in enumerate(zip(mine, theirs)):
+            if any(a[k] != b[k] for k in ("pts", "dts", "size", "key", "adler32")):
+                problems.append("track %d packet %d: %s, expected %s" % (index, i, a, b))
+                break
+        if int(got["tracks"][index]["dropped"]) > most_dropped:
+            problems.append("track %d: dropped %s" % (index, got["tracks"][index]["dropped"]))
+    return problems
+
+
+def group_ts():
+    """ws177-p028: MPEG-TS and M2TS."""
+    seeks = (0, 1000000, 1550000, 2900000, 10000000)
+    base = VIDEO_IN + ["-f", "lavfi", "-i", "sine=frequency=440:sample_rate=48000", "-t", "3"] + H264
+    cases = (("ts-h264-aac", base + AAC + ["-f", "mpegts"]),
+             ("ts-h264-mp3", base + ["-c:a", "libmp3lame", "-b:a", "64k", "-f", "mpegts"]),
+             ("m2ts", base + AAC + ["-f", "mpegts", "-mpegts_m2ts_mode", "1"]),
+             ("ts-late", base + AAC + ["-f", "mpegts", "-output_ts_offset", "1000"]),
+             ("ts-wrap", base + AAC + ["-f", "mpegts", "-output_ts_offset", "95442"]))
+    made = {}
+    for name, args in cases:
+        made[name] = ffmpeg(name + ".ts", args)
+        streams = probe_ts(made[name])
+        report(name, compare(name, run(made[name], seeks), streams, fmt="mpegts", seeks=seeks))
+
+    # Zero bytes between two packets: the packets are found again and nothing is lost.
+    source = made["ts-h264-aac"]
+    streams = probe_ts(source)
+    place = (os.path.getsize(source) // 188 // 2) * 188
+
+    def insert_junk(d):
+        d[place:place] = bytes(100)
+    path = mutate(source, "ts-junk.ts", insert_junk)
+    report("ts-junk", compare("ts-junk", run(path, seeks), streams, seeks=seeks))
+
+    # Cut in the middle of a packet: what is whole plays, the last PES of a track may be left out.
+    length = os.path.getsize(source) * 6 // 10 + 77
+    path = mutate(source, "ts-cut.ts", lambda d: d.__delitem__(slice(length, None)))
+    report("ts-cut", prefix("ts-cut", run(path, (0, 1000000)), streams))
+
+    # An audio packet in the middle of a PES lost: that PES is left out and counted, the video is whole.
+    data = open(source, "rb").read()
+    audio_pid = None
+    for offset in range(0, len(data), 188):
+        pid = ((data[offset + 1] & 0x1f) << 8) | data[offset + 2]
+        if pid == 0x101:
+            audio_pid = pid
+            if offset > len(data) // 2 and not data[offset + 1] & 0x40:
+                lost = offset
+                break
+    path = mutate(source, "ts-lost.ts", lambda d: d.__delitem__(slice(lost, lost + 188)))
+    got = run(path)
+    problems = compare("ts-lost", got, [streams[0]] + [dict(streams[1], packets=[])])
+    problems = [p for p in problems if not p.startswith("track 1")]
+    audio = got["packets"].get(1, [])
+    if int(got["tracks"][1]["dropped"]) != 1 or not 0 < len(streams[1]["packets"]) - len(audio) <= 40:
+        problems.append("audio: dropped %s, %d of %d packets" % (got["tracks"][1]["dropped"], len(audio),
+                                                                  len(streams[1]["packets"])))
+    report("ts-lost", problems)
 
 
 def main():
