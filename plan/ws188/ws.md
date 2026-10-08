@@ -43,3 +43,11 @@ Queue: なし
 ## ユーザーの決定（2026-10-08）
 
 preview の sandbox の起動（preview/{zedbsd,linux,freebsd}/spawn.c）は「app の側の例外として残す」。境界の検査の許可の表に載せる。
+
+## ユーザーの決定（2026-10-08 昼）
+
+- Files の mount の表（files/mntent/mounts-mntent.c・files/freebsd/mounts-freebsd.c、Places と各 volume の .Trash）: **kl_system に移す**（kl_system_machine に mount の一覧を足す）→ p004。
+- 再生の音（videoplayer・music・libmedia が audiod に直に流す）: **libkeiland の audio stream の口に移す**（compositor・backend が OS ごとに、zedBSD は audiod、Linux は PipeWire、FreeBSD は OSS）→ 大きいので [WS191](../ws191/ws.md)。
+- Q1 の判断: B3 の既存の FAIL は P2 の案どおり（printd の Makefile の comment の行を見ない、sessiond は system の service なので B3 の userland/base/net/ の規則から外す）。
+
+| p004 | Files の mount の一覧を kl_system_machine の要求へ（Places・.Trash の発見）、許可の表の PENDING の行を外す | planned | p003 |

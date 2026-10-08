@@ -491,6 +491,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS188](ws188/ws.md) | MG006 | app の OS の操作を libkeiland → compositor → backend へ（Settings の About・Storage・Users・Languages の残り）と境界の検査の強化（2026-10-08 ユーザー） | planned | p001 設計 |
 | [WS189](ws189/ws.md) | MG006 | app の間の drag and drop（画像、受け入れの見た目、dock の spring-loaded、desktop に file、画面をまたぐ）（2026-10-08 ユーザー） | planned | p001 設計（q892） |
 | [WS190](ws190/ws.md) | MG006 | 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・コピー・切り取り・貼り付け・すべて選択の popup）（2026-10-08 ユーザー、WS189 の後） | planned | p001 設計 |
+| [WS191](ws191/ws.md) | MG006 | 再生の音を libkeiland の audio stream の口へ（compositor・backend、zedBSD audiod・Linux PipeWire・FreeBSD OSS）（2026-10-08 ユーザー） | planning | p001 設計 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -520,6 +521,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 
 <!-- master:decisions-log:start -->
 - 2026-10-08 朝 ユーザー:「/dev/hid-hostは、/dev/input/bridgeに変更し、/dev/bt0は、/dev/bluetooth0に変更できますか？」→ クリックの回答「揃える」: node を `/dev/input/bridge`・`/dev/bluetoothN` に。UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct も input_bridge_*）。bluetooth.h と BT_IOC_* は元から Bluetooth の名前なのでそのまま。P2 が i01c の前に行う。
+- 2026-10-08 昼 ユーザー（クリック）: WS189 の DnD は専用の受け渡し・同じ app の中は app で・画像（PNG）から・見た目は compositor と app で分担・dock の spring-loaded・desktop に file・画面をまたぐ。WS190 の popup はコピー・切り取り・貼り付け・すべて選択。Files の mount の表は kl_system へ、再生の音は libkeiland の audio stream の口へ（WS191）。
 - 2026-10-08 朝 ユーザー（クリックの回答）: USB メモリは最新 main で UAT の image を作る（Q1 が build、書き込みはユーザー）。WS143 B6: account が無い install では bluetoothd は起動しない（今の暫定のまま）。ws143-p005 Q4: ペアリングの後に自動で接続する。Q5: 人が切断した機器からの再接続は断る。Q2: `/dev/hid-host` に HID_HOST_GET_DEVICE を足す。Q1: i2c-hid も共有の HID の glue（hid-input）に乗せる（推しと逆、F-084 を実施に）。libbrowser に要素を探して focus する口を足してよい（描画の改善は止めたまま）。BUG-241 はベータ3。BUG-225 は実機の UAT で見てから。Music のプレイリストなど（backlog-p2 111）は範囲外（後で）。
 - 2026-10-08 夜 ユーザー:「5330はsudoを勝手に使ってよいです。SSH鍵も勝手に更新してください。アップデートして再起動もお願いします。」「BUG-244: はい、優先度を上げてください。」「BUG-200:は解決でOKです。」「BUG-201は保留します。」「BUG-224はいったん閉じてください。」「切り替えのつまみがなんなのかは保留です。」「いったん寝ます。判断事項は起きたらお願いします。ブロッキングしても自走をお願いします。」
 - 2026-10-08 ユーザー: WS005 completed（記録のミス）。規約の整形（各 WS の全文規約の Phase）はベータ3。WS172 はベータ3。WS187 にロック画面の解除（下部から上のスワイプ・wheel の上、自動の lock の後の一定時間は認証なし、手動の lock は常に認証、Password・PIN・Hardware Key の選択）を追加。
@@ -790,7 +792,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | `plan/tools/git-hooks/commit-msg` | git の commit-msg の hook（メッセージが `WIP` ちょうどでない commit を拒否、Co-Authored-By などの混入の防止、2026-10-03） | `cp plan/tools/git-hooks/commit-msg .git/hooks/ && chmod +x .git/hooks/commit-msg`（clone・作り直しの後に毎回） |
 | `plan/tools/toolchain-lock.sh` | 共有の toolchain の tree（`build/llvm`・`llvm-source`・`llvm-build`・`NoctLang`）の directory を読み取り専用にして、許可の無い変更を防ぐ（BUG-096） | `lock`・`unlock`（main が許可した toolchain の変更の間だけ）・`status` |
 | [boot-test.sh](tools/boot-test.sh)（`boot-test.py`） | 起動の確認。OVMF の USB（amd64）か BIOS の IDE（i386）で起動し、画面を QMP で撮って login prompt を読む | `plan/tools/boot-test.sh [IMAGE]`。`OUTPUT`（既定 `build/boot-test`）、`BOOT_TIMEOUT`、`BOOT_MODE=uefi-usb` か `bios-ide` |
-| [Keiland の OS 境界 checker](tools/keiland-os-boundary/check.sh)（WS104） | 共通 source の OS include / ioctl、GPU layout の所有、install literal、libc に残る desktop header を C1〜C5、Linux/zedBSD moduleと実build membershipをL1〜L5で確認。evdev の 1 行だけを例外とする | `sh plan/tools/keiland-os-boundary/check.sh`。PASS は exit 0、違反は各項目の file:line と exit 1 |
+| [Keiland の OS 境界 checker](tools/keiland-os-boundary/check.sh)（WS104） | 共通 source の OS include / ioctl、GPU layout の所有、install literal、libc に残る desktop header を C1〜C5、Linux/zedBSD moduleと実build membershipをL1〜L5で確認。evdev の 1 行だけを例外とする。2026-10-08 WS188 p003: A1〜A5（app と libkeiland の OS の操作: /dev 等の literal・AF_UNIX・getpw*/statvfs/mount・fork/exec・OS の include）と許可の表 [app-allow.tsv](tools/keiland-os-boundary/app-allow.tsv)（行ごとに理由） | `sh plan/tools/keiland-os-boundary/check.sh`。PASS は exit 0、違反は各項目の file:line と exit 1 |
 | [Keiland launcher確認](tools/keiland-launcher/README.md) | 共通shellのruntime/env/argv/customprefix/exec signal、GPU/VTを取得しない | Python3 check.py＋launcher.in。Linux/FreeBSDで実施 |
 | [FreeBSD native の検証](tools/keiland-freebsd/README.md)（WS109） | actual native header/ELF/borrowedfd、properVulkanwindow、IntelGPU/VTlease/input、主要app/PTY/fileopen。専用guest限定、mockを実GPU結果としない | READMEのnativecompile/fixture手順。SSH/QMPの操作は既存承認範囲だけ |
 | [Linux の試験 guest と操作の道具](tools/keiland-linux/README.md)（WS105） | Debian 13 の image / overlay・loopback SSH・QMP screenshot / 入力・install・PNG の画素。host の画面を使わない | `build-guest.sh` / `guest.sh` / `install-guest.sh` / `png-probe.py`、build/ELF/header/source の checks、Vulkan chain/interpose と `wsi-check.sh`（90 frame ×4）。README の timeout 付き command |
