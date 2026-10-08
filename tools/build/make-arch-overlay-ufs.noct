@@ -73,6 +73,10 @@ func main(args){
     for(i in 0..Array.size(files)){var pair=splitSpec(files[i],"--file");var dest=pair[0];var source=pair[1];if(dest=="/bin/sh"){haveSh=true;}var target=root+dest;if(System.shell("mkdir -p "+zbShellQuote(zbParent(target))+" && cp -p "+zbShellQuote(source)+" "+zbShellQuote(target))!=0){zbFail("cannot install manifest file: "+dest);}}
     if(!haveSh){zbFail("profile manifest must contain /bin/sh");}
     for(i in 0..Array.size(modes)){var pair=splitSpec(modes[i],"--mode");if(System.shell("chmod "+zbShellQuote(pair[1])+" "+zbShellQuote(root+pair[0]))!=0){zbFail("cannot apply mode: "+modes[i]);}}
+    // The directories made for the files (/lib/firmware and the like) take
+    // 0755 as the prepared ones do, not the builder's file creation mask;
+    // the sticky ones keep theirs.
+    if(System.shell("find "+zbShellQuote(root)+" \\( -path "+zbShellQuote(root+"/tmp")+" -o -path "+zbShellQuote(root+"/shm")+" \\) -prune -o -type d -exec chmod 0755 {} +")!=0){zbFail("cannot set the directories' mode");}
     // Without --size-mib the image is sized from what was actually staged,
     // so that adding a package cannot silently overflow a fixed capacity.
     // On top of the file bytes UFS needs inodes, cylinder-group metadata and

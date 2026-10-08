@@ -84,6 +84,86 @@ pv_canvas_blend(
 }
 
 /*
+ * Blends a colour over a convex quadrilateral given by its corners in
+ * order (ws177-p042: a character's corners as they lie, turned or not):
+ * each pixel whose centre lies within it.  One thinner than a pixel either
+ * way is blended as the box around it, so that it still shows.
+ */
+void
+pv_canvas_blend_quad(
+	struct pv_canvas *canvas,
+	const double xs[4],
+	const double ys[4],
+	uint32_t color)
+{
+	double left;
+	double right;
+	double top;
+	double bottom;
+	double centre;
+	double cross;
+	double span_left;
+	double span_right;
+	unsigned corner;
+	unsigned next;
+	int crossed;
+	int first;
+	int last;
+	int line;
+
+	/* The box around it. */
+	left = xs[0];
+	right = xs[0];
+	top = ys[0];
+	bottom = ys[0];
+	for (corner = 1; corner < 4U; corner++) {
+		left = fmin(left, xs[corner]);
+		right = fmax(right, xs[corner]);
+		top = fmin(top, ys[corner]);
+		bottom = fmax(bottom, ys[corner]);
+	}
+
+	/* Thinner than a pixel: the box. */
+	if (right - left < 1.0 || bottom - top < 1.0) {
+		pv_canvas_blend(canvas, (int)floor(left), (int)floor(top), (int)ceil(right - floor(left)), (int)ceil(bottom - floor(top)), color);
+		return;
+	}
+
+	/* Each row of pixels whose centres the box spans. */
+	first = (int)ceil(top - 0.5);
+	last = (int)ceil(bottom - 0.5) - 1;
+	if (first < 0)
+		first = 0;
+	if (last > canvas->height - 1)
+		last = canvas->height - 1;
+	for (line = first; line <= last; line++) {
+		/* Where the row's centre line crosses the edges: the span between the leftmost and the rightmost crossing. */
+		centre = (double)line + 0.5;
+		crossed = 0;
+		span_left = 0.0;
+		span_right = 0.0;
+		for (corner = 0; corner < 4U; corner++) {
+			next = (corner + 1U) % 4U;
+
+			/* An edge the line crosses (its lower end in, its upper out). */
+			if ((ys[corner] <= centre && ys[next] > centre) || (ys[next] <= centre && ys[corner] > centre)) {
+				cross = xs[corner] + (centre - ys[corner]) * (xs[next] - xs[corner]) / (ys[next] - ys[corner]);
+				if (!crossed || cross < span_left)
+					span_left = cross;
+				if (!crossed || cross > span_right)
+					span_right = cross;
+				crossed = 1;
+			}
+		}
+
+		/* The pixels whose centres lie within the span. */
+		if (!crossed)
+			continue;
+		pv_canvas_blend(canvas, (int)ceil(span_left - 0.5), line, (int)ceil(span_right - 0.5) - (int)ceil(span_left - 0.5), 1, color);
+	}
+}
+
+/*
  * Blends a rectangle with rounded corners, smoothed at its curved edges.
  */
 void

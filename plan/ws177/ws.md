@@ -67,3 +67,7 @@ Primary Milestone: MG006（関係: MG002・MG003・MG005）
 | [ws177-p036](phase036/phase.md) | 案 U の 4: 出力の大きさの変更で整列の枠を計算し直す、メニューの間の network・volume の press でメニューを先に閉じる、swap の途中の desktop の切り替え・lock で swap を取り消す（backlog-p2 152） | planned | ws177-p035 |
 | [ws177-p037](phase037/phase.md) | 案 U の 5: 整列の記憶（同じ desktop で同じ形を選び直すと前の窓を前の枠へ、compositor の中だけ。2026-10-08 ユーザーの決定 (b)）、Super+矢印で鍵盤だけの入れ替え（backlog-p2 152） | planned | ws177-p036 |
 | [ws177-p038](phase038/phase.md) | 案 U の 6: Home が開く・閉じる途中の bar の fade、Home の上の status の pill の隙間の press を Home へ、明るい壁紙の Home の白の文字（backlog-p2 154） | planned | ws181-p005 |
+| [ws177-p040](phase040/phase.md) | 案 L の 1: libpdf の頁の文字に form XObject の中の文字（注釈は描かないので範囲の外）（backlog-p2 17） | in-progress（2026-10-08 夜 P1 q907） | ws128-p004 |
+| [ws177-p041](phase041/phase.md) | 案 L の 2: PDF Viewer の検索の一致の規則（行・ハイフン・空白、Unicode の大小・全角半角・濁点・合字）、一致の数と背景の読み、U+FFFD を知らせる（backlog-p2 18・19・22・25） | in-progress（2026-10-08 夜 P1 q907） | ws177-p040 |
+| [ws177-p042](phase042/phase.md) | 案 L の 3: 選択（頁をまたぐ、語・行・全て、指の長押しと handle、回転した字の塗り）（backlog-p2 20・21・24） | in-progress（2026-10-08 夜 P1 q907） | ws177-p041 |
+| [ws177-p043](phase043/phase.md) | 案 L の 4: titlebar の無い時の窓の中の検索の欄、Enter の後の caret を末尾に（backlog-p2 23・41） | in-progress（2026-10-08 夜 P1 q907） | ws177-p042 |

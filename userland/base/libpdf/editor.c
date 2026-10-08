@@ -248,6 +248,7 @@ static int editor_joins(const struct pdf_scan_show *before, const struct pdf_sca
 static void editor_point(const double text[6], const double ctm[6], double x, double y, double point[2]);
 static int editor_line_text(struct pdf_page_editor *editor, struct editor_line *line);
 static size_t editor_drawn_at(const struct pdf_page_editor *editor, size_t index);
+static void editor_form_text(const struct pdf_scan *scan, struct pdf_page_text *made);
 
 /*
  * Opens the editor of a page: the page's content is scanned, and the
@@ -4089,8 +4090,10 @@ editor_inside(
  * Reads a page's text (ws128-p004): the characters of the editor's lines
  * in their order, each with its glyph's corners, a space between two
  * strings of a line apart by more than a fifth of the size (its corners
- * the gap), and LINE_END on each line's last character.  Returns 0,
- * EINVAL, ENOMEM, or the failure of reading the page.
+ * the gap), and LINE_END on each line's last character; then the text the
+ * form XObjects the page draws show, in the order shown, in lines of
+ * their own (ws177-p040).  Returns 0, EINVAL, ENOMEM, or the failure of
+ * reading the page.
  */
 int
 pdf_page_text_open(
@@ -4131,6 +4134,9 @@ pdf_page_text_open(
 		for (in = 0; in < line->count; in++)
 			total += editor->scan.shows[line->first + in].characters_count + 1U;
 	}
+
+	/* The forms' characters, with a space before each. */
+	total += editor->scan.form_character_count * 2U;
 
 	/* The text and its characters. */
 	made = calloc(1, sizeof(*made));
@@ -4183,6 +4189,9 @@ pdf_page_text_open(
 			made->characters[made->count - 1U].flags |= PDF_TEXT_LINE_END;
 	}
 
+	/* The forms' text after the page's own lines. */
+	editor_form_text(&editor->scan, made);
+
 	/* Succeeded: the text, without the editor. */
 	pdf_page_editor_close(editor);
 	*text = made;
@@ -4203,4 +4212,58 @@ pdf_page_text_close(
 	/* The characters, then the text. */
 	free(text->characters);
 	free(text);
+}
+
+/*
+ * Adds the text the page's forms show (ws177-p040) after what the page's
+ * text holds: a line ends before each character the scan says starts one,
+ * and a space (its corners the gap) stands before each it says is apart.
+ * The text has room for each character and a space before it.
+ */
+static void
+editor_form_text(
+	const struct pdf_scan *scan,
+	struct pdf_page_text *made)
+{
+	struct pdf_text_character *character;
+	const struct pdf_text_character *last;
+	const double *quad;
+	size_t at;
+
+	/* Each character of the forms in the order shown. */
+	for (at = 0; at < scan->form_character_count; at++) {
+		quad = scan->form_quads + at * 8U;
+
+		/* A line ends before it (after the page's last line, too). */
+		if (scan->form_breaks[at] == PDF_SCAN_FORM_LINE && made->count > 0U)
+			made->characters[made->count - 1U].flags |= PDF_TEXT_LINE_END;
+
+		/* A space over the gap before it, after a character on its line. */
+		if (scan->form_breaks[at] == PDF_SCAN_FORM_SPACE && made->count > 0U) {
+			last = &made->characters[made->count - 1U];
+			character = &made->characters[made->count];
+			memset(character, 0, sizeof(*character));
+			character->character = ' ';
+			character->quad[0] = last->quad[2];
+			character->quad[1] = last->quad[3];
+			character->quad[2] = quad[0];
+			character->quad[3] = quad[1];
+			character->quad[4] = quad[6];
+			character->quad[5] = quad[7];
+			character->quad[6] = last->quad[4];
+			character->quad[7] = last->quad[5];
+			made->count++;
+		}
+
+		/* The character with its glyph's corners. */
+		character = &made->characters[made->count];
+		memset(character, 0, sizeof(*character));
+		character->character = scan->form_characters[at];
+		memcpy(character->quad, quad, sizeof(character->quad));
+		made->count++;
+	}
+
+	/* The forms' last line ends at its last character. */
+	if (scan->form_character_count > 0U)
+		made->characters[made->count - 1U].flags |= PDF_TEXT_LINE_END;
 }

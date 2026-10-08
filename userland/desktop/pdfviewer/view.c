@@ -447,6 +447,9 @@ pv_app_action(
 	case PV_ACTION_COPY:
 		pv_select_copy(app);
 		break;
+	case PV_ACTION_SELECT_ALL:
+		pv_select_all(app);
+		break;
 	case PV_ACTION_NONE:
 		break;
 	}
@@ -471,6 +474,7 @@ pv_app_tick(
 	double eased;
 	size_t page;
 	int sidebar;
+	int counting;
 	int due;
 
 	/* The time of the frame. */
@@ -549,6 +553,11 @@ pv_app_tick(
 		if (due < 0 || (int)(app->message_until - now) < due)
 			due = (int)(app->message_until - now);
 	}
+
+	/* The places of Find are counted a few pages a tick (ws177-p041). */
+	counting = pv_find_tick(app);
+	if (counting >= 0 && (due < 0 || counting < due))
+		due = counting;
 
 	/* Reports the wait. */
 	return due;
@@ -1501,6 +1510,9 @@ handle_key(
 			break;
 		case PV_KEY_C:
 			pv_app_action(app, PV_ACTION_COPY);
+			break;
+		case PV_KEY_A:
+			pv_app_action(app, PV_ACTION_SELECT_ALL);
 			break;
 		default:
 			break;

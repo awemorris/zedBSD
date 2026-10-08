@@ -13,8 +13,10 @@
  * touch catches them.  Two fingers zoom about the point between them.  In
  * the page mode a sideways drag of a page that fits across swipes to the
  * next or the previous page.  A double tap zooms in to twice the scale, or
- * back to the mode's fit.  Over the sidebar and the password card a
- * finger plays the pointer's left button.
+ * back to the mode's fit.  A long press selects the word under it, whose
+ * handles a finger then moves, and a tap lets the selection go
+ * (ws177-p042).  Over the sidebar and the password card a finger plays
+ * the pointer's left button.
  */
 
 #ifndef PDFVIEWER_TOUCH_H
@@ -41,7 +43,8 @@
  * nothing).  While two fingers zoom (pinching), place is the place of the
  * document held under them, scale the scale when they started and ratio
  * their distance's ratio then.  bounds_* are the scroller's bounds as last
- * set.
+ * set.  ws177-p042: handle says a finger (handle_id) holds a handle of the
+ * selection (1 its start's, 2 its end's) and moves it; no gesture sees it.
  */
 struct pv_touch {
 	struct kl_gesture *gesture;
@@ -67,6 +70,8 @@ struct pv_touch {
 	double bounds_y;
 	double bounds_width;
 	double bounds_height;
+	int handle;
+	int32_t handle_id;
 };
 
 /* The touch screen (touch.c). */
