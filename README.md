@@ -2,9 +2,13 @@ zedBSD and Keiland Desktop
 ==========================
 
 <div align="center">
+  <hr>
   <img src="docs/imgs/screenshot1.png" width="80%"><br>
+  <hr>
   <img src="docs/imgs/screenshot2.png" width="80%"><br>
+  <hr>
   <img src="docs/imgs/screenshot3.png" width="80%"><br>
+  <hr>
 </div><br>
 
 `zedBSD` is an operating system for modern computers, including those
