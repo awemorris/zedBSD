@@ -56,6 +56,9 @@
  * committed moves on (a new page's scroll is taken over by the fingers).
  *
  * The sign-in codes of mail (mail.c, WS169 p005).
+ *
+ * text_session is the view's text input's session when the window's text
+ * input was last asked for (browser_view_text_session, ws177-p019).
  */
 struct shell_state {
 	struct browser_view *view;
@@ -68,6 +71,7 @@ struct shell_state {
 	int touch_due;
 	unsigned long page_number;
 	struct shell_mail mail;
+	uint64_t text_session;
 };
 
 static void shell_show_state(struct shell_state *state);
@@ -477,11 +481,24 @@ shell_text_input(
 {
 	char text[KL_TEXT_SURROUNDING_MAX];
 	float caret[4];
+	uint64_t session;
 	size_t cursor;
 	unsigned hints;
 	int purpose;
 	int wanted;
 	int known;
+
+	/*
+	 * Another field, another page, or a composing the page ended itself (a
+	 * click put it into the value, ws177-p019): the text input is turned
+	 * off first, so that the input method is deactivated and drops what it
+	 * was composing, and on again below for the field that has the focus.
+	 */
+	session = browser_view_text_session(state->view);
+	if (session != state->text_session) {
+		kl_window_text_input(state->window.kui, 0);
+		state->text_session = session;
+	}
 
 	/* On while the focus is in a field or a textarea, off otherwise. */
 	wanted = browser_view_text_target(state->view, caret);

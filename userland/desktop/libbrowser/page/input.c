@@ -851,14 +851,24 @@ input_set_focus(
 	}
 
 	/*
-	 * The new focus is recorded before the events run, so a listener that
-	 * asks sees it; the generation paints the ring where it now is.  What
-	 * an input method was composing in the old element goes with the focus.
+	 * What an input method was composing in the old element goes into its
+	 * value before the focus leaves it, as a click in it would put it
+	 * (input fires; ws177-p019).
 	 */
-	page_compose_end(page, old);
+	error = page_compose_commit(page, old);
+	if (error != 0)
+		return error;
+
+	/*
+	 * The new focus is recorded before the events run, so a listener that
+	 * asks sees it; the generation paints the ring where it now is, and
+	 * the session's change starts the program's input method again for the
+	 * new element (ws177-p019).
+	 */
 	page->focused = element;
 	page->focus_visible = visible;
 	page->focus_generation++;
+	page->document->compose_session++;
 
 	/* The old element: blur, then focusout. */
 	if (old != NULL) {

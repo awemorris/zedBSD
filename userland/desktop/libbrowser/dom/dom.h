@@ -421,6 +421,11 @@ struct dom_doctype {
  * generation grows with every change to a tree of the document (a node
  * inserted or removed, text or an attribute changed), so the page can tell
  * that its style and layout are out of date.
+ *
+ * compose_session grows each time the focus moves to another element and
+ * each time the page itself ends what an input method was composing (a
+ * click, a script's value; ws177-p019), so the program can start its input
+ * method's text input again and the input method drops its own composing.
  */
 struct dom_document {
 	struct dom_node node;
@@ -450,6 +455,7 @@ struct dom_document {
 	enum dom_document_content content;
 	enum dom_quirks quirks;
 	uint32_t generation;
+	uint32_t compose_session;
 };
 
 /* Separately allocated weak subscriptions own a token, never their GC context. */

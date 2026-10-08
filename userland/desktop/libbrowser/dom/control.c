@@ -521,7 +521,13 @@ dom_input_set_value(
 	control->caret = length;
 	wb_units_release(&previous);
 
-	/* A script's value ends what an input method was composing (ws177-p019). */
+	/*
+	 * A script's value ends what an input method was composing
+	 * (ws177-p019); the session's change tells the program that the input
+	 * method's own composing must go too.
+	 */
+	if (control->preedit.length != 0)
+		element->node.document->compose_session++;
 	wb_units_clear(&control->preedit);
 	control->preedit_cursor = 0;
 	control->preedit_begin = 0;

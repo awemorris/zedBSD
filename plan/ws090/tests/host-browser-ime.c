@@ -12,7 +12,8 @@
  * with its caret's rectangle, the composed text shown at the caret
  * underlined without changing the value or firing input, the committed
  * text going in with input, the bytes deleted around the caret, and the
- * composing ending when the focus moves, on plan/ws090/tests/pages/ime.html,
+ * composing ending when the focus moves, its text going into the value
+ * with input (q893, as a click would), on plan/ws090/tests/pages/ime.html,
  * whose listeners write each input with the control's value to the
  * console.
  *
@@ -162,18 +163,19 @@ main(
 	error = browser_view_compose(view, "q", -1, -1);
 	check(error == 0 && paint_underlines(view) == lines, "password: nothing composed");
 
-	/* 7. A textarea takes it at its caret, and the composing ends when the focus moves. */
+	/* 7. A textarea takes it at its caret, and the composing ends when the focus moves, its text put into the value (q893). */
 	tabs(view, 1);
 	taken = target(view, caret);
 	check(taken == 1, "textarea: a target");
 	error = browser_view_compose(view, "\xe3\x81\xa6", 0, 3);
 	check(error == 0 && paint_has(view, "\"\xe3\x81\xa6\"") && paint_underlines(view) == lines + 1, "textarea: composed");
+	mark();
 	tabs(view, -1);
-	check(paint_underlines(view) == lines && !paint_has(view, "\"\xe3\x81\xa6\""), "focus: the composing ends");
+	check(paint_underlines(view) == lines && heard("input notes \xe3\x81\xa6\n") && paint_has(view, "\"\xe3\x81\xa6\""), "focus: the composing ends in the value");
 	tabs(view, 1);
 	mark();
 	error = browser_view_commit_text(view, "\xe6\x89\x8b", 0U, 0U);
-	check(error == 0 && heard("input notes") && paint_has(view, "\"\xe6\x89\x8b\""), "textarea: committed, with input");
+	check(error == 0 && heard("input notes") && paint_has(view, "\"\xe3\x81\xa6\xe6\x89\x8b\""), "textarea: committed, with input");
 
 	/* The view goes, and the summary. */
 	browser_view_destroy(view);

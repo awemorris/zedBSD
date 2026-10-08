@@ -355,6 +355,16 @@ int browser_view_compose(struct browser_view *view, const char *preedit, int beg
 int browser_view_commit_text(struct browser_view *view, const char *text, uint32_t delete_before, uint32_t delete_after);
 
 /*
+ * The text input's session (ws177-p019): a number that changes when the
+ * focus moves to another element, when another page is shown, and when
+ * the page itself ended what an input method was composing (a click puts
+ * it into the value, a script's value drops it).  The program starts its
+ * input method's text input again when it changes, so that the input
+ * method drops what it was composing too.  A pure query.
+ */
+uint64_t browser_view_text_session(const struct browser_view *view);
+
+/*
  * The side without a window: the page brought to rest (the page being
  * fetched has arrived, its timers have run on a virtual clock up to budget
  * milliseconds, and with BROWSER_SETTLE_LAYOUT it is laid out with the

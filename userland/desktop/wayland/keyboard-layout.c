@@ -29,6 +29,13 @@
 
 #include <string.h>
 
+/* The text-input-v3 purposes that choose a kind of field (q893). */
+#define LAYOUT_PURPOSE_DIGITS	2U
+#define LAYOUT_PURPOSE_NUMBER	3U
+#define LAYOUT_PURPOSE_PHONE	4U
+#define LAYOUT_PURPOSE_URL	5U
+#define LAYOUT_PURPOSE_EMAIL	6U
+
 /* The smallest movement that is a flick, and the share of a key's side it grows to (in tenths). */
 #define LAYOUT_FLICK_MIN	16
 #define LAYOUT_FLICK_TENTHS	3
@@ -229,6 +236,74 @@ static const struct kwl_qwerty_key layout_symbols_space[] = {
 	{ "→", "→", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_RIGHT, 3U }
 };
 
+/* The space row of the email address's letters: @ in the place of the comma (q893). */
+static const struct kwl_qwerty_key layout_email_space[] = {
+	{ "?123", "?123", NULL, NULL, KWL_FLICK_FACE, 0U, 5U },
+	{ "@", "@", "@", "@", KWL_FLICK_TYPE, 0U, 3U },
+	{ "space", "space", " ", " ", KWL_FLICK_SPACE, 0U, 12U },
+	{ ".", ".", ".", ".", KWL_FLICK_TYPE, 0U, 3U },
+	{ "Enter", "Enter", "\n", "\n", KWL_FLICK_ENTER, 0U, 5U },
+	{ "←", "←", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_LEFT, 3U },
+	{ "↑", "↑", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_UP, 3U },
+	{ "↓", "↓", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_DOWN, 3U },
+	{ "→", "→", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_RIGHT, 3U }
+};
+
+/* The space row of the web address's letters: / in the place of the comma (q893). */
+static const struct kwl_qwerty_key layout_url_space[] = {
+	{ "?123", "?123", NULL, NULL, KWL_FLICK_FACE, 0U, 5U },
+	{ "/", "/", "/", "/", KWL_FLICK_TYPE, 0U, 3U },
+	{ "space", "space", " ", " ", KWL_FLICK_SPACE, 0U, 12U },
+	{ ".", ".", ".", ".", KWL_FLICK_TYPE, 0U, 3U },
+	{ "Enter", "Enter", "\n", "\n", KWL_FLICK_ENTER, 0U, 5U },
+	{ "←", "←", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_LEFT, 3U },
+	{ "↑", "↑", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_UP, 3U },
+	{ "↓", "↓", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_DOWN, 3U },
+	{ "→", "→", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_RIGHT, 3U }
+};
+
+/*
+ * The digits' pad (q893): a telephone's three columns of digits with the
+ * signs a number or a phone number takes beside them, a key and a half
+ * wide each.
+ */
+static const struct kwl_qwerty_key layout_pad_top[] = {
+	{ "1", "1", "1", "1", KWL_FLICK_TYPE, 0U, 6U },
+	{ "2", "2", "2", "2", KWL_FLICK_TYPE, 0U, 6U },
+	{ "3", "3", "3", "3", KWL_FLICK_TYPE, 0U, 6U },
+	{ "-", "-", "-", "-", KWL_FLICK_TYPE, 0U, 6U }
+};
+
+static const struct kwl_qwerty_key layout_pad_middle[] = {
+	{ "4", "4", "4", "4", KWL_FLICK_TYPE, 0U, 6U },
+	{ "5", "5", "5", "5", KWL_FLICK_TYPE, 0U, 6U },
+	{ "6", "6", "6", "6", KWL_FLICK_TYPE, 0U, 6U },
+	{ "+", "+", "+", "+", KWL_FLICK_TYPE, 0U, 6U }
+};
+
+static const struct kwl_qwerty_key layout_pad_lower[] = {
+	{ "7", "7", "7", "7", KWL_FLICK_TYPE, 0U, 6U },
+	{ "8", "8", "8", "8", KWL_FLICK_TYPE, 0U, 6U },
+	{ "9", "9", "9", "9", KWL_FLICK_TYPE, 0U, 6U },
+	{ ".", ".", ".", ".", KWL_FLICK_TYPE, 0U, 6U }
+};
+
+static const struct kwl_qwerty_key layout_pad_bottom[] = {
+	{ "*", "*", "*", "*", KWL_FLICK_TYPE, 0U, 6U },
+	{ "0", "0", "0", "0", KWL_FLICK_TYPE, 0U, 6U },
+	{ "#", "#", "#", "#", KWL_FLICK_TYPE, 0U, 6U },
+	{ "Del", "Del", NULL, NULL, KWL_FLICK_BACKSPACE, 0U, 6U }
+};
+
+static const struct kwl_qwerty_key layout_pad_space[] = {
+	{ "ABC", "ABC", NULL, NULL, KWL_FLICK_FACE, 0U, 5U },
+	{ ",", ",", ",", ",", KWL_FLICK_TYPE, 0U, 3U },
+	{ "space", "space", " ", " ", KWL_FLICK_SPACE, 0U, 12U },
+	{ "Enter", "Enter", "\n", "\n", KWL_FLICK_ENTER, 0U, 5U },
+	{ "←", "←", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_LEFT, 3U },
+	{ "→", "→", NULL, NULL, KWL_FLICK_ARROW, KWL_KEY_RIGHT, 3U }
+};
+
 static const struct layout_qwerty_row layout_qwerty[KWL_QWERTY_FACES][KWL_QWERTY_ROWS] = {
 	{
 		LAYOUT_ROW(layout_extra),
@@ -245,13 +320,48 @@ static const struct layout_qwerty_row layout_qwerty[KWL_QWERTY_FACES][KWL_QWERTY
 		LAYOUT_ROW(layout_symbols_middle),
 		LAYOUT_ROW(layout_symbols_bottom),
 		LAYOUT_ROW(layout_symbols_space)
+	},
+	{
+		LAYOUT_ROW(layout_extra),
+		LAYOUT_ROW(layout_digits),
+		LAYOUT_ROW(layout_letters_top),
+		LAYOUT_ROW(layout_letters_middle),
+		LAYOUT_ROW(layout_letters_bottom),
+		LAYOUT_ROW(layout_email_space)
+	},
+	{
+		LAYOUT_ROW(layout_extra),
+		LAYOUT_ROW(layout_digits),
+		LAYOUT_ROW(layout_letters_top),
+		LAYOUT_ROW(layout_letters_middle),
+		LAYOUT_ROW(layout_letters_bottom),
+		LAYOUT_ROW(layout_url_space)
+	},
+	{
+		LAYOUT_ROW(layout_extra),
+		LAYOUT_ROW(layout_pad_top),
+		LAYOUT_ROW(layout_pad_middle),
+		LAYOUT_ROW(layout_pad_lower),
+		LAYOUT_ROW(layout_pad_bottom),
+		LAYOUT_ROW(layout_pad_space)
 	}
 };
 
 /* The QWERTY panel's faces' names, for the log. */
 static const char *const layout_qwerty_names[KWL_QWERTY_FACES] = {
 	"letters",
-	"symbols"
+	"symbols",
+	"email",
+	"url",
+	"number"
+};
+
+/* The kinds of field's names, for the log (q893). */
+static const char *const layout_field_names[] = {
+	"text",
+	"number",
+	"email",
+	"url"
 };
 
 /* The faces' names, for the log and the title band. */
@@ -628,6 +738,124 @@ kwl_qwerty_face_name(
 
 	/* The name. */
 	return layout_qwerty_names[face];
+}
+
+/*
+ * Returns the QWERTY face the face key goes to from a face, in a field
+ * whose own face is field_face (q893): the symbols from letters, the
+ * field's own face from the symbols (its letters, or its digits' pad), and
+ * the letters from the pad, so that a field of digits goes round the pad,
+ * the letters and the symbols.
+ */
+unsigned
+kwl_qwerty_face_next(
+	unsigned face,
+	unsigned field_face)
+{
+	/* The pad's key is ABC: the letters. */
+	if (face == KWL_QWERTY_NUMBER)
+		return KWL_QWERTY_LETTERS;
+
+	/* The symbols' key goes back to the field's own face (the letters when it has none). */
+	if (face == KWL_QWERTY_SYMBOLS && field_face < KWL_QWERTY_FACES)
+		return field_face;
+	if (face == KWL_QWERTY_SYMBOLS)
+		return KWL_QWERTY_LETTERS;
+
+	/* Every face of letters goes to the symbols. */
+	return KWL_QWERTY_SYMBOLS;
+}
+
+/*
+ * Returns the kind of field (KWL_FIELD_*) a text input's purpose
+ * (text-input-v3's number) makes; a purpose of none of them is a text
+ * field's.
+ */
+unsigned
+kwl_field_kind(
+	uint32_t purpose)
+{
+	/* What the purpose asks for. */
+	switch (purpose) {
+	case LAYOUT_PURPOSE_DIGITS:
+	case LAYOUT_PURPOSE_NUMBER:
+	case LAYOUT_PURPOSE_PHONE:
+		return KWL_FIELD_NUMBER;
+	case LAYOUT_PURPOSE_URL:
+		return KWL_FIELD_URL;
+	case LAYOUT_PURPOSE_EMAIL:
+		return KWL_FIELD_EMAIL;
+	default:
+		break;
+	}
+
+	/* Any other purpose types text. */
+	return KWL_FIELD_TEXT;
+}
+
+/*
+ * Returns the QWERTY face a kind of field opens on: the letters, the
+ * digits' pad, or the letters with an email's or a web address's sign.
+ */
+unsigned
+kwl_field_qwerty_face(
+	unsigned kind)
+{
+	/* The face made for the kind. */
+	switch (kind) {
+	case KWL_FIELD_NUMBER:
+		return KWL_QWERTY_NUMBER;
+	case KWL_FIELD_EMAIL:
+		return KWL_QWERTY_EMAIL;
+	case KWL_FIELD_URL:
+		return KWL_QWERTY_URL;
+	default:
+		break;
+	}
+
+	/* A text field's letters. */
+	return KWL_QWERTY_LETTERS;
+}
+
+/*
+ * Returns the flick face a kind of field opens on: the number face for
+ * digits, the alpha face for an email or a web address, and for a text
+ * field the face the user chose (chosen).
+ */
+unsigned
+kwl_field_flick_face(
+	unsigned kind,
+	unsigned chosen)
+{
+	/* Digits. */
+	if (kind == KWL_FIELD_NUMBER)
+		return KWL_FLICK_NUMBER;
+
+	/* An address's letters. */
+	if (kind == KWL_FIELD_EMAIL || kind == KWL_FIELD_URL)
+		return KWL_FLICK_ALPHA;
+
+	/* A text field keeps the user's face (the kana outside the faces). */
+	if (chosen >= KWL_FLICK_FACES)
+		return KWL_FLICK_KANA;
+
+	/* The user's face. */
+	return chosen;
+}
+
+/*
+ * Returns a kind of field's name (text, number, email, url); "?" for none.
+ */
+const char *
+kwl_field_kind_name(
+	unsigned kind)
+{
+	/* Only the kinds. */
+	if (kind >= sizeof(layout_field_names) / sizeof(layout_field_names[0]))
+		return "?";
+
+	/* The name. */
+	return layout_field_names[kind];
 }
 
 /*
