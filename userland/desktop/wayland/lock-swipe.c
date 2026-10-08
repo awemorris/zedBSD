@@ -86,12 +86,14 @@ kwl_lock_swipe_press(
 	if ((int64_t)y * 100 < (int64_t)height * LOCK_SWIPE_LOWER)
 		return 0;
 
-	/* Succeeded: followed from here, nothing travelled yet. */
+	/* Follows the press from here, nothing travelled yet. */
 	swipe->pressing = 1U;
 	swipe->start_x = x;
 	swipe->start_y = y;
 	swipe->up = 0;
 	swipe->across = 0;
+
+	/* Succeeded: the press is followed. */
 	return 1;
 }
 
@@ -124,9 +126,11 @@ kwl_lock_swipe_release(
 {
 	int32_t distance;
 
-	/* Only a press being followed, and it is followed no more. */
+	/* Ignores a release that has no press being followed. */
 	if (!swipe->pressing)
 		return 0;
+
+	/* Follows the press no more. */
 	swipe->pressing = 0U;
 
 	/* Short of the distance. */
@@ -178,7 +182,7 @@ kwl_lock_swipe_wheel(
 	if (swipe->wheel_notches != 0U && now_ms - swipe->wheel_ms > LOCK_WHEEL_PAUSE_MS)
 		swipe->wheel_notches = 0U;
 
-	/* These notches up, now. */
+	/* Counts these notches up, now. */
 	swipe->wheel_notches += (unsigned)(-vertical);
 	swipe->wheel_ms = now_ms;
 
@@ -186,8 +190,10 @@ kwl_lock_swipe_wheel(
 	if (swipe->wheel_notches < LOCK_WHEEL_NOTCHES)
 		return 0;
 
-	/* Succeeded: turned up enough; the next turn counts afresh. */
+	/* Starts the next turn's count afresh. */
 	swipe->wheel_notches = 0U;
+
+	/* Succeeded: turned up enough. */
 	return 1;
 }
 
@@ -214,8 +220,10 @@ kwl_lock_swipe_pad(
 	if (swipe->pad_up_um < LOCK_PAD_UM)
 		return 0;
 
-	/* Succeeded: far enough; this touch is spent. */
+	/* Spends this touch, so it opens no more. */
 	swipe->pad_spent = 1U;
+
+	/* Succeeded: far enough. */
 	return 1;
 }
 
@@ -237,8 +245,10 @@ kwl_lock_swipe_pad_gesture(
 	if (travel_um < LOCK_PAD_UM)
 		return 0;
 
-	/* Succeeded: far enough; this touch is spent. */
+	/* Spends this touch, so it opens no more. */
 	swipe->pad_spent = 1U;
+
+	/* Succeeded: far enough. */
 	return 1;
 }
 

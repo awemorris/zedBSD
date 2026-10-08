@@ -135,7 +135,7 @@
 
 /*
  * How long after a lock the session made itself a swipe alone opens it
- * (ws187-p002; the default proposed to the user on 2026-10-08, five
+ * (ws187-p002; the default the user decided on 2026-10-08, five
  * minutes, on the wall clock).
  */
 #define LOCK_GRACE_SECONDS	300
@@ -640,7 +640,6 @@ kwl_greeter_key(
 {
 	int error;
 	int held;
-
 	int modifies;
 
 	/* Releases do nothing, and nothing does once the session is starting or the machine ending. */
@@ -660,9 +659,12 @@ kwl_greeter_key(
 	 * typing (ws187-p002); a key never opens the lock without the secret.
 	 */
 	if (server->locked && !greeter_lock_card) {
+		/* A modifier alone brings no card. */
 		modifies = greeter_key_modifies(key);
 		if (modifies)
 			return 1;
+
+		/* Brings the card, and the key goes on into its field. */
 		greeter_lock_card = 1U;
 		kwl_lock_swipe_reset(&greeter_swipe);
 		printf("KWL LOCK card via=key\n");
@@ -894,6 +896,7 @@ kwl_greeter_tick(
 	    greeter_lock_card &&
 	    greeter_password_length == 0U &&
 	    !greeter_waiting) {
+		/* Hides the card once the input has been quiet long enough. */
 		now_ms = kwl_milliseconds();
 		if (now_ms - server->lock_input_ms >= GREETER_CARD_IDLE_MS) {
 			greeter_lock_card = 0U;
@@ -1470,6 +1473,7 @@ greeter_draw_hint(
 	VkCommandBuffer command)
 {
 	float color[4] = { 0.15f, 0.21f, 0.29f, GREETER_HINT_OPACITY };
+	const char *hint;
 	int32_t distance;
 	int32_t rise;
 	int32_t baseline;
@@ -1487,8 +1491,9 @@ greeter_draw_hint(
 	baseline = (int32_t)server->height - GREETER_HINT_FOOT - rise;
 	color[3] = GREETER_HINT_OPACITY * (1.0f - 0.67f * (float)rise / (float)distance);
 
-	/* The words, centred. */
-	greeter_draw_centered(server, command, SIZE_SEARCH, (int32_t)server->width / 2, baseline, kl_tr("Swipe up to unlock"), (int32_t)server->width, color);
+	/* Draws the words, centred. */
+	hint = kl_tr("Swipe up to unlock");
+	greeter_draw_centered(server, command, SIZE_SEARCH, (int32_t)server->width / 2, baseline, hint, (int32_t)server->width, color);
 }
 
 /*
@@ -2040,10 +2045,12 @@ greeter_layout_styles(
 	unsigned index;
 	unsigned count;
 
-	/* None until a lock screen offers more than the password. */
+	/* Offers none on the login screen. */
 	layout->style_count = 0U;
 	if (!server->locked)
 		return;
+
+	/* Offers none until sessiond offers more than the password. */
 	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) == 0U)
 		return;
 
@@ -2122,9 +2129,11 @@ greeter_style_choose(
 	struct kwl_server *server,
 	unsigned style)
 {
-	/* Not while an answer is awaited, nor for the style the field takes already. */
+	/* Keeps the style while an answer is awaited. */
 	if (greeter_waiting)
 		return;
+
+	/* Has nothing to change for the style the field takes already. */
 	if (style == greeter_style)
 		return;
 

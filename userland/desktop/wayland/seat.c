@@ -524,6 +524,7 @@ kwl_seat_motion_shell(
 	/* The lock screen has the pointer: only its buttons light up (ws035-p102), and a press may be a swipe up (ws187-p002). */
 	server->lock_input_ms = kwl_milliseconds();
 	if (server->locked) {
+		/* Lets the lock screen follow a press being swiped. */
 		kwl_greeter_motion(server);
 		server->dirty = 1;
 		return 1;
@@ -884,6 +885,7 @@ seat_axis(
 	/* The wheel turned up on the lock screen may open it (ws187-p002); a touch pad's fingers are counted by input.c. */
 	server->lock_input_ms = kwl_milliseconds();
 	if (server->locked) {
+		/* Counts the notches of a wheel; a touch pad's fingers are not notches. */
 		if (source == AXIS_SOURCE_WHEEL)
 			kwl_greeter_wheel(server, vertical);
 		return;
