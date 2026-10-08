@@ -1,0 +1,1370 @@
+boot: kernel heap, process, and scheduler initialization
+I/O pool large=24 small=24 resident=1675264 budget=67108864
+boot: HAL initialized successfully. [cpu 12, memory 7876MB, timer 1ms]
+boot: CPUs ready: 12
+boot: platform device discovery
+usb: URB completion contract q009-release-acquire-v1
+pci: ECAM segment 0000 bus 00 at 00000000:c0000000
+i915: device 8086:46a8 rev 0c attached
+i915: device 8086:46a8 registered; the start waits for kernel readiness
+xhci: pci 0000:00:0d.0 id=8086:461e sub=1028:0b02 rev=04 parent=root
+xhci: pci 0000:00:0d.0 BAR0 type=64 size=00000000:00010000 original=00000060:55280000/00000060:55280004 final=00000060:55280000/00000060:55280004 mapped=65536
+xhci: pci 0000:00:0d.0 command=0006->0002 (MEM on, MASTER off)
+xhci: pci 0000:00:0d.0 caps len=80 version=0120 hcs1=03000840 hcs2=14200054 hcc1=20007fc1 dboff=00003000 rtsoff=00002000 reject=00000000:ok
+usb0: xHCI, 3 root ports
+xhci: PCI controller, version=120 ports=3 slots=64 irq=0 MSI
+xhci: pci 0000:00:14.0 id=8086:51ed sub=1028:0b02 rev=01 parent=root
+xhci: pci 0000:00:14.0 BAR0 type=64 size=00000000:00010000 original=00000060:55260000/00000060:55260004 final=00000060:55260000/00000060:55260004 mapped=65536
+xhci: pci 0000:00:14.0 command=0006->0002 (MEM on, MASTER off)
+xhci: pci 0000:00:14.0 caps len=80 version=0120 hcs1=10000840 hcs2=14200054 hcc1=20007fc1 dboff=00003000 rtsoff=00002000 reject=00000000:ok
+usb1: xHCI, 16 root ports
+xhci: PCI controller, version=120 ports=16 slots=64 irq=0 MSI
+intel-ax211: controller retained; WLAN publication deferred
+hda: codec 0, 2 output pin(s), input yes, volume yes, 1 format(s), MSI
+acpi: PCI_Config region of absent function 0:10.6 reads as all ones
+acpi: PCI_Config region of absent function 0:10.7 reads as all ones
+ACPI Debug: "[DellRtd3 Adl_Tbt SSDT][AcpiTableEntry]"
+ACPI Debug: 0x4549e75
+ACPI Debug: "[DellRtd3 Adl_Tbt SSDT][AcpiTableExit]"
+ACPI Debug: 0x454c6c6
+ACPI Debug: "[DellUsbPortXhciAdl xh_adl SSDT][AcpiTableEntry]"
+ACPI Debug: 0x4552d5d
+ACPI Debug: "[DellUsbPortXhciAdl xh_adl SSDT][AcpiTableExit]"
+ACPI Debug: 0x4555fef
+ACPI Debug: "CPU XHCI PCIe MMIO Address0xC0068000"
+ACPI Debug: "TDM0 MMIO Address0xC006A000"
+ACPI Debug: "TDM1 MMIO Address0xC006B000"
+ACPI Debug: "BASE of ITBT Port0x0"
+ACPI Debug: "PCIe MMIO Address0xC0038000"
+ACPI Debug: "BASE of ITBT Port0x1"
+ACPI Debug: "PCIe MMIO Address0xC0039000"
+ACPI Debug: "BASE of ITBT Port0x2"
+ACPI Debug: "PCIe MMIO Address0xC003A000"
+ACPI Debug: "BASE of ITBT Port0x3"
+ACPI Debug: "PCIe MMIO Address0xC003B000"
+ACPI Debug: "TCSS xHCI _STA0x1"
+ACPI Debug: "TCSS DMA0 _STA0x1"
+ACPI Debug: "TCSS DMA1 _STA0x0"
+ACPI Debug: "TCSS RP0 _STA0x1"
+ACPI Debug: "TCSS RP1 _STA0x1"
+ACPI Debug: "TCSS RP2 _STA0x0"
+ACPI Debug: "TCSS RP3 _STA0x0"
+ACPI: S5 is SLP_TYP 7/0
+ACPI: reset register port 0xb2 value 0x73 width 8
+ACPI: SCI_EN 1, PM1_EN 0x20, 4 runtime GPEs
+acpi: SCI on IRQ 9
+ACPI: Notify(\_SB_.LID0, 0x80) has no handler
+ACPI: EC at ports 0x930/0x934, GPE 0x6e
+acpi: first SCI handled
+ACPI: Notify(\_SB_.PR00, 0x80) has no handler
+acpi: lid events on GPE 0x18
+acpi: power-button events on GPE 0x18
+acpi: power device lid value 1
+acpi: power device power-button value -1
+acpi: power device sleep-button value -1
+acpi: power device ac value 1
+acpi: power device battery0 value 100
+ACPI: LPS0 \_SB_.PEPD, Intel functions 0x7f, Microsoft functions 0x1ff
+acpi: 33 tables listed, namespace ready
+pci: _CRS window 0x70800000-0xbfffffff
+pci: _CRS window 0x4000000000-0x7fffffffff
+pci: 0000:00:15.1 BAR0 assigned 0x4010000000 size 0x1000 from _CRS window 0x4000000000-0x7fffffffff
+pci: 0000:00:15.0 BAR0 assigned 0x4010001000 size 0x1000 from _CRS window 0x4000000000-0x7fffffffff
+lpss-i2c: 00:15.1 ready, FIFO tx 64 rx 64, clock 133000 kHz
+lpss-i2c: 00:15.0 ready, FIFO tx 64 rx 64, clock 133000 kHz
+ucsi: the mailbox is exchanged under \ECMU
+ucsi: \_SB_.UBTC, mailbox 0x614e3000 (0x1000 bytes), version 0x0100, the 1.x arrangement
+typec: display port TC1: connector 0 (group 0 position 1), bound (error 0)
+typec: display port TC2: connector 1 (group 0 position 2), bound (error 0)
+typec: display port TC3: no single connector at group 0 position 0 (visible 0), not bound
+typec: display port TC4: no single connector at group 0 position 0 (visible 0), not bound
+graphics: built-in VGA 8x16 font selected
+ucsi: version 1.0.0, 1.x mailbox
+boot: platform devices detected: 0
+ucsi: rec 1 W 0000000000000001
+ACPI: Notify(\_SB_.PR01, 0x80) has no handler
+boot: waiting up to 5 seconds for boot storage
+ucsi: rec 2 R 10000000 1 0
+ucsi: rec 3 R 08000000 1 0
+xhci: port 6 reset complete portsc=00000e03
+ucsi: rec 4 W 0000000080010005
+ucsi: rec 5 R 80000000 1 0
+usb1: device 1 port 6 0c45:6d1d class ef configuration=1 configured (no supported configuration; first selected)
+usb1: device 1 interface 0 class 0e/01/00 no-driver
+usb1: device 1 interface 1 class 0e/02/00 no-driver
+ucsi: rec 6 W 0000000000020004
+ACPI: Notify(\_SB_.PR02, 0x80) has no handler
+ucsi: rec 7 R 20000000 1 0
+ucsi: rec 8 W 0000000000000006
+xhci: port 8 reset complete portsc=00000e03
+ucsi: rec 9 R 80001000 1 16
+ucsi: rec 9 I 0 44030000021400000400000000032001
+ucsi: rec 10 W 0000000000020004
+usb1: device 2 port 8 0a5c:5842 class 00 configuration=1 configured
+usb1: device 2 interface 0 class fe/00/00 no-driver
+usb1: device 2 interface 1 class 0b/00/00 no-driver
+smartcard: /dev/smartcard0: 58200 slot 0 of 1
+usb-ccid: 58200: 1 slot(s), extended APDUs, messages of 528 bytes
+usb1: device 2 interface 2 class 0b/00/00 driver=usb-ccid
+usb1: device 2 interface 3 class ff/00/00 no-driver
+ucsi: rec 11 R 20000000 1 0
+ACPI: Notify(\_SB_.PR03, 0x80) has no handler
+ucsi: 2 connectors, 4 Alternate Modes, features 0x000014
+ucsi: rec 12 W 0000000000010007
+ucsi: rec 13 R 80000200 1 2
+ucsi: rec 13 I 0 e137
+ucsi: rec 14 W 0000000000020004
+xhci: port 10 reset complete portsc=00000603
+ucsi: rec 15 R 20000000 1 0
+usb1: port 10 enumeration failed (3)
+ucsi: rec 16 W 000001000100000c
+xhci: port 15 reset complete portsc=00001203
+ACPI: Notify(\_SB_.PR04, 0x80) has no handler
+usb1: device 3 port 15 30de:6545 class 00 configuration=1 configured
+ucsi: rec 17 R 80000c00 1 12
+ucsi: rec 17 I 0 87800100000001ff461c0000
+zedBSD 1.0.0-beta2
+usb-storage: sda blocks=122019840 block-size=512 cache=unknown dpofua=no flush=sync-cache
+boot: parameters: boot0=UUID=167F-8843 rootpart=PARTLABEL=zedBSD-root swap0=PARTLABEL=zedBSD-swap logo=logo.ppm login=graphical kmsg=quiet
+ucsi: rec 18 W 0000000000020004
+usb1: device 3 interface 0 class 08/06/50 driver=usb-storage
+boot: ignored 1 unknown parameter; first=logo
+boot: VFS initialization
+i915: display device: 8086:46a8 -> display version 13, Alder Lake-P class (XE_LPD)
+i915: PM probe get_sync: cfg_vendor=0x8086 usage=1 active=1 resume_rc=0
+vfs: boot BIOS=80 GPT partition=unknown devices=0
+i915: pci_enable_device ok (command=0x0007)
+i915: uncore BAR mapped (8388608 bytes)
+input: /dev/input/event0: PC/AT PS/2 mouse
+i915: device_info: slice_fuse=0x00000001(1) dss_fuse=0x0000001f(5 DSS)
+input: /dev/input/event1: PC/AT PS/2 keyboard
+i915: gt_init_mmio: clock=19200000Hz period=52ns sseu(slice=0x1 dss=0x1f eu/ss=16 total=80) l3bank=0x7 engine_mask=0x10503 engines=5 fault=0x0
+i915: engine[0] rcs0: class=0 inst=0 base=0x02000 reset_domain=0x2 ctx_size=57344 caps=0x0
+i915: engine[1] bcs0: class=3 inst=0 base=0x22000 reset_domain=0x4 ctx_size=8192 caps=0x0
+xhci: port 3 reset complete portsc=00001203
+i915: engine[2] vcs0: class=1 inst=0 base=0x1c0000 reset_domain=0x20 ctx_size=8192 caps=0x3
+i915: engine[3] vcs2: class=1 inst=2 base=0x1d0000 reset_domain=0x80 ctx_size=8192 caps=0x3
+i915: engine[4] vecs0: class=2 inst=0 base=0x1c8000 reset_domain=0x2000 ctx_size=8192 caps=0x2
+vfs: native boot disk=none physical disks=1
+i915: gt_reset attempt=0 passes=2 rc=0
+i915: sanitize_gpu __intel_gt_reset(ALL_ENGINES) ok
+i915: dma_request: streaming_mask=0x7fffffffff coherent_mask=0x7fffffffff max_seg=0xffffffff
+i915: ggtt_probe: ggms=3 entries=1048576 (4096 MiB GPU VA window)
+i915: scratch: cpu=0xffff800100704000 dma=0x100704000 len=0x1000 ggtt_pte=0x100704001
+i915: ggtt_init_hw: gmadr=0x4000000000 mappable_end=0x10000000
+i915: ggtt_init_hw: WC aperture mapped base=0x4000000000 size=0x10000000 va=0xfffffffec103a000 attr=RW|WC
+ucsi: rec 19 R 20000000 1 0
+i915: ggtt_init_hw: 32 fence registers initialized
+i915: pci_set_master ok (command=0x0007)
+i915: pci_enable_msi ok (vector programmed, msi_enabled=1, handler unattached)
+i915: P2 opregion: ASLS=0x614e5018
+i915: P2 opregion: data=AVAILABLE ver=2.1 mboxes=0x1d VBT via RVDA size=8704 valid=1 | runtime=DISABLED (ACPI_RUNTIME_UNAVAILABLE (no AML / ACPI event delivery in zedBSD): the OpRegion is used as data only)
+i915: P2 opregion runtime mailboxes as found (observed only; this driver writes none of them): ACPI drdy=0x0 csts=0x0 cevt=0x0 chpd=0x0 clid=0x80000003 | ASLE ardy=0x0 aslc=0x0 tche=0x0
+i915: P2 opregion: sign='IntelGraphicsMem' size=8KiB version=0x02010000
+i915: dram: raw=0x00003420 type=0 channels=2 qgv_points=4 psf_gv_points=3 wm_lv0_adjust=0
+i915: bw: QGV 0 DCLK=2134 tRP=15 tRDPRE=8 tRAS=35 tRCD=15 tRC=50
+ucsi: rec 20 W 000001020100000c
+usb0: device 1 port 3 0bda:8156 class 00 configuration=2 configured
+i915: bw: QGV 1 DCLK=2934 tRP=21 tRDPRE=12 tRAS=47 tRCD=21 tRC=68
+i915: bw: QGV 2 DCLK=3201 tRP=22 tRDPRE=12 tRAS=52 tRCD=22 tRC=74
+i915: bw: QGV 3 DCLK=2668 tRP=19 tRDPRE=10 tRAS=43 tRCD=19 tRC=62
+i915: bw: PSF GV 0 CLK=32
+i915: bw: PSF GV 1 CLK=48
+i915: bw: PSF GV 2 CLK=48
+i915: bw: BW0/QGV0 num_planes=0 deratedbw=9299 peakbw=34144
+i915: bw: BW0/QGV1 num_planes=0 deratedbw=10925 peakbw=46944
+gpt: sda protective MBR extent mismatch: advertised-last=4329471 gpt-last=122019839; using GPT
+i915: bw: BW0/QGV2 num_planes=0 deratedbw=11707 peakbw=51216
+vfs: scan sda H/S=255/63 blocks=122019840: 3 entries
+usb-cdc-ncm: ue0 mac=6c:1f:f7:06:14:8a
+i915: bw: BW0/QGV3 num_planes=0 deratedbw=10508 peakbw=42688
+vfs: sda partition 1 start=00000000:00000800 data=00000000:00000800 blocks=00000000:00020000
+usb0: device 1 interface 0 class 02/0d/00 driver=usb-cdc-ncm
+i915: bw: BW0/PSF0 num_planes=0 bw=34133
+vfs: sda partition 2 start=00000000:00020800 data=00000000:00020800 blocks=00000000:00200000
+usb0: device 1 interface 1 class 0a/00/01 claimed-by=0 driver=usb-cdc-ncm
+vfs: sda partition 3 start=00000000:00220800 data=00000000:00220800 blocks=00000000:00200000
+i915: bw: BW0/PSF1 num_planes=0 bw=51200
+i915: bw: BW0/PSF2 num_planes=0 bw=51200
+i915: bw: BW1/QGV0 num_planes=2 deratedbw=11064 peakbw=34144
+i915: bw: BW1/QGV1 num_planes=2 deratedbw=13813 peakbw=46944
+i915: bw: BW1/QGV2 num_planes=2 deratedbw=14899 peakbw=51216
+i915: bw: BW1/QGV3 num_planes=2 deratedbw=13010 peakbw=42688
+i915: bw: BW1/PSF0 num_planes=2 bw=34133
+i915: bw: BW1/PSF1 num_planes=2 bw=51200
+i915: bw: BW1/PSF2 num_planes=2 bw=51200
+i915: bw: BW2/QGV0 num_planes=0 deratedbw=12225 peakbw=34144
+i915: bw: BW2/QGV1 num_planes=0 deratedbw=15917 peakbw=46944
+i915: bw: BW2/QGV2 num_planes=0 deratedbw=17252 peakbw=51216
+i915: bw: BW2/QGV3 num_planes=0 deratedbw=14768 peakbw=42688
+i915: bw: BW2/PSF0 num_planes=0 bw=34133
+i915: bw: BW2/PSF1 num_planes=0 bw=51200
+i915: bw: BW2/PSF2 num_planes=0 bw=51200
+i915: bw: BW3/QGV0 num_planes=0 deratedbw=12902 peakbw=34144
+i915: bw: BW3/QGV1 num_planes=0 deratedbw=17230 peakbw=46944
+ucsi: rec 21 R 80000c00 1 12
+ACPI: Notify(\_SB_.PR05, 0x80) has no handler
+i915: bw: BW3/QGV2 num_planes=0 deratedbw=18731 peakbw=51216
+ucsi: rec 21 I 0 3c41010000003c4102000000
+i915: bw: BW3/QGV3 num_planes=0 deratedbw=15838 peakbw=42688
+i915: bw: BW3/PSF0 num_planes=0 bw=34133
+i915: bw: BW3/PSF1 num_planes=0 bw=51200
+i915: bw: BW3/PSF2 num_planes=0 bw=51200
+i915: bw: BW4/QGV0 num_planes=0 deratedbw=13269 peakbw=34144
+i915: bw: BW4/QGV1 num_planes=0 deratedbw=17970 peakbw=46944
+i915: bw: BW4/QGV2 num_planes=0 deratedbw=19569 peakbw=51216
+i915: bw: BW4/QGV3 num_planes=0 deratedbw=16433 peakbw=42688
+i915: bw: BW4/PSF0 num_planes=0 bw=34133
+i915: bw: BW4/PSF1 num_planes=0 bw=51200
+i915: bw: BW4/PSF2 num_planes=0 bw=51200
+i915: bw: BW5/QGV0 num_planes=0 deratedbw=13460 peakbw=34144
+i915: bw: BW5/QGV1 num_planes=0 deratedbw=18365 peakbw=46944
+i915: bw: BW5/QGV2 num_planes=0 deratedbw=20017 peakbw=51216
+i915: bw: BW5/QGV3 num_planes=0 deratedbw=16748 peakbw=42688
+i915: bw: BW5/PSF0 num_planes=0 bw=34133
+i915: bw: BW5/PSF1 num_planes=0 bw=51200
+ucsi: rec 22 W 0000000000020004
+i915: bw: BW5/PSF2 num_planes=0 bw=51200
+i915: bw: sagv_status=2 num_qgv_points=4 num_psf_points=3
+i915: P2 hw_probe tail: dram_detect rc=0 bw_init rc=0 sagv=2
+i915: P3 display_driver_probe_noirq enter (device state carried from P2, msi_kept=1)
+i915: P3 drm_vblank_init: vblank_slots=4 (per-pipe worker+timer+seqlock)
+i915: intel_bios_init: source=1 vbt_found=1 version=249 bdb_blocks=12 child_devices=4 missing_defaults=0 parser_errors=0 arena_peak=5184
+i915: VBT child[0]: port=A dvo_port=10 type=0x1806 aux_ch=0 ddc_pin=9 dp=1 edp=1 hdmi=0 typec=0 tbt=0 max_lanes=4 max_rate=0 hpd_invert=0 lane_reversal=0
+i915: VBT child[1]: port=B dvo_port=7 type=0x60d2 aux_ch=1 ddc_pin=2 dp=0 edp=0 hdmi=1 typec=0 tbt=0 max_lanes=4 max_rate=0 hpd_invert=0 lane_reversal=0
+i915: VBT child[2]: port=D dvo_port=13 type=0x68c6 aux_ch=3 ddc_pin=9 dp=1 edp=0 hdmi=0 typec=1 tbt=1 max_lanes=4 max_rate=810000 hpd_invert=0 lane_reversal=0
+i915: VBT child[3]: port=E dvo_port=15 type=0x68c6 aux_ch=4 ddc_pin=10 dp=1 edp=0 hdmi=0 typec=1 tbt=1 max_lanes=4 max_rate=810000 hpd_invert=0 lane_reversal=0
+i915: P3 intel_bios_init done: source=1 vbt_found=1 version=249 child_devices=4
+i915: P3 intel_vga_register: client=registered gmch_bridge=found ret=0
+i915: P3 intel_power_domains_init: wells=30 allowed_dc=0x4000000a target_dc=0x2 disable_pw=1 (xelpd map)
+vfs: boot0 UUID=167F-8843 -> /dev/sda1 (private FAT)
+vfs: rootpart selector PARTLABEL=zedBSD-root resolved to /dev/sda2
+i915: N0 platform: hypervisor=0 (CPUID.1:ECX[31]; recorded, not a driver mode)
+i915: N0 opregion: ASLS=0x614e5018 mapped=1 sig=1 ver=2.1.0 size=8KiB mboxes=0x1d | VBT via RVDA (rvda=0x2000 rvds=8704 relative=1 inside=0 phys=0x614e7018) mapped=1 size=8704 valid=1 sha256=3bff4a0920d55c9a.. matches explicit pin=0
+i915: N0 vt-d (GPU unit): GFXVTBAR=0xfed90001 enabled=1 view=native VER=0x00000040 readable=1 GSTS=0x40000000 (TES bit31) PMEN=0x00000000 (EPM bit0 / PRS bit31)
+i915: N0 vt-d GSTS decoded: TES=0 RTPS=1 FLS=0 AFLS=0 WBFS=0 QIES=0 IRES=0 IRTPS=0 CFIS=0 | PMEN EPM=0 PRS=0
+i915: N0 VBT: observed OPREGION(RVDA) 8704 bytes sha256=3bff4a0920d55c9a.. | adopted by the parser: OPREGION 8704 bytes sha256=3bff4a0920d55c9a.. | same bytes=1
+ucsi: rec 23 R 20000000 1 0
+i915: N0 firmware framebuffer: present=1 base=0x4000000000 size=0x7e9000 in_aperture=1 GGTT pages 0..2025 | driver writes GGTT pages 770048..1048576 overlap=0
+i915: N0 pipe A: READABLE_ACTIVE
+i915: N0 pipe A: TRANSCONF=0xc0000000 TRANS_DDI_FUNC_CTL=0x8a210102 PIPESRC=0x077f0437 PLANE_CTL=0x94000008 PLANE_SURF=0x00000000 STRIDE=0x00000078 SIZE=0x0437077f
+i915: N0 pipe B: READABLE_INACTIVE
+i915: N0 pipe B: TRANSCONF=0x00000000 TRANS_DDI_FUNC_CTL=0x00030000 PIPESRC=0x00000000 PLANE_CTL=0x00000008 PLANE_SURF=0x00000000 STRIDE=0x00000000 SIZE=0x00000000
+i915: N0 pipe C: READABLE_INACTIVE
+i915: N0 pipe C: TRANSCONF=0x00000000 TRANS_DDI_FUNC_CTL=0x00030000 PIPESRC=0x00000000 PLANE_CTL=0x00000008 PLANE_SURF=0x00000000 STRIDE=0x00000000 SIZE=0x00000000
+i915: N0 pipe D: POWER_OFF -- not_readable (its wells' STATE is off: counted inactive, as the reference readout concludes; its registers were not read)
+i915: N0 pipe-A domain: DPLL0_ENABLE=0x00000000 DPLL1_ENABLE=0xcc000000 DPCLKA_CFGCR0=0x01e07801 (PHY A -> DPLL 1) DDI_BUF_CTL_A=0x80000002 PP_STATUS=0x80000008 PP_CONTROL=0x00000067 BLC_PWM_CTL=0x80000000 BLC_PWM_DUTY=0x00017700
+ucsi: rec 24 W 000001040100000c
+i915: N0 decision: PROCEED -- a pipe is active (firmware display): the start takes it over (N1: readout + crtc_disable_noatomic) before its first write (active pipes 0x1, unreadable 0x8)
+i915: N0 conditions: primary=0x0 observed=0x81 [ ACTIVE_PIPE OPREGION_PRESENT(data only; runtime disabled)]
+i915: N0 before-N0: PCI COMMAND firmware=0x0007 now=0x0007 (BME/MEM set at P2; restored on teardown) | done already: GT reset (GDRST full, display untouched on ADL-P), GT fault/error-register clears, fence clears (0..31), PCODE reads, MSI enabled (no handler), WC CPU view of the aperture | not done: any display register, any GGTT PTE, any D-state change
+i915: N0: the firmware's output: DP SST on DDI A, pipe A (lit pipes 0x1)
+i915: P3 intel_combo_phy_init: combo PHYs A/B (2 initialised)
+i915: BW_BUDDY: ABOX mask 0x3 page_mask 0x1f
+i915: P3 intel_combo_phy_init: combo PHYs A/B (0 initialised)
+i915: P3 intel_power_domains_init_hw(false) done: cdclk=179200 vco=537600 dbuf=0xf init_ref=1 sync_hw=1
+i915: P3 intel_dmc_init: revid=0xc step=D0 DMC load queued (path=i915/adlp_dmc.bin, work_submitted=1)
+input: /dev/input/event2: 06CB:CE65 Touchpad
+i915: P3 modeset/flip workqueues: modeset=1 flip=1
+i2c-hid: \_SB_.PC00.I2C1.TPD0 06cb:ce65 at 0x2c on \_SB.PC00.I2C1: 06CB:CE65 Touchpad, 5 fingers, 1 buttons
+i915: Forcing SAGV disable: mask 0x10b
+i915: P3 intel_bw_init: obj=3 sagv_forced=1 qgv=0x4 psf=0x6 mask=0x10b pcode=0 sagv_status=1
+i915: PCIID cached: ven=0x8086 dev=0x46a8 rev=0x0c subsys=1028:0b02 | live: ven=0x8086 dev=0x46a8 rev=0x0c subsys=1028:0b02
+i915: P3 intel_init_quirks: dev=0x46a8 subsys=1028:0b02 quirk_mask=0x0 hooks=0 dmi_available=0
+i915: Sanitized enable_fbc value: 1
+i915: P3 intel_fbc_init: fbc_mask=0x1 enable_fbc=1 created=1 funcs=6
+i915: P3 probe_noirq COMPLETE: global objs=4 (order: cdclk,dbuf,bw,pmdemand) mode_config max=16384x16384 cursor=256x256 async_flip=1
+i915: Found Alder Lake PCH
+i915: P4 intel_detect_pch: type=8 id=0x5180 source=1 bridges=1 bridge_dev=0x5182 subsys=1028:0b02
+i915: intel_irq_install: rc=0 msi_irq=19 attached=1 gt_irqs=0x909 dmask=0x9090909 smask=0x9090000 reset_writes=62 post_writes=28
+ucsi: rec 25 R 80000000 1 0
+i915: P4 de masks: pipe_masked=0x10100f80 pipe_enables=0x90700f89 port_masked=0x3f07 misc_masked=0x80000 de_irq_mask[A]=0xefeff07f master_enabled=1
+ucsi: rec 26 W 0000000000020004
+ACPI: Notify(\_SB_.PR06, 0x80) has no handler
+i915: irq observed: count=0 handled=0 none=0 gt=0 display=0 last_master_ctl=0x0 gu_misc_iir=0x0
+i915: P5-0 survey pipe A: power(pipe=1 trans=1) TRANSCONF=0xc0000000 TRANS_DDI_FUNC_CTL=0x8a210102 PLANE_CTL(1)=0x94000008
+i915: P5-0 survey pipe B: power(pipe=1 trans=1) TRANSCONF=0x00000000 TRANS_DDI_FUNC_CTL=0x00030000 PLANE_CTL(1)=0x00000008
+i915: P5-0 survey pipe C: power(pipe=1 trans=1) TRANSCONF=0x00000000 TRANS_DDI_FUNC_CTL=0x00030000 PLANE_CTL(1)=0x00000008
+i915: P5-0 survey pipe D: power(pipe=1 trans=1) TRANSCONF=0x00000000 TRANS_DDI_FUNC_CTL=0x00030000 PLANE_CTL(1)=0x00000008
+i915: P5-0 survey DDI A: DDI_BUF_CTL=0x80000002
+intel-gpio: GPI_IS 0xfd6e0100 (pins 0-25): HOSTSW_OWN 00874004 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey DDI B: DDI_BUF_CTL=0x00000080
+intel-gpio: GPI_IS 0xfd6e0104 (pins 32-47): HOSTSW_OWN 0000000c GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey DDI TC1: DDI_BUF_CTL=0x00000080
+intel-gpio: GPI_IS 0xfd6e0108 (pins 64-88): HOSTSW_OWN 00fb99e0 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey DDI TC2: DDI_BUF_CTL=0x00000080
+intel-gpio: GPI_IS 0xfd690100 (pins 352-359): HOSTSW_OWN 000000e0 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey DDI TC3: DDI_BUF_CTL=0x00000080
+intel-gpio: GPI_IS 0xfd690104 (pins 65535-65543): HOSTSW_OWN 00000000 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey DDI TC4: DDI_BUF_CTL=0x00000080
+intel-gpio: GPI_IS 0xfd6d0100 (pins 96-103): HOSTSW_OWN 000000ff GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL DPLL0: ENABLE=0x00000000
+ucsi: rec 27 R 20000000 1 0
+intel-gpio: GPI_IS 0xfd6d0104 (pins 128-151): HOSTSW_OWN 0070200f GPI_IS 00000000 GPI_IE 00000000
+intel-gpio: GPI_IS 0xfd6d0108 (pins 160-180): HOSTSW_OWN 000f9e14 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL DPLL1: ENABLE=0xcc000000
+intel-gpio: GPI_IS 0xfd6d010c (pins 192-215): HOSTSW_OWN 00000000 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL TBT: ENABLE=0x00000000
+intel-gpio: GPI_IS 0xfd6d0110 (pins 224-252): HOSTSW_OWN 00000000 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL TC1: ENABLE=0x00000000
+intel-gpio: GPI_IS 0xfd6a0100 (pins 256-279): HOSTSW_OWN 00000024 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL TC2: ENABLE=0x00000000
+intel-gpio: GPI_IS 0xfd6a0104 (pins 288-312): HOSTSW_OWN 0037fe80 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL TC3: ENABLE=0x00000000
+intel-gpio: GPI_IS 0xfd6a0108 (pins 65535-65540): HOSTSW_OWN 00000000 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey PLL TC4: ENABLE=0x00000000
+ucsi: rec 28 W 0000000000010012
+intel-gpio: GPI_IS 0xfd6a010c (pins 320-344): HOSTSW_OWN 00c3bfff GPI_IS 00000088 GPI_IE 00000000
+i915: P5-0 survey well 'DDI_IO_A': ON but refcount=0 (a sanitize candidate)
+intel-gpio: GPI_IS 0xfd6a0110 (pins 65535-65544): HOSTSW_OWN 00000000 GPI_IS 00000000 GPI_IE 00000000
+i915: P5-0 survey well 'AUX_A': ON but refcount=0 (a sanitize candidate)
+intel-gpio: 15 groups' interrupts turned off before the line is taken
+i915: P5-0 survey wells: total=30 on=10 on_unused=2
+intel-gpio: pin 327 interrupts through irq 14
+i915: SAGV supported: yes, original SAGV block time: 35 us
+i2c-hid: \_SB_.PC00.I2C1.TPD0 reads on its interrupt (\_SB.GPI0 pin 327)
+i915: P5 4 display pipes available.
+i915: P5 Current CDCLK: cdclk=179200 vco=537600 ref=38400 voltage=0
+i915: P5a wm: levels=6 latency=3/54/83/102/147/147/144/144 valid=1 sagv_status=1 block_time=35us
+i915: P5a objects: crtcs=4 planes/crtc=6 scalers=2 dplls=7(mgr=1) gmbus_pins=9 pps_base=0x61200 gmbus_base=0xc0000
+i915: P5a hw: max_cdclk=652800 nssc_ref=38400 adlp_wa=1 hti_read=0 vga_already_off=1 vga_disabled=0 writes=2 (gmbus_adapters/hdcp_component unimplemented: 1/1)
+i915: edp init_connector (in setup_outputs): vbt_source=1 port=A aux_ch=0 panel_early=1 type=2 pps(100us) t1_t3=2000 t8=800 t9=2000 t10=1100 t11_t12=5000 controller=0 well_refs=14
+ucsi: rec 29 R 80000900 1 9
+ucsi: rec 29 I 0 00000b202cb1845301
+i915: edp pps before: PP_STATUS=0x80000008 PP_CONTROL=0x00000067 PP_ON_DELAYS=0x00010001 PP_OFF_DELAYS=0x044c0001
+i915: edp pps after intel_pps_init: PP_STATUS=0x80000008 PP_CONTROL=0x00000067 PP_ON_DELAYS=0x07d00001 PP_OFF_DELAYS=0x044c0001
+i915: edp pps: idx=0 valid=1 delays(ms) up=200 down=110 cycle=600 bl_on=80 bl_off=200
+i915: edp acquire: rc=0 stage=4 failed_stage=0 dpcd_ok=1 edp_dpcd_ok=1 link_cfg_ok=1 edid_ok=1 edid_blocks=1 ext=0 i2c_defers=0 i2c_nacks=0 log_errors=0 wait_timeouts=0 time_faults=0 elapsed_ms=18 | sleeps: tick=0 (0 us) short=0 (0 us)
+ucsi: rec 30 W 0000000000020004
+i915: edp DPCD 000: 11 0a 02 41 00 00 01 00 02 00 00 00 00 0b 00 | eDP 700: 01 18 00 (ok=1) | 100: 0a 02 (ok=1)
+i915: edp EDID +000: 00 ff ff ff ff ff ff 00 06 af 99 2b 00 00 00 00
+i915: edp EDID +010: 00 1f 01 04 95 1d 11 78 02 93 05 92 58 59 90 29
+i915: edp EDID +020: 1d 50 54 00 00 00 01 01 01 01 01 01 01 01 01 01
+i915: edp EDID +030: 01 01 01 01 01 01 00 37 80 a0 70 38 30 40 10 10
+i915: edp EDID +040: 3e 00 25 a5 10 00 00 1a 00 2c 80 a0 70 38 30 40
+i915: edp EDID +050: 10 10 3e 00 25 a5 10 00 00 1a 00 00 00 fe 00 35
+i915: edp EDID +060: 47 54 4b 30 80 42 31 33 33 48 41 4e 00 00 00 00
+i915: edp EDID +070: 00 01 41 23 99 00 10 00 00 0a 01 0a 20 20 00 74
+i915: edp EDID sha256=503058223c08a628.. mfg=06af product=2b99
+i915: edp pps after intel_pps_init_late: PP_STATUS=0x80000008 PP_CONTROL=0x0000006f PP_ON_DELAYS=0x07d00001 PP_OFF_DELAYS=0x044c0001
+i915: edp late: rc=0 panel_late=1 type=2 delays(ms) up=200 down=110 cycle=600 | KEPT: vdd_hw=1 vdd_wakeref=1 off_reserved=1 (in 3000 ms) refs core=0 aux=1 well_refs=17
+i915: LCD-A rc=0 mode 1920x1080 clock=140800 kHz h 1920/1936/1952/2080 v 1080/1083/1097/1128 sync +- bpc=6 | link 270000 kHz x2 (sink max 270000 x2, use_max_params=1) bpp=18 need=316800 have=540000 kBps | TU=64 data M/N 0x4b17e4/0x800000 link M/N 273406/524288 | DPLL ref=38400 kHz CFGCR0=0x00e001a5 CFGCR1=0x00000088 DIV0=0x0 | notes=0
+ACPI: Notify(\_SB_.PR07, 0x80) has no handler
+i915: LCD-A cpu-transcoder[12] rmw   0x420c0 = 0x80000000 clear=0x00000000 (computed; NOT written)
+i915: LCD-A cpu-transcoder[13] write 0x60420 = 0x00000000 clear=0x00000000 (computed; NOT written)
+i915: LCD-A cpu-transcoder[14] write 0x6002c = 0x00000000 clear=0x00000000 (computed; NOT written)
+i915: LCD-A cpu-transcoder[15] rmw   0x420c0 = 0x00000000 clear=0x18000000 (computed; NOT written)
+i915: LCD-A cpu-transcoder[16] write 0x70008 = 0x00000000 clear=0x00000000 (computed; NOT written)
+i915: LCD-A ddi[0] write 0x60410 = 0x00000001 (computed; NOT written)
+i915: LCD-A ddi[1] write 0x60404 = 0x00000000 (computed; NOT written)
+i915: LCD-A ddi[2] write 0x60400 = 0x8a210002 (computed; NOT written)
+i915: LCD-A ddi: DDI_BUF_CTL value=0x00000002 (enable bit comes with link training) | DDI_BUF_CTL_A readout now=0x80000002
+i915: LCD-A word[ 0] 0x60030 = 0x7e4b17e4 (computed; NOT written)
+ucsi: rec 31 R 20000000 1 0
+i915: LCD-A word[ 1] 0x60034 = 0x00800000 (computed; NOT written)
+i915: LCD-A word[ 2] 0x60040 = 0x00042bfe (computed; NOT written)
+i915: LCD-A word[ 3] 0x60044 = 0x00080000 (computed; NOT written)
+i915: LCD-A word[ 4] 0x6007c = 0x00000000 (computed; NOT written)
+i915: LCD-A word[ 5] 0x60028 = 0x00000000 (computed; NOT written)
+i915: LCD-A word[ 6] 0x60000 = 0x081f077f (computed; NOT written)
+i915: LCD-A word[ 7] 0x60004 = 0x081f077f (computed; NOT written)
+i915: LCD-A word[ 8] 0x60008 = 0x079f078f (computed; NOT written)
+i915: LCD-A word[ 9] 0x6000c = 0x04670437 (computed; NOT written)
+i915: LCD-A word[10] 0x60010 = 0x04670000 (computed; NOT written)
+i915: LCD-A word[11] 0x60014 = 0x0448043a (computed; NOT written)
+i915: LCD-A word[12] 0x6001c = 0x077f0437 (computed; NOT written)
+i915: P5b setup_outputs: vbt_children=4 ddi_init=4 encoders=4 skipped=0 crt_present=0
+i915: P5b encoder[0]: port=A phy=0 tc=0 clk=1 pd=17 dvo=0x0a dev_type=0x1806 dp=1 hdmi=0
+ucsi: rec 32 W 000001000101000c
+i915: P5b encoder[1]: port=B phy=1 tc=0 clk=1 pd=18 dvo=0x07 dev_type=0x60d2 dp=0 hdmi=1
+i915: P5b encoder[2]: port=D phy=5 tc=1 clk=2 pd=23 dvo=0x0d dev_type=0x68c6 dp=1 hdmi=0
+i915: P5b encoder[3]: port=E phy=6 tc=1 clk=2 pd=24 dvo=0x0f dev_type=0x68c6 dp=1 hdmi=0
+i915: P5c [CRTC:A] hw state readout: enabled
+i915: P5c [CRTC:B] hw state readout: disabled
+i915: P5c [CRTC:C] hw state readout: disabled
+i915: P5c [CRTC:D] hw state readout: disabled
+i915: P5c [ENCODER port A] hw state readout: enabled pipe_mask=0x1 mst=0
+i915: P5c [ENCODER port B] hw state readout: disabled pipe_mask=0x0 mst=0
+i915: P5c [ENCODER port D] hw state readout: disabled pipe_mask=0x0 mst=0
+i915: P5c [ENCODER port E] hw state readout: disabled pipe_mask=0x0 mst=0
+i915: P5c [ENCODER port A] get_config: ICL_DPCLKA_CFGCR0=0x01e07801 -> shared_dpll id 1
+i915: P5c DPLL 0 hw state readout: pipe_mask 0x0, on 0
+i915: P5c DPLL 1 hw state readout: pipe_mask 0x1, on 1
+i915: P5c TBT PLL hw state readout: pipe_mask 0x0, on 0
+i915: P5c TC PLL 1 hw state readout: pipe_mask 0x0, on 0
+i915: P5c TC PLL 2 hw state readout: pipe_mask 0x0, on 0
+i915: P5c TC PLL 3 hw state readout: pipe_mask 0x0, on 0
+i915: P5c TC PLL 4 hw state readout: pipe_mask 0x0, on 0
+i915: P5c readout: crtcs=4 active_pipes=0x1 planes_visible=1 encoders_linked=1 dplls_on=1 (detail readout unimplemented: 1)
+i915: P5d power wells: kept (active pipes 0x1: the firmware display is left to the takeover)
+i915: P5d sanitize: vblank_resets=4 dmc_pipes=1 vblank_on=1 fbc_deact=0 enc_clk_gated=0 dplls_disabled=0 wells_disabled=0 cmtg_wa=0 early_was=0 wm_read=1 (crtc_disable_noatomic needed: 0)
+i915: gt tables: gt_wa=5 mocs(uc_index=3 entries=64) rps(rp0=72 rp1=18 min=6 eff=18 pcode=1) rc6_supported=1
+i915: WA-MANIFEST GT 'gt_wa': 5 entries
+i915: WA GT reg=0x00fdc clr=0x7f000000 set=0x00000000 rmask=0x7f000000 kind=0 mcr=0 MCR steering (icl_wa_init_mcr)
+i915: WA GT reg=0x1c3f10 clr=0x00400000 set=0x00400000 rmask=0x00400000 kind=0 mcr=0 Wa_14011060649
+i915: WA GT reg=0x1d3f10 clr=0x00400000 set=0x00400000 rmask=0x00400000 kind=0 mcr=0 Wa_14011060649
+i915: WA GT reg=0x09550 clr=0x00000200 set=0x00000200 rmask=0x00000200 kind=0 mcr=1 Wa_14011059788
+ucsi: rec 33 R 10000000 1 0
+i915: WA GT reg=0x09424 clr=0x00000002 set=0x00000000 rmask=0x00000000 kind=2 mcr=0 Wa_14015795083
+i915: gt tables rcs0: engine_wa=8 ctx_wa=5 whitelist=4
+i915: WA-MANIFEST ENGINE 'rcs0': 8 entries
+i915: WA ENGINE reg=0x020c4 clr=0x00000000 set=0x3fff0306 rmask=0x00003fff kind=1 mcr=0 fake: RING_CMD_CCTL MOCS
+i915: WA ENGINE reg=0x020ec clr=0x00000000 set=0x00020002 rmask=0x00000002 kind=1 mcr=0 Wa_1606700617
+i915: WA ENGINE reg=0x0e4f4 clr=0x00000000 set=0x41004100 rmask=0x00004100 kind=1 mcr=1 Wa_1606931601
+i915: WA ENGINE reg=0x020a0 clr=0x00080000 set=0x00080000 rmask=0x00080000 kind=0 mcr=0 Wa_14010919138
+i915: WA ENGINE reg=0x0e18c clr=0x00000000 set=0x80008000 rmask=0x00008000 kind=1 mcr=1 Wa_1406941453
+i915: WA ENGINE reg=0x0e48c clr=0x00000000 set=0x02000200 rmask=0x00000200 kind=1 mcr=1 Wa_14010229206
+i915: WA ENGINE reg=0x02050 clr=0x00000000 set=0x10801080 rmask=0x00001080 kind=1 mcr=0 Wa_1607297627
+i915: WA ENGINE reg=0x020e0 clr=0x00000000 set=0x40004000 rmask=0x00004000 kind=1 mcr=0 perctx preempt ctrl
+i915: WA-MANIFEST CTX 'ctx_wa': 5 entries
+i915: WA CTX reg=0x07304 clr=0x00000000 set=0x02000200 rmask=0x00000200 kind=1 mcr=0 Wa_1409142259
+i915: WA CTX reg=0x02580 clr=0x00000000 set=0x00060002 rmask=0x00000006 kind=1 mcr=0 WaDisableGPGPUMidThreadPreemption
+i915: WA CTX reg=0x06604 clr=0xffffffff set=0xe0040000 rmask=0x00000000 kind=2 mcr=0 Wa_16011163337 (FF_MODE2)
+i915: WA CTX reg=0x07018 clr=0x00000000 set=0x20002000 rmask=0x00002000 kind=1 mcr=0 Wa_1806527549
+i915: WA CTX reg=0x07300 clr=0x00000000 set=0x00400040 rmask=0x00000040 kind=1 mcr=0 Wa_1606376872
+i915: WA-MANIFEST WHITELIST 'whitelist': 4 entries
+i915: WA WHITELIST reg=0x10002349 clr=0x00000000 set=0x00000000 rmask=0x00000000 kind=0 mcr=0 Wa_1408556865 (PS_INVOCATION_COUNT x4)
+i915: WA WHITELIST reg=0x07010 clr=0x00000000 set=0x00000000 rmask=0x00000000 kind=0 mcr=0 Wa_1508744258
+i915: WA WHITELIST reg=0x07018 clr=0x00000000 set=0x00000000 rmask=0x00000000 kind=0 mcr=0 Wa_1806527549 (whitelist)
+i915: WA WHITELIST reg=0x07304 clr=0x00000000 set=0x00000000 rmask=0x00000000 kind=0 mcr=0 tuning
+i915: gt tables bcs0: engine_wa=1 ctx_wa=1 whitelist=1
+i915: gt tables vcs0: engine_wa=1 ctx_wa=0 whitelist=1
+i915: gt tables vcs2: engine_wa=1 ctx_wa=0 whitelist=1
+i915: gt tables vecs0: engine_wa=1 ctx_wa=0 whitelist=1
+i915: gt memory: object pool grew to 128 slots
+i915: gt mem: ggtt window first=1032192 pages=16384 (of 1048576) scratch ggtt=0xfc000000 ppgtt top_pd dma=0x100a3e000 objects=6
+i915: gt_reset attempt=0 passes=2 rc=0
+i915: gt resume: rc=0 reset_engines=0 stop_cs_timeouts=0 engines_resumed=5 l3cc(rcs)=32
+i915: gt hw: pat=1 gt_wa(w=3 skip=2 ok=4 mismatch=0 noverify=1) mocs(global=64 l3cc=32) whitelist_writes=60 engines=5
+i915: gt pm: rps_enabled=1 rc6_enabled=1 rc6_ctl=0x40000 pg_enable=0x19f
+i915: record_defaults: rc=0 where=- polls=10 timed_out=0 wedged=0
+i915: verify_workarounds: rc=0 where=- polls=22 timed_out=0
+i915: migrate_init: rc=0 where=-
+i915: pxp_init: rc=0 where=- full=1
+i915: P7 display_driver_probe: rc=0 active_crtcs=1 initial_commit=-21 (DRM atomic commit unimplemented) overlay=0 fbdev=0 ipc_enabled=1
+i915: P7 hpd_init: encoders=4 pins=4,5 setups=1 skipped=0 | de: enabled=0x30003 hotplug=0x30003 IMR=0xfffcfffc TC_CTL=0x00000088 TBT_CTL=0x00000088 | pch: enabled=0x3030000 hotplug=0x3030000 SHPD_FILTER=0xf8 SDEIMR=0x3c043f07 SHOTPLUG_DDI=0x00000088 SHOTPLUG_TC=0x00000088 | poll: works=1 core_gets=1
+i915: TC1: declared (DDI D, legacy 0, AUX channel 3)
+i915: TC2: declared (DDI E, legacy 0, AUX channel 4)
+i915: TC1: PHY mode tbt (ready 1, owned 0, live none)
+i915: TC1 readout: mode=none links=0 legacy=0 cold=0 live=0x0 | TCSS_DDI_STATUS=0x00000004 FIA1.0 DFLEXDPSP=0x00000010 DFLEXPA1=0x00000000 DDI_BUF_CTL=0x00000080
+ucsi: rec 34 R 80000000 1 0
+i915: TC2: PHY mode tbt (ready 1, owned 0, live none)
+i915: TC2 readout: mode=none links=0 legacy=0 cold=0 live=0x0 | TCSS_DDI_STATUS=0x00000004 FIA1.1 DFLEXDPSP=0x00000010 DFLEXPA1=0x00000000 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC1: bound (DDI D, AUX channel 3, VBT max rate 810000 lanes 4)
+i915: DP-ext TC2: bound (DDI E, AUX channel 4, VBT max rate 810000 lanes 4)
+i915: DP-ext: 2 external DP port(s) bound
+i915: hpd start: connectors=4 hdmi=HDMI-A-1 storm_threshold=50 short_storm=0 backend=mmio
+i915: P7 hotplug path: started
+i915: the firmware display (1 active crtc) is left to the resident start's takeover (N1)
+i915: P7 intel_opregion_register: runtime DISABLED (VBT_ONLY, ACPI_RUNTIME_UNAVAILABLE): no notifier registered, no mailbox written, no ASLE service -- the probe continues
+i915: P7 power_domains_enable: deferred (the INIT reference is kept until the takeover)
+i915: P7 driver_register: na_registrations=15 opregion=0 kms_poll=1 | power_domains_enable: wells_on 0 -> 0 dc_state=0x0 verify_mismatches=0 | runtime_pm_enable: probe usage=0 active=1 (autosuspend not armed: intel_runtime_suspend unimplemented)
+i915: P7 well always_on: refcount=3 hw_enabled=1
+i915: P7 well PW_1: refcount=0 hw_enabled=1
+i915: P7 well DC_off: refcount=3 hw_enabled=1
+i915: P7 well PW_2: refcount=2 hw_enabled=1
+i915: P7 well PW_A: refcount=2 hw_enabled=1
+i915: P7 well PW_B: refcount=2 hw_enabled=1
+i915: P7 well PW_C: refcount=2 hw_enabled=1
+i915: P7 well PW_D: refcount=2 hw_enabled=1
+i915: P7 well DDI_IO_A: refcount=0 hw_enabled=1
+ucsi: rec 35 W 0000000000020004
+i915: P7 well AUX_A: refcount=1 hw_enabled=1
+i915: P7 DC_STATE_EN=0x00000000 DC_off disable_calls=0 dc_state_writes=1 rewrites=0 dmc_has_payload=0
+i915: trace: 120 records (dropped 0)
+i915: rps: started timer=1 min=6 RPe=18 RP0=72 freq=18 clock=19200000Hz rp_control=0x400
+i915: display output: eDP panel, the firmware's output (DP SST on DDI A, pipe A, lit pipes 0x1)
+i915: rps: busy events=0x10 freq 18 -> 17 (up=0 down=1 boosts=0)
+i915: hpd (drm_dbg_kms) [CONNECTOR:2:HDMI-A-1]
+i915: hpd probe HDMI-A-1: status 2, SDEISR 0x00010000 (pin bit 0x00020000: not live)
+i915: rps: busy events=0x10 freq 17 -> 15 (up=0 down=2 boosts=0)
+i915: display inventory: HDMI-A-1 detected at the start (status 2), not lit
+ucsi: rec 36 R 20000000 0 0
+i915: hpd TC1 connected=0 (DDI D)
+i915: hpd probe DP-1: status 2, SDEISR 0x00010000 (pin bit 0x01000000: not live)
+i915: rps: busy events=0x10 freq 15 -> 11 (up=0 down=3 boosts=0)
+i915: display inventory: DP-1 detected at the start (status 2), not lit
+i915: hpd TC2 connected=0 (DDI E)
+i915: hpd probe DP-2: status 2, SDEISR 0x00010000 (pin bit 0x02000000: not live)
+i915: rps: busy events=0x10 freq 11 -> 6 (up=0 down=4 boosts=0)
+i915: display inventory: DP-2 detected at the start (status 2), not lit
+i915: vk: XXX capset declares vendor flags 7 for the connectivity check (contracts not implemented beyond the happy path)
+i915: registered native GPU node (storage, native streams, jobs)
+i915: resident: GPU node published; serving (RCS0, one request at a time, woken by the engine interrupt) on cpu 3
+i915: backlight: the panel's light is a backlight device
+ucsi: rec 37 W 000001000102000c
+ucsi: rec 38 R 80000000 0 0
+ucsi: rec 39 W 0000000000020004
+ucsi: rec 40 R 20000000 0 0
+ucsi: rec 41 W 000000000001000d
+ucsi: rec 42 R 80000100 0 1
+ucsi: rec 42 I 0 0f
+ucsi: rec 43 W 0000000000020004
+ucsi: rec 44 R 20000000 0 0
+ucsi: rec 45 W 000000000001000e
+ucsi: rec 46 R 80000100 0 1
+ucsi: rec 46 I 0 ff
+ucsi: rec 47 W 0000000000020004
+ucsi: rec 48 R 20000000 0 0
+ucsi: rec 49 W 0000000700810010
+ucsi: rec 50 R 10000000 0 0
+ucsi: rec 51 R 10000000 0 0
+ucsi: rec 52 R 80001000 0 16
+ucsi: rec 52 I 0 2c9101082cd102002cc103002cb10400
+ucsi: rec 53 W 0000000000020004
+ucsi: rec 54 R 20000000 0 0
+ucsi: rec 55 W 0000000604810010
+ucsi: rec 56 R 10000000 0 0
+ucsi: rec 57 R 80000c00 0 12
+ucsi: rec 57 I 0 2c4106003c21dcc03c21dcc0
+ucsi: rec 58 W 0000000000020004
+ucsi: rec 59 R 20000000 0 0
+ucsi: rec 60 W 0000000000020007
+ucsi: rec 61 R 80000200 0 2
+ucsi: rec 61 I 0 e137
+ucsi: rec 62 W 0000000000020004
+ucsi: rec 63 R 20000000 0 0
+ucsi: rec 64 W 000001000200000c
+ucsi: rec 65 R 80000c00 0 12
+ucsi: rec 65 I 0 87800100000001ff461c0000
+ucsi: rec 66 W 0000000000020004
+ucsi: rec 67 R 20000000 0 0
+ucsi: rec 68 W 000001020200000c
+ucsi: rec 69 R 80000c00 0 12
+ucsi: rec 69 I 0 3c41010000003c4102000000
+ucsi: rec 70 W 0000000000020004
+ucsi: rec 71 R 20000000 0 0
+ucsi: rec 72 W 000001040200000c
+ucsi: rec 73 R 80000000 0 0
+ucsi: rec 74 W 0000000000020004
+ucsi: rec 75 R 20000000 0 0
+ucsi: rec 76 W 0000000000020012
+ucsi: rec 77 R 80000900 0 9
+ucsi: rec 77 I 0 00003c400000000001
+ucsi: rec 78 W 0000000000020004
+ucsi: rec 79 R 20000000 0 0
+ucsi: rec 80 W 000001000201000c
+ucsi: rec 81 R 80000000 0 0
+ucsi: rec 82 W 0000000000020004
+ucsi: rec 83 R 20000000 0 0
+ucsi: rec 84 W 000001000202000c
+ucsi: rec 85 R 80000000 0 0
+ucsi: rec 86 W 0000000000020004
+ucsi: rec 87 R 20000000 0 0
+ucsi: rec 88 W 000000000002000d
+ucsi: rec 89 R 80000100 0 1
+ucsi: rec 89 I 0 0f
+ucsi: rec 90 W 0000000000020004
+ucsi: rec 91 R 20000000 0 0
+ucsi: rec 92 W 000000000002000e
+ucsi: rec 93 R 80000100 0 1
+ucsi: rec 93 I 0 00
+ucsi: rec 94 W 0000000000020004
+ucsi: rec 95 R 20000000 0 0
+ucsi: rec 96 W 00000000db650005
+ucsi: rec 97 R 80000000 0 0
+ucsi: rec 98 W 0000000000020004
+ucsi: rec 99 R 20000000 0 0
+ucsi: rec 100 W 0000000000010012
+ucsi: rec 101 R 80000900 0 9
+ucsi: rec 101 I 0 00000b202cb1845301
+ucsi: rec 102 W 0000000000020004
+ucsi: rec 103 R 20000000 0 0
+ucsi: rec 104 W 000001000101000c
+ucsi: rec 105 R 80000000 0 0
+ucsi: rec 106 W 0000000000020004
+ucsi: rec 107 R 20000000 0 0
+ucsi: rec 108 W 000001000102000c
+ucsi: rec 109 R 80000000 0 0
+ucsi: rec 110 W 0000000000020004
+ucsi: rec 111 R 20000000 0 0
+ucsi: rec 112 W 000000000001000d
+ucsi: rec 113 R 80000100 0 1
+ucsi: rec 113 I 0 0f
+ucsi: rec 114 W 0000000000020004
+ucsi: rec 115 R 20000000 0 0
+ucsi: rec 116 W 000000000001000e
+ucsi: rec 117 R 80000100 0 1
+ucsi: rec 117 I 0 ff
+ucsi: rec 118 W 0000000000020004
+ucsi: rec 119 R 20000000 0 0
+ucsi: rec 120 W 0000000700810010
+ucsi: rec 121 R 10000000 0 0
+ucsi: rec 122 R 10000000 0 0
+ucsi: rec 123 R 80001000 0 16
+ucsi: rec 123 I 0 2c9101082cd102002cc103002cb10400
+ucsi: rec 124 W 0000000000020004
+ucsi: rec 125 R 20000000 0 0
+ucsi: rec 126 W 0000000604810010
+ucsi: rec 127 R 10000000 0 0
+ucsi: rec 128 R 80000c00 0 12
+ucsi: rec 128 I 0 2c4106003c21dcc03c21dcc0
+ucsi: rec 129 W 0000000000020004
+ucsi: rec 130 R 20000000 0 0
+ucsi: rec 131 W 0000000000020012
+ucsi: rec 132 R 80000900 0 9
+ucsi: rec 132 I 0 00003c400000000001
+ucsi: rec 133 W 0000000000020004
+ucsi: rec 134 R 20000000 0 0
+ucsi: rec 135 W 000001000201000c
+ucsi: rec 136 R 80000000 0 0
+ucsi: rec 137 W 0000000000020004
+ucsi: rec 138 R 20000000 0 0
+ucsi: rec 139 W 000001000202000c
+ucsi: rec 140 R 80000000 0 0
+ucsi: rec 141 W 0000000000020004
+ucsi: rec 142 R 20000000 0 0
+ucsi: rec 143 W 000000000002000d
+ucsi: rec 144 R 80000100 0 1
+ucsi: rec 144 I 0 0f
+ucsi: rec 145 W 0000000000020004
+ucsi: rec 146 R 20000000 0 0
+ucsi: rec 147 W 000000000002000e
+ucsi: rec 148 R 80000100 0 1
+ucsi: rec 148 I 0 00
+ucsi: rec 149 W 0000000000020004
+ucsi: rec 150 R 20000000 0 0
+ucsi: 2 connectors
+ucsi: rec 151 R 20000000 0 0
+swap: swap0 source=PARTLABEL=zedBSD-swap slots=262143
+swap: active sources=1 total=262143 free=262143
+vfs: mounting runtime filesystems...
+vfs: runtime filesystems mounted
+boot: memory 8065748 KiB total, 8034852 KiB free, 16388 KiB reserved
+boot: starting init /sbin/init
+
+i915: firmware /lib/firmware/i915/adlp_dmc.bin: loaded (79088 bytes)
+i915: dmc worker: proceeding to load
+i915: resident shim: context sw_id=2 lrca=fc0b9119 pml4=0x10af4f000 ring=16384 bytes engine=rcs0
+i915: resident shim: context sw_id=3 lrca=fc0ce119 pml4=0x10b226000 ring=16384 bytes engine=rcs0
+i8042: mouse id=0 packet=3
+i915: vk: pipeline compiled by the executor: vs 816 bytes (1 attributes, 1 push registers, 1 varyings), fs 304 bytes (1 inputs, 0 push registers, 1 sampled images)
+i915: vk: pipeline compiled by the executor: vs 816 bytes (1 attributes, 1 push registers, 1 varyings), fs 304 bytes (1 inputs, 0 push registers, 1 sampled images)
+i915: vk: pipeline compiled by the executor: vs 1088 bytes (1 attributes, 3 push registers, 2 varyings), fs 7568 bytes (2 inputs, 3 push registers, 1 sampled images)
+i915: resident shim: context sw_id=4 lrca=fc0e3119 pml4=0x10f259000 ring=16384 bytes engine=rcs0
+i915: resident display: lease 1 claimed
+i915: vk: transfer kernels compiled by the executor: fill 400 bytes, copy 304 bytes
+i915: vk: GPU fill 1920x1080 -> 1920x1080 at (0,0) of a 1920x1080 surface: 0
+i915: vk: first draw: batch 353 dwords at 0x101a00000, state at 0x101804000, target 1920x1080 at 0x101e00000, depth no, 6 vertices
+i915: rps: unpark events=0x0 freq 6 -> 18 (up=0 down=4 boosts=0)
+i915: rps: busy events=0x20 freq 18 -> 19 (up=1 down=4 boosts=0)
+i915: rps: busy events=0x20 freq 19 -> 21 (up=2 down=4 boosts=0)
+i915: rps: busy events=0x20 freq 21 -> 25 (up=3 down=4 boosts=0)
+i915: rps: busy events=0x20 freq 25 -> 33 (up=4 down=4 boosts=0)
+i915: vk: GPU copy 1920x1080 -> 1920x1080 at (0,0) of a 1920x1080 surface: 0
+i915: rps: busy events=0x10 freq 33 -> 32 (up=4 down=5 boosts=0)
+i915: LCD-B input: VBT low_vswing=0 hobl=0 afc_override=0 backlight present=1 active_low=0 controller=0 pwm=200 Hz min=15 | rawclk=19200 kHz | DDI_BUF_CTL at connector init 0x80000002 -> saved bits 0x0
+i915: rps: busy events=0x10 freq 32 -> 30 (up=4 down=6 boosts=0)
+i915: LCD-B input: wm levels=6 latency 3/54/83/102/147/147/144/144 us ipc=1 sagv_block=35 us | DBUF slices now 0xf MBUS_CTL=0x1c000700 joined=0 | CDCLK now 179200 kHz vco 537600 ref 38400 bypass 19200 level 0 max 652800 | QGV mask 0x10b -> allowed 0x4 bw 14899 MB/s | DMC fw mask 0x1f
+i915: rps: busy events=0x10 freq 30 -> 26 (up=4 down=7 boosts=0)
+i915: N1 registry: 4 built | &n1=0xffff8001007cc020 &plane0=0xffff8001007d0478 hook=0xffffffff802eea76
+i915: N1 registry: 3 encoder(s): the bound screen's and 2 Type-C port(s)
+i915: rps: busy events=0x10 freq 26 -> 18 (up=4 down=8 boosts=0)
+i915: LCD-B UNRESOLVED step reached: __drm_atomic_helper_crtc_destroy_state
+i915: LCD-B UNRESOLVED step reached: intel_crtc_free_hw_state
+i915: rps: busy events=0x10 freq 18 -> 6 (up=4 down=9 boosts=0)
+i915: LCD-B UNRESOLVED step reached: intel_dsc_get_config
+i915: LCD-B UNRESOLVED step reached: intel_vrr_get_config
+i915: LCD-B UNRESOLVED step reached: intel_color_get_config
+i915: LCD-B UNRESOLVED step reached: hsw_ips_get_config
+i915: LCD-B UNRESOLVED step reached: __drm_atomic_helper_crtc_destroy_state
+i915: LCD-B UNRESOLVED step reached: intel_crtc_free_hw_state
+i915: LCD-B UNRESOLVED step reached: __drm_atomic_helper_crtc_destroy_state
+i915: LCD-B UNRESOLVED step reached: intel_crtc_free_hw_state
+i915: LCD-B UNRESOLVED step reached: __drm_atomic_helper_crtc_destroy_state
+i915: LCD-B UNRESOLVED step reached: intel_crtc_free_hw_state
+i915: LCD-B UNRESOLVED step reached: intel_hdmi_infoframes_enabled
+i915: LCD-B UNRESOLVED step reached: intel_ddi_mso_get_config
+i915: LCD-B UNRESOLVED step reached: intel_ddi_is_audio_enabled
+i915: LCD-B UNRESOLVED step reached: intel_edp_fixup_vbt_bpp
+i915: LCD-B UNRESOLVED step reached: intel_hdmi_read_gcp_infoframe
+i915: LCD-B UNRESOLVED step reached: intel_read_infoframe
+i915: LCD-B UNRESOLVED step reached: intel_read_infoframe
+i915: LCD-B UNRESOLVED step reached: intel_read_infoframe
+i915: LCD-B UNRESOLVED step reached: intel_read_infoframe
+i915: LCD-B UNRESOLVED step reached: bdw_get_trans_port_sync_config
+i915: LCD-B UNRESOLVED step reached: intel_read_dp_sdp
+i915: LCD-B UNRESOLVED step reached: intel_read_dp_sdp
+i915: LCD-B UNRESOLVED step reached: intel_psr_get_config
+i915: LCD-B UNRESOLVED step reached: intel_audio_codec_get_config
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_phys_mask
+i915: LCD-B UNRESOLVED step reached: intel_dp_sync_state
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_phys_mask
+i915: LCD-B UNRESOLVED step reached: intel_tc_port_sanitize_mode
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_phys_mask
+i915: LCD-B UNRESOLVED step reached: intel_tc_port_sanitize_mode
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_port_clock
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_port_clock
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_port_clock
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_port_clock
+i915: LCD-B (decided) intel_pmdemand_init_pmdemand_params: display 13 has no pm demand unit
+i915: LCD-B (decided) intel_pch_sanitize: HAS_PCH_IBX is false on this PCH
+i915: LCD-B UNRESOLVED step reached: intel_init_fifo_underrun_reporting
+i915: LCD-B UNRESOLVED step reached: drm_crtc_vblank_reset
+i915: LCD-B (decided) intel_crtc_vblank_on: DRM vblank events unused in this test; pipe vblank IRQ stays masked (checked by the binding)
+i915: LCD-B UNRESOLVED step reached: intel_init_fifo_underrun_reporting
+i915: LCD-B UNRESOLVED step reached: drm_crtc_vblank_reset
+i915: LCD-B UNRESOLVED step reached: intel_init_fifo_underrun_reporting
+i915: LCD-B UNRESOLVED step reached: drm_crtc_vblank_reset
+i915: LCD-B UNRESOLVED step reached: intel_init_fifo_underrun_reporting
+i915: LCD-B UNRESOLVED step reached: drm_crtc_vblank_reset
+i915: LCD-B UNRESOLVED step reached: intel_fbc_sanitize
+i915: LCD-B UNRESOLVED step reached: intel_tc_port_link_needs_reset
+i915: LCD-B UNRESOLVED step reached: intel_crtc_state_dump
+i915: LCD-B UNRESOLVED step reached: intel_crtc_state_dump
+i915: LCD-B UNRESOLVED step reached: intel_crtc_state_dump
+i915: LCD-B UNRESOLVED step reached: intel_crtc_state_dump
+i915: LCD-B UNRESOLVED step reached: intel_power_domains_sanitize_state
+i915: takeover: readout: active pipes 0x1, pipe 0 transcoder 0 DPLL1 port 0, mode 1920x1080 0 kHz, plane visible=1
+i915: LCD-B UNRESOLVED step reached: drm_crtc_wait_one_vblank
+i915: LCD-B UNRESOLVED step reached: drm_atomic_add_affected_connectors
+i915: hpd (drm_dbg) hotplug event received, stat 0x00010000, dig 0x00000089, pins 0x00000010, long 0x00000000
+i915: hpd (drm_dbg) digital hpd on [ENCODER:1:DDI A] - short
+i915: hpd: ignoring short hpd on eDP DDI A
+i915: hpd (drm_dbg) hotplug event received, stat 0x00010000, dig 0x0000008a, pins 0x00000010, long 0x00000010
+i915: LCD-B UNRESOLVED step reached: __drm_atomic_helper_crtc_destroy_state
+i915: hpd (drm_dbg) digital hpd on [ENCODER:1:DDI A] - long
+i915: LCD-B UNRESOLVED step reached: intel_crtc_free_hw_state
+i915: hpd (drm_dbg_kms) Received HPD interrupt on PIN 4 - cnt: 10
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_phys_mask
+i915: hpd: ignoring long hpd on eDP DDI A
+i915: LCD-B UNRESOLVED step reached: intel_fbc_disable
+i915: LCD-B UNRESOLVED step reached: intel_update_watermarks
+i915: LCD-B UNRESOLVED step reached: intel_pmdemand_update_port_clock
+i915: takeover: rc=0, crtcs stopped 1, still active 0x0
+i915: power well DC_off state mismatch (refcount 0/enabled 1)
+i915: takeover: power_domains_enable: wells_on 8 -> 3
+i915: LCD-B reg[preflight] ICL_DPLL_ENABLE 0x46010 = 0x00000000
+i915: LCD-B reg[preflight] TGL_DPLL_CFGCR0 0x164284 = 0x018001d4
+i915: LCD-B reg[preflight] TGL_DPLL_CFGCR1 0x164288 = 0x00002644
+i915: LCD-B reg[preflight] ICL_DPCLKA_CFGCR0 0x164280 = 0x01e07c01
+i915: LCD-B reg[preflight] DDI_BUF_CTL 0x64000 = 0x00000082
+i915: LCD-B reg[preflight] TRANS_CLK_SEL 0x46140 = 0x00000000
+i915: LCD-B reg[preflight] TRANS_DDI_FUNC_CTL 0x60400 = 0x00210102
+i915: LCD-B reg[preflight] TRANSCONF 0x70008 = 0x00000000
+i915: LCD-B reg[preflight] PIPE_MISC 0x70030 = 0x00000000
+i915: LCD-B reg[preflight] PLANE_CTL_1 0x70180 = 0x00000000
+i915: LCD-B reg[preflight] PLANE_COLOR_CTL_1 0x701cc = 0x00000000
+i915: LCD-B reg[preflight] PLANE_STRIDE_1 0x70188 = 0x00000000
+i915: LCD-B reg[preflight] PLANE_SIZE_1 0x70190 = 0x00000000
+i915: LCD-B reg[preflight] PLANE_SURF_1 0x7019c = 0x00000000
+i915: LCD-B reg[preflight] PLANE_WM_1_0 0x70240 = 0x00000000
+i915: LCD-B reg[preflight] PLANE_BUF_CFG_1 0x7027c = 0x00000000
+i915: LCD-B reg[preflight] MBUS_CTL 0x4438c = 0x1c000700
+i915: LCD-B reg[preflight] PIPE_MBUS_DBOX_CTL 0x7003c = 0x00000000
+i915: LCD-B reg[preflight] DBUF_CTL_S1 0x45008 = 0xc040c000
+i915: LCD-B reg[preflight] DBUF_CTL_S2 0x44fe8 = 0xc040c000
+i915: LCD-B reg[preflight] DBUF_CTL_S3 0x44300 = 0xc040c000
+i915: LCD-B reg[preflight] DBUF_CTL_S4 0x44304 = 0xc040c000
+i915: LCD-B reg[preflight] BXT_BLC_PWM_CTL 0xc8250 = 0x80000000
+i915: LCD-B reg[preflight] BXT_BLC_PWM_FREQ 0xc8254 = 0x00017700
+i915: LCD-B reg[preflight] BXT_BLC_PWM_DUTY 0xc8258 = 0x00017700
+i915: LCD-B reg[preflight] ICL_PIPESTATUS 0x70058 = 0x00000000
+i915: LCD-B reg[preflight] GEN8_DE_PIPE_IMR 0x44404 = 0x00000000
+i915: LCD-B reg[preflight] GEN8_DE_PIPE_IER 0x4440c = 0x00000000
+i915: LCD-B reg[preflight] GEN8_DE_PIPE_IIR 0x44408 = 0x00000000
+i915: LCD-B reg[preflight] PIPE_FRMCOUNT_G4X 0x70040 = 0x00000000
+i915: LCD-B preflight: DDI / PLL idle=1 (pipe A registers read TRANSCONF 0x00000000 PLANE_CTL 0x00000000 IMR 0x00000000 with power well A off) | IRQ state pipe A mask 0xefeff07f: vblank + underrun masked=1 | no code of this path waits for a software vblank count; no worker / callback / waiter is created by it
+i915: LCD-B input: VBT low_vswing=0 hobl=0 afc_override=0 backlight present=1 active_low=0 controller=0 pwm=200 Hz min=15 | rawclk=19200 kHz | DDI_BUF_CTL at connector init 0x80000002 -> saved bits 0x0
+i915: LCD-B input: wm levels=6 latency 3/54/83/102/147/147/144/144 us ipc=1 sagv_block=35 us | DBUF slices now 0xf MBUS_CTL=0x1c000700 joined=0 | CDCLK now 179200 kHz vco 537600 ref 38400 bypass 19200 level 0 max 652800 | QGV mask 0x10b -> allowed 0x4 bw 14899 MB/s | DMC fw mask 0x1f
+i915: resident display: buffers 1920x1080 pitch 7680: A surf 0xbc0c0000 cpu 0xffff80011285b000, B surf 0xbca00000 cpu 0xffff800113044000
+i915: P3 intel_combo_phy_init: combo PHYs A/B (0 initialised)
+i915: LCD-B (decided) intel_sagv_pre_plane_update: the QGV restriction stays as the initialisation left it (SAGV off, max-bandwidth point; bandwidth checked in prepare)
+i915: LCD-B (decided) intel_set_cpu_fifo_underrun_reporting: underrun IRQ stays masked; the test owns and samples ICL_PIPESTATUS
+i915: hpd (drm_dbg) hotplug event received, stat 0x00010000, dig 0x0000008a, pins 0x00000010, long 0x00000010
+i915: hpd (drm_dbg) digital hpd on [ENCODER:1:DDI A] - long
+i915: hpd (drm_dbg_kms) Received HPD interrupt on PIN 4 - cnt: 20
+i915: hpd: ignoring long hpd on eDP DDI A
+i915: LCD-B (decided) intel_crtc_vblank_on: DRM vblank events unused in this test; pipe vblank IRQ stays masked (checked by the binding)
+i915: LCD-B (decided) intel_sagv_post_plane_update: QGV points are not relaxed (SAGV stays off)
+i915: LCD-B reg[picture-up] ICL_DPLL_ENABLE 0x46010 = 0xcc000000 | Linux 0xcc000000 mask 0xcc000000 same
+i915: LCD-B reg[picture-up] TGL_DPLL_CFGCR0 0x164284 = 0x00e001a5 | Linux 0x00e001a5 mask 0xffffffff same
+i915: LCD-B reg[picture-up] TGL_DPLL_CFGCR1 0x164288 = 0x00000088 | Linux 0x00000088 mask 0xffffffff same
+i915: LCD-B reg[picture-up] ICL_DPCLKA_CFGCR0 0x164280 = 0x01e07800
+i915: LCD-B reg[picture-up] DDI_BUF_CTL 0x64000 = 0x80000002 | Linux 0x80000002 mask 0xffffff7f same
+i915: LCD-B reg[picture-up] TRANS_CLK_SEL 0x46140 = 0x10000000 | Linux 0x10000000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] TRANS_DDI_FUNC_CTL 0x60400 = 0x8a210002 | Linux 0x8a210002 mask 0xffffffff same
+i915: LCD-B reg[picture-up] TRANSCONF 0x70008 = 0xc0000000 | Linux 0xc0000000 mask 0xc0000000 same
+i915: LCD-B reg[picture-up] PIPE_MISC 0x70030 = 0x00800150
+i915: LCD-B reg[picture-up] PLANE_CTL_1 0x70180 = 0x94000000 | Linux 0x94000000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] PLANE_COLOR_CTL_1 0x701cc = 0x00002000 | Linux 0x00002000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] PLANE_STRIDE_1 0x70188 = 0x00000078 | Linux 0x00000078 mask 0xffffffff same
+i915: LCD-B reg[picture-up] PLANE_SIZE_1 0x70190 = 0x0437077f | Linux 0x0437077f mask 0xffffffff same
+i915: LCD-B reg[picture-up] PLANE_SURF_1 0x7019c = 0xbc0c0000
+i915: LCD-B reg[picture-up] PLANE_WM_1_0 0x70240 = 0x80004010 | Linux 0x80004010 mask 0xffffffff same
+i915: LCD-B reg[picture-up] PLANE_BUF_CFG_1 0x7027c = 0x0fdb0000 | Linux 0x0fdb0000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] MBUS_CTL 0x4438c = 0xdc000700 | Linux 0xdc000700 mask 0xffffffff same
+i915: LCD-B reg[picture-up] PIPE_MBUS_DBOX_CTL 0x7003c = 0xa9038806
+i915: LCD-B reg[picture-up] DBUF_CTL_S1 0x45008 = 0xc043c000 | Linux 0xc043c000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] DBUF_CTL_S2 0x44fe8 = 0xc043c000 | Linux 0xc043c000 mask 0xffffffff same
+i915: LCD-B reg[picture-up] DBUF_CTL_S3 0x44300 = 0xc043c000
+i915: LCD-B reg[picture-up] DBUF_CTL_S4 0x44304 = 0xc043c000
+i915: LCD-B reg[picture-up] BXT_BLC_PWM_CTL 0xc8250 = 0x80000000
+i915: LCD-B reg[picture-up] BXT_BLC_PWM_FREQ 0xc8254 = 0x00017700 | Linux 0x00017700 mask 0xffffffff same
+i915: LCD-B reg[picture-up] BXT_BLC_PWM_DUTY 0xc8258 = 0x00017700
+i915: LCD-B reg[picture-up] ICL_PIPESTATUS 0x70058 = 0x60000000
+i915: LCD-B reg[picture-up] GEN8_DE_PIPE_IMR 0x44404 = 0xefe9f07f
+i915: LCD-B reg[picture-up] GEN8_DE_PIPE_IER 0x4440c = 0x90700f89
+i915: LCD-B reg[picture-up] GEN8_DE_PIPE_IIR 0x44408 = 0x00000000
+i915: LCD-B reg[picture-up] PIPE_FRMCOUNT_G4X 0x70040 = 0x00000010
+i915: LCD-B reg[picture-up] same as Linux's dump: 17/17 (comparison only; no value above was copied from it)
+i915: LCD-B PICTURE UP: pattern id=0 on the panel; observation window 0 ms starts now (take the photograph)
+i915: resident display: picture up (buffer A surf 0xbc0c0000); serving presentation
+i915: resident display: panel buffers mapped for the GPU at 0x101e00000 / 0x102600000 (2025 pages each)
+i915: rps: unpark events=0x0 freq 6 -> 18 (up=4 down=9 boosts=0)
+i915: rps: busy events=0x10 freq 18 -> 17 (up=4 down=10 boosts=0)
+i915: rps: busy events=0x10 freq 17 -> 15 (up=4 down=11 boosts=0)
+i915: rps: busy events=0x10 freq 15 -> 11 (up=4 down=12 boosts=0)
+i915: rps: busy events=0x10 freq 11 -> 6 (up=4 down=13 boosts=0)
+i915: resident display: check frame 1: source 1920x1080 pitch 7680 non-black 2073600 fnv fd2fa121 (px(0,0)=ffeaf2fc) | panel buffer B non-black 2073600 of 2073600 fnv fb40eef1 (px(center)=fff8ccce)
+i915: resident display: flip 1: surf 0xbc0c0000 -> 0xbca00000 | frame 17 -> 0
+i915: resident display: first frame 1920x1080 (stride 7680; shared, GPU copy; RGBA) shown on the 1920x1080 panel
+i915: vk: GPU fill 1920x1080 -> 1920x1080 at (0,0) of a 1920x1080 surface: 0
+i915: rps: unpark events=0x0 freq 6 -> 18 (up=4 down=13 boosts=0)
+i915: rps: busy events=0x20 freq 18 -> 19 (up=5 down=13 boosts=0)
+i915: rps: busy events=0x20 freq 19 -> 21 (up=6 down=13 boosts=0)
+i915: rps: busy events=0x20 freq 21 -> 25 (up=7 down=13 boosts=0)
+i915: vk: GPU copy 1920x1080 -> 1920x1080 at (0,0) of a 1920x1080 surface: 0
+i915: rps: busy events=0x10 freq 25 -> 24 (up=7 down=14 boosts=0)
+i915: resident display: check frame 2: source 1920x1080 pitch 7680 non-black 2073600 fnv 3ac68955 (px(0,0)=ffeaf2fc) | panel buffer A non-black 2073600 of 2073600 fnv 18016785 (px(center)=fff8ccce)
+i915: resident display: flip 2: surf 0xbca00000 -> 0xbc0c0000 | frame 40 -> 0
+i915: perf: markers 6: wait 0.00 ms, run 0.00 ms
+i915: perf: 5142 ms: 2 presents (0.38/s), 7 submits, 5 batches | per submit ms: 5.44 (build 0.94, run 4.49, gpu 4.48) | per present ms: 760.00 (copy 2.79, publish 0.00, flip 0.00)
+i915: resident display: flip 3: surf 0xbc0c0000 -> 0xbca00000 | frame 135 -> 0
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: vk: session 1: frames 410 in 5010 ms: per submit 1 runs (183 full) 81 ops (most 457), in submit 5483 us (runs 5290, record 193), between 6737 us
+i915: perf: markers 410: wait 0.00 ms, run 0.00 ms
+i915: perf: 5012 ms: 205 presents (40.89/s), 410 submits, 593 batches | per submit ms: 5.48 (build 0.19, run 5.28, gpu 5.28) | per present ms: 4.56 (copy 1.59, publish 0.00, flip 1.47)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: context sw_id=5 lrca=fc0f8119 pml4=0x116fc7000 ring=16384 bytes engine=rcs0
+i915: resident shim: context sw_id=6 lrca=fc10d119 pml4=0x117551000 ring=16384 bytes engine=rcs0
+i915: vk: pipeline compiled by the executor: vs 688 bytes (1 attributes, 1 push registers, 1 varyings), fs 304 bytes (1 inputs, 0 push registers, 1 sampled images)
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 1 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: pipeline compiled by the executor: vs 688 bytes (1 attributes, 1 push registers, 1 varyings), fs 304 bytes (1 inputs, 0 push registers, 1 sampled images)
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 1 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: an object (kind 9) was destroyed before what names it: 0 views, 2 descriptor sets, 0 framebuffers and 0 command buffers let go of it
+i915: vk: first draw: batch 353 dwords at 0x104000000, state at 0x103e00000, target 1920x1036 at 0x104400000, depth no, 6 vertices
+i915: vk: first draw: batch 353 dwords at 0x102400000, state at 0x102200000, target 1180x800 at 0x102800000, depth no, 6 vertices
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: vk: session 1: frames 352 in 5005 ms: per submit 1 runs (99 full) 81 ops (most 459), in submit 5469 us (runs 5237, record 232), between 8749 us
+i915: perf: markers 372: wait 0.05 ms, run 0.00 ms
+i915: perf: 5004 ms: 176 presents (35.16/s), 372 submits, 469 batches | per submit ms: 5.28 (build 0.23, run 5.04, gpu 4.99) | per present ms: 4.99 (copy 2.22, publish 0.00, flip 1.30)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: vk: session 1: frames 165 in 5001 ms: per submit 1 runs (0 full) 53 ops (most 114), in submit 4285 us (runs 4164, record 120), between 26026 us
+i915: perf: markers 189: wait 0.17 ms, run 0.00 ms
+i915: perf: 5001 ms: 82 presents (16.39/s), 189 submits, 189 batches | per submit ms: 4.08 (build 0.11, run 3.96, gpu 3.74) | per present ms: 6.95 (copy 2.62, publish 0.00, flip 1.85)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 165: wait 0.15 ms, run 0.00 ms
+i915: perf: 5816 ms: 68 presents (11.69/s), 165 submits, 165 batches | per submit ms: 3.97 (build 0.10, run 3.86, gpu 3.70) | per present ms: 5.85 (copy 2.08, publish 0.00, flip 1.53)
+i915: resident shim: ring rewound (idle context)
+i915: vk: session 1: frames 135 in 5843 ms: per submit 1 runs (0 full) 57 ops (most 113), in submit 4548 us (runs 4419, record 129), between 38738 us
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5476 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.47 (build 0.13, run 5.33, gpu 5.33) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 30: wait 0.00 ms, run 0.00 ms
+i915: perf: 5482 ms: 9 presents (1.64/s), 30 submits, 30 batches | per submit ms: 6.22 (build 0.08, run 6.14, gpu 6.13) | per present ms: 0.72 (copy 0.70, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5001 ms: 9 presents (1.79/s), 32 submits, 32 batches | per submit ms: 5.59 (build 0.07, run 5.52, gpu 5.51) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 30: wait 0.00 ms, run 0.00 ms
+i915: perf: 5080 ms: 9 presents (1.77/s), 30 submits, 30 batches | per submit ms: 4.67 (build 0.06, run 4.61, gpu 4.60) | per present ms: 0.80 (copy 0.78, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+ucsi: rec 152 R 20000000 1 0
+i915: perf: markers 30: wait 0.00 ms, run 0.00 ms
+i915: perf: 5004 ms: 9 presents (1.79/s), 30 submits, 30 batches | per submit ms: 5.68 (build 0.07, run 5.61, gpu 5.60) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 30: wait 0.01 ms, run 0.00 ms
+i915: perf: 5870 ms: 8 presents (1.36/s), 30 submits, 30 batches | per submit ms: 4.92 (build 0.06, run 4.85, gpu 4.84) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5664 ms: 10 presents (1.76/s), 34 submits, 34 batches | per submit ms: 5.29 (build 0.07, run 5.21, gpu 5.21) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5334 ms: 9 presents (1.68/s), 32 submits, 32 batches | per submit ms: 5.10 (build 0.07, run 5.03, gpu 5.02) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5525 ms: 10 presents (1.80/s), 34 submits, 34 batches | per submit ms: 5.29 (build 0.07, run 5.22, gpu 5.21) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5480 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 4.69 (build 0.07, run 4.62, gpu 4.61) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 28: wait 0.00 ms, run 0.00 ms
+i915: perf: 5224 ms: 8 presents (1.53/s), 28 submits, 28 batches | per submit ms: 5.43 (build 0.08, run 5.34, gpu 5.34) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5646 ms: 9 presents (1.59/s), 32 submits, 32 batches | per submit ms: 4.78 (build 0.06, run 4.71, gpu 4.70) | per present ms: 0.82 (copy 0.79, publish 0.00, flip 0.00)
+i915: perf: markers 36: wait 0.00 ms, run 0.00 ms
+i915: perf: 5555 ms: 11 presents (1.97/s), 36 submits, 36 batches | per submit ms: 6.29 (build 0.06, run 6.22, gpu 6.21) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5475 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.73 (build 0.08, run 5.64, gpu 5.64) | per present ms: 0.73 (copy 0.70, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5438 ms: 10 presents (1.83/s), 34 submits, 34 batches | per submit ms: 5.53 (build 0.07, run 5.45, gpu 5.45) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+ucsi: rec 153 R 20000000 1 0
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5014 ms: 9 presents (1.79/s), 32 submits, 32 batches | per submit ms: 6.04 (build 0.08, run 5.96, gpu 5.95) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 28: wait 0.00 ms, run 0.00 ms
+i915: perf: 5899 ms: 8 presents (1.35/s), 28 submits, 28 batches | per submit ms: 5.12 (build 0.06, run 5.05, gpu 5.04) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5549 ms: 10 presents (1.80/s), 34 submits, 34 batches | per submit ms: 5.52 (build 0.08, run 5.44, gpu 5.43) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5401 ms: 9 presents (1.66/s), 32 submits, 32 batches | per submit ms: 4.97 (build 0.07, run 4.89, gpu 4.88) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5562 ms: 10 presents (1.79/s), 34 submits, 34 batches | per submit ms: 5.65 (build 0.07, run 5.58, gpu 5.57) | per present ms: 0.82 (copy 0.79, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5471 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.57 (build 0.06, run 5.50, gpu 5.49) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 28: wait 0.00 ms, run 0.01 ms
+i915: perf: 5189 ms: 8 presents (1.54/s), 28 submits, 28 batches | per submit ms: 6.17 (build 0.08, run 6.08, gpu 6.08) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5642 ms: 9 presents (1.59/s), 32 submits, 32 batches | per submit ms: 4.63 (build 0.06, run 4.57, gpu 4.56) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 36: wait 0.00 ms, run 0.00 ms
+i915: perf: 5489 ms: 11 presents (2.00/s), 36 submits, 36 batches | per submit ms: 5.87 (build 0.08, run 5.78, gpu 5.78) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5515 ms: 9 presents (1.63/s), 32 submits, 32 batches | per submit ms: 4.95 (build 0.07, run 4.88, gpu 4.87) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5477 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.13 (build 0.07, run 5.05, gpu 5.04) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+ucsi: rec 154 R 20000000 1 0
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5000 ms: 9 presents (1.79/s), 32 submits, 32 batches | per submit ms: 5.77 (build 0.08, run 5.68, gpu 5.67) | per present ms: 0.81 (copy 0.78, publish 0.00, flip 0.00)
+i915: perf: markers 28: wait 0.00 ms, run 0.00 ms
+i915: perf: 5869 ms: 8 presents (1.36/s), 28 submits, 28 batches | per submit ms: 4.61 (build 0.06, run 4.54, gpu 4.53) | per present ms: 0.77 (copy 0.74, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5545 ms: 10 presents (1.80/s), 34 submits, 34 batches | per submit ms: 5.53 (build 0.08, run 5.44, gpu 5.44) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5451 ms: 9 presents (1.65/s), 32 submits, 32 batches | per submit ms: 5.47 (build 0.08, run 5.39, gpu 5.38) | per present ms: 0.73 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5521 ms: 10 presents (1.81/s), 34 submits, 34 batches | per submit ms: 5.66 (build 0.08, run 5.57, gpu 5.57) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5495 ms: 9 presents (1.63/s), 32 submits, 32 batches | per submit ms: 5.13 (build 0.07, run 5.05, gpu 5.05) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 28: wait 0.00 ms, run 0.00 ms
+i915: perf: 5204 ms: 8 presents (1.53/s), 28 submits, 28 batches | per submit ms: 6.31 (build 0.08, run 6.23, gpu 6.22) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5692 ms: 9 presents (1.58/s), 32 submits, 32 batches | per submit ms: 5.04 (build 0.05, run 4.99, gpu 4.98) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 36: wait 0.00 ms, run 0.00 ms
+i915: perf: 5461 ms: 11 presents (2.01/s), 36 submits, 36 batches | per submit ms: 6.06 (build 0.07, run 5.99, gpu 5.98) | per present ms: 0.80 (copy 0.78, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5501 ms: 9 presents (1.63/s), 32 submits, 32 batches | per submit ms: 5.72 (build 0.07, run 5.65, gpu 5.64) | per present ms: 0.76 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+ucsi: rec 155 R 20000000 1 0
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5753 ms: 10 presents (1.73/s), 34 submits, 34 batches | per submit ms: 5.50 (build 0.08, run 5.42, gpu 5.41) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5475 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 4.95 (build 0.06, run 4.89, gpu 4.88) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5222 ms: 7 presents (1.34/s), 26 submits, 26 batches | per submit ms: 5.72 (build 0.05, run 5.67, gpu 5.66) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5616 ms: 10 presents (1.78/s), 34 submits, 34 batches | per submit ms: 5.42 (build 0.04, run 5.38, gpu 5.37) | per present ms: 0.77 (copy 0.74, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5550 ms: 9 presents (1.62/s), 32 submits, 32 batches | per submit ms: 5.30 (build 0.06, run 5.23, gpu 5.22) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5526 ms: 10 presents (1.80/s), 34 submits, 34 batches | per submit ms: 6.01 (build 0.07, run 5.94, gpu 5.93) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5467 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.58 (build 0.06, run 5.51, gpu 5.51) | per present ms: 0.81 (copy 0.79, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5480 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.11 (build 0.06, run 5.04, gpu 5.03) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5380 ms: 7 presents (1.30/s), 26 submits, 26 batches | per submit ms: 4.85 (build 0.06, run 4.78, gpu 4.77) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 36: wait 0.17 ms, run 0.00 ms
+i915: perf: 5523 ms: 11 presents (1.99/s), 36 submits, 36 batches | per submit ms: 5.71 (build 0.07, run 5.63, gpu 5.48) | per present ms: 0.77 (copy 0.70, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5358 ms: 9 presents (1.67/s), 32 submits, 32 batches | per submit ms: 5.99 (build 0.07, run 5.92, gpu 5.91) | per present ms: 0.72 (copy 0.70, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+ucsi: rec 156 R 20000000 1 0
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5617 ms: 10 presents (1.78/s), 34 submits, 34 batches | per submit ms: 5.16 (build 0.06, run 5.09, gpu 5.08) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5468 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 4.97 (build 0.07, run 4.89, gpu 4.88) | per present ms: 0.73 (copy 0.70, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5219 ms: 7 presents (1.34/s), 26 submits, 26 batches | per submit ms: 5.37 (build 0.08, run 5.29, gpu 5.28) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5822 ms: 10 presents (1.71/s), 34 submits, 34 batches | per submit ms: 5.13 (build 0.06, run 5.06, gpu 5.05) | per present ms: 0.81 (copy 0.79, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5584 ms: 9 presents (1.61/s), 32 submits, 32 batches | per submit ms: 5.09 (build 0.08, run 5.01, gpu 5.00) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5489 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.47 (build 0.08, run 5.39, gpu 5.38) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5531 ms: 9 presents (1.62/s), 32 submits, 32 batches | per submit ms: 5.13 (build 0.07, run 5.06, gpu 5.05) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5468 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.01 (build 0.07, run 4.93, gpu 4.92) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5220 ms: 7 presents (1.34/s), 26 submits, 26 batches | per submit ms: 5.49 (build 0.08, run 5.40, gpu 5.39) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 36: wait 0.00 ms, run 0.01 ms
+i915: perf: 5644 ms: 11 presents (1.94/s), 36 submits, 36 batches | per submit ms: 5.39 (build 0.07, run 5.31, gpu 5.31) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.02 ms
+i915: perf: 5108 ms: 9 presents (1.76/s), 32 submits, 32 batches | per submit ms: 5.66 (build 0.08, run 5.57, gpu 5.56) | per present ms: 0.80 (copy 0.78, publish 0.00, flip 0.00)
+ucsi: rec 157 R 20000000 1 0
+i915: perf: markers 34: wait 0.00 ms, run 0.01 ms
+i915: perf: 5894 ms: 10 presents (1.69/s), 34 submits, 34 batches | per submit ms: 4.98 (build 0.06, run 4.91, gpu 4.90) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.55 ms, run 0.01 ms
+i915: perf: 5478 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 4.82 (build 0.06, run 4.75, gpu 4.67) | per present ms: 1.55 (copy 0.71, publish 0.00, flip 0.24)
+i915: perf: markers 30: wait 0.00 ms, run 0.02 ms
+i915: perf: 5009 ms: 8 presents (1.59/s), 30 submits, 30 batches | per submit ms: 5.77 (build 0.08, run 5.69, gpu 5.68) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 30: wait 0.00 ms, run 0.00 ms
+i915: perf: 5813 ms: 9 presents (1.54/s), 30 submits, 30 batches | per submit ms: 5.30 (build 0.08, run 5.22, gpu 5.21) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5631 ms: 9 presents (1.59/s), 32 submits, 32 batches | per submit ms: 5.21 (build 0.07, run 5.14, gpu 5.13) | per present ms: 0.75 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5460 ms: 10 presents (1.83/s), 34 submits, 34 batches | per submit ms: 5.92 (build 0.07, run 5.85, gpu 5.84) | per present ms: 0.73 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5478 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.25 (build 0.07, run 5.17, gpu 5.16) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5505 ms: 10 presents (1.81/s), 34 submits, 34 batches | per submit ms: 5.64 (build 0.08, run 5.56, gpu 5.55) | per present ms: 0.80 (copy 0.78, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5197 ms: 7 presents (1.34/s), 26 submits, 26 batches | per submit ms: 5.90 (build 0.08, run 5.81, gpu 5.80) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 36: wait 0.01 ms, run 0.00 ms
+i915: perf: 5638 ms: 11 presents (1.95/s), 36 submits, 36 batches | per submit ms: 5.29 (build 0.07, run 5.21, gpu 5.20) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5045 ms: 9 presents (1.78/s), 32 submits, 32 batches | per submit ms: 5.28 (build 0.08, run 5.20, gpu 5.19) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+ucsi: rec 158 R 20000000 1 0
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5963 ms: 10 presents (1.67/s), 34 submits, 34 batches | per submit ms: 4.72 (build 0.07, run 4.65, gpu 4.64) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5480 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.22 (build 0.08, run 5.14, gpu 5.13) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5522 ms: 9 presents (1.62/s), 32 submits, 32 batches | per submit ms: 4.93 (build 0.07, run 4.85, gpu 4.84) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 28: wait 0.00 ms, run 0.00 ms
+i915: perf: 5191 ms: 8 presents (1.54/s), 28 submits, 28 batches | per submit ms: 5.29 (build 0.07, run 5.21, gpu 5.20) | per present ms: 0.82 (copy 0.80, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5383 ms: 9 presents (1.67/s), 32 submits, 32 batches | per submit ms: 4.92 (build 0.07, run 4.85, gpu 4.84) | per present ms: 0.73 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5528 ms: 10 presents (1.80/s), 34 submits, 34 batches | per submit ms: 5.21 (build 0.08, run 5.13, gpu 5.12) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5479 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 4.80 (build 0.07, run 4.73, gpu 4.72) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.01 ms
+i915: perf: 5514 ms: 10 presents (1.81/s), 34 submits, 34 batches | per submit ms: 5.15 (build 0.08, run 5.06, gpu 5.05) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5391 ms: 7 presents (1.29/s), 26 submits, 26 batches | per submit ms: 5.40 (build 0.07, run 5.33, gpu 5.32) | per present ms: 0.77 (copy 0.74, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 36: wait 0.00 ms, run 0.00 ms
+i915: perf: 5536 ms: 11 presents (1.98/s), 36 submits, 36 batches | per submit ms: 5.74 (build 0.08, run 5.66, gpu 5.65) | per present ms: 0.74 (copy 0.72, publish 0.00, flip 0.00)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5151 ms: 9 presents (1.74/s), 32 submits, 32 batches | per submit ms: 6.09 (build 0.08, run 6.01, gpu 6.00) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+ucsi: rec 159 R 20000000 1 0
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5847 ms: 10 presents (1.71/s), 34 submits, 34 batches | per submit ms: 5.40 (build 0.07, run 5.33, gpu 5.32) | per present ms: 0.82 (copy 0.79, publish 0.00, flip 0.00)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5474 ms: 10 presents (1.82/s), 34 submits, 34 batches | per submit ms: 5.79 (build 0.07, run 5.71, gpu 5.70) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: perf: markers 26: wait 0.00 ms, run 0.00 ms
+i915: perf: 5189 ms: 7 presents (1.34/s), 26 submits, 26 batches | per submit ms: 5.84 (build 0.08, run 5.75, gpu 5.74) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 34: wait 0.00 ms, run 0.00 ms
+i915: perf: 5649 ms: 10 presents (1.77/s), 34 submits, 34 batches | per submit ms: 5.27 (build 0.07, run 5.20, gpu 5.19) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5472 ms: 9 presents (1.64/s), 32 submits, 32 batches | per submit ms: 5.19 (build 0.07, run 5.12, gpu 5.11) | per present ms: 0.74 (copy 0.71, publish 0.00, flip 0.00)
+xhci: cancel slot=1 endpoint=7 pending-events=0 first-type=0 iman=2 usbsts=0 erdp=571c66e0 dequeue=110 command-busy=0 irq-busy=0
+xhci: cancelled request slot=1 endpoint=7 completion=26 residual=16
+xhci: cancel slot=1 endpoint=3 pending-events=0 first-type=0 iman=2 usbsts=0 erdp=571c6710 dequeue=113 command-busy=0 irq-busy=0
+xhci: cancelled request slot=1 endpoint=3 completion=26 residual=16384
+usb0: device 1 port 3 disconnected
+ucsi: rec 160 R 20000004 0 0
+ucsi: rec 161 W 0000000000020012
+ucsi: rec 162 R 80000904 0 9
+ucsi: rec 162 I 0 004011000000000001
+ucsi: rec 163 W 0000000000020004
+ucsi: rec 164 R 20000004 0 0
+ucsi: rec 165 W 0000000000000006
+ucsi: rec 166 R 80001004 0 16
+ucsi: rec 166 I 0 44030000021400000400000000032001
+ucsi: rec 167 W 0000000000030004
+ucsi: rec 168 R 20000000 0 0
+i915: perf: markers 40: wait 0.00 ms, run 0.00 ms
+i915: perf: 5522 ms: 12 presents (2.17/s), 40 submits, 40 batches | per submit ms: 5.39 (build 0.08, run 5.30, gpu 5.29) | per present ms: 0.75 (copy 0.73, publish 0.00, flip 0.00)
+ucsi: rec 169 R 20000004 0 0
+ucsi: rec 170 W 0000000000020012
+ucsi: rec 171 R 80000904 0 9
+ucsi: rec 171 I 0 00403c400000000001
+ucsi: rec 172 W 0000000000020004
+ucsi: rec 173 R 20000004 0 0
+ucsi: rec 174 W 000001000201000c
+ucsi: rec 175 R 80000004 0 0
+ucsi: rec 176 W 0000000000020004
+ucsi: rec 177 R 20000004 0 0
+ucsi: rec 178 W 000001000202000c
+ucsi: rec 179 R 10000004 0 0
+ucsi: rec 180 R 10000004 0 0
+ucsi: rec 181 R 80000004 0 0
+ucsi: rec 182 W 0000000000020004
+ucsi: rec 183 R 20000004 0 0
+ucsi: rec 184 W 000000000002000d
+ucsi: rec 185 R 80000104 0 1
+ucsi: rec 185 I 0 0f
+ucsi: rec 186 W 0000000000020004
+ucsi: rec 187 R 20000004 0 0
+ucsi: rec 188 W 000000000002000e
+ucsi: rec 189 R 80000104 0 1
+ucsi: rec 189 I 0 00
+ucsi: rec 190 W 0000000000020004
+ucsi: rec 191 R 20000004 0 0
+ucsi: rec 192 W 0000000000000006
+ucsi: rec 193 R 80001004 0 16
+ucsi: rec 193 I 0 44030000021400000400000000032001
+ucsi: rec 194 W 0000000000030004
+ucsi: rec 195 R 20000000 0 0
+ucsi: rec 196 R 20000004 0 0
+ucsi: rec 197 W 0000000000020012
+ucsi: rec 198 R 80000904 0 9
+ucsi: rec 198 I 0 60003b402cb1041301
+ucsi: rec 199 W 0000000000020004
+ucsi: rec 200 R 20000004 0 0
+ucsi: rec 201 W 000001000201000c
+ucsi: rec 202 R 80000004 0 0
+ucsi: rec 203 W 0000000000020004
+ucsi: rec 204 R 20000004 0 0
+ucsi: rec 205 W 000001000202000c
+ucsi: rec 206 R 20000004 0 0
+ucsi: rec 207 R 10000004 0 0
+ucsi: rec 208 R 80000004 0 0
+ucsi: rec 209 W 0000000000020004
+ucsi: rec 210 R 20000004 0 0
+ucsi: rec 211 W 000000000002000d
+ucsi: rec 212 R 80000104 0 1
+ucsi: rec 212 I 0 0f
+ucsi: rec 213 W 0000000000020004
+ucsi: rec 214 R 20000004 0 0
+ucsi: rec 215 W 000000000002000e
+ucsi: rec 216 R 80000104 0 1
+ucsi: rec 216 I 0 00
+ucsi: rec 217 W 0000000000020004
+ucsi: rec 218 R 20000004 0 0
+ucsi: rec 219 W 0000000300820010
+ucsi: rec 220 R 10000004 0 0
+ucsi: rec 221 R 10000004 1 0
+ucsi: rec 222 R 80000404 0 4
+ucsi: rec 222 I 0 c890012e
+ucsi: rec 223 W 0000000000020004
+ucsi: rec 224 R 20000004 0 0
+ucsi: rec 225 W 0000000000000006
+ucsi: rec 226 R 80001004 0 16
+ucsi: rec 226 I 0 44030000021400000400000000032001
+ucsi: rec 227 W 0000000000030004
+ucsi: rec 228 R 20000000 0 0
+i915: hpd (drm_dbg) hotplug event received, stat 0x00020000, dig 0x000000a8, pins 0x00000400, long 0x00000400
+i915: DE HPD iir=0x00020000 pins=0x00000400 long=0x00000400
+i915: hpd (drm_dbg) digital hpd on [ENCODER:4:DDI E] - long
+i915: hpd (drm_dbg_kms) Received HPD interrupt on PIN 10 - cnt: 10
+i915: hpd: long hpd on DDI E: detecting
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 0)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 1)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 2)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 3)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 4)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 5)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 6)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 7)
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 8)
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 1 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=0 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=514807
+i915: perf: markers 32: wait 0.00 ms, run 0.00 ms
+i915: perf: 5489 ms: 9 presents (1.63/s), 32 submits, 32 batches | per submit ms: 4.72 (build 0.07, run 4.65, gpu 4.64) | per present ms: 0.73 (copy 0.71, publish 0.00, flip 0.00)
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 1)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 64)
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 2 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=1 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=515854
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 2)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 3 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=2 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=516898
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 3)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 128)
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 4 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=3 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=517944
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 4)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 5 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=4 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=518989
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 5)
+i915: hpd TC2 connected=1 (DDI E)
+i915: TC2: mode none -> dp-alt
+i915: aux AUX USBC2/DDI TC2: not done (status 0x00000000; control 0x64410 reads 0x00000000; AUX wells bios 0x00000101 driver 0x00000303; report 192)
+i915: TC2 AUX failed: mode=dp-alt links=1 legacy=0 cold=1 live=0x1 | TCSS_DDI_STATUS=0x00000025 FIA1.1 DFLEXDPSP=0x00000f10 DFLEXPA1=0x00000030 DDI_BUF_CTL=0x00000080
+i915: DP-ext TC2: disconnected (step receiver capabilities, rc -16)
+i915: DP-ext TC2: probe 6 held the port in dp-alt mode (FIA lanes 4), none after it | I2C nacks 0 defers 0
+i915: hpd DP detect DP-2: disconnected, EDID 0 bytes
+i915: HPD-EVENT DP-2 pin=10 retry=5 status disconnected -> disconnected (UNCHANGED) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=520035
+i915: perf: markers 190: wait 0.16 ms, run 0.00 ms
+i915: perf: 5005 ms: 79 presents (15.78/s), 190 submits, 184 batches | per submit ms: 4.51 (build 0.11, run 4.39, gpu 4.20) | per present ms: 5.17 (copy 1.76, publish 0.00, flip 1.40)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: vk: session 1: frames 168 in 5023 ms: per submit 1 runs (0 full) 50 ops (most 104), in submit 4797 us (runs 4665, record 132), between 25103 us
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 364: wait 0.07 ms, run 0.00 ms
+i915: perf: 5165 ms: 166 presents (32.13/s), 364 submits, 364 batches | per submit ms: 3.78 (build 0.12, run 3.65, gpu 3.60) | per present ms: 6.77 (copy 2.95, publish 0.00, flip 1.72)
+i915: vk: session 1: frames 328 in 5241 ms: per submit 1 runs (0 full) 52 ops (most 106), in submit 4050 us (runs 3919, record 131), between 11929 us
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: hpd (drm_dbg) hotplug event received, stat 0x00020000, dig 0x000000a8, pins 0x00000400, long 0x00000400
+i915: DE HPD iir=0x00020000 pins=0x00000400 long=0x00000400
+i915: hpd (drm_dbg) digital hpd on [ENCODER:4:DDI E] - long
+i915: hpd (drm_dbg_kms) Received HPD interrupt on PIN 10 - cnt: 10
+i915: hpd: long hpd on DDI E: detecting
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 0)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=0 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=537242
+ucsi: rec 229 R 20000004 0 0
+ucsi: rec 230 W 0000000000020012
+ucsi: rec 231 R 80000904 0 9
+ucsi: rec 231 I 0 204011000000000001
+ucsi: rec 232 W 0000000000020004
+ucsi: rec 233 R 20000004 0 0
+ucsi: rec 234 W 0000000000000006
+ucsi: rec 235 R 80001004 0 16
+ucsi: rec 235 I 0 44030000021400000400000000032001
+ucsi: rec 236 W 0000000000030004
+ucsi: rec 237 R 20000000 0 0
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 1)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=1 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=538247
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 2)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=2 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=539252
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 3)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=3 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=540256
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 4)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=4 status disconnected -> disconnected (RETRY) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=541261
+i915: hpd (drm_dbg_kms) running encoder hotplug functions
+i915: hpd (drm_dbg_kms) Connector DP-2 (pin 10) received hotplug event. (retry 5)
+i915: hpd TC2 connected=0 (DDI E)
+i915: HPD-EVENT DP-2 pin=10 retry=5 status disconnected -> disconnected (UNCHANGED) | live=0 EDID rc=0 blocks=0 digital=0 | epoch=1 t=542266
+ucsi: rec 238 R 20000004 0 0
+ucsi: rec 239 W 0000000000020012
+ucsi: rec 240 R 80000904 0 9
+ucsi: rec 240 I 0 00403c400000000001
+ucsi: rec 241 W 0000000000020004
+ucsi: rec 242 R 20000004 0 0
+ucsi: rec 243 W 000001000201000c
+usb1: port 2 enumeration failed (13)
+ucsi: rec 244 R 80000004 0 0
+ucsi: rec 245 W 0000000000020004
+xhci: port 3 reset complete portsc=00001203
+ucsi: rec 246 R 20000004 0 0
+ucsi: rec 247 W 000001000202000c
+ucsi: rec 248 R 10000004 0 0
+ucsi: rec 249 R 10000004 0 0
+usb0: device 1 port 3 0bda:8156 class 00 configuration=2 configured
+usb-cdc-ncm: ue0 mac=6c:1f:f7:06:14:8a
+usb0: device 1 interface 0 class 02/0d/00 driver=usb-cdc-ncm
+usb0: device 1 interface 1 class 0a/00/01 claimed-by=0 driver=usb-cdc-ncm
+ucsi: rec 250 R 80000004 0 0
+ucsi: rec 251 W 0000000000020004
+ucsi: rec 252 R 20000004 0 0
+ucsi: rec 253 W 000000000002000d
+i915: vk: session 1: frames 236 in 17158 ms: per submit 1 runs (0 full) 53 ops (most 106), in submit 4172 us (runs 4063, record 108), between 68534 us
+i915: perf: markers 266: wait 0.22 ms, run 0.00 ms
+i915: perf: 17276 ms: 118 presents (6.83/s), 266 submits, 266 batches | per submit ms: 4.02 (build 0.11, run 3.91, gpu 3.74) | per present ms: 6.49 (copy 2.70, publish 0.00, flip 1.66)
+ucsi: rec 254 R 80000104 0 1
+ucsi: rec 254 I 0 0f
+ucsi: rec 255 W 0000000000020004
+ucsi: rec 256 R 20000004 0 0
+ucsi: rec 256 end (the record is full)
+i915: resident shim: ring rewound (idle context)
+i915: resident shim: ring rewound (idle context)
+i915: perf: markers 12: wait 0.00 ms, run 0.00 ms
+i915: perf: 15691 ms: 5 presents (0.31/s), 12 submits, 12 batches | per submit ms: 5.78 (build 0.09, run 5.69, gpu 5.68) | per present ms: 0.88 (copy 0.85, publish 0.00, flip 0.00)
+i915: resident shim: ring rewound (idle context)

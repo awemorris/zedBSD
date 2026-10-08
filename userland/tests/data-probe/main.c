@@ -27,6 +27,13 @@
  * taken as a copy; dropped, it is read again and finished.  Lines:
  * DATAPROBE drag enter|leave|drop and DATAPROBE drag received
  * when=early|drop bytes=N text=...
+ *
+ * --two-devices (ws189-p002 F2) gets a second wl_data_device on the same
+ * seat, as a program with two windows has one a window: the compositor
+ * sends a drag to every device of the client, and drops it on one.  The
+ * second device takes a drag with text as a copy too (it is told second,
+ * so the first is the one dropped on) and logs DATAPROBE drag
+ * enter|leave|drop device=2 ..., and its text when dropped on.
  */
 
 #include <wayland-client.h>
@@ -96,6 +103,10 @@ struct probe {
 	/* The offer of a drag over the window (NULL for none), and the serial of its enter (ws189-p002). */
 	struct wl_data_offer *drag_offer;
 	uint32_t drag_serial;
+	/* The second data device (--two-devices, ws189-p002 F2), and the offer of a drag over it (NULL for none). */
+	int two_devices;
+	struct wl_data_device *second;
+	struct wl_data_offer *second_offer;
 };
 
 static int probe_options(int count, char **arguments, struct probe *probe, unsigned *timeout);
@@ -127,6 +138,10 @@ static void device_leave(void *data, struct wl_data_device *device);
 static void device_motion(void *data, struct wl_data_device *device, uint32_t time, wl_fixed_t x, wl_fixed_t y);
 static void device_drop(void *data, struct wl_data_device *device);
 static void device_selection(void *data, struct wl_data_device *device, struct wl_data_offer *offer);
+static void second_enter(void *data, struct wl_data_device *device, uint32_t serial, struct wl_surface *surface, wl_fixed_t x, wl_fixed_t y, struct wl_data_offer *offer);
+static void second_leave(void *data, struct wl_data_device *device);
+static void second_drop(void *data, struct wl_data_device *device);
+static void second_selection(void *data, struct wl_data_device *device, struct wl_data_offer *offer);
 static void offer_offer(void *data, struct wl_data_offer *offer, const char *mime_type);
 static void offer_source_actions(void *data, struct wl_data_offer *offer, uint32_t actions);
 static void offer_action(void *data, struct wl_data_offer *offer, uint32_t action);
@@ -186,6 +201,16 @@ static const struct wl_data_device_listener device_listener = {
 	device_selection
 };
 
+/* The second data device's (--two-devices): its offers are described as the first's. */
+static const struct wl_data_device_listener second_listener = {
+	device_data_offer,
+	second_enter,
+	second_leave,
+	device_motion,
+	second_drop,
+	second_selection
+};
+
 /* Every offer's. */
 static const struct wl_data_offer_listener offer_listener = {
 	offer_offer,
@@ -224,7 +249,7 @@ main(
 	memset(&probe, 0, sizeof(probe));
 	error = probe_options(count, arguments, &probe, &timeout);
 	if (error != 0) {
-		fprintf(stderr, "usage: data-probe [--text=TEXT] [--color=RRGGBB] [--timeout-s=N] [--token=NAME] [--secret]\n");
+		fprintf(stderr, "usage: data-probe [--text=TEXT] [--color=RRGGBB] [--timeout-s=N] [--token=NAME] [--secret] [--two-devices]\n");
 		return 2;
 	}
 
@@ -269,7 +294,7 @@ main(
 	return 0;
 }
 
-/* Reads the options: --text=TEXT, --color=RRGGBB, --timeout-s=N (default 120), --token=NAME and --secret. */
+/* Reads the options: --text=TEXT, --color=RRGGBB, --timeout-s=N (default 120), --token=NAME, --secret and --two-devices. */
 static int
 probe_options(
 	int count,
@@ -294,6 +319,13 @@ probe_options(
 		same = strcmp(arguments[index], "--secret");
 		if (same == 0) {
 			probe->secret = 1;
+			continue;
+		}
+
+		/* A second data device. */
+		same = strcmp(arguments[index], "--two-devices");
+		if (same == 0) {
+			probe->two_devices = 1;
 			continue;
 		}
 
@@ -363,6 +395,10 @@ probe_connect(
 	/* The seat's data device. */
 	probe->device = wl_data_device_manager_get_data_device(probe->manager, probe->seat);
 	wl_data_device_add_listener(probe->device, &device_listener, probe);
+	if (probe->two_devices) {
+		probe->second = wl_data_device_manager_get_data_device(probe->manager, probe->seat);
+		wl_data_device_add_listener(probe->second, &second_listener, probe);
+	}
 
 	/* The window: a toplevel, configured before it is drawn. */
 	probe->surface = wl_compositor_create_surface(probe->compositor);
@@ -1164,4 +1200,113 @@ source_action(
 	UNUSED_PARAMETER(data);
 	UNUSED_PARAMETER(source);
 	UNUSED_PARAMETER(action);
+}
+
+/* A drag came over the window, told to the second device: taken as a copy when it has text (nothing is read before a drop). */
+static void
+second_enter(
+	void *data,
+	struct wl_data_device *device,
+	uint32_t serial,
+	struct wl_surface *surface,
+	wl_fixed_t x,
+	wl_fixed_t y,
+	struct wl_data_offer *offer)
+{
+	struct probe *probe;
+	uint32_t version;
+
+	UNUSED_PARAMETER(device);
+	UNUSED_PARAMETER(surface);
+	UNUSED_PARAMETER(x);
+	UNUSED_PARAMETER(y);
+
+	/* An earlier drag's offer goes. */
+	probe = data;
+	if (probe->second_offer != NULL && probe->second_offer != offer)
+		wl_data_offer_destroy(probe->second_offer);
+	probe->second_offer = offer;
+	printf("DATAPROBE drag enter device=2 text=%d\n", probe->offer_text);
+	fflush(stdout);
+	if (offer == NULL)
+		return;
+
+	/* Taken as a copy when it has text, refused otherwise. */
+	if (probe->offer_text) {
+		wl_data_offer_accept(offer, serial, PROBE_TYPE_UTF8);
+	} else {
+		wl_data_offer_accept(offer, serial, NULL);
+	}
+
+	/* A copy, the one action taken (version 3). */
+	version = wl_proxy_get_version((struct wl_proxy *)offer);
+	if (version >= 3U)
+		wl_data_offer_set_actions(offer, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY, WL_DATA_DEVICE_MANAGER_DND_ACTION_COPY);
+	(void)wl_display_flush(probe->display);
+}
+
+/* The drag left (or was dropped on the other device): the second device's offer goes. */
+static void
+second_leave(
+	void *data,
+	struct wl_data_device *device)
+{
+	struct probe *probe;
+
+	UNUSED_PARAMETER(device);
+
+	/* The offer, and the line. */
+	probe = data;
+	if (probe->second_offer != NULL)
+		wl_data_offer_destroy(probe->second_offer);
+	probe->second_offer = NULL;
+	printf("DATAPROBE drag leave device=2\n");
+	fflush(stdout);
+}
+
+/* The drag was dropped through the second device: its text is read and the drop finished. */
+static void
+second_drop(
+	void *data,
+	struct wl_data_device *device)
+{
+	char text[PROBE_TEXT_MAX + 1U];
+	struct probe *probe;
+	uint32_t version;
+	size_t length;
+
+	UNUSED_PARAMETER(device);
+
+	/* Only a drag with an offer. */
+	probe = data;
+	printf("DATAPROBE drag drop device=2\n");
+	fflush(stdout);
+	if (probe->second_offer == NULL)
+		return;
+
+	/* The text, the line, the finish. */
+	length = probe_read(probe, probe->second_offer, text);
+	printf("DATAPROBE drag received device=2 when=drop bytes=%u text=%s\n", (unsigned)length, text);
+	fflush(stdout);
+	version = wl_proxy_get_version((struct wl_proxy *)probe->second_offer);
+	if (version >= 3U)
+		wl_data_offer_finish(probe->second_offer);
+	wl_data_offer_destroy(probe->second_offer);
+	probe->second_offer = NULL;
+	(void)wl_display_flush(probe->display);
+}
+
+/* The selection told to the second device: its offer goes (the first device follows the selection). */
+static void
+second_selection(
+	void *data,
+	struct wl_data_device *device,
+	struct wl_data_offer *offer)
+{
+	UNUSED_PARAMETER(data);
+	UNUSED_PARAMETER(device);
+
+	/* Not this device's to read. */
+	if (offer != NULL)
+		wl_data_offer_destroy(offer);
 }

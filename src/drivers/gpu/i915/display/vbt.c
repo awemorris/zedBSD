@@ -1166,28 +1166,25 @@ drv_i915_vbt_set_log_level(
 }
 
 /*
- * Counts one parser message and shows its format text when its level is
- * shown.
+ * Shows one parser message whose level is shown (drv_i915_vbt_log_enabled()
+ * counted it), formatted with the kernel's printf subset under the VBT's
+ * tag.
  */
 void
-drv_i915_vbt_note(
-	int level,
-	const char *fmt)
+drv_i915_vbt_notef(
+	const char *fmt,
+	...)
 {
-	struct i915_vbt_world *world;
+	char text[256];
+	va_list arguments;
 
-	/* Without a world nothing is counted or shown. */
-	world = i915_vbt_bound_world;
-	if (world == NULL)
-		return;
+	/* Renders the message, cut to the room. */
+	va_start(arguments, fmt);
+	(void)kern_vsnprintf(text, sizeof(text), fmt, arguments);
+	va_end(arguments);
 
-	/* Every error-level message is counted. */
-	if (level == I915_VBT_LOG_ERR)
-		world->vbt_log_errors++;
-
-	/* Shows the message when its level is shown. */
-	if (level <= world->vbt_log_level)
-		drv_i915_vbt_emit(fmt);
+	/* Logs it under the VBT's tag. */
+	kern_logf("i915: vbt: %s", text);
 }
 
 /*

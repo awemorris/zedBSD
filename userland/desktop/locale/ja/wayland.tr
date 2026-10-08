@@ -1,299 +1,335 @@
 # The compositor's texts in Japanese (domain wayland, WS158). tools/i18n/tr.py update keeps the translations.
-# wayland.keys:3
+# userland/desktop/locale/wayland.keys:3
 msg	Lock Screen	画面をロック
-# wayland.keys:4, ../wayland/power-dialog.c:544
+# userland/desktop/locale/wayland.keys:4, userland/desktop/wayland/power-dialog.c:546
 msg	Log Out	ログアウト
-# wayland.keys:7
+# userland/desktop/locale/wayland.keys:7
 msg	Network	ネットワーク
-# wayland.keys:8, ../wayland/network.c:944
+# userland/desktop/locale/wayland.keys:8, userland/desktop/wayland/network.c:986
 msg	Wi-Fi	Wi-Fi
-# wayland.keys:9
+# userland/desktop/locale/wayland.keys:9
 msg	Ethernet	イーサネット
-# wayland.keys:10
+# userland/desktop/locale/wayland.keys:10
 msg	Interface	インターフェイス
-# wayland.keys:11
+# userland/desktop/locale/wayland.keys:11
 msg	Status	状態
-# wayland.keys:12
+# userland/desktop/locale/wayland.keys:12, userland/desktop/wayland/bluetooth-bar.c:812
 msg	Connected	接続済み
-# wayland.keys:13, ../wayland/network.c:1136
+# userland/desktop/locale/wayland.keys:13, userland/desktop/wayland/network.c:1178
 msg	Not connected	未接続
-# wayland.keys:14
+# userland/desktop/locale/wayland.keys:14
 msg	Network service not running	ネットワークサービスが動いていません
-# wayland.keys:15
+# userland/desktop/locale/wayland.keys:15
 msg	IPv4 address	IPv4 アドレス
-# wayland.keys:16
+# userland/desktop/locale/wayland.keys:16
 msg	Subnet mask	サブネットマスク
-# wayland.keys:17
+# userland/desktop/locale/wayland.keys:17
 msg	DNS	DNS
-# wayland.keys:18
+# userland/desktop/locale/wayland.keys:18
 msg	MAC address	MAC アドレス
-# wayland.keys:19
+# userland/desktop/locale/wayland.keys:19
 msg	MTU	MTU
-# wayland.keys:20
+# userland/desktop/locale/wayland.keys:20
 msg	Signal	信号の強さ
-# wayland.keys:21
+# userland/desktop/locale/wayland.keys:21
 msg	Received	受信
-# wayland.keys:22
+# userland/desktop/locale/wayland.keys:22
 msg	Sent	送信
-# ../wayland/greeter.c:455, ../wayland/power-dialog.c:542
-msg	Restart	再起動
-# ../wayland/greeter.c:456
-msg	Shut Down	シャットダウン
-# ../wayland/greeter.c (ws187-p002)
-msg	Swipe up to unlock	上にスワイプしてロックを解除
-# ../wayland/greeter.c (ws187-p003)
-msg	Security Key	セキュリティキー
-# ../wayland/greeter.c:961
-msg	Starting session...	セッションを開始しています...
-# ../wayland/greeter.c:963
-msg	Touch your security key.	セキュリティキーに触れてください。
-# ../wayland/greeter.c:965
-msg	Checking...	確認しています...
-# ../wayland/greeter.c:974
-msg	Use your password	パスワードを使う
-# ../wayland/greeter.c:976
-msg	Use your PIN	PIN を使う
-# ../wayland/greeter.c:978
-msg	Use a security key	セキュリティキーを使う
-# ../wayland/greeter.c:1008
-msg	Password	パスワード
-# ../wayland/greeter.c:1010
-msg	PIN	PIN
-# ../wayland/greeter.c:1012
-msg	Security key PIN	セキュリティキーの PIN
-# ../wayland/greeter.c:1255
-msg	A PIN has six digits.	PIN は 6 桁です。
-# ../wayland/greeter.c:1262
-msg	A security key's PIN has at least four characters.	セキュリティキーの PIN は 4 文字以上です。
-# ../wayland/greeter.c:1384
-msg	Shutting down...	シャットダウンしています...
-# ../wayland/greeter.c:1387
-msg	Restarting...	再起動しています...
-# ../wayland/greeter.c:1453
-msg	Busy. Try again.	処理中です。もう一度お試しください。
-# ../wayland/greeter.c:1455, ../wayland/greeter.c:1493
-msg	The login failed.	ログインできませんでした。
-# ../wayland/greeter.c:1477
-msg	Use your password.	パスワードを使ってください。
-# ../wayland/greeter.c:1486
-msg	This account is locked.	このアカウントはロックされています。
-# ../wayland/greeter.c:1500
-msg	That took too long. Try again.	時間がかかりすぎました。もう一度お試しください。
-# ../wayland/greeter.c:1512
-msg	Wrong PIN. Try again.	PIN が違います。もう一度お試しください。
-# ../wayland/greeter.c:1518
-msg	Wrong password. Try again.	パスワードが違います。もう一度お試しください。
-# ../wayland/greeter.c:1667
-msg	Wrong security key PIN. Try again.	セキュリティキーの PIN が違います。もう一度お試しください。
-# ../wayland/greeter.c:1670
-msg	No registered security key is plugged in.	登録したセキュリティキーが挿さっていません。
-# ../wayland/greeter.c:1675
-msg	The security key is locked.	セキュリティキーがロックされています。
-# ../wayland/greeter.c:1680
-msg	The security key did not answer.	セキュリティキーが応答しませんでした。
-# ../wayland/greeter.c:1685
-msg	This security key cannot be used.	このセキュリティキーは使えません。
-# ../wayland/keyboard.c:2051
-msg	Keyboard	キーボード
-# ../wayland/language.c:115
-ctx	long date	{1}, {2} {3}	{2}{3}日 {1}
-# ../wayland/language.c:117
-ctx	short date	{1} {2} {3}  {4}	{2}{3}日({1})  {4}
-# ../wayland/language.c:152
-ctx	weekday	Sunday	日曜日
-# ../wayland/language.c:153
-ctx	weekday	Sun	日
-# ../wayland/language.c:156
-ctx	weekday	Monday	月曜日
-# ../wayland/language.c:157
-ctx	weekday	Mon	月
-# ../wayland/language.c:160
-ctx	weekday	Tuesday	火曜日
-# ../wayland/language.c:161
-ctx	weekday	Tue	火
-# ../wayland/language.c:164
-ctx	weekday	Wednesday	水曜日
-# ../wayland/language.c:165
-ctx	weekday	Wed	水
-# ../wayland/language.c:168
-ctx	weekday	Thursday	木曜日
-# ../wayland/language.c:169
-ctx	weekday	Thu	木
-# ../wayland/language.c:172
-ctx	weekday	Friday	金曜日
-# ../wayland/language.c:173
-ctx	weekday	Fri	金
-# ../wayland/language.c:176
-ctx	weekday	Saturday	土曜日
-# ../wayland/language.c:177
-ctx	weekday	Sat	土
-# ../wayland/language.c:196
-ctx	month	January	1月
-# ../wayland/language.c:197
-ctx	month	Jan	1月
-# ../wayland/language.c:200
-ctx	month	February	2月
-# ../wayland/language.c:201
-ctx	month	Feb	2月
-# ../wayland/language.c:204
-ctx	month	March	3月
-# ../wayland/language.c:205
-ctx	month	Mar	3月
-# ../wayland/language.c:208
-ctx	month	April	4月
-# ../wayland/language.c:209
-ctx	month	Apr	4月
-# ../wayland/language.c:212
-ctx	month	May	5月
-# ../wayland/language.c:215
-ctx	month	June	6月
-# ../wayland/language.c:216
-ctx	month	Jun	6月
-# ../wayland/language.c:219
-ctx	month	July	7月
-# ../wayland/language.c:220
-ctx	month	Jul	7月
-# ../wayland/language.c:223
-ctx	month	August	8月
-# ../wayland/language.c:224
-ctx	month	Aug	8月
-# ../wayland/language.c:227
-ctx	month	September	9月
-# ../wayland/language.c:228
-ctx	month	Sep	9月
-# ../wayland/language.c:231
-ctx	month	October	10月
-# ../wayland/language.c:232
-ctx	month	Oct	10月
-# ../wayland/language.c:235
-ctx	month	November	11月
-# ../wayland/language.c:236
-ctx	month	Nov	11月
-# ../wayland/language.c:239
-ctx	month	December	12月
-# ../wayland/language.c:240
-ctx	month	Dec	12月
-# ../wayland/network.c:720
-msg	Could not join {1} ({2})	{1} に接続できませんでした（{2}）
-# ../wayland/network.c:947, ../wayland/network.c:1130
-msg	Connecting to {1}...	{1} に接続しています...
-# ../wayland/network.c:960
-msg	Looking for networks...	ネットワークを探しています...
-# ../wayland/network.c:962
-msg	No networks found	ネットワークが見つかりません
-# ../wayland/network.c:1015
-msg	{1} more in Settings > Wi-Fi	ほかに {1} 件（設定 > Wi-Fi）
-# ../wayland/network.c:1029
-msg	Wired ({1}): connected	有線（{1}）: 接続済み
-# ../wayland/network.c:1031
-msg	Wired: not connected	有線: 未接続
-# ../wayland/network.c:1087
-msg	Key for {1}	{1} のパスワード
-# ../wayland/network.c:1092
-msg	Enter: join   Esc: cancel	Enter: 接続   Esc: キャンセル
-# ../wayland/network.c:1108
-msg	Starting the network service...	ネットワークサービスを開始しています...
-# ../wayland/network.c:1114
-msg	Network service not available	ネットワークサービスを使えません
-# ../wayland/network.c:1121
-msg	No Wi-Fi hardware	Wi-Fi のハードウェアがありません
-# ../wayland/network.c:1124
-msg	Wi-Fi is off	Wi-Fi はオフです
-# ../wayland/network.c:1127
-msg	Searching for a known network	接続したことのあるネットワークを探しています
-# ../wayland/network.c:1133
-msg	Connected to {1}	{1} に接続済み
-# ../wayland/network.c:1237, ../wayland/network.c:2056
-msg	Could not {1} ({2})	{1}できませんでした（{2}）
-# ../wayland/network.c:1573
-msg	Connecting...	接続しています...
-# ../wayland/network.c:1771
-ctx	network request	scan	ネットワークを探すことが
-# ../wayland/network.c:1773
-ctx	network request	join	接続
-# ../wayland/network.c:1775
-ctx	network request	disconnect	切断
-# ../wayland/network.c:1777
-ctx	network request	turn Wi-Fi on	Wi-Fi をオンに
-# ../wayland/network.c:1779
-ctx	network request	turn Wi-Fi off	Wi-Fi をオフに
-# ../wayland/network.c:1781
-ctx	network request	save the key	パスワードを保存
-# ../wayland/network.c:1783
-ctx	network request	configure wired	有線の設定が
-# ../wayland/network.c:1789
-ctx	network request	do that	操作
-# ../wayland/network.c:1961
-msg	The key must be 8 to 63 characters	パスワードは 8〜63 文字です
-# ../wayland/network.c:1970
-msg	Could not save the key ({1})	パスワードを保存できませんでした（{1}）
-# ../wayland/network.c:2042
-msg	Could not join {1}: no saved key	{1} に接続できませんでした: 保存したパスワードがありません
-# ../wayland/network.c:2047
-msg	Wi-Fi is off; turn it on to join	Wi-Fi がオフです。接続するにはオンにしてください
-# ../wayland/network.c:2050
-msg	This account may not control Wi-Fi	このアカウントは Wi-Fi を操作できません
-# ../wayland/network.c:2053
-msg	{1} did not accept the key	{1} がパスワードを受け付けませんでした
-# ../wayland/power-dialog.c:540
-msg	Power Off	電源を切る
-# ../wayland/power-dialog.c:546
+# userland/desktop/wayland/bluetooth-ask.c:371
+msg	Pair with this device?	この機器とペアリングしますか？
+# userland/desktop/wayland/bluetooth-ask.c:373
+msg	Pair if the device shows the same number.	機器に同じ数字が出ていればペアリングします。
+# userland/desktop/wayland/bluetooth-ask.c:375
+msg	Type this number on the device, then press Enter.	機器でこの数字を打ち、Enter を押してください。
+# userland/desktop/wayland/bluetooth-ask.c:387
+msg	Asked by {1}	{1} が求めています
+# userland/desktop/wayland/bluetooth-ask.c:394
+msg	Closes in {1} s	あと {1} 秒で閉じます
+# userland/desktop/wayland/bluetooth-ask.c:597
+msg	Pair	ペアリング
+# userland/desktop/wayland/bluetooth-ask.c:607, userland/desktop/wayland/power-dialog.c:548
 msg	Cancel	キャンセル
-# ../wayland/shell.c:3647
-msg	Window	ウインドウ
-# ../wayland/shell.c:3651
-msg	{1} (not responding)	{1}（応答なし）
-# ../wayland/shell.c:6996
-msg	No other windows	ほかのウインドウはありません
-# ../wayland/shell.c:7002
-msg	Swipe left or right to choose · Swipe down to open	左右にスワイプして選ぶ · 下にスワイプして開く
-# ../wayland/sleep.c:624
-msg	This computer cannot sleep.	このコンピューターはスリープできません。
-# ../wayland/sleep.c:627
-msg	Sleep was cancelled: Wi-Fi could not be turned off.	スリープを中止しました: Wi-Fi をオフにできませんでした。
-# ../wayland/sleep.c:630
-msg	Sleep was cancelled: the disk was busy.	スリープを中止しました: ディスクが使用中でした。
-# ../wayland/sleep.c:633
-msg	Sleep was cancelled: a USB device was busy.	スリープを中止しました: USB デバイスが使用中でした。
-# ../wayland/sleep.c:636
-msg	Sleep was cancelled: the display was busy.	スリープを中止しました: ディスプレイが使用中でした。
-# ../wayland/sleep.c:639
-msg	Sleep was cancelled: {1} was busy.	スリープを中止しました: {1} が使用中でした。
-# ../wayland/sleep.c:642
-msg	Sleep was cancelled: {1} cannot sleep yet.	スリープを中止しました: {1} はまだスリープに対応していません。
-# ../wayland/sleep.c:646
-msg	Sleep was cancelled ({1}, error {2}).	スリープを中止しました（{1}、エラー {2}）。
-# ../wayland/sleep.c:648, ../wayland/sleep.c:662
-msg	Sleep was cancelled (error {1}).	スリープを中止しました（エラー {1}）。
-# ../wayland/sleep.c:653
-msg	A device did not come back after sleep (error {1}).	スリープの後に戻らなかったデバイスがあります（エラー {1}）。
-# ../wayland/sleep.c:656
-msg	Sleep was cancelled: a network change is waiting to be confirmed.	スリープを中止しました: ネットワークの変更が確認を待っています。
-# ../wayland/sleep.c:659
-msg	Sleep was cancelled: Wi-Fi was busy.	スリープを中止しました: Wi-Fi が使用中でした。
-# ../wayland/sleep.c:684
-msg	Sleep	スリープ
-# ../wayland/volume.c:504
-msg	Sound	サウンド
-# ../wayland/volume.c:509
-msg	Muted	消音
-# ../wayland/volume.c:531
-msg	Mute	消音
-# ../wayland/volume.c:538
-msg	Sound service is not running	サウンドサービスが動いていません
-# ../wayland/volume.c:540
-msg	No sound output	音声の出力がありません
-# ../wayland/media.c (ws156-p003)
+# userland/desktop/wayland/bluetooth-bar.c:358, userland/desktop/wayland/bluetooth-bar.c:597
+msg	The request failed.	できませんでした。
+# userland/desktop/wayland/bluetooth-bar.c:481
+msg	No paired devices	ペアリングした機器はありません
+# userland/desktop/wayland/bluetooth-bar.c:484
+msg	{1} more in Settings	ほか {1} 台は設定で
+# userland/desktop/wayland/bluetooth-bar.c:490
+msg	Bluetooth Settings...	Bluetooth の設定...
+# userland/desktop/wayland/bluetooth-bar.c:595
+msg	Bluetooth is busy. Try again.	Bluetooth が使用中です。もう一度試してください。
+# userland/desktop/wayland/bluetooth-bar.c:699
+msg	Bluetooth is off	Bluetooth はオフです
+# userland/desktop/wayland/bluetooth-bar.c:701
+msg	Starting...	起動中...
+# userland/desktop/wayland/bluetooth-bar.c:703
+msg	The adapter's firmware is missing	アダプタのファームウェアがありません
+# userland/desktop/wayland/bluetooth-bar.c:705
+msg	This adapter is not supported	このアダプタには対応していません
+# userland/desktop/wayland/bluetooth-bar.c:707
+msg	Bluetooth is not available	Bluetooth は使えません
+# userland/desktop/wayland/bluetooth-bar.c:814
+msg	Disconnect	切断
+# userland/desktop/wayland/bluetooth-bar.c:816
+msg	Connect	接続
+# userland/desktop/wayland/greeter.c:550, userland/desktop/wayland/power-dialog.c:544
+msg	Restart	再起動
+# userland/desktop/wayland/greeter.c:551
+msg	Shut Down	シャットダウン
+# userland/desktop/wayland/greeter.c:1231
+msg	Starting session...	セッションを開始しています...
+# userland/desktop/wayland/greeter.c:1233
+msg	Touch your security key.	セキュリティキーに触れてください。
+# userland/desktop/wayland/greeter.c:1235
+msg	Checking...	確認しています...
+# userland/desktop/wayland/greeter.c:1250
+msg	Use your password	パスワードを使う
+# userland/desktop/wayland/greeter.c:1252
+msg	Use your PIN	PIN を使う
+# userland/desktop/wayland/greeter.c:1254
+msg	Use a security key	セキュリティキーを使う
+# userland/desktop/wayland/greeter.c:1284, userland/desktop/wayland/greeter.c:2104
+msg	Password	パスワード
+# userland/desktop/wayland/greeter.c:1286, userland/desktop/wayland/greeter.c:2106
+msg	PIN	PIN
+# userland/desktop/wayland/greeter.c:1288
+msg	Security key PIN	セキュリティキーの PIN
+# userland/desktop/wayland/greeter.c:1488
+msg	Swipe up to unlock	上にスワイプしてロックを解除
+# userland/desktop/wayland/greeter.c:1647
+msg	A PIN has six digits.	PIN は 6 桁です。
+# userland/desktop/wayland/greeter.c:1654
+msg	A security key's PIN has at least four characters.	セキュリティキーの PIN は 4 文字以上です。
+# userland/desktop/wayland/greeter.c:1776
+msg	Shutting down...	シャットダウンしています...
+# userland/desktop/wayland/greeter.c:1779
+msg	Restarting...	再起動しています...
+# userland/desktop/wayland/greeter.c:1845
+msg	Busy. Try again.	処理中です。もう一度お試しください。
+# userland/desktop/wayland/greeter.c:1847, userland/desktop/wayland/greeter.c:1885
+msg	The login failed.	ログインできませんでした。
+# userland/desktop/wayland/greeter.c:1869
+msg	Use your password.	パスワードを使ってください。
+# userland/desktop/wayland/greeter.c:1878
+msg	This account is locked.	このアカウントはロックされています。
+# userland/desktop/wayland/greeter.c:1892
+msg	That took too long. Try again.	時間がかかりすぎました。もう一度お試しください。
+# userland/desktop/wayland/greeter.c:1904
+msg	Wrong PIN. Try again.	PIN が違います。もう一度お試しください。
+# userland/desktop/wayland/greeter.c:1910
+msg	Wrong password. Try again.	パスワードが違います。もう一度お試しください。
+# userland/desktop/wayland/greeter.c:2108
+msg	Security Key	セキュリティキー
+# userland/desktop/wayland/greeter.c:2181
+msg	Wrong security key PIN. Try again.	セキュリティキーの PIN が違います。もう一度お試しください。
+# userland/desktop/wayland/greeter.c:2184
+msg	No registered security key is plugged in.	登録したセキュリティキーが挿さっていません。
+# userland/desktop/wayland/greeter.c:2189
+msg	The security key is locked.	セキュリティキーがロックされています。
+# userland/desktop/wayland/greeter.c:2194
+msg	The security key did not answer.	セキュリティキーが応答しませんでした。
+# userland/desktop/wayland/greeter.c:2199
+msg	This security key cannot be used.	このセキュリティキーは使えません。
+# userland/desktop/wayland/keyboard.c:2076
+msg	Keyboard	キーボード
+# userland/desktop/wayland/language.c:101
+ctx	long date	{1}, {2} {3}	{2}{3}日 {1}
+# userland/desktop/wayland/language.c:103
+ctx	short date	{1} {2} {3}  {4}	{2}{3}日({1})  {4}
+# userland/desktop/wayland/language.c:138
+ctx	weekday	Sunday	日曜日
+# userland/desktop/wayland/language.c:139
+ctx	weekday	Sun	日
+# userland/desktop/wayland/language.c:142
+ctx	weekday	Monday	月曜日
+# userland/desktop/wayland/language.c:143
+ctx	weekday	Mon	月
+# userland/desktop/wayland/language.c:146
+ctx	weekday	Tuesday	火曜日
+# userland/desktop/wayland/language.c:147
+ctx	weekday	Tue	火
+# userland/desktop/wayland/language.c:150
+ctx	weekday	Wednesday	水曜日
+# userland/desktop/wayland/language.c:151
+ctx	weekday	Wed	水
+# userland/desktop/wayland/language.c:154
+ctx	weekday	Thursday	木曜日
+# userland/desktop/wayland/language.c:155
+ctx	weekday	Thu	木
+# userland/desktop/wayland/language.c:158
+ctx	weekday	Friday	金曜日
+# userland/desktop/wayland/language.c:159
+ctx	weekday	Fri	金
+# userland/desktop/wayland/language.c:162
+ctx	weekday	Saturday	土曜日
+# userland/desktop/wayland/language.c:163
+ctx	weekday	Sat	土
+# userland/desktop/wayland/language.c:182
+ctx	month	January	1月
+# userland/desktop/wayland/language.c:183
+ctx	month	Jan	1月
+# userland/desktop/wayland/language.c:186
+ctx	month	February	2月
+# userland/desktop/wayland/language.c:187
+ctx	month	Feb	2月
+# userland/desktop/wayland/language.c:190
+ctx	month	March	3月
+# userland/desktop/wayland/language.c:191
+ctx	month	Mar	3月
+# userland/desktop/wayland/language.c:194
+ctx	month	April	4月
+# userland/desktop/wayland/language.c:195
+ctx	month	Apr	4月
+# userland/desktop/wayland/language.c:198
+ctx	month	May	5月
+# userland/desktop/wayland/language.c:201
+ctx	month	June	6月
+# userland/desktop/wayland/language.c:202
+ctx	month	Jun	6月
+# userland/desktop/wayland/language.c:205
+ctx	month	July	7月
+# userland/desktop/wayland/language.c:206
+ctx	month	Jul	7月
+# userland/desktop/wayland/language.c:209
+ctx	month	August	8月
+# userland/desktop/wayland/language.c:210
+ctx	month	Aug	8月
+# userland/desktop/wayland/language.c:213
+ctx	month	September	9月
+# userland/desktop/wayland/language.c:214
+ctx	month	Sep	9月
+# userland/desktop/wayland/language.c:217
+ctx	month	October	10月
+# userland/desktop/wayland/language.c:218
+ctx	month	Oct	10月
+# userland/desktop/wayland/language.c:221
+ctx	month	November	11月
+# userland/desktop/wayland/language.c:222
+ctx	month	Nov	11月
+# userland/desktop/wayland/language.c:225
+ctx	month	December	12月
+# userland/desktop/wayland/language.c:226
+ctx	month	Dec	12月
+# userland/desktop/wayland/media.c:99
 msg	USB drive connected	USB ドライブが接続されました
-# ../wayland/network.c (ws156-p003)
+# userland/desktop/wayland/network.c:733
+msg	Could not join {1} ({2})	{1} に接続できませんでした（{2}）
+# userland/desktop/wayland/network.c:989, userland/desktop/wayland/network.c:1172
+msg	Connecting to {1}...	{1} に接続しています...
+# userland/desktop/wayland/network.c:1002
+msg	Looking for networks...	ネットワークを探しています...
+# userland/desktop/wayland/network.c:1004
+msg	No networks found	ネットワークが見つかりません
+# userland/desktop/wayland/network.c:1057
+msg	{1} more in Settings > Wi-Fi	ほかに {1} 件（設定 > Wi-Fi）
+# userland/desktop/wayland/network.c:1071
+msg	Wired ({1}): connected	有線（{1}）: 接続済み
+# userland/desktop/wayland/network.c:1073
+msg	Wired: not connected	有線: 未接続
+# userland/desktop/wayland/network.c:1129
+msg	Key for {1}	{1} のパスワード
+# userland/desktop/wayland/network.c:1134
+msg	Enter: join   Esc: cancel	Enter: 接続   Esc: キャンセル
+# userland/desktop/wayland/network.c:1150
+msg	Starting the network service...	ネットワークサービスを開始しています...
+# userland/desktop/wayland/network.c:1156
+msg	Network service not available	ネットワークサービスを使えません
+# userland/desktop/wayland/network.c:1163
+msg	No Wi-Fi hardware	Wi-Fi のハードウェアがありません
+# userland/desktop/wayland/network.c:1166
+msg	Wi-Fi is off	Wi-Fi はオフです
+# userland/desktop/wayland/network.c:1169
+msg	Searching for a known network	接続したことのあるネットワークを探しています
+# userland/desktop/wayland/network.c:1175
+msg	Connected to {1}	{1} に接続済み
+# userland/desktop/wayland/network.c:1279, userland/desktop/wayland/network.c:2153
+msg	Could not {1} ({2})	{1}できませんでした（{2}）
+# userland/desktop/wayland/network.c:1623
+msg	Connecting...	接続しています...
+# userland/desktop/wayland/network.c:1851
+ctx	network request	scan	ネットワークを探すことが
+# userland/desktop/wayland/network.c:1853
+ctx	network request	join	接続
+# userland/desktop/wayland/network.c:1855
+ctx	network request	disconnect	切断
+# userland/desktop/wayland/network.c:1857
+ctx	network request	turn Wi-Fi on	Wi-Fi をオンに
+# userland/desktop/wayland/network.c:1859
+ctx	network request	turn Wi-Fi off	Wi-Fi をオフに
+# userland/desktop/wayland/network.c:1861
+ctx	network request	save the key	パスワードを保存
+# userland/desktop/wayland/network.c:1863
+ctx	network request	configure wired	有線の設定が
+# userland/desktop/wayland/network.c:1869
+ctx	network request	do that	操作
+# userland/desktop/wayland/network.c:2041
+msg	The key must be 8 to 63 characters	パスワードは 8〜63 文字です
+# userland/desktop/wayland/network.c:2050
+msg	Could not save the key ({1})	パスワードを保存できませんでした（{1}）
+# userland/desktop/wayland/network.c:2079
 msg	Could not join {1}	{1} に接続できませんでした
-# ../wayland/notify-system.c (ws156-p003)
-msg	Battery critically low	バッテリーの残量がほとんどありません
-# ../wayland/notify-system.c (ws156-p003)
-msg	Battery low	バッテリーの残量が少なくなっています
-# ../wayland/notify-system.c (ws156-p003)
-msg	{1}% of the battery is left	バッテリーの残りは {1}%です
-# ../wayland/notify-log.c (ws156-p004)
+# userland/desktop/wayland/network.c:2139
+msg	Could not join {1}: no saved key	{1} に接続できませんでした: 保存したパスワードがありません
+# userland/desktop/wayland/network.c:2144
+msg	Wi-Fi is off; turn it on to join	Wi-Fi がオフです。接続するにはオンにしてください
+# userland/desktop/wayland/network.c:2147
+msg	This account may not control Wi-Fi	このアカウントは Wi-Fi を操作できません
+# userland/desktop/wayland/network.c:2150
+msg	{1} did not accept the key	{1} がパスワードを受け付けませんでした
+# userland/desktop/wayland/notify-log.c:210
 msg	No notifications	通知はありません
-# ../wayland/notify-log.c (ws156-p004)
+# userland/desktop/wayland/notify-log.c:226
 msg	Clear all notifications	通知をすべて消去
+# userland/desktop/wayland/notify-system.c:145
+msg	{1}% of the battery is left	バッテリーの残りは {1}%です
+# userland/desktop/wayland/notify-system.c:151
+msg	Battery critically low	バッテリーの残量がほとんどありません
+# userland/desktop/wayland/notify-system.c:159
+msg	Battery low	バッテリーの残量が少なくなっています
+# userland/desktop/wayland/power-dialog.c:542
+msg	Power Off	電源を切る
+# userland/desktop/wayland/shell.c:4097
+msg	Window	ウインドウ
+# userland/desktop/wayland/shell.c:4101
+msg	{1} (not responding)	{1}（応答なし）
+# userland/desktop/wayland/shell.c:7809
+msg	No other windows	ほかのウインドウはありません
+# userland/desktop/wayland/shell.c:7815
+msg	Swipe left or right to choose · Swipe down to open	左右にスワイプして選ぶ · 下にスワイプして開く
+# userland/desktop/wayland/sleep.c:637
+msg	This computer cannot sleep.	このコンピューターはスリープできません。
+# userland/desktop/wayland/sleep.c:640
+msg	Sleep was cancelled: Wi-Fi could not be turned off.	スリープを中止しました: Wi-Fi をオフにできませんでした。
+# userland/desktop/wayland/sleep.c:643
+msg	Sleep was cancelled: the disk was busy.	スリープを中止しました: ディスクが使用中でした。
+# userland/desktop/wayland/sleep.c:646
+msg	Sleep was cancelled: a USB device was busy.	スリープを中止しました: USB デバイスが使用中でした。
+# userland/desktop/wayland/sleep.c:649
+msg	Sleep was cancelled: the display was busy.	スリープを中止しました: ディスプレイが使用中でした。
+# userland/desktop/wayland/sleep.c:652
+msg	Sleep was cancelled: {1} was busy.	スリープを中止しました: {1} が使用中でした。
+# userland/desktop/wayland/sleep.c:655
+msg	Sleep was cancelled: {1} cannot sleep yet.	スリープを中止しました: {1} はまだスリープに対応していません。
+# userland/desktop/wayland/sleep.c:659
+msg	Sleep was cancelled ({1}, error {2}).	スリープを中止しました（{1}、エラー {2}）。
+# userland/desktop/wayland/sleep.c:661, userland/desktop/wayland/sleep.c:677
+msg	Sleep was cancelled (error {1}).	スリープを中止しました（エラー {1}）。
+# userland/desktop/wayland/sleep.c:668
+msg	A device did not come back after sleep (error {1}).	スリープの後に戻らなかったデバイスがあります（エラー {1}）。
+# userland/desktop/wayland/sleep.c:671
+msg	Sleep was cancelled: a network change is waiting to be confirmed.	スリープを中止しました: ネットワークの変更が確認を待っています。
+# userland/desktop/wayland/sleep.c:674
+msg	Sleep was cancelled: Wi-Fi was busy.	スリープを中止しました: Wi-Fi が使用中でした。
+# userland/desktop/wayland/sleep.c:699
+msg	Sleep	スリープ
+# userland/desktop/wayland/volume.c:507
+msg	Sound	サウンド
+# userland/desktop/wayland/volume.c:512
+msg	Muted	消音
+# userland/desktop/wayland/volume.c:534
+msg	Mute	消音
+# userland/desktop/wayland/volume.c:541
+msg	Sound service is not running	サウンドサービスが動いていません
+# userland/desktop/wayland/volume.c:543
+msg	No sound output	音声の出力がありません

@@ -1,7 +1,7 @@
 ---
 id: apps.pdfviewer.drag-out
 title: PDF Viewer の選択の文字と、長押しした画像を他の窓へ drag できる
-status: draft
+status: active
 areas: [pdfviewer, dnd]
 paths: [userland/desktop/pdfviewer/find.c, userland/desktop/pdfviewer/view.c, userland/desktop/pdfviewer/main.c]
 machine: either

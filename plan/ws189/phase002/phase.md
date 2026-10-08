@@ -76,3 +76,17 @@ compositor（`userland/desktop/wayland/`）:
   撮影 07 では Text Editor の窓が 2 つあった（前の手順の窓が残っていた）ので preview になった。シナリオ `desktop.dnd.dock-spring` の準備に「Text Editor の
   窓を 1 つだけ」と書き、窓が 2 つの場合を手順 4 として足した。
 - 確認: build（amd64 wayland・Linux all）warning 0、`run-host-dnd-state.sh` ok（165）、style の新しい指摘 0、`check-scenarios.py` PASS。QEMU は T1 へ。
+
+### F2〜F4（2026-10-08、q896 の後）
+
+- **F2（期待が誤り、試験を直した）**: same-program-windows の `devices=1` は正しい。Terminal の New Window（Ctrl+Shift+N）は fork と exec で別の process を起動する
+  （terminal/main.c `main_new_window`）ので、その client の data device は 1 つ。設計 §0 の欠け 1 の「Terminal・Notes の 2 つ目の窓が該当」は読み違いで、今の Kei の
+  program に 1 つの process で窓を 2 つ持つ物は無い（`kl_app_window_create` の呼び手は各 1 窓）。§3.6 の経路（1 つの client の複数の device への enter・
+  motion・leave、型を受けた最初の device への drop、他の device の leave）は、`data-probe --two-devices`（同じ seat に 2 つ目の wl_data_device、log
+  `DATAPROBE drag enter|leave|drop device=2`）で確かめるよう `desktop.dnd.same-program-windows` を書き直した。libkeiland の「自分の surface でない enter を断る」側は
+  今の program では起きない（2 窓の program ができた時の試験は Future Work の候補）。
+- **F3（実装を直した）**: Browser の画像の drag の text が path（`/tmp/aat-work/photo.png`）だった。`page_image_at`（libbrowser/page/link.c）が読み込み用の
+  `page_resolve_location`（file: の URL を path にする）を使っていた。drag では `link_resolve` と `net_url_serialize` で絶対の URL（`file:///tmp/aat-work/photo.png`）にする。
+- **F4**: ws189 の 10 のシナリオ（desktop.dnd.* の 8、apps.pdfviewer.drag-out、apps.browser.image-drag）を自己レビュー（log の行が source にあること、F2・F5・F6 の
+  直し）して `status: active` にした。Files・Terminal の DnD の回帰として `apps.files.drag-between-windows`（Files の窓の間の移動、Terminal への path、即離し）を足した（active）。
+- 確認: amd64 の data-probe・libbrowser・browser と Linux all の build warning 0、境界 PASS、style の新しい指摘 0、`check-scenarios.py` PASS（122）。QEMU は T1 へ。

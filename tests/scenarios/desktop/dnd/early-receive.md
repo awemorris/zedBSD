@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.early-receive
 title: drag の data は落とした窓にだけ渡り、drop の前の受け取りは空になる
-status: draft
+status: active
 areas: [compositor, dnd]
 paths: [userland/desktop/wayland/data.c, userland/tests/data-probe/]
 machine: either

@@ -1,7 +1,7 @@
 ---
 id: desktop.dnd.refused-mark
 title: 受けない窓の上の drag は「不可」の印になり、離すと取り消される
-status: draft
+status: active
 areas: [compositor, dnd]
 paths: [userland/desktop/wayland/data.c, userland/desktop/wayland/dnd-state.c, userland/desktop/wayland/shell.c]
 machine: either

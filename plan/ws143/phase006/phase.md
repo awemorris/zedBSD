@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws143-p006 -->
 # ws143-p006: desktop — backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓
 
-Status: in-progress（q896、P1、2026-10-08 午後）
+Status: test-wait（q896、P1、2026-10-08 夕。実装・host 試験済み、QEMU の AAT は T1 へ）
 Disposition: normal
 Parent: [WS143](../ws.md)
 Queue: q896（P1、2026-10-08 午後、ユーザーの決定「Mail の添付より先に WS143 p006」、Q1 の投入）
@@ -142,3 +142,34 @@ daemon が居ない・controller が無い・firmware が要る時の説明。le
 
 - 2026-10-08 P1: bluetoothd の `POWER on|off`・`STATE off`、`bt power` を実装（a532eda2c）。build（config-amd64-bt.mk の bluetoothd・bt）warning 0、
   `bt-daemon-host-test.sh` PASS。
+- 2026-10-08 P1: desktop の側を実装（129a1c659 ほか、本節）。
+  - compositor: `wayland/bluetooth-shell.c`（`kl_system_bluetooth_v1` の object、backend を desktop の最初の tick で 1 度開く・greeter は開かない、watch は object ごと・
+    scan は object ごとに 60 秒の lease（client が 30 秒ごとに頼み直す）、bar の menu の watch、backend の id と client の request の表、errno → `KL_SYSTEM_RESULT_*`、
+    問いを窓へ）、`wayland/bluetooth-ask.c`（pairing の窓: power-dialog の形の card。CONFIRM・CONSENT は Pair と Cancel、PASSKEY は Cancel だけで自分の pairing を
+    `kl_backend_bluetooth_cancel`。他の人の pairing は「Asked by NAME」、自分の pairing は残り秒。20 秒で no、PASSKEY は END まで（安全のため 60 秒で閉じる）。
+    lock・greeter の間の問いは即 no、lock で開いている窓は no。daemon の不在・ASK-END で閉じる。log `KWL BT ask …`・`KWL BT answer yes|no via=…`）、
+    `wayland/bluetooth-bar.c`（bar の rune: daemon と controller がある時だけ slot を取る、on は濃い・それ以外は淡い・接続ありは両脇に点。menu: switch（CAN_POWER の時）、
+    on でない時の状態の文、paired の機器（CAN_CONNECT の時 click で接続・切断）、「Bluetooth Settings...」で `settings bluetooth` を起動、失敗の行。network の menu の形）。
+    hook: system.c・protocol.c・objects.c・kwl.h・glass.h・shell.c（bar の配置・描画・button・key・motion・tick・home）・seat.c・keyboard.c・corner.c・scanout.c。
+    icon `GLASS_ICON_BLUETOOTH`（icons.c）。3 つの Makefile。
+  - libkeiland: `kl_system_bluetooth_state`・`_devices`・`_watch`・`_scan`・`_power`・`_device`（KL_VERSION 72、`KL_SYSTEM_HAS_BLUETOOTH 0x20000`、
+    `KL_SYSTEM_CHANGED_BLUETOOTH 0x10000`、結果は既存の `kl_system_take_result`）。**設計 §6 からの変更**: pair・forget・connect・disconnect は 1 つの
+    `kl_system_bluetooth_device(action, address, type)`（wire の device request と同じ形）、結果は専用の take を作らず共通の結果の ring。state の flags に
+    `KL_BLUETOOTH_POWERED`（利用者の switch）と `KL_BLUETOOTH_ANSWERS`（この desktop が問いに答える、I3）を足した（wire `KL_SYSTEM_BT_POWERED 0x4`・`_ANSWERS 0x8`）。
+  - Settings: `settings/page-bluetooth.c`（stub を置き換え、pages.c の ready=1）。Bluetooth の card（状態の文・switch・controller の名前、I3 の注）、My Devices
+    （種類・接続・電池・legacy の注、Connect/Disconnect は CAN_CONNECT の時、Remove）、Other Devices（on の時、Pair）、結果の行。頁が出ている間 watch と scan
+    （30 秒ごとに頼み直し、main loop の待ちも `se_bluetooth_wait` で短くする）、頁を離れると止める。文は他の頁と同じく英語のまま。
+  - backend の直し: (1) 自分の PAIR の前に agent の役が無ければ AGENT の接続を PAIR より先に作る（AGENT-END の後の pairing で問いが他の program へ行かない）。
+    (2) 取られていない結果・問いは update ごとに CHANGED を立て直す（`kl_backend_bluetooth_cancel` が update の外で結果を積むと、次の結果まで compositor が拾わなかった）。
+    (3) gcc の -Wrestrict を避けて名前の初期値を memcpy に。
+  - 翻訳: `locale/ja/wayland.tr` に 18 件（`tr.py update`・`check` 167/167）、glossary に「ペアリング」「機器」「アダプタ」「ファームウェア」。
+  - 試験: host `plan/ws143/tests/bt-desktop-host-test.sh`（偽の bluetoothd の thread: 不在→到達、読み取り（名前の \xNN・種類・paired が先・接続と電池）、agent、
+    POWER、off の間の PAIR は ENETDOWN、数字の比較（id で yes、古い id は ENOENT、END）、root の pairing の同意（own=0・user=root、no → ECONNREFUSED）、
+    PASSKEY の取り消し（ECANCELED と END）、FORGET、scan の間の request は scan の後に送る、同時に 1 つ（EBUSY）、AGENT-END の後は取り返さず PAIR の前に取り直す、
+    満ちた daemon で状態が保たれる、daemon が去ると unreachable、古い daemon（POWER・STATUS・CONNECT が無い））PASS（3 回）。WS131 の host 試験
+    `plan/ws131/tests/host-system.sh` に bluetooth-shell.c と unsupported の backend を足し（system.c が呼ぶため）、client の経路（HAS、unreachable、power・pair の
+    ENOTSUP、形の悪い address・action の EINVAL）を足した: PASS。AAT（draft）: `apps.settings.bluetooth-pair`、`desktop.bar.bluetooth-menu`。image:
+    `plan/ws143/tests/config-amd64-bt-desktop.mk`（AAT の image ＋ loopback の controller ＋ bluetoothd・bt）。
+  - 確認: build（amd64 wayland・libkeiland・settings、Linux all）warning 0、`keiland-os-boundary/check.sh` PASS、style の新しい指摘 0、`exports.py`、`check-scenarios.py` PASS。
+  - 未実施: QEMU の AAT（T1）、FreeBSD の build（Makefile.freebsd に足しただけ）、実機。接続・切断の確かめは p005 i02 の統合の後。loopback に PASSKEY の機器が無いので
+    窓の PASSKEY は host 試験だけ。
