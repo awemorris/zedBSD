@@ -67,6 +67,15 @@
 #define I915_DP_AUX_WELLS_BIOS		0x45440u
 #define I915_DP_AUX_WELLS_DRIVER	0x45444u
 
+/*
+ * The main power wells' driver requests (HSW_PWR_WELL_CTL2: PW_1 at bits 0
+ * and 1, PW_2 at 2 and 3, PW_A to D after them) and the DC state enable
+ * (DC_STATE_EN), also in the report (BUG-256: an AUX channel needs PW_2 up
+ * and the display out of DC5 and DC6).
+ */
+#define I915_DP_MAIN_WELLS_DRIVER	0x45404u
+#define I915_DP_DC_STATE_EN		0x45504u
+
 /* The failed transfers reported in full: the first ones, then one of every so many. */
 #define I915_DP_AUX_REPORTS_FIRST	8u
 #define I915_DP_AUX_REPORTS_EVERY	64u
@@ -910,6 +919,8 @@ i915_dp_aux_report(
 	u32 control;
 	u32 wells_bios;
 	u32 wells_driver;
+	u32 main_wells;
+	u32 dc_state;
 	int shown;
 
 	/* Counts the error; a level that is not shown ends here. */
@@ -927,8 +938,12 @@ i915_dp_aux_report(
 	wells_bios = i915_dp_intel_de_read(i915, _MMIO(I915_DP_AUX_WELLS_BIOS));
 	wells_driver = i915_dp_intel_de_read(i915, _MMIO(I915_DP_AUX_WELLS_DRIVER));
 
+	/* The main wells and the DC state the channel's registers live under. */
+	main_wells = i915_dp_intel_de_read(i915, _MMIO(I915_DP_MAIN_WELLS_DRIVER));
+	dc_state = i915_dp_intel_de_read(i915, _MMIO(I915_DP_DC_STATE_EN));
+
 	/* One line with every value. */
-	kern_logf("i915: aux %s: %s (status 0x%08x; control 0x%05x reads 0x%08x; AUX wells bios 0x%08x driver 0x%08x; report %u)\n",
+	kern_logf("i915: aux %s: %s (status 0x%08x; control 0x%05x reads 0x%08x; AUX wells bios 0x%08x driver 0x%08x; main wells driver 0x%08x DC_STATE_EN 0x%08x; report %u)\n",
 		  intel_dp->aux.name,
 		  what,
 		  status,
@@ -936,5 +951,7 @@ i915_dp_aux_report(
 		  control,
 		  wells_bios,
 		  wells_driver,
+		  main_wells,
+		  dc_state,
 		  i915_dp_aux_reports);
 }

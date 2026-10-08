@@ -27,7 +27,7 @@
  * environment, and both have DP names here:
  *
  *   the messages      every DP message macro counts into the DP's own
- *                     counters (drv_i915_dp_note()), not the parser's;
+ *                     counters (drv_i915_dp_notef()), not the parser's;
  *   the device        struct drm_i915_private carries the PPS lock, the DP
  *                     environment, the raw clock and the work queue after
  *                     the members the VBT parser knows.
@@ -127,15 +127,17 @@ typedef u16 __le16;
 /*
  * Reports one DP message.
  *
- * It has the form of the parser's I915_VBT_LOG(): the format text only, the
- * arguments type-checked and never evaluated.  The message is counted in the
- * DP's own counters and shown with the DP's prefix by drv_i915_dp_note().
+ * The message is counted in the DP's own counters; only a message whose
+ * level is shown has its arguments evaluated and is formatted with the
+ * kernel's printf subset (a conversion outside it is shown as written, its
+ * argument still consumed) and shown with the DP's prefix by
+ * drv_i915_dp_notef() (BUG-256: the format text alone, with its %s and
+ * %08x, was shown before).
  */
 #define I915_DP_LOG(level, fmt, ...) \
 	do { \
-		if (0) \
-			(void)drv_i915_vbt_fmtcheck(fmt, ##__VA_ARGS__); \
-		drv_i915_dp_note(level, fmt); \
+		if (drv_i915_dp_log_enabled(level)) \
+			drv_i915_dp_notef(level, fmt, ##__VA_ARGS__); \
 	} while (0)
 
 /*
@@ -841,10 +843,10 @@ struct i915_dp_world {
  * The DP's message counters (dp-sink.c).
  *
  * drv_i915_dp_log_enabled() counts an error-level message and tells whether the
- * level is shown; drv_i915_dp_note() counts and shows one message's format text.
+ * level is shown; drv_i915_dp_notef() formats and shows one shown message.
  */
 int drv_i915_dp_log_enabled(int level);
-void drv_i915_dp_note(int level, const char *fmt);
+void drv_i915_dp_notef(int level, const char *fmt, ...) __attribute__((format(printf, 2, 3)));
 
 /* The environment of the live eDP, or NULL when none is live (dp-sink.c). */
 struct i915_dp_env *drv_i915_dp_env_current(void);

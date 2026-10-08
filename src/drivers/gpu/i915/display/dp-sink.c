@@ -313,32 +313,31 @@ drv_i915_dp_log_enabled(
 }
 
 /*
- * Counts and shows one DP message.
- *
- * Only the format text is shown, with the eDP's prefix: the kernel has no
- * vsnprintf, and the Linux text uses conversions the kernel logger does not
- * promise.
+ * Shows one DP message whose level is shown (drv_i915_dp_log_enabled()
+ * counted it): formatted with the kernel's printf subset, where a
+ * conversion outside it (Linux's %*ph, a precision) is shown as written and
+ * its argument consumed, after the DP's prefix.
  */
 void
-drv_i915_dp_note(
+drv_i915_dp_notef(
 	int level,
-	const char *fmt)
+	const char *fmt,
+	...)
 {
-	int shown;
+	char text[256];
+	va_list arguments;
 
-	/* Counts the message and drops a level that is not shown. */
-	shown = drv_i915_dp_log_enabled(level);
-	if (!shown)
-		return;
+	/* Renders the message, cut to the room. */
+	va_start(arguments, fmt);
+	(void)kern_vsnprintf(text, sizeof(text), fmt, arguments);
+	va_end(arguments);
 
-	/* Writes the prefix, marking an error, then the format text. */
+	/* Writes the prefix, marking an error, then the message. */
 	if (level == I915_VBT_LOG_ERR) {
-		drv_i915_vbt_emit("i915: edp [err] ");
+		kern_logf("i915: dp [err] %s", text);
 	} else {
-		drv_i915_vbt_emit("i915: edp ");
+		kern_logf("i915: dp %s", text);
 	}
-
-	drv_i915_vbt_emit(fmt);
 }
 
 /*
