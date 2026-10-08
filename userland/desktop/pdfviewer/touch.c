@@ -56,6 +56,7 @@ static void touch_bounds(struct pv_touch *touch, struct pv_app *app);
 static void touch_pinch(struct pv_touch *touch, struct pv_app *app, uint64_t now);
 static void touch_pinch_end(struct pv_touch *touch, struct pv_app *app, uint64_t now);
 static void touch_swipe(struct pv_touch *touch, struct pv_app *app, uint64_t now);
+static int touch_handle(struct pv_touch *touch, struct pv_app *app, const struct kl_window_event *event, double x);
 
 /*
  * Makes the gestures and the scroller.
@@ -117,6 +118,7 @@ pv_touch_event(
 	int sidebar;
 	int error;
 	int for_pointer;
+	int held;
 
 	/* Nothing without the gestures. */
 	if (touch->gesture == NULL)
@@ -141,6 +143,11 @@ pv_touch_event(
 	time = event->time_us;
 	sidebar = pv_app_sidebar_width(app);
 	x = event->x - (double)sidebar;
+
+	/* A finger on a handle of the selection moves it, apart from the gestures (ws177-p042). */
+	held = touch_handle(touch, app, event, x);
+	if (held)
+		return;
 
 	/* Hands the finger to the gestures. */
 	switch (event->kind) {
@@ -510,6 +517,7 @@ touch_gestures(
 	uint64_t now)
 {
 	struct kl_gesture_event gesture;
+	int selected;
 	int found;
 
 	/* Each gesture in turn. */
@@ -521,13 +529,17 @@ touch_gestures(
 		/* Does what the gesture means. */
 		switch (gesture.kind) {
 		case KL_GESTURE_TAP:
+			/* A tap lets a selection go (ws177-p042). */
 			pv_log("TOUCH tap x=%.0f y=%.0f caught=%d", gesture.x, gesture.y, touch->caught);
+			pv_select_clear(app);
 			break;
 		case KL_GESTURE_DOUBLE_TAP:
 			touch_double_tap(touch, app, &gesture);
 			break;
 		case KL_GESTURE_LONG_PRESS:
-			pv_log("TOUCH long-press x=%.0f y=%.0f", gesture.x, gesture.y);
+			/* A long press on a word selects it, with its handles (ws177-p042). */
+			selected = pv_select_word_at(app, (int)floor(gesture.x), (int)floor(gesture.y));
+			pv_log("TOUCH long-press x=%.0f y=%.0f selected=%d", gesture.x, gesture.y, selected);
 			break;
 		case KL_GESTURE_DRAG_BEGIN:
 			touch_drag_begin(touch, app, now);
@@ -839,4 +851,51 @@ touch_swipe(
 	    app->swipe < 0.0)
 		app->swipe /= TOUCH_SWIPE_RESIST;
 	app->dirty = 1;
+}
+
+/*
+ * Moves a handle of the selection with the finger that holds it
+ * (ws177-p042): the first finger down on a handle takes it, its motion
+ * moves the handle to the character under it, and its lift or a cancel
+ * lets it go.  x is the finger's place over the pages.  Returns 1 when the
+ * event was the handle's (the gestures do not see it).
+ */
+static int
+touch_handle(
+	struct pv_touch *touch,
+	struct pv_app *app,
+	const struct kl_window_event *event,
+	double x)
+{
+	int which;
+
+	/* A first finger down on a handle takes it. */
+	if (touch->handle == 0) {
+		if (event->kind != KL_WINDOW_TOUCH_DOWN || touch->fingers != 0U)
+			return 0;
+		which = pv_select_handle_at(app, (int)floor(x), (int)floor(event->y));
+		if (which == 0)
+			return 0;
+		touch->handle = which;
+		touch->handle_id = event->id;
+		pv_log("TOUCH handle=%d", which);
+		return 1;
+	}
+
+	/* Another finger while a handle is held is passed over. */
+	if (event->kind != KL_WINDOW_TOUCH_CANCEL && event->id != touch->handle_id)
+		return 1;
+
+	/* Its motion moves the handle. */
+	if (event->kind == KL_WINDOW_TOUCH_MOTION) {
+		pv_select_handle_move(app, touch->handle, (int)floor(x), (int)floor(event->y));
+		return 1;
+	}
+
+	/* Its lift (or a cancel) lets the handle go. */
+	if (event->kind == KL_WINDOW_TOUCH_UP || event->kind == KL_WINDOW_TOUCH_CANCEL)
+		touch->handle = 0;
+
+	/* The handle's. */
+	return 1;
 }

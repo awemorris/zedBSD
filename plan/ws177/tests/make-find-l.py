@@ -12,8 +12,8 @@ inside its procedure (the glyph's picture, not the page's text).
 
 forms.pdf (ws177-p040), one page:
   the page's own lines "Page line" and the /P string "a"; the form /Fm1 shows "Form one", draws the nested /Fm2
-  ("Nested two"), then shows "after nested" and, apart on the same baseline, the /P string "a"; /Fm3 is turned a
-  quarter by its /Matrix and shows "Turned text".  The page text expected:
+  ("Nested two"), then shows "after nested" and, apart on the same baseline, the /P string "a"; /Fm3 is turned 30
+  degrees by its /Matrix and shows "Turned text".  The page text expected:
   Page line | a | Form one | Nested two | after nested a | Turned text
 
 find.pdf (ws177-p041, p042), 32 pages of 612 x 792 points:
@@ -176,7 +176,7 @@ def make_forms(folder: Path) -> None:
 					   + fonts_entry + b" >> >>", form2))
 	form1_number = document.add(stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 612 792] /Resources << "
 					   + fonts_entry + b" /XObject << /Fm2 %d 0 R >> >> >>" % form2_number, form1))
-	form3_number = document.add(stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 200 50] /Matrix [0 1 -1 0 400 100]"
+	form3_number = document.add(stream(b"<< /Type /XObject /Subtype /Form /BBox [0 0 200 50] /Matrix [0.866 0.5 -0.5 0.866 400 100]"
 					   b" /Resources << " + fonts_entry + b" >> >>", form3))
 	resources = b"<< " + fonts_entry + b" /XObject << /Fm1 %d 0 R /Fm3 %d 0 R >> >>" % (form1_number, form3_number)
 	pages = [page(document, page_content, resources)]

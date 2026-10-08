@@ -58,6 +58,7 @@ struct truetype_face;
 #define PV_KEY_E		18U
 #define PV_KEY_O		24U
 #define PV_KEY_F		33U
+#define PV_KEY_A		30U
 #define PV_KEY_C		46U
 #define PV_KEY_ENTER		28U
 #define PV_KEY_SPACE		57U
@@ -136,7 +137,8 @@ enum pv_action {
 	PV_ACTION_FIND,
 	PV_ACTION_FIND_NEXT,
 	PV_ACTION_FIND_PREVIOUS,
-	PV_ACTION_COPY
+	PV_ACTION_COPY,
+	PV_ACTION_SELECT_ALL
 };
 
 /*
@@ -161,6 +163,7 @@ enum pv_fit {
  * A surface to draw on: the caller's pixels (premultiplied 0xAARRGGBB),
  * the words in a row, and the size.
  */
+struct pv_find_key;
 struct pv_canvas {
 	uint32_t *pixels;
 	size_t stride;
@@ -186,7 +189,10 @@ struct pv_text {
  * list once interpreted (NULL before), its raster at one scale once
  * drawn, and its thumbnail once drawn for the sidebar (NULL before).  used
  * orders the rasters for the cache's eviction.  ws128-p004: its words as
- * libpdf reads them (NULL: none), once read (text_read).
+ * libpdf reads them (NULL: none), once read (text_read).  ws177-p041: its
+ * words as Find's keys (find.c, NULL until made), and how many places the
+ * words looked for are found on it (find_count, which holds while
+ * find_generation is the viewer's).
  */
 struct pv_page {
 	double width;
@@ -203,6 +209,9 @@ struct pv_page {
 	int thumbnail_height;
 	struct pdf_page_text *text;
 	int text_read;
+	struct pv_find_key *find_key;
+	size_t find_count;
+	unsigned long find_generation;
 };
 
 /*
@@ -273,6 +282,17 @@ struct pv_document {
  * page and its two ends, characters of the page's text); and the words
  * copied that main.c puts on the clipboard (copy_text, malloc'd, NULL when
  * none waits).
+ *
+ * ws177-p041: the words' keys (find_keys, find_key_length), the place
+ * shown as a key (find_key_at), and the count of the places: its
+ * generation (one more each time the words change), whether every page is
+ * counted, the next page to count and the total so far.  ws177-p042: the
+ * selection's end may be on another page than its start (select_caret_page);
+ * the last press of the pointer (click_*) and how many clicks in a row it
+ * ends (two: a word, three: a line); and whether the handles of a finger's
+ * selection are shown.  ws177-p043: the find field inside the window
+ * (without the titlebar): whether it is open, and whether main.c is asked
+ * to give it the keyboard.
  */
 struct pv_app {
 	struct pv_document document;
@@ -350,6 +370,21 @@ struct pv_app {
 	size_t select_caret;
 	char *copy_text;
 	size_t copy_length;
+	uint32_t find_keys[768];
+	size_t find_key_length;
+	size_t find_key_at;
+	unsigned long find_generation;
+	int find_counted;
+	size_t find_count_next;
+	size_t find_total;
+	size_t select_caret_page;
+	int click_count;
+	uint64_t click_time;
+	int click_x;
+	int click_y;
+	int select_handles;
+	int bar_open;
+	int want_bar_focus;
 
 	/*
 	 * Drag and drop out of the window (ws189-p003): a press in the
@@ -428,6 +463,14 @@ int pv_select_motion(struct pv_app *app, const struct pv_event *event);
 void pv_select_copy(struct pv_app *app);
 void pv_find_clear(struct pv_app *app);
 void pv_find_draw(struct pv_app *app, struct pv_canvas *canvas, size_t index, int x, int y, double scale);
+int pv_find_tick(struct pv_app *app);
+void pv_find_status(struct pv_app *app, char *out, size_t size);
+void pv_find_key_free(struct pv_find_key *key);
+void pv_select_all(struct pv_app *app);
+int pv_select_word_at(struct pv_app *app, int x, int y);
+int pv_select_handle_at(struct pv_app *app, int x, int y);
+void pv_select_handle_move(struct pv_app *app, int which, int x, int y);
+void pv_select_clear(struct pv_app *app);
 void pv_thumbnail_range(const struct pv_app *app, size_t *first, size_t *last);
 void pv_thumbnail_place(const struct pv_app *app, size_t index, int *x, int *y, int *width, int *height);
 void pv_password_layout(const struct pv_app *app, int *x, int *y, int *width, int *height);
@@ -465,6 +508,7 @@ uint32_t pv_draw_accent(void);
 /* The canvas (canvas.c). */
 void pv_canvas_fill(struct pv_canvas *canvas, int x, int y, int width, int height, uint32_t color);
 void pv_canvas_blend(struct pv_canvas *canvas, int x, int y, int width, int height, uint32_t color);
+void pv_canvas_blend_quad(struct pv_canvas *canvas, const double xs[4], const double ys[4], uint32_t color);
 void pv_canvas_round(struct pv_canvas *canvas, int x, int y, int width, int height, int radius, uint32_t color);
 void pv_canvas_copy(struct pv_canvas *canvas, int x, int y, const uint32_t *pixels, int width, int height);
 void pv_canvas_stretch(struct pv_canvas *canvas, int x, int y, int width, int height, const uint32_t *pixels, int source_width, int source_height);
