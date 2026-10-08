@@ -27,7 +27,7 @@
 #  U6 (p037). Super with an arrow swaps the focused arranged window with its neighbour ("KWL ARRANGE key-swap a="); the
 #     mode ended (a double click docks one, the bar's double click brings it back), "Side by Side" again puts the two
 #     windows back in the slots they had after the key swap ("KWL ARRANGE recall desktop=2 layout=columns windows=2",
-#     the apply line's slots in that order).
+#     "KWL ARRANGE clients" in that order; a surface's id is the same in every client).
 #  The compositor stays up, without ERROR.
 #
 #   plan/ws177/tests/u-guest.sh BUILD [OUTDIR]
@@ -96,8 +96,8 @@ arrange() {
 	set -- $(last "KWL ARRANGE menu item=$layout " | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\).*/\1 \2/p')
 	pointer move ${1:-640} ${2:-200} sleep 300 down sleep 60 up sleep 1500
 }
-# The surfaces of the latest apply line's slots, in the slots' order ("A;B").
-slot_ids() { last 'KWL ARRANGE apply layout=' | sed -n 's/.*slots=//p' | sed 's/@[-0-9,]*//g'; }
+# The clients of the latest arrangement's slots, in the slots' order ("A;B"; a surface's id is the same in every client).
+slot_ids() { last 'KWL ARRANGE clients desktop=' | sed -n 's/.*clients=//p'; }
 : > "$out/qmp.txt"
 
 # A white wallpaper (1280x800 PNG), the compositor and wltest under test.
@@ -133,7 +133,9 @@ touches "down 1 $ix $iy|hold 60|up 1"
 expect_some tap-replay 'KWL EDGE band replay release=1'
 expect_some tap-preview 'KWL APPS preview app=u.a windows=2 via=click'
 tap esc
-guest 'for p in $(ps -A -o pid,args | grep "[w]ltest --app-id=u.a" | awk "{print \$1}"); do kill $p; done; sleep 1.5; echo killed' >/dev/null
+# Only u.a's two run now; ps shows a process's argv[0] alone, not its options.
+guest 'for p in $(ps -A -o pid,args | grep "[w]ltest" | awk "{print \$1}"); do kill $p; done; sleep 1.5; echo killed' >/dev/null
+expect_count u.a-gone 'KWL CLIENT gone client=' 2
 
 # U2. Home: the layer left out once open, a press between the status's icons and on the clock are Home's.
 pointer move 8 8 sleep 300 down sleep 60 up sleep 1500
