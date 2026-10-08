@@ -46,3 +46,7 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned（Linux・FreeBSD は 10/13 以降、2026-10-08 ユーザー） | | p006 |
 | ws143-p008 | UAT（5330 の素の機械、D18。ユーザーの BR/EDR と LE のキーボード・マウス）、Wi-Fi との共存 | planned（5330 とユーザーの BR/EDR・LE の機器） | | p006、device の機種 |
 | ws143-p009 | 規約の全文との照合と回帰 | planned（全文規約はベータ3、2026-10-08 ユーザー） | | p002〜p008 |
+
+## UAT（2026-10-08 夕、5330）
+
+- ユーザー:「Bluetooth is not available on this computerになっています。」→ 今の段階では想定どおり（Q1）: UAT の image（config.mk・current-uat）に bluetoothd・bt が入っていない（入っているのは試験の config の plan/ws143/tests/config-amd64-bt-desktop.mk だけ）、5330 の AX211 の Bluetooth は firmware の package `intelbt` の load（p003 i02）が未実装で controller が上がらない、BR/EDR・LE の HID host（p005 i02〜i04）も未。実機で使えるようになるのは p003 i02・p005 i02 の後に UAT の config へ bluetoothd を足してから。
