@@ -38,11 +38,13 @@
 #define HID_INPUT_REPORT_SIZE_MAX	(HID_REPORT_BITS_MAX / 8U + 1U)
 
 /*
- * The keys one report ID holds now.  One per report the descriptor
- * declares, kept from prepare to destroy.
+ * One report the descriptor declares: its ID, its length in bytes (the
+ * ID's byte included), and the keys it holds now.  Kept from prepare to
+ * destroy.
  */
 struct hid_input_report_state {
 	uint8_t id;
+	size_t minimum_size;
 	unsigned long held[INPUT_BIT_WORDS(KEY_MAX)];
 };
 
@@ -161,6 +163,53 @@ drv_hid_input_report_ids(
 {
 	/* Nonzero when the reports carry their ID. */
 	return input->uses_report_ids;
+}
+
+/*
+ * Reports whether a report is shorter than its report ID declares (the ID
+ * is its first byte when the descriptor numbers its reports).  A report of
+ * an ID the descriptor does not declare is not short: the layout refuses
+ * it as malformed.
+ */
+int
+drv_hid_input_report_short(
+	const struct hid_input *input,
+	const uint8_t *report,
+	size_t length)
+{
+	const struct hid_input_report_state *state;
+	uint8_t report_id;
+	size_t index;
+
+	/* The report's ID: its first byte, or 0 for a descriptor without IDs. */
+	report_id = 0;
+	if (input->uses_report_ids) {
+		/* A numbered report needs at least its ID. */
+		if (length == 0U)
+			return 1;
+		report_id = report[0];
+	}
+
+	/* The declared report of that ID. */
+	state = NULL;
+	for (index = 0; index < input->report_count; index++) {
+		/* The report's own record. */
+		if (input->reports[index].id == report_id) {
+			state = &input->reports[index];
+			break;
+		}
+	}
+
+	/* An undeclared ID is the layout's to refuse. */
+	if (state == NULL)
+		return 0;
+
+	/* Shorter than declared. */
+	if (length < state->minimum_size)
+		return 1;
+
+	/* Long enough. */
+	return 0;
 }
 
 /*
@@ -469,6 +518,7 @@ hid_input_describe(
 		if (report.minimum_size > HID_INPUT_REPORT_SIZE_MAX)
 			return EINVAL;
 		input->reports[index].id = report.report_id;
+		input->reports[index].minimum_size = report.minimum_size;
 
 		/* The longest so far. */
 		if (report.minimum_size > input->report_max)

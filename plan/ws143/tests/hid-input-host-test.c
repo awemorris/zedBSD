@@ -21,7 +21,9 @@
  *                   receiver), each with fixed-seed random reports, and the
  *                   glue's own rules (held keys joined over report IDs, an
  *                   ErrorRollOver keeps the keys, no relative 0, a touch
- *                   screen alone, a full input layer, unpublishing twice).
+ *                   screen alone, a full input layer, unpublishing twice),
+ *                   and the pure checks of /dev/hid-host (its setup, a
+ *                   report shorter than its ID declares).
  *   fuzz COUNT SEED FILE...
  *                   COUNT mutated and generated descriptors and random
  *                   reports for each, built with ASan and UBSan
@@ -38,6 +40,7 @@
 
 #include "hid-input-old.h"
 
+#include <drivers/generic/hid-host.h>
 #include <drivers/generic/hid-input.h>
 #include <kern/input-device.h>
 
@@ -219,6 +222,7 @@ void *kern_calloc(size_t count, size_t size);
 void kern_free(void *pointer);
 void *kern_memcpy(void *destination, const void *source, size_t count);
 void *kern_memset(void *destination, int value, size_t count);
+size_t kern_strnlen(const char *text, size_t maximum);
 int kern_snprintf(char *buffer, size_t capacity, const char *format, ...) __attribute__((format(printf, 3, 4)));
 void kern_logf(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
@@ -245,6 +249,8 @@ static void check_mouse(void);
 static void check_touch_alone(void);
 static void check_vendor_only(void);
 static void check_full_layer(void);
+static void check_short_reports(void);
+static void check_setup(void);
 static void fuzz_mutate(struct descriptor *descriptor, const struct descriptor *base);
 static void fuzz_generate(struct descriptor *descriptor);
 static void fuzz_item(struct descriptor *descriptor);
@@ -346,6 +352,18 @@ kern_memset(
 {
 	/* The host's fill. */
 	return memset(destination, value, count);
+}
+
+/*
+ * Measures a text for the kernel's files, at most maximum bytes, as kcrt does.
+ */
+size_t
+kern_strnlen(
+	const char *text,
+	size_t maximum)
+{
+	/* The host's measure. */
+	return strnlen(text, maximum);
 }
 
 /*
@@ -531,6 +549,8 @@ run_check(
 	check_touch_alone();
 	check_vendor_only();
 	check_full_layer();
+	check_short_reports();
+	check_setup();
 
 	/* The old and the new side by side on each fixed descriptor. */
 	set_descriptor(&fixed, "boot keyboard", boot_keyboard, sizeof(boot_keyboard));
@@ -1594,4 +1614,102 @@ events_of(
 		taken = 16U;
 	memcpy(events, new_events, taken * sizeof(events[0]));
 	*count = taken;
+}
+
+/* Checks which reports /dev/hid-host refuses as shorter than their report ID declares. */
+static void
+check_short_reports(
+	void)
+{
+	static const uint8_t report[8] = { 1, 0x04, 0, 0, 0, 0, 0, 0 };
+	struct hid_input *input;
+	int error;
+
+	/* A boot keyboard: 8 bytes, no report ID. */
+	error = drv_hid_input_prepare(boot_keyboard, sizeof(boot_keyboard), &input);
+	check(error == 0, "short: keyboard prepare");
+	if (error != 0)
+		return;
+	check(drv_hid_input_report_short(input, report, 7U) == 1, "short: 7 bytes of 8");
+	check(drv_hid_input_report_short(input, report, 8U) == 0, "short: 8 bytes");
+	check(drv_hid_input_report_short(input, report, 9U) == 0, "short: 9 bytes (the rest unread)");
+	drv_hid_input_destroy(input);
+
+	/* Two report IDs of 3 bytes each, the ID first. */
+	error = drv_hid_input_prepare(two_id_keyboard, sizeof(two_id_keyboard), &input);
+	check(error == 0, "short: two IDs prepare");
+	if (error != 0)
+		return;
+	check(drv_hid_input_report_short(input, report, 0U) == 1, "short: no ID byte");
+	check(drv_hid_input_report_short(input, report, 2U) == 1, "short: 2 bytes of 3");
+	check(drv_hid_input_report_short(input, report, 3U) == 0, "short: 3 bytes");
+	check(drv_hid_input_report_short(input, (const uint8_t *)"\x07\x00", 2U) == 0, "short: an undeclared ID is the layout's");
+	drv_hid_input_destroy(input);
+	printf("ok: short reports\n");
+}
+
+/* Checks the setup of /dev/hid-host: a good one, and each way one is malformed. */
+static void
+check_setup(
+	void)
+{
+	static struct hid_host_setup good;
+	static struct hid_host_setup bad;
+
+	/* A well formed setup: a Bluetooth keyboard. */
+	memset(&good, 0, sizeof(good));
+	good.magic = HID_HOST_MAGIC;
+	good.version = HID_HOST_VERSION;
+	good.bus = BUS_BLUETOOTH;
+	good.vendor = 0x1234;
+	good.product = 0x5678;
+	good.descriptor_size = sizeof(boot_keyboard);
+	snprintf(good.name, sizeof(good.name), "Probe Keyboard");
+	snprintf(good.physical_path, sizeof(good.physical_path), "bluetooth/00:11:22:33:44:55/0A:0B:0C:0D:0E:01");
+	snprintf(good.unique_id, sizeof(good.unique_id), "0A:0B:0C:0D:0E:01");
+	memcpy(good.descriptor, boot_keyboard, sizeof(boot_keyboard));
+	check(sizeof(good) == 4324U, "setup: 4324 bytes");
+	check(drv_hid_host_setup_valid(&good) == 1, "setup: a good one");
+
+	/* A virtual device is allowed too. */
+	bad = good;
+	bad.bus = BUS_VIRTUAL;
+	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a virtual device");
+
+	/* Each malformed field. */
+	bad = good;
+	bad.magic ^= 1U;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: the magic");
+	bad = good;
+	bad.version = 2U;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: the version");
+	bad = good;
+	bad.bus = BUS_USB;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a program may not claim USB");
+	bad = good;
+	bad.descriptor_size = 0U;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: an empty descriptor");
+	bad = good;
+	bad.descriptor_size = HID_HOST_DESCRIPTOR_MAX + 1U;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a descriptor of 4097");
+	bad = good;
+	bad.descriptor_size = HID_HOST_DESCRIPTOR_MAX;
+	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a descriptor of 4096");
+	bad = good;
+	bad.reserved[3] = 1U;
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a reserved word");
+	bad = good;
+	memset(bad.name, 'x', sizeof(bad.name));
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a name without its NUL");
+	bad = good;
+	memset(bad.physical_path, 'x', sizeof(bad.physical_path));
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a place without its NUL");
+	bad = good;
+	memset(bad.unique_id, 'x', sizeof(bad.unique_id));
+	check(drv_hid_host_setup_valid(&bad) == 0, "setup: a unique ID without its NUL");
+	bad = good;
+	memset(bad.name, 'x', sizeof(bad.name) - 1U);
+	bad.name[sizeof(bad.name) - 1U] = '\0';
+	check(drv_hid_host_setup_valid(&bad) == 1, "setup: a name of 63 bytes");
+	printf("ok: hid-host setup\n");
 }
