@@ -36,6 +36,17 @@
 #define USB_HID_REQUEST_SET_PROTOCOL	0x0bU
 #define USB_HID_REQUEST_SET_REPORT	0x09U
 #define USB_HID_REPORT_TYPE_OUTPUT	2U
+#define USB_HID_REPORT_TYPE_FEATURE	3U
+
+/*
+ * The Device Mode (Input Mode) a digitizer is put in (BUG-267, as Linux's
+ * hid-multitouch does): a touch screen's fingers (2) or a touch pad's (3),
+ * in place of the single-touch mouse a Windows touch screen starts as; and
+ * the longest feature report that carries it.
+ */
+#define USB_HID_DEVICE_MODE_SCREEN	2U
+#define USB_HID_DEVICE_MODE_PAD		3U
+#define USB_HID_FEATURE_MAX		64U
 
 /* How long a raw device's output report may take (ws161-p002). */
 #define USB_HID_OUTPUT_TIMEOUT_MS	5000U
@@ -169,6 +180,8 @@ static int usb_hid_dump_wanted(void);
 static void usb_hid_location(const struct usb_hid *hid, unsigned *bus, unsigned *address, unsigned *interface_number);
 static void usb_hid_log_hex(const struct usb_hid *hid, const char *prefix, const uint8_t *bytes, size_t length);
 static void usb_hid_log_refusal(const struct usb_hid *hid, const uint8_t *descriptor, size_t length, int error);
+static int usb_hid_set_device_mode(struct usb_hid *hid);
+static void usb_hid_put_bits(uint8_t *data, uint32_t offset, uint32_t bits, uint32_t value);
 
 /* What a raw interface's transport does: its output reports (ws161-p002). */
 static const struct drv_hidraw_ops usb_hid_raw_ops = {
@@ -384,6 +397,10 @@ usb_hid_attach(
 	error = usb_hid_set_report_protocol(hid);
 	if (error != 0)
 		goto fail;
+
+	/* A digitizer's fingers rather than its mouse (BUG-267); a device that refuses keeps working as it starts. */
+	if (!hid->raw)
+		(void)usb_hid_set_device_mode(hid);
 	hid->stage = "resources";
 	usb_hid_identity(hid);
 	hid->buffer = kern_malloc(hid->buffer_size);
@@ -1753,4 +1770,108 @@ usb_hid_log_refusal(
 		  parsed,
 		  (unsigned)item_offset,
 		  prefix);
+}
+
+/*
+ * Puts a touch screen or a touch pad into the mode that reports its fingers
+ * (BUG-267): SET_REPORT of the feature report that holds the Device Mode
+ * (Digitizer 0x52), its other fields zero, as Linux's hid-multitouch does.
+ * ENOENT for a descriptor without a touch screen or pad or without the
+ * field; the device's refusal otherwise.  The outcome is logged.
+ */
+static int
+usb_hid_set_device_mode(
+	struct usb_hid *hid)
+{
+	struct hid_report_touch_info touch;
+	struct hid_report_feature_info feature;
+	uint8_t report[1U + USB_HID_FEATURE_MAX];
+	uint8_t *data;
+	unsigned bus;
+	unsigned address;
+	unsigned interface_number;
+	uint32_t mode;
+	size_t length;
+	size_t actual;
+	int error;
+
+	/* Only a touch screen or a touch pad has the mode. */
+	error = drv_hid_input_touch(hid->hidinput, &touch);
+	if (error != 0)
+		return ENOENT;
+
+	/* Where the Device Mode is; a descriptor without it starts in the fingers' mode already. */
+	error = drv_hid_input_feature(hid->hidinput, HID_REPORT_USAGE_DEVICE_MODE, &feature);
+	if (error != 0)
+		return ENOENT;
+	if (feature.data_size == 0U || feature.data_size > USB_HID_FEATURE_MAX)
+		return EINVAL;
+
+	/* A touch pad's fingers, or a touch screen's. */
+	mode = USB_HID_DEVICE_MODE_SCREEN;
+	if (touch.pad)
+		mode = USB_HID_DEVICE_MODE_PAD;
+
+	/* The report: its ID when it has one, then its data with the mode set. */
+	kern_memset(report, 0, sizeof(report));
+	length = 0;
+	if (feature.report_id != 0U) {
+		report[0] = feature.report_id;
+		length = 1;
+	}
+	data = report + length;
+	usb_hid_put_bits(data, feature.bit_offset, feature.bit_size, mode);
+	length += feature.data_size;
+
+	/* SET_REPORT of the feature report on the control pipe. */
+	actual = 0;
+	error = drv_usb_control(
+		hid->device,
+		DRV_USB_DIR_OUT | DRV_USB_REQUEST_CLASS | DRV_USB_RECIP_INTERFACE,
+		USB_HID_REQUEST_SET_REPORT,
+		(uint16_t)((USB_HID_REPORT_TYPE_FEATURE << 8U) | feature.report_id),
+		(uint16_t)drv_usb_interface_number(hid->interface),
+		report,
+		length,
+		USB_HID_CONTROL_TIMEOUT_MS,
+		&actual);
+
+	/* The kernel's log says what the device was asked and how it answered. */
+	usb_hid_location(hid, &bus, &address, &interface_number);
+	kern_logf("usb-hid: usb%u device %u interface %u device-mode=%u report=%u bytes=%u error=%d\n",
+		  bus,
+		  address,
+		  interface_number,
+		  (unsigned)mode,
+		  (unsigned)feature.report_id,
+		  (unsigned)length,
+		  error);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the device reports its fingers. */
+	return 0;
+}
+
+/* Sets a field of a report's data (bits from a bit offset, little-endian as HID's), leaving the other bits. */
+static void
+usb_hid_put_bits(
+	uint8_t *data,
+	uint32_t offset,
+	uint32_t bits,
+	uint32_t value)
+{
+	uint32_t index;
+	uint32_t bit;
+
+	/* One bit at a time; the bits of the value past 32 are zero. */
+	for (index = 0; index < bits && index < 32U; index++) {
+		/* A clear bit leaves the data as it is. */
+		if (((value >> index) & 1U) == 0U)
+			continue;
+
+		/* Sets the data's bit. */
+		bit = offset + index;
+		data[bit / 8U] = (uint8_t)(data[bit / 8U] | (1U << (bit % 8U)));
+	}
 }
