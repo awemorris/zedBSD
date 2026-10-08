@@ -26,8 +26,12 @@
 
 #include <errno.h>
 #include <poll.h>
+#include <stdio.h>
 #include <string.h>
 #include <time.h>
+
+/* How long the loop waits at most while some of the network's descriptors are polled by the shell itself, in ms. */
+#define WINDOW_UNWATCHED_MS	10
 
 /*
  * How the wheel's distance is scaled: libkeiland gives 4 pixels for each
@@ -38,6 +42,7 @@
 #define WINDOW_SCROLL_SCALE	3
 
 static void window_watch(struct shell_window *window, const struct pollfd *extra, size_t count);
+static void window_poll_unwatched(struct shell_window *window, struct pollfd *extra, size_t count);
 static void window_ready(struct pollfd *extra, size_t count, const struct kl_app_event *event);
 static void window_event(struct shell_window *window, const struct kl_window_event *input);
 static void window_button(struct shell_window *window, const struct kl_window_event *input);
@@ -140,6 +145,10 @@ shell_window_dispatch(
 	for (index = 0; index < extra_count; index++)
 		extra[index].revents = 0;
 
+	/* Descriptors the application could not watch are polled by the shell after a short wait (ws177-p019). */
+	if (window->unwatched_count != 0U && (timeout < 0 || timeout > WINDOW_UNWATCHED_MS))
+		timeout = WINDOW_UNWATCHED_MS;
+
 	/* The compositor and the network, together. */
 	status = kl_app_dispatch(window->app, timeout);
 	if (status != 0)
@@ -161,6 +170,9 @@ shell_window_dispatch(
 		if (event.kind == KL_APP_FD)
 			window_ready(extra, extra_count, &event);
 	}
+
+	/* And those the application does not watch. */
+	window_poll_unwatched(window, extra, extra_count);
 
 	/* Succeeded: the events so far have run. */
 	return 0;
@@ -257,6 +269,8 @@ window_watch(
 			if (extra[other].fd == window->watched[index])
 				found = 1;
 		}
+
+		/* Gone: no longer watched. */
 		if (!found) {
 			(void)kl_app_watch_fd(window->app, window->watched[index], 0U);
 			continue;
@@ -266,6 +280,8 @@ window_watch(
 		window->watched[kept] = window->watched[index];
 		kept++;
 	}
+
+	/* How many are still watched. */
 	window->watched_count = kept;
 
 	/* Each one now, for what it waits for (a new one is added, a known one updated). */
@@ -288,10 +304,59 @@ window_watch(
 			if (window->watched[index] == extra[other].fd)
 				found = 1;
 		}
-		if (found || window->watched_count == SHELL_NET_FDS)
+
+		/* Known already, or no room to remember it. */
+		if (found || window->watched_count == SHELL_WATCHED_MAX)
 			continue;
 		window->watched[window->watched_count] = extra[other].fd;
 		window->watched_count++;
+	}
+}
+
+/*
+ * Polls, without waiting, the network's descriptors the application does
+ * not watch (more than it can, ws177-p019), and gives them their answers.
+ */
+static void
+window_poll_unwatched(
+	struct shell_window *window,
+	struct pollfd *extra,
+	size_t count)
+{
+	struct pollfd single;
+	size_t index;
+	size_t unwatched;
+	unsigned watched;
+	int found;
+	int ready;
+
+	/* Each descriptor the application does not watch, polled alone. */
+	unwatched = 0;
+	for (index = 0; index < count; index++) {
+		found = 0;
+		for (watched = 0; watched < window->watched_count; watched++) {
+			if (window->watched[watched] == extra[index].fd)
+				found = 1;
+		}
+
+		/* One the application watches, or one that waits for nothing. */
+		if (found || extra[index].events == 0)
+			continue;
+		unwatched++;
+
+		/* Its answer now (POLLERR and POLLNVAL as poll gives them). */
+		single = extra[index];
+		single.revents = 0;
+		ready = poll(&single, 1, 0);
+		if (ready > 0)
+			extra[index].revents |= single.revents;
+	}
+
+	/* The log, when the number of those changed. */
+	if (unwatched != window->unwatched_count) {
+		printf("ZBROWSER NET fds=%lu watched=%u polled=%lu\n", (unsigned long)count, window->watched_count, (unsigned long)unwatched);
+		fflush(stdout);
+		window->unwatched_count = unwatched;
 	}
 }
 

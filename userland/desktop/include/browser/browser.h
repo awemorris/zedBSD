@@ -319,6 +319,38 @@ int browser_view_focus(struct browser_view *view, int focused);
  * when the page's scripts failed.
  */
 int browser_view_text_target(struct browser_view *view, float caret[4]);
+
+/*
+ * A field by its purpose (ws177-p017): the focus moves, with its ring, to
+ * the first control in the document's order that takes text (a text or
+ * password field, a textarea), can be focused, is drawn, and whose
+ * autocomplete attribute holds the token (ASCII, any case; for example
+ * "one-time-code"), and the view scrolls it into view, as Tab would.  The
+ * page's focus events fire.  Reports 0 when one has the focus, ENOENT
+ * when there is none (the focus stays where it was), or an errno value
+ * when the page's scripts or its layout failed.  It is a mutation of the
+ * view, not to be called from within one of its callbacks.
+ */
+int browser_view_focus_field(struct browser_view *view, const char *autocomplete);
+
+/*
+ * What an input method reads around the caret (ws177-p019): when the
+ * focused element takes its text (as browser_view_text_target says), its
+ * value as UTF-8 into text (a NUL-ended room of size bytes; a longer value
+ * is cut to a part around the caret, at characters' starts), the caret's
+ * byte offset in it, what the control is for (BROWSER_TEXT_PURPOSE_*: by
+ * its inputmode, else its type) and its hints (BROWSER_TEXT_HINT_*).  The
+ * numbers are text-input-v3's.  Returns 1 with them, 0 when the focus
+ * takes no text (or there was no memory).
+ */
+#define BROWSER_TEXT_PURPOSE_NORMAL	0
+#define BROWSER_TEXT_PURPOSE_DIGITS	2
+#define BROWSER_TEXT_PURPOSE_NUMBER	3
+#define BROWSER_TEXT_PURPOSE_PHONE	4
+#define BROWSER_TEXT_PURPOSE_URL	5
+#define BROWSER_TEXT_PURPOSE_EMAIL	6
+#define BROWSER_TEXT_HINT_MULTILINE	0x200U
+int browser_view_text_context(struct browser_view *view, char *text, size_t size, size_t *cursor, int *purpose, unsigned *hints);
 int browser_view_compose(struct browser_view *view, const char *preedit, int begin, int end);
 int browser_view_commit_text(struct browser_view *view, const char *text, uint32_t delete_before, uint32_t delete_after);
 

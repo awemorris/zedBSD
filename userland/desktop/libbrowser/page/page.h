@@ -231,6 +231,7 @@ int page_wheel_event(struct page *page, const struct page_pointer *pointer, int 
 int page_key_event(struct page *page, const char *type, const struct bind_key *key, int *canceled);
 int page_focus_at(struct page *page, int x, int y);
 int page_focus_move(struct page *page, int backward);
+int page_focus_field(struct page *page, const char *token);
 int page_window_focus(struct page *page, int focused);
 int page_activate_focused(struct page *page, struct wb_buffer *href, int *found);
 int page_click_control(struct page *page, int x, int y, struct wb_buffer *href, int *found);
@@ -248,7 +249,17 @@ int page_place_caret(struct page *page, int x);
 int page_caret_to_end(struct page *page);
 int page_paint_caret(struct page *page);
 struct dom_element *page_compose_element(struct page *page);
-int page_compose(struct page *page, const char *text, int cursor);
+int page_compose(struct page *page, const char *text, int begin, int cursor);
+
+/* What the focused control is for, for an input method (ws177-p019; the numbers are text-input-v3's purposes and hints). */
+#define PAGE_PURPOSE_NORMAL	0
+#define PAGE_PURPOSE_DIGITS	2
+#define PAGE_PURPOSE_NUMBER	3
+#define PAGE_PURPOSE_PHONE	4
+#define PAGE_PURPOSE_URL	5
+#define PAGE_PURPOSE_EMAIL	6
+#define PAGE_HINT_MULTILINE	0x200U
+int page_compose_context(struct page *page, struct wb_buffer *text, size_t *caret, int *purpose, unsigned *hints);
 int page_commit_text(struct page *page, const char *text, uint32_t before, uint32_t after);
 void page_compose_end(struct page *page, struct dom_element *element);
 

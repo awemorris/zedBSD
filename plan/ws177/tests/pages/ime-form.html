@@ -1,0 +1,26 @@
+<!DOCTYPE html>
+<html>
+<head>
+<meta charset="utf-8">
+<title>ime form</title>
+<style>
+body { font-family: sans-serif; font-size: 14px; }
+p { margin: 6px 0; }
+input { width: 300px; }
+</style>
+</head>
+<body>
+<p><input id="mail" type="email" autocomplete="email"></p>
+<p><input id="code" type="text" inputmode="numeric" autocomplete="one-time-code"></p>
+<p><input id="name" autocomplete="name"></p>
+<p><input id="later" autocomplete="nickname" onfocus="setTimeout(function () { document.getElementById('later').value = 'set'; }, 100)"></p>
+<p><textarea id="notes" autocomplete="street-address" cols="24" rows="3">hello</textarea></p>
+<script>
+document.getElementById("name").addEventListener("input", function (event) { console.log("input name " + event.target.value); });
+var notes = document.getElementById("notes");
+console.log("notes=" + notes.value);
+notes.value = "x\ny";
+console.log("notes-set=" + notes.value.length + " " + (notes.value === "x\ny"));
+</script>
+</body>
+</html>

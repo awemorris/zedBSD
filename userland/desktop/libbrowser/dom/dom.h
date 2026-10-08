@@ -328,6 +328,8 @@ struct dom_control {
 	int indeterminate;
 	struct wb_units preedit;
 	size_t preedit_cursor;
+	/* Where the composed text's chosen part (an input method's clause) starts, in units; the part runs to preedit_cursor, none when it is not before it (ws177-p019). */
+	size_t preedit_begin;
 	int drawn;
 	int32_t scroll_x;
 	int32_t content_x;

@@ -154,9 +154,9 @@ main(
 	memset(&b, 0, sizeof(b));
 
 	/* Keeps borrowed font paths alive for both views. */
-	fonts.sans = "build/ws035-fonts/Mahora-Regular.ttf";
-	fonts.mono = "build/ws035-fonts/JetBrainsMono-Regular.ttf";
-	fonts.fallback = "build/ws035-fonts/DroidSansFallbackFull.ttf";
+	fonts.sans = "userland/desktop/fonts/Mahora-Regular.ttf";
+	fonts.mono = "userland/desktop/fonts/JetBrainsMono-Regular.ttf";
+	fonts.fallback = "userland/desktop/fonts/DroidSansFallbackFull.ttf";
 
 	/* Gives the first view its observer before the callback structure is copied. */
 	memset(&callbacks, 0, sizeof(callbacks));
