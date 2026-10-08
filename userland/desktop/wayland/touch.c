@@ -40,8 +40,8 @@
  * - While a finger has the pointer or the title bar, another finger goes
  *   only to a client with wl_touch under it, or nowhere.
  * - Two or more fingers that touch within KWL_EDGE_GROUP_MS of each other,
- *   the outermost within KWL_EDGE_GROUP_BAND of the left, right or bottom
- *   edge and the others anywhere, and that all move in from that edge are
+ *   the outermost within KWL_EDGE_GROUP_BAND of the left, right, bottom or
+ *   top edge (BUG-270: Wiseview from the top band) and the others anywhere, and that all move in from that edge are
  *   the edge's swipe, as one finger from the edge is (BUG-267, the
  *   2026-10-08 UAT: the user swipes with two fingers, whose outer one
  *   lands beyond the one finger's strip; the user's decision: the others
@@ -1786,6 +1786,8 @@ side_name(
 		return "right";
 	case KWL_EDGE_SIDE_BOTTOM:
 		return "bottom";
+	case KWL_EDGE_SIDE_TOP:
+		return "top";
 	default:
 		break;
 	}

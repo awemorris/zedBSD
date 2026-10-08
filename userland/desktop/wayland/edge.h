@@ -34,6 +34,16 @@
 #define KWL_EDGE_LAUNCHER_WIDTH		40
 #define KWL_EDGE_CORNER			28
 
+/*
+ * The band's depth for a finger where the bar holds nothing a finger drags
+ * (BUG-270, the 2026-10-08 UAT: a finger swiping in from the top lands 13
+ * to 31 pixels down, below KWL_EDGE_BAND): the system bar's whole height
+ * (KWL_GLASS_BAR).  Over a docked window's menus, title and buttons the
+ * band keeps KWL_EDGE_BAND (a finger there pulls the window or opens a
+ * menu); the shell decides which (band_depth).
+ */
+#define KWL_EDGE_BAND_DEEP		44
+
 /* The bottom edge's strip, where the swipe up to App Home starts. */
 #define KWL_EDGE_BOTTOM_HEIGHT		20
 
@@ -64,12 +74,14 @@
  * The edges a group of fingers on a touch screen swipes in from (BUG-267,
  * the 2026-10-08 UAT: a swipe of two fingers from the edge is the swipe
  * one finger makes there): none, the left side, the right side (both under
- * the system bar: the desktops' swipe), or the bottom (App Home's).
+ * the system bar: the desktops' swipe), the bottom (App Home's), or the
+ * top (Wiseview's from the top band, BUG-270).
  */
 #define KWL_EDGE_SIDE_NONE		0U
 #define KWL_EDGE_SIDE_LEFT		1U
 #define KWL_EDGE_SIDE_RIGHT		2U
 #define KWL_EDGE_SIDE_BOTTOM		3U
+#define KWL_EDGE_SIDE_TOP		4U
 
 /*
  * The group of fingers: the finger nearest an edge (looked for within
@@ -117,6 +129,7 @@ struct kwl_edge_depth {
 };
 
 unsigned kwl_edge_classify(int32_t x, int32_t y, int32_t width, int32_t height, int touch);
+unsigned kwl_edge_classify_band(int32_t x, int32_t y, int32_t width, int32_t height, int32_t depth);
 unsigned kwl_edge_band_motion(int32_t dx, int32_t dy);
 unsigned kwl_edge_drag_axis(int32_t dx, int32_t dy);
 int32_t kwl_edge_distance(int32_t dx, int32_t dy);
