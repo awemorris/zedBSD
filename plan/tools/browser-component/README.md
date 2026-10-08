@@ -26,7 +26,8 @@ symbol interposition; production code has no test switches.
 `run.py` binds a temporary port on 127.0.0.1, serves two local pages, and closes a
 subsequent history response to cause a transport failure. The client has a
 60-second timeout. No external network, GPU hardware or Wayland server is needed.
-The fonts must already exist in `build/ws035-fonts`.
+The fonts are the tree's own (`userland/desktop/fonts`; before 2026-10-08 the fixture read `build/ws035-fonts`, an old
+build output whose `Mahora-Regular.ttf` had gone, and every drawing failed with ENOENT).
 
 ASan requires `detect_stack_use_after_return=0`: the engine's conservative
 collector scans the real stack. The sanitizer run checks the same production
