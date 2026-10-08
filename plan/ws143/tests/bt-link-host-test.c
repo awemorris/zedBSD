@@ -31,6 +31,11 @@
  *            keys stored under the identity address; LE's own buffers of
  *            27 bytes and 2 packets (a public key goes in 3 packets); a
  *            bonded device; a connection that does not come (cancelled)
+ *   router   (ws143-p005) the router as the session's handler: a device
+ *            connecting, its Link Key Request, the pairing's events of
+ *            another device, a connection of the HID host's stand-in and
+ *            one of nobody's; a paired connection taken over (handoff)
+ *            or not
  *
  *   plan/ws143/tests/bt-daemon-host-test.sh
  */
@@ -40,6 +45,7 @@
 #include "userland/base/bluetoothd/hci.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/pair.h"
+#include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/session.h"
 
 #include <errno.h>
@@ -75,6 +81,9 @@ static unsigned checks;
 
 /* The bonds' folder the script made. */
 static const char *keys_folder;
+
+/* The router of the run (ws143-p005): the session's handler, routing to the run's pairing. */
+static struct btd_router router;
 
 /* The test's P-256 keys (made up, not the Core's debug key) and their DHKey, most significant first. */
 static const char key_a_x[] = "e9f97fa093e059947e2b04296d94fcaedc7c39ccaee9c485fc201ae248b6c153";
@@ -141,6 +150,26 @@ struct fake {
 	unsigned flood;
 };
 
+/*
+ * The HID host's stand-in of the router test: the device it wants back,
+ * the device whose connection it claims, what it heard, and its answer to
+ * a paired connection offered (take) with the handle offered.
+ */
+struct hid_stub {
+	struct btd_router *router;
+	uint8_t wanted[6];
+	uint8_t claimed[6];
+	unsigned requests;
+	unsigned key_requests;
+	unsigned connected;
+	unsigned acl;
+	unsigned disconnected;
+	unsigned others;
+	int take;
+	unsigned offered;
+	uint16_t offered_handle;
+};
+
 /* What the pairing's hooks saw: the questions, the answer to give, the end. */
 struct hooks {
 	unsigned asked_kind;
@@ -163,6 +192,12 @@ static void test_queue(void);
 static void test_bredr(void);
 static void test_pin(void);
 static void test_le(void);
+static void test_router(void);
+static int stub_wants(void *context, const uint8_t *address);
+static int stub_claims(void *context, const uint8_t *address);
+static void stub_handle(void *context, struct btd_session *session, const uint8_t *packet, size_t length);
+static int stub_handoff(void *context, const uint8_t *address, unsigned type, uint16_t handle, const struct btd_bond *bond);
+static void pump(struct btd_session *session);
 static void run_pair(struct btd_session *session, struct btd_pair *pair, struct hooks *hooks, uint8_t last, unsigned type);
 static void open_run(struct fake *fake, struct btd_session *session, struct btd_pair *pair, struct hooks *hooks, pthread_t *thread);
 static void close_run(struct fake *fake, struct btd_session *session, pthread_t thread);
@@ -199,6 +234,7 @@ main(
 	test_bredr();
 	test_pin();
 	test_le();
+	test_router();
 
 	/* The verdict. */
 	if (failures != 0U) {
@@ -528,8 +564,8 @@ test_bredr(void)
 
 	/* The controller's answers to the refusals. */
 	(void)usleep(50000U);
-	expect(fake_saw(&fake, 0x040aU) && fake_saw(&fake, 0x0434U) && fake_saw(&fake, 0x042dU) && pair.refused >= 3U,
-	       "bredr: pairings from the other side are refused");
+	expect(fake_saw(&fake, 0x040aU) && fake_saw(&fake, 0x0434U) && fake_saw(&fake, 0x042dU) && router.refused >= 3U,
+	       "bredr: pairings from the other side are refused (by the router)");
 	close_run(&fake, session, thread);
 	expect(fake.credit_breaches == 0U, "bredr: no packet past the controller's buffers");
 	free(session);
@@ -644,6 +680,240 @@ test_le(void)
 }
 
 /*
+ * The router (ws143-p005, phase005 sections 4.1, 9.2 and 9.6): with a
+ * stand-in HID host that wants 0A:0B:0C:0D:0E:0D back and claims the
+ * connection of ...:0E.
+ */
+static void
+test_router(void)
+{
+	struct btd_router_hid hooks_hid;
+	struct btd_session *session;
+	struct btd_pair pair;
+	struct hid_stub stub;
+	struct hooks hooks;
+	struct fake fake;
+	uint8_t address[6];
+	uint8_t parameters[16];
+	pthread_t thread;
+	int error;
+
+	/* A started controller, the router with the stand-in. */
+	session = calloc(1U, sizeof(*session));
+	memset(&fake, 0, sizeof(fake));
+	fake.acl_total = 4U;
+	open_run(&fake, session, &pair, &hooks, &thread);
+	error = btd_session_start(session);
+	expect(error == 0, "router: started");
+	memset(&stub, 0, sizeof(stub));
+	stub.router = &router;
+	device_address(0x0dU, stub.wanted);
+	device_address(0x0eU, stub.claimed);
+	hooks_hid.context = &stub;
+	hooks_hid.wants = stub_wants;
+	hooks_hid.claims = stub_claims;
+	hooks_hid.handle = stub_handle;
+	btd_router_set_hid(&router, &hooks_hid);
+
+	/* A wanted device connecting goes to the HID host; another is refused. */
+	fake_address_event(&fake, 0x04U, stub.wanted, (const uint8_t *)"\x80\x25\x00\x01", 4U);
+	pump(session);
+	expect(stub.requests == 1U && !fake_saw(&fake, 0x040aU), "router: a wanted device's Connection Request goes to the HID host");
+	device_address(0x0fU, address);
+	fake_address_event(&fake, 0x04U, address, (const uint8_t *)"\x80\x25\x00\x01", 4U);
+	pump(session);
+	expect(fake_saw(&fake, 0x040aU) && stub.requests == 1U, "router: a stranger connecting is refused");
+
+	/* Link Key Request: the wanted device's to the HID host, a stranger has no key. */
+	fake_address_event(&fake, 0x17U, stub.wanted, NULL, 0U);
+	pump(session);
+	expect(stub.key_requests == 1U && !fake_saw(&fake, 0x040cU), "router: the wanted device's Link Key Request goes to the HID host");
+	fake_address_event(&fake, 0x17U, address, NULL, 0U);
+	pump(session);
+	expect(fake_saw(&fake, 0x040cU), "router: a stranger's Link Key Request has no key");
+
+	/* The pairing's events of a bonded HID device outside a pairing: refused, the key not stored (review B6). */
+	fake.opcode_count = 0U;
+	fake_address_event(&fake, 0x31U, stub.wanted, NULL, 0U);
+	fake_address_event(&fake, 0x34U, stub.wanted, NULL, 0U);
+	memset(parameters, 0x77, sizeof(parameters));
+	parameters[16 - 1] = 0x08U;
+	fake_address_event(&fake, 0x18U, stub.wanted, parameters, 16U);
+	fake_address_event(&fake, 0x18U, stub.wanted, (const uint8_t *)"\x08", 1U);
+	pump(session);
+	expect(fake_saw(&fake, 0x0434U) && fake_saw(&fake, 0x042fU) && router.keys_dropped == 2U && stub.others == 0U,
+	       "router: IO capability and passkey refused, the keys notified dropped (%u)", router.keys_dropped);
+
+	/* The HID host's connection: its events and data go to it, then its end. */
+	memset(parameters, 0, sizeof(parameters));
+	parameters[1] = 0x50U;
+	memcpy(parameters + 3, stub.claimed, 6U);
+	parameters[9] = 0x01U;
+	fake_event(&fake, 0x03U, parameters, 11U);
+	fake_event(&fake, 0x08U, (const uint8_t *)"\x00\x50\x00\x01", 4U);
+	fake_frame(&fake, 0x0050U, 0x0001U, (const uint8_t *)"\x08\x01\x00\x00", 4U);
+	pump(session);
+	expect(stub.connected == 1U && stub.others == 1U && stub.acl == 1U && btd_router_owner(&router, 0x0050U) == BTD_OWNER_HID,
+	       "router: the HID host's connection, its encryption and its data");
+	fake_event(&fake, 0x05U, (const uint8_t *)"\x00\x50\x00\x13", 4U);
+	pump(session);
+	expect(stub.disconnected == 1U && btd_router_owner(&router, 0x0050U) == BTD_OWNER_NONE, "router: its end, the route forgotten");
+
+	/* A connection nobody owns is ended. */
+	memset(parameters, 0, sizeof(parameters));
+	parameters[1] = 0x51U;
+	memcpy(parameters + 3, address, 6U);
+	parameters[9] = 0x01U;
+	fake.opcode_count = 0U;
+	fake_event(&fake, 0x03U, parameters, 11U);
+	pump(session);
+	expect(fake_saw(&fake, 0x0406U) && router.ended == 1U && stub.connected == 1U, "router: nobody's connection is ended");
+
+	/* A paired connection the HID host does not take: ended as before. */
+	btd_pair_set_handoff(&pair, stub_handoff, &stub);
+	hooks.answer = 1;
+	run_pair(session, &pair, &hooks, DEVICE_NUMERIC, BTD_ADDRESS_BREDR);
+	expect(strstr(hooks.end, "PAIRED") != NULL && stub.offered == 1U && !fake.connected && pair.handed == 0U,
+	       "router: a paired connection not taken over is ended (%s)", hooks.end);
+
+	/* One it takes: no disconnection, the connection the HID host's. */
+	stub.take = 1;
+	run_pair(session, &pair, &hooks, DEVICE_NUMERIC, BTD_ADDRESS_BREDR);
+	expect(strstr(hooks.end, "PAIRED") != NULL && stub.offered == 2U && stub.offered_handle == HANDLE_BREDR && fake.connected &&
+	       pair.handed == 1U && btd_router_owner(&router, HANDLE_BREDR) == BTD_OWNER_HID,
+	       "router: a paired connection taken over stays (%s)", hooks.end);
+	fake_frame(&fake, HANDLE_BREDR, 0x0001U, (const uint8_t *)"\x08\x02\x00\x00", 4U);
+	pump(session);
+	expect(stub.acl == 2U, "router: its data goes to the HID host");
+
+	/* The run's end. */
+	close_run(&fake, session, thread);
+	free(session);
+}
+
+/* The stand-in's answer: whether it wants a device back. */
+static int
+stub_wants(
+	void *context,
+	const uint8_t *address)
+{
+	struct hid_stub *stub;
+	int differs;
+
+	/* The device it wants. */
+	stub = context;
+	differs = memcmp(address, stub->wanted, 6U);
+	if (differs == 0)
+		return 1;
+
+	/* Not that one. */
+	return 0;
+}
+
+/* The stand-in's answer: whether a connection to a device is its own. */
+static int
+stub_claims(
+	void *context,
+	const uint8_t *address)
+{
+	struct hid_stub *stub;
+	int differs;
+
+	/* The device it claims. */
+	stub = context;
+	differs = memcmp(address, stub->claimed, 6U);
+	if (differs == 0)
+		return 1;
+
+	/* Not that one. */
+	return 0;
+}
+
+/* The stand-in's handler: counts what it heard. */
+static void
+stub_handle(
+	void *context,
+	struct btd_session *session,
+	const uint8_t *packet,
+	size_t length)
+{
+	struct hid_stub *stub;
+
+	(void)session;
+	(void)length;
+
+	/* ACL data, or an event by its code. */
+	stub = context;
+	if (packet[0] == 0x02U) {
+		stub->acl++;
+		return;
+	}
+
+	/* Each event it knows. */
+	switch (packet[1]) {
+	case 0x03U:
+		stub->connected++;
+		break;
+	case 0x04U:
+		stub->requests++;
+		break;
+	case 0x05U:
+		stub->disconnected++;
+		break;
+	case 0x17U:
+		stub->key_requests++;
+		break;
+	default:
+		stub->others++;
+		break;
+	}
+}
+
+/* The stand-in's answer to a paired connection: takes it (the router's route becomes its own) when told to. */
+static int
+stub_handoff(
+	void *context,
+	const uint8_t *address,
+	unsigned type,
+	uint16_t handle,
+	const struct btd_bond *bond)
+{
+	struct hid_stub *stub;
+
+	(void)address;
+	(void)type;
+
+	/* Offered, with the bond. */
+	stub = context;
+	stub->offered++;
+	stub->offered_handle = handle;
+	if (!stub->take || !bond->have_link_key)
+		return 0;
+
+	/* Succeeded: taken. */
+	(void)btd_router_assign(stub->router, handle, BTD_OWNER_HID);
+	return 1;
+}
+
+/* Lets the controller's packets come, then hands them all to the session. */
+static void
+pump(
+	struct btd_session *session)
+{
+	int error;
+
+	/* The controller's time to write. */
+	(void)usleep(50000U);
+
+	/* Each packet. */
+	for (;;) {
+		error = btd_session_input(session);
+		if (error != 0)
+			break;
+	}
+}
+
+/*
  * Runs one pairing to its end as the daemon's loop does: the session's
  * packets, the agent's answers, the deadlines (the clock is moved on when
  * the controller has nothing more to say, so the 10 and 30 seconds pass at
@@ -744,8 +1014,9 @@ open_run(
 	session->timing.command_ms = 300U;
 	memset(hooks, 0, sizeof(*hooks));
 	btd_pair_init(pair, session, keys_folder, hook_ask, hook_done, hooks, test_random, NULL);
-	session->handler = btd_pair_handle;
-	session->handler_context = pair;
+	btd_router_init(&router, pair);
+	session->handler = btd_router_handle;
+	session->handler_context = &router;
 
 	/* The controller. */
 	status = pthread_create(thread, NULL, fake_run, fake);

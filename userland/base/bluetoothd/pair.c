@@ -34,7 +34,6 @@
 #define PAIR_CREATE_CONNECTION		0x0405U
 #define PAIR_DISCONNECT			0x0406U
 #define PAIR_CREATE_CANCEL		0x0408U
-#define PAIR_REJECT_CONNECTION		0x040aU
 #define PAIR_LINK_KEY_REPLY		0x040bU
 #define PAIR_LINK_KEY_NEGATIVE		0x040cU
 #define PAIR_PIN_NEGATIVE		0x040eU
@@ -99,8 +98,7 @@
 #define PAIR_KEY_P256			0x07U
 #define PAIR_KEY_P256_MITM		0x08U
 
-/* The reasons bluetoothd gives: a connection refused (unacceptable address), pairing not allowed, a disconnection by the user. */
-#define PAIR_REASON_UNACCEPTABLE	0x0fU
+/* The reasons bluetoothd gives: pairing not allowed, a disconnection by the user. */
 #define PAIR_REASON_NOT_ALLOWED		0x18U
 #define PAIR_REASON_USER		0x13U
 
@@ -142,6 +140,7 @@ static void pair_cancel(struct btd_pair *pair, const char *why);
 static int pair_command(struct btd_pair *pair, uint16_t opcode, const uint8_t *parameters, size_t count, const char *why);
 static void pair_reply(struct btd_pair *pair, uint16_t opcode, const uint8_t *address, const uint8_t *more, size_t more_length);
 static void pair_disconnect_other(struct btd_pair *pair, uint16_t handle);
+static int pair_hand_over(struct btd_pair *pair);
 static int pair_ours(const struct btd_pair *pair, const uint8_t *address);
 static void pair_name(const struct btd_pair *pair, const uint8_t *address, unsigned type, char *name, size_t size);
 static const char *pair_smp_why(const struct btd_pair *pair);
@@ -521,6 +520,42 @@ btd_pair_active(
 	return 0;
 }
 
+/*
+ * Tells whether a pairing runs for a device (its address, least
+ * significant byte first): the router gives that device's events to the
+ * pairing.
+ */
+int
+btd_pair_owns(
+	const struct btd_pair *pair,
+	const uint8_t *address)
+{
+	int ours;
+
+	/* The pairing's device while a pairing runs. */
+	ours = pair_ours(pair, address);
+	if (ours)
+		return 1;
+
+	/* Not the pairing's. */
+	return 0;
+}
+
+/*
+ * Gives the pairing the hook that may take over the connection of a
+ * pairing that succeeded (NULL: every connection is ended, as before).
+ */
+void
+btd_pair_set_handoff(
+	struct btd_pair *pair,
+	btd_pair_handoff_fn handoff,
+	void *context)
+{
+	/* The hook and its context. */
+	pair->handoff = handoff;
+	pair->handoff_context = context;
+}
+
 /* Takes one event of the connections or the pairing. */
 static void
 pair_event(
@@ -529,23 +564,13 @@ pair_event(
 	size_t length,
 	uint8_t code)
 {
-	uint8_t reason[1];
 	uint32_t number;
 	int ours;
 
-	/* Each event the pairing knows; the address of an address-led event is its first six bytes. */
+	/* Each event the pairing knows (a device connecting to bluetoothd is the router's to refuse); the address of an address-led event is its first six bytes. */
 	switch (code) {
 	case PAIR_EVENT_CONNECTED:
 		pair_connected(pair, parameters, length);
-		break;
-	case PAIR_EVENT_REQUEST:
-		/* A device connecting to bluetoothd: refused, its address unacceptable (pairing is started from here only, design section 6.5). */
-		if (length >= BTD_ADDRESS_BYTES) {
-			pair->refused++;
-			reason[0] = PAIR_REASON_UNACCEPTABLE;
-			pair_reply(pair, PAIR_REJECT_CONNECTION, parameters, reason, sizeof(reason));
-		}
-
 		break;
 	case PAIR_EVENT_DISCONNECTED:
 		pair_disconnected(pair, parameters, length);
@@ -1422,6 +1447,7 @@ pair_succeed(
 	int authenticated;
 	int secure;
 	int legacy;
+	int handed;
 	unsigned key_size;
 
 	/* What the bond is worth: BR/EDR's from the key type, LE's from the Security Manager. */
@@ -1458,6 +1484,13 @@ pair_succeed(
 		       key_size,
 		       pair->used_stored,
 		       pair->probed);
+
+	/* A connection the HID host takes over stays; the end is told now (phase005 section 9.2). */
+	handed = pair_hand_over(pair);
+	if (handed) {
+		pair_deliver(pair);
+		return;
+	}
 
 	/* The connection ends. */
 	pair_finish(pair);
@@ -1649,6 +1682,54 @@ pair_disconnect_other(
 	error = btd_session_command(pair->session, PAIR_DISCONNECT, disconnect, sizeof(disconnect));
 	if (error == ENODEV)
 		btd_pair_lost(pair);
+}
+
+/*
+ * Offers the connection of a pairing that succeeded to the handoff hook,
+ * with the bond just stored; reports whether the hook took it (the
+ * pairing then forgets the connection: its channels and frames go).
+ */
+static int
+pair_hand_over(
+	struct btd_pair *pair)
+{
+	struct btd_bond bond;
+	const uint8_t *address;
+	unsigned type;
+	int taken;
+	int error;
+
+	/* Only a connection that is up, and a hook to take it. */
+	if (pair->handoff == NULL || !pair->connected)
+		return 0;
+
+	/* The bond's name: the connection's address, or the identity an LE device gave. */
+	address = pair->address;
+	type = pair->type;
+	if (pair->le && pair->smp.keys.have_identity) {
+		address = pair->smp.keys.identity;
+		type = BTD_ADDRESS_LE_PUBLIC;
+		if (pair->smp.keys.identity_type != 0U)
+			type = BTD_ADDRESS_LE_RANDOM;
+	}
+
+	/* The bond as stored; without it nothing can be taken over. */
+	error = btd_keys_read(pair->keys_folder, pair->session->address, address, type, &bond);
+	if (error != 0)
+		return 0;
+
+	/* The hook's answer; the bond's copy is not kept. */
+	taken = pair->handoff(pair->handoff_context, pair->address, pair->type, pair->handle, &bond);
+	memset(&bond, 0, sizeof(bond));
+	if (taken != 1)
+		return 0;
+
+	/* Succeeded: the connection is the hook's, the pairing has none. */
+	pair->handed++;
+	pair->connected = 0;
+	btd_l2cap_drop(&pair->l2cap, pair->handle);
+	memset(&pair->reassembly, 0, sizeof(pair->reassembly));
+	return 1;
 }
 
 /* Tells whether an address (least significant byte first) is the pairing's device while a pairing runs. */

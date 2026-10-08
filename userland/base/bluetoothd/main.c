@@ -37,6 +37,7 @@
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
+#include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/session.h"
 
 #include <errno.h>
@@ -162,6 +163,14 @@ static uint64_t btd_looked_ms;
 static struct btd_pair btd_pairing;
 
 /*
+ * The router of the session's packets (ws143-p005): the session's handler
+ * while the node is open, giving the pairing its device's packets and
+ * refusing what nobody owns.  It lives as long as the daemon; a closed
+ * node empties its routes.
+ */
+static struct btd_router btd_routing;
+
+/*
  * The clients of a pairing: the one that asked for it, the agent that
  * named itself (it answers for pairings of its uid, or of anyone when it
  * is the seat's user), and the one asked the question now
@@ -269,6 +278,7 @@ main(
 
 	/* The pairing, handed the session's connection packets from each start on. */
 	btd_pair_init(&btd_pairing, &btd_session, BTD_KEYS_FOLDER, btd_ask, btd_paired, NULL, btd_random, NULL);
+	btd_router_init(&btd_routing, &btd_pairing);
 
 	/* The controller there is now. */
 	btd_open();
@@ -458,10 +468,10 @@ btd_open(
 	/* A node that opened ends the busy note. */
 	btd_busy_logged = 0;
 
-	/* Its session, its packets handed to the pairing; a controller loaded before must not be loaded again. */
+	/* Its session, its packets handed to the router; a controller loaded before must not be loaded again. */
 	btd_session_init(&btd_session, descriptor, btd_node_control, &btd_session, path, BTD_FIRMWARE_FOLDER);
-	btd_session.handler = btd_pair_handle;
-	btd_session.handler_context = &btd_pairing;
+	btd_session.handler = btd_router_handle;
+	btd_session.handler_context = &btd_routing;
 	btd_session_open = 1;
 	btd_reappear_ms = 0U;
 	error = ioctl(descriptor, BT_IOC_GET_INFO, &btd_session.info);
@@ -524,8 +534,9 @@ btd_close(
 	if (!btd_session_open)
 		return;
 
-	/* A pairing cannot go on without the controller (review S-f). */
+	/* A pairing cannot go on without the controller (review S-f), and no connection is left. */
 	btd_pair_lost(&btd_pairing);
+	btd_router_clear(&btd_routing);
 
 	/* A client waiting for a scan is answered. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {

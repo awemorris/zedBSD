@@ -32,6 +32,8 @@ kwl_edge_classify(
 	int32_t height,
 	int touch)
 {
+	unsigned edge;
+
 	/* The bottom edge's strip. */
 	if (y >= height - KWL_EDGE_BOTTOM_HEIGHT)
 		return KWL_EDGE_BOTTOM_STRIP;
@@ -40,8 +42,31 @@ kwl_edge_classify(
 	if (!touch)
 		return KWL_EDGE_NONE;
 
+	/* Succeeded: the band of its own depth, or nowhere special. */
+	edge = kwl_edge_classify_band(x, y, width, height, KWL_EDGE_BAND);
+	return edge;
+}
+
+/*
+ * Tells where a touch's press is with the top edge's band depth pixels
+ * deep (KWL_EDGE_BAND, or KWL_EDGE_BAND_DEEP where the bar holds nothing a
+ * finger drags, BUG-270): the bottom edge's strip, the band (not over the
+ * launcher or the top-right corner), or nowhere special.
+ */
+unsigned
+kwl_edge_classify_band(
+	int32_t x,
+	int32_t y,
+	int32_t width,
+	int32_t height,
+	int32_t depth)
+{
+	/* The bottom edge's strip. */
+	if (y >= height - KWL_EDGE_BOTTOM_HEIGHT)
+		return KWL_EDGE_BOTTOM_STRIP;
+
 	/* Below the band. */
-	if (y >= KWL_EDGE_BAND)
+	if (y >= depth)
 		return KWL_EDGE_NONE;
 
 	/* Over the launcher (and App Home's top-left corner) or the top-right corner of Notes. */
@@ -211,8 +236,9 @@ kwl_edge_home_content(
 /*
  * Tells which edge a finger touching at (x, y) may swipe in from with
  * other fingers (BUG-267): the nearest of the left side, the right side
- * (both only under the system bar, whose height is top) and the bottom,
- * when it is within KWL_EDGE_GROUP_REACH; otherwise none.
+ * (both only under the system bar, whose height is top), the bottom and
+ * the top (BUG-270), when it is within KWL_EDGE_GROUP_REACH; otherwise
+ * none.
  */
 unsigned
 kwl_edge_group_side(
@@ -227,10 +253,10 @@ kwl_edge_group_side(
 	int32_t distance;
 	int32_t shortest;
 
-	/* Each edge in turn (the left side, the right side, the bottom): a nearer one wins. */
+	/* Each edge in turn (the left side, the right side, the bottom, the top): a nearer one wins. */
 	nearest = KWL_EDGE_SIDE_NONE;
 	shortest = KWL_EDGE_GROUP_REACH + 1;
-	for (side = KWL_EDGE_SIDE_LEFT; side <= KWL_EDGE_SIDE_BOTTOM; side++) {
+	for (side = KWL_EDGE_SIDE_LEFT; side <= KWL_EDGE_SIDE_TOP; side++) {
 		/* How far the finger is from this edge; -1 when it is not beside it. */
 		distance = kwl_edge_group_distance(side, x, y, width, height, top);
 		if (distance < 0)
@@ -275,12 +301,15 @@ kwl_edge_group_distance(
 	case KWL_EDGE_SIDE_BOTTOM:
 		distance = height - 1 - y;
 		break;
+	case KWL_EDGE_SIDE_TOP:
+		distance = y;
+		break;
 	default:
 		return -1;
 	}
 
 	/* The sides start under the system bar (the desktops' swipe starts there). */
-	if (side != KWL_EDGE_SIDE_BOTTOM && y < top)
+	if (side != KWL_EDGE_SIDE_BOTTOM && side != KWL_EDGE_SIDE_TOP && y < top)
 		return -1;
 
 	/* A point off the output is not beside the edge. */
@@ -318,6 +347,10 @@ kwl_edge_group_motion(
 		break;
 	case KWL_EDGE_SIDE_BOTTOM:
 		inward = -dy;
+		across = dx;
+		break;
+	case KWL_EDGE_SIDE_TOP:
+		inward = dy;
 		across = dx;
 		break;
 	default:
@@ -371,6 +404,9 @@ kwl_edge_group_point(
 		break;
 	case KWL_EDGE_SIDE_BOTTOM:
 		*edge_y = height - 1;
+		break;
+	case KWL_EDGE_SIDE_TOP:
+		*edge_y = 0;
 		break;
 	default:
 		break;

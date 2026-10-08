@@ -24,7 +24,7 @@ links=$(mktemp -d "$OUT/links.XXXXXX")
 cc $flags -o "$OUT/bt-link-host-test" plan/ws143/tests/bt-link-host-test.c userland/base/bluetoothd/session.c \
 	userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c \
 	userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c \
-	userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread
+	userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/router.c -lpthread
 timeout 120 "$OUT/bt-link-host-test" "$links"
 hid=$(mktemp -d "$OUT/hid.XXXXXX")
 cc $flags -o "$OUT/bt-hid-host-test" plan/ws143/tests/bt-hid-host-test.c userland/base/bluetoothd/sdp.c \

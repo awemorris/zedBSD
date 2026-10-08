@@ -510,6 +510,7 @@ static void wiseview_log(struct kwl_server *server);
 static int home_edge_press(struct kwl_server *server, uint32_t button, uint32_t state);
 static int band_button(struct kwl_server *server, uint32_t button, uint32_t state, int replays);
 static int band_motion(struct kwl_server *server, int replays);
+static int32_t band_depth(struct kwl_server *server);
 static void band_replay(struct kwl_server *server, int release);
 
 /* Whether where the desktops' pictures are has been logged (once, for the tests that click them). */
@@ -7309,7 +7310,7 @@ band_button(
 	int replays)
 {
 	unsigned edge;
-	int touch;
+	int32_t depth;
 
 	/* A press being given again goes past the band. */
 	if (server->band_replay)
@@ -7327,11 +7328,13 @@ band_button(
 	if (state == 0 || button != KWL_BUTTON_LEFT)
 		return 0;
 
-	/* Only a touch's press in the band (edge.c; the 2026-10-07 user decision: a touch only). */
-	touch = 0;
-	if (server->shell_source == KWL_CONTACT_TOUCH)
-		touch = 1;
-	edge = kwl_edge_classify(server->pointer_x, server->pointer_y, (int32_t)server->width, (int32_t)server->height, touch);
+	/* Only a touch's press (the 2026-10-07 user decision: a touch only). */
+	if (server->shell_source != KWL_CONTACT_TOUCH)
+		return 0;
+
+	/* Only in the band, as deep as the bar where it holds nothing a finger drags (edge.c, BUG-270). */
+	depth = band_depth(server);
+	edge = kwl_edge_classify_band(server->pointer_x, server->pointer_y, (int32_t)server->width, (int32_t)server->height, depth);
 	if (edge != KWL_EDGE_TOP_BAND)
 		return 0;
 
@@ -7343,6 +7346,33 @@ band_button(
 
 	/* Succeeded: the press is the band's for now. */
 	return 1;
+}
+
+/*
+ * Gives the top edge's band's depth at the pointer for a finger (BUG-270):
+ * the whole bar's height, except over a docked window's menus, title and
+ * buttons, where a finger pulls the window or opens a menu and the band
+ * keeps the edge's own KWL_EDGE_BAND.
+ */
+static int32_t
+band_depth(
+	struct kwl_server *server)
+{
+	struct kwl_object *docked;
+	struct shell_bar bar;
+
+	/* Without a docked window the bar holds nothing a finger drags down. */
+	docked = docked_window(server, KWL_PLANE_ANCHOR);
+	if (docked == NULL)
+		return KWL_EDGE_BAND_DEEP;
+
+	/* Over the docked window's part of the bar: from the line after the launcher to past its buttons. */
+	bar_layout(server, &bar);
+	if (server->pointer_x >= bar.menu_line && server->pointer_x < bar.buttons[BUTTON_CLOSE] + BUTTON_WIDTH)
+		return KWL_EDGE_BAND;
+
+	/* Succeeded: elsewhere in the bar, its whole height. */
+	return KWL_EDGE_BAND_DEEP;
 }
 
 /*

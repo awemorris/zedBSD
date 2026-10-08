@@ -111,6 +111,8 @@ static void test_single_strip(void);
 static void test_lift_before_in(void);
 static void test_other_in_middle(void);
 static void test_joined_far(void);
+static void test_top_pair(void);
+static void test_top_in_bar(void);
 
 /* Runs every scenario and reports how many checks failed. */
 int
@@ -155,6 +157,8 @@ main(
 	test_lift_before_in();
 	test_other_in_middle();
 	test_joined_far();
+	test_top_pair();
+	test_top_in_bar();
 
 	/* The touch screen goes. */
 	kwl_touch_remove(&server, &input, 1);
@@ -1013,8 +1017,9 @@ kwl_seat_button_deliver(
 
 /*
  * Passes a button to the stand-in shell: a press in a side strip under the
- * system bar (the desktops' swipe) or in the bottom strip (App Home's
- * swipe) is taken, and so is the release of a press taken.
+ * system bar (the desktops' swipe), in the bottom strip (App Home's swipe)
+ * or in the system bar (the top band, Wiseview's swipe, BUG-270) is taken,
+ * and so is the release of a press taken.
  */
 int
 kwl_seat_button_shell(
@@ -1047,6 +1052,8 @@ kwl_seat_button_shell(
 	if (y >= KWL_GLASS_BAR && (x < SHELL_SIDE || x >= OUTPUT_WIDTH - SHELL_SIDE))
 		strip = 1;
 	if (y >= OUTPUT_HEIGHT - SHELL_BOTTOM)
+		strip = 1;
+	if (y < KWL_EDGE_BAND_DEEP)
 		strip = 1;
 
 	/* Anywhere else the press goes on to what is under it, and the button is held. */
@@ -1219,4 +1226,75 @@ test_joined_far(
 	report_send(12200);
 	check(seen.downs == 0, "joined-far: the client never hears the middle finger");
 	check(seen.shell_releases == 1, "joined-far: the shell hears the release");
+}
+
+/*
+ * BUG-270: the outer finger just under the system bar (900, 50) and
+ * another (950, 400) swipe down: the top edge's swipe, the press at the
+ * top of the outer finger's column (where Wiseview's band takes it).
+ */
+static void
+test_top_pair(
+	void)
+{
+	unsigned step;
+
+	/* Both touch; the client hears both. */
+	scenario_begin("top edge, two fingers");
+	finger_down(0, 221, 950, 400);
+	finger_down(1, 222, 900, 50);
+	report_send(13000);
+	check(seen.downs == 2, "top: the client hears both fingers touch");
+
+	/* Both move down. */
+	for (step = 1; step <= 6; step++) {
+		finger_move(0, 950, 400 + 25 * (int32_t)step);
+		finger_move(1, 900 + (int32_t)step, 50 + 25 * (int32_t)step);
+		report_send(13000 + 16 * step);
+	}
+
+	/* The shell took them from the top edge. */
+	check(seen.cancels == 1, "top: the client hears cancel");
+	check(seen.shell_presses == 1, "top: the shell hears one press");
+	check(seen.press_x == 900 && seen.press_y == 0, "top: the press is on the top edge at the outer finger's column");
+	check(seen.motion_y == 150, "top: the pointer went the outer finger's way down");
+
+	/* They lift. */
+	finger_up(0);
+	finger_up(1);
+	report_send(13200);
+	check(seen.shell_releases == 1, "top: the shell hears the release");
+}
+
+/* BUG-270: the outer finger in the system bar (the shell's band) and another soon after anywhere: the other goes nowhere. */
+static void
+test_top_in_bar(
+	void)
+{
+	unsigned step;
+
+	/* The finger in the bar: the shell's. */
+	scenario_begin("top: outer finger in the bar, the other joins");
+	finger_down(0, 231, 1000, 20);
+	report_send(14000);
+	check(seen.shell_presses == 1 && seen.press_y == 20, "top-bar: the shell takes the finger in the bar");
+
+	/* Another finger 30 ms later: nobody hears it. */
+	finger_down(1, 232, 1100, 300);
+	report_send(14030);
+	check(seen.downs == 0, "top-bar: the client hears no down");
+
+	/* Both move down. */
+	for (step = 1; step <= 5; step++) {
+		finger_move(0, 1000, 20 + 30 * (int32_t)step);
+		finger_move(1, 1100, 300 + 30 * (int32_t)step);
+		report_send(14030 + 16 * step);
+	}
+
+	/* They lift: the shell followed the bar's finger, the client heard nothing. */
+	finger_up(1);
+	finger_up(0);
+	report_send(14200);
+	check(seen.motion_y == 170, "top-bar: the shell follows the finger in the bar");
+	check(seen.shell_releases == 1 && seen.downs == 0, "top-bar: the shell hears the release, the client nothing");
 }
