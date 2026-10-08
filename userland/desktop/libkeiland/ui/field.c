@@ -23,6 +23,13 @@
  * its characters but takes no input method, as a secret one.  A field's
  * limit (KL_VERSION 64, ws177-p004) is the most bytes its text holds: a
  * key or a commit past it puts in nothing more, or what fits.
+ *
+ * KL_VERSION 67 (ws177-p013): Ctrl+Z takes the last change back and
+ * Ctrl+Shift+Z or Ctrl+Y does it again (one change a key or a commit,
+ * the window's input keeping the history), Ctrl+C, Ctrl+X and Ctrl+V copy,
+ * cut and paste through the window's clipboard (a secret field copies
+ * nothing), and Ctrl+Left and Ctrl+Right move a word (with Shift, the
+ * selection).
  */
 
 #include "internal.h"
@@ -44,6 +51,8 @@ static size_t field_next(const struct kl_field *field, size_t at);
 static size_t field_shown(const struct kl_field *field, char *out, size_t size, size_t through);
 static size_t field_at(const struct kl_style *style, const struct kl_field *field, int x);
 static unsigned field_input(struct kl_field *field, const struct keiui_input *input);
+static unsigned field_take(struct kl_ui *ui, uint32_t id, struct kl_field *field, const struct keiui_input *input);
+static unsigned field_edit(struct kl_ui *ui, uint32_t id, struct kl_field *field, unsigned command, unsigned modifiers);
 static void field_insert(struct kl_field *field, const char *text);
 static void field_delete_around(struct kl_field *field, size_t before, size_t after);
 static size_t field_room(const struct kl_field *field);
@@ -171,7 +180,7 @@ kl_field(
 		taken = keiui_ui_take_input(ui, id, 0U, field_wants, &input);
 		if (!taken)
 			break;
-		changes |= field_input(field, &input);
+		changes |= field_take(ui, id, field, &input);
 	}
 
 	/* The text an input method is composing for it (a secret field's characters do not show, so neither does it). */
@@ -282,19 +291,23 @@ kl_field(
 	return changes;
 }
 
-/* Tells whether a field takes a key: its characters, its editing keys, Enter and Esc (with Control, only A). */
+/* Tells whether a field takes a key: its characters, its editing keys, Enter and Esc (with Control, A and the editing commands). */
 static int
 field_wants(
 	uint32_t code,
 	unsigned modifiers)
 {
 	uint32_t character;
+	unsigned command;
 
-	/* Control's only key is A (select all); Alt and Super are commands. */
+	/* Control's keys are A (select all) and the editing commands (ws177-p013); Alt and Super are commands. */
 	if ((modifiers & (KL_MOD_ALT | KL_MOD_SUPER)) != 0U)
 		return 0;
 	if ((modifiers & KL_MOD_CTRL) != 0U) {
 		if (code == 30U)
+			return 1;
+		command = keiui_edit_command(code, modifiers);
+		if (command != KEIUI_EDIT_NONE)
 			return 1;
 		return 0;
 	}
@@ -549,6 +562,141 @@ field_at(
 
 	/* Reports the nearest boundary. */
 	return best;
+}
+
+/*
+ * Takes one input in a field: an editing command of the window's input
+ * (field_edit), or a key, a text or a deletion, each change recorded in
+ * the history.  Reports what happened (KL_FIELD_* bits).
+ */
+static unsigned
+field_take(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_field *field,
+	const struct keiui_input *input)
+{
+	char before[KL_FIELD_MAX];
+	size_t before_length;
+	size_t caret;
+	size_t anchor;
+	unsigned command;
+	unsigned changes;
+
+	/* An editing command (ws177-p013). */
+	command = KEIUI_EDIT_NONE;
+	if (input->kind == KEIUI_INPUT_KEY)
+		command = keiui_edit_command(input->code, input->modifiers);
+	if (command != KEIUI_EDIT_NONE) {
+		changes = field_edit(ui, id, field, command, input->modifiers);
+		return changes;
+	}
+
+	/* The text before the input, for the history. */
+	memcpy(before, field->text, field->length + 1U);
+	before_length = field->length;
+	caret = field->caret;
+	anchor = field->anchor;
+
+	/* The input; a change goes in the history. */
+	changes = field_input(field, input);
+	if ((changes & KL_FIELD_CHANGED) != 0U)
+		keiui_edit_record(ui, id, before, before_length, caret, anchor, field->text, field->length);
+
+	/* Reports what the input did. */
+	return changes;
+}
+
+/*
+ * Carries out an editing command in a field (ws177-p013): undo and redo
+ * through the history, copy, cut and paste through the window's
+ * clipboard, a word left or right.  Reports what happened (KL_FIELD_*
+ * bits).
+ */
+static unsigned
+field_edit(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_field *field,
+	unsigned command,
+	unsigned modifiers)
+{
+	char before[KL_FIELD_MAX];
+	char pasted[KL_FIELD_MAX];
+	size_t before_length;
+	size_t caret;
+	size_t anchor;
+	size_t start;
+	size_t end;
+	size_t length;
+	int forward;
+	int redo;
+	int done;
+
+	/* The selection's ends in order. */
+	start = field->anchor;
+	end = field->caret;
+	if (start > end) {
+		start = field->caret;
+		end = field->anchor;
+	}
+
+	/* What the field had, for the history of a cut or a paste. */
+	memcpy(before, field->text, field->length + 1U);
+	before_length = field->length;
+	caret = field->caret;
+	anchor = field->anchor;
+
+	/* Each command. */
+	switch (command) {
+	case KEIUI_EDIT_UNDO:
+	case KEIUI_EDIT_REDO:
+		/* The history's change, within the field's room. */
+		redo = 0;
+		if (command == KEIUI_EDIT_REDO)
+			redo = 1;
+		done = keiui_edit_undo(ui, id, redo, field->text, &field->length, field_room(field) + 1U, &field->caret, &field->anchor);
+		if (!done)
+			return 0;
+		return KL_FIELD_CHANGED;
+	case KEIUI_EDIT_COPY:
+		/* The selection, never a secret field's. */
+		if (!field->secret && end > start)
+			keiui_edit_copy(ui, field->text + start, end - start);
+		return 0;
+	case KEIUI_EDIT_CUT:
+		/* The selection copied and erased, never a secret field's. */
+		if (field->secret || end == start)
+			return 0;
+		keiui_edit_copy(ui, field->text + start, end - start);
+		field_erase(field);
+		break;
+	case KEIUI_EDIT_PASTE:
+		/* The clipboard's text in place of the selection, as much as fits. */
+		length = keiui_edit_paste(ui, pasted, sizeof(pasted));
+		if (length == 0U)
+			return 0;
+		field_insert(field, pasted);
+		break;
+	case KEIUI_EDIT_WORD_LEFT:
+	case KEIUI_EDIT_WORD_RIGHT:
+		/* The caret to the word's start or end; Shift keeps the selection's other end. */
+		forward = 0;
+		if (command == KEIUI_EDIT_WORD_RIGHT)
+			forward = 1;
+		field->caret = keiui_edit_word(field->text, field->length, field->caret, forward);
+		if ((modifiers & KL_MOD_SHIFT) == 0U)
+			field->anchor = field->caret;
+		return 0;
+	default:
+		return 0;
+	}
+
+	/* A cut or a paste goes in the history. */
+	keiui_edit_record(ui, id, before, before_length, caret, anchor, field->text, field->length);
+
+	/* Succeeded: the text changed. */
+	return KL_FIELD_CHANGED;
 }
 
 /* Carries out one input in a field: a key, a text to commit, or bytes to delete; reports what happened (KL_FIELD_* bits). */

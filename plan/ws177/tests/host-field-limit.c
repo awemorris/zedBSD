@@ -258,6 +258,96 @@ kl_ui_pointer(
 	*y = 0.0;
 }
 
+/* The editing commands (ws177-p013) are host-text-edit.c's: here no key is one, and no change is kept. */
+unsigned
+keiui_edit_command(
+	uint32_t code,
+	unsigned modifiers)
+{
+	(void)code;
+	(void)modifiers;
+	return KEIUI_EDIT_NONE;
+}
+
+void
+keiui_edit_record(
+	struct kl_ui *ui,
+	uint32_t id,
+	const char *before,
+	size_t before_length,
+	size_t caret_before,
+	size_t anchor_before,
+	const char *after,
+	size_t after_length)
+{
+	(void)ui;
+	(void)id;
+	(void)before;
+	(void)before_length;
+	(void)caret_before;
+	(void)anchor_before;
+	(void)after;
+	(void)after_length;
+}
+
+int
+keiui_edit_undo(
+	struct kl_ui *ui,
+	uint32_t id,
+	int redo,
+	char *text,
+	size_t *length,
+	size_t capacity,
+	size_t *caret,
+	size_t *anchor)
+{
+	(void)ui;
+	(void)id;
+	(void)redo;
+	(void)text;
+	(void)length;
+	(void)capacity;
+	(void)caret;
+	(void)anchor;
+	return 0;
+}
+
+void
+keiui_edit_copy(
+	struct kl_ui *ui,
+	const char *text,
+	size_t length)
+{
+	(void)ui;
+	(void)text;
+	(void)length;
+}
+
+size_t
+keiui_edit_paste(
+	struct kl_ui *ui,
+	char *text,
+	size_t size)
+{
+	(void)ui;
+	(void)text;
+	(void)size;
+	return 0;
+}
+
+size_t
+keiui_edit_word(
+	const char *text,
+	size_t length,
+	size_t at,
+	int forward)
+{
+	(void)text;
+	(void)length;
+	(void)forward;
+	return at;
+}
+
 /*
  * Runs the steps.
  */

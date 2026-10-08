@@ -20,6 +20,11 @@
  * kept), the bytes around the caret are deleted, and the text being
  * composed shows underlined at the caret until it is committed.  The area
  * scrolls down just enough to keep the caret in sight.
+ *
+ * KL_VERSION 67 (ws177-p013): as a field, Ctrl+Z and Ctrl+Shift+Z or
+ * Ctrl+Y take a change back and do it again, Ctrl+C, Ctrl+X and Ctrl+V
+ * copy, cut and paste through the window's clipboard, and Ctrl+Left and
+ * Ctrl+Right move a word.
  */
 
 #include "internal.h"
@@ -50,6 +55,8 @@ struct area_layout {
 
 static int area_wants(uint32_t code, unsigned modifiers);
 static unsigned area_input(struct kl_text_area *area, const struct kl_style *style, int width, const struct keiui_input *input);
+static unsigned area_take(struct kl_ui *ui, uint32_t id, struct kl_text_area *area, const struct kl_style *style, int width, const struct keiui_input *input);
+static unsigned area_edit(struct kl_ui *ui, uint32_t id, struct kl_text_area *area, unsigned command, unsigned modifiers);
 static unsigned area_key(struct kl_text_area *area, const struct kl_style *style, int width, uint32_t code, unsigned modifiers);
 static void area_vertical(struct kl_text_area *area, const struct kl_style *style, int width, int lines, unsigned shift);
 static void area_erase(struct kl_text_area *area);
@@ -169,7 +176,7 @@ kl_text_area(
 		taken = keiui_ui_take_input(ui, id, 0U, area_wants, &input);
 		if (!taken)
 			break;
-		changes |= area_input(area, style, width, &input);
+		changes |= area_take(ui, id, area, style, width, &input);
 	}
 
 	/* The text an input method is composing for it. */
@@ -295,19 +302,23 @@ kl_text_area(
 	return changes;
 }
 
-/* Tells whether a text area takes a key: its characters, its editing keys, Enter and Esc (with Control, only A). */
+/* Tells whether a text area takes a key: its characters, its editing keys, Enter and Esc (with Control, A and the editing commands). */
 static int
 area_wants(
 	uint32_t code,
 	unsigned modifiers)
 {
 	uint32_t character;
+	unsigned command;
 
-	/* Control's only key is A (select all); Alt and Super are commands. */
+	/* Control's keys are A (select all) and the editing commands (ws177-p013); Alt and Super are commands. */
 	if ((modifiers & (KL_MOD_ALT | KL_MOD_SUPER)) != 0U)
 		return 0;
 	if ((modifiers & KL_MOD_CTRL) != 0U) {
 		if (code == 30U)
+			return 1;
+		command = keiui_edit_command(code, modifiers);
+		if (command != KEIUI_EDIT_NONE)
 			return 1;
 		return 0;
 	}
@@ -335,6 +346,158 @@ area_wants(
 	if (character != 0U)
 		return 1;
 	return 0;
+}
+
+/*
+ * Takes one input in a text area: an editing command of the window's
+ * input (area_edit), or a key, a text or a deletion, each change recorded
+ * in the history.  Reports what happened (KL_FIELD_* bits).
+ */
+static unsigned
+area_take(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_text_area *area,
+	const struct kl_style *style,
+	int width,
+	const struct keiui_input *input)
+{
+	static char before[KL_TEXT_AREA_MAX];
+	size_t before_length;
+	size_t caret;
+	size_t anchor;
+	unsigned command;
+	unsigned changes;
+
+	/* An editing command (ws177-p013). */
+	command = KEIUI_EDIT_NONE;
+	if (input->kind == KEIUI_INPUT_KEY)
+		command = keiui_edit_command(input->code, input->modifiers);
+	if (command != KEIUI_EDIT_NONE) {
+		area->goal_x = -1;
+		changes = area_edit(ui, id, area, command, input->modifiers);
+		return changes;
+	}
+
+	/* The text before the input, for the history. */
+	memcpy(before, area->text, area->length + 1U);
+	before_length = area->length;
+	caret = area->caret;
+	anchor = area->anchor;
+
+	/* The input; a change goes in the history. */
+	changes = area_input(area, style, width, input);
+	if ((changes & KL_FIELD_CHANGED) != 0U)
+		keiui_edit_record(ui, id, before, before_length, caret, anchor, area->text, area->length);
+
+	/* Reports what the input did. */
+	return changes;
+}
+
+/*
+ * Carries out an editing command in a text area (ws177-p013): undo and
+ * redo, copy, cut and paste, a word left or right.  Reports what happened
+ * (KL_FIELD_* bits).
+ */
+static unsigned
+area_edit(
+	struct kl_ui *ui,
+	uint32_t id,
+	struct kl_text_area *area,
+	unsigned command,
+	unsigned modifiers)
+{
+	static char before[KL_TEXT_AREA_MAX];
+	static char pasted[KL_TEXT_AREA_MAX];
+	size_t before_length;
+	size_t caret;
+	size_t anchor;
+	size_t start;
+	size_t end;
+	size_t length;
+	size_t at;
+	size_t piece;
+	int forward;
+	int redo;
+	int done;
+
+	/* The selection's ends in order. */
+	start = area->anchor;
+	end = area->caret;
+	if (start > end) {
+		start = area->caret;
+		end = area->anchor;
+	}
+
+	/* What the area had, for the history of a cut or a paste. */
+	memcpy(before, area->text, area->length + 1U);
+	before_length = area->length;
+	caret = area->caret;
+	anchor = area->anchor;
+
+	/* Each command. */
+	switch (command) {
+	case KEIUI_EDIT_UNDO:
+	case KEIUI_EDIT_REDO:
+		/* The history's change. */
+		redo = 0;
+		if (command == KEIUI_EDIT_REDO)
+			redo = 1;
+		done = keiui_edit_undo(ui, id, redo, area->text, &area->length, sizeof(area->text), &area->caret, &area->anchor);
+		if (!done)
+			return 0;
+		return KL_FIELD_CHANGED;
+	case KEIUI_EDIT_COPY:
+		/* The selection. */
+		if (end > start)
+			keiui_edit_copy(ui, area->text + start, end - start);
+		return 0;
+	case KEIUI_EDIT_CUT:
+		/* The selection copied and erased. */
+		if (end == start)
+			return 0;
+		keiui_edit_copy(ui, area->text + start, end - start);
+		area_erase(area);
+		break;
+	case KEIUI_EDIT_PASTE:
+		/* The clipboard's text in place of the selection, in pieces the insertion takes, as much as fits. */
+		length = keiui_edit_paste(ui, pasted, sizeof(pasted));
+		if (length == 0U)
+			return 0;
+		area_erase(area);
+		for (at = 0; at < length; at += piece) {
+			/* A piece the insertion takes whole, cut at a character's start. */
+			piece = length - at;
+			if (piece > KL_WINDOW_TEXT_MAX - 1U)
+				piece = KL_WINDOW_TEXT_MAX - 1U;
+			while (piece > 1U &&
+			       at + piece < length &&
+			       ((unsigned char)pasted[at + piece] & 0xc0U) == 0x80U)
+				piece--;
+			area_insert(area, pasted + at, piece);
+		}
+
+		/* The paste goes in the history below. */
+		break;
+	case KEIUI_EDIT_WORD_LEFT:
+	case KEIUI_EDIT_WORD_RIGHT:
+		/* The caret to the word's start or end; Shift keeps the selection's other end. */
+		forward = 0;
+		if (command == KEIUI_EDIT_WORD_RIGHT)
+			forward = 1;
+		area->caret = keiui_edit_word(area->text, area->length, area->caret, forward);
+		if ((modifiers & KL_MOD_SHIFT) == 0U)
+			area->anchor = area->caret;
+		return 0;
+	default:
+		return 0;
+	}
+
+	/* A cut or a paste goes in the history. */
+	keiui_edit_record(ui, id, before, before_length, caret, anchor, area->text, area->length);
+
+	/* Succeeded: the text changed. */
+	return KL_FIELD_CHANGED;
 }
 
 /* Carries out one input in a text area: a key, a text to commit, or bytes to delete; reports what happened (KL_FIELD_* bits). */

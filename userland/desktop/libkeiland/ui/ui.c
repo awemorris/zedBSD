@@ -46,6 +46,20 @@
 /* The evdev code of Tab, which moves the focus. */
 #define UI_KEY_TAB		15U
 
+/* The evdev codes of the editing commands' letters (ws177-p013): Z, Y, C, X and V. */
+#define UI_KEY_Z		44U
+#define UI_KEY_Y		21U
+#define UI_KEY_C		46U
+#define UI_KEY_X		45U
+#define UI_KEY_V		47U
+
+/* The most changes a text widget's history keeps (the oldest goes first). */
+#define UI_UNDO_STEPS		100U
+
+/* The FNV-1a hash's start and prime, which stamp a text the history knows. */
+#define UI_HASH_START		0xcbf29ce484222325ULL
+#define UI_HASH_PRIME		0x100000001b3ULL
+
 /*
  * How far round a widget's region a change of the lit widget may draw
  * (pixels: a lit row's ground, a ring, a shadow; BUG-226).
@@ -82,6 +96,37 @@ struct ui_record {
 	struct kl_rect rect;
 	struct kl_scroll *scroll;
 	struct kl_text_touch *touch;
+};
+
+/*
+ * One change of a text widget's text: where it is, the bytes it took out
+ * and those it put in (each allocated), and the caret and the selection's
+ * other end before it.
+ */
+struct ui_undo_step {
+	size_t at;
+	char *removed;
+	size_t removed_length;
+	char *inserted;
+	size_t inserted_length;
+	size_t caret_before;
+	size_t anchor_before;
+};
+
+/*
+ * The history of the text widget last edited (ws177-p013): its id, the
+ * changes (count of them, done of them not taken back), and the hash of
+ * its text after the last one done, which tells a text the application
+ * set itself (the history then no longer applies).  valid is 0 while no
+ * widget has one.
+ */
+struct ui_undo {
+	int valid;
+	uint32_t id;
+	uint64_t hash;
+	struct ui_undo_step steps[UI_UNDO_STEPS];
+	size_t count;
+	size_t done;
 };
 
 /* A widget's identity: its id and index, whether there is one, and its record's flags (KEIUI_*). */
@@ -206,6 +251,16 @@ struct kl_ui {
 	int damage_pending;
 	int damage_whole;
 	struct kl_rect damage;
+
+	/*
+	 * ws177-p013: the window the input is of, with its clipboard's calls
+	 * (kl_ui_window_text ties them; NULL before: the clipboard is then
+	 * none), and the text widgets' history of changes.
+	 */
+	struct kl_window *window;
+	void (*copy)(struct kl_window *window, const char *text, size_t length);
+	size_t (*paste)(struct kl_window *window, char *text, size_t size);
+	struct ui_undo undo;
 };
 
 /*
@@ -244,6 +299,10 @@ static void ui_focus_press(struct kl_ui *ui, const struct ui_record *record, dou
 static const struct ui_record *ui_focus_owner(const struct ui_key *key, const struct kl_ui *ui, double x, double y);
 static int ui_focus_move(struct kl_ui *ui, int backward);
 static int ui_inset_center(struct kl_ui *ui, uint64_t now_us);
+static void ui_undo_forget(struct ui_undo *undo);
+static void ui_undo_drop(struct ui_undo_step *step);
+static uint64_t ui_hash(const char *text, size_t length);
+static int ui_word_byte(char byte);
 
 /*
  * Makes a window's input state.
@@ -296,7 +355,8 @@ kl_ui_destroy(
 	if (ui == NULL)
 		return;
 
-	/* The gestures and the records. */
+	/* The text widgets' history, the gestures and the records. */
+	ui_undo_forget(&ui->undo);
 	if (ui->gesture != NULL)
 		kl_gesture_destroy(ui->gesture);
 	free(ui->shown);
@@ -1251,6 +1311,345 @@ keiui_ui_take_activate(
 }
 
 /*
+ * Tells which editing command a key with its modifiers is (ws177-p013):
+ * Ctrl+Z undo, Ctrl+Shift+Z and Ctrl+Y redo, Ctrl+C copy, Ctrl+X cut,
+ * Ctrl+V paste, Ctrl+Left and Ctrl+Right a word (with Shift too).
+ * Returns KEIUI_EDIT_NONE for any other key.
+ */
+unsigned
+keiui_edit_command(
+	uint32_t code,
+	unsigned modifiers)
+{
+	unsigned shift;
+
+	/* Only keys with Control, without Alt or Super. */
+	if ((modifiers & KL_MOD_CTRL) == 0U)
+		return KEIUI_EDIT_NONE;
+	if ((modifiers & (KL_MOD_ALT | KL_MOD_SUPER)) != 0U)
+		return KEIUI_EDIT_NONE;
+	shift = modifiers & KL_MOD_SHIFT;
+
+	/* Each command's key. */
+	switch (code) {
+	case UI_KEY_Z:
+		if (shift != 0U)
+			return KEIUI_EDIT_REDO;
+		return KEIUI_EDIT_UNDO;
+	case UI_KEY_Y:
+		return KEIUI_EDIT_REDO;
+	case UI_KEY_C:
+		return KEIUI_EDIT_COPY;
+	case UI_KEY_X:
+		return KEIUI_EDIT_CUT;
+	case UI_KEY_V:
+		return KEIUI_EDIT_PASTE;
+	case KL_KEY_LEFT:
+		return KEIUI_EDIT_WORD_LEFT;
+	case KL_KEY_RIGHT:
+		return KEIUI_EDIT_WORD_RIGHT;
+	default:
+		break;
+	}
+
+	/* Not a command. */
+	return KEIUI_EDIT_NONE;
+}
+
+/*
+ * Records a text widget's change in its history: the bytes the change
+ * took out and put in (the text before and after, less what they share at
+ * both ends), with the caret and the selection before it.  A widget other
+ * than the history's, or a text the history does not end with (the
+ * application set it), starts a new history; the changes taken back are
+ * forgotten.  Memory running out forgets the history.
+ */
+void
+keiui_edit_record(
+	struct kl_ui *ui,
+	uint32_t id,
+	const char *before,
+	size_t before_length,
+	size_t caret_before,
+	size_t anchor_before,
+	const char *after,
+	size_t after_length)
+{
+	struct ui_undo *undo;
+	struct ui_undo_step *step;
+	size_t prefix;
+	size_t suffix;
+	size_t index;
+	uint64_t hash;
+
+	/* A new history for another widget, or for a text set apart from it. */
+	undo = &ui->undo;
+	hash = ui_hash(before, before_length);
+	if (!undo->valid || undo->id != id || undo->hash != hash) {
+		ui_undo_forget(undo);
+		undo->valid = 1;
+		undo->id = id;
+	}
+
+	/* What the two texts share at their start, then at their end (not overlapping). */
+	prefix = 0;
+	while (prefix < before_length && prefix < after_length && before[prefix] == after[prefix])
+		prefix++;
+	suffix = 0;
+	while (suffix < before_length - prefix &&
+	       suffix < after_length - prefix &&
+	       before[before_length - 1U - suffix] == after[after_length - 1U - suffix])
+		suffix++;
+
+	/* The same text is no change. */
+	if (before_length - prefix - suffix == 0U && after_length - prefix - suffix == 0U)
+		return;
+
+	/* The changes taken back are forgotten. */
+	for (index = undo->done; index < undo->count; index++)
+		ui_undo_drop(&undo->steps[index]);
+	undo->count = undo->done;
+
+	/* A full history forgets its oldest change. */
+	if (undo->count == UI_UNDO_STEPS) {
+		ui_undo_drop(&undo->steps[0]);
+		memmove(&undo->steps[0], &undo->steps[1], (UI_UNDO_STEPS - 1U) * sizeof(undo->steps[0]));
+		undo->count--;
+	}
+
+	/* The change: where, and the bytes out and in (one more byte each, so that none is of size 0). */
+	step = &undo->steps[undo->count];
+	memset(step, 0, sizeof(*step));
+	step->at = prefix;
+	step->removed_length = before_length - prefix - suffix;
+	step->inserted_length = after_length - prefix - suffix;
+	step->caret_before = caret_before;
+	step->anchor_before = anchor_before;
+	step->removed = malloc(step->removed_length + 1U);
+	step->inserted = malloc(step->inserted_length + 1U);
+	if (step->removed == NULL || step->inserted == NULL) {
+		ui_undo_drop(step);
+		ui_undo_forget(undo);
+		return;
+	}
+
+	/* The bytes it took out and put in. */
+	memcpy(step->removed, before + prefix, step->removed_length);
+	memcpy(step->inserted, after + prefix, step->inserted_length);
+
+	/* Kept, the history now ending with the text after it. */
+	undo->count++;
+	undo->done = undo->count;
+	undo->hash = ui_hash(after, after_length);
+}
+
+/*
+ * Takes the last change done back (redo 0), or does the first one taken
+ * back again (redo 1), on a widget's text of a capacity (with its NUL):
+ * the caret and the selection are as before the change, or after it.
+ * Returns 1 when a change was, 0 when there is none, the history is
+ * another widget's, the text is not the one the history ends with, or the
+ * result would not fit.
+ */
+int
+keiui_edit_undo(
+	struct kl_ui *ui,
+	uint32_t id,
+	int redo,
+	char *text,
+	size_t *length,
+	size_t capacity,
+	size_t *caret,
+	size_t *anchor)
+{
+	struct ui_undo *undo;
+	struct ui_undo_step *step;
+	const char *out;
+	const char *in;
+	size_t out_length;
+	size_t in_length;
+	size_t new_length;
+	uint64_t hash;
+	int differs;
+
+	/* The widget's history, ending with the text it has now. */
+	undo = &ui->undo;
+	if (!undo->valid || undo->id != id)
+		return 0;
+	hash = ui_hash(text, *length);
+	if (hash != undo->hash)
+		return 0;
+
+	/* The change: undo puts back what it took out, redo does it again. */
+	if (redo) {
+		if (undo->done == undo->count)
+			return 0;
+		step = &undo->steps[undo->done];
+		out = step->removed;
+		out_length = step->removed_length;
+		in = step->inserted;
+		in_length = step->inserted_length;
+	} else {
+		if (undo->done == 0U)
+			return 0;
+		step = &undo->steps[undo->done - 1U];
+		out = step->inserted;
+		out_length = step->inserted_length;
+		in = step->removed;
+		in_length = step->removed_length;
+	}
+
+	/* Refuses a text the change does not fit, or that does not have the bytes it takes out. */
+	if (step->at + out_length > *length)
+		return 0;
+	differs = memcmp(text + step->at, out, out_length);
+	if (differs != 0)
+		return 0;
+	new_length = *length - out_length + in_length;
+	if (new_length + 1U > capacity)
+		return 0;
+
+	/* The bytes after the change move, and its bytes go in. */
+	memmove(text + step->at + in_length, text + step->at + out_length, *length - step->at - out_length + 1U);
+	memcpy(text + step->at, in, in_length);
+	*length = new_length;
+
+	/* The caret: as before the change (undo), or after what it put in (redo). */
+	if (redo) {
+		*caret = step->at + in_length;
+		*anchor = *caret;
+		undo->done++;
+	} else {
+		*caret = step->caret_before;
+		*anchor = step->anchor_before;
+		if (*caret > new_length)
+			*caret = new_length;
+		if (*anchor > new_length)
+			*anchor = new_length;
+		undo->done--;
+	}
+
+	/* The history now ends with this text. */
+	undo->hash = ui_hash(text, *length);
+
+	/* Succeeded: the change was taken back or done again. */
+	return 1;
+}
+
+/* Puts a text on the window's clipboard; without a window the text goes nowhere. */
+void
+keiui_edit_copy(
+	struct kl_ui *ui,
+	const char *text,
+	size_t length)
+{
+	/* No window tied to the input. */
+	if (ui->window == NULL || ui->copy == NULL)
+		return;
+
+	/* The window's clipboard. */
+	ui->copy(ui->window, text, length);
+}
+
+/*
+ * Reads the window's clipboard's text into a buffer of a size, ending it
+ * with a NUL.  Returns its length (0 without a window or a text).
+ */
+size_t
+keiui_edit_paste(
+	struct kl_ui *ui,
+	char *text,
+	size_t size)
+{
+	size_t length;
+
+	/* Nothing yet. */
+	if (size == 0U)
+		return 0;
+	text[0] = '\0';
+
+	/* No window tied to the input. */
+	if (ui->window == NULL || ui->paste == NULL)
+		return 0;
+
+	/* The clipboard's bytes, as many as fit with the NUL. */
+	length = ui->paste(ui->window, text, size - 1U);
+	if (length > size - 1U)
+		length = size - 1U;
+	text[length] = '\0';
+
+	/* Succeeded: the text. */
+	return length;
+}
+
+/*
+ * Gives the start of the word before an offset of a text (forward 0: past
+ * the spaces and signs before it, then the word), or the end of the word
+ * after it (forward 1).  A word is letters, digits, underscores and any
+ * byte of a character beyond ASCII, so the offset given is never inside a
+ * character.
+ */
+size_t
+keiui_edit_word(
+	const char *text,
+	size_t length,
+	size_t at,
+	int forward)
+{
+	int word;
+
+	/* Forward: past what is not a word, then past the word. */
+	if (forward) {
+		while (at < length) {
+			word = ui_word_byte(text[at]);
+			if (word)
+				break;
+			at++;
+		}
+		while (at < length) {
+			word = ui_word_byte(text[at]);
+			if (!word)
+				break;
+			at++;
+		}
+
+		/* The end of the word. */
+		return at;
+	}
+
+	/* Backward: before what is not a word, then before the word. */
+	while (at > 0U) {
+		word = ui_word_byte(text[at - 1U]);
+		if (word)
+			break;
+		at--;
+	}
+	while (at > 0U) {
+		word = ui_word_byte(text[at - 1U]);
+		if (!word)
+			break;
+		at--;
+	}
+
+	/* The start of the word. */
+	return at;
+}
+
+/* Ties a window's input to its window and its clipboard's calls (kl_ui_window_text, text-input.c). */
+void
+keiui_ui_set_window(
+	struct kl_ui *ui,
+	struct kl_window *window,
+	void (*copy)(struct kl_window *, const char *, size_t),
+	size_t (*paste)(struct kl_window *, char *, size_t))
+{
+	/* The window and its calls. */
+	ui->window = window;
+	ui->copy = copy;
+	ui->paste = paste;
+}
+
+/*
  * Reports the widget with the focus.  Returns 1 with its id and index, 0
  * when no widget has it.
  */
@@ -2151,5 +2550,87 @@ ui_scroll_shown(
 	}
 
 	/* Not among them. */
+	return 0;
+}
+
+/* Forgets a text widget's history: each change's bytes, and the widget. */
+static void
+ui_undo_forget(
+	struct ui_undo *undo)
+{
+	size_t index;
+
+	/* Each change kept. */
+	for (index = 0; index < undo->count; index++)
+		ui_undo_drop(&undo->steps[index]);
+
+	/* No history. */
+	undo->count = 0;
+	undo->done = 0;
+	undo->valid = 0;
+	undo->hash = 0;
+}
+
+/* Frees a change's bytes. */
+static void
+ui_undo_drop(
+	struct ui_undo_step *step)
+{
+	/* The bytes out and in. */
+	free(step->removed);
+	free(step->inserted);
+	step->removed = NULL;
+	step->inserted = NULL;
+}
+
+/* Gives the FNV-1a hash of a text, which tells the history's text from another. */
+static uint64_t
+ui_hash(
+	const char *text,
+	size_t length)
+{
+	uint64_t hash;
+	size_t index;
+
+	/* Each byte, then the length. */
+	hash = UI_HASH_START;
+	for (index = 0; index < length; index++) {
+		hash ^= (unsigned char)text[index];
+		hash *= UI_HASH_PRIME;
+	}
+
+	/* The length, so that texts of zeros differ. */
+	hash ^= (uint64_t)length;
+	hash *= UI_HASH_PRIME;
+
+	/* The hash. */
+	return hash;
+}
+
+/* Tells whether a byte is of a word: a letter, a digit, an underscore, or a byte of a character beyond ASCII. */
+static int
+ui_word_byte(
+	char byte)
+{
+	unsigned char value;
+
+	/* Beyond ASCII. */
+	value = (unsigned char)byte;
+	if (value >= 0x80U)
+		return 1;
+
+	/* A letter or a digit. */
+	if (value >= 'a' && value <= 'z')
+		return 1;
+	if (value >= 'A' && value <= 'Z')
+		return 1;
+	if (value >= '0' && value <= '9')
+		return 1;
+
+	/* The underscore. */
+	if (value == '_')
+		return 1;
+
+	/* Not a word's. */
 	return 0;
 }
