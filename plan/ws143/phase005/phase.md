@@ -641,3 +641,11 @@ p005 を cleared にする条件: i01a〜i03 の T1 の PASS、仕様の値の�
 - Q23: sessiond の hotplug の穴は BUG-264 として立て、i01a の前に P2 の次の世代が再現と直しを行う（login の後の USB キーボードにも効くため優先）。
 - S11 の tshark: btsnoop の外部の照合が要る時に host に入れる（sudo の package の導入は許可の範囲）。
 - Future Work: LED の出力、i2c-hid の乗せ替え（Q1 の判断待ち）を F に記録。
+
+## ユーザーの決定（2026-10-08 朝、クリックの回答）
+
+- Q1: i2c-hid も共有の glue（hid-input）に乗せる（推しと逆）。touchpad の経路の作り替えなので実機の回帰が要る。F-084 は実施へ。
+- Q2: HID_HOST_GET_DEVICE を足す。
+- Q4: ペアリングの後に自動で接続する。
+- Q5: 人が切断した機器からの再接続は断る。
+- B6（p004 の Q4）: account が無ければ bluetoothd は起動しない（暫定のまま確定）。
