@@ -1954,6 +1954,8 @@ main_bar(void)
 		start = main_app.cursor;
 		end = main_app.anchor;
 	}
+
+	/* The text's length. */
 	length = te_buffer_length(&main_app.buffer);
 
 	/* What the text is: the window's clipboard is always there. */

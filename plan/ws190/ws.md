@@ -36,5 +36,5 @@ Queue: q899（P1、2026-10-08 午後、WS189 の drag の後）
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計: kl_field・text area への kl_text_touch の組み込み、popup の部品（位置・画面の端・画面 keyboard との重なり）、Text Editor の popup | in-progress（第 2 版、review 1 を反映、Q1 の判定と §7 の Q1・Q2 待ち） | WS189 |
 | [p002](phase002/phase.md) | libkeiland の欄 | in-progress（実装・host 試験済み、T1 の AAT 待ち） | p001 |
-| p003 | Text Editor | planned | p002（kl_text_bar・kl_text_touch の bar） |
+| [p003](phase003/phase.md) | Text Editor | in-progress（実装・host 試験済み、T1 の AAT 待ち） | p002（kl_text_bar・kl_text_touch の bar） |
 | p004 | 規約の全文の見直し（WS の変えた C） | planned | p002・p003 |
