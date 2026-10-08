@@ -21,12 +21,19 @@
  *   bt agent                    answers the pairings' questions on the
  *                               terminal until it is ended
  *   bt power on|off             Bluetooth on or off for the user (ws143-p006)
+ *   bt connect ADDRESS [TYPE]   connects a bonded HID device (ws143-p005)
+ *   bt disconnect ADDRESS [TYPE]
+ *                               disconnects it (it does not come back by
+ *                               itself until connected again)
+ *   bt status                   the HID devices and their state
  *
- * Changing things (scan, pair, forget, agent) is for root, the seat's user
+ * Changing things (scan, pair, forget, agent, connect, disconnect) is for root, the seat's user
  * and wheel.  It prints the daemon's lines as they are, then one line the
  * tests read: "BT SHOW state=WORD", "BT SCAN devices=N", "BT PAIR
  * result=paired|error", "BT FORGET result=ok|error", "BT BONDS bonds=N" or
- * "BT POWER result=on|off|error".
+ * "BT POWER result=on|off|error", "BT CONNECT result=connected|error
+ * input=/dev/input/eventN|-", "BT DISCONNECT result=ok|error" or "BT STATUS
+ * devices=N open=M".
  * A question ("CONFIRM NUMBER", "CONSENT") is answered from standard input
  * (y for yes, anything else or its end for no).  It exits with 0, 1 when
  * the daemon answered ERROR, or 2 when there is no daemon.
@@ -152,6 +159,41 @@ main(
 		return status;
 	}
 
+	/* bt connect ADDRESS [TYPE] (ws143-p005). */
+	same = strcmp(argv[1], "connect");
+	if (same == 0) {
+		status = bt_device_request("CONNECT", argc, argv, request, sizeof(request));
+		if (status != 0) {
+			bt_usage();
+			return BT_EXIT_USAGE;
+		}
+
+		/* The connection, up to the input device. */
+		status = bt_ask(request, "CONNECT");
+		return status;
+	}
+
+	/* bt disconnect ADDRESS [TYPE] (ws143-p005). */
+	same = strcmp(argv[1], "disconnect");
+	if (same == 0) {
+		status = bt_device_request("DISCONNECT", argc, argv, request, sizeof(request));
+		if (status != 0) {
+			bt_usage();
+			return BT_EXIT_USAGE;
+		}
+
+		/* The disconnection. */
+		status = bt_ask(request, "DISCONNECT");
+		return status;
+	}
+
+	/* bt status (ws143-p005). */
+	same = strcmp(argv[1], "status");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("STATUS", "STATUS");
+		return status;
+	}
+
 	/* bt power on|off (ws143-p006). */
 	same = strcmp(argv[1], "power");
 	if (same == 0 && argc == 3) {
@@ -165,7 +207,7 @@ main(
 	return BT_EXIT_USAGE;
 }
 
-/* Writes "VERB ADDRESS TYPE" for bt pair and bt forget (TYPE bredr unless given); returns 0, or -1 for a misuse. */
+/* Writes "VERB ADDRESS TYPE" for bt pair, forget, connect and disconnect (TYPE bredr unless given); returns 0, or -1 for a misuse. */
 static int
 bt_device_request(
 	const char *verb,
@@ -266,15 +308,20 @@ bt_ask(
 {
 	char line[BTD_LINE_MAX + 1024U];
 	char state[64];
+	char input[64];
 	const char *word;
+	const char *found;
 	FILE *answer;
 	ssize_t written;
 	char *got;
 	unsigned devices;
 	unsigned bonds;
+	unsigned hids;
+	unsigned open;
 	size_t length;
 	int descriptor;
 	int paired;
+	int connected;
 	int failed;
 	int done;
 	int same;
@@ -309,7 +356,11 @@ bt_ask(
 	(void)snprintf(state, sizeof(state), "%s", "unknown");
 	devices = 0U;
 	bonds = 0U;
+	hids = 0U;
+	open = 0U;
+	(void)snprintf(input, sizeof(input), "%s", "-");
 	paired = 0;
+	connected = 0;
 	failed = 0;
 	done = 0;
 	for (;;) {
@@ -354,6 +405,24 @@ bt_ask(
 		same = strncmp(line, "PAIRED ", 7U);
 		if (same == 0)
 			paired = 1;
+
+		/* A CONNECTED line ends a connection well, and names its input device. */
+		same = strncmp(line, "CONNECTED ", 10U);
+		if (same == 0) {
+			connected = 1;
+			found = strstr(line, " input=");
+			if (found != NULL)
+				(void)sscanf(found + 7, "%63s", input);
+		}
+
+		/* A HID line counts, and so does an open one. */
+		same = strncmp(line, "HID ", 4U);
+		if (same == 0) {
+			hids++;
+			found = strstr(line, " state=open ");
+			if (found != NULL)
+				open++;
+		}
 
 		/* A BOND line counts. */
 		same = strncmp(line, "BOND ", 5U);
@@ -425,6 +494,19 @@ bt_ask(
 	same = strcmp(summary, "BONDS");
 	if (same == 0)
 		(void)printf("BT BONDS bonds=%u\n", bonds);
+	same = strcmp(summary, "CONNECT");
+	if (same == 0 && connected)
+		(void)printf("BT CONNECT result=connected input=%s\n", input);
+	if (same == 0 && !connected)
+		(void)printf("BT CONNECT result=error input=-\n");
+	same = strcmp(summary, "DISCONNECT");
+	if (same == 0 && !failed)
+		(void)printf("BT DISCONNECT result=ok\n");
+	if (same == 0 && failed)
+		(void)printf("BT DISCONNECT result=error\n");
+	same = strcmp(summary, "STATUS");
+	if (same == 0)
+		(void)printf("BT STATUS devices=%u open=%u\n", hids, open);
 	same = strcmp(summary, "POWER");
 	if (same == 0 && failed)
 		(void)printf("BT POWER result=error\n");
@@ -453,5 +535,6 @@ bt_usage(
 	/* The commands. */
 	(void)fprintf(stderr,
 		      "usage: bt show | bt scan [SECONDS] | bt devices | bt pair ADDRESS [bredr|le-public|le-random] |\n"
-		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent | bt power on|off\n");
+		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent | bt power on|off |\n"
+		      "       bt connect ADDRESS [TYPE] | bt disconnect ADDRESS [TYPE] | bt status\n");
 }

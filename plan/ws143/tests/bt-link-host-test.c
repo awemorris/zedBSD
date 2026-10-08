@@ -839,6 +839,7 @@ stub_handle(
 {
 	struct hid_stub *stub;
 
+	/* Only what the packet is matters, not its session or length. */
 	(void)session;
 	(void)length;
 
@@ -880,6 +881,7 @@ stub_handoff(
 {
 	struct hid_stub *stub;
 
+	/* The handle and the bond matter, not the address. */
 	(void)address;
 	(void)type;
 
