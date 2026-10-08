@@ -59,7 +59,8 @@
 /*
  * A job: the backend's number, the printer (protocol, host, port, IPP path
  * or LPD queue), the title, the spool file and its size, the order it was
- * accepted in, its thread and whether it was started, and under the
+ * accepted in, the document format sent to an IPP printer (empty for
+ * application/pdf), its thread and whether it was started, and under the
  * daemon's lock whether it is asked to stop, whether it holds one of the
  * sending places (from its start until the printer took it or it ended)
  * and whether it ended.
@@ -74,6 +75,7 @@ struct pd_job {
 	char file[512];
 	uint64_t size;
 	uint64_t order;
+	char format[32];
 	pthread_t thread;
 	int started;
 	int cancel;
