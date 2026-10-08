@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-08 夜 ユーザー（クリックの自由記述、BUG-267）:「一番外側の指が画面端にあれば、ほかの指は画面上のどこにあっても、画面端の2本指スワイプにします。あと、Settingsのスクロールが2本指でできることを確認しました！」→ 端の複数本の指の swipe は、一番外側の指が端の帯にあれば他の指の位置は問わない（P1 の 192 px の制限を外す）。真ん中だけの複数本の swipe は切り替えにしない。
 - 2026-10-08 午後 ユーザー（クリック）: Mail の添付（ws189-p004）より先に **WS143 p006 Bluetooth の desktop**（Settings の頁・system bar・pairing の確認の窓、app → libkeiland → compositor → backend）を P1 で。p004 はその後。（Q1 の推奨は WS083 Vulkan Video だった）
 - 2026-10-08 午後 ユーザー（クリック）: WS189 の DnD で、drop の前の wl_data_offer.receive を compositor が空にする（データは落とした窓にだけ渡す。drop の前に中身を読む GTK4 などは空を読む）→「これでよい」。ws189-p001 は Q1 の判定で cleared。
 - 2026-10-08 朝 ユーザー:「/dev/hid-hostは、/dev/input/bridgeに変更し、/dev/bt0は、/dev/bluetooth0に変更できますか？」→ クリックの回答「揃える」: node を `/dev/input/bridge`・`/dev/bluetoothN` に。UAPI も揃える（include/uapi/hid-host.h → input-bridge.h、HID_HOST_* → INPUT_BRIDGE_*、struct も input_bridge_*）。bluetooth.h と BT_IOC_* は元から Bluetooth の名前なのでそのまま。P2 が i01c の前に行う。
