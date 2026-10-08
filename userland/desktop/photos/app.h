@@ -126,6 +126,18 @@ struct ph_view {
 	uint64_t notice_until;
 	int glass;
 	int quit;
+
+	/*
+	 * A drag of a photo out of the window (ws189-p003): a press held on a
+	 * cell or on the photo shown whole arms it (the photo, where the
+	 * pointer was, and the frame that saw the press held); far enough
+	 * away it becomes the compositor's drag (main.c).
+	 */
+	int drag_armed;
+	long drag_photo;
+	double drag_press_x;
+	double drag_press_y;
+	uint64_t drag_frame;
 };
 
 /*
@@ -169,5 +181,6 @@ int ph_view_tick(struct ph_view *view, uint64_t now_us);
 void ph_view_draw(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, uint64_t now_us);
 size_t ph_view_panels(const struct ph_view *view, int width, int height, struct kl_glass_panel *panels, size_t capacity);
 void ph_view_notice(struct ph_view *view, const char *message, uint64_t now_us);
+long ph_view_drag_check(struct ph_view *view, double x, double y);
 
 #endif

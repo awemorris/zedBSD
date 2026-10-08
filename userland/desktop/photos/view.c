@@ -87,6 +87,10 @@
 #define VIEW_ID_PREVIOUS	11U
 #define VIEW_ID_NEXT		12U
 #define VIEW_ID_IMPORT		13U
+#define VIEW_ID_PICTURE		14U
+
+/* How far a press held on a photo moves before the photo is dragged out of the window (pixels, ws189-p003). */
+#define VIEW_DRAG_DISTANCE	8
 #define VIEW_ID_CARD_ALBUM	1000U
 #define VIEW_ID_CARD_NAME	15U
 #define VIEW_ID_CARD_NEW	16U
@@ -151,6 +155,7 @@ static void view_keep(struct ph_view *view);
 static void view_drop_thumbs(struct ph_view *view);
 static void view_card(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, uint64_t now_us);
 static void view_add_to(struct ph_view *view, size_t album, uint64_t now_us);
+static void view_drag_arm(struct ph_view *view, struct kl_ui *ui, long photo);
 
 /*
  * Makes the view's state: the timeline shown, nothing chosen or open, a
@@ -666,6 +671,35 @@ ph_view_notice(
 	/* The words and until when. */
 	(void)snprintf(view->notice, sizeof(view->notice), "%s", message);
 	view->notice_until = now_us + VIEW_NOTICE_US;
+}
+
+/*
+ * Tells whether the pointer moved far enough from a press held on a photo
+ * for the photo to be dragged out of the window (ws189-p003): the photo,
+ * once (the press is spent), or -1.
+ */
+long
+ph_view_drag_check(
+	struct ph_view *view,
+	double x,
+	double y)
+{
+	double dx;
+	double dy;
+
+	/* A press held in the last frame drawn. */
+	if (!view->drag_armed || view->drag_frame != view->frame)
+		return -1;
+
+	/* Far enough. */
+	dx = x - view->drag_press_x;
+	dy = y - view->drag_press_y;
+	if (dx * dx + dy * dy < (double)(VIEW_DRAG_DISTANCE * VIEW_DRAG_DISTANCE))
+		return -1;
+
+	/* Succeeded: the photo, the press spent. */
+	view->drag_armed = 0;
+	return view->drag_photo;
 }
 
 /* Lays out the lists at the left and the grid at the right; on glass, as cards with a gap between. */
@@ -1252,8 +1286,10 @@ view_grid(
 		if (cell_rect.y + cell < list.y || cell_rect.y > list.y + list.height)
 			continue;
 
-		/* Its input: a click chooses, a double click or a tap shows it whole. */
+		/* Its input: a click chooses, a double click or a tap shows it whole, a press held may become a drag out (ws189-p003). */
 		hit = kl_ui_hit(ui, VIEW_ID_CELL, (uint32_t)indices[index], &cell_rect);
+		if ((hit & KL_HIT_ACTIVE) != 0U)
+			view_drag_arm(view, ui, (long)indices[index]);
 		if ((hit & KL_HIT_CLICKED) != 0U)
 			view->chosen = (long)indices[index];
 		if ((hit & KL_HIT_CLICKED) != 0U && (hit & (KL_HIT_DOUBLE | KL_HIT_TOUCHED)) != 0U)
@@ -1446,6 +1482,8 @@ view_whole(
 	const struct kl_image *image;
 	struct kl_rect whole;
 	struct kl_rect button;
+	struct kl_rect picture_rect;
+	unsigned hit;
 	size_t *indices;
 	size_t count;
 	size_t shown;
@@ -1502,6 +1540,15 @@ view_whole(
 		draw_height = (int)((double)image->height * scale);
 		kl_canvas_image(style->canvas, image, (float)((width - draw_width) / 2), (float)(VIEW_TOP + (area_height - draw_height) / 2), (float)draw_width,
 		    (float)draw_height, 0.0f, 1.0f);
+
+		/* A press held on the picture may become a drag of the photo out of the window (ws189-p003). */
+		picture_rect.x = (width - draw_width) / 2;
+		picture_rect.y = VIEW_TOP + (area_height - draw_height) / 2;
+		picture_rect.width = draw_width;
+		picture_rect.height = draw_height;
+		hit = kl_ui_hit(ui, VIEW_ID_PICTURE, (uint32_t)photo, &picture_rect);
+		if ((hit & KL_HIT_ACTIVE) != 0U)
+			view_drag_arm(view, ui, photo);
 	} else if (view->picture_failed) {
 		(void)kl_text_draw(style->text, style->canvas, width / 2 - 120, height / 2, "This photo cannot be shown.", strlen("This photo cannot be shown."),
 		    VIEW_TEXT_NAME, 0, VIEW_COLOR_PALE);
@@ -1882,4 +1929,29 @@ view_add_to(
 	view->save = 1;
 	(void)snprintf(words, sizeof(words), "Added to %s", albums[album].name);
 	ph_view_notice(view, words, now_us);
+}
+
+/* Notes a press held on a photo: where the pointer was when it was first seen held (a drag starts from there). */
+static void
+view_drag_arm(
+	struct ph_view *view,
+	struct kl_ui *ui,
+	long photo)
+{
+	double x;
+	double y;
+
+	/* The same press seen again: only its frame. */
+	if (view->drag_armed && view->drag_photo == photo && view->drag_frame + 1U >= view->frame) {
+		view->drag_frame = view->frame;
+		return;
+	}
+
+	/* A new press. */
+	kl_ui_pointer(ui, &x, &y);
+	view->drag_armed = 1;
+	view->drag_photo = photo;
+	view->drag_press_x = x;
+	view->drag_press_y = y;
+	view->drag_frame = view->frame;
 }
