@@ -105,6 +105,7 @@ static void hid_ended(struct btd_hid *hid, struct btd_hid_device *device, const 
 static void hid_close_bridge(struct btd_hid_device *device);
 static void hid_drop(struct btd_hid *hid, struct btd_hid_device *device, int unplug);
 static void hid_page(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_page_scan(struct btd_hid *hid);
 static void hid_retry_later(struct btd_hid_device *device, uint64_t now);
 static void hid_answer(struct btd_hid *hid, struct btd_hid_device *device, const char *line);
 static void hid_connected_line(const struct btd_hid *hid, const struct btd_hid_device *device, char *line, size_t size);
@@ -159,7 +160,6 @@ btd_hid_refresh(
 	static struct btd_bond bonds[HID_BONDS_MAX];
 	struct btd_hid_device *device;
 	struct btd_hidcache record;
-	uint8_t scan[1];
 	unsigned count;
 	unsigned index;
 	unsigned found;
@@ -205,13 +205,9 @@ btd_hid_refresh(
 	/* The keys read are not kept. */
 	memset(bonds, 0, sizeof(bonds));
 
-	/* Page scan while a device may connect by itself (the controller's answer is not needed to go on). */
-	if (found == 0U || hid->page_scan)
-		return;
-	scan[0] = HID_SCAN_PAGE;
-	error = hid_command(hid, HID_WRITE_SCAN_ENABLE, scan, sizeof(scan));
-	if (error == 0)
-		hid->page_scan = 1;
+	/* Succeeded: page scan while a device may connect by itself. */
+	if (found != 0U)
+		hid_page_scan(hid);
 }
 
 /*
@@ -352,6 +348,28 @@ btd_hid_forget(
 
 	/* Succeeded: a connected device hears the unplug, and the device goes. */
 	hid_drop(hid, device, 1);
+}
+
+/*
+ * Lets a device go before it is paired again (PAIR of a device in the
+ * table, review B7): its link ends, its input device and its record go,
+ * its slot is freed; the pairing's handoff makes it anew.
+ */
+void
+btd_hid_release(
+	struct btd_hid *hid,
+	const uint8_t *address)
+{
+	struct btd_hid_device *device;
+
+	/* Nothing for a device not in the table. */
+	device = hid_find(hid, address);
+	if (device == NULL)
+		return;
+
+	/* Succeeded: its record goes, and the device without an unplug (its bond stays for the pairing). */
+	(void)btd_hidcache_forget(hid->keys_folder, hid->session->address, address, BTD_ADDRESS_BREDR);
+	hid_drop(hid, device, 0);
 }
 
 /*
@@ -677,7 +695,8 @@ btd_hid_handoff(
 		return 0;
 	}
 
-	/* Succeeded: its HID records next. */
+	/* Succeeded: its HID records next; from now on it may connect by itself (section 9.2). */
+	hid_page_scan(hid);
 	hid_sdp_start(hid, device);
 	return 1;
 }
@@ -2012,6 +2031,28 @@ hid_page(
 
 	/* Refused: tried again later. */
 	hid_ended(hid, device, "unreachable");
+}
+
+/* Turns page scan on (once; the controller's refusal is tried again at the next refresh or handoff). */
+static void
+hid_page_scan(
+	struct btd_hid *hid)
+{
+	uint8_t scan[1];
+	int error;
+
+	/* On already. */
+	if (hid->page_scan)
+		return;
+
+	/* Write Scan Enable: page scan only (inquiry scan is the pairing's mode's, D11b). */
+	scan[0] = HID_SCAN_PAGE;
+	error = hid_command(hid, HID_WRITE_SCAN_ENABLE, scan, sizeof(scan));
+	if (error != 0)
+		return;
+
+	/* Succeeded: on. */
+	hid->page_scan = 1;
 }
 
 /*

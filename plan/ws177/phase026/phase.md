@@ -3,7 +3,7 @@
 # ws177-p026: Settings の Notifications の頁（案 A2）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P2）
+Status: cleared（2026-10-08 夜 Q1: T1-461 PASS、許可 0 で denied・popup 無し、1 で posted・popup、頁の switch が設定を切り替える）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: Q1 の投入（2026-10-08 夜、ユーザーの決定「Settings の他の頁と同じ sidebar の 1 項目で良い」、承認済み）
