@@ -118,6 +118,7 @@ main(
 
 	/* The next number is not used again. */
 	(void)kl_backend_print_add(second, KL_BACKEND_PRINTER_IPP, "127.0.0.1", ipp_port, "", &request);
+	(void)take(second, request, &error);
 	count = kl_backend_print_printers(second, printers, KL_BACKEND_PRINTERS_MAX);
 	check("next-id", count == 2U && printers[1].id == 3U, "the new printer is 3");
 	kl_backend_print_close(second);
@@ -216,12 +217,18 @@ take(
 	int *error)
 {
 	uint32_t answered;
+	unsigned changed;
 	unsigned saved;
+	int tries;
 
-	/* Each answer waiting. */
-	while (kl_backend_print_take_result(print, &answered, error, &saved)) {
-		if (answered == request)
-			return 1;
+	/* Each answer waiting; the settings' changes are answered by the writer thread (ws177-p024), so a few updates. */
+	for (tries = 0; tries < 100; tries++) {
+		(void)kl_backend_print_update(print, &changed);
+		while (kl_backend_print_take_result(print, &answered, error, &saved)) {
+			if (answered == request)
+				return 1;
+		}
+		pause_ms(20);
 	}
 	return 0;
 }

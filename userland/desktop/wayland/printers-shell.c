@@ -564,12 +564,20 @@ printers_applied(
 	return KL_SYSTEM_RESULT_FAILED;
 }
 
-/* Tells whether a title keeps the rules: valid UTF-8 (checked loosely), no control character, at most 127 bytes. */
+/*
+ * Tells whether a title keeps the rules (design §2): valid UTF-8 (no
+ * overlong form, no surrogate, nothing past U+10FFFF, no sequence cut
+ * short), no C0, DEL or C1 control character, at most 127 bytes
+ * (ws177-p024: the check was loose before).
+ */
 static int
 printers_title_ok(
 	const char *title)
 {
 	const unsigned char *byte;
+	unsigned long code;
+	unsigned follow;
+	unsigned index;
 	size_t length;
 
 	/* Its length. */
@@ -577,15 +585,49 @@ printers_title_ok(
 	if (length > 127U)
 		return 0;
 
-	/* No C0 or DEL, and no C1 (UTF-8's C2 80 to C2 9F). */
-	for (byte = (const unsigned char *)title; *byte != '\0'; byte++) {
-		if (*byte < 0x20U || *byte == 0x7fU)
+	/* Each character. */
+	for (byte = (const unsigned char *)title; *byte != '\0'; byte += follow + 1U) {
+		/* The first byte: the character's length and its first bits. */
+		if (*byte < 0x80U) {
+			follow = 0;
+			code = *byte;
+		} else if (*byte >= 0xc2U && *byte <= 0xdfU) {
+			follow = 1;
+			code = *byte & 0x1fU;
+		} else if (*byte >= 0xe0U && *byte <= 0xefU) {
+			follow = 2;
+			code = *byte & 0x0fU;
+		} else if (*byte >= 0xf0U && *byte <= 0xf4U) {
+			follow = 3;
+			code = *byte & 0x07U;
+		} else {
+			/* A continuation byte first, an overlong C0 or C1, or past F4. */
 			return 0;
-		if (*byte == 0xc2U && byte[1] >= 0x80U && byte[1] <= 0x9fU)
+		}
+
+		/* The bytes that follow it. */
+		for (index = 1; index <= follow; index++) {
+			if ((byte[index] & 0xc0U) != 0x80U)
+				return 0;
+			code = code << 6 | (byte[index] & 0x3fU);
+		}
+
+		/* An overlong three or four bytes, a surrogate, or past U+10FFFF. */
+		if (follow == 2U && code < 0x800UL)
+			return 0;
+		if (follow == 3U && code < 0x10000UL)
+			return 0;
+		if (code >= 0xd800UL && code <= 0xdfffUL)
+			return 0;
+		if (code > 0x10ffffUL)
+			return 0;
+
+		/* A control character: C0, DEL or C1. */
+		if (code < 0x20UL || (code >= 0x7fUL && code <= 0x9fUL))
 			return 0;
 	}
 
-	/* Clean. */
+	/* Succeeded: the title keeps the rules. */
 	return 1;
 }
 
