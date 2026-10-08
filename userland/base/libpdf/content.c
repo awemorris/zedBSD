@@ -257,6 +257,11 @@ struct content_path {
  * how deep content runs nest (1 for the page's, more inside a form or a
  * Type 3 glyph), scan_saves counts the page's q by their tokens, and the
  * operator being run fills scan_object (scan_pending) when it draws one.
+ * ws177-p032: text_forms counts the levels of form_depth that are forms
+ * (not Type 3 glyphs), so that the text shown in forms alone is noted;
+ * form_serial changes as a form starts or ends, and form_noted_serial is
+ * the one the last form character was noted under (a new one starts a
+ * line).
  */
 struct content_run {
 	struct pdf_document *document;
@@ -274,6 +279,9 @@ struct content_run {
 	unsigned long operators;
 	size_t clip_depth;
 	int form_depth;
+	int text_forms;
+	unsigned long form_serial;
+	unsigned long form_noted_serial;
 	int stopped;
 	unsigned flags;
 	struct pdf_point *scratch;
@@ -488,6 +496,10 @@ static void scan_corners(const double matrix[6], const double corners[8], double
 static int scan_add_stray(struct pdf_scan *scan, size_t offset);
 static void scan_string(struct content_run *run, const unsigned char *bytes, size_t length);
 static void scan_code(struct content_run *run, unsigned code, int single_byte, const double before[6]);
+static void scan_glyph_quad(const struct content_run *run, const double before[6], double quad[8]);
+static int scan_form_here(const struct content_run *run);
+static void scan_form_code(struct content_run *run, unsigned code, int single_byte, const double before[6]);
+static unsigned scan_form_break(const struct content_run *run, const double quad[8]);
 static void scan_show(struct content_run *run, enum content_operator code, size_t start, size_t end, const unsigned char *data);
 static void scan_move(struct content_run *run, enum content_operator code, size_t start, size_t end);
 static void scan_mark(struct content_run *run, size_t start, size_t keyword, size_t end, const unsigned char *data);
@@ -623,6 +635,9 @@ pdf_scan_free(
 	free(scan->moves);
 	free(scan->marks);
 	free(scan->mark_stack);
+	free(scan->form_characters);
+	free(scan->form_quads);
+	free(scan->form_breaks);
 	memset(scan, 0, sizeof(*scan));
 }
 
@@ -2909,6 +2924,7 @@ show_string(
 	int adds;
 	int vertical;
 	int scanned;
+	int form_text;
 	int error;
 
 	/* A string without a usable font is not drawn and does not move. */
@@ -2922,6 +2938,9 @@ show_string(
 	scanned = scan_here(run);
 	if (scanned)
 		scan_string(run, bytes, length);
+
+	/* The text a form shows is noted apart, for the page's text (ws177-p032). */
+	form_text = scan_form_here(run);
 
 	/* A substituted or unreadable font marks the list; a vertical one moves down. */
 	run->flags |= pdf_font_status(state->font);
@@ -2984,9 +3003,11 @@ show_string(
 			advance_text(run, glyph.width * state->font_size + spacing);
 		}
 
-		/* The scan notes the code's characters, where its glyph was (ws128-p004). */
+		/* The scan notes the code's characters, where its glyph was (ws128-p004), the page's own or a form's (ws177-p032). */
 		if (scanned)
 			scan_code(run, code, single_byte, before);
+		if (form_text)
+			scan_form_code(run, code, single_byte, before);
 	}
 
 	/* Paints and clips with the glyphs. */
@@ -3802,6 +3823,10 @@ run_form(
 	run->ignored_saves = 0;
 	run->form_depth++;
 
+	/* A form's level, whose text is noted, and a new run of its text (ws177-p032). */
+	run->text_forms++;
+	run->form_serial++;
+
 	/* Applies the form's matrix, which its patterns are relative to, and clips to its bounding box. */
 	concat_matrix(run->stack[run->depth].ctm, matrix);
 	memcpy(saved_pattern_base, run->pattern_base, sizeof(saved_pattern_base));
@@ -3822,6 +3847,10 @@ run_form(
 	run->base_depth = saved_base;
 	run->ignored_saves = saved_ignored;
 	run->form_depth--;
+
+	/* The form's level ends; what is shown after it starts a new run of text. */
+	run->text_forms--;
+	run->form_serial++;
 
 	/* The caller's operands were the form's name; the form's own are gone with its content. */
 	run->operand_count = 0;
@@ -4742,11 +4771,7 @@ scan_code(
 	struct content_state *state;
 	struct pdf_scan *scan;
 	uint32_t characters[8];
-	double from[6];
-	double to[6];
 	double quad[8];
-	double low;
-	double high;
 	size_t needed;
 	size_t count;
 	size_t at;
@@ -4771,21 +4796,8 @@ scan_code(
 		return;
 	}
 
-	/* The glyph's corners: the text space from a descent to an ascent, from where it starts to where the next starts. */
-	low = (-0.2 * state->font_size) + state->rise;
-	high = (0.8 * state->font_size) + state->rise;
-	memcpy(from, state->ctm, sizeof(from));
-	concat_matrix(from, before);
-	memcpy(to, state->ctm, sizeof(to));
-	concat_matrix(to, run->text_matrix);
-	quad[0] = from[2] * high + from[4];
-	quad[1] = from[3] * high + from[5];
-	quad[2] = to[2] * high + to[4];
-	quad[3] = to[3] * high + to[5];
-	quad[4] = to[2] * low + to[4];
-	quad[5] = to[3] * low + to[5];
-	quad[6] = from[2] * low + from[4];
-	quad[7] = from[3] * low + from[5];
+	/* The glyph's corners. */
+	scan_glyph_quad(run, before, quad);
 
 	/* Each character, with the corners; an unknown one is noted. */
 	for (at = 0; at < count; at++) {
@@ -4795,6 +4807,198 @@ scan_code(
 		memcpy(scan->character_quads + scan->character_count * 8U, quad, sizeof(quad));
 		scan->character_count++;
 	}
+}
+
+/*
+ * Gives the corners of the glyph just shown, in the shown space: the text
+ * space from a descent to an ascent, from where it started (before) to
+ * where the next starts (the text matrix now).
+ */
+static void
+scan_glyph_quad(
+	const struct content_run *run,
+	const double before[6],
+	double quad[8])
+{
+	const struct content_state *state;
+	double from[6];
+	double to[6];
+	double low;
+	double high;
+
+	/* The descent and the ascent, and the two places in the shown space. */
+	state = &run->stack[run->depth];
+	low = (-0.2 * state->font_size) + state->rise;
+	high = (0.8 * state->font_size) + state->rise;
+	memcpy(from, state->ctm, sizeof(from));
+	concat_matrix(from, before);
+	memcpy(to, state->ctm, sizeof(to));
+	concat_matrix(to, run->text_matrix);
+
+	/* Top left, top right, bottom right, bottom left. */
+	quad[0] = from[2] * high + from[4];
+	quad[1] = from[3] * high + from[5];
+	quad[2] = to[2] * high + to[4];
+	quad[3] = to[3] * high + to[5];
+	quad[4] = to[2] * low + to[4];
+	quad[5] = to[3] * low + to[5];
+	quad[6] = from[2] * low + from[4];
+	quad[7] = from[3] * low + from[5];
+}
+
+/* Tells whether the text being shown is a form's, to be noted for the page's text (every level a form, none a Type 3 glyph). */
+static int
+scan_form_here(
+	const struct content_run *run)
+{
+	/* A scan, inside a form. */
+	if (run->scan == NULL)
+		return 0;
+	if (run->form_depth == 0)
+		return 0;
+
+	/* A Type 3 glyph's procedure among the levels: its text is the glyph's picture. */
+	if (run->form_depth != run->text_forms)
+		return 0;
+
+	/* A form's text. */
+	return 1;
+}
+
+/*
+ * Notes the characters one code of a form's shown string stands for, with
+ * the corners of its glyph and what stands before them (ws177-p032); a
+ * failure of memory fails the scan.
+ */
+static void
+scan_form_code(
+	struct content_run *run,
+	unsigned code,
+	int single_byte,
+	const double before[6])
+{
+	struct content_state *state;
+	struct pdf_scan *scan;
+	uint32_t characters[8];
+	double quad[8];
+	unsigned what;
+	size_t total;
+	size_t count;
+	size_t at;
+	int error;
+
+	/* The characters of the code. */
+	state = &run->stack[run->depth];
+	scan = run->scan;
+	error = pdf_font_unicode(run->document, state->font, code, single_byte, characters, sizeof(characters) / sizeof(characters[0]), &count);
+	if (error != 0) {
+		scan->error = error;
+		return;
+	}
+
+	/* A code that stands for nothing adds nothing. */
+	if (count == 0U)
+		return;
+
+	/* Room for them, their corners and what stands before each. */
+	total = scan->form_character_count + count;
+	error = scan_grow((void **)&scan->form_characters, &scan->form_character_capacity, total, sizeof(*scan->form_characters));
+	if (error == 0)
+		error = scan_grow((void **)&scan->form_quads, &scan->form_quad_capacity, total * 8U, sizeof(*scan->form_quads));
+	if (error == 0)
+		error = scan_grow((void **)&scan->form_breaks, &scan->form_break_capacity, total, sizeof(*scan->form_breaks));
+	if (error != 0) {
+		scan->error = error;
+		return;
+	}
+
+	/* The glyph's corners, and what stands before its first character. */
+	scan_glyph_quad(run, before, quad);
+	what = scan_form_break(run, quad);
+	run->form_noted_serial = run->form_serial;
+
+	/* Each character with the corners; the code's others follow its first on the same line. */
+	for (at = 0; at < count; at++) {
+		scan->form_characters[scan->form_character_count] = characters[at];
+		memcpy(scan->form_quads + scan->form_character_count * 8U, quad, sizeof(quad));
+		scan->form_breaks[scan->form_character_count] = (unsigned char)what;
+		scan->form_character_count++;
+		what = PDF_SCAN_FORM_SAME;
+	}
+}
+
+/*
+ * Decides what stands before a form's glyph (PDF_SCAN_FORM_*): the first,
+ * one in another run of a form's text (another form, or the same after a
+ * nested one), or one whose start is more than half its height off the
+ * last one's baseline, or well back along it, starts a line; one that
+ * starts along the line more than a fifth of its size past where the last
+ * ended has a space before it; anything else follows on.
+ */
+static unsigned
+scan_form_break(
+	const struct content_run *run,
+	const double quad[8])
+{
+	const struct pdf_scan *scan;
+	const double *last;
+	double height;
+	double up_x;
+	double up_y;
+	double along_x;
+	double along_y;
+	double length;
+	double gap_x;
+	double gap_y;
+	double across;
+	double ahead;
+	double off;
+
+	/* The first of the page's form text, or the first of another run. */
+	scan = run->scan;
+	if (scan->form_character_count == 0U)
+		return PDF_SCAN_FORM_LINE;
+	if (run->form_noted_serial != run->form_serial)
+		return PDF_SCAN_FORM_LINE;
+
+	/* The glyph's height and its upward direction (bottom left to top left). */
+	up_x = quad[0] - quad[6];
+	up_y = quad[1] - quad[7];
+	height = sqrt(up_x * up_x + up_y * up_y);
+	if (!(height > 1e-9))
+		return PDF_SCAN_FORM_LINE;
+	up_x /= height;
+	up_y /= height;
+
+	/* Its baseline's direction, at a right angle to it. */
+	along_x = up_y;
+	along_y = -up_x;
+	length = sqrt((quad[4] - quad[6]) * (quad[4] - quad[6]) + (quad[5] - quad[7]) * (quad[5] - quad[7]));
+	if (length > 1e-9) {
+		along_x = (quad[4] - quad[6]) / length;
+		along_y = (quad[5] - quad[7]) / length;
+	}
+
+	/* From the last glyph's end on its baseline (its bottom right) to this one's start (its bottom left). */
+	last = scan->form_quads + (scan->form_character_count - 1U) * 8U;
+	gap_x = quad[6] - last[4];
+	gap_y = quad[7] - last[5];
+	across = gap_x * up_x + gap_y * up_y;
+	ahead = gap_x * along_x + gap_y * along_y;
+
+	/* Off the line, or well back along it: a new line. */
+	off = fabs(across);
+	if (off > height / 2.0)
+		return PDF_SCAN_FORM_LINE;
+	if (ahead < -height)
+		return PDF_SCAN_FORM_LINE;
+
+	/* Apart along the line: a space. */
+	if (ahead > height / 5.0)
+		return PDF_SCAN_FORM_SPACE;
+
+	/* On the same line, next to the last. */
+	return PDF_SCAN_FORM_SAME;
 }
 
 /*

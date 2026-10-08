@@ -475,8 +475,15 @@ struct pdf_scan_mark {
  * force where the content starts).  ws128-p004: each character's corners
  * in the shown space (character_quads, eight numbers a character: its
  * code's glyph from the descent to the ascent, the characters of one code
- * sharing them), for the page's text.
+ * sharing them), for the page's text.  ws177-p032: the characters shown
+ * inside the form XObjects the page draws (not inside a Type 3 glyph),
+ * apart from the page's own, which the editor does not read: their corners
+ * as character_quads', and what stands before each (form_breaks:
+ * PDF_SCAN_FORM_*), decided as each is noted.
  */
+#define PDF_SCAN_FORM_SAME	0U
+#define PDF_SCAN_FORM_SPACE	1U
+#define PDF_SCAN_FORM_LINE	2U
 struct pdf_scan {
 	struct pdf_scan_object *objects;
 	size_t count;
@@ -511,6 +518,13 @@ struct pdf_scan {
 	size_t *mark_stack;
 	size_t mark_depth;
 	size_t mark_stack_capacity;
+	uint32_t *form_characters;
+	size_t form_character_count;
+	size_t form_character_capacity;
+	double *form_quads;
+	size_t form_quad_capacity;
+	unsigned char *form_breaks;
+	size_t form_break_capacity;
 };
 
 /* The scan of a page's content (content.c): the objects, and the decoded content they are ranges of. */
