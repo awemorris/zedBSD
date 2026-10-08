@@ -8,7 +8,7 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-- **2026-10-08 夜 再開（N=2）**: P1 = BUG-267 の残り（kernel は直った、compositor の 2 本指の gesture）→ q904 WS143 p005 i02b〜d。P2 = q903 WS177 M の仕上げと T1 の依頼 → WS191 の Linux の kei の ENOTSUP → BUG-269（FAT の書き込みで sshd が止まる）。T1 は依頼が来たら新しい世代で。5330 は main 777f5e3 の image（ユーザーが入れた）、SSH は host key を無視して kei@10.0.30.3（鍵は登録済み）。
+- **2026-10-09 未明（利用制限の後に再開、ユーザーの体制）**: N=2 は P1 と P3。P1 = ベータ2 の全部（UAT のデバッグが最優先、T1-475 の FAIL、BUG-273・272・173・242・120、WS102 p011）と合間のベータ3（WS031・075・068・052・172・095・155・046・004・001（4 LW まで）・126・171・009・026・106・139・094 p009・BUG-255）。P3 = 規約の全文の見直しだけ（Haiku、最初は ws190-p004、Q1 が能力を評価。.claude/agents/p3-conformance-haiku.md は再起動の後に使える、今は conformance-reviewer の model を haiku にして起動）。P2 は止めた。T1 = T1-481 を最優先に 477〜484。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
