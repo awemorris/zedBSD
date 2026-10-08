@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws189-p005 -->
 # ws189-p005: 規約の全文の見直し
 
-Status: uncleared（2026-10-09 Q1 の判定: P3（Haiku low）は自分で cleared と書いたが、依頼した Linux の build と WS189 の host 試験を流しておらず、plan/ws189/tests/host-png-write.c の style-check の指摘 14 が残る。直した clipboard.c・view.c は統合。残り: 試験の file の指摘と、Linux の build・host 試験の確認）
+Status: cleared（2026-10-09 Q1 の判定: P3（Sonnet 5.5 medium）の eeafdec5b、WS189 の行の style-check 0 を Q1 も確かめた、zedBSD・Linux の build 0、host 試験 PASS、protocol.c の段落の移動は動作に関係しない順と確かめた）
 
 Status: 見直し済み、Q1 の判定待ち（2026-10-09 P3 Sonnet が p001〜p004 の C を全文で読み直した。前の Haiku の見直しは uncleared）
 Disposition: normal
