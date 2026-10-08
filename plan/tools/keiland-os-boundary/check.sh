@@ -117,7 +117,12 @@ find userland/desktop -path 'userland/desktop/wayland' -prune \
     -o -path 'userland/desktop/libkeiland-backend*' -prune \
     -o \( -name 'Makefile*' -o -name '*.mk' \) -print |
 while IFS= read -r file; do
-    awk '/libkeiland-backend|userland\/base\/net\// && !/libkeiland-backend[a-z-]*\/Makefile\.(linux|freebsd)/ {print FILENAME ":" FNR ": " $0}' "$file"
+    # A Makefile's comment lines name things without building them; sessiond, the system's session manager, links the
+    # network service's protocol for itself (sleep.c), which is no use of libkeiland-backend (ws188, Q1 2026-10-08).
+    awk -v sessiond="$(case $file in userland/desktop/sessiond/*) echo 1 ;; *) echo 0 ;; esac)" '
+        /^[[:space:]]*#/ {next}
+        /libkeiland-backend/ && !/libkeiland-backend[a-z-]*\/Makefile\.(linux|freebsd)/ {print FILENAME ":" FNR ": " $0; next}
+        /userland\/base\/net\// && sessiond == 0 {print FILENAME ":" FNR ": " $0}' "$file"
 done >> "$work/B3"
 
 # The compositor takes from libkeiland only what D4 allows: the touch motion, the scroller, the gestures, the
