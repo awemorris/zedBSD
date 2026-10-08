@@ -4,7 +4,7 @@
 # reader, ASan and UBSan) prints what the reader finds; the two must be the same.  Then the player's test file
 # sample.mp4 (MPEG-4 Part 2 25 fps and AAC, 20 s) is read: two tracks, 500 video packets, every packet read.
 # Last line: host-mediafile: PASS.
-#   sh plan/ws122/tests/run-host-mediafile.sh
+#   sh plan/tools/media/run-host-mediafile.sh
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 cd "$(dirname -- "$0")/../../.."
@@ -14,9 +14,9 @@ out=build/ws122-host
 mkdir -p "$out/media"
 status=0
 cc -std=gnu89 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -I. \
-    plan/ws122/tests/host-mediafile.c userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
+    plan/tools/media/host-mediafile.c userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c \
     userland/desktop/mediafile/mkv.c userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c -o "$out/host-mediafile" || { echo "host-mediafile: FAIL (build)"; exit 1; }
-python3 plan/ws122/tests/make-media.py "$out/media" || { echo "host-mediafile: FAIL (make-media)"; exit 1; }
+python3 plan/tools/media/make-media.py "$out/media" || { echo "host-mediafile: FAIL (make-media)"; exit 1; }
 
 # Each made file against what it was made with.
 for expected in "$out"/media/*.expected; do
@@ -34,7 +34,7 @@ for expected in "$out"/media/*.expected; do
 done
 
 # The player's sample: two tracks, MPEG-4 Part 2 and AAC, 500 video packets, every packet read to the end.
-UBSAN_OPTIONS=halt_on_error=1 timeout 30 "$out/host-mediafile" plan/ws122/tests/sample.mp4 10000000 > "$out/sample.got" 2>&1
+UBSAN_OPTIONS=halt_on_error=1 timeout 30 "$out/host-mediafile" plan/tools/media/sample.mp4 10000000 > "$out/sample.got" 2>&1
 video=$(grep -c '^PACKET track=0 ' "$out/sample.got")
 audio=$(grep -c '^PACKET track=1 ' "$out/sample.got")
 if grep -q '^TRACK 0 kind=1 codec=6 name=mp4v width=320 height=240' "$out/sample.got" &&
@@ -49,7 +49,7 @@ else
 fi
 
 # ws121-p002: the same file read through a source (mf_open_source) prints the same.
-HOST_MEDIAFILE_SOURCE=1 UBSAN_OPTIONS=halt_on_error=1 timeout 30 "$out/host-mediafile" plan/ws122/tests/sample.mp4 10000000 \
+HOST_MEDIAFILE_SOURCE=1 UBSAN_OPTIONS=halt_on_error=1 timeout 30 "$out/host-mediafile" plan/tools/media/sample.mp4 10000000 \
     > "$out/sample-source.got" 2>&1
 if cmp -s "$out/sample.got" "$out/sample-source.got"; then
 	echo "sample.mp4 through a source: ok"

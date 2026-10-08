@@ -3,7 +3,7 @@
 # ws120-p006: 努力目標 Ogg Vorbis
 
 Parent: [WS120](../ws.md)
-Status: planning
+Status: canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定（m4a＋libavcodec の add-in、p008・p009）で置き換え）（旧: planning）
 Disposition: canceled（2026-10-07 q831: ユーザーの決定（形式は m4a だけ、AAC は libavcodec の add-in、独自の decoder は後）で取り下げ。置き換えは [p008](../phase008/phase.md)・[p009](../phase009/phase.md)。[p001](../phase001/phase.md) の「2026-10-07 の決定と設計」）
 Queue / attempts: none
 Goal: D1 で Ogg Vorbis を選んだ場合、Ogg の container と Vorbis I の decoder を足し、app で再生できるようにする。

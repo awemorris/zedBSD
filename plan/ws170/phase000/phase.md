@@ -2,7 +2,7 @@
 
 # ws170-p000: Phone の app の UI の mock
 
-Status: in-progress（実装・host の PNG・build は済み。QEMU は T1 待ち、夕方の UAT の image に入れるかは Q1）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-177b の撮影の後、p002〜p004 で実装・cleared）（旧: in-progress（実装・host の PNG・build は済み。QEMU は T1 待ち、夕方の UAT の image に入れるかは Q1））
 Disposition: normal
 Parent: [WS170](../ws.md)
 Queue: q743（2026-10-05、P2）

@@ -3,7 +3,7 @@
 
 Phase ID: `ws168-p003`
 Parent: [WS168](../ws.md)
-Status: in-progress（2026-10-07 q834 P2: 実装と host（Linux）の試験 PASS、zedBSD の build warning 0。sandbox_spawn で起こす QEMU の確認は p004 の T1 にまとめる）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-395（p004 の QEMU で sandbox_spawn も通る））（旧: in-progress（2026-10-07 q834 P2: 実装と host（Linux）の試験 PASS、zedBSD の build warning 0。sandbox_spawn で起こす QEMU の確認は p004 の T1 にまとめる））
 Queue: q834（2026-10-07、P2）
 設計: [p001](../phase001/phase.md) §4・§7、判断 H2・H5・H6
 

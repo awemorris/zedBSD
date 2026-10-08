@@ -24,7 +24,7 @@
  *   - the first fields of AVPacket (pts, dts, data, size, flags) and of
  *     AVFrame (data, linesize, extended_data, width, height, nb_samples,
  *     format), whose layout is checked for each major version the add-in
- *     knows (plan/ws122/tests/host-layout.c compiles the check against
+ *     knows (plan/tools/media/host-layout.c compiles the check against
  *     each version's headers).  A major version not in add_versions is
  *     refused: playing then says the version is not supported.
  *

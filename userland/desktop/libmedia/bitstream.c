@@ -21,7 +21,7 @@
  *     they go before each key frame.
  *
  * Everything here works on bytes alone and is tested on the host
- * (plan/ws122/tests/host-bitstream.c).  Moved into libmedia from Video
+ * (once plan/ws122/tests/host-bitstream.c, in the git history).  Moved into libmedia from Video
  * Player (ws177-p031).
  */
 

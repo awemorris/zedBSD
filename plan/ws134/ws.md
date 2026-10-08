@@ -3,7 +3,7 @@
 # WS134: システムモニターのアプリ（Analytic Spatial UI）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p007（T1-066 PASS）・p013（T1-070 PASS）は Q1 の判定、p003 は uncleared（fps・GPU の名前の 2 点）、p010 は規約（ベータ3）と実機の i915 の値）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p007・p013 を cleared。2026-10-08 q910 P2 の照合: p007（T1-066 PASS）・p013（T1-070 PASS）は Q1 の判定、p003 は uncleared（fps・GPU の名前の 2 点）、p010 は規約（ベータ3）と実機の i915 の値）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
@@ -29,11 +29,11 @@ CPU（全体と各 core）、GPU（Util・VRAM・温度・電力、複数）、R
 | [p004](phase004/phase.md) | M3a 操作: tap の展開・長押しの固定・swipe の時間軸・pinch の俯瞰・key/pointer・--calm | cleared（q660、T1-063 PASS） | p003 |
 | [p005](phase005/phase.md) | K1 kernel: CPU ごとの時間 `hw.cputimes`（sysctl の CLI・top の CPU 行、design.md §1.2 の review の反映） | cleared（q661、T1-064 PASS） | — |
 | [p006](phase006/phase.md) | K2 kernel: disk ごとの統計 `hw.diskstats`（物理の whole disk） | cleared（q661、T1-065 PASS） | — |
-| [p007](phase007/phase.md) | K3 kernel: GPU の telemetry の sysctl `hw.gputelemetry`（Guardrail により ioctl にしない。実機の確認は 5330） | in-progress（q661: 実装・build 済み、QEMU の試験待ち。i915 は実機） | — |
+| [p007](phase007/phase.md) | K3 kernel: GPU の telemetry の sysctl `hw.gputelemetry`（Guardrail により ioctl にしない。実機の確認は 5330） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-066 PASS。i915 の実の値は p010 の実機。旧: in-progress（q661: 実装・build 済み、QEMU の試験待ち。i915 は実機）） | — |
 | [p008](phase008/phase.md) | M3a 本物の値（zedBSD の backend の monitor の領域） | cleared（q662、T1-067 PASS） | WS131 p010 までの統合、p005・p006 |
 | [p011](phase011/phase.md) | M3b Linux・FreeBSD の backend の monitor の領域 | cleared（q662、T1-068 PASS） | p008 |
 | [p012](phase012/phase.md) | M3c compositor の `kl_system_monitor_v1`（manager v2、専用の thread、ack と間引き）と libkeiland の `kl_system_monitor_*` | cleared（q662、T1-069 PASS） | p008 |
-| [p013](phase013/phase.md) | M3d app の system の source | in-progress（q662: 実装・host 試験済み、QEMU の試験待ち） | p012 |
+| [p013](phase013/phase.md) | M3d app の system の source | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-070 で monitor-p013 PASS。旧: in-progress（q662: 実装・host 試験済み、QEMU の試験待ち）） | p012 |
 | p009 | K4 kernel: ACPI の thermal・電池（実機、WS131 p005 と調整） | planned（**[BUG-165](../bugs/BUG-165.md) の後**: 5330 の DSDT が読めず、電池・AC の情報が無い。UAT 2026-10-04） | 実機、BUG-165 |
 | [p010](phase010/phase.md) | M4 全文規約・回帰・デモの通し | in-progress（q663: 全文規約の見直しと直し済み、QEMU の回帰を依頼。実機の p003・p007・p009 とデモは実機待ち） | p002〜p009 |
 

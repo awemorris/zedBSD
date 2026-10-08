@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws099-p023 -->
 # ws099-p023: BUG-136（Gears のタイトルバー）と BUG-137（Terminal のタイトルバーの遅れ）
 
-Status: in-progress（q609-i01 は 2026-10-03 03:35 に終了。P2 は cleared を提案、判定は Q1。下の「判定の提案」）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: q609-i01 の P2 の提案のとおり（BUG-136/137））（旧: in-progress（q609-i01 は 2026-10-03 03:35 に終了。P2 は cleared を提案、判定は Q1。下の「判定の提案」））
 Disposition: normal
 Parent: [WS099](../ws.md)
 Bugs: [BUG-136](../../bugs/BUG-136.md)、[BUG-137](../../bugs/BUG-137.md)

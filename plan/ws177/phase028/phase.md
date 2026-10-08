@@ -24,7 +24,7 @@ Origin: [backlog-p2](../backlog-p2.md) の 116〜123 のうち browser の video
 - 壊れ方: sync byte が外れたら次の 2 つ続く sync を探す（読む時も scan の時も）、continuity counter の欠け（lost packet）・長さに足りない PES・16 MiB 超の PES は落として `dropped_count` に数える、同じ counter の重複は捨てる、transport error の印の packet は使わない。
 - seek: 先頭の video track の PES の PTS で file を二分 → その場所から 256 KiB（倍々で先頭まで）戻って、目標以前の最後の key frame の packet から読む。
 - `mediafile.c`: 先頭 584 byte を読んで判定（TS は MP4 の後）、`mediafile-private.h` に `mf_ts_format`・`mf_ts_detect`。3 つの Makefile（libmedia・music・videoplayer）に ts.c。
-- 他の WS の host 試験の source の一覧に ts.c（Q1 の許可 2026-10-08 夜）: plan/ws122/tests/run-host-mediafile.sh・run-host-codec.sh（あわせて `rm -rf` を `fresh_out` に）、plan/ws121/tests/run-host-engine.sh、plan/ws074/tests/host-build.sh。
+- 他の WS の host 試験の source の一覧に ts.c（Q1 の許可 2026-10-08 夜）: plan/tools/media/run-host-mediafile.sh・run-host-codec.sh（あわせて `rm -rf` を `fresh_out` に）、plan/ws121/tests/run-host-engine.sh、plan/ws074/tests/host-build.sh。
 - 範囲の外（記録）: 複数の packet にまたがる PAT・PMT の section、PMT の更新、LATM の AAC・AC-3・Opus in TS、H.265 の SPS の幅・高さ（0 のまま、decoder が知る）、PCR。Files の拡張子の表（`files/mime.c`）に m2ts・mts が無い（".ts" は TypeScript と重なる）→ p031 で Q1 に相談。
 
 ## 確認

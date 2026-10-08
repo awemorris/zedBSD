@@ -4,7 +4,7 @@
 
 Phase ID: `ws173-p001`・`ws173-p002`（2 つの Phase をこの 1 つの記録にまとめた。ws.md の行は Q1 が更新）
 Parent: [WS173](../ws.md)
-Status: in-progress（2026-10-05 P1 generation19 q776。実装・build・host 試験まで、T1 の QEMU の試験待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001・p002 とも T1-200 で aat-p002 PASS）（旧: in-progress（2026-10-05 P1 generation19 q776。実装・build・host 試験まで、T1 の QEMU の試験待ち））
 
 ## 実装
 

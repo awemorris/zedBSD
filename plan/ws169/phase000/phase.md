@@ -2,7 +2,7 @@
 
 # ws169-p000: メーラの app の UI の mock
 
-Status: in-progress（実装・host の PNG・build は済み。QEMU は T1 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-181 の撮影の後、p002〜p005 で実装・cleared）（旧: in-progress（実装・host の PNG・build は済み。QEMU は T1 待ち））
 Disposition: normal
 Parent: [WS169](../ws.md)
 Queue: q744（2026-10-05、P2）

@@ -2,7 +2,7 @@
 # ws174-p003: UEFI loader の key の検出と統合・docs・QEMU の試験
 
 Parent: [WS174](../ws.md)
-Status: uncleared（2026-10-06 T1-213 FAIL。同日 P1 が直して T1 の再試験待ち。T1 の 5 cell が PASS するまで cleared にしない）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-214 の再試行で全 cell PASS。1 回目の C3 の不検出は BUG-272（tracking））（旧: uncleared（2026-10-06 T1-213 FAIL。同日 P1 が直して T1 の再試験待ち。T1 の 5 cell が PASS するまで cleared にしない））
 Disposition: normal
 Queue: Q1 の dispatch（2026-10-05 夜、P1 へ p002・p003・p005）。承認: ユーザー「OKです。ブートローダの仕様変更を実装してください。BIOSは後日でよいです。」
 依存: [ws174-p002](../phase002/phase.md)（`zbl_boot_override_apply()`）

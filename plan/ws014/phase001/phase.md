@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws014-p001 -->
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p011 が実装・cleared）（旧: planning）
 Phase disposition: normal
 Implementation Queue: none for this design Phase
 Standard Vulkan library: [ws030](https://github.com/awemorris/zedBSD/issues/388) completed in q308; p007 adds standard external fd; direct-display selected, EGL canceled

@@ -1,6 +1,6 @@
 # ws099-p038: 最大化（dock）の時に compositor が中身の rect を四方に 4 px ずつ空ける
 
-Status: in-progress（q815、P1。実装と host の確認まで済み、T1 の撮影待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-264 の PNG（8 px）、T1-277 で p134・p076・p132・p137 PASS）（旧: in-progress（q815、P1。実装と host の確認まで済み、T1 の撮影待ち））
 WS: [WS099](../ws.md)
 Related: [ws090-p021](../../ws090/phase021/phase.md)（app の padding を 0）
 

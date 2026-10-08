@@ -3,7 +3,7 @@
 # WS182: 電源ボタンのメニュー（Log Out・Shut Down などを選ぶ）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p001（設計、D1 はユーザーの確認）は Q1 の判定、p002 は T1-377 QEMU PASS で 5320・5330 の短押し・長押しの実機待ち）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared（D1 は 2026-10-08 ユーザー「現状ではオーケーです」）。2026-10-08 q910 P2 の照合: p001（設計、D1 はユーザーの確認）は Q1 の判定、p002 は T1-377 QEMU PASS で 5320・5330 の短押し・長押しの実機待ち）
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O1
@@ -25,7 +25,7 @@ Resume point: p001 の設計を書いた（D1: greeter・lock でメニューを
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: 電源ボタンの事象 → メニュー（App Home の Power Off の dialog の再利用）、greeter・lock の時、WS052 p012 との関係、2 行の事象（押下と解放の 2 つの Notify） | 設計済み（D1 はユーザーの確認待ち） | — |
+| [p001](phase001/phase.md) | 設計: 電源ボタンの事象 → メニュー（App Home の Power Off の dialog の再利用）、greeter・lock の時、WS052 p012 との関係、2 行の事象（押下と解放の 2 つの Notify） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: D1 は 2026-10-08 ユーザー「現状ではオーケーです」。旧: 設計済み（D1 はユーザーの確認待ち）） | — |
 | [p002](phase002/phase.md) | 実装と QEMU・実機（5320・5330）の確認 | uncleared（2026-10-08 T1-377 QEMU PASS。残り: 実機の gap_ms、D1 の確認） | p001 |
 
 ## 決定 2026-10-08（ユーザー）

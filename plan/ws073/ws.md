@@ -3,7 +3,7 @@
 # WS073: Bug Board の掃討（bug sweep）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: Bug の WS。p025・p033・p040・p045 は uncleared（BUG の tracking）、p032 は素の 5330 の確認待ち、p041 は cleared（表を直した）。Bug Board に任せて WS を閉じるかは Q1）（2026-09-27 開始）
+Status: completed（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2.3）で閉じた。残りの uncleared の p025・p033・p040・p045 と p032 の実機の確認は Bug Board の各 ticket に任せる。旧: incomplete）
 Primary Milestone: MG002
 Related Milestones: MG004, MG006
 Objectives: O1
@@ -14,6 +14,12 @@ Resume point: 2026-09-30（p044、P1）: BUG-123 を ws073-p044 で修正（libw
 2026-10-04: 新 [p051](phase051/phase.md)（BUG-135 の残り、P9、q653。journal の commit を閉じる段と書いて flush する段に分け、flush を `ms->lock` の外へ。T1・T2 への試験の依頼はしない（user））。
 2026-10-06: [p055](phase055/phase.md) / BUG-202は通常boot_workerへのdevice初期化移動とamd64 buildまでcleared（source e093bebe、user指定）。同日user「マージしてください。」でmainへ統合、[q779履歴](../history/queue-q779.md)に結果。実機UAT待ち、Bug tracking。
 <!-- awesome-plan-current:end -->
+
+## 完了（2026-10-08、Q1 の判定）
+
+- この WS は Bug Board の掃討の作業の入れ物で、各 bug の状態の正本は [Bug Board](../known-bugs.md) と ticket。閉じた時点で uncleared の Phase: p025（BUG-087、patch は `plan/bugs/BUG-087-wip.patch`）、p033・p040（再現・原因が未確定）、p045（BUG-135、続きは p051）。in-progress の p032 は素の 5330 での確認待ち。これらは ticket の tracking のまま。
+- Phase の directory と `tests/` は Bug の ticket（約 50 件）と `plan/tools/guest/build-full-image.sh`（`tests/kernel-image.sh`）・`include/kern/buf-unjournaled.h`（`tests/host`）から参照されている。完了の規則の削除は、参照の付け替え（再現の script は `plan/tools/` へ）を Q1 が決めてから（下の表と Phase の記録はそれまで残す）。
+
 
 ## 目標
 

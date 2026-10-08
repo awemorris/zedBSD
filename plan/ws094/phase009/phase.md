@@ -2,7 +2,7 @@
 
 # ws094-p009: L3b 100 項目で L3 の数値目標に入れる
 
-Status: uncleared（2026-09-30、QEMU の Venus。(a)(c) は目標に届かない。残りの大部分は Files の外（zdesktop の import と、QEMU の Venus の呼び出し 1 回ごとの約 10 ms）で、進めるには main の判断が要る。実機は未実施）
+Status: uncleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2.1）: ベータ3 の性能の Phase へ回す。ベータ2 の完了の条件から外す）（旧: uncleared（2026-09-30、QEMU の Venus。(a)(c) は目標に届かない。残りの大部分は Files の外（zdesktop の import と、QEMU の Venus の呼び出し 1 回ごとの約 10 ms）で、進めるには main の判断が要る。実機は未実施））
 Disposition: normal
 Parent: [WS094](../ws.md)
 Queue: main（Q1）の依頼（2026-09-30、P4、worktree `.claude/worktrees/ws090-widgets`、branch `wt/ws090`、`git merge main -m WIP` の後）

@@ -4,7 +4,7 @@
 # its own (XDG_DATA_HOME).  Action 31 is FM_ACTION_GO_RECENTS; the button is at the title's right end.
 # ws177-p008: Clear Recents asks first (Enter clears, Esc keeps the list), and Recents with the list stopped
 # (recent.off) says so (RECENTS kept=0, stopped.png).
-#   sh plan/ws148/tests/run-host-files-recents.sh [OUTPUT]   (default build/ws148-files-recents)
+#   sh plan/tools/files/run-host-files-recents.sh [OUTPUT]   (default build/ws148-files-recents)
 # Each run gets a new directory behind OUTPUT (plan/tools/fresh-out.sh); nothing is removed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu

@@ -3,7 +3,7 @@
 # WS099: Keiland の compositor（zdesktop）のデモの基準
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p019（T1-220）は cleared（表を直した）、p023（q609 で P2 が cleared を提案）・p034（p034b cleared）・p035（b〜d、T1-229・231）・p038（T1-264 の PNG、T1-277 PASS）は Q1 の判定待ち。残り: p012（5330 の目視、ユーザー）、p022 の回帰（criteria.sh の C9 の一覧に消えた p072 が残っている、T1-401）、p006（C6、記録だけ））
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p023・p034・p035・p038 を cleared。2026-10-08 q910 P2 の照合: p019（T1-220）は cleared（表を直した）、p023（q609 で P2 が cleared を提案）・p034（p034b cleared）・p035（b〜d、T1-229・231）・p038（T1-264 の PNG、T1-277 PASS）は Q1 の判定待ち。残り: p012（5330 の目視、ユーザー）、p022 の回帰（T1-401 の p072 の FAIL は image が古かったため、criteria.sh の C9 の一覧からは 621197e04 で外れている）、p006（C6、記録だけ））
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2
@@ -36,7 +36,7 @@ WS035 を閉じた後継。ユーザー:「WS099のゴールも、明確な達�
 | C6 | 窓 10 個で、pointer の移動から表示まで中央値 50 ms 以内（実機）。compositor の GPU は WS075 の p023 が担う | WS075 の measure-apps.sh |
 | C7 | すりガラスの上の文字の contrast が、既定と生成の 5 枚の壁紙の全てで 4.5:1 以上（WCAG AA） | 撮った画面の文字と背景の画素から計算する試験 |
 | C8 | Terminal の窓は本体の四隅が直角、title bar は丸い。他の窓は両方丸い | p134 の試験 |
-| C9 | zdesktop の回帰の試験（`plan/ws035/tests/zdesktop-p*.sh` のうち基準の一覧に載せたもの）が全て PASS（[BUG-115](../bugs/BUG-115.md) の p072 を含む） | 一括の回帰の script |
+| C9 | zdesktop の回帰の試験（`plan/ws035/tests/zdesktop-p*.sh` のうち基準の一覧に載せたもの）が全て PASS（[BUG-115](../bugs/BUG-115.md) の p072 は試験の整理で削除され、2026-10-08 に一覧から外れた（621197e04）） | 一括の回帰の script |
 | C10 | 1 時間の連続の操作（窓の開閉を繰り返す試験）で zdesktop が落ちず、`ZWL ERROR` が 0 | 長時間の自動の試験 |
 
 基準に無いものはこの WS で作らない（見つけたら Future Work か Bug Board）。期限は 2026-10-10 ごろ。
@@ -81,8 +81,8 @@ WS035 を閉じた後継。ユーザー:「WS099のゴールも、明確な達�
 | [ws099-p030](phase030/phase.md) | タイトルバーの検索欄・menu の項目のドラッグで窓を動かす（閾値 mouse 2 px・touch 8 px、離してクリック、フォーカス中の欄はキャレットと選択）。2026-10-04 user | cleared（q670、T2-026） | — |
 | [ws099-p031](phase031/phase.md) | 上部の system bar の高さを窓の title bar に揃える（34 → 44 px）（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | WS142・BUG-180 と順を合わせる |
 | [ws099-p032](phase032/phase.md) | system bar の WiFi の icon の Alt+クリックで IP address と統計の情報の popup（2026-10-04 ユーザーの要望） | cleared（2026-10-05 Q1） | ws089-p022 と同じ network の情報の口 |
-| [ws099-p034](phase034/phase.md) | 上部の bar のデザインの調整（黒い地、左の app の icon・中央の仮想 desktop の点・右の状態の icon・時刻を pill にまとめる、2026-10-06 ユーザーの画像 4 枚） | p034b は cleared（2026-10-06 Q1 判定、T1-228）。phase.md の頭の Status は planned のまま（p034 の第 1 版は p034b に置き換わった）→ Q1 の判定待ち（2026-10-08 q910 P2 の照合。旧: planning） | |
-| ws099-p033 | 最大化の中で新しく起動した app の窓を最大化で開く（2026-10-05 午後 UAT、ユーザー「ウィンドウを最大化している状態で、新たにアプリを起動したら、そのアプリは最大化しているのがいいです。タブレットをスクリーン全体で使っているという認識にします。」）。今の desktop で前面の窓が最大化（docked）なら、新しい toplevel の最初の configure を最大化にする。dialog・popup・大きさの固定の窓・全画面は除く。決める点: 「最大化の状態」の判定（前面の窓か、その desktop のどれかか）と、最大化を外した後に開く窓の扱い | planning（P2、q の番号は開始時） |
+| [ws099-p034](phase034/phase.md) | 上部の bar のデザインの調整（黒い地、左の app の icon・中央の仮想 desktop の点・右の状態の icon・時刻を pill にまとめる、2026-10-06 ユーザーの画像 4 枚） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 第 1 版は p034b に置き換わり、p034b は T1-228 で cleared。旧: p034b は cleared（2026-10-06 Q1 判定、T1-228）。phase.md の頭の Status は planned…） | |
+| ws099-p033 | 最大化の中で新しく起動した app の窓を最大化で開く（2026-10-05 午後 UAT、ユーザー「ウィンドウを最大化している状態で、新たにアプリを起動したら、そのアプリは最大化しているのがいいです。タブレットをスクリーン全体で使っているという認識にします。」）。今の desktop で前面の窓が最大化（docked）なら、新しい toplevel の最初の configure を最大化にする。dialog・popup・大きさの固定の窓・全画面は除く。決める点: 「最大化の状態」の判定（前面の窓か、その desktop のどれかか）と、最大化を外した後に開く窓の扱い | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: phase.md の 2026-10-05 Q1 の判定（T1-187b）。旧: planning（P2、q の番号は開始時）） |
 
 ## ベータ1 の到達目標（2026-10-02 計画、fg019）
 

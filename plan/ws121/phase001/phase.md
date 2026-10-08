@@ -2,7 +2,7 @@
 
 # ws121-p001: browser の `<video>` の再生の要件・設計
 
-Status: in-progress（2026-10-05 夜、P2 g16、q775。設計の第 3 版（review 2 回目の条件 a・b・c・e を反映）。ユーザーの判断 U0〜U7 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: U0〜U7 は既定で進め、p002・p004〜p006 が実装・cleared）（旧: in-progress（2026-10-05 夜、P2 g16、q775。設計の第 3 版（review 2 回目の条件 a・b・c・e を反映）。ユーザーの判断 U0〜U7 待ち））
 Disposition: normal
 Parent: [WS121](../ws.md)
 Queue: q775（Q1、2026-10-05）
@@ -44,7 +44,7 @@ Queue: q775（Q1、2026-10-05）
 
 - log: `vp_log`（videoplayer の main.c にある）を `media_set_log(void (*)(void *, const char *), void *)` の hook にする（`-z defs` の link を通す）。videoplayer は今の行（OPEN・SEEK・END・CODEC）を同じ文で出し、WS122 の試験の照合を保つ。
 - decoder の thread の数は引数（videoplayer は今の 0 = FFmpeg が決める、browser は 2）。
-- 変える build: `platform/amd64/vmunix.mk`（libmedia の rule、videoplayer と libbrowser の link と `check-dynamic-elf.py --needed`）、`libbrowser/Makefile` の package の依存、videoplayer の Makefile、WS122 の host 試験（`plan/ws122/tests/run-host-mediafile.sh`・`run-host-codec.sh` の source の path）、`plan/tools/browser-component/run.sh`（host の libbrowser の build）、Linux・FreeBSD の keiland の build（videoplayer がそこにあれば）。
+- 変える build: `platform/amd64/vmunix.mk`（libmedia の rule、videoplayer と libbrowser の link と `check-dynamic-elf.py --needed`）、`libbrowser/Makefile` の package の依存、videoplayer の Makefile、WS122 の host 試験（`plan/tools/media/run-host-mediafile.sh`・`run-host-codec.sh` の source の path）、`plan/tools/browser-component/run.sh`（host の libbrowser の build）、Linux・FreeBSD の keiland の build（videoplayer がそこにあれば）。
 - WS122 の所有の file を動かすので、p002 は WS122 p003 が cleared になってから（WS122 と同じ担当で順に）。
 - 代案: libbrowser に直接 compile（library を増やさない。直しは二重）。
 

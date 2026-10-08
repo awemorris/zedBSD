@@ -2,7 +2,7 @@
 
 # ws159-p001: native のタッチパッドの設計
 
-Status: cleared の判定待ち（2026-10-05 P1 generation17 / q713-i01。設計を書き、Q1 が「このまま p002 へ」と ACK（main に統合）。Q1 の委任: D3・D6 の移動・EVIOCGPROP・D8 の caps）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: Q1 の ACK（2026-10-05）、後続の p003・p004 が cleared）（旧: cleared の判定待ち（2026-10-05 P1 generation17 / q713-i01。設計を書き、Q1 が「このまま p002 へ」と ACK（main に統合）。Q1 の委任: D3・D6 の移動・EVIOCGPROP・D8 の caps））
 Disposition: normal
 Parent: [WS159](../ws.md)
 Queue: q713 / q713-i01（2026-10-05 ユーザーのクリックの回答「ベータ1」、Q1 の投入）。design-reviewer は省く（2026-10-05 ユーザー）。

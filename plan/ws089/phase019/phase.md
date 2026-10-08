@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws089-p019 -->
 # ws089-p019: titlebar の検索欄から Down・Up で app の検索結果へ移る（compositor 側）
 
-Status: planned
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p012 の q805 の compositor の直しで済み、T1-238 PASS）（旧: planned）
 Disposition: normal
 Parent: [WS089](../ws.md)
 

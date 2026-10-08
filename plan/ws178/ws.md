@@ -2,7 +2,7 @@
 
 # WS178: OpenGL を Desktop へ、GLX を X11 server（xserver）へ
 
-Status: incomplete（2026-10-08 q910 P2 の照合: p001 は T1-340 で p005 PASS・x11-p004 の段 3 FAIL（T1-341 で WS178 の前の main でも同じ＝既存）→ Q1 の判定と x11-p004 の段 3 の Bug 化）（2026-10-07 追加、ベータ2、優先度は低い。p001 を P1 が実装、T1 待ち）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p001 を cleared（x11-p004 の段 3 は BUG-273）。2026-10-08 q910 P2 の照合: p001 は T1-340 で p005 PASS・x11-p004 の段 3 FAIL（T1-341 で WS178 の前の main でも同じ＝既存）→ Q1 の判定と x11-p004 の段 3 の Bug 化）（2026-10-07 追加、ベータ2、優先度は低い。p001 を P1 が実装、T1 待ち）
 Master: [master](../master.md)
 Primary Milestone: MG006
 
@@ -22,4 +22,4 @@ Primary Milestone: MG006
 
 | Phase | 内容 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 分割と移動（package・tree・link・menu・config）、build と menuconfig の試験、T1 で zgears・glxtest の回帰 | in-progress（P1、実装と host 確認済み、T1 待ち） | — |
+| [p001](phase001/phase.md) | 分割と移動（package・tree・link・menu・config）、build と menuconfig の試験、T1 で zgears・glxtest の回帰 | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-340 で p005 PASS。x11-p004 の段 3 の FAIL は WS178 の前から（T1-341）で BUG-273（tracking）。旧: in-progress（P1、実装と host 確認済み、T1 待ち）） | — |

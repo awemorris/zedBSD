@@ -2,7 +2,7 @@
 
 # WS181: 窓の docked・floating・最小化の状態、App Home の独立のモード、gesture、整列のメニューと整列モード（UAT 2026-10-07）
 
-Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p010 は cleared（表を直した）、p011 は T1-462 の log PASS で PNG をユーザーが見た後に Q1 の判定。準正常系は WS177 の案 U（p033〜p038、T1-475））（2026-10-07 p001 cleared、p002〜p004 は実装・build・host 試験まで、QEMU は T1 の `plan/ws181/tests/ws181-guest.sh` 待ち）。作成: 2026-10-07 ユーザーの UAT、クリック「ベータ2、UAT として優先」
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p011 はユーザーの返事待ちで保留。2026-10-08 q910 P2 の照合: p001〜p010 は cleared（表を直した）、p011 は T1-462 の log PASS で PNG をユーザーが見た後に Q1 の判定。準正常系は WS177 の案 U（p033〜p038、T1-475））（2026-10-07 p001 cleared、p002〜p004 は実装・build・host 試験まで、QEMU は T1 の `plan/ws181/tests/ws181-guest.sh` 待ち）。作成: 2026-10-07 ユーザーの UAT、クリック「ベータ2、UAT として優先」
 Master: [master](../master.md)
 Primary Milestone: MG006
 

@@ -4,7 +4,7 @@
 
 Phase ID: `ws130-p001`
 Parent: [WS130](../ws.md)
-Status: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §9 の判断（UAPI を含む）の後）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p007 が実装・cleared）（旧: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §9 の判断（UAPI を含む）の後））
 Phase disposition: normal
 Queue: q746（ベータ2 の P1 の列の 9 番目）
 

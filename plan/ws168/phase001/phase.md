@@ -4,7 +4,7 @@
 
 Phase ID: `ws168-p001`
 Parent: [WS168](../ws.md)
-Status: planning（2026-10-05 P1 generation17。設計の第 2 版（ユーザーの review を反映）。code はユーザーの review の後。§8 の判断が要る。2026-10-05 夜: H1〜H7 決定）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: H1〜H7 決定済み、p003・p004 が cleared）（旧: planning（2026-10-05 P1 generation17。設計の第 2 版（ユーザーの review を反映）。code はユーザーの review の後。§8 の判断が要る。2026-10-05 夜: H1〜H7 決定））
 Phase disposition: normal
 Queue: Q1 の 2026-10-05 の指示（第 1 版の設計、続けてユーザーの review に従った第 2 版）
 

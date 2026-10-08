@@ -4,7 +4,7 @@
 
 Phase ID: `ws165-p001`
 Parent: [WS165](../ws.md)
-Status: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §7 の判断（字形の data の license を含む）の後。2026-10-05 夜: H1〜H4 決定）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: H1〜H5 決定済み、p002・p003・p005 が cleared）（旧: planning（2026-10-05 P1 generation17。設計の第 1 版。code は §7 の判断（字形の data の license を含む）の後。2026-10-05 夜: H1〜H4 決定））
 Phase disposition: normal
 Queue: q739（ベータ2 の P1 の列の 7 番目、段 1）
 

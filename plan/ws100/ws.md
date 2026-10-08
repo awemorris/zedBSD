@@ -3,7 +3,7 @@
 # WS100: system bar の音量（icon・slider・確かめの音）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p008 は表の cleared（Q1 2026-09-30）に phase.md を合わせた、p013 は T1-087 PASS で Q1 の判定待ち。残り: p006（5330 の HDA、実機）、p009（L3 の音量の曲線、planned））
+Status: incomplete（2026-10-08 P2: p009（音量の曲線）を実装・host・build、QEMU は T1。2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p013 を cleared。2026-10-08 q910 P2 の照合: p008 は表の cleared（Q1 2026-09-30）に phase.md を合わせた、p013 は T1-087 PASS で Q1 の判定待ち。残り: p006（5330 の HDA、実機）、p009（L3 の音量の曲線、planned））
 Primary Milestone: MG006
 Related Milestones: MG003
 Objectives: O2
@@ -73,7 +73,7 @@ legacy の HDA が 5330 の firmware の設定で無効にされていないか�
 | [ws100-p008](phase008/phase.md) | L3: 確かめの音の遅れの計測と短縮（操作から音の始まりまで 50 ms 以内） | cleared（2026-09-30 Q1 の判断で。P4 は判定の扱いを待って uncleared で報告。QEMU の guest の中の経路（音量の変更から HDA の DMA がその byte を取るまで）の中央値 31〜37 ms・最大 42 ms で 50 ms 以内。host の WAV（QEMU の codec の buffer 42.7 ms と USB の経路を含む）は 106〜111 ms で参考。直しは入れていない。5330 は未実施） | p004 |
 | [ws100-p010](phase010/phase.md) | BUG-153: system bar の slider の click が zdesktop 自身の保存の読み戻しで戻される（50 → 100）のを直す | cleared（2026-10-03 Q1、T1-018） | p004 |
 | [ws100-p012](phase012/phase.md) | BUG-161: 音量の変更のたびに desktop.conf へ書かない。session の間は audiod だけが持ち、session の終わり（Log Out・終了）に zdesktop が一度だけ書く。BUG-153 の読み戻しの仕組みを外す | cleared（T2-009 PASS 3/3） | p004・p005・p010 |
-| [ws100-p013](phase013/phase.md) | BUG-170: slider のドラッグでのフリーズ。確認の音はドラッグの途中で鳴らさず離した時に 1 回（system bar と Settings）。速いドラッグの試験 `volume-bug170.sh` | in-progress（q683、実装済み・T1 の試験待ち） | p004・p005 |
+| [ws100-p013](phase013/phase.md) | BUG-170: slider のドラッグでのフリーズ。確認の音はドラッグの途中で鳴らさず離した時に 1 回（system bar と Settings）。速いドラッグの試験 `volume-bug170.sh` | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-087 PASS 3/3。旧: in-progress（q683、実装済み・T1 の試験待ち）） | p004・p005 |
 
 ## 段の計画（2026-09-30 main 経由のユーザーの方針「広く浅く」: まず動く段をそろえ、磨き込みは段ごとの数値目標の小さな Phase）
 

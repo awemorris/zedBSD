@@ -22,7 +22,7 @@
  * never see half a list and two applications do not lose each other's
  * entries.
  *
- * The user may stop the list (q824, plan/ws148/phase001: Settings'
+ * The user may stop the list (q824, WS148 p001 in the git history: Settings'
  * Storage, "Keep recent items"): a file recent.off beside the list says
  * so, the list is emptied, and kl_recent_add adds nothing until the file
  * is gone.  Files' Recents empties the list with kl_recent_clear.

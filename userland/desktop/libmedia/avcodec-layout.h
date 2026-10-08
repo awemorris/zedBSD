@@ -11,7 +11,7 @@
  * touches, as the order of FFmpeg's public headers gives them for the
  * major versions in avcodec.c's add_versions.  The layout
  * is a fact of FFmpeg's public interface; no FFmpeg code is copied.
- * plan/ws122/tests/host-layout.c compiles a check of these against each
+ * plan/tools/media/host-layout.c compiles a check of these against each
  * version's headers.
  */
 

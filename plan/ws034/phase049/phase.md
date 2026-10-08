@@ -73,5 +73,5 @@ fixture と同じく削除の対象にしてしまい、通っていた runner 2
 
 - 走らせていない 82 本（QEMU・ゲスト・hardware 等）は確かめていない。QEMU を使う runner の一掃は別に行う必要がある
   （起動に時間がかかり、host の表示を止めるものを除く判断が要る）。
-- 一掃で走らせた runner の一部は、tracked の解析 log（`plan/ws029/phase007/analyzer-*.log`、`plan/ws031/phase012/analyzer-gcc.log`）を
+- 一掃で走らせた runner の一部は、tracked の解析 log（`plan/ws029/phase007/analyzer-*.log`（git の履歴、2026-10-08 の WS の完了で削除）、`plan/ws031/phase012/analyzer-gcc.log`）を
   上書きした。元に戻した。
