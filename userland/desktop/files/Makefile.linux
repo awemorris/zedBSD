@@ -12,7 +12,7 @@ KEILAND_LINUX_FILES_SOURCES := userland/desktop/files/main.c \
 	userland/desktop/files/mime.c \
 	userland/desktop/files/places.c \
 	userland/desktop/files/devices.c \
-	userland/desktop/files/mntent/mounts-mntent.c \
+	userland/desktop/files/mounts.c \
 	userland/desktop/files/ui-input.c \
 	userland/desktop/files/ui-list.c \
 	userland/desktop/files/ui-scrollbar.c \

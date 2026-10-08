@@ -43,7 +43,12 @@ static const struct places_folder places_folders[] = {
     {"Music", "Music", KL_ICON_MUSIC},
     {"Movies", "Movies", KL_ICON_MOVIES}};
 
-/* The file systems whose mounts are not shown as places (virtual ones). */
+/*
+ * The file systems whose mounts are not shown as places: the desktop tells
+ * every file system with files (ws188-p004), and memory, overlays and
+ * images are no volume of the user's to show (a tmpfs still keeps its
+ * Trash, trash.c).
+ */
 static const char *const places_hidden_types[] = {
     "tmpfs", "devfs", "proc", "procfs", "sysfs", "devpts", "kernfs", "fdesc", "swap", "bind",
     "cgroup", "cgroup2", "efivarfs", "securityfs", "pstore", "bpf", "tracefs", "debugfs", "mqueue",
@@ -473,7 +478,7 @@ places_mounts(
 	int error;
 	int available;
 
-	/* Acquires the selected OS's real mount enumeration without exposing its native storage. */
+	/* The mounts as the desktop last told them (mounts.c, ws188-p004); none before its first answer. */
 	table = NULL;
 	error = fm_mounts_open(&table);
 	if (error != 0)

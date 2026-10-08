@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p001 -->
 # ws188-p001: 設計: Settings の OS の読みを libkeiland → compositor → backend へ
 
-Status: 設計の完了（Q1 の判定待ち。q891-i01、P2、2026-10-08。第 3 版: 第 1 版の M1〜M8・m1〜m15、第 2 版の MJ1・MJ2・m1〜m12 を反映。Q1 の判断 3 点を受けた）
+Status: cleared（Q1 判定 2026-10-08: 第 3 版を採用、p002・p002a の実装と T1-427・428 の PASS で確かめた）
 Disposition: normal
 Parent: [WS188](../ws.md)
 
@@ -218,3 +218,8 @@ Q1 の判断（2026-10-08）:
 - m10: AAT の manage-users の「一覧に出る」も `USERS list count` の行を待つ。
 - m11: libkeiland の view が約 58 KB 増える（全ての app）。受け入れる（kl_system は heap、app の大きさに比べて小さい）。
 - m12: ws.md の射影は Q1。
+
+
+## Q1 の判定（2026-10-08）
+
+第 3 版を採用。cleared。

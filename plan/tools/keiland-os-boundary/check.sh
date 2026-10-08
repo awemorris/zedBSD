@@ -117,7 +117,12 @@ find userland/desktop -path 'userland/desktop/wayland' -prune \
     -o -path 'userland/desktop/libkeiland-backend*' -prune \
     -o \( -name 'Makefile*' -o -name '*.mk' \) -print |
 while IFS= read -r file; do
-    awk '/libkeiland-backend|userland\/base\/net\// && !/libkeiland-backend[a-z-]*\/Makefile\.(linux|freebsd)/ {print FILENAME ":" FNR ": " $0}' "$file"
+    # A Makefile's comment lines name things without building them; sessiond, the system's session manager, links the
+    # network service's protocol for itself (sleep.c), which is no use of libkeiland-backend (ws188, Q1 2026-10-08).
+    awk -v sessiond="$(case $file in userland/desktop/sessiond/*) echo 1 ;; *) echo 0 ;; esac)" '
+        /^[[:space:]]*#/ {next}
+        /libkeiland-backend/ && !/libkeiland-backend[a-z-]*\/Makefile\.(linux|freebsd)/ {print FILENAME ":" FNR ": " $0; next}
+        /userland\/base\/net\// && sessiond == 0 {print FILENAME ":" FNR ": " $0}' "$file"
 done >> "$work/B3"
 
 # The compositor takes from libkeiland only what D4 allows: the touch motion, the scroller, the gestures, the
@@ -213,8 +218,128 @@ while IFS= read -r file; do
     grep -nE 'keiland/(keiui|keiland-ui)\.h|userland/desktop/keiland([^-a-z.]|$)' "$file" | sed "s|^|$file:|"
 done >> "$work/B5"
 
+# The applications and libkeiland reach the system only through libkeiland's kl_system_* (WS188 p003; Guardrail
+# "app と設定" and "Bluetooth と Display も compositor 経由", 2026-10-08 user): no literal of the system's trees
+# (/dev /proc /sys /run /var /etc), no daemon's socket or name (A1), no local socket (A2), no account or group database,
+# file system size, mount table or sysctl (A3), no process started (A4), no OS or daemon header (A5).  Their own
+# functions are in app-allow.tsv, each with its decision.  The compositor, libkeiland-backend, the system's services
+# (sessiond, printd), the X server and the graphics and compatibility libraries are not applications.  Comments are
+# left out; a literal is looked at only inside its quotes.
+python3 - plan/tools/keiland-os-boundary/app-allow.tsv "$work" <<'PY'
+import os
+import re
+import sys
+
+allow_path = sys.argv[1]
+work = sys.argv[2]
+not_applications = {
+    'wayland', 'sessiond', 'printd', 'xserver', 'libvulkan', 'libvulkan-compat', 'libGL', 'libegl', 'libglesv2',
+    'libwayland', 'libwayland-egl', 'linux-compat', 'freebsd-compat', 'include', 'fonts', 'artwork', 'wallpapers',
+    'locale',
+}
+calls = {
+    'A3': re.compile(r'\b(getpw\w*|getgr\w*|setpwent|endpwent|setgrent|endgrent|statvfs|fstatvfs|statfs|fstatfs|'
+                     r'getfsstat|getmntinfo|getmntent|setmntent|sysctl\w*)\s*\('),
+    'A4': re.compile(r'\b(fork|vfork|execl|execlp|execle|execv|execvp|execve|execvpe|fexecve|posix_spawn|posix_spawnp|'
+                     r'system|popen)\s*\('),
+    'A2': re.compile(r'\b(sockaddr_un|AF_UNIX|AF_LOCAL|PF_UNIX|PF_LOCAL)\b'),
+}
+literal = re.compile(r'^/(dev|proc|sys|run|var|etc)(/|$)|\.sock$|^(netd|audiod|volumed|bluetoothd|sessiond|printd|wpa_supplicant)\b')
+header = re.compile(r'^\s*#\s*include\s*[<"]((uapi|linux|dev)/[^>"]*|sys/sysctl\.h|mntent\.h|userland/base/[^>"]*)[>"]')
+
+# The allowed operations: (check, source, name); a row without its reason fails A1.
+allowed = []
+malformed = []
+with open(allow_path) as table:
+    for line in table:
+        if line.startswith('#') or not line.strip():
+            continue
+        fields = line.rstrip('\n').split('\t')
+        if len(fields) < 4 or not fields[3].strip():
+            malformed.append(f'{allow_path}: a row without its four columns: {line.strip()}')
+            continue
+        allowed.append((fields[0], fields[1], fields[2]))
+
+def is_allowed(check, path, name):
+    for row_check, source, row_name in allowed:
+        if row_check != check:
+            continue
+        if source.endswith('/'):
+            if not path.startswith(source):
+                continue
+        elif path != source:
+            continue
+        if row_name == '*' or row_name == name:
+            return True
+    return False
+
+def strip(text):
+    """The code without comments and with each literal emptied, and the literals with their lines."""
+    code = []
+    literals = []
+    index = 0
+    length = len(text)
+    while index < length:
+        if text.startswith('/*', index):
+            end = text.find('*/', index + 2)
+            end = length if end < 0 else end + 2
+            code.append('\n' * text.count('\n', index, end))
+            index = end
+        elif text.startswith('//', index):
+            end = text.find('\n', index)
+            index = length if end < 0 else end
+        elif text[index] in '"\'':
+            quote = text[index]
+            end = index + 1
+            while end < length and text[end] != quote:
+                if text[end] == '\\':
+                    end += 1
+                end += 1
+            if quote == '"':
+                literals.append((text.count('\n', 0, index) + 1, text[index + 1:end]))
+            code.append(quote + quote)
+            index = end + 1
+        else:
+            code.append(text[index])
+            index += 1
+    return ''.join(code), literals
+
+sources = []
+for name in sorted(os.listdir('userland/desktop')):
+    folder = os.path.join('userland/desktop', name)
+    if not os.path.isdir(folder) or name in not_applications or name.startswith('libkeiland-backend'):
+        continue
+    for directory, _, files in os.walk(folder):
+        for file in sorted(files):
+            if file.endswith(('.c', '.h', '.inc')):
+                sources.append(os.path.join(directory, file))
+
+found = {'A1': list(malformed), 'A2': [], 'A3': [], 'A4': [], 'A5': []}
+for path in sorted(sources):
+    with open(path, errors='replace') as source:
+        text = source.read()
+    code, literals = strip(text)
+    for number, line in enumerate(code.split('\n'), 1):
+        for check, pattern in calls.items():
+            for match in pattern.finditer(line):
+                if not is_allowed(check, path, match.group(1)):
+                    found[check].append(f'{path}:{number}: {match.group(1)}')
+    for number, line in enumerate(text.split('\n'), 1):
+        match = header.match(line)
+        if match and not is_allowed('A5', path, match.group(1)):
+            found['A5'].append(f'{path}:{number}: #include {match.group(1)}')
+    for number, value in literals:
+        if literal.search(value) and not is_allowed('A1', path, value):
+            found['A1'].append(f'{path}:{number}: "{value}"')
+
+for check, lines in found.items():
+    with open(os.path.join(work, check), 'w') as out:
+        for line in lines:
+            out.write(line + '\n')
+PY
+
 # Report every violated condition before returning the aggregate outcome.
-for check in C1 C2 C3 C4 C5 L1 L2 L3 L4 L5 L6 L7 M1 X1 B1 B2 B3 B5 S1; do
+for check in C1 C2 C3 C4 C5 L1 L2 L3 L4 L5 L6 L7 M1 X1 B1 B2 B3 B5 S1 A1 A2 A3 A4 A5; do
     if [ -s "$work/$check" ]; then
         while IFS= read -r detail; do
             printf 'check: %s FAIL %s\n' "$check" "$detail"

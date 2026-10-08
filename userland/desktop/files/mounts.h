@@ -5,11 +5,17 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Defines private mount enumeration without exposing native storage or mount-table APIs. */
+/*
+ * The mounted file systems as the desktop told them (mounts.c, ws188-p004):
+ * a walk over a copy of the last answer, which main.c puts in place.
+ */
 #ifndef FM_MOUNTS_H
 #define FM_MOUNTS_H
 
+#include <stddef.h>
+
 struct fm_mounts;
+struct kl_machine_mount;
 
 /* One current mount record borrows strings until the next iterator read or final close. */
 struct fm_mount {
@@ -23,5 +29,9 @@ int fm_mounts_open(struct fm_mounts **mounts);
 int fm_mounts_next(struct fm_mounts *mounts, struct fm_mount *mount);
 /* Close tolerates NULL and retires only this iterator's native ownership. */
 void fm_mounts_close(struct fm_mounts *mounts);
+/* Puts the desktop's last answer (libkeiland's kl_system_machine_mounts) in place of the mounts known. */
+void fm_mounts_set(const struct kl_machine_mount *list, size_t count);
+/* Tells once whether a walk found the mounts old and wants a new reading (main.c asks the desktop). */
+int fm_mounts_wanted(void);
 
 #endif

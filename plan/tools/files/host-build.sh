@@ -101,8 +101,8 @@ done
 objects="$objects $out/obj/keiland-translate.o"
 
 # files without the window, the presenter, the menus, the titlebar and the glass.
-# The shared mount-table adapter supplies the same real table on the host and zedBSD.
-for file in $src/*.c $src/mntent/*.c; do
+# The mounts are the desktop's answer (mounts.c, ws188-p004): none without a compositor.
+for file in $src/*.c; do
 	case $(basename "$file") in
 	main.c|window.c|present.c|menu.c|titlebar.c|glass.c|dnd.c|canvas.c|text.c|icons.c) continue ;;
 	esac

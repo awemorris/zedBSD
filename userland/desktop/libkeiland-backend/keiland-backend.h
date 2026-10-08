@@ -842,10 +842,13 @@ void kl_backend_monitor_close(struct kl_backend_monitor *monitor);
 #define KL_BACKEND_USER_NAME		64U
 #define KL_BACKEND_USER_FULL_NAME	128U
 #define KL_BACKEND_USER_HOME		256U
+#define KL_BACKEND_MOUNT_PATH		256U
+#define KL_BACKEND_MOUNT_TYPE		32U
 
 /* The most file systems and accounts one reading gives. */
 #define KL_BACKEND_FILESYSTEMS_MAX	8U
 #define KL_BACKEND_USERS_MAX		64U
+#define KL_BACKEND_MOUNTS_MAX		64U
 
 /*
  * The system's names: its version's name (PRETTY_NAME of os-release), the
@@ -890,6 +893,15 @@ struct kl_backend_user {
 };
 
 /*
+ * One mounted file system a user may keep files on (ws188-p004): where it
+ * is mounted and its file system's type.
+ */
+struct kl_backend_mount {
+	char path[KL_BACKEND_MOUNT_PATH];
+	char type[KL_BACKEND_MOUNT_TYPE];
+};
+
+/*
  * Reads the system's names; a value that cannot be read is left empty.
  * Returns 0.
  */
@@ -911,6 +923,21 @@ size_t kl_backend_filesystems_read(struct kl_backend_filesystem *list, size_t ca
  * were left out (no room, or a name that does not fit).
  */
 size_t kl_backend_users_read(struct kl_backend_user *list, size_t capacity, unsigned *skipped);
+
+/*
+ * Reads the mounted file systems (ws188-p004): every mount with files in
+ * it, tmpfs and overlays included (zedBSD's root is an overlay; a user's
+ * own tmpfs keeps a Trash); only the pseudo file systems without files of
+ * their own (the kernel's and the devices' views, control files) are left
+ * out.  The mounts outside the system's trees (/dev, /proc, /sys, /run,
+ * /snap, /var/lib) come first, so a full list loses those last.  Returns 0
+ * with count copied (at most capacity) and skipped left out for want of
+ * room or a path too long, or an errno value when the table could not be
+ * read.  Each operating system reads its own mount table (zedBSD and Linux
+ * the mntent table, FreeBSD getfsstat); only the machine thread reads it
+ * (getmntent's storage is static).
+ */
+int kl_backend_mounts_read(struct kl_backend_mount *list, size_t capacity, size_t *count, unsigned *skipped);
 
 /*
  * The peer of a client's connection (WS135, plan/ws135/design.md section

@@ -18,6 +18,8 @@ ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror \
 	plan/ws188/tests/host-machine.c \
 	userland/desktop/libkeiland-backend/machine/machine.c userland/desktop/libkeiland-backend/machine/filesystems.c \
 	userland/desktop/libkeiland-backend/machine/users.c userland/desktop/wayland/machine-wait.c \
+	userland/desktop/libkeiland-backend/machine/mounts.c userland/desktop/libkeiland-backend/machine/mounts-mntent.c \
+	userland/desktop/files/mounts.c \
 	userland/desktop/libkeiland/system/system-view.c \
 	-o "$out/host-machine"
 timeout 60 "$out/host-machine" "$out"

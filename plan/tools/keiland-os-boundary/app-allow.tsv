@@ -1,0 +1,29 @@
+# The applications' and libkeiland's allowed OS operations (check.sh A1-A5, ws188-p003; Guardrail "app と設定",
+# "Bluetooth と Display も compositor 経由（2026-10-08 ユーザー）").  An application reaches the system only through
+# libkeiland's kl_system_* (the compositor and libkeiland-backend do the OS's part); these are its own functions.
+# Columns, separated by tabs: the check, a source (a file, or a directory ending in /), the name found (a function, a
+# socket word, a literal, an included header; * for any), and why it is allowed (the decision).
+# A1 literal of /dev /proc /sys /run /var /etc, a .sock or a daemon's name  A2 a local socket  A3 the account and
+# group databases, the file systems' sizes and mounts, sysctl  A4 starting a process  A5 an OS or daemon header.
+A1	userland/desktop/preview/	*	the preview's sandbox (2026-10-08 user: an application's exception); make.c's escape test opens /etc/passwd to show the confinement holds
+A3	userland/desktop/preview/	*	the preview's sandbox (2026-10-08 user)
+A4	userland/desktop/preview/	*	the preview's sandbox starts its confined child (2026-10-08 user: preview/*/spawn.c stays the application's)
+A5	userland/desktop/preview/	*	the preview's sandbox: Linux's seccomp headers (linux/confine.c) (2026-10-08 user)
+A2	userland/desktop/libkeiland/instance.c	*	one copy of a program: the programs' own sockets between two starts of the same program (ws089-p016), no daemon
+A3	userland/desktop/libkeiland/settings.c	getpwuid	the program's own settings file (~/.config/keiland/<app>.conf) when $HOME is not set (Guardrail's exception; Q1 2026-10-08)
+A3	userland/desktop/files/dir.c	getpwuid	a file's owner's name in the listing (the file manager's own function; Q1 2026-10-08)
+A3	userland/desktop/files/dir.c	getgrgid	a file's group's name in the listing (Q1 2026-10-08)
+A3	userland/desktop/files/ui-info.c	getpwuid	a file's owner's name in Get Info (Q1 2026-10-08)
+A3	userland/desktop/files/ui-info.c	getgrgid	a file's group's name in Get Info (Q1 2026-10-08)
+A3	userland/desktop/files/ui.c	getpwuid	the name Today greets (the file manager's own window; Q1 2026-10-08)
+A2	userland/desktop/videoplayer/audio.c	*	PENDING (Q1 2026-10-08, ws188-p003): the playback stream to audiod (Video Player, Music and libmedia share it)
+A1	userland/desktop/videoplayer/audio.c	*	PENDING (as above)
+A5	userland/desktop/videoplayer/audio.c	userland/base/audiod/protocol.h	PENDING (as above)
+A4	userland/desktop/settings/main.c	posix_spawn	Settings opens Files at the Welcome's end: a program starting another (ws188-p001 D5; a compositor's start request is F-085)
+A4	userland/desktop/pdfviewer/main.c	posix_spawn	the PDF viewer opens Notes (a program starting another; F-085)
+A4	userland/desktop/files/apps.c	*	Open With: the file manager starts the program chosen for a file, or a terminal (spec §14; F-085)
+A1	userland/desktop/files/apps.c	/dev/null	a started program's standard input and output (Open With)
+A4	userland/desktop/terminal/main.c	*	the terminal runs its shell and the command it is given (the terminal's own function)
+A1	userland/desktop/files/places.c	*	the file manager's places: the system's own trees (/dev /proc /sys /run /var/lib) are not offered as places
+A1	userland/desktop/files/search.c	*	the file manager's search does not go down into /dev /proc /sys /run
+A1	userland/desktop/files/trash.c	*	the Trash: /var and /var/tmp and the system's own trees are not looked through for a volume's Trash

@@ -3,7 +3,7 @@
 # WS188: app の OS の操作を libkeiland → compositor → backend へ移す（Settings の残り）と境界の検査の強化
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: MG007
 Objectives: O2
@@ -34,12 +34,20 @@ Queue: なし
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 設計: 移し先の拡張（system の情報・storage の volume・利用者の一覧・system の言語）、protocol の version、3 OS の backend、design-reviewer | planned | — |
-| p002 | 実装: Settings の About・Storage・Users・Sharing・Welcome・Languages を libkeiland 経由に | planned | p001 |
-| p002a | Files の Today の空き容量（statvfs）を machine の FILESYSTEMS へ（2026-10-08 Q1 の判断） | in-progress | p002 |
-| p003 | 境界の検査の強化（app と libkeiland の literal・socket・getpw*・statvfs・spawn、許可の表） | planned | p002（先に入れると FAIL） |
+| p001 | 設計: 移し先の拡張（system の情報・storage の volume・利用者の一覧・system の言語）、protocol の version、3 OS の backend、design-reviewer | cleared | — |
+| p002 | 実装: Settings の About・Storage・Users・Sharing・Welcome・Languages を libkeiland 経由に | cleared（T1-427） | p001 |
+| p002a | Files の Today の空き容量（statvfs）を machine の FILESYSTEMS へ（2026-10-08 Q1 の判断） | cleared（T1-428） | p002 |
+| p003 | 境界の検査の強化（app と libkeiland の literal・socket・getpw*・statvfs・spawn、許可の表） | cleared | p002（先に入れると FAIL） |
 | p004 | （取りやめ）preview の spawn は app の側の例外（2026-10-08 ユーザー）。p003 の検査の許可の表に preview/*/spawn.c を載せる。Files の起動（posix_spawn）は p001 で compositor の起動の要求にするかを決める | canceled | — |
 
 ## ユーザーの決定（2026-10-08）
 
 preview の sandbox の起動（preview/{zedbsd,linux,freebsd}/spawn.c）は「app の側の例外として残す」。境界の検査の許可の表に載せる。
+
+## ユーザーの決定（2026-10-08 昼）
+
+- Files の mount の表（files/mntent/mounts-mntent.c・files/freebsd/mounts-freebsd.c、Places と各 volume の .Trash）: **kl_system に移す**（kl_system_machine に mount の一覧を足す）→ p004。
+- 再生の音（videoplayer・music・libmedia が audiod に直に流す）: **libkeiland の audio stream の口に移す**（compositor・backend が OS ごとに、zedBSD は audiod、Linux は PipeWire、FreeBSD は OSS）→ 大きいので [WS191](../ws191/ws.md)。
+- Q1 の判断: B3 の既存の FAIL は P2 の案どおり（printd の Makefile の comment の行を見ない、sessiond は system の service なので B3 の userland/base/net/ の規則から外す）。
+
+| p004 | Files の mount の一覧を kl_system_machine の要求へ（Places・.Trash の発見）、許可の表の PENDING の行を外す | in-progress（T1-429〜431 待ち） | p003 |

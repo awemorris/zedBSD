@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws188-p002a -->
 # ws188-p002a: Files の Today の空き容量を desktop の FILESYSTEMS へ
 
-Status: in-progress（q891-i01、P2、2026-10-08。実装・build まで、T1 の依頼は Q1 へ）
+Status: cleared（2026-10-08 Q1、T1-428 PASS）
 Disposition: normal
 Parent: [WS188](../ws.md)
 由来: Q1 の判断（2026-10-08、p001 の M6）「Files の statvfs（Home の空き容量）は machine の FILESYSTEMS で移す小さい Phase（ws188-p002a）を足す（規則に沿って app から system の mount を見ない）」
@@ -21,3 +21,8 @@ Parent: [WS188](../ws.md)
 | keiland-linux all | rc 0、warning 0 |
 | `sh plan/tools/files/host-build.sh` | rc 0 |
 | QEMU（Today の行に「N free」が出る） | 未実施（T1 の依頼） |
+
+
+## Q1 の判定（2026-10-08）
+
+T1-428 PASS: `ZFILES HOME free path=/ available=660127744`・errno=0、Today の画面に「0 files opened today · 660.1 MB free」（PNG を Q1 が目視）。cleared。
