@@ -18,8 +18,14 @@
  *
  * devfs keeps an owner and a mode given to a name, also for a node made
  * again under that name (a keyboard plugged in again).  A node that appears
- * for the first time comes with devfs's own owner, so the loops that wait
- * for the greeter and the session give the devices again every second.
+ * for the first time comes with devfs's own owner.  sessiond hears the
+ * system's events of the input devices and of the USB devices (the smart
+ * card slots) on /dev/system (ws132-p002) and gives the devices again as
+ * soon as one comes (BUG-264: the compositor, which hears the same event,
+ * then finds the node already its user's).  The loops that wait for the
+ * greeter and the session still give them every second, for a kernel
+ * without the events and for the nodes that post none (a display that
+ * attaches late).
  *
  * Giving a device away does not take it from a process that opened it
  * before: there is no revoke in the kernel yet, so the graphical login is
@@ -29,10 +35,14 @@
 #include "sessiond.h"
 
 #include <dirent.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/ioctl.h>
 #include <sys/stat.h>
 #include <unistd.h>
+#include <uapi/system.h>
 
 /* The display devices sessiond looks for: /dev/gpu0 to /dev/gpu3. */
 #define SEAT_GPU_COUNT		4U
@@ -55,8 +65,25 @@
 /* The wheel group, which owns the input devices when no one has the seat. */
 #define SEAT_WHEEL_GID		0
 
+/* The kernel's system device, and the classes of its events that bring or take a seat's device. */
+#define SEAT_SYSTEM_NODE	"/dev/system"
+#define SEAT_EVENT_CLASSES	(KERN_SYSTEM_EVENT_INPUT | KERN_SYSTEM_EVENT_USB)
+
+/* The records one read of the events takes. */
+#define SEAT_EVENT_READ		8U
+
+/*
+ * The descriptor the seat's events are read on: /dev/system, subscribed to
+ * SEAT_EVENT_CLASSES and read without waiting.  -1 when the kernel has no
+ * events or the descriptor failed; the loops' every-second giving is then
+ * the only one.  Opened once at sessiond's start and kept until it ends;
+ * sessiond's one thread uses it.
+ */
+static int seat_events = -1;
+
 static void seat_set(const char *path, uid_t uid, gid_t gid, mode_t mode);
 static void seat_input(const char *prefix, uid_t uid, gid_t gid, mode_t mode);
+static void seat_events_fail(const char *what, int error);
 
 /*
  * Gives the display and the input devices to a user, for that user only,
@@ -94,6 +121,8 @@ sessiond_seat_give(
 			snprintf(path, sizeof(path), "/dev/smartcard%u", index);
 			seat_set(path, 0, SEAT_WHEEL_GID, SEAT_KEY_MODE);
 		}
+
+		/* The login screen's account has the display and the input devices only. */
 		return;
 	}
 
@@ -136,6 +165,111 @@ sessiond_seat_restore(
 		snprintf(path, sizeof(path), "/dev/smartcard%u", index);
 		seat_set(path, 0, SEAT_WHEEL_GID, SEAT_KEY_MODE);
 	}
+}
+
+/*
+ * Subscribes to the system's events of the input and the USB devices, so a
+ * device that comes is given at once.  A kernel without them leaves the
+ * every-second giving alone.
+ */
+void
+sessiond_seat_events_open(
+	void)
+{
+	struct system_event_subscription subscription;
+	int descriptor;
+	int result;
+
+	/* The device, read without waiting and kept from the programs sessiond starts. */
+	descriptor = open(SEAT_SYSTEM_NODE, O_RDONLY | O_NONBLOCK | O_CLOEXEC);
+	if (descriptor < 0) {
+		sessiond_log("SESSIOND SEAT events unavailable errno=%d", errno);
+		return;
+	}
+
+	/* The classes; an older kernel refuses them. */
+	memset(&subscription, 0, sizeof(subscription));
+	subscription.classes = SEAT_EVENT_CLASSES;
+	result = ioctl(descriptor, KERN_SYSTEM_EVENT_SUBSCRIBE, &subscription);
+	if (result != 0) {
+		sessiond_log("SESSIOND SEAT events unavailable errno=%d", errno);
+		(void)close(descriptor);
+		return;
+	}
+
+	/* Succeeded: a device that comes is heard from now on. */
+	seat_events = descriptor;
+	sessiond_log("SESSIOND SEAT events subscribed classes=0x%x", (unsigned)SEAT_EVENT_CLASSES);
+}
+
+/* Reports the descriptor the seat's events come on, -1 for none (the loops poll it). */
+int
+sessiond_seat_events_fd(
+	void)
+{
+	/* The descriptor, or -1. */
+	return seat_events;
+}
+
+/*
+ * Reads every record of the seat's events waiting.  Reports 1 when a
+ * device came, or records were lost (the caller gives the devices again),
+ * and 0 otherwise: a device that went leaves nothing to give.
+ */
+int
+sessiond_seat_events_collect(
+	void)
+{
+	struct system_event events[SEAT_EVENT_READ];
+	ssize_t length;
+	size_t count;
+	size_t index;
+	int changed;
+
+	/* Nothing subscribed. */
+	if (seat_events < 0)
+		return 0;
+
+	/* Every record waiting. */
+	changed = 0;
+	for (;;) {
+		/* A few records; none left ends the pass. */
+		length = read(seat_events, events, sizeof(events));
+		if (length < 0 && (errno == EAGAIN || errno == EINTR))
+			break;
+		if (length < 0) {
+			seat_events_fail("read", errno);
+			break;
+		}
+
+		/* The device does not end, but a descriptor that does is given up. */
+		if (length == 0) {
+			seat_events_fail("end", 0);
+			break;
+		}
+
+		/* Whole records only. */
+		if ((size_t)length % sizeof(events[0]) != 0U) {
+			seat_events_fail("record", EPROTO);
+			break;
+		}
+
+		/* A device that came, or lost records, asks for the devices to be given again. */
+		count = (size_t)length / sizeof(events[0]);
+		for (index = 0; index < count; index++) {
+			if (events[index].class_bit == KERN_SYSTEM_EVENT_OVERFLOW)
+				changed = 1;
+			else if (events[index].action == KERN_SYSTEM_EVENT_ADD)
+				changed = 1;
+		}
+	}
+
+	/* Reports whether the devices are to be given again. */
+	if (changed)
+		return 1;
+
+	/* Succeeded: nothing came. */
+	return 0;
 }
 
 /* Gives one device node an owner and a mode, when the node is there. */
@@ -210,4 +344,16 @@ seat_input(
 
 	/* The listing is done with. */
 	(void)closedir(directory);
+}
+
+/* Gives up the seat's events after a failed read; the every-second giving goes on. */
+static void
+seat_events_fail(
+	const char *what,
+	int error)
+{
+	/* The descriptor goes, and nothing more is heard. */
+	sessiond_log("SESSIOND SEAT events failed what=%s errno=%d", what, error);
+	(void)close(seat_events);
+	seat_events = -1;
 }

@@ -122,7 +122,7 @@ sessiond_session_run(
 	struct sessiond_account *account)
 {
 	struct sessiond_exchange exchange;
-	struct pollfd entry[3];
+	struct pollfd entry[4];
 	char directory[64];
 	pid_t child;
 	pid_t waited;
@@ -131,6 +131,7 @@ sessiond_session_run(
 	int leaving;
 	nfds_t entries;
 	nfds_t sleep_slot;
+	nfds_t seat_slot;
 	int timeout;
 	int busy;
 	int ready;
@@ -225,6 +226,14 @@ sessiond_session_run(
 		entry[sleep_slot].revents = 0;
 		if (entry[sleep_slot].fd >= 0)
 			entries++;
+
+		/* A device plugged in, given below at once (seat.c, BUG-264). */
+		seat_slot = entries;
+		entry[seat_slot].fd = sessiond_seat_events_fd();
+		entry[seat_slot].events = POLLIN;
+		entry[seat_slot].revents = 0;
+		if (entry[seat_slot].fd >= 0)
+			entries++;
 		busy = sessiond_exchange_busy(&exchange);
 		timeout = 1000;
 		if (busy)
@@ -249,6 +258,10 @@ sessiond_session_run(
 		/* The sleep's answer goes to the compositor that asked. */
 		if (ready > 0 && sleep_slot < entries && entry[sleep_slot].revents != 0)
 			sessiond_sleep_collect();
+
+		/* The events of the devices are read; the giving below follows every pass anyway. */
+		if (ready > 0 && seat_slot < entries && entry[seat_slot].revents != 0)
+			(void)sessiond_seat_events_collect();
 
 		/* An attempt under way moves on. */
 		if (control >= 0)

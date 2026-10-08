@@ -86,6 +86,12 @@ long long sessiond_milliseconds(void);
 int sessiond_session_run(struct sessiond *daemon, struct sessiond_account *account);
 void sessiond_seat_give(uid_t uid, gid_t gid, int keys);
 void sessiond_seat_restore(void);
+
+/* The system's events of the seat's devices: a device that comes is given at once (seat.c, BUG-264). */
+void sessiond_seat_events_open(void);
+int sessiond_seat_events_fd(void);
+int sessiond_seat_events_collect(void);
+
 void sessiond_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 /* Ending the machine: the login screen's and a session's POWER (power.c, ws131-p027); nonzero once it is ending. */
