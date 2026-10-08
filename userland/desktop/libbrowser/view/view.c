@@ -2322,6 +2322,8 @@ view_commit_document(
 			if (error != 0)
 				break;
 		}
+
+		/* Destroys the page if prefetch loading failed. */
 		if (error != 0)
 			page_destroy(page);
 	}
@@ -2375,6 +2377,8 @@ view_prefetch_start(
 			location = *(char **)wb_vector_at(&locations, index);
 			free(location);
 		}
+
+		/* Releases the locations vector. */
 		wb_vector_release(&locations);
 		return error;
 	}
@@ -2404,6 +2408,8 @@ view_prefetch_start(
 			error = ENOMEM;
 			continue;
 		}
+
+		/* Initializes the script object with view and location. */
 		script->view = view;
 		script->location = location;
 		wb_buffer_init(&script->bytes);
@@ -2433,6 +2439,8 @@ view_prefetch_start(
 		 */
 		view->prefetch_waiting++;
 	}
+
+	/* Releases the locations vector. */
 	wb_vector_release(&locations);
 
 	/* Without memory the waiting ends: the scripts started are cancelled and the parser reads them. */

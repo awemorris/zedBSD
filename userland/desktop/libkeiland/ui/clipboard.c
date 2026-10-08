@@ -446,6 +446,8 @@ kl_window_receive_drop(
 			break;
 		}
 	}
+
+	/* Closes the read end of the pipe. */
 	close(pipes[0]);
 
 	/* A failure keeps nothing. */
@@ -1291,6 +1293,8 @@ clipboard_drag_free(
 		window->drag_data[index] = NULL;
 		window->drag_lengths[index] = 0;
 	}
+
+	/* Resets the drag type count. */
 	window->drag_count = 0;
 }
 
