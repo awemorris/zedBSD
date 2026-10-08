@@ -3022,6 +3022,10 @@ shell_focus(
 	field->anchor = 0;
 	field->cursor = length;
 	field->box_known = 0;
+
+	/* A search given the keyboard to go on editing (KL_FOCUS_EDIT, ws177-p043) has nothing selected, the cursor at its end. */
+	if (edit != 0U && control->role == KWL_CONTROL_SEARCH)
+		field->anchor = length;
 	field->preedit[0] = '\0';
 	shell_suggest_clear(server);
 

@@ -455,6 +455,28 @@ void pv_app_show_place(struct pv_app *app, const struct pv_place *place, double 
 void pv_app_swipe_end(struct pv_app *app, double velocity, int may_turn);
 void pv_app_go_to(struct pv_app *app, size_t index);
 
+/*
+ * The find field inside the window (ws177-p043): its panel, the field in
+ * it, and where the place's number is written, in window coordinates.
+ */
+struct pv_bar_place {
+	int x;
+	int y;
+	int width;
+	int height;
+	int field_x;
+	int field_y;
+	int field_width;
+	int field_height;
+	int status_x;
+};
+
+/* The find field's panel: its widest, its height, the padding within it, and the room for the place's number. */
+#define PV_BAR_WIDTH		420
+#define PV_BAR_HEIGHT		48
+#define PV_BAR_PADDING		8
+#define PV_BAR_STATUS		110
+
 /* Find and the selection (find.c, ws128-p004). */
 void pv_find_text(struct pv_app *app, const char *query);
 void pv_find_next(struct pv_app *app, int direction);
@@ -471,6 +493,9 @@ int pv_select_word_at(struct pv_app *app, int x, int y);
 int pv_select_handle_at(struct pv_app *app, int x, int y);
 void pv_select_handle_move(struct pv_app *app, int which, int x, int y);
 void pv_select_clear(struct pv_app *app);
+void pv_find_bar_open(struct pv_app *app);
+void pv_find_bar_close(struct pv_app *app);
+void pv_find_bar_place(const struct pv_app *app, struct pv_bar_place *place);
 void pv_thumbnail_range(const struct pv_app *app, size_t *first, size_t *last);
 void pv_thumbnail_place(const struct pv_app *app, size_t index, int *x, int *y, int *width, int *height);
 void pv_password_layout(const struct pv_app *app, int *x, int *y, int *width, int *height);

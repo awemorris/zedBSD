@@ -1600,8 +1600,9 @@ handle_key(
 			pv_app_action(app, PV_ACTION_FIND_NEXT);
 		break;
 	case PV_KEY_ESCAPE:
-		/* The selection and the places found let go. */
+		/* The selection and the places found let go, and the find field inside the window closes (ws177-p043). */
 		pv_find_clear(app);
+		pv_find_bar_close(app);
 		break;
 	default:
 		return;

@@ -463,8 +463,8 @@ pv_select_button(
 		}
 
 		/* Selected (logged). */
-		pv_log("SELECT page=%lu from=%lu to-page=%lu to=%lu", (unsigned long)app->select_page, (unsigned long)app->select_anchor,
-		       (unsigned long)app->select_caret_page, (unsigned long)app->select_caret);
+		pv_log("SELECT page=%lu from=%lu to=%lu to-page=%lu", (unsigned long)app->select_page, (unsigned long)app->select_anchor,
+		       (unsigned long)app->select_caret, (unsigned long)app->select_caret_page);
 		return 1;
 	}
 
@@ -798,7 +798,7 @@ pv_select_copy(
 	free(app->copy_text);
 	app->copy_text = out;
 	app->copy_length = length;
-	pv_log("COPY bytes=%lu unreadable=%lu text=\"%.40s\"", (unsigned long)length, (unsigned long)unreadable, out);
+	pv_log("COPY bytes=%lu text=\"%.40s\" unreadable=%lu", (unsigned long)length, out, (unsigned long)unreadable);
 
 	/* Told when it was cut short. */
 	if (copied_pages < last_page - first_page + 1U) {
@@ -812,6 +812,81 @@ pv_select_copy(
 		(void)snprintf(message, sizeof(message), "%lu characters could not be read", (unsigned long)unreadable);
 		pv_app_message(app, message, FIND_MESSAGE_MS);
 	}
+}
+
+/*
+ * Opens the find field inside the window (ws177-p043: Ctrl+F or Edit >
+ * Find without the titlebar's field) and asks main.c to give it the
+ * keyboard.
+ */
+void
+pv_find_bar_open(
+	struct pv_app *app)
+{
+	/* A document to look in. */
+	if (!app->has_document)
+		return;
+
+	/* Open, with the keyboard asked for (logged). */
+	app->bar_open = 1;
+	app->want_bar_focus = 1;
+	app->dirty = 1;
+	pv_log("FIND bar open");
+}
+
+/*
+ * Closes the find field inside the window (Esc in it): the marks of Find
+ * go with it.
+ */
+void
+pv_find_bar_close(
+	struct pv_app *app)
+{
+	/* Nothing open. */
+	if (!app->bar_open)
+		return;
+
+	/* Closed, the places found no longer marked (logged). */
+	app->bar_open = 0;
+	app->want_bar_focus = 0;
+	app->find_found = 0;
+	app->dirty = 1;
+	pv_log("FIND bar close");
+}
+
+/*
+ * Gives the place of the find field inside the window: its panel at the
+ * top right of the pages' part (window coordinates), and within it the
+ * field and, at its right, the room for the place's number.
+ */
+void
+pv_find_bar_place(
+	const struct pv_app *app,
+	struct pv_bar_place *place)
+{
+	int width;
+
+	/* The panel: at most PV_BAR_WIDTH, within the window less a margin either side. */
+	width = PV_BAR_WIDTH;
+	if (width > app->window_width - 2 * PV_MARGIN)
+		width = app->window_width - 2 * PV_MARGIN;
+	if (width < 0)
+		width = 0;
+	place->x = app->window_width - PV_MARGIN - width;
+	place->y = PV_MARGIN;
+	place->width = width;
+	place->height = PV_BAR_HEIGHT;
+
+	/* The field, the panel less its padding and the number's room. */
+	place->field_x = place->x + PV_BAR_PADDING;
+	place->field_y = place->y + PV_BAR_PADDING;
+	place->field_width = width - 3 * PV_BAR_PADDING - PV_BAR_STATUS;
+	if (place->field_width < 0)
+		place->field_width = 0;
+	place->field_height = PV_BAR_HEIGHT - 2 * PV_BAR_PADDING;
+
+	/* The number, right of the field. */
+	place->status_x = place->field_x + place->field_width + PV_BAR_PADDING;
 }
 
 /*

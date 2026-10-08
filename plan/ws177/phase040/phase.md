@@ -3,7 +3,7 @@
 # ws177-p040: libpdf の頁の文字に form XObject の中の文字を入れる（案 L の 1）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q907 に立てて着手）
+Status: test-wait（T1-474、2026-10-08 夜 Q1）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q907-i01（P1、承認: Q1 の投入「WS177 案 L: PDF Viewer の検索と選択（plan/ws177/phasing-20261008.md の L、backlog-p2 17〜25・41、約 14.5 LW）」）
@@ -35,3 +35,23 @@ Origin: [backlog-p2](../backlog-p2.md) 17 行（WS128 ws128-p004）、[案](../p
   2 つの form（1 つは入れ子、1 つは /Matrix で回した物）と、Type 3 の font の文字）で、form の文字が頁の行の後に出る・入れ子も・
   四隅が /Matrix の通り・Type 3 の glyph の中の文字が出ない・editor の shows の数が変わらない。既存の `plan/ws128/tests/run-host-page-text.sh`。
 - build warning 0（libpdf は C89）、style-check。
+
+## 実装と確認（2026-10-08 夜、P1 q907）
+
+- `userland/base/libpdf/content.c`: `content_run` に `text_forms`・`form_serial`・`form_noted_serial`。`run_form` の出入りで数える。`show_string` の各 code で
+  `scan_form_here`（scan があり、全ての段が form）なら `scan_form_code` が文字・四隅（`scan_glyph_quad`、`scan_code` と共有に切り出した）・前の区切り
+  （`scan_form_break`: 最初・別の form の続き・基準線から字の高さの半分より離れる・字の高さより後ろへ戻る → 行、字の大きさの 1/5 より先 → 空白）を
+  `pdf_scan` の新しい配列（`form_characters`・`form_quads`・`form_breaks`、`internal.h`）に足す。editor の shows・objects は変わらない。
+- `userland/base/libpdf/editor.c`: `pdf_page_text_open` が頁の行の後に `editor_form_text` で form の文字を足す（区切りの空白は四隅が隙間）。`include/libc/pdf.h` の説明。
+- 試験: `plan/ws177/tests/make-find-l.py`（forms.pdf: 頁の行、入れ子の form、30 度回した form、Type 3 の glyph の手続きの中の文字）、
+  `host-pdf-find-l.c` の forms の群（行の並び「Page line|a|Form one|Nested two|after nested a|Turned text|」、glyph の中の「zz」が無い、回した T の
+  基準線が 30 度）。
+
+| コマンド | 結果 |
+| --- | --- |
+| `sh plan/ws177/tests/host-pdf-find-l.sh`（libpdf と PDF Viewer の核、C89 -pedantic、plain と ASan+UBSan） | 両方 `52 passed, 0 failed`、`host-pdf-find-l: PASS` |
+| `sh plan/ws128/tests/run-host-page-text.sh`・`run-host-pdfviewer-find.sh`（既存の回帰） | PASS・PASS |
+| `make -j16 ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat build/p1-uat/bin/pdfviewer build/p1-uat/bin/wayland build/p1-uat/dynamic/libpdf.so` | rc 0、warning 0 |
+| `python3 plan/tools/style-check.py`（変えた file） | 指摘 0（titlebar-shell.c 1830・1838 と menu.c 139 の既存の指摘は変えていない行） |
+
+注釈（/Annots）の文字は範囲の外（libpdf は注釈を描かない。Q1 に報告済み）。未実施: QEMU（T1）。
