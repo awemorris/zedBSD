@@ -1,6 +1,0 @@
-{
-  "recorded_at": "2026-09-14T01:09:03.693295+00:00",
-  "instruction": "current user: ファームウェアが必要な場合は userland/firmware/ に機種ごとに追加します。では、実装してください。（2026-09-14、q314 計画の提示後）",
-  "interpretation": "Approval of the presented plan: MIT definitions/tables are transcribed into attributed .inc files, driver logic is written new in zedBSD style; host GDM stop, i915 unbind and VFIO passthrough are permitted for WS029 tests; reboot/package/cmdline changes are not.",
-  "plan_sha256": "10f56158a1522f263022022c6fa1c0dee7a0d4e932f9a59453aea615f03b776c"
-}

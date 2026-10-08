@@ -1,7 +1,0 @@
-i915 cold-attach bring-up campaign (2026-09-14T09:56:33Z)
-q314-i915-camp-01: status=fail remote=fail host_restored=True attach_stopped=None selftest=None registered=False
-q314-i915-camp-02: status=fail remote=fail host_restored=True attach_stopped=None selftest=None registered=False
-q314-i915-camp-03: status=fail remote=fail host_restored=True attach_stopped=None selftest=None registered=False
-q314-i915-camp-04: status=boot-pass remote=boot-pass host_restored=True attach_stopped=None selftest=ok registered=True
-q314-i915-camp-05: status=fail remote=fail host_restored=True attach_stopped=None selftest=None registered=False
-q314-i915-camp-06: status=fail remote=fail host_restored=True attach_stopped=None selftest=None registered=False
