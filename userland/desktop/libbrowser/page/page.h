@@ -265,6 +265,7 @@ void page_compose_end(struct page *page, struct dom_element *element);
 
 /* Links (link.c). */
 int page_link_at(struct page *page, int x, int y, struct wb_buffer *href, int *found);
+int page_image_at(struct page *page, int x, int y, const struct img_bitmap **bitmap, struct wb_buffer *source);
 int page_resolve_file(const char *base, const char *href, struct wb_buffer *out);
 int page_resolve_location(const char *base, const char *href, struct wb_buffer *out);
 void page_images_init(struct page *page);

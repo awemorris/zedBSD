@@ -31,6 +31,7 @@
  */
 
 #include "shell/internal.h"
+#include "../../picture/png-write.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -56,6 +57,9 @@
  * committed moves on (a new page's scroll is taken over by the fingers).
  *
  * The sign-in codes of mail (mail.c, WS169 p005).
+ *
+ * A left press that may drag a picture out of the window (ws189-p003):
+ * whether one is held, and where it went down.
  */
 struct shell_state {
 	struct browser_view *view;
@@ -68,11 +72,19 @@ struct shell_state {
 	int touch_due;
 	unsigned long page_number;
 	struct shell_mail mail;
+	int drag_armed;
+	int drag_press_x;
+	int drag_press_y;
 };
+
+/* How far a press moves before the image under it is dragged out of the window, and the picture's longest side (ws189-p003). */
+#define SHELL_DRAG_DISTANCE	8
+#define SHELL_DRAG_SIDE		2048
 
 static void shell_show_state(struct shell_state *state);
 static void shell_input(struct shell_state *state, const struct shell_event *event);
 static void shell_button(struct shell_state *state, const struct shell_event *event);
+static int shell_drag_image(struct shell_state *state);
 static void shell_key(struct shell_state *state, const struct shell_event *event);
 static int shell_text(struct shell_state *state, const struct shell_event *event);
 static void shell_text_input(struct shell_state *state);
@@ -339,6 +351,9 @@ shell_input(
 	const struct shell_event *event)
 {
 	uint32_t modifiers;
+	int distance_x;
+	int distance_y;
+	int dragged;
 	int error;
 
 	/* The modifiers held, as the view names them. */
@@ -351,6 +366,17 @@ shell_input(
 		shell_button(state, event);
 		break;
 	case SHELL_EVENT_MOTION:
+		/* A left press on an image moved far enough drags the image out of the window (ws189-p003). */
+		distance_x = abs(event->x - state->drag_press_x);
+		distance_y = abs(event->y - state->drag_press_y);
+		if (state->drag_armed && (distance_x > SHELL_DRAG_DISTANCE || distance_y > SHELL_DRAG_DISTANCE)) {
+			state->drag_armed = 0;
+			dragged = shell_drag_image(state);
+			if (dragged)
+				break;
+		}
+
+		/* The pointer's move, the page's. */
 		error = browser_view_pointer_move(state->view, (float)event->x, (float)event->y, modifiers);
 		break;
 	case SHELL_EVENT_LEAVE:
@@ -396,6 +422,14 @@ shell_button(
 	uint32_t modifiers;
 	int button;
 	int error;
+
+	/* A left press may become a drag of the image under it; any release ends that. */
+	state->drag_armed = 0;
+	if (event->pressed && event->button == SHELL_BUTTON_LEFT) {
+		state->drag_armed = 1;
+		state->drag_press_x = event->x;
+		state->drag_press_y = event->y;
+	}
 
 	/* The DOM's number of the button; a button it does not number is not given. */
 	button = shell_key_button(event->button);
@@ -908,4 +942,84 @@ shell_touch_pointer(
 		printf("ZBROWSER ERROR touch-click error=%s\n", strerror(error));
 		fflush(stdout);
 	}
+}
+
+/*
+ * Drags the image under the press out of the window (ws189-p003): its
+ * picture ("image/png", at most SHELL_DRAG_SIDE on its longer side) and the
+ * URL of its source as text, as a copy, with the picture under the
+ * pointer.  The drag starts first and its PNG is filled in after.  Returns
+ * 1 when the drag started, 0 when there is no image there (the motion is
+ * the page's then).
+ */
+static int
+shell_drag_image(
+	struct shell_state *state)
+{
+	struct browser_image image;
+	struct kl_drag_data data[3];
+	struct kl_drag_icon icon;
+	unsigned char *png;
+	uint32_t *fitted;
+	size_t count;
+	size_t size;
+	int fitted_width;
+	int fitted_height;
+	int error;
+
+	/* The image at the press. */
+	error = browser_view_image_at(state->view, (float)state->drag_press_x, (float)state->drag_press_y, &image);
+	if (error != 0)
+		return 0;
+
+	/* The picture, filled in later, and the source's URL as both text types when it has one. */
+	data[0].type = "image/png";
+	data[0].data = NULL;
+	data[0].length = 0;
+	count = 1;
+	if (image.url[0] != '\0') {
+		data[1].type = "text/plain;charset=utf-8";
+		data[1].data = image.url;
+		data[1].length = strlen(image.url);
+		data[2].type = "text/plain";
+		data[2].data = image.url;
+		data[2].length = strlen(image.url);
+		count = 3;
+	}
+
+	/* The drag from the press, a copy, the picture under the pointer at its middle. */
+	icon.pixels = image.pixels;
+	icon.width = image.width;
+	icon.height = image.height;
+	icon.hot_x = image.width / 2;
+	icon.hot_y = image.height / 2;
+	error = kl_window_start_drag_icon(state->window.kui, data, count, KL_DND_COPY, kl_window_press_serial(state->window.kui), &icon);
+	if (error != 0) {
+		printf("ZBROWSER DND drag failed errno=%d\n", error);
+		fflush(stdout);
+		browser_view_image_release(&image);
+		return 0;
+	}
+
+	/* The PNG, shrunk, filled in. */
+	png = NULL;
+	size = 0;
+	error = kl_picture_fit(image.pixels, image.width, image.height, (size_t)image.width, SHELL_DRAG_SIDE, &fitted, &fitted_width, &fitted_height);
+	if (error == 0) {
+		error = kl_picture_png(fitted, fitted_width, fitted_height, (size_t)fitted_width, &png, &size);
+		free(fitted);
+	}
+
+	/* Given to the drag. */
+	if (error == 0)
+		error = kl_window_drag_fill(state->window.kui, "image/png", png, size);
+	free(png);
+
+	/* The log line the tests read. */
+	printf("ZBROWSER DND drag image size=%dx%d bytes=%lu url=%s errno=%d\n", image.width, image.height, (unsigned long)size, image.url, error);
+	fflush(stdout);
+	browser_view_image_release(&image);
+
+	/* Succeeded: the drag goes on. */
+	return 1;
 }
