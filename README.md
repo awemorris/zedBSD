@@ -1,68 +1,65 @@
-# Kei / zedBSD
+zedBSD and Keiland Desktop
+==========================
 
 <div align="center">
   <img src="docs/imgs/screenshot1.png" width="80%">
 </div><br>
 
-Kei is an operating system for modern computers, including those with
-touch displays. It is built on zedBSD, a BSD-based kernel and base
-system written from scratch, and ships with Keiland, a Wayland desktop
-that unifies the classic desktop UI/UX and a futuristic touch UI/UX.
+`zedBSD` is an operating system for modern computers, including those
+with touch displays. It consists of POSIX-compatible kernel and base
+system written from scratch, and ships with `Keiland Desktop`, a
+Wayland compositor and apps that unify the classic desktop UI/UX and a
+futuristic touch UI/UX.
 
-Kei and zedBSD aim to become a commercial UNIX in the line of macOS
-and iOS, Solaris, and AIX: an operating system made for newly-designed
-cutting-edge computers, that changes "the way computing is".  They are
-written to conform to POSIX.1-2024 and to the Single UNIX
-Specification, Version 4 (SUSv4).  It is not yet a certified UNIX
-system.  Conformance will keep being raised, and UNIX certification
-from The Open Group is a goal.  UNIX is a registered trademark of The
-Open Group.
+zedBSD aim to become a commercial UNIX in the line of macOS and
+Solaris: an operating system made for newly-designed cutting-edge
+computers, that changes "the way computing is".  They are written to
+conform to `POSIX.1-2024` and to the `Single UNIX Specification,
+Version 4` (SUSv4).  It is not yet a certified UNIX system.
+Conformance will keep being raised, and UNIX certification from The
+Open Group is a goal.  (UNIX is a registered trademark of The Open
+Group.)
 
 Getting there means not being bound to an existing kernel or userland
-when the whole machine has to move together. Most of the system is
-reimplemented. Keiland is a Wayland compositor, and it adds extensions
-that existing compositors do not have, so the display, input, and
-applications can behave as one machine rather than as a set of loosely
-coupled clients. The same reason applies to the GPU stack on zedBSD: a
-native Vulkan path, not Linux DRM/KMS or Mesa. The desktop is not
-locked to that kernel. Keiland is also ported to Linux and FreeBSD.
+when the whole machine has to move together.  Most of the system is
+reimplemented.  Keiland Desktop is a Wayland compositor, and it adds
+extensions that existing compositors do not have, so the display,
+input, and applications can behave as one machine rather than as a set
+of loosely coupled clients.  The same reason applies to the GPU stack
+on zedBSD: a native, direct Vulkan path, not Linux DRM/KMS or Mesa.
+The desktop is not locked to that kernel.  Keiland Desktop is also
+ported to Linux and FreeBSD.
 
 The kernel, drivers, libc, and desktop are developed so that hardware
 and software can ship as one product: tablets, phones, and PCs
-designed by the same person who directs the OS. Everything that runs
-on open hardware stays free to use. Features that need the project's
+designed by the same person who directs the OS.  Everything that runs
+on open hardware stays free to use.  Features that need the project's
 own hardware are still published as source, and only run on that
 hardware.
 
-Both zedBSD and Kei are designed and directed by one developer and
-implemented with AI coding agents. Current targets are 64-bit x86 PCs
-and the Raspberry Pi series.
+Both zedBSD and Keiland Desktop are
+[designed and directed](plan/master.md)
+by one developer and implemented with AI coding agents.  Current targets
+are 64-bit x86 PCs and the Raspberry Pi series.
 
-## Try Kei
+## Try zedBSD
 
-You do not need to compile from scratch to boot Kei. Pre-built images
-are published for real PC and QEMU.
+You do not need to compile from scratch to boot zedBSD. Pre-built
+images are published for real PC and QEMU.
 
 ### Real PC
 
 Write a disk image to a USB stick, then boot from it.
 
 Supported hardware:
-- CPU: 64-bit Intel/AMD
-- GPU: Intel Iris Xe (Gen12)
-- WiFi: Intel AX211, Realtek RTL8822BU
+- CPU: Intel 11th-gen+, Tiger Lake or later
+- GPU: Intel Iris Xe iGPU (Xe-LP)
+- WiFi: Intel AX211 or Realtek RTL8822BU USB
 
 ### Windows (VM)
 
 The release archive bundles a custom-patched QEMU build with Windows
-Vulkan/GL passthrough.
-
-1. Download the latest `Kei-nightly.zip` from the Releases page of this repository.
-2. Extract the archive.
-3. Double-click `boot.bat`.
-
-Kei boots into the touch desktop inside QEMU, with hardware graphics
-acceleration enabled.
+Vulkan passthrough.
 
 ### Linux (VM)
 
@@ -99,6 +96,7 @@ make keiland-linux-install
 ```
 
 Then restart your display manager such as GDM.
+
 To run Keiland manually, type:
 
 ```sh
@@ -114,7 +112,7 @@ make keiland-freebsd
 make keiland-freebsd-install
 ```
 
-To run Keiland, type:
+To run Keiland manually, type:
 
 ```sh
 /opt/keiland/bin/keiland-desktop
@@ -125,7 +123,7 @@ To run Keiland, type:
 ## Open hardware and project hardware
 
 Code that runs on generally-sold hardware (PCs, Raspberry Pi series,
-and other SBCs) is free for anyone to build and use. That includes
+and other SBCs) is free for anyone to build and use.  That includes
 commercial use, modification, and redistribution under the [zlib
 License](LICENSE). Buying project hardware is not required to use that
 part of the system, and that split is meant to stay.
@@ -136,8 +134,8 @@ license. They are not a closed edition. They depend on that hardware,
 so they do not run on a generic PC or Raspberry Pi. The sold product
 is the computer, not a paid OS license.
 
-Kei, Keiland, and zedBSD stay under zlib as the long-term
-license. Improvements to the open-hardware system stay freely usable.
+zedBSD stay under zlib as the long-term license.  Improvements to the
+open-hardware system stay freely usable.
 
 ---
 
@@ -200,7 +198,7 @@ user boot zedBSD.
 
 ## Status
 
-Kei runs on modern computers. Supported development targets:
+zedBSD runs on modern computers. Supported development targets:
 
 | Target                      | Role                                          |
 |-----------------------------|-----------------------------------------------|
@@ -220,36 +218,55 @@ The zedBSD kernel supports some retro computers.
 
 ## Design
 
-The kernel sits on a hardware abstraction layer. Platform-neutral
-kernel code stays portable across machines that do not share a CPU,
-bus, or boot path.
+zedBSD adopts a layered architecture. Within this design, a component
+accesses only components in the layer directly below it and provides
+functionality exclusively to the layer directly above it. Furthermore,
+dependencies between adjacent layers are kept strictly one-to-one,
+preventing tangled cross-layer interactions.
+
+In the case of Linux desktops, the user environment is typically
+formed by numerous components with small, focused responsibilities
+communicating with one another. This represents a distributed object
+design, where the benefit lies in each component having limited scope,
+making individual parts relatively easy to develop. On the other hand,
+this inevitably creates complex many-to-many relationships among
+components. In my personal view, while systems with many-to-many
+relationships are straightforward to implement in isolation, they
+often struggle with overall system integration—as is often seen in
+microkernel-based operating systems.
+
+zedBSD adopts a layered architecture to resolve these trade-offs and
+deliver a tightly integrated, cohesive desktop experience directly at
+the OS level.
 
 ```
-+----------------------------------------------------------------+
-| Packages (/usr)                                                |
-+----------------------------------------------------------------+
-| Wayland desktop (/opt/keiland/)                                |
-+----------------------------------------------------------------+
-| Base programs (/bin, /lib)                                     |
-+----------------------------------------------------------------+
-| Base services (/sbin/networkd, /sbin/audiod)                   |
-+----------------------------------------------------------------+
-| Modern init (/sbin/init)                                       |
-+----------------------------------------------------------------+
-| Drivers (PCI, USB, GPU, disk, ethernet, wifi, filesystem, ...) |
-+----------------------------------------------------------------+
-| Kernel (platform-neutral)                                      |
-+----------------------------------------------------------------+
-| HAL (CPU + BSP)                                                |
-+----------------------------------------------------------------+
++-----------------------------------------------------------------------------------+
+| Desktop Apps                                                                      |
++-----------------------------------------------------------------------------------+
+| Desktop Server (Wayland-based and X11-compatible, with device control extensions) |
++-----------------------------------------------------------------------------------+
+| Desktop HAL Backend (Uses device drivers and base services)                       |
++-----------------------------------------------------------------------------------+
+| Base programs (/bin)                                                              |
++-----------------------------------------------------------------------------------+
+| Base services (networkd, audiod, mountd, ...)                                     |
++-----------------------------------------------------------------------------------+
+| Modern init (/sbin/init)                                                          |
++-----------------------------------------------------------------------------------+
+| Drivers (PCI, USB, GPU, disk, ethernet, IP, wifi, filesystem, ...)                |
++-----------------------------------------------------------------------------------+
+| Kernel [platform-neutral]                                                         |
++-----------------------------------------------------------------------------------+
+| Kernel HAL (CPU + BSP)                                                            |
++-----------------------------------------------------------------------------------+
 ```
 
 ---
 
-## GPU
+## Direct Vulkan GPU Drivers
 
-GPU support is a native Vulkan stack. It does not require Linux
-DRM/KMS or Mesa, and it does not use user-space drivers.
+GPU support is a native, direct Vulkan stack. It does not require
+Linux DRM/KMS or Mesa, and it does not use user-space drivers.
 
 Intel Xe-LP is the current driver. NVIDIA and AMD support are planned.
 
@@ -305,7 +322,7 @@ make help              # short command summary
 
 ## License
 
-Kei, Keiland, and zedBSD are distributed under the zlib License. See
+zedBSD and Keiland Desktop are distributed under the zlib License. See
 [LICENSE](LICENSE). The license is not a placeholder for a later
 proprietary release. The system is meant to stay published under zlib,
 including features that only run on project hardware. What runs on
