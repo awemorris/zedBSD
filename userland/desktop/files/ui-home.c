@@ -32,7 +32,6 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
-#include <sys/statvfs.h>
 #include <time.h>
 #include <unistd.h>
 #include <keiland/keiland.h>
@@ -111,16 +110,12 @@ fm_home_gather(
 	struct fm_app *app)
 {
 	struct fm_dashboard *board;
-	struct statvfs volume;
 	struct stat status;
 	struct tm today;
 	struct tm moment;
 	struct tm *converted;
 	char path[FM_PATH_MAX];
 	char line[FM_PATH_MAX];
-	char free_text[32];
-	char free_line[64];
-	char number[32];
 	const char *greeting;
 	const char *named;
 	char *newline;
@@ -230,16 +225,46 @@ fm_home_gather(
 	snprintf(board->greeting, sizeof(board->greeting), "%s", greeting);
 	if (app->user[0] != '\0')
 		(void)kl_tr_format(board->greeting, sizeof(board->greeting), named, app->user, (const char *)NULL);
-	free_text[0] = '\0';
-	error = statvfs(app->home, &volume);
-	if (error == 0)
-		fm_dir_size_text((uint64_t)volume.f_bavail * (uint64_t)volume.f_frsize, free_text, sizeof(free_text));
-	snprintf(number, sizeof(number), "%d", opened_today);
-	(void)kl_tr_format(board->summary, sizeof(board->summary), kl_trn("{1} file opened today", "{1} files opened today", (unsigned long)opened_today), number, (const char *)NULL);
-	if (free_text[0] != '\0') {
-		(void)kl_tr_format(free_line, sizeof(free_line), kl_tr("{1} free"), free_text, (const char *)NULL);
-		snprintf(board->summary + strlen(board->summary), sizeof(board->summary) - strlen(board->summary), " \xc2\xb7 %s", free_line);
-	}
+
+	/*
+	 * The line about the files, with the space left on the home's file
+	 * system as the desktop last read it; a new reading is asked for (the
+	 * main loop asks the desktop, ws188-p002), and its answer writes the
+	 * line again.
+	 */
+	board->opened_today = opened_today;
+	app->home_free_wanted = 1;
+	fm_home_summary(app);
+}
+
+/*
+ * Writes the dashboard's line about the files: how many were opened today,
+ * and the space left on the home's file system when the desktop told it.
+ */
+void
+fm_home_summary(
+	struct fm_app *app)
+{
+	struct fm_dashboard *board;
+	char free_text[32];
+	char free_line[64];
+	char number[32];
+	size_t length;
+
+	/* How many files were opened today. */
+	board = &app->dashboard;
+	snprintf(number, sizeof(number), "%d", board->opened_today);
+	(void)kl_tr_format(board->summary, sizeof(board->summary), kl_trn("{1} file opened today", "{1} files opened today", (unsigned long)board->opened_today), number, (const char *)NULL);
+
+	/* The space left is not known yet. */
+	if (!app->home_free_known)
+		return;
+
+	/* The space left, after a dot. */
+	fm_dir_size_text(app->home_free, free_text, sizeof(free_text));
+	(void)kl_tr_format(free_line, sizeof(free_line), kl_tr("{1} free"), free_text, (const char *)NULL);
+	length = strlen(board->summary);
+	snprintf(board->summary + length, sizeof(board->summary) - length, " \xc2\xb7 %s", free_line);
 }
 
 /*

@@ -7,7 +7,7 @@
 
 /*
  * ws177-p017: the host test of browser_view_focus_field (libbrowser's
- * public <browser.h> alone, linked with the host's libbrowser.so): on a
+ * public <browser/browser.h> alone, linked with the host's libbrowser.so): on a
  * page with an email field, a hidden and a disabled one-time-code field,
  * one whose autocomplete is "section-x ONE-TIME-CODE" and another after
  * it, the focus goes to the fourth (its focus event fires) and typed

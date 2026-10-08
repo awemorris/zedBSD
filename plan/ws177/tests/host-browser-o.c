@@ -7,7 +7,7 @@
 
 /*
  * ws177-p019: the host test of the browser's text input and forms
- * (libbrowser's public <browser.h> alone): what an input method reads
+ * (libbrowser's public <browser/browser.h> alone): what an input method reads
  * around the caret (the value, the caret, the purpose by type and by
  * inputmode, a textarea's multiline hint, a long value cut around the
  * caret), the chosen part of a composed text under a thicker line, a
