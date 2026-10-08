@@ -1424,8 +1424,11 @@ loopback_pairing(
 		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
 		break;
 	case LOOPBACK_OP_RESET:
-		/* The masks and the mode as at power-on. */
+		/* The masks and the mode as at power-on, and no connection (the devices keep their bonds). */
 		loopback_defaults();
+		for (index = 0U; index < LOOPBACK_LINKS; index++)
+			loopback_link_reset(&loopback.links[index]);
+		loopback.scan_enable = 0U;
 		error = loopback_complete(opcode, status_ok, sizeof(status_ok));
 		break;
 	case LOOPBACK_OP_LE_BUFFER_SIZE:
@@ -1753,8 +1756,8 @@ loopback_peer_acl(
 	if (error != 0)
 		return error;
 
-	/* An L2CAP header and a payload, or nothing to answer. */
-	if (length < 1U + 4U + 4U + 2U)
+	/* An L2CAP header and a payload (HIDP's messages may be one byte), or nothing to answer. */
+	if (length < 1U + 4U + 4U + 1U)
 		return 0;
 	cid = loopback_get16(packet + 7);
 	payload = packet + 9;
