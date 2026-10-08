@@ -13,6 +13,8 @@
  * stream), which paces the reading.  The position is the sound's: what the
  * stream has played since an anchor.  At the end of the file the thread waits for the ring to be
  * played out and says the song ended, for the window to go to the next.
+ * Sound that does not decode (PLAY_BAD_MAX packets in a row) or a file
+ * that cannot be read any more stops the song and says why (ws177-p021).
  */
 
 #include "play.h"
@@ -29,10 +31,13 @@
 /* The sound converted at once at most (frames). */
 #define PLAY_FRAMES		8192
 
+/* The packets in a row whose sound does not decode before the song stops. */
+#define PLAY_BAD_MAX		16
+
 /*
  * What the thread holds: the player, the file, the decoder and its track,
  * the time before which what decodes is passed over (after a seek), and
- * the converted sound.
+ * the packets in a row that did not decode, and the converted sound.
  */
 struct play_reader {
 	struct mu_player *player;
@@ -40,6 +45,7 @@ struct play_reader {
 	struct vp_decoder *decoder;
 	unsigned track;
 	double skip_before;
+	unsigned bad;
 	int16_t samples[PLAY_FRAMES * 2];
 };
 
@@ -50,6 +56,7 @@ static int play_feed(struct play_reader *reader, const struct mf_packet *packet)
 static int play_sound(struct play_reader *reader, double time);
 static int play_seek(struct play_reader *reader);
 static void play_end(struct play_reader *reader);
+static void play_fail(struct play_reader *reader, int failure);
 static int play_stopping(struct mu_player *player);
 static void play_sleep_ms(unsigned ms);
 
@@ -113,6 +120,7 @@ mu_player_open(
 		return ENOMEM;
 	reader->player = player;
 	player->problem = 0;
+	player->failure = 0;
 	error = play_reader_open(reader, path);
 	if (error != 0) {
 		play_reader_close(reader);
@@ -128,6 +136,7 @@ mu_player_open(
 		player->duration = (double)length_us / 1000000.0;
 	player->state = MU_PLAYING;
 	player->ended = 0;
+	player->draining = 0;
 	player->quit = 0;
 	player->seek_wanted = 0;
 	player->clock_time = 0.0;
@@ -303,6 +312,24 @@ mu_player_state(
 	return state;
 }
 
+/*
+ * Takes why the song stopped while it played (MU_FAIL_*), once; 0 for
+ * nothing.
+ */
+int
+mu_player_failure(
+	struct mu_player *player)
+{
+	int failure;
+
+	/* Read and taken under the lock. */
+	(void)pthread_mutex_lock(&player->lock);
+	failure = player->failure;
+	player->failure = 0;
+	(void)pthread_mutex_unlock(&player->lock);
+	return failure;
+}
+
 /* The thread: reads, decodes and writes until it is told to end. */
 static void *
 play_run(
@@ -328,8 +355,15 @@ play_run(
 
 		/* The next packet; at the end of the file the song ends when its sound is played out. */
 		status = mf_read(reader->file, &packet);
-		if (status != 0) {
+		if (status == ENODATA) {
 			play_end(reader);
+			continue;
+		}
+
+		/* A file that cannot be read any more stops the song. */
+		if (status != 0) {
+			mu_log("PLAY read error=%d", status);
+			play_fail(reader, MU_FAIL_READ);
 			continue;
 		}
 
@@ -423,6 +457,7 @@ play_feed(
 	int tries;
 
 	/* Sent; a full decoder gives its sound first, then takes the packet. */
+	status = 0;
 	for (tries = 0; tries < 2; tries++) {
 		status = vp_decoder_send(reader->decoder, packet);
 		if (status != EAGAIN)
@@ -437,6 +472,19 @@ play_feed(
 			if (status != 0)
 				return status;
 		}
+	}
+
+	/* A packet that does not decode; too many in a row stop the song. */
+	if (status != 0 && status != EAGAIN && packet != NULL) {
+		reader->bad++;
+		if (reader->bad == 1U || reader->bad == PLAY_BAD_MAX)
+			mu_log("PLAY decode error=%d bad=%u", status, reader->bad);
+		if (reader->bad >= PLAY_BAD_MAX) {
+			play_fail(reader, MU_FAIL_DECODE);
+			return 1;
+		}
+	} else if (status == 0) {
+		reader->bad = 0U;
 	}
 
 	/* What comes out of it. */
@@ -576,6 +624,27 @@ play_end(
 
 	/* Until the next look. */
 	play_sleep_ms(PLAY_WAIT_MS * 5);
+}
+
+/*
+ * Stops the song because it cannot go on (MU_FAIL_*): the reason is kept
+ * for the window, which goes to the next song, and the thread ends.
+ */
+static void
+play_fail(
+	struct play_reader *reader,
+	int failure)
+{
+	struct mu_player *player;
+
+	/* Told once, stopped, and the thread asked to end. */
+	player = reader->player;
+	(void)pthread_mutex_lock(&player->lock);
+	player->failure = failure;
+	player->state = MU_STOPPED;
+	player->quit = 1;
+	(void)pthread_mutex_unlock(&player->lock);
+	mu_log("PLAY failed reason=%d", failure);
 }
 
 /* Tells whether the thread is to end. */

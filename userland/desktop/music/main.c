@@ -54,8 +54,10 @@
  * frame (its pixels, size and canvas), the text and the style, the view,
  * the player, whether a frame is due, the window changed size, a widget
  * moves, the glass was decided, the last quarter of a second and the
- * last two seconds of the position told (for the frames and the log), and
- * when the folder was last looked at for a change.
+ * last two seconds of the position told (for the frames and the log),
+ * when the folder was last looked at for a change, a song to play at the
+ * next round (-1 for none: the one after a song that could not go on), and
+ * how many songs in a row could not go on (ws177-p021).
  */
 struct mu_window {
 	struct kl_app *app;
@@ -77,6 +79,8 @@ struct mu_window {
 	long quarter;
 	long logged;
 	uint64_t looked;
+	long pending;
+	size_t failed;
 };
 
 /* The window's menu. */
@@ -91,11 +95,17 @@ static const struct kl_menu_entry mu_menu[] = {
 
 int main(int argc, char **argv);
 static int mu_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **file);
-static void mu_library_start(const char *file, long *song);
+static int mu_library_start(const char *file, long *song);
+static void mu_file_notice(struct mu_window *music, int error, uint64_t now_us);
 static int mu_loop(struct mu_window *music, unsigned timeout);
 static void mu_input(struct mu_window *music, const struct kl_window_event *event);
 static void mu_requests(struct mu_window *music, uint64_t now_us);
 static void mu_play_song(struct mu_window *music, long song, uint64_t now_us);
+static void mu_tell(struct mu_window *music, int error, uint64_t now_us);
+static void mu_gone(struct mu_window *music, long song, uint64_t now_us);
+static void mu_failed(struct mu_window *music, int failure, uint64_t now_us);
+static void mu_advance(struct mu_window *music, long song);
+static void mu_lost(struct mu_window *music, unsigned state, uint64_t now_us);
 static void mu_toggle(struct mu_window *music, uint64_t now_us);
 static void mu_step(struct mu_window *music, int step, uint64_t now_us);
 static void mu_follow(struct mu_window *music, uint64_t now_us);
@@ -122,6 +132,7 @@ main(
 	unsigned width;
 	unsigned height;
 	long song;
+	int file_error;
 	int status;
 	int error;
 
@@ -138,7 +149,7 @@ main(
 		mu_log("FONT missing error=%d", error);
 
 	/* The songs, and the file named. */
-	mu_library_start(file, &song);
+	file_error = mu_library_start(file, &song);
 
 	/* The view's state. */
 	error = mu_view_init(&music.view);
@@ -146,6 +157,11 @@ main(
 		mu_log("FAILED operation=view error=%d", error);
 		return 1;
 	}
+
+	/* Nothing waits to play; a file named that cannot be played says why (ws177-p021). */
+	music.pending = -1;
+	if (file != NULL && file_error != 0)
+		mu_file_notice(&music, file_error, kl_clock_us());
 
 	/* The sound (none is no failure: the view says why nothing plays), and the decoding add-in. */
 	error = mu_player_init(&music.player);
@@ -324,8 +340,12 @@ mu_parse(
 	return 0;
 }
 
-/* Reads the songs of the home's Music folder, and adds the file named (-1 for none, or one that is not a song). */
-static void
+/*
+ * Reads the songs of the home's Music folder, and adds the file named (-1
+ * for none, or one that is not a song).  Returns 0, or why the file named
+ * is not a song (an errno value: ENOTSUP for one without sound).
+ */
+static int
 mu_library_start(
 	const char *file,
 	long *song)
@@ -347,11 +367,32 @@ mu_library_start(
 
 	/* The file named. */
 	if (file == NULL)
-		return;
+		return 0;
 	error = mu_library_add_file(file, song);
 	mu_log("FILE song=%ld error=%d", *song, error);
 	if (error != 0)
 		*song = -1;
+
+	/* Succeeded: the file's outcome. */
+	return error;
+}
+
+/* Says why a file named on the command line (from Files) cannot be played. */
+static void
+mu_file_notice(
+	struct mu_window *music,
+	int error,
+	uint64_t now_us)
+{
+	/* No sound in it, not a song's kind of file, gone, or not readable. */
+	if (error == ENOTSUP)
+		mu_view_notice(&music->view, "This file has no sound Music can play.", now_us);
+	else if (error == EINVAL)
+		mu_view_notice(&music->view, "This file is not a song Music can play.", now_us);
+	else if (error == ENOENT)
+		mu_view_notice(&music->view, "The file is gone.", now_us);
+	else
+		mu_view_notice(&music->view, "The file could not be read.", now_us);
 }
 
 /*
@@ -488,26 +529,45 @@ mu_requests(
 	uint64_t now_us)
 {
 	struct mu_request request;
+	unsigned steps;
+	int step;
 	int taken;
 
-	/* Each one, in order. */
+	/* Each one, in order; Next and Previous in a row are one step, their sum, so a song is opened once (ws177-p021). */
+	step = 0;
+	steps = 0U;
 	for (;;) {
 		taken = mu_view_take_request(&music->view, &request);
 		if (!taken)
 			break;
 		music->dirty = 1;
+
+		/* Next or Previous: added to the step. */
+		if (request.action == MU_ACTION_NEXT || request.action == MU_ACTION_PREVIOUS) {
+			if (request.action == MU_ACTION_NEXT)
+				step++;
+			else
+				step--;
+			steps++;
+			continue;
+		}
+
+		/* Another request: the step before it first. */
+		if (steps != 0U) {
+			mu_log("STEP step=%d requests=%u", step, steps);
+			mu_step(music, step, now_us);
+			step = 0;
+			steps = 0U;
+		}
+
+		/* The request. */
 		switch (request.action) {
 		case MU_ACTION_SONG:
+			music->failed = 0U;
 			mu_play_song(music, request.song, now_us);
 			break;
 		case MU_ACTION_PLAY:
 			mu_toggle(music, now_us);
-			break;
-		case MU_ACTION_NEXT:
-			mu_step(music, 1, now_us);
-			break;
-		case MU_ACTION_PREVIOUS:
-			mu_step(music, -1, now_us);
 			break;
 		case MU_ACTION_SEEK:
 			mu_player_seek(&music->player, request.seconds);
@@ -516,6 +576,12 @@ mu_requests(
 		default:
 			break;
 		}
+	}
+
+	/* The step the round ended with. */
+	if (steps != 0U) {
+		mu_log("STEP step=%d requests=%u", step, steps);
+		mu_step(music, step, now_us);
 	}
 }
 
@@ -549,14 +615,156 @@ mu_play_song(
 		return;
 	}
 
-	/* Not playing: why. */
+	/* Not playing; a file that went makes the collection look again and goes on (ws177-p021). */
 	music->view.state = MU_STOPPED;
+	if (error == ENOENT) {
+		mu_gone(music, song, now_us);
+		return;
+	}
+
+	/* Why. */
+	mu_tell(music, error, now_us);
+}
+
+/* Says why a song cannot be played. */
+static void
+mu_tell(
+	struct mu_window *music,
+	int error,
+	uint64_t now_us)
+{
+	/* The add-in, the sound service, or the song. */
 	if (music->player.problem == VP_CODEC_MISSING || music->player.problem == VP_CODEC_VERSION)
 		mu_view_notice(&music->view, "Playing needs libavcodec (the libavcodec package).", now_us);
 	else if (error == ENODEV)
 		mu_view_notice(&music->view, "There is no sound: the sound service is not running.", now_us);
 	else
 		mu_view_notice(&music->view, "This song cannot be played.", now_us);
+}
+
+/*
+ * A song whose file went: the folder is looked through again (the song
+ * leaves the list), and the song after it plays at the next round.
+ */
+static void
+mu_gone(
+	struct mu_window *music,
+	long song,
+	uint64_t now_us)
+{
+	const struct mu_song *songs;
+	size_t count;
+	char *next;
+	long found;
+
+	/* The song after it, by its file (the indexes change). */
+	next = NULL;
+	songs = mu_songs(&count);
+	if (song >= 0 && (size_t)song + 1U < count)
+		next = mu_copy(songs[song + 1].path);
+
+	/* Told, and the collection again. */
+	mu_log("GONE song=%ld", song);
+	mu_reload(music, now_us);
+	mu_view_notice(&music->view, "This song's file is gone.", now_us);
+
+	/* The song after it, at the next round. */
+	found = -1;
+	if (next != NULL)
+		found = mu_library_find(next);
+	free(next);
+	mu_advance(music, found);
+}
+
+/* A song that stopped while it played (MU_FAIL_*): told, and the next one plays at the next round. */
+static void
+mu_failed(
+	struct mu_window *music,
+	int failure,
+	uint64_t now_us)
+{
+	long next;
+
+	/* Why. */
+	mu_log("FAILED song=%ld reason=%d", music->view.playing, failure);
+	if (failure == MU_FAIL_DECODE)
+		mu_view_notice(&music->view, "This song could not be decoded.", now_us);
+	else
+		mu_view_notice(&music->view, "This song's file could not be read.", now_us);
+
+	/* Stopped, and the next one. */
+	music->view.state = MU_STOPPED;
+	next = mu_library_next(music->view.playing, 1);
+	mu_advance(music, next);
+}
+
+/*
+ * Plays a song at the next round after one that could not go on, unless
+ * as many songs as the collection has failed in a row (nothing then).
+ */
+static void
+mu_advance(
+	struct mu_window *music,
+	long song)
+{
+	size_t count;
+
+	/* None after it. */
+	if (song < 0)
+		return;
+
+	/* Every song failed in a row: no more. */
+	(void)mu_songs(&count);
+	music->failed++;
+	if (music->failed > count) {
+		mu_log("STOP failed=%lu", (unsigned long)music->failed);
+		return;
+	}
+
+	/* At the next round. */
+	music->pending = song;
+}
+
+/*
+ * The sound's stream was lost (its service went, WS191): it is opened
+ * again and the song goes on from where it was, paused when it was; with
+ * no service the song stops and says so.
+ */
+static void
+mu_lost(
+	struct mu_window *music,
+	unsigned state,
+	uint64_t now_us)
+{
+	const struct mu_song *songs;
+	size_t count;
+	double position;
+	long song;
+	int error;
+
+	/* The song and where it was. */
+	songs = mu_songs(&count);
+	song = music->view.playing;
+	if (song < 0 || (size_t)song >= count)
+		return;
+	position = mu_player_position(&music->player);
+	mu_log("AUDIO lost song=%ld ms=%lld", song, (long long)(position * 1000.0));
+
+	/* Opened again (the stream with it). */
+	error = mu_player_open(&music->player, songs[song].path);
+	mu_log("AUDIO reopened song=%ld error=%d", song, error);
+	music->dirty = 1;
+	if (error != 0) {
+		music->view.state = MU_STOPPED;
+		mu_tell(music, error, now_us);
+		return;
+	}
+
+	/* From where it was, and paused when it was. */
+	if (position > 0.0)
+		mu_player_seek(&music->player, position);
+	if (state == MU_PAUSED)
+		mu_player_pause(&music->player);
 }
 
 /* Plays or pauses the song; a song that ended plays again from its start. */
@@ -605,12 +813,15 @@ mu_step(
 	if (music->view.playing < 0)
 		return;
 
-	/* Previous after a while: the start again. */
+	/* Previous after a while: the start again (the first Previous of a step). */
 	position = mu_player_position(&music->player);
 	if (step < 0 && position > MU_RESTART) {
-		mu_player_seek(&music->player, 0.0);
-		mu_log("SEEK song=%ld to_ms=0", music->view.playing);
-		return;
+		step++;
+		if (step == 0) {
+			mu_player_seek(&music->player, 0.0);
+			mu_log("SEEK song=%ld to_ms=0", music->view.playing);
+			return;
+		}
 	}
 
 	/* The neighbour in the collection's order. */
@@ -644,15 +855,42 @@ mu_follow(
 	unsigned state;
 	double position;
 	long quarter;
+	long pending;
 	long two;
+	int failure;
 	int ended;
+	int lost;
+
+	/* A song waiting to play, after one that could not go on (ws177-p021). */
+	if (music->pending >= 0) {
+		pending = music->pending;
+		music->pending = -1;
+		mu_play_song(music, pending, now_us);
+	}
 
 	/* The state, and the end of a song: the next one, or the end of the list. */
 	state = mu_player_state(&music->player, &ended);
 	if (ended) {
 		mu_log("ENDED song=%ld", music->view.playing);
+		music->failed = 0U;
 		mu_step(music, 1, now_us);
 		state = mu_player_state(&music->player, &ended);
+	}
+
+	/* A song that could not go on: told, and the next one. */
+	failure = mu_player_failure(&music->player);
+	if (failure != 0) {
+		mu_failed(music, failure, now_us);
+		state = mu_player_state(&music->player, &ended);
+	}
+
+	/* The sound's service went while a song plays or is paused: the stream is opened again (WS191). */
+	if (music->view.playing >= 0 && state != MU_STOPPED) {
+		lost = vp_audio_lost(&music->player.audio);
+		if (lost) {
+			mu_lost(music, state, now_us);
+			state = mu_player_state(&music->player, &ended);
+		}
 	}
 
 	/* A new state, drawn and told. */
@@ -662,11 +900,13 @@ mu_follow(
 		mu_log("STATE song=%ld state=%u", music->view.playing, state);
 	}
 
-	/* The position: a frame each quarter of a second. */
+	/* The position: a frame each quarter of a second; a song that played a second is no failure. */
 	if (state == MU_STOPPED)
 		return;
 	position = mu_player_position(&music->player);
 	music->view.position = position;
+	if (position >= 1.0)
+		music->failed = 0U;
 	quarter = (long)(position * 4.0);
 	if (quarter != music->quarter) {
 		music->quarter = quarter;
