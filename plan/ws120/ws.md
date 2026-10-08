@@ -3,7 +3,7 @@
 # WS120: 音楽アプリ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p001・p008・p009 cleared。p002〜p007（2026-10-02 の WAV・FLAC・MP3・Ogg・独自 AAC の計画）は 2026-10-07 の決定（m4a＋libavcodec の add-in）で置き換わった → canceled にするかは Q1。service の連携はベータ4）（2026-10-07 q831 P2: p001 の決定で m4a＋libavcodec の add-in の local の player に。p008・p009 を実装）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p002〜p007 を canceled（2026-10-07 の決定で置き換え）。2026-10-08 q910 P2 の照合: p001・p008・p009 cleared。p002〜p007（2026-10-02 の WAV・FLAC・MP3・Ogg・独自 AAC の計画）は 2026-10-07 の決定（m4a＋libavcodec の add-in）で置き換わった → canceled にするかは Q1。service の連携はベータ4）（2026-10-07 q831 P2: p001 の決定で m4a＋libavcodec の add-in の local の player に。p008・p009 を実装）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -64,14 +64,14 @@ Resume point: p008（tags.c・library.c と host の試験）→ p009（app）�
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
 | [ws120-p001](phase001/phase.md) | 設計: 2026-10-07 のユーザーの決定（m4a、libavcodec の add-in、service の連携はベータ4）と app の構成 | cleared（q831、P2） | — | — |
-| [ws120-p002](phase002/phase.md) | libkeiland の PCM 再生の API | planning、**canceled**（2026-10-07: videoplayer の audiod の client を使う、共有の library は後） | — | — |
-| [ws120-p003](phase003/phase.md) | decoder: WAV・FLAC | planning、**canceled**（2026-10-07: 形式は m4a だけ） | — | — |
-| [ws120-p004](phase004/phase.md) | decoder: MP3 | planning、**canceled**（2026-10-07: 形式は m4a だけ） | — | — |
-| [ws120-p005](phase005/phase.md) | Music の app の MVP（WAV・FLAC・MP3） | planning、**canceled**（2026-10-07: p008・p009 に置き換え） | — | — |
-| [ws120-p006](phase006/phase.md) | Ogg Vorbis | planning、**canceled**（2026-10-07: 形式は m4a だけ） | — | — |
+| [ws120-p002](phase002/phase.md) | libkeiland の PCM 再生の API | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning、**canceled**（2026-10-07: videoplayer の audiod の client を使う、共有…） | — | — |
+| [ws120-p003](phase003/phase.md) | decoder: WAV・FLAC | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning、**canceled**（2026-10-07: 形式は m4a だけ）） | — | — |
+| [ws120-p004](phase004/phase.md) | decoder: MP3 | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning、**canceled**（2026-10-07: 形式は m4a だけ）） | — | — |
+| [ws120-p005](phase005/phase.md) | Music の app の MVP（WAV・FLAC・MP3） | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning、**canceled**（2026-10-07: p008・p009 に置き換え）） | — | — |
+| [ws120-p006](phase006/phase.md) | Ogg Vorbis | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning、**canceled**（2026-10-07: 形式は m4a だけ）） | — | — |
 | [ws120-p008](phase008/phase.md) | m4a の metadata と `~/Music` の collection（tags.c・library.c）、host の試験 | cleared（2026-10-07、T1-315） | p001 | — |
 | [ws120-p009](phase009/phase.md) | Music の app（一覧・再生・seek・次・Files・App Home）、libavcodec の add-in と audiod | cleared（2026-10-07、T1-315） | p008 | — |
-| [ws120-p007](phase007/phase.md) | 全文規約と回帰、制限の整理（必須の最終確認、後回し） | planning | p009 | 2h |
+| [ws120-p007](phase007/phase.md) | 全文規約と回帰、制限の整理（必須の最終確認、後回し） | canceled（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 2026-10-07 の決定で置き換え。旧: planning） | p009 | 2h |
 
 Graph（2026-10-07）: p001 → p008 → p009 → p007。p002〜p006 は canceled。
 

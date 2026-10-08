@@ -2,7 +2,7 @@
 
 # ws089-p012: Settings の中だけで済む操作性（検索の key・touch の scroll）
 
-Status: test-wait（T1 依頼中。2026-10-06 q805 P2: 残りの「titlebar の欄から Down で結果へ」を compositor で直した（末尾）。以前: uncleared（q619-i01、P1 generation4、2026-10-03。実装と試験は PASS。範囲 1 の欄の Down だけが compositor の変更待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-238 PASS）（旧: test-wait（T1 依頼中。2026-10-06 q805 P2: 残りの「titlebar の欄から Down で結果へ」を compositor で直した（末尾）。以前: uncleared（q619-i01、P1 generation4、2026-10-03。実装と試験は PASS。範囲 1 の欄の Down だけが compositor の変更待ち））
 Disposition: normal
 Parent: [WS089](../ws.md)
 Queue: q619 / q619-i01（Q1 の dispatch、2026-10-03。承認: user「Settingsも重点的にしましょう」と自走の指示。時限 4 時間）

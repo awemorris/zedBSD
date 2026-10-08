@@ -3,7 +3,7 @@
 # WS128: 標準アプリ全般のベータ1 のブラッシュアップ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p006・p009〜p011 cleared。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD は 10/13 以降）、p012（montage-4 の icon）は UAT の image で確認、p007 は実機の UAT）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p008 を cleared（FreeBSD の分は 10/13 以降）。p012 は UAT の image で確認まで保留。2026-10-08 q910 P2 の照合: p001〜p006・p009〜p011 cleared。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD は 10/13 以降）、p012（montage-4 の icon）は UAT の image で確認、p007 は実機の UAT）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -45,7 +45,7 @@ Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し�
 | [ws128-p010](phase010/phase.md) | Terminal の右端の wrap を xterm と同じ保留にする（BUG-150、Emacs の画面が 1 行ずれる） | cleared（2026-10-03 q636-i01、FreeBSD 実機と host、Q1 の照合待ち） | — | 1〜3h |
 | [ws128-p011](phase011/phase.md) | BUG-155: Terminal で IME の日本語を入力する（text-input-v3、組み立て中の文字を cursor に描く） | cleared（2026-10-03 Q1、T1-012） | — | 2h |
 | [ws128-p012](phase012/phase.md) | App Home の app の icon をデザインした物に差し替える（2026-10-05 夜 ユーザー） | planning（デザインの方向はユーザーに確かめる） | | |
-| [ws128-p008](phase008/phase.md) | 全文規約と回帰（WS の最後） | in-progress（q667、P2。規約・build・host 済み、QEMU 回帰・FreeBSD は T1 待ち、実機 p007 待ち） | 実装の Phase | 2h |
+| [ws128-p008](phase008/phase.md) | 全文規約と回帰（WS の最後） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T2-025 PASS 8/8（QEMU）。FreeBSD の build の分は 10/13 以降。旧: in-progress（q667、P2。規約・build・host 済み、QEMU 回帰・FreeBSD は T1 待ち、実機 p007 待…） | 実装の Phase | 2h |
 
 ## 既存の WS の残りとの照合（2026-10-02、その WS で実行し WS128 では重ねない）
 

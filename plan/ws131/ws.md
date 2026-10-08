@@ -3,7 +3,7 @@
 # WS131: libkeiland-backend の分離と libkeiui の吸収
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p001・p003〜p012・p014〜p023・p025〜p027 cleared（p003 の表を直した）。p002（設計、ユーザーのレビュー済み、D7 は確認中）と p013（T1-085 は流さない指示のまま、kl_ の改名は後の p021 で済み）は Q1 の判定、p024（規約と 3 OS の回帰）は規約がベータ3・Linux/FreeBSD が 10/13 以降。旧: planning（構成は決定、移行計画 [design.md](design.md) は p002 で作成、ユーザーのレビュー待ち））
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p013 を cleared（後続の証拠で）。p002 は D7 の確認まで保留。2026-10-08 q910 P2 の照合: p001・p003〜p012・p014〜p023・p025〜p027 cleared（p003 の表を直した）。p002（設計、ユーザーのレビュー済み、D7 は確認中）と p013（T1-085 は流さない指示のまま、kl_ の改名は後の p021 で済み）は Q1 の判定、p024（規約と 3 OS の回帰）は規約がベータ3・Linux/FreeBSD が 10/13 以降。旧: planning（構成は決定、移行計画 [design.md](design.md) は p002 で作成、ユーザーのレビュー待ち））
 Primary Milestone: MG006
 Related Milestones: MG007（Linux・FreeBSD の Keiland）
 Objectives: O2, O3
@@ -64,7 +64,7 @@ app は OS の抽象化を直接持たない。例: Settings → libkeiland → 
 | [p010](phase010/phase.md) | 拡張の protocol `kl_system_manager_v1` と設定の記録（監視は残す） | cleared（q659、T2-020・T1-061・T1-062） | p004、P2 の BUG-125 の merge | 4〜5h |
 | [p011](phase011/phase.md) | Settings を拡張へ、毎秒の監視の除去、libkeiland の OS を 0 に | cleared（q659、T2-021・022・024・T1-062） | p010、WS089・P1 の区切り | 4〜5h |
 | [p012](phase012/phase.md) | libkeiui を libkeiland へ移す（名前は変えない） | cleared（q673、T2-027、main 5ec60b4） | p003 の merge、ベータ1 の app の区切り | 4h |
-| [p013](phase013/phase.md) | 旧 libkeiui の名前を `kl_`・`KL_` に | in-progress（実装・host 試験済み、main に統合 2026-10-04。Q1 の最短の確認だけ PASS、回帰は test-queue の TQ-1） | p012 | 3〜4h |
+| [p013](phase013/phase.md) | 旧 libkeiui の名前を `kl_`・`KL_` に | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-085 は流さず、kl_ の改名は後続の p021〜p023 と多数の回帰で確かめ済み。旧: in-progress（実装・host 試験済み、main に統合 2026-10-04。Q1 の最短の確認だけ PASS、回帰は test…） | p012 | 3〜4h |
 | [p014](phase014/phase.md) | 旧 libkeiland の名前を `kl_`・`KL_` に | cleared（2026-10-05、T1-116 で FreeBSD の build と audit PASS） | p013・p011 | 3〜4h |
 | [p015](phase015/phase.md) | app の骨組みの API（`kl_app`） | cleared（2026-10-05 Q1） | p014・p010 | 4〜5h |
 | [p016](phase016/phase.md) | Text Editor | cleared（2026-10-07） | p015 | 3〜4h |

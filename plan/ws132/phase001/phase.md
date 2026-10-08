@@ -2,7 +2,7 @@
 
 # ws132-p001: /dev/system の事象の通知（電源・PnP）、自動 mount、Files の eject の設計
 
-Status: in-progress（2026-10-05 P1 generation17 / q707-i01。設計を書いた。人間の判断が要る点 D1〜D3 が残る）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: 後続の p002〜p005・p009 が実装・cleared）（旧: in-progress（2026-10-05 P1 generation17 / q707-i01。設計を書いた。人間の判断が要る点 D1〜D3 が残る））
 Disposition: normal
 Parent: [WS132](../ws.md)
 Queue: q707 / q707-i01（2026-10-05 未明の実装の束、Q1 の投入）。design-reviewer は省く（2026-10-05 ユーザー）

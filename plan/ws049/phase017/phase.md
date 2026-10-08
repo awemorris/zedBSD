@@ -4,7 +4,7 @@
 
 Phase ID: `ws049-p017`
 Parent: [WS049](../ws.md)
-Status: in-progress（2026-10-04。実装と host の確認、T1-093 の QEMU の回帰が PASS。Q1 の判定待ち。⑤ はユーザーの判断待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-093 PASS。⑤ は 2026-10-05 に不要として閉じ済み（UCSI は hal_space_map_device の error で判断））（旧: in-progress（2026-10-04。実装と host の確認、T1-093 の QEMU の回帰が PASS。Q1 の判定待ち。⑤ はユーザーの判断待ち））
 Phase disposition: normal
 Queue: q696 / q696-i01（P1）。承認: Q1 の Queue（[queue.md](../../queue.md) の q696、WS050 design §12 の提案、2026-10-04）
 

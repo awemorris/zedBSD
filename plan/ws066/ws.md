@@ -3,44 +3,25 @@
 # WS066: 動的 link の program の起動を速くする（`ld.so` の最適化）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p002 cleared、p001 は T1-165 の測定で Q1 の判定待ち。判定の後に WS の完了（規約はベータ3））
+Status: completed（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2.2）。旧: incomplete）
 Primary Milestone: MG002
-Related Milestones: MG004
-Objectives: O1
 Parent: [Master](../master.md)
-Queue: Q1（2026-10-05、P2）
-Resume point: p001 の受け入れ確定（true ≤ 700 µs、sh -c ≤ 950 µs）。p002（amd64 の -Bsymbolic-functions と GNU hash）実装済み、T1 の測定と回帰待ち。
+Queue: なし
 <!-- awesome-plan-current:end -->
 
-## 目標
+## 結果（2026-10-08 完了）
 
-2026-09-26 ユーザー: 「単体だとスタティックリンクが速くなるけど、大量のワークロードだと大差ないのね。じゃあとりあえずダイナミックリンクに戻して、ld.soの最適化をあとでやるリストとしてwsにしておこう。」
+動的 link の program の起動を速くした: amd64 の libc.so などを -Bsymbolic-functions と GNU hash に（p002）、libc の symbol の再配置 515 → 19。測定（T1-165）: true 約 680〜710 µs、sh -c 約 936 µs で受け入れ（true ≤ 700 µs、sh -c ≤ 950 µs）。
 
-base の program は動的 link のまま（静的 link にしない）。起動の固定費用のうち `/lib/ld.so` と `/lib/libc.so` の読み込み・再配置・symbol の探索の分を減らし、全ての動的な program の起動を縮める。
+## 制限・移管
 
-## 出発点（2026-09-26、guest、QEMU 8 GiB 4 vCPU NVMe）
+全文規約の見直しはベータ3。
 
-- `sh -c :` の起動は動的 1.0 ms、同じ sh を静的に link すると 0.72 ms。差の 0.28 ms（約 28%）が動的 link の費用（[F-020](../future-work.md) の測定）。
-- expat の configure・make では差は 0〜3%（時間の大半は clang と libtool の解釈）。
-- ws061-p009 の後も `cc` の loop の guest の CPU の 32% が `/lib/ld.so`。clang の driver が実行 file を `--hash-style=sysv` で link し、同じ symbol を指す再配置が多い（libLLVM で 5828 件中 4211 種）（[F-017](../future-work.md)）。
+## Phase
 
-## 候補（p001 で測って選ぶ）
+| Phase | 内容 | 最終の状態 |
+| --- | --- | --- |
+| ws066-p001 | 起動の費用の内訳（`ld.so` の各段階、再配置の数、探索の回数）と、候補の選択・設計 | cleared（2026-10-08） |
+| ws066-p002 | libc.so などの -Bsymbolic-functions と、base の program の GNU hash（amd64） | cleared（2026-10-05） |
 
-- 再配置の結果の cache（同じ symbol を指す再配置）、探索の順の短縮。
-- `--hash-style=both`（または gnu）を clang の driver の既定に（cross の toolchain と guest の LLVM の rebuild が要る）。
-- `libc.so` の再配置の数の削減（内部の参照を `-Bsymbolic` や protected visibility で解決）。
-- `-z now` を外した lazy binding（`relro` との兼ね合い）。
-- mapping と TLS の準備の固定費用。
-
-## 受け入れ（p001 で確定する）
-
-`sh -c :`・`/bin/true`・`cc t.c -o t` の起動が今より縮み、静的 link との差（0.28 ms）の半分以上を取り戻す（仮の目標）。loader の既存の試験と、dash との sh の差分試験・make の差分試験・expat の build が変わらない。規約。
-
-## Phase 一覧
-
-| Phase | 内容 | Status | 依存 |
-| --- | --- | --- | --- |
-| [ws066-p001](phase001/phase.md) | 起動の費用の内訳（`ld.so` の各段階、再配置の数、探索の回数）と、候補の選択・設計 | cleared の判定待ち（測定済み T1-165、受け入れ確定） | — |
-| [ws066-p002](phase002/phase.md) | libc.so などの -Bsymbolic-functions と、base の program の GNU hash（amd64） | cleared（2026-10-05 Q1） | p001 |
-
-p003（ld.so の cache、clang の測定ができた時）と規約の Phase は後で定める。
+Phase の directory とこの WS だけの試験は、完了の規則（AGENTS.md）で削除する（git の履歴に残る、削除は Q1）。

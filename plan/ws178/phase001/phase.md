@@ -2,7 +2,7 @@
 
 # ws178-p001: libGL を OpenGL（Desktop）と GLX（xserver）に分ける
 
-Status: in-progress（q836、P1。2026-10-07 実装済み、build と host の確認済み、T1 待ち）
+Status: cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T1-340 で p005 PASS。x11-p004 の段 3 の FAIL は WS178 の前から（T1-341）で BUG-273（tracking））（旧: in-progress（q836、P1。2026-10-07 実装済み、build と host の確認済み、T1 待ち））
 Disposition: normal
 Parent: [WS178](../ws.md)
 

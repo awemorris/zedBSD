@@ -3,7 +3,7 @@
 # WS102: スクリーンキーボード（compositor に直接、flick と QWERTY と手書き）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: 全 Phase が cleared（p022 の表を直した）。WS の完了を Q1 が判定（ユーザーが優先を下げたまま））
+Status: incomplete（2026-10-08 q910 P2 の照合の訂正: p001〜p009・p015〜p025 は cleared だが、表の p010・p011（L3 の計測と数値への直し）・p012（IME と組んだ日本語の変換、WS095 の続き＝ベータ3）・p013（Windows の QEMU の物理の touch、WS085）・p014（全文規約＝ベータ3）が planned のまま。sweep-beta2-rc2 §2.2 の「全部 cleared」は phase の directory だけを見た誤りで、WS の完了は保留）
 Primary Milestone: MG006
 Related Milestones: MG006
 Objectives: O2

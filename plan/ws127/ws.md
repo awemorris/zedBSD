@@ -3,7 +3,7 @@
 # WS127: Files のベータ1 のブラッシュアップ（最重点）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p001〜p006・p009〜p012 は cleared（p002 の表を直した）、p005 は canceled。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD の build は 10/13 以降）、p007 は実機の UAT。旧: planned）
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p008 を cleared（FreeBSD の分は 10/13 以降）。2026-10-08 q910 P2 の照合: p001〜p006・p009〜p012 は cleared（p002 の表を直した）、p005 は canceled。p008 は T2-025 PASS 8/8 で Q1 の判定（FreeBSD の build は 10/13 以降）、p007 は実機の UAT。旧: planned）
 Primary Milestone: MG006
 Objectives: O2
 Parent: [Master](../master.md)
@@ -52,7 +52,7 @@ Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し�
 | [ws127-p005](phase005/phase.md) | 日本語の UI の文言と、名前の変更での IME（F-041 の残り）。Settings と共通の翻訳の仕組み | canceled（2026-10-05 夜、WS158 に吸収） | p001、WS095、WS089 p016 と仕組みを共有 | 4h |
 | [ws127-p006](phase006/phase.md) | DnD の自動の scroll と spring-loaded（F-039）。端の自動 scroll と item・sidebar の folder の spring は実装済み（ws127-p002）。この Phase は tab の上で待つと tab が切り替わる spring | cleared（q666、T1-077） | p001 | 1h |
 | [ws127-p007](phase007/phase.md) | 5330 の実機での操作と速さ。遅ければ描き直しを damage の矩形に絞る（F-037） | planning（p002〜p006 の後、実機とユーザーの時間） | p002〜p006 の選んだ物 | 2h + ユーザー 20 分 |
-| [ws127-p008](phase008/phase.md) | 全文規約と回帰（WS の最後） | in-progress（q667、P2。規約・build・host 済み、QEMU 回帰・FreeBSD は T1 待ち、実機 p007 待ち） | 実装の Phase | 2h |
+| [ws127-p008](phase008/phase.md) | 全文規約と回帰（WS の最後） | cleared（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: T2-025 PASS 8/8（QEMU）。FreeBSD の build の分は 10/13 以降。旧: in-progress（q667、P2。規約・build・host 済み、QEMU 回帰・FreeBSD は T1 待ち、実機 p007 待…） | 実装の Phase | 2h |
 | [ws127-p009](phase009/phase.md) | Files の host 試験 p009・p010・p013 の FAIL（host-render の既定の font が作り直した build/ に無い path を指していた。試験を tree の font に） | cleared（q656、host 3 本 PASS） | — | 0.5h |
 | [ws127-p010](phase010/phase.md) | directory の名前（breadcrumb）のタップ・クリックで path を入力、約 1 秒後に path の候補の dropdown（2026-10-04 ユーザーの要望） | cleared（2026-10-05 Q1） | BUG-177・BUG-190 と揃える |
 | [ws127-p011](phase011/phase.md) | 左の pane の Home は ~/ の一覧に、今の dashboard は「Today」という別の頁に（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | — |

@@ -3,7 +3,7 @@
 # WS079: 手書きノート（Notes）と PDF Viewer、上の右端からのスワイプ
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-08 q910 P2 の照合: p012 は表の cleared（main 2026-09-28）に phase.md を合わせた。p017 は ws175-p010 の T1-265b（needs-person 2、fail 0）で Q1 の判定待ち。残りは S8・S9 の実機（ユーザー））
+Status: incomplete（2026-10-08 Q1 の判定（sweep-beta2-rc2 §2）: p017 は ws175-p010 と一緒に PNG の目視まで保留。2026-10-08 q910 P2 の照合: p012 は表の cleared（main 2026-09-28）に phase.md を合わせた。p017 は ws175-p010 の T1-265b（needs-person 2、fail 0）で Q1 の判定待ち。残りは S8・S9 の実機（ユーザー））
 Primary Milestone: MG006
 Related Milestones: MG002
 Objectives: O1
