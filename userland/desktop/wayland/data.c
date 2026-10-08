@@ -97,6 +97,9 @@
 #define OFFER_ERROR_INVALID_ACTION_MASK		1U
 #define OFFER_ERROR_INVALID_ACTION		2U
 
+/* How long a release waits for the target's answer before it decides without it (milliseconds, ws189-p002 F1). */
+#define DATA_RELEASE_WAIT_MS		500U
+
 /* Ctrl and Alt in the seat's modifiers (seat.c). */
 #define DATA_SEAT_CTRL			0x04U
 #define DATA_SEAT_ALT			0x08U
@@ -290,8 +293,8 @@ kwl_data_drag_motion(
 	struct kwl_server *server,
 	uint32_t time)
 {
-	/* Only while dragging. */
-	if (!server->dnd_active)
+	/* Only while dragging, and not once let go (the drop waits for its target's answer). */
+	if (!server->dnd_active || server->dnd_releasing)
 		return;
 
 	/* The bar's icons first (spring-loading, apps-bar.c), then the target, its mark, and the frame (the icon or the badge moves with the pointer). */
@@ -322,9 +325,28 @@ kwl_data_drag_release(
 	if (!server->dnd_active)
 		return;
 
-	/* A drag inside its client drops on any of its surfaces; one with a source needs an accepting target with an action. */
+	/*
+	 * Let go before the target answered (a quick drag let go at once,
+	 * ws189-p002 F1): the drop waits for the answer, or for
+	 * DATA_RELEASE_WAIT_MS (kwl_data_tick decides then).
+	 */
 	offer = server->dnd_offer;
 	source = server->dnd_source;
+	if (!server->dnd_releasing &&
+	    source != NULL &&
+	    offer != NULL &&
+	    !offer->dnd_answered &&
+	    server->dnd_target != NULL) {
+		server->dnd_releasing = 1;
+		server->dnd_release_deadline = kwl_milliseconds() + DATA_RELEASE_WAIT_MS;
+		printf("KWL DATA drag release wait client=%llu\n", (unsigned long long)offer->client->number);
+		return;
+	}
+
+	/* Decided now (a release that waited ends its wait). */
+	server->dnd_releasing = 0;
+
+	/* A drag inside its client drops on any of its surfaces; one with a source needs an accepting target with an action. */
 	device = server->dnd_target_device;
 	drop = 0;
 	if (device != NULL && !device->dead && server->dnd_target != NULL) {
@@ -374,6 +396,44 @@ kwl_data_drag_release(
 
 	/* Succeeded: the drag is over (the finish comes from the target). */
 	drag_end(server);
+}
+
+/*
+ * Decides a drop let go before its target answered (ws189-p002 F1): once
+ * the target's offer has answered (with its actions too, when it can say
+ * them), or at the deadline, the release is carried out as it would have
+ * been.
+ */
+void
+kwl_data_tick(
+	struct kwl_server *server)
+{
+	struct kwl_object *offer;
+	uint64_t now;
+	int answered;
+
+	/* Only a release waiting. */
+	if (!server->dnd_active || !server->dnd_releasing)
+		return;
+
+	/* The target's answer: an accept (and the actions of a target that says them, sent with it), or the target gone. */
+	offer = server->dnd_offer;
+	answered = 0;
+	if (offer == NULL || server->dnd_target == NULL)
+		answered = 1;
+	if (offer != NULL && offer->dnd_answered)
+		answered = 1;
+	if (offer != NULL && offer->dnd_answered && offer->dnd_accepted && offer->version >= DATA_ACTIONS_VERSION && offer->dnd_action == ACTION_NONE)
+		answered = 0;
+
+	/* Not yet, and time is left. */
+	now = kwl_milliseconds();
+	if (!answered && now < server->dnd_release_deadline)
+		return;
+
+	/* Succeeded: the release, decided now. */
+	printf("KWL DATA drag release decided answered=%d\n", answered);
+	kwl_data_drag_release(server);
 }
 
 /*
@@ -1152,7 +1212,8 @@ offer_accept(
 	if (!server->dnd_active || slot < 0)
 		return 0;
 
-	/* Whether a type is accepted. */
+	/* Whether a type is accepted; the offer has answered either way. */
+	offer->dnd_answered = 1;
 	offer->dnd_accepted = 0;
 	if (text != NULL)
 		offer->dnd_accepted = 1;
@@ -1711,6 +1772,7 @@ drag_end(
 
 	/* The drag's state. */
 	server->dnd_active = 0;
+	server->dnd_releasing = 0;
 	server->dnd_source = NULL;
 	server->dnd_origin = NULL;
 	server->dnd_icon = NULL;

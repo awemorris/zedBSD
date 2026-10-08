@@ -51,3 +51,13 @@ compositor（`userland/desktop/wayland/`）:
 - `sh plan/tools/keiland-os-boundary/check.sh`: PASS。`python3 plan/tools/aat/check-scenarios.py`: PASS（115）。
 - `python3 plan/tools/style-check.py`（変えた file）: 新しい指摘 0（残りは元からの blank-after-brace: clipboard.c 3・compose.c 4・shell.c 5・ui.c 2）。
 - 未実施: QEMU の AAT（T1）。FreeBSD の build（Makefile.freebsd に 2 file を足しただけ）。実機。
+
+### T1-433・T1-434 の結果と直し（2026-10-08、Q1 の判定の伝達）
+
+- 確認できた: early-receive、refused-mark、dock-spring、text-between-windows 1〜4、photo-to-notes 1〜2、browser image-drag 1（Q1 も PNG を目視）。
+- **F1（直した）**: 押して動かしすぐ離すと `state=refused` のまま cancel になった（T1 は 1.5 秒止めてから離す必要があった）。原因: release の時点で target の offer の
+  答え（accept・set_actions）がまだ届いておらず、`kwl_data_drag_release` が「受けていない」と判断した。直し（`wayland/data.c`・`kwl.h`・`data.h`・`main.c`）:
+  offer に `dnd_answered`（accept が来たか）を持ち、答えの無い offer の上の release は `dnd_releasing` にして待つ（log `KWL DATA drag release wait`）。
+  `kwl_data_tick`（main loop の毎回）が、答えが来たら（型を受けて action が決まった時、または断った時）、または 500 ms で、release を決める（log
+  `KWL DATA drag release decided answered=0|1`）。待つ間の pointer の動きは target を変えない。build（amd64 wayland・Linux all）warning 0、境界 PASS。
+- F2〜F4 は q896 の後（F2: same-program-windows の devices=1、F3: Browser の画像の url が path、F4: シナリオの status: draft と未実施の項目）。
