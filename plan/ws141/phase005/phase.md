@@ -33,3 +33,8 @@ C全文 `plan/coding-style.md`、Guardrailのsource/ownership/HAL/GPL/scanout規
 ## i13 checkpoint: 二device/native allocation共有（2026-10-09）
 
 rendererを独立登録し、低1GiB placed blob・同device新VA import・foreign native scanout・independent DMA hold・failed MMU flush quarantine/common reset回復を実装。actual source hostとrpi4 y build PASS、warning0、C/style/630旧名チェック0。[exact source/commands/制限](../execution-20261009.md#i13の二deviceallocation共有の実装2026-10-09継続中)。非同期worker/common completion/job/desktopは残り、in-progressを維持。現在のallocation-only stop contractはcommand capability公開前にworker retirementへ更新する。
+
+
+## i13 checkpoint: worker/job ownership（2026-10-09）
+
+16固定slot/恒久worker/実native runner/FIFO markerを追加。callback FINISHING後のpending retirement、normal cancelの通知なし撤回、fault cancelのretain、unpublished予約を除くstop_poll、drainとDMA quarantineを分離。actual source hostとrpi4 build PASS。[commands/hash/制限](../execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。p005はin-progress、p006はこの検証済みowner/workerをscoped prerequisiteとして使用し、完成したdecoder/compilerとjob tableの公開を接続する。実機/全WS適合は未達。

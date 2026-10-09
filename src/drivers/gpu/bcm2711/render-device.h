@@ -11,6 +11,7 @@
 
 #include <drivers/gpu/gpu.h>
 #include "drivers/gpu/bcm2711/v3d-memory.h"
+#include "drivers/gpu/bcm2711/render-worker.h"
 
 struct bcm2711_render_device;
 
@@ -20,6 +21,12 @@ struct bcm2711_render_session {
 	struct bcm2711_render_resource *resources;
 	uint32_t count;
 	uint32_t next_identifier;
+
+	/* The native IRQ guard keeps the descriptor alive until every accepted callback ends. */
+	uint32_t pending;
+
+	/* The native IRQ guard protects the Vulkan queues that own nonzero completion domains. */
+	uint64_t timelines;
 
 	/* The native IRQ guard protects namespace stop publication against ioctl admission. */
 	bool stopping;
@@ -40,6 +47,7 @@ struct bcm2711_render_resource {
 struct bcm2711_render_device {
 	struct mutex mutex;
 	struct bcm2711_v3d_space space;
+	struct bcm2711_render_worker worker;
 	struct drv_gpu_device *gpu;
 	struct drv_gpu_ops operations;
 	struct drv_gpu_share_ops share_operations;
