@@ -42,6 +42,8 @@ struct bcm2711_vulkan_descriptor_set {
 	bool charged;
 };
 
+int bcm2711_vulkan_descriptor_update_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+int bcm2711_vulkan_descriptor_clone(const struct bcm2711_vulkan_descriptor *source, struct bcm2711_vulkan_descriptor *destination);
 int bcm2711_vulkan_descriptor_sets_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 int bcm2711_vulkan_descriptor_release(struct bcm2711_vulkan_descriptor *descriptor);
 int bcm2711_vulkan_descriptor_pool_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);

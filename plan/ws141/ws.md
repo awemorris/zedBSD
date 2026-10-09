@@ -177,3 +177,7 @@ descriptor/pipeline layoutのexact client decoder、canonical binding、immutabl
 ## i14 pool/set checkpoint（2026-10-09）
 
 descriptor pool lifecycle/complete set batch allocation/freeを接続。old prepared ownersのstorage/chargeをpublic reset/destructionと分離、actual hostでrollback/retentionを確認。host6範囲/rpi4 y build/style PASS、次はdescriptor update/copyとdraw snapshot。i13/i14/p005/p006 in-progress、public runtime/Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。
+
+## i14 descriptor更新 checkpoint（2026-10-09）
+
+ordered write/copy、immutable sampler override、complete staging rollbackとindependent draw descriptor cloneを追加。actual client framing/native host7範囲、RPi4 y build/style PASS。mutable set更新・pool reset・全public resource退役後のprepared exact inputs/backing保持を確認。next render pass/framebuffer/graphics pipeline/native draw/queue、public runtime/Keiland/実機/p007は未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-ordered-descriptor更新とdraw-snapshotのsoftware出力2026-10-09)。
