@@ -206,6 +206,9 @@ struct btd_hid {
 	int page_scan;
 	unsigned refused;
 
+	/* ws197-p002: the session's notices of dropped packets that ended nothing (section 3.5). */
+	unsigned notices;
+
 	/* LE's auto-connect: whether it is set (an LE Create Connection from the filter accept list), how often it was, and when a refused one is tried again (0: at once). */
 	int le_armed;
 	unsigned le_arms;

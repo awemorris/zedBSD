@@ -36,8 +36,9 @@
 #define BTD_LINKMGR_PHONE	0x02U
 #define BTD_LINKMGR_PAIR	0x04U
 
-/* The longest a page may stay begun before the tick ends it (milliseconds). */
+/* The longest a page may stay begun before the tick ends it, and how soon a refused page scan write is tried again (milliseconds). */
 #define BTD_LINKMGR_PAGE_MS	15000U
+#define BTD_LINKMGR_RETRY_MS	1000U
 
 /*
  * The manager of a controller's session.  It lives in the daemon for the
@@ -74,5 +75,6 @@ void btd_linkmgr_page_end(struct btd_linkmgr *linkmgr, unsigned who, const uint8
 void btd_linkmgr_connected(struct btd_linkmgr *linkmgr, const uint8_t *address, uint8_t status);
 int btd_linkmgr_paging(const struct btd_linkmgr *linkmgr);
 int btd_linkmgr_tick(struct btd_linkmgr *linkmgr, uint64_t now_ms);
+uint64_t btd_linkmgr_deadline(const struct btd_linkmgr *linkmgr, uint64_t now_ms);
 
 #endif

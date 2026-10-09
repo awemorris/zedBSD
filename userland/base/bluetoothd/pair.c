@@ -151,6 +151,8 @@ static void pair_refuse_pending(struct btd_pair *pair);
 static void pair_forget_link(struct btd_pair *pair);
 static int pair_phone_accept(void *context, uint16_t handle, uint16_t psm, uint16_t *result, uint16_t *status);
 static int pair_key_authenticated(uint8_t key_type);
+static void pair_page_over(struct btd_pair *pair);
+static void pair_notice(struct btd_pair *pair, const uint8_t *packet);
 static int pair_ours(const struct btd_pair *pair, const uint8_t *address);
 static void pair_name(const struct btd_pair *pair, const uint8_t *address, unsigned type, char *name, size_t size);
 static const char *pair_smp_why(const struct btd_pair *pair);
@@ -195,8 +197,9 @@ btd_pair_init(
  * done hook, also for a refusal now).  agent says whether someone can
  * confirm a number; phone says the pairing is for a phone (ws197-p002
  * section 7.1, BR/EDR only), asked by the client of uid.  Returns 0,
- * EBUSY while a pairing or a scan runs, or EINVAL for a phone's pairing
- * of an LE address (the hook is not called then).
+ * EBUSY while a pairing or a scan runs or another party's BR/EDR page is
+ * out (the link manager's, ws197-p002 section 6.2), or EINVAL for a
+ * phone's pairing of an LE address (the hook is not called then).
  */
 int
 btd_pair_start(
@@ -222,6 +225,15 @@ btd_pair_start(
 			return EINVAL;
 		if (type == BTD_ADDRESS_LE_RANDOM)
 			return EINVAL;
+	}
+
+	/* BR/EDR: the controller's one page, unless another party's is out (busy, as while a HID device's connection is under way). */
+	pair->paging = 0;
+	if (type == BTD_ADDRESS_BREDR && pair->linkmgr != NULL) {
+		error = btd_linkmgr_page_begin(pair->linkmgr, BTD_LINKMGR_PAIR, address, btd_now_ms());
+		if (error != 0)
+			return EBUSY;
+		pair->paging = 1;
 	}
 
 	/* The device and a clean slate. */
@@ -347,6 +359,12 @@ btd_pair_handle(
 	/* ACL data of a connection. */
 	if (length >= 1U && packet[0] == BT_PACKET_ACL) {
 		pair_acl(pair, packet, length);
+		return;
+	}
+
+	/* The session's notice of packets it dropped on the pairing's connection (ws197-p002 section 3.5). */
+	if (length == BTD_DROP_LENGTH && packet[0] == BTD_PACKET_DROP) {
+		pair_notice(pair, packet);
 		return;
 	}
 
@@ -591,6 +609,19 @@ btd_pair_set_handoff(
 }
 
 /*
+ * Gives the pairing the link manager whose one BR/EDR page its Create
+ * Connection takes (ws197-p002 section 6.2; NULL: none).
+ */
+void
+btd_pair_set_linkmgr(
+	struct btd_pair *pair,
+	struct btd_linkmgr *linkmgr)
+{
+	/* The link manager. */
+	pair->linkmgr = linkmgr;
+}
+
+/*
  * Gives the pairing the phone link's hook (ws197-p002 section 7.2), which
  * is offered the connection of a phone's pairing before the HID host's
  * (NULL: a phone's pairing ends with phone=0 why=unsupported).
@@ -775,6 +806,9 @@ pair_connected(
 			pair_disconnect_other(pair, connection);
 		return;
 	}
+
+	/* The page is over, made or failed: the controller may page for another party. */
+	pair_page_over(pair);
 
 	/* The connection failed (a cancelled one ends with the reason it was cancelled for). */
 	if (parameters[0] != 0U) {
@@ -1635,8 +1669,9 @@ pair_deliver(
 {
 	char answer[BTD_PAIR_ANSWER_MAX];
 
-	/* Nothing under way from now on (a new pairing may start inside the hook). */
+	/* Nothing under way from now on (a new pairing may start inside the hook), and no page out. */
 	memcpy(answer, pair->answer, sizeof(answer));
+	pair_page_over(pair);
 	pair->state = PAIR_IDLE;
 	pair->state_deadline = 0U;
 	pair->total_deadline = 0U;
@@ -1667,7 +1702,8 @@ pair_cancel(
 	uint16_t opcode;
 	int error;
 
-	/* The cancel of the kind of connection. */
+	/* The cancel of the kind of connection; the page is over for the link manager. */
+	pair_page_over(pair);
 	pair->pending_error = why;
 	pair->state = PAIR_CANCELLING;
 	pair->state_deadline = btd_now_ms() + BTD_PAIR_CLOSE_MS;
@@ -1985,6 +2021,44 @@ pair_phone_accept(
 
 	/* Any other PSM: not supported. */
 	return 1;
+}
+
+/* Ends the pairing's BR/EDR page at the link manager (ws197-p002 section 6.2), on each way out of it; nothing when none is out. */
+static void
+pair_page_over(
+	struct btd_pair *pair)
+{
+	/* No page of the pairing's out. */
+	if (!pair->paging)
+		return;
+
+	/* Succeeded: over. */
+	pair->paging = 0;
+	btd_linkmgr_page_end(pair->linkmgr, BTD_LINKMGR_PAIR, pair->address);
+}
+
+/*
+ * Takes the session's notice of packets dropped on the pairing's
+ * connection (ws197-p002 section 3.5): the frame being put together goes,
+ * and the pairing is stopped (its next step may have been among them).
+ */
+static void
+pair_notice(
+	struct btd_pair *pair,
+	const uint8_t *packet)
+{
+	uint16_t handle;
+
+	/* Only the pairing's connection while a pairing runs. */
+	handle = (uint16_t)((unsigned)packet[1] | ((unsigned)packet[2] << 8));
+	if (!pair->connected || handle != pair->handle) {
+		pair->ignored++;
+		return;
+	}
+
+	/* Succeeded: the frame dropped, the pairing stopped. */
+	pair->reassembly.active = 0;
+	btd_pair_stop(pair, "lost-packets");
 }
 
 /* Tells whether a BR/EDR link key's type says the key was made with MITM protection (Core Vol 4 Part E §7.7.24). */

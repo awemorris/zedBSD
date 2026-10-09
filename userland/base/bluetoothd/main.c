@@ -38,6 +38,7 @@
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
+#include "userland/base/bluetoothd/linkmgr.h"
 #include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/session.h"
 #include "userland/base/bluetoothd/snoop.h"
@@ -194,6 +195,15 @@ static struct btd_router btd_routing;
 static struct btd_hid btd_hid_host;
 
 /*
+ * The link manager (ws197-p002 section 6): the one that writes the page
+ * scan the HID host wants, and the controller's one BR/EDR page that the
+ * HID host and the pairing take in turn.  It lives as long as the daemon;
+ * a closed node makes it forget what the controller was told and any page
+ * out.
+ */
+static struct btd_linkmgr btd_links;
+
+/*
  * The clients of a pairing: the one that asked for it, the agent that
  * named itself (it answers for pairings of its uid, or of anyone when it
  * is the seat's user), and the one asked the question now
@@ -261,11 +271,13 @@ main(
 	struct pollfd descriptors[4U + BTD_CLIENTS_MAX];
 	struct btd_hid_hooks hid_hooks;
 	struct btd_router_hid router_hid;
+	char expired_text[24];
 	unsigned count;
 	unsigned index;
 	uint64_t now;
 	int listener;
 	int timeout;
+	int expired;
 	int ready;
 	int error;
 
@@ -314,6 +326,11 @@ main(
 	/* The pairing, handed the session's connection packets from each start on. */
 	btd_pair_init(&btd_pairing, &btd_session, BTD_KEYS_FOLDER, btd_ask, btd_paired, NULL, btd_random, NULL);
 	btd_router_init(&btd_routing, &btd_pairing);
+
+	/* The link manager, whose page the router ends on a Connection Complete and the pairing takes. */
+	btd_linkmgr_init(&btd_links, &btd_session);
+	btd_router_set_linkmgr(&btd_routing, &btd_links);
+	btd_pair_set_linkmgr(&btd_pairing, &btd_links);
 
 	/*
 	 * The HID host, the router's owner of its connections, and the
@@ -398,6 +415,15 @@ main(
 		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
 			btd_hid_holding();
 			btd_hid_tick(&btd_hid_host, now);
+		}
+
+		/* The link manager's refused page scan write, and a page nobody ended in time. */
+		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
+			expired = btd_linkmgr_tick(&btd_links, now);
+			if (expired) {
+				btd_format_address(btd_links.expired_address, expired_text, sizeof(expired_text));
+				btd_log("bluetoothd: the page of %s was not ended in time\n", expired_text);
+			}
 		}
 
 		/* A scan that is over answers the client that asked. */
@@ -603,10 +629,11 @@ btd_close(
 	if (!btd_session_open)
 		return;
 
-	/* A pairing cannot go on without the controller (review S-f), and no connection is left. */
+	/* A pairing cannot go on without the controller (review S-f), and no connection or page is left. */
 	btd_pair_lost(&btd_pairing);
 	btd_hid_lost(&btd_hid_host);
 	btd_router_clear(&btd_routing);
+	btd_linkmgr_reset(&btd_links);
 
 	/* A client waiting for a scan is answered. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
@@ -684,6 +711,9 @@ btd_timeout(
 	if (deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
 	deadline = btd_hid_deadline(&btd_hid_host);
+	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
+	deadline = btd_linkmgr_deadline(&btd_links, now);
 	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
 	if (!btd_session_open && !btd_stopped) {

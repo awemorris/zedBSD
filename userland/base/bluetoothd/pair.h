@@ -32,6 +32,7 @@
 #include "userland/base/bluetoothd/acl.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/l2cap.h"
+#include "userland/base/bluetoothd/linkmgr.h"
 #include "userland/base/bluetoothd/session.h"
 #include "userland/base/bluetoothd/smp.h"
 
@@ -186,6 +187,14 @@ struct btd_pair {
 	void *phone_context;
 	int phone_taken;
 	const char *phone_why;
+
+	/*
+	 * ws197-p002 section 6.2: the link manager whose one BR/EDR page the
+	 * pairing takes for its Create Connection (NULL: none, the page is
+	 * not shared), and whether the pairing's page is out.
+	 */
+	struct btd_linkmgr *linkmgr;
+	int paging;
 };
 
 void btd_pair_init(struct btd_pair *pair, struct btd_session *session, const char *keys_folder, btd_pair_ask_fn ask, btd_pair_done_fn done, void *context, btd_random_fn random, void *random_context);
@@ -200,5 +209,6 @@ int btd_pair_active(const struct btd_pair *pair);
 int btd_pair_owns(const struct btd_pair *pair, const uint8_t *address);
 void btd_pair_set_handoff(struct btd_pair *pair, btd_pair_handoff_fn handoff, void *context);
 void btd_pair_set_phone_handoff(struct btd_pair *pair, btd_pair_phone_fn handoff, void *context);
+void btd_pair_set_linkmgr(struct btd_pair *pair, struct btd_linkmgr *linkmgr);
 
 #endif

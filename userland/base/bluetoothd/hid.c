@@ -38,7 +38,6 @@
 #define HID_LINK_KEY_NEGATIVE		0x040cU
 #define HID_AUTHENTICATION		0x0411U
 #define HID_SET_ENCRYPTION		0x0413U
-#define HID_WRITE_SCAN_ENABLE		0x0c1aU
 #define HID_READ_KEY_SIZE		0x1408U
 #define HID_CREATE_CANCEL		0x0408U
 #define HID_LE_CREATE			0x200dU
@@ -85,8 +84,8 @@
 #define HID_REASON_REFUSED		0x0fU
 #define HID_ROLE_CENTRAL		0x00U
 
-/* Write Scan Enable's value: page scan only (inquiry scan is the pairing's mode's, D11b). */
-#define HID_SCAN_PAGE			0x02U
+/* How long a page waits while another party's BR/EDR page is out (the link manager's, ws197-p002 section 6.2; not counted as a try). */
+#define HID_PAGE_WAIT_MS		2000U
 
 /* The only key size taken (KNOB). */
 #define HID_KEY_SIZE			16U
@@ -151,6 +150,8 @@ static void hid_close_bridge(struct btd_hid_device *device);
 static void hid_drop(struct btd_hid *hid, struct btd_hid_device *device, int unplug);
 static void hid_page(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_page_scan(struct btd_hid *hid);
+static void hid_page_over(struct btd_hid *hid, struct btd_hid_device *device);
+static void hid_notice(struct btd_hid *hid, const uint8_t *packet);
 static void hid_retry_later(struct btd_hid_device *device, uint64_t now);
 static void hid_answer(struct btd_hid *hid, struct btd_hid_device *device, const char *line);
 static void hid_connected_line(const struct btd_hid *hid, const struct btd_hid_device *device, char *line, size_t size);
@@ -734,7 +735,8 @@ btd_hid_lost(
 		if (device->asked)
 			hid_answer(hid, device, "ERROR lost");
 
-		/* Nothing open any more. */
+		/* Nothing open any more (a page out is over). */
+		hid_page_over(hid, device);
 		hid_close_bridge(device);
 		hid_reset_link(device);
 		device->state = BTD_HID_IDLE;
@@ -979,6 +981,12 @@ btd_hid_handle(
 	/* ACL data of a connection. */
 	if (length >= 1U && packet[0] == BT_PACKET_ACL) {
 		hid_acl(hid, packet, length);
+		return;
+	}
+
+	/* The session's notice of packets it dropped on a connection of the HID host's (ws197-p002 section 3.5). */
+	if (length == BTD_DROP_LENGTH && packet[0] == BTD_PACKET_DROP) {
+		hid_notice(hid, packet);
 		return;
 	}
 
@@ -1245,6 +1253,9 @@ hid_connected(
 	device = hid_find(hid, parameters + 3);
 	if (device == NULL || device->state != BTD_HID_PAGING)
 		return;
+
+	/* The page is over, made or failed: the controller may page for another party. */
+	hid_page_over(hid, device);
 
 	/* The page failed: tried again later. */
 	if (parameters[0] != 0U) {
@@ -2247,9 +2258,10 @@ hid_ended(
 	char line[BTD_HID_ANSWER_MAX];
 	uint64_t now;
 
-	/* Nothing open any more. */
+	/* Nothing open any more (a page out is over). */
 	if (why == NULL)
 		why = "lost";
+	hid_page_over(hid, device);
 	hid_close_bridge(device);
 	hid_reset_link(device);
 	device->state = BTD_HID_IDLE;
@@ -2335,9 +2347,21 @@ hid_page(
 	struct btd_hid *hid,
 	struct btd_hid_device *device)
 {
+	struct btd_linkmgr *linkmgr;
 	uint8_t parameters[13];
 	uint64_t now;
 	int error;
+
+	/* The controller's one BR/EDR page (ws197-p002 section 6.2): while another party's is out, the page waits a little, not counted as a try. */
+	now = btd_now_ms();
+	linkmgr = hid->router->linkmgr;
+	if (linkmgr != NULL) {
+		error = btd_linkmgr_page_begin(linkmgr, BTD_LINKMGR_HID, device->address, now);
+		if (error != 0) {
+			device->retry_at = now + HID_PAGE_WAIT_MS;
+			return;
+		}
+	}
 
 	/* The page's command. */
 	memset(parameters, 0, sizeof(parameters));
@@ -2347,7 +2371,6 @@ hid_page(
 	parameters[9] = 0x00U;
 	hid_put16(parameters + 10, 0x0000U);
 	parameters[12] = 0x01U;
-	now = btd_now_ms();
 	device->inbound = 0;
 	device->retry_at = 0U;
 	device->state = BTD_HID_PAGING;
@@ -2361,26 +2384,116 @@ hid_page(
 	hid_ended(hid, device, "unreachable");
 }
 
-/* Turns page scan on (once; the controller's refusal is tried again at the next refresh or handoff). */
+/*
+ * Turns page scan on (once): the HID host wants it from the link manager,
+ * the one that writes Write Scan Enable (ws197-p002 section 6.2; page scan
+ * only, inquiry scan is the pairing's mode's, D11b).  A refusal is tried
+ * again by the link manager's tick, and at the next refresh or handoff.
+ * Without a link manager nothing writes it.
+ */
 static void
 hid_page_scan(
 	struct btd_hid *hid)
 {
-	uint8_t scan[1];
+	struct btd_linkmgr *linkmgr;
 	int error;
 
 	/* On already. */
 	if (hid->page_scan)
 		return;
 
-	/* Write Scan Enable: page scan only (inquiry scan is the pairing's mode's, D11b). */
-	scan[0] = HID_SCAN_PAGE;
-	error = hid_command(hid, HID_WRITE_SCAN_ENABLE, scan, sizeof(scan));
+	/* The link manager there is. */
+	linkmgr = hid->router->linkmgr;
+	if (linkmgr == NULL)
+		return;
+
+	/* The HID host's want, written when the controller's setting changes. */
+	error = btd_linkmgr_want_scan(linkmgr, BTD_LINKMGR_HID, 1);
 	if (error != 0)
 		return;
 
 	/* Succeeded: on. */
 	hid->page_scan = 1;
+}
+
+/*
+ * Ends the HID host's BR/EDR page of a device at the link manager, on any
+ * way out of its paging state (ws197-p002 section 6.2): made, failed,
+ * cancelled, timed out, or the controller lost.  A device that connected
+ * by itself, an LE device, and one not paging had no page out.
+ */
+static void
+hid_page_over(
+	struct btd_hid *hid,
+	struct btd_hid_device *device)
+{
+	struct btd_linkmgr *linkmgr;
+
+	/* Only bluetoothd's own BR/EDR page. */
+	if (device->state != BTD_HID_PAGING)
+		return;
+	if (device->inbound)
+		return;
+	if (device->le)
+		return;
+
+	/* The link manager there is. */
+	linkmgr = hid->router->linkmgr;
+	if (linkmgr == NULL)
+		return;
+
+	/* Succeeded: the page is over (a page already ended is passed over). */
+	btd_linkmgr_page_end(linkmgr, BTD_LINKMGR_HID, device->address);
+}
+
+/*
+ * Takes the session's notice of packets dropped on a connection of the
+ * HID host's (ws197-p002 section 3.5).  The frame being put together goes
+ * (its rest may be among those dropped).  A lost data or signalling
+ * packet, or one of no known channel, ends the connection to be made
+ * again: a key's release may have been lost, and closing the input device
+ * releases every key held.  Lost events end a connection that waits for
+ * one (its page, its authentication, its encryption, its SDP); an open one
+ * goes on.
+ */
+static void
+hid_notice(
+	struct btd_hid *hid,
+	const uint8_t *packet)
+{
+	struct btd_hid_device *device;
+	uint16_t handle;
+	uint8_t flags;
+
+	/* The connection's device. */
+	handle = (uint16_t)((unsigned)packet[1] | ((unsigned)packet[2] << 8));
+	flags = packet[3];
+	device = hid_by_handle(hid, handle);
+	if (device == NULL) {
+		hid->notices++;
+		return;
+	}
+
+	/* The frame being put together is not finished with packets that are not there. */
+	device->reassembly.active = 0;
+
+	/* A connection's own packets lost: made again. */
+	if ((flags & (BTD_DROP_SIGNAL | BTD_DROP_DATA | BTD_DROP_UNKNOWN)) != 0U) {
+		hid_fail(hid, device, "lost-packets");
+		return;
+	}
+
+	/* Events lost while the connection waits for one: made again. */
+	if (device->state == BTD_HID_PAGING ||
+	    device->state == BTD_HID_AUTHENTICATING ||
+	    device->state == BTD_HID_ENCRYPTING ||
+	    device->state == BTD_HID_SDP) {
+		hid_fail(hid, device, "lost-packets");
+		return;
+	}
+
+	/* Succeeded: an open connection goes on, the loss counted. */
+	hid->notices++;
 }
 
 /*
@@ -3101,8 +3214,9 @@ hid_cancel_page(
 		return;
 	}
 
-	/* Succeeded: BR/EDR's, by the device's address. */
+	/* Succeeded: BR/EDR's, by the device's address; the page is over for the link manager. */
 	(void)hid_command(hid, HID_CREATE_CANCEL, device->address, BTD_ADDRESS_BYTES);
+	hid_page_over(hid, device);
 }
 
 /*

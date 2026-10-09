@@ -1,6 +1,6 @@
 #!/bin/sh
 # The host test of bluetoothd's phone link parts (ws197-p002, plan/ws197/phase002/phase.md section 12.1): builds
-# userland/base/bluetoothd's RFCOMM, OBEX, SDP server, session, router, link manager and phone pairing parts with the host's compiler under ASan
+# userland/base/bluetoothd's RFCOMM, OBEX, SDP server, session, router, link manager, phone pairing and HID host parts with the host's compiler under ASan
 # and UBSan and runs plan/ws197/tests/bt-phone-host-test.c and the others below (the bonds of the pairing's test go in a new folder of the
 # build).  The last line is "bt-phone-host-test: PASS" or "... FAIL".
 # usage: plan/ws197/tests/bt-phone-host-test.sh   (from the repository's top; OUT= to choose the build folder)
@@ -18,7 +18,8 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
 	"bt-session-host-test userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c -lpthread" \
 	"bt-router-host-test userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread" \
-	"bt-pair-phone-host-test userland/base/bluetoothd/pair.c userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread"; do
+	"bt-pair-phone-host-test userland/base/bluetoothd/pair.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread" \
+	"bt-linkuse-host-test userland/base/bluetoothd/hid.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/sdp.c userland/base/bluetoothd/hidp.c userland/base/bluetoothd/hidcache.c userland/base/bluetoothd/hog.c userland/base/bluetoothd/att.c -lpthread"; do
 	set -- $test
 	name=$1
 	shift

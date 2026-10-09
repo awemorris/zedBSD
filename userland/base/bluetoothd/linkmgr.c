@@ -213,6 +213,34 @@ btd_linkmgr_tick(
 	return 1;
 }
 
+/*
+ * Gives when the tick has work (the daemon's loop wakes then): a refused
+ * page scan write's next try, a page's end of time; 0 when nothing waits.
+ */
+uint64_t
+btd_linkmgr_deadline(
+	const struct btd_linkmgr *linkmgr,
+	uint64_t now_ms)
+{
+	uint64_t earliest;
+	uint64_t expiry;
+
+	/* A refused write, tried again soon. */
+	earliest = 0U;
+	if (linkmgr->scan_retry)
+		earliest = now_ms + BTD_LINKMGR_RETRY_MS;
+
+	/* A page out, ended just after its time. */
+	if (linkmgr->paging) {
+		expiry = linkmgr->page_started_ms + BTD_LINKMGR_PAGE_MS + 1U;
+		if (earliest == 0U || expiry < earliest)
+			earliest = expiry;
+	}
+
+	/* Succeeded: the earliest, or 0. */
+	return earliest;
+}
+
 /* Writes Write Scan Enable when what anybody wants differs from what the controller was told. */
 static int
 linkmgr_write_scan(
