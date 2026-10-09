@@ -90,3 +90,7 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
 - `include/libc/cpio.h`（C_I* の 20 と MAGIC "070707"）・`include/libc/tar.h`（TMAGIC・TMAGLEN・TVERSION・TVERSLEN、typeflag の 9、mode の 12）。値は規格の頁（`build/ws001-posix-ref/pages/cpio.h.html`・`tar.h.html`）から読んで照合した。tree の中に同じ名前を自分で定義する source や `<tar.h>`・`<cpio.h>` を include する source は無い（git grep）。
 - 確かめ: `check.py --header cpio.h --header tar.h` で 3 arch とも missing 0・header の error 無し。amd64 の libc.so の build（rc 0）で sysroot の `usr/include` に 2 つとも入る（既存の規則のまま、toolchain は変えていない）。照合の全体: 無い名前 89 → 89（cpio.h・tar.h は前は file が無く名前を数えていなかった。無い header は 5 → 3: complex.h・monetary.h・wordexp.h、p049・p050）。
 - 再開点: 照合の道具の誤検出（unistd.h の「if defined」の 6、sys/sem.h の匿名の構造体の member）。
+
+## 2026-10-10 Q1: 保留の branch の merge
+
+ユーザー「保留中のコードは随時mainに入れてOKです。」→ agent/p1-p045（19b52e2f4）を main に merge。SO_LINGER 等を `#ifdef` で使う package が ENOPROTOOPT を受けうる件は、T1 の回帰と UAT で見る。kernel の SO_LINGER・SO_ACCEPTCONN の実装・O_EXEC/O_SEARCH・uc_stack・wint_t は残り（ベータ3）。

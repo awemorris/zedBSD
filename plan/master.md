@@ -11,7 +11,7 @@
 -->
 <!-- master:agents:start -->
 - **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=1（P1 だけ）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
-  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。WS199 p002 は cleared（77a40b51f）、P1 は使用量のためラップアップ済み。次の P1 は [WS199](ws199/ws.md) p003 から（phase.md に「すること・やり方」）→ → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。branch agent/p1-ws197（WS197 p003 の i03 の途中。ベータ2 の必須になったので WS200 の後に P1 が再開し、区切りごとに main へ merge）、agent/p1-p045（WS001 p045、10/17 の後）。
+  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。WS199 p002 は cleared（77a40b51f）、P1 は使用量のためラップアップ済み。次の P1 は [WS199](ws199/ws.md) p003 から（phase.md に「すること・やり方」）→ → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。branch agent/p1-ws197（WS197 p003 の i03 の途中。ベータ2 の必須になったので WS200 の後に P1 が再開し、区切りごとに main へ merge）、agent/p1-p045 は main に merge 済み（2026-10-10）。
   - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
   - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
 <!-- master:agents:end -->
@@ -535,6 +535,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
 - 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
+- 2026-10-10 ユーザー:「保留中のコードは随時mainに入れてOKです。」「時間的にも使用量的にも、デバッグしきると思いますので。」→ agent/p1-p045（WS001 p045 の POSIX の header: sys/socket.h の SO_*・MSG_*・struct linger、fcntl.h、小さい関数 22、cpio.h・tar.h）を main に merge（19b52e2f4、vmunix・libc.so の build rc 0・warning 0）。agent/p1-ws197 は P1 が i03 の後に随時 merge。
 - 2026-10-10 ユーザー: 16 日までに使えるのは MAX プラン 3 つ分、「難しいバグもない状況なので、ほぼ確実に実装が終わります。SMSの送受信がスムースかどうかはわかりませんが。」体制はクリック「N=1 のまま」→ P1 が WS200 の後に WS197（branch agent/p1-ws197 に main を merge して p003 i03 から）。ベータ2 に入れるので、i03 が通ったら区切りごとに main へ merge する（release の bluetoothd が変わる、HID の回帰は T1 で確かめる）。
 - 2026-10-10 夜 ユーザー:「WS197はbeta2.mdで必須に入れておいてください。」→ beta2.md の必須に WS197（約 100 LW の残り）。UAT: BUG-283・284・285・286 close、WS199 の頁・ログイン画面のキー OK（PIN 不要・タッチ不要は image が古く未確認）、WS200 は未実装、BUG-222 は 4.9 MB/s。
 - 2026-10-10 merge 5515a4dab（WS199）: R3「置きっ放しもタッチ」を passkey-fido2 に、kernel の smartcard.c の drv_smartcard_card が card の出入りで KERN_SYSTEM_EVENT_USB の CHANGE（detail card=0|1）を post（Q1 の許し、include/uapi/system.h は注釈 1 行だけで layout 不変）、host-kl-system.c の printers の stub、fido2-p003-guest.sh の段 4 を security-keys の頁に。
