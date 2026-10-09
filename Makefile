@@ -812,7 +812,8 @@ DATA_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-data-image.noct \
 	$(BUILD_TOOLS_DIR)/overlay_journal_format.noct \
 	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
 ARCH_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-image.py \
-	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py
+	$(BUILD_TOOLS_DIR)/check-arch-overlay-image.py \
+	$(BUILD_TOOLS_DIR)/subtree_files.py
 ARCH_UFS_IMAGE_TOOLS := $(BUILD_TOOLS_DIR)/make-arch-overlay-ufs.noct \
 	$(BUILD_TOOLS_DIR)/ufs_format.noct $(ZEDBSD_IMAGE_HOST)
 # The release locks root (ws129-p004, U10): ZEDBSD_ROOT_LOCKED=y installs
@@ -904,8 +905,9 @@ release-info:
  'zip=$(if $(filter y,$(ZEDBSD_RELEASE_ZIP)),y,n)'
 
 # Files a caller wants in this one image without declaring a package, named on
-# the command line. It exists so that a test can put a program in an image and
-# run it, and is empty in an ordinary build:
+# the command line (--file, --mode and --subtree, as a package's). It exists so
+# that a test can put a program in an image and run it, and is empty in an
+# ordinary build:
 #
 #   make ZEDBSD_EXTRA_INPUTS=/path/to/prog \
 #        ZEDBSD_EXTRA_FILES='--file /usr/bin/prog=/path/to/prog' disk-image
@@ -1004,6 +1006,15 @@ ZEDBSD_ROOTFS_STICKY_DIRECTORIES := tmp shm
 # have been staged, not when this rule is evaluated: a package whose file list
 # is read from its own stage has an empty list while make parses a fresh
 # build, and the first image would lack those files (BUG-087).
+#
+# --subtree DEST=DIRECTORY puts a whole directory of a package's stage at DEST
+# (ws125-p002): Python's standard library, vim's runtime and Emacs's lisp are
+# thousands of files, and a --file for each would make this recipe, which is
+# one argument of the shell, longer than the 128 KiB the kernel allows one
+# argument.  The files keep their modes and symbolic links stay links.  What
+# the directory holds is not part of the selection's stamp, so the package
+# names a stamp of its stage among ZEDBSD_PACKAGE_INPUTS, and the root is
+# staged again when the package is.
 define ZEDBSD_ROOTFS_TREE_RULE
 $(BUILD)/rootfs/.stamp: $(ZEDBSD_ROOTFS_CONFIG_STAMP) $(2) \
 	$(ZEDBSD_PACKAGE_INPUTS) $(ZEDBSD_ROOTFS_DEVELOPMENT_INPUTS)
@@ -1025,6 +1036,11 @@ $(BUILD)/rootfs/.stamp: $(ZEDBSD_ROOTFS_CONFIG_STAMP) $(2) \
  case $$$$option in \
  --file) test "$$$$pass" = file || continue; \
  mkdir -p "$$$${destination%/*}"; cp -f "$$$$value" "$$$$destination" ;; \
+ --subtree) test "$$$$pass" = file || continue; \
+ test -d "$$$$value" || { \
+ echo "rootfs: --subtree names no directory: $$$$value" >&2; \
+ exit 2; }; \
+ mkdir -p "$$$$destination"; cp -RPp "$$$$value/." "$$$$destination/" ;; \
  --mode) test "$$$$pass" = mode || continue; \
  test -e "$$$$destination" || { \
  echo "rootfs: --mode names a file nothing installed: /$$$$path" >&2; \
