@@ -5,7 +5,7 @@
 Phase ID: `ws197-p004`
 Parent: [WS197](../ws.md)
 Related: [WS170](../../ws170/ws.md)（Phone の app、保存の持ち主）
-Status: planning（2026-10-10 P1: 詳細設計の第 3 版。[review-1.md](review-1.md)（blocker 3・major 13）と [review-2.md](review-2.md)（blocker 0・major 6・minor 14）を本文に入れた（各節の `[B1]`・`[M1]`・`[MA]`・`[m]` の印）。残りの判断は §9 で Q1 経由でユーザーへ。p004a〜c の実装は p003 の後）
+Status: planning（2026-10-10 P1: 詳細設計の第 3.1 版。[review-1.md](review-1.md)（blocker 3・major 13）、[review-2.md](review-2.md)（blocker 0・major 6・minor 14）、review-3（major 1・minor 6、Event の行）を本文に入れた（各節の `[B1]`・`[M1]`・`[MA]`・`[MG]`・`[m]`・`[n]` の印）。残りの判断は §9 で Q1 経由でユーザーへ。p004a〜c の実装は p003 の後）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-10「WS197 p004 の詳細設計として、SMS 利用における Phone app・libkeiland・libkeiland-backend・bluetoothd の流れと interface を確定し、別の session で判断の違いが出ないようにする」）
 
@@ -30,6 +30,7 @@ Queue: Q1 の投入（2026-10-10「WS197 p004 の詳細設計として、SMS 利
   1. 英字を含む送り手（"Amazon" など）、または数字が 6 桁未満（短い番号）: 前後の空白を除いて小文字にした文字列そのもの。
   2. 他は区切り（空白・`-`・`.`・括弧）を除く。`+` で始まれば `+` と数字のまま。`00` で始まれば `+` に置き換える。`0` 1 つで始まれば、その `0` を除いて `+<国番号>` を前に付ける（国番号は Settings の地域、無ければ記録の国番号の既定 `81`）。他（国内の番号を `0` 無しで書く国、NANP の 10 桁など）は `+<国番号>` を前に付ける。
   - 例（国番号 81）: `090-1234-5678` → `+819012345678`、`+81 90 1234 5678` → `+819012345678`、`080-1234-5678` → `+818012345678`（別の相手）。
+  - 限界（記録）[n3]: `+` も `0` も無く国番号から書いた番号（`819012345678`）には `+81` がもう一度付き、別の鍵になる。スマホの MAP は普通 `+` 付きか国内の形で出すので、出れば p008 で直す。
 
 ## 1. 層の流れ
 
@@ -201,11 +202,13 @@ struct kl_phone_link {
 | `int kl_system_phone_watch_link(struct kl_system *system, unsigned on)` | link の状態（`KL_PHONE_LINK_CHANGED`）だけを受ける（Settings 用、app_id の gate 無し）[ME] | 0、ENOTSUP |
 | `int kl_system_phone_link_set(struct kl_system *system, const char *address, unsigned on, unsigned profiles, uint32_t *request)` | 「スマホとして使う」と profile の switch（bluetoothd の `PHONE LINK`、持ち主の確かめは bluetoothd、app_id の gate 無し）[ME] | 0、ENOTSUP、EINVAL |
 
-- 結果: `kl_system_take_result` の (request, error)。error は §3.5。app_id の gate（§4.1）に掛かった request は `done(request, EACCES)`、listen は何も来ない。
+- 結果: `kl_system_take_result` の (request, error)。error は §3.5。app_id の gate（§4.1）に掛かった request は `done(request, REFUSED)`（EACCES）、listen は `link` の why `not-phone` で答える [m13]。
+- libkeiland は item を queue に積むたびに `KL_SYSTEM_CHANGED_PHONE` を立てる [MC]。
+- result の ring（32）が満ちると一番古い result を黙って捨てる（今の作り）。同期の `done` が落ちた app は 180 秒の期限で失敗とする（記録）[n6]。
 - `kl_system_take_phone_event` には v1 の `KL_PHONE_STATUS`（送信の状態）と、新しい `KL_PHONE_ITEMS`・`_LINK_CHANGED`・`_DROPPED` が来る。`KL_PHONE_ITEMS` は item の queue が空から物ありになった時の 1 つの印で、item ごとには積まない [B2]。**印は目安**: app は `KL_SYSTEM_CHANGED_PHONE` のたびと `KL_PHONE_DROPPED` を受けた時に、`kl_system_take_phone_item` を 0 が返るまで呼ぶ（印が ring から落ちても queue が止まらない）[MC]。
 - libkeiland の phone の event の ring（16）が満ちて古い物を捨てた時は、次の take で `KL_PHONE_DROPPED` を先に返す（`KL_NOTIFY_LOST` と同じ作り）[B2]。item の queue（最大 64 個、本文は item ごとに malloc で 16 KB まで、take で前の物を free）が満ちて捨てた時も `KL_PHONE_DROPPED`。
 - app は `KL_PHONE_ITEMS` の後に item を全部取ってから、result を見る（同期の request の result はその item の後に来る）。
-- bluetooth の backend の時、v1 の `received` は**どの app にも送らない**（listen した Phone の app は item で受ける）[M1, m6]。loopback の時は今どおり。
+- bluetooth の backend の時、v1 の `received` は**どの app にも送らない**（listen した Phone の app は item で受ける）[M1, m6]。loopback の時は今どおり（試験の偽の data なので gate も掛けない）[n5]。
 
 ### 3.4 app の側の規則（Phone の app）
 
@@ -255,7 +258,7 @@ manager の版 M（今 26 の次、merge の時に Q1）。v1 の request 0〜2�
 | event | 6 | dropped | — |
 | event | 7 | done | uint request, uint code（`KL_SYSTEM_RESULT_*`） |
 
-- `done` の code [MA]: 今の `KL_SYSTEM_RESULT_*` に足す: `LOST` 12（ECONNRESET）、`TIMEOUT` 13（ETIMEDOUT）、`TOO_LARGE` 14（EMSGSIZE）、`NO_ROOM` 15（ENOBUFS）、`NOT_CONNECTED` 16（ENOTCONN）、`NOT_FOUND` 17（ENOENT）。`system_view_error_of` に対応を足す。既存の対応: OK 0、REFUSED（EACCES）、UNSUPPORTED（ENOTSUP）、BUSY（EBUSY）、INVALID（EINVAL）、UNAVAILABLE（ENODEV）、STALE（ESTALE）、FAILED（EIO）。wire に OS の errno の数を出さない。libkeiland は `done` を result の ring に入れる（`system_view_result`、app は `kl_system_take_result`）[B1]。
+- `done` の code [MA]: 今の `KL_SYSTEM_RESULT_*` に足す: `LOST` 12（ECONNRESET）、`TIMEOUT` 13（ETIMEDOUT）、`TOO_LARGE` 14（EMSGSIZE）、`NO_ROOM` 15（ENOBUFS）、`NOT_CONNECTED` 16（ENOTCONN）。スマホに無い（`not-found`、ENOENT）は今の `NO_KEY` 8 を使う [n1]。`system_view_error_of` に対応を足す。既存の対応: OK 0、REFUSED（EACCES）、UNSUPPORTED（ENOTSUP）、BUSY（EBUSY）、INVALID（EINVAL）、UNAVAILABLE（ENODEV）、STALE（ESTALE）、FAILED（EIO）。wire に OS の errno の数を出さない。libkeiland は `done` を result の ring に入れる（`system_view_result`、app は `kl_system_take_result`）[B1]。
 - v1 の `send`（1023 byte）は backend 2 でも受ける: channel が SMS でなければ `result(UNSUPPORTED)`、app_id の gate（§4.1）に掛かれば `result(REFUSED)`、他は `result(OK)` の後に `send_text` と同じ道で送り、v1 の `status` を返す（`done` は送らない）[M13, m6]。
 - 1 つの item の wire は最大 約 17 KB（本文 16 KB）で、wire の上限 65532 byte に収まる。
 
@@ -276,10 +279,12 @@ manager の版 M（今 26 の次、merge の時に Q1）。v1 の request 0〜2�
 ### 4.3 compositor の中（phone-shell.c）
 
 - backend の表に `bluetooth`（値 2、`KL_SYSTEM_PHONE_BACKEND_BLUETOOTH`）。表の形を `struct phone_backend { name; open; close; update; send; call; sync; mark_read; }` に広げる。loopback は sync に固定の偽の page（2 通: 受信 1・送信 1、key 付き、`more=0`）を返し、link は messages=ready・can_send=1・notify=1（T1 の AAT 用）[m]。
-- backend は設定 `phone.backend` が 2 になった時に `kl_backend_phone_open()`、2 でなくなった時に close（設定の変化を見る）。close の時、走っている request は `done(ENODEV)`、`link` を送る。greeter の compositor は開かない（bluetooth-shell.c と同じ）[M11]。`settings-keys.c` の `phone.backend` の範囲を 0〜2 に。
+- **backend の開け閉め** [MG]: compositor は起動の時に `kl_backend_phone_open()` を**いつも**開く（`phone.backend` に関わらない。greeter の compositor は開かない、bluetooth-shell.c と同じ。Linux・FreeBSD は全部 ENOTSUP の物）。`watch_link`・`link_set` と link の状態は `phone.backend` に関わらずこの backend を使う（Settings は switch が off でも記録を読み書きできる）。`phone.backend` が 2 の時だけ、SMS の中継（sync・send_text・mark_read・live の item・v1 の send）をこの backend で行う。`phone.backend` が 2 でなくなった時、走っている SMS の request は `done(UNAVAILABLE)`（ENODEV）にし、`link` を送る（backend は開いたまま）[M11]。`settings-keys.c` の `phone.backend` の範囲を 0〜2 に。
+- **Settings の「スマホとして使う」の順** [MG]: on は (1) 記録が無ければ `PAIR … phone=1`（Bluetooth の拡張）、(2) `link_set on`（`done` を待つ）、(3) `phone.backend = 2`。off は (1) `link_set off`（`done` を待つ）、(2) `phone.backend = 0`。途中の失敗はそこで止め、前の段を戻さない（記録の enabled は bluetoothd が正、Settings は `link` の event で今の状態を表示し直す）。
 - main loop の毎回 `kl_backend_phone_update()` で読んだ物を配る。**同じ update の中では result を SENT より先に処理**し、対応表に無い n の SENT は 10 秒保留して照らす（bluetoothd の map.c の保留と同じ）。backend が繋ぎ直した（state の reachable が 0→1）時は対応表を空にする [M4]。
 - 同期: 1 つの app の同期は 1 本（EBUSY）。backend の同期の接続は 1 本なので、全体で同時に 1 つの同期を流し、他の object の同期は compositor の中で待たせる（app_id の gate で実際は Phone の app だけ）。待たせた同期は 150 秒で `done(TIMEOUT)` [M7, m2]。
-- `link` の event は listen か watch_link をした object へ、backend の state が変わった時に送る。`link_set` は backend の `kl_backend_phone_link_set` へ、結果は `done`。
+- `link` の event は listen か watch_link をした object へ、backend の state が変わった時と `phone.backend` が変わった時に送る。`link_set` は backend の `kl_backend_phone_link_set` へ、結果は `done`。compositor の Bluetooth の `PAIR … phone=1`・`FORGET` の `DONE` の後に `kl_backend_phone_refresh()` を呼ぶ（§5.3、[n4]）。
+- 版 M 以上の object への新しい request（3〜8）の結果は `done` だけ（v1 の `result` は v1 の request（send・call）だけ）[n2]。v1 の `status` と `result` は §4.2 の落とさない event に入れない（`status` が落ちても §6.3 の 1 時間の規則で決まる）。
 - 送信の対応表: `bluetoothd の request の番号 n → (client, object, app の request)`、32 個（古い物から捨てる）。client が去ったら対応を消す（後の `PHONE SENT` は捨てる。app は次の同期で知る、§6.3）。
 - 通知（§7）。
 - log は件数・長さ・errno だけ（番号・名前・本文を出さない）。
@@ -397,6 +402,7 @@ int kl_backend_phone_link_set(struct kl_backend_phone *phone, const char *addres
 int kl_backend_phone_take_item(struct kl_backend_phone *phone, struct kl_backend_phone_item *item);	/* 1 か 0 */
 int kl_backend_phone_take_result(struct kl_backend_phone *phone, struct kl_backend_phone_result *result);	/* 1 か 0 */
 int kl_backend_phone_take_sent(struct kl_backend_phone *phone, uint32_t *sent_request, unsigned *state);	/* 1 か 0 */
+void kl_backend_phone_refresh(struct kl_backend_phone *phone);	/* SHOW と SUBSCRIBE をすぐやり直す（PAIR phone=1・FORGET の後）[n4] */
 ```
 
 - 返り値: page・read・send・link_set は 0、ENOTCONN（bluetoothd が居ない）、ENOTSUP、EINVAL（§3.3 の検査）、EBUSY（その接続の queue が満ち）。
@@ -560,7 +566,7 @@ p004 を 3 つの Phase に分ける案（Q1 に ws.md の表の更新を頼む�
 
 ### 11.4 libkeiland（WS197 p004a、WS170 の API の拡張）
 
-- `keiland.h`: §3 の定数・struct・関数、KL_VERSION N の行。`system.c`・`system-protocol.c`・`system-view.c`（item の queue、page_end の記録、ring の溢れの印、同期の EBUSY と 120 秒）・`system-private.h`・`exports.map`。
+- `keiland.h`: §3 の定数・struct・関数、KL_VERSION N の行。`system.c`・`system-protocol.c`・`system-view.c`（item の queue、page_end の記録、ring の溢れの印、同期の EBUSY と 180 秒、`system_view_error_of` の新しい code）・`system-private.h`・`exports.map`。
 - 試験: `plan/ws089/tests/host-kl-system.c` の作りで item・page_end・done・dropped・ring の溢れ。
 
 ### 11.5 Phone の app（WS170 の code、WS197 p004b。WS170 の ws.md に記録）
@@ -586,7 +592,7 @@ p004 の 12 LW の内訳の案: p004a 6.5（backend 3、compositor 2、libkeilan
 
 - host:
   - backend（偽の bluetoothd）: PAGE の item と PAGE-END（capped）、ERROR、SUBSCRIBE の STATE・MESSAGE・SENT・DROPPED、長さ付きの本文が 2 回の read に割れる、**SENT が pushed の結果より先に来る**、bluetoothd の切断と繋ぎ直し（**request の番号の衝突**）、SEND の `length=0` を出さない、見張りの 120 秒、SUBSCRIBE の permission と busy のやり直し。
-  - libkeiland: item の queue と `KL_PHONE_ITEMS` の 1 つの印、page_end、done → result、**phone の ring の溢れで DROPPED**、同期の EBUSY が done・120 秒で解ける、大きさの引数。
+  - libkeiland: item の queue と `KL_PHONE_ITEMS` の 1 つの印、page_end、done → result、**phone の ring の溢れで DROPPED**、同期の EBUSY が done・180 秒で解ける、大きさの引数。
   - compositor（phone-shell）: 送信の対応表と 10 秒の保留、同期の待ち、**`page_end`・`done` が ENOBUFS で借りになり、出力が減ってから届く**、app_id の gate、backend の開け閉め。
   - Phone の store: §6.3 の手順の全部（key の重複、partial、送った 1 通の重ね、rename、1 対 1、`failed` の後の重ねで `sent`、partial と Source の file）、番号の鍵（`090…` と `+8190…` が同じ、`090…` と `080…` が別、英字の送り手）、知らない header の保持、目印と capped と `deep_at`、1 時間の規則、**同期の item で通知しない**。
   - libkeiland（足し）: **`KL_PHONE_ITEMS` の印が ring から落ちても item が取れる**、`done` の code と errno の対応。
@@ -601,4 +607,6 @@ p004 の 12 LW の内訳の案: p004a 6.5（backend 3、compositor 2、libkeilan
 - 2026-10-10: design-reviewer の review → [review-1.md](review-1.md)（blocker 3・major 13・minor 約 20。§0・§5.1〜§5.2（B3 の後）・§6.1・§10・§11.1・§11.2 の配置は GO）。
 - 2026-10-10: 第 2 版（P1、e9a737e2f）。全部に答えた（各節の印）。
 - 2026-10-10: design-reviewer の確認 → [review-2.md](review-2.md)（blocker 0・major 6（MA〜MF）・minor 14。§5 は GO で p003 i07 に進めてよい、p004a〜c は第 3 版の後）。
-- 2026-10-10: 第 3 版（P1）。MA〜MF と m1〜m14 を入れた（各節の印）。p003 i07（d1a47470d）は §5 の第 3 版の形（cursor の capped、閉じる時の扱い）で実装済み。
+- 2026-10-10: 第 3 版（P1、2c30374b7）。MA〜MF と m1〜m14 を入れた（各節の印）。p003 i07（d1a47470d）は §5 の第 3 版の形（cursor の capped、閉じる時の扱い）で実装済み。
+- 2026-10-10: design-reviewer の確認（review-3、短い確認、file にせずこの行に要約）: MA〜MF・m1〜m14 は閉じた（m2・m13 は古い文が残っていた）。新しい major 1: **MG** 「スマホとして使う」の switch が phone.backend・記録の enabled・PAIR の 3 つの意味を持ち、backend の開け閉めと順が決まっていない（Settings が backend 0 の間に記録を読めない、off の時に LINK off を送れない）。minor: n1 NOT_FOUND と NO_KEY の重なり、n2 v1 の result と done の二重、n3 `+` 無しの国番号付きの番号、n4 backend に refresh が無い、n5 loopback の gate、n6 result の ring の溢れ（記録）。判定: p004a は §4.3 に MG の段落を入れれば GO、p004b は GO、p004c は MG の Settings の順を書けば GO。
+- 2026-10-10: 第 3.1 版（P1）。MG（backend はいつも開き、SMS の中継だけ phone.backend 2 で。Settings の on・off の順）、m2・m13 の古い文、n1〜n6 を入れた。review-3 の判定の条件を満たしたので p004a〜c は GO（短い差分、再 review は要らない、review-3 の判定のとおり）。
