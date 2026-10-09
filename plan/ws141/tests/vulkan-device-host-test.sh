@@ -12,7 +12,7 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -include time.h -Wall -Wextr
     -ffunction-sections -fdata-sections -Iplan/ws141/tests/host -I"$out/client-headers" -Iinclude -Isrc -I. \
     plan/ws141/tests/vulkan-device-host-test.c plan/ws141/tests/vulkan-client-pipeline-host.c plan/ws141/tests/display-lock-host.c \
     src/drivers/gpu/bcm2711/vulkan-object.c src/drivers/gpu/bcm2711/vulkan-session.c \
-    src/drivers/gpu/bcm2711/vulkan-stream.c src/drivers/gpu/bcm2711/vulkan-device.c src/drivers/gpu/bcm2711/vulkan-sync.c \
+    src/drivers/gpu/bcm2711/vulkan-stream.c src/drivers/gpu/bcm2711/vulkan-device.c src/drivers/gpu/bcm2711/vulkan-sync.c src/drivers/gpu/bcm2711/vulkan-queue.c src/drivers/gpu/bcm2711/render-worker.c \
     src/drivers/gpu/bcm2711/vulkan-query.c src/drivers/gpu/bcm2711/vulkan-memory.c src/drivers/gpu/bcm2711/vulkan-resource.c src/drivers/gpu/bcm2711/vulkan-input.c src/drivers/gpu/bcm2711/vulkan-layout.c src/drivers/gpu/bcm2711/vulkan-layout-compat.c src/drivers/gpu/bcm2711/vulkan-descriptor-pool.c \
     src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-descriptor-update.c src/drivers/gpu/bcm2711/vulkan-target.c \
     src/drivers/gpu/bcm2711/vulkan-pipeline-build.c src/drivers/gpu/bcm2711/vulkan-pipeline-state.c src/drivers/gpu/bcm2711/vulkan-pipeline.c src/drivers/gpu/bcm2711/vulkan-pipeline-decode.c \

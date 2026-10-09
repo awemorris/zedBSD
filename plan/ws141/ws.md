@@ -242,3 +242,8 @@ actual public upload/readbackをimmutable pending primaryとFIFO Normal NC CPU�
 ## core sync checkpoint（2026-10-10）
 
 native fence/binary semaphoreのtyped device ownership、初期状態/status/atomic reset/destruction/OOMを実装。実client codec/transport＋明示pending/fault modelのhost24範囲、RPi4 y checks3/warning-error0/scoped style0 PASS。QueueSubmit completion/common marker/public binding/Keiland/physical/final runtime stack/p007は残り、in-progress/incompleteを維持。Master変更無し。[詳細/検証/復帰点](execution-20261009.md#i14-core-fencebinary-semaphoreのsoftware出力2026-10-10)。
+
+
+## actual QueueSubmit checkpoint（2026-10-10）
+
+実legacy client submit encoderとnative QueueSubmitを接続。全graph/prepared8MiB/256actionのpreflight後、既存COMMAND worker内でnative退役を直列確認し、binary chainsとfinal native fenceを完成させる。OOM/prefix refusal/one-time/uncertain whole quarantine/empty work fault refusalを実client private encoder＋actual kernel source/明示runner host25範囲で確認。RPi4 y checks3/warning-error0/scoped style0/diff0 PASS。COMMAND/CAPSET/JOB binding/public runtime・final stack/p007・実機/Keilandは残り、in-progress/incompleteを維持。Master変更無し。[exact scope/内部手順/限界/次](execution-20261009.md#i14-actual-legacy-queuesubmitのsoftware出力2026-10-10)。
