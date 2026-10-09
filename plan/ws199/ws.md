@@ -43,6 +43,10 @@ Resume point: p001 から。
 - 範囲:「全部ベータ2」（自動の鍵のモード・PIN 不要・タッチ不要も含む。5330 の YubiKey で鍵の振る舞いを先に確かめる）。
 - 他の推しは「全部推しどおり」: WS200 の Sign-in Methods と PIN 不要・タッチ不要を /etc/passkey の 1 行の設定にまとめ両方の頁が読む、鍵の PIN の変更は鍵の PIN だけで password 無し、Reset で消えた登録はこの機械からも消す、Add の password は最初に聞く、独立の頁。
 
+## R3 の決定（2026-10-10 ユーザー、クリック「置きっ放しもタッチ」）
+
+NFC の reader に載せたままの鍵も、そのまま「タッチ」と見なす（当て直しを求めない）。Q1 の注: reader に鍵を置いておくと、PIN を求めない設定の人は誰も触らずに login・解除できる。Settings の警告と release notes に書く。
+
 ## 目標
 
 - Settings に「Security Keys」の独立の頁（今は Users の頁の中の欄）。
