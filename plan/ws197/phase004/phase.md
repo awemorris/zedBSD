@@ -610,3 +610,7 @@ p004 の 12 LW の内訳の案: p004a 6.5（backend 3、compositor 2、libkeilan
 - 2026-10-10: 第 3 版（P1、2c30374b7）。MA〜MF と m1〜m14 を入れた（各節の印）。p003 i07（d1a47470d）は §5 の第 3 版の形（cursor の capped、閉じる時の扱い）で実装済み。
 - 2026-10-10: design-reviewer の確認（review-3、短い確認、file にせずこの行に要約）: MA〜MF・m1〜m14 は閉じた（m2・m13 は古い文が残っていた）。新しい major 1: **MG** 「スマホとして使う」の switch が phone.backend・記録の enabled・PAIR の 3 つの意味を持ち、backend の開け閉めと順が決まっていない（Settings が backend 0 の間に記録を読めない、off の時に LINK off を送れない）。minor: n1 NOT_FOUND と NO_KEY の重なり、n2 v1 の result と done の二重、n3 `+` 無しの国番号付きの番号、n4 backend に refresh が無い、n5 loopback の gate、n6 result の ring の溢れ（記録）。判定: p004a は §4.3 に MG の段落を入れれば GO、p004b は GO、p004c は MG の Settings の順を書けば GO。
 - 2026-10-10: 第 3.1 版（P1）。MG（backend はいつも開き、SMS の中継だけ phone.backend 2 で。Settings の on・off の順）、m2・m13 の古い文、n1〜n6 を入れた。review-3 の判定の条件を満たしたので p004a〜c は GO（短い差分、再 review は要らない、review-3 の判定のとおり）。
+
+## ユーザーの決定（2026-10-10）
+
+P1〜P7 はクリック「全部推しどおり」: P1 app が閉じている間の SMS は保存せず通知だけ（次の同期で取り込む）、P2 本文は次の取得まで libkeiland の buffer を指す、P3 新しい kl_system_phone_send_text（8192 byte）で旧い関数は残す、P4 Settings の「Use as phone」で phone.backend=2、P5 自分の送信とスマホの写しの照合は app（番号・向き・本文・±10 分）、P6 1 頁 32 件固定、P7 SMS の本文は app_id「phone」だけ。P8（技術、Q1）: 番号の正規化の既定の国番号は Settings の region、無ければ 81（推しどおり）。
