@@ -1,3 +1,37 @@
+# ベータ2 の image の license の一覧（ws129-p002、ベータ1 の一覧を作り直した物）
+
+## ベータ2 の再生成（2026-10-09、P1、q920）
+
+対象は release の config `config/release/config-amd64-beta2.mk`（CI の config に clang・libcxx・emacs・libavcodec・videoplayer、release の knob）。
+生成物 [licenses-generated.md](licenses-generated.md)・[licenses-index.txt](licenses-index.txt) をこの config で作り直した:
+
+    python3 tools/release/license-inventory.py --config config/release/config-amd64-beta2.mk \
+        --distfiles /home/awe/zedBSD-claude1/build/distfiles \
+        --markdown plan/ws129/licenses-generated.md --index plan/ws129/licenses-index.txt
+
+→ `26 components, 0 open items`（249 の userland package、21 の kernel の option、`/usr/share/licenses` の 28 file）。ベータ1 の一覧からの差:
+
+| 差 | component | 理由 |
+| --- | --- | --- |
+| 増えた | FFmpeg 9.0.2（LGPL-2.1-or-later、status `decided`） | libavcodec・videoplayer（WS122、2026-10-05 ユーザーの判断）。build の `config.h` は `FFMPEG_LICENSE "LGPL version 2.1 or later"`、`CONFIG_GPL 0`・`CONFIG_NONFREE 0`・`CONFIG_VERSION3 0`（main の `build/packages/libavcodec/build/config.h` で確かめた）。共有 library で置き換えられる。release notes に source の在り処（tarball の URL と sha256、package の Makefile の configure の option）を書く（p005） |
+| 増えた | Hershey fonts（hand-hershey）、SKK の入力の辞書（ime-dict-skk） | CI の config に入った（手書き・IME）。license の本文は在る |
+| 変わった | desktop の font: Inter → Mahora（Zlib） | font の差し替え。`Mahora-LICENSE.txt` が入る |
+| 減った | libvulkan の Venus の宣言（virglrenderer、MIT、旧 G4） | libvulkan が Venus の protocol をやめ Kei GPU の command protocol（uapi/gpu-op.h、ws167-p002）にした。第三者の文が無くなり、表からも外された（commit 4034e6b25） |
+| 減った | Expat | ベータ1 の一覧はデモの config との和で、expat はデモの側だけ。release の config は選ばない |
+
+firmware: i915・AX211 の WiFi・RTL8822B は入り、本文も在る。**Intel の Bluetooth の firmware（`intelbt-firmware`）は release の config に無い**
+（`bluetoothd`・`bt` は在る。UAT の config `config/current-uat.mk` だけが足している）。5330 の AX211 の Bluetooth は firmware が要るので、
+WS143（Bluetooth の HID）を release に入れるなら config に足す必要がある（判断は Q1・ユーザー）。足した場合も表の component は在り、
+`build/ws129-p002/config-with-intelbt.mk`（release の config＋intelbt-firmware）で `27 components, 0 open items`（本文 `LICENCE.ibt_firmware`・`WHENCE`、
+変更しない binary だけ・逆 engineering の禁止）。
+
+audit（`plan/tools/packages/audit-licenses.sh /home/awe/zedBSD-claude1/build/distfiles`、34 file）: FFmpeg の archive を package の判定に足した
+（上の通り LGPL として build）。展開先を `build/tmp/audit-licenses`（`plan/tools/fresh-out.sh`、消すのは Q1）にし、script の `rm -rf` をやめた。
+結果 `8944 GPL-bearing file(s)`、未知は `REmacs-1a72…/README.md` の 1 件だけ: main の distfiles に残った古い `remacs-1a724393053e.tar.gz`
+（2026-10-04 から取得も参照もしない。tree のどの Makefile・script にも名前が無い）。Q1 がこの archive を distfiles から外せば all known: yes。
+
+---
+
 # ベータ1 の image の license の一覧（ws129-p002）
 
 2026-10-04、P2（q668）。対象は release の image の当面の定義（`config/ci/config-amd64.mk` とデモの `plan/ws075/demo/config-demo-hdmi.mk` の和）。
