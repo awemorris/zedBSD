@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: native upload ownerはmain 89cf1a8f9へ統合（actual MMU/view host・y build PASS）。i14 integer viewport uniformsは独立host IEEE1280 pairとy build PASS。次はnative uniform stream/UBO FIFO read・owned TMU scratch/fetch・graphics CL・transfer/barrier/queue/public/commonとwhole-job/session quarantine。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09)。
+Resume point: i14 native storage/viewport/scalar uniform CPU loweringはhost/build PASS。actual compiled3 stage順・FIFO時点のcoherent UBO readを確認。次はnative uniform/code/TMU/fetch GPU preparationとwhole-job/session quarantine、graphics CL、transfer/barrier/queue/public/common。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-fifo-scalar-uniform-streamのsoftware出力2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 

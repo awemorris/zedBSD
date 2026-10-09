@@ -128,3 +128,7 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 [詳細](../execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09): copied IEEE viewportからXY shader scale/depth range/offsetをkernel integerのみでatomic生成。guard/round/stickyとnearest-evenを使用し、subnormal/逆depth/±zeroを保持。native-state hostのindependent host FP oracleで256境界＋1024固定sampleが全bits一致、既存XML/pixelもPASS、y build warning/error0/style total0。
 
 次にuniform streamとFIFO時点のUBO read、owned descriptor pointers/native storage/quarantineを接続する。general softfloat/public API/HAL変更は無し。同Phaseのinternal loweringで、foreign dependencyを変更しない。Phase in-progress、actual GPU/Keiland acceptance/p007未達。
+
+## i14 FIFO scalar uniforms checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-fifo-scalar-uniform-streamのsoftware出力2026-10-09): actual compiled順のconstant/push/viewport/UBO/current coherent read/native descriptor addressをindependent CPU streamへ完成。whole prefix OOM/late refusal解放、typed logical bounds、stage別copied stateとcanonical bindingを確認。actual Vulkan-device host14範囲とy build warning/error0/style0 PASS。GPU mapping ownership/queue launchは未接続。次はowned code/uniform/TMU/fetch preparation、whole-job/session quarantine/CL/queue/runtime、実機とp007。Phase in-progress、foreign commitment/HAL/UAPI変更無し。

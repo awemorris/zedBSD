@@ -27,7 +27,20 @@
 #include "drivers/gpu/bcm2711/vulkan-record.h"
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
 #include "drivers/gpu/bcm2711/vulkan-prepared.h"
+#include "drivers/gpu/bcm2711/vulkan-uniform.h"
 #include "userland/desktop/wayland/shaders.h"
+
+/* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
+struct uniform_fixture {
+	struct bcm2711_vulkan_prepared_event event;
+	struct bcm2711_vulkan_pipeline pipeline;
+	struct bcm2711_vulkan_pipeline_layout layout;
+	struct bcm2711_vulkan_set_layout set;
+	struct bcm2711_vulkan_object layout_object;
+	struct bcm2711_vulkan_object set_object;
+	struct bcm2711_shader_binary program;
+	struct bcm2711_shader_uniform uniforms[3];
+};
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
 static struct bcm2711_buffer reply_buffer;
@@ -66,6 +79,7 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void uniform_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
 static void draw_test(struct bcm2711_vulkan_command_buffer *command);
 static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
@@ -681,6 +695,170 @@ command_test(
 	return;
 }
 
+/* Checks actual compiled consumption/cloned input ownership and synthetic UBO intervals against real coherent resource backing. */
+static void
+uniform_test(
+	struct bcm2711_vulkan_session *session,
+	const struct bcm2711_vulkan_prepared_event *event)
+{
+	struct bcm2711_vulkan_native_binding bindings[BCM2711_VULKAN_PIPELINE_SETS][BCM2711_VULKAN_LAYOUT_BINDINGS];
+	struct bcm2711_vulkan_uniform_words *words;
+	struct bcm2711_vulkan_uniform_words *second;
+	struct bcm2711_shader_binary *program;
+	const struct bcm2711_shader_uniform *uniform;
+	struct uniform_fixture *fixture;
+	struct bcm2711_vulkan_object *object;
+	struct bcm2711_vulkan_resource *buffer;
+	struct bcm2711_v3d_view *view;
+	void *cpu;
+	uint8_t *bytes;
+	uint32_t address;
+	uint32_t stage;
+	uint32_t index;
+	uint32_t expected;
+	uint32_t push_stage;
+	unsigned baseline;
+	int error;
+
+	/* Borrowed numerical addresses exercise encoding only; this fixture grants no real GPU record storage or execution. */
+	baseline = allocations;
+	memset(bindings, 0, sizeof(bindings));
+	bindings[0][0].texture = 0x100020U;
+	bindings[0][0].sampler = 0x100040U;
+	for (stage = 0; stage < 3; stage++) {
+		program = event->pipeline->programs[stage];
+		error = bcm2711_vulkan_uniform_create(event, stage, bindings, &words);
+		assert(error == 0 && words != NULL && words->count == program->uniform_count);
+		push_stage = 0;
+		if (stage == BCM2711_SHADER_FRAGMENT)
+			push_stage = 1;
+
+		/* Known real viewport is width16/height8/depth0..1, independently expecting scale2048/1024/1/0. */
+		for (index = 0; index < words->count; index++) {
+			uniform = &program->uniforms[index];
+			expected = 0;
+			switch (uniform->kind) {
+			case BCM2711_SHADER_CONSTANT:
+				expected = uniform->bits;
+				break;
+			case BCM2711_SHADER_PUSH:
+				expected = event->push[push_stage][uniform->offset / 4U];
+				break;
+			case BCM2711_SHADER_TEXTURE:
+				expected = 0x100020U | uniform->bits;
+				break;
+			case BCM2711_SHADER_SAMPLER:
+				expected = 0x100040U | uniform->bits;
+				break;
+			case BCM2711_SHADER_VIEWPORT_X:
+				expected = 0x45000000U;
+				break;
+			case BCM2711_SHADER_VIEWPORT_Y:
+				expected = 0x44800000U;
+				break;
+			case BCM2711_SHADER_VIEWPORT_Z:
+				expected = 0x3f800000U;
+				break;
+			case BCM2711_SHADER_DEPTH_OFFSET:
+				break;
+			default:
+				assert(0);
+			}
+
+			/* The whole actual emitted consumption order must match these independently expected values. */
+			assert(words->words[index] == expected);
+		}
+
+		/* Each stage returns to the original ownership baseline before the next stream is assembled. */
+		bcm2711_vulkan_uniform_release(words);
+		assert(allocations == baseline);
+	}
+
+	/* Root and array OOM unwind the entire unpublished scalar owner. */
+	for (index = 1; index <= 2; index++) {
+		fail_after = index;
+		error = bcm2711_vulkan_uniform_create(event, BCM2711_SHADER_FRAGMENT, bindings, &words);
+		assert(error == ENOMEM && words == NULL && allocations == baseline);
+	}
+
+	/* A late sampled pointer refusal consumes no pending-primary references or scalar allocations. */
+	error = bcm2711_vulkan_uniform_create(event, BCM2711_SHADER_FRAGMENT, NULL, &words);
+	assert(error == EINVAL && words == NULL && allocations == baseline);
+	bindings[0][0].texture++;
+	error = bcm2711_vulkan_uniform_create(event, BCM2711_SHADER_FRAGMENT, bindings, &words);
+	assert(error == EINVAL && words == NULL && allocations == baseline);
+
+	/* Synthetic immutable metadata adds UBO consumption without rewriting the pending client's actual pipeline or clones. */
+	fixture = kern_calloc(1, sizeof(*fixture));
+	assert(fixture != NULL);
+	fixture->event = *event;
+	fixture->pipeline = *event->pipeline;
+	fixture->layout = *(struct bcm2711_vulkan_pipeline_layout *)event->pipeline->owner.parent->payload;
+	fixture->set = *(struct bcm2711_vulkan_set_layout *)fixture->layout.sets[0]->payload;
+	fixture->program = *event->pipeline->programs[BCM2711_SHADER_VERTEX];
+	fixture->event.pipeline = &fixture->pipeline;
+	fixture->pipeline.owner.parent = &fixture->layout_object;
+	fixture->layout_object.payload = &fixture->layout;
+	fixture->layout.sets[0] = &fixture->set_object;
+	fixture->set_object.payload = &fixture->set;
+	fixture->set.bindings[0].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	fixture->program.uniforms = fixture->uniforms;
+	fixture->program.uniform_count = 3;
+	fixture->pipeline.programs[BCM2711_SHADER_VERTEX] = &fixture->program;
+	fixture->uniforms[0].kind = BCM2711_SHADER_CONSTANT;
+	fixture->uniforms[0].bits = 0x12345678U;
+	fixture->uniforms[1].kind = BCM2711_SHADER_BLOCK;
+	fixture->uniforms[2].kind = BCM2711_SHADER_BLOCK;
+	fixture->uniforms[2].offset = 4;
+	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, 101);
+	assert(object != NULL);
+	buffer = object->payload;
+	memset(fixture->event.descriptors, 0, sizeof(fixture->event.descriptors));
+	fixture->event.descriptors[0][0].buffer = object;
+	fixture->event.descriptors[0][0].offset = 4;
+	fixture->event.descriptors[0][0].bytes = 8;
+	error = bcm2711_vulkan_resource_backing(buffer, 4, 8, &view, &address, &cpu);
+	assert(error == 0);
+	bytes = cpu;
+
+	/* Distinct little-endian words prove exact binding+static offsets and copied results across later completed writes. */
+	for (index = 0; index < 8; index++)
+		bytes[index] = (uint8_t)(index + 1);
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &words);
+	assert(error == 0 && words->count == 3 && words->words[0] == 0x12345678U);
+	assert(words->words[1] == 0x04030201U && words->words[2] == 0x08070605U);
+	for (index = 0; index < 8; index++)
+		bytes[index] = (uint8_t)(index + 17);
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &second);
+	assert(error == 0 && second->words[1] == 0x14131211U && second->words[2] == 0x18171615U);
+	assert(words->words[1] == 0x04030201U && words->words[2] == 0x08070605U);
+	bcm2711_vulkan_uniform_release(words);
+	bcm2711_vulkan_uniform_release(second);
+
+	/* Exact descriptor bytes, logical buffer end and quarantined native backing refuse the complete scalar prefix. */
+	fixture->event.descriptors[0][0].bytes = 7;
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &words);
+	assert(error == EINVAL && words == NULL && allocations == baseline + 1);
+	fixture->event.descriptors[0][0].bytes = 8;
+	fixture->event.descriptors[0][0].offset = 64;
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &words);
+	assert(error == EINVAL && words == NULL && allocations == baseline + 1);
+	fixture->event.descriptors[0][0].offset = 4;
+	view->quarantined = true;
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &words);
+	assert(error == EIO && words == NULL && allocations == baseline + 1);
+	view->quarantined = false;
+	fixture->event.used[0] = 0;
+	error = bcm2711_vulkan_uniform_create(&fixture->event, BCM2711_SHADER_VERTEX, NULL, &words);
+	assert(error == EINVAL && words == NULL && allocations == baseline + 1);
+	kern_free(fixture);
+	assert(allocations == baseline);
+	puts("WS141 native scalar uniforms/real compiled order/copied UBO FIFO reads/late atomic refusal: PASS");
+
+	/* Succeeded: no independent scalar owner or synthetic metadata remains in the real pending primary. */
+	return;
+}
+
 /* Exercises actual prepared ownership, pending guards and complete rollback without launching native GPU work. */
 static void
 prepared_test(
@@ -761,6 +939,7 @@ prepared_test(
 	assert(event->descriptors[0][0].view == view && event->descriptors[0][0].sampler == sampler);
 	assert(event->push[0][0] == 0x3f000000U && event->vertices[0]->bytes == 48);
 	assert(event->next->opcode == GPU_OP_CMD_END_RENDER_PASS && event->next->next == NULL);
+	uniform_test(session, event);
 	error = bcm2711_vulkan_prepared_create(command_object, &second);
 	assert(error == EBUSY && second == NULL && command->pending == 1 && set->pending == 1);
 	error = bcm2711_vulkan_prepared_release(prepared, false);
