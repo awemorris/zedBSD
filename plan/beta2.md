@@ -47,6 +47,7 @@
 | 6 | WS199 ロック画面のタッチ不要 | (c) の設定で lock。鍵を挿したまま／抜いて挿し直す | 挿したままならタッチを促す。lock の後に挿した鍵ならタッチ無しで解除 |
 | 7 | WS199 設定の変更 | 「PIN 不要」「タッチ不要」を入れる | パスワードを求め、「鍵を持つ人は誰でもログインできる」の警告が出る |
 | 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の card の switch（Password・PIN・Security Key、押すと password の popup） | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
+| 11 | [WS197](ws197/ws.md) スマホの SMS（Android） | 手順は ws197/ws.md の「5330 の UAT の手順」: Settings → Bluetooth でスマホを pairing して「Use as phone」→ Phone の app で受信・送信・同期、app を閉じている間の通知 | SMS が送受信でき、履歴が同期される |
 | 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 2026-10-10 は 4.9 MB/s（前は 950 KB/s） | 既知の問題に書くか close はユーザー |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
