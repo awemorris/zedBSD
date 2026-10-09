@@ -56,6 +56,12 @@
 /* The most planes of one display list the readout keeps. */
 #define BCM2711_LIST_PLANES		8U
 
+/* The physical and virtual page size used by the initial V3D MMU mappings. */
+#define BCM2711_V3D_PAGE_BYTES		4096U
+
+/* The 4-byte PTE slots that cover V3D's complete 4 GiB virtual space. */
+#define BCM2711_V3D_PAGE_ENTRIES		1048576U
+
 /*
  * One plane of a display list, as the readout decoded it.
  *
@@ -90,6 +96,31 @@ struct bcm2711_list {
 	uint32_t end;
 	uint32_t plane_count;
 	struct bcm2711_list_plane planes[BCM2711_LIST_PLANES];
+};
+
+/*
+ * One occupied interval of display-list SRAM, measured in words.
+ *
+ * The caller keeps these reservations for every current and pending list,
+ * filter table and firmware-owned region until takeover has been observed.
+ * words includes every occupied word starting at first; zero is invalid.
+ */
+struct bcm2711_list_range {
+	uint32_t first;
+	uint32_t words;
+};
+
+/*
+ * A relocation prepared from a stable SRAM snapshot without hardware writes.
+ *
+ * words includes the end marker.  A successful preparation also supplies
+ * that many unchanged words in the caller's image buffer.  Zero words means
+ * preparation failed, so destination must not be published to the channel.
+ */
+struct bcm2711_list_copy {
+	uint32_t source;
+	uint32_t destination;
+	uint32_t words;
 };
 
 /*
@@ -189,6 +220,11 @@ void bcm2711_clock_report(const char *family, const char *name, uint32_t clock_i
 
 /* The decoding of a compositor display list (list.c). */
 void bcm2711_list_decode(const volatile uint32_t *memory, uint32_t start, struct bcm2711_list *list);
+bool bcm2711_list_copy_prepare(const uint32_t *snapshot, uint32_t source, const struct bcm2711_list_range *reserved, unsigned reserved_count, uint32_t *image, uint32_t image_words, struct bcm2711_list_copy *copy);
+
+/* Software-only edits of a caller-owned V3D page table (mmu.c). */
+int bcm2711_v3d_pages_map(uint32_t *table, uint32_t address, uint64_t physical, uint64_t bytes);
+int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
 
 /* The stages of the two parts (display.c, v3d.c). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);

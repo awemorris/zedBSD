@@ -2,12 +2,12 @@
 
 # ws141-p003: display（N0 → N1 → N2 → P1 → P2 → P3 → P5、P4 は後）
 
-Status: in-progress（q695 の続き、P2 generation13。N0 を実装済み・未試験）
+Status: in-progress（N0実装済み、N1の純粋な配置/コピー準備を実装。実機待ち）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: none
 依存: [p002](../phase002/phase.md)（骨格・段の印・P0。p002 の QEMU の回帰と実機の P0 の写真が先にあると安全）
-実行者: phase-runner（high）
+実行者: 独立Codexセッション（旧P2 generation13の実装を引き継ぐ）
 
 ## 範囲（[design](../rpi4-gpu-design.md) §3.1・§10 の p003）
 
@@ -45,3 +45,9 @@ Queue: none
 ## 独立Codexセッションの再開確認（2026-10-09）
 
 ユーザーがWS141を担当へ割当。開始tree a05865278のrpi4 kernelをdriver y/nでbuildし、両方exit 0・warning/error 0、stage/list host試験PASS。source修正は無し。詳細は[実行記録](../execution-20261009.md)。ユーザー回答「実機確認は後で行う」により実機条件は未達のまま保持。whole Phaseのclearanceは行っていない。
+
+## N1の準備処理（2026-10-09、i03）
+
+ユーザーの継続指示により、実機観測と独立な配置計算とraw wordコピーだけを実装。list.cの`bcm2711_list_copy_prepare`はsnapshotと予約範囲から終端込みの連続領域を選び、decoded summaryを再構成せず全wordを保持する。予約範囲には全channelのcurrent/next list、filter、firmware専有範囲を含める責務を呼び手に明記。起動経路での呼び出し・hardware書き込みは無し。
+
+list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexact fit、9 planeとscaling/contextの完全一致、snapshot不変、失敗時のimage不変を確認しPASS。rpi4 y/n build warning/error 0、全文C review・補助style-check total 0。詳細は[実行記録 i03/i04の結果](../execution-20261009.md#i03i04の結果2026-10-09)。この部分attemptのみcleared、whole Phaseはin-progress。次は実機N0観測を元にsnapshotと全予約範囲の取得を統合し、再検証後のwrite/readback・次listの切り替え・時限付きpollを進める。p004の独立したsoftware準備も[WS](../ws.md)へ投影済み。N1の実機条件は保持。
