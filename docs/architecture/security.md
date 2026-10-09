@@ -304,8 +304,9 @@ style of the account together. A wrong password given to set or remove a
 PIN or a key counts the same way.
 
 The PIN is offered for an account only after that account has logged in or
-unlocked with its password or a security key since sessiond started, like a
-phone that asks for its passcode after a restart. So a restart, which anyone
+unlocked with its password or a security key, or proved its password to set
+or remove its PIN or a key, since sessiond started, like a phone that asks for
+its passcode after a restart. So a restart, which anyone
 at the login screen can cause, gives no new PIN attempts. After five wrong
 PINs in a row the PIN is turned off again until the next password or
 security key login. A security key counts its own wrong PINs and locks

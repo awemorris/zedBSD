@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: private actual Vulkan primary/graphics recordingはmain d097f9b46へ統合。i14 ordered draw stateのlogical fetch/stage push/descriptor prefix compatibilityと2回walkはhost12範囲/RPi4 y build PASS。次は独立immutable prepared ownerとnative GPU code/uniform/TMU/CL、transfer/barrier/queue/common/public binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。
+Resume point: immutable prepared CPU graphはmain 6730aa668へ統合（host13、rpi4 y build PASS）。i14 native shader/fetch/texture/sampler recordとstrict UIF変換はhost/XML8 record・4847 pixel、y build PASS。次はactual GPU upload owners・native uniform/CL・transfer/barrier/queue/public/common bindingとretired=false quarantine。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -205,3 +205,7 @@ stage別push/partial vertex/dynamic stateとdescriptor prefix互換/disturbance�
 ## i14 prepared CPU graph checkpoint（2026-10-09）
 
 pending primary graphとconsumed descriptorの独立snapshot owner、pending mutation/free/reset guardをhost13範囲/buildで確認。actual native packet/GPU backing/queue/public bindingは後続、uncertain DMA ownerの明示quarantine transferが必要。WS incomplete/p005-p006 in-progress、Keiland/実機/p007未達、Master変更無し。[結果/復帰点](execution-20261009.md#i14-immutable-prepared-cpu-graphのsoftware出力2026-10-09)。
+
+## i14 native records/UIF checkpoint（2026-10-09）
+
+独立private 4.2 byte serializerとraster→strict UIF scratch変換を追加。固定XMLで8 record全byte、inverse block walkerで全pixelとpadding/元raster不変、bounded refusalを確認。rpi4 y build warning/error0、style補助total0。actual FIFO後のscratch生成とowner/clean/retirement、native graphics CL/queue/runtime/Keilandは後続。p006 in-progress、WS incompleteと実機関門を維持。[Phase](phase006/phase.md#i14-native-recordとtexture配置のcheckpoint2026-10-09)と[実行記録](execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09)。

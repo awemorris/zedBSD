@@ -110,3 +110,9 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 ## i14 prepared CPU graph checkpoint（2026-10-09）
 
 独立primary graph/consumed descriptor snapshots、distinct ordinary set/command pending charges、全OOM/counter rollback、pending free/reset/destroy guardを追加。actual host13範囲/RPi4 y build/style PASS。native code/VA/CL/DMA/queueは未接続。workerはfalse-retirement payloadを自動再disposeしないため、actual native disposerで明示quarantine transfer/checked reset後のreleaseを接続する残条件を記録。p006/i14 in-progress、Keiland/実機/p007未達。[正確な契約/結果/限界/再開](../execution-20261009.md#i14-immutable-prepared-cpu-graphのsoftware出力2026-10-09)。
+
+## i14 native recordとtexture配置のcheckpoint（2026-10-09）
+
+[実行記録](../execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09): private 4.2 shader/attribute/texture/sampler serializerとstrict non-XOR UIF pixel変換を追加。callerはactual VPM capacity、uploaded code/uniform/default/fetch/scratchの独立owned intervalsを提供し、VCMを2 batchesとする。texture scratchの作成は先行image writeのnative completionとCPU visibility後のFIFO execution時。final fragment switchでscoreboardを取得し、real centre WをRF0へ供給するshader flagを有効にする。
+
+確認: [native-state-host-test.sh](../tests/native-state-host-test.sh) / [XMLと逆pixel oracle](../tests/native-state-check.py) で8 full record・4847 pixels/padding/raster・atomic refusal PASS、rpi4 y build warning/error0、style total0。GPU upload/CL/queue/public bindingと実機は未達。near-final full-standard/license/similarityはp007で再確認する。Phase in-progress、変更は同Phase内、foreign interface/dependency変更無し。
