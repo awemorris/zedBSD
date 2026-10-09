@@ -15,9 +15,12 @@
 
 struct bcm2711_render_device;
 struct bcm2711_vulkan_session;
+struct bcm2711_vulkan_native_job;
 
 /* A retained session owns its descriptor list until the common core retires all pins. */
 struct bcm2711_render_session {
+	/* The controller retains a closed descriptor while uncertain prepared Vulkan owners still borrow it. */
+	struct bcm2711_render_session *closed_next;
 	struct bcm2711_render_device *device;
 	struct bcm2711_render_resource *resources;
 
@@ -59,6 +62,10 @@ struct bcm2711_render_device {
 	struct drv_gpu_recovery_ops recovery_operations;
 	/* Live Vulkan allocation declarations reserve this aggregate logical heap budget. */
 	uint64_t vulkan_memory_bytes;
+	/* Callback disposal transfers uncertain whole payloads here without dropping their pending primary or session. */
+	struct bcm2711_vulkan_native_job *quarantine;
+	/* Internally held closed descriptors do not count as live external sessions or prevent checked reset. */
+	struct bcm2711_render_session *closed;
 	uint32_t sessions;
 	bool registered;
 };

@@ -28,6 +28,7 @@
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/native-storage.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vulkan-private.h"
 
 /* One prepared native job independently retains its mapped input allocation. */
 struct test_payload {
@@ -87,6 +88,8 @@ static void check_resources(void);
 static void check_upload_storage(void);
 static void check_worker(struct bcm2711_render_session *session);
 static void check_reservations(void);
+static void check_closed_vulkan(void);
+static int destroy_retained_leaf(struct bcm2711_vulkan_session *session, void *payload);
 static struct test_payload *prepare_payload(struct bcm2711_render_resource *resource);
 static int execute_payload(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *opaque, bool *retired);
 static int dispose_payload(struct bcm2711_render_device *controller, void *opaque, bool retired);
@@ -1465,6 +1468,9 @@ check_resources(
 
 	/* Private job tables exercise the actual fixed worker pool before production capability publication. */
 	check_reservations();
+
+	/* Native reset must preserve a closed protocol namespace until its last independent owner retires. */
+	check_closed_vulkan();
 }
 
 /* Exercises actual native execution, fixed queue capacity, callback retirement and fault drain. */
@@ -1720,6 +1726,74 @@ check_reservations(
 	assert(error == 0);
 	test_operations->close(test_controller, session);
 	assert(test_completed == 21 && test_completion_errors[20] == ECANCELED);
+}
+
+/* Checks actual close and checked reset ordering while an independent typed owner retains a closed renderer. */
+static void
+check_closed_vulkan(
+	void)
+{
+	struct bcm2711_render_session *render;
+	struct bcm2711_vulkan_session *session;
+	struct bcm2711_vulkan_object *leaf;
+	unsigned *destroyed;
+	void *object;
+	int error;
+
+	/* An actual open owns the private namespace before the fixture retains one typed dependency. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	render = object;
+	error = bcm2711_vulkan_session_open(render, &render->vulkan);
+	assert(error == 0);
+	session = render->vulkan;
+	destroyed = kern_calloc(1, sizeof(*destroyed));
+	assert(destroyed != NULL);
+	error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_BUFFER, 1, destroyed, destroy_retained_leaf, &leaf);
+	assert(error == 0);
+	error = bcm2711_vulkan_object_retain(leaf);
+	assert(error == 0 && leaf->references == 2);
+
+	/* Closing withdraws the registry but preserves the renderer, arena and independent logical owner. */
+	test_operations->close(test_controller, render);
+	assert(test_controller->sessions == 0 && test_controller->closed == render);
+	assert(render->vulkan == session && session->closing && session->live_objects == 1);
+	assert(!leaf->published && leaf->references == 1 && *destroyed == 0);
+
+	/* A failed provider reset cannot consume the retained namespace or permit new admission. */
+	test_reset_failed = true;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == ETIMEDOUT && test_controller->closed == render);
+	assert(render->vulkan == session && session->live_objects == 1 && *destroyed == 0);
+
+	/* Independent owner retirement still borrows the retained renderer descriptor for its actual destructor. */
+	error = bcm2711_vulkan_object_release(leaf);
+	assert(error == 0 && session->live_objects == 0 && *destroyed == 1);
+	kern_free(destroyed);
+
+	/* Only checked successful reset can consume the closed namespace and then reopen worker admission. */
+	test_reset_failed = false;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == 0 && test_controller->closed == NULL && test_controller->quarantine == NULL);
+	printf("WS141 closed Vulkan renderer retention/provider reset failure/checked recovery: PASS\n");
+}
+
+/* Observes that an independent typed destructor still owns its exact renderer after common close. */
+static int
+destroy_retained_leaf(
+	struct bcm2711_vulkan_session *session,
+	void *payload)
+{
+	unsigned *destroyed;
+
+	/* The closed renderer and bounded protocol arena must remain live throughout this last dependency destructor. */
+	destroyed = payload;
+	assert(session->render->device == test_controller && test_controller->closed == session->render);
+	assert(session->arena.base != NULL && session->closing && *destroyed == 0);
+	*destroyed = 1;
+
+	/* Succeeded: this synthetic leaf's independently retained lifetime has ended. */
+	return 0;
 }
 
 /* Prepares independently generated noop CL bytes and retains their mapped view before submission. */

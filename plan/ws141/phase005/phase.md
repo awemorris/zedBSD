@@ -56,3 +56,8 @@ p006のlazy coherent allocation/view出力へ、nonzero BLOBを同session typed 
 ## p006 binding所有のscoped出力（2026-10-09）
 
 buffer/imageのexact requirementsとsame-device VkMemory bindingを実装。resource/prepared jobはmemory objectを独立retainし、native view/BLOB/VMと退役を分離する。borrowed native VA/Normal NC CPU resolverはlogical extentを守り、mutex外のjobには独立referenceが必要。actual client/VA/MMU hostで退役順とbad bind拒否を確認、public runtime/worker bindingは後続。[p006詳細](../phase006/phase.md#i14-bufferimagebinding-checkpoint2026-10-09)。p005/i13 in-progress。
+
+
+## i14 whole native jobとclosed-session retirement checkpoint（2026-10-09）
+
+whole pending primary/current passをpersistent controller quarantineへallocation無しでtransferし、閉じたrenderer/namespaceは最後のtyped ownerまで保持する。actual checked reset→payload→closed session→translation recoveryの順を接続。actual Vulkan host18範囲/actual renderer close・provider reset failure・retained destructor host/named y warning/error0/style0 PASS。runner/recoveryのhostモデルはphysical DMA proofではない。transfer/barrier/submit/public dispatch/common bindingとKeiland/実機/p007は後続、Phase in-progress保持。内部lifetime契約、外国scope/HAL/UAPI変更無し。[詳細/再開点](../execution-20261009.md#i14-whole-pending-native-jobとclosed-rendererのsoftware出力2026-10-09)。
