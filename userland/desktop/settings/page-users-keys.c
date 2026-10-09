@@ -50,6 +50,10 @@
 #define KEYS_CHANGE_PIN		311
 #define KEYS_RESET		312
 #define KEYS_REMOVE_FIRST	320
+#define KEYS_OPTION_FIRST	330
+
+/* The ways to sign in with a key (ws199-p002): the PIN and the touch, the touch alone, neither to unlock. */
+#define KEYS_OPTIONS		3
 
 /* The wizards' steps (0 is the end). */
 #define KEYS_STEP_DONE		0U
@@ -109,6 +113,8 @@ static int keys_name_valid(const char *name, size_t length);
 static void keys_keep_name(struct se_app *app);
 static size_t keys_code_points(const char *text);
 static int keys_pin_ok(const struct se_app *app, unsigned first, unsigned again);
+static int keys_options_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+static unsigned keys_option_now(const struct se_app *app);
 
 /*
  * Draws the Security Keys page's cards from a top edge; returns the edge
@@ -124,9 +130,10 @@ se_keys_draw(
 {
 	int bottom;
 
-	/* The Software Security Key, then the keys. */
+	/* The Software Security Key, the keys, and how a key signs in (ws199-p002). */
 	bottom = se_keys_soft_draw(app, canvas, x, top, width);
 	bottom = keys_card_draw(app, canvas, x, bottom + KEYS_GAP, width);
+	bottom = keys_options_draw(app, canvas, x, bottom + KEYS_GAP, width);
 	return bottom;
 }
 
@@ -140,6 +147,7 @@ se_keys_press(
 {
 	struct kl_system_key keys[KL_SYSTEM_KEYS_MAX];
 	size_t count;
+	unsigned now;
 	int busy;
 	int taken;
 	int ops;
@@ -168,8 +176,24 @@ se_keys_press(
 		keys_start(app, SE_KEYS_FLOW_KEY_PIN, NULL);
 		return;
 	}
+
+	/* Reset Key. */
 	if (index == KEYS_RESET && ops) {
 		keys_start(app, SE_KEYS_FLOW_RESET, NULL);
+		return;
+	}
+
+	/* A way to sign in with a key other than the one now, with a key registered (ws199-p002). */
+	if (index >= KEYS_OPTION_FIRST && index < KEYS_OPTION_FIRST + KEYS_OPTIONS) {
+		now = keys_option_now(app);
+		if (ops && count != 0U && (unsigned)(index - KEYS_OPTION_FIRST) != now) {
+			app->keys.option_pin = index == KEYS_OPTION_FIRST;
+			app->keys.option_touch = index != KEYS_OPTION_FIRST + 2;
+			app->keys.weaker = (unsigned)(index - KEYS_OPTION_FIRST) > now;
+			keys_start(app, SE_KEYS_FLOW_OPTIONS, NULL);
+		}
+
+		/* Done. */
 		return;
 	}
 
@@ -271,6 +295,8 @@ se_keys_replugged(
 		se_dialog_step(app, "Plug the key in again", 3U, 4U, "The key takes a reset only just after it is plugged in, so it is asked as soon as it comes back.", NULL, 0);
 		se_dialog_busy(app, KEYS_REPLUG_TEXT, 1);
 	}
+
+	/* Logged. */
 	se_log("KEYS replug request=%u", request);
 }
 
@@ -487,6 +513,8 @@ keys_card_draw(
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 28, "A key's PIN and its reset are not available on this system.", KEYS_TEXT_SUB, 0, right - x - 40, SE_COLOR_TEXT_SECONDARY);
 		return top + height;
 	}
+
+	/* Change PIN. */
 	button = se_button_width(app, "Change PIN");
 	right -= 8 + button;
 	(void)se_button_draw(app, canvas, right, y + 8, "Change PIN", 0, enabled, KEYS_CHANGE_PIN);
@@ -525,11 +553,15 @@ keys_start(
 	se_dialog_open(app, keys_act, keys_ready);
 	if (flow == SE_KEYS_FLOW_KEY_PIN) {
 		keys_step(app, KEYS_STEP_INSERT);
+	} else if (flow == SE_KEYS_FLOW_OPTIONS && keys->weaker) {
+		keys_step(app, KEYS_STEP_WARNING);
 	} else if (flow == SE_KEYS_FLOW_RESET) {
 		keys_step(app, KEYS_STEP_WARNING);
 	} else {
 		keys_step(app, KEYS_STEP_PASSWORD);
 	}
+
+	/* Logged. */
 	se_log("KEYS key start flow=%u", flow);
 }
 
@@ -556,6 +588,13 @@ keys_place(
 	case SE_KEYS_FLOW_RESET:
 		*count = 4U;
 		if (step == KEYS_STEP_PASSWORD)
+			*place = 2U;
+		return;
+	case SE_KEYS_FLOW_OPTIONS:
+		*count = 1U;
+		if (app->keys.weaker)
+			*count = 2U;
+		if (step == KEYS_STEP_PASSWORD && *count == 2U)
 			*place = 2U;
 		return;
 	case SE_KEYS_FLOW_ADD:
@@ -612,9 +651,13 @@ keys_step(
 			se_dialog_step(app, "Remove the security key", place, count, body, "Remove", 0);
 		} else if (keys->flow == SE_KEYS_FLOW_RESET) {
 			se_dialog_step(app, "Reset the security key", place, count, "Type your password. Then you will plug the key in again and touch it.", "Reset Key", 1);
+		} else if (keys->flow == SE_KEYS_FLOW_OPTIONS) {
+			se_dialog_step(app, "Sign in with a security key", place, count, "Type your password to change how your key signs you in.", "Change", keys->weaker);
 		} else {
 			se_dialog_step(app, "Add a security key", place, count, "Type your password to add a security key to your account.", "Next", 0);
 		}
+
+		/* The password's field. */
 		se_dialog_field(app, "Password", "Your password now", SE_FIELD_SECRET, 0U);
 		break;
 	case KEYS_STEP_INSERT:
@@ -651,6 +694,15 @@ keys_step(
 			se_dialog_link(app, "Forgot the PIN? Reset the key");
 		break;
 	case KEYS_STEP_WARNING:
+		if (keys->flow == SE_KEYS_FLOW_OPTIONS) {
+			(void)snprintf(body, sizeof(body), "%s", "Anyone who has your security key can sign in to this computer with a touch, without its PIN.");
+			if (!keys->option_touch)
+				(void)snprintf(body, sizeof(body), "%s", "Anyone who has your security key can sign in to this computer with a touch, without its PIN. While your key stays plugged in (or lies on the reader), anyone at this computer can unlock it with a swipe.");
+			se_dialog_step(app, "Sign in with a security key", place, count, body, "Continue", 0);
+			break;
+		}
+
+		/* A reset's warning. */
 		se_dialog_step(app, "Reset the security key", place, count,
 		    "Resetting erases everything on the key: its PIN and every sign-in it holds, on this computer and on every other computer and website. This computer's sign-ins with it are removed too.",
 		    "Continue", 0);
@@ -682,6 +734,8 @@ keys_act(
 			se_log("KEYS cancel request=%u", keys->request);
 			return;
 		}
+
+		/* Nothing kept. */
 		se_keys_end(app);
 		return;
 	}
@@ -704,6 +758,8 @@ keys_act(
 			keys_step(app, KEYS_STEP_PASSWORD);
 			se_dialog_error(app, "For your security, type your password again.");
 		}
+
+		/* Done. */
 		return;
 	}
 
@@ -743,10 +799,14 @@ keys_next(
 			keys_ask(app);
 			return;
 		}
+
+		/* The key first, with the keys' own operations. */
 		if (ops) {
 			keys_step(app, KEYS_STEP_INSERT);
 			return;
 		}
+
+		/* Else its name. */
 		keys_default_name(app, keys->name, sizeof(keys->name));
 		keys_step(app, KEYS_STEP_NAME);
 		return;
@@ -757,6 +817,8 @@ keys_next(
 			keys_step(app, KEYS_STEP_SET_PIN);
 			return;
 		}
+
+		/* Else its PIN. */
 		keys_step(app, KEYS_STEP_PIN);
 		return;
 	default:
@@ -789,6 +851,8 @@ keys_back(
 			keys_step(app, KEYS_STEP_INSERT);
 			return;
 		}
+
+		/* Else the password. */
 		keys_step(app, KEYS_STEP_PASSWORD);
 		return;
 	case KEYS_STEP_SET_PIN:
@@ -798,11 +862,13 @@ keys_back(
 			keys_step(app, KEYS_STEP_INSERT);
 			return;
 		}
+
+		/* Else the name. */
 		keys_step(app, KEYS_STEP_NAME);
 		return;
 	case KEYS_STEP_PASSWORD:
-		/* A reset's warning. */
-		if (keys->flow == SE_KEYS_FLOW_RESET)
+		/* A reset's warning, or a weaker way's. */
+		if (keys->flow == SE_KEYS_FLOW_RESET || (keys->flow == SE_KEYS_FLOW_OPTIONS && keys->weaker))
 			keys_step(app, KEYS_STEP_WARNING);
 		return;
 	default:
@@ -929,6 +995,8 @@ keys_found(
 			keys_step(app, KEYS_STEP_SET_PIN);
 			return;
 		}
+
+		/* Else the PIN and a new one. */
 		keys_step(app, KEYS_STEP_CHANGE);
 		return;
 	}
@@ -972,6 +1040,8 @@ keys_ask(
 			se_field_clear(&keys->pin);
 			kl_field_set(&keys->pin, fresh);
 		}
+
+		/* A reset. */
 		break;
 	case KEYS_STEP_CHANGE:
 		(void)snprintf(pin, sizeof(pin), "%s", se_dialog_text(app, 0U));
@@ -987,13 +1057,19 @@ keys_ask(
 	default:
 		if (keys->flow == SE_KEYS_FLOW_REMOVE) {
 			error = kl_system_account_remove_key(app->system, keys->password.text, keys->ref, &request);
+		} else if (keys->flow == SE_KEYS_FLOW_OPTIONS) {
+			error = kl_system_account_set_key_options(app->system, keys->password.text, keys->option_pin, keys->option_touch, &request);
 		} else {
 			error = kl_system_account_key_reset(app->system, keys->password.text, &request);
 		}
+
+		/* The password goes either way. */
 		se_field_clear(&keys->password);
 		cancellable = 0;
 		break;
 	}
+
+	/* The copies wiped. */
 	memset(pin, 0, sizeof(pin));
 	memset(fresh, 0, sizeof(fresh));
 
@@ -1073,11 +1149,19 @@ keys_result(
 		return;
 	}
 
+	/* The way to sign in. */
+	if (keys->flow == SE_KEYS_FLOW_OPTIONS) {
+		keys_end_with(app, "Sign in with a security key", "Changed. The login screen always asks for a touch; the locked screen as you chose.");
+		return;
+	}
+
 	/* A removal, or an addition. */
 	if (keys->flow == SE_KEYS_FLOW_REMOVE) {
 		keys_end_with(app, "Security key", "The security key is removed.");
 		return;
 	}
+
+	/* An addition. */
 	keys_end_with(app, "Security key", "The security key is added. The login and locked screens take it from now on.");
 }
 
@@ -1136,6 +1220,8 @@ keys_failed(
 		} else {
 			keys_step(app, KEYS_STEP_SET_PIN);
 		}
+
+		/* Said. */
 		se_dialog_error(app, message);
 		return;
 	}
@@ -1153,6 +1239,8 @@ keys_failed(
 	} else {
 		keys_step(app, KEYS_STEP_PASSWORD);
 	}
+
+	/* Said. */
 	se_dialog_error(app, message);
 }
 
@@ -1326,4 +1414,84 @@ keys_pin_ok(
 	/* The same twice. */
 	same = strcmp(pin, repeat);
 	return same == 0;
+}
+
+/* Gives the way a key signs in now: 0 the PIN and the touch, 1 the touch alone, 2 neither to unlock. */
+static unsigned
+keys_option_now(
+	const struct se_app *app)
+{
+	unsigned key_pin;
+	unsigned key_touch;
+
+	/* As the desktop told (the PIN and the touch until it did). */
+	(void)kl_system_account_key_options(app->system, &key_pin, &key_touch);
+	if (key_pin)
+		return 0U;
+	if (key_touch)
+		return 1U;
+	return 2U;
+}
+
+/*
+ * Draws the card of how a security key signs in (ws199-p002): three
+ * choices, the one now marked, pressable with a key registered and the
+ * keys' own operations; returns the edge below it (the top when not shown).
+ */
+static int
+keys_options_draw(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int top,
+	int width)
+{
+	static const char *const names[KEYS_OPTIONS] = {
+		"PIN and touch",
+		"Touch only (no PIN)",
+		"No PIN, and no touch to unlock",
+	};
+	struct kl_system_key keys[KL_SYSTEM_KEYS_MAX];
+	struct kl_rect row;
+	kl_color ink;
+	unsigned now;
+	size_t count;
+	int enabled;
+	int height;
+	int index;
+	int ops;
+	int y;
+
+	/* Only with the keys' own operations. */
+	ops = keys_ops(app);
+	if (!ops)
+		return top - KEYS_GAP;
+
+	/* The card. */
+	count = kl_system_account_keys(app->system, keys, KL_SYSTEM_KEYS_MAX);
+	enabled = count != 0U && !app->keys.asked && !app->dialog.open;
+	now = keys_option_now(app);
+	height = 64 + KEYS_OPTIONS * KEYS_KEY_ROW + 16;
+	y = se_card_begin(app, canvas, x, top, width, height, "Sign in with a security key", "The login screen always asks for a touch.");
+
+	/* Each choice: its mark, its name; a press chooses it. */
+	for (index = 0; index < KEYS_OPTIONS; index++) {
+		ink = SE_COLOR_TEXT;
+		if (!enabled)
+			ink = SE_COLOR_TEXT_SECONDARY;
+		kl_canvas_ring(canvas, (float)(x + 30), (float)(y + 22), 8.0f, 2.0f, 1.0f, ink);
+		if ((unsigned)index == now)
+			kl_canvas_circle(canvas, (float)(x + 30), (float)(y + 22), 4.0f, SE_COLOR_ACCENT);
+		(void)kl_text_draw_fit(app->text, canvas, x + 50, kl_text_center(KEYS_TEXT_ROW, y + 4, 36), names[index], KEYS_TEXT_ROW, 0, width - 70, ink);
+		row.x = x + 16;
+		row.y = y;
+		row.width = width - 32;
+		row.height = KEYS_KEY_ROW;
+		if (enabled)
+			se_ui_hit(app, &row, SE_HIT_CONTROL, KEYS_OPTION_FIRST + index);
+		y += KEYS_KEY_ROW;
+	}
+
+	/* The edge below the card. */
+	return top + height;
 }

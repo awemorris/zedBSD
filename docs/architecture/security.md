@@ -393,6 +393,27 @@ The key's attestation statement is not checked, so the make of the key is
 not part of the trust: what registration protects against is a credential
 the user did not create on a key they hold, not a counterfeit key.
 
+**How a key signs in.** An account with a key chooses on Settings' Security
+Keys page how it signs in (a line of /etc/passkey,
+`name:uid:options:methods=...:key-pin=0|1:key-touch=0|1`, which WS200's
+Sign-in Methods shares; none, several or one that does not read are the
+defaults): the key's PIN and a touch (the default), a touch alone, or
+neither to unlock. The login screen always asks for a touch; only an unlock
+may go without one, and only after the lock screen's swipe. Without the
+PIN the key does not verify the user, so anyone who holds the key signs in
+with a touch; and a key left plugged in, or lying on an NFC reader (being
+in the field counts as a touch), signs in or unlocks for anyone at the
+machine. Settings says so, and asks the password, before a weaker choice.
+sessiond sends a key's login as `auth-fido2 NAME login PIN` and an unlock
+as `... unlock PIN`, and passkey-fido2 reads the account's line: an empty
+PIN only when the PIN is not asked, no touch only for an unlock when the
+touch is not asked, and the flags it checks in the answer follow. A key's
+login or unlock counts as a wrong attempt only when the key's PIN was wrong,
+the key is a clone or its answer does not verify; a key that was not there,
+not touched or taken away is not counted and is answered at once (the key
+counts its own wrong PINs). When an account's last key goes, its key's
+choice goes back to the default.
+
 **The key's own operations.** Settings' Security Keys page also asks what
 key is there, sets or changes the key's PIN, and resets the key, through
 sessiond's `KEYINFO`, `KEYPIN set|change` and `KEYRESET` (a session's only;
