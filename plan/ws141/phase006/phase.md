@@ -102,3 +102,7 @@ actual private client selected-state encoderをreadonly wrapperで実行、indep
 ## i14 primary/graphics recording checkpoint（2026-10-09）
 
 actual client primary pool/buffer codecsとreal public9vkCmdのfinite native recordingを接続。whole batch rollback、pending mutation拒否、pool非cycle/registry退役とindependent old graph、selected colour clear/raw state/typed interfaces、first node OOM→End failure/clean re-recordを確認。ordinary descriptor update-after-recordの想定をVulkan 1.0仕様へ修正し、set generation/current validationとpending update拒否を追加。host11範囲/RPi4 y build/style PASS、actual native CL/GPU completionの証拠にはしない。p005/p006/i13/i14 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。next immutable current draw preparation/native VA/code/uniform/TMU/CL、transfer/barrier/queue/common/public runtime。Master変更無し。[正確な結果/想定訂正/失敗と修正/限界/復帰点](../execution-20261009.md#i14-primary-command所有とactual-vkcmd記録のsoftware出力2026-10-09)。
+
+## i14 ordered draw state checkpoint（2026-10-09）
+
+exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、stage別push/partial vertex/dynamic stateの2回walkを実装。logical fetch/compiled uniform/whole target/sample backing/alias feedbackをnative準備前に確認。actual host12範囲/RPi4 y build/style PASS。callbackはborrowed state観察のみ、独立native prepared owner/CL/DMA/queue/public bindingは後続、p006/i14 in-progress、Keiland/実機/p007未達。[結果/fixture correction/限界/再開](../execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。
