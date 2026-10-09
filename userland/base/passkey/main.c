@@ -19,7 +19,12 @@
  *
  * Passwords and PINs are checked here with the C library's crypt() alone;
  * the security key style is passkey-fido2's (/usr/libexec/passkey-fido2,
- * ws172-p003), which gets the same request.
+ * ws172-p003), which gets the same request, as do a key's own operations
+ * (ws199-p001: key-info, key-set-pin, key-change-pin, key-reset).  While
+ * passkey-fido2 runs, passkey ignores SIGTERM, SIGHUP and SIGPIPE and
+ * waits for it: sessiond's TERM reaches passkey-fido2 and its helper in
+ * the same process group, which end the key's work (a cancel the key
+ * answers) before passkey-fido2 answers and exits.
  */
 
 #include "passkey.h"
@@ -102,6 +107,8 @@ main(
 
 	/* The security key style goes to passkey-fido2 with the whole request. */
 	same = request.operation == PASSKEY_OP_ENROLL_FIDO2 || request.operation == PASSKEY_OP_REMOVE_FIDO2;
+	if (request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET)
+		same = 1;
 	if (request.operation == PASSKEY_OP_AUTH && strcmp(request.fields[2], "fido2") == 0)
 		same = 1;
 	if (same) {
@@ -573,6 +580,11 @@ passkey_fido2(
 	(void)close(pipes[0]);
 	(void)write(pipes[1], request, length);
 	(void)close(pipes[1]);
+
+	/* sessiond's end of the work is passkey-fido2's to finish: passkey waits for it whatever comes (ws199-p001). */
+	(void)signal(SIGTERM, SIG_IGN);
+	(void)signal(SIGHUP, SIG_IGN);
+	(void)signal(SIGPIPE, SIG_IGN);
 
 	/* Its status. */
 	while (waitpid(child, &status, 0) < 0 && errno == EINTR)

@@ -31,6 +31,10 @@
 #define PASSKEY_OP_REMOVE_PIN	5
 #define PASSKEY_OP_ENROLL_FIDO2	6
 #define PASSKEY_OP_REMOVE_FIDO2	7
+#define PASSKEY_OP_KEY_INFO	8
+#define PASSKEY_OP_KEY_SET_PIN	9
+#define PASSKEY_OP_KEY_CHANGE_PIN	10
+#define PASSKEY_OP_KEY_RESET	11
 
 /* The file, its first line, and the version this passkey writes. */
 #ifndef PASSKEY_FILE

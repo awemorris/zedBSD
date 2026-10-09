@@ -59,12 +59,17 @@ struct helper_key {
 	struct pk_device device;
 	struct pk_info info;
 	int card;
+	int cancelled;
 };
 
-/* The helper's pipe to passkey-fido2, whether the touch was asked for (told once), and when the helper started. */
+/* The helper's pipe to passkey-fido2, whether the touch was asked for (told once), when the helper started, and whether sessiond ended the work (SIGTERM). */
 static int helper_pipe = -1;
 static int helper_touch_told;
 static uint64_t helper_started_ms;
+static volatile sig_atomic_t helper_ended;
+
+/* The longest the reset's look for the credentials the key holds may take (the key takes the reset only a few seconds after it is powered). */
+#define HELPER_RESET_LOOK_MS	1500U
 
 static int helper_sandbox(uid_t uid, gid_t gid);
 static int helper_open(struct fido2_devices *devices, size_t index, struct helper_key *key);
@@ -73,6 +78,11 @@ static int helper_ready(struct helper_key *key);
 static void helper_release(struct fido2_devices *devices, struct helper_key *key);
 static int helper_wait_card(struct fido2_devices *devices, size_t *index);
 static void helper_touch(void);
+static int helper_one(struct fido2_devices *devices, struct helper_key *key, int wait);
+static void helper_info(struct fido2_devices *devices);
+static void helper_pin(struct fido2_devices *devices, const struct fido2_job *job);
+static void helper_reset(struct fido2_devices *devices, const struct fido2_job *job);
+static void helper_terminated(int signal_number);
 static uint64_t helper_now_ms(void);
 static void helper_assert(struct fido2_devices *devices, const struct fido2_job *job);
 static void helper_make(struct fido2_devices *devices, const struct fido2_job *job);
@@ -94,6 +104,7 @@ fido2_helper(
 	uid_t uid,
 	gid_t gid)
 {
+	struct sigaction ending;
 	int error;
 
 	/* The pipe, the time, and the sandbox. */
@@ -105,11 +116,31 @@ fido2_helper(
 		_exit(2);
 	}
 
+	/* sessiond's end of the work: the key's command under way is cancelled, and the job ends with the key's answer (ws199-p001). */
+	memset(&ending, 0, sizeof(ending));
+	ending.sa_handler = helper_terminated;
+	sigemptyset(&ending.sa_mask);
+	(void)sigaction(SIGTERM, &ending, NULL);
+
 	/* The job. */
-	if (job->kind == FIDO2_JOB_ASSERT)
+	switch (job->kind) {
+	case FIDO2_JOB_ASSERT:
 		helper_assert(devices, job);
-	else
+		break;
+	case FIDO2_JOB_MAKE:
 		helper_make(devices, job);
+		break;
+	case FIDO2_JOB_INFO:
+		helper_info(devices);
+		break;
+	case FIDO2_JOB_SET_PIN:
+	case FIDO2_JOB_CHANGE_PIN:
+		helper_pin(devices, job);
+		break;
+	default:
+		helper_reset(devices, job);
+		break;
+	}
 
 	/* Done: the answer was sent. */
 	_exit(0);
@@ -232,6 +263,7 @@ helper_ready(
 	/* The device, the touch's wait told. */
 	pk_device_init(&key->device, &key->transport, FIDO2_TOUCH_MS);
 	key->device.keepalive = helper_keepalive;
+	key->device.keepalive_context = key;
 
 	/* What the key is. */
 	error = pk_ctap2_get_info(&key->device, &key->info);
@@ -302,6 +334,8 @@ helper_wait_card(
 		if (now >= deadline)
 			return ETIMEDOUT;
 		ready = poll(waits, count, (int)(deadline - now));
+		if (helper_ended)
+			return ECANCELED;
 		if (ready < 0 && errno == EINTR)
 			continue;
 		if (ready < 0)
@@ -483,84 +517,14 @@ helper_make(
 	struct pk_make_request request;
 	char line[FIDO2_MESSAGE_MAX];
 	char auth_data[2U * PK_AUTH_DATA_MAX + 1U];
-	static struct helper_key other;
 	uint8_t token[PK_PIN_TOKEN_MAX];
 	size_t token_size;
-	size_t cards;
-	size_t slot;
-	int present;
 	int error;
 
-	/* No card open yet. */
-	key.card = -1;
-	other.card = -1;
-
-	/* Two USB keys or more: a rogue one could slip its own credential in. */
-	if (devices->count > 1U) {
-		helper_fail("many-keys");
+	/* Exactly one key (a rogue second one could slip its own credential in), held to a reader in time when none is there. */
+	error = helper_one(devices, &key, 1);
+	if (error != 0)
 		return;
-	}
-
-	/* The cards held to a reader now that answer as keys: the first kept, any other one more key. */
-	cards = 0U;
-	for (slot = 0U; slot < devices->card_count; slot++) {
-		error = pk_os_card_present(&devices->cards[slot], &present);
-		if (error != 0 || !present)
-			continue;
-		if (cards == 0U) {
-			error = helper_open_card(devices, slot, &key);
-		} else {
-			error = helper_open_card(devices, slot, &other);
-		}
-
-		/* A card that is not a key does not count; one more than the first is let go. */
-		if (error != 0)
-			continue;
-		cards++;
-		if (cards > 1U)
-			helper_release(devices, &other);
-	}
-
-	/* Exactly one key: two or more are refused. */
-	if (devices->count + cards > 1U) {
-		helper_release(devices, &key);
-		helper_fail("many-keys");
-		return;
-	}
-
-	/* The USB key, when it is the one: it answers. */
-	if (devices->count == 1U) {
-		error = helper_open(devices, 0U, &key);
-		if (error != 0) {
-			helper_fail("device");
-			return;
-		}
-	}
-
-	/* No key at all: one held to a reader in the touch's time. */
-	if (devices->count + cards == 0U) {
-		if (devices->card_count == 0U) {
-			helper_fail("no-key");
-			return;
-		}
-
-		/* Held to a reader, in the touch's time. */
-		helper_touch();
-		for (;;) {
-			error = helper_wait_card(devices, &slot);
-			if (error != 0)
-				break;
-			error = helper_open_card(devices, slot, &key);
-			if (error == 0)
-				break;
-		}
-
-		/* None in time. */
-		if (error != 0) {
-			helper_fail("timeout");
-			return;
-		}
-	}
 
 	/* The PIN. */
 	error = helper_token(&key, job, PK_PERMISSION_MAKE_CREDENTIAL, token, &token_size);
@@ -608,9 +572,15 @@ helper_token(
 	unsigned protocol;
 	int error;
 
-	/* A key without a PIN is not used. */
+	/* A key without a PIN (or without a PIN protocol) is not used. */
 	protocol = pk_ctap2_choose_protocol(&key->info);
-	if ((key->info.options & PK_OPTION_CLIENT_PIN_SET) == 0U || protocol == 0U) {
+	if ((key->info.options & PK_OPTION_CLIENT_PIN_SET) == 0U) {
+		helper_fail("no-pin");
+		return EPERM;
+	}
+
+	/* A key without a PIN protocol is not used. */
+	if (protocol == 0U) {
 		helper_fail("device");
 		return EPERM;
 	}
@@ -627,6 +597,322 @@ helper_token(
 	return 0;
 }
 
+/*
+ * Takes the one key there: a USB key, or a card on a reader that answers
+ * as a key; with none and wait, one held to a reader in the touch's time.
+ * Returns 0 with it open, or an errno value after the failure was sent
+ * (many-keys, no-key, timeout, canceled, device).
+ */
+static int
+helper_one(
+	struct fido2_devices *devices,
+	struct helper_key *key,
+	int wait)
+{
+	static struct helper_key other;
+	size_t cards;
+	size_t slot;
+	int present;
+	int error;
+
+	/* No card open yet; two USB keys or more are refused. */
+	key->card = -1;
+	other.card = -1;
+	if (devices->count > 1U) {
+		helper_fail("many-keys");
+		return EEXIST;
+	}
+
+	/* The cards on a reader now that answer as keys: the first kept, any other one more key. */
+	cards = 0U;
+	for (slot = 0U; slot < devices->card_count; slot++) {
+		error = pk_os_card_present(&devices->cards[slot], &present);
+		if (error != 0 || !present)
+			continue;
+		if (cards == 0U) {
+			error = helper_open_card(devices, slot, key);
+		} else {
+			error = helper_open_card(devices, slot, &other);
+		}
+
+		/* A card that is not a key does not count; one more than the first is let go. */
+		if (error != 0)
+			continue;
+		cards++;
+		if (cards > 1U)
+			helper_release(devices, &other);
+	}
+
+	/* Exactly one key: two or more are refused. */
+	if (devices->count + cards > 1U) {
+		helper_release(devices, key);
+		helper_fail("many-keys");
+		return EEXIST;
+	}
+
+	/* The USB key, when it is the one: it answers. */
+	if (devices->count == 1U) {
+		error = helper_open(devices, 0U, key);
+		if (error != 0) {
+			helper_fail("device");
+			return error;
+		}
+
+		/* Open. */
+		return 0;
+	}
+
+	/* A card already there. */
+	if (cards == 1U)
+		return 0;
+
+	/* No key, and none to wait for. */
+	if (!wait || devices->card_count == 0U) {
+		helper_fail("no-key");
+		return ENODEV;
+	}
+
+	/* Held to a reader, in the touch's time. */
+	helper_touch();
+	for (;;) {
+		error = helper_wait_card(devices, &slot);
+		if (error != 0)
+			break;
+		error = helper_open_card(devices, slot, key);
+		if (error == 0)
+			return 0;
+	}
+
+	/* None in time, or the work ended. */
+	if (error == ECANCELED) {
+		helper_fail("canceled");
+		return error;
+	}
+
+	/* Out of time. */
+	helper_fail("timeout");
+	return error;
+}
+
+/*
+ * Tells what the keys there are (Settings' wizards, ws199-p001 section
+ * 4.1): how many, and for one key whether it has a PIN, its retries and
+ * its PIN's fewest characters; the PIN is never sent.
+ */
+static void
+helper_info(
+	struct fido2_devices *devices)
+{
+	static struct helper_key key;
+	static struct helper_key other;
+	char line[96];
+	unsigned count;
+	unsigned retries;
+	unsigned protocol;
+	unsigned minimum;
+	unsigned pin;
+	size_t index;
+	size_t slot;
+	int present;
+	int chosen;
+	int card;
+	int error;
+
+	/* The USB keys that answer, the first kept. */
+	count = 0U;
+	chosen = -1;
+	card = 0;
+	key.card = -1;
+	other.card = -1;
+	for (index = 0U; index < devices->count; index++) {
+		if (count == 0U) {
+			error = helper_open(devices, index, &key);
+		} else {
+			error = helper_open(devices, index, &other);
+		}
+
+		/* One that does not answer is not counted. */
+		if (error != 0)
+			continue;
+		if (count == 0U)
+			chosen = (int)index;
+		count++;
+	}
+
+	/* The cards on a reader that answer as keys (none is waited for). */
+	for (slot = 0U; slot < devices->card_count; slot++) {
+		error = pk_os_card_present(&devices->cards[slot], &present);
+		if (error != 0 || !present)
+			continue;
+		if (count == 0U) {
+			error = helper_open_card(devices, slot, &key);
+		} else {
+			error = helper_open_card(devices, slot, &other);
+		}
+
+		/* A card that is not a key is not counted. */
+		if (error != 0)
+			continue;
+		if (count == 0U) {
+			chosen = (int)slot;
+			card = 1;
+		} else {
+			helper_release(devices, &other);
+		}
+
+		/* Counted. */
+		count++;
+	}
+
+	/* Not one key: how many, and nothing more. */
+	if (count != 1U) {
+		helper_release(devices, &key);
+		(void)snprintf(line, sizeof(line), "info %u,0,0,0,0,0", count);
+		helper_send(line);
+		return;
+	}
+
+	/* The one key: its PIN, its retries (without the PIN), its PIN's fewest characters. */
+	pin = (key.info.options & PK_OPTION_CLIENT_PIN_SET) != 0U;
+	retries = 0U;
+	protocol = pk_ctap2_choose_protocol(&key.info);
+	if (pin && protocol != 0U)
+		(void)pk_ctap2_pin_retries(&key.device, protocol, &retries);
+	minimum = key.info.min_pin_length;
+	if (minimum == 0U)
+		minimum = 4U;
+
+	/* Told. */
+	(void)snprintf(line, sizeof(line), "info 1,%d,%d,%u,%u,%u", card, chosen, pin, retries, minimum);
+	helper_send(line);
+}
+
+/* Sets the one key's first PIN, or changes its PIN (the current one, the new one); the key checks both. */
+static void
+helper_pin(
+	struct fido2_devices *devices,
+	const struct fido2_job *job)
+{
+	static struct helper_key key;
+	unsigned protocol;
+	int has;
+	int error;
+
+	/* The one key there (none is waited for). */
+	error = helper_one(devices, &key, 0);
+	if (error != 0)
+		return;
+
+	/* Its PIN protocol, and whether it has a PIN: a set needs none, a change needs one. */
+	protocol = pk_ctap2_choose_protocol(&key.info);
+	has = (key.info.options & PK_OPTION_CLIENT_PIN_SET) != 0U;
+	if (protocol == 0U) {
+		helper_fail("device");
+		return;
+	}
+
+	/* A first PIN only for a key without one. */
+	if (job->kind == FIDO2_JOB_SET_PIN && has) {
+		helper_fail("pin-set");
+		return;
+	}
+
+	/* A change only for a key with one. */
+	if (job->kind == FIDO2_JOB_CHANGE_PIN && !has) {
+		helper_fail("no-pin");
+		return;
+	}
+
+	/* The PIN. */
+	if (job->kind == FIDO2_JOB_SET_PIN) {
+		error = pk_ctap2_set_pin(&key.device, protocol, job->new_pin);
+	} else {
+		error = pk_ctap2_change_pin(&key.device, protocol, job->pin, job->new_pin);
+	}
+
+	/* The key refused it. */
+	if (error != 0) {
+		helper_fail(helper_reason(&key, error));
+		return;
+	}
+
+	/* Done. */
+	helper_send("done");
+}
+
+/*
+ * Resets the one key (ws199-p001 section 4.5): passkey-fido2 saw it come
+ * back a moment ago, so the key still takes the reset.  First, within a
+ * short time, which of the job's credentials the key holds (each asked
+ * alone, without the user); then authenticatorReset with the touch; the
+ * credentials held go back so passkey-fido2 removes their lines.
+ */
+static void
+helper_reset(
+	struct fido2_devices *devices,
+	const struct fido2_job *job)
+{
+	static struct helper_key key;
+	struct pk_assertion_request request;
+	struct pk_assertion_reply reply;
+	char line[32];
+	uint64_t until;
+	uint64_t now;
+	unsigned held;
+	size_t index;
+	int error;
+
+	/* The one key (it came back just now; none is waited for). */
+	error = helper_one(devices, &key, 0);
+	if (error != 0)
+		return;
+
+	/* The credentials it holds, each asked alone and silently, while there is time. */
+	held = 0U;
+	until = helper_now_ms() + HELPER_RESET_LOOK_MS;
+	memset(&request, 0, sizeof(request));
+	request.rp_id = FIDO2_RP;
+	memcpy(request.client_data_hash, job->client_data_hash, sizeof(request.client_data_hash));
+	request.allow_count = 1U;
+	for (index = 0U; index < job->id_count && index < 32U; index++) {
+		now = helper_now_ms();
+		if (now >= until || helper_ended)
+			break;
+		request.allow_ids = &job->ids[index];
+		request.allow_sizes = &job->id_sizes[index];
+		error = pk_ctap2_get_assertion(&key.device, &request, &reply);
+		if (error == 0)
+			held |= 1U << index;
+	}
+
+	/* The work ended before the reset: nothing is reset. */
+	if (helper_ended) {
+		helper_fail("canceled");
+		return;
+	}
+
+	/* The reset, with the user's touch. */
+	error = pk_ctap2_reset(&key.device);
+	if (error != 0) {
+		helper_fail(helper_reason(&key, error));
+		return;
+	}
+
+	/* Done: what it held. */
+	(void)snprintf(line, sizeof(line), "reset %x", held);
+	helper_send(line);
+}
+
+/* Notes that sessiond ended the work (SIGTERM): the key's command is cancelled at its next keepalive. */
+static void
+helper_terminated(
+	int signal_number)
+{
+	/* Only noted (async-signal-safe). */
+	(void)signal_number;
+	helper_ended = 1;
+}
+
 /* Gives passkey's reason for a key's failure. */
 static const char *
 helper_reason(
@@ -635,21 +921,35 @@ helper_reason(
 {
 	uint8_t status;
 
-	/* The key's own answers. */
+	/* The work ended by sessiond, a PIN the library refused before the key saw it, and the key's own answers (ws199-p001 section 4.6). */
+	if (error == ECANCELED)
+		return "canceled";
+	if (error == EINVAL)
+		return "pin-policy";
 	if (error != EPROTO)
 		return "device";
 	status = key->device.last_status;
 	switch (status) {
 	case PK_CTAP2_PIN_INVALID:
-		return "bad-secret";
+		return "bad-key-pin";
 	case PK_CTAP2_PIN_BLOCKED:
-	case PK_CTAP2_PIN_AUTH_BLOCKED:
 		return "key-locked";
+	case PK_CTAP2_PIN_AUTH_BLOCKED:
+		return "key-replug";
+	case PK_CTAP2_PIN_NOT_SET:
+		return "no-pin";
+	case PK_CTAP2_PIN_REQUIRED:
+		return "pin-required";
+	case PK_CTAP2_PIN_POLICY_VIOLATION:
+		return "pin-policy";
+	case PK_CTAP2_NOT_ALLOWED:
+		return "not-allowed";
 	case PK_CTAP2_NO_CREDENTIALS:
 		return "no-key";
+	case PK_CTAP2_KEEPALIVE_CANCEL:
+		return "canceled";
 	case PK_CTAP2_OPERATION_DENIED:
 	case PK_CTAP2_USER_ACTION_TIMEOUT:
-	case PK_CTAP2_KEEPALIVE_CANCEL:
 		return "timeout";
 	case PK_CTAP2_CREDENTIAL_EXCLUDED:
 		return "bad-request";
@@ -661,14 +961,26 @@ helper_reason(
 	return "device";
 }
 
-/* Tells passkey-fido2, once, that the key waits for the user's touch. */
+/* Tells passkey-fido2, once, that the key waits for the user's touch; cancels the command when sessiond ended the work. */
 static void
 helper_keepalive(
 	void *context,
 	uint8_t status)
 {
+	struct helper_key *key;
+
+	/*
+	 * sessiond ended the work: the command under way is cancelled, once
+	 * (a USB key answers KEEPALIVE_CANCEL; a card ends when it is taken
+	 * away).
+	 */
+	key = context;
+	if (helper_ended && key != NULL && key->card < 0 && !key->cancelled) {
+		key->cancelled = 1;
+		(void)pk_hid_cancel(&key->hid);
+	}
+
 	/* Only the wait for the user, once. */
-	(void)context;
 	if (status != PK_HID_KEEPALIVE_UP_NEEDED)
 		return;
 	helper_touch();

@@ -167,6 +167,8 @@ fido2_message_parse(
 	char *place;
 	size_t count;
 	size_t length;
+	char extra;
+	int parsed;
 	int same;
 	int error;
 
@@ -202,6 +204,34 @@ fido2_message_parse(
 	if (same && length < sizeof(message->reason)) {
 		message->kind = FIDO2_MESSAGE_FAIL;
 		(void)snprintf(message->reason, sizeof(message->reason), "%s", words[1]);
+		return 0;
+	}
+
+	/* done (a key's PIN set or changed, ws199-p001). */
+	same = strcmp(words[0], "done") == 0;
+	if (same && count == 1U) {
+		message->kind = FIDO2_MESSAGE_DONE;
+		return 0;
+	}
+
+	/* info COUNT,CARD,INDEX,PIN,RETRIES,MIN (what the one key is, ws199-p001). */
+	same = strcmp(words[0], "info") == 0;
+	if (same && count == 2U) {
+		parsed = sscanf(words[1], "%u,%u,%u,%u,%u,%u%c", &message->info_count, &message->info_card, &message->info_index,
+		    &message->info_pin, &message->info_retries, &message->info_min, &extra);
+		if (parsed != 6)
+			return EINVAL;
+		message->kind = FIDO2_MESSAGE_INFO;
+		return 0;
+	}
+
+	/* reset MASK (the credentials the reset key held, by their places in the job, ws199-p001). */
+	same = strcmp(words[0], "reset") == 0;
+	if (same && count == 2U) {
+		parsed = sscanf(words[1], "%x%c", &message->held, &extra);
+		if (parsed != 1)
+			return EINVAL;
+		message->kind = FIDO2_MESSAGE_RESET;
 		return 0;
 	}
 
