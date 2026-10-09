@@ -22,6 +22,7 @@
 #include "drivers/gpu/bcm2711/vulkan-layout.h"
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 #include "drivers/gpu/bcm2711/vulkan-target.h"
+#include "drivers/gpu/bcm2711/vulkan-pipeline.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -57,6 +58,7 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void pipeline_test(struct bcm2711_vulkan_session *session);
 static void target_test(struct bcm2711_vulkan_session *session);
 static void descriptor_test(struct bcm2711_vulkan_session *session);
 static void encode_image_write(struct vulkan_writer *writer, uint64_t set, uint64_t sampler, uint64_t view);
@@ -2030,6 +2032,9 @@ target_test(
 	assert(load->colour.finalLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	destroy(session, GPU_OP_DESTROY_RENDER_PASS, 123);
 
+	/* Compile actual Keiland programs against this same-device clear pass before its public identity retires. */
+	pipeline_test(session);
+
 	/* One-pixel API granularity allows a caller to choose damage rectangles independently of native tile size. */
 	begin(&writer, wire, sizeof(wire), GPU_OP_GET_RENDER_AREA_GRANULARITY, 1);
 	vulkan_write_u64(&writer, 30);
@@ -2099,4 +2104,198 @@ target_test(
 	error = bcm2711_vulkan_object_release(framebuffer_object);
 	assert(error == 0 && allocations == baseline && view_object->references == references);
 	puts("WS141 Vulkan actual clear/load/backdrop passes/target compatibility/framebuffer OOM/retained native target: PASS");
+}
+
+/* Exercises actual module bytes and native compiler/interface ownership before the wire batch router publishes pipelines. */
+static void
+pipeline_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct bcm2711_vulkan_object *device;
+	struct bcm2711_vulkan_object *layout;
+	struct bcm2711_vulkan_pipeline *pipeline;
+	struct vulkan_object client_set;
+	VkDescriptorSetLayoutBinding binding;
+	VkDescriptorSetLayoutCreateInfo set_info;
+	VkDescriptorSetLayout set_handle;
+	VkPushConstantRange push;
+	VkPipelineLayoutCreateInfo layout_info;
+	VkShaderModuleCreateInfo module;
+	VkPipelineShaderStageCreateInfo stages[2];
+	VkVertexInputBindingDescription vertex_binding;
+	VkVertexInputAttributeDescription attribute;
+	VkPipelineVertexInputStateCreateInfo input;
+	VkPipelineInputAssemblyStateCreateInfo assembly;
+	VkPipelineViewportStateCreateInfo viewport;
+	VkPipelineRasterizationStateCreateInfo raster;
+	VkPipelineMultisampleStateCreateInfo samples;
+	VkPipelineColorBlendAttachmentState attachment;
+	VkPipelineColorBlendStateCreateInfo blend;
+	VkDynamicState dynamic_commands[2];
+	VkPipelineDynamicStateCreateInfo dynamic;
+	VkGraphicsPipelineCreateInfo info;
+	uint8_t wire[8192];
+	unsigned baseline;
+	unsigned with_inputs;
+	uint32_t index;
+	int error;
+
+	/* Actual client layout records supply the quad's fragment sampler and exact 32-byte vertex push range. */
+	baseline = allocations;
+	memset(&binding, 0, sizeof(binding));
+	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binding.descriptorCount = 1;
+	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	memset(&set_info, 0, sizeof(set_info));
+	set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	set_info.bindingCount = 1;
+	set_info.pBindings = &binding;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorSetLayoutCreateInfo(&writer, &set_info);
+	error = input_created(session, &writer, 130);
+	assert(error == VK_SUCCESS);
+	memset(&client_set, 0, sizeof(client_set));
+	client_set.wire_id = 130;
+	set_handle = (VkDescriptorSetLayout)(uintptr_t)&client_set;
+	memset(&push, 0, sizeof(push));
+	push.stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	push.size = 32;
+	memset(&layout_info, 0, sizeof(layout_info));
+	layout_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	layout_info.setLayoutCount = 1;
+	layout_info.pSetLayouts = &set_handle;
+	layout_info.pushConstantRangeCount = 1;
+	layout_info.pPushConstantRanges = &push;
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_PIPELINE_LAYOUT, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkPipelineLayoutCreateInfo(&writer, &layout_info);
+		error = input_created(session, &writer, 131 + index);
+		assert(error == VK_SUCCESS);
+		push.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	}
+
+	/* Ordinary native module creation owns exact immutable Keiland source arrays independently of the stream arena. */
+	memset(&module, 0, sizeof(module));
+	module.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	module.codeSize = sizeof(kwl_quad_vert);
+	module.pCode = kwl_quad_vert;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SHADER_MODULE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkShaderModuleCreateInfo(&writer, &module);
+	error = input_created(session, &writer, 133);
+	assert(error == VK_SUCCESS);
+	module.codeSize = sizeof(kwl_quad_frag);
+	module.pCode = kwl_quad_frag;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SHADER_MODULE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkShaderModuleCreateInfo(&writer, &module);
+	error = input_created(session, &writer, 134);
+	assert(error == VK_SUCCESS);
+
+	/* These fields are decoded native IDs, not client pointers; the backend accepts exactly the records the future wire decoder produces. */
+	memset(stages, 0, sizeof(stages));
+	stages[0].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[0].stage = VK_SHADER_STAGE_VERTEX_BIT;
+	stages[0].module = (VkShaderModule)(uintptr_t)133;
+	stages[0].pName = "main";
+	stages[1].sType = VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO;
+	stages[1].stage = VK_SHADER_STAGE_FRAGMENT_BIT;
+	stages[1].module = (VkShaderModule)(uintptr_t)134;
+	stages[1].pName = "main";
+	memset(&vertex_binding, 0, sizeof(vertex_binding));
+	vertex_binding.stride = 8;
+	memset(&attribute, 0, sizeof(attribute));
+	attribute.format = VK_FORMAT_R32G32_SFLOAT;
+	memset(&input, 0, sizeof(input));
+	input.sType = VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO;
+	input.vertexBindingDescriptionCount = 1;
+	input.pVertexBindingDescriptions = &vertex_binding;
+	input.vertexAttributeDescriptionCount = 1;
+	input.pVertexAttributeDescriptions = &attribute;
+	memset(&assembly, 0, sizeof(assembly));
+	assembly.sType = VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO;
+	assembly.topology = VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST;
+	memset(&viewport, 0, sizeof(viewport));
+	viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
+	viewport.viewportCount = 1;
+	viewport.scissorCount = 1;
+	memset(&raster, 0, sizeof(raster));
+	raster.sType = VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO;
+	raster.lineWidth = 1.0f;
+	memset(&samples, 0, sizeof(samples));
+	samples.sType = VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO;
+	samples.rasterizationSamples = VK_SAMPLE_COUNT_1_BIT;
+	memset(&attachment, 0, sizeof(attachment));
+	attachment.blendEnable = VK_TRUE;
+	attachment.srcColorBlendFactor = VK_BLEND_FACTOR_ONE;
+	attachment.dstColorBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	attachment.srcAlphaBlendFactor = VK_BLEND_FACTOR_ONE;
+	attachment.dstAlphaBlendFactor = VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA;
+	attachment.colorWriteMask = VK_COLOR_COMPONENT_R_BIT | VK_COLOR_COMPONENT_G_BIT | VK_COLOR_COMPONENT_B_BIT | VK_COLOR_COMPONENT_A_BIT;
+	memset(&blend, 0, sizeof(blend));
+	blend.sType = VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO;
+	blend.attachmentCount = 1;
+	blend.pAttachments = &attachment;
+	dynamic_commands[0] = VK_DYNAMIC_STATE_VIEWPORT;
+	dynamic_commands[1] = VK_DYNAMIC_STATE_SCISSOR;
+	memset(&dynamic, 0, sizeof(dynamic));
+	dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
+	dynamic.dynamicStateCount = 2;
+	dynamic.pDynamicStates = dynamic_commands;
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO;
+	info.stageCount = 2;
+	info.pStages = stages;
+	info.pVertexInputState = &input;
+	info.pInputAssemblyState = &assembly;
+	info.pViewportState = &viewport;
+	info.pRasterizationState = &raster;
+	info.pMultisampleState = &samples;
+	info.pColorBlendState = &blend;
+	info.pDynamicState = &dynamic;
+	info.layout = (VkPipelineLayout)(uintptr_t)131;
+	info.renderPass = (VkRenderPass)(uintptr_t)120;
+	info.basePipelineIndex = -1;
+	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, 30);
+	layout = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PIPELINE_LAYOUT, 131);
+	assert(device != NULL && layout != NULL);
+	with_inputs = allocations;
+
+	/* A declared push range invisible to the vertex stage is refused after partial compilation without leaking any parent or program. */
+	info.layout = (VkPipelineLayout)(uintptr_t)132;
+	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
+	assert(error == EINVAL && pipeline == NULL && allocations == with_inputs && layout->references == 1);
+	info.layout = (VkPipelineLayout)(uintptr_t)131;
+	fail_after = 2;
+	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
+	assert(error == ENOMEM && pipeline == NULL && allocations == with_inputs && layout->references == 1);
+
+	/* A scalar-only vertex attribute cannot supply the actual quad shader's second input component. */
+	attribute.format = VK_FORMAT_R32_SFLOAT;
+	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
+	assert(error == ENOTSUP && pipeline == NULL && allocations == with_inputs && layout->references == 1);
+	attribute.format = VK_FORMAT_R32G32_SFLOAT;
+	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
+	assert(error == 0 && pipeline != NULL && layout->references == 2);
+	assert(pipeline->blend && pipeline->binding_count == 1 && pipeline->attributes[0].format == VK_FORMAT_R32G32_SFLOAT);
+	assert(pipeline->programs[0]->vpm_output_words == 6 && pipeline->programs[1]->input_count == 2 && pipeline->programs[2]->varying_count == 2);
+	assert(pipeline->programs[2]->code_count != 0 && pipeline->programs[2]->uniform_count != 0);
+
+	/* Source modules and public layout identities may retire without invalidating independently owned native code/interface metadata. */
+	destroy(session, GPU_OP_DESTROY_SHADER_MODULE, 133);
+	destroy(session, GPU_OP_DESTROY_SHADER_MODULE, 134);
+	destroy(session, GPU_OP_DESTROY_PIPELINE_LAYOUT, 131);
+	destroy(session, GPU_OP_DESTROY_PIPELINE_LAYOUT, 132);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT, 130);
+	assert(layout->references == 1 && !layout->published && pipeline->programs[2]->code_count != 0);
+	error = bcm2711_vulkan_pipeline_release(session, pipeline);
+	assert(error == 0 && allocations == baseline);
+	puts("WS141 Vulkan actual quad compiler/push visibility/attribute interface/OOM/compiled pipeline ownership: PASS");
 }

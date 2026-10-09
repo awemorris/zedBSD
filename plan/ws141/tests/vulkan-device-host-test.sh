@@ -15,6 +15,10 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -include time.h -Wall -Wextr
     src/drivers/gpu/bcm2711/vulkan-stream.c src/drivers/gpu/bcm2711/vulkan-device.c \
     src/drivers/gpu/bcm2711/vulkan-query.c src/drivers/gpu/bcm2711/vulkan-memory.c src/drivers/gpu/bcm2711/vulkan-resource.c src/drivers/gpu/bcm2711/vulkan-input.c src/drivers/gpu/bcm2711/vulkan-layout.c src/drivers/gpu/bcm2711/vulkan-descriptor-pool.c \
     src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-descriptor-update.c src/drivers/gpu/bcm2711/vulkan-target.c \
+    src/drivers/gpu/bcm2711/vulkan-pipeline-build.c src/drivers/gpu/bcm2711/vulkan-pipeline-state.c \
+    src/drivers/gpu/bcm2711/shader.c src/drivers/gpu/bcm2711/shader-analyze.c \
+    src/drivers/gpu/bcm2711/shader-lower.c src/drivers/gpu/bcm2711/shader-output.c src/drivers/gpu/bcm2711/qpu.c \
+    src/drivers/gpu/i915/compiler/spirv.c \
     src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/i915/render/codec.c \
     userland/desktop/libvulkan/wire.c userland/desktop/libvulkan/codec.c userland/desktop/libvulkan/objects.c \
     -Wl,--gc-sections -o "$out/vulkan-device-host-test"

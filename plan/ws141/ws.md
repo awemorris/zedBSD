@@ -185,3 +185,7 @@ ordered write/copy、immutable sampler override、complete staging rollbackとin
 ## i14 target checkpoint（2026-10-09）
 
 actual Keiland clear/load/backdropのsingle-colour pass、same-device bound framebuffer、互換性/granularityとindependent target所有を追加。host8範囲/RPi4 y build/style PASS、次はgraphics pipeline/compiler/native draw/queue。public runtime/Keiland/実機/p007未達、i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-render-passframebufferのsoftware出力2026-10-09)。
+
+## i14 compiled pipeline checkpoint（2026-10-09）
+
+actual Keiland quad sourceから3native programsを構築、module entry/stage、varying/FIFO、descriptor type/visibility、push permission、attribute componentをvalidate。independent compiled graphとpartial OOM/unwindをhost9範囲/RPi4 y build/styleで確認。次はactual graphics pipeline wire batchとnative draw/queue、public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-compiled-pipeline-graphのsoftware出力2026-10-09)。
