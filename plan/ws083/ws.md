@@ -89,4 +89,4 @@ blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slic
 - **出力の使い道**: decode の picture は host から読むだけ（SAMPLED・TRANSFER_SRC は無い、HD5）。表示には app が de-tile して別の image に写す。
 - **実機で確かめた範囲**: 5330（Alder Lake-P、Gen12）で `tests/streams` の 6 本（I 3・P/B 3、CAVLC・CABAC・複数 slice・非対称の scaling list・weighted・list の modification・B pyramid と MMCO 1）の全 frame の hash が一致、result status は COMPLETE。long term・frame_num の gap・MMCO 5・4 byte の start code・1080p の hash は host の golden だけ（実機の hash は未）。
 - **hang の回復**: VCS0 の engine 単位の reset（GRDOM_MEDIA）と上限 3 回は実装と host 試験済み、実機（p007 の F1・F2、試験の kernel が要る）は未実施。hang した session の quarantine は video の submit・session の create だけを拒み、render の stream の入口は見ない（WS031 の側の残件、上の review の節）。
-- **性能**: 1 decode ごとに submit と wait（worker は 1 本で同期、U8）。数字は T1-435 の E の後に書く。
+- **性能**（T1-435 の E・E2、5330）: 1920x1080 の H.264（Baseline・Main・High、60 frame）で 1 decode の mean 4.2〜5.2 ms、longest 8 ms（probe は 1 decode ごとに submit と wait、worker は 1 本で同期）。60 fps に余裕。decode と同時の描画の fps への影響（U8）は測っていない。

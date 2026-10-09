@@ -2,7 +2,7 @@
 
 # ws083-p008: 性能・門の既定化・利用者への案内・result status query
 
-Status: in-progress（2026-10-10 P2: 残りは性能の数字（T1-435 の E、5330）だけ。result status query・利用者への案内・門（既定は OFF で閉じる）・SAMPLED/TRANSFER_SRC（HD5 で不要）・ws.md の制限は済み。E の数字を記録したら cleared 候補）（旧: in-progress（q897、P2。この attempt は host の分: result status query と利用者への案内））
+Status: cleared 候補（2026-10-10 P2: design §9 の受け入れ（記録、ws.md の制限）を全部満たす。性能は T1-435 の E・E2 の数字（下の表）を ws.md の制限に書いた。判定は Q1）（旧: in-progress（2026-10-10 P2: 残りは性能の数字（T1-435 の E）だけ）（旧: in-progress（q897、P2。この attempt は host の分: result status query と利用者への案内））
 Disposition: normal
 Parent: [WS083](../ws.md)
 Queue: q897（Q1 の dispatch、2026-10-08 午後「p008 の host の分を先に」）
@@ -96,7 +96,7 @@ design §9 の p008 の受け入れ（記録、ws.md の制限）の項目ごと
 | 利用者への案内 | 済み。`docs/reference/vulkan-video.md`（2026-10-08）の Availability に、既定は OFF（release の image も）と `zedbsd.cfg` に `i915.debug=video` の行で ON（既に `i915.debug=` の行があれば語を足す、`display,video`）を足した。release notes（`docs/release/zedbsd-1.0.0-beta2.md` の Hardware）の Vulkan Video の行を「既定は OFF、USB の EFI partition（FAT）の `zedbsd.cfg`（`ZEDBSD.CFG`）に `i915.debug=video` の行を足して起動し直すと ON、行を消すと OFF、image の中の program は要らない（Video Player は FFmpeg で CPU）」に書き換え、review の comment をユーザーの決定（2026-10-10、release は OFF）に直した |
 | D19 の門の既定化 | **既定は OFF で閉じる**（2026-10-10 ユーザーの決定: release の config に `i915.debug=video` を入れない。使う program は vkvideo-probe だけ、利用者は `zedbsd.cfg` で ON。Video Player が使うようになったら ON を改めて判断）。kernel の既定を ON にする変更（と OFF の parameter）は作らない。改めて ON にする時は p007 の実機（F1・F2）の後に別の Phase で |
 | SAMPLED・TRANSFER_SRC | 要らない（HD5、2026-10-07 ユーザー） |
-| 性能（U6・U8） | **残り**: T1-435 の E（5330、`vkvideo-probe --time`、B・C の 6 本と 1080p の sample 3 本の `--frames=60`）。数字が届いたらこの節と ws.md の制限に書いて cleared 候補 |
+| 性能（U6・U8） | 済み: T1-435 の E・E2（5330、下の「性能」の表）。1920x1080 の sample 3 本の 60 frame で 1 decode の mean 4.2〜5.2 ms・longest 8 ms（probe は 1 decode ごとに submit と wait をするので、実の再生より遅く出る側）。60 fps（16.7 ms）に余裕がある。U8（decode と描画が互いに待つ）は E2 で compositor が居て hang・reset の行が無いことまで、描画の fps への影響は測っていない |
 | ws.md の制限 | ws.md の「制限（p008）」の節に書いた |
 
 確認: 文書だけの変更（code は変えない）。`docs/` から `plan/` への link は足していない。
