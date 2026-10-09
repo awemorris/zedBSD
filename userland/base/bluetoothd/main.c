@@ -40,6 +40,8 @@
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/linkmgr.h"
+#include "userland/base/bluetoothd/outq.h"
+#include "userland/base/bluetoothd/phoneio.h"
 #include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/session.h"
 #include "userland/base/bluetoothd/snoop.h"
@@ -73,9 +75,13 @@
 #define BTD_LOADS_MAX		8U
 #define BTD_KEY_MAX		96U
 
-/* How many clients may be connected, and how long a write to one may wait. */
-#define BTD_CLIENTS_MAX		8U
-#define BTD_CLIENT_WRITE_MS	1000
+/*
+ * How many clients may be connected, and how many of the last free slots
+ * are kept for root and the seat's user (the compositor's connections,
+ * ws197-p003 section 4.2).
+ */
+#define BTD_CLIENTS_MAX		16U
+#define BTD_CLIENTS_RESERVED	4U
 
 /* How many packets one round of the loop handles at most (the clients are not starved). */
 #define BTD_PACKETS_A_ROUND	64U
@@ -101,17 +107,27 @@
 #define BTD_NO_CLIENT		(-1)
 
 /*
- * One client of the socket: its descriptor, its uid, whether it stopped
- * reading (it is closed at the end of the loop's round, where nothing
- * else uses it), the bytes of a line not ended yet, and what it waits for
- * (a scan's end, a pairing's end).
+ * One client of the socket: its descriptor, its uid, its generation (a
+ * number no client before it in the slot had, so an answer meant for a
+ * client that went never reaches the next one, ws197-p003 section 4.2),
+ * whether it stopped reading (it is closed at the end of the loop's
+ * round, where nothing else uses it), what is written to it and not sent
+ * yet, the bytes of a line not ended yet, the PHONE SEND line whose text
+ * is being read and that text (allocated while it is read), and what it
+ * waits for (a scan's end, a pairing's end).
  */
 struct btd_client {
 	int descriptor;
 	uid_t uid;
+	uint32_t generation;
 	int dead;
+	struct btd_outq output;
 	char input[BTD_LINE_MAX];
 	size_t used;
+	char send_line[BTD_LINE_MAX];
+	uint8_t *body;
+	size_t body_length;
+	size_t body_used;
 	int waits_scan;
 	int waits_pair;
 	int waits_connect;
@@ -169,9 +185,18 @@ static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static int btd_parse_pair(const char *text, uint8_t *address, unsigned *type, int *phone);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void btd_client_close(int index);
+static void btd_client_flush(int index);
+static ssize_t btd_client_send(void *context, const uint8_t *data, size_t length);
+static void btd_lines(int index);
+static int btd_body_begin(int index, const char *line, size_t length);
+static void btd_body_done(int index);
+static void btd_phone_send_request(int index, const char *line, const uint8_t *text, size_t length);
 
 /* The clients; a free slot has descriptor -1.  The daemon's one thread uses them. */
 static struct btd_client btd_clients[BTD_CLIENTS_MAX];
+
+/* The generation the next client gets; it only grows (wrapping after four billion clients). */
+static uint32_t btd_generation;
 
 /*
  * The controller's session, open while session_open is nonzero, and when
@@ -301,6 +326,7 @@ main(
 	struct btd_router_phone router_phone;
 	struct btd_phone_hooks phone_hooks;
 	char expired_text[24];
+	size_t pending;
 	unsigned count;
 	unsigned index;
 	uint64_t now;
@@ -409,10 +435,13 @@ main(
 		descriptors[count].events = POLLIN;
 		count++;
 
-		/* Each client's descriptor. */
+		/* Each client's descriptor, writable too while its queue holds something. */
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 			descriptors[count].fd = btd_clients[index].descriptor;
 			descriptors[count].events = POLLIN;
+			pending = btd_outq_pending(&btd_clients[index].output);
+			if (pending != 0U)
+				descriptors[count].events = POLLIN | POLLOUT;
 			count++;
 		}
 
@@ -492,6 +521,15 @@ main(
 		/* No controller: the nodes are looked for again, unless the daemon stopped trying. */
 		if (!btd_session_open && !btd_stopped && now >= btd_looked_ms + BTD_RETRY_MS)
 			btd_open();
+
+		/* What the clients that can take it are sent (before a new client takes a slot). */
+		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+			if (btd_clients[index].descriptor < 0 || btd_clients[index].dead)
+				continue;
+			if ((descriptors[3U + index].revents & POLLOUT) == 0)
+				continue;
+			btd_client_flush((int)index);
+		}
 
 		/* A new client, then each client's lines. */
 		if ((descriptors[0].revents & POLLIN) != 0)
@@ -801,10 +839,12 @@ static void
 btd_accept(
 	int listener)
 {
+	unsigned free_slots;
 	unsigned index;
 	uid_t uid;
 	gid_t gid;
 	int descriptor;
+	int seated;
 	int status;
 
 	/* The connection; its reads never block. */
@@ -821,16 +861,40 @@ btd_accept(
 		return;
 	}
 
-	/* A free slot. */
+	/* The free slots. */
+	free_slots = 0U;
+	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+		if (btd_clients[index].descriptor < 0)
+			free_slots++;
+	}
+
+	/* The last few are root's and the seat's user's (section 4.2). */
+	seated = 0;
+	if (uid == 0)
+		seated = 1;
+	if (!seated && free_slots <= BTD_CLIENTS_RESERVED)
+		seated = btd_seated(uid);
+	if (free_slots <= BTD_CLIENTS_RESERVED && !seated) {
+		(void)close(descriptor);
+		return;
+	}
+
+	/* A free slot, with a new generation and an empty queue. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 		if (btd_clients[index].descriptor >= 0)
 			continue;
+		btd_generation++;
 		btd_clients[index].descriptor = descriptor;
 		btd_clients[index].uid = uid;
+		btd_clients[index].generation = btd_generation;
 		btd_clients[index].dead = 0;
 		btd_clients[index].used = 0U;
+		btd_clients[index].body = NULL;
+		btd_clients[index].body_length = 0U;
+		btd_clients[index].body_used = 0U;
 		btd_clients[index].waits_scan = 0;
 		btd_clients[index].waits_pair = 0;
+		btd_outq_init(&btd_clients[index].output, BTD_OUTQ_MAX);
 		return;
 	}
 
@@ -838,20 +902,25 @@ btd_accept(
 	(void)close(descriptor);
 }
 
-/* Reads a client's bytes and carries out each whole line; a line too long closes the client. */
+/*
+ * Reads a client's bytes and carries out each whole line; a line too long
+ * closes the client.  While a PHONE SEND's text is being read the bytes go
+ * to it, never to the lines (section 4.3).
+ */
 static void
 btd_read(
 	int index)
 {
 	struct btd_client *client;
 	ssize_t count;
-	size_t length;
-	char *end;
 	int error;
 
-	/* What came, without waiting. */
+	/* What came, without waiting: into the text being read, or the line. */
 	client = &btd_clients[index];
-	count = recv(client->descriptor, client->input + client->used, sizeof(client->input) - 1U - client->used, 0);
+	if (client->body != NULL)
+		count = recv(client->descriptor, client->body + client->body_used, client->body_length - client->body_used, 0);
+	else
+		count = recv(client->descriptor, client->input + client->used, sizeof(client->input) - 1U - client->used, 0);
 	if (count < 0) {
 		error = errno;
 		if (error == EAGAIN || error == EWOULDBLOCK || error == EINTR)
@@ -864,20 +933,66 @@ btd_read(
 		return;
 	}
 
-	/* The bytes added to the line. */
+	/* The text's bytes: the request once it is whole. */
+	if (client->body != NULL) {
+		client->body_used += (size_t)count;
+		if (client->body_used == client->body_length)
+			btd_body_done(index);
+		return;
+	}
+
+	/* The line's bytes. */
 	client->used += (size_t)count;
 	client->input[client->used] = '\0';
 
 	/* Each whole line. */
+	btd_lines(index);
+}
+
+/*
+ * Carries out each whole line a client's buffer holds: a PHONE SEND line
+ * starts its text (taken from the buffer's rest first, section 4.3); any
+ * other line is a request.  A line that fills the buffer without ending
+ * closes the client.
+ */
+static void
+btd_lines(
+	int index)
+{
+	struct btd_client *client;
+	size_t text_length;
+	size_t length;
+	char *end;
+	int text;
+
+	/* Each whole line, until the client went or a text is read. */
+	client = &btd_clients[index];
 	for (;;) {
 		end = strchr(client->input, '\n');
 		if (end == NULL)
 			break;
 		*end = '\0';
+		length = (size_t)(end + 1 - client->input);
+
+		/* PHONE SEND: its text follows; a malformed one closes the client (the stream cannot be read on). */
+		text = btd_phoneio_send_length(client->input, &text_length);
+		if (text == EINVAL) {
+			btd_write(client, "ERROR length\nDONE\n");
+			client->dead = 1;
+			return;
+		} else if (text == 0) {
+			text = btd_body_begin(index, client->input, text_length);
+			memmove(client->input, end + 1, client->used - length + 1U);
+			client->used -= length;
+			if (text != 0)
+				return;
+			continue;
+		}
+
+		/* Any other line is a request. */
 		btd_line(index, client->input);
 		if (client->descriptor < 0)
 			return;
-		length = (size_t)(end + 1 - client->input);
 		memmove(client->input, end + 1, client->used - length + 1U);
 		client->used -= length;
 	}
@@ -885,6 +1000,111 @@ btd_read(
 	/* A line that fills the buffer without ending is not one. */
 	if (client->used + 1U >= sizeof(client->input))
 		btd_client_close(index);
+}
+
+/*
+ * Starts the text of a PHONE SEND line: its room, filled first from what
+ * the client's buffer holds after the line (the caller moves the buffer
+ * on past the line, and this takes the text's bytes out of it).  Returns
+ * 0 when the text is whole already (and its request done), or 1 while
+ * more bytes are read into it; a client the text cannot be kept for is
+ * closed (1).
+ */
+static int
+btd_body_begin(
+	int index,
+	const char *line,
+	size_t length)
+{
+	struct btd_client *client;
+	char *after;
+	size_t line_length;
+	size_t have;
+	size_t taken;
+
+	/* The line kept for the request, and the room for the text. */
+	client = &btd_clients[index];
+	(void)snprintf(client->send_line, sizeof(client->send_line), "%s", line);
+	client->body = malloc(length);
+	if (client->body == NULL) {
+		client->dead = 1;
+		return 1;
+	}
+	client->body_length = length;
+	client->body_used = 0U;
+
+	/* What the buffer holds after the line goes to the text first. */
+	line_length = strlen(line) + 1U;
+	after = client->input + line_length;
+	have = client->used - line_length;
+	taken = have;
+	if (taken > length)
+		taken = length;
+	memcpy(client->body, after, taken);
+	client->body_used = taken;
+
+	/* The bytes taken leave the buffer (the caller then moves it past the line). */
+	memmove(after, after + taken, have - taken + 1U);
+	client->used -= taken;
+
+	/* More to read. */
+	if (client->body_used < client->body_length)
+		return 1;
+
+	/* Succeeded: the text is whole, its request done. */
+	btd_body_done(index);
+	return 0;
+}
+
+/*
+ * Takes a PHONE SEND's whole text: the request, unless the client waits
+ * for another answer (the text is read and dropped either way: its bytes
+ * are never read as lines, section 4.3).
+ */
+static void
+btd_body_done(
+	int index)
+{
+	struct btd_client *client;
+	uint8_t *text;
+	size_t length;
+
+	/* The text, out of the client. */
+	client = &btd_clients[index];
+	text = client->body;
+	length = client->body_length;
+	client->body = NULL;
+	client->body_length = 0U;
+	client->body_used = 0U;
+
+	/* A client waiting for another answer asks nothing more until it is answered. */
+	if (client->waits_scan ||
+	    client->waits_pair ||
+	    client->waits_connect ||
+	    client->waits_probe) {
+		free(text);
+		return;
+	}
+
+	/* Succeeded: the request, then the text freed. */
+	btd_phone_send_request(index, client->send_line, text, length);
+	free(text);
+}
+
+/* Answers PHONE SEND (its text whole): the messages of the phone link come with ws197-p003 i06 and i07. */
+static void
+btd_phone_send_request(
+	int index,
+	const char *line,
+	const uint8_t *text,
+	size_t length)
+{
+	UNUSED_PARAMETER(line);
+	UNUSED_PARAMETER(text);
+	UNUSED_PARAMETER(length);
+
+	/* Not ready yet. */
+	btd_write(&btd_clients[index], "ERROR not-ready\nDONE\n");
 }
 
 /* Carries out one request line, or takes an answer to the question asked. */
@@ -2178,21 +2398,22 @@ btd_parse_pair(
 	return 0;
 }
 
-/* Writes a formatted text to a client, waiting a little for room; a client that cannot take it is closed. */
+/*
+ * Writes a formatted text to a client: added to its queue and sent as far
+ * as it takes it now, never waiting (section 4.1); a client whose queue
+ * would pass its limit is closed at the end of the round.
+ */
 static void
 btd_write(
 	struct btd_client *client,
 	const char *format,
 	...)
 {
-	struct pollfd room;
 	char text[BTD_LINE_MAX + 4U * BTD_NAME_MAX];
 	va_list arguments;
-	ssize_t sent;
 	size_t length;
-	size_t done;
-	int ready;
 	int written;
+	int error;
 
 	/* A client already closed, or that stopped reading. */
 	if (client->descriptor < 0 || client->dead)
@@ -2208,32 +2429,52 @@ btd_write(
 	if (length >= sizeof(text))
 		length = sizeof(text) - 1U;
 
-	/* All of it, waiting for room at most BTD_CLIENT_WRITE_MS each time. */
-	done = 0U;
-	while (done < length) {
-		sent = send(client->descriptor, text + done, length - done, 0);
-		if (sent > 0) {
-			done += (size_t)sent;
-			continue;
-		}
-
-		/* An interrupted send is tried again. */
-		if (sent < 0 && errno == EINTR)
-			continue;
-		if (sent < 0 && (errno == EAGAIN || errno == EWOULDBLOCK)) {
-			/* Waits for room. */
-			room.fd = client->descriptor;
-			room.events = POLLOUT;
-			room.revents = 0;
-			ready = poll(&room, 1U, BTD_CLIENT_WRITE_MS);
-			if (ready > 0)
-				continue;
-		}
-
-		/* A client that does not read is closed at the end of the round. */
+	/* Queued; a client that does not read enough is closed at the end of the round. */
+	error = btd_outq_append(&client->output, text, length);
+	if (error != 0) {
 		client->dead = 1;
 		return;
 	}
+
+	/* Succeeded: sent as far as it goes now. */
+	btd_client_flush((int)(client - btd_clients));
+}
+
+/* Sends a client's queue as far as it takes it now; a client that is gone is closed at the end of the round. */
+static void
+btd_client_flush(
+	int index)
+{
+	struct btd_client *client;
+	int error;
+
+	/* A client there. */
+	client = &btd_clients[index];
+	if (client->descriptor < 0)
+		return;
+
+	/* Succeeded: sent, or marked to close. */
+	error = btd_outq_flush(&client->output, btd_client_send, client);
+	if (error != 0)
+		client->dead = 1;
+}
+
+/* The queue's send: one send on the client's socket, never waiting. */
+static ssize_t
+btd_client_send(
+	void *context,
+	const uint8_t *data,
+	size_t length)
+{
+	struct btd_client *client;
+	ssize_t sent;
+
+	/* The client. */
+	client = context;
+
+	/* Succeeded: what went, or -1 with errno. */
+	sent = send(client->descriptor, data, length, 0);
+	return sent;
 }
 
 /*
@@ -2246,8 +2487,17 @@ btd_client_close(
 {
 	struct btd_client *client;
 
-	/* The descriptor, and the slot. */
+	/* What is queued is sent once more if it can be (an ERROR before a close), then the queue and a text being read go. */
 	client = &btd_clients[index];
+	if (client->descriptor >= 0)
+		(void)btd_outq_flush(&client->output, btd_client_send, client);
+	btd_outq_clear(&client->output);
+	free(client->body);
+	client->body = NULL;
+	client->body_length = 0U;
+	client->body_used = 0U;
+
+	/* The descriptor, and the slot. */
 	if (client->descriptor >= 0)
 		(void)close(client->descriptor);
 	client->descriptor = -1;
