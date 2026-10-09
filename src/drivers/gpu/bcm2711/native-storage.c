@@ -152,7 +152,9 @@ bcm2711_native_program_upload(
 	*storage = NULL;
 
 	/* Compiler products retain real immutable instruction arrays through their pipeline owners. */
-	if (binary == NULL || binary->code == NULL || binary->code_count == 0)
+	if (binary == NULL ||
+	    binary->code == NULL ||
+	    binary->code_count == 0)
 		return EINVAL;
 
 	/* Whole instruction byte counts are measured before allocation or any array access. */
@@ -216,7 +218,9 @@ bcm2711_native_storage_release(
 		return EBUSY;
 
 	/* A malformed retirement context cannot consume an otherwise valid independent native owner. */
-	if (space == NULL || space->native == NULL || owned->view == NULL)
+	if (space == NULL ||
+	    space->native == NULL ||
+	    owned->view == NULL)
 		return EINVAL;
 
 	/* A different controller cannot withdraw this owner's actual native VA reservation. */

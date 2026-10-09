@@ -15,6 +15,13 @@
 /* Keiland allocates short primary batches; the session namespace independently limits all surviving typed owners. */
 #define VULKAN_COMMAND_BATCH 64U
 
+/* One arena-owned allocation attempt records every partial owner until atomic batch publication or complete rollback. */
+struct vulkan_command_batch {
+	struct bcm2711_vulkan_command_buffer *prepared[VULKAN_COMMAND_BATCH];
+	struct bcm2711_vulkan_object *published[VULKAN_COMMAND_BATCH];
+	uint64_t identities[VULKAN_COMMAND_BATCH];
+};
+
 static int allocate_buffers(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int free_buffers(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader);
 static int prepare_buffer(struct bcm2711_vulkan_object *device, struct bcm2711_vulkan_object *pool, struct bcm2711_vulkan_command_buffer **created);
@@ -67,13 +74,11 @@ allocate_buffers(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	struct bcm2711_vulkan_command_buffer *prepared[VULKAN_COMMAND_BATCH];
-	struct bcm2711_vulkan_object *published[VULKAN_COMMAND_BATCH];
+	struct vulkan_command_batch *batch;
 	struct bcm2711_vulkan_object *device;
 	struct bcm2711_vulkan_object *pool_object;
 	struct bcm2711_vulkan_object *existing;
 	struct bcm2711_vulkan_command_pool *pool;
-	uint64_t identities[VULKAN_COMMAND_BATCH];
 	uint64_t device_id;
 	uint64_t pool_id;
 	uint64_t present;
@@ -107,9 +112,14 @@ allocate_buffers(
 	    array != count)
 		return ENOTSUP;
 
+	/* Existing command metadata owns the complete temporary rollback table; no published payload borrows it. */
+	batch = i915_vkc_array(reader, &session->arena, 1, sizeof(*batch));
+	if (batch == NULL)
+		return EINVAL;
+
 	/* Consume the whole exact reserved or selected identity vector before any mutation. */
 	for (index = 0; index < count; index++)
-		identities[index] = drv_i915_wire_read_u64(reader);
+		batch->identities[index] = drv_i915_wire_read_u64(reader);
 
 	/* Complete framing and same-device pool ownership precede every parent acquisition. */
 	if (reader->error != 0)
@@ -128,29 +138,27 @@ allocate_buffers(
 
 	/* Fresh typed IDs and uniqueness are properties of the entire batch, not a partially published prefix. */
 	for (index = 0; index < count; index++) {
-		if (identities[index] == 0)
+		if (batch->identities[index] == 0)
 			return EINVAL;
-		existing = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index]);
+		existing = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, batch->identities[index]);
 		if (existing != NULL)
 			return EEXIST;
 		for (previous = 0; previous < index; previous++) {
-			if (identities[previous] == identities[index])
+			if (batch->identities[previous] == batch->identities[index])
 				return EEXIST;
 		}
 	}
 
 	/* Independent metadata/registry allocations may refuse anywhere; keep exact partial ownership for complete rollback. */
-	kern_memset(prepared, 0, sizeof(prepared));
-	kern_memset(published, 0, sizeof(published));
 	error = 0;
 	for (index = 0; index < count; index++) {
-		error = prepare_buffer(device, pool_object, &prepared[index]);
+		error = prepare_buffer(device, pool_object, &batch->prepared[index]);
 		if (error != 0)
 			break;
-		error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index], prepared[index], bcm2711_vulkan_command_release, &published[index]);
+		error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_COMMAND_BUFFER, batch->identities[index], batch->prepared[index], bcm2711_vulkan_command_release, &batch->published[index]);
 		if (error != 0)
 			break;
-		prepared[index]->object = published[index];
+		batch->prepared[index]->object = batch->published[index];
 	}
 
 	/* No failed allocation acknowledges a prefix; published IDs and unpublished payloads retire through their distinct owners. */
@@ -158,10 +166,10 @@ allocate_buffers(
 		retirement_error = 0;
 		for (index = 0; index < count; index++) {
 			retired = 0;
-			if (published[index] != NULL)
-				retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index]);
-			else if (prepared[index] != NULL)
-				retired = bcm2711_vulkan_command_release(session, prepared[index]);
+			if (batch->published[index] != NULL)
+				retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, batch->identities[index]);
+			else if (batch->prepared[index] != NULL)
+				retired = bcm2711_vulkan_command_release(session, batch->prepared[index]);
 			if (retired != 0 && retirement_error == 0)
 				retirement_error = retired;
 		}
@@ -179,7 +187,7 @@ allocate_buffers(
 	}
 
 	/* Acknowledge only the complete vector, preserving exact client identity ordering. */
-	allocation_reply(reply, VK_SUCCESS, count, identities);
+	allocation_reply(reply, VK_SUCCESS, count, batch->identities);
 
 	/* Succeeded: every requested primary buffer owns its pool and an empty initial recording. */
 	return 0;
@@ -193,10 +201,9 @@ free_buffers(
 {
 	struct bcm2711_vulkan_object *device;
 	struct bcm2711_vulkan_object *pool_object;
-	struct bcm2711_vulkan_object *objects[VULKAN_COMMAND_BATCH];
+	struct vulkan_command_batch *batch;
 	struct bcm2711_vulkan_command_pool *pool;
 	struct bcm2711_vulkan_command_buffer *command;
-	uint64_t identities[VULKAN_COMMAND_BATCH];
 	uint64_t device_id;
 	uint64_t pool_id;
 	uint64_t array;
@@ -216,9 +223,17 @@ free_buffers(
 	    array != count)
 		return ENOTSUP;
 
+	/* Empty free remains valid without storage; nonempty selection metadata belongs only to this command arena. */
+	batch = NULL;
+	if (count != 0) {
+		batch = i915_vkc_array(reader, &session->arena, 1, sizeof(*batch));
+		if (batch == NULL)
+			return EINVAL;
+	}
+
 	/* Consume the whole exact reserved or selected identity vector before any mutation. */
 	for (index = 0; index < count; index++)
-		identities[index] = drv_i915_wire_read_u64(reader);
+		batch->identities[index] = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0)
 		return EINVAL;
 
@@ -235,19 +250,19 @@ free_buffers(
 
 	/* The complete selected vector is checked before a prefix can retire its records or dependency edges. */
 	for (index = 0; index < count; index++) {
-		objects[index] = NULL;
-		if (identities[index] == 0)
+		batch->published[index] = NULL;
+		if (batch->identities[index] == 0)
 			continue;
-		objects[index] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index]);
-		if (objects[index] == NULL)
+		batch->published[index] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, batch->identities[index]);
+		if (batch->published[index] == NULL)
 			return EINVAL;
-		command = objects[index]->payload;
+		command = batch->published[index]->payload;
 		if (command->owner.device != device || command->owner.parent != pool_object)
 			return EINVAL;
 		if (command->pending != 0)
 			return EBUSY;
 		for (previous = 0; previous < index; previous++) {
-			if (identities[previous] == identities[index])
+			if (batch->identities[previous] == batch->identities[index])
 				return EINVAL;
 		}
 	}
@@ -255,9 +270,9 @@ free_buffers(
 	/* All selected identities retire even when a recorded resource's native storage requires recovery. */
 	error = 0;
 	for (index = 0; index < count; index++) {
-		if (objects[index] == NULL)
+		if (batch->published[index] == NULL)
 			continue;
-		retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, identities[index]);
+		retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, batch->identities[index]);
 		if (retired != 0 && error == 0)
 			error = retired;
 	}

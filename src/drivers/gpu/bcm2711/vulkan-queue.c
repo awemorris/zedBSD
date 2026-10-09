@@ -207,8 +207,10 @@ decode_submission(
 	submission->count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 ||
-	    queue == NULL || queue->payload == NULL ||
-	    submission->count > QUEUE_BATCHES || array != submission->count)
+	    queue == NULL ||
+	    queue->payload == NULL ||
+	    submission->count > QUEUE_BATCHES ||
+	    array != submission->count)
 		return EINVAL;
 	root = queue->payload;
 	if (root->parent == NULL || root->parent->kind != I915_VK_OBJ_DEVICE)

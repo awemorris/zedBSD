@@ -260,6 +260,9 @@ write_word(
 	bytes[1] = (uint8_t)(word >> 8);
 	bytes[2] = (uint8_t)(word >> 16);
 	bytes[3] = (uint8_t)(word >> 24);
+
+	/* Succeeded: the requested register or shader record word is encoded in caller storage. */
+	return;
 }
 
 /* Stores one aligned code pointer with NaN propagation and its exact final-section flag. */
@@ -278,4 +281,7 @@ write_program(
 	/* The adjacent word points to this exact program's independently prepared uniform stream. */
 	write_word(bytes, code);
 	write_word(bytes + 4, program->uniforms);
+
+	/* Succeeded: the record contains this program and its independent uniform address. */
+	return;
 }

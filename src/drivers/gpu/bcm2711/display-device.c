@@ -391,6 +391,9 @@ device_close(
 
 	/* The common core retired every resource/VM pin before invoking final close. */
 	kern_free(session);
+
+	/* Succeeded: the closed display session owns no remaining public resource metadata. */
+	return;
 }
 
 /* Reports storage and display capabilities without promising Vulkan execution. */
@@ -493,6 +496,9 @@ resource_destroy(
 
 	/* Only common resource pins kept this descriptor alive. */
 	kern_free(resource);
+
+	/* Succeeded: the withdrawn display identity no longer holds its backing allocation. */
+	return;
 }
 
 /* Copies bytes from one retained resource under its controller ownership mutex. */
@@ -1119,6 +1125,9 @@ bind_operations(
 	controller->operations.display = &controller->display_operations;
 	controller->operations.scanout = &controller->scanout_operations;
 	controller->operations.share = &controller->share_operations;
+
+	/* Succeeded: the display publishes only its implemented operation groups. */
+	return;
 }
 
 /* Creates one ordinary native blob without additional placement restrictions. */
@@ -1237,7 +1246,9 @@ export_resource(
 	*result = NULL;
 	controller = opaque;
 	resource = private_resource;
-	if (resource->owner != private_session || !resource->blob || !resource->shareable)
+	if (resource->owner != private_session ||
+	    !resource->blob ||
+	    !resource->shareable)
 		return EINVAL;
 	mutex_lock(&controller->mutex);
 
@@ -1263,6 +1274,9 @@ release_shared(
 	/* Native imports retain their own allocation, rather than this exporting session. */
 	(void)opaque;
 	bcm2711_shared_release(private_shared);
+
+	/* Succeeded: the capability wrapper has relinquished its allocation reference. */
+	return;
 }
 
 /* Imports a same-device capability into a separately owned resource descriptor. */
@@ -1438,8 +1452,10 @@ shared_frame(
 		return ENOTSUP;
 	if (request->format != GPU_PIXEL_RGBA8888 && request->format != GPU_PIXEL_BGRA8888)
 		return ENOTSUP;
-	if (request->stride < request->width * 4U || request->stride > 65535U ||
-	    (request->stride & 3U) != 0 || (request->offset & 3U) != 0)
+	if (request->stride < request->width * 4U ||
+	    request->stride > 65535U ||
+	    (request->stride & 3U) != 0 ||
+	    (request->offset & 3U) != 0)
 		return EINVAL;
 	bytes = (uint64_t)request->stride * request->height;
 	if (request->offset > resource->buffer->bytes || bytes > resource->buffer->bytes - request->offset)
@@ -1447,8 +1463,10 @@ shared_frame(
 
 	/* Imported images keep the original authoritative layout throughout their lifetime. */
 	if (resource->has_image) {
-		if (request->width != resource->image.width || request->height != resource->image.height ||
-		    request->format != resource->image.format || request->stride != resource->image.stride ||
+		if (request->width != resource->image.width ||
+		    request->height != resource->image.height ||
+		    request->format != resource->image.format ||
+		    request->stride != resource->image.stride ||
 		    request->offset != resource->image.offset)
 			return EINVAL;
 	}
@@ -1486,4 +1504,7 @@ retire_holds(
 		bcm2711_buffer_release(controller->holds[slot]);
 		controller->holds[slot] = NULL;
 	}
+
+	/* Succeeded: every independent scanout hold has been retired. */
+	return;
 }

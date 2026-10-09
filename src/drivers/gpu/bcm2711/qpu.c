@@ -57,8 +57,10 @@ bcm2711_qpu_encode(
 	/* Refusal preserves the caller's word, so a partial machine instruction can never be published. */
 	if (instruction == NULL || word == NULL)
 		return EINVAL;
-	if (instruction->destination.number >= 64 || instruction->destination.peripheral > 1 ||
-	    instruction->predicate > 4 || instruction->push_flags > 3)
+	if (instruction->destination.number >= 64 ||
+	    instruction->destination.peripheral > 1 ||
+	    instruction->predicate > 4 ||
+	    instruction->push_flags > 3)
 		return EINVAL;
 	if (instruction->predicate != 0 && instruction->push_flags != 0)
 		return ENOTSUP;
@@ -173,7 +175,9 @@ bcm2711_qpu_small_constant(
 		immediate = bits;
 	} else if (bits >= 0xfffffff0U) {
 		immediate = 16 + bits - 0xfffffff0U;
-	} else if (bits >= 0x3b800000U && bits <= 0x43000000U && (bits & 0x007fffffU) == 0) {
+	} else if (bits >= 0x3b800000U &&
+		   bits <= 0x43000000U &&
+		   (bits & 0x007fffffU) == 0) {
 		immediate = 32 + ((bits - 0x3b800000U) >> 23);
 	} else {
 		/* No approximate float or truncated integer may replace a refused full-width constant. */

@@ -111,6 +111,9 @@ bcm2711_vulkan_uniform_release(
 	/* These copied words own no GPU mapping and can retire after upload or any pre-launch refusal. */
 	kern_free(words->words);
 	kern_free(words);
+
+	/* Succeeded: the retired draw has no uniform binding left. */
+	return;
 }
 
 /* Resolves each consumed word once after the exact dynamic viewport is checked. */

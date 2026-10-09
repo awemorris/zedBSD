@@ -45,7 +45,9 @@ bcm2711_vulkan_descriptor_pool_dispatch(
 	}
 
 	/* Ordinary void destruction still permits its echoed opcode; create/reset require their result body. */
-	if (requested > 1 || (opcode != GPU_OP_DESTROY_DESCRIPTOR_POOL && requested != 1))
+	if (requested > 1 ||
+	    (opcode != GPU_OP_DESTROY_DESCRIPTOR_POOL &&
+	     requested != 1))
 		return EINVAL;
 
 	/* Reset retains the pool identity while withdrawing only its public child sets. */
@@ -99,9 +101,15 @@ create_pool(
 	maximum = drv_i915_wire_read_u32(reader);
 	sizes = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 || type != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO ||
-	    chain != 0 || (flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0 ||
-	    maximum == 0 || maximum > VULKAN_POOL_SETS || sizes > 2 || count != sizes)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    type != VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO ||
+	    chain != 0 ||
+	    (flags & ~VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT) != 0 ||
+	    maximum == 0 ||
+	    maximum > VULKAN_POOL_SETS ||
+	    sizes > 2 ||
+	    count != sizes)
 		return ENOTSUP;
 
 	/* Capacity represents actual supported binding kinds, including bounded sums of repeated type declarations. */
@@ -129,7 +137,10 @@ create_pool(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (device == NULL)
@@ -316,7 +327,9 @@ release_pool(
 	/* A set's independent pool reference keeps final destruction away from nonzero charges. */
 	(void)session;
 	pool = payload;
-	if (pool->sets != 0 || pool->textures != 0 || pool->uniforms != 0)
+	if (pool->sets != 0 ||
+	    pool->textures != 0 ||
+	    pool->uniforms != 0)
 		__builtin_trap();
 	error = bcm2711_vulkan_object_release(pool->owner.device);
 	kern_free(pool);
@@ -338,4 +351,7 @@ pool_reply(
 	drv_i915_wire_reply_u32(reply, (uint32_t)status);
 	drv_i915_wire_reply_u64(reply, 1);
 	drv_i915_wire_reply_u64(reply, identity);
+
+	/* Succeeded: the reply carries the selected pool status and identity. */
+	return;
 }

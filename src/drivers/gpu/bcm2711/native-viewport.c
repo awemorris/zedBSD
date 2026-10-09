@@ -216,7 +216,9 @@ add_magnitudes(
 	/* Exactly halfway values retain the even significand; larger remainders round upward. */
 	rounded = (uint32_t)(sum >> 3);
 	remainder = (uint32_t)(sum & 7U);
-	if (remainder > 4U || (remainder == 4U && (rounded & 1U) != 0))
+	if (remainder > 4U ||
+	    (remainder == 4U &&
+	     (rounded & 1U) != 0))
 		rounded++;
 	if (rounded == 0x1000000U) {
 		rounded >>= 1;
@@ -459,7 +461,9 @@ subtract_magnitudes(
 	/* A guard tie rounds toward the even retained significand; any larger remainder rounds away from zero. */
 	rounded = (uint32_t)(difference >> 3);
 	remainder = (uint32_t)(difference & 7U);
-	if (remainder > 4U || (remainder == 4U && (rounded & 1U) != 0))
+	if (remainder > 4U ||
+	    (remainder == 4U &&
+	     (rounded & 1U) != 0))
 		rounded++;
 
 	/* A rounding carry renormalizes the retained significand without saturating a reversed range. */

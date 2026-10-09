@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build PASS。whole stack/p007/Keiland実機確認は未完了）
+Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build/whole ordinary stack/p007 software監査 PASS。main統合とKeiland実機確認は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: public CAPSET/COMMAND/NOTIFICATION/JOB/JOB_CAPACITYをactual render sessionとsingle workerへ接続。host26範囲＋actual node open/close/hardware owner host2 summary、RPi4 y warning/error0/checks3 PASS。次はactual client/displayの残るsoftware gate、whole public LTO callgraph16KiBとp007全文規約/license/類似/BLOB。Keiland/実機/console RAM寿命未確認、Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+Resume point: i13/i14のpublic Vulkan/二node/Keiland native描画software経路とi15全source監査を確認済み。全14host、RPi4 y/n warning-error0/checks3、caller/IRQ込み16KiB ordinary stack PASS。最新mainへ統合後、ユーザーのRPi4/Keiland/console RAM寿命確認待ちへ引き渡す。[全監査と限界](p007-software-audit.md)・[最終検証](execution-20261009.md#i15-最終software監査と検証2026-10-10)。Master/shared投影・Q1/T1回帰はQ1。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -73,7 +73,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V1〜V10/native runnerを実装、固定XML照合・host/build PASS。実機電源/register/job観測は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | in-progress | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
 | [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | in-progress（compiler/private Vulkan object/pipeline/recording/draw stateはhost/build PASS、native prepared job/public binding/実機は未達） | p004・p005 | 未見積 |
-| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planned | 全て | 3〜4h |
+| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | in-progress（i15 final software source監査。実機関門は保持） | 全て | 3〜4h |
 
 ## 要検討・ブロック（2026-10-05）
 

@@ -129,6 +129,9 @@ bcm2711_render_fail(
 	/* A failure cannot be observed by closing sessions until native teardown retains backing. */
 	render_fault(controller, error);
 	drv_gpu_report_error(controller->gpu, error);
+
+	/* Succeeded: the renderer refusal has been recorded for subsequent admission. */
+	return;
 }
 
 /* Opens one independent renderer namespace without granting native command access. */
@@ -202,8 +205,11 @@ render_close(
 	bcm2711_render_worker_drain(session);
 	mutex_lock(&controller->mutex);
 
-	if (session->device != controller || session->resources != NULL ||
-	    session->count != 0 || session->pending != 0 || controller->sessions == 0)
+	if (session->device != controller ||
+	    session->resources != NULL ||
+	    session->count != 0 ||
+	    session->pending != 0 ||
+	    controller->sessions == 0)
 		__builtin_trap();
 	controller->sessions--;
 
@@ -226,6 +232,9 @@ render_close(
 	/* Common observers see failure only after the closing namespace and all persistent native/session owners are rooted. */
 	if (error != 0)
 		bcm2711_render_fail(controller, error);
+
+	/* Succeeded: the closed namespace has no ordinary published owner left. */
+	return;
 }
 
 /* Reports the complete native storage and Vulkan operations implemented by this node. */
@@ -356,6 +365,9 @@ render_destroy(
 	kern_free(resource);
 	if (error != 0)
 		bcm2711_render_fail(controller, error);
+
+	/* Succeeded: the removed render identity has relinquished its resource metadata. */
+	return;
 }
 
 /* Reads one complete CPU span while the controller excludes native execution. */
@@ -470,7 +482,9 @@ render_export(
 	*result = NULL;
 	controller = opaque;
 	resource = private_resource;
-	if (resource->owner != private_session || !resource->blob || !resource->shareable)
+	if (resource->owner != private_session ||
+	    !resource->blob ||
+	    !resource->shareable)
 		return ENOTSUP;
 	mutex_lock(&controller->mutex);
 
@@ -496,6 +510,9 @@ render_release(
 	/* The common capability keeps its page vector alive until this exact release. */
 	(void)opaque;
 	bcm2711_shared_release(shared);
+
+	/* Succeeded: the shared render capability has relinquished its backing reference. */
+	return;
 }
 
 /* Imports native storage into a new session-specific VA and local resource identity. */
@@ -611,6 +628,9 @@ render_fault(
 {
 	/* This operation never waits for the controller mutex held by an executing native worker. */
 	bcm2711_render_worker_fault(opaque, error);
+
+	/* Succeeded: new renderer admission observes the recorded fault. */
+	return;
 }
 
 /* Reclaims uncertain translations only after common owners and checked native reset retire. */
@@ -841,6 +861,9 @@ bind_render(
 
 	/* The private typed runtime adds all command, capset and job callbacks as one complete contract. */
 	bcm2711_render_runtime_bind(&controller->operations);
+
+	/* Succeeded: the renderer publishes only its implemented operation groups. */
+	return;
 }
 
 /* Samples this namespace's stop admission under the same guard as native fault publication. */
@@ -857,7 +880,9 @@ session_ready(
 	enabled = spin_lock_irqsave(&hardware->guard);
 
 	ready = false;
-	if (hardware->ready && !hardware->faulted && !session->stopping)
+	if (hardware->ready &&
+	    !hardware->faulted &&
+	    !session->stopping)
 		ready = true;
 
 	spin_unlock_irqrestore(&hardware->guard, enabled);

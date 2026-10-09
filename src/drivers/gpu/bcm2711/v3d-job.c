@@ -270,6 +270,9 @@ finish_job(
 		engine->hardware.faulted = true;
 
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+
+	/* Succeeded: the native slot no longer belongs to this completed runner call. */
+	return;
 }
 
 /* Submits bin then render using IRQ dependency, with no hardware semaphore packets. */

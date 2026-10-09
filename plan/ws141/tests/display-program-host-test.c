@@ -159,6 +159,20 @@ check_program(
 
 	/* Compares literal hardware values, independent of the generator's formulas. */
 	apply_words();
+	/* Independent rational reconstruction samples retain every packed field and symmetric SRAM word. */
+	check(test_registers[BCM2711_REGION_HVS][0x4080 / 4] == 0x07effc00, "independent filter word 0");
+	check(test_registers[BCM2711_REGION_HVS][0x4084 / 4] == 0x07e3eff8, "independent filter word 1");
+	check(test_registers[BCM2711_REGION_HVS][0x4088 / 4] == 0x00600ffd, "independent filter word 2");
+	check(test_registers[BCM2711_REGION_HVS][0x408c / 4] == 0x01dca632, "independent filter word 3");
+	check(test_registers[BCM2711_REGION_HVS][0x4090 / 4] == 0x034d749a, "independent filter word 4");
+	check(test_registers[BCM2711_REGION_HVS][0x4094 / 4] == 0x0001c2e1, "independent filter word 5");
+	check(test_registers[BCM2711_REGION_HVS][0x4098 / 4] == 0x034d749a, "independent filter word 6");
+	check(test_registers[BCM2711_REGION_HVS][0x409c / 4] == 0x01dca632, "independent filter word 7");
+	check(test_registers[BCM2711_REGION_HVS][0x40a0 / 4] == 0x00600ffd, "independent filter word 8");
+	check(test_registers[BCM2711_REGION_HVS][0x40a4 / 4] == 0x07e3eff8, "independent filter word 9");
+	check(test_registers[BCM2711_REGION_HVS][0x40a8 / 4] == 0x07effc00, "independent filter word 10");
+
+	/* The scanout still uses the exact unscaled primary layout. */
 	check(test_registers[BCM2711_REGION_HVS][0x40 / 4] == 0x87800438, "HVS active dimensions and enable");
 	check(test_registers[BCM2711_REGION_HVS][0x4c / 4] == 0xad806020, "channel0 COB partition");
 	check(test_registers[BCM2711_REGION_HVS][0x5c / 4] == 0x60103010, "channel1 COB partition");

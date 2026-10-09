@@ -89,7 +89,9 @@ bcm2711_vulkan_descriptor_clone(
 	/* A destination that already owns a resource cannot be overwritten without a separate retirement. */
 	if (source == NULL || destination == NULL)
 		return EINVAL;
-	if (destination->view != NULL || destination->sampler != NULL || destination->buffer != NULL)
+	if (destination->view != NULL ||
+	    destination->sampler != NULL ||
+	    destination->buffer != NULL)
 		return EBUSY;
 	kern_memset(&prepared, 0, sizeof(prepared));
 
@@ -160,7 +162,9 @@ update_sets(
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
 	error = 0;
-	if (reader->error != 0 || count > VULKAN_UPDATE_OPERATIONS || array != count)
+	if (reader->error != 0 ||
+	    count > VULKAN_UPDATE_OPERATIONS ||
+	    array != count)
 		error = EINVAL;
 	for (index = 0; index < count && error == 0; index++)
 		error = write_binding(update, reader);
@@ -169,7 +173,9 @@ update_sets(
 	if (error == 0) {
 		count = drv_i915_wire_read_u32(reader);
 		array = drv_i915_wire_read_u64(reader);
-		if (reader->error != 0 || count > VULKAN_UPDATE_OPERATIONS || array != count)
+		if (reader->error != 0 ||
+		    count > VULKAN_UPDATE_OPERATIONS ||
+		    array != count)
 			error = EINVAL;
 		for (index = 0; index < count && error == 0; index++)
 			error = copy_binding(update, reader);
@@ -258,7 +264,11 @@ write_binding(
 	element = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
 	type = drv_i915_wire_read_u32(reader);
-	if (reader->error != 0 || structure != VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET || chain != 0 || element != 0 || count != 1)
+	if (reader->error != 0 ||
+	    structure != VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET ||
+	    chain != 0 ||
+	    element != 0 ||
+	    count != 1)
 		return ENOTSUP;
 	error = binding_lookup(update, identity, number, &set, &index);
 	if (error != 0)
@@ -279,7 +289,9 @@ write_binding(
 		candidate.sampler = layout->bindings[index].immutable;
 		if (candidate.sampler == NULL)
 			candidate.sampler = bcm2711_vulkan_object_find(update->session, I915_VK_OBJ_SAMPLER, sampler_id);
-		if (reader->error != 0 || candidate.view == NULL || candidate.sampler == NULL)
+		if (reader->error != 0 ||
+		    candidate.view == NULL ||
+		    candidate.sampler == NULL)
 			return EINVAL;
 		view = candidate.view->payload;
 		sampler = candidate.sampler->payload;
@@ -307,13 +319,17 @@ write_binding(
 		if (reader->error != 0 || candidate.buffer == NULL)
 			return EINVAL;
 		resource = candidate.buffer->payload;
-		if (resource->device != update->device || resource->memory == NULL || (resource->usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) == 0)
+		if (resource->device != update->device ||
+		    resource->memory == NULL ||
+		    (resource->usage & VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT) == 0)
 			return EINVAL;
 		if ((candidate.offset & 3U) != 0 || candidate.offset > resource->bytes)
 			return EINVAL;
 		if (candidate.bytes == VK_WHOLE_SIZE)
 			candidate.bytes = resource->bytes - candidate.offset;
-		if (candidate.bytes == 0 || candidate.bytes > 65536U || candidate.bytes > resource->bytes - candidate.offset)
+		if (candidate.bytes == 0 ||
+		    candidate.bytes > 65536U ||
+		    candidate.bytes > resource->bytes - candidate.offset)
 			return EINVAL;
 	} else {
 		if (array != 0)
@@ -367,7 +383,12 @@ copy_binding(
 	destination_number = drv_i915_wire_read_u32(reader);
 	destination_element = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
-	if (reader->error != 0 || structure != VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET || chain != 0 || source_element != 0 || destination_element != 0 || count != 1)
+	if (reader->error != 0 ||
+	    structure != VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET ||
+	    chain != 0 ||
+	    source_element != 0 ||
+	    destination_element != 0 ||
+	    count != 1)
 		return ENOTSUP;
 	error = binding_lookup(update, source_id, source_number, &source, &source_index);
 	if (error != 0)

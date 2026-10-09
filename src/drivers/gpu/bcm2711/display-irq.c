@@ -105,6 +105,9 @@ bcm2711_display_frame_arm(
 	display->adoption_armed = true;
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Succeeded: the selected frame source is armed under the flip guard. */
+	return;
 }
 
 /*
@@ -130,6 +133,9 @@ bcm2711_display_irq_mask(
 		/* The register mappings and callback owners remain alive. */
 		kern_irq_mask(display->timing_irq[port].irq);
 	}
+
+	/* Succeeded: the display sources no longer admit new service. */
+	return;
 }
 
 /* Acknowledges owned vblank and confirms the new list before unmasking underrun. */

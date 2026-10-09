@@ -16,7 +16,6 @@
 #include "drivers/gpu/bcm2711/render-worker.h"
 
 /* Free slots acquire a callback, execute once and finish that callback before reuse. */
-#define UNUSED_PARAMETER(parameter) ((void)(parameter))
 #define REQUEST_FREE 0U
 #define REQUEST_QUEUED 1U
 #define REQUEST_ACTIVE 2U
@@ -57,6 +56,9 @@ bcm2711_render_jobs_bind(
 {
 	/* The caller publishes JOB only together with the command notification and drain contract. */
 	operations->jobs = &job_operations;
+
+	/* Succeeded: the renderer job group uses the private reservation callbacks. */
+	return;
 }
 
 /*
@@ -70,6 +72,9 @@ bcm2711_render_worker_init(
 	kern_memset(&controller->worker, 0, sizeof(controller->worker));
 	waitq_init(&controller->worker.available, "bcm2711-render-work");
 	waitq_init(&controller->worker.retired, "bcm2711-render-retired");
+
+	/* Succeeded: the worker starts with an empty FIFO and no native uncertainty. */
+	return;
 }
 
 /*
@@ -135,8 +140,10 @@ bcm2711_render_worker_submit(
 	}
 
 	/* Native stop and callback publication share this same guard. */
-	if (session->stopping || worker->uncertain ||
-	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
+	if (session->stopping ||
+	    worker->uncertain ||
+	    !controller->space.native->hardware.ready ||
+	    controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 		return EIO;
 	}
@@ -307,6 +314,9 @@ bcm2711_render_worker_stop(
 
 	/* Queued canceled payloads still require disposal and exactly one common completion. */
 	waitq_wake_one(&controller->worker.available);
+
+	/* Succeeded: the selected session no longer admits new worker requests. */
+	return;
 }
 
 /*
@@ -393,6 +403,9 @@ bcm2711_render_worker_drain(
 	}
 
 	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
+
+	/* Succeeded: the selected session has no outstanding worker request. */
+	return;
 }
 
 /*
@@ -426,6 +439,9 @@ bcm2711_render_worker_fault(
 
 	/* The permanent worker disposes canceled payloads without claiming that native DMA stopped. */
 	waitq_wake_one(&controller->worker.available);
+
+	/* Succeeded: the worker fault is visible to subsequent admission. */
+	return;
 }
 
 /*
@@ -482,7 +498,10 @@ job_reserve(
 	uint32_t slot;
 
 	/* A refused reservation transfers no callback or output token to the backend. */
-	if (completion == NULL || token == NULL || timeline == 0 || timeline >= 64)
+	if (completion == NULL ||
+	    token == NULL ||
+	    timeline == 0 ||
+	    timeline >= 64)
 		return EINVAL;
 	*token = NULL;
 	controller = opaque;
@@ -497,8 +516,10 @@ job_reserve(
 	}
 
 	/* Faulted or stopping namespaces cannot acquire another producer-owned callback. */
-	if (session->stopping || controller->worker.uncertain ||
-	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
+	if (session->stopping ||
+	    controller->worker.uncertain ||
+	    !controller->space.native->hardware.ready ||
+	    controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 		return EIO;
 	}
@@ -561,8 +582,10 @@ job_commit(
 	}
 
 	/* Stop closes publication while keeping the original reservation withdrawable. */
-	if (session->stopping || controller->worker.uncertain ||
-	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
+	if (session->stopping ||
+	    controller->worker.uncertain ||
+	    !controller->space.native->hardware.ready ||
+	    controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 		return EIO;
 	}
@@ -655,7 +678,9 @@ job_capacity(
 	uint64_t mask;
 
 	/* A refused query owns no slot and reports no usable marker capacity. */
-	if (available == NULL || timeline == 0 || timeline >= 64)
+	if (available == NULL ||
+	    timeline == 0 ||
+	    timeline >= 64)
 		return EINVAL;
 	*available = 0;
 	controller = opaque;
@@ -670,8 +695,10 @@ job_capacity(
 	}
 
 	/* Closed native admission cannot advertise capacity even if slots are numerically free. */
-	if (session->stopping || controller->worker.uncertain ||
-	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
+	if (session->stopping ||
+	    controller->worker.uncertain ||
+	    !controller->space.native->hardware.ready ||
+	    controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 		return EIO;
 	}
@@ -703,8 +730,10 @@ find_reservation(
 	/* The IRQ guard excludes slot reuse throughout identity validation and the caller's transition. */
 	for (slot = 0; slot < BCM2711_RENDER_REQUESTS; slot++) {
 		request = &controller->worker.requests[slot];
-		if (token != request || request->session != session ||
-		    request->completion != completion || !request->supervised)
+		if (token != request ||
+		    request->session != session ||
+		    request->completion != completion ||
+		    !request->supervised)
 			continue;
 		return request;
 	}
@@ -735,6 +764,9 @@ queue_marker(
 
 	/* The marker retains the original pending hold until callback delivery ends. */
 	controller->worker.tail = request;
+
+	/* Succeeded: the reservation belongs to the ordered worker FIFO. */
+	return;
 }
 
 /* Completes an ordered marker only after the single worker retired all preceding native commands. */
@@ -745,9 +777,10 @@ execute_marker(
 	void *payload,
 	bool *retired)
 {
-	UNUSED_PARAMETER(controller);
-	UNUSED_PARAMETER(session);
-	UNUSED_PARAMETER(payload);
+	/* A completion marker owns ordering only and borrows no native payload. */
+	(void)controller;
+	(void)session;
+	(void)payload;
 
 	/* This marker launches no DMA; prior command execution supplied the actual native retirement proof. */
 	*retired = true;
@@ -763,9 +796,10 @@ dispose_marker(
 	void *payload,
 	bool retired)
 {
-	UNUSED_PARAMETER(controller);
-	UNUSED_PARAMETER(payload);
-	UNUSED_PARAMETER(retired);
+	/* An empty marker has no storage whose disposal depends on DMA retirement. */
+	(void)controller;
+	(void)payload;
+	(void)retired;
 
 	/* Succeeded: the marker never acquired any DMA storage that needs disposal. */
 	return 0;
@@ -834,6 +868,9 @@ worker_main(
 
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 	}
+
+	/* The permanent FIFO has no ordinary termination path. */
+	return;
 }
 
 /* Gives the single worker one immutable active request while retaining its session callback count. */
@@ -898,4 +935,7 @@ finish_request(
 	/* Capacity and final close observers see the fully retired slot and callback count. */
 	waitq_wake_all(&controller->worker.retired);
 	drv_gpu_capacity_changed(controller->gpu);
+
+	/* Succeeded: the callback outcome is delivered and its pending hold is retired. */
+	return;
 }

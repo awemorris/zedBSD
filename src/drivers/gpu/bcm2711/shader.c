@@ -19,7 +19,6 @@
 /* The shared frontend admits this finite ID space; private metadata occupies one heap byte per ID. */
 #define GRAPHICS_MODULE_IDS 65536U
 
-static int preflight_module(const uint32_t *words, size_t word_count, enum bcm2711_shader_stage stage, struct bcm2711_shader_diagnostic *diagnostic);
 static int preflight_declaration(const uint32_t *instruction, uint32_t count, uint8_t *levels, uint32_t bound, uint32_t model, const char **reason);
 static int compile_program(struct bcm2711_shader_compiler *compiler);
 
@@ -35,7 +34,8 @@ bcm2711_shader_compile(
 	struct bcm2711_shader_binary **binary,
 	struct bcm2711_shader_diagnostic *diagnostic)
 {
-	struct bcm2711_shader_compiler compiler;
+	struct bcm2711_shader_compiler *compiler;
+	struct bcm2711_shader_binary *created;
 	struct i915_shader_ir *ir;
 	struct i915_compile_diagnostic parse_diagnostic;
 	enum i915_shader_stage parse_stage;
@@ -47,14 +47,17 @@ bcm2711_shader_compile(
 	*binary = NULL;
 	if (diagnostic != NULL)
 		kern_memset(diagnostic, 0, sizeof(*diagnostic));
-	if (words == NULL || key == NULL || stage < BCM2711_SHADER_COORDINATE ||
-	    stage > BCM2711_SHADER_FRAGMENT || word_count > 1048576U)
+	if (words == NULL ||
+	    key == NULL ||
+	    stage < BCM2711_SHADER_COORDINATE ||
+	    stage > BCM2711_SHADER_FRAGMENT ||
+	    word_count > 1048576U)
 		return EINVAL;
 	if (key->swap_red_blue > 1 || key->premultiplied_blend > 1)
 		return EINVAL;
 
 	/* Bounds declaration recursion and fixes the graphics execution model before the shared parser allocates or expands constants. */
-	error = preflight_module(words, word_count, stage, diagnostic);
+	error = bcm2711_shader_preflight(words, word_count, stage, diagnostic);
 	if (error != 0)
 		return error;
 
@@ -75,37 +78,46 @@ bcm2711_shader_compile(
 		return error;
 	}
 
-	/* Compiler state owns no device reference and is unpublished until native lowering finishes. */
-	kern_memset(&compiler, 0, sizeof(compiler));
-	compiler.ir = ir;
-	compiler.key = key;
-	compiler.diagnostic = diagnostic;
-
-	/* Allocates the public program independently so every later failure has a single complete unwind. */
-	compiler.binary = kern_calloc(1, sizeof(*compiler.binary));
-	if (compiler.binary == NULL) {
+	/* Large register/output tables live in unpublished CPU storage while the parser and lowering use the finite kernel stack. */
+	compiler = kern_calloc(1, sizeof(*compiler));
+	if (compiler == NULL) {
 		drv_i915_shader_ir_free(ir);
 		return ENOMEM;
 	}
 
+	/* Compiler state owns no device reference and retires before any complete native program is published. */
+	compiler->ir = ir;
+	compiler->key = key;
+	compiler->diagnostic = diagnostic;
+
+	/* Allocates the public program independently so every later failure has a single complete unwind. */
+	compiler->binary = kern_calloc(1, sizeof(*compiler->binary));
+	if (compiler->binary == NULL) {
+		drv_i915_shader_ir_free(ir);
+		kern_free(compiler);
+		return ENOMEM;
+	}
+
 	/* The stage remains immutable throughout both interface validation and native output construction. */
-	compiler.binary->stage = stage;
+	compiler->binary->stage = stage;
 
 	/* One builder owns the complete unpublished prefix and supplies one checked outcome for common cleanup. */
-	error = compile_program(&compiler);
+	error = compile_program(compiler);
 
 	/* Source IR and allocator metadata retire before the immutable native program becomes visible. */
-	kern_free(compiler.values);
+	created = compiler->binary;
+	kern_free(compiler->values);
 	drv_i915_shader_ir_free(ir);
+	kern_free(compiler);
 
 	/* A failed native prefix can never escape as a usable shader binary. */
 	if (error != 0) {
-		bcm2711_shader_binary_free(compiler.binary);
+		bcm2711_shader_binary_free(created);
 		return error;
 	}
 
 	/* Publication transfers all completed code and uniform storage to the caller at once. */
-	*binary = compiler.binary;
+	*binary = created;
 
 	/* The caller owns a complete native program, including all draw-time uniform identities. */
 	return 0;
@@ -126,6 +138,9 @@ bcm2711_shader_binary_free(
 	kern_free(binary->code);
 	kern_free(binary->uniforms);
 	kern_free(binary);
+
+	/* Succeeded: the retired program owns no code or uniform metadata. */
+	return;
 }
 
 /*
@@ -418,13 +433,19 @@ bcm2711_shader_fail(
 		compiler->diagnostic->reason = reason;
 	}
 
-	/* The caller retains the exact checked failure for pipeline creation. */
-	return error;
+	/* A recorded refusal preserves its exact checked failure for pipeline creation. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: an optional diagnostic with no refusal preserves successful status. */
+	return 0;
 }
 
-/* Bounds graphics declaration graphs iteratively before the shared frontend can recurse through their constants. */
-static int
-preflight_module(
+/*
+ * Bounds graphics declarations before any private caller enters the shared recursive frontend.
+ */
+int
+bcm2711_shader_preflight(
 	const uint32_t *words,
 	size_t word_count,
 	enum bcm2711_shader_stage stage,
@@ -440,6 +461,12 @@ preflight_module(
 	uint32_t model;
 	int in_function;
 	int error;
+
+	/* Every native frontend user requires a real bounded graphics module before reading its header. */
+	if (words == NULL || word_count > 1048576U)
+		return EINVAL;
+	if (stage < BCM2711_SHADER_COORDINATE || stage > BCM2711_SHADER_FRAGMENT)
+		return EINVAL;
 
 	/* A complete SPIR-V header must precede any ID-indexed metadata access. */
 	if (word_count < 5U)

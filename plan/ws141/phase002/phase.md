@@ -57,3 +57,7 @@ Queue: q695
 ## 独立Codexセッションの再開確認（2026-10-09）
 
 ユーザーがWS141を担当へ割当。開始tree a05865278のrpi4 kernelをdriver y/nでbuildし、両方exit 0・warning/error 0、stage/list host試験PASS。source修正は無し。詳細は[実行記録](../execution-20261009.md)。ユーザー回答「実機確認は後で行う」により実機条件は未達のまま保持。whole Phaseのclearanceは行っていない。
+
+## 最終software監査（2026-10-10）
+
+stage/FDT/IRQ骨格の最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。

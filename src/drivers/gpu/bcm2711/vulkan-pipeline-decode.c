@@ -79,7 +79,9 @@ structure_header(
 	flags = drv_i915_wire_read_u32(reader);
 	if (reader->error != 0)
 		return EINVAL;
-	if (structure != (uint32_t)expected || chain != 0 || flags != 0)
+	if (structure != (uint32_t)expected ||
+	    chain != 0 ||
+	    flags != 0)
 		return ENOTSUP;
 
 	/* Succeeded: the expected ordinary structure body follows. */
@@ -104,7 +106,9 @@ shader_stages(
 	/* Count-selected stages are exactly the two roles supported by native graphics lowering. */
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count != 2 || array != count)
+	if (reader->error != 0 ||
+	    count != 2 ||
+	    array != count)
 		return ENOTSUP;
 	record->info.stageCount = count;
 	record->info.pStages = record->stages;
@@ -160,7 +164,9 @@ vertex_state(
 	record->info.pVertexInputState = &record->input;
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count > BCM2711_VULKAN_VERTEX_BINDINGS || array != count)
+	if (reader->error != 0 ||
+	    count > BCM2711_VULKAN_VERTEX_BINDINGS ||
+	    array != count)
 		return ENOTSUP;
 	record->input.vertexBindingDescriptionCount = count;
 	if (count != 0)
@@ -175,7 +181,9 @@ vertex_state(
 	/* Attributes have an independent exact declared count; a larger encoded array cannot hide ignored declarations. */
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count > BCM2711_VULKAN_VERTEX_ATTRIBUTES || array != count)
+	if (reader->error != 0 ||
+	    count > BCM2711_VULKAN_VERTEX_ATTRIBUTES ||
+	    array != count)
 		return ENOTSUP;
 	record->input.vertexAttributeDescriptionCount = count;
 	if (count != 0)
@@ -231,11 +239,15 @@ assembly_viewport(
 	record->viewport.sType = VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO;
 	record->viewport.viewportCount = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || record->viewport.viewportCount != 1 || array != 0)
+	if (reader->error != 0 ||
+	    record->viewport.viewportCount != 1 ||
+	    array != 0)
 		return ENOTSUP;
 	record->viewport.scissorCount = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || record->viewport.scissorCount != 1 || array != 0)
+	if (reader->error != 0 ||
+	    record->viewport.scissorCount != 1 ||
+	    array != 0)
 		return ENOTSUP;
 	record->info.pViewportState = &record->viewport;
 
@@ -327,7 +339,9 @@ colour_dynamic(
 	record->blend.logicOp = drv_i915_wire_read_u32(reader);
 	record->blend.attachmentCount = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || record->blend.attachmentCount != 1 || array != 1)
+	if (reader->error != 0 ||
+	    record->blend.attachmentCount != 1 ||
+	    array != 1)
 		return ENOTSUP;
 	record->colour.blendEnable = drv_i915_wire_read_u32(reader);
 	record->colour.srcColorBlendFactor = drv_i915_wire_read_u32(reader);
@@ -355,7 +369,9 @@ colour_dynamic(
 	record->dynamic.sType = VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO;
 	record->dynamic.dynamicStateCount = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || record->dynamic.dynamicStateCount != 2 || array != 2)
+	if (reader->error != 0 ||
+	    record->dynamic.dynamicStateCount != 2 ||
+	    array != 2)
 		return ENOTSUP;
 	for (index = 0; index < 2; index++)
 		record->commands[index] = drv_i915_wire_read_u32(reader);

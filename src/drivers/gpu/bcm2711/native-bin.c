@@ -39,13 +39,19 @@ bcm2711_native_bin_encode(
 		return ENOSPC;
 
 	/* Shader state includes at least one attribute fetch for the native 4.2 CS/VS workaround. */
-	if (state->shader == 0 || (state->shader & 31U) != 0 || state->attributes == 0 || state->attributes > 16U || state->vertices == 0)
+	if (state->shader == 0 ||
+	    (state->shader & 31U) != 0 ||
+	    state->attributes == 0 ||
+	    state->attributes > 16U ||
+	    state->vertices == 0)
 		return EINVAL;
 	if ((uint64_t)state->shader + 36U + state->attributes * 16U > ((uint64_t)1 << 32))
 		return EINVAL;
 
 	/* Finite raster state can encode only the implemented Boolean facing choices. */
-	if (state->forward > 1 || state->reverse > 1 || state->clockwise > 1)
+	if (state->forward > 1 ||
+	    state->reverse > 1 ||
+	    state->clockwise > 1)
 		return EINVAL;
 
 	/* Clipping stays inside the advertised drawable extent, including empty intersections. */
@@ -59,11 +65,16 @@ bcm2711_native_bin_encode(
 		return EINVAL;
 
 	/* Shader XY scales are finite positive dimension multiples; unsupported numerical metadata never reaches a packet. */
-	if (state->viewport.x_scale == 0 || state->viewport.x_scale > 0x49000000U || state->viewport.y_scale == 0 || state->viewport.y_scale > 0x49000000U)
+	if (state->viewport.x_scale == 0 ||
+	    state->viewport.x_scale > 0x49000000U ||
+	    state->viewport.y_scale == 0 ||
+	    state->viewport.y_scale > 0x49000000U)
 		return EINVAL;
 	if ((state->clipper.depth_scale & 0x7fffffffU) == 0 || (state->clipper.depth_scale & 0x7fffffffU) > 0x3f800000U)
 		return EINVAL;
-	if ((state->clipper.depth_offset & 0x7fffffffU) > 0x3f800000U || (state->clipper.minimum & 0x7fffffffU) > 0x40000000U || (state->clipper.maximum & 0x7fffffffU) > 0x40000000U)
+	if ((state->clipper.depth_offset & 0x7fffffffU) > 0x3f800000U ||
+	    (state->clipper.minimum & 0x7fffffffU) > 0x40000000U ||
+	    (state->clipper.maximum & 0x7fffffffU) > 0x40000000U)
 		return EINVAL;
 
 	/* Validation is complete; every packet and reserved field starts from an initialized zero image. */

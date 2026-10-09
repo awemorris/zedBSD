@@ -157,6 +157,9 @@ bcm2711_v3d_hardware_mask(
 
 	/* Submission remains closed throughout the worker's subsequent reset. */
 	hardware->ready = false;
+
+	/* Succeeded: new native source service is masked. */
+	return;
 }
 
 /*
@@ -393,6 +396,9 @@ bcm2711_v3d_hardware_events(
 	hardware->events.hub = 0;
 
 	spin_unlock_irqrestore(&hardware->guard, enabled);
+
+	/* Succeeded: the caller owns one protected native event snapshot. */
+	return;
 }
 
 /* Records actual identification and rejects unsupported layouts before MMU publication. */
@@ -624,6 +630,9 @@ record_failure(
 	engine->hardware.events.error = error;
 
 	spin_unlock_irqrestore(&engine->hardware.guard, enabled);
+
+	/* Succeeded: the first native refusal remains visible to later admission. */
+	return;
 }
 
 /* Clears stale owned interrupts while keeping both source banks fully masked. */
@@ -636,6 +645,9 @@ prepare_sources(
 	kern_mmio_write32(engine->hub.mapped + 0x60, UINT32_MAX);
 	kern_mmio_write32(engine->core.mapped + 0x58, ENGINE_CORE_EVENTS);
 	kern_mmio_write32(engine->hub.mapped + 0x58, ENGINE_HUB_EVENTS);
+
+	/* Succeeded: each native source is bound to its exact engine service. */
+	return;
 }
 
 /* Opens the persistent callback before unmasking device sources and GIC delivery. */

@@ -421,6 +421,9 @@ copy_image(
 	/* Copies exactly the complete image, leaving capacity canaries unchanged. */
 	for (index = 0; index < bytes; index++)
 		destination[index] = source[index];
+
+	/* Succeeded: the complete literal packet image is available in caller storage. */
+	return;
 }
 
 /* Writes one 32-bit packet field in its little-endian representation. */
@@ -434,4 +437,7 @@ put_word(
 	destination[1] = (uint8_t)(address >> 8);
 	destination[2] = (uint8_t)(address >> 16);
 	destination[3] = (uint8_t)(address >> 24);
+
+	/* Succeeded: the requested address is encoded in little-endian packet bytes. */
+	return;
 }

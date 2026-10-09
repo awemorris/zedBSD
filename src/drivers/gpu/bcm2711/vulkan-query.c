@@ -125,7 +125,9 @@ fixed_query(
 	/* The fixed protocol arrays retain their maximum ABI extents even when only one native type/heap is used. */
 	types = drv_i915_wire_read_u64(reader);
 	heaps = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || types != VK_MAX_MEMORY_TYPES || heaps != VK_MAX_MEMORY_HEAPS)
+	if (reader->error != 0 ||
+	    types != VK_MAX_MEMORY_TYPES ||
+	    heaps != VK_MAX_MEMORY_HEAPS)
 		return EINVAL;
 	memory = i915_vkc_array(reader, &session->arena, 1, sizeof(*memory));
 	if (memory == NULL)
@@ -164,7 +166,11 @@ queue_properties(
 	present = drv_i915_wire_read_u64(reader);
 	capacity = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 || array > 1 || (array != 0 && capacity != 1))
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    array > 1 ||
+	    (array != 0 &&
+	     capacity != 1))
 		return EINVAL;
 	physical = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PHYSICAL_DEVICE, identity);
 	if (physical == NULL)
@@ -262,9 +268,13 @@ image_query(
 		features = formats.linearTilingFeatures;
 	known_usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT | VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	status = VK_SUCCESS;
-	if (features == 0 || type != VK_IMAGE_TYPE_2D ||
-	    (tiling != VK_IMAGE_TILING_LINEAR && tiling != VK_IMAGE_TILING_OPTIMAL) ||
-	    flags != 0 || usage == 0 || (usage & ~known_usage) != 0)
+	if (features == 0 ||
+	    type != VK_IMAGE_TYPE_2D ||
+	    (tiling != VK_IMAGE_TILING_LINEAR &&
+	     tiling != VK_IMAGE_TILING_OPTIMAL) ||
+	    flags != 0 ||
+	    usage == 0 ||
+	    (usage & ~known_usage) != 0)
 		status = VK_ERROR_FORMAT_NOT_SUPPORTED;
 
 	/* Successful resources stay within the same one-layer/single-sample/dimension limits as native image creation. */
@@ -382,8 +392,10 @@ format_properties(
 	}
 
 	/* The scalar frontend consumes bounded 32-bit float attributes rather than foreign GPU vertex format encodings. */
-	if (format == VK_FORMAT_R32_SFLOAT || format == VK_FORMAT_R32G32_SFLOAT ||
-	    format == VK_FORMAT_R32G32B32_SFLOAT || format == VK_FORMAT_R32G32B32A32_SFLOAT)
+	if (format == VK_FORMAT_R32_SFLOAT ||
+	    format == VK_FORMAT_R32G32_SFLOAT ||
+	    format == VK_FORMAT_R32G32B32_SFLOAT ||
+	    format == VK_FORMAT_R32G32B32A32_SFLOAT)
 		properties->bufferFeatures = VK_FORMAT_FEATURE_VERTEX_BUFFER_BIT;
 
 	/* Succeeded: this finite native table has no inferred optional format capabilities. */

@@ -46,7 +46,9 @@ bcm2711_vulkan_memory_dispatch(
 	*handled = 1;
 
 	/* Ordinary void commands still request an echoed opcode; allocations require their result body. */
-	if (requested > 1 || (opcode == GPU_OP_ALLOCATE_MEMORY && requested != 1))
+	if (requested > 1 ||
+	    (opcode == GPU_OP_ALLOCATE_MEMORY &&
+	     requested != 1))
 		return EINVAL;
 
 	/* The controller mutex serializes both the aggregate declaration budget and independent view ownership. */
@@ -170,8 +172,10 @@ allocate_memory(
 	present = drv_i915_wire_read_u64(reader);
 	type = drv_i915_wire_read_u32(reader);
 	chain = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 ||
-	    type != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO || chain > 1)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    type != VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO ||
+	    chain > 1)
 		return EINVAL;
 	extension = 0;
 	argument = 0;
@@ -192,9 +196,14 @@ allocate_memory(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
-	if (bytes == 0 || bytes > VULKAN_MEMORY_BUDGET || memory_type != 0)
+	if (bytes == 0 ||
+	    bytes > VULKAN_MEMORY_BUDGET ||
+	    memory_type != 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (device == NULL)
@@ -210,8 +219,11 @@ allocate_memory(
 	resource = NULL;
 	if (extension == VULKAN_MEMORY_IMPORT) {
 		resource = bcm2711_render_find(session->render, argument);
-		if (resource == NULL || !resource->blob || resource->view->quarantined ||
-		    !resource->view->buffer->uncached || bytes > resource->view->buffer->bytes)
+		if (resource == NULL ||
+		    !resource->blob ||
+		    resource->view->quarantined ||
+		    !resource->view->buffer->uncached ||
+		    bytes > resource->view->buffer->bytes)
 			return EINVAL;
 	}
 
@@ -401,8 +413,10 @@ backing_matches(
 
 	/* The coherent allocation descriptor must describe a complete contiguous page-rounded run. */
 	rounded = (bytes + 4095U) & ~4095ULL;
-	if (!buffer->uncached || buffer->address == NULL ||
-	    buffer->bytes < bytes || buffer->memory.size < rounded)
+	if (!buffer->uncached ||
+	    buffer->address == NULL ||
+	    buffer->bytes < bytes ||
+	    buffer->memory.size < rounded)
 		return ENOTSUP;
 
 	/* The inclusive device-address ceiling covers the whole actual allocation, not only the requested prefix. */
@@ -425,4 +439,7 @@ allocation_reply(
 	drv_i915_wire_reply_u32(reply, (uint32_t)status);
 	drv_i915_wire_reply_u64(reply, 1);
 	drv_i915_wire_reply_u64(reply, identity);
+
+	/* Succeeded: the reply carries the selected allocation status and complete output vector. */
+	return;
 }

@@ -88,8 +88,11 @@ create_pipelines(
 	cache = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || cache != 0 || count == 0 ||
-	    count > VULKAN_PIPELINE_BATCH || array != count)
+	if (reader->error != 0 ||
+	    cache != 0 ||
+	    count == 0 ||
+	    count > VULKAN_PIPELINE_BATCH ||
+	    array != count)
 		return ENOTSUP;
 
 	/* Resolves the exact device before reserving any command-local record storage. */
@@ -112,7 +115,8 @@ create_pipelines(
 	/* Output identities follow the complete input record array, with the client's ordinary null allocator marker. */
 	allocator = drv_i915_wire_read_u64(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 ||
+	if (reader->error != 0 ||
+	    allocator != 0 ||
 	    array != count)
 		return EINVAL;
 	for (index = 0; index < count; index++)
