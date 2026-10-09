@@ -9,7 +9,7 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
     plan/ws141/tests/display-lock-host.c src/drivers/gpu/bcm2711/v3d-hardware.c \
     src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/bcm2711/v3d-job.c \
     src/drivers/gpu/bcm2711/v3d-diagnostic.c src/drivers/gpu/bcm2711/cl.c \
-    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/render-device.c \
+    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/render-device.c \
     src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/render-worker.c \
     -o "$out/v3d-hardware-host-test"
 "$out/v3d-hardware-host-test"

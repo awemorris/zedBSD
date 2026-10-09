@@ -8,7 +8,7 @@ mkdir -p "$out"
 cc -std=c99 -Wall -Wextra -Werror -Iinclude -Isrc -I. \
     plan/ws141/tests/native-state-host-test.c \
     src/drivers/gpu/bcm2711/native-shader.c src/drivers/gpu/bcm2711/native-texture.c \
-    -o "$out/native-state-host-test"
+    src/drivers/gpu/bcm2711/native-viewport.c -lm -o "$out/native-state-host-test"
 "$out/native-state-host-test" > "$out/native-state-host.log"
 python3 plan/ws141/tests/native-state-check.py "$xml" "$out/native-state-host.log"
 tail -1 "$out/native-state-host.log"

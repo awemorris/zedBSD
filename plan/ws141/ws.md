@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: immutable prepared CPU graphはmain 6730aa668へ統合（host13、rpi4 y build PASS）。i14 native shader/fetch/texture/sampler recordとstrict UIF変換はhost/XML8 record・4847 pixel、y build PASS。次はactual GPU upload owners・native uniform/CL・transfer/barrier/queue/public/common bindingとretired=false quarantine。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09)。
+Resume point: native upload ownerはmain 89cf1a8f9へ統合（actual MMU/view host・y build PASS）。i14 integer viewport uniformsは独立host IEEE1280 pairとy build PASS。次はnative uniform stream/UBO FIFO read・owned TMU scratch/fetch・graphics CL・transfer/barrier/queue/public/commonとwhole-job/session quarantine。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -209,3 +209,11 @@ pending primary graphとconsumed descriptorの独立snapshot owner、pending mut
 ## i14 native records/UIF checkpoint（2026-10-09）
 
 独立private 4.2 byte serializerとraster→strict UIF scratch変換を追加。固定XMLで8 record全byte、inverse block walkerで全pixelとpadding/元raster不変、bounded refusalを確認。rpi4 y build warning/error0、style補助total0。actual FIFO後のscratch生成とowner/clean/retirement、native graphics CL/queue/runtime/Keilandは後続。p006 in-progress、WS incompleteと実機関門を維持。[Phase](phase006/phase.md#i14-native-recordとtexture配置のcheckpoint2026-10-09)と[実行記録](execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09)。
+
+## i14 native upload checkpoint（2026-10-09）
+
+actual identified PA reachabilityでcached native allocation/VAを所有し、QPU code全byteとpage padをcleanするhelperを追加。uncertain DMAではroot/mapping保持、confirmed retirement後のflush failureはspace quarantineへNULL消費する。actual MMU/refcount/code/cache/reset境界のhostとy build PASS。whole-job quarantine/native executionは残り、WS incompleteを維持。[Phase](phase006/phase.md#i14-native-upload-owner-checkpoint2026-10-09) / [実行記録](execution-20261009.md#i14-native-upload-storageのsoftware出力2026-10-09)。
+
+## i14 viewport integer lowering checkpoint（2026-10-09）
+
+XY scale/depth range/offsetをkernel整数のみで生成するprivate helperを追加。independent host IEEE oracleで1280有限pairの全bit比較、XML/pixel、y build PASS。実native uniform stream/CL/queueは後続で、p006 in-progress/WS incompleteを保持。[Phase](phase006/phase.md#i14-integer-viewport-uniforms-checkpoint2026-10-09) / [詳細](execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09)。
