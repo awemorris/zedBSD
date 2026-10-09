@@ -4,7 +4,7 @@
 
 Phase ID: `ws197-p001`
 Parent: [WS197](../ws.md)
-Status: in-progress（第 3 版。第 1 版の指摘 R1〜R24（[review-1.md](review-1.md)）と第 2 版の指摘 S1〜S25（[review-2.md](review-2.md)）を反映。p002 に関わる節（§3・§4.4・§5.3・§8.2・§12）の短い再確認の前。code は書かない）
+Status: cleared 候補（第 3 版。R1〜R24（[review-1.md](review-1.md)）・S1〜S25（[review-2.md](review-2.md)）を反映、p002 に関わる節の短い確認（[review-3.md](review-3.md)）は **p002 は条件付きで GO**: T1〜T4 は p002 の詳細設計と受け入れの必須（§12）。§11 のユーザーの判断 Q1〜Q16 は Q1 経由で尋ねる。code は書かない）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-09「beta2.md の P1 の必須は T1・UAT の待ちだけになったので、WS197 の p001 設計を始める」、ユーザー 2026-10-09「OBEX, MAP, Integration, PBAP, HFPの順で実装しますか。beta2.mdの必須が終わってからです。」）
 依存（設計）: [WS143](../../ws143/ws.md) の bluetoothd の今の code（p004 cleared。p005 は in-progress、p006 は test-wait、p003 i02 は未着手。§12 で実装の Phase の依存に直した [R6]）、[WS170](../../ws170/ws.md) の Phone の app と `kl_system_phone_v1`（p001〜p004 cleared）。
@@ -99,7 +99,7 @@ L2CAP の ERTM と GOEP 2.0（OBEX over L2CAP、SRM）は作らない（ws.md �
 
 - 今は Write Scan Enable を hid.c だけが出し、HID の bond がある時だけ page scan を on にする（`hid.c:259-261`・`2366-2384`）。phone と HID の page（Create Connection）も調停が無い。
 - `linkmgr.c` が scan と page の唯一の出し手になる: HID と phone は「page scan が要る（bond 済みの相手が自分から来る）」「この address を page したい（優先度・次の時刻）」を登録し、linkmgr が Write Scan Enable を決め、page を 1 つずつ順に出す（controller は同時の Create Connection を嫌う）。pairing・scan の間は page を止める（今の HID の LE の auto-connect の扱いと同じ）。
-- WS143 の hid.c の scan と page の呼び出しを linkmgr の登録に置き換える（§12 の取り込みの規則の対象。p002 で WS143 の p005 の後に）。
+- WS143 の hid.c の scan と page の呼び出しを linkmgr の登録に置き換える（§12 の取り込みの規則の対象。p002 で、WS143 p005 の i02・i03 の merge の後に）。pair の Create Connection（`pair.c:290`・LE `pair.c:275`）と HID の LE の auto-connect（`hid.c:2889`・`2974`）を linkmgr に通すか、page の結果（Command Status の失敗、page timeout）を router から linkmgr に返す hook は p002 の詳細設計で決める [N3]。
 
 ## 4. SDP
 
@@ -280,7 +280,7 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 - 持ち主: **「スマホとして使う」の pairing（`PAIR address phone=1`）をした client の uid**（seat の人）。bond と同時に記録 `<controller>/<address>-bredr.phone`（uid と、uid の名前（再利用の検出）、有効な profile: messages・contacts・calls、enabled、0600、`_bluetooth`）を書く [S4]。
 - **持ち主の無い bond 済みのスマホは `PHONE LINK on` で取れない**（今までの普通の pairing の bond、別の人の bond）。使うにはスマホを忘れて（FORGET）、phone=1 で pairing し直す（スマホがもう一度許可を求める）[S4]。
 - `PHONE LINK off` は記録を消さず enabled=0 にする（持ち主はそのまま）。FORGET は bond と `.phone` を両方消す [S4]。
-- **持ち主の変更は持ち主か root だけ**（FORGET と再 pairing を経る）。D8 の「seat の人・wheel は変更できる」の例外として phone link に限る。
+- **持ち主の変更は持ち主か root だけ**（FORGET と再 pairing を経る）。`.phone` のある bond の FORGET も持ち主と root だけ（今の FORGET は seat の人と wheel なら誰でも、`main.c:1375-1387`）。D8 の「seat の人・wheel は変更できる」の例外として phone link に限る [N2]。
 - **持ち主が居る**＝持ち主が seat の人（`/dev/gpu0` の持ち主、`_greeter` を除く。今の `btd_permitted` の seat の判定、`main.c:1567` からの関数の 1590 行付近）[S21]。SSH だけの login は居ると数えない。今の判定はその時の stat だけで、logout・切り替えの event は来ない。**phone link が有効な間は 5 秒ごとに seat の持ち主を見直し**、持ち主の compositor の client（SUBSCRIBE）の切断も合図にする [S10]。
 - 持ち主が居ない間: phone の profile を切り、スマホからの Connection Request（phone の `wants`）と RFCOMM の SABM を断る（§3.4）。持ち主が seat の人になったら zedBSD から page する（§8.2.1）。
 - 記録の uid が無い（account の削除）か名前が違う（uid の再利用）時は、記録を無効にして「スマホとして使う」をやり直させる。
@@ -380,7 +380,7 @@ WS170 の store の変更は上の表より大きい [S12]。p004 の前に WS17
 | clock のずれ | 0.1% 速い・遅い受けで buffer の水位が保たれる [R20] |
 | fuzz | 全 parser（WS143 の hid-report の fuzz と同じ道具） |
 | 持ち主 | 持ち主でない uid に phone の event が出ない・request が断られる、持ち主の変更の規則、uid の再利用 [R3] |
-| 出力の queue | 読まない client で daemon が止まらない、credit が止まる [R4] |
+| 出力の queue | 読まない client で daemon が止まらず、上限で client を落とす。credit は止まらない [R4, S3] |
 | router | 相手からの Connection Request・Link Key Request・SCO の振り分け、handoff の鎖、ACL 8 本の割り当て（偽の controller の台本、WS143 の道具）[R2] |
 | Phone の app | page の同期（中断・再開・ring の dropped）、番号の key、連絡先の差分の更新（WS170 の host の試験に足す） |
 
@@ -451,6 +451,15 @@ WS170 の store の変更は上の表より大きい [S12]。p004 の前に WS17
 | p008 | 実機の試験と debug（Android・iPhone） | p007b、**WS143 p003 i02（5330 の firmware）と p005 i04（5330 の実機の門）** |
 | p009 | 規約の全文の見直し | p002〜p008 |
 
+**p002 の詳細設計と受け入れの必須**（[review-3.md](review-3.md)。詳細設計が design-reviewer を通るまで session.c・pair.c・l2cap.c・router.c・hid.c の code に手を付けない）:
+
+- T1: 受けの drop の印は handle ごとに ACL・事象・signalling を区別し、持ち主への知らせは同期の command の待ちの後に dequeue の側で順に。回復は段階（RFCOMM の data だけなら PSM 3 の L2CAP の channel を閉じる、signalling・事象なら ACL を切って linkmgr で page し直す）。数えた接続の事象（Connection・Disconnection Complete）は捨てない（ring に事象の余白、または ACL を先に捨てる）。WS143 の HID の同じ危険も直す。
+- T2: session の送りの表（16 frame、`session.c:452-456`）に link ごとの上限（phone は 8 まで）か他の link の予約。phone は自分の queue からその中でだけ移す。host の試験: phone が満杯の間も HID の signalling・ATT が ENOBUFS にならない（今の HID は戻り値を捨てる、`hid.c:2521`・`3152`）。
+- T3: pairing から phone への handoff で、pair の l2cap の表の channel（Pending を含む）と組み立ての状態を phone の表へ移す API（今の `btd_l2cap_drop` は相手に何も送らず消す、`pair.c:1733`・`l2cap.c:335-346`）。移せない物は Disconnection Request の後に捨てる。handoff の hook に phone=1 と uid を渡す口。
+- T4: 受け入れに HID の回帰: 保留の branch の image で WS143 の `bt-hid-p005.sh`・`bt-pair-p004.sh`・`bt-daemon-p003.sh`・`bt-loopback-p002.sh` を T1 に。WS143 が先に完了する時は、その script を plan/tools か tests/ のシナリオへ移すよう Q1 に頼む。
+- N4・N5: handoff の Class of Device が scan の表に無い時の代わり、Just Works の鍵の時に `.phone` を書かずに断る順、`.phone` の書き込みの失敗、SDP の ServiceRecordHandle の範囲（0x00010000 以上、(仕様、確かめる)）、in-flight の上限は max(1, pool − 2) と LE の pool の共有の時。
+- Q16 の答えの前に OBEX の Connect と SDP の record の版を code にしない。
+
 **保留の branch の取り込みの規則**（ws.md 12 行: WS197 の code は 10/17 まで main に入れない保留の branch）: WS197 の code は Q1 が作る branch（例 `agent/p1-ws197`）に置き、各 Phase の始めと merge 依頼の前に main を取り込む。§3.3 の WS143 の file の変更は小さく、関数の追加と hook の表に限り、WS143 の Phase が同じ file を変えている間は Q1 に順を聞く。
 
 **見積もりの見直し**（ws.md の約 121 LW に足す）: router・session・pair の変更と session の送り・受けの直し・接続の調停 +8（p002）、全 client の出力の queue と SUBSCRIBE の接続・持ち主の記録・seat の見直し +5（p003）、libkeiland の新しい API・page の同期・store の会話の model・banner・Settings の経路 +12（p004、WS170・WS156 の分を含む）、clock のずれと録音の filter +3（p007b）、bt-hci の class の SCO +2（p007a）、台本の MSE・AG +3。計 **約 154 LW**（§4.5 の (b) を選べば +10）[S22]。p007（25）は p007a（xHCI・bt-usb・bt-hci・SCO の口 17）と p007b（SCO・音・mSBC 13）に分ける。
@@ -461,3 +470,4 @@ WS170 の store の変更は上の表より大きい [S12]。p004 の前に WS17
 - 2026-10-09 深夜: design-reviewer（agent abb385aae6187503d）の review → [review-1.md](review-1.md)（blocker 2・major 12・minor 10）。第 2 版で全てに答えた（各節の `[Rn]`）。
 - 2026-10-09 深夜: 第 2 版の再 review（agent a6b845b338bd97e31）→ [review-2.md](review-2.md)（S1〜S25。p002 の前に S1〜S5・S14・S18）。
 - 2026-10-09 深夜: 第 3 版（P1）。S1〜S25 の全部に答えた（p002 の前の S1〜S5・S14・S18 は設計を直し、後の Phase の物は該当の節に方針と残りを書いた）。
+- 2026-10-09 深夜: 第 3 版の短い確認（agent a42a036a4bbde0983）→ [review-3.md](review-3.md): p002 は条件付きで GO。T1〜T4・N1〜N5 を §12 の p002 の必須に、N1〜N3 は本文を直した。

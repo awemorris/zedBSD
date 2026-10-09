@@ -30,7 +30,7 @@ Resume point: p001（設計）から。
 
 | Phase | 内容 | LW |
 | --- | --- | --- |
-| p001 | 設計（各 profile の役割、bluetoothd の構造、WS170 との API、試験の方法）。design-reviewer を通す | 4 |
+| [p001](phase001/phase.md) | 設計（各 profile の役割、bluetoothd の構造、WS170 との API、試験の方法）。design-reviewer を通す（2026-10-09 深夜 P1: 第 3 版、review 3 回、p002 は条件付き GO、cleared 候補。見積もりは約 154 LW に見直し） | 4 |
 | p002 | RFCOMM（OBEX と HFP の下、L2CAP の上の多重化と credit の流量制御、SDP の検索）と OBEX（client・server、Connect/Get/Put、header、app parameter） | 22 |
 | p003 | MAP（MAS: folder・message の一覧・取得・送信の bMessage、MNS: 通知の server と SDP の record） | 16 |
 | p004 | Integration（WS170 Phone の app の backend: SMS・通話・連絡先の compositor の API、Settings のスマホの pairing と許可） | 12 |
