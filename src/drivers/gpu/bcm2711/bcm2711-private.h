@@ -85,6 +85,7 @@ struct bcm2711_list_plane {
 	uint32_t format;
 	uint32_t order;
 	bool scaled;
+	bool flipped;
 	uint32_t x;
 	uint32_t y;
 	uint32_t width;
@@ -190,6 +191,16 @@ struct bcm2711_irq_line {
 	int irq;
 	bool registered;
 	uint64_t count;
+
+	/* Optional device-source service, installed while the line is masked. */
+	bool (*service)(void *owner);
+	void *owner;
+};
+
+/* A persistent IRQ source borrows its owning display and names one PV or HVS. */
+struct bcm2711_display_irq_source {
+	struct bcm2711_display *display;
+	uint32_t port;
 };
 
 /*
@@ -216,6 +227,16 @@ struct bcm2711_display {
 	 * is set when that list shows the firmware's framebuffer one to one.
 	 */
 	bool readout_done;
+
+	/* Set only after the new list and a fresh scanout frame are observed. */
+	bool scanout_started;
+
+	/* IRQ-written completion state; initialization arms only the new-mode frame. */
+	volatile bool adoption_armed;
+	volatile bool first_frame;
+	volatile uint64_t underruns;
+	struct bcm2711_display_irq_source compositor_source;
+	struct bcm2711_display_irq_source timing_source[BCM2711_TIMING_COUNT];
 	struct drv_bcm2711_boot_screen screen;
 	uint32_t port_channel[BCM2711_HDMI_COUNT];
 	uint32_t port;
@@ -264,6 +285,8 @@ void bcm2711_clock_report(const char *family, const char *name, uint32_t clock_i
 void bcm2711_list_decode(const volatile uint32_t *memory, uint32_t start, struct bcm2711_list *list);
 bool bcm2711_list_copy_prepare(const uint32_t *snapshot, uint32_t source, const struct bcm2711_list_range *reserved, unsigned reserved_count, uint32_t *image, uint32_t image_words, struct bcm2711_list_copy *copy);
 
+bool bcm2711_list_screen_matches(const struct bcm2711_list *list, const struct drv_bcm2711_boot_screen *screen);
+
 /* Software-only edits of a caller-owned V3D page table (mmu.c). */
 int bcm2711_v3d_pages_map(uint32_t *table, uint32_t address, uint64_t physical, uint64_t bytes);
 int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
@@ -274,6 +297,11 @@ int bcm2711_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
 /* The stages of the two parts (display.c, v3d.c). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);
 int bcm2711_display_readout(struct bcm2711_display *display, const struct drv_bcm2711_boot_screen *screen);
+int bcm2711_display_irq_prepare(struct bcm2711_display *display);
+int bcm2711_display_irq_open(struct bcm2711_display *display, uint32_t region);
+void bcm2711_display_frame_arm(struct bcm2711_display *display);
+void bcm2711_display_irq_mask(struct bcm2711_display *display);
+int bcm2711_display_start(const struct drv_fdt *fdt, struct bcm2711_display *display);
 int bcm2711_v3d_discover(const struct drv_fdt *fdt, struct bcm2711_v3d *v3d);
 
 #endif

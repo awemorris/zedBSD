@@ -112,6 +112,7 @@ bcm2711_fdt_reg_count(
 		if (error != 0)
 			break;
 
+		/* Includes only a complete address and size pair. */
 		count++;
 	}
 
@@ -141,6 +142,7 @@ bcm2711_fdt_gic_irq(
 	uint32_t cells;
 	uint32_t kind;
 	uint32_t number;
+	uint32_t flags;
 	int error;
 
 	/* Finds the controller the node's interrupts are delivered to. */
@@ -173,6 +175,11 @@ bcm2711_fdt_gic_irq(
 
 	/* Refuses anything but a shared peripheral interrupt. */
 	if (kind != FDT_GIC_KIND_SPI)
+		return ENOTSUP;
+
+	/* Requires the level-high SPI mode initialized by the RPi4 GIC implementation. */
+	flags = (uint32_t)drv_fdt_cells_value(value, index * FDT_GIC_CELLS + 2U, 1U);
+	if ((flags & 0x0fU) != 4U)
 		return ENOTSUP;
 
 	/* Succeeded: the kernel numbers GIC interrupts by their interrupt ID. */
@@ -239,10 +246,9 @@ bcm2711_irq_install(
 }
 
 /*
- * Counts and acknowledges one interrupt.
- *
- * No stage unmasks a line yet, so an interrupt here means a line was opened
- * by someone else; it is counted for the next stage mark and retired.
+ * Services an owned device source before retiring its GIC acknowledgement.
+ * Discovery leaves lines masked. Display initialization supplies persistent
+ * source callbacks before opening HVS/PV delivery; V3D remains masked.
  */
 static void
 irq_handler(
@@ -251,12 +257,20 @@ irq_handler(
 	void *argument)
 {
 	struct bcm2711_irq_line *line;
+	bool handled;
 
+	/* The persistent argument identifies the source independently of its ID. */
 	(void)irq;
 
-	/* Counts the interrupt on its line. */
+	/* Services the device source before sending EOI on a level-triggered line. */
 	line = argument;
-	line->count++;
+	handled = true;
+	if (line->service != NULL)
+		handled = line->service(line->owner);
+
+	/* Counts owned events, including the generic masked V3D discovery handler. */
+	if (handled)
+		line->count++;
 
 	/* Retires the acknowledgement before returning, as every handler must. */
 	kern_irq_send_eoi(acknowledge);

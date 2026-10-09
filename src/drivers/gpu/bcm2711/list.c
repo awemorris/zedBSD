@@ -217,6 +217,68 @@ bcm2711_list_copy_prepare(
 	return true;
 }
 
+/*
+ * Proves that a decoded unscaled plane displays the complete boot framebuffer.
+ *
+ * A match is evidence of the output's identity, independent of plane order.
+ * The decoder keeps only a bounded prefix, so an unretained matching plane
+ * cannot justify a destructive takeover.
+ */
+bool
+bcm2711_list_screen_matches(
+	const struct bcm2711_list *list,
+	const struct drv_bcm2711_boot_screen *screen)
+{
+	const struct bcm2711_list_plane *plane;
+	uint64_t bytes;
+	uint32_t count;
+	uint32_t index;
+
+	/* Requires a complete framebuffer in the compositor's reachable aperture. */
+	if (screen->size == 0 || screen->width == 0 || screen->height == 0)
+		return false;
+	if (screen->physical >= 0x40000000ULL)
+		return false;
+	if (screen->size > 0x40000000ULL - screen->physical)
+		return false;
+	bytes = (uint64_t)screen->height * screen->pitch;
+	if (bytes > screen->size)
+		return false;
+
+	/* A malformed list cannot prove where the console is displayed. */
+	if (!list->valid)
+		return false;
+	count = list->plane_count;
+	if (count > BCM2711_LIST_PLANES)
+		count = BCM2711_LIST_PLANES;
+
+	/* Searches all retained planes rather than assuming plane zero is the console. */
+	for (index = 0; index < count; index++) {
+		/* Requires enough words for a real unscaled packed-pixel plane. */
+		plane = &list->planes[index];
+		if (plane->words < LIST_PLANE_MIN_WORDS || plane->scaled || plane->flipped)
+			continue;
+		if (plane->format > LIST_FORMAT_LAST_SINGLE)
+			continue;
+
+		/* Compares the address after removing only the documented bus alias. */
+		if ((uint64_t)(plane->pointer & 0x3fffffffU) != screen->physical)
+			continue;
+		if (plane->width != screen->width || plane->height != screen->height)
+			continue;
+		if (plane->pitch != screen->pitch)
+			continue;
+		if (plane->x != 0 || plane->y != 0)
+			continue;
+
+		/* Succeeded: this plane shows the same complete framebuffer. */
+		return true;
+	}
+
+	/* No retained plane identifies the boot framebuffer. */
+	return false;
+}
+
 /* Decodes the words of one plane that starts at a control word. */
 static void
 decode_plane(
@@ -236,6 +298,7 @@ decode_plane(
 	plane->words = words;
 	plane->format = control & LIST_CONTROL_FORMAT_MASK;
 	plane->order = (control >> LIST_CONTROL_ORDER_SHIFT) & LIST_CONTROL_ORDER_MASK;
+	plane->flipped = false;
 	plane->x = 0;
 	plane->y = 0;
 	plane->width = 0;
@@ -258,6 +321,8 @@ decode_plane(
 
 	/* Reads where the plane sits on the output. */
 	position = memory[first + LIST_WORD_POSITION];
+	if ((position & 0x80008000U) != 0)
+		plane->flipped = true;
 	plane->x = position & LIST_POSITION_X_MASK;
 	plane->y = (position >> LIST_POSITION_Y_SHIFT) & LIST_POSITION_Y_MASK;
 
