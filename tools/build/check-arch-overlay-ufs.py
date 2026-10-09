@@ -10,6 +10,7 @@ import struct
 from pathlib import Path
 
 from check_ufs_import import load_checker
+from subtree_files import subtree_entries
 
 PROFILES={"i386":(1,3),"amd64":(2,62),"aarch64":(2,183)}
 
@@ -46,6 +47,9 @@ def large_directories(fs):
 def check(args):
     checker=load_checker(); checker.check(args.image)
     fs=checker.UFS(args.image.read_bytes()); files=parse_files(args.file)
+    # A directory's files are checked as the listed files are; its links only for being links.
+    tree_files,tree_links=subtree_entries(args.subtree)
+    files.update(tree_files)
     oversized = large_directories(fs)
     for path, ino, size in oversized:
         print(f'{args.image}: directory update limit: {path} inode={ino} '
@@ -71,6 +75,9 @@ def check(args):
             raise SystemExit(f'manifest hash mismatch: {destination}')
         if source.stat().st_mode&0o111 and fs.u16(fs.inode(ino),0)&0o111==0:
             raise SystemExit(f'executable mode lost: {destination}')
+    for destination in tree_links:
+        if fs.u16(fs.inode(fs.lookup(destination)),0)&0o170000!=0o120000:
+            raise SystemExit(f'symbolic link lost: {destination}')
     for item in args.mode:
         destination, mode_text = item.split('=', 1)
         actual = fs.u16(fs.inode(fs.lookup(destination)), 0) & 0o7777
@@ -83,6 +90,7 @@ def main():
     parser=argparse.ArgumentParser(); parser.add_argument('--profile',choices=PROFILES,required=True)
     parser.add_argument('--image',type=Path,required=True); parser.add_argument('--file',action='append',default=[])
     parser.add_argument('--mode',action='append',default=[])
+    parser.add_argument('--subtree',action='append',default=[])
     parser.add_argument('--writable-directory-limit', action='store_true',
                         help='reject directories the current writer cannot mutate')
     check(parser.parse_args())

@@ -12,6 +12,8 @@ import subprocess
 import tempfile
 from pathlib import Path
 
+from subtree_files import subtree_file_specifications
+
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
     "amd64": ("ZEDAMD64", 2, 62),
@@ -69,7 +71,8 @@ def parse_modes(specifications: list[str], files: dict[str, Path]) -> dict[str, 
 
 def create(args: argparse.Namespace) -> None:
     label, _, _ = PROFILES[args.profile]
-    files = parse_files(args.file)
+    # A package's directories (--subtree) are their files, one --file each.
+    files = parse_files(args.file + subtree_file_specifications(args.subtree))
     modes = parse_modes(args.mode, files)
     if args.size_mib < 16:
         raise SystemExit("architecture image must be at least 16 MiB")
@@ -136,6 +139,7 @@ def main() -> None:
     parser.add_argument("--min-free-bytes", type=int, default=4 * 1024 * 1024)
     parser.add_argument("--file", action="append", default=[])
     parser.add_argument("--mode", action="append", default=[])
+    parser.add_argument("--subtree", action="append", default=[])
     parser.add_argument("--force", action="store_true")
     create(parser.parse_args())
 

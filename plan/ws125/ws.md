@@ -9,7 +9,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1）
 Queue: none
-Resume point: p001（取得・検証・監査・cross build）と p002（staged tree を image に入れる共通の仕組み、WS124・WS126 も使う）が planned。互いに独立で、すぐ Queue にできる。
+Resume point: 2026-10-09 P1 q916: p002 は cleared 候補（`--subtree DEST=DIR`、[phase002](phase002/phase.md)）。p001（vim の取得・検証・監査・cross build）は planned。旧: p001 と p002 が planned、互いに独立。
 2026-10-02 user: packages（Emacs・vim・Python）は「リリースのイメージに入れます」→ vim も release の image に既定で入れる。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
@@ -55,7 +55,7 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
 | [ws125-p001](phase001/phase.md) | 取得・検証・license 監査、cross build と stage（binary と runtime）、ELF の確認 | planned | — | 2〜3h |
-| [ws125-p002](phase002/phase.md) | 共通: package の staged tree を image に入れる仕組み（`--tree` 等、file 数の上限を外す）。WS124・WS126 も使う | planned | — | 2〜3h |
+| [ws125-p002](phase002/phase.md) | 共通: package の staged tree を image に入れる仕組み（`--subtree DEST=DIR`、file 数の上限を外す）。WS124・WS126 も使う | cleared 候補（2026-10-09 P1 q916、host 試験 PASS、boot-test は ws126-p005 の image で T1） | — | 2〜3h |
 | [ws125-p003](phase003/phase.md) | menuconfig への登録、image への導入、guest の受け入れ V1〜V6 | planning（p001・p002 の成果待ち） | p001、p002 | 2〜3h |
 | [ws125-p004](phase004/phase.md) | 全文規約と回帰、制限の整理（必須の最終確認） | planning | p003 | 1〜2h |
 
