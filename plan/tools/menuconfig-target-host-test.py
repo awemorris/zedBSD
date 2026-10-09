@@ -79,7 +79,8 @@ def check_packages() -> None:
     # libavcodec (the media add-in) are built for amd64 only (2026-10-07 Q1).
     # The desktop's own packages (packages/desktop, such as GTK 4) go with
     # the desktop, which only some platforms have (BUG-129).
-    platform_tied = {"noct", "fidoctl", "passkey-fido2", "libavcodec"}
+    # bluetoothd and its CLI bt need the input bridge, which only amd64 builds (ws143-p005).
+    platform_tied = {"noct", "fidoctl", "passkey-fido2", "libavcodec", "bluetoothd", "bt"}
     for row in rows:
         if row[0] in platform_tied:
             continue
