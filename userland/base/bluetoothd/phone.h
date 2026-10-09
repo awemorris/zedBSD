@@ -6,22 +6,23 @@
  */
 
 /*
- * bluetoothd's phone link, the transport part (ws197-p002,
- * plan/ws197/phase002/phase.md sections 7.4, 7.5 and 11): one phone's ACL
- * link that a phone's pairing hands over (PAIR ... phone=1), its L2CAP
- * channels, an SDP server on each SDP channel the phone opens, SDP queries
- * of the phone's records, one RFCOMM session (the phone's or bluetoothd's)
- * and the frames it sends, queued within the link's share of the
- * controller's buffers (section 4.2).
+ * bluetoothd's phone link (ws197-p002 and p003, plan/ws197/phase002/
+ * phase.md sections 7.4, 7.5 and 11, phase003 sections 3 and 5): the one
+ * phone used as a phone, its owner's record, and its ACL link: handed
+ * over by a phone's pairing (PAIR ... phone=1), paged by bluetoothd while
+ * the owner sits at the seat, or accepted when the phone connects; then
+ * authenticated, encrypted with a key of 16 bytes, and ready.  On the
+ * link: its L2CAP channels, an SDP server on each SDP channel the phone
+ * opens, SDP queries of the phone's records, one RFCOMM session and its
+ * DLCs, and the frames sent, queued within the link's share of the
+ * controller's buffers.
  *
- * The profiles (MAP, PBAP, HFP) come in later Phases.  This Phase has a
- * probe for root (PHONE PROBE): SDP finds the phone's MAS or PSE, RFCOMM
- * opens a DLC to it, OBEX connects, gets a folder listing and disconnects;
- * the answer says how each step went and how many bytes came, never what
- * they were (p001 R22).  The phone link does not take a phone that
- * connects by itself in this Phase (its authentication is p003's).
+ * The profiles (MAP from p003; PBAP and HFP later) use the link through
+ * struct btd_phone_profile: the link's readiness and end, their SDP query,
+ * their DLCs.
  *
- * Without system calls besides the session's; the host tests build it.
+ * Without system calls besides the session's and the records' files; the
+ * host tests build it.
  */
 
 #ifndef BLUETOOTHD_PHONE_H
@@ -30,7 +31,6 @@
 #include "userland/base/bluetoothd/acl.h"
 #include "userland/base/bluetoothd/hid.h"
 #include "userland/base/bluetoothd/l2cap.h"
-#include "userland/base/bluetoothd/obex.h"
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/phonerec.h"
 #include "userland/base/bluetoothd/rfcomm.h"
@@ -43,36 +43,60 @@
 #include <stdint.h>
 #include <sys/types.h>
 
-/* The phone link's states: no phone, a link handed over and ready, its disconnection asked for. */
+/*
+ * The phone link's states (ws197-p003 section 5.1): no link, ready, its
+ * disconnection asked for, bluetoothd's page out, that page being
+ * cancelled, the phone's connection accepted, the link being secured.
+ */
 #define BTD_PHONE_NONE		0U
 #define BTD_PHONE_READY		1U
 #define BTD_PHONE_CLOSING	2U
+#define BTD_PHONE_PAGING	3U
+#define BTD_PHONE_CANCELLING	4U
+#define BTD_PHONE_ACCEPTING	5U
+#define BTD_PHONE_SECURING	6U
+
+/* The steps of securing a link (section 5.4): waiting for the phone's own encryption, authentication, encryption, the key's size. */
+#define BTD_PHONE_SECURE_WAIT_PEER	1U
+#define BTD_PHONE_SECURE_AUTH		2U
+#define BTD_PHONE_SECURE_ENCRYPT	3U
+#define BTD_PHONE_SECURE_KEY_SIZE	4U
+
+/*
+ * The times (milliseconds, section 5): a page, its cancel, an accepted
+ * connection, the securing, the wait for the phone's own encryption, the
+ * wait before authentication is asked again after a collision, how long a
+ * link lasts to count as stable, how long a refusal's own Connection
+ * Complete is awaited, and the short wait for a busy page or link.
+ */
+#define BTD_PHONE_PAGE_MS		12000U
+#define BTD_PHONE_CANCEL_MS		5000U
+#define BTD_PHONE_ACCEPT_MS		15000U
+#define BTD_PHONE_SECURE_MS		10000U
+#define BTD_PHONE_PEER_MS		3000U
+#define BTD_PHONE_AUTH_AGAIN_MS		200U
+#define BTD_PHONE_STABLE_MS		120000U
+#define BTD_PHONE_REJECT_MS		3000U
+#define BTD_PHONE_WAIT_MS		2000U
+
+/* The steps of the wait between pages (0, 30 s ... 600 s, section 5.2), and how many short links the phone ends before bluetoothd stops paging it. */
+#define BTD_PHONE_BACKOFF_STEPS		7U
+#define BTD_PHONE_PEER_CLOSED_MAX	3U
+
+/* What follows a link bluetoothd ended (section 5.5): no page, the next step's wait, the longest wait. */
+#define BTD_PHONE_AFTER_NONE		0U
+#define BTD_PHONE_AFTER_STEP		1U
+#define BTD_PHONE_AFTER_LONG		2U
+
+/* How many DLCs a profile may ask for before the RFCOMM session is up. */
+#define BTD_PHONE_PENDING_DLCS		2U
 
 /* How many frames wait for the session, and how many SDP channels the phone may open at a time. */
 #define BTD_PHONE_QUEUE		16U
 #define BTD_PHONE_SDP_SERVERS	2U
 
-/* How many HID devices may be connected while a phone is (section 7.5: the session's 8 links less pairing, refusal and the phone). */
+/* How many HID devices may be connected while a phone is wanted (section 7.5: the session's 8 links less pairing, refusal and the phone). */
 #define BTD_PHONE_HID_LIMIT	5U
-
-/* The longest answer line of a probe, and how long a whole probe may take (milliseconds). */
-#define BTD_PHONE_ANSWER_MAX	192U
-#define BTD_PHONE_PROBE_MS	30000U
-
-/* The most of a probe's folder listing taken (its bytes are counted, not kept). */
-#define BTD_PHONE_LISTING_MAX	262144U
-
-/* The steps of a probe: none, SDP's channel opening, SDP's query, RFCOMM's channel and DLC, OBEX's Connect, Get and Disconnect, the DLC's close. */
-#define BTD_PHONE_PROBE_NONE		0U
-#define BTD_PHONE_PROBE_SDP_CHANNEL	1U
-#define BTD_PHONE_PROBE_SDP		2U
-#define BTD_PHONE_PROBE_RFCOMM		3U
-#define BTD_PHONE_PROBE_CONNECT		4U
-#define BTD_PHONE_PROBE_GET		5U
-#define BTD_PHONE_PROBE_DISCONNECT	6U
-
-/* Tells the end of a probe: "PROBE ..." or "ERROR WHY". */
-typedef void (*btd_phone_answer_fn)(void *context, const char *line);
 
 /*
  * What the phone link asks of the daemon (ws197-p003): the name of a
@@ -82,6 +106,28 @@ typedef void (*btd_phone_answer_fn)(void *context, const char *line);
 struct btd_phone_hooks {
 	void *context;
 	btd_phonerec_account_fn account;
+};
+
+/*
+ * A profile on the phone's link (ws197-p003 section 5.8: MAP; PBAP and HFP
+ * later): told when the link is ready for it (secured, its owner at the
+ * seat) and when it ends, the end of its SDP query (error 0: the records
+ * in sdp), whether a server channel of bluetoothd's is offered to the
+ * phone, and its DLCs: opened, data, writable again, closed (a DLC asked
+ * for whose RFCOMM session never came up is told as open_failed with its
+ * server channel).
+ */
+struct btd_phone_profile {
+	void *context;
+	void (*ready)(void *context);
+	void (*ended)(void *context);
+	void (*sdp_done)(void *context, const struct btd_sdp *sdp, int error);
+	int (*accept)(void *context, unsigned server_channel);
+	void (*opened)(void *context, unsigned dlci);
+	void (*data)(void *context, unsigned dlci, const uint8_t *data, size_t length);
+	void (*writable)(void *context, unsigned dlci);
+	void (*closed)(void *context, unsigned dlci, int reason);
+	void (*open_failed)(void *context, unsigned server_channel);
 };
 
 /* One L2CAP frame waiting for the session: its channel (the phone's end of it) and payload. */
@@ -98,30 +144,14 @@ struct btd_phone_sdps {
 };
 
 /*
- * A probe under way (step BTD_PHONE_PROBE_NONE: none): the service class
- * asked for, the server channel SDP found, the DLC, the bytes the listing
- * gave, the response codes of OBEX's steps, its deadline, and the answer.
- */
-struct btd_phone_probe {
-	unsigned step;
-	uint16_t uuid;
-	unsigned channel;
-	unsigned dlci;
-	size_t bytes;
-	uint8_t connect_code;
-	uint8_t get_code;
-	uint8_t disconnect_code;
-	uint64_t deadline;
-};
-
-/*
  * The phone link of a controller's session: the session, the router, the
- * HID host (whose connections it limits while a phone is there), the SDP
- * records offered, the answer hook; and the one phone: its state, device,
+ * HID host (whose connections it limits while a phone is wanted), the SDP
+ * records offered, the bonds' folder and the daemon's hooks; the record
+ * and the seat; the pages; and the one phone's link: its state, device,
  * handle, the uid that paired it, its channels and frame, the SDP servers,
- * the SDP query, the RFCOMM session and its channel, the OBEX connection
- * of a probe, and the frames waiting.  It lives in the daemon for the
- * daemon's life; a phone fills it from the handoff to the link's end.
+ * the SDP query, the RFCOMM session and its channel, the profile, and the
+ * frames waiting.  It lives in the daemon for the daemon's life; a link
+ * fills it from its page, acceptance or handoff to its end.
  */
 struct btd_phone {
 	struct btd_session *session;
@@ -130,8 +160,6 @@ struct btd_phone {
 	const struct btd_sdps_db *db;
 	const char *keys_folder;
 	struct btd_phone_hooks hooks;
-	btd_phone_answer_fn answer;
-	void *answer_context;
 
 	/*
 	 * The record of the phone used as a phone (ws197-p003 section 3),
@@ -142,6 +170,62 @@ struct btd_phone {
 	int have_record;
 	int record_valid;
 	struct btd_phonerec record;
+
+	/*
+	 * The seat (section 3.3): whether the daemon knows its user, the
+	 * user's uid, and whether the record's owner is there (present: the
+	 * phone is wanted).
+	 */
+	int have_seat;
+	uid_t seat_uid;
+	int present;
+
+	/*
+	 * Bluetoothd's pages (section 5.2): the step of the wait, when the
+	 * next page may go, whether pages stopped until the next sign (the
+	 * phone's user ended short links, or its bond is gone), how many short
+	 * links the phone ended in a row, and why the link last ended.
+	 */
+	unsigned backoff_step;
+	uint64_t next_page_at;
+	int stopped;
+	unsigned peer_closed;
+	const char *why;
+
+	/*
+	 * Making the link (sections 5.2 to 5.5): whether the phone connected
+	 * by itself, whether bluetoothd's Create Connection still has its
+	 * Connection Complete to come, whether the link is to end as soon as it
+	 * is up, the state's deadline, the securing's step and deadlines and
+	 * whether authentication was asked again, when the link became ready,
+	 * what follows a link bluetoothd ends, and a refusal whose own
+	 * Connection Complete is awaited (its device and until when).
+	 */
+	int inbound;
+	int page_outstanding;
+	int stop_wanted;
+	uint64_t state_deadline;
+	unsigned secure_step;
+	uint64_t secure_deadline;
+	uint64_t auth_again_at;
+	int auth_retried;
+	uint64_t ready_since;
+	unsigned after;
+	int reject_pending;
+	uint8_t reject_address[BTD_ADDRESS_BYTES];
+	uint64_t reject_until;
+
+	/*
+	 * The profile (section 5.8): its hooks, whether it was told the link
+	 * is ready, its SDP query's class (0: none), and the server channels of
+	 * its DLCs asked for before the RFCOMM session is up.
+	 */
+	int have_profile;
+	struct btd_phone_profile profile;
+	int profile_started;
+	uint16_t sdp_uuid;
+	unsigned pending_count;
+	unsigned pending_channels[BTD_PHONE_PENDING_DLCS];
 
 	/*
 	 * The phone: where its link is, its device, its handle, who paired
@@ -170,8 +254,8 @@ struct btd_phone {
 
 	/*
 	 * The RFCOMM session (its channel: 0 for none; active once the channel
-	 * opened), and our channel's requests: how many went, whether the
-	 * phone just refused one, and when the next goes (0: none waits).
+	 * opened), and bluetoothd's channel's requests: how many went, whether
+	 * the phone just refused one, and when the next goes (0: none waits).
 	 */
 	uint16_t rfcomm_cid;
 	int rfcomm_active;
@@ -179,10 +263,6 @@ struct btd_phone {
 	unsigned rfcomm_tries;
 	int rfcomm_refused;
 	uint64_t rfcomm_retry_at;
-
-	/* A probe and its OBEX connection. */
-	struct btd_phone_probe probe;
-	struct btd_obex obex;
 
 	/* The frames waiting for room in the session, a ring: the oldest's slot and how many. */
 	unsigned queue_first;
@@ -195,7 +275,14 @@ struct btd_phone {
 	unsigned refused;
 };
 
-void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, const struct btd_sdps_db *db, const char *keys_folder, const struct btd_phone_hooks *hooks, btd_phone_answer_fn answer, void *context);
+void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, const struct btd_sdps_db *db, const char *keys_folder, const struct btd_phone_hooks *hooks);
+void btd_phone_set_profile(struct btd_phone *phone, const struct btd_phone_profile *profile);
+void btd_phone_set_seat(struct btd_phone *phone, int have_seat, uid_t uid, uint64_t now);
+void btd_phone_resume(struct btd_phone *phone, uint64_t now);
+int btd_phone_sdp_query(struct btd_phone *phone, uint16_t uuid);
+int btd_phone_dlc_open(struct btd_phone *phone, unsigned server_channel, uint64_t now);
+int btd_phone_dlc_write(struct btd_phone *phone, unsigned dlci, const uint8_t *data, size_t length, size_t *written);
+int btd_phone_dlc_close(struct btd_phone *phone, unsigned dlci, uint64_t now);
 int btd_phone_load(struct btd_phone *phone);
 const char *btd_phone_pair_check(struct btd_phone *phone, const uint8_t *address, uid_t uid, int phone_pairing, int seated);
 int btd_phone_link_set(struct btd_phone *phone, const uint8_t *address, uid_t uid, int on, int profiles);
@@ -209,7 +296,6 @@ void btd_phone_pump(struct btd_phone *phone);
 void btd_phone_tick(struct btd_phone *phone, uint64_t now);
 uint64_t btd_phone_deadline(const struct btd_phone *phone);
 void btd_phone_lost(struct btd_phone *phone);
-int btd_phone_probe(struct btd_phone *phone, const uint8_t *address, uint16_t uuid, uint64_t now);
 int btd_phone_drop(struct btd_phone *phone, const uint8_t *address);
 int btd_phone_owns(const struct btd_phone *phone, uint16_t handle);
 

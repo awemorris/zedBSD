@@ -124,8 +124,8 @@ static const char *phone_link_name(const struct btd_phone *phone);
 static void phone_profiles_text(unsigned profiles, char *text, size_t size);
 
 /*
- * Prepares the phone link of a session: no phone yet.  The answer hook
- * hears the end of each probe.
+ * Prepares the phone link of a session: no record read, no seat, no
+ * link, no profile.
  */
 void
 btd_phone_init(
@@ -135,9 +135,7 @@ btd_phone_init(
 	struct btd_hid *hid,
 	const struct btd_sdps_db *db,
 	const char *keys_folder,
-	const struct btd_phone_hooks *hooks,
-	btd_phone_answer_fn answer,
-	void *context)
+	const struct btd_phone_hooks *hooks)
 {
 	/* Nothing under way, and no record read yet. */
 	memset(phone, 0, sizeof(*phone));
@@ -147,10 +145,180 @@ btd_phone_init(
 	phone->db = db;
 	phone->keys_folder = keys_folder;
 	phone->hooks = *hooks;
-	phone->answer = answer;
-	phone->answer_context = context;
 	phone->state = BTD_PHONE_NONE;
 	btd_l2cap_init(&phone->l2cap);
+}
+
+/* Sets the profile that uses the phone's link (ws197-p003 section 5.8). */
+void
+btd_phone_set_profile(
+	struct btd_phone *phone,
+	const struct btd_phone_profile *profile)
+{
+	/* Succeeded: its hooks kept. */
+	phone->profile = *profile;
+	phone->have_profile = 1;
+}
+
+/*
+ * Tells the phone link who sits at the seat (ws197-p003 section 3.3; the
+ * daemon looks every few seconds, and says none while Bluetooth is off):
+ * the record's owner arriving starts the pages at once, leaving ends the
+ * link.
+ */
+void
+btd_phone_set_seat(
+	struct btd_phone *phone,
+	int have_seat,
+	uid_t uid,
+	uint64_t now)
+{
+	/* The seat as it is now. */
+	phone->have_seat = have_seat;
+	phone->seat_uid = uid;
+
+	/* Succeeded: the presence follows. */
+	phone_presence(phone, now);
+}
+
+/*
+ * Takes the end of a sleep (ws197-p003 section 5.6): the pages start
+ * again at once (a link that died under the sleep ends by its supervision
+ * timeout).
+ */
+void
+btd_phone_resume(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	/* Succeeded: the wait and the stop forgotten. */
+	phone->backoff_step = 0U;
+	phone->stopped = 0;
+	phone->peer_closed = 0U;
+	phone->next_page_at = now;
+}
+
+/*
+ * Asks the phone's SDP server for the records of a service class (a
+ * profile's query, ws197-p003 section 5.8): the end comes to the
+ * profile's sdp_done.  Returns 0, ENOTCONN without a ready link, or EBUSY
+ * while another query runs.
+ */
+int
+btd_phone_sdp_query(
+	struct btd_phone *phone,
+	uint16_t uuid)
+{
+	uint8_t request[16];
+	size_t length;
+	int error;
+
+	/* A ready link. */
+	if (phone->state != BTD_PHONE_READY)
+		return ENOTCONN;
+
+	/* One query at a time. */
+	if (phone->sdp_cid != 0U || phone->sdp_uuid != 0U)
+		return EBUSY;
+
+	/* SDP's channel first: its Connection Request (the query starts when it opens). */
+	error = btd_l2cap_connect(&phone->l2cap, phone->handle, PHONE_PSM_SDP, request, sizeof(request), &length, &phone->sdp_cid);
+	if (error != 0) {
+		phone->sdp_cid = 0U;
+		return EBUSY;
+	}
+
+	/* Succeeded: under way. */
+	phone->sdp_uuid = uuid;
+	(void)phone_send(phone, BTD_CID_SIGNALLING, request, length);
+	return 0;
+}
+
+/*
+ * Opens a DLC to a server channel of the phone (a profile's, ws197-p003
+ * section 5.8): at once on the RFCOMM session there is, else once
+ * bluetoothd's RFCOMM channel and session are up.  The profile hears
+ * opened (or closed, or open_failed).  Returns 0, ENOTCONN without a ready
+ * link, EBUSY when too many DLCs wait for the session, or RFCOMM's error.
+ */
+int
+btd_phone_dlc_open(
+	struct btd_phone *phone,
+	unsigned server_channel,
+	uint64_t now)
+{
+	unsigned dlci;
+	int error;
+
+	/* A ready link. */
+	if (phone->state != BTD_PHONE_READY)
+		return ENOTCONN;
+
+	/* A session there is: the DLC now. */
+	if (phone->rfcomm_active) {
+		error = btd_rfcomm_connect(&phone->rfcomm, server_channel, now, &dlci);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Room among the DLCs that wait for the session. */
+	if (phone->pending_count >= BTD_PHONE_PENDING_DLCS)
+		return EBUSY;
+
+	/* Succeeded: it waits, and the session is asked for (unless it is already). */
+	phone->pending_channels[phone->pending_count] = server_channel;
+	phone->pending_count++;
+	phone->rfcomm_tries = 0U;
+	phone_rfcomm_open(phone);
+	return 0;
+}
+
+/* Writes on a DLC of the phone's RFCOMM session as far as its credits take it.  Returns 0 with *written, or RFCOMM's error. */
+int
+btd_phone_dlc_write(
+	struct btd_phone *phone,
+	unsigned dlci,
+	const uint8_t *data,
+	size_t length,
+	size_t *written)
+{
+	int error;
+
+	/* A session. */
+	*written = 0U;
+	if (!phone->rfcomm_active)
+		return ENOTCONN;
+
+	/* Written as far as it goes. */
+	error = btd_rfcomm_write(&phone->rfcomm, dlci, data, length, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: what went is in written. */
+	return 0;
+}
+
+/* Closes a DLC of the phone's RFCOMM session (the profile hears closed).  Returns 0 or RFCOMM's error. */
+int
+btd_phone_dlc_close(
+	struct btd_phone *phone,
+	unsigned dlci,
+	uint64_t now)
+{
+	int error;
+
+	/* A session. */
+	if (!phone->rfcomm_active)
+		return ENOTCONN;
+
+	/* Closed. */
+	error = btd_rfcomm_close(&phone->rfcomm, dlci, now);
+	if (error != 0)
+		return error;
+
+	/* Succeeded. */
+	return 0;
 }
 
 /*
@@ -286,19 +454,30 @@ btd_phone_handoff(
 }
 
 /*
- * Tells the router whether the phone link wants a device that connects to
- * bluetoothd: never in this Phase (a phone that connects by itself is
- * authenticated by p003's reconnection).
+ * Tells the router whether the phone link wants a device's Connection
+ * Request and Link Key Request (ws197-p003 section 5.3): the record's
+ * phone while its owner is at the seat, in any state (the key is asked
+ * again on a ready link; the request of a link there already is refused).
  */
 int
 btd_phone_wants(
 	void *context,
 	const uint8_t *address)
 {
-	UNUSED_PARAMETER(context);
-	UNUSED_PARAMETER(address);
+	struct btd_phone *phone;
+	int same;
 
-	/* Not wanted. */
+	/* The phone link this hook serves, its phone wanted. */
+	phone = context;
+	if (!phone->present)
+		return 0;
+
+	/* The record's phone. */
+	same = memcmp(phone->record.address, address, BTD_ADDRESS_BYTES);
+	if (same == 0)
+		return 1;
+
+	/* Another device. */
 	return 0;
 }
 
@@ -386,37 +565,58 @@ btd_phone_pump(
 }
 
 /*
- * Ends what passed its deadline: RFCOMM's and OBEX's answers, a probe that
- * took too long, and asks for the RFCOMM channel again after a refusal.
+ * Moves the phone link on with time: a page when its wait is over, the
+ * deadlines of making and securing a link, the RFCOMM and SDP timers, a
+ * stable link's wait forgotten, and bluetoothd's RFCOMM channel asked for
+ * again after a refusal.
  */
 void
 btd_phone_tick(
 	struct btd_phone *phone,
 	uint64_t now)
 {
-	/* No phone. */
-	if (phone->state == BTD_PHONE_NONE)
+	/* A refusal's own Connection Complete is awaited a while only. */
+	if (phone->reject_pending && now >= phone->reject_until)
+		phone->reject_pending = 0;
+
+	/* No link: a page when the phone is wanted and its wait is over. */
+	if (phone->state == BTD_PHONE_NONE) {
+		if (phone->present && !phone->stopped && now >= phone->next_page_at)
+			phone_page(phone, now);
 		return;
+	}
+
+	/* A page that took too long is cancelled (its Connection Complete still comes, section 5.2). */
+	if (phone->state == BTD_PHONE_PAGING && now >= phone->state_deadline) {
+		phone_cancel_page(phone, now);
+		return;
+	}
+
+	/* A cancel or an acceptance that took too long: no link, the next page after its wait. */
+	if ((phone->state == BTD_PHONE_CANCELLING || phone->state == BTD_PHONE_ACCEPTING) && now >= phone->state_deadline) {
+		phone->page_outstanding = 0;
+		phone->state = BTD_PHONE_NONE;
+		phone_schedule(phone, BTD_PHONE_AFTER_STEP, now);
+		return;
+	}
+
+	/* The securing: its deadline, the phone's own encryption awaited, authentication asked again. */
+	if (phone->state == BTD_PHONE_SECURING) {
+		phone_secure_tick(phone, now);
+		return;
+	}
+
+	/* A link ready long enough: the wait between pages starts over (section 5.2). */
+	if (phone->state == BTD_PHONE_READY && phone->backoff_step != 0U && now >= phone->ready_since + BTD_PHONE_STABLE_MS) {
+		phone->backoff_step = 0U;
+		phone->peer_closed = 0U;
+	}
 
 	/* RFCOMM's timers. */
 	if (phone->rfcomm_active)
 		btd_rfcomm_tick(&phone->rfcomm, now);
 
-	/* OBEX's answer of a probe. */
-	if (phone->probe.step >= BTD_PHONE_PROBE_CONNECT)
-		btd_obex_tick(&phone->obex, now);
-
-	/* No probe under way. */
-	if (phone->probe.step == BTD_PHONE_PROBE_NONE)
-		return;
-
-	/* A probe that took too long. */
-	if (now >= phone->probe.deadline) {
-		phone_probe_fail(phone, "timeout");
-		return;
-	}
-
-	/* Succeeded: the RFCOMM channel asked for again when its wait is over. */
+	/* Succeeded: bluetoothd's RFCOMM channel asked for again when its wait is over. */
 	if (phone->rfcomm_retry_at != 0U && now >= phone->rfcomm_retry_at) {
 		phone->rfcomm_retry_at = 0U;
 		phone_rfcomm_open(phone);
@@ -434,14 +634,35 @@ btd_phone_deadline(
 	uint64_t earliest;
 	uint64_t deadline;
 
-	/* No phone. */
-	if (phone->state == BTD_PHONE_NONE)
-		return 0U;
-
-	/* The probe's. */
+	/* A refusal awaited. */
 	earliest = 0U;
-	if (phone->probe.step != BTD_PHONE_PROBE_NONE)
-		earliest = phone->probe.deadline;
+	if (phone->reject_pending)
+		earliest = phone->reject_until;
+
+	/* No link: the next page, while the phone is wanted. */
+	if (phone->state == BTD_PHONE_NONE) {
+		if (phone->present && !phone->stopped)
+			earliest = phone_earlier(earliest, phone->next_page_at);
+		return earliest;
+	}
+
+	/* The state's deadline. */
+	if (phone->state == BTD_PHONE_PAGING ||
+	    phone->state == BTD_PHONE_CANCELLING ||
+	    phone->state == BTD_PHONE_ACCEPTING)
+		earliest = phone_earlier(earliest, phone->state_deadline);
+
+	/* The securing's deadlines. */
+	if (phone->state == BTD_PHONE_SECURING) {
+		earliest = phone_earlier(earliest, phone->secure_deadline);
+		earliest = phone_earlier(earliest, phone->auth_again_at);
+		if (phone->secure_step == BTD_PHONE_SECURE_WAIT_PEER)
+			earliest = phone_earlier(earliest, phone->state_deadline);
+	}
+
+	/* A ready link's wait forgotten when it is stable. */
+	if (phone->state == BTD_PHONE_READY && phone->backoff_step != 0U)
+		earliest = phone_earlier(earliest, phone->ready_since + BTD_PHONE_STABLE_MS);
 
 	/* RFCOMM's answers. */
 	if (phone->rfcomm_active) {
@@ -449,13 +670,7 @@ btd_phone_deadline(
 		earliest = phone_earlier(earliest, deadline);
 	}
 
-	/* OBEX's answer. */
-	if (phone->probe.step >= BTD_PHONE_PROBE_CONNECT) {
-		deadline = btd_obex_deadline(&phone->obex);
-		earliest = phone_earlier(earliest, deadline);
-	}
-
-	/* The RFCOMM channel's next request. */
+	/* Bluetoothd's RFCOMM channel's next request. */
 	earliest = phone_earlier(earliest, phone->rfcomm_retry_at);
 
 	/* Succeeded: the earliest, or 0. */
@@ -464,71 +679,19 @@ btd_phone_deadline(
 
 /*
  * Forgets the phone's link because the controller went or was reset: no
- * command can be sent, a probe ends as lost.
+ * command can be sent; the next page waits for the controller.
  */
 void
 btd_phone_lost(
 	struct btd_phone *phone)
 {
-	/* No phone. */
+	/* No link. */
 	if (phone->state == BTD_PHONE_NONE)
 		return;
 
 	/* Succeeded: ended. */
+	phone->page_outstanding = 0;
 	phone_ended(phone, "lost");
-}
-
-/*
- * Starts a probe of the phone's link (PHONE PROBE, root): SDP finds the
- * phone's MAS (0x1132) or PSE (0x112F), RFCOMM opens a DLC to it, OBEX
- * connects, gets a folder listing and disconnects; the answer hook hears
- * how.  Returns 0 when it started, ENOTCONN when the device is not the
- * phone of a link, EINVAL for another service class, or EBUSY while a
- * probe runs.
- */
-int
-btd_phone_probe(
-	struct btd_phone *phone,
-	const uint8_t *address,
-	uint16_t uuid,
-	uint64_t now)
-{
-	uint8_t request[16];
-	size_t length;
-	int same;
-	int error;
-
-	/* The phone of a link that is ready. */
-	if (phone->state != BTD_PHONE_READY)
-		return ENOTCONN;
-	same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
-	if (same != 0)
-		return ENOTCONN;
-
-	/* MAP's MAS or PBAP's PSE. */
-	if (uuid != BTD_SDP_UUID_MAS && uuid != BTD_SDP_UUID_PSE)
-		return EINVAL;
-
-	/* One probe, and one SDP query, at a time. */
-	if (phone->probe.step != BTD_PHONE_PROBE_NONE || phone->sdp_cid != 0U)
-		return EBUSY;
-
-	/* The probe, for BTD_PHONE_PROBE_MS at most. */
-	memset(&phone->probe, 0, sizeof(phone->probe));
-	phone->probe.uuid = uuid;
-	phone->probe.deadline = now + BTD_PHONE_PROBE_MS;
-	phone->rfcomm_tries = 0U;
-	phone->rfcomm_retry_at = 0U;
-
-	/* SDP's channel first: its Connection Request. */
-	error = btd_l2cap_connect(&phone->l2cap, phone->handle, PHONE_PSM_SDP, request, sizeof(request), &length, &phone->sdp_cid);
-	if (error != 0)
-		return EBUSY;
-	phone->probe.step = BTD_PHONE_PROBE_SDP_CHANNEL;
-	(void)phone_send(phone, BTD_CID_SIGNALLING, request, length);
-
-	/* Succeeded: under way. */
-	return 0;
 }
 
 /*
@@ -942,7 +1105,7 @@ phone_accept(
 	return 0;
 }
 
-/* Takes an event of the phone's link: its end, and its encryption turned off. */
+/* Takes an event of the phone's link or device: a connection asked for, made or ended, its key asked, its authentication and encryption. */
 static void
 phone_event(
 	struct btd_phone *phone,
@@ -950,30 +1113,934 @@ phone_event(
 	size_t length,
 	uint8_t code)
 {
+	/* Each event the phone link knows; anything else is passed over. */
+	switch (code) {
+	case PHONE_EVENT_REQUEST:
+		phone_request(phone, parameters, length);
+		break;
+	case PHONE_EVENT_CONNECTED:
+		phone_connected(phone, parameters, length);
+		break;
+	case PHONE_EVENT_KEY_REQUEST:
+		phone_key_request(phone, parameters, length);
+		break;
+	case PHONE_EVENT_AUTHENTICATED:
+		phone_authenticated(phone, parameters, length);
+		break;
+	case PHONE_EVENT_ENCRYPTION:
+	case PHONE_EVENT_ENCRYPTION_V2:
+		phone_encryption(phone, parameters, length);
+		break;
+	case PHONE_EVENT_DISCONNECTED:
+		phone_disconnected(phone, parameters, length);
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * Follows the presence of the record's owner at the seat (section 3.3):
+ * arriving, the pages start at once and page scan is wanted; leaving, the
+ * link ends (Q14) and page scan is no longer wanted.  The HID host's
+ * limit follows the record.
+ */
+static void
+phone_presence(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	struct btd_linkmgr *linkmgr;
+	int present;
+
+	/* Wanted: a valid record that is on, its owner at the seat. */
+	present = 0;
+	if (phone->have_record &&
+	    phone->record_valid &&
+	    phone->record.enabled &&
+	    phone->have_seat &&
+	    phone->seat_uid == phone->record.uid)
+		present = 1;
+
+	/* The HID host's limit follows the record. */
+	phone_limit(phone);
+
+	/* No change. */
+	if (present == phone->present)
+		return;
+	phone->present = present;
+
+	/* Page scan, wanted while the owner is there. */
+	linkmgr = phone->router->linkmgr;
+	if (linkmgr != NULL)
+		(void)btd_linkmgr_want_scan(linkmgr, BTD_LINKMGR_PHONE, present);
+
+	/* Arriving: the pages start at once, and a link ready meanwhile goes to the profile. */
+	if (present) {
+		phone->backoff_step = 0U;
+		phone->stopped = 0;
+		phone->peer_closed = 0U;
+		phone->next_page_at = now;
+		phone_profile_ready(phone);
+		return;
+	}
+
+	/* Succeeded: leaving ends the link. */
+	phone_stop(phone, "absent", now);
+}
+
+/*
+ * Ends whatever link there is with no page after it (the owner left, the
+ * record was switched off or forgotten): a page is cancelled, a
+ * connection being made is ended when it comes, a link is disconnected.
+ */
+static void
+phone_stop(
+	struct btd_phone *phone,
+	const char *why,
+	uint64_t now)
+{
+	/* The reason, and no page after it. */
+	phone->why = why;
+	phone->after = BTD_PHONE_AFTER_NONE;
+
+	/* A page: cancelled, its Connection Complete ends it. */
+	if (phone->state == BTD_PHONE_PAGING) {
+		phone->stop_wanted = 1;
+		phone_cancel_page(phone, now);
+		return;
+	}
+
+	/* A connection on its way: ended when it comes. */
+	if (phone->state == BTD_PHONE_CANCELLING || phone->state == BTD_PHONE_ACCEPTING) {
+		phone->stop_wanted = 1;
+		return;
+	}
+
+	/* Succeeded: a link (securing or ready) is disconnected. */
+	phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_NONE);
+}
+
+/*
+ * Sets when the next page may go after a link or a page ended (section
+ * 5.5): none, the wait of the next step, or the longest wait.
+ */
+static void
+phone_schedule(
+	struct btd_phone *phone,
+	unsigned after,
+	uint64_t now)
+{
+	/* No page after it: until the next sign (the owner at the seat again, a sleep's end, PHONE LINK on). */
+	if (after == BTD_PHONE_AFTER_NONE) {
+		phone->stopped = 1;
+		return;
+	}
+
+	/* The longest wait. */
+	if (after == BTD_PHONE_AFTER_LONG)
+		phone->backoff_step = BTD_PHONE_BACKOFF_STEPS - 1U;
+
+	/* Succeeded: this step's wait, and the next step for the next time. */
+	phone->next_page_at = now + phone_backoff_ms[phone->backoff_step];
+	if (phone->backoff_step + 1U < BTD_PHONE_BACKOFF_STEPS)
+		phone->backoff_step++;
+}
+
+/*
+ * Pages the phone (section 5.2): one BR/EDR page of the controller at a
+ * time (the link manager), and not while the HID host uses every link it
+ * may; either waits a little, its step not counted.
+ */
+static void
+phone_page(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	struct btd_linkmgr *linkmgr;
+	uint8_t parameters[13];
+	unsigned links;
+	int error;
+
+	/* A link left by the HID host. */
+	links = btd_hid_link_count(phone->hid);
+	if (links > BTD_PHONE_HID_LIMIT) {
+		phone->why = "busy-links";
+		phone->next_page_at = now + BTD_PHONE_WAIT_MS;
+		return;
+	}
+
+	/* The controller's one page. */
+	linkmgr = phone->router->linkmgr;
+	if (linkmgr != NULL) {
+		error = btd_linkmgr_page_begin(linkmgr, BTD_LINKMGR_PHONE, phone->record.address, now);
+		if (error != 0) {
+			phone->next_page_at = now + BTD_PHONE_WAIT_MS;
+			return;
+		}
+	}
+
+	/* The phone, its address the record's. */
+	memcpy(phone->address, phone->record.address, BTD_ADDRESS_BYTES);
+	phone->uid = phone->record.uid;
+	phone->inbound = 0;
+	phone->stop_wanted = 0;
+	phone->page_outstanding = 1;
+	phone->state = BTD_PHONE_PAGING;
+	phone->state_deadline = now + BTD_PHONE_PAGE_MS;
+
+	/* Create Connection: the address, DM1 to DH5, R1, no clock offset, a role switch allowed (as the HID host's page). */
+	memset(parameters, 0, sizeof(parameters));
+	memcpy(parameters, phone->address, BTD_ADDRESS_BYTES);
+	phone_put16(parameters + 6, PHONE_PACKET_TYPES);
+	parameters[8] = 0x01U;
+	parameters[9] = 0x00U;
+	phone_put16(parameters + 10, 0x0000U);
+	parameters[12] = 0x01U;
+	error = btd_session_command(phone->session, PHONE_CREATE_CONNECTION, parameters, sizeof(parameters));
+	if (error == 0)
+		return;
+
+	/* Refused at once: no page out, the next after its wait. */
+	if (linkmgr != NULL)
+		btd_linkmgr_page_end(linkmgr, BTD_LINKMGR_PHONE, phone->address);
+	phone->page_outstanding = 0;
+	phone->state = BTD_PHONE_NONE;
+	phone->why = "unreachable";
+	phone_schedule(phone, BTD_PHONE_AFTER_STEP, now);
+}
+
+/*
+ * Cancels bluetoothd's page (its guard ran out, or the owner left,
+ * section 5.2): Create Connection Cancel; the page's Connection Complete
+ * still comes and ends the cancel (its status only logged: the command
+ * waits synchronously, so the Connection Complete is handed after it).
+ */
+static void
+phone_cancel_page(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	/* Cancelled, awaited a while. */
+	(void)btd_session_command(phone->session, PHONE_CANCEL_CONNECTION, phone->address, BTD_ADDRESS_BYTES);
+	phone->state = BTD_PHONE_CANCELLING;
+
+	/* Succeeded: its Connection Complete awaited. */
+	phone->state_deadline = now + BTD_PHONE_CANCEL_MS;
+}
+
+/*
+ * Takes Connection Request (address, class, link type) of the record's
+ * phone (section 5.3): accepted with no role switch when there is no
+ * link; when bluetoothd's page crosses it, the page is cancelled first and
+ * the phone's accepted, or refused when the page made its link already;
+ * refused while a link is there or the HID host uses every link it may.
+ */
+static void
+phone_request(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
+	uint64_t now;
+	unsigned links;
+	int same;
+	int error;
+
+	/* A whole event of the record's phone. */
+	if (length < 10U)
+		return;
+	same = memcmp(parameters, phone->record.address, BTD_ADDRESS_BYTES);
+	if (same != 0)
+		return;
+	now = btd_now_ms();
+
+	/* No link: accepted, unless the HID host uses every link it may. */
+	if (phone->state == BTD_PHONE_NONE) {
+		links = btd_hid_link_count(phone->hid);
+		if (links > BTD_PHONE_HID_LIMIT) {
+			phone_reject(phone, parameters, now);
+			return;
+		}
+		memcpy(phone->address, parameters, BTD_ADDRESS_BYTES);
+		phone->uid = phone->record.uid;
+		phone->stop_wanted = 0;
+		phone->page_outstanding = 0;
+		phone_accept_request(phone, now);
+		return;
+	}
+
+	/* Bluetoothd's page crossing it: cancelled first; a page that made its link already keeps it. */
+	if (phone->state == BTD_PHONE_PAGING) {
+		error = btd_session_command(phone->session, PHONE_CANCEL_CONNECTION, phone->address, BTD_ADDRESS_BYTES);
+		if (error != 0 && phone->session->status == PHONE_STATUS_EXISTS) {
+			phone_reject(phone, parameters, now);
+			return;
+		}
+		phone_accept_request(phone, now);
+		return;
+	}
+
+	/* A cancelled page: the phone's connection accepted (the page's Connection Complete still comes). */
+	if (phone->state == BTD_PHONE_CANCELLING) {
+		phone_accept_request(phone, now);
+		return;
+	}
+
+	/* Succeeded: refused while a link is there or on its way. */
+	phone_reject(phone, parameters, now);
+}
+
+/* Accepts the phone's connection with no role switch (the phone is often another device's central, section 5.3). */
+static void
+phone_accept_request(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	uint8_t accept[BTD_ADDRESS_BYTES + 1U];
+	int error;
+
+	/* Accept Connection Request: the address, the peripheral's role kept. */
+	memcpy(accept, phone->address, BTD_ADDRESS_BYTES);
+	accept[BTD_ADDRESS_BYTES] = PHONE_ROLE_PERIPHERAL;
+	error = btd_session_command(phone->session, PHONE_ACCEPT_CONNECTION, accept, sizeof(accept));
+	if (error != 0) {
+		phone->state = BTD_PHONE_NONE;
+		phone_schedule(phone, BTD_PHONE_AFTER_STEP, now);
+		return;
+	}
+
+	/* Succeeded: its Connection Complete awaited. */
+	phone->inbound = 1;
+	phone->state = BTD_PHONE_ACCEPTING;
+	phone->state_deadline = now + BTD_PHONE_ACCEPT_MS;
+}
+
+/*
+ * Refuses a Connection Request for limited resources; the refusal's own
+ * Connection Complete (Core 5.4 Vol 4 Part E 7.1.9, its status not given
+ * there) is awaited and passed over once (section 5.3, review-2 n1).
+ */
+static void
+phone_reject(
+	struct btd_phone *phone,
+	const uint8_t *address,
+	uint64_t now)
+{
+	uint8_t reject[BTD_ADDRESS_BYTES + 1U];
+
+	/* Reject Connection Request: the address, limited resources. */
+	memcpy(reject, address, BTD_ADDRESS_BYTES);
+	reject[BTD_ADDRESS_BYTES] = PHONE_REASON_RESOURCES;
+	(void)btd_session_command(phone->session, PHONE_REJECT_CONNECTION, reject, sizeof(reject));
+
+	/* Succeeded: its Connection Complete awaited. */
+	memcpy(phone->reject_address, address, BTD_ADDRESS_BYTES);
+	phone->reject_pending = 1;
+	phone->reject_until = now + BTD_PHONE_REJECT_MS;
+}
+
+/*
+ * Takes Connection Complete (status, handle, address, link type,
+ * encryption) of the record's phone (sections 5.2 to 5.4): a refusal's
+ * own and a cancelled page's are passed over; a failure ends the page or
+ * the acceptance; a success makes the link the phone link's and starts
+ * securing it (or ends it at once when it is no longer wanted).
+ */
+static void
+phone_connected(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
+	uint64_t now;
+	uint8_t status;
+	int refusal;
+	int same;
+
+	/* A whole event of the phone. */
+	if (length < 11U)
+		return;
+	same = memcmp(parameters + 3, phone->address, BTD_ADDRESS_BYTES);
+	if (same != 0 || phone->state == BTD_PHONE_NONE)
+		return;
+	status = parameters[0];
+	now = btd_now_ms();
+
+	/* A refusal's own Connection Complete: passed over once. */
+	refusal = memcmp(parameters + 3, phone->reject_address, BTD_ADDRESS_BYTES);
+	if (status != 0U && phone->reject_pending && refusal == 0) {
+		phone->reject_pending = 0;
+		return;
+	}
+
+	/* A failure: a cancelled page's while the phone's connection is accepted or made, else the end of the page or the acceptance. */
+	if (status != 0U) {
+		phone_connect_failed(phone, status, now);
+		return;
+	}
+
+	/* A success while no connection was on its way (a second link of the phone): ended. */
+	if (phone->state != BTD_PHONE_PAGING &&
+	    phone->state != BTD_PHONE_CANCELLING &&
+	    phone->state != BTD_PHONE_ACCEPTING) {
+		phone_end_handle(phone, phone_get16(parameters + 1));
+		return;
+	}
+
+	/* Bluetoothd's page made it, or it was the phone's: no page out any more once a page's state saw it. */
+	if (phone->state != BTD_PHONE_ACCEPTING)
+		phone->page_outstanding = 0;
+
+	/* Succeeded: the link, secured next. */
+	phone_link_up(phone, (uint16_t)(phone_get16(parameters + 1) & 0x0fffU), parameters[10], now);
+}
+
+/*
+ * Takes a failed Connection Complete of the phone: the cancelled page's
+ * (Unknown Connection Identifier, Page Timeout, Connection Already
+ * Exists) while the phone's connection is accepted or made is passed over;
+ * else the page or the acceptance ends and the next page waits.
+ */
+static void
+phone_connect_failed(
+	struct btd_phone *phone,
+	uint8_t status,
+	uint64_t now)
+{
+	int pages_end;
+
+	/* The cancelled page's, while the phone's own connection goes on. */
+	pages_end = 0;
+	if (status == PHONE_STATUS_UNKNOWN || status == PHONE_STATUS_PAGE_TIMEOUT || status == PHONE_STATUS_EXISTS)
+		pages_end = 1;
+	if (phone->page_outstanding && pages_end && phone->state != BTD_PHONE_PAGING && phone->state != BTD_PHONE_CANCELLING) {
+		phone->page_outstanding = 0;
+		return;
+	}
+
+	/* Not a connection on its way. */
+	if (phone->state != BTD_PHONE_PAGING &&
+	    phone->state != BTD_PHONE_CANCELLING &&
+	    phone->state != BTD_PHONE_ACCEPTING)
+		return;
+
+	/* Succeeded: no link, the next page after its wait (or none, when it was stopped). */
+	phone->page_outstanding = 0;
+	phone->state = BTD_PHONE_NONE;
+	phone->why = "unreachable";
+	if (phone->stop_wanted) {
+		phone_schedule(phone, BTD_PHONE_AFTER_NONE, now);
+		return;
+	}
+	phone_schedule(phone, BTD_PHONE_AFTER_STEP, now);
+}
+
+/*
+ * Takes the phone's new ACL link (section 5.4): its route, its share of
+ * the session, its channels' table; then the securing (a link no longer
+ * wanted ends at once).
+ */
+static void
+phone_link_up(
+	struct btd_phone *phone,
+	uint16_t handle,
+	uint8_t encrypted,
+	uint64_t now)
+{
+	unsigned buffers;
+	int error;
+
+	/* The route is the phone link's (the router gave it already when it claimed the connection; this makes sure). */
+	phone->handle = handle;
+	(void)btd_router_assign(phone->router, handle, BTD_OWNER_PHONE);
+
+	/* The link's share of the session (section 4.2 of p002). */
+	buffers = 1U;
+	if (phone->session->acl_pool.total > PHONE_BUFFERS_LEFT + 1U)
+		buffers = phone->session->acl_pool.total - PHONE_BUFFERS_LEFT;
+	(void)btd_session_set_link_limits(phone->session, handle, BTD_SEND_PHONE_FRAMES, buffers);
+
+	/* The link's channels and frame, none yet. */
+	btd_l2cap_init(&phone->l2cap);
+	btd_l2cap_set_accept(&phone->l2cap, phone_accept, phone);
+	memset(&phone->reassembly, 0, sizeof(phone->reassembly));
+	phone->frame_cid = 0U;
+	phone->queue_first = 0U;
+	phone->queue_count = 0U;
+	phone->encrypted = 0;
+	if (encrypted != 0U)
+		phone->encrypted = 1;
+	phone->key_size = 0U;
+	phone->class_unknown = 0;
+
+	/* No longer wanted: ended at once. */
+	phone->state = BTD_PHONE_SECURING;
+	if (phone->stop_wanted) {
+		phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_NONE);
+		return;
+	}
+
+	/* The securing: the phone's own encryption awaited a while when it connected, else authentication at once. */
+	phone->secure_deadline = now + BTD_PHONE_SECURE_MS;
+	phone->auth_again_at = 0U;
+	phone->auth_retried = 0;
+	if (phone->inbound) {
+		phone->secure_step = BTD_PHONE_SECURE_WAIT_PEER;
+		phone->state_deadline = now + BTD_PHONE_PEER_MS;
+		return;
+	}
+
+	/* Succeeded: authentication asked for. */
+	error = phone_secure_auth(phone);
+	if (error != 0)
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+}
+
+/* Asks for the link's authentication (Authentication Requested): the controller asks for the key.  Returns 0, or the command's error (Command Disallowed sends the securing back to wait for the phone). */
+static int
+phone_secure_auth(
+	struct btd_phone *phone)
+{
+	uint8_t handle[2];
+	int error;
+
+	/* Authentication Requested. */
+	phone->secure_step = BTD_PHONE_SECURE_AUTH;
+	phone_put16(handle, phone->handle);
+	error = btd_session_command(phone->session, PHONE_AUTHENTICATION, handle, sizeof(handle));
+
+	/* The phone started its own already: its encryption awaited a while more. */
+	if (error != 0 && phone->session->status == PHONE_STATUS_DISALLOWED) {
+		phone->secure_step = BTD_PHONE_SECURE_WAIT_PEER;
+		phone->state_deadline = btd_now_ms() + BTD_PHONE_PEER_MS;
+		return 0;
+	}
+
+	/* Refused. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: its Authentication Complete awaited. */
+	return 0;
+}
+
+/* Moves the securing on with time (section 5.4): its deadline, the phone's own encryption awaited, authentication asked again after a collision. */
+static void
+phone_secure_tick(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	int error;
+
+	/* The whole securing took too long. */
+	if (now >= phone->secure_deadline) {
+		phone->why = "security";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+		return;
+	}
+
+	/* The phone did not secure the link itself in time: authentication asked for. */
+	if (phone->secure_step == BTD_PHONE_SECURE_WAIT_PEER && now >= phone->state_deadline) {
+		error = phone_secure_auth(phone);
+		if (error != 0)
+			phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+		return;
+	}
+
+	/* Succeeded: authentication asked again after a collision. */
+	if (phone->auth_again_at != 0U && now >= phone->auth_again_at) {
+		phone->auth_again_at = 0U;
+		error = phone_secure_auth(phone);
+		if (error != 0)
+			phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+	}
+}
+
+/*
+ * Answers Link Key Request (address) of the record's phone (section 5.3):
+ * the bond's key when it was made with a number the user confirmed, else
+ * none; the key is not kept.
+ */
+static void
+phone_key_request(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
+	struct btd_bond bond;
+	uint8_t reply[BTD_ADDRESS_BYTES + 16U];
+	int authenticated;
+	int same;
+	int error;
+
+	/* A whole event. */
+	if (length < BTD_ADDRESS_BYTES)
+		return;
+
+	/* The record's phone, its record valid, its bond there. */
+	error = ENOENT;
+	same = memcmp(parameters, phone->record.address, BTD_ADDRESS_BYTES);
+	if (same == 0 && phone->have_record && phone->record_valid)
+		error = btd_keys_read(phone->keys_folder, phone->session->address, parameters, BTD_ADDRESS_BREDR, &bond);
+
+	/* Its key made with a number the user confirmed. */
+	authenticated = 0;
+	if (error == 0 && bond.have_link_key && bond.link_key_type == PHONE_KEY_P192_MITM)
+		authenticated = 1;
+	if (error == 0 && bond.have_link_key && bond.link_key_type == PHONE_KEY_P256_MITM)
+		authenticated = 1;
+
+	/* None: Negative Reply. */
+	if (!authenticated) {
+		memset(&bond, 0, sizeof(bond));
+		(void)btd_session_command(phone->session, PHONE_LINK_KEY_NEGATIVE, parameters, BTD_ADDRESS_BYTES);
+		return;
+	}
+
+	/* Succeeded: Link Key Request Reply, and the key forgotten. */
+	memcpy(reply, parameters, BTD_ADDRESS_BYTES);
+	memcpy(reply + BTD_ADDRESS_BYTES, bond.link_key, sizeof(bond.link_key));
+	(void)btd_session_command(phone->session, PHONE_LINK_KEY_REPLY, reply, sizeof(reply));
+	memset(&bond, 0, sizeof(bond));
+	memset(reply, 0, sizeof(reply));
+}
+
+/*
+ * Takes Authentication Complete (status, handle) of the link being
+ * secured (section 5.4): encryption next; a collision asks again once; a
+ * key the phone no longer has stops the pages; any other failure ends the
+ * link.  Once encrypted, a failure is passed over.
+ */
+static void
+phone_authenticated(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
+	uint8_t encryption[3];
+	uint16_t handle;
+	int error;
+
+	/* A whole event of the link being secured, not encrypted yet. */
+	if (length < 3U || phone->state != BTD_PHONE_SECURING)
+		return;
+	handle = (uint16_t)(phone_get16(parameters + 1) & 0x0fffU);
+	if (handle != phone->handle || phone->encrypted)
+		return;
+
+	/* A collision with the phone's own: asked again a little later, once. */
+	if ((parameters[0] == PHONE_STATUS_COLLISION || parameters[0] == PHONE_STATUS_DIFFERENT_COLLISION) && !phone->auth_retried) {
+		phone->auth_retried = 1;
+		phone->auth_again_at = btd_now_ms() + BTD_PHONE_AUTH_AGAIN_MS;
+		return;
+	}
+
+	/* The phone forgot the bond: no page until it is paired again. */
+	if (parameters[0] == PHONE_STATUS_KEY_MISSING) {
+		phone->why = "key-missing";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_NONE);
+		return;
+	}
+
+	/* Any other failure. */
+	if (parameters[0] != 0U) {
+		phone->why = "security";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+		return;
+	}
+
+	/* Succeeded: Set Connection Encryption, on. */
+	phone->secure_step = BTD_PHONE_SECURE_ENCRYPT;
+	phone_put16(encryption, phone->handle);
+	encryption[2] = 0x01U;
+	error = btd_session_command(phone->session, PHONE_SET_ENCRYPTION, encryption, sizeof(encryption));
+	if (error != 0) {
+		phone->why = "security";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+	}
+}
+
+/*
+ * Takes Encryption Change (status, handle, enabled) of the phone's link:
+ * while securing, encryption on leads to the key's size whatever the step
+ * (it uses the bond's key the link key request gave); on a ready link,
+ * encryption off ends it (the phone's data is not sent in the clear).
+ */
+static void
+phone_encryption(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
 	uint16_t handle;
 
-	/* An event of a link with its status and handle at all, of the phone's link. */
-	if (length < 3U || phone->state == BTD_PHONE_NONE)
+	/* A whole event of the phone's link. */
+	if (length < 4U || phone->state == BTD_PHONE_NONE)
 		return;
 	handle = (uint16_t)(phone_get16(parameters + 1) & 0x0fffU);
 	if (handle != phone->handle)
 		return;
 
-	/* Disconnection Complete that happened: the link went. */
-	if (code == PHONE_EVENT_DISCONNECTED) {
-		if (parameters[0] == 0x00U)
-			phone_ended(phone, "lost");
+	/* A ready link whose encryption went off. */
+	if (phone->state == BTD_PHONE_READY) {
+		if (parameters[0] == 0x00U && parameters[3] == 0x00U) {
+			phone->encrypted = 0;
+			phone->why = "security";
+			phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+		}
 		return;
 	}
 
-	/* Encryption turned off: the phone's data is not sent in the clear. */
-	if (code == PHONE_EVENT_ENCRYPTION || code == PHONE_EVENT_ENCRYPTION_V2) {
-		if (length >= 4U &&
-		    parameters[0] == 0x00U &&
-		    parameters[3] == 0x00U) {
-			phone->encrypted = 0;
-			phone_disconnect(phone, PHONE_REASON_SECURITY);
+	/* Only while securing. */
+	if (phone->state != BTD_PHONE_SECURING)
+		return;
+
+	/* The phone forgot the bond. */
+	if (parameters[0] == PHONE_STATUS_KEY_MISSING) {
+		phone->why = "key-missing";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_NONE);
+		return;
+	}
+
+	/* Not encrypted. */
+	if (parameters[0] != 0x00U || parameters[3] == 0x00U) {
+		phone->why = "security";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
+		return;
+	}
+
+	/* Succeeded: encrypted, its key's size next. */
+	phone->encrypted = 1;
+	phone_key_size(phone);
+}
+
+/* Reads the encryption key's size (KNOB: 16 bytes only): the link is ready, or ends. */
+static void
+phone_key_size(
+	struct btd_phone *phone)
+{
+	uint8_t handle[2];
+	int error;
+
+	/* Read Encryption Key Size: the handle, then the size. */
+	phone->secure_step = BTD_PHONE_SECURE_KEY_SIZE;
+	phone_put16(handle, phone->handle);
+	error = btd_session_command(phone->session, PHONE_READ_KEY_SIZE, handle, sizeof(handle));
+	if (error != 0 || phone->session->returned_length < 3U) {
+		phone->why = "key-size";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_LONG);
+		return;
+	}
+
+	/* A shorter key is refused. */
+	phone->key_size = phone->session->returned[2];
+	if (phone->key_size != PHONE_KEY_SIZE) {
+		phone->why = "key-size";
+		phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_LONG);
+		return;
+	}
+
+	/* Succeeded: ready. */
+	phone_ready(phone, btd_now_ms());
+}
+
+/*
+ * Makes the secured link ready (section 5.4): the channels the phone
+ * asked for meanwhile are accepted, and the profile hears it while the
+ * owner is at the seat.
+ */
+static void
+phone_ready(
+	struct btd_phone *phone,
+	uint64_t now)
+{
+	uint8_t answer[BTD_SIGNAL_MAX];
+	size_t length;
+	int error;
+
+	/* Ready since now. */
+	phone->state = BTD_PHONE_READY;
+	phone->ready_since = now;
+	phone->why = NULL;
+
+	/* The channels held Pending are accepted. */
+	error = btd_l2cap_answer_pending(&phone->l2cap, phone->handle, BTD_L2CAP_SUCCESS, answer, sizeof(answer), &length);
+	if (error == 0 && length != 0U)
+		(void)phone_send(phone, BTD_CID_SIGNALLING, answer, length);
+
+	/* Succeeded: the profile, when the owner is there. */
+	phone_profile_ready(phone);
+}
+
+/* Tells the profile the link is ready, once a link, while the owner is at the seat. */
+static void
+phone_profile_ready(
+	struct btd_phone *phone)
+{
+	/* A ready link, its owner there, a profile not told yet. */
+	if (phone->state != BTD_PHONE_READY || !phone->present)
+		return;
+	if (!phone->have_profile || phone->profile_started)
+		return;
+
+	/* Succeeded: told. */
+	phone->profile_started = 1;
+	if (phone->profile.ready != NULL)
+		phone->profile.ready(phone->profile.context);
+}
+
+/*
+ * Takes Disconnection Complete (status, handle, reason) of the phone's
+ * link (section 5.5): the link ends, and the reason sets the next page:
+ * the phone gone out of range or switched off is paged again after the
+ * next step's wait; the phone's user ending short links three times stops
+ * the pages; a link bluetoothd ended follows what it was ended for.
+ */
+static void
+phone_disconnected(
+	struct btd_phone *phone,
+	const uint8_t *parameters,
+	size_t length)
+{
+	uint64_t now;
+	uint16_t handle;
+	uint8_t reason;
+	unsigned after;
+	int short_link;
+
+	/* A whole event that happened, of the phone's link. */
+	if (length < 4U || phone->state == BTD_PHONE_NONE || parameters[0] != 0x00U)
+		return;
+	handle = (uint16_t)(phone_get16(parameters + 1) & 0x0fffU);
+	if (handle != phone->handle)
+		return;
+	if (phone->state != BTD_PHONE_SECURING && phone->state != BTD_PHONE_READY && phone->state != BTD_PHONE_CLOSING)
+		return;
+	reason = parameters[3];
+	now = btd_now_ms();
+
+	/* A link that did not last: the next page waits a step more. */
+	short_link = 1;
+	if (phone->ready_since != 0U && now >= phone->ready_since + BTD_PHONE_STABLE_MS)
+		short_link = 0;
+
+	/* What follows: bluetoothd's own end as it was meant, the phone's user's end of short links three times stops. */
+	after = BTD_PHONE_AFTER_STEP;
+	if (reason == PHONE_REASON_LOCAL_HOST)
+		after = phone->after;
+	if (reason == PHONE_REASON_USER && short_link) {
+		phone->peer_closed++;
+		if (phone->peer_closed >= BTD_PHONE_PEER_CLOSED_MAX) {
+			phone->why = "peer-closed";
+			after = BTD_PHONE_AFTER_NONE;
 		}
+	}
+
+	/* The link ends. */
+	phone_ended(phone, phone->why);
+
+	/* Succeeded: the next page set (a link's end without a reason of bluetoothd's is "lost"). */
+	if (phone->why == NULL)
+		phone->why = "lost";
+	phone_schedule(phone, after, now);
+}
+
+/* Ends a second link of the phone that came up while it had one: Disconnect, not the phone link's. */
+static void
+phone_end_handle(
+	struct btd_phone *phone,
+	uint16_t handle)
+{
+	uint8_t disconnect[3];
+
+	/* Succeeded: Disconnect, the link refused for its security's sake. */
+	phone_put16(disconnect, (uint16_t)(handle & 0x0fffU));
+	disconnect[2] = PHONE_REASON_USER;
+	(void)btd_session_command(phone->session, PHONE_DISCONNECT, disconnect, sizeof(disconnect));
+}
+
+/* Ends the SDP query: its channel closes, and the profile hears the end. */
+static void
+phone_sdp_finish(
+	struct btd_phone *phone,
+	int error)
+{
+	uint16_t cid;
+
+	/* The channel closes (its closing finds no query any more). */
+	cid = phone->sdp_cid;
+	phone->sdp_cid = 0U;
+	if (cid != 0U && phone->state == BTD_PHONE_READY)
+		phone_close_channel(phone, cid);
+
+	/* Succeeded: the profile hears it. */
+	phone_sdp_done(phone, error);
+}
+
+/* Tells the profile the end of its SDP query (error 0: the records in phone->sdp), once. */
+static void
+phone_sdp_done(
+	struct btd_phone *phone,
+	int error)
+{
+	/* No query. */
+	if (phone->sdp_uuid == 0U)
+		return;
+
+	/* Over. */
+	phone->sdp_uuid = 0U;
+
+	/* Succeeded: the profile hears it. */
+	if (phone->have_profile && phone->profile.sdp_done != NULL)
+		phone->profile.sdp_done(phone->profile.context, &phone->sdp, error);
+}
+
+/* Asks the session for the DLCs that waited for it (the profile hears opened, or closed). */
+static void
+phone_pending_connect(
+	struct btd_phone *phone)
+{
+	unsigned channels[BTD_PHONE_PENDING_DLCS];
+	unsigned count;
+	unsigned index;
+	unsigned dlci;
+	int error;
+
+	/* The DLCs that wait, taken (a failure's hook may ask for another). */
+	count = phone->pending_count;
+	memcpy(channels, phone->pending_channels, sizeof(channels));
+	phone->pending_count = 0U;
+
+	/* Each, asked for; one the session refuses at once fails. */
+	for (index = 0U; index < count; index++) {
+		error = btd_rfcomm_connect(&phone->rfcomm, channels[index], btd_now_ms(), &dlci);
+		if (error == 0)
+			continue;
+		if (phone->have_profile && phone->profile.open_failed != NULL)
+			phone->profile.open_failed(phone->profile.context, channels[index]);
+	}
+}
+
+/* Fails the DLCs that waited for an RFCOMM session that did not come. */
+static void
+phone_pending_failed(
+	struct btd_phone *phone)
+{
+	unsigned channels[BTD_PHONE_PENDING_DLCS];
+	unsigned count;
+	unsigned index;
+
+	/* The DLCs that wait, taken. */
+	count = phone->pending_count;
+	memcpy(channels, phone->pending_channels, sizeof(channels));
+	phone->pending_count = 0U;
+	phone->rfcomm_retry_at = 0U;
+
+	/* Succeeded: each fails. */
+	for (index = 0U; index < count; index++) {
+		if (phone->have_profile && phone->profile.open_failed != NULL)
+			phone->profile.open_failed(phone->profile.context, channels[index]);
 	}
 }
 
@@ -1080,7 +2147,7 @@ phone_signal(
 	if (answer_length != 0U)
 		(void)phone_send(phone, BTD_CID_SIGNALLING, answer, answer_length);
 
-	/* The channels that closed; our RFCOMM channel refused (the phone's request crossed it, section 8.2) is asked for again later. */
+	/* The channels that closed; bluetoothd's RFCOMM channel refused (the phone's request crossed it, section 8.2 of p002) is asked for again later. */
 	for (index = 0U; index < effect.closed_count; index++) {
 		if (effect.closed[index] == phone->rfcomm_cid &&
 		    !phone->rfcomm_active &&
@@ -1094,24 +2161,24 @@ phone_signal(
 		phone_closed(phone, effect.closed[index]);
 	}
 
-	/* Succeeded: those that opened. */
+	/* Those that opened. */
 	for (index = 0U; index < effect.opened_count; index++)
 		phone_opened(phone, effect.opened[index]);
 
-	/* Our refused RFCOMM channel: asked for again after a wait, three times at most, unless the phone's opened meanwhile. */
-	if (phone->rfcomm_refused) {
-		phone->rfcomm_refused = 0;
-		if (phone->rfcomm_cid != 0U || phone->probe.step != BTD_PHONE_PROBE_RFCOMM)
-			return;
-		if (phone->rfcomm_tries >= PHONE_RFCOMM_TRIES) {
-			phone_probe_fail(phone, "rfcomm-refused");
-			return;
-		}
-
-		/* The wait: 100 to 500 ms, spread by the clock so both sides do not ask again together. */
-		now = btd_now_ms();
-		phone->rfcomm_retry_at = now + PHONE_RFCOMM_WAIT_MS + (now % PHONE_RFCOMM_SPREAD_MS);
+	/* Bluetoothd's refused RFCOMM channel: asked for again after a wait, three times at most, unless the phone's opened meanwhile. */
+	if (!phone->rfcomm_refused)
+		return;
+	phone->rfcomm_refused = 0;
+	if (phone->rfcomm_cid != 0U || phone->pending_count == 0U)
+		return;
+	if (phone->rfcomm_tries >= PHONE_RFCOMM_TRIES) {
+		phone_pending_failed(phone);
+		return;
 	}
+
+	/* Succeeded: the wait, 100 to 500 ms, spread by the clock so both sides do not ask again together. */
+	now = btd_now_ms();
+	phone->rfcomm_retry_at = now + PHONE_RFCOMM_WAIT_MS + (now % PHONE_RFCOMM_SPREAD_MS);
 }
 
 /* Moves the link's parts on for a channel that opened: an SDP server, the SDP query, or the RFCOMM session. */
@@ -1146,11 +2213,10 @@ phone_opened(
 		return;
 	}
 
-	/* Our SDP channel: the query's first request. */
+	/* Bluetoothd's SDP channel: the query's first request. */
 	if (channel->psm == PHONE_PSM_SDP && cid == phone->sdp_cid) {
 		phone->sdp_transaction++;
-		btd_sdp_init(&phone->sdp, phone->probe.uuid, phone->sdp_transaction);
-		phone->probe.step = BTD_PHONE_PROBE_SDP;
+		btd_sdp_init(&phone->sdp, phone->sdp_uuid, phone->sdp_transaction);
 		phone_sdp_send(phone);
 		return;
 	}
@@ -1165,7 +2231,7 @@ phone_opened(
 		return;
 	}
 
-	/* The phone's while ours is asked for. */
+	/* The phone's while bluetoothd's is asked for. */
 	if (channel->inbound && phone->rfcomm_cid != 0U) {
 		phone_close_channel(phone, cid);
 		return;
@@ -1188,7 +2254,10 @@ phone_opened(
 	phone->rfcomm_active = 1;
 	btd_rfcomm_init(&phone->rfcomm, &events, mtu);
 
-	/* Ours: bluetoothd starts the multiplexer (the phone's waits for the phone's SABM). */
+	/* Bluetoothd's server channels offered on every session, whoever opened it (section 5.8). */
+	(void)btd_rfcomm_listen(&phone->rfcomm, BTD_PHONE_MNS_CHANNEL);
+
+	/* Bluetoothd's: it starts the multiplexer (the phone's waits for the phone's SABM). */
 	if (!channel->inbound) {
 		error = btd_rfcomm_start(&phone->rfcomm, btd_now_ms());
 		if (error != 0) {
@@ -1197,9 +2266,8 @@ phone_opened(
 		}
 	}
 
-	/* Succeeded: a probe that waits for the session opens its DLC. */
-	if (phone->probe.step == BTD_PHONE_PROBE_RFCOMM && phone->probe.dlci == 0U)
-		phone_probe_dlc(phone);
+	/* Succeeded: the DLCs that waited for a session are asked for. */
+	phone_pending_connect(phone);
 }
 
 /* Forgets the parts of a channel that closed: an SDP server, the SDP query, or the RFCOMM session. */
@@ -1216,11 +2284,10 @@ phone_closed(
 			phone->sdps[index].cid = 0U;
 	}
 
-	/* The SDP query's: a probe still asking fails. */
+	/* The SDP query's: a query still asking fails. */
 	if (phone->sdp_cid != 0U && cid == phone->sdp_cid) {
 		phone->sdp_cid = 0U;
-		if (phone->probe.step == BTD_PHONE_PROBE_SDP_CHANNEL || phone->probe.step == BTD_PHONE_PROBE_SDP)
-			phone_probe_fail(phone, "sdp");
+		phone_sdp_done(phone, EIO);
 		return;
 	}
 
@@ -1228,15 +2295,14 @@ phone_closed(
 	if (phone->rfcomm_cid == 0U || cid != phone->rfcomm_cid)
 		return;
 
-	/* RFCOMM's, before it opened: a probe that waits for it fails. */
+	/* RFCOMM's, before it opened: the DLCs that waited for it fail. */
 	phone->rfcomm_cid = 0U;
 	if (!phone->rfcomm_active) {
-		if (phone->probe.step == BTD_PHONE_PROBE_RFCOMM)
-			phone_probe_fail(phone, "rfcomm");
+		phone_pending_failed(phone);
 		return;
 	}
 
-	/* Succeeded: the session's DLCs are lost (their owners hear it, a probe fails). */
+	/* Succeeded: the session's DLCs are lost (the profile hears it). */
 	phone->rfcomm_active = 0;
 	btd_rfcomm_lost(&phone->rfcomm);
 }
@@ -1361,25 +2427,28 @@ phone_close_channel(
 	phone_closed(phone, cid);
 }
 
-/* Ends the phone's link with a reason: Disconnect; the end comes with its Disconnection Complete. */
+/* Ends the phone's link with a reason (section 5.5), and what follows it: Disconnect; the end comes with its Disconnection Complete. */
 static void
 phone_disconnect(
 	struct btd_phone *phone,
-	uint8_t reason)
+	uint8_t reason,
+	unsigned after)
 {
 	uint8_t disconnect[3];
 	int error;
 
-	/* Ending already. */
-	if (phone->state != BTD_PHONE_READY)
+	/* A link to end (not one ending already). */
+	if (phone->state != BTD_PHONE_READY && phone->state != BTD_PHONE_SECURING)
 		return;
 
 	/* Disconnect. */
+	phone->after = after;
 	phone_put16(disconnect, phone->handle);
 	disconnect[2] = reason;
 	error = btd_session_command(phone->session, PHONE_DISCONNECT, disconnect, sizeof(disconnect));
 	if (error != 0) {
 		phone_ended(phone, "lost");
+		phone_schedule(phone, after, btd_now_ms());
 		return;
 	}
 
@@ -1387,7 +2456,11 @@ phone_disconnect(
 	phone->state = BTD_PHONE_CLOSING;
 }
 
-/* Forgets the phone's link: a probe ends with why, RFCOMM's DLCs are lost, the HID host may use every link again. */
+/*
+ * Forgets the phone's link: the profile hears its DLCs, its query and the
+ * link end; nothing of the link is left.  The record, the seat and the
+ * pages stay.
+ */
 static void
 phone_ended(
 	struct btd_phone *phone,
@@ -1395,15 +2468,26 @@ phone_ended(
 {
 	unsigned index;
 
-	/* Closing from now on (nothing more is sent on the link), and a probe under way ends. */
+	/* Closing from now on (nothing more is sent on the link, a profile's request is refused). */
 	phone->state = BTD_PHONE_CLOSING;
-	if (phone->probe.step != BTD_PHONE_PROBE_NONE)
-		phone_probe_fail(phone, why);
+	if (why != NULL)
+		phone->why = why;
 
-	/* RFCOMM's session goes. */
+	/* RFCOMM's session goes (its DLCs' closing reaches the profile). */
 	if (phone->rfcomm_active) {
 		phone->rfcomm_active = 0;
 		btd_rfcomm_lost(&phone->rfcomm);
+	}
+
+	/* The DLCs that waited for a session, and the SDP query, fail. */
+	phone_pending_failed(phone);
+	phone_sdp_done(phone, ENOTCONN);
+
+	/* The profile hears the end. */
+	if (phone->profile_started) {
+		phone->profile_started = 0;
+		if (phone->profile.ended != NULL)
+			phone->profile.ended(phone->profile.context);
 	}
 
 	/* Nothing of the link is left. */
@@ -1417,8 +2501,11 @@ phone_ended(
 	phone->queue_first = 0U;
 	phone->queue_count = 0U;
 	phone->encrypted = 0;
+	phone->ready_since = 0U;
+	phone->secure_step = 0U;
+	phone->stop_wanted = 0;
 
-	/* Succeeded: no phone (the HID host's limit follows the record, not the link: ws197-p003 section 3.4). */
+	/* Succeeded: no link (the HID host's limit follows the record, not the link). */
 	phone->state = BTD_PHONE_NONE;
 }
 
@@ -1524,7 +2611,7 @@ phone_sdps_input(
 	(void)phone_send(phone, slot->cid, answer, answer_length);
 }
 
-/* Sends the SDP query's next request; one that cannot be built fails the probe. */
+/* Sends the SDP query's next request; one that cannot be built fails the query. */
 static void
 phone_sdp_send(
 	struct btd_phone *phone)
@@ -1536,7 +2623,7 @@ phone_sdp_send(
 	/* The request. */
 	error = btd_sdp_request(&phone->sdp, request, sizeof(request), &length);
 	if (error != 0) {
-		phone_probe_fail(phone, "sdp");
+		phone_sdp_finish(phone, EIO);
 		return;
 	}
 
@@ -1544,23 +2631,17 @@ phone_sdp_send(
 	(void)phone_send(phone, phone->sdp_cid, request, length);
 }
 
-/*
- * Takes an answer of the SDP query: the next request, or the phone's
- * server channel of the class asked for, then the query's channel closes
- * and RFCOMM comes next.
- */
+/* Takes an answer of the SDP query: the next request, or the records whole (or a failure), then the query's channel closes. */
 static void
 phone_sdp_input(
 	struct btd_phone *phone,
 	const uint8_t *pdu,
 	size_t length)
 {
-	unsigned channel;
 	int meant;
-	int error;
 
-	/* Only while the probe asks. */
-	if (phone->probe.step != BTD_PHONE_PROBE_SDP)
+	/* Only while a query asks. */
+	if (phone->sdp_uuid == 0U)
 		return;
 
 	/* The answer: more to ask, the lists whole, or failed. */
@@ -1572,28 +2653,17 @@ phone_sdp_input(
 
 	/* A failed query. */
 	if (meant != BTD_SDP_DONE) {
-		phone_probe_fail(phone, "sdp");
+		phone_sdp_finish(phone, EIO);
 		return;
 	}
 
-	/* The server channel of the first record of the class. */
-	error = btd_sdp_rfcomm_channel(&phone->sdp, phone->probe.uuid, 0U, &channel);
-	if (error != 0) {
-		phone_probe_fail(phone, "no-service");
-		return;
-	}
-
-	/* Succeeded: RFCOMM next (the step moves first: the query's channel closing does not fail the probe). */
-	phone->probe.channel = channel;
-	phone->probe.step = BTD_PHONE_PROBE_RFCOMM;
-	phone_close_channel(phone, phone->sdp_cid);
-	phone_rfcomm_open(phone);
+	/* Succeeded: the records to the profile. */
+	phone_sdp_finish(phone, 0);
 }
 
 /*
- * Brings the probe to RFCOMM: the DLC at once on a session there is, else
- * bluetoothd's RFCOMM channel asked for (the session starts when it
- * opens).
+ * Asks for bluetoothd's RFCOMM channel for the DLCs that wait (the session
+ * starts when it opens), unless a channel is asked for or opening already.
  */
 static void
 phone_rfcomm_open(
@@ -1603,114 +2673,29 @@ phone_rfcomm_open(
 	size_t length;
 	int error;
 
-	/* Only while the probe waits for RFCOMM. */
-	if (phone->probe.step != BTD_PHONE_PROBE_RFCOMM)
+	/* Nothing waits, or a session there is. */
+	if (phone->pending_count == 0U || phone->state != BTD_PHONE_READY)
 		return;
-
-	/* A session there is: the DLC. */
 	if (phone->rfcomm_active) {
-		phone_probe_dlc(phone);
+		phone_pending_connect(phone);
 		return;
 	}
 
-	/* A channel asked for already (ours, or the phone's opening). */
+	/* A channel asked for already (bluetoothd's, or the phone's opening). */
 	if (phone->rfcomm_cid != 0U)
 		return;
 
-	/* Succeeded: our RFCOMM channel asked for. */
+	/* Bluetoothd's RFCOMM channel asked for. */
 	phone->rfcomm_tries++;
 	error = btd_l2cap_connect(&phone->l2cap, phone->handle, PHONE_PSM_RFCOMM, request, sizeof(request), &length, &phone->rfcomm_cid);
 	if (error != 0) {
 		phone->rfcomm_cid = 0U;
-		phone_probe_fail(phone, "rfcomm");
+		phone_pending_failed(phone);
 		return;
 	}
 
-	/* Sent on the signalling channel. */
+	/* Succeeded: sent on the signalling channel. */
 	(void)phone_send(phone, BTD_CID_SIGNALLING, request, length);
-}
-
-/* Opens the probe's DLC to the phone's server channel. */
-static void
-phone_probe_dlc(
-	struct btd_phone *phone)
-{
-	unsigned dlci;
-	int error;
-
-	/* The DLC (opened tells when OBEX may connect). */
-	error = btd_rfcomm_connect(&phone->rfcomm, phone->probe.channel, btd_now_ms(), &dlci);
-	if (error != 0) {
-		phone_probe_fail(phone, "rfcomm");
-		return;
-	}
-
-	/* Succeeded: waiting for it. */
-	phone->probe.dlci = dlci;
-}
-
-/* Ends a probe that failed: the answer hook hears why, and its DLC and SDP channel close. */
-static void
-phone_probe_fail(
-	struct btd_phone *phone,
-	const char *why)
-{
-	char line[BTD_PHONE_ANSWER_MAX];
-	unsigned dlci;
-	uint16_t sdp_cid;
-
-	/* No probe under way. */
-	if (phone->probe.step == BTD_PHONE_PROBE_NONE)
-		return;
-
-	/* Over from now on (closing its parts below calls back here and finds none). */
-	dlci = phone->probe.dlci;
-	sdp_cid = phone->sdp_cid;
-	phone->probe.step = BTD_PHONE_PROBE_NONE;
-	phone->probe.dlci = 0U;
-	phone->rfcomm_retry_at = 0U;
-
-	/* Its DLC, and its SDP channel. */
-	if (dlci != 0U && phone->rfcomm_active)
-		(void)btd_rfcomm_close(&phone->rfcomm, dlci, btd_now_ms());
-	if (sdp_cid != 0U && phone->state == BTD_PHONE_READY)
-		phone_close_channel(phone, sdp_cid);
-
-	/* Succeeded: why, to the one who asked. */
-	(void)snprintf(line, sizeof(line), "ERROR %s", why);
-	if (phone->answer != NULL)
-		phone->answer(phone->answer_context, line);
-}
-
-/* Ends a probe that went through: each step's result and the listing's size, never its content (p001 R22), and the DLC closes. */
-static void
-phone_probe_finish(
-	struct btd_phone *phone)
-{
-	char line[BTD_PHONE_ANSWER_MAX];
-	unsigned dlci;
-
-	/* Over from now on. */
-	dlci = phone->probe.dlci;
-	phone->probe.step = BTD_PHONE_PROBE_NONE;
-	phone->probe.dlci = 0U;
-
-	/* The DLC closes. */
-	if (dlci != 0U && phone->rfcomm_active)
-		(void)btd_rfcomm_close(&phone->rfcomm, dlci, btd_now_ms());
-
-	/* Succeeded: the line. */
-	(void)snprintf(line,
-		       sizeof(line),
-		       "PROBE uuid=0x%04x channel=%u connect=0x%02x get=0x%02x bytes=%u disconnect=0x%02x",
-		       (unsigned)phone->probe.uuid,
-		       phone->probe.channel,
-		       (unsigned)phone->probe.connect_code,
-		       (unsigned)phone->probe.get_code,
-		       (unsigned)phone->probe.bytes,
-		       (unsigned)phone->probe.disconnect_code);
-	if (phone->answer != NULL)
-		phone->answer(phone->answer_context, line);
 }
 
 /* RFCOMM's send hook: a payload on the session's channel, queued. */
@@ -1737,54 +2722,40 @@ phone_rf_send(
 	return 0;
 }
 
-/* RFCOMM's question whether a server channel of bluetoothd's is offered: none in this Phase (MNS and HF come with their profiles). */
+/* RFCOMM's question whether a server channel of bluetoothd's is offered: the profile's answer (none without a profile). */
 static int
 phone_rf_accept(
 	void *context,
 	unsigned server_channel)
 {
-	UNUSED_PARAMETER(context);
-	UNUSED_PARAMETER(server_channel);
+	struct btd_phone *phone;
+	int offered;
 
-	/* Not offered. */
-	return 0;
+	/* The phone link, with a profile told the link is ready. */
+	phone = context;
+	if (!phone->profile_started || phone->profile.accept == NULL)
+		return 0;
+
+	/* Succeeded: as the profile says. */
+	offered = phone->profile.accept(phone->profile.context, server_channel);
+	return offered;
 }
 
-/* RFCOMM's DLC opened: the probe's connects OBEX to the class's Target. */
+/* RFCOMM's DLC opened: to the profile. */
 static void
 phone_rf_opened(
 	void *context,
 	unsigned dlci)
 {
 	struct btd_phone *phone;
-	struct btd_obex_events events;
-	const uint8_t *target;
-	int error;
 
-	/* The probe's DLC. */
+	/* Succeeded: the profile hears it. */
 	phone = context;
-	if (phone->probe.step != BTD_PHONE_PROBE_RFCOMM || dlci != phone->probe.dlci)
-		return;
-
-	/* An OBEX client on it. */
-	memset(&events, 0, sizeof(events));
-	events.context = phone;
-	events.write = phone_ob_write;
-	events.done = phone_ob_done;
-	events.body = phone_ob_body;
-	btd_obex_init(&phone->obex, &events, BTD_OBEX_CLIENT);
-
-	/* Connect with MAS's or PSE's Target. */
-	target = phone_target_mas;
-	if (phone->probe.uuid == BTD_SDP_UUID_PSE)
-		target = phone_target_pse;
-	phone->probe.step = BTD_PHONE_PROBE_CONNECT;
-	error = btd_obex_connect(&phone->obex, target, sizeof(phone_target_mas), btd_now_ms());
-	if (error != 0)
-		phone_probe_fail(phone, "obex");
+	if (phone->have_profile && phone->profile.opened != NULL)
+		phone->profile.opened(phone->profile.context, dlci);
 }
 
-/* RFCOMM's data of a DLC: the probe's goes to OBEX. */
+/* RFCOMM's data of a DLC: to the profile. */
 static void
 phone_rf_data(
 	void *context,
@@ -1794,16 +2765,13 @@ phone_rf_data(
 {
 	struct btd_phone *phone;
 
-	/* The probe's DLC while OBEX runs. */
+	/* Succeeded: the profile hears it. */
 	phone = context;
-	if (phone->probe.step < BTD_PHONE_PROBE_CONNECT || dlci != phone->probe.dlci)
-		return;
-
-	/* Succeeded: to OBEX. */
-	btd_obex_input(&phone->obex, data, length, btd_now_ms());
+	if (phone->have_profile && phone->profile.data != NULL)
+		phone->profile.data(phone->profile.context, dlci, data, length);
 }
 
-/* RFCOMM's DLC writable again: OBEX's rest goes. */
+/* RFCOMM's DLC writable again: to the profile. */
 static void
 phone_rf_writable(
 	void *context,
@@ -1811,16 +2779,13 @@ phone_rf_writable(
 {
 	struct btd_phone *phone;
 
-	/* The probe's DLC while OBEX runs. */
+	/* Succeeded: the profile hears it. */
 	phone = context;
-	if (phone->probe.step < BTD_PHONE_PROBE_CONNECT || dlci != phone->probe.dlci)
-		return;
-
-	/* Succeeded: OBEX's rest. */
-	btd_obex_pump(&phone->obex);
+	if (phone->have_profile && phone->profile.writable != NULL)
+		phone->profile.writable(phone->profile.context, dlci);
 }
 
-/* RFCOMM's DLC closed: the probe's, before its end, fails. */
+/* RFCOMM's DLC closed: to the profile. */
 static void
 phone_rf_closed(
 	void *context,
@@ -1829,19 +2794,13 @@ phone_rf_closed(
 {
 	struct btd_phone *phone;
 
-	UNUSED_PARAMETER(reason);
-
-	/* The probe's DLC. */
+	/* Succeeded: the profile hears it. */
 	phone = context;
-	if (phone->probe.step == BTD_PHONE_PROBE_NONE || dlci != phone->probe.dlci)
-		return;
-
-	/* Succeeded: the probe fails (its DLC is gone already). */
-	phone->probe.dlci = 0U;
-	phone_probe_fail(phone, "rfcomm");
+	if (phone->have_profile && phone->profile.closed != NULL)
+		phone->profile.closed(phone->profile.context, dlci, reason);
 }
 
-/* RFCOMM's session ended: its L2CAP channel closes. */
+/* RFCOMM's session ended: its L2CAP channel closes (its DLCs were told). */
 static void
 phone_rf_ended(
 	void *context,
@@ -1857,130 +2816,11 @@ phone_rf_ended(
 	if (!phone->rfcomm_active)
 		return;
 
-	/* A probe on the session fails. */
-	if (phone->probe.step >= BTD_PHONE_PROBE_RFCOMM)
-		phone_probe_fail(phone, "rfcomm");
-
-	/* Succeeded: the channel closes (its DLCs were told). */
+	/* Succeeded: the channel closes. */
 	cid = phone->rfcomm_cid;
 	phone->rfcomm_active = 0;
 	phone->rfcomm_cid = 0U;
 	phone_close_channel(phone, cid);
-}
-
-/* OBEX's write hook: bytes on the probe's DLC, as far as RFCOMM's credits take them. */
-static int
-phone_ob_write(
-	void *context,
-	const uint8_t *data,
-	size_t length,
-	size_t *written)
-{
-	struct btd_phone *phone;
-	int error;
-
-	/* The probe's DLC on the session. */
-	phone = context;
-	*written = 0U;
-	if (!phone->rfcomm_active || phone->probe.dlci == 0U)
-		return ENOTCONN;
-
-	/* Written as far as it goes. */
-	error = btd_rfcomm_write(&phone->rfcomm, phone->probe.dlci, data, length, written);
-	if (error != 0)
-		return error;
-
-	/* Succeeded: what went is in written. */
-	return 0;
-}
-
-/* OBEX's operation ended: Connect leads to the Get, the Get to Disconnect, Disconnect to the probe's end. */
-static void
-phone_ob_done(
-	void *context,
-	unsigned operation,
-	int error,
-	uint8_t code,
-	const uint8_t *headers,
-	size_t length)
-{
-	struct btd_phone *phone;
-	struct btd_obex_writer writer;
-	uint8_t request[PHONE_HEADERS_MAX];
-	int failed;
-
-	UNUSED_PARAMETER(headers);
-	UNUSED_PARAMETER(length);
-
-	/* The probe's connection. */
-	phone = context;
-	if (phone->probe.step < BTD_PHONE_PROBE_CONNECT)
-		return;
-
-	/* Connect: accepted, or the probe fails. */
-	if (operation == BTD_OBEX_OP_CONNECT) {
-		phone->probe.connect_code = code;
-		if (error != 0 || code != BTD_OBEX_SUCCESS) {
-			phone_probe_fail(phone, "obex-connect");
-			return;
-		}
-
-		/* The folder listing: its Type alone (no Name, the current folder). */
-		btd_obex_writer_init(&writer, request, sizeof(request));
-		btd_obex_put_bytes(&writer, BTD_OBEX_TYPE, (const uint8_t *)PHONE_LISTING_TYPE, PHONE_LISTING_TYPE_BYTES);
-		phone->probe.step = BTD_PHONE_PROBE_GET;
-		failed = btd_obex_get(&phone->obex, request, writer.used, BTD_PHONE_LISTING_MAX, btd_now_ms());
-		if (failed != 0)
-			phone_probe_fail(phone, "obex-get");
-		return;
-	}
-
-	/* The Get: its response code kept whatever it is (a refusal is an answer too), then Disconnect; no response at all fails. */
-	if (operation == BTD_OBEX_OP_GET) {
-		phone->probe.get_code = code;
-		if (error != 0 && code == 0U) {
-			phone_probe_fail(phone, "obex-get");
-			return;
-		}
-
-		/* Disconnect. */
-		phone->probe.step = BTD_PHONE_PROBE_DISCONNECT;
-		failed = btd_obex_disconnect(&phone->obex, btd_now_ms());
-		if (failed != 0)
-			phone_probe_fail(phone, "obex-disconnect");
-		return;
-	}
-
-	/* Not the probe's last step. */
-	if (operation != BTD_OBEX_OP_DISCONNECT)
-		return;
-
-	/* Succeeded: Disconnect's answer ends the probe. */
-	phone->probe.disconnect_code = code;
-	if (error != 0) {
-		phone_probe_fail(phone, "obex-disconnect");
-		return;
-	}
-
-	/* The answer. */
-	phone_probe_finish(phone);
-}
-
-/* OBEX's body of the listing: counted, never kept (p001 R22). */
-static int
-phone_ob_body(
-	void *context,
-	const uint8_t *data,
-	size_t length)
-{
-	struct btd_phone *phone;
-
-	UNUSED_PARAMETER(data);
-
-	/* Counted; the Get goes on. */
-	phone = context;
-	phone->probe.bytes += length;
-	return 0;
 }
 
 /* Gives the earlier of two deadlines, 0 standing for none. */
