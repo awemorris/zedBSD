@@ -13,22 +13,24 @@
 | 10/09〜10/12 | 試験待ちの物を T1 で流して直す。5330 の UAT（下の「実機」をまとめて） |
 | **10/13** | **機能の凍結の目標**（2026-10-09 ユーザー）。release notes・既知の問題をまとめる。ベータなので UAT の Bug を直し切れなくてよく、code freeze はぎりぎりまで行わないこともある |
 | 10/14〜10/15 | 最終回帰（QEMU）と 5330 の確認、出た Bug を「直す／既知の問題に書く」で仕分け |
-| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。WS143・WS083 が間に合わなければここで OFF。公開の手順の確認（公開はユーザーの指示で） |
+| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。WS143・WS083 は必須（2026-10-09 ユーザー）。間に合わなければここで OFF。公開の手順の確認（公開はユーザーの指示で） |
 
 ## 必須
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [WS129](ws129/ws.md) p005 release notes と既知の問題（Bluetooth・Vulkan Video は条件付き） | P1 下書き中 | 3 | P1 |
-| [WS129](ws129/ws.md) p013 利用の手引きの更新（menuconfig・keiland の prerequisites） | P1 次 | 1.5 | P1 |
+| [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み、ユーザーの review 待ち・comment の整理 | 1 | P1・ユーザー |
+| [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
 | [WS129](ws129/ws.md) p002 license の一覧を release の image の rootfs で確かめる | 一覧は再生成済み（27 components、open 0） | 0.5 | P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 10/16 | 1.5 | P1・Q1 |
-| T1 の未実行の試験 8 本: T1-497 [WS193](ws193/ws.md) menuconfig、T1-498 [WS194](ws194/ws.md) prerequisites、T1-495 Python、T1-477・483・484、T1-494・478・479 の再試験 | 2026-10-09 夕: 480・482・493・486・496（パネルは写真の確認待ち）は済み | 5 | T1 |
-| 上の試験で出る FAIL の直し: T1-494（BUG-234・BUG-188 がまだ fail）、T1-479（IPv6 の default route が 2 本）、T1-478（音量の回帰 volume-p005） | P1 解析中 | 4 | P1 |
+| T1 の未実行の試験 9 本: T1-499〜503（BUG-234・BUG-188・IPv6・音量の回帰・Bluetooth の回帰・FreeBSD の prerequisites の再試験）、T1-495 Python、T1-477・483・484 | 2026-10-09 夜: 480・482・486・493・496・497 は済み、498 は Debian PASS | 5 | T1 |
+| 試験の FAIL の直し（T1-494・479・478・498 の分は直して再試験中、次に出る物の枠） | — | 3 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |
+| [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1-502 の回帰・残りの Phase・5330 の確認と直し | 4.5 | P1・T1・ユーザー |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の残り（p007 hang の道具・p008 性能と門）→ T1-435（5330 の実機）と FAIL の直し（不確実）。直前に OFF にする門の手順を用意 | 3.5 | P1・T1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）の判定 | ユーザー待ち | —（15 分） | ユーザー |
 
 ## UAT の確認項目（ユーザー、5330 の release の image）
@@ -39,7 +41,6 @@
 | --- | --- | --- | --- |
 | 1 | [WS192](ws192/ws.md) 状態の島の操作パネル | 右上の icon の島を指で tap（mouse の click でも） | 右上に glass のパネル。Wi-Fi の switch、音量の slider と mute、Input の行の tap で言語の切り替え、Wi-Fi の「›」で AP の一覧。外の tap・Esc・島の再 tap で閉じる |
 | 2 | [BUG-188](bugs/BUG-188.md) Wi-Fi の 1 回の tap | Settings → Wi-Fi で保存済みの AP の行を 1 回だけ tap | 接続が始まる（2 回の tap は要らない） |
-| 3 | [BUG-184](bugs/BUG-184.md) Wi-Fi のオフ（直しの後） | Settings → Wi-Fi をオン → オフ | オフにできる |
 | 4 | [BUG-234](bugs/BUG-234.md) Files から program | Files で /bin を開き `ls` を開く | Terminal が開き、ls の出力と終了の案内が残る |
 | 5 | [WS183](ws183/ws.md) touchpad の tap | 1 本指の tap、素早い 2 回の tap、tap の直後に指を置いて動かす | tap はすぐ click（遅れを感じない）、2 回は double click、最後は drag |
 | 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
@@ -55,27 +56,12 @@
 | 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
-## 入れる（間に合わなければ直前で OFF、2026-10-09 ユーザー。必須の後に P1 が完了を目指す、UAT は少し遅れる）
-
-| 項目 | 状態 | LW | 担当 |
-| --- | --- | --- | --- |
-| [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1 の再試験・5330 の確認・直しが残る | 4.5 | P1・T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | T1-435 と FAIL の直し（不確実）、p007 の hang の道具と実機 | 3.5 | P1・T1 |
-
-## UAT で直ったことを確かめる Bug（2026-10-09 P1: 8 件とも直しは main に入り QEMU で確認済み、新しい code は無い）
-
-| Bug | 症状 | 5330 で見る所 |
-| --- | --- | --- |
-| [BUG-184](bugs/BUG-184.md) | Settings で WiFi をオフにできない | UAT の 3 |
-
 ## 合計
 
 | 区分 | LW |
 | --- | --- |
-| 必須 | 34.5 |
-| 入れる（WS143・WS083） | 8 |
-| UAT で確かめる Bug | 0（直しは済み） |
-| **計** | **42.5 LW**（約 14 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
+| 必須（WS143・WS083 を含む） | 39.5 |
+| **計** | **39.5 LW**（約 13 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 

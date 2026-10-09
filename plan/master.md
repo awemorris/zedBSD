@@ -525,6 +525,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「WS143, WS083を必須項目に移して、beta2.mdを更新してください。BUG-184は確認できたのでCloseです。」→ beta2.md の必須に移し（計 39.5 LW）、BUG-184 を resolved。
 - 2026-10-09 ユーザー:「userland/desktop/のインストール先を、zedBSDでもLinux/FreeBSDに合わせて、/opt/keiland/にします。account-adminはKeilandの必須バイナリとして、/opt/keiland以下に移します。baseから移動してください。」時期はクリック「ベータ3（RC の後）」→ [WS195](ws195/ws.md)。「useradd/usermod/userdelは別途、実装が必要な認識」→ [WS196](ws196/ws.md)（POSIX に同等の utility は無い）。Q1 判定: P1 の ws001-p045 の d42615bc7（sys/socket.h の SO_LINGER 等・fcntl.h）は RC の直前に package の挙動を変える危険があるので、10/17 の後に merge（branch agent/p1-p045）。
 - 2026-10-09 ユーザー:「beta2.mdの必須の項目は、P1担当分はこのまま消化しきってください。そのあと、UATは少し遅れるので、WS143, WS083もP1で完了を目指してください。」「BUG-237, BUG-271, BUG-219, BUG-232, BUG-235, BUG-179, BUG-180は確認できたのでCloseです。」→ 7 件を resolved。P1 は beta2.md の必須 → WS143 → WS083 の順、ws001-p045 は後。
 - 2026-10-09 ユーザー（クリック）: ベータ2 の FFmpeg 9.0.2（LGPL）の source の提供は「ffmpeg.org への link だけ」→ release notes に版と ffmpeg.org の link、zedBSD の patch と configure の引数は GitHub の tree にある旨を書く。release の asset に tarball は載せない（Q1 は tarball を推したが、ユーザーの決定）。
