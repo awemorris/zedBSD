@@ -2,7 +2,7 @@
 
 # ws141-p007: 全規約・license/類似・最終確認
 
-Status: in-progress
+Status: cleared
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: [完成までの承認と有限実行scope](../execution-20261009.md#完成までの継続承認2026-10-09)
@@ -40,3 +40,8 @@ i15の最終source監査・build/host・main統合criteriaを満たしcleared。
 ## i18最終source検証（2026-10-10）
 
 共通compilerとi915/VC4 callerを再確認し、全文C/境界/Zlib origin、RPi4 y/n・amd64 i915 y build、対象host、final普通経路stack15680/margin704を確認。[今回commands/results/hash](../compiler-refactor-20261010.md#i17-software-clearancei18最終検証)。main統合/readbackまではin-progress、実機のwhole条件は保持。
+
+
+## i18 clearance・main統合（2026-10-10）
+
+今回最終sourceの全文規約/境界/license、対象build/host/ordinary stackとmain統合/readbackのcriteriaを満たしi18/p007をcleared。source `fca9cd37f`、main親 `0206f4f88`、merge `ab268b857`。対象212/212 source hash一致、build/host入力差分0、main/own/integration cleanを確認した。[今回終了と残件](../compiler-refactor-20261010.md#i18-main統合今回software実行の終了2026-10-10)。旧i15 clearance・source変更による失効/再開の履歴は保持する。RPi4/Keilandの実機条件は他Phase/WSに未達のまま保持し、remote closure/projectionはQ1へ保留する。
