@@ -3,7 +3,7 @@
 # ws126-p003: T2（OpenSSL と expat）
 
 Parent: [WS126](../ws.md)
-Status: planning
+Status: planned（2026-10-09 Q1、q916 の 3 として P1 に割当）
 Disposition: normal
 Queue / attempts: none
 Goal: 既存の package の OpenSSL（`_ssl`・`_hashlib`）と expat（`pyexpat`・`_elementtree`）を Python に組み込む。
