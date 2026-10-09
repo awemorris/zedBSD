@@ -60,6 +60,7 @@ enum ph_state {
 	PH_STATE_ANSWERED,
 	PH_STATE_MISSED,
 	PH_STATE_NO_ANSWER,
+	PH_STATE_UNKNOWN,	/* a text the phone may or may not have sent (ws197-p004b) */
 	PH_STATES
 };
 
@@ -69,7 +70,12 @@ enum ph_state {
  * text -- a message's words, a file's name, a picture's caption (NULL for
  * none) -- with a detail: a message's state ("Delivered"), a call's
  * length (NULL for a call not answered), a file's type and size.  path is
- * its file.
+ * its file.  A message of the paired phone (ws197-p004b) has its source
+ * ("bt:<address>:map:<key>", NULL for none), the other side's name as the
+ * phone gave it (NULL for none), whether its time was not known
+ * (partial) and whether its words were cut; extra holds the header's
+ * lines this program does not know, written back as they were.  serial
+ * names the item for this run of the program (its index may move).
  *
  * The strings are the store's (store.c), allocated for each item.
  */
@@ -84,15 +90,25 @@ struct ph_item {
 	char *text;
 	char *detail;
 	char *path;
+	char *source;
+	char *name;
+	char *extra;
+	int partial;
+	int truncated;
+	unsigned long serial;
 };
 
 /*
  * One contact: its ID (the name of its file and of its folder of items),
  * the name, the number, the initials and color of the picture standing for
  * the person, the messages not read, and the timeline (oldest first; the
- * array allocated, item_capacity its room).
+ * array allocated, item_capacity its room).  conversation is 1 for a
+ * number's conversation without a contact's file (ws197-p004b): its ID is
+ * its folder, "n" and the digits or "a" and the sender's bytes in
+ * hexadecimal.
  */
 struct ph_contact {
+	int conversation;
 	char *id;
 	char *name;
 	char *number;
@@ -123,6 +139,34 @@ struct ph_request {
 	long contact;
 };
 
+/*
+ * One message of the paired phone (ws197-p004b) as libkeiland gives it:
+ * the phone's address, its key (16 hexadecimal digits, or "-" when its
+ * time was not known), whether it went out, its time, the other side's
+ * number and name (empty for none), whether the phone has it read and cut
+ * it, and its words.
+ */
+struct ph_phone_message {
+	const char *address;
+	const char *key;
+	int outgoing;
+	time_t date;
+	const char *peer;
+	const char *name;
+	int read;
+	int truncated;
+	const char *text;
+};
+
+/* What the store made of a phone's message: a new file, one it had, or one of its own it had without the key (its source added). */
+#define PH_MERGE_NEW		0
+#define PH_MERGE_KNOWN		1
+#define PH_MERGE_OVERLAID	2
+
+/* The longest number key (ws197-p004 section 0), with its NUL, and the country code used when none is set. */
+#define PH_NUMBER_KEY_MAX	264U
+#define PH_COUNTRY_DEFAULT	"81"
+
 /* The longest the contacts' filter keeps, with its NUL. */
 #define PH_FILTER_MAX		64U
 
@@ -134,7 +178,8 @@ struct ph_request {
  * view stands on the compositor's glass (cards with the desktop between), whether the
  * timeline goes to its end at the next frame, the contacts whose messages
  * were read (a bit each of the first 32), the notice shown at the bottom
- * until a time, and whether the program is to end.
+ * until a time, whether the paired phone takes no text to send (the send
+ * button grey, ws197-p004b), and whether the program is to end.
  */
 struct ph_view {
 	struct kl_field search;
@@ -154,6 +199,7 @@ struct ph_view {
 	struct kl_field new_number;
 	struct ph_request requests[PH_REQUESTS_MAX];
 	size_t request_count;
+	int cannot_send;
 	int quit;
 };
 
@@ -167,6 +213,13 @@ int ph_store_add_item(long contact, enum ph_kind kind, enum ph_channel channel, 
 int ph_store_set_state(long contact, size_t item, enum ph_state state, const char *detail);
 int ph_store_mark_read(long contact);
 const char *ph_channel_word(enum ph_channel channel);
+void ph_store_set_country(const char *code);
+int ph_number_key(const char *number, char *key, size_t size);
+long ph_store_conversation(const char *number, const char *name, int create);
+int ph_store_phone_message(const struct ph_phone_message *message, long *contact, size_t *item, int *merge);
+int ph_store_find_serial(unsigned long serial, long *contact, size_t *item);
+int ph_store_sync_load(const char *address, int64_t *since, int64_t *deep_at);
+int ph_store_sync_save(const char *address, int64_t since, int64_t deep_at);
 
 /* The view (view.c). */
 int ph_view_init(struct ph_view *view);

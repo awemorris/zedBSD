@@ -231,6 +231,14 @@ ph_view_action(
 		/* Nothing written, or nobody to send to: nothing to send. */
 		if (view->message.length == 0U || view->selected < 0)
 			break;
+
+		/* The paired phone takes no text to send (ws197-p004b). */
+		if (view->cannot_send) {
+			ph_view_notice(view, "The phone does not take texts to send.", now_us);
+			break;
+		}
+
+		/* Asked of the window. */
 		view_request(view, PH_ACTION_SEND, view->selected);
 		ph_log("REQUEST action=send contact=%ld length=%zu", view->selected, view->message.length);
 		break;
@@ -1553,7 +1561,7 @@ view_composer(
 	if ((changes & KL_FIELD_SUBMITTED) != 0U)
 		ph_view_action(view, PH_ACTION_SEND, now_us);
 
-	/* Send: an arrow up in a circle of the accent, grey while nothing is written. */
+	/* Send: an arrow up in a circle of the accent, grey while nothing is written or the paired phone takes no text. */
 	button.x = area->x + area->width - 46;
 	button.y = area->y + 12;
 	button.width = 36;
@@ -1562,7 +1570,7 @@ view_composer(
 	if ((hit & KL_HIT_CLICKED) != 0U)
 		ph_view_action(view, PH_ACTION_SEND, now_us);
 	ground = style->theme->track;
-	if (view->message.length != 0U)
+	if (view->message.length != 0U && !view->cannot_send)
 		ground = style->theme->accent;
 	kl_canvas_circle(style->canvas, (float)button.x + 18.0f, (float)button.y + 18.0f, 16.0f, ground);
 	kl_icon_draw(style->canvas, KL_ICON_UP, (float)button.x + 8.0f, (float)button.y + 8.0f, 20.0f, PH_COLOR_WHITE);
