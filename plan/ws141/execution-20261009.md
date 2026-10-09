@@ -27,3 +27,16 @@
 - 以前の`plan/ws141/temp/`（GPLの作業の文書・630定数のrename-map）は開始treeに存在しない。現在のsourceを新たに書く前に、旧作業資料を回収するか、正本と既存の監査記録から再構成する必要がある。今回、旧名の照合は未実施。
 - p001のQ1判定、p002の実機P0/V0、p003のN0回帰・実機、N1以降は残件。今回のbuild/host PASSだけでwhole Phaseをclearedにしない。
 
+
+## ws141-codex-20261009-i02: 作業資料の復旧（2026-10-09）
+
+- ユーザーが分担を再確認: この担当はWS141だけを専用ディレクトリで作業、ws.mdを排他的に更新、Masterを更新しない。パッチの提供先はQ1、統合もQ1。
+- 範囲: p001/p002の既存作業資料と参照sourceの復旧・整合確認。新規GPU sourceの生成は無し。
+- 状態: cleared（復旧という部分範囲のみ）。whole PhaseのQ1判定・実機条件は残る。
+- 旧P2 worktreeの`plan/ws141/temp/`に資料が残っていた。元のcacheは読み取りだけにして、このworktreeのignored `plan/ws141/temp/`へ136 fileを複写。
+- 3つのGPL由来の作業文書、独自名へ変換した3文書、630定数の対応表、変換用scriptを回収。Linux/Mesaの監査対象121 fileのSHA256は、既存の`rpi4-gpu-license-audit.md`の値と全て一致。
+- 正本commitはLinux `05f7e89ab9731565d8a62e3b5d1ec206485eeb0b`、Mesa `06f9e28304d5d3f109c33535c1c25b9df5769af2`で一致。各cacheは監査対象fileのsnapshotであり、git cloneを新規に作ったものではない。
+- 対応表の630のhardware定数は全て旧名と新名が異なる。現行`src/drivers/gpu/bcm2711/`のC/headerへ旧名を語単位で照合し0件。
+- `git check-ignore`で原文・改名表がignoredであることを確認。GPL source・作業文書・旧名の対応表はコミットに含めない。
+- 詳細な複写元・個別hashのreceiptは`temp/recovery-20261009.json`（ignored）。後日復旧するときは旧P2 cacheまたは監査記録の固定commit/hashを使う。元cacheは変更しない。
+- 初回i01時点の「資料回収が必要」は、このi02で解消。実機確認は依然後で行う。N1は実機N0の観測後。

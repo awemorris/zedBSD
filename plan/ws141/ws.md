@@ -8,17 +8,18 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: 独立Codexセッションを開始（2026-10-09、基点a05865278）。骨格・N0の現行rpi4 kernelはdriver y/nともbuild exit 0、warning/error 0。stage/list host試験PASS（[実行記録](execution-20261009.md)）。次はN0の版のQEMU回帰をQ1経由でT1へ、ユーザーの実機P0・V0・N0の写真で観測値を確認。その後N1。p001のQ1判定と旧temp資料の回収も残る。実機はユーザー回答により後で実施。
+Resume point: 独立Codexセッションを開始（2026-10-09、基点a05865278）。骨格・N0の現行rpi4 kernelはdriver y/nともbuild exit 0、warning/error 0。stage/list host試験PASS（[実行記録](execution-20261009.md)）。次はN0の版のQEMU回帰をQ1経由でT1へ、ユーザーの実機P0・V0・N0の写真で観測値を確認。その後N1。p001のQ1判定は残る。旧temp資料は旧P2 cacheから復旧し、Linux/Mesaの監査対象121 fileのSHA256一致、630定数の旧名が現行driverに0件を確認済み。実機はユーザー回答により後で実施。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
 ## 独立セッションの担当（2026-10-09）
 
 - ユーザー「WS141をあなたが作業します。P1,P2とは別なセッションです。ws141/ws.mdはあなたがそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」に基づく。
+- 2026-10-09のユーザーの再確認: パッチの提供先はQ1、統合もQ1。この分担を保持する。
 - 担当: このCodexセッション。`plan/ws141/ws.md` は担当が排他的に更新する。共有のMaster・Queue・Guardrail・他WSは読み取りだけ、統合はQ1。
 - 独立worktree: `/home/awe/zedBSD-claude1/.claude/worktrees/ws141-codex`、branch `codex/ws141-rpi4-gpu`、開始commit `a05865278`。sourceと成果のbuildはこのworktree内で行う。共有LLVMは読み取り専用のsymlinkで参照し、変更・再buildはしない。
 - ユーザー回答「実機確認は後で行う」。p002のP0・V0、p003のN0以降の実機確認は未実施のまま保持し、実機観測が必要な依存は満たした扱いにしない。
-- 最初の範囲: p002骨格・p003/N0の既存実装と現在のbuildの整合を調べ、rpi4のdriver有効／無効build、既存の短いhost試験を実施。N1の前に必要な実機N0の写真は後続の再開条件。
+- 最初の確認は終了（driver y/n build・stage/list host PASS）。続いて作業資料を復旧した。範囲: p002骨格・p003/N0の既存実装と現在のbuildの整合を調べ、rpi4のdriver有効／無効build、既存の短いhost試験を実施。N1の前に必要な実機N0の写真は後続の再開条件。
 - Q1へ渡す物: WIP commit、対象pathだけのbinary対応patch、基点・検証・実機待ち・残件の記録。
 
 ## 単一目標
