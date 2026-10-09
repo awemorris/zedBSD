@@ -30,6 +30,7 @@
 #include "drivers/gpu/bcm2711/vulkan-prepared.h"
 #include "drivers/gpu/bcm2711/vulkan-uniform.h"
 #include "drivers/gpu/bcm2711/vulkan-native-draw.h"
+#include "drivers/gpu/bcm2711/vulkan-native-pass.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
@@ -87,6 +88,7 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void native_pass_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *begin);
 static void native_draw_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void uniform_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
@@ -951,6 +953,133 @@ native_draw_test(
 	return;
 }
 
+/* Exercises whole mapped pass ownership with real prepared targets/draws and synthetic no-op/malformed event copies. */
+static void
+native_pass_test(
+	struct bcm2711_vulkan_session *session,
+	const struct bcm2711_vulkan_prepared_event *begin_event)
+{
+	struct bcm2711_vulkan_native_pass *pass;
+	const struct bcm2711_vulkan_prepared_event *following;
+	struct bcm2711_vulkan_prepared_event *events;
+	struct bcm2711_vulkan_framebuffer *framebuffer;
+	struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_v3d_view *view;
+	struct bcm2711_v3d_space *space;
+	void *cpu;
+	uint32_t address;
+	uint32_t references;
+	uint32_t index;
+	uint32_t byte;
+	unsigned baseline;
+	unsigned held;
+	unsigned cleans;
+	uint64_t available;
+	uint64_t bytes;
+	int error;
+
+	/* The actual immutable primary supplies its typed framebuffer and independently bound coherent colour allocation. */
+	space = &session->render->device->space;
+	framebuffer = begin_event->pass->objects[1]->payload;
+	image_view = framebuffer->view->payload;
+	image = image_view->owner.parent->payload;
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &cpu);
+	assert(error == 0 && image->bytes == 512U);
+	references = view->references;
+	baseline = allocations;
+	memset(cpu, 0x6c, 512);
+	available = 8U * 1024U * 1024U;
+	cleans = native_cleans;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == 0 && pass != NULL && following == NULL);
+	assert(pass->output == view && view->references == references + 1U);
+	assert(pass->count == 9U && pass->draws == 1U && pass->first == pass->last && pass->last->next == NULL);
+	bytes = pass->bytes;
+	assert(bytes == 1646592U && available == 8U * 1024U * 1024U - bytes);
+	assert(native_cleans == cleans + 20U && pass->job.kind == BCM2711_V3D_JOB_CL);
+	assert(pass->job.command.cl.bin_end - pass->job.command.cl.bin_start == 130U);
+	assert(pass->job.command.cl.render_end - pass->job.command.cl.render_start == 106U);
+	assert(pass->job.command.cl.pool_bytes == 0x83000U && pass->job.command.cl.state_bytes == 4096U);
+	assert(pass->job.command.cl.overflow_count == 4U && pass->job.command.cl.clean_output);
+	assert(pass->state.output == address && pass->state.load == 1U && pass->state.store == 1U);
+	assert(pass->load == VK_ATTACHMENT_LOAD_OP_CLEAR && pass->cpu == cpu);
+	for (index = 0; index < BCM2711_NATIVE_BIN_BYTES; index++)
+		assert(((uint8_t *)pass->storage[0]->view->buffer->address)[BCM2711_NATIVE_PASS_BIN_PREFIX + index] == pass->first->bin[index]);
+	for (index = 0; index < 4U; index++) {
+		assert(pass->job.command.cl.overflow[index].address == pass->storage[5U + index]->view->address);
+		assert(pass->job.command.cl.overflow[index].bytes == 256U * 1024U);
+	}
+
+	/* A successfully prepared CLEAR pass still leaves every existing target sample untouched until actual execution. */
+	for (byte = 0; byte < 512U; byte++)
+		assert(((uint8_t *)cpu)[byte] == 0x6c);
+	held = allocations;
+	error = bcm2711_vulkan_native_pass_release(&pass, false);
+	assert(error == EBUSY && pass != NULL && allocations == held && pass->bytes == bytes);
+	assert(view->references == references + 1U && pass->first != NULL && pass->count == 9U);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && pass == NULL && allocations == baseline && view->references == references);
+
+	/* Selected late allocation failures retire complete draw/list/overflow prefixes and restore the caller's exact aggregate budget. */
+	for (index = 0; index < 3U; index++) {
+		fail_after = 10U + index * 25U;
+		available = 8U * 1024U * 1024U;
+		error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+		assert(error == ENOMEM && pass == NULL && following == NULL && fail_after == 0);
+		assert(allocations == baseline && view->references == references && available == 8U * 1024U * 1024U);
+	}
+
+	/* A budget sufficient for all draw owners but insufficient for the pass pool rolls back all earlier independent mappings. */
+	available = 64U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == ENOMEM && pass == NULL && following == NULL && allocations == baseline);
+	assert(view->references == references && available == 64U * 1024U);
+
+	/* Synthetic immutable event copies exercise no-op draws and missing-END refusal without mutating the pending real primary. */
+	events = kern_calloc(3, sizeof(*events));
+	assert(events != NULL);
+	events[0] = *begin_event;
+	events[1] = *begin_event->next;
+	events[2] = *begin_event->next->next;
+	events[0].next = &events[1];
+	events[1].next = &events[2];
+	events[1].draw[0] = 0;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == 0 && pass->draws == 0 && pass->first == NULL && pass->count == 9U);
+	assert(pass->job.command.cl.bin_end - pass->job.command.cl.bin_start == 14U);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1U && view->references == references);
+	events[1].draw[0] = 6;
+	events[1].draw[1] = 0;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == 0 && pass->draws == 0 && pass->first == NULL);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1U && view->references == references);
+	events[1].draw[1] = 1;
+	events[1].next = NULL;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == EINVAL && pass == NULL && following == NULL && available == 8U * 1024U * 1024U);
+	assert(allocations == baseline + 1U && view->references == references);
+	kern_free(events);
+
+	/* Overflow admission refuses before acquiring another framebuffer reference or native owner. */
+	view->references = 0xffffffffU;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == EOVERFLOW && pass == NULL && allocations == baseline);
+	view->references = references;
+	for (byte = 0; byte < 512U; byte++)
+		assert(((uint8_t *)cpu)[byte] == 0x6c);
+	puts("WS141 whole mapped native pass/CL-tile-overflow/output ownership/no-op draw/atomic rollback: PASS");
+
+	/* Succeeded: every complete or refused whole-pass root retires without modifying the real pending primary or target samples. */
+	return;
+}
+
 /* Checks actual compiled consumption/cloned input ownership and synthetic UBO intervals against real coherent resource backing. */
 static void
 uniform_test(
@@ -1196,6 +1325,7 @@ prepared_test(
 	assert(event->push[0][0] == 0x3f000000U && event->vertices[0]->bytes == 48);
 	assert(event->next->opcode == GPU_OP_CMD_END_RENDER_PASS && event->next->next == NULL);
 	native_draw_test(session, event);
+	native_pass_test(session, prepared->first);
 	uniform_test(session, event);
 	error = bcm2711_vulkan_prepared_create(command_object, &second);
 	assert(error == EBUSY && second == NULL && command->pending == 1 && set->pending == 1);

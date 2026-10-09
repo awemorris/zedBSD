@@ -18,6 +18,8 @@
 
 /* One complete native draw retains all GPU inputs through uncertain completion; its enclosing job keeps the prepared primary pending. */
 struct bcm2711_vulkan_native_draw {
+	/* The enclosing pass links fully owned draw roots; individual release never traverses this link. */
+	struct bcm2711_vulkan_native_draw *next;
 	struct bcm2711_v3d_space *space;
 	struct bcm2711_native_storage *storage[BCM2711_VULKAN_DRAW_STORAGE];
 	struct bcm2711_vulkan_native_binding bindings[BCM2711_VULKAN_PIPELINE_SETS][BCM2711_VULKAN_LAYOUT_BINDINGS];
