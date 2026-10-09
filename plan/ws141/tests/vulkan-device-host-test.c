@@ -31,6 +31,7 @@
 #include "drivers/gpu/bcm2711/vulkan-uniform.h"
 #include "drivers/gpu/bcm2711/vulkan-native-draw.h"
 #include "drivers/gpu/bcm2711/vulkan-native-pass.h"
+#include "drivers/gpu/bcm2711/vulkan-native-job.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
@@ -109,6 +110,7 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void native_job_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
 static void native_execute_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *begin);
 static void native_pass_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *begin);
 static void native_draw_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
@@ -1287,6 +1289,91 @@ native_execute_test(
 	return;
 }
 
+/* Verifies actual pending/native pass payload transfer survives synthetic callback retirement until explicit recovery. */
+static void
+native_job_test(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_vulkan_object *command_object)
+{
+	struct bcm2711_vulkan_native_job *job;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_render_device *controller;
+	struct bcm2711_render_session *render;
+	unsigned baseline;
+	unsigned held;
+	uint32_t references;
+	uint32_t index;
+	bool retired;
+	int error;
+
+	/* Future runtime binding is explicit in this private fixture, without publishing COMMAND/CAPSET/JOB operations. */
+	render = session->render;
+	controller = render->device;
+	command = command_object->payload;
+	assert(command->pending == 0 && render->vulkan == NULL);
+	controller->space.native->hardware.initialized = true;
+	controller->space.native->power.ready = true;
+	render->vulkan = session;
+	baseline = allocations;
+	references = command_object->references;
+	for (index = 1; index <= 3U; index++) {
+		fail_after = index;
+		error = bcm2711_vulkan_native_job_create(command_object, &job);
+		assert(error == ENOMEM && job == NULL && allocations == baseline && command->pending == 0);
+		assert(command_object->references == references);
+	}
+
+	/* The complete queued CPU payload retains the primary before any coherent source snapshot or native allocation. */
+	error = bcm2711_vulkan_native_job_create(command_object, &job);
+	assert(error == 0 && job != NULL && job->pass == NULL && command->pending == 1);
+	native_execute_error = 0;
+	native_execute_retired = true;
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == 0 && retired && job->pass == NULL && job->executed && command->pending == 1);
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == EBUSY && retired);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == 0 && allocations == baseline && command->pending == 0 && controller->quarantine == NULL);
+
+	/* An explicit native-runner timeout keeps the complete current pass, pending primary and descriptor graph alive after false disposal. */
+	error = bcm2711_vulkan_native_job_create(command_object, &job);
+	assert(error == 0);
+	native_execute_error = ETIMEDOUT;
+	native_execute_retired = false;
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == ETIMEDOUT && !retired && job->pass != NULL && command->pending == 1);
+	held = allocations;
+	error = bcm2711_vulkan_native_job_dispose(controller, job, false);
+	assert(error == 0 && controller->quarantine == job && job->quarantined && allocations == held);
+	assert(job->prepared != NULL && job->pass->first != NULL && job->pass->output != NULL);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, false);
+	assert(error == 0 && controller->quarantine == job && job->next == NULL && allocations == held);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == EBUSY && controller->quarantine == job && command->pending == 1 && allocations == held);
+
+	/* External session ownership and unavailable native reset admission each leave the entire quarantined graph untouched. */
+	controller->sessions = 1;
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == EBUSY && controller->quarantine == job && command->pending == 1 && allocations == held);
+	controller->sessions = 0;
+	controller->space.native->hardware.ready = false;
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == EIO && controller->quarantine == job && command->pending == 1 && allocations == held);
+	controller->space.native->hardware.ready = true;
+
+	/* No physical fixture DMA ran; synthetic reset admission authorizes only this host owner-graph retirement, not production reset acceptance. */
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == 0 && controller->quarantine == NULL && allocations == baseline && command->pending == 0);
+	assert(command_object->references == references);
+	native_execute_error = 0;
+	native_execute_retired = true;
+	render->vulkan = NULL;
+	puts("WS141 whole pending native job/controller quarantine/descriptor charges/explicit recovery: PASS");
+
+	/* Succeeded: callback disposal cannot discard the sole root of any uncertain native pass or pending primary. */
+	return;
+}
+
 /* Checks actual compiled consumption/cloned input ownership and synthetic UBO intervals against real coherent resource backing. */
 static void
 uniform_test(
@@ -1519,6 +1606,7 @@ prepared_test(
 	error = bcm2711_vulkan_prepared_release(prepared, true);
 	assert(error == 0 && command->pending == 0 && set->pending == 0 && allocations == baseline);
 	command->flags = 0;
+	native_job_test(session, command_object);
 
 	/* A complete prepared primary acquires one distinct set charge and one independent snapshot of each consumed view/sampler. */
 	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
