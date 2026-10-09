@@ -59,6 +59,17 @@
 
 #include "../intel/genxml.h"
 
+#ifdef I915_TEST_VIDEO_HANG_AT
+#include "../intel/commands.h"
+
+#include <kern/atomic.h>
+
+/* How many runs the hang test hangs when the build gives no count. */
+#ifndef I915_TEST_VIDEO_HANG_COUNT
+#define I915_TEST_VIDEO_HANG_COUNT	1U
+#endif
+#endif
+
 /* The H.264 decode limits the executor reports and holds sessions to (design §3.3). */
 #define I915_VIDEO_MAX_DPB_SLOTS	17U
 #define I915_VIDEO_MAX_REFERENCES	16U
@@ -348,6 +359,18 @@ struct i915_video_simulation {
 	int reset_done;
 };
 
+#ifdef I915_TEST_VIDEO_HANG_AT
+/*
+ * The number of video runs since boot, in a test build that hangs some of
+ * them (ws083-p007).
+ *
+ * Every run of every session takes the next number, so a run is hung once
+ * and the runs after the hung ones decode as they would.  It only grows, and
+ * is never reset; zero means no run yet.
+ */
+static atomic_uint_t i915_video_test_runs;
+#endif
+
 static int i915_video_capabilities(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_video_format_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int i915_video_family_properties(struct i915_render_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -396,6 +419,9 @@ static void i915_video_resolve(struct i915_render_session *session, const struct
 static uint64_t i915_video_bind_address(struct i915_render_session *session, const struct i915_video_session *video, uint32_t index);
 static uint64_t i915_video_picture_address(struct i915_render_session *session, uint64_t view);
 static int i915_video_write(struct i915_render_session *session, struct i915_video_session *video, const struct i915_video_mfx_decode *decode);
+#ifdef I915_TEST_VIDEO_HANG_AT
+static void i915_video_test_hang(struct i915_gfx_batch *batch, uint64_t batch_va);
+#endif
 
 /*
  * Runs one of the video commands the dispatcher routes here: the physical
@@ -2994,6 +3020,14 @@ i915_video_run(
 	if (video->batch == NULL || video->cursor.count == 0U)
 		return 0;
 
+#ifdef I915_TEST_VIDEO_HANG_AT
+	/*
+	 * The hang recovery test (ws083-p007): the chosen runs end in a loop
+	 * that never finishes, as a stream that hangs MFX would.
+	 */
+	i915_video_test_hang(&video->cursor, video->batch->va);
+
+#endif
 	/* Runs the batch to its end in the session's VCS0 context, then empties it. */
 	error = drv_i915_gfx_batch_run(session, &video->cursor, video->batch->va, I915_ENGINE_VCS0);
 	video->cursor.count = 0U;
@@ -3176,3 +3210,51 @@ i915_video_write(
 	/* Succeeded: the batch holds the decode. */
 	return 0;
 }
+
+#ifdef I915_TEST_VIDEO_HANG_AT
+/*
+ * Ends a run's batch in a loop that never finishes when the run is one the
+ * test build hangs: runs I915_TEST_VIDEO_HANG_AT to I915_TEST_VIDEO_HANG_AT +
+ * I915_TEST_VIDEO_HANG_COUNT - 1, counted from 1 over every session since
+ * boot.  The decode before the loop runs; the request then times out, and the
+ * worker resets the video engine as it would after a real hang.
+ */
+static void
+i915_video_test_hang(
+	struct i915_gfx_batch *batch,
+	uint64_t batch_va)
+{
+	uint64_t loop_va;
+	unsigned run;
+
+	/* Numbers this run among every video run since boot, from 1. */
+	run = atomic_fetch_add_relaxed(&i915_video_test_runs, 1U) + 1U;
+
+	/* Leaves the runs before the hung ones as they are. */
+	if (run < (unsigned)I915_TEST_VIDEO_HANG_AT)
+		return;
+
+	/* Leaves the runs after the hung ones as they are. */
+	if (run >= (unsigned)I915_TEST_VIDEO_HANG_AT + (unsigned)I915_TEST_VIDEO_HANG_COUNT)
+		return;
+
+	/* The loop and the batch's end have to fit behind the decode. */
+	if (batch->overflow != 0 || batch->count + 6U > batch->capacity) {
+		kern_logf("i915: video: I915_TEST_VIDEO_HANG_AT: run %u has no room for the loop\n", run);
+		return;
+	}
+
+	/*
+	 * The loop: an arbitration point, then a jump back to it in the
+	 * context's address space, so the engine never reaches the batch's end.
+	 */
+	loop_va = batch_va + (uint64_t)batch->count * 4U;
+	drv_i915_batch_emit(batch, MI_ARB_CHECK);
+	drv_i915_batch_emit(batch, MI_BATCH_BUFFER_START_GEN8 | MI_BATCH_NON_SECURE_I965);
+	drv_i915_batch_emit(batch, (uint32_t)loop_va);
+	drv_i915_batch_emit(batch, (uint32_t)(loop_va >> 32));
+
+	/* Tells the log which run was made to hang. */
+	kern_logf("i915: video: I915_TEST_VIDEO_HANG_AT: run %u ends in a loop that does not finish\n", run);
+}
+#endif
