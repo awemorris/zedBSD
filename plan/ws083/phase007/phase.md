@@ -2,7 +2,7 @@
 
 # ws083-p007: VCS0 の engine 単位の reset（GRDOM_MEDIA）と video の hang の回復
 
-Status: in-progress（q876、P2。2026-10-08 夜 host で進められる範囲を実装と host 試験。実機の人工の hang からの回復は 5330 が戻ってから T1）
+Status: in-progress（2026-10-10 P2: host の範囲は全部済み。受け入れの残りは実機の人工の hang からの回復だけで、ユーザーが hang の image（下の「2026-10-10 実機の手順」）で起動し、Q1 が SSH で流す）（旧: in-progress（q876、P2。2026-10-08 夜 host で進められる範囲を実装と host 試験。実機の人工の hang からの回復は 5330 が戻ってから T1））
 Disposition: normal
 Parent: [WS083](../ws.md)
 Queue: q876（Q1 の dispatch、承認済み）
@@ -81,3 +81,63 @@ Queue: q876（Q1 の dispatch、承認済み）
   - F2 上限（R5）: 新しい image `test-hw.sh "vkx -DI915_TEST_VIDEO_HANG_AT=1 -DI915_TEST_VIDEO_HANG_COUNT=4" OUT`。probe を 5 回（各回の最初の decode が hang）→ 1〜3 回目は reset、4 回目は `video: 4 hangs; video engine stopped until a checked reset`（reset しない）、5 回目は `the video engine is stopped; the decode did not run`。SSH と desktop は生きている。
   - 失敗の形（返す物）: `vcs0 reset request timed out: request 00000001 RESET_CTL …`（ready にならない、R-S4 の材料）、`engine_reset vcs0 … rc=110`（GDRST が消えない）、F1 の 2 回目の probe の不一致。dmesg の `i915:` の全行と probe の全出力。
 - 状態: 道具は済み。Phase は実機（F1・F2）まで in-progress。
+- 2026-10-10: この F1・F2 の手順（T1 が ESP に kernel を置く形）は、T1 の ESP の書き込みが Claude Code の安全の判定で止められたので、下の「2026-10-10 実機の手順」（ユーザーが image か kernel を置く、1 回の起動で F1・F2）に置き換えた。
+
+## 2026-10-10 P2: host の残りと実機の手順（ユーザー「P2はWS083を完了させたらp007, p008を完了させたらラップアップ。実機でテストするので詳細なQEMUテストは不要です。」）
+
+### host の範囲（済み）
+
+- i915 の contract 試験（reset・mmio）: run.sh は trap に rm があるので、同じ compile を `build/tmp/p2-contracts.run.*`（`fresh_out`）で手で流した。reset 34 check・mmio 43 check、ordinary・ASan/UBSan とも 0 failure（main 1b08d90b9 の上）。
+- WS083 の host 試験 8 本（`run-host-*.sh`）は 1b08d90b9 で全部 PASS（p002 等の照合の時）。
+- 他の WS の runner の `forget` の欠け（上の「Q1 への連絡」）は main で直っている（ws031・ws075 の list に `forget` がある）。
+- **人工の hang の間隔**（新、試験の build だけ）: `render/video.c` の `#ifdef I915_TEST_VIDEO_HANG_AT` の中に `I915_TEST_VIDEO_HANG_STEP`（既定 1 = 今までどおり連続）を足した。hang する run は AT から STEP おきに COUNT 個。STEP 2 なら hang の間に 1 つ decode が通るので、**1 回の起動で F1（reset の後の回復）と F2（4 回目の hang で停止）の両方**を見られ、ユーザーが image（か kernel）を置くのは 1 回で済む。STEP が 1 未満なら `#error`。製品の build（macro なし）には code も文字列も無い。
+  - 確かめ: roundtrip の executor（`run-host-video-roundtrip.sh` を CC の包みで `-DI915_TEST_VIDEO_HANG_AT=1 -DI915_TEST_VIDEO_HANG_STEP=2 -DI915_TEST_VIDEO_HANG_COUNT=100000`）は plain・ASan/UBSan とも PASS、`idr.bin`（IDR と P の 2 run）の loop は 1 つ（run 1、dword 310 の `MI_BATCH_BUFFER_START` の飛び先が dword 309 の `MI_ARB_CHECK` = va 0x70000204d4）。STEP 無し（`AT=1 COUNT=100000`）は前と同じ 2 つ（dword 310・612）。genxml の照合はどちらも loop の分で 38 命令になり不一致（試験の build の batch なので期待どおり、製品の build の roundtrip は PASS）。
+  - build: `make -j16 ZEDBSD_CONFIG=plan/ws083/tests/config-video-hang.mk BUILD=build/p2-hang build/p2-hang/vmunix` rc 0・warning 0（kernel include check・amd64 vmunix check PASS、stamp に `-DI915_TEST_VIDEO_HANG_AT=2 -DI915_TEST_VIDEO_HANG_STEP=2 -DI915_TEST_VIDEO_HANG_COUNT=4`、log の文字列 2 つ）。製品 `make -j16 BUILD=build/p2-k ZEDBSD_CONFIG=config/ci/config-amd64.mk build/p2-k/vmunix` rc 0・warning 0、`HANG_AT` の文字列 0。
+- 新 `plan/ws083/tests/config-video-hang.mk`: `config/current-uat.mk` ＋ `i915.debug=video` ＋ vkvideo-probe ＋ 試験の stream を `/root/ws083/` ＋ `ZEDBSD_TEST_CPPFLAGS`（既定 `AT=2 STEP=2 COUNT=4` = 起動から 2・4・6・8 番目の video の run が hang）。release の image には使わない。
+- R-S4（ready にならない時の 2 回目の GDRST）は R1 のとおり実機で ready にならない例が出たら考える（host でできる事は無い）。
+
+### 2026-10-10 実機の手順（ユーザーに頼む形、ESP に書くのはユーザー）
+
+前提: T1・Q1 は ESP に書かない（2026-10-10 の安全の判定）。5330 の SSH は kei@10.0.30.3。hang の kernel は video の engine を**わざと**止めるので、試験の後は必ず元に戻す。
+
+**1. 準備（ユーザー、どちらか 1 つ。推しは (b)、USB の中身が残り、置くのは file 1 つ）**
+
+- (a) image ごと: tree の上で `make -j16 ZEDBSD_CONFIG=plan/ws083/tests/config-video-hang.mk BUILD=build/ws083-hang disk-image` → `build/ws083-hang/hdd-image.img` を USB に書き（UAT の image と同じ書き方、USB の中身は消える）、5330 をその USB で起動。試験の後は普段の UAT の image を書き戻す。
+- (b) kernel だけ（今の 5330 の image が `i915.debug=video` 入りで、kernel と同じ tree の時。Q1 が先に SSH の `uname -a` の revision と、その tree との間に kernel と userland の ABI を変える commit が無いことを確かめる）: Q1 が `make -j16 ZEDBSD_CONFIG=plan/ws083/tests/config-video-hang.mk BUILD=build/ws083-hang build/ws083-hang/vmunix` を作り、5330 の `/tmp/vmunix-hang` に scp する（ESP には書かない）。ユーザーが 5330 の Terminal で:
+  ```
+  sudo mount -t msdos /dev/sda1 /mnt        # ESP（USB の 1 番目の FAT。違えば ls /dev/sda* で）
+  sudo cp /mnt/vmunix /mnt/vmunix.orig      # 元の kernel を残す
+  sudo cp /tmp/vmunix-hang /mnt/vmunix
+  grep i915.debug /mnt/zedbsd.cfg           # i915.debug=video の行があること（無ければ 1 行足す）
+  sudo umount /mnt
+  sudo reboot
+  ```
+  元に戻す: `sudo mount -t msdos /dev/sda1 /mnt && sudo cp /mnt/vmunix.orig /mnt/vmunix && sudo umount /mnt && sudo reboot`（`vmunix.orig` は残っても害は無い）。
+
+**2. 試験（Q1 か T1 が SSH で、起動の後に video を使う物を他に動かさない。各行は 1 decode = 1 run）**
+
+`P` = `sudo vkvideo-probe --frames=1 --expect=/root/ws083/i-baseline-64.sha256 /root/ws083/i-baseline-64.h264`（(b) で probe・stream が image に無ければ `/tmp/v/` に scp したもの）。起動の後、`sudo dmesg | grep 'i915:'` を各段の後に取る。
+
+| 段 | 命令 | 期待（probe） | 期待（dmesg の新しい行） |
+| --- | --- | --- | --- |
+| 0 | `sudo dmesg \| grep i915:` | — | `Vulkan video decode is offered on a GT with VCS0`、`engine[2] vcs0 … reset_domain=0x20` |
+| 1 | P（run 1） | exit 0、`1 frames decoded, 1 match the reference` | 無し |
+| 2 | P（run 2、hang 1） | 非 0 の exit（DEVICE_LOST） | `I915_TEST_VIDEO_HANG_AT: run 2 ends in a loop`、`did not complete in 1000 ms`、`video: request failed (error 110); hang 1, context sw_id=… retained`、`engine_reset vcs0 domains=0x20 passes=2 rc=0`、`vcs0: engine reset; the engine takes work again`、`video: engine reset after hang 1; video takes work again`、`decode failed on VCS0 … session quarantined` |
+| 3 | P（run 3） | exit 0・1 match（**F1: reset の後に正しく decode**） | 無し |
+| 4 | P（run 4、hang 2） | 非 0 | 段 2 と同じ形で hang 2 |
+| 5 | P（run 5） | exit 0・1 match | 無し |
+| 6 | P（run 6、hang 3） | 非 0 | 同じ形で hang 3（reset する） |
+| 7 | P（run 7） | exit 0・1 match（3 回の reset の後も回復） | 無し |
+| 8 | P（run 8、hang 4） | 非 0 | `video: 4 hangs; video engine stopped until a checked reset`（**F2: reset しない**、`engine_reset vcs0` の行は無い） |
+| 9 | P、続けて `sudo vkvideo-probe --list` | P は非 0 で `vkvideo-probe: no queue family decodes H.264`（停止した engine は新しい device に video の family を出さない）、`--list` は `video families 0, video extensions 0` | 新しい `capset declares H.264 video decode` の行が出ない |
+| 10 | `ps ax \| grep -c wayland`、SSH が生きている | compositor が居る | rcs0 の hang・reset の行が無い（desktop は止まらない） |
+
+返す物: 各段の probe の全出力と dmesg の `i915:` の全行。失敗の形: `vcs0 reset request timed out: request 00000001 RESET_CTL …`（ready にならない、R-S4 の材料）、`engine_reset vcs0 … rc=110`（GDRST が消えない）、段 3・5・7 の不一致。hang が段の外で起きたら止めて Q1 へ。所要は 10 分ほど（hang 1 回 1 秒）。
+
+**3. 後始末（ユーザー）**: (a) は UAT の image を書き戻す、(b) は上の「元に戻す」。`uname -a` が元の kernel。
+
+受け入れ（design §9 の p007: host の試験、実機で人工の hang からの回復）: 段 1〜10 が期待どおりなら cleared 候補。
+
+### 再開点
+
+host の範囲は終わり。次はユーザーの準備（1）と Q1 の SSH（2）。結果が来たら Q1 が判定（FAIL の解析は新しい attempt）。
