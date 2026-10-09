@@ -252,3 +252,8 @@ native fence/binary semaphoreのtyped device ownership、初期状態/status/ato
 ## public Vulkan runtimeの登録と次のsoftware関門（2026-10-10）
 
 [p005](phase005/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)・[p006](phase006/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)を更新。private-onlyからactual render node publicationへ進み、全openにcomplete namespace、actual20route dispatch、immutable async COMMAND、checked domain/real completion/close drain、paired168byte capsetを接続。actual host26とactual renderer register/open/close/OOM/ownership host2 summary、full public LTO retained y buildはPASS。physical Keiland/console RAM lifetimeとwhole stack/p007を未達として保持する。Master/共有記録更新はQ1。詳細は[checkpoint](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+
+
+## public runtime stack修正と次のsoftware確認（2026-10-10）
+
+p006で4件pipelineのtemporary recordをcommand arenaへ移し、LTO frame4560→256byte。shared parserを変更せずprivate graphics stage/constant-depth admissionを追加。実Keiland compiler/深度境界/OOMとactual4件batch/arena reuse、host26/最終RPi4 y/styleはPASS。whole IRQ/caller stack、actual2node runtime、p007全WS監査と実機/Keiland/console RAM寿命は残る。in-progress/incompleteを維持、Master担当変更なし。[証拠/訂正/復帰点](execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。

@@ -11,7 +11,7 @@
 
 #include "drivers/gpu/bcm2711/vulkan-pipeline-record.h"
 
-/* Four self-contained records keep command metadata finite within the kernel stack while Keiland creates one pipeline per call. */
+/* Four arena-owned records bound temporary command storage without competing with the compiler for kernel stack space. */
 #define VULKAN_PIPELINE_BATCH 4U
 
 static int create_pipelines(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -65,7 +65,7 @@ create_pipelines(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	struct bcm2711_vulkan_pipeline_record records[VULKAN_PIPELINE_BATCH];
+	struct bcm2711_vulkan_pipeline_record *records;
 	struct bcm2711_vulkan_object *device;
 	struct bcm2711_vulkan_object *object;
 	struct bcm2711_vulkan_pipeline *pipeline;
@@ -88,11 +88,21 @@ create_pipelines(
 	cache = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || cache != 0 || count == 0 || count > VULKAN_PIPELINE_BATCH || array != count)
+	if (reader->error != 0 || cache != 0 || count == 0 ||
+	    count > VULKAN_PIPELINE_BATCH || array != count)
 		return ENOTSUP;
+
+	/* Resolves the exact device before reserving any command-local record storage. */
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, identity);
 	if (device == NULL)
 		return EINVAL;
+
+	/* One existing command arena holds all nested temporary fields; compiled owners retain no pointer into it. */
+	records = i915_vkc_array(reader, &session->arena, count, sizeof(*records));
+	if (records == NULL)
+		return EINVAL;
+
+	/* Decodes the complete batch before publishing any independently compiled member. */
 	for (index = 0; index < count; index++) {
 		error = bcm2711_vulkan_pipeline_decode(reader, &records[index]);
 		if (error != 0)
@@ -102,7 +112,8 @@ create_pipelines(
 	/* Output identities follow the complete input record array, with the client's ordinary null allocator marker. */
 	allocator = drv_i915_wire_read_u64(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || array != count)
+	if (reader->error != 0 || allocator != 0 ||
+	    array != count)
 		return EINVAL;
 	for (index = 0; index < count; index++)
 		identifiers[index] = drv_i915_wire_read_u64(reader);

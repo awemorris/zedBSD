@@ -5776,25 +5776,36 @@ pipeline_test(
 	assert(pipeline->programs[0]->vpm_output_words == 6 && pipeline->programs[1]->input_count == 2 && pipeline->programs[2]->varying_count == 2);
 	assert(pipeline->programs[2]->code_count != 0 && pipeline->programs[2]->uniform_count != 0);
 
-	/* The real client selected-state encoder and native decoder preserve legitimate partial batch results. */
+	/* The real client selected-state encoder and native decoder preserve partial results across the complete four-member batch. */
 	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_GRAPHICS_PIPELINES, 1);
 	vulkan_write_u64(&writer, 30);
 	vulkan_write_u64(&writer, 0);
-	vulkan_write_u32(&writer, 2);
-	vulkan_write_u64(&writer, 2);
+	vulkan_write_u32(&writer, 4);
+	vulkan_write_u64(&writer, 4);
+	ws141_client_encode_graphics(&writer, &info);
+	info.layout = (VkPipelineLayout)(uintptr_t)132;
+	ws141_client_encode_graphics(&writer, &info);
+	info.layout = (VkPipelineLayout)(uintptr_t)131;
 	ws141_client_encode_graphics(&writer, &info);
 	info.layout = (VkPipelineLayout)(uintptr_t)132;
 	ws141_client_encode_graphics(&writer, &info);
 	info.layout = (VkPipelineLayout)(uintptr_t)131;
 	vulkan_write_u64(&writer, 0);
-	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 4);
 	vulkan_write_u64(&writer, 135);
 	vulkan_write_u64(&writer, 136);
+	vulkan_write_u64(&writer, 137);
+	vulkan_write_u64(&writer, 138);
 	error = execute(session, &writer, &reader);
 	assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
-	assert(vulkan_read_u64(&reader) == 2 && vulkan_read_u64(&reader) == 135 && vulkan_read_u64(&reader) == 0);
+	assert(vulkan_read_u64(&reader) == 4 && vulkan_read_u64(&reader) == 135 && vulkan_read_u64(&reader) == 0);
+	assert(vulkan_read_u64(&reader) == 137 && vulkan_read_u64(&reader) == 0);
 	published = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PIPELINE, 135);
 	assert(published != NULL);
+
+	/* The next command resets temporary arena metadata while the other independently compiled member remains usable. */
+	destroy(session, GPU_OP_DESTROY_PIPELINE, 137);
+	assert(published->payload != NULL && published->references == 1);
 
 	/* Real public client recording keeps this compiled pipeline and the complete bound framebuffer live. */
 	record_test(session);

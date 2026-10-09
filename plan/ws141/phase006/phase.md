@@ -204,3 +204,8 @@ native fence/binary semaphoreのtyped device ownership、初期状態/status/ato
 ## public runtimeのsoftware checkpoint（2026-10-10）
 
 actual render openでcomplete Vulkan ownerを作り、production combined20route/async immutable snapshot single-worker/real callback drain/capset168byte strict queue/owned domain/JOB capacityを登録前にbind。actual host26範囲とactual renderer register/open/close/hardware-owner host2 summary、final RPi4 y warning/error0/checks3 PASS。公開LTO ELFにruntimeが残ることを確認。受理後mutable input、whole CPU OOM unwind、fence completed after worker、16slot limit、close joinとfault error handoffをactual callbacksで確認。single-thread/common observerとMMIO fixtureの限界を保持し実機/Keiland成功と偽らない。legacy pending no-overtake EAGAINは内部手順でAPI/WS criteria不変。Statusはin-progress、whole callgraph16KiB/p007/full physical acceptanceは未達。[全手順・commands・結果・制限](../execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+
+
+## public runtime stack修正のcheckpoint（2026-10-10）
+
+全命令LTO inspectionでpipeline frame4560byteを発見し、4件metadataを既存command arenaへ移して256byteに削減。深いconstant graphとparserによるcompute stage上書きをprivate compilerのiterative preflightで止め、read-only共有parserを維持。actual graphics4件partial batch/arena再利用、実Keiland scalar/decoderと2048段拒否・exact9level受け入れ・OOM/診断のhost、RPi4 y warning/error0/checks3/style0を確認。partial context estimateはworker9344byteで、IRQ/outer caller/unknown indirectを含むwhole16KiB証明は後続。whole Phase/p007/実機関門は未clear。[命令の取りこぼしの訂正/範囲/検証/残件](../execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。
