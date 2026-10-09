@@ -384,6 +384,7 @@ static void greeter_key_enter(struct kwl_server *server, unsigned user);
 static void greeter_key_granted(struct kwl_server *server);
 static void greeter_key_try_again(struct kwl_server *server);
 static int greeter_user_index(const char *name);
+static void greeter_keypad_log(struct kwl_server *server);
 
 /*
  * Prepares the login screen: the users, and the answers' descriptor.
@@ -540,8 +541,12 @@ kwl_greeter_answer(
 		greeter_styles_asked = 0U;
 		if (error != 0 || greeter_styles_wanted)
 			return;
-		if (server->greeter || server->locked)
+		if (server->greeter || server->locked) {
 			greeter_styles_take(server);
+			greeter_keypad_log(server);
+		}
+
+		/* Taken. */
 		return;
 	}
 
@@ -2413,6 +2418,7 @@ greeter_style_choose(
 	kwl_keypad_reset(&greeter_keypad, 0U);
 	server->dirty = 1;
 	printf("KWL GREETER style=%u via=choice\n", greeter_style);
+	greeter_keypad_log(server);
 
 	/* Another style than the key's leaves the key's mode (ws199-p001). */
 	if (style != KL_BACKEND_STYLE_KEY) {
@@ -2589,9 +2595,12 @@ greeter_keypad_press(
 	if (index >= layout->key_count || greeter_waiting)
 		return;
 
-	/* What the key does. */
+	/* What the key does (the letters or the digits laid out again are logged for the tests' pointer). */
 	action = kwl_keypad_press(&greeter_keypad, &layout->keys[index], &character);
 	server->dirty = 1;
+	printf("KWL GREETER keypad press action=%d\n", (int)action);
+	if (action == KWL_KEYPAD_LETTERS || action == KWL_KEYPAD_DIGITS)
+		greeter_keypad_log(server);
 
 	/* A character, Backspace, or Enter. */
 	switch (action) {
@@ -2762,6 +2771,7 @@ greeter_key_enter(
 	kwl_keypad_reset(&greeter_keypad, 0U);
 	server->dirty = 1;
 	printf("KWL GREETER key mode user=%s step=%d\n", greeter_users[greeter_selected].name, (int)greeter_key.step);
+	greeter_keypad_log(server);
 
 	/* The touch alone, or the lock's check: sent at once (after the styles, when they are asked). */
 	attempting = kwl_key_attempting(&greeter_key);
@@ -2881,4 +2891,31 @@ kwl_greeter_sleep(
 		server->dirty = 1;
 		printf("KWL LOCK card closed via=sleep\n");
 	}
+}
+
+/*
+ * Logs where the PIN's keypad is and its first and last keys, for the
+ * tests' pointer (its keys are a grid: the digits 3 by 4), or that none
+ * shows.
+ */
+static void
+greeter_keypad_log(
+	struct kwl_server *server)
+{
+	struct greeter_layout layout;
+	const struct kwl_keypad_key *last;
+
+	/* Where everything goes. */
+	greeter_layout(server, &layout);
+
+	/* No keypad. */
+	if (layout.key_count == 0U) {
+		printf("KWL GREETER keypad none\n");
+		return;
+	}
+
+	/* The first key and the last. */
+	last = &layout.keys[layout.key_count - 1U];
+	printf("KWL GREETER keypad keys=%zu letters=%u x=%d y=%d right=%d bottom=%d\n", layout.key_count, greeter_keypad.letters, layout.keys[0].rect[0],
+	    layout.keys[0].rect[1], last->rect[0] + last->rect[2], last->rect[1] + last->rect[3]);
 }
