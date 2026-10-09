@@ -21,7 +21,20 @@
  * known) and told as a notification.  What happens is logged on standard
  * error as "PHONE" lines for the tests, never the numbers or the words.
  *
- *   phone [--width=N] [--height=N] [--timeout-s=N]
+ * The paired phone's messages (ws197-p004b, plan/ws197/phase004/phase.md
+ * section 6): this program listens (kl_system_phone_listen) and brings
+ * them in page by page (kl_system_phone_sync) when it starts, when the
+ * phone's messages become ready, after a drop, every five minutes while
+ * the phone tells no new message, and over the last seven days once a
+ * day; how far it came is kept (sync/bt-<address>.state), advanced only by
+ * a synchronisation that ended well.  A message that came by itself is
+ * kept and told; one of a synchronisation is kept and not told.  Texts go
+ * to the paired phone as SMS (kl_system_phone_send_text); one the phone
+ * may or may not have sent is kept as unknown, and one still not sent an
+ * hour later, after one more synchronisation, failed.  Messages read here
+ * are marked read on the phone.
+ *
+ *   phone [--width=N] [--height=N] [--timeout-s=N] [--peer NUMBER]
  */
 
 #include "phone.h"
@@ -53,6 +66,71 @@
 /* The most requests to the phone waiting for their states, and the folder of the store under the home. */
 #define PH_PENDING_MAX		32U
 #define PH_STORE_FOLDER		"Documents/Phone"
+
+/* The paired phone's backend in kl_phone_link (the compositor's phone.backend 2), and its messages off and ready. */
+#define PH_BACKEND_BLUETOOTH	2U
+#define PH_MESSAGES_OFF		0U
+#define PH_MESSAGES_READY	2U
+
+/* The synchronisations (bits of what is wanted): over the mark, the five minutes', the last seven days'. */
+#define PH_SYNC_NORMAL		1U
+#define PH_SYNC_QUICK		2U
+#define PH_SYNC_DEEP		4U
+
+/* A page's items, a first synchronisation's days and limit, the overlaps (seconds) and the waits. */
+#define PH_SYNC_COUNT		32U
+#define PH_SYNC_FIRST_DAYS	30
+#define PH_SYNC_FIRST_LIMIT	500U
+#define PH_DAY_SECONDS		86400
+#define PH_QUICK_OVERLAP	600
+#define PH_QUICK_SECONDS	300
+#define PH_DEEP_DAYS		7
+#define PH_SYNC_ANSWER_US	180000000U
+#define PH_SYNC_TRIES		3U
+#define PH_SYNC_RETRY_SECONDS	600
+#define PH_STALE_SECONDS	3600
+#define PH_CHECK_SECONDS	60
+
+/* The handles kept for marking read on the phone, and the marks waiting. */
+#define PH_HANDLES_MAX		256U
+#define PH_MARKS_MAX		64U
+
+/*
+ * A synchronisation of the paired phone's messages: what is wanted next
+ * (PH_SYNC_* bits), the kind running (0 for none), its page's request (0
+ * while none is asked) and when it was asked, when it started (UNIX
+ * seconds), its since, limit and cursor, the items of the page taken,
+ * whether it is the first (no mark), whether a folder's limit stopped it,
+ * whether a drop came meanwhile, the pages that came short in a row and
+ * when to try again, when the last one started and ended well, when the
+ * next five minutes' one is due and the next look at the deep one.
+ */
+struct ph_sync {
+	unsigned wanted;
+	unsigned running;
+	uint32_t request;
+	uint64_t asked_us;
+	int64_t started;
+	int64_t since;
+	unsigned limit;
+	char cursor[KL_PHONE_CURSOR_MAX];
+	unsigned items;
+	int first;
+	int capped;
+	int again;
+	unsigned short_pages;
+	time_t retry_at;
+	int64_t last_start;
+	time_t last_done;
+	time_t next_quick;
+	time_t deep_check_at;
+};
+
+/* A key's handle on the phone for this session of its messages (mark_read). */
+struct ph_handle {
+	char key[KL_PHONE_KEY_MAX];
+	char handle[KL_PHONE_HANDLE_MAX];
+};
 
 /*
  * The window's state: the application, the window and its input, the
@@ -90,14 +168,36 @@ struct ph_window {
 	/*
 	 * The compositor's phone (NULL when the compositor has none), and the
 	 * requests sent that wait for their states: the request's number, the
-	 * contact and the item it is about (a request of 0 is a free row).
+	 * item it is about by its serial, and whether it is a text of
+	 * kl_system_phone_send_text (a request of 0 is a free row).
 	 */
 	struct kl_system *system;
 	struct ph_pending {
 		uint32_t request;
-		long contact;
-		size_t item;
+		unsigned long serial;
+		int text;
 	} pending[PH_PENDING_MAX];
+
+	/*
+	 * The paired phone's messages (ws197-p004b): whether the compositor
+	 * carries them, the link as last told (link_known 0 before), the
+	 * synchronisation, the handles of the keys seen (a ring by
+	 * handle_next), the handles waiting to be marked read on the phone and
+	 * the request of the one under way (0 for none), when the texts not
+	 * sent are next looked at, and when the synchronisation for them was
+	 * asked (0 for none).
+	 */
+	int phone_sync;
+	struct kl_phone_link link;
+	int link_known;
+	struct ph_sync sync;
+	struct ph_handle handles[PH_HANDLES_MAX];
+	unsigned handle_next;
+	char marks[PH_MARKS_MAX][KL_PHONE_HANDLE_MAX];
+	unsigned mark_count;
+	uint32_t mark_request;
+	time_t stale_check_at;
+	time_t stale_sync_at;
 };
 
 /* The window's menu. */
@@ -111,7 +211,7 @@ static const struct kl_menu_entry ph_menu[] = {
 };
 
 int main(int argc, char **argv);
-static int ph_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout);
+static int ph_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **peer);
 static int ph_loop(struct ph_window *phone, unsigned timeout);
 static void ph_input(struct ph_window *phone, const struct kl_window_event *event);
 static int ph_resize(struct ph_window *phone);
@@ -125,7 +225,24 @@ static void ph_requests(struct ph_window *phone);
 static void ph_send(struct ph_window *phone, long contact);
 static void ph_call(struct ph_window *phone, long contact);
 static void ph_save_contact(struct ph_window *phone);
-static void ph_remember(struct ph_window *phone, uint32_t request, long contact, size_t item);
+static void ph_remember(struct ph_window *phone, uint32_t request, unsigned long serial, int text);
+static void ph_result(struct ph_window *phone, uint32_t request, int error);
+static void ph_items(struct ph_window *phone);
+static void ph_item(struct ph_window *phone, const struct kl_phone_item *item);
+static void ph_link(struct ph_window *phone);
+static int ph_paired(const struct ph_window *phone);
+static void ph_sync_want(struct ph_window *phone, unsigned kind);
+static void ph_sync_start(struct ph_window *phone);
+static void ph_sync_page(struct ph_window *phone);
+static void ph_sync_answer(struct ph_window *phone, int error);
+static void ph_sync_end(struct ph_window *phone, int succeeded);
+static void ph_sync_timers(struct ph_window *phone);
+static void ph_stale_texts(struct ph_window *phone);
+static void ph_handle_keep(struct ph_window *phone, const char *key, const char *handle);
+static const char *ph_handle_of(const struct ph_window *phone, const char *key);
+static void ph_mark_add(struct ph_window *phone, const char *handle);
+static void ph_mark_next(struct ph_window *phone);
+static void ph_read_conversation(struct ph_window *phone, long contact);
 
 /*
  * Runs Phone.
@@ -138,17 +255,19 @@ main(
 	struct kl_window_options window_options;
 	struct kl_app_options app_options;
 	static struct ph_window phone;
+	const char *peer;
 	unsigned capabilities;
 	unsigned timeout;
 	unsigned width;
 	unsigned height;
+	long contact;
 	int status;
 	int error;
 
 	/* The command line. */
-	status = ph_parse(argc, argv, &width, &height, &timeout);
+	status = ph_parse(argc, argv, &width, &height, &timeout, &peer);
 	if (status != 0) {
-		fprintf(stderr, "usage: phone [--width=N] [--height=N] [--timeout-s=N]\n");
+		fprintf(stderr, "usage: phone [--width=N] [--height=N] [--timeout-s=N] [--peer NUMBER]\n");
 		return 2;
 	}
 
@@ -163,6 +282,14 @@ main(
 	if (error != 0) {
 		ph_log("FAILED operation=view error=%d", error);
 		return 1;
+	}
+
+	/* A number asked (a notification's click, ws197-p004 section 7): its conversation shown. */
+	if (peer != NULL) {
+		contact = ph_store_conversation(peer, NULL, 1);
+		if (contact >= 0)
+			ph_view_select(&phone.view, contact);
+		ph_log("PEER found=%d", contact >= 0);
 	}
 
 	/* The application. */
@@ -198,16 +325,21 @@ main(
 	phone.style.glass = 0;
 	phone.view.glass = 0;
 
-	/* The compositor's phone. */
+	/* The compositor's phone, and its messages of the paired phone heard (ws197-p004b). */
 	phone.system = kl_app_system(phone.app);
 	if (phone.system != NULL) {
 		capabilities = kl_system_capabilities(phone.system);
 		if ((capabilities & KL_SYSTEM_HAS_PHONE) == 0U)
 			phone.system = NULL;
+		if ((capabilities & KL_SYSTEM_HAS_PHONE_SYNC) != 0U && phone.system != NULL) {
+			error = kl_system_phone_listen(phone.system, 1U);
+			if (error == 0)
+				phone.phone_sync = 1;
+		}
 	}
 
 	/* The log the tests read. */
-	ph_log("SYSTEM phone=%d", phone.system != NULL);
+	ph_log("SYSTEM phone=%d sync=%d", phone.system != NULL, phone.phone_sync);
 
 	/* The loop until the window closes. */
 	status = ph_loop(&phone, timeout);
@@ -257,7 +389,8 @@ ph_parse(
 	char **argv,
 	unsigned *width,
 	unsigned *height,
-	unsigned *timeout)
+	unsigned *timeout,
+	const char **peer)
 {
 	int index;
 	int same;
@@ -266,6 +399,7 @@ ph_parse(
 	*width = PH_WIDTH;
 	*height = PH_HEIGHT;
 	*timeout = 0U;
+	*peer = NULL;
 
 	/* Each argument. */
 	for (index = 1; index < argc; index++) {
@@ -287,6 +421,14 @@ ph_parse(
 		same = strncmp(argv[index], "--timeout-s=", 12U);
 		if (same == 0) {
 			*timeout = (unsigned)strtoul(argv[index] + 12, NULL, 10);
+			continue;
+		}
+
+		/* The number whose conversation is shown (the next argument). */
+		same = strcmp(argv[index], "--peer");
+		if (same == 0 && index + 1 < argc) {
+			index++;
+			*peer = argv[index];
 			continue;
 		}
 
@@ -680,7 +822,11 @@ ph_store_start(void)
 	ph_log("STORE error=%d", error);
 }
 
-/* Takes the phone's events and the results of the requests sent. */
+/*
+ * Takes the phone's items, events and the results of the requests sent
+ * (the items first: a sync's result follows its items), then starts what
+ * the paired phone's messages wait for.
+ */
 static void
 ph_phone_round(
 	struct ph_window *phone)
@@ -703,29 +849,51 @@ ph_phone_round(
 		return;
 	}
 
-	/* The requests refused (no backend): failed. */
-	for (;;) {
-		taken = kl_system_take_result(phone->system, &request, &error);
-		if (!taken)
-			break;
-		if (error == 0)
-			continue;
-		ph_log("RESULT request=%u error=%d", request, error);
-		ph_status(phone, request, 0U, 1);
-		if (error == ENODEV)
-			ph_view_notice(&phone->view, "No phone backend: choose one in the desktop's settings (phone.backend).", kl_clock_us());
-	}
+	/* The paired phone's messages that came. */
+	ph_items(phone);
 
-	/* Each message that came, and each state. */
+	/* Each message that came, each state, the link's changes and the drops. */
 	for (;;) {
 		taken = kl_system_take_phone_event(phone->system, &event);
 		if (!taken)
 			break;
-		if (event.kind == KL_PHONE_RECEIVED)
+
+		/* Each kind. */
+		switch (event.kind) {
+		case KL_PHONE_RECEIVED:
 			ph_received(phone, &event);
-		else if (event.kind == KL_PHONE_STATUS)
+			break;
+		case KL_PHONE_STATUS:
 			ph_status(phone, event.request, event.state, 0);
+			break;
+		case KL_PHONE_LINK_CHANGED:
+			ph_link(phone);
+			break;
+		case KL_PHONE_DROPPED:
+			ph_items(phone);
+			ph_sync_want(phone, PH_SYNC_NORMAL);
+			break;
+		default:
+			break;
+		}
 	}
+
+	/* Items an event's mark told late. */
+	ph_items(phone);
+
+	/* The requests' results. */
+	for (;;) {
+		taken = kl_system_take_result(phone->system, &request, &error);
+		if (!taken)
+			break;
+		ph_result(phone, request, error);
+	}
+
+	/* The synchronisation, the texts not sent and the marks waiting. */
+	ph_sync_timers(phone);
+	ph_stale_texts(phone);
+	ph_sync_start(phone);
+	ph_mark_next(phone);
 }
 
 /* Keeps a message that came under its sender's contact (a new one for a number not known), and tells it. */
@@ -784,6 +952,9 @@ ph_status(
 	const char *detail;
 	size_t count;
 	size_t index;
+	size_t at;
+	long contact;
+	int error;
 
 	/* The request's row. */
 	for (index = 0; index < PH_PENDING_MAX; index++) {
@@ -791,11 +962,18 @@ ph_status(
 			break;
 	}
 
-	/* A request not waited for. */
+	/* A request not waited for, or its item gone. */
 	if (index == PH_PENDING_MAX || request == 0U)
 		return;
+	error = ph_store_find_serial(phone->pending[index].serial, &contact, &at);
+	if (error != 0) {
+		phone->pending[index].request = 0;
+		return;
+	}
+
+	/* The item asked about. */
 	contacts = ph_contacts(&count);
-	item = &contacts[phone->pending[index].contact].items[phone->pending[index].item];
+	item = &contacts[contact].items[at];
 
 	/* The state as the store keeps it. */
 	detail = NULL;
@@ -810,7 +988,11 @@ ph_status(
 		kept = PH_STATE_NO_ANSWER;
 	if (item->kind == PH_CALL && kept == PH_STATE_ANSWERED)
 		detail = "0:00";
-	(void)ph_store_set_state(phone->pending[index].contact, phone->pending[index].item, kept, detail);
+
+	/* A text delivered stays so when its sent comes late. */
+	if (kept == PH_STATE_SENT && item->state == PH_STATE_DELIVERED)
+		kept = PH_STATE_DELIVERED;
+	(void)ph_store_set_state(contact, at, kept, detail);
 	ph_log("STATUS request=%u state=%u failed=%d", request, state, failed);
 	phone->dirty = 1;
 
@@ -843,7 +1025,7 @@ ph_requests(
 			ph_call(phone, request.contact);
 			break;
 		case PH_ACTION_READ:
-			(void)ph_store_mark_read(request.contact);
+			ph_read_conversation(phone, request.contact);
 			break;
 		case PH_ACTION_SAVE:
 			ph_save_contact(phone);
@@ -854,7 +1036,11 @@ ph_requests(
 	}
 }
 
-/* Keeps the message written as sending and sends it on the channel the contact's last message went by (RCS for a first). */
+/*
+ * Keeps the message written as sending and sends it: to the paired phone
+ * as SMS (ws197-p004b), else on the channel the contact's last message
+ * went by (RCS for a first).
+ */
 static void
 ph_send(
 	struct ph_window *phone,
@@ -862,16 +1048,27 @@ ph_send(
 {
 	const struct ph_contact *contacts;
 	enum ph_channel channel;
+	unsigned long serial;
 	uint32_t request;
 	size_t count;
 	size_t item;
 	size_t index;
+	int paired;
 	int error;
 
-	/* The contact and its channel. */
+	/* The contact. */
 	contacts = ph_contacts(&count);
 	if (contact < 0 || (size_t)contact >= count || phone->view.message.length == 0U)
 		return;
+
+	/* The paired phone that takes no text: nothing kept or sent. */
+	paired = ph_paired(phone);
+	if (paired && !phone->link.can_send) {
+		ph_view_notice(&phone->view, "The phone does not take texts to send.", kl_clock_us());
+		return;
+	}
+
+	/* Its channel: SMS through the paired phone, else the last message's. */
 	channel = PH_RCS;
 	for (index = contacts[contact].item_count; index > 0U; index--) {
 		if (contacts[contact].items[index - 1U].kind == PH_CALL)
@@ -881,6 +1078,10 @@ ph_send(
 		break;
 	}
 
+	/* The paired phone's texts are SMS. */
+	if (paired)
+		channel = PH_SMS;
+
 	/* Kept as sending, the timeline at its end. */
 	error = ph_store_add_item(contact, PH_TEXT, channel, 1, time(NULL), PH_STATE_SENDING, phone->view.message.text, NULL, &item);
 	if (error != 0) {
@@ -888,24 +1089,36 @@ ph_send(
 		return;
 	}
 
+	/* Its name for this run. */
+	serial = contacts[contact].items[item].serial;
+
 	/* The new item shown. */
 	phone->view.to_end = 1;
 
-	/* Sent through the compositor's phone; without one it failed. */
+	/* Sent through the compositor's phone (the paired phone's texts of up to 8192 bytes); without one it failed. */
 	request = 0;
 	error = ENOTSUP;
-	if (phone->system != NULL)
+	if (paired) {
+		error = kl_system_phone_send_text(phone->system, KL_PHONE_SMS, contacts[contact].number, phone->view.message.text, phone->view.message.length,
+		    &request);
+	} else if (phone->system != NULL) {
 		error = kl_system_phone_send(phone->system, (unsigned)channel, contacts[contact].number, phone->view.message.text, &request);
-	ph_log("SEND contact=%ld channel=%u length=%zu error=%d", contact, (unsigned)channel, phone->view.message.length, error);
+	}
+
+	/* The log the tests read: lengths only. */
+	ph_log("SEND contact=%ld channel=%u length=%zu paired=%d error=%d", contact, (unsigned)channel, phone->view.message.length, paired, error);
 	kl_field_set(&phone->view.message, "");
 	if (error != 0) {
 		(void)ph_store_set_state(contact, item, PH_STATE_FAILED, NULL);
-		ph_view_notice(&phone->view, "No phone: the compositor has none.", kl_clock_us());
+		if (error == EINVAL)
+			ph_view_notice(&phone->view, "The number or the message cannot be sent.", kl_clock_us());
+		else
+			ph_view_notice(&phone->view, "No phone: the compositor has none.", kl_clock_us());
 		return;
 	}
 
 	/* Its states to come. */
-	ph_remember(phone, request, contact, item);
+	ph_remember(phone, request, serial, paired);
 }
 
 /* Calls the contact on the line and keeps the call with how it ends. */
@@ -944,7 +1157,7 @@ ph_call(
 	}
 
 	/* Its end to come. */
-	ph_remember(phone, request, contact, item);
+	ph_remember(phone, request, contacts[contact].items[item].serial, 0);
 }
 
 /* Keeps the new contact of the view's form and shows it. */
@@ -973,8 +1186,8 @@ static void
 ph_remember(
 	struct ph_window *phone,
 	uint32_t request,
-	long contact,
-	size_t item)
+	unsigned long serial,
+	int text)
 {
 	size_t index;
 
@@ -990,6 +1203,724 @@ ph_remember(
 
 	/* The row. */
 	phone->pending[index].request = request;
-	phone->pending[index].contact = contact;
-	phone->pending[index].item = item;
+	phone->pending[index].serial = serial;
+	phone->pending[index].text = text;
+}
+
+/*
+ * Takes a request's result: the synchronisation's page, a mark on the
+ * phone, a text of the paired phone (one that may or may not have gone is
+ * unknown, ws197-p004 section 3.5), or a request of version 16 (a refusal
+ * fails it).
+ */
+static void
+ph_result(
+	struct ph_window *phone,
+	uint32_t request,
+	int error)
+{
+	enum ph_state kept;
+	size_t index;
+	size_t at;
+	long contact;
+	int found;
+
+	/* The synchronisation's page. */
+	if (request != 0U && request == phone->sync.request) {
+		ph_sync_answer(phone, error);
+		return;
+	}
+
+	/* A mark on the phone: the next one goes (a stale or unconnected one waits for the next synchronisation's handle). */
+	if (request != 0U && request == phone->mark_request) {
+		phone->mark_request = 0U;
+		ph_log("MARK error=%d", error);
+		return;
+	}
+
+	/* A text of the paired phone: in the phone's outbox, or not sent, or not known. */
+	for (index = 0; index < PH_PENDING_MAX; index++) {
+		if (phone->pending[index].request == request && phone->pending[index].text)
+			break;
+	}
+
+	/* A text of the paired phone answered. */
+	if (index < PH_PENDING_MAX && request != 0U) {
+		ph_log("RESULT request=%u error=%d text=1", request, error);
+		if (error == 0)
+			return;
+
+		/* Lost on the way: it may have gone; else refused. */
+		kept = PH_STATE_FAILED;
+		if (error == ECONNRESET || error == ETIMEDOUT || error == ENOBUFS)
+			kept = PH_STATE_UNKNOWN;
+		found = ph_store_find_serial(phone->pending[index].serial, &contact, &at);
+		if (found == 0)
+			(void)ph_store_set_state(contact, at, kept, NULL);
+		phone->pending[index].request = 0U;
+		phone->dirty = 1;
+		return;
+	}
+
+	/* A request of version 16 refused (no backend): failed. */
+	if (error == 0)
+		return;
+	ph_log("RESULT request=%u error=%d", request, error);
+	ph_status(phone, request, 0U, 1);
+	if (error == ENODEV)
+		ph_view_notice(&phone->view, "No phone backend: choose one in the desktop's settings (phone.backend).", kl_clock_us());
+}
+
+/* Takes every item of the paired phone that waits. */
+static void
+ph_items(
+	struct ph_window *phone)
+{
+	struct kl_phone_item item;
+	int taken;
+
+	/* No messages of the paired phone. */
+	if (!phone->phone_sync)
+		return;
+
+	/* Each item, until none waits. */
+	for (;;) {
+		taken = kl_system_take_phone_item(phone->system, &item, sizeof(item));
+		if (!taken)
+			break;
+		ph_item(phone, &item);
+	}
+}
+
+/*
+ * Keeps one item of the paired phone (ws197-p004 section 6.3): counted for
+ * its sync's page, its handle kept, marked read on the phone when it was
+ * read here, and told when it came by itself, new and not read.
+ */
+static void
+ph_item(
+	struct ph_window *phone,
+	const struct kl_phone_item *item)
+{
+	struct ph_phone_message message;
+	const struct ph_contact *contacts;
+	const struct ph_item *kept;
+	char title[160];
+	char body[160];
+	size_t count;
+	size_t at;
+	long contact;
+	int merge;
+	int error;
+
+	/* Counted for the page asked. */
+	if (item->request != 0U && item->request == phone->sync.request)
+		phone->sync.items++;
+
+	/* The message as the store takes it. */
+	memset(&message, 0, sizeof(message));
+	message.address = "-";
+	if (phone->link_known && phone->link.address[0] != '\0')
+		message.address = phone->link.address;
+	message.key = item->key;
+	if (item->partial)
+		message.key = "-";
+	message.date = (time_t)item->time;
+	message.peer = item->peer;
+	message.name = item->name;
+	message.text = item->text;
+
+	/* Its direction, whether the phone read it and whether its words were cut. */
+	if (item->direction == 1U)
+		message.outgoing = 1;
+	if (item->read != 0U)
+		message.read = 1;
+	if (item->truncated != 0U)
+		message.truncated = 1;
+
+	/* Kept. */
+	error = ph_store_phone_message(&message, &contact, &at, &merge);
+	ph_log("ITEM request=%u dir=%u length=%lu merge=%d error=%d", item->request, item->direction, (unsigned long)item->length, merge, error);
+	if (error != 0)
+		return;
+	phone->dirty = 1;
+
+	/* Its handle on the phone, for marking it read. */
+	if (!item->partial)
+		ph_handle_keep(phone, item->key, item->handle);
+
+	/* Read here and not on the phone: marked there. */
+	contacts = ph_contacts(&count);
+	kept = &contacts[contact].items[at];
+	if (merge == PH_MERGE_KNOWN && !message.outgoing && !message.read && kept->state == PH_STATE_READ && !item->partial)
+		ph_mark_add(phone, item->handle);
+
+	/* Only a new message that came by itself, not read, is told and shown. */
+	if (merge != PH_MERGE_NEW || item->request != 0U || message.outgoing || message.read)
+		return;
+
+	/* Shown now: read at once, the timeline at its end. */
+	if (contact == phone->view.selected && !phone->view.adding) {
+		ph_read_conversation(phone, contact);
+		phone->view.to_end = 1;
+	}
+
+	/* Told: the other side's name and the first line. */
+	(void)snprintf(title, sizeof(title), "Message from %s", contacts[contact].name);
+	(void)snprintf(body, sizeof(body), "%.*s", (int)strcspn(item->text, "\n"), item->text);
+	(void)kl_app_notify(phone->app, title, body);
+}
+
+/*
+ * Takes the link's new state: the send button grey when the paired phone
+ * takes no text, why it does not work told, and a synchronisation when its
+ * messages become ready.
+ */
+static void
+ph_link(
+	struct ph_window *phone)
+{
+	struct kl_phone_link link;
+	unsigned was;
+	int permission;
+	int no_mas;
+	int error;
+	int same;
+
+	/* The state. */
+	error = kl_system_phone_link(phone->system, &link, sizeof(link));
+	if (error != 0)
+		return;
+	was = PH_MESSAGES_OFF;
+	if (phone->link_known)
+		was = phone->link.messages;
+	same = strcmp(link.why, phone->link.why);
+	phone->link = link;
+	phone->link_known = 1;
+	ph_log("LINK backend=%u messages=%u send=%u notify=%u owner=%u why=%s", link.backend, link.messages, link.can_send, link.notify, link.owner, link.why);
+
+	/* The send button. */
+	phone->view.cannot_send = 0;
+	if (link.backend == PH_BACKEND_BLUETOOTH && !link.can_send)
+		phone->view.cannot_send = 1;
+	phone->dirty = 1;
+
+	/* Why the phone's messages do not work, once for each change. */
+	permission = strcmp(link.why, "permission");
+	no_mas = strcmp(link.why, "no-mas");
+	if (same != 0 && link.backend == PH_BACKEND_BLUETOOTH) {
+		if (permission == 0)
+			ph_view_notice(&phone->view, "Allow access to the messages on the phone.", kl_clock_us());
+		else if (no_mas == 0)
+			ph_view_notice(&phone->view, "The phone does not share its messages.", kl_clock_us());
+	}
+
+	/* Ready now: a synchronisation (and at once the five minutes' and the deep one looked at). */
+	if (link.messages == PH_MESSAGES_READY && was != PH_MESSAGES_READY && link.backend != 0U) {
+		ph_sync_want(phone, PH_SYNC_NORMAL);
+		phone->sync.next_quick = time(NULL) + PH_QUICK_SECONDS;
+		phone->sync.deep_check_at = 0;
+	}
+}
+
+/* Tells whether the texts go to the paired phone: the compositor carries its messages and the backend is it. */
+static int
+ph_paired(
+	const struct ph_window *phone)
+{
+	/* The messages carried, and the link of the paired phone. */
+	if (phone->system == NULL || !phone->phone_sync || !phone->link_known)
+		return 0;
+	if (phone->link.backend != PH_BACKEND_BLUETOOTH)
+		return 0;
+
+	/* Succeeded: paired. */
+	return 1;
+}
+
+/* Asks a synchronisation (PH_SYNC_*): after the one running, which a drop runs again. */
+static void
+ph_sync_want(
+	struct ph_window *phone,
+	unsigned kind)
+{
+	/* A drop during one makes it run again. */
+	if (phone->sync.running != 0U && kind == PH_SYNC_NORMAL)
+		phone->sync.again = 1;
+
+	/* Wanted. */
+	phone->sync.wanted |= kind;
+}
+
+/*
+ * Starts the synchronisation wanted when none runs and the phone's
+ * messages are ready (section 6.2): the first since thirty days ago, at
+ * most five hundred a folder; the next since the mark; the five minutes'
+ * since ten minutes before the last start; the deep one over the last
+ * seven days.
+ */
+static void
+ph_sync_start(
+	struct ph_window *phone)
+{
+	struct ph_sync *sync;
+	int64_t since;
+	int64_t deep_at;
+	time_t now;
+	int error;
+
+	/* One at a time, when wanted, the phone's messages ready, and not waiting to try again. */
+	sync = &phone->sync;
+	now = time(NULL);
+	if (!phone->phone_sync || sync->running != 0U || sync->wanted == 0U)
+		return;
+	if (!phone->link_known || phone->link.messages != PH_MESSAGES_READY || phone->link.backend == 0U)
+		return;
+	if (sync->retry_at != 0 && now < sync->retry_at)
+		return;
+	sync->retry_at = 0;
+
+	/* The mark (none: the first). */
+	since = 0;
+	deep_at = 0;
+	error = ENOENT;
+	if (phone->link.address[0] != '\0')
+		error = ph_store_sync_load(phone->link.address, &since, &deep_at);
+
+	/* The kind: over the mark first, then the deep one, then the five minutes'. */
+	memset(sync->cursor, 0, sizeof(sync->cursor));
+	sync->first = 0;
+	sync->capped = 0;
+	sync->again = 0;
+	sync->limit = 0U;
+	if ((sync->wanted & PH_SYNC_NORMAL) != 0U || error != 0) {
+		sync->running = PH_SYNC_NORMAL;
+		sync->since = since;
+		if (error != 0) {
+			sync->first = 1;
+			sync->since = (int64_t)now - (int64_t)PH_SYNC_FIRST_DAYS * PH_DAY_SECONDS;
+			sync->limit = PH_SYNC_FIRST_LIMIT;
+		}
+
+		/* The kinds it covers are done. */
+		sync->wanted &= ~(PH_SYNC_NORMAL | PH_SYNC_QUICK);
+	} else if ((sync->wanted & PH_SYNC_DEEP) != 0U) {
+		sync->running = PH_SYNC_DEEP;
+		sync->since = (int64_t)now - (int64_t)PH_DEEP_DAYS * PH_DAY_SECONDS;
+		sync->wanted &= ~PH_SYNC_DEEP;
+	} else {
+		sync->running = PH_SYNC_QUICK;
+		sync->since = since;
+		if (sync->last_start != 0)
+			sync->since = sync->last_start - PH_QUICK_OVERLAP;
+		sync->wanted &= ~PH_SYNC_QUICK;
+	}
+
+	/* Not before the epoch. */
+	if (sync->since < 0)
+		sync->since = 0;
+
+	/* Its first page. */
+	sync->started = (int64_t)now;
+	sync->last_start = sync->started;
+	ph_log("SYNC start kind=%u first=%d limit=%u", sync->running, sync->first, sync->limit);
+	ph_sync_page(phone);
+}
+
+/* Asks the synchronisation's next page (busy: asked again at the next round). */
+static void
+ph_sync_page(
+	struct ph_window *phone)
+{
+	struct ph_sync *sync;
+	uint32_t request;
+	int error;
+
+	/* The page from the cursor. */
+	sync = &phone->sync;
+	error = kl_system_phone_sync(phone->system, KL_PHONE_MESSAGES, sync->since, sync->limit, sync->cursor, PH_SYNC_COUNT, &request);
+	if (error == EBUSY) {
+		sync->request = 0U;
+		return;
+	}
+
+	/* Another failure ends it. */
+	if (error != 0) {
+		ph_log("SYNC page error=%d", error);
+		ph_sync_end(phone, 0);
+		return;
+	}
+
+	/* Asked: its items are counted until its answer. */
+	sync->request = request;
+	sync->asked_us = kl_clock_us();
+	sync->items = 0U;
+}
+
+/*
+ * Takes the answer of the synchronisation's page: the next page while
+ * more follow, the end when none does; a page whose items did not all
+ * come, a stale cursor or a failure ends it without moving the mark.
+ */
+static void
+ph_sync_answer(
+	struct ph_window *phone,
+	int error)
+{
+	char cursor[KL_PHONE_CURSOR_MAX];
+	struct ph_sync *sync;
+	unsigned skipped;
+	unsigned capped;
+	unsigned kind;
+	unsigned count;
+	unsigned more;
+	int found;
+
+	/* The page answered. */
+	sync = &phone->sync;
+	found = ENOENT;
+	if (error == 0)
+		found = kl_system_phone_page_end(phone->system, sync->request, cursor, sizeof(cursor), &more, &count, &skipped, &capped);
+	sync->request = 0U;
+
+	/* A stale cursor: the same synchronisation again from the start. */
+	if (error == ESTALE) {
+		kind = sync->running;
+		ph_sync_end(phone, 0);
+		ph_sync_want(phone, kind);
+		return;
+	}
+
+	/* A failure: the mark stays. */
+	if (error != 0 || found != 0) {
+		ph_log("SYNC failed error=%d", error);
+		ph_sync_end(phone, 0);
+		return;
+	}
+
+	/* Items lost on the way: again, three times in a row, then after ten minutes. */
+	if (count != sync->items) {
+		ph_log("SYNC short count=%u items=%u", count, sync->items);
+		sync->short_pages++;
+		kind = sync->running;
+		ph_sync_end(phone, 0);
+		ph_sync_want(phone, kind);
+		if (sync->short_pages >= PH_SYNC_TRIES) {
+			sync->short_pages = 0U;
+			sync->retry_at = time(NULL) + PH_SYNC_RETRY_SECONDS;
+		}
+
+		/* Tried again later. */
+		return;
+	}
+
+	/* The next page. */
+	if (capped)
+		sync->capped = 1;
+	if (more) {
+		(void)snprintf(sync->cursor, sizeof(sync->cursor), "%s", cursor);
+		ph_sync_page(phone);
+		return;
+	}
+
+	/* Succeeded: the end. */
+	sync->short_pages = 0U;
+	ph_sync_end(phone, 1);
+}
+
+/*
+ * Ends the synchronisation: one that ended well moves the mark (a day
+ * before it started; the deep one its own time), tells a first one cut by
+ * the limit, and runs once more after a drop that came meanwhile.
+ */
+static void
+ph_sync_end(
+	struct ph_window *phone,
+	int succeeded)
+{
+	struct ph_sync *sync;
+	int64_t since;
+	int64_t deep_at;
+	unsigned kind;
+	int again;
+	int error;
+
+	/* Not running any more. */
+	sync = &phone->sync;
+	kind = sync->running;
+	again = sync->again;
+	sync->running = 0U;
+	sync->request = 0U;
+	sync->again = 0;
+	ph_log("SYNC end kind=%u succeeded=%d capped=%d", kind, succeeded, sync->capped);
+	if (!succeeded)
+		return;
+
+	/* The mark of the phone. */
+	since = 0;
+	deep_at = 0;
+	if (phone->link.address[0] != '\0') {
+		(void)ph_store_sync_load(phone->link.address, &since, &deep_at);
+		if (kind == PH_SYNC_DEEP)
+			deep_at = (int64_t)time(NULL);
+		else
+			since = sync->started - PH_DAY_SECONDS;
+		error = ph_store_sync_save(phone->link.address, since, deep_at);
+		if (error != 0)
+			ph_log("SYNC save error=%d", error);
+	}
+
+	/* Ended well: the texts not sent are looked at again. */
+	sync->last_done = time(NULL);
+	phone->stale_check_at = 0;
+
+	/* A first one cut by the limit. */
+	if (sync->first && sync->capped)
+		ph_view_notice(&phone->view, "Some older messages were not brought in.", kl_clock_us());
+
+	/* A drop meanwhile: once more. */
+	if (again)
+		ph_sync_want(phone, PH_SYNC_NORMAL);
+}
+
+/*
+ * Looks after the synchronisation's times: a page not answered in time
+ * fails it, the five minutes' one while the phone tells no new message,
+ * and the deep one once a day.
+ */
+static void
+ph_sync_timers(
+	struct ph_window *phone)
+{
+	struct ph_sync *sync;
+	int64_t since;
+	int64_t deep_at;
+	uint64_t now_us;
+	time_t now;
+	int error;
+
+	/* A page not answered in time. */
+	sync = &phone->sync;
+	now_us = kl_clock_us();
+	if (sync->request != 0U && now_us - sync->asked_us >= PH_SYNC_ANSWER_US) {
+		ph_log("SYNC timeout");
+		ph_sync_end(phone, 0);
+	}
+
+	/* A page busy at the library: asked again. */
+	if (sync->running != 0U && sync->request == 0U)
+		ph_sync_page(phone);
+
+	/* Only while the phone's messages are ready. */
+	if (!phone->phone_sync || !phone->link_known || phone->link.messages != PH_MESSAGES_READY)
+		return;
+	now = time(NULL);
+
+	/* No new message told: every five minutes. */
+	if (!phone->link.notify && now >= sync->next_quick) {
+		sync->next_quick = now + PH_QUICK_SECONDS;
+		ph_sync_want(phone, PH_SYNC_QUICK);
+	}
+
+	/* The deep one when the last is a day old (looked at every hour). */
+	if (now < sync->deep_check_at || phone->link.address[0] == '\0')
+		return;
+	sync->deep_check_at = now + PH_STALE_SECONDS;
+	since = 0;
+	deep_at = 0;
+	error = ph_store_sync_load(phone->link.address, &since, &deep_at);
+	if (error == 0 && (int64_t)now - deep_at >= PH_DAY_SECONDS)
+		ph_sync_want(phone, PH_SYNC_DEEP);
+}
+
+/*
+ * Looks at the texts to the paired phone still sending or unknown an hour
+ * on (ws197-p004 section 6.3): a synchronisation first, and those still
+ * not matched after it failed.
+ */
+static void
+ph_stale_texts(
+	struct ph_window *phone)
+{
+	const struct ph_contact *contacts;
+	const struct ph_item *item;
+	unsigned stale;
+	size_t count;
+	size_t index;
+	size_t at;
+	time_t now;
+	int failing;
+	int paired;
+
+	/* Once a minute, for the paired phone. */
+	now = time(NULL);
+	if (now < phone->stale_check_at)
+		return;
+	phone->stale_check_at = now + PH_CHECK_SECONDS;
+	paired = ph_paired(phone);
+	if (!paired)
+		return;
+
+	/* After a synchronisation asked for them that ended well, they failed. */
+	failing = 0;
+	if (phone->stale_sync_at != 0 && phone->sync.last_done >= phone->stale_sync_at)
+		failing = 1;
+
+	/* Each text sending or unknown an hour on. */
+	stale = 0U;
+	contacts = ph_contacts(&count);
+	for (index = 0U; index < count; index++) {
+		for (at = 0U; at < contacts[index].item_count; at++) {
+			item = &contacts[index].items[at];
+			if (item->kind != PH_TEXT || !item->outgoing)
+				continue;
+			if (item->state != PH_STATE_SENDING && item->state != PH_STATE_UNKNOWN)
+				continue;
+			if (now - item->date < PH_STALE_SECONDS)
+				continue;
+			stale++;
+			if (failing)
+				(void)ph_store_set_state((long)index, at, PH_STATE_FAILED, NULL);
+		}
+	}
+
+	/* None, or failed now. */
+	if (stale == 0U || failing) {
+		if (failing && stale != 0U) {
+			ph_log("STALE failed=%u", stale);
+			phone->dirty = 1;
+		}
+
+		/* Nothing waits for a synchronisation. */
+		phone->stale_sync_at = 0;
+		return;
+	}
+
+	/* A synchronisation for them first. */
+	if (phone->stale_sync_at == 0) {
+		phone->stale_sync_at = now;
+		ph_sync_want(phone, PH_SYNC_NORMAL);
+	}
+}
+
+/* Keeps a key's handle on the phone (the oldest goes when all are taken). */
+static void
+ph_handle_keep(
+	struct ph_window *phone,
+	const char *key,
+	const char *handle)
+{
+	unsigned index;
+	int same;
+
+	/* The key's own, made new. */
+	for (index = 0U; index < PH_HANDLES_MAX; index++) {
+		same = strcmp(phone->handles[index].key, key);
+		if (same == 0) {
+			(void)snprintf(phone->handles[index].handle, sizeof(phone->handles[index].handle), "%s", handle);
+			return;
+		}
+	}
+
+	/* Over the oldest. */
+	index = phone->handle_next;
+	phone->handle_next = (phone->handle_next + 1U) % PH_HANDLES_MAX;
+	(void)snprintf(phone->handles[index].key, sizeof(phone->handles[index].key), "%s", key);
+	(void)snprintf(phone->handles[index].handle, sizeof(phone->handles[index].handle), "%s", handle);
+}
+
+/* Finds a key's handle on the phone (NULL when none was seen). */
+static const char *
+ph_handle_of(
+	const struct ph_window *phone,
+	const char *key)
+{
+	unsigned index;
+	int same;
+
+	/* Each kept. */
+	for (index = 0U; index < PH_HANDLES_MAX; index++) {
+		if (phone->handles[index].key[0] == '\0')
+			continue;
+		same = strcmp(phone->handles[index].key, key);
+		if (same == 0)
+			return phone->handles[index].handle;
+	}
+
+	/* None. */
+	return NULL;
+}
+
+/* Queues a handle to be marked read on the phone (none when the queue is full: the next synchronisation tells it again). */
+static void
+ph_mark_add(
+	struct ph_window *phone,
+	const char *handle)
+{
+	/* Room. */
+	if (phone->mark_count == PH_MARKS_MAX || handle[0] == '\0')
+		return;
+
+	/* After the others. */
+	(void)snprintf(phone->marks[phone->mark_count], sizeof(phone->marks[0]), "%s", handle);
+	phone->mark_count++;
+}
+
+/* Asks the next mark on the phone once the last is answered. */
+static void
+ph_mark_next(
+	struct ph_window *phone)
+{
+	uint32_t request;
+	int paired;
+	int error;
+
+	/* Each mark in turn, while the paired phone carries them. */
+	paired = ph_paired(phone);
+	while (paired && phone->mark_request == 0U && phone->mark_count > 0U) {
+		error = kl_system_phone_mark_read(phone->system, phone->marks[0], &request);
+		memmove(phone->marks[0], phone->marks[1], (phone->mark_count - 1U) * sizeof(phone->marks[0]));
+		phone->mark_count--;
+		if (error == 0)
+			phone->mark_request = request;
+	}
+}
+
+/*
+ * Marks a conversation read here and its messages of the paired phone
+ * read there (one at a time; those without a handle yet are marked when a
+ * synchronisation brings it).
+ */
+static void
+ph_read_conversation(
+	struct ph_window *phone,
+	long contact)
+{
+	const struct ph_contact *contacts;
+	const struct ph_item *item;
+	const char *handle;
+	const char *key;
+	size_t count;
+	size_t index;
+
+	/* A contact that is there. */
+	contacts = ph_contacts(&count);
+	if (contact < 0 || (size_t)contact >= count)
+		return;
+
+	/* Each unread message of the phone with a handle seen. */
+	for (index = 0U; index < contacts[contact].item_count; index++) {
+		item = &contacts[contact].items[index];
+		if (item->state != PH_STATE_UNREAD || item->source == NULL)
+			continue;
+		key = strrchr(item->source, ':');
+		if (key == NULL)
+			continue;
+		handle = ph_handle_of(phone, key + 1);
+		if (handle != NULL)
+			ph_mark_add(phone, handle);
+	}
+
+	/* Read here. */
+	(void)ph_store_mark_read(contact);
 }
