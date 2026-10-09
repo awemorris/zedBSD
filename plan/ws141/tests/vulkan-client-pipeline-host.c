@@ -135,6 +135,45 @@ ws141_client_encode_recording(
 }
 
 /*
+ * Copies a real public buffer-copy recording with caller-owned exact byte regions.
+ */
+void
+ws141_client_encode_buffer_copy(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t source_id,
+	uint64_t destination_id,
+	const VkBufferCopy *regions,
+	uint32_t count)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object buffers[2];
+
+	/* These temporary client handles supply only actual wire IDs; the actual API copies all region bytes into its recording. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(buffers, 0, sizeof(buffers));
+	buffers[0].wire_id = source_id;
+	buffers[1].wire_id = destination_id;
+	vkCmdCopyBuffer(&command, (VkBuffer)(uintptr_t)&buffers[0], (VkBuffer)(uintptr_t)&buffers[1], count, regions);
+
+	/* The actual copied recording retires only after all complete client bytes enter the fixture's wire batch. */
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: no caller-owned buffer handle or region array remains in the immutable wire result. */
+	return;
+}
+
+/*
  * Copies one real public core image-copy or image-blit command with application-owned endpoint arrays.
  */
 void
