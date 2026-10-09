@@ -175,10 +175,14 @@ drv_rpi4_firmware_property(
 {
 	int error;
 
-	/* Refuses a request without storage or larger than the buffer allows. */
-	if (values == NULL || answered == NULL)
+	/* Requires answer metadata even for a notification without values. */
+	if (answered == NULL)
 		return EINVAL;
-	if (capacity == 0 || capacity > DRV_RPI4_FIRMWARE_MAX_VALUES)
+
+	/* Nonempty value buffers require storage; zero-capacity tags carry none. */
+	if (capacity != 0 && values == NULL)
+		return EINVAL;
+	if (capacity > DRV_RPI4_FIRMWARE_MAX_VALUES)
 		return EINVAL;
 	if (request_count > capacity)
 		return EINVAL;

@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: finished（i08はuncleared: WS048の限定mailbox修正の適用判断待ち。コード・host/build結果を保存、再開は回答後）
+- Status: active（i09: ユーザーがmailbox限定修正とmain mergeを承認、実source適用・確認・統合中）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -16,6 +16,7 @@
 | ws141-codex-20261009-i06 | p004/V7の1×1 noop command list生成 | cleared（software生成のみ） | BCL/RCL/tile sub-listを固定4.2 XMLと独立に照合しPASS。容量・VA・領域の重なり・失敗時のbyte保持を確認。rpi4 y/n build warning/error 0。GPUへの投入・起動への追加・実機clearanceは対象外 |
 | ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | cleared（統合のみ） | 最新mainとの統合版でnoop/XMLと既存4host試験PASS、rpi4 y/n build warning/error 0。merge 16024f1b9を共有mainへ取り込み済み。Master更新・実機clearance・pushは対象外 |
 | ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
+| ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | in-progress | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -138,3 +139,21 @@
 - 提案のみの確認: `build/ws141-init-i08/empty-tag-proposal/`にsource/testの作業コピーを置き、既存WS048 modelをコンパイルして通常/USB notificationと値なしの32 byte tag/answered=0を確認。`ASAN_OPTIONS=detect_leaks=0 .../firmware-host-test /home/awe/zedBSD-claude1/vendor/raspberrypi-firmware/boot/bcm2711-rpi-4-b.dtb` → 200163 checks PASS、ASan/UBSan。最初の実行はsandboxのptrace下でLeakSanitizerが終了時に使えず失敗したため、leak検出のみ無効化。これは提案の確認で、実source適用済みという証拠ではない。
 - 再開: 限定修正の承認ならそのexact scopeを適用し、既存mailbox hostと対象buildを確認して新attemptへ保存。その後最新mainとの独立統合と検証。Q1への引渡しの回答なら依存をQ1へ残し、当該依存の統合を確認するまで表示開始成功扱いにしない。回答前のmain mergeは行わない。
 - 実機はユーザーが後で実施、QEMUはQ1/T1経由。途中の画面消失は承認済みだが、実機IRQ・scanout・console buffer寿命・T1回帰、flip/合成/resident登録・V3D投入・p007は残る。Master/共有Queue/Guardrail/standards/他WS投影はQ1担当で未更新。push/外部連絡は無し。
+
+
+## i09の追加承認（2026-10-09）
+
+- 承認者/出典: このchatのユーザー、原文「mainにマージしてOKです。mailbox修正も承認します。」。
+- 承認範囲: `proposed/firmware-empty-tag.diff`の実mailbox source/header/既存host試験の3 pathと、i08のWS141初期scanout成果のmain統合。HAL APIは変更しない。i08のuncleared履歴は保存する。
+- 実sourceのmailbox host、display hostとrpi4 driver y/nのnamed kernel buildを確認し、最新mainとの専用worktreeで統合検証してから共有mainへ取り込む。実機/whole Phase・WS acceptanceは未達のまま。Master/共有Queue/Guardrail/他WSの記録投影とpushは対象外。
+
+
+## i09: mailbox実sourceの確認（2026-10-09）
+
+- 承認済み提案をそのまま`src/drivers/platform/rpi4/rpi4-firmware.c/.h`・`plan/ws048/tests/firmware-host-test.c`へ適用。capacity0/request_count0のtagはvalues=NULLを許可し、非emptyのstorage・上限・request_countの検査は保持。空tagのmodelがend markerを値で上書きしないよう既存host modelを修正。HAL API変更無し。
+- `make -f plan/ws048/tests/host-test.mk OUT=build/ws141-init-i09/mailbox-host build/ws141-init-i09/mailbox-host/firmware-host-test` → 実mailbox clientのhost executableをbuild（ASan/UBSan）。`ASAN_OPTIONS=detect_leaks=0 build/ws141-init-i09/mailbox-host/firmware-host-test /home/awe/zedBSD-claude1/vendor/raspberrypi-firmware/boot/bcm2711-rpi-4-b.dtb` → 200163 checks PASS。値なし32 byte通知/answered0と通常tag/USB通知を確認。LSanは既知のsandbox ptrace制約により無効、実firmwareではない。
+- `sh plan/ws141/tests/display-host-test.sh build/ws141-display-i09` → program/実executor+IRQ sourceの2試験PASS。
+- `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とBUILD=n・driver=nの同target → exit0、warning/error0、ELF/image checker各PASS。ログ`build/ws141-init-i09/kernel-{y,n}.log`。SHA256: y `defcfcaeb820f13b050ffaa1a9ecb1ad74144c2af36fa7d5dc4af1261127858c`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
+- mailbox変更箇所の全文規約/所有/null値を使用するloopの境界をreview、補助style-check source/header total0、git diff --check0。formatter形状は既存ANSI定義/paragraphを保持、無関係なformatはしない。
+- i08で拒否された通知依存をsoftware上で解消。i08のuncleared履歴を遡って変更せず、このi09に結果を保存。最新main開始点`b224d174c150980a0cfe49f53ef5df71a7b455b5`はcleanで、i08起点以降の対象source/WS141には差分無し。次は専用worktreeで最新mainとのmerge・対象試験/buildを確認し、mainへ取り込み。
+- WS048 p003/WS側のAPI拡張の記録投影はQ1へ残す（承認された他WS編集は提案の3 pathのみ）。WS048全体の再開や実機受け入れをこの依存修正で宣言しない。

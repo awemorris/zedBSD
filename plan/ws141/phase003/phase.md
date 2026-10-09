@@ -2,7 +2,7 @@
 
 # ws141-p003: display（firmware出力先の特定 → Linux順の再初期化 → 初回scanout → flip/合成/統合）
 
-Status: uncleared（i08: host/build PASS、必須のWS048容量0tag適用判断待ち。実機は後で確認）
+Status: in-progress（i09: mailbox修正を承認・適用、host/build PASS、main統合中。実機は後で確認）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: none
@@ -70,3 +70,8 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 - 未達: 実mailbox clientは値なしtagを拒否するため、現kernelではR0 op0 EINVALでMMIO write 0。WS048の3 pathの限定提案を作業コピーで確認したが実source未適用、適用判断のユーザー回答待ち。したがってi08はuncleared、以前のwhole Phaseの実機/flip/合成/統合も未達。build PASSをnative scanout成功とは扱わない。
 - 旧「N1/N2で画面が変わらない」という受け入れ条件は今回の再初期化についてwithdrawn。新hardware条件は元のport/modeへ戻り、R0 ok（採用された新listのframe）、console framebufferの寿命/内容・画面・vblank/underrunを実機で確認すること。framebuffer geometryの一致だけではRAM寿命を証明しない。実機はユーザーが後で実施、QEMUはQ1/T1経由で後続回帰として残す。
 - 再開は限定mailbox修正の承認/依存統合から。同じPhaseの新attemptに前回unclearedを保持して結果を記録し、最新mainとの統合検証へ進む。HALの契約拡張が必要なら具体差分を事前提示。exact commands/参照版/hash・skipped checks・Linux全driverとの相違は[実行記録i08](../execution-20261009.md#i08の結果と再開条件2026-10-09)。WSへの設計変更/受け入れへの影響は[WS記録](../ws.md#i08の設計変更と依存待ち2026-10-09)。
+
+
+## i09: 依存判断の解決（2026-10-09）
+
+ユーザー「mainにマージしてOKです。mailbox修正も承認します。」を取得。i08の未適用mailbox依存を提案のsource/header/host3 pathへ適用して解消し、実sourceのmailbox hostとdisplay host、rpi4 y/n build warning/error0を確認した。p003をin-progressへ戻し、最新mainとの統合検証へ進む。以前のi08 unclearedは保持。whole Phaseの実機/flip/合成/登録の受け入れはまだ未達。結果とcommandsは[実行記録i09](../execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)、WSへの影響は[WS記録](../ws.md#i09-依存修正とmergeの承認2026-10-09)。

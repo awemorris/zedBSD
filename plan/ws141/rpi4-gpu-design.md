@@ -242,3 +242,8 @@ P0 → N0 → N1 → N2 → P1 → P2 → P3（CPU で埋めた plane）→ P5�
 ## 2026-10-09 i08の保存状態
 
 初期表示R0を生成/実行/IRQ採用確認の独立構造で実装し、両portのhostとrpi4 y/n buildを確認した。値なしの表示終了通知をWS048 clientが拒否する必須依存は未適用のため、実kernelの再初期化はop0 EINVALで始まらない。i08/p003はuncleared。限定差分の適用回答後に依存確認・統合検証へ再開する。scope/相違/実機を含む未達とcommandsは[実行記録](execution-20261009.md#i08の結果と再開条件2026-10-09)、WS acceptanceへの影響は[WS記録](ws.md#i08の設計変更と依存待ち2026-10-09)。
+
+
+## 2026-10-09 i09の依存解決
+
+ユーザーがmailbox修正とmain mergeを承認。容量0tagの限定修正を実sourceへ適用して実mailbox hostを確認し、i08で拒否されていた通知依存を解消した。display host/rpi4 y/n build PASS、最新mainとの統合を検証中。i08のuncleared履歴を保持し、実機での初期scanout・buffer寿命/IRQと後続機能の受け入れは別に残す。[実行記録i09](execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)。
