@@ -135,6 +135,50 @@ strncasecmp(const char *a, const char *b, size_t n)
 	}
 	return n ? tolower((unsigned char)*a) - tolower((unsigned char)*b) : 0;
 }
+
+/*
+ * Compares two strings without regard to case, in a locale.  The single-byte
+ * case mapping is the same in every locale zedBSD has, so the locale changes
+ * nothing.
+ */
+int
+strcasecmp_l(
+	const char *a,
+	const char *b,
+	locale_t locale)
+{
+	int order;
+
+	(void)locale;
+
+	/* The comparison the current locale makes. */
+	order = strcasecmp(a, b);
+
+	/* Succeeded: the order of the two strings. */
+	return order;
+}
+
+/*
+ * Compares at most n bytes of two strings without regard to case, in a
+ * locale; the locale changes nothing, as for strcasecmp_l().
+ */
+int
+strncasecmp_l(
+	const char *a,
+	const char *b,
+	size_t n,
+	locale_t locale)
+{
+	int order;
+
+	(void)locale;
+
+	/* The comparison the current locale makes. */
+	order = strncasecmp(a, b, n);
+
+	/* Succeeded: the order of the two prefixes. */
+	return order;
+}
 char *
 strcasestr(const char *h, const char *n)
 {

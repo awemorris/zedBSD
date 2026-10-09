@@ -3,14 +3,27 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: planning（要検討・ブロック、2026-10-05 ユーザー「要検討状態にしてブロックする」）。以前: incomplete
+Status: incomplete（2026-10-09 ユーザーが独立CodexセッションへWS141を割り当て、再開。実機確認は後で実施）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
-Queue: q691（p001）、q695（p002）
-Resume point: p002（q695）の骨格を実装済み・QEMU の回帰と実機の写真待ち（2026-10-04）。p001 の文書（[rpi4-gpu-design.md](rpi4-gpu-design.md)・[rpi4-gpu-license-audit.md](rpi4-gpu-license-audit.md)）がそろい review を反映済み（2026-10-04、q691-i01）。判断の項目 1〜17 は決定（1 は事実として使う、2〜17 は既定案、2026-10-04 ユーザー）。
+Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
+Resume point: 独立Codexセッションを開始（2026-10-09、基点a05865278）。骨格・N0の現行rpi4 kernelはdriver y/nともbuild exit 0、warning/error 0。stage/list host試験PASS（[実行記録](execution-20261009.md)）。N1のraw listコピー/予約範囲を避ける配置と、V5の4 KiBページ表の生成/解除を追加しhost PASS・y/n build warning/error 0。V7の1×1 noop CL生成も追加し、固定4.2 XMLとのbyte照合・host・build PASS。これらを起動からはまだ呼ばない。次のsoftware段はV8のclear/store。hardwareはN0の版のQEMU回帰をQ1経由でT1へ、ユーザーの実機P0・V0・N0の写真で観測値を確認し、N1/V1のhardware処理と統合を進める。p001のQ1判定は残る。旧temp資料は旧P2 cacheから復旧し、Linux/Mesaの監査対象121 fileのSHA256一致、630定数の旧名が現行driverに0件を確認済み。実機はユーザー回答により後で実施。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
+
+## 独立セッションの担当（2026-10-09）
+
+- ユーザー「WS141をあなたが作業します。P1,P2とは別なセッションです。ws141/ws.mdはあなたがそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」に基づく。
+- 2026-10-09のユーザーの再確認: パッチの提供先はQ1、統合もQ1。この分担を保持する。
+- 追加承認（2026-10-09）: ユーザー「パッチの影響範囲が狭いので、あなたがマージしてOKです。」により、今回のN1/V5準備のmerge担当をCodexへ変更。mainへmerge commit `a326c5e24`で統合済み。最新mainとの統合版でもhost4試験PASS・rpi4 y/n build warning/error 0。詳細は[実行記録i05](execution-20261009.md#i05-mainへの統合2026-10-09)。
+- 継続のV7 noop生成も、同じ狭いWS141の変更としてCodexがmerge `16024f1b9`でmainへ統合済み。統合版のnoop/XML照合・既存4host試験とrpi4 y/n buildは全てPASS・warning/error 0。[実行記録i07](execution-20261009.md#i07の統合結果2026-10-09)。V7の実投入・実機clearanceは保持。
+- 担当: このCodexセッション。`plan/ws141/ws.md` は担当が排他的に更新する。共有のMaster・Queue・Guardrail・他WSは読み取りだけ。共有記録の投影・T1依頼は引き続きQ1。
+- 独立worktree: `/home/awe/zedBSD-claude1/.claude/worktrees/ws141-codex`、branch `codex/ws141-rpi4-gpu`、開始commit `a05865278`。sourceと成果のbuildはこのworktree内で行う。共有LLVMは読み取り専用のsymlinkで参照し、変更・再buildはしない。
+- ユーザー回答「実機確認は後で行う」。p002のP0・V0、p003のN0以降の実機確認は未実施のまま保持し、実機観測が必要な依存は満たした扱いにしない。
+- ユーザー「Q1でのマージは遅らせます。続きをお願いします。」により未マージの変更をこのbranchに積み上げる。N1の配置/コピーとV5のページ表を純粋な準備処理として実装しhost/buildを確認。詳細は[実行記録](execution-20261009.md)。
+- 最初の確認は終了（driver y/n build・stage/list host PASS）。続いて作業資料を復旧した。範囲: p002骨格・p003/N0の既存実装と現在のbuildの整合を調べ、rpi4のdriver有効／無効build、既存の短いhost試験を実施。N1の前に必要な実機N0の写真は後続の再開条件。
+- Q1へ渡す物: WIP commit、対象pathだけのbinary対応patch、基点・検証・実機待ち・残件の記録。
 
 ## 単一目標
 
@@ -55,13 +68,13 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
-| [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み、QEMU の回帰と実機待ち） | p001 | 4h |
-| [p003](phase003/phase.md) | display（[design](rpi4-gpu-design.md) の N0〜N2・P1〜P3・P5、P4 は後）: firmware の framebuffer の readout と引き継ぎ、HVS の plane、pixelvalve・HDMI の mode set、vblank と page flip（i915 の resident display を手本に） | planning | p002 | 6h〜 |
-| p004 | V3D: power・MMU・buffer object、bin/render の control list と CSD の job、reset、fence | planning | p002 | 6h〜 |
+| [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
+| [p003](phase003/phase.md) | display（[design](rpi4-gpu-design.md) の N0〜N2・P1〜P3・P5、P4 は後）: firmware の framebuffer の readout と引き継ぎ、HVS の plane、pixelvalve・HDMI の mode set、vblank と page flip（i915 の resident display を手本に） | in-progress（N0とN1の配置/コピー準備を実装、build・host PASS。N1のwrite/readback/pollは実機N0観測後） | p002 | 6h〜 |
+| [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | p005 | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planning | p003・p004 | 4h〜 |
 | p006 | 実行器（Vulkan・compiler）の方針の決定（別 WS にするか） | planning | p004 | 2h |
 | p007 | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planning | 全て | 3〜4h |
 
 ## 要検討・ブロック（2026-10-05）
 
-ユーザーの指示で要検討の状態にしてブロックする。ユーザーと方針を決めるまで Queue に入れない。
+2026-10-05のユーザー指示で要検討・ブロックしていた。2026-10-09の独立Codexセッションへの割当で作業を再開。実機観測を必要とする段階の依存は、実機確認が後になるという回答に従い未達として保持する。

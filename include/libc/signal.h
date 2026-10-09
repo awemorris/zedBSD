@@ -53,6 +53,9 @@ void psignal(int, const char *);
 void psiginfo(const siginfo_t *, const char *);
 void abort(void) __attribute__((__noreturn__));
 int killpg(pid_t, int);
+/* Signals to and the signal mask of a thread, which POSIX declares here as well as in <pthread.h>. */
+int pthread_kill(pthread_t, int);
+int pthread_sigmask(int, const sigset_t *, sigset_t *);
 
 #if __KERN_LEGACY_VISIBLE
 int sighold(int);

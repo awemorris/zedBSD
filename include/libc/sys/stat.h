@@ -17,6 +17,18 @@ extern "C" {
 #include <time.h>
 #include <uapi/stat.h>
 
+/*
+ * Whether a stat buffer is a message queue, a semaphore, a shared memory
+ * object or a typed memory object.  zedBSD does not make these into files
+ * of a type of their own (shared memory objects are ordinary files under
+ * /dev/shm), so no buffer is one: each test is false, as the standard
+ * allows, and still evaluates its argument's type.
+ */
+#define S_TYPEISMQ(buf) ((void)(buf), 0)
+#define S_TYPEISSEM(buf) ((void)(buf), 0)
+#define S_TYPEISSHM(buf) ((void)(buf), 0)
+#define S_TYPEISTMO(buf) ((void)(buf), 0)
+
 int fstat(int, struct stat *);
 int stat(const char *, struct stat *);
 int lstat(const char *, struct stat *);

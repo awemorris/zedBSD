@@ -26,6 +26,12 @@
 #define WIFSTOPPED(status) (((status) & 0xff) == 0x7f)
 #define WSTOPSIG(status) (((status) >> 8) & 0xff)
 #define WIFCONTINUED(status) ((status) == 0xffff)
+/*
+ * Whether the process left a core image: the bit the traditional encoding
+ * keeps for it beside the signal.  zedBSD writes no core images, so the
+ * kernel never sets it and the test is always false.
+ */
+#define WCOREDUMP(status) (((status) & 0x80) != 0)
 
 #define WNOHANG 0x0001
 #define WUNTRACED 0x0002

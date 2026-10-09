@@ -37,6 +37,8 @@ typedef struct {
 #define REG_ICASE 2
 #define REG_NEWLINE 4
 #define REG_NOSUB 8
+/* Repetitions match as few characters as they can rather than as many (POSIX.1-2024). */
+#define REG_MINIMAL 16
 
 #define REG_NOTBOL 1
 #define REG_NOTEOL 2

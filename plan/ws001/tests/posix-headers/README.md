@@ -1,0 +1,3 @@
+# POSIX.1-2024 の header の照合（ws001-p045）
+
+C library の header（`include/libc`）が POSIX.1-2024（Issue 8）の各 header に求められる名前（型・構造体と member・定数・limits・macro・関数・変数）を持つかを、x86_64・i386・aarch64 の tree の clang で調べる道具。使い方: 規格の頁が無ければ `fetch.sh build/ws001-posix-ref` で取り（86 頁）、名前の一覧を作り直す時は `python3 -I extract.py build/ws001-posix-ref/pages posix-2024.json`（markup の読み違いは extract.py の OVERRIDES・ADDITIONS・NOISE で直す）、照合は `python3 -I check.py OUTDIR [--target amd64] [--header unistd.h]`（OUTDIR は fresh の directory、`table.md` と `results.json`、最後の行が `missing N (base B, XSI X, options O)`）。各 header を `_XOPEN_SOURCE=800` で単独に include するので、単独で通らない header も表に出る。limits.h の「省いてよい」節の値は別に数える。

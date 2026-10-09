@@ -5,8 +5,15 @@ GMAKE?= gmake
 NATIVE_MAKE= env -u MAKEFLAGS -u MFLAGS ${GMAKE} -j ${.MAKE.JOBS:U1} -f userland/desktop/keiland-freebsd.mk
 NATIVE_OVERRIDES= ${.MAKEOVERRIDES:@name@${name}=${${name}:Q}@}
 
+# WS194: the packages first (gmake among them, asked before they are installed), then the build, then the install
+# offered; KEILAND_ASK=n asks nothing and only prints.
+KEILAND_ASK?= y
+PREREQUISITES= KEILAND_ASK=${KEILAND_ASK} sh tools/build/keiland-prerequisites.sh
+
 keiland-freebsd:
+	@${PREREQUISITES} check freebsd
 	${NATIVE_MAKE} all ${NATIVE_OVERRIDES}
+	@${PREREQUISITES} offer-install freebsd ${NATIVE_MAKE} install ${NATIVE_OVERRIDES}
 
 keiland-freebsd-install:
 	${NATIVE_MAKE} install ${NATIVE_OVERRIDES}

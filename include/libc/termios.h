@@ -9,7 +9,6 @@ extern "C" {
 #include <uapi/termios.h>
 #include <sys/types.h>
 
-#define L_ctermid 13
 int tcgetattr(int, struct termios *);
 int tcgetwinsize(int, struct winsize *);
 int tcsetattr(int, int, const struct termios *);
@@ -33,7 +32,6 @@ pid_t tcgetpgrp(int);
 pid_t tcgetsid(int);
 int tcsetpgrp(int, pid_t);
 int tcsendbreak(int, int);
-char *ctermid(char *);
 
 #ifdef __cplusplus
 }

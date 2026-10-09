@@ -56,6 +56,23 @@
 /* The most planes of one display list the readout keeps. */
 #define BCM2711_LIST_PLANES		8U
 
+/* The physical and virtual page size used by the initial V3D MMU mappings. */
+#define BCM2711_V3D_PAGE_BYTES		4096U
+
+/* The 4-byte PTE slots that cover V3D's complete 4 GiB virtual space. */
+#define BCM2711_V3D_PAGE_ENTRIES		1048576U
+
+/* The complete command-list byte counts of the initial 1x1 noop job. */
+#define BCM2711_V3D_NOOP_BIN_BYTES	14U
+#define BCM2711_V3D_NOOP_RENDER_BYTES	56U
+#define BCM2711_V3D_NOOP_TILE_BYTES	19U
+
+/* One tile's rounded allocation plus 8 KiB and 512 KiB overflow headroom. */
+#define BCM2711_V3D_NOOP_POOL_BYTES	0x83000U
+
+/* One tile's state array, allocated separately by the future job owner. */
+#define BCM2711_V3D_NOOP_STATE_BYTES	256U
+
 /*
  * One plane of a display list, as the readout decoded it.
  *
@@ -90,6 +107,62 @@ struct bcm2711_list {
 	uint32_t end;
 	uint32_t plane_count;
 	struct bcm2711_list_plane planes[BCM2711_LIST_PLANES];
+};
+
+/*
+ * One occupied interval of display-list SRAM, measured in words.
+ *
+ * The caller keeps these reservations for every current and pending list,
+ * filter table and firmware-owned region until takeover has been observed.
+ * words includes every occupied word starting at first; zero is invalid.
+ */
+struct bcm2711_list_range {
+	uint32_t first;
+	uint32_t words;
+};
+
+/*
+ * A relocation prepared from a stable SRAM snapshot without hardware writes.
+ *
+ * words includes the end marker.  A successful preparation also supplies
+ * that many unchanged words in the caller's image buffer.  Zero words means
+ * preparation failed, so destination must not be published to the channel.
+ */
+struct bcm2711_list_copy {
+	uint32_t source;
+	uint32_t destination;
+	uint32_t words;
+};
+
+/*
+ * One caller-owned command buffer and its already mapped GPU VA interval.
+ *
+ * bytes points to capacity writable CPU bytes that belong only to this
+ * buffer.  address names the same storage in the GPU's MMU.  used is zero
+ * until generation succeeds; the owner retains the storage through job
+ * completion and handles cache clean before submission.
+ */
+struct bcm2711_v3d_cl {
+	uint8_t *bytes;
+	uint32_t capacity;
+	uint32_t address;
+	uint32_t used;
+};
+
+/*
+ * The three command buffers and tile-list pool of one shader-free noop job.
+ *
+ * The caller supplies distinct CPU storage and GPU mappings.  The pool is
+ * GPU-writable and must not overlap a command buffer.  Only its mapped VA
+ * is used here; allocation, tile state, cache and submission belong to the
+ * job owner.  The command buffers remain alive until both queues finish.
+ */
+struct bcm2711_v3d_noop {
+	struct bcm2711_v3d_cl bin;
+	struct bcm2711_v3d_cl render;
+	struct bcm2711_v3d_cl tile;
+	uint32_t pool_address;
+	uint32_t pool_bytes;
 };
 
 /*
@@ -189,6 +262,14 @@ void bcm2711_clock_report(const char *family, const char *name, uint32_t clock_i
 
 /* The decoding of a compositor display list (list.c). */
 void bcm2711_list_decode(const volatile uint32_t *memory, uint32_t start, struct bcm2711_list *list);
+bool bcm2711_list_copy_prepare(const uint32_t *snapshot, uint32_t source, const struct bcm2711_list_range *reserved, unsigned reserved_count, uint32_t *image, uint32_t image_words, struct bcm2711_list_copy *copy);
+
+/* Software-only edits of a caller-owned V3D page table (mmu.c). */
+int bcm2711_v3d_pages_map(uint32_t *table, uint32_t address, uint64_t physical, uint64_t bytes);
+int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
+
+/* Command-list generation without allocation or hardware access (cl.c). */
+int bcm2711_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
 
 /* The stages of the two parts (display.c, v3d.c). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);

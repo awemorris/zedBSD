@@ -24,14 +24,6 @@ PLATFORMS = [
     ("x68k", "m68k", "x68k", "Sharp X68000 MC68030"),
 ]
 
-ARCHITECTURES = [
-    ("i386", "i386 32-bit"),
-    ("amd64", "x86_64 64-bit"),
-    ("arm64", "Arm64"),
-    ("sparcv9", "SPARC V9 64-bit"),
-    ("m68k", "Motorola 68000 family"),
-]
-
 BOARD_LABELS = {
     "pcat": "IBM PC/AT compatible",
     "pc98": "NEC PC-9800",
@@ -57,41 +49,51 @@ BOARD_VARIANTS = {
     ("m68k", "x68k"): [("default", "Default")],
 }
 
-DRIVER_CATEGORIES = [
-    ("Architecture drivers", None),
-    ("ISA drivers", CONFIG_DIR / "drivers" / "isa.drivers"),
-    ("PCI drivers", CONFIG_DIR / "drivers" / "pci.drivers"),
-    ("USB drivers", CONFIG_DIR / "drivers" / "usb.drivers"),
-    ("Generic drivers", CONFIG_DIR / "drivers" / "generic.drivers"),
+# The names the Packages menu gives the directories of userland/packages
+# (WS193: the menu is built from the directories the packages are in, so a
+# new directory needs no change here; one without a name here is shown
+# capitalized).
+PACKAGE_LABELS = {
+    "lang": "Languages",
+    "devel": "Development",
+    "libs": "Libraries",
+    "desktop": "Desktop",
+    "multimedia": "Multimedia",
+    "fonts": "Fonts",
+    "network": "Network",
+    "security": "Security",
+}
+
+# The CPUs and the board each one boots on (2026-10-09 user, WS193): the
+# platform each pair builds.  Another platform read from a config.mk is kept
+# as it is and shown as the current one.
+MENU_CPUS = [
+    ("amd64", "x86_64", "amd64", "UEFI + ACPI"),
+    ("arm64", "arm64", "rpi4", "Raspberry Pi 4"),
 ]
 
-PROGRAM_CATEGORIES = [
-    ("Base", ("base", "comp")),
-    ("Desktop", ("desktop",)),
-    ("X11", ("x11-servers", "x11-applications")),
-    ("Tests", ("tests",)),
-    ("Firmware", ("firmware",)),
-    ("Packages", ("packages",)),
-]
+# The user programs' groups the Base, Desktop and Firmware menus select
+# from.  The X11 and test programs, the disk layout (Variant), the kernel's
+# options, the drivers, the test hooks and Noct's GPU accelerator are not in
+# the menu (2026-10-09 user: "menu から外す", "X11とTestsはメニューから削除し、
+# 直接記述のみにする"): they are set in config.mk by hand, and the values a
+# config.mk holds are read and written back as they are.
+BASE_GROUPS = ("base", "comp")
+DESKTOP_GROUPS = ("desktop",)
+FIRMWARE_GROUPS = ("firmware",)
 
-PACKAGE_CATEGORIES = [
-    ("Languages", "packages/lang"),
-    ("Development", "packages/devel"),
-    ("Libraries", "packages/libs"),
-    ("Desktop", "packages/desktop"),
-    ("Multimedia", "packages/multimedia"),
-    ("Fonts", "packages/fonts"),
-    ("Network", "packages/network"),
-    ("Security", "packages/security"),
-]
+
+def package_categories(rows: list[list[str]]) -> list[tuple[str, str]]:
+    """The Packages menu's categories: the directories of userland/packages
+    that hold a package, in order, each with its name."""
+    groups = sorted({row[4] for row in rows if row[4].startswith("packages/")})
+    return [(PACKAGE_LABELS.get(group.split("/", 1)[1],
+                                group.split("/", 1)[1].capitalize()), group)
+            for group in groups]
 
 
 def platform_record(name: str):
     return next((item for item in PLATFORMS if item[0] == name), PLATFORMS[0])
-
-
-def platforms_for_architecture(architecture: str):
-    return [item for item in PLATFORMS if item[1] == architecture]
 
 
 def variants_for_platform(platform: str) -> list[tuple[str, str]]:
@@ -101,11 +103,6 @@ def variants_for_platform(platform: str) -> list[tuple[str, str]]:
 
 def variant_default(platform: str) -> str:
     return variants_for_platform(platform)[0][0]
-
-
-def variant_label(platform: str, variant: str) -> str:
-    return next((label for value, label in variants_for_platform(platform)
-                 if value == variant), variant)
 
 
 def applies(specification: str, platform: str) -> bool:
@@ -124,21 +121,6 @@ def read_rows(path: Path, fields: int) -> list[list[str]]:
         if len(parts) != fields:
             raise SystemExit(f"{path}:{number}: expected {fields} fields")
         result.append(parts)
-    return result
-
-
-def option_rows(path: Path, platform: str) -> list[dict[str, object]]:
-    result = []
-    for key, kind, label, targets, default, choices in read_rows(path, 6):
-        if not applies(targets, platform):
-            continue
-        parsed_choices = []
-        if choices:
-            for item in choices.split(","):
-                value, text = item.split(":", 1)
-                parsed_choices.append((value, text))
-        result.append({"key": key, "kind": kind, "label": label,
-                       "default": default, "choices": parsed_choices})
     return result
 
 
@@ -353,103 +335,6 @@ def target_label(values: dict[str, object]) -> str:
     return platform_record(str(values["ZEDBSD_PLATFORM"]))[3]
 
 
-def select_target(screen, values: dict[str, object]) -> None:
-    while True:
-        platform = str(values["ZEDBSD_PLATFORM"])
-        record = platform_record(platform)
-        variant = str(values["ZEDBSD_VARIANT"])
-        labels = [f"Architecture: {record[1]}",
-                  f"Board: {BOARD_LABELS[record[2]]}",
-                  f"Variant: {variant_label(platform, variant)}", "Back"]
-        selected = choose(screen, "Select target", labels, target_label(values))
-        if selected is None or selected == 3:
-            return
-        if selected == 0:
-            index = choose(screen, "Architecture",
-                           [label for _name, label in ARCHITECTURES],
-                           target_label(values),
-                           next((i for i, item in enumerate(ARCHITECTURES)
-                                 if item[0] == record[1]), 0))
-            if index is not None:
-                values["ZEDBSD_PLATFORM"] = platforms_for_architecture(
-                    ARCHITECTURES[index][0])[0][0]
-                normalize(values)
-        elif selected == 1:
-            candidates = platforms_for_architecture(record[1])
-            index = choose(screen, "Board",
-                           [BOARD_LABELS[item[2]] for item in candidates],
-                           target_label(values),
-                           next((i for i, item in enumerate(candidates)
-                                 if item[0] == platform), 0))
-            if index is not None:
-                values["ZEDBSD_PLATFORM"] = candidates[index][0]
-                normalize(values)
-        else:
-            candidates = variants_for_platform(platform)
-            index = choose(screen, "Variant",
-                           [label for _value, label in candidates],
-                           target_label(values),
-                           next((i for i, item in enumerate(candidates)
-                                 if item[0] == variant), 0))
-            if index is not None:
-                values["ZEDBSD_VARIANT"] = candidates[index][0]
-
-
-def option_value(option: dict[str, object], values: dict[str, object]) -> str:
-    kind, key = str(option["kind"]), str(option["key"])
-    if kind == "fixed":
-        return "[*]"
-    value = str(values.get(key, option["default"]))
-    if kind == "bool":
-        return "[*]" if value == "y" else "[ ]"
-    for candidate, label in option["choices"]:
-        if candidate == value:
-            return f"<{label}>"
-    return f"<{value}>"
-
-
-def edit_options(screen, title: str, options: list[dict[str, object]],
-                 values: dict[str, object]) -> None:
-    selected = 0
-    while True:
-        labels = [f"{option_value(option, values):<18} {option['label']}"
-                  for option in options]
-        labels.append("Back")
-        selected_result = choose(screen, title, labels, target_label(values), selected)
-        if selected_result is None or selected_result == len(options):
-            return
-        selected = selected_result
-        option = options[selected]
-        key, kind = str(option["key"]), str(option["kind"])
-        if kind == "fixed" or key == "-":
-            continue
-        if kind == "bool":
-            values[key] = "n" if str(values.get(key, "n")) == "y" else "y"
-        elif kind == "choice":
-            choices = option["choices"]
-            current = str(values.get(key, option["default"]))
-            index = next((i for i, item in enumerate(choices)
-                          if item[0] == current), 0)
-            chosen = choose(screen, str(option["label"]),
-                            [item[1] for item in choices], target_label(values), index)
-            if chosen is not None:
-                values[key] = choices[chosen][0]
-
-
-def select_drivers(screen, values: dict[str, object]) -> None:
-    while True:
-        selected = choose(screen, "Select drivers",
-                          [name for name, _path in DRIVER_CATEGORIES] + ["Back"],
-                          target_label(values))
-        if selected is None or selected == len(DRIVER_CATEGORIES):
-            return
-        title, path = DRIVER_CATEGORIES[selected]
-        if path is None:
-            path = architecture_driver_path(str(values["ZEDBSD_PLATFORM"]))
-        options = option_rows(path, str(values["ZEDBSD_PLATFORM"]))
-        edit_options(screen, title, options, values)
-
-
 def package_select(rows: list[list[str]], selected: set, name: str):
     """Selects a program and whatever it needs.
 
@@ -519,31 +404,136 @@ def edit_program_group(screen, values: dict[str, object], groups: tuple[str, ...
 
 
 def select_package_programs(screen, values: dict[str, object]) -> None:
+    categories = package_categories(user_program_rows())
     while True:
         choice = choose(screen, "Packages",
-                        [label for label, _group in PACKAGE_CATEGORIES] + ["Back"],
+                        [label for label, _group in categories] + ["Back"],
                         target_label(values))
-        if choice is None or choice == len(PACKAGE_CATEGORIES):
+        if choice is None or choice == len(categories):
             return
-        label, group = PACKAGE_CATEGORIES[choice]
+        label, group = categories[choice]
         edit_program_group(screen, values, (group,), label)
 
 
-def select_programs(screen, values: dict[str, object]) -> None:
+def group_rows(values: dict[str, object], groups: tuple[str, ...]) -> list[list[str]]:
+    """The programs of some groups that build for the current platform."""
+    platform = str(values["ZEDBSD_PLATFORM"])
+    return [row for row in user_program_rows()
+            if row[4] in groups and applies(row[2], platform)]
+
+
+def all_selected(values: dict[str, object], groups: tuple[str, ...]) -> bool:
+    """Whether every program of some groups is selected (the All box)."""
+    selected = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
+    rows = group_rows(values, groups)
+    return bool(rows) and all(row[0] in selected for row in rows)
+
+
+def toggle_all(values: dict[str, object], groups: tuple[str, ...]) -> None:
+    """Selects every program of some groups, or with all of them selected
+    goes back to their defaults (what a fresh configuration selects)."""
+    selected = values.setdefault("ZEDBSD_USER_PROGRAMS", set())
+    rows = group_rows(values, groups)
+    if all_selected(values, groups):
+        for row in rows:
+            if row[3] == "y":
+                selected.add(row[0])
+            else:
+                selected.discard(row[0])
+        return
+    everything = user_program_rows()
+    for row in rows:
+        if package_select(everything, selected, row[0]) is not None:
+            selected.add(row[0])
+
+
+def program_section(screen, values: dict[str, object], title: str,
+                    groups: tuple[str, ...]) -> None:
+    """Base or Desktop: All, and Select with the section's programs one by one."""
     while True:
-        choice = choose(screen, "Select user programs",
-                        [label for label, _group in PROGRAM_CATEGORIES] + ["Back"],
+        box = "[*]" if all_selected(values, groups) else "[ ]"
+        choice = choose(screen, title, [f"{box} All", "Select", "Back"],
                         target_label(values))
-        if choice is None or choice == len(PROGRAM_CATEGORIES):
+        if choice is None or choice == 2:
             return
-        label, groups = PROGRAM_CATEGORIES[choice]
-        if groups == ("packages",):
-            select_package_programs(screen, values)
+        if choice == 0:
+            toggle_all(values, groups)
         else:
-            edit_program_group(screen, values, groups, label)
+            edit_program_group(screen, values, groups, title)
+
+
+def select_cpu_board(screen, values: dict[str, object]) -> None:
+    """CPU / Board: the CPU, and the board it boots on."""
+    while True:
+        platform = str(values["ZEDBSD_PLATFORM"])
+        current = next((item for item in MENU_CPUS if item[0] == platform), None)
+        cpu = current[1] if current else platform_record(platform)[1]
+        board = current[3] if current else BOARD_LABELS[platform_record(platform)[2]]
+        choice = choose(screen, "CPU / Board",
+                        [f"CPU: {cpu}", f"Board: {board}", "Back"],
+                        target_label(values))
+        if choice is None or choice == 2:
+            return
+        if choice == 0:
+            index = choose(screen, "CPU", [item[1] for item in MENU_CPUS],
+                           target_label(values),
+                           next((i for i, item in enumerate(MENU_CPUS)
+                                 if item[0] == platform), 0))
+            if index is not None:
+                values["ZEDBSD_PLATFORM"] = MENU_CPUS[index][0]
+                normalize(values)
+        else:
+            message(screen, "Board", [f"{cpu} boots on {board}.",
+                                      "The board follows the CPU."],
+                    target_label(values))
+
+
+def boot_options(screen, values: dict[str, object]) -> None:
+    """Boot Option: the graphical boot, the graphical login and the serial mirror."""
+    selected = 0
+    while True:
+        graphical = str(values.get("ZEDBSD_GRAPHICAL_BOOT", "y")) == "y"
+        login = str(values.get("ZEDBSD_GRAPHICAL_LOGIN", "y")) == "y"
+        mirror = str(values.get("CONFIG_PCAT_SERIAL_MIRROR", "n")) == "y"
+        labels = [("[*]" if graphical else "[ ]") + " Graphical boot (No kernel messages on boot console)",
+                  ("[*]" if login else "[ ]") + " Graphical login (Automatically starts Keiland)",
+                  ("[*]" if mirror else "[ ]") + " Mirror kernel messages to serial port",
+                  "Back"]
+        choice = choose(screen, "Boot Option", labels, target_label(values), selected)
+        if choice is None or choice == 3:
+            return
+        selected = choice
+        if choice == 0:
+            values["ZEDBSD_GRAPHICAL_BOOT"] = "n" if graphical else "y"
+            values["ZEDBSD_BOOT_KERNEL_MESSAGES"] = "y" if graphical else "n"
+        elif choice == 1:
+            values["ZEDBSD_GRAPHICAL_LOGIN"] = "n" if login else "y"
+        else:
+            values["CONFIG_PCAT_SERIAL_MIRROR"] = "n" if mirror else "y"
+
+
+def development(screen, values: dict[str, object]) -> None:
+    """Development: the development files."""
+    selected = 0
+    while True:
+        files = str(values.get("ZEDBSD_ROOTFS_DEVELOPMENT", "y")) == "y"
+        labels = [("[*]" if files else "[ ]") + " Install development files (/usr/include, .so links, .pc, .a)",
+                  "Back"]
+        choice = choose(screen, "Development", labels, target_label(values), selected)
+        if choice is None or choice == 1:
+            return
+        selected = choice
+        values["ZEDBSD_ROOTFS_DEVELOPMENT"] = "n" if files else "y"
+
+
+# The rows of make list-user-programs, read once: the menu asks for them on
+# every redraw, and the tree does not change while the menu is open.
+USER_PROGRAM_CACHE: list[list[str]] = []
 
 
 def user_program_rows() -> list[list[str]]:
+    if USER_PROGRAM_CACHE:
+        return USER_PROGRAM_CACHE
     result = subprocess.run(
         ["make", "--no-print-directory", "list-user-programs"], cwd=REPO,
         check=False, text=True, stdout=subprocess.PIPE,
@@ -556,94 +546,132 @@ def user_program_rows() -> list[list[str]]:
         if len(parts) != 7:
             raise SystemExit(f"make list-user-programs:{number}: malformed row")
         rows.append(parts)
+    USER_PROGRAM_CACHE.extend(rows)
     return rows
 
 
-def build(screen, values: dict[str, object], output: Path,
-          make_target: str) -> None:
-    answer = choose(screen, "Are you sure you want to build?",
+def build_log(values: dict[str, object]) -> Path:
+    """Where Build boot image writes make's output: the build directory of the target."""
+    platform = str(values["ZEDBSD_PLATFORM"])
+    directory = {"i386": "pcat", "rpi4": "arm64", "sun4u": "sparcv9"}.get(platform, platform)
+    return REPO / "build" / directory / "menuconfig-build.log"
+
+
+def trace_target(line: str) -> str | None:
+    """The target a line of make --trace says is being made, or None."""
+    match = re.search(r"update target '([^']+)'", line)
+    return match.group(1) if match else None
+
+
+def draw_progress(screen, values: dict[str, object], done: int, total: int,
+                  current: str) -> None:
+    """The build's progress: a bar of the targets made of those to make, and the one being made now."""
+    screen.erase()
+    height, width = screen.getmaxyx()
+    draw_title(screen, "Build boot image", target_label(values))
+    total = max(total, done, 1)
+    span = max(10, width - 20)
+    filled = span * done // total
+    addstr(screen, 4, 4, "[" + "#" * filled + "-" * (span - filled) + "]", width - 8)
+    addstr(screen, 5, 4, f"{done} of {total} targets ({100 * done // total}%)", width - 8)
+    addstr(screen, 7, 4, "Now building:", width - 8, curses.A_BOLD)
+    addstr(screen, 8, 6, current, width - 10)
+    addstr(screen, 10, 4, f"Log: {build_log(values)}", width - 8)
+    screen.refresh()
+
+
+def build_boot_image(screen, values: dict[str, object], output: Path) -> None:
+    """Saves the configuration and builds the boot image with as many jobs as
+    the machine has processors (2026-10-09 user: this menu only), showing a
+    progress bar and the target being built."""
+    answer = choose(screen, "Build boot image: are you sure?",
                     ["Yes", "No"], target_label(values))
     if answer != 0:
         return
     save(output, values)
-    curses.def_prog_mode()
-    curses.endwin()
-    print(f"\nBuilding {target_label(values)}...\n", flush=True)
+    jobs = os.environ.get("ZEDBSD_JOBS") or str(os.cpu_count() or 1)
+    common = ["make", "--no-print-directory", "--trace", f"ZEDBSD_CONFIG={output}"]
+    draw_progress(screen, values, 0, 1, "counting what to build...")
+    planned = subprocess.run(common + ["-n", "disk-image"], cwd=REPO, check=False,
+                             text=True, stdout=subprocess.PIPE, stderr=subprocess.DEVNULL)
+    total = sum(1 for line in planned.stdout.splitlines() if trace_target(line))
+    log = build_log(values)
+    log.parent.mkdir(parents=True, exist_ok=True)
+    done = 0
+    current = "starting"
+    status = None
     try:
-        jobs = os.environ.get("ZEDBSD_JOBS") or str(os.cpu_count() or 1)
-        result = subprocess.run(
-            ["make", f"-j{jobs}", "--no-print-directory",
-             f"ZEDBSD_CONFIG={output}", make_target], cwd=REPO,
-            check=False)
+        with log.open("w", encoding="utf-8") as stream:
+            process = subprocess.Popen(common + [f"-j{jobs}", "disk-image"], cwd=REPO,
+                                       stdout=subprocess.PIPE, stderr=subprocess.STDOUT,
+                                       text=True, errors="replace")
+            assert process.stdout is not None
+            for line in process.stdout:
+                stream.write(line)
+                target = trace_target(line)
+                if target:
+                    done += 1
+                    current = target
+                    draw_progress(screen, values, done, total, current)
+            status = process.wait()
     except OSError as error:
-        print(f"build menu: {error}", flush=True)
-        result = None
-    finally:
-        curses.reset_prog_mode()
-        curses.curs_set(0)
-        screen.clear()
-        screen.refresh()
-    if result is not None and result.returncode == 0:
-        lines = ["Build succeeded.", "", f"Target: {make_target}"]
-        message(screen, "Build result", lines, target_label(values))
-    else:
-        status = result.returncode if result is not None else "not started"
-        message(screen, "Build result", ["Build failed.", f"Status: {status}"],
+        message(screen, "Build result", [f"Build failed to start: {error}"], target_label(values))
+        return
+    if status == 0:
+        message(screen, "Build result",
+                ["Build succeeded.", "", f"{done} targets built.", f"Log: {log}"],
                 target_label(values))
+        return
+    tail = log.read_text(encoding="utf-8", errors="replace").splitlines()[-20:]
+    message(screen, "Build result",
+            [f"Build failed (status {status}).", f"Log: {log}", ""] + tail,
+            target_label(values))
 
 
 def tui(screen, values: dict[str, object], output: Path) -> None:
     curses.curs_set(0)
     screen.keypad(True)
+    entries = [
+        ("CPU / Board", "cpu-board"),
+        ("Boot Option", "boot"),
+        ("Development", "development"),
+        ("Base", "base"),
+        ("Desktop", "desktop"),
+        ("Packages", "packages"),
+        ("Firmware", "firmware"),
+        ("", ""),
+        ("Build boot image", "build"),
+        ("", ""),
+        ("Exit", "exit"),
+    ]
+    selected = 0
     while True:
-        entries = [
-            ("Build all", "build-all"),
-            ("", ""),
-            ("Select target", "target"),
-            ("Select kernel option", "kernel-options"),
-            ("Select drivers", "drivers"),
-            ("Select user programs", "user-programs"),
-            ("Select root file system option", "rootfs-options"),
-            ("Build toolchain", "build-toolchain"),
-            ("Build kernel", "build-kernel"),
-            ("Build rootfs", "build-rootfs"),
-            ("Build boot disk image", "build-boot-disk"),
-            ("", ""),
-            ("Save and exit", "save"),
-        ]
         labels = [label for label, _action in entries]
-        selected = choose(screen, "Main menu", labels, target_label(values))
-        if selected is None:
+        choice = choose(screen, "Main menu", labels, target_label(values), selected)
+        if choice is None:
             save(output, values)
             return
-        action = entries[selected][1]
-        if action == "save":
+        selected = choice
+        action = entries[choice][1]
+        if action == "exit":
             save(output, values)
             return
-        if action == "build-all":
-            build(screen, values, output, "disk-image")
-        elif action == "target":
-            select_target(screen, values)
-        elif action == "kernel-options":
-            edit_options(screen, "Select kernel option",
-                         option_rows(CONFIG_DIR / "kernel-options.list",
-                                     str(values["ZEDBSD_PLATFORM"])), values)
-        elif action == "drivers":
-            select_drivers(screen, values)
-        elif action == "user-programs":
-            select_programs(screen, values)
-        elif action == "rootfs-options":
-            edit_options(screen, "Select root file system option",
-                         option_rows(CONFIG_DIR / "rootfs-options.list",
-                                     str(values["ZEDBSD_PLATFORM"])), values)
-        elif action == "build-toolchain":
-            build(screen, values, output, "toolchain")
-        elif action == "build-kernel":
-            build(screen, values, output, "vmunix")
-        elif action == "build-rootfs":
-            build(screen, values, output, "rootfs")
-        elif action == "build-boot-disk":
-            build(screen, values, output, "disk-image")
+        if action == "cpu-board":
+            select_cpu_board(screen, values)
+        elif action == "boot":
+            boot_options(screen, values)
+        elif action == "development":
+            development(screen, values)
+        elif action == "base":
+            program_section(screen, values, "Base", BASE_GROUPS)
+        elif action == "desktop":
+            program_section(screen, values, "Desktop", DESKTOP_GROUPS)
+        elif action == "packages":
+            select_package_programs(screen, values)
+        elif action == "firmware":
+            edit_program_group(screen, values, FIRMWARE_GROUPS, "Firmware")
+        elif action == "build":
+            build_boot_image(screen, values, output)
 
 
 def main() -> None:

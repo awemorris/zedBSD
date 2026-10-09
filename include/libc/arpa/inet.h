@@ -12,9 +12,8 @@
 extern "C" {
 #endif
 
+/* INET_ADDRSTRLEN comes with <netinet/in.h>. */
 #include <netinet/in.h>
-
-#define INET_ADDRSTRLEN 16
 
 int inet_aton(const char *text, struct in_addr *address);
 char *inet_ntoa(struct in_addr address);

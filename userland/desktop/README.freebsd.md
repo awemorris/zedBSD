@@ -22,6 +22,13 @@ make -j8 keiland-freebsd
 sudo make keiland-freebsd-install
 ```
 
+`make keiland-freebsd` first checks with `pkg info` that these packages are
+installed; on a terminal it lists the missing ones and asks before installing
+them with `sudo pkg install` (y/N), and after a build that succeeded it asks
+before running the install (y/N).  Without a terminal, or with `KEILAND_ASK=n`,
+it asks nothing: it prints the missing packages and stops, or prints the
+install command.
+
 Neither `make toolchain` nor a zedBSD `config.mk` is required. FreeBSD's base
 `make` forwards these native targets to the installed `gmake`; GNU make can
 also run the same targets directly. A staged installation is optional:

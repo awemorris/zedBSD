@@ -1,0 +1,172 @@
+#!/bin/sh
+# The host packages the native Keiland builds need, and the install after a build (WS194, the 2026-10-09 user
+# request): "make keiland-linux" and "make keiland-freebsd" run this before and after the build.
+#
+#   keiland-prerequisites.sh check linux|freebsd
+#       Lists the packages the build needs that the host's package manager (apt, dnf or yum, pacman; FreeBSD's pkg)
+#       does not have installed.  On a terminal it asks before installing them (y/N) and installs them with sudo;
+#       without a terminal, or when the answer is no, it prints what is missing and how to install it, and fails, so
+#       that the build does not start half equipped.  With everything there it says nothing and succeeds.
+#   keiland-prerequisites.sh offer-install linux|freebsd COMMAND...
+#       After a build that succeeded: on a terminal it asks whether to install now (y/N) and runs COMMAND (with sudo
+#       unless it runs as root); without a terminal it prints COMMAND and succeeds.
+#
+# KEILAND_ASK=n in the environment (the make variable of the same name) asks nothing: missing packages are listed and
+# the build stops, and the install is only printed.
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+set -u
+
+# Prints a line on the standard error.
+say() {
+	printf '%s\n' "$*" >&2
+}
+
+# Succeeds when the questions may be asked: both ends a terminal, and KEILAND_ASK not n.
+interactive() {
+	[ "${KEILAND_ASK:-y}" != n ] && [ -t 0 ] && [ -t 1 ]
+}
+
+# Asks a yes-or-no question; succeeds on yes.  The default (Enter) is no.
+ask() {
+	printf '%s [y/N] ' "$1"
+	read -r answer || return 1
+	case $answer in
+	y | Y | yes | YES | Yes)
+		return 0
+		;;
+	esac
+	return 1
+}
+
+# The way to run a command as root: nothing as root, else sudo, else doas.
+as_root() {
+	if [ "$(id -u)" = 0 ]; then
+		echo ""
+	elif command -v sudo >/dev/null 2>&1; then
+		echo sudo
+	elif command -v doas >/dev/null 2>&1; then
+		echo doas
+	else
+		echo sudo
+	fi
+}
+
+# Finds the package manager and sets manager, wanted (the packages the build needs), the test of one being installed
+# and the command that installs them.
+find_manager() {
+	system=$1
+	manager=
+	if [ "$system" = freebsd ]; then
+		if command -v pkg >/dev/null 2>&1; then
+			manager=pkg
+			wanted="gmake python3 meson ninja vulkan-headers vulkan-loader libdrm mesa-dri seatd"
+			install="pkg install -y"
+		fi
+		return 0
+	fi
+	if command -v dpkg-query >/dev/null 2>&1 && command -v apt-get >/dev/null 2>&1; then
+		manager=apt
+		wanted="build-essential libvulkan-dev linux-libc-dev python3 curl"
+		install="apt-get install -y"
+	elif command -v dnf >/dev/null 2>&1; then
+		manager=dnf
+		wanted="gcc make vulkan-headers vulkan-loader-devel kernel-headers python3 curl"
+		install="dnf install -y"
+	elif command -v yum >/dev/null 2>&1; then
+		manager=yum
+		wanted="gcc make vulkan-headers vulkan-loader-devel kernel-headers python3 curl"
+		install="yum install -y"
+	elif command -v pacman >/dev/null 2>&1; then
+		manager=pacman
+		wanted="base-devel vulkan-headers vulkan-icd-loader linux-api-headers python curl"
+		install="pacman -S --needed --noconfirm"
+	fi
+}
+
+# Succeeds when one package is installed, as its manager reports it.
+installed() {
+	case $manager in
+	apt)
+		dpkg-query -W -f='${Status}' "$1" 2>/dev/null | grep -q 'install ok installed'
+		;;
+	dnf | yum)
+		rpm -q "$1" >/dev/null 2>&1
+		;;
+	pacman)
+		pacman -Q "$1" >/dev/null 2>&1
+		;;
+	pkg)
+		pkg info -e "$1" >/dev/null 2>&1
+		;;
+	*)
+		return 1
+		;;
+	esac
+}
+
+# check: the packages first.
+check() {
+	find_manager "$1"
+	if [ -z "$manager" ]; then
+		say "keiland: no known package manager (apt, dnf, yum, pacman, pkg); make sure a C compiler, make, the Vulkan"
+		say "keiland: loader and headers, the kernel headers, python3 and curl are installed."
+		return 0
+	fi
+	missing=
+	for package in $wanted; do
+		if ! installed "$package"; then
+			missing="$missing $package"
+		fi
+	done
+	missing=${missing# }
+	if [ -z "$missing" ]; then
+		return 0
+	fi
+	root=$(as_root)
+	command="${root:+$root }$install $missing"
+	echo "Keiland needs these $manager packages, which are not installed:"
+	echo "  $missing"
+	if interactive && ask "Install them now with: $command ?"; then
+		if $command; then
+			return 0
+		fi
+		say "keiland: installing the packages failed."
+		return 1
+	fi
+	say "keiland: install them with: $command"
+	say "keiland: then run the build again."
+	return 1
+}
+
+# offer-install: the install after a good build.
+offer_install() {
+	shift
+	root=$(as_root)
+	command="${root:+$root }$*"
+	if interactive && ask "The build succeeded.  Install Keiland now with: $command ?"; then
+		if $command; then
+			return 0
+		fi
+		say "keiland: the install failed."
+		return 1
+	fi
+	echo "The build succeeded.  Install Keiland with: $command"
+	return 0
+}
+
+case ${1:-} in
+check)
+	[ $# -eq 2 ] || { say "usage: keiland-prerequisites.sh check linux|freebsd"; exit 2; }
+	check "$2"
+	;;
+offer-install)
+	[ $# -ge 3 ] || { say "usage: keiland-prerequisites.sh offer-install linux|freebsd COMMAND..."; exit 2; }
+	shift
+	offer_install "$@"
+	;;
+*)
+	say "usage: keiland-prerequisites.sh check|offer-install ..."
+	exit 2
+	;;
+esac

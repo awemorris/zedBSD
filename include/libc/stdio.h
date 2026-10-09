@@ -31,6 +31,8 @@ extern "C" {
 #define FOPEN_MAX 16
 #define FILENAME_MAX 1024
 #define L_tmpnam 32
+/* Room for the name ctermid() gives, "/dev/console" and its null. */
+#define L_ctermid 13
 #define TMP_MAX 10000
 
 typedef struct __stdio_file FILE;
@@ -55,6 +57,8 @@ int puts(const char *string);
 FILE *fopen(const char *path, const char *mode);
 FILE *fdopen(int, const char *);
 FILE *popen(const char *, const char *);
+/* The path name of the process's controlling terminal. */
+char *ctermid(char *);
 int pclose(FILE *);
 FILE *freopen(const char *, const char *, FILE *);
 FILE *tmpfile(void);

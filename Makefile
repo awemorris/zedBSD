@@ -464,9 +464,15 @@ managed-lan-host-test:
 	@$(BUILD)/host-tests/managed-lan
 
 # The Linux desktop has independent rules and uses only the host compiler and headers.
+# WS194 (2026-10-09 user): the host packages it needs are checked first (asked before they are installed), and after
+# a build that succeeded the install is offered (asked before it runs); KEILAND_ASK=n asks nothing and only prints.
+KEILAND_ASK ?= y
+KEILAND_PREREQUISITES := KEILAND_ASK=$(KEILAND_ASK) sh tools/build/keiland-prerequisites.sh
 .PHONY: keiland-linux keiland-linux-install keiland-linux-install-session keiland-linux-clean
 keiland-linux:
+	@$(KEILAND_PREREQUISITES) check linux
 	$(MAKE) -f userland/desktop/keiland-linux.mk all
+	@$(KEILAND_PREREQUISITES) offer-install linux $(MAKE) -f userland/desktop/keiland-linux.mk install $(MAKEOVERRIDES)
 keiland-linux-install:
 	$(MAKE) -f userland/desktop/keiland-linux.mk install
 keiland-linux-install-session:
@@ -477,7 +483,9 @@ keiland-linux-clean:
 # FreeBSD also has a BSD make entry; GNU make uses the same independent native rules.
 .PHONY: keiland-freebsd keiland-freebsd-install
 keiland-freebsd:
+	@$(KEILAND_PREREQUISITES) check freebsd
 	$(MAKE) -f userland/desktop/keiland-freebsd.mk all
+	@$(KEILAND_PREREQUISITES) offer-install freebsd $(MAKE) -f userland/desktop/keiland-freebsd.mk install $(MAKEOVERRIDES)
 keiland-freebsd-install:
 	$(MAKE) -f userland/desktop/keiland-freebsd.mk install
 
@@ -1092,6 +1100,11 @@ ZEDBSD_GRAPHICAL_BOOT ?= y
 # screen, also under the graphical boot.  A config that does not name it keeps
 # the old behaviour: quiet with the graphical boot, shown without it.
 ZEDBSD_BOOT_KERNEL_MESSAGES ?= $(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),n,y)
+# WS193 (2026-10-09 user): whether the graphical login starts Keiland by
+# itself (login=graphical) is a menu choice of its own ("Graphical login"),
+# apart from the boot logo; by default it follows the graphical boot, which
+# is what it was part of before.
+ZEDBSD_GRAPHICAL_LOGIN ?= $(ZEDBSD_GRAPHICAL_BOOT)
 # A target without a sysroot has no development files.
 ifeq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
 override ZEDBSD_ROOTFS_DEVELOPMENT := n

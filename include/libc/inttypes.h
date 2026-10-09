@@ -108,6 +108,101 @@ uintmax_t wcstoumax(const wchar_t *, wchar_t **, int);
 #define SCNuMAX __PRI_64 "u"
 #define SCNxMAX __PRI_64 "x"
 
+
+/*
+ * The least-width and fastest types.  zedBSD's compilers make each of them
+ * the exact-width type of the same width (int_least16_t and int_fast16_t are
+ * short, as int16_t is), so their modifiers are the exact-width ones.
+ */
+#define PRIdLEAST8 PRId8
+#define PRIdFAST8 PRId8
+#define PRIiLEAST8 PRIi8
+#define PRIiFAST8 PRIi8
+#define PRIoLEAST8 PRIo8
+#define PRIoFAST8 PRIo8
+#define PRIuLEAST8 PRIu8
+#define PRIuFAST8 PRIu8
+#define PRIxLEAST8 PRIx8
+#define PRIxFAST8 PRIx8
+#define PRIXLEAST8 PRIX8
+#define PRIXFAST8 PRIX8
+#define PRIdLEAST16 PRId16
+#define PRIdFAST16 PRId16
+#define PRIiLEAST16 PRIi16
+#define PRIiFAST16 PRIi16
+#define PRIoLEAST16 PRIo16
+#define PRIoFAST16 PRIo16
+#define PRIuLEAST16 PRIu16
+#define PRIuFAST16 PRIu16
+#define PRIxLEAST16 PRIx16
+#define PRIxFAST16 PRIx16
+#define PRIXLEAST16 PRIX16
+#define PRIXFAST16 PRIX16
+#define PRIdLEAST32 PRId32
+#define PRIdFAST32 PRId32
+#define PRIiLEAST32 PRIi32
+#define PRIiFAST32 PRIi32
+#define PRIoLEAST32 PRIo32
+#define PRIoFAST32 PRIo32
+#define PRIuLEAST32 PRIu32
+#define PRIuFAST32 PRIu32
+#define PRIxLEAST32 PRIx32
+#define PRIxFAST32 PRIx32
+#define PRIXLEAST32 PRIX32
+#define PRIXFAST32 PRIX32
+#define PRIdLEAST64 PRId64
+#define PRIdFAST64 PRId64
+#define PRIiLEAST64 PRIi64
+#define PRIiFAST64 PRIi64
+#define PRIoLEAST64 PRIo64
+#define PRIoFAST64 PRIo64
+#define PRIuLEAST64 PRIu64
+#define PRIuFAST64 PRIu64
+#define PRIxLEAST64 PRIx64
+#define PRIxFAST64 PRIx64
+#define PRIXLEAST64 PRIX64
+#define PRIXFAST64 PRIX64
+#define SCNdLEAST8 SCNd8
+#define SCNdFAST8 SCNd8
+#define SCNiLEAST8 SCNi8
+#define SCNiFAST8 SCNi8
+#define SCNoLEAST8 SCNo8
+#define SCNoFAST8 SCNo8
+#define SCNuLEAST8 SCNu8
+#define SCNuFAST8 SCNu8
+#define SCNxLEAST8 SCNx8
+#define SCNxFAST8 SCNx8
+#define SCNdLEAST16 SCNd16
+#define SCNdFAST16 SCNd16
+#define SCNiLEAST16 SCNi16
+#define SCNiFAST16 SCNi16
+#define SCNoLEAST16 SCNo16
+#define SCNoFAST16 SCNo16
+#define SCNuLEAST16 SCNu16
+#define SCNuFAST16 SCNu16
+#define SCNxLEAST16 SCNx16
+#define SCNxFAST16 SCNx16
+#define SCNdLEAST32 SCNd32
+#define SCNdFAST32 SCNd32
+#define SCNiLEAST32 SCNi32
+#define SCNiFAST32 SCNi32
+#define SCNoLEAST32 SCNo32
+#define SCNoFAST32 SCNo32
+#define SCNuLEAST32 SCNu32
+#define SCNuFAST32 SCNu32
+#define SCNxLEAST32 SCNx32
+#define SCNxFAST32 SCNx32
+#define SCNdLEAST64 SCNd64
+#define SCNdFAST64 SCNd64
+#define SCNiLEAST64 SCNi64
+#define SCNiFAST64 SCNi64
+#define SCNoLEAST64 SCNo64
+#define SCNoFAST64 SCNo64
+#define SCNuLEAST64 SCNu64
+#define SCNuFAST64 SCNu64
+#define SCNxLEAST64 SCNx64
+#define SCNxFAST64 SCNx64
+
 #ifdef __cplusplus
 }
 #endif

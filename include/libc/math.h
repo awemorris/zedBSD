@@ -49,6 +49,13 @@ extern int signgam;
 #define M_SQRT2    1.41421356237309504880
 #define M_SQRT1_2  0.70710678118654752440
 
+/* The constants POSIX.1-2024 added to the XSI set. */
+#define M_1_SQRTPI 0.56418958354775628695
+#define M_EGAMMA   0.57721566490153286061
+#define M_PHI      1.61803398874989484820
+#define M_SQRT1_3  0.57735026918962576451
+#define M_SQRT3    1.73205080756887729353
+
 int __fpclassify(double);
 int __fpclassifyf(float);
 int __fpclassifyl(long double);

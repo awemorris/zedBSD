@@ -87,6 +87,29 @@ extern "C" {
 
 #define _CS_PATH 1
 
+/*
+ * The C-language compilation environments' strings for confstr(): the
+ * flags each environment takes (empty: the compiler's defaults are the
+ * environment), those for threads, which environments are the
+ * width-restricted ones, and the environment the utilities need.
+ */
+#define _CS_POSIX_V8_ILP32_OFF32_CFLAGS 2
+#define _CS_POSIX_V8_ILP32_OFF32_LDFLAGS 3
+#define _CS_POSIX_V8_ILP32_OFF32_LIBS 4
+#define _CS_POSIX_V8_ILP32_OFFBIG_CFLAGS 5
+#define _CS_POSIX_V8_ILP32_OFFBIG_LDFLAGS 6
+#define _CS_POSIX_V8_ILP32_OFFBIG_LIBS 7
+#define _CS_POSIX_V8_LP64_OFF64_CFLAGS 8
+#define _CS_POSIX_V8_LP64_OFF64_LDFLAGS 9
+#define _CS_POSIX_V8_LP64_OFF64_LIBS 10
+#define _CS_POSIX_V8_LPBIG_OFFBIG_CFLAGS 11
+#define _CS_POSIX_V8_LPBIG_OFFBIG_LDFLAGS 12
+#define _CS_POSIX_V8_LPBIG_OFFBIG_LIBS 13
+#define _CS_POSIX_V8_THREADS_CFLAGS 14
+#define _CS_POSIX_V8_THREADS_LDFLAGS 15
+#define _CS_POSIX_V8_WIDTH_RESTRICTED_ENVS 16
+#define _CS_V8_ENV 17
+
 int access(const char *path, int mode);
 int faccessat(int, const char *, int, int);
 char *getcwd(char *buffer, size_t size);
@@ -176,6 +199,10 @@ long sysconf(int name);
 long pathconf(const char *, int);
 long fpathconf(int, int);
 size_t confstr(int, char *, size_t);
+
+/* The terminal's foreground process group, as <termios.h> declares them too. */
+pid_t tcgetpgrp(int);
+int tcsetpgrp(int, pid_t);
 pid_t fork(void);
 pid_t vfork(void);
 pid_t _Fork(void);
