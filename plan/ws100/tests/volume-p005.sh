@@ -8,8 +8,9 @@
 #     session; zdesktop writes it once at the session's end, volume-p004's A5); the system bar's popup shows it
 #     (bar-30.png).
 #  3. Mute in Settings: audiod muted, no feedback sound; the bar's icon muted (bar-muted.png); mute off: a sound.
-#  4. The system bar -> Settings: the wheel over the bar's icon (two notches down) and the bar's mute are shown by the
-#     page within a few seconds (SOUND report value=20, muted=1) (page-20.png, page-muted.png).
+#  4. The system bar -> Settings: the wheel over the bar's icon (two notches down) and the mute button of the panel the
+#     icon opens (the status island, WS192) are shown by the page within a few seconds (SOUND report value=20,
+#     muted=1) (page-20.png, page-muted.png).
 #  5. The WAV (the guest stopped): the feedback sounds were played (at least the releases' and mute-off's).
 #   plan/ws100/tests/volume-p005.sh IMAGE [OUTDIR]
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -117,9 +118,10 @@ conf_start=$(guest "grep -E '^sound\\.(volume|muted)=' $conf" | tr '\n' ' ')
 
 # A Settings already running (the Welcome the session starts at a first login, ws164-p002) would take the page this
 # test asks for, with its lines in the session's log and its window mapped before (T1-478: the five lines that read
-# Settings' log failed): it ends first.  What ran is kept (processes.txt).
+# Settings' log failed): it ends first.  What ran is kept (processes.txt before, processes-after.txt after).
 guest 'ps -A -o pid,args' > "$out/processes.txt"
 guest 'for p in $(ps -A -o pid,args | awk '"'"'{n = $2; sub(/.*\//, "", n)} n == "settings" {print $1}'"'"'); do kill $p; done; sleep 2; echo ended' >/dev/null
+guest 'ps -A -o pid,args' > "$out/processes-after.txt"
 maps=$(count $log 'KWL MAP client=')
 # Settings runs as kei (runas): the compositor serves its system extension only to its own user (WS131 p011, D5), so a
 # Settings root started would find no sound (T2-021).
@@ -171,10 +173,12 @@ pointer move $ix $iy sleep 400 wheel-down sleep 700 wheel-down sleep 1000
 target=$((value - 10))
 expect_more $slog "SOUND report reachable=1 device=1 value=$target muted=0" 0 5
 shot page-$target.png
+# The icon opens the status island's panel (WS192; the volume popup it replaced had its mute at the right): its mute
+# button's place is the panel's log line (KWL STATUS item name=mute, screen coordinates).
 pointer move $((ix - 2)) $iy sleep 200 move $ix $iy sleep 300 down sleep 60 up sleep 900
-set -- $(last $log 'KWL VOLUME popup open' | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\) width=\([0-9]*\) height=\([0-9]*\) slider=\([0-9]*\) mute=\([0-9]*\).*/\1 \2 \3 \4 \5 \6/p')
-px=${1:-900} pw=${3:-260} my=$((${6:-134} + 17))
-pointer move $((px + pw - 40)) $my sleep 300 down sleep 60 up sleep 800
+set -- $(last $log 'KWL STATUS item name=mute ' | sed -n 's/.* x=\([0-9]*\) y=\([0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p')
+mx=$((${1:-940} + ${3:-88} / 2)) my=$((${2:-174} + ${4:-44} / 2))
+pointer move $((mx - 2)) $my sleep 200 move $mx $my sleep 300 down sleep 60 up sleep 800
 python3 plan/ws035/tests/qmp-keys.py "$GUEST_RUNTIME/qmp.sock" '<esc>'
 expect_more $slog "SOUND report reachable=1 device=1 value=$target muted=1" 0 5
 shot page-muted.png

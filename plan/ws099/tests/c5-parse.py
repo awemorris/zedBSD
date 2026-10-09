@@ -5,6 +5,10 @@
 #
 #   c5-parse.py LOG FIRST_FRAME_MS GAP_MS
 # Prints one "C5 ..." line per transition and "C5 RESULT pass=N fail=M first_max=A gap_max=B".
+# The first open and close of each kind is a warm-up: its numbers are printed ("warm-up") and in first_max and
+# gap_max, but only a transition that drew no frame at all fails it.  QEMU draws that first one at about 200 ms and
+# the later ones within the limits (T1-006, T1-477), and the user does not count it (2026-10-03: "C5の200msは問題視
+# しません。clearでOKです。", the speed is F-072's).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 import re
 import sys
@@ -45,6 +49,7 @@ def main():
     passed = failed = 0
     first_max = gap_max = 0
     open_start = {}
+    warmed = set()
     for what, kind, at, windows in events:
         if what == 'start':
             open_start[kind] = at
@@ -57,13 +62,19 @@ def main():
         first = after[0] - start if after else None
         gaps = [b - a for a, b in zip([start] + during, during + [at])]
         gap = max(gaps) if gaps else None
-        ok = first is not None and first <= first_limit and gap is not None and gap <= gap_limit
+        warm_up = kind not in warmed
+        warmed.add(kind)
+        if warm_up:
+            ok = first is not None
+        else:
+            ok = first is not None and first <= first_limit and gap is not None and gap <= gap_limit
         passed += ok
         failed += not ok
         first_max = max(first_max, first or 0)
         gap_max = max(gap_max, gap or 0)
         extra = f' windows={windows}' if windows else ''
-        print(f'C5 {kind}{extra}: first_frame_ms={first} settle_ms={at - start} frames={len(during)} '
+        mark = ' warm-up' if warm_up else ''
+        print(f'C5 {kind}{extra}{mark}: first_frame_ms={first} settle_ms={at - start} frames={len(during)} '
               f'max_gap_ms={gap} {"ok" if ok else "FAIL"}')
     print(f'C5 RESULT pass={passed} fail={failed} first_max={first_max} gap_max={gap_max}')
     return 0 if failed == 0 and passed > 0 else 1
