@@ -52,5 +52,6 @@ int bcm2711_vulkan_object_remove(struct bcm2711_vulkan_session *session, enum i9
 int bcm2711_vulkan_objects_close(struct bcm2711_vulkan_session *session);
 int bcm2711_vulkan_session_open(struct bcm2711_render_session *render, struct bcm2711_vulkan_session **session);
 int bcm2711_vulkan_session_close(struct bcm2711_vulkan_session **session);
+int bcm2711_vulkan_stream_execute(struct bcm2711_vulkan_session *session, const void *wire, uint32_t bytes, int (*dispatch)(struct bcm2711_vulkan_session *, uint32_t, uint32_t, struct i915_wire_reader *, struct i915_wire_writer *));
 
 #endif

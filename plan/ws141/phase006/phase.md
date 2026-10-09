@@ -47,3 +47,8 @@ private workerとjob tableはactual source host/buildで確認済み。prepared 
 ## Vulkan session/objectのsource出力（2026-10-09、継続中）
 
 compilerはmainへ統合済み。新private Vulkan session/object ownerを追加し、typed ID/session isolation、registry/dependency/prepared workの独立reference、old identity再利用、closing namespace withdrawal、live ownerが残るcloseのEBUSY/arena保持、actual partial allocation unwindをhostで確認。caller controller mutex/worker joinを前提にしたsource部品であり、nodeのcommand/capset/runtimeへは未接続。private software gateはPASS、whole p006はin-progress。[範囲/確認/復帰点](../execution-20261009.md#i14-vulkan-sessionobjectのsoftware出力2026-10-09)。
+
+
+## Vulkan transportのcheckpoint（2026-10-09）
+
+実client wire writerでSET/SEEK/VERSION/外部streamを検証しPASS、named rpi4 y build warning/error0。明示reply capacity/retained CPU owner/最後のrelease atomic trailerと外部streamのbounded immutable copyを実装。typed command callbackは未接続、native GPU completionとは別。p006/i14はin-progress、次はinstance/device/memory/pipeline/draw/queue。詳細は[実行記録](../execution-20261009.md#i14-vulkan-streamのsoftware出力2026-10-09)。
