@@ -30,6 +30,7 @@ struct bcm2711_vulkan_pipeline {
 	bool blend;
 };
 
+int bcm2711_vulkan_pipeline_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
 int bcm2711_vulkan_pipeline_state(struct bcm2711_vulkan_pipeline *pipeline, const VkGraphicsPipelineCreateInfo *info);
 int bcm2711_vulkan_pipeline_build(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *device, const VkGraphicsPipelineCreateInfo *info, struct bcm2711_vulkan_pipeline **pipeline);
 int bcm2711_vulkan_pipeline_release(struct bcm2711_vulkan_session *session, void *payload);

@@ -94,3 +94,7 @@ single-colour render pass/framebufferをactual client recordへ接続。clear/lo
 ## i14 compiled pipeline checkpoint（2026-10-09）
 
 same-device module/layout/passとactual native compilerを接続。唯一main entry/stage・canonical varying/FIFO・descriptor/push permission・attribute interfaceを確認しpartial compile/OOMを全退役。host9範囲/RPi4 y build/style PASS。wire create/destroy/public runtimeは未接続、native codeのGPU uploadはprepared draw ownerの後続責務。p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-compiled-pipeline-graphのsoftware出力2026-10-09)。
+
+## i14 pipeline wire checkpoint（2026-10-09）
+
+actual private client selected-state encoderをreadonly wrapperで実行、independent native finite decoder/complete batch/partial member resultsとcompiler/typed ownerへ接続。host9範囲/RPi4 y build/style PASS、single compiled stack framesを確認、total public runtime call pathは後続。p006/i14 in-progress、COMMAND/CAPSET/JOB未公開。[結果/限界/復帰点](../execution-20261009.md#i14-graphics-pipeline-wire-batchのsoftware出力2026-10-09)。next recorded command/native prepared draw/queue/common binding。

@@ -58,6 +58,8 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
+
 static void pipeline_test(struct bcm2711_vulkan_session *session);
 static void target_test(struct bcm2711_vulkan_session *session);
 static void descriptor_test(struct bcm2711_vulkan_session *session);
@@ -584,6 +586,12 @@ dispatch(
 	if (handled != 0)
 		return 0;
 	error = bcm2711_vulkan_target_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	/* Fully compiled graphics batches publish independent typed owners only after complete selected-state decoding. */
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_pipeline_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -2112,6 +2120,8 @@ pipeline_test(
 	struct bcm2711_vulkan_session *session)
 {
 	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct bcm2711_vulkan_object *published;
 	struct bcm2711_vulkan_object *device;
 	struct bcm2711_vulkan_object *layout;
 	struct bcm2711_vulkan_pipeline *pipeline;
@@ -2287,6 +2297,32 @@ pipeline_test(
 	assert(pipeline->blend && pipeline->binding_count == 1 && pipeline->attributes[0].format == VK_FORMAT_R32G32_SFLOAT);
 	assert(pipeline->programs[0]->vpm_output_words == 6 && pipeline->programs[1]->input_count == 2 && pipeline->programs[2]->varying_count == 2);
 	assert(pipeline->programs[2]->code_count != 0 && pipeline->programs[2]->uniform_count != 0);
+
+	/* The real client selected-state encoder and native decoder preserve legitimate partial batch results. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_GRAPHICS_PIPELINES, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u32(&writer, 2);
+	vulkan_write_u64(&writer, 2);
+	ws141_client_encode_graphics(&writer, &info);
+	info.layout = (VkPipelineLayout)(uintptr_t)132;
+	ws141_client_encode_graphics(&writer, &info);
+	info.layout = (VkPipelineLayout)(uintptr_t)131;
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 135);
+	vulkan_write_u64(&writer, 136);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_INITIALIZATION_FAILED);
+	assert(vulkan_read_u64(&reader) == 2 && vulkan_read_u64(&reader) == 135 && vulkan_read_u64(&reader) == 0);
+	published = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PIPELINE, 135);
+	assert(published != NULL);
+	error = bcm2711_vulkan_object_retain(published);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_PIPELINE, 135);
+	assert(published->references == 1 && !published->published);
+	error = bcm2711_vulkan_object_release(published);
+	assert(error == 0);
 
 	/* Source modules and public layout identities may retire without invalidating independently owned native code/interface metadata. */
 	destroy(session, GPU_OP_DESTROY_SHADER_MODULE, 133);
