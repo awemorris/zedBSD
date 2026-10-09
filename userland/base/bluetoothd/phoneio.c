@@ -275,6 +275,147 @@ btd_phoneio_quote(
 	return 0;
 }
 
+/*
+ * Tells whether a uid may use the phone's messages and hear its events
+ * (ws197-p004 section 5.4): root, and the owner of a valid record.
+ */
+int
+btd_phoneio_allowed(
+	const struct btd_phoneio_owner *owner,
+	uid_t uid)
+{
+	/* Root. */
+	if (uid == 0)
+		return 1;
+
+	/* The owner of a valid record. */
+	if (owner->have_owner && owner->owner == uid)
+		return 1;
+
+	/* Anyone else. */
+	return 0;
+}
+
+/* Tells whether the phone's owner changed (a record came or went, or names another uid). */
+int
+btd_phoneio_owner_changed(
+	const struct btd_phoneio_owner *before,
+	const struct btd_phoneio_owner *now)
+{
+	/* A record that came or went. */
+	if (before->have_owner != now->have_owner)
+		return 1;
+
+	/* Another owner. */
+	if (now->have_owner && before->owner != now->owner)
+		return 1;
+
+	/* The same. */
+	return 0;
+}
+
+/*
+ * Marks the clients to close after the owner changed (ws197-p004 section
+ * 5.4): a subscriber, or a client waiting for a phone request's answer,
+ * that may no longer use the phone (closed, never refused: a SEND already
+ * pushed must not read as a refusal).  Returns how many are marked.
+ */
+unsigned
+btd_phoneio_to_close(
+	const struct btd_phoneio_owner *owner,
+	const struct btd_phoneio_client *clients,
+	unsigned count,
+	int *closes)
+{
+	unsigned index;
+	unsigned marked;
+	int allowed;
+
+	/* Each open client that subscribed or waits. */
+	marked = 0U;
+	for (index = 0U; index < count; index++) {
+		closes[index] = 0;
+		if (!clients[index].open)
+			continue;
+		if (!clients[index].subscribed && !clients[index].waits_phone)
+			continue;
+
+		/* One that may still use the phone stays. */
+		allowed = btd_phoneio_allowed(owner, clients[index].uid);
+		if (allowed)
+			continue;
+
+		/* Closed. */
+		closes[index] = 1;
+		marked++;
+	}
+
+	/* The count marked. */
+	return marked;
+}
+
+/*
+ * Answers PHONE SUBSCRIBE (ws197-p004 section 5.1): the owner and root
+ * while there is a record (BTD_PHONEIO_SUBSCRIBE_PERMISSION otherwise),
+ * at most most at a time (BTD_PHONEIO_SUBSCRIBE_BUSY).
+ */
+int
+btd_phoneio_subscribe(
+	const struct btd_phoneio_owner *owner,
+	uid_t uid,
+	int have_record,
+	unsigned subscribers,
+	unsigned most)
+{
+	int allowed;
+
+	/* The owner and root, with a record. */
+	allowed = btd_phoneio_allowed(owner, uid);
+	if (!allowed || !have_record)
+		return BTD_PHONEIO_SUBSCRIBE_PERMISSION;
+
+	/* Room. */
+	if (subscribers >= most)
+		return BTD_PHONEIO_SUBSCRIBE_BUSY;
+
+	/* Succeeded: subscribed. */
+	return BTD_PHONEIO_SUBSCRIBE_OK;
+}
+
+/*
+ * Tells whether a connection is taken (ws197-p003 section 4.2, p004
+ * section 5.4): root and the seat's user always while a slot is free; any
+ * other uid only while more than reserved slots are free and it holds
+ * fewer than per_uid connections.  seated is whether the uid is root or
+ * the seat's user.
+ */
+int
+btd_phoneio_accept(
+	uid_t uid,
+	int seated,
+	unsigned free_slots,
+	unsigned reserved,
+	unsigned held,
+	unsigned per_uid)
+{
+	/* No slot at all. */
+	if (free_slots == 0U)
+		return 0;
+
+	/* Root and the seat's user. */
+	if (uid == 0 || seated)
+		return 1;
+
+	/* Others: not into the reserved slots, nor past their share. */
+	if (free_slots <= reserved)
+		return 0;
+	if (held >= per_uid)
+		return 0;
+
+	/* Succeeded: taken. */
+	return 1;
+}
+
 /* Prepares a client's input: no line, no text. */
 void
 btd_phoneio_input_init(

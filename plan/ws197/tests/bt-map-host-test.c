@@ -901,7 +901,7 @@ test_page(void)
 
 	/* A page of two from the inbox's start: its COUNT in zedBSD's zone, then again in the phone's (+11:00). */
 	setup();
-	refused = btd_map_page(&map, 7U, 1700000000, "", 2U);
+	refused = btd_map_page(&map, 7U, 1700000000, 500U, "", 2U);
 	check(refused == NULL, "page: started");
 	page_count(1700000000, "20231114T221320", "\x12\x02\x00\x03", "20231115T101320+1100");
 	page_count(1700000000, "20231115T091320", "\x12\x02\x00\x03", NULL);
@@ -951,21 +951,21 @@ test_page(void)
 	respond(0xa0U, NULL, 0U);
 
 	/* The page's end: the e-mail skipped, the next offset 2 of 3 in the inbox. */
-	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.0.2 more=1 count=1 skipped=1\n7: DONE\n"), "page: PAGE-END");
+	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.0.2.0 more=1 count=1 skipped=1 capped=0\n7: DONE\n"), "page: PAGE-END");
 
 	/* The next page: LIST from 2 at once (no COUNT); empty, so the sent folder next. */
 	world.answers_length = 0U;
-	refused = btd_map_page(&map, 7U, 1700000000, TEST_SESSION_TEXT ".6553f100.0.2", 2U);
+	refused = btd_map_page(&map, 7U, 1700000000, 500U, TEST_SESSION_TEXT ".6553f100.0.2.0", 2U);
 	check(refused == NULL, "page: the next started");
 	length = take(packet, sizeof(packet));
 	found = find_header(packet, length, 3U, 0x4cU, &header);
 	check(found && memcmp(header.data, "\x01\x02\x00\x02\x02\x02\x00\x02", 8U) == 0, "page: from offset 2");
 	respond_body(0xa0U, "<MAP-msg-listing version=\"1.0\"/>");
-	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.1.0 more=1 count=0 skipped=0"), "page: the sent folder next");
+	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.1.0.0 more=1 count=0 skipped=0 capped=0"), "page: the sent folder next");
 
 	/* The sent folder: its COUNT (the phone's zone known now), its LIST empty, the end. */
 	world.answers_length = 0U;
-	(void)btd_map_page(&map, 7U, 1700000000, TEST_SESSION_TEXT ".6553f100.1.0", 2U);
+	(void)btd_map_page(&map, 7U, 1700000000, 500U, TEST_SESSION_TEXT ".6553f100.1.0.0", 2U);
 	length = take(packet, sizeof(packet));
 	found = find_header(packet, length, 3U, 0x01U, &header);
 	check(found && is_text(&header, "sent"), "page: Name sent");
@@ -974,12 +974,28 @@ test_page(void)
 	respond(0xa0U, NULL, 0U);
 	(void)take(packet, sizeof(packet));
 	respond_body(0xa0U, "<MAP-msg-listing version=\"1.0\"/>");
-	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.2.0 more=0 count=0 skipped=0"), "page: no more");
+	check(has_answer("7: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.2.0.0 more=0 count=0 skipped=0 capped=0"), "page: no more");
 
 	/* Past the last folder: the end at once. */
 	world.answers_length = 0U;
-	refused = btd_map_page(&map, 7U, 1700000000, TEST_SESSION_TEXT ".6553f100.2.0", 2U);
+	refused = btd_map_page(&map, 7U, 1700000000, 500U, TEST_SESSION_TEXT ".6553f100.2.0.0", 2U);
 	check(refused == NULL && has_answer("more=0 count=0") && take(packet, sizeof(packet)) == 0U, "page: past the last folder");
+
+	/* A limit of 2 on an inbox of 3: the inbox cut after a whole page, said in PAGE-END and its cursor. */
+	setup();
+	world.answers_length = 0U;
+	refused = btd_map_page(&map, 8U, 1700000000, 2U, "", 2U);
+	check(refused == NULL, "page: a page with a limit");
+	page_count(1700000000, "20231114T221320", "\x12\x02\x00\x03", NULL);
+	(void)take(packet, sizeof(packet));
+	respond_body(0xa0U, "<MAP-msg-listing><msg handle=\"1\" type=\"EMAIL\"/><msg handle=\"2\" type=\"EMAIL\"/></MAP-msg-listing>");
+	check(has_answer("8: PHONE PAGE-END cursor=" TEST_SESSION_TEXT ".6553f100.1.0.1 more=1 count=0 skipped=2 capped=1"), "page: cut at the limit");
+
+	/* A limit above 500, a cursor without its last part. */
+	refused = btd_map_page(&map, 8U, 1700000000, 501U, "", 2U);
+	check(refused != NULL && strcmp(refused, "argument") == 0, "page: a limit above 500");
+	refused = btd_map_page(&map, 8U, 1700000000, 2U, TEST_SESSION_TEXT ".6553f100.1.0", 2U);
+	check(refused != NULL && strcmp(refused, "argument") == 0, "page: an old cursor");
 }
 
 /* What a page refuses, a listing too large, a slow client, a client that went. */
@@ -996,24 +1012,24 @@ test_page_errors(void)
 
 	/* Not ready. */
 	start();
-	refused = btd_map_page(&map, 1U, 1700000000, "", 2U);
+	refused = btd_map_page(&map, 1U, 1700000000, 500U, "", 2U);
 	check(refused != NULL && strcmp(refused, "not-ready") == 0, "errors: not ready");
 
 	/* Cursors of another session or time, malformed ones, counts out of range. */
 	setup();
-	refused = btd_map_page(&map, 1U, 1700000000, "22220000.6553f100.0.2", 2U);
+	refused = btd_map_page(&map, 1U, 1700000000, 500U, "22220000.6553f100.0.2.0", 2U);
 	check(refused != NULL && strcmp(refused, "stale-cursor") == 0, "errors: another session's cursor");
-	refused = btd_map_page(&map, 1U, 1700000001, TEST_SESSION_TEXT ".6553f100.0.2", 2U);
+	refused = btd_map_page(&map, 1U, 1700000001, 500U, TEST_SESSION_TEXT ".6553f100.0.2.0", 2U);
 	check(refused != NULL && strcmp(refused, "stale-cursor") == 0, "errors: another time's cursor");
-	refused = btd_map_page(&map, 1U, 1700000000, "x", 2U);
+	refused = btd_map_page(&map, 1U, 1700000000, 500U, "x", 2U);
 	check(refused != NULL && strcmp(refused, "argument") == 0, "errors: a malformed cursor");
-	refused = btd_map_page(&map, 1U, 1700000000, "", 0U);
+	refused = btd_map_page(&map, 1U, 1700000000, 500U, "", 0U);
 	check(refused != NULL && strcmp(refused, "argument") == 0, "errors: count 0");
-	refused = btd_map_page(&map, 1U, 1700000000, "", 33U);
+	refused = btd_map_page(&map, 1U, 1700000000, 500U, "", 33U);
 	check(refused != NULL && strcmp(refused, "argument") == 0, "errors: count 33");
 
 	/* A listing past 64 KB: aborted, asked again for half as many. */
-	refused = btd_map_page(&map, 2U, 1700000000, "", 4U);
+	refused = btd_map_page(&map, 2U, 1700000000, 500U, "", 4U);
 	check(refused == NULL, "errors: a page of four");
 	(void)take(packet, sizeof(packet));
 	respond(0xa0U, NULL, 0U);
@@ -1040,7 +1056,7 @@ test_page_errors(void)
 	/* A client with no room: the page waits, then goes on when it reads. */
 	setup();
 	world.room = 1000;
-	(void)btd_map_page(&map, 3U, 1700000000, "", 2U);
+	(void)btd_map_page(&map, 3U, 1700000000, 500U, "", 2U);
 	(void)take(packet, sizeof(packet));
 	respond(0xa0U, NULL, 0U);
 	(void)take(packet, sizeof(packet));
@@ -1055,7 +1071,7 @@ test_page_errors(void)
 	/* A client too slow: 30 s, then ERROR slow. */
 	setup();
 	world.room = 1000;
-	(void)btd_map_page(&map, 4U, 1700000000, "", 2U);
+	(void)btd_map_page(&map, 4U, 1700000000, 500U, "", 2U);
 	(void)take(packet, sizeof(packet));
 	respond(0xa0U, NULL, 0U);
 	(void)take(packet, sizeof(packet));
@@ -1066,7 +1082,7 @@ test_page_errors(void)
 
 	/* A client that went during its LIST: nothing more is asked or answered for it. */
 	setup();
-	(void)btd_map_page(&map, 5U, 1700000000, "", 2U);
+	(void)btd_map_page(&map, 5U, 1700000000, 500U, "", 2U);
 	(void)take(packet, sizeof(packet));
 	respond(0xa0U, NULL, 0U);
 	(void)take(packet, sizeof(packet));
@@ -1153,7 +1169,7 @@ test_live(void)
 	respond(0xa0U, NULL, 0U);
 
 	/* Ahead of a page's operation: the search runs after the COUNT, before the LIST. */
-	(void)btd_map_page(&map, 7U, 1700000000, "", 2U);
+	(void)btd_map_page(&map, 7U, 1700000000, 500U, "", 2U);
 	(void)take(packet, sizeof(packet));
 	mns_event(0U, "x-bt/MAP-event-report", event_20, &code);
 	respond(0xa0U, NULL, 0U);
@@ -1213,8 +1229,8 @@ test_send(void)
 
 	/* The answer names the message 30: the client told, the held event told. */
 	respond(0xa0U, name_30, sizeof(name_30));
-	check(has_answer("5: PHONE SENT request=1 handle=" TEST_SESSION_TEXT ".0000000000000030 state=pushed\n5: DONE\n"), "send: pushed");
-	check(has_emit("PHONE SENT request=1 handle=" TEST_SESSION_TEXT ".0000000000000030 state=sent"), "send: sent");
+	check(has_answer("5: PHONE SENT request=286326785 handle=" TEST_SESSION_TEXT ".0000000000000030 state=pushed\n5: DONE\n"), "send: pushed");
+	check(has_emit("PHONE SENT request=286326785 handle=" TEST_SESSION_TEXT ".0000000000000030 state=sent"), "send: sent");
 
 	/* The shift to the sent folder: not told twice; then delivered. */
 	mns_event(0U, "x-bt/MAP-event-report", "<MAP-event-report><event type=\"MessageShift\" handle=\"30\" folder=\"telecom/msg/sent\" old_folder=\"telecom/msg/outbox\" msg_type=\"SMS_GSM\"/></MAP-event-report>", &code);
@@ -1315,7 +1331,7 @@ test_failures(void)
 
 	/* The MAS's DLC closed: a page and a read lost, failed, again in 30 s; the MNS closed at the next tick. */
 	setup();
-	(void)btd_map_page(&map, 7U, 1700000000, "", 2U);
+	(void)btd_map_page(&map, 7U, 1700000000, 500U, "", 2U);
 	(void)btd_map_read(&map, 3U, TEST_SESSION_TEXT ".10");
 	btd_map_closed(&map, TEST_MAS_DLCI, 0);
 	check(has_answer("7: ERROR lost\n7: DONE\n") && has_answer("3: ERROR lost\n3: DONE\n"), "failures: the requests lost");

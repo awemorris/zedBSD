@@ -50,7 +50,7 @@
 #define BTD_MAP_EVENTS_MAX		8U
 #define BTD_MAP_CLOSING_MAX		4U
 
-/* The most messages one page asks for, a folder gives in a synchronisation, and a search for an announced message lists. */
+/* The most messages one page asks for, the highest limit of a folder in a synchronisation, and how many a search for an announced message lists. */
 #define BTD_MAP_PAGE_COUNT_MAX		32U
 #define BTD_MAP_FOLDER_LIMIT		500U
 #define BTD_MAP_LOCATE_COUNT		32U
@@ -175,7 +175,8 @@ struct btd_map_op {
 
 /*
  * One PAGE request running: its client, its since and the folder,
- * offset and count of this page; the entries of its listing and the next
+ * offset, count and limit of this page and whether a folder of its
+ * synchronisation was cut at the limit; the entries of its listing and the next
  * one to fetch; what it gave and left out; whether its count was asked
  * again with the phone's zone; whether it waits for its client to read
  * (since when); and whether its client went (the operation running for it
@@ -188,6 +189,8 @@ struct btd_map_page {
 	unsigned folder;
 	unsigned offset;
 	unsigned count;
+	unsigned limit;
+	int capped;
 	size_t listed;
 	size_t entry_count;
 	size_t next_entry;
@@ -364,7 +367,7 @@ void btd_map_data(void *context, unsigned dlci, const uint8_t *data, size_t leng
 void btd_map_writable(void *context, unsigned dlci);
 void btd_map_closed(void *context, unsigned dlci, int reason);
 void btd_map_open_failed(void *context, unsigned server_channel);
-const char *btd_map_page(struct btd_map *map, uint64_t token, int64_t since, const char *cursor, unsigned count);
+const char *btd_map_page(struct btd_map *map, uint64_t token, int64_t since, unsigned limit, const char *cursor, unsigned count);
 const char *btd_map_read(struct btd_map *map, uint64_t token, const char *handle);
 const char *btd_map_send(struct btd_map *map, uint64_t token, const char *number, const uint8_t *text, size_t length);
 void btd_map_cancel(struct btd_map *map, uint64_t token);
