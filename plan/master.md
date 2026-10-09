@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー（クリック）: WS126 p004 の D1（依存の package の要る追加の module）は「今は足さない」→ p004 は保留、今の module で p005 の image へ。
 - 2026-10-09 ユーザー（クリック）: libc の wint_t（uint32_t、clang は int）は「WS001 p045 で直す」→ libcxx の作り直しと一緒に ws001-p045 で。今は変えない。
 - 2026-10-09 ユーザー:「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」→ [ws001-p045](ws001/phase045/phase.md)（planned、ベータ3 の P1 の列）。
 - 2026-10-09 ユーザー:「<sys/socket.h> ですが、libcに入れてくれますか？」→ ws126-p002 の SOMAXCONN（128）は libc の include/libc/sys/socket.h に置き、uapi と kernel の unix-socket.c は変えない（Q1 の uapi 案を取り消し）。
