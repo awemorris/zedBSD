@@ -107,6 +107,7 @@ bcm2711_render_worker_submit(
 	bcm2711_render_execute execute,
 	bcm2711_render_dispose dispose,
 	void *payload,
+	uint32_t timeline,
 	struct drv_gpu_completion *completion)
 {
 	struct bcm2711_render_device *controller;
@@ -114,14 +115,26 @@ bcm2711_render_worker_submit(
 	struct bcm2711_render_request *request;
 	unsigned long enabled;
 	uint32_t slot;
+	uint64_t domain;
 
 	/* Payload ownership needs both its executable operation and terminal disposal. */
-	if (execute == NULL || dispose == NULL || completion == NULL)
+	if (execute == NULL ||
+	    dispose == NULL ||
+	    completion == NULL ||
+	    timeline >= 64)
 		return EINVAL;
 	controller = session->device;
 	worker = &controller->worker;
+	domain = UINT64_C(1) << timeline;
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 
+	/* Nonzero markers preserve the exact live native queue domain until final callback retirement. */
+	if (timeline != 0 && (session->timelines & domain) == 0) {
+		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
+		return EINVAL;
+	}
+
+	/* Native stop and callback publication share this same guard. */
 	if (session->stopping || worker->uncertain ||
 	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
@@ -149,6 +162,7 @@ bcm2711_render_worker_submit(
 	request->execute = execute;
 	request->dispose = dispose;
 	request->payload = payload;
+	request->timeline = timeline;
 	request->state = REQUEST_QUEUED;
 	request->canceled = 0;
 	request->next = NULL;

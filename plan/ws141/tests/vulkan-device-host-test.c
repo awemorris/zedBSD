@@ -17,6 +17,8 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/vulkan-device.h"
+#include "drivers/gpu/bcm2711/vulkan-dispatch.h"
+#include "drivers/gpu/bcm2711/render-runtime.h"
 #include "drivers/gpu/bcm2711/vulkan-sync.h"
 #include "drivers/gpu/bcm2711/vulkan-queue.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
@@ -71,6 +73,18 @@ static unsigned allocations;
 
 /* A selected ordinary heap failure must unwind parent/domain ownership acquired by native publication. */
 static unsigned fail_after;
+
+/* The explicit callback fixture records actual worker delivery and checks both native ownership locks. */
+static struct bcm2711_render_session *runtime_session;
+
+/* Finished callbacks remain observable after their real worker slots are recycled. */
+static unsigned runtime_callbacks;
+
+/* Each expected outcome belongs to its immutable request token, never a fabricated GPU completion. */
+static int runtime_errors[32];
+
+/* A native global error is counted only after the worker releases its ownership mutex. */
+static unsigned runtime_faults;
 
 /* Unique numerical physical pages model independent cached upload allocation placement, without physical cache or GPU execution. */
 static uint64_t next_native_physical = 0x200000U;
@@ -148,6 +162,8 @@ static void input_test(struct bcm2711_vulkan_session *session);
 static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
 static void resource_test(struct bcm2711_vulkan_session *session);
 static void sync_test(struct bcm2711_vulkan_session *session);
+static void runtime_test(struct bcm2711_vulkan_session *session);
+static void runtime_trailer(struct vulkan_writer *writer);
 static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
 static void external_barrier_test(struct bcm2711_vulkan_object *memory_object);
 static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
@@ -433,16 +449,168 @@ kern_io_read_barrier(
 }
 
 /*
- * Observes the actual worker fault publication's wake without inventing a host scheduler or common completion callback.
+ * Initializes the explicit single-thread worker condition fixture.
+ */
+void
+waitq_init(
+	struct wait_queue *queue,
+	const char *name)
+{
+	/* No host scheduler is installed; the actual FIFO is stepped by the fixture. */
+	memset(queue, 0, sizeof(*queue));
+	queue->name = name;
+
+	/* Succeeded: this condition can observe real worker publication. */
+	return;
+}
+
+/*
+ * Reads the explicit host condition generation used by the drain handshake.
+ */
+uint64_t
+waitq_sequence(
+	const struct wait_queue *queue)
+{
+	/* Succeeded: the same sequence is checked when the fixture yields a guarded wait. */
+	return queue->sequence;
+}
+
+/*
+ * Records publication without introducing a physical scheduler or native completion.
  */
 void
 waitq_wake_one(
 	struct wait_queue *queue)
 {
-	/* No host thread sleeps on this explicit single-thread queue fixture. */
-	(void)queue;
+	/* Only actual production publication advances this explicit host condition. */
+	queue->sequence++;
 
-	/* Succeeded: actual worker fault publication may proceed without physical scheduling. */
+	/* Succeeded: a later worker step can observe the publication. */
+	return;
+}
+
+/*
+ * Records final slot retirement after real callback delivery ends.
+ */
+void
+waitq_wake_all(
+	struct wait_queue *queue)
+{
+	/* Actual callback return precedes the production retirement sequence update. */
+	queue->sequence++;
+
+	/* Succeeded: the host condition observed retirement publication. */
+	return;
+}
+
+/*
+ * Models the real drain condition by yielding its guard and stepping the actual FIFO once.
+ */
+int
+waitq_sleep(
+	struct wait_queue *queue,
+	struct spinlock *guard,
+	uint64_t observed,
+	uint64_t deadline,
+	unsigned flags)
+{
+	unsigned long enabled;
+	int error;
+
+	/* The fixture may wait only for its known retained session's final callback barrier. */
+	assert(queue == &runtime_session->device->worker.retired && observed == queue->sequence);
+	assert(deadline == 0 && flags == 0 && guard->held.value == 1);
+	spin_unlock_irqrestore(guard, 1);
+	error = bcm2711_render_worker_step(runtime_session->device);
+	assert(error == 0);
+	enabled = spin_lock_irqsave(guard);
+	assert(enabled == 1);
+
+	/* Succeeded: the real drain resumes with the same guard held after one callback retired. */
+	return 0;
+}
+
+/*
+ * Enforces the controller mutex boundary in this explicit single-thread execution fixture.
+ */
+void
+mutex_lock(
+	struct mutex *mutex)
+{
+	/* Host scheduling is explicit; recursive native ownership must still fail. */
+	assert(mutex->locked == 0);
+	mutex->locked = 1;
+
+	/* Succeeded: the fixture owns this controller's ordinary execution boundary. */
+	return;
+}
+
+/*
+ * Enforces balanced controller ownership release before common callback delivery.
+ */
+void
+mutex_unlock(
+	struct mutex *mutex)
+{
+	/* Every completed frame must leave the exact ownership mutex unheld. */
+	assert(mutex->locked == 1);
+	mutex->locked = 0;
+
+	/* Succeeded: observers may inspect callback retirement outside the mutex. */
+	return;
+}
+
+/*
+ * Observes the actual worker's common callback contract without emulating the common GPU framework.
+ */
+void
+drv_gpu_complete(
+	struct drv_gpu_completion *completion,
+	int error)
+{
+	/* An accepted real worker slot retains its owner and domain through this entire delivery. */
+	assert(runtime_callbacks < 32);
+	assert(completion == (struct drv_gpu_completion *)(uintptr_t)(runtime_callbacks + 1));
+	assert(runtime_session->device->mutex.locked == 0);
+	assert(runtime_session->device->space.native->hardware.guard.held.value == 0);
+	assert(runtime_session->pending != 0);
+	runtime_errors[runtime_callbacks++] = error;
+
+	/* Succeeded: this explicit host observer recorded delivery, not a physical DMA retirement proof. */
+	return;
+}
+
+/*
+ * Observes capacity publication only after the actual completion observer has returned.
+ */
+void
+drv_gpu_capacity_changed(
+	struct drv_gpu_device *device)
+{
+	/* The real worker publishes freed slots outside both controller and native IRQ ownership. */
+	assert(device == runtime_session->device->gpu);
+	assert(runtime_session->device->mutex.locked == 0);
+	assert(runtime_session->device->space.native->hardware.guard.held.value == 0);
+
+	/* Succeeded: actual slot capacity became observable after callback return. */
+	return;
+}
+
+/*
+ * Observes the actual executor's global error handoff after native quarantine has been armed.
+ */
+void
+bcm2711_render_fail(
+	struct bcm2711_render_device *controller,
+	int error)
+{
+	/* This fixture supplies no success result, checked physical reset or replacement GPU error routing. */
+	assert(controller == runtime_session->device && error != 0);
+	assert(controller->mutex.locked == 0);
+	assert(controller->space.native->hardware.faulted && controller->worker.uncertain);
+	runtime_faults++;
+
+	/* Succeeded: native admission closed before the actual worker handed global loss to its observer. */
 	return;
 }
 
@@ -481,6 +649,8 @@ main(
 	memset(&render, 0, sizeof(render));
 	memset(&view, 0, sizeof(view));
 	engine.hardware.ready = true;
+	engine.hardware.initialized = true;
+	engine.power.ready = true;
 	engine.hardware.physical_bits = 32;
 	engine.hardware.core_ident[1] = 2U << 28;
 	page_buffer.address = native_pages;
@@ -624,6 +794,7 @@ main(
 	assert(render.timelines == (UINT64_C(1) << 7));
 	queue = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUEUE, 40);
 	assert(queue != NULL);
+	runtime_test(session);
 	sync_test(session);
 	memory_test(session, &render);
 	resource_test(session);
@@ -3235,7 +3406,7 @@ record_test(
 	return;
 }
 
-/* Routes the actual immutable command through native roots, then native physical queries. */
+/* Routes the real client codec through the same production dispatcher as the public node. */
 static int
 dispatch(
 	struct bcm2711_vulkan_session *session,
@@ -3244,142 +3415,192 @@ dispatch(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	int handled;
 	int error;
 
-	/* Device root routing must either consume one exact opcode or leave it unchanged for another typed module. */
-	error = bcm2711_vulkan_device_dispatch(session, opcode, requested, reader, reply, &handled);
+	/* The host supplies no replacement opcode table or successful unknown-command path. */
+	error = bcm2711_vulkan_dispatch(session, opcode, requested, reader, reply);
 	if (error != 0)
 		return error;
-	if (handled != 0)
-		return 0;
 
-	/* Complete queue submits own native retirement independently of the decoder trailer. */
-	error = bcm2711_vulkan_queue_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Core native fences and semaphores keep their independent typed device owners. */
-	error = bcm2711_vulkan_sync_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Actual physical records use the independently implemented native query table. */
-	error = bcm2711_vulkan_query_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Allocation commands retain native views and real typed device ownership. */
-	error = bcm2711_vulkan_memory_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Native storage requirements and retained memory binding consume their actual typed commands. */
-	error = bcm2711_vulkan_resource_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Immutable native image views, samplers and owned SPIR-V modules retain their exact typed parents. */
-	error = bcm2711_vulkan_input_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Canonical descriptor and pipeline interfaces retain immutable dependency graphs independently of public IDs. */
-	error = bcm2711_vulkan_layout_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Actual pool lifecycle and complete set batches acquire independently retained native graph ownership. */
-	error = bcm2711_vulkan_descriptor_pool_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_descriptor_sets_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	/* Ordered mutable bindings acquire independent draw snapshots before later updates can retire their original resources. */
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_descriptor_update_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	/* Immutable target owners keep attachment semantics and native storage through later command preparation. */
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_target_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	/* Fully compiled graphics batches publish independent typed owners only after complete selected-state decoding. */
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_pipeline_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Primary command pools preserve native ownership through reset, recording and public identity retirement. */
-	error = bcm2711_vulkan_command_pool_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_command_batch_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-	error = bcm2711_vulkan_command_buffer_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Complete explicit dependencies retain typed resources independently of the public handles. */
-	error = bcm2711_vulkan_barrier_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Coherent buffer copies retain complete actual typed byte intervals independently of graphics state. */
-	error = bcm2711_vulkan_buffer_copy_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Reply-free copied image transfers retain both exact typed resources and the complete region vector. */
-	error = bcm2711_vulkan_transfer_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled != 0)
-		return 0;
-
-	/* Reply-free ordered graphics records retain immutable state and exact input identities. */
-	error = bcm2711_vulkan_record_dispatch(session, opcode, requested, reader, reply, &handled);
-	if (error != 0)
-		return error;
-	if (handled == 0)
-		return ENOTSUP;
-
-	/* Succeeded: one real typed native module consumed the complete selected command. */
+	/* Succeeded: the actual runtime owns this complete command. */
 	return 0;
+}
+
+/* Exercises actual capset, immutable command acceptance, queue fence execution and final callback drain. */
+static void
+runtime_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct bcm2711_render_device *controller;
+	struct bcm2711_vulkan_session *old_namespace;
+	struct bcm2711_vulkan_object *fence_object;
+	struct bcm2711_vulkan_sync *fence;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct gpu_capset capset;
+	VkFenceCreateInfo create;
+	uint8_t wire[512];
+	uint32_t protocol;
+	uint32_t xml;
+	uint32_t timelines;
+	uint32_t unused;
+	uint32_t magic;
+	uint32_t flags;
+	unsigned baseline;
+	unsigned index;
+	int error;
+
+	/* The complete public table binds the actual dispatcher and actual single worker to this existing typed namespace. */
+	controller = session->render->device;
+	old_namespace = session->render->vulkan;
+	session->render->vulkan = session;
+	runtime_session = session->render;
+	baseline = allocations;
+	bcm2711_render_worker_init(controller);
+	bcm2711_render_runtime_bind(&controller->operations);
+	assert(controller->operations.get_capset != NULL && controller->operations.command != NULL);
+	assert(controller->operations.commands != NULL && controller->operations.jobs != NULL);
+
+	/* Actual profile bytes select the unchanged client XML, opaque sharing, strict queue and quiescence; unused video words stay absent. */
+	memset(&capset, 0xa5, sizeof(capset));
+	capset.capset_id = 4;
+	capset.capset_version = 0;
+	capset.capacity = GPU_CAPSET_MAX;
+	error = controller->operations.get_capset(controller, runtime_session, &capset);
+	assert(error == 0 && capset.bytes == 168);
+	memset(&reader, 0, sizeof(reader));
+	reader.data = capset.data;
+	reader.bytes = capset.bytes;
+	protocol = vulkan_read_u32(&reader);
+	xml = vulkan_read_u32(&reader);
+	assert(protocol == 1 && xml == 0x0040310d);
+	reader.cursor = 152;
+	timelines = vulkan_read_u32(&reader);
+	unused = vulkan_read_u32(&reader);
+	magic = vulkan_read_u32(&reader);
+	flags = vulkan_read_u32(&reader);
+	assert(timelines == 1 && unused == 0);
+	assert(magic == 0x5a424453 && flags == 7);
+	capset.capacity = 167;
+	error = controller->operations.get_capset(controller, runtime_session, &capset);
+	assert(error == EINVAL);
+	capset.capacity = GPU_CAPSET_MAX;
+	capset.capset_version = 1;
+	error = controller->operations.get_capset(controller, runtime_session, &capset);
+	assert(error == ENOTSUP);
+
+	/* A real typed fence remains unsignaled until its actual empty native submit executes inside the public command worker. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FENCE, 1);
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFenceCreateInfo(&writer, &create);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 910);
+	error = execute(session, &writer, &reader);
+	assert(error == 0);
+	fence_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FENCE, 910);
+	assert(fence_object != NULL);
+	fence = fence_object->payload;
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 0, 0, 910, 0);
+	runtime_trailer(&writer);
+	memset(reply_storage, 0xa5, sizeof(reply_storage));
+	error = controller->operations.commands->submit(controller, runtime_session, wire, (uint32_t)writer.bytes, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)1);
+	assert(error == 0 && runtime_callbacks == 0 && runtime_session->pending == 1 && !fence->signaled);
+	memset(wire, 0xff, sizeof(wire));
+	error = controller->operations.command(controller, runtime_session, wire, 8);
+	assert(error == EAGAIN && !fence->signaled);
+	error = bcm2711_render_worker_step(controller);
+	assert(error == 0 && runtime_callbacks == 1 && runtime_errors[0] == 0);
+	assert(fence->signaled && runtime_session->pending == 0 && reply_storage[2047] == 0x00401000);
+
+	/* Snapshot OOM and a non-owned completion domain leave neither a callback nor a queued prefix. */
+	baseline = allocations;
+	fail_after = 1;
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)2);
+	assert(error == ENOMEM && allocations == baseline && runtime_session->pending == 0);
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 6, (struct drv_gpu_completion *)(uintptr_t)2);
+	assert(error == EINVAL && allocations == baseline && runtime_session->pending == 0);
+
+	/* A selected real queue marker preserves its domain until the callback returns, without sending an empty Vulkan command. */
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 7, (struct drv_gpu_completion *)(uintptr_t)2);
+	assert(error == 0 && controller->worker.head->timeline == 7 && runtime_callbacks == 1);
+	error = bcm2711_render_worker_step(controller);
+	assert(error == 0 && runtime_callbacks == 2 && runtime_errors[1] == 0 && allocations == baseline);
+
+	/* Complete unknown commands produce an actual error notification and never publish a false decoder-completion trailer. */
+	begin(&writer, wire, sizeof(wire), (enum gpu_op)0xffffffffU, 1);
+	runtime_trailer(&writer);
+	memset(reply_storage, 0xa5, sizeof(reply_storage));
+	error = controller->operations.commands->submit(controller, runtime_session, wire, (uint32_t)writer.bytes, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)3);
+	assert(error == 0);
+	error = bcm2711_render_worker_step(controller);
+	assert(error == 0 && runtime_callbacks == 3 && runtime_errors[2] == ENOTSUP && reply_storage[2047] == 0xa5a5a5a5);
+	assert(runtime_faults == 0 && !controller->worker.uncertain && allocations == baseline);
+
+	/* All sixteen real slots own independent CPU snapshots; the next refused request leaves no seventeenth allocation or callback. */
+	for (index = 0; index < BCM2711_RENDER_REQUESTS; index++) {
+		error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)(index + 4));
+		assert(error == 0);
+	}
+
+	/* A refused next request never acquires an extra copied payload or callback. */
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)20);
+	assert(error == EAGAIN && allocations == baseline + BCM2711_RENDER_REQUESTS);
+
+	/* Production close drain cancels and joins every accepted actual worker callback, preserving error outcomes without claiming physical stop. */
+	controller->operations.commands->drain(controller, runtime_session);
+	assert(runtime_callbacks == 19 && runtime_session->pending == 0 && allocations == baseline);
+	for (index = 3; index < runtime_callbacks; index++) {
+		assert(runtime_errors[index] == ECANCELED);
+	}
+
+	/* A refused next request never acquires an extra copied payload or callback. */
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)20);
+	assert(error == EIO && runtime_callbacks == 19 && allocations == baseline);
+
+	/* A native fault after accepted marker publication produces an error callback and arms whole-device admission before reporting loss. */
+	runtime_session->stopping = false;
+	/* A refused next request never acquires an extra copied payload or callback. */
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)20);
+	assert(error == 0);
+	controller->space.native->hardware.faulted = true;
+	error = bcm2711_render_worker_step(controller);
+	assert(error == 0 && runtime_callbacks == 20 && runtime_errors[19] == EIO && runtime_faults == 1);
+	assert(controller->worker.uncertain && allocations == baseline);
+	error = controller->operations.commands->submit(controller, runtime_session, NULL, 0, GPU_COMMAND_CONTEXT_FENCE, 0, (struct drv_gpu_completion *)(uintptr_t)21);
+	assert(error == EIO && runtime_callbacks == 20 && allocations == baseline);
+
+	/* The explicit fixture restores synthetic admission for independent checks; no checked physical reset is asserted. */
+	controller->space.native->hardware.faulted = false;
+	controller->worker.uncertain = false;
+	destroy(session, GPU_OP_DESTROY_FENCE, 910);
+	session->render->vulkan = old_namespace;
+	puts("WS141 actual public runtime capset/snapshot/FIFO/fence/callback/domain/OOM/capacity/close drain: PASS");
+
+	/* Succeeded: public callback software was verified separately from common ioctl integration, scheduler and physical GPU behavior. */
+	return;
+}
+
+/* Appends the unchanged client's exact reply seek and decoder-completion trailer to one fixture frame. */
+static void
+runtime_trailer(
+	struct vulkan_writer *writer)
+{
+	/* Actual transport completion uses one final echoed version opcode and naturally aligned release word. */
+	vulkan_write_u32(writer, GPU_OP_SEEK_REPLY_STREAM);
+	vulkan_write_u32(writer, 0);
+	vulkan_write_u64(writer, sizeof(reply_storage) - 20);
+	vulkan_write_u32(writer, GPU_OP_ENUMERATE_INSTANCE_VERSION);
+	vulkan_write_u32(writer, 1);
+	vulkan_write_u64(writer, 1);
+	assert(writer->error == VK_SUCCESS);
+
+	/* Succeeded: the real stream decoder must complete every earlier command before publishing this trailer. */
+	return;
 }
 
 /* Exercises the unchanged actual client submit encoder across full native preparation, binary chains, fence retirement and uncertainty. */
