@@ -785,6 +785,7 @@ btd_timeout(
 	uint64_t earliest;
 	uint64_t deadline;
 	int pending;
+	int ready;
 
 	/* Queued packets are handled at once. */
 	if (btd_session_open) {
@@ -804,13 +805,26 @@ btd_timeout(
 	deadline = btd_hid_deadline(&btd_hid_host);
 	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
+	/*
+	 * The phone link's deadlines and the seat's next look, while the
+	 * controller is ready (only then does the loop tick them; a look not
+	 * made yet is due at once).  A seat's look of 0 must not count as no
+	 * deadline: it would wait for a descriptor and stop the HID host's
+	 * ticks (T1-524).
+	 */
+	ready = 0;
+	if (btd_session_open && btd_session.state == BTD_STATE_READY)
+		ready = 1;
 	deadline = btd_phone_deadline(&btd_phone_link);
-	if (btd_session_open &&
+	if (ready &&
 	    deadline != 0U &&
 	    (earliest == 0U || deadline < earliest))
 		earliest = deadline;
-	if (btd_session_open && (earliest == 0U || btd_seat_check_at < earliest))
-		earliest = btd_seat_check_at;
+	deadline = btd_seat_check_at;
+	if (deadline == 0U)
+		deadline = now;
+	if (ready && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
 	deadline = btd_linkmgr_deadline(&btd_links, now);
 	if (btd_session_open &&
 	    deadline != 0U &&
