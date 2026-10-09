@@ -239,7 +239,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS138](ws138/ws.md) | ベータ2 | MG006 | 0.5 | 背景の PNG |
 | [WS139](ws139/ws.md) | ベータ2 | MG006 | 2 | desktop の速さ |
 | [WS140](ws140/ws.md) | ベータ2 | MG002 | 0.5 | ld.so の上限の動的化 |
-| [WS141](ws141/ws.md) | 要検討（ブロック） | MG006 | 10 | Raspberry Pi 4 の GPU（N0 から V8・TFU まで） |
+| [WS141](ws141/ws.md) | 別 session で実行（2026-10-09 ユーザー、ws141/ は その session が排他的に更新、patch は Q1 が merge） | MG006 | 10 | Raspberry Pi 4 の GPU（N0 から V8・TFU まで） |
 | [WS142](ws142/ws.md) | ベータ2 | MG006 | 3 | アプリの切り替え（bar・Alt+Tab・gesture） |
 | [WS143](ws143/ws.md) | ベータ2（2026-10-05 移動） | MG006 | 8 | Bluetooth |
 | [WS144](ws144/ws.md) | アイディアの Phase（議論の後） | MG005 | 8 | VPN |
@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「WS141を別なセッションで実行します。ws141/ws.mdはそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」→ WS141 は別 session が実行。plan/ws141/（ws.md と Phase）はその session だけが書き、Q1・P1 は書かない。master.md・queue.md などの共有の記録は Q1 だけが書く。届いた patch は Q1 が main に適用する（commit は WIP）。QEMU は host で同時に 1 つの規則があるので、T1 と時間が重ならないよう Q1 が調整する。
 - 2026-10-09 ユーザー（クリック）: WS126 p004 の D1（依存の package の要る追加の module）は「今は足さない」→ p004 は保留、今の module で p005 の image へ。
 - 2026-10-09 ユーザー（クリック）: libc の wint_t（uint32_t、clang は int）は「WS001 p045 で直す」→ libcxx の作り直しと一緒に ws001-p045 で。今は変えない。
 - 2026-10-09 ユーザー:「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」→ [ws001-p045](ws001/phase045/phase.md)（planned、ベータ3 の P1 の列）。
