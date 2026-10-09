@@ -19,7 +19,7 @@ status=0
 
 # The tools the script needs besides the stand-ins.
 mkdir -p "$out/tools"
-for tool in sh grep cat id; do
+for tool in sh grep cat id ps tr; do
 	ln -s "$(command -v $tool)" "$out/tools/$tool"
 done
 
@@ -49,7 +49,9 @@ for name in pkg sudo id make; do stand_in pkg "$name"; done
 
 # Runs the script with a manager's stand-ins: $1 manager, $2 terminal (yes: a pseudo-terminal it reads and writes;
 # job: a controlling pseudo-terminal, but the standard input and output not it, as a BSD make -j job has them,
-# T1-498; no: no controlling terminal at all, setsid(1)), $3 answer, then its arguments.
+# T1-498; background: a controlling pseudo-terminal, but run in a process group of its own that is not the terminal's
+# foreground one, as FreeBSD's make -j8 runs a job, T1-503; no: no controlling terminal at all, setsid(1)), $3 answer,
+# then its arguments.
 run() {
 	manager=$1
 	terminal=$2
@@ -62,6 +64,10 @@ run() {
 	elif [ "$terminal" = job ]; then
 		printf '%s\n' "$answer" | PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" \
 			"$terminal_tool" -qec "sh $script_path $* < /dev/null > $out/output 2>&1" /dev/null > "$out/terminal" 2>&1
+	elif [ "$terminal" = background ]; then
+		printf '%s\n' "$answer" | timeout 20 env PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" \
+			"$terminal_tool" -qec "sh -c 'set -m; sh $script_path $* < /dev/null > $out/output 2>&1 & wait \$!'" /dev/null \
+			> "$out/terminal" 2>&1
 	else
 		PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" "$session_tool" -w sh "$script_path" "$@" \
 			> "$out/output" 2>&1 < /dev/null
@@ -127,6 +133,12 @@ printf '%s\n' gmake python3 meson ninja vulkan-headers vulkan-loader libdrm mesa
 code=$(run pkg job y check freebsd)
 test "$code" = 0 && grep -qx 'sudo pkg install -y seatd' "$out/calls.log" && grep -q 'Install them now' "$out/terminal"
 expect "pkg, seatd missing, make -j job on a terminal, yes: asked on /dev/tty, installed" $?
+
+# FreeBSD pkg: seatd missing, the job in a process group that is not the terminal's foreground one (T1-503: FreeBSD's
+# make -j8, "read: read error: Input/output error"): not asked, listed with the command, stops.
+code=$(run pkg background y check freebsd)
+test "$code" = 1 && grep -q 'background of the terminal' "$out/output" && grep -q 'install them with: sudo pkg install -y seatd' "$out/output" && ! grep -q 'Install them now' "$out/terminal" && ! grep -q '^pkg install' "$out/calls.log"
+expect "pkg, seatd missing, background job on a terminal: not asked, listed, stops" $?
 
 # The install after the build: no terminal prints, a terminal and yes runs it with sudo, no does not.
 code=$(run apt no "" offer-install linux make -f userland/desktop/keiland-linux.mk install)

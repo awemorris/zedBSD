@@ -40,3 +40,13 @@ Q1 了承（2026-10-09）: 下の 1〜5 の形。
 T1-498: Debian 13 は PASS、FreeBSD 15 は端末つきの `make -j8 keiland-freebsd` が質問せずに「install them with: pkg install -y seatd」で止まった（2 回）。原因: script は標準入力と標準出力が端末かで判定していたが、BSD make の `-j` は job の出力を pipe で集め、入力も端末でない（GNU make の -j も標準入力は 1 つの job だけ）。
 直し 7ff549ea9: 質問と答えを制御端末 `/dev/tty` で行い、開けるかで判定する（subshell で: 特別な組み込みの redirection の失敗は shell を終わらせる）。端末の無い CI（制御端末なし）は今まで通り質問しない。host 試験に「制御端末は在るが標準入出力は端末でない（make -j の job）」の場合を足し、前の script では T1-498 と同じ止まり方、今は y で導入を確かめた。端末なしの場合は setsid で制御端末を外して流す。`sh plan/ws194/tests/prerequisites-host-test.sh` → PASS（13 件）。
 注: `ssh -t` で `< /dev/null` を付けても制御端末が在るので質問は出る。端末なしの確かめは制御端末の無い形（`-t` なしの ssh）で。再試験は T1 の行（Q1 が番号）。
+
+## T1-503 の FAIL の直し（2026-10-09 深夜、P1）
+
+T1-503: Debian 13（端末つき・端末なし）と FreeBSD の端末なしは PASS。FreeBSD 15 の端末つきの `make -j8 keiland-freebsd` は質問は出るが `read: read error: Input/output error` で答えを読めず Error 1（f1.png）。
+原因: BSD make の `-j` は job ごとに process group を作る（job mode）。その group は端末の前面の group でないので、`/dev/tty` の read は SIGTTIN（無視されていれば EIO）になる。host の bmake（Debian の bmake 20200710）と pty（script(1)）で再現: `-j8` の job は `pgid≠tpgid` で read が `Stopped -- signal 21`。GNU make の -j は job を make と同じ group に置くので Debian は通った。
+直し:
+1. `BSDmakefile` に `.MAKEFLAGS: -B`: BSD make が target の命令を互換の mode（make 自身の process group、前面）で 1 つずつ流す。build の並列は gmake の `-j ${.MAKE.JOBS}`（-B でも `.MAKE.JOBS` は 8 のまま、bmake で確かめた）。
+2. `keiland-prerequisites.sh` の `interactive` に `foreground`: `ps -o pgid=`・`tpgid=` が違えば（前面でない job）「keiland: this runs in the background of the terminal (a job of make -j), where it cannot ask.」と言って質問しない（check は一覧と命令で止まり、offer-install は命令を出す）。ps が答えない時は今まで通り聞く。
+確かめ（host、QEMU なし）: bmake -j8 ＋ pty で -B ありは「[y/N]」に y で実行、-B なしは背景の行と命令（止まらない）、端末なしは命令だけ、KEILAND_ASK=n は聞かない。GNU make -j4 ＋ pty は今まで通り聞く。前の script は背景の group で SIGTTIN で止まる（rc 149）を確かめた。`plan/ws194/tests/prerequisites-host-test.sh` に背景の group の場合（`set -m` の背景 job）を足して 14 件 PASS。`sh -n`・`dash -n` ok。
+未実施: FreeBSD 15 の guest の bmake（20250xxx）での通し（T1 の再試験、T1-503 の (1) と同じ手順）。
