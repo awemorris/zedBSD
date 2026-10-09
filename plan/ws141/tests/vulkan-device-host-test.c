@@ -126,6 +126,8 @@ static void draw_test(struct bcm2711_vulkan_command_buffer *command);
 static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
 static void record_test(struct bcm2711_vulkan_session *session);
 void ws141_client_encode_buffer_copy(struct vulkan_writer *writer, uint64_t command_id, uint64_t source_id, uint64_t destination_id, const VkBufferCopy *regions, uint32_t count);
+void ws141_client_encode_raster_copy(struct vulkan_writer *writer, uint64_t command_id, uint64_t buffer_id, uint64_t image_id, VkImageLayout layout, const VkBufferImageCopy *regions, uint32_t count, VkBool32 upload);
+static void raster_copy_test(struct bcm2711_vulkan_session *session);
 static void buffer_copy_test(struct bcm2711_vulkan_session *session);
 static void transfer_test(struct bcm2711_vulkan_session *session);
 static void clear_test(struct bcm2711_vulkan_session *session);
@@ -2312,6 +2314,271 @@ transfer_test(
 	return;
 }
 
+/* Checks real public upload/readback byte order, partial image regions, both row strides and atomic FIFO refusal. */
+static void
+raster_copy_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct bcm2711_vulkan_object *image_object;
+	struct bcm2711_vulkan_object *buffer_object;
+	struct bcm2711_vulkan_object *alias_object;
+	struct bcm2711_vulkan_object *primary;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_native_job *job;
+	struct bcm2711_vulkan_buffer_copy *copy;
+	struct bcm2711_vulkan_buffer_copy *fixture;
+	struct bcm2711_render_device *controller;
+	struct bcm2711_v3d_view *view;
+	struct vulkan_object pool;
+	VkImageCreateInfo image_info;
+	VkBufferCreateInfo buffer_info;
+	VkCommandBufferAllocateInfo allocation;
+	VkCommandBufferBeginInfo recording;
+	VkBufferImageCopy uploads[2];
+	VkBufferImageCopy readbacks[2];
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint8_t wire[4096];
+	uint8_t expected_image[448];
+	uint8_t expected_buffer[1536];
+	void *image_cpu;
+	void *buffer_cpu;
+	uint32_t address;
+	uint32_t index;
+	uint32_t row;
+	uint32_t calls;
+	unsigned baseline;
+	bool retired;
+	int error;
+
+	/* An actual non-power-of-two BGRA transfer image retains raw channel bytes in its independent coherent binding. */
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image_info.imageType = VK_IMAGE_TYPE_2D;
+	image_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+	image_info.extent.width = 13;
+	image_info.extent.height = 7;
+	image_info.extent.depth = 1;
+	image_info.mipLevels = 1;
+	image_info.arrayLayers = 1;
+	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	image_info.usage = VK_IMAGE_USAGE_TRANSFER_SRC_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageCreateInfo(&writer, &image_info);
+	error = input_created(session, &writer, 195);
+	assert(error == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_IMAGE_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 195);
+	vulkan_write_u64(&writer, 102);
+	vulkan_write_u64(&writer, 4096);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	image_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE, 195);
+	assert(image_object != NULL);
+	image = image_object->payload;
+	image->layout = VK_IMAGE_LAYOUT_GENERAL;
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &image_cpu);
+	assert(error == 0 && image->pitch == 64 && image->bytes == sizeof(expected_image));
+
+	/* One distinct actual buffer has enough logical bytes for upload data, packed readback and separately padded readback. */
+	memset(&buffer_info, 0, sizeof(buffer_info));
+	buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer_info.size = sizeof(expected_buffer);
+	buffer_info.usage = VK_BUFFER_USAGE_TRANSFER_SRC_BIT | VK_BUFFER_USAGE_TRANSFER_DST_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_BUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkBufferCreateInfo(&writer, &buffer_info);
+	error = input_created(session, &writer, 196);
+	assert(error == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_BUFFER_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 196);
+	vulkan_write_u64(&writer, 102);
+	vulkan_write_u64(&writer, 6144);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	buffer_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, 196);
+	assert(buffer_object != NULL);
+	error = bcm2711_vulkan_resource_backing(buffer_object->payload, 0, sizeof(expected_buffer), &view, &address, &buffer_cpu);
+	assert(error == 0);
+
+	/* A separate real primary uses the existing reset-enabled device pool and stores both transfer directions in one FIFO. */
+	memset(&pool, 0, sizeof(pool));
+	pool.wire_id = 150;
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocation.commandPool = (VkCommandPool)(uintptr_t)&pool;
+	allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocation.commandBufferCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_COMMAND_BUFFERS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferAllocateInfo(&writer, &allocation);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 156);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	primary = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 156);
+	assert(primary != NULL);
+	command = primary->payload;
+	memset(&recording, 0, sizeof(recording));
+	recording.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	memset(uploads, 0, sizeof(uploads));
+	uploads[0].bufferOffset = 4;
+	uploads[0].bufferRowLength = 11;
+	uploads[0].bufferImageHeight = 5;
+	uploads[0].imageSubresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	uploads[0].imageSubresource.layerCount = 1;
+	uploads[0].imageOffset.x = 3;
+	uploads[0].imageOffset.y = 2;
+	uploads[0].imageExtent.width = 7;
+	uploads[0].imageExtent.height = 3;
+	uploads[0].imageExtent.depth = 1;
+	uploads[1].bufferOffset = 160;
+	uploads[1].imageSubresource = uploads[0].imageSubresource;
+	uploads[1].imageExtent.width = 2;
+	uploads[1].imageExtent.height = 2;
+	uploads[1].imageExtent.depth = 1;
+	memset(readbacks, 0, sizeof(readbacks));
+	readbacks[0].bufferOffset = 224;
+	readbacks[0].imageSubresource = uploads[0].imageSubresource;
+	readbacks[0].imageExtent = image_info.extent;
+	readbacks[1] = readbacks[0];
+	readbacks[1].bufferOffset = 624;
+	readbacks[1].bufferRowLength = 17;
+	readbacks[1].bufferImageHeight = 9;
+
+	/* A bad trailing upload selection consumes its whole vector and following readback without retaining any prefix. */
+	for (index = 0; index < 2; index++) {
+		uploads[1].imageSubresource.mipLevel = 1;
+		if (index != 0)
+			uploads[1].imageSubresource.mipLevel = 0;
+		begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+		vulkan_write_u64(&writer, 156);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+		begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+		writer.bytes -= 8;
+		ws141_client_encode_raster_copy(&writer, 156, 196, 195, VK_IMAGE_LAYOUT_GENERAL, uploads, 2, true);
+		ws141_client_encode_raster_copy(&writer, 156, 196, 195, VK_IMAGE_LAYOUT_GENERAL, readbacks, 2, false);
+		vulkan_write_u32(&writer, GPU_OP_END_COMMAND_BUFFER);
+		vulkan_write_u32(&writer, 1);
+		vulkan_write_u64(&writer, 156);
+		error = execute(session, &writer, &reader);
+		assert(error == 0);
+		if (index == 0) {
+			assert(vulkan_read_u32(&reader) != VK_SUCCESS && command->first == NULL);
+			assert(image_object->references == 1 && buffer_object->references == 1);
+		} else {
+			assert(vulkan_read_u32(&reader) == VK_SUCCESS && image_object->references == 3 && buffer_object->references == 3);
+		}
+	}
+
+	/* Runtime row-vector allocation and execution-time layout refusal leave every source and destination byte unchanged. */
+	copy = (struct bcm2711_vulkan_buffer_copy *)command->first;
+	assert(copy->regions.images[0].bufferRowLength == 11 && copy->regions.images[1].bufferRowLength == 0);
+	memset(image_cpu, 0xd3, sizeof(expected_image));
+	memset(expected_image, 0xd3, sizeof(expected_image));
+	memset(buffer_cpu, 0x27, sizeof(expected_buffer));
+	memset(expected_buffer, 0x27, sizeof(expected_buffer));
+	baseline = allocations;
+	fail_after = 1;
+	error = bcm2711_vulkan_buffer_copy_run(&copy->record);
+	assert(error == ENOMEM && allocations == baseline && memcmp(image_cpu, expected_image, sizeof(expected_image)) == 0);
+	controller = session->render->device;
+	session->render->vulkan = session;
+	error = bcm2711_vulkan_native_job_create(primary, &job);
+	assert(error == 0);
+	image->layout = VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL;
+	calls = native_execute_calls;
+	error = bcm2711_vulkan_native_job_execute(controller, session->render, job, &retired);
+	assert(error == EINVAL && retired && native_execute_calls == calls && memcmp(image_cpu, expected_image, sizeof(expected_image)) == 0);
+	assert(memcmp(buffer_cpu, expected_buffer, sizeof(expected_buffer)) == 0);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == 0 && allocations == baseline && command->pending == 0);
+	image->layout = VK_IMAGE_LAYOUT_GENERAL;
+
+	/* Actual FIFO source reads observe host updates after preparation and preserve raw BGRA bytes without channel conversion. */
+	error = bcm2711_vulkan_native_job_create(primary, &job);
+	assert(error == 0);
+	for (index = 0; index < sizeof(expected_buffer); index++)
+		((uint8_t *)buffer_cpu)[index] = (uint8_t)(index ^ 0x5cU);
+	memcpy(expected_buffer, buffer_cpu, sizeof(expected_buffer));
+	for (row = 0; row < 3; row++)
+		memcpy(expected_image + (row + 2U) * 64U + 12U, expected_buffer + 4U + row * 44U, 28);
+	for (row = 0; row < 2; row++)
+		memcpy(expected_image + row * 64U, expected_buffer + 160U + row * 8U, 8);
+	for (row = 0; row < 7; row++) {
+		memcpy(expected_buffer + 224U + row * 52U, expected_image + row * 64U, 52);
+		memcpy(expected_buffer + 624U + row * 68U, expected_image + row * 64U, 52);
+	}
+
+	/* Complete upload followed by both readbacks changes exactly selected row bytes and performs no native GPU launch. */
+	error = bcm2711_vulkan_native_job_execute(controller, session->render, job, &retired);
+	assert(error == 0 && retired && native_execute_calls == calls && job->pass == NULL);
+	assert(memcmp(image_cpu, expected_image, sizeof(expected_image)) == 0 && memcmp(buffer_cpu, expected_buffer, sizeof(expected_buffer)) == 0);
+	assert(image->layout == VK_IMAGE_LAYOUT_GENERAL && command->pending == 1);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == 0 && allocations == baseline && command->pending == 0);
+	session->render->vulkan = NULL;
+
+	/* A second actual buffer alias tests copied row unions against physical image placement, including legal unused image padding. */
+	buffer_info.size = sizeof(expected_image);
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_BUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkBufferCreateInfo(&writer, &buffer_info);
+	error = input_created(session, &writer, 197);
+	assert(error == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_BUFFER_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 197);
+	vulkan_write_u64(&writer, 102);
+	vulkan_write_u64(&writer, 4096);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	alias_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, 197);
+	assert(alias_object != NULL);
+	fixture = kern_calloc(1, sizeof(*fixture));
+	assert(fixture != NULL);
+	memcpy(fixture, copy, sizeof(*fixture));
+	fixture->record.objects[0] = alias_object;
+	fixture->record.count = 1;
+	fixture->regions.images[0].bufferOffset = 52;
+	fixture->regions.images[0].bufferRowLength = 16;
+	fixture->regions.images[0].imageOffset.x = 0;
+	fixture->regions.images[0].imageOffset.y = 0;
+	fixture->regions.images[0].imageExtent.width = 2;
+	fixture->regions.images[0].imageExtent.height = 2;
+	error = bcm2711_vulkan_buffer_copy_validate(&fixture->record, image->device);
+	assert(error == 0);
+	fixture->regions.images[0].bufferOffset = 0;
+	error = bcm2711_vulkan_buffer_copy_validate(&fixture->record, image->device);
+	assert(error == EINVAL);
+	kern_free(fixture);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_BUFFER, 197);
+	assert(error == 0);
+
+	/* Only this primary, transfer image and staging buffer retire; all earlier actual graphics owners remain valid. */
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, 156);
+	assert(error == 0 && image_object->references == 1 && buffer_object->references == 1);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_BUFFER, 196);
+	assert(error == 0);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_IMAGE, 195);
+	assert(error == 0);
+	puts("WS141 real public coherent upload/readback/raw BGRA/FIFO/padded-packed rows/whole refusal/no native launch: PASS");
+
+	/* Succeeded: exact CPU transfer bytes are verified separately from physical native rendering. */
+	return;
+}
+
 /* Checks actual coherent buffer transfers, FIFO reads and exact destination bytes without simulating any GPU operation. */
 static void
 buffer_copy_test(
@@ -2425,7 +2692,7 @@ buffer_copy_test(
 
 	/* Pending preparation snapshots immutable offsets while execution reads the latest coherent source bytes in FIFO order. */
 	copy = (struct bcm2711_vulkan_buffer_copy *)command->first;
-	assert(copy->record.count == 2 && copy->regions[0].srcOffset == 1 && copy->regions[1].size == 17);
+	assert(copy->record.count == 2 && copy->regions.buffers[0].srcOffset == 1 && copy->regions.buffers[1].size == 17);
 	controller = session->render->device;
 	session->render->vulkan = session;
 	baseline = allocations;
@@ -2453,11 +2720,11 @@ buffer_copy_test(
 	assert(fixture != NULL);
 	memcpy(fixture, copy, sizeof(*fixture));
 	fixture->record.objects[1] = objects[0];
-	fixture->regions[0].dstOffset = 32;
-	fixture->regions[1].dstOffset = 120;
+	fixture->regions.buffers[0].dstOffset = 32;
+	fixture->regions.buffers[1].dstOffset = 120;
 	error = bcm2711_vulkan_buffer_copy_validate(&fixture->record, ((struct bcm2711_vulkan_resource *)objects[0]->payload)->device);
 	assert(error == 0);
-	fixture->regions[0].dstOffset = 6;
+	fixture->regions.buffers[0].dstOffset = 6;
 	error = bcm2711_vulkan_buffer_copy_validate(&fixture->record, ((struct bcm2711_vulkan_resource *)objects[0]->payload)->device);
 	assert(error == EINVAL);
 	kern_free(fixture);
@@ -2890,6 +3157,7 @@ record_test(
 	clear_test(session);
 	transfer_test(session);
 	buffer_copy_test(session);
+	raster_copy_test(session);
 
 	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
 	set->pending = 1;

@@ -135,6 +135,53 @@ ws141_client_encode_recording(
 }
 
 /*
+ * Copies real public buffer/image upload or readback recording with exact standard selected fields.
+ */
+void
+ws141_client_encode_raster_copy(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t buffer_id,
+	uint64_t image_id,
+	VkImageLayout layout,
+	const VkBufferImageCopy *regions,
+	uint32_t count,
+	VkBool32 upload)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object buffer;
+	struct vulkan_object image;
+
+	/* Temporary client identities retain no kernel resource; the actual APIs independently copy their complete standard parameters. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.wire_id = buffer_id;
+	memset(&image, 0, sizeof(image));
+	image.wire_id = image_id;
+	if (upload) {
+		vkCmdCopyBufferToImage(&command, (VkBuffer)(uintptr_t)&buffer, (VkImage)(uintptr_t)&image, layout, count, regions);
+	} else {
+		vkCmdCopyImageToBuffer(&command, (VkImage)(uintptr_t)&image, layout, (VkBuffer)(uintptr_t)&buffer, count, regions);
+	}
+
+	/* All actual copied recording bytes enter the host wire before either client identity or caller vector retires. */
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: uploaded and readback opcode-specific layout/identity framing comes from the real public client. */
+	return;
+}
+
+/*
  * Copies a real public buffer-copy recording with caller-owned exact byte regions.
  */
 void
