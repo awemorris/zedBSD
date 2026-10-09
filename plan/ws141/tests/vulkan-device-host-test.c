@@ -56,6 +56,8 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void descriptor_test(struct bcm2711_vulkan_session *session);
+static void encode_image_write(struct vulkan_writer *writer, uint64_t set, uint64_t sampler, uint64_t view);
 static void pool_test(struct bcm2711_vulkan_session *session);
 static int sets_allocate(struct bcm2711_vulkan_session *session, uint64_t pool, uint64_t layout, uint64_t first);
 static void layout_test(struct bcm2711_vulkan_session *session);
@@ -419,6 +421,7 @@ main(
 	input_test(session);
 	layout_test(session);
 	pool_test(session);
+	descriptor_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -565,6 +568,12 @@ dispatch(
 	if (handled != 0)
 		return 0;
 	error = bcm2711_vulkan_descriptor_sets_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	/* Ordered mutable bindings acquire independent draw snapshots before later updates can retire their original resources. */
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_descriptor_update_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -1538,4 +1547,361 @@ sets_allocate(
 
 	/* Succeeded: the exact complete batch outcome follows the actual client's allocation framing. */
 	return (int)status;
+}
+
+/* Exercises complete ordered native updates, rollback and draw snapshots using actual client framing and handle codecs. */
+static void
+descriptor_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object client_image;
+	struct vulkan_object client_sampler;
+	struct vulkan_object client_layouts[2];
+	struct vulkan_object client_pool;
+	struct vulkan_object client_sets[2];
+	struct vulkan_object client_buffer;
+	struct bcm2711_vulkan_object *view;
+	struct bcm2711_vulkan_object *second_view;
+	struct bcm2711_vulkan_object *sampler;
+	struct bcm2711_vulkan_object *buffer;
+	struct bcm2711_vulkan_object *set_object;
+	struct bcm2711_vulkan_descriptor_set *immutable_set;
+	struct bcm2711_vulkan_descriptor_set *mutable_set;
+	struct bcm2711_vulkan_descriptor snapshot;
+	struct bcm2711_vulkan_descriptor uniform_snapshot;
+	struct bcm2711_vulkan_descriptor overflow_snapshot;
+	struct bcm2711_buffer *blob;
+	struct gpu_blob_create blob_request;
+	VkImageCreateInfo image_info;
+	VkImageViewCreateInfo view_info;
+	VkSamplerCreateInfo sampler_info;
+	VkBufferCreateInfo buffer_info;
+	VkDescriptorSetLayoutBinding bindings[2];
+	VkDescriptorSetLayoutCreateInfo layout_info;
+	VkDescriptorPoolSize sizes[2];
+	VkDescriptorPoolCreateInfo pool_info;
+	VkDescriptorSetLayout layout_handles[2];
+	VkDescriptorSetAllocateInfo allocation;
+	VkDescriptorBufferInfo uniform;
+	VkCopyDescriptorSet copy;
+	VkSampler immutable;
+	uint8_t wire[2048];
+	unsigned baseline;
+	unsigned with_inputs;
+	uint32_t references;
+	uint32_t opcode;
+	uint32_t index;
+	int error;
+
+	/* A single coherent allocation backs both a sampled image and an exact 65-byte uniform buffer. */
+	baseline = allocations;
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image_info.imageType = VK_IMAGE_TYPE_2D;
+	image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	image_info.extent.width = 16;
+	image_info.extent.height = 8;
+	image_info.extent.depth = 1;
+	image_info.mipLevels = 1;
+	image_info.arrayLayers = 1;
+	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageCreateInfo(&writer, &image_info);
+	error = input_created(session, &writer, 100);
+	assert(error == VK_SUCCESS);
+	memset(&buffer_info, 0, sizeof(buffer_info));
+	buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer_info.size = 65;
+	buffer_info.usage = VK_BUFFER_USAGE_UNIFORM_BUFFER_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_BUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkBufferCreateInfo(&writer, &buffer_info);
+	error = input_created(session, &writer, 101);
+	assert(error == VK_SUCCESS);
+	error = memory_allocate(session, 102, 8192, 0, 0);
+	assert(error == VK_SUCCESS);
+	memset(&blob_request, 0, sizeof(blob_request));
+	blob_request.blob_id = 102;
+	blob_request.bytes = 8192;
+	blob_request.flags = GPU_BLOB_MAPPABLE;
+	error = bcm2711_vulkan_memory_blob(session, &blob_request, NULL, &blob);
+	assert(error == 0);
+	for (index = 0; index < 2; index++) {
+		opcode = GPU_OP_BIND_IMAGE_MEMORY;
+		if (index != 0)
+			opcode = GPU_OP_BIND_BUFFER_MEMORY;
+		begin(&writer, wire, sizeof(wire), opcode, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 100 + index);
+		vulkan_write_u64(&writer, 102);
+		vulkan_write_u64(&writer, index * 512U);
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	}
+
+	/* Two actual view identities share the image, so snapshot tests can distinguish old and new immutable inputs. */
+	memset(&client_image, 0, sizeof(client_image));
+	client_image.wire_id = 100;
+	memset(&view_info, 0, sizeof(view_info));
+	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	view_info.image = (VkImage)(uintptr_t)&client_image;
+	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view_info.format = image_info.format;
+	view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	view_info.subresourceRange.levelCount = 1;
+	view_info.subresourceRange.layerCount = 1;
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE_VIEW, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkImageViewCreateInfo(&writer, &view_info);
+		error = input_created(session, &writer, 103 + index);
+		assert(error == VK_SUCCESS);
+	}
+
+	/* Distinct sampler identities let copies demonstrate that destination immutable semantics override source mutable state. */
+	memset(&sampler_info, 0, sizeof(sampler_info));
+	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SAMPLER, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkSamplerCreateInfo(&writer, &sampler_info);
+		error = input_created(session, &writer, 105 + index);
+		assert(error == VK_SUCCESS);
+	}
+
+	/* Both layouts have canonical image/uniform slots, with only the first layout retaining its immutable sampler. */
+	memset(&client_sampler, 0, sizeof(client_sampler));
+	client_sampler.wire_id = 105;
+	immutable = (VkSampler)(uintptr_t)&client_sampler;
+	memset(bindings, 0, sizeof(bindings));
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	bindings[0].descriptorCount = 1;
+	bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	bindings[0].pImmutableSamplers = &immutable;
+	bindings[1].binding = 1;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	bindings[1].descriptorCount = 1;
+	bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	memset(&layout_info, 0, sizeof(layout_info));
+	layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layout_info.bindingCount = 2;
+	layout_info.pBindings = bindings;
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkDescriptorSetLayoutCreateInfo(&writer, &layout_info);
+		error = input_created(session, &writer, 110 + index);
+		assert(error == VK_SUCCESS);
+		bindings[0].pImmutableSamplers = NULL;
+	}
+
+	/* One pool allocates the two distinct interfaces through the real client record encoder. */
+	memset(sizes, 0, sizeof(sizes));
+	sizes[0].type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	sizes[0].descriptorCount = 2;
+	sizes[1].type = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	sizes[1].descriptorCount = 2;
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.maxSets = 2;
+	pool_info.poolSizeCount = 2;
+	pool_info.pPoolSizes = sizes;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorPoolCreateInfo(&writer, &pool_info);
+	error = input_created(session, &writer, 112);
+	assert(error == VK_SUCCESS);
+	memset(client_layouts, 0, sizeof(client_layouts));
+	memset(&client_pool, 0, sizeof(client_pool));
+	client_pool.wire_id = 112;
+	for (index = 0; index < 2; index++) {
+		client_layouts[index].wire_id = 110 + index;
+		layout_handles[index] = (VkDescriptorSetLayout)(uintptr_t)&client_layouts[index];
+	}
+
+	/* Actual set allocation creates one immutable and one mutable sampled-image interface. */
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	allocation.descriptorPool = (VkDescriptorPool)(uintptr_t)&client_pool;
+	allocation.descriptorSetCount = 2;
+	allocation.pSetLayouts = layout_handles;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorSetAllocateInfo(&writer, &allocation);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 113);
+	vulkan_write_u64(&writer, 114);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	set_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 113);
+	assert(set_object != NULL);
+	immutable_set = set_object->payload;
+	set_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 114);
+	assert(set_object != NULL);
+	mutable_set = set_object->payload;
+	view = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE_VIEW, 103);
+	second_view = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE_VIEW, 104);
+	sampler = bcm2711_vulkan_object_find(session, I915_VK_OBJ_SAMPLER, 105);
+	buffer = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, 101);
+	with_inputs = allocations;
+
+	/* A write followed by a copy in one command sees the staged view and keeps the destination's immutable sampler. */
+	memset(client_sets, 0, sizeof(client_sets));
+	client_sets[0].wire_id = 113;
+	client_sets[1].wire_id = 114;
+	memset(&copy, 0, sizeof(copy));
+	copy.sType = VK_STRUCTURE_TYPE_COPY_DESCRIPTOR_SET;
+	copy.srcSet = (VkDescriptorSet)(uintptr_t)&client_sets[1];
+	copy.dstSet = (VkDescriptorSet)(uintptr_t)&client_sets[0];
+	copy.descriptorCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 114, 106, 103);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCopyDescriptorSet(&writer, &copy);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && allocations == with_inputs);
+	assert(mutable_set->bindings[0].view == view && mutable_set->bindings[0].sampler != sampler);
+	assert(immutable_set->bindings[0].view == view && immutable_set->bindings[0].sampler == sampler);
+	memset(&snapshot, 0, sizeof(snapshot));
+	error = bcm2711_vulkan_descriptor_clone(&immutable_set->bindings[0], &snapshot);
+	assert(error == 0);
+
+	/* Overflow during later sampler acquisition must return the earlier view edge without publishing a partial snapshot. */
+	memset(&overflow_snapshot, 0, sizeof(overflow_snapshot));
+	references = sampler->references;
+	sampler->references = UINT32_MAX;
+	error = bcm2711_vulkan_descriptor_clone(&immutable_set->bindings[0], &overflow_snapshot);
+	sampler->references = references;
+	assert(error == EOVERFLOW && overflow_snapshot.view == NULL && view->references == 4);
+
+	/* Failure in a later copy rolls back an earlier valid image replacement without changing either live set. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 114, 106, 104);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	copy.dstBinding = 7;
+	vulkan_encode_VkCopyDescriptorSet(&writer, &copy);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && allocations == with_inputs);
+	assert(mutable_set->bindings[0].view == view && immutable_set->bindings[0].view == view);
+
+	/* Transaction allocation failure similarly leaves exact view/sampler owners unchanged. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 113, 0, 104);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	fail_after = 1;
+	error = execute(session, &writer, &reader);
+	assert(error == ENOMEM && allocations == with_inputs && immutable_set->bindings[0].view == view);
+
+	/* Actual buffer-info encoding resolves VK_WHOLE_SIZE against logical bytes, excluding padded allocation storage. */
+	memset(&client_buffer, 0, sizeof(client_buffer));
+	client_buffer.wire_id = 101;
+	memset(&uniform, 0, sizeof(uniform));
+	uniform.buffer = (VkBuffer)(uintptr_t)&client_buffer;
+	uniform.offset = 4;
+	uniform.range = VK_WHOLE_SIZE;
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 2);
+	vulkan_write_u64(&writer, 2);
+	encode_image_write(&writer, 113, 0, 104);
+	vulkan_write_u32(&writer, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 113);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u32(&writer, VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorBufferInfo(&writer, &uniform);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && allocations == with_inputs);
+	assert(immutable_set->bindings[0].view == second_view && snapshot.view == view);
+	assert(immutable_set->bindings[1].buffer == buffer && immutable_set->bindings[1].offset == 4 && immutable_set->bindings[1].bytes == 61);
+	memset(&uniform_snapshot, 0, sizeof(uniform_snapshot));
+	error = bcm2711_vulkan_descriptor_clone(&immutable_set->bindings[1], &uniform_snapshot);
+	assert(error == 0);
+
+	/* Reset and public resource destruction retire mutable sets but preserve both exact prepared snapshots and their backing memory. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 112);
+	vulkan_write_u32(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_POOL, 112);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT, 110);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT, 111);
+	destroy(session, GPU_OP_DESTROY_IMAGE_VIEW, 103);
+	destroy(session, GPU_OP_DESTROY_IMAGE_VIEW, 104);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 105);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 106);
+	destroy(session, GPU_OP_DESTROY_IMAGE, 100);
+	destroy(session, GPU_OP_DESTROY_BUFFER, 101);
+	memory_free(session, 102);
+	bcm2711_buffer_release(blob);
+	assert(snapshot.view == view && snapshot.sampler == sampler && view->references == 1 && sampler->references == 1);
+	assert(uniform_snapshot.buffer == buffer && buffer->references == 1 && session->render->device->vulkan_memory_bytes == 8192);
+	error = bcm2711_vulkan_descriptor_release(&snapshot);
+	assert(error == 0 && session->render->device->vulkan_memory_bytes == 8192);
+	error = bcm2711_vulkan_descriptor_release(&uniform_snapshot);
+	assert(error == 0 && allocations == baseline && session->render->device->vulkan_memory_bytes == 0);
+	puts("WS141 Vulkan ordered writes/copies/immutable override/rollback/exact uniform range/independent draw snapshot: PASS");
+}
+
+/* Follows the actual client descriptor_write selected-field framing for one combined-image binding. */
+static void
+encode_image_write(
+	struct vulkan_writer *writer,
+	uint64_t set,
+	uint64_t sampler,
+	uint64_t view)
+{
+	/* The native wire selects a single image payload and explicitly absent buffer/texel arrays. */
+	vulkan_write_u32(writer, VK_STRUCTURE_TYPE_WRITE_DESCRIPTOR_SET);
+	vulkan_write_u64(writer, 0);
+	vulkan_write_u64(writer, set);
+	vulkan_write_u32(writer, 0);
+	vulkan_write_u32(writer, 0);
+	vulkan_write_u32(writer, 1);
+	vulkan_write_u32(writer, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER);
+	vulkan_write_u64(writer, 1);
+	vulkan_write_u64(writer, sampler);
+	vulkan_write_u64(writer, view);
+	vulkan_write_u32(writer, VK_IMAGE_LAYOUT_GENERAL);
+	vulkan_write_u64(writer, 0);
+	vulkan_write_u64(writer, 0);
+
+	/* Succeeded: one complete descriptor write is encoded without an application pointer. */
+	return;
 }

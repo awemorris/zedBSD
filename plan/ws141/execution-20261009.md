@@ -434,3 +434,17 @@ Allocateはcomplete input/output arraysをconsumeしてからwhole-batch fresh I
 named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-pool-sets-final-y.log`。routersは未公開/未参照、kernel機能稼働の証拠とは扱わない。clang-format-19/definition tab/full C manual（successful-retain-before-field-publication、charge-after-complete、null-safe independent release、first native error preservation）を確認、style total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
 
 next: ordered descriptor write/copy updatesとimmutable draw snapshots、render pass/framebuffer/graphics pipeline、native CL/queue/common worker/public runtime。Master/shared投影はQ1。
+
+### descriptor pool/setのmain統合確認
+
+source `40309b8150d0fff8c32033fd92afb5f3fb82acb5` を専用統合treeでmergeし `82d179fbfe5985622d2c5dc05a0714cd109b7631`。actual host `build/ws141-i14-pool-sets-integration-host` の6範囲PASS、named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-pool-sets-integration-y.log`）。共有main/専用branch HEADをmerge SHAでreadback、main clean。Q1の他WS/共有記録を保持、Master担当編集無し。nは当該private source無しで先行検証を保持。i13/i14/p005/p006 in-progress。
+
+## i14 ordered descriptor更新とdraw snapshotのsoftware出力（2026-10-09）
+
+private `vulkan-descriptor-update.c` と当該arm64 source列を追加。actual client `descriptor_write` のselected image/uniform/texel framingとgenerated copy encoderに従い、write全件→copy全件の順序を保持。各操作は既存single-element interfaceに限定、各family64操作、最大128destinationのheap stagingを固定上限にする。初回destination cloneとreplacement cloneは成功retainだけをfieldへ公開。complete command検証前はlive setを変更せず、後続copyの不正入力/普通OOMで全staged edgeを退役。copyは先行write/copyのstaged stateを見て、destination immutable samplerを優先する。job向け公開private clone helperはexact resource interval/view/sampler/bufferを独立保持し、mutable setを後から参照しない。
+
+image updateはsame-device sampled/bound image、GENERAL/SHADER_READ_ONLY layoutとsame-device samplerを確認。uniform updateはbound uniform bufferのlogical extent、4-byte offset、range1..65536、VK_WHOLE_SIZEのlogical remainderだけを受け、padded memoryを範囲へ加えない。old actual bindingはcomplete publication後に退役し、最初のnative retirement errorを維持して他のedge cleanupも完遂。普通void updateにparameter replyを捏造しない。
+
+最初のcompileは新sourceが存在しないallocator名 `kern_kcalloc/kern_kfree` とこのscopeにないUNUSED_PARAMETER macroを使いFAIL。実projectのkern_calloc/kern_freeと明示unused commentへ修正。追加host fixtureのBLOB struct名も実 `gpu_blob_create` へ修正後、`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-update-host` と `... build/ws141-i14-update-final-host` → 7範囲PASS。actual client header/handle/standard record/native stream/actual VA sourceを実行、image write→copyのordering/immutable override、sampler retain overflow時の先行view unwind、後半invalid copyによる全rollback、transaction OOMのmutation無し、65-byte bufferのoffset4/WHOLE_SIZE=61、prepared old view保持、pool resetと全public identity退役後のimage/sampler/buffer/allocation owner保持・final heap0を確認。selected-field image-write helperは実client framingを忠実にencodeするfixtureでありvkUpdateDescriptorSets関数自体の実行ではない。physical allocator/native flushはfixture、GPU/cache/IRQ動作未検証。
+
+clang-format-19/definition tab/full C manual（ANSI宣言/公開-static順/forward/所有/first error/finite bounds）とstyle total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS、log `build/ws141-i14-update-final-y.log`、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。public COMMAND/CAPSET/JOB/runtimeは未公開、i13/i14/p005/p006はin-progress、whole p007/Keiland/実機は未達。next render pass/framebuffer/compiled graphics pipeline、recorded native draw/queue/common worker/public runtime。Master/shared投影はQ1。

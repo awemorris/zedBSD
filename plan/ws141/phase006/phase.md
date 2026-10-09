@@ -82,3 +82,7 @@ actual client recordでdescriptor/pipeline layoutを追加。canonical bindings�
 ## i14 pool/set checkpoint（2026-10-09）
 
 actual client recordでfinite pool/reset/destroyとall-or-nothing set batch allocate/freeを追加。old prepared setのindependent graph/charge保持とcapacity reuse、2nd registry OOMの全rollbackをnative hostで確認。host6範囲/rpi4 y build/style PASS、next ordered descriptor update/copyとdraw snapshot。public runtime未公開、p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。
+
+## i14 descriptor更新 checkpoint（2026-10-09）
+
+actual client selected-field framing/generated copy recordでordered writes/copiesを接続。complete staged validation/rollback、destination immutable override、exact logical uniform interval、independent draw snapshotsのmutable set/reset/public retirement非依存をhostで確認。host7範囲/RPi4 y build/style PASS、public runtime未公開、p006/i14 in-progress。[結果/修正/限界/復帰点](../execution-20261009.md#i14-ordered-descriptor更新とdraw-snapshotのsoftware出力2026-10-09)。next render pass/framebuffer/compiled pipeline、native command/queue/common binding。
