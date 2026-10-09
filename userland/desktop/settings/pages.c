@@ -42,6 +42,7 @@ const struct se_page se_pages[SE_PAGES] = {
 	{ SE_PAGE_PRINTERS, SE_GROUP_DEVICES, SE_GLYPH_PRINTER, "Printers", "Add and manage printers.", "printers", "printers print printer ipp lpd jobs", 1, se_printers_draw, se_printers_press, se_printers_key, NULL },
 	{ SE_PAGE_SHARING, SE_GROUP_DEVICES, SE_GLYPH_SHARE, "Sharing", "Remote Login and, later, cloud storage.", "sharing", "sharing share files remote login ssh sshd cloud", 1, se_sharing_draw, se_sharing_press, NULL, NULL },
 	{ SE_PAGE_USERS, SE_GROUP_SYSTEM, SE_GLYPH_PEOPLE, "Users", "Accounts on this computer.", "users", "users accounts people login password", 1, se_users_draw, se_users_press, se_users_key, NULL },
+	{ SE_PAGE_SECURITY_KEYS, SE_GROUP_SYSTEM, SE_GLYPH_LOCK, "Security Keys", "The PIN and the security keys you sign in with.", "security-keys", "security keys key fido2 yubikey passkey pin software sign in login unlock", 1, se_keys_draw, se_keys_press, NULL, NULL },
 	{ SE_PAGE_UPDATES, SE_GROUP_SYSTEM, SE_GLYPH_REFRESH, "Updates", "Keep Kei up to date.", "updates", "updates upgrade version software", 0, se_soon_draw, NULL, NULL, NULL },
 	{ SE_PAGE_ABOUT, SE_GROUP_SYSTEM, SE_GLYPH_INFO, "About", "This computer and the version of Kei.", "about", "about version system computer kei hardware welcome", 1, se_about_draw, se_about_press, NULL, NULL }
 };

@@ -31,8 +31,8 @@
  *
  * For an administrator, the administration's card (ws089-p026,
  * page-users-admin.c) stands under the list, whose rows are then chosen
- * with a click.  The PIN card (ws163-p003, page-users-pin.c) stands under
- * the password card.
+ * with a click.  Under the password card, a card leads to the Security
+ * Keys page (ws199-p001), which has the PIN and the security keys.
  */
 
 #include "settings.h"
@@ -43,10 +43,11 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The controls of the page: the three fields, Show, and Change Password. */
+/* The controls of the page: the three fields, Show, Change Password, and the Security Keys page. */
 #define USERS_FIELD_FIRST	1
 #define USERS_SHOW		10
 #define USERS_CHANGE		11
+#define USERS_KEYS		12
 
 /* The list's rows as controls (the administration chooses them, page-users-admin.c). */
 #define USERS_ROW_FIRST		100
@@ -74,6 +75,7 @@ static int users_ready(const struct se_app *app);
 static void users_change(struct se_app *app);
 static void users_wipe(struct se_users *users);
 static void users_field_draw(struct se_app *app, struct kl_canvas *canvas, int index, int x, int y, int width);
+static int users_keys_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
 
 /*
  * Draws the Users page's cards from a top edge; returns the edge below
@@ -128,8 +130,7 @@ se_users_draw(
 	y = se_card_begin(app, canvas, x, top, width, height, "Password", "Change the password you log in with.");
 	if (!available) {
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 24, "This desktop cannot change the password here.", USERS_TEXT_ROW, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
-		bottom = se_users_pin_draw(app, canvas, x, top + height + USERS_GAP, width);
-		bottom = se_users_keys_draw(app, canvas, x, bottom + USERS_GAP, width);
+		bottom = users_keys_draw(app, canvas, x, top + height + USERS_GAP, width);
 		return bottom;
 	}
 
@@ -167,9 +168,8 @@ se_users_draw(
 	if (differs != 0)
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, "The new password and its repeat differ.", USERS_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 
-	/* The PIN card under it (ws163-p003), and the security keys card (ws172-p003). */
-	bottom = se_users_pin_draw(app, canvas, x, top + height + USERS_GAP, width);
-	bottom = se_users_keys_draw(app, canvas, x, bottom + USERS_GAP, width);
+	/* The way to the PIN and the security keys under it (ws199-p001). */
+	bottom = users_keys_draw(app, canvas, x, top + height + USERS_GAP, width);
 
 	/* The edge below the cards. */
 	return bottom;
@@ -187,19 +187,19 @@ se_users_press(
 	int ready;
 	int taken;
 
-	/* The administration's controls, and the PIN card's. */
+	/* The administration's controls. */
 	users = &app->users;
 	taken = se_users_admin_press(app, index);
 	if (taken)
 		return;
-	taken = se_users_pin_press(app, index);
-	if (taken)
-		return;
-	taken = se_users_keys_press(app, index);
-	if (taken)
-		return;
 
-	/* A field takes the keyboard (from the administration's or the PIN card's fields). */
+	/* The Security Keys page. */
+	if (index == USERS_KEYS) {
+		se_ui_go(app, SE_PAGE_SECURITY_KEYS);
+		return;
+	}
+
+	/* A field takes the keyboard (from the administration's fields). */
 	if (index >= USERS_FIELD_FIRST && index < USERS_FIELD_FIRST + SE_USERS_FIELDS) {
 		users->focus = index - USERS_FIELD_FIRST;
 		users->keyboard = SE_USERS_KEYBOARD_PASSWORD;
@@ -236,15 +236,9 @@ se_users_key(
 	int ready;
 	int used;
 
-	/* The administration's fields, or the PIN card's, when they have the keyboard. */
+	/* The administration's fields, when they have the keyboard. */
 	users = &app->users;
 	used = se_users_admin_key(app, event);
-	if (used)
-		return 1;
-	used = se_users_pin_key(app, event);
-	if (used)
-		return 1;
-	used = se_users_keys_key(app, event);
 	if (used)
 		return 1;
 
@@ -315,14 +309,11 @@ se_users_result(
 	int bad;
 	int taken;
 
-	/* The administration's change, and the PIN's. */
+	/* The administration's change, and the Security Keys page's (ws199-p001). */
 	taken = se_users_admin_result(app, request, error);
 	if (taken)
 		return 1;
-	taken = se_users_pin_result(app, request, error);
-	if (taken)
-		return 1;
-	taken = se_users_keys_result(app, request, error);
+	taken = se_keys_result(app, request, error);
 	if (taken)
 		return 1;
 
@@ -368,6 +359,30 @@ se_users_result(
 	return 1;
 }
 
+/* Draws the card that leads to the Security Keys page (ws199-p001); returns the edge below it. */
+static int
+users_keys_draw(
+	struct se_app *app,
+	struct kl_canvas *canvas,
+	int x,
+	int top,
+	int width)
+{
+	int button;
+	int height;
+	int y;
+
+	/* The card: what the page has, and its button at the right. */
+	height = 64 + 56;
+	y = se_card_begin(app, canvas, x, top, width, height, "PIN and security keys", "Sign in and unlock with a PIN or a FIDO2 security key.");
+	(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 26, "They are set on the Security Keys page.", USERS_TEXT_SUB, 0, width - 200, SE_COLOR_TEXT_SECONDARY);
+	button = se_button_width(app, "Security Keys");
+	(void)se_button_draw(app, canvas, x + width - 20 - button, y + 8, "Security Keys", 0, 1, USERS_KEYS);
+
+	/* The edge below the card. */
+	return top + height;
+}
+
 /* Tells whether the desktop offers the account (KL_SYSTEM_HAS_ACCOUNT). */
 static int
 users_available(
@@ -393,11 +408,10 @@ void
 se_users_close(
 	struct se_app *app)
 {
-	/* The three fields, the administration's, the PIN card's and the keys card's. */
+	/* The three fields, the administration's, and the Security Keys page's. */
 	users_wipe(&app->users);
 	se_users_admin_wipe(&app->users);
-	se_users_pin_wipe(&app->users);
-	se_users_keys_wipe(&app->users);
+	se_keys_close(app);
 }
 
 /*

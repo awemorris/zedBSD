@@ -58,7 +58,7 @@ Queue: q921（P1、2026-10-10）
 - 窓の中央の card、下の頁は暗くして入力を受けない。題、本文、欄（0〜2、秘密の欄は伏せ字）、button（Back・Cancel・主）、下の小さな link（任意）、「Step n of m」。
 - **busy**: spinner と言葉、欄と button は灰色。Cancel は取り消せる step（Touch・Replug）だけ押せる。Esc は busy でない時だけ Cancel。
 - 秘密の欄（password・PIN）は送った時・閉じた時に消す。ウィザードが 2 分何も無ければ秘密を消して最初の秘密の step に戻す（N12）。
-- API は WS200 も使う前提で固める: `settings_dialog_open(spec)`・`_step(...)`・`_busy(text, cancellable)`・`_error(text)`・`_close()`、入力は Settings の今の event の流れから渡す。
+- API（i01 で実装、WS200 も使う）: `se_dialog_open(app, act, ready)`・`se_dialog_step(app, title, step, steps, body, primary, can_back)`・`se_dialog_field(app, label, placeholder, kind, limit)`・`se_dialog_digits`・`se_dialog_set_text`・`se_dialog_text`・`se_dialog_length`・`se_dialog_focus`・`se_dialog_link`・`se_dialog_error`・`se_dialog_busy(app, text, cancellable)`・`se_dialog_close`・`se_dialog_dismiss`。owner は `act(app, SE_DIALOG_PRIMARY|BACK|CANCEL|LINK|IDLE)` と `ready(app)` を渡す。ui.c は popup が開いている間、click を popup の control だけに、key を全部 popup に渡し、scroll・drag を止め、別の頁へ移ると Cancel する。
 
 ### 3.3 Add Key のウィザード
 
@@ -206,7 +206,7 @@ Queue: q921（P1、2026-10-10）
 
 | i | 内容 | 主な file |
 | --- | --- | --- |
-| i01 | popup の部品と頁「Security Keys」（今の操作だけ: 一覧・Remove・Add の 5 step・Software Security Key）、Users の頁の link、`locked` の行 | settings/（dialog.c・page-keys.c・Makefile 3 つ） |
+| i01 | popup の部品と頁「Security Keys」（今の操作だけ: 一覧・Remove・Add の 5 step・Software Security Key）、Users の頁の link、`locked` の行 | settings/（dialog.c（新）、page-users-keys.c（頁と鍵の card・Add/Remove）、page-users-pin.c（Software Security Key）、page-users.c（link の card）、settings.h（SE_PAGE_SECURITY_KEYS・se_dialog・se_keys）、pages.c、ui.c、system.c、main.c、Makefile 3 つ） |
 | i02 | NFC（§5）: libpasskey の slot、passkey-fido2 と helper、kernel の card の事象、backend の `keys_changed`、security.md | libpasskey・passkey-fido2・smartcard.c・events-zedbsd.c |
 | i03 | KEYINFO・KEYPIN・KEYRESET（§4.1・§4.4〜§4.7）、reset と CANCEL、Insert・Set PIN・Change PIN・Reset のウィザード | libpasskey・passkey・passkey-fido2・sessiond・backend・wayland・libkeiland・settings |
 | i04 | options の行と `set-options`・`auth-fido2`、検査の緩め、radio と警告 | passkey・passkey-fido2・sessiond・settings |
@@ -246,6 +246,12 @@ Queue: q921（P1、2026-10-10）
 | CTAPHID_CANCEL | reset の触れる待ちで鍵が 0x2d を返す事は CTAP の記述による（推測）。5330 で確かめる |
 | QEMU | CTAP2 の鍵の模擬は無い。鍵の操作は 5330 |
 | 見積もり | i01 3、i02 4、i03 6、i04 3、i05 5、i06 2、計 **約 23 LW** |
+
+## 進み
+
+| 日 | i | 内容 | 検証 |
+| --- | --- | --- | --- |
+| 2026-10-10 | i01 | dialog.c（popup）、Security Keys の頁（Software Security Key の Set/Change/Remove を password → PIN 2 回の popup に、鍵の一覧と Remove（password の popup）、Add Key の 4 step: Password → Name（「Security Key」か空いた「Security Key N」、前後の空白を除く）→ Key PIN → Touch → Done）、鍵が 5 本なら Add を灰色、Users の頁は Security Keys への link の card、`locked` の語の行、2 分の idle で password を消して step 1 へ。i01 では Change PIN・Reset Key の button は出さない（i03）。「Not available」は `KL_SYSTEM_HAS_KEYS`・`KL_SYSTEM_HAS_PIN` で判定 | zedBSD の build（settings、warning 0）、host の renderer（plan/ws089/tests/host-build.sh の objects と、scratch の stub で add・remove・PIN の成功・失敗の答えを流し、PNG を目で確認: 頁、各 step、busy、bad-secret・locked の 2 行の誤り、Esc で閉じる）、style-check（変えた所） |
 
 ## Event
 

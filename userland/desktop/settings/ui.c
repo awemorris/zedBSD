@@ -279,6 +279,9 @@ se_ui_tick(
 	/* A touch pad's scrolling that flies on moves (BUG-211). */
 	ui_kinetic_step(app, now);
 
+	/* The popup's busy ring and its idle time (ws199-p001). */
+	se_dialog_tick(app, now);
+
 	/* The minute now, and the time for whatever is drawn. */
 	minute = now / 60000U;
 	app->now = now;
@@ -306,6 +309,10 @@ se_ui_go(
 	/* A page outside the table changes nothing. */
 	if (page >= SE_PAGES)
 		return;
+
+	/* A popup belongs to the page it opened on: going elsewhere cancels it (ws199-p001). */
+	if (app->dialog.open != 0 && page != app->page)
+		se_dialog_dismiss(app);
 
 	/* The search's results give way to the page chosen, and so does the Welcome (left, not done: ws164-p002). */
 	se_search_end(app);
@@ -370,7 +377,7 @@ se_ui_draw(
 	 * frame keeps the pixels of the last one.
 	 */
 	partial = 0;
-	if (app->dirty == 0 && app->hover_pending != 0)
+	if (app->dirty == 0 && app->hover_pending != 0 && app->dialog.open == 0)
 		partial = 1;
 	app->hover_pending = 0;
 
@@ -406,6 +413,7 @@ se_ui_draw(
 	if (app->show_sidebar != 0)
 		ui_draw_sidebar(app, canvas);
 	ui_draw_page(app, canvas);
+	se_dialog_draw(app, canvas);
 	(void)se_fields_end(app->now * 1000U);
 	if (partial != 0)
 		kl_canvas_clip_pop(canvas);
@@ -972,7 +980,8 @@ ui_motion(
 	page = &se_pages[app->page];
 	if (app->press_kind == SE_HIT_CONTROL &&
 	    page->drag != NULL &&
-	    app->search.active == 0) {
+	    app->search.active == 0 &&
+	    app->dialog.open == 0) {
 		app->drag_y = event->y;
 		page->drag(app, app->press_index, event->x, SE_DRAG_MOVE);
 		return;
@@ -1034,6 +1043,23 @@ ui_button(
 	/* The region under the pointer. */
 	(void)ui_hit_at(app, event->x, event->y, &kind, &index);
 
+	/* Under a popup a press holds its control down and a release over it clicks: no drag, no scroll (ws199-p001). */
+	if (app->dialog.open != 0) {
+		if (event->pressed != 0) {
+			app->press_kind = kind;
+			app->press_index = index;
+		} else {
+			if (kind == app->press_kind && index == app->press_index)
+				ui_click(app, kind, index);
+			app->press_kind = SE_HIT_NONE;
+			app->press_index = -1;
+		}
+
+		/* Drawn again. */
+		app->dirty = 1;
+		return;
+	}
+
 	/* A press holds the region down; a page's control that drags starts its drag (a finger on it drags the slider, not the page). */
 	page = &se_pages[app->page];
 	if (event->pressed != 0) {
@@ -1084,6 +1110,13 @@ ui_click(
 {
 	const struct se_page *page;
 	int taken;
+
+	/* Under a popup only its own controls click (ws199-p001). */
+	if (app->dialog.open != 0) {
+		if (kind == SE_HIT_CONTROL)
+			(void)se_dialog_press(app, index);
+		return;
+	}
 
 	/* A row of the list and a tile of Home both open their page. */
 	if (kind == SE_HIT_PAGE_ROW || kind == SE_HIT_TILE) {
@@ -1266,6 +1299,10 @@ ui_scroll(
 	int scroll;
 	int limit;
 	int height;
+
+	/* Nothing scrolls under a popup (ws199-p001). */
+	if (app->dialog.open != 0)
+		return;
 
 	/* The list when the pointer is over it, else the page. */
 	list = &app->layout.sidebar;
@@ -1469,6 +1506,13 @@ ui_key(
 	/* Only a press does anything. */
 	if (event->pressed == 0)
 		return;
+
+	/* A popup takes every key (ws199-p001). */
+	used = se_dialog_key(app, event);
+	if (used != 0) {
+		app->dirty = 1;
+		return;
+	}
 
 	/* Ctrl+F gives the keyboard to the titlebar's search (when the compositor's menus did not take it). */
 	if ((event->modifiers & SE_MOD_CTRL) != 0U && event->key == SE_KEY_F) {
