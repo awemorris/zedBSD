@@ -201,3 +201,7 @@ actual client primary pool/buffer codecsとreal public9vkCmdのfinite native rec
 ## i14 ordered draw state checkpoint（2026-10-09）
 
 stage別push/partial vertex/dynamic stateとdescriptor prefix互換/disturbance、全graph validation後のCPU-only準備callbackを接続。host12範囲/RPi4 y build/style PASS。独立prepared native owner/code/uniform/TMU/CL、queue/public runtime、Keiland/実機/p007は未達、WS incomplete。Master担当変更無し。[詳細/修正/復帰点](execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。
+
+## i14 prepared CPU graph checkpoint（2026-10-09）
+
+pending primary graphとconsumed descriptorの独立snapshot owner、pending mutation/free/reset guardをhost13範囲/buildで確認。actual native packet/GPU backing/queue/public bindingは後続、uncertain DMA ownerの明示quarantine transferが必要。WS incomplete/p005-p006 in-progress、Keiland/実機/p007未達、Master変更無し。[結果/復帰点](execution-20261009.md#i14-immutable-prepared-cpu-graphのsoftware出力2026-10-09)。
