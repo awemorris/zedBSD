@@ -2683,6 +2683,8 @@ system_link(
 		link.running = 1U;
 	if ((flags & KL_SYSTEM_LINK_LOOPBACK) != 0U)
 		link.loopback = 1U;
+	if ((flags & KL_SYSTEM_LINK_WIRELESS) != 0U)
+		link.wireless = 1U;
 	system_view_copy(link.address, sizeof(link.address), address);
 	system_view_copy(link.netmask, sizeof(link.netmask), netmask);
 	system_view_copy(link.hardware, sizeof(link.hardware), hardware);

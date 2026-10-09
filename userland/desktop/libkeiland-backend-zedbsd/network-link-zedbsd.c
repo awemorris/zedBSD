@@ -38,6 +38,7 @@
 #include <string.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
+#include <uapi/wlan.h>
 #include <unistd.h>
 
 /* The file the resolver reads its servers from. */
@@ -47,6 +48,7 @@
 #define LINK_LINE_MAX 256U
 
 static void link_read(int descriptor, const char *name, struct kl_backend_network_link *link);
+static unsigned link_wireless(int descriptor, const char *name);
 static int link_request(int descriptor, const char *name, unsigned long command, struct ifreq *request);
 static void link_address(const struct ifreq *request, char *text, size_t size);
 static void link_wired(int descriptor, struct kl_backend_network_link *links, size_t count);
@@ -331,6 +333,9 @@ link_read(
 	if (error == 0 && link->address[0] != '\0')
 		link_address(&request, link->netmask, sizeof(link->netmask));
 
+	/* A radio: the kernel answers its Wi-Fi status, or says it has Wi-Fi but cannot answer now (BUG-284). */
+	link->wireless = link_wireless(descriptor, name);
+
 	/* The bytes received and sent, and the link's speed the driver last heard (BUG-222). */
 	error = link_request(descriptor, name, SIOCGIFSTATS, &request);
 	if (error == 0) {
@@ -341,6 +346,41 @@ link_read(
 
 	/* Succeeded: the interface holds every available attribute. */
 	return;
+}
+
+/*
+ * Tells whether an interface is a radio (BUG-284): the kernel's Wi-Fi
+ * status request (a query anyone may make) succeeds, or fails otherwise
+ * than "not supported" (a Wi-Fi interface stopping); any other interface
+ * answers EOPNOTSUPP.  Returns 1 or 0.
+ */
+static unsigned
+link_wireless(
+	int descriptor,
+	const char *name)
+{
+	struct wlan_status_request status;
+	int error;
+	int status_error;
+
+	/* The interface's Wi-Fi status. */
+	memset(&status, 0, sizeof(status));
+	(void)snprintf(status.ifr_name, sizeof(status.ifr_name), "%s", name);
+	status.version = WLAN_ABI_VERSION;
+	status.size = sizeof(status);
+	error = ioctl(descriptor, SIOCGWLANSTATUS, &status);
+	status_error = errno;
+
+	/* Answered: a radio. */
+	if (error == 0)
+		return 1U;
+
+	/* Not a radio, or gone. */
+	if (status_error == EOPNOTSUPP || status_error == ENODEV || status_error == ENXIO)
+		return 0U;
+
+	/* Succeeded: a radio that cannot answer now. */
+	return 1U;
 }
 
 /* Asks the kernel one thing of an interface; returns 0 or -1. */
@@ -407,7 +447,6 @@ link_wired(
 	char error[160];
 	size_t index;
 	int loaded;
-	int wireless;
 
 	/* net.conf, when it can be read (without it every wired interface takes DHCP). */
 	configuration = calloc(1, sizeof(*configuration));
@@ -417,8 +456,7 @@ link_wired(
 
 	/* Each wired interface. */
 	for (index = 0; index < count; index++) {
-		wireless = strncmp(links[index].name, "wlan", 4U);
-		if (links[index].loopback || wireless == 0)
+		if (links[index].loopback || links[index].wireless)
 			continue;
 		links[index].wired_mode = KL_BACKEND_WIRED_DHCP;
 		if (loaded == 0)

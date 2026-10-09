@@ -1276,13 +1276,11 @@ network_wired(
 		return 0;
 
 	/*
-	 * Nor any radio by its name (zedBSD's and FreeBSD's wlanN, Linux's
-	 * wlpNsN, wlanN and wlxM): the service names its radio only while it
-	 * has one in use, and a radio that is up without a network was drawn as
-	 * an Ethernet card with no cable (BUG-277).
+	 * Nor any radio the system tells (KL_VERSION 76): the service names its
+	 * radio only while it has one in use, and a radio that is up without a
+	 * network was drawn as an Ethernet card with no cable (BUG-284).
 	 */
-	differs = strncmp(network->links[index].name, "wl", 2U);
-	if (differs == 0)
+	if (network->links[index].wireless != 0)
 		return 0;
 
 	/* Any other interface is. */

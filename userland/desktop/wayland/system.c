@@ -2471,6 +2471,8 @@ system_network_details_send(
 			flags |= KL_SYSTEM_LINK_RUNNING;
 		if (link->loopback)
 			flags |= KL_SYSTEM_LINK_LOOPBACK;
+		if (link->wireless)
+			flags |= KL_SYSTEM_LINK_WIRELESS;
 		(void)snprintf(hardware, sizeof(hardware), "%02x:%02x:%02x:%02x:%02x:%02x", link->hardware[0], link->hardware[1], link->hardware[2], link->hardware[3], link->hardware[4], link->hardware[5]);
 
 		/* name, flags, address, netmask, hardware, mtu, and the bytes received and sent in halves. */

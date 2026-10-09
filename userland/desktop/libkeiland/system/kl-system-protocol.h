@@ -696,6 +696,7 @@
 #define KL_SYSTEM_LINK_UP			0x1U
 #define KL_SYSTEM_LINK_RUNNING			0x2U
 #define KL_SYSTEM_LINK_LOOPBACK			0x4U
+#define KL_SYSTEM_LINK_WIRELESS			0x8U
 
 /* kl_system_audio_v1's requests and events. */
 #define KL_SYSTEM_AUDIO_DESTROY			0U
