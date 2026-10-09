@@ -100,3 +100,19 @@ design §9 の p008 の受け入れ（記録、ws.md の制限）の項目ごと
 | ws.md の制限 | ws.md の「制限（p008）」の節に書いた |
 
 確認: 文書だけの変更（code は変えない）。`docs/` から `plan/` への link は足していない。
+
+## 2026-10-10 性能（T1-435 の E・E2、5330 の実機、image 588c5cd、ESP は書いていない）
+
+| stream | decodes | total ms | mean ms | longest ms |
+| --- | --- | --- | --- | --- |
+| i-baseline-64 | 3 | 2 | 0.666 | 1 |
+| i-main-352-slices | 3 | 2 | 0.666 | 1 |
+| i-high-352-cqm | 3 | 2 | 0.666 | 2 |
+| p-baseline-64 | 10 | 8 | 0.800 | 5 |
+| pb-main-352 | 15 | 14 | 0.933 | 2 |
+| pb-high-352-pyramid | 15 | 16 | 1.066 | 2 |
+| sample baseline（--frames=60、hash は見ない） | 60 | 250 | 4.166 | 5 |
+| sample main | 60 | 304 | 5.066 | 6 |
+| sample high | 60 | 309 | 5.150 | 8 |
+
+全 stream が match。E2: 後も compositor が居て、vcs0・rcs0 の hang・reset の行は無い。sample（1080p 相当）の 1 frame 約 4〜5 ms で、60 fps（16.7 ms）に十分な余裕。
