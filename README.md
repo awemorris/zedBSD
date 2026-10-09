@@ -43,10 +43,15 @@ on open hardware stays free to use.  Features that need the project's
 own hardware are still published as source, and only run on that
 hardware.
 
+## AI Usage
+
 Both zedBSD and Keiland Desktop are
 [designed and directed](plan/master.md)
 by one developer and implemented with AI coding agents.  Current targets
 are 64-bit x86 PCs and the Raspberry Pi series.
+
+Debugging is done by the latest "Vision Language Model Loop", which
+uses a camera to caputure the screen of the PC under debugging.
 
 ## Try zedBSD
 

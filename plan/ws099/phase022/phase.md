@@ -32,3 +32,19 @@ Awesome Plan §6 の code を作る WS の最後の conformance。[guide.md](../
 ## Event
 
 2026-10-02 / ws099-beta1-plan-p022: fg019 の計画で新設（guide の提案 p018 を正式化）。
+
+## T1-477 の回帰の FAIL の解析（2026-10-09 深夜、P1）
+
+T1-477（image の tree 0d39d675e）: C4・C8・C9 PASS、C1 p126・C2・C3 c3-swipe-back・C5・C7 FAIL。出力 /home/awe/zedBSD-worktrees/t1/build/t1-477/out/。分けた結果（製品の回帰は見つからない）:
+
+| 試験 | 原因 | 区分 | 直し |
+| --- | --- | --- | --- |
+| C2 maximize | docked の幅 1904 at x=8 を「1920 と等しい」で見ていた。ws099-p038 の `KWL_GLASS_DOCK_PAD`（8）の余白は設計どおり（maximized.png） | 試験 | 幅＋2×x が画面の幅、x は 0〜16 |
+| C2 unminimize の後の move | surface の番号は client ごと。Welcome の Settings（client 2）と Files（client 3）が同じ surface=19 で、Wiseview の tile の行の最後（Welcome の物）を押した（`WISEVIEW select surface=19 client=2`、unminimized.png は Welcome） | 試験（Welcome、ws164-p002 が入った後） | launch の行の client で tile・select・CONFIGURE を引く |
+| C3 c3-swipe-back の段 6 | zdesktop.log の `unfullscreen-swipe start` は段 2・4 の 2 行だけで、段 6 で増えていない（製品は正しい）。段 6 の前の count が数でない答え（SSH の時間切れで空、`found 2 (more than 0)`）だった見込み | 試験の harness（推定） | count が数でない答えを 3 回まで聞き直し、stderr に harness の行 |
+| C5 | 1 回目の開閉だけ first・gap が約 200 ms、2・3 回目は 94〜96 ms・gap 126〜135 ms。T1-006 と同じ形で、2026-10-03 ユーザー「C5の200msは問題視しません。clearでOKです。」 | 既知（判断済み） | c5-parse.py は種類ごとの最初の開閉を warm-up として記録し（first_max・gap_max に入る）、frame が 1 枚も無い時だけ FAIL。T1-477 の log で `pass=12 fail=0`（host） |
+| C7 | 全 70 の FAIL は Settings・Files の窓が無い画面の測定（Aurora-settings.png は壁紙だけ）。`$ends; … /bin/settings …` の guest の shell の行が BUG-274 の後の `ps -o args` で `[s]ettings` に当たり、shell が自分を kill して Settings・Files を起動しなかった | 試験（ps の args の変更） | `ps -o pid,comm`（argv[0]）で `(^|/)(wayland|popup-probe|settings|files)$` を終える（fake の ps で host 確認） |
+| C1 p126 | 最初の boot の自動 login の session が 30 秒以内に READY を出さず（`HANDOFF session ready=0 waited_ms=30001`、GO 無し）、`HANDOFF go written=3` の最初の待ちが MISSING。その後の 2 回の login・logout は黒 0・文字 0。同じ image の C9 の p126 は `ready=1 waited_ms=1485` で PASS | 未再現（1 回だけ） | 直し無し。T1 の再試験で C1 を見る。再現したら gdbstub で session の compositor の READY の前を止めて見る（推定: image の最初の起動で host の Venus の pipeline の compile が冷えていた） |
+
+注: criteria.sh の C1 と C9 の p126 はどちらも `$out/p126.log` に書いていて、C1 の log は C9 の物で上書きされた（results.txt と c1/ の出力が C1 の証拠）。C1 の名前を `c1-p126` に変えた。
+確かめ: `sh -n`（c2・c3・c7）、`c5-parse.py` を T1-477 の log に流して `C5 RESULT pass=12 fail=0`。QEMU は T1。

@@ -29,7 +29,21 @@ say() {
 interactive() {
 	[ "${KEILAND_ASK:-y}" != n ] || return 1
 	# In a subshell: a redirection that fails on a special built-in ends the shell that runs it.
-	( : </dev/tty >/dev/tty ) 2>/dev/null
+	( : </dev/tty >/dev/tty ) 2>/dev/null || return 1
+	foreground
+}
+
+# Succeeds unless this runs in a process group that is not the terminal's foreground one: a read of /dev/tty there
+# stops the job (SIGTTIN) or fails with EIO (T1-503: FreeBSD's make -j8 runs each job in a process group of its own,
+# "read: read error: Input/output error").  BSDmakefile runs its targets in the foreground (.MAKEFLAGS: -B); this is
+# the guard for any other make that does not.  When ps cannot tell, the questions are asked.
+foreground() {
+	group=$(ps -o pgid= -p $$ 2>/dev/null | tr -d ' ')
+	terminal_group=$(ps -o tpgid= -p $$ 2>/dev/null | tr -d ' ')
+	[ -n "$group" ] && [ -n "$terminal_group" ] || return 0
+	[ "$group" = "$terminal_group" ] && return 0
+	say "keiland: this runs in the background of the terminal (a job of make -j), where it cannot ask."
+	return 1
 }
 
 # Asks a yes-or-no question on the terminal; succeeds on yes.  The default (Enter) is no.

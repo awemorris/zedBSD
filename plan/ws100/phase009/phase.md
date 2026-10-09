@@ -84,3 +84,9 @@ Queue: Q1 の投入（2026-10-08「WS100 p009（音量の曲線、約 0.5 LW）�
 
 本体（curve・soft・mute・hardware）は PASS。回帰の volume-p004 は 1 回目だけ boot の時期（HANDOFF の行）で FAIL、2 回目 PASS（試験の時間の揺れ、製品の変化ではない）。volume-p005 は 2 回とも同じ 5 行が FAIL。原因は `/tmp/s.log` に Settings の行（SOUND report・ZSETTINGS CONTROL）が無く、MAP も新しく出ないこと。画面（sound.png）は Sound の頁で 60%。音量の曲線の変更とは関係が無い。読み: 最初の login で compositor が Settings の Welcome（ws164-p002、T1-267 の PASS の後に入った）を起動し、試験の `/bin/settings sound` が instance を Welcome に渡して終わる（Welcome の行は session の log へ）。**未確認の推定**。
 直し 7ad5d84ef（試験）: Settings の起動の前に `ps` を `processes.txt` に残し、動いている Settings を終える。再試験は T1 の行（Q1 が番号）。
+
+## T1-501 の再試験の FAIL（2026-10-09 深夜、P1）
+
+7ad5d84ef で T1-478 の 5 行は消え（Welcome の Settings を終えた後の Settings が Sound の頁の行を出した）、残りは段 4 の `SOUND report … value=20 muted=1 MISSING` の 1 行（2 回とも）。processes.txt の `/bin/settings --welcome` は終える**前**の ps なので想定どおり（その後の Settings の起動・頁の行は全部 ok）。
+原因（試験の側）: 段 4 は bar の音量の icon を押して「音量の popup」（`KWL VOLUME popup open … mute=`）の右端の mute を押していたが、WS192 で icon は状態の島のパネルを開くようになり（bar-muted.png）、popup の行は出ない。既定値の (1120,151) はパネルの Sound の題の行で、何も押していない。製品の回帰ではない。
+直し（試験）: パネルの `KWL STATUS item name=mute x= y= width= height=`（画面の座標）の中央を押す。終えた後の ps も `processes-after.txt` に残す。`sh -n` のみ（QEMU は T1）。
