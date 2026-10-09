@@ -3,7 +3,7 @@
 # WS192: 右上の状態の島をタップで開く glass の操作パネル（タブレット向け）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: completed（ベータ2 の範囲、2026-10-10 Q1。規約の全文の見直し p003 はベータ3）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
@@ -34,6 +34,6 @@ Resume point: p001 から。
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 今の島・各 icon の popup・glass の描画の調べと、パネルの設計（項目・寸法・開閉・入力）と実装・host 試験 | planned | — |
-| p002 | AAT（T1）とユーザーの UAT の依頼 | planning | p001 |
+| [p001](phase001/phase.md) | 今の島・各 icon の popup・glass の描画の調べと、パネルの設計（項目・寸法・開閉・入力）と実装・host 試験 | cleared（2026-10-10） | — |
+| p002 | AAT（T1）とユーザーの UAT の依頼 | cleared（2026-10-10 Q1: T1-496・514、ユーザーの UAT） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |

@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws143-p008 -->
 # ws143-p008: UAT（5330 の素の機械、ユーザーの BR/EDR と LE のキーボード・マウス）と Wi-Fi との共存
 
-Status: planned（手順と確認の項目は 2026-10-09 夜 P1。実施はユーザーと Q1、T1-502 の結果の後）
+Status: cleared（2026-10-10 Q1 判定: ユーザーの 5330 の UAT「Bluetoothはキーボード、マウスについて接続確認、利用可能であることを確認できました。」。BUG-275（USB の zero-bandwidth の endpoint）の直しの後）
 Disposition: normal
 Parent: [WS143](../ws.md)
 Queue: none

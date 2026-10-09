@@ -109,3 +109,7 @@ Q1（q879）:「libkeiland の present を、変わった所（damage）だけ�
 層 1・2・4 の回帰: AAT の files・settings・notes・accent の 23 本で fail 0（pass 8・needs-person 14・not-run 1）、files-desktop-guest PASS、boot-test PASS。PNG（build/t1-400/aat-out/png/ の 69 枚）の全ての目視はまだ（Q1 は fail 0 と accent の log で判定）。
 測定（M5）: band の間 `ZFILES DESKTOP band frames=4 mean_ms=93 longest_ms=112 draw_ms=10 present_ms=112`。前後の compositor の `KWL PERF`: compose draw_ms 97〜101（acquire 4〜13、submit+present 68〜73）、frame_ms 112〜113。つまり QEMU の Venus では compositor の 1 frame が約 100 ms で、app の present の待ちはそれに引きずられている（app の写しは 10 ms）。
 判断（Q1）: 層 3 は今は進めない。理由: (1) H1 のとおり範囲選択の最中は pointer の移動ごとに出力の全体を描くので層 3 は効かない、(2) 測った約 100 ms は QEMU の Venus の submit+present（host との往復）が大半で、5330 の i915 の native の経路の数字ではない。5330 で `DESKTOP band frames=`・`KWL PERF` を測ってから、compositor の全体の再描画の速さ（Venus でない経路）を見て決める。
+
+## 2026-10-10 UAT（Q1）
+
+2026-10-10 ユーザー「これで一通りUATの確認事項は確認したと思います。CloseできるものはCloseしましょう。USB LANの遅さ、だけが残りました。」 → 描画の速さの体感は確認済み（App Home の遷移の fps は BUG-280、既知の問題）。層 3 は保留のまま。
