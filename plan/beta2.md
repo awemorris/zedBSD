@@ -55,7 +55,7 @@
 | 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
-## 入れる（間に合わなければ直前で OFF、2026-10-09 ユーザー）
+## 入れる（間に合わなければ直前で OFF、2026-10-09 ユーザー。必須の後に P1 が完了を目指す、UAT は少し遅れる）
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
