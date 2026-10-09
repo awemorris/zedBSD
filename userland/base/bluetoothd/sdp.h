@@ -21,9 +21,23 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* The service classes bluetoothd looks for. */
+/* The service classes bluetoothd looks for (HID's, and the phone's of ws197-p002: MAP's MAS, PBAP's PSE, HFP's AG). */
 #define BTD_SDP_UUID_HID	0x1124U
 #define BTD_SDP_UUID_PNP	0x1200U
+#define BTD_SDP_UUID_MAS	0x1132U
+#define BTD_SDP_UUID_PSE	0x112fU
+#define BTD_SDP_UUID_AG		0x111fU
+
+/* The data elements' types (Core 5.4 Vol 3 Part B section 3.2), for the SDP server too. */
+#define BTD_SDP_TYPE_NIL	0U
+#define BTD_SDP_TYPE_UINT	1U
+#define BTD_SDP_TYPE_SINT	2U
+#define BTD_SDP_TYPE_UUID	3U
+#define BTD_SDP_TYPE_TEXT	4U
+#define BTD_SDP_TYPE_BOOL	5U
+#define BTD_SDP_TYPE_SEQUENCE	6U
+#define BTD_SDP_TYPE_ALTERNATIVE 7U
+#define BTD_SDP_TYPE_URL	8U
 
 /* The HID channels' PSMs (HID 1.1.1 fixes them). */
 #define BTD_SDP_PSM_SDP		0x0001U
@@ -87,10 +101,24 @@ struct btd_hid_record {
 	uint16_t version;
 };
 
+/* One data element taken apart: its type, its value (pointing into the bytes) and its whole size. */
+struct btd_sdp_element {
+	unsigned type;
+	const uint8_t *value;
+	size_t length;
+	size_t size;
+};
+
 void btd_sdp_init(struct btd_sdp *sdp, uint16_t uuid, uint16_t transaction);
 int btd_sdp_request(struct btd_sdp *sdp, uint8_t *out, size_t size, size_t *length);
 int btd_sdp_input(struct btd_sdp *sdp, const uint8_t *pdu, size_t length);
 int btd_sdp_hid(const struct btd_sdp *sdp, struct btd_hid_record *record);
 int btd_sdp_pnp(const struct btd_sdp *sdp, struct btd_hid_record *record);
+unsigned btd_sdp_records(const struct btd_sdp *sdp, uint16_t uuid);
+int btd_sdp_rfcomm_channel(const struct btd_sdp *sdp, uint16_t uuid, unsigned nth, unsigned *channel);
+int btd_sdp_profile_version(const struct btd_sdp *sdp, uint16_t uuid, unsigned nth, uint16_t profile, uint16_t *version);
+int btd_sdp_uint_attribute(const struct btd_sdp *sdp, uint16_t uuid, unsigned nth, uint16_t attribute, uint32_t *value);
+int btd_sdp_element(const uint8_t *data, size_t length, struct btd_sdp_element *element);
+int btd_sdp_check(const uint8_t *data, size_t length);
 
 #endif

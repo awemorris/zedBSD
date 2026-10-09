@@ -34,17 +34,6 @@
 /* How deep data elements may nest. */
 #define SDP_DEPTH_MAX			8U
 
-/* The data element types (Core Vol 3 Part B §3.2). */
-#define SDP_TYPE_NIL			0U
-#define SDP_TYPE_UINT			1U
-#define SDP_TYPE_SINT			2U
-#define SDP_TYPE_UUID			3U
-#define SDP_TYPE_TEXT			4U
-#define SDP_TYPE_BOOL			5U
-#define SDP_TYPE_SEQUENCE		6U
-#define SDP_TYPE_ALTERNATIVE		7U
-#define SDP_TYPE_URL			8U
-
 /* The attributes read (HID Profile 1.1.1 §5.3.4, Device ID Profile 1.3 §5). */
 #define SDP_ATTRIBUTE_CLASSES		0x0001U
 #define SDP_ATTRIBUTE_PROTOCOLS		0x0004U
@@ -66,24 +55,23 @@
 #define SDP_UUID_L2CAP			0x0100U
 #define SDP_DESCRIPTOR_REPORT		0x22U
 
-/* One data element taken apart: its type, its value (pointing into the bytes) and its whole size. */
-struct sdp_element {
-	unsigned type;
-	const uint8_t *value;
-	size_t length;
-	size_t size;
-};
+/* RFCOMM's protocol UUID, and the profiles' list of a record (ws197-p002). */
+#define SDP_UUID_RFCOMM			0x0003U
+#define SDP_ATTRIBUTE_PROFILES		0x0009U
 
-static int sdp_element(const uint8_t *data, size_t length, struct sdp_element *element);
+static int sdp_element(const uint8_t *data, size_t length, struct btd_sdp_element *element);
 static int sdp_check(const uint8_t *data, size_t length, unsigned depth);
-static int sdp_uint(const struct sdp_element *element, uint32_t *value);
-static int sdp_uuid(const struct sdp_element *element, uint32_t *value);
-static int sdp_bool(const struct sdp_element *element, int *value);
-static int sdp_has_class(const struct sdp_element *classes, uint32_t uuid);
-static int sdp_psm(const struct sdp_element *protocols, uint32_t *psm);
-static int sdp_find_record(const struct btd_sdp *sdp, uint32_t uuid, struct sdp_element *record);
-static int sdp_hid_attribute(uint32_t id, const struct sdp_element *value, struct btd_hid_record *record);
-static int sdp_descriptor(const struct sdp_element *list, struct btd_hid_record *record);
+static int sdp_uint(const struct btd_sdp_element *element, uint32_t *value);
+static int sdp_uuid(const struct btd_sdp_element *element, uint32_t *value);
+static int sdp_bool(const struct btd_sdp_element *element, int *value);
+static int sdp_has_class(const struct btd_sdp_element *classes, uint32_t uuid);
+static int sdp_psm(const struct btd_sdp_element *protocols, uint32_t *psm);
+static int sdp_find_record(const struct btd_sdp *sdp, uint32_t uuid, struct btd_sdp_element *record);
+static int sdp_find_nth(const struct btd_sdp *sdp, uint32_t uuid, unsigned nth, struct btd_sdp_element *record);
+static int sdp_record_value(const struct btd_sdp_element *record, uint32_t attribute, struct btd_sdp_element *value);
+static int sdp_rfcomm(const struct btd_sdp_element *protocols, uint32_t *channel);
+static int sdp_hid_attribute(uint32_t id, const struct btd_sdp_element *value, struct btd_hid_record *record);
+static int sdp_descriptor(const struct btd_sdp_element *list, struct btd_hid_record *record);
 static uint16_t sdp_be16(const uint8_t *bytes);
 static void sdp_put16(uint8_t *bytes, uint16_t value);
 
@@ -272,9 +260,9 @@ btd_sdp_hid(
 	const struct btd_sdp *sdp,
 	struct btd_hid_record *record)
 {
-	struct sdp_element found;
-	struct sdp_element pair;
-	struct sdp_element value;
+	struct btd_sdp_element found;
+	struct btd_sdp_element pair;
+	struct btd_sdp_element value;
 	uint32_t id;
 	uint32_t psm;
 	size_t offset;
@@ -344,9 +332,9 @@ btd_sdp_pnp(
 	const struct btd_sdp *sdp,
 	struct btd_hid_record *record)
 {
-	struct sdp_element found;
-	struct sdp_element pair;
-	struct sdp_element value;
+	struct btd_sdp_element found;
+	struct btd_sdp_element pair;
+	struct btd_sdp_element value;
 	uint32_t id;
 	uint32_t number;
 	size_t offset;
@@ -397,6 +385,206 @@ btd_sdp_pnp(
 }
 
 /*
+ * Counts the records of a class in a whole query (ws197-p002: a phone's
+ * MAS instances).
+ */
+unsigned
+btd_sdp_records(
+	const struct btd_sdp *sdp,
+	uint16_t uuid)
+{
+	struct btd_sdp_element record;
+	unsigned count;
+	int error;
+
+	/* Each one found in turn. */
+	count = 0U;
+	for (;;) {
+		error = sdp_find_nth(sdp, uuid, count, &record);
+		if (error != 0)
+			break;
+		count++;
+	}
+
+	/* Succeeded: the count. */
+	return count;
+}
+
+/*
+ * Reads the RFCOMM server channel of the nth record of a class (its
+ * ProtocolDescriptorList: L2CAP, then RFCOMM with the channel, RFCOMM 1.2
+ * section 7.2).  Returns 0, ENOENT, or EINVAL for a channel outside 1 to
+ * 30.
+ */
+int
+btd_sdp_rfcomm_channel(
+	const struct btd_sdp *sdp,
+	uint16_t uuid,
+	unsigned nth,
+	unsigned *channel)
+{
+	struct btd_sdp_element record;
+	struct btd_sdp_element protocols;
+	uint32_t value;
+	int error;
+
+	/* The record and its ProtocolDescriptorList. */
+	error = sdp_find_nth(sdp, uuid, nth, &record);
+	if (error != 0)
+		return error;
+	error = sdp_record_value(&record, SDP_ATTRIBUTE_PROTOCOLS, &protocols);
+	if (error != 0)
+		return error;
+
+	/* The RFCOMM descriptor's channel. */
+	error = sdp_rfcomm(&protocols, &value);
+	if (error != 0)
+		return error;
+	if (value < 1U || value > 30U)
+		return EINVAL;
+
+	/* Succeeded: the channel. */
+	*channel = value;
+	return 0;
+}
+
+/*
+ * Reads the version of a profile that the nth record of a class lists in
+ * its BluetoothProfileDescriptorList (pairs of the profile's UUID and a
+ * 16-bit version).  Returns 0, ENOENT, or EINVAL.
+ */
+int
+btd_sdp_profile_version(
+	const struct btd_sdp *sdp,
+	uint16_t uuid,
+	unsigned nth,
+	uint16_t profile,
+	uint16_t *version)
+{
+	struct btd_sdp_element record;
+	struct btd_sdp_element profiles;
+	struct btd_sdp_element descriptor;
+	struct btd_sdp_element named;
+	struct btd_sdp_element number;
+	uint32_t value;
+	size_t offset;
+	int error;
+
+	/* The record and its profiles. */
+	error = sdp_find_nth(sdp, uuid, nth, &record);
+	if (error != 0)
+		return error;
+	error = sdp_record_value(&record, SDP_ATTRIBUTE_PROFILES, &profiles);
+	if (error != 0)
+		return error;
+	if (profiles.type != BTD_SDP_TYPE_SEQUENCE)
+		return EINVAL;
+
+	/* Each descriptor: the profile's UUID, then its version. */
+	offset = 0;
+	while (offset < profiles.length) {
+		error = sdp_element(&profiles.value[offset], profiles.length - offset, &descriptor);
+		if (error != 0 || descriptor.type != BTD_SDP_TYPE_SEQUENCE)
+			return EINVAL;
+		offset += descriptor.size;
+
+		/* The profile named. */
+		error = sdp_element(descriptor.value, descriptor.length, &named);
+		if (error != 0)
+			return EINVAL;
+		error = sdp_uuid(&named, &value);
+		if (error != 0 || value != profile)
+			continue;
+
+		/* Succeeded: its version. */
+		error = sdp_element(&descriptor.value[named.size], descriptor.length - named.size, &number);
+		if (error != 0)
+			return EINVAL;
+		error = sdp_uint(&number, &value);
+		if (error != 0 || value > 0xffffU)
+			return EINVAL;
+		*version = (uint16_t)value;
+		return 0;
+	}
+
+	/* The profile is not listed. */
+	return ENOENT;
+}
+
+/*
+ * Reads an unsigned attribute (1, 2 or 4 bytes) of the nth record of a
+ * class: MAP's MASInstanceID and SupportedMessageTypes, the profiles'
+ * SupportedFeatures.  Returns 0, ENOENT, or EINVAL.
+ */
+int
+btd_sdp_uint_attribute(
+	const struct btd_sdp *sdp,
+	uint16_t uuid,
+	unsigned nth,
+	uint16_t attribute,
+	uint32_t *value)
+{
+	struct btd_sdp_element record;
+	struct btd_sdp_element found;
+	int error;
+
+	/* The record and the attribute. */
+	error = sdp_find_nth(sdp, uuid, nth, &record);
+	if (error != 0)
+		return error;
+	error = sdp_record_value(&record, attribute, &found);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: an unsigned number. */
+	error = sdp_uint(&found, value);
+	if (error != 0)
+		return EINVAL;
+	return 0;
+}
+
+/*
+ * Takes apart the data element at the start of the bytes for another part
+ * of bluetoothd (the SDP server, ws197-p002).  Returns 0 or EINVAL.
+ */
+int
+btd_sdp_element(
+	const uint8_t *data,
+	size_t length,
+	struct btd_sdp_element *element)
+{
+	int error;
+
+	/* The element. */
+	error = sdp_element(data, length, element);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: taken apart. */
+	return 0;
+}
+
+/*
+ * Checks that bytes are a list of well formed data elements nested at most
+ * eight deep, for another part of bluetoothd.  Returns 0 or EINVAL.
+ */
+int
+btd_sdp_check(
+	const uint8_t *data,
+	size_t length)
+{
+	int error;
+
+	/* The elements. */
+	error = sdp_check(data, length, 0U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: well formed. */
+	return 0;
+}
+
+/*
  * Takes apart the data element at the start of the bytes: its type, its
  * value and its whole size, checked against the bytes and the sizes the
  * type allows.  Returns 0 or EINVAL.
@@ -405,7 +593,7 @@ static int
 sdp_element(
 	const uint8_t *data,
 	size_t length,
-	struct sdp_element *element)
+	struct btd_sdp_element *element)
 {
 	static const size_t fixed[5] = { 1U, 2U, 4U, 8U, 16U };
 	unsigned index;
@@ -420,7 +608,7 @@ sdp_element(
 
 	/* Nil has no value; the other fixed sizes; then lengths in 1, 2 or 4 bytes. */
 	header = 1U;
-	if (element->type == SDP_TYPE_NIL) {
+	if (element->type == BTD_SDP_TYPE_NIL) {
 		if (index != 0U)
 			return EINVAL;
 		value = 0U;
@@ -444,15 +632,15 @@ sdp_element(
 	}
 
 	/* The sizes each type allows: numbers fixed, UUIDs 2, 4 or 16, booleans 1, the rest a length. */
-	if ((element->type == SDP_TYPE_UINT || element->type == SDP_TYPE_SINT) && index > 4U)
+	if ((element->type == BTD_SDP_TYPE_UINT || element->type == BTD_SDP_TYPE_SINT) && index > 4U)
 		return EINVAL;
-	if (element->type == SDP_TYPE_UUID && index != 1U && index != 2U && index != 4U)
+	if (element->type == BTD_SDP_TYPE_UUID && index != 1U && index != 2U && index != 4U)
 		return EINVAL;
-	if (element->type == SDP_TYPE_BOOL && index != 0U)
+	if (element->type == BTD_SDP_TYPE_BOOL && index != 0U)
 		return EINVAL;
-	if ((element->type == SDP_TYPE_TEXT || element->type == SDP_TYPE_SEQUENCE || element->type == SDP_TYPE_ALTERNATIVE || element->type == SDP_TYPE_URL) && index < 5U)
+	if ((element->type == BTD_SDP_TYPE_TEXT || element->type == BTD_SDP_TYPE_SEQUENCE || element->type == BTD_SDP_TYPE_ALTERNATIVE || element->type == BTD_SDP_TYPE_URL) && index < 5U)
 		return EINVAL;
-	if (element->type > SDP_TYPE_URL)
+	if (element->type > BTD_SDP_TYPE_URL)
 		return EINVAL;
 
 	/* The value must be within the bytes. */
@@ -476,7 +664,7 @@ sdp_check(
 	size_t length,
 	unsigned depth)
 {
-	struct sdp_element element;
+	struct btd_sdp_element element;
 	size_t offset;
 	int error;
 
@@ -490,7 +678,7 @@ sdp_check(
 		error = sdp_element(&data[offset], length - offset, &element);
 		if (error != 0)
 			return error;
-		if (element.type == SDP_TYPE_SEQUENCE || element.type == SDP_TYPE_ALTERNATIVE) {
+		if (element.type == BTD_SDP_TYPE_SEQUENCE || element.type == BTD_SDP_TYPE_ALTERNATIVE) {
 			error = sdp_check(element.value, element.length, depth + 1U);
 			if (error != 0)
 				return error;
@@ -507,11 +695,11 @@ sdp_check(
 /* Reads an unsigned integer of 1, 2 or 4 bytes.  Returns 0 or EINVAL. */
 static int
 sdp_uint(
-	const struct sdp_element *element,
+	const struct btd_sdp_element *element,
 	uint32_t *value)
 {
 	/* Refuses another type, or a size past 32 bits. */
-	if (element->type != SDP_TYPE_UINT || element->length > 4U)
+	if (element->type != BTD_SDP_TYPE_UINT || element->length > 4U)
 		return EINVAL;
 
 	/* The number, most significant byte first. */
@@ -532,14 +720,14 @@ sdp_uint(
  */
 static int
 sdp_uuid(
-	const struct sdp_element *element,
+	const struct btd_sdp_element *element,
 	uint32_t *value)
 {
 	static const uint8_t base[12] = { 0x00, 0x00, 0x10, 0x00, 0x80, 0x00, 0x00, 0x80, 0x5f, 0x9b, 0x34, 0xfb };
 	int different;
 
 	/* Refuses another type. */
-	if (element->type != SDP_TYPE_UUID)
+	if (element->type != BTD_SDP_TYPE_UUID)
 		return EINVAL;
 
 	/* The short forms. */
@@ -567,11 +755,11 @@ sdp_uuid(
 /* Reads a boolean.  Returns 0 or EINVAL. */
 static int
 sdp_bool(
-	const struct sdp_element *element,
+	const struct btd_sdp_element *element,
 	int *value)
 {
 	/* Refuses another type. */
-	if (element->type != SDP_TYPE_BOOL || element->length != 1U)
+	if (element->type != BTD_SDP_TYPE_BOOL || element->length != 1U)
 		return EINVAL;
 
 	/* Any value but 0 is true. */
@@ -582,16 +770,16 @@ sdp_bool(
 /* Reports whether a ServiceClassIDList names a class. */
 static int
 sdp_has_class(
-	const struct sdp_element *classes,
+	const struct btd_sdp_element *classes,
 	uint32_t uuid)
 {
-	struct sdp_element element;
+	struct btd_sdp_element element;
 	uint32_t value;
 	size_t offset;
 	int error;
 
 	/* Only a sequence lists classes. */
-	if (classes->type != SDP_TYPE_SEQUENCE)
+	if (classes->type != BTD_SDP_TYPE_SEQUENCE)
 		return 0;
 
 	/* Each UUID of it. */
@@ -618,35 +806,35 @@ sdp_has_class(
  */
 static int
 sdp_psm(
-	const struct sdp_element *protocols,
+	const struct btd_sdp_element *protocols,
 	uint32_t *psm)
 {
-	struct sdp_element list;
-	struct sdp_element descriptor;
-	struct sdp_element uuid;
-	struct sdp_element number;
+	struct btd_sdp_element list;
+	struct btd_sdp_element descriptor;
+	struct btd_sdp_element uuid;
+	struct btd_sdp_element number;
 	uint32_t value;
 	size_t offset;
 	int error;
 
 	/* Refuses anything but a sequence. */
-	if (protocols->type != SDP_TYPE_SEQUENCE || protocols->length == 0U)
+	if (protocols->type != BTD_SDP_TYPE_SEQUENCE || protocols->length == 0U)
 		return ENOENT;
 	list = *protocols;
 
 	/* The additional lists hold lists: the first one. */
 	error = sdp_element(protocols->value, protocols->length, &descriptor);
-	if (error != 0 || descriptor.type != SDP_TYPE_SEQUENCE || descriptor.length == 0U)
+	if (error != 0 || descriptor.type != BTD_SDP_TYPE_SEQUENCE || descriptor.length == 0U)
 		return ENOENT;
 	error = sdp_element(descriptor.value, descriptor.length, &uuid);
-	if (error == 0 && uuid.type == SDP_TYPE_SEQUENCE)
+	if (error == 0 && uuid.type == BTD_SDP_TYPE_SEQUENCE)
 		list = descriptor;
 
 	/* Each protocol descriptor: the one of L2CAP carries the PSM after its UUID. */
 	offset = 0;
 	while (offset < list.length) {
 		error = sdp_element(&list.value[offset], list.length - offset, &descriptor);
-		if (error != 0 || descriptor.type != SDP_TYPE_SEQUENCE)
+		if (error != 0 || descriptor.type != BTD_SDP_TYPE_SEQUENCE)
 			return ENOENT;
 		offset += descriptor.size;
 		error = sdp_element(descriptor.value, descriptor.length, &uuid);
@@ -677,51 +865,107 @@ static int
 sdp_find_record(
 	const struct btd_sdp *sdp,
 	uint32_t uuid,
-	struct sdp_element *record)
+	struct btd_sdp_element *record)
 {
-	struct sdp_element lists;
-	struct sdp_element pair;
-	struct sdp_element value;
-	uint32_t id;
+	int error;
+
+	/* The first of the class. */
+	error = sdp_find_nth(sdp, uuid, 0U, record);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the record. */
+	return 0;
+}
+
+/*
+ * Finds the nth record (from 0) of a class in a query's whole lists (a
+ * phone may list several MAS instances, ws197-p002).  Returns 0 with the
+ * record, or ENOENT.
+ */
+static int
+sdp_find_nth(
+	const struct btd_sdp *sdp,
+	uint32_t uuid,
+	unsigned nth,
+	struct btd_sdp_element *record)
+{
+	struct btd_sdp_element lists;
+	struct btd_sdp_element value;
+	unsigned seen;
 	size_t offset;
-	size_t inner;
 	int listed;
 	int error;
 
 	/* The lists: one sequence. */
 	error = sdp_element(sdp->lists, sdp->used, &lists);
-	if (error != 0 || lists.type != SDP_TYPE_SEQUENCE)
+	if (error != 0 || lists.type != BTD_SDP_TYPE_SEQUENCE)
 		return ENOENT;
 
-	/* Each record, until one lists the class. */
+	/* Each record, counting those that list the class. */
+	seen = 0U;
 	offset = 0;
 	while (offset < lists.length) {
 		error = sdp_element(&lists.value[offset], lists.length - offset, record);
-		if (error != 0 || record->type != SDP_TYPE_SEQUENCE)
+		if (error != 0 || record->type != BTD_SDP_TYPE_SEQUENCE)
 			return ENOENT;
 		offset += record->size;
 
-		/* Its ServiceClassIDList among its pairs. */
-		inner = 0;
-		while (inner < record->length) {
-			error = sdp_element(&record->value[inner], record->length - inner, &pair);
-			if (error != 0)
-				break;
-			inner += pair.size;
-			error = sdp_element(&record->value[inner], record->length - inner, &value);
-			if (error != 0)
-				break;
-			inner += value.size;
-			error = sdp_uint(&pair, &id);
-			if (error != 0 || id != SDP_ATTRIBUTE_CLASSES)
-				continue;
-			listed = sdp_has_class(&value, uuid);
-			if (listed)
-				return 0;
-		}
+		/* Its ServiceClassIDList. */
+		error = sdp_record_value(record, SDP_ATTRIBUTE_CLASSES, &value);
+		if (error != 0)
+			continue;
+		listed = sdp_has_class(&value, uuid);
+		if (!listed)
+			continue;
+
+		/* The one asked for. */
+		if (seen == nth)
+			return 0;
+		seen++;
 	}
 
-	/* No record of the class. */
+	/* No such record of the class. */
+	return ENOENT;
+}
+
+/*
+ * Finds an attribute's value in a record's pairs of ID and value.  Returns
+ * 0 with the value, or ENOENT (also for pairs that are not well formed).
+ */
+static int
+sdp_record_value(
+	const struct btd_sdp_element *record,
+	uint32_t attribute,
+	struct btd_sdp_element *value)
+{
+	struct btd_sdp_element pair;
+	uint32_t id;
+	size_t inner;
+	int error;
+
+	/* Each pair, until the one of the attribute. */
+	inner = 0;
+	while (inner < record->length) {
+		/* The ID. */
+		error = sdp_element(&record->value[inner], record->length - inner, &pair);
+		if (error != 0)
+			return ENOENT;
+		inner += pair.size;
+
+		/* Its value. */
+		error = sdp_element(&record->value[inner], record->length - inner, value);
+		if (error != 0)
+			return ENOENT;
+		inner += value->size;
+
+		/* Succeeded: the one asked for. */
+		error = sdp_uint(&pair, &id);
+		if (error == 0 && id == attribute)
+			return 0;
+	}
+
+	/* Not in the record. */
 	return ENOENT;
 }
 
@@ -732,7 +976,7 @@ sdp_find_record(
 static int
 sdp_hid_attribute(
 	uint32_t id,
-	const struct sdp_element *value,
+	const struct btd_sdp_element *value,
 	struct btd_hid_record *record)
 {
 	uint32_t number;
@@ -763,7 +1007,7 @@ sdp_hid_attribute(
 
 	/* The service's name in the primary language, cut to what is kept. */
 	if (id == SDP_ATTRIBUTE_NAME) {
-		if (value->type != SDP_TYPE_TEXT)
+		if (value->type != BTD_SDP_TYPE_TEXT)
 			return EINVAL;
 		length = value->length;
 		if (length >= sizeof(record->name))
@@ -788,25 +1032,25 @@ sdp_hid_attribute(
  */
 static int
 sdp_descriptor(
-	const struct sdp_element *list,
+	const struct btd_sdp_element *list,
 	struct btd_hid_record *record)
 {
-	struct sdp_element entry;
-	struct sdp_element kind;
-	struct sdp_element bytes;
+	struct btd_sdp_element entry;
+	struct btd_sdp_element kind;
+	struct btd_sdp_element bytes;
 	uint32_t type;
 	size_t offset;
 	int error;
 
 	/* Refuses anything but a sequence. */
-	if (list->type != SDP_TYPE_SEQUENCE)
+	if (list->type != BTD_SDP_TYPE_SEQUENCE)
 		return EINVAL;
 
 	/* Each entry, until the report descriptor's. */
 	offset = 0;
 	while (offset < list->length) {
 		error = sdp_element(&list->value[offset], list->length - offset, &entry);
-		if (error != 0 || entry.type != SDP_TYPE_SEQUENCE)
+		if (error != 0 || entry.type != BTD_SDP_TYPE_SEQUENCE)
 			return EINVAL;
 		offset += entry.size;
 		error = sdp_element(entry.value, entry.length, &kind);
@@ -816,7 +1060,7 @@ sdp_descriptor(
 		if (error != 0)
 			return EINVAL;
 		error = sdp_element(&entry.value[kind.size], entry.length - kind.size, &bytes);
-		if (error != 0 || bytes.type != SDP_TYPE_TEXT)
+		if (error != 0 || bytes.type != BTD_SDP_TYPE_TEXT)
 			return EINVAL;
 		if (type != SDP_DESCRIPTOR_REPORT)
 			continue;
@@ -831,6 +1075,57 @@ sdp_descriptor(
 
 	/* None: the record cannot be used (btd_sdp_hid reports it). */
 	return 0;
+}
+
+/*
+ * Reads the RFCOMM server channel of a ProtocolDescriptorList: the
+ * descriptor whose UUID is RFCOMM's carries the channel after it.  Returns
+ * 0 or ENOENT.
+ */
+static int
+sdp_rfcomm(
+	const struct btd_sdp_element *protocols,
+	uint32_t *channel)
+{
+	struct btd_sdp_element descriptor;
+	struct btd_sdp_element uuid;
+	struct btd_sdp_element number;
+	uint32_t value;
+	size_t offset;
+	int error;
+
+	/* A sequence of descriptors. */
+	if (protocols->type != BTD_SDP_TYPE_SEQUENCE)
+		return ENOENT;
+
+	/* Each descriptor, until RFCOMM's. */
+	offset = 0;
+	while (offset < protocols->length) {
+		error = sdp_element(&protocols->value[offset], protocols->length - offset, &descriptor);
+		if (error != 0 || descriptor.type != BTD_SDP_TYPE_SEQUENCE)
+			return ENOENT;
+		offset += descriptor.size;
+
+		/* Its UUID. */
+		error = sdp_element(descriptor.value, descriptor.length, &uuid);
+		if (error != 0)
+			return ENOENT;
+		error = sdp_uuid(&uuid, &value);
+		if (error != 0 || value != SDP_UUID_RFCOMM)
+			continue;
+
+		/* Succeeded: the channel after it. */
+		error = sdp_element(&descriptor.value[uuid.size], descriptor.length - uuid.size, &number);
+		if (error != 0)
+			return ENOENT;
+		error = sdp_uint(&number, channel);
+		if (error != 0)
+			return ENOENT;
+		return 0;
+	}
+
+	/* No RFCOMM. */
+	return ENOENT;
 }
 
 /* Reads a big-endian 16-bit number. */

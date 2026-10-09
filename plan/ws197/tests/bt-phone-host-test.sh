@@ -11,7 +11,8 @@ flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wdeclaration-after-statem
 status=0
 # Each test program: its name and its sources besides the test.
 for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
-	"bt-obex-host-test userland/base/bluetoothd/obex.c"; do
+	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
+	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c"; do
 	set -- $test
 	name=$1
 	shift
