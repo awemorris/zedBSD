@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws200-p001 -->
 # ws200-p001: Change Password のウィザードと Sign-in Methods
 
-Status: cleared 候補・test-wait（T1-（Q1）、WS199 p004 と同じ依頼の行）（2026-10-10 P1）
+Status: cleared 候補（2026-10-10 P1、merge 88d068d78、KL_VERSION 78・KL_SYSTEM_MANAGER_VERSION 26。T1-523 の (e) と 5330 の UAT 待ち）
 Parent: [WS200](../ws.md)
 
 ## ゴール
