@@ -126,21 +126,40 @@ USB Wi-Fi adapters with the Realtek RTL8822BU chip also work.
 ### Wired network
 
 USB Ethernet adapters that follow the USB CDC-NCM or CDC-ECM standard work
-(many USB-C adapters and docks do). Plug the adapter in **before** you start
-the computer; an adapter plugged in later may not come up in Beta 2.
+(many USB-C adapters and docks do). An adapter can be plugged in before or
+after you start the computer.
+
+<!-- review: BUG-168 (an adapter plugged in later did not come up) was fixed and passed in QEMU; the 5330 check is in
+     the UAT. If it fails there, restore "Plug the adapter in before you start the computer". -->
+
+### Bluetooth
+
+Open **Settings** → **Bluetooth** to pair a Bluetooth keyboard or mouse
+with the Latitude 5330's built-in Bluetooth.
+
+<!-- review (2026-10-09 user): Bluetooth is in the release and is turned off at the last moment (10/16) if keyboards
+     and mice do not work on the 5330. If it is turned off, delete this section. -->
 
 ## Security notes
 
 Read these before you connect Beta 2 to a network.
 
 - **The password is public.** Everyone who reads this guide knows the
-  password of `kei`, and Beta 2 has no way to change it.
+  password of `kei`. Change it first: open **Settings** → **Users** and use
+  **Change Password**, or type `passwd` in Terminal.
 - **The SSH server is on.** Beta 2 accepts SSH logins with that password
-  from the network, and the user `kei` cannot turn the server off.
-- Together, this means that anyone on the same network can log in to the
-  computer as `kei` and read or change that user's files. Use Beta 2 only on
-  networks you trust, such as your home network, and do not keep anything
-  private in it.
+  from the network. To turn the server off, type in Terminal:
+
+  ```sh
+  sudo service stop sshd
+  sudo service disable sshd
+  ```
+
+  The first command stops it now, the second keeps it off at the next start.
+- Until you change the password, anyone on the same network can log in to
+  the computer as `kei`, and `kei` can run commands as root with `sudo`. Use
+  Beta 2 only on networks you trust, such as your home network, and do not
+  keep anything private in it.
 - The image keeps what you save on the USB drive. Anyone who has the drive
   can read it.
 
@@ -151,6 +170,16 @@ virtual machine on a Windows PC instead of starting from USB. Extract the zip
 to a folder and run `boot.bat` in it. It starts QEMU with the same image and
 3D graphics passed to the PC's GPU (Venus). The same login, password and
 security notes apply.
+
+## Building it yourself
+
+The image is built from the source with `make menuconfig` (choose the CPU,
+the boot options and the programs, then **Build boot image**). The steps are
+in the [build-from-source guide](../howto/build-from-source.md). The
+Keiland desktop also builds natively on Linux and FreeBSD with
+`make keiland-linux` and `make keiland-freebsd`, which check the host's
+packages first and offer to install the missing ones (see the
+[README](../../README.md)).
 
 ## Licenses
 

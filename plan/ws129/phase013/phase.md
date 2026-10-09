@@ -36,3 +36,12 @@ Queue: q715 / q715-i01（P2）
 
 - 文書の主張を source で確かめた: login の lock（`userland/base/login/verify.c`）、自動 login（`/etc/keiland/autologin` = kei、release の image の rootfs で確認）、Settings の頁の名前（Wi-Fi・Sound、`userland/desktop/settings/pages.c`）、passwd・su・doas が無い、release の asset の名前（`.github/workflows/release.yml`）。
 - 未実施: 手順（USB への書き込み・F2/F12・Secure Boot）は実機で確かめていない（p007 の実機の確認で）。
+
+## ベータ2 の更新（2026-10-09、q920、P1）
+
+Q1 の割り当て（q920 (3)「menuconfig の新しい階層・keiland の prerequisites を反映」）。
+- `docs/howto/build-from-source.md` §3 を WS193 の menu（CPU / Board・Boot Option・Development・Base・Desktop・Packages・Firmware・Build boot image・Exit）に書き直した。menu に無い設定（Variant・kernel の option・X11・試験）は config.mk に手で書き menu が保つこと、Build boot image の進捗と log の場所、Variant の表を値で。i386 は menu から外れた。
+- `README.md` の Keiland の Linux・FreeBSD の節に、WS194 の package の確認・導入の問い・build の後の install の問い・`KEILAND_ASK=n` を足した。
+- 利用の手引き `docs/release/zedbsd-1.0.0-beta2-guide.md`: Security notes を今の実装に（passwd と Settings → Users の Change Password、`sudo service stop/disable sshd`、kei は wheel で sudo できる）。有線の後挿し（BUG-168 は QEMU で直った、実機は UAT、review の comment）、Bluetooth の節（条件付き）、「Building it yourself」の節。
+- 確かめ: Settings の頁の名前（pages.c）、Users の Change Password（page-users.c）、`/etc/group` の wheel に kei、`service` の stop・disable（service-command.c）、menu の項目（tools/menuconfig.py）。docs/ から plan/ への link は無い（comment の中の名前だけ）。
+- 未実施: 手引きの手順の実機の確認（p007）。

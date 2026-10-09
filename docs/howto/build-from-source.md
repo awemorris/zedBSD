@@ -1,6 +1,6 @@
 # Build zedBSD from source
 
-Status: current for the 2026-09-05 build and image interface
+Status: current for the 2026-10-09 build and image interface
 
 This guide builds a zedBSD disk image from a source checkout and starts the
 supported x86 QEMU targets. Commands are run from the repository root.
@@ -111,31 +111,55 @@ Create or replace `config.mk` with the menu:
 make menuconfig
 ```
 
-Select one platform, its drivers, and user programs, then save. `config.mk` is
-the sole selected-target input; normal build targets reject a missing or
-invalid file. It is generated and should not be hand-edited.
+The main menu has these entries:
 
-The target menu is organized as Architecture -> Board -> Variant. PC/AT amd64
-provides the following image profiles in this order:
+| Entry | What it sets |
+| --- | --- |
+| **CPU / Board** | The CPU: `x86_64` (boots on UEFI + ACPI PCs) or `arm64` (Raspberry Pi 4). The board follows the CPU. |
+| **Boot Option** | Graphical boot (no kernel messages on the boot console), graphical login (starts Keiland by itself), and mirroring the kernel messages to the serial port. |
+| **Development** | Whether the image carries the development files (`/usr/include`, the `.so` links, `.pc` and `.a` files). |
+| **Base** | The base programs (`/bin`, `/sbin`) and the compilers, by group. |
+| **Desktop** | Keiland and its applications. |
+| **Packages** | The third-party packages of `userland/packages/`, one submenu per directory (Languages, Development, Libraries, Multimedia, Fonts, Network, Security, ...). |
+| **Firmware** | The device firmware packages (Intel graphics, Wi-Fi and Bluetooth, Realtek Wi-Fi). |
+| **Build boot image** | Saves `config.mk` and builds the disk image (see below). |
+| **Exit** | Saves `config.mk` and leaves. |
 
-| Menu label | Saved value | Image boot paths | Expected firmware behavior |
-| --- | --- | --- | --- |
-| `UEFI, UFS root partition (for PC/AT)` | `native` (default) | GPT: ESP with the UEFI loader, `vmunix` and `zedbsd.cfg`; a UFS root partition mounted read-write; a swap partition | Boots with OVMF; does not boot with SeaBIOS |
-| `UEFI + BIOS (for PC/AT)` | `hybrid` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
-| `UEFI (for Apple)` | `uefi` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload | Boots with OVMF; does not boot with SeaBIOS |
-| `BIOS (for PC/AT)` | `bios` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
+The build adds the programs a selected program depends on. `config.mk` is the
+sole selected-target input; normal build targets reject a missing or invalid
+file.
 
-The current single-profile boards save the fixed `Default` Variant. A saved
-configuration from before the Variant field was introduced uses its board
-default. Variant describes disk-image composition only; it does not change the
+Some settings are not in the menu and are written in `config.mk` by hand: the
+disk layout (`ZEDBSD_VARIANT`), the kernel's options and drivers, the X11
+programs, the test programs and hooks, and Noct's GPU accelerator. The menu
+reads the values such a `config.mk` holds and writes them back unchanged.
+
+**Build boot image** asks for confirmation, saves `config.mk` and runs the
+`disk-image` build with as many jobs as the machine has processors
+(`ZEDBSD_JOBS` in the environment overrides it). It shows a progress bar of
+the targets built against those to build and the target being built now, and
+writes make's output to `build/<target>/menuconfig-build.log` (for example
+`build/amd64/menuconfig-build.log`). At the end it shows whether the build
+succeeded, and the end of the log when it failed. The same build without the
+menu is `make -j16 disk-image` (section 4).
+
+On amd64 `ZEDBSD_VARIANT` chooses the disk image's layout:
+
+| Value | Image boot paths | Expected firmware behavior |
+| --- | --- | --- |
+| `native` (default) | GPT: ESP with the UEFI loader, `vmunix` and `zedbsd.cfg`; a UFS root partition mounted read-write; a swap partition | Boots with OVMF; does not boot with SeaBIOS |
+| `hybrid` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
+| `uefi` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload (for Apple computers) | Boots with OVMF; does not boot with SeaBIOS |
+| `bios` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
+
+The variant describes disk-image composition only; it does not change the
 kernel, target triple, or compiled BIOS/UEFI loader artifacts. Disk capacity is
-not a build-menu selection.
+not a build setting. Each amd64 variant publishes its image at
+`build/amd64/hdd-image.img`, so preserve a copy elsewhere if several outputs
+are needed at once.
 
-To build each amd64 profile, run `make menuconfig`, choose PC/AT amd64 and the
-desired label, save, and run `make -j16 disk-image`. Repeat the menu/save/build
-sequence for another profile; each selected profile publishes its image at
-`build/amd64/hdd-image.img`, so preserve a copy elsewhere if multiple outputs
-are needed simultaneously. Do not hand-edit generated `config.mk`.
+The i386 targets (PC/AT and NEC PC-98) are no longer offered by the menu; the
+menu keeps one that a `config.mk` already selects.
 
 The maintained x86 output directories are:
 
