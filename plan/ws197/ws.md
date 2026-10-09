@@ -51,3 +51,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 ## 2026-10-10 Q1: p002 の判定
 
 p002（RFCOMM・OBEX・SDP・phone.c と WS143 の変更、i01〜i08）は保留の branch agent/p1-ws197 の 92157604f で実装済み。host 試験は全部 PASS、T1-518（WS143 の HID の回帰 4 本、bt-loopback-p002・bt-daemon-p003・bt-pair-p004・bt-hid-p005）が全部 PASS。**p002 は cleared**（code は 10/17 の後に main へ merge）。branch の phase002/phase.md への反映は P1。
+
+## 2026-10-10 T1-524（HID の回帰、883abd4b8）
+
+bt-loopback-p002・bt-daemon-p003（SHOW・BONDS）・bt-pair-p004 は PASS。**bt-hid-p005 が 2 回とも FAIL**: 自動の接続の後に HOG の mouse が open にならない（state=waiting）、keyboard の EVDEV の node が出ない、controller が去った時の KEY_B の release、controller が戻った時の HOG の mouse。→ WS197 i01〜i03 の WS143 の変更（linkmgr の page の枠・session・router）による回帰の見込み。**main への merge は止める**。P1 が直す。
