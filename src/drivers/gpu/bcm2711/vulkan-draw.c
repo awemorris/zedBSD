@@ -94,6 +94,15 @@ walk_records(
 
 		/* Each event updates one ordinary graphics selection or emits a complete pass/draw preparation point. */
 		switch (record->opcode) {
+		case GPU_OP_CMD_CLEAR_COLOR_IMAGE:
+			/* Clear meta work retains the same typed immutable image without consuming graphics selections or nesting inside a pass. */
+			if (state->pass != NULL)
+				return EINVAL;
+			error = bcm2711_vulkan_record_validate(command, record);
+			if (error != 0)
+				return error;
+			selected = true;
+			break;
 		case GPU_OP_CMD_PIPELINE_BARRIER:
 			/* Complete serial barriers execute outside a render pass and keep every typed dependency through preparation. */
 			if (state->pass != NULL)

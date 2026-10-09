@@ -135,6 +135,49 @@ ws141_client_encode_recording(
 }
 
 /*
+ * Appends one real public image-clear record with copied raw colour and subresource selections.
+ */
+void
+ws141_client_encode_clear(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t image_id,
+	VkImageLayout layout,
+	const VkImageSubresourceRange *ranges,
+	uint32_t count)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object image;
+	VkClearColorValue colour;
+
+	/* The real public wrapper owns all recording bytes independently of the finite host application objects. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(&image, 0, sizeof(image));
+	image.wire_id = image_id;
+
+	/* Exact IEEE words select distinct channels without depending on a kernel floating-point operation. */
+	colour.uint32[0] = 0x3e800000U;
+	colour.uint32[1] = 0x3f000000U;
+	colour.uint32[2] = 0x3f800000U;
+	colour.uint32[3] = 0x3f800000U;
+	vkCmdClearColorImage(&command, (VkImage)(uintptr_t)&image, layout, &colour, count, ranges);
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: the copied actual-client record retains no application colour, range or opaque object pointer. */
+	return;
+}
+
+/*
  * Appends one actual public barrier record using independently copied finite host object metadata.
  */
 void

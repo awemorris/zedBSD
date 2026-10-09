@@ -11,10 +11,12 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/vulkan-native-pass.h"
+#include "drivers/gpu/bcm2711/native-colour.h"
 
 /* All padded native inputs across the enclosing submission share one finite staging budget. */
 #define NATIVE_PASS_BYTES (256ULL * 1024U * 1024U)
 
+static int prepare_clear(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_record *record);
 static int prepare_target(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *begin);
 static int collect_draws(struct bcm2711_vulkan_native_pass *pass, const struct bcm2711_vulkan_prepared_event *begin, uint64_t *remaining, const struct bcm2711_vulkan_prepared_event **next);
 static int allocate_storage(struct bcm2711_vulkan_native_pass *pass, uint64_t bytes, uint64_t *remaining, struct bcm2711_native_storage **storage);
@@ -95,6 +97,70 @@ bcm2711_vulkan_native_pass_create(
 	*next = following;
 
 	/* Succeeded: every possible device reference belongs to this root or its linked independent draw roots. */
+	return 0;
+}
+
+/*
+ * Prepares an independently owned full-image native clear without CPU framebuffer mutation.
+ *
+ * A zero-draw bin list and native tile clear/store implement every selected
+ * single-subresource range.  The prepared primary retains the logical image;
+ * this root independently retains its exact backing view through uncertain
+ * native completion, using the ordinary whole-pass retirement mechanism.
+ */
+int
+bcm2711_vulkan_native_clear_create(
+	struct bcm2711_v3d_space *space,
+	const struct bcm2711_vulkan_prepared_event *event,
+	uint64_t *available,
+	struct bcm2711_vulkan_native_pass **pass)
+{
+	struct bcm2711_vulkan_native_pass *created;
+	uint64_t remaining;
+	int error;
+	int released;
+
+	/* Every refusal leaves the caller's native owner and budget unchanged. */
+	if (pass == NULL)
+		return EINVAL;
+	*pass = NULL;
+
+	/* Only an exact prepared clear and native address-space owner supply the complete input graph. */
+	if (space == NULL ||
+	    space->native == NULL ||
+	    event == NULL ||
+	    event->record == NULL ||
+	    event->opcode != GPU_OP_CMD_CLEAR_COLOR_IMAGE)
+		return EINVAL;
+
+	/* Native storage cannot exceed the enclosing submission budget. */
+	if (available == NULL || *available > NATIVE_PASS_BYTES)
+		return EINVAL;
+
+	/* One CPU root owns all independently retained output and list allocations before publication. */
+	remaining = *available;
+	created = kern_calloc(1, sizeof(*created));
+	if (created == NULL)
+		return ENOMEM;
+	created->space = space;
+	created->job.kind = BCM2711_V3D_JOB_CL;
+	error = prepare_clear(created, event->record);
+	if (error == 0)
+		error = prepare_lists(created, &remaining);
+
+	/* No native work launched, so every complete unpublished prefix can retire without changing the output. */
+	if (error != 0) {
+		released = bcm2711_vulkan_native_pass_release(&created, true);
+		if (released != 0)
+			return released;
+		return error;
+	}
+
+	/* Publication consumes only successfully prepared padded storage, exactly as an ordinary graphics pass does. */
+	*available = remaining;
+	*pass = created;
+
+	/* Succeeded: native tile clear/store owns every eventual DMA reference and reads no user graphics state. */
 	return 0;
 }
 
@@ -471,4 +537,95 @@ prepare_image(
 
 	/* Succeeded: the descriptor borrows exactly one complete independently retained native interval. */
 	return;
+}
+
+/* Copies one full-image numerical target and native packed clear colour before allocating any command storage. */
+static int
+prepare_clear(
+	struct bcm2711_vulkan_native_pass *pass,
+	const struct bcm2711_vulkan_record *record)
+{
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_v3d_view *view;
+	uint32_t address;
+	uint32_t colour;
+	uint32_t swap;
+	void *cpu;
+	int error;
+
+	/* The independently pending primary supplies a typed immutable full-subresource clear selection. */
+	if (record->opcode != GPU_OP_CMD_CLEAR_COLOR_IMAGE ||
+	    record->semantic_error != 0 ||
+	    record->objects[0] == NULL)
+		return EINVAL;
+
+	/* Every selected range names the same implemented colour image subresource. */
+	if (record->objects[0]->kind != I915_VK_OBJ_IMAGE ||
+	    record->count == 0 ||
+	    record->count > 64U)
+		return EINVAL;
+
+	/* The clear preserves its explicit general or transfer destination layout. */
+	if (record->layout != VK_IMAGE_LAYOUT_GENERAL && record->layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+		return EINVAL;
+
+	/* A complete typed binding and destination usage precede all physical backing access. */
+	image = record->objects[0]->payload;
+	if (image == NULL ||
+	    image->memory == NULL ||
+	    (image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
+		return EINVAL;
+
+	/* Only complete native raster geometry and implemented UNORM formats enter the integer colour conversion. */
+	if (image->width == 0 ||
+	    image->width > 4096U ||
+	    image->height == 0 ||
+	    image->height > 4096U ||
+	    image->bytes > 0xffffffffU)
+		return EINVAL;
+
+	/* Other formats have no implemented native clear interpretation. */
+	if (image->format != VK_FORMAT_R8G8B8A8_UNORM && image->format != VK_FORMAT_B8G8R8A8_UNORM)
+		return ENOTSUP;
+
+	/* Packed clear bytes match the same raw RGBA8 store packet used for ordinary native output. */
+	swap = 0;
+	if (image->format == VK_FORMAT_B8G8R8A8_UNORM)
+		swap = 1;
+	error = bcm2711_native_colour_pack(record->words, swap, &colour);
+	if (error != 0)
+		return error;
+
+	/* Exact coherent output backing gains an independent view reference before any numerical alias enters the root. */
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+
+	/* The independent output edge must remain representable through all later preparation failures. */
+	if (view->references == 0 || view->references == 0xffffffffU)
+		return EOVERFLOW;
+	bcm2711_v3d_memory_retain(view);
+	pass->output = view;
+	pass->cpu = cpu;
+	pass->target = image;
+	pass->initial_layout = record->layout;
+	pass->final_layout = record->layout;
+
+	/* Full target tile coverage requires no load, and hardware clear/store writes only valid framebuffer pixels. */
+	pass->state.width = image->width;
+	pass->state.height = image->height;
+	pass->state.pitch = image->pitch;
+	pass->state.output = address;
+	pass->state.output_bytes = (uint32_t)image->bytes;
+	pass->state.last_x = (image->width - 1U) / 64U;
+	pass->state.last_y = (image->height - 1U) / 64U;
+	pass->state.store = 1;
+	pass->state.clear_colour = colour;
+	pass->area.extent.width = image->width;
+	pass->area.extent.height = image->height;
+	pass->format = image->format;
+	pass->load = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+
+	/* Succeeded: the existing CPU partial-clear path is disabled for this independently owned native full-image clear. */
+	return 0;
 }
