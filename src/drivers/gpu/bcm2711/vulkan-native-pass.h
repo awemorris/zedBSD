@@ -48,6 +48,9 @@ int bcm2711_vulkan_native_pass_create(struct bcm2711_v3d_space *space, const str
 /* A full-image clear uses the native tile clear colour and store without CPU target writes or user graphics state. */
 int bcm2711_vulkan_native_clear_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint64_t *available, struct bcm2711_vulkan_native_pass **pass);
 
+/* An unpublished owner with complete output/draw state gains all independently owned lists; failure leaves its partial mappings attached for release. */
+int bcm2711_vulkan_native_pass_build_lists(struct bcm2711_vulkan_native_pass *pass, uint64_t *available);
+
 /* Run once under the controller mutex, then retain the whole parent payload when the returned native retirement proof is false. */
 int bcm2711_vulkan_native_pass_run(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 

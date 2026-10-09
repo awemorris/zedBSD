@@ -169,3 +169,8 @@ actual WSIのfamily0↔external pairを、exact bound memoryのexternal declarat
 ## i14 full-image native GPU clear checkpoint（2026-10-10）
 
 actual public vkCmdClearColorImage→typed immutable primary→prepared pending graph→zero-draw native tile clear/storeを接続。TRANSFER_DST用途・bound same-device・remaining ranges・FIFO current layout、独立output/9storage、OOM/budget rollback、zero-draw quarantine/reset lifetimeを確認。actual encoder/native owner＋explicit runner host20範囲、final named RPi4 y warning/error0/checks3/style0 PASS。CPU target write無し。mock runnerはGPU pixelを書かず、実機clear/Keiland成功は未確認。copy/blit/readback・primary queue submit/fence/semaphore/public/common binding・final runtime stack/p007が残り、Phase in-progress/WS incompleteを維持。Master/shared source/HAL/UAPI変更無し。[証拠/失敗と修正/復帰点](../execution-20261009.md#i14-full-image-gpu-clearのsoftware出力2026-10-10)。
+
+
+## i14 native image copy/blit checkpoint（2026-10-10）
+
+actual public copy/blit→完全immutable primary/pending graph→内部kernel-compiled texture quad/native passを接続。raw copy、nearest/linear拡縮・両axis反転・RGBA/BGRA conversion、source全sample footprint/physical alias、multi-region FIFO/whole-pass quarantineを確認。temporary数値metaのみで公開仮object無し、CPU destination pixel write無し。actual client/kernel-source＋明示runner host21範囲、final RPi4 y warning/error0/checks3/style0とown SPIR-V validator PASS。実GPU pixelはmockしないため実機/Keiland成功は未確認。buffer readback/transfer・QueueSubmit/fence/semaphore/public/common binding・final stack/p007が残り、Phase in-progress/WS incompleteを維持。Master変更無し。[正確な範囲/codec誤りの修正/確認/復帰点](../execution-20261009.md#i14-native-image-copyblitのsoftware出力2026-10-10)。
