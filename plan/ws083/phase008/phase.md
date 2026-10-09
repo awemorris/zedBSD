@@ -2,7 +2,7 @@
 
 # ws083-p008: 性能・門の既定化・利用者への案内・result status query
 
-Status: cleared 候補（2026-10-10 P2: design §9 の受け入れ（記録、ws.md の制限）を全部満たす。性能は T1-435 の E・E2 の数字（下の表）を ws.md の制限に書いた。判定は Q1）（旧: in-progress（2026-10-10 P2: 残りは性能の数字（T1-435 の E）だけ）（旧: in-progress（q897、P2。この attempt は host の分: result status query と利用者への案内））
+Status: cleared（2026-10-10 Q1 判定: result status は実機で COMPLETE、門は既定 OFF（ユーザー）、release notes と docs/reference、性能 1080p 相当で 1 frame 4.2〜5.2 ms）
 Disposition: normal
 Parent: [WS083](../ws.md)
 Queue: q897（Q1 の dispatch、2026-10-08 午後「p008 の host の分を先に」）
