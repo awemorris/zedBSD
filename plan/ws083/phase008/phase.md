@@ -2,7 +2,7 @@
 
 # ws083-p008: 性能・門の既定化・利用者への案内・result status query
 
-Status: in-progress（q897、P2。この attempt は host の分: result status query と利用者への案内）
+Status: in-progress（2026-10-10 P2: 残りは性能の数字（T1-435 の E、5330）だけ。result status query・利用者への案内・門（既定は OFF で閉じる）・SAMPLED/TRANSFER_SRC（HD5 で不要）・ws.md の制限は済み。E の数字を記録したら cleared 候補）（旧: in-progress（q897、P2。この attempt は host の分: result status query と利用者への案内））
 Disposition: normal
 Parent: [WS083](../ws.md)
 Queue: q897（Q1 の dispatch、2026-10-08 午後「p008 の host の分を先に」）
@@ -85,3 +85,18 @@ UAPI（gpu-op.h）・HAL・wire の形は変えない（query の op は 1.0 の
 - OFF にする（直前でも）: その 1 行を消す（入れていなければ何もしない）。利用者の手元では、USB の FAT の partition の `ZEDBSD.CFG`（1 行 1 parameter）に `i915.debug=video` の行を足す・消すだけで切り替わる。
 - **D19 の既定化（kernel の既定を ON にする）はベータ2 ではしない**のを推す: 実機の p005・p006b・p007 が済んでおらず、既定を ON にするなら OFF の parameter（例 `i915.video=off`）も要る。ベータ3 で。
 - 注意（Q1・ユーザーへ）: release の image の中に Vulkan Video を使う program は無い。Video Player は libmedia → FFmpeg で CPU で decode し（`userland/desktop/libmedia/avcodec.c`）、FFmpeg は `--disable-hwaccels` で build される（`userland/packages/multimedia/libavcodec/Makefile`）。vkvideo-probe は試験の image だけ。だから beta2.md の UAT の 9（Video Player で H.264 の mp4）は WS083 を通らず、門の ON・OFF で結果は変わらない。WS083 の実機の確かめは T1-435（5330 の passthrough の vkvideo-probe）と p007 の F1・F2。release の門を ON にしても、利用者に見える違いは他の program が Vulkan Video を使う時だけ。
+
+## 2026-10-10 P2（WS083 の完了の段、ユーザー「P2を立ててWS083 Videoを完了しましょう。」）
+
+design §9 の p008 の受け入れ（記録、ws.md の制限）の項目ごとの状態:
+
+| 項目 | 状態 |
+| --- | --- |
+| result status query | 済み。host（2026-10-08、上の表）に加え、5330 の実機（2026-10-10 Q1、image 588c5cd、`i915.debug=video`）で 6 本の stream（I 3 本・P/B 3 本）の全 picture が COMPLETE: probe は family の `queryResultStatusSupport` が TRUE なので decode ごとに query を読み、COMPLETE でない picture があれば `, N failed` と exit 5、pool が作れなければ `no result status query` の行を出す。Q1 が全出力を見直し、どちらの行も無い（出力は capabilities・session・parameters・`N frames decoded, N match the reference` の 4 種だけ）。ERROR（D17 の飛ばし）の実機は未実施（正しい stream では起きない。host の roundtrip の `test_status_queries` で確かめた） |
+| 利用者への案内 | 済み。`docs/reference/vulkan-video.md`（2026-10-08）の Availability に、既定は OFF（release の image も）と `zedbsd.cfg` に `i915.debug=video` の行で ON（既に `i915.debug=` の行があれば語を足す、`display,video`）を足した。release notes（`docs/release/zedbsd-1.0.0-beta2.md` の Hardware）の Vulkan Video の行を「既定は OFF、USB の EFI partition（FAT）の `zedbsd.cfg`（`ZEDBSD.CFG`）に `i915.debug=video` の行を足して起動し直すと ON、行を消すと OFF、image の中の program は要らない（Video Player は FFmpeg で CPU）」に書き換え、review の comment をユーザーの決定（2026-10-10、release は OFF）に直した |
+| D19 の門の既定化 | **既定は OFF で閉じる**（2026-10-10 ユーザーの決定: release の config に `i915.debug=video` を入れない。使う program は vkvideo-probe だけ、利用者は `zedbsd.cfg` で ON。Video Player が使うようになったら ON を改めて判断）。kernel の既定を ON にする変更（と OFF の parameter）は作らない。改めて ON にする時は p007 の実機（F1・F2）の後に別の Phase で |
+| SAMPLED・TRANSFER_SRC | 要らない（HD5、2026-10-07 ユーザー） |
+| 性能（U6・U8） | **残り**: T1-435 の E（5330、`vkvideo-probe --time`、B・C の 6 本と 1080p の sample 3 本の `--frames=60`）。数字が届いたらこの節と ws.md の制限に書いて cleared 候補 |
+| ws.md の制限 | ws.md の「制限（p008）」の節に書いた |
+
+確認: 文書だけの変更（code は変えない）。`docs/` から `plan/` への link は足していない。
