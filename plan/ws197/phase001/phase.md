@@ -4,13 +4,13 @@
 
 Phase ID: `ws197-p001`
 Parent: [WS197](../ws.md)
-Status: in-progress（第 2 版。第 1 版の指摘 R1〜R24（[review-1.md](review-1.md)）を反映済み。第 2 版の再 review の指摘 S1〜S25（[review-2.md](review-2.md)）は未反映: 第 3 版で p002 の前に S1〜S5・S14・S18 を直す（2026-10-09 深夜、Q1 の割り込み（WS193 の menuconfig）で中断）。code は書かない）
+Status: cleared 候補（第 3 版。R1〜R24（[review-1.md](review-1.md)）・S1〜S25（[review-2.md](review-2.md)）を反映、p002 に関わる節の短い確認（[review-3.md](review-3.md)）は **p002 は条件付きで GO**: T1〜T4 は p002 の詳細設計と受け入れの必須（§12）。§11 のユーザーの判断 Q1〜Q16 は Q1 経由で尋ねる。code は書かない）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-09「beta2.md の P1 の必須は T1・UAT の待ちだけになったので、WS197 の p001 設計を始める」、ユーザー 2026-10-09「OBEX, MAP, Integration, PBAP, HFPの順で実装しますか。beta2.mdの必須が終わってからです。」）
 依存（設計）: [WS143](../../ws143/ws.md) の bluetoothd の今の code（p004 cleared。p005 は in-progress、p006 は test-wait、p003 i02 は未着手。§12 で実装の Phase の依存に直した [R6]）、[WS170](../../ws170/ws.md) の Phone の app と `kl_system_phone_v1`（p001〜p004 cleared）。
 成果: この文書。§11 のユーザーの判断、§12 の Phase の分け方。
 
-版: 2026-10-09 第 1 版（P1）→ 同日深夜 第 2 版（P1、R1〜R24）。各節の `[Rn]` はその節が答える指摘。
+版: 2026-10-09 第 1 版（P1）→ 同日深夜 第 2 版（R1〜R24）→ 第 3 版（S1〜S25）。各節の `[Rn]`・`[Sn]` はその節が答える指摘。
 
 ## 0. 読み方と前提
 
@@ -63,7 +63,8 @@ L2CAP の ERTM と GOEP 2.0（OBEX over L2CAP、SRM）は作らない（ws.md �
 | RFCOMM | `rfcomm.c` | 1 つの ACL の上の多重化（§5） | p002 |
 | OBEX | `obex.c` | packet の組み立てと分解、client・server（§6） | p002 |
 | phone link | `phone.c`・`phonerec.c` | 1 台のスマホの持ち主・profile の状態・再接続（§8.2）、持ち主の記録（§8.2） | p003（骨格）・p004 |
-| 出力の queue | `outq.c` | socket の client ごとの non-blocking の出力の queue（§8.3） | p003 |
+| 出力の queue | `outq.c` | socket の**全部の** client の non-blocking の出力の queue（§8.3）[S9] | p003 |
+| 接続の調停 | `linkmgr.c` | page scan（Write Scan Enable）と page（Create Connection）を HID と phone の要求から 1 つに調停（§3.6）[S14] | p002 |
 | MAP | `map.c`・`mapxml.c`・`bmsg.c` | MAS の client と MNS の server（§7.1）、listing と event の XML、bMessage | p003 |
 | PBAP | `pbap.c`・`vcard.c` | PCE と vCard 2.1・3.0（§7.2） | p005 |
 | HFP | `hfp.c`・`at.c` | HF の SLC、AT、通話の状態（§7.3） | p006 |
@@ -74,24 +75,31 @@ L2CAP の ERTM と GOEP 2.0（OBEX over L2CAP、SRM）は作らない（ws.md �
 | file | 変更 |
 | --- | --- |
 | `router.c`・`router.h` | `BTD_OWNER_PHONE`。phone の hook（`struct btd_router_hid` と同じ形の `wants`・`claims`・`handle`）。相手からの Connection Request: HID の次に phone の `wants`（持ち主が居る時だけ、§8.2）。Link Key Request も同じ順。SCO/eSCO の Connection Request（link type 0x00・0x02）と Synchronous Connection Complete・Changed（event 0x2C・0x2D）は、相手の address の ACL の持ち主が phone なら phone へ、他は断る |
-| `session.c`・`session.h` | H4 の SCO（型 0x03）の読み書き。SCO の buffer（Read Buffer Size の SCO の欄）と、Synchronous Flow Control を使うなら Number Of Completed Packets の SCO の handle の数え。SCO の handle は ACL の link の表とは別の表（最大 1 本）。送りの queue の持ち主ごとの割り当て（§5.3） |
-| `pair.c`・`main.c` | pairing の後の handoff を鎖に: phone の handoff（相手の Class of Device の major が phone 0x02、または SDP で AG・MSE・PSE の record がある）→ HID の handoff。pair の l2cap に accept の hook（pairing の間にスマホが開ける SDP の channel を sdps へ、§3.4） |
+| `session.c`・`session.h` | 送り: link ごとの「controller で処理中の packet の数」の上限（phone の link は BR/EDR の pool の総数 − 2）と、flush を link ごとの round-robin にし buffer を待つ link の frame を飛ばす（今は全 link の FIFO、`session.c:1889-1904`）[S2]。受け: 同期の command の待ち（最大 2 秒、398-419 行）の間の受けの ring（32 KB、`session.h:45`）が満ちて捨てた時、**handle ごとの drop の印**を持ち主に知らせる（今は数えるだけ、1589-1592 行）[S1]。SCO（H4 の型 0x03）と SCO の buffer の数えは p007b（§7.4）。SCO の handle の Disconnection Complete と link type の判定（Connection Complete は link type を見ない、`router.c:325-358`・439-470）も p007b [S15] |
+| `pair.c`・`main.c` | `PAIR address phone=1`（「スマホとして使う」の意図）。pairing の後の handoff を鎖に: phone の handoff（**phone=1 の pairing で、相手の Class of Device の major が phone 0x02 の時だけ**。handoff は同期の hook（`pair.c:1700-1735`）なので非同期の SDP を条件にしない）→ HID の handoff [S4]。pair の l2cap に accept の hook（pairing の間にスマホが開ける SDP の channel を sdps へ、§3.4） |
 | `l2cap.c` | 持ち主の表は今のまま（phone link は自分の表を 1 つ持つ: SDP・RFCOMM の 2〜3 本） |
-| `snoop.c` | phone link の RFCOMM・SDP の payload は header だけ書き、中身を伏せる [R22] |
+| `snoop.c` | phone の handle の ACL は L2CAP の header より後を全部伏せる（trace は生の H4 で続きの断片に header が無いので、header だけを残す形は作れない）。SCO（通話の声）は記録しない。試験の正解は伏せない台本の相手から取る（§9.3）[R22, S17] |
 
-接続の数 [R2]: ACL 8 本 ＝ pairing 1 ＋ 断るための 1 ＋ HID 5 ＋ phone 1。今の `BTD_HID_MAX`（6）を 5 にする（HID の受け入れが 6 台から 5 台に減る。WS143 の記録にも書く）。SCO は ACL の表の外の 1 本。
+接続の数 [R2, S25]: ACL 8 本 ＝ pairing 1 ＋ 断るための 1 ＋ HID 6。**スマホを「スマホとして使う」にした時だけ** HID の枠を 1 つ phone に予約する（HID は 5 台まで。phone link の無い機械は今のまま 6 台）。SCO は ACL の表の外の 1 本。
 
 ### 3.4 相手から来る channel と security [R19]
 
 - phone link の ACL の上で相手が開ける L2CAP の channel（SDP 0x0001・RFCOMM 0x0003）は、HID と同じ規則で受ける: bond 済み、暗号化済み、鍵の長さ 16。暗号化の前の request は Pending にし、**zedBSD から Authentication_Requested と Set_Connection_Encryption を始める**（HID host の §9.8 と同じ）。
 - pairing の間（pair が持ち主）にスマホが開ける SDP の channel は、pair の accept の hook で受けて sdps に渡す（pairing の手続きの間の SDP は、スマホが相手の service を知るために使う。**pairing の前の SDP が要るかは未確認**で、要らないと分かれば pair の hook は作らない）。bond していない相手の pairing の外の接続は今どおり切る。
 - 相手の DLC の SABM は、その channel の profile が有効で持ち主が居る時だけ UA、他は DM [R16]。
+- phone link は**認証された（MITM で守られた）link key**（numeric comparison などの SSP の型）の bond だけで使う。Just Works の bond のスマホは「スマホとして使う」を断り、pairing のやり直しを求める（link key の型の値は (仕様、確かめる)）[S19]。
 
 ### 3.5 大きさ
 
 - RFCOMM の frame の最大（N1）: 自分と相手の L2CAP の MTU（configuration の値）の小さい方から 6（RFCOMM の header の最大 5 と FCS 1）を引いた値以下を PN で申し出る [R16]。
 - OBEX の最大 packet 長: zedBSD は 8192 byte を申し出る。相手がそれより小さければ相手の値。最小 255（OBEX の下限）より小さい相手は断る [R17]。
 - 1 通の SMS は bMessage で数 KB、MAP の listing は 1 件 300〜500 byte。最初の同期（§11 Q4: 30 日、folder ごとに最大 500 通）は 1 folder 250 KB、8 KB の packet で約 30 往復。PBAP の電話帳は 1000 件で数百 KB（写真を除く）。
+
+### 3.6 接続の調停（`linkmgr.c`）[S14]
+
+- 今は Write Scan Enable を hid.c だけが出し、HID の bond がある時だけ page scan を on にする（`hid.c:259-261`・`2366-2384`）。phone と HID の page（Create Connection）も調停が無い。
+- `linkmgr.c` が scan と page の唯一の出し手になる: HID と phone は「page scan が要る（bond 済みの相手が自分から来る）」「この address を page したい（優先度・次の時刻）」を登録し、linkmgr が Write Scan Enable を決め、page を 1 つずつ順に出す（controller は同時の Create Connection を嫌う）。pairing・scan の間は page を止める（今の HID の LE の auto-connect の扱いと同じ）。
+- WS143 の hid.c の scan と page の呼び出しを linkmgr の登録に置き換える（§12 の取り込みの規則の対象。p002 で、WS143 p005 の i02・i03 の merge の後に）。pair の Create Connection（`pair.c:290`・LE `pair.c:275`）と HID の LE の auto-connect（`hid.c:2889`・`2974`）を linkmgr に通すか、page の結果（Command Status の失敗、page timeout）を router から linkmgr に返す hook は p002 の詳細設計で決める [N3]。
 
 ## 4. SDP
 
@@ -119,11 +127,19 @@ SupportedMessageTypes に SMS_GSM か SMS_CDMA を持つ最初の MAS に接続�
 
 | record | ServiceClassIDList | 中身 |
 | --- | --- | --- |
-| MNS | 0x1133 | ProtocolDescriptorList: L2CAP・RFCOMM（MNS の channel）・OBEX、BluetoothProfileDescriptorList: MAP 0x1134 の 1.4、ServiceName「Keiland MNS」、MapSupportedFeatures（0x0317）。GoepL2capPsm は出さない |
+| MNS | 0x1133 | ProtocolDescriptorList: L2CAP・RFCOMM（MNS の channel）・OBEX、BluetoothProfileDescriptorList: MAP 0x1134 の版（§4.5）、ServiceName「Keiland MNS」、MapSupportedFeatures（0x0317、版が許す時）。GoepL2capPsm は出さない |
 | HF | 0x111E と 0x1203 | L2CAP・RFCOMM（HF の channel）、HFP 0x111E の 1.8、SupportedFeatures（0x0311）。wide band speech の bit は mSBC を作った後（p007b） |
-| PCE | 0x112E | BluetoothProfileDescriptorList: PBAP 0x1130 の 1.2、ServiceName（protocol は持たない、(仕様、確かめる)） |
+| PCE | 0x112E | BluetoothProfileDescriptorList: PBAP 0x1130 の版（§4.5）、ServiceName（protocol は持たない、(仕様、確かめる)） |
 
 Device ID の record は出さない（VendorIDSource の値の範囲の扱い（0xFFFF は予約）、(仕様、確かめる)）。
+
+### 4.5 名乗る版と GOEP 2.0（ERTM）[S5]
+
+- MAP 1.2 以降と PBAP 1.2 は OBEX over L2CAP（GOEP 2.0、L2CAP の ERTM）を必須にしている、と reviewer は記憶している（(仕様、確かめる)）。そうなら、ERTM を作らない zedBSD が MAP 1.4・PBAP 1.2 を名乗るのは不適合。
+- **p002 の詳細設計の最初に MAP 1.4・PBAP 1.2・GOEP 2.0 の該当の節を引いて確かめる**。必須なら次の 2 つのどちらかで、ユーザーに尋ねる（§11 Q16）:
+  - (a) **MAP 1.1・PBAP 1.1 を名乗り RFCOMM だけで動かす**（MSE・PSE は 1.1 の相手のために RFCOMM の channel を残す（(仕様、確かめる)））。失う物: MAP の Extended Event Report 1.1（event に送り主の名前と時刻が無い → Get で読む）、MapSupportedFeatures の交換、PBAP の Folder Version Counters・Database Identifier（同期は毎回全部を読み、差分は zedBSD の側で取る）。
+  - (b) L2CAP の ERTM と GOEP 2.0（SRM）を作る（ws.md の「後回し +10 LW」を前に）。
+- 推し: (a)（受け入れに要る事は全部できる。ERTM は Future Work）。§4.3・§6.2 の SupportedFeatures の交換と §7.1・§7.2 の版に依る機能は (b) の時だけ。
 
 - Class of Device の service class の bit（Telephony・Object Transfer・Audio）と EIR の UUID の list に MNS・HF・PCE を出すか: スマホがそれを見て「通話」「連絡先」の項目を出すかは**未確認**。p002 で出す形を決め、p008 で効き目を見る [R24]。
 
@@ -141,11 +157,13 @@ Device ID の record は出さない（VendorIDSource の値の範囲の扱い�
 - 多重化の command: PN（frame の最大 N1、credit の初期値 K（0〜7）[R16]、CL の bit で credit による流れの制御を申し出る 0xF0 → 答え 0xE0）、MSC（DLC を開けた後に両側が送る。**仕様の必須**で、相手の MSC を受けるまで data を送らない）[R16]、RPN・RLS（答えるだけ）、Test、NSC。
 - PN の答えが CL=0（相手が credit を持たない）なら、FCon/FCoff の流れの制御で続ける（RFCOMM 1.0 の相手。最近のスマホでは来ない見込み。来たら log）[R16]。
 
-### 5.3 credit と送りの queue [R4, R5]
+### 5.3 credit と送りと受け [R4, R5, S1, S2, S3]
 
-- 各 DLC は「送ってよい frame の数」と「相手に与えた残り」を持つ。受けた frame を上（OBEX・AT）が消費し、**上の出口（socket の client の出力の queue、§8.3）に空きがある時だけ** credit を足す（空の UIH、P/F=1 と credit の byte）。出口が詰まれば相手は止まる（捨てない）。
-- credit を足す UIH は失ってはならない: 「足すべき credit の数」を数えて持ち、session の送りの queue に置けなかった（ENOBUFS）時は次の loop で送り直す。
-- session の 16 frame の送りの queue は持ち主ごとに割り当てる: phone は 8 まで、HID の出力（LED など）と pairing の signalling に残りを保証する。phone の OBEX の大きな送り（PushMessage）は phone の中の queue（16 frame まで）で待ち、session の割り当ての空きで流す。
+- **credit は bluetoothd の中の部品の buffer の空きだけで与える**（OBEX の packet の組み立て、AT の行、MNS の受け）。socket の client の遅さには結ばない（AT・MNS の DLC を止めると SLC・通知の登録が切れ、自分の OBEX の timeout も先に切れる）。client が遅い時は、MAS・PSE は PAGE の要求の間隔（app が次の page を頼まない）で、live の event は「落ちた」の印（§8.4）で吸収する [S3]。
+- **与える credit の合計の上限**: 1 つの RFCOMM の session で相手に与えている credit の合計 × N1 を、session の受けの ring（32 KB）の 1/4（8 KB）以下に抑える。同期の HCI command の待ちの間に相手が送れる量がそれで限られる [S1]。
+- **受けの drop**: session が phone の handle の packet を捨てた（drop の印、§3.3）時は、L2CAP の basic mode は送り直さず UIH の FCS は header しか守らないので、RFCOMM の session を DISC して作り直し、進行中の OBEX の操作を失敗にし、同期をやり直す（app の目印から、§8.4）[S1]。
+- credit を足す UIH は失わない: 「足すべき credit の数」を数えて持ち、送りの queue に置けなかった（ENOBUFS）時は次の loop で送り直す [R5]。
+- **送り**: session の link ごとの in-flight の上限と round-robin（§3.3）で、phone の大きな送り（PushMessage）が controller の ACL の pool を使い切って HID の出力（LED・HID の control）を待たせない。phone の OBEX の送りは phone の中の queue（16 frame まで）で待つ [S2]。
 
 ### 5.4 server channel
 
@@ -161,7 +179,7 @@ MNS 16、HF 17（値は任意で、SDP の record が教える）。
 
 ### 6.2 client（MAS・PBAP）
 
-- Connect: Target（MAS `bb582b40-420c-11db-b0de-0800200c9a66`、PBAP の PSE `796135f0-f0c5-11d8-0966-0800200c9a66`）と App Parameters の SupportedFeatures（§4.3）→ 答えの Who と Connection ID。
+- Connect: Target（MAS `bb582b40-420c-11db-b0de-0800200c9a66`、PBAP の PSE `796135f0-f0c5-11d8-0966-0800200c9a66`）と（§4.5 の (b) の時）App Parameters の SupportedFeatures（§4.3）→ 答えの Who と Connection ID。
 - Get: 答えが Continue（0x90）なら Final 付きの Get を続け、Success（0xA0）で終わる。Body の上限（listing 1 page 256 KB、vCard の全体 2 MB、bMessage 64 KB。越えたら Abort して失敗）。
 - Put: Body を分けて最後を End of Body。**Body の無い Put は削除の意味なので、MAP の SetNotificationRegistration・SetMessageStatus・UpdateInbox は End of Body に filler の 1 byte 0x30 を付ける**（MAP の該当の節、(仕様、確かめる)）[R8]。
 - SetPath、Abort、Disconnect。各 request に timeout（10 秒、大きい Get は packet ごと）。timeout・切断は上の操作の失敗（自動で繰り返さない）。
@@ -186,6 +204,11 @@ MNS 16、HF 17（値は任意で、SDP の record が教える）。
 | 既読 | Put `x-bt/messageStatus`、Name＝handle、StatusIndicator=read、StatusValue=1、End of Body 0x30 [R8] | |
 | 送信 | SetPath `outbox` → Put `x-bt/message`、Charset=UTF-8、Body＝bMessage | 答えの Name が新しい handle。結果は MNS の event（SendingSuccess・SendingFailure・DeliverySuccess） |
 | event | MNS の Put: `<MAP-event-report version="1.0|1.1"><event type=… handle=… folder=… msg_type=… …/>` | NewMessage → Get して持ち主へ。MessageDeleted・MessageShift・ReadStatusChanged も |
+
+#### 7.1.0 MAS の操作の順と既読 [S6, S23]
+
+- MAS の操作（PAGE の listing と Get、live の NewMessage の Get、既読、送信、SetPath）は 1 本の OBEX の接続と folder の状態を共有するので、**1 本の queue で順に流す**（SetPath を含めて 1 つの操作が終わってから次）。
+- GetMessage がスマホの未読を既読にし得る（(仕様、確かめる)・機種差）。最初の同期で未読を消さないよう、listing の `read` を記録し、Get の後に未読だった物は SetMessageStatus（read=0、filler 0x30）で戻す。p003 で Android・iPhone の振る舞いを確かめる項目にする。
 
 #### 7.1.1 XML と bMessage [R9, R18]
 
@@ -220,16 +243,16 @@ iPhone の MAP は Uploading を持たない見込み（ws.md）。iPhone が MA
 | 段 | 内容 | Phase |
 | --- | --- | --- |
 | xHCI の isochronous | USB の core の isochronous の URB の API は**既にある**（`include/drivers/usb/usb.h:223` `struct drv_usb_iso_packet`、958 行 `drv_usb_urb_setup_isochronous`、`src/drivers/usb/usb.c:2308`）。無いのは host controller の側: xHCI の Isoch TRB と frame の時刻合わせ（`src/drivers/pci/pci-xhci.c:2034` は endpoint の型の設定だけ。EHCI も ENOTSUP、`pci-ehci.c:1823`）。kernel の内部の仕事で UAPI ではない。USB の音・camera にも効き、全ての USB の device の回帰の危険があるので、**独立の Phase p007a として p001 の後に並行で始められる**（kernel の詳細設計と design-reviewer が先） | p007a |
-| bt-usb の interface 1 | 今の bt-usb は interface 1（isochronous）を取らない（`src/drivers/usb/usb-bt.c:12-14`）。`drv_usb_interface_claim`（usb.h:743）で取り、SCO の本数と air mode で `drv_usb_interface_set_alternate`（usb.h:738）。**5330 の interface 1 の alternate の値は未確認**（WS143 p002 の descriptor の dump を見直す） | p007a |
+| bt-usb の interface 1 | 今の bt-usb は interface 1（isochronous）を取らない（`src/drivers/usb/usb-bt.c:12-14`）。`drv_usb_interface_claim`（usb.h:743）で取り、SCO の本数と air mode で `drv_usb_interface_set_alternate`（usb.h:738）。isochronous の frame から HCI の SCO packet を組み立て直し、受けきれない時は NAK で待たせられないので古い SCO を捨てる。class の driver（`src/drivers/generic/bt-hci.c`・`bt-hci-proto.c`）の SCO の経路（読みの ring、書きの型の検査、統計）も [S16]。**5330 の interface 1 の alternate の値は未確認**（WS143 p002 の descriptor の dump を見直す） | p007a |
 | UAPI | `include/uapi/bluetooth.h` の `BT_PACKET_SCO`（今は予約で EINVAL）を使えるようにし、alternate を選ぶ ioctl を足す（§11 Q9） | p007a |
 | HAL | 変更は無い見込み。DMA・cache の API が要ると分かったら実装せずに止め、差分を Q1 に出す（HAL の API は承認が要る） | p007a |
 | HCI | AG が SCO/eSCO を開ける（または HF が `AT+BCC` で頼む）。Connection Request に Accept Synchronous Connection Request（CVSD: Voice Setting 0x0060、mSBC: 0x0063）。eSCO の組（CVSD の S4・S3・S1・D1、mSBC の T2・T1）は HFP 1.8 の表 | p007b |
 | bluetoothd と audiod | SCO の packet を `/dev/bluetoothN` で読み書きし、audiod の client として再生の stream（スマホの声）と録音の stream（mic）を 8000 Hz（CVSD）・16000 Hz（mSBC）・mono・16 bit で開ける（audiod は 8〜192 kHz を受ける、`userland/base/audiod/main.c:483`） | p007b |
 | clock のずれ [R20] | SCO の clock（controller）と audiod の device の clock はずれる。jitter の buffer（60 ms）の水位を見て、適応で 1 sample を間引く・足す（0.1% 程度まで）。受けが途切れたら無音 | p007b |
-| 録音の質 [R20] | audiod の録音の変換は線形補間で anti-alias の filter が無い（`userland/base/audiod/mix.c:81-93,245`）。48 kHz から 8・16 kHz に落とすと折り返しの雑音が出る。**bluetoothd の側で 48 kHz の stream を開けて自分で filter と間引きをする**（audiod を変えない。WS をまたがない） | p007b |
+| 録音の質 [R20, S21] | audiod の録音の変換は線形補間で anti-alias の filter が無い（`userland/base/audiod/mix.c:81-93,245`）。高い rate から 8・16 kHz に落とすと折り返しの雑音が出る。**bluetoothd の側で device の rate（48 kHz と決まっていない、`device.c:100`）の stream を開けて自分で filter と間引きをする**（audiod を変えない） | p007b |
 | echo [R20] | laptop の speaker と mic では相手に自分の声が返る（echo の打ち消しは作らない）。AG が EC/NR を持てば `AT+NREC` を送らずに AG に任せる。Settings と Phone の画面で「ヘッドセットを勧める」（§11 Q7） | p007b |
 | mSBC [R20] | SBC の mSBC の固定の設定（16 kHz、mono、8 subband、15 block、loudness、bitpool 26）。空中の 1 frame は 60 byte（H2 の header 2 byte、SBC の frame 57 byte（sync word 0xAD）、pad 1 byte）(仕様、確かめる)。encoder と decoder は自前（base の再実装の方針、WS143 §6.6）。PLC は最初は無音。**独立の decoder（host の試験の道具としてだけ使う libavcodec の msbc の decoder、製品には入れない）と照合**する [R13] | p007b |
-| 1 つの loop の予算 [R4] | SCO の frame は 3.75〜7.5 ms ごと。bluetoothd の poll の loop は 1 回の処理を限る（OBEX の 1 packet・vCard の 1 件・XML の 1 page 分の解析で区切る）。p007b の最初に loop の 1 回の最大の時間を測り、SCO の 1 周期を越える時は SCO と PCM を別の thread に分ける（判断は p007b の詳細設計で、Q1 に報告） | p007b |
+| 1 つの loop の予算 [R4, S13] | SCO の frame は 3.75〜7.5 ms ごと。loop を止めるのは解析だけでなく、session の同期の HCI command の待ち（最大 2 秒）。SCO は同じ `/dev/bluetoothN` の読みの流れに来るので、別の thread に分けるだけでは足りない（推測）。**p007a の詳細設計で、session の command を非同期にするか、SCO の口（fd・node）を分けるかを決める**。その結果で UAPI の形が変わるので、Q9 はその後に尋ねる | p007a・p007b |
 
 CVSD を先に通し、mSBC は p007b の後半（§11 Q6）。LC3-SWB と、Intel の音の offload（I2S で DSP へ）は使わない。
 
@@ -254,9 +277,11 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 
 ### 8.2 持ち主と許可 [R3]
 
-- 持ち主: スマホを「スマホとして使う」にした seat の人の uid。記録 `<controller>/<address>-bredr.phone`（uid と、uid の名前（再利用の検出）、有効な profile: messages・contacts・calls、0600、`_bluetooth`）。
-- **持ち主の変更は持ち主か root だけ**。別の人が使うには持ち主（か root）が「スマホとして使う」を外すか、スマホを忘れて（FORGET）その人が pairing し直す（スマホがもう一度許可を求める）。D8 の「seat の人・wheel は変更できる」の例外として phone link に限る。
-- **持ち主が居る**＝持ち主が seat の人（`/dev/gpu0` の持ち主、`_greeter` を除く。今の `btd_permitted` の seat の判定、`main.c:1503-1510`）。SSH だけの login は居ると数えない。
+- 持ち主: **「スマホとして使う」の pairing（`PAIR address phone=1`）をした client の uid**（seat の人）。bond と同時に記録 `<controller>/<address>-bredr.phone`（uid と、uid の名前（再利用の検出）、有効な profile: messages・contacts・calls、enabled、0600、`_bluetooth`）を書く [S4]。
+- **持ち主の無い bond 済みのスマホは `PHONE LINK on` で取れない**（今までの普通の pairing の bond、別の人の bond）。使うにはスマホを忘れて（FORGET）、phone=1 で pairing し直す（スマホがもう一度許可を求める）[S4]。
+- `PHONE LINK off` は記録を消さず enabled=0 にする（持ち主はそのまま）。FORGET は bond と `.phone` を両方消す [S4]。
+- **持ち主の変更は持ち主か root だけ**（FORGET と再 pairing を経る）。`.phone` のある bond の FORGET も持ち主と root だけ（今の FORGET は seat の人と wheel なら誰でも、`main.c:1375-1387`）。D8 の「seat の人・wheel は変更できる」の例外として phone link に限る [N2]。
+- **持ち主が居る**＝持ち主が seat の人（`/dev/gpu0` の持ち主、`_greeter` を除く。今の `btd_permitted` の seat の判定、`main.c:1567` からの関数の 1590 行付近）[S21]。SSH だけの login は居ると数えない。今の判定はその時の stat だけで、logout・切り替えの event は来ない。**phone link が有効な間は 5 秒ごとに seat の持ち主を見直し**、持ち主の compositor の client（SUBSCRIBE）の切断も合図にする [S10]。
 - 持ち主が居ない間: phone の profile を切り、スマホからの Connection Request（phone の `wants`）と RFCOMM の SABM を断る（§3.4）。持ち主が seat の人になったら zedBSD から page する（§8.2.1）。
 - 記録の uid が無い（account の削除）か名前が違う（uid の再利用）時は、記録を無効にして「スマホとして使う」をやり直させる。
 - スマホの側の許可（Android の確認、iPhone の toggle）が無い時は OBEX の Connect が失敗する（Forbidden 等）。Settings に「スマホで許可してください」。
@@ -269,7 +294,9 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 
 ### 8.3 bluetoothd の socket [R1, R4]
 
-- **出力の queue**（`outq.c`）: socket の client ごとに non-blocking の出力の queue（上限 256 KB）。`btd_write` の「1 秒まで待って落とす」は phone の client には使わない。queue が上限に近づいたら RFCOMM の credit を止める（§5.3）。上限を越えたら client を落とす（読まない client）。
+- **出力の queue**（`outq.c`）: **全部の** socket の client に non-blocking の出力の queue（上限 256 KB）。今の `btd_write`（1 秒まで待って落とす）は使わない（誰でも接続できる socket の読まない client が loop を止める）。上限を越えたら client を落とす。credit とは結ばない（§5.3）[S9, S3]。
+- client の枠（今 8、`main.c:75`。compositor が既に 4 本、`bluetooth-zedbsd.c:22`）を 16 にし、seat の人の compositor の分に 4 本を予約する [S9]。
+- **SUBSCRIBE は専用の接続**（その接続は event の行だけを流し、request は受けない）。request の接続は今どおり「答え ... DONE」。長い値を送る request（`PHONE SEND`）は、行の後に `length` の byte を読む binary の mode に入る（今の入力は 512 byte の行の buffer、`main.c:752-797`）[S20]。
 - **SUBSCRIBE**: F-086（状態の変化の通知）の一部をこの WS で作る（Q1 に Future Work の行の更新を頼む）。phone の event は SUBSCRIBE した持ち主の client だけ。
 - 長い値は「行 + 長さ付きの byte」（`… length=<n>` の行の後に n byte）。行の中の値は引用符と `\` の escape。1 つの本文は 64 KB まで。
 
@@ -293,9 +320,11 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 
 ### 8.4 compositor の API と Phone の app の同期 [R1, R21]
 
-- `kl_system_phone_v1` の版を上げる（manager の版と `KL_VERSION` を次の番号に）。v1 の client（今の Phone の app）には今の `received` を、新しい版の client には下の event を送る（版で分ける）。
-- **同期は pull で、目印は app が持つ**: Phone の app は `~/Documents/Phone/` に「スマホごとの同期の目印」（`sync/bt-<address>.state`: messages・contacts・calls の最後の時刻と cursor）を持つ。app は起動の時・`link` の connected の時・「今すぐ同期」の時に `sync_page(what, since, cursor)` を出し、compositor が backend 経由で bluetoothd の `PHONE PAGE` を 1 回出し、答えの item（32 個まで）を `page_item` の event で返し、最後に `page_end(cursor, more)`。app は page を保存してから目印を書き、次の page を頼む。ring を経ないので落ちない。
-- live の event（新しい受信・通話・状態）は今の 16 個の ring（`system-private.h:36`）を使い、ring が満ちて古い物を捨てた時は「落ちた」の印を立てる。app は印を見たら目印から `sync_page` で取り直す（live で落ちても同期で戻る）。
+- `kl_system_phone_v1` に request と event を足す。**版の番号（manager の版、今 24、`KL_VERSION` 今 75）は保留の branch の上で固定せず、merge の時に Q1 が割り当てる** [S24]。
+- **ABI**: `struct kl_phone_event` は公開の struct（`keiland.h:1652-1665`）で大きさを変えない。新しい関数（`kl_system_phone_sync_page`・`kl_system_take_phone_item` など）を足し、**app がそれを呼んだ時だけ** compositor は新しい event を送る（manager の版は libkeiland ごとで app ごとに分けられない、`system.c:3360-3362`）。今の `received` は従来どおり残す [S8]。
+- **同期は pull で、目印は app が持つ**: Phone の app は `~/Documents/Phone/` に「スマホごとの同期の目印」（`sync/bt-<address>.state`: messages・contacts・calls の最後の時刻と cursor）を持つ。app は起動の時・`link` の connected の時・「今すぐ同期」の時に `sync_page(what, since, cursor)` を出し、compositor が backend 経由で bluetoothd の `PHONE PAGE` を 1 回出し、答えの item（32 個まで）を `page_item` の event で返し、最後に `page_end(cursor, more)`。app は page を保存してから目印を書き、次の page を頼む（live の ring を経ない。取りこぼしの扱いは下の「page の取りこぼし」）。
+- live の event（新しい受信・通話・状態）は今の 16 個の ring（`system-private.h:36`）を使い、ring が満ちて古い物を捨てた時は**libkeiland の中で**「落ちた」の印を立てる（compositor には分からない）。compositor は live の event に通し番号を付け、libkeiland は途切れでも印を立てる。app は印を見たら目印から `sync_page` で取り直す [S7]。
+- **page の取りこぼし** [S7]: compositor は client の出力が 1 MB を越えると event を ENOBUFS で捨てる（`wire.c:115-122`）。`page_end` に item の数と、送りに 1 つでも失敗したら error を持たせ、app は数が合う時だけ目印を進める。libkeiland は request ごとの page の buffer（32 item）を持つ。cursor は 1 回の同期の中だけで使い、目印は「最後の時刻 − 24 時間の重なり」から読み直す（遅れて届く SMS、timezone の差。重複は Source で除く）。
 - 本文の上限: `KL_PHONE_TEXT_MAX`（1024）は v1 のまま。新しい版の `message`・`page_item` は本文を 16 KB まで運ぶ（compositor の wire の上限は 65532 byte、`kwl.h:64`）。16 KB を越える本文（長い連結 SMS でも数 KB）は切り、item に `Truncated: yes` を書く。libkeiland の ring の 1 個の大きさは本文の分だけ増える（16 個 × 16 KB = 256 KB、app ごと）。大きければ live の event は本文の先頭 1 KB と `length` だけにし、app が `fetch(source)` で全文を取る形に変える（p004 の詳細設計で決め、Q1 に報告）。
 
 | 向き | 名前 | 引数 |
@@ -314,12 +343,14 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 - `phone.backend` の設定に値 2「bluetooth」を足す。Settings で「スマホとして使う」を on にした時、compositor は `phone.backend` を 2 にする（持ち主の desktop.conf）[R21]。
 - Settings の「スマホとして使う」と profile の switch: `kl_system_bluetooth_*` の拡張（`kl_system_bluetooth_phone_link(address, on, profiles)`）→ compositor の bluetooth の拡張 → `kl_backend_bluetooth`（`PHONE LINK`）。KL_VERSION は上と同じ版で [R21]。
 
-### 8.5 通知の banner [R12]
+#### 8.5 通知の banner [R12, S11]
 
 - 着信: compositor が `call_state` の incoming を受けた時、Phone の app が無くても banner（相手の名前か番号、応答・拒否）。応答の後は Phone の app を開く。
 - SMS: compositor が live の `message`（dir=in）を受けた時、Phone の app が前面に無ければ banner（相手と本文の 1 行目、押すと Phone の app のその相手のタイムライン）。
 - lock の画面では「新しいメッセージ」「着信」と相手の名前だけ（本文は出さない）。着信の応答は lock の画面からもできる（§11 Q8）。
 - 持ち主の session だけ（他の人の session、greeter には出ない。§8.2 で持ち主が居ない間は接続していない）。
+- **WS を跨ぐ点** [S11]: 今の通知（WS156）は lock の画面で何も出さず（`notify-popup.c:345-357`）、button は本体の click だけ（`notify.h` の `KWL_NOTIFY_ACTION`）。banner は WS156 の notify（client 0）を使い、「応答・拒否」の 2 つの button と lock の画面の扱いは WS156・lock の持ち主への依頼にする（p004 で Q1 が割り当て）。§11 Q8 はこの衝突を説明して尋ねる。
+- 名前の出どころ: 連絡先は Phone の app の store にしか無く、app が閉じている時は compositor も bluetoothd も知らない。HFP の `+CLIP` の alpha（電話の側の連絡先の名前）、bMessage の originator の vCard の FN（(仕様、確かめる)）、無ければ番号 [S11]。
 
 ### 8.6 WS170 の保存への写し方（Phone の app、p004・p005。WS170 の code を変える WS を跨ぐ仕事で、割り当ては Q1）[R11]
 
@@ -330,6 +361,8 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 | PBAP の通話の履歴 | `Kind: call`・`Direction`・`State: answered|missed|no-answer`・`Source: bt:<address>:pbap:<時刻>:<番号>` |
 | HFP の通話 | 終わった時に `Kind: call`（PBAP の履歴と同じ時刻・番号なら 1 つに） |
 | 同期の目印 | `sync/bt-<address>.state`（§8.4） |
+
+WS170 の store の変更は上の表より大きい [S12]。p004 の前に WS170 の設計の変更として書き（Q1 が割り当て）、次を決める: (a) 今の store は item が連絡先に付く model（`store_load_items(long contact)`、`messages/<連絡先の id>`、`store.c:198,267,519`）で、連絡先でない会話（番号の key）を足すと表示の時の 2 つの folder の重ね合わせと、後で連絡先が作られた時の移し替えが要る、(b) 番号の正規化の規則（`+81 90…` と `090…`、国の文脈は Settings の地域）、(c) file の名前は `<日時>-<通し番号>` でなく Source の hash から決める（2 台の機械が同じスマホを同期しても cloud の上で 1 つ）、(d) スマホの連絡先の id は `/` を含まない形（`bt-<address>-<hash>`）、(e) store は開く時に全部を読む（`store.c:17-21`）ので、スマホの 5000 と手元の 1024 を足した上限（6100 以上）と、開く時間・memory の見積もり。
 
 ## 9. 試験の方法
 
@@ -347,7 +380,7 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 | clock のずれ | 0.1% 速い・遅い受けで buffer の水位が保たれる [R20] |
 | fuzz | 全 parser（WS143 の hid-report の fuzz と同じ道具） |
 | 持ち主 | 持ち主でない uid に phone の event が出ない・request が断られる、持ち主の変更の規則、uid の再利用 [R3] |
-| 出力の queue | 読まない client で daemon が止まらない、credit が止まる [R4] |
+| 出力の queue | 読まない client で daemon が止まらず、上限で client を落とす。credit は止まらない [R4, S3] |
 | router | 相手からの Connection Request・Link Key Request・SCO の振り分け、handoff の鎖、ACL 8 本の割り当て（偽の controller の台本、WS143 の道具）[R2] |
 | Phone の app | page の同期（中断・再開・ring の dropped）、番号の key、連絡先の差分の更新（WS170 の host の試験に足す） |
 
@@ -357,13 +390,13 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 - MAP・PBAP: host の BlueZ の obexd の PSE（dummy の電話帳）で PBAP。MAP の MNS の event は obexd の MSE では送れない見込みなので、**project で書く小さな台本の MSE**（host の Python の AF_BLUETOOTH の RFCOMM の socket の上で、決まった listing・bMessage・event を返す。BlueZ の code は使わない）。
 - HFP: **台本の AG**（同じく Python の RFCOMM の socket の上で RING・+CLIP・+CIEV・CLCC を返す）。oFono と phonesim は代わりの候補（入るかは未確認）。
 - SCO の音: qemu-xhci の isochronous の emulation と usb-host の isochronous の passthrough、dongle（clone の CSR8510 は SCO が壊れている物がある）の三つが揃うかは**未確認**（§10）。揃わなければ SCO は 5330 の実機だけ。
-- 試験の image は WS143 の `plan/ws143/tests/config-amd64-bt-desktop.mk` に WS197 の config を重ねる（T1）。
+- 試験の image の config は WS197 の `plan/ws197/tests/` に自前で置く（WS143 の tests は WS143 の完了で消える）[S21]。
 
 ### 9.3 実機（p008）
 
 - 5330 とユーザーの Android・iPhone。pairing → 「スマホとして使う」→ スマホの許可 → SMS の受信・既読・送信（Android）、連絡先・履歴、着信・応答・終話・発信、通話の音（CVSD・mSBC）、Wi-Fi との共存、suspend、持ち主の logout と別の人の login。
 - 実機の trace（btsnoop）は payload を伏せた形だけを残す。実の SMS・連絡先の中身は証拠に残さない（件数・状態・PNG は本文を見せない画面で）[R22]。
-- 実機の trace の header の部分（RFCOMM の DLCI・PN・MSC、OBEX の header の並び）は host の試験の正解に足す [R13]。
+- 試験の正解（RFCOMM の DLCI・PN・MSC、OBEX の header の並び）は、伏せない台本の相手（§9.2）との trace と仕様の例から取る（実機の trace は伏せてあるので使わない）[R13, S17]。
 - QEMU の証拠と実機の証拠は分けて書く。
 
 ## 10. 危険と未確認
@@ -392,13 +425,14 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 | Q5 | MMS | **範囲の外（後の WS）** / 入れる | **範囲の外** |
 | Q6 | 通話の音の質 | **CVSD（狭帯域）を先に、mSBC（広帯域）を同じ Phase の後半で（SBC は自前）** / CVSD だけ | **CVSD の後に mSBC** |
 | Q7 | 通話の音の出入り | **audiod の既定の出力と mic（ヘッドホン・ヘッドセットを挿せばそちら）。laptop の speaker では相手に echo が返り得るので、画面でヘッドセットを勧める（echo の打ち消しは作らない）** / echo の打ち消しを作る（大きい） | **既定＋ヘッドセットを勧める** |
-| Q8 | 着信と SMS の banner | **Phone の app が閉じていても banner。lock の画面では相手の名前だけ（本文は出さない）、着信は lock の画面から応答できる** / app が開いている時だけ | **banner** |
-| Q9 | UAPI の追加 | **`include/uapi/bluetooth.h` の `BT_PACKET_SCO` を使えるようにすることと、bt-usb の alternate を選ぶ ioctl の形を承認し、struct は p007a の詳細設計で review**（USB の isochronous の URB の API は kernel の内部に既にあり UAPI ではない）/ 別の形 | **形を承認** |
+| Q8 | 着信と SMS の banner（今の通知は lock の画面で何も出さず、button は 1 つだけ。2 つの button と lock の画面の表示は WS156・lock の画面の変更になる） | **Phone の app が閉じていても banner。lock の画面では「着信」「新しいメッセージ」と相手の名前だけ（本文は出さない）、着信は lock の画面から応答・拒否できる（WS156・lock の変更を含む）** / lock の画面では出さない（今の通知と同じ）/ app が開いている時だけ | **banner と lock の画面の応答** |
+| Q9 | UAPI の追加（SCO の口） | **今は尋ねない。p007a の詳細設計（session の command を非同期にするか、SCO の口を分けるか）の後に、形を示して尋ねる** [S13] | — |
 | Q10 | Linux・FreeBSD の Keiland | **WS197 では作らない（「無い」の backend だけ。Linux の BlueZ の obexd・oFono・PipeWire を包む backend は Future Work）** / WS197 で Linux も | **作らない** |
 | Q11 | 音声認識（Siri・Google） | **入れる（小さい）** / 範囲の外 | **入れる** |
 | Q12 | OBEX の認証 | **使わない（link の暗号と bond で守る）** / 使う | **使わない** |
 | Q13 | iPhone の MAP の確かめの時期（iPhone は HFP の接続が無いと MAP を見せないかもしれない、未確認） | (a) **p003（MAP）の後に Android で受信を確かめ、iPhone は p006（HFP の制御）の後に確かめる**（順はユーザーの指示のまま、iPhone の MAP の受け入れは遅くなる）/ (b) HFP の SLC（音なし）の最小を p003 の前に入れる（順の例外、約 +3 LW）/ (c) p008 でまとめて | **(a)** |
 | Q14 | 持ち主の logout の時 | **スマホの profile を切り、持ち主が seat に戻ったら再接続** / つないだまま（data は捨てる） | **切る** |
+| Q16 | MAP・PBAP の版と GOEP 2.0（§4.5、仕様の確かめの結果、必須だった時だけ） | **(a) MAP 1.1・PBAP 1.1 を名乗り RFCOMM だけ（受け入れに要る事はできる。送り主の名前を event でなく Get で読む、電話帳は毎回全部を読む）。ERTM と GOEP 2.0 は Future Work** / (b) ERTM と GOEP 2.0 を作る（+10 LW） | **(a)** |
 | Q15 | 通話中の蓋 | **通話中も蓋を閉じれば suspend（通話は切れる）。通話中は suspend しない、は後の Phase** / 今作る | **今は suspend** |
 
 情報のお願い（判断ではない）: 試験に使う Android と iPhone の機種と OS の版。**firmware の要らない USB の Bluetooth の dongle が 2 本あるか**（無ければ host の相手の試験は無く、実機だけになる。WS143 で尋ねた時の答えが記録に無い）。
@@ -407,9 +441,9 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 
 | Phase | 内容 | 依存 |
 | --- | --- | --- |
-| p002 | SDP の server と client の一般化、RFCOMM、OBEX、router・session・pair の変更（§3.3 のうち phone の hook と handoff の鎖、送りの割り当て）。host の試験と fuzz。host の相手（dongle がある時）で Connect・Get の往復 | p001、**WS143 p005 cleared と main への merge**（router.c・pair.c・hid.c が落ち着いてから） |
+| p002 | 最初に §4.5 の仕様の確かめ（Q16）。SDP の server と client の一般化、RFCOMM、OBEX、router・session・pair の変更（§3.3: phone の hook、handoff の鎖と phone=1、送りの in-flight の上限と round-robin、受けの drop の印）、接続の調停（§3.6）。host の試験と fuzz。host の相手（dongle がある時）で Connect・Get の往復 | p001、**WS143 p005 の i02・i03 の main への merge**（router.c・pair.c・hid.c・session.c が落ち着いてから。i04（実機の門）は待たない）[S18] |
 | p003 | MAP（MAS・MNS、XML、bMessage）、phone link の骨格（持ち主、記録、再接続）、出力の queue と SUBSCRIBE（F-086 の一部）、socket の PHONE の request・event | p002 |
-| p004 | Integration: `kl_backend_phone`（zedBSD と unsupported）、compositor の backend「bluetooth」と API の版、banner、Settings の「スマホとして使う」、**Phone の app と store の変更（page の同期、Source、番号の key、目印）＝ WS170 の code（Q1 が割り当てを決める）** | p003、WS170 |
+| p004 | Integration: `kl_backend_phone`（zedBSD と unsupported）、compositor の backend「bluetooth」と API（§8.4 の新しい関数）、banner（WS156 の notify）、Settings の「スマホとして使う」、**Phone の app と store の変更（page の同期、Source、会話の key、目印）＝ WS170 の code と設計の変更、banner の 2 つの button と lock の画面 ＝ WS156・lock（Q1 が割り当てを決める）** | p003、WS170、**WS143 p006（`kl_system_bluetooth_*`・`kl_backend_bluetooth` の拡張の元）**[S18] |
 | p005 | PBAP（vCard、連絡先の組と差分、履歴）。store の subfolder と上限 | p004 |
 | p006 | HFP の制御（SLC、AT、着信・発信・応答・終話・DTMF・音量・音声認識）。Q13 (a) なら iPhone の MAP の確かめ | p004 |
 | p007a | **xHCI の isochronous（kernel の詳細設計と design-reviewer が先）、bt-usb の interface 1、UAPI（Q9）**。USB の回帰（T1） | p001 と Q9。p002〜p006 と並行してよい（Q1 の割り当て次第） |
@@ -417,12 +451,23 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 | p008 | 実機の試験と debug（Android・iPhone） | p007b、**WS143 p003 i02（5330 の firmware）と p005 i04（5330 の実機の門）** |
 | p009 | 規約の全文の見直し | p002〜p008 |
 
+**p002 の詳細設計と受け入れの必須**（[review-3.md](review-3.md)。詳細設計が design-reviewer を通るまで session.c・pair.c・l2cap.c・router.c・hid.c の code に手を付けない）:
+
+- T1: 受けの drop の印は handle ごとに ACL・事象・signalling を区別し、持ち主への知らせは同期の command の待ちの後に dequeue の側で順に。回復は段階（RFCOMM の data だけなら PSM 3 の L2CAP の channel を閉じる、signalling・事象なら ACL を切って linkmgr で page し直す）。数えた接続の事象（Connection・Disconnection Complete）は捨てない（ring に事象の余白、または ACL を先に捨てる）。WS143 の HID の同じ危険も直す。
+- T2: session の送りの表（16 frame、`session.c:452-456`）に link ごとの上限（phone は 8 まで）か他の link の予約。phone は自分の queue からその中でだけ移す。host の試験: phone が満杯の間も HID の signalling・ATT が ENOBUFS にならない（今の HID は戻り値を捨てる、`hid.c:2521`・`3152`）。
+- T3: pairing から phone への handoff で、pair の l2cap の表の channel（Pending を含む）と組み立ての状態を phone の表へ移す API（今の `btd_l2cap_drop` は相手に何も送らず消す、`pair.c:1733`・`l2cap.c:335-346`）。移せない物は Disconnection Request の後に捨てる。handoff の hook に phone=1 と uid を渡す口。
+- T4: 受け入れに HID の回帰: 保留の branch の image で WS143 の `bt-hid-p005.sh`・`bt-pair-p004.sh`・`bt-daemon-p003.sh`・`bt-loopback-p002.sh` を T1 に。WS143 が先に完了する時は、その script を plan/tools か tests/ のシナリオへ移すよう Q1 に頼む。
+- N4・N5: handoff の Class of Device が scan の表に無い時の代わり、Just Works の鍵の時に `.phone` を書かずに断る順、`.phone` の書き込みの失敗、SDP の ServiceRecordHandle の範囲（0x00010000 以上、(仕様、確かめる)）、in-flight の上限は max(1, pool − 2) と LE の pool の共有の時。
+- Q16 の答えの前に OBEX の Connect と SDP の record の版を code にしない。
+
 **保留の branch の取り込みの規則**（ws.md 12 行: WS197 の code は 10/17 まで main に入れない保留の branch）: WS197 の code は Q1 が作る branch（例 `agent/p1-ws197`）に置き、各 Phase の始めと merge 依頼の前に main を取り込む。§3.3 の WS143 の file の変更は小さく、関数の追加と hook の表に限り、WS143 の Phase が同じ file を変えている間は Q1 に順を聞く。
 
-**見積もりの見直し**（ws.md の約 121 LW に足す）: router・session・pair の変更 +4（p002）、出力の queue と SUBSCRIBE +3（p003）、page の同期と store の変更・banner・Settings の経路 +6（p004）、clock のずれと録音の filter +3（p007b）、台本の MSE・AG +3（p002・p003・p006）。計 **約 140 LW**。p007（25）は p007a（xHCI・bt-usb・UAPI 15）と p007b（SCO・音・mSBC 13）に分ける。
+**見積もりの見直し**（ws.md の約 121 LW に足す）: router・session・pair の変更と session の送り・受けの直し・接続の調停 +8（p002）、全 client の出力の queue と SUBSCRIBE の接続・持ち主の記録・seat の見直し +5（p003）、libkeiland の新しい API・page の同期・store の会話の model・banner・Settings の経路 +12（p004、WS170・WS156 の分を含む）、clock のずれと録音の filter +3（p007b）、bt-hci の class の SCO +2（p007a）、台本の MSE・AG +3。計 **約 154 LW**（§4.5 の (b) を選べば +10）[S22]。p007（25）は p007a（xHCI・bt-usb・bt-hci・SCO の口 17）と p007b（SCO・音・mSBC 13）に分ける。
 
 ## Event
 
 - 2026-10-09 深夜: 第 1 版（P1、711caae2f）。
 - 2026-10-09 深夜: design-reviewer（agent abb385aae6187503d）の review → [review-1.md](review-1.md)（blocker 2・major 12・minor 10）。第 2 版で全てに答えた（各節の `[Rn]`）。
-- 2026-10-09 深夜: 第 2 版の再 review（agent a6b845b338bd97e31）→ [review-2.md](review-2.md)（S1〜S25。p002 の前に S1〜S5・S14・S18）。第 3 版は未着手（Q1 の割り込みで中断、再開点はここ）。
+- 2026-10-09 深夜: 第 2 版の再 review（agent a6b845b338bd97e31）→ [review-2.md](review-2.md)（S1〜S25。p002 の前に S1〜S5・S14・S18）。
+- 2026-10-09 深夜: 第 3 版（P1）。S1〜S25 の全部に答えた（p002 の前の S1〜S5・S14・S18 は設計を直し、後の Phase の物は該当の節に方針と残りを書いた）。
+- 2026-10-09 深夜: 第 3 版の短い確認（agent a42a036a4bbde0983）→ [review-3.md](review-3.md): p002 は条件付きで GO。T1〜T4・N1〜N5 を §12 の p002 の必須に、N1〜N3 は本文を直した。
