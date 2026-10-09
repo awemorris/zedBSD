@@ -34,9 +34,23 @@ stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | g
 status=0
 top=98
 
-# The number of lines of zdesktop's log matching a pattern.
+# The number of lines of zdesktop's log matching a pattern.  An answer that is not a number (the SSH timed out with
+# nothing, T1-477's step 6: "found 2 (more than 0)" with both earlier swipes in the log) is asked again, three times
+# in all, and reported on stderr as the harness's.
 count() {
-	guest "grep -cE '$1' /tmp/zdesktop.log" | tail -1
+	count_try=1
+	while :; do
+		count_reply=$(guest "grep -cE '$1' /tmp/zdesktop.log" | tail -1)
+		case $count_reply in
+		''|*[!0-9]*) ;;
+		*) echo "$count_reply"; return 0 ;;
+		esac
+		echo "harness: count '$1' got '$count_reply', attempt $count_try" >&2
+		[ $count_try -ge 3 ] && break
+		count_try=$((count_try + 1))
+		sleep 2
+	done
+	echo "$count_reply"
 }
 
 # Fails the run unless zdesktop's log has (within a few seconds) as many lines matching a pattern as asked (default 1).

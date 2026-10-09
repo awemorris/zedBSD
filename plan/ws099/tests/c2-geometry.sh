@@ -6,7 +6,8 @@
 #  1. corners and sides: each dragged STEP pixels outwards (ws035-p128's way): the size grows by STEP in the dragged
 #     directions, the opposite corner or side stays (KWL RESIZE settled x= y= width= height=).
 #  2. move: its title bar dragged by (MOVE_DX, MOVE_DY): KWL GLASS moved x= y= is the old place plus that.
-#  3. maximize and back: a double click on the title bar docks it (KWL GLASS dock), a double click on its title in
+#  3. maximize and back: a double click on the title bar docks it (KWL GLASS dock: the width less KWL_GLASS_DOCK_PAD on
+#     each side, ws099-p038), a double click on its title in
 #     the system bar brings it back (KWL GLASS undock x= y=) to the same place, and its next configure has the size
 #     it had (KWL CONFIGURE ... width= height=).
 #  4. minimize and back: its minimize button (KWL GLASS minimize), then Wiseview (Super+Tab) and a click on its tile
@@ -137,6 +138,9 @@ pointer move "$1" "$2" sleep 200 down sleep 60 up
 expect_more 'KWL GLASS launch(-late)? surface=' "$launches" 20 || { echo "C2 RESULT pass=$pass fail=$fail"; echo "C2: FAIL"; exit 1; }
 sleep 3
 surface=$(last 'KWL GLASS launch(-late)? surface=' | sed -n 's/.*surface=\([0-9]*\) .*/\1/p')
+# A surface's number is its client's own: another client's window (the Welcome's Settings, ws164-p002) may have the
+# same one, so Wiseview's tile is told by the client too (T1-477: the Welcome's tile was clicked).
+client=$(last 'KWL GLASS launch(-late)? surface=' | sed -n 's/.* client=\([0-9]*\).*/\1/p')
 width=0 height=0
 geometry
 echo "Files: surface $surface, ${width}x$height at $left,$top (title bar top) to $right,$bottom"
@@ -166,15 +170,17 @@ pointer move $((tx - 2)) $ty sleep 150 move $tx $ty sleep 300 down sleep 50 up s
 if expect_more "KWL GLASS dock surface=$surface " "$docks" 5; then
 	set -- $(last "KWL GLASS dock surface=$surface " | sed -n 's/.* title=\([0-9]*\) x=\([-0-9]*\) y=\([-0-9]*\) w=\([0-9]*\) h=\([0-9]*\).*/\1 \2 \3 \4 \5/p')
 	title_x=${1:-400}
+	# The docked body is KWL_GLASS_DOCK_PAD in from the sides (ws099-p038): it spans the width less its x twice.
 	result=ok
-	[ "${4:-0}" -eq "${size%x*}" ] || result=no
+	[ $((${4:-0} + 2 * ${2:-0})) -eq "${size%x*}" ] || result=no
+	[ "${2:-0}" -ge 0 ] && [ "${2:-0}" -le 16 ] || result=no
 	verdict $result "maximize: docked ${4:-?}x${5:-?} at ${2:-?},${3:-?}"
 	shot maximized
 	undocks=$(count "KWL GLASS undock surface=$surface ")
 	pointer move $((title_x + 20)) 17 sleep 300 down sleep 50 up sleep 120 down sleep 50 up sleep 1500
 	if expect_more "KWL GLASS undock surface=$surface " "$undocks" 5; then
 		set -- $(last "KWL GLASS undock surface=$surface " | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\).*/\1 \2/p')
-		set -- "$1" "$2" $(last "KWL CONFIGURE client=[0-9]+ surface=$surface " | sed -n 's/.* width=\([0-9]*\) height=\([0-9]*\).*/\1 \2/p')
+		set -- "$1" "$2" $(last "KWL CONFIGURE client=$client surface=$surface " | sed -n 's/.* width=\([0-9]*\) height=\([0-9]*\).*/\1 \2/p')
 		result=ok
 		[ "$1" -eq "$before_x" ] && [ "$2" -eq "$before_y" ] && [ "${3:-0}" -eq "$before_w" ] && [ "${4:-0}" -eq "$before_h" ] || result=no
 		verdict $result "unmaximize: back to $1,$2 ${3:-?}x${4:-?} (was $before_x,$before_y ${before_w}x$before_h)"
@@ -195,10 +201,10 @@ if expect_more "KWL GLASS minimize surface=$surface" "$minimizes" 5; then
 	keys '<super-tab>'
 	sleep 1
 	if expect_more 'KWL WISEVIEW open windows=' "$opens" 5; then
-		set -- $(last "KWL WISEVIEW tile client=[0-9]+ surface=$surface " | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p')
-		selects=$(count "KWL WISEVIEW select surface=$surface")
+		set -- $(last "KWL WISEVIEW tile client=$client surface=$surface " | sed -n 's/.* x=\([-0-9]*\) y=\([-0-9]*\) width=\([0-9]*\) height=\([0-9]*\).*/\1 \2 \3 \4/p')
+		selects=$(count "KWL WISEVIEW select surface=$surface client=$client")
 		pointer move $((${1:-0} + ${3:-0} / 2)) $((${2:-0} + ${4:-0} / 2)) sleep 300 down sleep 60 up sleep 1500
-		if expect_more "KWL WISEVIEW select surface=$surface" "$selects" 5; then
+		if expect_more "KWL WISEVIEW select surface=$surface client=$client" "$selects" 5; then
 			verdict ok "unminimize from Wiseview"
 			shot unminimized
 			move 10 0 "after unminimize (from its place)"

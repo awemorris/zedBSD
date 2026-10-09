@@ -32,8 +32,11 @@ mkdir -p "$out"
 guest() { timeout 120 python3 plan/tools/guest/guest.py run "$1" 2>&1 </dev/null; }
 pointer() { python3 plan/ws035/tests/qmp-pointer.py "$GUEST_RUNTIME/qmp.sock" "$@"; }
 check() { python3 plan/ws035/tests/zdesktop-check.py "$@" --runtime "$GUEST_RUNTIME"; }
-stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep -E "[w]ayland( |$)|[p]opup-probe|[s]ettings|[f]iles" | awk "{print \$1}"); do kill $p; done; i=0; while ps -A -o args | grep -qE "[w]ayland( |$)|[p]opup-probe|[s]ettings|[f]iles" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
-ends='for p in $(ps -A -o pid,args | grep -E "[p]opup-probe|[s]ettings|[f]iles" | awk "{print \$1}"); do kill $p; done; sleep 1; echo ok'
+# The processes are told by their command (argv[0], ps -o comm), not by their command line: since BUG-274 ps -o args
+# shows whole lines, and the guest shell running "$ends; ... /bin/settings ..." names settings in its own, so a match
+# on the line killed that shell before it started Settings (T1-477: no Settings or Files window on any wallpaper).
+stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,comm | awk "\$2 ~ /(^|\\/)(wayland|popup-probe|settings|files)\$/ {print \$1}"); do kill $p; done; i=0; while ps -A -o comm | grep -qE "(^|/)(wayland|popup-probe|settings|files)$" && [ $i -lt 50 ]; do sleep 0.2; i=$((i+1)); done'
+ends='for p in $(ps -A -o pid,comm | awk "\$2 ~ /(^|\\/)(popup-probe|settings|files)\$/ {print \$1}"); do kill $p; done; sleep 1; echo ok'
 pass=0
 fail=0
 worst=
