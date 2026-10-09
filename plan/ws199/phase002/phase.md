@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p002 -->
 # ws199-p002: PIN 不要・タッチ不要の設定（設計の i04）
 
-Status: planned（2026-10-10 Q1。P1 が次に着手）
+Status: in-progress（2026-10-10 P1: 1〜3 と 4 の Settings 以外を実装、e3f90b154。残りは下の「再開点」）
 Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §2・§4.3・§4.4・§11 の R4・R6
 
 ## ゴール
@@ -19,3 +19,14 @@ Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §2・§4.
 ## 確かめ
 - host 試験: passkey の options の読み書き、passkey-fido2 の wire の検査の緩め（許さない組の UP・UV 無しを拒む）、sessiond の数え。build warning 0。
 - 5330 での前提（ユーザーが fidoctl で流す、Q1 が手順を渡した）: `fidoctl -s assert` が触れずに flags 0x00 を返すか。
+
+## 進み（P1）
+
+| 日 | 内容 | 検証 |
+| --- | --- | --- |
+| 2026-10-10 | passkey: record.c に `passkey_options_*`（読み・書き・既定、重複・不正・key-touch=0 で key-pin=1 は既定）、`enrolled` の答えに ` key-pin=0|1 key-touch=0|1`、`set-options NAME PASSWORD PIN TOUCH`（鍵の無い account は not-enrolled、既定なら行を消す、methods は書き戻す）、`auth-fido2` を passkey-fido2 へ。passkey-fido2: `auth-fido2 NAME login|unlock PIN` で options を読み、空の PIN は key-pin=0 の時だけ（UV を求めない）、up=false は unlock かつ key-touch=0 の時だけ、検査の flag も同じ。最後の鍵を消すと key の options を既定へ。sessiond: AUTH/UNLOCK の fido2 は auth-fido2（login/unlock）、前もって数えず答えの語で数える（bad-key-pin・bad-secret・cloned・key-locked・key-replug だけ数え、他は遅れ無し、R4）、cloned・pin-required は写さず通す（R6）、`SETOPTIONS PIN TOUCH` + password 行。backend: ENROLLED の key-pin・key-touch、`kl_backend_session_set_options`。compositor: account の set_key_options（request 10）と options の event（9、enrolled の前）。libkeiland: `kl_system_account_key_options`・`_set_key_options` | zedBSD の build（wayland・settings・sessiond・passkey・passkey-fido2）warning 0。host 試験 PASS: passkey-host-test、fido2-host-test、sessiond-auth-host-test（cloned の期待を R6 に直した）、plan/ws199/tests/sessiond-keys-host-test.sh（SETOPTIONS、fido2 の no-key は数えず即答、bad-key-pin は数えて遅れ） |
+
+## 再開点（P1、2026-10-10）
+
+- 残り: (a) Settings の Security Keys の頁に radio の card「Sign in with a security key」（`kl_system_account_key_options` で今の値、鍵が 0 本なら灰色、KL_SYSTEM_HAS_KEY_OPS が無ければ出さない）。押すと popup（dialog.c）: 弱い方へは警告（Touch only:「Anyone who has your security key can sign in to this computer with a touch.」、No PIN no touch to unlock: それに「While your key stays plugged in (or lies on the reader), anyone at this computer can unlock it with a swipe.」）＋ password、強い方へは password だけ → `kl_system_account_set_key_options` → Done。flow を `SE_KEYS_FLOW_OPTIONS` として page-users-keys.c に足す。(b) plan/ws089/tests/host-kl-system.c に `kl_system_account_key_options`・`_set_key_options` の stub。(c) security.md に options の規則（login は常にタッチ、PIN 不要の人は置きっぱなしの NFC・挿しっぱなしで誰でも入れる、R4 の数え）。(d) passkey の options の読み書きの host 試験（plan/ws199/tests に小さく）。
+- (a) まで済めば cleared 候補（T1 は p004 でまとめて、5330 は p005）。
