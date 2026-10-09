@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: active（i10: ユーザーの継続指示でP1/P2の同期flip部品を実装、build/hostまで確認）
+- Status: finished（i10のsoftware/統合部分範囲はcleared。whole p003/WSは未完了）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -17,7 +17,7 @@
 | ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | cleared（統合のみ） | 最新mainとの統合版でnoop/XMLと既存4host試験PASS、rpi4 y/n build warning/error 0。merge 16024f1b9を共有mainへ取り込み済み。Master更新・実機clearance・pushは対象外 |
 | ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
 | ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | cleared（software/統合範囲のみ） | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
-| ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | in-progress | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
+| ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | cleared（software/統合部分範囲のみ） | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -190,3 +190,12 @@
 - `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit0、warning/error0、ELF/image checker3 PASS。同targetのBUILD=n/driver=nもexit0、変更対象が無いためup-to-date。y SHA256 `dbcf5bba5fe8083d491b84e788a23d040b9cf4ab8589e57ace81a45cfe87bae3`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。ログは`build/ws141-flip-i10/kernel-y-final.log`・`kernel-n.log`・`display-host.log`。共有LLVMは変更無し。
 - C全文manual review: 順序/宣言/段落/条件/return/IRQ guardとbuffer所有を確認。clang-format-19 19.1.7（ColumnLimit0、定義引数tab復元）、GCC14.2.0 host。新source/header・private header・変更IRQと新host2 fileのstyle-check total0。runner `sh -n`、`git diff --check -- . ':!*.diff'`も0。630 hardware旧名の語単位一致0。GPL参照source/改名表はignored tempのみ。p007の全WS最終準拠/license/設計類似監査は別の残件。
 - 今回のsoftware部品とbuild/host条件は達成。最新mainとの独立統合を続け、統合後の範囲でi10の結果を確定する。P2/whole p003/WSは完了にしない。実機R0/画面/IRQ/console RAM寿命、P1/P2 hardware受け入れ、連続buffer allocator・display ops/登録・P3合成、V3D投入とp007、Q1/T1回帰は未実施。
+
+
+## i10のmain統合結果（2026-10-09）
+
+- 実装commit `8ca85c4a9`、最新mainとのcode統合`d6c4fe08de26d8735c55e7dfcb6bdecbdc5b2d26`、追加された他WSの文書を保持したmain統合commit `181339820df839427f3322a7ac25f6663517096f`。main基点は`79817ed884e401895254bcafc4b5bc0ab1eeb4cd`、検証中の更新`d71e9572fb05c77b225a8ac805ec6c05d7617189`との差は他WS文書だけ。共有mainはclean状態を確認してfast-forward。担当差分はWS141/BCM2711 private sourceとarm64の当該source列のみ。master.mdを含む他セッションの更新はそのまま保持した。
+- 専用統合worktree `/home/awe/zedBSD-claude1/.claude/worktrees/ws141-integrate`で`sh plan/ws141/tests/display-host-test.sh build/ws141-integration-i10/host` → 3試験PASS。driver=y named vmunix build → exit0、warning/error0、ELF/image checker3 PASS。driver=n named build → exit0、up-to-date（新しいchecker実行無し）。統合versionのhashは自worktree確認版と一致: y `dbcf5bba5fe8083d491b84e788a23d040b9cf4ab8589e57ace81a45cfe87bae3`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。ログは同worktree `build/ws141-integration-i10/display-host.log`・`kernel-y.log`・`kernel-n.log`。文書だけの追加追従でsource/build inputは変わらず、確認を再拡大しなかった。
+- i10はcaller-owned bufferを扱う部品のsoftware/build/統合部分範囲で**cleared**。cycleの選択済みattemptを全件終え、finishedに戻す。p003は**in-progress**、WSは**incomplete**。P1/P2の実機条件と全display登録の達成は含まない。ユーザーが後で行うR0/画面/IRQ/console RAM寿命、Q1/T1回帰、連続buffer allocator/owner・display ops/登録・自動flip・P3合成、V3D投入、p007は残る。
+- 再開点: buffer ownerを連続かつ1 GiB未満のCPU mapping付きで接続し、保持maskを尊重したpresent/restore/失敗時の寿命管理をdisplay opsへつなぐ。今回の追加APIはprivateのみ、公開GPU/HAL API変更は無し。次の有限scopeは次の継続指示で選択する。共有記録/WS048 bodyの投影とT1依頼はQ1、担当からMasterを更新しない。push/外部連絡/実機/QEMUは未実施。
+- 統合済みi10保存patchは`build/ws141-handoff/ws141-i10-merged.patch`とmanifest。再適用しない。以前のi03/i08/i09 patchも再適用しない。最終記録commitはmachine-readable manifestで追える。

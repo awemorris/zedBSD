@@ -90,3 +90,8 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 ## i10のsoftware確認・残件（2026-10-09）
 
 同じR0 pipelineを使う実MMIOの同期flip/console復帰とIRQ状態を追加、短いhost3試験・rpi4 y/n buildがPASS。旧/新bufferの保持はadoptionで退役し、timeoutの不確かさはfresh console adoptionだけで解消する。allocator/登録/boot呼び出しは未接続。実機成功の証拠は無く、whole Phaseはin-progressのまま。softwareのexact commands/hash・限界・最新mainへの統合結果は[実行記録i10](../execution-20261009.md#i10の実装確認2026-10-09main統合前)。次の統合点は、保持maskを尊重する連続buffer ownerとdisplay ops/device登録。実機R0/IRQ/console RAM寿命・P1/P2のhardware条件はユーザーが後で確認する。
+
+
+## i10の統合結果（2026-10-09）
+
+実装8ca85c4a9、main統合181339820。統合版host3試験とdriver=y build PASS（warning/error0/checker3 PASS）、nはup-to-date。i10部分はcleared、whole Phaseはin-progress。未接続のbuffer owner/display登録・P3・実機R0/P1/P2/IRQ/console RAM寿命とQ1/T1回帰は保持。[evidence/再開点](../execution-20261009.md#i10のmain統合結果2026-10-09)。
