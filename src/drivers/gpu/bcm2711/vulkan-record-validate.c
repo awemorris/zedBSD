@@ -12,6 +12,7 @@
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
 
+static int validate_clear(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int same_device(struct bcm2711_vulkan_object *object, struct bcm2711_vulkan_object *device);
 static int validate_sets(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_vertices(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
@@ -46,6 +47,9 @@ bcm2711_vulkan_record_validate(
 		break;
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 		error = validate_pass(command, record);
+		break;
+	case GPU_OP_CMD_CLEAR_COLOR_IMAGE:
+		error = validate_clear(command, record);
 		break;
 	case GPU_OP_CMD_END_RENDER_PASS:
 		if (!command->render_open)
@@ -274,5 +278,52 @@ validate_viewport(
 	}
 
 	/* Succeeded: exact copied IEEE words describe a finite admitted dynamic viewport. */
+	return 0;
+}
+
+/* Validates one independently retainable full colour image clear without reading its mutable execution-time layout. */
+static int
+validate_clear(
+	struct bcm2711_vulkan_command_buffer *command,
+	const struct bcm2711_vulkan_record *record)
+{
+	struct bcm2711_vulkan_resource *image;
+	int error;
+
+	/* A complete void refusal becomes End's outcome, and image clears must occur outside every render pass. */
+	if (record->semantic_error != 0)
+		return record->semantic_error;
+
+	/* Transfer clears do not inherit a render pass attachment or user draw state. */
+	if (command->render_open)
+		return EINVAL;
+
+	/* Recording consumed every finite selected range before this validation. */
+	if (record->count == 0 || record->count > 64U)
+		return EINVAL;
+
+	/* Only the implemented transfer destination and general layouts may be selected explicitly. */
+	if (record->layout != VK_IMAGE_LAYOUT_GENERAL && record->layout != VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL)
+		return EINVAL;
+
+	/* The exact typed image belongs to the primary logical device. */
+	error = same_device(record->objects[0], command->owner.device);
+	if (error != 0)
+		return error;
+
+	/* A different typed payload cannot describe image storage. */
+	if (record->objects[0]->kind != I915_VK_OBJ_IMAGE)
+		return EINVAL;
+
+	/* The typed single-subresource image must already have a complete memory binding and transfer destination usage. */
+	image = record->objects[0]->payload;
+	if (image->memory == NULL || (image->usage & VK_IMAGE_USAGE_TRANSFER_DST_BIT) == 0)
+		return EINVAL;
+
+	/* Clear conversion currently implements only the two advertised byte UNORM colour formats. */
+	if (image->format != VK_FORMAT_R8G8B8A8_UNORM && image->format != VK_FORMAT_B8G8R8A8_UNORM)
+		return ENOTSUP;
+
+	/* Succeeded: current layout is checked later in FIFO execution after preceding transitions and native writes retire. */
 	return 0;
 }

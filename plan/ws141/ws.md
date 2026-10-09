@@ -217,3 +217,8 @@ actual identified PA reachabilityでcached native allocation/VAを所有し、QP
 ## i14 viewport integer lowering checkpoint（2026-10-09）
 
 XY scale/depth range/offsetをkernel整数のみで生成するprivate helperを追加。independent host IEEE oracleで1280有限pairの全bit比較、XML/pixel、y build PASS。実native uniform stream/CL/queueは後続で、p006 in-progress/WS incompleteを保持。[Phase](phase006/phase.md#i14-integer-viewport-uniforms-checkpoint2026-10-09) / [詳細](execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09)。
+
+
+## i14 full-image native GPU clear checkpoint（2026-10-10）
+
+actual public vkCmdClearColorImage→typed immutable primary→prepared pending graph→zero-draw native tile clear/storeを接続。TRANSFER_DST用途・bound same-device・remaining ranges・FIFO current layout、独立output/9storage、OOM/budget rollback、zero-draw quarantine/reset lifetimeを確認。actual encoder/native owner＋explicit runner host20範囲、final named RPi4 y warning/error0/checks3/style0 PASS。CPU target write無し。mock runnerはGPU pixelを書かず、実機clear/Keiland成功は未確認。copy/blit/readback・primary queue submit/fence/semaphore/public/common binding・final runtime stack/p007が残り、Phase in-progress/WS incompleteを維持。Master/shared source/HAL/UAPI変更無し。[証拠/失敗と修正/復帰点](execution-20261009.md#i14-full-image-gpu-clearのsoftware出力2026-10-10)。
