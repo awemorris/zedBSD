@@ -16,6 +16,7 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-phonerec-host-test userland/base/bluetoothd/phonerec.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/hci.c" \
 	"bt-outq-host-test userland/base/bluetoothd/outq.c" \
 	"bt-phoneio-host-test userland/base/bluetoothd/phoneio.c" \
+	"bt-mapxml-host-test userland/base/bluetoothd/mapxml.c" \
 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
 	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
