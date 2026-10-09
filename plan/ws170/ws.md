@@ -67,6 +67,10 @@ Primary Milestone: MG006
 | 後（別の Phase、範囲の外） | 本物の SMS・MMS・RCS の送受信、モデム、スマホの bridge、VoIP、chat の API の統合 | — | — |
 | p005 | 全文規約の見直し（最初の範囲） | planning | p002〜p004 |
 
+## スマホ連携の SMS の流れ（2026-10-10、WS197 p004）
+
+本物の SMS（Bluetooth の MAP でスマホ経由）の層の流れ（Phone の app → libkeiland → compositor → libkeiland-backend → bluetoothd）、各境界の interface、保存の持ち主（Phone の app だけ）、同期（pull、目印は app）、WS170 の store・app・compositor・libkeiland の変更の一覧は [ws197-p004](../ws197/phase004/phase.md) が正。p001 §3 の API の拡張と p002 の store の変更（Source・番号の key の会話・同期の目印）はそこに従う。
+
 ## 2026-10-06 UAT のフィードバック
 
 - BUG-218 本体の padding を Settings と同じに、慣性の開始の遅れ。BUG-203・204 の IME と OSK は直し済み・T1-217 待ち
