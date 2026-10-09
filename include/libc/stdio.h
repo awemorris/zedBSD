@@ -122,6 +122,10 @@ int renameat2(int, const char *, int, const char *, unsigned);
 int remove(const char *);
 int asprintf(char **, const char *, ...);
 int vasprintf(char **, const char *, va_list);
+
+/* Formatted output to a file descriptor. */
+int dprintf(int, const char *, ...);
+int vdprintf(int, const char *, va_list);
 char *fgetln(FILE *, size_t *);
 const char *fmtcheck(const char *, const char *);
 int fpurge(FILE *);

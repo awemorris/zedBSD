@@ -125,12 +125,17 @@ bcm2711_vulkan_native_job_execute(
 			continue;
 		}
 
-		/* This private executor requires a complete graphics pass or implemented dependency; transfers are added before public binding. */
-		if (event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS)
+		/* Both graphics and full-image clear meta passes use the same independent native owner and checked retirement path. */
+		if (event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
+			error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
+		} else if (event->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
+			error = bcm2711_vulkan_native_clear_create(&controller->space, event, &remaining, &job->pass);
+			next = event->next;
+		} else {
 			return ENOTSUP;
+		}
 
-		/* FIFO staging reads only source bytes made visible by completed preceding queue work. */
-		error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
+		/* A refused whole-pass preparation owns no launched DMA and leaves the primary pending until disposal. */
 		if (error != 0)
 			return error;
 

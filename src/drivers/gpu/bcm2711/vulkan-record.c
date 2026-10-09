@@ -34,7 +34,7 @@ bcm2711_vulkan_record_dispatch(
 	uint64_t identity;
 	int error;
 
-	/* Ordinary lifecycle, transfer and synchronization operations have separate typed native routes. */
+	/* Ordinary lifecycle and synchronization operations have separate typed native routes. */
 	(void)reply;
 	*handled = 1;
 	switch (opcode) {
@@ -47,6 +47,7 @@ bcm2711_vulkan_record_dispatch(
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 	case GPU_OP_CMD_END_RENDER_PASS:
 	case GPU_OP_CMD_DRAW:
+	case GPU_OP_CMD_CLEAR_COLOR_IMAGE:
 		break;
 	default:
 		*handled = 0;

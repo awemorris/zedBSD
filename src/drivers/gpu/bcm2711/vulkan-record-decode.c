@@ -10,6 +10,7 @@
 
 #include "drivers/gpu/bcm2711/vulkan-record.h"
 
+static int decode_clear(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_sets(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_vertices(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
 static int decode_push(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct bcm2711_vulkan_record *record);
@@ -55,6 +56,9 @@ bcm2711_vulkan_record_decode(
 		break;
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 		error = decode_pass(session, reader, record);
+		break;
+	case GPU_OP_CMD_CLEAR_COLOR_IMAGE:
+		error = decode_clear(session, reader, record);
 		break;
 	case GPU_OP_CMD_DRAW:
 		/* Draw's four words preserve exact vertex/instance counts and base selections. */
@@ -286,5 +290,82 @@ decode_pass(
 		return ENOTSUP;
 
 	/* Succeeded: the complete single-colour begin event copied its exact target, area and selected clear bits. */
+	return 0;
+}
+
+/* Consumes every bounded clear range before retaining a semantic refusal for the primary's reply-bearing End. */
+static int
+decode_clear(
+	struct bcm2711_vulkan_session *session,
+	struct i915_wire_reader *reader,
+	struct bcm2711_vulkan_record *record)
+{
+	uint64_t identity;
+	uint64_t present;
+	uint64_t array;
+	uint32_t representation;
+	uint32_t index;
+	uint32_t aspect;
+	uint32_t mip;
+	uint32_t levels;
+	uint32_t layer;
+	uint32_t layers;
+
+	/* The actual public wrapper selects one typed image and an explicit layout without retaining a client pointer. */
+	identity = drv_i915_wire_read_u64(reader);
+	record->objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE, identity);
+	record->layout = drv_i915_wire_read_u32(reader);
+	present = drv_i915_wire_read_u64(reader);
+	if (present > 1)
+		return EINVAL;
+
+	/* A present colour union carries the actual client's raw unsigned representation of four IEEE component words. */
+	if (present != 0) {
+		representation = drv_i915_wire_read_u32(reader);
+		array = drv_i915_wire_read_u64(reader);
+		if (array > 4)
+			return EINVAL;
+
+		/* Keep malformed colour semantics distinct from the complete following range framing. */
+		if (representation != 2 || array != 4)
+			record->semantic_error = EINVAL;
+		for (index = 0; index < array; index++)
+			record->words[index] = drv_i915_wire_read_u32(reader);
+	} else {
+		record->semantic_error = EINVAL;
+	}
+
+	/* All implemented images have exactly one mip and layer, so repeated complete ranges coalesce into one native tile clear. */
+	record->count = drv_i915_wire_read_u32(reader);
+	array = drv_i915_wire_read_u64(reader);
+	if (record->count > 64U || array != record->count)
+		return EINVAL;
+
+	/* An empty clear is a complete semantic refusal, while a framing mismatch cannot be skipped. */
+	if (record->count == 0)
+		record->semantic_error = EINVAL;
+	for (index = 0; index < record->count; index++) {
+		/* Decode the complete five-word range even when an earlier range or colour selection was refused. */
+		aspect = drv_i915_wire_read_u32(reader);
+		mip = drv_i915_wire_read_u32(reader);
+		levels = drv_i915_wire_read_u32(reader);
+		layer = drv_i915_wire_read_u32(reader);
+		layers = drv_i915_wire_read_u32(reader);
+		if (aspect != VK_IMAGE_ASPECT_COLOR_BIT ||
+		    mip != 0 ||
+		    layer != 0) {
+			if (record->semantic_error == 0)
+				record->semantic_error = EINVAL;
+		}
+
+		/* Standard remaining-count sentinels select the same sole implemented subresource. */
+		if ((levels != 1 && levels != VK_REMAINING_MIP_LEVELS) ||
+		    (layers != 1 && layers != VK_REMAINING_ARRAY_LAYERS)) {
+			if (record->semantic_error == 0)
+				record->semantic_error = EINVAL;
+		}
+	}
+
+	/* Succeeded: the outer decoder checks framing before End can observe the complete semantic outcome. */
 	return 0;
 }

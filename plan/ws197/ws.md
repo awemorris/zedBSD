@@ -3,13 +3,13 @@
 # WS197: Bluetooth のスマホ連携（SMS の MAP、通話の HFP、連絡先の PBAP）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（ベータ3。code は保留の branch だけ）
+Status: incomplete（ベータ2 の必須。code は branch agent/p1-ws197、区切りごとに main へ merge）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: 未割当（ベータ3、10/17 の公開の後に再開）
-Target: **ベータ3**
+Queue: P1、WS200 の後（2026-10-10 ユーザー: N=1 のまま）
+Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
 Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の head 2bf274a38、build は通る、host の試験の一部は未更新で通らない）。
 <!-- awesome-plan-current:end -->
 
@@ -23,7 +23,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 ## 再開の手順（2026-10-10 Q1、別の session への引き継ぎ）
 
 - **code と詳細の記録は保留の branch `agent/p1-ws197`（head 2bf274a38）にある。** main には無い（10/17 の公開まで release の bluetoothd を変えないため、Q1 の判断）。main のこの ws.md と phase001 は要約。p002・p003 の phase.md・review・試験（plan/ws197/tests/）は branch にだけある。
-- 再開の時: (1) branch に main を merge する（`git switch agent/p1-ws197 && git merge main`。WS143・WS199 の bluetoothd・passkey の変更と衝突しうるので WS143 の host 試験 `plan/ws143/tests/bt-daemon-host-test.sh` と `plan/ws197/tests/bt-phone-host-test.sh` を流す）。(2) branch の plan/ws197/phase003/phase.md の「進み」の最後の行の**再開点**から続ける。(3) i03 が終わったら main へ merge してよいか Q1 が判断（10/17 の後なら可）。
+- 再開の時: (1) branch に main を merge する（`git switch agent/p1-ws197 && git merge main`。WS143・WS199 の bluetoothd・passkey の変更と衝突しうるので WS143 の host 試験 `plan/ws143/tests/bt-daemon-host-test.sh` と `plan/ws197/tests/bt-phone-host-test.sh` を流す）。(2) branch の plan/ws197/phase003/phase.md の「進み」の最後の行の**再開点**から続ける。(3) i03 が通ったら main へ merge（ベータ2 に入れる、2026-10-10 ユーザー）。merge の前に T1 で WS143 の HID の回帰。
 - 各 commit で: WS143 と WS197 の host 試験、target の bluetoothd の build warning 0。QEMU に Bluetooth の実機は無いので、HID の回帰は T1（T1-518 の手順: branch の commit を detach で build-bt-image.sh、WS143 の 4 本の試験）。
 
 ## 目標

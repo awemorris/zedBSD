@@ -45,6 +45,7 @@ wint_t towctrans(wint_t, wctrans_t);
 
 
 /* The locale-aware forms POSIX.1-2008 added. */
+int iswalnum_l(wint_t, locale_t);
 int iswalpha_l(wint_t, locale_t);
 int iswblank_l(wint_t, locale_t);
 int iswcntrl_l(wint_t, locale_t);
@@ -59,6 +60,8 @@ int iswxdigit_l(wint_t, locale_t);
 int iswctype_l(wint_t, wctype_t, locale_t);
 wint_t towupper_l(wint_t, locale_t);
 wint_t towlower_l(wint_t, locale_t);
+wctrans_t wctrans_l(const char *, locale_t);
+wint_t towctrans_l(wint_t, wctrans_t, locale_t);
 wctype_t wctype_l(const char *, locale_t);
 
 #ifdef __cplusplus

@@ -45,6 +45,9 @@ struct bcm2711_vulkan_native_pass {
 /* Earlier queue writes must have completed and become CPU-visible; next borrows the event after this pass's END from the enclosing prepared primary. */
 int bcm2711_vulkan_native_pass_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *begin, uint64_t *available, struct bcm2711_vulkan_native_pass **pass, const struct bcm2711_vulkan_prepared_event **next);
 
+/* A full-image clear uses the native tile clear colour and store without CPU target writes or user graphics state. */
+int bcm2711_vulkan_native_clear_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint64_t *available, struct bcm2711_vulkan_native_pass **pass);
+
 /* Run once under the controller mutex, then retain the whole parent payload when the returned native retirement proof is false. */
 int bcm2711_vulkan_native_pass_run(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 

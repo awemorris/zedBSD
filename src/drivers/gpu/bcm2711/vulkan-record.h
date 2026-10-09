@@ -28,6 +28,9 @@ struct bcm2711_vulkan_record {
 	uint32_t words[BCM2711_VULKAN_PUSH_WORDS];
 	uint64_t offsets[BCM2711_VULKAN_VERTEX_BINDINGS];
 	VkRect2D area;
+	/* Image transfers preserve their explicit execution layout and fully consumed semantic refusal. */
+	VkImageLayout layout;
+	int semantic_error;
 };
 
 int bcm2711_vulkan_record_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);

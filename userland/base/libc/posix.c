@@ -239,6 +239,8 @@ static size_t mount_table_append(char *line, size_t size, size_t length, const c
 static void mount_table_unescape(char *word);
 static int write_all_bytes(int fd, const char *buffer, size_t length);
 static const char *confstr_value(int name);
+static int fcntl_get_owner_ex(int fd, struct f_owner_ex *owner);
+static int fcntl_set_owner_ex(int fd, const struct f_owner_ex *owner);
 
 /*
  * Implements the getopt operation.
@@ -802,6 +804,31 @@ fcntl(
 	int owner_result = 0;
 	struct flock *native = NULL;
 	struct flock_record request;
+	struct f_owner_ex *owner;
+	int owner_status;
+
+	/*
+	 * F_GETOWN_EX and F_SETOWN_EX are F_GETOWN and F_SETOWN with the kind of
+	 * owner spelled out; the kernel only knows the signed form.
+	 */
+	if (command == F_GETOWN_EX || command == F_SETOWN_EX) {
+		va_start(ap, command);
+		owner = va_arg(ap, struct f_owner_ex *);
+		va_end(ap);
+
+		/* Converts the owner record to or from the kernel's signed owner. */
+		if (command == F_GETOWN_EX)
+			owner_status = fcntl_get_owner_ex(fd, owner);
+		else
+			owner_status = fcntl_set_owner_ex(fd, owner);
+
+		/* Reports the failure fcntl() has already left in errno. */
+		if (owner_status != 0)
+			return -1;
+
+		/* Succeeded: the owner was read or set. */
+		return 0;
+	}
 
 	/* Handles the command condition. */
 	if (command == F_DUPFD || command == F_DUPFD_CLOEXEC ||
@@ -10294,4 +10321,78 @@ confstr_value(
 
 	/* No string for that name. */
 	return NULL;
+}
+
+/* Reports the owner of a file's signals with its kind spelled out. */
+static int
+fcntl_get_owner_ex(
+	int fd,
+	struct f_owner_ex *owner)
+{
+	intptr_t status;
+	int signal_owner;
+
+	/* Refuses a missing owner record before asking the kernel. */
+	if (owner == NULL) {
+		errno = EFAULT;
+		return -1;
+	}
+
+	/* Reads the owner, a process identifier or a negated process group identifier. */
+	signal_owner = 0;
+	status = call(KERN_SYS_fcntl, (uintptr_t)fd, F_GETOWN, (uintptr_t)&signal_owner, 0, 0, 0);
+	if (status != 0)
+		return -1;
+
+	/* A negative owner is a process group; zero and a positive owner are a process. */
+	if (signal_owner < 0) {
+		owner->type = F_OWNER_PGRP;
+		owner->pid = (pid_t)-signal_owner;
+	} else {
+		owner->type = F_OWNER_PID;
+		owner->pid = (pid_t)signal_owner;
+	}
+
+	/* Succeeded: the record names the owner. */
+	return 0;
+}
+
+/* Makes the process or process group a record names the owner of a file's signals. */
+static int
+fcntl_set_owner_ex(
+	int fd,
+	const struct f_owner_ex *owner)
+{
+	intptr_t status;
+	int signal_owner;
+
+	/* Refuses a missing owner record before asking the kernel. */
+	if (owner == NULL) {
+		errno = EFAULT;
+		return -1;
+	}
+
+	/* A negative identifier names neither a process nor a process group. */
+	if (owner->pid < 0) {
+		errno = EINVAL;
+		return -1;
+	}
+
+	/* Turns the kind and the identifier into the kernel's signed owner. */
+	if (owner->type == F_OWNER_PID) {
+		signal_owner = (int)owner->pid;
+	} else if (owner->type == F_OWNER_PGRP) {
+		signal_owner = -(int)owner->pid;
+	} else {
+		errno = EINVAL;
+		return -1;
+	}
+
+	/* Hands the owner to the kernel, which checks that it is in the caller's session. */
+	status = call(KERN_SYS_fcntl, (uintptr_t)fd, F_SETOWN, (uintptr_t)(intptr_t)signal_owner, 0, 0, 0);
+	if (status != 0)
+		return -1;
+
+	/* Succeeded: the file's signals now go to that owner. */
+	return 0;
 }
