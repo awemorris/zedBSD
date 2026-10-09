@@ -28,7 +28,7 @@
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001（頁・NFC・鍵の PIN と Reset）・p002（PIN 不要・タッチ不要）を merge。次 p003 greeter・lock の鍵のモードと keypad、p004 試験と T1 | 8 | P1・T1 |
+| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p003（頁・NFC・鍵の PIN と Reset・PIN 不要/タッチ不要・greeter と lock の鍵のモードと keypad）を merge。次 p004 試験と T1、p005 UAT | 2 | P1・T1 |
 | [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared（branch agent/p1-ws197）、p003 MAP は i03 の途中。p004〜p009 未着手。再開の手順は ws.md | 約 100 | P1 |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
@@ -36,7 +36,7 @@
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
 | 次の UAT で出る Bug の枠 | — | 5 | P1 |
-| **計** | | **約 127 LW**（約 42 時間、うち WS197 が約 100） | |
+| **計** | | **約 121 LW**（約 40 時間、うち WS197 が約 100） | |
 
 ## 次の UAT で確認してほしい事項（5330、WS199・WS200 の後の image）
 
