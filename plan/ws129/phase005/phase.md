@@ -44,3 +44,6 @@ Q1 の割り当て（q920 (2)）。言語は英語（release.md §9 U13）、置
 - 既知の問題の更新: `docs/release/zedbsd-1.0.0-beta2-known-issues.md`。resolved の BUG-095・156・157・166・167・168・171・172・174・175・176・177・190 を外し、BUG-253/255（蓋）・189/212（有線と Wi-Fi）・222・205・206/207・203・271 を足した。RC までに直す予定の物（BUG-184・188・235・232・179/180・234・191・238/242）と Bluetooth の行は comment に置き、RC で残っていれば表へ移す。
 - 判断が要る点（Q1・ユーザー）: FFmpeg の LGPL 2.1 §6 の source の提供。ffmpeg.org への link だけより、release の asset に `ffmpeg-9.0.2.tar.xz` を載せる方が確実（release.yml の変更、p004 の範囲）。
 - 未実施: 機能の行の一つ一つの実機の確認（p007）。link は最終の tag ができるまで切れる。
+
+2026-10-09 ユーザーの決定（Q1 の中継、クリック）: FFmpeg の source は「ffmpeg.org への link だけ」。release notes の節を書き直した（版 9.0.2、ffmpeg.org と tarball の link と sha256、zedBSD は patch を当てず configure の引数は GitHub の tree の package の Makefile）。release.yml は変えない。review の comment を外した。
+既知の問題の下書きの comment から plan の file の名前を外した（docs から plan へ参照しない）。release notes の file（docs/release/zedbsd-1.0.0-beta2.md）は前の commit で git に入っていなかったので、8a050dff0 で加えた。

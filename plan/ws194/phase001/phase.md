@@ -34,3 +34,9 @@ Q1 了承（2026-10-09）: 下の 1〜5 の形。
 - host（Debian、package は揃っている）で `make -j32 keiland-linux < /dev/null` rc 0: check は何も言わず、build の後に「The build succeeded. Install Keiland with: sudo make -f userland/desktop/keiland-linux.mk install」。
 - `make -n keiland-linux`・`keiland-freebsd` で check と offer-install の行が入ること。
 - 未実施: Debian 13 の guest（apt、足りない状態から）と FreeBSD 15 の guest（pkg）での対話の通し（T1、p002）。
+
+## T1-498 の FAIL の直し（2026-10-09、P1）
+
+T1-498: Debian 13 は PASS、FreeBSD 15 は端末つきの `make -j8 keiland-freebsd` が質問せずに「install them with: pkg install -y seatd」で止まった（2 回）。原因: script は標準入力と標準出力が端末かで判定していたが、BSD make の `-j` は job の出力を pipe で集め、入力も端末でない（GNU make の -j も標準入力は 1 つの job だけ）。
+直し 7ff549ea9: 質問と答えを制御端末 `/dev/tty` で行い、開けるかで判定する（subshell で: 特別な組み込みの redirection の失敗は shell を終わらせる）。端末の無い CI（制御端末なし）は今まで通り質問しない。host 試験に「制御端末は在るが標準入出力は端末でない（make -j の job）」の場合を足し、前の script では T1-498 と同じ止まり方、今は y で導入を確かめた。端末なしの場合は setsid で制御端末を外して流す。`sh plan/ws194/tests/prerequisites-host-test.sh` → PASS（13 件）。
+注: `ssh -t` で `< /dev/null` を付けても制御端末が在るので質問は出る。端末なしの確かめは制御端末の無い形（`-t` なしの ssh）で。再試験は T1 の行（Q1 が番号）。
