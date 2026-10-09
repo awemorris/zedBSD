@@ -535,6 +535,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
 - 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
+- 2026-10-10 ユーザー:「P1はp004cまで完了したらラップアップ。マージしてください。実機でテストするので詳細なQEMUテストは不要です。」「P2はWS083を完了させたらp007, p008を完了させたらラップアップ。実機でテストするので詳細なQEMUテストは不要です。」→ WS197 p004a〜c・WS083 p007〜p009 は host 試験と build まで、QEMU の T1 は WS197 の HID の回帰だけ。
 - 2026-10-10 ユーザー:「P2を立ててWS083 Videoを完了しましょう。」→ N=2（P1 は WS197、P2 は WS083 の完了）。P2: p002・p003a・p004・p006a の記録の照合（実機の p005・p006b で確かめた分）、p008 の残り（result status query、利用者への案内、性能の記録は T1-435 の E）、p007 の hang の回復の実機の手順（ESP に test の kernel が要る、ユーザーに頼む形）、p009 規約の全文の見直し。release の config は OFF のまま（ユーザー）。
 - 2026-10-10 ユーザー:「ws083-p005のテストをやってもらえますか？実機で」→ Q1 が 5330 で p005（bring-up・I frame 3 本）と p006b（P・B 3 本）を流し全部一致、hang なし。release の config の Vulkan Video はクリック「OFF のまま（推し）」（使う program は vkvideo-probe だけ、利用者は ZEDBSD.CFG に i915.debug=video で ON にできる。Video Player が使うようになったら ON）。
 - 2026-10-10 ユーザー（クリック）: WS197 p004 の SMS の設計の判断 P1〜P7 は「全部推しどおり」（P8 は Q1 が推しで）。WS197 の branch を c56043c2b（p003 i06 まで、T1-526 の HID の回帰 PASS）まで main に merge。p004 を p004a・b・c に分けた。
