@@ -239,7 +239,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS138](ws138/ws.md) | ベータ2 | MG006 | 0.5 | 背景の PNG |
 | [WS139](ws139/ws.md) | ベータ2 | MG006 | 2 | desktop の速さ |
 | [WS140](ws140/ws.md) | ベータ2 | MG002 | 0.5 | ld.so の上限の動的化 |
-| [WS141](ws141/ws.md) | 要検討（ブロック） | MG006 | 10 | Raspberry Pi 4 の GPU（N0 から V8・TFU まで） |
+| [WS141](ws141/ws.md) | 別 session で実行（2026-10-09 ユーザー、ws141/ は その session が排他的に更新、patch は Q1 が merge） | MG006 | 10 | Raspberry Pi 4 の GPU（N0 から V8・TFU まで） |
 | [WS142](ws142/ws.md) | ベータ2 | MG006 | 3 | アプリの切り替え（bar・Alt+Tab・gesture） |
 | [WS143](ws143/ws.md) | ベータ2（2026-10-05 移動） | MG006 | 8 | Bluetooth |
 | [WS144](ws144/ws.md) | アイディアの Phase（議論の後） | MG005 | 8 | VPN |
@@ -485,6 +485,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS189](ws189/ws.md) | MG006 | app の間の drag and drop（画像、受け入れの見た目、dock の spring-loaded、desktop に file、画面をまたぐ）（2026-10-08 ユーザー） | planned | p001 設計（q892） |
 | [WS190](ws190/ws.md) | MG006 | 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・コピー・切り取り・貼り付け・すべて選択の popup）（2026-10-08 ユーザー、WS189 の後） | planned | p001 設計 |
 | [WS191](ws191/ws.md) | MG006 | 再生の音を libkeiland の audio stream の口へ（compositor・backend、zedBSD audiod・Linux PipeWire・FreeBSD OSS）（2026-10-08 ユーザー） | planning | p001 設計 |
+| [WS192](ws192/ws.md) | MG006 | 右上の状態の島を tap で開く glass の操作パネル（WiFi・音量・IME などを大きく、タブレット向け）（2026-10-09 ユーザー、ベータ2） | planned | p001 設計と実装 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -520,6 +521,9 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー（クリック）: WS192 の島の press は「全部パネルに統一（P1 の案）」→ mouse・touch とも島の press はパネル。個別の popup はパネルの行の「›」から。mouse の近道（network の Alt+click、音量の wheel）は残す。
+- 2026-10-09 ユーザー:「右上の通知アイコン領域は、タブレットでは個別のアイコンのタッチが難しかったです。…通知アイコンの島をクリックやタッチすると、ポップアップが画面右上に表示されて、そこに大きめのメニューで、WiFiボタン、音量スライダー、IMEアイコン、などを表示して、操作可能にしたいです。ポップアップはglassエフェクトがいいです。」、時期はクリック「ベータ2（RC 10/13 まで）」→ [WS192](ws192/ws.md)、q917 P1（UAT の debug の次、ws001-p045 より先）。
+- 2026-10-09 ユーザー:「WS141を別なセッションで実行します。ws141/ws.mdはそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」→ WS141 は別 session が実行。plan/ws141/（ws.md と Phase）はその session だけが書き、Q1・P1 は書かない。master.md・queue.md などの共有の記録は Q1 だけが書く。届いた patch は Q1 が main に適用する（commit は WIP）。QEMU は host で同時に 1 つの規則があるので、T1 と時間が重ならないよう Q1 が調整する。
 - 2026-10-09 ユーザー（クリック）: WS126 p004 の D1（依存の package の要る追加の module）は「今は足さない」→ p004 は保留、今の module で p005 の image へ。
 - 2026-10-09 ユーザー（クリック）: libc の wint_t（uint32_t、clang は int）は「WS001 p045 で直す」→ libcxx の作り直しと一緒に ws001-p045 で。今は変えない。
 - 2026-10-09 ユーザー:「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」→ [ws001-p045](ws001/phase045/phase.md)（planned、ベータ3 の P1 の列）。
@@ -805,6 +809,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | --- | --- | --- |
 | [q1-clean.sh](tools/q1-clean.sh)・[fresh-out.sh](tools/fresh-out.sh)・[files/host-clean.sh](tools/files/host-clean.sh)（2026-10-06） | 削除は Q1 の pipeline（ユーザーの規則）。host の試験の script は rm を持たず、`fresh_out NAME`（新しい `NAME.run.*` を作り NAME を symlink で向ける）か `build/tmp/` の mktemp を使う。Q1 が `q1-clean.sh WORKTREE` で古い run・tmp・old を消す | `. plan/tools/fresh-out.sh; fresh_out "$out"`、Q1: `sh plan/tools/q1-clean.sh /home/awe/zedBSD-worktrees/p1` |
 | [gtk4-linux/](tools/gtk4-linux/README.md)（WS114 から移した、2026-10-06） | Linux の Keiland の上の標準 GTK4 の装飾（CSD・SSD）の試験と session の起動 | `decoration-wire.py`・`start-session.sh` など、README を参照 |
+| [ws125/tests/subtree-host-test.sh](ws125/tests/subtree-host-test.sh)（2026-10-09、WS125 の完了時に plan/tools/ へ移す） | package の staged tree を image に入れる `--subtree DEST=DIR` の回帰（Makefile の tree の規則・UFS・FAT の道具と検査、一覧と中身の一致） | host で `plan/ws125/tests/subtree-host-test.sh`、PASS で終わる |
 | [compositor/](tools/compositor/README.md)（WS110） | compositor の起動の role（--testing・--session・--greeter）の試験 | `run-host-role.sh`、`roles-guest.sh` |
 | [rtld/](tools/rtld/README.md)（WS140） | ld.so の多数の object・依存・handle・TLS の試験 | `rtld-many.sh BUILD`（`config-amd64-rtld.mk` の SSH の image、BUILD/sysroot の symlink） |
 | [wallpaper/](tools/wallpaper/README.md)（WS138） | 背景の PNG・JPEG の復号と読み込みの時間・greeter の背景 | host `run-host-wallpaper-decode.sh`、guest `wallpaper-time.sh`（Settings の image）・`greeter-wallpaper.sh`（criteria の image） |

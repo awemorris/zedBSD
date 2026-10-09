@@ -194,5 +194,7 @@ void kwl_ime_popup_draw(struct kwl_server *server, VkCommandBuffer command);
 int32_t kwl_ime_indicator_width(struct kwl_server *server);
 void kwl_ime_indicator_draw(struct kwl_server *server, VkCommandBuffer command, int32_t x, int32_t top, const float *ink);
 int kwl_ime_indicator_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_ime_panel_label(struct kwl_server *server, char *label, size_t size);
+void kwl_ime_panel_next(struct kwl_server *server);
 
 #endif

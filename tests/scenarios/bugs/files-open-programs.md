@@ -17,9 +17,9 @@ AAT の image と試験の file（`/tmp/aat-samples/sample.mp4`）。helper が 
 
 ## 操作と確認
 1. 操作: desktop の `aat-clip.mp4` を double click。
-   確認事項: Video Player で開く（BUG-233）。正解: `ZFILES DESKTOP open name=aat-clip.mp4 via=double-click`、`ZFILES LAUNCH name=Video Player command=/bin/videoplayer …aat-clip.mp4`、`/bin/videoplayer` が動いている（desktop の Files が立てた Video Player の行は session の log に来ない、T1-488）、`ZTERM START` が無い。確認方法: log、撮影 video。
+   確認事項: Video Player で開く（BUG-233）。正解: `ZFILES DESKTOP open name=aat-clip.mp4 via=double-click`、`ZFILES LAUNCH name=Video Player command=/bin/videoplayer …aat-clip.mp4`、`/bin/videoplayer` が動いている（desktop の Files が立てた Video Player の行は session の log に来ない、T1-488）、`/bin/terminal` が動いていない（始めに他の scenario の program を止める）。確認方法: log、撮影 video。
 2. 操作: desktop の `aat-ls` を double click。
-   確認事項: Terminal で走り、終わっても窓が残る（BUG-234）。正解: `ZTERM START`、その窓の `KWL CLIENT gone` が 3 秒の間に無い。確認方法: log、撮影 ls（出力と終了の案内）。
+   確認事項: Terminal で走り、終わっても窓が残る（BUG-234）。正解: `ZFILES OPEN path=…/aat-ls app=Run in Terminal error=0`、窓が出る、`/bin/terminal` が動いている（Terminal の `ZTERM START` も session の log に来ない、T1-491）、その窓の `KWL CLIENT gone` が 3 秒の間に無い。確認方法: log、撮影 ls（出力と終了の案内）。
 
 ## 合格
 1・2 の行。違えば BUG-233・BUG-234 の再現（fail）。撮影は人が見る（needs-person）。

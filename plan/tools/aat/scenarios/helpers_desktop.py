@@ -327,13 +327,18 @@ def network_details(item):
 	closed = run.wait(r"KWL NETWORK info close", since, 10)
 	item.step("Esc", closed)
 	item.check(closed, "the details did not close")
+	# A plain click opens the status pill's panel (WS192), whose Wi-Fi row opens the menu.
 	since = run.mark()
 	run.click(*point)
+	panel = run.wait(r"KWL STATUS panel open ", since, 10)
+	row = run.wait(r"KWL STATUS item name=wifi x=", since, 5)
+	item.check(panel and row, "a plain click did not open the status panel")
+	run.click(aatlib.number(row, "x") + 30, aatlib.number(row, "y") + aatlib.number(row, "height") // 2)
 	menu = run.wait(r"KWL NETWORK open", since, 10)
 	run.shot(item, "menu")
 	run.key("esc")
-	item.step("a plain click, then Esc", menu)
-	item.check(menu, "a plain click did not open the menu")
+	item.step("a plain click (the panel), its Wi-Fi row, then Esc", f"{panel}; {menu}")
+	item.check(menu, "the panel's Wi-Fi row did not open the menu")
 	item.passed(f"{values['Interface']} {values['IPv4 address']}")
 
 
@@ -343,19 +348,22 @@ def volume_slider(item):
 	item.check(icons, "no KWL VOLUME icon line")
 	before = run.lines(r"KWL VOLUME (restored|set) value=", None)
 	old = aatlib.number(before[-1], "value") if before else None
+	# A click on the icon opens the status pill's panel (WS192), whose sound row has the slider.
 	since = run.mark()
 	run.click(*icon_middle(icons[-1]))
-	popup = run.wait(r"KWL VOLUME popup open x=", since, 10)
-	item.step("clicked the volume icon", popup)
-	item.check(popup, "the popup did not open")
-	# Without a sound device (QEMU without audio) the popup's controls do nothing by design (volume.c, T1-202c).
+	popup = run.wait(r"KWL STATUS panel open ", since, 10)
+	slider = run.wait(r"KWL STATUS item name=volume x=", since, 5)
+	item.step("clicked the volume icon", f"{popup}; {slider}")
+	item.check(popup and slider, "the panel did not open")
+	# Without a sound device (QEMU without audio) the controls do nothing by design (volume.c, T1-202c).
 	if aatlib.number(popup, "sound") == 0:
 		run.shot(item, "no-sound")
 		run.key("esc")
 		item.person("no sound device here (sound=0): the slider is shown inert; drag it on a machine with sound")
-	left = aatlib.number(popup, "x") + 14 + 9
-	width = 260 - 28 - 18
-	y = aatlib.number(popup, "slider") + 17
+	# The knob's middle travels the track less the knob (28): 0% at the track's left + 14 (status-panel.c).
+	left = aatlib.number(slider, "x") + 14
+	width = aatlib.number(slider, "width") - 28
+	y = aatlib.number(slider, "y") + aatlib.number(slider, "height") // 2
 	since = run.mark()
 	points = [(left + width * (20 + 60 * step / 10) / 100, y) for step in range(11)]
 	run.press_path(points, pause=0.08)
@@ -375,6 +383,76 @@ def volume_slider(item):
 		item.step(f"put the volume back to {old}")
 	run.key("esc")
 	item.passed(f"value {value}, {len(feedback)} feedback sound(s)")
+
+
+def island_middle(item) -> tuple[int, int]:
+	"""The middle of the system bar's status pill (shell.c logs its left and width)."""
+	lines = run.lines(r"KWL GLASS status left=-?\d+ width=\d+", None)
+	item.check(lines, "no KWL GLASS status line")
+	return aatlib.number(lines[-1], "left") + aatlib.number(lines[-1], "width") // 2, 22
+
+
+@run.define("desktop.bar.status-panel")
+def status_panel(item):
+	# WS192: a click or a tap anywhere on the status pill opens the glass control panel.
+	island = island_middle(item)
+	since = run.mark()
+	run.click(*island)
+	opened = run.wait(r"KWL STATUS panel open ", since, 10)
+	items = run.lines(r"KWL STATUS item name=", since)
+	item.step(f"clicked the status pill at {island[0]},{island[1]}", f"{opened}; {len(items)} items")
+	run.shot(item, "mouse")
+	item.check(opened, "a click on the status pill did not open the panel")
+	since = run.mark()
+	run.key("esc")
+	item.check(run.wait(r"KWL STATUS panel close via=key", since, 5), "Esc did not close the panel")
+	since = run.mark()
+	run.aat("tap", str(island[0]), str(island[1]))
+	opened = run.wait(r"KWL STATUS panel open ", since, 10)
+	run.shot(item, "touch")
+	item.step("tapped the status pill", opened)
+	item.check(opened, "a tap on the status pill did not open the panel")
+	since = run.mark()
+	run.aat("tap", "200", "600")
+	item.check(run.wait(r"KWL STATUS panel close via=outside", since, 5), "a tap outside did not close the panel")
+	since = run.mark()
+	run.aat("tap", str(island[0]), str(island[1]))
+	opened = run.wait(r"KWL STATUS panel open ", since, 10)
+	item.check(opened, "the panel did not open again")
+	rows = {aatlib.field(line, "name"): line for line in run.lines(r"KWL STATUS item name=", since)}
+	done = []
+	if "input" in rows:
+		row = rows["input"]
+		mark = run.mark()
+		run.aat("tap", str(aatlib.number(row, "x") + 40), str(aatlib.number(row, "y") + aatlib.number(row, "height") // 2))
+		next_line = run.wait(r"KWL IME indicator next via=panel", mark, 5)
+		item.step("tapped the input row", next_line)
+		item.check(next_line, "the input row did not ask for the next language")
+		done.append("input")
+	if aatlib.number(opened, "sound") == 1 and "mute" in rows:
+		row = rows["mute"]
+		point = (aatlib.number(row, "x") + aatlib.number(row, "width") // 2, aatlib.number(row, "y") + aatlib.number(row, "height") // 2)
+		mark = run.mark()
+		run.aat("tap", str(point[0]), str(point[1]))
+		muted = run.wait(r"KWL VOLUME set value=\d+ muted=\d+ via=panel-mute", mark, 5)
+		run.aat("tap", str(point[0]), str(point[1]))
+		item.step("tapped Mute twice", muted)
+		item.check(muted, "the panel's Mute did nothing")
+		done.append("mute")
+	run.shot(item, "rows")
+	row = rows.get("wifi")
+	item.check(row, "no Wi-Fi row")
+	mark = run.mark()
+	run.aat("tap", str(aatlib.number(row, "x") + 30), str(aatlib.number(row, "y") + aatlib.number(row, "height") // 2))
+	menu = run.wait(r"KWL NETWORK open", mark, 10)
+	closed = run.lines(r"KWL STATUS panel close via=item", mark)
+	run.shot(item, "network-menu")
+	run.key("esc")
+	item.step("tapped the Wi-Fi row", f"{menu}; panel closed {len(closed)}")
+	item.check(menu and closed, "the Wi-Fi row did not open the network's menu in the panel's place")
+	done.append("wifi")
+	item.person("the panel on the glass at the top right, under the clock's pill, with large rows (mouse.png, touch.png, rows.png); the network's menu at the top right (network-menu.png)")
+	item.passed(f"opened by click and tap; {', '.join(done)}")
 
 
 @run.define("desktop.startup.wallpaper-time")

@@ -729,6 +729,64 @@ kwl_volume_is_open(
 	return (int)volume_view.open;
 }
 
+/*
+ * Gives the status panel the volume, whether it is muted and whether there
+ * is sound to set (status-panel.c, WS192).
+ */
+void
+kwl_volume_panel_state(
+	unsigned *value,
+	unsigned *muted,
+	int *sound)
+{
+	/* What the popup shows. */
+	*value = volume_view.value;
+	*muted = volume_view.muted;
+	*sound = volume_sound();
+}
+
+/*
+ * Sets the volume from the status panel's slider, mute kept: a step of a
+ * drag is sent at most every VOLUME_SEND_MS without a sound, a final one
+ * now with the feedback sound, as the popup's slider does.
+ */
+void
+kwl_volume_panel_slide(
+	struct kwl_server *server,
+	unsigned value,
+	unsigned final)
+{
+	int sound;
+
+	/* Without sound there is nothing to set. */
+	sound = volume_sound();
+	if (!sound)
+		return;
+
+	/* The volume, as the popup's slider sets it. */
+	volume_set(server, value, volume_view.muted, "panel-slider", final);
+}
+
+/* Switches mute from the status panel's button, as the popup's row does. */
+void
+kwl_volume_panel_mute(
+	struct kwl_server *server)
+{
+	unsigned muted;
+	int sound;
+
+	/* Without sound there is nothing to switch. */
+	sound = volume_sound();
+	if (!sound)
+		return;
+
+	/* The other position. */
+	muted = 1U;
+	if (volume_view.muted)
+		muted = 0U;
+	volume_set(server, volume_view.value, muted, "panel-mute", 1U);
+}
+
 /* Opens the popup under the icon of an output's bar, kept on that output. */
 static void
 volume_open_popup(

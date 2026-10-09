@@ -296,6 +296,77 @@ kwl_bluetooth_button(
 	return 1;
 }
 
+/*
+ * Gives the status panel Bluetooth's row (status-panel.c, WS192): whether
+ * the controller can be switched, the switch's position, and its state in
+ * words.
+ */
+void
+kwl_bluetooth_panel_state(
+	unsigned *usable,
+	unsigned *on,
+	char *text,
+	size_t size)
+{
+	/* A controller that is on or off can be switched. */
+	*usable = 0U;
+	if (bar_view.state.reachable &&
+	    (bar_view.state.state == KL_BACKEND_BT_ON ||
+	     bar_view.state.state == KL_BACKEND_BT_OFF))
+		*usable = 1U;
+
+	/* The switch as the menu draws it, and the state. */
+	*on = bar_switch_on();
+	if (bar_view.state.state == KL_BACKEND_BT_ON) {
+		(void)snprintf(text, size, "%s", kl_tr("On"));
+	} else {
+		(void)snprintf(text, size, "%s", bar_state_text());
+	}
+}
+
+/* Turns Bluetooth on or off from the status panel, as the menu's switch does. */
+void
+kwl_bluetooth_panel_switch(
+	struct kwl_server *server)
+{
+	unsigned request;
+	unsigned usable;
+	unsigned on;
+	char text[96];
+	int error;
+
+	/* Nothing to switch without a controller that is on or off. */
+	kwl_bluetooth_panel_state(&usable, &on, text, sizeof(text));
+	if (!usable)
+		return;
+
+	/* The other position, held until the state agrees, as the menu's switch asks it. */
+	on = !on;
+	request = KL_BACKEND_BT_POWER_OFF;
+	if (on)
+		request = KL_BACKEND_BT_POWER_ON;
+	error = kwl_bluetooth_bar_request(request, NULL, 0U);
+	printf("KWL BT bar panel switch on=%u error=%d\n", on, error);
+	if (error == 0) {
+		bar_view.switch_wanted = on;
+		bar_view.switch_until = kwl_milliseconds() + BAR_SWITCH_HOLD_MS;
+	}
+
+	/* The switch shows its new position at once. */
+	server->dirty = 1;
+}
+
+/* Opens Bluetooth's menu on an output's bar from the status panel, as a press on the icon does. */
+void
+kwl_bluetooth_panel_open(
+	struct kwl_server *server,
+	unsigned slot)
+{
+	/* The menu under the icon of that output's bar. */
+	bar_view.output = slot;
+	bar_open(server);
+}
+
 /* Handles a key while the menu is open: Esc closes it, and the others are the menu's too.  Returns 1 when the key was Bluetooth's. */
 int
 kwl_bluetooth_key(

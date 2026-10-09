@@ -11,6 +11,8 @@ import struct
 import subprocess
 from pathlib import Path
 
+from subtree_files import subtree_file_specifications
+
 PROFILES = {
     "i386": ("ZEDI386", 1, 3),
     "amd64": ("ZEDAMD64", 2, 62),
@@ -57,7 +59,8 @@ def fat_kind(boot: bytes) -> tuple[str, int]:
 
 
 def check(args: argparse.Namespace) -> None:
-    files = parse_files(args.file)
+    # A package's directories (--subtree) are their files, one --file each.
+    files = parse_files(args.file + subtree_file_specifications(args.subtree))
     if args.image.stat().st_size != args.size_mib * 1024 * 1024:
         raise SystemExit("inner image has the wrong byte size")
     if args.image.stat().st_size % 512:
@@ -115,6 +118,7 @@ def main() -> None:
     parser.add_argument("--min-free-bytes", type=int, default=4 * 1024 * 1024)
     parser.add_argument("--file", action="append", default=[])
     parser.add_argument("--mode", action="append", default=[])
+    parser.add_argument("--subtree", action="append", default=[])
     check(parser.parse_args())
 
 

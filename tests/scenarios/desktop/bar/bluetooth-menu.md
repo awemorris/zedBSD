@@ -19,7 +19,7 @@ controller のある機械で bar に Bluetooth の rune が出て、menu から
 ## 操作と確認
 1. 操作: bluetoothd の起動の前と後で bar を撮る。`aat mark start` は起動の前。
    確認事項: icon の有無。正解: 前は rune が無い（`KWL BT icon` の行が無い）、後は `KWL BT icon x= y= width= height=` と network の fan の左に rune（on なので濃い）。確認方法: log、撮影。
-2. 操作: rune を click して撮る。
+2. 操作: rune を click（状態の島のパネルが開く、WS192）し、パネルの Bluetooth の行の左の方を click して撮る。
    確認事項: menu。正解: `KWL BT bar open`、`KWL BT watch on=1`、`KWL BT menu x= y= width= height= rows=N` と各 `KWL BT row index= kind= …`（kind 0 の switch、
    kind 3 の 07 の機器、kind 4 の「Bluetooth Settings...」）、switch は on。確認方法: log、撮影。
 3. 操作: switch の行（`KWL BT row … kind=0`）を click、3 秒待って撮る。
@@ -29,7 +29,7 @@ controller のある機械で bar に Bluetooth の rune が出て、menu から
    確認事項: on。正解: `action=1 error=0`、`state=4 power=1`、rune が濃い。確認方法: log、撮影。
 5. 操作: 「Bluetooth Settings...」の行を click。
    確認事項: 設定。正解: `KWL BT bar settings pid=…`、`KWL BT bar close via=settings`、Settings が Bluetooth の頁で開く（`ZSETTINGS BLUETOOTH watch on=1`）。確認方法: log、撮影。
-6. 操作: rune を click して menu を開き、menu の外を click。次に開いて Esc。
+6. 操作: rune を click してパネルから menu を開き、menu の外を click。次に同じく開いて Esc。
    確認事項: 閉じ方。正解: `KWL BT bar close via=outside`、`KWL BT bar close via=key`、閉じた後 `KWL BT watch on=0`（Settings を閉じた後）。確認方法: log。
 
 ## 合格

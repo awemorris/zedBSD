@@ -233,6 +233,9 @@ scanout_overlay(
 	showing = kwl_volume_is_open();
 	if (showing)
 		return 1;
+	showing = kwl_status_panel_is_open();
+	if (showing)
+		return 1;
 	showing = kwl_power_dialog_showing(server);
 	if (showing)
 		return 1;
