@@ -78,3 +78,15 @@ blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slic
 - 確認: run-host-libvulkan-native・-status・-video、run-host-video-roundtrip、run-host-mfx-avc、run-host-vcs-worker、run-host-boot-video、ws031 run-vk-host-tests、ws075 run-host-layered、ws101 host/run.sh すべて PASS。`make -j16 BUILD=build/p2-k ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_USER_PROGRAMS="libvulkan vkvideo-probe" build/p2-k/vmunix build/p2-k/dynamic/libvulkan.so build/p2-k/bin/vkvideo-probe` warning 0。実機は未。
 
 残件（2026-10-08 Q1 の指示で記録）: render 側の quarantine の門。hang した session（quarantined）でも render の stream の入口（`render/command.c` の `i915_command_render`）は quarantine を見ず、graphics の family の submit・新しい resource は続けられる（design §6.1 の「quarantine はその session の新しい resource・job を拒む」に届いていない）。R-S3 は video の submit と video session の create だけを拒む。直すなら WS031（i915 の Vulkan 実行器）の側の別 Queue。
+
+## 制限（p008、2026-10-10 P2）
+
+利用者向けの説明は `docs/reference/vulkan-video.md`。WS083 の到達点の制限:
+
+- **既定は OFF**: kernel は boot の `i915.debug=video`（か `display,video`）がある時だけ video decode を出す。release の image（beta2）は OFF（2026-10-10 ユーザー）。ON は `zedbsd.cfg` の 1 行。image の中で使う program は試験の `vkvideo-probe` だけ（Video Player は libmedia → FFmpeg で CPU、FFmpeg は `--disable-hwaccels`）。
+- **形**: H.264 の decode だけ（Baseline・Main・High、8 bit、4:2:0、progressive、4096x4096・level 5.1 まで）。interlaced（field・MBAFF・PAFF）・4:2:2 以上・10 bit・encode・H.265・AV1 は無い（Future）。
+- **規格に合わない点**（HD6）: N1 apiVersion 1.0 のまま video の拡張を名乗る（sync2 は 1.0 の command への翻訳）、N2 ycbcr の拡張無しで NV12 と plane の aspect、N3 OPTIMAL の subresource layout を返す、N4 slice が 256 を超える picture は飛ばす（libvulkan の README）。result status の pool は profile を見ない。
+- **出力の使い道**: decode の picture は host から読むだけ（SAMPLED・TRANSFER_SRC は無い、HD5）。表示には app が de-tile して別の image に写す。
+- **実機で確かめた範囲**: 5330（Alder Lake-P、Gen12）で `tests/streams` の 6 本（I 3・P/B 3、CAVLC・CABAC・複数 slice・非対称の scaling list・weighted・list の modification・B pyramid と MMCO 1）の全 frame の hash が一致、result status は COMPLETE。long term・frame_num の gap・MMCO 5・4 byte の start code・1080p の hash は host の golden だけ（実機の hash は未）。
+- **hang の回復**: VCS0 の engine 単位の reset（GRDOM_MEDIA）と上限 3 回は実装と host 試験済み、実機（p007 の F1・F2、試験の kernel が要る）は未実施。hang した session の quarantine は video の submit・session の create だけを拒み、render の stream の入口は見ない（WS031 の側の残件、上の review の節）。
+- **性能**: 1 decode ごとに submit と wait（worker は 1 本で同期、U8）。数字は T1-435 の E の後に書く。

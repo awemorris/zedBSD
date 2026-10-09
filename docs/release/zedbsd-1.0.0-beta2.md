@@ -82,9 +82,14 @@ X11 programs run on the desktop through a rootless X server, with GLX.
 
 - Intel graphics with zedBSD's own i915 driver: Vulkan, OpenGL ES and
   OpenGL through Vulkan, used by the desktop.
-- Vulkan Video: the i915 driver decodes H.264 in the GPU
-  (`VK_KHR_video_decode_h264`) for programs that use it. The Video Player
-  decodes with FFmpeg on the CPU.
+- Vulkan Video: the i915 driver can decode H.264 in the GPU
+  (`VK_KHR_video_decode_h264`) for programs that use it. It is **off by
+  default** in Beta 2. To turn it on, add the line `i915.debug=video` to
+  `zedbsd.cfg` (shown as `ZEDBSD.CFG` on some systems) in the USB drive's EFI
+  partition (FAT), and start again; remove the line to turn it off. If the file
+  already has an `i915.debug=` line, change it instead of adding a second one
+  (for example `i915.debug=display,video`). No program in the image needs it:
+  the Video Player decodes with FFmpeg on the CPU.
 - Wi-Fi: the built-in Intel Wi-Fi 6E AX211 (WPA2-Personal), and USB Wi-Fi
   adapters with the Realtek RTL8822BU chip.
 - Wired network: USB Ethernet adapters that follow USB CDC-NCM or CDC-ECM.
@@ -100,11 +105,8 @@ X11 programs run on the desktop through a rootless X server, with GLX.
      moment (10/16) if they are not ready. If one is turned off, replace its line:
      - Bluetooth off: delete the "Bluetooth keyboards and mice" line here, and add the known-issue row from the
        known-issues draft.
-     - Vulkan Video off: replace its line with
-       "- Vulkan Video decoding (H.264) is not in this release; videos are decoded by FFmpeg on the CPU."
-       or delete it.
-     Vulkan Video is behind the boot option i915.debug=video until ws083-p008 makes it the default; if it is still
-     behind the option at the RC, say so in its line ("start with i915.debug=video on the boot line to turn it on").
+     - Vulkan Video (2026-10-10 user): off in the release image (no i915.debug=video in the release
+       configuration); its line says how to turn it on. It decoded every test stream on the Latitude 5330.
      IPv6 waits for the networkd retest (T1-500); drop "and IPv6" if it fails. -->
 
 ### For developers
