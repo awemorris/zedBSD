@@ -13,6 +13,7 @@ status=0
 for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
+	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
 	"bt-session-host-test userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c -lpthread" \
 	"bt-router-host-test userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread"; do
 	set -- $test
