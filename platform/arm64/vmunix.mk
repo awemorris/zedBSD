@@ -111,6 +111,8 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/v3d-hardware.c src/drivers/gpu/bcm2711/mmu.c \
 	src/drivers/gpu/bcm2711/v3d-job.c src/drivers/gpu/bcm2711/v3d-diagnostic.c \
 	src/drivers/gpu/bcm2711/cl.c src/drivers/gpu/bcm2711/buffer.c \
+	src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/v3d-memory.c \
+	src/drivers/gpu/bcm2711/render-device.c \
 	src/drivers/gpu/bcm2711/display-program.c \
 	src/drivers/gpu/bcm2711/display-start.c \
 	src/drivers/gpu/bcm2711/display-execute.c \

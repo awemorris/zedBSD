@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（i11 display所有/合成/登録と起動診断を実装、host/build PASS。実機とV3D/Vulkanは未完了）
+Status: incomplete（display/V1〜V10/二device allocation-shareを実装、host/build PASS。worker/Vulkan/compilerと実機は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i11 displayはmain40ce86ac0へ統合済み。i12のnative V1〜V10、MMU/cache/IRQ、bin→render/overflow/TFU/CSD、boot診断を実装しhost/XML/rpi4 y-n build PASS。i12のmain統合後、i13の二device resource/share/worker/GPU APIへ進む。p006のkernel実行器/compilerも承認済み。実機R0/P1/P2/P3/P5/V1〜V10とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i12 evidence](execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。
+Resume point: i12はmain30350c8cbへ統合。i13の二device登録・placed blob/share・global VA owner・direct scanout独立hold・failed flush quarantine/common reset回復を実装しactual source host/rpi4 y build PASS、warning0。次は非同期worker/common completion/job supervision、その出力をp006 kernel Vulkan実行器/compilerへbindする。COMMAND/CAPSET未公開。実機R0/P1/P2/P3/P5/V1〜V10とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i13 checkpoint](execution-20261009.md#i13の二deviceallocation共有の実装2026-10-09継続中)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -71,7 +71,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
 | [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i11 allocator/登録/copy present/2-plane合成/起動診断を実装、host/build PASS。実機待ち） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
-| [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planned | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
+| [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | in-progress | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
 | [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | planned | p004・p005 | 未見積 |
 | [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planned | 全て | 3〜4h |
 
@@ -125,3 +125,11 @@ i11はmain40ce86ac0へ統合、統合版host4とrpi4 y/n build PASS。i12でfixe
 ## i12: native V3Dのruntime接続（2026-10-09）
 
 V1〜V10とtrusted CL/TFU/CSD runnerを実装し、actual source host/clear XML/rpi4 y-n buildがPASS、warning/error0。p005へ渡すcallerのbuffer/VA保持・retired=falseのquarantine・common recovery後のrelease、p006のprivate lowering契約を各Phaseへ記録。i12のmain統合確認後にi13へ継続する。実機/console RAM寿命/Vulkan/compiler/最終監査は未達、WS incomplete/p004 in-progressを保持する。[exact scope/commands/制限](execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。
+
+## i12統合・i13開始（2026-10-09）
+
+V1〜V10のsource/host/buildまとまりをmain `30350c8cba31875a01d58f804a5de13a1305a7ee`へ統合。software部分attempt i12はcleared、p004の実機条件は未実施。p005をin-progressにして二deviceのallocation/share/VA/worker統合を進める。p006 Vulkan/compiler/Keilandとp007最終適合は承認済み後続。[詳細](execution-20261009.md#i12統合確認とi13開始2026-10-09)。Master/共有計画/外部公開の投影はQ1が行う。
+
+## i13 checkpoint（2026-10-09）
+
+二device登録・native blob/share/VA・direct scanoutの独立referenceとfailed flush quarantineを実装し、actual source host/rpi4 build PASS、warning0。p005はin-progress、次は非同期worker/common completion/job supervisionとp006 Vulkan/compilerのbinding。Vulkan/Keilandはまだ動作可能と主張しない。実機は未実施、WS incomplete。[詳細/復帰点](execution-20261009.md#i13の二deviceallocation共有の実装2026-10-09継続中)。

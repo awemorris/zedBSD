@@ -24,6 +24,7 @@
 
 #include "drivers/gpu/bcm2711/bcm2711-gpu.h"
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /*
@@ -141,6 +142,13 @@ drv_bcm2711_gpu_attach(
 		v3d_error = bcm2711_v3d_diagnostic(&attach_v3d);
 		if (v3d_error != 0)
 			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 diagnostic failed (%d)", v3d_error);
+	}
+
+	/* Publishes independent resource/share ownership only after all boot native jobs retire. */
+	if (v3d_error == 0) {
+		v3d_error = bcm2711_render_register(&attach_v3d);
+		if (v3d_error != 0)
+			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "render registration failed (%d)", v3d_error);
 	}
 
 	/* Reports a board where neither part could be prepared. */

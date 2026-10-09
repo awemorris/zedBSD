@@ -52,6 +52,24 @@ bcm2711_buffer_create(
 		return error;
 	}
 
+	/* Verifies the actual run rather than trusting requested placement flags. */
+	if (buffer->memory.size != rounded ||
+	    (buffer->memory.paddr & (alignment - 1U)) != 0 ||
+	    buffer->memory.paddr > UINT64_MAX - (rounded - 1U) ||
+	    (limit != 0 && (buffer->memory.paddr > limit ||
+			    rounded - 1U > limit - buffer->memory.paddr))) {
+		/* No device has seen this malformed placement, so physical retirement is safe. */
+		released = kern_pmem_free(&buffer->memory);
+		if (released != 0) {
+			kern_logf("bcm2711: retained invalid placement (%d)\n", released);
+			return ENOTSUP;
+		}
+
+		/* The descriptor no longer owns physical storage. */
+		kern_free(buffer);
+		return ENOTSUP;
+	}
+
 	/* A successful allocation must supply a usable CPU view of the whole run. */
 	buffer->address = kern_pmem_to_kernel(buffer->memory.paddr);
 	if (buffer->address == NULL) {

@@ -1,0 +1,56 @@
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/* Private renderer descriptors and caller-serialized native allocation lookup. */
+#ifndef KERN_DRIVERS_GPU_BCM2711_RENDER_DEVICE_H
+#define KERN_DRIVERS_GPU_BCM2711_RENDER_DEVICE_H
+
+#include <drivers/gpu/gpu.h>
+#include "drivers/gpu/bcm2711/v3d-memory.h"
+
+struct bcm2711_render_device;
+
+/* A retained session owns its descriptor list until the common core retires all pins. */
+struct bcm2711_render_session {
+	struct bcm2711_render_device *device;
+	struct bcm2711_render_resource *resources;
+	uint32_t count;
+	uint32_t next_identifier;
+
+	/* The native IRQ guard protects namespace stop publication against ioctl admission. */
+	bool stopping;
+};
+
+/* One descriptor owns a native VA view; jobs hold independent mapped references. */
+struct bcm2711_render_resource {
+	struct bcm2711_render_resource *next;
+	struct bcm2711_render_session *owner;
+	struct bcm2711_v3d_view *view;
+	uint32_t identifier;
+	bool blob;
+	bool mappable;
+	bool shareable;
+};
+
+/* The controller mutex serializes resources, translations and the single native worker. */
+struct bcm2711_render_device {
+	struct mutex mutex;
+	struct bcm2711_v3d_space space;
+	struct drv_gpu_device *gpu;
+	struct drv_gpu_ops operations;
+	struct drv_gpu_share_ops share_operations;
+	struct drv_gpu_scanout_ops scanout_operations;
+	struct drv_gpu_recovery_ops recovery_operations;
+	uint32_t sessions;
+	bool registered;
+};
+
+int bcm2711_render_register(struct bcm2711_v3d *engine);
+struct bcm2711_render_resource *bcm2711_render_find(struct bcm2711_render_session *session, uint32_t identifier);
+void bcm2711_render_fail(struct bcm2711_render_device *controller, int error);
+
+#endif
