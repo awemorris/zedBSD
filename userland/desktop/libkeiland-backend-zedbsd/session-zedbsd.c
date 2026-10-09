@@ -1247,7 +1247,11 @@ session_kind(
 	return SESSION_ANSWER_UNKNOWN;
 }
 
-/* Takes STYLES' list ("password pin fido2"): the KL_BACKEND_STYLE_* bits. */
+/*
+ * Takes STYLES' list ("password pin fido2", or part of it: WS200 may turn
+ * the password off): the KL_BACKEND_STYLE_* bits; an empty list leaves
+ * none (kl_backend_session_styles_get then gives the password).
+ */
 static void
 session_take_styles(
 	struct kl_backend *backend,
@@ -1261,7 +1265,7 @@ session_take_styles(
 
 	/* Each word of the list. */
 	snprintf(copy, sizeof(copy), "%s", list);
-	styles = KL_BACKEND_STYLE_PASSWORD;
+	styles = 0U;
 	word = copy;
 	while (word != NULL && *word != '\0') {
 		rest = strchr(word, ' ');
@@ -1270,7 +1274,10 @@ session_take_styles(
 			rest++;
 		}
 
-		/* The PIN, or a security key. */
+		/* The password, the PIN, or a security key. */
+		same = strcmp(word, "password");
+		if (same == 0)
+			styles |= KL_BACKEND_STYLE_PASSWORD;
 		same = strcmp(word, "pin");
 		if (same == 0)
 			styles |= KL_BACKEND_STYLE_PIN;

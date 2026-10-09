@@ -214,6 +214,22 @@ test_login_screen(
 	check(kl_backend_session_styles_get(backend) == (KL_BACKEND_STYLE_PASSWORD | KL_BACKEND_STYLE_PIN), "the PIN among the styles");
 	answer_count = 0U;
 
+	/* STYLES without the password (WS200: the password turned off): the PIN and the key alone. */
+	error = kl_backend_session_styles(backend, "kei");
+	check(error == 0 && read_line(ends[0], "STYLES kei\n"), "STYLES kei written again");
+	(void)write(ends[0], "STYLES pin fido2\n", 17U);
+	kl_backend_tick(backend, 999U);
+	check(kl_backend_session_styles_get(backend) == (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY), "the password turned off is not among the styles");
+	answer_count = 0U;
+
+	/* An empty STYLES: the password. */
+	error = kl_backend_session_styles(backend, "kei");
+	check(error == 0 && read_line(ends[0], "STYLES kei\n"), "STYLES kei written a third time");
+	(void)write(ends[0], "STYLES \n", 8U);
+	kl_backend_tick(backend, 999U);
+	check(kl_backend_session_styles_get(backend) == KL_BACKEND_STYLE_PASSWORD, "no styles listed is the password");
+	answer_count = 0U;
+
 	/* AUTH with its secret on a line of its own, and a second request while it waits: EBUSY. */
 	error = kl_backend_session_authenticate(backend, "kei", KL_BACKEND_STYLE_PASSWORD, "secret");
 	check(error == 0 && read_line(ends[0], "AUTH kei password\nsecret\n"), "AUTH kei password and the secret written");

@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device allocation-share/workerとprivate compiler/Vulkan recordingを実装、host/build PASS。native prepared draw/queue/public runtimeと実機/p007は未完了）
+Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build PASS。whole stack/p007/Keiland実機確認は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i14 whole pending job/closed-session recovery、explicit barrier/implicit pass layouts＋qualified external-family sharingを接続。actual public barrier/typed memory host19範囲/close-reset host/named y warning/error0 PASS。次はGPU copy/clear/blit meta lowering、primary QueueSubmit/public runtime/common binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-external-family共有メモリのadmission-checkpoint2026-10-09)。
+Resume point: public CAPSET/COMMAND/NOTIFICATION/JOB/JOB_CAPACITYをactual render sessionとsingle workerへ接続。host26範囲＋actual node open/close/hardware owner host2 summary、RPi4 y warning/error0/checks3 PASS。次はactual client/displayの残るsoftware gate、whole public LTO callgraph16KiBとp007全文規約/license/類似/BLOB。Keiland/実機/console RAM寿命未確認、Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -227,3 +227,33 @@ actual public vkCmdClearColorImage→typed immutable primary→prepared pending 
 ## i14 native image copy/blit checkpoint（2026-10-10）
 
 actual public copy/blit→完全immutable primary/pending graph→内部kernel-compiled texture quad/native passを接続。raw copy、nearest/linear拡縮・両axis反転・RGBA/BGRA conversion、source全sample footprint/physical alias、multi-region FIFO/whole-pass quarantineを確認。temporary数値metaのみで公開仮object無し、CPU destination pixel write無し。actual client/kernel-source＋明示runner host21範囲、final RPi4 y warning/error0/checks3/style0とown SPIR-V validator PASS。実GPU pixelはmockしないため実機/Keiland成功は未確認。buffer readback/transfer・QueueSubmit/fence/semaphore/public/common binding・final stack/p007が残り、Phase in-progress/WS incompleteを維持。Master変更無し。[正確な範囲/codec誤りの修正/確認/復帰点](execution-20261009.md#i14-native-image-copyblitのsoftware出力2026-10-10)。
+
+
+## coherent buffer copy checkpoint（2026-10-10）
+
+actual public CopyBufferのcomplete typed byte vectorをpending primaryへ保持し、FIFO native retirement後のNormal NC CPU転送へ接続。exact13/17byte以外保持、record後source更新、physical alias/末尾failure無部分retain・pending disposalをactual host22範囲で確認。native runnerは起動しない。RPi4 y warning/error0/checks3/style0 PASS。buffer/image upload/readback・queue/fence/semaphore/public/common binding・final stack/p007と実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](execution-20261009.md#i14-coherent-buffer-copyのsoftware出力2026-10-10)。
+
+
+## coherent buffer-image transfer checkpoint（2026-10-10）
+
+actual public upload/readbackをimmutable pending primaryとFIFO Normal NC CPU行copyへ接続。部分upload/packedとpadded readback/unused padding alias/late invalid region/OOM/layout failure不変/whole pending lifetimeをactual host23範囲で確認。RPi4 y warning/error0/checks3/scoped style0/diff0 PASS。native GPU launch無し。queue/fence/semaphore/public/common binding・final runtime stack/p007・実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](execution-20261009.md#i14-coherent-buffer-image-uploadreadbackのsoftware出力2026-10-10)。
+
+
+## core sync checkpoint（2026-10-10）
+
+native fence/binary semaphoreのtyped device ownership、初期状態/status/atomic reset/destruction/OOMを実装。実client codec/transport＋明示pending/fault modelのhost24範囲、RPi4 y checks3/warning-error0/scoped style0 PASS。QueueSubmit completion/common marker/public binding/Keiland/physical/final runtime stack/p007は残り、in-progress/incompleteを維持。Master変更無し。[詳細/検証/復帰点](execution-20261009.md#i14-core-fencebinary-semaphoreのsoftware出力2026-10-10)。
+
+
+## actual QueueSubmit checkpoint（2026-10-10）
+
+実legacy client submit encoderとnative QueueSubmitを接続。全graph/prepared8MiB/256actionのpreflight後、既存COMMAND worker内でnative退役を直列確認し、binary chainsとfinal native fenceを完成させる。OOM/prefix refusal/one-time/uncertain whole quarantine/empty work fault refusalを実client private encoder＋actual kernel source/明示runner host25範囲で確認。RPi4 y checks3/warning-error0/scoped style0/diff0 PASS。COMMAND/CAPSET/JOB binding/public runtime・final stack/p007・実機/Keilandは残り、in-progress/incompleteを維持。Master変更無し。[exact scope/内部手順/限界/次](execution-20261009.md#i14-actual-legacy-queuesubmitのsoftware出力2026-10-10)。
+
+
+## public Vulkan runtimeの登録と次のsoftware関門（2026-10-10）
+
+[p005](phase005/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)・[p006](phase006/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)を更新。private-onlyからactual render node publicationへ進み、全openにcomplete namespace、actual20route dispatch、immutable async COMMAND、checked domain/real completion/close drain、paired168byte capsetを接続。actual host26とactual renderer register/open/close/OOM/ownership host2 summary、full public LTO retained y buildはPASS。physical Keiland/console RAM lifetimeとwhole stack/p007を未達として保持する。Master/共有記録更新はQ1。詳細は[checkpoint](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+
+
+## public runtime stack修正と次のsoftware確認（2026-10-10）
+
+p006で4件pipelineのtemporary recordをcommand arenaへ移し、LTO frame4560→256byte。shared parserを変更せずprivate graphics stage/constant-depth admissionを追加。実Keiland compiler/深度境界/OOMとactual4件batch/arena reuse、host26/最終RPi4 y/styleはPASS。whole IRQ/caller stack、actual2node runtime、p007全WS監査と実機/Keiland/console RAM寿命は残る。in-progress/incompleteを維持、Master担当変更なし。[証拠/訂正/復帰点](execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。

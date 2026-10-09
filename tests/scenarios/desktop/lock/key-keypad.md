@@ -28,8 +28,9 @@ desktop。Settings → Security Keys → Software Security Key で PIN（例 `13
    確認事項: 鍵の欄と英字の keypad。正解: `KWL GREETER style=4 via=choice`、`KWL GREETER keypad keys=12 letters=0`、欄の hint は「Security key PIN」。左下の `ABC` を押すと `KWL GREETER keypad keys=30 letters=1`。確認方法: log、撮影（人が見る: q〜p・a〜l・↑ z〜m ←・123 OK）。
 5. 操作: もう一度 Super+L とドラッグ（PIN の欄と数字の keypad）、方式の選択で Password を押す。
    確認事項: keypad が消える。正解: `KWL GREETER style=1 via=choice` と `KWL GREETER keypad none`。password を打って Enter で `KWL LOCK unlocked`。確認方法: log。
-6. 操作: Log Out し、login の画面を待つ。
+6. 操作: Log Out し、login の画面を待つ。`/var/log/greeter.log` に `KWL GREETER key owner asked` が出るまで（styles の答えの後、1 秒ほど）何も打たない。その後 password で login する。
    確認事項: login の画面でも鍵の持ち主を問い、鍵が無ければ何もしない。正解: `KWL GREETER key owner asked error=0` と `KWL GREETER key owner error=0 found=0 … action=0`。password で login できる。確認方法: log。
+   注記: 画面が出てすぐ（styles の答えの前）に password と Enter を打つと、login が先に送られ、その間と login の後は持ち主を問わない（login を待たせないための製品の振る舞い）。T1-523 の FAIL はこれ。
 
 ## 合格
 1〜3・5・6 の正解（4 は鍵を登録した機械だけ）。keypad の配置（欄のすぐ下、card の内側、時計と重ならない）は撮影を人が見る。

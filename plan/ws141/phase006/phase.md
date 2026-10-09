@@ -174,3 +174,38 @@ actual public vkCmdClearColorImage→typed immutable primary→prepared pending 
 ## i14 native image copy/blit checkpoint（2026-10-10）
 
 actual public copy/blit→完全immutable primary/pending graph→内部kernel-compiled texture quad/native passを接続。raw copy、nearest/linear拡縮・両axis反転・RGBA/BGRA conversion、source全sample footprint/physical alias、multi-region FIFO/whole-pass quarantineを確認。temporary数値metaのみで公開仮object無し、CPU destination pixel write無し。actual client/kernel-source＋明示runner host21範囲、final RPi4 y warning/error0/checks3/style0とown SPIR-V validator PASS。実GPU pixelはmockしないため実機/Keiland成功は未確認。buffer readback/transfer・QueueSubmit/fence/semaphore/public/common binding・final stack/p007が残り、Phase in-progress/WS incompleteを維持。Master変更無し。[正確な範囲/codec誤りの修正/確認/復帰点](../execution-20261009.md#i14-native-image-copyblitのsoftware出力2026-10-10)。
+
+
+## coherent buffer transfer手順（2026-10-10）
+
+buffer copy/upload/readbackはNormal NC coherent backingのCPU byte/row copyをFIFO native completion後に実行する。4.2 TFUのraster出力非対応と既存coherent memory境界に基づく内部手順の選択。image copy/blit/clearとKeilandのGPU描画条件は維持。physical aliases・whole preflight・explicit layout・paddingとnext native visibilityを確認する。p005のownership/public interface/dependency/WS acceptanceは変更無し。[統合と改訂理由](../execution-20261009.md#image-copyblitのmain統合とcoherent-transfer設計2026-10-10)。
+
+
+## coherent buffer copy checkpoint（2026-10-10）
+
+actual public CopyBufferのcomplete typed byte vectorをpending primaryへ保持し、FIFO native retirement後のNormal NC CPU転送へ接続。exact13/17byte以外保持、record後source更新、physical alias/末尾failure無部分retain・pending disposalをactual host22範囲で確認。native runnerは起動しない。RPi4 y warning/error0/checks3/style0 PASS。buffer/image upload/readback・queue/fence/semaphore/public/common binding・final stack/p007と実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](../execution-20261009.md#i14-coherent-buffer-copyのsoftware出力2026-10-10)。
+
+
+## coherent buffer-image transfer checkpoint（2026-10-10）
+
+actual public upload/readbackをimmutable pending primaryとFIFO Normal NC CPU行copyへ接続。部分upload/packedとpadded readback/unused padding alias/late invalid region/OOM/layout failure不変/whole pending lifetimeをactual host23範囲で確認。RPi4 y warning/error0/checks3/scoped style0/diff0 PASS。native GPU launch無し。queue/fence/semaphore/public/common binding・final runtime stack/p007・実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](../execution-20261009.md#i14-coherent-buffer-image-uploadreadbackのsoftware出力2026-10-10)。
+
+
+## core sync checkpoint（2026-10-10）
+
+native fence/binary semaphoreのtyped device ownership、初期状態/status/atomic reset/destruction/OOMを実装。実client codec/transport＋明示pending/fault modelのhost24範囲、RPi4 y checks3/warning-error0/scoped style0 PASS。QueueSubmit completion/common marker/public binding/Keiland/physical/final runtime stack/p007は残り、in-progress/incompleteを維持。Master変更無し。[詳細/検証/復帰点](../execution-20261009.md#i14-core-fencebinary-semaphoreのsoftware出力2026-10-10)。
+
+
+## actual QueueSubmit checkpoint（2026-10-10）
+
+実legacy client submit encoderとnative QueueSubmitを接続。全graph/prepared8MiB/256actionのpreflight後、既存COMMAND worker内でnative退役を直列確認し、binary chainsとfinal native fenceを完成させる。OOM/prefix refusal/one-time/uncertain whole quarantine/empty work fault refusalを実client private encoder＋actual kernel source/明示runner host25範囲で確認。RPi4 y checks3/warning-error0/scoped style0/diff0 PASS。COMMAND/CAPSET/JOB binding/public runtime・final stack/p007・実機/Keilandは残り、in-progress/incompleteを維持。Master変更無し。[exact scope/内部手順/限界/次](../execution-20261009.md#i14-actual-legacy-queuesubmitのsoftware出力2026-10-10)。
+
+
+## public runtimeのsoftware checkpoint（2026-10-10）
+
+actual render openでcomplete Vulkan ownerを作り、production combined20route/async immutable snapshot single-worker/real callback drain/capset168byte strict queue/owned domain/JOB capacityを登録前にbind。actual host26範囲とactual renderer register/open/close/hardware-owner host2 summary、final RPi4 y warning/error0/checks3 PASS。公開LTO ELFにruntimeが残ることを確認。受理後mutable input、whole CPU OOM unwind、fence completed after worker、16slot limit、close joinとfault error handoffをactual callbacksで確認。single-thread/common observerとMMIO fixtureの限界を保持し実機/Keiland成功と偽らない。legacy pending no-overtake EAGAINは内部手順でAPI/WS criteria不変。Statusはin-progress、whole callgraph16KiB/p007/full physical acceptanceは未達。[全手順・commands・結果・制限](../execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+
+
+## public runtime stack修正のcheckpoint（2026-10-10）
+
+全命令LTO inspectionでpipeline frame4560byteを発見し、4件metadataを既存command arenaへ移して256byteに削減。深いconstant graphとparserによるcompute stage上書きをprivate compilerのiterative preflightで止め、read-only共有parserを維持。actual graphics4件partial batch/arena再利用、実Keiland scalar/decoderと2048段拒否・exact9level受け入れ・OOM/診断のhost、RPi4 y warning/error0/checks3/style0を確認。partial context estimateはworker9344byteで、IRQ/outer caller/unknown indirectを含むwhole16KiB証明は後続。whole Phase/p007/実機関門は未clear。[命令の取りこぼしの訂正/範囲/検証/残件](../execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。

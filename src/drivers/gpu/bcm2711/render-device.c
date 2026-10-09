@@ -13,6 +13,7 @@
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
+#include "drivers/gpu/bcm2711/render-runtime.h"
 #include "drivers/gpu/bcm2711/share.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/vulkan-native-job.h"
@@ -90,9 +91,9 @@ bcm2711_render_register(
 
 	/* Borrowed tables and the native translation owner persist after publication. */
 	controller->registered = true;
-	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "render node ready allocation/share; Vulkan pending");
+	bcm2711_stage_mark(BCM2711_FAMILY_V3D, "render node ready native Vulkan/strict queue");
 
-	/* Succeeded: userspace can allocate, map and share checked native V3D storage. */
+	/* Succeeded: userspace can allocate, map, share and submit the complete native Vulkan profile. */
 	return 0;
 }
 
@@ -166,8 +167,16 @@ render_open(
 		return ENOMEM;
 	}
 
-	/* Sessions count only complete opens, and zero permits checked global recovery. */
+	/* Every accepted open owns its complete typed namespace before any common client sees it. */
 	session->device = controller;
+	error = bcm2711_vulkan_session_open(session, &session->vulkan);
+	if (error != 0) {
+		kern_free(session);
+		mutex_unlock(&controller->mutex);
+		return error;
+	}
+
+	/* Sessions count only complete opens, and zero permits checked global recovery. */
 	controller->sessions++;
 	*result = session;
 
@@ -219,7 +228,7 @@ render_close(
 		bcm2711_render_fail(controller, error);
 }
 
-/* Reports only actual native storage operations implemented by this node. */
+/* Reports the complete native storage and Vulkan operations implemented by this node. */
 static int
 render_info(
 	void *opaque,
@@ -236,7 +245,7 @@ render_info(
 	info->max_resource_bytes = RENDER_RESOURCE_BYTES;
 	kern_snprintf(info->driver_name, sizeof(info->driver_name), "bcm2711-v3d42");
 
-	/* Succeeded: no Vulkan or command feature is implied by storage discovery. */
+	/* Succeeded: the same published table supplies storage, Vulkan and supervised-job discovery. */
 	return 0;
 }
 
@@ -799,7 +808,7 @@ static void
 bind_render(
 	struct bcm2711_render_device *controller)
 {
-	/* The allocation-only tables never imply SPIR-V compilation or Vulkan execution. */
+	/* Native ownership and checked recovery are assembled before complete Vulkan transport publication. */
 	controller->operations.version = DRV_GPU_INTERFACE_VERSION;
 	controller->operations.size = sizeof(controller->operations);
 	controller->operations.capabilities = RENDER_CAPABILITIES;
@@ -829,6 +838,9 @@ bind_render(
 	controller->recovery_operations.stop_poll = render_stop_poll;
 	controller->recovery_operations.fault = render_fault;
 	controller->recovery_operations.reset = render_reset;
+
+	/* The private typed runtime adds all command, capset and job callbacks as one complete contract. */
+	bcm2711_render_runtime_bind(&controller->operations);
 }
 
 /* Samples this namespace's stop admission under the same guard as native fault publication. */

@@ -17,6 +17,7 @@
 #include "broadcom/qpu/qpu_instr.h"
 #include "drivers/gpu/bcm2711/shader.h"
 #include "drivers/gpu/i915/compiler/compiler.h"
+#include <uapi/errno.h>
 #include "userland/desktop/wayland/shaders.h"
 
 /* One host-only bit conversion preserves exact scalar representations without aliasing violations. */
@@ -67,6 +68,7 @@ static void initialize_machine(struct shader_machine *machine, uint32_t fragment
 static void compare_number(uint32_t native, uint32_t expected);
 static void verify_program(const struct v3d_device_info *device, const uint32_t *words, size_t word_count, const struct i915_shader_ir *ir, enum bcm2711_shader_stage stage, struct bcm2711_shader_key *key);
 static void verify_allocation_refusal(const struct bcm2711_shader_key *key);
+static void verify_graphics_profile(const struct bcm2711_shader_key *key);
 
 /*
  * Supplies the ordinary kernel allocation API through the host allocator.
@@ -188,6 +190,12 @@ main(
 		error = drv_i915_shader_parse(modules[pair * 2 + 1], bytes[pair * 2 + 1] / 4, I915_STAGE_FRAGMENT, &fragment, &diagnostic);
 		assert(error == 0);
 		pipeline_key(fragment, &key);
+
+		/* One actual quad profile exercises independent graphics admission and its metadata lifetime. */
+		if (pair == 0)
+			verify_graphics_profile(&key);
+
+		/* Ordinary actual modules retain the existing native-allocation and scalar differential checks. */
 		verify_allocation_refusal(&key);
 		verify_program(&device, modules[pair * 2], bytes[pair * 2] / 4, vertex, BCM2711_SHADER_COORDINATE, &key);
 		verify_program(&device, modules[pair * 2], bytes[pair * 2] / 4, vertex, BCM2711_SHADER_VERTEX, &key);
@@ -923,6 +931,137 @@ verify_program(
 
 	/* The caller exercises ordinary program ownership after every completed native variant. */
 	bcm2711_shader_binary_free(binary);
+}
+
+/* Checks deep declaration graphs and stage changes through the public compiler, retaining the actual Keiland source body. */
+static void
+verify_graphics_profile(
+	const struct bcm2711_shader_key *key)
+{
+	struct bcm2711_shader_binary *binary;
+	struct bcm2711_shader_diagnostic diagnostic;
+	uint32_t *words;
+	size_t source_count;
+	size_t offset;
+	size_t prefix;
+	size_t entry;
+	size_t variable;
+	size_t position;
+	size_t baseline;
+	uint32_t opcode;
+	uint32_t count;
+	uint32_t scalar_type;
+	uint32_t scalar;
+	uint32_t previous_type;
+	uint32_t previous_constant;
+	uint32_t type;
+	uint32_t identity;
+	uint32_t index;
+	int error;
+
+	/* Locate actual declarations without relying on generated shader offsets or IDs. */
+	source_count = sizeof(kwl_quad_vert) / 4;
+	prefix = 0;
+	entry = 0;
+	variable = 0;
+	scalar_type = 0;
+	scalar = 0;
+	offset = 5;
+	while (offset < source_count) {
+		count = kwl_quad_vert[offset] >> 16;
+		opcode = kwl_quad_vert[offset] & 0xffffU;
+		assert(count != 0 && count <= source_count - offset);
+
+		/* A real float constant supplies the scalar leaf of the additional aggregate graph. */
+		if (opcode == 22U)
+			scalar_type = kwl_quad_vert[offset + 1];
+		if (opcode == 43U && kwl_quad_vert[offset + 1] == scalar_type)
+			scalar = kwl_quad_vert[offset + 2];
+		if (opcode == 15U)
+			entry = offset;
+		if (opcode == 59U)
+			variable = offset;
+		if (opcode == 54U) {
+			prefix = offset;
+			break;
+		}
+
+		/* Advance only over complete immutable source instructions while locating the module/function boundary. */
+		offset += count;
+	}
+
+	/* The fixture adds ordinary nested structure constants, leaving the source's actual executable shader unchanged. */
+	assert(prefix != 0 && entry != 0 && variable != 0);
+	assert(scalar_type != 0 && scalar != 0);
+	words = malloc((source_count + 2048U * 7U) * sizeof(*words));
+	assert(words != NULL);
+	memcpy(words, kwl_quad_vert, prefix * sizeof(*words));
+	previous_type = scalar_type;
+	previous_constant = scalar;
+	for (index = 0; index < 2048U; index++) {
+		/* Each new structure has one member of the preceding type and one constant of that exact type. */
+		position = prefix + index * 7U;
+		type = kwl_quad_vert[3] + index * 2U;
+		identity = type + 1U;
+		words[position] = (3U << 16) | 30U;
+		words[position + 1] = type;
+		words[position + 2] = previous_type;
+		words[position + 3] = (4U << 16) | 44U;
+		words[position + 4] = type;
+		words[position + 5] = identity;
+		words[position + 6] = previous_constant;
+		previous_type = type;
+		previous_constant = identity;
+	}
+
+	/* Deep aggregate expansion is refused before the shared parser allocates an IR or recurses through any constant. */
+	memcpy(words + prefix + 2048U * 7U, kwl_quad_vert + prefix, (source_count - prefix) * sizeof(*words));
+	words[3] = kwl_quad_vert[3] + 4096U;
+	baseline = allocations_live;
+	binary = (void *)1;
+	error = bcm2711_shader_compile(words, source_count + 2048U * 7U, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == ENOTSUP && binary == NULL && allocations_live == baseline);
+	assert(diagnostic.instruction == prefix + 8U * 7U + 3U);
+
+	/* A same-ID redefinition that could mutate an earlier constant edge is refused independently of nesting depth. */
+	words[prefix + 5] = scalar;
+	error = bcm2711_shader_compile(words, source_count + 2048U * 7U, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == EINVAL && binary == NULL && allocations_live == baseline);
+	assert(diagnostic.instruction == prefix + 3U);
+
+	/* Eight ordinary aggregate edges followed by the scalar leaf remain admitted and compile the unchanged actual shader. */
+	words[prefix + 5] = kwl_quad_vert[3] + 1U;
+	words[3] = kwl_quad_vert[3] + 16U;
+	memcpy(words + prefix + 8U * 7U, kwl_quad_vert + prefix, (source_count - prefix) * sizeof(*words));
+	error = bcm2711_shader_compile(words, source_count + 8U * 7U, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == 0 && binary != NULL);
+	bcm2711_shader_binary_free(binary);
+	assert(allocations_live == baseline);
+
+	/* A compute entry cannot overwrite the requested graphics stage before a Workgroup variable is decoded. */
+	memcpy(words, kwl_quad_vert, sizeof(kwl_quad_vert));
+	words[entry + 1] = 5U;
+	error = bcm2711_shader_compile(words, source_count, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == ENOTSUP && binary == NULL && allocations_live == baseline);
+	assert(diagnostic.instruction == entry);
+
+	/* Graphics entry points cannot route a malformed Workgroup variable into compute-only recursive layout. */
+	memcpy(words, kwl_quad_vert, sizeof(kwl_quad_vert));
+	words[variable + 3] = 4U;
+	error = bcm2711_shader_compile(words, source_count, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == ENOTSUP && binary == NULL && allocations_live == baseline);
+	assert(diagnostic.instruction == variable);
+
+	/* Preflight metadata OOM owns no IR, native program, or diagnostic pointer into freed storage. */
+	allocation_attempt = 0;
+	allocation_refusal = 1;
+	error = bcm2711_shader_compile(kwl_quad_vert, source_count, BCM2711_SHADER_VERTEX, key, &binary, &diagnostic);
+	assert(error == ENOMEM && binary == NULL && allocations_live == baseline);
+	allocation_refusal = 0;
+	free(words);
+
+	/* These are actual compiler refusal and lifetime results; no physical GPU scheduling is modeled. */
+	puts("WS141 native graphics stage/deep constant graph/redefinition/preflight OOM: PASS");
 }
 
 /* Verifies each native program allocation refusal leaves no leaked frontend or partial native ownership. */

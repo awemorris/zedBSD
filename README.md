@@ -12,10 +12,10 @@ zedBSD and Keiland Desktop
 </div><br>
 
 `zedBSD` is an operating system for modern computers, including those
-with touch displays. It consists of POSIX-compatible kernel and base
+with touch displays.  It consists of POSIX-compatible kernel and base
 system written from scratch, and ships with `Keiland Desktop`, a
-Wayland compositor and apps that unify the classic desktop UI/UX and a
-futuristic touch UI/UX.
+Wayland-based desktop environment that unifies the classic mouse UI/UX
+and a futuristic touch UI/UX.
 
 zedBSD aim to become a commercial UNIX in the line of macOS and
 Solaris: an operating system made for newly-designed cutting-edge
@@ -28,13 +28,13 @@ Group.)
 
 Getting there means not being bound to an existing kernel or userland
 when the whole machine has to move together.  Most of the system is
-reimplemented.  Keiland Desktop is a Wayland compositor, and it adds
-extensions that existing compositors do not have, so the display,
-input, and applications can behave as one machine rather than as a set
-of loosely coupled clients.  The same reason applies to the GPU stack
-on zedBSD: a native, direct Vulkan path, not Linux DRM/KMS or Mesa.
-The desktop is not locked to that kernel.  Keiland Desktop is also
-ported to Linux and FreeBSD.
+reimplemented.  Keiland Server is a Wayland compositor, and it adds
+many extensions that existing compositors do not have, so the display,
+input, and apps can behave as one machine rather than as a set of
+loosely coupled clients.  The same reason applies to the GPU stack on
+zedBSD: a native, direct Vulkan path, not Linux DRM/KMS or Mesa.  The
+desktop is not locked to that kernel.  Keiland Desktop is also ported
+to Linux and FreeBSD.
 
 The kernel, drivers, libc, and desktop are developed so that hardware
 and software can ship as one product: tablets, phones, and PCs
@@ -43,19 +43,22 @@ on open hardware stays free to use.  Features that need the project's
 own hardware are still published as source, and only run on that
 hardware.
 
+---
+
 ## AI Usage
 
-Both zedBSD and Keiland Desktop are
-[designed and directed](plan/master.md)
+Both zedBSD and Keiland Desktop are [designed and directed](plan/master.md)
 by one developer and implemented with AI coding agents.  Current targets
 are 64-bit x86 PCs and the Raspberry Pi series.
 
 Debugging is done by the latest "Vision Language Model Loop", which
-uses a camera to caputure the screen of the PC under debugging.
+uses a camera to capture the screen of the PC under debugging.
+
+---
 
 ## Try zedBSD
 
-You do not need to compile from scratch to boot zedBSD. Pre-built
+You do not need to compile from scratch to boot zedBSD.  Pre-built
 images are published for real PC and QEMU.
 
 ### Real PC
@@ -63,9 +66,16 @@ images are published for real PC and QEMU.
 Write a disk image to a USB stick, then boot from it.
 
 Supported hardware:
-- CPU: Intel 11th-gen+, Tiger Lake or later
-- GPU: Intel Iris Xe iGPU (Xe-LP)
-- WiFi: Intel AX211 or Realtek RTL8822BU USB
+
+- Dell Latitude 5330:
+-- CPU: Intel Core i5 1245P
+-- GPU: Intel Iris Xe
+-- WiFi: Intel AX211
+-- Bluetooth: Intel AX211
+-- USB: USB 3.0, USB-C DisplayPort Alt Mode
+
+- Raspberry Pi4
+-- No onboard WiFi & Bluetooth, use USB ones.
 
 ### Windows (VM)
 

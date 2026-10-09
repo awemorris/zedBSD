@@ -9,6 +9,8 @@
 #include "userland/desktop/libvulkan/resources.c"
 #include "userland/desktop/libvulkan/pipeline.c"
 #include "userland/desktop/libvulkan/commands.c"
+#include "userland/desktop/libvulkan/sync.c"
+#include "userland/desktop/libvulkan/queue.c"
 
 /*
  * Refuses host transport because this wrapper exercises finite real client recording without a kernel device descriptor.
@@ -131,6 +133,92 @@ ws141_client_encode_recording(
 	vulkan_writer_finish(&command.recording);
 
 	/* Succeeded: real client-owned recording bytes were copied before every fixture application pointer retired. */
+	return;
+}
+
+/*
+ * Copies real public buffer/image upload or readback recording with exact standard selected fields.
+ */
+void
+ws141_client_encode_raster_copy(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t buffer_id,
+	uint64_t image_id,
+	VkImageLayout layout,
+	const VkBufferImageCopy *regions,
+	uint32_t count,
+	VkBool32 upload)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object buffer;
+	struct vulkan_object image;
+
+	/* Temporary client identities retain no kernel resource; the actual APIs independently copy their complete standard parameters. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.wire_id = buffer_id;
+	memset(&image, 0, sizeof(image));
+	image.wire_id = image_id;
+	if (upload) {
+		vkCmdCopyBufferToImage(&command, (VkBuffer)(uintptr_t)&buffer, (VkImage)(uintptr_t)&image, layout, count, regions);
+	} else {
+		vkCmdCopyImageToBuffer(&command, (VkImage)(uintptr_t)&image, layout, (VkBuffer)(uintptr_t)&buffer, count, regions);
+	}
+
+	/* All actual copied recording bytes enter the host wire before either client identity or caller vector retires. */
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: uploaded and readback opcode-specific layout/identity framing comes from the real public client. */
+	return;
+}
+
+/*
+ * Copies a real public buffer-copy recording with caller-owned exact byte regions.
+ */
+void
+ws141_client_encode_buffer_copy(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t source_id,
+	uint64_t destination_id,
+	const VkBufferCopy *regions,
+	uint32_t count)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object buffers[2];
+
+	/* These temporary client handles supply only actual wire IDs; the actual API copies all region bytes into its recording. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(buffers, 0, sizeof(buffers));
+	buffers[0].wire_id = source_id;
+	buffers[1].wire_id = destination_id;
+	vkCmdCopyBuffer(&command, (VkBuffer)(uintptr_t)&buffers[0], (VkBuffer)(uintptr_t)&buffers[1], count, regions);
+
+	/* The actual copied recording retires only after all complete client bytes enter the fixture's wire batch. */
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: no caller-owned buffer handle or region array remains in the immutable wire result. */
 	return;
 }
 
@@ -342,5 +430,95 @@ ws141_client_encode_graphics(
 	pipeline_encode_graphics(writer, &device, 0, &info);
 
 	/* Succeeded: writer status and exact bytes come from the unmodified actual client encoder. */
+	return;
+}
+
+/*
+ * Encodes finite queue-submit cases with the actual private client wait ledger and numerical native identities.
+ */
+void
+ws141_client_encode_submit(
+    struct vulkan_writer *writer,
+    uint64_t command_id,
+    uint64_t semaphore_id,
+    uint64_t fence_id,
+    uint32_t mode)
+{
+	struct vulkan_sync semaphore;
+	struct vulkan_object fence;
+	struct VkCommandBuffer_T commands[2];
+	struct vulkan_queue_wait waits[2];
+	struct vulkan_queue_transaction transaction;
+	VkSubmitInfo submits[2];
+	VkCommandBuffer command_handles[2];
+	VkSemaphore sem;
+	VkPipelineStageFlags stage;
+	uint32_t count;
+	uint32_t index;
+
+	/* Explicit local metadata resolves actual typed native fixtures, while the absent second command deliberately tests trailing refusal. */
+	memset(&semaphore, 0, sizeof(semaphore));
+	semaphore.object.wire_id = semaphore_id;
+	memset(&fence, 0, sizeof(fence));
+	fence.wire_id = fence_id;
+	memset(commands, 0, sizeof(commands));
+	commands[0].object.wire_id = command_id;
+	commands[1].object.wire_id = 999;
+	command_handles[0] = (VkCommandBuffer)&commands[0];
+	command_handles[1] = (VkCommandBuffer)&commands[1];
+	sem = (VkSemaphore)(uintptr_t)&semaphore;
+	stage = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	if (mode == 5) {
+		stage = VK_PIPELINE_STAGE_HOST_BIT;
+	} else if (mode == 6) {
+		stage = VK_PIPELINE_STAGE_COMPUTE_SHADER_BIT;
+	}
+
+	/* The real ledger owns each proposed native or completed-software wait during this finite encoding. */
+	memset(waits, 0, sizeof(waits));
+	memset(&transaction, 0, sizeof(transaction));
+	transaction.waits = waits;
+	memset(submits, 0, sizeof(submits));
+	for (index = 0; index < 2; index++)
+		submits[index].sType = VK_STRUCTURE_TYPE_SUBMIT_INFO;
+
+	/* Mode zero is an empty fence signal; one is signal-only, four is one primary, and two/three are ordered binary chains. */
+	count = 0;
+	if (mode == 1) {
+		count = 1;
+		submits[0].signalSemaphoreCount = 1;
+		submits[0].pSignalSemaphores = &sem;
+	} else if (mode == 4) {
+		count = 1;
+		submits[0].commandBufferCount = 1;
+		submits[0].pCommandBuffers = &command_handles[0];
+	} else if (mode == 2 ||
+	    mode == 3 || mode == 5 || mode == 6) {
+		count = 2;
+		submits[0].waitSemaphoreCount = 1;
+		submits[0].pWaitSemaphores = &sem;
+		submits[0].pWaitDstStageMask = &stage;
+		submits[0].commandBufferCount = 1;
+		submits[0].pCommandBuffers = &command_handles[0];
+		submits[0].signalSemaphoreCount = 1;
+		submits[0].pSignalSemaphores = &sem;
+		submits[1].waitSemaphoreCount = 1;
+		submits[1].pWaitSemaphores = &sem;
+		submits[1].pWaitDstStageMask = &stage;
+		if (mode == 2) {
+			submits[1].commandBufferCount = 1;
+			submits[1].pCommandBuffers = &command_handles[1];
+		}
+	}
+
+	/* The real queue encoder preserves native wait-stage lengths, command IDs, signal IDs and the exact optional fence handle. */
+	vulkan_write_u64(writer, 40);
+	vulkan_write_u32(writer, count);
+	vulkan_write_u64(writer, count);
+	for (index = 0; index < count; index++)
+		queue_write_submit(writer, &transaction, &submits[index]);
+	queue_write_handle(writer, (uint64_t)(uintptr_t)&fence);
+
+	/* Succeeded: only explicit finite local metadata was supplied to unchanged actual client submission encoding. */
 	return;
 }

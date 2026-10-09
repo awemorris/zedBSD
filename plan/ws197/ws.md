@@ -22,7 +22,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 
 ## 再開の手順（2026-10-10 Q1、別の session への引き継ぎ）
 
-- **code と詳細の記録は保留の branch `agent/p1-ws197`（head 2bf274a38）にある。** main には無い（10/17 の公開まで release の bluetoothd を変えないため、Q1 の判断）。main のこの ws.md と phase001 は要約。p002・p003 の phase.md・review・試験（plan/ws197/tests/）は branch にだけある。
+- **code と詳細の記録は保留の branch `agent/p1-ws197`（head 2bf274a38）にある。** main には無い（10/17 の公開まで release の bluetoothd を変えないため、Q1 の判断）。p002・p003 の phase.md と review は 2026-10-10 に branch の f06bf4dbb の物を main にも写した（ユーザーの依頼）。branch で更新したら main へも写す（branch の main の merge で揃う）。試験（plan/ws197/tests/）は branch の code が要るので branch にだけある。
 - 再開の時: (1) branch に main を merge する（`git switch agent/p1-ws197 && git merge main`。WS143・WS199 の bluetoothd・passkey の変更と衝突しうるので WS143 の host 試験 `plan/ws143/tests/bt-daemon-host-test.sh` と `plan/ws197/tests/bt-phone-host-test.sh` を流す）。(2) branch の plan/ws197/phase003/phase.md の「進み」の最後の行の**再開点**から続ける。(3) i03 が通ったら main へ merge（ベータ2 に入れる、2026-10-10 ユーザー）。merge の前に T1 で WS143 の HID の回帰。
 - 各 commit で: WS143 と WS197 の host 試験、target の bluetoothd の build warning 0。QEMU に Bluetooth の実機は無いので、HID の回帰は T1（T1-518 の手順: branch の commit を detach で build-bt-image.sh、WS143 の 4 本の試験）。
 
@@ -38,8 +38,11 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（profile の役割、bluetoothd の構造、WS170 の API、試験）、review 3 回、ユーザーの決定 Q1〜Q16 | 4 | cleared |
 | p002 | RFCOMM・OBEX・SDP の server と client・phone.c・phone の pairing・linkmgr・drop の回復・WS143 の変更（i01〜i08）。詳細は branch の phase002/phase.md | 22 | **cleared**（host 約 2,500 checks、T1-518 HID の回帰 PASS、2026-10-10 Q1） |
-| p003 | MAP（MCE の MAS と MNS）、phone link の持ち主・記録・再接続、socket の PHONE。詳細設計 第 2.1 版（review 2 回）、i01〜i08。詳細は branch の phase003/phase.md | 24 | **in-progress**: i01（phonerec、PAIR の検査、PHONE LINK・SHOW、FORGET）・i02（outq、client の枠、長さ付きの入力）済み。i03（phone link の一生）の途中。i04 mapxml・i05 bMessage・i06 map.c と MNS・i07 phoneio と SUBSCRIBE・i08 T1 は未 |
-| p004 | Integration（WS170 Phone の app の backend: SMS・通話・連絡先の compositor の API、Settings のスマホの pairing と許可）。p003 §1.1 の変更（suspend、本文 16 KB、PAGE の cursor、PHONE GET を作らない）を前提に | 12 | planned |
+| p003 | MAP（MCE の MAS と MNS）。2026-10-10: i01〜i07 実装済み、c56043c2b（i06）まで main に merge（T1-526 PASS）、i07＋owner の純粋な関数 5c6219e7a は T1-527 待ち。、phone link の持ち主・記録・再接続、socket の PHONE。詳細設計 第 2.1 版（review 2 回）、i01〜i08。詳細は branch の phase003/phase.md | 24 | **in-progress**: i01（phonerec、PAIR の検査、PHONE LINK・SHOW、FORGET）・i02（outq、client の枠、長さ付きの入力）済み。i03（phone link の一生）の途中。i04 mapxml・i05 bMessage・i06 map.c と MNS・i07 phoneio と SUBSCRIBE・i08 T1 は未 |
+| [p004](phase004/phase.md) | SMS の層の interface の設計（Phone app・libkeiland・compositor・libkeiland-backend・bluetoothd、v3.1、review 3 回）。ユーザーの決定 P1〜P8 | — | cleared（設計、2026-10-10） |
+| p004a | libkeiland-backend の phone-zedbsd.c（bluetoothd の socket）・compositor の phone-shell.c の bluetooth の backend・libkeiland の追加（phase004 §3〜§5・§11.2〜§11.4） | 6.5 | planned、次 |
+| p004b | Phone の app の保存と同期（目印・merge・E.164 の key・送信の状態） | 3.5 | planned |
+| p004c | Settings の「Use as phone」と通知（WS156 の lock_text の変更は P1 が同じ Phase で行う、Q1） | 1.5 | planned |
 | p005 | PBAP（電話帳、vCard 2.1/3.0、連絡先の store） | 8 | planned |
 | p006 | HFP の制御（AT の SLC、indicator、応答・終話・発信、発信者、割り込み、codec の交渉） | 12 | planned |
 | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
@@ -51,3 +54,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 ## 2026-10-10 Q1: p002 の判定
 
 p002（RFCOMM・OBEX・SDP・phone.c と WS143 の変更、i01〜i08）は保留の branch agent/p1-ws197 の 92157604f で実装済み。host 試験は全部 PASS、T1-518（WS143 の HID の回帰 4 本、bt-loopback-p002・bt-daemon-p003・bt-pair-p004・bt-hid-p005）が全部 PASS。**p002 は cleared**（code は 10/17 の後に main へ merge）。branch の phase002/phase.md への反映は P1。
+
+## 2026-10-10 T1-524（HID の回帰、883abd4b8）
+
+bt-loopback-p002・bt-daemon-p003（SHOW・BONDS）・bt-pair-p004 は PASS。**bt-hid-p005 が 2 回とも FAIL**: 自動の接続の後に HOG の mouse が open にならない（state=waiting）、keyboard の EVDEV の node が出ない、controller が去った時の KEY_B の release、controller が戻った時の HOG の mouse。→ WS197 i01〜i03 の WS143 の変更（linkmgr の page の枠・session・router）による回帰の見込み。**main への merge は止める**。P1 が直す。
