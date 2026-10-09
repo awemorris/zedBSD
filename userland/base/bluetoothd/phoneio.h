@@ -21,6 +21,7 @@
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 /* The longest text PHONE SEND carries. */
 #define BTD_PHONE_SEND_MAX		8192U
@@ -71,6 +72,37 @@ struct btd_phoneio_input {
 	size_t text_used;
 };
 
+/*
+ * The phone's owner as the socket's rules see it (ws197-p004 section
+ * 5.4): whether a valid record names one, and its uid.
+ */
+struct btd_phoneio_owner {
+	int have_owner;
+	uid_t owner;
+};
+
+/*
+ * One client as the phone's rules see it: whether its slot is open, its
+ * uid, whether it subscribed, and whether it waits for a phone request's
+ * answer.
+ */
+struct btd_phoneio_client {
+	int open;
+	uid_t uid;
+	int subscribed;
+	int waits_phone;
+};
+
+/* What PHONE SUBSCRIBE is answered. */
+#define BTD_PHONEIO_SUBSCRIBE_OK		0
+#define BTD_PHONEIO_SUBSCRIBE_PERMISSION	1
+#define BTD_PHONEIO_SUBSCRIBE_BUSY		2
+
+int btd_phoneio_allowed(const struct btd_phoneio_owner *owner, uid_t uid);
+int btd_phoneio_owner_changed(const struct btd_phoneio_owner *before, const struct btd_phoneio_owner *now);
+unsigned btd_phoneio_to_close(const struct btd_phoneio_owner *owner, const struct btd_phoneio_client *clients, unsigned count, int *closes);
+int btd_phoneio_subscribe(const struct btd_phoneio_owner *owner, uid_t uid, int have_record, unsigned subscribers, unsigned most);
+int btd_phoneio_accept(uid_t uid, int seated, unsigned free_slots, unsigned reserved, unsigned held, unsigned per_uid);
 int btd_phoneio_next(const char **cursor, char *key, size_t key_size, char *value, size_t value_size);
 int btd_phoneio_send_length(const char *line, size_t *length);
 int btd_phoneio_quote(char *line, size_t size, size_t *used, const char *text, size_t limit);

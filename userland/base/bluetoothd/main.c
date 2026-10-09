@@ -210,6 +210,7 @@ static void btd_phone_send_request(int index, const char *line, const uint8_t *t
 static uint64_t btd_token(int index);
 static struct btd_client *btd_token_client(uint64_t token);
 static int btd_phone_allowed(uid_t uid);
+static void btd_phone_owner(struct btd_phoneio_owner *owner);
 static void btd_client_raw(struct btd_client *client, const char *line, const uint8_t *bytes, size_t length);
 static void btd_subscriber_write(struct btd_client *client, const char *line, const uint8_t *bytes, size_t length);
 static int btd_phone_line(uid_t uid, int permitted, const char *prefix, char *line, size_t size);
@@ -294,13 +295,12 @@ static struct btd_map btd_messages;
 
 /*
  * What the phone's subscribers were told last (the line of PHONE STATE,
- * an empty one before the first) and the uid of the phone's owner then
- * (have_owner 0: no valid record).  A change of either is acted on at the
- * end of the loop's round.
+ * an empty one before the first) and the phone's owner then (none: no
+ * valid record).  A change of either is acted on at the end of the loop's
+ * round.
  */
 static char btd_phone_told[BTD_PHONEIO_OUT_MAX];
-static int btd_have_owner;
-static uid_t btd_owner;
+static struct btd_phoneio_owner btd_owner_known;
 
 
 /*
@@ -977,6 +977,7 @@ btd_accept(
 	gid_t gid;
 	int descriptor;
 	int seated;
+	int taken;
 	int status;
 
 	/* The connection; its reads never block. */
@@ -1000,28 +1001,23 @@ btd_accept(
 			free_slots++;
 	}
 
-	/* The last few are root's and the seat's user's (section 4.2). */
-	seated = 0;
-	if (uid == 0)
-		seated = 1;
-	if (!seated && free_slots <= BTD_CLIENTS_RESERVED)
-		seated = btd_seated(uid);
-	if (free_slots <= BTD_CLIENTS_RESERVED && !seated) {
-		(void)close(descriptor);
-		return;
-	}
-
-	/* A uid that is neither root nor the seat's user holds a few at most (ws197-p004 section 5.4). */
+	/* The connections the uid holds already. */
 	held = 0U;
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 		if (btd_clients[index].descriptor >= 0 && btd_clients[index].uid == uid)
 			held++;
 	}
 
-	/* A uid at the bound: the seat's user is not bound. */
-	if (!seated && held >= BTD_CLIENTS_PER_UID)
+	/* Whether it is the seat's user, looked at only when the rules need it (the last few slots, a uid at its share). */
+	seated = 0;
+	if (uid != 0 &&
+	    (free_slots <= BTD_CLIENTS_RESERVED ||
+	     held >= BTD_CLIENTS_PER_UID))
 		seated = btd_seated(uid);
-	if (!seated && held >= BTD_CLIENTS_PER_UID) {
+
+	/* Root and the seat's user while a slot is free; others not into the reserve nor past their share (sections 4.2, p004 5.4). */
+	taken = btd_phoneio_accept(uid, seated, free_slots, BTD_CLIENTS_RESERVED, held, BTD_CLIENTS_PER_UID);
+	if (!taken) {
 		(void)close(descriptor);
 		return;
 	}
@@ -3096,18 +3092,27 @@ static int
 btd_phone_allowed(
 	uid_t uid)
 {
-	/* Root. */
-	if (uid == 0)
-		return 1;
+	struct btd_phoneio_owner owner;
+	int allowed;
 
-	/* The owner of a valid record. */
-	if (btd_phone_link.have_record &&
-	    btd_phone_link.record_valid &&
-	    btd_phone_link.record.uid == uid)
-		return 1;
+	/* The owner now, and the rule. */
+	btd_phone_owner(&owner);
+	allowed = btd_phoneio_allowed(&owner, uid);
+	return allowed;
+}
 
-	/* Anyone else. */
-	return 0;
+/* Gives the phone's owner as the socket's rules see it: the uid of a valid record, or none. */
+static void
+btd_phone_owner(
+	struct btd_phoneio_owner *owner)
+{
+	/* None, unless a valid record names one. */
+	owner->have_owner = 0;
+	owner->owner = 0;
+	if (btd_phone_link.have_record && btd_phone_link.record_valid) {
+		owner->have_owner = 1;
+		owner->owner = btd_phone_link.record.uid;
+	}
 }
 
 /*
@@ -3241,45 +3246,50 @@ static void
 btd_phone_watch(void)
 {
 	static char line[BTD_PHONEIO_OUT_MAX];
+	struct btd_phoneio_client clients[BTD_CLIENTS_MAX];
+	struct btd_phoneio_owner owner;
 	struct btd_client *client;
+	int closes[BTD_CLIENTS_MAX];
 	unsigned index;
 	unsigned subscribers;
 	size_t pending;
-	int have_owner;
-	int allowed;
+	int changed;
 	int same;
 	int error;
 
 	/* The owner now. */
-	have_owner = 0;
-	if (btd_phone_link.have_record && btd_phone_link.record_valid)
-		have_owner = 1;
+	btd_phone_owner(&owner);
+	changed = btd_phoneio_owner_changed(&btd_owner_known, &owner);
 
-	/* A new owner, or none: the others' subscribers and requests end, MAP looks again. */
-	if (have_owner != btd_have_owner || (have_owner && btd_phone_link.record.uid != btd_owner)) {
-		btd_have_owner = have_owner;
-		btd_owner = btd_phone_link.record.uid;
+	/* A new owner, or none: the others' subscribers and waiting clients close, MAP looks again. */
+	if (changed) {
+		btd_owner_known = owner;
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
-			client = &btd_clients[index];
-			if (client->descriptor < 0)
-				continue;
-			allowed = btd_phone_allowed(client->uid);
-			if (allowed)
-				continue;
+			clients[index].open = 0;
+			if (btd_clients[index].descriptor >= 0 && !btd_clients[index].dead)
+				clients[index].open = 1;
+			clients[index].uid = btd_clients[index].uid;
+			clients[index].subscribed = btd_clients[index].subscribed;
+			clients[index].waits_phone = btd_clients[index].waits_phone;
+		}
 
-			/*
-			 * A subscriber goes; so does a client waiting for a phone
-			 * request (closed, not refused: a SEND already pushed must
-			 * read as not known, never as a refusal that invites a second
-			 * send, ws197-p004 review-2 m4).
-			 */
-			if (client->subscribed)
-				client->dead = 1;
-			if (client->waits_phone) {
+		/* Those that may no longer use the phone. */
+		(void)btd_phoneio_to_close(&owner, clients, BTD_CLIENTS_MAX, closes);
+
+		/*
+		 * Each one marked closes at the end of the round; its request is
+		 * forgotten first (closed, not refused: a SEND already pushed must
+		 * read as not known, never as a refusal that invites a second send,
+		 * ws197-p004 review-2 m4).
+		 */
+		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+			if (!closes[index])
+				continue;
+			client = &btd_clients[index];
+			if (client->waits_phone)
 				btd_map_cancel(&btd_messages, btd_token((int)index));
-				client->waits_phone = 0;
-				client->dead = 1;
-			}
+			client->waits_phone = 0;
+			client->dead = 1;
 		}
 
 		/* MAP looks again whether it is wanted. */
@@ -3327,29 +3337,28 @@ btd_phone_subscribe_request(
 	int index)
 {
 	char line[BTD_PHONEIO_OUT_MAX];
+	struct btd_phoneio_owner owner;
 	struct btd_client *client;
 	unsigned count;
 	unsigned slot;
-	int allowed;
+	int answer;
 	int error;
 
-	/* The owner and root (no record: nobody's). */
+	/* The subscribers now. */
 	client = &btd_clients[index];
-	allowed = btd_phone_allowed(client->uid);
-	if (!allowed || !btd_phone_link.have_record) {
-		btd_write(client, "ERROR permission\nDONE\n");
-		return;
-	}
-
-	/* Two at a time. */
 	count = 0U;
 	for (slot = 0U; slot < BTD_CLIENTS_MAX; slot++) {
 		if (btd_clients[slot].descriptor >= 0 && btd_clients[slot].subscribed)
 			count++;
 	}
 
-	/* No third. */
-	if (count >= BTD_SUBSCRIBERS_MAX) {
+	/* The owner and root while there is a record, two at a time. */
+	btd_phone_owner(&owner);
+	answer = btd_phoneio_subscribe(&owner, client->uid, btd_phone_link.have_record, count, BTD_SUBSCRIBERS_MAX);
+	if (answer == BTD_PHONEIO_SUBSCRIBE_PERMISSION) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	} else if (answer == BTD_PHONEIO_SUBSCRIBE_BUSY) {
 		btd_write(client, "ERROR busy\nDONE\n");
 		return;
 	}

@@ -22,6 +22,12 @@
  *              after the text (no newline ends a text) is a request again; a request that closes the client
  *              stops the reading; a malformed PHONE SEND line and a line
  *              too long are reported
+ *   rules      who may use the phone (ws197-p004 section 5.4): root and
+ *              the owner; the owner's change and the clients it closes
+ *              (subscribers and waiting clients of others, not root's,
+ *              not closed slots); SUBSCRIBE's permission and busy; the
+ *              accept of connections (the reserve, a uid's share, root
+ *              and the seat's user)
  *
  *   plan/ws197/tests/bt-phone-host-test.sh
  */
@@ -64,6 +70,7 @@ static int feed(struct btd_phoneio_input *input, const char *bytes, size_t lengt
 static void test_arguments(void);
 static void test_length(void);
 static void test_input(void);
+static void test_rules(void);
 
 /*
  * Runs every part and reports the checks.
@@ -75,6 +82,7 @@ main(void)
 	test_arguments();
 	test_length();
 	test_input();
+	test_rules();
 
 	/* The count of what failed. */
 	printf("bt-phoneio-host-test: %u checks, %u failed\n", checks, failures);
@@ -378,4 +386,93 @@ test_input(void)
 	check(error == 0 && input.text != NULL && input.text_used == 3U, "input: a text being read");
 	btd_phoneio_input_clear(&input);
 	check(input.text == NULL && seen.texts == 0U, "input: cleared, no request");
+}
+
+/* The phone's rules for clients: who may use it, the owner's change, SUBSCRIBE, the accept. */
+static void
+test_rules(void)
+{
+	struct btd_phoneio_owner none;
+	struct btd_phoneio_owner alice;
+	struct btd_phoneio_owner bob;
+	struct btd_phoneio_client clients[7];
+	int closes[7];
+	unsigned marked;
+	int answer;
+
+	/* No owner, alice (1001), bob (1002). */
+	none.have_owner = 0;
+	none.owner = 0;
+	alice.have_owner = 1;
+	alice.owner = 1001;
+	bob.have_owner = 1;
+	bob.owner = 1002;
+
+	/* Root and the owner; nobody else, and nobody but root without an owner. */
+	check(btd_phoneio_allowed(&alice, 0), "rules: root");
+	check(btd_phoneio_allowed(&alice, 1001), "rules: the owner");
+	check(!btd_phoneio_allowed(&alice, 1002), "rules: another uid");
+	check(!btd_phoneio_allowed(&none, 1001), "rules: no owner, no uid");
+	check(btd_phoneio_allowed(&none, 0), "rules: no owner, root");
+
+	/* The owner's changes. */
+	check(btd_phoneio_owner_changed(&none, &alice), "rules: an owner came");
+	check(btd_phoneio_owner_changed(&alice, &bob), "rules: another owner");
+	check(btd_phoneio_owner_changed(&alice, &none), "rules: the owner went");
+	check(!btd_phoneio_owner_changed(&alice, &alice), "rules: the same owner");
+
+	/*
+	 * Alice's phone becomes bob's: alice's subscriber and waiting client
+	 * close; bob's, root's, a closed slot and a client that neither
+	 * subscribed nor waits stay.
+	 */
+	memset(clients, 0, sizeof(clients));
+	clients[0].open = 1;
+	clients[0].uid = 1001;
+	clients[0].subscribed = 1;
+	clients[1].open = 1;
+	clients[1].uid = 1002;
+	clients[1].subscribed = 1;
+	clients[2].open = 1;
+	clients[2].uid = 1002;
+	clients[2].waits_phone = 1;
+	clients[3].open = 1;
+	clients[3].uid = 1001;
+	clients[4].open = 1;
+	clients[4].uid = 0;
+	clients[4].subscribed = 1;
+	clients[5].open = 0;
+	clients[5].uid = 1001;
+	clients[5].subscribed = 1;
+	clients[6].open = 1;
+	clients[6].uid = 1001;
+	clients[6].waits_phone = 1;
+	marked = btd_phoneio_to_close(&bob, clients, 7U, closes);
+	check(marked == 2U, "rules: two clients close");
+	check(closes[0] && closes[6], "rules: alice's subscriber and waiting client close");
+	check(!closes[1] && !closes[2] && !closes[3] && !closes[4] && !closes[5], "rules: the others stay");
+
+	/* No owner left: alice's and bob's go, root's stays. */
+	marked = btd_phoneio_to_close(&none, clients, 7U, closes);
+	check(marked == 4U && closes[0] && closes[1] && closes[2] && closes[6] && !closes[4], "rules: no owner, all but root's close");
+
+	/* SUBSCRIBE: no record, another uid, two already, the owner. */
+	answer = btd_phoneio_subscribe(&alice, 1001, 0, 0U, 2U);
+	check(answer == BTD_PHONEIO_SUBSCRIBE_PERMISSION, "rules: subscribe without a record");
+	answer = btd_phoneio_subscribe(&alice, 1002, 1, 0U, 2U);
+	check(answer == BTD_PHONEIO_SUBSCRIBE_PERMISSION, "rules: subscribe of another uid");
+	answer = btd_phoneio_subscribe(&alice, 1001, 1, 2U, 2U);
+	check(answer == BTD_PHONEIO_SUBSCRIBE_BUSY, "rules: a third subscriber");
+	answer = btd_phoneio_subscribe(&alice, 1001, 1, 1U, 2U);
+	check(answer == BTD_PHONEIO_SUBSCRIBE_OK, "rules: the owner subscribes");
+	answer = btd_phoneio_subscribe(&alice, 0, 1, 0U, 2U);
+	check(answer == BTD_PHONEIO_SUBSCRIBE_OK, "rules: root subscribes");
+
+	/* The accept: the reserve of 4, a share of 4, root and the seat's user, no slot at all. */
+	check(btd_phoneio_accept(1002, 0, 10U, 4U, 3U, 4U), "rules: another uid below its share");
+	check(!btd_phoneio_accept(1002, 0, 10U, 4U, 4U, 4U), "rules: another uid at its share");
+	check(!btd_phoneio_accept(1002, 0, 4U, 4U, 0U, 4U), "rules: another uid into the reserve");
+	check(btd_phoneio_accept(1001, 1, 4U, 4U, 6U, 4U), "rules: the seat's user into the reserve and past the share");
+	check(btd_phoneio_accept(0, 0, 1U, 4U, 9U, 4U), "rules: root");
+	check(!btd_phoneio_accept(0, 0, 0U, 4U, 0U, 4U), "rules: no slot at all");
 }
