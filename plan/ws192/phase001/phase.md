@@ -2,7 +2,7 @@
 
 # ws192-p001: 状態の島の操作パネル（glass）の設計と実装
 
-Status: planned（2026-10-09 Q1、q917 P1）
+Status: test-wait（2026-10-09 P1 q917: 実装・host 試験 PASS・build warning 0。AAT は T1 の依頼（p002 を兼ねる））
 Parent: [WS192](../ws.md)
 
 ## 手順
@@ -53,3 +53,25 @@ Parent: [WS192](../ws.md)
 
 - AAT の scenario（mouse と touch の両方）: 島の真ん中を tap → panel open、Wi-Fi の switch（network-probe）→ off/on、「›」→ network の menu、volume の slider の drag → 値、mute、Input → 次の言語、外の tap と Esc で閉じる、PNG。
 - host 試験: 配置の計算（output の幅ごと、出る行の組み合わせ）を compositor の他の host 試験と同じ形で。
+
+ユーザーの決定（2026-10-09、Q1 経由、クリック「全部パネルに統一（P1 の案）」）: 上の設計の 1〜5（島の press は全部パネル、個別の popup はパネルの「›」から、mouse の近道は残す）で進める。
+
+## 2026-10-09 P1 q917: 実装（test-wait）
+
+### 変更
+
+- 新しい `userland/desktop/wayland/status-panel.c`（約 980 行）: 島の位置の記録（`kwl_status_panel_place`、bar が描く時に output ごと）、開閉（島の press、もう一度島・外の press（そこで止まる）・Esc）、配置（右端を時計の pill の右端に、bar の下 6 px、幅 360 か output − 16）、行（Wi-Fi・Bluetooth（controller がある時）・Sound・Input（IME が言語を出している時）・Battery（ある時））、各行の press（switch・「›」の残り・Mute・slider の drag・次の言語）、glass と行の card・switch・slider の描画、test の log（`KWL STATUS panel open … sound=`、`KWL STATUS item name=…`、`KWL STATUS act name=…`、`KWL STATUS panel close via=…`）。Alt+click は島の icon の物（network の詳細）に、network・Bluetooth・volume の menu が開いている間の島の press はその menu の物に残す。
+- `shell.c`: `draw_status` で島の位置をパネルへ、press の分配で media・IME・volume・network・Bluetooth より前にパネル、描画（system bar と head の両方）、「開いている間は全部の button」・key・motion・surface の判定・still の判定にパネルを足した。`keyboard.c`・`scanout.c`・`corner.c` の「popup が開いているか」の列にも足した。
+- 小さな公開の関数: `volume.c`（`kwl_volume_panel_state`・`kwl_volume_panel_slide`・`kwl_volume_panel_mute`、popup の slider・Mute と同じ `volume_set`）、`network.c`（`kwl_network_panel_state`・`kwl_network_panel_switch`（menu の switch の行と同じ `network_act`）・`kwl_network_panel_open`）、`bluetooth-bar.c`（`kwl_bluetooth_panel_state`・`kwl_bluetooth_panel_switch`（menu の switch と同じ request と保持）・`kwl_bluetooth_panel_open`）、`input-method.c`（`kwl_ime_panel_label`・`kwl_ime_panel_next`（chip と同じ `STATUS_NEXT`））。宣言は `kwl.h`・`ime.h`・`glass.h`。build の列（Makefile・Makefile.linux・Makefile.freebsd）に status-panel.c。
+- libkeiland・backend・protocol・HAL は変えていない。
+
+### 確かめ
+
+- `make -j32 build/amd64/bin/wayland` rc 0・warning 0。`make keiland-linux`（Linux の build、host の gcc）rc 0・warning 0。FreeBSD の build は未実施（FreeBSD の host が要る）。
+- `plan/tools/style-check.py`: status-panel.c は 0。変えた既存の file の指摘の数は変更の前と同じ（bluetooth-bar.c の 1 は直した）。
+- host 試験 `plan/ws192/tests/status-panel-host-test.sh`（status-panel.c と plane.c を host の cc で、描画と bar の widget を stand-in にして）: 17 項目 PASS（島だけで開く・Alt は開かない、時計の右端に揃う、Wi-Fi の switch、Wi-Fi の行で network の menu とパネルが閉じる、menu の開いている間は島の press を取らない、Bluetooth の switch、Mute、slider の左端 0・drag で右端 100・離して中ほどが final、Input で次の言語、Battery、Esc・外・島で閉じる、狭い output の余白、controller の無い時に Bluetooth の行が無い）。`build/keiland-linux/include`（keiland-linux の build の生成物）を使う。
+- AAT: 新しい `desktop.bar.status-panel`（`tests/scenarios/desktop/bar/status-panel.md`、helper は `helpers_desktop.py`）。島の press がパネルに変わったので、`desktop.bar.network-details`（普通の click → パネル → Wi-Fi の行 → menu）と `desktop.bar.volume-slider`（パネルの slider、`item name=volume` の位置）を追従させ、`desktop.bar.bluetooth-menu`（draft、手の操作）の文書も直した。`check-scenarios.py` PASS。
+
+### 未実施
+
+- QEMU の AAT（T1 の依頼）、5330 の touch の UAT（ユーザー）。p003 の規約の全文の見直し。

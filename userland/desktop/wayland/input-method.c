@@ -1064,6 +1064,49 @@ kwl_ime_indicator_button(
 }
 
 /*
+ * Gives the status panel the language the input method has chosen ("A",
+ * "あ"), the label the bar's chip shows (status-panel.c, WS192).  Returns
+ * 1 when there is one, 0 without an input method that told its language.
+ */
+int
+kwl_ime_panel_label(
+	struct kwl_server *server,
+	char *label,
+	size_t size)
+{
+	struct kwl_ime *ime;
+	int32_t width;
+
+	/* No language without an input method that has told one. */
+	label[0] = '\0';
+	ime = server->ime;
+	width = kwl_ime_indicator_width(server);
+	if (ime == NULL || width == 0)
+		return 0;
+
+	/* Succeeded: the chip's label. */
+	(void)snprintf(label, size, "%s", ime->label);
+	return 1;
+}
+
+/* Asks the input method for the next language from the status panel, as a press on the bar's chip does. */
+void
+kwl_ime_panel_next(
+	struct kwl_server *server)
+{
+	struct kwl_ime *ime;
+
+	/* Only an input method that hears its status. */
+	ime = server->ime;
+	if (ime == NULL || ime->status == NULL)
+		return;
+
+	/* The next language. */
+	ime_emit(ime->status, STATUS_NEXT, NULL, 0);
+	printf("KWL IME indicator next via=panel\n");
+}
+
+/*
  * Starts the input method's program on a socket pair and makes its
  * connection.
  */

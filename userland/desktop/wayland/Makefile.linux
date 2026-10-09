@@ -71,6 +71,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/audio-stream.c \
 	userland/desktop/wayland/bluetooth-ask.c \
 	userland/desktop/wayland/bluetooth-bar.c \
+	userland/desktop/wayland/status-panel.c \
 	userland/desktop/wayland/machine-shell.c \
 	userland/desktop/wayland/machine-wait.c \
 	userland/desktop/wayland/language-file.c \
