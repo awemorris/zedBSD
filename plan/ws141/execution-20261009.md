@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: finished（i10のsoftware/統合部分範囲はcleared。whole p003/WSは未完了）
+- Status: active（2026-10-09ユーザーが完成までの自走を指示、Vulkan実行器/compilerもWS141へ追加）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -18,6 +18,12 @@
 | ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
 | ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | cleared（software/統合範囲のみ） | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 | ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | cleared（software/統合部分範囲のみ） | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
+
+| ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software部分、統合待ち） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
+| ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | pending | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
+| ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | pending | i11/i12の必要な実source出力を確認後 |
+| ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | pending | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
+| ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | pending | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -199,3 +205,24 @@
 - i10はcaller-owned bufferを扱う部品のsoftware/build/統合部分範囲で**cleared**。cycleの選択済みattemptを全件終え、finishedに戻す。p003は**in-progress**、WSは**incomplete**。P1/P2の実機条件と全display登録の達成は含まない。ユーザーが後で行うR0/画面/IRQ/console RAM寿命、Q1/T1回帰、連続buffer allocator/owner・display ops/登録・自動flip・P3合成、V3D投入、p007は残る。
 - 再開点: buffer ownerを連続かつ1 GiB未満のCPU mapping付きで接続し、保持maskを尊重したpresent/restore/失敗時の寿命管理をdisplay opsへつなぐ。今回の追加APIはprivateのみ、公開GPU/HAL API変更は無し。次の有限scopeは次の継続指示で選択する。共有記録/WS048 bodyの投影とT1依頼はQ1、担当からMasterを更新しない。push/外部連絡/実機/QEMUは未実施。
 - 統合済みi10保存patchは`build/ws141-handoff/ws141-i10-merged.patch`とmanifest。再適用しない。以前のi03/i08/i09 patchも再適用しない。最終記録commitはmachine-readable manifestで追える。
+
+
+## 完成までの継続承認（2026-10-09）
+
+- ユーザー原文「続けてください。完成まで自走してください。」。WS141の残る実装を一連の有限scope i11〜i15として承認。途中の部分attemptで終了せず、依存を実sourceで確認しつつ実装/検証/統合を続ける。実機をユーザーが後で行うこと、Masterを担当が更新しないこと、公開HAL API具体差分の事前承認、独立worktree、GPL資料非commitと最終監査は維持する。
+- p006の方針判断: このchatのユーザー回答「WS141に実行器・compilerも含め、Keiland表示まで進める」。従来の方針決定だけのp006を実装へ拡張し、別WSへ移さずkernelのVulkan実行器とSPIR-V→V3D backendを含める。i915のGen12 machine codeを流用しない。公開GPU APIを保ち、実装済み処理だけをcapabilityで報告する。
+- 完了判定: code/build/hostと実機/desktopの受け入れを別に記録する。実機未実施でWS completedやdesktop成功を主張しない。materialな新HAL API差分は具体案を用意して既存規則どおり判断を求めるが、それ以外の通常の技術判断で作業を止めない。
+
+
+## i11: display所有・合成・登録のsoftware結果（2026-10-09）
+
+- `buffer.c/.h`で連続run/CPU view/referenceのownerを追加。displayは全画面copy用の低1 GiB bufferを2つ恒久所有し、ordinary storageはopen別に作成/転送/map/破棄する。present後にsource resourceを破棄してもHVSはprivate copyを読む。timeout/closeではcontrollerがrunを保持し、新leaseはconsole復帰を先に確認する。
+- `display-device.c`をR0後のattachへ接続。実装済みRESOURCE/TRANSFER/MAPPING/DISPLAY/DISPLAY_EVENTSだけを公開。2-open lease、非wrap sequence、fixed boot modeのquery/enum/validate、actual FIFO completionを実装。renderer/companion/BLOB/SHARE/COMMANDは後続i12〜i14。
+- 2-planeのlistは128/160の17 word、primaryは64/80、console43/filter32〜42を保持。lower console/upper imageを独立に生成し、位置/premultiplied alphaを追加。両bufferのcache clean→完成list→next公開→selected PV/current一致を要求する。SRAM最低spanを0x42c4へ更新。
+- Linuxのsingle-output plane load（unscaled 4 pixels/cycle、集計60%）とCOB要求の大きい方を計算。publication前にmax(old,new,500 MHz)をprovider上限で制限したclock要求、actual adoption後に必要rateへ下げる。firmware call中もBUSYを保持しspin guardは持たない。timeoutはtransition rate/旧新bufferを保持。clock引下げのrefusalは採用済みframeを失敗へ変えず、higher safe rateとsnapshotのclock_errorを残す。
+- 起動はP1の1秒vblank観測→P2のgreen/purple stripe付き2-buffer flip→console復帰→P3の右上premultiplied checker合成→console復帰→P5登録。危険なwrite前の3秒pauseと各stopを維持。cadenceの数は観測値を印へ出す、host値を実機cadenceの証拠とは扱わない。
+- BCM2711単独configは共通GPU coreを選んでいなかったため初回linkがdrv_gpu_register未定義で失敗。own arm64 source列でgpu.c/gpu-fence.cを不足時だけ追加し解消、PCI backend時の重複をfilter-outで避けた。公開GPU/HAL APIとroot Makefileは変更無し。
+- `sh plan/ws141/tests/display-host-test.sh build/ws141-display-i11` → 4 PASS。実callback/allocator/flip/IRQを使い、RGBA→BGRA、source破棄、lease競合/旧completion不可視、restore timeout→retry、clock refusalのprepublication停止、17-word literal listとsmall positioned alpha、実boot診断経路を確認。物理DMA/ARM cache/SMP/electrical outputの証拠ではない。
+- named build: `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とdriver=n/BUILD末尾n → exit0、warning/error0、y checker3 PASS。ログ `build/ws141-display-i11{,-n}-build.log`。vmunix SHA256: y `3da45b164b6abb8e0782990f530af8280a61fcd1752709526b17e73dbef05493`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
+- C全文manual（object lifetime/排他/clock/adoption/unwind/条件と戻り）、clang-format-19/definition tab復元、補助style-check total0、git diff --check0。630hardware定数の旧名一致0、GPL source/改名表/作業文書はignored tempのみ。全WS/license/類似の最終監査p007は未実施。
+- i11はsoftware部分だけcleared、p003/WSは実機のR0/P1/P2/P3/P5/console RAM寿命とQ1/T1回帰が未達のためin-progress/incomplete。main統合と再確認へ進み、i12のV3D power/MMU/jobを続ける。Master/共有Queue/Guardrail/他WS投影・GitHub公開はQ1へ保留、push無し。
