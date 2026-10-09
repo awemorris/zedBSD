@@ -48,3 +48,5 @@ mmu.cのmap/unmapとprivate宣言・buildへの追加を実装。mmu-host-test.c
 V7のBCL/RCL/generic tile sub-listをcl.cで生成する処理を実装。caller-owned bufferとpoolの全予約範囲を検証し、全検査後に14/56/19 byteを生成・公開する。CPU storageとGPU mapping/cache/job投入は後続の所有者の責務として明記。NONE store、shader無しで起動から呼ばない。
 
 noop-host-testは成功・容量/VA/予約等の拒否とbyte保持を確認しPASS。固定XMLから独立にopcode/field/default/minus-oneを解釈するnoop-packet-checkで3列全体が一致しPASS。既存4試験PASS、rpi4 y/n build warning/error 0、全文C review/format/補助style-check/構文/diff確認済み。詳細は[実行記録 i06](../execution-20261009.md#i06の結果2026-10-09)。このsoftware部分だけcleared、whole Phaseはin-progress。V7がGPU上で完了したとの主張はしない。WSのPhase表/再開点を同時に更新。V8生成を次のsoftware段とし、実投入は元のV0〜V6の確認/実装後。
+
+V7生成は最新mainへmerge `16024f1b9`で統合済み（i07）。統合版でもhost/oracleとy/n build PASS。次のV8の固定MIT手順には、clear値を設定した後に2回のdummy tileを通し、最初のtileでCLEAR、最後にVCD cache flushする初期化が含まれる。noopのNONE storeをcolor storeに替えるだけではその条件を供給できない。実装時はこの初期化もpacket oracleと照合し、hardwareのclear/store完了は実機のbuffer観測で確認する。
