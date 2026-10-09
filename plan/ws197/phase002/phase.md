@@ -4,7 +4,7 @@
 
 Phase ID: `ws197-p002`
 Parent: [WS197](../ws.md)
-Status: in-progress（2026-10-10 P1: 詳細設計の第 2 版。review-1 は一部 GO（i05〜i07 は着手可）。i01〜i04（WS143 の file: session.c・pair.c・l2cap.c・router.c・hid.c）は第 2 版の短い再確認を通るまで code に手を付けない（[p001 §12](../phase001/phase.md)））
+Status: in-progress（2026-10-10 P1: 詳細設計の第 2.1 版は design-reviewer を通った（[review-2.md](review-2.md)、i01〜i08 は GO）。実装中）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-10「WS197 p002（RFCOMM と OBEX）を、10/17 まで main に入れない保留の branch で始める。§12 の条件 T1〜T4 を先に詳細設計に書いて design-reviewer を通し、通ってから実装」）
 Branch: `agent/p1-ws197`（main 43e55052c から。10/17 まで main に merge しない。各 Phase の始めと merge 依頼の前に main を取り込む）
@@ -75,10 +75,11 @@ record を 4 つの class に分ける。
 - **`last_cid`** は着いた順にだけ更新する: node から読んだ時（`session_read` の直後）に、ACL の first の断片なら その L2CAP の CID（4 byte 未満なら 0 = 不明）。ring から取り出した packet の dispatch では更新しない [M2]。
 - 捨てた ACL の印: first の断片なら その CID、続きの断片なら `last_cid`。CID が 0x0001・0x0005 なら `SIGNAL`、0 なら `UNKNOWN`、他は `DATA` と `drop_cid`（最初の 1 つ）。数えていない handle の ACL は印を付けない（持ち主が居ない）。
 - session 全体: `events_dropped`、`counted_lost`、`scan_dropped`。
+- `session_link_add`・`session_link_remove` は record の drop の状態（sealed・skip_continuing・drop_*・notice_after・last_cid）と送りの上限（frame_limit・inflight_limit）を初期値に戻す（handle を使い直した新しい link が古い封や phone の上限を引き継がない）。知らせを待つ間に Disconnection Complete で link が消えたら、その link の知らせは出さない（持ち主は切断を受ける）[review-2 の 1]。
 
 ### 3.4 知らせ（捨てた所より前の物を全部渡した後）[B1, M3, m4]
 
-- ring の record に通し番号の考えを入れる: `enqueued`（積んだ record の数）と `dequeued`（取り出した数）を数える（ring は FIFO なので番号を record に書かない）。H の最初の drop の時に `H.notice_after = enqueued`（その時までに積んだ物）。session 全体の印も同じ（`events_notice_after`）。
+- ring の record に通し番号の考えを入れる: `enqueued`（積んだ record の数）と `dequeued`（取り出した数）を数える（ring は FIFO なので番号を record に書かない）。H の最初の drop の時に `H.notice_after = enqueued`（その時までに積んだ物）。期日の比較は unsigned の差（`(uint32_t)(dequeued − notice_after) < 0x80000000`）で、数が回っても誤らない [review-2 の 2]。session 全体の印も同じ（`events_notice_after`）。
 - `btd_session_input` は ring から取り出す前に、`dequeued ≥ notice_after` の知らせがあれば先にそれを 1 つ渡す（印を消し封を解いてから handler を呼ぶ: handler の中の command の待ちで同じ link に立つ新しい印を後で消して失わない）。ring が空の時は全部の知らせが期日。
 - 知らせは合成の packet `[BTD_PACKET_DROP (0xF0), handle 下位, handle 上位, flags, cid 下位, cid 上位, count 下位, count 上位]`（8 byte）。session 全体は handle 0xFFFF、flags `BTD_DROP_EVENT`・`BTD_DROP_COUNTED`。0xF0 は bluetoothd の中だけの値で `session.h` に定義する（UAPI の kernel の知らせ（0x80 以上の 1 byte の packet）とは長さで区別でき、node からは来ない）。btsnoop には書かない [m4]。
 - `btd_session_pending` は ring に物があるか、期日の知らせがある時 1 [M3]。daemon の loop は pending の間 poll で待たない（今の main.c の 0 の timeout の規則のまま）。
@@ -161,11 +162,10 @@ BR/EDR の page scan（Write Scan Enable 0x0C1A）と BR/EDR の page（Create C
 
 ### 7.3 L2CAP の移し替え `btd_l2cap_move`（[T3]）
 
-`int btd_l2cap_move(struct btd_l2cap *from, struct btd_l2cap *to, uint16_t handle, uint8_t *signal, size_t size, size_t *signal_length, unsigned *moved)`
+`int btd_l2cap_move(struct btd_l2cap *from, struct btd_l2cap *to, uint16_t handle, unsigned *moved, unsigned *left)` と `int btd_l2cap_refuse_left(struct btd_l2cap *from, uint16_t handle, uint8_t *answer, size_t size, size_t *length)` [review-2 の 3]
 
 - `from` の表の、その handle の FREE でない channel を全部、`to` の**同じ枠**（local CID は枠の番号そのもの: `local_cid − BTD_CID_DYNAMIC`、l2cap.c:218・712、`signal_find` が CID から枠を引く 1113-1121）へ、状態・CID・相手の CID・MTU・identifier・inbound をそのまま写し、`from` の枠を FREE にする [M5]。`to->next_identifier` は `from` の値にする（未答えの request の identifier と重ねない）。`information_pending`・`echo_pending` も写す。
 - `to` のその枠が空いていない channel（phone の表は handoff の時は空なので、起きるのは表の誤用の時だけ）は移さず `from` に印を付けて残す。呼び手は `btd_l2cap_refuse_left(from, handle, answer, size, &length)` を繰り返し呼び、1 回に 1 つの signalling の command（OPEN・CONFIGURING は Disconnection Request、PENDING は Connection Response の No resources）を受け取り、**1 つずつ別の C-frame で送る**（BR/EDR の MTUsig の最小は 48 byte、Core Vol 3 Part A 表 4.1。1 つの command は 12 byte 以下）。返す物が無くなったら 0、`from` から消す [m7]。
-- 引数は `int btd_l2cap_move(struct btd_l2cap *from, struct btd_l2cap *to, uint16_t handle, unsigned *moved, unsigned *left)`（上の signal の buffer の引数は無くした）。
 - 移った channel の accept は `to` の hook の物になる。PENDING の channel は `to` の持ち主が `btd_l2cap_answer_pending` で答える（phone は handoff の直後、link が暗号化済みで鍵 16 byte なら成功で答える）。
 - 組み立て: phone は `*reassembly` を自分の組み立てに写す（frame の途中の断片を失わない）。pair は今どおり自分の物を消す。
 - 試験: pairing の間にスマホが SDP（PSM 1）を開け Pending、handoff の後に Connection Response（成功）が出て configuration が続き、移した後に local CID で `btd_l2cap_channel` が引ける [M5]。`to` の枠が埋まっている時の `refuse_left` が 1 つずつ返す。phone が受けず HID が受ける時の断り（m6）。
@@ -209,7 +209,7 @@ session の link は 8（`BTD_LINKS_MAX`）＝ pairing 1 ＋ 断るための 1 �
 ### 8.3 DLC
 
 - 開ける（client）: PN（command、§8.4）→ PN の response → SABM（P=1）→ UA で開く（DM なら断られた）→ 自分の MSC の command を送り、相手の MSC の command に response を返す。**自分の MSC の response を受け、相手の MSC の command を受けるまで data を送らない**（RFCOMM §6.3 の注 2、TS 27.010 §5.4.6.3.7）。T1 は DLC の SABM で 60 s（§5.3）、多重化の command の T2 は 20 s。時間切れは session を閉じる（§5.3）。
-- 相手が PN を交わさずに SABM で開けた DLC（PN は 2 つ目以降の DLC では任意、RFCOMM §6.5.1）: N1 は 127、相手の初期の credit は 0 とし、UA の後に自分から credit を与える（§8.5）[m12]。
+- 相手が PN を交わさずに SABM で開けた DLC（PN は 2 つ目以降の DLC では任意、RFCOMM §6.5.1）: その session で credit の流れが既に決まっている（前の DLC で PN を交わした）時だけ受け、N1 は 127、相手の初期の credit は 0 とし、UA の後に自分から credit を与える（§8.5）[m12]。session の最初の DLC が PN 無しの SABM で来たら credit の流れが有効でないので DM（m13 と同じ理由）[review-2 の 5]。
 - 受ける（server）: 相手の PN に、その DLCI の server channel が登録され有効で持ち主が居れば response（§8.4）、居なければ DM（RFCOMM §5.5）。SABM: 同じ規則で UA か DM。security の始動は SABM の時だけ（§5.3 の最後の段落）: phone link は暗号化と鍵 16 byte を L2CAP の accept で済ませているので、SABM では確かめだけ。
 - 閉じる: DISC（P=1）→ UA（相手が既に閉じていれば DM）。相手の DISC には UA。DISC か自分の閉じで、その DLCI の PN の値と credit は既定に戻す（§5.5）。
 - 数: 1 session に DLC 6 つまで（MAS・MNS・PSE・AG と予備）。
@@ -217,7 +217,7 @@ session の link は 8（`BTD_LINKS_MAX`）＝ pairing 1 ＋ 断るための 1 �
 ### 8.4 多重化の command（DLCI 0 の UIH、TS 27.010 §5.4.6）
 
 - 形: type の byte（EA=1、C/R、T1-T6）、length の byte（EA、7 bit）、値。RFCOMM は 1 frame に 1 message（§5.5）。
-- PN（type 0x80 の組で 0x83 command・0x81 response、値 8 byte、TS 27.010 表 3）: DLCI（6 bit）、I=0 と CL（command は 0xF、response は 0xE、RFCOMM §5.5.3 表 5.3）、priority（0〜63、0 を送る）、T=0、N1（2 byte、little-endian）、NA=0、K（credit の初期値 0〜7）。受けた response の N1 は自分の申し出以下（違えば DISC）。CL が 0xE でない response は credit の無い相手（v1.0B）: 受けの量を縛れず §8.5 の予算（[T1] の前提）が成り立たないので、log して その DLC に DISC（最近のスマホでは来ない見込み）[m13]。相手の PN の command の CL が 0xF でない時も同じく DM。
+- PN（type 0x80 の組で 0x83 command・0x81 response、値 8 byte、TS 27.010 表 3）: DLCI（6 bit）、I=0 と CL（command は 0xF、response は 0xE、RFCOMM §5.5.3 表 5.3）、priority（0〜63、0 を送る）、T=0、N1（2 byte、little-endian）、NA=0、K（credit の初期値 0〜7）。受けた response の N1 は自分の申し出以下（違えば DISC）。CL が 0xE でない response は credit の無い相手（v1.0B）: 受けの量を縛れず §8.5 の予算（[T1] の前提）が成り立たないので、log して その DLC に DISC（最近のスマホでは来ない見込み）[m13]。まだ開いていない DLC への相手の PN の command の CL が 0xF でない時も同じく DM。開いた DLC への PN（CL は 0、RFCOMM §5.5.3）には今の値をそのまま返す（responder は変えなくてよい）[review-2 の 4]。
 - MSC（0xE0 の組、値 2 byte: DLCI（EA=1、C/R=1 の address の形）と V.24 の byte）。送る V.24: EA=1、FC=0（credit の session では意味を持たない、§6.5.3）、RTC=1、RTR=1、IC=0、DV=1（= 0x8D）。break の byte は送らず、受けたら無視。
 - RPN（0x90 の組）: 値 1 byte（問い合わせ）か 8 byte。response は値 8 byte、受けた値をそのまま（問い合わせには 9600 bit/s・8N1・流れの制御なしの既定）。
 - RLS（0x50 の組）: response は受けた値をそのまま。
@@ -309,7 +309,7 @@ Connect（Target を呼び手が照合、Who と Connection ID を返す）、Pu
 | --- | --- |
 | RFCOMM の frame | FCS（TS 27.010 Annex B: `07 3F` → `89`、検査 `CF`）、SABM・UA・DM・DISC・UIH の組み立てと分解、2 byte の length、credit 付き UIH、壊れた frame（EA、FCS、length > N1） |
 | RFCOMM の DLCI と C/R | zedBSD が initiator の session で相手の server channel 5 → DLCI 10、zedBSD が responder の session で相手の server channel 5 → DLCI 11、同じ session で両方向の DLC（RFCOMM §5.4 の規則と表 1 の C/R を正解に）。両端を zedBSD の code にした試験だけでは対称の誤りを捕まえられないので、相手の側は試験の中に手で書いた byte の列（仕様から） |
-| RFCOMM の台本 | SABM（DLCI 0）→ UA → PN → SABM → UA → MSC の交換 → data → DISC → DISC（DLCI 0）。MSC の前に data を送らない。credit 0 で止まる、返す credit を ENOBUFS で失わない、予算 8 KB、相手が credit を越えて送ると閉じる、CL=0 の相手、PN の N1 が申し出より大きい答え、衝突（PSM 3 の Connection Request の交差）、時間切れ、未登録の channel への SABM・PN に DM、NSC |
+| RFCOMM の台本 | SABM（DLCI 0）→ UA → PN → SABM → UA → MSC の交換 → data → DISC → DISC（DLCI 0）。最初の DLC の PN 無しの SABM → DM、2 つ目の DLC の PN 無しの SABM → UA と credit、開いた DLC への PN に今の値。MSC の前に data を送らない。credit 0 で止まる、返す credit を ENOBUFS で失わない、予算 8 KB、相手が credit を越えて送ると閉じる、CL=0 の相手、PN の N1 が申し出より大きい答え、衝突（PSM 3 の Connection Request の交差）、時間切れ、未登録の channel への SABM・PN に DM、NSC |
 | OBEX | packet と header（3 byte を含む長さ、空の Unicode、App Parameters の TLV）、Connect の交渉（254 は失敗、255 は可）、Get の Continue の連続と上限の Abort、Put の分割と End of Body、SetPath、時間切れ、server の Connect・Put・認証付き Connect の拒否、RFCOMM の流れの上の組み立て（1 byte ずつの到着） |
 | SDP の server | 16・32・128 bit の UUID の検索、複数 UUID の pattern、属性の範囲、continuation（切って続ける、古い版の continuation は 0x0005）、自分の record を今の client（`sdp.c`）で読み戻す、壊れた request の各 error、空の表 |
 | SDP の client | MAP 1.4.2 表 7.1 の形に作った MAS の record 2 つから channel・版・SupportedMessageTypes、PBAP の PSE の record |
@@ -368,3 +368,4 @@ firmware の要らない USB の Bluetooth の dongle が 2 本ある時だけ�
 - 2026-10-10: 第 1 版（P1）。§1 の仕様の確かめ（MAP 1.4.2 §9、PBAP 1.2.3 §9: GOEP 2.0 は必須）を Q1 に報告。
 - 2026-10-10: Q16 の決定 (a)（ユーザー、Q1 経由）。ERTM・GOEP 2.0 の Future Work の行は Q1 に依頼。
 - 2026-10-10: design-reviewer の review（agent a70a3277735e7af2e）→ [review-1.md](review-1.md)（blocker 1・major 6・minor 18、一部 GO: i05〜i07 は可、i01〜i04 は直しと短い再確認の後）。第 2 版で全部に答えた。
+- 2026-10-10: 第 2 版の短い再確認 → [review-2.md](review-2.md): **i01〜i04 も GO**。minor 5 つは本文を直した（第 2.1 版）。
