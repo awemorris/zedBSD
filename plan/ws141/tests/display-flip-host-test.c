@@ -85,9 +85,9 @@ main(
 	error = bcm2711_display_flip_present(&test_display, &bad);
 	check(error == EINVAL && test_writes == before, "last DMA row bounded");
 	bad = test_frames[0];
-	bad.format = 1;
+	bad.format = 2;
 	error = bcm2711_display_flip_present(&test_display, &bad);
-	check(error == ENOTSUP && test_writes == before, "RGB order cannot change");
+	check(error == ENOTSUP && test_writes == before, "unknown RGB encoding refused");
 	bad = test_display.screen;
 	error = bcm2711_display_flip_present(&test_display, &bad);
 	check(error == EINVAL && test_writes == before, "console overlap refused");

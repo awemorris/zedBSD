@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Native display leases copy into device-owned RAM that outlives every session. */
+/* Native display leases own copy targets and independent shared scanout holds. */
 #include <stddef.h>
 #include <stdint.h>
 
@@ -15,14 +15,16 @@
 #include <kern/kmem.h>
 #include <kern/sched.h>
 #include <uapi/errno.h>
+#include <uapi/gpu-allocation.h>
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/buffer.h"
+#include "drivers/gpu/bcm2711/share.h"
 
 /* Resource limits describe actual ordinary packed-pixel storage support. */
 #define DISPLAY_RESOURCE_BYTES (32ULL * 1024U * 1024U)
 #define DISPLAY_RESOURCE_COUNT 64U
-#define DISPLAY_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_DISPLAY | GPU_CAP_DISPLAY_EVENTS)
+#define DISPLAY_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_DISPLAY | GPU_CAP_DISPLAY_EVENTS | GPU_CAP_BLOB | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE)
 
 /* One open owns its resources and at most one nontransferrable display lease. */
 struct display_session {
@@ -30,12 +32,18 @@ struct display_session {
 	uint64_t completed;
 	uint64_t present_time;
 	uint32_t resources;
+	uint32_t next_resource;
 };
 
-/* One ordinary storage allocation belongs to one open until common VM pins retire. */
+/* One open owns its descriptor; independent native holds keep its allocation alive. */
 struct display_resource {
 	struct display_session *owner;
 	struct bcm2711_buffer *buffer;
+	struct gpu_image_descriptor image;
+	bool blob;
+	bool shareable;
+	bool mappable;
+	bool has_image;
 };
 
 /* One boot output owns persistent operation tables and private scanout buffers. */
@@ -46,7 +54,9 @@ struct display_device {
 	struct drv_gpu_ops operations;
 	struct drv_gpu_display_ops display_operations;
 	struct drv_gpu_scanout_ops scanout_operations;
+	struct drv_gpu_share_ops share_operations;
 	struct bcm2711_buffer *copies[2];
+	struct bcm2711_buffer *holds[2];
 	struct display_session *owner;
 	uint64_t next_lease;
 	uint64_t completed;
@@ -64,6 +74,17 @@ static int resource_create(void *opaque, void *private_session, const struct gpu
 static void resource_destroy(void *opaque, void *private_session, void *private_resource);
 static int resource_read(void *opaque, void *private_session, void *private_resource, uint64_t offset, void *data, uint32_t bytes);
 static int resource_write(void *opaque, void *private_session, void *private_resource, uint64_t offset, const void *data, uint32_t bytes);
+static int blob_create(void *opaque, void *private_session, const struct gpu_blob_create *request, void **result, uint32_t *identifier);
+static int blob_create_placed(void *opaque, void *private_session, const struct gpu_blob_create_placed *request, void **result, uint32_t *identifier);
+static int allocate_blob(struct display_device *controller, struct display_session *session, const struct gpu_blob_create *request, const struct gpu_placement *placement, void **result, uint32_t *identifier);
+static int export_resource(void *opaque, void *private_session, void *private_resource, const struct gpu_image_descriptor *image, void **result);
+static void release_shared(void *opaque, void *private_shared);
+static int import_resource(void *opaque, void *private_session, void *private_shared, void **result, uint32_t *identifier);
+static int export_backing(void *opaque, void *private_shared, struct drv_gpu_scanout_backing *backing);
+static int import_image(void *opaque, void *private_session, const struct gpu_image_descriptor *image, const struct drv_gpu_scanout_backing *backing, void **result);
+static int retain_resource(struct display_device *controller, struct display_session *session, struct bcm2711_buffer *buffer, const struct gpu_image_descriptor *image, void **result);
+static int shared_frame(struct display_device *controller, const struct display_resource *resource, const struct gpu_display_present *request, struct drv_bcm2711_boot_screen *frame);
+static void retire_holds(struct display_device *controller);
 static int resource_map(void *opaque, void *private_session, void *private_resource, struct drv_gpu_mapping *mapping);
 static int output_query(void *opaque, void *private_session, struct gpu_display_info *request);
 static int output_mode(void *opaque, void *private_session, struct gpu_display_mode *request);
@@ -436,6 +457,7 @@ resource_create(
 
 	/* Publishes ownership only after the allocation and CPU view are complete. */
 	resource->owner = session;
+	resource->mappable = true;
 	session->resources++;
 	*result = resource;
 
@@ -445,7 +467,7 @@ resource_create(
 	return 0;
 }
 
-/* Retires ordinary storage after pins; no HVS DMA ever borrows these bytes. */
+/* Retires a descriptor after pins; native DMA holds own separate allocation references. */
 static void
 resource_destroy(
 	void *opaque,
@@ -503,7 +525,7 @@ resource_read(
 	return 0;
 }
 
-/* Copies bytes into a resource that is never used directly for this display's DMA. */
+/* Copies bytes into retained native RAM; Vulkan fences arbitrate shared accesses. */
 static int
 resource_write(
 	void *opaque,
@@ -548,6 +570,8 @@ resource_map(
 	resource = private_resource;
 	if (resource->owner != private_session)
 		return EINVAL;
+	if (!resource->mappable)
+		return ENOTSUP;
 	mapping->physical = resource->buffer->memory.paddr;
 	mapping->address = resource->buffer->address;
 	mapping->bytes = resource->buffer->bytes;
@@ -733,7 +757,7 @@ output_release(
 	return 0;
 }
 
-/* Copies a complete frame into an unheld private target and waits for native adoption. */
+/* Presents copied storage or an independently retained blob at actual native adoption. */
 static int
 output_present(
 	void *opaque,
@@ -745,6 +769,9 @@ output_present(
 	struct display_session *session;
 	struct display_resource *resource;
 	struct drv_bcm2711_boot_screen frame;
+	struct bcm2711_flip_status status;
+	uint32_t slot;
+	bool shared;
 	int error;
 
 	/* Gives one caller exclusive access to copy-buffer selection and publication. */
@@ -770,15 +797,46 @@ output_present(
 		return EOVERFLOW;
 	}
 
-	/* Copy targets remain controller-owned even when publication later times out. */
-	error = copy_frame(controller, resource, request, &frame);
+	/* Reclaims only references that actual selected-PV adoption no longer retains. */
+	retire_holds(controller);
+	shared = false;
+	if ((request->flags & GPU_DISPLAY_PRESENT_BLOB) != 0)
+		shared = true;
+
+	/* Ordinary storage copies; native blobs retain a direct scanout allocation. */
+	if (shared) {
+		error = shared_frame(controller, resource, request, &frame);
+	} else {
+		error = copy_frame(controller, resource, request, &frame);
+	}
+
+	/* A refused candidate has acquired no native publication or storage hold. */
 	if (error != 0) {
 		mutex_unlock(&controller->mutex);
 		return error;
 	}
 
-	/* Publishes the complete copy and waits for its actual current-list adoption. */
+	/* A candidate's independent storage hold precedes every possible native publication. */
+	if (shared) {
+		bcm2711_display_flip_snapshot(controller->native, &status);
+		if (status.busy || status.uncertain) {
+			mutex_unlock(&controller->mutex);
+			return EBUSY;
+		}
+
+		/* Native flip selects the same unheld list slot while this mutex excludes peers. */
+		slot = 0;
+		if ((status.retained_mask & 1U) != 0)
+			slot = 1;
+		if (controller->holds[slot] != NULL)
+			__builtin_trap();
+		bcm2711_buffer_retain(resource->buffer);
+		controller->holds[slot] = resource->buffer;
+	}
+
+	/* Publishes the complete frame and waits for its actual current-list adoption. */
 	error = bcm2711_display_flip_compose(controller->native, &frame, 0, 0, false);
+	retire_holds(controller);
 	if (error != 0) {
 		mutex_unlock(&controller->mutex);
 		return error;
@@ -793,7 +851,7 @@ output_present(
 
 	mutex_unlock(&controller->mutex);
 
-	/* Succeeded: the source resource is no longer borrowed by hardware. */
+	/* Succeeded: shared DMA keeps an independent hold; ordinary source storage is retired. */
 	return 0;
 }
 
@@ -884,14 +942,14 @@ output_constraints(
 	error = find_output(controller, request->display_id, request->generation);
 	if (error != 0)
 		return error;
-	request->flags = GPU_SCANOUT_COPY;
+	request->flags = GPU_SCANOUT_COPY | GPU_SCANOUT_SHARED | GPU_SCANOUT_FOREIGN;
 	request->formats = GPU_DISPLAY_FORMAT_BGRA8888 | GPU_DISPLAY_FORMAT_RGBA8888;
 	request->stride_alignment = 4;
 	request->offset_alignment = 4;
 	request->placement = GPU_PLACEMENT_CONTIGUOUS;
 	request->max_dma_address = 0x3fffffffU;
 
-	/* Succeeded: no foreign or shared zero-copy import is promised by this table. */
+	/* Succeeded: native allocation imports must satisfy every listed placement requirement. */
 	return 0;
 }
 
@@ -922,13 +980,19 @@ restore_console(
 
 	/* A confirmed unheld console needs no redundant hardware transaction. */
 	bcm2711_display_flip_snapshot(controller->native, &status);
-	if (!status.uncertain && status.retained_mask == 0)
+	if (!status.uncertain && status.retained_mask == 0) {
+		/* Console adoption already retired every independent shared DMA hold. */
+		retire_holds(controller);
 		return 0;
+	}
 
-	/* An uncertain restore keeps both private allocations alive in the controller. */
+	/* An uncertain restore keeps private targets and shared allocations alive in the controller. */
 	error = bcm2711_display_flip_restore(controller->native);
 	if (error != 0)
 		return error;
+
+	/* Confirmed console adoption retires both shared and copied native frames. */
+	retire_holds(controller);
 
 	/* Succeeded: another lease may reuse the private copy buffers. */
 	return 0;
@@ -1023,9 +1087,16 @@ bind_operations(
 	controller->display_operations.wait = output_wait;
 	controller->display_operations.events = output_events;
 
-	/* Publishes pairing and constraints without unsupported native imports. */
+	/* Publishes checked foreign native imports with actual physical constraints. */
 	controller->scanout_operations.query_device = output_device;
 	controller->scanout_operations.constraints = output_constraints;
+	controller->scanout_operations.import_image = import_image;
+
+	/* Export capabilities retain RAM independently of the original resource and open. */
+	controller->share_operations.export_resource = export_resource;
+	controller->share_operations.release = release_shared;
+	controller->share_operations.import_resource = import_resource;
+	controller->share_operations.get_scanout_backing = export_backing;
 
 	/* Describes actual storage, transfers, mappings and display support. */
 	controller->operations.version = DRV_GPU_INTERFACE_VERSION;
@@ -1036,9 +1107,379 @@ bind_operations(
 	controller->operations.get_info = device_info;
 	controller->operations.resource_create = resource_create;
 	controller->operations.resource_destroy = resource_destroy;
+	controller->operations.blob_create = blob_create;
+	controller->operations.blob_create_placed = blob_create_placed;
 	controller->operations.resource_read = resource_read;
 	controller->operations.resource_write = resource_write;
 	controller->operations.resource_map = resource_map;
 	controller->operations.display = &controller->display_operations;
 	controller->operations.scanout = &controller->scanout_operations;
+	controller->operations.share = &controller->share_operations;
+}
+
+/* Creates one ordinary native blob without additional placement restrictions. */
+static int
+blob_create(
+	void *opaque,
+	void *private_session,
+	const struct gpu_blob_create *request,
+	void **result,
+	uint32_t *identifier)
+{
+	int error;
+
+	/* The common resource wrapper needs a distinct nonzero local blob identity. */
+	error = allocate_blob(opaque, private_session, request, NULL, result, identifier);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: this open owns the created native blob. */
+	return 0;
+}
+
+/* Creates a native blob whose actual allocation satisfies every accepted condition. */
+static int
+blob_create_placed(
+	void *opaque,
+	void *private_session,
+	const struct gpu_blob_create_placed *request,
+	void **result,
+	uint32_t *identifier)
+{
+	int error;
+
+	/* The shared allocator refuses coherence and verifies actual returned placement. */
+	error = allocate_blob(opaque, private_session, &request->blob, &request->placement, result, identifier);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the immutable native allocation meets the requested placement. */
+	return 0;
+}
+
+/* Reserves descriptor capacity before creating the independently owned blob storage. */
+static int
+allocate_blob(
+	struct display_device *controller,
+	struct display_session *session,
+	const struct gpu_blob_create *request,
+	const struct gpu_placement *placement,
+	void **result,
+	uint32_t *identifier)
+{
+	struct display_resource *resource;
+	int error;
+
+	/* Display blobs share the ordinary resource count and byte limits. */
+	*result = NULL;
+	*identifier = 0;
+	if (request->bytes > DISPLAY_RESOURCE_BYTES)
+		return ENOTSUP;
+	mutex_lock(&controller->mutex);
+
+	if (session->resources >= DISPLAY_RESOURCE_COUNT || session->next_resource == UINT32_MAX) {
+		mutex_unlock(&controller->mutex);
+		return ENOSPC;
+	}
+
+	/* A descriptor exists before physical allocation can succeed. */
+	resource = kern_calloc(1, sizeof(*resource));
+	if (resource == NULL) {
+		mutex_unlock(&controller->mutex);
+		return ENOMEM;
+	}
+
+	/* The placement helper acquires exactly one reference on successful native allocation. */
+	error = bcm2711_blob_allocate(request, placement, &resource->buffer);
+	if (error != 0) {
+		kern_free(resource);
+		mutex_unlock(&controller->mutex);
+		return error;
+	}
+
+	/* Publishes immutable blob semantics with a never-reused per-open identifier. */
+	resource->owner = session;
+	resource->blob = true;
+	if ((request->flags & GPU_BLOB_SHAREABLE) != 0)
+		resource->shareable = true;
+	if ((request->flags & GPU_BLOB_MAPPABLE) != 0)
+		resource->mappable = true;
+	session->next_resource++;
+	session->resources++;
+	*identifier = session->next_resource;
+	*result = resource;
+
+	mutex_unlock(&controller->mutex);
+
+	/* Succeeded: the common wrapper owns the complete native blob descriptor. */
+	return 0;
+}
+
+/* Exports one allocation without exposing a borrowed session descriptor. */
+static int
+export_resource(
+	void *opaque,
+	void *private_session,
+	void *private_resource,
+	const struct gpu_image_descriptor *image,
+	void **result)
+{
+	struct display_device *controller;
+	struct display_resource *resource;
+	struct bcm2711_shared *shared;
+	int error;
+
+	/* Only explicitly shareable blobs grant independent allocation capabilities. */
+	*result = NULL;
+	controller = opaque;
+	resource = private_resource;
+	if (resource->owner != private_session || !resource->blob || !resource->shareable)
+		return EINVAL;
+	mutex_lock(&controller->mutex);
+
+	error = bcm2711_shared_create(resource->buffer, image, &shared);
+
+	mutex_unlock(&controller->mutex);
+
+	/* Failed exports retain neither a capability nor a new native reference. */
+	if (error != 0)
+		return error;
+	*result = shared;
+
+	/* Succeeded: the capability survives the original blob and open. */
+	return 0;
+}
+
+/* Consumes the export's one allocation reference after the common capability retires. */
+static void
+release_shared(
+	void *opaque,
+	void *private_shared)
+{
+	/* Native imports retain their own allocation, rather than this exporting session. */
+	(void)opaque;
+	bcm2711_shared_release(private_shared);
+}
+
+/* Imports a same-device capability into a separately owned resource descriptor. */
+static int
+import_resource(
+	void *opaque,
+	void *private_session,
+	void *private_shared,
+	void **result,
+	uint32_t *identifier)
+{
+	struct display_device *controller;
+	struct display_session *session;
+	struct bcm2711_buffer *buffer;
+	struct gpu_image_descriptor image;
+	bool has_image;
+	int error;
+
+	/* Borrowed capability storage remains live throughout this callback. */
+	*identifier = 0;
+	controller = opaque;
+	session = private_session;
+	buffer = bcm2711_shared_buffer(private_shared);
+	has_image = bcm2711_shared_description(private_shared, &image);
+	mutex_lock(&controller->mutex);
+
+	/* The destination identity never aliases a previously retired blob. */
+	if (session->next_resource == UINT32_MAX) {
+		mutex_unlock(&controller->mutex);
+		return ENOSPC;
+	}
+
+	/* An allocation-only import owns bytes without inventing a scanout description. */
+	if (has_image) {
+		error = retain_resource(controller, session, buffer, &image, result);
+	} else {
+		error = retain_resource(controller, session, buffer, NULL, result);
+	}
+
+	/* A failed import owns no receiver descriptor or independent allocation reference. */
+	if (error != 0) {
+		mutex_unlock(&controller->mutex);
+		return error;
+	}
+
+	/* A fresh renderer-independent identity is required by the common blob wrapper. */
+	session->next_resource++;
+	*identifier = session->next_resource;
+
+	mutex_unlock(&controller->mutex);
+
+	/* Succeeded: this open owns a new descriptor and an independent native storage hold. */
+	return 0;
+}
+
+/* Borrows the immutable page vector from the still-live native export capability. */
+static int
+export_backing(
+	void *opaque,
+	void *private_shared,
+	struct drv_gpu_scanout_backing *backing)
+{
+	int error;
+
+	/* The capability itself keeps every described address stable. */
+	(void)opaque;
+	error = bcm2711_shared_backing(private_shared, backing);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the receiver can verify the real native physical placement. */
+	return 0;
+}
+
+/* Imports foreign scanout only after native capability and placement verification. */
+static int
+import_image(
+	void *opaque,
+	void *private_session,
+	const struct gpu_image_descriptor *image,
+	const struct drv_gpu_scanout_backing *backing,
+	void **result)
+{
+	struct display_device *controller;
+	struct bcm2711_buffer *buffer;
+	int error;
+
+	/* An independent lookup hold protects storage even after the source capability disappears. */
+	*result = NULL;
+	controller = opaque;
+	error = bcm2711_shared_lookup(image, backing, &buffer);
+	if (error != 0)
+		return error;
+	mutex_lock(&controller->mutex);
+
+	error = retain_resource(controller, private_session, buffer, image, result);
+
+	mutex_unlock(&controller->mutex);
+
+	/* The destination owns its own reference on success; both outcomes retire the lookup hold. */
+	bcm2711_buffer_release(buffer);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: common resource teardown owns this complete imported native image. */
+	return 0;
+}
+
+/* Creates a destination descriptor while the caller serializes resource capacity. */
+static int
+retain_resource(
+	struct display_device *controller,
+	struct display_session *session,
+	struct bcm2711_buffer *buffer,
+	const struct gpu_image_descriptor *image,
+	void **result)
+{
+	struct display_resource *resource;
+	int error;
+
+	/* The display namespace remains bounded even when the renderer supports larger blobs. */
+	(void)controller;
+	*result = NULL;
+	if (session->resources >= DISPLAY_RESOURCE_COUNT)
+		return ENOSPC;
+	if (buffer->bytes > DISPLAY_RESOURCE_BYTES)
+		return ENOTSUP;
+	if (image != NULL) {
+		error = bcm2711_shared_image(buffer, image);
+		if (error != 0)
+			return error;
+	}
+
+	/* Allocates the receiver state before retaining the native storage. */
+	resource = kern_calloc(1, sizeof(*resource));
+	if (resource == NULL)
+		return ENOMEM;
+	resource->owner = session;
+	resource->buffer = buffer;
+	resource->blob = true;
+	resource->shareable = true;
+	resource->mappable = true;
+	if (image != NULL) {
+		resource->image = *image;
+		resource->has_image = true;
+	}
+
+	/* This reference belongs to the receiver, independently of the exporting capability. */
+	bcm2711_buffer_retain(buffer);
+	session->resources++;
+	*result = resource;
+
+	/* Succeeded: ordinary resource destruction can retire the independent receiver state. */
+	return 0;
+}
+
+/* Describes a directly retained blob without copying or changing its immutable image. */
+static int
+shared_frame(
+	struct display_device *controller,
+	const struct display_resource *resource,
+	const struct gpu_display_present *request,
+	struct drv_bcm2711_boot_screen *frame)
+{
+	uint64_t bytes;
+
+	/* Native direct scanout accepts the exact active mode and one complete linear image. */
+	if (!resource->blob || request->flags != (GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB))
+		return ENOTSUP;
+	if (request->width != controller->native->screen.width ||
+	    request->height != controller->native->screen.height ||
+	    request->refresh_millihz != controller->native->refresh_millihz)
+		return ENOTSUP;
+	if (request->format != GPU_PIXEL_RGBA8888 && request->format != GPU_PIXEL_BGRA8888)
+		return ENOTSUP;
+	if (request->stride < request->width * 4U || request->stride > 65535U ||
+	    (request->stride & 3U) != 0 || (request->offset & 3U) != 0)
+		return EINVAL;
+	bytes = (uint64_t)request->stride * request->height;
+	if (request->offset > resource->buffer->bytes || bytes > resource->buffer->bytes - request->offset)
+		return EINVAL;
+
+	/* Imported images keep the original authoritative layout throughout their lifetime. */
+	if (resource->has_image) {
+		if (request->width != resource->image.width || request->height != resource->image.height ||
+		    request->format != resource->image.format || request->stride != resource->image.stride ||
+		    request->offset != resource->image.offset)
+			return EINVAL;
+	}
+
+	/* The physical base and whole allocation were verified before the blob became visible. */
+	*frame = controller->native->screen;
+	frame->physical = resource->buffer->memory.paddr + request->offset;
+	frame->size = bytes;
+	frame->pitch = request->stride;
+	frame->format = 0;
+	if (request->format == GPU_PIXEL_RGBA8888)
+		frame->format = 1;
+
+	/* Succeeded: an independent controller hold will precede native list publication. */
+	return 0;
+}
+
+/* Retires only those shared allocations that no current or uncertain SRAM list retains. */
+static void
+retire_holds(
+	struct display_device *controller)
+{
+	struct bcm2711_flip_status status;
+	uint32_t slot;
+
+	/* Actual adoption is the retirement boundary; a late uncertain IRQ cannot resolve it. */
+	bcm2711_display_flip_snapshot(controller->native, &status);
+
+	/* Each slot owns at most one independent shared storage reference. */
+	for (slot = 0; slot < 2; slot++) {
+		if ((status.retained_mask & (1U << slot)) != 0 || controller->holds[slot] == NULL)
+			continue;
+
+		/* Native HVS has proved this slot retired, including a rejected unpublished candidate. */
+		bcm2711_buffer_release(controller->holds[slot]);
+		controller->holds[slot] = NULL;
+	}
 }

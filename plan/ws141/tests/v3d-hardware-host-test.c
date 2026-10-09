@@ -16,11 +16,14 @@
 #include <kern/dcache.h>
 #include <kern/device-io.h>
 #include <kern/irq.h>
+#include <kern/kmem.h>
+#include <uapi/gpu-allocation.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/buffer.h"
 #include "drivers/gpu/bcm2711/v3d-job.h"
+#include "drivers/gpu/bcm2711/render-device.h"
 
 /* Persistent single-thread fixture; no allocation or IRQ owner can disappear. */
 static struct bcm2711_v3d test_engine;
@@ -53,11 +56,17 @@ static uint32_t test_offsets[256];
 static uint32_t test_values[256];
 static unsigned test_writes;
 
+/* Captures the actual native renderer node and common error publications. */
+static const struct drv_gpu_ops *test_operations;
+static struct bcm2711_render_device *test_controller;
+static unsigned test_reported;
+
 static void fixture(void);
 static void registers_reset(void);
 static void trace(uint32_t offset, uint32_t data);
 static unsigned find_write(uint32_t offset, unsigned from);
 static void check_jobs(void);
+static void check_resources(void);
 static void model_clear(void);
 static void model_tfu(void);
 static void *gpu_pointer(uint32_t address);
@@ -226,6 +235,9 @@ main(
 	/* The same actual MMU/cache/IRQ owner now executes native job submission paths. */
 	check_jobs();
 
+	/* Exercises real renderer callbacks and quarantined native VA ownership after boot work. */
+	check_resources();
+
 	/* Succeeded: ordinary and failed paths obey literal native ownership boundaries. */
 	puts("v3d-hardware-host-test PASS");
 	return 0;
@@ -272,11 +284,13 @@ bcm2711_buffer_release(
 	struct bcm2711_buffer *buffer)
 {
 	/* Published PT storage must never be released by a failure or reset path. */
-	assert(buffer->references == 1);
+	assert(buffer->references != 0);
+	buffer->references--;
+	if (buffer->references != 0)
+		return;
 	assert(buffer != test_engine.hardware.scratch);
 	if (buffer == test_engine.hardware.pages)
 		assert(!test_engine.hardware.mmu_published);
-	buffer->references = 0;
 	test_released++;
 }
 
@@ -578,6 +592,124 @@ bcm2711_stage_pause(
 	family_same = strcmp(family, "v3d");
 	assert(family_same == 0);
 	assert(stage[0] == 'V');
+}
+
+/*
+ * Retains model allocations for resource, export and native VA ownership.
+ */
+void
+bcm2711_buffer_retain(
+	struct bcm2711_buffer *buffer)
+{
+	/* Every new reference starts from already retained model storage. */
+	assert(buffer->references != 0);
+	buffer->references++;
+}
+
+/*
+ * Allocates ordinary host descriptors used by the actual renderer and sharing source.
+ */
+void *
+kern_calloc(
+	size_t count,
+	size_t bytes)
+{
+	void *storage;
+
+	/* Descriptor allocation is independent from the model's retained physical storage. */
+	storage = calloc(count, bytes);
+	assert(storage != NULL);
+
+	/* Succeeded: the caller owns zeroed ordinary descriptor memory. */
+	return storage;
+}
+
+/*
+ * Frees a safely retired host descriptor without recycling uncertain native RAM.
+ */
+void
+kern_free(
+	void *storage)
+{
+	/* Native view and shared allocation ownership are asserted separately by the fixture. */
+	free(storage);
+}
+
+/*
+ * Supplies observable controller mutex ownership without modeling SMP scheduling.
+ */
+int
+mutex_init(
+	struct mutex *mutex,
+	enum lock_rank rank,
+	const char *name)
+{
+	/* Initializes the same controller lock before any native renderer node publishes. */
+	spin_init(&mutex->guard, rank, name);
+	mutex->locked = 0;
+
+	/* Succeeded: the model can detect nested or unbalanced mutex ownership. */
+	return 0;
+}
+
+/*
+ * Acquires a host controller owner and refuses reentrant renderer callbacks.
+ */
+void
+mutex_lock(
+	struct mutex *mutex)
+{
+	/* Common error publication must occur after controller ownership ends. */
+	assert(mutex->locked == 0);
+	mutex->locked = 1;
+}
+
+/*
+ * Releases the exact controller owner acquired by this model callback.
+ */
+void
+mutex_unlock(
+	struct mutex *mutex)
+{
+	/* Every native mapping transaction balances one controller ownership interval. */
+	assert(mutex->locked == 1);
+	mutex->locked = 0;
+}
+
+/*
+ * Captures complete real operation tables without simulating common ioctl success.
+ */
+int
+drv_gpu_register(
+	const struct drv_gpu_ops *operations,
+	void *controller,
+	struct drv_gpu_device **result)
+{
+	/* Storage-only registration must not advertise Vulkan before an executor exists. */
+	assert((operations->capabilities & (GPU_CAP_COMMAND | GPU_CAP_CAPSET)) == 0);
+	assert(operations->share != NULL && operations->recovery != NULL);
+	assert(operations->blob_create_placed != NULL && operations->resource_destroy != NULL);
+	test_operations = operations;
+	test_controller = controller;
+	*result = controller;
+
+	/* Succeeded: the fixture can exercise the actual published renderer callbacks. */
+	return 0;
+}
+
+/*
+ * Records common device loss only after native fault teardown has been armed.
+ */
+void
+drv_gpu_report_error(
+	struct drv_gpu_device *device,
+	int error)
+{
+	/* No callback may report an error while uncertain resource destruction can free its storage. */
+	assert(device == (struct drv_gpu_device *)test_controller);
+	assert(error != 0 && test_controller->mutex.locked == 0);
+	assert(test_engine.hardware.faulted);
+	test_reported++;
 }
 
 /* Resets volatile registers independently of any MMU allocation or IRQ owner. */
@@ -915,4 +1047,115 @@ find_write(
 	/* No matching write may be silently substituted by a neighboring command. */
 	assert(0);
 	return test_writes;
+}
+
+/* Checks real resource sharing and VA quarantine against the actual native MMU owner. */
+static void
+check_resources(
+	void)
+{
+	struct gpu_blob_create blob;
+	struct gpu_info info;
+	struct gpu_device_info device;
+	struct drv_gpu_mapping mapping;
+	struct bcm2711_render_resource *resource;
+	struct bcm2711_render_resource *imported;
+	struct bcm2711_render_session *first;
+	struct bcm2711_render_session *second;
+	struct bcm2711_buffer *buffer;
+	void *object;
+	void *alias;
+	void *shared;
+	uint32_t identifier;
+	uint32_t address;
+	unsigned releases;
+	int error;
+
+	/* The final fixture starts with a complete native MMU and no boot diagnostic owner. */
+	fixture();
+	error = bcm2711_v3d_hardware_start(&test_engine);
+	assert(error == 0);
+	error = bcm2711_render_register(&test_engine);
+	assert(error == 0 && test_operations != NULL);
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	first = object;
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	second = object;
+	error = test_operations->get_info(test_controller, first, &info);
+	assert(error == 0 && info.max_resources == 128 && (info.capabilities & GPU_CAP_ALLOCATION_SHARE) != 0);
+	error = test_operations->scanout->query_device(test_controller, first, &device);
+	assert(error == 0 && device.roles == GPU_DEVICE_RENDER && device.companion_id == 0);
+
+	/* Native blobs publish checked PTEs and independent per-open protocol identities. */
+	memset(&blob, 0, sizeof(blob));
+	blob.bytes = 8192;
+	blob.flags = GPU_BLOB_MAPPABLE | GPU_BLOB_SHAREABLE | GPU_BLOB_CROSS_DEVICE;
+	error = test_operations->blob_create(test_controller, first, &blob, &object, &identifier);
+	assert(error == 0 && identifier == 1);
+	resource = object;
+	buffer = resource->view->buffer;
+	address = resource->view->address;
+	assert(address == 4096 && buffer->references == 1);
+	error = test_operations->resource_map(test_controller, first, resource, &mapping);
+	assert(error == 0 && mapping.physical == buffer->memory.paddr && mapping.bytes == 8192);
+	error = test_operations->share->export_resource(test_controller, first, resource, NULL, &shared);
+	assert(error == 0 && buffer->references == 2);
+	error = test_operations->share->import_resource(test_controller, second, shared, &alias, &identifier);
+	assert(error == 0 && identifier == 1 && buffer->references == 3);
+	imported = alias;
+	assert(imported->view->address == 12288 && imported->view != resource->view);
+
+	/* Source retirement frees its VA while the export and destination retain the same RAM. */
+	test_operations->resource_destroy(test_controller, first, resource);
+	assert(buffer->references == 2 && ((uint32_t *)test_engine.hardware.pages->address)[1] == 0);
+	test_operations->close(test_controller, first);
+	test_operations->share->release(test_controller, shared);
+	assert(buffer->references == 1);
+	test_operations->resource_destroy(test_controller, second, imported);
+	assert(buffer->references == 0 && test_controller->space.views == NULL);
+
+	/* Failed TLB retirement cannot release a descriptor's independent native allocation hold. */
+	error = test_operations->blob_create(test_controller, second, &blob, &object, &identifier);
+	assert(error == 0 && identifier == 2);
+	resource = object;
+	buffer = resource->view->buffer;
+	releases = test_released;
+	test_stuck_hub = 0x1200;
+	test_operations->resource_destroy(test_controller, second, resource);
+	assert(test_reported == 1 && test_released == releases && buffer->references == 1);
+	assert(test_controller->space.views->address == 4096 && test_controller->space.views->quarantined);
+	assert(test_controller->space.views->references == 0);
+	assert(((uint32_t *)test_engine.hardware.pages->address)[1] == 0);
+	error = test_operations->blob_create(test_controller, second, &blob, &object, &identifier);
+	assert(error == EIO && object == NULL);
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == EBUSY && buffer->references == 1);
+	test_operations->close(test_controller, second);
+
+	/* Failed native reset retains inaccessible storage and admits no fresh namespace. */
+	test_reset_failed = true;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == ETIMEDOUT && buffer->references == 1);
+	error = test_operations->open(test_controller, &object);
+	assert(error == EIO && object == NULL);
+	test_reset_failed = false;
+	test_stuck_hub = 0;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == 0 && buffer->references == 0 && test_controller->space.views == NULL);
+
+	/* Failed initial publication retains its unreturned VA even before a resource became visible. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	first = object;
+	test_stuck_hub = 0x1000;
+	releases = test_released;
+	error = test_operations->blob_create(test_controller, first, &blob, &object, &identifier);
+	assert(error == ETIMEDOUT && object == NULL && identifier == 0 && test_reported == 2);
+	assert(test_released == releases && test_controller->space.views->address == 4096);
+	test_operations->close(test_controller, first);
+	test_stuck_hub = 0;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == 0 && test_released == releases + 1 && test_controller->space.views == NULL);
 }

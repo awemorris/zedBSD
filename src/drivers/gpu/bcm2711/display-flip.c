@@ -690,7 +690,7 @@ prepare_frame(
 {
 	uint32_t order;
 
-	/* Requires the same dimensions and RGB byte order as the established mode. */
+	/* Requires the same dimensions with either independently encoded RGB byte order. */
 	if (frame == NULL)
 		return EINVAL;
 	if (frame->width != console->width || frame->height != console->height)
@@ -699,7 +699,7 @@ prepare_frame(
 		return EINVAL;
 	if (frame->height == 0 || frame->height > 4096U)
 		return EINVAL;
-	if (frame->format != console->format || frame->format > 1U)
+	if (frame->format > 1U)
 		return ENOTSUP;
 
 	/* Bounds every DMA row and keeps the bus alias representable below one GiB. */

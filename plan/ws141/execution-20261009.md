@@ -19,8 +19,8 @@
 | ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | cleared（software/統合範囲のみ） | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 | ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | cleared（software/統合部分範囲のみ） | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
 | ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software/統合部分） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
-| ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | in-progress | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
-| ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | pending | i11/i12の必要な実source出力を確認後 |
+| ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | cleared（software部分） | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
+| ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | in-progress | i11/i12の必要な実source出力を確認後 |
 | ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | pending | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
 | ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | pending | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
 
@@ -246,4 +246,25 @@
 - host: `sh plan/ws141/tests/v3d-power-host-test.sh build/ws141-power-i12-final` → PASS（actual固定DT/FDT/provider順）。`sh plan/ws141/tests/v3d-hardware-host-test.sh build/ws141-v3d-i12-final` → PASS（actual hardware/job/diagnostic source、literal MMU/cache/launch順、両bank IRQ、同時fault/完了、overflow、PTE tail欠落、cache/MMU/ASB timeout、CSD IRQ後clean、real packetからの出力model、missing store refusal、forced-loop reset→noop/PTE退去）。`sh plan/ws141/tests/clear-host-test.sh build/ws141-clear-i12-final` → C/primary XML oracleともPASS。hostの出力modelは物理V3Dの実行証拠ではない。
 - named build: `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とn/BUILD末尾n → exit0、warning/error0、y checker3 PASS。log `build/ws141-v3d-i12-final-build.log`/`build/ws141-v3d-i12-n-build.log`。SHA256 y `03bbf256302d6a96d386af14bc692c291f275f153a10237ae58287a92920fee0`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
 - C全文manual review（所有/retirement/IRQとworkerの排他/timeout/範囲と算術/段落と条件とreturn）、clang-format-19 19.1.7＋definition tab/packet table/one-argument-per-lineの復元、補助style total0、shell構文/diff check0。630 hardware旧名の語単位一致0。最終全WS/license/類似監査はp007で継続する。固定Mesa `v3dv_meta_copy.c`を正本commitから追加取得、MITのfile許諾/hashをlicense表へ追記、code/objectの取り込み無し。
-- i12は統合確認までin-progress。p004 whole acceptance/WS completionは実機待ちのまま。renderer登録/非同期worker/二device resource/shareはi13、Vulkan/SPIR-V/Keilandはi14、全最終検証はi15。Master/共有Queue/Guardrail/他WS/GitHub/T1の投影はQ1、push無し。
+- i12はsoftware/部分scopeをcleared。p004 whole acceptance/WS completionは実機待ちのまま。renderer登録/非同期worker/二device resource/shareはi13、Vulkan/SPIR-V/Keilandはi14、全最終検証はi15。Master/共有Queue/Guardrail/他WS/GitHub/T1の投影はQ1、push無し。
+
+
+## i12統合確認とi13開始（2026-10-09）
+
+- i12 source commit `ed62bb3bbc46a912cc644bf6037b30e95a3033c5`、統合commit `30350c8cba31875a01d58f804a5de13a1305a7ee`（WIP）。Q1のmain `1520080ede0f6fb1d6d3a8992f80ecdd22b0dd65`の変更を保持し、専用統合worktreeでmerge。競合なし。
+- 統合treeのnamed rpi4 driver y/n buildともexit0、warning/error0。3つのhost（provider、hardware/job/diagnostic、clear/XML）PASS。y/n vmunix hashはi12 source結果と一致。logは統合worktree `build/ws141-i12-integration-{y,n}.log`。
+- 共有mainを上記統合commitへfast-forwardし、担当branchも同期。i12のsoftware部分attemptはcleared、実機whole p004はin-progressのまま。push/外部公開無し。
+- i13をin-progressにする。p005の二device/resource共有・VA所有・非同期worker/recoveryを開始。native allocationの独立referenceを共有し、scanout/fault/timeoutのDMA holdはresource/session破棄から独立させる。companion identityはcommon coreの現在の口で取得できないため0（任意preference無し）を保持し、役割とforeign sharingで選択する。公開API/HALを追加しない。
+
+
+## i13の二device/allocation共有の実装（2026-10-09、継続中）
+
+- 新規private `share.c/.h`、`v3d-memory.c/.h`、`render-device.c/.h`。native rendererはV1〜V10を安全に終えた後だけ別のGPU nodeとして登録。現在のcapabilityはresource/blob/transfer/map/share/allocation-share、COMMAND/CAPSET/Vulkanは未公開。device roleはdisplay/renderを別々に返し、optional companionは0。
+- placed blobは実際のphysical runのsize/base alignment/全extent/max DMAを検証。HVSと共有可能なlow1GiB contiguous RAM、非snooping cached storageのCOHERENT条件はENOTSUP。flagだけを成功根拠にしない。
+- exportはpage vectorとbufferの独立holdを持つ。元resource/openの終了から独立し、同device importは新descriptor、renderer importは新VA/local IDを持つ。foreign scanoutはlive native exportのvector identity/全extent/元のimmutable layoutを照合して独立buffer referenceを取得し、未知のexporter/MMIO/変更layoutは拒否。一般のforeign allocation-only importはcommon coreの既存EXDEV契約を維持。
+- displayはCOPYとnative SHARED/FOREIGNを公開。ordinary presentは従来copy、BLOB presentはSRAM slotごとの独立buffer holdをnative publicationより先に取得。actual selected-PV adoptionが除いたslotだけを解放し、timeout/failed closeではold/candidate双方を保持。fresh console adoption後にだけ解放。RGBA/BGRAの上planeを独立encodeし、下console/HDMI mode/portは維持。
+- rendererのsorted VA ownerはpage0を予約、全pageを同時mapしてcache/TLB flush後だけresourceを返す。mapのflush失敗は未公開viewをquarantine。unmap後flush失敗でもVA予約とphysical referenceを保持し、common faultを所有arm後に通知。coreの全owner退去とchecked native reset/最終表flushの後だけ回収。
+- source build: named rpi4 y target exit0、warning/error0、checker3 PASS、SHA256 `932927e3741c81922f6ba0a13cc6b72f9963dd52806d7726db88deff422dac17`、log `build/ws141-i13-render-final-build.log`。
+- short host: `sh plan/ws141/tests/display-host-test.sh build/ws141-i13-share-final-host`の4試験PASS（actual display/share/refcount/slot retirement、allocator placement違反、RGBA direct、source/capability/descriptor退去、2slot timeout/close/restore）。`sh plan/ws141/tests/v3d-hardware-host-test.sh build/ws141-i13-render-final-host` PASS（actual renderer/MMU callbacks、source/import別VA、元open/capability退去、PTE clear後TLB failureと未公開map failureのquarantine、live external owner時のreset拒否、failed native reset retained、再reset/flush後のrelease）。物理/SMP/cache電気的確認ではない。
+- clang-format19.1.7、full C/manual ownership/VA/IRQ/failure scope review、style-check0、diff-check0、shell構文0、hardware630旧名照合0。新sourceは独自Zlib、GPL原文/構造転記・外部object無し。p007の最終全source/license/類似監査は後続。
+- i13はin-progress。非同期worker/common completion/job supervision、Vulkan object/blob-id binding、SPIR-V/Keilandはまだ実装中/後続。現在のallocation-only recovery stopはnative commandを公開しない状態でのみ成立し、実行器をbindする前にworker join/callback drainへ更新する。実機whole acceptanceは未実施。

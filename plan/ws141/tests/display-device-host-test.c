@@ -22,6 +22,7 @@
 #include <kern/sched.h>
 #include <drivers/gpu/gpu.h>
 #include <uapi/errno.h>
+#include <uapi/gpu-allocation.h>
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 
@@ -43,6 +44,9 @@ static uint8_t *test_console;
 static unsigned test_run_count;
 static unsigned test_freed;
 static bool test_stall;
+
+/* Models an allocator that violates requested placement before any DMA publication. */
+static bool test_misplaced;
 
 /* The clock provider can refuse a transition without permitting any list publication. */
 static bool test_clock_refused;
@@ -66,6 +70,15 @@ main(
 	struct drv_gpu_mapping mapping;
 	struct bcm2711_flip_status status;
 	struct drv_bcm2711_boot_screen overlay;
+	struct gpu_blob_create_placed blob;
+	struct gpu_image_descriptor image;
+	struct drv_gpu_scanout_backing backing;
+	struct gpu_scanout_constraints constraints;
+	void *capability;
+	void *imported;
+	void *alias;
+	void *other;
+	uint32_t identifier;
 	uint32_t *words;
 	const uint8_t pixels[4] = {0x11, 0x22, 0x33, 0xff};
 	uint8_t *native;
@@ -222,6 +235,121 @@ main(
 	error = bcm2711_display_flip_restore(&test_display);
 	assert(error == 0 && test_core_hz == 137600000);
 
+	/* Advertised foreign sharing carries actual native constraints, never a companion guess. */
+	error = test_operations->open(test_device, &first);
+	assert(error == 0);
+	error = test_operations->open(test_device, &second);
+	assert(error == 0);
+	memset(&constraints, 0, sizeof(constraints));
+	constraints.display_id = 1;
+	constraints.generation = 1;
+	error = test_operations->scanout->constraints(test_device, first, &constraints);
+	assert(error == 0 && constraints.flags == (GPU_SCANOUT_COPY | GPU_SCANOUT_SHARED | GPU_SCANOUT_FOREIGN));
+	assert(constraints.max_dma_address == 0x3fffffff && constraints.placement == GPU_PLACEMENT_CONTIGUOUS);
+
+	/* Placed allocation verifies the actual run and refuses requested cache coherence. */
+	memset(&blob, 0, sizeof(blob));
+	blob.blob.bytes = 8294400;
+	blob.blob.flags = GPU_BLOB_MAPPABLE | GPU_BLOB_SHAREABLE | GPU_BLOB_CROSS_DEVICE;
+	blob.placement.flags = GPU_PLACEMENT_COHERENT;
+	error = test_operations->blob_create_placed(test_device, first, &blob, &resource, &identifier);
+	assert(error == ENOTSUP && resource == NULL && identifier == 0);
+	blob.placement.flags = GPU_PLACEMENT_CONTIGUOUS;
+	blob.placement.max_dma_address = 0x3fffffff;
+	blob.placement.alignment = 4096;
+	freed_before = test_freed;
+	test_misplaced = true;
+	error = test_operations->blob_create_placed(test_device, first, &blob, &resource, &identifier);
+	assert(error == ENOTSUP && resource == NULL && test_freed == freed_before + 1);
+	test_misplaced = false;
+	error = test_operations->blob_create_placed(test_device, first, &blob, &resource, &identifier);
+	assert(error == 0 && resource != NULL && identifier != 0);
+	error = test_operations->resource_write(test_device, first, resource, 0, pixels, 4);
+	assert(error == 0);
+
+	/* Export, same-device import and foreign import hold storage independently of the source. */
+	memset(&image, 0, sizeof(image));
+	image.width = 1920;
+	image.height = 1080;
+	image.stride = 7680;
+	image.format = GPU_PIXEL_RGBA8888;
+	image.allocation_bytes = 8294400;
+	image.usage = 16;
+	image.tiling = GPU_IMAGE_LINEAR;
+	error = test_operations->share->export_resource(test_device, first, resource, &image, &capability);
+	assert(error == 0);
+	error = test_operations->share->import_resource(test_device, second, capability, &alias, &identifier);
+	assert(error == 0 && identifier != 0);
+	error = test_operations->share->get_scanout_backing(test_device, capability, &backing);
+	assert(error == 0 && backing.page_count == 2025 && backing.page_bytes == 4096);
+	backing.flags |= DRV_GPU_BACKING_DEVICE;
+	error = test_operations->scanout->import_image(test_device, second, &image, &backing, &imported);
+	assert(error == ENOTSUP && imported == NULL);
+	backing.flags = DRV_GPU_BACKING_CONTIGUOUS;
+	image.stride += 4;
+	error = test_operations->scanout->import_image(test_device, second, &image, &backing, &imported);
+	assert(error == ENOTSUP && imported == NULL);
+	image.stride -= 4;
+	error = test_operations->scanout->import_image(test_device, second, &image, &backing, &imported);
+	assert(error == 0 && imported != NULL);
+	freed_before = test_freed;
+	test_operations->resource_destroy(test_device, first, resource);
+	test_operations->close(test_device, first);
+	test_operations->share->release(test_device, capability);
+	test_operations->resource_destroy(test_device, second, alias);
+	assert(test_freed == freed_before);
+
+	/* Direct RGBA scanout encodes its own channel order while the lower console stays BGRA. */
+	memset(&claim, 0, sizeof(claim));
+	claim.display_id = 1;
+	claim.generation = 1;
+	error = test_operations->display->claim(test_device, second, &claim);
+	assert(error == 0);
+	present.lease = claim.lease;
+	present.flags = GPU_DISPLAY_PRESENT_FIFO | GPU_DISPLAY_PRESENT_BLOB;
+	present.refresh_millihz = 60000;
+	present.sequence = 0;
+	error = test_operations->display->present(test_device, second, imported, &present);
+	assert(error == 0);
+	bcm2711_display_flip_snapshot(&test_display, &status);
+	assert(status.frames[0].format == 1 && status.retained_mask == 1);
+	words = &test_hvs[0x4000 / 4 + 128];
+	assert(words[0] == 0x4800d807 && words[8] == 0x4800f807);
+	test_operations->resource_destroy(test_device, second, imported);
+	assert(test_freed == freed_before);
+	release.lease = claim.lease;
+	error = test_operations->display->release(test_device, second, &release);
+	assert(error == 0 && test_freed == freed_before + 1);
+
+	/* Two uncertain native blob slots survive both descriptors and a failed close restore. */
+	error = test_operations->blob_create(test_device, second, &blob.blob, &resource, &identifier);
+	assert(error == 0);
+	error = test_operations->blob_create(test_device, second, &blob.blob, &other, &identifier);
+	assert(error == 0);
+	error = test_operations->display->claim(test_device, second, &claim);
+	assert(error == 0);
+	present.lease = claim.lease;
+	present.sequence = 0;
+	error = test_operations->display->present(test_device, second, resource, &present);
+	assert(error == 0);
+	test_stall = true;
+	present.sequence = 0;
+	error = test_operations->display->present(test_device, second, other, &present);
+	assert(error == ETIMEDOUT);
+	bcm2711_display_flip_snapshot(&test_display, &status);
+	assert(status.uncertain && status.retained_mask == 3);
+	freed_before = test_freed;
+	test_operations->resource_destroy(test_device, second, resource);
+	test_operations->resource_destroy(test_device, second, other);
+	test_operations->close(test_device, second);
+	assert(test_freed == freed_before);
+	test_stall = false;
+	error = test_operations->open(test_device, &first);
+	assert(error == 0);
+	error = test_operations->display->claim(test_device, first, &claim);
+	assert(error == 0 && test_freed == freed_before + 2);
+	test_operations->close(test_device, first);
+
 	/* Succeeded: private scanout storage survives every ordinary open and resource. */
 	puts("display-device-host-test PASS");
 	return 0;
@@ -303,7 +431,14 @@ kern_pmem_alloc_limited(
 	assert(test_run_count < 16 && alignment == 4096 && boundary == 0);
 	allocation = &test_allocations[test_run_count];
 	allocation->physical = 0x02000000ULL + test_run_count * 0x02000000ULL;
-	assert(allocation->physical + bytes - 1 <= limit);
+	if (test_misplaced) {
+		/* A malformed returned run must be rejected before CPU mapping or publication. */
+		allocation->physical += 0x40000000ULL;
+	} else {
+		assert(allocation->physical + bytes - 1 <= limit);
+	}
+
+	/* CPU storage belongs to the actual returned physical descriptor, including malformed placement. */
 	allocation->address = calloc(1, bytes);
 	assert(allocation->address != NULL);
 	allocation->bytes = bytes;
