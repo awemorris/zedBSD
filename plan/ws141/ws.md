@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device allocation-share/workerとprivate compiler/Vulkan recordingを実装、host/build PASS。native prepared draw/queue/public runtimeと実機/p007は未完了）
+Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build PASS。whole stack/p007/Keiland実機確認は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i14 whole pending job/closed-session recovery、explicit barrier/implicit pass layouts＋qualified external-family sharingを接続。actual public barrier/typed memory host19範囲/close-reset host/named y warning/error0 PASS。次はGPU copy/clear/blit meta lowering、primary QueueSubmit/public runtime/common binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-external-family共有メモリのadmission-checkpoint2026-10-09)。
+Resume point: public CAPSET/COMMAND/NOTIFICATION/JOB/JOB_CAPACITYをactual render sessionとsingle workerへ接続。host26範囲＋actual node open/close/hardware owner host2 summary、RPi4 y warning/error0/checks3 PASS。次はactual client/displayの残るsoftware gate、whole public LTO callgraph16KiBとp007全文規約/license/類似/BLOB。Keiland/実機/console RAM寿命未確認、Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -247,3 +247,8 @@ native fence/binary semaphoreのtyped device ownership、初期状態/status/ato
 ## actual QueueSubmit checkpoint（2026-10-10）
 
 実legacy client submit encoderとnative QueueSubmitを接続。全graph/prepared8MiB/256actionのpreflight後、既存COMMAND worker内でnative退役を直列確認し、binary chainsとfinal native fenceを完成させる。OOM/prefix refusal/one-time/uncertain whole quarantine/empty work fault refusalを実client private encoder＋actual kernel source/明示runner host25範囲で確認。RPi4 y checks3/warning-error0/scoped style0/diff0 PASS。COMMAND/CAPSET/JOB binding/public runtime・final stack/p007・実機/Keilandは残り、in-progress/incompleteを維持。Master変更無し。[exact scope/内部手順/限界/次](execution-20261009.md#i14-actual-legacy-queuesubmitのsoftware出力2026-10-10)。
+
+
+## public Vulkan runtimeの登録と次のsoftware関門（2026-10-10）
+
+[p005](phase005/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)・[p006](phase006/phase.md#public-runtimeのsoftware-checkpoint2026-10-10)を更新。private-onlyからactual render node publicationへ進み、全openにcomplete namespace、actual20route dispatch、immutable async COMMAND、checked domain/real completion/close drain、paired168byte capsetを接続。actual host26とactual renderer register/open/close/OOM/ownership host2 summary、full public LTO retained y buildはPASS。physical Keiland/console RAM lifetimeとwhole stack/p007を未達として保持する。Master/共有記録更新はQ1。詳細は[checkpoint](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
