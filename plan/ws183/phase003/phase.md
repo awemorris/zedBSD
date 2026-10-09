@@ -2,7 +2,7 @@
 
 # ws183-p003: 規約の全文の見直し（WS183 が変えた C）
 
-Status: cleared 候補（2026-10-09 P4。見直し・build・host 試験まで済み。Q1 の判定待ち）
+Status: cleared（2026-10-09 Q1 判定: 差分を読み動作の不変を確認、comment は code と合う、build warning 0・host 試験 3 本 ok。P4 の Sonnet 5.5 low の試しは合格）
 Parent: [WS183](../ws.md)
 
 ## 範囲

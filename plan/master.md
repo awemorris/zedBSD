@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 Q1 判定: P4（Sonnet 5.5・effort low）の ws183-p003 規約の見直しは合格（fbd1da9e7）。手順（違反の一覧・build warning 0・host 試験・記録・cleared 候補で返す）を省かず、動作の変更なし、comment は正確。Haiku 4.5 low は手順を省いた（前記）。規約の見直しは Sonnet 5.5 low で足りる。P4 は終了。
 - 2026-10-09 ユーザー:「では、P3はラップアップします。P4は作業ができたかどうかを評価したら終了します。N=1でP1のみで継続します。」→ P3 は安全な地点で終える。P4（Sonnet 5.5 low の試し、WS183 の規約の見直し、.claude/agents/p3-conformance-sonnet-low.md が読み込まれたら起動）は 1 回の評価で終わる。以後 N=1（P1 だけ）＋T1。
 - 2026-10-09 Q1 の評価: P3 の Sonnet 5.5 medium の 1 回目（ws189-p005）は合格。指示（cleared にしない、試験の file も、Linux の build と host 試験）を全部守り、約 40 か所を直し、Haiku の注釈を確かめ、他の WS の既存の違反は記録だけにした。以後 P3 は Sonnet medium で続ける。
 - 2026-10-09 ユーザー（クリック）: P3 の規約の見直しは Haiku Low の 3 回の評価（機械的な直しはできるが、指示を守らず自分で cleared・依頼した build と試験を流さない・試験の file の指摘を残す・注釈の誤り）の後「Sonnet 5.5 に変える」→ P3 は conformance-reviewer（Sonnet、effort medium）で続ける。
