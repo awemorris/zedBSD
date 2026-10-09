@@ -58,8 +58,9 @@ log in as `kei`. Use Beta 2 only on networks you trust. `root` cannot log in.
 - External displays over HDMI and USB-C (DisplayPort alternate mode),
   extended or mirrored, arranged in Settings → Display.
 
-<!-- review: the control panel (WS192, T1-496) and the lock screen (WS187) wait for T1 and the 5330 UAT; FIDO2 sign-in
-     (WS172 p003, WS161 p006) waits for the UAT. Drop a line whose test fails. -->
+<!-- review: the control panel (WS192) passed in QEMU (T1-496) apart from the look, which a person judges; it and the
+     lock screen (WS187) wait for the 5330 UAT (items 1 and 6). FIDO2 sign-in (WS172 p003, WS161 p006) waits for the UAT
+     (item 7). Drop a line whose check fails. -->
 
 ### Applications
 
@@ -100,10 +101,7 @@ X11 programs run on the desktop through a rootless X server, with GLX.
        or delete it.
      Vulkan Video is behind the boot option i915.debug=video until ws083-p008 makes it the default; if it is still
      behind the option at the RC, say so in its line ("start with i915.debug=video on the boot line to turn it on").
-     IPv6 waits for T1-478.
-     The older note follows. -->
-<!-- review: Bluetooth is in on the condition that keyboards and mice work on the 5330 by the freeze (2026-10-09 user);
-     if not, delete its line here and add the known-issue row (see the known-issues draft). IPv6 waits for T1-478. -->
+     IPv6 waits for the networkd retest (T1-500); drop "and IPv6" if it fails. -->
 
 ### For developers
 
