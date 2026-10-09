@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device allocation-shareを実装、host/build PASS。native worker/job reservationを実装、Vulkan/compilerと実機は未完了）
+Status: incomplete（display/V1〜V10/二device allocation-share/workerとprivate compiler/Vulkan recordingを実装、host/build PASS。native prepared draw/queue/public runtimeと実機/p007は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i13のallocation/shareはmain cfb3401f7へ統合。private native worker・exact-once completion・supervised reserve/commit/cancel/capacityを実装しactual source host/rpi4 build PASS、warning0。worker checkpointを統合し、p006 kernel Vulkan実行器とV3D SPIR-V compilerへ検証済みscoped owner出力を接続する。COMMAND/CAPSET/JOB未公開。実機/console RAM寿命とp007最終監査は未達。Master/共有記録/T1投影はQ1担当。[worker結果](execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。
+Resume point: private actual Vulkan primary/graphics recordingはmain d097f9b46へ統合。i14 ordered draw stateのlogical fetch/stage push/descriptor prefix compatibilityと2回walkはhost12範囲/RPi4 y build PASS。次は独立immutable prepared ownerとnative GPU code/uniform/TMU/CL、transfer/barrier/queue/common/public binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -70,9 +70,9 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
 | [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i11 allocator/登録/copy present/2-plane合成/起動診断を実装、host/build PASS。実機待ち） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
-| [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
+| [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V1〜V10/native runnerを実装、固定XML照合・host/build PASS。実機電源/register/job観測は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | in-progress | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
-| [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | planned | p004・p005 | 未見積 |
+| [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | in-progress（compiler/private Vulkan object/pipeline/recording/draw stateはhost/build PASS、native prepared job/public binding/実機は未達） | p004・p005 | 未見積 |
 | [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planned | 全て | 3〜4h |
 
 ## 要検討・ブロック（2026-10-05）
@@ -197,3 +197,7 @@ actual selected-state graphics encoder→independent native decoder/compiler/reg
 ## i14 primary/graphics recording checkpoint（2026-10-09）
 
 actual client primary pool/buffer codecsとreal public9vkCmdのfinite native recordingを接続。whole batch rollback、pending mutation拒否、pool非cycle/registry退役とindependent old graph、selected colour clear/raw state/typed interfaces、first node OOM→End failure/clean re-recordを確認。ordinary descriptor update-after-recordの想定をVulkan 1.0仕様へ修正し、set generation/current validationとpending update拒否を追加。host11範囲/RPi4 y build/style PASS、actual native CL/GPU completionの証拠にはしない。p005/p006/i13/i14 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。next immutable current draw preparation/native VA/code/uniform/TMU/CL、transfer/barrier/queue/common/public runtime。Master変更無し。[正確な結果/想定訂正/失敗と修正/限界/復帰点](execution-20261009.md#i14-primary-command所有とactual-vkcmd記録のsoftware出力2026-10-09)。
+
+## i14 ordered draw state checkpoint（2026-10-09）
+
+stage別push/partial vertex/dynamic stateとdescriptor prefix互換/disturbance、全graph validation後のCPU-only準備callbackを接続。host12範囲/RPi4 y build/style PASS。独立prepared native owner/code/uniform/TMU/CL、queue/public runtime、Keiland/実機/p007は未達、WS incomplete。Master担当変更無し。[詳細/修正/復帰点](execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。

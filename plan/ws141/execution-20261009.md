@@ -510,3 +510,23 @@ private `vulkan-command.h`、pool/batch/bufferの3 source、`vulkan-record.h`、
 clang-format-19後definition tab/ANSI/section/forward、finite framing/short circuit、successful-retain-before-field/publication、borrowed list非cycle、first native cleanup error、kernel FP無しとgeneration/pending意味を確認、style total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-record-final-y.log`）、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。routersは未公開/未参照でGC除去、hashをGPU稼働証拠としない。後続paragraph comment/condition line-break editsは意味変更無し、統合treeで当該最終sourceを再buildする。
 
 p005/p006/i13/i14 in-progress、COMMAND/CAPSET/JOB未公開、physical/Keiland/p007未達。next: current generationを検証したimmutable draw preparation、stage別push/descriptor/vertex state、native GPU code/uniform/TMU/attribute/CLとindependent VA owners、transfer/barrier/queue sync/common worker、complete public binding。Master/共有投影はQ1。
+
+### primary command/graphics recordingのmain統合確認
+
+source `8dd4a94d76426b283ed0548d5ca7ea7fbd12055e` とQ1 record-only main `a42a544353d4e5e57da6847b7835c95f552f5e77` を専用統合treeで保持し、merge `d097f9b4660a54e2fbe0c1e8fa896a6b5d0234dc` へ統合。統合版actual host11範囲とnamed RPi4 y buildがexit0、warning/error0、arm64 check3 PASS。logs `build/ws141-i14-record-integration-host.log` と `build/ws141-i14-record-integration-y.log`、vmunix SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。main/専用branchを同SHAへfast-forwardしcleanを確認。Master担当編集無し、nはprivate source無しで先行証拠を保持。i13/i14/p005/p006 in-progress、public binding/Keiland/実機/p007は未達、immutable draw state検証へ継続。
+
+## i14 ordered draw stateのsoftware出力（2026-10-09）
+
+private `vulkan-layout-compat.c`、`vulkan-draw.h`、draw/walk/validate sourceとarm64列を追加。pipeline layoutはexact push range groupingも保持し、combined V|F rangeと独立V/F rangesをword permission unionだけで互換と誤判定しない。canonical set definitionの共有比較、set Nまでの全prefixとexact push ranges、ordinary binding disturbanceを実装。stage別push word/layout、部分vertex bind、current pass/pipeline/dynamic viewport/scissorをserialized heap stateへ解決する。全graphをcallback無しで検証してから2回目にCPU-only準備callbackを呼ぶ。callbackは独立ownerを取得し、失敗時の全prefix rollbackをcallerが担う契約、DMA launchは禁止。
+
+actual compiled coordinate/vertex/fragment uniform streamだけを消費し、unused descriptor/attributeに不要な設定を要求しない。頂点範囲はfirstVertex/vertexCount/stride/format全byteをlogical resource内で確認、allocation paddingを使わない。UBOはexact descriptor range内のwordとactual coherent VA spanを確認。sampled textureはinitialized combined view/sampler/implemented layout、全image span、attachment feedbackを拒否。独立image/memory handleでもnative VA spanが重なれば拒否。clear-only passもcurrent target backingを確認。no FP実行、no application/wire pointer保持。borrowed stateはcallback終了前に独立DMA ownerへ変換する必要がある。
+
+一次仕様 [Pipeline Layout Compatibility](https://docs.vulkan.org/spec/latest/chapters/descriptorsets.html#descriptorsets-compatibility) を参照し、bind pipelineだけではpush valuesをdisturbせず、bound descriptorのprefix互換と再bindによるdisturbを分ける。これはp006内部実装で外部HAL/UAPI/他Phase scopeの変更無し。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-draw-state-final-host` → actual client/native sourceの12範囲PASS。real9vkCmd→whole state walking→begin/draw/end callback、temporary-state OOMとcallback OOM時のheap復元、48-byte vertex resourceを7vertex/firstVertex1で越えるlogical fetch拒否、stage違いpush不足、alias feedback拒否、synthetic immutable extra binding prefixによるcompatible higher-set維持/incompatible lower-rebindによるhigher-set disturbance、combined/separate push range不互換とdeclaration order違い互換を確認。synthetic prefix/immutable scalar mutationsは明示fault fixture、actual client decoderやGPU DMAを実行した証拠ではない。callbackはborrowed stateを観察するだけで、independent prepared GPU jobはまだ作っていない。
+
+既存recording-only fixtureはsampled viewとframebufferが同じimageで、recording ownershipの試験には使えたがvalid native drawではattachment feedbackになるため、別actual sampled image/viewを同じcoherent memoryのnonoverlapping offset2048へbindして修正。productionにfallbackや特例を入れない。レビュー中のnative alias check追記が一時的に別helperへ入った編集ミスをsource確認で訂正、試験前に除去。
+
+formatter19/definition tab/style total0/diff0、ANSI/section/forward/short circuit/全interval64bit/first error/borrowed pointer lifetime/heap stack reductionを確認。named RPi4 y build exit0、warning/error0、arm64 check3 PASS（`build/ws141-i14-draw-state-final-y.log`）、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。後続comment/return整理は意味変更無し、統合treeで最終sourceを確認する。global p007全文適合/公開runtime stack/physicalは未達。private routersはGC除去、vmunix hashはGPU実行証拠にならない。
+
+i13/i14/p005/p006 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。next independent immutable prepared draw owners（pipeline/target/consumed vertex/descriptor backing、stage push snapshot）、native GPU code/uniform/TMU/attribute/CL、transfer/barrier/queue/common worker/public binding。Master/共有投影はQ1。

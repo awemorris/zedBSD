@@ -38,8 +38,14 @@ struct bcm2711_vulkan_pipeline_layout {
 	uint32_t count;
 	struct bcm2711_vulkan_object *sets[BCM2711_VULKAN_PIPELINE_SETS];
 	VkShaderStageFlags push[BCM2711_VULKAN_PUSH_WORDS];
+	/* Exact range grouping distinguishes one combined-stage range from two otherwise identical per-stage ranges. */
+	VkPushConstantRange ranges[2];
+	uint32_t range_count;
 };
 
 int bcm2711_vulkan_layout_dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply, int *handled);
+int bcm2711_vulkan_layout_set_compatible(const struct bcm2711_vulkan_set_layout *first, const struct bcm2711_vulkan_set_layout *second);
+int bcm2711_vulkan_layout_push_compatible(const struct bcm2711_vulkan_pipeline_layout *first, const struct bcm2711_vulkan_pipeline_layout *second);
+int bcm2711_vulkan_layout_compatible(const struct bcm2711_vulkan_pipeline_layout *first, const struct bcm2711_vulkan_pipeline_layout *second, uint32_t set);
 
 #endif

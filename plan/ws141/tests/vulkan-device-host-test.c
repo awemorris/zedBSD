@@ -25,6 +25,7 @@
 #include "drivers/gpu/bcm2711/vulkan-pipeline.h"
 #include "drivers/gpu/bcm2711/vulkan-command.h"
 #include "drivers/gpu/bcm2711/vulkan-record.h"
+#include "drivers/gpu/bcm2711/vulkan-draw.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -64,6 +65,8 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void draw_test(struct bcm2711_vulkan_command_buffer *command);
+static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
 static void record_test(struct bcm2711_vulkan_session *session);
 static void command_test(struct bcm2711_vulkan_session *session);
 static void pipeline_test(struct bcm2711_vulkan_session *session);
@@ -676,6 +679,184 @@ command_test(
 	return;
 }
 
+/* Verifies complete state admission and explicitly injected fixture faults against actual native draw walking. */
+static void
+draw_test(
+	struct bcm2711_vulkan_command_buffer *command)
+{
+	struct bcm2711_vulkan_command_node *node;
+	struct bcm2711_vulkan_record *draw;
+	struct bcm2711_vulkan_record *push;
+	struct bcm2711_vulkan_descriptor_set *set;
+	struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_pipeline_layout combined;
+	struct bcm2711_vulkan_pipeline_layout separate;
+	struct bcm2711_vulkan_command_buffer prefixed;
+	struct bcm2711_vulkan_pipeline *pipeline;
+	struct bcm2711_vulkan_record prefix[2];
+	struct bcm2711_vulkan_object layout_object;
+	struct bcm2711_vulkan_object *set_object;
+	uint32_t observation[4];
+	unsigned baseline;
+	int error;
+
+	/* The callback observes actual recorded draw state; no native launch or GPU completion is simulated. */
+	baseline = allocations;
+	memset(observation, 0, sizeof(observation));
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == 0 && observation[0] == 3 && observation[2] == 1 && allocations == baseline);
+	fail_after = 1;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == ENOMEM && observation[0] == 3 && allocations == baseline);
+	memset(observation, 0, sizeof(observation));
+	observation[1] = GPU_OP_CMD_DRAW;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == ENOMEM && observation[0] == 2 && allocations == baseline);
+
+	/* The complete validation walk must reject a late fetch error before even the pass-begin callback can prepare a prefix. */
+	draw = NULL;
+	push = NULL;
+	set = NULL;
+	pipeline = NULL;
+	set_object = NULL;
+	for (node = command->first; node != NULL; node = node->next) {
+		if (((struct bcm2711_vulkan_record *)node)->opcode == GPU_OP_CMD_DRAW)
+			draw = (struct bcm2711_vulkan_record *)node;
+		if (((struct bcm2711_vulkan_record *)node)->opcode == GPU_OP_CMD_PUSH_CONSTANTS)
+			push = (struct bcm2711_vulkan_record *)node;
+		if (((struct bcm2711_vulkan_record *)node)->opcode == GPU_OP_CMD_BIND_DESCRIPTOR_SETS) {
+			set_object = ((struct bcm2711_vulkan_record *)node)->objects[1];
+			set = set_object->payload;
+		}
+
+		/* Actual pipeline ownership supplies the exact compatibility definition for the synthetic binding-prefix fixture. */
+		if (((struct bcm2711_vulkan_record *)node)->opcode == GPU_OP_CMD_BIND_PIPELINE)
+			pipeline = ((struct bcm2711_vulkan_record *)node)->objects[0]->payload;
+	}
+
+	/* Seven vertices exceed the logical 48-byte buffer even though its rounded memory binding has more storage. */
+	assert(draw != NULL && push != NULL && set != NULL);
+	memset(observation, 0, sizeof(observation));
+	draw->words[0] = 7;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == EINVAL && observation[0] == 0 && allocations == baseline);
+	draw->words[0] = 6;
+	draw->words[2] = 1;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == EINVAL && observation[0] == 0);
+	draw->words[2] = 0;
+
+	/* A fault-injected push to the other stage cannot define the vertex shader's previously unset words. */
+	push->stages = VK_SHADER_STAGE_FRAGMENT_BIT;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == EINVAL && observation[0] == 0);
+	push->stages = VK_SHADER_STAGE_VERTEX_BIT;
+
+	/* Distinct image objects aliasing the attachment's storage must not bypass the unsupported feedback guard. */
+	image_view = set->bindings[0].view->payload;
+	image = image_view->owner.parent->payload;
+	assert(image->offset == 2048);
+	image->offset = 0;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == ENOTSUP && observation[0] == 0);
+	image->offset = 2048;
+	error = bcm2711_vulkan_draw_walk(command, draw_observe, observation);
+	assert(error == 0 && observation[0] == 3 && allocations == baseline);
+
+	/* Synthetic immutable binding prefixes use real set owners while exercising production disturbance beyond Keiland's single-set stream. */
+	assert(pipeline != NULL && set_object != NULL);
+	combined = *(struct bcm2711_vulkan_pipeline_layout *)pipeline->owner.parent->payload;
+	combined.count = 2;
+	combined.sets[1] = combined.sets[0];
+	memset(&layout_object, 0, sizeof(layout_object));
+	layout_object.kind = I915_VK_OBJ_PIPELINE_LAYOUT;
+	layout_object.payload = &combined;
+	memset(prefix, 0, sizeof(prefix));
+	prefix[0].opcode = GPU_OP_CMD_BIND_DESCRIPTOR_SETS;
+	prefix[0].count = 2;
+	prefix[0].objects[0] = &layout_object;
+	prefix[0].objects[1] = set_object;
+	prefix[0].objects[2] = set_object;
+	prefix[0].generations[0] = set->generation;
+	prefix[0].generations[1] = set->generation;
+	prefix[0].node.next = command->first;
+	prefixed = *command;
+	prefixed.first = &prefix[0].node;
+	memset(observation, 0, sizeof(observation));
+	observation[3] = 1;
+	error = bcm2711_vulkan_draw_walk(&prefixed, draw_observe, observation);
+	assert(error == 0 && observation[0] == 3 && allocations == baseline);
+
+	/* Replacing set zero using an incompatible push-range layout disturbs set one; rebinding real set zero does not resurrect it. */
+	prefix[1] = prefix[0];
+	prefix[1].count = 1;
+	prefix[1].objects[0] = pipeline->owner.parent;
+	prefix[1].node.next = command->first;
+	prefix[0].node.next = &prefix[1].node;
+	combined.ranges[0].size = 16;
+	memset(observation, 0, sizeof(observation));
+	observation[3] = 2;
+	error = bcm2711_vulkan_draw_walk(&prefixed, draw_observe, observation);
+	assert(error == 0 && observation[0] == 3 && allocations == baseline);
+
+	/* Equal per-word stage permissions do not make combined and separate exact push ranges compatible. */
+	memset(&combined, 0, sizeof(combined));
+	memset(&separate, 0, sizeof(separate));
+	combined.range_count = 1;
+	combined.ranges[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT | VK_SHADER_STAGE_FRAGMENT_BIT;
+	combined.ranges[0].size = 16;
+	separate.range_count = 2;
+	separate.ranges[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	separate.ranges[0].size = 16;
+	separate.ranges[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	separate.ranges[1].size = 16;
+	error = bcm2711_vulkan_layout_push_compatible(&combined, &separate);
+	assert(error == EINVAL);
+	combined = separate;
+	combined.ranges[0] = separate.ranges[1];
+	combined.ranges[1] = separate.ranges[0];
+	error = bcm2711_vulkan_layout_push_compatible(&combined, &separate);
+	assert(error == 0);
+	puts("WS141 Vulkan actual ordered draw state/full fetch/push compatibility/no prefix preparation on failure: PASS");
+
+	/* Succeeded: all explicit fixture mutations were restored and the actual recording remains executable. */
+	return;
+}
+
+/* Observes borrowed valid native state without claiming independently owned GPU preparation or execution. */
+static int
+draw_observe(
+	void *payload,
+	const struct bcm2711_vulkan_draw_state *state,
+	const struct bcm2711_vulkan_record *record)
+{
+	uint32_t *observation;
+
+	/* Pass begin, valid draw and pass end are the only native preparation points. */
+	observation = payload;
+	assert(state->pass != NULL);
+	observation[0]++;
+	if (record->opcode == GPU_OP_CMD_DRAW) {
+		assert(state->pipeline != NULL && state->viewport != NULL && state->scissor != NULL);
+		assert(state->vertices[0]->bytes == 48 && state->offsets[0] == 0);
+		assert(state->sets[0].set->bindings[0].view->identity == 181);
+		assert(state->push[0][0] == 0x3f000000U && state->push_layouts[0][0] != NULL && state->push_layouts[1][0] == NULL);
+		observation[2]++;
+		if (observation[3] == 1)
+			assert(state->sets[1].set != NULL);
+		if (observation[3] == 2)
+			assert(state->sets[1].set == NULL && state->sets[1].layout != NULL);
+	}
+
+	/* A selected callback refusal tests caller rollback boundaries without starting native DMA. */
+	if (observation[1] == record->opcode)
+		return ENOMEM;
+
+	/* Succeeded: exact borrowed pass/draw state was observed under the serialized preparation contract. */
+	return 0;
+}
+
 /* Runs actual public client vkCmd calls through native recording, first-error handling and retained graph retirement. */
 static void
 record_test(
@@ -691,6 +872,8 @@ record_test(
 	struct bcm2711_vulkan_record *event;
 	struct bcm2711_vulkan_command_node *node;
 	VkBufferCreateInfo buffer_info;
+	VkImageCreateInfo image_info;
+	VkImageViewCreateInfo image_view_info;
 	VkSamplerCreateInfo sampler_info;
 	VkDescriptorPoolSize size;
 	VkDescriptorPoolCreateInfo pool_info;
@@ -722,6 +905,48 @@ record_test(
 	vulkan_write_u64(&writer, 1024);
 	error = execute(session, &writer, &reader);
 	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+
+	/* Draw validation uses an actual distinct bound sampled image, avoiding undefined attachment feedback in the earlier recording-only fixture. */
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image_info.imageType = VK_IMAGE_TYPE_2D;
+	image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	image_info.extent.width = 16;
+	image_info.extent.height = 8;
+	image_info.extent.depth = 1;
+	image_info.mipLevels = 1;
+	image_info.arrayLayers = 1;
+	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageCreateInfo(&writer, &image_info);
+	error = input_created(session, &writer, 180);
+	assert(error == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_IMAGE_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 180);
+	vulkan_write_u64(&writer, 102);
+	vulkan_write_u64(&writer, 2048);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	memset(&client, 0, sizeof(client));
+	client.wire_id = 180;
+	memset(&image_view_info, 0, sizeof(image_view_info));
+	image_view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	image_view_info.image = (VkImage)(uintptr_t)&client;
+	image_view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	image_view_info.format = image_info.format;
+	image_view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	image_view_info.subresourceRange.levelCount = 1;
+	image_view_info.subresourceRange.layerCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE_VIEW, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageViewCreateInfo(&writer, &image_view_info);
+	error = input_created(session, &writer, 181);
+	assert(error == VK_SUCCESS);
 
 	/* The quad's exact retained set interface is allocated with normal native pool ownership and mutable sampled inputs. */
 	memset(&sampler_info, 0, sizeof(sampler_info));
@@ -755,7 +980,7 @@ record_test(
 	vulkan_write_u64(&writer, 30);
 	vulkan_write_u32(&writer, 1);
 	vulkan_write_u64(&writer, 1);
-	encode_image_write(&writer, 163, 161, 103);
+	encode_image_write(&writer, 163, 161, 181);
 	vulkan_write_u32(&writer, 0);
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
@@ -829,6 +1054,9 @@ record_test(
 	assert(event->opcode == GPU_OP_CMD_SET_VIEWPORT && event->words[2] == 0x41800000U && event->words[3] == 0x41000000U);
 	assert(set_object->references == 2);
 
+	/* Native state walking consumes the complete actual client recording before any GPU work is prepared. */
+	draw_test(command);
+
 	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
 	set->pending = 1;
 	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
@@ -839,7 +1067,7 @@ record_test(
 	vulkan_write_u32(&writer, 0);
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
-	assert(error == EBUSY && set->bindings[0].view->identity == 103);
+	assert(error == EBUSY && set->bindings[0].view->identity == 181);
 	error = bcm2711_vulkan_record_current(command);
 	assert(error == 0 && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
 	set->pending = 0;
@@ -868,6 +1096,8 @@ record_test(
 	assert(error == 0 && !command_object->published && command->first != NULL);
 	destroy(session, GPU_OP_DESTROY_BUFFER, 170);
 	destroy(session, GPU_OP_DESTROY_SAMPLER, 161);
+	destroy(session, GPU_OP_DESTROY_IMAGE_VIEW, 181);
+	destroy(session, GPU_OP_DESTROY_IMAGE, 180);
 	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_DESCRIPTOR_POOL, 1);
 	vulkan_write_u64(&writer, 30);
 	vulkan_write_u64(&writer, 160);

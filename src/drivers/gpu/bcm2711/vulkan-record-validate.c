@@ -18,7 +18,6 @@ static int validate_vertices(struct bcm2711_vulkan_command_buffer *command, cons
 static int validate_push(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_pass(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_viewport(const struct bcm2711_vulkan_record *record);
-static int set_compatible(const struct bcm2711_vulkan_set_layout *first, const struct bcm2711_vulkan_set_layout *second);
 
 /*
  * Validates one copied event against its exact device, primary recording and finite native graphics interfaces.
@@ -135,7 +134,7 @@ validate_sets(
 		if (error != 0)
 			return error;
 		set = record->objects[index + 1U]->payload;
-		error = set_compatible(layout->sets[record->first + index]->payload, set->layout->payload);
+		error = bcm2711_vulkan_layout_set_compatible(layout->sets[record->first + index]->payload, set->layout->payload);
 		if (error != 0)
 			return error;
 	}
@@ -275,32 +274,5 @@ validate_viewport(
 	}
 
 	/* Succeeded: exact copied IEEE words describe a finite admitted dynamic viewport. */
-	return 0;
-}
-
-/* Compares canonical single-element set definitions including their independently retained immutable sampler identity. */
-static int
-set_compatible(
-	const struct bcm2711_vulkan_set_layout *first,
-	const struct bcm2711_vulkan_set_layout *second)
-{
-	const struct bcm2711_vulkan_binding_layout *left;
-	const struct bcm2711_vulkan_binding_layout *right;
-	uint32_t index;
-
-	/* Canonical ordering removes application declaration order from descriptor interface compatibility. */
-	if (first->count != second->count)
-		return EINVAL;
-	for (index = 0; index < first->count; index++) {
-		left = &first->bindings[index];
-		right = &second->bindings[index];
-		if (left->number != right->number ||
-		    left->type != right->type ||
-		    left->stages != right->stages ||
-		    left->immutable != right->immutable)
-			return EINVAL;
-	}
-
-	/* Succeeded: both retained definitions identify the same finite set interface. */
 	return 0;
 }
