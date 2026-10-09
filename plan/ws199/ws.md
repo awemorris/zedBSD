@@ -61,5 +61,5 @@ Resume point: p001 から。
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| p001 | 今の Users の頁の鍵の欄・fidoctl・libpasskey・sessiond の要求の調べ、頁とウィザードの設計（画面の流れ）、実装、host 試験 | planned |
+| p001 | 調べ・設計（第 4 版、review-1〜3）と実装 i01〜i06（i01 popup と頁、i02 NFC（BUG-286）、i03 KEYINFO・KEYPIN・KEYRESET と Insert/Set PIN/Change PIN/Reset、i04 options と auth-fido2、i05 KEYOWNER と greeter・lock の鍵のモードと keypad、i06 試験と T1）、約 23 LW。2026-10-10: i01（cfa5351a1）と i02（0b44c7008）を main に merge | in-progress |
 | p002 | T1 の AAT と 5330 の UAT | planning |

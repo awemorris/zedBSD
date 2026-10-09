@@ -18,6 +18,10 @@ Resume point: p001 から。
 「SettingsのUsersのページには、パスワード変更ボタンをつけて、ウィザード式にする。」
 「SettingsのUsersのページには、認証方式のボタンをつけて、Password, PIN, Security Keyにチェックをつけて変更できる。それ以外のログイン方法は、greeter/lock画面では使えなくなる。コンソールのログインではパスワードだけ使える。」
 
+## 依存（2026-10-10 Q1、WS199 review-2 N15）
+
+WS199 i01 の popup の部品（userland/desktop/settings/dialog.c）を使う。account の設定は /etc/passkey の 1 行 `<name>:<uid>:options:methods=..:key-pin=0|1:key-touch=0|1` を WS199 と共有し、各々自分の field だけを変えて書き戻す。
+
 ## 目標
 
 - Users の頁に「Change Password」の button、ウィザード（今の password → 新しい password を 2 回 → 完了、処理中は操作できない表示）。
