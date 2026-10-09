@@ -21,6 +21,7 @@
 #include "drivers/gpu/bcm2711/vulkan-input.h"
 #include "drivers/gpu/bcm2711/vulkan-layout.h"
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
+#include "drivers/gpu/bcm2711/vulkan-target.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -56,6 +57,7 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void target_test(struct bcm2711_vulkan_session *session);
 static void descriptor_test(struct bcm2711_vulkan_session *session);
 static void encode_image_write(struct vulkan_writer *writer, uint64_t set, uint64_t sampler, uint64_t view);
 static void pool_test(struct bcm2711_vulkan_session *session);
@@ -574,6 +576,12 @@ dispatch(
 	if (handled != 0)
 		return 0;
 	error = bcm2711_vulkan_descriptor_update_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	/* Immutable target owners keep attachment semantics and native storage through later command preparation. */
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_target_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -1608,7 +1616,7 @@ descriptor_test(
 	image_info.arrayLayers = 1;
 	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
 	image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
-	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT;
 	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
 	vulkan_write_u64(&writer, 30);
 	vulkan_write_u64(&writer, 1);
@@ -1665,6 +1673,9 @@ descriptor_test(
 		error = input_created(session, &writer, 103 + index);
 		assert(error == VK_SUCCESS);
 	}
+
+	/* Exercise compatible clear/load targets while the exact bound image/view identities are still available. */
+	target_test(session);
 
 	/* Distinct sampler identities let copies demonstrate that destination immutable semantics override source mutable state. */
 	memset(&sampler_info, 0, sizeof(sampler_info));
@@ -1904,4 +1915,188 @@ encode_image_write(
 
 	/* Succeeded: one complete descriptor write is encoded without an application pointer. */
 	return;
+}
+
+/* Exercises actual Keiland clear/load/backdrop pass records, bound framebuffer validation and independent target ownership. */
+static void
+target_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object client_pass;
+	struct vulkan_object client_view;
+	struct bcm2711_vulkan_object *clear_object;
+	struct bcm2711_vulkan_object *load_object;
+	struct bcm2711_vulkan_object *framebuffer_object;
+	struct bcm2711_vulkan_object *view_object;
+	struct bcm2711_vulkan_pass *clear;
+	struct bcm2711_vulkan_pass *load;
+	struct bcm2711_vulkan_framebuffer *target;
+	VkAttachmentDescription attachment;
+	VkAttachmentReference colour;
+	VkSubpassDescription subpass;
+	VkSubpassDependency dependencies[2];
+	VkRenderPassCreateInfo pass_info;
+	VkFramebufferCreateInfo framebuffer_info;
+	VkImageView attachment_handle;
+	uint8_t wire[1024];
+	unsigned baseline;
+	unsigned with_passes;
+	uint32_t references;
+	int error;
+
+	/* The actual client encoder maps Keiland's present layout to GENERAL while preserving its clear/store semantics. */
+	baseline = allocations;
+	memset(&attachment, 0, sizeof(attachment));
+	attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	attachment.samples = VK_SAMPLE_COUNT_1_BIT;
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.storeOp = VK_ATTACHMENT_STORE_OP_STORE;
+	attachment.stencilLoadOp = VK_ATTACHMENT_LOAD_OP_DONT_CARE;
+	attachment.stencilStoreOp = VK_ATTACHMENT_STORE_OP_DONT_CARE;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	memset(&colour, 0, sizeof(colour));
+	colour.layout = VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL;
+	memset(&subpass, 0, sizeof(subpass));
+	subpass.pipelineBindPoint = VK_PIPELINE_BIND_POINT_GRAPHICS;
+	subpass.colorAttachmentCount = 1;
+	subpass.pColorAttachments = &colour;
+	memset(dependencies, 0, sizeof(dependencies));
+	dependencies[0].srcSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[0].dstStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	memset(&pass_info, 0, sizeof(pass_info));
+	pass_info.sType = VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO;
+	pass_info.attachmentCount = 1;
+	pass_info.pAttachments = &attachment;
+	pass_info.subpassCount = 1;
+	pass_info.pSubpasses = &subpass;
+	pass_info.dependencyCount = 1;
+	pass_info.pDependencies = dependencies;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_RENDER_PASS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkRenderPassCreateInfo(&writer, &pass_info);
+	error = input_created(session, &writer, 120);
+	assert(error == VK_SUCCESS);
+	clear_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_RENDER_PASS, 120);
+	assert(clear_object != NULL);
+	clear = clear_object->payload;
+	assert(clear->colour.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR && clear->colour.finalLayout == VK_IMAGE_LAYOUT_GENERAL);
+
+	/* A compatible loading pass retains a different lifecycle without changing colour-subpass compatibility. */
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_LOAD;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_PRESENT_SRC_KHR;
+	dependencies[0].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_RENDER_PASS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkRenderPassCreateInfo(&writer, &pass_info);
+	error = input_created(session, &writer, 121);
+	assert(error == VK_SUCCESS);
+	load_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_RENDER_PASS, 121);
+	assert(load_object != NULL);
+	load = load_object->payload;
+	assert(load->colour.loadOp == VK_ATTACHMENT_LOAD_OP_LOAD && load->colour.initialLayout == VK_IMAGE_LAYOUT_GENERAL);
+	error = bcm2711_vulkan_pass_compatible(clear, load);
+	assert(error == 0);
+
+	/* The actual backdrop's two external dependencies and sampled final layout remain independently copied native fields. */
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	attachment.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
+	attachment.finalLayout = VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL;
+	dependencies[0].srcStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[0].srcAccessMask = VK_ACCESS_SHADER_READ_BIT | VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[0].dstAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[1].dstSubpass = VK_SUBPASS_EXTERNAL;
+	dependencies[1].srcStageMask = VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT;
+	dependencies[1].dstStageMask = VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT;
+	dependencies[1].srcAccessMask = VK_ACCESS_COLOR_ATTACHMENT_WRITE_BIT;
+	dependencies[1].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+	pass_info.dependencyCount = 2;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_RENDER_PASS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkRenderPassCreateInfo(&writer, &pass_info);
+	error = input_created(session, &writer, 123);
+	assert(error == VK_SUCCESS);
+	load_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_RENDER_PASS, 123);
+	assert(load_object != NULL);
+	load = load_object->payload;
+	assert(load->count == 2 && load->dependencies[1].dstAccessMask == VK_ACCESS_SHADER_READ_BIT);
+	assert(load->colour.finalLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
+	destroy(session, GPU_OP_DESTROY_RENDER_PASS, 123);
+
+	/* One-pixel API granularity allows a caller to choose damage rectangles independently of native tile size. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_RENDER_AREA_GRANULARITY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 120);
+	vulkan_write_u64(&writer, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u64(&reader) == 1 && vulkan_read_u32(&reader) == 1 && vulkan_read_u32(&reader) == 1);
+	with_passes = allocations;
+
+	/* Actual handle conversion supplies the same-device pass and full-colour view used by Keiland framebuffer creation. */
+	memset(&client_pass, 0, sizeof(client_pass));
+	memset(&client_view, 0, sizeof(client_view));
+	client_pass.wire_id = 120;
+	client_view.wire_id = 103;
+	attachment_handle = (VkImageView)(uintptr_t)&client_view;
+	memset(&framebuffer_info, 0, sizeof(framebuffer_info));
+	framebuffer_info.sType = VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO;
+	framebuffer_info.renderPass = (VkRenderPass)(uintptr_t)&client_pass;
+	framebuffer_info.attachmentCount = 1;
+	framebuffer_info.pAttachments = &attachment_handle;
+	framebuffer_info.width = 16;
+	framebuffer_info.height = 8;
+	framebuffer_info.layers = 1;
+	view_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE_VIEW, 103);
+	assert(view_object != NULL);
+	references = view_object->references;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FRAMEBUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFramebufferCreateInfo(&writer, &framebuffer_info);
+	fail_after = 2;
+	error = input_created(session, &writer, 122);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && allocations == with_passes);
+	assert(view_object->references == references && clear_object->references == 1);
+
+	/* Extent mismatch refuses creation without retaining target dependencies or acknowledging a framebuffer identity. */
+	framebuffer_info.width = 17;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FRAMEBUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFramebufferCreateInfo(&writer, &framebuffer_info);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 122);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && allocations == with_passes && view_object->references == references);
+	framebuffer_info.width = 16;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FRAMEBUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFramebufferCreateInfo(&writer, &framebuffer_info);
+	error = input_created(session, &writer, 122);
+	assert(error == VK_SUCCESS);
+	framebuffer_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FRAMEBUFFER, 122);
+	assert(framebuffer_object != NULL);
+	target = framebuffer_object->payload;
+	assert(target->owner.parent == clear_object && target->view == view_object && target->width == 16 && target->height == 8);
+	error = bcm2711_vulkan_object_retain(framebuffer_object);
+	assert(error == 0);
+
+	/* Prepared framebuffer ownership survives both public framebuffer and pass destruction with the exact view and attachment semantics. */
+	destroy(session, GPU_OP_DESTROY_FRAMEBUFFER, 122);
+	destroy(session, GPU_OP_DESTROY_RENDER_PASS, 120);
+	destroy(session, GPU_OP_DESTROY_RENDER_PASS, 121);
+	assert(framebuffer_object->references == 1 && clear_object->references == 1 && view_object->references == references + 1);
+	assert(target->owner.parent == clear_object && clear->colour.loadOp == VK_ATTACHMENT_LOAD_OP_CLEAR);
+	error = bcm2711_vulkan_object_release(framebuffer_object);
+	assert(error == 0 && allocations == baseline && view_object->references == references);
+	puts("WS141 Vulkan actual clear/load/backdrop passes/target compatibility/framebuffer OOM/retained native target: PASS");
 }
