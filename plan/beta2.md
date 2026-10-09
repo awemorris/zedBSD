@@ -53,6 +53,10 @@
 | 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
 | 15 | [WS193](ws193/ws.md) menuconfig（host） | 自分の PC で `make menuconfig` → Build boot image | 新しい階層、進捗の bar と今の対象の名前。できた image が起動 |
 | 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
+| 18 | [BUG-235](bugs/BUG-235.md) Log Out | bar の Log Out の icon を押す | 確認の dialog が出て、Cancel で戻れる |
+| 19 | [BUG-232](bugs/BUG-232.md) 起動中の app | Text Editor を開いたまま App Home を開き、Text Editor の tile か検索で選ぶ | 新しく起動せず、開いている窓に切り替わる |
+| 20 | [BUG-219](bugs/BUG-219.md)・[BUG-237](bugs/BUG-237.md) 見た目 | title bar の menu（File など）と app の icon を見る。Wiseview と dark の外観でも | menu の字に下線があり題と区別できる。icon の白抜きが透けない |
+| 21 | [BUG-179](bugs/BUG-179.md)・[BUG-180](bugs/BUG-180.md) 最大化 | title bar のダブルクリックで最大化、最大化した窓を上のバーから下へ drag | 最大化がすぐ（前は約 0.8 秒）。drag で元の大きさに戻って動く |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
 ## 入れる（間に合わなければ直前で OFF、2026-10-09 ユーザー）
@@ -62,17 +66,17 @@
 | [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1 の再試験・5330 の確認・直しが残る | 4.5 | P1・T1・ユーザー |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | T1-435 と FAIL の直し（不確実）、p007 の hang の道具と実機 | 3.5 | P1・T1 |
 
-## 直す（UAT で出た物の中で小さく効果の大きい物、直し切れなくてよい）
+## UAT で直ったことを確かめる Bug（2026-10-09 P1: 8 件とも直しは main に入り QEMU で確認済み、新しい code は無い）
 
-| Bug | 症状 | LW |
+| Bug | 症状 | 5330 で見る所 |
 | --- | --- | --- |
-| [BUG-184](bugs/BUG-184.md) | Settings で WiFi をオフにできない | 1 |
-| [BUG-235](bugs/BUG-235.md) | Log Out の icon で確認なしに終わる | 1 |
-| [BUG-232](bugs/BUG-232.md) | App Home で起動中の app を選ぶと切り替わらない | 2 |
-| [BUG-219](bugs/BUG-219.md) | title bar の題と menu の字が同じ | 1 |
-| [BUG-237](bugs/BUG-237.md) | app の icon の白抜きが透過 | 1 |
-| [BUG-179](bugs/BUG-179.md)・[BUG-180](bugs/BUG-180.md) | 最大化の遅れ・最大化の解除のドラッグ | 3 |
-| [BUG-271](bugs/BUG-271.md) | IPP で Brother に PDF を送ると断られる（LPD は動く） | 2 |
+| [BUG-184](bugs/BUG-184.md) | Settings で WiFi をオフにできない | UAT の 3 |
+| [BUG-235](bugs/BUG-235.md) | Log Out の icon で確認なしに終わる | UAT の 18 |
+| [BUG-232](bugs/BUG-232.md) | App Home で起動中の app を選ぶと切り替わらない | UAT の 19 |
+| [BUG-219](bugs/BUG-219.md) | title bar の題と menu の字が同じ | UAT の 20 |
+| [BUG-237](bugs/BUG-237.md) | app の icon の白抜きが透過 | UAT の 20 |
+| [BUG-179](bugs/BUG-179.md)・[BUG-180](bugs/BUG-180.md) | 最大化の遅れ・最大化の解除のドラッグ | UAT の 21 |
+| [BUG-271](bugs/BUG-271.md) | IPP で Brother に PDF を送ると断られる | 実機の IPP は試さない（ユーザーの判断、LPD で印刷できる）。既知の問題に残すかは RC で |
 
 ## 合計
 
@@ -80,8 +84,8 @@
 | --- | --- |
 | 必須 | 34.5 |
 | 入れる（WS143・WS083） | 8 |
-| 直す（Bug） | 11 |
-| **計** | **53.5 LW**（約 18 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
+| UAT で確かめる Bug | 0（直しは済み） |
+| **計** | **42.5 LW**（約 14 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
