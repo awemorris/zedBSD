@@ -423,11 +423,25 @@ def status_panel(item):
 	done = []
 	if "input" in rows:
 		row = rows["input"]
+		point = (str(aatlib.number(row, "x") + 40), str(aatlib.number(row, "y") + aatlib.number(row, "height") // 2))
+		# The input method's language before the tap, put back after it (T1-494: Japanese left on turned the
+		# next scenarios' typing in App Home into kana).
+		said = run.lines(r"KWL IME (app key=\S+ )?language=\S+", None)
+		old = re.search(r"language=(\S+)", said[-1]).group(1) if said else "direct"
 		mark = run.mark()
-		run.aat("tap", str(aatlib.number(row, "x") + 40), str(aatlib.number(row, "y") + aatlib.number(row, "height") // 2))
+		run.aat("tap", *point)
 		next_line = run.wait(r"KWL IME indicator next via=panel", mark, 5)
 		item.step("tapped the input row", next_line)
 		item.check(next_line, "the input row did not ask for the next language")
+		back = run.lines(rf"KWL IME language={re.escape(old)}$", mark)
+		for _ in range(4):
+			if back:
+				break
+			mark = run.mark()
+			run.aat("tap", *point)
+			back = run.wait(rf"KWL IME language={re.escape(old)}$", mark, 3)
+		item.step(f"tapped the input row until {old} again", back[-1] if isinstance(back, list) and back else back)
+		item.check(back, f"the input row did not come back to {old}")
 		done.append("input")
 	if aatlib.number(opened, "sound") == 1 and "mute" in rows:
 		row = rows["mute"]
