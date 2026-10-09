@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws171-p001 -->
 # ws171-p001: hal.h の関数の一覧、今の comment の状態、各 arch の実装、雛形
 
-Status: cleared 候補（2026-10-09 P1。文書と一覧だけ、hal.h は変えていない。Q1 の判定待ち）
+Status: cleared（2026-10-09 Q1 判定: 文書と一覧、hal.h は不変）
 Parent: [WS171](../ws.md)
 Queue: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間の仕事。ユーザーの一覧に WS171）
 

@@ -2,7 +2,7 @@
 
 # ws106p002: source・データと参照を移動
 
-Status: cleared 候補（2026-10-09 P1: 残りの ime-probe は 2026-10-07 に userland/tests/ime-probe へ移っていた（71c8a1487、ユーザーの make menuconfig の指示による）。全 30 件の照合と build。Q1 の判定待ち）（旧: uncleared）
+Status: cleared（2026-10-09 Q1 判定: 30 件の照合と build）
 Disposition: normal
 Parent: [WS106](../ws.md)
 Queue / Attempt: q540 / q540-i01

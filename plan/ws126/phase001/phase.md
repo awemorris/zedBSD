@@ -3,7 +3,7 @@
 # ws126-p001: 取得・検証・監査と cross build の方針
 
 Parent: [WS126](../ws.md)
-Status: cleared 候補（2026-10-09 P1: 3.14.8 の取得・Sigstore の署名の確かめ・監査・patch・configure の試し・module の表・方式。Q1 の判定待ち）
+Status: cleared（2026-10-09 Q1 判定）
 Disposition: normal
 Queue / attempts: Q1 の dispatch（P1、2026-10-09、ベータ3 の合間。Q1「WS126 は進めて。2026-10-09 のユーザーの一覧が優先」）
 Goal: CPython の tarball を確定・検証・監査し、zedbsd 向けの configure を試して、module ごとの依存と cross build の方式を決める。
