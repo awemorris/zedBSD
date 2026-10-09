@@ -28,8 +28,10 @@ Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §2・§4.
 
 | 2026-10-10 | Settings: Security Keys の頁に card「Sign in with a security key」（3 つの選択、鍵が 0 本なら灰色、KEY_OPS の無い所は出さない）、弱い方へは警告（Touch only / No PIN no touch で文を分ける）→ password、強い方へは password だけ → `kl_system_account_set_key_options` → Done。plan/ws089/tests/host-kl-system.c に options の stub（HOST_KEY_OPTION）。security.md に「How a key signs in」 | zedBSD の settings の build warning 0、host の renderer で選択・警告・Done（build/p1-ws199/opt-*.png）、style-check |
 
+| 2026-10-10（p003 の中で） | (d) `plan/ws199/tests/passkey-options-host-test.sh`（新）: options の行の読み（無し・1 行・touch だけ・他の account・別の uid・2 行・PIN ありで touch 無し・field の欠け・重複・未知・値 2・field の余り・順の違い）、書き戻し（WS200 の methods を保つ、古い行が消える、他の account の行と鍵の行を保つ、既定なら行を消す、header が先、ENOSPC、ENAMETOOLONG）、request（set-options・auth-fido2 の空の PIN・key-owner）。見つけて直した: field が 4 つ以上ある行を受けていた → 既定に（record.c）、set-options で file の読みに失敗した時に未初期化の options を読んでいた（main.c、害は無いが直した） | passkey-options・passkey・fido2 の host 試験 PASS、passkey・passkey-fido2 の build warning 0 |
+
 ## 再開点（P1、2026-10-10）
 
-- (a)〜(c) は済み（上の表）。残りは (d) だけ。以下は元の記述。
+- (a)〜(d) は済み（上の表、(d) は p003 の中で 2026-10-10）。以下は元の記述。
 - 残り: (a) Settings の Security Keys の頁に radio の card「Sign in with a security key」（`kl_system_account_key_options` で今の値、鍵が 0 本なら灰色、KL_SYSTEM_HAS_KEY_OPS が無ければ出さない）。押すと popup（dialog.c）: 弱い方へは警告（Touch only:「Anyone who has your security key can sign in to this computer with a touch.」、No PIN no touch to unlock: それに「While your key stays plugged in (or lies on the reader), anyone at this computer can unlock it with a swipe.」）＋ password、強い方へは password だけ → `kl_system_account_set_key_options` → Done。flow を `SE_KEYS_FLOW_OPTIONS` として page-users-keys.c に足す。(b) plan/ws089/tests/host-kl-system.c に `kl_system_account_key_options`・`_set_key_options` の stub。(c) security.md に options の規則（login は常にタッチ、PIN 不要の人は置きっぱなしの NFC・挿しっぱなしで誰でも入れる、R4 の数え）。(d) passkey の options の読み書きの host 試験（plan/ws199/tests に小さく）。
 - (a) まで済めば cleared 候補（T1 は p004 でまとめて、5330 は p005）。
