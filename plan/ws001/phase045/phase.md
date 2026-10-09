@@ -33,3 +33,13 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
 - 規格の取得: POSIX.1-2024（Issue 8）の header の索引 `https://pubs.opengroup.org/onlinepubs/9799919799/idx/head.html` から 86 の header の頁を取得（P1 の worktree の build/ws001-posix-ref/pages、git に入れない）。
 - 頁の形（照合の script の設計の材料）: 記号の定数は `<dt>NAME</dt>`（limits は `{NAME}`）、型と構造体の名前は `<b>name</b>`（「`<b>ipc_perm</b>` structure」）、構造体の member は `<pre><tt>型 名前 </tt>説明` の行、関数は DESCRIPTION の `<pre><tt>` の prototype。option の印は `<sup>[<a …>XSI</a>]</sup>` の後の `opt-start.gif`〜`opt-end.gif` の範囲（数: CX 199、XSI 114、OB 16、ADV 11 ほか）。
 - 再開点: `plan/ws001/tests/posix-headers/` に extract（頁 → 名前の一覧の JSON、option の印つき）と check（header ごとに C を生成し x86_64・i386・aarch64 の clang で compile、未宣言の名前を数えて表を作る）を作る所から。wint_t は最後（toolchain の判断を Q1 へ）。
+
+## 2026-10-09 P1 q916: 照合の道具と最初の表
+
+- 道具（`plan/ws001/tests/posix-headers/`）:
+  - `fetch.sh OUT`: 規格の header の頁（86）を取る（git に入れない、OUT は build の下）。
+  - `extract.py PAGES OUT.json`: 頁の DESCRIPTION から header ごとの名前（types・structs と members・constants・limits（limits.h の省いてよい 3 節は may_omit）・function-like macros・functions・variables・others（人が分ける table の名前））を、option の印（CX・XSI・ADV・OB…）つきで取り出す。markup の読み違いは OVERRIDES・ADDITIONS・NOISE で直す。結果は `posix-2024.json`（git に入れる、86 header、types 342・structs 83・constants 1140・limits 185・macros 19・functions 1219・variables 9）。
+  - `check.py OUT [--target …] [--header …]`: header ごとに `_XOPEN_SOURCE=800` で単独に include して全部の名前を参照する C を作り、tree の clang で x86_64・i386・aarch64 に compile（include/libc の後ろに compiler の include だけ）し、probe の行の error を「無い名前」、header の中の error を「単独で通らない」と数える。`table.md`・`results.json`。
+- 最初の表（2026-10-09、`table-2026-10-09.md`）: 無い名前 438（base と CX 355、XSI 64、他の option 19。limits.h の省いてよい値 37 は別）。3 arch で同じ。無い header 5（complex.h・cpio.h・monetary.h・tar.h・wordexp.h。tgmath.h は complex.h が無いので通らない）。
+  - 種類: constant 239、function 93、limit（XSI）51、member 27、type 14、struct 9、macro 4、variable 1。
+  - function 93 のうち、libc に実装があって宣言だけ無い物 5（pthread_kill・pthread_sigmask（signal.h にも要る）、ctermid、tcgetpgrp・tcsetpgrp（unistd.h））、実装の無い物 88（`check.py` の results と libc.so の symbol の照合）。
