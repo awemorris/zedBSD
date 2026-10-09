@@ -3,14 +3,14 @@
 # WS199: セキュリティキーの管理の頁（Software Security Key を含む）と、ログイン画面のキーの自動のログイン
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Queue: q921（P1、2026-10-10）
 Target: **ベータ2**（2026-10-10 ユーザー。走っている Bug と試験の後に着手）
-Resume point: p001 から。
+Resume point: p004 の T1 の結果（T1-（Q1））を Q1 が判定 → p005（5330 の UAT、一覧は下の「5330 の UAT の一覧」）。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-10 ユーザーの UAT）
@@ -72,8 +72,28 @@ NFC の reader に載せたままの鍵も、そのまま「タッチ」と見�
 | --- | --- | --- |
 | [p001](phase001/phase.md) | 調べ・設計（第 4.1 版、review-1〜3）と実装 i01 頁と popup・i02 NFC（BUG-286）・i03 鍵の情報・Set/Change PIN・Reset。i01（cfa5351a1）・i02（0b44c7008・5515a4dab）・i03（d8cb16814、KL_VERSION 77）を main に merge | cleared 候補（実装の分。実機は p005） |
 | [p002](phase002/phase.md) | PIN 不要・タッチ不要の設定（options の行、set-options・auth-fido2、radio と警告）＝ i04 | cleared（77a40b51f） |
-| [p003](phase003/phase.md) | greeter・lock の鍵のモード、user の自動の選択、0.5 秒、keypad、sleep で card を閉じる ＝ i05 | planned、**次** |
-| [p004](phase004/phase.md) | host 試験の残り・style・T1 の AAT を 1 回で ＝ i06 | planned |
+| [p003](phase003/phase.md) | greeter・lock の鍵のモード、user の自動の選択、0.5 秒、keypad、sleep で card を閉じる ＝ i05 | cleared 候補（2f414c00e、QEMU は p004 の T1） |
+| [p004](phase004/phase.md) | host 試験の残り・style・T1 の AAT を 1 回で ＝ i06 | cleared 候補・test-wait（T1-（Q1）、WS200 p001 と同じ依頼） |
 | [p005](phase005/phase.md) | 5330 の UAT | planning |
+
+## 5330 の UAT の一覧（p005、ws199-p004 で 2026-10-10 P1）
+
+ユーザーが YubiKey 5 NFC（USB と ACR1552 の NFC）で流す。手順の要約は plan/beta2.md の「次の UAT」の 4〜7。鍵の Insert・Reset・タッチ・KEYOWNER は QEMU に鍵が無いので、ここでしか確かめられない。
+
+| # | 項目 | 手順 | 期待 |
+| --- | --- | --- | --- |
+| U1 | Add Key（USB、PIN 有り） | Settings → Security Keys → Add Key → password → 鍵を挿す → 名前（既定は鍵の名前か「Security Key」）→ 鍵の PIN → 触れる | Done、一覧に名前。PIN の誤りは password を保ったまま PIN の step へ |
+| U2 | Add Key（PIN の無い鍵、NFC） | Reset 直後の鍵を reader に当てて Add Key | 「Set the key's PIN」の step（2 回の入力）→ そのまま登録 |
+| U3 | 2 本以上 | 2 本挿して Add Key | 「More than one key is there.」、1 本にして Check Again で進む |
+| U4 | Change PIN | Change PIN → 今の PIN → 新しい PIN を 2 回 | Done、新しい PIN で login できる。password は聞かない |
+| U5 | Reset Key | 警告 → password → 抜いて挿し直す → 触れる | Done と消えた登録の数、一覧から消える。Touch の間の Cancel では消えない。挿し直しが遅いと「came back too late」 |
+| U6 | Remove | 鍵の行の Remove → password | 一覧から消える。最後の鍵を消すと「Sign in with a security key」は「PIN and touch」に戻る |
+| U7 | Software Security Key | Set Up PIN（password → 6 桁 2 回）、Change、Remove | lock の画面で PIN が出て解ける |
+| U8 | login（USB・NFC） | login の画面で鍵を挿す／当てる | 自動で鍵の持ち主の user と鍵のモード。PIN and touch: 欄の下の keypad で PIN → タッチ。Touch only: タッチだけ。抜くと password の欄へ |
+| U9 | unlock の 3 通り | 各設定で Super+L → swipe | PIN and touch: PIN とタッチ。Touch only: タッチだけ。No PIN no touch: 「Checking your security key...」を最低 0.5 秒出して解除 |
+| U10 | 設定の変更の警告 | 「Touch only」「No PIN, and no touch to unlock」を選ぶ | password を求め、「鍵を持つ人は誰でも…」、後者は挿したまま・reader に置いたままの警告も |
+| U11 | lock 中の sleep | 鍵の card を出したまま（または Settings の鍵の操作中に）lid を閉じる | 待っている問いが取り消されて眠る。起きた後に card は閉じている |
+| U12 | NFC の置きっ放し | reader に鍵を置いたまま login・unlock | タッチと見なす（PIN の要る設定では PIN だけ） |
+| U13 | console・SSH | console の login・su・sudo・SSH | password だけ（鍵・PIN は出ない） |
 
 見積もり（2026-10-10）: p002 4 LW、p003 6 LW、p004 2 LW。使用量の都合で、p004 の T1 は 1 回にまとめる。
