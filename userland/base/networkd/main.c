@@ -2252,6 +2252,14 @@ lan_raise(
 	if (result != 0)
 		fprintf(stderr, "networkd: %s up failed after %u tries: %s\n", name, LAN_RAISE_ATTEMPTS, diagnostic);
 	(void)networkd_lan_raised(&managed_lan, name);
+
+	/*
+	 * The interfaces read again: a cable already there when the interface
+	 * came up raises no carrier event (the driver keeps its carrier across
+	 * the down and up, BUG-277), so its running flag is what says it is
+	 * to be configured.
+	 */
+	lan_snapshot();
 }
 
 /*

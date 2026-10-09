@@ -92,7 +92,7 @@ Future Work は実行を許可しない。
 | F-083 | HID の出力の report（キーボードの LED、HOGP の Output Report）。kernel の input に出力の経路が無い | 2026-10-08 ws143-p005 の設計（範囲の外） |  |  |
 | F-084 | i2c-hid を共有の HID の glue（hid-input）に乗せ替える | 2026-10-08 ws143-p005 の Q1 → 2026-10-08 朝 ユーザー「乗せる」で実施（ws143-p005 の新しい attempt、promoted） |  |  |
 | F-085 | compositor の app の起動の要求（activation の token 付き、全ての app の起動を 1 か所に。今の posix_spawn は token を持たない） | 2026-10-08 P2 WS188 p001 の設計 |  |  |
-| F-086 | bluetoothd の SUBSCRIBE（状態の変化の通知）。今は Settings の頁・bar の menu を見ている間だけ 2 秒ごとと各要求の直後に読み直す | ws143-p006（2026-10-08 Q1） | Bluetooth の電池の消費・反応の遅れが問題になった時 |
+| F-086 | bluetoothd の SUBSCRIBE（状態の変化の通知）。今は Settings の頁・bar の menu を見ている間だけ 2 秒ごとと各要求の直後に読み直す | ws143-p006（2026-10-08 Q1） | Bluetooth の電池の消費・反応の遅れが問題になった時 |。2026-10-10: phone の event の分だけ WS197 p003 で作る（Settings・bar の状態の SUBSCRIBE は残り） 
 | F-087 | Settings（touch を pointer に変える）と Files の改名の欄（touch を kl_ui に渡さない）で指の選択・bar を効かせる | ws190-p001 review 1 M4、Q1 の判断 Q2 | Settings・Files の touch の UAT |
 | F-088 | Notes の文字の box の中に編集の bar を置く | ws190-p001 review 1 M5 | Notes の box の touch の UAT |
 | F-089 | 編集の bar の文字の翻訳（共有の domain `keiland` を library が読む口） | ws190-p001 review 1 minor 6 | 日本語の UI の UAT |

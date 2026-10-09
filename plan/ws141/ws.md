@@ -142,3 +142,54 @@ native FIFO workerとsupervised reservationを実装しactual host/rpi4 build PA
 ## i14 compiler checkpoint（2026-10-09）
 
 device-independent Zlib SPIR-V frontendをread-onlyで再利用し、独立QPU4.2 encoder、scalar validation/liveness、二threadのregister管理、VPM vertex/fragment interface、uniform/TMU/float RGBA output/source-over/target swizzle/終了を追加。actual Keilandのquad/panel shaderをcoordinate/vertex/fragment programへ変換し、固定MIT Mesaの独立decoder/repackerとsource/native scalar差分試験PASS、rpi4 build warning/error0。Vulkan command/pipeline/draw runtimeへの接続は次の作業。COMMAND/CAPSETは引き続き未公開、p006/i14はin-progress、WS incomplete。実機のshader/timing/memory/cacheは未検証。[結果と復帰点](execution-20261009.md#i14-compilerのsoftware-checkpoint2026-10-09)。
+
+
+## i14 Vulkan protocol checkpoint（2026-10-09）
+
+独立typed object/sessionの所有とbounded transportを追加。actual source host・actual libvulkan wire writer試験/rpi4 y build PASS、warning/error0。まだtyped GPU runtimeは未接続、COMMAND/CAPSET/JOB未公開。次はinstance/device/query/memory/pipeline/draw/queue、p006/i14はin-progress、WS incomplete。実機とp007の受け入れは未実施。[詳細と復帰点](execution-20261009.md#i14-vulkan-streamのsoftware出力2026-10-09)。
+
+
+## i14 native Vulkan root/query checkpoint（2026-10-09）
+
+実client codecとnative sourceでinstance/device/queue graph・physical queries・domainのcallback lifetimeを接続。承認されたshared4 pathでNormal NC RAMのuser mappingを追加、private buffer/VM alias ownershipも確認。host2/rpi4 y build PASS、warning/error0。次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。
+
+
+## i14 root/query/Normal NCの統合（2026-10-09）
+
+Q1最新mainを保持し、object/session/transport/root/queryと承認済みNormal NC mappingを統合。統合treeのhost2/rpi4 y-n build PASS、warning/error0。実装途中のVulkan entrypointsはまだ公開しない。i13/i14はin-progress、次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。[統合evidence](execution-20261009.md#i14-rootquerynormal-ncのmain統合確認2026-10-09)。
+
+## i14 native memory/BLOB checkpoint（2026-10-09）
+
+lazy VkMemory/type0/export/importとactual placement後のNormal NC backing、nonzero BLOB/resourceへのprivate routingを追加。actual client headerでvoidのopcode echo要求を確認しroot destructionを修正。actual VA/MMUを使うhostでindependent owner/budget/OOM/quarantine PASS、rpi4 y build warning/error0。i13/i14とp005/p006はin-progress、COMMAND/CAPSET/JOB未公開。次はbuffer/image/bindingとtyped rendering runtime、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。
+
+## i14 buffer/image/binding checkpoint（2026-10-09）
+
+実client codecでtyped buffer/image・requirements・same-device memory bind・linear colour pitchを追加。actual VA/MMU hostでbinding/prepared ownerの独立保持、logical extentとrequired sizeの区別、bad bind拒否を確認。host3範囲/rpi4 y build/style PASS。次はview/sampler/shader moduleからtyped draw/runtimeへ、COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress。Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-bufferimagerequirementsbindingのsoftware出力2026-10-09)。
+
+## i14 immutable input checkpoint（2026-10-09）
+
+colour image view、single-level nearest/linear sampler、owned SPIR-V moduleを実装し、actual client handle/record codec/native hostでparent/job/referenceとarena非依存を確認。host4範囲/rpi4 y build/style PASS、次はdescriptor/pipeline layoutからnative draw/runtimeへ。COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress、Keiland/実機/p007未達。[結果/復帰点](execution-20261009.md#i14-immutable-viewsamplerspir-v-moduleのsoftware出力2026-10-09)。Masterは更新しない。
+
+## i14 canonical layout checkpoint（2026-10-09）
+
+descriptor/pipeline layoutのexact client decoder、canonical binding、immutable parent所有、8texture/4uniform/4set/128byte push許可を追加。actual host5範囲/rpi4 y build/style PASS。次はpool/set/updateとdraw descriptor snapshot、public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/復帰点](execution-20261009.md#i14-canonical-descriptorpipeline-layoutのsoftware出力2026-10-09)。
+
+## i14 pool/set checkpoint（2026-10-09）
+
+descriptor pool lifecycle/complete set batch allocation/freeを接続。old prepared ownersのstorage/chargeをpublic reset/destructionと分離、actual hostでrollback/retentionを確認。host6範囲/rpi4 y build/style PASS、次はdescriptor update/copyとdraw snapshot。i13/i14/p005/p006 in-progress、public runtime/Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。
+
+## i14 descriptor更新 checkpoint（2026-10-09）
+
+ordered write/copy、immutable sampler override、complete staging rollbackとindependent draw descriptor cloneを追加。actual client framing/native host7範囲、RPi4 y build/style PASS。mutable set更新・pool reset・全public resource退役後のprepared exact inputs/backing保持を確認。next render pass/framebuffer/graphics pipeline/native draw/queue、public runtime/Keiland/実機/p007は未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-ordered-descriptor更新とdraw-snapshotのsoftware出力2026-10-09)。
+
+## i14 target checkpoint（2026-10-09）
+
+actual Keiland clear/load/backdropのsingle-colour pass、same-device bound framebuffer、互換性/granularityとindependent target所有を追加。host8範囲/RPi4 y build/style PASS、次はgraphics pipeline/compiler/native draw/queue。public runtime/Keiland/実機/p007未達、i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-render-passframebufferのsoftware出力2026-10-09)。
+
+## i14 compiled pipeline checkpoint（2026-10-09）
+
+actual Keiland quad sourceから3native programsを構築、module entry/stage、varying/FIFO、descriptor type/visibility、push permission、attribute componentをvalidate。independent compiled graphとpartial OOM/unwindをhost9範囲/RPi4 y build/styleで確認。次はactual graphics pipeline wire batchとnative draw/queue、public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-compiled-pipeline-graphのsoftware出力2026-10-09)。
+
+## i14 pipeline wire checkpoint（2026-10-09）
+
+actual selected-state graphics encoder→independent native decoder/compiler/registryを接続、complete batch/fresh vector/legitimate partial successesとprepared public-retirementをhost9範囲/RPi4 y build/styleで確認。有限recordのcompiled stack frameも確認、total runtime pathは後続。次はrecorded commands/native CL/queue/common binding、COMMAND/CAPSET/JOB/public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-graphics-pipeline-wire-batchのsoftware出力2026-10-09)。

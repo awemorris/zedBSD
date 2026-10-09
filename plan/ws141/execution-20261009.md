@@ -303,3 +303,190 @@ source `f1afd22be`を専用統合treeでmerge `cfb3401f72940ea03a5fe0c528ab7c7b9
 - named y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` exit0、warning/error0、checker3 PASS。log `build/ws141-i14-shader-build.log`。SHA256 `c79948bc3c420ca545fe041394c886274d1b8e606a087f71534d32706465233a`。runtime未接続で未参照compilerはLTO/section GCでimageから除かれるためhashはworker版と同じ。実際のnew source compilationをlogで確認した。
 - clang-format-19/定義引数tab復元、style total0、git diff --check0、既存630hardware rename旧名一致0。追加13Mesa sourceのheader許諾/hashを[license表](rpi4-gpu-license-audit.md#i14-compilerの追加参照2026-10-09)へ保存。p007の全WS最終規約/license/設計類似監査はまだ。
 - i13/p005、i14/p006はin-progress。次はVulkan wire/session/object/reply buffer/nonzero BLOB allocation/pipeline/descriptor/draw CL/queue native payload接続。complete binding後のみCOMMAND/CAPSET/jobsを公開する。Keiland表示と実機whole acceptanceは未達。Master/shared projections/GitHub/T1はQ1、push無し。
+
+## i14 compilerのmain統合・Vulkan runtime開始（2026-10-09）
+
+compiler source `ee10b51ac3047c6f214164feaf62946eeda88ec0`を専用統合treeへmerge `7c5fa7ce4`、Q1最新main `effcde5a40127df371b9ef8113668a498353da45`を保持してmerge `5397c6329cc6cdf42470df97ac639e1b80874863`。統合named rpi4 y/n build exit0・warning/error0、actual shader/独立Mesa oracle host PASS。y `4630648c7841e8e265c61b1fb1abeb8dddb8147df4dcde48cdfe3ffa89051105`、n `ccd63d0d4e29682d5d78876ae9987eca9e0948248a314c5b0ed3a1137b63f214`。source hashとの差は保持したQ1のunix-socket修正による。logは統合tree `build/ws141-i14-integration-{y,n}.log`。main/担当treeをcleanでfast-forward read-back済み、作者がMasterを変更した差分無し、push無し。
+
+i14は引き続きin-progress。device-independentな既存Zlib wire codec/generated record codecもread-onlyで再利用する。新native Vulkan objectはsession/kind/identityで分離し、registry/dependent object/prepared native payloadのreferenceを独立所有する。削除IDの再利用は古いnative ownerを置換しない。worker/callback join後のsession closeで全namespaceを撤去し、live objectが残る場合はsession storageを解放できない。complete decode/pipeline/draw/runtimeへの接続は作業中、capabilityは未公開。
+
+## i14 Vulkan session/objectのsoftware出力（2026-10-09）
+
+- 新規private `vulkan-private.h`、`vulkan-object.c`、`vulkan-session.c`。各sessionのtyped kind/identityを分離、live duplicateはEEXIST。registry/dependent object/prepared native workが独立referenceを持ち、removeはregistryだけを撤去、同じIDの新objectは古いretained payloadを置換しない。4096live objectの有限容量、reference overflowを拒否。controller mutexの下で呼ぶ部品であり、新たなpublic HAL/APIを追加しない。
+- closeは全namespaceをwithdrawした後にregistry referencesを落とし、残るlive objectならEBUSYでsession/256KiB record arena/owner pointerを保持。worker/common callback join後、全依存が退役した時だけarena/sessionを解放しowner pointerをNULLにする。typed destructorはnative VA quarantineを別ownerへ残し、logical metadataの退役後もnative storage errorを返す契約。
+- `sh plan/ws141/tests/vulkan-object-host-test.sh build/ws141-i14-vulkan-object-host` PASS。actual registry/session codeで2session/同ID別kind、duplicate拒否、prepared owner→ID削除→ID再利用→old final release、registry allocation refusal、memory→buffer依存、namespace撤去後のretained owner/close EBUSY・新publication拒否、late release/close再試行、destructor EIOでも全registry retirement、session/arena別allocation failureと全heap accounting0を確認。ordinary allocatorだけfixtureで置換、physical DMA/native schedulerの証拠ではない。
+- source named rpi4 y build exit0、warning/error0、checker3 PASS。log `build/ws141-i14-vulkan-object-build.log`、image SHA256 `4630648c7841e8e265c61b1fb1abeb8dddb8147df4dcde48cdfe3ffa89051105`。未参照部品はまだLTO/GCで除かれる。clang-format-19/definition tab復元/style total0、git diff --check0。最終全WS/p007 auditは未実施。
+- 既存Zlib `i915/render/codec.c`をread-only arm64 sourceとして追加。`codec.h`/generated `vulkan-codec.inc`もdevice-independent sourceとして参照し、i915 executor/object registry/Gen12 batchは再利用しない。次はbounded transport/reply/external stream、typed instance/device/memory/nonzero BLOB binding、pipeline/descriptor/draw/queueへの接続。i13/p005、i14/p006はin-progress、COMMAND/CAPSET/JOB未公開、実機未確認。Master/shared recordsはQ1。
+
+
+## i14 Vulkan streamのsoftware出力（2026-10-09）
+
+- `vulkan-stream.c`はshared Zlib codecをread-onlyで使い、実clientのSET_REPLY/SEEK_REPLY/VERSION/EXECUTEのwireを独立実装。replyはsessionの実blobをCPU referenceで保持し、明示capacityとalignmentを検査。VERSIONの最後の自然alignment u32をrelease atomicで公開し、decoder進捗をnative GPU完了と混同しない。
+- 外部streamはdecode前に全体をcopyし、同じreply backingや後続client mutationから切り離す。total copy budget64 MiB/depth4、現clientのcount1/optional fields0だけ対応。未対応opcode/flag、short wire、out-of-range selector/seekは拒否。全失敗経路でCPU buffer hold/copyを解放。dispatchにはrequested flagを渡す。native buffer APIにNULL releaseの契約が無いため、empty frameではreleaseを呼ばない。
+- `sh plan/ws141/tests/vulkan-stream-host-test.sh build/ws141-i14-vulkan-stream-final-host` PASS。actual libvulkan wire writer＋actual native stream＋actual shared codecで、reply offset/capacity/trailer、同backing再選択、外部streamのimmutable snapshot、unsupported flags/depth/容量/unaligned seek/short header/selector無しと全heap/reference baseline復帰を確認。typed callbackはfixtureであり、GPU/atomic SMP/native completionの証拠ではない。
+- source named rpi4 y build exit0、warning/error0、checker3 PASS。log `build/ws141-i14-vulkan-stream-build.log`、image SHA256 `4630648c7841e8e265c61b1fb1abeb8dddb8147df4dcde48cdfe3ffa89051105`。まだunreferencedなのでimageにはGCされる。clang-format19/定義引数tab復元/style0/diff check0。最終p007は未実施。
+- i13/p005、i14/p006はin-progress。次はtyped instance/device/query/memory/pipeline/draw/queue runtime。COMMAND/CAPSET/JOBは未公開、実機未実施、Master/shared recordsはQ1。
+
+
+## i13/i14: Normal NC mappingの限定承認（2026-10-09）
+
+libvulkanのHOST_COHERENT必須条件に対応するため、既存HALのuncached RAM kernel aliasに一致するuser mappingをGPU/VMへ渡す4 pathの具体的patchを用意。AArch64 syntax-only確認/patch check PASS。共有source担当境界を越える当該差分の質問へユーザー「OKです。」、正確な範囲を[依存提案・承認](uncached-ram-mapping-proposal.md)へ保存し実sourceに適用。i13/i14の同scopeへこの4 pathだけを追加。HAL API/user UAPI/既存default policy変更無し。Master/Guardrail/他WS projectionはQ1。private bufferのalias lifetimeとnative Vulkan memory runtimeへの接続を続ける。
+
+
+## i14 Vulkan native root/queryとNormal NC owner（2026-10-09）
+
+- `vulkan-device.c/.h`は実clientのgenerated instance/device recordをdecodeし、typed instance→physical→device→queueの独立parent edgeを保持。remote layers/extensionsはlocal WSI側で除かれるためnativeでは拒否。全optional feature0、family0/index0/count1のgraphics queueだけ。GetDeviceQueue2の実timeline chainを検査し、二つのpresent wordを独立検査。完全なroot/registryを作ってからIRQ guard内でdomainをclaim、失敗はroot/domain/parentをunwindする。既存同lookupだけidempotent、別ID/別parent/別timelineは拒否。
+- implicit physical/queue childを親destroy時にnamespaceから外すが、prepared ownerはroot/parent/domainを最後まで保持。worker slotにtimelineを追加し、supervised reservation時からnormal cancel/FINISHING callbackの終了まで維持。旧queueのfinal release後も同sessionの古いcallback slotが存在するdomainの再利用はEAGAIN。Queue/DeviceWaitIdleはsole workerの前続native同期完了とactual ready/fault/job_busy/uncertain/stoppingを確認、busy/lossを成功扱いしない。
+- `vulkan-query.c`はactual client codecでphysical property/zero optional features/Normal NC coherent memory type0/256 MiB driver budget、graphics+transferの一family、RGBA/BGRA UNORM画像、float vertex formatsを返す。2D/4096/one level/layer/sample/one colour target/128 push/8 texturesの有限scope。depth/sRGB/compressed/storage/compute/geometry/timestamp等はclaimしない。private API1.1は既存transport要件であり正式Vulkan conformance証拠ではない。**各limit/format/memoryの完成runtime enforcementが公開の前提**。
+- 承認済みshared4 pathを実sourceに適用。`bcm2711_buffer_create_uncached`は既存HALのNormal NC aliasを独立所有し、元cached direct mapをdata accessしない。render/display mappingはbufferのimmutable cache policyをuser VMへ渡す。最終ref後にNC unmap→physical free、unmap/free failureはstorageを保持。既存blob_id0/COHERENT placement refusalはまだ保持し、nonzero VkDeviceMemoryとのbindingは次の作業。
+- host: `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-device-final-host` PASS（actual libvulkan wire.c/codec.c＋native transport/object/session/root/query、完全discovery record、feature/family拒否、exact queue/domain ownership、retained old queue、old callbackによるdomain再利用拒否、registry allocation refusal unwind、全heap0）。`sh plan/ws141/tests/uncached-mapping-host-test.sh build/ws141-i14-nc-final-host` PASS（actual buffer/VM source、Normal NCとDevice属性の区別、unaligned byte copyの正しいretained alias、VM fork/pin refが最後までunmapを防ぐ、unmap→physical free、mapping failure unwind）。ordinary allocator/descriptor/native ready/lock/CPU aliasはhost fixture、physical GPU/cache/SMP/schedulerの証拠ではない。
+- final source y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` exit0、warning/error0、checker3 PASS。log `build/ws141-i14-device-final-y.log`、image SHA256 `4415e968fe2aff0ad918f12870d7d0be05072967924f25b6e005ffdd265e8ab3`。新root/queryは未接続でGCされる。clang-format19/definition tab復元、full changed-scope manual review/style total0/diff check0。p007 whole WS auditは未実施。
+- 次はVkDeviceMemory/nonzero BLOB binding、image/buffer/descriptor/pipeline/command buffer/draw/queueの完成とnative job接続。i13/i14/p005/p006 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機未確認。mainの新しいQ1成果を保持して統合する。Master/shared planning/Guardrail/他WS projectionはQ1、push無し。
+
+
+## i14 root/query/Normal NCのmain統合確認（2026-10-09）
+
+- source commit `ee89c4b7d`、object/session `85450f1e8`、transport `9da0b4c27`を、Q1最新main `372ff3515`へ専用統合worktreeでmerge。統合commit `ea4d0e299228bce8d688fe56e6ccbda5824fadca`、競合無し。Q1のUSB/desktop/plan成果を保持。Master変更無し、push無し。
+- 統合treeのactual client/native root-query hostとNormal NC buffer/VM hostともPASS。named rpi4 y/n build exit0、warning/error0、各checker3 PASS。log `build/ws141-i14-root-integration-{y,n}.log`。y SHA256 `4415e968fe2aff0ad918f12870d7d0be05072967924f25b6e005ffdd265e8ab3`、n `32d5dc572e8742792695f3444a8cd37de8a276b3406a539468607b4478c4453c`。hostは物理GPU/cache/SMPの証拠ではない。
+- 検証済み統合treeへ共有mainと担当branchをfast-forwardする。i13/i14はin-progress、復帰点はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。共有Master/Guardrail等の限定例外/progress投影はQ1。
+
+## i14 VkDeviceMemoryとplaced BLOBのsoftware出力（2026-10-09）
+
+- 承認済みi13/i14内で、private `vulkan-memory.c/.h`、rendererのprivate Vulkan session pointer/aggregate declaration budget、nonzero BLOB routingを追加。普通のcached `blob_id=0` allocatorのcoherence拒否を保持。public COMMAND/CAPSET/JOBはまだ未公開、実sessionのVulkan pointerは未接続。p005/p006とi13/i14はin-progress、Keilandの表示や実機の成功を主張しない。
+- 実 `userland/desktop/libvulkan/memory.c` と `wire.c` を照合。AllocateMemoryはtype0、同openのtyped device、exact output ID、ordinary/EXPORT/IMPORT_RESOURCEの一段chainを確認。共有markerはOPAQUE1とprivate WSI0x200を受け付ける。0x200はrenderer内部のshare hintで、Linux dma-buf fdの提供ではない。allocation descriptor/device edge/宣言budgetを先にpublishし、physical RAMはBLOBでactual alignment/DMA limit/COHERENT条件を受け取った後にNormal NCで確保する。
+- importは同openの実BLOB/native viewのみ、cached RAMやquarantined viewを拒否。独立view referenceが元resourceの破棄後もstorageを保持。nonzero BLOBはtyped VkMemory/extent/share permissionとphysical placementを確認し、RAM→実VA map/cache flushの成功後にviewをpublish、返すbuffer referenceとVkMemoryのview referenceを分離。後続resourceはさらに独立VA viewを持つ。
+- queried256MiB heapに対し、live VkMemory declarationのpage-rounded extentをdriver-wideで合計し、import aliasも保守的に加算。これは宣言budgetであり、破棄されたVkMemoryの後もBLOB/VM/share capabilityが保持するphysical RAMの測定値やhard physical heap制限ではない。resourceの既存extent/count/VA制限と独立ownerは保持する。
+- actual flush failureはzero-reference/quarantined native viewのownerにRAM/VAを残す。lazy BLOBのmap失敗時もcontrollerのadmissionを採り直し、native不確定ならlock外でcommon lossを公開する。memory identity/budgetの退役とDMA storageの退役を分離。VkMemory destructorのnative unmap failureはquarantineに渡し、結果を返す。
+- **先行root/query checkpointの修正**: 実 `vulkan_command_begin` はvoidも常にrequested=1でopcode echoを要求する。root DestroyInstance/DestroyDeviceの「parameter reply無し」をrequested=0と取り違えていたため、0/1を受け付けるよう修正。前のhost fixtureは手動headerでこの不一致を見逃した。fixtureをactual `vulkan_command_begin` の8-byte headerへ変更し、FreeMemoryも実client requested=1/echoを確認。旧host PASSの履歴は当時の範囲として残す。runtime入口が未公開だったため実clientで動作済みとは扱っていない。
+- bounded host: actual client wire/codec + native stream/root/query/object/session/memory + **actual v3d-memory.c/mmu.c** を実行。物理allocator/native flushは明示fixture、hardware/cacheを模擬成功と主張しない。late placement、repeat aliasの同一RAM、厳しいDMA ceilingとbad alignmentの拒否、元VkMemory→resource→import VkMemoryの独立退役、aggregate declaration exhaustion、payload/registry OOMのbudget/device edge unwind、failed flush後のactual VA quarantine/fixtureが与える後のreset境界でのrecoveryを確認。全heap0、timeline0、reply owner1。別のNormal NC buffer/VM試験のownership証拠と区別。
+- commands: `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-memory-host` → memory/placed BLOB/import/budget/actual VA quarantine PASS、actual client root/query/domain PASS。named rpi4 driver y `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit0、warning/error0、arm64 check3 PASS。formatter/最終source/build再確認とmain統合の結果は次の追記に保存する。
+- next: VkBuffer/Imageのlayout/requirements/binding、descriptor/sampler/shader/pipeline/renderpass/framebuffer、recorded command/draw/native CL/queue/common submissionとcomplete public runtime binding。closeはworker/common callback join後にtyped namespaceを退役し、残存logical ownerがあるsessionをfreeしない。near-final p007全source規約/license/類似/build統合と実機受け入れは未実施。Master/shared board/syncはQ1。
+
+### memory最終source確認
+
+- `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-memory-final-host` → 上記2範囲PASS。
+- 最終named rpi4 y build → exit0、warning/error0、arm64 check3 PASS。log `build/ws141-i14-memory-final-y.log`、vmunix SHA256 `8cceed68fc984cc067b3ed3918c53bf4a36bfd80b770ba2ed4a5516d3055fdb6`。
+- clang-format-19 19.1.7適用後、definition argument tab/public-before-static/ANSI declaration/comment/ownership/error pathを全文C規約で確認。新memory/header/render private source/root correction/hostのstyle-check total0、`git diff --check` 0。失敗時のnative retirement errorを無視せずpublication refusalより優先。
+- 残る全WSのfull-standard conformance/license/類似監査はp007、公開Vulkan runtime/Keiland/物理動作は未完了。
+
+### memory/BLOBのmain統合
+
+source `7ad8b94699d6080f950911d7e1ce877c440cba3f` をQ1 main `52551818e3f32a3390daf0300ff6984849b47966` と専用統合treeでmergeし `63537b070d6e481946ecb57ba40c2f3af181e40e`。対象pathの衝突無し、Q1のUSB/desktop/共有記録変更を保持。統合版 `vulkan-device-host-test.sh build/ws141-i14-memory-integration-host` の2範囲PASS、named rpi4 y/n buildともexit0/warning/error0。y arm64 check3 PASS・SHA256 `8cceed68fc984cc067b3ed3918c53bf4a36bfd80b770ba2ed4a5516d3055fdb6`、nは対象source無しでup-to-date・SHA256 `32d5dc572e8742792695f3444a8cd37de8a276b3406a539468607b4478c4453c`。共有mainと専用branchのHEAD readbackをmerge SHAで確認、main clean。Masterを担当が編集していない。次はbuffer/image/binding、i13/i14とp005/p006 in-progress、COMMAND/CAPSET/JOB/Keiland/実機/p007は未完了。
+
+## i14 buffer/image/requirements/bindingのsoftware出力（2026-10-09）
+
+- private `vulkan-resource.c/.h` とarm64当該source列を追加。実clientのgenerated standard recordをread-only Zlib codecでdecodeし、typed buffer/image create/destroy、requirements、bind、linear colour subresource layoutを接続。COMMAND/CAPSET/JOBは未公開、resource runtimeはまだpublic entrypointから呼ばない。p005/p006とi13/i14はin-progress。
+- bufferは実requested byte extentと64-byte-rounded allocation requirementを分離。usageはvertex/index/uniform/transferのみ、最大256MiB。画像は2D4096-square、1level/layer/sample、RGBA/BGRA8UNORM、sample/colour/transferのsubset。pitchはwidth×4の64-byte alignment、colour subresourceはoffset0/rowPitch/sizeをexactに返す。optimalのnative storageもrasterだがCPU subresource layoutを公開しない。TMU/RCLへのactual pitch/format loweringは後続。
+- optional external declarationのexact type/single chain/opaque1またはprivateWSI0x200をnative側で確認し、shared codecがskipする未実装意味を黙認しない。sampler/descriptor/runtimeの未実装capabilityを公開したとの主張はしない。
+- bindはsame-device typed memoryを独立retainし、既存binding/rebind・不正alignment・required interval超過・未backed/quarantined memoryを拒否。buffer/image identityやVkMemory identityの破棄後もprepared resource/view ownerが残る間、memory/device/declaration budget/native RAMを保持。draw/transfer向けbacking resolverはexact logical extentとimmutable allocation intervalを確認し、borrowed VA view/Normal NC CPU aliasだけを返す。jobはcontroller mutexを離れる前に独立retainする責務。
+- actual client `vulkan_command_begin` とstandard record encoder/decoderでnative stream/object/root/query/memory/resourceおよびactual `v3d-memory.c/mmu.c` を実行。65-byte buffer/128-byte requirement/type bit1、17×3 external linear image/pitch128/extent384、misaligned bindのmutation無し拒否、nonzero offsetのVA/CPU span、logical extent超過の拒否、memory identity/BLOB退役後のbinding保持、prepared ownerのresource identity退役後の保持/final releaseを確認。全heap0。native physical allocator/flushは明示fixture、GPU/cacheの物理動作を証明しない。
+- 最初のhostはfixtureのroot用destroy helperをresourceへ流用してdevice IDを送らずassert FAIL。sourceのresource parserがactual required parentを拒否した結果。fixtureを実 `vulkan_object_destroy_remote` の`device/id/allocator`形式へ修正後、`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-resource-corrected-host` と `... build/ws141-i14-resource-final-host` → memory/VA・resource/binding・root/query/domainの3範囲PASS。external image declarationをactual encoderへ供給した追確認 `... build/ws141-i14-resource-external-host` も保存。failed coreはignored temp扱い、担当が削除しない。
+- named rpi4 y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit0/warning/error0、arm64 check3 PASS。log `build/ws141-i14-resource-final-y.log`。resource routerは未接続のため未使用section除去後hashはmemory統合版と同じ。clang-format-19、definition argument tab/全C標準manual、style-check total0、diff-check0。whole WS p007/license/類似監査は後続。
+- next: image view/sampler/owned SPIR-V module、descriptor/pipeline layout、render pass/framebuffer/pipeline compile、command buffer/native draw/queue/public runtime。実機はユーザーが後日実施、WS completed/Keiland描画成功はまだ記録しない。
+
+### external image fixtureの再確認
+
+`build/ws141-i14-resource-external-host` はFAIL（actual writerのexternal_memory_typeをfixtureが0のままにしており、OPAQUE宣言をnative type0へ変換した）。実 `wire.c:vulkan_encode_image_external` / native context設定を照合し、fixture writerにもnegotiated opaque type1を設定。sourceは正しくunsupported type0を拒否していた。修正後 `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-resource-external-fixed-host` → 上記3範囲PASS、style total0/diff0。source `b1bbe9845a714f530e1b37c7d24651bba1b12b96` はfixture correctionを伴う最終source検証後に統合する。物理acceptance/public runtimeは未達。
+
+### buffer/imageのmain統合確認
+
+source `b1bbe9845a714f530e1b37c7d24651bba1b12b96` とexternal-type fixture correction `deccc248112bb359946dae6a9f20a11a2cad38c3` をQ1 latest `bb7d07f23fa39941aa62ea48bda182a866130901` と専用統合treeでmergeし `4d1e343927e0c3ee69420c1ccbd60351d45f49a5`。統合版host3範囲PASS、named rpi4 y build exit0/warning/error0/check3 PASS。nはこのprivate sourceを含まず先行統合済みの検証を保持し追加build不要。共有main/専用branch HEADのreadbackがmerge SHA、main clean。Q1の他WS/共有記録を保持、Masterを担当が編集していない。i13/i14/p005/p006 in-progress。
+
+## i14 immutable view/sampler/SPIR-V moduleのsoftware出力（2026-10-09）
+
+- private `vulkan-input.c/.h` とarm64当該source列を追加。実client codecでCreate/DestroyImageView、Sampler、ShaderModuleを接続。generated recordのpNext/配列extentを複写cursorで確認してからdecode、complete creation tailをconsumeしてから普通OOMを構造化replyする。public COMMAND/CAPSET/JOB/runtimeは未公開。
+- image viewはsame-device actual colour image、2D/full sole subresource/same format、identityまたはexplicit same-channel swizzleに限定。image parentとdevice rootの独立referenceをretain、sourceimage identityの退役後もview/jobが保持する。remaining mip/array countはsole subresourceに解決する。immutable format/swizzleは後続TMU/RCLで下ろす。
+- samplerはnormalized2D、nearest/linear min-mag、single mip、repeat/mirrored-repeat/clamp-edgeを保持。comparison/anisotropy/border/unnormalizedは拒否。zero LOD bias/minと非負finite maxをIEEE float bit複写で確認、kernel FP instructionを使わない。actual Keilandのnearestとglass-linear recordをsource/hostで確認。hardware filtering/schedulingは未検証。
+- shader moduleは最大128KiB、complete codeSize=encoded words×4、SPIR-V headerを確認してown host blockへ複写。command arenaやoriginal stream pointerを保存しない。stage/entry/interface/命令対応の実compiler validationはpipeline create時に既存private compilerへ渡す後続で、module creationをnative compilation成功と偽称しない。
+- `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-input-host` の最初のlinkはactual client handle conversion symbolsが不足。実 `objects.c` のnondispatchable representation/wire ID helpersをGC付きlinkへ追加し、viewの入力はfixture native IDを直castせずactual local client objectからencode。次のlinkは先行 `-include time.h` のfeature selectionでpipe2 prototypeが出ずcompile FAIL、host compileに `_GNU_SOURCE` を設定。対象client sourceはread-only、kernel/source/toolchain変更は不要。
+- 修正後 `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-input-client-object-host` → memory/VA、resource/binding、immutable inputs、root/query/domainの4範囲PASS。actual image-view parent retain/registry OOM unwind、prepared viewがimage/view identity退役後も残る、actual Keiland nearest/linear sampler、actual `kwl_quad_vert` source copy、arena/stream overwrite後のbyte保持、retained moduleがidentity退役後も残る、declared nonzero sourceのabsent array拒否、全heap0/timeline0/reply owner1。普通host allocator/native flushは明示fixture、物理cache/IRQ/GPU/QPU timingは証明しない。
+- named rpi4 y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit0/warning/error0/check3 PASS、log `build/ws141-i14-input-final-y.log`、vmunix SHA256 `8cceed68fc984cc067b3ed3918c53bf4a36bfd80b770ba2ed4a5516d3055fdb6`。input routerは未公開/未参照でGC除去、hash不変を機能稼働の証拠と扱わない。clang-format-19後definition tab/ANSI/public/static order/所有/エラー経路/full C標準manualとstyle-check total0/diff0。
+- next: descriptor layout/pool/set/updateとpipeline layout（actual Keiland combined image sampler/512-set pool/32-byte push）、render pass/framebuffer/graphics pipeline、draw/queue/common worker integrationとpublic runtime。i13/i14とp005/p006はin-progress、Keiland/実機/p007未達。Master/shared投影はQ1。
+
+### immutable inputのmain統合確認
+
+source `64007b3e74814e696287c0caffde85f821c009e5` をQ1 latest mainへ専用treeで統合。first merge `b2a07f3d5c7829635f613923dfa2a73d21a0b3a8` でhost4範囲/named rpi4 y build PASS。Q1のmainが `7ca3c5e4037e8d609f260ad1b5b317024b32a9fc` へ進みfast-forward不能だったため、それを専用treeへ再統合し `c603fd47566f3c62e550bb8ac1be7e2158b39025`。新TCP headerとQ1の他WS/共有記録を保持しnamed rpi4 y buildを再実行、exit0/warning/error0/check3 PASS（`build/ws141-i14-input-refreshed-integration-y.log`）。共有mainと専用branch HEADのreadbackは最終merge SHA、main clean。nは当該private source無しで既存確認を保持。Masterを担当が編集していない。次はdescriptor/pipeline layout、p005/p006とi13/i14 in-progress、Keiland/実機/p007は未達。
+
+## i14 canonical descriptor/pipeline layoutのsoftware出力（2026-10-09）
+
+private `vulkan-layout.c/.h` と当該arm64 source列を追加。実client codecのwidth/array framingに従う独立native decoderでDSL/PipelineLayout create/destroyを接続。canonical binding order、duplicate/count/stage/typeの拒否、combined image sampler/uniform block（各binding1element）のfinite interface、immutable sampler/same-device parentを保持。4set合計textures8/uniforms4、push128bytes/4byte境界/vertex-fragment stage許可を検証。各stageは一つのdeclared range、overlapが無い場合も同stage複数rangeを拒否。unsupported storage/descriptor indexing等を公開しない。
+
+layoutはarena/application pointerを保存せず、immutable samplerとdeviceを独立retain。pipeline layoutはset interfaces/deviceを独立retainし、exact push permissionを各wordに保持。source layout/sampler/public pipeline identity退役後もdependent pipeline/prepared ownerが残る間、依存graph全体を保持。partial constructionは成功したretainだけをpayloadへassignし、publication/parent失敗で全edgeをunwind、retirement errorを優先する。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-layout-host` と `... build/ws141-i14-layout-final-host` → actual client/object/record/native sourceの5範囲PASS。順不同2bindingのcanonical order/immutable sampler保持、actual pipeline layout encoder、registry OOM時のset edge unwind、vertex32/fragment96-byte push permission、repeated-stage拒否、public sampler/layout/pipeline identity退役後のprepared graph保持とfinal heap0/timeline0/reply owner1を確認。allocator/flushはfixture、物理GPU/cacheは未検証。
+
+named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-layout-final-y.log`。layout router未参照でGC除去されるためhash不変、稼働可能との主張無し。clang-format-19後definition tab/full C manualを確認、style-check total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
+
+nextはactual Keilandの512-set pool/allocate/free/reset/update、immutable draw descriptor snapshots、render pass/framebuffer/graphics pipeline/native CL/queue/common worker/public runtime。pool/setの退役はold prepared ownerが保持するstorage/chargeと新しいpublic identityを分離する。Master/shared投影はQ1。
+
+### canonical layoutのmain統合確認
+
+source `d2887e8b7dbd282fa84181c9539c589328877f80` をQ1 latest `5ccfd126997d3202c20207c14b70ead78cf4040a` と専用treeでmergeし `389dd95f3afd964cd2843458aadf9561a91b6133`。統合版actual host5範囲/named rpi4 y build exit0/warning/error0/check3 PASS。対象外Q1変更を保持し、共有main/専用branch HEADをmerge SHAでreadback、main clean。nは当該private source無しで先行検証を保持。Master担当編集無し。i13/i14とp005/p006 in-progress、next pool/set/update/draw runtime、Keiland/実機/p007未達。
+
+## i14 descriptor pool/set所有のsoftware出力（2026-10-09）
+
+private `vulkan-descriptor.h`、`vulkan-descriptor-pool.c`、`vulkan-descriptor-sets.c` と当該arm64 source列を追加。actual client recordでpool create/destroy/reset、complete set batch allocate/freeを接続。poolはsame-device/free flag/finite capacityとsupported combined image/uniform typeだけを受け、live/old setのfinal ownerにcapacity chargeを結ぶ。one-command allocation/freeは最大64sets、session namespace4096を既存限界として保持。Keilandの512-set pool declarationを許容。
+
+Allocateはcomplete input/output arraysをconsumeしてからwhole-batch fresh IDs/same-device interfaces/duplicate IDs/capacityを確認。各setがdevice/pool/layout/immutable samplerを独立retainし、chargeはcomplete payloadのみで取得。partial batch OOMはpublish済みidentityと未publish payloadを別々に退役、全charge/edgeをrestore、output count0のstructured Vulkan failureを返す。freeはselected same-pool IDsを全検証してからregistry edgeを退役。pool reset/destroyはpublic child identityをwithdrawし、prepared setは旧storage/dependencies/chargeを保持、last ownerでpoolが退役。mutable draw bindings/descriptor updateはまだ未接続。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-pool-sets-host` と `... build/ws141-i14-pool-sets-final-host` → actual client handle/record codec/native sourceの6範囲PASS。512-set declarationを持つbounded two-texture pool、2nd set registry OOMでfirst ID/双方charge/全parent unwind、complete batch output順序、exact free、reset後retained old setのcharge維持/capacity拒否/final release後reuse、public layout/pool退役後のprepared set graph保持、全heap0/timeline0/reply owner1。512sets同時の実確保・physical GPU/cache/IRQはこの試験では実施していない。
+
+named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-pool-sets-final-y.log`。routersは未公開/未参照、kernel機能稼働の証拠とは扱わない。clang-format-19/definition tab/full C manual（successful-retain-before-field-publication、charge-after-complete、null-safe independent release、first native error preservation）を確認、style total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
+
+next: ordered descriptor write/copy updatesとimmutable draw snapshots、render pass/framebuffer/graphics pipeline、native CL/queue/common worker/public runtime。Master/shared投影はQ1。
+
+### descriptor pool/setのmain統合確認
+
+source `40309b8150d0fff8c32033fd92afb5f3fb82acb5` を専用統合treeでmergeし `82d179fbfe5985622d2c5dc05a0714cd109b7631`。actual host `build/ws141-i14-pool-sets-integration-host` の6範囲PASS、named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-pool-sets-integration-y.log`）。共有main/専用branch HEADをmerge SHAでreadback、main clean。Q1の他WS/共有記録を保持、Master担当編集無し。nは当該private source無しで先行検証を保持。i13/i14/p005/p006 in-progress。
+
+## i14 ordered descriptor更新とdraw snapshotのsoftware出力（2026-10-09）
+
+private `vulkan-descriptor-update.c` と当該arm64 source列を追加。actual client `descriptor_write` のselected image/uniform/texel framingとgenerated copy encoderに従い、write全件→copy全件の順序を保持。各操作は既存single-element interfaceに限定、各family64操作、最大128destinationのheap stagingを固定上限にする。初回destination cloneとreplacement cloneは成功retainだけをfieldへ公開。complete command検証前はlive setを変更せず、後続copyの不正入力/普通OOMで全staged edgeを退役。copyは先行write/copyのstaged stateを見て、destination immutable samplerを優先する。job向け公開private clone helperはexact resource interval/view/sampler/bufferを独立保持し、mutable setを後から参照しない。
+
+image updateはsame-device sampled/bound image、GENERAL/SHADER_READ_ONLY layoutとsame-device samplerを確認。uniform updateはbound uniform bufferのlogical extent、4-byte offset、range1..65536、VK_WHOLE_SIZEのlogical remainderだけを受け、padded memoryを範囲へ加えない。old actual bindingはcomplete publication後に退役し、最初のnative retirement errorを維持して他のedge cleanupも完遂。普通void updateにparameter replyを捏造しない。
+
+最初のcompileは新sourceが存在しないallocator名 `kern_kcalloc/kern_kfree` とこのscopeにないUNUSED_PARAMETER macroを使いFAIL。実projectのkern_calloc/kern_freeと明示unused commentへ修正。追加host fixtureのBLOB struct名も実 `gpu_blob_create` へ修正後、`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-update-host` と `... build/ws141-i14-update-final-host` → 7範囲PASS。actual client header/handle/standard record/native stream/actual VA sourceを実行、image write→copyのordering/immutable override、sampler retain overflow時の先行view unwind、後半invalid copyによる全rollback、transaction OOMのmutation無し、65-byte bufferのoffset4/WHOLE_SIZE=61、prepared old view保持、pool resetと全public identity退役後のimage/sampler/buffer/allocation owner保持・final heap0を確認。selected-field image-write helperは実client framingを忠実にencodeするfixtureでありvkUpdateDescriptorSets関数自体の実行ではない。physical allocator/native flushはfixture、GPU/cache/IRQ動作未検証。
+
+clang-format-19/definition tab/full C manual（ANSI宣言/公開-static順/forward/所有/first error/finite bounds）とstyle total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS、log `build/ws141-i14-update-final-y.log`、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。public COMMAND/CAPSET/JOB/runtimeは未公開、i13/i14/p005/p006はin-progress、whole p007/Keiland/実機は未達。next render pass/framebuffer/compiled graphics pipeline、recorded native draw/queue/common worker/public runtime。Master/shared投影はQ1。
+
+### descriptor更新のmain統合確認
+
+source `d3a2069522da3a370657a01a356861976d290510` を専用treeでmergeし `26f6f243558fd6c1d2773a3a75683ceda55b837a`。統合版host7範囲/named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-update-integration-y.log`）。共有main/専用branch HEADのreadbackはmerge SHA、main clean。対象外Q1変更/Masterを保持、担当Master編集無し。nは当該private sourceを含まず先行検証を保持。i13/i14/p005/p006 in-progress、next render pass/framebuffer/native pipeline/draw。
+
+## i14 render pass/framebufferのsoftware出力（2026-10-09）
+
+private `vulkan-target.c/.h` と当該arm64 source列を追加。actual standard client recordを独立decodeし、single-colour/single-sample/single-subpass、RGBA/BGRA8、clear/load/discardとstore/discard、initial/final colour layoutを保持。input/resolve/depth/preserve/multiview/imageless/self-dependency等の未実装意味を黙認しない。external↔subpass0 dependency最大4、graphics/transfer/host stage/accessとBY_REGIONをretain。actual Keiland compose clear→present、load→present、backdrop→shader-readの1/2dependencyを照合。client PRESENT_SRCはwireでGENERALに変換されるため、native側もその実recordを受ける。dependency/cache/load/storeのactual hardware loweringは後続native command実行の責務。
+
+framebufferはsame-device/pass format/bound colour image/full view/actual extent/layer1を確認。complete recordとallocator/output tailをconsumeしてからheap確保。pass/view/deviceの成功retainだけをpayloadへ公開し、registry OOMや後続edge失敗で全取得分を退役。old prepared framebufferはpublic framebuffer/passが無くてもexact targetとattachment lifecycleを保持。compatible passはこの限定single-colourのformat一致、load/store/layout/dependencyの差は互換性を破壊しない。render-area granularity1×1をactual same-device passから返す。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-target-host` → actual client header/handle/standard record/native sourceの8範囲PASS。clear/load互換性・present→GENERAL mapping・backdrop2dependency/sourceコピー・1×1 query・framebuffer registry OOM時のpass/view unwind・画像width16に対するwidth17 refusal・prepared framebufferのpublic framebuffer/pass destruction後のgraph保持/final heap復元を確認。先行descriptor snapshotが全public resourceを破棄した後のbacking維持も継続PASS。native physical allocation/flushはfixture、GPU/cache/IRQは未検証。
+
+clang-format-19後definition tab/full C manual（ANSI宣言/公開-static順/forward/finite exact counts/失敗時所有/first error）とstyle total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS、log `build/ws141-i14-target-final-y.log`、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。routersは未公開/未参照、COMMAND/CAPSET/JOB/runtime/Keiland/実機/p007は未達。i13/i14/p005/p006 in-progress。next graphics pipeline/compiler interface validation/native code storage、recorded draw/queue/common worker/public binding。Master/shared投影はQ1。
+
+### render targetのmain統合確認
+
+source `1346dfb92c533f256cf6a67968e345cb87d50fee` を専用treeでmergeし `1f60f07f3b49e223c60bfd02bc9cae8a37c7c16b`。統合版host8範囲/named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-target-integration-y.log`）。共有main/専用branch HEADをmerge SHAでreadback、main clean。対象外Q1変更/Master保持、担当Master編集無し。nは当該private source無しで先行検証を保持。i13/i14/p005/p006 in-progress、next compiled graphics pipelineとnative draw/queue/public binding。
+
+## i14 compiled pipeline graphのsoftware出力（2026-10-09）
+
+private `vulkan-pipeline.h`、`vulkan-pipeline-build.c`、`vulkan-pipeline-state.c` と当該arm64 source列を追加。kernel側temporary creation fieldsから、dynamic viewport/scissor・single-sample triangle list・raw float vertex input・full RGBA opaque/premultiplied source-over・fill/cull/windingをimmutable metadataへ複写。既存reported16binding/16attribute/offset2047/stride2048を守り、unsupported stages/depth/discard/derivatives/specialization/other statesをrefuse。same-device module/layout/passを確認し、SPIR-Vの唯一のmain entryとexecution modelをnative側で明示検証（read-only frontendはarbitrary entry選択をしないため）。fragment sourceのcanonical varying keyをderiveし、coordinate/vertex/fragmentをexisting independent QPU4.2 compilerへ渡す。
+
+全emitted uniformのset/binding type/stage visibility、exact push word permission、native coordinate/render vertex FIFOとdeclared float attribute componentの対応を確認。partial compilationやparent retain failureは全program/実取得parentを退役。compiledpipelineはlayout/pass/deviceを独立保持、source module/command arena pointerを保存しない。native codeはCPU storageで保持、GPU upload/VA/code cache visibilityは後続draw preparationの独立owner責務。wire batch create/destroy routerはまだ未接続。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-pipeline-build-host` と `... build/ws141-i14-pipeline-build-final-host` → actual client module/layout records・native scalar compiler/typed ownersの9範囲PASS。actual Keiland quad/SPIR-Vの3native variants、VPM coordinate6words/vertex2input/fragment2varyings、premultiplied output、wrong vertex push stage permission/不足attribute componentの拒否、frontend allocation OOM時のparent/program unwind、source moduleとpublic layout退役後のowned native code/interface保持・final heap復元を確認。graphics create wire request自体はまだ試験していない。前の固定MIT Mesa native word/source differential試験の証拠を保持、physical GPU/cache/timingは未検証。
+
+clang-format-19後definition tab/full C manual（ANSI/section/forward/finite record/fallible retain-before-field/first error/FP bits/source entry/interface matching）とstyle total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS、log `build/ws141-i14-pipeline-build-final-y.log`、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。public runtime/COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress、Keiland/実機/p007未達。next actual pipeline wire batch/canonical selected-state decoder、recorded command/native CL/queue/common worker/public binding。Master/shared投影はQ1。
+
+### compiled pipeline graphのmain統合確認
+
+source `c6b013e546bd17171c42a094669f63f8d248ff47` を専用treeへmerge `8d100db17547ce86de1e9824ab8adfbbce847568`。統合版host9範囲/named rpi4 y build exit0/warning/error0/check3 PASS（`build/ws141-i14-pipeline-build-integration-y.log`）。Q1 mainが進んだため差分を確認し、他WS/T1のrecord-only変更を保持するmerge `3584304e8283e00ff0452e2e983ff6dff1e7e957`。対象sourceの変更無し、追加build不要。共有main/専用branch HEADを最終merge SHAでreadback、main clean。Master担当編集無し、nは当該private source無しで先行検証を保持。i13/i14/p005/p006 in-progress、next graphics wire decode/batchとnative draw/queue。
+
+## i14 graphics pipeline wire batchのsoftware出力（2026-10-09）
+
+private `vulkan-pipeline.c`、`vulkan-pipeline-decode.c`、`vulkan-pipeline-record.h` と当該arm64 source列を追加。actual client `pipeline_encode_graphics` のselected-state framingを独立decodeし、exact headers/absent chain/zero flags、2shader/main string、count-selected16binding/16attribute、dynamic1viewport/scissorのstatic array省略、single-sample mask0/1、colour1/constant4/dynamic2とcanonical no-derivative tailを保持。self-owned finite temporary fieldsへ複写し、arena/application/wire pointerを保存しない。graphics batch最大4でcomplete inputとoutput identity vectorをconsumeしてからwhole fresh IDチェック・compile/publicationへ進む。ordinary OOM/unsupported interfaceはmember failureとnullable exact outputを返し、合法なpartial successを独立保持。public destroyはregistry referenceだけを退役。
+
+`plan/ws141/tests/vulkan-client-pipeline-host.c` はreadonly実 `resources.c` と `pipeline.c` をincludeし、real private encoderとreal `vulkan_render_pass_subpass`/handle conversionを使用するhost wrapper。single-colour subpassのlocal metadataだけは明示fixture、client source変更無し。`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-pipeline-wire-host` と `... build/ws141-i14-pipeline-wire-final-host` → 9範囲PASS。actual encoder→native stream/decoder/compiler/registryを実行、dynamic array omissionとrecord widths、同batchのfirst native success/second wrong push visibility failure、result count2/exact firstID/second0、prepared pipelineがpublic destroy後もcode/interfaceを保持しfinalreleaseできることを確認。先行pure backend/module/layout/descriptor/target/actual VA ownership試験もPASS。
+
+kernel stackのconcrete record-array risk確認として、actual AArch64 source compile commandへ`-fno-lto -fstack-usage`だけを追加してprivate `build/ws141-i14-pipeline-stack/`へ4translation unitをcompile。shared LLVMはreadonly、source/build config変更無し。actual non-LTO static frames: pipeline dispatch4512、pipeline build672、shader compile816、SPIR-V parser3712 bytes、frontend中最大補助frame736。ARM64_SYS_STACK_SIZE=16384を照合。これはindividual compiled frame evidenceであり、公開runtime上位callerを含むtotal call pathとLTO形を証明しない。public binding/p007で全経路を再確認する。
+
+clang-format-19後definition tab/full C manual（ANSI/section/forward/selected-state exact counts/自己所有record/complete tail-before-publication/partial vector/成功retainとfirst cleanup error）とstyle total0/diff0。named rpi4 y build exit0/warning/error0/check3 PASS、log `build/ws141-i14-pipeline-wire-final-y.log`、SHA256 `edc090d1cd6b963206e381b7316c2ef7682bd91293a4c02cdbf9ecfebdddbb28`。COMMAND/CAPSET/JOB/public runtimeは未公開、cache/computeは実装済みとしない。i13/i14/p005/p006 in-progress、Keiland/実機/p007未達。next command pool/buffer/recorded graphics state、native code/uniform/attribute/texture/CL prepared owner、queue/common worker/public runtime。Master/shared投影はQ1。

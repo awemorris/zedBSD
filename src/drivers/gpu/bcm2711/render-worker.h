@@ -34,6 +34,8 @@ struct bcm2711_render_request {
 	bcm2711_render_execute execute;
 	bcm2711_render_dispose dispose;
 	void *payload;
+	/* A supervised callback retains its old queue domain through final callback retirement. */
+	uint32_t timeline;
 	uint32_t state;
 	int canceled;
 	bool supervised;

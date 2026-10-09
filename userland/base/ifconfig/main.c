@@ -239,6 +239,17 @@ show(
 	       hardware.ifr_hwaddr[0], hardware.ifr_hwaddr[1],
 	       hardware.ifr_hwaddr[2], hardware.ifr_hwaddr[3],
 	       hardware.ifr_hwaddr[4], hardware.ifr_hwaddr[5]);
+
+	/* The link's speed as its driver last learnt it (BUG-222); a loopback has none. */
+	if ((flags.ifr_flags & IFF_LOOPBACK) == 0) {
+		/* A speed the driver was told, or unknown until it is told one. */
+		if (stats.ifr_data.ifi_link_mbps != 0U)
+			printf("        media: %uMbps\n", (unsigned)stats.ifr_data.ifi_link_mbps);
+		else
+			printf("        media: unknown\n");
+	}
+
+	/* The counters. */
 	printf("        RX packets %llu bytes %llu errors %llu dropped %llu\n",
 	       (unsigned long long)stats.ifr_data.ifi_ipackets,
 	       (unsigned long long)stats.ifr_data.ifi_ibytes,

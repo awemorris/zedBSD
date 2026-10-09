@@ -3,7 +3,7 @@
 # ws177-p006: fidoctl の PIN の入力（案 I の 45 行）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q884 の 3: 実装・host PASS・build。端末での echo の無さは実機か serial の UAT）
+Status: cleared（2026-10-10 Q1 判定: ユーザーの 5330 の UAT「WS177 はOK」、host・build は前の記録のとおり）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q884 の 3（P1、2026-10-08）

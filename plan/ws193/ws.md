@@ -71,5 +71,5 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 今の tools/menuconfig.py の調べ、新しい階層と Build boot image の実装、host 試験 | planned | — |
-| p002 | T1 の image の build と boot-test、ユーザーの確認 | planning | p001 |
+| p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |

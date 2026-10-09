@@ -206,6 +206,30 @@ static unsigned main_anchor_column;
 static unsigned long main_anchor_line;
 
 /*
+ * Whether the last click was a touch pad's tap: the compositor gives a
+ * tap's press and release at once, with the same time (a button pressed
+ * by a hand is held for some milliseconds).  A press soon after a tap may
+ * be a double tap or a tap-and-drag, which the compositor gives as the
+ * tap's click and then a held press (BUG-276); main_tap_drag says the press
+ * held now came that way, so that its first move off the cell makes it the
+ * drag of characters the user meant, not a double click's drag by words.
+ */
+static int main_last_tap;
+static int main_tap_drag;
+
+/*
+ * A tap on the selected range (BUG-276, the user: "with a range selected,
+ * the first tap of a double tap takes the selection away"): the click of a
+ * touch pad's tap does not clear the range at once but at main_tap_clear_at
+ * (0: nothing waits), so that the tap-and-drag that may follow drags the
+ * range out as a pressed pad does.  main_tap_second says the press held
+ * now came within that time on the range: moved, it drags the range out;
+ * let go, it was a double tap and selects the word.
+ */
+static uint64_t main_tap_clear_at;
+static int main_tap_second;
+
+/*
  * The unit a held selection grows by (ws035-p111): 1 a cell (a click), 2 a
  * word (a double click), 3 a line (a triple click); the word or line the
  * double or triple click chose, which a drag keeps selected while it adds
@@ -232,6 +256,9 @@ static uint64_t main_edge_at;
 /* How close in time a click makes a double or triple click, and how far a press moves before it drags, in milliseconds and pixels. */
 #define MAIN_CLICK_MS		400U
 #define MAIN_DRAG_DISTANCE	6
+
+/* How long a tap's click on the range waits for a tap-and-drag before it clears the range: the compositor's tap-drag time (touchpad.c TAP_DRAG_MS) and a margin. */
+#define MAIN_TAP_DRAG_MS	350U
 
 /* How often a selection held past the grid's edge scrolls, in milliseconds, and the most lines one step scrolls (ws035-p114). */
 #define MAIN_EDGE_MS		60U
@@ -289,7 +316,10 @@ static void main_pointer(void);
 static void main_pointer_press(const struct terminal_pointer_event *event);
 static void main_primary_paste(void);
 static void main_pointer_motion(const struct terminal_pointer_event *event);
-static void main_pointer_release(void);
+static void main_pointer_release(const struct terminal_pointer_event *event);
+static void main_tap_expire(uint64_t now);
+static void main_range_clear(void);
+static void main_select_word(unsigned column, unsigned long line);
 static void main_cell(int32_t x, int32_t y, unsigned *column, unsigned long *line);
 static void main_range(unsigned from_column, unsigned long from_line, unsigned to_column, unsigned long to_line);
 static int main_word_character(unsigned column, unsigned long line);
@@ -613,6 +643,14 @@ main_loop(
 		if (main_touch_due >= 0 && main_touch_due < timeout)
 			timeout = main_touch_due;
 
+		/* A tap's click on the range clears it when no tap-and-drag came in time (BUG-276). */
+		if (main_tap_clear_at != 0U) {
+			if (main_tap_clear_at <= now)
+				timeout = 0;
+			else if ((uint64_t)timeout > main_tap_clear_at - now)
+				timeout = (int)(main_tap_clear_at - now);
+		}
+
 		/* A selection held past the grid's edge scrolls on its own time, even while the pointer rests (ws035-p114). */
 		if (main_selecting && main_edge != 0) {
 			if (main_edge_at <= now)
@@ -677,8 +715,9 @@ main_loop(
 		/* The fingers scroll the view, and their taps and long presses become the pointer's presses (ws081-p011). */
 		main_touch_round();
 
-		/* The pointer selects, or drags the selected text out (ws035-p093). */
+		/* The pointer selects, or drags the selected text out (ws035-p093); a tap's wait on the range ends in time (BUG-276). */
 		main_pointer();
+		main_tap_expire(terminal_clock());
 
 		/* The search bar's text and steps find their matches (ws128-p006). */
 		main_search(options);
@@ -1857,7 +1896,7 @@ main_pointer(void)
 		else if (event->kind == TERMINAL_POINTER_MOTION)
 			main_pointer_motion(event);
 		else
-			main_pointer_release();
+			main_pointer_release(event);
 	}
 
 	/* Succeeded: all taken. */
@@ -1915,8 +1954,29 @@ main_pointer_press(
 		return;
 	}
 
-	/* A press inside the range, not a repeated click, may drag it out. */
+	/*
+	 * A press while a tap's click on the range waits (BUG-276): on the
+	 * range it may drag it out (a tap-and-drag) or end a double tap;
+	 * elsewhere the wait ends and the range goes as the tap meant.
+	 */
 	inside = terminal_screen_in_range(main_screen, column, line);
+	if (main_tap_clear_at != 0U) {
+		main_tap_clear_at = 0U;
+		if (inside) {
+			main_drag_armed = 1;
+			main_tap_second = 1;
+			main_press_x = event->x;
+			main_press_y = event->y;
+			main_press_serial = event->serial;
+			main_clicks = 1U;
+			return;
+		}
+
+		/* Elsewhere: the range goes. */
+		main_range_clear();
+	}
+
+	/* A press inside the range, not a repeated click, may drag it out. */
 	if (inside && !again) {
 		main_drag_armed = 1;
 		main_press_x = event->x;
@@ -1925,6 +1985,11 @@ main_pointer_press(
 		main_clicks = 1U;
 		return;
 	}
+
+	/* A second press soon after a tap may be a tap-and-drag: decided by its first move (BUG-276). */
+	main_tap_drag = 0;
+	if (again && main_clicks == 1U && main_last_tap)
+		main_tap_drag = 1;
 
 	/* How many clicks, up to three (a fourth starts again at one). */
 	if (again)
@@ -2049,6 +2114,8 @@ main_pointer_motion(
 {
 	char text[4096];
 	size_t length;
+	unsigned column;
+	unsigned long line;
 	int32_t dx;
 	int32_t dy;
 	int32_t top;
@@ -2072,6 +2139,24 @@ main_pointer_motion(
 		return;
 	main_pointer_x = event->x;
 	main_pointer_y = event->y;
+
+	/*
+	 * A tap-and-drag that leaves its cell is a drag of characters from the
+	 * tapped cell, not a double click's drag by words (BUG-276: a touch
+	 * pad's tap then a finger moved, where a hand would press the pad).
+	 */
+	if (main_tap_drag) {
+		main_cell(event->x, event->y, &column, &line);
+		if (column != main_click_column || line != main_click_line) {
+			main_tap_drag = 0;
+			main_clicks = 1U;
+			main_unit = 1U;
+			main_anchor_column = main_click_column;
+			main_anchor_line = main_click_line;
+			main_screen->range = 0;
+			main_screen->changed = 1;
+		}
+	}
 
 	/*
 	 * Past the grid's top the view scrolls back into the scrollback, past
@@ -2201,18 +2286,40 @@ main_scroll(void)
 
 /* A release: a press inside the range that did not drag clears it (a click); a selection ends. */
 static void
-main_pointer_release(void)
+main_pointer_release(
+	const struct terminal_pointer_event *event)
 {
 	/* The edge stops scrolling with the button's release (ws035-p114). */
 	main_edge = 0;
 
-	/* A click inside the range clears it, and a Shift click later extends from there. */
+	/* A release at the press's own time ends a touch pad's tap (BUG-276); a held press is a hand's. */
+	main_last_tap = 0;
+	if (event->time == main_click_time)
+		main_last_tap = 1;
+	main_tap_drag = 0;
+
+	/*
+	 * A click inside the range clears it, and a Shift click later extends
+	 * from there.  A touch pad's tap waits first for the tap-and-drag that
+	 * may follow (BUG-276); the second tap of a double tap on the range
+	 * selects the word, as a double click does.
+	 */
 	if (main_drag_armed) {
 		main_drag_armed = 0;
-		main_screen->range = 0;
-		main_screen->changed = 1;
-		main_anchor_column = main_click_column;
-		main_anchor_line = main_click_line;
+		if (main_tap_second) {
+			main_tap_second = 0;
+			main_select_word(main_click_column, main_click_line);
+			return;
+		}
+
+		/* A tap's click waits for its drag. */
+		if (main_last_tap) {
+			main_tap_clear_at = terminal_clock() + MAIN_TAP_DRAG_MS;
+			return;
+		}
+
+		/* A hand's click clears it now. */
+		main_range_clear();
 		return;
 	}
 
@@ -2238,6 +2345,57 @@ main_pointer_release(void)
 	/* A cell selection, dragged or extended with Shift. */
 	if (main_screen->range)
 		main_selected_log("drag");
+}
+
+/* Clears the range a tap on it left waiting, once no tap-and-drag came in time (BUG-276). */
+static void
+main_tap_expire(
+	uint64_t now)
+{
+	/* Nothing waits, or not yet. */
+	if (main_tap_clear_at == 0U || now < main_tap_clear_at)
+		return;
+
+	/* Succeeded: the tap's click clears the range as a click does. */
+	main_tap_clear_at = 0U;
+	main_range_clear();
+}
+
+/* Clears the range as a click inside it does: a Shift click later extends from the clicked cell. */
+static void
+main_range_clear(void)
+{
+	/* No range; the anchor at the click. */
+	main_screen->range = 0;
+	main_screen->changed = 1;
+	main_anchor_column = main_click_column;
+	main_anchor_line = main_click_line;
+}
+
+/* Selects the word under a cell, as a double click does (the second tap of a double tap on the range, BUG-276). */
+static void
+main_select_word(
+	unsigned column,
+	unsigned long line)
+{
+	unsigned from;
+	unsigned to;
+
+	/* The word's bounds, the range on them, a drag after it by words. */
+	main_clicks = 2U;
+	main_unit = 2U;
+	main_unit_moved = 0;
+	main_unit_bounds(main_unit, column, line, &from, &to);
+	main_unit_from[0] = from;
+	main_unit_from[1] = line;
+	main_unit_to[0] = to;
+	main_unit_to[1] = line;
+	main_anchor_column = from;
+	main_anchor_line = line;
+	main_range(from, line, to, line);
+
+	/* Said, and the primary selection. */
+	main_selected_log("word");
 }
 
 /*

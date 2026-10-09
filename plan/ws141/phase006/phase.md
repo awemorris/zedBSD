@@ -43,3 +43,58 @@ private workerとjob tableはactual source host/buildで確認済み。prepared 
 ## compilerのsoftware checkpoint（2026-10-09）
 
 独立QPU encoder/scalar compilerを実装し、actual Keiland quad/panelの6stage variantsと各fragmentのblend/swap組合せを確認。固定Mesa decoder/repackerで全native wordsを照合、別scalar IR interpreterとの32input差分、actual uniform consumption/TMU4result/target4channelとnative4allocation refusalのownership unwindをPASS。RPi4 named build exit0・warning/error0。scalar証拠をnative GPU実行やWS clearanceとは扱わない。unsupported operations/control effectsは拒否しcapabilityを公開しない。[正確な範囲、制限、次のVulkan runtime](../execution-20261009.md#i14-compilerのsoftware-checkpoint2026-10-09)。
+
+## Vulkan session/objectのsource出力（2026-10-09、継続中）
+
+compilerはmainへ統合済み。新private Vulkan session/object ownerを追加し、typed ID/session isolation、registry/dependency/prepared workの独立reference、old identity再利用、closing namespace withdrawal、live ownerが残るcloseのEBUSY/arena保持、actual partial allocation unwindをhostで確認。caller controller mutex/worker joinを前提にしたsource部品であり、nodeのcommand/capset/runtimeへは未接続。private software gateはPASS、whole p006はin-progress。[範囲/確認/復帰点](../execution-20261009.md#i14-vulkan-sessionobjectのsoftware出力2026-10-09)。
+
+
+## Vulkan transportのcheckpoint（2026-10-09）
+
+実client wire writerでSET/SEEK/VERSION/外部streamを検証しPASS、named rpi4 y build warning/error0。明示reply capacity/retained CPU owner/最後のrelease atomic trailerと外部streamのbounded immutable copyを実装。typed command callbackは未接続、native GPU completionとは別。p006/i14はin-progress、次はinstance/device/memory/pipeline/draw/queue。詳細は[実行記録](../execution-20261009.md#i14-vulkan-streamのsoftware出力2026-10-09)。
+
+
+## HOST_COHERENT memoryのmapping依存（2026-10-09）
+
+実libvulkanのdiscoveryはhost coherent memoryを必須とする。cached V3D RAMをcoherentと偽らず、既存HALのNormal NC kernel aliasと同属性のuser translationを使う。shared GPU/VMの4 pathの具体的差分を[依存提案](../uncached-ram-mapping-proposal.md)へ用意し、未適用。担当source境界のため承認を求める。HAL API変更無し。private instance/device/runtimeは独立継続、COMMAND/CAPSETをdependency未達で公開しない。p005/p006 in-progress、Master/shared projectionはQ1。
+
+
+## native root/queryとNormal NC memoryのcheckpoint（2026-10-09）
+
+ユーザー承認のshared4 pathを適用し、private bufferのNormal NC alias lifetimeとrender/display→VM cache属性を接続。instance/physical/device/queue parent graphとexact timeline/domain所有、callbackが残るdomainのreuse拒否、native busy/faultをidle成功にしない処理、actual client codecでの有限physical queriesを追加。actual source host2 PASS、rpi4 y build warning/error0。native runtimeのmemory budget/limit enforcementは未接続、COMMAND/CAPSET/JOB未公開。次はVkDeviceMemory/nonzero BLOB、resource/pipeline/draw/queue。p006/i14 in-progress。[scope/commands/hash/制限](../execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。
+
+## i14 native memory/BLOB checkpoint（2026-10-09）
+
+実client wireでlazy VkMemory/type0/export/importとnonzero placed BLOBを実装。actual VA/MMU sourceを含むhostでindependent references・declaration budget・OOM・failed flush quarantine/recovery PASS、rpi4 y build warning/error0。void commandのactual header requested=1を照合して先行root destructionも修正。COMMAND/CAPSET/JOBはまだ未公開、次はbuffer/image/layout/bindingとtyped rendering runtime。[正確な出力/修正/制限](../execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。p006/i14はin-progress、Keiland/実機/最終適合は未達。
+
+## i14 buffer/image/binding checkpoint（2026-10-09）
+
+typed create/destroy/requirements/bind/linear layoutを実client codecへ接続。logical buffer extentとrounded requirementを分離、raster colour image pitchを定義し、independent binding/prepared ownerをactual VA source hostで確認。host3範囲/rpi4 y build PASS、style total0。public runtime未公開、次はview/sampler/shader moduleとdescriptor/pipeline/draw。[設計/失敗と修正/結果/制限](../execution-20261009.md#i14-bufferimagerequirementsbindingのsoftware出力2026-10-09)。p006/i14 in-progress、Keiland/実機/p007未達。
+
+## i14 immutable input checkpoint（2026-10-09）
+
+actual client handle/record encoderとnative sourceでcolour view・nearest/linear sampler・copied SPIR-V moduleを追加。image/root/module/jobの独立保持、registry OOM、arena/stream overwrite後のactual Keiland module byte保持を確認。host4範囲/rpi4 y build/style PASS。stage/entry/native compiler keyはpipeline createの後続、public runtimeは未公開。[結果/失敗と修正/制限/再開](../execution-20261009.md#i14-immutable-viewsamplerspir-v-moduleのsoftware出力2026-10-09)。次はdescriptor/pipeline layout、p006/i14 in-progress。
+
+## i14 canonical layout checkpoint（2026-10-09）
+
+actual client recordでdescriptor/pipeline layoutを追加。canonical bindings・same-device immutable sampler・finite set/push interfaceとindependent graph retentionをhostで確認。host5範囲/rpi4 y build/style PASS、次は512-set pool/set/updateとimmutable draw snapshot。public runtime未公開、p006/i14 in-progress。[結果/制限/再開](../execution-20261009.md#i14-canonical-descriptorpipeline-layoutのsoftware出力2026-10-09)。
+
+## i14 pool/set checkpoint（2026-10-09）
+
+actual client recordでfinite pool/reset/destroyとall-or-nothing set batch allocate/freeを追加。old prepared setのindependent graph/charge保持とcapacity reuse、2nd registry OOMの全rollbackをnative hostで確認。host6範囲/rpi4 y build/style PASS、next ordered descriptor update/copyとdraw snapshot。public runtime未公開、p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。
+
+## i14 descriptor更新 checkpoint（2026-10-09）
+
+actual client selected-field framing/generated copy recordでordered writes/copiesを接続。complete staged validation/rollback、destination immutable override、exact logical uniform interval、independent draw snapshotsのmutable set/reset/public retirement非依存をhostで確認。host7範囲/RPi4 y build/style PASS、public runtime未公開、p006/i14 in-progress。[結果/修正/限界/復帰点](../execution-20261009.md#i14-ordered-descriptor更新とdraw-snapshotのsoftware出力2026-10-09)。next render pass/framebuffer/compiled pipeline、native command/queue/common binding。
+
+## i14 target checkpoint（2026-10-09）
+
+single-colour render pass/framebufferをactual client recordへ接続。clear/load/present mapping/backdrop dependencyを保持、bounded native target compatibility/ownershipとprepared graphを確認。host8範囲/RPi4 y build/style PASS、public runtime未公開、p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-render-passframebufferのsoftware出力2026-10-09)。next compiled graphics pipeline/recorded native draw/queue/common binding。
+
+## i14 compiled pipeline checkpoint（2026-10-09）
+
+same-device module/layout/passとactual native compilerを接続。唯一main entry/stage・canonical varying/FIFO・descriptor/push permission・attribute interfaceを確認しpartial compile/OOMを全退役。host9範囲/RPi4 y build/style PASS。wire create/destroy/public runtimeは未接続、native codeのGPU uploadはprepared draw ownerの後続責務。p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-compiled-pipeline-graphのsoftware出力2026-10-09)。
+
+## i14 pipeline wire checkpoint（2026-10-09）
+
+actual private client selected-state encoderをreadonly wrapperで実行、independent native finite decoder/complete batch/partial member resultsとcompiler/typed ownerへ接続。host9範囲/RPi4 y build/style PASS、single compiled stack framesを確認、total public runtime call pathは後続。p006/i14 in-progress、COMMAND/CAPSET/JOB未公開。[結果/限界/復帰点](../execution-20261009.md#i14-graphics-pipeline-wire-batchのsoftware出力2026-10-09)。next recorded command/native prepared draw/queue/common binding。

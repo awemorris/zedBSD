@@ -66,8 +66,9 @@ vm_device_create(
 	if (bytes - 1U > UINTPTR_MAX - (uintptr_t)address)
 		return EOVERFLOW;
 
-	/* Device storage cannot become executable through later mprotect calls. */
-	if ((attributes & ~VM_DEVICE_MMIO) != 0)
+	/* MMIO and Normal non-cacheable RAM are mutually exclusive storage identities. */
+	if ((attributes & ~(VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM)) != 0 ||
+	    attributes == (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM))
 		return EINVAL;
 
 	/* The original device open grants only a nonempty subset of read and write. */
@@ -152,6 +153,10 @@ vm_device_page_attributes(
 	if ((mapping->attributes & VM_DEVICE_MMIO) != 0)
 		return HAL_SPACE_DEVICE | HAL_SPACE_NOCACHE;
 
+	/* Managed uncached RAM uses Normal memory attributes, preserving unaligned byte access. */
+	if ((mapping->attributes & VM_DEVICE_UNCACHED_RAM) != 0)
+		return HAL_SPACE_NOCACHE;
+
 	/* Succeeded: ordinary DMA RAM requires no device-only page attributes. */
 	return 0U;
 }
@@ -182,7 +187,7 @@ vm_device_read(
 	if (offset > mapping->bytes || bytes > mapping->bytes - offset)
 		return EFAULT;
 
-	/* Ordinary DMA RAM keeps its established cached alias. */
+	/* Managed RAM uses its retained cached or Normal non-cacheable kernel alias. */
 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
 		kern_memcpy(destination, (const uint8_t *)mapping->address + offset, bytes);
 
@@ -232,7 +237,7 @@ vm_device_write(
 	if (offset > mapping->bytes || bytes > mapping->bytes - offset)
 		return EFAULT;
 
-	/* Ordinary DMA RAM uses its existing cached kernel alias. */
+	/* Managed RAM uses the same cached or Normal non-cacheable alias as its owner. */
 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
 		kern_memcpy((uint8_t *)mapping->address + offset, source, bytes);
 

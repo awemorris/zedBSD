@@ -14,6 +14,7 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/share.h"
+#include "drivers/gpu/bcm2711/vulkan-memory.h"
 
 /* These initial capabilities exclude Vulkan until the executor and compiler are bound. */
 #define RENDER_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE)
@@ -417,7 +418,11 @@ render_map(
 	mapping->bytes = buffer->bytes;
 	mapping->attributes = 0;
 
-	/* Succeeded: the common core pins ordinary cached RAM through every VM mapping. */
+	/* Every user mapping preserves the allocation's immutable CPU cache policy. */
+	if (buffer->uncached)
+		mapping->attributes = DRV_GPU_MAPPING_UNCACHED_RAM;
+
+	/* Succeeded: the common core pins RAM with the same cache policy through every VM mapping. */
 	return 0;
 }
 
@@ -654,9 +659,16 @@ allocate_resource(
 	}
 
 	/* Acquires one source reference before creating the session's independent native view. */
-	error = bcm2711_blob_allocate(request, placement, &buffer);
+	if (request->blob_id != 0)
+		error = bcm2711_vulkan_memory_blob(session->vulkan, request, placement, &buffer);
+	else
+		error = bcm2711_blob_allocate(request, placement, &buffer);
 	if (error != 0) {
+		/* A lazy Vulkan backing map can fail after native translation publication became uncertain. */
+		ready = render_ready(controller);
 		mutex_unlock(&controller->mutex);
+		if (!ready)
+			bcm2711_render_fail(controller, error);
 		return error;
 	}
 

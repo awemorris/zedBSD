@@ -16,6 +16,10 @@
 /* Bounds storage descriptions independently of available physical memory. */
 #define BUFFER_MAX_BYTES (256ULL * 1024U * 1024U)
 
+/* Architectures without Normal non-cacheable RAM cannot satisfy coherent allocations. */
+extern int kern_pmem_map_uncached(const struct kern_pmem *run, void **mapped) __attribute__((weak));
+extern int kern_pmem_unmap_uncached(void *mapped, size_t size) __attribute__((weak));
+
 /*
  * Allocates a page-rounded contiguous run satisfying a device's address limit.
  * Failures leave no allocation owned by the caller.
@@ -97,6 +101,47 @@ bcm2711_buffer_create(
 }
 
 /*
+ * Allocates one Normal non-cacheable run without retaining a cached CPU alias.
+ */
+int
+bcm2711_buffer_create_uncached(
+	uint64_t bytes,
+	uint64_t limit,
+	size_t alignment,
+	struct bcm2711_buffer **result)
+{
+	struct bcm2711_buffer *buffer;
+	void *mapped;
+	int error;
+
+	/* Both alias lifetime operations must exist before any physical allocation is acquired. */
+	*result = NULL;
+	if (kern_pmem_map_uncached == NULL || kern_pmem_unmap_uncached == NULL)
+		return ENOTSUP;
+
+	/* The initial unpublished owner supplies checked placement and zeroed bytes. */
+	error = bcm2711_buffer_create(bytes, limit, alignment, &buffer);
+	if (error != 0)
+		return error;
+
+	/* Mapping cleans and discards the former direct-map cache lines before publishing Normal NC translations. */
+	mapped = NULL;
+	error = kern_pmem_map_uncached(&buffer->memory, &mapped);
+	if (error != 0) {
+		bcm2711_buffer_release(buffer);
+		return error;
+	}
+
+	/* No later CPU owner reads or writes the allocation's former cached direct-map address. */
+	buffer->address = mapped;
+	buffer->uncached = true;
+	*result = buffer;
+
+	/* Succeeded: all retained CPU owners use the same Normal non-cacheable RAM alias. */
+	return 0;
+}
+
+/*
  * Retains storage protected by an existing reference or a publisher's mutex.
  */
 void
@@ -140,6 +185,19 @@ bcm2711_buffer_release(
 	/* Other resource or DMA owners still need the same CPU and physical addresses. */
 	if (remaining != 0)
 		return;
+
+	/* Every native, resource and VM owner has retired before its uncached translation can be removed. */
+	if (buffer->uncached) {
+		error = kern_pmem_unmap_uncached(buffer->address, buffer->memory.size);
+		if (error != 0) {
+			kern_logf("bcm2711: retained failed uncached release %d\n", error);
+			return;
+		}
+
+		/* A failed later physical release retains RAM without exposing a stale CPU alias. */
+		buffer->uncached = false;
+		buffer->address = NULL;
+	}
 
 	/* Only the final stopped owner may return the physical run to the allocator. */
 	error = kern_pmem_free(&buffer->memory);

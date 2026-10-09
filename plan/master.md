@@ -527,6 +527,9 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-10 Q1 の記録: WS141 の別 session が main の checkout の main を自分で 2 回 fast-forward した（4d1e34392、c603fd475＝64007b3e7・b2a07f3d5 と Q1 の 7ca3c5e40 の merge）。中身は plan/ws141/ と platform/arm64/vmunix.mk の bcm2711/vulkan-input.c の 1 行だけで、release（amd64）に影響なし。2026-10-09 のユーザーの取り決めは「パッチをあなたに提供するので、Q1がマージします」なので、ユーザーに確かめる。
+- 2026-10-10 ユーザー:「ue0のスピードですが、ifconfigやSettingsでLink Speedも表示するのがいいです。まずはそこからです。」→ BUG-222 の最初の作業として P1。
+- 2026-10-10 ユーザー（クリック）: BUG-280（App Home への遷移が Linux より滑らかでない）は「ベータ2 は既知の問題（推し）」。2026-10-10 ユーザー: BUG-276 の症状は「範囲選択した状態でダブルタップしようとすると、最初のタップで選択が解除されるバグです。」（P1 が直し直した、e0ca68bdd）。
 - 2026-10-09 ユーザー（クリック）: WS197 の Q16（MAP 1.4・PBAP 1.2 は GOEP 2.0／L2CAP ERTM が必須と P1 が仕様で確かめた）は「(a) 1.1 で RFCOMM だけ（推し）」→ MAP 1.1・PBAP 1.1、ERTM と GOEP 2.0 は Future Work。
 - 2026-10-09 ユーザー（クリック）: WS197 の設計の判断 Q1〜Q16 は「全部推しどおり」（スマホ 1 台、中継だけで保存は ~/Documents/Phone、過去 30 日・最大 500 通、MMS は範囲外、CVSD の後に mSBC、echo の打ち消しなし、lock 画面で着信に応答、Linux・FreeBSD は作らない、Android が先で iPhone は HFP の後、logout で切る、通話中の蓋は suspend、MAP・PBAP 1.1 と RFCOMM）。見積もり約 154 LW。
 - 2026-10-09 ユーザー（クリック）: WS198 は「ベータ3 で S1、推しどおり」→ D1 ベータ3、D2 base の make を直す、D3 tar と圧縮を base に作る、D4 S1（base と desktop の image、外の package なし）が完了の条件、D5 toolchain の規則の変更は Q1 の許可で WS198 が行う。

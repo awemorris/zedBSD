@@ -64,7 +64,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/signal.o \
 	$(BUILD)/src/kern/cwdinfo.o $(BUILD)/src/kern/elf.o \
-	$(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/exec.o $(BUILD)/src/kern/sandbox.o \
 	$(BUILD)/src/kern/user-probe.o \
 	$(BUILD)/src/kern/syscall.o $(BUILD)/src/kern/uaccess.o \
 	$(BUILD)/src/kern/cdev.o $(BUILD)/src/kern/devfs.o \
@@ -109,6 +109,10 @@ PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-cdc-ncm.o \
 endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-cdc-ecm.o
+endif
+# The CDC notification reader both network drivers share (BUG-222).
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
+PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-cdc-notification.o
 endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 PCAT_USB_CLASS_OBJS += $(BUILD)/drivers/usb/usb-hid.o $(BUILD)/drivers/generic/hidraw.o $(BUILD)/drivers/generic/hidraw-describe.o $(BUILD)/drivers/generic/hid-report.o $(BUILD)/drivers/generic/hid-digitizer.o $(BUILD)/drivers/generic/hid-touch.o \

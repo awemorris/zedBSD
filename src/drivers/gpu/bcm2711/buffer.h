@@ -9,6 +9,7 @@
 #ifndef KERN_DRIVERS_GPU_BCM2711_BUFFER_H
 #define KERN_DRIVERS_GPU_BCM2711_BUFFER_H
 
+#include <stdbool.h>
 #include <stdint.h>
 #include <kern/lock.h>
 #include <kern/pmem.h>
@@ -20,9 +21,13 @@ struct bcm2711_buffer {
 	uint64_t bytes;
 	struct kern_pmem memory;
 	void *address;
+
+	/* An uncached run is never read or written through its cached direct-map alias. */
+	bool uncached;
 };
 
 int bcm2711_buffer_create(uint64_t bytes, uint64_t limit, size_t alignment, struct bcm2711_buffer **result);
+int bcm2711_buffer_create_uncached(uint64_t bytes, uint64_t limit, size_t alignment, struct bcm2711_buffer **result);
 void bcm2711_buffer_retain(struct bcm2711_buffer *buffer);
 void bcm2711_buffer_release(struct bcm2711_buffer *buffer);
 

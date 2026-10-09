@@ -260,6 +260,10 @@ endif
 ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-ecm.c
 endif
+# The CDC notification reader both network drivers share (BUG-222).
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
+AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-cdc-notification.c
+endif
 ifeq ($(CONFIG_DRIVER_USB_HID),y)
 AMD64_USB_CLASS_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/drivers/generic/hidraw-describe.c
 endif
