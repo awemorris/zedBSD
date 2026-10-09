@@ -3,7 +3,7 @@
 # ws177-p045: networkd の IPv6 の準正常系・異常系（案 R）
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-479、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1 判定: T1-500 で ipv6-r-dnsmasq・p008 とも PASS（`one IPv6 default route` ok）。networkd の直しは P1 cd50a24ea）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q909（P1、承認は p044 と同じ）

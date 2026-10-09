@@ -23,8 +23,8 @@
 | [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 手順を phase.md に用意済み（host の確かめ PASS）、実行は 10/16 | 0.5 | P1・Q1 |
-| T1 の未実行の試験 9 本: T1-499〜503（BUG-234・BUG-188・IPv6・音量の回帰・Bluetooth の回帰・FreeBSD の prerequisites の再試験）、T1-495 Python、T1-477・483・484 | 2026-10-09 夜: 480・482・486・493・496・497 は済み、498 は Debian PASS | 5 | T1 |
-| 試験の FAIL の直し（T1-494・479・478・498 の分は直して再試験中、次に出る物の枠） | — | 3 | P1 |
+| T1 の未実行の試験: T1-483・484・435（5330 の実機） | 2026-10-09 夜: 499・500・502 PASS、501・503(FreeBSD)・495・477 FAIL | 2 | T1 |
+| 試験の FAIL の直し: T1-477（WS099 の回帰 C1・C2・C3・C5・C7）、T1-501（volume-p005 の SOUND report 1 行、Welcome の Settings）、T1-503（FreeBSD で /dev/tty の read が EIO）、T1-495（Python の import、ベータ3） | P1 次の世代 | 4 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |
@@ -39,8 +39,6 @@
 | # | 項目 | 手順（自明でない物だけ） | 期待 |
 | --- | --- | --- | --- |
 | 1 | [WS192](ws192/ws.md) 状態の島の操作パネル | 右上の icon の島を指で tap（mouse の click でも） | 右上に glass のパネル。Wi-Fi の switch、音量の slider と mute、Input の行の tap で言語の切り替え、Wi-Fi の「›」で AP の一覧。外の tap・Esc・島の再 tap で閉じる |
-| 2 | [BUG-188](bugs/BUG-188.md) Wi-Fi の 1 回の tap | Settings → Wi-Fi で保存済みの AP の行を 1 回だけ tap | 接続が始まる（2 回の tap は要らない） |
-| 4 | [BUG-234](bugs/BUG-234.md) Files から program | Files で /bin を開き `ls` を開く | Terminal が開き、ls の出力と終了の案内が残る |
 | 5 | [WS183](ws183/ws.md) touchpad の tap | 1 本指の tap、素早い 2 回の tap、tap の直後に指を置いて動かす | tap はすぐ click（遅れを感じない）、2 回は double click、最後は drag |
 | 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
