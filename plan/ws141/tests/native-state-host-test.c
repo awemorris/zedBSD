@@ -7,11 +7,13 @@
 
 /* Native records are compared with the pinned XML; the pixel image is decoded by a separate inverse block walker. */
 #include <assert.h>
+#include <fenv.h>
 #include <stdio.h>
 #include <string.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/native-state.h"
+#include "drivers/gpu/bcm2711/native-viewport.h"
 
 /* Unaligned output reservations retain canaries before and after their exact record lengths. */
 static uint8_t record_bytes[80];
@@ -30,6 +32,8 @@ static void verify_attributes(void);
 static void verify_textures(void);
 static void verify_copy(void);
 static void unchanged_record(void);
+static void verify_viewports(void);
+static void verify_viewport_case(uint32_t width, uint32_t height, uint32_t minimum, uint32_t maximum);
 
 /*
  * Produces complete native byte images and checks atomic refusal and pixel ownership boundaries.
@@ -43,6 +47,7 @@ main(
 	verify_attributes();
 	verify_textures();
 	verify_copy();
+	verify_viewports();
 
 	/* The external XML and inverse-pixel oracles consume these actual encoder outputs. */
 	puts("native-state-host-test PASS");
@@ -319,4 +324,134 @@ unchanged_record(
 	/* Even bytes outside the nominal record capacity retain the original caller storage contents. */
 	for (index = 0; index < sizeof(record_bytes); index++)
 		assert(record_bytes[index] == 0xa5);
+}
+
+/* Compares bounded native viewport arithmetic with the host's independent nearest-even IEEE operations. */
+static void
+verify_viewports(
+	void)
+{
+	static const uint32_t endpoints[16] = {
+	    0, 0x80000000U, 1, 2, 0x003fffffU, 0x007fffffU, 0x00800000U, 0x00800001U,
+	    0x3e7fffffU, 0x3e800000U, 0x3effffffU, 0x3f000000U, 0x3f000001U, 0x3f7ffffeU, 0x3f7fffffU, 0x3f800000U};
+	struct bcm2711_native_viewport viewport;
+	struct bcm2711_native_viewport saved;
+	uint32_t words[6];
+	uint32_t left;
+	uint32_t right;
+	uint32_t width;
+	uint32_t height;
+	uint32_t minimum;
+	uint32_t maximum;
+	uint32_t seed;
+	uint32_t index;
+	int error;
+	int same;
+
+	/* Host rounding is explicitly set rather than inheriting an unspecified floating-point environment. */
+	error = fesetround(FE_TONEAREST);
+	assert(error == 0 && sizeof(float) == sizeof(uint32_t));
+
+	/* The complete boundary grid covers cancellation, reversed ranges, signed zero, subnormal transitions and tie-adjacent normals. */
+	for (left = 0; left < 16; left++) {
+		/* Widths also exercise positive subnormal normalization and exact ordinary scales. */
+		width = endpoints[left] & 0x7fffffffU;
+		if (width == 0)
+			width = 1;
+		for (right = 0; right < 16; right++) {
+			/* One ordinary maximal dimension checks the largest advertised native XY scale. */
+			verify_viewport_case(width, 0x45800000U, endpoints[left], endpoints[right]);
+		}
+	}
+
+	/* A fixed finite sample crosses all admitted exponent distances without turning this check into a stress run. */
+	seed = 0x31415926U;
+	for (index = 0; index < 1024; index++) {
+		/* Independent generated input words include exact IEEE magnitudes rather than pre-rounded expected arithmetic. */
+		seed = seed * 1664525U + 1013904223U;
+		width = seed % 0x45800000U + 1U;
+		seed = seed * 1664525U + 1013904223U;
+		height = seed % 0x45800000U + 1U;
+		seed = seed * 1664525U + 1013904223U;
+		minimum = seed % 0x3f800001U;
+		seed = seed * 1664525U + 1013904223U;
+		maximum = seed % 0x3f800001U;
+		verify_viewport_case(width, height, minimum, maximum);
+	}
+
+	/* Invalid finite-interface words leave the whole output struct unchanged. */
+	memset(&viewport, 0xa5, sizeof(viewport));
+	saved = viewport;
+	memset(words, 0, sizeof(words));
+	words[2] = 0x3f800000U;
+	words[3] = 0x3f800000U;
+	words[5] = 0x3f800000U;
+	words[4] = 0xbf800000U;
+	error = bcm2711_native_viewport_prepare(words, &viewport);
+	assert(error == EINVAL);
+	same = memcmp(&viewport, &saved, sizeof(viewport));
+	assert(same == 0);
+	words[4] = 0;
+	words[2] = 0x7f800000U;
+	error = bcm2711_native_viewport_prepare(words, &viewport);
+	assert(error == EINVAL);
+	same = memcmp(&viewport, &saved, sizeof(viewport));
+	assert(same == 0);
+
+	/* All once-rounded integer results matched independent host arithmetic for the fixed finite sample. */
+	puts("native-viewport-check PASS (256 boundary pairs and 1024 seeded finite pairs)");
+}
+
+/* Checks one raw finite viewport using ordinary host IEEE multiplication and subtraction as the independent oracle. */
+static void
+verify_viewport_case(
+	uint32_t width,
+	uint32_t height,
+	uint32_t minimum,
+	uint32_t maximum)
+{
+	struct bcm2711_native_viewport viewport;
+	struct bcm2711_native_viewport expected;
+	uint32_t words[6];
+	float dimension;
+	float minimum_number;
+	float maximum_number;
+	float copied;
+	volatile float calculated;
+	int error;
+	int same;
+
+	/* Native inputs preserve signs and complete bits, including either zero endpoint representation. */
+	memset(words, 0, sizeof(words));
+	words[2] = width;
+	words[3] = height;
+	words[4] = minimum;
+	words[5] = maximum;
+	error = bcm2711_native_viewport_prepare(words, &viewport);
+	assert(error == 0);
+
+	/* Host multiplication rounds to an actual stored float word before its bits are read. */
+	memcpy(&dimension, &width, sizeof(dimension));
+	calculated = dimension * 128.0f;
+	copied = calculated;
+	memcpy(&expected.x_scale, &copied, sizeof(copied));
+	memcpy(&dimension, &height, sizeof(dimension));
+	calculated = dimension * 128.0f;
+	copied = calculated;
+	memcpy(&expected.y_scale, &copied, sizeof(copied));
+
+	/* Host subtraction independently supplies reversed-range, cancellation, subnormal and signed-zero behavior. */
+	memcpy(&minimum_number, &minimum, sizeof(minimum_number));
+	memcpy(&maximum_number, &maximum, sizeof(maximum_number));
+	calculated = maximum_number - minimum_number;
+	copied = calculated;
+	memcpy(&expected.depth_scale, &copied, sizeof(copied));
+	expected.depth_offset = minimum;
+	same = memcmp(&viewport, &expected, sizeof(viewport));
+
+	/* A disagreement reports exact input/output words without treating numerical proximity as a match. */
+	if (same != 0) {
+		printf("viewport mismatch %08x %08x %08x %08x: native %08x %08x %08x %08x expected %08x %08x %08x %08x\n", width, height, minimum, maximum, viewport.x_scale, viewport.y_scale, viewport.depth_scale, viewport.depth_offset, expected.x_scale, expected.y_scale, expected.depth_scale, expected.depth_offset);
+		assert(same == 0);
+	}
 }
