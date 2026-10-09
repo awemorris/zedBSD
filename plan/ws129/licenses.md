@@ -9,7 +9,7 @@
         --distfiles /home/awe/zedBSD-claude1/build/distfiles \
         --markdown plan/ws129/licenses-generated.md --index plan/ws129/licenses-index.txt
 
-→ `26 components, 0 open items`（249 の userland package、21 の kernel の option、`/usr/share/licenses` の 28 file）。ベータ1 の一覧からの差:
+→ `27 components, 0 open items`（250 の userland package、21 の kernel の option、`/usr/share/licenses` の 30 file。intelbt-firmware を足した後）。ベータ1 の一覧からの差:
 
 | 差 | component | 理由 |
 | --- | --- | --- |
@@ -19,16 +19,15 @@
 | 減った | libvulkan の Venus の宣言（virglrenderer、MIT、旧 G4） | libvulkan が Venus の protocol をやめ Kei GPU の command protocol（uapi/gpu-op.h、ws167-p002）にした。第三者の文が無くなり、表からも外された（commit 4034e6b25） |
 | 減った | Expat | ベータ1 の一覧はデモの config との和で、expat はデモの側だけ。release の config は選ばない |
 
-firmware: i915・AX211 の WiFi・RTL8822B は入り、本文も在る。**Intel の Bluetooth の firmware（`intelbt-firmware`）は release の config に無い**
-（`bluetoothd`・`bt` は在る。UAT の config `config/current-uat.mk` だけが足している）。5330 の AX211 の Bluetooth は firmware が要るので、
-WS143（Bluetooth の HID）を release に入れるなら config に足す必要がある（判断は Q1・ユーザー）。足した場合も表の component は在り、
-`build/ws129-p002/config-with-intelbt.mk`（release の config＋intelbt-firmware）で `27 components, 0 open items`（本文 `LICENCE.ibt_firmware`・`WHENCE`、
-変更しない binary だけ・逆 engineering の禁止）。
+firmware: i915・AX211 の WiFi・RTL8822B・**Intel の Bluetooth（`intelbt-firmware`）**が入り、本文も在る。intelbt は最初の再生成の時は release の
+config に無く（UAT の config だけ）、2026-10-09 ユーザーの決定（Q1 の中継、クリック）「入れる、動かなければ既知」で release の config に足した
+（`bluetoothd`・`bt`・`CONFIG_DRIVER_USB_BT` と `/etc/passwd` の `_bluetooth` は元から在る）。本文 `LICENCE.ibt_firmware`・`WHENCE`、変更しない binary だけ・
+逆 engineering の禁止。
 
 audit（`plan/tools/packages/audit-licenses.sh /home/awe/zedBSD-claude1/build/distfiles`、34 file）: FFmpeg の archive を package の判定に足した
 （上の通り LGPL として build）。展開先を `build/tmp/audit-licenses`（`plan/tools/fresh-out.sh`、消すのは Q1）にし、script の `rm -rf` をやめた。
 結果 `8944 GPL-bearing file(s)`、未知は `REmacs-1a72…/README.md` の 1 件だけ: main の distfiles に残った古い `remacs-1a724393053e.tar.gz`
-（2026-10-04 から取得も参照もしない。tree のどの Makefile・script にも名前が無い）。Q1 がこの archive を distfiles から外せば all known: yes。
+（2026-10-04 から取得も参照もしない。tree のどの Makefile・script にも名前が無い）。2026-10-09 Q1 がこの archive を distfiles から消した（参照は plan/history だけ）ので all known: yes になる。
 
 ---
 

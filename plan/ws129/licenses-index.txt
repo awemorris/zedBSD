@@ -22,5 +22,6 @@ noto-color-emoji	2.047	OFL-1.1	/usr/share/licenses/noto-color-emoji/OFL-1.1.txt
 hand-hershey	1986	LicenseRef-Hershey-fonts (use for any purpose with the acknowledgements)	/usr/share/licenses/hand-hershey/NOTICE
 i915-firmware	-	LicenseRef-Intel-i915-firmware (redistribution allowed)	/usr/share/licenses/i915-firmware/LICENSE.i915 /usr/share/licenses/i915-firmware/WHENCE
 intelax211-firmware	-	LicenseRef-iwlwifi-firmware (redistribution allowed)	/usr/share/licenses/intelax211-firmware/LICENCE.iwlwifi_firmware /usr/share/licenses/intelax211-firmware/WHENCE
+intelbt-firmware	-	LicenseRef-ibt-firmware (redistribution allowed)	/usr/share/licenses/intelbt-firmware/LICENCE.ibt_firmware /usr/share/licenses/intelbt-firmware/WHENCE
 rtl8822b-firmware	-	LicenseRef-rtlwifi-firmware (redistribution allowed)	/usr/share/licenses/rtl8822b-firmware/LICENCE.rtlwifi_firmware.txt
 ffmpeg	9.0.2	LGPL-2.1-or-later	/usr/share/licenses/ffmpeg/COPYING.LGPLv2.1 /usr/share/licenses/ffmpeg/LICENSE.md
