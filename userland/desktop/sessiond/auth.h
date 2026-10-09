@@ -65,6 +65,7 @@ enum sessiond_command {
 	SESSIOND_COMMAND_KEYINFO,
 	SESSIOND_COMMAND_KEYPIN,
 	SESSIOND_COMMAND_KEYRESET,
+	SESSIOND_COMMAND_SETOPTIONS,
 	SESSIOND_COMMAND_COUNT
 };
 
@@ -97,6 +98,7 @@ void sessiond_policy_success(struct sessiond_count *count, int style);
 unsigned sessiond_policy_delay(const struct sessiond_count *count);
 const char *sessiond_policy_reason(const char *passkey_reason);
 void sessiond_policy_styles(const char *listed, const struct sessiond_count *count, char *out, size_t size);
+int sessiond_policy_key_counts(const char *passkey_reason);
 
 /*
  * A request in progress on one socket (the greeter's or the session's):

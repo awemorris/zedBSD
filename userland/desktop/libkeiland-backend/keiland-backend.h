@@ -1606,6 +1606,18 @@ int kl_backend_session_enrolled(struct kl_backend *backend);
 void kl_backend_session_enrolled_get(const struct kl_backend *backend, unsigned *pin, unsigned *keys);
 
 /*
+ * The session user's key options as the last ENROLLED told them
+ * (ws199-p001): whether the key's PIN is asked to sign in, and whether its
+ * touch is asked to unlock (1 and 1 until told).  kl_backend_session_
+ * set_options sets them, checked by the user's password (SETOPTIONS, a
+ * session); the answer is session_answer(KL_BACKEND_SESSION_ENROLL, error)
+ * as kl_backend_session_set_pin's.  Returns as
+ * kl_backend_session_authenticate.
+ */
+void kl_backend_session_options_get(const struct kl_backend *backend, unsigned *key_pin, unsigned *key_touch);
+int kl_backend_session_set_options(struct kl_backend *backend, const char *password, unsigned key_pin, unsigned key_touch);
+
+/*
  * Gives the security keys of the last ENROLLED answer (ws172-p003): at
  * most capacity of them in keys; returns how many there are.
  */

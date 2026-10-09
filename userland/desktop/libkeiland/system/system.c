@@ -120,6 +120,7 @@ struct system_account_listener {
 	void (*replug)(void *data, struct wl_proxy *proxy, uint32_t request);
 	void (*removed)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
 	void (*keys_changed)(void *data, struct wl_proxy *proxy);
+	void (*options)(void *data, struct wl_proxy *proxy, uint32_t key_pin, uint32_t key_touch);
 };
 
 /* The listener of kl_system_sharing_v1's events (ws089-p025), in their order. */
@@ -249,6 +250,7 @@ static void system_account_key_info(void *data, struct wl_proxy *proxy, uint32_t
 static void system_account_replug(void *data, struct wl_proxy *proxy, uint32_t request);
 static void system_account_removed(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
 static void system_account_keys_changed(void *data, struct wl_proxy *proxy);
+static void system_account_options(void *data, struct wl_proxy *proxy, uint32_t key_pin, uint32_t key_touch);
 static int system_key_ops(struct kl_system *system);
 static int system_key_secret_valid(const char *secret);
 static void system_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
@@ -309,7 +311,8 @@ static const struct system_account_listener system_account_listener = {
 	system_account_key_info,
 	system_account_replug,
 	system_account_removed,
-	system_account_keys_changed
+	system_account_keys_changed,
+	system_account_options
 };
 
 /* The sharing object's callbacks (ws089-p025). */
@@ -2649,6 +2652,58 @@ kl_system_account_replugged(
 	return 1;
 }
 
+/* Gives the user's key's options as the compositor last told them (ws199-p001): 1 when known. */
+int
+kl_system_account_key_options(
+	const struct kl_system *system,
+	unsigned *key_pin,
+	unsigned *key_touch)
+{
+	/* Asked, until told. */
+	*key_pin = 1U;
+	*key_touch = 1U;
+	if (system == NULL || !system->view.key_options_known)
+		return 0;
+
+	/* Told. */
+	*key_pin = system->view.key_pin;
+	*key_touch = system->view.key_touch;
+	return 1;
+}
+
+/* Asks for the user's key's options to be set, checked by the password (ws199-p001).  Nothing secret is kept here. */
+int
+kl_system_account_set_key_options(
+	struct kl_system *system,
+	const char *password,
+	unsigned key_pin,
+	unsigned key_touch,
+	uint32_t *request)
+{
+	uint32_t number;
+	int offered;
+	int valid;
+
+	/* The keys' own operations offered; a password; no touch only without the PIN. */
+	offered = system_key_ops(system);
+	if (!offered)
+		return ENOTSUP;
+	if (password == NULL || password[0] == '\0' || key_pin > 1U || key_touch > 1U || (key_pin == 1U && key_touch == 0U))
+		return EINVAL;
+	valid = system_key_secret_valid(password);
+	if (!valid)
+		return EINVAL;
+
+	/* A refusal of an earlier request is not this one's. */
+	system->view.refused_request = 0U;
+	system->view.refused_reason[0] = '\0';
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS, number, password, key_pin, key_touch);
+	return 0;
+}
+
 /* Gives how many of this machine's registrations the last reset removed (ws199-p001). */
 unsigned
 kl_system_account_key_removed(
@@ -3387,6 +3442,25 @@ system_account_keys_changed(
 	/* Changed. */
 	system = data;
 	system->view.changed |= KL_SYSTEM_CHANGED_KEYS;
+}
+
+/* Keeps the user's key's options (ws199-p001), told before each enrolled. */
+static void
+system_account_options(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t key_pin,
+	uint32_t key_touch)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Known now (enrolled, which follows, says it changed). */
+	system = data;
+	system->view.key_options_known = 1U;
+	system->view.key_pin = key_pin != 0U;
+	system->view.key_touch = key_touch != 0U;
 }
 
 /* Keeps an answered request of any object. */

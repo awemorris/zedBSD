@@ -10,7 +10,9 @@
  * style of /sbin/passkey, which starts it with the same request on its
  * standard input; its answer goes to passkey's standard output.
  *
- *   auth NAME fido2 KEY-PIN                   the login with a key
+ *   auth NAME fido2 KEY-PIN                   the login with a key (its PIN and touch)
+ *   auth-fido2 NAME login|unlock KEY-PIN      the login or unlock with a key as the
+ *                                             account's options ask (ws199-p001)
  *   enroll-fido2 NAME PASSWORD LABEL KEY-PIN  a new key for the account
  *   remove-fido2 NAME PASSWORD ID-OR-REF      one of the account's keys goes
  *   key-info NAME                             what the key there is (ws199-p001)
@@ -98,7 +100,7 @@ static int main_usable(const char *name, uid_t uid);
 static int main_file(size_t *length, int need_private);
 static int main_keys(const char *name, uid_t uid, struct main_keys *keys);
 static int main_helper_account(uid_t *uid, gid_t *gid);
-static int main_auth(const char *name, uid_t uid, char *pin);
+static int main_auth(const char *name, uid_t uid, char *pin, int unlock, int optional);
 static int main_enroll(const char *name, uid_t uid, const char *label, char *pin);
 static int main_remove(const char *name, uid_t uid, const char *id);
 static int main_change(const char *name, const char *field, const char *added);
@@ -110,6 +112,7 @@ static int main_all_keys(struct main_all_keys *all);
 static int main_replug(void);
 static int main_job_failed(int error, const struct fido2_message *message, int kind);
 static uint64_t main_now_ms(void);
+static int main_options_reset(const char *name, uid_t uid);
 static const char *main_verify_reason(int error);
 
 /* Answers one request. */
@@ -127,6 +130,8 @@ main(void)
 	int found;
 	int is_auth;
 	int is_key;
+	int unlock;
+	int same;
 
 	/* Root alone, a clean environment, no core file. */
 	real = getuid();
@@ -149,6 +154,16 @@ main(void)
 	is_auth = 0;
 	if (request.operation == PASSKEY_OP_AUTH)
 		is_auth = strcmp(request.fields[2], "fido2") == 0;
+	unlock = 0;
+	if (request.operation == PASSKEY_OP_AUTH_FIDO2) {
+		is_auth = 1;
+		unlock = strcmp(request.fields[2], "unlock") == 0;
+		same = strcmp(request.fields[2], "login") == 0;
+		if (!unlock && !same) {
+			passkey_wipe(buffer, sizeof(buffer));
+			return main_fail("bad-request");
+		}
+	}
 	is_key = request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET;
 	if (!is_auth && !is_key && request.operation != PASSKEY_OP_ENROLL_FIDO2 && request.operation != PASSKEY_OP_REMOVE_FIDO2) {
 		passkey_wipe(buffer, sizeof(buffer));
@@ -182,7 +197,7 @@ main(void)
 		}
 
 		/* The login, and nothing secret stays. */
-		status = main_auth(request.fields[1], account.pw_uid, request.fields[3]);
+		status = main_auth(request.fields[1], account.pw_uid, request.fields[3], unlock, request.operation == PASSKEY_OP_AUTH_FIDO2);
 		passkey_wipe(buffer, sizeof(buffer));
 		return status;
 	}
@@ -448,16 +463,24 @@ main_helper_account(
 }
 
 /*
- * Logs in with a key: the account's keys, a new challenge, the helper's
- * answer checked against the account's own public key, and a larger count
- * kept.
+ * Logs in (or unlocks) with a key: the account's keys, a new challenge,
+ * the helper's answer checked against the account's own public key, and a
+ * larger count kept.  With optional (auth-fido2, ws199-p001) the account's
+ * options decide: an empty PIN only when the key's PIN is not asked
+ * (then the user is not verified), and no touch only to unlock when the
+ * touch is not asked; the flags checked follow.
  */
 static int
 main_auth(
 	const char *name,
 	uid_t uid,
-	char *pin)
+	char *pin,
+	int unlock,
+	int optional)
 {
+	struct passkey_options options;
+	size_t length;
+	unsigned required;
 	static struct fido2_job job;
 	static struct fido2_message message;
 	struct pk_credential allowed[PASSKEY_FIDO2_MAX];
@@ -487,6 +510,24 @@ main_auth(
 		if (error != 0)
 			return main_fail("internal");
 		return main_fail("not-enrolled");
+	}
+
+	/* The account's options: an empty PIN only when it is not asked, an unlock without the touch only when it is not asked. */
+	passkey_options_default(&options);
+	if (optional) {
+		error = main_file(&length, 1);
+		if (error == 0)
+			(void)passkey_options_read(main_text, length, name, uid, &options);
+	}
+	if (pin[0] == '\0' && options.key_pin)
+		return main_fail("bad-request");
+	required = PK_FLAG_UP | PK_FLAG_UV;
+	job.presence = 1;
+	if (pin[0] == '\0')
+		required &= ~PK_FLAG_UV;
+	if (unlock && !options.key_touch) {
+		job.presence = 0;
+		required &= ~PK_FLAG_UP;
 	}
 
 	/* The challenge and the client data hash. */
@@ -525,7 +566,7 @@ main_auth(
 	if (message.kind != FIDO2_MESSAGE_ASSERTION)
 		return main_fail("device");
 
-	/* What is expected: the login's relying party, this client data hash, the user present and verified, the account's keys. */
+	/* What is expected: the login's relying party, this client data hash, the user present and verified as asked, the account's keys. */
 	memset(&expectation, 0, sizeof(expectation));
 	for (index = 0U; index < keys->count; index++) {
 		allowed[index].id = keys->records[index].id;
@@ -538,7 +579,7 @@ main_auth(
 	/* The relying party, the hash, the flags, the keys. */
 	expectation.rp_id = FIDO2_RP;
 	memcpy(expectation.client_data_hash, job.client_data_hash, sizeof(expectation.client_data_hash));
-	expectation.required_flags = PK_FLAG_UP | PK_FLAG_UV;
+	expectation.required_flags = required;
 	expectation.credentials = allowed;
 	expectation.credential_count = keys->count;
 
@@ -704,10 +745,12 @@ main_remove(
 	if (!found)
 		return main_fail("not-enrolled");
 
-	/* Its line goes, under the lock. */
+	/* Its line goes, under the lock; with the last key the key's options go back to the defaults (ws199-p001). */
 	error = main_change(name, keys->records[chosen].id_text, NULL);
 	if (error != 0)
 		return main_fail("internal");
+	if (keys->count == 1U)
+		(void)main_options_reset(name, uid);
 
 	/* Succeeded. */
 	return main_ok(uid, NULL);
@@ -1109,6 +1152,59 @@ main_job_failed(
 	if (message->kind == FIDO2_MESSAGE_FAIL)
 		return main_fail(message->reason);
 	return main_fail("device");
+}
+
+/*
+ * Sets the account's key's PIN and touch back to asked, under the account
+ * files' lock (its last key went): the line keeps WS200's methods, or goes
+ * when it is all defaults.  Returns 0 or an errno value.
+ */
+static int
+main_options_reset(
+	const char *name,
+	uid_t uid)
+{
+	struct passkey_options options;
+	char line[MAIN_LINE_MAX];
+	const char *added;
+	sigset_t held;
+	sigset_t previous;
+	size_t length;
+	size_t written;
+	int defaults;
+	int error;
+
+	/* The signals that would stop the change are held; the lock. */
+	sigfillset(&held);
+	(void)sigprocmask(SIG_BLOCK, &held, &previous);
+	error = account_files_lock();
+	if (error != 0) {
+		(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+		return error;
+	}
+
+	/* The file read again under the lock; the options' key part back to the defaults. */
+	passkey_options_default(&options);
+	error = main_file(&length, 0);
+	if (error == 0) {
+		(void)passkey_options_read(main_text, length, name, uid, &options);
+		options.key_pin = 1;
+		options.key_touch = 1;
+		error = passkey_options_line(name, uid, &options, line, sizeof(line));
+	}
+	defaults = passkey_options_is_default(&options);
+	added = line;
+	if (defaults)
+		added = NULL;
+	if (error == 0)
+		error = passkey_record_replace(main_text, length, name, "options", added, main_output, sizeof(main_output), &written);
+	if (error == 0)
+		error = account_file_write(PASSKEY_FILE, 0600, main_output, written);
+
+	/* The lock and the signals given back. */
+	account_files_unlock();
+	(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+	return error;
 }
 
 /* Gives the monotonic time in milliseconds. */

@@ -258,6 +258,8 @@ struct system_state {
 	unsigned enrolled_known;
 	unsigned enrolled_pin;
 	unsigned enrolled_keys;
+	unsigned enrolled_key_pin;
+	unsigned enrolled_key_touch;
 	struct kl_backend_key enrolled_list[KL_BACKEND_KEYS_MAX];
 	size_t enrolled_list_count;
 	unsigned enrolled_wanted;
@@ -282,6 +284,7 @@ static int system_account_key(struct kwl_object *object, uint32_t opcode, const 
 static int system_account_key_op(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_key_op_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *first, const char *second);
 static struct kwl_object *system_pin_object(struct kwl_server *server, unsigned version);
+static int system_key_options_begin(struct kwl_object *object, uint32_t number, const char *password, uint32_t key_pin, uint32_t key_touch);
 static int system_key_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *password, const char *argument, const char *pin);
 static int system_pin_begin(struct kwl_object *object, uint32_t number, const char *current, const char *pin);
 static int system_pin_valid(const char *pin);
@@ -1209,6 +1212,7 @@ kwl_system_enrolled_answer(
 	system_state.enrolled_pin = pin;
 	system_state.enrolled_keys = keys;
 	system_state.enrolled_list_count = listed;
+	kl_backend_session_options_get(server->backend, &system_state.enrolled_key_pin, &system_state.enrolled_key_touch);
 	printf("KWL SYSTEM enrolled pin=%u keys=%u listed=%lu\n", pin, keys, (unsigned long)listed);
 
 	/* Each account object of every client that is not ending. */
@@ -1690,8 +1694,8 @@ system_account_request(
 		return 0;
 	}
 
-	/* A key's own operation since version 25 (ws199-p001). */
-	if (opcode >= KL_SYSTEM_ACCOUNT_KEY_INFO && opcode <= KL_SYSTEM_ACCOUNT_KEY_CANCEL) {
+	/* A key's own operation, or its options, since version 25 (ws199-p001). */
+	if (opcode >= KL_SYSTEM_ACCOUNT_KEY_INFO && opcode <= KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
 		if (object->version < KL_SYSTEM_SINCE_KEY_OPS)
 			return EPROTO;
 		error = system_account_key_op(object, opcode, bytes, size);
@@ -2157,6 +2161,7 @@ system_account_key_op(
 	size_t size)
 {
 	struct kwl_server *server;
+	uint32_t values[2];
 	uint32_t number;
 	char *first;
 	char *second;
@@ -2189,6 +2194,19 @@ system_account_key_op(
 		error = system_read_string(bytes, size, next, &second, &end);
 	}
 
+	/* The options' two words after the password. */
+	values[0] = 0U;
+	values[1] = 0U;
+	if (error == 0 && opcode == KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
+		if (size - end != 8U) {
+			error = EPROTO;
+		} else {
+			values[0] = system_word(bytes, end);
+			values[1] = system_word(bytes, end + 4U);
+			end += 8U;
+		}
+	}
+
 	/* Nothing after them. */
 	if (error == 0 && end != size)
 		error = EPROTO;
@@ -2199,8 +2217,11 @@ system_account_key_op(
 	/* The operation starts, unless the request was malformed or the screen is locked. */
 	if (error == 0 && server->locked)
 		error = EBUSY;
-	if (error == 0)
+	if (error == 0 && opcode == KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
+		error = system_key_options_begin(object, number, first, values[0], values[1]);
+	} else if (error == 0) {
 		error = system_key_op_begin(object, number, opcode, first, second);
+	}
 
 	/* The copies go, the secrets wiped. */
 	if (first != NULL) {
@@ -2280,6 +2301,48 @@ system_key_op_begin(
 	return 0;
 }
 
+/* Starts a change of the key's options through the session manager (SETOPTIONS).  Returns 0 when asked, or the errno value to answer with. */
+static int
+system_key_options_begin(
+	struct kwl_object *object,
+	uint32_t number,
+	const char *password,
+	uint32_t key_pin,
+	uint32_t key_touch)
+{
+	struct kl_backend *backend;
+	size_t length;
+	int managed;
+	int error;
+
+	/* One change at a time, a password that fits, values of 0 or 1. */
+	if (system_state.pin_waiting)
+		return EBUSY;
+	length = strlen(password);
+	if (length == 0U || length > KL_SYSTEM_PASSWORD_MAX || key_pin > 1U || key_touch > 1U)
+		return EINVAL;
+	backend = object->client->server->backend;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	/* The change; the answer comes through kwl_system_pin_answer. */
+	error = kl_backend_session_set_options(backend, password, key_pin, key_touch);
+	printf("KWL SYSTEM account key options client=%llu number=%u pin=%u touch=%u error=%d\n", (unsigned long long)object->client->number, number, key_pin,
+	    key_touch, error);
+	if (error != 0)
+		return error;
+
+	/* The change waits for its answer. */
+	system_state.pin.client = object->client->number;
+	system_state.pin.object = object->id;
+	system_state.pin.number = number;
+	system_state.pin_waiting = 1U;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
+	system_state.pin_key = 0U;
+	return 0;
+}
+
 /* Tells whether a PIN is exactly six decimal digits. */
 static int
 system_pin_valid(
@@ -2324,6 +2387,13 @@ system_account_enrolled(
 			offset = system_put_string(payload, offset, system_state.enrolled_list[index].label);
 			(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_KEY, payload, offset);
 		}
+	}
+
+	/* The key's options, to an object of version 25 or later (ws199-p001). */
+	if (object->version >= KL_SYSTEM_SINCE_KEY_OPS) {
+		words[0] = system_state.enrolled_key_pin;
+		words[1] = system_state.enrolled_key_touch;
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_OPTIONS, words, sizeof(words));
 	}
 
 	/* Whether a PIN is set, and the security keys. */

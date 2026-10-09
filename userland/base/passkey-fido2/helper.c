@@ -481,16 +481,19 @@ helper_assert(
 		return;
 	}
 
-	/* The PIN to that key alone. */
-	error = helper_token(&key, job, PK_PERMISSION_GET_ASSERTION, token, &token_size);
-	if (error != 0)
-		return;
+	/* The PIN to that key alone, when one is asked (ws199-p001: the account's key may sign in without it). */
+	token_size = 0U;
+	if (job->pin[0] != '\0') {
+		error = helper_token(&key, job, PK_PERMISSION_GET_ASSERTION, token, &token_size);
+		if (error != 0)
+			return;
+		request.pin_token = token;
+		request.pin_token_size = token_size;
+		request.pin_protocol = pk_ctap2_choose_protocol(&key.info);
+	}
 
-	/* The assertion, with the user's touch and the PIN's verification. */
-	request.presence = 1;
-	request.pin_token = token;
-	request.pin_token_size = token_size;
-	request.pin_protocol = pk_ctap2_choose_protocol(&key.info);
+	/* The assertion, with the user's touch unless the unlock asks none, and the PIN's verification when it was given. */
+	request.presence = job->presence;
 	error = pk_ctap2_get_assertion(&key.device, &request, &reply);
 	pk_crypto_wipe(token, sizeof(token));
 	if (error != 0) {

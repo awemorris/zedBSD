@@ -190,6 +190,36 @@ kl_backend_session_add_key(
 	return ENOTSUP;
 }
 
+/* Gives the key options' defaults (ws199-p001). */
+void
+kl_backend_session_options_get(
+	const struct kl_backend *backend,
+	unsigned *key_pin,
+	unsigned *key_touch)
+{
+	/* Both asked. */
+	(void)backend;
+	*key_pin = 1U;
+	*key_touch = 1U;
+}
+
+/* Sets no key options. */
+int
+kl_backend_session_set_options(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned key_pin,
+	unsigned key_touch)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	(void)key_pin;
+	(void)key_touch;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
 /* Asks nothing about the keys (ws199-p001). */
 int
 kl_backend_session_key_info(

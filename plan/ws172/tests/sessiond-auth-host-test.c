@@ -200,7 +200,7 @@ test_policy(void)
 	check(strcmp(sessiond_policy_reason("not-enrolled"), "bad-secret") == 0, "not-enrolled is bad-secret");
 	check(strcmp(sessiond_policy_reason("locked-account"), "locked") == 0, "locked-account is locked");
 	check(strcmp(sessiond_policy_reason("key-locked"), "locked") == 0, "key-locked is locked");
-	check(strcmp(sessiond_policy_reason("cloned"), "bad-secret") == 0, "cloned is bad-secret");
+	check(strcmp(sessiond_policy_reason("cloned"), "cloned") == 0, "cloned is told as it is (ws199-p001 R6)");
 	check(strcmp(sessiond_policy_reason("timeout"), "timeout") == 0, "timeout");
 	check(strcmp(sessiond_policy_reason("anything"), "bad-secret") == 0, "unknown reason");
 

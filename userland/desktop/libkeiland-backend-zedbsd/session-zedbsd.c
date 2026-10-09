@@ -591,6 +591,62 @@ kl_backend_session_remove_key(
 }
 
 /*
+ * Gives the session user's key options as the last ENROLLED told them (ws199-p001).
+ */
+void
+kl_backend_session_options_get(
+	const struct kl_backend *backend,
+	unsigned *key_pin,
+	unsigned *key_touch)
+{
+	/* Asked, without a backend or an answer. */
+	*key_pin = 1U;
+	*key_touch = 1U;
+	if (backend == NULL)
+		return;
+
+	/* Succeeded: the last answer's. */
+	*key_pin = backend->session_key_pin;
+	*key_touch = backend->session_key_touch;
+}
+
+/*
+ * Asks sessiond to set the session user's key options (SETOPTIONS, ws199-p001).
+ */
+int
+kl_backend_session_set_options(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned key_pin,
+	unsigned key_touch)
+{
+	char line[SESSION_REQUEST_MAX];
+	int valid;
+	int written;
+	int error;
+
+	/* Only a session sessiond started and still listens to. */
+	if (backend == NULL || password == NULL || key_pin > 1U || key_touch > 1U)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The password, one line; no touch only without the PIN. */
+	valid = session_secret_valid(password);
+	if (!valid || password[0] == '\0' || (key_pin == 1U && key_touch == 0U))
+		return EINVAL;
+
+	/* The request; nothing of the password is kept once it is sent. */
+	written = snprintf(line, sizeof(line), "SETOPTIONS %u %u\n%s\n", key_pin, key_touch, password);
+	error = session_ask(backend, KL_BACKEND_SESSION_ENROLL, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
  * Asks sessiond what the security keys there are (KEYINFO, ws199-p001).
  */
 int
@@ -1105,6 +1161,7 @@ session_take_enrolled(
 	const char *list)
 {
 	const char *word;
+	const char *option;
 	unsigned pin;
 	unsigned keys;
 	int scanned;
@@ -1124,6 +1181,16 @@ session_take_enrolled(
 	if (pin != 0U)
 		backend->session_pin = 1U;
 	backend->session_keys = keys;
+
+	/* The key's options (ws199-p001): asked unless said otherwise. */
+	backend->session_key_pin = 1U;
+	backend->session_key_touch = 1U;
+	option = strstr(list, " key-pin=0");
+	if (option != NULL)
+		backend->session_key_pin = 0U;
+	option = strstr(list, " key-touch=0");
+	if (option != NULL)
+		backend->session_key_touch = 0U;
 
 	/* Each key listed, while there is room (one that does not read is left out). */
 	backend->session_key_count = 0U;

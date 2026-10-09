@@ -125,6 +125,9 @@ struct system_view {
 	unsigned replugged;
 	uint32_t replugged_request;
 	unsigned key_removed;
+	unsigned key_options_known;
+	unsigned key_pin;
+	unsigned key_touch;
 	struct kl_sharing_state sharing;
 	struct kl_sharing_state sharing_pending;
 	unsigned sharing_touched;
