@@ -805,6 +805,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | --- | --- | --- |
 | [q1-clean.sh](tools/q1-clean.sh)・[fresh-out.sh](tools/fresh-out.sh)・[files/host-clean.sh](tools/files/host-clean.sh)（2026-10-06） | 削除は Q1 の pipeline（ユーザーの規則）。host の試験の script は rm を持たず、`fresh_out NAME`（新しい `NAME.run.*` を作り NAME を symlink で向ける）か `build/tmp/` の mktemp を使う。Q1 が `q1-clean.sh WORKTREE` で古い run・tmp・old を消す | `. plan/tools/fresh-out.sh; fresh_out "$out"`、Q1: `sh plan/tools/q1-clean.sh /home/awe/zedBSD-worktrees/p1` |
 | [gtk4-linux/](tools/gtk4-linux/README.md)（WS114 から移した、2026-10-06） | Linux の Keiland の上の標準 GTK4 の装飾（CSD・SSD）の試験と session の起動 | `decoration-wire.py`・`start-session.sh` など、README を参照 |
+| [ws125/tests/subtree-host-test.sh](ws125/tests/subtree-host-test.sh)（2026-10-09、WS125 の完了時に plan/tools/ へ移す） | package の staged tree を image に入れる `--subtree DEST=DIR` の回帰（Makefile の tree の規則・UFS・FAT の道具と検査、一覧と中身の一致） | host で `plan/ws125/tests/subtree-host-test.sh`、PASS で終わる |
 | [compositor/](tools/compositor/README.md)（WS110） | compositor の起動の role（--testing・--session・--greeter）の試験 | `run-host-role.sh`、`roles-guest.sh` |
 | [rtld/](tools/rtld/README.md)（WS140） | ld.so の多数の object・依存・handle・TLS の試験 | `rtld-many.sh BUILD`（`config-amd64-rtld.mk` の SSH の image、BUILD/sysroot の symlink） |
 | [wallpaper/](tools/wallpaper/README.md)（WS138） | 背景の PNG・JPEG の復号と読み込みの時間・greeter の背景 | host `run-host-wallpaper-decode.sh`、guest `wallpaper-time.sh`（Settings の image）・`greeter-wallpaper.sh`（criteria の image） |
