@@ -70,3 +70,7 @@ compilerはmainへ統合済み。新private Vulkan session/object ownerを追加
 ## i14 buffer/image/binding checkpoint（2026-10-09）
 
 typed create/destroy/requirements/bind/linear layoutを実client codecへ接続。logical buffer extentとrounded requirementを分離、raster colour image pitchを定義し、independent binding/prepared ownerをactual VA source hostで確認。host3範囲/rpi4 y build PASS、style total0。public runtime未公開、次はview/sampler/shader moduleとdescriptor/pipeline/draw。[設計/失敗と修正/結果/制限](../execution-20261009.md#i14-bufferimagerequirementsbindingのsoftware出力2026-10-09)。p006/i14 in-progress、Keiland/実機/p007未達。
+
+## i14 immutable input checkpoint（2026-10-09）
+
+actual client handle/record encoderとnative sourceでcolour view・nearest/linear sampler・copied SPIR-V moduleを追加。image/root/module/jobの独立保持、registry OOM、arena/stream overwrite後のactual Keiland module byte保持を確認。host4範囲/rpi4 y build/style PASS。stage/entry/native compiler keyはpipeline createの後続、public runtimeは未公開。[結果/失敗と修正/制限/再開](../execution-20261009.md#i14-immutable-viewsamplerspir-v-moduleのsoftware出力2026-10-09)。次はdescriptor/pipeline layout、p006/i14 in-progress。

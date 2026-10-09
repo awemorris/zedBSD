@@ -165,3 +165,7 @@ lazy VkMemory/type0/export/importとactual placement後のNormal NC backing、no
 ## i14 buffer/image/binding checkpoint（2026-10-09）
 
 実client codecでtyped buffer/image・requirements・same-device memory bind・linear colour pitchを追加。actual VA/MMU hostでbinding/prepared ownerの独立保持、logical extentとrequired sizeの区別、bad bind拒否を確認。host3範囲/rpi4 y build/style PASS。次はview/sampler/shader moduleからtyped draw/runtimeへ、COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress。Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-bufferimagerequirementsbindingのsoftware出力2026-10-09)。
+
+## i14 immutable input checkpoint（2026-10-09）
+
+colour image view、single-level nearest/linear sampler、owned SPIR-V moduleを実装し、actual client handle/record codec/native hostでparent/job/referenceとarena非依存を確認。host4範囲/rpi4 y build/style PASS、次はdescriptor/pipeline layoutからnative draw/runtimeへ。COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress、Keiland/実機/p007未達。[結果/復帰点](execution-20261009.md#i14-immutable-viewsamplerspir-v-moduleのsoftware出力2026-10-09)。Masterは更新しない。

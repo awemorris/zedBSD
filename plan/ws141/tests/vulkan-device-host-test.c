@@ -18,6 +18,8 @@
 #include "drivers/gpu/bcm2711/vulkan-device.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
+#include "drivers/gpu/bcm2711/vulkan-input.h"
+#include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
 static struct bcm2711_buffer reply_buffer;
@@ -52,6 +54,8 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void input_test(struct bcm2711_vulkan_session *session);
+static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
 static void resource_test(struct bcm2711_vulkan_session *session);
 static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
 static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
@@ -407,6 +411,7 @@ main(
 	assert(queue != NULL);
 	memory_test(session, &render);
 	resource_test(session);
+	input_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -527,6 +532,13 @@ dispatch(
 
 	/* Native storage requirements and retained memory binding consume their actual typed commands. */
 	error = bcm2711_vulkan_resource_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Immutable native image views, samplers and owned SPIR-V modules retain their exact typed parents. */
+	error = bcm2711_vulkan_input_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -700,7 +712,7 @@ destroy(
 
 	/* Native allocation callbacks remain absent and implicit child identities retire inside the actual command. */
 	begin(&writer, wire, sizeof(wire), opcode, 1);
-	if (opcode == GPU_OP_DESTROY_BUFFER || opcode == GPU_OP_DESTROY_IMAGE)
+	if (opcode != GPU_OP_DESTROY_INSTANCE && opcode != GPU_OP_DESTROY_DEVICE)
 		vulkan_write_u64(&writer, 30);
 	vulkan_write_u64(&writer, identity);
 	vulkan_write_u64(&writer, 0);
@@ -1026,4 +1038,182 @@ resource_test(
 	destroy(session, GPU_OP_DESTROY_IMAGE, 61);
 	assert(allocations == baseline && session->render->device->space.views == NULL);
 	puts("WS141 Vulkan actual buffer/image layout/requirements/binding/prepared owner: PASS");
+}
+
+/* Exercises actual colour-view/sampler/module records and their immutable ownership through dependent retirement. */
+static void
+input_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct bcm2711_vulkan_object *image;
+	struct bcm2711_vulkan_object *view;
+	struct bcm2711_vulkan_object *shader;
+	struct bcm2711_vulkan_image_view *description;
+	struct bcm2711_vulkan_module *module;
+	struct vulkan_object client_image;
+	VkImageCreateInfo image_info;
+	VkImageViewCreateInfo view_info;
+	VkSamplerCreateInfo sampler_info;
+	VkShaderModuleCreateInfo shader_info;
+	uint8_t wire[4096];
+	unsigned baseline;
+	int error;
+
+	/* A small actual colour image supplies the independently retained view parent. */
+	baseline = allocations;
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	image_info.imageType = VK_IMAGE_TYPE_2D;
+	image_info.format = VK_FORMAT_R8G8B8A8_UNORM;
+	image_info.extent.width = 16;
+	image_info.extent.height = 8;
+	image_info.extent.depth = 1;
+	image_info.mipLevels = 1;
+	image_info.arrayLayers = 1;
+	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	image_info.tiling = VK_IMAGE_TILING_OPTIMAL;
+	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageCreateInfo(&writer, &image_info);
+	error = input_created(session, &writer, 70);
+	assert(error == VK_SUCCESS);
+	image = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE, 70);
+	assert(image != NULL && image->references == 1);
+
+	/* Failed view registry publication must unwind the acquired image/device edges after ordinary payload allocation. */
+	memset(&view_info, 0, sizeof(view_info));
+	view_info.sType = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
+	memset(&client_image, 0, sizeof(client_image));
+	client_image.wire_id = 70;
+	view_info.image = (VkImage)(uintptr_t)&client_image;
+	view_info.viewType = VK_IMAGE_VIEW_TYPE_2D;
+	view_info.format = image_info.format;
+	view_info.subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	view_info.subresourceRange.levelCount = 1;
+	view_info.subresourceRange.layerCount = 1;
+	fail_after = 2;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE_VIEW, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageViewCreateInfo(&writer, &view_info);
+	error = input_created(session, &writer, 71);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && image->references == 1);
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE_VIEW, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageViewCreateInfo(&writer, &view_info);
+	error = input_created(session, &writer, 71);
+	assert(error == VK_SUCCESS && image->references == 2);
+	view = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE_VIEW, 71);
+	assert(view != NULL);
+	description = view->payload;
+	assert(description->owner.parent == image && description->format == image_info.format);
+
+	/* A prepared view reference survives both public image and public view identity retirement. */
+	error = bcm2711_vulkan_object_retain(view);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_IMAGE, 70);
+	destroy(session, GPU_OP_DESTROY_IMAGE_VIEW, 71);
+	assert(view->references == 1 && image->references == 1 && !image->published);
+	error = bcm2711_vulkan_object_release(view);
+	assert(error == 0 && allocations == baseline);
+
+	/* Exact Keiland nearest and glass-linear sampler records create independent immutable native inputs. */
+	memset(&sampler_info, 0, sizeof(sampler_info));
+	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sampler_info.magFilter = VK_FILTER_NEAREST;
+	sampler_info.minFilter = VK_FILTER_NEAREST;
+	sampler_info.mipmapMode = VK_SAMPLER_MIPMAP_MODE_NEAREST;
+	sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SAMPLER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSamplerCreateInfo(&writer, &sampler_info);
+	error = input_created(session, &writer, 72);
+	assert(error == VK_SUCCESS);
+	sampler_info.magFilter = VK_FILTER_LINEAR;
+	sampler_info.minFilter = VK_FILTER_LINEAR;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SAMPLER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSamplerCreateInfo(&writer, &sampler_info);
+	error = input_created(session, &writer, 73);
+	assert(error == VK_SUCCESS);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 72);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 73);
+	assert(allocations == baseline);
+
+	/* The actual Keiland quad module is copied before the arena and original command storage are reused. */
+	memset(&shader_info, 0, sizeof(shader_info));
+	shader_info.sType = VK_STRUCTURE_TYPE_SHADER_MODULE_CREATE_INFO;
+	shader_info.codeSize = sizeof(kwl_quad_vert);
+	shader_info.pCode = kwl_quad_vert;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SHADER_MODULE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkShaderModuleCreateInfo(&writer, &shader_info);
+	error = input_created(session, &writer, 74);
+	assert(error == VK_SUCCESS);
+	shader = bcm2711_vulkan_object_find(session, I915_VK_OBJ_SHADER_MODULE, 74);
+	assert(shader != NULL);
+	module = shader->payload;
+	assert(module->word_count == sizeof(kwl_quad_vert) / sizeof(uint32_t));
+	memset(session->arena.base, 0xa5, session->arena.size);
+	memset(wire, 0x5a, sizeof(wire));
+	assert(memcmp(module->words, kwl_quad_vert, sizeof(kwl_quad_vert)) == 0);
+	error = bcm2711_vulkan_object_retain(shader);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_SHADER_MODULE, 74);
+	assert(shader->references == 1 && memcmp(module->words, kwl_quad_vert, sizeof(kwl_quad_vert)) == 0);
+	error = bcm2711_vulkan_object_release(shader);
+	assert(error == 0 && allocations == baseline);
+
+	/* An absent source array cannot masquerade as the same nonzero declared SPIR-V extent. */
+	shader_info.pCode = NULL;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SHADER_MODULE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkShaderModuleCreateInfo(&writer, &shader_info);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 75);
+	error = execute(session, &writer, &reader);
+	assert(error == ENOTSUP && allocations == baseline);
+	puts("WS141 Vulkan actual colour view/nearest-linear sampler/copied Keiland SPIR-V ownership: PASS");
+}
+
+/* Completes actual ordinary creation framing and decodes one exact acknowledged native identity. */
+static int
+input_created(
+	struct bcm2711_vulkan_session *session,
+	struct vulkan_writer *writer,
+	uint64_t identity)
+{
+	struct vulkan_reader reader;
+	uint64_t returned;
+	uint32_t status;
+	int error;
+
+	/* Native creation uses the same null allocator and typed output identity as the actual client helper. */
+	vulkan_write_u64(writer, 0);
+	vulkan_write_u64(writer, 1);
+	vulkan_write_u64(writer, identity);
+	error = execute(session, writer, &reader);
+	assert(error == 0);
+	status = vulkan_read_u32(&reader);
+	assert(vulkan_read_u64(&reader) == 1);
+	returned = vulkan_read_u64(&reader);
+	if (status == VK_SUCCESS)
+		assert(returned == identity);
+	else
+		assert(returned == 0);
+
+	/* Succeeded: the caller sees an explicit Vulkan creation outcome after complete reply decoding. */
+	return (int)status;
 }
