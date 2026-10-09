@@ -21,9 +21,8 @@
 | --- | --- | --- | --- |
 | [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み、ユーザーの review 待ち・comment の整理 | 1 | P1・ユーザー |
 | [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
-| [WS129](ws129/ws.md) p002 license の一覧を release の image の rootfs で確かめる | 一覧は再生成済み（27 components、open 0） | 0.5 | P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
-| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 10/16 | 1.5 | P1・Q1 |
+| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 手順を phase.md に用意済み（host の確かめ PASS）、実行は 10/16 | 0.5 | P1・Q1 |
 | T1 の未実行の試験 9 本: T1-499〜503（BUG-234・BUG-188・IPv6・音量の回帰・Bluetooth の回帰・FreeBSD の prerequisites の再試験）、T1-495 Python、T1-477・483・484 | 2026-10-09 夜: 480・482・486・493・496・497 は済み、498 は Debian PASS | 5 | T1 |
 | 試験の FAIL の直し（T1-494・479・478・498 の分は直して再試験中、次に出る物の枠） | — | 3 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |

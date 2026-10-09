@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws129-p002 -->
 # ws129-p002: image の license の一覧
 
-Status: in-progress（q668・q669、P2、2026-10-04。一覧・script・host 試験・audit・G1〜G4・D1・D2 は済み、open 0。CI の config の完全な rootfs の確かめと QEMU の remacs の起動は T 待ち）
+Status: cleared（ベータ2 の分、2026-10-09 Q1 判定: release の config で 27 components・open 0、release の rootfs（clang・libcxx を除く）で --rootfs の Open items none。clang・libcxx の本文は CI の build で確かめる）
 Disposition: normal
 Parent: [WS129](../ws.md)
 Focused goal: fg019（ベータ1）
