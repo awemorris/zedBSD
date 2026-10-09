@@ -110,6 +110,13 @@ drv_bcm2711_gpu_attach(
 		}
 	}
 
+	/* Publishes display operations only after the real boot scanout was confirmed. */
+	if (display_error == 0) {
+		display_error = bcm2711_display_register(&attach_display);
+		if (display_error != 0)
+			bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P5 registration failed (%d)", display_error);
+	}
+
 	/* Runs the V3D engine's discovery, whatever became of the display. */
 	v3d_error = bcm2711_v3d_discover(&fdt, &attach_v3d);
 
