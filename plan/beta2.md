@@ -17,6 +17,7 @@
 
 ## 今の状況
 
+- 2026-10-10 夜の UAT: BUG-283・284・285・286 close、WS199 の頁とログイン画面のキー（PIN あり、NFC）OK、BUG-222 は 4.9 MB/s。PIN 不要・タッチ不要の card は image が古く未確認。WS200 は未実装。WS197 を必須に（ユーザー）。
 - 2026-10-10 の UAT は一通り済んだ。残る既知の Bug は USB LAN の遅さ（BUG-222、最悪ベータ2 では遅くてよい）。
 - 順（ユーザー）: 走っている Bug の直しと試験を全部終える → WS199（Vulkan Video より優先）→ WS200。
 - P1: WS199 の設計を新しい仕様で書き直し design-reviewer に通している（code は試験が片付いてから）。
@@ -28,7 +29,7 @@
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
 | [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001（頁・NFC・鍵の PIN と Reset）・p002（PIN 不要・タッチ不要）を merge。次 p003 greeter・lock の鍵のモードと keypad、p004 試験と T1 | 8 | P1・T1 |
-| [BUG-286](bugs/BUG-286.md) NFC の YubiKey で登録と login が失敗 | 直して merge（i02、置きっ放しもタッチ）。5330 で確認待ち | 0.5 | ユーザー |
+| [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared（branch agent/p1-ws197）、p003 MAP は i03 の途中。p004〜p009 未着手。再開の手順は ws.md | 約 100 | P1 |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
@@ -41,16 +42,12 @@
 
 | # | 項目 | 手順 | 期待 |
 | --- | --- | --- | --- |
-| 1 | [BUG-283](bugs/BUG-283.md) ロック画面の button | PIN か鍵を登録した状態で lock | Password・PIN・Security Key の button が高く押しやすい |
-| 2 | [BUG-284](bugs/BUG-284.md) Ethernet の頁 | Settings → Network → Ethernet | wlan0 が出ず、ue0 だけが Connected |
-| 3 | [BUG-285](bugs/BUG-285.md) PIN の登録の直後 | autologin のまま Settings で PIN を登録 → lock | lock の画面に PIN が出て PIN で解除できる |
 | 4 | [WS199](ws199/ws.md) セキュリティキーの頁 | Settings → Security Keys で鍵の一覧、Add Key のウィザード（名前・PIN の設定・初期化・PIN の変更）、Software Security Key（今の PIN） | ウィザードで登録・PIN の変更・初期化ができる。処理中は操作できない表示 |
 | 5 | WS199 ログイン画面のキー | 鍵を挿す（(a) 既定、(b)「PIN 不要」、(c)「PIN 不要」＋「タッチ不要」の設定で） | 自動で鍵のモードとその鍵の user に。(a) PIN（欄の下に OSK）とタッチ、(b) タッチだけ、(c) 「確認中」の後に最低 0.5 秒「確認した」を出してデスクトップへ |
 | 6 | WS199 ロック画面のタッチ不要 | (c) の設定で lock。鍵を挿したまま／抜いて挿し直す | 挿したままならタッチを促す。lock の後に挿した鍵ならタッチ無しで解除 |
 | 7 | WS199 設定の変更 | 「PIN 不要」「タッチ不要」を入れる | パスワードを求め、「鍵を持つ人は誰でもログインできる」の警告が出る |
 | 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の Password・PIN・Security Key | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
-| 10 | [BUG-286](bugs/BUG-286.md) NFC の YubiKey | Settings で NFC の reader に当てて登録、NFC のタッチで login・解除 | USB と同じに使える |
-| 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から ue0 経由で大きい file を scp | 速さを教えてください（10/06 は 950 KB/s、TCP の直しの後の値） |
+| 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 2026-10-10 は 4.9 MB/s（前は 950 KB/s） | 既知の問題に書くか close はユーザー |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
@@ -58,7 +55,7 @@
 | --- | --- |
 | BUG-222（USB LAN の遅さ、直らなければ）、BUG-280（App Home への遷移の fps）、BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更・調べが要る |
 | BUG-255（蓋を閉じた間の HDMI）、BUG-159（電池で 5 fps）、BUG-145（AX211 の DHCP）、BUG-165（5330 の DSDT） | 調査が長い・実機の時間が要る |
-| WS201（/home の暗号化）、WS197（Bluetooth のスマホ連携）、WS195（/opt/keiland）、WS196（useradd 等）、WS198（self-build）、[WS001 p045](ws001/phase045/phase.md) POSIX の header、[WS126](ws126/ws.md) Python | ベータ3 の列 |
+| WS201（/home の暗号化）、WS195（/opt/keiland）、WS196（useradd 等）、WS198（self-build）、[WS001 p045](ws001/phase045/phase.md) POSIX の header、[WS126](ws126/ws.md) Python | ベータ3 の列 |
 | 規約の全文の見直しの Phase（各 WS） | ユーザーの決定でベータ3 |
 
 ## 運用

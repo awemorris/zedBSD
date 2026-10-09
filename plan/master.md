@@ -535,6 +535,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
 - 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
+- 2026-10-10 夜 ユーザー:「WS197はbeta2.mdで必須に入れておいてください。」→ beta2.md の必須に WS197（約 100 LW の残り）。UAT: BUG-283・284・285・286 close、WS199 の頁・ログイン画面のキー OK（PIN 不要・タッチ不要は image が古く未確認）、WS200 は未実装、BUG-222 は 4.9 MB/s。
 - 2026-10-10 merge 5515a4dab（WS199）: R3「置きっ放しもタッチ」を passkey-fido2 に、kernel の smartcard.c の drv_smartcard_card が card の出入りで KERN_SYSTEM_EVENT_USB の CHANGE（detail card=0|1）を post（Q1 の許し、include/uapi/system.h は注釈 1 行だけで layout 不変）、host-kl-system.c の printers の stub、fido2-p003-guest.sh の段 4 を security-keys の頁に。
 - 2026-10-10 ユーザー（クリック）: WS199 R3 は「置きっ放しもタッチ」→ NFC の reader に載せたままの鍵もタッチと見なす（P1 の推しの「当て直し」は採らない）。
 - 2026-10-10 Q1 判定: WS199 i02 の kernel の src/drivers/generic/smartcard.c（WS161 の file）の変更を許す: card の出入りで既存の KERN_SYSTEM_EVENT_USB の CHANGE（subject smartcardN、detail card=1|0）を post。UAPI・HAL は変えない。試験の整理: plan/ws172/tests/run-host-settings-keys.sh を削除（Users の頁の鍵の欄が消えた、master・未完了の Phase の参照なし）。fido2-p003-guest.sh は T1 の回帰で使うので段 4 を security-keys の頁に直す（P1）。
