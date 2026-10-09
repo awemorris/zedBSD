@@ -288,10 +288,10 @@ se_keys_soft_result(
 		refused = kl_system_account_refusal(app->system, keys->request, reason, sizeof(reason));
 		locked = 1;
 		if (refused)
-			locked = strcmp(reason, "locked");
+			locked = strcmp(reason, "locked-account");
 		message = "The password is wrong.";
 		if (locked == 0)
-			message = "Too many wrong attempts, or your account is locked. Wait, then try again.";
+			message = "Your account is locked: it cannot have a PIN.";
 		break;
 	case EINVAL:
 		message = "The PIN is not accepted: use six digits.";

@@ -40,6 +40,11 @@
 #define SESSIOND_PASSKEY_GRACE_MS	2000LL
 #endif
 
+/* A key's reset: the key plugged in again (30 s) and touched (33 s), with room (ws199-p001 section 4.5). */
+#ifndef SESSIOND_PASSKEY_RESET_MS
+#define SESSIOND_PASSKEY_RESET_MS	75000LL
+#endif
+
 /* The longest request written to passkey (its own bound), and how often a busy exchange is looked at (milliseconds). */
 #define SESSIOND_REQUEST_SIZE		4096U
 #define SESSIOND_EXCHANGE_TICK_MS	100
@@ -57,6 +62,9 @@ enum sessiond_command {
 	SESSIOND_COMMAND_ENROLLED,
 	SESSIOND_COMMAND_ENROLL,
 	SESSIOND_COMMAND_REMOVE,
+	SESSIOND_COMMAND_KEYINFO,
+	SESSIOND_COMMAND_KEYPIN,
+	SESSIOND_COMMAND_KEYRESET,
 	SESSIOND_COMMAND_COUNT
 };
 
@@ -121,6 +129,8 @@ struct sessiond_exchange {
 	/* A failure's answer, sent at reply_ms. */
 	char held[SESSIOND_LINE_MAX];
 	long long reply_ms;
+	/* A key's reset whose password passkey-fido2 found right (status verified, ws199-p001). */
+	int verified;
 	/* A login that passkey granted (the greeter's): the account, in the greeter's login. */
 	int logged_in;
 	struct sessiond_account *login;

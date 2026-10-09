@@ -239,14 +239,20 @@ se_keys_refusal(
 		const char *word;
 		const char *line;
 	} lines[] = {
-		{ "bad-secret", "The password or the key's PIN is wrong." },
-		{ "locked", "Too many wrong attempts, or the key's PIN is locked. Wait, then try again." },
+		{ "bad-secret", "The password is wrong." },
+		{ "bad-key-pin", "The key's PIN is wrong." },
+		{ "locked", "Too many wrong attempts. Wait, then try again." },
 		{ "no-key", "No security key was found. Plug it in, or hold it to the reader." },
 		{ "many-keys", "More than one key is there. Leave only the key to add." },
-		{ "key-locked", "The security key is locked: too many wrong PINs." },
+		{ "key-locked", "The key's PIN is locked: too many wrong PINs. Reset the key to use it again." },
+		{ "key-replug", "Too many wrong PINs for now. Unplug the key, plug it in again, and try again." },
+		{ "no-pin", "The key has no PIN yet. Set one first: run fidoctl set-pin in Terminal." },
+		{ "pin-policy", "The key does not take that PIN." },
 		{ "timeout", "The key was not touched in time." },
+		{ "canceled", "Cancelled." },
 		{ "locked-account", "Your account is locked: it cannot have a security key." },
-		{ "device", "The security key did not answer. It needs a PIN of its own." },
+		{ "not-enrolled", "That key is no longer registered." },
+		{ "device", "The security key did not answer." },
 	};
 	char reason[KEYS_REASON];
 	size_t index;

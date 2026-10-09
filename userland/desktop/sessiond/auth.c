@@ -21,7 +21,19 @@
  *   ENROLL fido2 label, then the password's and the key PIN's lines
  *   REMOVE pin, then the password's line
  *   REMOVE fido2 id, then the password's line
+ *   KEYINFO                         KEYINFO count=N [name=HEX pin=0|1 retries=N min=N]
+ *   KEYPIN set, then the new key PIN's line
+ *   KEYPIN change, then the key PIN's and the new one's lines
+ *   KEYRESET, then the password's line
+ *                                   REPLUG while the key is to be plugged in again,
+ *                                   TOUCH..., then OK removed=N or FAIL reason
  *   CANCEL
+ * (the keys' own requests, ws199-p001 section 4.4: KEYINFO and KEYPIN are
+ * not attempts of the account and touch no count; KEYRESET counts as a
+ * password attempt until passkey-fido2 says the password was right, which
+ * clears the counts as a password does, and its later failures are told
+ * at once.  ENROLL, REMOVE and the keys' requests are told passkey's own
+ * reason word; AUTH and UNLOCK the greeter's words.)
  * A request that comes while another is answered is ERROR busy.  The lines
  * after a request are always its secrets, never requests.  Every secret is
  * written to passkey's standard input and erased.
@@ -59,6 +71,9 @@ static const char *const auth_commands[SESSIOND_COMMAND_COUNT] = {
 	"ENROLLED",
 	"ENROLL",
 	"REMOVE",
+	"KEYINFO",
+	"KEYPIN",
+	"KEYRESET",
 };
 
 /* The words of the styles, by SESSIOND_STYLE_*. */
@@ -82,6 +97,8 @@ static void auth_finish(struct sessiond_exchange *exchange, int status);
 static void auth_listing(struct sessiond_exchange *exchange, int ok, const char *extra);
 static void auth_granted(struct sessiond_exchange *exchange, unsigned answer_uid, const char *extra);
 static void auth_refused(struct sessiond_exchange *exchange, const char *reason);
+static void auth_key_answer(struct sessiond_exchange *exchange, int ok, const char *reason, const char *extra);
+static int auth_status(struct sessiond_exchange *exchange, const char *line);
 static void auth_reply(struct sessiond_exchange *exchange, const char *line);
 static int auth_lookup(const char *name, uid_t *uid);
 static void auth_wipe(void *memory, size_t size);
@@ -312,6 +329,8 @@ auth_parse(
 	size_t length;
 	unsigned count;
 	int command;
+	int match;
+	int set;
 	int greeter_only;
 	int session_only;
 	int style;
@@ -365,9 +384,37 @@ auth_parse(
 		snprintf(exchange->name, sizeof(exchange->name), "%s", exchange->owner->passwd.pw_name);
 	}
 
-	/* STYLES and ENROLLED take nothing more. */
+	/* STYLES, ENROLLED and KEYINFO take nothing more. */
+	exchange->verified = 0;
 	if (command == SESSIOND_COMMAND_STYLES || command == SESSIOND_COMMAND_ENROLLED)
 		return 0;
+	if (command == SESSIOND_COMMAND_KEYINFO) {
+		exchange->style = SESSIOND_STYLE_FIDO2;
+		return 0;
+	}
+
+	/* KEYRESET takes the password's line. */
+	if (command == SESSIOND_COMMAND_KEYRESET) {
+		exchange->style = SESSIOND_STYLE_FIDO2;
+		exchange->lines_wanted = 1U;
+		return 0;
+	}
+
+	/* KEYPIN set takes the new key PIN's line, KEYPIN change the key PIN's and the new one's. */
+	if (command == SESSIOND_COMMAND_KEYPIN) {
+		if (count < 2U)
+			return -1;
+		exchange->style = SESSIOND_STYLE_FIDO2;
+		exchange->lines_wanted = 1U;
+		match = strcmp(word[1], "change");
+		if (match == 0)
+			exchange->lines_wanted = 2U;
+		set = strcmp(word[1], "set");
+		if (match != 0 && set != 0)
+			return -1;
+		snprintf(exchange->argument, sizeof(exchange->argument), "%s", word[1]);
+		return 0;
+	}
 
 	/* The others name a style, and AUTH and UNLOCK take its secret. */
 	if (count < 2U)
@@ -478,7 +525,8 @@ auth_begin(
 	 */
 	if (exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) {
 		sessiond_policy_attempt(exchange->count, exchange->style);
-	} else if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE) {
+	} else if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE ||
+		   exchange->command == SESSIOND_COMMAND_KEYRESET) {
 		sessiond_policy_attempt(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
 
@@ -493,10 +541,14 @@ auth_begin(
 		return;
 	}
 
-	/* passkey runs (a key's touch is waited for longer). */
+	/* passkey runs (a key's touch is waited for longer, a reset's plugging in again and touch longer still; what a key is, not). */
 	timeout = SESSIOND_PASSKEY_MS;
 	if (exchange->style == SESSIOND_STYLE_FIDO2)
 		timeout = SESSIOND_PASSKEY_KEY_MS;
+	if (exchange->command == SESSIOND_COMMAND_KEYINFO)
+		timeout = SESSIOND_PASSKEY_MS;
+	if (exchange->command == SESSIOND_COMMAND_KEYRESET)
+		timeout = SESSIOND_PASSKEY_RESET_MS;
 	error = auth_start(exchange, request, (size_t)length, timeout);
 	auth_wipe(request, sizeof(request));
 	if (error != 0) {
@@ -557,6 +609,21 @@ auth_request(
 		}
 
 		/* The removal's request is written. */
+		break;
+	case SESSIOND_COMMAND_KEYINFO:
+		length = snprintf(request, size, "key-info\n%s\n", exchange->name);
+		break;
+	case SESSIOND_COMMAND_KEYPIN:
+		if (exchange->lines_wanted == 2U) {
+			length = snprintf(request, size, "key-change-pin\n%s\n%s\n%s\n", exchange->name, exchange->lines[0], exchange->lines[1]);
+		} else {
+			length = snprintf(request, size, "key-set-pin\n%s\n%s\n", exchange->name, exchange->lines[0]);
+		}
+
+		/* The key PIN's request is written. */
+		break;
+	case SESSIOND_COMMAND_KEYRESET:
+		length = snprintf(request, size, "key-reset\n%s\n%s\n", exchange->name, exchange->lines[0]);
 		break;
 	case SESSIOND_COMMAND_COUNT:
 		break;
@@ -681,18 +748,17 @@ auth_read(
 		exchange->used += (size_t)count;
 		exchange->answer[exchange->used] = '\0';
 
-		/* Each whole line: a touch is told at once, anything else is the answer. */
+		/* Each whole line: a status is taken at once (auth_status), anything else is the answer. */
 		end = strchr(exchange->answer, '\n');
 		while (end != NULL) {
 			*end = '\0';
-			match = strcmp(exchange->answer, "status touch");
-			if (match != 0) {
+			match = auth_status(exchange, exchange->answer);
+			if (!match) {
 				exchange->done = 1;
 				break;
 			}
 
-			/* The touch is told, and its line goes. */
-			auth_reply(exchange, "TOUCH");
+			/* The status's line goes. */
 			consumed = (size_t)(end + 1 - exchange->answer);
 			memmove(exchange->answer, end + 1, exchange->used - consumed + 1U);
 			exchange->used -= consumed;
@@ -789,6 +855,19 @@ auth_finish(
 	/* STYLES and ENROLLED are told as they are. */
 	if (exchange->command == SESSIOND_COMMAND_STYLES || exchange->command == SESSIOND_COMMAND_ENROLLED) {
 		auth_listing(exchange, ok, extra);
+		return;
+	}
+
+	/* The keys' own requests touch no count, but a reset's wrong password (ws199-p001). */
+	if (exchange->command == SESSIOND_COMMAND_KEYINFO || exchange->command == SESSIOND_COMMAND_KEYPIN ||
+	    exchange->command == SESSIOND_COMMAND_KEYRESET) {
+		if (!ok && exchange->command == SESSIOND_COMMAND_KEYRESET && !exchange->verified) {
+			auth_refused(exchange, reason);
+			return;
+		}
+
+		/* Told as it is. */
+		auth_key_answer(exchange, ok, reason, extra);
 		return;
 	}
 
@@ -904,17 +983,29 @@ auth_refused(
 	const char *reason)
 {
 	const char *what;
+	const char *told;
 	unsigned delay;
+	int timeout;
 
-	/* What failed, for syslog. */
+	/* What failed, for syslog; the word told (the greeter's words for a login or an unlock, passkey's own for a change). */
+	told = reason;
+	if (exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK)
+		told = sessiond_policy_reason(reason);
 	what = "change";
 	if (exchange->command == SESSIOND_COMMAND_AUTH)
 		what = "login";
 	if (exchange->command == SESSIOND_COMMAND_UNLOCK)
 		what = "unlock";
 
-	/* The failure goes on record. */
+	/*
+	 * The failure goes on record.  One sessiond ended (CANCEL, the
+	 * deadline) without passkey's judgment is told at once: it says nothing
+	 * of the secret (R5).
+	 */
 	delay = sessiond_policy_delay(exchange->count);
+	timeout = strcmp(reason, "timeout") == 0 || strcmp(reason, "canceled") == 0;
+	if (exchange->term_ms != 0 && timeout)
+		delay = 0U;
 	syslog(LOG_WARNING, "failed %s %s on the graphical seat (%u in a row)", what, exchange->name, exchange->count->wrong);
 	sessiond_log(
 		"SESSIOND %s fail user=%s wrong=%u delay=%u style=%s reason=%s",
@@ -926,8 +1017,94 @@ auth_refused(
 		reason);
 
 	/* The answer waits out the delay (sessiond_exchange_tick sends it). */
-	snprintf(exchange->held, sizeof(exchange->held), "FAIL %s", sessiond_policy_reason(reason));
+	snprintf(exchange->held, sizeof(exchange->held), "FAIL %s", told);
 	exchange->reply_ms = sessiond_milliseconds() + (long long)delay * 1000LL;
+}
+
+/*
+ * Answers a key's own request (ws199-p001 section 4.4): KEYINFO's facts,
+ * OK for a PIN, OK removed=N for a reset; a failure at once with passkey's
+ * word, without a delay or a failed change on record (the key counts its
+ * own wrong PINs).
+ */
+static void
+auth_key_answer(
+	struct sessiond_exchange *exchange,
+	int ok,
+	const char *reason,
+	const char *extra)
+{
+	char reply[SESSIOND_LINE_MAX];
+	const char *word;
+
+	/* What it was. */
+	word = auth_commands[exchange->command];
+
+	/* A failure, told at once. */
+	if (!ok) {
+		sessiond_log("SESSIOND %s fail user=%s reason=%s", word, exchange->name, reason);
+		snprintf(reply, sizeof(reply), "FAIL %s", reason);
+		auth_reply(exchange, reply);
+		return;
+	}
+
+	/* KEYINFO: the key's facts. */
+	if (exchange->command == SESSIOND_COMMAND_KEYINFO) {
+		snprintf(reply, sizeof(reply), "KEYINFO %s", extra);
+		auth_reply(exchange, reply);
+		return;
+	}
+
+	/* A PIN set or changed, or a key reset, on record. */
+	syslog(LOG_NOTICE, "%s of %s", word, exchange->name);
+	sessiond_log("SESSIOND %s ok user=%s %s", word, exchange->name, extra);
+	snprintf(reply, sizeof(reply), "OK");
+	if (extra[0] != '\0')
+		snprintf(reply, sizeof(reply), "OK %s", extra);
+	auth_reply(exchange, reply);
+}
+
+/*
+ * Takes one of passkey's status lines: "status touch" is told as TOUCH,
+ * "status replug" as REPLUG, and "status verified" (a reset's password was
+ * right) clears the counts as a password does.  Returns 1 when the line
+ * was a status, 0 when it is the answer.
+ */
+static int
+auth_status(
+	struct sessiond_exchange *exchange,
+	const char *line)
+{
+	int match;
+
+	/* The touch. */
+	match = strcmp(line, "status touch");
+	if (match == 0) {
+		auth_reply(exchange, "TOUCH");
+		return 1;
+	}
+
+	/* The key to plug in again. */
+	match = strcmp(line, "status replug");
+	if (match == 0) {
+		auth_reply(exchange, "REPLUG");
+		return 1;
+	}
+
+	/* The reset's password was right: from here its failures are told at once. */
+	match = strcmp(line, "status verified");
+	if (match == 0) {
+		if (exchange->command == SESSIOND_COMMAND_KEYRESET && !exchange->verified) {
+			exchange->verified = 1;
+			sessiond_policy_success(exchange->count, SESSIOND_STYLE_PASSWORD);
+		}
+
+		/* Taken. */
+		return 1;
+	}
+
+	/* The answer. */
+	return 0;
 }
 
 /* Writes one line on the socket. */
