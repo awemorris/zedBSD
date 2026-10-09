@@ -233,7 +233,9 @@ btd_bmsg_number_ok(
 			continue;
 
 		/* A sign the network dials. */
-		if (letter == '+' || letter == '*' || letter == '#')
+		if (letter == '+' ||
+		    letter == '*' ||
+		    letter == '#')
 			continue;
 
 		/* Anything else is not a number. */

@@ -28,6 +28,9 @@
 #include <stdlib.h>
 #include <string.h>
 
+/* Marks a parameter a function takes for its signature's sake. */
+#define UNUSED_PARAMETER(parameter) ((void)(parameter))
+
 /* The fuzz's rounds. */
 #define TEST_FUZZ_ROUNDS	200000U
 
@@ -66,6 +69,9 @@ struct owner {
 	int done_error;
 	uint8_t done_code;
 	int target_answer;
+	unsigned response_count;
+	uint8_t response_code;
+	size_t response_length;
 	unsigned put_count;
 	size_t put_headers_length;
 	uint8_t put_headers[1024];
@@ -76,6 +82,7 @@ struct owner {
 static void check(int condition, const char *what);
 static int owner_write(void *context, const uint8_t *data, size_t length, size_t *written);
 static void owner_done(void *context, unsigned operation, int error, uint8_t code, const uint8_t *headers, size_t length);
+static void owner_response(void *context, unsigned operation, uint8_t code, const uint8_t *headers, size_t length);
 static int owner_body(void *context, const uint8_t *data, size_t length);
 static int owner_target(void *context, const uint8_t *target, size_t length);
 static uint8_t owner_put(void *context, const uint8_t *headers, size_t length, const uint8_t *body, size_t body_length);
@@ -293,10 +300,32 @@ owner_init(
 	events.context = owner;
 	events.write = owner_write;
 	events.done = owner_done;
+	events.response = owner_response;
 	events.body = owner_body;
 	events.target = owner_target;
 	events.put = owner_put;
 	btd_obex_init(ob, &events, role);
+}
+
+/* Counts each answer packet, keeping the last one's code and the length of its headers. */
+static void
+owner_response(
+	void *context,
+	unsigned operation,
+	uint8_t code,
+	const uint8_t *headers,
+	size_t length)
+{
+	struct owner *owner;
+
+	UNUSED_PARAMETER(operation);
+	UNUSED_PARAMETER(headers);
+
+	/* Succeeded: counted. */
+	owner = context;
+	owner->response_count++;
+	owner->response_code = code;
+	owner->response_length = length;
 }
 
 /* Writes a packet as the peer would: the code, the length of the whole, a prefix and headers. */
@@ -560,6 +589,20 @@ test_get(void)
 	check(owner.done_count == 1U && owner.done_error == 0 && owner.done_operation == BTD_OBEX_OP_GET, "get: done");
 	check(owner.body_length == 8U && memcmp(owner.body, "abcdexyz", 8U) == 0, "get: whole body");
 	check(ob.state == BTD_OBEX_CONNECTED, "get: connected again");
+	check(owner.response_count == 2U && owner.response_code == 0xa0U && owner.response_length == sizeof(body_two), "get: each answer packet to response");
+
+	/* A wait set longer: the answer's deadline follows, and its passing breaks the connection. */
+	btd_obex_set_timeout(&ob, 60000U);
+	(void)btd_obex_get(&ob, type, sizeof(type), 100U, 2500U);
+	check(btd_obex_deadline(&ob) == 62500U, "get: longer wait");
+	btd_obex_tick(&ob, 62499U);
+	check(ob.state == BTD_OBEX_BUSY, "get: still waiting");
+	btd_obex_tick(&ob, 62500U);
+	check(owner.done_count == 2U && owner.done_error == ETIMEDOUT && ob.state == BTD_OBEX_BROKEN, "get: longer wait passed");
+	client_connected(&owner, &ob, 1024U);
+
+	/* The count goes on as if the first Get were the only one before. */
+	owner.done_count = 1U;
 
 	/* Past the limit (4 bytes): Abort, then its answer ends the Get with EMSGSIZE. */
 	(void)btd_obex_get(&ob, type, sizeof(type), 4U, 3000U);

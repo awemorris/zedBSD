@@ -340,6 +340,20 @@ btd_obex_init(
 	ob->role = role;
 	ob->state = BTD_OBEX_IDLE;
 	ob->next_connection_id = 1U;
+	ob->timeout = BTD_OBEX_TIMEOUT_MS;
+}
+
+/*
+ * Sets how long a client waits for each answer from its next request on
+ * (MAP's Connect waits longer while the phone asks its user).
+ */
+void
+btd_obex_set_timeout(
+	struct btd_obex *ob,
+	uint64_t milliseconds)
+{
+	/* Succeeded: the next request's wait. */
+	ob->timeout = milliseconds;
 }
 
 /*
@@ -781,7 +795,7 @@ obex_send(
 
 	/* A client waits for the answer within its time. */
 	if (ob->role == BTD_OBEX_CLIENT)
-		ob->deadline = now + BTD_OBEX_TIMEOUT_MS;
+		ob->deadline = now + ob->timeout;
 
 	/* As much as the DLC takes now. */
 	btd_obex_pump(ob);
@@ -860,6 +874,10 @@ obex_client(
 		obex_end(ob, ob->abort_error, code, headers, headers_length);
 		return;
 	}
+
+	/* Each answer packet to the owner, with all its headers. */
+	if (ob->events.response != NULL)
+		ob->events.response(ob->events.context, ob->operation, code, headers, headers_length);
 
 	/* Each operation's answer. */
 	if (ob->operation == BTD_OBEX_OP_GET) {

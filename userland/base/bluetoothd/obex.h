@@ -127,7 +127,11 @@ struct btd_obex_writer {
  * bytes on the DLC and says how many went (fewer when credits ran out: the
  * owner calls btd_obex_pump when its DLC is writable again).  A client's
  * operation ends in done: 0 or an errno value, the response code (0 when
- * none came), and the final response's headers.  body gives a Get's body as
+ * none came), and the final response's headers.  response, when set, is
+ * given each answer packet of a Get, Put or SetPath with all its headers
+ * (Body ones too), before the operation goes on or ends (MAP section
+ * 6.3.2 puts a listing's ListingSize and MSETime in the first packet of a
+ * Get answered in several).  body gives a Get's body as
  * it comes and returns nonzero to stop (the Get is aborted).  A server asks
  * target whether a Connect's Target (NULL: none) is served (1), and put for
  * the response code of a whole Put (its first packet's headers, its body).
@@ -136,6 +140,7 @@ struct btd_obex_events {
 	void *context;
 	int (*write)(void *context, const uint8_t *data, size_t length, size_t *written);
 	void (*done)(void *context, unsigned operation, int error, uint8_t code, const uint8_t *headers, size_t length);
+	void (*response)(void *context, unsigned operation, uint8_t code, const uint8_t *headers, size_t length);
 	int (*body)(void *context, const uint8_t *data, size_t length);
 	int (*target)(void *context, const uint8_t *target, size_t length);
 	uint8_t (*put)(void *context, const uint8_t *headers, size_t length, const uint8_t *body, size_t body_length);
@@ -149,13 +154,15 @@ struct btd_obex_events {
  * went; a server's Put keeps its first packet's headers and its body.
  * abort_wanted is an Abort asked for (or forced by abort_error) to be sent
  * at the client's next turn, aborting says it was sent; server_put says a
- * Put's packets are being gathered.
+ * Put's packets are being gathered.  timeout is how long a client waits
+ * for each answer (BTD_OBEX_TIMEOUT_MS unless the owner set another).
  */
 struct btd_obex {
 	struct btd_obex_events events;
 	unsigned role;
 	unsigned state;
 	unsigned operation;
+	uint64_t timeout;
 	int abort_wanted;
 	int aborting;
 	int abort_error;
@@ -193,6 +200,7 @@ int btd_obex_header_next(const uint8_t *headers, size_t length, size_t *offset, 
 int btd_obex_find(const uint8_t *headers, size_t length, uint8_t id, struct btd_obex_header *header);
 
 void btd_obex_init(struct btd_obex *ob, const struct btd_obex_events *events, unsigned role);
+void btd_obex_set_timeout(struct btd_obex *ob, uint64_t milliseconds);
 int btd_obex_connect(struct btd_obex *ob, const uint8_t *target, size_t target_length, uint64_t now);
 int btd_obex_get(struct btd_obex *ob, const uint8_t *headers, size_t length, size_t body_limit, uint64_t now);
 int btd_obex_put(struct btd_obex *ob, const uint8_t *headers, size_t length, const uint8_t *body, size_t body_length, uint64_t now);

@@ -11,6 +11,8 @@
 
 #include "userland/base/bluetoothd/phoneio.h"
 
+#include "userland/base/bluetoothd/mapxml.h"
+
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
@@ -197,6 +199,79 @@ btd_phoneio_send_length(
 
 	/* Succeeded: the length of the text that follows. */
 	*length = number;
+	return 0;
+}
+
+/*
+ * Adds a value as a string in double quotes to a line at *used: the text
+ * cut to limit bytes without splitting a character, each '"' and '\\'
+ * escaped with a backslash, each byte below 0x20 and 0x7f as \xHH.
+ * Returns 0, or ENOSPC when the line has no room (the line is left as it
+ * was).
+ */
+int
+btd_phoneio_quote(
+	char *line,
+	size_t size,
+	size_t *used,
+	const char *text,
+	size_t limit)
+{
+	static const char digits[] = "0123456789abcdef";
+	size_t length;
+	size_t index;
+	size_t at;
+	unsigned char byte;
+
+	/* The text as far as it is kept. */
+	length = strlen(text);
+	length = btd_mapxml_utf8_cut(text, length, limit);
+
+	/* The opening quote. */
+	at = *used;
+	if (at + 1U >= size)
+		return ENOSPC;
+	line[at] = '"';
+	at++;
+
+	/* Each byte, escaped where it must be (room for four bytes, the quote and the NUL kept). */
+	for (index = 0U; index < length; index++) {
+		if (at + 6U >= size)
+			return ENOSPC;
+		byte = (unsigned char)text[index];
+
+		/* A quote or a backslash after a backslash. */
+		if (byte == '"' || byte == '\\') {
+			line[at] = '\\';
+			line[at + 1U] = (char)byte;
+			at += 2U;
+			continue;
+		}
+
+		/* A control byte as two hex digits. */
+		if (byte < 0x20U || byte == 0x7fU) {
+			line[at] = '\\';
+			line[at + 1U] = 'x';
+			line[at + 2U] = digits[byte >> 4];
+			line[at + 3U] = digits[byte & 0x0fU];
+			at += 4U;
+			continue;
+		}
+
+		/* Any other byte as it is. */
+		line[at] = (char)byte;
+		at++;
+	}
+
+	/* The closing quote. */
+	if (at + 1U >= size)
+		return ENOSPC;
+	line[at] = '"';
+	at++;
+
+	/* Succeeded: the line ends after it. */
+	line[at] = '\0';
+	*used = at;
 	return 0;
 }
 

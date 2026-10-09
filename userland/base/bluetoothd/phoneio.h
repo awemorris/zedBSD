@@ -38,6 +38,14 @@
 #define BTD_PHONEIO_LINE_MAX		512U
 
 /*
+ * The longest line the daemon writes (its newline included: the
+ * compositor reads lines into 2048 bytes), and the longest name or number
+ * a line carries before its escapes.
+ */
+#define BTD_PHONEIO_OUT_MAX		2047U
+#define BTD_PHONEIO_TEXT_MAX		128U
+
+/*
  * What a client's input gives the daemon: a request's line (nonzero
  * stops the reading: the client went), and a PHONE SEND's line with its
  * whole text.
@@ -65,6 +73,7 @@ struct btd_phoneio_input {
 
 int btd_phoneio_next(const char **cursor, char *key, size_t key_size, char *value, size_t value_size);
 int btd_phoneio_send_length(const char *line, size_t *length);
+int btd_phoneio_quote(char *line, size_t size, size_t *used, const char *text, size_t limit);
 void btd_phoneio_input_init(struct btd_phoneio_input *input);
 void btd_phoneio_input_room(struct btd_phoneio_input *input, uint8_t **room, size_t *size);
 int btd_phoneio_input_got(struct btd_phoneio_input *input, size_t count, const struct btd_phoneio_events *events);

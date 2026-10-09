@@ -15,7 +15,7 @@ status=0
 for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-phonerec-host-test userland/base/bluetoothd/phonerec.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/hci.c" \
 	"bt-outq-host-test userland/base/bluetoothd/outq.c" \
-	"bt-phoneio-host-test userland/base/bluetoothd/phoneio.c" \
+	"bt-phoneio-host-test userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/mapxml.c" \
 	"bt-mapxml-host-test userland/base/bluetoothd/mapxml.c" \
 	"bt-bmsg-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mapxml.c" \
 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \

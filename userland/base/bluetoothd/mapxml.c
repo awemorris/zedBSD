@@ -1250,7 +1250,9 @@ mapxml_value(
 		}
 
 		/* A tab, carriage return or line feed is a space in a value. */
-		if (byte == '\t' || byte == '\r' || byte == '\n')
+		if (byte == '\t' ||
+		    byte == '\r' ||
+		    byte == '\n')
 			byte = ' ';
 
 		/* A byte as it is. */
