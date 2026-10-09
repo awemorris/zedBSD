@@ -486,6 +486,8 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS190](ws190/ws.md) | MG006 | 文字の欄と Text Editor の指での選択（ダブルタップ・端の drag・コピー・切り取り・貼り付け・すべて選択の popup）（2026-10-08 ユーザー、WS189 の後） | planned | p001 設計 |
 | [WS191](ws191/ws.md) | MG006 | 再生の音を libkeiland の audio stream の口へ（compositor・backend、zedBSD audiod・Linux PipeWire・FreeBSD OSS）（2026-10-08 ユーザー） | planning | p001 設計 |
 | [WS192](ws192/ws.md) | MG006 | 右上の状態の島を tap で開く glass の操作パネル（WiFi・音量・IME などを大きく、タブレット向け）（2026-10-09 ユーザー、ベータ2） | planned | p001 設計と実装 |
+| [WS193](ws193/ws.md) | MG006 | make menuconfig のメニュー階層の作り直しと Build boot image（進捗の bar、-j$(nproc)）（2026-10-09 ユーザー、ベータ2） | planned | p001 実装 |
+| [WS194](ws194/ws.md) | MG006 | make keiland-linux（apt・yum・pacman）・keiland-freebsd（pkg）の必要な package の確認と導入、build 後の install の確認（2026-10-09 ユーザー、ベータ2） | planned | p001 実装 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -521,6 +523,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー: make menuconfig のメニュー階層の変更（toplevel: CPU / Board・Boot Option・Development・Base・Desktop・Packages・Build boot image・Exit、原文は [WS193](ws193/ws.md)）、Build boot image は進捗の bar と対象の名前、「このメニューに限り、nprocの数だけ-jしてOKです」。make keiland-freebsd・keiland-linux は必要な package を確かめてから導入、build 成功後に install を確かめて実行、「テストはaptだけでいいです」→ [WS194](ws194/ws.md)。時期はクリック「両方ベータ2」。q918・q919 P1（WS192 の後、ws001-p045 より先）。
 - 2026-10-09 ユーザー（クリック）: WS192 の島の press は「全部パネルに統一（P1 の案）」→ mouse・touch とも島の press はパネル。個別の popup はパネルの行の「›」から。mouse の近道（network の Alt+click、音量の wheel）は残す。
 - 2026-10-09 ユーザー:「右上の通知アイコン領域は、タブレットでは個別のアイコンのタッチが難しかったです。…通知アイコンの島をクリックやタッチすると、ポップアップが画面右上に表示されて、そこに大きめのメニューで、WiFiボタン、音量スライダー、IMEアイコン、などを表示して、操作可能にしたいです。ポップアップはglassエフェクトがいいです。」、時期はクリック「ベータ2（RC 10/13 まで）」→ [WS192](ws192/ws.md)、q917 P1（UAT の debug の次、ws001-p045 より先）。
 - 2026-10-09 ユーザー:「WS141を別なセッションで実行します。ws141/ws.mdはそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」→ WS141 は別 session が実行。plan/ws141/（ws.md と Phase）はその session だけが書き、Q1・P1 は書かない。master.md・queue.md などの共有の記録は Q1 だけが書く。届いた patch は Q1 が main に適用する（commit は WIP）。QEMU は host で同時に 1 つの規則があるので、T1 と時間が重ならないよう Q1 が調整する。
