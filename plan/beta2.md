@@ -33,7 +33,7 @@
 | BUG-253（蓋） | ✔ close | — |
 | Settings の Bluetooth と HID | ✔ 2026-10-10 keyboard・mouse の接続と利用を確認（BUG-275 close、WS143 p008 cleared） | — |
 | Terminal の選んだ文字のドラッグ | ✔ 2026-10-10 直った（BUG-276 close） | — |
-| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) **直っていない**（2026-10-10 ユーザー）。SSH: ue0 は RUNNING・2500Mbps・`static online`。static の設定の interface を backend か Settings が No cable と読む見込み → P1（BUG-283 の次） |
+| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) ✔ ue0 は Connected（BUG-277 close）。No cable は wlan0 の card が Ethernet の頁に出ていた → [BUG-284](bugs/BUG-284.md) P1 |
 | Settings の YubiKey | ✔ 2026-10-10 FIDO2 の鍵の登録と login（BUG-279 close）。要望: 独立の頁とウィザード → WS199、Users の頁のパスワード変更と認証方式 → WS200（ベータ2）、ロック画面の button の高さ → BUG-283 | — |
 | (旧) Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
