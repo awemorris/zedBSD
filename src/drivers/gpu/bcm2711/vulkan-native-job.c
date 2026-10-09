@@ -12,6 +12,7 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/vulkan-native-job.h"
 #include "drivers/gpu/bcm2711/vulkan-barrier.h"
+#include "drivers/gpu/bcm2711/vulkan-native-image.h"
 
 /* All concurrently resident native pass/draw uploads share this submission-wide padded budget. */
 #define NATIVE_JOB_BYTES (256ULL * 1024U * 1024U)
@@ -42,10 +43,15 @@ bcm2711_vulkan_native_job_create(
 	*job = NULL;
 
 	/* A typed primary requires an exact renderer-owned non-closing Vulkan session. */
-	if (command == NULL || command->session == NULL || command->kind != I915_VK_OBJ_COMMAND_BUFFER)
+	if (command == NULL ||
+	    command->session == NULL ||
+	    command->kind != I915_VK_OBJ_COMMAND_BUFFER)
 		return EINVAL;
 	session = command->session->render;
-	if (session == NULL || session->device == NULL || session->vulkan != command->session || command->session->closing)
+	if (session == NULL ||
+	    session->device == NULL ||
+	    session->vulkan != command->session ||
+	    command->session->closing)
 		return EINVAL;
 
 	/* The CPU payload root exists before the primary graph acquires its pending counts and cloned descriptor holds. */
@@ -87,6 +93,7 @@ bcm2711_vulkan_native_job_execute(
 	struct bcm2711_v3d_job_result completion;
 	uint64_t remaining;
 	uint64_t bytes;
+	uint32_t region;
 	int error;
 
 	/* Initial refusals launch no work and therefore retain no device borrow. */
@@ -96,7 +103,13 @@ bcm2711_vulkan_native_job_execute(
 	job = payload;
 
 	/* The accepted payload must belong to the same exact renderer namespace and native controller. */
-	if (controller == NULL || session == NULL || job == NULL || job->prepared == NULL || job->session != session || session->device != controller || controller->space.native == NULL)
+	if (controller == NULL ||
+	    session == NULL ||
+	    job == NULL ||
+	    job->prepared == NULL ||
+	    job->session != session ||
+	    session->device != controller ||
+	    controller->space.native == NULL)
 		return EINVAL;
 
 	/* A completed or uncertain payload never replays coherent source reads, clear or native work. */
@@ -114,6 +127,7 @@ bcm2711_vulkan_native_job_execute(
 	/* One finite resident upload budget covers every pass and its complete independent draw input prefix. */
 	job->executed = true;
 	remaining = NATIVE_JOB_BYTES;
+	region = 0;
 	event = job->prepared->first;
 	while (event != NULL) {
 		/* Every earlier native pass completed before this explicit dependency can publish FIFO-visible layout state. */
@@ -125,12 +139,20 @@ bcm2711_vulkan_native_job_execute(
 			continue;
 		}
 
-		/* Both graphics and full-image clear meta passes use the same independent native owner and checked retirement path. */
+		/* Graphics, full-image clears and each copied image region use the same independent native owner and checked retirement path. */
 		if (event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS) {
 			error = bcm2711_vulkan_native_pass_create(&controller->space, event, &remaining, &job->pass, &next);
 		} else if (event->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 			error = bcm2711_vulkan_native_clear_create(&controller->space, event, &remaining, &job->pass);
 			next = event->next;
+		} else if (event->opcode == GPU_OP_CMD_COPY_IMAGE || event->opcode == GPU_OP_CMD_BLIT_IMAGE) {
+			error = bcm2711_vulkan_native_image_create(&controller->space, (const struct bcm2711_vulkan_transfer *)event->record, region, &remaining, &job->pass);
+			region++;
+			next = event;
+			if (region == event->record->count) {
+				next = event->next;
+				region = 0;
+			}
 		} else {
 			return ENOTSUP;
 		}
@@ -177,7 +199,10 @@ bcm2711_vulkan_native_job_dispose(
 
 	/* Only one exact renderer/controller can consume or persist this prepared root. */
 	job = payload;
-	if (controller == NULL || job == NULL || job->session == NULL || job->session->device != controller)
+	if (controller == NULL ||
+	    job == NULL ||
+	    job->session == NULL ||
+	    job->session->device != controller)
 		return EINVAL;
 
 	/* Uncertain native DMA transfers the existing whole root without a fallible allocation or loss of its pending owner graph. */

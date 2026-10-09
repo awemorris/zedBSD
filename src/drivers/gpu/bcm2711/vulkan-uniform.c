@@ -46,7 +46,9 @@ bcm2711_vulkan_uniform_create(
 	*words = NULL;
 
 	/* Only a real prepared draw can supply immutable pipeline and stage-specific copied state. */
-	if (draw == NULL || draw->opcode != GPU_OP_CMD_DRAW || draw->pipeline == NULL)
+	if (draw == NULL ||
+	    draw->opcode != GPU_OP_CMD_DRAW ||
+	    draw->pipeline == NULL)
 		return EINVAL;
 
 	/* Native coordinates, render vertices and fragments occupy exactly three compiled slots. */
@@ -183,13 +185,26 @@ prepare_word(
 		break;
 	case BCM2711_SHADER_TEXTURE:
 	case BCM2711_SHADER_SAMPLER:
-		error = resolve_descriptor(draw, uniform, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &descriptor, &slot);
-		if (error != 0)
-			return error;
+		/* Internal texture shaders use exactly one staged binding and require no fabricated user layout or descriptor. */
+		if (draw->meta != NULL) {
+			if (uniform->set != 0 ||
+			    uniform->binding != 0 ||
+			    bindings == NULL)
+				return EINVAL;
+			slot = 0;
+		} else {
+			error = resolve_descriptor(draw, uniform, VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER, &descriptor, &slot);
+			if (error != 0)
+				return error;
 
-		/* Both retained components are required before borrowed native record addresses can describe this binding. */
-		if (descriptor->view == NULL || descriptor->sampler == NULL || bindings == NULL)
-			return EINVAL;
+			/* Both retained components precede any ordinary numerical binding selection. */
+			if (descriptor->view == NULL ||
+			    descriptor->sampler == NULL ||
+			    bindings == NULL)
+				return EINVAL;
+		}
+
+		/* Select the independently uploaded numerical record after either complete interface validation. */
 		address = bindings[uniform->set][slot].texture;
 		if (uniform->kind == BCM2711_SHADER_SAMPLER)
 			address = bindings[uniform->set][slot].sampler;

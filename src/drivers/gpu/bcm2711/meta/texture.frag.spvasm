@@ -1,0 +1,33 @@
+; zedBSD
+; Copyright (C) 2026 Awe Morris
+; SPDX-License-Identifier: Zlib
+; Internal transfers sample one independently staged texture and write one unblended colour target.
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint Fragment %main "main" %uv %colour
+OpExecutionMode %main OriginUpperLeft
+OpDecorate %uv Location 0
+OpDecorate %colour Location 0
+OpDecorate %source DescriptorSet 0
+OpDecorate %source Binding 0
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%vec2 = OpTypeVector %float 2
+%vec4 = OpTypeVector %float 4
+%image = OpTypeImage %float 2D 0 0 0 1 Unknown
+%sampled = OpTypeSampledImage %image
+%in2 = OpTypePointer Input %vec2
+%out4 = OpTypePointer Output %vec4
+%resource = OpTypePointer UniformConstant %sampled
+%uv = OpVariable %in2 Input
+%colour = OpVariable %out4 Output
+%source = OpVariable %resource UniformConstant
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%texture = OpLoad %sampled %source
+%coordinate = OpLoad %vec2 %uv
+%value = OpImageSampleImplicitLod %vec4 %texture %coordinate
+OpStore %colour %value
+OpReturn
+OpFunctionEnd

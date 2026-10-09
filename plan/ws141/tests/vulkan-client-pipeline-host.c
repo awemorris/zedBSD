@@ -135,6 +135,52 @@ ws141_client_encode_recording(
 }
 
 /*
+ * Copies one real public core image-copy or image-blit command with application-owned endpoint arrays.
+ */
+void
+ws141_client_encode_transfer(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t source_id,
+	uint64_t destination_id,
+	VkImageLayout source_layout,
+	VkImageLayout destination_layout,
+	const VkImageCopy *copies,
+	const VkImageBlit *blits,
+	uint32_t count,
+	VkFilter filter)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object images[2];
+
+	/* The actual client wrapper owns its complete copied recording independently of these finite host handles. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(images, 0, sizeof(images));
+	images[0].wire_id = source_id;
+	images[1].wire_id = destination_id;
+
+	/* Selected public operations supply exact actual wire field order, including blit's trailing filter. */
+	if (blits != NULL)
+		vkCmdBlitImage(&command, (VkImage)(uintptr_t)&images[0], source_layout, (VkImage)(uintptr_t)&images[1], destination_layout, count, blits, filter);
+	else
+		vkCmdCopyImage(&command, (VkImage)(uintptr_t)&images[0], source_layout, (VkImage)(uintptr_t)&images[1], destination_layout, count, copies);
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: no application region array or opaque image handle survives the actual recorded bytes. */
+	return;
+}
+
+/*
  * Appends one real public image-clear record with copied raw colour and subresource selections.
  */
 void

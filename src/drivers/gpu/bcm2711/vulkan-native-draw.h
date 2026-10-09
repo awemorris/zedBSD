@@ -33,6 +33,22 @@ struct bcm2711_vulkan_native_draw {
 	uint8_t bin[BCM2711_NATIVE_BIN_BYTES];
 };
 
+/* One unpublished internal texture quad borrows an actual retained source and owns copied geometry/programs until native upload finishes. */
+struct bcm2711_vulkan_meta_draw {
+	struct bcm2711_vulkan_pipeline pipeline;
+	struct bcm2711_vulkan_resource *image;
+	uint32_t vertices[36];
+	uint32_t viewport[6];
+	uint32_t width;
+	uint32_t height;
+	VkRect2D area;
+	VkFilter filter;
+	/* Copy preserves raw channel bytes; blit instead uses the source's canonical colour interpretation. */
+	bool raw;
+};
+
+int bcm2711_vulkan_native_meta_draw_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_meta_draw *meta, uint64_t *available, struct bcm2711_vulkan_native_draw **draw);
+
 /* The controller mutex and earlier queue completion/CPU visibility are prerequisites; available counts the enclosing job's remaining padded native budget. */
 int bcm2711_vulkan_native_draw_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *event, uint64_t *available, struct bcm2711_vulkan_native_draw **draw);
 

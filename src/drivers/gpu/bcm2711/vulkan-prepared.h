@@ -11,6 +11,8 @@
 
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
 
+struct bcm2711_vulkan_meta_draw;
+
 /* One native preparation point owns only consumed descriptor copies; other immutable inputs belong to the retained pending primary. */
 struct bcm2711_vulkan_prepared_event {
 	struct bcm2711_vulkan_prepared_event *next;
@@ -26,6 +28,12 @@ struct bcm2711_vulkan_prepared_event {
 	uint32_t push[2][BCM2711_VULKAN_PUSH_WORDS];
 	uint32_t viewport[6];
 	VkRect2D scissor;
+	/* Drawable and render bounds are copied scalars; internal transfers need no fabricated public framebuffer. */
+	uint32_t width;
+	uint32_t height;
+	VkRect2D area;
+	/* Only the private meta builder supplies this temporary description; native upload retains no pointer to it. */
+	const struct bcm2711_vulkan_meta_draw *meta;
 	uint32_t draw[4];
 };
 
