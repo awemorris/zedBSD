@@ -73,8 +73,16 @@ echo "interface: ${name:-none}"
 [ -n "$name" ] && pass plugged-interface || fail plugged-interface
 [ $got -eq 0 ] && pass plugged-dhcp-address || fail plugged-dhcp-address
 if [ -n "$name" ]; then
-	guest "ifconfig $name" > "$out/plug1-counters.txt"
-	rx=$(sed -n 's/.*RX packets \([0-9]*\).*/\1/p' "$out/plug1-counters.txt" | head -1)
+	# The counters; an SSH call that gave nothing back (T1-515: one hung for its 60 s right after the DHCP, the next
+	# ones answered) is tried again, and told apart from a count of 0 in the output.
+	try=0
+	rx=
+	while [ $try -lt 3 ] && [ -z "$rx" ]; do
+		guest "ifconfig $name" > "$out/plug1-counters$try.txt"
+		rx=$(sed -n 's/.*RX packets \([0-9]*\).*/\1/p' "$out/plug1-counters$try.txt" | head -1)
+		try=$((try + 1))
+	done
+	[ $try -gt 1 ] && echo "counters: $((try - 1)) SSH calls gave nothing back before this one (a stall of the guest's SSH)"
 	echo "RX packets: ${rx:-?}"
 	[ "${rx:-0}" -gt 0 ] 2>/dev/null && pass plugged-rx || fail plugged-rx
 	# A failed address: what a manual DHCP gets, for the analysis (not judged).

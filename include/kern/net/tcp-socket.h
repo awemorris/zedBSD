@@ -40,9 +40,20 @@ enum tcp_state {
 
 /*
  * How many segments that came ahead of a gap a connection keeps until the
- * gap is filled (BUG-222).
+ * gap is filled (BUG-222).  On the 64-bit machines it is the whole receive
+ * window (44 segments, tcp.c's TCP_RECEIVE_PACKETS): a segment dropped for
+ * want of room is one the sender (without SACK) resends a round trip
+ * after the one before it, and with the window queued in the USB adapter a
+ * round trip is tens of milliseconds (T1-516: a 2 % loss fell to a tenth
+ * of the speed).  The window counts only the receive queue's free slots,
+ * so the queue and the segments kept ahead stay within about one window
+ * of packets together.  The 32-bit boards keep a few (tcp.c).
  */
+#if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64)
+#define TCP_REORDER_MAX 44U
+#else
 #define TCP_REORDER_MAX 16U
+#endif
 
 struct tcp_pending {
 	struct packet_buf *packet;
