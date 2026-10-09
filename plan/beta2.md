@@ -13,7 +13,7 @@
 | 10/10〜10/12 | 走っている Bug の直しと試験を終える → WS199（セキュリティキー）→ WS200 |
 | **10/13** | 機能の凍結の目標。ベータなので UAT の Bug は直し切れなくてよく、code freeze はぎりぎりまで行わないこともある |
 | 10/14〜10/15 | 最終回帰（QEMU）と 5330 の UAT、出た Bug を「直す／既知の問題に書く」で仕分け |
-| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。Vulkan Video は T1-435 が PASS なら ON、でなければ OFF。公開の手順の確認（公開はユーザーの指示で） |
+| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。Vulkan Video は release では OFF（2026-10-10 ユーザー）。公開の手順の確認（公開はユーザーの指示で） |
 
 ## 今の状況
 
@@ -31,7 +31,7 @@
 | [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p004 を merge（host 試験・Linux の build まで）。T1-523（2026-10-10）: security-keys・passkey-p002・wheel-card・FreeBSD の build PASS。FAIL: key-keypad の 6（login の log に key owner の行が無い）、fido2-p003 の step 3（鍵が無い時に NFC の待ちで reason=timeout になり no-key にならない）→ P1 が直す。p005 は 5330 の UAT（U1〜U13 は ws.md） | 0.5 | P1・T1 |
 | [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared、p003 MAP は i01〜i07 実装（i06 まで main に merge、i07 は T1-527）、p004 の SMS の interface の設計は cleared（判断 P1〜P8 は推しどおり）。次 p004a〜c（SMS を Phone の app で）→ p005 PBAP → p006・p007 HFP → p008 実機 | 約 75 | P1 |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | 実装を merge（88d068d78）。T1-523: Change Password は手で正解（試験の helper が旧い form）、Sign-in Methods の手順 8 FAIL（password を外しても lock に Password の pill が残る、styles=7）→ P1 が直す。POSIX（p045）は PASS。Sign-in Methods は Users の頁の card の switch（押すと password の popup） | 0.5 | T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | 2026-10-10 5330 の実機で p005（bring-up・I frame）・p006b（P・B frame）が全部一致、hang なし。残り: release の config で ON にするかの判断、性能（p008、`--time`）、hang からの回復（p007、hang の kernel が要る） | 1 | ユーザー・T1 |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | 2026-10-10 5330 の実機で p005（bring-up・I frame）・p006b（P・B frame）が全部一致、hang なし。release の config は OFF のまま（ユーザー）。残り: 性能（p008、`--time`、T1-435 の E）、hang からの回復（p007、hang の kernel が要る、ベータ3） | 0.5 | T1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
