@@ -490,6 +490,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS194](ws194/ws.md) | MG006 | make keiland-linux（apt・yum・pacman）・keiland-freebsd（pkg）の必要な package の確認と導入、build 後の install の確認（2026-10-09 ユーザー、ベータ2） | planned | p001 実装 |
 | [WS195](ws195/ws.md) | MG006 | zedBSD でも userland/desktop を /opt/keiland/ に、account-admin を base から Keiland へ（2026-10-09 ユーザー、ベータ3） | planning | p001 設計 |
 | [WS196](ws196/ws.md) | MG002 | useradd・usermod・userdel（2026-10-09 ユーザーの問い、ベータ3 以降の提案） | planning | p001 範囲 |
+| [WS197](ws197/ws.md) | MG006 | Bluetooth のスマホ連携: MAP（SMS）・Integration（WS170）・PBAP・HFP（通話、SCO）、約 121 LW（2026-10-09 ユーザー、beta2.md の必須の後） | planning | p001 設計 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -525,6 +526,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「Bluetoothは、SMSのMAP, CallsのHFP, PBAP, を実装したいですが…今はANCSは実装しなくていいですが、見積もりだけでも。」「OBEX, MAP, Integration, PBAP, HFPの順で実装しますか。beta2.mdの必須が終わってからです。」→ [WS197](ws197/ws.md)（約 121 LW、OBEX の下の RFCOMM を p002 に含める）。Q1: 着手は beta2.md の必須の後、code は 10/17 まで保留の branch（release の bluetoothd を RC の後に変えないため）。
 - 2026-10-09 ユーザー（クリック）: WS195 の D1〜D7・WS196 の E1〜E6 は「全部推しどおり」。Q1: Noct v2.0.3 の取り込みで、この checkout の target の source tree が「同じ commit の時だけ置き換える」規則で止まったので、userland/base/noct/Makefile の置き換えの条件を「別の release か別の patch」に広げた（toolchain の build の規則、ユーザーの取り込みの指示の範囲）。共有の build/NoctLang は 2.0.3 に入れ替え済み（旧は build/NoctLang.old-2.0.1、T1 の build の確認の後に消す）。host・target とも build rc 0、interpreter.c の -Wreturn-type は消えた。
 - 2026-10-09 ユーザー:「指摘のあったNoctのmissing-returnのバグは、上流でv2.0.3にアップデートして修正済みです。取り込んでいただければと思います。」→ Q1（toolchain の変更はユーザーの指示）: userland/base/noct/version.mk を v2.0.3（f6efa83a8、前の snapshot fcf5759 からの差は interpreter.c の missing-return の直しだけ）に。共有の build/NoctLang は T1 の build の合間に Q1 が入れ替える。2.0.1 を決め打ちした plan/ws035/tests/baseline-toolchain.sh（完了した WS の試験、参照なし）は試験の整理の基準で削除。
 - 2026-10-09 ユーザー:「WS143, WS083を必須項目に移して、beta2.mdを更新してください。BUG-184は確認できたのでCloseです。」→ beta2.md の必須に移し（計 39.5 LW）、BUG-184 を resolved。
