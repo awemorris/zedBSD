@@ -4,13 +4,13 @@
 
 Phase ID: `ws199-p001`
 Parent: [WS199](../ws.md)
-Status: planning（2026-10-10 P1: 第 2 版。ユーザーの仕様の変更と決定（ws.md「仕様の変更」）に合わせて第 1 版（5903f7548）を書き直した。design-reviewer の前。code は書かない。実装は走っている Bug・T1 の試験の後（ユーザー））
+Status: planning（2026-10-10 P1: 第 3 版。[review-1.md](review-1.md)（blocker 2・major 12・minor 15）に答えた（末尾の §9）。ユーザーの判断 J1〜J6 を Q1 経由で尋ね中。code は書かない）
 Phase disposition: normal
 Queue: q921（P1、2026-10-10）
 依存: ws172-p002・p003（PIN と鍵の今の経路）、docs/architecture/security.md「Login authentication」、ws187（lock の画面）
 所有 path: `userland/desktop/settings/`、`userland/desktop/libkeiland/system/`、`userland/desktop/include/keiland/keiland.h`、`userland/desktop/wayland/`（greeter.c・system.c）、`userland/desktop/libkeiland-backend*/`、`userland/desktop/sessiond/`、`userland/base/passkey/`、`userland/base/passkey-fido2/`、`userland/base/libpasskey/`、`docs/architecture/security.md`、`plan/ws199/`
 
-版: 2026-10-10 第 1 版（P1、5903f7548: 頁とウィザードだけ）→ 第 2 版（ログインの鍵のモード、PIN 不要・タッチ不要、Software Security Key、user の自動の選択）。
+版: 2026-10-10 第 1 版（P1、5903f7548: 頁とウィザードだけ）→ 第 2 版（63db6b7bc、ログインの鍵のモード、PIN 不要・タッチ不要、Software Security Key、user の自動の選択）→ 第 3 版（review-1 の直しを §9 に。§2〜§8 の本文で §9 と食い違う所は §9 が優先）。
 
 ## 0. ユーザーの決定（ws.md、2026-10-10）
 
@@ -165,7 +165,60 @@ Queue: q921（P1、2026-10-10）
 | QEMU の CTAP2 の模擬 | 無い見込み。画面の確かめは偽の鍵の台本で |
 | 見積もり | i01 3、i02 5、i03 4、i04 5、i05 2、計 **約 19 LW** |
 
+## 9. 第 3 版: review-1 への答え（§2〜§8 より優先）
+
+### 9.1 ユーザーの判断（Q1 経由で尋ね中、推しは太字）
+
+| # | 判断 | 推し |
+| --- | --- | --- |
+| J1（B2） | タッチ不要の自動の login: greeter が出るたびに挿しっぱなしの鍵で自動で送ると、Log Out・別の user・Restart/Shut Down が使えず、起動で落ちる session は繰り返す | **自動で送るのは greeter が出た後に挿した（挿し直した）鍵だけ。挿しっぱなしの鍵は鍵のモードの画面を出し「Sign in」を 1 押し** |
+| J2（B1） | lock の「lock の後に挿した鍵」 | **§9.4 の作りで作る**（compositor が lock を sessiond に知らせ、FIDO の hidraw の追加の事象で判定、復帰の直後は数えない、その node だけに up=false）。無理なら lock ではタッチ不要を使わない |
+| J3（m3） | PIN の keyboard | **greeter が欄のすぐ下に描く小さな keypad**（今の画面の keyboard は端の panel で greeter・lock では閉じる作り）。非 ASCII の PIN は物の keyboard だけ |
+| J4（M9） | WS200 の Sign-in Methods との重なり | **/etc/passkey の 1 行の options（methods と鍵の pin・touch）にまとめ、両方の頁が同じ設定を読む。popup の部品は WS199 i01 で作り WS200 が使う** |
+| J5（m5・m6） | 第 1 版の D1〜D4、頁の一覧は自分の鍵だけ | **推しどおり**、一覧は session の user の鍵だけ |
+| J6 | ベータ2 の範囲（10/13 の凍結） | **i01・i02 まで**（頁、Software Security Key、Add・Change PIN・Reset のウィザード、鍵の情報）。i03・i04（PIN 不要・タッチ不要、鍵の自動のモード、user の自動の選択）は 5330 の YubiKey で up=false・UV 無し・復帰の再列挙を先に確かめ、ベータ3 か凍結の後 |
+
+### 9.2 範囲と Phase の分け方（m14）
+
+- NFC（reader に当てる鍵）は鍵のモード・ウィザードの範囲の外（M4: passkey-fido2 は hidraw だけを開き、kernel は card を当てた事象を出さない）。画面の言葉から NFC を消す。
+- Phase の分け方を Q1 に頼む: p001 設計（この文書）、p002 = i01、p003 = i02、p004 = i03・i04（J6 の答えで時期）、p005 規約の全文の見直し、p006 T1 と 5330 の UAT。
+- 依存（m15）: i04 は ws172-p002（PIN の login、T1 待ち）・ws172-p007（greeter の方式の選択、test-wait）・ws187-p003 が cleared になってから。ws172 の ws.md の表の p003 の食い違いは Q1 へ。
+- security.md（と keiland.md・security-keys.md）は各 i の code の前に書く（M11）。
+
+### 9.3 i01・i02 の直し（ベータ2 の範囲）
+
+- **鍵の情報の問い（M3）**: 1 秒ごとの poll をやめる。popup が開いた時に 1 回 `KEYINFO`、その後は compositor が FIDO の hidraw（`/dev/system` の INPUT、detail の `usage=f1d0:0001`、backend の events-zedbsd.c が既に INPUT を購読している）の ADD・REMOVE を見て `KL_SYSTEM_CHANGED_KEYS`（新）を Settings に出し、Settings はその時だけ `KEYINFO` を問う。lock の間（session の socket を UNLOCK が使う）は問わない。
+- **失敗の語（M5）**: helper の CTAP の status を語に分ける: 0x31 → `bad-key-pin`（鍵の PIN の誤り、password の `bad-secret` と別）、0x32 → `key-locked`（Reset だけが戻す）、0x34 → `key-replug`（抜いて挿し直せば戻る。Reset に導かない）、0x35 → `no-pin`、0x36 → `pin-required`、0x37 → `pin-policy`（その鍵の PIN の規則に合わない）、0x30 → `not-allowed`。sessiond の語の表（`auth-policy.c`）に足し、Settings の request にはそのまま返す（greeter の AUTH は今の語のまま: 鍵の PIN の誤りは今どおり `bad-secret` と見せる）。ウィザードは `bad-secret` で Password の step、`bad-key-pin` で PIN の step へ戻る。
+- **新しい操作の表（M6）**:
+
+| request（Settings の session だけ） | passkey の操作 | 秘密 | 数え | 時間 |
+| --- | --- | --- | --- | --- |
+| `KEYINFO` | `key-info` | 無し | 数えない | 5 s |
+| `KEYPIN set` | `key-set-pin` | 鍵の新しい PIN | 数えない（鍵が数える） | 10 s |
+| `KEYPIN change` | `key-change-pin` | 鍵の今の PIN、新しい PIN | 数えない（鍵が数える） | 10 s |
+| `KEYRESET` | `key-reset` | account の password | password の試みとして数える | 60 s（replug 30 s、touch 30 s） |
+
+  greeter からは送れない（今の ENROLL と同じ規則）。どれも一度に 1 つ（今の socket の規則）。
+- **Reset を 1 回の実行に（M7）**: ウィザードは Warning → Password → `KEYRESET` を送る。passkey が password を確かめ（誤りは今の遅れの後に `bad-secret`）、passkey-fido2 が挿さった鍵 1 本に account の credential の有無を silent に問い（持っていた credential の ID を覚える）、`status replug` を出して鍵が抜けて挿し直されるのを 30 s まで待ち（`pk_os_list` を 100 ms ごと）、現れたらすぐ authenticatorReset を送り（10 秒の窓の中）、`status touch`、成功で覚えた credential の行を /etc/passkey から消して ok。`status replug` は sessiond → backend → compositor → libkeiland で `KL_SYSTEM_CHANGED_REPLUG`（新）として Settings に届き、画面は「Unplug the key, then plug it back in.」。
+- **取り消し（m2）**: `kl_system_account_key_cancel`（今の `kl_backend_session_cancel` → sessiond の CANCEL）。i01 の Add は今の API のままで Cancel を出さない（touch の待ちの 30 s で終わる）。i02 で Touch と Replug の step に Cancel。`KL_SYSTEM_HAS_KEY_OPS`（新）で古い compositor は i02 の button を出さない。
+- **PIN の長さ（m4）**: 鍵の PIN は鍵の minPINLength（`KEYINFO` の `min=`、無ければ 4）以上の code point、63 byte 以下（UTF-8）。Software Security Key は今の 6 桁。
+- **options の読み出し（M12）**: i02 では options を作らない（i03）。i03 で作る時は: `enrolled` の答えに `options=` を足して読む、最後の鍵を消したら options の行も消す、重複・不正な行は一番強い設定（PIN とタッチ）として読む。
+- **Linux・FreeBSD（m11）**: Settings の Makefile.linux・Makefile.freebsd に新しい file を足し、鍵の操作は `KL_SYSTEM_HAS_KEY_OPS` が無いので「Not available on this system」を出す。backend の新しい関数は ENOTSUP。
+- **試験（M10）**: libpasskey の host 試験（`plan/ws161/tests/libpasskey-ctap2-host-test.c`）の software authenticator に reset（10 秒の窓、touch）と新しい status を足す。passkey の request の解析（新しい 4 つの操作の field の数）、helper の語の表、passkey-fido2 の wire の試験（`plan/ws172/tests/fido2-wire-host-test.c`）に replug と touch の status、Settings のウィザードの状態機械（純粋な関数）。QEMU に CTAP2 の鍵は無い（ws172-p003 のユーザーの決定で QEMU の鍵の経路は作らない）ので、画面は鍵の無い状態（Insert の待ち、Software Security Key、一覧）を T1 の AAT で PNG に、鍵の操作は 5330 の UAT（YubiKey 5: Add の PIN 有り・無し、Change PIN、Reset、`key-replug` の再現、Remove）。
+
+### 9.4 i03・i04 の直し（J6 の答えの後の範囲、ここでは方針だけ）
+
+- **lock の判定（B1、J2）**: compositor が lock・unlock の時に sessiond へ `LOCKED`・`UNLOCKED`（新しい session の行）。sessiond は既存の `/dev/system` の購読（`seat.c`）で FIDO の hidraw の ADD（`usage=f1d0:0001`）の node 名と時刻を記録し、sleep からの復帰（sessiond が受ける `sleep.end`）の後 5 秒の ADD は数えない（再列挙）。UNLOCK の fido2 の request に「lock の後に ADD した node」の一覧を付け、passkey-fido2 はその node の鍵にだけ up=false を許す（他の node は up=true）。
+- **request の形（M8）**: `auth` の field の数を変えず、新しい操作 `auth-fido2`（name、鍵の PIN（空可）、presence、node の一覧）。
+- **KEYOWNER（M1・M2）**: silent の答えの署名を確かめる（credential の公開鍵で）。署名の無い・合わない答えは持ち主と見ない。同じ鍵が 2 つ以上の account に登録されていれば `KEYOWNER many-owners`（選ばない）。allowList は鍵の `maxCredentialCountInList` ごとに分けて問う。name の無い request は passkey の request の規則に新しい形で（`key-owner` は name の field を `-`）。sessiond の uid の照合は `KEYOWNER` では行わない（答えの名前から sessiond が passwd で引き直す）。
+- **自動の試みの数え（M6）**: 自動で始めた鍵の試みが取り消し・時間切れ・鍵の抜けで終わった時は数えない（その鍵が答えて署名が合わなかった時だけ数える）。
+- **WS200 との 1 行（J4、M9）**: `<name>:<uid>:options:methods=password,pin,fido2:key-pin=<0|1>:key-touch=<0|1>`。Security Key の方式が外れていれば鍵のモードに入らない。
+- **0.5 秒（m1）**: greeter が「Checking…」を出した時刻から 0.5 秒経つまで display を返さない（session の READY の後の RELEASED を遅らせる）。
+- **m7〜m10、m12、m13**: up=false を断る鍵は今も使えない（危険の表を直す）、KEYOWNER は sessiond で最後の 1 つにまとめて遅らせる、鍵の node の REMOVE だけで戻り AUTH の途中なら CANCEL、user を選び直す時は打ちかけの password を消す、鍵の事象は seat.c の流れ 1 つで、PIN もタッチも不要の login も `signed_in` を立てる（security.md に書く）。
+
 ## Event
 
 - 2026-10-10: 第 1 版（P1、5903f7548）。
-- 2026-10-10: 第 2 版（P1）。ユーザーの仕様の変更（ログインの鍵のモード、PIN 不要・タッチ不要、Software Security Key、user の自動の選択）と決定を入れた。第 1 版の D1〜D4 は推しどおり（D1 Change PIN は鍵の PIN だけ、D2 Reset で消えた登録は消す、D3 独立の頁、D4 password は最初）として扱う（ユーザーの「全部推し」の範囲かは Q1 に確かめる）。
+- 2026-10-10: 第 2 版（P1、63db6b7bc）。ユーザーの仕様の変更（ログインの鍵のモード、PIN 不要・タッチ不要、Software Security Key、user の自動の選択）と決定を入れた。第 1 版の D1〜D4 は推しどおり（D1 Change PIN は鍵の PIN だけ、D2 Reset で消えた登録は消す、D3 独立の頁、D4 password は最初）として扱う（ユーザーの「全部推し」の範囲かは Q1 に確かめる）。
+- 2026-10-10: design-reviewer（agent ad183bc29369c7a4e）→ [review-1.md](review-1.md)（blocker 2・major 12・minor 15。i01 は軽い直しで GO、i02〜i05 は直してから）。
+- 2026-10-10: 第 3 版（P1）。§9 に全部の答え。ユーザーの判断 J1〜J6 を Q1 へ。
