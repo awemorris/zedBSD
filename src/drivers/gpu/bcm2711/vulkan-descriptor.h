@@ -39,6 +39,9 @@ struct bcm2711_vulkan_descriptor_set {
 	struct bcm2711_vulkan_object *pool;
 	struct bcm2711_vulkan_object *layout;
 	struct bcm2711_vulkan_descriptor bindings[BCM2711_VULKAN_LAYOUT_BINDINGS];
+	/* Successful updates invalidate earlier ordinary recordings; pending native users prohibit descriptor mutation. */
+	uint64_t generation;
+	uint32_t pending;
 	bool charged;
 };
 

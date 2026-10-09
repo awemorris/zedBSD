@@ -8,6 +8,131 @@
 /* Expose the real private client encoder with finite local object metadata; neither client source is modified. */
 #include "userland/desktop/libvulkan/resources.c"
 #include "userland/desktop/libvulkan/pipeline.c"
+#include "userland/desktop/libvulkan/commands.c"
+
+/*
+ * Refuses host transport because this wrapper exercises finite real client recording without a kernel device descriptor.
+ */
+VkResult
+vulkan_context_execute(
+	struct vulkan_context *context,
+	const struct vulkan_writer *writer,
+	size_t reply_capacity,
+	struct vulkan_reader *reader)
+{
+	/* Finite local records must never reach a transport flush in this explicit host fixture. */
+	(void)context;
+	(void)writer;
+	(void)reply_capacity;
+	vulkan_reader_init(reader, NULL, 0);
+
+	/* Reports the fixture's absent native descriptor instead of fabricating successful device execution. */
+	return VK_ERROR_DEVICE_LOST;
+}
+
+/*
+ * Appends actual public vkCmd graphics records using matching finite local metadata and owned client writer storage.
+ */
+void
+ws141_client_encode_recording(
+	struct vulkan_writer *writer,
+	uint64_t command_id)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_render_pass pass;
+	struct vulkan_object framebuffer;
+	struct vulkan_object pipeline;
+	struct vulkan_object layout;
+	struct vulkan_object set;
+	struct vulkan_object buffer;
+	VkAttachmentDescription attachment;
+	VkRenderPassBeginInfo begin;
+	VkClearValue clears[2];
+	VkViewport viewport;
+	VkRect2D scissor;
+	VkDescriptorSet descriptor;
+	VkBuffer vertex;
+	VkDeviceSize offset;
+	uint32_t push[8];
+	uint32_t index;
+
+	/* The explicit fixture mirrors the already-created native primary and single-colour attachment metadata. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+	memset(&attachment, 0, sizeof(attachment));
+	attachment.format = VK_FORMAT_R8G8B8A8_UNORM;
+	attachment.loadOp = VK_ATTACHMENT_LOAD_OP_CLEAR;
+	memset(&pass, 0, sizeof(pass));
+	pass.object.kind = VULKAN_OBJECT_RENDER_PASS;
+	pass.object.wire_id = 120;
+	pass.attachment_count = 1;
+	pass.attachments = &attachment;
+
+	/* Real client opaque handles translate to the exact preexisting native test identities. */
+	memset(&framebuffer, 0, sizeof(framebuffer));
+	framebuffer.wire_id = 122;
+	memset(&pipeline, 0, sizeof(pipeline));
+	pipeline.wire_id = 135;
+	memset(&layout, 0, sizeof(layout));
+	layout.wire_id = 131;
+	memset(&set, 0, sizeof(set));
+	set.wire_id = 163;
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.wire_id = 170;
+	descriptor = (VkDescriptorSet)(uintptr_t)&set;
+	vertex = (VkBuffer)(uintptr_t)&buffer;
+	offset = 0;
+
+	/* The real selected clear encoder consumes one active union and canonicalizes the ignored extra entry. */
+	memset(clears, 0, sizeof(clears));
+	clears[0].color.float32[0] = 0.25f;
+	clears[0].color.float32[3] = 1.0f;
+	memset(&begin, 0, sizeof(begin));
+	begin.sType = VK_STRUCTURE_TYPE_RENDER_PASS_BEGIN_INFO;
+	begin.renderPass = (VkRenderPass)(uintptr_t)&pass;
+	begin.framebuffer = (VkFramebuffer)(uintptr_t)&framebuffer;
+	begin.renderArea.extent.width = 16;
+	begin.renderArea.extent.height = 8;
+	begin.clearValueCount = 2;
+	begin.pClearValues = clears;
+	vkCmdBeginRenderPass(&command, &begin, VK_SUBPASS_CONTENTS_INLINE);
+
+	/* Public dynamic setters preserve real record headers, scalar codecs and exact selected array extents. */
+	memset(&viewport, 0, sizeof(viewport));
+	viewport.width = 16.0f;
+	viewport.height = 8.0f;
+	viewport.maxDepth = 1.0f;
+	vkCmdSetViewport(&command, 0, 1, &viewport);
+	memset(&scissor, 0, sizeof(scissor));
+	scissor.extent.width = 16;
+	scissor.extent.height = 8;
+	vkCmdSetScissor(&command, 0, 1, &scissor);
+	vkCmdBindVertexBuffers(&command, 0, 1, &vertex, &offset);
+	vkCmdBindPipeline(&command, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipeline)(uintptr_t)&pipeline);
+	vkCmdBindDescriptorSets(&command, VK_PIPELINE_BIND_POINT_GRAPHICS, (VkPipelineLayout)(uintptr_t)&layout, 0, 1, &descriptor, 0, NULL);
+
+	/* Copied push data and a complete triangle-list draw use the same API sequence as Keiland's ordinary quad path. */
+	for (index = 0; index < 8; index++)
+		push[index] = 0x3f000000U + index;
+	vkCmdPushConstants(&command, (VkPipelineLayout)(uintptr_t)&layout, VK_SHADER_STAGE_VERTEX_BIT, 0, sizeof(push), push);
+	vkCmdDraw(&command, 6, 1, 0, 0);
+	vkCmdEndRenderPass(&command);
+
+	/* The bounded caller receives only complete actual recording bytes and their real local encoding outcome. */
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: real client-owned recording bytes were copied before every fixture application pointer retired. */
+	return;
+}
 
 /*
  * Encodes one actual client graphics record using real selected-state and handle conversion functions.

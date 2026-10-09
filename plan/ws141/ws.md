@@ -193,3 +193,7 @@ actual Keiland quad sourceから3native programsを構築、module entry/stage�
 ## i14 pipeline wire checkpoint（2026-10-09）
 
 actual selected-state graphics encoder→independent native decoder/compiler/registryを接続、complete batch/fresh vector/legitimate partial successesとprepared public-retirementをhost9範囲/RPi4 y build/styleで確認。有限recordのcompiled stack frameも確認、total runtime pathは後続。次はrecorded commands/native CL/queue/common binding、COMMAND/CAPSET/JOB/public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/限界/復帰点](execution-20261009.md#i14-graphics-pipeline-wire-batchのsoftware出力2026-10-09)。
+
+## i14 primary/graphics recording checkpoint（2026-10-09）
+
+actual client primary pool/buffer codecsとreal public9vkCmdのfinite native recordingを接続。whole batch rollback、pending mutation拒否、pool非cycle/registry退役とindependent old graph、selected colour clear/raw state/typed interfaces、first node OOM→End failure/clean re-recordを確認。ordinary descriptor update-after-recordの想定をVulkan 1.0仕様へ修正し、set generation/current validationとpending update拒否を追加。host11範囲/RPi4 y build/style PASS、actual native CL/GPU completionの証拠にはしない。p005/p006/i13/i14 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。next immutable current draw preparation/native VA/code/uniform/TMU/CL、transfer/barrier/queue/common/public runtime。Master変更無し。[正確な結果/想定訂正/失敗と修正/限界/復帰点](execution-20261009.md#i14-primary-command所有とactual-vkcmd記録のsoftware出力2026-10-09)。

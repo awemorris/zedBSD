@@ -23,6 +23,8 @@
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 #include "drivers/gpu/bcm2711/vulkan-target.h"
 #include "drivers/gpu/bcm2711/vulkan-pipeline.h"
+#include "drivers/gpu/bcm2711/vulkan-command.h"
+#include "drivers/gpu/bcm2711/vulkan-record.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -58,8 +60,12 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t command_id);
+
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void record_test(struct bcm2711_vulkan_session *session);
+static void command_test(struct bcm2711_vulkan_session *session);
 static void pipeline_test(struct bcm2711_vulkan_session *session);
 static void target_test(struct bcm2711_vulkan_session *session);
 static void descriptor_test(struct bcm2711_vulkan_session *session);
@@ -428,6 +434,7 @@ main(
 	layout_test(session);
 	pool_test(session);
 	descriptor_test(session);
+	command_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -513,6 +520,368 @@ main(
 	return 0;
 }
 
+/* Exercises actual primary lifecycle codecs and independent owners without pretending to execute native work. */
+static void
+command_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object local;
+	struct bcm2711_vulkan_object *pool_object;
+	struct bcm2711_vulkan_object *first;
+	struct bcm2711_vulkan_object *second;
+	struct bcm2711_vulkan_command_pool *pool;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_command_buffer *other;
+	VkCommandPoolCreateInfo info;
+	VkCommandBufferAllocateInfo allocation;
+	VkCommandBufferBeginInfo recording;
+	uint8_t wire[4096];
+	unsigned baseline;
+	unsigned index;
+	int error;
+
+	/* Individual reset permission is separate from the always available whole-pool reset. */
+	baseline = allocations;
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandPoolCreateInfo(&writer, &info);
+	error = input_created(session, &writer, 150);
+	assert(error == 0);
+	pool_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_POOL, 150);
+	assert(pool_object != NULL);
+	pool = pool_object->payload;
+
+	/* Real client handle conversion and record widths select one ordinary primary pool. */
+	memset(&local, 0, sizeof(local));
+	local.kind = VULKAN_OBJECT_COMMAND_POOL;
+	local.wire_id = 150;
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocation.commandPool = (VkCommandPool)(uintptr_t)&local;
+	allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocation.commandBufferCount = 2;
+
+	/* Second registry OOM must unwind the complete first output and both acquired parent graphs before retry. */
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_COMMAND_BUFFERS, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkCommandBufferAllocateInfo(&writer, &allocation);
+		vulkan_write_u64(&writer, 2);
+		vulkan_write_u64(&writer, 151);
+		vulkan_write_u64(&writer, 152);
+		if (index == 0)
+			fail_after = 4;
+		error = execute(session, &writer, &reader);
+		assert(error == 0);
+		if (index == 0) {
+			assert(vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY && vulkan_read_u64(&reader) == 0);
+			first = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 151);
+			second = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 152);
+			assert(first == NULL && second == NULL && pool->children == NULL && pool_object->references == 1);
+		} else {
+			assert(vulkan_read_u32(&reader) == VK_SUCCESS && vulkan_read_u64(&reader) == 2);
+			assert(vulkan_read_u64(&reader) == 151 && vulkan_read_u64(&reader) == 152);
+		}
+	}
+
+	/* A complete actual Begin/End pair creates a legal empty executable command buffer. */
+	first = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 151);
+	second = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 152);
+	assert(first != NULL && second != NULL && pool_object->references == 3);
+	command = first->payload;
+	other = second->payload;
+	memset(&recording, 0, sizeof(recording));
+	recording.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	recording.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 151);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && command->state == BCM2711_VULKAN_COMMAND_RECORDING);
+	begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 151);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 151);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 151);
+	vulkan_write_u32(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+
+	/* Explicit pending fixture ownership must block whole-pool mutation and all-or-nothing free before any prefix changes. */
+	error = bcm2711_vulkan_object_retain(second);
+	assert(error == 0);
+	other->pending = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u32(&writer, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	begin(&writer, wire, sizeof(wire), GPU_OP_FREE_COMMAND_BUFFERS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u32(&writer, 2);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 151);
+	vulkan_write_u64(&writer, 152);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && first->published && second->published);
+	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && first->published && second->published && pool_object->published);
+	other->pending = 0;
+	error = bcm2711_vulkan_object_release(second);
+	assert(error == 0);
+
+	/* Pool reset returns children to initial state while retaining their original public IDs. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u32(&writer, VK_COMMAND_POOL_RESET_RELEASE_RESOURCES_BIT);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	assert(first->published && second->published && command->state == BCM2711_VULKAN_COMMAND_INITIAL && other->state == BCM2711_VULKAN_COMMAND_INITIAL);
+
+	/* Public destruction leaves the original pool alive behind an independently retained withdrawn child. */
+	error = bcm2711_vulkan_object_retain(first);
+	assert(error == 0);
+	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && !first->published && !pool_object->published && pool->children == command && pool_object->references == 1);
+	error = bcm2711_vulkan_object_release(first);
+	assert(error == 0 && allocations == baseline);
+	puts("WS141 Vulkan actual client primary pool/buffer lifecycle, batch rollback and pending ownership: PASS");
+
+	/* Succeeded: software lifecycle evidence preserves the separate native execution boundary. */
+	return;
+}
+
+/* Runs actual public client vkCmd calls through native recording, first-error handling and retained graph retirement. */
+static void
+record_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object client;
+	struct bcm2711_vulkan_object *command_object;
+	struct bcm2711_vulkan_object *set_object;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_descriptor_set *set;
+	struct bcm2711_vulkan_record *event;
+	struct bcm2711_vulkan_command_node *node;
+	VkBufferCreateInfo buffer_info;
+	VkSamplerCreateInfo sampler_info;
+	VkDescriptorPoolSize size;
+	VkDescriptorPoolCreateInfo pool_info;
+	VkCommandPoolCreateInfo command_info;
+	VkCommandBufferAllocateInfo allocation;
+	VkCommandBufferBeginInfo recording;
+	uint8_t wire[8192];
+	uint32_t index;
+	uint32_t nodes;
+	unsigned baseline;
+	int error;
+
+	/* Real bound vertex storage uses a nonoverlapping interval in the existing coherent native fixture allocation. */
+	baseline = allocations;
+	memset(&buffer_info, 0, sizeof(buffer_info));
+	buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer_info.size = 48;
+	buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_BUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkBufferCreateInfo(&writer, &buffer_info);
+	error = input_created(session, &writer, 170);
+	assert(error == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_BUFFER_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 170);
+	vulkan_write_u64(&writer, 102);
+	vulkan_write_u64(&writer, 1024);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+
+	/* The quad's exact retained set interface is allocated with normal native pool ownership and mutable sampled inputs. */
+	memset(&sampler_info, 0, sizeof(sampler_info));
+	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SAMPLER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSamplerCreateInfo(&writer, &sampler_info);
+	error = input_created(session, &writer, 161);
+	assert(error == VK_SUCCESS);
+	memset(&size, 0, sizeof(size));
+	size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	size.descriptorCount = 2;
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.maxSets = 2;
+	pool_info.poolSizeCount = 1;
+	pool_info.pPoolSizes = &size;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorPoolCreateInfo(&writer, &pool_info);
+	error = input_created(session, &writer, 160);
+	assert(error == VK_SUCCESS);
+	error = sets_allocate(session, 160, 130, 163);
+	assert(error == 0);
+	set_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 163);
+	assert(set_object != NULL);
+	set = set_object->payload;
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 163, 161, 103);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0);
+
+	/* Reset-enabled ordinary primary metadata matches the real client wrapper's local recording identity. */
+	memset(&command_info, 0, sizeof(command_info));
+	command_info.sType = VK_STRUCTURE_TYPE_COMMAND_POOL_CREATE_INFO;
+	command_info.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandPoolCreateInfo(&writer, &command_info);
+	error = input_created(session, &writer, 150);
+	assert(error == VK_SUCCESS);
+	memset(&client, 0, sizeof(client));
+	client.wire_id = 150;
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocation.commandPool = (VkCommandPool)(uintptr_t)&client;
+	allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocation.commandBufferCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_COMMAND_BUFFERS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferAllocateInfo(&writer, &allocation);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 151);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	command_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 151);
+	assert(command_object != NULL);
+	command = command_object->payload;
+	memset(&recording, 0, sizeof(recording));
+	recording.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	/* A fifth native event allocation refusal must consume the rest of the real stream, report End OOM, and permit clean re-recording. */
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+		vulkan_write_u64(&writer, 151);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+		begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+		writer.bytes -= 8;
+		ws141_client_encode_recording(&writer, 151);
+		vulkan_write_u32(&writer, GPU_OP_END_COMMAND_BUFFER);
+		vulkan_write_u32(&writer, 1);
+		vulkan_write_u64(&writer, 151);
+		if (index == 0)
+			fail_after = 5;
+		error = execute(session, &writer, &reader);
+		assert(error == 0);
+		if (index == 0) {
+			assert(vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
+			assert(command->recording_error == ENOMEM && command->state == BCM2711_VULKAN_COMMAND_INVALID);
+		} else {
+			assert(vulkan_read_u32(&reader) == VK_SUCCESS && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE && !command->render_open);
+		}
+	}
+
+	/* Exact nine-event ordering, selected clear union and raw push words come from real public client encoding. */
+	nodes = 0;
+	for (node = command->first; node != NULL; node = node->next)
+		nodes++;
+	assert(nodes == 9);
+	event = (struct bcm2711_vulkan_record *)command->first;
+	assert(event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS && event->count == 2 && event->words[0] == 0x3e800000U && event->words[3] == 0x3f800000U);
+	event = (struct bcm2711_vulkan_record *)event->node.next;
+	assert(event->opcode == GPU_OP_CMD_SET_VIEWPORT && event->words[2] == 0x41800000U && event->words[3] == 0x41000000U);
+	assert(set_object->references == 2);
+
+	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
+	set->pending = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 163, 161, 104);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && set->bindings[0].view->identity == 103);
+	error = bcm2711_vulkan_record_current(command);
+	assert(error == 0 && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	set->pending = 0;
+
+	/* Vulkan 1.0 ordinary update-after-bind invalidates the executable recording while preserving independent owned resources. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 163, 161, 104);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && set->bindings[0].view->identity == 104);
+	error = bcm2711_vulkan_record_current(command);
+	assert(error == EINVAL && command->state == BCM2711_VULKAN_COMMAND_INVALID && command->first != NULL);
+
+	/* Withdrawing every public input leaves the retained old primary graph intact, then final release returns all added heap ownership. */
+	error = bcm2711_vulkan_object_retain(command_object);
+	assert(error == 0);
+	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && !command_object->published && command->first != NULL);
+	destroy(session, GPU_OP_DESTROY_BUFFER, 170);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 161);
+	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 160);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && !set_object->published && set_object->references == 1 && set->bindings[0].view->identity == 104);
+	error = bcm2711_vulkan_object_release(command_object);
+	assert(error == 0 && allocations == baseline);
+	puts("WS141 Vulkan actual public vkCmd stream/order/clear union/record OOM/update invalidation/retained primary graph: PASS");
+
+	/* Succeeded: recording software is verified independently of native CL execution and actual GPU completion. */
+	return;
+}
+
 /* Routes the actual immutable command through native roots, then native physical queries. */
 static int
 dispatch(
@@ -592,6 +961,30 @@ dispatch(
 	if (handled != 0)
 		return 0;
 	error = bcm2711_vulkan_pipeline_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Primary command pools preserve native ownership through reset, recording and public identity retirement. */
+	error = bcm2711_vulkan_command_pool_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_command_batch_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_command_buffer_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Reply-free ordered graphics records retain immutable state and exact input identities. */
+	error = bcm2711_vulkan_record_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -2040,9 +2433,6 @@ target_test(
 	assert(load->colour.finalLayout == VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL);
 	destroy(session, GPU_OP_DESTROY_RENDER_PASS, 123);
 
-	/* Compile actual Keiland programs against this same-device clear pass before its public identity retires. */
-	pipeline_test(session);
-
 	/* One-pixel API granularity allows a caller to choose damage rectangles independently of native tile size. */
 	begin(&writer, wire, sizeof(wire), GPU_OP_GET_RENDER_AREA_GRANULARITY, 1);
 	vulkan_write_u64(&writer, 30);
@@ -2100,6 +2490,9 @@ target_test(
 	assert(framebuffer_object != NULL);
 	target = framebuffer_object->payload;
 	assert(target->owner.parent == clear_object && target->view == view_object && target->width == 16 && target->height == 8);
+
+	/* Native command recording uses this complete target together with actual quad pipeline resources. */
+	pipeline_test(session);
 	error = bcm2711_vulkan_object_retain(framebuffer_object);
 	assert(error == 0);
 
@@ -2317,6 +2710,9 @@ pipeline_test(
 	assert(vulkan_read_u64(&reader) == 2 && vulkan_read_u64(&reader) == 135 && vulkan_read_u64(&reader) == 0);
 	published = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PIPELINE, 135);
 	assert(published != NULL);
+
+	/* Real public client recording keeps this compiled pipeline and the complete bound framebuffer live. */
+	record_test(session);
 	error = bcm2711_vulkan_object_retain(published);
 	assert(error == 0);
 	destroy(session, GPU_OP_DESTROY_PIPELINE, 135);
