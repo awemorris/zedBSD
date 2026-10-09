@@ -122,3 +122,9 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 [詳細](../execution-20261009.md#i14-native-upload-storageのsoftware出力2026-10-09): private cached code/scratch allocationとnative VAの独立ownerを追加。actual PA bitsで配置し、compiled codeのlittle-endian upload/full padded cache cleanを実施。retired=falseは全保持、trueはNULL消費し、failed translation retirementをnative space quarantineが保持。whole prepared job quarantineとclosing session lifetimeは後続接続のまま。
 
 [hardware host](../tests/v3d-hardware-host-test.sh) のactual mapping/refcount/cache/reset failure boundaryとcode bytes/padding確認がPASS、rpi4 y build warning/error0/style total0。fixtureの旧typed BLOB参照/linkとreset error期待を追従し、actual Vulkan source成功をmockで代替していない。public runtime/GPU launch/Keilandは未接続、Phase/WSをcleared/completedにしない。変更は同Phase内でforeign interface無し。
+
+## i14 integer viewport uniforms checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09): copied IEEE viewportからXY shader scale/depth range/offsetをkernel integerのみでatomic生成。guard/round/stickyとnearest-evenを使用し、subnormal/逆depth/±zeroを保持。native-state hostのindependent host FP oracleで256境界＋1024固定sampleが全bits一致、既存XML/pixelもPASS、y build warning/error0/style total0。
+
+次にuniform streamとFIFO時点のUBO read、owned descriptor pointers/native storage/quarantineを接続する。general softfloat/public API/HAL変更は無し。同Phaseのinternal loweringで、foreign dependencyを変更しない。Phase in-progress、actual GPU/Keiland acceptance/p007未達。
