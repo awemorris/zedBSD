@@ -436,8 +436,8 @@ test_queue(void)
 		handled++;
 	}
 
-	/* Every queued packet, then nothing. */
-	expect(error == EAGAIN && handled + session->queue_dropped == 200U && !btd_session_pending(session),
+	/* Every queued packet and one notice of the events dropped (ws197-p002), then nothing. */
+	expect(error == EAGAIN && handled + session->queue_dropped == 201U && !btd_session_pending(session),
 	       "queue: %u packets handled after the command", handled);
 
 	/* A command still works. */

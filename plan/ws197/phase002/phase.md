@@ -369,3 +369,14 @@ firmware の要らない USB の Bluetooth の dongle が 2 本ある時だけ�
 - 2026-10-10: Q16 の決定 (a)（ユーザー、Q1 経由）。ERTM・GOEP 2.0 の Future Work の行は Q1 に依頼。
 - 2026-10-10: design-reviewer の review（agent a70a3277735e7af2e）→ [review-1.md](review-1.md)（blocker 1・major 6・minor 18、一部 GO: i05〜i07 は可、i01〜i04 は直しと短い再確認の後）。第 2 版で全部に答えた。
 - 2026-10-10: 第 2 版の短い再確認 → [review-2.md](review-2.md): **i01〜i04 も GO**。minor 5 つは本文を直した（第 2.1 版）。
+
+## 実装の進み（2026-10-10、P1、ws197 branch）
+
+| i | commit | 状態 |
+| --- | --- | --- |
+| i05 RFCOMM | c5a174129 | 実装と host 試験 PASS（bt-phone-host-test、302 checks） |
+| i06 OBEX | 0f5d78fb8 | 実装と host 試験 PASS（bt-obex-host-test、2073 checks） |
+| i07 SDP の server と client の一般化 | e90f6822d | 実装と host 試験 PASS（bt-sdp-host-test、45 checks）、WS143 の host 試験 PASS |
+| i01 session の受けの drop と送りの上限 | この commit | session.c・session.h を実装（§3・§4、build warning 0、style-check 0）、WS143 の host 試験 PASS（bt-link-host-test の queue の期待値を「events の知らせ 1 つ」で 201 に直した）。新しい試験 `plan/ws197/tests/bt-session-host-test.c` は書いたが未完: socket pair の送りの buffer が 40 KB の flood を一度に持てず（write が EAGAIN）、(a) の flood の段が走らない。直し方の案: 偽の controller を thread にして読みと並べて書く（WS143 の bt-link-host-test の fake_run と同じ形）か、flood を小さく（BTD_QUEUE_BYTES を試験の build だけで小さくはしない: 試験は既定の経路で） |
+
+再開点: bt-session-host-test の偽の controller を thread に直して (a)〜(g) と送りの試験を通す → `bt-phone-host-test.sh` に足す → i02（router）。2026-10-10 Q1 の割り込み（ベータ2 の UAT の BUG-275〜280）で中断。
