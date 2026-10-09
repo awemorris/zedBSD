@@ -1866,6 +1866,34 @@ glass_draw_text(
 }
 
 /*
+ * Draws a line of UTF-8 text centred on x (a button's word, a board's
+ * line), cut in the middle where it is wider than limit.  The middle cut's
+ * x is the line's left edge; a caller that gave it the centre drew the
+ * word from the centre on, half its width to the right (BUG-278).
+ */
+void
+glass_draw_text_centred(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	enum glass_size size,
+	int32_t centre,
+	int32_t baseline,
+	const char *text,
+	int32_t limit,
+	const float *color)
+{
+	int32_t width;
+
+	/* The line's width, at most the room. */
+	width = glass_text_width(server, size, text);
+	if (width > limit)
+		width = limit;
+
+	/* Succeeded: drawn from half its width left of the centre. */
+	glass_draw_text_middle(server, command, size, centre - width / 2, baseline, text, limit, color);
+}
+
+/*
  * Draws a line of UTF-8 text from x on a baseline, cut in the middle (with
  * an ellipsis of dots between its start and its end) where it would pass
  * x + limit.  Names that differ only at their end (Document 1, Document 2)
