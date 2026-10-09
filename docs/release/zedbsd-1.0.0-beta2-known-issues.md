@@ -50,15 +50,11 @@ guide.
 | Bold text looks different from regular text (its edges are smoothed differently). | — | BUG-205 |
 | The Browser does not respond while a page loads, and editing the address can put `file://` in front of `https://`. | Wait for the page; type the whole address again. | BUG-207, BUG-206 |
 | Japanese input does not work in Phone. | — | BUG-203 |
-| Printing a PDF to some network printers (for example the Brother MFC-L3770CDW over IPP) fails. | Print over LPD if the printer offers it. | BUG-271 |
 
 <!-- review: the rows below are the bugs the beta 2 triage plans to fix before the RC, and the ones whose fixes wait for
      T1. Move a row into the table above only if it is still open at the RC.
 | In Settings → Wi-Fi, clicking the switch to turn Wi-Fi off can press Scan instead. | — | BUG-184 |
 | In Settings → Wi-Fi, a single tap on a network does not join it. | Tap it twice. | BUG-188 |
-| The Log Out icon ends the session without asking. | Save your work first. | BUG-235 |
-| Choosing a running app in App Home starts it again instead of switching to it. | Switch with the top bar's app list or the Windows key. | BUG-232 |
-| Maximizing a window by double-clicking its title bar takes almost a second, and a maximized window dragged down grows to full size once before it shrinks. | — | BUG-179, BUG-180 |
 | Opening a program in /bin from Files shows nothing. | Run it from Terminal. | BUG-234 |
 | The key repeat settings in Settings do not change the repeat. | — | BUG-191 |
 | Emacs does not take -nw, and the output of M-x shell is laid out wrongly. | — | BUG-238, BUG-242 |

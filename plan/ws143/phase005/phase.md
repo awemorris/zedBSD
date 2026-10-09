@@ -788,3 +788,15 @@ T1-463: p002・p003 PASS、p004 は `BT SCAN devices=4` の 1 行（07 は T1-43
 - 確かめ（P1、host）: `bt-daemon-host-test.sh` → daemon 90・pair 161・link 56・hid 75・hidhost 96・hog 24 PASS（ASan・UBSan）。`config-amd64-bt.mk` の vmunix・bluetoothd・bt、`config/ci/config-amd64.mk` の vmunix は exit 0・warning 0。style-check（bluetoothd 全部・loopback・試験）0。**未実施**: QEMU（T1）、実機（i04）、tshark の照合。
 - 設計からの残り: HID service 2 つ目の device（§9.12）、resolving list の無い controller での背景の passive scan の fallback（今は IRK の bond は CONNECT でだけ繋がる）、auto-connect の scan の duty の実機での測り（i04）。
 - i03（LE の HOGP）は T1-467 で p002〜p005 の 4 本とも PASS（bt-hid-p005 1 m 22 s、LE の HOG mouse 04 を含む）→ i03 は cleared。Phase は i04（5330 の実機、ユーザーの device）まで in-progress。
+
+## 外部の判定 S11: btsnoop を tshark で読む（2026-10-09 夜、P1）
+
+- 対象: T1-467（i03、bt-hid-p005 PASS）の daemon の btsnoop の記録 `t1/build/ws143-bt-hid-p005.run.2fRlQS/btd-p005.snoop`（502 frame、BR/EDR のキーボード 01・マウス 02・Just Works 07・LE の HOG 04）。host に tshark 4.4.18 を入れた（`apt-get install tshark`）。
+- 命令: `tshark -r SNOOP -q -z io,phs`（hci_h4 → bthci_cmd 59・bthci_evt 206・bthci_acl 237 → btl2cap 237 → btsdp 32・bthid 46・btatt 50。全 frame を dissector が分けた）、`tshark -r SNOOP -q -z expert`（Error・Warning 0。Note 7 は「ATT_MTU に達した、値はもっと長いかも」2 と ATT の Undecoded 5）、`tshark -r SNOOP -V -Y frame.number==N` と `-x`。
+- 照合（設計 §9.11 が挙げた取り違えの起こりやすい所）:
+  - LE Enable Encryption（frame 423）: Connection Handle 0x0044、Random Number 0、EDIV 0、LTK の順に読めた（LE Secure Connections の鍵なので Rand・EDIV が 0 で正しい）。parameter の順の取り違えは無い。
+  - ATT: Read By Group Type（GAP 0x0001-0x0005・HID 0x0010-0x0020・Battery 0x0030-0x0033・Device Information）、characteristic の探索の続き（前の宣言の handle + 1 から）、Protocol Mode の宣言 0x0019 の value handle 0x001a に Write Command で 01（Report Protocol、HOGP の値どおり。tshark は value handle に名前を付けず Unknown と出すだけ）、Report Reference（0x0018）が Report ID 1・Input、Report Map の Read Blob の offset 22・44（MTU 23 で 22 byte ずつ）、CCCD（0x0017・0x0033）への Write Request、Report の value handle 0x0016 の Notification。
+  - HIDP: SET_PROTOCOL の byte 0x71（type 7、parameter 1）、DATA の header 0xA1（Input）、HANDSHAKE の Successful。**tshark は parameter 1 を「Boot」と表示する**が、Bluetooth HID の仕様と Linux（`HIDP_PROTO_BOOT 0`・`HIDP_PROTO_REPORT 1`）では 1 が Report で、daemon（`BTD_HIDP_PROTOCOL_REPORT 1`、hid.c の SET_PROTOCOL）の意図と一致する。dissector の表示の違いとして記録し、daemon は変えない。
+  - SDP: HID と PnP Information の Service Search Attribute の continuation（fragment 2 つの後に完結）を tshark が組み立てた。L2CAP の Information Request（Extended Features）、HID-Control（0x11）・HID-Interrupt（0x13）の順。
+  - loopback の偽の機器の値の小さな不整合（daemon の誤りではない）: LE の 04 の PnP ID は Vendor ID Source 1（Bluetooth SIG）で Vendor ID 0x1209（pid.codes、USB-IF の番号）。実機の照合には影響しない。
+- 限界: loopback の相手も同じ作り手なので、両側が同じ誤解をしていれば相手は応える。tshark は第三者の解釈で、byte の形と field の順が仕様どおりに読めることまでを示す。実機（i04・p008）の記録も同じ命令で読む。

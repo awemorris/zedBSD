@@ -76,3 +76,10 @@ Q1 の割り当て:「p002 license の一覧を今の release の image（config
 Q1 が古い remacs の archive を distfiles から消した。
 
 状態: ベータ2 の分は cleared 候補（release の rootfs への `--rootfs` は RC の image で）。
+
+## release の rootfs への `--rootfs`（2026-10-09 夜、P1）
+
+- build: `make -j8 ZEDBSD_CONFIG=plan/ws129/tests/config-amd64-release-noclang.mk BUILD=build/ws129-p002-rootfs ZEDBSD_EXTRA_INPUTS=…/INDEX "ZEDBSD_EXTRA_FILES=--file /usr/share/licenses/INDEX=…/INDEX" build/ws129-p002-rootfs/rootfs/.stamp`（tree a77107e68 の上、release の config から target の clang・libcxx だけを除いた物。subagent は target の clang・libcxx を build しない）→ rc 0。INDEX は `license-inventory.py --config config/release/config-amd64-beta2.mk --index` の `27 components, 0 open items`。
+- `license-inventory.py --config plan/ws129/tests/config-amd64-release-noclang.mk --rootfs build/ws129-p002-rootfs/rootfs` → Open items: none。release の config そのもの（`--config config/release/config-amd64-beta2.mk`）で当てると、この build に入れていない clang・libcxx の LICENSE.TXT の 2 件だけが open（予想どおり）。clang・libcxx の本文は CI の build の step（release.yml の `--rootfs`）が確かめる。
+- build の warning: 489 行の全部が外部の package（FFmpeg・OpenSSL・OpenSSH の source、perl の locale の注意）と、`userland/base/noct/noct/src/core/interpreter.c:2395` の -Wreturn-type 1 件（NoctLang、toolchain の範囲なので Q1 に報告、直さない）。zedBSD の source の warning は無い。
+- 状態: ベータ2 の分は cleared 候補（clang・libcxx の本文は RC の CI の build で確かめる）。
