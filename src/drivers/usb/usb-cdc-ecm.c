@@ -12,6 +12,7 @@
  */
 
 #include <drivers/usb/usb-cdc-ecm.h>
+#include <drivers/usb/usb-cdc-notification.h>
 #include <drivers/usb/usb.h>
 #include <uapi/errno.h>
 #include <kern/lock.h>
@@ -40,9 +41,7 @@
 #define ECM_FILTER_DIRECTED 0x0004U
 #define ECM_FILTER_BROADCAST 0x0008U
 
-#define ECM_NOTIFICATION_NETWORK_CONNECTION 0x00U
-#define ECM_NOTIFICATION_SPEED_CHANGE 0x2aU
-#define ECM_NOTIFICATION_SIZE 16U
+#define ECM_NOTIFICATION_SIZE DRV_USB_CDC_NOTIFICATION_TRANSFER
 #define ECM_ETHERNET_HEADER_SIZE 14U
 #define ECM_MTU 1500U
 #define ECM_FRAME_SIZE (ECM_ETHERNET_HEADER_SIZE + ECM_MTU)
@@ -121,10 +120,17 @@ struct ecm_adapter {
 	int stop_error;
 	uint32_t upstream_bps;
 	uint32_t downstream_bps;
+	/*
+	 * The notification transfer's length (one packet of an endpoint of
+	 * short packets, BUG-222) and the start of a notification whose rest
+	 * is still to come; the poll that takes the notification completion
+	 * owns the reader, and open empties it before the transfer starts.
+	 */
+	size_t notification_length;
+	struct drv_usb_cdc_notification_reader notification_reader;
 };
 
 static uint16_t ecm_le16(const uint8_t *bytes);
-static uint32_t ecm_le32(const uint8_t *bytes);
 static struct drv_usb_configuration * ecm_interface_configuration(struct drv_usb_interface *interface);
 static int ecm_iad_covers(const struct drv_usb_interface_association_descriptor *iad, unsigned interface_number);
 static int ecm_iad_consistent(struct drv_usb_configuration *configuration, unsigned control_number, unsigned data_number);
@@ -149,6 +155,7 @@ static int ecm_transmit(struct net_device *device, struct packet_buf *packet);
 static int ecm_tx_submit(struct ecm_adapter *adapter, struct packet_buf *packet);
 static void ecm_tx_queue_free(struct ecm_adapter *adapter);
 static void ecm_notification_process(struct ecm_adapter *adapter);
+static void ecm_notification_take(struct ecm_adapter *adapter, const struct drv_usb_cdc_notification *notification);
 static int ecm_rearm(struct ecm_adapter *adapter, int notification);
 static int ecm_poll_enter(struct ecm_adapter *adapter);
 static void ecm_poll_exit(struct ecm_adapter *adapter);
@@ -223,16 +230,6 @@ ecm_le16(
 {
 	/* Returns the computed result. */
 	return (uint16_t)((uint16_t)bytes[0] | ((uint16_t)bytes[1] << 8));
-}
-
-/* Reads a 32-bit field, least significant byte first. */
-static uint32_t
-ecm_le32(
-	const uint8_t *bytes)
-{
-	/* Returns the computed result. */
-	return (uint32_t)bytes[0] | ((uint32_t)bytes[1] << 8) |
-	       ((uint32_t)bytes[2] << 16) | ((uint32_t)bytes[3] << 24);
 }
 
 /* Reports the configuration an interface belongs to. */
@@ -1040,9 +1037,10 @@ ecm_open(
 	/* Checks the operation status. */
 	error = ecm_program_packet_filter(adapter);
 	if (error == 0) {
+		drv_usb_cdc_notification_reset(&adapter->notification_reader);
 		error = ecm_start_urb(adapter, adapter->notification_urb,
 				      adapter->notification_buffer,
-				      ECM_NOTIFICATION_SIZE, 0);
+				      adapter->notification_length, 0);
 	}
 	if (error == 0) {
 		error = ecm_start_urb(adapter, adapter->rx_urb,
@@ -1237,67 +1235,106 @@ ecm_tx_queue_free(
 	}
 }
 
-/* Takes one notification the device has sent. */
+/*
+ * Takes the notifications the device has sent.
+ *
+ * The transfer's bytes join what the reader kept of an earlier one, and
+ * each whole notification is taken in turn (BUG-222: a speed's
+ * notification may come split over two transfers, or behind another).
+ */
 static void
 ecm_notification_process(
 	struct ecm_adapter *adapter)
 {
+	struct drv_usb_cdc_notification notification;
+	enum drv_usb_urb_status status;
+	size_t length;
+	int whole;
+
+	/* A transfer that failed leaves a gap: what was kept cannot be joined to what comes next. */
+	status = drv_usb_urb_status(adapter->notification_urb);
+	if (status != DRV_USB_URB_COMPLETE) {
+		drv_usb_cdc_notification_reset(&adapter->notification_reader);
+		return;
+	}
+
+	/* Adds the transfer's bytes to the reader. */
+	length = drv_usb_urb_actual_length(adapter->notification_urb);
+	drv_usb_cdc_notification_add(&adapter->notification_reader, adapter->notification_buffer, length);
+
+	/* Takes every whole notification the reader holds. */
+	for (;;) {
+		whole = drv_usb_cdc_notification_next(&adapter->notification_reader, &notification);
+		if (!whole)
+			break;
+		ecm_notification_take(adapter, &notification);
+	}
+}
+
+/* Acts on one notification: the link's coming and going, and its speed. */
+static void
+ecm_notification_take(
+	struct ecm_adapter *adapter,
+	const struct drv_usb_cdc_notification *notification)
+{
 	unsigned long irq;
-	const uint8_t *notification = adapter->notification_buffer;
-	size_t length = drv_usb_urb_actual_length(adapter->notification_urb);
-	uint16_t interface_number;
-	uint32_t downstream;
-	uint32_t upstream;
+	uint32_t fastest;
+	uint32_t mbps;
+	unsigned control_number;
+	unsigned data_number;
 	int connected;
 
-	/* Checks the drv usb urb status result. */
-	if (drv_usb_urb_status(adapter->notification_urb) !=
-		    DRV_USB_URB_COMPLETE ||
-	    length < 8U ||
-	    notification[0] != (DRV_USB_DIR_IN | DRV_USB_REQUEST_CLASS |
-				DRV_USB_RECIP_INTERFACE)) {
-		/* Returns the computed result. */
+	/* Passes over a notification of another interface: the control or the data one is this function's. */
+	control_number = drv_usb_interface_number(adapter->control);
+	data_number = drv_usb_interface_number(adapter->data);
+	if (notification->interface_number != control_number && notification->interface_number != data_number)
 		return;
-	}
 
-	/* Checks the drv usb interface number result. */
-	interface_number = ecm_le16(notification + 4U);
-	if (interface_number != drv_usb_interface_number(adapter->control) &&
-	    interface_number != drv_usb_interface_number(adapter->data)) {
-		/* Returns the computed result. */
-		return;
-	}
-
-	/* Checks the ecm le16 result. */
-	if (notification[1] == ECM_NOTIFICATION_NETWORK_CONNECTION &&
-	    ecm_le16(notification + 6U) == 0U && length == 8U) {
-		connected = ecm_le16(notification + 2U);
+	/* The link came or went: the carrier follows the cable. */
+	if (notification->code == DRV_USB_CDC_NETWORK_CONNECTION && notification->data_length == 0U) {
+		/* Whether the device says the cable is in. */
+		connected = 0;
+		if (notification->value != 0U)
+			connected = 1;
 		(void)net_device_set_carrier(adapter->net_device, connected);
 
-		/* A link that went has no speed until the device tells the next one (BUG-222). */
+		/* A link that went has no speed until the device tells the next one. */
 		if (!connected && adapter->net_device != NULL)
 			adapter->net_device->link_mbps = 0U;
-	} else if (notification[1] == ECM_NOTIFICATION_SPEED_CHANGE &&
-		   ecm_le16(notification + 2U) == 0U &&
-		   ecm_le16(notification + 6U) == 8U && length == 16U) {
-		downstream = ecm_le32(notification + 8U);
-		upstream = ecm_le32(notification + 12U);
-		irq = spin_lock_irqsave(&adapter->lock);
-
-		adapter->downstream_bps = downstream;
-		adapter->upstream_bps = upstream;
-
-		spin_unlock_irqrestore(&adapter->lock, irq);
-
-		/*
-		 * The interface reports the faster direction as its link's
-		 * speed, in Mb/s, which is what Settings shows (BUG-222).
-		 */
-		if (upstream > downstream)
-			downstream = upstream;
-		if (adapter->net_device != NULL)
-			adapter->net_device->link_mbps = downstream / 1000000U;
+		return;
 	}
+
+	/* Passes over anything but the speed's notification. */
+	if (notification->code != DRV_USB_CDC_CONNECTION_SPEED_CHANGE || notification->data_length != 8U)
+		return;
+
+	/* Keeps both directions' speeds. */
+	irq = spin_lock_irqsave(&adapter->lock);
+
+	adapter->downstream_bps = notification->downstream_bps;
+	adapter->upstream_bps = notification->upstream_bps;
+
+	spin_unlock_irqrestore(&adapter->lock, irq);
+
+	/* The interface reports the faster direction as its link's speed, in Mb/s, which ifconfig and Settings show. */
+	fastest = notification->downstream_bps;
+	if (notification->upstream_bps > fastest)
+		fastest = notification->upstream_bps;
+	mbps = fastest / 1000000U;
+
+	/* An adapter without its interface yet has nowhere to show it. */
+	if (adapter->net_device == NULL)
+		return;
+
+	/* Logs a speed that changed, for a look at the link without the desktop. */
+	if (adapter->net_device->link_mbps != mbps) {
+		kern_logf("usb-cdc-ecm: %s link %u Mb/s\n",
+			  adapter->net_device->name,
+			  (unsigned)mbps);
+	}
+
+	/* The speed ifconfig and Settings read (SIOCGIFSTATS). */
+	adapter->net_device->link_mbps = mbps;
 }
 
 /* Puts the receive and notification transfers back on. */
@@ -1310,7 +1347,7 @@ ecm_rearm(
 		notification ? adapter->notification_urb : adapter->rx_urb;
 	void *buffer = notification ? (void *)adapter->notification_buffer
 				    : (void *)adapter->rx_buffer;
-	size_t length = notification ? ECM_NOTIFICATION_SIZE : ECM_FRAME_SIZE;
+	size_t length = notification ? adapter->notification_length : ECM_FRAME_SIZE;
 	int error = ecm_start_urb(adapter, urb, buffer, length, 0);
 	unsigned long irq = spin_lock_irqsave(&adapter->lock);
 	unsigned *retry = notification ? &adapter->notification_retries
@@ -1883,6 +1920,8 @@ ecm_attach(
 	adapter->data_alternate = binding.data_alternate;
 	adapter->bulk_out_max_packet_size =
 		drv_usb_endpoint_max_packet_size(binding.bulk_out);
+	adapter->notification_length = drv_usb_cdc_notification_transfer_length(
+		drv_usb_endpoint_max_packet_size(binding.notification));
 	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-cdc-ecm");
 
 	/* Checks the operation status. */
