@@ -18,6 +18,7 @@
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/vulkan-device.h"
 #include "drivers/gpu/bcm2711/vulkan-sync.h"
+#include "drivers/gpu/bcm2711/vulkan-queue.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/vulkan-input.h"
@@ -128,6 +129,8 @@ static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *s
 static void record_test(struct bcm2711_vulkan_session *session);
 void ws141_client_encode_buffer_copy(struct vulkan_writer *writer, uint64_t command_id, uint64_t source_id, uint64_t destination_id, const VkBufferCopy *regions, uint32_t count);
 void ws141_client_encode_raster_copy(struct vulkan_writer *writer, uint64_t command_id, uint64_t buffer_id, uint64_t image_id, VkImageLayout layout, const VkBufferImageCopy *regions, uint32_t count, VkBool32 upload);
+extern void ws141_client_encode_submit(struct vulkan_writer *writer, uint64_t command_id, uint64_t semaphore_id, uint64_t fence_id, uint32_t mode);
+static void queue_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
 static void raster_copy_test(struct bcm2711_vulkan_session *session);
 static void buffer_copy_test(struct bcm2711_vulkan_session *session);
 static void transfer_test(struct bcm2711_vulkan_session *session);
@@ -426,6 +429,20 @@ kern_io_read_barrier(
 	native_read_barriers++;
 
 	/* Succeeded: the fixture observed the output visibility boundary. */
+	return;
+}
+
+/*
+ * Observes the actual worker fault publication's wake without inventing a host scheduler or common completion callback.
+ */
+void
+waitq_wake_one(
+	struct wait_queue *queue)
+{
+	/* No host thread sleeps on this explicit single-thread queue fixture. */
+	(void)queue;
+
+	/* Succeeded: actual worker fault publication may proceed without physical scheduling. */
 	return;
 }
 
@@ -3161,6 +3178,7 @@ record_test(
 	transfer_test(session);
 	buffer_copy_test(session);
 	raster_copy_test(session);
+	queue_test(session, command_object);
 
 	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
 	set->pending = 1;
@@ -3231,6 +3249,13 @@ dispatch(
 
 	/* Device root routing must either consume one exact opcode or leave it unchanged for another typed module. */
 	error = bcm2711_vulkan_device_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Complete queue submits own native retirement independently of the decoder trailer. */
+	error = bcm2711_vulkan_queue_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled != 0)
@@ -3355,6 +3380,228 @@ dispatch(
 
 	/* Succeeded: one real typed native module consumed the complete selected command. */
 	return 0;
+}
+
+/* Exercises the unchanged actual client submit encoder across full native preparation, binary chains, fence retirement and uncertainty. */
+static void
+queue_test(
+    struct bcm2711_vulkan_session *session,
+    struct bcm2711_vulkan_object *command_object)
+{
+	struct bcm2711_render_device *controller;
+	struct bcm2711_vulkan_session *old_namespace;
+	struct bcm2711_vulkan_object *fence_object;
+	struct bcm2711_vulkan_object *sem_object;
+	struct bcm2711_vulkan_object *once_object;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_command_buffer *once;
+	struct bcm2711_vulkan_sync *fence;
+	struct bcm2711_vulkan_sync *semaphore;
+	struct vulkan_object pool;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkFenceCreateInfo create;
+	VkSemaphoreCreateInfo sem_create;
+	VkCommandBufferAllocateInfo allocation;
+	VkCommandBufferBeginInfo recording;
+	uint8_t wire[2048];
+	uint32_t index;
+	uint32_t calls;
+	unsigned baseline;
+	unsigned prepared_baseline;
+	int error;
+
+	/* The actual controller/primary graph already exists; the explicit host runner never performs physical DMA or QPU execution. */
+	controller = session->render->device;
+	old_namespace = session->render->vulkan;
+	session->render->vulkan = session;
+	command = command_object->payload;
+	baseline = allocations;
+	calls = native_execute_calls;
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FENCE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkFenceCreateInfo(&writer, &create);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 900);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	fence_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FENCE, 900);
+	assert(fence_object != NULL);
+	fence = fence_object->payload;
+	memset(&sem_create, 0, sizeof(sem_create));
+	sem_create.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SEMAPHORE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSemaphoreCreateInfo(&writer, &sem_create);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 901);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	sem_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_SEMAPHORE, 901);
+	assert(sem_object != NULL);
+	semaphore = sem_object->payload;
+	prepared_baseline = allocations;
+
+	/* An empty actual submit signals its ordinary native fence after preceding FIFO work without launching a GPU job. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 900, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && fence->signaled && !fence->pending);
+	assert(native_execute_calls == calls && allocations == prepared_baseline);
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_FENCES, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 900);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && !fence->signaled);
+
+	/* A real signal-only batch completes one binary signal; repeating it without a consumption changes no live payload. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 0, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && semaphore->signaled);
+	assert(semaphore->signals_reserved == 1 && semaphore->signals_completed == 1 && semaphore->waits_completed == 0);
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 900, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && semaphore->signaled && !fence->signaled && !fence->pending);
+	assert(allocations == prepared_baseline && native_execute_calls == calls);
+
+	/* A late absent second primary unwinds an already prepared first primary and both proposed binary transitions without any live effect. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 900, 2);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && command->pending == 0 && !fence->signaled && !fence->pending);
+	assert(semaphore->signals_completed == 1 && semaphore->waits_completed == 0 && semaphore->signaled);
+	assert(allocations == prepared_baseline && native_execute_calls == calls);
+
+	/* HOST is forbidden for submit waits and COMPUTE is absent from this graphics queue; neither refusal consumes a prior native signal. */
+	for (index = 5; index <= 6; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+		ws141_client_encode_submit(&writer, 151, 901, 900, index);
+		error = execute(session, &writer, &reader);
+		assert(error == ENOTSUP && semaphore->signaled && !fence->pending && !fence->signaled);
+		assert(command->pending == 0 && allocations == prepared_baseline && native_execute_calls == calls);
+	}
+
+	/* Early and partial CPU preparation OOM return ordinary Vulkan allocation failure with every input state unchanged. */
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+		ws141_client_encode_submit(&writer, 151, 901, 900, 3);
+		if (index == 0) {
+			fail_after = 1;
+		} else {
+			fail_after = 5;
+		}
+
+		/* Both refusal points occur before live semaphore/fence publication or the explicit mock native runner. */
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
+		assert(command->pending == 0 && !fence->signaled && !fence->pending && semaphore->signaled);
+		assert(semaphore->signals_completed == 1 && semaphore->waits_completed == 0);
+		assert(allocations == prepared_baseline && native_execute_calls == calls);
+	}
+
+	/* Actual wait-primary-signal-wait ordering completes the real native pass before its following signals and final fence. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 900, 3);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && native_execute_calls == calls + 1U);
+	assert(command->pending == 0 && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	assert(semaphore->signals_reserved == 2 && semaphore->signals_completed == 2);
+	assert(semaphore->waits_reserved == 2 && semaphore->waits_completed == 2 && !semaphore->signaled && !semaphore->pending);
+	assert(fence->signaled && !fence->pending && allocations == prepared_baseline);
+
+	/* A real independently recorded empty one-time primary becomes invalid only after actual accepted execution, with no GPU launch. */
+	memset(&pool, 0, sizeof(pool));
+	pool.wire_id = 150;
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocation.commandPool = (VkCommandPool)(uintptr_t)&pool;
+	allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocation.commandBufferCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_COMMAND_BUFFERS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferAllocateInfo(&writer, &allocation);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 157);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	once_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 157);
+	assert(once_object != NULL);
+	once = once_object->payload;
+	memset(&recording, 0, sizeof(recording));
+	recording.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+	recording.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 157);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 157);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 157, 901, 0, 4);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && once->state == BCM2711_VULKAN_COMMAND_INVALID && once->pending == 0);
+	assert(native_execute_calls == calls + 1U);
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 157, 901, 0, 4);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && once->state == BCM2711_VULKAN_COMMAND_INVALID && once->pending == 0);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, 157);
+	assert(error == 0 && allocations == prepared_baseline);
+
+	/* An uncertain real native-job handoff reports DEVICE_LOST and keeps the whole pending primary instead of signaling its fence. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_FENCES, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 900);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	native_execute_error = ETIMEDOUT;
+	native_execute_retired = false;
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 900, 4);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	assert(controller->worker.uncertain && controller->space.native->hardware.faulted && controller->quarantine != NULL);
+	assert(command->pending == 1 && !fence->signaled && !fence->pending && fence->status == VK_ERROR_DEVICE_LOST);
+
+	/* Empty work cannot hide native uncertainty behind a fresh decoder reply or newly signaled fence. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_QUEUE_SUBMIT, 1);
+	ws141_client_encode_submit(&writer, 151, 901, 0, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EIO && !fence->signaled && command->pending == 1);
+
+	/* No physical DMA ran; explicit synthetic reset admission permits actual whole-owner retirement without claiming a production reset. */
+	native_execute_error = 0;
+	native_execute_retired = true;
+	controller->space.native->hardware.faulted = false;
+	controller->worker.uncertain = false;
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == 0 && controller->quarantine == NULL && command->pending == 0 && allocations == prepared_baseline);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_FENCE, 900);
+	assert(error == 0);
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_SEMAPHORE, 901);
+	assert(error == 0 && allocations == baseline);
+	session->render->vulkan = old_namespace;
+	puts("WS141 actual client QueueSubmit/full CPU preflight/binary chains/native fence/one-time/OOM/whole uncertain quarantine: PASS");
+
+	/* Succeeded: actual queue and native primary source respects complete input, retirement and independent synchronization boundaries. */
+	return;
 }
 
 /* Exercises exact client sync records, native payload observation and atomic reset/destruction across independent pending owners. */
