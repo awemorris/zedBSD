@@ -747,6 +747,7 @@ struct kl_backend_bluetooth;
 #define KL_BACKEND_BT_FORGET		4U
 #define KL_BACKEND_BT_CONNECT		5U
 #define KL_BACKEND_BT_DISCONNECT	6U
+#define KL_BACKEND_BT_PAIR_PHONE	7U	/* pair a phone as this user's phone (bluetoothd's PAIR ... phone=1, ws197-p004c) */
 
 /* A pairing's questions. */
 #define KL_BACKEND_BT_ASK_CONFIRM	1U	/* the same number on both sides? (yes or no) */

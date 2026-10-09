@@ -631,7 +631,11 @@ struct se_printers {
  * (T1-438: the log says it even when no change comes), whether the desktop was told to watch,
  * when the scan was last asked (0: not scanning), the devices as last
  * drawn (the clicks name them by their place), the request asked (0 for
- * none) and its kind, and the last answer (red for a failure).
+ * none) and its kind, and the last answer (red for a failure).  The
+ * phone's switch (ws197-p004c, "Use as phone"): whether its link is
+ * watched, the link as last told (phone_known 0 before), and the switch
+ * under way: the step (SE_PHONE_STEP_*), on or off, the phone's address,
+ * and the link_set asked (0 for none).
  */
 struct se_bluetooth {
 	int state_logged;
@@ -643,7 +647,19 @@ struct se_bluetooth {
 	char doing[16];
 	char message[SE_MESSAGE];
 	int message_bad;
+	int phone_watching;
+	struct kl_phone_link phone_link;
+	int phone_known;
+	unsigned phone_step;
+	int phone_on;
+	char phone_address[KL_BLUETOOTH_ADDRESS_MAX];
+	uint32_t phone_request;
 };
+
+/* The steps of the phone's switch: none, the pairing as the user's phone, its link_set. */
+#define SE_PHONE_STEP_NONE	0U
+#define SE_PHONE_STEP_PAIR	1U
+#define SE_PHONE_STEP_LINK	2U
 
 /*
  * The Languages page's system language (ws158-p004): the language of the

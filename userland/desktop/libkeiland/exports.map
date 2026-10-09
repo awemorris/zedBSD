@@ -132,6 +132,7 @@
 		kl_system_sharing_query;
 		kl_system_notify;
 		kl_system_notify_withdraw;
+		kl_system_notify_lock;
 		kl_system_take_notify_event;
 		kl_system_mail_arrived;
 		kl_system_mail_listen;
@@ -390,6 +391,7 @@
 		kl_app_take;
 		kl_app_system;
 		kl_app_notify;
+		kl_app_notify_lock;
 		kl_app_display;
 		kl_app_window_create;
 		kl_window_set_menu;

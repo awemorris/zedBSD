@@ -385,6 +385,42 @@ kl_app_notify(
 }
 
 /*
+ * Posts a notification of the application with what the lock screen
+ * shows of it (ws197-p004c), without waiting for its number.
+ */
+int
+kl_app_notify_lock(
+	struct kl_app *app,
+	const char *title,
+	const char *body,
+	const char *lock_text)
+{
+	struct kl_notification notification;
+	struct kl_system *system;
+	int error;
+
+	/* The application's system. */
+	if (app == NULL || title == NULL)
+		return EINVAL;
+	system = kl_app_system(app);
+	if (system == NULL)
+		return ENOTSUP;
+
+	/* The words, under the application's ID. */
+	memset(&notification, 0, sizeof(notification));
+	notification.app = app->application;
+	notification.title = title;
+	notification.body = body;
+	error = kl_system_notify_lock(system, &notification, lock_text, NULL);
+	if (error != 0)
+		return error;
+
+	/* Sent at once. */
+	(void)wl_display_flush(app->display);
+	return 0;
+}
+
+/*
  * Reports the application's connection.
  */
 struct wl_display *

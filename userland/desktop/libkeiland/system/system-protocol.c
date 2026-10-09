@@ -356,6 +356,7 @@ static const struct wl_message system_notify_requests[] = {
 	{ "destroy", "", NULL },
 	{ "post", "uusssu", system_plain_types },
 	{ "withdraw", "uu", system_plain_types },
+	{ "post_lock", "27uusssus", system_plain_types },
 };
 
 /* The events of kl_system_notify_v1. */
@@ -366,11 +367,11 @@ static const struct wl_message system_notify_events[] = {
 	{ "result", "uuu", system_plain_types },
 };
 
-/* kl_system_notify_v1, made at the manager's version (13): three requests and four events.  It lives for the program. */
+/* kl_system_notify_v1, made at the manager's version (13, post_lock since 27): four requests and four events.  It lives for the program. */
 const struct wl_interface kl_system_notify_v1_interface = {
 	KL_SYSTEM_NOTIFY_NAME,
-	KL_SYSTEM_SINCE_NOTIFY,
-	3,
+	KL_SYSTEM_SINCE_NOTIFY_LOCK,
+	4,
 	system_notify_requests,
 	4,
 	system_notify_events

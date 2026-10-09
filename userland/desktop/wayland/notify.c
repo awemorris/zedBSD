@@ -511,6 +511,35 @@ kwl_notify_waiting(
 	return notify_count(model, KWL_NOTIFY_WAITING, 0U, 1);
 }
 
+/*
+ * Sets what the lock screen shows of a notification (ws197-p004c): its
+ * words, cleaned as a title's, or "" for nothing.  Returns 0, ENOENT for a
+ * number not kept, or EINVAL for words too long.
+ */
+int
+kwl_notify_set_lock_text(
+	struct kwl_notify_model *model,
+	uint32_t id,
+	const char *text)
+{
+	struct kwl_notification *item;
+	int fits;
+
+	/* The notification, and words that fit. */
+	item = notify_item(model, id);
+	if (item == NULL)
+		return ENOENT;
+	if (text == NULL)
+		text = "";
+	fits = notify_fits(text, KWL_NOTIFY_TITLE_MAX);
+	if (!fits)
+		return EINVAL;
+
+	/* Succeeded: kept on one line. */
+	(void)kwl_notify_clean(item->lock_text, sizeof(item->lock_text), text, 0);
+	return 0;
+}
+
 /* Finds a notification by its number; NULL when there is none. */
 const struct kwl_notification *
 kwl_notify_find(
