@@ -123,6 +123,27 @@ main(
 }
 
 /*
+ * Models accepted provider requests outside the IRQ guard during exclusive admission.
+ */
+int
+drv_rpi4_firmware_property(
+	uint32_t tag,
+	uint32_t *values,
+	unsigned request_count,
+	unsigned capacity,
+	uint32_t *answered)
+{
+	/* Native list publication owns BUSY, but firmware requests must not hold a spinlock. */
+	assert(test_display.flip.busy && test_display.flip.guard.held.value == 0);
+	assert(tag == 0x00038002U && request_count == 3 && capacity == 3);
+	assert(values[0] == 4 && values[2] == 0);
+	*answered = 8;
+
+	/* Succeeded: the modeled provider accepted the requested floor. */
+	return 0;
+}
+
+/*
  * Models ordered reads from persistent register windows.
  */
 uint32_t
@@ -328,6 +349,9 @@ setup(
 	test_display.screen.pitch = 7680;
 	test_display.screen.format = format;
 	test_display.scanout_started = true;
+	test_display.max_core_hz = 500000000;
+	test_display.console_core_hz = 137600000;
+	test_display.refresh_millihz = 60000;
 	test_display.adoption_armed = true;
 	test_display.first_frame = true;
 	for (slot = 0; slot < 2; slot++) {

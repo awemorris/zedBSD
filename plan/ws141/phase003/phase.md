@@ -2,7 +2,7 @@
 
 # ws141-p003: display（firmware出力先の特定 → Linux順の再初期化 → 初回scanout → flip/合成/統合）
 
-Status: in-progress（i09のsoftware/統合範囲はcleared、mainへ統合済み。whole Phaseの実機/後続機能は未達）
+Status: in-progress（i11でbuffer/合成/登録/起動診断を実装・host/build確認済み。実機受け入れは未達）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: none
@@ -95,3 +95,10 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 ## i10の統合結果（2026-10-09）
 
 実装8ca85c4a9、main統合181339820。統合版host3試験とdriver=y build PASS（warning/error0/checker3 PASS）、nはup-to-date。i10部分はcleared、whole Phaseはin-progress。未接続のbuffer owner/display登録・P3・実機R0/P1/P2/IRQ/console RAM寿命とQ1/T1回帰は保持。[evidence/再開点](../execution-20261009.md#i10のmain統合結果2026-10-09)。
+
+
+## i11のsoftware結果と現行の実機手順（2026-10-09）
+
+allocator/reference owner、2-plane/clock/adoption、ordinary copy presentのdisplay opsとboot登録を実装。起動のP1で1秒frame観測、P2でgreen/purple stripe付きprivate targetをflip、P3で右上半透明checkerを合成し、それぞれconsole復帰を確認してP5へ登録。各段のstop/pauseを保持。host4 PASS・driver y/n build warning/error0・全文C/補助style/改名確認済み。i11のsoftware部分だけcleared、実機/RAM寿命/Q1-T1回帰待ちでwhole Phaseはin-progress。[exact evidence/制限](../execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
+
+実機ではR0 ok/current43→P1のcount（既存modeのrefreshと照合）→P2の2色と復帰→P3の透過/位置と復帰→P5 nodeを写真で確認する。stop=P1はR0まで、stop=P2はP1まで、stop=P3はP2と復帰まで、stop=P5はP3と復帰まで。実機はユーザーが後で実施と承認済み、今回写真/scanout成功の主張はない。p005はこのdisplay software出力へ接続し、Keiland renderingはp006後。[WS全体の変更](../ws.md#完成までの自走p006の実装範囲確定2026-10-09)。

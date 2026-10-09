@@ -231,6 +231,11 @@ struct bcm2711_display {
 
 	/* Set only after the new list and a fresh scanout frame are observed. */
 	bool scanout_started;
+	uint32_t refresh_millihz;
+
+	/* R0 captures the provider ceiling and the sole output bandwidth requirement. */
+	uint32_t max_core_hz;
+	uint32_t console_core_hz;
 
 	/* Persistent synchronous flip state shares lifetime with its IRQ owners. */
 	struct bcm2711_flip_state flip;
@@ -306,6 +311,7 @@ int bcm2711_display_irq_open(struct bcm2711_display *display, uint32_t region);
 void bcm2711_display_frame_arm(struct bcm2711_display *display);
 void bcm2711_display_irq_mask(struct bcm2711_display *display);
 int bcm2711_display_start(const struct drv_fdt *fdt, struct bcm2711_display *display);
+int bcm2711_display_register(struct bcm2711_display *display);
 int bcm2711_v3d_discover(const struct drv_fdt *fdt, struct bcm2711_v3d *v3d);
 
 #endif

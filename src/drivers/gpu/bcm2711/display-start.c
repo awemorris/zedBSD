@@ -65,6 +65,7 @@ bcm2711_display_start(
 	struct bcm2711_display_mode mode;
 	uint32_t order;
 	uint32_t max_core_hz;
+	uint64_t pixels_per_frame;
 	bool allowed;
 	int error;
 
@@ -123,6 +124,10 @@ bcm2711_display_start(
 	/* Succeeded: scanout adoption was observed, not inferred from enable bits. */
 	display->channel = 0;
 	display->scanout_started = true;
+	display->max_core_hz = max_core_hz;
+	display->console_core_hz = start_program.commands[start_program.count - 1U].value;
+	pixels_per_frame = (uint64_t)(mode.width + mode.hfront + mode.hsync + mode.hback) * (mode.height + mode.vfront + mode.vsync + mode.vback);
+	display->refresh_millihz = (uint32_t)(((uint64_t)mode.tmds_hz * 1000U + pixels_per_frame / 2U) / pixels_per_frame);
 	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 ok hdmi%u ch0 list43 frame observed", display->port);
 	return 0;
 }
