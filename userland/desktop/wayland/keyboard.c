@@ -298,6 +298,13 @@ enum keyboard_tool_kind {
 /* How long a panel takes to grow out of its edge or to go back into it (design §2.8's time). */
 #define KEYBOARD_SLIDE_MS	200U
 
+/*
+ * How long past a slide's end its frame at the end is still waited for
+ * (ws102-p010): the frame that puts the panel at its end and logs the
+ * slide's measurement.
+ */
+#define KEYBOARD_SLIDE_TAIL_MS	300U
+
 /* How far the title band is dragged towards the panel's edge to close it. */
 #define KEYBOARD_SWIPE_CLOSE	80
 
@@ -674,6 +681,7 @@ static int keyboard_panel_release(struct kwl_server *server, uint32_t button);
 static uint64_t keyboard_microseconds(void);
 static void keyboard_latency_sent(struct kwl_server *server);
 static void keyboard_slide_frame(int leaving, uint64_t elapsed);
+static int keyboard_slide_unfinished(uint64_t now);
 static void keyboard_draw_emoji(struct kwl_server *server, VkCommandBuffer command);
 static const char *keyboard_kind_name(enum keyboard_kind kind);
 static const char *keyboard_source_name(enum kwl_contact_source source);
@@ -930,6 +938,7 @@ kwl_keyboard_tick(
 	uint64_t now;
 	float slide;
 	float home;
+	int unfinished;
 	int same;
 
 	/* The corners' places, once, for the tests. */
@@ -968,8 +977,18 @@ kwl_keyboard_tick(
 			keyboard.moving = 0;
 	}
 
-	/* A panel growing out of its edge or going back into it is drawn every frame; one gone back is done with. */
+	/*
+	 * A panel growing out of its edge or going back into it is drawn every
+	 * frame, and once more past the slide's end, so that its last frame is
+	 * at the end and the slide is measured (ws102-p010: without it the
+	 * slide's end was logged only when something else drew a frame, and a
+	 * leaving panel was done with before its frame at the end); one gone
+	 * back is done with after that frame.
+	 */
+	unfinished = keyboard_slide_unfinished(now);
 	if (now - keyboard.slide_ms < KEYBOARD_SLIDE_MS) {
+		server->dirty = 1;
+	} else if (unfinished) {
 		server->dirty = 1;
 	} else if (keyboard.leaving != PANEL_NONE) {
 		keyboard.leaving = PANEL_NONE;
@@ -5146,4 +5165,30 @@ keyboard_slide_frame(
 	keyboard.slide_done = 1;
 	printf("KWL OSK slide end leaving=%d frames=%u first_ms=%llu max_gap_ms=%llu\n", leaving, keyboard.slide_frames,
 	    (unsigned long long)keyboard.slide_first_ms, (unsigned long long)keyboard.slide_gap_ms);
+}
+
+/*
+ * Whether the slide still waits for its frame past its end (ws102-p010):
+ * no frame of it was drawn yet, or its end is not logged yet, and it ended
+ * only a short while ago (a panel no longer drawn is not waited for long).
+ * Returns 1 while a frame is still to be drawn for it, else 0.
+ */
+static int
+keyboard_slide_unfinished(
+	uint64_t now)
+{
+	/* A slide long over is not waited for. */
+	if (now - keyboard.slide_ms >= KEYBOARD_SLIDE_MS + KEYBOARD_SLIDE_TAIL_MS)
+		return 0;
+
+	/* A slide none of whose frames was drawn yet waits for its first. */
+	if (keyboard.slide_seen != keyboard.slide_ms)
+		return 1;
+
+	/* A slide followed waits until its end is logged. */
+	if (keyboard.slide_done == 0U)
+		return 1;
+
+	/* Measured. */
+	return 0;
 }

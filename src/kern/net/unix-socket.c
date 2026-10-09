@@ -461,11 +461,23 @@ unix_socket_receive_begin(
 		return -EINVAL;
 	kern_memset(transaction, 0, sizeof(*transaction));
 	datagram = socket->type == SOCK_DGRAM;
+
+	/*
+	 * A stream has no sender's address: room a caller offers for one is
+	 * given none back, as POSIX ignores msg_name on a connection-mode
+	 * socket (Python's recvmsg always offers room; refusing it failed
+	 * multiprocessing's forkserver, T1-508).
+	 */
+	if (!datagram && address != NULL) {
+		*address_length = 0;
+		address = NULL;
+		address_length = NULL;
+	}
+
+	/* An empty stream receive is done; flags the receive does not know are refused. */
 	if (!datagram && length == 0)
 		return 0;
-	if ((!datagram &&
-	     (address != NULL ||
-	      (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_WAITALL)) != 0)) ||
+	if ((!datagram && (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_WAITALL)) != 0) ||
 	    (datagram && (flags & ~(MSG_DONTWAIT | MSG_PEEK | MSG_TRUNC)) != 0))
 		return -EOPNOTSUPP;
 
