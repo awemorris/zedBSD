@@ -80,3 +80,13 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 ## i09の統合・部分clearance（2026-10-09）
 
 承認済みmailbox修正とLinux順R0初期scanout成果を最新mainへ統合済み（dde7c1ba7）。統合版の実mailbox host/display hostとrpi4 y/n buildがPASS、warning/error0で、i09のsoftware/統合範囲をclearedにした。whole Phaseは実機/flip/合成/登録が未達のためin-progressのまま、closeしない。i08のuncleared履歴を保持し、実機の元の出力先・新list frame採用・buffer寿命/IRQとQ1/T1の回帰を再開条件に残す。commands/版/hash/未実施とWSへの投影は[統合記録](../execution-20261009.md#i09-mainへの統合結果2026-10-09)と[WS結果](../ws.md#i09の統合結果2026-10-09)。
+
+
+## i10: 同期flip部品の部分範囲（2026-10-09）
+
+継続指示によりP1/P2のvblank sequenceとcaller所有bufferの同期flip/console復帰を実装する。起動のflip・連続buffer allocator・P3合成・公開GPU登録は次の統合点に残し、whole Phaseの受け入れを減らさない。R0と同じport/modeを守り、inactive listだけへ書き、timeout時は実際に参照されうるbufferを保持、復帰のfresh frameを観測してから退役する。stateのIRQ/worker排他も部品に含める。[承認・条件・検証範囲](../execution-20261009.md#i10の選択実装範囲2026-10-09)。
+
+
+## i10のsoftware確認・残件（2026-10-09）
+
+同じR0 pipelineを使う実MMIOの同期flip/console復帰とIRQ状態を追加、短いhost3試験・rpi4 y/n buildがPASS。旧/新bufferの保持はadoptionで退役し、timeoutの不確かさはfresh console adoptionだけで解消する。allocator/登録/boot呼び出しは未接続。実機成功の証拠は無く、whole Phaseはin-progressのまま。softwareのexact commands/hash・限界・最新mainへの統合結果は[実行記録i10](../execution-20261009.md#i10の実装確認2026-10-09main統合前)。次の統合点は、保持maskを尊重する連続buffer ownerとdisplay ops/device登録。実機R0/IRQ/console RAM寿命・P1/P2のhardware条件はユーザーが後で確認する。

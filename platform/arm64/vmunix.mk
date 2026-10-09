@@ -110,6 +110,7 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/display-program.c \
 	src/drivers/gpu/bcm2711/display-start.c \
 	src/drivers/gpu/bcm2711/display-execute.c \
+	src/drivers/gpu/bcm2711/display-flip.c \
 	src/drivers/gpu/bcm2711/display-irq.c
 endif
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \

@@ -12,6 +12,12 @@ cc -std=c99 -Wall -Wextra -Werror -Iinclude -Isrc -I. \
 cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror -Iinclude -Isrc -I. \
     plan/ws141/tests/display-execute-host-test.c \
     src/drivers/gpu/bcm2711/display-program.c src/drivers/gpu/bcm2711/display-execute.c \
-    src/drivers/gpu/bcm2711/display-irq.c \
+    src/drivers/gpu/bcm2711/display-irq.c src/drivers/gpu/bcm2711/display-flip.c \
+    plan/ws141/tests/display-lock-host.c \
     -o "$out/display-execute-host-test"
 "$out/display-execute-host-test"
+cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror -Iinclude -Isrc -I. \
+    plan/ws141/tests/display-flip-host-test.c plan/ws141/tests/display-lock-host.c \
+    src/drivers/gpu/bcm2711/display-flip.c src/drivers/gpu/bcm2711/display-irq.c \
+    -o "$out/display-flip-host-test"
+"$out/display-flip-host-test"
