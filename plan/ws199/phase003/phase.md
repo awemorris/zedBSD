@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p003 -->
 # ws199-p003: ログイン・ロック画面の鍵のモードと keypad（設計の i05）
 
-Status: cleared 候補（2026-10-10 P1: KEYOWNER・greeter と lock の鍵のモード・keypad・0.5 秒・sleep で CANCEL と card を閉じる、merge 2f414c00e。host 試験 PASS、build warning 0。QEMU は p004、実機は p005）
+Status: cleared（2026-10-10 Q1 判定: 実装と host 試験、QEMU の T1-525・528。鍵の振る舞いは p005 の 5330）
 Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §3.6〜§3.8・§4.2・§11 の R2・R5・R10
 
 ## ゴール
