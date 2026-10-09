@@ -103,6 +103,8 @@ ARM64_KERNEL_SOURCES += $(ARM64_USB_SOURCES)
 ifeq ($(CONFIG_DRIVER_BCM2711_GPU),y)
 # Native BCM2711 nodes need the common GPU core even without a PCI GPU.
 ARM64_KERNEL_SOURCES += $(filter-out $(KERN_GPU_SOURCES),src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c)
+# The shared Zlib scalar parser has no device or Gen12 code-generation dependencies.
+ARM64_KERNEL_SOURCES += $(filter-out $(KERN_GPU_SOURCES),src/drivers/gpu/i915/compiler/spirv.c)
 ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/stage.c src/drivers/gpu/bcm2711/fdt-util.c \
 	src/drivers/gpu/bcm2711/firmware.c src/drivers/gpu/bcm2711/display.c \
@@ -110,7 +112,9 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/v3d.c src/drivers/gpu/bcm2711/v3d-power.c \
 	src/drivers/gpu/bcm2711/v3d-hardware.c src/drivers/gpu/bcm2711/mmu.c \
 	src/drivers/gpu/bcm2711/v3d-job.c src/drivers/gpu/bcm2711/v3d-diagnostic.c \
-	src/drivers/gpu/bcm2711/cl.c src/drivers/gpu/bcm2711/buffer.c \
+	src/drivers/gpu/bcm2711/cl.c src/drivers/gpu/bcm2711/qpu.c src/drivers/gpu/bcm2711/buffer.c \
+	src/drivers/gpu/bcm2711/shader.c src/drivers/gpu/bcm2711/shader-analyze.c \
+	src/drivers/gpu/bcm2711/shader-lower.c src/drivers/gpu/bcm2711/shader-output.c \
 	src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/v3d-memory.c \
 	src/drivers/gpu/bcm2711/render-device.c src/drivers/gpu/bcm2711/render-worker.c \
 	src/drivers/gpu/bcm2711/display-program.c \

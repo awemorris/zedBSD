@@ -527,6 +527,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー（クリック）: WS197 の Q16（MAP 1.4・PBAP 1.2 は GOEP 2.0／L2CAP ERTM が必須と P1 が仕様で確かめた）は「(a) 1.1 で RFCOMM だけ（推し）」→ MAP 1.1・PBAP 1.1、ERTM と GOEP 2.0 は Future Work。
 - 2026-10-09 ユーザー（クリック）: WS197 の設計の判断 Q1〜Q16 は「全部推しどおり」（スマホ 1 台、中継だけで保存は ~/Documents/Phone、過去 30 日・最大 500 通、MMS は範囲外、CVSD の後に mSBC、echo の打ち消しなし、lock 画面で着信に応答、Linux・FreeBSD は作らない、Android が先で iPhone は HFP の後、logout で切る、通話中の蓋は suspend、MAP・PBAP 1.1 と RFCOMM）。見積もり約 154 LW。
 - 2026-10-09 ユーザー（クリック）: WS198 は「ベータ3 で S1、推しどおり」→ D1 ベータ3、D2 base の make を直す、D3 tar と圧縮を base に作る、D4 S1（base と desktop の image、外の package なし）が完了の条件、D5 toolchain の規則の変更は Q1 の許可で WS198 が行う。
 - 2026-10-09 ユーザー:「これは優先度は低いですが、zedBSD上でzedBSDをセルフビルド可能にするWSを作りましょう。このケースではホストclangのみ使えばいいですね。工数もそれほど大きくないので、ベータ2に入りそうです。」→ [WS198](ws198/ws.md)。P1 は menuconfig の Noct・Emacs の後に p001（前提の調べと工数）、その後 WS197 の設計。
