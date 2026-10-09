@@ -152,3 +152,8 @@ device-independent Zlib SPIR-V frontendをread-onlyで再利用し、独立QPU4.
 ## i14 native Vulkan root/query checkpoint（2026-10-09）
 
 実client codecとnative sourceでinstance/device/queue graph・physical queries・domainのcallback lifetimeを接続。承認されたshared4 pathでNormal NC RAMのuser mappingを追加、private buffer/VM alias ownershipも確認。host2/rpi4 y build PASS、warning/error0。次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。
+
+
+## i14 root/query/Normal NCの統合（2026-10-09）
+
+Q1最新mainを保持し、object/session/transport/root/queryと承認済みNormal NC mappingを統合。統合treeのhost2/rpi4 y-n build PASS、warning/error0。実装途中のVulkan entrypointsはまだ公開しない。i13/i14はin-progress、次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。[統合evidence](execution-20261009.md#i14-rootquerynormal-ncのmain統合確認2026-10-09)。
