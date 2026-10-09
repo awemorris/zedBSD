@@ -7,8 +7,10 @@
 
 /*
  * passkey-fido2's side of the device helper (fido2.h; ws172-p003): the
- * security keys' nodes are opened and claimed here, as root, so that the
- * helper needs to open nothing; the helper is started with them and its
+ * security keys' nodes are opened and claimed here, as root, and the
+ * smart card slots attached (ws199-p001: a key held to an NFC reader; a
+ * slot's card is powered and claimed by the helper), so that the helper
+ * needs to open nothing; the helper is started with them and its
  * messages are read until its answer.  A "touch" is passed on at once as
  * passkey's "status touch".  A helper that does not answer within the
  * touch's time is killed and the attempt is a timeout.
@@ -31,9 +33,9 @@
 static uint64_t device_now_ms(void);
 
 /*
- * Opens and claims every security key's node.  Returns 0 (none open is
- * not an error: the helper says no-key), or an errno value when the nodes
- * cannot be listed.
+ * Opens and claims every security key's node, and attaches every smart
+ * card slot.  Returns 0 (none open is not an error: the helper says
+ * no-key), or an errno value when the nodes cannot be listed.
  */
 int
 fido2_devices_open(
@@ -58,21 +60,34 @@ fido2_devices_open(
 			devices->count++;
 	}
 
-	/* Succeeded: the keys that could be claimed. */
+	/* The smart card slots, with a card or without (none is not an error). */
+	error = pk_os_list_slots(found, PK_OS_DEVICES_MAX, &count);
+	if (error != 0)
+		count = 0U;
+	for (index = 0U; index < count; index++) {
+		error = pk_os_card_attach(&devices->cards[devices->card_count], found[index].path);
+		if (error == 0)
+			devices->card_count++;
+	}
+
+	/* Succeeded: the keys that could be claimed, and the slots. */
 	return 0;
 }
 
-/* Closes the keys' nodes (their claims go with them). */
+/* Closes the keys' nodes and the slots (their claims go with them). */
 void
 fido2_devices_close(
 	struct fido2_devices *devices)
 {
 	size_t index;
 
-	/* Each one. */
+	/* Each one, and each slot (its card powered off). */
 	for (index = 0U; index < devices->count; index++)
 		pk_os_close(&devices->handles[index]);
 	devices->count = 0U;
+	for (index = 0U; index < devices->card_count; index++)
+		pk_os_card_close(&devices->cards[index]);
+	devices->card_count = 0U;
 }
 
 /*

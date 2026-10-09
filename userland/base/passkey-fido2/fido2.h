@@ -112,10 +112,16 @@ struct fido2_record {
 	char label[FIDO2_LABEL_MAX + 1U];
 };
 
-/* The nodes passkey-fido2 opened: their handles and how many. */
+/*
+ * The nodes passkey-fido2 opened: the USB keys' handles and how many, and
+ * the smart card slots attached (a key may be held to an NFC reader,
+ * ws199-p001 section 5) and how many.
+ */
 struct fido2_devices {
 	struct pk_os_hid handles[PK_OS_DEVICES_MAX];
 	size_t count;
+	struct pk_os_card cards[PK_OS_DEVICES_MAX];
+	size_t card_count;
 };
 
 /* wire.c */

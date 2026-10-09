@@ -271,6 +271,7 @@ Queue: q921（P1、2026-10-10）
 | 日 | i | 内容 | 検証 |
 | --- | --- | --- | --- |
 | 2026-10-10 | i01 | dialog.c（popup）、Security Keys の頁（Software Security Key の Set/Change/Remove を password → PIN 2 回の popup に、鍵の一覧と Remove（password の popup）、Add Key の 4 step: Password → Name（「Security Key」か空いた「Security Key N」、前後の空白を除く）→ Key PIN → Touch → Done）、鍵が 5 本なら Add を灰色、Users の頁は Security Keys への link の card、`locked` の語の行、2 分の idle で password を消して step 1 へ。i01 では Change PIN・Reset Key の button は出さない（i03）。「Not available」は `KL_SYSTEM_HAS_KEYS`・`KL_SYSTEM_HAS_PIN` で判定 | zedBSD の build（settings、warning 0）、host の renderer（plan/ws089/tests/host-build.sh の objects と、scratch の stub で add・remove・PIN の成功・失敗の答えを流し、PNG を目で確認: 頁、各 step、busy、bad-secret・locked の 2 行の誤り、Esc で閉じる）、style-check（変えた所） |
+| 2026-10-10 | i02（userland の分） | BUG-286: libpasskey に slot の API（`pk_os_list_slots`・`pk_os_card_attach`・`_present`・`_event`・`_select`（電源と FIDO の applet、通らなければ電源を切って claim を放す）・`_power_off`、Linux は stub）。passkey-fido2 は全部の slot を root で attach して helper に渡す。helper: login は USB の鍵が 1 本も答えない時だけ `touch` を出して試みの間に来た card を待つ（reader に在る card は使わない、R3 の推し）、登録は在る card を 1 本と数え（USB と合わせ 2 本以上は `many-keys`）、無ければ当てるのを待つ。security.md に NFC の段落。kernel の card の事象（§5.3）と backend の `keys_changed` は Q1 の許し待ち | zedBSD の build（passkey-fido2・fidoctl、warning 0）、host 試験 plan/ws172/tests/fido2-host-test.sh・plan/ws161/tests/fidoctl-host-test.sh・libpasskey-host-test.sh PASS、style-check。5330 の NFC の UAT は未実施 |
 
 ## Event
 
