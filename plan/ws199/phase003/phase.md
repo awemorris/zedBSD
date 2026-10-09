@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p003 -->
 # ws199-p003: ログイン・ロック画面の鍵のモードと keypad（設計の i05）
 
-Status: planned（2026-10-10 Q1。p002 の後）
+Status: in-progress（2026-10-10 P1）
 Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §3.6〜§3.8・§4.2・§11 の R2・R5・R10
 
 ## ゴール
@@ -18,3 +18,11 @@ Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §3.6〜§
 
 ## 確かめ
 - host 試験（greeter の鍵のモードの状態の遷移、0.5 秒、抜けで戻る、card の無い時は何もしない）。build warning 0。QEMU に CTAP2 の鍵は無いので鍵の振る舞いは 5330 の UAT。
+
+## 進み（P1）
+
+| 日 | 内容 | 検証 |
+| --- | --- | --- |
+| 2026-10-10 | (1) KEYOWNER の下側: passkey `key-owner NAME|-`、passkey-fido2 は全 account（`-`）か名指しの account の credential を account ごとの group にし、helper が 1 本の鍵（USB か reader に在る card、待たない）に silent（up=false・UV 無し）で group ごとに問う（allowList は鍵の maxCredentialCountInList ごと、言わない鍵は 1 つずつ、2 つ目の group で止める）、最初の group の答えの署名をその account の公開鍵で確かめる（合わなければ none）。答え `ok uid=N user=NAME key-pin key-touch card`、`fail none|many-owners|no-key|many-keys`。sessiond `KEYOWNER`（greeter は `-`、session は自分の user だけ）、policy に触れない（数えない・遅れ無し・signed_in 無し、R2）、sessiond 全体で 1 秒に 1 回、越えたら `ERROR busy`（R10）、答えの名前を passwd で引き直す。**p002 の不具合も直した**: libpasskey の `pk_verify_assertion` が required_flags に関係なく UP を必須にしていたので、unlock の key-touch=0（up=false）が必ず `bad-secret` で数えられていた → UP も required_flags に従う（fidoctl の `-s` の検査も同じ理由で通らなかった） | zedBSD の build（passkey・passkey-fido2・sessiond）warning 0。host 試験 PASS: libpasskey-host-test（verify の UP の組を足した）、fido2-host-test（owner の message の解析）、plan/ws199/tests/sessiond-keys-host-test.sh（KEYOWNER: session・greeter・1 秒・none・PIN を出さない）、sessiond-auth-host-test、passkey-host-test。commit 1b1861597 |
+
+再開点: (2) backend `kl_backend_session_key_owner` と compositor の配線 → (3) greeter・lock の鍵のモード（純粋な状態は新しい file にして host 試験）→ (4) keypad → (5) sleep → (6) AAT → p002 (d)。
