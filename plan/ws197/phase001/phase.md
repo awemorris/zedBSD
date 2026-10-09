@@ -4,7 +4,7 @@
 
 Phase ID: `ws197-p001`
 Parent: [WS197](../ws.md)
-Status: in-progress（第 2 版。第 1 版（711caae2f）の design-reviewer の指摘 R1〜R24（[review-1.md](review-1.md)）を反映。再 review の前。code は書かない）
+Status: in-progress（第 2 版。第 1 版の指摘 R1〜R24（[review-1.md](review-1.md)）を反映済み。第 2 版の再 review の指摘 S1〜S25（[review-2.md](review-2.md)）は未反映: 第 3 版で p002 の前に S1〜S5・S14・S18 を直す（2026-10-09 深夜、Q1 の割り込み（WS193 の menuconfig）で中断）。code は書かない）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-09「beta2.md の P1 の必須は T1・UAT の待ちだけになったので、WS197 の p001 設計を始める」、ユーザー 2026-10-09「OBEX, MAP, Integration, PBAP, HFPの順で実装しますか。beta2.mdの必須が終わってからです。」）
 依存（設計）: [WS143](../../ws143/ws.md) の bluetoothd の今の code（p004 cleared。p005 は in-progress、p006 は test-wait、p003 i02 は未着手。§12 で実装の Phase の依存に直した [R6]）、[WS170](../../ws170/ws.md) の Phone の app と `kl_system_phone_v1`（p001〜p004 cleared）。
@@ -425,3 +425,4 @@ bluetoothd の phone.c（MAP・PBAP・HFP を束ね、持ち主だけに中継�
 
 - 2026-10-09 深夜: 第 1 版（P1、711caae2f）。
 - 2026-10-09 深夜: design-reviewer（agent abb385aae6187503d）の review → [review-1.md](review-1.md)（blocker 2・major 12・minor 10）。第 2 版で全てに答えた（各節の `[Rn]`）。
+- 2026-10-09 深夜: 第 2 版の再 review（agent a6b845b338bd97e31）→ [review-2.md](review-2.md)（S1〜S25。p002 の前に S1〜S5・S14・S18）。第 3 版は未着手（Q1 の割り込みで中断、再開点はここ）。
