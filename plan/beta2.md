@@ -29,10 +29,10 @@
 | 窓の dock の解除のダブルタップ | ✔ 遅れなし | — |
 | ダブルタップからの title bar のドラッグ | ✔ | — |
 | Settings の Wi-Fi の on/off | ✔ | — |
-| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) P1 |
+| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した（文字の中央の描き方の誤り、通知の履歴の文字も）、T1-514 の PNG で確認 |
 | BUG-253（蓋） | ✔ close | — |
 | Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) source の調べで候補 3 つ（firmware の load の後に controller が戻らない・xHCI に列挙されない・intelbt の前の古い image）。5330 の SSH が要る。**Settings の文言と image の版をユーザーに確認** |
-| Terminal の文字のドラッグ | ✘ 押し込みが要る、tap の後のドラッグで選べるように | [BUG-276](bugs/BUG-276.md) P1 |
+| Terminal の文字のドラッグ | ✘ 押し込みが要る、tap の後のドラッグで選べるように | [BUG-276](bugs/BUG-276.md) Terminal は直した（tap の直後の drag を文字の drag に）、実機の UAT で確認。他の app の扱いをユーザーに確認 |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 で確認中、次の UAT で実機 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) P1 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
