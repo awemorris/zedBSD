@@ -83,3 +83,8 @@ p001。
 
 - guest で `python3 -c 'print(1)'`: 未実施。image に入れるには 2700 個ほどの標準 library の file と libz.so.1 の登録が要り、それは p005 の範囲（menuconfig の登録、入れる tree の選び）。p005 の image で T1 に流す案。p002 の受け入れの「guest の試し」をそこへ回すかは Q1 の判定。
 - 再開の条件（p003）: `security/openssl` の stage を pkg-config と同じ形で見せ、`_ssl`・`_hashlib` を build する。
+
+### 2026-10-09 追記: libc の所見のその後（q916 の 3 (1)、Q1 承認「Bug にしない、小さい直し」）
+
+- `<inttypes.h>`: 直した。64 bit と MAX の `PRI*`・`SCN*` は `__PRI_64`（`__LP64__` なら `"l"`、ILP32 なら `"ll"`）、PTR は `__PRI_PTR`（LP64 `"l"`、ILP32 は無し）。`<stdint.h>` が compiler から取る型（x86_64・aarch64・sparcv9 は int64_t・intmax_t・intptr_t が long、i386・m68k は int64_t が long long・intptr_t が int）に合う。試験: 全部の 64/PTR/MAX の `PRI`・`SCN` を正しい型で printf・scanf に渡す program を x86_64・i386・aarch64・sparcv9・m68k の zedBSD target と host の gcc（KERN_UAPI_NATIVE）で `-Wall -Wextra -Wformat=2 -Werror` PASS。逆の試験（long long を PRId64 に渡す）は warning が出る（format の検査が効いていることの確認）。build: vmunix・3 arch の sysroot・libc.so・mkfs・mkswap・libkeiland.so rc 0・warning 0、emacs の api-util.c の syntax 検査 PASS（gpu-dmabuf.c は Linux・FreeBSD の build だけで zedBSD の header を使わない）。
+- `<wchar.h>` の `wint_t`: 直さない。clang の `__WINT_TYPE__`（int）に合わせると大きさは同じだが、C++ の ABI が変わる: 今の libc++.so.1（main の build/amd64/rootfs/usr/lib）が `std::basic_streambuf<wchar_t>::overflow(unsigned int)`（`_ZNSt3__115basic_streambufIwNS_11char_traitsIwEEE8overflowEj`）・`pbackfail(unsigned int)` を export しており、`int_type` が wint_t なので mangled name が `Ej` → `Ei` に変わる。直すには libcxx（toolchain）の作り直しが要るので Q1 へ報告。
