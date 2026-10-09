@@ -45,8 +45,35 @@
 /* The bytes of the queue of packets that came while a command waited. */
 #define BTD_QUEUE_BYTES		(32U * 1024U)
 
-/* How many L2CAP frames may wait for the controller's buffers, and the longest. */
+/*
+ * The queue's room kept (ws197-p002, plan/ws197/phase002/phase.md section
+ * 3.2): the last bytes for the connections' Connection and Disconnection
+ * Complete alone, and more before them for the events, which ACL data and
+ * the scans' reports do not take.
+ */
+#define BTD_QUEUE_COUNTED_RESERVE	1024U
+#define BTD_QUEUE_EVENT_RESERVE		4096U
+
+/*
+ * The notice of packets dropped (ws197-p002 section 3.4), a packet of
+ * bluetoothd's own that the handler gets after every packet that came
+ * before the drop: the type 0xF0 (no H4 type, and the kernel's notices are
+ * one byte long; it never comes from the node and is never traced), the
+ * handle (0xFFFF for events not of one connection), the flags, the first
+ * data channel dropped and the count.
+ */
+#define BTD_PACKET_DROP		0xf0U
+#define BTD_DROP_LENGTH		8U
+#define BTD_DROP_ALL		0xffffU
+#define BTD_DROP_SIGNAL		0x01U
+#define BTD_DROP_DATA		0x02U
+#define BTD_DROP_UNKNOWN	0x04U
+#define BTD_DROP_EVENT		0x08U
+#define BTD_DROP_COUNTED	0x10U
+
+/* How many L2CAP frames may wait for the controller's buffers (a phone's link, at most half of them), and the longest. */
 #define BTD_SEND_FRAMES		16U
+#define BTD_SEND_PHONE_FRAMES	8U
 #define BTD_SEND_FRAME_MAX	(BTD_L2CAP_HEADER + BTD_L2CAP_MAX)
 
 /* How many connections' sent packets are counted. */
@@ -106,16 +133,36 @@ struct btd_pool {
 };
 
 /*
- * A connection whose sent packets are counted: its handle, whether it is
- * LE, and how many of its packets the controller has not completed yet.
- * The session adds it on a Connection Complete (or LE's) and removes it on
- * the Disconnection Complete, which gives its packets back to the pool.
+ * A connection whose sent packets are counted: its handle, its device's
+ * address, whether it is LE, and how many of its packets the controller
+ * has not completed yet.  The session adds it on a Connection Complete (or
+ * LE's) and removes it on the Disconnection Complete, which gives its
+ * packets back to the pool.
+ *
+ * ws197-p002: its frames waiting and the most it may have waiting and in
+ * the controller (0: no limit but the pool); and its drops.  sealed says a
+ * packet of it was dropped and every later one is dropped too until its
+ * notice is handed (notice_after: the count of queued packets that came
+ * before the drop, handed first); skip_continuing drops continuing packets
+ * after the notice until a first one; last_cid is the channel of the last
+ * first packet that came, in the order they came.
  */
 struct btd_link_count {
 	int used;
 	uint16_t handle;
+	uint8_t address[BTD_ADDRESS_BYTES];
 	int le;
 	unsigned outstanding;
+	unsigned frames;
+	unsigned frame_limit;
+	unsigned inflight_limit;
+	int sealed;
+	int skip_continuing;
+	uint8_t drop_flags;
+	uint16_t drop_cid;
+	unsigned drop_count;
+	uint32_t notice_after;
+	uint16_t last_cid;
 };
 
 /*
@@ -220,6 +267,24 @@ struct btd_session {
 	unsigned queue_dropped;
 	uint8_t queue[BTD_QUEUE_BYTES];
 
+	/*
+	 * ws197-p002: the packets queued and taken from the queue since the
+	 * start (they wrap; compared by their difference), the events that are
+	 * not of one connection dropped (their notice due after
+	 * events_notice_after packets were taken, events_flags its flags), the
+	 * scans' reports dropped, the continuing packets passed over after a
+	 * notice, and the link the next flush starts with.
+	 */
+	uint32_t enqueued;
+	uint32_t dequeued;
+	int events_noticed;
+	uint8_t events_flags;
+	uint32_t events_notice_after;
+	unsigned events_dropped;
+	unsigned scan_dropped;
+	unsigned continuing_skipped;
+	unsigned flush_next;
+
 	/* The controller's ACL buffers: BR/EDR's pool, LE's, and whether LE shares BR/EDR's. */
 	struct btd_pool acl_pool;
 	struct btd_pool le_pool;
@@ -256,6 +321,9 @@ int btd_session_scan_stop(struct btd_session *session);
 int btd_session_pending(const struct btd_session *session);
 int btd_session_command(struct btd_session *session, uint16_t opcode, const uint8_t *parameters, size_t count);
 int btd_session_send(struct btd_session *session, uint16_t handle, uint16_t cid, const uint8_t *payload, size_t length);
+int btd_session_set_link_limits(struct btd_session *session, uint16_t handle, unsigned frame_limit, unsigned inflight_limit);
+unsigned btd_session_link_room(const struct btd_session *session, uint16_t handle);
+unsigned btd_session_links(const struct btd_session *session, uint16_t *handles, uint8_t (*addresses)[BTD_ADDRESS_BYTES], unsigned max);
 const char *btd_state_name(enum btd_state state);
 uint64_t btd_now_ms(void);
 

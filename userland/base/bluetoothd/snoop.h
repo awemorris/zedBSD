@@ -38,5 +38,6 @@ size_t btd_snoop_header(uint8_t *out, size_t size);
 size_t btd_snoop_record(uint8_t *out, size_t size, uint8_t packet_type, int received, uint64_t unix_us, const uint8_t *packet, size_t length);
 int btd_snoop_open(const char *path);
 void btd_snoop_write(int descriptor, uint8_t packet_type, int received, const uint8_t *packet, size_t length);
+size_t btd_snoop_hide(const uint8_t *packet, size_t length, uint8_t *out, size_t size);
 
 #endif

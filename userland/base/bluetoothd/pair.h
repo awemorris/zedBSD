@@ -18,6 +18,12 @@
  * or to show), one to hear the pairing's end (a PAIRED or ERROR line); and
  * may give a third (ws143-p005, phase005 section 9.2) that takes over the
  * connection of a pairing that succeeded instead of ending it.
+ *
+ * ws197-p002 (plan/ws197/phase002/phase.md section 7): a pairing may be
+ * asked for a phone (PAIR ... phone=1, BR/EDR only).  It then holds the
+ * phone's SDP and RFCOMM channels Pending, refuses a stored key that is
+ * not authenticated, and offers the connection to a fourth hook, the phone
+ * link's, before the HID host's.
  */
 
 #ifndef BLUETOOTHD_PAIR_H
@@ -26,11 +32,13 @@
 #include "userland/base/bluetoothd/acl.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/l2cap.h"
+#include "userland/base/bluetoothd/linkmgr.h"
 #include "userland/base/bluetoothd/session.h"
 #include "userland/base/bluetoothd/smp.h"
 
 #include <stddef.h>
 #include <stdint.h>
+#include <sys/types.h>
 
 /*
  * What the agent is asked: to confirm a number (yes or no), to show a
@@ -67,6 +75,38 @@ typedef void (*btd_pair_done_fn)(void *context, const char *answer);
  * before.
  */
 typedef int (*btd_pair_handoff_fn)(void *context, const uint8_t *address, unsigned type, uint16_t handle, const struct btd_bond *bond);
+
+/*
+ * What a pairing asked for a phone hands the phone link with its
+ * connection (ws197-p002 section 7.2): the device's address and type, the
+ * connection's handle, the bond just stored, the uid of the client that
+ * asked, the encryption key's size the pairing read, the Class of Device
+ * the last scan saw (have_class 0: the device was not in the scan), the
+ * pairing's table of channels (the phone link moves them to its own,
+ * btd_l2cap_move, and refuses those left before it returns) and the frame
+ * being put together.  It lives on the pairing's stack for the hook's call.
+ */
+struct btd_pair_handoff {
+	const uint8_t *address;
+	unsigned type;
+	uint16_t handle;
+	const struct btd_bond *bond;
+	uid_t uid;
+	unsigned key_size;
+	int have_class;
+	uint32_t class_of_device;
+	struct btd_l2cap *l2cap;
+	struct btd_reassembly *reassembly;
+};
+
+/*
+ * Takes over the connection of a phone's pairing that succeeded (the
+ * phone link).  Returns 1 when it took the connection, or 0 with *why the
+ * word the PAIRED line gives (unauthenticated, key-size, not-phone, busy,
+ * ...); the pairing then refuses the channels it held Pending and offers
+ * the connection to the HID host's hook.
+ */
+typedef int (*btd_pair_phone_fn)(void *context, const struct btd_pair_handoff *handoff, const char **why);
 
 /*
  * The pairing of one device, and the hooks of the daemon.  It lives in the
@@ -134,10 +174,31 @@ struct btd_pair {
 	btd_pair_handoff_fn handoff;
 	void *handoff_context;
 	unsigned handed;
+
+	/*
+	 * ws197-p002: whether the pairing is for a phone and the uid of the
+	 * client that asked; the phone link's hook (NULL: none) and its
+	 * context; and the hook's answer (phone_taken, or why it did not take
+	 * the connection), which the PAIRED line ends with.
+	 */
+	int phone;
+	uid_t uid;
+	btd_pair_phone_fn phone_handoff;
+	void *phone_context;
+	int phone_taken;
+	const char *phone_why;
+
+	/*
+	 * ws197-p002 section 6.2: the link manager whose one BR/EDR page the
+	 * pairing takes for its Create Connection (NULL: none, the page is
+	 * not shared), and whether the pairing's page is out.
+	 */
+	struct btd_linkmgr *linkmgr;
+	int paging;
 };
 
 void btd_pair_init(struct btd_pair *pair, struct btd_session *session, const char *keys_folder, btd_pair_ask_fn ask, btd_pair_done_fn done, void *context, btd_random_fn random, void *random_context);
-int btd_pair_start(struct btd_pair *pair, const uint8_t *address, unsigned type, int agent);
+int btd_pair_start(struct btd_pair *pair, const uint8_t *address, unsigned type, int agent, int phone, uid_t uid);
 void btd_pair_handle(void *context, struct btd_session *session, const uint8_t *packet, size_t length);
 void btd_pair_answer(struct btd_pair *pair, int accepted);
 void btd_pair_tick(struct btd_pair *pair, uint64_t now);
@@ -147,5 +208,7 @@ void btd_pair_lost(struct btd_pair *pair);
 int btd_pair_active(const struct btd_pair *pair);
 int btd_pair_owns(const struct btd_pair *pair, const uint8_t *address);
 void btd_pair_set_handoff(struct btd_pair *pair, btd_pair_handoff_fn handoff, void *context);
+void btd_pair_set_phone_handoff(struct btd_pair *pair, btd_pair_phone_fn handoff, void *context);
+void btd_pair_set_linkmgr(struct btd_pair *pair, struct btd_linkmgr *linkmgr);
 
 #endif

@@ -99,6 +99,21 @@
 /* A connection handle's bits. */
 #define SESSION_HANDLE_MASK		0x0fffU
 
+/*
+ * ws197-p002: an ACL packet's packet boundary flag (bits 12 and 13 of its
+ * handle's field) for a continuing packet, the offsets of its first
+ * packet's L2CAP channel, the signalling channels of BR/EDR and LE, the
+ * LE extended advertising report, Data Buffer Overflow, and the half of
+ * the counters' range that tells a count due from one to come.
+ */
+#define SESSION_BOUNDARY_SHIFT		12U
+#define SESSION_BOUNDARY_CONTINUING	0x01U
+#define SESSION_ACL_CID			7U
+#define SESSION_CID_SIGNALLING		0x0001U
+#define SESSION_CID_LE_SIGNALLING	0x0005U
+#define SESSION_LE_EXTENDED_REPORT	0x0dU
+#define SESSION_DUE_RANGE		0x80000000U
+
 /* The ACL pool assumed when the controller does not tell its own (one small packet at a time). */
 #define SESSION_POOL_LENGTH_LEAST	27U
 
@@ -143,7 +158,17 @@ static int session_dequeue(struct btd_session *session);
 static void session_hand(struct btd_session *session);
 static int session_counted_event(struct btd_session *session, const struct btd_event *event);
 static void session_completed(struct btd_session *session, const struct btd_event *event);
-static void session_link_add(struct btd_session *session, uint16_t handle, int le);
+static void session_link_add(struct btd_session *session, uint16_t handle, int le, const uint8_t *address);
+static void session_link_reset(struct btd_link_count *link);
+static int session_acl_arrival(struct btd_session *session);
+static void session_mark_link(struct btd_session *session, struct btd_link_count *link);
+static void session_mark_events(struct btd_session *session, uint8_t flags);
+static int session_due(const struct btd_session *session, uint32_t after);
+static int session_notice(struct btd_session *session);
+static int session_notice_waiting(const struct btd_session *session);
+static int session_report(const struct btd_event *event);
+static int session_oldest(const struct btd_session *session, uint16_t handle, unsigned *index);
+static void session_frame_done(struct btd_session *session, unsigned index);
 static void session_link_remove(struct btd_session *session, uint16_t handle);
 static struct btd_link_count *session_link(struct btd_session *session, uint16_t handle);
 static struct btd_pool *session_pool(struct btd_session *session, const struct btd_link_count *link);
@@ -240,8 +265,15 @@ int
 btd_session_input(
 	struct btd_session *session)
 {
+	int noticed;
 	int queued;
+	int dropped;
 	int error;
+
+	/* A notice of dropped packets that is due goes before the packets that came after the drop (ws197-p002). */
+	noticed = session_notice(session);
+	if (noticed)
+		return 0;
 
 	/* A packet that came while a command waited goes first, in its order. */
 	queued = session_dequeue(session);
@@ -256,6 +288,13 @@ btd_session_input(
 		return EAGAIN;
 	if (error != 0)
 		return error;
+
+	/* ACL data of a sealed link, or continuing data after its notice, is dropped as it arrives. */
+	if (session->packet[0] == BT_PACKET_ACL) {
+		dropped = session_acl_arrival(session);
+		if (dropped)
+			return 0;
+	}
 
 	/* Handles it. */
 	session_dispatch(session);
@@ -388,8 +427,15 @@ int
 btd_session_pending(
 	const struct btd_session *session)
 {
+	int waiting;
+
 	/* Packets wait in the queue. */
 	if (session->queue_used != 0U)
+		return 1;
+
+	/* A notice of dropped packets waits (with the queue empty, it is due). */
+	waiting = session_notice_waiting(session);
+	if (waiting)
 		return 1;
 
 	/* Nothing queued. */
@@ -449,8 +495,14 @@ btd_session_send(
 	if (length > BTD_L2CAP_MAX)
 		return EMSGSIZE;
 
-	/* Room among the waiting frames. */
+	/* Room among the waiting frames (ws197-p002: a phone's link leaves room to the others within its share). */
 	if (session->frame_count >= BTD_SEND_FRAMES) {
+		session->frames_dropped++;
+		return ENOBUFS;
+	}
+
+	/* Within the link's own share. */
+	if (link->frames >= link->frame_limit) {
 		session->frames_dropped++;
 		return ENOBUFS;
 	}
@@ -461,6 +513,7 @@ btd_session_send(
 	frame->sent = 0U;
 	frame->length = btd_l2cap_frame(frame->bytes, sizeof(frame->bytes), cid, payload, length);
 	session->frame_count++;
+	link->frames++;
 
 	/* As much as the buffers take now. */
 	error = session_flush(session);
@@ -469,6 +522,102 @@ btd_session_send(
 
 	/* Succeeded: sent, or waiting for buffers. */
 	return 0;
+}
+
+/*
+ * Sets the most frames a connection may have waiting (0: as many as the
+ * session holds) and in the controller (0: as many as its pool holds), for
+ * a phone's link (ws197-p002, plan/ws197/phase002/phase.md section 4.2).
+ * Returns 0, or ENOTCONN for a connection the session does not know.
+ */
+int
+btd_session_set_link_limits(
+	struct btd_session *session,
+	uint16_t handle,
+	unsigned frame_limit,
+	unsigned inflight_limit)
+{
+	struct btd_link_count *link;
+
+	/* A connection the controller made. */
+	link = session_link(session, handle);
+	if (link == NULL)
+		return ENOTCONN;
+
+	/* The frames waiting: the session's whole table at most. */
+	link->frame_limit = frame_limit;
+	if (link->frame_limit == 0U || link->frame_limit > BTD_SEND_FRAMES)
+		link->frame_limit = BTD_SEND_FRAMES;
+
+	/* Succeeded: the packets in the controller (0: the pool alone bounds them). */
+	link->inflight_limit = inflight_limit;
+	return 0;
+}
+
+/*
+ * Tells how many more frames a connection may queue now (0 for a
+ * connection the session does not know).
+ */
+unsigned
+btd_session_link_room(
+	const struct btd_session *session,
+	uint16_t handle)
+{
+	const struct btd_link_count *link;
+	unsigned own;
+	unsigned shared;
+	unsigned index;
+
+	/* The connection. */
+	link = NULL;
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		if (session->links[index].used && session->links[index].handle == handle)
+			link = &session->links[index];
+	}
+
+	/* Not counted. */
+	if (link == NULL)
+		return 0U;
+
+	/* Its own share and the table's room. */
+	own = 0U;
+	if (link->frames < link->frame_limit)
+		own = link->frame_limit - link->frames;
+	shared = BTD_SEND_FRAMES - session->frame_count;
+
+	/* Succeeded: the smaller. */
+	if (own < shared)
+		return own;
+	return shared;
+}
+
+/*
+ * Lists the connections the session counts, their handles and addresses
+ * (at most max), for the router's check of its routes after a lost
+ * connection event (ws197-p002 section 3.5).  Returns the count listed.
+ */
+unsigned
+btd_session_links(
+	const struct btd_session *session,
+	uint16_t *handles,
+	uint8_t (*addresses)[BTD_ADDRESS_BYTES],
+	unsigned max)
+{
+	unsigned index;
+	unsigned count;
+
+	/* Each connection counted. */
+	count = 0U;
+	for (index = 0U; index < BTD_LINKS_MAX && count < max; index++) {
+		if (!session->links[index].used)
+			continue;
+		handles[count] = session->links[index].handle;
+		memcpy(addresses[count], session->links[index].address, BTD_ADDRESS_BYTES);
+		count++;
+	}
+
+	/* Succeeded: the count. */
+	return count;
 }
 
 /*
@@ -1553,43 +1702,105 @@ session_scan_le(
 /*
  * Queues the packet just read (it came while a command or a vendor event
  * was awaited) to be handled after the wait.  What only counts the
- * controller's buffers and connections is done now, so a full queue
- * cannot lose it: Number Of Completed Packets is not queued, and a
+ * controller's buffers and connections, or resets the controller, is done
+ * now, so a full queue cannot lose it: Number Of Completed Packets, a
+ * Hardware Error and a Data Buffer Overflow are not queued, and a
  * connection made or ended is counted and queued marked as counted.  The
- * queue is a ring of records, a header (length and flags) and the packet;
- * a packet that does not fit is dropped and counted.
+ * queue is a ring of records, a header (length and flags) and the packet.
+ *
+ * ws197-p002 (plan/ws197/phase002/phase.md section 3.2): the last bytes are
+ * kept for the counted events, and more before them for the other events;
+ * ACL data and the scans' reports take neither.  ACL data of a sealed link
+ * is dropped; a dropped ACL packet seals its link and an event dropped
+ * marks the events, each noticed to the handler after what came before.
  */
 static void
 session_enqueue(
 	struct btd_session *session)
 {
 	struct btd_event event;
+	struct btd_link_count *link;
+	uint16_t handle;
 	uint8_t flags;
 	size_t tail;
 	size_t index;
 	size_t need;
+	size_t free_bytes;
+	size_t reserve;
 	int counted;
+	int report;
+	int dropped;
 	int error;
 
-	/* The buffers given back, and the connections made or ended, are counted now. */
+	/* ACL data of a sealed link, or continuing data after its notice: dropped as it arrives. */
 	flags = 0U;
-	error = btd_hci_event(session->packet, session->packet_length, &event);
+	counted = 0;
+	report = 0;
+	error = EINVAL;
+	if (session->packet[0] == BT_PACKET_ACL) {
+		dropped = session_acl_arrival(session);
+		if (dropped)
+			return;
+	} else {
+		error = btd_hci_event(session->packet, session->packet_length, &event);
+	}
+
+	/* The buffers given back are counted now and not queued. */
 	if (error == 0 && event.code == SESSION_EVENT_COMPLETED_PACKETS) {
 		session_completed(session, &event);
 		return;
 	}
 
-	/* A connection made or ended is counted now and marked so. */
+	/* A hardware error and an overflow are handled now (as dispatch would) and not queued. */
+	if (error == 0 && event.code == SESSION_EVENT_HARDWARE_ERROR) {
+		session->hardware_errors++;
+		session_set(session, BTD_STATE_ERROR, "%s", "hardware error");
+		return;
+	}
+
+	/* An overflow is counted (the buffers' count is wrong somewhere). */
+	if (error == 0 && event.code == SESSION_EVENT_BUFFER_OVERFLOW) {
+		session->buffer_overflows++;
+		return;
+	}
+
+	/* A connection made or ended is counted now and marked so; a scan's report is the least kept. */
 	if (error == 0) {
 		counted = session_counted_event(session, &event);
 		if (counted > 0)
 			flags |= SESSION_RECORD_COUNTED;
+		report = session_report(&event);
 	}
 
-	/* Room for the header and the packet. */
+	/* The room each kind may take: counted events all, other events all but their reserve, ACL data and reports less. */
 	need = SESSION_RECORD_HEADER + session->packet_length;
-	if (need > BTD_QUEUE_BYTES - session->queue_used) {
+	free_bytes = BTD_QUEUE_BYTES - session->queue_used;
+	reserve = BTD_QUEUE_EVENT_RESERVE;
+	if (counted > 0)
+		reserve = 0U;
+	else if (error == 0 && !report)
+		reserve = BTD_QUEUE_COUNTED_RESERVE;
+
+	/* No room: dropped, and noticed by kind. */
+	if (free_bytes < reserve || need > free_bytes - reserve) {
 		session->queue_dropped++;
+		if (session->packet[0] == BT_PACKET_ACL) {
+			handle = session_handle(session->packet + 1);
+			link = session_link(session, handle);
+			if (link != NULL)
+				session_mark_link(session, link);
+		} else if (session->packet[0] != BT_PACKET_EVENT) {
+			/* Neither data nor an event: nobody to tell. */
+		} else if (counted > 0) {
+			session_mark_events(session, BTD_DROP_COUNTED);
+		} else if (report) {
+			session->scan_dropped++;
+		} else {
+			session->events_dropped++;
+			session_mark_events(session, BTD_DROP_EVENT);
+		}
+
+		/* Not queued. */
 		return;
 	}
 
@@ -1606,8 +1817,9 @@ session_enqueue(
 		tail = (tail + 1U) % BTD_QUEUE_BYTES;
 	}
 
-	/* The record is in the queue. */
+	/* Succeeded: the record is in the queue, and counted for the notices' order. */
 	session->queue_used += need;
+	session->enqueued++;
 }
 
 /* Takes the oldest queued packet into session->packet (and its flags); returns 1, or 0 when none waits. */
@@ -1643,6 +1855,7 @@ session_dequeue(
 	if ((flags & SESSION_RECORD_COUNTED) != 0U)
 		session->packet_counted = 1;
 	session->queue_used -= SESSION_RECORD_HEADER + length;
+	session->dequeued++;
 
 	/* Succeeded: a packet to handle. */
 	return 1;
@@ -1683,7 +1896,7 @@ session_counted_event(
 		/* A connection made, of ACL data. */
 		handle = session_handle(event->parameters + 1);
 		if (event->parameters[0] == 0U && event->parameters[9] == SESSION_LINK_ACL)
-			session_link_add(session, handle, 0);
+			session_link_add(session, handle, 0, event->parameters + 3);
 		return 1;
 	}
 
@@ -1695,7 +1908,7 @@ session_counted_event(
 		/* A connection made. */
 		handle = session_handle(event->parameters + 2);
 		if (event->parameters[1] == 0U)
-			session_link_add(session, handle, 1);
+			session_link_add(session, handle, 1, event->parameters + 6);
 		return 1;
 	}
 
@@ -1774,7 +1987,8 @@ static void
 session_link_add(
 	struct btd_session *session,
 	uint16_t handle,
-	int le)
+	int le,
+	const uint8_t *address)
 {
 	struct btd_link_count *link;
 	unsigned index;
@@ -1787,10 +2001,13 @@ session_link_add(
 		link = &session->links[index];
 		if (link->used)
 			continue;
+
+		/* A fresh record: no drop, no limit of an earlier connection of the handle. */
+		session_link_reset(link);
 		link->used = 1;
 		link->handle = handle;
 		link->le = le;
-		link->outstanding = 0U;
+		memcpy(link->address, address, BTD_ADDRESS_BYTES);
 		return;
 	}
 }
@@ -1819,8 +2036,9 @@ session_link_remove(
 	pool->free += link->outstanding;
 	if (pool->free > pool->total)
 		pool->free = pool->total;
-	link->used = 0;
-	link->outstanding = 0U;
+
+	/* The record emptied: a notice still waiting for it is not given (its owner hears of the disconnection). */
+	session_link_reset(link);
 
 	/* Its frames out of the queue, the others kept in order. */
 	index = 0U;
@@ -1869,10 +2087,13 @@ session_pool(
 }
 
 /*
- * Sends the waiting frames, oldest first, as far as their pools have
- * buffers: each packet as long as its pool takes, the first of a frame
- * marked first (not to be flushed), the others continuing.  Returns 0, or
- * the node's error.
+ * Sends the waiting frames as far as their pools have buffers, one packet
+ * of one connection at a time, the connections in turn (ws197-p002 section
+ * 4.2: a connection waiting for buffers, or at its limit in the
+ * controller, does not hold the others back); each connection's frames go
+ * in their order, each packet as long as its pool takes, the first of a
+ * frame marked first (not to be flushed), the others continuing.  Returns
+ * 0, or the node's error.
  */
 static int
 session_flush(
@@ -1884,52 +2105,80 @@ session_flush(
 	uint8_t boundary;
 	size_t chunk;
 	size_t length;
+	unsigned index;
+	unsigned step;
+	unsigned slot;
+	int found;
+	int sent;
 	int error;
 
-	/* The oldest frame, packet by packet. */
-	while (session->frame_count != 0U) {
-		frame = &session->frames[0];
-		link = session_link(session, frame->handle);
-
-		/* A frame whose connection went (the removal drops them; this is a guard). */
-		if (link == NULL) {
-			memmove(&session->frames[0], &session->frames[1], sizeof(session->frames[0]) * (session->frame_count - 1U));
-			session->frame_count--;
+	/* Frames whose connection went are dropped first (the removal drops them; this is a guard). */
+	index = 0U;
+	while (index < session->frame_count) {
+		link = session_link(session, session->frames[index].handle);
+		if (link != NULL) {
+			index++;
 			continue;
 		}
 
-		/* No buffer: the frame waits for Number Of Completed Packets. */
-		pool = session_pool(session, link);
-		if (pool->free == 0U)
-			return 0;
+		/* Nobody's: out of the table, the later ones move up. */
+		memmove(&session->frames[index], &session->frames[index + 1U], sizeof(session->frames[0]) * (session->frame_count - index - 1U));
+		session->frame_count--;
+	}
 
-		/* The next piece, as long as the pool's packets. */
-		chunk = frame->length - frame->sent;
-		if (chunk > pool->length)
-			chunk = pool->length;
-		boundary = BTD_ACL_CONTINUING;
-		if (frame->sent == 0U) {
-			/* A first packet: LE's, or a BR/EDR one the controller may hold, is not flushable; else as before that feature. */
-			boundary = BTD_ACL_FIRST_FLUSHABLE;
-			if (link->le || session->no_flush)
-				boundary = BTD_ACL_FIRST;
-		}
+	/* Rounds of the connections, one packet each turn, until none can send. */
+	sent = 1;
+	while (sent) {
+		sent = 0;
+		for (step = 0U; step < BTD_LINKS_MAX; step++) {
+			/* The next connection in turn, with a frame waiting. */
+			slot = (session->flush_next + step) % BTD_LINKS_MAX;
+			link = &session->links[slot];
+			if (!link->used)
+				continue;
+			found = session_oldest(session, link->handle, &index);
+			if (!found)
+				continue;
 
-		/* The packet, written. */
-		length = btd_acl_build(session->outgoing, sizeof(session->outgoing), frame->handle, boundary, frame->bytes + frame->sent, chunk);
-		error = session_write(session, session->outgoing, length);
-		if (error != 0)
-			return error;
+			/* A buffer of its pool, and room under its limit in the controller. */
+			pool = session_pool(session, link);
+			if (pool->free == 0U)
+				continue;
+			if (link->inflight_limit != 0U && link->outstanding >= link->inflight_limit)
+				continue;
 
-		/* The controller holds one more buffer of the pool for this connection. */
-		pool->free--;
-		link->outstanding++;
-		frame->sent += chunk;
+			/* The next piece, as long as the pool's packets. */
+			frame = &session->frames[index];
+			chunk = frame->length - frame->sent;
+			if (chunk > pool->length)
+				chunk = pool->length;
+			boundary = BTD_ACL_CONTINUING;
+			if (frame->sent == 0U) {
+				/* A first packet: LE's, or a BR/EDR one the controller may hold, is not flushable; else as before that feature. */
+				boundary = BTD_ACL_FIRST_FLUSHABLE;
+				if (link->le || session->no_flush)
+					boundary = BTD_ACL_FIRST;
+			}
 
-		/* A frame sent whole leaves the queue. */
-		if (frame->sent == frame->length) {
-			memmove(&session->frames[0], &session->frames[1], sizeof(session->frames[0]) * (session->frame_count - 1U));
-			session->frame_count--;
+			/* The packet, written. */
+			length = btd_acl_build(session->outgoing, sizeof(session->outgoing), frame->handle, boundary, frame->bytes + frame->sent, chunk);
+			error = session_write(session, session->outgoing, length);
+			if (error != 0)
+				return error;
+
+			/* The controller holds one more buffer of the pool for this connection. */
+			pool->free--;
+			link->outstanding++;
+			frame->sent += chunk;
+
+			/* A frame sent whole leaves the queue. */
+			if (frame->sent == frame->length)
+				session_frame_done(session, index);
+
+			/* The next turn begins with the connection after this one. */
+			session->flush_next = (slot + 1U) % BTD_LINKS_MAX;
+			sent = 1;
+			break;
 		}
 	}
 
@@ -1984,6 +2233,288 @@ session_core_buffers(
 		session->le_pool.length = BT_ACL_DATA_MAX;
 	session->le_pool.free = session->le_pool.total;
 	session->le_shared = 0;
+}
+
+/* Empties a counted connection's record: unused, no drop, no limit but the session's. */
+static void
+session_link_reset(
+	struct btd_link_count *link)
+{
+	/* Nothing of an earlier connection is kept. */
+	memset(link, 0, sizeof(*link));
+	link->frame_limit = BTD_SEND_FRAMES;
+}
+
+/*
+ * Takes an ACL packet as it arrives from the node, in the order the
+ * packets come (ws197-p002 section 3.3): a first packet sets its link's
+ * last channel and ends the passing over of continuing packets after a
+ * notice; a packet of a sealed link, or a continuing one after a notice,
+ * is dropped.  Returns 1 when it is dropped.
+ */
+static int
+session_acl_arrival(
+	struct btd_session *session)
+{
+	struct btd_link_count *link;
+	unsigned field;
+	unsigned boundary;
+	size_t data;
+
+	/* A packet with its header, of a counted connection. */
+	if (session->packet_length < 5U)
+		return 0;
+	field = (unsigned)session->packet[1] | ((unsigned)session->packet[2] << 8);
+	link = session_link(session, (uint16_t)(field & SESSION_HANDLE_MASK));
+	if (link == NULL)
+		return 0;
+	boundary = (field >> SESSION_BOUNDARY_SHIFT) & 0x03U;
+	data = (size_t)session->packet[3] | ((size_t)session->packet[4] << 8);
+
+	/* A first packet: its channel when the L2CAP header is in it (0: not known). */
+	if (boundary != SESSION_BOUNDARY_CONTINUING) {
+		link->skip_continuing = 0;
+		link->last_cid = 0U;
+		if (data >= 4U && session->packet_length >= SESSION_ACL_CID + 2U)
+			link->last_cid = (uint16_t)(session->packet[SESSION_ACL_CID] | (session->packet[SESSION_ACL_CID + 1U] << 8));
+	} else if (link->skip_continuing) {
+		/* A continuing packet of a frame whose start was dropped before the notice. */
+		session->continuing_skipped++;
+		return 1;
+	}
+
+	/* A sealed link drops everything until its notice is handed. */
+	if (link->sealed) {
+		link->drop_count++;
+		return 1;
+	}
+
+	/* Taken. */
+	return 0;
+}
+
+/*
+ * Marks a link whose ACL packet was dropped: the first drop seals it and
+ * sets its notice after the packets queued before it; its flags say what
+ * the channel was (the last first packet's: signalling, data, or not
+ * known).
+ */
+static void
+session_mark_link(
+	struct btd_session *session,
+	struct btd_link_count *link)
+{
+	uint8_t flags;
+
+	/* The channel's kind. */
+	if (link->last_cid == SESSION_CID_SIGNALLING || link->last_cid == SESSION_CID_LE_SIGNALLING) {
+		flags = BTD_DROP_SIGNAL;
+	} else if (link->last_cid == 0U) {
+		flags = BTD_DROP_UNKNOWN;
+	} else {
+		flags = BTD_DROP_DATA;
+	}
+
+	/* The first drop seals the link, its notice after what was queued before it. */
+	if (!link->sealed) {
+		link->sealed = 1;
+		link->notice_after = session->enqueued;
+		link->drop_cid = 0U;
+		link->drop_flags = 0U;
+		link->drop_count = 0U;
+	}
+
+	/* Succeeded: the drop's kind and count, the first data channel kept. */
+	link->drop_flags |= flags;
+	if ((flags & BTD_DROP_DATA) != 0U && link->drop_cid == 0U)
+		link->drop_cid = link->last_cid;
+	link->drop_count++;
+}
+
+/* Marks events dropped that are not one connection's ACL data: their notice after the packets queued before the first. */
+static void
+session_mark_events(
+	struct btd_session *session,
+	uint8_t flags)
+{
+	/* The first sets when the notice is due. */
+	if (!session->events_noticed) {
+		session->events_noticed = 1;
+		session->events_notice_after = session->enqueued;
+		session->events_flags = 0U;
+	}
+
+	/* Succeeded: the kind. */
+	session->events_flags |= flags;
+}
+
+/* Tells whether a notice set after a count of queued packets is due: that many were taken (counted modulo 2^32). */
+static int
+session_due(
+	const struct btd_session *session,
+	uint32_t after)
+{
+	uint32_t taken;
+
+	/* The packets taken since, as a difference that wraps. */
+	taken = session->dequeued - after;
+	if (taken < SESSION_DUE_RANGE)
+		return 1;
+
+	/* Not yet. */
+	return 0;
+}
+
+/*
+ * Hands one notice of dropped packets that is due to the handler: the
+ * link's mark is cleared and its seal lifted before (a drop inside the
+ * handler's own commands starts a new mark), continuing packets passed
+ * over until a first one.  Returns 1 when one was handed.
+ */
+static int
+session_notice(
+	struct btd_session *session)
+{
+	struct btd_link_count *link;
+	uint8_t notice[BTD_DROP_LENGTH];
+	unsigned index;
+	unsigned count;
+	int due;
+
+	/* A link's notice that is due. */
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		link = &session->links[index];
+		if (!link->used || !link->sealed)
+			continue;
+		due = session_due(session, link->notice_after);
+		if (!due)
+			continue;
+
+		/* The notice, its mark cleared first. */
+		notice[0] = BTD_PACKET_DROP;
+		notice[1] = (uint8_t)(link->handle & 0xffU);
+		notice[2] = (uint8_t)(link->handle >> 8);
+		notice[3] = link->drop_flags;
+		notice[4] = (uint8_t)(link->drop_cid & 0xffU);
+		notice[5] = (uint8_t)(link->drop_cid >> 8);
+		count = link->drop_count;
+		if (count > 0xffffU)
+			count = 0xffffU;
+		notice[6] = (uint8_t)(count & 0xffU);
+		notice[7] = (uint8_t)(count >> 8);
+		link->sealed = 0;
+		link->skip_continuing = 1;
+		link->drop_flags = 0U;
+		link->drop_cid = 0U;
+		link->drop_count = 0U;
+
+		/* Succeeded: handed. */
+		if (session->handler != NULL)
+			session->handler(session->handler_context, session, notice, sizeof(notice));
+		return 1;
+	}
+
+	/* The events' notice when it is due. */
+	if (!session->events_noticed)
+		return 0;
+	due = session_due(session, session->events_notice_after);
+	if (!due)
+		return 0;
+	notice[0] = BTD_PACKET_DROP;
+	notice[1] = (uint8_t)(BTD_DROP_ALL & 0xffU);
+	notice[2] = (uint8_t)(BTD_DROP_ALL >> 8);
+	notice[3] = session->events_flags;
+	notice[4] = 0U;
+	notice[5] = 0U;
+	notice[6] = 0U;
+	notice[7] = 0U;
+	session->events_noticed = 0;
+	session->events_flags = 0U;
+
+	/* Succeeded: handed. */
+	if (session->handler != NULL)
+		session->handler(session->handler_context, session, notice, sizeof(notice));
+	return 1;
+}
+
+/* Tells whether a notice of dropped packets waits (sealed links, or events). */
+static int
+session_notice_waiting(
+	const struct btd_session *session)
+{
+	unsigned index;
+
+	/* A sealed link. */
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		if (session->links[index].used && session->links[index].sealed)
+			return 1;
+	}
+
+	/* The events. */
+	if (session->events_noticed)
+		return 1;
+
+	/* None. */
+	return 0;
+}
+
+/* Tells whether an event is a scan's report, the least kept in the queue: an inquiry's result or an LE advertising report (legacy or extended). */
+static int
+session_report(
+	const struct btd_event *event)
+{
+	int scan;
+
+	/* The scans' results. */
+	scan = session_scan_event(event);
+	if (scan)
+		return 1;
+
+	/* LE's extended advertising report. */
+	if (event->code == BTD_EVENT_LE_META && event->length >= 1U && event->parameters[0] == SESSION_LE_EXTENDED_REPORT)
+		return 1;
+
+	/* Anything else. */
+	return 0;
+}
+
+/* Finds the oldest frame of a connection in the table.  Returns 1 with its index, or 0 when none waits. */
+static int
+session_oldest(
+	const struct btd_session *session,
+	uint16_t handle,
+	unsigned *index)
+{
+	unsigned at;
+
+	/* The first in the table's order. */
+	for (at = 0U; at < session->frame_count; at++) {
+		if (session->frames[at].handle == handle) {
+			*index = at;
+			return 1;
+		}
+	}
+
+	/* None. */
+	return 0;
+}
+
+/* Takes a frame sent whole out of the table: its connection has one frame less waiting, the later ones move up. */
+static void
+session_frame_done(
+	struct btd_session *session,
+	unsigned index)
+{
+	struct btd_link_count *link;
+
+	/* One less for its connection. */
+	link = session_link(session, session->frames[index].handle);
+	if (link != NULL && link->frames != 0U)
+		link->frames--;
+
+	/* Succeeded: out of the table. */
+	memmove(&session->frames[index], &session->frames[index + 1U], sizeof(session->frames[0]) * (session->frame_count - index - 1U));
+	session->frame_count--;
 }
 
 /* Tells whether an event is a scan's result: an inquiry result of any form, or an LE advertising report. */

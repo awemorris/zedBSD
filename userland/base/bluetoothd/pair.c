@@ -115,6 +115,10 @@
 /* How many bonds are looked through to resolve a private address. */
 #define PAIR_BONDS_MAX			32U
 
+/* The PSMs a phone's pairing holds Pending for the phone link (ws197-p002 section 7.1): SDP and RFCOMM. */
+#define PAIR_PSM_SDP			0x0001U
+#define PAIR_PSM_RFCOMM			0x0003U
+
 static void pair_event(struct btd_pair *pair, const uint8_t *parameters, size_t length, uint8_t code);
 static void pair_acl(struct btd_pair *pair, const uint8_t *packet, size_t length);
 static void pair_connected(struct btd_pair *pair, const uint8_t *parameters, size_t length);
@@ -142,6 +146,12 @@ static int pair_command(struct btd_pair *pair, uint16_t opcode, const uint8_t *p
 static void pair_reply(struct btd_pair *pair, uint16_t opcode, const uint8_t *address, const uint8_t *more, size_t more_length);
 static void pair_disconnect_other(struct btd_pair *pair, uint16_t handle);
 static int pair_hand_over(struct btd_pair *pair);
+static int pair_offer_phone(struct btd_pair *pair, const struct btd_bond *bond);
+static void pair_refuse_pending(struct btd_pair *pair);
+static void pair_forget_link(struct btd_pair *pair);
+static int pair_phone_accept(void *context, uint16_t handle, uint16_t psm, uint16_t *result, uint16_t *status);
+static void pair_page_over(struct btd_pair *pair);
+static void pair_notice(struct btd_pair *pair, const uint8_t *packet);
 static int pair_ours(const struct btd_pair *pair, const uint8_t *address);
 static void pair_name(const struct btd_pair *pair, const uint8_t *address, unsigned type, char *name, size_t size);
 static const char *pair_smp_why(const struct btd_pair *pair);
@@ -184,15 +194,20 @@ btd_pair_init(
 /*
  * Starts pairing a device: connects to it and pairs (the end comes to the
  * done hook, also for a refusal now).  agent says whether someone can
- * confirm a number.  Returns 0, or EBUSY while a pairing or a scan runs
- * (the hook is not called then).
+ * confirm a number; phone says the pairing is for a phone (ws197-p002
+ * section 7.1, BR/EDR only), asked by the client of uid.  Returns 0,
+ * EBUSY while a pairing or a scan runs or another party's BR/EDR page is
+ * out (the link manager's, ws197-p002 section 6.2), or EINVAL for a
+ * phone's pairing of an LE address (the hook is not called then).
  */
 int
 btd_pair_start(
 	struct btd_pair *pair,
 	const uint8_t *address,
 	unsigned type,
-	int agent)
+	int agent,
+	int phone,
+	uid_t uid)
 {
 	uint8_t parameters[25];
 	int error;
@@ -202,6 +217,23 @@ btd_pair_start(
 		return EBUSY;
 	if (pair->session->scanning)
 		return EBUSY;
+
+	/* A phone is paired over BR/EDR alone (the phone link has no LE part). */
+	if (phone) {
+		if (type == BTD_ADDRESS_LE_PUBLIC)
+			return EINVAL;
+		if (type == BTD_ADDRESS_LE_RANDOM)
+			return EINVAL;
+	}
+
+	/* BR/EDR: the controller's one page, unless another party's is out (busy, as while a HID device's connection is under way). */
+	pair->paging = 0;
+	if (type == BTD_ADDRESS_BREDR && pair->linkmgr != NULL) {
+		error = btd_linkmgr_page_begin(pair->linkmgr, BTD_LINKMGR_PAIR, address, btd_now_ms());
+		if (error != 0)
+			return EBUSY;
+		pair->paging = 1;
+	}
 
 	/* The device and a clean slate. */
 	memcpy(pair->address, address, BTD_ADDRESS_BYTES);
@@ -228,6 +260,18 @@ btd_pair_start(
 	pair->answer[0] = '\0';
 	memset(&pair->reassembly, 0, sizeof(pair->reassembly));
 	btd_l2cap_init(&pair->l2cap);
+
+	/*
+	 * A phone's pairing: who asked, no answer of the phone link yet, and
+	 * the phone's SDP and RFCOMM channels held Pending until the handoff
+	 * (any other pairing refuses every channel, as before).
+	 */
+	pair->phone = phone;
+	pair->uid = uid;
+	pair->phone_taken = 0;
+	pair->phone_why = NULL;
+	if (phone)
+		btd_l2cap_set_accept(&pair->l2cap, pair_phone_accept, pair);
 
 	/* The pairing is under way from now on, for BTD_PAIR_TOTAL_MS at most. */
 	pair->state = PAIR_CONNECTING;
@@ -314,6 +358,12 @@ btd_pair_handle(
 	/* ACL data of a connection. */
 	if (length >= 1U && packet[0] == BT_PACKET_ACL) {
 		pair_acl(pair, packet, length);
+		return;
+	}
+
+	/* The session's notice of packets it dropped on the pairing's connection (ws197-p002 section 3.5). */
+	if (length == BTD_DROP_LENGTH && packet[0] == BTD_PACKET_DROP) {
+		pair_notice(pair, packet);
 		return;
 	}
 
@@ -557,6 +607,35 @@ btd_pair_set_handoff(
 	pair->handoff_context = context;
 }
 
+/*
+ * Gives the pairing the link manager whose one BR/EDR page its Create
+ * Connection takes (ws197-p002 section 6.2; NULL: none).
+ */
+void
+btd_pair_set_linkmgr(
+	struct btd_pair *pair,
+	struct btd_linkmgr *linkmgr)
+{
+	/* The link manager. */
+	pair->linkmgr = linkmgr;
+}
+
+/*
+ * Gives the pairing the phone link's hook (ws197-p002 section 7.2), which
+ * is offered the connection of a phone's pairing before the HID host's
+ * (NULL: a phone's pairing ends with phone=0 why=unsupported).
+ */
+void
+btd_pair_set_phone_handoff(
+	struct btd_pair *pair,
+	btd_pair_phone_fn handoff,
+	void *context)
+{
+	/* The hook and its context. */
+	pair->phone_handoff = handoff;
+	pair->phone_context = context;
+}
+
 /* Takes one event of the connections or the pairing. */
 static void
 pair_event(
@@ -726,6 +805,9 @@ pair_connected(
 			pair_disconnect_other(pair, connection);
 		return;
 	}
+
+	/* The page is over, made or failed: the controller may page for another party. */
+	pair_page_over(pair);
 
 	/* The connection failed (a cancelled one ends with the reason it was cancelled for). */
 	if (parameters[0] != 0U) {
@@ -991,7 +1073,13 @@ pair_encryption(
 	pair_key_size(pair);
 }
 
-/* Answers Link Key Request: the pairing's stored key, or none (the controller pairs then). */
+/*
+ * Answers Link Key Request: the pairing's stored key, or none (the
+ * controller pairs then).  A phone's pairing takes only an authenticated
+ * stored key (ws197-p002 section 7.1): with a Just Works one the controller
+ * runs Secure Simple Pairing again, so a phone that can confirm a number
+ * gets a key the phone link takes.
+ */
 static void
 pair_key_request(
 	struct btd_pair *pair,
@@ -1002,6 +1090,17 @@ pair_key_request(
 	/* Another device, or no stored key: Negative Reply. */
 	ours = pair_ours(pair, address);
 	if (!ours || pair->state != PAIR_AUTHENTICATING || !pair->have_stored || !pair->stored.have_link_key) {
+		pair_reply(pair, PAIR_LINK_KEY_NEGATIVE, address, NULL, 0U);
+		return;
+	}
+
+	/*
+	 * A phone's pairing never uses the stored key: Negative Reply, and the
+	 * numbers are compared anew, so the phone shows the pairing to its
+	 * owner and nobody takes a bonded phone silently (ws197-p003 section
+	 * 3.2, review-2 N2).
+	 */
+	if (pair->phone) {
 		pair_reply(pair, PAIR_LINK_KEY_NEGATIVE, address, NULL, 0U);
 		return;
 	}
@@ -1452,6 +1551,7 @@ pair_succeed(
 	int legacy;
 	int handed;
 	unsigned key_size;
+	size_t length;
 
 	/* What the bond is worth: BR/EDR's from the key type, LE's from the Security Manager. */
 	authenticated = 0;
@@ -1488,8 +1588,20 @@ pair_succeed(
 		       pair->used_stored,
 		       pair->probed);
 
-	/* A connection the HID host takes over stays; the end is told now (phase005 section 9.2). */
+	/* A connection the phone link or the HID host takes over stays (phase005 section 9.2, ws197-p002 section 7.2). */
 	handed = pair_hand_over(pair);
+
+	/* A phone's pairing tells what the phone link answered, after the rest of the line (ws197-p002 section 7.2). */
+	if (pair->phone_why == NULL)
+		pair->phone_why = "refused";
+	length = strlen(pair->answer);
+	if (pair->phone && pair->phone_taken) {
+		(void)snprintf(pair->answer + length, sizeof(pair->answer) - length, " phone=1");
+	} else if (pair->phone) {
+		(void)snprintf(pair->answer + length, sizeof(pair->answer) - length, " phone=0 why=%s", pair->phone_why);
+	}
+
+	/* A connection taken over stays; the end is told now. */
 	if (handed) {
 		pair_deliver(pair);
 		return;
@@ -1559,8 +1671,9 @@ pair_deliver(
 {
 	char answer[BTD_PAIR_ANSWER_MAX];
 
-	/* Nothing under way from now on (a new pairing may start inside the hook). */
+	/* Nothing under way from now on (a new pairing may start inside the hook), and no page out. */
 	memcpy(answer, pair->answer, sizeof(answer));
+	pair_page_over(pair);
 	pair->state = PAIR_IDLE;
 	pair->state_deadline = 0U;
 	pair->total_deadline = 0U;
@@ -1591,7 +1704,8 @@ pair_cancel(
 	uint16_t opcode;
 	int error;
 
-	/* The cancel of the kind of connection. */
+	/* The cancel of the kind of connection; the page is over for the link manager. */
+	pair_page_over(pair);
 	pair->pending_error = why;
 	pair->state = PAIR_CANCELLING;
 	pair->state_deadline = btd_now_ms() + BTD_PAIR_CLOSE_MS;
@@ -1688,9 +1802,11 @@ pair_disconnect_other(
 }
 
 /*
- * Offers the connection of a pairing that succeeded to the handoff hook,
- * with the bond just stored; reports whether the hook took it (the
- * pairing then forgets the connection: its channels and frames go).
+ * Offers the connection of a pairing that succeeded to the handoff hooks,
+ * with the bond just stored: a phone's pairing to the phone link's first
+ * (ws197-p002 section 7.2), then to the HID host's.  Reports whether a
+ * hook took it (the pairing then forgets the connection: its channels and
+ * frames go).
  */
 static int
 pair_hand_over(
@@ -1702,8 +1818,15 @@ pair_hand_over(
 	int taken;
 	int error;
 
-	/* Only a connection that is up, and a hook to take it. */
-	if (pair->handoff == NULL || !pair->connected)
+	/* Only a connection that is up (a phone's pairing whose connection went tells so). */
+	if (!pair->connected) {
+		if (pair->phone)
+			pair->phone_why = "lost";
+		return 0;
+	}
+
+	/* A hook to take it. */
+	if (pair->handoff == NULL && !pair->phone)
 		return 0;
 
 	/* The bond's name: the connection's address, or the identity an LE device gave. */
@@ -1718,21 +1841,226 @@ pair_hand_over(
 
 	/* The bond as stored; without it nothing can be taken over. */
 	error = btd_keys_read(pair->keys_folder, pair->session->address, address, type, &bond);
-	if (error != 0)
+	if (error != 0) {
+		if (pair->phone)
+			pair->phone_why = "store";
 		return 0;
+	}
 
-	/* The hook's answer; the bond's copy is not kept. */
+	/* A phone's pairing: the phone link first. */
+	if (pair->phone) {
+		taken = pair_offer_phone(pair, &bond);
+		if (taken) {
+			memset(&bond, 0, sizeof(bond));
+			pair_forget_link(pair);
+			return 1;
+		}
+	}
+
+	/* No HID host to ask. */
+	if (pair->handoff == NULL) {
+		memset(&bond, 0, sizeof(bond));
+		return 0;
+	}
+
+	/* The HID host's answer; the bond's copy is not kept. */
 	taken = pair->handoff(pair->handoff_context, pair->address, pair->type, pair->handle, &bond);
 	memset(&bond, 0, sizeof(bond));
 	if (taken != 1)
 		return 0;
 
-	/* Succeeded: the connection is the hook's, the pairing has none. */
+	/* Succeeded: the connection is the HID host's, the pairing has none. */
+	pair_forget_link(pair);
+	return 1;
+}
+
+/*
+ * Offers the connection of a phone's pairing to the phone link's hook
+ * (ws197-p002 sections 7.2 and 7.4), with what the hook needs to take it.
+ * Reports whether the hook took it; when it did not, the reason is kept for
+ * the PAIRED line and the channels held Pending are refused before the HID
+ * host is asked (it would drop them silently, review m6).
+ */
+static int
+pair_offer_phone(
+	struct btd_pair *pair,
+	const struct btd_bond *bond)
+{
+	struct btd_pair_handoff handoff;
+	const struct btd_device *seen;
+	const char *why;
+	unsigned index;
+	int taken;
+	int same;
+
+	/* Without the phone link nothing takes the connection as a phone's. */
+	if (pair->phone_handoff == NULL) {
+		pair->phone_why = "unsupported";
+		pair_refuse_pending(pair);
+		return 0;
+	}
+
+	/* The connection, the bond, who asked and the key's size the pairing read. */
+	memset(&handoff, 0, sizeof(handoff));
+	handoff.address = pair->address;
+	handoff.type = pair->type;
+	handoff.handle = pair->handle;
+	handoff.bond = bond;
+	handoff.uid = pair->uid;
+	handoff.key_size = pair->key_size;
+	handoff.l2cap = &pair->l2cap;
+	handoff.reassembly = &pair->reassembly;
+
+	/* The Class of Device the last scan saw for the device (none when it was not in the scan, section 7.4). */
+	for (index = 0U; index < pair->session->devices.count; index++) {
+		seen = &pair->session->devices.entries[index];
+		if (seen->type != pair->type)
+			continue;
+		same = memcmp(seen->address, pair->address, BTD_ADDRESS_BYTES);
+		if (same != 0)
+			continue;
+
+		/* Its class, when the scan read one. */
+		if (seen->has_class) {
+			handoff.have_class = 1;
+			handoff.class_of_device = seen->class_of_device;
+		}
+
+		break;
+	}
+
+	/* The phone link's answer. */
+	why = NULL;
+	taken = pair->phone_handoff(pair->phone_context, &handoff, &why);
+	if (taken == 1) {
+		pair->phone_taken = 1;
+		pair->phone_why = NULL;
+		return 1;
+	}
+
+	/* Not taken: why (a hook that named nothing refused all the same), and the held channels refused. */
+	if (why == NULL)
+		why = "refused";
+	pair->phone_why = why;
+	pair_refuse_pending(pair);
+
+	/* The HID host may take it next. */
+	return 0;
+}
+
+/*
+ * Refuses the channels a phone's pairing held Pending (the phone link did
+ * not take the connection): a Connection Response "no resources" for each,
+ * on the signalling channel.  A response that cannot be sent is passed
+ * over: the connection is the HID host's or is ended next.
+ */
+static void
+pair_refuse_pending(
+	struct btd_pair *pair)
+{
+	uint8_t answer[BTD_SIGNAL_MAX];
+	size_t length;
+	int error;
+
+	/* The responses, built (the channels are freed). */
+	error = btd_l2cap_answer_pending(&pair->l2cap, pair->handle, BTD_L2CAP_NO_RESOURCES, answer, sizeof(answer), &length);
+	if (error != 0)
+		pair->ignored++;
+
+	/* Nothing was pending. */
+	if (length == 0U)
+		return;
+
+	/* Sent; a failure is the next command's to find. */
+	error = btd_session_send(pair->session, pair->handle, BTD_CID_SIGNALLING, answer, length);
+	if (error != 0)
+		pair->ignored++;
+}
+
+/* Forgets the connection a hook took over: it is the hook's, the pairing has none (its channels and frames go). */
+static void
+pair_forget_link(
+	struct btd_pair *pair)
+{
+	/* Counted, and let go. */
 	pair->handed++;
 	pair->connected = 0;
 	btd_l2cap_drop(&pair->l2cap, pair->handle);
 	memset(&pair->reassembly, 0, sizeof(pair->reassembly));
+}
+
+/*
+ * Answers a channel the other side asks for during a phone's pairing
+ * (the accept hook of the pairing's table, ws197-p002 section 7.1): SDP
+ * and RFCOMM are held Pending for the phone link to answer after the
+ * handoff; anything else is refused as PSM not supported.
+ */
+static int
+pair_phone_accept(
+	void *context,
+	uint16_t handle,
+	uint16_t psm,
+	uint16_t *result,
+	uint16_t *status)
+{
+	struct btd_pair *pair;
+
+	UNUSED_PARAMETER(handle);
+
+	/* The pairing whose table asks. */
+	pair = context;
+
+	/* Only a phone's pairing holds a channel. */
+	if (!pair->phone)
+		return 1;
+
+	/* SDP and RFCOMM: Pending, no further information. */
+	if (psm == PAIR_PSM_SDP || psm == PAIR_PSM_RFCOMM) {
+		*result = BTD_L2CAP_PENDING;
+		*status = 0x0000U;
+		return 0;
+	}
+
+	/* Any other PSM: not supported. */
 	return 1;
+}
+
+/* Ends the pairing's BR/EDR page at the link manager (ws197-p002 section 6.2), on each way out of it; nothing when none is out. */
+static void
+pair_page_over(
+	struct btd_pair *pair)
+{
+	/* No page of the pairing's out. */
+	if (!pair->paging)
+		return;
+
+	/* Succeeded: over. */
+	pair->paging = 0;
+	btd_linkmgr_page_end(pair->linkmgr, BTD_LINKMGR_PAIR, pair->address);
+}
+
+/*
+ * Takes the session's notice of packets dropped on the pairing's
+ * connection (ws197-p002 section 3.5): the frame being put together goes,
+ * and the pairing is stopped (its next step may have been among them).
+ */
+static void
+pair_notice(
+	struct btd_pair *pair,
+	const uint8_t *packet)
+{
+	uint16_t handle;
+
+	/* Only the pairing's connection while a pairing runs. */
+	handle = (uint16_t)((unsigned)packet[1] | ((unsigned)packet[2] << 8));
+	if (!pair->connected || handle != pair->handle) {
+		pair->ignored++;
+		return;
+	}
+
+	/* Succeeded: the frame dropped, the pairing stopped. */
+	pair->reassembly.active = 0;
+	btd_pair_stop(pair, "lost-packets");
 }
 
 /* Tells whether an address (least significant byte first) is the pairing's device while a pairing runs. */

@@ -90,7 +90,9 @@ typedef int (*btd_l2cap_accept_fn)(void *context, uint16_t handle, uint16_t psm,
  * (ours, or for a pending channel the other side's request still to be
  * answered).  inbound says the other side asked for it; the Flush Timeout
  * and the QoS the other side gave are kept (bluetoothd carries out
- * neither, phase005 Q10).
+ * neither, phase005 Q10).  left says a move to another table found its
+ * slot there taken (ws197-p002): the channel waits in its table to be
+ * refused (btd_l2cap_refuse_left).
  */
 struct btd_channel {
 	unsigned state;
@@ -106,6 +108,7 @@ struct btd_channel {
 	int have_flush_timeout;
 	uint16_t flush_timeout;
 	int have_qos;
+	int left;
 };
 
 /*
@@ -167,5 +170,7 @@ void btd_l2cap_drop(struct btd_l2cap *l2cap, uint16_t handle);
 void btd_l2cap_set_accept(struct btd_l2cap *l2cap, btd_l2cap_accept_fn accept, void *context);
 int btd_l2cap_answer_pending(struct btd_l2cap *l2cap, uint16_t handle, uint16_t result, uint8_t *answer, size_t size, size_t *answer_length);
 int btd_l2cap_echo(struct btd_l2cap *l2cap, uint8_t *request, size_t size, size_t *request_length);
+void btd_l2cap_move(struct btd_l2cap *from, struct btd_l2cap *to, uint16_t handle, unsigned *moved, unsigned *left);
+int btd_l2cap_refuse_left(struct btd_l2cap *from, uint16_t handle, uint8_t *answer, size_t size, size_t *length);
 
 #endif

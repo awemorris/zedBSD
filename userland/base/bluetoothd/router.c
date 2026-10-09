@@ -20,9 +20,10 @@
 #include <string.h>
 #include <uapi/bluetooth.h>
 
-/* The commands the router sends: Disconnect, Reject Connection Request and the negative replies of the pairing. */
+/* The commands the router sends: Disconnect, Reject Connection Request, Reject Synchronous Connection Request and the negative replies of the pairing. */
 #define ROUTER_DISCONNECT		0x0406U
 #define ROUTER_REJECT_CONNECTION	0x040aU
+#define ROUTER_REJECT_SYNCHRONOUS	0x042aU
 #define ROUTER_LINK_KEY_NEGATIVE	0x040cU
 #define ROUTER_PIN_NEGATIVE		0x040eU
 #define ROUTER_CONFIRM_NEGATIVE		0x042dU
@@ -43,6 +44,8 @@
 #define ROUTER_EVENT_KEY_REQUEST	0x17U
 #define ROUTER_EVENT_KEY_NOTIFICATION	0x18U
 #define ROUTER_EVENT_MAX_SLOTS		0x1bU
+#define ROUTER_EVENT_SYNC_COMPLETE	0x2cU
+#define ROUTER_EVENT_SYNC_CHANGED	0x2dU
 #define ROUTER_EVENT_KEY_REFRESH	0x30U
 #define ROUTER_EVENT_IO_REQUEST		0x31U
 #define ROUTER_EVENT_IO_RESPONSE	0x32U
@@ -62,10 +65,28 @@
 #define ROUTER_LE_LTK_REQUEST		0x05U
 #define ROUTER_LE_ENHANCED		0x0aU
 
-/* The reasons the router gives: an unacceptable address (a connection refused), pairing not allowed, a disconnection by the user. */
+/*
+ * The reasons the router gives: an unacceptable address (a connection
+ * refused), pairing not allowed, a disconnection by the user, limited
+ * resources and security reasons (a synchronous link refused, the second
+ * to a device on an AES-CCM link, Core 5.4 Vol 4 Part E 7.1.28), and the
+ * connection timeout of a disconnection the router makes up for a lost
+ * event (ws197-p002 section 3.5).
+ */
 #define ROUTER_REASON_UNACCEPTABLE	0x0fU
 #define ROUTER_REASON_NOT_ALLOWED	0x18U
 #define ROUTER_REASON_USER		0x13U
+#define ROUTER_REASON_RESOURCES		0x0dU
+#define ROUTER_REASON_SECURITY		0x0eU
+#define ROUTER_REASON_TIMEOUT		0x08U
+
+/* The link types of Connection Request and Connection Complete: SCO, ACL, eSCO. */
+#define ROUTER_LINK_SCO			0x00U
+#define ROUTER_LINK_ACL			0x01U
+#define ROUTER_LINK_ESCO		0x02U
+
+/* Encryption Change's Encryption_Enabled for AES-CCM on BR/EDR. */
+#define ROUTER_ENCRYPTION_AES_CCM	0x02U
 
 /* The lengths of the events the router reads. */
 #define ROUTER_CONNECTED_LENGTH		11U
@@ -74,6 +95,7 @@
 #define ROUTER_LE_CONNECTED_LENGTH	19U
 #define ROUTER_LE_ENHANCED_LENGTH	31U
 
+static void router_dispatch(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_acl(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_event(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_connected(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
@@ -81,12 +103,19 @@ static void router_le(struct btd_router *router, struct btd_session *session, co
 static void router_le_connected(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_disconnected(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_request(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
+static void router_synchronous_request(struct btd_router *router, struct btd_session *session, const uint8_t *address);
+static void router_encryption(struct btd_router *router, const uint8_t *packet);
+static void router_notice(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
+static void router_notice_events(struct btd_router *router, struct btd_session *session, const uint8_t *packet);
+static void router_check_routes(struct btd_router *router, struct btd_session *session);
+static void router_check_links(struct btd_router *router, struct btd_session *session);
 static void router_key_request(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_pairing_event(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length, size_t offset);
 static void router_by_handle(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length, size_t offset);
-static void router_take(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length, uint16_t handle, unsigned owner);
+static void router_take(struct btd_router *router, struct btd_session *session, const uint8_t *packet, size_t length, uint16_t handle, const uint8_t *address, unsigned owner);
 static unsigned router_owner_of(const struct btd_router *router, const uint8_t *address);
 static int router_hid_wants(const struct btd_router *router, const uint8_t *address);
+static int router_phone_wants(const struct btd_router *router, const uint8_t *address);
 static void router_deliver(struct btd_router *router, unsigned owner, struct btd_session *session, const uint8_t *packet, size_t length);
 static void router_end(struct btd_router *router, struct btd_session *session, uint16_t handle);
 static void router_refuse(struct btd_router *router, struct btd_session *session, uint16_t opcode, const uint8_t *address, const uint8_t *more, size_t more_length);
@@ -121,6 +150,56 @@ btd_router_set_hid(
 }
 
 /*
+ * Gives the router the phone link's hooks (ws197-p002 section 5); members
+ * left NULL answer no.
+ */
+void
+btd_router_set_phone(
+	struct btd_router *router,
+	const struct btd_router_phone *phone)
+{
+	/* The hooks, copied. */
+	router->phone = *phone;
+}
+
+/*
+ * Gives the router the link manager, which hears every BR/EDR ACL
+ * Connection Complete (its page of that device is over); NULL for none.
+ */
+void
+btd_router_set_linkmgr(
+	struct btd_router *router,
+	struct btd_linkmgr *linkmgr)
+{
+	/* Kept for the router's life. */
+	router->linkmgr = linkmgr;
+}
+
+/*
+ * Checks the routes against the connections the session counts, after a
+ * connection event was lost (ws197-p002 section 3.5): a route whose
+ * connection the session does not count, or counts for another device,
+ * gets a made-up Disconnection Complete (its owner hears that the
+ * connection ended) and goes; a connection the session counts without a
+ * route is ended (a connection nobody owns, as on its Connection
+ * Complete).  Called when the session's queue is empty, so every counted
+ * connection event was routed.
+ */
+void
+btd_router_reconcile(
+	struct btd_router *router,
+	struct btd_session *session)
+{
+	/* Done now: nothing waits. */
+	router->reconcile_due = 0;
+	router->reconciled++;
+
+	/* The routes without their connection first, then the connections without a route. */
+	router_check_routes(router, session);
+	router_check_links(router, session);
+}
+
+/*
  * Takes a packet the session hands on (the session's handler): ACL data
  * goes to its connection's owner, an event to the owner of its connection
  * or its device, or is refused.
@@ -137,20 +216,12 @@ btd_router_handle(
 	/* The router this handler serves. */
 	router = context;
 
-	/* ACL data of a connection. */
-	if (length >= 1U && packet[0] == BT_PACKET_ACL) {
-		router_acl(router, session, packet, length);
-		return;
-	}
+	/* The packet, to whom it goes. */
+	router_dispatch(router, session, packet, length);
 
-	/* Anything but an event with its header is passed over. */
-	if (length < 3U || packet[0] != BT_PACKET_EVENT) {
-		router->ignored++;
-		return;
-	}
-
-	/* Succeeded: the event, whose parameters' length the session checked. */
-	router_event(router, session, packet, length);
+	/* A check of the routes that waited for the session's queue to empty. */
+	if (router->reconcile_due && session->queue_used == 0U)
+		btd_router_reconcile(router, session);
 }
 
 /*
@@ -224,6 +295,36 @@ btd_router_clear(
 	memset(router->routes, 0, sizeof(router->routes));
 }
 
+/* Sends a packet on by its type: ACL data, a notice of dropped packets, an event. */
+static void
+router_dispatch(
+	struct btd_router *router,
+	struct btd_session *session,
+	const uint8_t *packet,
+	size_t length)
+{
+	/* ACL data of a connection. */
+	if (length >= 1U && packet[0] == BT_PACKET_ACL) {
+		router_acl(router, session, packet, length);
+		return;
+	}
+
+	/* The session's notice of packets it dropped (ws197-p002 section 3.4). */
+	if (length == BTD_DROP_LENGTH && packet[0] == BTD_PACKET_DROP) {
+		router_notice(router, session, packet, length);
+		return;
+	}
+
+	/* Anything but an event with its header is passed over. */
+	if (length < 3U || packet[0] != BT_PACKET_EVENT) {
+		router->ignored++;
+		return;
+	}
+
+	/* Succeeded: the event, whose parameters' length the session checked. */
+	router_event(router, session, packet, length);
+}
+
 /* Gives an ACL packet to its connection's owner; a packet of nobody's connection is passed over. */
 static void
 router_acl(
@@ -290,14 +391,23 @@ router_event(
 		/* Simple Pairing Complete: the status, then the address. */
 		router_pairing_event(router, session, packet, length, 1U);
 		break;
-	case ROUTER_EVENT_AUTHENTICATED:
 	case ROUTER_EVENT_ENCRYPTION:
+	case ROUTER_EVENT_ENCRYPTION_V2:
+		/* An encryption change: its cipher kept for the route, then the owner's (the status, then the handle). */
+		router_encryption(router, packet);
+		router_by_handle(router, session, packet, length, 1U);
+		break;
+	case ROUTER_EVENT_SYNC_COMPLETE:
+	case ROUTER_EVENT_SYNC_CHANGED:
+		/* A synchronous link's: nobody owns one (they are refused). */
+		router->synchronous_ignored++;
+		break;
+	case ROUTER_EVENT_AUTHENTICATED:
 	case ROUTER_EVENT_KEY_CHANGED:
 	case ROUTER_EVENT_REMOTE_FEATURES:
 	case ROUTER_EVENT_REMOTE_VERSION:
 	case ROUTER_EVENT_MODE:
 	case ROUTER_EVENT_KEY_REFRESH:
-	case ROUTER_EVENT_ENCRYPTION_V2:
 		/* A connection's event: the status, then the handle. */
 		router_by_handle(router, session, packet, length, 1U);
 		break;
@@ -317,9 +427,10 @@ router_event(
 
 /*
  * Takes BR/EDR's Connection Complete (status, handle, address, link type,
- * encryption): the device's owner gets it and owns the connection; a
- * connection nobody owns is ended, a failed one nobody waits for is passed
- * over.
+ * encryption): the link manager's page of the device is over; the
+ * device's owner gets it and owns the connection; a connection nobody owns
+ * is ended, a failed one nobody waits for is passed over.  Only ACL
+ * connections are owned: a synchronous one (never accepted) is ended.
  */
 static void
 router_connected(
@@ -339,8 +450,20 @@ router_connected(
 		return;
 	}
 
-	/* The device's owner. */
+	/* A synchronous link: one that came up anyway is ended, a failed one passed over. */
 	handle = router_handle_at(parameters + 1);
+	if (parameters[9] != ROUTER_LINK_ACL) {
+		router->synchronous_ignored++;
+		if (parameters[0] == 0U)
+			router_end(router, session, handle);
+		return;
+	}
+
+	/* The link manager's page of the device ends here, whatever the status. */
+	if (router->linkmgr != NULL)
+		btd_linkmgr_connected(router->linkmgr, parameters + 3, parameters[0]);
+
+	/* The device's owner. */
 	owner = router_owner_of(router, parameters + 3);
 
 	/* A failure nobody waits for is passed over. */
@@ -356,7 +479,7 @@ router_connected(
 	}
 
 	/* Succeeded: the connection is its owner's, or ended. */
-	router_take(router, session, packet, length, handle, owner);
+	router_take(router, session, packet, length, handle, parameters + 3, owner);
 }
 
 /* Routes LE's meta events: the connections' by their device or handle, the rest to the pairing. */
@@ -446,7 +569,7 @@ router_le_connected(
 	}
 
 	/* Succeeded: the connection is its owner's, or ended. */
-	router_take(router, session, packet, length, handle, owner);
+	router_take(router, session, packet, length, handle, parameters + 6, owner);
 }
 
 /* Takes Disconnection Complete (status, handle, reason): its owner hears it, then the connection is forgotten. */
@@ -489,9 +612,10 @@ router_disconnected(
 
 /*
  * Takes Connection Request (address, class of device, link type): a
- * device the HID host wants goes to it; any other is refused with an
- * unacceptable address (pairing starts from this side only, design
- * section 6.5).
+ * synchronous link is refused (ws197-p002 section 5); an ACL one of a
+ * device the HID host wants goes to it, then one the phone link wants;
+ * any other is refused with an unacceptable address (pairing starts from
+ * this side only, design section 6.5).
  */
 static void
 router_request(
@@ -510,11 +634,24 @@ router_request(
 		return;
 	}
 
-	/* A bonded HID device the HID host wants back. */
+	/* A synchronous link (SCO, eSCO): nobody takes one yet. */
 	address = packet + 3;
+	if (packet[3 + 9] != ROUTER_LINK_ACL) {
+		router_synchronous_request(router, session, address);
+		return;
+	}
+
+	/* A bonded HID device the HID host wants back. */
 	wanted = router_hid_wants(router, address);
 	if (wanted) {
 		router_deliver(router, BTD_OWNER_HID, session, packet, length);
+		return;
+	}
+
+	/* A bonded phone the phone link wants back. */
+	wanted = router_phone_wants(router, address);
+	if (wanted) {
+		router_deliver(router, BTD_OWNER_PHONE, session, packet, length);
 		return;
 	}
 
@@ -556,8 +693,238 @@ router_key_request(
 		return;
 	}
 
+	/* A phone the phone link wants: its stored key. */
+	wanted = router_phone_wants(router, address);
+	if (wanted) {
+		router_deliver(router, BTD_OWNER_PHONE, session, packet, length);
+		return;
+	}
+
 	/* Succeeded: no key for anyone else. */
 	router_refuse(router, session, ROUTER_LINK_KEY_NEGATIVE, address, NULL, 0U);
+}
+
+/*
+ * Refuses a synchronous link's Connection Request (ws197-p002 section 5):
+ * limited resources, or security reasons when the device's ACL link is
+ * encrypted with AES-CCM (Core 5.4 Vol 4 Part E 7.1.28 says shall).
+ */
+static void
+router_synchronous_request(
+	struct btd_router *router,
+	struct btd_session *session,
+	const uint8_t *address)
+{
+	const struct btd_route *route;
+	uint8_t reason[1];
+	unsigned index;
+	int differs;
+
+	/* The reason: security for a device on an AES-CCM link, else resources. */
+	reason[0] = ROUTER_REASON_RESOURCES;
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		route = &router->routes[index];
+		if (!route->used || !route->aes_ccm)
+			continue;
+
+		/* The same device. */
+		differs = memcmp(route->address, address, BTD_ADDRESS_BYTES);
+		if (differs == 0)
+			reason[0] = ROUTER_REASON_SECURITY;
+	}
+
+	/* Succeeded: refused. */
+	router->synchronous_refused++;
+	router_refuse(router, session, ROUTER_REJECT_SYNCHRONOUS, address, reason, sizeof(reason));
+}
+
+/*
+ * Keeps whether an encryption change (status, handle, Encryption_Enabled)
+ * left its connection on AES-CCM; a failed change keeps what was.
+ */
+static void
+router_encryption(
+	struct btd_router *router,
+	const uint8_t *packet)
+{
+	struct btd_route *route;
+	uint16_t handle;
+
+	/* A whole change that succeeded. */
+	if (packet[2] < 4U || packet[3] != 0U)
+		return;
+
+	/* The connection's route. */
+	handle = router_handle_at(packet + 4);
+	route = router_find(router, handle);
+	if (route == NULL)
+		return;
+
+	/* Succeeded: AES-CCM, or another cipher (or none). */
+	route->aes_ccm = 0;
+	if (packet[6] == ROUTER_ENCRYPTION_AES_CCM)
+		route->aes_ccm = 1;
+}
+
+/*
+ * Takes the session's notice of packets it dropped (ws197-p002 section
+ * 3.5): a connection's goes to its owner; the events' (handle 0xFFFF)
+ * checks the routes when a connection event was among them (once the
+ * session's queue is empty) and goes to every route's owner, with that
+ * route's handle, when other events were.
+ */
+static void
+router_notice(
+	struct btd_router *router,
+	struct btd_session *session,
+	const uint8_t *packet,
+	size_t length)
+{
+	uint16_t handle;
+	unsigned owner;
+
+	/* The notice's connection: a handle, or the events'. */
+	router->notices++;
+	handle = (uint16_t)((unsigned)packet[1] | ((unsigned)packet[2] << 8));
+	if (handle != BTD_DROP_ALL) {
+		owner = btd_router_owner(router, handle);
+		if (owner == BTD_OWNER_NONE) {
+			router->ignored++;
+			return;
+		}
+
+		/* The connection's owner. */
+		router_deliver(router, owner, session, packet, length);
+		return;
+	}
+
+	/* A lost connection event: the routes are checked once every counted event was routed. */
+	if ((packet[3] & BTD_DROP_COUNTED) != 0U)
+		router->reconcile_due = 1;
+
+	/* Succeeded: other lost events told to each connection's owner. */
+	if ((packet[3] & BTD_DROP_EVENT) != 0U)
+		router_notice_events(router, session, packet);
+}
+
+/* Tells each route's owner of the events lost, as a notice of its own connection. */
+static void
+router_notice_events(
+	struct btd_router *router,
+	struct btd_session *session,
+	const uint8_t *packet)
+{
+	uint16_t handles[BTD_LINKS_MAX];
+	unsigned owners[BTD_LINKS_MAX];
+	uint8_t notice[BTD_DROP_LENGTH];
+	unsigned count;
+	unsigned index;
+
+	/* The routes as they are now (an owner's commands do not change the list being walked). */
+	count = 0U;
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		if (!router->routes[index].used)
+			continue;
+		handles[count] = router->routes[index].handle;
+		owners[count] = router->routes[index].owner;
+		count++;
+	}
+
+	/* Each owner, with its connection's handle and the events' mark. */
+	memcpy(notice, packet, sizeof(notice));
+	notice[3] = BTD_DROP_EVENT;
+	for (index = 0U; index < count; index++) {
+		notice[1] = (uint8_t)(handles[index] & 0xffU);
+		notice[2] = (uint8_t)(handles[index] >> 8);
+		router_deliver(router, owners[index], session, notice, sizeof(notice));
+	}
+}
+
+/*
+ * Ends the routes whose connection the session no longer counts, or
+ * counts for another device (its handle used again): the owner hears a
+ * Disconnection Complete made up with a connection timeout.
+ */
+static void
+router_check_routes(
+	struct btd_router *router,
+	struct btd_session *session)
+{
+	uint16_t links[BTD_LINKS_MAX];
+	uint8_t addresses[BTD_LINKS_MAX][BTD_ADDRESS_BYTES];
+	uint8_t none[BTD_ADDRESS_BYTES];
+	uint8_t ended[7];
+	struct btd_route *route;
+	unsigned count;
+	unsigned index;
+	unsigned link;
+	int counted;
+	int unknown;
+	int differs;
+
+	/* The session's connections. */
+	count = btd_session_links(session, links, addresses, BTD_LINKS_MAX);
+	memset(none, 0, sizeof(none));
+
+	/* Each route, against them. */
+	for (index = 0U; index < BTD_LINKS_MAX; index++) {
+		route = &router->routes[index];
+		if (!route->used)
+			continue;
+
+		/* A route made without its device's address matches the handle alone. */
+		unknown = 0;
+		differs = memcmp(route->address, none, BTD_ADDRESS_BYTES);
+		if (differs == 0)
+			unknown = 1;
+
+		/* The session's connection of its handle, of the same device. */
+		counted = 0;
+		for (link = 0U; link < count; link++) {
+			if (links[link] != route->handle)
+				continue;
+			differs = memcmp(addresses[link], route->address, BTD_ADDRESS_BYTES);
+			if (unknown || differs == 0)
+				counted = 1;
+		}
+
+		/* Still there. */
+		if (counted)
+			continue;
+
+		/* Gone: Disconnection Complete (status 0, the handle, a timeout), heard by its owner, which ends the route. */
+		ended[0] = BT_PACKET_EVENT;
+		ended[1] = ROUTER_EVENT_DISCONNECTED;
+		ended[2] = ROUTER_DISCONNECTED_LENGTH;
+		ended[3] = 0U;
+		ended[4] = (uint8_t)(route->handle & 0xffU);
+		ended[5] = (uint8_t)(route->handle >> 8);
+		ended[6] = ROUTER_REASON_TIMEOUT;
+		router_disconnected(router, session, ended, sizeof(ended));
+	}
+}
+
+/* Ends the connections the session counts that no route owns (their Connection Complete was lost). */
+static void
+router_check_links(
+	struct btd_router *router,
+	struct btd_session *session)
+{
+	uint16_t links[BTD_LINKS_MAX];
+	uint8_t addresses[BTD_LINKS_MAX][BTD_ADDRESS_BYTES];
+	struct btd_route *route;
+	unsigned count;
+	unsigned index;
+
+	/* The session's connections. */
+	count = btd_session_links(session, links, addresses, BTD_LINKS_MAX);
+
+	/* Each one without a route: ended, as a connection nobody owns. */
+	for (index = 0U; index < count; index++) {
+		route = router_find(router, links[index]);
+		if (route == NULL)
+			router_end(router, session, links[index]);
+	}
 }
 
 /*
@@ -646,7 +1013,7 @@ router_by_handle(
 	router_deliver(router, owner, session, packet, length);
 }
 
-/* Makes a new connection its owner's and hands it the event; a connection nobody owns, or that does not fit, is ended. */
+/* Makes a new connection its owner's (with its device's address) and hands it the event; a connection nobody owns, or that does not fit, is ended. */
 static void
 router_take(
 	struct btd_router *router,
@@ -654,8 +1021,10 @@ router_take(
 	const uint8_t *packet,
 	size_t length,
 	uint16_t handle,
+	const uint8_t *address,
 	unsigned owner)
 {
+	struct btd_route *route;
 	int error;
 
 	/* Nobody's: ended. */
@@ -671,11 +1040,18 @@ router_take(
 		return;
 	}
 
+	/* The route's device, for the check after a lost event; a new connection starts unencrypted. */
+	route = router_find(router, handle);
+	if (route != NULL) {
+		memcpy(route->address, address, BTD_ADDRESS_BYTES);
+		route->aes_ccm = 0;
+	}
+
 	/* Succeeded: the owner hears it. */
 	router_deliver(router, owner, session, packet, length);
 }
 
-/* Tells who owns a device's connection: the pairing's device, the HID host's, or nobody's. */
+/* Tells who owns a device's connection: the pairing's device, the HID host's, the phone link's, or nobody's. */
 static unsigned
 router_owner_of(
 	const struct btd_router *router,
@@ -689,14 +1065,19 @@ router_owner_of(
 	if (ours)
 		return BTD_OWNER_PAIR;
 
-	/* No HID host. */
-	if (router->hid.claims == NULL)
-		return BTD_OWNER_NONE;
-
 	/* A device the HID host paged or accepted. */
-	claimed = router->hid.claims(router->hid.context, address);
-	if (claimed)
-		return BTD_OWNER_HID;
+	if (router->hid.claims != NULL) {
+		claimed = router->hid.claims(router->hid.context, address);
+		if (claimed)
+			return BTD_OWNER_HID;
+	}
+
+	/* A device the phone link paged or accepted. */
+	if (router->phone.claims != NULL) {
+		claimed = router->phone.claims(router->phone.context, address);
+		if (claimed)
+			return BTD_OWNER_PHONE;
+	}
 
 	/* Nobody's. */
 	return BTD_OWNER_NONE;
@@ -723,6 +1104,27 @@ router_hid_wants(
 	return 0;
 }
 
+/* Tells whether the phone link wants a bonded phone that connects to bluetoothd. */
+static int
+router_phone_wants(
+	const struct btd_router *router,
+	const uint8_t *address)
+{
+	int wanted;
+
+	/* No phone link. */
+	if (router->phone.wants == NULL)
+		return 0;
+
+	/* The phone link's answer. */
+	wanted = router->phone.wants(router->phone.context, address);
+	if (wanted)
+		return 1;
+
+	/* Not wanted. */
+	return 0;
+}
+
 /* Hands a packet to an owner (an owner without a handler passes it over). */
 static void
 router_deliver(
@@ -741,6 +1143,12 @@ router_deliver(
 	/* The HID host's, when there is one. */
 	if (owner == BTD_OWNER_HID && router->hid.handle != NULL) {
 		router->hid.handle(router->hid.context, session, packet, length);
+		return;
+	}
+
+	/* The phone link's, when there is one. */
+	if (owner == BTD_OWNER_PHONE && router->phone.handle != NULL) {
+		router->phone.handle(router->phone.context, session, packet, length);
 		return;
 	}
 

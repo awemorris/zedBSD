@@ -134,6 +134,40 @@ btd_snoop_open(
 }
 
 /*
+ * Copies an ACL packet (its H4 type's byte first) with its data hidden
+ * (ws197-p002 section 11, a phone's link): the type, the ACL header and,
+ * in a packet that starts a frame, the L2CAP header stay; every other byte
+ * is zero, the length kept.  Returns the bytes copied (size at most).
+ */
+size_t
+btd_snoop_hide(
+	const uint8_t *packet,
+	size_t length,
+	uint8_t *out,
+	size_t size)
+{
+	size_t copied;
+	size_t kept;
+
+	/* As much as out holds. */
+	copied = length;
+	if (copied > size)
+		copied = size;
+
+	/* The type and the ACL header, and the L2CAP header of a packet that starts a frame (its boundary flag is not 01). */
+	kept = 1U + 4U;
+	if (length >= 3U && ((packet[2] >> 4) & 0x03U) != 0x01U)
+		kept += 4U;
+	if (kept > copied)
+		kept = copied;
+
+	/* Succeeded: the headers, then zeros. */
+	memcpy(out, packet, kept);
+	memset(out + kept, 0, copied - kept);
+	return copied;
+}
+
+/*
  * Appends one packet's record at the time now (a failed write is not
  * reported: the record is a help, not the daemon's work).
  */

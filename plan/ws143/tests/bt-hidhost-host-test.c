@@ -221,12 +221,14 @@ static const uint8_t controller[6] = { 0x55U, 0x44U, 0x33U, 0x22U, 0x11U, 0x00U 
 
 /*
  * The run's parts: the session, the pairing (the router's), the router,
+ * its link manager (ws197-p002: the page scan's writer and the one page),
  * the HID host, the controller and its thread.  One run at a time, on the
  * test's thread.
  */
 static struct btd_session *session;
 static struct btd_pair pairing;
 static struct btd_router router;
+static struct btd_linkmgr links;
 static struct btd_hid host;
 static struct fake fake;
 static pthread_t fake_thread;
@@ -924,6 +926,7 @@ test_lifecycle(void)
 	settle();
 	(void)bridge_read(bytes, sizeof(bytes), &length);
 	btd_hid_lost(&host);
+	btd_linkmgr_reset(&links);
 	status_of(0x41U, line, sizeof(line));
 	expect(bridge_closed() && strstr(line, "state=waiting") != NULL && strstr(line, "last=lost") != NULL && !host.page_scan,
 	       "lifecycle: the controller lost (%s)", line);
@@ -1032,6 +1035,9 @@ run_open(
 	/* The router with the pairing, as the daemon has them. */
 	btd_pair_init(&pairing, session, keys_folder, NULL, NULL, NULL, NULL, NULL);
 	btd_router_init(&router, &pairing);
+	btd_linkmgr_init(&links, session);
+	btd_router_set_linkmgr(&router, &links);
+	btd_pair_set_linkmgr(&pairing, &links);
 	session->handler = btd_router_handle;
 	session->handler_context = &router;
 

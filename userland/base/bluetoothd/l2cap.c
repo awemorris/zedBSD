@@ -338,10 +338,12 @@ btd_l2cap_drop(
 {
 	unsigned index;
 
-	/* Each channel of the connection. */
+	/* Each channel of the connection, with any mark of a move. */
 	for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
-		if (l2cap->channels[index].state != BTD_CHANNEL_FREE && l2cap->channels[index].handle == handle)
+		if (l2cap->channels[index].state != BTD_CHANNEL_FREE && l2cap->channels[index].handle == handle) {
 			l2cap->channels[index].state = BTD_CHANNEL_FREE;
+			l2cap->channels[index].left = 0;
+		}
 	}
 }
 
@@ -430,6 +432,130 @@ btd_l2cap_answer_pending(
 
 	/* Succeeded: the answers. */
 	*answer_length = out.used;
+	return 0;
+}
+
+/*
+ * Moves every channel of a connection from one table to another
+ * (ws197-p002 section 7.3: the pairing's channels to the phone link's at
+ * the handoff): each goes to the same slot of the other table, so its
+ * local CID (the slot's number) stays, with its state, its CIDs, its MTU,
+ * its identifier and its direction.  The request identifiers go on from
+ * the first table's, and its outstanding Information and Echo Requests go
+ * with them.  A channel whose slot is taken in the other table stays,
+ * marked to be refused (btd_l2cap_refuse_left).  The counts of those moved
+ * and left are returned.
+ */
+void
+btd_l2cap_move(
+	struct btd_l2cap *from,
+	struct btd_l2cap *to,
+	uint16_t handle,
+	unsigned *moved,
+	unsigned *left)
+{
+	struct btd_channel *source;
+	struct btd_channel *target;
+	unsigned index;
+
+	/* Each channel of the connection. */
+	*moved = 0U;
+	*left = 0U;
+	for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
+		source = &from->channels[index];
+		if (source->state == BTD_CHANNEL_FREE || source->handle != handle)
+			continue;
+
+		/* A taken slot: the channel stays to be refused. */
+		target = &to->channels[index];
+		if (target->state != BTD_CHANNEL_FREE) {
+			source->left = 1;
+			(*left)++;
+			continue;
+		}
+
+		/* Copied whole into the same slot, then freed here. */
+		*target = *source;
+		target->left = 0;
+		source->state = BTD_CHANNEL_FREE;
+		source->left = 0;
+		(*moved)++;
+	}
+
+	/* The identifiers go on, with the requests still answered to the first table. */
+	to->next_identifier = from->next_identifier;
+	to->information_pending = from->information_pending;
+	to->information_identifier = from->information_identifier;
+	to->echo_pending = from->echo_pending;
+	to->echo_identifier = from->echo_identifier;
+}
+
+/*
+ * Builds the refusal of one channel a move left in its table (section
+ * 7.3), and frees it: an open or configuring channel gets a Disconnection
+ * Request, a pending one the Connection Response "no resources"; one that
+ * is connecting or closing is freed without a command (nothing of it can
+ * be answered once the table no longer routes the connection).  The caller
+ * sends each command in a frame of its own (the smallest signalling MTU
+ * holds one).  Returns 0 with *length the command's bytes (0 when no
+ * channel is left), or EMSGSIZE when the command does not fit.
+ */
+int
+btd_l2cap_refuse_left(
+	struct btd_l2cap *from,
+	uint16_t handle,
+	uint8_t *answer,
+	size_t size,
+	size_t *length)
+{
+	struct btd_channel *channel;
+	struct signal_out out;
+	uint8_t data[8];
+	uint8_t identifier;
+	unsigned index;
+	int error;
+
+	/* Nothing written yet. */
+	out.bytes = answer;
+	out.size = size;
+	out.used = 0U;
+	*length = 0U;
+
+	/* The first channel of the connection left by a move. */
+	for (index = 0U; index < BTD_CHANNELS_MAX; index++) {
+		channel = &from->channels[index];
+		if (channel->state == BTD_CHANNEL_FREE || channel->handle != handle || !channel->left)
+			continue;
+
+		/* An open or configuring channel: Disconnection Request, their CID then ours. */
+		error = 0;
+		if (channel->state == BTD_CHANNEL_OPEN || channel->state == BTD_CHANNEL_CONFIGURING) {
+			signal_put16(data, channel->remote_cid);
+			signal_put16(data + 2, channel->local_cid);
+			identifier = signal_identifier(from);
+			error = signal_put(&out, SIGNAL_DISCONNECTION_REQUEST, identifier, data, 4U);
+		} else if (channel->state == BTD_CHANNEL_PENDING) {
+			/* A pending one: Connection Response under their identifier, no CID, no resources. */
+			signal_put16(data, 0U);
+			signal_put16(data + 2, channel->remote_cid);
+			signal_put16(data + 4, BTD_L2CAP_NO_RESOURCES);
+			signal_put16(data + 6, 0U);
+			error = signal_put(&out, SIGNAL_CONNECTION_RESPONSE, channel->identifier, data, 8U);
+		}
+
+		/* A command that does not fit keeps the channel for the next call. */
+		if (error != 0)
+			return EMSGSIZE;
+
+		/* Succeeded: refused (or dropped), and freed. */
+		from->rejected++;
+		channel->state = BTD_CHANNEL_FREE;
+		channel->left = 0;
+		*length = out.used;
+		return 0;
+	}
+
+	/* Succeeded: nothing is left. */
 	return 0;
 }
 
