@@ -77,6 +77,8 @@ btd_phoneio_next(
 			used++;
 			text++;
 		}
+
+		/* The word read. */
 		value[used] = '\0';
 		*cursor = text;
 		return BTD_PHONEIO_ARGUMENT;
@@ -184,6 +186,8 @@ btd_phoneio_send_length(
 				return EINVAL;
 			number = number * 10U + (size_t)(value[index] - '0');
 		}
+
+		/* Read once. */
 		found = 1;
 	}
 
