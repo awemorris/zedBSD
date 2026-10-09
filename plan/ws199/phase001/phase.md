@@ -247,6 +247,25 @@ Queue: q921（P1、2026-10-10）
 | QEMU | CTAP2 の鍵の模擬は無い。鍵の操作は 5330 |
 | 見積もり | i01 3、i02 4、i03 6、i04 3、i05 5、i06 2、計 **約 23 LW** |
 
+## 11. 第 4.1 版: review-3 への答え（§3〜§8 より優先）
+
+[review-3.md](review-3.md): i01 GO、i02 は R8・R9 の後、i03〜i05 は R1〜R5 の後。
+
+| # | 答え（i） |
+| --- | --- |
+| R1 | /sbin/passkey は passkey-fido2 に渡す操作（ENROLL・REMOVE・AUTH/UNLOCK の fido2、KEY*、KEYOWNER）の間 SIGTERM・SIGHUP・SIGPIPE を無視して passkey-fido2 の終わりまで待つ。passkey-fido2 は assert・make の間も TERM を flag で受け、helper の答えを最大 1.5 s 待ってから helper を KILL して終わる（reset を送った後は答えまで止める）。helper は TERM で flag を立て、KEEPALIVE の callback で `pk_hid_cancel`。sessiond の猶予 2 s で KILL された時だけ「may or may not」。ENROLLED の問い直しは答えの後（i03） |
+| R2 | KEYOWNER は policy に触れない（数えない・消さない・`signed_in` を立てない・遅れ無し・failed の syslog 無し）。`auth_parse` は KEYOWNER を greeter と session に許し、session は name を owner に固定（i05） |
+| R3 | **推し（Q1 経由でユーザーに確認中）**: NFC の card は試みの始まりの後に来た INSERTED だけをタッチと見なす。assert（login、unlock の key-touch=1）は、始めから reader に在る card には問わず、`status touch` を出して当て直し（INSERTED）を待つ。make・KEYINFO・KEYPIN・KEYRESET・KEYOWNER・unlock の key-touch=0 は在る card を使う。greeter は画面が出た時に在る card では自動で AUTH を始めない（KEYOWNER で user を選ぶだけ）。警告に「reader に置いたままの鍵」を足す（i02 で assert の規則、i05 で greeter） |
+| R4 | AUTH・UNLOCK の fido2 は前もって数えず、答えの語で数える: `bad-secret`（鍵の PIN の誤り）・`cloned`・署名の不一致は数える、`timeout`・`canceled`・`no-key`・鍵の抜けは数えない。鍵の PIN は鍵が数える（8 回、電源ごと 3 回）ので総当たりは開かない、と security.md に（i04） |
+| R5 | sleep の前に、待っている fido2 の request（Settings・greeter・lock のどれでも）に CANCEL。sessiond は CANCEL・deadline で終わり答えを読んでいない exchange の失敗を遅れ無しで返す。lock は答えを待たずに画面を出し、POWER だけが待つ。card を閉じる処理は sleep の側（lock 済みの sleep は `kwl_lock` を通らない）（i03・i05） |
+| R6 | AUTH・UNLOCK の写しで `pin-required`・`cloned` はそのまま通す（greeter・lock が行を持つ）（i04） |
+| R7 | `status verified` は passkey-fido2 が password を確かめた直後に出す。verified の後の失敗は数えず、遅れと failed の syslog も通さない（i03） |
+| R8 | kernel の関数は `drv_smartcard_card`（`usb_ccid_worker` の thread から呼ばれ、`smartcard_post` を spinlock の外で呼べる）。slot の ADD・REMOVE でも `keys_changed`。`include/uapi/system.h` の USB の注釈 1 行の追記（UAPI の layout は不変）も Q1 の許しの範囲に。volumed が NFC のたびに scan する件は Q1 へ（i02） |
+| R9 | 電源・SELECT の失敗の slot は `pk_os_card_power_off` で claim を放す（attach は保つ）。当てるのを待つのは USB の鍵が 1 本も答えない時だけ。KEYOWNER・KEYINFO は待たない。reader の電源の入り切りが card の出入りに見えるかは 5330 で確かめ、要れば backend が短い間の CHANGE を無視する（i02） |
+| R10 | KEYOWNER の 1 秒の間隔と「最後の 1 つ」は greeter（compositor）が持ち、sessiond は 1 秒に 1 回を越えたら `ERROR busy`（i05） |
+| R11 | i01 で実装と記録（§3.2 の API、§8 の file、`KL_SYSTEM_HAS_KEYS`・`_PIN`、5 本で Add を灰色、名前の前後の空白、2 分の idle は main loop の timeout に `se_dialog_wait`） |
+| R12 | Q1 の記録 |
+
 ## 進み
 
 | 日 | i | 内容 | 検証 |
