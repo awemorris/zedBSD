@@ -26,27 +26,29 @@ bcm2711_vulkan_native_bin_prepare(
 	struct bcm2711_vulkan_native_draw *draw)
 {
 	struct bcm2711_native_bin state;
-	const struct bcm2711_vulkan_record *pass;
-	const struct bcm2711_vulkan_framebuffer *framebuffer;
 	const struct bcm2711_shader_binary *fragment;
 	uint32_t index;
 	int error;
 
-	/* Missing or incomplete immutable ownership cannot supply a native draw state. */
-	if (event == NULL || draw == NULL || event->pipeline == NULL || event->pass == NULL)
+	/* The pending graphics graph or private meta description supplies only copied drawable and render-area numbers. */
+	if (event == NULL ||
+	    draw == NULL ||
+	    event->pipeline == NULL)
 		return EINVAL;
 	draw->bin_bytes = 0;
-	pass = event->pass;
-	if (pass->objects[1] == NULL || pass->objects[1]->kind != I915_VK_OBJ_FRAMEBUFFER || pass->objects[1]->payload == NULL)
-		return EINVAL;
-	framebuffer = pass->objects[1]->payload;
-	if (framebuffer->width == 0 || framebuffer->width > 4096U || framebuffer->height == 0 || framebuffer->height > 4096U)
+	if (event->width == 0 ||
+	    event->width > 4096U ||
+	    event->height == 0 ||
+	    event->height > 4096U)
 		return EINVAL;
 
-	/* The current interface admits only nonnegative finite render-area/scissor origins. */
-	if (pass->area.offset.x < 0 || pass->area.offset.y < 0 || event->scissor.offset.x < 0 || event->scissor.offset.y < 0)
+	/* Exact nonnegative target/scissor bounds cannot exceed the complete logical drawable. */
+	if (event->area.offset.x < 0 ||
+	    event->area.offset.y < 0 ||
+	    event->scissor.offset.x < 0 ||
+	    event->scissor.offset.y < 0)
 		return EINVAL;
-	if ((uint64_t)pass->area.offset.x + pass->area.extent.width > framebuffer->width || (uint64_t)pass->area.offset.y + pass->area.extent.height > framebuffer->height)
+	if ((uint64_t)event->area.offset.x + event->area.extent.width > event->width || (uint64_t)event->area.offset.y + event->area.extent.height > event->height)
 		return EINVAL;
 
 	/* Viewport preparation validates all six copied IEEE words before any packet is published. */
@@ -59,8 +61,8 @@ bcm2711_vulkan_native_bin_prepare(
 		return error;
 
 	/* Native guardband clipping requires explicit viewport restriction as well as drawable and user scissors. */
-	clip_axis(state.clipper.bounds[0], state.clipper.bounds[2], pass->area.offset.x, pass->area.extent.width, event->scissor.offset.x, event->scissor.extent.width, framebuffer->width, &state.window[0], &state.window[2]);
-	clip_axis(state.clipper.bounds[1], state.clipper.bounds[3], pass->area.offset.y, pass->area.extent.height, event->scissor.offset.y, event->scissor.extent.height, framebuffer->height, &state.window[1], &state.window[3]);
+	clip_axis(state.clipper.bounds[0], state.clipper.bounds[2], event->area.offset.x, event->area.extent.width, event->scissor.offset.x, event->scissor.extent.width, event->width, &state.window[0], &state.window[2]);
+	clip_axis(state.clipper.bounds[1], state.clipper.bounds[3], event->area.offset.y, event->area.extent.height, event->scissor.offset.y, event->scissor.extent.height, event->height, &state.window[1], &state.window[3]);
 
 	/* Facing choices are exact immutable pipeline fields; unsupported bits cannot silently change culling. */
 	if ((event->pipeline->cull & ~(VK_CULL_MODE_FRONT_BIT | VK_CULL_MODE_BACK_BIT)) != 0)

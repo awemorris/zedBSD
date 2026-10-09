@@ -28,15 +28,15 @@
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p004 を merge（host 試験・Linux の build まで）。T1 の 1 回の依頼は WS200 の分を足してから、p005 は 5330 の UAT（U1〜U13 は ws.md） | 0.5 | P1・T1 |
+| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p004 を merge（host 試験・Linux の build まで）。T1-523 で QEMU、p005 は 5330 の UAT（U1〜U13 は ws.md） | 0.5 | P1・T1 |
 | [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared（branch agent/p1-ws197）、p003 MAP は i03 の途中。p004〜p009 未着手。再開の手順は ws.md | 約 100 | P1 |
-| [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
+| [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | 実装を merge（88d068d78）、T1-523 と 5330 の UAT 待ち。Sign-in Methods は Users の頁の card の switch（押すと password の popup） | 0.5 | T1・ユーザー |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
 | 次の UAT で出る Bug の枠 | — | 5 | P1 |
-| **計** | | **約 119 LW**（約 40 時間、うち WS197 が約 100） | |
+| **計** | | **約 113 LW**（約 38 時間、うち WS197 が約 100） | |
 
 ## 次の UAT で確認してほしい事項（5330、WS199・WS200 の後の image）
 
@@ -46,7 +46,7 @@
 | 5 | WS199 ログイン画面のキー | 鍵を挿す（(a) 既定、(b)「PIN 不要」、(c)「PIN 不要」＋「タッチ不要」の設定で） | 自動で鍵のモードとその鍵の user に。(a) PIN（欄の下に OSK）とタッチ、(b) タッチだけ、(c) 「確認中」の後に最低 0.5 秒「確認した」を出してデスクトップへ |
 | 6 | WS199 ロック画面のタッチ不要 | (c) の設定で lock。鍵を挿したまま／抜いて挿し直す | 挿したままならタッチを促す。lock の後に挿した鍵ならタッチ無しで解除 |
 | 7 | WS199 設定の変更 | 「PIN 不要」「タッチ不要」を入れる | パスワードを求め、「鍵を持つ人は誰でもログインできる」の警告が出る |
-| 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の Password・PIN・Security Key | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
+| 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の card の switch（Password・PIN・Security Key、押すと password の popup） | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
 | 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 2026-10-10 は 4.9 MB/s（前は 950 KB/s） | 既知の問題に書くか close はユーザー |
 
 ## 既知の問題に書いて出す（ベータ3 以降）

@@ -174,6 +174,7 @@ prepare_event(
 	const struct bcm2711_vulkan_record *record)
 {
 	struct bcm2711_vulkan_prepared *prepared;
+	const struct bcm2711_vulkan_framebuffer *framebuffer;
 	struct bcm2711_vulkan_prepared_event *event;
 	int error;
 	int released;
@@ -193,6 +194,10 @@ prepare_event(
 	event->record = record;
 	event->pass = state->pass;
 	if (record->opcode == GPU_OP_CMD_DRAW) {
+		framebuffer = state->pass->objects[1]->payload;
+		event->width = framebuffer->width;
+		event->height = framebuffer->height;
+		event->area = state->pass->area;
 		event->pipeline = state->pipeline;
 		kern_memcpy(event->vertices, state->vertices, sizeof(event->vertices));
 		kern_memcpy(event->offsets, state->offsets, sizeof(event->offsets));

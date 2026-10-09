@@ -28,6 +28,8 @@ struct native_fetch {
 static int allocate_storage(struct bcm2711_vulkan_native_draw *draw, uint64_t bytes, uint64_t available, const struct bcm2711_shader_binary *program, struct bcm2711_native_storage **storage);
 static int prepare_textures(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available);
 static int prepare_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_descriptor *descriptor, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
+static int prepare_texture_image(struct bcm2711_vulkan_native_draw *draw, struct bcm2711_vulkan_resource *image, const struct bcm2711_vulkan_sampler *source, uint32_t swap, uint64_t available, struct bcm2711_vulkan_native_binding *binding);
+static int prepare_meta_texture(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_meta_draw *meta, uint64_t available);
 static int prepare_sampler(const struct bcm2711_vulkan_sampler *source, struct bcm2711_native_sampler *sampler);
 static int prepare_programs(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, struct bcm2711_native_shader *shader);
 static int prepare_records(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, const struct bcm2711_native_shader *shader);
@@ -61,9 +63,15 @@ bcm2711_vulkan_native_draw_create(
 	*draw = NULL;
 
 	/* Only real prepared draws and an identified native controller provide the required immutable inputs. */
-	if (space == NULL || space->native == NULL || event == NULL || event->pipeline == NULL)
+	if (space == NULL ||
+	    space->native == NULL ||
+	    event == NULL ||
+	    event->pipeline == NULL)
 		return EINVAL;
-	if (event->opcode != GPU_OP_CMD_DRAW || event->draw[0] == 0 || event->draw[1] != 1 || event->draw[3] != 0)
+	if (event->opcode != GPU_OP_CMD_DRAW ||
+	    event->draw[0] == 0 ||
+	    event->draw[1] != 1 ||
+	    event->draw[3] != 0)
 		return EINVAL;
 
 	/* One finite job-wide budget prevents independent draws from bypassing the total native staging bound. */
@@ -101,6 +109,51 @@ bcm2711_vulkan_native_draw_create(
 	*draw = created;
 
 	/* Succeeded: all code, uniforms, texture/fetch data and records remain independently owned until checked retirement. */
+	return 0;
+}
+
+/*
+ * Uploads one internal texture quad without publishing or fabricating any Vulkan namespace object.
+ */
+int
+bcm2711_vulkan_native_meta_draw_create(
+	struct bcm2711_v3d_space *space,
+	const struct bcm2711_vulkan_meta_draw *meta,
+	uint64_t *available,
+	struct bcm2711_vulkan_native_draw **draw)
+{
+	struct bcm2711_vulkan_prepared_event *event;
+	int error;
+
+	/* Only a complete actual source and independently compiled temporary meta pipeline can supply native inputs. */
+	if (draw == NULL)
+		return EINVAL;
+	*draw = NULL;
+	if (meta == NULL || meta->image == NULL)
+		return EINVAL;
+
+	/* The large prepared description stays off the kernel stack and owns no public descriptor edge. */
+	event = kern_calloc(1, sizeof(*event));
+	if (event == NULL)
+		return ENOMEM;
+	event->opcode = GPU_OP_CMD_DRAW;
+	event->pipeline = (struct bcm2711_vulkan_pipeline *)&meta->pipeline;
+	event->meta = meta;
+	event->width = meta->width;
+	event->height = meta->height;
+	event->area = meta->area;
+	event->scissor = meta->area;
+	event->draw[0] = 6;
+	event->draw[1] = 1;
+	kern_memcpy(event->viewport, meta->viewport, sizeof(event->viewport));
+
+	/* Native upload copies every shader, scalar, source texel and vertex before the temporary description retires. */
+	error = bcm2711_vulkan_native_draw_create(space, event, available, draw);
+	kern_free(event);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the returned native root retains no temporary pipeline, geometry or prepared-event pointer. */
 	return 0;
 }
 
@@ -165,7 +218,9 @@ allocate_storage(
 	padded = (bytes + 4095U) & ~4095ULL;
 
 	/* Both allocation count and the enclosing job's remaining total are checked before physical acquisition. */
-	if (draw->count == BCM2711_VULKAN_DRAW_STORAGE || draw->bytes > available || padded > available - draw->bytes)
+	if (draw->count == BCM2711_VULKAN_DRAW_STORAGE ||
+	    draw->bytes > available ||
+	    padded > available - draw->bytes)
 		return ENOMEM;
 	error = 0;
 	if (program != NULL)
@@ -195,6 +250,14 @@ prepare_textures(
 	uint32_t set;
 	uint32_t slot;
 	int error;
+
+	/* Internal transfer sampling has one exact actual image and a copied filter, with no user descriptor namespace. */
+	if (event->meta != NULL) {
+		error = prepare_meta_texture(draw, event->meta, available);
+		if (error != 0)
+			return error;
+		return 0;
+	}
 
 	/* Canonical consumed masks never reinterpret undefined bits as descriptor slots. */
 	for (set = 0; set < BCM2711_VULKAN_PIPELINE_SETS; set++) {
@@ -227,6 +290,47 @@ prepare_texture(
 {
 	struct bcm2711_vulkan_image_view *image_view;
 	struct bcm2711_vulkan_resource *image;
+	uint32_t swap;
+	int error;
+
+	/* Retained typed clones supply both immutable sampler parameters and the actual image dependency. */
+	if (descriptor->view == NULL || descriptor->sampler == NULL)
+		return EINVAL;
+	if (descriptor->view->kind != I915_VK_OBJ_IMAGE_VIEW || descriptor->sampler->kind != I915_VK_OBJ_SAMPLER)
+		return EINVAL;
+	image_view = descriptor->view->payload;
+	if (image_view == NULL ||
+	    image_view->owner.parent == NULL ||
+	    descriptor->sampler->payload == NULL)
+		return EINVAL;
+	image = image_view->owner.parent->payload;
+	if (image == NULL ||
+	    (image->format != VK_FORMAT_R8G8B8A8_UNORM &&
+	    image->format != VK_FORMAT_B8G8R8A8_UNORM))
+		return ENOTSUP;
+
+	/* Ordinary sampled input preserves the actual image's canonical red/blue interpretation. */
+	swap = 0;
+	if (image->format == VK_FORMAT_B8G8R8A8_UNORM)
+		swap = 1;
+	error = prepare_texture_image(draw, image, descriptor->sampler->payload, swap, available, binding);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every numerical binding references independently uploaded texture and sampler storage. */
+	return 0;
+}
+
+/* Stages one actual coherent source and encodes copied sampling choices without borrowing a public descriptor object. */
+static int
+prepare_texture_image(
+	struct bcm2711_vulkan_native_draw *draw,
+	struct bcm2711_vulkan_resource *image,
+	const struct bcm2711_vulkan_sampler *source,
+	uint32_t swap,
+	uint64_t available,
+	struct bcm2711_vulkan_native_binding *binding)
+{
 	struct bcm2711_native_storage *pixels;
 	struct bcm2711_native_storage *records;
 	struct bcm2711_native_texture texture;
@@ -237,18 +341,6 @@ prepare_texture(
 	uint32_t address;
 	uint32_t bytes;
 	int error;
-
-	/* Retained typed clones supply both immutable sampler parameters and the actual image dependency. */
-	if (descriptor->view == NULL || descriptor->sampler == NULL)
-		return EINVAL;
-	if (descriptor->view->kind != I915_VK_OBJ_IMAGE_VIEW || descriptor->sampler->kind != I915_VK_OBJ_SAMPLER)
-		return EINVAL;
-	image_view = descriptor->view->payload;
-	if (image_view == NULL || image_view->owner.parent == NULL || descriptor->sampler->payload == NULL)
-		return EINVAL;
-	image = image_view->owner.parent->payload;
-	if (image == NULL || (image->format != VK_FORMAT_R8G8B8A8_UNORM && image->format != VK_FORMAT_B8G8R8A8_UNORM))
-		return ENOTSUP;
 
 	/* Complete coherent logical raster storage is read only at execution, after previous GPU writes become visible. */
 	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &source_view, &address, &cpu);
@@ -276,13 +368,12 @@ prepare_texture(
 	texture.width = image->width;
 	texture.height = image->height;
 	texture.bytes = bytes;
-	if (image->format == VK_FORMAT_B8G8R8A8_UNORM)
-		texture.swap_red_blue = 1;
+	texture.swap_red_blue = swap;
 	destination = records->view->buffer->address;
 	error = bcm2711_native_texture_encode(&texture, destination, 32);
 	if (error != 0)
 		return error;
-	error = prepare_sampler(descriptor->sampler->payload, &sampler);
+	error = prepare_sampler(source, &sampler);
 	if (error != 0)
 		return error;
 	error = bcm2711_native_sampler_encode(&sampler, destination + 32, 32);
@@ -307,7 +398,8 @@ prepare_sampler(
 	struct bcm2711_native_sampler *sampler)
 {
 	/* Unsupported retained metadata never silently changes filtering. */
-	if ((source->mag != VK_FILTER_NEAREST && source->mag != VK_FILTER_LINEAR) ||
+	if ((source->mag != VK_FILTER_NEAREST &&
+	    source->mag != VK_FILTER_LINEAR) ||
 	    (source->min != VK_FILTER_NEAREST && source->min != VK_FILTER_LINEAR))
 		return ENOTSUP;
 	kern_memset(sampler, 0, sizeof(*sampler));
@@ -370,7 +462,10 @@ prepare_programs(
 	/* Every emitted program retains independent code and exact current scalar consumption. */
 	for (stage = 0; stage < 3; stage++) {
 		program = event->pipeline->programs[stage];
-		if (program == NULL || program->code == NULL || program->code_count == 0 || (uint32_t)program->stage != stage)
+		if (program == NULL ||
+		    program->code == NULL ||
+		    program->code_count == 0 ||
+		    (uint32_t)program->stage != stage)
 			return EINVAL;
 		bytes = (uint64_t)program->code_count * 8U;
 		error = allocate_storage(draw, bytes, available, program, &code);
@@ -609,6 +704,23 @@ resolve_fetch(
 	uint32_t index;
 	int error;
 
+	/* Internal geometry already contains exactly six owned position/UV vertices; no typed buffer or fake allocation is involved. */
+	if (event->meta != NULL) {
+		if ((location == 0 &&
+		    components != 4) ||
+		    (location == 1 &&
+		    components != 2) ||
+		    location > 1)
+			return EINVAL;
+		fetch->cpu = (const uint8_t *)event->meta->vertices;
+		if (location == 1)
+			fetch->cpu += 16;
+		fetch->stride = 24;
+		fetch->source_components = components;
+		fetch->components = components;
+		return 0;
+	}
+
 	/* Immutable pipeline array counts precede all declaration searches. */
 	if (event->pipeline->attribute_count > BCM2711_VULKAN_VERTEX_ATTRIBUTES || event->pipeline->binding_count > BCM2711_VULKAN_VERTEX_BINDINGS)
 		return EINVAL;
@@ -700,4 +812,38 @@ write_word(
 
 	/* Succeeded: the complete numerical word occupies its exact four-byte native field. */
 	return;
+}
+
+/* Stages one transfer source with exact nearest/linear clamp semantics and optional raw-channel copy interpretation. */
+static int
+prepare_meta_texture(
+	struct bcm2711_vulkan_native_draw *draw,
+	const struct bcm2711_vulkan_meta_draw *meta,
+	uint64_t available)
+{
+	struct bcm2711_vulkan_sampler sampler;
+	uint32_t swap;
+	int error;
+
+	/* Meta recording validation supplies an actual bound colour source; its application usage is transfer rather than sampled. */
+	if (meta->image == NULL || meta->image->memory == NULL)
+		return EINVAL;
+	if (meta->filter != VK_FILTER_NEAREST && meta->filter != VK_FILTER_LINEAR)
+		return ENOTSUP;
+
+	/* Clamp is to the complete source image, as required for Vulkan blit; one mip has no independent mip filtering state. */
+	kern_memset(&sampler, 0, sizeof(sampler));
+	sampler.mag = meta->filter;
+	sampler.min = meta->filter;
+	sampler.u = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler.v = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	swap = 0;
+	if (!meta->raw && meta->image->format == VK_FORMAT_B8G8R8A8_UNORM)
+		swap = 1;
+	error = prepare_texture_image(draw, meta->image, &sampler, swap, available, &draw->bindings[0][0]);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: transfer shader binding zero owns all staged texels and numerical sampler/texture records. */
+	return 0;
 }

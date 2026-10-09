@@ -165,6 +165,38 @@ bcm2711_vulkan_native_clear_create(
 }
 
 /*
+ * Builds the complete native lists for an unpublished independently owned graphics or internal transfer pass.
+ */
+int
+bcm2711_vulkan_native_pass_build_lists(
+	struct bcm2711_vulkan_native_pass *pass,
+	uint64_t *available)
+{
+	uint64_t remaining;
+	int error;
+
+	/* Only a fresh native root with an exact independent output may acquire command and overflow storage. */
+	if (pass == NULL ||
+	    pass->space == NULL ||
+	    pass->output == NULL ||
+	    pass->count != 0 ||
+	    pass->executed)
+		return EINVAL;
+	if (available == NULL || *available > NATIVE_PASS_BYTES)
+		return EINVAL;
+
+	/* A partial allocation failure keeps every mapping on the root while leaving the enclosing caller budget unchanged. */
+	remaining = *available;
+	error = prepare_lists(pass, &remaining);
+	if (error != 0)
+		return error;
+	*available = remaining;
+
+	/* Succeeded: all lists are cleaned and every native address belongs to the same complete unpublished pass. */
+	return 0;
+}
+
+/*
  * Retires a whole native pass only after no-launch, completion or checked global reset proves DMA stopped.
  */
 int

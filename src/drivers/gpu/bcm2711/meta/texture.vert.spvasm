@@ -1,0 +1,32 @@
+; zedBSD
+; Copyright (C) 2026 Awe Morris
+; SPDX-License-Identifier: Zlib
+; Internal transfer vertices carry exact destination clip positions and source normalized coordinates.
+OpCapability Shader
+OpMemoryModel Logical GLSL450
+OpEntryPoint Vertex %main "main" %position %uv %out_position %out_uv
+OpDecorate %position Location 0
+OpDecorate %uv Location 1
+OpDecorate %out_position BuiltIn Position
+OpDecorate %out_uv Location 0
+%void = OpTypeVoid
+%fn = OpTypeFunction %void
+%float = OpTypeFloat 32
+%vec4 = OpTypeVector %float 4
+%vec2 = OpTypeVector %float 2
+%in4 = OpTypePointer Input %vec4
+%in2 = OpTypePointer Input %vec2
+%out4 = OpTypePointer Output %vec4
+%out2 = OpTypePointer Output %vec2
+%position = OpVariable %in4 Input
+%uv = OpVariable %in2 Input
+%out_position = OpVariable %out4 Output
+%out_uv = OpVariable %out2 Output
+%main = OpFunction %void None %fn
+%entry = OpLabel
+%p = OpLoad %vec4 %position
+%t = OpLoad %vec2 %uv
+OpStore %out_position %p
+OpStore %out_uv %t
+OpReturn
+OpFunctionEnd
