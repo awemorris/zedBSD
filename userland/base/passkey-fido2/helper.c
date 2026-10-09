@@ -23,12 +23,13 @@
  * passkey-fido2 attached the readers' slots, and the helper powers a card
  * and selects its FIDO applet (pk_os_card_select), a slot whose card does
  * not answer (a reader's SAM slot, a card that is not a key) being let go.
- * A card held to the reader is present for the key, so to log in only a
- * card that comes during the attempt is asked: when no USB key answers,
- * the helper says "touch" (touch the key, or hold it to the reader) and
- * waits for a card to come until the touch's time is nearly out.  To
- * register, a card already there counts as the one key, and with no key
- * at all the helper waits for one to be held to the reader the same way.
+ * A card on the reader is the user's presence for the key (the user's
+ * decision of 2026-10-10: a card left on the reader counts as a touch), so
+ * to log in the cards already there are asked after the USB keys; when no
+ * key answers at all, the helper says "touch" (touch the key, or hold it
+ * to the reader) and waits for a card to come until the touch's time is
+ * nearly out.  To register, a card already there counts as the one key,
+ * and with no key at all the helper waits for one the same way.
  */
 
 #include "fido2.h"
@@ -368,6 +369,7 @@ helper_assert(
 	size_t index;
 	size_t slot;
 	int answered;
+	int present;
 	int tapped;
 	int found;
 	int error;
@@ -391,11 +393,26 @@ helper_assert(
 			found = 1;
 	}
 
-	/*
-	 * No USB key answered: a key held to a reader during the attempt (one
-	 * already there is not asked: being there is not the user's touch).
-	 * Each card that comes is asked the same; one that holds none is let go.
-	 */
+	/* The cards on a reader now, asked the same; one that holds none is let go. */
+	for (slot = 0U; slot < devices->card_count && !found; slot++) {
+		error = pk_os_card_present(&devices->cards[slot], &present);
+		if (error != 0 || !present)
+			continue;
+		error = helper_open_card(devices, slot, &key);
+		if (error != 0)
+			continue;
+		answered = 1;
+		error = pk_ctap2_get_assertion(&key.device, &request, &reply);
+		if (error == 0) {
+			found = 1;
+			break;
+		}
+
+		/* Not this account's key: let go. */
+		helper_release(devices, &key);
+	}
+
+	/* No key answered at all: one held to a reader during the attempt, each that comes asked the same. */
 	tapped = 0;
 	if (!found && !answered && devices->card_count != 0U) {
 		helper_touch();

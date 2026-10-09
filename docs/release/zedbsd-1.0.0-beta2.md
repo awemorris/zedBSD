@@ -54,6 +54,10 @@ log in as `kei`. Use Beta 2 only on networks you trust. `root` cannot log in.
   Languages.
 - A lock screen with a large clock; sign in with a password, a 6-digit PIN
   or a FIDO2 security key (such as a YubiKey).
+- Settings → Security Keys: the 6-digit PIN (Software Security Key) and the
+  FIDO2 keys, added with a step-by-step window. A key works plugged in or held
+  to an NFC reader; a key left lying on the reader counts as touched, so do
+  not leave it there if anyone else can reach the computer.
 - Icons of the files in `~/Desktop`, and drag and drop between apps.
 - External displays over HDMI and USB-C (DisplayPort alternate mode),
   extended or mirrored, arranged in Settings → Display.

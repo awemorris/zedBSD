@@ -9,7 +9,7 @@
 #     field takes the key (style=4, "Security key PIN"): key.png.  A PIN of three is not sent ("at least four").
 #  3. A PIN of four is sent: passkey-fido2 finds no key that holds the credential (the test kernel's loopback key does
 #     not speak CTAP2): SESSIOND AUTH fail ... reason=no-key, the greeter says so: no-key.png.
-#  4. kei logs in with the password; Settings' Users page shows the Security keys card with the key: settings.png.
+#  4. kei logs in with the password; Settings' Security Keys page (ws199-p001) lists the key: settings.png.
 #  5. No log has a PIN or a password.
 #
 #   plan/ws172/tests/build-fido2-image.sh BUILD; plan/tools/files/files-guest.sh start BUILD/hdd-image.img
@@ -109,7 +109,7 @@ expect_log /var/log/greeter.log 'KWL GREETER answer=FAIL reason=no-key' 10
 pointer move 1270 790 sleep 300
 check "$out/no-key.png" >/dev/null
 
-# 4. The password logs in; Settings' Users page lists the key.
+# 4. The password logs in; Settings' Security Keys page lists the key (ws199-p001).
 set -- $(style_at 1)
 pointer move "${1:-580}" "${2:-500}" down sleep 60 up
 expect_log /var/log/greeter.log 'KWL GREETER style=1( via=choice)?$' 5
@@ -118,12 +118,12 @@ expect_log /var/log/sessiond.log 'SESSIOND AUTH ok user=kei uid=1000 style=passw
 expect_log $session 'KWL HANDOFF go=1' 20
 expect_log $session 'KWL WELCOME skip done=1 error=0' 10
 # Settings on the session's own socket (its compositor's KWL READY line names it; T1-309: wayland-0 was not it), then
-# the key's line the Users page asks for.
+# the key's line the Security Keys page asks for.
 socket=$(guest "grep -o 'KWL READY socket=[^ ]*' $session | tail -1 | sed 's/KWL READY socket=//'" | tail -1)
 socket=${socket:-/run/user/1000/wayland-0}
 echo "session socket: $socket"
-guest "su kei -c 'XDG_RUNTIME_DIR=$(dirname "$socket") WAYLAND_DISPLAY=$(basename "$socket") /bin/settings users >/tmp/fido2-settings.log 2>&1 &'; sleep 4; echo started" >/dev/null
-expect_log /tmp/fido2-settings.log 'ZSETTINGS PAGE users' 20
+guest "su kei -c 'XDG_RUNTIME_DIR=$(dirname "$socket") WAYLAND_DISPLAY=$(basename "$socket") /bin/settings security-keys >/tmp/fido2-settings.log 2>&1 &'; sleep 4; echo started" >/dev/null
+expect_log /tmp/fido2-settings.log 'ZSETTINGS PAGE security-keys' 20
 expect_log $session 'KWL SYSTEM enrolled pin=0 keys=1 listed=1' 20
 guest "tail -5 /tmp/fido2-settings.log" | sed 's/^/settings: /'
 sleep 2

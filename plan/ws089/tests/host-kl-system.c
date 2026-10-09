@@ -320,6 +320,18 @@ kl_system_printers_set_default(struct kl_system *system, uint32_t printer, uint3
 	return ENOTSUP;
 }
 
+/* A printer's name, IPP path or LPD queue changed (KL_VERSION 75): not offered by the stand-in. */
+int
+kl_system_printers_edit(struct kl_system *system, uint32_t printer, const char *name, const char *path, uint32_t *request)
+{
+	(void)system;
+	(void)printer;
+	(void)name;
+	(void)path;
+	(void)request;
+	return ENOTSUP;
+}
+
 int
 kl_system_print_cancel(struct kl_system *system, uint32_t job, uint32_t *request)
 {
