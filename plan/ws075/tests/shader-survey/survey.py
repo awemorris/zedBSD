@@ -1,7 +1,7 @@
 #!/usr/bin/env python3
 # ws075-p001: lists everything in SPIR-V modules that the i915 executor's shader compiler does not take, without stopping
 # at the first thing (the compiler itself refuses the whole module at its first refusal).  The rules copy what
-# src/drivers/gpu/i915/compiler/spirv.c (and compile.c) accept as of 2026-09-28, and the geometry stage of ws075-p007a
+# src/drivers/gpu/compiler/spirv.c (and compile.c) accept as of 2026-09-28, and the geometry stage of ws075-p007a
 # (spirv-geometry.inc, 2026-10-07); each rule names the function it copies.  Shape rules
 # (operand sizes, nesting depths, dynamic indices, phis) are not copied: the compiler's first refusal is compared by
 # run.sh to catch a module whose only gaps are of that kind.
@@ -12,17 +12,17 @@
 import subprocess
 import sys
 
-# i915_spirv_declare_decoration, i915_spirv_declare_member_decoration.
+# drv_gpu_spirv_declare_decoration, drv_gpu_spirv_declare_member_decoration.
 DECORATIONS = {'Location', 'Binding', 'DescriptorSet', 'BuiltIn', 'ArrayStride', 'Block', 'RelaxedPrecision', 'Flat',
                'Centroid', 'NoPerspective'}
 MEMBER_DECORATIONS = {'Offset', 'BuiltIn', 'MatrixStride', 'RowMajor', 'ColMajor', 'RelaxedPrecision', 'Flat', 'Centroid',
                       'NoPerspective'}
 
-# i915_spirv_declare_variable: module variables of these storage classes (Input and Output with a Location; an Output
+# drv_gpu_spirv_declare_variable: module variables of these storage classes (Input and Output with a Location; an Output
 # without one is a block written only through its Position builtin).
 STORAGE = {'Input', 'Output', 'PushConstant', 'UniformConstant', 'Uniform'}
 
-# i915_spirv_declare (module level): what is interpreted, and what has no execution semantics.
+# drv_gpu_spirv_declare (module level): what is interpreted, and what has no execution semantics.
 MODULE = {'OpEntryPoint', 'OpDecorate', 'OpMemberDecorate', 'OpTypeVoid', 'OpTypeBool', 'OpTypeSampler', 'OpTypeFunction',
           'OpTypeImage', 'OpTypeInt', 'OpTypeFloat', 'OpTypeVector', 'OpTypeMatrix', 'OpTypeSampledImage', 'OpTypeArray',
           'OpTypeStruct', 'OpTypePointer', 'OpConstant', 'OpConstantTrue', 'OpConstantFalse', 'OpConstantComposite',
@@ -30,7 +30,7 @@ MODULE = {'OpEntryPoint', 'OpDecorate', 'OpMemberDecorate', 'OpTypeVoid', 'OpTyp
           'OpMemberName', 'OpString', 'OpLine', 'OpNoLine', 'OpModuleProcessed', 'OpCapability', 'OpExtension',
           'OpMemoryModel', 'OpExecutionMode'}
 
-# i915_spirv_lower_instruction: the instructions of a function body that are lowered.
+# drv_gpu_spirv_lower_instruction: the instructions of a function body that are lowered.
 BODY = {'OpReturn', 'OpUnreachable', 'OpBranch', 'OpBranchConditional', 'OpSelectionMerge', 'OpLoopMerge', 'OpKill',
         'OpPhi', 'OpFDiv', 'OpFMod', 'OpFRem', 'OpFOrdEqual', 'OpFUnordEqual', 'OpFOrdNotEqual', 'OpFUnordNotEqual',
         'OpFOrdLessThan', 'OpFUnordLessThan', 'OpFOrdGreaterThan', 'OpFUnordGreaterThan', 'OpFOrdLessThanEqual',
@@ -51,32 +51,32 @@ BODY = {'OpReturn', 'OpUnreachable', 'OpBranch', 'OpBranchConditional', 'OpSelec
         'OpImageSampleProjDrefExplicitLod', 'OpImageFetch', 'OpImage', 'OpImageQuerySizeLod', 'OpImageQuerySize',
         'OpImageQueryLevels', 'OpEmitVertex', 'OpEndPrimitive'}
 
-# i915_spirv_geometry_mode: the execution modes of a geometry shader (Invocations of 1 alone, OutputVertices of 1 to 256).
+# drv_gpu_spirv_geometry_mode: the execution modes of a geometry shader (Invocations of 1 alone, OutputVertices of 1 to 256).
 GEOMETRY_MODES = {'InputPoints', 'InputLines', 'InputLinesAdjacency', 'Triangles', 'InputTrianglesAdjacency',
                   'OutputPoints', 'OutputLineStrip', 'OutputTriangleStrip', 'OutputVertices', 'Invocations'}
 
-# i915_spirv_lower_load_vertex_input: the members of gl_in a geometry shader reads.
+# drv_gpu_spirv_lower_load_vertex_input: the members of gl_in a geometry shader reads.
 GL_IN_MEMBERS = {'Position', 'PointSize'}
 
-# i915_spirv_lower_sample and i915_spirv_lower_texture: the image operands of a sample that are lowered.
+# drv_gpu_spirv_lower_sample and drv_gpu_spirv_lower_texture: the image operands of a sample that are lowered.
 SAMPLE_OPERANDS = {'Bias', 'Lod', 'Grad', 'ConstOffset'}
 
-# i915_spirv_lower_fetch: the image operands of a fetch that are lowered (Sample: of a multisampled image).
+# drv_gpu_spirv_lower_fetch: the image operands of a fetch that are lowered (Sample: of a multisampled image).
 FETCH_OPERANDS = {'Lod', 'ConstOffset', 'Sample'}
 
-# The image kinds a sample, a fetch and a query take (i915_spirv_image_type() and its callers): a sample not of a
+# The image kinds a sample, a fetch and a query take (drv_gpu_spirv_image_type() and its callers): a sample not of a
 # multisampled image; a fetch also of a texel buffer, and of a multisampled 2D image (not an array); a query of any
 # 1D, 2D, 3D or cube image, multisampled or not.
 SAMPLE_DIMS = {'1D', '2D', '3D', 'Cube'}
 FETCH_DIMS = {'1D', '2D', '3D', 'Buffer'}
 
-# i915_spirv_lower_extended: GLSL.std.450.
+# drv_gpu_spirv_lower_extended: GLSL.std.450.
 EXTENDED = {'Round', 'RoundEven', 'Trunc', 'FAbs', 'SAbs', 'FSign', 'SSign', 'Floor', 'Ceil', 'Fract', 'Radians', 'Degrees',
             'Sin', 'Cos', 'Tan', 'Pow', 'Exp', 'Log', 'Exp2', 'Log2', 'Sqrt', 'InverseSqrt', 'FMin', 'UMin', 'SMin', 'FMax',
             'UMax', 'SMax', 'FClamp', 'UClamp', 'SClamp', 'FMix', 'Step', 'SmoothStep', 'Length', 'Distance', 'Cross',
             'Normalize', 'Reflect', 'Determinant', 'MatrixInverse', 'PackHalf2x16', 'UnpackHalf2x16'}
 
-# i915_spirv_lower_store_output and i915_spirv_geometry_output: the output builtins that are written, by stage (a
+# drv_gpu_spirv_lower_store_output and drv_gpu_spirv_geometry_output: the output builtins that are written, by stage (a
 # geometry shader's gl_PointSize is refused: shaderTessellationAndGeometryPointSize is not offered).
 OUTPUT_BUILTINS = {'Vertex': {'Position', 'PointSize'}, 'Geometry': {'Position', 'Layer', 'PrimitiveId'}}
 
@@ -179,7 +179,7 @@ def survey(path):
 			if opcode == 'OpConstant' and types.get(operands[0], ['?'])[0] == 'OpTypeInt':
 				constants[result] = int(operands[1])
 			if opcode == 'OpConstantComposite':
-				# i915_spirv_declare_constant_composite: vectors, matrices, arrays and structures of constants.
+				# drv_gpu_spirv_declare_constant_composite: vectors, matrices, arrays and structures of constants.
 				kind = types.get(operands[0], ['?'])[0]
 				if kind not in ('OpTypeVector', 'OpTypeMatrix', 'OpTypeArray', 'OpTypeStruct'):
 					gap('constant composite of %s' % kind[6:].lower())
@@ -191,19 +191,19 @@ def survey(path):
 				if storage not in STORAGE:
 					gap('module variable in %s' % storage)
 				elif storage == 'Input' and result in builtins:
-					# i915_spirv_declare_variable: a vertex shader's VertexIndex and InstanceIndex are generated inputs.
+					# drv_gpu_spirv_declare_variable: a vertex shader's VertexIndex and InstanceIndex are generated inputs.
 					# A fragment shader's FrontFacing, FragCoord and PointCoord are the payload's facing bit, pixel
 					# position, depth and w, and the point sprite's coordinate.
 					generated = stage == 'Vertex' and builtins[result] in ('VertexIndex', 'InstanceIndex')
 					if stage == 'Fragment' and builtins[result] in ('FrontFacing', 'FragCoord', 'PointCoord', 'PrimitiveId'):
 						generated = True
-					# i915_spirv_declare_geometry_input: gl_PrimitiveIDIn is the thread's payload.
+					# drv_gpu_spirv_declare_geometry_input: gl_PrimitiveIDIn is the thread's payload.
 					if stage == 'Geometry' and builtins[result] == 'PrimitiveId':
 						generated = True
 					if not generated:
 						gap('input builtin %s' % builtins[result])
 				elif storage == 'Input':
-					# i915_spirv_lower_load: an input is floats, or integers in a vertex shader or a Flat fragment input.
+					# drv_gpu_spirv_lower_load: an input is floats, or integers in a vertex shader or a Flat fragment input.
 					pointee = types.get(types.get(operands[0], ['', '', ''])[2], ['?', ''])
 					if pointee[0] == 'OpTypeVector':
 						pointee = types.get(pointee[1], ['?'])
@@ -230,10 +230,10 @@ def survey(path):
 		if opcode == 'OpLoad':
 			loads[result] = operands[0]
 		if opcode == 'OpImage':
-			# i915_spirv_lower_image: the image of a loaded sampler names its binding.
+			# drv_gpu_spirv_lower_image: the image of a loaded sampler names its binding.
 			loads[result] = loads.get(operands[1], '')
 		if opcode.startswith('OpImageSample'):
-			# i915_spirv_lower_sample and _texture: 1D, 2D, 3D and cube images, arrays, of floats or integers;
+			# drv_gpu_spirv_lower_sample and _texture: 1D, 2D, 3D and cube images, arrays, of floats or integers;
 			# Bias, Lod, Grad and ConstOffset (the operand mask after a Dref's reference).
 			mask = 4 if 'Dref' in opcode else 3
 			if len(operands) > mask and not set(operands[mask].split('|')) <= SAMPLE_OPERANDS:
@@ -243,7 +243,7 @@ def survey(path):
 			if image[0] == 'OpTypeImage' and (image[2] not in SAMPLE_DIMS or image[5] != '0'):
 				gap('texture() of a sampler%s%s' % (image[2], 'MS' if image[5] != '0' else ''))
 		if opcode in ('OpImageFetch', 'OpImageQuerySizeLod', 'OpImageQuerySize', 'OpImageQueryLevels'):
-			# i915_spirv_lower_fetch and _query: what FETCH_DIMS and SAMPLE_DIMS say.
+			# drv_gpu_spirv_lower_fetch and _query: what FETCH_DIMS and SAMPLE_DIMS say.
 			image = types.get(loads.get(operands[1], ''), ['?', '', '?', '0', '0', '0'])
 			if image[0] == 'OpTypeSampledImage':
 				image = types.get(image[1], ['?', '', '?', '0', '0', '0'])
@@ -257,12 +257,12 @@ def survey(path):
 			if opcode == 'OpImageFetch' and len(operands) > 3 and not set(operands[3].split('|')) <= FETCH_OPERANDS:
 				gap('texelFetch() with operands (%s)' % operands[3])
 		if opcode == 'OpVariable':
-			# i915_spirv_lower_variable: scalars, vectors, matrices, and arrays and structures of them.
+			# drv_gpu_spirv_lower_variable: scalars, vectors, matrices, and arrays and structures of them.
 			if len(operands) > 2:
 				gap('local variable initializer')
 		if opcode == 'OpAccessChain':
 			chains[result] = (operands[2], operands[3:])
-			# i915_spirv_lower_load_vertex_input: gl_in (an unlocated, built-in-less input of a geometry shader) is
+			# drv_gpu_spirv_lower_load_vertex_input: gl_in (an unlocated, built-in-less input of a geometry shader) is
 			# read at a vertex, then a member, which must be gl_Position or gl_PointSize.
 			base = operands[2]
 			if (stage == 'Geometry' and base in variables and variables[base][0] == 'Input' and base not in builtins and

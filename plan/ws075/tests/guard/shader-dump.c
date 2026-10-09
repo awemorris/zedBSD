@@ -36,7 +36,7 @@ kern_free(
 	free(pointer);
 }
 
-#include "../../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../../src/drivers/gpu/i915/compiler/compile.c"
 #include "scoreboard-check.h"
@@ -46,10 +46,10 @@ main(
 	int argc,
 	char **argv)
 {
-	struct i915_compile_diagnostic diagnostic;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
-	enum i915_shader_stage stage;
+	enum drv_gpu_shader_stage stage;
 	uint32_t *code;
 	FILE *file;
 	long size;
@@ -60,9 +60,9 @@ main(
 		fprintf(stderr, "usage: shader-dump vertex|fragment FILE.spv OUT.bin\n");
 		return 2;
 	}
-	stage = I915_STAGE_VERTEX;
+	stage = DRV_GPU_STAGE_VERTEX;
 	if (strcmp(argv[1], "fragment") == 0)
-		stage = I915_STAGE_FRAGMENT;
+		stage = DRV_GPU_STAGE_FRAGMENT;
 
 	/* Reads the module. */
 	file = fopen(argv[2], "rb");
@@ -78,7 +78,7 @@ main(
 
 	/* Parses and compiles it. */
 	memset(&diagnostic, 0, sizeof(diagnostic));
-	error = drv_i915_shader_parse(code, (size_t)size / 4U, stage, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(code, (size_t)size / 4U, stage, &ir, &diagnostic);
 	if (error != 0) {
 		fprintf(stderr, "%s: refused by the parser: %d (%s)\n", argv[2], error, diagnostic.reason != NULL ? diagnostic.reason : "?");
 		return 1;

@@ -180,7 +180,7 @@
 #define COMPILE_GS_WRITE_HEADER_REGS	2U
 
 /* The spilled values one instruction reads at most (three sources), and defines at most (a sample's four). */
-#define COMPILE_MAX_FILLS	(I915_IR_TEXTURE_MAX_PARAMS + 1U)
+#define COMPILE_MAX_FILLS	(DRV_GPU_IR_TEXTURE_MAX_PARAMS + 1U)
 #define COMPILE_MAX_SPILLS	4U
 
 /* A spilled value takes one register of scratch memory: 32 bytes, two OWords. */
@@ -326,7 +326,7 @@ struct i915_compile_loop {
  * one attempt to the next.
  */
 struct i915_compile_state {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	struct i915_eu_buf code;
 
 	/* The register a value lives in; COMPILE_NO_GRF before its definition, and always for a spilled value. */
@@ -516,20 +516,20 @@ struct i915_compile_state {
 	uint32_t gs_control_bits;
 };
 
-static uint32_t i915_compile_sources(const struct i915_shader_ir_inst *inst);
-static uint32_t i915_compile_operands(const struct i915_shader_ir_inst *inst);
-static void i915_compile_guarded_texture(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static uint32_t i915_compile_sources(const struct drv_gpu_shader_ir_inst *inst);
+static uint32_t i915_compile_operands(const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_guarded_texture(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_skips(struct i915_compile_state *state);
 static int i915_compile_skip_region(struct i915_compile_state *state, uint32_t begin, uint32_t end);
-static int i915_compile_skip_garbage(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint64_t garbage[COMPILE_SKIP_WORDS]);
+static int i915_compile_skip_garbage(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint64_t garbage[COMPILE_SKIP_WORDS]);
 static const uint64_t *i915_compile_skip_value_garbage(const struct i915_compile_state *state, uint32_t value);
 static int i915_compile_bool_table(struct i915_compile_state *state, uint32_t value, uint64_t table[COMPILE_SKIP_WORDS], uint32_t depth);
 static int i915_compile_table_within(const uint64_t table[COMPILE_SKIP_WORDS], const uint64_t within[COMPILE_SKIP_WORDS]);
-static void i915_compile_skip_begin(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_skip_begin(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static uint32_t i915_compile_if_any(struct i915_compile_state *state, uint32_t predicate);
 static void i915_compile_skip_end(struct i915_compile_state *state);
-static uint32_t i915_compile_source(const struct i915_shader_ir_inst *inst, uint32_t index);
-static uint32_t i915_compile_results(const struct i915_shader_ir_inst *inst);
+static uint32_t i915_compile_source(const struct drv_gpu_shader_ir_inst *inst, uint32_t index);
+static uint32_t i915_compile_results(const struct drv_gpu_shader_ir_inst *inst);
 static int i915_compile_attempt(struct i915_compile_state *state);
 static void i915_compile_reset(struct i915_compile_state *state);
 static int i915_compile_liveness(struct i915_compile_state *state);
@@ -541,42 +541,42 @@ static uint32_t i915_compile_temporary(struct i915_compile_state *state);
 static uint32_t i915_compile_temporaries(struct i915_compile_state *state, uint32_t count);
 static void i915_compile_exhausted(struct i915_compile_state *state);
 static uint32_t i915_compile_choose_victim(const struct i915_compile_state *state);
-static int i915_compile_involves(const struct i915_shader_ir_inst *inst, uint32_t value);
+static int i915_compile_involves(const struct drv_gpu_shader_ir_inst *inst, uint32_t value);
 static uint32_t i915_compile_fill(struct i915_compile_state *state, uint32_t value);
 static void i915_compile_scratch_offset(struct i915_compile_state *state, uint32_t value);
 static void i915_compile_scratch_header(struct i915_compile_state *state);
 static void i915_compile_spill_results(struct i915_compile_state *state);
 static void i915_compile_release_temporaries(struct i915_compile_state *state);
-static void i915_compile_release(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_instruction(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_load_input(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_load_push(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_load_block(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_storage(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_store_output(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_arithmetic(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_negate(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_math(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_unary(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_minmax(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_compare(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_logic(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_select(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_kill(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_sample(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static int i915_compile_sampler_index(const struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t *sampler);
-static void i915_compile_sample_message(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t sampler);
-static void i915_compile_texture(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_integer(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_multiply(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_divide(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_convert(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_integer_compare(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_move(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_derivative(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_half(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_release(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_instruction(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_load_input(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_load_push(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_load_block(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_storage(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_store_output(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_arithmetic(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_negate(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_math(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_unary(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_minmax(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_compare(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_logic(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_select(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_kill(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_sample(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static int i915_compile_sampler_index(const struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t *sampler);
+static void i915_compile_sample_message(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t sampler);
+static void i915_compile_texture(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_integer(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_multiply(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_divide(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_convert(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_integer_compare(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_move(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_derivative(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_half(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_loop_begin(struct i915_compile_state *state);
-static void i915_compile_loop_end(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_loop_end(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static int i915_compile_rank(const uint32_t *list, uint32_t count, uint32_t location, uint32_t *rank);
 static uint32_t i915_compile_flat_mask(const struct i915_compile_state *state);
 static int i915_compile_input_flat(const struct i915_compile_state *state, uint32_t location);
@@ -584,7 +584,7 @@ static int i915_compile_input_linear(const struct i915_compile_state *state, uin
 static void i915_compile_note(struct i915_compile_state *state, uint32_t *list, uint32_t *count, uint32_t limit, uint32_t location);
 static void i915_compile_interface(struct i915_compile_state *state);
 static void i915_compile_fragment_payload(struct i915_compile_state *state);
-static void i915_compile_frag_coord(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_frag_coord(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_blocks(struct i915_compile_state *state);
 static void i915_compile_prologue(struct i915_compile_state *state);
 static void i915_compile_terminate(struct i915_compile_state *state);
@@ -596,26 +596,26 @@ static void i915_compile_gather(struct i915_compile_state *state, uint32_t first
 static void i915_compile_read_into(struct i915_compile_state *state, uint32_t value, uint32_t grf);
 static void i915_compile_describe(const struct i915_compile_state *state, struct i915_shader_binary *binary);
 static void i915_compile_compute_interface(struct i915_compile_state *state);
-static void i915_compile_load_system(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_atomic(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
-static void i915_compile_storage_size(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_load_system(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_atomic(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
+static void i915_compile_storage_size(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t payload_inputs);
 static int i915_compile_storage_block(struct i915_compile_state *state, uint32_t uniform, uint32_t *block);
 static void i915_compile_terminate_compute(struct i915_compile_state *state);
 static void i915_compile_describe_compute(const struct i915_compile_state *state, struct i915_shader_binary *binary);
-static void i915_compile_shared(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_atomic_shared(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_shared(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_atomic_shared(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_fence(struct i915_compile_state *state, uint32_t fences);
-static void i915_compile_barrier(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_barrier(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static int i915_compile_group_threads(const struct i915_compile_state *state);
 static void i915_compile_geometry_interface(struct i915_compile_state *state);
 static void i915_compile_geometry_prologue(struct i915_compile_state *state);
-static void i915_compile_load_vertex_input(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static int i915_compile_vertex_slot(const struct i915_compile_state *state, const struct i915_shader_ir_inst *inst, uint32_t *slot, uint32_t *component);
-static void i915_compile_geometry_system(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_load_vertex_input(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static int i915_compile_vertex_slot(const struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst, uint32_t *slot, uint32_t *component);
+static void i915_compile_geometry_system(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_terminate_geometry(struct i915_compile_state *state);
 static void i915_compile_describe_geometry(const struct i915_compile_state *state, struct i915_shader_binary *binary);
-static void i915_compile_emit_vertex(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
-static void i915_compile_end_primitive(struct i915_compile_state *state, const struct i915_shader_ir_inst *inst);
+static void i915_compile_emit_vertex(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
+static void i915_compile_end_primitive(struct i915_compile_state *state, const struct drv_gpu_shader_ir_inst *inst);
 static void i915_compile_flush_cut_bits(struct i915_compile_state *state, uint32_t live_grf);
 static void i915_compile_control_write(struct i915_compile_state *state, int predicated);
 static uint32_t i915_compile_urb_write_descriptor(uint32_t global, uint32_t header_regs, int per_slot, int channel_mask);
@@ -628,7 +628,7 @@ static uint32_t i915_compile_urb_write_descriptor(uint32_t global, uint32_t head
  */
 int
 drv_i915_shader_compile(
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	struct i915_shader_binary **out)
 {
 	int error;
@@ -654,7 +654,7 @@ drv_i915_shader_compile(
  */
 int
 drv_i915_shader_compile_stage(
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	const struct i915_shader_binary *producer,
 	struct i915_shader_binary **out)
 {
@@ -675,13 +675,13 @@ drv_i915_shader_compile_stage(
 	 * the stage names the vertex, compute and geometry stages and takes any
 	 * other for the fragment stage.
 	 */
-	if (ir->stage >= I915_STAGE_COUNT)
+	if (ir->stage >= DRV_GPU_STAGE_COUNT)
 		return EINVAL;
 
 	/* Only a geometry shader reads a stage before it, and that stage is a vertex shader. */
-	if (producer != NULL && ir->stage != I915_STAGE_GEOMETRY)
+	if (producer != NULL && ir->stage != DRV_GPU_STAGE_GEOMETRY)
 		return EINVAL;
-	if (producer != NULL && producer->stage != I915_STAGE_VERTEX)
+	if (producer != NULL && producer->stage != DRV_GPU_STAGE_VERTEX)
 		return EINVAL;
 
 	/* Allocates the binary and records what is known before lowering. */
@@ -711,6 +711,8 @@ drv_i915_shader_compile_stage(
 		kern_free(binary);
 		return ENOMEM;
 	}
+
+	/* Places the liveness lists after the contiguous value-register table. */
 	state.last_use = state.value_grf + ir->value_count;
 	state.def_index = state.last_use + ir->value_count;
 	state.spill_slot = state.def_index + ir->value_count;
@@ -748,7 +750,7 @@ drv_i915_shader_compile_stage(
 			break;
 
 		/* A vertex shader first gives its staged VUE's registers to the values. */
-		if (ir->stage == I915_STAGE_VERTEX && state.late_vue == 0) {
+		if (ir->stage == DRV_GPU_STAGE_VERTEX && state.late_vue == 0) {
 			state.late_vue = 1;
 			continue;
 		}
@@ -797,6 +799,8 @@ drv_i915_shader_compile_stage(
 		kern_free(binary);
 		return ENOMEM;
 	}
+
+	/* Copies the completed EU instruction stream into its owned shader binary. */
 	kern_memcpy(binary->code, words, bytes);
 	binary->code_bytes = (uint32_t)bytes;
 
@@ -842,7 +846,7 @@ static int
 i915_compile_attempt(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	uint32_t index;
 	int error;
 
@@ -866,7 +870,7 @@ i915_compile_attempt(
 		state->index = index;
 
 		/* Only a SELECT's own compare writes f0.0 between two SELECTs; anything else may write it. */
-		if (ir->instructions[index].op != I915_IR_SELECT)
+		if (ir->instructions[index].op != DRV_GPU_IR_SELECT)
 			state->select_flag = 0U;
 		i915_compile_instruction(state, &ir->instructions[index]);
 		i915_compile_spill_results(state);
@@ -897,7 +901,7 @@ static void
 i915_compile_reset(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	const struct i915_shader_binary *producer;
 	uint32_t *value_grf;
 	uint32_t *spill_slot;
@@ -959,7 +963,7 @@ i915_compile_reset(
  */
 static uint32_t
 i915_compile_sources(
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t operands;
 
@@ -977,109 +981,109 @@ i915_compile_sources(
 /* Returns how many of an instruction's src[] name values. */
 static uint32_t
 i915_compile_operands(
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	/* The operation decides how many sources it reads. */
 	switch (inst->op) {
-	case I915_IR_STORE_OUTPUT:
-	case I915_IR_FNEG:
-	case I915_IR_RSQ:
-	case I915_IR_SIN:
-	case I915_IR_COS:
-	case I915_IR_RCP:
-	case I915_IR_SQRT:
-	case I915_IR_EXP2:
-	case I915_IR_LOG2:
-	case I915_IR_FABS:
-	case I915_IR_FLOOR:
-	case I915_IR_FRACT:
-	case I915_IR_NOT:
-	case I915_IR_KILL:
-	case I915_IR_FTRUNC:
-	case I915_IR_FROUND_EVEN:
-	case I915_IR_INEG:
-	case I915_IR_INOT:
-	case I915_IR_I2F:
-	case I915_IR_U2F:
-	case I915_IR_F2I:
-	case I915_IR_F2U:
-	case I915_IR_MOVE:
-	case I915_IR_LOOP_END:
-	case I915_IR_DDX:
-	case I915_IR_DDX_FINE:
-	case I915_IR_DDY:
-	case I915_IR_DDY_FINE:
-	case I915_IR_UNPACK_HALF:
-	case I915_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_STORE_OUTPUT:
+	case DRV_GPU_IR_FNEG:
+	case DRV_GPU_IR_RSQ:
+	case DRV_GPU_IR_SIN:
+	case DRV_GPU_IR_COS:
+	case DRV_GPU_IR_RCP:
+	case DRV_GPU_IR_SQRT:
+	case DRV_GPU_IR_EXP2:
+	case DRV_GPU_IR_LOG2:
+	case DRV_GPU_IR_FABS:
+	case DRV_GPU_IR_FLOOR:
+	case DRV_GPU_IR_FRACT:
+	case DRV_GPU_IR_NOT:
+	case DRV_GPU_IR_KILL:
+	case DRV_GPU_IR_FTRUNC:
+	case DRV_GPU_IR_FROUND_EVEN:
+	case DRV_GPU_IR_INEG:
+	case DRV_GPU_IR_INOT:
+	case DRV_GPU_IR_I2F:
+	case DRV_GPU_IR_U2F:
+	case DRV_GPU_IR_F2I:
+	case DRV_GPU_IR_F2U:
+	case DRV_GPU_IR_MOVE:
+	case DRV_GPU_IR_LOOP_END:
+	case DRV_GPU_IR_DDX:
+	case DRV_GPU_IR_DDX_FINE:
+	case DRV_GPU_IR_DDY:
+	case DRV_GPU_IR_DDY_FINE:
+	case DRV_GPU_IR_UNPACK_HALF:
+	case DRV_GPU_IR_SKIP_BEGIN:
 		return 1U;
 
-	case I915_IR_LOAD_STORAGE:
-	case I915_IR_LOAD_SHARED:
+	case DRV_GPU_IR_LOAD_STORAGE:
+	case DRV_GPU_IR_LOAD_SHARED:
 		/* The offset, and the predicate of a predicated load (ws101-p002, ws101-p006). */
 		return 1U + inst->component;
 
-	case I915_IR_ATOMIC:
+	case DRV_GPU_IR_ATOMIC:
 		/* The offset and the value, the comparator of a compare and exchange, then a predicate (ws101-p002). */
-		if (inst->immediate == I915_IR_ATOMIC_CMPXCHG)
+		if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG)
 			return 3U + inst->component;
 		return 2U + inst->component;
 
-	case I915_IR_FADD:
-	case I915_IR_FSUB:
-	case I915_IR_FMUL:
-	case I915_IR_SAMPLE:
-	case I915_IR_FMIN:
-	case I915_IR_FMAX:
-	case I915_IR_FLT:
-	case I915_IR_FGE:
-	case I915_IR_FEQ:
-	case I915_IR_FNEU:
-	case I915_IR_AND:
-	case I915_IR_OR:
-	case I915_IR_IADD:
-	case I915_IR_ISUB:
-	case I915_IR_IMUL:
-	case I915_IR_UDIV:
-	case I915_IR_UMOD:
-	case I915_IR_IDIV:
-	case I915_IR_IREM:
-	case I915_IR_IAND:
-	case I915_IR_IOR:
-	case I915_IR_IXOR:
-	case I915_IR_SHL:
-	case I915_IR_SHR:
-	case I915_IR_ASR:
-	case I915_IR_ILT:
-	case I915_IR_IGE:
-	case I915_IR_ULT:
-	case I915_IR_UGE:
-	case I915_IR_IEQ:
-	case I915_IR_INE:
-	case I915_IR_PACK_HALF:
+	case DRV_GPU_IR_FADD:
+	case DRV_GPU_IR_FSUB:
+	case DRV_GPU_IR_FMUL:
+	case DRV_GPU_IR_SAMPLE:
+	case DRV_GPU_IR_FMIN:
+	case DRV_GPU_IR_FMAX:
+	case DRV_GPU_IR_FLT:
+	case DRV_GPU_IR_FGE:
+	case DRV_GPU_IR_FEQ:
+	case DRV_GPU_IR_FNEU:
+	case DRV_GPU_IR_AND:
+	case DRV_GPU_IR_OR:
+	case DRV_GPU_IR_IADD:
+	case DRV_GPU_IR_ISUB:
+	case DRV_GPU_IR_IMUL:
+	case DRV_GPU_IR_UDIV:
+	case DRV_GPU_IR_UMOD:
+	case DRV_GPU_IR_IDIV:
+	case DRV_GPU_IR_IREM:
+	case DRV_GPU_IR_IAND:
+	case DRV_GPU_IR_IOR:
+	case DRV_GPU_IR_IXOR:
+	case DRV_GPU_IR_SHL:
+	case DRV_GPU_IR_SHR:
+	case DRV_GPU_IR_ASR:
+	case DRV_GPU_IR_ILT:
+	case DRV_GPU_IR_IGE:
+	case DRV_GPU_IR_ULT:
+	case DRV_GPU_IR_UGE:
+	case DRV_GPU_IR_IEQ:
+	case DRV_GPU_IR_INE:
+	case DRV_GPU_IR_PACK_HALF:
 		return 2U;
 
-	case I915_IR_SELECT:
-	case I915_IR_SAMPLE_BIAS:
-	case I915_IR_SAMPLE_LOD:
+	case DRV_GPU_IR_SELECT:
+	case DRV_GPU_IR_SAMPLE_BIAS:
+	case DRV_GPU_IR_SAMPLE_LOD:
 		return 3U;
 
-	case I915_IR_TEXTURE:
+	case DRV_GPU_IR_TEXTURE:
 		/* A texture message reads its run of parameters. */
 		return inst->src[1];
 
-	case I915_IR_STORE_STORAGE:
-	case I915_IR_STORE_SHARED:
+	case DRV_GPU_IR_STORE_STORAGE:
+	case DRV_GPU_IR_STORE_SHARED:
 		/* The offset and the word, and the predicate of a predicated store. */
 		return 2U + inst->component;
 
-	case I915_IR_LOAD_VERTEX_INPUT:
+	case DRV_GPU_IR_LOAD_VERTEX_INPUT:
 		/* The vertex's number when it is chosen at run time (ws075-p007a). */
-		if (inst->immediate == I915_IR_VERTEX_DYNAMIC)
+		if (inst->immediate == DRV_GPU_IR_VERTEX_DYNAMIC)
 			return 1U;
 		return 0U;
 
-	case I915_IR_EMIT_VERTEX:
-	case I915_IR_END_PRIMITIVE:
+	case DRV_GPU_IR_EMIT_VERTEX:
+	case DRV_GPU_IR_END_PRIMITIVE:
 		/* The predicate of an emit or an end under one (ws075-p007a). */
 		return inst->component;
 
@@ -1098,7 +1102,7 @@ i915_compile_operands(
  */
 static uint32_t
 i915_compile_source(
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t index)
 {
 	uint32_t operands;
@@ -1109,7 +1113,7 @@ i915_compile_source(
 		return inst->guard - 1U;
 
 	/* A texture message's parameters are consecutive values from src[0]. */
-	if (inst->op == I915_IR_TEXTURE)
+	if (inst->op == DRV_GPU_IR_TEXTURE)
 		return inst->src[0] + index;
 
 	/* Succeeded: any other instruction names each source. */
@@ -1119,29 +1123,29 @@ i915_compile_source(
 /* Returns how many consecutive values an instruction defines from its dst. */
 static uint32_t
 i915_compile_results(
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	/* A sample defines four; a store, a discard, a loop mark or a no-op none; anything else one. */
 	switch (inst->op) {
-	case I915_IR_SAMPLE:
-	case I915_IR_SAMPLE_BIAS:
-	case I915_IR_SAMPLE_LOD:
-	case I915_IR_TEXTURE:
+	case DRV_GPU_IR_SAMPLE:
+	case DRV_GPU_IR_SAMPLE_BIAS:
+	case DRV_GPU_IR_SAMPLE_LOD:
+	case DRV_GPU_IR_TEXTURE:
 		return 4U;
 
-	case I915_IR_STORE_OUTPUT:
-	case I915_IR_STORE_STORAGE:
-	case I915_IR_STORE_SHARED:
-	case I915_IR_BARRIER:
-	case I915_IR_FENCE:
-	case I915_IR_KILL:
-	case I915_IR_NOP:
-	case I915_IR_LOOP_BEGIN:
-	case I915_IR_LOOP_END:
-	case I915_IR_SKIP_BEGIN:
-	case I915_IR_SKIP_END:
-	case I915_IR_EMIT_VERTEX:
-	case I915_IR_END_PRIMITIVE:
+	case DRV_GPU_IR_STORE_OUTPUT:
+	case DRV_GPU_IR_STORE_STORAGE:
+	case DRV_GPU_IR_STORE_SHARED:
+	case DRV_GPU_IR_BARRIER:
+	case DRV_GPU_IR_FENCE:
+	case DRV_GPU_IR_KILL:
+	case DRV_GPU_IR_NOP:
+	case DRV_GPU_IR_LOOP_BEGIN:
+	case DRV_GPU_IR_LOOP_END:
+	case DRV_GPU_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_SKIP_END:
+	case DRV_GPU_IR_EMIT_VERTEX:
+	case DRV_GPU_IR_END_PRIMITIVE:
 		return 0U;
 
 	default:
@@ -1166,15 +1170,17 @@ static int
 i915_compile_liveness(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	struct i915_compile_loop *loops;
 	uint32_t open[COMPILE_MAX_LOOPS];
 	uint32_t open_count;
 	uint32_t loop_count;
 	uint32_t index;
 	uint32_t source;
+	uint32_t source_count;
 	uint32_t result;
+	uint32_t result_count;
 	uint32_t value;
 
 	/* Starts with no value defined. */
@@ -1185,7 +1191,7 @@ i915_compile_liveness(
 	/* Counts the loops, for the list of their extents. */
 	loop_count = 0U;
 	for (index = 0U; index < ir->instruction_count; index++) {
-		if (ir->instructions[index].op == I915_IR_LOOP_END)
+		if (ir->instructions[index].op == DRV_GPU_IR_LOOP_END)
 			loop_count++;
 	}
 
@@ -1201,41 +1207,47 @@ i915_compile_liveness(
 		inst = &ir->instructions[index];
 
 		/* Notes this instruction as the latest reader of each value it reads. */
-		for (source = 0U; source < i915_compile_sources(inst); source++) {
+		source_count = i915_compile_sources(inst);
+		for (source = 0U; source < source_count; source++) {
 			value = i915_compile_source(inst, source);
 			if (value < ir->value_count)
 				state->last_use[value] = index;
 		}
 
 		/* A MOVE into a value defined before keeps that value alive up to it. */
-		if (inst->op == I915_IR_MOVE &&
+		if (inst->op == DRV_GPU_IR_MOVE &&
 		    inst->dst < ir->value_count &&
 		    state->def_index[inst->dst] != COMPILE_NO_INDEX)
 			state->last_use[inst->dst] = index;
 
 		/* Notes the first definition of each value the instruction defines. */
-		for (result = 0U; result < i915_compile_results(inst); result++) {
+		result_count = i915_compile_results(inst);
+		for (result = 0U; result < result_count; result++) {
 			value = inst->dst + result;
 			if (value < ir->value_count && state->def_index[value] == COMPILE_NO_INDEX)
 				state->def_index[value] = index;
 		}
 
 		/* A loop start opens a loop; more than the code generator follows is refused. */
-		if (inst->op == I915_IR_LOOP_BEGIN) {
+		if (inst->op == DRV_GPU_IR_LOOP_BEGIN) {
 			if (open_count >= COMPILE_MAX_LOOPS) {
 				kern_free(loops);
 				return ENOTSUP;
 			}
+
+			/* Records this loop header in the open-loop stack. */
 			open[open_count] = index;
 			open_count++;
 		}
 
 		/* A loop end closes the innermost open loop. */
-		if (inst->op == I915_IR_LOOP_END) {
+		if (inst->op == DRV_GPU_IR_LOOP_END) {
 			if (open_count == 0U) {
 				kern_free(loops);
 				return EINVAL;
 			}
+
+			/* Closes the innermost loop and publishes its instruction extent. */
 			open_count--;
 			loops[loop_count].begin = open[open_count];
 			loops[loop_count].end = index;
@@ -1304,7 +1316,7 @@ static void
 i915_compile_keep_outputs(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t seen_location[4U * (1U + COMPILE_MAX_VARYINGS)];
 	uint32_t seen_component[4U * (1U + COMPILE_MAX_VARYINGS)];
 	uint32_t seen_count;
@@ -1316,7 +1328,7 @@ i915_compile_keep_outputs(
 	seen_count = 0U;
 	for (index = state->ir->instruction_count; index > 0U; index--) {
 		inst = &state->ir->instructions[index - 1U];
-		if (inst->op != I915_IR_STORE_OUTPUT)
+		if (inst->op != DRV_GPU_IR_STORE_OUTPUT)
 			continue;
 
 		/* A component stored again later keeps the later value. */
@@ -1325,6 +1337,8 @@ i915_compile_keep_outputs(
 			if (seen_location[seen] == inst->location && seen_component[seen] == inst->component)
 				stored_later = 1;
 		}
+
+		/* Keeps a value live when a later store still needs its previous definition. */
 		if (stored_later != 0)
 			continue;
 
@@ -1546,7 +1560,7 @@ static uint32_t
 i915_compile_choose_victim(
 	const struct i915_compile_state *state)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t best;
 	uint32_t best_end;
 	uint32_t value;
@@ -1592,7 +1606,7 @@ i915_compile_choose_victim(
 /* Returns nonzero when an instruction reads or defines a value. */
 static int
 i915_compile_involves(
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t value)
 {
 	uint32_t source;
@@ -1787,7 +1801,7 @@ i915_compile_release_temporaries(
 static void
 i915_compile_release(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t sources;
 	uint32_t source;
@@ -1815,7 +1829,7 @@ i915_compile_release(
 	}
 
 	/* Only a loop's end has values of its own to free. */
-	if (inst->op != I915_IR_LOOP_END)
+	if (inst->op != DRV_GPU_IR_LOOP_END)
 		return;
 
 	/* Frees every value whose life the loop widened to its end. */
@@ -1829,7 +1843,7 @@ i915_compile_release(
 static void
 i915_compile_instruction(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t payload_inputs;
 	uint32_t dst;
@@ -1839,11 +1853,11 @@ i915_compile_instruction(
 	 * compute thread's push data starts at r1, a geometry thread's after
 	 * the input vertices' handles.
 	 */
-	if (state->ir->stage == I915_STAGE_VERTEX) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		payload_inputs = COMPILE_PAYLOAD_GRF + state->push_regs;
-	} else if (state->ir->stage == I915_STAGE_COMPUTE) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_COMPUTE) {
 		payload_inputs = COMPILE_CS_PUSH_GRF + state->push_regs;
-	} else if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		payload_inputs = state->gs_push_grf + state->push_regs;
 	} else {
 		payload_inputs = state->fs_setup_grf + state->push_regs;
@@ -1851,225 +1865,229 @@ i915_compile_instruction(
 
 	/* Lowers by the operation. */
 	switch (inst->op) {
-	case I915_IR_NOP:
+	case DRV_GPU_IR_NOP:
 		break;
 
-	case I915_IR_CONST:
+	case DRV_GPU_IR_CONST:
 		/* A constant enters a value register as an immediate. */
 		dst = i915_compile_define(state, inst->dst, 1U);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(dst), drv_i915_eu_imm_f(inst->immediate));
 		break;
 
-	case I915_IR_ICONST:
+	case DRV_GPU_IR_ICONST:
 		/* An integer constant enters a value register as an integer immediate, bit for bit. */
 		dst = i915_compile_define(state, inst->dst, 1U);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_d(dst), drv_i915_eu_imm_d(inst->immediate));
 		break;
 
-	case I915_IR_LOAD_INPUT:
+	case DRV_GPU_IR_LOAD_INPUT:
 		/* A geometry shader reads its inputs per vertex, never so. */
-		if (state->ir->stage == I915_STAGE_GEOMETRY) {
+		if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 			state->unsupported = 1;
 			break;
 		}
+
+		/* Loads the remaining vertex inputs from their selected payload positions. */
 		i915_compile_load_input(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_LOAD_VERTEX_INPUT:
+	case DRV_GPU_IR_LOAD_VERTEX_INPUT:
 		i915_compile_load_vertex_input(state, inst);
 		break;
 
-	case I915_IR_EMIT_VERTEX:
+	case DRV_GPU_IR_EMIT_VERTEX:
 		i915_compile_emit_vertex(state, inst);
 		break;
 
-	case I915_IR_END_PRIMITIVE:
+	case DRV_GPU_IR_END_PRIMITIVE:
 		i915_compile_end_primitive(state, inst);
 		break;
 
-	case I915_IR_LOAD_PUSH:
+	case DRV_GPU_IR_LOAD_PUSH:
 		i915_compile_load_push(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_LOAD_UBO:
+	case DRV_GPU_IR_LOAD_UBO:
 		i915_compile_load_block(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_LOAD_STORAGE:
-	case I915_IR_STORE_STORAGE:
+	case DRV_GPU_IR_LOAD_STORAGE:
+	case DRV_GPU_IR_STORE_STORAGE:
 		i915_compile_storage(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_LOAD_SYSTEM:
+	case DRV_GPU_IR_LOAD_SYSTEM:
 		/* A geometry thread's built-in is in its own payload; a compute thread's in its. */
-		if (state->ir->stage == I915_STAGE_GEOMETRY) {
+		if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 			i915_compile_geometry_system(state, inst);
 			break;
 		}
+
+		/* Loads the remaining invocation built-ins from their compute payload positions. */
 		i915_compile_load_system(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_ATOMIC:
+	case DRV_GPU_IR_ATOMIC:
 		i915_compile_atomic(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_STORAGE_SIZE:
+	case DRV_GPU_IR_STORAGE_SIZE:
 		i915_compile_storage_size(state, inst, payload_inputs);
 		break;
 
-	case I915_IR_LOAD_SHARED:
-	case I915_IR_STORE_SHARED:
+	case DRV_GPU_IR_LOAD_SHARED:
+	case DRV_GPU_IR_STORE_SHARED:
 		i915_compile_shared(state, inst);
 		break;
 
-	case I915_IR_FENCE:
+	case DRV_GPU_IR_FENCE:
 		i915_compile_fence(state, inst->immediate);
 		break;
 
-	case I915_IR_BARRIER:
+	case DRV_GPU_IR_BARRIER:
 		i915_compile_barrier(state, inst);
 		break;
 
-	case I915_IR_STORE_OUTPUT:
+	case DRV_GPU_IR_STORE_OUTPUT:
 		i915_compile_store_output(state, inst);
 		break;
 
-	case I915_IR_FADD:
-	case I915_IR_FSUB:
-	case I915_IR_FMUL:
+	case DRV_GPU_IR_FADD:
+	case DRV_GPU_IR_FSUB:
+	case DRV_GPU_IR_FMUL:
 		i915_compile_arithmetic(state, inst);
 		break;
 
-	case I915_IR_FNEG:
+	case DRV_GPU_IR_FNEG:
 		i915_compile_negate(state, inst);
 		break;
 
-	case I915_IR_SIN:
-	case I915_IR_COS:
-	case I915_IR_RSQ:
-	case I915_IR_RCP:
-	case I915_IR_SQRT:
-	case I915_IR_EXP2:
-	case I915_IR_LOG2:
+	case DRV_GPU_IR_SIN:
+	case DRV_GPU_IR_COS:
+	case DRV_GPU_IR_RSQ:
+	case DRV_GPU_IR_RCP:
+	case DRV_GPU_IR_SQRT:
+	case DRV_GPU_IR_EXP2:
+	case DRV_GPU_IR_LOG2:
 		i915_compile_math(state, inst);
 		break;
 
-	case I915_IR_FABS:
-	case I915_IR_FLOOR:
-	case I915_IR_FRACT:
-	case I915_IR_FTRUNC:
-	case I915_IR_FROUND_EVEN:
+	case DRV_GPU_IR_FABS:
+	case DRV_GPU_IR_FLOOR:
+	case DRV_GPU_IR_FRACT:
+	case DRV_GPU_IR_FTRUNC:
+	case DRV_GPU_IR_FROUND_EVEN:
 		i915_compile_unary(state, inst);
 		break;
 
-	case I915_IR_FMIN:
-	case I915_IR_FMAX:
+	case DRV_GPU_IR_FMIN:
+	case DRV_GPU_IR_FMAX:
 		i915_compile_minmax(state, inst);
 		break;
 
-	case I915_IR_FLT:
-	case I915_IR_FGE:
-	case I915_IR_FEQ:
-	case I915_IR_FNEU:
+	case DRV_GPU_IR_FLT:
+	case DRV_GPU_IR_FGE:
+	case DRV_GPU_IR_FEQ:
+	case DRV_GPU_IR_FNEU:
 		i915_compile_compare(state, inst);
 		break;
 
-	case I915_IR_AND:
-	case I915_IR_OR:
-	case I915_IR_NOT:
+	case DRV_GPU_IR_AND:
+	case DRV_GPU_IR_OR:
+	case DRV_GPU_IR_NOT:
 		i915_compile_logic(state, inst);
 		break;
 
-	case I915_IR_BOOL:
+	case DRV_GPU_IR_BOOL:
 		/* A Boolean enters a value register as an integer immediate, bit for bit. */
 		dst = i915_compile_define(state, inst->dst, 1U);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_d(dst), drv_i915_eu_imm_d(inst->immediate));
 		break;
 
-	case I915_IR_SELECT:
+	case DRV_GPU_IR_SELECT:
 		i915_compile_select(state, inst);
 		break;
 
-	case I915_IR_KILL:
+	case DRV_GPU_IR_KILL:
 		i915_compile_kill(state, inst);
 		break;
 
-	case I915_IR_SAMPLE:
-	case I915_IR_SAMPLE_BIAS:
-	case I915_IR_SAMPLE_LOD:
-	case I915_IR_TEXTURE:
+	case DRV_GPU_IR_SAMPLE:
+	case DRV_GPU_IR_SAMPLE_BIAS:
+	case DRV_GPU_IR_SAMPLE_LOD:
+	case DRV_GPU_IR_TEXTURE:
 		i915_compile_guarded_texture(state, inst);
 		break;
 
-	case I915_IR_IADD:
-	case I915_IR_ISUB:
-	case I915_IR_INEG:
-	case I915_IR_IAND:
-	case I915_IR_IOR:
-	case I915_IR_IXOR:
-	case I915_IR_INOT:
-	case I915_IR_SHL:
-	case I915_IR_SHR:
-	case I915_IR_ASR:
+	case DRV_GPU_IR_IADD:
+	case DRV_GPU_IR_ISUB:
+	case DRV_GPU_IR_INEG:
+	case DRV_GPU_IR_IAND:
+	case DRV_GPU_IR_IOR:
+	case DRV_GPU_IR_IXOR:
+	case DRV_GPU_IR_INOT:
+	case DRV_GPU_IR_SHL:
+	case DRV_GPU_IR_SHR:
+	case DRV_GPU_IR_ASR:
 		i915_compile_integer(state, inst);
 		break;
 
-	case I915_IR_IMUL:
+	case DRV_GPU_IR_IMUL:
 		i915_compile_multiply(state, inst);
 		break;
 
-	case I915_IR_UDIV:
-	case I915_IR_UMOD:
-	case I915_IR_IDIV:
-	case I915_IR_IREM:
+	case DRV_GPU_IR_UDIV:
+	case DRV_GPU_IR_UMOD:
+	case DRV_GPU_IR_IDIV:
+	case DRV_GPU_IR_IREM:
 		i915_compile_divide(state, inst);
 		break;
 
-	case I915_IR_I2F:
-	case I915_IR_U2F:
-	case I915_IR_F2I:
-	case I915_IR_F2U:
+	case DRV_GPU_IR_I2F:
+	case DRV_GPU_IR_U2F:
+	case DRV_GPU_IR_F2I:
+	case DRV_GPU_IR_F2U:
 		i915_compile_convert(state, inst);
 		break;
 
-	case I915_IR_ILT:
-	case I915_IR_IGE:
-	case I915_IR_ULT:
-	case I915_IR_UGE:
-	case I915_IR_IEQ:
-	case I915_IR_INE:
+	case DRV_GPU_IR_ILT:
+	case DRV_GPU_IR_IGE:
+	case DRV_GPU_IR_ULT:
+	case DRV_GPU_IR_UGE:
+	case DRV_GPU_IR_IEQ:
+	case DRV_GPU_IR_INE:
 		i915_compile_integer_compare(state, inst);
 		break;
 
-	case I915_IR_MOVE:
+	case DRV_GPU_IR_MOVE:
 		i915_compile_move(state, inst);
 		break;
 
-	case I915_IR_LOOP_BEGIN:
+	case DRV_GPU_IR_LOOP_BEGIN:
 		i915_compile_loop_begin(state);
 		break;
 
-	case I915_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_SKIP_BEGIN:
 		i915_compile_skip_begin(state, inst);
 		break;
 
-	case I915_IR_SKIP_END:
+	case DRV_GPU_IR_SKIP_END:
 		i915_compile_skip_end(state);
 		break;
 
-	case I915_IR_LOOP_END:
+	case DRV_GPU_IR_LOOP_END:
 		i915_compile_loop_end(state, inst);
 		break;
 
-	case I915_IR_DDX:
-	case I915_IR_DDX_FINE:
-	case I915_IR_DDY:
-	case I915_IR_DDY_FINE:
+	case DRV_GPU_IR_DDX:
+	case DRV_GPU_IR_DDX_FINE:
+	case DRV_GPU_IR_DDY:
+	case DRV_GPU_IR_DDY_FINE:
 		i915_compile_derivative(state, inst);
 		break;
 
-	case I915_IR_PACK_HALF:
-	case I915_IR_UNPACK_HALF:
+	case DRV_GPU_IR_PACK_HALF:
+	case DRV_GPU_IR_UNPACK_HALF:
 		i915_compile_half(state, inst);
 		break;
 
@@ -2084,7 +2102,7 @@ i915_compile_instruction(
 static void
 i915_compile_load_input(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_buf *code;
@@ -2113,7 +2131,7 @@ i915_compile_load_input(
 	 * set for a back face; its sign spread over the channel, inverted, is the
 	 * all-ones or zero Boolean (brw's Gen12 lowering).
 	 */
-	if (state->ir->stage == I915_STAGE_FRAGMENT && inst->location == I915_SHADER_LOCATION_FRONT_FACING) {
+	if (state->ir->stage == DRV_GPU_STAGE_FRAGMENT && inst->location == DRV_GPU_SHADER_LOCATION_FRONT_FACING) {
 		dst = i915_compile_define(state, inst->dst, 1U);
 		facing = drv_i915_eu_grf_scalar(COMPILE_FS_DISPATCH_GRF, 0U);
 		facing.type = drv_i915_eu_grf_d(COMPILE_FS_DISPATCH_GRF).type;
@@ -2123,7 +2141,7 @@ i915_compile_load_input(
 	}
 
 	/* gl_FragCoord comes from the payload's pixel position, depth and w. */
-	if (state->ir->stage == I915_STAGE_FRAGMENT && inst->location == I915_SHADER_LOCATION_FRAG_COORD) {
+	if (state->ir->stage == DRV_GPU_STAGE_FRAGMENT && inst->location == DRV_GPU_SHADER_LOCATION_FRAG_COORD) {
 		i915_compile_frag_coord(state, inst);
 		return;
 	}
@@ -2139,7 +2157,7 @@ i915_compile_load_input(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* An attribute component of a vertex is a payload register of its own. */
-	if (state->ir->stage == I915_STAGE_VERTEX) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		drv_i915_eu_mov(code, drv_i915_eu_grf(dst), drv_i915_eu_grf(payload_inputs + 4U * rank + inst->component));
 		return;
 	}
@@ -2191,7 +2209,7 @@ i915_compile_load_input(
 static void
 i915_compile_frag_coord(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg subspans;
 	struct i915_eu_reg pixels;
@@ -2257,7 +2275,7 @@ i915_compile_frag_coord(
 static void
 i915_compile_load_push(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg source;
@@ -2287,7 +2305,7 @@ i915_compile_load_push(
 static void
 i915_compile_load_block(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg source;
@@ -2307,6 +2325,8 @@ i915_compile_load_block(
 		state->error = 1;
 		return;
 	}
+
+	/* Refuses a push load that is misaligned or outside the declared push range. */
 	if ((inst->immediate & 3U) != 0U ||
 	    inst->immediate < state->block_first_byte[block] ||
 	    inst->immediate + 4U > state->block_first_byte[block] + state->block_bytes[block]) {
@@ -2340,7 +2360,7 @@ i915_compile_load_block(
 static void
 i915_compile_storage(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg low;
@@ -2380,7 +2400,7 @@ i915_compile_storage(
 	offset_grf = i915_compile_grf(state, inst->src[0]);
 	data_grf = 0U;
 	predicate_grf = 0U;
-	if (inst->op == I915_IR_STORE_STORAGE) {
+	if (inst->op == DRV_GPU_IR_STORE_STORAGE) {
 		data_grf = i915_compile_grf(state, inst->src[1]);
 		if (inst->component != 0U)
 			predicate_grf = i915_compile_grf(state, inst->src[2]);
@@ -2390,7 +2410,7 @@ i915_compile_storage(
 
 	/* A load's word gets its register. */
 	dst = 0U;
-	if (inst->op == I915_IR_LOAD_STORAGE)
+	if (inst->op == DRV_GPU_IR_LOAD_STORAGE)
 		dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Takes the address payload and the sum and carry registers. */
@@ -2419,7 +2439,7 @@ i915_compile_storage(
 	drv_i915_eu_mov(&state->code, interleaved, drv_i915_eu_grf_ud(carry));
 
 	/* A predicated load reads where the predicate is not zero; the other channels keep what the register held (ws101-p002). */
-	if (inst->op == I915_IR_LOAD_STORAGE && inst->component != 0U) {
+	if (inst->op == DRV_GPU_IR_LOAD_STORAGE && inst->component != 0U) {
 		null = drv_i915_eu_null();
 		null.type = COMPILE_TYPE_D;
 		drv_i915_eu_cmp(&state->code,
@@ -2439,7 +2459,7 @@ i915_compile_storage(
 					0U,
 					0,
 					0);
-	} else if (inst->op == I915_IR_LOAD_STORAGE) {
+	} else if (inst->op == DRV_GPU_IR_LOAD_STORAGE) {
 		/* A load reads the word into its register. */
 		drv_i915_eu_send(&state->code,
 				 drv_i915_eu_grf(dst),
@@ -2495,7 +2515,7 @@ i915_compile_storage(
 static void
 i915_compile_store_output(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t source_grf;
 	uint32_t rank;
@@ -2511,38 +2531,40 @@ i915_compile_store_output(
 
 	/* A vertex and a geometry shader stage a VUE; a fragment shader its colours. */
 	stages_vue = 0;
-	if (state->ir->stage == I915_STAGE_VERTEX)
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX)
 		stages_vue = 1;
-	if (state->ir->stage == I915_STAGE_GEOMETRY)
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY)
 		stages_vue = 1;
 
 	/* The layer is a geometry shader's only: the staged header's second dword, an integer moved bit for bit. */
-	if (inst->location == I915_IR_LOCATION_LAYER) {
-		if (state->ir->stage != I915_STAGE_GEOMETRY) {
+	if (inst->location == DRV_GPU_IR_LOCATION_LAYER) {
+		if (state->ir->stage != DRV_GPU_STAGE_GEOMETRY) {
 			state->unsupported = 1;
 			return;
 		}
+
+		/* Resolves the scalar output before placing it in the vertex payload. */
 		source_grf = i915_compile_grf(state, inst->src[0]);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_ud(state->vue_grf + COMPILE_VUE_LAYER), drv_i915_eu_grf_ud(source_grf));
 		return;
 	}
 
 	/* The point size is the vertex's only: component 3 of the VUE header. */
-	if (inst->location == I915_IR_LOCATION_POINT_SIZE && state->ir->stage != I915_STAGE_VERTEX) {
+	if (inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE && state->ir->stage != DRV_GPU_STAGE_VERTEX) {
 		state->unsupported = 1;
 		return;
 	}
 
 	/* A gathered VUE only remembers the value; the end of the shader writes it. */
-	if (state->ir->stage == I915_STAGE_VERTEX && state->late_vue != 0) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX && state->late_vue != 0) {
 		/* The point size is slot 0's (the header's) last component. */
-		if (inst->location == I915_IR_LOCATION_POINT_SIZE) {
+		if (inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE) {
 			state->output_value[COMPILE_VUE_POINT_SIZE] = inst->src[0];
 			return;
 		}
 
 		/* The position is slot 1; a varying follows it, in ascending location order. */
-		if (inst->location == I915_IR_LOCATION_POSITION) {
+		if (inst->location == DRV_GPU_IR_LOCATION_POSITION) {
 			rank = 0U;
 		} else {
 			found = i915_compile_rank(state->varyings, state->varying_count, inst->location, &rank);
@@ -2550,6 +2572,8 @@ i915_compile_store_output(
 				state->unsupported = 1;
 				return;
 			}
+
+			/* Places the next varying after the outputs already assigned. */
 			rank++;
 		}
 
@@ -2559,14 +2583,14 @@ i915_compile_store_output(
 	}
 
 	/* The point size is the staged header's last dword. */
-	if (inst->location == I915_IR_LOCATION_POINT_SIZE) {
+	if (inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE) {
 		source_grf = i915_compile_grf(state, inst->src[0]);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(state->vue_grf + COMPILE_VUE_POINT_SIZE), drv_i915_eu_grf(source_grf));
 		return;
 	}
 
 	/* Finds the staging registers of the output. */
-	if (stages_vue != 0 && inst->location == I915_IR_LOCATION_POSITION) {
+	if (stages_vue != 0 && inst->location == DRV_GPU_IR_LOCATION_POSITION) {
 		/* The position follows the VUE header. */
 		grf = state->vue_grf + 4U;
 	} else if (stages_vue != 0) {
@@ -2576,8 +2600,10 @@ i915_compile_store_output(
 			state->unsupported = 1;
 			return;
 		}
+
+		/* Locates this varying after the fixed vertex payload registers. */
 		grf = state->vue_grf + 8U + 4U * rank;
-	} else if (inst->location == I915_IR_LOCATION_SECOND_COLOR) {
+	} else if (inst->location == DRV_GPU_IR_LOCATION_SECOND_COLOR) {
 		/* The second colour of a dual-source write takes location 1's r120..r123 (location 1 is not written then). */
 		grf = COMPILE_MAX_GRF - 3U - 4U;
 	} else if (inst->location < I915_SHADER_MAX_COLOR_OUTPUTS) {
@@ -2598,7 +2624,7 @@ i915_compile_store_output(
 static void
 i915_compile_arithmetic(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -2614,14 +2640,14 @@ i915_compile_arithmetic(
 	right = drv_i915_eu_grf(right_grf);
 
 	/* a - b = a + (-b): ADD with the SECOND source negated (operand order matters). */
-	if (inst->op == I915_IR_FSUB)
+	if (inst->op == DRV_GPU_IR_FSUB)
 		right = drv_i915_eu_negate(right);
 
 	/* Gives the result its register. */
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* A multiply is MUL; an add or a subtract is ADD. */
-	if (inst->op == I915_IR_FMUL) {
+	if (inst->op == DRV_GPU_IR_FMUL) {
 		op = I915_EU_MUL;
 	} else {
 		op = I915_EU_ADD;
@@ -2635,7 +2661,7 @@ i915_compile_arithmetic(
 static void
 i915_compile_negate(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg source;
 	uint32_t source_grf;
@@ -2659,7 +2685,7 @@ i915_compile_negate(
 static void
 i915_compile_math(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg source;
 	enum i915_eu_math func;
@@ -2674,17 +2700,17 @@ i915_compile_math(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Chooses the math function of the IR operation. */
-	if (inst->op == I915_IR_SIN) {
+	if (inst->op == DRV_GPU_IR_SIN) {
 		func = I915_EU_MATH_SIN;
-	} else if (inst->op == I915_IR_COS) {
+	} else if (inst->op == DRV_GPU_IR_COS) {
 		func = I915_EU_MATH_COS;
-	} else if (inst->op == I915_IR_RCP) {
+	} else if (inst->op == DRV_GPU_IR_RCP) {
 		func = I915_EU_MATH_INV;
-	} else if (inst->op == I915_IR_SQRT) {
+	} else if (inst->op == DRV_GPU_IR_SQRT) {
 		func = I915_EU_MATH_SQRT;
-	} else if (inst->op == I915_IR_EXP2) {
+	} else if (inst->op == DRV_GPU_IR_EXP2) {
 		func = I915_EU_MATH_EXP;
-	} else if (inst->op == I915_IR_LOG2) {
+	} else if (inst->op == DRV_GPU_IR_LOG2) {
 		func = I915_EU_MATH_LOG;
 	} else {
 		func = I915_EU_MATH_RSQ;
@@ -2702,7 +2728,7 @@ i915_compile_math(
 static void
 i915_compile_unary(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg source;
 	uint32_t source_grf;
@@ -2716,13 +2742,13 @@ i915_compile_unary(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Emits the operation. */
-	if (inst->op == I915_IR_FABS) {
+	if (inst->op == DRV_GPU_IR_FABS) {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(dst), drv_i915_eu_abs(source));
-	} else if (inst->op == I915_IR_FLOOR) {
+	} else if (inst->op == DRV_GPU_IR_FLOOR) {
 		drv_i915_eu_alu1(&state->code, I915_EU_RNDD, drv_i915_eu_grf(dst), source);
-	} else if (inst->op == I915_IR_FTRUNC) {
+	} else if (inst->op == DRV_GPU_IR_FTRUNC) {
 		drv_i915_eu_alu1(&state->code, I915_EU_RNDZ, drv_i915_eu_grf(dst), source);
-	} else if (inst->op == I915_IR_FROUND_EVEN) {
+	} else if (inst->op == DRV_GPU_IR_FROUND_EVEN) {
 		drv_i915_eu_alu1(&state->code, I915_EU_RNDE, drv_i915_eu_grf(dst), source);
 	} else {
 		drv_i915_eu_alu1(&state->code, I915_EU_FRC, drv_i915_eu_grf(dst), source);
@@ -2733,7 +2759,7 @@ i915_compile_unary(
 static void
 i915_compile_minmax(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -2752,7 +2778,7 @@ i915_compile_minmax(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* The minimum keeps the source that is less, the maximum the one that is greater or equal. */
-	if (inst->op == I915_IR_FMIN) {
+	if (inst->op == DRV_GPU_IR_FMIN) {
 		cond = I915_EU_COND_LT;
 	} else {
 		cond = I915_EU_COND_GE;
@@ -2770,7 +2796,7 @@ i915_compile_minmax(
 static void
 i915_compile_compare(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -2789,11 +2815,11 @@ i915_compile_compare(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Picks the test; only NE holds when a source is NaN, the unordered comparison of the four. */
-	if (inst->op == I915_IR_FLT) {
+	if (inst->op == DRV_GPU_IR_FLT) {
 		cond = I915_EU_COND_LT;
-	} else if (inst->op == I915_IR_FGE) {
+	} else if (inst->op == DRV_GPU_IR_FGE) {
 		cond = I915_EU_COND_GE;
-	} else if (inst->op == I915_IR_FEQ) {
+	} else if (inst->op == DRV_GPU_IR_FEQ) {
 		cond = I915_EU_COND_EQ;
 	} else {
 		cond = I915_EU_COND_NE;
@@ -2807,7 +2833,7 @@ i915_compile_compare(
 static void
 i915_compile_logic(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -2816,7 +2842,7 @@ i915_compile_logic(
 	uint32_t dst;
 
 	/* A not reads one source. */
-	if (inst->op == I915_IR_NOT) {
+	if (inst->op == DRV_GPU_IR_NOT) {
 		left_grf = i915_compile_grf(state, inst->src[0]);
 		dst = i915_compile_define(state, inst->dst, 1U);
 		drv_i915_eu_alu1(&state->code, I915_EU_NOT, drv_i915_eu_grf_d(dst), drv_i915_eu_grf_d(left_grf));
@@ -2831,7 +2857,7 @@ i915_compile_logic(
 
 	/* Gives the result its register and emits the operation. */
 	dst = i915_compile_define(state, inst->dst, 1U);
-	if (inst->op == I915_IR_AND) {
+	if (inst->op == DRV_GPU_IR_AND) {
 		drv_i915_eu_alu2(&state->code, I915_EU_AND, drv_i915_eu_grf_d(dst), left, right);
 	} else {
 		drv_i915_eu_alu2(&state->code, I915_EU_OR, drv_i915_eu_grf_d(dst), left, right);
@@ -2846,7 +2872,7 @@ i915_compile_logic(
 static void
 i915_compile_select(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg taken;
 	struct i915_eu_reg other;
@@ -2897,13 +2923,13 @@ i915_compile_select(
 static void
 i915_compile_kill(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg null;
 	uint32_t condition_grf;
 
 	/* Only a fragment shader discards; the interface already refused anything else. */
-	if (state->ir->stage != I915_STAGE_FRAGMENT) {
+	if (state->ir->stage != DRV_GPU_STAGE_FRAGMENT) {
 		state->unsupported = 1;
 		return;
 	}
@@ -2933,7 +2959,7 @@ i915_compile_kill(
 static void
 i915_compile_sample(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg u;
 	struct i915_eu_reg v;
@@ -2951,7 +2977,7 @@ i915_compile_sample(
 	}
 
 	/* A sample with more than a coordinate builds its message. */
-	if (inst->op != I915_IR_SAMPLE || inst->component != 0U) {
+	if (inst->op != DRV_GPU_IR_SAMPLE || inst->component != 0U) {
 		i915_compile_sample_message(state, inst, sampler);
 		return;
 	}
@@ -2985,17 +3011,17 @@ i915_compile_sample(
 static int
 i915_compile_sampler_index(
 	const struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t *sampler)
 {
-	const struct i915_shader_ir_uniform *uniform;
+	const struct drv_gpu_shader_ir_uniform *uniform;
 	uint32_t index;
 
 	/* Counts the sampled images before the one named. */
 	*sampler = 0U;
 	for (index = 0U; index < state->ir->uniform_count; index++) {
 		uniform = &state->ir->uniforms[index];
-		if (uniform->kind != I915_IR_UNIFORM_SAMPLED_IMAGE)
+		if (uniform->kind != DRV_GPU_IR_UNIFORM_SAMPLED_IMAGE)
 			continue;
 		if (uniform->set == inst->location && uniform->binding == inst->immediate)
 			break;
@@ -3022,7 +3048,7 @@ i915_compile_sampler_index(
 static void
 i915_compile_sample_message(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t sampler)
 {
 	struct i915_eu_reg dword;
@@ -3043,7 +3069,7 @@ i915_compile_sample_message(
 	u_grf = i915_compile_grf(state, inst->src[0]);
 	v_grf = i915_compile_grf(state, inst->src[1]);
 	level_grf = COMPILE_NO_GRF;
-	if (inst->op != I915_IR_SAMPLE)
+	if (inst->op != DRV_GPU_IR_SAMPLE)
 		level_grf = i915_compile_grf(state, inst->src[2]);
 
 	/* Gives the four reply values four consecutive registers. */
@@ -3087,9 +3113,9 @@ i915_compile_sample_message(
 	drv_i915_eu_mov(&state->code, drv_i915_eu_grf(next + 1U), drv_i915_eu_grf(v_grf));
 
 	/* The message type: sample_b with a bias, sample_l with a level, sample otherwise. */
-	if (inst->op == I915_IR_SAMPLE_BIAS) {
+	if (inst->op == DRV_GPU_IR_SAMPLE_BIAS) {
 		message = EU_SAMPLER_MESSAGE_SAMPLE_BIAS;
-	} else if (inst->op == I915_IR_SAMPLE_LOD) {
+	} else if (inst->op == DRV_GPU_IR_SAMPLE_LOD) {
 		message = EU_SAMPLER_MESSAGE_SAMPLE_LOD;
 	} else {
 		message = EU_SAMPLER_MESSAGE_SAMPLE;
@@ -3122,7 +3148,7 @@ i915_compile_sample_message(
 }
 
 /*
- * Lowers a texture message (I915_IR_TEXTURE), as Mesa builds it on Gen12.0
+ * Lowers a texture message (DRV_GPU_IR_TEXTURE), as Mesa builds it on Gen12.0
  * (lower_sampler_logical_send(), brw_lower_logical_sends.cpp): a header
  * when there is a texel offset (as i915_compile_sample_message() writes
  * it), then the parameters in the order the IR gives them, each copied
@@ -3133,7 +3159,7 @@ i915_compile_sample_message(
 static void
 i915_compile_texture(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg dword;
 	struct i915_eu_reg thread;
@@ -3159,7 +3185,7 @@ i915_compile_texture(
 
 	/* Refuses a message longer than the IR allows. */
 	param_count = inst->src[1];
-	if (param_count == 0U || param_count > I915_IR_TEXTURE_MAX_PARAMS) {
+	if (param_count == 0U || param_count > DRV_GPU_IR_TEXTURE_MAX_PARAMS) {
 		state->error = 1;
 		return;
 	}
@@ -3236,7 +3262,7 @@ i915_compile_texture(
 static void
 i915_compile_integer(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -3249,13 +3275,15 @@ i915_compile_integer(
 	left = drv_i915_eu_grf_d(left_grf);
 
 	/* A negation and a complement read one source. */
-	if (inst->op == I915_IR_INEG || inst->op == I915_IR_INOT) {
+	if (inst->op == DRV_GPU_IR_INEG || inst->op == DRV_GPU_IR_INOT) {
 		dst = i915_compile_define(state, inst->dst, 1U);
-		if (inst->op == I915_IR_INEG) {
+		if (inst->op == DRV_GPU_IR_INEG) {
 			drv_i915_eu_mov(&state->code, drv_i915_eu_grf_d(dst), drv_i915_eu_negate(left));
 		} else {
 			drv_i915_eu_alu1(&state->code, I915_EU_NOT, drv_i915_eu_grf_d(dst), left);
 		}
+
+		/* Succeeded: the unary integer operation has its encoded destination. */
 		return;
 	}
 
@@ -3268,31 +3296,31 @@ i915_compile_integer(
 
 	/* Emits the operation. */
 	switch (inst->op) {
-	case I915_IR_IADD:
+	case DRV_GPU_IR_IADD:
 		drv_i915_eu_alu2(&state->code, I915_EU_ADD, drv_i915_eu_grf_d(dst), left, right);
 		break;
 
-	case I915_IR_ISUB:
+	case DRV_GPU_IR_ISUB:
 		drv_i915_eu_alu2(&state->code, I915_EU_ADD, drv_i915_eu_grf_d(dst), left, drv_i915_eu_negate(right));
 		break;
 
-	case I915_IR_IAND:
+	case DRV_GPU_IR_IAND:
 		drv_i915_eu_alu2(&state->code, I915_EU_AND, drv_i915_eu_grf_d(dst), left, right);
 		break;
 
-	case I915_IR_IOR:
+	case DRV_GPU_IR_IOR:
 		drv_i915_eu_alu2(&state->code, I915_EU_OR, drv_i915_eu_grf_d(dst), left, right);
 		break;
 
-	case I915_IR_IXOR:
+	case DRV_GPU_IR_IXOR:
 		drv_i915_eu_alu2(&state->code, I915_EU_XOR, drv_i915_eu_grf_d(dst), left, right);
 		break;
 
-	case I915_IR_SHL:
+	case DRV_GPU_IR_SHL:
 		drv_i915_eu_alu2(&state->code, I915_EU_SHL, drv_i915_eu_grf_d(dst), left, right);
 		break;
 
-	case I915_IR_SHR:
+	case DRV_GPU_IR_SHR:
 		/* A logical shift reads the word as unsigned, so zeros come in. */
 		drv_i915_eu_alu2(&state->code,
 				 I915_EU_SHR,
@@ -3318,7 +3346,7 @@ i915_compile_integer(
 static void
 i915_compile_multiply(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t left_grf;
 	uint32_t right_grf;
@@ -3365,7 +3393,7 @@ i915_compile_multiply(
 static void
 i915_compile_divide(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg dividend;
 	struct i915_eu_reg divisor;
@@ -3383,7 +3411,7 @@ i915_compile_divide(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* An unsigned division reads and writes unsigned words, a signed one signed words. */
-	if (inst->op == I915_IR_UDIV || inst->op == I915_IR_UMOD) {
+	if (inst->op == DRV_GPU_IR_UDIV || inst->op == DRV_GPU_IR_UMOD) {
 		dividend = drv_i915_eu_grf_ud(dividend_grf);
 		divisor = drv_i915_eu_grf_ud(divisor_grf);
 		result = drv_i915_eu_grf_ud(dst);
@@ -3394,7 +3422,7 @@ i915_compile_divide(
 	}
 
 	/* A division keeps the quotient, a remainder the remainder. */
-	if (inst->op == I915_IR_UDIV || inst->op == I915_IR_IDIV) {
+	if (inst->op == DRV_GPU_IR_UDIV || inst->op == DRV_GPU_IR_IDIV) {
 		func = I915_EU_MATH_INT_QUOTIENT;
 	} else {
 		func = I915_EU_MATH_INT_REMAINDER;
@@ -3412,7 +3440,7 @@ i915_compile_divide(
 static void
 i915_compile_convert(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t source_grf;
 	uint32_t dst;
@@ -3422,11 +3450,11 @@ i915_compile_convert(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Moves across the types. */
-	if (inst->op == I915_IR_I2F) {
+	if (inst->op == DRV_GPU_IR_I2F) {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(dst), drv_i915_eu_grf_d(source_grf));
-	} else if (inst->op == I915_IR_U2F) {
+	} else if (inst->op == DRV_GPU_IR_U2F) {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf(dst), drv_i915_eu_grf_ud(source_grf));
-	} else if (inst->op == I915_IR_F2I) {
+	} else if (inst->op == DRV_GPU_IR_F2I) {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_d(dst), drv_i915_eu_grf(source_grf));
 	} else {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_ud(dst), drv_i915_eu_grf(source_grf));
@@ -3441,7 +3469,7 @@ i915_compile_convert(
 static void
 i915_compile_integer_compare(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg left;
 	struct i915_eu_reg right;
@@ -3453,7 +3481,7 @@ i915_compile_integer_compare(
 	/* Reads both sources, as unsigned words for an unsigned comparison. */
 	left_grf = i915_compile_grf(state, inst->src[0]);
 	right_grf = i915_compile_grf(state, inst->src[1]);
-	if (inst->op == I915_IR_ULT || inst->op == I915_IR_UGE) {
+	if (inst->op == DRV_GPU_IR_ULT || inst->op == DRV_GPU_IR_UGE) {
 		left = drv_i915_eu_grf_ud(left_grf);
 		right = drv_i915_eu_grf_ud(right_grf);
 	} else {
@@ -3465,11 +3493,11 @@ i915_compile_integer_compare(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* Picks the test. */
-	if (inst->op == I915_IR_ILT || inst->op == I915_IR_ULT) {
+	if (inst->op == DRV_GPU_IR_ILT || inst->op == DRV_GPU_IR_ULT) {
 		cond = I915_EU_COND_LT;
-	} else if (inst->op == I915_IR_IGE || inst->op == I915_IR_UGE) {
+	} else if (inst->op == DRV_GPU_IR_IGE || inst->op == DRV_GPU_IR_UGE) {
 		cond = I915_EU_COND_GE;
-	} else if (inst->op == I915_IR_IEQ) {
+	} else if (inst->op == DRV_GPU_IR_IEQ) {
 		cond = I915_EU_COND_EQ;
 	} else {
 		cond = I915_EU_COND_NE;
@@ -3486,7 +3514,7 @@ i915_compile_integer_compare(
 static void
 i915_compile_move(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t source_grf;
 	uint32_t dst;
@@ -3515,7 +3543,7 @@ i915_compile_move(
 static void
 i915_compile_derivative(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg minuend;
 	struct i915_eu_reg subtrahend;
@@ -3525,7 +3553,7 @@ i915_compile_derivative(
 	uint32_t quad;
 
 	/* Only pixels come in quads. */
-	if (state->ir->stage != I915_STAGE_FRAGMENT) {
+	if (state->ir->stage != DRV_GPU_STAGE_FRAGMENT) {
 		state->unsupported = 1;
 		return;
 	}
@@ -3541,7 +3569,7 @@ i915_compile_derivative(
 	 * <0;2,1> so each row serves its two pixels; outside the channel mask,
 	 * the destination being the value's own.
 	 */
-	if (inst->op == I915_IR_DDY_FINE) {
+	if (inst->op == DRV_GPU_IR_DDY_FINE) {
 		for (quad = 0U; quad < 2U; quad++) {
 			minuend = drv_i915_eu_grf_region(source_grf, 16U * quad + 8U, EU_TYPE_F, EU_VSTRIDE_0, EU_WIDTH_2, EU_HSTRIDE_1);
 			subtrahend = drv_i915_eu_grf_region(source_grf, 16U * quad, EU_TYPE_F, EU_VSTRIDE_0, EU_WIDTH_2, EU_HSTRIDE_1);
@@ -3555,11 +3583,11 @@ i915_compile_derivative(
 	}
 
 	/* Picks the two pixels of each quad. */
-	if (inst->op == I915_IR_DDX_FINE) {
+	if (inst->op == DRV_GPU_IR_DDX_FINE) {
 		/* Each row: its right pixel (one float on) less its left one, <2;2,0>. */
 		minuend = drv_i915_eu_grf_region(source_grf, 4U, EU_TYPE_F, EU_VSTRIDE_2, EU_WIDTH_2, EU_HSTRIDE_0);
 		subtrahend = drv_i915_eu_grf_region(source_grf, 0U, EU_TYPE_F, EU_VSTRIDE_2, EU_WIDTH_2, EU_HSTRIDE_0);
-	} else if (inst->op == I915_IR_DDX) {
+	} else if (inst->op == DRV_GPU_IR_DDX) {
 		/* The top row: its right pixel less its left one, <4;4,0>. */
 		minuend = drv_i915_eu_grf_region(source_grf, 4U, EU_TYPE_F, EU_VSTRIDE_4, EU_WIDTH_4, EU_HSTRIDE_0);
 		subtrahend = drv_i915_eu_grf_region(source_grf, 0U, EU_TYPE_F, EU_VSTRIDE_4, EU_WIDTH_4, EU_HSTRIDE_0);
@@ -3583,14 +3611,14 @@ i915_compile_derivative(
 static void
 i915_compile_half(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t low_grf;
 	uint32_t high_grf;
 	uint32_t dst;
 
 	/* An unpack converts one half of each channel. */
-	if (inst->op == I915_IR_UNPACK_HALF) {
+	if (inst->op == DRV_GPU_IR_UNPACK_HALF) {
 		low_grf = i915_compile_grf(state, inst->src[0]);
 		dst = i915_compile_define(state, inst->dst, 1U);
 		drv_i915_eu_mov(&state->code,
@@ -3638,7 +3666,7 @@ i915_compile_loop_begin(
 static void
 i915_compile_loop_end(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg null;
 	uint32_t condition_grf;
@@ -3698,13 +3726,13 @@ i915_compile_loop_end(
  * so the derivatives of the message's coordinates see every pixel of the
  * quad), the message, the ENDIF.  A thread none of whose channels is in the
  * guard jumps over the message.  The channels outside the guard read its result
- * only in selections that take something else (struct i915_shader_ir_inst).
+ * only in selections that take something else (struct drv_gpu_shader_ir_inst).
  * An unguarded message, or one past COMPILE_MAX_GUARDS, is lowered as it is.
  */
 static void
 i915_compile_guarded_texture(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t if_position;
 	uint32_t endif_position;
@@ -3723,7 +3751,7 @@ i915_compile_guarded_texture(
 	}
 
 	/* Lowers the message itself. */
-	if (inst->op == I915_IR_TEXTURE) {
+	if (inst->op == DRV_GPU_IR_TEXTURE) {
 		i915_compile_texture(state, inst);
 	} else {
 		i915_compile_sample(state, inst);
@@ -3754,8 +3782,8 @@ static void
 i915_compile_skips(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t index;
 	uint32_t end;
 	uint32_t value;
@@ -3792,19 +3820,19 @@ i915_compile_skips(
 
 	/* Checks each region: from its SKIP_BEGIN to the next SKIP_END. */
 	for (index = 0U; index < ir->instruction_count; index++) {
-		if (ir->instructions[index].op != I915_IR_SKIP_BEGIN)
+		if (ir->instructions[index].op != DRV_GPU_IR_SKIP_BEGIN)
 			continue;
 
 		/* Its end; a region without one is not skipped. */
 		for (end = index + 1U; end < ir->instruction_count; end++) {
-			if (ir->instructions[end].op == I915_IR_SKIP_END)
+			if (ir->instructions[end].op == DRV_GPU_IR_SKIP_END)
 				break;
-			if (ir->instructions[end].op == I915_IR_SKIP_BEGIN)
+			if (ir->instructions[end].op == DRV_GPU_IR_SKIP_BEGIN)
 				break;
 		}
 
 		/* A region is a SKIP_BEGIN closed by its own SKIP_END, with nothing opened in between. */
-		if (end >= ir->instruction_count || ir->instructions[end].op != I915_IR_SKIP_END)
+		if (end >= ir->instruction_count || ir->instructions[end].op != DRV_GPU_IR_SKIP_END)
 			continue;
 
 		/* Skipped only when what leaves it is proven masked. */
@@ -3843,8 +3871,8 @@ i915_compile_skip_region(
 	uint32_t begin,
 	uint32_t end)
 {
-	const struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint64_t inside[COMPILE_SKIP_WORDS];
 	uint64_t garbage[COMPILE_SKIP_WORDS];
 	uint64_t table[COMPILE_SKIP_WORDS];
@@ -3878,18 +3906,18 @@ i915_compile_skip_region(
 		 * or end inside is not skipped over; nor a workgroup barrier, which
 		 * every thread of the group must reach, nor a fence (ws101-p006).
 		 */
-		if (inst->op == I915_IR_LOOP_BEGIN ||
-		    inst->op == I915_IR_LOOP_END ||
-		    inst->op == I915_IR_MOVE ||
-		    inst->op == I915_IR_STORE_OUTPUT ||
-		    inst->op == I915_IR_EMIT_VERTEX ||
-		    inst->op == I915_IR_END_PRIMITIVE ||
-		    inst->op == I915_IR_BARRIER ||
-		    inst->op == I915_IR_FENCE)
+		if (inst->op == DRV_GPU_IR_LOOP_BEGIN ||
+		    inst->op == DRV_GPU_IR_LOOP_END ||
+		    inst->op == DRV_GPU_IR_MOVE ||
+		    inst->op == DRV_GPU_IR_STORE_OUTPUT ||
+		    inst->op == DRV_GPU_IR_EMIT_VERTEX ||
+		    inst->op == DRV_GPU_IR_END_PRIMITIVE ||
+		    inst->op == DRV_GPU_IR_BARRIER ||
+		    inst->op == DRV_GPU_IR_FENCE)
 			return 0;
 
 		/* A discard must be under P. */
-		if (inst->op == I915_IR_KILL) {
+		if (inst->op == DRV_GPU_IR_KILL) {
 			known = i915_compile_bool_table(state, inst->src[0], table, 0U);
 			if (!known)
 				return 0;
@@ -3899,7 +3927,7 @@ i915_compile_skip_region(
 		}
 
 		/* A storage or shared-memory store must be predicated on something under P. */
-		if (inst->op == I915_IR_STORE_STORAGE || inst->op == I915_IR_STORE_SHARED) {
+		if (inst->op == DRV_GPU_IR_STORE_STORAGE || inst->op == DRV_GPU_IR_STORE_SHARED) {
 			if (inst->component == 0U)
 				return 0;
 			known = i915_compile_bool_table(state, inst->src[2], table, 0U);
@@ -3911,7 +3939,7 @@ i915_compile_skip_region(
 		}
 
 		/* So must an atomic, whose predicate is its last source (ws101-p002). */
-		if (inst->op == I915_IR_ATOMIC) {
+		if (inst->op == DRV_GPU_IR_ATOMIC) {
 			if (inst->component == 0U)
 				return 0;
 			operands = i915_compile_operands(inst);
@@ -3947,16 +3975,16 @@ i915_compile_skip_region(
 
 		/* Garbage that could be seen must not reach an effect or control. */
 		if (!clean &&
-		    (inst->op == I915_IR_STORE_OUTPUT ||
-		     inst->op == I915_IR_EMIT_VERTEX ||
-		     inst->op == I915_IR_END_PRIMITIVE ||
-		     inst->op == I915_IR_STORE_STORAGE ||
-		     inst->op == I915_IR_STORE_SHARED ||
-		     inst->op == I915_IR_ATOMIC ||
-		     inst->op == I915_IR_KILL ||
-		     inst->op == I915_IR_MOVE ||
-		     inst->op == I915_IR_LOOP_END ||
-		     inst->op == I915_IR_SKIP_BEGIN))
+		    (inst->op == DRV_GPU_IR_STORE_OUTPUT ||
+		     inst->op == DRV_GPU_IR_EMIT_VERTEX ||
+		     inst->op == DRV_GPU_IR_END_PRIMITIVE ||
+		     inst->op == DRV_GPU_IR_STORE_STORAGE ||
+		     inst->op == DRV_GPU_IR_STORE_SHARED ||
+		     inst->op == DRV_GPU_IR_ATOMIC ||
+		     inst->op == DRV_GPU_IR_KILL ||
+		     inst->op == DRV_GPU_IR_MOVE ||
+		     inst->op == DRV_GPU_IR_LOOP_END ||
+		     inst->op == DRV_GPU_IR_SKIP_BEGIN))
 			return 0;
 
 		/* Records the results' garbage (a loop move may make a value clean again). */
@@ -3982,7 +4010,7 @@ i915_compile_skip_region(
 static int
 i915_compile_skip_garbage(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint64_t garbage[COMPILE_SKIP_WORDS])
 {
 	uint64_t condition[COMPILE_SKIP_WORDS];
@@ -4002,7 +4030,7 @@ i915_compile_skip_garbage(
 		garbage[word] = 0U;
 
 	/* A selection by a clean condition: the garbage of each side where it is taken. */
-	if (inst->op == I915_IR_SELECT && state->skip_taint[inst->src[0]] == 0U) {
+	if (inst->op == DRV_GPU_IR_SELECT && state->skip_taint[inst->src[0]] == 0U) {
 		first = i915_compile_skip_value_garbage(state, inst->src[1]);
 		second = i915_compile_skip_value_garbage(state, inst->src[2]);
 		if (first == NULL && second == NULL)
@@ -4026,7 +4054,7 @@ i915_compile_skip_garbage(
 	}
 
 	/* An AND is garbage only where the other side is true; an OR only where it is false. */
-	if ((inst->op == I915_IR_AND || inst->op == I915_IR_OR) &&
+	if ((inst->op == DRV_GPU_IR_AND || inst->op == DRV_GPU_IR_OR) &&
 	    (state->skip_taint[inst->src[0]] == 0U || state->skip_taint[inst->src[1]] == 0U)) {
 		first = i915_compile_skip_value_garbage(state, inst->src[0]);
 		read = inst->src[1];
@@ -4044,7 +4072,7 @@ i915_compile_skip_garbage(
 		for (word = 0; word < (int)COMPILE_SKIP_WORDS; word++) {
 			if (!known) {
 				garbage[word] = first[word];
-			} else if (inst->op == I915_IR_AND) {
+			} else if (inst->op == DRV_GPU_IR_AND) {
 				garbage[word] = first[word] & other[word];
 			} else {
 				garbage[word] = first[word] & ~other[word];
@@ -4101,7 +4129,7 @@ i915_compile_bool_table(
 	uint64_t table[COMPILE_SKIP_WORDS],
 	uint32_t depth)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint64_t left[COMPILE_SKIP_WORDS];
 	uint64_t right[COMPILE_SKIP_WORDS];
 	uint32_t def;
@@ -4121,7 +4149,7 @@ i915_compile_bool_table(
 		inst = &state->ir->instructions[def - 1U];
 
 	/* A constant: all true or all false. */
-	if (inst != NULL && inst->op == I915_IR_BOOL) {
+	if (inst != NULL && inst->op == DRV_GPU_IR_BOOL) {
 		for (word = 0; word < (int)COMPILE_SKIP_WORDS; word++) {
 			table[word] = 0U;
 			if (inst->immediate != 0U)
@@ -4133,11 +4161,11 @@ i915_compile_bool_table(
 	}
 
 	/* NOT, AND and OR of their operands' tables. */
-	if (inst != NULL && (inst->op == I915_IR_NOT || inst->op == I915_IR_AND || inst->op == I915_IR_OR)) {
+	if (inst != NULL && (inst->op == DRV_GPU_IR_NOT || inst->op == DRV_GPU_IR_AND || inst->op == DRV_GPU_IR_OR)) {
 		known = i915_compile_bool_table(state, inst->src[0], left, depth + 1U);
 		if (!known)
 			return 0;
-		if (inst->op != I915_IR_NOT) {
+		if (inst->op != DRV_GPU_IR_NOT) {
 			known = i915_compile_bool_table(state, inst->src[1], right, depth + 1U);
 			if (!known)
 				return 0;
@@ -4145,9 +4173,9 @@ i915_compile_bool_table(
 
 		/* Combined channel by channel. */
 		for (word = 0; word < (int)COMPILE_SKIP_WORDS; word++) {
-			if (inst->op == I915_IR_NOT) {
+			if (inst->op == DRV_GPU_IR_NOT) {
 				table[word] = ~left[word];
-			} else if (inst->op == I915_IR_AND) {
+			} else if (inst->op == DRV_GPU_IR_AND) {
 				table[word] = left[word] & right[word];
 			} else {
 				table[word] = left[word] | right[word];
@@ -4266,7 +4294,7 @@ i915_compile_if_any(
 static void
 i915_compile_skip_begin(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t length;
 
@@ -4279,7 +4307,7 @@ i915_compile_skip_begin(
 	/* So does one too short to be worth its IF. */
 	length = 0U;
 	while (state->index + 1U + length < state->ir->instruction_count &&
-	       state->ir->instructions[state->index + 1U + length].op != I915_IR_SKIP_END)
+	       state->ir->instructions[state->index + 1U + length].op != DRV_GPU_IR_SKIP_END)
 		length++;
 	if (length < COMPILE_SKIP_MIN_INSTRUCTIONS)
 		return;
@@ -4436,7 +4464,7 @@ static void
 i915_compile_interface(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t payload_end;
 	uint32_t index;
 	uint32_t vue_slots;
@@ -4448,60 +4476,60 @@ i915_compile_interface(
 	/* Lists every input read and, for a vertex shader, every varying written; notes a discard. */
 	for (index = 0U; index < state->ir->instruction_count; index++) {
 		inst = &state->ir->instructions[index];
-		if (inst->op == I915_IR_LOAD_INPUT && inst->location == I915_SHADER_LOCATION_FRONT_FACING) {
+		if (inst->op == DRV_GPU_IR_LOAD_INPUT && inst->location == DRV_GPU_SHADER_LOCATION_FRONT_FACING) {
 			/* The facing bit is in the payload's fixed registers, not an input of its own. */
 			continue;
-		} else if (inst->op == I915_IR_LOAD_INPUT && inst->location == I915_SHADER_LOCATION_FRAG_COORD) {
+		} else if (inst->op == DRV_GPU_IR_LOAD_INPUT && inst->location == DRV_GPU_SHADER_LOCATION_FRAG_COORD) {
 			/* The pixel position needs no input; its depth and w come in the payload when read. */
 			if (inst->component == 2U)
 				state->uses_depth = 1;
 			if (inst->component == 3U)
 				state->uses_w = 1;
-		} else if (inst->op == I915_IR_LOAD_INPUT) {
+		} else if (inst->op == DRV_GPU_IR_LOAD_INPUT) {
 			/* An input, which the linear barycentrics interpolate when it has no perspective. */
 			i915_compile_note(state, state->inputs, &state->input_count, COMPILE_MAX_INPUTS, inst->location);
 			linear = i915_compile_input_linear(state, inst->location);
-			if (linear != 0 && state->ir->stage == I915_STAGE_FRAGMENT)
+			if (linear != 0 && state->ir->stage == DRV_GPU_STAGE_FRAGMENT)
 				state->uses_linear = 1;
-		} else if (inst->op == I915_IR_STORE_OUTPUT && inst->location == I915_IR_LOCATION_POINT_SIZE) {
+		} else if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE) {
 			/* The point size is in the VUE header, not a varying of its own. */
 			state->writes_point_size = 1;
-		} else if (inst->op == I915_IR_STORE_OUTPUT && inst->location == I915_IR_LOCATION_LAYER) {
+		} else if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location == DRV_GPU_IR_LOCATION_LAYER) {
 			/* A geometry shader's layer is in the VUE header, not a varying of its own. */
 			continue;
-		} else if (inst->op == I915_IR_STORE_OUTPUT &&
-		    (state->ir->stage == I915_STAGE_VERTEX || state->ir->stage == I915_STAGE_GEOMETRY) &&
-		    inst->location != I915_IR_LOCATION_POSITION) {
+		} else if (inst->op == DRV_GPU_IR_STORE_OUTPUT &&
+		    (state->ir->stage == DRV_GPU_STAGE_VERTEX || state->ir->stage == DRV_GPU_STAGE_GEOMETRY) &&
+		    inst->location != DRV_GPU_IR_LOCATION_POSITION) {
 			i915_compile_note(state, state->varyings, &state->varying_count, COMPILE_MAX_VARYINGS, inst->location);
-		} else if (inst->op == I915_IR_STORE_OUTPUT && inst->location == I915_IR_LOCATION_SECOND_COLOR) {
+		} else if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location == DRV_GPU_IR_LOCATION_SECOND_COLOR) {
 			/* The second colour of a dual-source write, which goes with location 0's. */
 			state->uses_second_color = 1;
-		} else if (inst->op == I915_IR_STORE_OUTPUT && inst->location < I915_SHADER_MAX_COLOR_OUTPUTS) {
+		} else if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location < I915_SHADER_MAX_COLOR_OUTPUTS) {
 			/* A fragment shader's colour location gets a render-target write. */
 			state->fs_outputs |= 1U << inst->location;
-		} else if (inst->op == I915_IR_KILL) {
+		} else if (inst->op == DRV_GPU_IR_KILL) {
 			state->uses_kill = 1;
 		}
 	}
 
 	/* A discard belongs to a fragment shader. */
-	if (state->uses_kill != 0 && state->ir->stage != I915_STAGE_FRAGMENT)
+	if (state->uses_kill != 0 && state->ir->stage != DRV_GPU_STAGE_FRAGMENT)
 		state->unsupported = 1;
 
 	/* A second colour goes with location 0's alone (Vulkan: dual source writes attachment 0; Mesa needs both). */
-	if (state->uses_second_color != 0 && (state->ir->stage != I915_STAGE_FRAGMENT || state->fs_outputs != 1U))
+	if (state->uses_second_color != 0 && (state->ir->stage != DRV_GPU_STAGE_FRAGMENT || state->fs_outputs != 1U))
 		state->unsupported = 1;
 
 	/* A fragment payload carries, after the perspective barycentrics, what the kernel asked for, in the order of the conventions. */
-	if (state->ir->stage == I915_STAGE_FRAGMENT)
+	if (state->ir->stage == DRV_GPU_STAGE_FRAGMENT)
 		i915_compile_fragment_payload(state);
 
 	/* A compute thread's payload is its header, its push data and its per-thread IDs. */
-	if (state->ir->stage == I915_STAGE_COMPUTE)
+	if (state->ir->stage == DRV_GPU_STAGE_COMPUTE)
 		i915_compile_compute_interface(state);
 
 	/* A geometry thread's payload is its header, its handles and its push data; its output is a URB entry. */
-	if (state->ir->stage == I915_STAGE_GEOMETRY)
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY)
 		i915_compile_geometry_interface(state);
 
 	/*
@@ -4509,11 +4537,11 @@ i915_compile_interface(
 	 * an interpolated input, the IDs of a compute thread, nothing after a
 	 * geometry thread's push data (it reads its inputs from the URB).
 	 */
-	if (state->ir->stage == I915_STAGE_VERTEX) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		payload_end = COMPILE_PAYLOAD_GRF + state->push_regs + 4U * state->input_count;
-	} else if (state->ir->stage == I915_STAGE_COMPUTE) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_COMPUTE) {
 		payload_end = COMPILE_CS_PUSH_GRF + state->push_regs + I915_SHADER_PER_THREAD_REGS;
-	} else if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		payload_end = state->gs_push_grf + state->push_regs;
 	} else {
 		payload_end = state->fs_setup_grf + state->push_regs + 2U * state->input_count;
@@ -4534,7 +4562,7 @@ i915_compile_interface(
 	 * cut bits in the first two value registers for its whole run: they are
 	 * not IR values, so no spill ever moves them.
 	 */
-	if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		state->gs_count_grf = state->first_value_grf;
 		state->gs_cut_grf = state->first_value_grf + 1U;
 		state->first_value_grf += 2U;
@@ -4545,12 +4573,12 @@ i915_compile_interface(
 	 * A vertex shader stages its VUE below r127, and the values stay below
 	 * it; a gathered VUE keeps only the window of its writes from them.
 	 */
-	if (state->ir->stage == I915_STAGE_VERTEX && state->late_vue == 0) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX && state->late_vue == 0) {
 		vue_slots = 2U + state->varying_count;
 		state->vue_grf = COMPILE_MAX_GRF - 4U * vue_slots;
 		if (state->vue_grf <= state->last_value_grf)
 			state->last_value_grf = state->vue_grf - 1U;
-	} else if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		/*
 		 * A geometry shader stages its VUE as a vertex shader does, and keeps
 		 * the two registers below it for the header of its vertex writes: the
@@ -4560,7 +4588,7 @@ i915_compile_interface(
 		state->vue_grf = COMPILE_MAX_GRF - 4U * vue_slots;
 		if (state->vue_grf - COMPILE_GS_WRITE_HEADER_REGS <= state->last_value_grf)
 			state->last_value_grf = state->vue_grf - COMPILE_GS_WRITE_HEADER_REGS - 1U;
-	} else if (state->ir->stage == I915_STAGE_VERTEX) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		if (COMPILE_GATHER_GRF <= state->last_value_grf)
 			state->last_value_grf = COMPILE_GATHER_GRF - 1U;
 	}
@@ -4632,7 +4660,7 @@ static void
 i915_compile_blocks(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir_uniform *uniform;
+	const struct drv_gpu_shader_ir_uniform *uniform;
 	uint32_t index;
 	uint32_t first;
 	uint32_t end;
@@ -4645,8 +4673,8 @@ i915_compile_blocks(
 	/* Places each uniform block that is read, and each storage buffer's address, after what comes before it. */
 	for (index = 0U; index < state->ir->uniform_count; index++) {
 		uniform = &state->ir->uniforms[index];
-		if (uniform->kind != I915_IR_UNIFORM_STORAGE &&
-		    (uniform->kind != I915_IR_UNIFORM_BLOCK || uniform->size == 0U))
+		if (uniform->kind != DRV_GPU_IR_UNIFORM_STORAGE &&
+		    (uniform->kind != DRV_GPU_IR_UNIFORM_BLOCK || uniform->size == 0U))
 			continue;
 
 		/* More blocks than a binary describes are refused. */
@@ -4659,7 +4687,7 @@ i915_compile_blocks(
 		first = uniform->offset & ~31U;
 		end = (uniform->offset + uniform->size + 31U) & ~31U;
 		state->block_address[state->block_count] = 0U;
-		if (uniform->kind == I915_IR_UNIFORM_STORAGE) {
+		if (uniform->kind == DRV_GPU_IR_UNIFORM_STORAGE) {
 			first = 0U;
 			end = 32U;
 			state->block_address[state->block_count] = 1U;
@@ -4692,15 +4720,15 @@ i915_compile_prologue(
 		i915_compile_scratch_header(state);
 
 	/* A compute shader has no output to fill: it writes memory only. */
-	if (state->ir->stage == I915_STAGE_COMPUTE)
+	if (state->ir->stage == DRV_GPU_STAGE_COMPUTE)
 		return;
 
 	/* A geometry shader prepares its vertex writes, then stages its VUE as a vertex shader does. */
-	if (state->ir->stage == I915_STAGE_GEOMETRY)
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY)
 		i915_compile_geometry_prologue(state);
 
 	/* A fragment shader's colours start as zeros. */
-	if (state->ir->stage == I915_STAGE_FRAGMENT) {
+	if (state->ir->stage == DRV_GPU_STAGE_FRAGMENT) {
 		outputs = i915_compile_fs_outputs(state);
 		if (state->uses_second_color != 0)
 			outputs |= 1U << 1;
@@ -4749,23 +4777,25 @@ i915_compile_terminate(
 	code = &state->code;
 
 	/* A compute thread only retires. */
-	if (state->ir->stage == I915_STAGE_COMPUTE) {
+	if (state->ir->stage == DRV_GPU_STAGE_COMPUTE) {
 		i915_compile_terminate_compute(state);
 		return;
 	}
 
 	/* A geometry thread writes how many vertices it emitted and retires. */
-	if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		i915_compile_terminate_geometry(state);
 		return;
 	}
 
 	/* A vertex shader writes its VUE, staged or gathered. */
-	if (state->ir->stage == I915_STAGE_VERTEX && state->late_vue != 0) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX && state->late_vue != 0) {
 		i915_compile_terminate_gathered(state);
 		return;
 	}
-	if (state->ir->stage == I915_STAGE_VERTEX) {
+
+	/* Selects the vertex or fragment termination message for this kernel. */
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		i915_compile_terminate_vertex(state);
 		return;
 	}
@@ -5075,7 +5105,7 @@ i915_compile_describe(
 	const struct i915_compile_state *state,
 	struct i915_shader_binary *binary)
 {
-	const struct i915_shader_ir_uniform *uniform;
+	const struct drv_gpu_shader_ir_uniform *uniform;
 	uint32_t index;
 	uint32_t block;
 
@@ -5089,6 +5119,8 @@ i915_compile_describe(
 		while (binary->scratch_bytes < state->spill_count * COMPILE_SLOT_BYTES)
 			binary->scratch_bytes *= 2U;
 	}
+
+	/* Publishes the push-register layout consumed by the draw state. */
 	binary->push_regs = state->push_regs;
 	binary->push_constant_bytes = state->push_constant_regs * 32U;
 
@@ -5100,7 +5132,7 @@ i915_compile_describe(
 	/* The sampled images in the order the kernel numbers them. */
 	for (index = 0U; index < state->ir->uniform_count; index++) {
 		uniform = &state->ir->uniforms[index];
-		if (uniform->kind != I915_IR_UNIFORM_SAMPLED_IMAGE)
+		if (uniform->kind != DRV_GPU_IR_UNIFORM_SAMPLED_IMAGE)
 			continue;
 		if (binary->sampler_count >= I915_SHADER_MAX_SAMPLERS)
 			break;
@@ -5138,13 +5170,13 @@ i915_compile_describe(
 	 * workgroup; a geometry shader its URB entry and its varyings; a fragment
 	 * shader's varyings are its inputs.
 	 */
-	if (state->ir->stage == I915_STAGE_VERTEX) {
+	if (state->ir->stage == DRV_GPU_STAGE_VERTEX) {
 		binary->varying_count = state->varying_count;
 		kern_memcpy(binary->varying_locations, state->varyings, sizeof(state->varyings));
 		binary->dispatch_grf_start = COMPILE_PAYLOAD_GRF;
-	} else if (state->ir->stage == I915_STAGE_COMPUTE) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_COMPUTE) {
 		i915_compile_describe_compute(state, binary);
-	} else if (state->ir->stage == I915_STAGE_GEOMETRY) {
+	} else if (state->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
 		i915_compile_describe_geometry(state, binary);
 	} else {
 		binary->varying_count = state->input_count;

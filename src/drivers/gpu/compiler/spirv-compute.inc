@@ -15,7 +15,7 @@
  * reaches memory through storage buffers, whose words it may also change
  * indivisibly (OpAtomic*).  gl_NumWorkGroups is three words in memory the
  * dispatch places: the parser gives them a storage buffer of the set
- * I915_IR_SYSTEM_SET, so the code generator reads them as it reads any
+ * DRV_GPU_IR_SYSTEM_SET, so the code generator reads them as it reads any
  * storage buffer.
  *
  * A Workgroup variable is shared memory (ws101-p006): the parser lays the
@@ -33,14 +33,19 @@
  * the top of spirv.c.
  */
 
-/* The execution modes the parser interprets (Khronos SPIR-V spec, section 3.6). */
-#define EXECUTION_MODE_LOCAL_SIZE	17U
-#define EXECUTION_MODE_LOCAL_SIZE_ID	38U
+/*
+ * The execution modes the parser interprets (Khronos SPIR-V spec, section 3.6).
+ */
+#define EXECUTION_MODE_LOCAL_SIZE 17U
+#define EXECUTION_MODE_LOCAL_SIZE_ID 38U
 
-/* The largest workgroup along x, y and z (the device reports these as maxComputeWorkGroupSize). */
-#define COMPUTE_MAX_SIZE_X	128U
-#define COMPUTE_MAX_SIZE_Y	128U
-#define COMPUTE_MAX_SIZE_Z	64U
+/*
+ * The largest workgroup along x, y and z (the device reports these as
+ * maxComputeWorkGroupSize).
+ */
+#define COMPUTE_MAX_SIZE_X 128U
+#define COMPUTE_MAX_SIZE_Y 128U
+#define COMPUTE_MAX_SIZE_Z 64U
 
 /*
  * The memory semantics bits that order other memory accesses around an
@@ -48,36 +53,48 @@
  * storage-class bits beside them name what is ordered and order nothing by
  * themselves.
  */
-#define MEMORY_SEMANTICS_ORDERING	0x1EU
+#define MEMORY_SEMANTICS_ORDERING 0x1EU
 
 /* The byte offsets of gl_NumWorkGroups' x, y and z in their storage buffer. */
-#define SYSTEM_GROUP_COUNT_BYTES	4U
+#define SYSTEM_GROUP_COUNT_BYTES 4U
 
-/* The storage-class bits of memory semantics: UniformMemory (buffers) and WorkgroupMemory (shared memory). */
-#define MEMORY_SEMANTICS_UNIFORM	0x40U
-#define MEMORY_SEMANTICS_WORKGROUP	0x100U
+/*
+ * The storage-class bits of memory semantics: UniformMemory (buffers) and
+ * WorkgroupMemory (shared memory).
+ */
+#define MEMORY_SEMANTICS_UNIFORM 0x40U
+#define MEMORY_SEMANTICS_WORKGROUP 0x100U
 
-/* The Acquire and AcquireRelease / SequentiallyConsistent bits, which order the accesses after. */
-#define MEMORY_SEMANTICS_ACQUIRING	0x1AU
+/*
+ * The Acquire and AcquireRelease / SequentiallyConsistent bits, which order the
+ * accesses after.
+ */
+#define MEMORY_SEMANTICS_ACQUIRING 0x1AU
 
-/* The largest size shared memory's layout measures, so no sum overflows; the declaration refuses past the device's. */
-#define SHARED_MEASURE_LIMIT		0x40000000U
+/*
+ * The largest size shared memory's layout measures, so no sum overflows; the
+ * declaration refuses past the device's.
+ */
+#define SHARED_MEASURE_LIMIT 0x40000000U
 
-/* The execution scope of a workgroup barrier (SPIR-V spec, section 3.27, Scope). */
-#define SCOPE_WORKGROUP			2U
+/*
+ * The execution scope of a workgroup barrier (SPIR-V spec, section 3.27,
+ * Scope).
+ */
+#define SCOPE_WORKGROUP 2U
 
 /*
  * Records one execution mode of the entry point.
  *
  * LocalSize gives the workgroup's size; LocalSizeId names three constants
  * that give it, which are resolved once every constant is declared
- * (i915_spirv_compute_declared()).  Any other OpExecutionMode has no effect
+ * (drv_gpu_spirv_compute_declared()).  Any other OpExecutionMode has no effect
  * on this lowering (a fragment shader's OriginUpperLeft, for one); any other
  * OpExecutionModeId is refused, since its operands could be anything.
  */
 static int
-i915_spirv_declare_execution_mode(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_declare_execution_mode(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
 	uint32_t count,
 	uint32_t opcode,
@@ -89,9 +106,16 @@ i915_spirv_declare_execution_mode(
 	if (count < 3U)
 		return EINVAL;
 
-	/* A geometry shader's modes say what it takes and emits (ws075-p007a, spirv-geometry.inc). */
-	if (parser->ir->stage == I915_STAGE_GEOMETRY) {
-		error = i915_spirv_geometry_mode(parser, word, count, opcode, offset);
+	/*
+	 * A geometry shader's modes say what it takes and emits (ws075-p007a,
+	 * spirv-geometry.inc).
+	 */
+	if (parser->ir->stage == DRV_GPU_STAGE_GEOMETRY) {
+		error = drv_gpu_spirv_geometry_mode(parser,
+						    word,
+						    count,
+						    opcode,
+						    offset);
 		if (error != 0)
 			return error;
 
@@ -100,7 +124,8 @@ i915_spirv_declare_execution_mode(
 	}
 
 	/* LocalSize: the three sizes are literals. */
-	if (opcode == OP_EXECUTION_MODE && word[2] == EXECUTION_MODE_LOCAL_SIZE) {
+	if (opcode == OP_EXECUTION_MODE &&
+	    word[2] == EXECUTION_MODE_LOCAL_SIZE) {
 		if (count < 6U)
 			return EINVAL;
 
@@ -111,21 +136,35 @@ i915_spirv_declare_execution_mode(
 		return 0;
 	}
 
-	/* Any other literal execution mode changes nothing the lowering does. */
+	/*
+	 * Any other literal execution mode changes nothing the lowering does.
+	 */
 	if (opcode == OP_EXECUTION_MODE)
 		return 0;
 
-	/* Refuses an execution mode whose operands this parser does not interpret. */
+	/*
+	 * Refuses an execution mode whose operands this parser does not
+	 * interpret.
+	 */
 	if (word[2] != EXECUTION_MODE_LOCAL_SIZE_ID) {
-		error = i915_spirv_refuse(parser, opcode, offset, "OpExecutionModeId with a mode other than LocalSizeId");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "OpExecutionModeId with a mode other than LocalSizeId");
 		return error;
 	}
 
-	/* LocalSizeId names three constants, resolved after the declarations. */
+	/*
+	 * LocalSizeId names three constants, resolved after the declarations.
+	 */
 	if (count < 6U)
 		return EINVAL;
 
-	/* Records the constants' ids until i915_spirv_compute_declared() reads them. */
+	/*
+	 * Records the constants' ids until drv_gpu_spirv_compute_declared()
+	 * reads them.
+	 */
 	parser->local_size_id[0] = word[3];
 	parser->local_size_id[1] = word[4];
 	parser->local_size_id[2] = word[5];
@@ -141,30 +180,38 @@ i915_spirv_declare_execution_mode(
  * A module of another stage passes unchanged.
  */
 static int
-i915_spirv_compute_declared(
-	struct i915_spirv_parser *parser)
+drv_gpu_spirv_compute_declared(
+	struct drv_gpu_spirv_parser *parser)
 {
-	struct i915_spirv_id *constant;
+	struct drv_gpu_spirv_id *constant;
 	uint32_t *size;
 	uint32_t invocations;
 	uint32_t axis;
 	int error;
 
 	/* Only a compute shader has a workgroup. */
-	if (parser->ir->stage != I915_STAGE_COMPUTE)
+	if (parser->ir->stage != DRV_GPU_STAGE_COMPUTE)
 		return 0;
 
-	/* Reads each size a LocalSizeId names from its constant; a specialization constant is refused. */
+	/*
+	 * Reads each size a LocalSizeId names from its constant; a
+	 * specialization constant is refused.
+	 */
 	size = parser->ir->local_size;
 	for (axis = 0U; parser->local_size_by_id != 0 && axis < 3U; axis++) {
 		/* Resolves the id the mode names along the axis. */
-		constant = i915_spirv_id(parser, parser->local_size_id[axis]);
+		constant =
+		    drv_gpu_spirv_id(parser, parser->local_size_id[axis]);
 		if (constant == NULL)
 			return EINVAL;
 
 		/* Refuses a size that is not a plain constant. */
 		if (constant->kind != ID_CONSTANT) {
-			error = i915_spirv_refuse(parser, OP_EXECUTION_MODE_ID, 0U, "LocalSizeId of something that is not a constant");
+			error = drv_gpu_spirv_refuse(
+			    parser,
+			    OP_EXECUTION_MODE_ID,
+			    0U,
+			    "LocalSizeId of something that is not a constant");
 			return error;
 		}
 
@@ -173,8 +220,14 @@ i915_spirv_compute_declared(
 	}
 
 	/* A compute shader must say how large its workgroup is. */
-	if (size[0] == 0U || size[1] == 0U || size[2] == 0U) {
-		error = i915_spirv_refuse(parser, OP_ENTRY_POINT, 0U, "compute shader without a LocalSize");
+	if (size[0] == 0U ||
+	    size[1] == 0U ||
+	    size[2] == 0U) {
+		error =
+		    drv_gpu_spirv_refuse(parser,
+					 OP_ENTRY_POINT,
+					 0U,
+					 "compute shader without a LocalSize");
 		return error;
 	}
 
@@ -182,18 +235,31 @@ i915_spirv_compute_declared(
 	if (size[0] > COMPUTE_MAX_SIZE_X ||
 	    size[1] > COMPUTE_MAX_SIZE_Y ||
 	    size[2] > COMPUTE_MAX_SIZE_Z) {
-		error = i915_spirv_refuse(parser, OP_ENTRY_POINT, 0U, "workgroup larger than the device along an axis");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    OP_ENTRY_POINT,
+		    0U,
+		    "workgroup larger than the device along an axis");
 		return error;
 	}
 
-	/* Refuses a workgroup of more invocations than the device runs at once. */
+	/*
+	 * Refuses a workgroup of more invocations than the device runs at once.
+	 */
 	invocations = size[0] * size[1] * size[2];
-	if (invocations > I915_SHADER_MAX_GROUP_INVOCATIONS) {
-		error = i915_spirv_refuse(parser, OP_ENTRY_POINT, 0U, "workgroup of more invocations than the device supports");
+	if (invocations > DRV_GPU_SPIRV_MAX_GROUP_INVOCATIONS) {
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    OP_ENTRY_POINT,
+		    0U,
+		    "workgroup of more invocations than the device supports");
 		return error;
 	}
 
-	/* Succeeded: the workgroup size is known and within the device's limits. */
+	/*
+	 * Succeeded: the workgroup size is known and within the device's
+	 * limits.
+	 */
 	return 0;
 }
 
@@ -202,9 +268,9 @@ i915_spirv_compute_declared(
  * dispatch gives every invocation.  Any other built-in is refused.
  */
 static int
-i915_spirv_declare_system(
-	struct i915_spirv_parser *parser,
-	struct i915_spirv_id *record,
+drv_gpu_spirv_declare_system(
+	struct drv_gpu_spirv_parser *parser,
+	struct drv_gpu_spirv_id *record,
 	uint32_t opcode,
 	uint32_t offset)
 {
@@ -219,11 +285,17 @@ i915_spirv_declare_system(
 	case BUILTIN_LOCAL_INVOCATION_INDEX:
 		break;
 	default:
-		error = i915_spirv_refuse(parser, opcode, offset, "compute built-in input that is not lowered");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "compute built-in input that is not lowered");
 		return error;
 	}
 
-	/* A load of it reads the dispatch's values, not an interface location. */
+	/*
+	 * A load of it reads the dispatch's values, not an interface location.
+	 */
 	record->ptr_kind = PTR_SYSTEM;
 
 	/* Succeeded: the built-in is known. */
@@ -235,19 +307,25 @@ i915_spirv_declare_system(
  * component of its vector.
  */
 static int
-i915_spirv_chain_system(
-	struct i915_spirv_parser *parser,
-	struct i915_spirv_id *record,
-	struct i915_spirv_id *pointee,
-	struct i915_spirv_id *index_record,
+drv_gpu_spirv_chain_system(
+	struct drv_gpu_spirv_parser *parser,
+	struct drv_gpu_spirv_id *record,
+	struct drv_gpu_spirv_id *pointee,
+	struct drv_gpu_spirv_id *index_record,
 	uint32_t opcode,
 	uint32_t offset)
 {
 	int error;
 
 	/* Only a component of a vector, chosen by a constant, is selected. */
-	if (pointee->kind != ID_TYPE_VECTOR || index_record->kind != ID_CONSTANT) {
-		error = i915_spirv_refuse(parser, opcode, offset, "access chain into a compute built-in other than a constant component");
+	if (pointee->kind != ID_TYPE_VECTOR ||
+	    index_record->kind != ID_CONSTANT) {
+		error =
+		    drv_gpu_spirv_refuse(parser,
+					 opcode,
+					 offset,
+					 "access chain into a compute built-in "
+					 "other than a constant component");
 		return error;
 	}
 
@@ -265,26 +343,30 @@ i915_spirv_chain_system(
 
 /*
  * Lowers a load of a compute built-in: each component it reads, from the
- * dispatch's values (i915_spirv_system_component()).
+ * dispatch's values (drv_gpu_spirv_system_component()).
  */
 static int
-i915_spirv_lower_load_system(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_load_system(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
-	const struct i915_spirv_id *pointer,
-	const struct i915_spirv_id *variable,
+	const struct drv_gpu_spirv_id *pointer,
+	const struct drv_gpu_spirv_id *variable,
 	uint32_t components,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_spirv_id *record;
+	struct drv_gpu_spirv_id *record;
 	uint32_t first;
 	uint32_t index;
 	int error;
 
 	/* The built-ins are integer scalars and vectors of at most three. */
 	if (components > 3U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "load of a compute built-in wider than three components");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "load of a compute built-in wider than three components");
 		return error;
 	}
 
@@ -294,13 +376,17 @@ i915_spirv_lower_load_system(
 		first = (uint32_t)pointer->component;
 
 	/* Names the loaded value's scalars. */
-	record = i915_spirv_result(parser, word[2], word[1], components, 0);
+	record = drv_gpu_spirv_result(parser, word[2], word[1], components, 0);
 	if (record == NULL)
 		return EINVAL;
 
 	/* Reads each component the load covers. */
-	for (index = 0U; index < components; index++)
-		record->comp[index] = i915_spirv_system_component(parser, variable->builtin, first + index);
+	for (index = 0U; index < components; index++) {
+		record->comp[index] =
+		    drv_gpu_spirv_system_component(parser,
+						   variable->builtin,
+						   first + index);
+	}
 
 	/* A value the parser could not make fails the load. */
 	if (parser->error != 0)
@@ -321,12 +407,12 @@ i915_spirv_lower_load_system(
  * places (the system storage buffer).
  */
 static uint32_t
-i915_spirv_system_component(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_system_component(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t builtin,
 	uint32_t component)
 {
-	struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir_inst *inst;
 	uint32_t local;
 	uint32_t group;
 	uint32_t size;
@@ -340,54 +426,93 @@ i915_spirv_system_component(
 	switch (builtin) {
 	case BUILTIN_LOCAL_INVOCATION_ID:
 		/* The channel's place in its group along the axis. */
-		value = i915_spirv_load_system(parser, I915_IR_SYSTEM_LOCAL_ID_X + component);
+		value = drv_gpu_spirv_load_system(parser,
+						  DRV_GPU_IR_SYSTEM_LOCAL_ID_X +
+						      component);
 		return value;
 
 	case BUILTIN_LOCAL_INVOCATION_INDEX:
 		/* The channel's linear place in its group. */
-		value = i915_spirv_load_system(parser, I915_IR_SYSTEM_LOCAL_INDEX);
+		value =
+		    drv_gpu_spirv_load_system(parser,
+					      DRV_GPU_IR_SYSTEM_LOCAL_INDEX);
 		return value;
 
 	case BUILTIN_WORKGROUP_ID:
 		/* The group's place in the dispatch along the axis. */
-		value = i915_spirv_load_system(parser, I915_IR_SYSTEM_GROUP_ID_X + component);
+		value = drv_gpu_spirv_load_system(parser,
+						  DRV_GPU_IR_SYSTEM_GROUP_ID_X +
+						      component);
 		return value;
 
 	case BUILTIN_PRIMITIVE_ID:
-		/* A geometry invocation's input primitive: the thread's payload (ws075-p007a). */
+		/*
+		 * A geometry invocation's input primitive: the thread's payload
+		 * (ws075-p007a).
+		 */
 		parser->ir->uses_primitive_id = 1U;
-		value = i915_spirv_load_system(parser, I915_IR_SYSTEM_PRIMITIVE_ID);
+		value =
+		    drv_gpu_spirv_load_system(parser,
+					      DRV_GPU_IR_SYSTEM_PRIMITIVE_ID);
 		return value;
 
 	case BUILTIN_GLOBAL_INVOCATION_ID:
-		/* The group's place along the axis, and the group's size along it. */
-		group = i915_spirv_load_system(parser, I915_IR_SYSTEM_GROUP_ID_X + component);
+		/*
+		 * The group's place along the axis, and the group's size along
+		 * it.
+		 */
+		group = drv_gpu_spirv_load_system(parser,
+						  DRV_GPU_IR_SYSTEM_GROUP_ID_X +
+						      component);
 		size = parser->ir->local_size[component];
 
-		/* A group one invocation wide along the axis has every channel at its first, the group's place. */
+		/*
+		 * A group one invocation wide along the axis has every channel
+		 * at its first, the group's place.
+		 */
 		if (size == 1U)
 			return group;
 
 		/* The group's first invocation: its place times its size. */
-		size_value = i915_spirv_integer_constant(parser, size);
-		first = i915_spirv_emit_value(parser, I915_IR_IMUL, group, size_value);
+		size_value = drv_gpu_spirv_integer_constant(parser, size);
+		first = drv_gpu_spirv_emit_value(parser,
+						 DRV_GPU_IR_IMUL,
+						 group,
+						 size_value);
 
 		/* Adds the channel's place in the group. */
-		local = i915_spirv_load_system(parser, I915_IR_SYSTEM_LOCAL_ID_X + component);
-		value = i915_spirv_emit_value(parser, I915_IR_IADD, first, local);
+		local = drv_gpu_spirv_load_system(parser,
+						  DRV_GPU_IR_SYSTEM_LOCAL_ID_X +
+						      component);
+		value = drv_gpu_spirv_emit_value(parser,
+						 DRV_GPU_IR_IADD,
+						 first,
+						 local);
 		return value;
 
 	default:
 		break;
 	}
 
-	/* The group counts: a word of the system storage buffer, read by every channel. */
-	uniform = i915_spirv_system_uniform(parser);
-	place = i915_spirv_integer_constant(parser, component * SYSTEM_GROUP_COUNT_BYTES);
-	value = i915_spirv_new_value(parser);
-	inst = i915_spirv_emit(parser, I915_IR_LOAD_STORAGE, value, place, 0U);
+	/*
+	 * The group counts: a word of the system storage buffer, read by every
+	 * channel.
+	 */
+	uniform = drv_gpu_spirv_system_uniform(parser);
+	place = drv_gpu_spirv_integer_constant(parser,
+					       component *
+						   SYSTEM_GROUP_COUNT_BYTES);
+	value = drv_gpu_spirv_new_value(parser);
+	inst = drv_gpu_spirv_emit(parser,
+				  DRV_GPU_IR_LOAD_STORAGE,
+				  value,
+				  place,
+				  0U);
 
-	/* The load reads the system buffer; a failed emit has latched the error. */
+	/*
+	 * The load reads the system buffer; a failed emit has latched the
+	 * error.
+	 */
 	if (inst != NULL)
 		inst->location = uniform;
 
@@ -397,18 +522,22 @@ i915_spirv_system_component(
 
 /* Emits a LOAD_SYSTEM of one built-in value and returns it. */
 static uint32_t
-i915_spirv_load_system(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_load_system(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t which)
 {
-	struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir_inst *inst;
 	uint32_t value;
 
 	/* Reads the value from the thread's payload into a fresh value. */
-	value = i915_spirv_new_value(parser);
-	inst = i915_spirv_emit(parser, I915_IR_LOAD_SYSTEM, value, 0U, 0U);
+	value = drv_gpu_spirv_new_value(parser);
+	inst =
+	    drv_gpu_spirv_emit(parser, DRV_GPU_IR_LOAD_SYSTEM, value, 0U, 0U);
 
-	/* The load names which built-in it reads; a failed emit has latched the error. */
+	/*
+	 * The load names which built-in it reads; a failed emit has latched the
+	 * error.
+	 */
 	if (inst != NULL)
 		inst->component = which;
 
@@ -421,20 +550,22 @@ i915_spirv_load_system(
  * adding it the first time gl_NumWorkGroups is read.
  */
 static uint32_t
-i915_spirv_system_uniform(
-	struct i915_spirv_parser *parser)
+drv_gpu_spirv_system_uniform(
+	struct drv_gpu_spirv_parser *parser)
 {
-	struct i915_shader_ir_uniform *slot;
+	struct drv_gpu_shader_ir_uniform *slot;
 
 	/* The buffer is added once; the parser keeps its index plus one. */
 	if (parser->system_uniform != 0U)
 		return parser->system_uniform - 1U;
 
-	/* Takes the next slot of the uniform list for the three group counts. */
+	/*
+	 * Takes the next slot of the uniform list for the three group counts.
+	 */
 	slot = &parser->ir->uniforms[parser->ir->uniform_count];
-	slot->set = I915_IR_SYSTEM_SET;
+	slot->set = DRV_GPU_IR_SYSTEM_SET;
 	slot->binding = 0U;
-	slot->kind = I915_IR_UNIFORM_STORAGE;
+	slot->kind = DRV_GPU_IR_UNIFORM_STORAGE;
 	slot->offset = 0U;
 	slot->size = 0U;
 	parser->ir->uniform_count++;
@@ -456,18 +587,18 @@ i915_spirv_system_uniform(
  * sides (ws101-p006).
  */
 static int
-i915_spirv_lower_atomic(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_atomic(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
 	uint32_t count,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_shader_ir_inst *inst;
-	struct i915_spirv_id *record;
-	struct i915_spirv_id *pointer;
-	struct i915_spirv_id *variable;
-	struct i915_spirv_id *type;
+	struct drv_gpu_shader_ir_inst *inst;
+	struct drv_gpu_spirv_id *record;
+	struct drv_gpu_spirv_id *pointer;
+	struct drv_gpu_spirv_id *variable;
+	struct drv_gpu_spirv_id *type;
 	uint32_t value_comp[4];
 	uint32_t compare_comp[4];
 	uint32_t components;
@@ -482,57 +613,63 @@ i915_spirv_lower_atomic(
 	uint32_t dst;
 	int error;
 
-	/* Every form names a result type, a result, a pointer, a scope and semantics. */
+	/*
+	 * Every form names a result type, a result, a pointer, a scope and
+	 * semantics.
+	 */
 	if (count < 6U)
 		return EINVAL;
 
-	/* The operation, how many words its instruction has and which of them is the value. */
+	/*
+	 * The operation, how many words its instruction has and which of them
+	 * is the value.
+	 */
 	operands = 7U;
 	value_word = 6U;
 	compare = NO_VALUE;
 	switch (opcode) {
 	case OP_ATOMIC_EXCHANGE:
-		operation = I915_IR_ATOMIC_XCHG;
+		operation = DRV_GPU_IR_ATOMIC_XCHG;
 		break;
 	case OP_ATOMIC_COMPARE_EXCHANGE:
-		operation = I915_IR_ATOMIC_CMPXCHG;
+		operation = DRV_GPU_IR_ATOMIC_CMPXCHG;
 		operands = 9U;
 		value_word = 7U;
 		break;
 	case OP_ATOMIC_I_INCREMENT:
-		operation = I915_IR_ATOMIC_ADD;
+		operation = DRV_GPU_IR_ATOMIC_ADD;
 		operands = 6U;
 		break;
 	case OP_ATOMIC_I_DECREMENT:
-		operation = I915_IR_ATOMIC_SUB;
+		operation = DRV_GPU_IR_ATOMIC_SUB;
 		operands = 6U;
 		break;
 	case OP_ATOMIC_I_ADD:
-		operation = I915_IR_ATOMIC_ADD;
+		operation = DRV_GPU_IR_ATOMIC_ADD;
 		break;
 	case OP_ATOMIC_I_SUB:
-		operation = I915_IR_ATOMIC_SUB;
+		operation = DRV_GPU_IR_ATOMIC_SUB;
 		break;
 	case OP_ATOMIC_S_MIN:
-		operation = I915_IR_ATOMIC_SMIN;
+		operation = DRV_GPU_IR_ATOMIC_SMIN;
 		break;
 	case OP_ATOMIC_U_MIN:
-		operation = I915_IR_ATOMIC_UMIN;
+		operation = DRV_GPU_IR_ATOMIC_UMIN;
 		break;
 	case OP_ATOMIC_S_MAX:
-		operation = I915_IR_ATOMIC_SMAX;
+		operation = DRV_GPU_IR_ATOMIC_SMAX;
 		break;
 	case OP_ATOMIC_U_MAX:
-		operation = I915_IR_ATOMIC_UMAX;
+		operation = DRV_GPU_IR_ATOMIC_UMAX;
 		break;
 	case OP_ATOMIC_AND:
-		operation = I915_IR_ATOMIC_AND;
+		operation = DRV_GPU_IR_ATOMIC_AND;
 		break;
 	case OP_ATOMIC_OR:
-		operation = I915_IR_ATOMIC_OR;
+		operation = DRV_GPU_IR_ATOMIC_OR;
 		break;
 	default:
-		operation = I915_IR_ATOMIC_XOR;
+		operation = DRV_GPU_IR_ATOMIC_XOR;
 		break;
 	}
 
@@ -541,13 +678,21 @@ i915_spirv_lower_atomic(
 		return EINVAL;
 
 	/* The fences the semantics ask for around the atomic (ws101-p006). */
-	error = i915_spirv_semantics(parser, word[5], &fences, opcode, offset);
+	error =
+	    drv_gpu_spirv_semantics(parser, word[5], &fences, opcode, offset);
 	if (error != 0)
 		return error;
 
-	/* A compare and exchange has the semantics of the unequal case too, and is fenced for both. */
+	/*
+	 * A compare and exchange has the semantics of the unequal case too, and
+	 * is fenced for both.
+	 */
 	if (opcode == OP_ATOMIC_COMPARE_EXCHANGE) {
-		error = i915_spirv_semantics(parser, word[6], &unequal, opcode, offset);
+		error = drv_gpu_spirv_semantics(parser,
+						word[6],
+						&unequal,
+						opcode,
+						offset);
 		if (error != 0)
 			return error;
 
@@ -555,25 +700,47 @@ i915_spirv_lower_atomic(
 		fences |= unequal;
 	}
 
-	/* Resolves the word the atomic works on, of a storage buffer or of shared memory. */
-	error = i915_spirv_atomic_pointer(parser, word[3], &pointer, &variable, opcode, offset);
+	/*
+	 * Resolves the word the atomic works on, of a storage buffer or of
+	 * shared memory.
+	 */
+	error = drv_gpu_spirv_atomic_pointer(parser,
+					     word[3],
+					     &pointer,
+					     &variable,
+					     opcode,
+					     offset);
 	if (error != 0)
 		return error;
 
 	/* Refuses a word that is not a 32-bit integer. */
-	type = i915_spirv_id(parser, pointer->pointee);
-	if (type == NULL || type->kind != ID_TYPE_INT || type->width != 32U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "atomic on something that is not a 32-bit integer");
+	type = drv_gpu_spirv_id(parser, pointer->pointee);
+	if (type == NULL ||
+	    type->kind != ID_TYPE_INT ||
+	    type->width != 32U) {
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "atomic on something that is not a 32-bit integer");
 		return error;
 	}
 
-	/* The value the operation combines with the word: one for an increment or a decrement, or the operand. */
+	/*
+	 * The value the operation combines with the word: one for an increment
+	 * or a decrement, or the operand.
+	 */
 	if (operands == 6U) {
-		value = i915_spirv_integer_constant(parser, 1U);
+		value = drv_gpu_spirv_integer_constant(parser, 1U);
 	} else {
-		components = i915_spirv_operand(parser, word[value_word], value_comp);
+		components =
+		    drv_gpu_spirv_operand(parser, word[value_word], value_comp);
 		if (components != 1U) {
-			error = i915_spirv_refuse(parser, opcode, offset, "atomic whose value is not an integer scalar");
+			error = drv_gpu_spirv_refuse(
+			    parser,
+			    opcode,
+			    offset,
+			    "atomic whose value is not an integer scalar");
 			return error;
 		}
 
@@ -581,11 +748,19 @@ i915_spirv_lower_atomic(
 		value = value_comp[0];
 	}
 
-	/* A compare and exchange also takes the value the word is compared with. */
+	/*
+	 * A compare and exchange also takes the value the word is compared
+	 * with.
+	 */
 	if (opcode == OP_ATOMIC_COMPARE_EXCHANGE) {
-		components = i915_spirv_operand(parser, word[8], compare_comp);
+		components =
+		    drv_gpu_spirv_operand(parser, word[8], compare_comp);
 		if (components != 1U) {
-			error = i915_spirv_refuse(parser, opcode, offset, "atomic whose comparator is not an integer scalar");
+			error = drv_gpu_spirv_refuse(
+			    parser,
+			    opcode,
+			    offset,
+			    "atomic whose comparator is not an integer scalar");
 			return error;
 		}
 
@@ -594,37 +769,50 @@ i915_spirv_lower_atomic(
 	}
 
 	/* The word's byte offset in the buffer or in shared memory. */
-	place = i915_spirv_storage_offset(parser, pointer, pointer->byte_offset);
+	place =
+	    drv_gpu_spirv_storage_offset(parser, pointer, pointer->byte_offset);
 
 	/* Names the result: the word's value before the operation. */
-	record = i915_spirv_result(parser, word[2], word[1], 1U, 1);
+	record = drv_gpu_spirv_result(parser, word[2], word[1], 1U, 1);
 	if (record == NULL)
 		return EINVAL;
 	dst = record->comp[0];
 
-	/* An ordering atomic is fenced on both sides (ws101-p006): this fence orders the accesses before it, for a release. */
-	i915_spirv_fence(parser, fences);
+	/*
+	 * An ordering atomic is fenced on both sides (ws101-p006): this fence
+	 * orders the accesses before it, for a release.
+	 */
+	drv_gpu_spirv_fence(parser, fences);
 
 	/* Emits the operation on the word. */
-	inst = i915_spirv_emit(parser, I915_IR_ATOMIC, dst, place, value);
+	inst = drv_gpu_spirv_emit(parser, DRV_GPU_IR_ATOMIC, dst, place, value);
 	if (inst == NULL)
 		return parser->error;
 	inst->immediate = operation;
 
-	/* The memory the word is in: the buffer's uniform, or the group's shared memory. */
+	/*
+	 * The memory the word is in: the buffer's uniform, or the group's
+	 * shared memory.
+	 */
 	inst->location = variable->uniform;
 	if (pointer->ptr_kind == PTR_SHARED)
-		inst->location = I915_IR_LOCATION_SHARED;
+		inst->location = DRV_GPU_IR_LOCATION_SHARED;
 
 	/* A compare and exchange's comparator is the third source. */
 	if (compare != NO_VALUE)
 		inst->src[2] = compare;
 
-	/* Under a predicate only the block's channels change the word; the predicate follows the values. */
+	/*
+	 * Under a predicate only the block's channels change the word; the
+	 * predicate follows the values.
+	 */
 	if (parser->predicate != PREDICATE_ALWAYS) {
-		inst->component = I915_IR_ATOMIC_PREDICATED;
+		inst->component = DRV_GPU_IR_ATOMIC_PREDICATED;
 
-		/* The predicate is the source after the comparator, or after the value. */
+		/*
+		 * The predicate is the source after the comparator, or after
+		 * the value.
+		 */
 		if (compare != NO_VALUE) {
 			inst->src[3] = parser->predicate;
 		} else {
@@ -632,8 +820,11 @@ i915_spirv_lower_atomic(
 		}
 	}
 
-	/* The fence after the atomic orders the accesses after it, for an acquire. */
-	i915_spirv_fence(parser, fences);
+	/*
+	 * The fence after the atomic orders the accesses after it, for an
+	 * acquire.
+	 */
+	drv_gpu_spirv_fence(parser, fences);
 
 	/* A value the parser could not make fails the atomic. */
 	if (parser->error != 0)
@@ -649,15 +840,15 @@ i915_spirv_lower_atomic(
  * performs whole.
  */
 static int
-i915_spirv_lower_atomic_access(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_atomic_access(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
 	uint32_t count,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_spirv_id *pointer;
-	struct i915_spirv_id *variable;
+	struct drv_gpu_spirv_id *pointer;
+	struct drv_gpu_spirv_id *variable;
 	uint32_t scalars[4];
 	uint32_t components;
 	uint32_t pointer_id;
@@ -665,7 +856,10 @@ i915_spirv_lower_atomic_access(
 	uint32_t fences;
 	int error;
 
-	/* A load names a result type, a result, the pointer, a scope and semantics; a store the pointer, a scope, semantics and the value. */
+	/*
+	 * A load names a result type, a result, the pointer, a scope and
+	 * semantics; a store the pointer, a scope, semantics and the value.
+	 */
 	if (opcode == OP_ATOMIC_LOAD) {
 		if (count < 6U)
 			return EINVAL;
@@ -683,30 +877,58 @@ i915_spirv_lower_atomic_access(
 	}
 
 	/* The fences the semantics ask for around the access (ws101-p006). */
-	error = i915_spirv_semantics(parser, semantics_id, &fences, opcode, offset);
+	error = drv_gpu_spirv_semantics(parser,
+					semantics_id,
+					&fences,
+					opcode,
+					offset);
 	if (error != 0)
 		return error;
 
 	/* Resolves the word of a storage buffer or of shared memory. */
-	error = i915_spirv_atomic_pointer(parser, pointer_id, &pointer, &variable, opcode, offset);
+	error = drv_gpu_spirv_atomic_pointer(parser,
+					     pointer_id,
+					     &pointer,
+					     &variable,
+					     opcode,
+					     offset);
 	if (error != 0)
 		return error;
 
-	/* A load reads the word as any load of its memory does, fenced after for an acquire. */
+	/*
+	 * A load reads the word as any load of its memory does, fenced after
+	 * for an acquire.
+	 */
 	if (opcode == OP_ATOMIC_LOAD) {
 		/* Reads the word from shared memory or from the buffer. */
 		if (pointer->ptr_kind == PTR_SHARED) {
-			error = i915_spirv_lower_shared(parser, word, pointer, NULL, 1U, opcode, offset);
+			error = drv_gpu_spirv_lower_shared(parser,
+							   word,
+							   pointer,
+							   NULL,
+							   1U,
+							   opcode,
+							   offset);
 		} else {
-			error = i915_spirv_lower_storage(parser, word, pointer, variable, NULL, 1U, opcode, offset);
+			error = drv_gpu_spirv_lower_storage(parser,
+							    word,
+							    pointer,
+							    variable,
+							    NULL,
+							    1U,
+							    opcode,
+							    offset);
 		}
 
 		/* Reports a load that could not be lowered. */
 		if (error != 0)
 			return error;
 
-		/* The fence after the load orders the accesses after it, for an acquire. */
-		i915_spirv_fence(parser, fences);
+		/*
+		 * The fence after the load orders the accesses after it, for an
+		 * acquire.
+		 */
+		drv_gpu_spirv_fence(parser, fences);
 		if (parser->error != 0)
 			return parser->error;
 
@@ -715,20 +937,40 @@ i915_spirv_lower_atomic_access(
 	}
 
 	/* A store writes the one scalar value it names. */
-	components = i915_spirv_operand(parser, word[4], scalars);
+	components = drv_gpu_spirv_operand(parser, word[4], scalars);
 	if (components != 1U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "atomic store of something that is not a scalar");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "atomic store of something that is not a scalar");
 		return error;
 	}
 
-	/* The fence before the store orders the accesses before it, for a release. */
-	i915_spirv_fence(parser, fences);
+	/*
+	 * The fence before the store orders the accesses before it, for a
+	 * release.
+	 */
+	drv_gpu_spirv_fence(parser, fences);
 
 	/* Writes the word as any store of its memory does. */
 	if (pointer->ptr_kind == PTR_SHARED) {
-		error = i915_spirv_lower_shared(parser, word, pointer, scalars, 1U, opcode, offset);
+		error = drv_gpu_spirv_lower_shared(parser,
+						   word,
+						   pointer,
+						   scalars,
+						   1U,
+						   opcode,
+						   offset);
 	} else {
-		error = i915_spirv_lower_storage(parser, word, pointer, variable, scalars, 1U, opcode, offset);
+		error = drv_gpu_spirv_lower_storage(parser,
+						    word,
+						    pointer,
+						    variable,
+						    scalars,
+						    1U,
+						    opcode,
+						    offset);
 	}
 
 	/* Reports a store that could not be lowered. */
@@ -745,20 +987,20 @@ i915_spirv_lower_atomic_access(
  * refusal.
  */
 static int
-i915_spirv_atomic_pointer(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_atomic_pointer(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t pointer_id,
-	struct i915_spirv_id **pointer,
-	struct i915_spirv_id **variable,
+	struct drv_gpu_spirv_id **pointer,
+	struct drv_gpu_spirv_id **variable,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_spirv_id *base;
-	struct i915_spirv_id *owner;
+	struct drv_gpu_spirv_id *base;
+	struct drv_gpu_spirv_id *owner;
 	int error;
 
 	/* Resolves the pointer. */
-	base = i915_spirv_id(parser, pointer_id);
+	base = drv_gpu_spirv_id(parser, pointer_id);
 	if (base == NULL)
 		return EINVAL;
 
@@ -767,17 +1009,28 @@ i915_spirv_atomic_pointer(
 		return EINVAL;
 
 	/* Resolves the variable the pointer leads into. */
-	owner = i915_spirv_id(parser, base->var);
+	owner = drv_gpu_spirv_id(parser, base->var);
 	if (owner == NULL)
 		return EINVAL;
 
-	/* Only the words of a storage buffer or of shared memory are changed atomically. */
+	/*
+	 * Only the words of a storage buffer or of shared memory are changed
+	 * atomically.
+	 */
 	if (base->ptr_kind != PTR_SSBO && base->ptr_kind != PTR_SHARED) {
-		error = i915_spirv_refuse(parser, opcode, offset, "atomic on something that is not a storage buffer or shared memory");
+		error =
+		    drv_gpu_spirv_refuse(parser,
+					 opcode,
+					 offset,
+					 "atomic on something that is not a "
+					 "storage buffer or shared memory");
 		return error;
 	}
 
-	/* Succeeded: the atomic works on a word of a buffer or of shared memory. */
+	/*
+	 * Succeeded: the atomic works on a word of a buffer or of shared
+	 * memory.
+	 */
 	*pointer = base;
 	*variable = owner;
 	return 0;
@@ -785,32 +1038,36 @@ i915_spirv_atomic_pointer(
 
 /*
  * Reads the memory semantics of an atomic or a barrier: the fences
- * (I915_IR_FENCE_*) an ordering (Acquire, Release, AcquireRelease,
+ * (DRV_GPU_IR_FENCE_*) an ordering (Acquire, Release, AcquireRelease,
  * SequentiallyConsistent) asks for, of the memory its storage-class bits
  * name -- buffers (UniformMemory), shared memory (WorkgroupMemory), or both
  * when it names neither -- and none for relaxed semantics.  Returns 0, or
  * the refusal of semantics that are not a constant.
  */
 static int
-i915_spirv_semantics(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_semantics(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t semantics_id,
 	uint32_t *fences,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_spirv_id *semantics;
+	struct drv_gpu_spirv_id *semantics;
 	uint32_t bits;
 	int error;
 
 	/* Resolves the semantics' id. */
-	semantics = i915_spirv_id(parser, semantics_id);
+	semantics = drv_gpu_spirv_id(parser, semantics_id);
 	if (semantics == NULL)
 		return EINVAL;
 
 	/* The semantics must be a constant. */
 	if (semantics->kind != ID_CONSTANT) {
-		error = i915_spirv_refuse(parser, opcode, offset, "memory semantics that are not a constant");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "memory semantics that are not a constant");
 		return error;
 	}
 
@@ -822,19 +1079,19 @@ i915_spirv_semantics(
 
 	/* An ordering of buffers (UniformMemory) fences the buffers. */
 	if ((bits & MEMORY_SEMANTICS_UNIFORM) != 0U)
-		*fences |= I915_IR_FENCE_GLOBAL;
+		*fences |= DRV_GPU_IR_FENCE_GLOBAL;
 
 	/* One of shared memory (WorkgroupMemory) fences shared memory. */
 	if ((bits & MEMORY_SEMANTICS_WORKGROUP) != 0U)
-		*fences |= I915_IR_FENCE_SHARED;
+		*fences |= DRV_GPU_IR_FENCE_SHARED;
 
 	/* An ordering that names no memory is about all of it. */
 	if (*fences == 0U)
-		*fences = I915_IR_FENCE_GLOBAL | I915_IR_FENCE_SHARED;
+		*fences = DRV_GPU_IR_FENCE_GLOBAL | DRV_GPU_IR_FENCE_SHARED;
 
 	/* An acquire also waits for the writes before it. */
 	if ((bits & MEMORY_SEMANTICS_ACQUIRING) != 0U)
-		*fences |= I915_IR_FENCE_ACQUIRE;
+		*fences |= DRV_GPU_IR_FENCE_ACQUIRE;
 
 	/* Succeeded: the fences are known. */
 	return 0;
@@ -842,20 +1099,30 @@ i915_spirv_semantics(
 
 /* Emits a FENCE of the memory `fences` names; nothing when it names none. */
 static void
-i915_spirv_fence(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_fence(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t fences)
 {
-	struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir_inst *inst;
 
 	/* Relaxed semantics need no fence. */
-	if ((fences & (I915_IR_FENCE_GLOBAL | I915_IR_FENCE_SHARED)) == 0U)
+	if ((fences & (DRV_GPU_IR_FENCE_GLOBAL | DRV_GPU_IR_FENCE_SHARED)) ==
+	    0U)
 		return;
 
-	/* The fence orders the memory it names; a failed emit has latched the error. */
-	inst = i915_spirv_emit(parser, I915_IR_FENCE, 0U, 0U, 0U);
+	/*
+	 * The fence orders the memory it names; a failed emit has latched the
+	 * error.
+	 */
+	inst = drv_gpu_spirv_emit(parser, DRV_GPU_IR_FENCE, 0U, 0U, 0U);
 	if (inst != NULL)
 		inst->immediate = fences;
+
+	/*
+	 * Succeeded: the requested memory fences precede later scalar
+	 * operations.
+	 */
+	return;
 }
 
 /*
@@ -869,31 +1136,37 @@ i915_spirv_fence(
  * loops early) and one in a loop that not every invocation enters.
  */
 static int
-i915_spirv_lower_barrier(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_barrier(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
 	uint32_t count,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_shader_ir_inst *inst;
-	struct i915_spirv_id *scope;
+	struct drv_gpu_shader_ir_inst *inst;
+	struct drv_gpu_spirv_id *scope;
 	uint32_t fences;
 	uint32_t level;
 	int error;
 
-	/* A memory barrier: its scope and its semantics, which give the fences. */
+	/*
+	 * A memory barrier: its scope and its semantics, which give the fences.
+	 */
 	if (opcode == OP_MEMORY_BARRIER) {
 		if (count < 3U)
 			return EINVAL;
 
 		/* Reads the fences the semantics ask for. */
-		error = i915_spirv_semantics(parser, word[2], &fences, opcode, offset);
+		error = drv_gpu_spirv_semantics(parser,
+						word[2],
+						&fences,
+						opcode,
+						offset);
 		if (error != 0)
 			return error;
 
 		/* The barrier is its fences. */
-		i915_spirv_fence(parser, fences);
+		drv_gpu_spirv_fence(parser, fences);
 		if (parser->error != 0)
 			return parser->error;
 
@@ -901,29 +1174,40 @@ i915_spirv_lower_barrier(
 		return 0;
 	}
 
-	/* A control barrier names the execution scope, the memory scope and the semantics. */
+	/*
+	 * A control barrier names the execution scope, the memory scope and the
+	 * semantics.
+	 */
 	if (count < 4U)
 		return EINVAL;
 
 	/* Resolves the execution scope. */
-	scope = i915_spirv_id(parser, word[1]);
+	scope = drv_gpu_spirv_id(parser, word[1]);
 	if (scope == NULL)
 		return EINVAL;
 
 	/* The execution scope must be a constant. */
 	if (scope->kind != ID_CONSTANT) {
-		error = i915_spirv_refuse(parser, opcode, offset, "barrier whose execution scope is not a constant");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "barrier whose execution scope is not a constant");
 		return error;
 	}
 
 	/* Reads the fences the semantics ask for. */
-	error = i915_spirv_semantics(parser, word[3], &fences, opcode, offset);
+	error =
+	    drv_gpu_spirv_semantics(parser, word[3], &fences, opcode, offset);
 	if (error != 0)
 		return error;
 
-	/* A barrier of a narrower scope than the workgroup is its fences: the channels of a thread run together. */
+	/*
+	 * A barrier of a narrower scope than the workgroup is its fences: the
+	 * channels of a thread run together.
+	 */
 	if (scope->constant != SCOPE_WORKGROUP) {
-		i915_spirv_fence(parser, fences);
+		drv_gpu_spirv_fence(parser, fences);
 		if (parser->error != 0)
 			return parser->error;
 
@@ -931,24 +1215,43 @@ i915_spirv_lower_barrier(
 		return 0;
 	}
 
-	/* Refuses a barrier after a return, which a thread whose channels all returned never reaches. */
+	/*
+	 * Refuses a barrier after a return, which a thread whose channels all
+	 * returned never reaches.
+	 */
 	if (parser->returned != 0) {
-		error = i915_spirv_refuse(parser, opcode, offset, "workgroup barrier after a return");
+		error =
+		    drv_gpu_spirv_refuse(parser,
+					 opcode,
+					 offset,
+					 "workgroup barrier after a return");
 		return error;
 	}
 
-	/* Refuses a barrier in a loop some invocation does not enter, which threads reach unequally often. */
+	/*
+	 * Refuses a barrier in a loop some invocation does not enter, which
+	 * threads reach unequally often.
+	 */
 	for (level = 0U; level < parser->loop_depth; level++) {
 		if (parser->loops[level].entry_predicate != PREDICATE_ALWAYS) {
-			error = i915_spirv_refuse(parser, opcode, offset, "workgroup barrier in a loop not every invocation enters");
+			error =
+			    drv_gpu_spirv_refuse(parser,
+						 opcode,
+						 offset,
+						 "workgroup barrier in a loop "
+						 "not every invocation enters");
 			return error;
 		}
 	}
 
-	/* The barrier, after its fences; a failed emit has latched the error. */
-	inst = i915_spirv_emit(parser, I915_IR_BARRIER, 0U, 0U, 0U);
-	if (inst != NULL)
-		inst->immediate = fences & (I915_IR_FENCE_GLOBAL | I915_IR_FENCE_SHARED);
+	/*
+	 * The barrier, after its fences; a failed emit has latched the error.
+	 */
+	inst = drv_gpu_spirv_emit(parser, DRV_GPU_IR_BARRIER, 0U, 0U, 0U);
+	if (inst != NULL) {
+		inst->immediate = fences & (DRV_GPU_IR_FENCE_GLOBAL |
+					    DRV_GPU_IR_FENCE_SHARED);
+	}
 
 	/* The kernel's dispatch must give the group a barrier. */
 	parser->ir->uses_barrier = 1U;
@@ -964,29 +1267,41 @@ i915_spirv_lower_barrier(
 /*
  * Declares a Workgroup variable of a compute shader (ws101-p006): the next
  * bytes of the group's shared memory, as many as its natural layout takes
- * (i915_spirv_shared_bytes()).  Refuses a type the layout does not cover
- * and a total past I915_IR_MAX_SHARED_BYTES.
+ * (drv_gpu_spirv_shared_bytes()).  Refuses a type the layout does not cover
+ * and a total past DRV_GPU_IR_MAX_SHARED_BYTES.
  */
 static int
-i915_spirv_declare_shared(
-	struct i915_spirv_parser *parser,
-	struct i915_spirv_id *record,
+drv_gpu_spirv_declare_shared(
+	struct drv_gpu_spirv_parser *parser,
+	struct drv_gpu_spirv_id *record,
 	uint32_t opcode,
 	uint32_t offset)
 {
 	uint32_t bytes;
 	int error;
 
-	/* The bytes the variable takes; none for a type the layout does not cover. */
-	bytes = i915_spirv_shared_bytes(parser, record->pointee);
+	/*
+	 * The bytes the variable takes; none for a type the layout does not
+	 * cover.
+	 */
+	bytes = drv_gpu_spirv_shared_bytes(parser, record->pointee);
 	if (bytes == 0U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "Workgroup variable of a type shared memory does not lay out");
+		error = drv_gpu_spirv_refuse(parser,
+					     opcode,
+					     offset,
+					     "Workgroup variable of a type "
+					     "shared memory does not lay out");
 		return error;
 	}
 
 	/* Refuses more shared memory than the device has. */
-	if (bytes > I915_IR_MAX_SHARED_BYTES || parser->ir->shared_bytes > I915_IR_MAX_SHARED_BYTES - bytes) {
-		error = i915_spirv_refuse(parser, opcode, offset, "Workgroup variables larger than the shared memory");
+	if (bytes > DRV_GPU_IR_MAX_SHARED_BYTES ||
+	    parser->ir->shared_bytes > DRV_GPU_IR_MAX_SHARED_BYTES - bytes) {
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "Workgroup variables larger than the shared memory");
 		return error;
 	}
 
@@ -1009,17 +1324,17 @@ i915_spirv_declare_shared(
  * than SHARED_MEASURE_LIMIT bytes), which is refused.
  */
 static uint32_t
-i915_spirv_shared_bytes(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_shared_bytes(
+	struct drv_gpu_spirv_parser *parser,
 	uint32_t type_id)
 {
-	struct i915_spirv_id *type;
+	struct drv_gpu_spirv_id *type;
 	uint32_t total;
 	uint32_t part;
 	uint32_t member;
 
 	/* Resolves the type; an unknown id is not laid out. */
-	type = i915_spirv_id(parser, type_id);
+	type = drv_gpu_spirv_id(parser, type_id);
 	if (type == NULL)
 		return 0U;
 
@@ -1030,10 +1345,12 @@ i915_spirv_shared_bytes(
 		/*
 		 * A 32-bit scalar is laid out, and a 16-bit integer in a 32-bit
 		 * slot of its own (ws031-p039: shared memory's layout is the
-		 * implementation's; the word holds the 32-bit value it is carried
-		 * in).
+		 * implementation's; the word holds the 32-bit value it is
+		 * carried in).
 		 */
-		if (type->width != 32U && !(type->kind == ID_TYPE_INT && type->width == 16U))
+		if (type->width != 32U &&
+		    !(type->kind == ID_TYPE_INT &&
+		    type->width == 16U))
 			return 0U;
 
 		/* Reports the scalar's 4 bytes. */
@@ -1042,25 +1359,38 @@ i915_spirv_shared_bytes(
 	case ID_TYPE_VECTOR:
 	case ID_TYPE_MATRIX:
 		/* Its components or columns one after the other. */
-		part = i915_spirv_shared_bytes(parser, type->type);
+		part = drv_gpu_spirv_shared_bytes(parser, type->type);
 
-		/* Reports the part's bytes times the parts (0 when the part is not laid out). */
+		/*
+		 * Reports the part's bytes times the parts (0 when the part is
+		 * not laid out).
+		 */
 		return part * type->count;
 
 	case ID_TYPE_ARRAY:
-		/* Its elements one after the other; a run-time array has no size, and a size past 1 GiB is not measured. */
-		part = i915_spirv_shared_bytes(parser, type->type);
-		if (type->length == 0U || part == 0U || type->length > SHARED_MEASURE_LIMIT / part)
+		/*
+		 * Its elements one after the other; a run-time array has no
+		 * size, and a size past 1 GiB is not measured.
+		 */
+		part = drv_gpu_spirv_shared_bytes(parser, type->type);
+		if (type->length == 0U ||
+		    part == 0U ||
+		    type->length > SHARED_MEASURE_LIMIT / part)
 			return 0U;
 
 		/* Reports the element's bytes times the length. */
 		return part * type->length;
 
 	case ID_TYPE_STRUCT:
-		/* Its members in order, none of them unlaid and the sum within the measure. */
+		/*
+		 * Its members in order, none of them unlaid and the sum within
+		 * the measure.
+		 */
 		total = 0U;
 		for (member = 0U; member < type->count; member++) {
-			part = i915_spirv_shared_bytes(parser, type->member_type[member]);
+			part = drv_gpu_spirv_shared_bytes(
+			    parser,
+			    type->member_type[member]);
 			if (part == 0U || part > SHARED_MEASURE_LIMIT - total)
 				return 0U;
 			total += part;
@@ -1085,11 +1415,11 @@ i915_spirv_shared_bytes(
  * buffer's do.
  */
 static int
-i915_spirv_chain_shared(
-	struct i915_spirv_parser *parser,
-	struct i915_spirv_id *record,
-	struct i915_spirv_id *pointee,
-	struct i915_spirv_id *index_record,
+drv_gpu_spirv_chain_shared(
+	struct drv_gpu_spirv_parser *parser,
+	struct drv_gpu_spirv_id *record,
+	struct drv_gpu_spirv_id *pointee,
+	struct drv_gpu_spirv_id *index_record,
 	uint32_t index_id,
 	uint32_t opcode,
 	uint32_t offset)
@@ -1116,7 +1446,11 @@ i915_spirv_chain_shared(
 
 	/* Only a constant selects a structure's member. */
 	if (pointee->kind == ID_TYPE_STRUCT && constant == 0) {
-		error = i915_spirv_refuse(parser, opcode, offset, "access chain with a dynamic index into a structure");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "access chain with a dynamic index into a structure");
 		return error;
 	}
 
@@ -1127,7 +1461,9 @@ i915_spirv_chain_shared(
 
 		/* Moves the byte offset past the members before it. */
 		for (member = 0U; member < selected; member++) {
-			member_bytes = i915_spirv_shared_bytes(parser, pointee->member_type[member]);
+			member_bytes = drv_gpu_spirv_shared_bytes(
+			    parser,
+			    pointee->member_type[member]);
 			record->byte_offset += member_bytes;
 		}
 
@@ -1138,24 +1474,39 @@ i915_spirv_chain_shared(
 		return 0;
 	}
 
-	/* Refuses an index into a scalar: only an array, a matrix or a vector has parts. */
-	if (pointee->kind != ID_TYPE_ARRAY && pointee->kind != ID_TYPE_MATRIX && pointee->kind != ID_TYPE_VECTOR) {
-		error = i915_spirv_refuse(parser, opcode, offset, "access chain into a scalar");
+	/*
+	 * Refuses an index into a scalar: only an array, a matrix or a vector
+	 * has parts.
+	 */
+	if (pointee->kind != ID_TYPE_ARRAY &&
+	    pointee->kind != ID_TYPE_MATRIX &&
+	    pointee->kind != ID_TYPE_VECTOR) {
+		error = drv_gpu_spirv_refuse(parser,
+					     opcode,
+					     offset,
+					     "access chain into a scalar");
 		return error;
 	}
 
-	/* An array's element, a matrix's column or a vector's component: the part's bytes apart. */
-	stride = i915_spirv_shared_bytes(parser, pointee->type);
+	/*
+	 * An array's element, a matrix's column or a vector's component: the
+	 * part's bytes apart.
+	 */
+	stride = drv_gpu_spirv_shared_bytes(parser, pointee->type);
 	if (stride == 0U)
 		return EINVAL;
 	record->pointee = pointee->type;
 
 	/* A constant index past an array's length is invalid SPIR-V. */
-	if (constant != 0 && pointee->kind == ID_TYPE_ARRAY && selected >= pointee->length)
+	if (constant != 0 &&
+	    pointee->kind == ID_TYPE_ARRAY &&
+	    selected >= pointee->length)
 		return EINVAL;
 
 	/* So is one past a matrix's columns or a vector's components. */
-	if (constant != 0 && pointee->kind != ID_TYPE_ARRAY && selected >= pointee->count)
+	if (constant != 0 &&
+	    pointee->kind != ID_TYPE_ARRAY &&
+	    selected >= pointee->count)
 		return EINVAL;
 
 	/* A constant index moves the byte offset, and the step is done. */
@@ -1165,28 +1516,58 @@ i915_spirv_chain_shared(
 	}
 
 	/* A dynamic index must be an integer scalar. */
-	scalar_count = i915_spirv_operand(parser, index_id, scalars);
+	scalar_count = drv_gpu_spirv_operand(parser, index_id, scalars);
 	if (scalar_count != 1U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "dynamic index that is not an integer scalar");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "dynamic index that is not an integer scalar");
 		return error;
 	}
-	/* A 16-bit index made whole, signed as SPIR-V's indices are (ws031-p039). */
-	scalars[0] = i915_spirv_extend16(parser, scalars[0], i915_spirv_operand_int_width(parser, index_id), 1);
 
-	/* Folds it with an earlier dynamic index into one in bytes, or keeps it with its stride when it is the first. */
+	/*
+	 * A 16-bit index made whole, signed as SPIR-V's indices are
+	 * (ws031-p039).
+	 */
+	scalars[0] = drv_gpu_spirv_extend16(
+	    parser,
+	    scalars[0],
+	    drv_gpu_spirv_operand_int_width(parser, index_id),
+	    1);
+
+	/*
+	 * Folds it with an earlier dynamic index into one in bytes, or keeps it
+	 * with its stride when it is the first.
+	 */
 	if (record->dynamic_index != NO_VALUE) {
-		stride_value = i915_spirv_integer_constant(parser, record->dynamic_stride);
-		before = i915_spirv_emit_value(parser, I915_IR_IMUL, record->dynamic_index, stride_value);
-		stride_value = i915_spirv_integer_constant(parser, stride);
-		after = i915_spirv_emit_value(parser, I915_IR_IMUL, scalars[0], stride_value);
-		record->dynamic_index = i915_spirv_emit_value(parser, I915_IR_IADD, before, after);
+		stride_value =
+		    drv_gpu_spirv_integer_constant(parser,
+						   record->dynamic_stride);
+		before = drv_gpu_spirv_emit_value(parser,
+						  DRV_GPU_IR_IMUL,
+						  record->dynamic_index,
+						  stride_value);
+		stride_value = drv_gpu_spirv_integer_constant(parser, stride);
+		after = drv_gpu_spirv_emit_value(parser,
+						 DRV_GPU_IR_IMUL,
+						 scalars[0],
+						 stride_value);
+		record->dynamic_index =
+		    drv_gpu_spirv_emit_value(parser,
+					     DRV_GPU_IR_IADD,
+					     before,
+					     after);
 		record->dynamic_stride = 1U;
 	} else {
 		record->dynamic_index = scalars[0];
 		record->dynamic_stride = stride;
 	}
 
-	/* Shared memory has no run-time array, so no length goes with the index. */
+	/*
+	 * Shared memory has no run-time array, so no length goes with the
+	 * index.
+	 */
 	record->dynamic_length = 0U;
 
 	/* A value the parser could not make fails the step. */
@@ -1205,38 +1586,49 @@ i915_spirv_chain_shared(
  * predicate.  Never forwarded: another invocation may have written the word.
  */
 static int
-i915_spirv_lower_shared(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_shared(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
-	const struct i915_spirv_id *pointer,
+	const struct drv_gpu_spirv_id *pointer,
 	const uint32_t *scalars,
 	uint32_t components,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_spirv_id *record;
-	struct i915_spirv_id *type;
-	struct i915_shader_ir_inst *inst;
+	struct drv_gpu_spirv_id *record;
+	struct drv_gpu_spirv_id *type;
+	struct drv_gpu_shader_ir_inst *inst;
 	uint32_t index;
 	uint32_t place;
 	uint32_t value;
 	int error;
 
 	/* Resolves the type the pointer addresses. */
-	type = i915_spirv_id(parser, pointer->pointee);
+	type = drv_gpu_spirv_id(parser, pointer->pointee);
 	if (type == NULL)
 		return EINVAL;
 
 	/* Only a scalar or a vector is moved at once. */
-	if (type->kind != ID_TYPE_INT && type->kind != ID_TYPE_FLOAT && type->kind != ID_TYPE_VECTOR) {
-		error = i915_spirv_refuse(parser, opcode, offset, "load or store of something that is not a scalar or a vector in shared memory");
+	if (type->kind != ID_TYPE_INT &&
+	    type->kind != ID_TYPE_FLOAT &&
+	    type->kind != ID_TYPE_VECTOR) {
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "load or store of something that is not a scalar or a "
+		    "vector in shared memory");
 		return error;
 	}
 
 	/* A load's result names fresh scalars. */
 	record = NULL;
 	if (scalars == NULL) {
-		record = i915_spirv_result(parser, word[2], word[1], components, 0);
+		record = drv_gpu_spirv_result(parser,
+					      word[2],
+					      word[1],
+					      components,
+					      0);
 		if (record == NULL)
 			return EINVAL;
 	}
@@ -1244,16 +1636,27 @@ i915_spirv_lower_shared(
 	/* Each scalar at its byte, under the block's predicate. */
 	for (index = 0U; index < components; index++) {
 		/* The scalar's byte offset in shared memory. */
-		place = i915_spirv_storage_offset(parser, pointer, pointer->byte_offset + index * 4U);
+		place = drv_gpu_spirv_storage_offset(parser,
+						     pointer,
+						     pointer->byte_offset +
+							 index * 4U);
 
 		/* A load reads the word into a fresh value of the result. */
 		if (scalars == NULL) {
-			value = i915_spirv_new_value(parser);
-			inst = i915_spirv_emit(parser, I915_IR_LOAD_SHARED, value, place, 0U);
+			value = drv_gpu_spirv_new_value(parser);
+			inst = drv_gpu_spirv_emit(parser,
+						  DRV_GPU_IR_LOAD_SHARED,
+						  value,
+						  place,
+						  0U);
 			record->comp[index] = value;
 
-			/* Under a predicate only the block's channels read; the predicate is the second source. */
-			if (inst != NULL && parser->predicate != PREDICATE_ALWAYS) {
+			/*
+			 * Under a predicate only the block's channels read; the
+			 * predicate is the second source.
+			 */
+			if (inst != NULL &&
+			    parser->predicate != PREDICATE_ALWAYS) {
 				inst->src[1] = parser->predicate;
 				inst->component = 1U;
 			}
@@ -1263,9 +1666,16 @@ i915_spirv_lower_shared(
 		}
 
 		/* A store writes the scalar to the word. */
-		inst = i915_spirv_emit(parser, I915_IR_STORE_SHARED, 0U, place, scalars[index]);
+		inst = drv_gpu_spirv_emit(parser,
+					  DRV_GPU_IR_STORE_SHARED,
+					  0U,
+					  place,
+					  scalars[index]);
 
-		/* Under a predicate only the block's channels write; the predicate is the third source. */
+		/*
+		 * Under a predicate only the block's channels write; the
+		 * predicate is the third source.
+		 */
 		if (inst != NULL && parser->predicate != PREDICATE_ALWAYS) {
 			inst->src[2] = parser->predicate;
 			inst->component = 1U;
@@ -1286,19 +1696,19 @@ i915_spirv_lower_shared(
  * member's offset, divided by its stride.
  */
 static int
-i915_spirv_lower_array_length(
-	struct i915_spirv_parser *parser,
+drv_gpu_spirv_lower_array_length(
+	struct drv_gpu_spirv_parser *parser,
 	const uint32_t *word,
 	uint32_t count,
 	uint32_t opcode,
 	uint32_t offset)
 {
-	struct i915_shader_ir_inst *inst;
-	struct i915_spirv_id *record;
-	struct i915_spirv_id *base;
-	struct i915_spirv_id *variable;
-	struct i915_spirv_id *block;
-	struct i915_spirv_id *array;
+	struct drv_gpu_shader_ir_inst *inst;
+	struct drv_gpu_spirv_id *record;
+	struct drv_gpu_spirv_id *base;
+	struct drv_gpu_spirv_id *variable;
+	struct drv_gpu_spirv_id *block;
+	struct drv_gpu_spirv_id *array;
 	uint32_t member;
 	uint32_t range;
 	uint32_t beyond;
@@ -1308,12 +1718,15 @@ i915_spirv_lower_array_length(
 	uint32_t constant;
 	int error;
 
-	/* The instruction names a result type, a result, the structure pointer and the member. */
+	/*
+	 * The instruction names a result type, a result, the structure pointer
+	 * and the member.
+	 */
 	if (count < 5U)
 		return EINVAL;
 
 	/* Resolves the pointer to the whole block. */
-	base = i915_spirv_id(parser, word[3]);
+	base = drv_gpu_spirv_id(parser, word[3]);
 	if (base == NULL)
 		return EINVAL;
 
@@ -1321,16 +1734,25 @@ i915_spirv_lower_array_length(
 	if (base->kind != ID_VARIABLE && base->kind != ID_POINTER)
 		return EINVAL;
 
-	/* Only a storage buffer has a run-time array whose length the dispatch knows. */
+	/*
+	 * Only a storage buffer has a run-time array whose length the dispatch
+	 * knows.
+	 */
 	if (base->ptr_kind != PTR_SSBO) {
-		error = i915_spirv_refuse(parser, opcode, offset, "OpArrayLength of something that is not a storage buffer");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "OpArrayLength of something that is not a storage buffer");
 		return error;
 	}
 
 	/* Resolves the buffer's variable and its block's structure. */
-	variable = i915_spirv_id(parser, base->var);
-	block = i915_spirv_id(parser, base->pointee);
-	if (variable == NULL || block == NULL || block->kind != ID_TYPE_STRUCT)
+	variable = drv_gpu_spirv_id(parser, base->var);
+	block = drv_gpu_spirv_id(parser, base->pointee);
+	if (variable == NULL ||
+	    block == NULL ||
+	    block->kind != ID_TYPE_STRUCT)
 		return EINVAL;
 
 	/* The member must exist. */
@@ -1339,47 +1761,65 @@ i915_spirv_lower_array_length(
 		return EINVAL;
 
 	/* The member must be a run-time array. */
-	array = i915_spirv_id(parser, block->member_type[member]);
-	if (array == NULL || array->kind != ID_TYPE_ARRAY || array->length != 0U)
+	array = drv_gpu_spirv_id(parser, block->member_type[member]);
+	if (array == NULL ||
+	    array->kind != ID_TYPE_ARRAY ||
+	    array->length != 0U)
 		return EINVAL;
 
 	/* The array must have a stride and an offset to measure it by. */
 	if (array->stride == 0U || block->member_has_offset[member] == 0U) {
-		error = i915_spirv_refuse(parser, opcode, offset, "OpArrayLength of an array without a stride or an offset");
+		error = drv_gpu_spirv_refuse(
+		    parser,
+		    opcode,
+		    offset,
+		    "OpArrayLength of an array without a stride or an offset");
 		return error;
 	}
 
 	/* The buffer's range; a failed emit has latched the error. */
-	range = i915_spirv_new_value(parser);
-	inst = i915_spirv_emit(parser, I915_IR_STORAGE_SIZE, range, 0U, 0U);
+	range = drv_gpu_spirv_new_value(parser);
+	inst =
+	    drv_gpu_spirv_emit(parser, DRV_GPU_IR_STORAGE_SIZE, range, 0U, 0U);
 	if (inst != NULL)
 		inst->location = variable->uniform;
 
 	/* The bytes of the buffer from the array's start on. */
-	constant = i915_spirv_integer_constant(parser, block->member_offset[member]);
-	beyond = i915_spirv_emit_value(parser, I915_IR_ISUB, range, constant);
+	constant = drv_gpu_spirv_integer_constant(parser,
+						  block->member_offset[member]);
+	beyond =
+	    drv_gpu_spirv_emit_value(parser, DRV_GPU_IR_ISUB, range, constant);
 
 	/*
 	 * The smallest shift whose power of two reaches the stride.  The search
-	 * stops at 31: a stride past 2^31 is no power of two that a 32-bit shift
-	 * makes, and a shift of 32 would wrap and never end the search.
+	 * stops at 31: a stride past 2^31 is no power of two that a 32-bit
+	 * shift makes, and a shift of 32 would wrap and never end the search.
 	 */
 	stride = array->stride;
 	shift = 0U;
 	while (shift < 31U && ((uint32_t)1U << shift) < stride)
 		shift++;
 
-	/* Whole elements of the array: a shift for a power-of-two stride, a division otherwise. */
+	/*
+	 * Whole elements of the array: a shift for a power-of-two stride, a
+	 * division otherwise.
+	 */
 	if (((uint32_t)1U << shift) == stride) {
-		constant = i915_spirv_integer_constant(parser, shift);
-		length = i915_spirv_emit_value(parser, I915_IR_SHR, beyond, constant);
+		constant = drv_gpu_spirv_integer_constant(parser, shift);
+		length = drv_gpu_spirv_emit_value(parser,
+						  DRV_GPU_IR_SHR,
+						  beyond,
+						  constant);
 	} else {
-		constant = i915_spirv_integer_constant(parser, stride);
-		length = i915_spirv_emit_value(parser, I915_IR_UDIV, beyond, constant);
+		constant = drv_gpu_spirv_integer_constant(parser, stride);
+		length = drv_gpu_spirv_emit_value(parser,
+						  DRV_GPU_IR_UDIV,
+						  beyond,
+						  constant);
 	}
 
 	/* Names the result. */
-	record = i915_spirv_result(parser, word[2], word[1], 1U, 0);
+	record = drv_gpu_spirv_result(parser, word[2], word[1], 1U, 0);
 	if (record == NULL)
 		return EINVAL;
 	record->comp[0] = length;
@@ -1398,11 +1838,14 @@ i915_spirv_lower_array_length(
  * none).
  */
 static const char *
-i915_spirv_compute_refusal(
-	uint32_t opcode)
+drv_gpu_spirv_compute_refusal(uint32_t opcode)
 {
-	/* An image of any kind: the dispatch gives a compute shader no binding table. */
-	if (opcode >= OP_IMAGE_SAMPLE_IMPLICIT_LOD && opcode <= OP_IMAGE_QUERY_LEVELS)
+	/*
+	 * An image of any kind: the dispatch gives a compute shader no binding
+	 * table.
+	 */
+	if (opcode >= OP_IMAGE_SAMPLE_IMPLICIT_LOD &&
+	    opcode <= OP_IMAGE_QUERY_LEVELS)
 		return "image or sampler access in a compute shader";
 
 	/* Succeeded: nothing refuses the instruction here. */

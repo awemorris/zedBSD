@@ -457,7 +457,7 @@ test_ids(void)
 	curbe = (const uint32_t *)(const void *)(slot + I915_GFX_DYNAMIC_HEAP + I915_GFX_DYN_CURBE);
 	systems = 0U;
 	for (index = 0U; index < binary->block_count; index++) {
-		if (binary->blocks[index].set != I915_IR_SYSTEM_SET)
+		if (binary->blocks[index].set != DRV_GPU_IR_SYSTEM_SET)
 			continue;
 		words = curbe + binary->blocks[index].push_offset / 4U;
 		assert(words[0] == (uint32_t)(TEST_SLOT_VA + I915_GFX_DYNAMIC_HEAP + I915_GFX_DYN_GROUP_COUNTS));
@@ -549,7 +549,7 @@ test_ids_indirect(void)
 	curbe = (const uint32_t *)(const void *)(slot + I915_GFX_DYNAMIC_HEAP + I915_GFX_DYN_CURBE);
 	systems = 0U;
 	for (index = 0U; index < binary->block_count; index++) {
-		if (binary->blocks[index].set != I915_IR_SYSTEM_SET)
+		if (binary->blocks[index].set != DRV_GPU_IR_SYSTEM_SET)
 			continue;
 		words = curbe + binary->blocks[index].push_offset / 4U;
 		assert(words[0] == (uint32_t)TEST_INDIRECT_VA);

@@ -18,10 +18,11 @@ for part in codec object dispatch transport instance vulkan fence objects reply 
     state batch math video video-mfx video-h264-tables; do
 	executor="$executor $driver/render/$part.c"
 done
-for part in spirv compile eu; do
+executor="$executor $repo/src/drivers/gpu/compiler/spirv.c"
+for part in compile eu; do
 	executor="$executor $driver/compiler/$part.c"
 done
-base="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement -DKERN_USER_ABI_LP64 -DVK_REPO=\"$repo\" -I$repo/include -I$repo -idirafter $repo/include/libc"
+base="-std=gnu11 -Wall -Wextra -Werror -Wdeclaration-after-statement -DKERN_USER_ABI_LP64 -DVK_REPO=\"$repo\" -I$repo/include -I$repo/src -I$repo -idirafter $repo/include/libc"
 "$compiler" $base -O2 "$repo/plan/ws075/tests/host-layered.c" $executor -o "$work/ordinary" -lm
 "$work/ordinary"
 "$compiler" $base -O1 -g -fsanitize=address,undefined -fno-omit-frame-pointer "$repo/plan/ws075/tests/host-layered.c" $executor -o "$work/sanitized" -lm

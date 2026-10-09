@@ -17,8 +17,8 @@
 #define SHADER_MAX_VALUES 16384U
 
 static int input_interface(struct bcm2711_shader_compiler *compiler);
-static int analyze_instruction(struct bcm2711_shader_compiler *compiler, const struct i915_shader_ir_inst *instruction, uint32_t *skip_depth);
-static int instruction_shape(enum i915_shader_ir_op operation, uint32_t *sources, uint32_t *destinations);
+static int analyze_instruction(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t *skip_depth);
+static int instruction_shape(enum drv_gpu_shader_ir_op operation, uint32_t *sources, uint32_t *destinations);
 static int note_read(struct bcm2711_shader_compiler *compiler, uint32_t number);
 static int output_interface(struct bcm2711_shader_compiler *compiler);
 
@@ -29,7 +29,7 @@ int
 bcm2711_shader_analyze(
 	struct bcm2711_shader_compiler *compiler)
 {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	uint32_t index;
 	uint32_t skip_depth;
 	int error;
@@ -41,7 +41,7 @@ bcm2711_shader_analyze(
 	    ir->value_count == 0 ||
 	    ir->value_count > SHADER_MAX_VALUES)
 		return E2BIG;
-	if (ir->stage != I915_STAGE_VERTEX && ir->stage != I915_STAGE_FRAGMENT)
+	if (ir->stage != DRV_GPU_STAGE_VERTEX && ir->stage != DRV_GPU_STAGE_FRAGMENT)
 		return ENOTSUP;
 
 	/* Every value starts absent; value zero remains an ordinary valid scalar. */
@@ -98,7 +98,7 @@ input_interface(
 	struct bcm2711_shader_compiler *compiler)
 {
 	struct bcm2711_shader_binary *binary;
-	const struct i915_shader_ir_io *input;
+	const struct drv_gpu_shader_ir_io *input;
 	struct bcm2711_shader_component *component;
 	uint32_t location;
 	uint32_t index;
@@ -195,11 +195,11 @@ input_interface(
 static int
 analyze_instruction(
 	struct bcm2711_shader_compiler *compiler,
-	const struct i915_shader_ir_inst *instruction,
+	const struct drv_gpu_shader_ir_inst *instruction,
 	uint32_t *skip_depth)
 {
 	struct bcm2711_shader_value *scalar;
-	const struct i915_shader_ir_uniform *uniform;
+	const struct drv_gpu_shader_ir_uniform *uniform;
 	uint32_t sources;
 	uint32_t destinations;
 	uint32_t index;
@@ -223,7 +223,7 @@ analyze_instruction(
 
 	/* The frontend texture guard names an earlier Boolean even when unconditional sampling is safe. */
 	if (instruction->guard != 0) {
-		if (instruction->op != I915_IR_SAMPLE)
+		if (instruction->op != DRV_GPU_IR_SAMPLE)
 			return EINVAL;
 		error = note_read(compiler, instruction->guard - 1);
 		if (error != 0)
@@ -245,17 +245,17 @@ analyze_instruction(
 	}
 
 	/* Stage-visible output stores are pinned only after all later overwrites have been inspected. */
-	if (instruction->op == I915_IR_STORE_OUTPUT) {
+	if (instruction->op == DRV_GPU_IR_STORE_OUTPUT) {
 		if (instruction->component >= 4)
 			return EINVAL;
-		if (instruction->location == I915_IR_LOCATION_POSITION) {
-			if (compiler->ir->stage != I915_STAGE_VERTEX)
+		if (instruction->location == DRV_GPU_IR_LOCATION_POSITION) {
+			if (compiler->ir->stage != DRV_GPU_STAGE_VERTEX)
 				return ENOTSUP;
 			output = BCM2711_SHADER_POSITION + instruction->component;
 		} else {
 			if (instruction->location >= 16)
 				return ENOTSUP;
-			if (compiler->ir->stage == I915_STAGE_FRAGMENT && instruction->location != 0)
+			if (compiler->ir->stage == DRV_GPU_STAGE_FRAGMENT && instruction->location != 0)
 				return ENOTSUP;
 			output = instruction->location * 4 + instruction->component;
 		}
@@ -265,7 +265,7 @@ analyze_instruction(
 	}
 
 	/* Push loads consume exactly one aligned, declared word. */
-	if (instruction->op == I915_IR_LOAD_PUSH) {
+	if (instruction->op == DRV_GPU_IR_LOAD_PUSH) {
 		if ((instruction->immediate & 3) != 0 ||
 		    compiler->ir->push_bytes < 4 ||
 		    instruction->immediate > compiler->ir->push_bytes - 4)
@@ -273,11 +273,11 @@ analyze_instruction(
 	}
 
 	/* Uniform block metadata remains a checked descriptor identity, never a userspace native address. */
-	if (instruction->op == I915_IR_LOAD_UBO) {
+	if (instruction->op == DRV_GPU_IR_LOAD_UBO) {
 		if (instruction->location >= compiler->ir->uniform_count || (instruction->immediate & 3) != 0)
 			return EINVAL;
 		uniform = &compiler->ir->uniforms[instruction->location];
-		if (uniform->kind != I915_IR_UNIFORM_BLOCK ||
+		if (uniform->kind != DRV_GPU_IR_UNIFORM_BLOCK ||
 		    uniform->size < 4 ||
 		    instruction->immediate < uniform->offset ||
 		    instruction->immediate - uniform->offset > uniform->size - 4)
@@ -285,13 +285,13 @@ analyze_instruction(
 	}
 
 	/* Only normalized two-dimensional, zero-offset sampling has a complete native transaction here. */
-	if (instruction->op == I915_IR_SAMPLE) {
-		if (compiler->ir->stage != I915_STAGE_FRAGMENT || instruction->component != 0)
+	if (instruction->op == DRV_GPU_IR_SAMPLE) {
+		if (compiler->ir->stage != DRV_GPU_STAGE_FRAGMENT || instruction->component != 0)
 			return ENOTSUP;
 		number = 0;
 		for (index = 0; index < compiler->ir->uniform_count; index++) {
 			uniform = &compiler->ir->uniforms[index];
-			if (uniform->kind == I915_IR_UNIFORM_SAMPLED_IMAGE &&
+			if (uniform->kind == DRV_GPU_IR_UNIFORM_SAMPLED_IMAGE &&
 			    uniform->set == instruction->location && uniform->binding == instruction->immediate)
 				number++;
 		}
@@ -303,9 +303,9 @@ analyze_instruction(
 	}
 
 	/* Skip markers omit a proven optimization only; matching pure operations still execute exactly. */
-	if (instruction->op == I915_IR_SKIP_BEGIN) {
+	if (instruction->op == DRV_GPU_IR_SKIP_BEGIN) {
 		(*skip_depth)++;
-	} else if (instruction->op == I915_IR_SKIP_END) {
+	} else if (instruction->op == DRV_GPU_IR_SKIP_END) {
 		if (*skip_depth == 0)
 			return EINVAL;
 		(*skip_depth)--;
@@ -318,7 +318,7 @@ analyze_instruction(
 /* Classifies only the pure scalar operations for which the native emitter supplies complete semantics. */
 static int
 instruction_shape(
-	enum i915_shader_ir_op operation,
+	enum drv_gpu_shader_ir_op operation,
 	uint32_t *sources,
 	uint32_t *destinations)
 {
@@ -328,69 +328,69 @@ instruction_shape(
 
 	/* A shape is an interface contract, rather than an inference from unused zero-filled fields. */
 	switch (operation) {
-	case I915_IR_NOP:
-	case I915_IR_SKIP_END:
+	case DRV_GPU_IR_NOP:
+	case DRV_GPU_IR_SKIP_END:
 		*destinations = 0;
 		break;
-	case I915_IR_STORE_OUTPUT:
-	case I915_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_STORE_OUTPUT:
+	case DRV_GPU_IR_SKIP_BEGIN:
 		*sources = 1;
 		*destinations = 0;
 		break;
-	case I915_IR_CONST:
-	case I915_IR_BOOL:
-	case I915_IR_ICONST:
-	case I915_IR_LOAD_INPUT:
-	case I915_IR_LOAD_PUSH:
-	case I915_IR_LOAD_UBO:
+	case DRV_GPU_IR_CONST:
+	case DRV_GPU_IR_BOOL:
+	case DRV_GPU_IR_ICONST:
+	case DRV_GPU_IR_LOAD_INPUT:
+	case DRV_GPU_IR_LOAD_PUSH:
+	case DRV_GPU_IR_LOAD_UBO:
 		break;
-	case I915_IR_SAMPLE:
+	case DRV_GPU_IR_SAMPLE:
 		*sources = 2;
 		*destinations = 4;
 		break;
-	case I915_IR_SELECT:
+	case DRV_GPU_IR_SELECT:
 		*sources = 3;
 		break;
-	case I915_IR_FADD:
-	case I915_IR_FSUB:
-	case I915_IR_FMUL:
-	case I915_IR_FMIN:
-	case I915_IR_FMAX:
-	case I915_IR_FLT:
-	case I915_IR_FGE:
-	case I915_IR_FEQ:
-	case I915_IR_FNEU:
-	case I915_IR_AND:
-	case I915_IR_OR:
-	case I915_IR_IADD:
-	case I915_IR_ISUB:
-	case I915_IR_IAND:
-	case I915_IR_IOR:
-	case I915_IR_IXOR:
-	case I915_IR_SHL:
-	case I915_IR_SHR:
-	case I915_IR_ASR:
+	case DRV_GPU_IR_FADD:
+	case DRV_GPU_IR_FSUB:
+	case DRV_GPU_IR_FMUL:
+	case DRV_GPU_IR_FMIN:
+	case DRV_GPU_IR_FMAX:
+	case DRV_GPU_IR_FLT:
+	case DRV_GPU_IR_FGE:
+	case DRV_GPU_IR_FEQ:
+	case DRV_GPU_IR_FNEU:
+	case DRV_GPU_IR_AND:
+	case DRV_GPU_IR_OR:
+	case DRV_GPU_IR_IADD:
+	case DRV_GPU_IR_ISUB:
+	case DRV_GPU_IR_IAND:
+	case DRV_GPU_IR_IOR:
+	case DRV_GPU_IR_IXOR:
+	case DRV_GPU_IR_SHL:
+	case DRV_GPU_IR_SHR:
+	case DRV_GPU_IR_ASR:
 		*sources = 2;
 		break;
-	case I915_IR_FNEG:
-	case I915_IR_RSQ:
-	case I915_IR_RCP:
-	case I915_IR_SQRT:
-	case I915_IR_EXP2:
-	case I915_IR_LOG2:
-	case I915_IR_FABS:
-	case I915_IR_FLOOR:
-	case I915_IR_FRACT:
-	case I915_IR_NOT:
-	case I915_IR_FTRUNC:
-	case I915_IR_INEG:
-	case I915_IR_INOT:
-	case I915_IR_I2F:
-	case I915_IR_U2F:
-	case I915_IR_F2I:
-	case I915_IR_F2U:
-	case I915_IR_MOVE:
-	case I915_IR_FROUND_EVEN:
+	case DRV_GPU_IR_FNEG:
+	case DRV_GPU_IR_RSQ:
+	case DRV_GPU_IR_RCP:
+	case DRV_GPU_IR_SQRT:
+	case DRV_GPU_IR_EXP2:
+	case DRV_GPU_IR_LOG2:
+	case DRV_GPU_IR_FABS:
+	case DRV_GPU_IR_FLOOR:
+	case DRV_GPU_IR_FRACT:
+	case DRV_GPU_IR_NOT:
+	case DRV_GPU_IR_FTRUNC:
+	case DRV_GPU_IR_INEG:
+	case DRV_GPU_IR_INOT:
+	case DRV_GPU_IR_I2F:
+	case DRV_GPU_IR_U2F:
+	case DRV_GPU_IR_F2I:
+	case DRV_GPU_IR_F2U:
+	case DRV_GPU_IR_MOVE:
+	case DRV_GPU_IR_FROUND_EVEN:
 		*sources = 1;
 		break;
 	default:
@@ -437,7 +437,7 @@ output_interface(
 
 	/* Four native position words or four fragment color words form the mandatory stage output. */
 	output = 0;
-	if (compiler->ir->stage == I915_STAGE_VERTEX)
+	if (compiler->ir->stage == DRV_GPU_STAGE_VERTEX)
 		output = BCM2711_SHADER_POSITION;
 
 	/* Holds each complete position or RGBA value until all source instructions have executed. */

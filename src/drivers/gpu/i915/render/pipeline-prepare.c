@@ -35,13 +35,13 @@
 #include <stddef.h>
 #include <stdint.h>
 
-static int i915_pipeline_compile_stage(const struct i915_gfx_shader *shader, enum i915_shader_stage stage, const struct i915_shader_binary *producer, struct i915_shader_binary **result);
-static int i915_pipeline_geometry_inputs(const struct i915_shader_ir *ir, const struct i915_shader_binary *producer);
+static int i915_pipeline_compile_stage(const struct i915_gfx_shader *shader, enum drv_gpu_shader_stage stage, const struct i915_shader_binary *producer, struct i915_shader_binary **result);
+static int i915_pipeline_geometry_inputs(const struct drv_gpu_shader_ir *ir, const struct i915_shader_binary *producer);
 static int i915_pipeline_kernels_fit(const struct i915_gfx_pipeline *pipeline);
 static int i915_pipeline_geometry_fits(const struct i915_shader_binary *geometry);
 static const struct i915_shader_binary *i915_pipeline_last_stage(const struct i915_gfx_pipeline *pipeline);
 static int i915_pipeline_input_slot(const struct i915_shader_binary *writer, uint32_t location, uint32_t *slot);
-static const char *i915_pipeline_stage_name(enum i915_shader_stage stage);
+static const char *i915_pipeline_stage_name(enum drv_gpu_shader_stage stage);
 static int i915_pipeline_compute_fits(const struct i915_shader_binary *binary);
 static int i915_pipeline_thread_ids(struct i915_gfx_pipeline *pipeline);
 
@@ -71,7 +71,7 @@ drv_i915_gfx_pipeline_prepare(
 		return EINVAL;
 
 	/* Compiles the vertex stage. */
-	error = i915_pipeline_compile_stage(pipeline->vertex, I915_STAGE_VERTEX, NULL, &pipeline->vs_binary);
+	error = i915_pipeline_compile_stage(pipeline->vertex, DRV_GPU_STAGE_VERTEX, NULL, &pipeline->vs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
@@ -79,7 +79,7 @@ drv_i915_gfx_pipeline_prepare(
 
 	/* Compiles the geometry stage, when there is one, against the vertex kernel's VUE. */
 	if (pipeline->geometry != NULL) {
-		error = i915_pipeline_compile_stage(pipeline->geometry, I915_STAGE_GEOMETRY, pipeline->vs_binary, &pipeline->gs_binary);
+		error = i915_pipeline_compile_stage(pipeline->geometry, DRV_GPU_STAGE_GEOMETRY, pipeline->vs_binary, &pipeline->gs_binary);
 		if (error != 0) {
 			drv_i915_gfx_pipeline_release(pipeline);
 			return error;
@@ -87,7 +87,7 @@ drv_i915_gfx_pipeline_prepare(
 	}
 
 	/* Compiles the fragment stage. */
-	error = i915_pipeline_compile_stage(pipeline->fragment, I915_STAGE_FRAGMENT, NULL, &pipeline->fs_binary);
+	error = i915_pipeline_compile_stage(pipeline->fragment, DRV_GPU_STAGE_FRAGMENT, NULL, &pipeline->fs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
@@ -184,7 +184,7 @@ drv_i915_gfx_compute_prepare(
 		return EINVAL;
 
 	/* Compiles the compute stage. */
-	error = i915_pipeline_compile_stage(pipeline->compute, I915_STAGE_COMPUTE, NULL, &pipeline->cs_binary);
+	error = i915_pipeline_compile_stage(pipeline->compute, DRV_GPU_STAGE_COMPUTE, NULL, &pipeline->cs_binary);
 	if (error != 0) {
 		drv_i915_gfx_pipeline_release(pipeline);
 		return error;
@@ -336,7 +336,7 @@ drv_i915_gfx_pipeline_kernels(
 	kernels->ps_flat_mask = fragment->input_flat_mask;
 	for (index = 0U; index < fragment->input_count && index < I915_GFX_MAX_VARYINGS; index++) {
 		/* gl_PointCoord is the point sprite's coordinate, which the setup makes in place of a slot. */
-		if (fragment->input_locations[index] == I915_SHADER_LOCATION_POINT_COORD) {
+		if (fragment->input_locations[index] == DRV_GPU_SHADER_LOCATION_POINT_COORD) {
 			kernels->ps_point_sprite_mask |= 1U << index;
 			kernels->ps_input_slots[index] = 0U;
 			continue;
@@ -350,7 +350,7 @@ drv_i915_gfx_pipeline_kernels(
 		kernels->ps_input_slots[index] = slot;
 
 		/* gl_PrimitiveID that no stage writes is the setup's (anv's slot -1). */
-		if (found != 0 && fragment->input_locations[index] == I915_SHADER_LOCATION_PRIMITIVE_ID)
+		if (found != 0 && fragment->input_locations[index] == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID)
 			kernels->ps_primitive_id_mask |= 1U << index;
 	}
 
@@ -391,18 +391,18 @@ drv_i915_gfx_pipeline_kernels(
 static int
 i915_pipeline_compile_stage(
 	const struct i915_gfx_shader *shader,
-	enum i915_shader_stage stage,
+	enum drv_gpu_shader_stage stage,
 	const struct i915_shader_binary *producer,
 	struct i915_shader_binary **result)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
 	const char *reason;
 	int error;
 
 	/* Parses the SPIR-V into the compiler's IR. */
 	kern_memset(&diagnostic, 0, sizeof(diagnostic));
-	error = drv_i915_shader_parse(shader->words, shader->word_count, stage, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(shader->words, shader->word_count, stage, &ir, &diagnostic);
 	if (error != 0) {
 		reason = "?";
 		if (diagnostic.reason != NULL)
@@ -425,15 +425,15 @@ i915_pipeline_compile_stage(
 		kern_logf("i915: vk: %s stage given a %s shader\n",
 			  i915_pipeline_stage_name(stage),
 			  i915_pipeline_stage_name(ir->stage));
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		return EINVAL;
 	}
 
 	/* A geometry shader reads only locations the vertex kernel writes. */
-	if (stage == I915_STAGE_GEOMETRY) {
+	if (stage == DRV_GPU_STAGE_GEOMETRY) {
 		error = i915_pipeline_geometry_inputs(ir, producer);
 		if (error != 0) {
-			drv_i915_shader_ir_free(ir);
+			drv_gpu_shader_ir_free(ir);
 			return error;
 		}
 	}
@@ -449,7 +449,7 @@ i915_pipeline_compile_stage(
 		kern_logf("i915: vk: %s shader refused by the compiler: error %d\n", i915_pipeline_stage_name(stage), error);
 
 		/* A geometry shader's input primitive and output vertices, which size its URB entry. */
-		if (stage == I915_STAGE_GEOMETRY) {
+		if (stage == DRV_GPU_STAGE_GEOMETRY) {
 			kern_logf("i915: vk: the refused geometry shader: %u vertices in, at most %u vertices out (topology %u)\n",
 				  ir->vertices_in,
 				  ir->max_vertices,
@@ -457,12 +457,12 @@ i915_pipeline_compile_stage(
 		}
 
 		/* The IR goes with the refusal. */
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		return error;
 	}
 
 	/* The IR is not needed once the binary is made. */
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 
 	/* Succeeded: the stage has its binary. */
 	return 0;
@@ -518,10 +518,10 @@ i915_pipeline_kernels_fit(
 	 */
 	last = i915_pipeline_last_stage(pipeline);
 	for (index = 0U; index < pipeline->fs_binary->input_count; index++) {
-		if (pipeline->fs_binary->input_locations[index] == I915_SHADER_LOCATION_POINT_COORD)
+		if (pipeline->fs_binary->input_locations[index] == DRV_GPU_SHADER_LOCATION_POINT_COORD)
 			continue;
 		found = i915_pipeline_input_slot(last, pipeline->fs_binary->input_locations[index], &slot);
-		if (found != 0 && pipeline->fs_binary->input_locations[index] == I915_SHADER_LOCATION_PRIMITIVE_ID)
+		if (found != 0 && pipeline->fs_binary->input_locations[index] == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID)
 			continue;
 		if (found != 0) {
 			kern_logf("i915: vk: the fragment shader reads location %u, which the %s shader does not write\n",
@@ -567,10 +567,10 @@ i915_pipeline_kernels_fit(
  */
 static int
 i915_pipeline_geometry_inputs(
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	const struct i915_shader_binary *producer)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t index;
 	uint32_t slot;
 	int found;
@@ -582,11 +582,11 @@ i915_pipeline_geometry_inputs(
 	/* Looks at every read of an input vertex's value. */
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
 
 		/* The position and the point size are in the header and the slot after it. */
-		if (inst->location == I915_IR_LOCATION_POSITION || inst->location == I915_IR_LOCATION_POINT_SIZE)
+		if (inst->location == DRV_GPU_IR_LOCATION_POSITION || inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE)
 			continue;
 
 		/* A located input is one of the vertex kernel's varyings. */
@@ -675,14 +675,14 @@ i915_pipeline_input_slot(
 /* Names a stage in the log lines. */
 static const char *
 i915_pipeline_stage_name(
-	enum i915_shader_stage stage)
+	enum drv_gpu_shader_stage stage)
 {
 	/* The vertex, the compute and the geometry stage by name. */
-	if (stage == I915_STAGE_VERTEX)
+	if (stage == DRV_GPU_STAGE_VERTEX)
 		return "vertex";
-	if (stage == I915_STAGE_COMPUTE)
+	if (stage == DRV_GPU_STAGE_COMPUTE)
 		return "compute";
-	if (stage == I915_STAGE_GEOMETRY)
+	if (stage == DRV_GPU_STAGE_GEOMETRY)
 		return "geometry";
 
 	/* Succeeded: every other stage is the fragment stage. */
@@ -715,7 +715,7 @@ i915_pipeline_compute_fits(
 
 	/* The compiler refused larger groups; one past the device's limit is inconsistent. */
 	invocations = binary->local_size[0] * binary->local_size[1] * binary->local_size[2];
-	if (invocations == 0U || invocations > I915_SHADER_MAX_GROUP_INVOCATIONS)
+	if (invocations == 0U || invocations > DRV_GPU_SPIRV_MAX_GROUP_INVOCATIONS)
 		return 0;
 
 	/* Succeeded: the dispatch can place the kernel. */

@@ -50,7 +50,7 @@ kern_free(
 	free(pointer);
 }
 
-#include "../../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../../src/drivers/gpu/compiler/spirv.c"
 
 /* The most buffers one test binds, and the most loops one shader nests. */
 #define LOWER_MAX_BUFFERS	8U
@@ -67,7 +67,7 @@ kern_free(
 /* One invocation of a group: its values, its built-ins, where it is and its loops (ws101-p006). */
 struct lower_thread {
 	uint32_t *values;
-	uint32_t system[I915_IR_SYSTEM_COUNT];
+	uint32_t system[DRV_GPU_IR_SYSTEM_COUNT];
 	uint32_t index;
 	uint32_t loops[LOWER_MAX_LOOPS];
 	uint32_t loop_count;
@@ -78,7 +78,7 @@ struct lower_thread {
 /*
  * One storage buffer of a test, bound at (set, binding): its words and its
  * size in bytes.  The system buffer (the group counts) is set
- * I915_IR_SYSTEM_SET, binding 0.
+ * DRV_GPU_IR_SYSTEM_SET, binding 0.
  */
 struct lower_buffer {
 	uint32_t set;
@@ -89,7 +89,7 @@ struct lower_buffer {
 
 /* What one dispatch of a module runs with. */
 struct lower_dispatch {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	struct lower_buffer buffers[LOWER_MAX_BUFFERS];
 	uint32_t buffer_count;
 	uint8_t push[128];
@@ -105,7 +105,7 @@ struct lower_dispatch {
 	char failure[160];
 };
 
-static struct i915_shader_ir *lower_parse(const char *dir, const char *name);
+static struct drv_gpu_shader_ir *lower_parse(const char *dir, const char *name);
 static struct lower_buffer *lower_buffer_add(struct lower_dispatch *dispatch, uint32_t set, uint32_t binding, uint32_t words, uint32_t fill);
 static int lower_bind(struct lower_dispatch *dispatch);
 static int lower_run(struct lower_dispatch *dispatch);
@@ -113,7 +113,7 @@ static int lower_group(struct lower_dispatch *dispatch, struct lower_thread *thr
 static int lower_invocation(struct lower_dispatch *dispatch, struct lower_thread *thread);
 static uint32_t *lower_word(struct lower_dispatch *dispatch, uint32_t uniform, uint32_t byte);
 static uint32_t *lower_shared_word(struct lower_dispatch *dispatch, uint32_t byte);
-static int lower_atomic(struct lower_dispatch *dispatch, const struct i915_shader_ir_inst *inst, uint32_t *values);
+static int lower_atomic(struct lower_dispatch *dispatch, const struct drv_gpu_shader_ir_inst *inst, uint32_t *values);
 static int lower_test_add(const char *dir);
 static int lower_test_ids(const char *dir);
 static int lower_test_atomic(const char *dir);
@@ -164,13 +164,13 @@ main(
 }
 
 /* Parses DIR/NAME.spv as a compute shader; NULL on any failure. */
-static struct i915_shader_ir *
+static struct drv_gpu_shader_ir *
 lower_parse(
 	const char *dir,
 	const char *name)
 {
-	struct i915_compile_diagnostic diagnostic;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
 	char path[512];
 	uint32_t *code;
 	FILE *file;
@@ -196,7 +196,7 @@ lower_parse(
 	fclose(file);
 
 	/* Parses it. */
-	error = drv_i915_shader_parse(code, (size_t)size / 4U, I915_STAGE_COMPUTE, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(code, (size_t)size / 4U, DRV_GPU_STAGE_COMPUTE, &ir, &diagnostic);
 	free(code);
 	if (error != 0) {
 		printf("%s: FAIL refused by the parser: %d (%s)\n", name, error, diagnostic.reason != NULL ? diagnostic.reason : "?");
@@ -238,7 +238,7 @@ static int
 lower_bind(
 	struct lower_dispatch *dispatch)
 {
-	const struct i915_shader_ir_uniform *uniform;
+	const struct drv_gpu_shader_ir_uniform *uniform;
 	uint32_t index;
 	uint32_t buffer;
 
@@ -246,7 +246,7 @@ lower_bind(
 	for (index = 0U; index < dispatch->ir->uniform_count; index++) {
 		uniform = &dispatch->ir->uniforms[index];
 		dispatch->bound[index] = NULL;
-		if (uniform->kind != I915_IR_UNIFORM_STORAGE)
+		if (uniform->kind != DRV_GPU_IR_UNIFORM_STORAGE)
 			continue;
 		for (buffer = 0U; buffer < dispatch->buffer_count; buffer++) {
 			if (dispatch->buffers[buffer].set == uniform->set && dispatch->buffers[buffer].binding == uniform->binding)
@@ -277,7 +277,7 @@ lower_run(
 	int error;
 
 	/* The group counts the system buffer holds. */
-	counts = lower_buffer_add(dispatch, I915_IR_SYSTEM_SET, 0U, 3U, 0U);
+	counts = lower_buffer_add(dispatch, DRV_GPU_IR_SYSTEM_SET, 0U, 3U, 0U);
 	counts->words[0] = dispatch->groups[0];
 	counts->words[1] = dispatch->groups[1];
 	counts->words[2] = dispatch->groups[2];
@@ -286,7 +286,7 @@ lower_run(
 		return error;
 
 	/* One state per invocation of a group, and the group's shared memory. */
-	size = ((struct i915_shader_ir *)dispatch->ir)->local_size;
+	size = ((struct drv_gpu_shader_ir *)dispatch->ir)->local_size;
 	invocations = size[0] * size[1] * size[2];
 	threads = calloc(invocations, sizeof(*threads));
 	for (linear = 0U; linear < invocations; linear++)
@@ -301,13 +301,13 @@ lower_run(
 				for (word = 0U; word < dispatch->ir->shared_bytes / 4U; word++)
 					dispatch->shared[word] = LOWER_SHARED_FILL;
 				for (linear = 0U; linear < invocations; linear++) {
-					threads[linear].system[I915_IR_SYSTEM_LOCAL_ID_X] = linear % size[0];
-					threads[linear].system[I915_IR_SYSTEM_LOCAL_ID_Y] = (linear / size[0]) % size[1];
-					threads[linear].system[I915_IR_SYSTEM_LOCAL_ID_Z] = linear / (size[0] * size[1]);
-					threads[linear].system[I915_IR_SYSTEM_LOCAL_INDEX] = linear;
-					threads[linear].system[I915_IR_SYSTEM_GROUP_ID_X] = gx;
-					threads[linear].system[I915_IR_SYSTEM_GROUP_ID_Y] = gy;
-					threads[linear].system[I915_IR_SYSTEM_GROUP_ID_Z] = gz;
+					threads[linear].system[DRV_GPU_IR_SYSTEM_LOCAL_ID_X] = linear % size[0];
+					threads[linear].system[DRV_GPU_IR_SYSTEM_LOCAL_ID_Y] = (linear / size[0]) % size[1];
+					threads[linear].system[DRV_GPU_IR_SYSTEM_LOCAL_ID_Z] = linear / (size[0] * size[1]);
+					threads[linear].system[DRV_GPU_IR_SYSTEM_LOCAL_INDEX] = linear;
+					threads[linear].system[DRV_GPU_IR_SYSTEM_GROUP_ID_X] = gx;
+					threads[linear].system[DRV_GPU_IR_SYSTEM_GROUP_ID_Y] = gy;
+					threads[linear].system[DRV_GPU_IR_SYSTEM_GROUP_ID_Z] = gz;
 				}
 				error = lower_group(dispatch, threads, invocations);
 			}
@@ -401,7 +401,7 @@ lower_shared_word(
 static int
 lower_atomic(
 	struct lower_dispatch *dispatch,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t *values)
 {
 	uint32_t operands;
@@ -411,13 +411,13 @@ lower_atomic(
 
 	/* A predicated atomic whose channel is outside the block does nothing. */
 	operands = 2U;
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG)
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG)
 		operands = 3U;
 	if (inst->component != 0U && values[inst->src[operands]] == 0U)
 		return 0;
 
 	/* The word must be inside the buffer or the shared memory. */
-	if (inst->location == I915_IR_LOCATION_SHARED) {
+	if (inst->location == DRV_GPU_IR_LOCATION_SHARED) {
 		word = lower_shared_word(dispatch, values[inst->src[0]]);
 	} else {
 		word = lower_word(dispatch, inst->location, values[inst->src[0]]);
@@ -431,41 +431,41 @@ lower_atomic(
 	old = *word;
 	value = values[inst->src[1]];
 	switch (inst->immediate) {
-	case I915_IR_ATOMIC_ADD:
+	case DRV_GPU_IR_ATOMIC_ADD:
 		*word = old + value;
 		break;
-	case I915_IR_ATOMIC_SUB:
+	case DRV_GPU_IR_ATOMIC_SUB:
 		*word = old - value;
 		break;
-	case I915_IR_ATOMIC_AND:
+	case DRV_GPU_IR_ATOMIC_AND:
 		*word = old & value;
 		break;
-	case I915_IR_ATOMIC_OR:
+	case DRV_GPU_IR_ATOMIC_OR:
 		*word = old | value;
 		break;
-	case I915_IR_ATOMIC_XOR:
+	case DRV_GPU_IR_ATOMIC_XOR:
 		*word = old ^ value;
 		break;
-	case I915_IR_ATOMIC_XCHG:
+	case DRV_GPU_IR_ATOMIC_XCHG:
 		*word = value;
 		break;
-	case I915_IR_ATOMIC_SMIN:
+	case DRV_GPU_IR_ATOMIC_SMIN:
 		if ((int32_t)value < (int32_t)old)
 			*word = value;
 		break;
-	case I915_IR_ATOMIC_SMAX:
+	case DRV_GPU_IR_ATOMIC_SMAX:
 		if ((int32_t)value > (int32_t)old)
 			*word = value;
 		break;
-	case I915_IR_ATOMIC_UMIN:
+	case DRV_GPU_IR_ATOMIC_UMIN:
 		if (value < old)
 			*word = value;
 		break;
-	case I915_IR_ATOMIC_UMAX:
+	case DRV_GPU_IR_ATOMIC_UMAX:
 		if (value > old)
 			*word = value;
 		break;
-	case I915_IR_ATOMIC_CMPXCHG:
+	case DRV_GPU_IR_ATOMIC_CMPXCHG:
 		if (old == values[inst->src[2]])
 			*word = value;
 		break;
@@ -489,8 +489,8 @@ lower_invocation(
 	struct lower_dispatch *dispatch,
 	struct lower_thread *thread)
 {
-	const struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	const uint32_t *system;
 	uint32_t *values;
 	uint32_t *loops;
@@ -516,22 +516,22 @@ lower_invocation(
 			return 1;
 		}
 		switch (inst->op) {
-		case I915_IR_NOP:
-		case I915_IR_SKIP_BEGIN:
-		case I915_IR_SKIP_END:
+		case DRV_GPU_IR_NOP:
+		case DRV_GPU_IR_SKIP_BEGIN:
+		case DRV_GPU_IR_SKIP_END:
 			break;
-		case I915_IR_CONST:
-		case I915_IR_ICONST:
-		case I915_IR_BOOL:
+		case DRV_GPU_IR_CONST:
+		case DRV_GPU_IR_ICONST:
+		case DRV_GPU_IR_BOOL:
 			values[inst->dst] = inst->immediate;
 			break;
-		case I915_IR_LOAD_PUSH:
+		case DRV_GPU_IR_LOAD_PUSH:
 			memcpy(&values[inst->dst], dispatch->push + inst->immediate, 4U);
 			break;
-		case I915_IR_LOAD_SYSTEM:
+		case DRV_GPU_IR_LOAD_SYSTEM:
 			values[inst->dst] = system[inst->component];
 			break;
-		case I915_IR_LOAD_STORAGE:
+		case DRV_GPU_IR_LOAD_STORAGE:
 			if (inst->component != 0U && b == 0U)
 				break;
 			word = lower_word(dispatch, inst->location, a);
@@ -541,7 +541,7 @@ lower_invocation(
 			}
 			values[inst->dst] = *word;
 			break;
-		case I915_IR_STORE_STORAGE:
+		case DRV_GPU_IR_STORE_STORAGE:
 			if (inst->component != 0U && values[inst->src[2]] == 0U)
 				break;
 			word = lower_word(dispatch, inst->location, a);
@@ -551,10 +551,10 @@ lower_invocation(
 			}
 			*word = b;
 			break;
-		case I915_IR_STORAGE_SIZE:
+		case DRV_GPU_IR_STORAGE_SIZE:
 			values[inst->dst] = dispatch->bound[inst->location]->bytes;
 			break;
-		case I915_IR_LOAD_SHARED:
+		case DRV_GPU_IR_LOAD_SHARED:
 			if (inst->component != 0U && b == 0U)
 				break;
 			word = lower_shared_word(dispatch, a);
@@ -564,7 +564,7 @@ lower_invocation(
 			}
 			values[inst->dst] = *word;
 			break;
-		case I915_IR_STORE_SHARED:
+		case DRV_GPU_IR_STORE_SHARED:
 			if (inst->component != 0U && values[inst->src[2]] == 0U)
 				break;
 			word = lower_shared_word(dispatch, a);
@@ -574,91 +574,91 @@ lower_invocation(
 			}
 			*word = b;
 			break;
-		case I915_IR_FENCE:
+		case DRV_GPU_IR_FENCE:
 			break;
-		case I915_IR_BARRIER:
+		case DRV_GPU_IR_BARRIER:
 			thread->index = index + 1U;
 			thread->loop_count = loop_count;
 			thread->steps = steps;
 			thread->state = LOWER_AT_BARRIER;
 			return 0;
-		case I915_IR_ATOMIC:
+		case DRV_GPU_IR_ATOMIC:
 			if (lower_atomic(dispatch, inst, values) != 0)
 				return 1;
 			break;
-		case I915_IR_IADD:
+		case DRV_GPU_IR_IADD:
 			values[inst->dst] = a + b;
 			break;
-		case I915_IR_ISUB:
+		case DRV_GPU_IR_ISUB:
 			values[inst->dst] = a - b;
 			break;
-		case I915_IR_IMUL:
+		case DRV_GPU_IR_IMUL:
 			values[inst->dst] = a * b;
 			break;
-		case I915_IR_INEG:
+		case DRV_GPU_IR_INEG:
 			values[inst->dst] = 0U - a;
 			break;
-		case I915_IR_UDIV:
+		case DRV_GPU_IR_UDIV:
 			values[inst->dst] = b != 0U ? a / b : 0xFFFFFFFFU;
 			break;
-		case I915_IR_UMOD:
+		case DRV_GPU_IR_UMOD:
 			values[inst->dst] = b != 0U ? a % b : 0U;
 			break;
-		case I915_IR_IDIV:
+		case DRV_GPU_IR_IDIV:
 			values[inst->dst] = (b != 0U && !(a == 0x80000000U && b == 0xFFFFFFFFU)) ? (uint32_t)((int32_t)a / (int32_t)b) : 0U;
 			break;
-		case I915_IR_IREM:
+		case DRV_GPU_IR_IREM:
 			values[inst->dst] = (b != 0U && !(a == 0x80000000U && b == 0xFFFFFFFFU)) ? (uint32_t)((int32_t)a % (int32_t)b) : 0U;
 			break;
-		case I915_IR_IAND:
-		case I915_IR_AND:
+		case DRV_GPU_IR_IAND:
+		case DRV_GPU_IR_AND:
 			values[inst->dst] = a & b;
 			break;
-		case I915_IR_IOR:
-		case I915_IR_OR:
+		case DRV_GPU_IR_IOR:
+		case DRV_GPU_IR_OR:
 			values[inst->dst] = a | b;
 			break;
-		case I915_IR_IXOR:
+		case DRV_GPU_IR_IXOR:
 			values[inst->dst] = a ^ b;
 			break;
-		case I915_IR_INOT:
-		case I915_IR_NOT:
+		case DRV_GPU_IR_INOT:
+		case DRV_GPU_IR_NOT:
 			values[inst->dst] = ~a;
 			break;
-		case I915_IR_SHL:
+		case DRV_GPU_IR_SHL:
 			values[inst->dst] = a << (b & 31U);
 			break;
-		case I915_IR_SHR:
+		case DRV_GPU_IR_SHR:
 			values[inst->dst] = a >> (b & 31U);
 			break;
-		case I915_IR_ASR:
+		case DRV_GPU_IR_ASR:
 			values[inst->dst] = (uint32_t)((int32_t)a >> (b & 31U));
 			break;
-		case I915_IR_ILT:
+		case DRV_GPU_IR_ILT:
 			values[inst->dst] = (int32_t)a < (int32_t)b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_IGE:
+		case DRV_GPU_IR_IGE:
 			values[inst->dst] = (int32_t)a >= (int32_t)b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_ULT:
+		case DRV_GPU_IR_ULT:
 			values[inst->dst] = a < b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_UGE:
+		case DRV_GPU_IR_UGE:
 			values[inst->dst] = a >= b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_IEQ:
+		case DRV_GPU_IR_IEQ:
 			values[inst->dst] = a == b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_INE:
+		case DRV_GPU_IR_INE:
 			values[inst->dst] = a != b ? 0xFFFFFFFFU : 0U;
 			break;
-		case I915_IR_SELECT:
+		case DRV_GPU_IR_SELECT:
 			values[inst->dst] = a != 0U ? b : values[inst->src[2]];
 			break;
-		case I915_IR_MOVE:
+		case DRV_GPU_IR_MOVE:
 			values[inst->dst] = a;
 			break;
-		case I915_IR_LOOP_BEGIN:
+		case DRV_GPU_IR_LOOP_BEGIN:
 			if (loop_count >= LOWER_MAX_LOOPS) {
 				snprintf(dispatch->failure, sizeof(dispatch->failure), "loops nested too deep");
 				return 1;
@@ -666,7 +666,7 @@ lower_invocation(
 			loops[loop_count] = index;
 			loop_count++;
 			break;
-		case I915_IR_LOOP_END:
+		case DRV_GPU_IR_LOOP_END:
 			if (loop_count == 0U) {
 				snprintf(dispatch->failure, sizeof(dispatch->failure), "LOOP_END without LOOP_BEGIN");
 				return 1;
