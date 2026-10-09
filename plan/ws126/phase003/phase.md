@@ -3,7 +3,7 @@
 # ws126-p003: T2（OpenSSL と expat）
 
 Parent: [WS126](../ws.md)
-Status: cleared 候補（2026-10-09 P1 q916: `_ssl`・`_hashlib` を stage の OpenSSL で build、CA bundle は OpenSSL の既定 /etc/ssl/cert.pem、loopback TLS の試験を host で PASS。guest は p005 の image で T1。Q1 の判定待ち）
+Status: cleared（2026-10-09 Q1 判定: _ssl・_hashlib の build と ELF、import 0 failed、host の tls-loopback の script の確かめ。guest の確かめは p005 の image で T1）
 Disposition: normal
 Queue / attempts: q916（2026-10-09 Q1 承認、ユーザー「ベータ2のすべての作業をP1でスケジューリングして行います」）の 3 (2)
 Goal: 既存の package の OpenSSL（`_ssl`・`_hashlib`）と expat（`pyexpat`・`_elementtree`）を Python に組み込む。

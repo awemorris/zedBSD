@@ -17,6 +17,10 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
 - 足りない宣言・定数・型を補う。宣言はあるが実装の無い関数は一覧にし、小さい物は実装し、大きい物は Phase を分ける（Q1 に提案）。
 - 数字の重複を作らない（kernel と共有の値は uapi を参照するか、2 箇所なら comment で対応を書く。2026-10-09 ユーザーの SOMAXCONN の決定: POSIX の header の定数は libc の header に置く）。
 
+## 含める既知の不足
+
+- wint_t（2026-10-09 ユーザー、クリック「WS001 p045 で直す」）: libc の `<wchar.h>` の wint_t は uint32_t、clang の zedBSD target の `__WINT_TYPE__` は int。大きさは同じだが int にすると libc++.so.1 の `basic_streambuf<wchar_t>::overflow`・`pbackfail` の mangled 名が Ej→Ei に変わるので、libcxx（toolchain、main の許可で unlock）の作り直しと一緒に直す。P1 の調べは ws126-p002 の phase.md。
+
 ## 受け入れ
 
 - 全 header の照合の表と、不足 0（または残りを理由と移管先つきで列挙）。

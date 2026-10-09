@@ -62,7 +62,7 @@ cross build: CPython は同じ版の build 用の Python（`--with-build-python`
 | --- | --- | --- | --- | --- |
 | [ws126-p001](phase001/phase.md) | 取得・検証・license 監査、zedbsd の configure の試行、module ごとの依存の実測、cross build の方針 | cleared 候補（2026-10-09 P1） | — | 2〜3h |
 | [ws126-p002](phase002/phase.md) | host 用 Python（同じ版）と、target の interpreter（`libpython`、`python3`）と T1 の cross build・stage | cleared（2026-10-09 Q1 判定。guest の試しは p005 へ）（P1 q916、guest の試しは p005 へ回す案） | p001 | 3〜4h |
-| [ws126-p003](phase003/phase.md) | T2: OpenSSL（`_ssl`・`_hashlib`）と expat | cleared 候補（2026-10-09 P1 q916、guest は p005） | p002 | 2h |
+| [ws126-p003](phase003/phase.md) | T2: OpenSSL（`_ssl`・`_hashlib`）と expat | cleared（2026-10-09 Q1、6ea9df81e） | p002 | 2h |
 | [ws126-p004](phase004/phase.md) | T3: 選んだ依存の package（`libs/libffi`・`libs/sqlite` ほか）と `_ctypes`・`_sqlite3` ほか | planning（D1 の判断待ち、libffi の所有の調整） | p002、D1 | 3〜4h |
 | [ws126-p005](phase005/phase.md) | menuconfig への登録、標準 library の tree の image への導入、guest の受け入れ P1〜P8 | planning | p003（p004 を行うならそれも）、ws125-p002 | 3h |
 | [ws126-p006](phase006/phase.md) | 全文規約と回帰、制限の整理（必須の最終確認） | planning | p005 | 2h |
