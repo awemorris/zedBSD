@@ -153,3 +153,68 @@ python3-host: $(ZEDBSD_PYTHON3_HOST_STAMP)
 	@:
 python3: $(ZEDBSD_PYTHON3_STAGED)
 	@:
+
+# ---------------------------------------------------------------- packaging
+
+# What the image carries (ws126-p005): the interpreter and libpython,
+# stripped of their debugging sections, and the standard library as one
+# directory (--subtree, ws125-p002).  The library goes in without the test
+# suite (test/, about 160 MB), the Tk and IDLE parts (tkinter, idlelib,
+# turtledemo: no Tk here), ensurepip (pip comes later, 2026-10-02 user), the
+# build's own configuration directory (config-3.14, the static libpython for
+# embedding), the test-only extension modules (_test*, xx*), and the
+# optimized bytecode (.opt-1, .opt-2: the ordinary .pyc is kept, so nothing
+# is compiled on first use).  The extension modules are stripped too.
+ZEDBSD_PYTHON3_IMAGE := $(ZEDBSD_EXT_python3_WORKDIR)/image
+ZEDBSD_PYTHON3_IMAGE_STAMP := $(ZEDBSD_PYTHON3_IMAGE)/.zedbsd-image
+ZEDBSD_PYTHON3_IMAGE_LIBDIR := $(ZEDBSD_PYTHON3_IMAGE)/lib/python3.14
+ZEDBSD_PYTHON3_IMAGE_PROGRAM := $(ZEDBSD_PYTHON3_IMAGE)/bin/python3.14
+ZEDBSD_PYTHON3_IMAGE_LIBRARY := $(ZEDBSD_PYTHON3_IMAGE)/lib/$(ZEDBSD_PYTHON3_SONAME)
+ZEDBSD_PYTHON3_IMAGE_EXCLUDE := \
+	--exclude=./test --exclude=./idlelib --exclude=./tkinter \
+	--exclude=./turtledemo --exclude=./ensurepip --exclude=./config-3.14 \
+	--exclude='./lib-dynload/_test*' --exclude='./lib-dynload/xx*' \
+	--exclude='*.opt-1.pyc' --exclude='*.opt-2.pyc'
+
+$(ZEDBSD_PYTHON3_IMAGE_STAMP): $(ZEDBSD_PYTHON3_STAGED) $(ZEDBSD_PYTHON3_MAKEFILE)
+	@rm -rf '$(ZEDBSD_PYTHON3_IMAGE)'
+	@mkdir -p '$(ZEDBSD_PYTHON3_IMAGE_LIBDIR)' '$(ZEDBSD_PYTHON3_IMAGE)/bin'
+	tar -C '$(ZEDBSD_PYTHON3_LIBDIR)' $(ZEDBSD_PYTHON3_IMAGE_EXCLUDE) -cf - . | \
+		tar -C '$(ZEDBSD_PYTHON3_IMAGE_LIBDIR)' -xpf -
+	cp -p '$(ZEDBSD_PYTHON3_PROGRAM)' '$(ZEDBSD_PYTHON3_IMAGE_PROGRAM)'
+	cp -p '$(ZEDBSD_PYTHON3_LIBRARY)' '$(ZEDBSD_PYTHON3_IMAGE_LIBRARY)'
+	. '$(ZEDBSD_EXTERNAL_CROSS_ENV)' && "$$STRIP" --strip-unneeded \
+		'$(ZEDBSD_PYTHON3_IMAGE_PROGRAM)' '$(ZEDBSD_PYTHON3_IMAGE_LIBRARY)' \
+		'$(ZEDBSD_PYTHON3_IMAGE_LIBDIR)'/lib-dynload/*.so
+	@$(PYTHON) '$(ZEDBSD_EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
+		--machine $(ZEDBSD_ARCHITECTURE) --role shared-library \
+		--soname $(ZEDBSD_PYTHON3_SONAME) --needed libc.so \
+		'$(ZEDBSD_PYTHON3_IMAGE_LIBRARY)'
+	@$(PYTHON) '$(ZEDBSD_EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
+		--machine $(ZEDBSD_ARCHITECTURE) --role application \
+		--needed $(ZEDBSD_PYTHON3_SONAME) --needed libc.so \
+		'$(ZEDBSD_PYTHON3_IMAGE_PROGRAM)'
+	@touch '$@'
+
+$(ZEDBSD_PYTHON3_IMAGE_PROGRAM) $(ZEDBSD_PYTHON3_IMAGE_LIBRARY): $(ZEDBSD_PYTHON3_IMAGE_STAMP)
+	@test -f '$@'
+
+.PHONY: python3-image
+python3-image: $(ZEDBSD_PYTHON3_IMAGE_STAMP)
+	@:
+
+# Choosing python3 chooses what its modules are built against: zlib, OpenSSL
+# (ssl, hashlib) and the CA bundle ssl reads by default.  Off by default
+# (D3, as vim and Emacs).
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,python3,Python 3 interpreter,*,n,package,,y,\
+	packages/lang,lang/python3,libs/zlib security/openssl security/ca-certificates))
+
+ZEDBSD_PACKAGE_INPUTS += $(if $(filter python3,$(ZEDBSD_USER_PROGRAMS)),\
+	$(ZEDBSD_PYTHON3_IMAGE_STAMP) $(ZEDBSD_PYTHON3_LICENSE))
+ZEDBSD_PACKAGE_FILES += $(if $(filter python3,$(ZEDBSD_USER_PROGRAMS)),\
+	--file $(ZEDBSD_PACKAGE_BINDIR)/python3.14=$(ZEDBSD_PYTHON3_IMAGE_PROGRAM) \
+	--file /usr/lib/$(ZEDBSD_PYTHON3_SONAME)=$(ZEDBSD_PYTHON3_IMAGE_LIBRARY) \
+	--subtree /usr/lib/python3.14=$(ZEDBSD_PYTHON3_IMAGE_LIBDIR) \
+	--file /usr/share/licenses/python3/LICENSE=$(ZEDBSD_PYTHON3_LICENSE))
+ZEDBSD_PACKAGE_LINKS += $(if $(filter python3,$(ZEDBSD_USER_PROGRAMS)),\
+	$(ZEDBSD_PACKAGE_BINDIR)/python3=python3.14)
