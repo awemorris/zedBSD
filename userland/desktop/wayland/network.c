@@ -620,6 +620,56 @@ kwl_network_button(
 }
 
 /*
+ * Gives the status panel the network's row (status-panel.c, WS192): whether
+ * there is a Wi-Fi radio to switch, the switch's position, and the line the
+ * menu shows under its switch.
+ */
+void
+kwl_network_panel_state(
+	unsigned *usable,
+	unsigned *on,
+	char *text,
+	size_t size)
+{
+	/* A radio to switch: the daemon is reached and there is Wi-Fi hardware. */
+	*usable = 0U;
+	if (network_view.state.reachable && network_view.state.wifi != KL_BACKEND_WIFI_ABSENT)
+		*usable = 1U;
+
+	/* The switch as the menu draws it, and the state's line. */
+	*on = network_switch_on();
+	network_state_text(&network_view.state, text, size);
+}
+
+/* Turns the Wi-Fi on or off from the status panel, as the menu's switch does. */
+void
+kwl_network_panel_switch(
+	struct kwl_server *server)
+{
+	struct network_row row;
+
+	/* Nothing to switch without a radio. */
+	if (!network_view.state.reachable || network_view.state.wifi == KL_BACKEND_WIFI_ABSENT)
+		return;
+
+	/* The menu's switch row's action. */
+	memset(&row, 0, sizeof(row));
+	row.kind = NETWORK_ROW_SWITCH;
+	network_act(server, &row);
+}
+
+/* Opens the network's menu on an output's bar from the status panel, as a press on the icon does. */
+void
+kwl_network_panel_open(
+	struct kwl_server *server,
+	unsigned slot)
+{
+	/* The menu under the icon of that output's bar. */
+	network_view.output = slot;
+	network_open_menu(server);
+}
+
+/*
  * Handles a key while the menu is open: Esc closes it, and the others are
  * the menu's too.  Returns 1 when the key was the network's.
  */

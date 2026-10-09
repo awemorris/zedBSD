@@ -16,8 +16,8 @@ BUG-170（slider の drag で確認の音を鳴らし続けて止まる）が直
 desktop。今の音量を log の `ZWL VOLUME restored value=` か `ZWL VOLUME set value=` で控える（最後に戻す）。
 
 ## 操作と確認
-1. 操作: bar の音量の icon（`ZWL VOLUME icon` の位置）を click。
-   確認事項: popup。正解: 開く。確認方法: log `ZWL VOLUME popup open x= y= width= height= slider=…`（slider の行の上端）。
+1. 操作: bar の音量の icon（`ZWL VOLUME icon` の位置）を click（状態の島のパネルが開く、WS192）。
+   確認事項: パネル。正解: 開く。確認方法: log `KWL STATUS panel open … sound=` と `KWL STATUS item name=volume x= y= width= height=`（slider の track の左・knob の上端・track の幅・knob の高さ）。
 2. 操作: slider の 20% の所から 80% の所まで 1 秒ほどかけて drag。
    確認事項: 値と音。正解: `ZWL VOLUME set value=80 … final=1` 前後、確認の音（`ZWL VOLUME feedback`）は 1 回以下。確認方法: log。
 3. 操作: すぐに画面を撮る。
@@ -29,4 +29,4 @@ desktop。今の音量を log の `ZWL VOLUME restored value=` か `ZWL VOLUME s
 1〜3 の正解。
 
 ## 注記
-slider の x: popup の x から 14+9 px が 0%、幅 260−28−18 px（`volume.c`）。y は slider の行の上端 + 17。音が実際に鳴るかは UAT。QEMU に audiod の音の device が無い時は `ZWL VOLUME reachable=0` で、値の変化だけを見る。
+slider の x: `item name=volume` の x + 14 px が 0%、幅は width − 28 px（knob の幅、`status-panel.c`）。y は item の y + height/2。音が実際に鳴るかは UAT。QEMU に audiod の音の device が無い時は `ZWL VOLUME reachable=0` で、値の変化だけを見る。

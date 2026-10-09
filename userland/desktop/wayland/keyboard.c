@@ -1255,6 +1255,9 @@ keyboard_contact_begin(
 	open = kwl_volume_is_open();
 	if (open)
 		return 0;
+	open = kwl_status_panel_is_open();
+	if (open)
+		return 0;
 
 	/* The contact from its start; it is not armed yet. */
 	memset(&keyboard.contact, 0, sizeof(keyboard.contact));

@@ -1958,6 +1958,9 @@ int kwl_bluetooth_button(struct kwl_server *server, uint32_t button, uint32_t st
 int kwl_bluetooth_key(struct kwl_server *server, uint32_t key, uint32_t state);
 int kwl_bluetooth_motion(struct kwl_server *server);
 int kwl_bluetooth_is_open(void);
+void kwl_bluetooth_panel_state(unsigned *usable, unsigned *on, char *text, size_t size);
+void kwl_bluetooth_panel_switch(struct kwl_server *server);
+void kwl_bluetooth_panel_open(struct kwl_server *server, unsigned slot);
 void kwl_bluetooth_bar_tick(struct kwl_server *server);
 
 /* The outputs of the plane, the windows and the pointer on them (heads.c, ws113-p007). */
@@ -2127,6 +2130,19 @@ int kwl_volume_key(struct kwl_server *server, uint32_t key, uint32_t state);
 int kwl_volume_motion(struct kwl_server *server);
 int kwl_volume_axis(struct kwl_server *server, int32_t vertical, int32_t horizontal);
 int kwl_volume_is_open(void);
+void kwl_volume_panel_state(unsigned *value, unsigned *muted, int *sound);
+void kwl_volume_panel_slide(struct kwl_server *server, unsigned value, unsigned final);
+void kwl_volume_panel_mute(struct kwl_server *server);
+void kwl_network_panel_state(unsigned *usable, unsigned *on, char *text, size_t size);
+void kwl_network_panel_switch(struct kwl_server *server);
+void kwl_network_panel_open(struct kwl_server *server, unsigned slot);
+
+/* The status pill's control panel (status-panel.c, WS192; its drawing is in glass.h). */
+void kwl_status_panel_place(struct kwl_server *server, unsigned slot, int32_t x, int32_t top, int32_t width, int32_t right);
+int kwl_status_panel_button(struct kwl_server *server, uint32_t button, uint32_t state);
+int kwl_status_panel_motion(struct kwl_server *server);
+int kwl_status_panel_key(struct kwl_server *server, uint32_t key, uint32_t state);
+int kwl_status_panel_is_open(void);
 
 /* What a toplevel asks the glass look's shell to do (xdg_toplevel requests, ws035-p076). */
 #define KWL_TOPLEVEL_MOVE		1

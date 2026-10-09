@@ -22,8 +22,8 @@ desktop で network に繋がっている（5330 は有線か Wi-Fi、QEMU は U
    確認事項: 値。正解: 詳細の IPv4 address と MAC address が `ifconfig` と同じ。確認方法: 出力と log の比較。
 3. 操作: Esc。
    確認事項: 詳細。正解: 閉じる。確認方法: log `ZWL NETWORK info close`。
-4. 操作: icon を普通に click、Esc。
-   確認事項: menu。正解: いつもの menu が開いて閉じる。確認方法: log `ZWL NETWORK open`・`ZWL NETWORK close`。
+4. 操作: icon を普通に click（状態の島のパネルが開く、WS192）、パネルの Wi-Fi の行の左の方を click、Esc。
+   確認事項: menu。正解: `KWL STATUS panel open`、行で `KWL STATUS panel close via=item` といつもの menu（`ZWL NETWORK open`）、Esc で閉じる（`ZWL NETWORK close`）。確認方法: log。
 
 ## 合格
 1〜4 の正解。

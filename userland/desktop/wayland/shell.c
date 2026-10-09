@@ -746,8 +746,9 @@ kwl_glass_draw(
 	kwl_arrange_draw(server, command);
 	kwl_backdrop_reset(server);
 
-	/* The volume's popup, when open (volume.c). */
+	/* The volume's popup, when open (volume.c), and the status pill's control panel (status-panel.c). */
 	kwl_volume_draw_popup(server, command);
+	kwl_status_panel_draw(server, command);
 
 	/* The top-right corner's hint, while its swipe is followed or settles (corner.c). */
 	kwl_corner_draw(server, command);
@@ -844,6 +845,7 @@ kwl_glass_draw_head(
 	kwl_bluetooth_draw_menu(server, command);
 	kwl_arrange_draw(server, command);
 	kwl_volume_draw_popup(server, command);
+	kwl_status_panel_draw(server, command);
 	server->layer_on = layer;
 }
 
@@ -999,6 +1001,18 @@ kwl_glass_button(
 	/* An open arrangement menu closes first when the press is on another widget of its bar (arrange-shell.c, ws177-p036). */
 	if (cover == NULL || remote)
 		(void)kwl_arrange_bar_press(server, button, state);
+
+	/*
+	 * The status pill takes a press anywhere on it, on any output's bar: the
+	 * control panel opens (status-panel.c, WS192, the 2026-10-09 user
+	 * decision); the open panel takes every button.
+	 */
+	open = kwl_status_panel_is_open();
+	if (cover == NULL || remote || open) {
+		pressed = kwl_status_panel_button(server, button, state);
+		if (pressed)
+			return 1;
+	}
 
 	/* The removable media's icon takes a press on it: Files on its devices (media.c). */
 	if (cover == NULL || remote) {
@@ -1834,6 +1848,9 @@ kwl_glass_title_at(
 	open = kwl_volume_is_open();
 	if (open)
 		return NULL;
+	open = kwl_status_panel_is_open();
+	if (open)
+		return NULL;
 	open = kwl_menu_is_open();
 	if (open)
 		return NULL;
@@ -2030,6 +2047,9 @@ kwl_glass_still(
 	if (open)
 		return 0;
 	open = (unsigned)kwl_volume_is_open();
+	if (open)
+		return 0;
+	open = (unsigned)kwl_status_panel_is_open();
 	if (open)
 		return 0;
 
@@ -3038,8 +3058,11 @@ kwl_glass_key(
 	if (taken)
 		return 1;
 
-	/* The volume's open popup takes every key (volume.c). */
+	/* The volume's open popup takes every key (volume.c), and so does the status pill's open panel (status-panel.c). */
 	taken = kwl_volume_key(server, key, state);
+	if (taken)
+		return 1;
+	taken = kwl_status_panel_key(server, key, state);
 	if (taken)
 		return 1;
 
@@ -4804,6 +4827,9 @@ draw_status(
 		printf("KWL GLASS status left=%d width=%d clock=%d\n", bar->status_x, bar->status_width, bar->clock_pill_x);
 	}
 
+	/* Where the status pill is on this bar, which a press opens the control panel from (status-panel.c, WS192). */
+	kwl_status_panel_place(server, bar->output, bar->status_x, bar->top, bar->status_width, bar->clock_pill_x + bar->clock_pill_width);
+
 	/* The date and time. */
 	glass_draw_text(server, command, SIZE_BAR, bar->clock_x, bar->top + BAR_BASELINE, bar->clock, 400, ink);
 
@@ -4883,8 +4909,11 @@ home_bar_passes(
 	if (server->home_press || server->home_page_press || server->home_rise_press)
 		return 0;
 
-	/* The volume's popup, the network's menu and Bluetooth's, while open, have every button. */
+	/* The volume's popup, the status pill's panel, the network's menu and Bluetooth's, while open, have every button. */
 	open = kwl_volume_is_open();
+	if (open)
+		return 1;
+	open = kwl_status_panel_is_open();
 	if (open)
 		return 1;
 	open = kwl_network_is_open();
@@ -9634,8 +9663,11 @@ glass_motion_take(
 	if (taken)
 		return 1;
 
-	/* The volume's open popup follows a drag of its slider (volume.c). */
+	/* The volume's open popup follows a drag of its slider (volume.c), and so does the status pill's open panel (status-panel.c). */
 	taken = kwl_volume_motion(server);
+	if (taken)
+		return 1;
+	taken = kwl_status_panel_motion(server);
 	if (taken)
 		return 1;
 
