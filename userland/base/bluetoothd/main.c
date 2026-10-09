@@ -126,7 +126,6 @@ struct btd_client {
 	int waits_pair;
 	int waits_connect;
 	uint8_t connect_address[BTD_ADDRESS_BYTES];
-	int waits_probe;
 };
 
 static void btd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -167,7 +166,6 @@ static void btd_connect(int index, const char *argument);
 static void btd_disconnect(struct btd_client *client, const char *argument);
 static void btd_status(struct btd_client *client);
 static void btd_phone_request(int index, const char *argument);
-static void btd_probed(void *context, const char *line);
 static int btd_hid_bridge(void *context, int *descriptor);
 static void btd_hid_told(void *context, const uint8_t *address, const char *line);
 static void btd_hid_holding(void);
@@ -238,8 +236,6 @@ static struct btd_linkmgr btd_links;
 static struct btd_phone btd_phone_link;
 static struct btd_sdps_db btd_records;
 
-/* The client waiting for a probe of the phone's link (BTD_NO_CLIENT: none). */
-static int btd_probe_client = BTD_NO_CLIENT;
 
 /*
  * The clients of a pairing: the one that asked for it, the agent that
@@ -400,7 +396,7 @@ main(
 	btd_sdps_db_init(&btd_records);
 	phone_hooks.context = NULL;
 	phone_hooks.account = btd_account;
-	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, BTD_KEYS_FOLDER, &phone_hooks, btd_probed, NULL);
+	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, BTD_KEYS_FOLDER, &phone_hooks);
 	router_phone.context = &btd_phone_link;
 	router_phone.wants = btd_phone_wants;
 	router_phone.claims = btd_phone_claims;
@@ -989,8 +985,7 @@ btd_client_text(
 	/* A client waiting for another answer asks nothing more until it is answered. */
 	if (client->waits_scan ||
 	    client->waits_pair ||
-	    client->waits_connect ||
-	    client->waits_probe)
+	    client->waits_connect)
 		return;
 
 	/* Succeeded: the request. */
@@ -1037,11 +1032,10 @@ btd_line(
 		return;
 	}
 
-	/* A client waiting for its scan, its pairing, its connection or its probe asks nothing more until it is answered. */
+	/* A client waiting for its scan, its pairing or its connection asks nothing more until it is answered. */
 	if (client->waits_scan ||
 	    client->waits_pair ||
-	    client->waits_connect ||
-	    client->waits_probe)
+	    client->waits_connect)
 		return;
 
 	/* SHOW. */
@@ -1841,9 +1835,8 @@ btd_paired(
 }
 
 /*
- * Answers PHONE (ws197-p002 section 11, root only): PROBE ADDRESS
- * uuid=0x1132|0x112F tries the phone's link through SDP, RFCOMM and OBEX
- * (answered when it ends); DROP ADDRESS ends the phone's link.
+ * Answers PHONE: SHOW and LINK (ws197-p003), and for root DROP ADDRESS,
+ * which ends the phone's link (a test's tool, ws197-p002).
  */
 static void
 btd_phone_request(
@@ -1855,13 +1848,10 @@ btd_phone_request(
 	uint8_t address[BTD_ADDRESS_BYTES];
 	const char *rest;
 	size_t length;
-	uint16_t uuid;
-	int probe;
-	int drop;
 	int same;
 	int error;
 
-	/* SHOW (ws197-p003): anyone, each seeing what the phone link lets them. */
+	/* SHOW: anyone, each seeing what the phone link lets them. */
 	client = &btd_clients[index];
 	same = strcmp(argument, "SHOW");
 	if (same == 0) {
@@ -1869,45 +1859,28 @@ btd_phone_request(
 		return;
 	}
 
-	/* LINK ADDRESS on|off [profiles=...] (ws197-p003): the owner and root, as the phone link checks. */
+	/* LINK ADDRESS on|off [profiles=...]: the owner and root, as the phone link checks. */
 	same = strncmp(argument, "LINK ", 5U);
 	if (same == 0) {
 		btd_phone_link_request(client, argument + 5);
 		return;
 	}
 
-	/* The rest is root's alone. */
+	/* DROP is root's alone. */
+	same = strncmp(argument, "DROP ", 5U);
+	if (same != 0) {
+		btd_write(client, "ERROR request\nDONE\n");
+		return;
+	}
 	if (client->uid != 0) {
 		btd_write(client, "ERROR permission\nDONE\n");
 		return;
 	}
 
-	/* PROBE or DROP. */
-	probe = 0;
-	drop = 0;
-	rest = NULL;
-	same = strncmp(argument, "PROBE ", 6U);
-	if (same == 0) {
-		probe = 1;
-		rest = argument + 6;
-	}
-
-	/* DROP. */
-	same = strncmp(argument, "DROP ", 5U);
-	if (same == 0) {
-		drop = 1;
-		rest = argument + 5;
-	}
-
-	/* Another request. */
-	if (rest == NULL) {
-		btd_write(client, "ERROR request\nDONE\n");
-		return;
-	}
-
 	/* The address. */
+	rest = argument + 5;
 	length = strlen(rest);
-	if (length < 17U) {
+	if (length != 17U) {
 		btd_write(client, "ERROR address\nDONE\n");
 		return;
 	}
@@ -1927,76 +1900,15 @@ btd_phone_request(
 		return;
 	}
 
-	/* DROP: the link ends (its end comes with the link's Disconnection Complete). */
-	if (drop) {
-		error = btd_phone_drop(&btd_phone_link, address);
-		if (error != 0) {
-			btd_write(client, "ERROR not-connected\nDONE\n");
-			return;
-		}
-
-		/* Asked. */
-		btd_write(client, "DONE\n");
-		return;
-	}
-
-	/* PROBE: MAS's class or PSE's. */
-	uuid = 0U;
-	same = strcmp(rest + 17, " uuid=0x1132");
-	if (probe && same == 0)
-		uuid = BTD_SDP_UUID_MAS;
-	same = strcmp(rest + 17, " uuid=0x112F");
-	if (probe && same == 0)
-		uuid = BTD_SDP_UUID_PSE;
-	same = strcmp(rest + 17, " uuid=0x112f");
-	if (probe && same == 0)
-		uuid = BTD_SDP_UUID_PSE;
-	if (uuid == 0U) {
-		btd_write(client, "ERROR uuid\nDONE\n");
-		return;
-	}
-
-	/* One probe at a time. */
-	if (btd_probe_client != BTD_NO_CLIENT) {
-		btd_write(client, "ERROR busy\nDONE\n");
-		return;
-	}
-
-	/* Started, or why not. */
-	error = btd_phone_probe(&btd_phone_link, address, uuid, btd_now_ms());
-	if (error == ENOTCONN) {
+	/* The link ends (its end comes with the link's Disconnection Complete). */
+	error = btd_phone_drop(&btd_phone_link, address);
+	if (error != 0) {
 		btd_write(client, "ERROR not-connected\nDONE\n");
 		return;
-	} else if (error != 0) {
-		btd_write(client, "ERROR busy\nDONE\n");
-		return;
 	}
 
-	/* Succeeded: the client waits for the probe's end. */
-	btd_probe_client = index;
-	client->waits_probe = 1;
-}
-
-/* Tells the client that asked the end of a probe (the phone link's hook) and logs it (the line says no content, p001 R22). */
-static void
-btd_probed(
-	void *context,
-	const char *line)
-{
-	int index;
-
-	UNUSED_PARAMETER(context);
-
-	/* Logged. */
-	btd_log("bluetoothd: phone: %s\n", line);
-
-	/* The client that asked hears it. */
-	index = btd_probe_client;
-	btd_probe_client = BTD_NO_CLIENT;
-	if (index == BTD_NO_CLIENT)
-		return;
-	btd_clients[index].waits_probe = 0;
-	btd_write(&btd_clients[index], "%s\nDONE\n", line);
+	/* Succeeded: asked. */
+	btd_write(client, "DONE\n");
 }
 
 /* Answers PHONE SHOW (ws197-p003 section 9.2): the phone's line as the phone link lets the client see it, then DONE. */
@@ -2408,11 +2320,6 @@ btd_client_close(
 	client->waits_scan = 0;
 	client->waits_pair = 0;
 	client->waits_connect = 0;
-	client->waits_probe = 0;
-
-	/* The client waiting for a probe is gone: the probe's end has nobody to tell. */
-	if (btd_probe_client == index)
-		btd_probe_client = BTD_NO_CLIENT;
 
 	/* The agent is gone; a question it was asked is no, and it hears no ASK-END. */
 	if (btd_agent_client == index)

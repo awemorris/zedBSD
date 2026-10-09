@@ -88,6 +88,9 @@
 #define BTD_PHONE_AFTER_STEP		1U
 #define BTD_PHONE_AFTER_LONG		2U
 
+/* Bluetoothd's RFCOMM server channel for MAP's MNS (p001 section 5.4; SDP tells it). */
+#define BTD_PHONE_MNS_CHANNEL		16U
+
 /* How many DLCs a profile may ask for before the RFCOMM session is up. */
 #define BTD_PHONE_PENDING_DLCS		2U
 

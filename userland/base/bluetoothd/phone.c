@@ -30,17 +30,69 @@
 #define UNUSED_PARAMETER(parameter) ((void)(parameter))
 #endif
 
-/* The commands the phone link sends: Disconnect. */
+/*
+ * The commands the phone link sends (Core 5.4 Vol 4 Part E 7.1, 7.5.7):
+ * Create Connection, its Cancel, Accept and Reject Connection Request,
+ * Link Key Request Reply and Negative Reply, Disconnect, Authentication
+ * Requested, Set Connection Encryption, Read Encryption Key Size.
+ */
+#define PHONE_CREATE_CONNECTION		0x0405U
 #define PHONE_DISCONNECT		0x0406U
+#define PHONE_CANCEL_CONNECTION		0x0408U
+#define PHONE_ACCEPT_CONNECTION		0x0409U
+#define PHONE_REJECT_CONNECTION		0x040aU
+#define PHONE_LINK_KEY_REPLY		0x040bU
+#define PHONE_LINK_KEY_NEGATIVE		0x040cU
+#define PHONE_AUTHENTICATION		0x0411U
+#define PHONE_SET_ENCRYPTION		0x0413U
+#define PHONE_READ_KEY_SIZE		0x1408U
 
-/* The events it takes: Disconnection Complete, Encryption Change (and its second version). */
+/*
+ * The events it takes: Connection Complete, Connection Request,
+ * Disconnection Complete, Authentication Complete, Encryption Change (and
+ * its second version), Link Key Request.
+ */
+#define PHONE_EVENT_CONNECTED		0x03U
+#define PHONE_EVENT_REQUEST		0x04U
 #define PHONE_EVENT_DISCONNECTED	0x05U
+#define PHONE_EVENT_AUTHENTICATED	0x06U
 #define PHONE_EVENT_ENCRYPTION		0x08U
+#define PHONE_EVENT_KEY_REQUEST		0x17U
 #define PHONE_EVENT_ENCRYPTION_V2	0x59U
 
-/* The reason of a disconnection by bluetoothd, and of one for the link's security. */
+/*
+ * The statuses it tells apart (Core 5.4 Vol 1 Part F): Unknown Connection
+ * Identifier (a cancelled page), Page Timeout, PIN or Key Missing,
+ * Connection Already Exists, Command Disallowed, LMP Error Transaction
+ * Collision, Different Transaction Collision.
+ */
+#define PHONE_STATUS_UNKNOWN		0x02U
+#define PHONE_STATUS_PAGE_TIMEOUT	0x04U
+#define PHONE_STATUS_KEY_MISSING	0x06U
+#define PHONE_STATUS_EXISTS		0x0bU
+#define PHONE_STATUS_DISALLOWED		0x0cU
+#define PHONE_STATUS_COLLISION		0x23U
+#define PHONE_STATUS_DIFFERENT_COLLISION 0x2aU
+
+/*
+ * The reasons: a disconnection by bluetoothd (Remote User Terminated, the
+ * value a host sends), one for the link's security (Authentication
+ * Failure), a refusal for limited resources, and what a disconnection's
+ * event says: the supervision timeout, the phone's user, the phone's power
+ * off, bluetoothd's own end.
+ */
 #define PHONE_REASON_USER		0x13U
 #define PHONE_REASON_SECURITY		0x05U
+#define PHONE_REASON_RESOURCES		0x0dU
+#define PHONE_REASON_TIMEOUT		0x08U
+#define PHONE_REASON_POWER_OFF		0x15U
+#define PHONE_REASON_LOCAL_HOST		0x16U
+
+/* Accept Connection Request's role: stay the peripheral (no role switch, section 5.3). */
+#define PHONE_ROLE_PERIPHERAL		0x01U
+
+/* Create Connection's packet types: DM1, DH1, DM3, DH3, DM5 and DH5, as the HID host's page. */
+#define PHONE_PACKET_TYPES		0xcc18U
 
 /* The PSMs of the phone's link: SDP and RFCOMM. */
 #define PHONE_PSM_SDP			0x0001U
@@ -62,29 +114,42 @@
 #define PHONE_RFCOMM_WAIT_MS		100U
 #define PHONE_RFCOMM_SPREAD_MS		400U
 
-/* The OBEX type of a folder listing, its NUL included. */
-#define PHONE_LISTING_TYPE		"x-obex/folder-listing"
-#define PHONE_LISTING_TYPE_BYTES	22U
-
-/* The probe's room for a Get's headers. */
-#define PHONE_HEADERS_MAX		64U
-
 /*
- * The Targets of OBEX's Connect (p001 section 6.2): MAP's MAS
- * (bb582b40-420c-11db-b0de-0800200c9a66) and PBAP's PSE
- * (796135f0-f0c5-11d8-0966-0800200c9a66), most significant byte first.
+ * The waits between bluetoothd's pages, by step (ws197-p003 section 5.2):
+ * at once, then 30 s doubling up to 10 minutes.  Fixed for the daemon's
+ * life.
  */
-static const uint8_t phone_target_mas[16] = {
-	0xbbU, 0x58U, 0x2bU, 0x40U, 0x42U, 0x0cU, 0x11U, 0xdbU,
-	0xb0U, 0xdeU, 0x08U, 0x00U, 0x20U, 0x0cU, 0x9aU, 0x66U
-};
-static const uint8_t phone_target_pse[16] = {
-	0x79U, 0x61U, 0x35U, 0xf0U, 0xf0U, 0xc5U, 0x11U, 0xd8U,
-	0x09U, 0x66U, 0x08U, 0x00U, 0x20U, 0x0cU, 0x9aU, 0x66U
+static const uint64_t phone_backoff_ms[BTD_PHONE_BACKOFF_STEPS] = {
+	0U, 30000U, 60000U, 120000U, 240000U, 480000U, 600000U
 };
 
 static int phone_accept(void *context, uint16_t handle, uint16_t psm, uint16_t *result, uint16_t *status);
 static void phone_event(struct btd_phone *phone, const uint8_t *parameters, size_t length, uint8_t code);
+static void phone_presence(struct btd_phone *phone, uint64_t now);
+static void phone_stop(struct btd_phone *phone, const char *why, uint64_t now);
+static void phone_schedule(struct btd_phone *phone, unsigned after, uint64_t now);
+static void phone_page(struct btd_phone *phone, uint64_t now);
+static void phone_cancel_page(struct btd_phone *phone, uint64_t now);
+static void phone_request(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_accept_request(struct btd_phone *phone, uint64_t now);
+static void phone_reject(struct btd_phone *phone, const uint8_t *address, uint64_t now);
+static void phone_connected(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_connect_failed(struct btd_phone *phone, uint8_t status, uint64_t now);
+static void phone_link_up(struct btd_phone *phone, uint16_t handle, uint8_t encrypted, uint64_t now);
+static int phone_secure_auth(struct btd_phone *phone);
+static void phone_secure_tick(struct btd_phone *phone, uint64_t now);
+static void phone_key_request(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_authenticated(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_encryption(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_key_size(struct btd_phone *phone);
+static void phone_ready(struct btd_phone *phone, uint64_t now);
+static void phone_profile_ready(struct btd_phone *phone);
+static void phone_disconnected(struct btd_phone *phone, const uint8_t *parameters, size_t length);
+static void phone_end_handle(struct btd_phone *phone, uint16_t handle);
+static void phone_sdp_finish(struct btd_phone *phone, int error);
+static void phone_sdp_done(struct btd_phone *phone, int error);
+static void phone_pending_connect(struct btd_phone *phone);
+static void phone_pending_failed(struct btd_phone *phone);
 static void phone_acl(struct btd_phone *phone, const uint8_t *packet, size_t length);
 static void phone_frame(struct btd_phone *phone, uint16_t cid, const uint8_t *payload, size_t length);
 static void phone_signal(struct btd_phone *phone, const uint8_t *payload, size_t length);
@@ -94,7 +159,7 @@ static void phone_notice(struct btd_phone *phone, const uint8_t *packet);
 static void phone_lost_frame(struct btd_phone *phone, uint16_t cid);
 static int phone_carries(const struct btd_phone *phone, uint16_t cid);
 static void phone_close_channel(struct btd_phone *phone, uint16_t cid);
-static void phone_disconnect(struct btd_phone *phone, uint8_t reason);
+static void phone_disconnect(struct btd_phone *phone, uint8_t reason, unsigned after);
 static void phone_ended(struct btd_phone *phone, const char *why);
 static int phone_send(struct btd_phone *phone, uint16_t cid, const uint8_t *payload, size_t length);
 static void phone_flush(struct btd_phone *phone);
@@ -102,9 +167,6 @@ static void phone_sdps_input(struct btd_phone *phone, struct btd_phone_sdps *slo
 static void phone_sdp_send(struct btd_phone *phone);
 static void phone_sdp_input(struct btd_phone *phone, const uint8_t *pdu, size_t length);
 static void phone_rfcomm_open(struct btd_phone *phone);
-static void phone_probe_dlc(struct btd_phone *phone);
-static void phone_probe_fail(struct btd_phone *phone, const char *why);
-static void phone_probe_finish(struct btd_phone *phone);
 static int phone_rf_send(void *context, const uint8_t *payload, size_t length);
 static int phone_rf_accept(void *context, unsigned server_channel);
 static void phone_rf_opened(void *context, unsigned dlci);
@@ -112,9 +174,6 @@ static void phone_rf_data(void *context, unsigned dlci, const uint8_t *data, siz
 static void phone_rf_writable(void *context, unsigned dlci);
 static void phone_rf_closed(void *context, unsigned dlci, int reason);
 static void phone_rf_ended(void *context, int reason);
-static int phone_ob_write(void *context, const uint8_t *data, size_t length, size_t *written);
-static void phone_ob_done(void *context, unsigned operation, int error, uint8_t code, const uint8_t *headers, size_t length);
-static int phone_ob_body(void *context, const uint8_t *data, size_t length);
 static uint64_t phone_earlier(uint64_t earliest, uint64_t deadline);
 static uint16_t phone_get16(const uint8_t *bytes);
 static void phone_put16(uint8_t *bytes, uint16_t value);
@@ -336,6 +395,7 @@ btd_phone_handoff(
 	const struct btd_pair_handoff *handoff,
 	const char **why)
 {
+	uint64_t now;
 	struct btd_phone *phone;
 	uint8_t answer[BTD_SIGNAL_MAX];
 	unsigned moved;
@@ -448,6 +508,19 @@ btd_phone_handoff(
 	error = btd_l2cap_answer_pending(&phone->l2cap, phone->handle, BTD_L2CAP_SUCCESS, answer, sizeof(answer), &length);
 	if (error == 0 && length != 0U)
 		(void)phone_send(phone, BTD_CID_SIGNALLING, answer, length);
+
+	/* Ready since now; the presence follows the record just written (the owner paired it at the seat). */
+	now = btd_now_ms();
+	phone->ready_since = now;
+	phone->inbound = 0;
+	phone->page_outstanding = 0;
+	phone_presence(phone, now);
+
+	/* The owner not at the seat: the link ends (Q14); else the profile hears it is ready. */
+	if (!phone->present)
+		phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_NONE);
+	else
+		phone_profile_ready(phone);
 
 	/* Succeeded: the link is the phone link's. */
 	return 1;
@@ -713,8 +786,8 @@ btd_phone_drop(
 	if (same != 0)
 		return ENOTCONN;
 
-	/* Succeeded: ended by the user. */
-	phone_disconnect(phone, PHONE_REASON_USER);
+	/* Succeeded: ended by the user (paged again after the next step's wait). */
+	phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_STEP);
 	return 0;
 }
 
@@ -803,8 +876,8 @@ btd_phone_load(
 		phone->have_record = 1;
 	}
 
-	/* Succeeded: the HID host's limit follows the record. */
-	phone_limit(phone);
+	/* Succeeded: the presence (and the HID host's limit) follows the record. */
+	phone_presence(phone, btd_now_ms());
 	return 0;
 }
 
@@ -876,9 +949,9 @@ btd_phone_link_set(
 	int on,
 	int profiles)
 {
+	uint64_t now;
 	struct btd_phonerec record;
 	int valid;
-	int same;
 	int error;
 
 	/* The records are the controller's. */
@@ -913,12 +986,18 @@ btd_phone_link_set(
 	phone->record = record;
 	phone->have_record = 1;
 	phone->record_valid = 1;
-	phone_limit(phone);
 
-	/* Off ends the phone's link. */
-	same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
-	if (!on && same == 0)
-		phone_disconnect(phone, PHONE_REASON_USER);
+	/* On pages at once, whatever stopped the pages before (section 5.5). */
+	now = btd_now_ms();
+	if (on) {
+		phone->stopped = 0;
+		phone->backoff_step = 0U;
+		phone->peer_closed = 0U;
+		phone->next_page_at = now;
+	}
+
+	/* The presence follows (off ends the link). */
+	phone_presence(phone, now);
 
 	/* Succeeded. */
 	return 0;
@@ -970,13 +1049,8 @@ btd_phone_forget(
 		phone->record_valid = 0;
 	}
 
-	/* The HID host's limit follows. */
-	phone_limit(phone);
-
-	/* The phone's link ends. */
-	same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
-	if (same == 0)
-		phone_disconnect(phone, PHONE_REASON_USER);
+	/* The presence follows (the forgotten phone's link ends). */
+	phone_presence(phone, btd_now_ms());
 
 	/* Succeeded: forgotten. */
 	return 0;
@@ -2338,7 +2412,7 @@ phone_notice(
 
 	/* Lost signalling, or a packet of no known channel: the link is made again. */
 	if ((flags & (BTD_DROP_SIGNAL | BTD_DROP_UNKNOWN)) != 0U) {
-		phone_disconnect(phone, PHONE_REASON_USER);
+		phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_STEP);
 		return;
 	}
 
@@ -2351,7 +2425,7 @@ phone_notice(
 		}
 
 		/* Another channel's. */
-		phone_disconnect(phone, PHONE_REASON_USER);
+		phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_STEP);
 		return;
 	}
 
@@ -2379,7 +2453,7 @@ phone_lost_frame(
 	}
 
 	/* Succeeded: any other frame ends the link. */
-	phone_disconnect(phone, PHONE_REASON_USER);
+	phone_disconnect(phone, PHONE_REASON_USER, BTD_PHONE_AFTER_STEP);
 }
 
 /* Tells whether a channel is one of the phone link's SDP or RFCOMM channels. */
