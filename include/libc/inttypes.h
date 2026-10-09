@@ -24,6 +24,22 @@ uintmax_t strtoumax(const char *, char **, int);
 intmax_t wcstoimax(const wchar_t *, wchar_t **, int);
 uintmax_t wcstoumax(const wchar_t *, wchar_t **, int);
 
+/*
+ * The length modifiers of the 64-bit and pointer-sized integers.  They follow
+ * the types <stdint.h> takes from the compiler: on an LP64 target int64_t,
+ * intmax_t and intptr_t are long, so the modifier is "l"; on an ILP32 target
+ * int64_t and intmax_t are long long ("ll") and intptr_t is int (none).  A
+ * modifier of the right size but the wrong type still prints correctly, but
+ * the compiler's format check reports it.
+ */
+#ifdef __LP64__
+#define __PRI_64 "l"
+#define __PRI_PTR "l"
+#else
+#define __PRI_64 "ll"
+#define __PRI_PTR ""
+#endif
+
 #define PRId8 "d"
 #define PRIi8 "i"
 #define PRIo8 "o"
@@ -42,29 +58,24 @@ uintmax_t wcstoumax(const wchar_t *, wchar_t **, int);
 #define PRIu32 "u"
 #define PRIx32 "x"
 #define PRIX32 "X"
-#define PRId64 "lld"
-#define PRIi64 "lli"
-#define PRIo64 "llo"
-#define PRIu64 "llu"
-#define PRIx64 "llx"
-#define PRIX64 "llX"
-#if __SIZEOF_POINTER__ == 8
-#define __PRI_PTR "ll"
-#else
-#define __PRI_PTR ""
-#endif
+#define PRId64 __PRI_64 "d"
+#define PRIi64 __PRI_64 "i"
+#define PRIo64 __PRI_64 "o"
+#define PRIu64 __PRI_64 "u"
+#define PRIx64 __PRI_64 "x"
+#define PRIX64 __PRI_64 "X"
 #define PRIdPTR __PRI_PTR "d"
 #define PRIiPTR __PRI_PTR "i"
 #define PRIoPTR __PRI_PTR "o"
 #define PRIuPTR __PRI_PTR "u"
 #define PRIxPTR __PRI_PTR "x"
 #define PRIXPTR __PRI_PTR "X"
-#define PRIdMAX "lld"
-#define PRIiMAX "lli"
-#define PRIoMAX "llo"
-#define PRIuMAX "llu"
-#define PRIxMAX "llx"
-#define PRIXMAX "llX"
+#define PRIdMAX __PRI_64 "d"
+#define PRIiMAX __PRI_64 "i"
+#define PRIoMAX __PRI_64 "o"
+#define PRIuMAX __PRI_64 "u"
+#define PRIxMAX __PRI_64 "x"
+#define PRIXMAX __PRI_64 "X"
 
 #define SCNd8 "hhd"
 #define SCNi8 "hhi"
@@ -81,21 +92,21 @@ uintmax_t wcstoumax(const wchar_t *, wchar_t **, int);
 #define SCNo32 "o"
 #define SCNu32 "u"
 #define SCNx32 "x"
-#define SCNd64 "lld"
-#define SCNi64 "lli"
-#define SCNo64 "llo"
-#define SCNu64 "llu"
-#define SCNx64 "llx"
+#define SCNd64 __PRI_64 "d"
+#define SCNi64 __PRI_64 "i"
+#define SCNo64 __PRI_64 "o"
+#define SCNu64 __PRI_64 "u"
+#define SCNx64 __PRI_64 "x"
 #define SCNdPTR __PRI_PTR "d"
 #define SCNiPTR __PRI_PTR "i"
 #define SCNoPTR __PRI_PTR "o"
 #define SCNuPTR __PRI_PTR "u"
 #define SCNxPTR __PRI_PTR "x"
-#define SCNdMAX "lld"
-#define SCNiMAX "lli"
-#define SCNoMAX "llo"
-#define SCNuMAX "llu"
-#define SCNxMAX "llx"
+#define SCNdMAX __PRI_64 "d"
+#define SCNiMAX __PRI_64 "i"
+#define SCNoMAX __PRI_64 "o"
+#define SCNuMAX __PRI_64 "u"
+#define SCNxMAX __PRI_64 "x"
 
 #ifdef __cplusplus
 }
