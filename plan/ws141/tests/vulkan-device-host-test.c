@@ -134,6 +134,7 @@ static void input_test(struct bcm2711_vulkan_session *session);
 static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
 static void resource_test(struct bcm2711_vulkan_session *session);
 static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
+static void external_barrier_test(struct bcm2711_vulkan_object *memory_object);
 static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
 static void memory_free(struct bcm2711_vulkan_session *session, uint64_t identity);
 static int dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -2598,6 +2599,9 @@ memory_test(
 	memory = object->payload;
 	assert(memory->view == NULL);
 
+	/* Exact actual export declarations qualify the explicit native/external barrier boundary before any provider execution claim. */
+	external_barrier_test(object);
+
 	/* The first placed BLOB must use the actual alignment and full inclusive DMA ceiling before creating a native view. */
 	memset(&request, 0, sizeof(request));
 	memset(&placement, 0, sizeof(placement));
@@ -2647,6 +2651,11 @@ memory_test(
 	/* Aggregate declared heap exhaustion has an explicit Vulkan failure and no new backing allocation. */
 	error = memory_allocate(session, 52, 256ULL << 20, 0, 0);
 	assert(error == VK_SUCCESS);
+
+	/* An actual private declaration cannot acquire external queue ownership merely by selecting a special family number. */
+	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_MEMORY, 52);
+	assert(object != NULL);
+	external_barrier_test(object);
 	error = memory_allocate(session, 53, 4096, 0, 0);
 	assert(error == (int)VK_ERROR_OUT_OF_DEVICE_MEMORY && backing_allocations == 1);
 	memory_free(session, 52);
@@ -2747,6 +2756,68 @@ memory_free(
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
 	assert(error == 0 && reply_storage[0] == GPU_OP_FREE_MEMORY);
+}
+
+/* Checks explicit external-family admission against actual native memory declarations using a numerical image-description fixture. */
+static void
+external_barrier_test(
+	struct bcm2711_vulkan_object *memory_object)
+{
+	struct bcm2711_vulkan_memory *memory;
+	struct bcm2711_vulkan_barrier *barrier;
+	struct bcm2711_vulkan_resource resource;
+	struct bcm2711_vulkan_object image;
+	unsigned baseline;
+	int expected;
+	int error;
+
+	/* This synthetic description borrows an actual typed allocation declaration and never publishes a resource or native job. */
+	baseline = allocations;
+	memory = memory_object->payload;
+	memset(&resource, 0, sizeof(resource));
+	resource.device = memory->device;
+	resource.memory = memory_object;
+	memset(&image, 0, sizeof(image));
+	image.kind = I915_VK_OBJ_IMAGE;
+	image.payload = &resource;
+	barrier = kern_calloc(1, sizeof(*barrier));
+	assert(barrier != NULL);
+
+	/* One full colour transition uses the actual sole native queue and a declared external-sharing endpoint. */
+	barrier->count = 1;
+	barrier->source = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	barrier->destination = VK_PIPELINE_STAGE_ALL_COMMANDS_BIT;
+	barrier->entries[0].object = &image;
+	barrier->entries[0].before = VK_IMAGE_LAYOUT_GENERAL;
+	barrier->entries[0].after = VK_IMAGE_LAYOUT_GENERAL;
+	barrier->entries[0].range.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	barrier->entries[0].range.levelCount = 1;
+	barrier->entries[0].range.layerCount = 1;
+	barrier->entries[0].source_family = 0;
+	barrier->entries[0].destination_family = BCM2711_VULKAN_EXTERNAL_FAMILY;
+	expected = EINVAL;
+	if (memory->external_type != 0)
+		expected = 0;
+	error = bcm2711_vulkan_barrier_validate(barrier, memory->device);
+	assert(error == expected);
+	barrier->entries[0].source_family = BCM2711_VULKAN_EXTERNAL_FAMILY;
+	barrier->entries[0].destination_family = 0;
+	error = bcm2711_vulkan_barrier_validate(barrier, memory->device);
+	assert(error == expected);
+
+	/* Unrelated native families and mixed ignored/external indices have no implemented ownership or provider contract. */
+	barrier->entries[0].source_family = 7;
+	error = bcm2711_vulkan_barrier_validate(barrier, memory->device);
+	assert(error == ENOTSUP);
+	barrier->entries[0].source_family = VK_QUEUE_FAMILY_IGNORED;
+	barrier->entries[0].destination_family = BCM2711_VULKAN_EXTERNAL_FAMILY;
+	error = bcm2711_vulkan_barrier_validate(barrier, memory->device);
+	assert(error == ENOTSUP);
+	kern_free(barrier);
+	assert(allocations == baseline);
+
+	/* Succeeded: declared shareability gates both external directions without changing any actual allocation or native owner. */
+	return;
 }
 
 /* Exercises actual buffer/image codecs, immutable raster requirements and independently retained bindings through native source. */
