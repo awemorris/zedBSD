@@ -20,7 +20,9 @@
  * name is longer than 64 bytes, and one with more than sixteen program
  * headers.  Then (p002) it opens 200 handles, past the 64 of the
  * loader's first handle chunk, and forty TLS libraries, which grow each
- * thread's TLS vector past its 33 entries, in two threads.  build-many.sh
+ * thread's TLS vector past its 33 entries, in two threads.  Last (T1-495)
+ * it opens a library by its path, from a directory no search reaches, as
+ * Python opens its extension modules.  build-many.sh
  * builds the libraries and this program, and
  * rtld-many.sh runs it in the guest with LD_LIBRARY_PATH set to where the
  * libraries are.
@@ -52,6 +54,12 @@
 /* The library with extra program headers, and its function's value. */
 #define MANY_PHDR_NAME "libphdr.so"
 #define MANY_PHDR_VALUE 55
+
+/* The library opened by its path (rtld-many.sh unpacks the archive in /root/ws140), and its function's value. */
+#define MANY_PATH_ABSOLUTE "/root/ws140/dynload/libpathmod.so"
+#define MANY_PATH_RELATIVE "./dynload/libpathmod.so"
+#define MANY_PATH_MISSING "/root/ws140/dynload/libnothere.so"
+#define MANY_PATH_VALUE 66
 
 /* The handles opened at once, and the TLS libraries (libtls00.so to libtls39.so). */
 #define MANY_HANDLES 200U
@@ -85,6 +93,7 @@ static void check_tls(const char *step);
 static void check_tls_written(const char *step);
 static void *tls_thread(void *argument);
 static void close_tls(void);
+static void check_path(void);
 
 /* The TLS libraries' handles and their functions, which return a variable's address. */
 static void *tls_libraries[MANY_TLS];
@@ -227,6 +236,10 @@ main(
 	/* Closes the forty and opens one again, under an id given before. */
 	close_tls();
 	step_ok("tls-close");
+
+	/* A library opened by its path, absolute and relative (T1-495). */
+	check_path();
+	step_ok("path");
 
 	/* Back to the objects loaded at startup once more. */
 	count_objects(&count);
@@ -697,4 +710,62 @@ close_tls(
 	closed = dlclose(library);
 	if (closed != 0)
 		step_fail("tls-close", dlerror());
+}
+
+/*
+ * Opens a library by its absolute path, from a directory that neither
+ * LD_LIBRARY_PATH nor /lib and /usr/lib reach, then by a relative path to
+ * the same file (the same object, found by its identity) and by the
+ * absolute path again (the same object); a path to no file is refused.
+ */
+static void
+check_path(
+	void)
+{
+	void *absolute;
+	void *relative;
+	void *again;
+	void *missing;
+	void *first_symbol;
+	void *relative_symbol;
+	void *again_symbol;
+	int value;
+	int found;
+
+	/* By the absolute path: the file outside every search. */
+	absolute = dlopen(MANY_PATH_ABSOLUTE, RTLD_NOW);
+	if (absolute == NULL)
+		step_fail("path", dlerror());
+
+	/* Its function answers. */
+	found = call_symbol(absolute, "path_value", &value);
+	if (!found || value != MANY_PATH_VALUE)
+		step_fail("path", "path_value is wrong");
+	first_symbol = dlsym(absolute, "path_value");
+
+	/* By a relative path from the program's directory: the object loaded already. */
+	relative = dlopen(MANY_PATH_RELATIVE, RTLD_NOW);
+	if (relative == NULL)
+		step_fail("path", dlerror());
+	relative_symbol = dlsym(relative, "path_value");
+	if (relative_symbol != first_symbol)
+		step_fail("path", "the relative path loaded another copy");
+
+	/* By the absolute path again: the same object. */
+	again = dlopen(MANY_PATH_ABSOLUTE, RTLD_NOW);
+	if (again == NULL)
+		step_fail("path", dlerror());
+	again_symbol = dlsym(again, "path_value");
+	if (again_symbol != first_symbol)
+		step_fail("path", "the second open loaded another copy");
+
+	/* A path to no file is refused. */
+	missing = dlopen(MANY_PATH_MISSING, RTLD_NOW);
+	if (missing != NULL)
+		step_fail("path", "a path to no file was opened");
+
+	/* Closes the three handles, which unloads the library. */
+	(void)dlclose(again);
+	(void)dlclose(relative);
+	(void)dlclose(absolute);
 }

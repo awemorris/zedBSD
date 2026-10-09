@@ -71,3 +71,12 @@ p003（p004）、ws125-p002、D2、D3。
 ### 未実施
 
 - guest の P1〜P3・P5〜P7 と P8（boot-test）: T1。ws125-p002 の全体の image と boot-test もこの image で兼ねる。
+
+## T1-495 の FAIL の解析と直し（2026-10-09 深夜、P1）
+
+T1-495: image（0）・boot-test（1）は PASS、python3-guest の P2・P3・P5・P6 が `ImportError: invalid shared-object path`（math・json・zlib・hashlib など lib-dynload の拡張 module。os・sys・re など組み込みの物は ok）。
+原因: zedBSD の ld.so（`src/rtld/rtld.c` の `__rtld_dlopen`）は bare name と `/lib/<name>` だけを受け、それ以外の slash を含む path を `dlopen_bare_name` が NULL にして「invalid shared-object path」で断っていた（BUG-083 の直しで「任意の絶対 path は今のまま断る」と残った物）。CPython は拡張 module を `/usr/lib/python3.14/lib-dynload/<module>.cpython-314-….so` の絶対 path で dlopen するので、全部断られる。image の配置ではなく loader の制限。
+直し（`src/rtld/rtld.c`）: POSIX の dlopen のとおり、`/lib/` と bare name 以外の slash を含む path は、その file をそのまま開く（`dlopen_names_file`）。既に読んだ object の判定は path が同じ物だけ（別の directory の同じ名前の file を取り違えない。同じ file の別の path は load の時の inode（`find_identity`）で同じ object）。`load_object` を名前の検索（`load_object`）と開いた file の map（`load_object_file`）に分け、path で開く `load_object_path` を足した。bare name・`/lib/<name>`・DT_NEEDED の検索は今までと同じ。
+確かめ: `make BUILD=build/p1-rtld build/p1-rtld/dynamic/ld.so`（-Werror、warning 0）。rtld は guest でしか動かないので host の試験は無し。回帰の道具 `plan/tools/rtld/`（Master の Tools）に段 `path` を足した（検索の届かない `dynload/libpathmod.so` を絶対 path・`./` の相対 path・再度の絶対 path で開いて同じ関数の address、無い path は NULL）。`rtld-many.c` は target の clang で -Werror の compile のみ。`build-many.sh` の host の `rm -rf "$out"` は `fresh_out` に替えた（2026-10-06 の規則）。
+未実施（T1）: `rtld-many.sh`（新しい段 path を含む 17 段）と、T1-495 の python3-guest の再試験。
+注: `plan/ws074/tests/rtld-dlopen.*`（ws074-p017、cleared）は「/usr/lib/libcrypto.so の絶対 path は断る」を確かめる試験で、今の挙動と合わない。Master の Tools にも未完了の Phase にも無いので、直さずに削除を Q1 に依頼する。
