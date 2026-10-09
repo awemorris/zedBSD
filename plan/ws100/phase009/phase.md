@@ -4,7 +4,7 @@
 
 Phase ID: `ws100-p009`
 Parent: [WS100](../ws.md)
-Status: test-wait（T1-478、2026-10-08 夜 Q1）
+Status: cleared（2026-10-09 Q1 判定: T1-478 の本体 PASS、回帰の volume-p005 は試験の直しの後 T1-505 PASS）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-08「WS100 p009（音量の曲線、約 0.5 LW）を実装し T1 の依頼文を」）
 依存: p006 の a（codec の amplifier の段の log。QEMU と 5330 の段数・1 段の dB を読むため）。実機の確かめは p006 の b の後。

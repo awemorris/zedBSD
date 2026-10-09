@@ -23,8 +23,8 @@
 | [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 手順を phase.md に用意済み（host の確かめ PASS）、実行は 10/16 | 0.5 | P1・Q1 |
-| T1 の未実行の試験: T1-483・484・435（5330 の実機） | 2026-10-09 夜: 499・500・502 PASS、501・503(FreeBSD)・495・477 FAIL | 2 | T1 |
-| 試験の FAIL の直し: T1-477（WS099 の回帰 C1・C2・C3・C5・C7）、T1-501（volume-p005 の SOUND report 1 行、Welcome の Settings）、T1-503（FreeBSD で /dev/tty の read が EIO）、T1-495（Python の import、ベータ3） | P1 次の世代 | 4 | P1 |
+| T1 の未実行の試験: T1-435（5330 の実機、5330 に SSH が届かない、2026-10-09 夜） | 他は全部流した | 1 | T1・ユーザー |
+| 試験の FAIL の直し: T1-504 C7（fail 77 中 7、前回 70）、T1-483（画面 keyboard の slide の計測 6〜7 回）、T1-484（tcp-loss-speed の試験の準備）、T1-508（Python、ベータ3） | P1 次の世代 | 3 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |
