@@ -491,10 +491,14 @@ resource_visitor(
 
 	/* The first Interrupt it consumes (an APIC line, ws183-p001). */
 	device = argument;
-	if (resource->kind == DRV_ACPI_RESOURCE_IRQ && !resource->producer && device->irq < 0) {
+	if (resource->kind == DRV_ACPI_RESOURCE_IRQ &&
+	    !resource->producer &&
+	    device->irq < 0) {
 		device->irq = (int)resource->base;
 		device->irq_level = resource->level;
 		device->irq_active_low = resource->active_low;
+
+		/* Goes on: the other resources are still to be seen. */
 		return 0;
 	}
 
@@ -586,7 +590,7 @@ worker(
 {
 	struct i2c_hid_device *device;
 	int error;
-	int line;
+	int irq_error;
 
 	/* The device the probe started this thread for. */
 	device = argument;
@@ -610,14 +614,15 @@ worker(
 	/* Without a pad, the Interrupt of its _CRS when it has one (until it is given up), then sampling. */
 	if (error != 0) {
 		if (device->irq >= 0) {
-			line = irq_take(device);
-			if (line == 0) {
+			irq_error = irq_take(device);
+			if (irq_error == 0) {
+				/* Says the device is read on its Interrupt, then reads it there until the line is given up. */
 				kern_logf("i2c-hid: %s reads on its interrupt (irq %d level=%u active_low=%u)\n", device->path, device->irq, (unsigned)device->irq_level, (unsigned)device->irq_active_low);
 				wait_irq(device);
 			}
 
 			/* The line could not be had, or was given up. */
-			kern_logf("i2c-hid: %s samples its input (irq %d: %d)\n", device->path, device->irq, line);
+			kern_logf("i2c-hid: %s samples its input (irq %d: %d)\n", device->path, device->irq, irq_error);
 		} else {
 			kern_logf("i2c-hid: %s samples its input (line: %d)\n", device->path, error);
 		}
@@ -730,13 +735,17 @@ irq_take(
 	if (error != 0)
 		return error;
 
-	/* The line's trigger mode and polarity. */
+	/* The trigger mode its _CRS gives: edge unless it says level. */
 	trigger = KERN_IRQ_TRIGGER_EDGE;
 	if (device->irq_level != 0U)
 		trigger = KERN_IRQ_TRIGGER_LEVEL;
+
+	/* The polarity its _CRS gives: high unless it says active low. */
 	polarity = KERN_IRQ_POLARITY_HIGH;
 	if (device->irq_active_low != 0U)
 		polarity = KERN_IRQ_POLARITY_LOW;
+
+	/* Sets the line to that trigger mode and polarity, and gives the handler back when it cannot. */
 	error = kern_irq_set_mode(device->irq, trigger, polarity);
 	if (error != 0) {
 		(void)kern_irq_unregister(device->irq, irq_interrupt, device);
@@ -776,8 +785,9 @@ wait_irq(
 		deadline = sched_ticks() + kern_ms_to_ticks(I2C_HID_IRQ_CHECK_MS) + 1U;
 		state = spin_lock_irqsave(&device->irq_lock);
 
+		/* Waits, with the lock, for a firing or for the deadline. */
 		while (device->irq_fired == 0U) {
-			/* The time to look came. */
+			/* Stops waiting when the time to look has come. */
 			now = sched_ticks();
 			if (now >= deadline)
 				break;
@@ -801,6 +811,8 @@ wait_irq(
 			error = poll_input(device, &reported);
 			if (error != 0 || !reported)
 				break;
+
+			/* Remembers that the device had something to say. */
 			any = true;
 		}
 
@@ -808,10 +820,14 @@ wait_irq(
 		if (fired == 0U)
 			continue;
 
-		/* Firings with nothing to read, without end: the line is given back, and the device sampled. */
-		empty++;
-		if (any)
+		/* Counts the firings in a row with nothing to read; one that gave a report starts the count over. */
+		if (any) {
 			empty = 0;
+		} else {
+			empty++;
+		}
+
+		/* Firings with nothing to read, without end: the line is given back, and the device sampled. */
 		if (empty >= I2C_HID_IRQ_EMPTY_MAX) {
 			kern_logf("i2c-hid: %s: irq %d fired %u times with nothing to read; gives it up\n", device->path, device->irq, empty);
 			(void)kern_irq_unregister(device->irq, irq_interrupt, device);
