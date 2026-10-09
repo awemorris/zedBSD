@@ -39,6 +39,13 @@ end=$(date +%s.%N)
 empty=$(echo "$end - $start" | bc)
 echo "empty ssh command: $empty s"
 
+# The adapter's counters before the runs, to compare with a run that fails (T1-513: one run in several, the fetch and
+# its SSH session both stopped for about 120 s, "Connection to 127.0.0.1 closed by remote host", and the next run went
+# through).  RX errors that grow over the failed run are frames the driver could not take (no packet buffer, or a
+# failed transfer); for the packets themselves start the guest with QEMU's dump of its network
+# (guest.py start IMAGE --qemu-extra "-object filter-dump,id=dump0,netdev=net0,file=OUTDIR/net0.pcap").
+guest "ifconfig -a" > "$out/before.txt"
+
 # The runs.
 i=1
 while [ $i -le "$runs" ]; do
@@ -53,6 +60,9 @@ while [ $i -le "$runs" ]; do
 		echo "run $i: ok, $seconds s, ${rate:-?} MB/s"
 	else
 		echo "run $i: FAILED, cksum '$got' (expected '$expected'), $seconds s"
+		guest "ifconfig -a" > "$out/run$i-guest.txt"
+		echo "  ue0 RX before: $(awk '/^ue0:/ {f = 1} f && /RX packets/ {print; exit}' "$out/before.txt" | tr -s ' ')"
+		echo "  ue0 RX after:  $(awk '/^ue0:/ {f = 1} f && /RX packets/ {print; exit}' "$out/run$i-guest.txt" | tr -s ' ')"
 		status=1
 	fi
 	i=$((i + 1))

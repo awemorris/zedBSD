@@ -47,10 +47,10 @@ bcm2711_vulkan_device_dispatch(
 {
 	int error;
 
-	/* Destruction has no reply payload; all other root commands require their actual client response. */
+	/* Destruction has no parameter payload, but an ordinary client still requests its echoed opcode. */
 	*handled = 1;
 	if (opcode == GPU_OP_DESTROY_INSTANCE || opcode == GPU_OP_DESTROY_DEVICE) {
-		if (requested != 0)
+		if (requested > 1)
 			return EINVAL;
 	} else {
 		/* Unknown opcodes remain available to the typed resource and draw routers. */

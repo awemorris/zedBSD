@@ -50,7 +50,7 @@
 | [WS129](ws129/ws.md) p013 利用の手引き | 下書き済み（[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)） | ユーザーの review | 0.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 未着手 | 10/14（RC の後） | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み（host の確かめ PASS） | 10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
-| T1 の再試験の結果（2026-10-10）: 509 C7 PASS、510 画面 keyboard PASS、513 有線の戻り PASS、514 パネルの PNG。511 tcp-loss-speed FAIL（fetch が繋がらない）、512 Python（ベータ3）は 17/45 files 失敗、513 の tcp-receive-speed で fetch が 2 回に 1 回返らない | 511・513 の残りは P1 | 2 | P1・T1 |
+| T1 の再試験の結果（2026-10-10）: 509 C7 PASS、510 画面 keyboard PASS、513 有線の戻り PASS、514 パネルの PNG。511 tcp-loss-speed FAIL（fetch が繋がらない）、512 Python（ベータ3）は 17/45 files 失敗、513 の tcp-receive-speed で fetch が 2 回に 1 回返らない | P1 の見立て: 試験の host 側は正しく、guest の USB LAN で SYN か SYN-ACK が落ちる・ue0 の TCP が約 2 分止まる（packet の pool の枯渇の見込み、未確認）。採取を足して T1-516 | 2 | P1・T1 |
 | 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
 | [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |

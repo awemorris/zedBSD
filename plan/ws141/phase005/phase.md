@@ -48,3 +48,7 @@ rendererを独立登録し、低1GiB placed blob・同device新VA import・forei
 ## Normal NC mappingとqueue domainへの接続（2026-10-09）
 
 shared4 pathの限定承認を得てGPU/VM mappingへNormal NC RAMを追加。private NC allocationとrender/display mapperはimmutable cache属性を保持する。native buffer/VM host PASS、rpi4 y build warning/error0。supervised worker slotはactual VkQueue domainをcallback終端まで保持し、新queueは古いslotが残るdomainを再利用しない。p006のroot/query hostでも所有を確認。Vk memory/nonzero BLOB/resource runtime/COMMAND等の公開は後続、p005/i13 in-progress。[詳細](../execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。
+
+## native VkMemoryとのnonzero BLOB接続（2026-10-09）
+
+p006のlazy coherent allocation/view出力へ、nonzero BLOBを同session typed identityで接続。actual first-export placementをRAM確保前に検証し、元memory/view/resourceの独立referenceとfailed native flushのquarantineを保持。query256MiBはlive declarationsのbudget、surviving BLOB/VM/shareのphysical heap測定値ではない。actual VA/MMU host/rpi4 y build PASS、private Vulkan pointer/runtime入口はまだ未接続。nextはp006 complete runtimeとdrained final close/public job binding。[依存出力/制限](../execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。p005/i13 in-progress。

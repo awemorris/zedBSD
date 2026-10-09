@@ -14,11 +14,15 @@
 #include "drivers/gpu/bcm2711/render-worker.h"
 
 struct bcm2711_render_device;
+struct bcm2711_vulkan_session;
 
 /* A retained session owns its descriptor list until the common core retires all pins. */
 struct bcm2711_render_session {
 	struct bcm2711_render_device *device;
 	struct bcm2711_render_resource *resources;
+
+	/* Protocol state stays private until the complete native executor is bound. */
+	struct bcm2711_vulkan_session *vulkan;
 	uint32_t count;
 	uint32_t next_identifier;
 
@@ -53,6 +57,8 @@ struct bcm2711_render_device {
 	struct drv_gpu_share_ops share_operations;
 	struct drv_gpu_scanout_ops scanout_operations;
 	struct drv_gpu_recovery_ops recovery_operations;
+	/* Live Vulkan allocation declarations reserve this aggregate logical heap budget. */
+	uint64_t vulkan_memory_bytes;
 	uint32_t sessions;
 	bool registered;
 };

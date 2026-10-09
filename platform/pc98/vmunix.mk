@@ -79,7 +79,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(KERN_ACL_OBJS) \
 	$(KERN_QUOTA_OBJS) \
 	$(BUILD)/src/kern/cwdinfo.o \
-	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o \
+	$(BUILD)/src/kern/elf.o $(BUILD)/src/kern/exec.o $(BUILD)/src/kern/sandbox.o \
 	$(BUILD)/src/kern/user-probe.o $(BUILD)/src/kern/syscall.o \
 	$(BUILD)/src/kern/uaccess.o $(BUILD)/src/kern/cdev.o \
 	$(BUILD)/src/kern/devfs.o $(BUILD)/src/kern/text-display.o \
