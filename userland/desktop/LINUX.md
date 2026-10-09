@@ -4,11 +4,16 @@ Debian 13 / amd64 / glibc で検証した Linux 版。compositor、独自 Waylan
 
 ## Build と install
 
-Debian 13 の build dependencies:
+`make keiland-linux` は、まず build に要る package が入っているかを package manager（apt・dnf/yum・pacman）で確かめる。足りない物があれば一覧を出し、端末なら導入してよいかを聞いて（y/N）、y なら sudo で導入する。build が成功したら、install してよいかを聞いて（y/N）、y なら `sudo make keiland-linux-install` と同じ install を行う。端末でない時と `KEILAND_ASK=n` の時は何も聞かず、足りない package と install の命令を出すだけにする（足りない時は build を始めずに止まる）。
+
+```sh
+make -j$(nproc) keiland-linux
+```
+
+Debian 13 で要る package（apt の名前。dnf/yum・pacman の名前は `tools/build/keiland-prerequisites.sh` の表）:
 
 ```sh
 sudo apt install build-essential libvulkan-dev linux-libc-dev python3 curl
-make -j$(nproc) keiland-linux
 sudo make keiland-linux-install
 ```
 
