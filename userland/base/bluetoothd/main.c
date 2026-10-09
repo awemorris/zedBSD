@@ -40,6 +40,7 @@
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/linkmgr.h"
+#include "userland/base/bluetoothd/map.h"
 #include "userland/base/bluetoothd/outq.h"
 #include "userland/base/bluetoothd/phoneio.h"
 #include "userland/base/bluetoothd/router.h"
@@ -57,6 +58,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <syslog.h>
+#include <time.h>
 #include <sys/ioctl.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
@@ -82,6 +84,20 @@
  */
 #define BTD_CLIENTS_MAX		16U
 #define BTD_CLIENTS_RESERVED	4U
+
+/* How many connections a uid that is neither root nor the seat's user may hold (ws197-p004 section 5.4). */
+#define BTD_CLIENTS_PER_UID	4U
+
+/*
+ * The phone's subscribers (ws197-p003 section 9.4, p004 section 5): how
+ * many connections at once, the queue past which events are dropped (and
+ * DROPPED told), and the queue under which DROPPED is told; the limit of a
+ * PAGE when the request names none (Q4).
+ */
+#define BTD_SUBSCRIBERS_MAX	2U
+#define BTD_SUBSCRIBE_DROP	196608U
+#define BTD_SUBSCRIBE_RESUME	65536U
+#define BTD_PAGE_LIMIT		500U
 
 /* How many packets one round of the loop handles at most (the clients are not starved). */
 #define BTD_PACKETS_A_ROUND	64U
@@ -116,7 +132,9 @@
  * whether it stopped reading (it is closed at the end of the loop's
  * round, where nothing else uses it), what is written to it and not sent
  * yet, what it writes (a line not ended yet, or a PHONE SEND's text being
- * read), and what it waits for (a scan's end, a pairing's end).
+ * read), what it waits for (a scan's end, a pairing's end, a phone
+ * request's DONE), and whether it is a phone's subscriber (it reads only
+ * events, ws197-p003 section 9.4) and dropped events it must be told of.
  */
 struct btd_client {
 	int descriptor;
@@ -128,6 +146,9 @@ struct btd_client {
 	int waits_scan;
 	int waits_pair;
 	int waits_connect;
+	int waits_phone;
+	int subscribed;
+	int sub_dropped;
 	uint8_t connect_address[BTD_ADDRESS_BYTES];
 };
 
@@ -186,6 +207,30 @@ static ssize_t btd_client_send(void *context, const uint8_t *data, size_t length
 static int btd_client_line(void *context, char *line);
 static void btd_client_text(void *context, const char *line, const uint8_t *text, size_t length);
 static void btd_phone_send_request(int index, const char *line, const uint8_t *text, size_t length);
+static uint64_t btd_token(int index);
+static struct btd_client *btd_token_client(uint64_t token);
+static int btd_phone_allowed(uid_t uid);
+static void btd_client_raw(struct btd_client *client, const char *line, const uint8_t *bytes, size_t length);
+static void btd_subscriber_write(struct btd_client *client, const char *line, const uint8_t *bytes, size_t length);
+static int btd_phone_line(uid_t uid, int permitted, const char *prefix, char *line, size_t size);
+static void btd_phone_watch(void);
+static void btd_phone_subscribe_request(int index);
+static void btd_phone_page_request(int index, const char *argument);
+static void btd_phone_read_request(int index, const char *argument);
+static int btd_decimal(const char *text, unsigned long long most, unsigned long long *value);
+static uint64_t btd_messages_clock(void *context);
+static int64_t btd_messages_wall(void *context);
+static int32_t btd_messages_offset(void *context, int64_t seconds);
+static int btd_messages_wanted(void *context);
+static int btd_messages_sdp(void *context, uint16_t uuid);
+static int btd_messages_open(void *context, unsigned server_channel);
+static int btd_messages_write(void *context, unsigned dlci, const uint8_t *data, size_t length, size_t *written);
+static void btd_messages_close(void *context, unsigned dlci);
+static void btd_messages_answer(void *context, uint64_t token, const char *line, const uint8_t *bytes, size_t length);
+static void btd_messages_emit(void *context, const char *line, const uint8_t *bytes, size_t length);
+static long btd_messages_room(void *context, uint64_t token);
+static void btd_messages_up(void *context);
+static void btd_messages_log(void *context, const char *line);
 
 /* The clients; a free slot has descriptor -1.  The daemon's one thread uses them. */
 static struct btd_client btd_clients[BTD_CLIENTS_MAX];
@@ -239,6 +284,23 @@ static struct btd_linkmgr btd_links;
  */
 static struct btd_phone btd_phone_link;
 static struct btd_sdps_db btd_records;
+
+/*
+ * The MAP client on the phone link (ws197-p003 section 8): started when
+ * the link is ready for its owner, its answers and events going to the
+ * clients through main's hooks.  It lives as long as the daemon.
+ */
+static struct btd_map btd_messages;
+
+/*
+ * What the phone's subscribers were told last (the line of PHONE STATE,
+ * an empty one before the first) and the uid of the phone's owner then
+ * (have_owner 0: no valid record).  A change of either is acted on at the
+ * end of the loop's round.
+ */
+static char btd_phone_told[BTD_PHONEIO_OUT_MAX];
+static int btd_have_owner;
+static uid_t btd_owner;
 
 
 /*
@@ -325,6 +387,9 @@ main(
 	struct btd_router_hid router_hid;
 	struct btd_router_phone router_phone;
 	struct btd_phone_hooks phone_hooks;
+	struct btd_phone_profile phone_profile;
+	struct btd_map_hooks map_hooks;
+	uint32_t first_session;
 	char expired_text[24];
 	size_t pending;
 	unsigned count;
@@ -415,6 +480,43 @@ main(
 	btd_router_set_phone(&btd_routing, &router_phone);
 	btd_pair_set_phone_handoff(&btd_pairing, btd_phone_handoff, &btd_phone_link);
 
+	/*
+	 * The MAP client (ws197-p003 section 8): the phone link's profile, its
+	 * hooks into the phone link and the clients, its sessions and requests
+	 * counted from a random number (a handle or request of an earlier run
+	 * is not taken for one of this run).
+	 */
+	memset(&map_hooks, 0, sizeof(map_hooks));
+	map_hooks.clock = btd_messages_clock;
+	map_hooks.wall = btd_messages_wall;
+	map_hooks.local_offset = btd_messages_offset;
+	map_hooks.wanted = btd_messages_wanted;
+	map_hooks.sdp_query = btd_messages_sdp;
+	map_hooks.dlc_open = btd_messages_open;
+	map_hooks.dlc_write = btd_messages_write;
+	map_hooks.dlc_close = btd_messages_close;
+	map_hooks.answer = btd_messages_answer;
+	map_hooks.emit = btd_messages_emit;
+	map_hooks.room = btd_messages_room;
+	map_hooks.up = btd_messages_up;
+	map_hooks.log = btd_messages_log;
+	btd_random(NULL, (uint8_t *)&first_session, sizeof(first_session));
+	btd_map_init(&btd_messages, &map_hooks, first_session);
+
+	/* The MAP client as the phone link's profile. */
+	memset(&phone_profile, 0, sizeof(phone_profile));
+	phone_profile.context = &btd_messages;
+	phone_profile.ready = btd_map_ready;
+	phone_profile.ended = btd_map_ended;
+	phone_profile.sdp_done = btd_map_sdp_done;
+	phone_profile.accept = btd_map_accept;
+	phone_profile.opened = btd_map_opened;
+	phone_profile.data = btd_map_data;
+	phone_profile.writable = btd_map_writable;
+	phone_profile.closed = btd_map_closed;
+	phone_profile.open_failed = btd_map_open_failed;
+	btd_phone_set_profile(&btd_phone_link, &phone_profile);
+
 	/* The controller there is now. */
 	btd_open();
 	btd_log("BLUETOOTHD READY state=%s uid=%u\n", btd_state_name(btd_session.state), (unsigned)getuid());
@@ -495,6 +597,9 @@ main(
 			btd_phone_pump(&btd_phone_link);
 		}
 
+		/* MAP's timers (its DLCs to close, OBEX's answers, the attempts after failures, the slow clients). */
+		btd_map_tick(&btd_messages, now);
+
 		/* The link manager's refused page scan write, and a page nobody ended in time. */
 		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
 			expired = btd_linkmgr_tick(&btd_links, now);
@@ -543,6 +648,9 @@ main(
 				continue;
 			btd_read((int)index);
 		}
+
+		/* The phone's owner and state as its subscribers know them, the pages waiting for room, the dropped events told. */
+		btd_phone_watch();
 
 		/* The clients that stopped reading are closed now. */
 		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
@@ -825,6 +933,11 @@ btd_timeout(
 		deadline = now;
 	if (ready && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
+
+	/* MAP's next timer (its own clock is the same). */
+	deadline = btd_map_deadline(&btd_messages);
+	if (deadline != 0U && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
 	deadline = btd_linkmgr_deadline(&btd_links, now);
 	if (btd_session_open &&
 	    deadline != 0U &&
@@ -858,6 +971,7 @@ btd_accept(
 	int listener)
 {
 	unsigned free_slots;
+	unsigned held;
 	unsigned index;
 	uid_t uid;
 	gid_t gid;
@@ -897,6 +1011,21 @@ btd_accept(
 		return;
 	}
 
+	/* A uid that is neither root nor the seat's user holds a few at most (ws197-p004 section 5.4). */
+	held = 0U;
+	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+		if (btd_clients[index].descriptor >= 0 && btd_clients[index].uid == uid)
+			held++;
+	}
+
+	/* A uid at the bound: the seat's user is not bound. */
+	if (!seated && held >= BTD_CLIENTS_PER_UID)
+		seated = btd_seated(uid);
+	if (!seated && held >= BTD_CLIENTS_PER_UID) {
+		(void)close(descriptor);
+		return;
+	}
+
 	/* A free slot, with a new generation and an empty queue. */
 	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
 		if (btd_clients[index].descriptor >= 0)
@@ -909,6 +1038,10 @@ btd_accept(
 		btd_phoneio_input_init(&btd_clients[index].input);
 		btd_clients[index].waits_scan = 0;
 		btd_clients[index].waits_pair = 0;
+		btd_clients[index].waits_connect = 0;
+		btd_clients[index].waits_phone = 0;
+		btd_clients[index].subscribed = 0;
+		btd_clients[index].sub_dropped = 0;
 		btd_outq_init(&btd_clients[index].output, BTD_OUTQ_MAX);
 		return;
 	}
@@ -1011,17 +1144,23 @@ btd_client_text(
 	client = context;
 	index = (int)(client - btd_clients);
 
-	/* A client waiting for another answer asks nothing more until it is answered. */
+	/* A client waiting for another answer asks nothing more until it is answered, and a subscriber asks nothing. */
 	if (client->waits_scan ||
 	    client->waits_pair ||
-	    client->waits_connect)
+	    client->waits_connect ||
+	    client->waits_phone ||
+	    client->subscribed)
 		return;
 
 	/* Succeeded: the request. */
 	btd_phone_send_request(index, line, text, length);
 }
 
-/* Answers PHONE SEND (its text whole): the messages of the phone link come with ws197-p003 i06 and i07. */
+/*
+ * Starts PHONE SEND to="NUMBER" length=N with its text whole (ws197-p004
+ * section 5.1): the owner's and root's, answered by MAP (PHONE SENT and
+ * DONE, or ERROR).
+ */
 static void
 btd_phone_send_request(
 	int index,
@@ -1029,12 +1168,60 @@ btd_phone_send_request(
 	const uint8_t *text,
 	size_t length)
 {
-	UNUSED_PARAMETER(line);
-	UNUSED_PARAMETER(text);
-	UNUSED_PARAMETER(length);
+	struct btd_client *client;
+	char key[BTD_PHONEIO_KEY_MAX];
+	char value[BTD_PHONEIO_VALUE_MAX];
+	char number[BTD_PHONEIO_VALUE_MAX];
+	const char *cursor;
+	const char *refused;
+	int allowed;
+	int got;
+	int same;
 
-	/* Not ready yet. */
-	btd_write(&btd_clients[index], "ERROR not-ready\nDONE\n");
+	/* The owner and root. */
+	client = &btd_clients[index];
+	allowed = btd_phone_allowed(client->uid);
+	if (!allowed) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The number among the arguments (the length was read by the input). */
+	number[0] = '\0';
+	cursor = line + strlen("PHONE SEND");
+	for (;;) {
+		got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
+		if (got != BTD_PHONEIO_ARGUMENT)
+			break;
+
+		/* to= is the number; length= was the input's. */
+		same = strcmp(key, "to");
+		if (same == 0) {
+			(void)snprintf(number, sizeof(number), "%s", value);
+			continue;
+		}
+
+		/* Any other key. */
+		same = strcmp(key, "length");
+		if (same != 0) {
+			btd_write(client, "ERROR argument\nDONE\n");
+			return;
+		}
+	}
+
+	/* A number given. */
+	if (number[0] == '\0') {
+		btd_write(client, "ERROR number\nDONE\n");
+		return;
+	}
+
+	/* Asked of MAP, the client waiting for its DONE (a refusal answered now). */
+	client->waits_phone = 1;
+	refused = btd_map_send(&btd_messages, btd_token(index), number, text, length);
+	if (refused != NULL) {
+		client->waits_phone = 0;
+		btd_write(client, "ERROR %s\nDONE\n", refused);
+	}
 }
 
 /* Carries out one request line, or takes an answer to the question asked. */
@@ -1061,10 +1248,12 @@ btd_line(
 		return;
 	}
 
-	/* A client waiting for its scan, its pairing or its connection asks nothing more until it is answered. */
+	/* A client waiting for its scan, its pairing, its connection or a phone request asks nothing more until it is answered; a subscriber asks nothing. */
 	if (client->waits_scan ||
 	    client->waits_pair ||
-	    client->waits_connect)
+	    client->waits_connect ||
+	    client->waits_phone ||
+	    client->subscribed)
 		return;
 
 	/* SHOW. */
@@ -1897,6 +2086,27 @@ btd_phone_request(
 		return;
 	}
 
+	/* SUBSCRIBE: the owner's and root's events (ws197-p004 section 5.2). */
+	same = strcmp(argument, "SUBSCRIBE");
+	if (same == 0) {
+		btd_phone_subscribe_request(index);
+		return;
+	}
+
+	/* PAGE messages ...: a page of the synchronisation. */
+	same = strncmp(argument, "PAGE ", 5U);
+	if (same == 0) {
+		btd_phone_page_request(index, argument + 5);
+		return;
+	}
+
+	/* READ handle=...: a message marked read on the phone. */
+	same = strncmp(argument, "READ ", 5U);
+	if (same == 0) {
+		btd_phone_read_request(index, argument + 5);
+		return;
+	}
+
 	/* DROP is root's alone. */
 	same = strncmp(argument, "DROP ", 5U);
 	if (same != 0) {
@@ -1949,20 +2159,21 @@ static void
 btd_phone_show_request(
 	struct btd_client *client)
 {
-	char line[BTD_LINE_MAX];
+	char line[BTD_PHONEIO_OUT_MAX];
 	int permitted;
 	int error;
 
 	/* What the client may see. */
 	permitted = btd_permitted(client->uid);
-	error = btd_phone_show(&btd_phone_link, client->uid, permitted, line, sizeof(line));
+	error = btd_phone_line(client->uid, permitted, "PHONE ", line, sizeof(line));
 	if (error != 0) {
 		btd_write(client, "DONE\n");
 		return;
 	}
 
 	/* Succeeded: the line. */
-	btd_write(client, "%s\nDONE\n", line);
+	btd_client_raw(client, line, NULL, 0U);
+	btd_write(client, "DONE\n");
 }
 
 /*
@@ -2060,6 +2271,9 @@ btd_phone_link_request(
 		switched = "on";
 	btd_log("bluetoothd: phone link of %s %s by uid %u\n", address_text, switched, (unsigned)client->uid);
 	btd_write(client, "DONE\n");
+
+	/* MAP follows the switch and the profiles (stopped, started, or a failed one tried again at once). */
+	btd_map_check(&btd_messages);
 }
 
 /* Gives the name of a uid's account (the phone link's hook).  Returns 0 or ENOENT. */
@@ -2353,6 +2567,13 @@ btd_client_close(
 	client->waits_scan = 0;
 	client->waits_pair = 0;
 	client->waits_connect = 0;
+
+	/* Its phone request is forgotten (an answer still to come reaches nobody), and it subscribes no more. */
+	if (client->waits_phone)
+		btd_map_cancel(&btd_messages, btd_token(index));
+	client->waits_phone = 0;
+	client->subscribed = 0;
+	client->sub_dropped = 0;
 
 	/* The agent is gone; a question it was asked is no, and it hears no ASK-END. */
 	if (btd_agent_client == index)
@@ -2823,4 +3044,747 @@ btd_seat_check(
 
 	/* Succeeded: the seat's user. */
 	btd_phone_set_seat(&btd_phone_link, 1, status.st_uid, now);
+}
+
+/*
+ * Gives a client's token for MAP's answers (ws197-p003 section 4.2): its
+ * generation and its slot, so an answer for a client that went never
+ * reaches the next one in the slot.
+ */
+static uint64_t
+btd_token(
+	int index)
+{
+	uint64_t token;
+
+	/* The generation above the slot (the slot counted from 1, so no token is 0). */
+	token = ((uint64_t)btd_clients[index].generation << 8) | (uint64_t)(index + 1);
+
+	/* The token. */
+	return token;
+}
+
+/* Finds the client a token names, or NULL when it went (or stopped reading). */
+static struct btd_client *
+btd_token_client(
+	uint64_t token)
+{
+	struct btd_client *client;
+	uint64_t slot;
+
+	/* The slot. */
+	slot = token & 0xffU;
+	if (slot == 0U || slot > BTD_CLIENTS_MAX)
+		return NULL;
+	client = &btd_clients[slot - 1U];
+
+	/* The same client: open, reading, of the same generation. */
+	if (client->descriptor < 0 || client->dead)
+		return NULL;
+	if (client->generation != (uint32_t)(token >> 8))
+		return NULL;
+
+	/* Succeeded: the client. */
+	return client;
+}
+
+/*
+ * Tells whether a uid may use the phone's messages (ws197-p004 section
+ * 5.4): root, and the owner of the valid record.
+ */
+static int
+btd_phone_allowed(
+	uid_t uid)
+{
+	/* Root. */
+	if (uid == 0)
+		return 1;
+
+	/* The owner of a valid record. */
+	if (btd_phone_link.have_record &&
+	    btd_phone_link.record_valid &&
+	    btd_phone_link.record.uid == uid)
+		return 1;
+
+	/* Anyone else. */
+	return 0;
+}
+
+/*
+ * Writes a line (its newline added) and bytes after it to a client's
+ * queue, as long as the line and the bytes are (no formatting); a client
+ * whose queue would pass its limit is closed at the end of the round,
+ * never here.
+ */
+static void
+btd_client_raw(
+	struct btd_client *client,
+	const char *line,
+	const uint8_t *bytes,
+	size_t length)
+{
+	int error;
+
+	/* A client already closed, or that stopped reading. */
+	if (client->descriptor < 0 || client->dead)
+		return;
+
+	/* The line and its newline. */
+	error = btd_outq_append(&client->output, line, strlen(line));
+	if (error == 0)
+		error = btd_outq_append(&client->output, "\n", 1U);
+
+	/* The bytes after it. */
+	if (error == 0 && length != 0U)
+		error = btd_outq_append(&client->output, bytes, length);
+
+	/* A client that does not read enough goes at the end of the round. */
+	if (error != 0) {
+		client->dead = 1;
+		return;
+	}
+
+	/* Succeeded: sent as far as it goes now. */
+	btd_client_flush((int)(client - btd_clients));
+}
+
+/*
+ * Writes an event to a subscriber (ws197-p003 section 9.4): past
+ * BTD_SUBSCRIBE_DROP queued, the event is dropped and the subscriber told
+ * PHONE DROPPED once its queue is short again (btd_phone_watch).
+ */
+static void
+btd_subscriber_write(
+	struct btd_client *client,
+	const char *line,
+	const uint8_t *bytes,
+	size_t length)
+{
+	size_t pending;
+	size_t needed;
+
+	/* Dropping already: this one too. */
+	if (client->sub_dropped)
+		return;
+
+	/* Room for it under the mark, else dropped. */
+	pending = btd_outq_pending(&client->output);
+	needed = strlen(line) + 1U + length;
+	if (pending + needed > BTD_SUBSCRIBE_DROP) {
+		client->sub_dropped = 1;
+		return;
+	}
+
+	/* Succeeded: written. */
+	btd_client_raw(client, line, bytes, length);
+}
+
+/*
+ * Writes the phone's line for a uid after prefix (PHONE SHOW's "PHONE ",
+ * PHONE STATE's "PHONE STATE "): the phone link's part, then for those who
+ * see it whole MAP's part and why the link or MAP stopped.  Returns 0, or
+ * ENOENT when there is no record or nothing to show to that uid.
+ */
+static int
+btd_phone_line(
+	uid_t uid,
+	int permitted,
+	const char *prefix,
+	char *line,
+	size_t size)
+{
+	char phone[BTD_PHONEIO_OUT_MAX];
+	char messages[96];
+	const char *whole;
+	const char *own_why;
+	int error;
+
+	/* The phone link's part ("PHONE address=..."). */
+	error = btd_phone_show(&btd_phone_link, uid, permitted, phone, sizeof(phone));
+	if (error != 0)
+		return error;
+
+	/* Seen in part: as it is. */
+	whole = strstr(phone, " link=");
+	if (whole == NULL) {
+		(void)snprintf(line, size, "%s%s", prefix, phone + strlen("PHONE "));
+		return 0;
+	}
+
+	/* MAP's part. */
+	error = btd_map_state_text(&btd_messages, messages, sizeof(messages));
+	if (error != 0)
+		messages[0] = '\0';
+
+	/* Why the link stopped, when MAP says no why of its own. */
+	own_why = strstr(messages, " why=");
+	if (btd_phone_link.why != NULL &&
+	    btd_phone_link.state != BTD_PHONE_READY &&
+	    own_why == NULL) {
+		(void)snprintf(line, size, "%s%s %s why=%s", prefix, phone + strlen("PHONE "), messages, btd_phone_link.why);
+		return 0;
+	}
+
+	/* Succeeded: the whole line. */
+	(void)snprintf(line, size, "%s%s %s", prefix, phone + strlen("PHONE "), messages);
+	return 0;
+}
+
+/*
+ * Keeps the phone's subscribers right, at the end of each round
+ * (ws197-p004 section 5.4): when the owner changed, the subscribers and
+ * waiting requests of anyone else end and MAP looks again whether it is
+ * wanted; the pages that waited for room go on; a subscriber whose queue
+ * is short again hears PHONE DROPPED; and a changed state is told.
+ */
+static void
+btd_phone_watch(void)
+{
+	static char line[BTD_PHONEIO_OUT_MAX];
+	struct btd_client *client;
+	unsigned index;
+	unsigned subscribers;
+	size_t pending;
+	int have_owner;
+	int allowed;
+	int same;
+	int error;
+
+	/* The owner now. */
+	have_owner = 0;
+	if (btd_phone_link.have_record && btd_phone_link.record_valid)
+		have_owner = 1;
+
+	/* A new owner, or none: the others' subscribers and requests end, MAP looks again. */
+	if (have_owner != btd_have_owner || (have_owner && btd_phone_link.record.uid != btd_owner)) {
+		btd_have_owner = have_owner;
+		btd_owner = btd_phone_link.record.uid;
+		for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+			client = &btd_clients[index];
+			if (client->descriptor < 0)
+				continue;
+			allowed = btd_phone_allowed(client->uid);
+			if (allowed)
+				continue;
+
+			/*
+			 * A subscriber goes; so does a client waiting for a phone
+			 * request (closed, not refused: a SEND already pushed must
+			 * read as not known, never as a refusal that invites a second
+			 * send, ws197-p004 review-2 m4).
+			 */
+			if (client->subscribed)
+				client->dead = 1;
+			if (client->waits_phone) {
+				btd_map_cancel(&btd_messages, btd_token((int)index));
+				client->waits_phone = 0;
+				client->dead = 1;
+			}
+		}
+
+		/* MAP looks again whether it is wanted. */
+		btd_map_check(&btd_messages);
+	}
+
+	/* The pages waiting for their clients' room. */
+	btd_map_pump(&btd_messages);
+
+	/* Each subscriber whose queue is short again hears what it lost. */
+	subscribers = 0U;
+	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+		client = &btd_clients[index];
+		if (client->descriptor < 0 || !client->subscribed || client->dead)
+			continue;
+		subscribers++;
+		pending = btd_outq_pending(&client->output);
+		if (client->sub_dropped && pending <= BTD_SUBSCRIBE_RESUME) {
+			client->sub_dropped = 0;
+			btd_client_raw(client, "PHONE DROPPED", NULL, 0U);
+		}
+	}
+
+	/* The state as root sees it, told when it changed. */
+	if (subscribers == 0U)
+		return;
+	error = btd_phone_line(0, 1, "PHONE STATE ", line, sizeof(line));
+	if (error != 0)
+		return;
+	same = strcmp(line, btd_phone_told);
+	if (same == 0)
+		return;
+	(void)snprintf(btd_phone_told, sizeof(btd_phone_told), "%s", line);
+
+	/* Succeeded: told to each subscriber allowed. */
+	btd_messages_emit(NULL, line, NULL, 0U);
+}
+
+/*
+ * Answers PHONE SUBSCRIBE (ws197-p004 section 5.1): the owner and root,
+ * two at a time; DONE, then the state now, then events alone.
+ */
+static void
+btd_phone_subscribe_request(
+	int index)
+{
+	char line[BTD_PHONEIO_OUT_MAX];
+	struct btd_client *client;
+	unsigned count;
+	unsigned slot;
+	int allowed;
+	int error;
+
+	/* The owner and root (no record: nobody's). */
+	client = &btd_clients[index];
+	allowed = btd_phone_allowed(client->uid);
+	if (!allowed || !btd_phone_link.have_record) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* Two at a time. */
+	count = 0U;
+	for (slot = 0U; slot < BTD_CLIENTS_MAX; slot++) {
+		if (btd_clients[slot].descriptor >= 0 && btd_clients[slot].subscribed)
+			count++;
+	}
+
+	/* No third. */
+	if (count >= BTD_SUBSCRIBERS_MAX) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* Subscribed: DONE, then the state now. */
+	client->subscribed = 1;
+	client->sub_dropped = 0;
+	btd_write(client, "DONE\n");
+	error = btd_phone_line(0, 1, "PHONE STATE ", line, sizeof(line));
+	if (error == 0)
+		btd_client_raw(client, line, NULL, 0U);
+}
+
+/*
+ * Starts PHONE PAGE messages since=N [limit=N] [cursor=C] count=N
+ * (ws197-p004 section 5.1): the owner's and root's, answered by MAP.
+ */
+static void
+btd_phone_page_request(
+	int index,
+	const char *argument)
+{
+	struct btd_client *client;
+	char key[BTD_PHONEIO_KEY_MAX];
+	char value[BTD_PHONEIO_VALUE_MAX];
+	char cursor_text[BTD_PHONEIO_VALUE_MAX];
+	const char *cursor;
+	const char *refused;
+	unsigned long long number;
+	int64_t since;
+	unsigned limit;
+	unsigned count;
+	int have_since;
+	int allowed;
+	int error;
+	int got;
+	int same;
+
+	/* The owner and root. */
+	client = &btd_clients[index];
+	allowed = btd_phone_allowed(client->uid);
+	if (!allowed) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* The messages, the only kind of this Phase. */
+	same = strncmp(argument, "messages", 8U);
+	if (same != 0 || (argument[8] != ' ' && argument[8] != '\0')) {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* Each argument. */
+	have_since = 0;
+	since = 0;
+	limit = BTD_PAGE_LIMIT;
+	count = 0U;
+	cursor_text[0] = '\0';
+	cursor = argument + 8;
+	for (;;) {
+		got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
+		if (got == BTD_PHONEIO_END)
+			break;
+		if (got != BTD_PHONEIO_ARGUMENT) {
+			btd_write(client, "ERROR argument\nDONE\n");
+			return;
+		}
+
+		/* The cursor, as it is. */
+		same = strcmp(key, "cursor");
+		if (same == 0) {
+			(void)snprintf(cursor_text, sizeof(cursor_text), "%s", value);
+			continue;
+		}
+
+		/* since: decimal seconds, not negative. */
+		same = strcmp(key, "since");
+		if (same == 0) {
+			error = btd_decimal(value, 0x7fffffffffffffffULL, &number);
+			if (error != 0) {
+				btd_write(client, "ERROR argument\nDONE\n");
+				return;
+			}
+
+			/* Taken. */
+			since = (int64_t)number;
+			have_since = 1;
+			continue;
+		}
+
+		/* limit and count: small decimal numbers (their ranges are MAP's to check). */
+		error = btd_decimal(value, 100000ULL, &number);
+		if (error != 0) {
+			btd_write(client, "ERROR argument\nDONE\n");
+			return;
+		}
+
+		/* The limit. */
+		same = strcmp(key, "limit");
+		if (same == 0) {
+			limit = (unsigned)number;
+			continue;
+		}
+
+		/* The count. */
+		same = strcmp(key, "count");
+		if (same == 0) {
+			count = (unsigned)number;
+			continue;
+		}
+
+		/* Any other key. */
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* since and count given. */
+	if (!have_since || count == 0U) {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* Asked of MAP, the client waiting for its DONE (a refusal answered now). */
+	client->waits_phone = 1;
+	refused = btd_map_page(&btd_messages, btd_token(index), since, limit, cursor_text, count);
+	if (refused != NULL) {
+		client->waits_phone = 0;
+		btd_write(client, "ERROR %s\nDONE\n", refused);
+	}
+}
+
+/* Starts PHONE READ handle=H (ws197-p004 section 5.1): the owner's and root's, answered by MAP. */
+static void
+btd_phone_read_request(
+	int index,
+	const char *argument)
+{
+	struct btd_client *client;
+	char key[BTD_PHONEIO_KEY_MAX];
+	char value[BTD_PHONEIO_VALUE_MAX];
+	const char *cursor;
+	const char *refused;
+	int allowed;
+	int got;
+	int same;
+
+	/* The owner and root. */
+	client = &btd_clients[index];
+	allowed = btd_phone_allowed(client->uid);
+	if (!allowed) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* handle=, the one argument. */
+	cursor = argument;
+	got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
+	same = strcmp(key, "handle");
+	if (got != BTD_PHONEIO_ARGUMENT || same != 0 || *cursor != '\0') {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* Asked of MAP, the client waiting for its DONE (a refusal answered now). */
+	client->waits_phone = 1;
+	refused = btd_map_read(&btd_messages, btd_token(index), value);
+	if (refused != NULL) {
+		client->waits_phone = 0;
+		btd_write(client, "ERROR %s\nDONE\n", refused);
+	}
+}
+
+/* MAP's clock: the daemon's monotonic milliseconds. */
+static uint64_t
+btd_messages_clock(
+	void *context)
+{
+	uint64_t now;
+
+	UNUSED_PARAMETER(context);
+
+	/* The daemon's clock. */
+	now = btd_now_ms();
+	return now;
+}
+
+/* MAP's time of day: seconds since 1970 UTC. */
+static int64_t
+btd_messages_wall(
+	void *context)
+{
+	time_t now;
+
+	UNUSED_PARAMETER(context);
+
+	/* The system's time. */
+	now = time(NULL);
+	return (int64_t)now;
+}
+
+/* MAP's zone: zedBSD's offset from UTC at a time (0 when the zone cannot be read). */
+static int32_t
+btd_messages_offset(
+	void *context,
+	int64_t seconds)
+{
+	struct tm broken;
+	struct tm *local;
+	time_t moment;
+
+	UNUSED_PARAMETER(context);
+
+	/* The local time then. */
+	moment = (time_t)seconds;
+	local = localtime_r(&moment, &broken);
+	if (local == NULL)
+		return 0;
+
+	/* Its offset. */
+	return (int32_t)broken.tm_gmtoff;
+}
+
+/* Tells MAP whether messages are wanted: a valid record that is on, with its messages. */
+static int
+btd_messages_wanted(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+
+	/* No valid record. */
+	if (!btd_phone_link.have_record || !btd_phone_link.record_valid)
+		return 0;
+
+	/* Off, or without messages. */
+	if (!btd_phone_link.record.enabled)
+		return 0;
+	if ((btd_phone_link.record.profiles & BTD_PHONEREC_MESSAGES) == 0U)
+		return 0;
+
+	/* Wanted. */
+	return 1;
+}
+
+/* MAP's SDP query, on the phone link. */
+static int
+btd_messages_sdp(
+	void *context,
+	uint16_t uuid)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's query. */
+	error = btd_phone_sdp_query(&btd_phone_link, uuid);
+	return error;
+}
+
+/* MAP's DLC asked for, on the phone link. */
+static int
+btd_messages_open(
+	void *context,
+	unsigned server_channel)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's DLC. */
+	error = btd_phone_dlc_open(&btd_phone_link, server_channel, btd_now_ms());
+	return error;
+}
+
+/* MAP's bytes on a DLC, as far as its credits take them. */
+static int
+btd_messages_write(
+	void *context,
+	unsigned dlci,
+	const uint8_t *data,
+	size_t length,
+	size_t *written)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's DLC. */
+	error = btd_phone_dlc_write(&btd_phone_link, dlci, data, length, written);
+	return error;
+}
+
+/* MAP's DLC closed (one already gone is nothing). */
+static void
+btd_messages_close(
+	void *context,
+	unsigned dlci)
+{
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's DLC. */
+	(void)btd_phone_dlc_close(&btd_phone_link, dlci, btd_now_ms());
+}
+
+/* Writes MAP's answer to the client a token names (DONE ends its wait); a client that went hears nothing. */
+static void
+btd_messages_answer(
+	void *context,
+	uint64_t token,
+	const char *line,
+	const uint8_t *bytes,
+	size_t length)
+{
+	struct btd_client *client;
+	int same;
+
+	UNUSED_PARAMETER(context);
+
+	/* The client. */
+	client = btd_token_client(token);
+	if (client == NULL)
+		return;
+
+	/* The line and its bytes. */
+	btd_client_raw(client, line, bytes, length);
+
+	/* Succeeded: DONE ends the wait. */
+	same = strcmp(line, "DONE");
+	if (same == 0)
+		client->waits_phone = 0;
+}
+
+/* Writes an event to each subscriber that may hear it (the owner's and root's, checked now, ws197-p004 section 5.4). */
+static void
+btd_messages_emit(
+	void *context,
+	const char *line,
+	const uint8_t *bytes,
+	size_t length)
+{
+	struct btd_client *client;
+	unsigned index;
+	int allowed;
+
+	UNUSED_PARAMETER(context);
+
+	/* Each subscriber. */
+	for (index = 0U; index < BTD_CLIENTS_MAX; index++) {
+		client = &btd_clients[index];
+		if (client->descriptor < 0 || !client->subscribed || client->dead)
+			continue;
+
+		/* Only the owner and root, as they are now. */
+		allowed = btd_phone_allowed(client->uid);
+		if (!allowed)
+			continue;
+
+		/* Written, or dropped when its queue is full. */
+		btd_subscriber_write(client, line, bytes, length);
+	}
+}
+
+/* Tells MAP how many bytes a token's client still takes (-1: it went). */
+static long
+btd_messages_room(
+	void *context,
+	uint64_t token)
+{
+	struct btd_client *client;
+	size_t pending;
+
+	UNUSED_PARAMETER(context);
+
+	/* The client. */
+	client = btd_token_client(token);
+	if (client == NULL)
+		return -1;
+
+	/* Its queue's room. */
+	pending = btd_outq_pending(&client->output);
+	return (long)(BTD_OUTQ_MAX - pending);
+}
+
+/* MAP came up: the phone link's waits start from the first. */
+static void
+btd_messages_up(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's backoff. */
+	btd_phone_profile_ok(&btd_phone_link);
+}
+
+/* A line of MAP's for the daemon's log. */
+static void
+btd_messages_log(
+	void *context,
+	const char *line)
+{
+	UNUSED_PARAMETER(context);
+
+	/* Logged. */
+	btd_log("bluetoothd: %s\n", line);
+}
+
+/* Reads a decimal number of 1 to 19 digits, at most most.  Returns 0 with it, or EINVAL. */
+static int
+btd_decimal(
+	const char *text,
+	unsigned long long most,
+	unsigned long long *value)
+{
+	unsigned long long number;
+	unsigned long long digit;
+	size_t length;
+	size_t index;
+
+	/* 1 to 19 digits. */
+	length = strlen(text);
+	if (length == 0U || length > 19U)
+		return EINVAL;
+
+	/* Each digit, the number within most. */
+	number = 0U;
+	for (index = 0U; index < length; index++) {
+		if (text[index] < '0' || text[index] > '9')
+			return EINVAL;
+		digit = (unsigned long long)(text[index] - '0');
+		if (number > (most - digit) / 10U)
+			return EINVAL;
+		number = number * 10U + digit;
+	}
+
+	/* Succeeded: the number. */
+	*value = number;
+	return 0;
 }

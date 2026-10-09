@@ -25,12 +25,17 @@
  * adds PAIR's option phone=1 (a phone for the phone link, BR/EDR only:
  * ERROR phone-le otherwise, ERROR busy-links while the HID host uses every
  * link), whose PAIRED line ends with "phone=1", or "phone=0 why=WORD" when
- * the phone link did not take it; and, for root, PHONE PROBE ADDRESS
- * uuid=0x1132|0x112F (SDP, RFCOMM and OBEX tried on the phone's link,
- * answered "PROBE uuid=... channel=... connect=0x.. get=0x.. bytes=N
- * disconnect=0x.." or ERROR WHY) and PHONE DROP ADDRESS.  A pairing's
- * questions, to the agent or the pairing's client, name the device and
- * who started it:
+ * the phone link did not take it; and, for root, PHONE DROP ADDRESS.
+ * ws197-p003 adds the phone's requests (plan/ws197/phase004/phase.md
+ * section 5, which is their grammar): PHONE SHOW, PHONE LINK ADDRESS
+ * on|off [profiles=m,c,h], PHONE SUBSCRIBE (events alone from then on:
+ * PHONE STATE, PHONE MESSAGE with its text, PHONE SENT, PHONE
+ * MESSAGE-GONE, PHONE DROPPED), PHONE PAGE messages since=N [limit=N]
+ * [cursor=C] count=N, PHONE READ handle=H and PHONE SEND to="N" length=N
+ * followed by the text's bytes.  The daemon's phone lines are up to 2047
+ * bytes, and a line ending in length=N is followed by N bytes.  A
+ * pairing's questions, to the agent or the pairing's client, name the
+ * device and who started it:
  *
  *   CONFIRM NUMBER address=... type=... uid=...   answered YES or NO
  *   CONSENT address=... type=... uid=...          answered YES or NO

@@ -181,7 +181,7 @@ static int map_item(struct btd_map *map, char *line, size_t size, uint64_t handl
 static uint64_t map_key(unsigned folder, const char *datetime, const char *peer, const uint8_t *text, size_t length);
 static uint64_t map_hash(uint64_t hash, const uint8_t *bytes, size_t length);
 static const char *map_error_word(int error, uint8_t code);
-static int map_parse_cursor(const char *cursor, uint32_t *session, uint64_t *since, unsigned *folder, unsigned *offset);
+static int map_parse_cursor(const char *cursor, uint32_t *session, uint64_t *since, unsigned *folder, unsigned *offset, int *capped);
 static int map_parse_handle(const char *text, uint32_t *session, uint64_t *handle);
 static int map_hex(const char *text, size_t length, uint64_t *value);
 static void map_period(struct btd_map *map, int64_t since, char *text, size_t size, int *guessed, int32_t *offset);
@@ -200,9 +200,9 @@ static uint64_t map_earlier(uint64_t earliest, uint64_t deadline);
 
 /*
  * Prepares the MAP client: off, nothing queued; the sessions of its MAS
- * connections are numbered from first_session (a number the daemon draws
- * at its start, so a handle of an earlier run is not taken for one of
- * this run).
+ * connections and its sent messages' request numbers count from
+ * first_session (a number the daemon draws at its start, so a handle or a
+ * request of an earlier run is not taken for one of this run).
  */
 void
 btd_map_init(
@@ -215,6 +215,7 @@ btd_map_init(
 	map->hooks = *hooks;
 	map->state = BTD_MAP_OFF;
 	map->session = first_session;
+	map->next_request = first_session;
 }
 
 /*
@@ -542,18 +543,21 @@ btd_map_open_failed(
 }
 
 /*
- * Starts a PHONE PAGE request (section 8.5): count messages from the
- * folder and offset the cursor names (empty: the inbox's first), of the
- * time since on.  The answers go to token: the messages, PHONE PAGE-END
- * with the next cursor, DONE; or ERROR.  Returns NULL when it started, or
- * the word of an ERROR to answer now: not-ready, argument, stale-cursor
- * (a cursor of another session or since), busy.
+ * Starts a PHONE PAGE request (section 8.5, ws197-p004 section 5.1):
+ * count messages from the folder and offset the cursor names (empty: the
+ * inbox's first), of the time since on, at most limit messages of a
+ * folder (0: no limit).  The answers go to token: the messages, PHONE
+ * PAGE-END with the next cursor and whether a folder was cut at the
+ * limit, DONE; or ERROR.  Returns NULL when it started, or the word of an
+ * ERROR to answer now: not-ready, argument, stale-cursor (a cursor of
+ * another session or since), busy.
  */
 const char *
 btd_map_page(
 	struct btd_map *map,
 	uint64_t token,
 	int64_t since,
+	unsigned limit,
 	const char *cursor,
 	unsigned count)
 {
@@ -565,14 +569,17 @@ btd_map_page(
 	unsigned folder;
 	unsigned offset;
 	unsigned index;
+	int capped;
 	int error;
 
 	/* MAP ready. */
 	if (map->state != BTD_MAP_READY)
 		return "not-ready";
 
-	/* A count and a time that can be asked. */
+	/* A count, a limit and a time that can be asked. */
 	if (count == 0U || count > BTD_MAP_PAGE_COUNT_MAX)
+		return "argument";
+	if (limit > BTD_MAP_FOLDER_LIMIT)
 		return "argument";
 	if (since < 0)
 		return "argument";
@@ -580,8 +587,9 @@ btd_map_page(
 	/* The folder and offset: the first, or the cursor's of this session and since. */
 	folder = BTD_MAP_FOLDER_INBOX;
 	offset = 0U;
+	capped = 0;
 	if (cursor[0] != '\0') {
-		error = map_parse_cursor(cursor, &session, &cursor_since, &folder, &offset);
+		error = map_parse_cursor(cursor, &session, &cursor_since, &folder, &offset, &capped);
 		if (error != 0)
 			return "argument";
 		if (session != map->session || cursor_since != (uint64_t)since)
@@ -590,7 +598,7 @@ btd_map_page(
 
 	/* Past the last folder: nothing more. */
 	if (folder >= BTD_MAP_FOLDERS) {
-		(void)snprintf(line, sizeof(line), "PHONE PAGE-END cursor=%s more=0 count=0 skipped=0", cursor);
+		(void)snprintf(line, sizeof(line), "PHONE PAGE-END cursor=%s more=0 count=0 skipped=0 capped=%d", cursor, capped);
 		map->hooks.answer(map->hooks.context, token, line, NULL, 0U);
 		map->hooks.answer(map->hooks.context, token, "DONE", NULL, 0U);
 		return NULL;
@@ -630,6 +638,8 @@ btd_map_page(
 	page->folder = folder;
 	page->offset = offset;
 	page->count = count;
+	page->limit = limit;
+	page->capped = capped;
 
 	/* Succeeded: under way. */
 	map_settle(map);
@@ -2384,7 +2394,7 @@ map_page_continue(
 	struct btd_map_entry *entry;
 	struct btd_map_op op;
 	char line[128];
-	unsigned limit;
+	unsigned size;
 	unsigned next_folder;
 	unsigned next_offset;
 	long room;
@@ -2436,19 +2446,22 @@ map_page_continue(
 		return;
 	}
 
-	/* The folder's limit: 500 messages, or fewer when the phone counted fewer. */
-	limit = BTD_MAP_FOLDER_LIMIT;
-	if (map->sizes_known[page->folder] && map->sizes_since[page->folder] == page->since) {
-		if (map->sizes[page->folder] < limit)
-			limit = map->sizes[page->folder];
-	}
+	/* The folder's size when the phone counted it (0xffffffff: not known). */
+	size = 0xffffffffU;
+	if (map->sizes_known[page->folder] && map->sizes_since[page->folder] == page->since)
+		size = map->sizes[page->folder];
 
-	/* The next page: further in this folder while it gave a whole page within the limit, else the next folder. */
+	/* The next page: further in this folder while it gave a whole page short of its size and of the limit, else the next folder. */
 	next_folder = page->folder;
 	next_offset = page->offset + (unsigned)page->listed;
-	if (page->listed != page->count || next_offset >= limit) {
+	if (page->listed != page->count || next_offset >= size) {
 		next_folder = page->folder + 1U;
 		next_offset = 0U;
+	} else if (page->limit != 0U && next_offset >= page->limit) {
+		/* Messages left beyond the limit: cut, and said so. */
+		next_folder = page->folder + 1U;
+		next_offset = 0U;
+		page->capped = 1;
 	}
 
 	/* More while a folder is left. */
@@ -2459,14 +2472,16 @@ map_page_continue(
 	/* The end of the page and its answer. */
 	(void)snprintf(line,
 		       sizeof(line),
-		       "PHONE PAGE-END cursor=%08lx.%llx.%u.%u more=%d count=%u skipped=%u",
+		       "PHONE PAGE-END cursor=%08lx.%llx.%u.%u.%d more=%d count=%u skipped=%u capped=%d",
 		       (unsigned long)map->session,
 		       (unsigned long long)page->since,
 		       next_folder,
 		       next_offset,
+		       page->capped,
 		       more,
 		       page->given,
-		       page->skipped);
+		       page->skipped,
+		       page->capped);
 	map->hooks.answer(map->hooks.context, page->token, line, NULL, 0U);
 	map->hooks.answer(map->hooks.context, page->token, "DONE", NULL, 0U);
 
@@ -3166,7 +3181,8 @@ map_error_word(
 
 /*
  * Reads a cursor: <session, 8 hex digits>.<since, 1 to 16 hex
- * digits>.<folder>.<offset, decimal>.  Returns 0, or EINVAL.
+ * digits>.<folder>.<offset, decimal>.<capped, 0 or 1>.  Returns 0, or
+ * EINVAL.
  */
 static int
 map_parse_cursor(
@@ -3174,7 +3190,8 @@ map_parse_cursor(
 	uint32_t *session,
 	uint64_t *since,
 	unsigned *folder,
-	unsigned *offset)
+	unsigned *offset,
+	int *capped)
 {
 	const char *dot;
 	const char *part;
@@ -3210,9 +3227,12 @@ map_parse_cursor(
 		return EINVAL;
 	*folder = (unsigned)(part[0] - '0');
 
-	/* The offset: one to four decimal digits. */
+	/* The offset: one to four decimal digits up to the last dot. */
 	part += 2;
-	length = strlen(part);
+	dot = strchr(part, '.');
+	if (dot == NULL)
+		return EINVAL;
+	length = (size_t)(dot - part);
 	if (length == 0U || length > 4U)
 		return EINVAL;
 	*offset = 0U;
@@ -3221,6 +3241,12 @@ map_parse_cursor(
 			return EINVAL;
 		*offset = *offset * 10U + (unsigned)(part[index] - '0');
 	}
+
+	/* Whether a folder was cut at the limit: 0 or 1, the end. */
+	part = dot + 1;
+	if ((part[0] != '0' && part[0] != '1') || part[1] != '\0')
+		return EINVAL;
+	*capped = part[0] - '0';
 
 	/* Succeeded: the cursor read. */
 	return 0;
