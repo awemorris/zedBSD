@@ -26,7 +26,9 @@
  *
  * While the screen is locked, and while a fullscreen window is on top
  * (unless the notification is urgent), a notification is not shown but
- * goes straight to the log.  The log lines the tests read: KWL NOTIFY
+ * goes straight to the log; on the lock screen one with words of its own
+ * for it (lock_text, ws197-p004c: "New message from <name>") is shown with
+ * those words alone, nothing of its title and body.  The log lines the tests read: KWL NOTIFY
  * show, hide, gone, skip, dismiss, activate.
  */
 
@@ -342,9 +344,9 @@ kwl_notify_board_width(
 
 /*
  * Tells whether a notification is not to be shown but to go straight to
- * the log: while the screen is locked (whatever it is), and while a
- * fullscreen window is on top (unless it is urgent).  Returns the reason's
- * code: 0 to show, 1 locked, 2 fullscreen.
+ * the log: while the screen is locked (unless it has words for the lock
+ * screen), and while a fullscreen window is on top (unless it is urgent).
+ * Returns the reason's code: 0 to show, 1 locked, 2 fullscreen.
  */
 static int
 popup_route(
@@ -353,9 +355,12 @@ popup_route(
 {
 	struct kwl_object *top;
 
-	/* The lock screen shows no notification. */
-	if (server->locked)
-		return 1;
+	/* The lock screen shows only a notification's words for it (ws197-p004c). */
+	if (server->locked) {
+		if (item->lock_text[0] == '\0')
+			return 1;
+		return 0;
+	}
 
 	/* A fullscreen window on top is not covered, but by an urgent one. */
 	top = kwl_top_window(server);
@@ -580,6 +585,12 @@ kwl_notify_draw_card(
 	/* The text's column, between the icon and the close sign. */
 	text_left = left + POPUP_PADDING + POPUP_ICON + POPUP_PADDING;
 	text_width = width - (text_left - left) - POPUP_PADDING - POPUP_CLOSE;
+
+	/* On the lock screen, the words for it alone (ws197-p004c). */
+	if (server->locked && item->lock_text[0] != '\0') {
+		glass_draw_text(server, command, SIZE_TITLE, text_left, top + 44, item->lock_text, text_width, ink);
+		return;
+	}
 
 	/* The application's name (its window's ID when it gave none), faint, then the title on the same line. */
 	app = item->app;

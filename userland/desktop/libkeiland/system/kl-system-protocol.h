@@ -415,6 +415,9 @@
 /* Since when the phone has listen, sync, send_text, mark_read, link_set, watch_link and their events (ws197-p004a). */
 #define KL_SYSTEM_SINCE_PHONE_SYNC		27U
 
+/* Since when the notifications have post_lock (ws197-p004c). */
+#define KL_SYSTEM_SINCE_NOTIFY_LOCK		27U
+
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
 #define KL_SYSTEM_AUDIO_NAME			"kl_system_audio_v1"
@@ -439,6 +442,7 @@
  *   request 2 scan(uint on)           the devices around looked for while some object asks
  *   request 3 power(uint request, uint on)
  *   request 4 device(uint request, uint action, string address, uint type)   action: KL_SYSTEM_BT_PAIR and the others
+ *                                     (5, the user's phone paired, since the phone's messages, ws197-p004c)
  *   event   0 state(uint reachable, uint state, uint flags, uint features, string address, string name)
  *                                     flags: scanning, pairing, the user's switch on, this desktop answers the pairings' questions
  *   event   1 device(string address, uint type, string name, uint kind, uint flags, int battery, int rssi)
@@ -548,10 +552,14 @@
  * plan/ws156/phase001/phase.md section 2): post(request, replaces, app,
  * title, body, flags), withdraw(request, id); posted(request, id),
  * activated(id), closed(id, reason), result(request, applied, saved).
+ * Since version 27 (ws197-p004c): post_lock(request, replaces, app,
+ * title, body, flags, lock_text), a post with what the lock screen shows
+ * of it (at most 128 bytes; "" for nothing), answered as post.
  */
 #define KL_SYSTEM_NOTIFY_DESTROY		0U
 #define KL_SYSTEM_NOTIFY_POST			1U
 #define KL_SYSTEM_NOTIFY_WITHDRAW		2U
+#define KL_SYSTEM_NOTIFY_POST_LOCK		3U
 #define KL_SYSTEM_NOTIFY_EVENT_POSTED		0U
 #define KL_SYSTEM_NOTIFY_EVENT_ACTIVATED	1U
 #define KL_SYSTEM_NOTIFY_EVENT_CLOSED		2U

@@ -88,6 +88,43 @@ kwl_notify_system_post(
 }
 
 /*
+ * Posts a notification of the compositor's own under an application's
+ * name (ws197-p004c), whose body's click starts a command (NULL: no
+ * action), with what the lock screen shows of it (NULL: nothing).
+ * Returns its number, or 0 when it could not be kept.
+ */
+uint32_t
+kwl_notify_app_post(
+	struct kwl_server *server,
+	const char *app,
+	const char *title,
+	const char *body,
+	const char *command,
+	const char *lock_text)
+{
+	struct notify_system_action *action;
+	unsigned flags;
+	uint32_t id;
+
+	/* A notification with an action, when it has one. */
+	flags = 0U;
+	if (command != NULL)
+		flags |= KWL_NOTIFY_ACTION;
+	id = kwl_notify_post_as(server, app, title, body, flags, lock_text);
+	if (id == 0U || command == NULL)
+		return id;
+
+	/* Its action, in the next entry. */
+	action = &notify_system_actions[notify_system_next];
+	notify_system_next = (notify_system_next + 1U) % NOTIFY_SYSTEM_ACTIONS;
+	action->id = id;
+	(void)snprintf(action->command, sizeof(action->command), "%s", command);
+
+	/* Succeeded: its number. */
+	return id;
+}
+
+/*
  * Runs the action of a compositor's notification whose body was clicked
  * (kwl_notify_activate): its command is started.
  */

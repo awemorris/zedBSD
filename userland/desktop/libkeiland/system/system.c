@@ -860,6 +860,58 @@ kl_system_notify(
 }
 
 /*
+ * Posts a notification with what the lock screen shows of it (ws197-p004c:
+ * a few words, never its body); a compositor older than that takes it as
+ * kl_system_notify (the lock screen shows nothing of it).
+ */
+int
+kl_system_notify_lock(
+	struct kl_system *system,
+	const struct kl_notification *notification,
+	const char *lock_text,
+	uint32_t *request)
+{
+	const char *app;
+	const char *title;
+	const char *body;
+	uint32_t number;
+	int error;
+
+	/* The notify object and the words. */
+	if (system == NULL || notification == NULL)
+		return EINVAL;
+	if (system->notify == NULL || system->lost)
+		return ENOTSUP;
+
+	/* An older compositor: a plain post. */
+	if (system->manager_version < KL_SYSTEM_SINCE_NOTIFY_LOCK || lock_text == NULL) {
+		error = kl_system_notify(system, notification, request);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* The words (NULL as empty). */
+	app = notification->app;
+	if (app == NULL)
+		app = "";
+	title = notification->title;
+	if (title == NULL)
+		title = "";
+	body = notification->body;
+	if (body == NULL)
+		body = "";
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->notify, KL_SYSTEM_NOTIFY_POST_LOCK, number, notification->replaces, app, title, body, (uint32_t)notification->flags,
+	    lock_text);
+
+	/* Succeeded: the number comes later. */
+	return 0;
+}
+
+/*
  * Takes back a notification the application posted (KL_NOTIFY_CLOSED,
  * KL_NOTIFY_WITHDRAWN, follows).
  */
@@ -1496,7 +1548,9 @@ kl_system_bluetooth_device(
 	/* An action, an address of its length, a type. */
 	if (system == NULL || address == NULL)
 		return EINVAL;
-	if (action < KL_BLUETOOTH_PAIR || action > KL_BLUETOOTH_DISCONNECT || type > KL_BLUETOOTH_LE_RANDOM)
+	if (action < KL_BLUETOOTH_PAIR || action > KL_BLUETOOTH_PAIR_PHONE || type > KL_BLUETOOTH_LE_RANDOM)
+		return EINVAL;
+	if (action == KL_BLUETOOTH_PAIR_PHONE && type != KL_BLUETOOTH_BREDR)
 		return EINVAL;
 	length = strlen(address);
 	if (length != KL_BLUETOOTH_ADDRESS_MAX - 1U)

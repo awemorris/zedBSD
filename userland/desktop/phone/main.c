@@ -1307,6 +1307,7 @@ ph_item(
 	const struct ph_item *kept;
 	char title[160];
 	char body[160];
+	char lock_text[128];
 	size_t count;
 	size_t at;
 	long contact;
@@ -1365,10 +1366,11 @@ ph_item(
 		phone->view.to_end = 1;
 	}
 
-	/* Told: the other side's name and the first line. */
+	/* Told: the other side's name and the first line; the lock screen shows the name alone (ws197-p004c). */
 	(void)snprintf(title, sizeof(title), "Message from %s", contacts[contact].name);
 	(void)snprintf(body, sizeof(body), "%.*s", (int)strcspn(item->text, "\n"), item->text);
-	(void)kl_app_notify(phone->app, title, body);
+	(void)snprintf(lock_text, sizeof(lock_text), "New message from %s", contacts[contact].name);
+	(void)kl_app_notify_lock(phone->app, title, body, lock_text);
 }
 
 /*

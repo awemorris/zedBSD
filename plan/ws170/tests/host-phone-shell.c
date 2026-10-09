@@ -148,6 +148,40 @@ kwl_milliseconds(
 	return 1000U;
 }
 
+/* The compositor's notification of an application (ws197-p004c's phone-shell.c posts one for a message no phone program hears): none here. */
+uint32_t
+kwl_notify_app_post(
+	struct kwl_server *server,
+	const char *app,
+	const char *title,
+	const char *body,
+	const char *command,
+	const char *lock_text)
+{
+	/* Not kept. */
+	(void)server;
+	(void)app;
+	(void)title;
+	(void)body;
+	(void)command;
+	(void)lock_text;
+	return 0U;
+}
+
+/* Copies words (notify.c's, which phone-shell.c uses for a notification). */
+size_t
+kwl_notify_clean(
+	char *out,
+	size_t room,
+	const char *text,
+	int lines)
+{
+	/* The copy. */
+	(void)lines;
+	(void)snprintf(out, room, "%s", text);
+	return strlen(out);
+}
+
 /* The fake desktop's settings: only phone.backend exists. */
 int
 kwl_settings_number(

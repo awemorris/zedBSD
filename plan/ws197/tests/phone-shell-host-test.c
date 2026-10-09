@@ -21,7 +21,11 @@
  *    a message that came reaches the listening phone program (request
  *    0), nobody when none listens; the setting turned away from the
  *    paired phone makes the requests waiting UNAVAILABLE; the backend
- *    reaching bluetoothd again forgets the texts' numbers.
+ *    reaching bluetoothd again forgets the texts' numbers; a message that
+ *    came while no phone program listens is the compositor's own
+ *    notification with the lock screen's words and a command of the
+ *    number (ws197-p004c), none while the phone's notifications are off,
+ *    none for one read on the phone.
  * 2. libkeiland's view (system-view.c): the item queue told by one
  *    KL_PHONE_ITEMS, items taken after the mark fell out of the event
  *    ring, a full queue's KL_PHONE_DROPPED, the pages' ends by request,
@@ -83,9 +87,16 @@ static unsigned test_event_count;
 /* The client that reads too little (its number, 0 for none). */
 static uint64_t test_full_client;
 
-/* The fake desktop's phone.backend and clock. */
+/* The fake desktop's phone.backend, notify.allow.phone and clock. */
 static int test_backend = 2;
+static int test_notify_allowed = 1;
 static uint64_t test_now = 1000U;
+
+/* The compositor's notifications posted: how many, and the last one's words and command. */
+static unsigned test_notify_count;
+static char test_notify_title[160];
+static char test_notify_lock[160];
+static char test_notify_command[256];
 
 /* The one fake backend. */
 static struct kl_backend_phone test_phone;
@@ -211,12 +222,54 @@ kwl_settings_number(
 	/* The settings of no server in particular. */
 	(void)server;
 
-	/* The one setting. */
+	/* The phone's notifications. */
+	differs = strcmp(name, "notify.allow.phone");
+	if (differs == 0) {
+		*number = test_notify_allowed;
+		return 0;
+	}
+
+	/* The phone's backend. */
 	differs = strcmp(name, "phone.backend");
 	if (differs != 0)
 		return ENOENT;
 	*number = test_backend;
 	return 0;
+}
+
+/* The compositor's notification of an application (notify-system.c): kept for the checks. */
+uint32_t
+kwl_notify_app_post(
+	struct kwl_server *server,
+	const char *app,
+	const char *title,
+	const char *body,
+	const char *command,
+	const char *lock_text)
+{
+	/* Kept. */
+	(void)server;
+	(void)app;
+	(void)body;
+	test_notify_count++;
+	(void)snprintf(test_notify_title, sizeof(test_notify_title), "%s", title);
+	(void)snprintf(test_notify_lock, sizeof(test_notify_lock), "%s", lock_text);
+	(void)snprintf(test_notify_command, sizeof(test_notify_command), "%s", command);
+	return test_notify_count;
+}
+
+/* Copies words as notify.c does, without its mending (the tests' words are plain). */
+size_t
+kwl_notify_clean(
+	char *out,
+	size_t room,
+	const char *text,
+	int lines)
+{
+	/* The copy. */
+	(void)lines;
+	(void)snprintf(out, room, "%s", text);
+	return strlen(out);
 }
 
 /* The fake backend: opened once. */
@@ -677,7 +730,28 @@ test_shell(void)
 	test_item(0U, "0000000000000005");
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
 	kwl_phone_tick(&server);
-	test_check("gone", test_event_count == 1U && test_events[0].client == 3U);
+	test_check("gone", test_event_count == 1U && test_events[0].client == 3U && test_notify_count == 0U);
+
+	/* No phone program listens: the compositor's own notification, the lock screen's words, the number's command. */
+	kwl_object_destroy(later);
+	test_event_count = 0U;
+	test_item(0U, "0000000000000006");
+	(void)snprintf(test_phone.items[0].name, sizeof(test_phone.items[0].name), "%s", "Mother");
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
+	kwl_phone_tick(&server);
+	test_check("notify", test_event_count == 0U && test_notify_count == 1U && strcmp(test_notify_title, "Mother") == 0 &&
+	    strcmp(test_notify_lock, "New message from Mother") == 0 && strstr(test_notify_command, "--peer '+15550100'") != NULL);
+
+	/* Read on the phone, or the phone's notifications off: none. */
+	test_item(0U, "0000000000000007");
+	test_phone.items[0].read = 1U;
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
+	kwl_phone_tick(&server);
+	test_notify_allowed = 0;
+	test_item(0U, "0000000000000008");
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
+	kwl_phone_tick(&server);
+	test_check("notify-none", test_notify_count == 1U);
 }
 
 /* libkeiland's part. */

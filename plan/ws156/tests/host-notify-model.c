@@ -160,6 +160,15 @@ main(void)
 	error = kwl_notify_post(&model, 10U, 1U, 0U, "App", "T\x01", "B\xfe", 0U, &id, closed, &closed_count);
 	check(error == 0 && strcmp(kwl_notify_find(&model, id)->title, "T ") == 0 && strcmp(kwl_notify_find(&model, id)->body, "B\xef\xbf\xbd") == 0, "a post's words are mended");
 
+	/* The lock screen's words (ws197-p004c): kept on one line, none by default, too long refused, a number not kept unknown. */
+	check(kwl_notify_find(&model, id)->lock_text[0] == '\0', "no words for the lock screen by default");
+	error = kwl_notify_set_lock_text(&model, id, "New message\nfrom Mother");
+	check(error == 0 && strcmp(kwl_notify_find(&model, id)->lock_text, "New message from Mother") == 0, "the lock screen's words on one line");
+	error = kwl_notify_set_lock_text(&model, id, long_body);
+	check(error == EINVAL, "the lock screen's words past 128 bytes are refused");
+	error = kwl_notify_set_lock_text(&model, 99999U, "x");
+	check(error == ENOENT, "the lock screen's words of a number not kept");
+
 	/* Done. */
 	kwl_notify_model_free(&model);
 	printf("host-notify-model: %d passed, %d failed\n", passed, failed);

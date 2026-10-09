@@ -448,7 +448,8 @@ bt_device(
 		KL_BACKEND_BT_PAIR,
 		KL_BACKEND_BT_FORGET,
 		KL_BACKEND_BT_CONNECT,
-		KL_BACKEND_BT_DISCONNECT
+		KL_BACKEND_BT_DISCONNECT,
+		KL_BACKEND_BT_PAIR_PHONE
 	};
 	const char *address;
 	uint32_t request;
@@ -690,6 +691,9 @@ bt_answers(
 			break;
 		printf("KWL BT result id=%u error=%d reason=%s\n", backend_request, error, reason);
 
+		/* A pairing or a forgetting may change the user's phone: its record read again at once (ws197-p004 section 4.3). */
+		kwl_phone_refresh();
+
 		/* The request it answers. */
 		waiting = NULL;
 		for (index = 0; index < BT_WAITING_MAX; index++) {
@@ -816,7 +820,7 @@ static const char *
 bt_action_name(
 	unsigned what)
 {
-	static const char *const names[] = { "none", "power-on", "power-off", "pair", "forget", "connect", "disconnect" };
+	static const char *const names[] = { "none", "power-on", "power-off", "pair", "forget", "connect", "disconnect", "pair-phone" };
 
 	/* A known one. */
 	if (what < sizeof(names) / sizeof(names[0]))

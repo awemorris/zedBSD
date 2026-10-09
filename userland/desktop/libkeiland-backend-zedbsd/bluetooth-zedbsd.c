@@ -441,6 +441,7 @@ kl_backend_bluetooth_request(
 		/* A device's request: its verb. */
 		switch (request) {
 		case KL_BACKEND_BT_PAIR:
+		case KL_BACKEND_BT_PAIR_PHONE:
 			verb = "PAIR";
 			break;
 		case KL_BACKEND_BT_FORGET:
@@ -468,6 +469,13 @@ kl_backend_bluetooth_request(
 		if (!valid)
 			return EINVAL;
 		(void)snprintf(line, sizeof(line), "%s %s %s\n", verb, address, bt_type_name(type));
+
+		/* A phone of the user's is paired over BR/EDR, as the user's (ws197-p004 section 5.1). */
+		if (request == KL_BACKEND_BT_PAIR_PHONE) {
+			if (type != KL_BACKEND_BT_BREDR)
+				return EINVAL;
+			(void)snprintf(line, sizeof(line), "%s %s %s phone=1\n", verb, address, bt_type_name(type));
+		}
 	}
 
 	/* A request already waiting for the scan to end. */
@@ -479,7 +487,7 @@ kl_backend_bluetooth_request(
 	 * program of the user may have taken it): its AGENT goes before the
 	 * PAIR, so that the pairing's questions come to it.
 	 */
-	if (request == KL_BACKEND_BT_PAIR && bluetooth->agent.socket < 0) {
+	if ((request == KL_BACKEND_BT_PAIR || request == KL_BACKEND_BT_PAIR_PHONE) && bluetooth->agent.socket < 0) {
 		error = bt_connect(&bluetooth->agent, "AGENT\n");
 		bluetooth->agent_due_ms = 0U;
 		if (error == 0)
@@ -606,7 +614,9 @@ kl_backend_bluetooth_cancel(
 	unsigned changed;
 
 	/* Only a pairing of this program's going on. */
-	if (bluetooth == NULL || bluetooth->request_kind != KL_BACKEND_BT_PAIR)
+	if (bluetooth == NULL)
+		return ENOENT;
+	if (bluetooth->request_kind != KL_BACKEND_BT_PAIR && bluetooth->request_kind != KL_BACKEND_BT_PAIR_PHONE)
 		return ENOENT;
 
 	/* Its connection, and its end as a result (cancelled). */

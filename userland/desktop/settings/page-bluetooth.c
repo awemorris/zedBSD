@@ -19,6 +19,13 @@
  *   Other Devices  while the page shows and the controller is on, the
  *                  devices a scan finds, with Pair.  A pairing's question
  *                  is the desktop's own window's, not this page's.
+ *   Use as phone   (ws197-p004c, plan/ws197/phase004/phase.md section
+ *                  4.3) a phone's button: on pairs it as the user's phone
+ *                  when it is not yet (PAIR phone=1), turns its switch on
+ *                  (kl_system_phone_link_set) and then the desktop's
+ *                  phone.backend to 2; off turns the switch off, then
+ *                  phone.backend to 0.  A step that fails stops there.  The
+ *                  phone's line tells its messages' state.
  *
  * While the page shows, the state is watched and the scan is asked again
  * each SE_BLUETOOTH_RENEW_MS (the desktop lets an asking go after a
@@ -30,12 +37,24 @@
 #include <errno.h>
 #include <stdio.h>
 #include <string.h>
+#include <strings.h>
 
 /* The controls (hit indices): the switch, and each device's buttons by its place in the drawn list. */
 #define BLUETOOTH_SWITCH	1
 #define BLUETOOTH_PAIR_FIRST	100
 #define BLUETOOTH_FORGET_FIRST	200
 #define BLUETOOTH_CONNECT_FIRST	300
+#define BLUETOOTH_PHONE_FIRST	400
+
+/* The desktop's setting of the phone's backend: none, and the paired phone (ws197-p004c). */
+#define BLUETOOTH_PHONE_SETTING		"phone.backend"
+#define BLUETOOTH_PHONE_NONE		0
+#define BLUETOOTH_PHONE_BLUETOOTH	2
+
+/* The phone link's messages ready (kl_phone_link's messages). */
+#define BLUETOOTH_MESSAGES_CONNECTING	1U
+#define BLUETOOTH_MESSAGES_READY	2U
+#define BLUETOOTH_MESSAGES_FAILED	3U
 
 /* The rows' heights, the padding and the text sizes. */
 #define BLUETOOTH_ROW		56
@@ -54,6 +73,12 @@ static void bluetooth_ask(struct se_app *app, unsigned action, size_t drawn);
 static void bluetooth_asked(struct se_app *app, int error, const char *doing);
 static const char *bluetooth_state_words(const struct kl_bluetooth_state *state);
 static const char *bluetooth_kind_words(unsigned kind);
+static int bluetooth_phone_available(const struct se_app *app);
+static int bluetooth_phone_used(const struct se_app *app, const struct kl_bluetooth_device *device);
+static void bluetooth_phone_press(struct se_app *app, size_t drawn);
+static void bluetooth_phone_link(struct se_app *app);
+static int bluetooth_phone_result(struct se_app *app, uint32_t request, int error);
+static const char *bluetooth_phone_words(const struct se_app *app);
 
 /*
  * Draws the Bluetooth page's cards from a top edge; returns the edge below
@@ -146,6 +171,12 @@ se_bluetooth_press(
 		return;
 	}
 
+	/* A phone's "Use as phone" (ws197-p004c). */
+	if (index >= BLUETOOTH_PHONE_FIRST) {
+		bluetooth_phone_press(app, (size_t)(index - BLUETOOTH_PHONE_FIRST));
+		return;
+	}
+
 	/* A device's button, by its place in the list drawn. */
 	if (index >= BLUETOOTH_CONNECT_FIRST) {
 		drawn = (size_t)(index - BLUETOOTH_CONNECT_FIRST);
@@ -176,7 +207,10 @@ se_bluetooth_poll(
 	struct se_app *app)
 {
 	struct kl_bluetooth_state state;
+	struct kl_phone_event event;
 	int available;
+	int taken;
+	int error;
 
 	/* Only with the desktop's Bluetooth. */
 	available = bluetooth_available(app);
@@ -190,6 +224,21 @@ se_bluetooth_poll(
 		se_log("BLUETOOTH state reachable=%u state=%u flags=%u features=%u", state.reachable, state.state, state.flags, state.features);
 		if (app->page == SE_PAGE_BLUETOOTH)
 			app->dirty = 1;
+	}
+
+	/* The phone's link as last told (its events are not this page's: they go). */
+	if ((app->system_changed & KL_SYSTEM_CHANGED_PHONE) != 0U && app->bluetooth.phone_watching) {
+		do {
+			taken = kl_system_take_phone_event(app->system, &event);
+		} while (taken == 1);
+		error = kl_system_phone_link(app->system, &app->bluetooth.phone_link, sizeof(app->bluetooth.phone_link));
+		if (error == 0) {
+			app->bluetooth.phone_known = 1;
+			se_log("BLUETOOTH phone enabled=%u messages=%u owner=%u why=%s", app->bluetooth.phone_link.enabled, app->bluetooth.phone_link.messages,
+			    app->bluetooth.phone_link.owner, app->bluetooth.phone_link.why);
+			if (app->page == SE_PAGE_BLUETOOTH)
+				app->dirty = 1;
+		}
 	}
 
 	/* Watched and scanned while the page shows. */
@@ -245,6 +294,7 @@ se_bluetooth_result(
 		const char *words;
 	} done[] = {
 		{ "pair", "The device is paired." },
+		{ "pair-phone", "The phone is paired." },
 		{ "forget", "The device is removed." },
 		{ "connect", "The device is connected." },
 		{ "disconnect", "The device is disconnected." }
@@ -263,7 +313,13 @@ se_bluetooth_result(
 	};
 	struct se_bluetooth *bluetooth;
 	size_t index;
+	int phone;
 	int same;
+
+	/* The phone's switch (ws197-p004c). */
+	phone = bluetooth_phone_result(app, request, error);
+	if (phone)
+		return 1;
 
 	/* Only the request the page asked. */
 	bluetooth = &app->bluetooth;
@@ -272,6 +328,18 @@ se_bluetooth_result(
 	bluetooth->request = 0U;
 	se_log("BLUETOOTH result kind=%s errno=%d", bluetooth->doing, error);
 	app->dirty = 1;
+
+	/* The pairing of the user's phone: its switch next (ws197-p004c). */
+	same = strcmp(bluetooth->doing, "pair-phone");
+	if (same == 0 && bluetooth->phone_step == SE_PHONE_STEP_PAIR) {
+		if (error == 0) {
+			bluetooth_phone_link(app);
+			return 1;
+		}
+
+		/* Not paired: the switch stops there. */
+		bluetooth->phone_step = SE_PHONE_STEP_NONE;
+	}
 
 	/* Succeeded: a line for a device's change, none for the switch. */
 	bluetooth->message[0] = '\0';
@@ -389,9 +457,11 @@ bluetooth_list(
 	size_t index;
 	size_t rows;
 	size_t drawn;
+	int phone_offered;
 	int connectable;
 	int enabled;
 	int button;
+	int used;
 	int right;
 	int height;
 	int written;
@@ -429,6 +499,7 @@ bluetooth_list(
 
 	/* Each device: its name, what it is and how it is, and its buttons. */
 	enabled = bluetooth->request == 0U && (state.flags & KL_BLUETOOTH_PAIRING) == 0U;
+	phone_offered = bluetooth_phone_available(app);
 	connectable = (state.features & KL_BLUETOOTH_CAN_CONNECT) != 0U && state.state == KL_BLUETOOTH_ON;
 	for (index = 0; index < count; index++) {
 		device = &devices[index];
@@ -456,6 +527,11 @@ bluetooth_list(
 		if (!paired)
 			written = snprintf(line, sizeof(line), "%s  %s", bluetooth_kind_words(device->kind), device->address);
 
+		/* The user's phone: its messages' state (ws197-p004c). */
+		used = bluetooth_phone_used(app, device);
+		if (used)
+			written = snprintf(line, sizeof(line), "%s%s  %s", bluetooth_kind_words(device->kind), connected, bluetooth_phone_words(app));
+
 		/* A line longer than the room is cut (the drawing fits it to its width anyway). */
 		if (written < 0)
 			line[0] = '\0';
@@ -466,6 +542,13 @@ bluetooth_list(
 		if (!paired) {
 			button = se_button_width(app, "Pair");
 			(void)se_button_draw(app, canvas, right - button, y + 10, "Pair", 1, enabled, BLUETOOTH_PAIR_FIRST + (int)drawn);
+			right -= button + 10;
+
+			/* A phone may be paired as the user's at once (ws197-p004c). */
+			if (phone_offered && device->kind == KL_BLUETOOTH_KIND_PHONE && device->type == KL_BLUETOOTH_BREDR) {
+				button = se_button_width(app, "Use as phone");
+				(void)se_button_draw(app, canvas, right - button, y + 10, "Use as phone", 0, enabled, BLUETOOTH_PHONE_FIRST + (int)drawn);
+			}
 		} else {
 			button = se_button_width(app, "Remove");
 			(void)se_button_draw(app, canvas, right - button, y + 10, "Remove", 0, enabled, BLUETOOTH_FORGET_FIRST + (int)drawn);
@@ -476,6 +559,17 @@ bluetooth_list(
 			if (connectable) {
 				button = se_button_width(app, label);
 				(void)se_button_draw(app, canvas, right - button, y + 10, label, 0, enabled, BLUETOOTH_CONNECT_FIRST + (int)drawn);
+				right -= button + 10;
+			}
+
+			/* A phone's switch: used for messages or not (ws197-p004c). */
+			label = "Use as phone";
+			if (used && app->bluetooth.phone_link.enabled)
+				label = "Stop using as phone";
+			if (phone_offered && (used || device->kind == KL_BLUETOOTH_KIND_PHONE) && device->type == KL_BLUETOOTH_BREDR) {
+				button = se_button_width(app, label);
+				(void)se_button_draw(app, canvas, right - button, y + 10, label, 0, enabled && bluetooth->phone_step == SE_PHONE_STEP_NONE,
+				    BLUETOOTH_PHONE_FIRST + (int)drawn);
 			}
 		}
 
@@ -494,6 +588,7 @@ bluetooth_follow(
 	int shown)
 {
 	struct se_bluetooth *bluetooth;
+	int offered;
 	int error;
 
 	/* The watching follows the page. */
@@ -502,6 +597,14 @@ bluetooth_follow(
 		error = kl_system_bluetooth_watch(app->system, (unsigned)shown);
 		bluetooth->watching = shown;
 		se_log("BLUETOOTH watch on=%d errno=%d", shown, error);
+	}
+
+	/* The phone's link too, where the desktop offers it (ws197-p004c). */
+	offered = bluetooth_phone_available(app);
+	if (offered && shown != bluetooth->phone_watching) {
+		error = kl_system_phone_watch_link(app->system, (unsigned)shown);
+		bluetooth->phone_watching = shown;
+		se_log("BLUETOOTH phone-watch on=%d errno=%d", shown, error);
 	}
 
 	/* The scan: asked when the page comes and again in time, given up when it goes. */
@@ -614,4 +717,196 @@ bluetooth_kind_words(
 	if (kind < sizeof(words) / sizeof(words[0]))
 		return words[kind];
 	return "Device";
+}
+
+/* Tells whether the desktop offers the phone's switch (KL_SYSTEM_HAS_PHONE_SYNC, ws197-p004c). */
+static int
+bluetooth_phone_available(
+	const struct se_app *app)
+{
+	unsigned capabilities;
+
+	/* The desktop's phone, with its messages. */
+	if (app->system == NULL)
+		return 0;
+	capabilities = kl_system_capabilities(app->system);
+	if ((capabilities & KL_SYSTEM_HAS_PHONE_SYNC) == 0U)
+		return 0;
+
+	/* Succeeded: offered. */
+	return 1;
+}
+
+/* Tells whether a device is the user's phone as the link last told (its address). */
+static int
+bluetooth_phone_used(
+	const struct se_app *app,
+	const struct kl_bluetooth_device *device)
+{
+	int same;
+
+	/* A link told, with an address. */
+	if (!app->bluetooth.phone_known || app->bluetooth.phone_link.address[0] == '\0')
+		return 0;
+
+	/* The same address (the letters in either case). */
+	same = strcasecmp(app->bluetooth.phone_link.address, device->address);
+	if (same != 0)
+		return 0;
+
+	/* Succeeded: the user's phone. */
+	return 1;
+}
+
+/*
+ * Carries out a phone's "Use as phone" or "Stop using as phone" (section
+ * 4.3): on pairs it as the user's first when it is not the user's phone
+ * yet, then turns its switch on; off turns the switch off.
+ */
+static void
+bluetooth_phone_press(
+	struct se_app *app,
+	size_t drawn)
+{
+	struct se_bluetooth *bluetooth;
+	const struct kl_bluetooth_device *device;
+	int used;
+	int error;
+
+	/* A device drawn, and no switch under way. */
+	bluetooth = &app->bluetooth;
+	if (drawn >= bluetooth->drawn_count || bluetooth->phone_step != SE_PHONE_STEP_NONE || bluetooth->request != 0U)
+		return;
+	device = &bluetooth->drawn[drawn];
+	used = bluetooth_phone_used(app, device);
+	(void)snprintf(bluetooth->phone_address, sizeof(bluetooth->phone_address), "%s", device->address);
+
+	/* Off: its switch. */
+	bluetooth->phone_on = 1;
+	if (used && bluetooth->phone_link.enabled)
+		bluetooth->phone_on = 0;
+	if (!bluetooth->phone_on || used) {
+		bluetooth_phone_link(app);
+		return;
+	}
+
+	/* On, a phone not the user's yet: paired as the user's first. */
+	bluetooth->phone_step = SE_PHONE_STEP_PAIR;
+	error = kl_system_bluetooth_device(app->system, KL_BLUETOOTH_PAIR_PHONE, device->address, KL_BLUETOOTH_BREDR, &bluetooth->request);
+	bluetooth_asked(app, error, "pair-phone");
+	if (error != 0)
+		bluetooth->phone_step = SE_PHONE_STEP_NONE;
+}
+
+/* Asks the phone's switch on or off (its answer turns the desktop's phone.backend). */
+static void
+bluetooth_phone_link(
+	struct se_app *app)
+{
+	struct se_bluetooth *bluetooth;
+	int error;
+
+	/* Asked of the desktop. */
+	bluetooth = &app->bluetooth;
+	bluetooth->phone_step = SE_PHONE_STEP_LINK;
+	error = kl_system_phone_link_set(app->system, bluetooth->phone_address, (unsigned)bluetooth->phone_on, KL_PHONE_PROFILE_MESSAGES,
+	    &bluetooth->phone_request);
+	se_log("BLUETOOTH phone-switch on=%d error=%d", bluetooth->phone_on, error);
+	app->dirty = 1;
+	if (error == 0)
+		return;
+
+	/* Refused at once: stopped there. */
+	bluetooth->phone_step = SE_PHONE_STEP_NONE;
+	bluetooth->phone_request = 0U;
+	bluetooth->message_bad = 1;
+	(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "The phone could not be asked.");
+}
+
+/*
+ * Takes the answer of the phone's switch: on, the desktop's phone.backend
+ * becomes the paired phone; off, none.  Returns 1 when it was its answer.
+ */
+static int
+bluetooth_phone_result(
+	struct se_app *app,
+	uint32_t request,
+	int error)
+{
+	struct se_bluetooth *bluetooth;
+
+	/* Only the switch asked. */
+	bluetooth = &app->bluetooth;
+	if (bluetooth->phone_request == 0U || request != bluetooth->phone_request)
+		return 0;
+	bluetooth->phone_request = 0U;
+	bluetooth->phone_step = SE_PHONE_STEP_NONE;
+	se_log("BLUETOOTH phone-switch-result on=%d errno=%d", bluetooth->phone_on, error);
+	app->dirty = 1;
+
+	/* Failed: stopped there (the link's state shows what is). */
+	if (error != 0) {
+		bluetooth->message_bad = 1;
+		(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "The phone's switch could not be changed.");
+		if (error == EACCES)
+			(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "The phone is another account's.");
+		if (error == ENOTCONN || error == ENOTSUP)
+			(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "Bluetooth cannot do that here yet.");
+		return 1;
+	}
+
+	/* The desktop's phone follows the switch. */
+	bluetooth->message_bad = 0;
+	if (bluetooth->phone_on) {
+		se_look_set_number(app, BLUETOOTH_PHONE_SETTING, BLUETOOTH_PHONE_BLUETOOTH, BLUETOOTH_PHONE_NONE);
+		(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "The phone is used for messages.");
+	} else {
+		se_look_set_number(app, BLUETOOTH_PHONE_SETTING, BLUETOOTH_PHONE_NONE, BLUETOOTH_PHONE_NONE);
+		(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", "The phone is no longer used.");
+	}
+
+	/* Succeeded: the answer was the switch's. */
+	return 1;
+}
+
+/* The words of the user's phone's messages, as the link last told. */
+static const char *
+bluetooth_phone_words(
+	const struct se_app *app)
+{
+	const struct kl_phone_link *link;
+	int same;
+
+	/* Not used for messages. */
+	link = &app->bluetooth.phone_link;
+	if (!link->enabled)
+		return "Not used as phone";
+
+	/* Why its messages do not work. */
+	same = strcmp(link->why, "permission");
+	if (same == 0)
+		return "Allow access to messages on the phone";
+	same = strcmp(link->why, "no-mas");
+	if (same == 0)
+		return "The phone does not share its messages";
+	same = strcmp(link->why, "not-owner");
+	if (same == 0)
+		return "Another account's phone";
+
+	/* Each state of its messages. */
+	switch (link->messages) {
+	case BLUETOOTH_MESSAGES_READY:
+		return "Messages connected";
+	case BLUETOOTH_MESSAGES_CONNECTING:
+		return "Messages connecting...";
+	case BLUETOOTH_MESSAGES_FAILED:
+		return "Messages not connected";
+	default:
+		break;
+	}
+
+	/* Off: not near, or not yet. */
+	if (!link->present)
+		return "Used as phone (messages while you are signed in here)";
+	return "Used as phone (not connected)";
 }

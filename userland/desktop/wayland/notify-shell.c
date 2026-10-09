@@ -49,7 +49,7 @@ static int notify_ready;
 
 static void notify_open(void);
 static void notify_left(uint64_t client, uint32_t object);
-static int notify_post(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int notify_post(struct kwl_object *object, const unsigned char *bytes, size_t size, int lock);
 static int notify_allowed(struct kwl_object *object, const char *app);
 static int notify_withdraw(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static void notify_tell_closed(struct kwl_server *server, const struct kwl_notify_closed *closed);
@@ -108,7 +108,11 @@ kwl_notify_request(
 
 	/* A notification. */
 	if (opcode == KL_SYSTEM_NOTIFY_POST)
-		return notify_post(object, bytes, size);
+		return notify_post(object, bytes, size, 0);
+
+	/* A notification with what the lock screen shows of it (ws197-p004c, version 27). */
+	if (opcode == KL_SYSTEM_NOTIFY_POST_LOCK && object->version >= KL_SYSTEM_SINCE_NOTIFY_LOCK)
+		return notify_post(object, bytes, size, 1);
 
 	/* A notification taken back. */
 	if (opcode == KL_SYSTEM_NOTIFY_WITHDRAW)
@@ -145,18 +149,44 @@ kwl_notify_post_system(
 	const char *body,
 	unsigned flags)
 {
+	uint32_t id;
+
+	/* As the System's, nothing on the lock screen. */
+	id = kwl_notify_post_as(server, "System", title, body, flags, NULL);
+	return id;
+}
+
+/*
+ * Posts a notification of the compositor's own (client 0) under an
+ * application's name (ws197-p004c: the phone's messages when the phone
+ * program is not running), with what the lock screen shows of it (NULL:
+ * nothing).  Returns its number, or 0 when it could not be kept.
+ */
+uint32_t
+kwl_notify_post_as(
+	struct kwl_server *server,
+	const char *app,
+	const char *title,
+	const char *body,
+	unsigned flags,
+	const char *lock_text)
+{
 	struct kwl_notify_closed closed[2];
 	size_t closed_count;
 	uint32_t id;
 	int error;
 
-	/* Kept as the System's. */
+	/* Kept as the application's. */
 	notify_open();
-	error = kwl_notify_post(&notify_model, 0U, 0U, 0U, "System", title, body, flags, &id, closed, &closed_count);
+	error = kwl_notify_post(&notify_model, 0U, 0U, 0U, app, title, body, flags, &id, closed, &closed_count);
 	if (error != 0) {
 		printf("KWL NOTIFY post-failed client=0 error=%d\n", error);
 		return 0U;
 	}
+
+	/* What the lock screen shows of it. */
+	if (lock_text != NULL)
+		(void)kwl_notify_set_lock_text(&notify_model, id, lock_text);
 
 	/* An oldest pushed out of the log is told to its client; the log the tests read. */
 	if (closed_count > 0U)
@@ -353,14 +383,16 @@ notify_left(
 		printf("KWL NOTIFY left client=%llu object=%u count=%lu\n", (unsigned long long)client, object, (unsigned long)count);
 }
 
-/* Carries out post(request, replaces, app, title, body, flags). */
+/* Carries out post(request, replaces, app, title, body, flags), or post_lock(..., flags, lock_text) when lock is 1. */
 static int
 notify_post(
 	struct kwl_object *object,
 	const unsigned char *bytes,
-	size_t size)
+	size_t size,
+	int lock)
 {
 	struct kwl_notify_closed closed[2];
+	const char *lock_text;
 	const char *app;
 	const char *title;
 	const char *body;
@@ -384,9 +416,22 @@ notify_post(
 		error = notify_string(bytes, size, offset, &title, &offset);
 	if (error == 0)
 		error = notify_string(bytes, size, offset, &body, &offset);
-	if (error != 0 || offset + 4U != size)
+	if (error != 0 || offset + 4U > size)
 		return EPROTO;
 	flags = notify_word(bytes, offset);
+	offset += 4U;
+
+	/* What the lock screen shows of it, the last argument of post_lock. */
+	lock_text = "";
+	if (lock) {
+		error = notify_string(bytes, size, offset, &lock_text, &offset);
+		if (error != 0)
+			return EPROTO;
+	}
+
+	/* Nothing after the last argument. */
+	if (offset != size)
+		return EPROTO;
 
 	/* A client posting faster than the rate is refused as busy (ws177-p005). */
 	error = kwl_notify_rate_take(&notify_model, object->client->number, kwl_milliseconds());
@@ -418,6 +463,10 @@ notify_post(
 	/* An oldest pushed out of the log is told to its client. */
 	if (closed_count > 0U)
 		notify_tell_closed(object->client->server, &closed[0]);
+
+	/* What the lock screen shows of it (words too long show nothing there). */
+	if (lock)
+		(void)kwl_notify_set_lock_text(&notify_model, id, lock_text);
 
 	/* Its number (the log the tests read). */
 	words[0] = request;

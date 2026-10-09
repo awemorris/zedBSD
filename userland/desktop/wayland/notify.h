@@ -71,7 +71,9 @@
  * One notification: its number, its client (0: the compositor's) and the
  * client's object it came by, where it is and its place in its order (a
  * serial that grows: the waiting by when they came, the log by when they
- * entered it), its flags, and its words.
+ * entered it), its flags, and its words.  lock_text is what the lock
+ * screen shows of it (ws197-p004c, "New message from <name>"; empty: the
+ * lock screen shows nothing of it).
  */
 struct kwl_notification {
 	uint32_t id;
@@ -83,6 +85,7 @@ struct kwl_notification {
 	char app[KWL_NOTIFY_APP_MAX + 1U];
 	char title[KWL_NOTIFY_TITLE_MAX + 1U];
 	char body[KWL_NOTIFY_BODY_MAX + 1U];
+	char lock_text[KWL_NOTIFY_TITLE_MAX + 1U];
 };
 
 /* A notification that closed, for its client to be told. */
@@ -134,6 +137,7 @@ size_t kwl_notify_waiting(const struct kwl_notify_model *model);
 const struct kwl_notification *kwl_notify_find(const struct kwl_notify_model *model, uint32_t id);
 size_t kwl_notify_orphan(struct kwl_notify_model *model, uint64_t client, uint32_t object);
 int kwl_notify_rate_take(struct kwl_notify_model *model, uint64_t client, uint64_t now_ms);
+int kwl_notify_set_lock_text(struct kwl_notify_model *model, uint32_t id, const char *text);
 size_t kwl_notify_clean(char *out, size_t room, const char *text, int lines);
 
 #endif

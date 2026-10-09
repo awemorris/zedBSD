@@ -32,8 +32,13 @@
  * the desktop's life whatever the setting, so that Settings reads and sets
  * the phone's switch; the messages go through it only while the setting
  * is 2.  Nothing is kept on disk here: an item no phone program hears is
- * dropped (the program's next sync takes it).  Numbers, names and words
- * are never logged, only their lengths.
+ * dropped (the program's next sync takes it), and a new message is told
+ * as the compositor's own notification (ws197-p004c, plan/ws197/phase004/
+ * phase.md section 7: the other side's name and the first line; the lock
+ * screen shows "New message from <name>" alone; a click opens the phone
+ * program at that conversation), unless the user turned the phone's
+ * notifications off.  Numbers, names and words are never logged, only
+ * their lengths.
  *
  * done, page_end, link and dropped are never lost: when the client reads
  * too little to take one (kwl_emit's ENOBUFS), it is owed, in order, and
@@ -42,9 +47,11 @@
  */
 
 #include "kwl.h"
+#include "notify.h"
 
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
+#include "userland/desktop/paths.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -70,8 +77,14 @@
 /* The longest event owed: the link's nine words and two strings with their lengths. */
 #define PHONE_OWED_BYTES	(9U * 4U + 4U + KL_SYSTEM_PHONE_ADDRESS_MAX + 4U + KL_SYSTEM_PHONE_WHY_MAX + 8U)
 
-/* The program the messages go to (its window's app_id). */
+/* The program the messages go to (its window's app_id), its name on a notification, the setting that lets it notify, and how it is started at a conversation. */
 #define PHONE_APP		"phone"
+#define PHONE_APP_NAME		"Phone"
+#define PHONE_NOTIFY_SETTING	"notify.allow.phone"
+#define PHONE_COMMAND		KEILAND_BINDIR "/phone"
+
+/* The most of a message's first line a notification is made from, with its NUL. */
+#define PHONE_LINE_MAX		2048U
 
 /* How many phone objects are followed, what one may be owed, how many requests wait for the backend, how many states wait for their text. */
 #define PHONE_SLOTS		16U
@@ -263,10 +276,12 @@ static void phone_link_fill(unsigned refused, struct phone_link_event *link);
 static void phone_link_tell(struct kwl_object *object, unsigned refused);
 static void phone_links(void);
 static int phone_item(struct kwl_object *object, uint32_t request, const struct kl_backend_phone_item *item);
-static void phone_live(const struct kl_backend_phone_item *item);
+static void phone_live(struct kwl_server *server, const struct kl_backend_phone_item *item);
+static void phone_notify(struct kwl_server *server, const struct kl_backend_phone_item *item);
+static int phone_shell_safe(const char *text);
 static void phone_answers(void);
 static void phone_answer(struct phone_pending *pending, const struct kl_backend_phone_result *result);
-static void phone_items(void);
+static void phone_items(struct kwl_server *server);
 static void phone_sents(uint64_t now);
 static int phone_sent_match(uint32_t sent_request, unsigned state);
 static void phone_held_check(uint64_t now);
@@ -447,7 +462,7 @@ kwl_phone_tick(
 	 */
 	now = kwl_milliseconds();
 	if ((changed & KL_BACKEND_PHONE_CHANGED_ITEM) != 0U)
-		phone_items();
+		phone_items(server);
 	if ((changed & KL_BACKEND_PHONE_CHANGED_RESULT) != 0U)
 		phone_answers();
 	if ((changed & KL_BACKEND_PHONE_CHANGED_SENT) != 0U)
@@ -1044,7 +1059,7 @@ phone_loopback_send_text(
 	(void)snprintf(item.peer, sizeof(item.peer), "%s", to);
 	item.text = echo;
 	item.length = strlen(echo);
-	phone_live(&item);
+	phone_live(object->client->server, &item);
 }
 
 /* The loopback backend's message marked read: done at once. */
@@ -1825,10 +1840,12 @@ phone_item(
 /*
  * Hands a message that came to every phone program that listens; one that
  * read too little hears that it was dropped.  No program listening: nobody
- * keeps it (the next sync takes it).
+ * keeps it (the next sync takes it), and a new one is told as a
+ * notification.
  */
 static void
 phone_live(
+	struct kwl_server *server,
 	const struct kl_backend_phone_item *item)
 {
 	struct phone_slot *slot;
@@ -1862,6 +1879,92 @@ phone_live(
 
 	/* The log the tests read: lengths only. */
 	printf("KWL PHONE live dir=%u text=%lu told=%u\n", item->direction, (unsigned long)item->length, told);
+
+	/* No phone program to tell it: the compositor's own notification. */
+	if (told == 0U)
+		phone_notify(server, item);
+}
+
+/*
+ * Tells a new message that came while no phone program listens (section
+ * 7): a notification of the phone's, the other side's name (else its
+ * number) and the first line, the lock screen's words "New message from
+ * <name>", a click opening the phone program at the conversation; none
+ * for one sent from the phone, one read there, or while the user turned
+ * the phone's notifications off.
+ */
+static void
+phone_notify(
+	struct kwl_server *server,
+	const struct kl_backend_phone_item *item)
+{
+	char line[PHONE_LINE_MAX];
+	char title[KWL_NOTIFY_TITLE_MAX + 1U];
+	char body[KWL_NOTIFY_BODY_MAX + 1U];
+	char words[KWL_NOTIFY_TITLE_MAX * 2U];
+	char lock_text[KWL_NOTIFY_TITLE_MAX + 1U];
+	char command[KWL_NOTIFY_TITLE_MAX + 64U];
+	const char *who;
+	uint32_t id;
+	size_t first;
+	int allowed;
+	int error;
+	int safe;
+
+	/* A message received, not read on the phone. */
+	if (item->direction != KL_BACKEND_PHONE_DIRECTION_IN || item->read)
+		return;
+
+	/* The user's switch of the phone's notifications (on unless turned off). */
+	error = kwl_settings_number(server, PHONE_NOTIFY_SETTING, &allowed);
+	if (error == 0 && allowed == 0)
+		return;
+
+	/* The other side: its name on the phone, else its number. */
+	who = item->peer;
+	if (item->name[0] != '\0')
+		who = item->name;
+	(void)kwl_notify_clean(title, sizeof(title), who, 0);
+
+	/* The first line of the words. */
+	first = strcspn(item->text, "\n");
+	if (first >= sizeof(line))
+		first = sizeof(line) - 1U;
+	memcpy(line, item->text, first);
+	line[first] = '\0';
+	(void)kwl_notify_clean(body, sizeof(body), line, 0);
+
+	/* The lock screen's words, without the message's. */
+	(void)snprintf(words, sizeof(words), "New message from %s", title);
+	(void)kwl_notify_clean(lock_text, sizeof(lock_text), words, 0);
+
+	/* A click opens the phone program at the conversation (the number only when the shell takes it as it is). */
+	safe = phone_shell_safe(item->peer);
+	(void)snprintf(command, sizeof(command), "%s", PHONE_COMMAND);
+	if (safe)
+		(void)snprintf(command, sizeof(command), "%s --peer '%s'", PHONE_COMMAND, item->peer);
+
+	/* Posted. */
+	id = kwl_notify_app_post(server, PHONE_APP_NAME, title, body, command, lock_text);
+	printf("KWL PHONE notify id=%u title=%lu body=%lu peer=%d\n", id, (unsigned long)strlen(title), (unsigned long)strlen(body), safe);
+}
+
+/* Tells whether a number or sender's name goes in a command between single quotes as it is: 1 to 64 letters, digits and "+*#._ -". */
+static int
+phone_shell_safe(
+	const char *text)
+{
+	size_t length;
+	size_t span;
+
+	/* Not empty, not long, and only those characters. */
+	length = strlen(text);
+	span = strspn(text, "abcdefghijklmnopqrstuvwxyzABCDEFGHIJKLMNOPQRSTUVWXYZ0123456789+*#._ -");
+	if (length == 0U || length > 64U || span != length)
+		return 0;
+
+	/* Succeeded: safe. */
+	return 1;
 }
 
 /* Hands the backend's answers to their objects. */
@@ -1961,7 +2064,7 @@ phone_answer(
  */
 static void
 phone_items(
-	void)
+	struct kwl_server *server)
 {
 	struct kl_backend_phone_item item;
 	struct phone_pending *pending;
@@ -1978,7 +2081,7 @@ phone_items(
 		/* One that came by itself. */
 		if (item.id == 0U) {
 			if (phone_state.setting == KL_SYSTEM_PHONE_BACKEND_BLUETOOTH)
-				phone_live(&item);
+				phone_live(server, &item);
 			continue;
 		}
 

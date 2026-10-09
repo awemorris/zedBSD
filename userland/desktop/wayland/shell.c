@@ -598,9 +598,15 @@ kwl_glass_draw(
 		return;
 	}
 
-	/* The login screen, or a session's lock screen, is all there is to draw (greeter.c). */
+	/*
+	 * The login screen, or a session's lock screen, is all there is to
+	 * draw (greeter.c), with the notifications that have words for the
+	 * lock screen over a session's (notify-popup.c, ws197-p004c).
+	 */
 	if (server->greeter || server->locked) {
 		kwl_greeter_draw(server, command);
+		if (server->locked && !server->greeter)
+			kwl_notify_popup_draw(server, command);
 		return;
 	}
 
