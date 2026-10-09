@@ -105,7 +105,8 @@ ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/stage.c src/drivers/gpu/bcm2711/fdt-util.c \
 	src/drivers/gpu/bcm2711/firmware.c src/drivers/gpu/bcm2711/display.c \
 	src/drivers/gpu/bcm2711/readout.c src/drivers/gpu/bcm2711/list.c \
-	src/drivers/gpu/bcm2711/v3d.c src/drivers/gpu/bcm2711/mmu.c
+	src/drivers/gpu/bcm2711/v3d.c src/drivers/gpu/bcm2711/mmu.c \
+	src/drivers/gpu/bcm2711/cl.c
 endif
 ARM64_KERNEL_SOURCES += $(KERN_NET_SOURCES) $(KERN_BLOCK_IDENTITY_SOURCES) \
 	$(KERN_UFS_SOURCES)
