@@ -3,7 +3,7 @@
 # ws177-p038: Home が開く・閉じる途中の bar の fade、Home の上の status の隙間の press、白の文字
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-475、2026-10-08 夜 Q1）
+Status: cleared（2026-10-10 Q1 判定: T1-489 (a) で u-guest status 0（swap-cancel・status-gap ok）、回帰 ws181・p009 PASS。ユーザーの UAT「WS177 はOK」）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908 / q908-i01

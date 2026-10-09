@@ -3,7 +3,7 @@
 # ws177-p033: 上端の帯の長押し（apps bar の preview）と、Home が開ききった後の desktop の層を描かない
 
 Parent: [WS177](../ws.md)
-Status: test-wait（T1-475、2026-10-08 夜 Q1）
+Status: cleared（2026-10-10 Q1 判定: T1-489 (a) で u-guest status 0（swap-cancel・status-gap ok）、回帰 ws181・p009 PASS。ユーザーの UAT「WS177 はOK」）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q908（承認済み、Q1 の dispatch 2026-10-08「WS177 案 U」）/ q908-i01

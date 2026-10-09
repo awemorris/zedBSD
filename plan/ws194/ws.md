@@ -35,5 +35,5 @@ Resume point: p001 から。
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 今の keiland-linux・keiland-freebsd の規則と依存の調べ、package の一覧（apt・yum・pacman・pkg）と確認の対話の実装、host 試験 | planned | — |
-| p002 | T1 の Debian（apt）と FreeBSD（pkg）の guest での試験 | planning | p001 |
+| p002 | T1 の Debian（apt）と FreeBSD（pkg）の guest での試験 | cleared（2026-10-10 Q1: T1-498・T1-506、ユーザーの UAT「WS194はOK」） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |

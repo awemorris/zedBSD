@@ -36,6 +36,9 @@
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) P1 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) P1 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
+| WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
+| WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
+| BUG-189・BUG-212（有線と Wi-Fi） | ✔ close | — |
 | USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) 5330 の復帰の後に実機で測る。直らなければ既知の問題 |
 | App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べ（ベータ2 で直せるかは調べの後） |
 
@@ -51,7 +54,7 @@
 | 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
 | [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |
-| WS192（状態の島のパネル）・WS193（menuconfig）・WS194（package の確認）の UAT の指摘 | WS193・WS194 は cleared、WS192 はパネルの写真の確認待ち | UAT | 3 | ユーザー・P1 |
+| WS192（状態の島のパネル）の UAT の指摘 | WS193・WS194 は UAT OK、WS192 は BUG-278（Mute の文字） | P1 | 1 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | — | ユーザー | — | ユーザー |
 | UAT で出る Bug の debug の枠（2026-10-10 の 6 件: BUG-275〜280） | P1 が着手 | — | 10 | P1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）、WS192 のパネルの PNG（build/review/t1-496/） | — | ユーザー | —（15 分） | ユーザー |
@@ -70,10 +73,6 @@
 | 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
 | 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
 | 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
-| 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
-| 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
-| 22 | [BUG-189](bugs/BUG-189.md) 有線と Wi-Fi の両方の接続 | USB LAN と Wi-Fi の両方をつなぎ、Settings → Network の Active Network を見る | USB LAN（有線）が出る。再現しなければ close（2026-10-08 ユーザー） |
-| 23 | [BUG-212](bugs/BUG-212.md) 有線を抜いた後の Wi-Fi | 有線の接続中に Wi-Fi もつなぎ、有線の cable を抜く | Wi-Fi が切れずに使える。再現したら Wi-Fi の off・on の前に Q1 へ（SSH で networkd と intel-ax211 の log を取る）。再現しなければ close |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
 ## 合計
