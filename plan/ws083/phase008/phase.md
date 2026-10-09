@@ -68,3 +68,20 @@ UAPI（gpu-op.h）・HAL・wire の形は変えない（query の op は 1.0 の
 ## 残り
 
 - 性能（1080p の decode の時間、U6・U8）、D19 の既定化（`i915.debug=video` を外す）: 実機の p005・p006b・p007 の後。
+
+## 2026-10-09 夜 P1: 性能の測りの道具と門（ベータ2 で OFF にできるか）
+
+### 性能の測り（U6・U8 の材料）
+
+- `vkvideo-probe --time`（新）: 各 decode を、command の記録から fence まで（frame の hash は数えない）時計（CLOCK_MONOTONIC）で測り、最後に `vkvideo-probe: decode time: N decodes, total T ms, mean M ms, longest L ms`。`docs/reference/vulkan-video.md` の Example program に 1 段落。
+- 確かめ: `make … "ZEDBSD_USER_PROGRAMS=libvulkan vkvideo-probe" build/p1-ws083/bin/vkvideo-probe` rc 0・warning 0、`run-host-vkvideo-probe.sh` PASS（reader・hash・DPB。probe の Vulkan の経路と option の解析は host 試験の外）、style-check の新しい指摘 0。
+- 実機の手順（T1-435 に足す文の案）: `vkvideo-probe --time --expect=… /tmp/v/pb-high-352-pyramid.h264`、1080p は `/home/awe/zedbsd-media/sample-h264-{main,high}.h264` を `--time --frames=60`（hash は見ない）。数字を返す。参考の目安: 1080p で mean が 33 ms 以下なら 30 fps に足りる（probe は 1 decode ごとに submit と wait をするので、実の再生より遅く出る）。
+
+### 門（2026-10-09 Q1「直前に OFF にできる門があることを確かめ、OFF の手順を」）
+
+- 今の門: kernel は boot の parameter `i915.debug` に `video` がある時だけ video decode を出す（`src/drivers/gpu/i915/device.c` の `i915_boot_word_listed(…, "video")` → `drv_i915_render_video_request`、`render/vulkan.c` の capset）。既定は OFF。
+- release の config（`config/release/config-amd64-beta2.mk`）には `i915.debug=video` が**無い**。つまり今の release の image は Vulkan Video が OFF。
+- ON にする（T1-435 の A〜C と p007 の F1 が PASS した後、Q1・ユーザーの判断）: release の config に 1 行 `ZEDBSD_BOOT_EXTRA_LINES += i915.debug=video`（boot の cfg の名前に語が入るので image が作り直される、`platform/amd64/vmunix.mk` の AMD64_BOOT_EXTRA_TAG）。kernel の変更は要らない。
+- OFF にする（直前でも）: その 1 行を消す（入れていなければ何もしない）。利用者の手元では、USB の FAT の partition の `ZEDBSD.CFG`（1 行 1 parameter）に `i915.debug=video` の行を足す・消すだけで切り替わる。
+- **D19 の既定化（kernel の既定を ON にする）はベータ2 ではしない**のを推す: 実機の p005・p006b・p007 が済んでおらず、既定を ON にするなら OFF の parameter（例 `i915.video=off`）も要る。ベータ3 で。
+- 注意（Q1・ユーザーへ）: release の image の中に Vulkan Video を使う program は無い。Video Player は libmedia → FFmpeg で CPU で decode し（`userland/desktop/libmedia/avcodec.c`）、FFmpeg は `--disable-hwaccels` で build される（`userland/packages/multimedia/libavcodec/Makefile`）。vkvideo-probe は試験の image だけ。だから beta2.md の UAT の 9（Video Player で H.264 の mp4）は WS083 を通らず、門の ON・OFF で結果は変わらない。WS083 の実機の確かめは T1-435（5330 の passthrough の vkvideo-probe）と p007 の F1・F2。release の門を ON にしても、利用者に見える違いは他の program が Vulkan Video を使う時だけ。
