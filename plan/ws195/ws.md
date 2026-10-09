@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: 未割当
 Target: **ベータ3**（RC の後。2026-10-09 ユーザー、クリック「ベータ3（RC の後）」）
-Resume point: p001（調べと移行の設計）から。
+Resume point: p001 の D1〜D7（ユーザーの判断、[phase.md](phase001/phase.md) §2.2）。決まったら design-reviewer → p002 から実装（10/17 の後）。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -28,4 +28,4 @@ Resume point: p001（調べと移行の設計）から。
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 今の配置と参照の調べ、/opt/keiland の配置（bin・lib・libexec・share）と移行の設計、account-admin の移動 | planning | ベータ2 の公開（10/17） |
+| [p001](phase001/phase.md) | 今の配置と参照の調べ、/opt/keiland の配置（bin・lib・libexec・share）と移行の設計、account-admin の移動 | planning（2026-10-09 夜 P1: 調べと設計の案。D1〜D7 のユーザーの判断と design-reviewer 待ち。p002〜p006 の案は phase.md §2.4） | ベータ2 の公開（10/17） |
