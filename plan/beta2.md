@@ -29,7 +29,7 @@
 | 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |
 | [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1-502 の回帰・残りの Phase・5330 の確認と直し | 4.5 | P1・T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の残り（p007 hang の道具・p008 性能と門）→ T1-435（5330 の実機）と FAIL の直し（不確実）。直前に OFF にする門の手順を用意 | 3.5 | P1・T1 |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の残り済み（hang の道具・`--time`・門）。T1-435（5330 の実機、F1・F2 を足す）と FAIL の直し。門は boot の `i915.debug=video`（今の release の config は OFF）。ON は release の config に 1 行、T1-435 が PASS したら入れる | 2.5 | P1・T1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）の判定 | ユーザー待ち | —（15 分） | ユーザー |
 
 ## UAT の確認項目（ユーザー、5330 の release の image）
@@ -45,7 +45,7 @@
 | 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
 | 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
-| 9 | [WS083](ws083/ws.md) Vulkan Video（H.264） | T1-435 の後に Q1 が案内。Video Player で H.264 の mp4 を再生 | 映像が出て止まらない。✘ なら 10/16 に OFF |
+| 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
 | 10 | [BUG-253](bugs/BUG-253.md) 蓋 | HDMI を挿したまま蓋を閉じ、開ける。起動ごとに違うことがあるので 2〜3 回の起動で | 閉じると HDMI へ、開けると戻る |
 | 11 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から USB LAN（ue0）経由で大きい file を scp。Settings の Network で link の速度を見る | 速さを教えてください（前回 950 KB/s）。link の速度が出る |
 | 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
@@ -61,8 +61,8 @@
 
 | 区分 | LW |
 | --- | --- |
-| 必須（WS143・WS083 を含む） | 38 |
-| **計** | **38 LW**（約 13 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
+| 必須（WS143・WS083 を含む） | 37 |
+| **計** | **37 LW**（約 13 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
