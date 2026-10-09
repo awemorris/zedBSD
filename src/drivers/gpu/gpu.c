@@ -2905,7 +2905,8 @@ gpu_map_ioctl(
 		    view.bytes == 0 ||
 		    view.bytes < resource->bytes ||
 		    view.bytes > SIZE_MAX ||
-		    (view.attributes & ~DRV_GPU_MAPPING_DEVICE) != 0)
+		    (view.attributes & ~(DRV_GPU_MAPPING_DEVICE | DRV_GPU_MAPPING_UNCACHED_RAM)) != 0 ||
+		    view.attributes == (DRV_GPU_MAPPING_DEVICE | DRV_GPU_MAPPING_UNCACHED_RAM))
 			return EIO;
 
 		/* Every alias and extent must represent whole pages for the VM insertion. */
@@ -3036,6 +3037,10 @@ gpu_mmap(
 	attributes = 0U;
 	if ((resource->mapping.attributes & DRV_GPU_MAPPING_DEVICE) != 0)
 		attributes = VM_DEVICE_MMIO;
+
+	/* Normal uncached RAM keeps the backend's cache policy in every user translation. */
+	if ((resource->mapping.attributes & DRV_GPU_MAPPING_UNCACHED_RAM) != 0)
+		attributes = VM_DEVICE_UNCACHED_RAM;
 
 	/* A successful VM owner consumes the release callback and independently retains the file. */
 	error = vm_device_create(

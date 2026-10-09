@@ -38,3 +38,13 @@ rendererを独立登録し、低1GiB placed blob・同device新VA import・forei
 ## i13 checkpoint: worker/job ownership（2026-10-09）
 
 16固定slot/恒久worker/実native runner/FIFO markerを追加。callback FINISHING後のpending retirement、normal cancelの通知なし撤回、fault cancelのretain、unpublished予約を除くstop_poll、drainとDMA quarantineを分離。actual source hostとrpi4 build PASS。[commands/hash/制限](../execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。p005はin-progress、p006はこの検証済みowner/workerをscoped prerequisiteとして使用し、完成したdecoder/compilerとjob tableの公開を接続する。実機/全WS適合は未達。
+
+
+## HOST_COHERENT memoryのmapping依存（2026-10-09）
+
+実libvulkanのdiscoveryはhost coherent memoryを必須とする。cached V3D RAMをcoherentと偽らず、既存HALのNormal NC kernel aliasと同属性のuser translationを使う。shared GPU/VMの4 pathの具体的差分を[依存提案](../uncached-ram-mapping-proposal.md)へ用意し、未適用。担当source境界のため承認を求める。HAL API変更無し。private instance/device/runtimeは独立継続、COMMAND/CAPSETをdependency未達で公開しない。p005/p006 in-progress、Master/shared projectionはQ1。
+
+
+## Normal NC mappingとqueue domainへの接続（2026-10-09）
+
+shared4 pathの限定承認を得てGPU/VM mappingへNormal NC RAMを追加。private NC allocationとrender/display mapperはimmutable cache属性を保持する。native buffer/VM host PASS、rpi4 y build warning/error0。supervised worker slotはactual VkQueue domainをcallback終端まで保持し、新queueは古いslotが残るdomainを再利用しない。p006のroot/query hostでも所有を確認。Vk memory/nonzero BLOB/resource runtime/COMMAND等の公開は後続、p005/i13 in-progress。[詳細](../execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。

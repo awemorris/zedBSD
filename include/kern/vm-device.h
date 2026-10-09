@@ -17,6 +17,8 @@
 #include <stdint.h>
 
 #define VM_DEVICE_MMIO 1U
+/* Normal non-cacheable RAM remains managed memory and permits ordinary byte copies. */
+#define VM_DEVICE_UNCACHED_RAM 2U
 
 struct file;
 

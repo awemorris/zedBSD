@@ -147,3 +147,8 @@ device-independent Zlib SPIR-V frontendをread-onlyで再利用し、独立QPU4.
 ## i14 Vulkan protocol checkpoint（2026-10-09）
 
 独立typed object/sessionの所有とbounded transportを追加。actual source host・actual libvulkan wire writer試験/rpi4 y build PASS、warning/error0。まだtyped GPU runtimeは未接続、COMMAND/CAPSET/JOB未公開。次はinstance/device/query/memory/pipeline/draw/queue、p006/i14はin-progress、WS incomplete。実機とp007の受け入れは未実施。[詳細と復帰点](execution-20261009.md#i14-vulkan-streamのsoftware出力2026-10-09)。
+
+
+## i14 native Vulkan root/query checkpoint（2026-10-09）
+
+実client codecとnative sourceでinstance/device/queue graph・physical queries・domainのcallback lifetimeを接続。承認されたshared4 pathでNormal NC RAMのuser mappingを追加、private buffer/VM alias ownershipも確認。host2/rpi4 y build PASS、warning/error0。次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vulkan-native-rootqueryとnormal-nc-owner2026-10-09)。

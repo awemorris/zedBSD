@@ -21,6 +21,8 @@
 
 #define DRV_GPU_INTERFACE_VERSION	9U
 #define DRV_GPU_MAPPING_DEVICE		1U
+/* Normal non-cacheable RAM keeps ordinary byte access and managed-memory identity. */
+#define DRV_GPU_MAPPING_UNCACHED_RAM	2U
 
 struct drv_gpu_device;
 struct drv_gpu_completion;
@@ -88,7 +90,8 @@ struct drv_gpu_recovery_ops {
 /*
  * An immutable CPU view borrowed from one retained resource. The GPU core
  * retains the resource and its open file through every VM mapping and pin.
- * DEVICE distinguishes uncached MMIO from ordinary coherently mapped DMA RAM.
+ * DEVICE distinguishes MMIO from managed RAM; UNCACHED_RAM preserves a backend
+ * Normal non-cacheable alias in userspace without treating RAM as device registers.
  */
 struct drv_gpu_mapping {
 	uint64_t physical;

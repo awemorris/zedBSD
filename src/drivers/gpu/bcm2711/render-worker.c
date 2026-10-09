@@ -511,6 +511,7 @@ job_reserve(
 	request->session = session;
 	request->completion = completion;
 	request->supervised = true;
+	request->timeline = timeline;
 	request->state = REQUEST_RESERVED;
 	session->pending++;
 	*token = request;
