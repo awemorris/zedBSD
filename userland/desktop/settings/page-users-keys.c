@@ -81,6 +81,7 @@ se_users_keys_draw(
 	struct kl_system_key keys[KL_SYSTEM_KEYS_MAX];
 	struct se_users *users;
 	char state[SE_MESSAGE];
+	const char *hint;
 	kl_color ink;
 	size_t count;
 	size_t index;
@@ -147,6 +148,20 @@ se_users_keys_draw(
 		ink = SE_COLOR_TEXT;
 	if (users->key_message[0] != '\0')
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, users->key_message, KEYS_TEXT_SUB, 0, width - 40, ink);
+
+	/*
+	 * With no answer to show and Add not ready, what Add needs: a new key
+	 * (a YubiKey as it comes) has no PIN, and without one it cannot be
+	 * added here, which the disabled button alone did not say (BUG-279).
+	 */
+	hint = NULL;
+	if (users->key_message[0] == '\0' && !enabled) {
+		hint = "Type your password and a name for the key, then its PIN.";
+		if (users->key_fields[KEYS_PIN].length < KEYS_PIN_MIN)
+			hint = "Type the key's PIN. A new key needs one first: run fidoctl set-pin in Terminal.";
+	}
+	if (hint != NULL)
+		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, hint, KEYS_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 
 	/* The edge below the card. */
 	return top + height;
