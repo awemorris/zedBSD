@@ -2,6 +2,7 @@
 # Native MMU/cache/IRQ ownership and reset failures, no physical MMIO or QEMU.
 # Usage: sh plan/ws141/tests/v3d-hardware-host-test.sh [output-directory]
 set -eu
+. plan/ws141/tests/vulkan-sources.sh
 out=${1:-build/ws141-v3d-hardware-host}
 mkdir -p "$out"
 cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
@@ -10,11 +11,8 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
     plan/ws141/tests/display-lock-host.c src/drivers/gpu/bcm2711/v3d-hardware.c \
     src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/bcm2711/v3d-job.c \
     src/drivers/gpu/bcm2711/v3d-diagnostic.c src/drivers/gpu/bcm2711/cl.c \
-    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/render-device.c \
-    src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/render-worker.c \
-    src/drivers/gpu/bcm2711/vulkan-barrier.c src/drivers/gpu/bcm2711/vulkan-native-job.c src/drivers/gpu/bcm2711/vulkan-native-pass.c \
-    src/drivers/gpu/bcm2711/vulkan-native-draw.c src/drivers/gpu/bcm2711/vulkan-prepared.c \
-    src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-object.c \
-    src/drivers/gpu/bcm2711/vulkan-session.c -Wl,--gc-sections \
+    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/render-device.c \
+    src/drivers/gpu/bcm2711/share.c \
+    $ws141_vulkan_sources -Wl,--gc-sections \
     -o "$out/v3d-hardware-host-test"
 "$out/v3d-hardware-host-test"

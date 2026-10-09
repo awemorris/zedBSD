@@ -2,6 +2,7 @@
 # Actual client wire/record codec and native Vulkan ownership/query modules, no physical GPU or QEMU.
 # Usage: sh plan/ws141/tests/vulkan-device-host-test.sh [output-directory]
 set -eu
+. plan/ws141/tests/vulkan-sources.sh
 out=${1:-build/ws141-vulkan-device-host}
 task_root=$(pwd)
 mkdir -p "$out/client-headers"
@@ -11,17 +12,7 @@ fi
 cc -std=c99 -D_POSIX_C_SOURCE=200809L -D_GNU_SOURCE -include time.h -Wall -Wextra -Werror \
     -ffunction-sections -fdata-sections -Iplan/ws141/tests/host -I"$out/client-headers" -Iinclude -Isrc -I. \
     plan/ws141/tests/vulkan-device-host-test.c plan/ws141/tests/vulkan-client-pipeline-host.c plan/ws141/tests/display-lock-host.c \
-    src/drivers/gpu/bcm2711/vulkan-object.c src/drivers/gpu/bcm2711/vulkan-session.c \
-    src/drivers/gpu/bcm2711/vulkan-stream.c src/drivers/gpu/bcm2711/vulkan-device.c src/drivers/gpu/bcm2711/vulkan-sync.c src/drivers/gpu/bcm2711/vulkan-queue.c src/drivers/gpu/bcm2711/render-worker.c \
-    src/drivers/gpu/bcm2711/vulkan-query.c src/drivers/gpu/bcm2711/vulkan-memory.c src/drivers/gpu/bcm2711/vulkan-resource.c src/drivers/gpu/bcm2711/vulkan-input.c src/drivers/gpu/bcm2711/vulkan-layout.c src/drivers/gpu/bcm2711/vulkan-layout-compat.c src/drivers/gpu/bcm2711/vulkan-descriptor-pool.c \
-    src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-descriptor-update.c src/drivers/gpu/bcm2711/vulkan-target.c \
-    src/drivers/gpu/bcm2711/vulkan-pipeline-build.c src/drivers/gpu/bcm2711/vulkan-pipeline-state.c src/drivers/gpu/bcm2711/vulkan-pipeline.c src/drivers/gpu/bcm2711/vulkan-pipeline-decode.c \
-    src/drivers/gpu/bcm2711/vulkan-command-pool.c src/drivers/gpu/bcm2711/vulkan-command-batch.c src/drivers/gpu/bcm2711/vulkan-command-buffer.c \
-    src/drivers/gpu/bcm2711/vulkan-barrier.c src/drivers/gpu/bcm2711/vulkan-barrier-decode.c src/drivers/gpu/bcm2711/vulkan-barrier-validate.c src/drivers/gpu/bcm2711/vulkan-record.c src/drivers/gpu/bcm2711/vulkan-record-decode.c src/drivers/gpu/bcm2711/vulkan-record-validate.c src/drivers/gpu/bcm2711/vulkan-draw.c src/drivers/gpu/bcm2711/vulkan-draw-validate.c src/drivers/gpu/bcm2711/vulkan-prepared.c src/drivers/gpu/bcm2711/vulkan-uniform.c src/drivers/gpu/bcm2711/native-viewport.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/native-shader.c src/drivers/gpu/bcm2711/native-texture.c src/drivers/gpu/bcm2711/vulkan-native-draw.c src/drivers/gpu/bcm2711/vulkan-native-bin.c src/drivers/gpu/bcm2711/native-bin.c src/drivers/gpu/bcm2711/native-pass.c src/drivers/gpu/bcm2711/vulkan-native-pass.c src/drivers/gpu/bcm2711/vulkan-native-execute.c src/drivers/gpu/bcm2711/vulkan-native-job.c src/drivers/gpu/bcm2711/native-colour.c src/drivers/gpu/bcm2711/vulkan-buffer-copy.c src/drivers/gpu/bcm2711/vulkan-transfer.c src/drivers/gpu/bcm2711/vulkan-native-image.c \
-    src/drivers/gpu/bcm2711/shader.c src/drivers/gpu/bcm2711/shader-analyze.c \
-    src/drivers/gpu/bcm2711/shader-lower.c src/drivers/gpu/bcm2711/shader-output.c src/drivers/gpu/bcm2711/qpu.c \
-    src/drivers/gpu/i915/compiler/spirv.c \
-    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/i915/render/codec.c \
+    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/mmu.c \
     userland/desktop/libvulkan/wire.c userland/desktop/libvulkan/codec.c userland/desktop/libvulkan/objects.c \
-    -Wl,--gc-sections -o "$out/vulkan-device-host-test"
+    $ws141_vulkan_sources -Wl,--gc-sections -o "$out/vulkan-device-host-test"
 "$out/vulkan-device-host-test"

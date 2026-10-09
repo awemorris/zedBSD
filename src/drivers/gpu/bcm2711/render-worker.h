@@ -55,7 +55,7 @@ struct bcm2711_render_worker {
 void bcm2711_render_jobs_bind(struct drv_gpu_ops *operations);
 void bcm2711_render_worker_init(struct bcm2711_render_device *controller);
 int bcm2711_render_worker_start(struct bcm2711_render_device *controller);
-int bcm2711_render_worker_submit(struct bcm2711_render_session *session, bcm2711_render_execute execute, bcm2711_render_dispose dispose, void *payload, struct drv_gpu_completion *completion);
+int bcm2711_render_worker_submit(struct bcm2711_render_session *session, bcm2711_render_execute execute, bcm2711_render_dispose dispose, void *payload, uint32_t timeline, struct drv_gpu_completion *completion);
 int bcm2711_render_worker_step(struct bcm2711_render_device *controller);
 void bcm2711_render_worker_stop(struct bcm2711_render_session *session, int error);
 int bcm2711_render_worker_stopped(struct bcm2711_render_session *session);

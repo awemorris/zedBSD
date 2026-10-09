@@ -72,6 +72,9 @@ static const struct drv_gpu_ops *test_operations;
 static struct bcm2711_render_device *test_controller;
 static unsigned test_reported;
 
+/* A selected descriptor allocation failure exercises actual render open and complete namespace unwind. */
+static unsigned test_descriptor_failure;
+
 /* Worker callbacks retain observable identities through FINISHING before slot reuse. */
 static unsigned test_completed;
 static int test_completion_errors[32];
@@ -310,6 +313,28 @@ bcm2711_buffer_create(
 }
 
 /*
+ * Supplies the actual typed-memory allocator with explicit model storage and declared NC ownership.
+ */
+int
+bcm2711_buffer_create_uncached(
+	uint64_t bytes,
+	uint64_t limit,
+	size_t alignment,
+	struct bcm2711_buffer **result)
+{
+	int error;
+
+	/* The model validates ordinary lifetime only; real NC aliases and placement have their separate source checks. */
+	error = bcm2711_buffer_create(bytes, limit, alignment, result);
+	if (error != 0)
+		return error;
+	(*result)->uncached = true;
+
+	/* Succeeded: the actual typed-memory path may retain this explicit fixture owner. */
+	return 0;
+}
+
+/*
  * Records safe, unpublished allocation unwind; no fixture memory is recycled.
  */
 void
@@ -325,30 +350,6 @@ bcm2711_buffer_release(
 	if (buffer == test_engine.hardware.pages)
 		assert(!test_engine.hardware.mmu_published);
 	test_released++;
-}
-
-/*
- * Refuses typed Vulkan allocation binding in the allocation-only hardware fixture.
- *
- * Actual typed Vulkan memory/BLOB ownership is exercised by the separate
- * Vulkan-device host fixture.  This fixture never opens a Vulkan session.
- */
-int
-bcm2711_vulkan_memory_blob(
-	struct bcm2711_vulkan_session *session,
-	const struct gpu_blob_create *request,
-	const struct gpu_placement *placement,
-	struct bcm2711_buffer **buffer)
-{
-	/* Placement is not consulted without a real typed protocol namespace. */
-	(void)placement;
-
-	/* Only a deliberately unsupported nonzero typed BLOB request reaches this fixture boundary. */
-	*buffer = NULL;
-	assert(session == NULL && request->blob_id != 0);
-
-	/* No synthetic typed allocation is reported as a successful Vulkan binding. */
-	return ENOTSUP;
 }
 
 /*
@@ -674,11 +675,35 @@ kern_calloc(
 {
 	void *storage;
 
+	/* Descriptor OOM is separate from physical storage refusal and precedes any complete session publication. */
+	if (test_descriptor_failure != 0) {
+		test_descriptor_failure--;
+		if (test_descriptor_failure == 0)
+			return NULL;
+	}
+
 	/* Descriptor allocation is independent from the model's retained physical storage. */
 	storage = calloc(count, bytes);
 	assert(storage != NULL);
 
 	/* Succeeded: the caller owns zeroed ordinary descriptor memory. */
+	return storage;
+}
+
+/*
+ * Supplies ordinary descriptor storage for the actual runtime's bounded copied external stream.
+ */
+void *
+kern_malloc(
+	size_t bytes)
+{
+	void *storage;
+
+	/* Heap bytes belong to the CPU fixture and never prove native physical placement or retirement. */
+	storage = malloc(bytes);
+	assert(storage != NULL);
+
+	/* Succeeded: actual transport owns this independent copied CPU extent. */
 	return storage;
 }
 
@@ -743,8 +768,10 @@ drv_gpu_register(
 	void *controller,
 	struct drv_gpu_device **result)
 {
-	/* Storage-only registration must not advertise Vulkan before an executor exists. */
-	assert((operations->capabilities & (GPU_CAP_COMMAND | GPU_CAP_CAPSET)) == 0);
+	/* Actual registration publishes only the complete native Vulkan transport and supervised callback tables. */
+	assert((operations->capabilities & (GPU_CAP_COMMAND | GPU_CAP_CAPSET | GPU_CAP_NOTIFICATION)) == (GPU_CAP_COMMAND | GPU_CAP_CAPSET | GPU_CAP_NOTIFICATION));
+	assert(operations->command != NULL && operations->get_capset != NULL && operations->commands != NULL);
+	assert(operations->commands->submit != NULL && operations->commands->drain != NULL && operations->jobs != NULL);
 	assert(operations->share != NULL && operations->recovery != NULL);
 	assert(operations->blob_create_placed != NULL && operations->resource_destroy != NULL);
 	test_operations = operations;
@@ -1378,12 +1405,24 @@ check_resources(
 	assert(error == 0);
 	error = bcm2711_render_register(&test_engine);
 	assert(error == 0 && test_operations != NULL);
+
+	/* Session, namespace and arena failures all leave the common result unpublished and the controller session count unchanged. */
+	for (identifier = 1; identifier <= 3; identifier++) {
+		test_descriptor_failure = identifier;
+		object = (void *)(uintptr_t)1;
+		error = test_operations->open(test_controller, &object);
+		assert(error == ENOMEM && object == NULL && test_controller->sessions == 0);
+	}
+
+	/* Successful opens publish independent complete namespaces after every refused partial open unwound. */
 	error = test_operations->open(test_controller, &object);
 	assert(error == 0);
 	first = object;
+	assert(first->vulkan != NULL);
 	error = test_operations->open(test_controller, &object);
 	assert(error == 0);
 	second = object;
+	assert(second->vulkan != NULL && second->vulkan != first->vulkan);
 	error = test_operations->get_info(test_controller, first, &info);
 	assert(error == 0 && info.max_resources == 128 && (info.capabilities & GPU_CAP_ALLOCATION_SHARE) != 0);
 	error = test_operations->scanout->query_device(test_controller, first, &device);
@@ -1502,7 +1541,7 @@ check_worker(
 	for (slot = 0; slot < BCM2711_RENDER_REQUESTS; slot++) {
 		mutex_lock(&test_controller->mutex);
 		payload = prepare_payload(resource);
-		error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)(slot + 1U));
+		error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, 0, (struct drv_gpu_completion *)(uintptr_t)(slot + 1U));
 		mutex_unlock(&test_controller->mutex);
 		assert(error == 0 && session->pending == slot + 1U);
 	}
@@ -1510,7 +1549,7 @@ check_worker(
 	/* Queue saturation transfers neither callback nor prepared payload ownership. */
 	mutex_lock(&test_controller->mutex);
 	payload = prepare_payload(resource);
-	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)17U);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, 0, (struct drv_gpu_completion *)(uintptr_t)17U);
 	assert(error == EAGAIN && session->pending == 16 && test_completed == 0);
 	error = dispose_payload(test_controller, payload, true);
 	mutex_unlock(&test_controller->mutex);
@@ -1548,7 +1587,7 @@ check_worker(
 	buffer = resource->view->buffer;
 	mutex_lock(&test_controller->mutex);
 	payload = prepare_payload(resource);
-	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)17U);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, 0, (struct drv_gpu_completion *)(uintptr_t)17U);
 	mutex_unlock(&test_controller->mutex);
 	assert(error == 0);
 	test_hang = true;
@@ -1596,7 +1635,7 @@ check_reservations(
 	/* These private callbacks are not advertised on the allocation-only production node yet. */
 	memset(&operations, 0, sizeof(operations));
 	bcm2711_render_jobs_bind(&operations);
-	assert(operations.jobs != NULL && test_operations->jobs == NULL);
+	assert(operations.jobs != NULL && test_operations->jobs != NULL);
 	error = test_operations->open(test_controller, &object);
 	assert(error == 0);
 	session = object;
@@ -1665,7 +1704,7 @@ check_reservations(
 	mutex_lock(&test_controller->mutex);
 
 	payload = prepare_payload(resource);
-	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)18U);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, 0, (struct drv_gpu_completion *)(uintptr_t)18U);
 	assert(error == 0);
 
 	mutex_unlock(&test_controller->mutex);
@@ -1744,8 +1783,7 @@ check_closed_vulkan(
 	error = test_operations->open(test_controller, &object);
 	assert(error == 0);
 	render = object;
-	error = bcm2711_vulkan_session_open(render, &render->vulkan);
-	assert(error == 0);
+	assert(render->vulkan != NULL);
 	session = render->vulkan;
 	destroyed = kern_calloc(1, sizeof(*destroyed));
 	assert(destroyed != NULL);
