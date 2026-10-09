@@ -513,6 +513,7 @@ static void set_loader_error(const char *message);
 static struct rtld_handle *allocate_handle(struct rtld_object *object, int main_scope);
 static struct rtld_handle *handle_free_slot(void);
 static const char *dlopen_bare_name(const char *path);
+static int dlopen_names_file(const char *path);
 static const char *object_basename(const char *path);
 static int preflight_dlopen_file(int fd);
 static int valid_elf_header(const Elf_Ehdr *header, int expected_type);
@@ -520,6 +521,8 @@ static int validate_file_programs(const Elf_Ehdr *header, const Elf_Phdr *phdr, 
 static int temporary_writable_plt(const Elf_Phdr *program);
 static uintptr_t page_floor(uintptr_t value);
 static struct rtld_object *load_object(const char *name, struct rtld_object *requester);
+static struct rtld_object *load_object_path(const char *file_path);
+static struct rtld_object *load_object_file(intptr_t fd, const char path[RTLD_PATH_MAX], struct rtld_object *requester);
 static intptr_t open_dependency(const char *name, size_t name_length, const struct rtld_object *requester, char path[RTLD_PATH_MAX]);
 static intptr_t open_search_list(const char *list, const struct rtld_object *owner, const char *name, size_t name_length, char path[RTLD_PATH_MAX]);
 static intptr_t open_search_candidate(const char *directory, size_t directory_length, const char *name, size_t name_length, char path[RTLD_PATH_MAX]);
@@ -1167,6 +1170,7 @@ __rtld_dlopen(
 	unsigned i;
 	int same_path;
 	int same_name;
+	int names_file;
 
 	clear_loader_error();
 
@@ -1193,9 +1197,21 @@ __rtld_dlopen(
 		/* Returns the computed result. */
 		return handle;
 	}
+	/*
+	 * A bare name (or /lib/ and a name) is looked for where a DT_NEEDED name
+	 * is; any other path with a slash names its file, opened as it is, as
+	 * POSIX has it (T1-495: Python loads its extension modules from
+	 * /usr/lib/python3.14/lib-dynload by their whole paths).
+	 */
+	names_file = 0;
 	name = dlopen_bare_name(path);
+	if (name == NULL) {
+		names_file = dlopen_names_file(path);
+		if (names_file)
+			name = path;
+	}
 
-	/* Handles a failed rtld strlen operation. */
+	/* Refuses an empty path, or one too long to keep. */
 	if (name == NULL || (length = rtld_strlen(name)) == 0 ||
 	    length >= RTLD_PATH_MAX) {
 		set_loader_error("invalid shared-object path");
@@ -1205,18 +1221,30 @@ __rtld_dlopen(
 		return NULL;
 	}
 
-	/* An object already loaded under the path or the name (from /lib or /usr/lib) is shared. */
+	/*
+	 * An object already loaded under the path, or for a bare name under the
+	 * name (from /lib or /usr/lib), is shared.  A path is not matched by its
+	 * file name alone: two directories may hold different files of one name
+	 * (the same file under another path is found by its identity on load).
+	 */
 	for (i = 0; i < object_count; i++) {
 		object = object_at(i);
 		loaded_name = object_basename(object->path);
 		same_path = rtld_strcmp(object->path, path) == 0;
-		same_name = rtld_strcmp(loaded_name, name) == 0;
+		same_name = 0;
+		if (!names_file)
+			same_name = rtld_strcmp(loaded_name, name) == 0;
 		if (object->active && !object->unloading && (same_path || same_name))
 			goto loaded;
 	}
 
-	/* The file, found where a DT_NEEDED name is (/lib, then /usr/lib for packages; BUG-083). */
-	fd = open_dependency(name, length, NULL, full_path);
+	/* The file: at its path, or found where a DT_NEEDED name is (/lib, then /usr/lib for packages; BUG-083). */
+	if (names_file) {
+		copy_path(full_path, path);
+		fd = syscall6(KERN_SYS_open, (uintptr_t)full_path, O_RDONLY, 0, 0, 0, 0);
+	} else {
+		fd = open_dependency(name, length, NULL, full_path);
+	}
 
 	/* Handles an operation failure. */
 	if (raw_error(fd)) {
@@ -1237,7 +1265,13 @@ __rtld_dlopen(
 		return NULL;
 	}
 	(void)syscall6(KERN_SYS_close, (uintptr_t)fd, 0, 0, 0, 0, 0);
-	object = load_object(name, NULL);
+
+	/* Maps the object: the file at the path, or the one the name finds. */
+	if (names_file) {
+		object = load_object_path(full_path);
+	} else {
+		object = load_object(name, NULL);
+	}
 	relocate_object(object);
 	debug_map_publish();
 
@@ -2408,6 +2442,27 @@ dlopen_bare_name(
 	return path;
 }
 
+/* Tells whether a dlopen path names its file: it is not empty and holds a slash (other than /lib/ and a bare name). */
+static int
+dlopen_names_file(
+	const char *path)
+{
+	const char *cursor;
+
+	/* No path. */
+	if (path == NULL || path[0] == '\0')
+		return 0;
+
+	/* A slash anywhere makes it a path to open as it is. */
+	for (cursor = path; *cursor != '\0'; cursor++) {
+		if (*cursor == '/')
+			return 1;
+	}
+
+	/* Succeeded: a bare name, looked for in the library directories. */
+	return 0;
+}
+
 /* Returns the file name of an object's path: what follows its last slash, or the whole path. */
 static const char *
 object_basename(
@@ -2623,18 +2678,10 @@ load_object(
 	struct rtld_object *requester)
 {
 	char path[RTLD_PATH_MAX];
-	struct stat status;
-	Elf_Ehdr header;
-	Elf_Phdr room[RTLD_PROGRAM_INLINE];
-	Elf_Phdr *phdr;
-	struct rtld_object *object, *existing;
-	intptr_t fd, result;
-	size_t phdr_mapping;
+	struct rtld_object *object;
+	intptr_t fd;
 	size_t length;
 	unsigned i;
-	uintptr_t minimum;
-
-	minimum = UINTPTR_MAX;
 
 	/* Handles the name availability. */
 	if (name == NULL || name[0] == '\0')
@@ -2656,6 +2703,61 @@ load_object(
 	/* Handles an operation failure. */
 	if (raw_error(fd))
 		rtld_fatal("cannot open dependency");
+
+	/* Maps the file found and its dependencies. */
+	object = load_object_file(fd, path, requester);
+
+	/* Succeeded: the object of the file. */
+	return object;
+}
+
+/*
+ * Loads the shared object at a path that names its file (dlopen of a path
+ * with a slash, opened as it is rather than searched for, T1-495).
+ */
+static struct rtld_object *
+load_object_path(
+	const char *file_path)
+{
+	char path[RTLD_PATH_MAX];
+	struct rtld_object *object;
+	intptr_t fd;
+
+	/* The path as the object's own, which the caller measured against RTLD_PATH_MAX. */
+	copy_path(path, file_path);
+
+	/* Opens the file itself. */
+	fd = syscall6(KERN_SYS_open, (uintptr_t)path, O_RDONLY, 0, 0, 0, 0);
+	if (raw_error(fd))
+		rtld_fatal("cannot open shared object");
+
+	/* Maps the file and its dependencies. */
+	object = load_object_file(fd, path, NULL);
+
+	/* Succeeded: the object of the file. */
+	return object;
+}
+
+/* Maps an opened shared object (closing its descriptor), or finds it loaded already; then its dependencies. */
+static struct rtld_object *
+load_object_file(
+	intptr_t fd,
+	const char path[RTLD_PATH_MAX],
+	struct rtld_object *requester)
+{
+	struct stat status;
+	Elf_Ehdr header;
+	Elf_Phdr room[RTLD_PROGRAM_INLINE];
+	Elf_Phdr *phdr;
+	struct rtld_object *object, *existing;
+	intptr_t result;
+	size_t phdr_mapping;
+	unsigned i;
+	uintptr_t minimum;
+
+	minimum = UINTPTR_MAX;
+
+	/* The file's identity and size. */
 	result = syscall6(KERN_SYS_fstat, (uintptr_t)fd, (uintptr_t)&status,
 			  0, 0, 0, 0);
 

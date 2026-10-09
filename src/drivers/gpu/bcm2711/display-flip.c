@@ -17,6 +17,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
+#include "drivers/platform/rpi4/rpi4-firmware.h"
 
 /* The boot primary and two spare lists do not overlap the reserved filter. */
 #define FLIP_CONSOLE_LIST 43U
@@ -25,6 +26,15 @@
 #define FLIP_PLANE_WORDS 9U
 #define FLIP_NO_LIST 4096U
 
+/* Two-plane lists need seventeen words; their slots cannot overlap the primaries. */
+#define FLIP_COMPOSE_FIRST 128U
+#define FLIP_COMPOSE_STRIDE 32U
+#define FLIP_COMPOSE_WORDS 17U
+
+static int submit_frame(struct bcm2711_display *display, const struct drv_bcm2711_boot_screen *frame, const uint32_t *words, uint32_t count, bool composed);
+static int raise_clock(struct bcm2711_display *display, uint32_t required);
+static int request_clock(uint32_t hz);
+static void finish_adoption(struct bcm2711_display *display, uint32_t required);
 static int check_pipeline(struct bcm2711_display *display, bool recovering);
 static int prepare_frame(const struct drv_bcm2711_boot_screen *console, const struct drv_bcm2711_boot_screen *frame, uint32_t *words);
 static bool frames_overlap(const struct drv_bcm2711_boot_screen *a, const struct drv_bcm2711_boot_screen *b);
@@ -64,7 +74,7 @@ bcm2711_display_flip_attach(
 		return ENODEV;
 	if (display->port >= BCM2711_TIMING_COUNT || display->channel != 0)
 		return EINVAL;
-	if (display->compositor.mapped == NULL || display->compositor.size < 0x4144U)
+	if (display->compositor.mapped == NULL || display->compositor.size < 0x42c4U)
 		return ENODEV;
 	if (display->timing[display->port].mapped == NULL || display->timing[display->port].size < 0x2cU)
 		return ENODEV;
@@ -86,10 +96,52 @@ bcm2711_display_flip_attach(
 
 	/* Publishes permission to submit only after the hardware ownership check. */
 	display->flip.attached = true;
+	display->flip.core_hz = display->console_core_hz;
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
 	/* Succeeded: the caller may submit buffers within the unchanged boot mode. */
+	return 0;
+}
+
+/*
+ * Detaches a registration attempt that never left the confirmed console list.
+ * No live or uncertain DMA buffer can be released through this operation.
+ */
+int
+bcm2711_display_flip_detach(
+	struct bcm2711_display *display)
+{
+	unsigned long enabled;
+	int error;
+
+	/* Requires the persistent initialized guard before observing attachment. */
+	if (!display->flip.initialized)
+		return ENODEV;
+
+	/* Withdraws ownership only when no submission, recovery or borrowed DMA exists. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	if (display->flip.busy ||
+	    display->flip.uncertain ||
+	    display->flip.retained_mask != 0) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
+		return EBUSY;
+	}
+
+	/* A current console pointer alone cannot prove no pending list will replace it. */
+	error = check_pipeline(display, false);
+	if (error != 0 || display->flip.active_list != FLIP_CONSOLE_LIST) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
+		return EBUSY;
+	}
+
+	/* No hardware reference is withdrawn; the console keeps its existing list. */
+	display->flip.attached = false;
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Succeeded: an unpublished device owner may unwind its private buffers. */
 	return 0;
 }
 
@@ -103,23 +155,270 @@ bcm2711_display_flip_present(
 	const struct drv_bcm2711_boot_screen *frame)
 {
 	uint32_t words[FLIP_PLANE_WORDS];
-	uint32_t slot;
-	uint32_t index;
-	uint32_t list;
-	unsigned long enabled;
-	bool overlap;
-	void *mapping;
 	int error;
 
 	/* Rejects unrepresentable geometry before touching ownership or hardware. */
 	error = prepare_frame(&display->screen, frame, words);
 	if (error != 0)
 		return error;
+
+	/* Publishes only the complete independent primary-plane image. */
+	error = submit_frame(display, frame, words, FLIP_PLANE_WORDS, false);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the selected PV observed actual primary adoption. */
+	return 0;
+}
+
+/*
+ * Composes an unscaled upper image over the retained full-screen console.
+ * Positions and alpha are encoded independently; both SRAM contexts are fresh.
+ */
+int
+bcm2711_display_flip_compose(
+	struct bcm2711_display *display,
+	const struct drv_bcm2711_boot_screen *frame,
+	uint32_t x,
+	uint32_t y,
+	bool premultiplied)
+{
+	struct drv_bcm2711_boot_screen extent;
+	uint32_t words[FLIP_COMPOSE_WORDS];
+	int error;
+
+	/* Refuses any upper-plane crop, scaling or overflow of the established output. */
+	if (frame == NULL)
+		return EINVAL;
+	if (x > display->screen.width || frame->width > display->screen.width - x)
+		return EINVAL;
+	if (y > display->screen.height || frame->height > display->screen.height - y)
+		return EINVAL;
+
+	/* Regenerates the console plane instead of copying hardware-written contexts. */
+	error = prepare_frame(&display->screen, &display->screen, words);
+	if (error != 0)
+		return error;
+
+	/* Validates the upper buffer using its unscaled dimensions and native byte order. */
+	extent = display->screen;
+	extent.width = frame->width;
+	extent.height = frame->height;
+	error = prepare_frame(&extent, frame, words + 8);
+	if (error != 0)
+		return error;
+
+	/* Replaces the lower terminator with the upper plane, followed by its own END. */
+	words[9] = (y << 16) | x;
+	if (premultiplied)
+		words[10] = 0x2000fff0U;
+
+	/* Publishes both completed planes while retaining the boot routes and pixel timing. */
+	error = submit_frame(display, frame, words, FLIP_COMPOSE_WORDS, true);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: a selected-PV frame adopted both planes in their new SRAM slot. */
+	return 0;
+}
+
+/*
+ * Restores the retained boot console without changing mode or routing.
+ * A fresh matching PV interrupt is required even after a late uncertain flip.
+ */
+int
+bcm2711_display_flip_restore(
+	struct bcm2711_display *display)
+{
+	unsigned long enabled;
+	void *mapping;
+	int error;
+
+	/* Requires the persistent owner and the existing console CPU mapping. */
+	if (!display->flip.initialized)
+		return ENODEV;
+	mapping = kern_pmem_to_kernel(display->screen.physical);
+	if (mapping == NULL)
+		return EFAULT;
+
+	/* Excludes ordinary submissions while console bytes are prepared. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	if (!display->flip.attached) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
+		return ENODEV;
+	}
+
+	/* An in-flight submitter owns both publication and its synchronous result. */
+	if (display->flip.busy) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
+		return EBUSY;
+	}
+
+	/* Keeps another caller from publishing while console cache cleaning runs. */
+	display->flip.busy = true;
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Raises the provider clock before restoring a potentially heavier active list. */
+	error = raise_clock(display, display->console_core_hz);
+	if (error != 0)
+		return error;
+
+	/* Makes current console contents visible before reinstating its original list. */
+	kern_dcache_clean_range(mapping, (size_t)display->screen.size);
+	kern_io_write_barrier();
+
+	/* Allows recovery from uncertain current/next pointers only on this pipeline. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	error = check_pipeline(display, true);
+	if (error != 0) {
+		display->flip.uncertain = true;
+		display->flip.busy = false;
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
+		return error;
+	}
+
+	/* Requeues the preserved console list and demands a fresh matching source. */
+	publish_list(display, FLIP_CONSOLE_LIST);
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Returns holds only after the selected PV proves boot-console adoption. */
+	error = wait_adoption(display);
+	if (error != 0)
+		return error;
+
+	/* Lowers bandwidth only after adoption, while publication is still excluded. */
+	finish_adoption(display, display->console_core_hz);
+
+	/* Succeeded: no caller-provided framebuffer remains retained. */
+	return 0;
+}
+
+/*
+ * Copies buffer holds and progress under the IRQ guard for the sole buffer owner.
+ * An uninitialized display reports an unattached, empty status.
+ */
+void
+bcm2711_display_flip_snapshot(
+	struct bcm2711_display *display,
+	struct bcm2711_flip_status *status)
+{
+	unsigned long enabled;
+	uint32_t slot;
+
+	/* Clears the caller's result without dereferencing an uninitialized guard. */
+	kern_memset(status, 0, sizeof(*status));
+	if (!display->flip.initialized)
+		return;
+
+	/* Copies immutable descriptors alongside the mask that defines their lifetime. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	status->attached = display->flip.attached;
+	status->busy = display->flip.busy;
+	status->uncertain = display->flip.uncertain;
+	status->active_list = display->flip.active_list;
+	status->pending_list = display->flip.pending_list;
+	status->retained_mask = display->flip.retained_mask;
+	status->frame_sequence = display->flip.frame_sequence;
+	status->core_hz = display->flip.core_hz;
+	status->clock_error = display->flip.clock_error;
+	for (slot = 0; slot < BCM2711_FLIP_SLOTS; slot++) {
+		/* Masked-out copies do not grant DMA ownership and may name retired memory. */
+		status->frames[slot] = display->flip.frames[slot];
+	}
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
+}
+
+/*
+ * Observes the selected PV's acknowledged frame with the caller's guard held.
+ * A timeout stays uncertain until actual console adoption permits all retirement.
+ */
+void
+bcm2711_display_flip_vblank_locked(
+	struct bcm2711_display *display,
+	uint32_t current)
+{
+	uint32_t slot;
+	uint32_t control;
+
+	/* Counts real selected-PV frames independently of submissions and old lists. */
+	display->flip.frame_sequence++;
+	if (!display->flip.attached || display->flip.pending_list == FLIP_NO_LIST)
+		return;
+	if (current != display->flip.pending_list)
+		return;
+
+	/* Records adoption before marking completion visible to the synchronous caller. */
+	display->flip.active_list = current;
+	display->flip.pending_list = FLIP_NO_LIST;
+	if (current == FLIP_CONSOLE_LIST) {
+		/* Fresh console adoption makes every caller framebuffer safe to release. */
+		display->flip.retained_mask = 0;
+		display->flip.uncertain = false;
+	} else if (!display->flip.uncertain) {
+		/* Ordinary adoption releases the preceding list's borrowed storage. */
+		slot = (current - FLIP_FIRST_LIST) / FLIP_LIST_STRIDE;
+		if (current >= FLIP_COMPOSE_FIRST)
+			slot = (current - FLIP_COMPOSE_FIRST) / FLIP_COMPOSE_STRIDE;
+		display->flip.retained_mask = 1U << slot;
+	}
+
+	/* Clears stale underrun before enabling the adopted channel's source. */
+	kern_mmio_write32(display->compositor.mapped + 0x04, 0x200);
+	control = kern_mmio_read32(display->compositor.mapped);
+	kern_mmio_write32(display->compositor.mapped, control | 0x200U);
+	display->flip.completed = true;
+}
+
+/* Publishes one completely prepared primary or composed list with identical DMA holds. */
+static int
+submit_frame(
+	struct bcm2711_display *display,
+	const struct drv_bcm2711_boot_screen *frame,
+	const uint32_t *words,
+	uint32_t count,
+	bool composed)
+{
+	uint32_t slot;
+	uint32_t index;
+	uint32_t list;
+	uint32_t required;
+	uint64_t load;
+	unsigned long enabled;
+	bool overlap;
+	void *mapping;
+	void *console_mapping;
+	int error;
+
+	/* Computes the two unscaled planes at four pixels per compositor cycle. */
+	required = display->console_core_hz;
+	if (composed) {
+		/* One output uses sixty percent of the aggregate plane cycle demand. */
+		load = (uint64_t)display->screen.width * display->screen.height + (uint64_t)frame->width * frame->height;
+		load = load * ((display->refresh_millihz + 500U) / 1000U) / 4U;
+		load = load * 60U / 100U;
+		if (load > required)
+			required = (uint32_t)load;
+	}
+
+	/* Preparation completed before acquiring a mutable publication owner. */
 	if (!display->flip.initialized)
 		return ENODEV;
 	mapping = kern_pmem_to_kernel(frame->physical);
 	if (mapping == NULL)
 		return EFAULT;
+	console_mapping = NULL;
+	if (composed) {
+		/* The lower console may have received newer cached text since R0. */
+		console_mapping = kern_pmem_to_kernel(display->screen.physical);
+		if (console_mapping == NULL)
+			return EFAULT;
+	}
 
 	/* Reserves a free SRAM slot without overwriting an active or uncertain list. */
 	enabled = spin_lock_irqsave(&display->flip.guard);
@@ -164,7 +463,14 @@ bcm2711_display_flip_present(
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
-	/* Publishes frozen RGB bytes before any list can make them DMA-visible. */
+	/* Raises bandwidth before any SRAM or next-list write, outside the IRQ guard. */
+	error = raise_clock(display, required);
+	if (error != 0)
+		return error;
+
+	/* Publishes both lower-console and upper-image bytes before the composed list. */
+	if (console_mapping != NULL)
+		kern_dcache_clean_range(console_mapping, (size_t)display->screen.size);
 	kern_dcache_clean_range(mapping, (size_t)frame->size);
 	kern_io_write_barrier();
 
@@ -182,7 +488,9 @@ bcm2711_display_flip_present(
 
 	/* Writes the inactive slot completely while the current slot stays intact. */
 	list = FLIP_FIRST_LIST + slot * FLIP_LIST_STRIDE;
-	for (index = 0; index < FLIP_PLANE_WORDS; index++) {
+	if (composed)
+		list = FLIP_COMPOSE_FIRST + slot * FLIP_COMPOSE_STRIDE;
+	for (index = 0; index < count; index++) {
 		/* Context placeholders are fresh even when this retired slot is reused. */
 		kern_mmio_write32(display->compositor.mapped + 0x4000U + (list + index) * 4U, words[index]);
 	}
@@ -199,149 +507,104 @@ bcm2711_display_flip_present(
 	if (error != 0)
 		return error;
 
+	/* Releases temporary bandwidth only after the frame has actually adopted. */
+	finish_adoption(display, required);
+
 	/* Succeeded: status now retains only the adopted framebuffer. */
 	return 0;
 }
 
-/*
- * Restores the retained boot console without changing mode, routing or clocks.
- * A fresh matching PV interrupt is required even after a late uncertain flip.
- */
-int
-bcm2711_display_flip_restore(
-	struct bcm2711_display *display)
+/* Raises the transition floor while BUSY serializes all firmware-clock requests. */
+static int
+raise_clock(
+	struct bcm2711_display *display,
+	uint32_t required)
 {
+	uint32_t hz;
 	unsigned long enabled;
-	void *mapping;
 	int error;
 
-	/* Requires the persistent owner and the existing console CPU mapping. */
-	if (!display->flip.initialized)
-		return ENODEV;
-	mapping = kern_pmem_to_kernel(display->screen.physical);
-	if (mapping == NULL)
-		return EFAULT;
+	/* Refuses bandwidth outside the ceiling captured before firmware teardown. */
+	error = 0;
+	if (required == 0 || required > display->max_core_hz)
+		error = ENOTSUP;
+	hz = 500000000U;
+	if (hz < required)
+		hz = required;
+	if (hz < display->flip.core_hz)
+		hz = display->flip.core_hz;
+	if (hz > display->max_core_hz)
+		hz = display->max_core_hz;
 
-	/* Excludes ordinary submissions while console bytes are prepared. */
+	/* Requests the same temporary floor as R0 before publishing any new list. */
+	if (error == 0)
+		error = request_clock(hz);
+
+	/* A failed request relinquishes admission without publishing the candidate. */
 	enabled = spin_lock_irqsave(&display->flip.guard);
 
-	if (!display->flip.attached) {
-		spin_unlock_irqrestore(&display->flip.guard, enabled);
-		return ENODEV;
-	}
-
-	/* An in-flight submitter owns both publication and its synchronous result. */
-	if (display->flip.busy) {
-		spin_unlock_irqrestore(&display->flip.guard, enabled);
-		return EBUSY;
-	}
-
-	/* Keeps another caller from publishing while console cache cleaning runs. */
-	display->flip.busy = true;
-
-	spin_unlock_irqrestore(&display->flip.guard, enabled);
-
-	/* Makes current console contents visible before reinstating its original list. */
-	kern_dcache_clean_range(mapping, (size_t)display->screen.size);
-	kern_io_write_barrier();
-
-	/* Allows recovery from uncertain current/next pointers only on this pipeline. */
-	enabled = spin_lock_irqsave(&display->flip.guard);
-
-	error = check_pipeline(display, true);
+	display->flip.clock_error = error;
 	if (error != 0) {
-		display->flip.uncertain = true;
 		display->flip.busy = false;
-		spin_unlock_irqrestore(&display->flip.guard, enabled);
-		return error;
+	} else {
+		/* A timeout keeps this transition rate until confirmed console recovery. */
+		display->flip.core_hz = hz;
 	}
-
-	/* Requeues the preserved console list and demands a fresh matching source. */
-	publish_list(display, FLIP_CONSOLE_LIST);
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
-	/* Returns holds only after the selected PV proves boot-console adoption. */
-	error = wait_adoption(display);
+	/* Refuses publication if the provider could not establish its bandwidth. */
 	if (error != 0)
 		return error;
 
-	/* Succeeded: no caller-provided framebuffer remains retained. */
+	/* Succeeded: the transition clock precedes every candidate register write. */
 	return 0;
 }
 
-/*
- * Copies buffer holds and progress under the IRQ guard for the sole buffer owner.
- * An uninitialized display reports an unattached, empty status.
- */
-void
-bcm2711_display_flip_snapshot(
-	struct bcm2711_display *display,
-	struct bcm2711_flip_status *status)
+/* Sends the firmware provider's exact rate request with turbo left unchanged. */
+static int
+request_clock(
+	uint32_t hz)
 {
-	unsigned long enabled;
-	uint32_t slot;
+	uint32_t values[3];
+	uint32_t answered;
+	int error;
 
-	/* Clears the caller's result without dereferencing an uninitialized guard. */
-	memset(status, 0, sizeof(*status));
-	if (!display->flip.initialized)
-		return;
+	/* Leaves rounding to the same firmware provider used by R0 and Linux. */
+	values[0] = 4;
+	values[1] = hz;
+	values[2] = 0;
+	error = drv_rpi4_firmware_property(0x00038002U, values, 3, 3, &answered);
+	if (error != 0)
+		return error;
+	if (answered < 8U || values[0] != 4)
+		return EIO;
 
-	/* Copies immutable descriptors alongside the mask that defines their lifetime. */
-	enabled = spin_lock_irqsave(&display->flip.guard);
-
-	status->attached = display->flip.attached;
-	status->busy = display->flip.busy;
-	status->uncertain = display->flip.uncertain;
-	status->active_list = display->flip.active_list;
-	status->pending_list = display->flip.pending_list;
-	status->retained_mask = display->flip.retained_mask;
-	status->frame_sequence = display->flip.frame_sequence;
-	for (slot = 0; slot < BCM2711_FLIP_SLOTS; slot++) {
-		/* Masked-out copies do not grant DMA ownership and may name retired memory. */
-		status->frames[slot] = display->flip.frames[slot];
-	}
-
-	spin_unlock_irqrestore(&display->flip.guard, enabled);
+	/* Succeeded: the firmware accepted this core-clock request. */
+	return 0;
 }
 
-/*
- * Observes the selected PV's acknowledged frame with the caller's guard held.
- * A timeout stays uncertain until actual console adoption permits all retirement.
- */
-void
-bcm2711_display_flip_vblank_locked(
+/* Retires the transition floor only after actual adoption, before releasing BUSY. */
+static void
+finish_adoption(
 	struct bcm2711_display *display,
-	uint32_t current)
+	uint32_t required)
 {
-	uint32_t slot;
-	uint32_t control;
+	unsigned long enabled;
+	int error;
 
-	/* Counts real selected-PV frames independently of submissions and old lists. */
-	display->flip.frame_sequence++;
-	if (!display->flip.attached || display->flip.pending_list == FLIP_NO_LIST)
-		return;
-	if (current != display->flip.pending_list)
-		return;
+	/* A refused reduction leaves the higher safe floor and the adopted image intact. */
+	error = request_clock(required);
 
-	/* Records adoption before marking completion visible to the synchronous caller. */
-	display->flip.active_list = current;
-	display->flip.pending_list = FLIP_NO_LIST;
-	if (current == FLIP_CONSOLE_LIST) {
-		/* Fresh console adoption makes every caller framebuffer safe to release. */
-		display->flip.retained_mask = 0;
-		display->flip.uncertain = false;
-	} else if (!display->flip.uncertain) {
-		/* Ordinary adoption releases the preceding list's borrowed storage. */
-		slot = (current - FLIP_FIRST_LIST) / FLIP_LIST_STRIDE;
-		display->flip.retained_mask = 1U << slot;
-	}
+	/* Publishes the clock diagnostic alongside permission for another submission. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
 
-	/* Clears stale underrun before enabling the adopted channel's source. */
-	kern_mmio_write32(display->compositor.mapped + 0x04, 0x200);
-	control = kern_mmio_read32(display->compositor.mapped);
-	kern_mmio_write32(display->compositor.mapped, control | 0x200U);
-	display->flip.completed = true;
+	display->flip.clock_error = error;
+	if (error == 0)
+		display->flip.core_hz = required;
+	display->flip.busy = false;
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 }
 
 /* Checks sole ownership and unchanged timing before any list publication. */
@@ -400,9 +663,13 @@ check_pipeline(
 	next = kern_mmio_read32(hvs + 0x20);
 	if (recovering) {
 		/* Known private pointers are the only uncertainty this component owns. */
-		if (current != FLIP_CONSOLE_LIST && current != 64U && current != 80U)
+		if (current != FLIP_CONSOLE_LIST &&
+		    current != 64U && current != 80U &&
+		    current != 128U && current != 160U)
 			return EBUSY;
-		if (next != FLIP_CONSOLE_LIST && next != 64U && next != 80U)
+		if (next != FLIP_CONSOLE_LIST &&
+		    next != 64U && next != 80U &&
+		    next != 128U && next != 160U)
 			return EBUSY;
 	} else {
 		/* Ordinary publication requires the last completed list on both pointers. */
@@ -520,8 +787,7 @@ wait_adoption(
 
 		error = 0;
 		if (display->flip.completed) {
-			/* The operation relinquishes BUSY only after its caller sees completion. */
-			display->flip.busy = false;
+			/* The submitter retains BUSY until its post-adoption clock operation. */
 		} else if (waited >= 100000U) {
 			/* Both old and new buffers remain held even if adoption arrives later. */
 			display->flip.uncertain = true;

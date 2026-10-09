@@ -10,7 +10,7 @@ Queue: [独立セッションの実行記録 i04](../execution-20261009.md)
 
 ## 範囲と目標
 
-[承認済みdesign §3.3](../rpi4-gpu-design.md#33-v3dp004)のV1〜V10を成立させる。V0はp002。V1の電源・clock/reset、V2の最大rate確認、V3の識別、V4のcache範囲/IRQ mask、V5のMMU、V6のIRQ、V7のnoop bin/render、V8のclear/store、V9のTFU、V10のtimeout/reset後のV7再実行がwhole Phaseの範囲。CSDとshader/drawing実行器はp006の判断後。
+[承認済みdesign §3.3](../rpi4-gpu-design.md#33-v3dp004)のV1〜V10を成立させる。V0はp002。V1の電源・clock/reset、V2の最大rate確認、V3の識別、V4のcache範囲/IRQ mask、V5のMMU、V6のIRQ、V7のnoop bin/render、V8のclear/store、V9のTFU、V10のtimeout/reset後のV7再実行がwhole Phaseの範囲。CSDとshader/drawing実行器はp006へ接続する（2026-10-09ユーザーが本WS内実装を確定）。
 
 ## 依存と今回の部分範囲
 
@@ -50,3 +50,8 @@ V7のBCL/RCL/generic tile sub-listをcl.cで生成する処理を実装。caller
 noop-host-testは成功・容量/VA/予約等の拒否とbyte保持を確認しPASS。固定XMLから独立にopcode/field/default/minus-oneを解釈するnoop-packet-checkで3列全体が一致しPASS。既存4試験PASS、rpi4 y/n build warning/error 0、全文C review/format/補助style-check/構文/diff確認済み。詳細は[実行記録 i06](../execution-20261009.md#i06の結果2026-10-09)。このsoftware部分だけcleared、whole Phaseはin-progress。V7がGPU上で完了したとの主張はしない。WSのPhase表/再開点を同時に更新。V8生成を次のsoftware段とし、実投入は元のV0〜V6の確認/実装後。
 
 V7生成は最新mainへmerge `16024f1b9`で統合済み（i07）。統合版でもhost/oracleとy/n build PASS。次のV8の固定MIT手順には、clear値を設定した後に2回のdummy tileを通し、最初のtileでCLEAR、最後にVCD cache flushする初期化が含まれる。noopのNONE storeをcolor storeに替えるだけではその条件を供給できない。実装時はこの初期化もpacket oracleと照合し、hardwareのclear/store完了は実機のbuffer観測で確認する。
+
+
+## p006の実装範囲確定に伴う依存（2026-10-09）
+
+ユーザー回答「WS141に実行器・compilerも含め、Keiland表示まで進める」でp006を本WS内の実装Phaseへ変更。p004はnative bin/render/TFU/CSDのjob/cache/MMU/reset出力をp006へ渡す。p004側のV1〜V10の受け入れは保持し、CSD/shaderの命令生成・Vulkan object/stream実行は[p006](../phase006/phase.md)。実機は後日、software実装と実機whole acceptanceを区別する。[起点/全体変更](../ws.md#完成までの自走p006の実装範囲確定2026-10-09)。

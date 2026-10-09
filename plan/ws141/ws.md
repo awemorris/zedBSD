@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（i10同期flip部品をmain統合済み、host/build PASS。実機・display登録等は未完了）
+Status: incomplete（i11 display所有/合成/登録と起動診断を実装、host/build PASS。実機とV3D/Vulkanは未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i10の同期flip/vblank sequence/console復帰・timeout buffer保持部品をmain統合済み（181339820）。統合版のhost3試験/driver y buildはPASS・warning/error0、nはup-to-date。起動からのflip/allocator/公開display ops/device登録・P3合成は未接続。次は保持maskを尊重するbuffer ownerとdisplay登録への接続、実機R0/IRQ/console RAM寿命・P1/P2の受け入れ。実機はユーザーが後で実施。Master/共有記録とT1依頼はQ1担当。[i10結果/再開](execution-20261009.md#i10のmain統合結果2026-10-09)。
+Resume point: i11のdisplay owner/2-plane/clock/copy FIFO/登録を実装しhost4/y-n build PASS。main統合とi12のV3D電源/MMU/jobへ進む。p006のkernel実行器/compilerも承認済みscope。実機R0/P1/P2/P3/P5とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i11 evidence](execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -54,7 +54,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 
 - display: firmware の framebuffer の引き継ぎ、HVS（plane の合成）、pixelvalve（timing）、HDMI（mode・EDID・audio は範囲の外）、vblank、scanout の page flip。
 - 3D: V3D 4.2 の power・clock（firmware の mailbox）、MMU、bin/render の control list、CSD（compute）の job、reset、fence。
-- zedBSD の GPU の interface への統合と、desktop（Keiland の compositor）の表示。Vulkan の実行器（compiler）は別の Phase または別の WS（i915 の WS031 にあたる）で決める。
+- zedBSD の GPU の interface への統合と、desktop（Keiland の compositor）の表示。Vulkan の実行器とSPIR-V compilerはp006で本WSに実装する（2026-10-09ユーザー確定）。
 - 範囲の外: Raspberry Pi 5、DSI の LCD、HDMI の音、video の decode。
 
 ## 前提・関係
@@ -69,11 +69,11 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
-| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i10同期flip部品main統合済み、host/build PASS。実機/allocator/登録/合成は未達） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
+| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i11 allocator/登録/copy present/2-plane合成/起動診断を実装、host/build PASS。実機待ち） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
-| p005 | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planning | p003・p004 | 4h〜 |
-| p006 | 実行器（Vulkan・compiler）の方針の決定（別 WS にするか） | planning | p004 | 2h |
-| p007 | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planning | 全て | 3〜4h |
+| [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planned | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
+| [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | planned | p004・p005 | 未見積 |
+| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planned | 全て | 3〜4h |
 
 ## 要検討・ブロック（2026-10-05）
 
@@ -105,3 +105,13 @@ mailbox依存と初期表示R0成果を最新mainへ統合済み（dde7c1ba7）�
 ## i10の統合結果（2026-10-09）
 
 同期flip部品をmainへ統合済み（181339820）、統合版もhost3試験/buildがPASS。i10のsoftware/統合部分はcleared。全displayの受け入れではないためp003 in-progress/WS incomplete、残件/再開点は上記と[実行記録](execution-20261009.md#i10のmain統合結果2026-10-09)。Q1の共有投影/回帰依頼は担当から更新しない。
+
+
+## 完成までの自走・p006の実装範囲確定（2026-10-09）
+
+ユーザー「続けてください。完成まで自走してください。」、続く回答「WS141に実行器・compilerも含め、Keiland表示まで進める」で、p006を方針だけからkernel Vulkan実行器/SPIR-V compiler実装に拡張した。p005のdesktopにはp006出力が必要、p007はこの最終sourceも含める。p005/006/007を個別Phaseとして保存し、i11〜i15の有限scopeを実行記録に追加。実機の受け入れはユーザーが後で実施、未確認をcompletedにしない。Masterは変更しない。[正確な承認・境界](execution-20261009.md#完成までの継続承認2026-10-09)。
+
+
+## i11: displayのruntime接続（2026-10-09）
+
+2つの恒久buffer owner、copy present/lease/固定modeのdevice登録、2-planeの位置/alphaとclockの前後処理、P1/P2/P3の実boot診断を追加。host4 PASS、y/n build warning/error0、software部分のみcleared。p003 whole acceptanceとWS completedは実機/console RAM寿命/V3D/Vulkan/最終監査待ち。main統合とi12へ継続する。[結果/再開](execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
