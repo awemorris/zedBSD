@@ -34,4 +34,4 @@ Resume point: p001 から。
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 前提の調べ（上の一覧）、足りない物と工数、self-build の image の config の案 | planning | — |
+| [p001](phase001/phase.md) | 前提の調べ（上の一覧）、足りない物と工数、self-build の image の config の案 | cleared 候補（2026-10-09 深夜 P1: 段 S0〜S3 の表、S1 は約 27〜33 LW でベータ2 に入らない見込み、D1〜D5 はユーザーの判断） | — |
