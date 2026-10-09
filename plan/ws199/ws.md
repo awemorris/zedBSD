@@ -65,5 +65,5 @@ NFC の reader に載せたままの鍵も、そのまま「タッチ」と見�
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| p001 | 調べ・設計（第 4 版、review-1〜3）と実装 i01〜i06（i01 popup と頁、i02 NFC（BUG-286）、i03 KEYINFO・KEYPIN・KEYRESET と Insert/Set PIN/Change PIN/Reset、i04 options と auth-fido2、i05 KEYOWNER と greeter・lock の鍵のモードと keypad、i06 試験と T1）、約 23 LW。2026-10-10: i01（cfa5351a1）と i02（0b44c7008）を main に merge | in-progress |
+| p001 | 調べ・設計（第 4 版、review-1〜3）と実装 i01〜i06（i01 popup と頁、i02 NFC（BUG-286）、i03 KEYINFO・KEYPIN・KEYRESET と Insert/Set PIN/Change PIN/Reset、i04 options と auth-fido2、i05 KEYOWNER と greeter・lock の鍵のモードと keypad、i06 試験と T1）、約 23 LW。2026-10-10: i01（cfa5351a1）・i02（0b44c7008、R3 は 5515a4dab）・i03（d8cb16814、鍵の情報・Set/Change PIN・Reset Key、KL_VERSION 77）を main に merge | in-progress |
 | p002 | T1 の AAT と 5330 の UAT | planning |
