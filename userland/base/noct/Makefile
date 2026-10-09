@@ -195,10 +195,10 @@ define ZEDBSD_NOCT_EXTRACT_SOURCE
 	parent=$${source%/*}; \
 	if test '$(4)' = replace && test -d "$$source" && test ! -L "$$source" && \
 	   test -f "$$source/.zedbsd-source-identity" && \
-	   grep -qx 'commit=$(ZEDBSD_NOCT_TAG_COMMIT)' "$$source/.zedbsd-source-identity" && \
-	   { ! grep -qx 'patch-level=$(3)' "$$source/.zedbsd-source-identity" || \
+	   { ! grep -qx 'commit=$(ZEDBSD_NOCT_TAG_COMMIT)' "$$source/.zedbsd-source-identity" || \
+	     ! grep -qx 'patch-level=$(3)' "$$source/.zedbsd-source-identity" || \
 	     ! grep -qx 'patches-sha256=$(5)' "$$source/.zedbsd-source-identity"; }; then \
-		echo "Noct: replacing the source tree of other patches: $$source" >&2; \
+		echo "Noct: replacing the source tree of another release or other patches: $$source" >&2; \
 		rm -rf -- "$$source"; \
 	fi; \
 	if test -e "$$source"; then \
@@ -277,7 +277,7 @@ define ZEDBSD_NOCT_VERIFY_SOURCE
 endef
 
 # An accepted tree is used as it is, whatever the patch files' times.  The
-# target's tree (in this checkout) is replaced when it holds other patches;
+# target's tree (in this checkout) is replaced when it holds another release or other patches;
 # the host's (shared) never is.
 ifeq ($(NOCT_SOURCE_ACCEPTED),yes)
 $(NOCT_SOURCE_STAMP):

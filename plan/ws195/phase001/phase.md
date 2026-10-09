@@ -113,3 +113,7 @@ Queue: Q1 の投入（2026-10-09 夜「main の release の image に影響し�
 - 数は 2026-10-09 の tree の grep で、`/usr/share/kei` 以外の data の小さい path（`share/keiland/hand` など）は `/usr/share/keiland` で数えた。正規表現に入らない書き方（変数で組み立てた path）は数えていない。
 - Linux の Keiland の libvulkan・libwayland-client は `/opt/keiland/lib` の自前の物（上の D1）。FreeBSD の側は読んでいない（同じ形の見込み、未確認）。
 - design-reviewer の review は未実施（ユーザーの判断の後に通す）。
+
+## ユーザーの決定（2026-10-09）
+
+D1〜D7 はクリック「全部推しどおり」（各 (a)）。10/17 の後に design-reviewer を通して p002 から。
