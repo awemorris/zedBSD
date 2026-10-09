@@ -4,14 +4,14 @@
 
 Phase ID: `ws197-p003`
 Parent: [WS197](../ws.md)
-Status: planning（2026-10-10 P1: 詳細設計の第 2 版。[review-1.md](review-1.md) の B1〜B3・M1〜M12・m1〜m22 に答えた。短い再確認の前。code は書かない）
+Status: in-progress（2026-10-10 P1: 詳細設計の第 2.1 版。[review-1.md](review-1.md) の全部に答え、[review-2.md](review-2.md) で全部閉じた。review-2 の N1・N2・n1〜n9 を本文に入れた（各節の `[N1]`・`[n1]`）。i01〜i07 は GO、実装に入る）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-10「WS197 p003 MAP（MCE の MAS と MNS）を保留の branch agent/p1-ws197 で。まず詳細設計を書き design-reviewer を通してから実装」）
 Branch: `agent/p1-ws197`（10/17 の公開まで main に merge しない。各 Phase の始めと merge 依頼の前に main を取り込む）
 依存: [p002](../phase002/phase.md)（cleared 2026-10-10、T1-518 PASS）、[p001](../phase001/phase.md) の設計とユーザーの決定（2026-10-09「全部推しどおり」、Q16 は 2026-10-10 に (a)）
 所有 path: `userland/base/bluetoothd/`（新しい file と、下の §2 の表の今の file の変更）、`plan/ws197/`
 
-版: 2026-10-10 第 1 版（P1、d21a55cae）→ 同日 第 2 版（review-1 の指摘、各節の `[B1]`・`[M1]`・`[m1]` の印）。
+版: 2026-10-10 第 1 版（P1、d21a55cae）→ 同日 第 2 版（review-1 の指摘、各節の `[B1]`・`[M1]`・`[m1]` の印、4397bcb31）→ 第 2.1 版（review-2 の N1・N2・n1〜n9）。
 
 前提のユーザーの決定（p001 §11）:
 
@@ -50,7 +50,7 @@ Branch: `agent/p1-ws197`（10/17 の公開まで main に merge しない。各 
 | p001 §8.3 `PHONE PAGE … after=` | `cursor=`（§8.5） | listing の offset と MAP の session を持つ |
 | p001 §8.3 event の `source=` | `handle=`（session 付き）と `key=`（§8.3） | handle は session ごとに変わる |
 | p001 §8.3 `PHONE GET` | 作らない | 1.1 では handle から時刻・folder を引けない [M9] |
-| p001 §8.2 「持ち主の無い bond は phone=1 で pairing し直す（スマホがもう一度許可を求める）」 | 他人の記録のある address の PAIR は断る（§3.2） | 今の pair.c は保存の認証済みの鍵を使い、スマホに何も出ない [B1] |
+| p001 §8.2 「持ち主の無い bond は phone=1 で pairing し直す（スマホがもう一度許可を求める）」 | 他人の記録のある address の PAIR は断る（§3.2） | 今の pair.c は保存の認証済みの鍵を使い、スマホに何も出ない [B1]。phone=1 の pairing は保存の鍵を使わない（§3.2）[N2] |
 | p001 §8.2「持ち主＝PAIR の client」 | seat の人の PAIR だけが phone=1（§3.2） | SSH の root・wheel の pairing で持ち主が永久に不在になる [M4] |
 | p002 §11・§14 の `PHONE PROBE` と「p008 で PROBE」 | 消す。p008 は MAP の操作で確かめる | MAP が同じ道を使う |
 | p002 の `phone_ended` が HID の上限を 6 に戻す | 上限は記録の状態だけで決める（§3.4） | [M12] |
@@ -101,8 +101,8 @@ enabled 1
 | 出来事 | 規則 |
 | --- | --- |
 | `PAIR ADDRESS TYPE`（phone の有無に関わらず）の始め | その address に**有効な記録があり、その uid が client と違い、client が root でない**なら `ERROR owned`（pairing を始めない。他人が同じスマホの bond を作り直して鍵の型を変える事も防ぐ）。pair.c の始めに main が検査の hook を渡す（`btd_pair_set_check`、新） |
-| `PAIR … phone=1` の始め | client の uid が seat の人（§3.3 の判定）でなければ `ERROR phone-seat`。root も同じ（持ち主は seat の人だけ） |
-| handoff で phone が受ける（p002 §7.4 の 1〜5 の後） | 6) 別の address の**有効な**記録があれば受けない（`why=other-phone`）。7) 同じ address の有効な記録の uid が違えば受けない（`why=owned`。始めの検査の後に記録が変わった時の守り）。8) 記録を書く（同じ uid の記録があれば enabled と profile を保ち、無ければ全部 1、enabled 1）。書けなければ受けない（`why=store`）。9) 無効な他の `.phone` を消す。**記録を書いてから** route を移す（今の `btd_router_assign` の前）[M2] |
+| `PAIR … phone=1` の始め | client の uid が seat の人（§3.3 の判定）でなければ `ERROR phone-seat`。root も同じ（持ち主は seat の人だけ）。**phone=1 の pairing の Link Key Request には保存の鍵があっても常に Negative Reply**（p002 §7.1 [m9] の「認証済みでない時だけ」を広げる）: SSP の数値比較をやり直させ、スマホの画面に確認を出す。持ち主の無い bond・無効な記録の bond を黙って取る道を閉じる [N2] |
+| handoff で phone が受ける（p002 §7.4 の 1〜5 の後） | 6) 別の address の**有効な**記録があれば受けない（`why=other-phone`）。7) 同じ address の有効な記録の uid が違えば受けない（`why=owned`。始めの検査の後に記録が変わった時の守り）。8) 記録を書く（同じ uid の記録があれば profile を保ち enabled は 1（phone=1 で pairing し直した意図は「使う」）[n8]、無ければ全部 1、enabled 1）。書けなければ受けない（`why=store`）。9) 無効な他の `.phone` を消す。**記録を書いてから** route を移す（今の `btd_router_assign` の前）[M2] |
 | `PHONE LINK ADDRESS on|off [profiles=m,c,h]` | 有効な記録の持ち主と root。enabled と profile を書き換える。記録の無い address は `ERROR not-phone`（今までの普通の bond は取れない） |
 | `FORGET ADDRESS bredr` | `.phone` があり**有効**なら持ち主と root だけ（p001 N2: D8 の例外）、無効なら D8 の人。`.phone` を先に消し、次に bond（今の規則）。bond が無くても `.phone` を消せたら DONE。`.phone` の消しの失敗は `ERROR <理由>` で bond に触れない。つないでいれば切る |
 
@@ -162,18 +162,21 @@ phone は `page_outstanding`（自分の Create Connection の Connection Comple
 
 - page する条件: 在（POWER on を含む、§3.3）、state NONE、自動の page を止めていない（§5.5）、HID の接続が 5 以下（§3.4）、controller が READY、pairing・scan の最中でない（main が HID と同じ `btd_hid_holding` の条件で phone の tick の page を止める）。
 - 間隔: 最初はすぐ、page の失敗・短い link（§5.5）のたびに 30 s・60 s・120 s・240 s・480 s・600 s（以後 600 s）。**戻すのは**、link が READY で 2 分続いた時、MAP が ready になった時、不在 → 在、sleep.end、`PHONE LINK on`。READY になっただけでは戻さない。
-- 手順: `btd_linkmgr_page_begin(lm, BTD_LINKMGR_PHONE, address, now)`（EBUSY なら 2 s 後、段は進めない）→ Create Connection（0x0405: address、packet type 0xCC18（HID の page と同じ、`hid.c:2427`）、page scan repetition mode R1、clock offset 0、Allow Role Switch 0x01）→ PAGING、`page_outstanding = 1`（15 s の守り）。
+- 手順: `btd_linkmgr_page_begin(lm, BTD_LINKMGR_PHONE, address, now)`（EBUSY なら 2 s 後、段は進めない）→ Create Connection（0x0405: address、packet type 0xCC18（HID の page と同じ、`hid.c:2427`）、page scan repetition mode R1、clock offset 0、Allow Role Switch 0x01）→ PAGING、`page_outstanding = 1`（12 s の守り。linkmgr の 15 s の満了より先に、CANCELLING の間に token が外れないため）[n3]。
 - Command Status の失敗: NONE、`page_end`、次の段。Connection Complete の失敗（`page_outstanding` を 0 に）: NONE、次の段（page の終わりは router が `btd_linkmgr_connected` で行う）。
-- **守りの切れ** [B3]: PAGING で 15 s → Create Connection Cancel（0x0408、address）→ CANCELLING。Connection Complete（どの status でも、成功なら `phone_disconnect` で切る）か Command Complete の 0x0B（既に接続、その Connection Complete は届いている）で NONE と次の段。CANCELLING も 5 s で NONE（log）。
+- **守りの切れ** [B3, n3]: PAGING で 12 s → Create Connection Cancel（0x0408、address）→ CANCELLING。command は同期で、待つ間の事象は queue に入って command の後に配られる（`session.c`）ので、Cancel の Command Complete の status（0x00・0x02・0x0B）は log だけにし、CANCELLING を出るのは Connection Complete だけ: 失敗なら NONE と次の段、成功なら（止める印が無ければ）SECURING へ進める（つながった link を捨てない）。CANCELLING も 5 s で NONE（log）。
+- **止める**（在 → 不在、FORGET、`LINK off`）[n5]: PAGING は Cancel して CANCELLING に「止める」印、ACCEPTING・CANCELLING は印だけ立てる。印のある状態の成功の Connection Complete は Disconnect（0x16 の理由で page しない）。SECURING・READY は `phone_disconnect`。
 - page scan: 在の間 `btd_linkmgr_want_scan(lm, BTD_LINKMGR_PHONE, 1)`、他は 0（自動の page を止めている間も、スマホからの接続は受けるので 1）。
 
 ### 5.3 スマホからの接続と交差 [B3, M1]
 
 - `btd_phone_wants(address)`: 在で address が記録の物なら、**state に関わらず** 1。router は Connection Request と Link Key Request の両方でこれを聞く（HID の wants の後）。READY の link でスマホが認証をやり直す時の Link Key Request も phone が答える（HID の wants が IDLE 以外で 1 なのと同じ、`hid.c:974-976`）。
 - Connection Request（router が phone へ渡す、link type ACL だけ）:
-  - NONE: Accept Connection Request（0x0409、role 0x01 = peripheral のまま。スマホは他の機器の central であることが多く role switch の失敗で接続を落とさない。**未確認**: p008）→ ACCEPTING（15 s の守り）。
-  - PAGING（交差）: Accept（role 0x01）と、自分の page の Create Connection Cancel（0x0408）を出し、ACCEPTING。Core 7.1.7: Cancel の時に baseband が既に接続を作っていれば controller が切って Success、page の Connection Complete は失敗（0x02 Unknown Connection Identifier）で来る。
-  - 他（ACCEPTING・SECURING・READY・CLOSING・CANCELLING）: Reject Connection Request（0x040A、reason 0x0D）。Core 7.1.9 で、この Reject の後にローカルの Connection Complete（失敗、status 0x0D）が来る。phone は `reject_pending`（address と reason）を覚えて、その Connection Complete を 1 回だけ吸う（state を変えない）。
+  - NONE: HID の接続が 6 台なら Reject（下の吸い込み）[n5]。他は Accept Connection Request（0x0409、role 0x01 = peripheral のまま。スマホは他の機器の central であることが多く role switch の失敗で接続を落とさない。**未確認**: p008）→ ACCEPTING（15 s の守り。切れたら NONE と log。後で来る成功の Connection Complete は claims 0 で router が切る）。
+  - PAGING（交差）[n4]: 先に自分の page の Create Connection Cancel（0x0408、同期で Command Complete まで数 ms）。その status が 0x0B（page の接続が既にでき Connection Complete は queue の中）なら Connection Request は Reject（下の吸い込み）して PAGING のまま（queue の成功の Connection Complete で SECURING）。他なら Accept（role 0x01）→ ACCEPTING（`page_outstanding` は 1 のまま）。Core 7.1.7: Cancel の時に baseband が既に接続を作っていれば controller が切って Success、page の Connection Complete は失敗（0x02 Unknown Connection Identifier）で来る。Cancel が受けた接続まで切る controller があるかは推測（p008）。
+  - CANCELLING: Accept（Cancel は出し直さない）→ ACCEPTING（`page_outstanding` は 1 のまま）[n2]。
+  - 他（ACCEPTING・SECURING・READY・CLOSING）: Reject Connection Request（0x040A、reason 0x0D）。
+  - **Reject の吸い込み** [n1]: Core 7.1.9 で Reject の後にローカルの controller も Connection Complete（失敗）を出す。その status は Core が定めない（Reason が入るのは相手の Connection Complete）。phone は `reject_pending`（address と時刻）を覚え、その address の失敗の Connection Complete を status に関わらず 3 s の間に 1 回だけ吸う（state を変えない）。
 - ACCEPTING の Connection Complete の振り分け: 成功 → SECURING（その handle）。失敗で `page_outstanding` が 1 かつ status が 0x02・0x04（Page Timeout）・0x0B のどれか → 自分の page の終わり（`page_outstanding = 0`、ACCEPTING のまま）。他の失敗 → Accept の失敗で NONE と次の段。SECURING 以後に来た失敗の Connection Complete で `page_outstanding` が 1 → page の終わりとして吸う。
 - 交差の残る窓: router は最初に来たその address の Connection Complete で linkmgr の token を終える（`router.c:462-464`）ので、Cancel した page の Connection Complete がまだの間に HID が page を始めると Command Disallowed になり得る。HID はそれを unreachable として再試行する（p002 §6.2 の「調停しない事」と同じ扱い、窓は数 ms）。記録だけ。
 - 同じ形の潜在の誤り（PAGING 中の Connection Request を Reject し、ローカルの Connection Complete を page の失敗と見る）は HID の `hid_request`（`hid.c:1259-1266`）にもある。WS143 の範囲なので Q1 に報告する（Bug にするかは Q1）。
@@ -201,7 +204,8 @@ Connection Complete（成功）→ route を PHONE に（`btd_router_assign`）�
 | Disconnection Complete の reason | 扱い |
 | --- | --- |
 | 0x08 Connection Timeout（離れた） | 次の段の間隔で page |
-| 0x13 Remote User Terminated・0x15 Remote Device Terminated due to Power Off | **自動の page を止める**（スマホの利用者が「切断」を押した・電源を切った）。止めを解くのは不在 → 在、sleep.end、`PHONE LINK on`。スマホからの接続はいつでも受ける |
+| 0x15 Remote Device Terminated due to Power Off | 0x08 と同じ（スマホの再起動・電源の後に戻る）[N1] |
+| 0x13 Remote User Terminated | 段を 1 つ進める（600 s まで）。**READY の後 2 分以内の 0x13 が 3 回続いた時だけ自動の page を止め**、STATE `why=peer-closed`（スマホの利用者が「切断」を押した、と見る）。止めを解くのは不在 → 在、sleep.end、`PHONE LINK on`。MAP は MCE（zedBSD）からしか始まらないので、止めると次の合図まで SMS が届かない。だから 1 回では止めない [N1]。スマホからの接続はいつでも受ける。スマホが出す reason の値は推測（p008） |
 | 0x16 Local Host Terminated（自分で切った） | 切った理由のまま（不在・FORGET・LINK off は page しない、key-size・security は 600 s） |
 | 他 | 次の段の間隔で page |
 
@@ -329,7 +333,7 @@ MAS の OBEX は 1 度に 1 つの操作。全部を 1 本の queue（24 個ま�
 | --- | --- | --- |
 | COUNT | Get `x-bt/MAP-msg-listing`、Name＝folder、MaxListCount 0x01 = 0、LIST と同じ filter（FilterMessageType・FilterPeriodBegin）（§5.5.4.1・§5.5.4.13） | その folder の ListingSize（filter の後の件数）と MSETime |
 | LIST | Get 同、Name＝folder、MaxListCount＝n、ListStartOffset 0x02＝o、FilterMessageType 0x03 = 0x0C（EMAIL と MMS を除く。IM の bit 4 は 1.1 の相手には予約なので立てない）、FilterPeriodBegin 0x04（§6.2）、ParameterMask 0x10 = 0x0000117E（bit 1 datetime・2 sender_name・3 sender_addressing・4 recipient_name・5 recipient_addressing・6 type・8 reception_status・12 read）、body の上限 64 KB | 同期の page |
-| LOCATE | Get 同、Name＝folder、MaxListCount 32、ParameterMask 同 | live の event の時刻と名前（event 1.0 に datetime は無い、§3.1.7.1） |
+| LOCATE | Get 同、Name＝folder、MaxListCount 32、FilterPeriodBegin＝今から 1 時間前（§6.2 の offset。listing の順に頼らない）[n6]、ParameterMask 同 | live の event の時刻と名前（event 1.0 に datetime は無い、§3.1.7.1） |
 | GET | Get `x-bt/message`、Name＝handle（16 桁、§5.6.2）、Attachment 0x0A = 0、Charset 0x14 = 1（UTF-8）、body の上限 64 KB | 1 通の本文 |
 | UNREAD | Put `x-bt/messageStatus`、Name＝handle、StatusIndicator 0x17 = 0、StatusValue 0x18 = 0、End of Body 0x30 | GET でスマホが既読にした物を戻す |
 | READ | 同、StatusValue 1 | `PHONE READ` |
@@ -372,7 +376,7 @@ MAS の OBEX は 1 度に 1 つの操作。全部を 1 本の queue（24 個ま�
 ### 8.7 MNS の server と SDP の record（MAP §7.1.2、Q16 (a)）[m9, m10]
 
 - RFCOMM の server channel 16（p001 §5.4）。phone の `accept(16)` は MAP が CONNECTING 以降の間だけ 1。DLC が開いたら OBEX の server（`btd_obex_init(…, BTD_OBEX_SERVER)`）、`target` は MNS の UUID（`bb582b41-420c-11db-b0de-0800200c9a66`、§6.3 表 6.5）の時だけ 1。MNS の DLC は 1 つ（2 つ目は DM）。
-- record は phone link が READY になった時に登録し（pairing の直後や接続の直後にスマホが SDP を引く機種のため、MAP の始めを待たない。messages が on の時だけ）、phone link の終わりと messages の off で外す。
+- 登録は phone が持つ db（今の `const struct btd_sdps_db *` を const でなくし、main の `btd_records` を渡す）で `btd_sdps_register`・`unregister` を呼ぶ [n7]。record は phone link が READY になった時に登録し（pairing の直後や接続の直後にスマホが SDP を引く機種のため、MAP の始めを待たない。messages が on の時だけ）、phone link の終わりと messages の off で外す。
 - record（属性 ID の昇順、`btd_sdps_register` の形）:
 
 | 属性 | 値 |
@@ -400,12 +404,12 @@ MAS の OBEX は 1 度に 1 つの操作。全部を 1 本の queue（24 個ま�
 
 | request | 答え |
 | --- | --- |
-| `PHONE SHOW` | `PHONE address=… owner=<uid>|invalid mine=0|1 enabled=0|1 profiles=m,c,h present=0|1 link=none|paging|securing|ready messages=off|connecting|ready|failed send=0|1 notify=0|1 why=…`（記録が無ければ行無し）、`DONE`。持ち主でない D8 の人には `mine=0` と address・enabled だけ |
+| `PHONE SHOW` | `PHONE address=… owner=<uid>|invalid mine=0|1 enabled=0|1 profiles=m,c,h present=0|1 link=none|paging|securing|ready|closing（ACCEPTING は securing、CANCELLING は paging に寄せる）[n9] messages=off|connecting|ready|failed send=0|1 notify=0|1 why=…`（記録が無ければ行無し）、`DONE`。持ち主でない D8 の人には `mine=0` と address・enabled だけ |
 | `PHONE LINK ADDRESS on|off [profiles=m,c,h]` | §3.2。on: 在ならすぐ page、自動の page の止めを解き、MAP の失敗のやり直しを戻す。off: 切る（記録は残す）。`DONE` |
 | `PHONE SUBSCRIBE` | §9.4。答えは `DONE` の後に event の行が続く |
 | `PHONE PAGE messages since=N cursor=C count=N` | §8.5 |
 | `PHONE READ handle=H` | `DONE` |
-| `PHONE SEND to="…" length=N` ＋ N byte | §4.3 の後、`PHONE SENT request=<n> handle=H state=queued`、`DONE`（PushMessage の成功まで待つ） |
+| `PHONE SEND to="…" length=N` ＋ N byte | §4.3 の後、`PHONE SENT request=<n> handle=H state=pushed`、`DONE`（PushMessage の成功まで待つ）[n9] |
 | `PHONE DROP ADDRESS` | p002 のまま（root、試験の道具） |
 
 - messages が ready でない時の PAGE・READ・SEND は `ERROR not-ready`。SEND は send=0 の時 `ERROR no-send`。
@@ -496,13 +500,13 @@ Android で: pairing（phone=1、seat の人）→ スマホの「メッセー�
 | GetMessage が既読にするか | 機種差。UNREAD で戻す（害は無い） | p008 |
 | Accept の role 0x01 | スマホとの接続で role を変えない選択が通るか | p008 |
 | スマホの認証の振る舞い | 受けの接続で自分から認証・暗号化するか（WAIT_PEER の 3 s）、profile の無い ACL を切るか、許可の画面の間 Connect を待たせるか | p008 |
-| listing の順 | 新しい順と仕様は言うが例は古い順。map は順に頼らない | p008 |
+| listing の順 | 新しい順と仕様は言うが例は古い順。map は順に頼らない（LOCATE は 1 時間の filter で絞る） | p008 |
 | SDP の属性 ID | Assigned Numbers の値（§0）を手元で確かめていない | p008 の SDP の dump |
 | handle の寿命 | session ごとに変わる前提（`stale`）。Persistent が使えない 1.1 の制限 | — |
 | 同期の取りこぼし | page の間の受信・削除で 1 件ずれる（§8.5） | p004 の重なりと live |
 | 時刻 | offset の無い datetime は MSETime か zedBSD の timezone で推定（`zone=`） | p008 |
 | 交差の窓 | 交差で Cancel した page の Connection Complete の前に HID が page を始めると Command Disallowed（§5.3） | p008 |
-| HID の同じ潜在の誤り | `hid_request` の PAGING 中の Reject（§5.3） | Q1 の判断（WS143） |
+| HID の同じ潜在の誤り | `hid_request` の PAGING 中の Reject（§5.3）。BUG-282 | i03 で同じ形の直しを当てられるか見る（Q1 2026-10-10） |
 
 ## 14. 見積もり
 
@@ -512,4 +516,6 @@ p001 の p003 の 16 LW と骨格 +5 LW（p001 §12 の見直し）に対し、�
 
 - 2026-10-10: 第 1 版（P1、d21a55cae）。MAP 1.4.2 の §3.1.3・§3.1.6・§3.1.7・§5.1〜§5.9・§6.3・§6.4・§7.1 を読んで書いた。
 - 2026-10-10: design-reviewer（agent adc3ca142b525c859）の review → [review-1.md](review-1.md)（blocker 3・major 12・minor 22。i04・i05 は GO、他は直してから）。
-- 2026-10-10: 第 2 版（P1）。全部に答えた（各節の印）。Core 7.1.7（Create Connection Cancel）と §5.1.8（LanguageBaseAttributeIDList）を読み足した。
+- 2026-10-10: 第 2 版（P1、4397bcb31）。全部に答えた（各節の印）。Core 7.1.7（Create Connection Cancel）と §5.1.8（LanguageBaseAttributeIDList）を読み足した。
+- 2026-10-10: 第 2 版の再確認（agent a8b0127cb85b80091）→ [review-2.md](review-2.md): review-1 は全部閉じた。新しい major 2（N1: 0x13・0x15 で page を止めると戻らない、N2: 持ち主の無い bond を phone=1 で黙って取れる）と minor 9。**i02・i04〜i07 は GO、i01・i03 は N2・N1 を書けば GO**（再 review は要らない）。第 2.1 版で全部を本文に入れた。
+- 2026-10-10: Q1: hid.c の同じ形の潜在の誤りは [BUG-282](../../bugs/BUG-282.md)（tracking、ベータ3、WS143）。i03 で linkmgr・交差の直しと同じ形が HID にも当てられるなら一緒に直し、ticket に記録する（ws197 branch）。
