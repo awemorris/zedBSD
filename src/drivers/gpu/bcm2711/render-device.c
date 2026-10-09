@@ -78,6 +78,7 @@ bcm2711_render_register(
 	}
 
 	/* Storage and sharing are complete; Vulkan capabilities remain a later binding. */
+	bcm2711_render_worker_init(controller);
 	bind_render(controller);
 	error = drv_gpu_register(&controller->operations, controller, &controller->gpu);
 	if (error != 0) {
@@ -136,6 +137,7 @@ render_open(
 	struct bcm2711_render_device *controller;
 	struct bcm2711_render_session *session;
 	bool ready;
+	int error;
 
 	/* A faulted renderer must pass common checked recovery before admitting another open. */
 	*result = NULL;
@@ -146,6 +148,13 @@ render_open(
 	if (!ready || controller->sessions == UINT32_MAX) {
 		mutex_unlock(&controller->mutex);
 		return EIO;
+	}
+
+	/* First userspace open starts the one permanent worker after scheduler and timers are live. */
+	error = bcm2711_render_worker_start(controller);
+	if (error != 0) {
+		mutex_unlock(&controller->mutex);
+		return error;
 	}
 
 	/* One open retains its local identity counter and complete resource list. */
@@ -178,10 +187,11 @@ render_close(
 	/* Quarantined views retain storage independently of the closing session descriptor. */
 	controller = opaque;
 	session = private_session;
+	bcm2711_render_worker_drain(session);
 	mutex_lock(&controller->mutex);
 
 	if (session->device != controller || session->resources != NULL ||
-	    session->count != 0 || controller->sessions == 0)
+	    session->count != 0 || session->pending != 0 || controller->sessions == 0)
 		__builtin_trap();
 	controller->sessions--;
 
@@ -529,78 +539,47 @@ render_device(
 	return 0;
 }
 
-/* Closes this namespace's native publication without waiting for hardware. */
+/* Closes this namespace's publication and cancels queued payloads without waiting. */
 static int
 render_stop_begin(
 	void *opaque,
 	void *private_session,
 	int error)
 {
-	struct bcm2711_render_session *session;
-	unsigned long enabled;
-	struct bcm2711_render_device *controller;
+	/* The worker joins accepted callbacks separately from uncertain native DMA storage. */
+	(void)opaque;
+	bcm2711_render_worker_stop(private_session, error);
 
-	/* The initial allocation-only node publishes no native jobs or retained completions. */
-	(void)error;
-	controller = opaque;
-	session = private_session;
-	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
-
-	session->stopping = true;
-
-	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
-
-	/* Succeeded: no later request may publish native work for this namespace. */
+	/* Succeeded: the stop handshake is armed without blocking on active native work. */
 	return 0;
 }
 
-/* Confirms the allocation-only namespace has no published job or callback. */
+/* Observes native retirement and complete callback delivery without waiting. */
 static int
 render_stop_poll(
 	void *opaque,
 	void *private_session)
 {
-	struct bcm2711_render_device *controller;
-	struct bcm2711_render_session *session;
-	unsigned long enabled;
 	int error;
 
-	/* A native queue becoming busy invalidates this allocation-only stopping contract. */
-	controller = opaque;
-	session = private_session;
-	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
-
-	error = 0;
-	if (!session->stopping || controller->space.native->hardware.job_busy)
-		error = EAGAIN;
-
-	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
-
-	/* A pending stop supplies no DMA retirement evidence. */
+	/* Pending callbacks return EAGAIN; native uncertainty returns EIO for checked global recovery. */
+	(void)opaque;
+	error = bcm2711_render_worker_stopped(private_session);
 	if (error != 0)
 		return error;
 
-	/* Succeeded: this allocation-only session has no native job or posted callback. */
+	/* Succeeded: posted callbacks and native access retired; unpublished reservations remain withdrawable. */
 	return 0;
 }
 
-/* Arms all resource destruction to preserve native DMA storage before common loss publication. */
+/* Arms resource destruction and queue cancellation before common global loss publication. */
 static void
 render_fault(
 	void *opaque,
 	int error)
 {
-	struct bcm2711_render_device *controller;
-	unsigned long enabled;
-
-	/* Sticky native fault closes admission without acquiring the potentially occupied worker mutex. */
-	(void)error;
-	controller = opaque;
-	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
-
-	controller->space.native->hardware.faulted = true;
-
-	spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
+	/* This operation never waits for the controller mutex held by an executing native worker. */
+	bcm2711_render_worker_fault(opaque, error);
 }
 
 /* Reclaims uncertain translations only after common owners and checked native reset retire. */
@@ -629,6 +608,10 @@ render_reset(
 
 	/* Native translation flush must retire every quarantined VA before physical reuse. */
 	error = bcm2711_v3d_memory_recover(&controller->space);
+	if (error == 0) {
+		/* Callback and queue ownership must also retire before native publication reopens. */
+		error = bcm2711_render_worker_recovered(controller);
+	}
 
 	mutex_unlock(&controller->mutex);
 

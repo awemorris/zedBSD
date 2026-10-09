@@ -17,6 +17,8 @@
 #include <kern/device-io.h>
 #include <kern/irq.h>
 #include <kern/kmem.h>
+#include <kern/thread.h>
+#include <kern/sched.h>
 #include <uapi/gpu-allocation.h>
 #include <uapi/errno.h>
 
@@ -24,6 +26,12 @@
 #include "drivers/gpu/bcm2711/buffer.h"
 #include "drivers/gpu/bcm2711/v3d-job.h"
 #include "drivers/gpu/bcm2711/render-device.h"
+
+/* One prepared native job independently retains its mapped input allocation. */
+struct test_payload {
+	struct bcm2711_v3d_view *view;
+	struct bcm2711_v3d_job job;
+};
 
 /* Persistent single-thread fixture; no allocation or IRQ owner can disappear. */
 static struct bcm2711_v3d test_engine;
@@ -61,12 +69,24 @@ static const struct drv_gpu_ops *test_operations;
 static struct bcm2711_render_device *test_controller;
 static unsigned test_reported;
 
+/* Worker callbacks retain observable identities through FINISHING before slot reuse. */
+static unsigned test_completed;
+static int test_completion_errors[32];
+static struct bcm2711_render_session *test_callback_session;
+static unsigned test_executed;
+static unsigned test_disposed;
+
 static void fixture(void);
 static void registers_reset(void);
 static void trace(uint32_t offset, uint32_t data);
 static unsigned find_write(uint32_t offset, unsigned from);
 static void check_jobs(void);
 static void check_resources(void);
+static void check_worker(struct bcm2711_render_session *session);
+static void check_reservations(void);
+static struct test_payload *prepare_payload(struct bcm2711_render_resource *resource);
+static int execute_payload(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *opaque, bool *retired);
+static int dispose_payload(struct bcm2711_render_device *controller, void *opaque, bool retired);
 static void model_clear(void);
 static void model_tfu(void);
 static void *gpu_pointer(uint32_t address);
@@ -451,7 +471,8 @@ kern_dcache_clean_range(
 {
 	/* Clean reaches the entire actual table or scratch allocation, outside spin. */
 	assert(test_engine.hardware.guard.held.value == 0 && address != NULL);
-	assert(bytes == 0x400000 || bytes == 0x200000 || bytes == 4096 || bytes == 256);
+	assert(bytes == 0x400000 || bytes == 0x200000 || bytes == 0x100000 ||
+	       bytes == 4096 || bytes == 256);
 	trace(0x20000, (uint32_t)bytes);
 }
 
@@ -572,7 +593,7 @@ void
 bcm2711_stage_mark(
 	const char *family,
 	const char *format,
-	...)
+    ...)
 {
 	/* Model diagnostics do not contribute to any physical acceptance claim. */
 	assert(family != NULL && format != NULL);
@@ -710,6 +731,139 @@ drv_gpu_report_error(
 	assert(error != 0 && test_controller->mutex.locked == 0);
 	assert(test_engine.hardware.faulted);
 	test_reported++;
+}
+
+/*
+ * Models creation of the opaque permanent worker without scheduling a host kernel.
+ */
+int
+kthread_create(
+	void (*entry)(void *),
+	void *argument,
+	int priority,
+	struct thread **result)
+{
+	/* The production thread entry is retained; host checks invoke its actual one-step path. */
+	assert(entry != NULL && argument == test_controller && priority == SCHED_PRIORITY_DEFAULT);
+	*result = (struct thread *)argument;
+
+	/* Succeeded: thread_start receives the same permanent controller lifetime token. */
+	return 0;
+}
+
+/*
+ * Checks the one-time worker start without running an unrelated scheduler model.
+ */
+void
+thread_start(
+	struct thread *thread)
+{
+	/* No detached thread or replacement controller lifetime is introduced. */
+	assert(thread == (struct thread *)test_controller);
+}
+
+/*
+ * Initializes host condition sequences for the real queue and callback-retirement waits.
+ */
+void
+waitq_init(
+	struct wait_queue *queue,
+	const char *name)
+{
+	/* A sequence models publication visibility, without claiming scheduler ordering. */
+	memset(queue, 0, sizeof(*queue));
+	queue->name = name;
+}
+
+/*
+ * Reads the same condition sequence that real sleep uses for its lost-wake handshake.
+ */
+uint64_t
+waitq_sequence(
+	const struct wait_queue *queue)
+{
+	/* Succeeded: this is the model's current condition publication generation. */
+	return queue->sequence;
+}
+
+/*
+ * Advances a host condition publication observed by the actual queue owner.
+ */
+void
+waitq_wake_one(
+	struct wait_queue *queue)
+{
+	/* Host scheduling is deferred; publication is still visible to a later actual step. */
+	queue->sequence++;
+}
+
+/*
+ * Advances a host retirement sequence after callbacks and slots are fully retired.
+ */
+void
+waitq_wake_all(
+	struct wait_queue *queue)
+{
+	/* The model does not manufacture a callback or physical retirement outcome. */
+	queue->sequence++;
+}
+
+/*
+ * Models a drain wait by releasing its condition guard and running actual queued work.
+ */
+int
+waitq_sleep(
+	struct wait_queue *queue,
+	struct spinlock *guard,
+	uint64_t observed,
+	uint64_t deadline,
+	unsigned flags)
+{
+	unsigned long enabled;
+	int error;
+
+	/* Drain cannot lose a completion between its pending check and condition observation. */
+	assert(queue == &test_controller->worker.retired && observed == queue->sequence);
+	assert(deadline == 0 && flags == 0 && guard->held.value == 1);
+	spin_unlock_irqrestore(guard, 1);
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0);
+	enabled = spin_lock_irqsave(guard);
+	assert(enabled == 1);
+
+	/* Succeeded: the drain resumes with its condition guard held after real callback retirement. */
+	return 0;
+}
+
+/*
+ * Observes exact callback ownership without allowing the worker to reuse FINISHING storage.
+ */
+void
+drv_gpu_complete(
+	struct drv_gpu_completion *completion,
+	int error)
+{
+	int stopped;
+
+	/* Common callback delivery must run outside native IRQ and controller locks. */
+	assert(completion == (struct drv_gpu_completion *)(uintptr_t)(test_completed + 1U));
+	assert(test_controller->mutex.locked == 0 && test_engine.hardware.guard.held.value == 0);
+	assert(test_callback_session->pending != 0);
+	stopped = bcm2711_render_worker_stopped(test_callback_session);
+	assert(stopped == EAGAIN);
+	test_completion_errors[test_completed++] = error;
+}
+
+/*
+ * Observes actual slot retirement before the common capacity publication.
+ */
+void
+drv_gpu_capacity_changed(
+	struct drv_gpu_device *device)
+{
+	/* Capacity notification follows callback return and leaves no controller lock held. */
+	assert(device == (struct drv_gpu_device *)test_controller);
+	assert(test_controller->mutex.locked == 0 && test_engine.hardware.guard.held.value == 0);
 }
 
 /* Resets volatile registers independently of any MMU allocation or IRQ owner. */
@@ -1158,4 +1312,369 @@ check_resources(
 	test_stuck_hub = 0;
 	error = test_operations->recovery->reset(test_controller);
 	assert(error == 0 && test_released == releases + 1 && test_controller->space.views == NULL);
+
+	/* A fresh namespace owns the worker test after the earlier faulted namespace was closed. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	first = object;
+	check_worker(first);
+
+	/* Private job tables exercise the actual fixed worker pool before production capability publication. */
+	check_reservations();
+}
+
+/* Exercises actual native execution, fixed queue capacity, callback retirement and fault drain. */
+static void
+check_worker(
+	struct bcm2711_render_session *session)
+{
+	struct gpu_blob_create blob;
+	struct bcm2711_render_resource *resource;
+	struct bcm2711_buffer *buffer;
+	struct test_payload *payload;
+	void *object;
+	uint32_t identifier;
+	uint32_t slot;
+	unsigned executed;
+	int error;
+
+	/* One mapped allocation supplies all indirect CL/pool/state storage for the actual native noop. */
+	memset(&blob, 0, sizeof(blob));
+	blob.bytes = 1048576;
+	blob.flags = GPU_BLOB_MAPPABLE;
+	error = test_operations->blob_create(test_controller, session, &blob, &object, &identifier);
+	assert(error == 0);
+	resource = object;
+	buffer = resource->view->buffer;
+	test_callback_session = session;
+
+	/* Each queued payload owns its native view before handing a callback to the fixed slot pool. */
+	for (slot = 0; slot < BCM2711_RENDER_REQUESTS; slot++) {
+		mutex_lock(&test_controller->mutex);
+		payload = prepare_payload(resource);
+		error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)(slot + 1U));
+		mutex_unlock(&test_controller->mutex);
+		assert(error == 0 && session->pending == slot + 1U);
+	}
+
+	/* Queue saturation transfers neither callback nor prepared payload ownership. */
+	mutex_lock(&test_controller->mutex);
+	payload = prepare_payload(resource);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)17U);
+	assert(error == EAGAIN && session->pending == 16 && test_completed == 0);
+	error = dispose_payload(test_controller, payload, true);
+	mutex_unlock(&test_controller->mutex);
+	assert(error == 0 && buffer->references == 1 && resource->view->references == 17);
+
+	/* The first real bin/render job completes before its common callback or slot retires. */
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0 && test_executed == 1 && test_completed == 1);
+	assert(test_completion_errors[0] == 0 && session->pending == 15);
+	error = test_operations->recovery->stop_begin(test_controller, session, ECANCELED);
+	assert(error == 0);
+	error = test_operations->recovery->stop_poll(test_controller, session);
+	assert(error == EAGAIN);
+
+	/* Drain joins every canceled queued callback without launching another native job. */
+	bcm2711_render_worker_drain(session);
+	assert(test_completed == 16 && test_executed == 1 && session->pending == 0);
+	assert(test_disposed == 17 && resource->view->references == 1);
+	for (slot = 1; slot < 16; slot++)
+		assert(test_completion_errors[slot] == ECANCELED);
+	error = test_operations->recovery->stop_poll(test_controller, session);
+	assert(error == 0);
+	test_operations->resource_destroy(test_controller, session, resource);
+	assert(buffer->references == 0);
+	test_operations->close(test_controller, session);
+
+	/* A timed-out real native job ends its callback while its resource stays device-owned. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	session = object;
+	test_callback_session = session;
+	error = test_operations->blob_create(test_controller, session, &blob, &object, &identifier);
+	assert(error == 0);
+	resource = object;
+	buffer = resource->view->buffer;
+	mutex_lock(&test_controller->mutex);
+	payload = prepare_payload(resource);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)17U);
+	mutex_unlock(&test_controller->mutex);
+	assert(error == 0);
+	test_hang = true;
+	executed = test_executed;
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0 && test_completed == 17 && test_executed == executed + 1);
+	assert(test_completion_errors[16] == ETIMEDOUT && test_controller->worker.uncertain);
+	assert(session->pending == 0 && buffer->references == 1 && resource->view->references == 1);
+	error = test_operations->recovery->stop_begin(test_controller, session, EIO);
+	assert(error == 0);
+	error = test_operations->recovery->stop_poll(test_controller, session);
+	assert(error == EIO);
+	test_operations->resource_destroy(test_controller, session, resource);
+	assert(buffer->references == 1 && test_controller->space.views->quarantined);
+	test_operations->close(test_controller, session);
+	assert(buffer->references == 1);
+	test_hang = false;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == 0 && buffer->references == 0 && !test_controller->worker.uncertain);
+	assert(test_controller->space.views == NULL);
+}
+
+/* Verifies actual fixed marker ownership, command ordering and normal versus uncertain cancellation. */
+static void
+check_reservations(
+	void)
+{
+	struct drv_gpu_ops operations;
+	struct bcm2711_render_session *session;
+	struct bcm2711_render_session *other;
+	struct bcm2711_render_resource *resource;
+	struct bcm2711_buffer *buffer;
+	struct test_payload *payload;
+	struct gpu_blob_create blob;
+	void *tokens[BCM2711_RENDER_RESERVATIONS];
+	void *token;
+	void *object;
+	unsigned long enabled;
+	unsigned available;
+	unsigned before;
+	uint32_t identifier;
+	uint32_t slot;
+	int error;
+
+	/* These private callbacks are not advertised on the allocation-only production node yet. */
+	memset(&operations, 0, sizeof(operations));
+	bcm2711_render_jobs_bind(&operations);
+	assert(operations.jobs != NULL && test_operations->jobs == NULL);
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	session = object;
+	test_callback_session = session;
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	other = object;
+
+	/* The future Vulkan queue owns domain one; no other arbitrary index is accepted. */
+	enabled = spin_lock_irqsave(&test_engine.hardware.guard);
+
+	session->timelines = 2;
+
+	spin_unlock_irqrestore(&test_engine.hardware.guard, enabled);
+
+	/* Capacity observation consumes no slot and validates the actual per-session domain. */
+	error = operations.jobs->capacity(test_controller, session, 1, &available);
+	assert(error == 0 && available == BCM2711_RENDER_RESERVATIONS);
+	error = operations.jobs->reserve(test_controller, session, 0, (struct drv_gpu_completion *)(uintptr_t)100U, &token);
+	assert(error == EINVAL);
+	error = operations.jobs->reserve(test_controller, session, 2, (struct drv_gpu_completion *)(uintptr_t)100U, &token);
+	assert(error == EINVAL && token == NULL);
+
+	/* Producer saturation still leaves half the fixed pool for actual decoder command storage. */
+	before = test_completed;
+	for (slot = 0; slot < BCM2711_RENDER_RESERVATIONS; slot++) {
+		error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)(100U + slot), &tokens[slot]);
+		assert(error == 0 && session->pending == slot + 1);
+	}
+
+	/* A full reservation pool refuses ownership before token publication. */
+	error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)108U, &token);
+	assert(error == EAGAIN && token == NULL);
+	error = operations.jobs->capacity(test_controller, session, 1, &available);
+	assert(error == 0 && available == 0);
+
+	/* Neither a foreign owner, an invented pointer nor a changed original callback can commit a slot. */
+	error = operations.jobs->commit(test_controller, other, tokens[0], (struct drv_gpu_completion *)(uintptr_t)100U);
+	assert(error == ESTALE);
+	error = operations.jobs->commit(test_controller, session, (void *)(uintptr_t)1U, (struct drv_gpu_completion *)(uintptr_t)100U);
+	assert(error == ESTALE);
+	error = operations.jobs->commit(test_controller, session, tokens[0], (struct drv_gpu_completion *)(uintptr_t)109U);
+	assert(error == ESTALE);
+
+	/* Definite nonacceptance withdraws every original callback without inventing terminal completion. */
+	for (slot = 0; slot < BCM2711_RENDER_RESERVATIONS; slot++) {
+		error = operations.jobs->cancel(test_controller, session, tokens[slot], (struct drv_gpu_completion *)(uintptr_t)(100U + slot), 0);
+		assert(error == 0);
+	}
+
+	/* A withdrawn exact token remains stale and all original holds have ended. */
+	assert(session->pending == 0 && test_completed == before);
+	error = operations.jobs->commit(test_controller, session, tokens[0], (struct drv_gpu_completion *)(uintptr_t)100U);
+	assert(error == ESTALE);
+
+	/* An accepted native noop precedes its reserved marker in the actual worker FIFO. */
+	memset(&blob, 0, sizeof(blob));
+	blob.bytes = 1048576;
+	blob.flags = GPU_BLOB_MAPPABLE;
+	error = test_operations->blob_create(test_controller, session, &blob, &object, &identifier);
+	assert(error == 0);
+	resource = object;
+	buffer = resource->view->buffer;
+	error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)19U, &token);
+	assert(error == 0);
+	mutex_lock(&test_controller->mutex);
+
+	payload = prepare_payload(resource);
+	error = bcm2711_render_worker_submit(session, execute_payload, dispose_payload, payload, (struct drv_gpu_completion *)(uintptr_t)18U);
+	assert(error == 0);
+
+	mutex_unlock(&test_controller->mutex);
+
+	/* Commit allocates nothing; normal cancel cannot withdraw posted marker callback ownership. */
+	error = operations.jobs->commit(test_controller, session, token, (struct drv_gpu_completion *)(uintptr_t)19U);
+	assert(error == 0);
+	error = operations.jobs->cancel(test_controller, session, token, (struct drv_gpu_completion *)(uintptr_t)19U, 0);
+	assert(error == ESTALE);
+	test_operations->resource_destroy(test_controller, session, resource);
+	assert(buffer->references == 1);
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0 && test_completed == 18 && session->pending == 1);
+	assert(buffer->references == 0);
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0 && test_completed == 19 && session->pending == 0);
+	assert(test_completion_errors[17] == 0 && test_completion_errors[18] == 0);
+
+	/* An uncertain unpublished marker retains its original callback until stop/drain. */
+	error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)20U, &token);
+	assert(error == 0);
+	error = operations.jobs->cancel(test_controller, session, token, (struct drv_gpu_completion *)(uintptr_t)20U, 1);
+	assert(error == 0 && test_completed == 19 && session->pending == 1);
+	error = operations.jobs->cancel(test_controller, session, token, (struct drv_gpu_completion *)(uintptr_t)20U, 0);
+	assert(error == ESTALE);
+
+	/* A separate ordinary unpublished reservation remains cancelable after stop_begin and native idle proof. */
+	error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)110U, &tokens[0]);
+	assert(error == 0);
+	error = test_operations->recovery->stop_begin(test_controller, session, EIO);
+	assert(error == 0);
+	error = test_operations->recovery->stop_poll(test_controller, session);
+	assert(error == EAGAIN);
+	error = operations.jobs->capacity(test_controller, session, 1, &available);
+	assert(error == EIO && available == 0);
+	error = bcm2711_render_worker_step(test_controller);
+	assert(error == 0 && test_completed == 20 && test_completion_errors[19] == EIO);
+	error = test_operations->recovery->stop_poll(test_controller, session);
+	assert(error == 0 && session->pending == 1);
+	error = operations.jobs->cancel(test_controller, session, tokens[0], (struct drv_gpu_completion *)(uintptr_t)110U, 0);
+	assert(error == 0 && session->pending == 0 && test_completed == 20);
+	test_operations->close(test_controller, session);
+	test_operations->close(test_controller, other);
+
+	/* Final close joins an unwithdrawn reservation before the backend session can disappear. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	session = object;
+	test_callback_session = session;
+	enabled = spin_lock_irqsave(&test_engine.hardware.guard);
+
+	session->timelines = 2;
+
+	spin_unlock_irqrestore(&test_engine.hardware.guard, enabled);
+
+	/* Drain converts this unpublished callback into an error marker and delivers it exactly once. */
+	error = operations.jobs->reserve(test_controller, session, 1, (struct drv_gpu_completion *)(uintptr_t)21U, &token);
+	assert(error == 0);
+	test_operations->close(test_controller, session);
+	assert(test_completed == 21 && test_completion_errors[20] == ECANCELED);
+}
+
+/* Prepares independently generated noop CL bytes and retains their mapped view before submission. */
+static struct test_payload *
+prepare_payload(
+	struct bcm2711_render_resource *resource)
+{
+	struct test_payload *payload;
+	struct bcm2711_v3d_noop lists;
+	uint8_t *storage;
+	uint32_t address;
+	int error;
+
+	/* The caller owns the controller mutex while constructing and retaining native input spans. */
+	assert(test_controller->mutex.locked == 1);
+	payload = kern_calloc(1, sizeof(*payload));
+	assert(payload != NULL);
+	payload->view = resource->view;
+	address = resource->view->address;
+	storage = resource->view->buffer->address;
+	memset(&lists, 0, sizeof(lists));
+	lists.bin.bytes = storage;
+	lists.bin.address = address;
+	lists.bin.capacity = 4096;
+	lists.render.bytes = storage + 4096;
+	lists.render.address = address + 4096;
+	lists.render.capacity = 4096;
+	lists.tile.bytes = storage + 8192;
+	lists.tile.address = address + 8192;
+	lists.tile.capacity = 4096;
+	lists.pool_address = address + 16384;
+	lists.pool_bytes = BCM2711_V3D_NOOP_POOL_BYTES;
+	error = bcm2711_v3d_noop_prepare(&lists);
+	assert(error == 0);
+	payload->job.kind = BCM2711_V3D_JOB_CL;
+	payload->job.command.cl.bin_start = lists.bin.address;
+	payload->job.command.cl.bin_end = lists.bin.address + lists.bin.used;
+	payload->job.command.cl.render_start = lists.render.address;
+	payload->job.command.cl.render_end = lists.render.address + lists.render.used;
+	payload->job.command.cl.pool_address = lists.pool_address;
+	payload->job.command.cl.pool_bytes = lists.pool_bytes;
+	payload->job.command.cl.state_address = address + 12288;
+	payload->job.command.cl.state_bytes = 256;
+
+	/* Every queued payload owns a view reference independently of the original descriptor. */
+	bcm2711_v3d_memory_retain(resource->view);
+
+	/* Succeeded: worker acceptance can now consume this complete prepared native payload. */
+	return payload;
+}
+
+/* Executes the real bounded bin/render path while the controller owns every input view. */
+static int
+execute_payload(
+	struct bcm2711_render_device *controller,
+	struct bcm2711_render_session *session,
+	void *opaque,
+	bool *retired)
+{
+	struct test_payload *payload;
+	struct bcm2711_v3d_job_result result;
+	int error;
+
+	/* A queue cancellation never invokes this native execution callback. */
+	assert(controller->mutex.locked == 1 && session == test_callback_session);
+	payload = opaque;
+	test_executed++;
+	test_writes = 0;
+	kern_dcache_clean_range(payload->view->buffer->address, payload->view->buffer->bytes);
+	error = bcm2711_v3d_job_run(controller->space.native, &payload->job, &result);
+	*retired = result.retired;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: actual serviced bin and render events supply this native job's retirement. */
+	return 0;
+}
+
+/* Retires prepared descriptor storage while uncertain native mappings remain independently held. */
+static int
+dispose_payload(
+	struct bcm2711_render_device *controller,
+	void *opaque,
+	bool retired)
+{
+	struct test_payload *payload;
+	int error;
+
+	/* The worker must arm native quarantine before disposal drops a failed job's view reference. */
+	assert(controller->mutex.locked == 1);
+	if (!retired)
+		assert(test_engine.hardware.faulted && controller->worker.uncertain);
+	payload = opaque;
+	test_disposed++;
+	error = bcm2711_v3d_memory_release(&controller->space, payload->view);
+	kern_free(payload);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the job descriptor is gone while other native storage owners remain valid. */
+	return 0;
 }

@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device allocation-shareを実装、host/build PASS。worker/Vulkan/compilerと実機は未完了）
+Status: incomplete（display/V1〜V10/二device allocation-shareを実装、host/build PASS。native worker/job reservationを実装、Vulkan/compilerと実機は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i12はmain30350c8cbへ統合。i13の二device登録・placed blob/share・global VA owner・direct scanout独立hold・failed flush quarantine/common reset回復を実装しactual source host/rpi4 y build PASS、warning0。次は非同期worker/common completion/job supervision、その出力をp006 kernel Vulkan実行器/compilerへbindする。COMMAND/CAPSET未公開。実機R0/P1/P2/P3/P5/V1〜V10とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i13 checkpoint](execution-20261009.md#i13の二deviceallocation共有の実装2026-10-09継続中)。
+Resume point: i13のallocation/shareはmain cfb3401f7へ統合。private native worker・exact-once completion・supervised reserve/commit/cancel/capacityを実装しactual source host/rpi4 build PASS、warning0。worker checkpointを統合し、p006 kernel Vulkan実行器とV3D SPIR-V compilerへ検証済みscoped owner出力を接続する。COMMAND/CAPSET/JOB未公開。実機/console RAM寿命とp007最終監査は未達。Master/共有記録/T1投影はQ1担当。[worker結果](execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -133,3 +133,8 @@ V1〜V10のsource/host/buildまとまりをmain `30350c8cba31875a01d58f804a5de13
 ## i13 checkpoint（2026-10-09）
 
 二device登録・native blob/share/VA・direct scanoutの独立referenceとfailed flush quarantineを実装し、actual source host/rpi4 build PASS、warning0。p005はin-progress、次は非同期worker/common completion/job supervisionとp006 Vulkan/compilerのbinding。Vulkan/Keilandはまだ動作可能と主張しない。実機は未実施、WS incomplete。[詳細/復帰点](execution-20261009.md#i13の二deviceallocation共有の実装2026-10-09継続中)。
+
+
+## i13 worker checkpoint（2026-10-09）
+
+native FIFO workerとsupervised reservationを実装しactual host/rpi4 build PASS。normal cancel/uncertain retain/common callback joinとDMA quarantineを区別。p005はin-progress、p006へ検証済みscoped source出力を渡す。Vulkan/Keiland/実機/最終適合は未達。[詳細](execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。
