@@ -11,8 +11,8 @@ extern "C" {
 #include <locale.h>
 #include <uapi/signal.h>
 #include <uapi/time.h>
+#include <sys/types.h>
 
-typedef long clock_t;
 #define CLOCKS_PER_SEC 1000000L
 #define TIME_UTC 1
 struct tm {

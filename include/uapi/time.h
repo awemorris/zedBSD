@@ -23,9 +23,6 @@
 #include <stdint.h>
 #include <uapi/types.h>
 
-typedef int64_t time_t;
-typedef int clockid_t;
-typedef int32_t timer_t;
 #define CLOCK_MONOTONIC 1
 #define CLOCK_REALTIME  2
 #define TIMER_ABSTIME   1

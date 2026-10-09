@@ -40,19 +40,10 @@ extern "C" {
 #define PTHREAD_STACK_MIN 65536U
 #define PTHREAD_BARRIER_SERIAL_THREAD (-1)
 
-typedef tid_t pthread_t;
-typedef unsigned pthread_key_t;
-typedef struct __pthread_attr { size_t stacksize, guardsize; void *stackaddr; int detachstate, stackset; struct sched_param schedparam; } pthread_attr_t;
-typedef struct { volatile uint32_t locked; pthread_t owner; unsigned count, type, pshared, robust; } pthread_mutex_t;
-typedef struct { unsigned type, pshared, robust; } pthread_mutexattr_t;
-typedef struct { volatile uint32_t sequence; unsigned pshared, clock; } pthread_cond_t;
-typedef struct { unsigned clock, pshared; } pthread_condattr_t;
-typedef struct { volatile uint32_t state; } pthread_once_t;
-typedef struct { volatile uint32_t guard, sequence; unsigned readers, writer, pshared; } pthread_rwlock_t;
-typedef struct { unsigned pshared; } pthread_rwlockattr_t;
-typedef struct { volatile uint32_t guard, sequence; unsigned count, trip, pshared; } pthread_barrier_t;
-typedef struct { unsigned pshared; } pthread_barrierattr_t;
-typedef volatile uint32_t pthread_spinlock_t;
+/*
+ * The thread types themselves (pthread_t, pthread_mutex_t and the rest) are
+ * defined in <sys/types.h>, included above, as POSIX places them there.
+ */
 
 struct __pthread_cleanup {
 	void (*routine)(void *);

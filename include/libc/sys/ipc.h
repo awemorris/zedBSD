@@ -26,8 +26,6 @@ extern "C" {
 #define IPC_SET  1
 #define IPC_STAT 2
 
-typedef int key_t;
-
 struct ipc_perm {
 	uid_t uid, gid, cuid, cgid;
 	mode_t mode;

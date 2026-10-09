@@ -19,9 +19,7 @@
 
 #if !KERN_UAPI_HOST_LIBC
 #include <stdint.h>
-
-typedef uint64_t fsblkcnt_t;
-typedef uint64_t fsfilcnt_t;
+#include <uapi/types.h>
 
 #define ST_RDONLY 0x00000001UL
 #define ST_NOSUID 0x00000002UL
