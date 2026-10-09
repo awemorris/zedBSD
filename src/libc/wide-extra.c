@@ -17,6 +17,7 @@
 #include <time.h>
 #include <uchar.h>
 #include <wchar.h>
+#include <wctype.h>
 
 extern void *__libc_internal_mbstate(unsigned) __attribute__((weak));
 
@@ -225,4 +226,173 @@ wcslcat(wchar_t *destination, const wchar_t *source, size_t size)
 	wmemcpy(destination + destination_length, source, copied);
 	destination[destination_length + copied] = L'\0';
 	return destination_length + source_length;
+}
+
+/* Copies a wide string and reports where its terminating null was written. */
+wchar_t *
+wcpcpy(
+	wchar_t *destination,
+	const wchar_t *source)
+{
+	size_t length;
+
+	/* Copies the characters and the null. */
+	length = wcslen(source);
+	memcpy(destination, source, (length + 1U) * sizeof(wchar_t));
+
+	/* Succeeded: the place of the null. */
+	return destination + length;
+}
+
+/*
+ * Copies at most size wide characters of a string, filling the rest with
+ * nulls, and reports the end of the copied characters (destination + size
+ * when the source was not shorter).
+ */
+wchar_t *
+wcpncpy(
+	wchar_t *destination,
+	const wchar_t *source,
+	size_t size)
+{
+	size_t length;
+	size_t index;
+
+	/* Copies the characters that fit. */
+	length = wcsnlen(source, size);
+	memcpy(destination, source, length * sizeof(wchar_t));
+
+	/* Fills what is left with nulls. */
+	for (index = length; index < size; index++)
+		destination[index] = L'\0';
+
+	/* Succeeded: the end of the copied characters. */
+	return destination + length;
+}
+
+/* Reports the length of a wide string, looking at no more than maximum characters. */
+size_t
+wcsnlen(
+	const wchar_t *string,
+	size_t maximum)
+{
+	size_t length;
+
+	/* Counts up to the null or the bound. */
+	length = 0U;
+	while (length < maximum && string[length] != L'\0')
+		length++;
+
+	/* Succeeded: the length. */
+	return length;
+}
+
+/* Makes a copy of a wide string in memory malloc gives; NULL and ENOMEM when there is none. */
+wchar_t *
+wcsdup(
+	const wchar_t *string)
+{
+	wchar_t *copy;
+	size_t length;
+
+	/* Allocates room for the characters and the null. */
+	length = wcslen(string);
+	copy = malloc((length + 1U) * sizeof(wchar_t));
+	if (copy == NULL)
+		return NULL;
+
+	/* Copies the characters and the null. */
+	memcpy(copy, string, (length + 1U) * sizeof(wchar_t));
+
+	/* Succeeded: the copy, which the caller frees. */
+	return copy;
+}
+
+/*
+ * Compares at most size wide characters of two strings, each character
+ * taken in lower case.  Reports less than, equal to or greater than zero.
+ */
+int
+wcsncasecmp(
+	const wchar_t *left,
+	const wchar_t *right,
+	size_t size)
+{
+	wint_t left_character;
+	wint_t right_character;
+	size_t index;
+
+	/* Compares the characters in lower case until they differ or end. */
+	for (index = 0U; index < size; index++) {
+		left_character = towlower((wint_t)left[index]);
+		right_character = towlower((wint_t)right[index]);
+
+		/* The first difference decides. */
+		if (left_character != right_character) {
+			if (left_character < right_character)
+				return -1;
+			return 1;
+		}
+
+		/* Both strings ended together. */
+		if (left_character == L'\0')
+			return 0;
+	}
+
+	/* Succeeded: the first size characters are the same. */
+	return 0;
+}
+
+/* Compares two wide strings, each character taken in lower case. */
+int
+wcscasecmp(
+	const wchar_t *left,
+	const wchar_t *right)
+{
+	int order;
+
+	/* No bound: the comparison goes to the end of the shorter string. */
+	order = wcsncasecmp(left, right, (size_t)-1);
+
+	/* Succeeded: the order. */
+	return order;
+}
+
+/* Compares two wide strings ignoring case, in a locale; case is the same in every locale. */
+int
+wcscasecmp_l(
+	const wchar_t *left,
+	const wchar_t *right,
+	locale_t locale)
+{
+	int order;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The comparison of the current locale. */
+	order = wcsncasecmp(left, right, (size_t)-1);
+
+	/* Succeeded: the order. */
+	return order;
+}
+
+/* Compares at most size wide characters ignoring case, in a locale. */
+int
+wcsncasecmp_l(
+	const wchar_t *left,
+	const wchar_t *right,
+	size_t size,
+	locale_t locale)
+{
+	int order;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The comparison of the current locale. */
+	order = wcsncasecmp(left, right, size);
+
+	/* Succeeded: the order. */
+	return order;
 }

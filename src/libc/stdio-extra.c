@@ -201,3 +201,81 @@ FILE *tmpfile(void)
 __attribute__((weak)) FILE *funopen(const void *cookie, int (*readfn)(void *, char *, int),
     int (*writefn)(void *, const char *, int), fpos_t (*seekfn)(void *, fpos_t, int), int (*closefn)(void *))
 { (void)cookie; (void)readfn; (void)writefn; (void)seekfn; (void)closefn; errno = ENOSYS; return NULL; }
+
+/*
+ * Writes formatted output to a file descriptor (POSIX vdprintf).
+ *
+ * The text is formatted into memory first and then written whole, going on
+ * after a short write or an interrupted one.  Reports the bytes written, or
+ * -1 with errno when the text cannot be formatted or written.
+ */
+int
+vdprintf(
+	int descriptor,
+	const char *format,
+	va_list arguments)
+{
+	char *text;
+	size_t done;
+	ssize_t wrote;
+	int length;
+	int failure;
+
+	/* Formats the whole text. */
+	length = vasprintf(&text, format, arguments);
+	if (length < 0)
+		return -1;
+
+	/* Writes it all, going on after short and interrupted writes. */
+	done = 0U;
+	failure = 0;
+	while (done < (size_t)length) {
+		wrote = write(descriptor, text + done, (size_t)length - done);
+		if (wrote < 0 && errno == EINTR)
+			continue;
+
+		/* Any other failure stops the output; errno says why. */
+		if (wrote < 0) {
+			failure = errno;
+			break;
+		}
+
+		/* Counts what was written and goes on with the rest. */
+		done += (size_t)wrote;
+	}
+
+	/* The text is no longer needed. */
+	free(text);
+
+	/* Reports a write that failed. */
+	if (failure != 0) {
+		errno = failure;
+		return -1;
+	}
+
+	/* Succeeded: the bytes written. */
+	return length;
+}
+
+/* Writes formatted output to a file descriptor (POSIX dprintf). */
+int
+dprintf(
+	int descriptor,
+	const char *format,
+	...)
+{
+	va_list arguments;
+	int written;
+
+	/* Formats and writes through vdprintf. */
+	va_start(arguments, format);
+	written = vdprintf(descriptor, format, arguments);
+	va_end(arguments);
+
+	/* Reports a failure, errno set. */
+	if (written < 0)
+		return -1;
+
+	/* Succeeded: the bytes written. */
+	return written;
+}
