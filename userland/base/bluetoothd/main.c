@@ -100,6 +100,9 @@
 /* The file that keeps the user's switch (design D11a: the state before is kept, on the first time), in the keys' folder. */
 #define BTD_POWER_FILE		BTD_KEYS_FOLDER "/power"
 #define BTD_GREETER		"_greeter"
+
+/* How often the seat's user is looked at again for the phone link (ws197-p003 section 3.3). */
+#define BTD_SEAT_CHECK_MS	5000U
 #define BTD_ADMIN_GROUP		"wheel"
 #define BTD_GROUPS_MAX		64
 
@@ -173,6 +176,7 @@ static void btd_trace(void *context, const uint8_t *packet, size_t length, int r
 static int btd_arguments(int argc, char **argv);
 static void btd_system_open(void);
 static void btd_system_events(void);
+static void btd_seat_check(uint64_t now);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static int btd_parse_pair(const char *text, uint8_t *address, unsigned *type, int *phone);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
@@ -284,6 +288,13 @@ static int btd_busy_logged;
 static char btd_loads[BTD_LOADS_MAX][BTD_KEY_MAX];
 static unsigned btd_load_count;
 static uint64_t btd_reappear_ms;
+
+/*
+ * When the seat's user is next looked at for the phone link (ws197-p003
+ * section 3.3; 0: at once).  Moved on by each look; kept for the
+ * daemon's life.
+ */
+static uint64_t btd_seat_check_at;
 
 /*
  * Whether the user turned Bluetooth off (POWER off, ws143-p006): the
@@ -476,8 +487,10 @@ main(
 			btd_hid_tick(&btd_hid_host, now);
 		}
 
-		/* The phone link's deadlines, and its frames moved on to the session. */
+		/* The phone link's seat every few seconds, its deadlines, and its frames moved on to the session. */
 		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
+			if (now >= btd_seat_check_at)
+				btd_seat_check(now);
 			btd_phone_tick(&btd_phone_link, now);
 			btd_phone_pump(&btd_phone_link);
 		}
@@ -796,6 +809,8 @@ btd_timeout(
 	    deadline != 0U &&
 	    (earliest == 0U || deadline < earliest))
 		earliest = deadline;
+	if (btd_session_open && (earliest == 0U || btd_seat_check_at < earliest))
+		earliest = btd_seat_check_at;
 	deadline = btd_linkmgr_deadline(&btd_links, now);
 	if (btd_session_open &&
 	    deadline != 0U &&
@@ -1160,6 +1175,7 @@ btd_power(
 	/* On: scans and pairings may start again; kept for the next start. */
 	if (on == 0) {
 		btd_powered_off = 0;
+		btd_seat_check_at = 0U;
 		error = btd_power_save();
 		btd_log("BLUETOOTHD POWER on uid=%u saved=%d\n", (unsigned)client->uid, error == 0);
 		btd_write(client, "POWER on\nDONE\n");
@@ -1173,8 +1189,9 @@ btd_power(
 		return;
 	}
 
-	/* Succeeded: off until POWER on, kept for the next start. */
+	/* Succeeded: off until POWER on, kept for the next start; the phone link sees nobody at the seat at once. */
 	btd_powered_off = 1;
+	btd_seat_check_at = 0U;
 	error = btd_power_save();
 	btd_log("BLUETOOTHD POWER off uid=%u saved=%d\n", (unsigned)client->uid, error == 0);
 	btd_write(client, "POWER off\nDONE\n");
@@ -2739,9 +2756,55 @@ btd_system_events(
 		if (same != 0)
 			continue;
 
-		/* A sleep ended: the links are checked, while there is a controller. */
+		/* A sleep ended: the links are checked and the phone paged again at once, while there is a controller (ws197-p003 section 5.6). */
 		btd_log("bluetoothd: sleep.end, the HID links checked\n");
-		if (btd_session_open && btd_session.state == BTD_STATE_READY)
+		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
 			btd_hid_resume(&btd_hid_host);
+			btd_phone_resume(&btd_phone_link, btd_now_ms());
+		}
 	}
+}
+
+/*
+ * Tells the phone link who sits at the seat (ws197-p003 section 3.3): the
+ * display's owner unless it is the greeter, and nobody while the user
+ * turned Bluetooth off.  Looked at again every BTD_SEAT_CHECK_MS.
+ */
+static void
+btd_seat_check(
+	uint64_t now)
+{
+	struct passwd *account;
+	struct stat status;
+	int same;
+	int error;
+
+	/* The next look. */
+	btd_seat_check_at = now + BTD_SEAT_CHECK_MS;
+
+	/* Nobody while Bluetooth is off. */
+	if (btd_powered_off) {
+		btd_phone_set_seat(&btd_phone_link, 0, 0, now);
+		return;
+	}
+
+	/* The display's owner. */
+	error = stat(BTD_SEAT_NODE, &status);
+	if (error != 0) {
+		btd_phone_set_seat(&btd_phone_link, 0, 0, now);
+		return;
+	}
+
+	/* An account the system knows, and not the greeter's. */
+	account = getpwuid(status.st_uid);
+	same = 1;
+	if (account != NULL)
+		same = strcmp(account->pw_name, BTD_GREETER);
+	if (account == NULL || same == 0) {
+		btd_phone_set_seat(&btd_phone_link, 0, 0, now);
+		return;
+	}
+
+	/* Succeeded: the seat's user. */
+	btd_phone_set_seat(&btd_phone_link, 1, status.st_uid, now);
 }
