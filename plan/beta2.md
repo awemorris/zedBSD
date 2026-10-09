@@ -54,6 +54,8 @@
 | 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
 | 15 | [WS193](ws193/ws.md) menuconfig（host） | 自分の PC で `make menuconfig` → Build boot image | 新しい階層、進捗の bar と今の対象の名前。できた image が起動 |
 | 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
+| 22 | [BUG-189](bugs/BUG-189.md) 有線と Wi-Fi の両方の接続 | USB LAN と Wi-Fi の両方をつなぎ、Settings → Network の Active Network を見る | USB LAN（有線）が出る。再現しなければ close（2026-10-08 ユーザー） |
+| 23 | [BUG-212](bugs/BUG-212.md) 有線を抜いた後の Wi-Fi | 有線の接続中に Wi-Fi もつなぎ、有線の cable を抜く | Wi-Fi が切れずに使える。再現したら Wi-Fi の off・on の前に Q1 へ（SSH で networkd と intel-ax211 の log を取る）。再現しなければ close |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
 ## 合計
@@ -67,7 +69,7 @@
 
 | 項目 | 理由 |
 | --- | --- |
-| BUG-189・BUG-212（有線と WiFi の同時接続）、BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更が要る |
+| BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更が要る |
 | BUG-255（蓋を閉じた間の HDMI）、BUG-159（電池で 5 fps）、BUG-145（AX211 の DHCP）、BUG-165（5330 の DSDT） | 調査が長い・実機の時間が要る |
 | [WS001 p045](ws001/phase045/phase.md) POSIX の header の残り・p046〜p051、[WS126](ws126/ws.md) Python | ベータ3 の列（合間に P1） |
 | 規約の全文の見直しの Phase（各 WS） | ユーザーの決定でベータ3 |
