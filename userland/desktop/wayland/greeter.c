@@ -105,8 +105,17 @@
 #define GREETER_FIELD		44
 #define GREETER_AVATAR		72
 
-/* The line under the message that switches between the PIN and the password: its height. */
+/* The line under the message that switches between the PIN and the password: its height, and the card's margin under it. */
 #define GREETER_LINK		28
+#define GREETER_LINK_MARGIN	4
+
+/*
+ * The lock screen's styles side by side in that line instead (ws187-p003,
+ * BUG-283: taller buttons, the card growing downwards): their height and
+ * the card's margin under them.
+ */
+#define GREETER_STYLE_HEIGHT	40
+#define GREETER_STYLE_MARGIN	20
 
 /* A PIN's digits. */
 #define GREETER_PIN_DIGITS	6U
@@ -1010,6 +1019,9 @@ greeter_layout(
 	int32_t width;
 	int32_t height;
 	int32_t card_height;
+	int32_t base_height;
+	int32_t link_height;
+	int32_t link_margin;
 	int32_t x;
 	int32_t y;
 	unsigned index;
@@ -1021,11 +1033,22 @@ greeter_layout(
 	rows = 0U;
 	if (greeter_user_count > 1U)
 		rows = greeter_user_count;
-	card_height = 28 + GREETER_AVATAR + 48 + (int32_t)rows * GREETER_ROW + 12 + GREETER_FIELD + 44 + GREETER_LINK;
+	base_height = 28 + GREETER_AVATAR + 48 + (int32_t)rows * GREETER_ROW + 12 + GREETER_FIELD + 40 + GREETER_LINK + GREETER_LINK_MARGIN;
+
+	/* The styles side by side (when sessiond offers more than the password) take a taller line, and the card grows downwards for them (BUG-283). */
+	link_height = GREETER_LINK;
+	link_margin = GREETER_LINK_MARGIN;
+	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) != 0U) {
+		link_height = GREETER_STYLE_HEIGHT;
+		link_margin = GREETER_STYLE_MARGIN;
+	}
+
+	/* The card, placed by its height without the styles (its top stays where it was), as tall as its lines. */
+	card_height = base_height - GREETER_LINK - GREETER_LINK_MARGIN + link_height + link_margin;
 	layout->card[2] = GREETER_CARD_WIDTH;
 	layout->card[3] = card_height;
 	layout->card[0] = (width - GREETER_CARD_WIDTH) / 2;
-	layout->card[1] = height / 2 - card_height / 2 + height / 16;
+	layout->card[1] = height / 2 - base_height / 2 + height / 16;
 	x = layout->card[0];
 	y = layout->card[1] + 28;
 
@@ -1061,7 +1084,7 @@ greeter_layout(
 	layout->link[0] = x + 24;
 	layout->link[1] = y + GREETER_FIELD + 40;
 	layout->link[2] = GREETER_CARD_WIDTH - 48;
-	layout->link[3] = GREETER_LINK;
+	layout->link[3] = link_height;
 
 	/* The lock screen's styles in the link's line. */
 	greeter_layout_styles(server, layout);
@@ -2117,7 +2140,7 @@ greeter_draw_styles(
 			label = kl_tr("PIN");
 		if (layout->style_bits[index] == KL_BACKEND_STYLE_KEY)
 			label = kl_tr("Security Key");
-		greeter_draw_centered(server, command, SIZE_BAR, rect[0] + rect[2] / 2, rect[1] + 19, label, rect[2] - 8, color);
+		greeter_draw_centered(server, command, SIZE_BAR, rect[0] + rect[2] / 2, rect[1] + rect[3] / 2 + 5, label, rect[2] - 8, color);
 	}
 }
 
