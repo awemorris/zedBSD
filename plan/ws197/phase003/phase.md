@@ -519,3 +519,9 @@ p001 の p003 の 16 LW と骨格 +5 LW（p001 §12 の見直し）に対し、�
 - 2026-10-10: 第 2 版（P1、4397bcb31）。全部に答えた（各節の印）。Core 7.1.7（Create Connection Cancel）と §5.1.8（LanguageBaseAttributeIDList）を読み足した。
 - 2026-10-10: 第 2 版の再確認（agent a8b0127cb85b80091）→ [review-2.md](review-2.md): review-1 は全部閉じた。新しい major 2（N1: 0x13・0x15 で page を止めると戻らない、N2: 持ち主の無い bond を phone=1 で黙って取れる）と minor 9。**i02・i04〜i07 は GO、i01・i03 は N2・N1 を書けば GO**（再 review は要らない）。第 2.1 版で全部を本文に入れた。
 - 2026-10-10: Q1: hid.c の同じ形の潜在の誤りは [BUG-282](../../bugs/BUG-282.md)（tracking、ベータ3、WS143）。i03 で linkmgr・交差の直しと同じ形が HID にも当てられるなら一緒に直し、ticket に記録する（ws197 branch）。
+
+## 実装の進み（ws197 branch）
+
+| i | commit | 状態 |
+| --- | --- | --- |
+| i01 記録・PAIR の検査・LINK・SHOW・FORGET・HID の上限 | この commit | 新 `phonerec.c`・`.h`（§3.1: 形・読み・書き・消し・list・valid・prune）。phone: `btd_phone_init` に keys の folder と hook（account）、`btd_phone_load`（掃除、有効が 1 つならそれ、0 なら最初の無効の物を SHOW 用に、2 つ以上は EEXIST）、`btd_phone_pair_check`（`busy`・`phone-seat`・`owned`）、`btd_phone_link_set`、`btd_phone_forget`、`btd_phone_show`、handoff の 6〜9（`phone_take_record`: 記録を書いてから route）、HID の上限は記録だけで決める（`phone_limit`、`phone_ended` から外した）。pair.c: phone=1 の pairing の Link Key Request は保存の鍵があっても常に Negative Reply（N2、使わなくなった `pair_key_authenticated` を消した）。main: `btd_account`（getpwuid）、`btd_seated`、controller の READY で `btd_phone_load`、PAIR の始めの検査、FORGET は `.phone` を先に（bond が無くても `.phone` を消せたら DONE）、`PHONE SHOW`・`PHONE LINK`。**設計の補い**: §3.2 の「pair.c の始めの検査の hook」は、main が `btd_pair_start` の前に `btd_phone_pair_check` を呼ぶ形にした（同じ loop の中で同じ結果、pair.c の API を増やさない）。`.phone` の行は `key value`。試験: 新 `bt-phonerec-host-test`（34 checks）、`bt-phone-link-host-test` に records（world ごとに mkdtemp の folder、+38 checks、計 79）、`bt-pair-phone-host-test` の保存の認証済みの鍵の期待値を N2 に直した。bt-phone-host-test.sh（10 本）PASS、WS143 の bt-daemon-host-test.sh PASS、target の bluetoothd の build（`ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat`）rc 0・warning 0、style-check（変えた file）0 |

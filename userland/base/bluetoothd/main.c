@@ -149,6 +149,10 @@ static void btd_question_end(void);
 static void btd_ask(void *context, unsigned kind, uint32_t number);
 static void btd_paired(void *context, const char *answer);
 static int btd_permitted(uid_t uid);
+static int btd_seated(uid_t uid);
+static int btd_account(void *context, uid_t uid, char *name, size_t size);
+static void btd_phone_show_request(struct btd_client *client);
+static void btd_phone_link_request(struct btd_client *client, const char *argument);
 static void btd_connect(int index, const char *argument);
 static void btd_disconnect(struct btd_client *client, const char *argument);
 static void btd_status(struct btd_client *client);
@@ -295,6 +299,7 @@ main(
 	struct btd_hid_hooks hid_hooks;
 	struct btd_router_hid router_hid;
 	struct btd_router_phone router_phone;
+	struct btd_phone_hooks phone_hooks;
 	char expired_text[24];
 	unsigned count;
 	unsigned index;
@@ -374,7 +379,9 @@ main(
 
 	/* The phone link, the router's owner of a phone's link and the pairing's phone hook (ws197-p002). */
 	btd_sdps_db_init(&btd_records);
-	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, btd_probed, NULL);
+	phone_hooks.context = NULL;
+	phone_hooks.account = btd_account;
+	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, BTD_KEYS_FOLDER, &phone_hooks, btd_probed, NULL);
 	router_phone.context = &btd_phone_link;
 	router_phone.wants = btd_phone_wants;
 	router_phone.claims = btd_phone_claims;
@@ -645,6 +652,9 @@ btd_open(
 		btd_failures = 0U;
 		if (!btd_powered_off)
 			btd_hid_refresh(&btd_hid_host);
+		error = btd_phone_load(&btd_phone_link);
+		if (error == EEXIST)
+			btd_log("bluetoothd: two phones' records are valid; neither is used until one is forgotten\n");
 	} else if (btd_session.state == BTD_STATE_ERROR) {
 		btd_failures++;
 		if (btd_failures >= BTD_FAILURES_MAX) {
@@ -985,7 +995,7 @@ btd_line(
 		return;
 	}
 
-	/* PHONE PROBE ADDRESS uuid=0x1132|0x112F, PHONE DROP ADDRESS (ws197-p002, root). */
+	/* PHONE SHOW and PHONE LINK (ws197-p003); PHONE PROBE ADDRESS uuid=0x1132|0x112F and PHONE DROP ADDRESS (ws197-p002, root). */
 	same = strncmp(line, "PHONE ", 6U);
 	if (same == 0) {
 		btd_phone_request(index, line + 6);
@@ -1356,9 +1366,11 @@ btd_pair(
 {
 	struct btd_client *client;
 	uint8_t address[BTD_ADDRESS_BYTES];
+	const char *refusal;
 	unsigned type;
 	unsigned links;
 	int permitted;
+	int seated;
 	int phone;
 	int busy;
 	int error;
@@ -1400,6 +1412,14 @@ btd_pair(
 	links = btd_hid_link_count(&btd_hid_host);
 	if (phone && links >= BTD_HID_MAX) {
 		btd_write(client, "ERROR busy-links\nDONE\n");
+		return;
+	}
+
+	/* A phone's pairing is the seat's user's, and another owner's phone is not paired again (ws197-p003 section 3.2). */
+	seated = btd_seated(client->uid);
+	refusal = btd_phone_pair_check(&btd_phone_link, address, client->uid, phone, seated);
+	if (refusal != NULL) {
+		btd_write(client, "ERROR %s\nDONE\n", refusal);
 		return;
 	}
 
@@ -1495,6 +1515,7 @@ btd_forget(
 {
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
+	int phone_record;
 	int permitted;
 	int error;
 
@@ -1518,9 +1539,25 @@ btd_forget(
 		return;
 	}
 
-	/* The bond's file, gone. */
+	/* A phone's record goes first: a valid one by its owner and root alone (ws197-p003 section 3.2). */
+	phone_record = ENOENT;
+	if (type == BTD_ADDRESS_BREDR)
+		phone_record = btd_phone_forget(&btd_phone_link, address, client->uid);
+	if (phone_record == EPERM) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	} else if (phone_record != 0 && phone_record != ENOENT) {
+		btd_write(client, "ERROR %s\nDONE\n", strerror(phone_record));
+		return;
+	}
+
+	/* The bond's file, gone (a phone's record without its bond was forgotten all the same). */
 	error = btd_keys_forget(BTD_KEYS_FOLDER, btd_session.address, address, type);
-	if (error == ENOENT) {
+	if (error == ENOENT && phone_record == 0) {
+		btd_log("bluetoothd: forgot the phone record of %s\n", argument);
+		btd_write(client, "DONE\n");
+		return;
+	} else if (error == ENOENT) {
 		btd_write(client, "ERROR not-bonded\nDONE\n");
 		return;
 	}
@@ -1698,8 +1735,22 @@ btd_phone_request(
 	int same;
 	int error;
 
-	/* Root alone. */
+	/* SHOW (ws197-p003): anyone, each seeing what the phone link lets them. */
 	client = &btd_clients[index];
+	same = strcmp(argument, "SHOW");
+	if (same == 0) {
+		btd_phone_show_request(client);
+		return;
+	}
+
+	/* LINK ADDRESS on|off [profiles=...] (ws197-p003): the owner and root, as the phone link checks. */
+	same = strncmp(argument, "LINK ", 5U);
+	if (same == 0) {
+		btd_phone_link_request(client, argument + 5);
+		return;
+	}
+
+	/* The rest is root's alone. */
 	if (client->uid != 0) {
 		btd_write(client, "ERROR permission\nDONE\n");
 		return;
@@ -1820,6 +1871,175 @@ btd_probed(
 		return;
 	btd_clients[index].waits_probe = 0;
 	btd_write(&btd_clients[index], "%s\nDONE\n", line);
+}
+
+/* Answers PHONE SHOW (ws197-p003 section 9.2): the phone's line as the phone link lets the client see it, then DONE. */
+static void
+btd_phone_show_request(
+	struct btd_client *client)
+{
+	char line[BTD_LINE_MAX];
+	int permitted;
+	int error;
+
+	/* What the client may see. */
+	permitted = btd_permitted(client->uid);
+	error = btd_phone_show(&btd_phone_link, client->uid, permitted, line, sizeof(line));
+	if (error != 0) {
+		btd_write(client, "DONE\n");
+		return;
+	}
+
+	/* Succeeded: the line. */
+	btd_write(client, "%s\nDONE\n", line);
+}
+
+/*
+ * Answers PHONE LINK ADDRESS on|off [profiles=m,c,h] (ws197-p003 section
+ * 3.2): the phone link of a phone with a valid record turned on or off by
+ * its owner or root.
+ */
+static void
+btd_phone_link_request(
+	struct btd_client *client,
+	const char *argument)
+{
+	char address_text[18];
+	uint8_t address[BTD_ADDRESS_BYTES];
+	const char *rest;
+	const char *letters;
+	const char *switched;
+	size_t length;
+	int profiles;
+	int on_text;
+	int off_text;
+	int on;
+	int same;
+	int error;
+
+	/* The address and a space after it. */
+	length = strlen(argument);
+	if (length < 18U || argument[17] != ' ') {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* Its seventeen characters, read. */
+	memcpy(address_text, argument, 17U);
+	address_text[17] = '\0';
+	error = btd_address_parse(address_text, address);
+	if (error != 0) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* on, or off, or anything else refused. */
+	rest = argument + 18;
+	on_text = strncmp(rest, "on", 2U);
+	off_text = strncmp(rest, "off", 3U);
+	if (on_text == 0) {
+		on = 1;
+		rest += 2;
+	} else if (off_text == 0) {
+		on = 0;
+		rest += 3;
+	} else {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* The profiles, "profiles=" and the letters m, c and h with commas (or none, kept as they are). */
+	profiles = -1;
+	same = strncmp(rest, " profiles=", 10U);
+	if (same == 0) {
+		profiles = 0;
+		for (letters = rest + 10; *letters != '\0'; letters++) {
+			if (*letters == 'm') {
+				profiles |= (int)BTD_PHONEREC_MESSAGES;
+			} else if (*letters == 'c') {
+				profiles |= (int)BTD_PHONEREC_CONTACTS;
+			} else if (*letters == 'h') {
+				profiles |= (int)BTD_PHONEREC_CALLS;
+			} else if (*letters != ',') {
+				btd_write(client, "ERROR argument\nDONE\n");
+				return;
+			}
+		}
+	} else if (*rest != '\0') {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* The switch, as the phone link allows it. */
+	error = btd_phone_link_set(&btd_phone_link, address, client->uid, on, profiles);
+	if (error == ENOENT) {
+		btd_write(client, "ERROR not-phone\nDONE\n");
+		return;
+	} else if (error == EPERM) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	} else if (error != 0) {
+		btd_write(client, "ERROR %s\nDONE\n", strerror(error));
+		return;
+	}
+
+	/* Succeeded: switched, and logged. */
+	switched = "off";
+	if (on)
+		switched = "on";
+	btd_log("bluetoothd: phone link of %s %s by uid %u\n", address_text, switched, (unsigned)client->uid);
+	btd_write(client, "DONE\n");
+}
+
+/* Gives the name of a uid's account (the phone link's hook).  Returns 0 or ENOENT. */
+static int
+btd_account(
+	void *context,
+	uid_t uid,
+	char *name,
+	size_t size)
+{
+	struct passwd *account;
+
+	UNUSED_PARAMETER(context);
+
+	/* The account. */
+	account = getpwuid(uid);
+	if (account == NULL)
+		return ENOENT;
+
+	/* Succeeded: its name. */
+	(void)snprintf(name, size, "%s", account->pw_name);
+	return 0;
+}
+
+/* Tells whether a uid is the seat's user: the display's owner, not the greeter. */
+static int
+btd_seated(
+	uid_t uid)
+{
+	struct passwd *account;
+	struct stat status;
+	int same;
+	int error;
+
+	/* An account the system knows, and not the greeter's. */
+	account = getpwuid(uid);
+	if (account == NULL)
+		return 0;
+	same = strcmp(account->pw_name, BTD_GREETER);
+	if (same == 0)
+		return 0;
+
+	/* The display's owner. */
+	error = stat(BTD_SEAT_NODE, &status);
+	if (error != 0)
+		return 0;
+	if (status.st_uid != uid)
+		return 0;
+
+	/* The seat's user. */
+	return 1;
 }
 
 /*

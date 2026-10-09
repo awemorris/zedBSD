@@ -118,6 +118,10 @@ static int phone_ob_body(void *context, const uint8_t *data, size_t length);
 static uint64_t phone_earlier(uint64_t earliest, uint64_t deadline);
 static uint16_t phone_get16(const uint8_t *bytes);
 static void phone_put16(uint8_t *bytes, uint16_t value);
+static int phone_take_record(struct btd_phone *phone, const struct btd_pair_handoff *handoff, const char **why);
+static void phone_limit(struct btd_phone *phone);
+static const char *phone_link_name(const struct btd_phone *phone);
+static void phone_profiles_text(unsigned profiles, char *text, size_t size);
 
 /*
  * Prepares the phone link of a session: no phone yet.  The answer hook
@@ -130,15 +134,19 @@ btd_phone_init(
 	struct btd_router *router,
 	struct btd_hid *hid,
 	const struct btd_sdps_db *db,
+	const char *keys_folder,
+	const struct btd_phone_hooks *hooks,
 	btd_phone_answer_fn answer,
 	void *context)
 {
-	/* Nothing under way. */
+	/* Nothing under way, and no record read yet. */
 	memset(phone, 0, sizeof(*phone));
 	phone->session = session;
 	phone->router = router;
 	phone->hid = hid;
 	phone->db = db;
+	phone->keys_folder = keys_folder;
+	phone->hooks = *hooks;
 	phone->answer = answer;
 	phone->answer_context = context;
 	phone->state = BTD_PHONE_NONE;
@@ -219,6 +227,11 @@ btd_phone_handoff(
 		return 0;
 	}
 
+	/* The owner's record, written before the link moves: a phone whose record cannot be written is not taken (ws197-p003 section 3.2). */
+	error = phone_take_record(phone, handoff, why);
+	if (error != 0)
+		return 0;
+
 	/* The link's route is the phone link's from now on. */
 	error = btd_router_assign(phone->router, handoff->handle, BTD_OWNER_PHONE);
 	if (error != 0) {
@@ -260,8 +273,8 @@ btd_phone_handoff(
 		buffers = phone->session->acl_pool.total - PHONE_BUFFERS_LEFT;
 	(void)btd_session_set_link_limits(phone->session, phone->handle, BTD_SEND_PHONE_FRAMES, buffers);
 
-	/* The HID host keeps a link free for the phone. */
-	btd_hid_set_limit(phone->hid, BTD_PHONE_HID_LIMIT);
+	/* The HID host keeps a link free for the phone while its record is on (ws197-p003 section 3.4). */
+	phone_limit(phone);
 
 	/* The channels held Pending during the pairing are accepted now that the link is the phone link's. */
 	error = btd_l2cap_answer_pending(&phone->l2cap, phone->handle, BTD_L2CAP_SUCCESS, answer, sizeof(answer), &length);
@@ -556,6 +569,313 @@ btd_phone_owns(
 		return 1;
 
 	/* Another connection. */
+	return 0;
+}
+
+/*
+ * Reads the record of the phone used as a phone when the controller opens
+ * (ws197-p003 section 3.1): records without a bond go, and the one valid
+ * record is kept (or the first invalid one, which owns nothing but is
+ * shown).  The HID host's limit follows.  Returns 0, ENXIO without the
+ * controller's address, EEXIST when two records are valid (none is used
+ * until one is forgotten), or the error of reading the folder.
+ */
+int
+btd_phone_load(
+	struct btd_phone *phone)
+{
+	struct btd_phonerec records[BTD_PHONEREC_LIST_MAX];
+	unsigned count;
+	unsigned valid_count;
+	unsigned first_valid;
+	unsigned index;
+	int valid;
+	int error;
+
+	/* No record until one is read. */
+	phone->have_record = 0;
+	phone->record_valid = 0;
+
+	/* The records are the controller's. */
+	if (!phone->session->have_address) {
+		phone_limit(phone);
+		return ENXIO;
+	}
+
+	/* Records whose bond went while the daemon did not run go too (a failure leaves them, read below as invalid). */
+	(void)btd_phonerec_prune(phone->keys_folder, phone->session->address);
+
+	/* The records there are. */
+	error = btd_phonerec_list(phone->keys_folder, phone->session->address, records, BTD_PHONEREC_LIST_MAX, &count);
+	if (error != 0) {
+		phone_limit(phone);
+		return error;
+	}
+
+	/* The valid ones. */
+	valid_count = 0U;
+	first_valid = 0U;
+	for (index = 0U; index < count; index++) {
+		valid = btd_phonerec_valid(phone->keys_folder, phone->session->address, &records[index], phone->hooks.account, phone->hooks.context);
+		if (!valid)
+			continue;
+		if (valid_count == 0U)
+			first_valid = index;
+		valid_count++;
+	}
+
+	/* Two phones each say they are the one: neither is used. */
+	if (valid_count >= 2U) {
+		phone_limit(phone);
+		return EEXIST;
+	}
+
+	/* The valid record, or the first invalid one, kept. */
+	if (valid_count == 1U) {
+		phone->record = records[first_valid];
+		phone->have_record = 1;
+		phone->record_valid = 1;
+	} else if (count != 0U) {
+		phone->record = records[0];
+		phone->have_record = 1;
+	}
+
+	/* Succeeded: the HID host's limit follows the record. */
+	phone_limit(phone);
+	return 0;
+}
+
+/*
+ * Checks a pairing before it starts (ws197-p003 section 3.2): a phone's
+ * pairing (phone=1) is the seat's user's alone; nobody but the owner and
+ * root pairs a phone whose valid record is another's; the phone of a link
+ * is not paired again under it.  Returns NULL when the pairing may start,
+ * or why not: "phone-seat", "owned" or "busy".
+ */
+const char *
+btd_phone_pair_check(
+	struct btd_phone *phone,
+	const uint8_t *address,
+	uid_t uid,
+	int phone_pairing,
+	int seated)
+{
+	struct btd_phonerec record;
+	int valid;
+	int same;
+	int error;
+
+	/* The phone of a link is not paired again under it. */
+	if (phone->state != BTD_PHONE_NONE) {
+		same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
+		if (same == 0)
+			return "busy";
+	}
+
+	/* A phone's owner is the seat's user. */
+	if (phone_pairing && !seated)
+		return "phone-seat";
+
+	/* Without the controller's address there are no records to read. */
+	if (!phone->session->have_address)
+		return NULL;
+
+	/* The device's record, when it has one. */
+	error = btd_phonerec_read(phone->keys_folder, phone->session->address, address, &record);
+	if (error != 0)
+		return NULL;
+
+	/* An invalid record owns nothing. */
+	valid = btd_phonerec_valid(phone->keys_folder, phone->session->address, &record, phone->hooks.account, phone->hooks.context);
+	if (!valid)
+		return NULL;
+
+	/* Its owner, or root. */
+	if (record.uid == uid || uid == 0)
+		return NULL;
+
+	/* Another's phone. */
+	return "owned";
+}
+
+/*
+ * Turns the phone link of a phone on or off (PHONE LINK, ws197-p003
+ * section 3.2), and its profiles (profiles < 0 keeps them): the valid
+ * record's owner and root alone.  Off ends the link.  Returns 0, ENOENT
+ * when the device has no valid record, EPERM for anyone else, or the
+ * error of writing the record.
+ */
+int
+btd_phone_link_set(
+	struct btd_phone *phone,
+	const uint8_t *address,
+	uid_t uid,
+	int on,
+	int profiles)
+{
+	struct btd_phonerec record;
+	int valid;
+	int same;
+	int error;
+
+	/* The records are the controller's. */
+	if (!phone->session->have_address)
+		return ENOENT;
+
+	/* The device's record. */
+	error = btd_phonerec_read(phone->keys_folder, phone->session->address, address, &record);
+	if (error != 0)
+		return ENOENT;
+
+	/* A valid one: an invalid record owns nothing to switch. */
+	valid = btd_phonerec_valid(phone->keys_folder, phone->session->address, &record, phone->hooks.account, phone->hooks.context);
+	if (!valid)
+		return ENOENT;
+
+	/* Its owner, or root. */
+	if (record.uid != uid && uid != 0)
+		return EPERM;
+
+	/* The switch and the profiles, written. */
+	record.enabled = 0;
+	if (on)
+		record.enabled = 1;
+	if (profiles >= 0)
+		record.profiles = (unsigned)profiles & BTD_PHONEREC_PROFILES;
+	error = btd_phonerec_write(phone->keys_folder, phone->session->address, &record);
+	if (error != 0)
+		return error;
+
+	/* Kept, and the HID host's limit follows. */
+	phone->record = record;
+	phone->have_record = 1;
+	phone->record_valid = 1;
+	phone_limit(phone);
+
+	/* Off ends the phone's link. */
+	same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
+	if (!on && same == 0)
+		phone_disconnect(phone, PHONE_REASON_USER);
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Removes the record of a phone before its bond is forgotten (FORGET,
+ * ws197-p003 section 3.2): a valid record by its owner and root alone, an
+ * invalid one by anyone the daemon lets forget.  The link ends.  Returns
+ * 0, ENOENT when there was none (the bond is forgotten as ever), EPERM,
+ * or the error of removing the file.
+ */
+int
+btd_phone_forget(
+	struct btd_phone *phone,
+	const uint8_t *address,
+	uid_t uid)
+{
+	struct btd_phonerec record;
+	int valid;
+	int same;
+	int error;
+
+	/* The records are the controller's. */
+	if (!phone->session->have_address)
+		return ENOENT;
+
+	/* The device's record (a malformed one is invalid). */
+	error = btd_phonerec_read(phone->keys_folder, phone->session->address, address, &record);
+	if (error == ENOENT)
+		return ENOENT;
+	valid = 0;
+	if (error == 0)
+		valid = btd_phonerec_valid(phone->keys_folder, phone->session->address, &record, phone->hooks.account, phone->hooks.context);
+
+	/* A valid record by its owner, or root. */
+	if (valid && record.uid != uid && uid != 0)
+		return EPERM;
+
+	/* The file goes. */
+	error = btd_phonerec_forget(phone->keys_folder, phone->session->address, address);
+	if (error != 0)
+		return error;
+
+	/* The record kept is gone with it. */
+	same = memcmp(phone->record.address, address, BTD_ADDRESS_BYTES);
+	if (phone->have_record && same == 0) {
+		phone->have_record = 0;
+		phone->record_valid = 0;
+	}
+
+	/* The HID host's limit follows. */
+	phone_limit(phone);
+
+	/* The phone's link ends. */
+	same = memcmp(phone->address, address, BTD_ADDRESS_BYTES);
+	if (same == 0)
+		phone_disconnect(phone, PHONE_REASON_USER);
+
+	/* Succeeded: forgotten. */
+	return 0;
+}
+
+/*
+ * Writes the line of PHONE SHOW (ws197-p003 section 9.2): the whole state
+ * to the owner and root, the address and the switch to another the daemon
+ * lets change things.  Returns 0, or ENOENT when there is no record or
+ * nothing to show to that uid.
+ */
+int
+btd_phone_show(
+	const struct btd_phone *phone,
+	uid_t uid,
+	int permitted,
+	char *line,
+	size_t size)
+{
+	char address[24];
+	char owner[16];
+	char profiles[8];
+	int whole;
+	int mine;
+
+	/* A record. */
+	if (!phone->have_record)
+		return ENOENT;
+	btd_format_address(phone->record.address, address, sizeof(address));
+
+	/* Whose: the owner's (of a valid record), and root sees it whole too. */
+	mine = 0;
+	if (phone->record_valid && phone->record.uid == uid)
+		mine = 1;
+	whole = mine;
+	if (uid == 0)
+		whole = 1;
+
+	/* Anyone else the daemon lets change things sees the address and the switch. */
+	if (!whole) {
+		if (!permitted)
+			return ENOENT;
+		(void)snprintf(line, size, "PHONE address=%s mine=0 enabled=%d", address, phone->record.enabled);
+		return 0;
+	}
+
+	/* The owner, or "invalid". */
+	(void)snprintf(owner, sizeof(owner), "%lu", (unsigned long)phone->record.uid);
+	if (!phone->record_valid)
+		(void)snprintf(owner, sizeof(owner), "%s", "invalid");
+	phone_profiles_text(phone->record.profiles, profiles, sizeof(profiles));
+
+	/* Succeeded: the whole line. */
+	(void)snprintf(line,
+		       size,
+		       "PHONE address=%s owner=%s mine=%d enabled=%d profiles=%s present=0 link=%s messages=off send=0 notify=0",
+		       address,
+		       owner,
+		       mine,
+		       phone->record.enabled,
+		       profiles,
+		       phone_link_name(phone));
 	return 0;
 }
 
@@ -1097,10 +1417,9 @@ phone_ended(
 	phone->queue_first = 0U;
 	phone->queue_count = 0U;
 	phone->encrypted = 0;
-	phone->state = BTD_PHONE_NONE;
 
-	/* Succeeded: the HID host's links are all its own again. */
-	btd_hid_set_limit(phone->hid, BTD_HID_MAX);
+	/* Succeeded: no phone (the HID host's limit follows the record, not the link: ws197-p003 section 3.4). */
+	phone->state = BTD_PHONE_NONE;
 }
 
 /*
@@ -1707,4 +2026,163 @@ phone_put16(
 	/* The two bytes. */
 	bytes[0] = (uint8_t)(value & 0xffU);
 	bytes[1] = (uint8_t)(value >> 8);
+}
+
+/*
+ * Writes the owner's record of a phone the pairing hands over (ws197-p003
+ * section 3.2, steps 6 to 9): no other phone's valid record, no other
+ * owner's record of this phone; the same owner's profiles are kept and the
+ * link is wanted again; invalid records of other phones go.  Returns 0
+ * with the record kept, or an errno value with *why.
+ */
+static int
+phone_take_record(
+	struct btd_phone *phone,
+	const struct btd_pair_handoff *handoff,
+	const char **why)
+{
+	struct btd_phonerec records[BTD_PHONEREC_LIST_MAX];
+	int valids[BTD_PHONEREC_LIST_MAX];
+	struct btd_phonerec record;
+	unsigned profiles;
+	unsigned count;
+	unsigned index;
+	int same;
+	int error;
+
+	/* The records are the controller's. */
+	if (!phone->session->have_address) {
+		*why = "store";
+		return ENXIO;
+	}
+
+	/* The records there are. */
+	error = btd_phonerec_list(phone->keys_folder, phone->session->address, records, BTD_PHONEREC_LIST_MAX, &count);
+	if (error != 0) {
+		*why = "store";
+		return error;
+	}
+
+	/* Each valid one: another phone's, or this phone's of another owner, refuses; the same owner's profiles are kept. */
+	profiles = BTD_PHONEREC_PROFILES;
+	for (index = 0U; index < count; index++) {
+		valids[index] = btd_phonerec_valid(phone->keys_folder, phone->session->address, &records[index], phone->hooks.account, phone->hooks.context);
+		if (!valids[index])
+			continue;
+
+		/* Another phone is the one already (one phone, Q1). */
+		same = memcmp(records[index].address, handoff->address, BTD_ADDRESS_BYTES);
+		if (same != 0) {
+			*why = "other-phone";
+			return EEXIST;
+		}
+
+		/* This phone is another owner's (the check before the pairing, made again: section 3.2's 7). */
+		if (records[index].uid != handoff->uid) {
+			*why = "owned";
+			return EPERM;
+		}
+
+		/* The same owner paired it again: its profiles stay. */
+		profiles = records[index].profiles;
+	}
+
+	/* The record: the owner, the profiles, wanted (a pairing again means "use it", review-2 n8). */
+	memset(&record, 0, sizeof(record));
+	memcpy(record.address, handoff->address, BTD_ADDRESS_BYTES);
+	record.uid = handoff->uid;
+	record.profiles = profiles;
+	record.enabled = 1;
+
+	/* The owner's account name, which tells a reused uid later. */
+	error = phone->hooks.account(phone->hooks.context, handoff->uid, record.user, sizeof(record.user));
+	if (error != 0) {
+		*why = "store";
+		return error;
+	}
+
+	/* Written (a name the record cannot keep is refused here). */
+	error = btd_phonerec_write(phone->keys_folder, phone->session->address, &record);
+	if (error != 0) {
+		*why = "store";
+		return error;
+	}
+
+	/* Invalid records of other phones go: they own nothing and would stand beside this one. */
+	for (index = 0U; index < count; index++) {
+		same = memcmp(records[index].address, handoff->address, BTD_ADDRESS_BYTES);
+		if (same == 0 || valids[index])
+			continue;
+		(void)btd_phonerec_forget(phone->keys_folder, phone->session->address, records[index].address);
+	}
+
+	/* Succeeded: the record is the phone link's. */
+	phone->record = record;
+	phone->have_record = 1;
+	phone->record_valid = 1;
+	return 0;
+}
+
+/* Sets the HID host's limit from the record (ws197-p003 section 3.4): one link fewer while a valid record is on. */
+static void
+phone_limit(
+	struct btd_phone *phone)
+{
+	unsigned limit;
+
+	/* Six, or five for a phone that is wanted. */
+	limit = BTD_HID_MAX;
+	if (phone->have_record && phone->record_valid && phone->record.enabled)
+		limit = BTD_PHONE_HID_LIMIT;
+
+	/* Succeeded: the HID host's limit. */
+	btd_hid_set_limit(phone->hid, limit);
+}
+
+/* Names the phone's link for PHONE SHOW: none, paging, securing, ready or closing. */
+static const char *
+phone_link_name(
+	const struct btd_phone *phone)
+{
+	/* Each state's name. */
+	switch (phone->state) {
+	case BTD_PHONE_READY:
+		return "ready";
+	case BTD_PHONE_CLOSING:
+		return "closing";
+	default:
+		break;
+	}
+
+	/* No link. */
+	return "none";
+}
+
+/* Writes the profiles on as "m,c,h" (each letter when on), or "-" for none. */
+static void
+phone_profiles_text(
+	unsigned profiles,
+	char *text,
+	size_t size)
+{
+	size_t used;
+
+	/* Each profile on, in order. */
+	used = 0U;
+	text[0] = '\0';
+	if ((profiles & BTD_PHONEREC_MESSAGES) != 0U)
+		used += (size_t)snprintf(text + used, size - used, "%s", "m,");
+	if ((profiles & BTD_PHONEREC_CONTACTS) != 0U)
+		used += (size_t)snprintf(text + used, size - used, "%s", "c,");
+	if ((profiles & BTD_PHONEREC_CALLS) != 0U)
+		used += (size_t)snprintf(text + used, size - used, "%s", "h,");
+
+	/* None. */
+	if (used == 0U) {
+		(void)snprintf(text, size, "%s", "-");
+		return;
+	}
+
+	/* The last comma goes. */
+	text[used - 1U] = '\0';
 }

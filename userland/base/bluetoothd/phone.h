@@ -32,6 +32,7 @@
 #include "userland/base/bluetoothd/l2cap.h"
 #include "userland/base/bluetoothd/obex.h"
 #include "userland/base/bluetoothd/pair.h"
+#include "userland/base/bluetoothd/phonerec.h"
 #include "userland/base/bluetoothd/rfcomm.h"
 #include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/sdp.h"
@@ -72,6 +73,16 @@
 
 /* Tells the end of a probe: "PROBE ..." or "ERROR WHY". */
 typedef void (*btd_phone_answer_fn)(void *context, const char *line);
+
+/*
+ * What the phone link asks of the daemon (ws197-p003): the name of a
+ * uid's account, which tells whether the owner of a record is still the
+ * account that made it.
+ */
+struct btd_phone_hooks {
+	void *context;
+	btd_phonerec_account_fn account;
+};
 
 /* One L2CAP frame waiting for the session: its channel (the phone's end of it) and payload. */
 struct btd_phone_frame {
@@ -117,8 +128,20 @@ struct btd_phone {
 	struct btd_router *router;
 	struct btd_hid *hid;
 	const struct btd_sdps_db *db;
+	const char *keys_folder;
+	struct btd_phone_hooks hooks;
 	btd_phone_answer_fn answer;
 	void *answer_context;
+
+	/*
+	 * The record of the phone used as a phone (ws197-p003 section 3),
+	 * read when the controller opens and kept as it is written: whether
+	 * there is one, whether it is valid (an invalid record owns nothing),
+	 * and the record.
+	 */
+	int have_record;
+	int record_valid;
+	struct btd_phonerec record;
 
 	/*
 	 * The phone: where its link is, its device, its handle, who paired
@@ -172,7 +195,12 @@ struct btd_phone {
 	unsigned refused;
 };
 
-void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, const struct btd_sdps_db *db, btd_phone_answer_fn answer, void *context);
+void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, const struct btd_sdps_db *db, const char *keys_folder, const struct btd_phone_hooks *hooks, btd_phone_answer_fn answer, void *context);
+int btd_phone_load(struct btd_phone *phone);
+const char *btd_phone_pair_check(struct btd_phone *phone, const uint8_t *address, uid_t uid, int phone_pairing, int seated);
+int btd_phone_link_set(struct btd_phone *phone, const uint8_t *address, uid_t uid, int on, int profiles);
+int btd_phone_forget(struct btd_phone *phone, const uint8_t *address, uid_t uid);
+int btd_phone_show(const struct btd_phone *phone, uid_t uid, int permitted, char *line, size_t size);
 int btd_phone_handoff(void *context, const struct btd_pair_handoff *handoff, const char **why);
 int btd_phone_wants(void *context, const uint8_t *address);
 int btd_phone_claims(void *context, const uint8_t *address);

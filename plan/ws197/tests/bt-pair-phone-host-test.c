@@ -27,9 +27,9 @@
  *              asked, PAIRED ends with phone=0 why=...; without the phone
  *              link's hook why=unsupported; an ordinary pairing's line has
  *              no phone=
- *   keys       a phone's pairing refuses a stored Just Works key (Negative
- *              Reply) and takes an authenticated one; an ordinary pairing
- *              takes the Just Works key as before
+ *   keys       a phone's pairing refuses a stored key, Just Works or
+ *              authenticated (Negative Reply, ws197-p003 N2); an ordinary
+ *              pairing takes the stored key as before
  *   le         a phone's pairing of an LE address is refused (EINVAL)
  *
  *   plan/ws197/tests/bt-phone-host-test.sh KEYS_FOLDER
@@ -1010,7 +1010,7 @@ test_ordinary(void)
 	close_world(&world);
 }
 
-/* The stored key of a phone's pairing: a Just Works one refused, an authenticated one taken; an ordinary pairing takes either. */
+/* The stored key of a phone's pairing: never taken (ws197-p003 N2); an ordinary pairing takes it. */
 static void
 test_keys(void)
 {
@@ -1032,12 +1032,12 @@ test_keys(void)
 	btd_pair_stop(&world.pair, "test");
 	close_world(&world);
 
-	/* A phone's pairing with a stored authenticated key: Reply. */
+	/* A phone's pairing with a stored authenticated key: Negative Reply too, the numbers compared anew (ws197-p003 section 3.2, review-2 N2). */
 	store_key(TEST_KEY_MITM);
 	open_world(&world);
 	run_to_key(&world, 1);
-	check(commands_of(&world, TEST_KEY_REPLY) == 1U, "keys: a phone's pairing takes a stored authenticated key");
-	check(commands_of(&world, TEST_KEY_NEGATIVE) == 0U, "keys: no Negative Reply then");
+	check(commands_of(&world, TEST_KEY_NEGATIVE) == 1U, "keys: a phone's pairing refuses a stored authenticated key too");
+	check(commands_of(&world, TEST_KEY_REPLY) == 0U, "keys: the authenticated key not given");
 	btd_pair_stop(&world.pair, "test");
 	close_world(&world);
 	forget_key();

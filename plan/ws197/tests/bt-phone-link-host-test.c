@@ -29,15 +29,26 @@
  *              counted, lost signalling ends the link; the link's end
  *              gives the HID host its links back
  *   snoop      a phone's ACL packet hidden: the headers kept, the rest zero
+ *   records    ws197-p003 section 3: the handoff writes the owner's record
+ *              (another phone's valid record and another owner's refuse,
+ *              an invalid one goes), the pairing's check (owned,
+ *              phone-seat, root), PHONE LINK, PHONE SHOW, FORGET, and the
+ *              load (a record without its bond goes, two valid ones are
+ *              neither used); the HID host's limit follows the record
+ *
+ * Each world has a new folder of bonds and records under the folder the
+ * script gives.
  *
  *   plan/ws197/tests/bt-phone-host-test.sh
  */
 
 #include "userland/base/bluetoothd/hid.h"
+#include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/l2cap.h"
 #include "userland/base/bluetoothd/obex.h"
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/phone.h"
+#include "userland/base/bluetoothd/phonerec.h"
 #include "userland/base/bluetoothd/rfcomm.h"
 #include "userland/base/bluetoothd/router.h"
 #include "userland/base/bluetoothd/sdps.h"
@@ -50,6 +61,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -69,6 +81,11 @@
 #define TEST_HANDLE		0x002aU
 #define TEST_PHONE		0x51U
 #define TEST_UID		1001U
+
+/* Another account's uid, the controller's last address byte, and another phone's. */
+#define TEST_OTHER_UID		1002U
+#define TEST_CONTROLLER		0x10U
+#define TEST_SECOND_PHONE	0x61U
 
 /* The phone's MAS server channel. */
 #define TEST_MAS_CHANNEL	5U
@@ -138,6 +155,13 @@ struct world {
 /* The run's world, one at a time; static for its size. */
 static struct world world;
 
+/* The folder the script gives, and the world's own folder of bonds and records under it. */
+static const char *base_folder;
+static char folder[512];
+
+/* The name of TEST_UID's account the hook gives (changed to tell a reused uid). */
+static char account_name[BTD_PHONEREC_USER_MAX];
+
 static void check(int condition, const char *what);
 static void open_world(void);
 static void close_world(void);
@@ -170,19 +194,35 @@ static void test_taken(void);
 static void test_probe(void);
 static void test_notices(void);
 static void test_snoop(void);
+static void test_records(void);
+static int hook_account(void *context, uid_t uid, char *name, size_t size);
+static void write_bond(uint8_t last, uint8_t key_type);
+static void write_record(uint8_t last, uid_t uid, const char *user, int enabled);
 
 /*
  * Runs every part and reports the checks.
  */
 int
-main(void)
+main(
+	int argc,
+	char **argv)
 {
+	/* The folder for the bonds and records. */
+	if (argc < 2) {
+		fprintf(stderr, "usage: bt-phone-link-host-test FOLDER\n");
+		return 2;
+	}
+
+	/* Kept for each world. */
+	base_folder = argv[1];
+
 	/* Each part. */
 	test_refusals();
 	test_taken();
 	test_probe();
 	test_notices();
 	test_snoop();
+	test_records();
 
 	/* The count of what failed. */
 	printf("bt-phone-link-host-test: %u checks, %u failed\n", checks, failures);
@@ -214,8 +254,10 @@ static void
 open_world(void)
 {
 	struct btd_hid_hooks hooks;
+	struct btd_phone_hooks phone_hooks;
 	struct btd_router_phone owner;
 	struct btd_link_count *link;
+	char *made;
 	int ends[2];
 	int status;
 
@@ -260,9 +302,24 @@ open_world(void)
 	hooks.answer = no_told;
 	btd_hid_init(&world.hid, &world.session, "/nonexistent", &world.router, &hooks);
 
+	/* The world's own folder of bonds and records. */
+	(void)snprintf(folder, sizeof(folder), "%s/phone.XXXXXX", base_folder);
+	made = mkdtemp(folder);
+	if (made == NULL) {
+		perror("mkdtemp");
+		exit(2);
+	}
+
+	/* The controller's address, which names the records' folder, and TEST_UID's account. */
+	world.session.have_address = 1;
+	make_address(world.session.address, TEST_CONTROLLER);
+	(void)snprintf(account_name, sizeof(account_name), "%s", "tester");
+
 	/* The phone link, the router's owner of the phone's link. */
 	btd_sdps_db_init(&world.records);
-	btd_phone_init(&world.phone, &world.session, &world.router, &world.hid, &world.records, hook_answer, NULL);
+	phone_hooks.context = NULL;
+	phone_hooks.account = hook_account;
+	btd_phone_init(&world.phone, &world.session, &world.router, &world.hid, &world.records, folder, &phone_hooks, hook_answer, NULL);
 	owner.context = &world.phone;
 	owner.wants = btd_phone_wants;
 	owner.claims = btd_phone_claims;
@@ -930,6 +987,7 @@ hand_over(
 	bond.have_link_key = 1;
 	bond.link_key_type = key_type;
 	bond.key_size = (uint8_t)key_size;
+	(void)btd_keys_write(folder, world.session.address, &bond);
 
 	/* What the pairing hands over. */
 	make_address(address, TEST_PHONE);
@@ -1132,7 +1190,7 @@ test_notices(void)
 	ended[5] = (uint8_t)(TEST_HANDLE >> 8);
 	ended[6] = 0x13U;
 	btd_router_handle(&world.router, &world.session, ended, sizeof(ended));
-	check(world.phone.state == BTD_PHONE_NONE && world.hid.limit == BTD_HID_MAX, "notices: the link's end");
+	check(world.phone.state == BTD_PHONE_NONE && world.hid.limit == BTD_PHONE_HID_LIMIT, "notices: the link's end (the HID host's limit follows the record)");
 	check(btd_router_owner(&world.router, TEST_HANDLE) == BTD_OWNER_NONE, "notices: the route gone");
 	close_world();
 }
@@ -1157,4 +1215,212 @@ test_snoop(void)
 	length = btd_snoop_hide(continuing, sizeof(continuing), out, sizeof(out));
 	same = memcmp(out, continuing, 5U);
 	check(length == sizeof(continuing) && same == 0 && out[5] == 0U && out[8] == 0U, "snoop: a continuing packet's data zero");
+}
+
+/*
+ * The owner's record (ws197-p003 section 3): written by the handoff,
+ * checked before a pairing, switched by PHONE LINK, shown, forgotten, and
+ * read when the controller opens.
+ */
+static void
+test_records(void)
+{
+	struct btd_phonerec record;
+	uint8_t address[BTD_ADDRESS_BYTES];
+	uint8_t second[BTD_ADDRESS_BYTES];
+	char line[256];
+	const char *refusal;
+	const char *why;
+	int taken;
+	int error;
+
+	/* Another phone's valid record: the handoff refuses. */
+	open_world();
+	make_address(address, TEST_PHONE);
+	make_address(second, TEST_SECOND_PHONE);
+	write_bond(TEST_SECOND_PHONE, TEST_KEY_MITM);
+	write_record(TEST_SECOND_PHONE, TEST_UID, "tester", 1);
+	taken = hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	check(!taken && why != NULL && strcmp(why, "other-phone") == 0, "records: another phone's valid record refuses");
+	check(btd_router_owner(&world.router, TEST_HANDLE) == BTD_OWNER_NONE, "records: the route not taken");
+
+	/* The uid's account renamed: that record is invalid, does not refuse, and goes; the new one has the new name. */
+	(void)snprintf(account_name, sizeof(account_name), "%s", "renamed");
+	taken = hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	check(taken == 1, "records: an invalid record of another phone does not refuse");
+	error = btd_phonerec_read(folder, world.session.address, second, &record);
+	check(error == ENOENT, "records: the invalid record of another phone goes");
+	error = btd_phonerec_read(folder, world.session.address, address, &record);
+	check(error == 0 && record.uid == TEST_UID && strcmp(record.user, "renamed") == 0, "records: the handoff writes the owner's record");
+	check(error == 0 && record.enabled == 1 && record.profiles == BTD_PHONEREC_PROFILES, "records: wanted, every profile on");
+	check(world.phone.have_record && world.phone.record_valid && world.hid.limit == BTD_PHONE_HID_LIMIT, "records: kept, the HID host's limit five");
+	close_world();
+
+	/* This phone's record of another owner: the handoff refuses. */
+	open_world();
+	make_address(address, TEST_PHONE);
+	write_bond(TEST_PHONE, TEST_KEY_MITM);
+	write_record(TEST_PHONE, TEST_OTHER_UID, "other", 1);
+	taken = hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	check(!taken && why != NULL && strcmp(why, "owned") == 0, "records: another owner's phone refuses");
+
+	/* The check before a pairing: another's phone, the seat, root. */
+	refusal = btd_phone_pair_check(&world.phone, address, TEST_UID, 0, 1);
+	check(refusal != NULL && strcmp(refusal, "owned") == 0, "records: a pairing of another owner's phone refused");
+	refusal = btd_phone_pair_check(&world.phone, address, 0, 0, 0);
+	check(refusal == NULL, "records: root pairs it");
+	refusal = btd_phone_pair_check(&world.phone, address, TEST_OTHER_UID, 1, 0);
+	check(refusal != NULL && strcmp(refusal, "phone-seat") == 0, "records: a phone's pairing off the seat refused");
+	refusal = btd_phone_pair_check(&world.phone, address, TEST_OTHER_UID, 1, 1);
+	check(refusal == NULL, "records: the owner at the seat pairs it");
+
+	/* PHONE LINK: another uid refused; the owner turns it off, then on with messages alone. */
+	(void)btd_phone_load(&world.phone);
+	error = btd_phone_link_set(&world.phone, address, TEST_UID, 0, -1);
+	check(error == EPERM, "records: PHONE LINK by another refused");
+	error = btd_phone_link_set(&world.phone, address, TEST_OTHER_UID, 0, -1);
+	check(error == 0 && world.hid.limit == BTD_HID_MAX, "records: off, the HID host's links all its own");
+	error = btd_phonerec_read(folder, world.session.address, address, &record);
+	check(error == 0 && record.enabled == 0 && record.profiles == BTD_PHONEREC_PROFILES, "records: off written, the profiles kept");
+	error = btd_phone_link_set(&world.phone, address, TEST_OTHER_UID, 1, (int)BTD_PHONEREC_MESSAGES);
+	check(error == 0 && world.hid.limit == BTD_PHONE_HID_LIMIT, "records: on again");
+	error = btd_phonerec_read(folder, world.session.address, address, &record);
+	check(error == 0 && record.enabled == 1 && record.profiles == BTD_PHONEREC_MESSAGES, "records: on written with messages alone");
+	make_address(second, TEST_SECOND_PHONE);
+	error = btd_phone_link_set(&world.phone, second, 0, 1, -1);
+	check(error == ENOENT, "records: PHONE LINK of a device without a record");
+
+	/* PHONE SHOW: the owner sees it whole, another the address and the switch, a stranger nothing. */
+	error = btd_phone_show(&world.phone, TEST_OTHER_UID, 1, line, sizeof(line));
+	check(error == 0 && strstr(line, "owner=1002 mine=1 enabled=1 profiles=m ") != NULL, "records: SHOW to the owner");
+	error = btd_phone_show(&world.phone, TEST_UID, 1, line, sizeof(line));
+	check(error == 0 && strstr(line, "mine=0 enabled=1") != NULL && strstr(line, "owner=") == NULL, "records: SHOW to another");
+	error = btd_phone_show(&world.phone, TEST_UID, 0, line, sizeof(line));
+	check(error == ENOENT, "records: SHOW to a stranger");
+
+	/* FORGET: another refused, the owner's goes. */
+	error = btd_phone_forget(&world.phone, address, TEST_UID);
+	check(error == EPERM, "records: FORGET by another refused");
+	error = btd_phone_forget(&world.phone, address, TEST_OTHER_UID);
+	check(error == 0 && !world.phone.have_record && world.hid.limit == BTD_HID_MAX, "records: FORGET by the owner");
+	error = btd_phonerec_read(folder, world.session.address, address, &record);
+	check(error == ENOENT, "records: the file gone");
+	error = btd_phone_forget(&world.phone, address, TEST_OTHER_UID);
+	check(error == ENOENT, "records: FORGET of none");
+
+	/* An invalid record (its account renamed) is forgotten by anyone. */
+	write_record(TEST_PHONE, TEST_UID, "tester", 1);
+	(void)snprintf(account_name, sizeof(account_name), "%s", "renamed");
+	error = btd_phone_forget(&world.phone, address, TEST_OTHER_UID);
+	check(error == 0, "records: an invalid record forgotten by anyone");
+	close_world();
+
+	/* The load: a record without its bond goes. */
+	open_world();
+	make_address(second, TEST_SECOND_PHONE);
+	write_record(TEST_SECOND_PHONE, TEST_UID, "tester", 1);
+	error = btd_phone_load(&world.phone);
+	check(error == 0 && !world.phone.have_record, "records: load without records");
+	error = btd_phonerec_read(folder, world.session.address, second, &record);
+	check(error == ENOENT, "records: a record without its bond pruned");
+
+	/* Two valid records: neither used. */
+	write_bond(TEST_PHONE, TEST_KEY_MITM);
+	write_record(TEST_PHONE, TEST_UID, "tester", 1);
+	write_bond(TEST_SECOND_PHONE, TEST_KEY_MITM);
+	write_record(TEST_SECOND_PHONE, TEST_UID, "tester", 1);
+	error = btd_phone_load(&world.phone);
+	check(error == EEXIST && !world.phone.have_record && world.hid.limit == BTD_HID_MAX, "records: two valid records, neither used");
+
+	/* One forgotten by root: the other is the phone. */
+	error = btd_phone_forget(&world.phone, second, 0);
+	check(error == 0, "records: root forgets one");
+	error = btd_phone_load(&world.phone);
+	check(error == 0 && world.phone.have_record && world.phone.record_valid && world.hid.limit == BTD_PHONE_HID_LIMIT, "records: the other loaded");
+
+	/* A Just Works bond makes its record invalid: shown as such. */
+	write_bond(TEST_PHONE, TEST_KEY_JUST_WORKS);
+	error = btd_phone_load(&world.phone);
+	check(error == 0 && world.phone.have_record && !world.phone.record_valid && world.hid.limit == BTD_HID_MAX, "records: a Just Works bond's record invalid");
+	error = btd_phone_show(&world.phone, 0, 1, line, sizeof(line));
+	check(error == 0 && strstr(line, "owner=invalid") != NULL, "records: SHOW of an invalid record");
+	close_world();
+}
+
+/* The phone link's account hook: TEST_UID's account (by its current name) and TEST_OTHER_UID's "other". */
+static int
+hook_account(
+	void *context,
+	uid_t uid,
+	char *name,
+	size_t size)
+{
+	UNUSED_PARAMETER(context);
+
+	/* TEST_UID's. */
+	if (uid == TEST_UID) {
+		(void)snprintf(name, size, "%s", account_name);
+		return 0;
+	}
+
+	/* TEST_OTHER_UID's. */
+	if (uid == TEST_OTHER_UID) {
+		(void)snprintf(name, size, "%s", "other");
+		return 0;
+	}
+
+	/* No such account. */
+	return ENOENT;
+}
+
+/* Writes a bond of a phone (its address's last byte) with a key of a type. */
+static void
+write_bond(
+	uint8_t last,
+	uint8_t key_type)
+{
+	struct btd_bond bond;
+	int error;
+
+	/* The bond. */
+	memset(&bond, 0, sizeof(bond));
+	make_address(bond.address, last);
+	bond.type = BTD_ADDRESS_BREDR;
+	bond.have_link_key = 1;
+	bond.link_key_type = key_type;
+	bond.key_size = 16U;
+
+	/* Written, or the test cannot run. */
+	error = btd_keys_write(folder, world.session.address, &bond);
+	if (error != 0) {
+		fprintf(stderr, "btd_keys_write: %s\n", strerror(error));
+		exit(2);
+	}
+}
+
+/* Writes a phone's record (its address's last byte) of an owner, every profile on. */
+static void
+write_record(
+	uint8_t last,
+	uid_t uid,
+	const char *user,
+	int enabled)
+{
+	struct btd_phonerec record;
+	int error;
+
+	/* The record. */
+	memset(&record, 0, sizeof(record));
+	make_address(record.address, last);
+	record.uid = uid;
+	(void)snprintf(record.user, sizeof(record.user), "%s", user);
+	record.profiles = BTD_PHONEREC_PROFILES;
+	record.enabled = enabled;
+
+	/* Written, or the test cannot run. */
+	error = btd_phonerec_write(folder, world.session.address, &record);
+	if (error != 0) {
+		fprintf(stderr, "btd_phonerec_write: %s\n", strerror(error));
+		exit(2);
+	}
 }

@@ -150,7 +150,6 @@ static int pair_offer_phone(struct btd_pair *pair, const struct btd_bond *bond);
 static void pair_refuse_pending(struct btd_pair *pair);
 static void pair_forget_link(struct btd_pair *pair);
 static int pair_phone_accept(void *context, uint16_t handle, uint16_t psm, uint16_t *result, uint16_t *status);
-static int pair_key_authenticated(uint8_t key_type);
 static void pair_page_over(struct btd_pair *pair);
 static void pair_notice(struct btd_pair *pair, const uint8_t *packet);
 static int pair_ours(const struct btd_pair *pair, const uint8_t *address);
@@ -1086,7 +1085,6 @@ pair_key_request(
 	struct btd_pair *pair,
 	const uint8_t *address)
 {
-	int authenticated;
 	int ours;
 
 	/* Another device, or no stored key: Negative Reply. */
@@ -1096,9 +1094,13 @@ pair_key_request(
 		return;
 	}
 
-	/* A phone's pairing with a stored key nobody confirmed: Negative Reply, and the pairing runs anew. */
-	authenticated = pair_key_authenticated(pair->stored.link_key_type);
-	if (pair->phone && !authenticated) {
+	/*
+	 * A phone's pairing never uses the stored key: Negative Reply, and the
+	 * numbers are compared anew, so the phone shows the pairing to its
+	 * owner and nobody takes a bonded phone silently (ws197-p003 section
+	 * 3.2, review-2 N2).
+	 */
+	if (pair->phone) {
 		pair_reply(pair, PAIR_LINK_KEY_NEGATIVE, address, NULL, 0U);
 		return;
 	}
@@ -2059,21 +2061,6 @@ pair_notice(
 	/* Succeeded: the frame dropped, the pairing stopped. */
 	pair->reassembly.active = 0;
 	btd_pair_stop(pair, "lost-packets");
-}
-
-/* Tells whether a BR/EDR link key's type says the key was made with MITM protection (Core Vol 4 Part E §7.7.24). */
-static int
-pair_key_authenticated(
-	uint8_t key_type)
-{
-	/* Authenticated P-192 and authenticated P-256. */
-	if (key_type == PAIR_KEY_P192_MITM)
-		return 1;
-	if (key_type == PAIR_KEY_P256_MITM)
-		return 1;
-
-	/* Just Works, legacy and debug keys. */
-	return 0;
 }
 
 /* Tells whether an address (least significant byte first) is the pairing's device while a pairing runs. */
