@@ -206,6 +206,18 @@ static unsigned main_anchor_column;
 static unsigned long main_anchor_line;
 
 /*
+ * Whether the last click was a touch pad's tap: the compositor gives a
+ * tap's press and release at once, with the same time (a button pressed
+ * by a hand is held for some milliseconds).  A press soon after a tap may
+ * be a double tap or a tap-and-drag, which the compositor gives as the
+ * tap's click and then a held press (BUG-276); main_tap_drag says the press
+ * held now came that way, so that its first move off the cell makes it the
+ * drag of characters the user meant, not a double click's drag by words.
+ */
+static int main_last_tap;
+static int main_tap_drag;
+
+/*
  * The unit a held selection grows by (ws035-p111): 1 a cell (a click), 2 a
  * word (a double click), 3 a line (a triple click); the word or line the
  * double or triple click chose, which a drag keeps selected while it adds
@@ -289,7 +301,7 @@ static void main_pointer(void);
 static void main_pointer_press(const struct terminal_pointer_event *event);
 static void main_primary_paste(void);
 static void main_pointer_motion(const struct terminal_pointer_event *event);
-static void main_pointer_release(void);
+static void main_pointer_release(const struct terminal_pointer_event *event);
 static void main_cell(int32_t x, int32_t y, unsigned *column, unsigned long *line);
 static void main_range(unsigned from_column, unsigned long from_line, unsigned to_column, unsigned long to_line);
 static int main_word_character(unsigned column, unsigned long line);
@@ -1857,7 +1869,7 @@ main_pointer(void)
 		else if (event->kind == TERMINAL_POINTER_MOTION)
 			main_pointer_motion(event);
 		else
-			main_pointer_release();
+			main_pointer_release(event);
 	}
 
 	/* Succeeded: all taken. */
@@ -1925,6 +1937,11 @@ main_pointer_press(
 		main_clicks = 1U;
 		return;
 	}
+
+	/* A second press soon after a tap may be a tap-and-drag: decided by its first move (BUG-276). */
+	main_tap_drag = 0;
+	if (again && main_clicks == 1U && main_last_tap)
+		main_tap_drag = 1;
 
 	/* How many clicks, up to three (a fourth starts again at one). */
 	if (again)
@@ -2049,6 +2066,8 @@ main_pointer_motion(
 {
 	char text[4096];
 	size_t length;
+	unsigned column;
+	unsigned long line;
 	int32_t dx;
 	int32_t dy;
 	int32_t top;
@@ -2072,6 +2091,24 @@ main_pointer_motion(
 		return;
 	main_pointer_x = event->x;
 	main_pointer_y = event->y;
+
+	/*
+	 * A tap-and-drag that leaves its cell is a drag of characters from the
+	 * tapped cell, not a double click's drag by words (BUG-276: a touch
+	 * pad's tap then a finger moved, where a hand would press the pad).
+	 */
+	if (main_tap_drag) {
+		main_cell(event->x, event->y, &column, &line);
+		if (column != main_click_column || line != main_click_line) {
+			main_tap_drag = 0;
+			main_clicks = 1U;
+			main_unit = 1U;
+			main_anchor_column = main_click_column;
+			main_anchor_line = main_click_line;
+			main_screen->range = 0;
+			main_screen->changed = 1;
+		}
+	}
 
 	/*
 	 * Past the grid's top the view scrolls back into the scrollback, past
@@ -2201,10 +2238,17 @@ main_scroll(void)
 
 /* A release: a press inside the range that did not drag clears it (a click); a selection ends. */
 static void
-main_pointer_release(void)
+main_pointer_release(
+	const struct terminal_pointer_event *event)
 {
 	/* The edge stops scrolling with the button's release (ws035-p114). */
 	main_edge = 0;
+
+	/* A release at the press's own time ends a touch pad's tap (BUG-276); a held press is a hand's. */
+	main_last_tap = 0;
+	if (event->time == main_click_time)
+		main_last_tap = 1;
+	main_tap_drag = 0;
 
 	/* A click inside the range clears it, and a Shift click later extends from there. */
 	if (main_drag_armed) {
