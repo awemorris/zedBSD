@@ -24,6 +24,9 @@ typedef struct dl_info {
 	void *dli_saddr;
 } Dl_info;
 
+/* POSIX.1-2024's name for the information dladdr() gives. */
+typedef Dl_info Dl_info_t;
+
 void *dlopen(const char *, int);
 void *dlsym(void *, const char *);
 void *dlvsym(void *, const char *, const char *);

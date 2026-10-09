@@ -23,6 +23,14 @@ extern "C" {
  */
 #define RLIM_NLIMITS RLIMIT_NLIMITS
 
+/*
+ * The values a soft or hard limit that cannot be represented reads back as:
+ * every limit fits rlim_t here, so they are RLIM_INFINITY, as the standard
+ * allows.
+ */
+#define RLIM_SAVED_CUR RLIM_INFINITY
+#define RLIM_SAVED_MAX RLIM_INFINITY
+
 int getrlimit(int, struct rlimit *);
 int setrlimit(int, const struct rlimit *);
 int getpriority(int, id_t);

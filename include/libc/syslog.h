@@ -38,6 +38,8 @@ extern "C" {
 #define LOG_PID 0x01
 #define LOG_CONS 0x02
 #define LOG_NDELAY 0x08
+/* Open the log at the first message rather than at openlog(), which is what openlog() does without LOG_NDELAY. */
+#define LOG_ODELAY 0x04
 #define LOG_NOWAIT 0x10
 #define LOG_PERROR 0x20
 #define LOG_MASK(p) (1 << (p))

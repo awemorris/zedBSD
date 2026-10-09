@@ -29,6 +29,8 @@ extern "C" {
 
 #define FTW_PHYS  0x01
 #define FTW_MOUNT 0x02
+/* POSIX.1-2024's name for staying on the file system the walk starts on. */
+#define FTW_XDEV FTW_MOUNT
 #define FTW_DEPTH 0x04
 #define FTW_CHDIR 0x08
 

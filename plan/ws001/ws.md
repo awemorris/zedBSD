@@ -66,6 +66,12 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p043` | [tabs の XCU の形と幅](phase043/phase.md) | in-progress（2026-10-07 P2） | -0、-1・-2、column 1 の `\E[0C` のずれ、幅（COLUMNS・端末・cols）、TERM の既定、複数の operand。host の比較 55/55、zedBSD の build。guest は T1 待ち |
 | `ws001-p044` | [ps の XCU の形](phase044/phase.md) | test-wait（2026-10-09 P1） | -o の field=header（引数の終わりまで）、XCU の field と header、列の幅、選択の和と既定（実効 user と session）、-f の command line、`[dd-]hh:mm:ss`。host 15/15、zedBSD の build。pcpu・etime・実の user・tty の名前は kernel に無く記録。guest は T1 待ち |
 | `ws001-p045` | [POSIX の header の全数の照合と補完](phase045/phase.md) | planned（2026-10-09 Q1、ユーザーの指示） | 全 header の型・定数・宣言を照合し、不足を補う。ws126-p002 の libc の不足が発端 |
+| `ws001-p046` | [memory stream の関数](phase046/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。fmemopen・open_memstream（stdio.h）、open_wmemstream（wchar.h） |
+| `ws001-p047` | [scheduling の関数と時計](phase047/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。sched_get_priority_max/min・sched_getparam/setparam・sched_getscheduler/setschedul |
+| `ws001-p048` | [netdb の network・protocol の database](phase048/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。getprotobyname・getprotobynumber・getprotoent・setprotoent・endprotoent と struct pro |
+| `ws001-p049` | [monetary.h と wordexp.h](phase049/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。<monetary.h>（strfmon・strfmon_l、ssize_t・size_t・locale_t）と <wordexp.h>（wordexp・wor |
+| `ws001-p050` | [complex.h と tgmath.h](phase050/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。<complex.h>（複素数の数学関数 約 70、I・CMPLX ほか）と、それを使う compiler の <tgmath.h> が通ること |
+| `ws001-p051` | [mlock 系と typed memory](phase051/phase.md) | planning（2026-10-09 Q1、ベータ3 以降、未割当） | p045 から分けた大きい関数。mlock・mlockall・munlock・munlockall と MCL_CURRENT・MCL_FUTURE（ML・MLR の option）、posi |
 
 ### q042 pre-merge identifier migration
 

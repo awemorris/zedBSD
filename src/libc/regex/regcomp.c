@@ -1065,8 +1065,9 @@ tre_parse(tre_parse_ctx_t *ctx)
 				ctx->n = tre_ast_new_literal(ctx->mem, EMPTY,
 							     -1, -1);
 			else
+				/* REG_MINIMAL (POSIX.1-2024): every repetition matches as little as it can. */
 				ctx->n = tre_ast_new_iter(ctx->mem, ctx->n, min,
-							  max, 0);
+							  max, (ctx->cflags & REG_MINIMAL) != 0);
 			if (!ctx->n)
 				return REG_ESPACE;
 		}

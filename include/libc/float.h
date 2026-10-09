@@ -41,6 +41,11 @@
 #define LDBL_MIN __LDBL_MIN__
 #define LDBL_MAX __LDBL_MAX__
 #define LDBL_EPSILON __LDBL_EPSILON__
+#define LDBL_DIG __LDBL_DIG__
+#define LDBL_DECIMAL_DIG __LDBL_DECIMAL_DIG__
+#define LDBL_MIN_10_EXP __LDBL_MIN_10_EXP__
+#define LDBL_MAX_10_EXP __LDBL_MAX_10_EXP__
+#define LDBL_TRUE_MIN __LDBL_DENORM_MIN__
 #else
 #define LDBL_MANT_DIG DBL_MANT_DIG
 #define LDBL_MIN_EXP DBL_MIN_EXP
@@ -48,7 +53,15 @@
 #define LDBL_MIN DBL_MIN
 #define LDBL_MAX DBL_MAX
 #define LDBL_EPSILON DBL_EPSILON
+#define LDBL_DIG DBL_DIG
+#define LDBL_DECIMAL_DIG DBL_DECIMAL_DIG
+#define LDBL_MIN_10_EXP DBL_MIN_10_EXP
+#define LDBL_MAX_10_EXP DBL_MAX_10_EXP
+#define LDBL_TRUE_MIN DBL_TRUE_MIN
 #endif
+
+/* The decimal digits that round-trip the widest floating type, long double. */
+#define DECIMAL_DIG LDBL_DECIMAL_DIG
 
 #define FLT_EVAL_METHOD __FLT_EVAL_METHOD__
 

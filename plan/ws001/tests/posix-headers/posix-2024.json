@@ -1279,11 +1279,6 @@
     ],
     "options": [],
     "union": false
-   },
-   "termios": {
-    "members": [],
-    "options": [],
-    "union": false
    }
   },
   "types": {
@@ -2306,11 +2301,7 @@
     "options": []
    }
   },
-  "variables": {
-   "return": {
-    "options": []
-   }
-  }
+  "variables": {}
  },
  "iso646.h": {
   "constants": {
@@ -3446,27 +3437,8 @@
   },
   "macros": {},
   "others": {},
-  "structs": {
-   "iovec": {
-    "members": [],
-    "options": [
-     "XSI"
-    ],
-    "union": false
-   }
-  },
-  "types": {
-   "sigset_t": {
-    "options": [
-     "XSI"
-    ]
-   },
-   "ssize_t": {
-    "options": [
-     "XSI"
-    ]
-   }
-  },
+  "structs": {},
+  "types": {},
   "variables": {}
  },
  "locale.h": {
@@ -5475,9 +5447,6 @@
     "options": []
    },
    "size_t": {
-    "options": []
-   },
-   "ssize_t": {
     "options": []
    }
   },
@@ -11069,27 +11038,10 @@
   "others": {},
   "structs": {},
   "types": {
-   "blksize_t": {
-    "options": []
-   },
-   "cc_t": {
-    "options": []
-   },
    "gid_t": {
     "options": []
    },
    "intptr_t": {
-    "options": []
-   },
-   "long": {
-    "options": [
-     "OB"
-    ]
-   },
-   "mode_t": {
-    "options": []
-   },
-   "nfds_t": {
     "options": []
    },
    "off_t": {
@@ -11100,31 +11052,13 @@
    "pid_t": {
     "options": []
    },
-   "ptrdiff_t": {
-    "options": []
-   },
    "size_t": {
-    "options": []
-   },
-   "speed_t": {
     "options": []
    },
    "ssize_t": {
     "options": []
    },
-   "suseconds_t": {
-    "options": []
-   },
-   "tcflag_t": {
-    "options": []
-   },
    "uid_t": {
-    "options": []
-   },
-   "wchar_t": {
-    "options": []
-   },
-   "wint_t": {
     "options": []
    }
   },

@@ -33,6 +33,13 @@ from pathlib import Path
 # Names the markup gives wrongly, by header: (kind, name) to drop.
 OVERRIDES = {
     "signal.h.html": [("constants", "Any")],
+    # Named in the prose of the limits, the widths or the regoff_t range, not defined by these headers.
+    "inttypes.h.html": [("variables", "return")],
+    "fcntl.h.html": [("structs", "termios")],
+    "limits.h.html": [("structs", "iovec"), ("types", "sigset_t"), ("types", "ssize_t")],
+    "regex.h.html": [("types", "ssize_t")],
+    "unistd.h.html": [("types", name) for name in ("blksize_t", "cc_t", "long", "mode_t", "nfds_t", "ptrdiff_t", "speed_t",
+                                                    "suseconds_t", "tcflag_t", "wchar_t", "wint_t")],
     "stdarg.h.html": [("variables", "argno"), ("variables", "array"), ("functions", "execl"), ("functions", "execv"), ("functions", "while")],
     "stdint.h.html": [("types", "_t"), ("types", "uint24_t"), ("types", "ptrdiff_t"), ("types", "sig_atomic_t"),
                       ("types", "size_t"), ("types", "wchar_t"), ("types", "wint_t")],

@@ -238,6 +238,7 @@ static size_t mount_table_line(const struct kern_mount_info *entry, char *line, 
 static size_t mount_table_append(char *line, size_t size, size_t length, const char *word, int escape);
 static void mount_table_unescape(char *word);
 static int write_all_bytes(int fd, const char *buffer, size_t length);
+static const char *confstr_value(int name);
 
 /*
  * Implements the getopt operation.
@@ -1711,7 +1712,11 @@ fpathconf(
 }
 
 /*
- * Implements the confstr operation.
+ * Gives a configuration string: the utilities' search path, or for a
+ * C-language compilation environment its flags and which environments are
+ * the width-restricted ones (ws001-p045).  Returns the size the whole
+ * string needs, its terminating null included, or 0 with EINVAL for a name
+ * there is no string for.
  */
 size_t
 confstr(
@@ -1719,27 +1724,28 @@ confstr(
 	char *buffer,
 	size_t size)
 {
-	size_t copied;
-	static const char path[] = "/bin:/usr/bin";
+	const char *value;
 	size_t needed;
+	size_t copied;
 
-	/* Validates the current name. */
-	if (name != _CS_PATH) {
+	/* The string of the name. */
+	value = confstr_value(name);
+	if (value == NULL) {
 		errno = EINVAL;
-
-		/* Reports successful completion. */
 		return 0;
 	}
-	needed = sizeof(path);
+	needed = strlen(value) + 1U;
 
-	/* Handles the buffer availability. */
+	/* As much of it as fits, always terminated. */
 	if (buffer != NULL && size != 0) {
-		copied = needed < size ? needed : size;
-		memcpy(buffer, path, copied);
+		copied = needed;
+		if (copied > size)
+			copied = size;
+		memcpy(buffer, value, copied);
 		buffer[copied - 1U] = '\0';
 	}
 
-	/* Returns the computed result. */
+	/* Succeeded: the size the whole string needs. */
 	return needed;
 }
 
@@ -10236,4 +10242,50 @@ write_all_bytes(
 
 	/* Succeeded: everything is on the file. */
 	return 0;
+}
+
+/*
+ * Gives the string of a confstr() name, or NULL for a name there is none
+ * for.  The environments' flags are empty: zedBSD's compiler builds for the
+ * target's one environment by default.
+ */
+static const char *
+confstr_value(
+	int name)
+{
+	/* Each name. */
+	switch (name) {
+	case _CS_PATH:
+		/* Where the standard utilities are. */
+		return "/bin:/usr/bin";
+	case _CS_POSIX_V8_WIDTH_RESTRICTED_ENVS:
+		/* The one environment each target builds for. */
+#ifdef __LP64__
+		return "POSIX_V8_LP64_OFF64";
+#else
+		return "POSIX_V8_ILP32_OFF32";
+#endif
+	case _CS_POSIX_V8_ILP32_OFF32_CFLAGS:
+	case _CS_POSIX_V8_ILP32_OFF32_LDFLAGS:
+	case _CS_POSIX_V8_ILP32_OFF32_LIBS:
+	case _CS_POSIX_V8_ILP32_OFFBIG_CFLAGS:
+	case _CS_POSIX_V8_ILP32_OFFBIG_LDFLAGS:
+	case _CS_POSIX_V8_ILP32_OFFBIG_LIBS:
+	case _CS_POSIX_V8_LP64_OFF64_CFLAGS:
+	case _CS_POSIX_V8_LP64_OFF64_LDFLAGS:
+	case _CS_POSIX_V8_LP64_OFF64_LIBS:
+	case _CS_POSIX_V8_LPBIG_OFFBIG_CFLAGS:
+	case _CS_POSIX_V8_LPBIG_OFFBIG_LDFLAGS:
+	case _CS_POSIX_V8_LPBIG_OFFBIG_LIBS:
+	case _CS_POSIX_V8_THREADS_CFLAGS:
+	case _CS_POSIX_V8_THREADS_LDFLAGS:
+	case _CS_V8_ENV:
+		/* No flags and nothing in the environment: the defaults are the environment, threads included. */
+		return "";
+	default:
+		break;
+	}
+
+	/* No string for that name. */
+	return NULL;
 }

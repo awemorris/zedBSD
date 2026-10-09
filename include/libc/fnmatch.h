@@ -21,6 +21,8 @@ extern "C" {
 #define FNM_FILE_NAME FNM_PATHNAME
 #define FNM_LEADING_DIR 0x08
 #define FNM_CASEFOLD 0x10
+/* POSIX.1-2024's name for matching without regard to case. */
+#define FNM_IGNORECASE FNM_CASEFOLD
 
 int fnmatch(const char *, const char *, int);
 
