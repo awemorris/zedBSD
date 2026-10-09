@@ -672,10 +672,11 @@ struct se_languages {
 	int message_bad;
 };
 
-/* The Users page's password fields: the current password, the new one, the new one again. */
-#define SE_USERS_FIELDS		3
-
-/* Whose fields have the Users page's keyboard: the password card's, or the administration's. */
+/*
+ * Whose fields have the Users page's keyboard: none of the page's (the
+ * password is changed in the popup since WS200, page-users-password.c),
+ * or the administration's.
+ */
 #define SE_USERS_KEYBOARD_PASSWORD	0
 #define SE_USERS_KEYBOARD_ADMIN		1
 
@@ -719,11 +720,8 @@ enum se_admin_mode {
 
 /*
  * The Users page (page-users.c, ws160-p002): the account as the passwd
- * database has it (read once: read), the three password fields (wiped when
- * the change is asked, when Esc empties them and when the window closes),
- * the field with the keyboard, whether the passwords are shown, the change
- * asked and its request's number, and the last answer (bad when it
- * failed).
+ * database has it (read once: read).  The change of the password and of
+ * the sign-in methods are popups since WS200 (struct se_password).
  *
  * The administration (ws089-p026): the user chosen in the list (its row
  * plus one, 0 for none), whose fields have the keyboard
@@ -745,14 +743,6 @@ struct se_users {
 	char selected_name[64];
 	struct se_user_row rows[SE_USERS_LIST_MAX];
 	int row_count;
-	struct kl_field fields[SE_USERS_FIELDS];
-	int focus;
-	int shown;
-	int asked;
-	uint32_t request;
-	char message[SE_MESSAGE];
-	int message_bad;
-
 	int selected;
 	int keyboard;
 	enum se_admin_mode admin_mode;
@@ -806,6 +796,28 @@ struct se_dialog {
 	uint64_t input_ms;
 	void (*act)(struct se_app *app, unsigned action);
 	int (*ready)(const struct se_app *app);
+};
+
+/*
+ * The Users page's popups (WS200, page-users-password.c): the change of
+ * the password (the current one kept from its step to the one that sends
+ * it, wiped then, when the popup closes and when it is left alone) and the
+ * change of the sign-in methods (the methods asked for and the one turned
+ * on or off); the change asked and its request's number.
+ */
+enum se_password_flow {
+	SE_PASSWORD_FLOW_NONE,
+	SE_PASSWORD_FLOW_CHANGE,
+	SE_PASSWORD_FLOW_METHODS
+};
+struct se_password {
+	unsigned flow;
+	unsigned step;
+	struct kl_field current;
+	unsigned methods;
+	unsigned method;
+	int asked;
+	uint32_t request;
 };
 
 /*
@@ -1325,6 +1337,7 @@ struct se_app {
 	struct se_users users;
 	struct se_dialog dialog;
 	struct se_keys keys;
+	struct se_password password;
 
 	/* The Ethernet page's editor of a wired interface (ws089-p022). */
 	struct se_wired wired;
@@ -1587,6 +1600,12 @@ int se_users_admin_press(struct se_app *app, int index);
 int se_users_admin_key(struct se_app *app, const struct se_event *event);
 int se_users_admin_result(struct se_app *app, uint32_t request, int error);
 void se_users_admin_wipe(struct se_users *users);
+
+/* The Users page's password and sign-in methods (page-users-password.c, WS200). */
+int se_password_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+int se_password_press(struct se_app *app, int index);
+int se_password_result(struct se_app *app, uint32_t request, int error);
+void se_password_end(struct se_app *app);
 
 /* The Security Keys page (page-users-keys.c and page-users-pin.c, ws199-p001). */
 int se_keys_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);

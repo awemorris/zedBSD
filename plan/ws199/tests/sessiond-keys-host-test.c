@@ -285,6 +285,16 @@ test_keys(
 	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
 	check(got && strcmp(line, "OK") == 0, "SETOPTIONS 0 0 OK");
 
+	/* SETMETHODS: the methods' word and the password's line, to passkey's set-methods (WS200). */
+	send_line(&exchange, "SETMETHODS password,fido2");
+	send_line(&exchange, "right");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "OK") == 0, "SETMETHODS password,fido2 OK");
+
+	/* A method turned off is told as it is to the greeter and the lock (WS200). */
+	same = strcmp(sessiond_policy_reason("style-off"), "style-off");
+	check(same == 0, "style-off is told as it is");
+
 	/* A key's unlock that did not find the key: not counted, told at once (review-3 R4). */
 	started = sessiond_milliseconds();
 	send_line(&exchange, "UNLOCK fido2");

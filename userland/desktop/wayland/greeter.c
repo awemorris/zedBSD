@@ -2172,6 +2172,14 @@ greeter_refused(
 		return;
 	}
 
+	/* A way to sign in the account turned off (WS200): said, and the styles asked again. */
+	same = strcmp(reason, "style-off");
+	if (same == 0) {
+		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("That way to sign in is turned off. Use another."));
+		greeter_styles_wanted = 1U;
+		return;
+	}
+
 	/* A security key's refusals (ws172-p003). */
 	if (greeter_style == KL_BACKEND_STYLE_KEY) {
 		greeter_key_refused(reason);

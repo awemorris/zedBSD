@@ -64,6 +64,7 @@ struct kl_backend {
 	struct kl_backend_key_info session_key_info;
 	unsigned session_key_pin;
 	unsigned session_key_touch;
+	unsigned session_methods;
 	unsigned session_key_removed;
 	struct kl_backend_key_owner session_key_owner;
 	int events_descriptor;

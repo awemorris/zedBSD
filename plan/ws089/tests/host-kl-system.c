@@ -56,6 +56,8 @@ unsigned
 kl_system_capabilities(const struct kl_system *system)
 {
 	(void)system;
+	if (getenv("HOST_METHODS") != NULL)
+		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_KEY_OPS | KL_SYSTEM_HAS_METHODS;
 	if (getenv("HOST_KEYS") != NULL && getenv("HOST_KEY_OPS") != NULL)
 		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_KEY_OPS;
 	if (getenv("HOST_KEYS") != NULL)
@@ -143,13 +145,44 @@ kl_system_account_set_pin(struct kl_system *system, const char *current, const c
 	return ENOTSUP;
 }
 
-/* What the user has enrolled (ws172-p002): never told by the stand-in. */
+/* What the user has enrolled (ws172-p002): told as HOST_ENROLLED says ("PIN KEYS", WS200), else never. */
 int
 kl_system_account_enrolled(const struct kl_system *system, unsigned *pin, unsigned *keys)
 {
+	const char *enrolled;
+
 	(void)system;
 	*pin = 0U;
 	*keys = 0U;
+	enrolled = getenv("HOST_ENROLLED");
+	if (enrolled == NULL || sscanf(enrolled, "%u %u", pin, keys) != 2)
+		return 0;
+	return 1;
+}
+
+/* The sign-in methods (WS200): HOST_METHODS's bits; a change asked is answered with HOST_ACCOUNT_RESULT. */
+int
+kl_system_account_methods(const struct kl_system *system, unsigned *methods)
+{
+	const char *told;
+
+	(void)system;
+	*methods = KL_SYSTEM_METHODS_ALL;
+	told = getenv("HOST_METHODS");
+	if (told == NULL)
+		return 0;
+	*methods = (unsigned)atoi(told);
+	return 1;
+}
+
+int
+kl_system_account_set_methods(struct kl_system *system, const char *password, unsigned methods, uint32_t *request)
+{
+	(void)system;
+	printf("HOST methods password=%zu methods=%u\n", strlen(password), methods);
+	*request = 84U;
+	host_account_request = 84U;
+	host_account_pending = 1;
 	return 0;
 }
 
@@ -307,15 +340,19 @@ kl_system_account_touched(struct kl_system *system, uint32_t *request)
 	return 0;
 }
 
-/* No refusal's word without the administration. */
+/* A refusal's word as HOST_REFUSAL says (WS200), else none. */
 int
 kl_system_account_refusal(const struct kl_system *system, uint32_t request, char *reason, size_t size)
 {
+	const char *word;
+
 	(void)system;
 	(void)request;
-	(void)reason;
-	(void)size;
-	return 0;
+	word = getenv("HOST_REFUSAL");
+	if (word == NULL)
+		return 0;
+	snprintf(reason, size, "%s", word);
+	return 1;
 }
 
 /* Remote Login (ws089-p025): not offered by the stand-in. */

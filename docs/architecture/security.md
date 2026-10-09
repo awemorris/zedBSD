@@ -414,6 +414,24 @@ not touched or taken away is not counted and is answered at once (the key
 counts its own wrong PINs). When an account's last key goes, its key's
 choice goes back to the default.
 
+**Sign-in methods.** The user chooses on Settings' Users page which of the
+password, the PIN and a security key the login and lock screens take (the
+same options line's `methods=password,pin,fido2` or part of it; `set-methods
+NAME PASSWORD METHODS`, checked by the account's password, through sessiond's
+`SETMETHODS`). A method takes effect only while it is set up (a PIN, a key
+registered); when none of the methods that take effect is the password or a
+key, the password takes effect too, because the PIN alone is never the first
+sign-in after a start. So the methods can never shut an account out of the
+screens, and `set-methods` refuses methods without the password or a key, and
+without the password unless the account has a key. passkey answers `styles`
+with the methods that take effect, and refuses `auth` in a method the account
+turned off with `style-off` before it looks at the secret (passkey-fido2 does
+the same for a key, and leaves such an account out of a key's owners). The
+console, `su`, `sudo`, `passwd` and SSH do not ask passkey and always take the
+password, which is how a user who turned the password off and lost the key
+gets back in. `enrolled` tells the methods as bits after `key-touch=`
+(`methods=N`: 1 the password, 2 the PIN, 4 a key).
+
 **The key's owner.** When a key is plugged in or held to a reader while the
 login screen shows (or while the lock screen's card shows, after a swipe),
 the screen asks sessiond whose it is (`KEYOWNER`; passkey's

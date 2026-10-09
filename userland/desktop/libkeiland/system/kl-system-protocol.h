@@ -214,6 +214,8 @@
  *   event   8 keys_changed()                                               since version 25
  *   request 10 set_key_options(uint request, string password, uint key_pin, uint key_touch)  since version 25
  *   event   9 options(uint key_pin, uint key_touch)                        since version 25
+ *   request 11 set_methods(uint request, string password, uint methods)    since version 26 (WS200)
+ *   event   10 methods(uint methods)                                       since version 26
  *   The compositor changes the password of the user it runs as, through
  *   the system (zedBSD: passwd; elsewhere unsupported), on a thread of its
  *   own, and answers ok, denied (the current password is wrong), invalid
@@ -272,6 +274,12 @@
  *   enrolled, whether the user's key asks its PIN to sign in and its touch
  *   to unlock; set_key_options sets them, checked by the user's password
  *   (zedBSD: sessiond's SETOPTIONS), answered as set_pin.
+ *   methods tells, before each options, the methods the login and locked
+ *   screens take for the user (KL_SYSTEM_METHOD_* bits: the password, the
+ *   PIN, a security key; version 26, WS200); set_methods sets them,
+ *   checked by the user's password, the password or a key among them
+ *   (zedBSD: sessiond's SETMETHODS), answered as set_pin.  The console,
+ *   su, sudo and SSH always take the password.
  *
  * kl_system_monitor_v1 (WS134 p012, plan/ws134/design.md section 1.3)
  *   request 0 destroy
@@ -313,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		25U
+#define KL_SYSTEM_MANAGER_VERSION		26U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -400,6 +408,9 @@
 
 /* Since when the account has key_info, key_pin, key_reset and key_cancel, and their events (ws199-p001). */
 #define KL_SYSTEM_SINCE_KEY_OPS			25U
+
+/* Since when the account has set_methods and methods (WS200). */
+#define KL_SYSTEM_SINCE_METHODS			26U
 
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
@@ -680,6 +691,7 @@
 #define KL_SYSTEM_ACCOUNT_KEY_RESET		8U
 #define KL_SYSTEM_ACCOUNT_KEY_CANCEL		9U
 #define KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS	10U
+#define KL_SYSTEM_ACCOUNT_SET_METHODS		11U
 #define KL_SYSTEM_ACCOUNT_EVENT_RESULT		0U
 #define KL_SYSTEM_ACCOUNT_EVENT_REFUSED		1U
 #define KL_SYSTEM_ACCOUNT_EVENT_ENROLLED	2U
@@ -690,6 +702,7 @@
 #define KL_SYSTEM_ACCOUNT_EVENT_REMOVED		7U
 #define KL_SYSTEM_ACCOUNT_EVENT_KEYS_CHANGED	8U
 #define KL_SYSTEM_ACCOUNT_EVENT_OPTIONS		9U
+#define KL_SYSTEM_ACCOUNT_EVENT_METHODS		10U
 #define KL_SYSTEM_KEY_NAME_MAX			63U
 #define KL_SYSTEM_KEY_LABEL_MAX			32U
 #define KL_SYSTEM_KEY_REF_MAX			16U

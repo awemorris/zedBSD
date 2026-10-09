@@ -198,6 +198,8 @@
 		kl_system_account_key_removed;
 		kl_system_account_key_options;
 		kl_system_account_set_key_options;
+		kl_system_account_methods;
+		kl_system_account_set_methods;
 		kl_system_account_refusal;
 		kl_system_monitor_open;
 		kl_system_monitor_take;
