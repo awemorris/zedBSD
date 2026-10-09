@@ -526,6 +526,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「make menuconfigで、Noctはuserland/base/noct/にあるけど、Baseメニューにないようなので、追加してください。base/emacsもBaseメニューに追加です。Emacsの依存はbase/noct/に修正です。」「PackagesメニューからからNoctを削除してください。Baseに移動するためです。」→ WS193 の追加の作業として P1（WS197 の設計より先）。
 - 2026-10-09 ユーザー:「ld.soの変更は承認します。マージしていいですよ。」→ c03fac053 を main に merge（上の保留を取り消し）。ws074 の旧の rtld-dlopen・rtld-probe の試験を削除。T1-507（rtld の回帰）・T1-508（python3-guest）を依頼。
 - 2026-10-09 Q1 判定: P1 の T1-495 の直し c03fac053（src/rtld/rtld.c の dlopen が slash を含む任意の path を開く。BUG-083 で agent が決めた「/lib 以外の絶対 path は断る」を覆す、POSIX の dlopen の形）は、release の image の ld.so を RC の直前に変えないため 10/17 の後に merge（branch agent/p1-rtld）。Python はベータ2 の release に入っていない。merge の時に plan/ws074/tests/rtld-dlopen.sh・rtld-dlopen.c・rtld-probe.c（旧の断りを確かめる、Tools に無い）を削除する。
 - 2026-10-09 ユーザー:「Bluetoothは、SMSのMAP, CallsのHFP, PBAP, を実装したいですが…今はANCSは実装しなくていいですが、見積もりだけでも。」「OBEX, MAP, Integration, PBAP, HFPの順で実装しますか。beta2.mdの必須が終わってからです。」→ [WS197](ws197/ws.md)（約 121 LW、OBEX の下の RFCOMM を p002 に含める）。Q1: 着手は beta2.md の必須の後、code は 10/17 まで保留の branch（release の bluetoothd を RC の後に変えないため）。
