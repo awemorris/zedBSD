@@ -551,6 +551,9 @@ begin(
 	memset(writer, 0, sizeof(*writer));
 	writer->data = storage;
 	writer->capacity = capacity;
+
+	/* The actual native context negotiates opaque allocation capabilities before encoding public external declarations. */
+	writer->external_memory_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 	vulkan_command_begin(writer, opcode);
 	assert(requested == 1 && writer->bytes == sizeof(header));
 	memcpy(header, writer->data, sizeof(header));
