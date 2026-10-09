@@ -27,9 +27,33 @@
 | T1 の未実行の試験 15 本: T1-493・494（再試験）、T1-496 [WS192](ws192/ws.md) パネル、T1-497 [WS193](ws193/ws.md) menuconfig、T1-498 [WS194](ws194/ws.md) prerequisites、T1-495 Python、T1-477〜484・486 | 実装済み・試験待ち | 8 | T1 |
 | 上の試験で出る FAIL の直し | — | 4 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
-| 5330 の UAT（WS192 パネル・BUG-253 蓋・BUG-269 ESP の書き込み・WS183 タップ・WS187 ロック画面・WS161 YubiKey・WS090 の測定・WS177・BUG-222 の速度） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
+| 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）の判定 | ユーザー待ち | —（15 分） | ユーザー |
+
+## UAT の確認項目（ユーザー、5330 の release の image）
+
+迷ったら PNG か一言を Q1 へ。✔ は動けば OK、✘ はその場の様子（何をしたら何が起きたか）を教えてください。
+
+| # | 項目 | 手順（自明でない物だけ） | 期待 |
+| --- | --- | --- | --- |
+| 1 | [WS192](ws192/ws.md) 状態の島の操作パネル | 右上の icon の島を指で tap（mouse の click でも） | 右上に glass のパネル。Wi-Fi の switch、音量の slider と mute、Input の行の tap で言語の切り替え、Wi-Fi の「›」で AP の一覧。外の tap・Esc・島の再 tap で閉じる |
+| 2 | [BUG-188](bugs/BUG-188.md) Wi-Fi の 1 回の tap | Settings → Wi-Fi で保存済みの AP の行を 1 回だけ tap | 接続が始まる（2 回の tap は要らない） |
+| 3 | [BUG-184](bugs/BUG-184.md) Wi-Fi のオフ（直しの後） | Settings → Wi-Fi をオン → オフ | オフにできる |
+| 4 | [BUG-234](bugs/BUG-234.md) Files から program | Files で /bin を開き `ls` を開く | Terminal が開き、ls の出力と終了の案内が残る |
+| 5 | [WS183](ws183/ws.md) touchpad の tap | 1 本指の tap、素早い 2 回の tap、tap の直後に指を置いて動かす | tap はすぐ click（遅れを感じない）、2 回は double click、最後は drag |
+| 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
+| 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
+| 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
+| 9 | [WS083](ws083/ws.md) Vulkan Video（H.264） | T1-435 の後に Q1 が案内。Video Player で H.264 の mp4 を再生 | 映像が出て止まらない。✘ なら 10/16 に OFF |
+| 10 | [BUG-253](bugs/BUG-253.md) 蓋 | HDMI を挿したまま蓋を閉じ、開ける。起動ごとに違うことがあるので 2〜3 回の起動で | 閉じると HDMI へ、開けると戻る |
+| 11 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から USB LAN（ue0）経由で大きい file を scp。Settings の Network で link の速度を見る | 速さを教えてください（前回 950 KB/s）。link の速度が出る |
+| 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
+| 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
+| 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
+| 15 | [WS193](ws193/ws.md) menuconfig（host） | 自分の PC で `make menuconfig` → Build boot image | 新しい階層、進捗の bar と今の対象の名前。できた image が起動 |
+| 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
+| 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
 ## 入れる（間に合わなければ直前で OFF、2026-10-09 ユーザー）
 
