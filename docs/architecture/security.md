@@ -366,6 +366,20 @@ for the assertion. A key that holds none of the credentials answers `no-key`
 without ever seeing the PIN. Keys plugged in or tapped during the attempt are
 asked too.
 
+**A key held to an NFC reader.** passkey-fido2 also opens every smart card
+slot (`/dev/smartcardN`) and hands them to the helper, which powers a card
+and selects its FIDO applet only when it asks it; a slot whose card does not
+answer (a reader's SAM slot, a card that is not a security key) is let go and
+not counted. A card lying on the reader is in the field all the time, and for
+an NFC key being in the field is the user's presence, so a login asks only a
+card that comes to the reader during the attempt: when no USB key answers,
+the screen asks to touch the key or hold it to the reader, and the helper
+waits for a card until the touch's time is nearly out (`timeout` when none
+came). A card already on the reader is not used to log in until it is taken
+away and held there again. Registering counts a card already on the reader as
+the one key (two keys, USB or NFC, are refused), and with no key at all waits
+for one to be held there the same way.
+
 **Registering.** Registration asks for exactly one security key: with two or
 more present it is refused (`many-keys`), so a rogue device cannot slip in
 its own credential. The settings page shows the key's name and place before

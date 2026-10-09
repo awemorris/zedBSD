@@ -254,6 +254,7 @@ enum se_page_id {
 	SE_PAGE_PRINTERS,
 	SE_PAGE_SHARING,
 	SE_PAGE_USERS,
+	SE_PAGE_SECURITY_KEYS,
 	SE_PAGE_UPDATES,
 	SE_PAGE_ABOUT,
 	SE_PAGES
@@ -674,17 +675,9 @@ struct se_languages {
 /* The Users page's password fields: the current password, the new one, the new one again. */
 #define SE_USERS_FIELDS		3
 
-/* The PIN card's fields (ws163-p003): the current password, the new PIN, the new PIN again. */
-#define SE_PIN_FIELDS		3
-
-/* The security keys card's fields (ws172-p003): the current password, the key's name, the key's own PIN. */
-#define SE_KEY_FIELDS		3
-
-/* Whose fields have the Users page's keyboard: the password card's, the administration's, the PIN card's, or the keys card's. */
+/* Whose fields have the Users page's keyboard: the password card's, or the administration's. */
 #define SE_USERS_KEYBOARD_PASSWORD	0
 #define SE_USERS_KEYBOARD_ADMIN		1
-#define SE_USERS_KEYBOARD_PIN		2
-#define SE_USERS_KEYBOARD_KEYS		3
 
 /* The most users the Users page lists (ws089-p026). */
 #define SE_USERS_LIST_MAX	64
@@ -740,16 +733,8 @@ enum se_admin_mode {
  * asked and its request's number, and the last answer (bad when it
  * failed).
  *
- * The PIN card (ws163-p003, page-users-pin.c): its three fields (wiped
- * when the change is asked, when Esc empties them and when the window
- * closes) and the one with the keyboard, whether a PIN is set (looked up
- * when the card draws), the change asked (a removal or not) and its
- * request's number, and the last answer (bad when it failed).
- *
- * The security keys card (ws172-p003, page-users-keys.c): its three
- * fields (the secrets wiped as the PIN card's) and the one with the
- * keyboard, the change asked (a removal or not) and its request's number,
- * whether the key waits to be touched, and the last answer.
+ * The PIN and the security keys have their own page since ws199-p001
+ * (struct se_keys).
  */
 struct se_users {
 	int read;
@@ -778,24 +763,75 @@ struct se_users {
 	uint32_t admin_request;
 	char admin_message[SE_MESSAGE];
 	int admin_bad;
+};
 
-	struct kl_field pin_fields[SE_PIN_FIELDS];
-	int pin_focus;
-	int pin_set;
-	int pin_asked;
-	int pin_removing;
-	uint32_t pin_request;
-	char pin_message[SE_MESSAGE];
-	int pin_bad;
+/*
+ * The popup (dialog.c, ws199-p001 section 3.2): whether it is open, its
+ * step's title, place among the steps, text and button, whether Back is
+ * offered, its fields (each with a label, a placeholder, a kind and, for
+ * a PIN of digits, the most digits; 0: any text) and the one with the
+ * keyboard, the small link, the line of what went wrong, whether it is
+ * busy (and with what, and whether Cancel works then), when it last had
+ * input, and its owner's two functions.
+ */
+#define SE_DIALOG_FIELDS	2
+enum se_dialog_action {
+	SE_DIALOG_PRIMARY,
+	SE_DIALOG_BACK,
+	SE_DIALOG_CANCEL,
+	SE_DIALOG_LINK,
+	SE_DIALOG_IDLE
+};
+struct se_dialog {
+	int open;
+	char title[64];
+	unsigned step;
+	unsigned steps;
+	char body[320];
+	char primary[32];
+	int can_back;
+	unsigned field_count;
+	char labels[SE_DIALOG_FIELDS][48];
+	char placeholders[SE_DIALOG_FIELDS][64];
+	unsigned kinds[SE_DIALOG_FIELDS];
+	size_t digits[SE_DIALOG_FIELDS];
+	struct kl_field fields[SE_DIALOG_FIELDS];
+	int focus;
+	char link[64];
+	char error[SE_MESSAGE];
+	int busy;
+	int cancellable;
+	char busy_text[SE_MESSAGE];
+	uint64_t input_ms;
+	void (*act)(struct se_app *app, unsigned action);
+	int (*ready)(const struct se_app *app);
+};
 
-	struct kl_field key_fields[SE_KEY_FIELDS];
-	int key_focus;
-	int key_asked;
-	int key_removing;
-	int key_touch;
-	uint32_t key_request;
-	char key_message[SE_MESSAGE];
-	int key_bad;
+/*
+ * The Security Keys page's wizards (ws199-p001, page-users-keys.c and
+ * page-users-pin.c): the one under way and its step, the account's
+ * password kept between the steps that ask it and the one that sends it
+ * (wiped then, when the popup closes, and when it is left alone), the new
+ * key's name and the key a removal names, the change asked and its
+ * request's number, and whether the key waits to be touched.
+ */
+enum se_keys_flow {
+	SE_KEYS_FLOW_NONE,
+	SE_KEYS_FLOW_ADD,
+	SE_KEYS_FLOW_REMOVE,
+	SE_KEYS_FLOW_PIN_SET,
+	SE_KEYS_FLOW_PIN_REMOVE
+};
+struct se_keys {
+	unsigned flow;
+	unsigned step;
+	struct kl_field password;
+	char name[KL_SYSTEM_KEY_LABEL_MAX + 1U];
+	char ref[KL_SYSTEM_KEY_REF_MAX + 1U];
+	char label[KL_SYSTEM_KEY_LABEL_MAX + 1U];
+	int asked;
+	uint32_t request;
+	int touch;
 };
 
 /*
@@ -1269,6 +1305,8 @@ struct se_app {
 
 	/* The Users page's account and password fields (ws160-p002). */
 	struct se_users users;
+	struct se_dialog dialog;
+	struct se_keys keys;
 
 	/* The Ethernet page's editor of a wired interface (ws089-p022). */
 	struct se_wired wired;
@@ -1531,17 +1569,41 @@ int se_users_admin_press(struct se_app *app, int index);
 int se_users_admin_key(struct se_app *app, const struct se_event *event);
 int se_users_admin_result(struct se_app *app, uint32_t request, int error);
 void se_users_admin_wipe(struct se_users *users);
-int se_users_pin_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
-int se_users_pin_press(struct se_app *app, int index);
-int se_users_pin_key(struct se_app *app, const struct se_event *event);
-int se_users_pin_result(struct se_app *app, uint32_t request, int error);
-void se_users_pin_wipe(struct se_users *users);
-int se_users_keys_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
-int se_users_keys_press(struct se_app *app, int index);
-int se_users_keys_key(struct se_app *app, const struct se_event *event);
-int se_users_keys_result(struct se_app *app, uint32_t request, int error);
-void se_users_keys_touched(struct se_app *app);
-void se_users_keys_wipe(struct se_users *users);
+
+/* The Security Keys page (page-users-keys.c and page-users-pin.c, ws199-p001). */
+int se_keys_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+void se_keys_press(struct se_app *app, int index);
+int se_keys_result(struct se_app *app, uint32_t request, int error);
+void se_keys_touched(struct se_app *app);
+void se_keys_close(struct se_app *app);
+void se_keys_end(struct se_app *app);
+int se_keys_soft_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
+int se_keys_soft_press(struct se_app *app, int index);
+void se_keys_soft_act(struct se_app *app, unsigned action);
+int se_keys_soft_ready(const struct se_app *app);
+void se_keys_soft_result(struct se_app *app, int error);
+const char *se_keys_refusal(struct se_app *app, uint32_t request);
+void se_keys_keep_password(struct se_app *app);
+
+/* The popup (dialog.c, ws199-p001). */
+void se_dialog_open(struct se_app *app, void (*act)(struct se_app *app, unsigned action), int (*ready)(const struct se_app *app));
+void se_dialog_close(struct se_app *app);
+void se_dialog_dismiss(struct se_app *app);
+void se_dialog_step(struct se_app *app, const char *title, unsigned step, unsigned steps, const char *body, const char *primary, int can_back);
+void se_dialog_field(struct se_app *app, const char *label, const char *placeholder, unsigned kind, size_t limit);
+void se_dialog_digits(struct se_app *app, unsigned index, size_t digits);
+void se_dialog_set_text(struct se_app *app, unsigned index, const char *text);
+const char *se_dialog_text(const struct se_app *app, unsigned index);
+size_t se_dialog_length(const struct se_app *app, unsigned index);
+void se_dialog_focus(struct se_app *app, unsigned index);
+void se_dialog_link(struct se_app *app, const char *text);
+void se_dialog_error(struct se_app *app, const char *text);
+void se_dialog_busy(struct se_app *app, const char *text, int cancellable);
+void se_dialog_draw(struct se_app *app, struct kl_canvas *canvas);
+int se_dialog_press(struct se_app *app, int index);
+int se_dialog_key(struct se_app *app, const struct se_event *event);
+void se_dialog_tick(struct se_app *app, uint64_t now);
+int se_dialog_wait(const struct se_app *app);
 void se_users_reload(struct se_app *app);
 void se_users_copy(struct se_app *app);
 void se_languages_copy(struct se_app *app);

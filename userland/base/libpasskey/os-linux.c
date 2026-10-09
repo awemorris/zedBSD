@@ -224,3 +224,78 @@ pk_os_card_close(
 	/* Nothing open. */
 	card->descriptor = -1;
 }
+
+/* Lists no smart card slot (ws199-p001). */
+int
+pk_os_list_slots(
+	struct pk_os_device *devices,
+	size_t capacity,
+	size_t *count)
+{
+	/* None. */
+	(void)devices;
+	(void)capacity;
+	*count = 0U;
+	return 0;
+}
+
+/* Attaches no smart card slot. */
+int
+pk_os_card_attach(
+	struct pk_os_card *card,
+	const char *path)
+{
+	/* Not on this system. */
+	(void)path;
+	card->descriptor = -1;
+	return ENOTSUP;
+}
+
+/* Tells of no card. */
+int
+pk_os_card_present(
+	struct pk_os_card *card,
+	int *present)
+{
+	/* Not on this system. */
+	(void)card;
+	*present = 0;
+	return ENOTSUP;
+}
+
+/* Reads no card's event. */
+int
+pk_os_card_event(
+	struct pk_os_card *card,
+	int *inserted)
+{
+	/* Not on this system. */
+	(void)card;
+	*inserted = 0;
+	return ENOTSUP;
+}
+
+/* Selects no card's applet. */
+int
+pk_os_card_select(
+	struct pk_os_card *card,
+	struct pk_nfc *nfc,
+	struct pk_transport *transport,
+	unsigned timeout_ms)
+{
+	/* Not on this system. */
+	(void)card;
+	(void)nfc;
+	(void)transport;
+	(void)timeout_ms;
+	return ENOTSUP;
+}
+
+/* Powers no card off. */
+void
+pk_os_card_power_off(
+	struct pk_os_card *card)
+{
+	/* Nothing open. */
+	(void)card;
+}
