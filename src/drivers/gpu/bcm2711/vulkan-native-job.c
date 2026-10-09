@@ -132,7 +132,9 @@ bcm2711_vulkan_native_job_execute(
 	event = job->prepared->first;
 	while (event != NULL) {
 		/* Exact coherent buffer transfers execute only after every preceding native pass has retired and published its output. */
-		if (event->opcode == GPU_OP_CMD_COPY_BUFFER) {
+		if (event->opcode == GPU_OP_CMD_COPY_BUFFER ||
+		    event->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE ||
+		    event->opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER) {
 			error = bcm2711_vulkan_buffer_copy_run(event->record);
 			if (error != 0)
 				return error;

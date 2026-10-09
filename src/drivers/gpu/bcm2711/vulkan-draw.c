@@ -97,6 +97,8 @@ walk_records(
 		/* Each event updates one ordinary graphics selection or emits a complete pass/draw preparation point. */
 		switch (record->opcode) {
 		case GPU_OP_CMD_COPY_BUFFER:
+		case GPU_OP_CMD_COPY_BUFFER_TO_IMAGE:
+		case GPU_OP_CMD_COPY_IMAGE_TO_BUFFER:
 			/* Synchronous coherent transfer work has its own complete immutable owner outside graphics pass state. */
 			if (state->pass != NULL)
 				return EINVAL;

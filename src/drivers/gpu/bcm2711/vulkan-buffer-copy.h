@@ -13,10 +13,16 @@
 
 #define BCM2711_VULKAN_BUFFER_COPY_REGIONS 64U
 
+/* One opcode-selected complete region vector uses standard copied fields without storing application pointers. */
+union bcm2711_vulkan_buffer_copy_regions {
+	VkBufferCopy buffers[BCM2711_VULKAN_BUFFER_COPY_REGIONS];
+	VkBufferImageCopy images[BCM2711_VULKAN_BUFFER_COPY_REGIONS];
+};
+
 /* One immutable transfer owns the whole copied vector and both independent typed input edges until its pending primary retires. */
 struct bcm2711_vulkan_buffer_copy {
 	struct bcm2711_vulkan_record record;
-	VkBufferCopy regions[BCM2711_VULKAN_BUFFER_COPY_REGIONS];
+	union bcm2711_vulkan_buffer_copy_regions regions;
 	bool retained[2];
 };
 
