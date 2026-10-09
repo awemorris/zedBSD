@@ -19,6 +19,7 @@
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/vulkan-input.h"
+#include "drivers/gpu/bcm2711/vulkan-layout.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -54,6 +55,7 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void layout_test(struct bcm2711_vulkan_session *session);
 static void input_test(struct bcm2711_vulkan_session *session);
 static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
 static void resource_test(struct bcm2711_vulkan_session *session);
@@ -412,6 +414,7 @@ main(
 	memory_test(session, &render);
 	resource_test(session);
 	input_test(session);
+	layout_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -539,6 +542,13 @@ dispatch(
 
 	/* Immutable native image views, samplers and owned SPIR-V modules retain their exact typed parents. */
 	error = bcm2711_vulkan_input_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Canonical descriptor and pipeline interfaces retain immutable dependency graphs independently of public IDs. */
+	error = bcm2711_vulkan_layout_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -1216,4 +1226,135 @@ input_created(
 
 	/* Succeeded: the caller sees an explicit Vulkan creation outcome after complete reply decoding. */
 	return (int)status;
+}
+
+/* Exercises actual descriptor/pipeline layout encoders, canonical bindings and immutable ownership through parent identity retirement. */
+static void
+layout_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object client_sampler;
+	struct vulkan_object client_layout;
+	struct bcm2711_vulkan_object *sampler;
+	struct bcm2711_vulkan_object *layout;
+	struct bcm2711_vulkan_object *pipeline;
+	struct bcm2711_vulkan_set_layout *set;
+	struct bcm2711_vulkan_pipeline_layout *interface;
+	VkSamplerCreateInfo sampler_info;
+	VkDescriptorSetLayoutBinding bindings[2];
+	VkDescriptorSetLayoutCreateInfo set_info;
+	VkPipelineLayoutCreateInfo pipeline_info;
+	VkPushConstantRange ranges[2];
+	VkSampler immutable;
+	VkDescriptorSetLayout selected;
+	uint8_t wire[1024];
+	unsigned baseline;
+	int error;
+
+	/* One actual sampler supplies the descriptor's independently retained immutable edge. */
+	baseline = allocations;
+	memset(&sampler_info, 0, sizeof(sampler_info));
+	sampler_info.sType = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
+	sampler_info.addressModeU = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeV = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	sampler_info.addressModeW = VK_SAMPLER_ADDRESS_MODE_CLAMP_TO_EDGE;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SAMPLER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSamplerCreateInfo(&writer, &sampler_info);
+	error = input_created(session, &writer, 80);
+	assert(error == VK_SUCCESS);
+	sampler = bcm2711_vulkan_object_find(session, I915_VK_OBJ_SAMPLER, 80);
+	assert(sampler != NULL && sampler->references == 1);
+	memset(&client_sampler, 0, sizeof(client_sampler));
+	client_sampler.wire_id = 80;
+	immutable = (VkSampler)(uintptr_t)&client_sampler;
+
+	/* Input binding order is independent of native canonical order, and immutable sampler ownership survives source identity removal. */
+	memset(bindings, 0, sizeof(bindings));
+	bindings[0].binding = 7;
+	bindings[0].descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	bindings[0].descriptorCount = 1;
+	bindings[0].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	bindings[0].pImmutableSamplers = &immutable;
+	bindings[1].binding = 1;
+	bindings[1].descriptorType = VK_DESCRIPTOR_TYPE_UNIFORM_BUFFER;
+	bindings[1].descriptorCount = 1;
+	bindings[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	memset(&set_info, 0, sizeof(set_info));
+	set_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	set_info.bindingCount = 2;
+	set_info.pBindings = bindings;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorSetLayoutCreateInfo(&writer, &set_info);
+	error = input_created(session, &writer, 81);
+	assert(error == VK_SUCCESS && sampler->references == 2);
+	layout = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, 81);
+	assert(layout != NULL);
+	set = layout->payload;
+	assert(set->count == 2 && set->bindings[0].number == 1 && set->bindings[1].number == 7);
+	assert(set->textures == 1 && set->uniforms == 1 && set->bindings[1].immutable == sampler);
+	memset(&client_layout, 0, sizeof(client_layout));
+	client_layout.wire_id = 81;
+	selected = (VkDescriptorSetLayout)(uintptr_t)&client_layout;
+
+	/* Exact per-stage push ranges and copied set interfaces are retained in the native pipeline layout. */
+	memset(ranges, 0, sizeof(ranges));
+	ranges[0].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	ranges[0].size = 32;
+	ranges[1].stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	ranges[1].offset = 32;
+	ranges[1].size = 96;
+	memset(&pipeline_info, 0, sizeof(pipeline_info));
+	pipeline_info.sType = VK_STRUCTURE_TYPE_PIPELINE_LAYOUT_CREATE_INFO;
+	pipeline_info.setLayoutCount = 1;
+	pipeline_info.pSetLayouts = &selected;
+	pipeline_info.pushConstantRangeCount = 2;
+	pipeline_info.pPushConstantRanges = ranges;
+	fail_after = 2;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_PIPELINE_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkPipelineLayoutCreateInfo(&writer, &pipeline_info);
+	error = input_created(session, &writer, 82);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && layout->references == 1);
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_PIPELINE_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkPipelineLayoutCreateInfo(&writer, &pipeline_info);
+	error = input_created(session, &writer, 82);
+	assert(error == VK_SUCCESS && layout->references == 2);
+	pipeline = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PIPELINE_LAYOUT, 82);
+	assert(pipeline != NULL);
+	interface = pipeline->payload;
+	assert(interface->count == 1 && interface->sets[0] == layout);
+	assert(interface->push[0] == VK_SHADER_STAGE_VERTEX_BIT && interface->push[7] == VK_SHADER_STAGE_VERTEX_BIT);
+	assert(interface->push[8] == VK_SHADER_STAGE_FRAGMENT_BIT && interface->push[31] == VK_SHADER_STAGE_FRAGMENT_BIT);
+
+	/* A malformed repeated-stage range never allocates or modifies an existing pipeline interface. */
+	ranges[1].stageFlags = VK_SHADER_STAGE_VERTEX_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_PIPELINE_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkPipelineLayoutCreateInfo(&writer, &pipeline_info);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 83);
+	error = execute(session, &writer, &reader);
+	assert(error == EINVAL && interface->push[31] == VK_SHADER_STAGE_FRAGMENT_BIT);
+
+	/* A prepared pipeline-layout owner keeps the descriptor layout and immutable sampler after every public identity retires. */
+	error = bcm2711_vulkan_object_retain(pipeline);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_SAMPLER, 80);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT, 81);
+	destroy(session, GPU_OP_DESTROY_PIPELINE_LAYOUT, 82);
+	assert(sampler->references == 1 && layout->references == 1 && pipeline->references == 1);
+	error = bcm2711_vulkan_object_release(pipeline);
+	assert(error == 0 && allocations == baseline);
+	puts("WS141 Vulkan actual canonical descriptor/pipeline layout/immutable dependencies/push permissions: PASS");
 }

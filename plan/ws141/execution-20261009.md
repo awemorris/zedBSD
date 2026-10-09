@@ -402,3 +402,19 @@ source `b1bbe9845a714f530e1b37c7d24651bba1b12b96` とexternal-type fixture corre
 - 修正後 `sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-input-client-object-host` → memory/VA、resource/binding、immutable inputs、root/query/domainの4範囲PASS。actual image-view parent retain/registry OOM unwind、prepared viewがimage/view identity退役後も残る、actual Keiland nearest/linear sampler、actual `kwl_quad_vert` source copy、arena/stream overwrite後のbyte保持、retained moduleがidentity退役後も残る、declared nonzero sourceのabsent array拒否、全heap0/timeline0/reply owner1。普通host allocator/native flushは明示fixture、物理cache/IRQ/GPU/QPU timingは証明しない。
 - named rpi4 y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit0/warning/error0/check3 PASS、log `build/ws141-i14-input-final-y.log`、vmunix SHA256 `8cceed68fc984cc067b3ed3918c53bf4a36bfd80b770ba2ed4a5516d3055fdb6`。input routerは未公開/未参照でGC除去、hash不変を機能稼働の証拠と扱わない。clang-format-19後definition tab/ANSI/public/static order/所有/エラー経路/full C標準manualとstyle-check total0/diff0。
 - next: descriptor layout/pool/set/updateとpipeline layout（actual Keiland combined image sampler/512-set pool/32-byte push）、render pass/framebuffer/graphics pipeline、draw/queue/common worker integrationとpublic runtime。i13/i14とp005/p006はin-progress、Keiland/実機/p007未達。Master/shared投影はQ1。
+
+### immutable inputのmain統合確認
+
+source `64007b3e74814e696287c0caffde85f821c009e5` をQ1 latest mainへ専用treeで統合。first merge `b2a07f3d5c7829635f613923dfa2a73d21a0b3a8` でhost4範囲/named rpi4 y build PASS。Q1のmainが `7ca3c5e4037e8d609f260ad1b5b317024b32a9fc` へ進みfast-forward不能だったため、それを専用treeへ再統合し `c603fd47566f3c62e550bb8ac1be7e2158b39025`。新TCP headerとQ1の他WS/共有記録を保持しnamed rpi4 y buildを再実行、exit0/warning/error0/check3 PASS（`build/ws141-i14-input-refreshed-integration-y.log`）。共有mainと専用branch HEADのreadbackは最終merge SHA、main clean。nは当該private source無しで既存確認を保持。Masterを担当が編集していない。次はdescriptor/pipeline layout、p005/p006とi13/i14 in-progress、Keiland/実機/p007は未達。
+
+## i14 canonical descriptor/pipeline layoutのsoftware出力（2026-10-09）
+
+private `vulkan-layout.c/.h` と当該arm64 source列を追加。実client codecのwidth/array framingに従う独立native decoderでDSL/PipelineLayout create/destroyを接続。canonical binding order、duplicate/count/stage/typeの拒否、combined image sampler/uniform block（各binding1element）のfinite interface、immutable sampler/same-device parentを保持。4set合計textures8/uniforms4、push128bytes/4byte境界/vertex-fragment stage許可を検証。各stageは一つのdeclared range、overlapが無い場合も同stage複数rangeを拒否。unsupported storage/descriptor indexing等を公開しない。
+
+layoutはarena/application pointerを保存せず、immutable samplerとdeviceを独立retain。pipeline layoutはset interfaces/deviceを独立retainし、exact push permissionを各wordに保持。source layout/sampler/public pipeline identity退役後もdependent pipeline/prepared ownerが残る間、依存graph全体を保持。partial constructionは成功したretainだけをpayloadへassignし、publication/parent失敗で全edgeをunwind、retirement errorを優先する。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-layout-host` と `... build/ws141-i14-layout-final-host` → actual client/object/record/native sourceの5範囲PASS。順不同2bindingのcanonical order/immutable sampler保持、actual pipeline layout encoder、registry OOM時のset edge unwind、vertex32/fragment96-byte push permission、repeated-stage拒否、public sampler/layout/pipeline identity退役後のprepared graph保持とfinal heap0/timeline0/reply owner1を確認。allocator/flushはfixture、物理GPU/cacheは未検証。
+
+named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-layout-final-y.log`。layout router未参照でGC除去されるためhash不変、稼働可能との主張無し。clang-format-19後definition tab/full C manualを確認、style-check total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
+
+nextはactual Keilandの512-set pool/allocate/free/reset/update、immutable draw descriptor snapshots、render pass/framebuffer/graphics pipeline/native CL/queue/common worker/public runtime。pool/setの退役はold prepared ownerが保持するstorage/chargeと新しいpublic identityを分離する。Master/shared投影はQ1。
