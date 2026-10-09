@@ -11,7 +11,7 @@
 -->
 <!-- master:agents:start -->
 - **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=1（P1 だけ）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
-  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。今 WS199 p002（i04、PIN 不要・タッチ不要）。順は [WS199](ws199/ws.md) p002 → p003 → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。保留の branch: agent/p1-ws197（WS197 p003 の i03 の途中、10/17 の後に merge）、agent/p1-p045（WS001 p045、10/17 の後）。
+  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。WS199 p002 は cleared（77a40b51f）、P1 は使用量のためラップアップ済み。次の P1 は [WS199](ws199/ws.md) p003 から（phase.md に「すること・やり方」）→ → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。保留の branch: agent/p1-ws197（WS197 p003 の i03 の途中、10/17 の後に merge）、agent/p1-p045（WS001 p045、10/17 の後）。
   - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
   - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
 <!-- master:agents:end -->

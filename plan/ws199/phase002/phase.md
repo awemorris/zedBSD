@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p002 -->
 # ws199-p002: PIN 不要・タッチ不要の設定（設計の i04）
 
-Status: in-progress（2026-10-10 P1: cleared 候補。T1 の確かめは p004、5330 は p005。残りは host 試験の (d) だけ）
+Status: cleared（2026-10-10 Q1 判定: 実装と host 試験（passkey・fido2・sessiond-auth・sessiond-keys）PASS、build warning 0、merge 77a40b51f。残り: passkey の options の読み書きの host 試験（再開点 (d)、p004 で）。実機は p005）
 Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §2・§4.3・§4.4・§11 の R4・R6
 
 ## ゴール
