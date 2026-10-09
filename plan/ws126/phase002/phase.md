@@ -3,7 +3,7 @@
 # ws126-p002: build 用 Python と target の interpreter（T1）
 
 Parent: [WS126](../ws.md)
-Status: cleared 候補（2026-10-09 P1 q916: 依存の libc の不足を直し、target の interpreter と T1 の module を cross build・stage した。guest の試しは未実施で、p005 の image の登録と合わせて T1 へ回す案。Q1 の判定待ち）
+Status: cleared（2026-10-09 Q1 判定: cross build・stage・import 0 failed。guest の `python3 -c` の試しは image に標準 library を入れる p005 の受け入れへ移した（Q1 の決定、p005 の phase.md に記載））
 Disposition: normal
 Queue / attempts: q916（2026-10-09 Q1 承認、ユーザー「ベータ2のすべての作業をP1でスケジューリングして行います」）item 2
 Goal: 同じ版の build 用 Python を host に作り、target の `python3` と T1 の module を cross build して stage する。

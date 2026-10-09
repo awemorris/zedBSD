@@ -31,3 +31,7 @@ Investigation bound: 3 時間。
 ## 依存・未決の判断
 
 p003（p004）、ws125-p002、D2、D3。
+
+## 2026-10-09 Q1: p002 から移した確認
+
+- ws126-p002 の「guest の試し」（`python3 -c 'print(1)'`）は、標準 library 約 2700 file と libz.so.1 の登録を image に入れるこの Phase の受け入れに含める。T1 へはこの Phase の image でまとめて依頼する。
