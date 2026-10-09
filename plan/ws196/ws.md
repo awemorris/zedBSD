@@ -10,7 +10,7 @@ Objectives: O1
 Parent: [Master](../master.md)
 Queue: 未割当
 Target: ベータ3 以降（2026-10-09 Q1 の提案、時期はユーザーの判断で確定）
-Resume point: p001（仕様の範囲）から。
+Resume point: p001 の E1〜E6（ユーザーの判断、[phase.md](phase001/phase.md) §4）。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -27,4 +27,4 @@ Resume point: p001（仕様の範囲）から。
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| p001 | 範囲（option）と共有の code の置き場の設計 | planning | WS195 p001 |
+| [p001](phase001/phase.md) | 範囲（option）と共有の code の置き場の設計 | planning（2026-10-09 夜 P1: 調べと設計の案。E1〜E6 のユーザーの判断と design-reviewer 待ち。p002〜p005 の案は phase.md §5） | WS195 p001 |
