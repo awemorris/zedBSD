@@ -1,6 +1,6 @@
 #!/bin/sh
 # The host test of bluetoothd's phone link parts (ws197-p002, plan/ws197/phase002/phase.md section 12.1): builds
-# userland/base/bluetoothd's RFCOMM, OBEX, SDP server and session parts with the host's compiler under ASan and UBSan and runs
+# userland/base/bluetoothd's RFCOMM, OBEX, SDP server, session, router and link manager parts with the host's compiler under ASan and UBSan and runs
 # plan/ws197/tests/bt-phone-host-test.c.  The last line is "bt-phone-host-test: PASS" or "... FAIL".
 # usage: plan/ws197/tests/bt-phone-host-test.sh   (from the repository's top; OUT= to choose the build folder)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
@@ -13,7 +13,8 @@ status=0
 for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
-	"bt-session-host-test userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c -lpthread"; do
+	"bt-session-host-test userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c -lpthread" \
+	"bt-router-host-test userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread"; do
 	set -- $test
 	name=$1
 	shift

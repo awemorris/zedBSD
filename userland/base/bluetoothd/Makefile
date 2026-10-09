@@ -12,7 +12,8 @@ BLUETOOTHD_SOURCES := userland/base/bluetoothd/main.c userland/base/bluetoothd/s
 	userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/acl.c \
 	userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/keys.c userland/base/bluetoothd/sdp.c \
 	userland/base/bluetoothd/hidp.c userland/base/bluetoothd/att.c userland/base/bluetoothd/hidcache.c \
-	userland/base/bluetoothd/snoop.c userland/base/bluetoothd/router.c userland/base/bluetoothd/hid.c \
+	userland/base/bluetoothd/snoop.c userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c \
+	userland/base/bluetoothd/hid.c \
 	userland/base/bluetoothd/hog.c
 BLUETOOTHD_DATA := /etc/service.d/bluetoothd=userland/base/bluetoothd/bluetoothd.service
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,bluetoothd,Bluetooth daemon,amd64,n,basic,$(BLUETOOTHD_SOURCES),y,base,base/bluetoothd,,0755,program,$(BLUETOOTHD_DATA),,sbin))
