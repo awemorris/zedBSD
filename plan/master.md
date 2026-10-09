@@ -520,6 +520,11 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー（クリック）: WS126 p004 の D1（依存の package の要る追加の module）は「今は足さない」→ p004 は保留、今の module で p005 の image へ。
+- 2026-10-09 ユーザー（クリック）: libc の wint_t（uint32_t、clang は int）は「WS001 p045 で直す」→ libcxx の作り直しと一緒に ws001-p045 で。今は変えない。
+- 2026-10-09 ユーザー:「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」→ [ws001-p045](ws001/phase045/phase.md)（planned、ベータ3 の P1 の列）。
+- 2026-10-09 ユーザー:「<sys/socket.h> ですが、libcに入れてくれますか？」→ ws126-p002 の SOMAXCONN（128）は libc の include/libc/sys/socket.h に置き、uapi と kernel の unix-socket.c は変えない（Q1 の uapi 案を取り消し）。
+- 2026-10-09 Q1 判定: P4（Sonnet 5.5・effort low）の ws183-p003 規約の見直しは合格（fbd1da9e7）。手順（違反の一覧・build warning 0・host 試験・記録・cleared 候補で返す）を省かず、動作の変更なし、comment は正確。Haiku 4.5 low は手順を省いた（前記）。規約の見直しは Sonnet 5.5 low で足りる。P4 は終了。
 - 2026-10-09 ユーザー:「では、P3はラップアップします。P4は作業ができたかどうかを評価したら終了します。N=1でP1のみで継続します。」→ P3 は安全な地点で終える。P4（Sonnet 5.5 low の試し、WS183 の規約の見直し、.claude/agents/p3-conformance-sonnet-low.md が読み込まれたら起動）は 1 回の評価で終わる。以後 N=1（P1 だけ）＋T1。
 - 2026-10-09 Q1 の評価: P3 の Sonnet 5.5 medium の 1 回目（ws189-p005）は合格。指示（cleared にしない、試験の file も、Linux の build と host 試験）を全部守り、約 40 か所を直し、Haiku の注釈を確かめ、他の WS の既存の違反は記録だけにした。以後 P3 は Sonnet medium で続ける。
 - 2026-10-09 ユーザー（クリック）: P3 の規約の見直しは Haiku Low の 3 回の評価（機械的な直しはできるが、指示を守らず自分で cleared・依頼した build と試験を流さない・試験の file の指摘を残す・注釈の誤り）の後「Sonnet 5.5 に変える」→ P3 は conformance-reviewer（Sonnet、effort medium）で続ける。
@@ -793,6 +798,8 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 ## Tools
 
 回帰と観察の道具は `plan/tools/` に置く。完了した WS の試験は、ここへ移したもの以外を削除した。Phase に固有の試験は各 WS の `tests/` にある。
+
+注意（2026-10-09 P1 の所見）: BUG-274 の直しで `ps -o args` が command line の全体を出すようになった。guest の試験で `ps -A -o pid,args | grep <語>` で選んで kill する形は、その語が試験自身を走らせる shell の行にも出ると自分を kill する（ws172 の passkey の FAIL の原因）。新しく書く試験は `ps -A -o pid,comm` で選ぶ。既存の約 380 箇所は一斉に直さず、FAIL した時に追従する（試験の整理の基準を当てる）。
 
 | tool | 用途 | 使い方 |
 | --- | --- | --- |

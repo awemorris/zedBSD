@@ -58,7 +58,11 @@ expect() {
 }
 
 # Stops sessiond, its greeter and any session.
-stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,args | grep -E "[s]essiond|[w]ayland( |$)" | awk "{print \$1}"); do kill $p; done; sleep 2'
+# By the command (argv[0], such as /bin/wayland), not by the command line:
+# since BUG-274 ps -o args shows whole lines, and the guest shell running
+# this one names sessiond in its own (/sbin/sessiond, sessiond.log), so a
+# match on the line killed that shell before the rest of the command ran.
+stop_all='service stop greeter >/dev/null 2>&1; for p in $(ps -A -o pid,comm | awk "\$2 ~ /(^|\\/)(sessiond|wayland)\$/ {print \$1}"); do kill $p; done; sleep 2'
 
 # 0. The program and the account; the logs emptied, the autologin emptied.  kei has taken Settings' Welcome already
 #    (welcome.done=1 in ~/.config/keiland/desktop.conf): its first session would otherwise open the Welcome, and the

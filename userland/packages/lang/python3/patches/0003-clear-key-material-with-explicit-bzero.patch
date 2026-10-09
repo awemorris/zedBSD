@@ -1,0 +1,28 @@
+Clear key material with explicit_bzero() on zedBSD.
+
+The HACL* memzero helper picks a clearing function the compiler may not
+remove by naming the systems that have one, and otherwise falls back to a
+loop through a volatile pointer with a #warning.  zedBSD's C library has
+explicit_bzero() in <strings.h>, as FreeBSD's does, so zedBSD takes the same
+branch.
+
+--- a/Modules/_hacl/Lib_Memzero0.c
++++ b/Modules/_hacl/Lib_Memzero0.c
+@@ -31,7 +31,7 @@
+ #include <string.h>
+ #endif
+ 
+-#if defined(__FreeBSD__) || defined(__NetBSD__)
++#if defined(__FreeBSD__) || defined(__NetBSD__) || defined(__ZEDBSD__)
+ #include <strings.h>
+ #endif
+ 
+@@ -57,7 +57,7 @@
+     SecureZeroMemory(dst, len_);
+   #elif defined(__APPLE__) && defined(__MACH__) && defined(APPLE_HAS_MEMSET_S)
+     memset_s(dst, len_, 0, len_);
+-  #elif (defined(__linux__) && !defined(LINUX_NO_EXPLICIT_BZERO)) || defined(__FreeBSD__) || defined(__OpenBSD__)
++  #elif (defined(__linux__) && !defined(LINUX_NO_EXPLICIT_BZERO)) || defined(__FreeBSD__) || defined(__OpenBSD__) || defined(__ZEDBSD__)
+     explicit_bzero(dst, len_);
+   #elif defined(__NetBSD__)
+     explicit_memset(dst, 0, len_);

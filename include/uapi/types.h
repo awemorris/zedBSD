@@ -69,6 +69,24 @@ typedef uint32_t useconds_t;
  */
 typedef long suseconds_t;
 typedef uint32_t reclen_t;
+
+/*
+ * A time in whole seconds since the epoch, and the names of a clock and of a
+ * timer.  <uapi/time.h> builds its structures from these; they live here so
+ * that <sys/types.h> declares them without the structures and the clock
+ * numbers that come with <time.h>.
+ */
+typedef int64_t time_t;
+typedef int clockid_t;
+typedef int32_t timer_t;
+
+/*
+ * A count of file system blocks and a count of file serial numbers, as
+ * struct statvfs reports them.  They live here for the same reason as the
+ * time types: <sys/types.h> declares them without the structure.
+ */
+typedef uint64_t fsblkcnt_t;
+typedef uint64_t fsfilcnt_t;
 #else
 
 /*

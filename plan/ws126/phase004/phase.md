@@ -3,7 +3,7 @@
 # ws126-p004: T3（新しい依存の package と module）
 
 Parent: [WS126](../ws.md)
-Status: planning
+Status: planning（保留。2026-10-09 ユーザー D1: クリック「今は足さない」→ ctypes・sqlite3・bz2・lzma・zstd は今は足さず、今の module で p005 へ進む）
 Disposition: normal
 Queue / attempts: none
 Goal: D1 で選んだ追加の module（既定案 `ctypes`・`sqlite3`）のために依存の package を加え、Python に組み込む。

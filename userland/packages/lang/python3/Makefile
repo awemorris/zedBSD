@@ -57,6 +57,16 @@ $(ZEDBSD_PYTHON3_HOST_STAMP): $(ZEDBSD_EXT_python3_SRCSTAMP)
 ZEDBSD_PYTHON3_ZLIB_STAGE := $(ZEDBSD_EXTERNAL_WORKROOT)/zlib/stage
 ZEDBSD_PYTHON3_ZLIB_STAMP := $(ZEDBSD_PYTHON3_ZLIB_STAGE)/.zedbsd-staged
 
+# The staged OpenSSL, named by path for the same reason, for the ssl and
+# hashlib modules (ws126-p003).  configure is given its directory rather than
+# its .pc files: pkg-config here prefixes one stage (zlib's) as the sysroot,
+# and OpenSSL's stage is another.  The default CA bundle is OpenSSL's own
+# compiled-in default, /etc/ssl/cert.pem (--openssldir=/etc/ssl), which is
+# where security/ca-certificates installs it, so ssl.get_default_verify_paths()
+# reports it with nothing set here.
+ZEDBSD_PYTHON3_SSL_STAGE := $(ZEDBSD_EXTERNAL_WORKROOT)/openssl/stage
+ZEDBSD_PYTHON3_SSL_STAMP := $(ZEDBSD_PYTHON3_SSL_STAGE)/.zedbsd-staged
+
 ZEDBSD_PYTHON3_CONFIGURED := $(ZEDBSD_EXT_python3_BUILDDIR)/.zedbsd-configured
 ZEDBSD_PYTHON3_STAGED := $(ZEDBSD_EXT_python3_STAGEDIR)/.zedbsd-staged
 ZEDBSD_PYTHON3_SONAME := libpython3.14.so.1.0
@@ -68,10 +78,16 @@ ZEDBSD_PYTHON3_LICENSE := $(ZEDBSD_EXT_python3_SRCDIR)/LICENSE
 # The answers configure cannot find out in a cross build (plan/ws126/design.md):
 # getaddrinfo works, IPv6 included; /dev/ptmx is there and the old BSD
 # /dev/ptc is not.
+#
+# <netpacket/packet.h> exists, but zedBSD's packet sockets are addressed by
+# struct sockaddr_l2, not by the Linux struct sockaddr_ll (and PACKET_HOST)
+# that the socket module writes its AF_PACKET support against.  configure is
+# told the header is absent, so the module is built without AF_PACKET.
 ZEDBSD_PYTHON3_CACHE := \
 	ac_cv_buggy_getaddrinfo=no \
 	ac_cv_file__dev_ptmx=yes \
-	ac_cv_file__dev_ptc=no
+	ac_cv_file__dev_ptc=no \
+	ac_cv_header_netpacket_packet_h=no
 
 # pkg-config sees only what was staged for zedBSD: the host's own libraries
 # (libffi, liblzma, zstd) would otherwise be taken for the target's.
@@ -86,9 +102,13 @@ ZEDBSD_PYTHON3_PKG_CONFIG := \
 #   system calls, which zedBSD does not offer; the default build (with the GIL)
 #   allocates with pymalloc over the C library's malloc instead.
 # --with-build-python: the build Python above.
+# --with-openssl: the staged OpenSSL above; --with-openssl-rpath=no keeps its
+#   stage directory out of the modules, which find libssl.so and
+#   libcrypto.so through the ordinary /lib lookup.
 $(ZEDBSD_PYTHON3_CONFIGURED): $(ZEDBSD_EXT_python3_SRCSTAMP) \
 	$(ZEDBSD_EXTERNAL_CROSS_STAMP) $(ZEDBSD_PYTHON3_HOST_STAMP) \
-	$(ZEDBSD_PYTHON3_ZLIB_STAMP) $(ZEDBSD_PYTHON3_MAKEFILE)
+	$(ZEDBSD_PYTHON3_ZLIB_STAMP) $(ZEDBSD_PYTHON3_SSL_STAMP) \
+	$(ZEDBSD_PYTHON3_MAKEFILE)
 	@rm -rf '$(ZEDBSD_EXT_python3_BUILDDIR)'
 	@mkdir -p '$(ZEDBSD_EXT_python3_BUILDDIR)'
 	cd '$(ZEDBSD_EXT_python3_BUILDDIR)' && \
@@ -100,9 +120,10 @@ $(ZEDBSD_PYTHON3_CONFIGURED): $(ZEDBSD_EXT_python3_SRCSTAMP) \
 			--build="$$('$(ZEDBSD_EXT_python3_SRCDIR)/config.guess')" \
 			--with-build-python='$(ZEDBSD_PYTHON3_HOST)' \
 			--prefix=/usr --enable-shared --without-ensurepip --without-mimalloc \
+			--with-openssl='$(ZEDBSD_PYTHON3_SSL_STAGE)/usr' --with-openssl-rpath=no \
 			$(ZEDBSD_PYTHON3_CACHE) \
 			CC="$$CC" CXX="$$CXX" AR="$$AR" RANLIB="$$RANLIB" READELF="$$READELF" \
-			LDFLAGS="-Wl,-rpath-link,$(ZEDBSD_PYTHON3_ZLIB_STAGE)/usr/lib"
+			LDFLAGS="-Wl,-rpath-link,$(ZEDBSD_PYTHON3_ZLIB_STAGE)/usr/lib -Wl,-rpath-link,$(ZEDBSD_PYTHON3_SSL_STAGE)/usr/lib"
 	@touch '$@'
 
 $(ZEDBSD_PYTHON3_STAGED): $(ZEDBSD_PYTHON3_CONFIGURED)

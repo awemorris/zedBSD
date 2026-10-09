@@ -17,6 +17,14 @@ extern "C" {
 /* POSIX: <sys/socket.h> defines struct iovec as <sys/uio.h> does. */
 #include <sys/uio.h>
 
+/*
+ * The largest backlog listen() is worth asking for.  It is the same value as
+ * the kernel's unix stream listener limit (UNIX_LISTEN_BACKLOG_MAX in
+ * src/kern/net/unix-socket.c); a TCP listener keeps fewer and silently trims
+ * a larger request, as listen() is allowed to.
+ */
+#define SOMAXCONN 128
+
 /* The standard macro evaluates its message pointer once through a bounded helper. */
 #define CMSG_FIRSTHDR(message) __libc_cmsg_firsthdr(message)
 

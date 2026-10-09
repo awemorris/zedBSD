@@ -420,6 +420,8 @@ kwl_touchpad_release_all(
 	/* A tap drag's left button; a tap's click is complete and holds none. */
 	if (pad->tap == KWL_TOUCHPAD_TAP_DRAG)
 		push_button(actions, KWL_TOUCHPAD_BUTTON_LEFT, 0U);
+
+	/* Forgets the tap and the motion held back for it. */
 	pad->tap = KWL_TOUCHPAD_TAP_NONE;
 	pad->tap_held_x = 0;
 	pad->tap_held_y = 0;
@@ -698,6 +700,7 @@ touch_end(
 	 * where the clicks were).
 	 */
 	if (pad->tap == KWL_TOUCHPAD_TAP_SECOND) {
+		/* Forgets the tap and the motion held back for it. */
 		pad->tap = KWL_TOUCHPAD_TAP_NONE;
 		pad->tap_held_x = 0;
 		pad->tap_held_y = 0;
@@ -1238,6 +1241,8 @@ tap_drag_begin(
 	/* The motion held back, now the drag's. */
 	if (pad->tap_held_x != 0 || pad->tap_held_y != 0)
 		push_motion(actions, (int32_t)pad->tap_held_x, (int32_t)pad->tap_held_y);
+
+	/* The motion is given, so nothing stays held back. */
 	pad->tap_held_x = 0;
 	pad->tap_held_y = 0;
 }
