@@ -71,4 +71,8 @@ Q1 の割り当て:「p002 license の一覧を今の release の image（config
 - 未実施: release の image の rootfs への `--rootfs` の当て（image の build は T1・Q1）。release の rootfs ができたら
   `license-inventory.py --config config/release/config-amd64-beta2.mk --rootfs <rootfs>` で本文の有無を確かめる。
 
-状態: ベータ2 の分は cleared 候補（intelbt の判断と release の rootfs への `--rootfs` は残り）。
+2026-10-09 ユーザーの決定（Q1 の中継）「入れる、動かなければ既知」: `config/release/config-amd64-beta2.mk` に `intelbt-firmware` を足した
+（Bluetooth に要る他の物 bluetoothd・bt・CONFIG_DRIVER_USB_BT・`_bluetooth` の account は既に在る）。再生成 → `27 components, 0 open items`。
+Q1 が古い remacs の archive を distfiles から消した。
+
+状態: ベータ2 の分は cleared 候補（release の rootfs への `--rootfs` は RC の image で）。
