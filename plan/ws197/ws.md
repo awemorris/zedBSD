@@ -42,3 +42,7 @@ Resume point: p001（設計）から。
 | 計 | | **約 121 LW**（L2CAP ERTM は後回し +10、ANCS は作らない +8） |
 
 順はユーザーの指示（OBEX → MAP → Integration → PBAP → HFP）。OBEX の下に RFCOMM が要るので p002 に含めた。HFP の中で一番不確かなのは p007 の SCO（USB の isochronous）。
+
+## 2026-10-10 Q1: p002 の判定
+
+p002（RFCOMM・OBEX・SDP・phone.c と WS143 の変更、i01〜i08）は保留の branch agent/p1-ws197 の 92157604f で実装済み。host 試験は全部 PASS、T1-518（WS143 の HID の回帰 4 本、bt-loopback-p002・bt-daemon-p003・bt-pair-p004・bt-hid-p005）が全部 PASS。**p002 は cleared**（code は 10/17 の後に main へ merge）。branch の phase002/phase.md への反映は P1。
