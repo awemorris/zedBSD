@@ -257,41 +257,71 @@ def fill(fields: list[str]) -> None:
 
 @run.define("apps.settings.change-password")
 def settings_password(item):
+	# ws200-p001: Change Password (control 400 on the Password card) opens a popup wizard: Step 1 the current
+	# password, Step 2 the new one twice, then Done.  Enter goes on, Tab moves between the two fields, Esc closes.
 	common.keep_shadow(run)
 	before = shadow_line()
 	window, since = run.settings(item, "users")
-	controls = run.controls(since, "users")
-	cases = (
-		("a wrong current password", ["wrong-pass", "aat-pass-1", "aat-pass-1"], "wrong"),
-		("a short new password", [aatlib.PASSWORD, "short", "short"], "short"),
-		("the right change", [aatlib.PASSWORD, "aat-pass-1", "aat-pass-1"], "right"),
-	)
-	for what, fields, name in cases:
-		# The field is at the page's foot, half under the window's edge (T1-232: a click there missed it, and the
-		# typing went to the sidebar): the page is scrolled until the field is whole.
-		controls = reveal_control(window, "users", 1)
+
+	def open_wizard() -> str | None:
+		"""Opens the wizard from the Password card and gives its start line."""
+		controls = reveal_control(window, "users", 400)
 		mark = run.mark()
-		run.click_control(item, window, controls, 1, "the current password's field")
+		run.click_control(item, window, controls, 400, "Change Password")
+		started = run.wait(r"ZSETTINGS USERS start flow=1\b", mark, 10)
+		time.sleep(0.5)
+		return started
+
+	# 1. The popup's first step.
+	started = open_wizard()
+	item.step("Change Password", started or "no start line")
+	run.shot(item, "step-1")
+	item.check(started, "the wizard did not start (no ZSETTINGS USERS start flow=1)")
+	cases = (
+		("new passwords that differ", ["aat-pass-1", "aat-pass-2"], "differ", "wrong-pass"),
+		("a short new password", ["short", "short"], "short", "wrong-pass"),
+		("a wrong current password", ["aat-pass-1", "aat-pass-1"], "wrong", "wrong-pass"),
+	)
+	for index, (what, fields, name, current) in enumerate(cases):
+		if index:
+			run.key("esc")
+			time.sleep(0.5)
+			open_wizard()
+		mark = run.mark()
+		run.type(current)
+		run.key("enter")
+		time.sleep(0.5)
 		fill(fields)
 		time.sleep(3.0)
-		result = run.lines(r"ZSETTINGS USERS result request=\d+ errno=\d+", mark)
+		asked = run.lines(r"ZSETTINGS USERS change request=\d+", mark)
+		result = run.lines(r"ZSETTINGS USERS result request=\d+ errno=-?\d+", mark)
 		now = shadow_line()
-		item.step(what, f"{result[-1] if result else 'no request'}; shadow {'changed' if now != before else 'kept'}")
+		item.step(what, f"{len(asked)} requests; {result[-1] if result else 'no result'}; shadow {'changed' if now != before else 'kept'}")
 		run.shot(item, name)
-		if name == "right":
-			item.check(result and aatlib.number(result[-1], "errno") == 0 and now != before, "the right change was not made")
+		item.check(now == before, f"{what} changed the password")
+		if name == "wrong":
+			item.check(asked and result and aatlib.number(result[-1], "errno") != 0, "no refused request for the wrong password")
 		else:
-			item.check(now == before, f"{what} changed the password")
-			if name == "wrong":
-				item.check(result and aatlib.number(result[-1], "errno") != 0, "no refused request for the wrong password")
-		# Esc empties the fields, or with nothing typed goes back from the page (T1-202c: the cases after the first
-		# typed into the Settings overview): the Users page is asked for again, its controls read anew.
-		run.key("esc")
-		controls = users_page_again(controls)
+			item.check(not asked, f"{what} was sent ({asked[-1] if asked else ''})")
+	# 5. Back at Step 1 after the refusal: the right password, the new one twice.
+	mark = run.mark()
+	run.type(aatlib.PASSWORD)
+	run.key("enter")
+	time.sleep(0.5)
+	fill(["aat-pass-1", "aat-pass-1"])
+	result = run.wait(r"ZSETTINGS USERS result request=\d+ errno=-?\d+", mark, 15)
+	time.sleep(1.0)
+	now = shadow_line()
+	item.step("the right change", f"{result or 'no result'}; shadow {'changed' if now != before else 'kept'}")
+	run.shot(item, "right")
+	item.check(result and aatlib.number(result, "errno") == 0 and now != before, "the right change was not made")
+	# Done closes the popup.
+	run.key("enter")
+	time.sleep(0.5)
 	common.restore_shadow(run)
 	item.check(shadow_line() == before, "/etc/shadow was not put back")
 	item.step("put /etc/shadow back")
-	item.person("the messages under the fields in the screenshots (wrong, not accepted, changed)")
+	item.person("the steps and the messages in the screenshots (Step 1 of 2, differ, at least 8, wrong, changed)")
 
 
 def users_page_again(controls: dict) -> dict:

@@ -31,3 +31,9 @@ build: zedBSD の passkey・passkey-fido2・sessiond・settings・wayland warnin
 設計との違い: 「Sign-in Methods」は button の先の popup の checkbox ではなく、Users の頁の card の switch にし、押すと password の popup（Security Keys の頁の「Sign in with a security key」と同じ形）。console・su・sudo・SSH は passkey を通らないので変えていない。
 
 再開点: T1 の結果を Q1 が判定（PASS で cleared）。5330 の UAT は p002（beta2.md の「次の UAT」の 8）。
+
+## T1-523 の FAIL の直し（2026-10-10 P1、agent/p1）
+
+- sign-in-methods 手順 8（password を外しても lock に Password の pill、styles=7）: **製品**。libkeiland-backend-zedbsd の `session_take_styles` が STYLES の答えに password を常に足し、greeter の `greeter_styles_take` も `| PASSWORD` していた。backend は `password` の語も読んで 0 から組み立て（空の答えは 0 → `kl_backend_session_styles_get` が password）、greeter は答えのままにし（何も無ければ password）、提示されない style からは最初に提示される style（password → PIN → 鍵）へ移る（`greeter_first_style`）。`greeter_next_style` は順の輪で提示される次の物。PIN の止め（`pin-off`）で password も無ければ「That way to sign in is turned off. Use another.」と最初の style。試験: `plan/ws131/tests/host-session.c` に `STYLES pin fido2` → PIN|KEY と空の STYLES → password（67/67 PASS）。
+- change-password の AAT の helper（`plan/tools/aat/scenarios/helpers_apps.py`）を popup のウィザード（control 400、Step 1 の今の password → Step 2 の新しい物 2 回、Tab、Esc）に書き直した: 1 開く、2 不一致・3 短い（request が出ない）、4 今の password の誤り（request と errno≠0、shadow 不変）、5 正しい変更（errno=0、shadow が変わる）、Done、shadow を戻す。
+- build: zedBSD の wayland（config/current-uat.mk）warning 0、style-check の増え 0。QEMU は T1 の再試験待ち。

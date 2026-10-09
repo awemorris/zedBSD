@@ -8,7 +8,10 @@
 #  2. The greeter offers the password and the key (KWL GREETER styles=5): greeter.png.  A click on its pill under the
 #     field takes the key (style=4, "Security key PIN"): key.png.  A PIN of three is not sent ("at least four").
 #  3. A PIN of four is sent: passkey-fido2 finds no key that holds the credential (the test kernel's loopback key does
-#     not speak CTAP2): SESSIOND AUTH fail ... reason=no-key, the greeter says so: no-key.png.
+#     not speak CTAP2).  With no reader it fails at once (reason=no-key); with a card reader's slot (the image's) it
+#     says "touch" and waits for a card held to the reader for the touch's time, then fails (reason=timeout:
+#     ws199-p001 section 5 and R3, the card tapped during the attempt).  Either way SESSIOND AUTH fail and the
+#     greeter's answer=FAIL say so: no-key.png.
 #  4. kei logs in with the password; Settings' Security Keys page (ws199-p001) lists the key: settings.png.
 #  5. No log has a PIN or a password.
 #
@@ -104,8 +107,8 @@ expect short-pin '^0$' "$(guest "grep -c 'KWL GREETER auth user=kei style=4' /va
 # 3. A PIN of four goes; no key holds the credential.
 keys '<backspace>' '<backspace>' '<backspace>' '4321' '\n'
 expect_log /var/log/greeter.log 'KWL GREETER auth user=kei style=4' 5
-expect_log /var/log/sessiond.log 'SESSIOND AUTH fail user=kei .*reason=no-key' 45
-expect_log /var/log/greeter.log 'KWL GREETER answer=FAIL reason=no-key' 10
+expect_log /var/log/sessiond.log 'SESSIOND AUTH fail user=kei .*reason=(no-key|timeout)' 100
+expect_log /var/log/greeter.log 'KWL GREETER answer=FAIL reason=(no-key|timeout)' 10
 pointer move 1270 790 sleep 300
 check "$out/no-key.png" >/dev/null
 
