@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i11のdisplay owner/2-plane/clock/copy FIFO/登録を実装しhost4/y-n build PASS。main統合とi12のV3D電源/MMU/jobへ進む。p006のkernel実行器/compilerも承認済みscope。実機R0/P1/P2/P3/P5とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i11 evidence](execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
+Resume point: i11 displayはmain40ce86ac0へ統合済み。i12のnative V1〜V10、MMU/cache/IRQ、bin→render/overflow/TFU/CSD、boot診断を実装しhost/XML/rpi4 y-n build PASS。i12のmain統合後、i13の二device resource/share/worker/GPU APIへ進む。p006のkernel実行器/compilerも承認済み。実機R0/P1/P2/P3/P5/V1〜V10とconsole RAM寿命はユーザーが後で確認、未達を保持。Master/共有記録/T1投影はQ1担当。[i12 evidence](execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -115,3 +115,13 @@ mailbox依存と初期表示R0成果を最新mainへ統合済み（dde7c1ba7）�
 ## i11: displayのruntime接続（2026-10-09）
 
 2つの恒久buffer owner、copy present/lease/固定modeのdevice登録、2-planeの位置/alphaとclockの前後処理、P1/P2/P3の実boot診断を追加。host4 PASS、y/n build warning/error0、software部分のみcleared。p003 whole acceptanceとWS completedは実機/console RAM寿命/V3D/Vulkan/最終監査待ち。main統合とi12へ継続する。[結果/再開](execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
+
+
+## i11統合とV3Dの再開（2026-10-09）
+
+i11はmain40ce86ac0へ統合、統合版host4とrpi4 y/n build PASS。i12でfixed firmwareのnative PM/reset/clock providerを検証するV1/V2とreset部品をbootへ接続しhost/build確認。V3D registerはまだ読まず、次にV3〜V10を接続する。実機whole acceptance/Vulkan/compiler/最終監査は残る。[詳細](execution-20261009.md#i11のmain統合とi12の再開2026-10-09)。
+
+
+## i12: native V3Dのruntime接続（2026-10-09）
+
+V1〜V10とtrusted CL/TFU/CSD runnerを実装し、actual source host/clear XML/rpi4 y-n buildがPASS、warning/error0。p005へ渡すcallerのbuffer/VA保持・retired=falseのquarantine・common recovery後のrelease、p006のprivate lowering契約を各Phaseへ記録。i12のmain統合確認後にi13へ継続する。実機/console RAM寿命/Vulkan/compiler/最終監査は未達、WS incomplete/p004 in-progressを保持する。[exact scope/commands/制限](execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。

@@ -11,7 +11,7 @@
  * The platform calls the driver once while it discovers the board's devices.
  * The driver opens the firmware's device tree, honors rpi4gpu.off=1, and runs
  * P0 discovery, N0 output readout and R0 initial scanout for the display,
- * and V0 discovery for the V3D engine. Either part may be missing (QEMU's raspi4b emulates
+ * and V0 discovery plus native PM/clock preparation for the V3D engine. Either part may be missing (QEMU's raspi4b emulates
  * neither) without stopping the other or the boot.
  */
 
@@ -119,6 +119,29 @@ drv_bcm2711_gpu_attach(
 
 	/* Runs the V3D engine's discovery, whatever became of the display. */
 	v3d_error = bcm2711_v3d_discover(&fdt, &attach_v3d);
+
+	/* Native PM and clocks must be established before any engine identification read. */
+	if (v3d_error == 0) {
+		v3d_error = bcm2711_v3d_power_prepare(&fdt, &attach_v3d);
+		if (v3d_error == 0)
+			v3d_error = bcm2711_v3d_power_start(&attach_v3d);
+		if (v3d_error != 0)
+			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V1/V2 not ready (%d)", v3d_error);
+	}
+
+	/* Initializes translations and serviced IRQs only after native power is ready. */
+	if (v3d_error == 0) {
+		v3d_error = bcm2711_v3d_hardware_start(&attach_v3d);
+		if (v3d_error != 0)
+			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V3/V6 not ready (%d)", v3d_error);
+	}
+
+	/* Runs trusted native diagnostics before publishing any render-device client. */
+	if (v3d_error == 0) {
+		v3d_error = bcm2711_v3d_diagnostic(&attach_v3d);
+		if (v3d_error != 0)
+			bcm2711_stage_mark(BCM2711_FAMILY_V3D, "V7 diagnostic failed (%d)", v3d_error);
+	}
 
 	/* Reports a board where neither part could be prepared. */
 	if (display_error != 0 && v3d_error != 0)

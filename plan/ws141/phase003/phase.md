@@ -102,3 +102,8 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 allocator/reference owner、2-plane/clock/adoption、ordinary copy presentのdisplay opsとboot登録を実装。起動のP1で1秒frame観測、P2でgreen/purple stripe付きprivate targetをflip、P3で右上半透明checkerを合成し、それぞれconsole復帰を確認してP5へ登録。各段のstop/pauseを保持。host4 PASS・driver y/n build warning/error0・全文C/補助style/改名確認済み。i11のsoftware部分だけcleared、実機/RAM寿命/Q1-T1回帰待ちでwhole Phaseはin-progress。[exact evidence/制限](../execution-20261009.md#i11-display所有合成登録のsoftware結果2026-10-09)。
 
 実機ではR0 ok/current43→P1のcount（既存modeのrefreshと照合）→P2の2色と復帰→P3の透過/位置と復帰→P5 nodeを写真で確認する。stop=P1はR0まで、stop=P2はP1まで、stop=P3はP2と復帰まで、stop=P5はP3と復帰まで。実機はユーザーが後で実施と承認済み、今回写真/scanout成功の主張はない。p005はこのdisplay software出力へ接続し、Keiland renderingはp006後。[WS全体の変更](../ws.md#完成までの自走p006の実装範囲確定2026-10-09)。
+
+
+## i11統合確認（2026-10-09）
+
+実装d0141f6e2を専用worktreeでhost4/y-n build確認し、Q1の後続更新も保持してmain40ce86ac0へ統合。i11部分cleared、実機/console RAM寿命は未達のまま。i12でFDT name lookupを共通internal helperへ移すが、displayのlookup/translation契約は保つ。[結果](../execution-20261009.md#i11のmain統合とi12の再開2026-10-09)。

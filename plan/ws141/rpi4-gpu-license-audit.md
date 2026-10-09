@@ -158,6 +158,7 @@ BCM2711 ARM Peripherals の条件: 「Raspberry Pi の製品と一緒に使う�
 | `src/broadcom/vulkan/v3dv_queue.c` | `5a2b307ca9db3f9dcda0fa5bf6b5cb22fe84f664d893c7e3f5c60cbc00a254ac` | MIT | 手順の参照（submit の埋め方） |
 | `src/broadcom/vulkan/v3dvx_cmd_buffer.c` | `8e314e2c49360193d888de3ad07b0a2755c63def7dab94c31893007fac561e9c` | MIT | 手順の参照（bin の CL の前置き） |
 | `src/broadcom/vulkan/v3dvx_meta_common.c` | `ffaf743923992b5b1657a131552f81ed9131adb4083d1a75b7444fb48f4c940c` | MIT | 手順の参照（render の CL、clear と store） |
+| `src/broadcom/vulkan/v3dv_meta_copy.c` | `e9683a98530ffa2ebe931638ff154aa35db0353666155aba280c2096abb6f1b0` | MIT（file先頭のRaspberry Pi Ltd許諾を確認、2026-10-09追加） | 固定Mesa commitからignored tempへ取得。image/TFUの呼び手を読むだけ、code/objectの取り込み無し |
 | `src/broadcom/vulkan/v3dvx_queue.c` | `3c5e22ad6e8164433fbe1ac6a76f2a37c540f9bc45a3afb315180c8afe8028c5` | MIT | 手順の参照（何もしない job） |
 | `src/broadcom/simulator/v3dx_simulator.c` | `c4bd6ac8ca1342b2266535540b55b7b79bc9dff5d2ae99a0c173402019c4b163` | MIT | 手順の参照（完了の poll、cache の flush） |
 | `src/broadcom/drm-shim/v3d_noop.c` | `b3a0b944e6b83789c2d1c30022a81a41fa5b2e9e27ae003631e03ec4253c663d` | MIT | 識別の register の期待値 |

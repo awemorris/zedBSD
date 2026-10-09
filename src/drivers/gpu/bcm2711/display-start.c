@@ -44,7 +44,6 @@ static struct bcm2711_display_program start_program;
 static bool start_attempted;
 
 static int map_regions(const struct drv_fdt *fdt, const struct bcm2711_display *display);
-static int named_window(const struct drv_fdt *fdt, uint32_t node, const char *name, struct bcm2711_window *window);
 static int capture_mode(const struct bcm2711_display *display, struct bcm2711_display_mode *mode, uint32_t *order, uint32_t *max_core_hz);
 static uint32_t encoder_read(uint32_t base, uint32_t role, uint32_t offset);
 static int capture_avi(uint32_t base, struct bcm2711_display_mode *mode);
@@ -166,7 +165,7 @@ map_regions(
 		for (role = 0; role < BCM2711_ENCODER_REGIONS; role++) {
 			/* Resolves and bounds one register role before mapping it. */
 			window = &start_windows[base + role];
-			error = named_window(fdt, node, start_regions[role], window);
+			error = bcm2711_fdt_named_window(fdt, node, start_regions[role], window);
 			if (error != 0)
 				return error;
 			if (window->size < start_spans[role])
@@ -193,55 +192,6 @@ map_regions(
 
 	/* Succeeded: every future register access has a bounded mapped window. */
 	return 0;
-}
-
-/* Finds a reg index from the bounded, NUL-terminated reg-names string list. */
-static int
-named_window(
-	const struct drv_fdt *fdt,
-	uint32_t node,
-	const char *name,
-	struct bcm2711_window *window)
-{
-	const uint8_t *names;
-	uint32_t length;
-	uint32_t first;
-	uint32_t end;
-	uint32_t index;
-	int comparison;
-	int error;
-
-	/* Requires the binding's role names instead of assuming an address order. */
-	error = drv_fdt_property(fdt, node, "reg-names", &names, &length);
-	if (error != 0)
-		return error;
-	first = 0;
-	index = 0;
-	while (first < length) {
-		/* Proves termination inside the property before comparing the string. */
-		end = first;
-		while (end < length && names[end] != 0)
-			end++;
-		if (end == length)
-			return EINVAL;
-		comparison = kern_strcmp((const char *)names + first, name);
-		if (comparison == 0) {
-			/* Resolves the matching reg entry through the existing translation helper. */
-			error = bcm2711_fdt_window(fdt, node, index, window);
-			if (error != 0)
-				return error;
-
-			/* Succeeded: the window corresponds to the requested hardware role. */
-			return 0;
-		}
-
-		/* Advances only past a string proved to be completely inside the property. */
-		first = end + 1U;
-		index++;
-	}
-
-	/* A missing role cannot be replaced by an assumed register base. */
-	return ENOENT;
 }
 
 /* Captures and cross-checks a progressive RGB8 mode on the selected output. */
