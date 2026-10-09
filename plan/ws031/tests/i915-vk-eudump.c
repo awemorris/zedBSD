@@ -12,19 +12,19 @@
 void *kern_calloc(size_t count, size_t size) { return calloc(count, size); }
 void kern_free(void *pointer) { free(pointer); }
 
-#include "../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../src/drivers/gpu/i915/compiler/compile.c"
 
 int
 main(int argc, char **argv)
 {
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 	struct i915_shader_binary producer;
-	enum i915_shader_stage stage;
+	enum drv_gpu_shader_stage stage;
 	uint32_t index;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 	uint32_t *words;
 	long bytes;
 	FILE *f;
@@ -43,13 +43,13 @@ main(int argc, char **argv)
 		return 2;
 	fclose(f);
 
-	stage = I915_STAGE_FRAGMENT;
+	stage = DRV_GPU_STAGE_FRAGMENT;
 	if (strcmp(argv[1], "vertex") == 0)
-		stage = I915_STAGE_VERTEX;
+		stage = DRV_GPU_STAGE_VERTEX;
 	if (strcmp(argv[1], "geometry") == 0)
-		stage = I915_STAGE_GEOMETRY;
+		stage = DRV_GPU_STAGE_GEOMETRY;
 	memset(&diag, 0, sizeof(diag));
-	error = drv_i915_shader_parse(words, (size_t)bytes / 4U, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(words, (size_t)bytes / 4U, stage, &ir, &diag);
 	if (error != 0) {
 		fprintf(stderr, "parse: error %d (%s, opcode %u at word %u)\n", error,
 			diag.reason != NULL ? diag.reason : "?", diag.opcode, diag.word_offset);
@@ -57,10 +57,10 @@ main(int argc, char **argv)
 	}
 	/* a geometry shader's producer writes the locations it reads, in ascending order (the parser lists them so) */
 	memset(&producer, 0, sizeof(producer));
-	producer.stage = I915_STAGE_VERTEX;
+	producer.stage = DRV_GPU_STAGE_VERTEX;
 	for (index = 0U; index < ir->input_count && index < I915_SHADER_MAX_INPUTS; index++)
 		producer.varying_locations[producer.varying_count++] = ir->inputs[index].location;
-	if (stage == I915_STAGE_GEOMETRY)
+	if (stage == DRV_GPU_STAGE_GEOMETRY)
 		error = drv_i915_shader_compile_stage(ir, &producer, &binary);
 	else
 		error = drv_i915_shader_compile(ir, &binary);

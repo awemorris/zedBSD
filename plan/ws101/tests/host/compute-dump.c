@@ -47,7 +47,7 @@ kern_free(
 	free(pointer);
 }
 
-#include "../../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../../src/drivers/gpu/i915/compiler/compile.c"
 #include "../../../ws075/tests/guard/scoreboard-check.h"
@@ -77,8 +77,8 @@ main(
 	int argc,
 	char **argv)
 {
-	struct i915_compile_diagnostic diagnostic;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 	const char *path;
 	uint32_t *code;
@@ -114,7 +114,7 @@ main(
 
 	/* Parses it as a compute shader. */
 	memset(&diagnostic, 0, sizeof(diagnostic));
-	error = drv_i915_shader_parse(code, words, I915_STAGE_COMPUTE, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_COMPUTE, &ir, &diagnostic);
 
 	/* A module that must be refused passes when the parser or the compiler refuses it. */
 	if (refuse != 0) {
@@ -137,7 +137,7 @@ main(
 		       diagnostic.reason != NULL ? diagnostic.reason : "?", diagnostic.opcode);
 		return 1;
 	}
-	if (ir->stage != I915_STAGE_COMPUTE) {
+	if (ir->stage != DRV_GPU_STAGE_COMPUTE) {
 		printf("%s: FAIL not a compute shader\n", path);
 		return 1;
 	}

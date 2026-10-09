@@ -285,7 +285,7 @@ test_pipelines(void)
 	assert(pipeline != NULL);
 	assert(pipeline->bind_point == VK_PIPELINE_BIND_POINT_COMPUTE);
 	assert(pipeline->kernels_ready != 0);
-	assert(pipeline->cs_binary != NULL && pipeline->cs_binary->stage == I915_STAGE_COMPUTE);
+	assert(pipeline->cs_binary != NULL && pipeline->cs_binary->stage == DRV_GPU_STAGE_COMPUTE);
 	assert(pipeline->vs_binary == NULL && pipeline->fs_binary == NULL);
 	assert(pipeline->threads == 8U && pipeline->right_mask == 0xffU);
 	assert(pipeline->cs_binary->local_size[0] == 64U);

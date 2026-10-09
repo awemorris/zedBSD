@@ -148,7 +148,7 @@ static void
 i915_compile_geometry_interface(
 	struct i915_compile_state *state)
 {
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 	uint32_t index;
 	uint32_t control_bits;
 	uint32_t entry_bytes;
@@ -168,11 +168,11 @@ i915_compile_geometry_interface(
 	/* Lists the located per-vertex inputs read, for the pipeline to check against the vertex shader's varyings. */
 	for (index = 0U; index < state->ir->instruction_count; index++) {
 		inst = &state->ir->instructions[index];
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
-		if (inst->location == I915_IR_LOCATION_POSITION)
+		if (inst->location == DRV_GPU_IR_LOCATION_POSITION)
 			continue;
-		if (inst->location == I915_IR_LOCATION_POINT_SIZE)
+		if (inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE)
 			continue;
 		i915_compile_note(state, state->inputs, &state->input_count, COMPILE_MAX_INPUTS, inst->location);
 	}
@@ -193,7 +193,7 @@ i915_compile_geometry_interface(
 	 * ends one.
 	 */
 	control_bits = 0U;
-	if (state->ir->output_topology != I915_IR_OUTPUT_POINTS && state->ir->uses_end_primitive != 0U)
+	if (state->ir->output_topology != DRV_GPU_IR_OUTPUT_POINTS && state->ir->uses_end_primitive != 0U)
 		control_bits = state->ir->max_vertices;
 	state->gs_control_bits = control_bits;
 	state->gs_control_hwords = (control_bits + COMPILE_GS_HWORD_BITS - 1U) / COMPILE_GS_HWORD_BITS;
@@ -258,7 +258,7 @@ i915_compile_geometry_prologue(
 static void
 i915_compile_load_vertex_input(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_buf *code;
 	struct i915_eu_reg null;
@@ -276,7 +276,7 @@ i915_compile_load_vertex_input(
 	code = &state->code;
 
 	/* Only a geometry shader reads a vertex of its input primitive. */
-	if (state->ir->stage != I915_STAGE_GEOMETRY) {
+	if (state->ir->stage != DRV_GPU_STAGE_GEOMETRY) {
 		state->error = 1;
 		return;
 	}
@@ -290,7 +290,7 @@ i915_compile_load_vertex_input(
 
 	/* A constant vertex past the primitive's is inconsistent IR. */
 	chosen = 0;
-	if (inst->immediate == I915_IR_VERTEX_DYNAMIC)
+	if (inst->immediate == DRV_GPU_IR_VERTEX_DYNAMIC)
 		chosen = 1;
 	if (chosen == 0 && inst->immediate >= state->ir->vertices_in) {
 		state->error = 1;
@@ -368,7 +368,7 @@ i915_compile_load_vertex_input(
 static int
 i915_compile_vertex_slot(
 	const struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t *slot,
 	uint32_t *component)
 {
@@ -380,10 +380,10 @@ i915_compile_vertex_slot(
 		return ENOENT;
 
 	/* The position follows the header; the point size is the header's last dword; a located input is a varying. */
-	if (inst->location == I915_IR_LOCATION_POSITION) {
+	if (inst->location == DRV_GPU_IR_LOCATION_POSITION) {
 		*slot = 1U;
 		*component = inst->component;
-	} else if (inst->location == I915_IR_LOCATION_POINT_SIZE) {
+	} else if (inst->location == DRV_GPU_IR_LOCATION_POINT_SIZE) {
 		*slot = 0U;
 		*component = COMPILE_VUE_POINT_SIZE;
 	} else {
@@ -407,12 +407,12 @@ i915_compile_vertex_slot(
 static void
 i915_compile_geometry_system(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	uint32_t dst;
 
 	/* A geometry thread has no other built-in; reading this one without asking for it is inconsistent IR. */
-	if (inst->component != I915_IR_SYSTEM_PRIMITIVE_ID || state->ir->uses_primitive_id == 0U) {
+	if (inst->component != DRV_GPU_IR_SYSTEM_PRIMITIVE_ID || state->ir->uses_primitive_id == 0U) {
 		state->error = 1;
 		return;
 	}
@@ -478,7 +478,7 @@ i915_compile_terminate_geometry(
 static void
 i915_compile_emit_vertex(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_buf *code;
 	struct i915_eu_reg null;
@@ -770,7 +770,7 @@ i915_compile_control_write(
 static void
 i915_compile_end_primitive(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_buf *code;
 	struct i915_eu_reg null;
@@ -873,7 +873,7 @@ i915_compile_describe_geometry(
 
 	/* Points carry stream IDs in their control data; strips cut bits. */
 	binary->control_data_format = COMPILE_GS_CONTROL_CUT;
-	if (state->ir->output_topology == I915_IR_OUTPUT_POINTS)
+	if (state->ir->output_topology == DRV_GPU_IR_OUTPUT_POINTS)
 		binary->control_data_format = COMPILE_GS_CONTROL_SID;
 
 	/* What the payload carries and what the clipper reads from the VUE. */

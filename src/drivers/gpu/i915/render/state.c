@@ -1057,14 +1057,14 @@ drv_i915_gfx_emit_vertex_input(
 	sgvs = 0U;
 	for (index = 0U; index < count; index++) {
 		/* gl_VertexIndex and gl_InstanceIndex: the fetcher writes component x of the element (3DSTATE_VF_SGVS). */
-		if (kernels->vs_inputs[index] == I915_SHADER_LOCATION_VERTEX_INDEX) {
+		if (kernels->vs_inputs[index] == DRV_GPU_SHADER_LOCATION_VERTEX_INDEX) {
 			sgvs |= index | GEN12_SGVS_VERTEX_ID_ENABLE;
 			order[index] = I915_GFX_NO_ATTRIBUTE;
 			continue;
 		}
 
 		/* gl_InstanceIndex likewise, its element named in the instance half of the dword. */
-		if (kernels->vs_inputs[index] == I915_SHADER_LOCATION_INSTANCE_INDEX) {
+		if (kernels->vs_inputs[index] == DRV_GPU_SHADER_LOCATION_INSTANCE_INDEX) {
 			sgvs |= (index << GEN12_SGVS_INSTANCE_ID_SHIFT) | GEN12_SGVS_INSTANCE_ID_ENABLE;
 			order[index] = I915_GFX_NO_ATTRIBUTE;
 			continue;
@@ -1083,6 +1083,7 @@ drv_i915_gfx_emit_vertex_input(
 			return EINVAL;
 		}
 
+		/* Retains the attribute index selected for this shader input location. */
 		order[index] = other;
 	}
 
@@ -1651,6 +1652,8 @@ drv_i915_gfx_emit_depth(
 			if (state->framebuffer->views[state->pass->depth_attachment]->layer_count > 1U)
 				layers = state->framebuffer->views[state->pass->depth_attachment]->layer_count;
 		}
+
+		/* Uses the image slice stride to place each depth layer. */
 		rows = depth->slice_rows;
 		if (rows == 0U)
 			rows = (depth->height + 3U) & ~3U;
@@ -2462,6 +2465,7 @@ i915_state_write_surfaces(
 					  error);
 				return error;
 			}
+
 			continue;
 		}
 
@@ -2717,7 +2721,7 @@ i915_state_write_push(
 			return EINVAL;
 
 		/* The system storage buffer of a compute kernel (the group counts) is the dispatch's to fill. */
-		if (block->set == I915_IR_SYSTEM_SET)
+		if (block->set == DRV_GPU_IR_SYSTEM_SET)
 			continue;
 
 		/* Finds the buffer bound at the block's set and binding. */
@@ -2810,6 +2814,7 @@ i915_state_viewport_source(
 			return EINVAL;
 		}
 
+		/* Publishes the viewport set by the recorded dynamic command. */
 		*viewport = state->viewport;
 	}
 
@@ -2821,6 +2826,7 @@ i915_state_viewport_source(
 			return EINVAL;
 		}
 
+		/* Publishes the scissor set by the recorded dynamic command. */
 		*scissor = &state->scissor;
 	}
 
@@ -2936,6 +2942,8 @@ i915_state_write_blend(
 	uint32_t disable;
 	int integer;
 	int blends;
+	int takes_logic;
+	uint32_t format;
 
 	/* Works out the hardware blend of attachment 0. */
 	pipeline = state->pipeline;
@@ -2945,12 +2953,12 @@ i915_state_write_blend(
 	entry = 0U;
 	if (equation.enable != 0U) {
 		entry |= GEN12_BLEND_ENABLE |
-		    (equation.src_color << GEN12_BLEND_SRC_FACTOR_SHIFT) |
-		    (equation.dst_color << GEN12_BLEND_DST_FACTOR_SHIFT) |
-		    (equation.color_function << GEN12_BLEND_COLOR_FUNCTION_SHIFT) |
-		    (equation.src_alpha << GEN12_BLEND_SRC_ALPHA_FACTOR_SHIFT) |
-		    (equation.dst_alpha << GEN12_BLEND_DST_ALPHA_FACTOR_SHIFT) |
-		    (equation.alpha_function << GEN12_BLEND_ALPHA_FUNCTION_SHIFT);
+			 (equation.src_color << GEN12_BLEND_SRC_FACTOR_SHIFT) |
+			 (equation.dst_color << GEN12_BLEND_DST_FACTOR_SHIFT) |
+			 (equation.color_function << GEN12_BLEND_COLOR_FUNCTION_SHIFT) |
+			 (equation.src_alpha << GEN12_BLEND_SRC_ALPHA_FACTOR_SHIFT) |
+			 (equation.dst_alpha << GEN12_BLEND_DST_ALPHA_FACTOR_SHIFT) |
+			 (equation.alpha_function << GEN12_BLEND_ALPHA_FUNCTION_SHIFT);
 	}
 
 	/*
@@ -2987,10 +2995,15 @@ i915_state_write_blend(
 		 * blends or not, an integer one too; a float or an sRGB target
 		 * passes the colour through (Vulkan, VkLogicOp; anv).
 		 */
-		if (pipeline->logic_op_enable != 0U &&
-		    i915_state_format_takes_logic_op(i915_state_target_format(state, slot, target)) != 0)
-			words[2U + 2U * slot] |= GEN12_BLEND_LOGIC_OP_ENABLE |
-			    (i915_blend_logic_op(pipeline->logic_op) << GEN12_BLEND_LOGIC_OP_FUNCTION_SHIFT);
+		if (pipeline->logic_op_enable != 0U) {
+			/* Resolves this attachment's format before selecting its logic operation. */
+			format = i915_state_target_format(state, slot, target);
+			takes_logic = i915_state_format_takes_logic_op(format);
+			if (takes_logic != 0) {
+				words[2U + 2U * slot] |= GEN12_BLEND_LOGIC_OP_ENABLE |
+							 (i915_blend_logic_op(pipeline->logic_op) << GEN12_BLEND_LOGIC_OP_FUNCTION_SHIFT);
+			}
+		}
 	}
 
 	/* Takes the pipeline's blend constants, or the dynamic ones vkCmdSetBlendConstants set. */
@@ -3051,15 +3064,20 @@ i915_blend_equation(
 	}
 
 	/* Notes an equation that reads the second colour source of a dual-source write. */
-	second = 0;
-	if (i915_blend_uses_second_source(pipeline->blend_src_color) != 0) {
-		second = 1;
-	} else if (i915_blend_uses_second_source(pipeline->blend_dst_color) != 0) {
-		second = 1;
-	} else if (i915_blend_uses_second_source(pipeline->blend_src_alpha) != 0) {
-		second = 1;
-	} else if (i915_blend_uses_second_source(pipeline->blend_dst_alpha) != 0) {
-		second = 1;
+	second = i915_blend_uses_second_source(pipeline->blend_src_color);
+	if (second == 0) {
+		/* Tries the destination colour only when the source colour uses no second input. */
+		second = i915_blend_uses_second_source(pipeline->blend_dst_color);
+	}
+
+	/* Tries alpha factors only while neither colour factor needs a second source. */
+	if (second == 0) {
+		second = i915_blend_uses_second_source(pipeline->blend_src_alpha);
+	}
+
+	/* Keeps the destination alpha lookup last in the original short-circuit order. */
+	if (second == 0) {
+		second = i915_blend_uses_second_source(pipeline->blend_dst_alpha);
 	}
 
 	/* An equation of the second source blends only when the fragment kernel writes one (dual source, ws031-p032). */
@@ -3168,11 +3186,15 @@ i915_state_target_format(
 	const struct i915_gfx_image *target)
 {
 	const struct i915_gfx_view *view;
+	uint32_t format;
 
 	/* The slot's view. */
 	view = i915_state_target_view(state, slot);
-	if (view != NULL)
-		return drv_i915_gfx_view_format(view);
+	if (view != NULL) {
+		/* Uses the retained attachment view's selected format. */
+		format = drv_i915_gfx_view_format(view);
+		return format;
+	}
 
 	/* A test's state draws slot 0 into the target it gives. */
 	if (slot == 0U && state->framebuffer == NULL && target != NULL)

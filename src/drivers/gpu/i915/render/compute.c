@@ -201,7 +201,7 @@ drv_i915_gfx_dispatch(
  * IDs.
  *
  * The push data comes from the compute bind point's sets.  The system
- * storage buffer (I915_IR_SYSTEM_SET) points at the group counts: the
+ * storage buffer (DRV_GPU_IR_SYSTEM_SET) points at the group counts: the
  * slot's, or an indirect dispatch's in its buffer.  Returns EINVAL when the
  * sets do not give the kernel its buffers or the CURBE does not fit the
  * slot.
@@ -286,7 +286,7 @@ drv_i915_gfx_dispatch_write(
 	address[2] = I915_COMPUTE_GROUP_COUNT_BYTES;
 	for (index = 0U; index < binary->block_count; index++) {
 		block = &binary->blocks[index];
-		if (block->set == I915_IR_SYSTEM_SET && block->address != 0U) {
+		if (block->set == DRV_GPU_IR_SYSTEM_SET && block->address != 0U) {
 			kern_memcpy(curbe + block->push_offset, address, sizeof(address));
 		}
 	}
@@ -465,7 +465,7 @@ i915_compute_names_storage(
 
 	/* An address block other than the system buffer (the group counts) is an application's storage buffer. */
 	for (index = 0U; index < binary->block_count; index++) {
-		if (binary->blocks[index].address != 0U && binary->blocks[index].set != I915_IR_SYSTEM_SET)
+		if (binary->blocks[index].address != 0U && binary->blocks[index].set != DRV_GPU_IR_SYSTEM_SET)
 			return 1;
 	}
 

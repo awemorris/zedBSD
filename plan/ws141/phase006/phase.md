@@ -217,3 +217,7 @@ SPIR-V/compiler/typed Vulkan/QueueSubmit/public caller stackの最終sourceを[p
 ## software統合の終了（2026-10-10）
 
 i14 compiler/Vulkan/Keiland software経路のsoftware/統合部分をcleared。final runtime/stack/全source監査とmain merge5eb8867f3を確認。whole Phaseの実機/Keiland条件は未達、Statusはin-progressを維持。[全結果と復帰条件](../execution-20261009.md#i15-main統合software実行の終了2026-10-10)。
+
+## 共通frontendへの移行（2026-10-10）
+
+ユーザーの明示指示でparser/IR依存を新[p008](../phase008/phase.md)のGPU共通moduleへ移す。V3D QPU backendとpublic Vulkan/Keiland契約は保持。静的改善と最終検証は[今回i16〜i18](../compiler-refactor-20261010.md)、実機whole acceptance未確認。

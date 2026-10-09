@@ -38,7 +38,7 @@ kern_free(void *pointer)
 	free(pointer);
 }
 
-#include "../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../src/drivers/gpu/i915/compiler/compile.c"
 #include "../../../src/drivers/gpu/i915/tests/fixtures/generality-shaders-gen.inc"
@@ -103,18 +103,18 @@ has_opcode(const struct i915_shader_binary *binary, uint32_t opcode)
 }
 
 static void
-compile_shader(const char *name, enum i915_shader_stage stage, uint32_t expect_math)
+compile_shader(const char *name, enum drv_gpu_shader_stage stage, uint32_t expect_math)
 {
 	uint32_t *spv;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 	int error;
 
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 
 	spv = load_spv(name, &words);
-	error = drv_i915_shader_parse(spv, words, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(spv, words, stage, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused: opcode %u at word %u: %s\n", name, diag.opcode, diag.word_offset, diag.reason != NULL ? diag.reason : "-");
 	assert(error == 0);
@@ -129,14 +129,14 @@ compile_shader(const char *name, enum i915_shader_stage stage, uint32_t expect_m
 	assert(binary->grf_used > COMPILE_FIRST_VALUE_GRF);
 
 	/* Every shader ends by sending its output and retiring the thread. */
-	assert(has_opcode(binary, stage == I915_STAGE_VERTEX ? EU_OP_SEND : EU_OP_SENDC));
+	assert(has_opcode(binary, stage == DRV_GPU_STAGE_VERTEX ? EU_OP_SEND : EU_OP_SENDC));
 
 	/* The vertex shader's rotation lowers to math instructions. */
 	if (expect_math != 0U)
 		assert(has_opcode(binary, EU_OP_MATH));
 
 	drv_i915_shader_binary_free(binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(spv);
 }
 
@@ -157,13 +157,13 @@ inst_field(const uint32_t *inst, unsigned high, unsigned low)
 	return value;
 }
 
-static struct i915_shader_ir *
-hand_ir(struct i915_shader_ir_inst *insts, unsigned count)
+static struct drv_gpu_shader_ir *
+hand_ir(struct drv_gpu_shader_ir_inst *insts, unsigned count)
 {
-	static struct i915_shader_ir ir;
+	static struct drv_gpu_shader_ir ir;
 
 	memset(&ir, 0, sizeof(ir));
-	ir.stage = I915_STAGE_VERTEX;
+	ir.stage = DRV_GPU_STAGE_VERTEX;
 	ir.instructions = insts;
 	ir.instruction_count = count;
 	ir.value_count = 16U;
@@ -179,7 +179,7 @@ hand_ir(struct i915_shader_ir_inst *insts, unsigned count)
 static void
 test_fsub_is_add_with_second_source_negated(void)
 {
-	struct i915_shader_ir_inst insts[3];
+	struct drv_gpu_shader_ir_inst insts[3];
 	struct i915_shader_binary *binary;
 	const uint32_t *inst;
 	unsigned src0_nr, src1_nr;
@@ -187,9 +187,9 @@ test_fsub_is_add_with_second_source_negated(void)
 
 	/* two loads first, so %1 and %2 own known registers whatever order the operands are visited in */
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = I915_IR_LOAD_INPUT; insts[0].dst = 1U;
-	insts[1].op = I915_IR_LOAD_INPUT; insts[1].dst = 2U;
-	insts[2].op = I915_IR_FSUB;
+	insts[0].op = DRV_GPU_IR_LOAD_INPUT; insts[0].dst = 1U;
+	insts[1].op = DRV_GPU_IR_LOAD_INPUT; insts[1].dst = 2U;
+	insts[2].op = DRV_GPU_IR_FSUB;
 	insts[2].dst = 3U; insts[2].src[0] = 1U; insts[2].src[1] = 2U;      /* %3 = %1 - %2 */
 	error = drv_i915_shader_compile(hand_ir(insts, 3U), &binary);
 	assert(error == 0);
@@ -204,7 +204,7 @@ test_fsub_is_add_with_second_source_negated(void)
 	drv_i915_shader_binary_free(binary);
 
 	/* and an ADD stays an ADD with no modifier */
-	insts[2].op = I915_IR_FADD;
+	insts[2].op = DRV_GPU_IR_FADD;
 	error = drv_i915_shader_compile(hand_ir(insts, 3U), &binary);
 	assert(error == 0);
 	inst = body(binary) + 2U * 4U;
@@ -217,15 +217,15 @@ test_fsub_is_add_with_second_source_negated(void)
 static void
 test_fneg_and_push_operands(void)
 {
-	struct i915_shader_ir_inst insts[3];
+	struct drv_gpu_shader_ir_inst insts[3];
 	struct i915_shader_binary *binary;
 	const uint32_t *inst;
 	int error;
 
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = I915_IR_LOAD_PUSH; insts[0].dst = 1U; insts[0].immediate = 4U;   /* the SECOND float */
-	insts[1].op = I915_IR_FNEG; insts[1].dst = 2U; insts[1].src[0] = 1U;
-	insts[2].op = I915_IR_STORE_OUTPUT; insts[2].src[0] = 2U; insts[2].location = 0U; insts[2].component = 3U;
+	insts[0].op = DRV_GPU_IR_LOAD_PUSH; insts[0].dst = 1U; insts[0].immediate = 4U;   /* the SECOND float */
+	insts[1].op = DRV_GPU_IR_FNEG; insts[1].dst = 2U; insts[1].src[0] = 1U;
+	insts[2].op = DRV_GPU_IR_STORE_OUTPUT; insts[2].src[0] = 2U; insts[2].location = 0U; insts[2].component = 3U;
 	error = drv_i915_shader_compile(hand_ir(insts, 3U), &binary);
 	assert(error == 0);
 	inst = body(binary);                                            /* MOV r16 <- r2.4<0;1,0> */
@@ -251,18 +251,18 @@ test_fneg_and_push_operands(void)
 static void
 test_register_lifetime(void)
 {
-	struct i915_shader_ir_inst insts[6];
+	struct drv_gpu_shader_ir_inst insts[6];
 	struct i915_shader_binary *binary;
 	const uint32_t *inst;
 	int error;
 
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = I915_IR_LOAD_INPUT; insts[0].dst = 1U;                                   /* r16, read at 2 and 4 */
-	insts[1].op = I915_IR_LOAD_INPUT; insts[1].dst = 2U; insts[1].component = 1U;          /* r17, last read at 2 */
-	insts[2].op = I915_IR_FMUL; insts[2].dst = 3U; insts[2].src[0] = 1U; insts[2].src[1] = 2U;  /* r18 */
-	insts[3].op = I915_IR_CONST; insts[3].dst = 4U; insts[3].immediate = 0x40000000U;      /* takes r17 (free), NOT r16 */
-	insts[4].op = I915_IR_FSUB; insts[4].dst = 5U; insts[4].src[0] = 1U; insts[4].src[1] = 4U;
-	insts[5].op = I915_IR_STORE_OUTPUT; insts[5].src[0] = 5U;
+	insts[0].op = DRV_GPU_IR_LOAD_INPUT; insts[0].dst = 1U;                                   /* r16, read at 2 and 4 */
+	insts[1].op = DRV_GPU_IR_LOAD_INPUT; insts[1].dst = 2U; insts[1].component = 1U;          /* r17, last read at 2 */
+	insts[2].op = DRV_GPU_IR_FMUL; insts[2].dst = 3U; insts[2].src[0] = 1U; insts[2].src[1] = 2U;  /* r18 */
+	insts[3].op = DRV_GPU_IR_CONST; insts[3].dst = 4U; insts[3].immediate = 0x40000000U;      /* takes r17 (free), NOT r16 */
+	insts[4].op = DRV_GPU_IR_FSUB; insts[4].dst = 5U; insts[4].src[0] = 1U; insts[4].src[1] = 4U;
+	insts[5].op = DRV_GPU_IR_STORE_OUTPUT; insts[5].src[0] = 5U;
 	error = drv_i915_shader_compile(hand_ir(insts, 6U), &binary);
 	assert(error == 0);
 	inst = body(binary) + 3U * 4U;
@@ -278,35 +278,35 @@ test_register_lifetime(void)
 static void
 test_not_lowered_ir_is_refused(void)
 {
-	struct i915_shader_ir_inst insts[1];
+	struct drv_gpu_shader_ir_inst insts[1];
 	struct i915_shader_binary *binary;
 	int error;
 
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = (enum i915_shader_ir_op)0x7fff;
+	insts[0].op = (enum drv_gpu_shader_ir_op)0x7fff;
 	insts[0].dst = 3U; insts[0].src[0] = 1U; insts[0].src[1] = 2U;
 	binary = (struct i915_shader_binary *)1;
 	error = drv_i915_shader_compile(hand_ir(insts, 1U), &binary);
 	assert(error == ENOTSUP && binary == NULL);
 
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = I915_IR_FADD; insts[0].dst = 3U; insts[0].src[0] = 1U; insts[0].src[1] = 2U;
+	insts[0].op = DRV_GPU_IR_FADD; insts[0].dst = 3U; insts[0].src[0] = 1U; insts[0].src[1] = 2U;
 	error = drv_i915_shader_compile(hand_ir(insts, 1U), &binary);
 	assert(error == EINVAL && binary == NULL);
 
 	memset(insts, 0, sizeof(insts));
-	insts[0].op = I915_IR_LOAD_PUSH; insts[0].dst = 3U; insts[0].immediate = 8U;   /* push_bytes is 8 */
+	insts[0].op = DRV_GPU_IR_LOAD_PUSH; insts[0].dst = 3U; insts[0].immediate = 8U;   /* push_bytes is 8 */
 	error = drv_i915_shader_compile(hand_ir(insts, 1U), &binary);
 	assert(error == EINVAL && binary == NULL);
 
-	/* a stage past I915_STAGE_COUNT is inconsistent, not taken for a fragment shader (ws075-p007a a4) */
+	/* a stage past DRV_GPU_STAGE_COUNT is inconsistent, not taken for a fragment shader (ws075-p007a a4) */
 	{
-		struct i915_shader_ir *ir;
+		struct drv_gpu_shader_ir *ir;
 
 		memset(insts, 0, sizeof(insts));
-		insts[0].op = I915_IR_NOP;
+		insts[0].op = DRV_GPU_IR_NOP;
 		ir = hand_ir(insts, 1U);
-		ir->stage = I915_STAGE_COUNT;
+		ir->stage = DRV_GPU_STAGE_COUNT;
 		binary = (struct i915_shader_binary *)1;
 		error = drv_i915_shader_compile(ir, &binary);
 		assert(error == EINVAL && binary == NULL);
@@ -314,13 +314,13 @@ test_not_lowered_ir_is_refused(void)
 
 	/* more varyings than a VUE carries (COMPILE_MAX_VARYINGS, sixteen) */
 	{
-		struct i915_shader_ir_inst many[18];
+		struct drv_gpu_shader_ir_inst many[18];
 		unsigned k;
 
 		memset(many, 0, sizeof(many));
-		many[0].op = I915_IR_LOAD_PUSH; many[0].dst = 1U;
+		many[0].op = DRV_GPU_IR_LOAD_PUSH; many[0].dst = 1U;
 		for (k = 1U; k < 18U; k++) {
-			many[k].op = I915_IR_STORE_OUTPUT; many[k].src[0] = 1U; many[k].location = k - 1U;
+			many[k].op = DRV_GPU_IR_STORE_OUTPUT; many[k].src[0] = 1U; many[k].location = k - 1U;
 		}
 		error = drv_i915_shader_compile(hand_ir(many, 18U), &binary);
 		assert(error == ENOTSUP && binary == NULL);
@@ -337,11 +337,11 @@ test_vertex_shader_generates_eu(void)
 {
 	uint32_t *spv;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 
 	spv = load_spv("cuboid.vert.spv", &words);
-	assert(drv_i915_shader_parse(spv, words, I915_STAGE_VERTEX, &ir, NULL) == 0);
+	assert(drv_gpu_shader_parse(spv, words, DRV_GPU_STAGE_VERTEX, &ir, NULL) == 0);
 	assert(drv_i915_shader_compile(ir, &binary) == 0);
 	/*
 	 * one EU instruction to an IR instruction, plus: the prologue (4 header + 4 position + 4 for the one
@@ -364,7 +364,7 @@ test_vertex_shader_generates_eu(void)
 	printf("  cuboid.vert.spv: %u IR instructions -> %u EU instructions, value registers r%u..r%u\n",
 		ir->instruction_count, binary->code_bytes / 16U, COMPILE_FIRST_VALUE_GRF, binary->grf_used - 1U);
 	drv_i915_shader_binary_free(binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(spv);
 }
 
@@ -1144,13 +1144,13 @@ test_vertex_shader_eu_computes_the_shader(void)
 	const unsigned in0 = COMPILE_PAYLOAD_GRF + 1U;          /* after one register of push constants */
 	uint32_t *spv;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 	static struct eu_model m;
 	unsigned c, k;
 
 	spv = load_spv("cuboid.vert.spv", &words);
-	assert(drv_i915_shader_parse(spv, words, I915_STAGE_VERTEX, &ir, NULL) == 0);
+	assert(drv_gpu_shader_parse(spv, words, DRV_GPU_STAGE_VERTEX, &ir, NULL) == 0);
 	assert(drv_i915_shader_compile(ir, &binary) == 0);
 
 	/* every register starts as junk that differs per channel, so an unset read cannot look right */
@@ -1191,7 +1191,7 @@ test_vertex_shader_eu_computes_the_shader(void)
 	}
 	printf("  cuboid.vert.spv: the generated EU words compute gl_Position / texture_coordinate of the GLSL source for 8 vertices (instruction-semantics model, not hardware)\n");
 	drv_i915_shader_binary_free(binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(spv);
 }
 
@@ -1203,15 +1203,15 @@ test_vertex_shader_eu_computes_the_shader(void)
 
 /* Parses and compiles a shader file, printing a refusal before failing. */
 static struct i915_shader_binary *
-compile_file(const char *directory, const char *name, enum i915_shader_stage stage)
+compile_file(const char *directory, const char *name, enum drv_gpu_shader_stage stage)
 {
 	char path[512];
 	FILE *file;
 	long size;
 	uint32_t *code;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 	int error;
 
 	snprintf(path, sizeof(path), "%s/%s/%s", VK_REPO, directory, name);
@@ -1223,14 +1223,14 @@ compile_file(const char *directory, const char *name, enum i915_shader_stage sta
 	code = malloc((size_t)size);
 	assert(fread(code, 1, (size_t)size, file) == (size_t)size);
 	fclose(file);
-	error = drv_i915_shader_parse(code, (size_t)size / 4U, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(code, (size_t)size / 4U, stage, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused: opcode %u at word %u: %s\n", name, diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
 	assert(error == 0);
 	error = drv_i915_shader_compile(ir, &binary);
 	assert(error == 0);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 	return binary;
 }
@@ -1334,7 +1334,7 @@ test_eu_glsl_math(void)
 		struct i915_shader_binary *binary;
 
 		snprintf(name, sizeof(name), "%s.frag.spv", shaders[s]);
-		binary = compile_file(COMPILER_SHADERS, name, I915_STAGE_FRAGMENT);
+		binary = compile_file(COMPILER_SHADERS, name, DRV_GPU_STAGE_FRAGMENT);
 		for (batch = 0U; batch < 2U; batch++) {
 			for (i = 0U; i < 4U; i++) {
 				float values[8][4];
@@ -1383,7 +1383,7 @@ test_dual_source(void)
 	unsigned c;
 	unsigned k;
 
-	binary = compile_file(COMPILER_SHADERS, "dual.frag.spv", I915_STAGE_FRAGMENT);
+	binary = compile_file(COMPILER_SHADERS, "dual.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(binary->dual_source == 1U);
 
 	/* The one SENDC, which ends the thread. */
@@ -1429,9 +1429,9 @@ test_dual_source(void)
 
 	/* A second colour without the first is refused. */
 	{
-		struct i915_shader_ir *ir;
+		struct drv_gpu_shader_ir *ir;
 		struct i915_shader_binary *refused;
-		struct i915_compile_diagnostic diag;
+		struct drv_gpu_compile_diagnostic diag;
 		char path[512];
 		FILE *file;
 		long size;
@@ -1447,11 +1447,11 @@ test_dual_source(void)
 		spv = malloc((size_t)size);
 		assert(fread(spv, 1, (size_t)size, file) == (size_t)size);
 		fclose(file);
-		error = drv_i915_shader_parse(spv, (size_t)size / 4U, I915_STAGE_FRAGMENT, &ir, &diag);
+		error = drv_gpu_shader_parse(spv, (size_t)size / 4U, DRV_GPU_STAGE_FRAGMENT, &ir, &diag);
 		assert(error == 0);
 		error = drv_i915_shader_compile(ir, &refused);
 		assert(error != 0);
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		free(spv);
 	}
 	printf("  dual source: one SENDC, desc 0x%08x (Mesa brw_fb_write_desc: mlen 4, RT write, SIMD8 dual source, last), ex_mlen 4, src0 r124, src1 r120, both colours\n", desc);
@@ -1466,8 +1466,8 @@ static void
 test_int16_refusals(void)
 {
 	static const char *const names[5] = { "ubo.frag.spv", "ssbo.frag.spv", "push.frag.spv", "input.frag.spv", "output.frag.spv" };
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	char path[512];
 	FILE *file;
 	long size;
@@ -1486,7 +1486,7 @@ test_int16_refusals(void)
 		assert(fread(spv, 1, (size_t)size, file) == (size_t)size);
 		fclose(file);
 		memset(&diag, 0, sizeof(diag));
-		error = drv_i915_shader_parse(spv, (size_t)size / 4U, I915_STAGE_FRAGMENT, &ir, &diag);
+		error = drv_gpu_shader_parse(spv, (size_t)size / 4U, DRV_GPU_STAGE_FRAGMENT, &ir, &diag);
 		assert(error == ENOTSUP);
 		assert(diag.reason != NULL && strstr(diag.reason, "16-bit integer") != NULL);
 		free(spv);
@@ -1505,7 +1505,7 @@ test_eu_comparisons(void)
 	unsigned run, c;
 
 	m = malloc(sizeof(*m));
-	binary = compile_file(COMPILER_SHADERS, "compare.frag.spv", I915_STAGE_FRAGMENT);
+	binary = compile_file(COMPILER_SHADERS, "compare.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	for (run = 0U; run < 3U; run++) {
 		float x[8], y[8], values[8][4];
 
@@ -1595,8 +1595,8 @@ test_eu_branches_and_discard(void)
 	unsigned x0, y, c, divergent, all_gone, partial;
 
 	m = malloc(sizeof(*m));
-	branch = compile_file(COMPILER_SHADERS, "branch.frag.spv", I915_STAGE_FRAGMENT);
-	discard = compile_file(COMPILER_SHADERS, "discard.frag.spv", I915_STAGE_FRAGMENT);
+	branch = compile_file(COMPILER_SHADERS, "branch.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	discard = compile_file(COMPILER_SHADERS, "discard.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(branch->uses_kill == 0U && discard->uses_kill == 1U);
 	divergent = 0U;
 	all_gone = 0U;
@@ -1673,8 +1673,8 @@ test_eu_vertex_shaders(void)
 	unsigned c, k;
 
 	m = malloc(sizeof(*m));
-	cells = compile_file(COMPILER_SHADERS, "cells.vert.spv", I915_STAGE_VERTEX);
-	vsmath = compile_file(COMPILER_SHADERS, "vsmath.vert.spv", I915_STAGE_VERTEX);
+	cells = compile_file(COMPILER_SHADERS, "cells.vert.spv", DRV_GPU_STAGE_VERTEX);
+	vsmath = compile_file(COMPILER_SHADERS, "vsmath.vert.spv", DRV_GPU_STAGE_VERTEX);
 	assert(cells->input_count == 2U && cells->varying_count == 1U && cells->push_regs == 0U);
 
 	/* the payload: location 0 (position) in r2..r5, location 1 (value) in r6..r9 */
@@ -1743,9 +1743,9 @@ test_eu_mview(void)
 	unsigned c, k, r;
 
 	m = malloc(sizeof(*m));
-	vert = compile_file(MVIEW_SHADERS, "mview.vert.spv", I915_STAGE_VERTEX);
-	frag = compile_file(MVIEW_SHADERS, "mview.frag.spv", I915_STAGE_FRAGMENT);
-	cutout = compile_file(MVIEW_SHADERS, "cutout.frag.spv", I915_STAGE_FRAGMENT);
+	vert = compile_file(MVIEW_SHADERS, "mview.vert.spv", DRV_GPU_STAGE_VERTEX);
+	frag = compile_file(MVIEW_SHADERS, "mview.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	cutout = compile_file(MVIEW_SHADERS, "cutout.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(vert->push_regs == 4U && vert->input_count == 3U && vert->varying_count == 2U);
 	assert(vert->grf_used > 19U);
 	assert(frag->push_regs == 4U && frag->input_count == 2U && frag->uses_kill == 0U);
@@ -1870,9 +1870,9 @@ test_all_shaders_compile(void)
 
 	for (i = 0U; i < sizeof(files) / sizeof(files[0]); i++) {
 		struct i915_shader_binary *binary;
-		enum i915_shader_stage stage;
+		enum drv_gpu_shader_stage stage;
 
-		stage = strstr(files[i][1], ".vert.") != NULL ? I915_STAGE_VERTEX : I915_STAGE_FRAGMENT;
+		stage = strstr(files[i][1], ".vert.") != NULL ? DRV_GPU_STAGE_VERTEX : DRV_GPU_STAGE_FRAGMENT;
 		binary = compile_file(files[i][0], files[i][1], stage);
 		assert(binary->code_bytes > 0U && binary->stage == stage);
 		drv_i915_shader_binary_free(binary);
@@ -1884,8 +1884,8 @@ test_all_shaders_compile(void)
 	 * mat4 and the offset), ubo.frag bytes 0 .. 15, 32 .. 47 and 80 .. 95 of set 0 binding 1, each range
 	 * widened to whole 32-byte registers; neither reads push constants.
 	 */
-	vertex = compile_file(FEATURE_SHADERS, "ubo.vert.spv", I915_STAGE_VERTEX);
-	fragment = compile_file(FEATURE_SHADERS, "ubo.frag.spv", I915_STAGE_FRAGMENT);
+	vertex = compile_file(FEATURE_SHADERS, "ubo.vert.spv", DRV_GPU_STAGE_VERTEX);
+	fragment = compile_file(FEATURE_SHADERS, "ubo.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(vertex->push_constant_bytes == 0U && vertex->block_count == 1U);
 	assert(vertex->blocks[0].set == 0U && vertex->blocks[0].binding == 0U);
 	assert(vertex->blocks[0].offset == 0U && vertex->blocks[0].bytes == 96U && vertex->blocks[0].push_offset == 0U);
@@ -1896,7 +1896,7 @@ test_all_shaders_compile(void)
 	assert(fragment->push_regs == 3U && fragment->sampler_count == 0U);
 
 	/* tex3.frag samples three images, each its own binding table entry and sampler, in the order it names them. */
-	textures = compile_file(FEATURE_SHADERS, "tex3.frag.spv", I915_STAGE_FRAGMENT);
+	textures = compile_file(FEATURE_SHADERS, "tex3.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(textures->sampler_count == 3U);
 	assert(textures->sampler_set[0] == 0U && textures->sampler_binding[0] == 0U);
 	assert(textures->sampler_set[1] == 0U && textures->sampler_binding[1] == 2U);
@@ -1911,20 +1911,20 @@ test_all_shaders_compile(void)
 
 /* Compiles one of the generality test's embedded modules. */
 static struct i915_shader_binary *
-compile_words(const char *name, const uint32_t *words, size_t bytes, enum i915_shader_stage stage, int *refused)
+compile_words(const char *name, const uint32_t *words, size_t bytes, enum drv_gpu_shader_stage stage, int *refused)
 {
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 	int error;
 
-	error = drv_i915_shader_parse(words, bytes / 4U, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(words, bytes / 4U, stage, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused: opcode %u at word %u: %s\n", name, diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
 	assert(error == 0);
 	error = drv_i915_shader_compile(ir, &binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	if (refused != NULL) {
 		*refused = error;
 		return error == 0 ? binary : NULL;
@@ -2011,7 +2011,7 @@ test_eu_generality_fragment(void)
 	for (step = 0U; step < 8U; step++) {
 		struct i915_shader_binary *binary;
 
-		binary = compile_words(steps[step].name, steps[step].words, steps[step].bytes, I915_STAGE_FRAGMENT, NULL);
+		binary = compile_words(steps[step].name, steps[step].words, steps[step].bytes, DRV_GPU_STAGE_FRAGMENT, NULL);
 		assert(binary->input_count == 1U);
 		if (step == 1U || step == 3U)
 			assert(has_opcode(binary, EU_OP_MATH));         /* the integer division */
@@ -2094,20 +2094,20 @@ test_eu_generality_interfaces(void)
 {
 	static const float corners[4][2] = { { -1.0f, -1.0f }, { 1.0f, -1.0f }, { 1.0f, 1.0f }, { -1.0f, 1.0f } };
 	struct i915_shader_binary *vary_vert, *vary_frag, *subset, *vin_vert, *vin_frag, *matrix_vert, *vio_vert;
-	struct i915_shader_ir_inst many[32];
-	struct i915_shader_ir ir;
+	struct drv_gpu_shader_ir_inst many[32];
+	struct drv_gpu_shader_ir ir;
 	struct eu_model *m;
 	uint32_t payload[64][8];
 	unsigned c, k, rank, x0, y;
 
 	m = malloc(sizeof(*m));
-	vary_vert = compile_words("vary16.vert", i915_vke2_vary16_vert, sizeof(i915_vke2_vary16_vert), I915_STAGE_VERTEX, NULL);
-	vary_frag = compile_words("vary16.frag", i915_vke2_vary16_frag, sizeof(i915_vke2_vary16_frag), I915_STAGE_FRAGMENT, NULL);
-	subset = compile_words("subset.frag", i915_vke2_subset_frag, sizeof(i915_vke2_subset_frag), I915_STAGE_FRAGMENT, NULL);
-	vin_vert = compile_words("vin16.vert", i915_vke2_vin16_vert, sizeof(i915_vke2_vin16_vert), I915_STAGE_VERTEX, NULL);
-	vin_frag = compile_words("vin16.frag", i915_vke2_vin16_frag, sizeof(i915_vke2_vin16_frag), I915_STAGE_FRAGMENT, NULL);
-	matrix_vert = compile_words("matrix.vert", i915_vke2_matrix_vert, sizeof(i915_vke2_matrix_vert), I915_STAGE_VERTEX, NULL);
-	vio_vert = compile_words("vio16.vert", i915_vke2_vio16_vert, sizeof(i915_vke2_vio16_vert), I915_STAGE_VERTEX, NULL);
+	vary_vert = compile_words("vary16.vert", i915_vke2_vary16_vert, sizeof(i915_vke2_vary16_vert), DRV_GPU_STAGE_VERTEX, NULL);
+	vary_frag = compile_words("vary16.frag", i915_vke2_vary16_frag, sizeof(i915_vke2_vary16_frag), DRV_GPU_STAGE_FRAGMENT, NULL);
+	subset = compile_words("subset.frag", i915_vke2_subset_frag, sizeof(i915_vke2_subset_frag), DRV_GPU_STAGE_FRAGMENT, NULL);
+	vin_vert = compile_words("vin16.vert", i915_vke2_vin16_vert, sizeof(i915_vke2_vin16_vert), DRV_GPU_STAGE_VERTEX, NULL);
+	vin_frag = compile_words("vin16.frag", i915_vke2_vin16_frag, sizeof(i915_vke2_vin16_frag), DRV_GPU_STAGE_FRAGMENT, NULL);
+	matrix_vert = compile_words("matrix.vert", i915_vke2_matrix_vert, sizeof(i915_vke2_matrix_vert), DRV_GPU_STAGE_VERTEX, NULL);
+	vio_vert = compile_words("vio16.vert", i915_vke2_vio16_vert, sizeof(i915_vke2_vio16_vert), DRV_GPU_STAGE_VERTEX, NULL);
 	assert(vio_vert->input_count == 16U && vio_vert->varying_count == 16U && vio_vert->scratch_bytes != 0U);
 	assert(vary_vert->scratch_bytes == 0U && vin_vert->scratch_bytes == 0U && matrix_vert->scratch_bytes == 0U);
 
@@ -2287,15 +2287,15 @@ test_eu_generality_interfaces(void)
 	/* sixteen attributes and sixteen varyings of a hand-made IR: output k is attribute k */
 	memset(many, 0, sizeof(many));
 	for (k = 0U; k < 16U; k++) {
-		many[2U * k].op = I915_IR_LOAD_INPUT;
+		many[2U * k].op = DRV_GPU_IR_LOAD_INPUT;
 		many[2U * k].dst = k;
 		many[2U * k].location = k;
-		many[2U * k + 1U].op = I915_IR_STORE_OUTPUT;
+		many[2U * k + 1U].op = DRV_GPU_IR_STORE_OUTPUT;
 		many[2U * k + 1U].src[0] = k;
 		many[2U * k + 1U].location = k;
 	}
 	memset(&ir, 0, sizeof(ir));
-	ir.stage = I915_STAGE_VERTEX;
+	ir.stage = DRV_GPU_STAGE_VERTEX;
 	ir.instructions = many;
 	ir.instruction_count = 32U;
 	ir.value_count = 16U;
@@ -2337,8 +2337,8 @@ compile_geometry(const char *name, const struct i915_shader_binary *producer, st
 	FILE *file;
 	long size;
 	uint32_t *code;
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	int error;
 
 	snprintf(path, sizeof(path), "%s/%s/%s", VK_REPO, COMPILER_SHADERS, name);
@@ -2350,14 +2350,14 @@ compile_geometry(const char *name, const struct i915_shader_binary *producer, st
 	code = malloc((size_t)size);
 	assert(fread(code, 1, (size_t)size, file) == (size_t)size);
 	fclose(file);
-	error = drv_i915_shader_parse(code, (size_t)size / 4U, I915_STAGE_GEOMETRY, &ir, &diag);
+	error = drv_gpu_shader_parse(code, (size_t)size / 4U, DRV_GPU_STAGE_GEOMETRY, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused: opcode %u at word %u: %s\n", name, diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
-	assert(error == 0 && ir->stage == I915_STAGE_GEOMETRY);
+	assert(error == 0 && ir->stage == DRV_GPU_STAGE_GEOMETRY);
 	*binary = NULL;
 	error = drv_i915_shader_compile_stage(ir, producer, binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 	return error;
 }
@@ -2400,7 +2400,7 @@ test_geometry_reads(void)
 
 	/* the vertex shader before it writes locations 0 and 2: slots 2 and 3 of its VUE */
 	memset(&producer, 0, sizeof(producer));
-	producer.stage = I915_STAGE_VERTEX;
+	producer.stage = DRV_GPU_STAGE_VERTEX;
 	producer.varying_count = 2U;
 	producer.varying_locations[0] = 0U;
 	producer.varying_locations[1] = 2U;
@@ -2412,20 +2412,20 @@ test_geometry_reads(void)
 	producer.varying_locations[1] = 2U;
 
 	/* a producer that is not a vertex kernel, or a producer for another stage, is inconsistent */
-	producer.stage = I915_STAGE_FRAGMENT;
+	producer.stage = DRV_GPU_STAGE_FRAGMENT;
 	assert(compile_geometry("noemit.geom.spv", &producer, &binary) == EINVAL && binary == NULL);
-	producer.stage = I915_STAGE_VERTEX;
+	producer.stage = DRV_GPU_STAGE_VERTEX;
 
 	error = compile_geometry("noemit.geom.spv", &producer, &binary);
 	assert(error == 0);
 
 	/* what the draw programs: r0, r1, the primitive's number in r2, three handles, the push data from r6 */
-	assert(binary->stage == I915_STAGE_GEOMETRY);
-	assert(binary->vertices_in == 3U && binary->output_topology == I915_IR_OUTPUT_TRIANGLE_STRIP);
+	assert(binary->stage == DRV_GPU_STAGE_GEOMETRY);
+	assert(binary->vertices_in == 3U && binary->output_topology == DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP);
 	assert(binary->uses_primitive_id == 1U && binary->writes_layer == 1U);
 	assert(binary->dispatch_grf_start == 6U && binary->push_regs == 0U);
 	assert(binary->varying_count == 2U);
-	assert(binary->varying_locations[0] == 0U && binary->varying_locations[1] == I915_SHADER_LOCATION_PRIMITIVE_ID);
+	assert(binary->varying_locations[0] == 0U && binary->varying_locations[1] == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID);
 	assert(binary->input_count == 2U && binary->input_locations[0] == 0U && binary->input_locations[1] == 2U);
 
 	/* a vertex is four slots (two 32-byte units), no cut bits; the entry 32 + 3 x 64 bytes, four 64-byte units */
@@ -2586,7 +2586,7 @@ test_geometry_emits(void)
 	m = malloc(sizeof(*m));
 	assert(m != NULL);
 	memset(&producer, 0, sizeof(producer));
-	producer.stage = I915_STAGE_VERTEX;
+	producer.stage = DRV_GPU_STAGE_VERTEX;
 
 	/* points.geom: a square of four vertices around each point, of the pushed colour, then one strip end */
 	assert(compile_geometry("points.geom.spv", &producer, &binary) == 0);
@@ -2684,7 +2684,7 @@ test_geometry_emits(void)
 	producer.varying_locations[2] = 2U;
 	assert(compile_geometry("varyings.geom.spv", &producer, &binary) == 0);
 	assert(binary->dispatch_grf_start == 6U && binary->push_regs == 1U && binary->varying_count == 3U);
-	assert(binary->varying_locations[2] == I915_SHADER_LOCATION_PRIMITIVE_ID && binary->output_vertex_hwords == 3U);
+	assert(binary->varying_locations[2] == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID && binary->output_vertex_hwords == 3U);
 	gs_model_start(m, binary);
 	m->grf[6][0] = float_bits(0.5f);
 	gs_model_run(m, binary);
@@ -2820,7 +2820,7 @@ test_geometry_spill(void)
 
 	/* The vertex shader before it writes the position alone. */
 	memset(&producer, 0, sizeof(producer));
-	producer.stage = I915_STAGE_VERTEX;
+	producer.stage = DRV_GPU_STAGE_VERTEX;
 
 	/* Compiles the shader: a triangle in, one varying out, and scratch memory for what did not fit. */
 	error = compile_geometry("spill.geom.spv", &producer, &binary);
@@ -2892,7 +2892,7 @@ test_p024_spill_mix(void)
 	m = malloc(sizeof(*m));
 	assert(m != NULL);
 	for (which = 0U; which < 2U; which++) {
-		binary = compile_file(P024_SHADERS, shaders[which].file, I915_STAGE_FRAGMENT);
+		binary = compile_file(P024_SHADERS, shaders[which].file, DRV_GPU_STAGE_FRAGMENT);
 		assert(binary->uses_kill == 1U && binary->sampler_count == 1U && binary->scratch_bytes != 0U);
 		scratch[which] = binary->scratch_bytes;
 
@@ -2954,8 +2954,8 @@ test_p024_spill_mix(void)
 int
 main(void)
 {
-	compile_shader("cuboid.frag.spv", I915_STAGE_FRAGMENT, 0U);
-	compile_shader("cuboid.vert.spv", I915_STAGE_VERTEX, 1U);
+	compile_shader("cuboid.frag.spv", DRV_GPU_STAGE_FRAGMENT, 0U);
+	compile_shader("cuboid.vert.spv", DRV_GPU_STAGE_VERTEX, 1U);
 	test_vertex_shader_generates_eu();
 	test_vertex_shader_eu_computes_the_shader();
 	test_fneg_and_push_operands();

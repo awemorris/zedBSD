@@ -393,9 +393,9 @@ i915_blit_compile(
 	int copy,
 	struct i915_shader_binary **result)
 {
-	struct i915_shader_ir_inst instructions[8];
-	struct i915_shader_ir_uniform uniform;
-	struct i915_shader_ir ir;
+	struct drv_gpu_shader_ir_inst instructions[8];
+	struct drv_gpu_shader_ir_uniform uniform;
+	struct drv_gpu_shader_ir ir;
 	uint32_t index;
 	uint32_t count;
 	uint32_t first;
@@ -411,14 +411,14 @@ i915_blit_compile(
 	if (copy) {
 		/* Loads the coordinate into values 0 and 1. */
 		for (index = 0U; index < 2U; index++) {
-			instructions[count].op = I915_IR_LOAD_INPUT;
+			instructions[count].op = DRV_GPU_IR_LOAD_INPUT;
 			instructions[count].dst = index;
 			instructions[count].component = index;
 			count++;
 		}
 
 		/* Samples set 0 binding 0 at it into values 2 to 5. */
-		instructions[count].op = I915_IR_SAMPLE;
+		instructions[count].op = DRV_GPU_IR_SAMPLE;
 		instructions[count].dst = 2U;
 		instructions[count].src[0] = 0U;
 		instructions[count].src[1] = 1U;
@@ -432,7 +432,7 @@ i915_blit_compile(
 	} else {
 		/* Loads the four inputs into values 0 to 3. */
 		for (index = 0U; index < 4U; index++) {
-			instructions[count].op = I915_IR_LOAD_INPUT;
+			instructions[count].op = DRV_GPU_IR_LOAD_INPUT;
 			instructions[count].dst = index;
 			instructions[count].component = index;
 			count++;
@@ -444,14 +444,14 @@ i915_blit_compile(
 
 	/* Stores the four colour values as the output. */
 	for (index = 0U; index < 4U; index++) {
-		instructions[count].op = I915_IR_STORE_OUTPUT;
+		instructions[count].op = DRV_GPU_IR_STORE_OUTPUT;
 		instructions[count].src[0] = first + index;
 		instructions[count].component = index;
 		count++;
 	}
 
 	/* Completes the fragment shader. */
-	ir.stage = I915_STAGE_FRAGMENT;
+	ir.stage = DRV_GPU_STAGE_FRAGMENT;
 	ir.instructions = instructions;
 	ir.instruction_count = count;
 	ir.value_count = first + 4U;
@@ -474,9 +474,9 @@ static int
 i915_blit_compile_resolve(
 	struct i915_shader_binary **result)
 {
-	struct i915_shader_ir_inst instructions[48];
-	struct i915_shader_ir_uniform uniforms[4];
-	struct i915_shader_ir ir;
+	struct drv_gpu_shader_ir_inst instructions[48];
+	struct drv_gpu_shader_ir_uniform uniforms[4];
+	struct drv_gpu_shader_ir ir;
 	uint32_t count;
 	uint32_t index;
 	uint32_t sample;
@@ -494,7 +494,7 @@ i915_blit_compile_resolve(
 
 	/* Loads the coordinate into values 0 and 1. */
 	for (index = 0U; index < 2U; index++) {
-		instructions[count].op = I915_IR_LOAD_INPUT;
+		instructions[count].op = DRV_GPU_IR_LOAD_INPUT;
 		instructions[count].dst = index;
 		instructions[count].component = index;
 		count++;
@@ -502,19 +502,19 @@ i915_blit_compile_resolve(
 
 	/* Samples binding n into values 2 + 4n to 5 + 4n, each binding a sampled image of set 0. */
 	for (sample = 0U; sample < 4U; sample++) {
-		instructions[count].op = I915_IR_SAMPLE;
+		instructions[count].op = DRV_GPU_IR_SAMPLE;
 		instructions[count].dst = 2U + 4U * sample;
 		instructions[count].src[0] = 0U;
 		instructions[count].src[1] = 1U;
 		instructions[count].immediate = sample;
 		count++;
 		uniforms[sample].binding = sample;
-		uniforms[sample].kind = I915_IR_UNIFORM_SAMPLED_IMAGE;
+		uniforms[sample].kind = DRV_GPU_IR_UNIFORM_SAMPLED_IMAGE;
 	}
 
 	/* The weight of each sample, in value 18. */
 	quarter = 18U;
-	instructions[count].op = I915_IR_CONST;
+	instructions[count].op = DRV_GPU_IR_CONST;
 	instructions[count].dst = quarter;
 	instructions[count].immediate = I915_BLIT_FLOAT_QUARTER;
 	count++;
@@ -525,7 +525,7 @@ i915_blit_compile_resolve(
 		/* Adds the samples' component one after another. */
 		sum = 2U + component;
 		for (sample = 1U; sample < 4U; sample++) {
-			instructions[count].op = I915_IR_FADD;
+			instructions[count].op = DRV_GPU_IR_FADD;
 			instructions[count].dst = next;
 			instructions[count].src[0] = sum;
 			instructions[count].src[1] = 2U + 4U * sample + component;
@@ -535,14 +535,14 @@ i915_blit_compile_resolve(
 		}
 
 		/* Takes a quarter of the sum. */
-		instructions[count].op = I915_IR_FMUL;
+		instructions[count].op = DRV_GPU_IR_FMUL;
 		instructions[count].dst = next;
 		instructions[count].src[0] = sum;
 		instructions[count].src[1] = quarter;
 		count++;
 
 		/* Stores it as the output's component. */
-		instructions[count].op = I915_IR_STORE_OUTPUT;
+		instructions[count].op = DRV_GPU_IR_STORE_OUTPUT;
 		instructions[count].src[0] = next;
 		instructions[count].component = component;
 		count++;
@@ -550,7 +550,7 @@ i915_blit_compile_resolve(
 	}
 
 	/* Completes the fragment shader. */
-	ir.stage = I915_STAGE_FRAGMENT;
+	ir.stage = DRV_GPU_STAGE_FRAGMENT;
 	ir.instructions = instructions;
 	ir.instruction_count = count;
 	ir.value_count = next;

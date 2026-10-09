@@ -1027,9 +1027,9 @@ test_geometry_pipeline(void)
 	assert(pipeline->geometry == drv_i915_object_lookup(stub_session, I915_VK_OBJ_SHADER_MODULE, FIXTURE_POINTS_GS));
 	geometry = pipeline->gs_binary;
 	assert(pipeline->vs_binary != NULL && geometry != NULL && pipeline->fs_binary != NULL);
-	assert(geometry->stage == I915_STAGE_GEOMETRY);
+	assert(geometry->stage == DRV_GPU_STAGE_GEOMETRY);
 	assert(geometry->code_bytes != 0U && geometry->code_bytes <= I915_GFX_PS_KERNEL - I915_GFX_GS_KERNEL);
-	assert(geometry->vertices_in == 1U && geometry->output_topology == I915_IR_OUTPUT_TRIANGLE_STRIP);
+	assert(geometry->vertices_in == 1U && geometry->output_topology == DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP);
 	assert(geometry->varying_count == 1U && geometry->varying_locations[0] == 0U);
 	assert(geometry->urb_entry_size != 0U && geometry->output_vertex_hwords != 0U);
 	assert(geometry->writes_point_size == 0U && geometry->sampler_count == 0U);
@@ -1039,7 +1039,7 @@ test_geometry_pipeline(void)
 	assert(kernels.gs_code == geometry->code && kernels.gs_bytes == geometry->code_bytes);
 	assert(kernels.gs_grf_start == geometry->dispatch_grf_start);
 	assert(kernels.gs_push_regs == geometry->push_regs && kernels.gs_push.constant_bytes == geometry->push_constant_bytes);
-	assert(kernels.gs_vertices_in == 1U && kernels.gs_output_topology == I915_IR_OUTPUT_TRIANGLE_STRIP);
+	assert(kernels.gs_vertices_in == 1U && kernels.gs_output_topology == DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP);
 	assert(kernels.gs_output_vertex_hwords == geometry->output_vertex_hwords);
 	assert(kernels.gs_control_hwords == geometry->control_data_hwords);
 	assert(kernels.gs_control_format == geometry->control_data_format);
@@ -1095,7 +1095,7 @@ test_geometry_interfaces(void)
 	 */
 	error = fixture_prepare_three("varyings.vert.spv", "varyings.geom.spv", "primitive-id.frag.spv", &pipeline);
 	assert(error == 0 && pipeline.kernels_ready != 0);
-	assert(pipeline.gs_binary->varying_count == 3U && pipeline.gs_binary->varying_locations[2] == I915_SHADER_LOCATION_PRIMITIVE_ID);
+	assert(pipeline.gs_binary->varying_count == 3U && pipeline.gs_binary->varying_locations[2] == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID);
 	drv_i915_gfx_pipeline_kernels(&pipeline, &kernels);
 	assert(kernels.gs_vertices_in == 3U && kernels.gs_primitive_id != 0U && kernels.gs_writes_layer != 0U);
 	assert(kernels.gs_push_regs != 0U && kernels.gs_push.constant_bytes != 0U);

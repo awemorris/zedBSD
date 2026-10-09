@@ -12,13 +12,13 @@
 #include "drivers/gpu/bcm2711/shader-private.h"
 
 static int preload_inputs(struct bcm2711_shader_compiler *compiler);
-static int lower_instruction(struct bcm2711_shader_compiler *compiler, const struct i915_shader_ir_inst *instruction);
-static int lower_arithmetic(struct bcm2711_shader_compiler *compiler, const struct i915_shader_ir_inst *instruction, uint32_t destination);
-static int lower_select(struct bcm2711_shader_compiler *compiler, const struct i915_shader_ir_inst *instruction, uint32_t destination);
-static int lower_sample(struct bcm2711_shader_compiler *compiler, const struct i915_shader_ir_inst *instruction);
+static int lower_instruction(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction);
+static int lower_arithmetic(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t destination);
+static int lower_select(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction, uint32_t destination);
+static int lower_sample(struct bcm2711_shader_compiler *compiler, const struct drv_gpu_shader_ir_inst *instruction);
 static int operands(struct bcm2711_shader_compiler *compiler, uint32_t left, uint32_t right, struct bcm2711_qpu_source *first, struct bcm2711_qpu_source *second);
 static int force_register(struct bcm2711_shader_compiler *compiler, struct bcm2711_qpu_source *source, uint32_t scratch);
-static int arithmetic_operation(enum i915_shader_ir_op operation, enum bcm2711_qpu_operation *native, uint32_t *sources);
+static int arithmetic_operation(enum drv_gpu_shader_ir_op operation, enum bcm2711_qpu_operation *native, uint32_t *sources);
 static void retire_values(struct bcm2711_shader_compiler *compiler);
 
 /*
@@ -150,11 +150,11 @@ preload_inputs(
 static int
 lower_instruction(
 	struct bcm2711_shader_compiler *compiler,
-	const struct i915_shader_ir_inst *instruction)
+	const struct drv_gpu_shader_ir_inst *instruction)
 {
 	struct bcm2711_shader_value *scalar;
 	struct bcm2711_shader_uniform uniform;
-	const struct i915_shader_ir_uniform *block;
+	const struct drv_gpu_shader_ir_uniform *block;
 	const struct bcm2711_shader_component *component;
 	uint32_t index;
 	uint32_t destination;
@@ -162,10 +162,10 @@ lower_instruction(
 
 	/* Non-executable markers describe already checked source semantics and need no native instruction. */
 	switch (instruction->op) {
-	case I915_IR_NOP:
-	case I915_IR_STORE_OUTPUT:
-	case I915_IR_SKIP_BEGIN:
-	case I915_IR_SKIP_END:
+	case DRV_GPU_IR_NOP:
+	case DRV_GPU_IR_STORE_OUTPUT:
+	case DRV_GPU_IR_SKIP_BEGIN:
+	case DRV_GPU_IR_SKIP_END:
 		return 0;
 	default:
 		break;
@@ -173,16 +173,16 @@ lower_instruction(
 
 	/* Source constants remain exact bits until a consuming operation chooses a small constant or full uniform. */
 	scalar = &compiler->values[instruction->dst];
-	if (instruction->op == I915_IR_CONST ||
-	    instruction->op == I915_IR_BOOL ||
-	    instruction->op == I915_IR_ICONST) {
+	if (instruction->op == DRV_GPU_IR_CONST ||
+	    instruction->op == DRV_GPU_IR_BOOL ||
+	    instruction->op == DRV_GPU_IR_ICONST) {
 		scalar->constant = 1;
 		scalar->number = instruction->immediate;
 		return 0;
 	}
 
 	/* Repeated input loads alias the same pinned register and never reread the VPM or varying FIFO. */
-	if (instruction->op == I915_IR_LOAD_INPUT) {
+	if (instruction->op == DRV_GPU_IR_LOAD_INPUT) {
 		for (index = 0; index < compiler->binary->input_count; index++) {
 			component = &compiler->binary->inputs[index];
 			if (component->location == instruction->location && component->component == instruction->component) {
@@ -198,7 +198,7 @@ lower_instruction(
 	}
 
 	/* Sampling allocates four exact result scalars and completes the native TMU transaction before publication. */
-	if (instruction->op == I915_IR_SAMPLE) {
+	if (instruction->op == DRV_GPU_IR_SAMPLE) {
 		error = lower_sample(compiler, instruction);
 		if (error != 0)
 			return error;
@@ -215,11 +215,11 @@ lower_instruction(
 	scalar->register_live = 1;
 
 	/* Draw-time push and block words use checked descriptor identities instead of embedding device addresses. */
-	if (instruction->op == I915_IR_LOAD_PUSH || instruction->op == I915_IR_LOAD_UBO) {
+	if (instruction->op == DRV_GPU_IR_LOAD_PUSH || instruction->op == DRV_GPU_IR_LOAD_UBO) {
 		kern_memset(&uniform, 0, sizeof(uniform));
 		uniform.kind = BCM2711_SHADER_PUSH;
 		uniform.offset = instruction->immediate;
-		if (instruction->op == I915_IR_LOAD_UBO) {
+		if (instruction->op == DRV_GPU_IR_LOAD_UBO) {
 			block = &compiler->ir->uniforms[instruction->location];
 			uniform.kind = BCM2711_SHADER_BLOCK;
 			uniform.set = block->set;
@@ -236,7 +236,7 @@ lower_instruction(
 	}
 
 	/* If-converted selection preserves lane-wise source bits, including integer and Boolean values. */
-	if (instruction->op == I915_IR_SELECT) {
+	if (instruction->op == DRV_GPU_IR_SELECT) {
 		error = lower_select(compiler, instruction, destination);
 		if (error != 0)
 			return error;
@@ -257,7 +257,7 @@ lower_instruction(
 /* Assigns native opcodes only where one QPU instruction implements the scalar operation exactly. */
 static int
 arithmetic_operation(
-	enum i915_shader_ir_op operation,
+	enum drv_gpu_shader_ir_op operation,
 	enum bcm2711_qpu_operation *native,
 	uint32_t *sources)
 {
@@ -266,101 +266,101 @@ arithmetic_operation(
 
 	/* This table describes semantic operations rather than importing a hardware encoding table. */
 	switch (operation) {
-	case I915_IR_FADD:
+	case DRV_GPU_IR_FADD:
 		*native = BCM2711_QPU_FLOAT_ADD;
 		break;
-	case I915_IR_FSUB:
+	case DRV_GPU_IR_FSUB:
 		*native = BCM2711_QPU_FLOAT_SUBTRACT;
 		break;
-	case I915_IR_FMUL:
+	case DRV_GPU_IR_FMUL:
 		*native = BCM2711_QPU_FLOAT_MULTIPLY;
 		break;
-	case I915_IR_FMIN:
+	case DRV_GPU_IR_FMIN:
 		*native = BCM2711_QPU_FLOAT_MINIMUM;
 		break;
-	case I915_IR_FMAX:
+	case DRV_GPU_IR_FMAX:
 		*native = BCM2711_QPU_FLOAT_MAXIMUM;
 		break;
-	case I915_IR_AND:
-	case I915_IR_IAND:
+	case DRV_GPU_IR_AND:
+	case DRV_GPU_IR_IAND:
 		*native = BCM2711_QPU_BITS_AND;
 		break;
-	case I915_IR_OR:
-	case I915_IR_IOR:
+	case DRV_GPU_IR_OR:
+	case DRV_GPU_IR_IOR:
 		*native = BCM2711_QPU_BITS_OR;
 		break;
-	case I915_IR_IXOR:
+	case DRV_GPU_IR_IXOR:
 		*native = BCM2711_QPU_BITS_XOR;
 		break;
-	case I915_IR_IADD:
+	case DRV_GPU_IR_IADD:
 		*native = BCM2711_QPU_INTEGER_ADD;
 		break;
-	case I915_IR_ISUB:
+	case DRV_GPU_IR_ISUB:
 		*native = BCM2711_QPU_INTEGER_SUBTRACT;
 		break;
-	case I915_IR_SHL:
+	case DRV_GPU_IR_SHL:
 		*native = BCM2711_QPU_SHIFT_LEFT;
 		break;
-	case I915_IR_SHR:
+	case DRV_GPU_IR_SHR:
 		*native = BCM2711_QPU_SHIFT_RIGHT;
 		break;
-	case I915_IR_ASR:
+	case DRV_GPU_IR_ASR:
 		*native = BCM2711_QPU_SHIFT_SIGNED;
 		break;
-	case I915_IR_NOT:
-	case I915_IR_INOT:
+	case DRV_GPU_IR_NOT:
+	case DRV_GPU_IR_INOT:
 		*native = BCM2711_QPU_BITS_NOT;
 		*sources = 1;
 		break;
-	case I915_IR_MOVE:
+	case DRV_GPU_IR_MOVE:
 		*native = BCM2711_QPU_MOVE;
 		*sources = 1;
 		break;
-	case I915_IR_INEG:
+	case DRV_GPU_IR_INEG:
 		*native = BCM2711_QPU_INTEGER_NEGATE;
 		*sources = 1;
 		break;
-	case I915_IR_RCP:
+	case DRV_GPU_IR_RCP:
 		*native = BCM2711_QPU_FLOAT_RECIPROCAL;
 		*sources = 1;
 		break;
-	case I915_IR_RSQ:
+	case DRV_GPU_IR_RSQ:
 		*native = BCM2711_QPU_FLOAT_INVERSE_ROOT;
 		*sources = 1;
 		break;
-	case I915_IR_EXP2:
+	case DRV_GPU_IR_EXP2:
 		*native = BCM2711_QPU_FLOAT_EXPONENT;
 		*sources = 1;
 		break;
-	case I915_IR_LOG2:
+	case DRV_GPU_IR_LOG2:
 		*native = BCM2711_QPU_FLOAT_LOGARITHM;
 		*sources = 1;
 		break;
-	case I915_IR_FLOOR:
+	case DRV_GPU_IR_FLOOR:
 		*native = BCM2711_QPU_FLOAT_FLOOR;
 		*sources = 1;
 		break;
-	case I915_IR_FTRUNC:
+	case DRV_GPU_IR_FTRUNC:
 		*native = BCM2711_QPU_FLOAT_TRUNCATE;
 		*sources = 1;
 		break;
-	case I915_IR_FROUND_EVEN:
+	case DRV_GPU_IR_FROUND_EVEN:
 		*native = BCM2711_QPU_FLOAT_ROUND;
 		*sources = 1;
 		break;
-	case I915_IR_I2F:
+	case DRV_GPU_IR_I2F:
 		*native = BCM2711_QPU_SIGNED_TO_FLOAT;
 		*sources = 1;
 		break;
-	case I915_IR_U2F:
+	case DRV_GPU_IR_U2F:
 		*native = BCM2711_QPU_UNSIGNED_TO_FLOAT;
 		*sources = 1;
 		break;
-	case I915_IR_F2I:
+	case DRV_GPU_IR_F2I:
 		*native = BCM2711_QPU_FLOAT_TO_SIGNED;
 		*sources = 1;
 		break;
-	case I915_IR_F2U:
+	case DRV_GPU_IR_F2U:
 		*native = BCM2711_QPU_FLOAT_TO_UNSIGNED;
 		*sources = 1;
 		break;
@@ -376,7 +376,7 @@ arithmetic_operation(
 static int
 lower_arithmetic(
 	struct bcm2711_shader_compiler *compiler,
-	const struct i915_shader_ir_inst *instruction,
+	const struct drv_gpu_shader_ir_inst *instruction,
 	uint32_t destination)
 {
 	struct bcm2711_qpu_source left;
@@ -417,7 +417,7 @@ lower_arithmetic(
 	}
 
 	/* Negation and absolute value change only the IEEE sign bit, including signed zero and NaN payloads. */
-	if (instruction->op == I915_IR_FNEG || instruction->op == I915_IR_FABS) {
+	if (instruction->op == DRV_GPU_IR_FNEG || instruction->op == DRV_GPU_IR_FABS) {
 		error = bcm2711_shader_operand(compiler, instruction->src[0], BCM2711_SHADER_SCRATCH_LEFT, &left);
 		if (error != 0)
 			return error;
@@ -425,7 +425,7 @@ lower_arithmetic(
 		uniform.kind = BCM2711_SHADER_CONSTANT;
 		uniform.bits = 0x80000000U;
 		native = BCM2711_QPU_BITS_XOR;
-		if (instruction->op == I915_IR_FABS) {
+		if (instruction->op == DRV_GPU_IR_FABS) {
 			uniform.bits = 0x7fffffffU;
 			native = BCM2711_QPU_BITS_AND;
 		}
@@ -444,7 +444,7 @@ lower_arithmetic(
 	}
 
 	/* Fraction uses the original scalar after the independent floor result is ready. */
-	if (instruction->op == I915_IR_FRACT) {
+	if (instruction->op == DRV_GPU_IR_FRACT) {
 		error = bcm2711_shader_operand(compiler, instruction->src[0], BCM2711_SHADER_SCRATCH_LEFT, &left);
 		if (error != 0)
 			return error;
@@ -462,23 +462,23 @@ lower_arithmetic(
 	}
 
 	/* Native comparison flags preserve ordered NaN semantics rather than approximating a comparison by subtraction. */
-	if (instruction->op == I915_IR_FLT ||
-	    instruction->op == I915_IR_FGE ||
-	    instruction->op == I915_IR_FEQ ||
-	    instruction->op == I915_IR_FNEU) {
+	if (instruction->op == DRV_GPU_IR_FLT ||
+	    instruction->op == DRV_GPU_IR_FGE ||
+	    instruction->op == DRV_GPU_IR_FEQ ||
+	    instruction->op == DRV_GPU_IR_FNEU) {
 		error = operands(compiler, instruction->src[0], instruction->src[1], &left, &right);
 		if (error != 0)
 			return error;
 		flags = 1;
 		predicate = 1;
-		if (instruction->op == I915_IR_FLT) {
+		if (instruction->op == DRV_GPU_IR_FLT) {
 			flags = 2;
-		} else if (instruction->op == I915_IR_FGE) {
+		} else if (instruction->op == DRV_GPU_IR_FGE) {
 			flags = 3;
 			temporary = left;
 			left = right;
 			right = temporary;
-		} else if (instruction->op == I915_IR_FNEU) {
+		} else if (instruction->op == DRV_GPU_IR_FNEU) {
 			predicate = 3;
 		}
 
@@ -501,7 +501,7 @@ lower_arithmetic(
 	}
 
 	/* Square root preserves zero and positive infinity instead of leaving zero times infinity as NaN. */
-	if (instruction->op == I915_IR_SQRT) {
+	if (instruction->op == DRV_GPU_IR_SQRT) {
 		error = bcm2711_shader_operand(compiler, instruction->src[0], BCM2711_SHADER_SCRATCH_LEFT, &left);
 		if (error != 0)
 			return error;
@@ -556,7 +556,7 @@ lower_arithmetic(
 static int
 lower_select(
 	struct bcm2711_shader_compiler *compiler,
-	const struct i915_shader_ir_inst *instruction,
+	const struct drv_gpu_shader_ir_inst *instruction,
 	uint32_t destination)
 {
 	struct bcm2711_qpu_source condition;
@@ -597,7 +597,7 @@ lower_select(
 static int
 lower_sample(
 	struct bcm2711_shader_compiler *compiler,
-	const struct i915_shader_ir_inst *instruction)
+	const struct drv_gpu_shader_ir_inst *instruction)
 {
 	struct bcm2711_shader_uniform uniform;
 	struct bcm2711_qpu_source coordinate;

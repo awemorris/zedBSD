@@ -37,12 +37,12 @@ kern_free(void *pointer)
 	free(pointer);
 }
 
-#include "../../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../../src/drivers/gpu/i915/compiler/compile.c"
 
 static uint32_t *check_load(const char *path, size_t *words);
-static struct i915_shader_binary *check_compile(const char *path, enum i915_shader_stage stage, const struct i915_shader_binary *producer);
+static struct i915_shader_binary *check_compile(const char *path, enum drv_gpu_shader_stage stage, const struct i915_shader_binary *producer);
 
 /* Reads a file of words. */
 static uint32_t *
@@ -77,11 +77,11 @@ check_load(const char *path, size_t *words)
 static struct i915_shader_binary *
 check_compile(
 	const char *path,
-	enum i915_shader_stage stage,
+	enum drv_gpu_shader_stage stage,
 	const struct i915_shader_binary *producer)
 {
-	struct i915_compile_diagnostic diagnostic;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
 	struct i915_shader_binary *binary;
 	const char *reason;
 	uint32_t *code;
@@ -97,7 +97,7 @@ check_compile(
 
 	/* Parses it into the compiler's IR, and says why when it is refused. */
 	memset(&diagnostic, 0, sizeof(diagnostic));
-	error = drv_i915_shader_parse(code, words, stage, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(code, words, stage, &ir, &diagnostic);
 	free(code);
 	if (error != 0) {
 		reason = "?";
@@ -111,14 +111,14 @@ check_compile(
 	/* A module of another stage than the one asked for is refused as the driver refuses it. */
 	if (ir->stage != stage) {
 		printf("%s: REFUSED: a module of stage %d given as stage %d\n", path, (int)ir->stage, (int)stage);
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		return NULL;
 	}
 
 	/* Compiles the IR to EU code. */
 	binary = NULL;
 	error = drv_i915_shader_compile_stage(ir, producer, &binary);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	if (error != 0) {
 		printf("%s: REFUSED by the compiler: error %d\n", path, error);
 		return NULL;
@@ -135,7 +135,7 @@ main(
 {
 	struct i915_shader_binary *producer;
 	struct i915_shader_binary *binary;
-	enum i915_shader_stage stage;
+	enum drv_gpu_shader_stage stage;
 	int first;
 	int index;
 	int status;
@@ -145,21 +145,21 @@ main(
 		fprintf(stderr, "usage: i915-shader-check vertex|fragment FILE.spv ... | geometry VERTEX.spv FILE.spv ...\n");
 		return 2;
 	}
-	stage = I915_STAGE_VERTEX;
+	stage = DRV_GPU_STAGE_VERTEX;
 	if (strcmp(argv[1], "fragment") == 0)
-		stage = I915_STAGE_FRAGMENT;
+		stage = DRV_GPU_STAGE_FRAGMENT;
 	if (strcmp(argv[1], "geometry") == 0)
-		stage = I915_STAGE_GEOMETRY;
+		stage = DRV_GPU_STAGE_GEOMETRY;
 
 	/* A geometry shader reads the VUE of the vertex shader named first. */
 	producer = NULL;
 	first = 2;
-	if (stage == I915_STAGE_GEOMETRY) {
+	if (stage == DRV_GPU_STAGE_GEOMETRY) {
 		if (argc < 4) {
 			fprintf(stderr, "usage: i915-shader-check geometry VERTEX.spv FILE.spv ...\n");
 			return 2;
 		}
-		producer = check_compile(argv[2], I915_STAGE_VERTEX, NULL);
+		producer = check_compile(argv[2], DRV_GPU_STAGE_VERTEX, NULL);
 		if (producer == NULL)
 			return 1;
 		first = 3;

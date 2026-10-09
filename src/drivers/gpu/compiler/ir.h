@@ -6,8 +6,7 @@
  */
 
 /*
- * The scalar shader IR: the record the SPIR-V parser writes and the EU code
- * generator reads.
+ * The scalar shader IR shared by the SPIR-V frontend and GPU backends.
  *
  * The IR is SCALAR: every value is 32 bits to a channel -- a float, a 32-bit
  * integer, or a Boolean as all ones (true) or zero (false), which only the
@@ -33,8 +32,8 @@
  * This header declares types only.
  */
 
-#ifndef DRIVERS_GPU_I915_COMPILER_IR_H
-#define DRIVERS_GPU_I915_COMPILER_IR_H
+#ifndef DRIVERS_GPU_COMPILER_IR_H
+#define DRIVERS_GPU_COMPILER_IR_H
 
 #include <stdint.h>
 
@@ -43,132 +42,138 @@
  *
  * It is not a user location, so no located output can collide with it.
  */
-#define I915_IR_LOCATION_POSITION	0xFFFFFFFFU
+#define DRV_GPU_IR_LOCATION_POSITION 0xFFFFFFFFU
 
 /*
  * The STORE_OUTPUT location of the PointSize builtin, component 0: the
- * point width of the VUE header.
+ * point width carried by the vertex interface.
  */
-#define I915_IR_LOCATION_POINT_SIZE	0xFFFFFFFEU
+#define DRV_GPU_IR_LOCATION_POINT_SIZE 0xFFFFFFFEU
 
 /*
- * The kinds of bound resource (struct i915_shader_ir_uniform.kind): a
+ * The kinds of bound resource (struct drv_gpu_shader_ir_uniform.kind): a
  * combined image sampler, a uniform buffer block whose words the shader
  * reads at constant offsets, or a storage buffer the shader reads and
  * writes in memory at offsets it computes.
  */
-#define I915_IR_UNIFORM_SAMPLED_IMAGE	1U
-#define I915_IR_UNIFORM_BLOCK		2U
-#define I915_IR_UNIFORM_STORAGE		3U
+#define DRV_GPU_IR_UNIFORM_SAMPLED_IMAGE 1U
+#define DRV_GPU_IR_UNIFORM_BLOCK 2U
+#define DRV_GPU_IR_UNIFORM_STORAGE 3U
 
 /*
  * The set of the storage buffer a compute shader reads gl_NumWorkGroups
- * from (ws101-p002): a uniform of kind I915_IR_UNIFORM_STORAGE with this
+ * from (ws101-p002): a uniform of kind DRV_GPU_IR_UNIFORM_STORAGE with this
  * set and binding 0 names three words -- the group counts x, y, z -- that
  * the dispatch places and whose address it delivers like any other storage
  * buffer's.  No descriptor set of a pipeline layout has this number.
  */
-#define I915_IR_SYSTEM_SET		0xFFFFFFFFU
+#define DRV_GPU_IR_SYSTEM_SET 0xFFFFFFFFU
 
 /*
  * The built-in values of a compute invocation a LOAD_SYSTEM reads, as its
  * `component` (ws101-p002): the invocation's place in its workgroup (x, y,
  * z and the linear index) and the workgroup's place in the dispatch.
  */
-#define I915_IR_SYSTEM_LOCAL_ID_X	0U
-#define I915_IR_SYSTEM_LOCAL_ID_Y	1U
-#define I915_IR_SYSTEM_LOCAL_ID_Z	2U
-#define I915_IR_SYSTEM_LOCAL_INDEX	3U
-#define I915_IR_SYSTEM_GROUP_ID_X	4U
-#define I915_IR_SYSTEM_GROUP_ID_Y	5U
-#define I915_IR_SYSTEM_GROUP_ID_Z	6U
+#define DRV_GPU_IR_SYSTEM_LOCAL_ID_X 0U
+#define DRV_GPU_IR_SYSTEM_LOCAL_ID_Y 1U
+#define DRV_GPU_IR_SYSTEM_LOCAL_ID_Z 2U
+#define DRV_GPU_IR_SYSTEM_LOCAL_INDEX 3U
+#define DRV_GPU_IR_SYSTEM_GROUP_ID_X 4U
+#define DRV_GPU_IR_SYSTEM_GROUP_ID_Y 5U
+#define DRV_GPU_IR_SYSTEM_GROUP_ID_Z 6U
 
 /*
  * The built-in value of a geometry invocation a LOAD_SYSTEM reads
  * (ws075-p007a): gl_PrimitiveIDIn, the number of the input primitive the
  * channel's invocation runs for.
  */
-#define I915_IR_SYSTEM_PRIMITIVE_ID	7U
-#define I915_IR_SYSTEM_COUNT		8U
+#define DRV_GPU_IR_SYSTEM_PRIMITIVE_ID 7U
+#define DRV_GPU_IR_SYSTEM_COUNT 8U
 
 /*
  * The operations of an ATOMIC instruction, as its `immediate`
  * (ws101-p002): the value numbers of the data port's atomic operations
- * (Mesa brw_eu_defines.h, BRW_AOP_*), so the code generator passes them
- * through.  An increment and a decrement are ADD and SUB of one.
+ * (Mesa brw_eu_defines.h, BRW_AOP_*), retained as stable IR tags. Each backend
+ * translates these tags to its own instruction encoding.  An increment and a
+ * decrement are ADD and SUB of one.
  */
-#define I915_IR_ATOMIC_AND		1U
-#define I915_IR_ATOMIC_OR		2U
-#define I915_IR_ATOMIC_XOR		3U
-#define I915_IR_ATOMIC_XCHG		4U
-#define I915_IR_ATOMIC_ADD		7U
-#define I915_IR_ATOMIC_SUB		8U
-#define I915_IR_ATOMIC_SMAX		10U
-#define I915_IR_ATOMIC_SMIN		11U
-#define I915_IR_ATOMIC_UMAX		12U
-#define I915_IR_ATOMIC_UMIN		13U
-#define I915_IR_ATOMIC_CMPXCHG		14U
+#define DRV_GPU_IR_ATOMIC_AND 1U
+#define DRV_GPU_IR_ATOMIC_OR 2U
+#define DRV_GPU_IR_ATOMIC_XOR 3U
+#define DRV_GPU_IR_ATOMIC_XCHG 4U
+#define DRV_GPU_IR_ATOMIC_ADD 7U
+#define DRV_GPU_IR_ATOMIC_SUB 8U
+#define DRV_GPU_IR_ATOMIC_SMAX 10U
+#define DRV_GPU_IR_ATOMIC_SMIN 11U
+#define DRV_GPU_IR_ATOMIC_UMAX 12U
+#define DRV_GPU_IR_ATOMIC_UMIN 13U
+#define DRV_GPU_IR_ATOMIC_CMPXCHG 14U
 
 /*
  * The `component` of an ATOMIC instruction that is predicated: its last
  * source is the Boolean of the channels that run it.
  */
-#define I915_IR_ATOMIC_PREDICATED	1U
+#define DRV_GPU_IR_ATOMIC_PREDICATED 1U
 
 /*
  * The `location` of an ATOMIC instruction on a word of the workgroup's
  * shared memory rather than of a storage buffer (ws101-p006).
  */
-#define I915_IR_LOCATION_SHARED		0xFFFFFFFDU
+#define DRV_GPU_IR_LOCATION_SHARED 0xFFFFFFFDU
 
 /*
  * The location a fragment shader's second colour is stored to: Location 0
  * Index 1, the second source of a dual-source blend (ws031-p032).
  */
-#define I915_IR_LOCATION_SECOND_COLOR	0xFFFFFFFCU
+#define DRV_GPU_IR_LOCATION_SECOND_COLOR 0xFFFFFFFCU
 
 /*
  * The STORE_OUTPUT location of a geometry shader's Layer builtin, component
- * 0 (ws075-p007a): the integer the VUE header carries as the render target
- * array index of the primitive the vertex ends.
+ * 0 (ws075-p007a): the render target array index of the emitted primitive.
  */
-#define I915_IR_LOCATION_LAYER		0xFFFFFFFBU
+#define DRV_GPU_IR_LOCATION_LAYER 0xFFFFFFFBU
 
 /*
  * The `immediate` bit of a LOAD_VERTEX_INPUT whose input vertex is chosen
  * at run time (ws075-p007a): src[0] is then the integer number of the
  * vertex, and the other bits are zero.
  */
-#define I915_IR_VERTEX_DYNAMIC		0x80000000U
+#define DRV_GPU_IR_VERTEX_DYNAMIC 0x80000000U
 
 /*
- * The primitives a geometry shader emits, numbered as the hardware's
- * primitive topology types (3D_Prim_Topo_Type) take them (ws075-p007a):
+ * The primitives a geometry shader emits, retaining the original IR
+ * numeric tags (ws075-p007a):
  * points, line strips and triangle strips.
  */
-#define I915_IR_OUTPUT_POINTS		1U
-#define I915_IR_OUTPUT_LINE_STRIP	3U
-#define I915_IR_OUTPUT_TRIANGLE_STRIP	5U
+#define DRV_GPU_IR_OUTPUT_POINTS 1U
+#define DRV_GPU_IR_OUTPUT_LINE_STRIP 3U
+#define DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP 5U
 
-/* The most vertices one invocation of a geometry shader may emit (the device reports it as maxGeometryOutputVertices). */
-#define I915_IR_MAX_OUTPUT_VERTICES	256U
+/*
+ * The most vertices one invocation of a geometry shader may emit (the device
+ * reports it as maxGeometryOutputVertices).
+ */
+#define DRV_GPU_IR_MAX_OUTPUT_VERTICES 256U
 
 /*
  * The memory a FENCE orders, and whether it acquires, as bits of its
  * `immediate`; a BARRIER's `immediate` names the fences before it
  * (ws101-p006).
  */
-#define I915_IR_FENCE_GLOBAL		1U
-#define I915_IR_FENCE_SHARED		2U
-#define I915_IR_FENCE_ACQUIRE		4U
+#define DRV_GPU_IR_FENCE_GLOBAL 1U
+#define DRV_GPU_IR_FENCE_SHARED 2U
+#define DRV_GPU_IR_FENCE_ACQUIRE 4U
 
-/* The most bytes of shared memory a workgroup has (the device reports it as maxComputeSharedMemorySize). */
-#define I915_IR_MAX_SHARED_BYTES	16384U
+/*
+ * The most bytes of shared memory a workgroup has (the device reports it as
+ * maxComputeSharedMemorySize).
+ */
+#define DRV_GPU_IR_MAX_SHARED_BYTES 16384U
 
 /*
  * The sampler messages of a TEXTURE instruction, numbered as the message
- * type field of the descriptor takes them (Mesa brw_eu_defines.h,
- * GFX5_SAMPLER_MESSAGE_*, HSW_SAMPLER_MESSAGE_SAMPLE_DERIV_COMPARE), each
+ * type field historically assigned to them. These stable IR tags are
+ * translated to vendor messages by each backend; each operation is described
  * with the parameters it takes in order ([ref] is the depth reference of
  * a compare, the coordinate is u [v [r [ai]]]):
  *
@@ -183,19 +188,19 @@
  * A message may stop after its last parameter that matters; the rest read
  * as zero.
  */
-#define I915_IR_TEXTURE_SAMPLE			0U
-#define I915_IR_TEXTURE_SAMPLE_BIAS		1U
-#define I915_IR_TEXTURE_SAMPLE_LOD		2U
-#define I915_IR_TEXTURE_SAMPLE_COMPARE		3U
-#define I915_IR_TEXTURE_SAMPLE_DERIVS		4U
-#define I915_IR_TEXTURE_SAMPLE_BIAS_COMPARE	5U
-#define I915_IR_TEXTURE_SAMPLE_LOD_COMPARE	6U
-#define I915_IR_TEXTURE_LD			7U
-#define I915_IR_TEXTURE_RESINFO			10U
-#define I915_IR_TEXTURE_SAMPLE_DERIV_COMPARE	20U
+#define DRV_GPU_IR_TEXTURE_SAMPLE 0U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_BIAS 1U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_LOD 2U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_COMPARE 3U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_DERIVS 4U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_BIAS_COMPARE 5U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_LOD_COMPARE 6U
+#define DRV_GPU_IR_TEXTURE_LD 7U
+#define DRV_GPU_IR_TEXTURE_RESINFO 10U
+#define DRV_GPU_IR_TEXTURE_SAMPLE_DERIV_COMPARE 20U
 
 /* The most parameters a TEXTURE instruction passes. */
-#define I915_IR_TEXTURE_MAX_PARAMS		11U
+#define DRV_GPU_IR_TEXTURE_MAX_PARAMS 11U
 
 /*
  * The pipeline stage a shader runs in.
@@ -203,12 +208,12 @@
  * The parser takes it from the module's entry point; the code generator
  * chooses the payload and the terminating message by it.
  */
-enum i915_shader_stage {
-	I915_STAGE_VERTEX = 0,
-	I915_STAGE_FRAGMENT = 1,
-	I915_STAGE_COMPUTE = 2,
-	I915_STAGE_GEOMETRY = 3,
-	I915_STAGE_COUNT = 4
+enum drv_gpu_shader_stage {
+	DRV_GPU_STAGE_VERTEX = 0,
+	DRV_GPU_STAGE_FRAGMENT = 1,
+	DRV_GPU_STAGE_COMPUTE = 2,
+	DRV_GPU_STAGE_GEOMETRY = 3,
+	DRV_GPU_STAGE_COUNT = 4
 };
 
 /*
@@ -218,41 +223,43 @@ enum i915_shader_stage {
  * shader tests need; the code generator refuses any other value rather than
  * dropping it.
  */
-enum i915_shader_ir_op {
-	I915_IR_NOP = 0,
+enum drv_gpu_shader_ir_op {
+	DRV_GPU_IR_NOP = 0,
 
 	/* dst = the float whose bits are `immediate`. */
-	I915_IR_CONST,
+	DRV_GPU_IR_CONST,
 
 	/* dst = input `location`, component `component`. */
-	I915_IR_LOAD_INPUT,
+	DRV_GPU_IR_LOAD_INPUT,
 
 	/* Output `location` (or POSITION), component `component` = src[0]. */
-	I915_IR_STORE_OUTPUT,
+	DRV_GPU_IR_STORE_OUTPUT,
 
-	/* dst = the push-constant word at byte offset `immediate`, bit for bit. */
-	I915_IR_LOAD_PUSH,
+	/*
+	 * dst = the push-constant word at byte offset `immediate`, bit for bit.
+	 */
+	DRV_GPU_IR_LOAD_PUSH,
 
 	/* dst = src[0] + src[1]. */
-	I915_IR_FADD,
+	DRV_GPU_IR_FADD,
 
 	/* dst = src[0] - src[1]. */
-	I915_IR_FSUB,
+	DRV_GPU_IR_FSUB,
 
 	/* dst = src[0] * src[1]. */
-	I915_IR_FMUL,
+	DRV_GPU_IR_FMUL,
 
 	/* dst = -src[0]. */
-	I915_IR_FNEG,
+	DRV_GPU_IR_FNEG,
 
 	/* dst = 1 / sqrt(src[0]). */
-	I915_IR_RSQ,
+	DRV_GPU_IR_RSQ,
 
 	/* dst = sin(src[0]). */
-	I915_IR_SIN,
+	DRV_GPU_IR_SIN,
 
 	/* dst = cos(src[0]). */
-	I915_IR_COS,
+	DRV_GPU_IR_COS,
 
 	/*
 	 * dst .. dst + 3 = texture(set `location`, binding `immediate`) at
@@ -260,191 +267,220 @@ enum i915_shader_ir_op {
 	 * `component` is the constant texel offset (u in bits 11:8, v in 7:4,
 	 * each -8 .. 7), 0 for none.
 	 */
-	I915_IR_SAMPLE,
+	DRV_GPU_IR_SAMPLE,
 
 	/* dst = 1 / src[0]. */
-	I915_IR_RCP,
+	DRV_GPU_IR_RCP,
 
 	/* dst = sqrt(src[0]). */
-	I915_IR_SQRT,
+	DRV_GPU_IR_SQRT,
 
 	/* dst = 2 ^ src[0]. */
-	I915_IR_EXP2,
+	DRV_GPU_IR_EXP2,
 
 	/* dst = log2(src[0]). */
-	I915_IR_LOG2,
+	DRV_GPU_IR_LOG2,
 
 	/* dst = |src[0]|. */
-	I915_IR_FABS,
+	DRV_GPU_IR_FABS,
 
 	/* dst = floor(src[0]). */
-	I915_IR_FLOOR,
+	DRV_GPU_IR_FLOOR,
 
 	/* dst = src[0] - floor(src[0]). */
-	I915_IR_FRACT,
+	DRV_GPU_IR_FRACT,
 
 	/* dst = the smaller of src[0] and src[1]. */
-	I915_IR_FMIN,
+	DRV_GPU_IR_FMIN,
 
 	/* dst = the larger of src[0] and src[1]. */
-	I915_IR_FMAX,
+	DRV_GPU_IR_FMAX,
 
 	/* dst = the Boolean src[0] < src[1]; false when either is NaN. */
-	I915_IR_FLT,
+	DRV_GPU_IR_FLT,
 
 	/* dst = the Boolean src[0] >= src[1]; false when either is NaN. */
-	I915_IR_FGE,
+	DRV_GPU_IR_FGE,
 
 	/* dst = the Boolean src[0] == src[1]; false when either is NaN. */
-	I915_IR_FEQ,
+	DRV_GPU_IR_FEQ,
 
 	/* dst = the Boolean src[0] != src[1]; true when either is NaN. */
-	I915_IR_FNEU,
+	DRV_GPU_IR_FNEU,
 
 	/* dst = the Boolean src[0] and src[1]. */
-	I915_IR_AND,
+	DRV_GPU_IR_AND,
 
 	/* dst = the Boolean src[0] or src[1]. */
-	I915_IR_OR,
+	DRV_GPU_IR_OR,
 
 	/* dst = the Boolean not src[0]. */
-	I915_IR_NOT,
+	DRV_GPU_IR_NOT,
 
 	/* dst = the Boolean whose bits are `immediate` (all ones or zero). */
-	I915_IR_BOOL,
+	DRV_GPU_IR_BOOL,
 
-	/* dst = src[1] where the Boolean src[0] is true, else src[2], bit for bit. */
-	I915_IR_SELECT,
+	/*
+	 * dst = src[1] where the Boolean src[0] is true, else src[2], bit for
+	 * bit.
+	 */
+	DRV_GPU_IR_SELECT,
 
-	/* Discards the pixels where the Boolean src[0] is true (fragment only). */
-	I915_IR_KILL,
+	/*
+	 * Discards the pixels where the Boolean src[0] is true (fragment only).
+	 */
+	DRV_GPU_IR_KILL,
 
 	/* dst = src[0] rounded toward zero (a float). */
-	I915_IR_FTRUNC,
+	DRV_GPU_IR_FTRUNC,
 
 	/* dst = the 32-bit integer whose bits are `immediate`. */
-	I915_IR_ICONST,
+	DRV_GPU_IR_ICONST,
 
 	/*
 	 * dst = the word at byte offset `immediate` of uniform block
 	 * `location` (an index of the uniform list), bit for bit.
 	 */
-	I915_IR_LOAD_UBO,
+	DRV_GPU_IR_LOAD_UBO,
 
 	/* dst = src[0] + src[1], integers modulo 2^32. */
-	I915_IR_IADD,
+	DRV_GPU_IR_IADD,
 
 	/* dst = src[0] - src[1], integers modulo 2^32. */
-	I915_IR_ISUB,
+	DRV_GPU_IR_ISUB,
 
 	/* dst = the low 32 bits of src[0] * src[1]. */
-	I915_IR_IMUL,
+	DRV_GPU_IR_IMUL,
 
 	/* dst = -src[0], an integer modulo 2^32. */
-	I915_IR_INEG,
+	DRV_GPU_IR_INEG,
 
-	/* dst = src[0] / src[1], unsigned, rounded toward zero; undefined for a zero divisor. */
-	I915_IR_UDIV,
+	/*
+	 * dst = src[0] / src[1], unsigned, rounded toward zero; undefined for a
+	 * zero divisor.
+	 */
+	DRV_GPU_IR_UDIV,
 
 	/* dst = src[0] % src[1], unsigned; undefined for a zero divisor. */
-	I915_IR_UMOD,
+	DRV_GPU_IR_UMOD,
 
 	/* dst = the bitwise and, or, exclusive or of src[0] and src[1]. */
-	I915_IR_IAND,
-	I915_IR_IOR,
-	I915_IR_IXOR,
+	DRV_GPU_IR_IAND,
+	DRV_GPU_IR_IOR,
+	DRV_GPU_IR_IXOR,
 
 	/* dst = the bitwise complement of src[0]. */
-	I915_IR_INOT,
+	DRV_GPU_IR_INOT,
 
-	/* dst = src[0] shifted left, right logically, right arithmetically by src[1] (mod 32). */
-	I915_IR_SHL,
-	I915_IR_SHR,
-	I915_IR_ASR,
+	/*
+	 * dst = src[0] shifted left, right logically, right arithmetically by
+	 * src[1] (mod 32).
+	 */
+	DRV_GPU_IR_SHL,
+	DRV_GPU_IR_SHR,
+	DRV_GPU_IR_ASR,
 
 	/* dst = the float of the signed / unsigned integer src[0]. */
-	I915_IR_I2F,
-	I915_IR_U2F,
+	DRV_GPU_IR_I2F,
+	DRV_GPU_IR_U2F,
 
-	/* dst = the signed / unsigned integer of the float src[0], rounded toward zero. */
-	I915_IR_F2I,
-	I915_IR_F2U,
+	/*
+	 * dst = the signed / unsigned integer of the float src[0], rounded
+	 * toward zero.
+	 */
+	DRV_GPU_IR_F2I,
+	DRV_GPU_IR_F2U,
 
 	/* dst = the Boolean of the signed comparison src[0] <, >= src[1]. */
-	I915_IR_ILT,
-	I915_IR_IGE,
+	DRV_GPU_IR_ILT,
+	DRV_GPU_IR_IGE,
 
 	/* dst = the Boolean of the unsigned comparison src[0] <, >= src[1]. */
-	I915_IR_ULT,
-	I915_IR_UGE,
+	DRV_GPU_IR_ULT,
+	DRV_GPU_IR_UGE,
 
 	/* dst = the Boolean src[0] == src[1], != src[1], as integers. */
-	I915_IR_IEQ,
-	I915_IR_INE,
+	DRV_GPU_IR_IEQ,
+	DRV_GPU_IR_INE,
 
 	/*
 	 * dst = src[0], bit for bit.  The only instruction whose destination
 	 * may be defined before: a loop variable is moved into before its loop
 	 * and again at the loop's end.
 	 */
-	I915_IR_MOVE,
+	DRV_GPU_IR_MOVE,
 
 	/* The first instruction of a loop's body. */
-	I915_IR_LOOP_BEGIN,
+	DRV_GPU_IR_LOOP_BEGIN,
 
 	/*
 	 * The end of a loop's body: the channels where the Boolean src[0] is
 	 * true run the body again; the loop ends when it is false for all.
 	 */
-	I915_IR_LOOP_END,
+	DRV_GPU_IR_LOOP_END,
 
 	/*
 	 * dst = src[0] / src[1], signed, rounded toward zero; undefined for a
 	 * zero divisor and for the most negative integer divided by -1.
 	 */
-	I915_IR_IDIV,
+	DRV_GPU_IR_IDIV,
 
-	/* dst = src[0] - src[1] * (src[0] / src[1]), signed: the sign of src[0] (SPIR-V OpSRem). */
-	I915_IR_IREM,
+	/*
+	 * dst = src[0] - src[1] * (src[0] / src[1]), signed: the sign of src[0]
+	 * (SPIR-V OpSRem).
+	 */
+	DRV_GPU_IR_IREM,
 
-	/* dst = src[0] rounded to the nearest integer, a tie to the even one (a float). */
-	I915_IR_FROUND_EVEN,
+	/*
+	 * dst = src[0] rounded to the nearest integer, a tie to the even one (a
+	 * float).
+	 */
+	DRV_GPU_IR_FROUND_EVEN,
 
-	/* As SAMPLE, the level of detail the derivatives choose moved by the bias src[2]. */
-	I915_IR_SAMPLE_BIAS,
+	/*
+	 * As SAMPLE, the level of detail the derivatives choose moved by the
+	 * bias src[2].
+	 */
+	DRV_GPU_IR_SAMPLE_BIAS,
 
 	/* As SAMPLE, at the level of detail src[2]. */
-	I915_IR_SAMPLE_LOD,
+	DRV_GPU_IR_SAMPLE_LOD,
 
 	/*
 	 * dst = the difference of src[0] across the pixel's 2x2 quad (fragment
-	 * only): right minus left, bottom minus top.  DDX and DDY take the quad's
-	 * top left pixel's difference for all four (coarse); DDX_FINE each
-	 * row's own.
+	 * only): right minus left, bottom minus top.  DDX and DDY take the
+	 * quad's top left pixel's difference for all four (coarse); DDX_FINE
+	 * each row's own.
 	 */
-	I915_IR_DDX,
-	I915_IR_DDX_FINE,
-	I915_IR_DDY,
+	DRV_GPU_IR_DDX,
+	DRV_GPU_IR_DDX_FINE,
+	DRV_GPU_IR_DDY,
 
-	/* dst = src[0] and src[1] as 16-bit floats, the low half and the high half. */
-	I915_IR_PACK_HALF,
+	/*
+	 * dst = src[0] and src[1] as 16-bit floats, the low half and the high
+	 * half.
+	 */
+	DRV_GPU_IR_PACK_HALF,
 
-	/* dst = the float of the 16-bit float at bits 16 * `component` + 15 .. 16 * `component` of src[0]. */
-	I915_IR_UNPACK_HALF,
+	/*
+	 * dst = the float of the 16-bit float at bits 16 * `component` + 15 ..
+	 * 16 * `component` of src[0].
+	 */
+	DRV_GPU_IR_UNPACK_HALF,
 
 	/* As DDY, each column's own difference (fine). */
-	I915_IR_DDY_FINE,
+	DRV_GPU_IR_DDY_FINE,
 
 	/*
 	 * dst .. dst + 3 = the reply of one sampler message to the image and
 	 * sampler at set `location`, binding `immediate`: the message's
 	 * parameters are the src[1] consecutive values from src[0] on, in the
-	 * order the message takes them (I915_IR_TEXTURE_*); `component` is the
-	 * message type (bits 4:0) and the constant texel offset of the header
-	 * (bits 23:8: u in 11:8, v in 7:4, r in 3:0 of the offset, shifted by
-	 * 8), no header when the offset is 0.
+	 * order the message takes them (DRV_GPU_IR_TEXTURE_*); `component` is
+	 * the message type (bits 4:0) and the constant texel offset of the
+	 * header (bits 23:8: u in 11:8, v in 7:4, r in 3:0 of the offset,
+	 * shifted by 8), no header when the offset is 0.
 	 */
-	I915_IR_TEXTURE,
+	DRV_GPU_IR_TEXTURE,
 
 	/*
 	 * dst = the word at byte offset src[0] (a value) of storage buffer
@@ -452,93 +488,93 @@ enum i915_shader_ir_op {
 	 * `component` 1 only where the Boolean src[1] (the predicate of the
 	 * block the load is in) holds, the other channels' dst left as it was.
 	 */
-	I915_IR_LOAD_STORAGE,
+	DRV_GPU_IR_LOAD_STORAGE,
 
 	/*
 	 * The word at byte offset src[0] of storage buffer `location` = src[1],
 	 * written to memory; with `component` 1 only where the Boolean src[2]
 	 * (the predicate of the block the store is in) holds.
 	 */
-	I915_IR_STORE_STORAGE,
+	DRV_GPU_IR_STORE_STORAGE,
 
 	/*
 	 * The start of a skippable block (ws075-p023): the instructions up to
-	 * the matching SKIP_END are the body of one block whose predicate is the
-	 * Boolean src[0]; a thread none of whose channels is in it may jump over
-	 * them.  The parser checks that nothing made between the two is seen
-	 * afterwards except through a selection or an AND by that predicate, and
-	 * turns a pair it cannot prove so into NOPs.
+	 * the matching SKIP_END are the body of one block whose predicate is
+	 * the Boolean src[0]; a thread none of whose channels is in it may jump
+	 * over them.  The parser checks that nothing made between the two is
+	 * seen afterwards except through a selection or an AND by that
+	 * predicate, and turns a pair it cannot prove so into NOPs.
 	 */
-	I915_IR_SKIP_BEGIN,
+	DRV_GPU_IR_SKIP_BEGIN,
 
 	/* The end of a skippable block. */
-	I915_IR_SKIP_END,
+	DRV_GPU_IR_SKIP_END,
 
 	/*
-	 * dst = the built-in value `component` (I915_IR_SYSTEM_*) of the
+	 * dst = the built-in value `component` (DRV_GPU_IR_SYSTEM_*) of the
 	 * channel's compute invocation (ws101-p002) or geometry invocation
 	 * (ws075-p007a).
 	 */
-	I915_IR_LOAD_SYSTEM,
+	DRV_GPU_IR_LOAD_SYSTEM,
 
 	/*
 	 * dst = the value the word at byte offset src[0] of storage buffer
-	 * `location` held, which the operation `immediate` (I915_IR_ATOMIC_*)
-	 * of it and src[1] replaces in one indivisible step; a compare and
-	 * exchange writes src[1] only where the word equals src[2].  The
-	 * Boolean predicate is the source after the values (src[2], or src[3]
-	 * for a compare and exchange) when `component` is
-	 * I915_IR_ATOMIC_PREDICATED.  The code generator asks the memory for
+	 * `location` held, which the operation `immediate`
+	 * (DRV_GPU_IR_ATOMIC_*) of it and src[1] replaces in one indivisible
+	 * step; a compare and exchange writes src[1] only where the word equals
+	 * src[2].  The Boolean predicate is the source after the values
+	 * (src[2], or src[3] for a compare and exchange) when `component` is
+	 * DRV_GPU_IR_ATOMIC_PREDICATED.  The code generator asks the memory for
 	 * the old value only when an instruction reads dst (ws101-p002).
 	 */
-	I915_IR_ATOMIC,
+	DRV_GPU_IR_ATOMIC,
 
 	/*
 	 * dst = the bytes of storage buffer `location` its descriptor gives the
 	 * shader, the range an OpArrayLength divides (ws101-p002).
 	 */
-	I915_IR_STORAGE_SIZE,
+	DRV_GPU_IR_STORAGE_SIZE,
 
 	/*
-	 * dst = the word at byte offset src[0] of the workgroup's shared memory;
-	 * with `component` 1 read only where the Boolean src[1] holds, the
-	 * other channels keeping whatever their register held (ws101-p006).
+	 * dst = the word at byte offset src[0] of the workgroup's shared
+	 * memory; with `component` 1 read only where the Boolean src[1] holds,
+	 * the other channels keeping whatever their register held (ws101-p006).
 	 */
-	I915_IR_LOAD_SHARED,
+	DRV_GPU_IR_LOAD_SHARED,
 
 	/*
 	 * The word at byte offset src[0] of the workgroup's shared memory =
 	 * src[1]; with `component` 1 only where the Boolean src[2] holds
 	 * (ws101-p006).
 	 */
-	I915_IR_STORE_SHARED,
+	DRV_GPU_IR_STORE_SHARED,
 
 	/*
 	 * Every invocation of the workgroup waits here until all have come
 	 * (a workgroup execution barrier), after the fences `immediate` names
-	 * (I915_IR_FENCE_*) (ws101-p006).  Every thread of the group must reach
-	 * it the same number of times: the parser refuses one after a return
-	 * and one in a loop not every invocation enters.
+	 * (DRV_GPU_IR_FENCE_*) (ws101-p006).  Every thread of the group must
+	 * reach it the same number of times: the parser refuses one after a
+	 * return and one in a loop not every invocation enters.
 	 */
-	I915_IR_BARRIER,
+	DRV_GPU_IR_BARRIER,
 
 	/*
 	 * The memory accesses before it are done, and visible to the others
 	 * that use the memory, before any after it (a memory fence of the
-	 * memory `immediate` names, I915_IR_FENCE_*) (ws101-p006).
+	 * memory `immediate` names, DRV_GPU_IR_FENCE_*) (ws101-p006).
 	 */
-	I915_IR_FENCE,
+	DRV_GPU_IR_FENCE,
 
 	/*
 	 * dst = input `location`, component `component` of one vertex of the
 	 * input primitive (geometry only, ws075-p007a): the vertex `immediate`,
-	 * or, when `immediate` is I915_IR_VERTEX_DYNAMIC, the vertex whose
+	 * or, when `immediate` is DRV_GPU_IR_VERTEX_DYNAMIC, the vertex whose
 	 * number is the integer src[0] (a number past the primitive's vertices
 	 * reads something undefined).  The location is a located input's own,
-	 * or I915_IR_LOCATION_POSITION or I915_IR_LOCATION_POINT_SIZE for gl_in's
-	 * builtins.  The value is read bit for bit, never interpolated.
+	 * or DRV_GPU_IR_LOCATION_POSITION or DRV_GPU_IR_LOCATION_POINT_SIZE for
+	 * gl_in's builtins.  The value is read bit for bit, never interpolated.
 	 */
-	I915_IR_LOAD_VERTEX_INPUT,
+	DRV_GPU_IR_LOAD_VERTEX_INPUT,
 
 	/*
 	 * Emits one vertex of the output primitive from what the outputs hold
@@ -546,7 +582,7 @@ enum i915_shader_ir_op {
 	 * channels where the Boolean src[0] (the predicate of the block the
 	 * emit is in) holds.
 	 */
-	I915_IR_EMIT_VERTEX,
+	DRV_GPU_IR_EMIT_VERTEX,
 
 	/*
 	 * Ends the output strip the vertices emitted so far make (geometry
@@ -554,10 +590,10 @@ enum i915_shader_ir_op {
 	 * `component` 1 only for the channels where the Boolean src[0] holds.
 	 * The parser leaves it out when the output is points.
 	 */
-	I915_IR_END_PRIMITIVE,
+	DRV_GPU_IR_END_PRIMITIVE,
 
 	/* The number of operations above; it is not an operation of its own. */
-	I915_IR_OP_COUNT
+	DRV_GPU_IR_OP_COUNT
 };
 
 /*
@@ -567,27 +603,33 @@ enum i915_shader_ir_op {
  * (an array or a block several); the list lives as long as the IR that owns
  * it.
  */
-struct i915_shader_ir_io {
+struct drv_gpu_shader_ir_io {
 	uint32_t location;
 	uint32_t components;
 	uint32_t type;
 
-	/* Nonzero for a Flat input: the draw sets it up as the provoking vertex's value. */
+	/*
+	 * Nonzero for a Flat input: the draw sets it up as the provoking
+	 * vertex's value.
+	 */
 	uint32_t flat;
 
-	/* Nonzero for a NoPerspective input: interpolated linearly in screen space. */
+	/*
+	 * Nonzero for a NoPerspective input: interpolated linearly in screen
+	 * space.
+	 */
 	uint32_t noperspective;
 };
 
 /*
  * One bound resource of a shader: a sampled image or a uniform block.
  *
- * The n-th sampled image of the shader is sampler n and binding-table entry
- * 1 + n of the kernel the code generator produces.  A uniform block records
+ * Each backend assigns the sampled images to its own sampler resources.
+ * A uniform block records
  * the bytes [offset, offset + size) the shader reads of it, which the draw
  * delivers with the push constants.
  */
-struct i915_shader_ir_uniform {
+struct drv_gpu_shader_ir_uniform {
 	uint32_t set;
 	uint32_t binding;
 	uint32_t kind;
@@ -601,8 +643,8 @@ struct i915_shader_ir_uniform {
  * Sources name values defined by earlier instructions; which of the fields
  * mean something is stated by the operation.
  */
-struct i915_shader_ir_inst {
-	enum i915_shader_ir_op op;
+struct drv_gpu_shader_ir_inst {
+	enum drv_gpu_shader_ir_op op;
 	uint32_t dst;
 	uint32_t src[4];
 	uint32_t immediate;
@@ -622,21 +664,21 @@ struct i915_shader_ir_inst {
 };
 
 /*
- * A parsed shader ready for lowering to EU code.
+ * A parsed shader ready for lowering by the selected GPU backend.
  *
- * The parser allocates it with its lists and drv_i915_shader_ir_free()
+ * The parser allocates it with its lists and drv_gpu_shader_ir_free()
  * releases it.  A caller that builds one by hand (the rectangle kernels)
  * owns its storage and never passes it to the free function.
  */
-struct i915_shader_ir {
-	enum i915_shader_stage stage;
-	struct i915_shader_ir_io *inputs;
+struct drv_gpu_shader_ir {
+	enum drv_gpu_shader_stage stage;
+	struct drv_gpu_shader_ir_io *inputs;
 	uint32_t input_count;
-	struct i915_shader_ir_io *outputs;
+	struct drv_gpu_shader_ir_io *outputs;
 	uint32_t output_count;
-	struct i915_shader_ir_uniform *uniforms;
+	struct drv_gpu_shader_ir_uniform *uniforms;
 	uint32_t uniform_count;
-	struct i915_shader_ir_inst *instructions;
+	struct drv_gpu_shader_ir_inst *instructions;
 	uint32_t instruction_count;
 	uint32_t value_count;
 
@@ -660,8 +702,8 @@ struct i915_shader_ir {
 	/*
 	 * Geometry (ws075-p007a), from the execution modes: the vertices of one
 	 * input primitive (1, 2, 4, 3 or 6), the primitive emitted
-	 * (I915_IR_OUTPUT_*) and the most vertices one invocation emits; zero
-	 * for another stage.
+	 * (DRV_GPU_IR_OUTPUT_*) and the most vertices one invocation emits;
+	 * zero for another stage.
 	 */
 	uint32_t vertices_in;
 	uint32_t output_topology;
@@ -676,4 +718,4 @@ struct i915_shader_ir {
 	uint32_t writes_layer;
 };
 
-#endif /* DRIVERS_GPU_I915_COMPILER_IR_H */
+#endif /* DRIVERS_GPU_COMPILER_IR_H */

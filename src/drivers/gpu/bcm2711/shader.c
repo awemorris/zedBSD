@@ -11,7 +11,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/shader-private.h"
-#include "drivers/gpu/i915/compiler/compiler.h"
+#include "drivers/gpu/compiler/spirv.h"
 
 /* Nine constant levels match the shared frontend's eight aggregate edges followed by one scalar leaf. */
 #define GRAPHICS_CONSTANT_LEVELS 9U
@@ -36,9 +36,9 @@ bcm2711_shader_compile(
 {
 	struct bcm2711_shader_compiler *compiler;
 	struct bcm2711_shader_binary *created;
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic parse_diagnostic;
-	enum i915_shader_stage parse_stage;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic parse_diagnostic;
+	enum drv_gpu_shader_stage parse_stage;
 	int error;
 
 	/* A refused compile never publishes a partial program or leaves an old output pointer live. */
@@ -62,12 +62,12 @@ bcm2711_shader_compile(
 		return error;
 
 	/* Both native vertex variants parse the same source stage; their VPM epilogues differ. */
-	parse_stage = I915_STAGE_VERTEX;
+	parse_stage = DRV_GPU_STAGE_VERTEX;
 	if (stage == BCM2711_SHADER_FRAGMENT)
-		parse_stage = I915_STAGE_FRAGMENT;
+		parse_stage = DRV_GPU_STAGE_FRAGMENT;
 	parse_diagnostic.reason = NULL;
 	ir = NULL;
-	error = drv_i915_shader_parse(words, word_count, parse_stage, &ir, &parse_diagnostic);
+	error = drv_gpu_shader_parse(words, word_count, parse_stage, &ir, &parse_diagnostic);
 	if (error != 0) {
 		if (diagnostic != NULL) {
 			diagnostic->instruction = parse_diagnostic.word_offset;
@@ -81,7 +81,7 @@ bcm2711_shader_compile(
 	/* Large register/output tables live in unpublished CPU storage while the parser and lowering use the finite kernel stack. */
 	compiler = kern_calloc(1, sizeof(*compiler));
 	if (compiler == NULL) {
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		return ENOMEM;
 	}
 
@@ -93,7 +93,7 @@ bcm2711_shader_compile(
 	/* Allocates the public program independently so every later failure has a single complete unwind. */
 	compiler->binary = kern_calloc(1, sizeof(*compiler->binary));
 	if (compiler->binary == NULL) {
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		kern_free(compiler);
 		return ENOMEM;
 	}
@@ -107,7 +107,7 @@ bcm2711_shader_compile(
 	/* Source IR and allocator metadata retire before the immutable native program becomes visible. */
 	created = compiler->binary;
 	kern_free(compiler->values);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	kern_free(compiler);
 
 	/* A failed native prefix can never escape as a usable shader binary. */

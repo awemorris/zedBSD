@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i11〜i15の承認済みsoftware実装/全source監査/build/host/main統合を終了。final merge5eb8867f3、RPi4 y/n warning-error0/checks3、全14host、caller/IRQ込み16KiB ordinary stack PASS。次はユーザーのRPi4/Keiland/console RAM寿命確認とQ1/T1回帰。[最終audit](p007-software-audit.md)・[統合/終了/未確認条件](execution-20261009.md#i15-main統合software実行の終了2026-10-10)。共有投影/GitHubはQ1。
+Resume point: i11〜i15のsoftware実装/監査/main統合は終了。2026-10-10追加指示で静的改善とp008共通compiler refactorを実行中。final merge5eb8867f3、RPi4 y/n warning-error0/checks3、全14host、caller/IRQ込み16KiB ordinary stack PASS。次はユーザーのRPi4/Keiland/console RAM寿命確認とQ1/T1回帰。[最終audit](p007-software-audit.md)・[統合/終了/未確認条件](execution-20261009.md#i15-main統合software実行の終了2026-10-10)。共有投影/GitHubはQ1。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -73,7 +73,8 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V1〜V10/native runnerを実装、固定XML照合・host/build PASS。実機電源/register/job観測は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | in-progress | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
 | [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | in-progress（compiler/native prepared job/public runtime/Keiland software経路とhost/build/stack監査PASS、実機待ち） | p004・p005 | 未見積 |
-| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | cleared（i15全source software監査/build/host/main統合。実機関門は他Phaseに保持） | 全て | 3〜4h |
+| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | in-progress（i15はcleared履歴。今回refactor後の最終再確認） | 全て | 3〜4h |
+| [p008](phase008/phase.md) | GPU共通SPIR-V frontend/IR、i915・VC4参照移行 | cleared（software/build/host。実機は他Phase） | p006 software出力、p007再監査 | 今回有限scope |
 
 ## 要検討・ブロック（2026-10-05）
 
@@ -261,3 +262,11 @@ p006で4件pipelineのtemporary recordをcommand arenaへ移し、LTO frame4560�
 ## software実行の終了（2026-10-10）
 
 i13/i14のsoftware/統合部分とi15/p007をcleared。全実装/検証/監査記録をmainへ統合済み。WS acceptanceの実機/Keiland画面/console RAM寿命は後日確認待ちで、Statusはincompleteを保持する。新Queue・remote公開・Master独自更新は行わない。対象、全commands/hash、user/Q1担当の残る条件は[最終受け渡し](execution-20261009.md#i15-main統合software実行の終了2026-10-10)。
+
+## 共通compilerの追加指示（2026-10-10）
+
+ユーザーが静的レビュー/改善とGPU共通compilerへの抽出を明示して自律実行を依頼。p008を追加しp006のfrontend依存を共通moduleへ移す。p007の旧clearanceはsource変更で失効、今回i18で再確認。WS incomplete/実機ユーザー担当/共有投影Q1を維持。[承認・scope・手順](compiler-refactor-20261010.md)。
+
+## 共通compiler software確認（2026-10-10）
+
+p008/i17をcleared。共通frontend/IR/diagnosticをdrv_gpu_へ移しi915とVC4を接続、heap parse stateと短絡を保つcaller修正を確認。IR token互換、RPi4 y/n・amd64 i915 y build、parser/EU/QPU/client host、ordinary stack margin704 PASS。p007/i18は今回最終sourceのmain統合待ち。WS incompleteと後日実機ユーザー担当は保持。[今回成果と未確認](compiler-refactor-20261010.md)。共有投影はQ1。

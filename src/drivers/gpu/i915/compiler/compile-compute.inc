@@ -82,7 +82,7 @@ i915_compile_compute_interface(
 static void
 i915_compile_load_system(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg source;
@@ -93,18 +93,18 @@ i915_compile_load_system(
 	dst = i915_compile_define(state, inst->dst, 1U);
 
 	/* The invocation's place in its group: a register of the thread's own push data, after the cross-thread data. */
-	if (inst->component <= I915_IR_SYSTEM_LOCAL_INDEX) {
+	if (inst->component <= DRV_GPU_IR_SYSTEM_LOCAL_INDEX) {
 		source = drv_i915_eu_grf_ud(payload_inputs + inst->component);
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_ud(dst), source);
 		return;
 	}
 
 	/* The group's place along the axis: a dword of the header. */
-	if (inst->component == I915_IR_SYSTEM_GROUP_ID_X) {
+	if (inst->component == DRV_GPU_IR_SYSTEM_GROUP_ID_X) {
 		byte = COMPILE_CS_GROUP_X_BYTE;
-	} else if (inst->component == I915_IR_SYSTEM_GROUP_ID_Y) {
+	} else if (inst->component == DRV_GPU_IR_SYSTEM_GROUP_ID_Y) {
 		byte = COMPILE_CS_GROUP_Y_BYTE;
-	} else if (inst->component == I915_IR_SYSTEM_GROUP_ID_Z) {
+	} else if (inst->component == DRV_GPU_IR_SYSTEM_GROUP_ID_Z) {
 		byte = COMPILE_CS_GROUP_Z_BYTE;
 	} else {
 		/* A built-in the IR does not define is inconsistent IR. */
@@ -155,7 +155,7 @@ i915_compile_storage_block(
 static void
 i915_compile_storage_size(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg source;
@@ -190,7 +190,7 @@ i915_compile_storage_size(
 static void
 i915_compile_atomic(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst,
+	const struct drv_gpu_shader_ir_inst *inst,
 	uint32_t payload_inputs)
 {
 	struct i915_eu_reg low;
@@ -217,7 +217,7 @@ i915_compile_atomic(
 	int found;
 
 	/* A word of shared memory is changed by its own message (ws101-p006). */
-	if (inst->location == I915_IR_LOCATION_SHARED) {
+	if (inst->location == DRV_GPU_IR_LOCATION_SHARED) {
 		i915_compile_atomic_shared(state, inst);
 		return;
 	}
@@ -241,7 +241,7 @@ i915_compile_atomic(
 
 	/* A compare and exchange also reads its comparator. */
 	compare_grf = 0U;
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG)
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG)
 		compare_grf = i915_compile_grf(state, inst->src[2]);
 
 	/* A predicated atomic reads its predicate, the last operand. */
@@ -265,7 +265,7 @@ i915_compile_atomic(
 	/* Two data values -- a compare and exchange's -- take a run of their own; one is sent from its register. */
 	data_grf = value_grf;
 	data_regs = 1U;
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG) {
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG) {
 		data_grf = i915_compile_temporaries(state, 2U);
 		data_regs = 2U;
 	}
@@ -293,7 +293,7 @@ i915_compile_atomic(
 	drv_i915_eu_mov(&state->code, interleaved, drv_i915_eu_grf_ud(carry));
 
 	/* A compare and exchange sends the comparator, then the new value. */
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG) {
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG) {
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_ud(data_grf), drv_i915_eu_grf_ud(compare_grf));
 		drv_i915_eu_mov(&state->code, drv_i915_eu_grf_ud(data_grf + 1U), drv_i915_eu_grf_ud(value_grf));
 	}
@@ -354,7 +354,7 @@ i915_compile_atomic(
 	state->grf_busy[carry] = 0U;
 
 	/* So is a compare and exchange's run of two data values. */
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG) {
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG) {
 		state->grf_busy[data_grf] = 0U;
 		state->grf_busy[data_grf + 1U] = 0U;
 	}
@@ -440,7 +440,7 @@ i915_compile_group_threads(
 static void
 i915_compile_shared(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg null;
 	struct i915_eu_reg dst;
@@ -460,7 +460,7 @@ i915_compile_shared(
 	/* A store sends its word, the second operand; a load sends none, and its predicate is the second operand. */
 	data = drv_i915_eu_null();
 	predicate_operand = 1U;
-	if (inst->op == I915_IR_STORE_SHARED) {
+	if (inst->op == DRV_GPU_IR_STORE_SHARED) {
 		data_grf = i915_compile_grf(state, inst->src[1]);
 		data = drv_i915_eu_grf(data_grf);
 		predicate_operand = 2U;
@@ -476,7 +476,7 @@ i915_compile_shared(
 	descriptor = (1U << EU_DESC_MLEN_SHIFT) | (control << EU_DP_CONTROL_SHIFT) | EU_BTI_SLM;
 	ex_descriptor = 0U;
 	dst = drv_i915_eu_null();
-	if (inst->op == I915_IR_LOAD_SHARED) {
+	if (inst->op == DRV_GPU_IR_LOAD_SHARED) {
 		descriptor |= (1U << EU_DESC_RLEN_SHIFT) | (EU_DP_UNTYPED_READ << EU_DP_TYPE_SHIFT);
 		dst_grf = i915_compile_define(state, inst->dst, 1U);
 		dst = drv_i915_eu_grf(dst_grf);
@@ -531,7 +531,7 @@ i915_compile_shared(
 static void
 i915_compile_atomic_shared(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg null;
 	struct i915_eu_reg reply;
@@ -554,7 +554,7 @@ i915_compile_atomic_shared(
 
 	/* A compare and exchange also reads its comparator. */
 	compare_grf = 0U;
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG)
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG)
 		compare_grf = i915_compile_grf(state, inst->src[2]);
 
 	/* A predicated atomic reads its predicate, the last operand. */
@@ -573,7 +573,7 @@ i915_compile_atomic_shared(
 	/* A compare and exchange sends the comparator, then the new value, in a run of two. */
 	data_grf = value_grf;
 	data_regs = 1U;
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG) {
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG) {
 		data_grf = i915_compile_temporaries(state, 2U);
 		if (state->out_of_registers != 0)
 			return;
@@ -634,14 +634,14 @@ i915_compile_atomic_shared(
 	}
 
 	/* The temporaries are free again. */
-	if (inst->immediate == I915_IR_ATOMIC_CMPXCHG) {
+	if (inst->immediate == DRV_GPU_IR_ATOMIC_CMPXCHG) {
 		state->grf_busy[data_grf] = 0U;
 		state->grf_busy[data_grf + 1U] = 0U;
 	}
 }
 
 /*
- * Lowers the fences `fences` names (I915_IR_FENCE_*, ws101-p006): a memory
+ * Lowers the fences `fences` names (DRV_GPU_IR_FENCE_*, ws101-p006): a memory
  * fence message of the data cache (binding table entry 0) for buffers and
  * one of shared memory (254) for shared memory, each SIMD1 of r0 with the
  * commit bit; the encoder waits for each reply before going on, so the
@@ -657,7 +657,7 @@ i915_compile_fence(
 	uint32_t reply;
 
 	/* Nothing to order. */
-	if ((fences & (I915_IR_FENCE_GLOBAL | I915_IR_FENCE_SHARED)) == 0U)
+	if ((fences & (DRV_GPU_IR_FENCE_GLOBAL | DRV_GPU_IR_FENCE_SHARED)) == 0U)
 		return;
 
 	/* A register for the replies. */
@@ -673,11 +673,11 @@ i915_compile_fence(
 		     (EU_DP_FENCE_COMMIT << EU_DP_CONTROL_SHIFT);
 
 	/* The buffers' fence, at the data cache's entry. */
-	if ((fences & I915_IR_FENCE_GLOBAL) != 0U)
+	if ((fences & DRV_GPU_IR_FENCE_GLOBAL) != 0U)
 		drv_i915_eu_send_scalar(&state->code, drv_i915_eu_grf(reply), drv_i915_eu_grf(0U), EU_SFID_DATA_CACHE, descriptor | EU_BTI_DATA_CACHE);
 
 	/* Then shared memory's, at the shared memory's entry. */
-	if ((fences & I915_IR_FENCE_SHARED) != 0U)
+	if ((fences & DRV_GPU_IR_FENCE_SHARED) != 0U)
 		drv_i915_eu_send_scalar(&state->code, drv_i915_eu_grf(reply), drv_i915_eu_grf(0U), EU_SFID_DATA_CACHE, descriptor | EU_BTI_SLM);
 
 	/* The register is free again. */
@@ -696,7 +696,7 @@ i915_compile_fence(
 static void
 i915_compile_barrier(
 	struct i915_compile_state *state,
-	const struct i915_shader_ir_inst *inst)
+	const struct drv_gpu_shader_ir_inst *inst)
 {
 	struct i915_eu_reg dword;
 	struct i915_eu_reg identity;

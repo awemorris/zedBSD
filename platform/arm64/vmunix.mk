@@ -104,7 +104,7 @@ ifeq ($(CONFIG_DRIVER_BCM2711_GPU),y)
 # Native BCM2711 nodes need the common GPU core even without a PCI GPU.
 ARM64_KERNEL_SOURCES += $(filter-out $(KERN_GPU_SOURCES),src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c)
 # The shared Zlib scalar parser has no device or Gen12 code-generation dependencies.
-ARM64_KERNEL_SOURCES += $(filter-out $(KERN_GPU_SOURCES),src/drivers/gpu/i915/compiler/spirv.c src/drivers/gpu/i915/render/codec.c)
+ARM64_KERNEL_SOURCES += $(filter-out $(KERN_GPU_SOURCES),src/drivers/gpu/compiler/spirv.c src/drivers/gpu/i915/render/codec.c)
 ARM64_KERNEL_SOURCES += src/drivers/gpu/bcm2711/attach.c \
 	src/drivers/gpu/bcm2711/stage.c src/drivers/gpu/bcm2711/fdt-util.c \
 	src/drivers/gpu/bcm2711/firmware.c src/drivers/gpu/bcm2711/display.c \
