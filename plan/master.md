@@ -523,6 +523,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「beta2.mdの必須の項目は、P1担当分はこのまま消化しきってください。そのあと、UATは少し遅れるので、WS143, WS083もP1で完了を目指してください。」「BUG-237, BUG-271, BUG-219, BUG-232, BUG-235, BUG-179, BUG-180は確認できたのでCloseです。」→ 7 件を resolved。P1 は beta2.md の必須 → WS143 → WS083 の順、ws001-p045 は後。
 - 2026-10-09 ユーザー（クリック）: ベータ2 の FFmpeg 9.0.2（LGPL）の source の提供は「ffmpeg.org への link だけ」→ release notes に版と ffmpeg.org の link、zedBSD の patch と configure の引数は GitHub の tree にある旨を書く。release の asset に tarball は載せない（Q1 は tarball を推したが、ユーザーの決定）。
 - 2026-10-09 ユーザー:「WS143 Bluetooth の HID（BR/EDR・LE のキーボード・マウス）ですが、現在の判断ではベータ2に入れます。間に合わなければ直前でOFFにします。」「WS083 Vulkan Video（H.264）ですが、現在の判断ではベータ2に入れます。間に合わなければ直前でOFFにします。」「機能の凍結の日は10/13を目標にしますが、ベータなので、UATフィードバックのバグを直しきれなくてもいいです。そういう意味では、code freezeはぎりぎりまでやらないかもしれないです。」→ plan/beta2.md を更新（LW 表記、計 53.5 LW）。
 - 2026-10-09 ユーザー（クリック）: ベータ2 の release の config に Bluetooth（WS143、intelbt-firmware）を「入れる、動かなければ既知」→ config/release/config-amd64-beta2.mk に足す（P1 q920）。10/12 の凍結までに HID が 5330 で動かなければ release notes の既知の問題に書く。
