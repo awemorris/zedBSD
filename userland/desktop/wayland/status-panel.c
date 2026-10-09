@@ -944,7 +944,7 @@ status_draw_sound(
 	/* The button, the accent's colours given back, and its word. */
 	glass_draw_solid(server, command, (float)mute_x, (float)mute_y, (float)STATUS_MUTE_WIDTH, (float)STATUS_MUTE_HEIGHT, (float)STATUS_MUTE_HEIGHT / 2.0f, fill);
 	kwl_accent_done(server, kept);
-	glass_draw_text_middle(server, command, SIZE_BAR, mute_x + STATUS_MUTE_WIDTH / 2, mute_y + STATUS_MUTE_HEIGHT / 2 + 6, kl_tr("Mute"), STATUS_MUTE_WIDTH, dark);
+	glass_draw_text_centred(server, command, SIZE_BAR, mute_x + STATUS_MUTE_WIDTH / 2, mute_y + STATUS_MUTE_HEIGHT / 2 + 6, kl_tr("Mute"), STATUS_MUTE_WIDTH, dark);
 
 	/* The slider: the track, its filled part and the knob at the volume. */
 	status_slider_place(row, &left, &width, &middle);

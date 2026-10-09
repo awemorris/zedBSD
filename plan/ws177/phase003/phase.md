@@ -3,7 +3,7 @@
 # ws177-p003: UCSI の堅牢化の host の分（案 G）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q882 の 3: host の分を実装・host PASS・kernel build。実機の確認は 5330 の後）
+Status: cleared（2026-10-10 Q1 判定: ユーザーの 5330 の UAT「WS177 はOK」、host・build は前の記録のとおり）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q882 の 3（P1、2026-10-08、承認は Q1 の dispatch「G の host の分（backlog-p2 148〜150・155）: UCSI の堅牢化の、5330 なしで作れる所。記録の再生の host 試験と停止の道。実機の確認は 5330 の後（BUG-256 にも注意、触らない）」）

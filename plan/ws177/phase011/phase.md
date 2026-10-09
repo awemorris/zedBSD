@@ -3,7 +3,7 @@
 # ws177-p011: Notes の Save Clean Copy の仕上げ（案 K3）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（2026-10-08 P1 q887 の 1: 実装・host PASS・build warning 0。Notes の画面（案内・menu）は UAT）
+Status: cleared（2026-10-10 Q1 判定: ユーザーの 5330 の UAT「WS177 はOK」、host・build は前の記録のとおり）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q887 の 1（P1、2026-10-08）

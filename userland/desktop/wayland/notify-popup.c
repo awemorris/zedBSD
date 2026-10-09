@@ -702,7 +702,7 @@ popup_draw_icon(
 	glass_draw_solid(server, command, (float)x, (float)y, (float)POPUP_ICON, (float)POPUP_ICON, 9.0f, fill);
 	memcpy(ink, white, sizeof(ink));
 	ink[3] = opacity;
-	glass_draw_text_middle(server, command, SIZE_TITLE, x + POPUP_ICON / 2, y + POPUP_ICON / 2 + 7, letter, POPUP_ICON, ink);
+	glass_draw_text_centred(server, command, SIZE_TITLE, x + POPUP_ICON / 2, y + POPUP_ICON / 2 + 7, letter, POPUP_ICON, ink);
 }
 
 /*

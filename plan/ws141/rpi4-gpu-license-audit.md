@@ -173,3 +173,24 @@ BCM2711 ARM Peripherals の条件: 「Raspberry Pi の製品と一緒に使う�
 | path（Raspberry Pi firmware の wiki、`https://github.com/raspberrypi/firmware.wiki.git` の commit `c9e615a74d377a7e94ac2140336d1352941ef9a2`） | SHA-256 | license | 扱い |
 | --- | --- | --- | --- |
 | `Mailbox-property-interface.md` | `1197d7f52ae2ce6b731bb1ea8e1fce93df4395983629994069e71d498160dd8b` | 表記なし（Raspberry Pi の公開の interface の文書） | mailbox の tag・clock の ID・framebuffer・EDID の tag の値の出典（interface の事実）。display の終了の通知と電源 domain の set の tag は載っておらず、GPL の header にしか無い（[design](rpi4-gpu-design.md) の判断の項目 17） |
+
+
+## i14 compilerの追加参照（2026-10-09）
+
+固定Mesa25.3.6 commit `06f9e28304d5d3f109c33535c1c25b9df5769af2`、ignored `temp/mesa/` のみ。各sourceの先頭のMIT許諾とhashを読み直した。新kernel QPU/compilerは独立のZlib実装であり、単一ALU/保守的idle/register liveness/semantic uniformの構成を採用。既存Zlib `src/drivers/gpu/i915/compiler/spirv.c` はdevice-independent frontendとしてread-onlyでarm64 source listへ追加し、Gen12 code generatorは使用しない。全WSの最終license/設計類似監査はp007で再実施する。
+
+| path | SHA-256 | license | 扱い |
+| --- | --- | --- | --- |
+| `src/broadcom/qpu/qpu_instr.h` | `4b1b90e3bb8ea614dea36484e24d83049392c55cf19b01125627fa5ff4c9d07f` | MIT（各file先頭の許諾を確認） | native命令のformat factsと独立host oracle。kernelへのcode/object取り込み無し |
+| `src/broadcom/qpu/qpu_instr.c` | `f61745f35e5b34c74aad56b01afb9e068860ecb067361b8f9610dc1b673c8d4e` | MIT（各file先頭の許諾を確認） | native命令のformat factsと独立host oracle。kernelへのcode/object取り込み無し |
+| `src/broadcom/qpu/qpu_pack.c` | `abf436006dd3bed52cf1e77245d7267105a9100f02d8b3d643ddc6641fd6d551` | MIT（各file先頭の許諾を確認） | native命令のformat factsと独立host oracle。kernelへのcode/object取り込み無し |
+| `src/broadcom/compiler/v3d_compiler.h` | `54723cbf03636cca567e7883e857652e53d6b8b526d9e9a3399befc040bbbe0f` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/vir_to_qpu.c` | `28cb5e58c46b2a81da62afe34468310525b15bcb5643e8b5586fed56954423da` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/nir_to_vir.c` | `d5debdf3036532223afc70a3246c4d07f038dceaa83c96f75d19a98c45c9431a` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/qpu_schedule.c` | `e282c7ae7a5cc231c83637c9c57285a480654f3cb12e4e86c0152508d1c9cc1e` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/qpu_validate.c` | `4102b7282bcc1647582dc210173022cf04c35a018abe58d079dd153de2506dd0` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/v3d_tex.c` | `c8a260f669908f80ba1547d42180ee6aebc87c6024dfc2e1d9dcf119c1a7f62b` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/v3d_nir_lower_io.c` | `ca9e6568235109dfa63a417e324df1441c2c8b21f48962a97de48bef4099ee82` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/vir_register_allocate.c` | `ff2493df97d6191e2e4fd0726fa47ffe42808d5d3b813bb66b7690686e6d38b9` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/vulkan/v3dv_pipeline.c` | `53dec555a2cf7a785d73cbc11b02eb06ed6d61634544b31f5ca572815468d562` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+| `src/broadcom/compiler/meson.build` | `8fc878fac85e2450999e83c1a7676b79128b498f1189ae50f06cef4deaf00f78` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |

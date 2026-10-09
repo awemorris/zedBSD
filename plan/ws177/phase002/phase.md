@@ -3,7 +3,7 @@
 # ws177-p002: i915 の Type-C の残り — legacy の PHY の待ちを sleep に、停止で PHY を返す（案 F）
 
 Parent: [WS177](../ws.md)
-Status: in-progress（実装済み・host PASS・kernel の build warning 0。実機の確認は 5330 の後、QEMU では i915 を通らない）
+Status: cleared（2026-10-10 Q1 判定: ユーザーの 5330 の UAT「WS177 はOK」、host・build は前の記録のとおり）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q882 の 2（P1、2026-10-08、承認は Q1 の dispatch「Queue（q882、承認済み）: WS177 の案 E・F・G の host の分を順に」）

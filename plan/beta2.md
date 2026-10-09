@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=beta2-triage -->
 
-# ベータ2 の残り作業とトリアージ（2026-10-09 Q1、同日更新）
+# ベータ2 の残り作業とトリアージ（2026-10-09 Q1、2026-10-10 未明 更新）
 
 公開は 10/17（OSC 当日、朝から会場）なので、**10/16 中にリリースの準備を終える**。作業日は 10/09〜10/16。
 体制: P1（実装・debug）＋T1（QEMU の試験）＋ユーザー（5330 の UAT・判断）。この表は計画で、Queue の承認ではない。
@@ -15,22 +15,49 @@
 | 10/14〜10/15 | 最終回帰（QEMU）と 5330 の確認、出た Bug を「直す／既知の問題に書く」で仕分け |
 | **10/16** | 最終の image・配布物・license の一覧・release notes を確定。WS143・WS083 は必須（2026-10-09 ユーザー）。間に合わなければここで OFF。公開の手順の確認（公開はユーザーの指示で） |
 
+## 今の状況（2026-10-10 未明）
+
+- **2026-10-10 の UAT で 6 件の Bug（BUG-275〜280）が出たので、P1 は WS197 を止めてこちらを先に直す。**
+- P1 の実装・直しの必須は済んでいた。 残りの必須は全部「待ち」: T1 の再試験、ユーザーの review と UAT、5330 の復帰、日程の決まった作業（10/14 の最終回帰、10/16 の公開の準備）。
+- その間の P1 は WS197（Bluetooth のスマホ連携、ベータ3）を 10/17 まで main に入れない別の branch で進める（ユーザー「beta2.mdの必須が終わってから」）。T1 の FAIL・UAT の Bug が来たら P1 はすぐそちらへ戻る。
+- **ユーザーに頼みたい事**: 5330 の電源か network（10/09 夜から ping も SSH も届かない、T1-435 が待っている）、release の文書の review、UAT、PNG の確認、試験の機器の情報。
+
+## UAT の結果（2026-10-10、5330、ユーザー）
+
+| 項目 | 結果 | 次 |
+| --- | --- | --- |
+| 窓の dock の解除のダブルタップ | ✔ 遅れなし | — |
+| ダブルタップからの title bar のドラッグ | ✔ | — |
+| Settings の Wi-Fi の on/off | ✔ | — |
+| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した（文字の中央の描き方の誤り、通知の履歴の文字も）、T1-514 の PNG で確認 |
+| BUG-253（蓋） | ✔ close | — |
+| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) source の調べで候補 3 つ（firmware の load の後に controller が戻らない・xHCI に列挙されない・intelbt の前の古い image）。5330 の SSH が要る。**Settings の文言と image の版をユーザーに確認** |
+| Terminal の文字のドラッグ | ✘ 押し込みが要る、tap の後のドラッグで選べるように | [BUG-276](bugs/BUG-276.md) Terminal は直した（tap の直後の drag を文字の drag に）、実機の UAT で確認。他の app の扱いをユーザーに確認 |
+| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 で確認中、次の UAT で実機 |
+| Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) P1 |
+| menuconfig（WS193） | ✔ | WS193 p002 cleared |
+| WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
+| WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
+| BUG-189・BUG-212（有線と Wi-Fi） | ✔ close | — |
+| USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) 5330 の復帰の後に実機で測る。直らなければ既知の問題 |
+| App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べ（ベータ2 で直せるかは調べの後） |
+
 ## 必須
 
-| 項目 | 状態 | LW | 担当 |
-| --- | --- | --- | --- |
-| [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み、ユーザーの review 待ち・comment の整理 | 1 | P1・ユーザー |
-| [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
-| [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
-| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 手順を phase.md に用意済み（host の確かめ PASS）、実行は 10/16 | 0.5 | P1・Q1 |
-| T1 の未実行の試験: T1-435（5330 の実機、5330 に SSH が届かない、2026-10-09 夜） | 他は全部流した | 1 | T1・ユーザー |
-| 試験の FAIL の直し: T1-504 C7（fail 77 中 7、前回 70）、T1-483（画面 keyboard の slide の計測 6〜7 回）、T1-484（tcp-loss-speed の試験の準備）、T1-508（Python、ベータ3） | P1 次の世代 | 3 | P1 |
-| WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
-| 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
-| UAT で出る Bug の debug の枠 | — | 10 | P1 |
-| [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1-502 の回帰・残りの Phase・5330 の確認と直し | 4.5 | P1・T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の残り済み（hang の道具・`--time`・門）。T1-435（5330 の実機、F1・F2 を足す）と FAIL の直し。門は boot の `i915.debug=video`（今の release の config は OFF）。ON は release の config に 1 行、T1-435 が PASS したら入れる | 2.5 | P1・T1 |
-| T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）の判定 | ユーザー待ち | —（15 分） | ユーザー |
+| 項目 | 状態 | 待っている物 | LW | 担当 |
+| --- | --- | --- | --- | --- |
+| [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)） | ユーザーの review。RC で review の comment を消す | 0.5 | ユーザー・P1 |
+| [WS129](ws129/ws.md) p013 利用の手引き | 下書き済み（[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)） | ユーザーの review | 0.5 | ユーザー・P1 |
+| [WS129](ws129/ws.md) p006 最終回帰（release の image） | 未着手 | 10/14（RC の後） | 3 | T1 |
+| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み（host の確かめ PASS） | 10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
+| T1 の再試験 T1-509〜512（window の C7、画面 keyboard の slide、USB LAN の試験、Python と unix socket の kernel の直し） | P1 が直して T1 が実行中 | T1 | 2 | T1 |
+| 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
+| [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |
+| WS192（状態の島のパネル）の UAT の指摘 | WS193・WS194 は UAT OK、WS192 は BUG-278（Mute の文字） | P1 | 1 | P1 |
+| 5330 の UAT（下の「UAT の確認項目」） | — | ユーザー | — | ユーザー |
+| UAT で出る Bug の debug の枠（2026-10-10 の 6 件: BUG-275〜280） | P1 が着手 | — | 10 | P1 |
+| T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）、WS192 のパネルの PNG（build/review/t1-496/） | — | ユーザー | —（15 分） | ユーザー |
 
 ## UAT の確認項目（ユーザー、5330 の release の image）
 
@@ -44,23 +71,16 @@
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
 | 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
 | 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
-| 10 | [BUG-253](bugs/BUG-253.md) 蓋 | HDMI を挿したまま蓋を閉じ、開ける。起動ごとに違うことがあるので 2〜3 回の起動で | 閉じると HDMI へ、開けると戻る |
-| 11 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から USB LAN（ue0）経由で大きい file を scp。Settings の Network で link の速度を見る | 速さを教えてください（前回 950 KB/s）。link の速度が出る |
 | 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
 | 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
-| 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
-| 15 | [WS193](ws193/ws.md) menuconfig（host） | 自分の PC で `make menuconfig` → Build boot image | 新しい階層、進捗の bar と今の対象の名前。できた image が起動 |
-| 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
-| 22 | [BUG-189](bugs/BUG-189.md) 有線と Wi-Fi の両方の接続 | USB LAN と Wi-Fi の両方をつなぎ、Settings → Network の Active Network を見る | USB LAN（有線）が出る。再現しなければ close（2026-10-08 ユーザー） |
-| 23 | [BUG-212](bugs/BUG-212.md) 有線を抜いた後の Wi-Fi | 有線の接続中に Wi-Fi もつなぎ、有線の cable を抜く | Wi-Fi が切れずに使える。再現したら Wi-Fi の off・on の前に Q1 へ（SSH で networkd と intel-ax211 の log を取る）。再現しなければ close |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
 ## 合計
 
 | 区分 | LW |
 | --- | --- |
-| 必須（WS143・WS083 を含む） | 37 |
-| **計** | **37 LW**（約 13 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
+| 必須（WS143・WS083 を含む、残り） | 26 |
+| **計** | **26 LW**（約 9 時間、大半は待ちの後の作業。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
@@ -74,4 +94,4 @@
 ## 運用
 
 - 凍結の目標の 10/13 の後も、ベータなので UAT の Bug の直しは 10/16 の準備に間に合う範囲で続ける。新しい仕様の変更は「ベータ3 に回すか」を Q1 がユーザーに聞く。
-- 毎日の終わりに Q1 がこの表を更新し、完了した項目を消す。
+- Q1 は進むたびにこの表を更新し、完了した項目を消す（2026-10-09 ユーザー「都度、beta2.mdを更新していただけると、進捗がわかって助かります」）。

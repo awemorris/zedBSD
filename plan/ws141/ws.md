@@ -138,3 +138,7 @@ V1〜V10のsource/host/buildまとまりをmain `30350c8cba31875a01d58f804a5de13
 ## i13 worker checkpoint（2026-10-09）
 
 native FIFO workerとsupervised reservationを実装しactual host/rpi4 build PASS。normal cancel/uncertain retain/common callback joinとDMA quarantineを区別。p005はin-progress、p006へ検証済みscoped source出力を渡す。Vulkan/Keiland/実機/最終適合は未達。[詳細](execution-20261009.md#i13-checkpoint-native-workerとsupervised-reservation2026-10-09)。
+
+## i14 compiler checkpoint（2026-10-09）
+
+device-independent Zlib SPIR-V frontendをread-onlyで再利用し、独立QPU4.2 encoder、scalar validation/liveness、二threadのregister管理、VPM vertex/fragment interface、uniform/TMU/float RGBA output/source-over/target swizzle/終了を追加。actual Keilandのquad/panel shaderをcoordinate/vertex/fragment programへ変換し、固定MIT Mesaの独立decoder/repackerとsource/native scalar差分試験PASS、rpi4 build warning/error0。Vulkan command/pipeline/draw runtimeへの接続は次の作業。COMMAND/CAPSETは引き続き未公開、p006/i14はin-progress、WS incomplete。実機のshader/timing/memory/cacheは未検証。[結果と復帰点](execution-20261009.md#i14-compilerのsoftware-checkpoint2026-10-09)。
