@@ -14,13 +14,16 @@
  *   fidoctl [-d NODE] set-pin              the new PIN on standard input
  *   fidoctl [-d NODE] change-pin           the current PIN, then the new one
  *   fidoctl [-d NODE] [-p] register RP USER
- *   fidoctl [-d NODE] [-p] assert RP CREDENTIAL
- *   fidoctl verify RP CREDENTIAL KEY CLIENT-DATA-HASH AUTH-DATA SIGNATURE
+ *   fidoctl [-d NODE] [-p] [-s] assert RP CREDENTIAL
+ *   fidoctl [-s] verify RP CREDENTIAL KEY CLIENT-DATA-HASH AUTH-DATA SIGNATURE
  *
  * Without -d the first key listed is used, taken for this program alone
  * while it runs (zedBSD's grab); with no USB key, the first key held to an
  * NFC reader (ws161-p005: a smart card slot /dev/smartcardN with a card,
- * listed as "card" lines; -d names one too).  -p reads the PIN from standard input and
+ * listed as "card" lines; -d names one too).  -s asks an assertion without the
+ * user's presence (up false: no touch, ws199-p001, to see what a key answers),
+ * and verify -s takes one without the user present.  -p reads the PIN from
+ * standard input and
  * asks the key to verify the user.  A PIN never comes from the command line.
  *
  * register prints the new credential's ID, its COSE public key and its
@@ -104,14 +107,15 @@ static int fidoctl_touch_asked;
 static int fidoctl_list(void);
 static int fidoctl_open(const char *path, struct fidoctl_key *key);
 static int fidoctl_open_card(const char *path, struct fidoctl_key *key);
+static int fidoctl_card_answers(const char *path);
 static int fidoctl_ready(struct fidoctl_key *key);
 static void fidoctl_close(struct fidoctl_key *key);
 static int fidoctl_info(struct fidoctl_key *key);
 static int fidoctl_set_pin(struct fidoctl_key *key);
 static int fidoctl_change_pin(struct fidoctl_key *key);
 static int fidoctl_register(struct fidoctl_key *key, int use_pin, const char *rp_id, const char *user);
-static int fidoctl_assert(struct fidoctl_key *key, int use_pin, const char *rp_id, const char *credential);
-static int fidoctl_verify(char **arguments);
+static int fidoctl_assert(struct fidoctl_key *key, int use_pin, int silent, const char *rp_id, const char *credential);
+static int fidoctl_verify(int silent, char **arguments);
 static int fidoctl_token(struct fidoctl_key *key, unsigned permissions, const char *rp_id, uint8_t *token, size_t *token_size);
 static int fidoctl_read_pin(const char *prompt, char *pin, size_t size);
 static int fidoctl_pin_valid(const char *pin);
@@ -135,22 +139,26 @@ main(
 	const char *path;
 	size_t index;
 	int use_pin;
+	int silent;
 	int option;
 	int status;
 	int error;
 	int compared;
 
-	/* The options: the node, and whether a PIN is read. */
+	/* The options: the node, whether a PIN is read, and whether an assertion asks no touch. */
 	path = NULL;
 	use_pin = 0;
+	silent = 0;
 	for (;;) {
-		option = getopt(argc, argv, "d:p");
+		option = getopt(argc, argv, "d:ps");
 		if (option == -1)
 			break;
 		if (option == 'd')
 			path = optarg;
 		else if (option == 'p')
 			use_pin = 1;
+		else if (option == 's')
+			silent = 1;
 		else
 			return fidoctl_usage();
 	}
@@ -181,7 +189,7 @@ main(
 
 	/* verify needs only its arguments. */
 	if (chosen->kind == FIDOCTL_VERIFY) {
-		status = fidoctl_verify(argv + optind + 1);
+		status = fidoctl_verify(silent, argv + optind + 1);
 		return status;
 	}
 
@@ -205,7 +213,7 @@ main(
 		status = fidoctl_register(&key, use_pin, argv[optind + 1], argv[optind + 2]);
 		break;
 	default:
-		status = fidoctl_assert(&key, use_pin, argv[optind + 1], argv[optind + 2]);
+		status = fidoctl_assert(&key, use_pin, silent, argv[optind + 1], argv[optind + 2]);
 		break;
 	}
 
@@ -220,6 +228,7 @@ fidoctl_list(void)
 {
 	struct pk_os_device devices[PK_OS_DEVICES_MAX];
 	size_t count;
+	size_t answered;
 	size_t index;
 	int error;
 
@@ -233,13 +242,31 @@ fidoctl_list(void)
 		printf("device %s %04x:%04x %s\n", devices[index].path, devices[index].vendor, devices[index].product, devices[index].name);
 	printf("devices %lu\n", (unsigned long)count);
 
-	/* The smart card slots with a card (a key held to an NFC reader, or another card: info tells). */
+	/*
+	 * The smart card slots that say they hold a card: a "card" line for
+	 * each whose card answers the FIDO applet (a key held to an NFC
+	 * reader), a "slot" line with why for the others, which are not
+	 * counted (BUG-286: a reader's SAM slot says present but answers
+	 * nothing).
+	 */
 	error = pk_os_list_cards(devices, PK_OS_DEVICES_MAX, &count);
 	if (error != 0)
 		count = 0U;
-	for (index = 0U; index < count; index++)
+	answered = 0U;
+	for (index = 0U; index < count; index++) {
+		error = fidoctl_card_answers(devices[index].path);
+		if (error != 0) {
+			printf("slot %s %04x:%04x %s: %s\n", devices[index].path, devices[index].vendor, devices[index].product, devices[index].name, strerror(error));
+			continue;
+		}
+
+		/* A key: counted. */
 		printf("card %s %04x:%04x %s\n", devices[index].path, devices[index].vendor, devices[index].product, devices[index].name);
-	printf("cards %lu\n", (unsigned long)count);
+		answered++;
+	}
+
+	/* The keys counted. */
+	printf("cards %lu\n", (unsigned long)answered);
 
 	/* Succeeded. */
 	return 0;
@@ -257,6 +284,7 @@ fidoctl_open(
 	struct pk_os_device devices[PK_OS_DEVICES_MAX];
 	struct pk_hid_io io;
 	size_t count;
+	size_t first;
 	int error;
 	int same;
 
@@ -271,21 +299,27 @@ fidoctl_open(
 			return error;
 		}
 
-		/* No USB key: the keys held to an NFC reader. */
+		/* No USB key: the first card held to an NFC reader that answers the FIDO applet. */
+		first = 0U;
 		if (count == 0U) {
 			error = pk_os_list_cards(devices, PK_OS_DEVICES_MAX, &count);
 			if (error != 0)
 				count = 0U;
+			for (first = 0U; first < count; first++) {
+				error = fidoctl_card_answers(devices[first].path);
+				if (error == 0)
+					break;
+			}
 		}
 
 		/* At least one key, the first taken. */
-		if (count == 0U) {
+		if (first == count) {
 			(void)fidoctl_fail("no security key", ENODEV, NULL);
 			return ENODEV;
 		}
 
 		/* Its node. */
-		path = devices[0].path;
+		path = devices[first].path;
 	}
 
 	/* A smart card slot: the NFC transport. */
@@ -351,6 +385,33 @@ fidoctl_open_card(
 	/* Succeeded: CTAP2 over the applet. */
 	(void)pk_nfc_transport(&key->transport, &key->nfc);
 	return 0;
+}
+
+/*
+ * Whether a smart card slot's card answers the FIDO applet: the card
+ * powered, the applet selected, and the slot given back, nothing printed.
+ * Returns 0, or an errno value (EBUSY while another program holds the
+ * slot, EIO from a slot whose card does not answer).
+ */
+static int
+fidoctl_card_answers(
+	const char *path)
+{
+	struct pk_os_card card;
+	struct pk_nfc_io io;
+	struct pk_nfc nfc;
+	int error;
+
+	/* The slot, its card powered. */
+	card.descriptor = -1;
+	error = pk_os_card_open(&card, path, &io);
+	if (error != 0)
+		return error;
+
+	/* The FIDO applet; the card powered off again either way. */
+	error = pk_nfc_open(&nfc, &io, FIDOCTL_OPEN_MS);
+	pk_os_card_close(&card);
+	return error;
 }
 
 /*
@@ -557,6 +618,7 @@ static int
 fidoctl_assert(
 	struct fidoctl_key *key,
 	int use_pin,
+	int silent,
 	const char *rp_id,
 	const char *credential)
 {
@@ -577,10 +639,12 @@ fidoctl_assert(
 	allow[0] = id;
 	allow_sizes[0] = id_size;
 
-	/* The question: the user present, over a new client data hash. */
+	/* The question: the user present unless asked silent, over a new client data hash. */
 	memset(&request, 0, sizeof(request));
 	request.rp_id = rp_id;
 	request.presence = 1;
+	if (silent)
+		request.presence = 0;
 	request.allow_ids = allow;
 	request.allow_sizes = allow_sizes;
 	request.allow_count = 1U;
@@ -610,6 +674,10 @@ fidoctl_assert(
 	fidoctl_hex_print("client-data-hash", request.client_data_hash, sizeof(request.client_data_hash));
 	fidoctl_hex_print("auth-data", reply.auth_data, reply.auth_data_size);
 	fidoctl_hex_print("signature", reply.signature, reply.signature_size);
+
+	/* The flags the key set (UP 0x01, UV 0x04), after the relying party's hash. */
+	if (reply.auth_data_size > PK_SHA256_SIZE)
+		printf("flags 0x%02x\n", reply.auth_data[PK_SHA256_SIZE]);
 	return 0;
 }
 
@@ -620,6 +688,7 @@ fidoctl_assert(
  */
 static int
 fidoctl_verify(
+	int silent,
 	char **arguments)
 {
 	static uint8_t cose_key[FIDOCTL_BYTES_MAX];
@@ -654,7 +723,7 @@ fidoctl_verify(
 	if (error != 0)
 		return fidoctl_fail("the arguments", error, NULL);
 
-	/* What is expected: the relying party, the user present, this credential. */
+	/* What is expected: the relying party, the user present (unless silent), this credential. */
 	allowed.id = id;
 	allowed.id_size = id_size;
 	allowed.cose_key = cose_key;
@@ -662,6 +731,8 @@ fidoctl_verify(
 	allowed.sign_count = 0U;
 	expectation.rp_id = arguments[0];
 	expectation.required_flags = PK_FLAG_UP;
+	if (silent)
+		expectation.required_flags = 0U;
 	expectation.credentials = &allowed;
 	expectation.credential_count = 1U;
 
@@ -948,7 +1019,7 @@ fidoctl_usage(void)
 		"usage: fidoctl list\n"
 		"       fidoctl [-d NODE] info | set-pin | change-pin\n"
 		"       fidoctl [-d NODE] [-p] register RP USER\n"
-		"       fidoctl [-d NODE] [-p] assert RP CREDENTIAL\n"
-		"       fidoctl verify RP CREDENTIAL KEY CLIENT-DATA-HASH AUTH-DATA SIGNATURE\n");
+		"       fidoctl [-d NODE] [-p] [-s] assert RP CREDENTIAL\n"
+		"       fidoctl [-s] verify RP CREDENTIAL KEY CLIENT-DATA-HASH AUTH-DATA SIGNATURE\n");
 	return 2;
 }
