@@ -39,7 +39,7 @@
 | WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
 | WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
 | BUG-189・BUG-212（有線と Wi-Fi） | ✔ close | — |
-| USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) まず ifconfig と Settings に Link Speed を出す（ユーザーの指示、P1）。速さの調べは 5330 の復帰の後、直らなければ既知の問題 |
+| USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) ifconfig に `media: 2500Mbps` 等を出す直しと、CDC の通知の読みの直し（短い endpoint の device で link と速度の通知を落としていた）を merge、T1-515。Settings の Link speed は前から有る。5330 の値は次の UAT（`ifconfig ue0`・`dmesg | grep link`・Settings）。速さの調べは 5330 の復帰の後、直らなければ既知の問題 |
 | App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べた: compositor は Linux と同じ code、差は driver（1 frame が 16.7 ms を越えて 30 fps、GPU の周波数が上がりきらない、present の待ち）。**決定（ユーザー）: ベータ2 は既知の問題**、5330 の計測の後に WS139（ベータ3） |
 
 ## 必須
