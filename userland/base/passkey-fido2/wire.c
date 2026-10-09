@@ -15,6 +15,8 @@
 
 #include "fido2.h"
 
+#include "userland/base/libpasskey/verify.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -480,6 +482,45 @@ fido2_client_data_hash(
 		return error;
 
 	/* Succeeded: the hash. */
+	return 0;
+}
+
+/*
+ * Decides what a login or an unlock with a key asks and checks
+ * (auth-fido2, ws199-p002): the user verified when a PIN is given, the
+ * touch except to unlock with key_touch 0.  An empty PIN is taken only
+ * when the account does not ask for the key's PIN (key_pin 0).  Returns 0
+ * with the flags the assertion must carry and whether the key is asked
+ * for the touch, or EINVAL for an empty PIN the account asks for.
+ */
+int
+fido2_auth_flags(
+	int key_pin,
+	int key_touch,
+	int unlock,
+	int pin_given,
+	unsigned *required,
+	int *presence)
+{
+	/* An empty PIN is refused when the account asks for the key's PIN. */
+	if (!pin_given && key_pin)
+		return EINVAL;
+
+	/* By default the key is touched and the user verified by the PIN. */
+	*required = PK_FLAG_UP | PK_FLAG_UV;
+	*presence = 1;
+
+	/* Without a PIN the key cannot verify the user. */
+	if (!pin_given)
+		*required &= ~PK_FLAG_UV;
+
+	/* Only an unlock may go without the touch, and only when the account says so. */
+	if (unlock && !key_touch) {
+		*presence = 0;
+		*required &= ~PK_FLAG_UP;
+	}
+
+	/* Succeeded: the flags and the touch. */
 	return 0;
 }
 

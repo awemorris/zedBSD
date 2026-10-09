@@ -179,6 +179,7 @@ int fido2_record_recount(const char *line, uint32_t count, char *output, size_t 
 int fido2_label_valid(const char *label);
 int fido2_client_data_hash(const char *name, const uint8_t *challenge, uint8_t *hash);
 int fido2_user_id(const char *name, uint8_t *id);
+int fido2_auth_flags(int key_pin, int key_touch, int unlock, int pin_given, unsigned *required, int *presence);
 
 /* device.c */
 extern volatile sig_atomic_t fido2_ended;

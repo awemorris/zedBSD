@@ -667,6 +667,8 @@ auth_request(
 			length = snprintf(request, size, "auth-fido2\n%s\n%s\n%s\n", exchange->name, context, exchange->lines[0]);
 			break;
 		}
+
+		/* A password's or a PIN's. */
 		length = snprintf(request, size, "auth\n%s\n%s\n%s\n", exchange->name, style, exchange->lines[0]);
 		break;
 	case SESSIOND_COMMAND_SETOPTIONS:
