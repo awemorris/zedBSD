@@ -1001,6 +1001,98 @@ if_indextoname(
 	return name;
 }
 
+/*
+ * Lists the interfaces with their indexes (POSIX if_nameindex).
+ *
+ * The list is one block from malloc: the entries, the entry that ends it
+ * (index 0, name NULL), then the names.  if_freenameindex frees it.
+ * Reports NULL with errno (ENOBUFS when there is no memory) on a failure.
+ */
+struct if_nameindex *
+if_nameindex(
+	void)
+{
+	struct ifconf configuration;
+	struct ifreq *requests;
+	struct if_nameindex *list;
+	char *names;
+	size_t count;
+	size_t index;
+	int descriptor;
+	int status;
+
+	/* The network's ioctl answers it. */
+	descriptor = socket(AF_INET, SOCK_DGRAM, 0);
+	if (descriptor < 0)
+		return NULL;
+
+	/* Asks how much room the list of the interfaces takes. */
+	memset(&configuration, 0, sizeof(configuration));
+	status = ioctl(descriptor, SIOCGIFCONF, &configuration);
+	if (status != 0) {
+		close(descriptor);
+		return NULL;
+	}
+
+	/* Room for the requests, at least one so that malloc gives a block. */
+	count = configuration.ifc_len / sizeof(struct ifreq);
+	requests = malloc((count + 1U) * sizeof(struct ifreq));
+	if (requests == NULL) {
+		close(descriptor);
+		errno = ENOBUFS;
+		return NULL;
+	}
+
+	/* Reads the interfaces; one added since the question is left out. */
+	configuration.ifc_len = (uint32_t)(count * sizeof(struct ifreq));
+	configuration.ifc_buf = (uint64_t)(uintptr_t)requests;
+	status = 0;
+	if (count != 0U)
+		status = ioctl(descriptor, SIOCGIFCONF, &configuration);
+	close(descriptor);
+	if (status != 0) {
+		free(requests);
+		return NULL;
+	}
+
+	/* An interface removed since the question shortens the list. */
+	count = configuration.ifc_len / sizeof(struct ifreq);
+
+	/* One block for the entries, the end and the names. */
+	list = malloc((count + 1U) * sizeof(struct if_nameindex) + count * IF_NAMESIZE);
+	if (list == NULL) {
+		free(requests);
+		errno = ENOBUFS;
+		return NULL;
+	}
+
+	/* Fills an entry for each interface, its name copied behind the entries. */
+	names = (char *)(list + count + 1U);
+	for (index = 0U; index < count; index++) {
+		memcpy(names + index * IF_NAMESIZE, requests[index].ifr_name, IF_NAMESIZE);
+		names[index * IF_NAMESIZE + IF_NAMESIZE - 1U] = '\0';
+		list[index].if_index = (unsigned)requests[index].ifr_ifindex;
+		list[index].if_name = names + index * IF_NAMESIZE;
+	}
+
+	/* The entry that ends the list. */
+	list[count].if_index = 0U;
+	list[count].if_name = NULL;
+	free(requests);
+
+	/* Succeeded: the list, which the caller frees with if_freenameindex. */
+	return list;
+}
+
+/* Frees a list if_nameindex returned. */
+void
+if_freenameindex(
+	struct if_nameindex *list)
+{
+	/* The entries and the names are one block. */
+	free(list);
+}
+
 /* ------------------------------------------------------------------ *
  * IPv6 addresses as text (ws130-p004)
  *

@@ -40,7 +40,8 @@
 #define OS_CARD_PREFIX		"smartcard"
 
 static int os_probe(const char *path, struct pk_os_device *device);
-static int os_card_probe(const char *path, struct pk_os_device *device);
+static int os_card_probe(const char *path, int any, struct pk_os_device *device);
+static int os_card_list(int any, struct pk_os_device *devices, size_t capacity, size_t *count);
 static int os_card_transmit(void *context, const uint8_t *command, size_t size, uint8_t *response, size_t capacity, size_t *response_size, unsigned timeout_ms);
 
 /*
@@ -202,38 +203,155 @@ pk_os_list_cards(
 	size_t capacity,
 	size_t *count)
 {
-	struct dirent *entry;
-	DIR *directory;
-	char path[PK_OS_PATH_MAX];
-	int compared;
-	int written;
-	int error;
+	/* The slots with a card. */
+	return os_card_list(0, devices, capacity, count);
+}
 
-	/* None yet; the nodes' directory. */
-	*count = 0U;
-	directory = opendir(OS_CARD_DIRECTORY);
-	if (directory == NULL)
+/*
+ * Lists every smart card slot, with a card or without (ws199-p001: the
+ * slots a key may be held to while something waits): at most capacity of
+ * them in devices, their number in *count.  Returns 0, or an errno value
+ * when the nodes cannot be looked at.
+ */
+int
+pk_os_list_slots(
+	struct pk_os_device *devices,
+	size_t capacity,
+	size_t *count)
+{
+	/* Every slot. */
+	return os_card_list(1, devices, capacity, count);
+}
+
+/*
+ * Attaches a smart card slot (ws199-p001): its node opened for its card's
+ * events (without waiting: pk_os_card_event says EAGAIN) and for a later
+ * pk_os_card_select, its card not powered and the slot not claimed.
+ * Returns 0, or an errno value.
+ */
+int
+pk_os_card_attach(
+	struct pk_os_card *card,
+	const char *path)
+{
+	int descriptor;
+
+	/* The node. */
+	card->descriptor = -1;
+	descriptor = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
+	if (descriptor < 0)
 		return errno;
 
-	/* Each slot with a card, while there is room. */
-	for (;;) {
-		entry = readdir(directory);
-		if (entry == NULL || *count == capacity)
-			break;
-		compared = strncmp(entry->d_name, OS_CARD_PREFIX, sizeof(OS_CARD_PREFIX) - 1U);
-		if (compared != 0)
-			continue;
-		written = snprintf(path, sizeof(path), "%s/%s", OS_CARD_DIRECTORY, entry->d_name);
-		if (written < 0 || (size_t)written >= sizeof(path))
-			continue;
-		error = os_card_probe(path, &devices[*count]);
-		if (error == 0)
-			(*count)++;
+	/* Succeeded: attached. */
+	card->descriptor = descriptor;
+	return 0;
+}
+
+/* Tells whether an attached slot holds a card now.  Returns 0, or an errno value. */
+int
+pk_os_card_present(
+	struct pk_os_card *card,
+	int *present)
+{
+	struct ccid_status status;
+	int result;
+
+	/* Its state. */
+	*present = 0;
+	result = ioctl(card->descriptor, CCID_GET_STATUS, &status);
+	if (result < 0)
+		return errno;
+
+	/* Succeeded: a card unless absent. */
+	*present = status.state != CCID_CARD_ABSENT;
+	return 0;
+}
+
+/*
+ * Reads one of an attached slot's events: *inserted 1 when a card came,
+ * 0 when one went.  Returns 0, EAGAIN when none waits, ENODEV when the
+ * reader is gone, or another errno value.
+ */
+int
+pk_os_card_event(
+	struct pk_os_card *card,
+	int *inserted)
+{
+	struct ccid_event event;
+	ssize_t got;
+
+	/* One record, whole. */
+	*inserted = 0;
+	got = read(card->descriptor, &event, sizeof(event));
+	if (got < 0)
+		return errno;
+	if (got == 0)
+		return ENODEV;
+	if ((size_t)got != sizeof(event))
+		return EIO;
+
+	/* Succeeded: what it says. */
+	*inserted = event.kind == CCID_EVENT_INSERTED;
+	return 0;
+}
+
+/*
+ * Powers an attached slot's card (the slot claimed for this open) and
+ * selects its FIDO applet, CTAP2 over it in transport.  A card that does
+ * not answer (a reader's SAM slot, a card that is not a key, BUG-286) is
+ * powered off again and the slot kept.  Returns 0, EBUSY while another
+ * open holds the slot, or another errno value.
+ */
+int
+pk_os_card_select(
+	struct pk_os_card *card,
+	struct pk_nfc *nfc,
+	struct pk_transport *transport,
+	unsigned timeout_ms)
+{
+	struct ccid_status status;
+	struct ccid_info info;
+	struct pk_nfc_io io;
+	int result;
+	int error;
+
+	/* What the reader takes. */
+	result = ioctl(card->descriptor, CCID_GET_INFO, &info);
+	if (result < 0)
+		return errno;
+
+	/* The card powered (its ATR is not needed: the reader frames the card). */
+	result = ioctl(card->descriptor, CCID_POWER_ON, &status);
+	if (result < 0)
+		return errno;
+
+	/* The FIDO applet. */
+	io.context = card;
+	io.transmit = os_card_transmit;
+	io.max_command = info.max_command;
+	io.extended = (info.flags & CCID_INFO_EXTENDED_APDU) != 0U;
+	error = pk_nfc_open(nfc, &io, timeout_ms);
+	if (error != 0) {
+		pk_os_card_power_off(card);
+		return error;
 	}
 
-	/* Succeeded: the directory closed. */
-	(void)closedir(directory);
+	/* Succeeded: CTAP2 over the applet. */
+	(void)pk_nfc_transport(transport, nfc);
 	return 0;
+}
+
+/* Powers an attached slot's card off and lets the slot go, the slot kept attached. */
+void
+pk_os_card_power_off(
+	struct pk_os_card *card)
+{
+	/* Only an open slot. */
+	if (card->descriptor < 0)
+		return;
+
+	/* Off. */
+	(void)ioctl(card->descriptor, CCID_POWER_OFF);
 }
 
 /*
@@ -298,14 +416,57 @@ pk_os_card_close(
 	card->descriptor = -1;
 }
 
+/* Lists the smart card slots, every one (any) or those with a card.  Returns 0, or an errno value. */
+static int
+os_card_list(
+	int any,
+	struct pk_os_device *devices,
+	size_t capacity,
+	size_t *count)
+{
+	struct dirent *entry;
+	DIR *directory;
+	char path[PK_OS_PATH_MAX];
+	int compared;
+	int written;
+	int error;
+
+	/* None yet; the nodes' directory. */
+	*count = 0U;
+	directory = opendir(OS_CARD_DIRECTORY);
+	if (directory == NULL)
+		return errno;
+
+	/* Each slot (with a card unless any), while there is room. */
+	for (;;) {
+		entry = readdir(directory);
+		if (entry == NULL || *count == capacity)
+			break;
+		compared = strncmp(entry->d_name, OS_CARD_PREFIX, sizeof(OS_CARD_PREFIX) - 1U);
+		if (compared != 0)
+			continue;
+		written = snprintf(path, sizeof(path), "%s/%s", OS_CARD_DIRECTORY, entry->d_name);
+		if (written < 0 || (size_t)written >= sizeof(path))
+			continue;
+		error = os_card_probe(path, any, &devices[*count]);
+		if (error == 0)
+			(*count)++;
+	}
+
+	/* Succeeded: the directory closed. */
+	(void)closedir(directory);
+	return 0;
+}
+
 /*
- * Tells whether a node is a smart card slot with a card in it, filling
- * device when it is.  Returns 0, ENODEV for an empty slot, or an errno
- * value.
+ * Tells whether a node is a smart card slot (with a card in it unless
+ * any), filling device when it is.  Returns 0, ENODEV for an empty slot
+ * when a card is needed, or an errno value.
  */
 static int
 os_card_probe(
 	const char *path,
+	int any,
 	struct pk_os_device *device)
 {
 	struct ccid_status status;
@@ -331,7 +492,7 @@ os_card_probe(
 
 	/* The node is not kept; an empty slot is no key's. */
 	(void)close(descriptor);
-	if (status.state == CCID_CARD_ABSENT)
+	if (!any && status.state == CCID_CARD_ABSENT)
 		return ENODEV;
 
 	/* Succeeded: the slot. */

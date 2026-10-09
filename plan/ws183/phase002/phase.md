@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws183-p002 -->
 # ws183-p002: 1 本指のタップのクリックの遅れ
 
-Status: test-wait（実機 5320・5330 の確認を 2026-10-08 Q1 へ依頼、T1 の番号は Q1 が付ける。実装・build・host 試験まで済み）
+Status: cleared（2026-10-10 ユーザー「これで一通りUATの確認事項は確認したと思います。CloseできるものはCloseしましょう。USB LANの遅さ、だけが残りました。」。5330 で「ドックしたウィンドウをフローティングに戻すダブルタップは遅延がなかった」「ダブルタップからウィンドウタイトルバーをドラッグで移動できた」）
 Disposition: normal
 Parent: [WS183](../ws.md)
 Queue: q863（ユーザー 2026-10-08「起動して作業開始してください」、P2）

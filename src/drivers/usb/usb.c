@@ -281,6 +281,7 @@ static int host_interface_disable(struct drv_usb_host_interface *alternate);
 static void device_quarantine_selection(struct drv_usb_device *device, const char *stage, int error);
 static struct drv_usb_host_interface * interface_active_alternate(const struct drv_usb_interface *interface);
 static int host_interface_enable(struct drv_usb_host_interface *alternate);
+static int endpoint_zero_bandwidth(const struct drv_usb_endpoint *endpoint);
 static int device_release(struct drv_usb_bus *bus, struct drv_usb_device *device);
 static void device_finalize(struct drv_usb_bus *bus, struct drv_usb_device *device);
 static void free_configurations(struct drv_usb_device *device);
@@ -5318,6 +5319,7 @@ static int
 host_interface_disable(
 	struct drv_usb_host_interface *alternate)
 {
+	int zero;
 	int rollback;
 	struct drv_usb_hcd *hcd = alternate->interface->device->bus->hcd;
 	unsigned index, rollback_index;
@@ -5326,9 +5328,11 @@ host_interface_disable(
 	/* Handles the endpoint disable availability. */
 	if (hcd->ops->endpoint_disable == NULL)
 		return 0;
-	/* Process each remaining element. */
+	/* Unconfigures each endpoint that carries data (a zero-bandwidth one was never configured). */
 	for (index = 0; index < alternate->endpoint_count; index++) {
-		/* Checks the operation status. */
+		zero = endpoint_zero_bandwidth(&alternate->endpoints[index]);
+		if (zero)
+			continue;
 		error = hcd->ops->endpoint_disable(
 			hcd, &alternate->endpoints[index]);
 		if (error == 0)
@@ -5341,7 +5345,10 @@ host_interface_disable(
 		for (rollback_index = index; rollback_index != 0;) {
 			rollback_index--;
 
-			/* Checks the operation status. */
+			/* Configures it again, unless it is zero-bandwidth. */
+			zero = endpoint_zero_bandwidth(&alternate->endpoints[rollback_index]);
+			if (zero)
+				continue;
 			rollback = hcd->ops->endpoint_enable(
 				hcd, &alternate->endpoints[rollback_index]);
 			if (rollback_error == 0 && rollback != 0)
@@ -5399,6 +5406,7 @@ static int
 host_interface_enable(
 	struct drv_usb_host_interface *alternate)
 {
+	int zero;
 	int rollback;
 	struct drv_usb_hcd *hcd = alternate->interface->device->bus->hcd;
 	unsigned index, rollback_index;
@@ -5407,9 +5415,15 @@ host_interface_enable(
 	/* Handles the endpoint enable availability. */
 	if (hcd->ops->endpoint_enable == NULL)
 		return 0;
-	/* Process each remaining element. */
+	/*
+	 * Configures each endpoint that carries data.  A zero-bandwidth
+	 * isochronous endpoint (packet size 0) can carry nothing and has no
+	 * context in the controller (BUG-275).
+	 */
 	for (index = 0; index < alternate->endpoint_count; index++) {
-		/* Checks the operation status. */
+		zero = endpoint_zero_bandwidth(&alternate->endpoints[index]);
+		if (zero)
+			continue;
 		error = hcd->ops->endpoint_enable(hcd,
 						  &alternate->endpoints[index]);
 		if (error != 0) {
@@ -5421,7 +5435,10 @@ host_interface_enable(
 			for (rollback_index = index; rollback_index != 0;) {
 				rollback_index--;
 
-				/* Checks the operation status. */
+				/* Unconfigures it again, unless it is zero-bandwidth. */
+				zero = endpoint_zero_bandwidth(&alternate->endpoints[rollback_index]);
+				if (zero)
+					continue;
 				rollback = hcd->ops->endpoint_disable(
 					hcd,
 					&alternate->endpoints[rollback_index]);
@@ -5441,6 +5458,23 @@ host_interface_enable(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Tells whether an endpoint is zero-bandwidth: an isochronous endpoint
+ * whose packet size is 0 (a default setting that reserves no bus time),
+ * which carries nothing and is not configured in the host controller.
+ */
+static int
+endpoint_zero_bandwidth(
+	const struct drv_usb_endpoint *endpoint)
+{
+	/* An endpoint with a packet size carries data. */
+	if ((endpoint->descriptor.maximum_packet_size & 0x7ffU) != 0U)
+		return 0;
+
+	/* Zero-bandwidth. */
+	return 1;
 }
 
 /* Gives every resource a device held back. */
@@ -6118,6 +6152,7 @@ parse_configuration(
 	struct drv_usb_host_interface **alternate_tail;
 	struct drv_usb_endpoint_descriptor endpoint_descriptor;
 	unsigned endpoint_number, endpoint_index;
+	int empty_packet;
 	uint8_t descriptor_length;
 	uint8_t descriptor_type;
 	struct drv_usb_configuration_descriptor descriptor;
@@ -6304,13 +6339,27 @@ parse_configuration(
 			kern_memcpy(&endpoint_descriptor, raw + offset,
 			       sizeof(endpoint_descriptor));
 
-			/* Handles the endpoint number condition. */
+			/*
+			 * An empty packet size is refused, except on an
+			 * isochronous endpoint: a zero-bandwidth isochronous
+			 * endpoint is how a default setting reserves no bus
+			 * time (USB 2.0 section 5.6.3), as a Bluetooth
+			 * controller's voice interface does in its setting 0
+			 * (Core 5.4 Vol 4 Part B section 2.1.1, BUG-275).
+			 */
+			empty_packet = 0;
+			if (endpoint_descriptor.maximum_packet_size == 0 &&
+			    (endpoint_descriptor.attributes & 3U) !=
+				    DRV_USB_TRANSFER_ISOCHRONOUS)
+				empty_packet = 1;
+
+			/* Refuses endpoint zero, reserved address bits, a second control endpoint and an empty packet size. */
 			endpoint_number = endpoint_descriptor.address & 0x0fU;
 			if (endpoint_number == 0 ||
 			    (endpoint_descriptor.address & 0x70U) != 0 ||
 			    (endpoint_descriptor.attributes & 3U) ==
 				    DRV_USB_TRANSFER_CONTROL ||
-			    endpoint_descriptor.maximum_packet_size == 0) {
+			    empty_packet) {
 				error = EINVAL;
 				goto fail;
 			}
@@ -7603,6 +7652,7 @@ configuration_reset_endpoints(
 	struct drv_usb_device *device = configuration->device;
 	struct drv_usb_hcd *hcd = device->bus->hcd;
 	unsigned index;
+	int zero;
 	int error;
 
 	/* Process each linked entry. */
@@ -7610,10 +7660,12 @@ configuration_reset_endpoints(
 	     interface = interface->next) {
 		alternate_local = interface_active_alternate(interface);
 
-		/* Process each remaining element. */
+		/* Resets each configured endpoint (a zero-bandwidth one has no context to reset, BUG-275). */
 		for (index = 0; index < alternate_local->endpoint_count;
 		     index++) {
-			/* Checks the operation status. */
+			zero = endpoint_zero_bandwidth(&alternate_local->endpoints[index]);
+			if (zero)
+				continue;
 			error = hcd->ops->endpoint_reset(
 				hcd, &alternate_local->endpoints[index]);
 			if (error != 0)
@@ -8176,15 +8228,19 @@ host_interface_reset_endpoints(
 	struct drv_usb_device *device = alternate->interface->device;
 	struct drv_usb_hcd *hcd = device->bus->hcd;
 	unsigned index;
+	int zero;
 	int error;
 
 	/*
 	 * Keep every core latch closed until all host-side endpoint state
-	 * agrees with the confirmed device-side reset.  A partial HCD reset is
+	 * agrees with the confirmed device-side reset.  A zero-bandwidth
+	 * endpoint has no host-side state (BUG-275).  A partial HCD reset is
 	 * visible only inside a subsequently quarantined device.
 	 */
 	for (index = 0; index < alternate->endpoint_count; index++) {
-		/* Checks the operation status. */
+		zero = endpoint_zero_bandwidth(&alternate->endpoints[index]);
+		if (zero)
+			continue;
 		error = hcd->ops->endpoint_reset(hcd,
 						 &alternate->endpoints[index]);
 		if (error != 0)

@@ -6,20 +6,22 @@
  */
 
 /*
- * The Users page's PIN card (ws163-p003, ws172-p002): the six-digit PIN
- * that logs in and unlocks on this machine's screen.
+ * The Security Keys page's Software Security Key (ws199-p001 section 3.1;
+ * before it the Users page's PIN card, ws163-p003, ws172-p002): the
+ * six-digit PIN that logs in and unlocks on this machine's screen, a key
+ * with no device.
  *
  * The card says whether a PIN is set, as the desktop tells it
  * (kl_system_account_enrolled: the session manager keeps the PIN, in
- * /etc/passkey on zedBSD, which Settings cannot read), and has three
- * fields: the current password, the new PIN and the new PIN again (digits
- * only, at most six, shown as dots).  Set Up PIN (Change PIN when one is
- * set) asks the desktop with the password and the PIN; Remove PIN asks
- * with the password alone (libkeiland's kl_system_account_set_pin, an
- * empty PIN).  The session manager checks the password and sets or
- * removes the PIN.  The fields are wiped as soon as the change is asked,
- * and the answer comes as a line under the buttons.  A desktop without the
- * PIN (KL_SYSTEM_HAS_PIN) says so and offers no change.
+ * /etc/passkey on zedBSD, which Settings cannot read), and has Set Up PIN
+ * (Change PIN when one is set) and Remove.  Each opens the popup
+ * (dialog.c): the current password first, then for a new PIN the six
+ * digits twice; the desktop is asked with the password and the PIN
+ * (libkeiland's kl_system_account_set_pin, an empty PIN to remove it),
+ * and the session manager checks the password.  The password is kept from
+ * its step to the one that sends it, and wiped then, when the popup closes
+ * and when it is left alone.  A desktop without the PIN
+ * (KL_SYSTEM_HAS_PIN) says so and offers no change.
  */
 
 #include "settings.h"
@@ -30,298 +32,267 @@
 #include <stdio.h>
 #include <string.h>
 
-/* The card's controls: its three fields, Set Up PIN (or Change PIN), and Remove PIN. */
-#define PIN_FIELD_FIRST		200
-#define PIN_APPLY		210
-#define PIN_REMOVE		211
-
-/* The fields: the current password, the new PIN, and the new PIN again. */
-#define PIN_PASSWORD		0
-#define PIN_NEW			1
-#define PIN_AGAIN		2
+/* The card's controls: Set Up PIN (or Change PIN), and Remove. */
+#define SOFT_APPLY		210
+#define SOFT_REMOVE		211
 
 /* The digits of a PIN. */
-#define PIN_DIGITS		6U
+#define SOFT_DIGITS		6U
 
-/* A field's row, the field's left edge in the row, and the line under the buttons. */
-#define PIN_ROW			52
-#define PIN_FIELD_X		210
-#define PIN_MESSAGE_LINE	30
+/* The steps of a new PIN (the password, the PIN), and of a removal (the password). */
+#define SOFT_STEP_PASSWORD	1U
+#define SOFT_STEP_PIN		2U
+#define SOFT_STEPS		2U
 
-/* The text sizes of a row and of a message. */
-#define PIN_TEXT_ROW		15U
-#define PIN_TEXT_SUB		13U
+/* The text sizes of a row. */
+#define SOFT_TEXT_SUB		13U
+#define SOFT_TEXT_ROW		15U
 
 /* The room of a refusal's word. */
-#define PIN_REASON		32U
+#define SOFT_REASON		32U
 
-/* The fields' labels and placeholders. */
-static const char *const pin_labels[SE_PIN_FIELDS] = { "Current password", "New PIN", "New PIN again" };
-static const char *const pin_placeholders[SE_PIN_FIELDS] = { "Your password now", "Six digits", "The same again" };
-
-static int pin_available(const struct se_app *app);
-static int pin_is_set(const struct se_app *app, int *set);
-static int pin_ready(const struct se_app *app);
-static int pin_remove_ready(const struct se_app *app);
-static void pin_ask(struct se_app *app, int removing);
-static void pin_field_draw(struct se_app *app, struct kl_canvas *canvas, int index, int x, int y, int width);
+static int soft_available(const struct se_app *app);
+static int soft_is_set(const struct se_app *app, int *set);
+static void soft_start(struct se_app *app, unsigned flow);
+static void soft_step(struct se_app *app, unsigned step);
+static void soft_ask(struct se_app *app);
 
 /*
- * Draws the PIN card from a top edge; returns the edge below it.
+ * Draws the Software Security Key card from a top edge; returns the edge
+ * below it.
  */
 int
-se_users_pin_draw(
+se_keys_soft_draw(
 	struct se_app *app,
 	struct kl_canvas *canvas,
 	int x,
 	int top,
 	int width)
 {
-	struct se_users *users;
 	const char *apply;
 	const char *state;
-	kl_color ink;
 	int available;
-	int enabled;
-	int removable;
+	int busy;
+	int set;
 	int known;
-	int differs;
 	int apply_width;
 	int remove_width;
 	int right;
 	int height;
-	int index;
 	int y;
 
 	/* Without the PIN, a short card that says so. */
-	users = &app->users;
-	available = pin_available(app);
-	height = 64 + 36 + SE_PIN_FIELDS * PIN_ROW + 60 + PIN_MESSAGE_LINE;
+	available = soft_available(app);
+	height = 64 + 36 + 56;
 	if (!available)
 		height = 64 + 50;
-	y = se_card_begin(app, canvas, x, top, width, height, "PIN", "Unlock the locked screen with six digits.");
+	y = se_card_begin(app, canvas, x, top, width, height, "Software Security Key", "A six-digit PIN that signs in and unlocks on this computer's screen.");
 	if (!available) {
-		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 24, "This desktop cannot set a PIN here.", PIN_TEXT_ROW, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
+		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 24, "This desktop cannot set a PIN here.", SOFT_TEXT_ROW, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 		return top + height;
 	}
 
 	/* Whether a PIN is set now, once the desktop has told it. */
-	known = pin_is_set(app, &users->pin_set);
+	known = soft_is_set(app, &set);
 	state = "Looking for your PIN...";
-	if (known && !users->pin_set)
+	if (known && !set)
 		state = "No PIN is set. The login and locked screens take your password.";
-	if (known && users->pin_set)
-		state = "A PIN is set. After a restart, log in once with your password.";
-	(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 22, state, PIN_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
+	if (known && set)
+		state = "A PIN is set. After a restart, sign in once with your password.";
+	(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 22, state, SOFT_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 	y += 36;
 
-	/* Each field. */
-	for (index = 0; index < SE_PIN_FIELDS; index++) {
-		pin_field_draw(app, canvas, index, x, y, width);
-		y += PIN_ROW;
-	}
-
-	/* The buttons at the right: Set Up PIN (Change PIN), and Remove PIN left of it when one is set. */
+	/* The buttons at the right: Set Up PIN (Change PIN), and Remove left of it when one is set; none while a change is under way. */
 	right = x + width - 20;
 	apply = "Set Up PIN";
-	if (users->pin_set)
+	if (set)
 		apply = "Change PIN";
+	busy = app->keys.asked || app->dialog.open;
 	apply_width = se_button_width(app, apply);
-	enabled = pin_ready(app);
-	(void)se_button_draw(app, canvas, right - apply_width, y + 12, apply, 1, enabled, PIN_APPLY);
-	if (users->pin_set) {
-		remove_width = se_button_width(app, "Remove PIN");
-		removable = pin_remove_ready(app);
-		(void)se_button_draw(app, canvas, right - apply_width - 8 - remove_width, y + 12, "Remove PIN", 0, removable, PIN_REMOVE);
+	(void)se_button_draw(app, canvas, right - apply_width, y + 8, apply, 1, known && !busy, SOFT_APPLY);
+	if (set) {
+		remove_width = se_button_width(app, "Remove");
+		(void)se_button_draw(app, canvas, right - apply_width - 8 - remove_width, y + 8, "Remove", 0, !busy, SOFT_REMOVE);
 	}
-
-	/* The last answer (green when it was done, red when it failed). */
-	y += 60;
-	ink = SE_COLOR_GOOD;
-	if (users->pin_bad)
-		ink = SE_COLOR_BAD;
-	if (users->pin_message[0] != '\0')
-		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, users->pin_message, PIN_TEXT_SUB, 0, width - 40, ink);
-
-	/* Without an answer to show, what the fields still need: the new PIN the same twice. */
-	differs = 0;
-	if (users->pin_message[0] == '\0' && users->pin_fields[PIN_NEW].length != 0 && users->pin_fields[PIN_AGAIN].length != 0)
-		differs = strcmp(users->pin_fields[PIN_NEW].text, users->pin_fields[PIN_AGAIN].text);
-	if (differs != 0)
-		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, "The new PIN and its repeat differ.", PIN_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 
 	/* The edge below the card. */
 	return top + height;
 }
 
 /*
- * Carries out a click on a control of the PIN card.  Returns 1 when the
+ * Carries out a click on a control of the card.  Returns 1 when the
  * control was the card's.
  */
 int
-se_users_pin_press(
+se_keys_soft_press(
 	struct se_app *app,
 	int index)
 {
-	struct se_users *users;
-	int ready;
-
-	/* A field takes the keyboard. */
-	users = &app->users;
-	if (index >= PIN_FIELD_FIRST && index < PIN_FIELD_FIRST + SE_PIN_FIELDS) {
-		users->pin_focus = index - PIN_FIELD_FIRST;
-		users->keyboard = SE_USERS_KEYBOARD_PIN;
-		return 1;
-	}
-
-	/* Set Up PIN or Change PIN, when the fields are ready. */
-	if (index == PIN_APPLY) {
-		ready = pin_ready(app);
-		if (ready)
-			pin_ask(app, 0);
-		return 1;
-	}
-
-	/* Remove PIN, when the password is typed. */
-	if (index == PIN_REMOVE) {
-		ready = pin_remove_ready(app);
-		if (ready)
-			pin_ask(app, 1);
-		return 1;
-	}
+	int set;
+	int known;
 
 	/* Not the card's. */
-	return 0;
-}
-
-/*
- * Takes a key while the PIN card's fields have the keyboard: Tab moves
- * between them, Enter asks the change when the fields are ready and
- * otherwise goes to the next field, Esc empties the fields (or gives the
- * keyboard back to the password card), the others type (only digits into
- * the PIN's fields, at most six).  Returns 1 when the key was used.
- */
-int
-se_users_pin_key(
-	struct se_app *app,
-	const struct se_event *event)
-{
-	struct se_users *users;
-	struct kl_field *field;
-	uint32_t character;
-	int ready;
-	int used;
-
-	/* Not the card's keyboard. */
-	users = &app->users;
-	if (users->keyboard != SE_USERS_KEYBOARD_PIN)
+	if (index != SOFT_APPLY && index != SOFT_REMOVE)
 		return 0;
 
-	/* Tab and Shift+Tab. */
-	if (event->key == SE_KEY_TAB) {
-		if ((event->modifiers & SE_MOD_SHIFT) != 0U) {
-			users->pin_focus = (users->pin_focus + SE_PIN_FIELDS - 1) % SE_PIN_FIELDS;
-		} else {
-			users->pin_focus = (users->pin_focus + 1) % SE_PIN_FIELDS;
-		}
-
-		/* Taken. */
+	/* One change at a time, once the desktop has told whether a PIN is set. */
+	known = soft_is_set(app, &set);
+	if (!known || app->keys.asked || app->dialog.open)
 		return 1;
+
+	/* Set Up PIN, Change PIN or Remove. */
+	if (index == SOFT_APPLY) {
+		soft_start(app, SE_KEYS_FLOW_PIN_SET);
+	} else if (set) {
+		soft_start(app, SE_KEYS_FLOW_PIN_REMOVE);
 	}
 
-	/* Enter: the change, or the next field. */
-	if (event->key == SE_KEY_ENTER) {
-		ready = pin_ready(app);
-		if (ready) {
-			pin_ask(app, 0);
-		} else {
-			users->pin_focus = (users->pin_focus + 1) % SE_PIN_FIELDS;
-		}
-
-		/* Taken. */
-		return 1;
-	}
-
-	/* Esc empties the fields; with nothing typed the keyboard goes back to the password card. */
-	if (event->key == SE_KEY_ESC) {
-		if (users->pin_fields[PIN_PASSWORD].length == 0 && users->pin_fields[PIN_NEW].length == 0 && users->pin_fields[PIN_AGAIN].length == 0)
-			users->keyboard = SE_USERS_KEYBOARD_PASSWORD;
-		se_users_pin_wipe(users);
-		users->pin_message[0] = '\0';
-		return 1;
-	}
-
-	/*
-	 * The PIN's fields keep digits only, six at most: a character that is
-	 * not a digit, or one more than six (without a selection it would
-	 * replace), is taken and dropped before the field sees it (BUG-257:
-	 * taking it back from the field's end left the caret past the text,
-	 * and the next key wrote outside it).
-	 */
-	field = &users->pin_fields[users->pin_focus];
-	character = kl_key_character(event->key, event->modifiers);
-	if (users->pin_focus != PIN_PASSWORD && character != 0U && (event->modifiers & SE_MOD_CTRL) == 0U) {
-		if (character < '0' || character > '9')
-			return 1;
-		if (field->length >= PIN_DIGITS && field->caret == field->anchor)
-			return 1;
-	}
-
-	/* Anything else types into the field with the keyboard. */
-	used = se_field_key(field, event);
-	if (used == 0)
-		return 0;
-
-	/* A new character takes the last answer away. */
-	if (!users->pin_asked)
-		users->pin_message[0] = '\0';
-
-	/* Succeeded: the field took the key. */
+	/* Taken. */
 	return 1;
 }
 
 /*
- * Takes the answer of a PIN's change when it is the card's.  Returns 1
- * when the request was the card's.
+ * Takes the popup's action for the PIN's wizards: the step's button goes
+ * on (or asks), Back goes back, Cancel closes, and idle wipes the
+ * password kept and asks it again.
  */
-int
-se_users_pin_result(
+void
+se_keys_soft_act(
 	struct se_app *app,
-	uint32_t request,
+	unsigned action)
+{
+	struct se_keys *keys;
+
+	/* Cancel (and Close after the end): nothing kept. */
+	keys = &app->keys;
+	if (action == SE_DIALOG_CANCEL) {
+		se_keys_end(app);
+		return;
+	}
+
+	/* Back: the password again. */
+	if (action == SE_DIALOG_BACK) {
+		soft_step(app, SOFT_STEP_PASSWORD);
+		return;
+	}
+
+	/* Left alone: the password kept goes, and is asked again. */
+	if (action == SE_DIALOG_IDLE) {
+		if (keys->step > SOFT_STEP_PASSWORD && !keys->asked) {
+			soft_step(app, SOFT_STEP_PASSWORD);
+			se_dialog_error(app, "For your security, type your password again.");
+		}
+
+		/* Nothing else. */
+		return;
+	}
+
+	/* Only the step's button from here. */
+	if (action != SE_DIALOG_PRIMARY)
+		return;
+
+	/* The end's Done closes. */
+	if (keys->step == 0U) {
+		se_keys_end(app);
+		return;
+	}
+
+	/* The password: kept, then the PIN (or, for a removal, asked). */
+	if (keys->step == SOFT_STEP_PASSWORD) {
+		se_keys_keep_password(app);
+		if (keys->flow == SE_KEYS_FLOW_PIN_REMOVE) {
+			soft_ask(app);
+			return;
+		}
+
+		/* A new PIN's digits. */
+		soft_step(app, SOFT_STEP_PIN);
+		return;
+	}
+
+	/* The PIN: asked. */
+	soft_ask(app);
+}
+
+/* Tells whether the popup's step may go on: the password typed, or the new PIN whole and twice the same. */
+int
+se_keys_soft_ready(
+	const struct se_app *app)
+{
+	const char *pin;
+	const char *again;
+	size_t length;
+	int same;
+
+	/* The end's Done. */
+	if (app->keys.step == 0U)
+		return 1;
+
+	/* The password typed. */
+	length = se_dialog_length(app, 0U);
+	if (app->keys.step == SOFT_STEP_PASSWORD)
+		return length != 0U;
+
+	/* The new PIN of six digits, twice the same. */
+	if (length != SOFT_DIGITS)
+		return 0;
+	pin = se_dialog_text(app, 0U);
+	again = se_dialog_text(app, 1U);
+	same = strcmp(pin, again);
+	if (same != 0)
+		return 0;
+
+	/* Ready. */
+	return 1;
+}
+
+/*
+ * Takes the answer of a PIN's change: the end, or the password's step
+ * again with what went wrong.
+ */
+void
+se_keys_soft_result(
+	struct se_app *app,
 	int error)
 {
-	struct se_users *users;
+	struct se_keys *keys;
 	const char *message;
-	char reason[PIN_REASON];
+	const char *done;
+	char reason[SOFT_REASON];
 	int refused;
 	int locked;
-	int bad;
+	int removing;
 
-	/* Only the change the card asked. */
-	users = &app->users;
-	if (!users->pin_asked || request != users->pin_request)
-		return 0;
-	users->pin_asked = 0;
+	/* No longer asked; the popup may have been closed meanwhile. */
+	keys = &app->keys;
+	keys->asked = 0;
+	removing = keys->flow == SE_KEYS_FLOW_PIN_REMOVE;
+	se_log("KEYS pin result request=%u errno=%d remove=%d", keys->request, error, removing);
+	if (!app->dialog.open)
+		return;
 
-	/* What the answer says. */
-	bad = 1;
+	/* Done: the end. */
+	if (error == 0) {
+		done = "The PIN is set. The login and locked screens take it from now on.";
+		if (removing)
+			done = "The PIN is removed. The login and locked screens take your password.";
+		keys->step = 0U;
+		se_dialog_step(app, "Software Security Key", 0U, 0U, done, "Done", 0);
+		se_dialog_final(app);
+		return;
+	}
+
+	/* What went wrong. */
 	switch (error) {
-	case 0:
-		message = "The PIN is set. The login and locked screens take it from now on.";
-		if (users->pin_removing)
-			message = "The PIN is removed.";
-		bad = 0;
-		break;
 	case EPERM:
 		/* The refusal's word, when the desktop gave one: a locked account, or a wrong password. */
-		refused = kl_system_account_refusal(app->system, request, reason, sizeof(reason));
+		refused = kl_system_account_refusal(app->system, keys->request, reason, sizeof(reason));
 		locked = 1;
 		if (refused)
-			locked = strcmp(reason, "locked");
-		message = "The current password is wrong.";
+			locked = strcmp(reason, "locked-account");
+		message = "The password is wrong.";
 		if (locked == 0)
 			message = "Your account is locked: it cannot have a PIN.";
-		users->pin_focus = PIN_PASSWORD;
 		break;
 	case EINVAL:
 		message = "The PIN is not accepted: use six digits.";
@@ -337,33 +308,14 @@ se_users_pin_result(
 		break;
 	}
 
-	/* Shown under the buttons, and logged for the tests (without the password or the PIN). */
-	(void)snprintf(users->pin_message, sizeof(users->pin_message), "%s", message);
-	users->pin_bad = bad;
-	app->dirty = 1;
-	se_log("USERS pin result request=%u errno=%d remove=%d", request, error, users->pin_removing);
-
-	/* Succeeded: the answer was the card's. */
-	return 1;
-}
-
-/*
- * Wipes the PIN card's fields.
- */
-void
-se_users_pin_wipe(
-	struct se_users *users)
-{
-	int index;
-
-	/* Each field (se_field_clear overwrites its text). */
-	for (index = 0; index < SE_PIN_FIELDS; index++)
-		se_field_clear(&users->pin_fields[index]);
+	/* The password again, with it said. */
+	soft_step(app, SOFT_STEP_PASSWORD);
+	se_dialog_error(app, message);
 }
 
 /* Tells whether the desktop offers the PIN (KL_SYSTEM_HAS_PIN). */
 static int
-pin_available(
+soft_available(
 	const struct se_app *app)
 {
 	unsigned bits;
@@ -383,7 +335,7 @@ pin_available(
 
 /* Tells whether the desktop has told whether a PIN is set (1), and sets *set to whether one is. */
 static int
-pin_is_set(
+soft_is_set(
 	const struct se_app *app,
 	int *set)
 {
@@ -393,6 +345,8 @@ pin_is_set(
 
 	/* Not known before the desktop told it. */
 	*set = 0;
+	if (app->system == NULL)
+		return 0;
 	known = kl_system_account_enrolled(app->system, &pin, &keys);
 	if (!known)
 		return 0;
@@ -403,121 +357,90 @@ pin_is_set(
 	return 1;
 }
 
-/* Tells whether the fields are ready to set the PIN: the password typed, six digits twice the same, and none asked. */
-static int
-pin_ready(
-	const struct se_app *app)
-{
-	const struct se_users *users;
-	int same;
-
-	/* One change at a time. */
-	users = &app->users;
-	if (users->pin_asked)
-		return 0;
-
-	/* The password typed, and the new PIN whole. */
-	if (users->pin_fields[PIN_PASSWORD].length == 0)
-		return 0;
-	if (users->pin_fields[PIN_NEW].length != PIN_DIGITS)
-		return 0;
-
-	/* The new PIN twice the same. */
-	same = strcmp(users->pin_fields[PIN_NEW].text, users->pin_fields[PIN_AGAIN].text);
-	if (same != 0)
-		return 0;
-
-	/* Ready. */
-	return 1;
-}
-
-/* Tells whether the PIN can be removed: one is set, the password typed, and none asked. */
-static int
-pin_remove_ready(
-	const struct se_app *app)
-{
-	const struct se_users *users;
-
-	/* One change at a time, of a PIN that is set. */
-	users = &app->users;
-	if (users->pin_asked || !users->pin_set)
-		return 0;
-
-	/* The password typed. */
-	if (users->pin_fields[PIN_PASSWORD].length == 0)
-		return 0;
-
-	/* Ready. */
-	return 1;
-}
-
-/* Asks the desktop to set the PIN (or to remove it), and wipes the fields. */
+/* Starts a PIN's wizard at the password. */
 static void
-pin_ask(
+soft_start(
 	struct se_app *app,
-	int removing)
+	unsigned flow)
 {
-	struct se_users *users;
-	const char *pin;
-	uint32_t request;
-	int error;
+	/* The popup, its owner this card. */
+	se_keys_end(app);
+	app->keys.flow = flow;
+	se_dialog_open(app, se_keys_soft_act, se_keys_soft_ready);
+	soft_step(app, SOFT_STEP_PASSWORD);
+	se_log("KEYS pin start remove=%d", flow == SE_KEYS_FLOW_PIN_REMOVE);
+}
 
-	/* Asked; the password and the PIN leave with the next flush. */
-	users = &app->users;
-	pin = users->pin_fields[PIN_NEW].text;
-	if (removing)
-		pin = "";
-	error = kl_system_account_set_pin(app->system, users->pin_fields[PIN_PASSWORD].text, pin, &request);
-	se_users_pin_wipe(users);
-	users->pin_focus = PIN_PASSWORD;
+/* Shows a step of the PIN's wizard. */
+static void
+soft_step(
+	struct se_app *app,
+	unsigned step)
+{
+	struct se_keys *keys;
+	unsigned steps;
 
-	/* Not asked: said at once. */
-	if (error != 0) {
-		(void)snprintf(users->pin_message, sizeof(users->pin_message), "The PIN could not be changed (%s).", strerror(error));
-		users->pin_bad = 1;
-		se_log("USERS pin errno=%d", error);
+	/* A removal has the password alone. */
+	keys = &app->keys;
+	keys->step = step;
+	steps = SOFT_STEPS;
+	if (keys->flow == SE_KEYS_FLOW_PIN_REMOVE)
+		steps = 1U;
+
+	/* The password: wiped when it is asked again. */
+	if (step == SOFT_STEP_PASSWORD) {
+		se_field_clear(&keys->password);
+		if (keys->flow == SE_KEYS_FLOW_PIN_REMOVE) {
+			se_dialog_step(app, "Remove the PIN", 1U, steps, "Type your password to remove the PIN. The login and locked screens will take your password.", "Remove", 0);
+		} else {
+			se_dialog_step(app, "Software Security Key", 1U, steps, "Type your password to set the PIN.", "Next", 0);
+		}
+
+		/* Its field. */
+		se_dialog_field(app, "Password", "Your password now", SE_FIELD_SECRET, 0U);
 		return;
 	}
 
-	/* Succeeded: the answer comes as a result. */
-	users->pin_asked = 1;
-	users->pin_removing = removing;
-	users->pin_request = request;
-	(void)snprintf(users->pin_message, sizeof(users->pin_message), "Checking the password...");
-	users->pin_bad = 0;
-	se_log("USERS pin request=%u remove=%d", request, removing);
+	/* The new PIN, twice. */
+	se_dialog_step(app, "Software Security Key", 2U, steps, "Choose six digits. After a restart, sign in once with your password before the PIN works.", "Set PIN", 1);
+	se_dialog_field(app, "New PIN", "Six digits", SE_FIELD_SECRET, 0U);
+	se_dialog_digits(app, 0U, SOFT_DIGITS);
+	se_dialog_field(app, "New PIN again", "The same again", SE_FIELD_SECRET, 0U);
+	se_dialog_digits(app, 1U, SOFT_DIGITS);
 }
 
-/* Draws one field's row: its label at the left, the field at the right, dots or the placeholder, and the cursor in the field with the keyboard. */
+/* Asks the desktop to set the PIN (or to remove it) with the password kept, and wipes both. */
 static void
-pin_field_draw(
-	struct se_app *app,
-	struct kl_canvas *canvas,
-	int index,
-	int x,
-	int y,
-	int width)
+soft_ask(
+	struct se_app *app)
 {
-	struct se_users *users;
-	struct kl_rect box;
-	int focused;
+	struct se_keys *keys;
+	char pin[SOFT_DIGITS + 1U];
+	uint32_t request;
+	int error;
 
-	/* The label. */
-	users = &app->users;
-	(void)kl_text_draw_fit(app->text, canvas, x + 20, kl_text_center(PIN_TEXT_ROW, y + 8, 36), pin_labels[index], PIN_TEXT_ROW, 0, PIN_FIELD_X - 30, SE_COLOR_TEXT);
+	/* The PIN typed (none for a removal), out of the popup before it is busy. */
+	keys = &app->keys;
+	pin[0] = '\0';
+	if (keys->flow == SE_KEYS_FLOW_PIN_SET)
+		(void)snprintf(pin, sizeof(pin), "%s", se_dialog_text(app, 0U));
 
-	/* The field's place, and whether it has the keyboard. */
-	box.x = x + PIN_FIELD_X;
-	box.y = y + 8;
-	box.width = width - PIN_FIELD_X - 20;
-	box.height = 36;
-	focused = 0;
-	if (users->keyboard == SE_USERS_KEYBOARD_PIN && users->pin_focus == index)
-		focused = 1;
+	/* Asked; the password and the PIN leave with the next flush. */
+	error = kl_system_account_set_pin(app->system, keys->password.text, pin, &request);
+	se_field_clear(&keys->password);
+	memset(pin, 0, sizeof(pin));
 
-	/* A click on it gives it the keyboard. */
-	se_ui_hit(app, &box, SE_HIT_CONTROL, PIN_FIELD_FIRST + index);
+	/* Not asked: said at once, at the password. */
+	if (error != 0) {
+		soft_step(app, SOFT_STEP_PASSWORD);
+		se_dialog_error(app, "The PIN could not be changed.");
+		se_log("KEYS pin errno=%d", error);
+		return;
+	}
 
-	/* libkeiland's field: all three are secrets, as dots and without an input method (ws090-p007). */
-	(void)se_field_draw(app, canvas, &users->pin_fields[index], &box, pin_placeholders[index], SE_FIELD_SECRET, focused);
+	/* Succeeded: busy until the answer. */
+	keys->asked = 1;
+	keys->request = request;
+	se_dialog_busy(app, "Checking the password...", 0);
+	se_log("KEYS pin request=%u remove=%d", request, keys->flow == SE_KEYS_FLOW_PIN_REMOVE);
 }

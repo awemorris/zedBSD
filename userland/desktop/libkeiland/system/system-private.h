@@ -120,6 +120,16 @@ struct system_view {
 	size_t keys_pending_count;
 	unsigned touched;
 	uint32_t touched_request;
+	struct kl_system_key_info key_info;
+	unsigned key_info_known;
+	unsigned replugged;
+	uint32_t replugged_request;
+	unsigned key_removed;
+	unsigned key_options_known;
+	unsigned key_pin;
+	unsigned key_touch;
+	unsigned methods_known;
+	unsigned methods;
 	struct kl_sharing_state sharing;
 	struct kl_sharing_state sharing_pending;
 	unsigned sharing_touched;

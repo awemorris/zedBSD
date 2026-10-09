@@ -38,6 +38,20 @@ int toascii(int character);
 int toupper_l(int, locale_t);
 int tolower_l(int, locale_t);
 
+/* The classifications in a locale: single bytes are classified the same in every locale this C library has. */
+int isalnum_l(int, locale_t);
+int isalpha_l(int, locale_t);
+int isblank_l(int, locale_t);
+int iscntrl_l(int, locale_t);
+int isdigit_l(int, locale_t);
+int isgraph_l(int, locale_t);
+int islower_l(int, locale_t);
+int isprint_l(int, locale_t);
+int ispunct_l(int, locale_t);
+int isspace_l(int, locale_t);
+int isupper_l(int, locale_t);
+int isxdigit_l(int, locale_t);
+
 #ifdef __cplusplus
 }
 #endif

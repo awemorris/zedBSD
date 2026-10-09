@@ -6,13 +6,17 @@
  */
 
 /*
- * posix_fallocate() without a kernel operation for it.
+ * posix_fallocate() without a kernel operation for it, and posix_fadvise().
  *
  * The file is extended to cover the range, and one zero byte is written
  * into each block the extension added, so that the blocks are allocated
  * now and a later write into the range does not fail for want of space.
  * Blocks the file already had are left untouched: they are allocated or
  * hold data already.
+ *
+ * posix_fadvise() checks its arguments and otherwise takes no action: the
+ * kernel has no read-ahead or cache policy a program can steer, and advice is
+ * allowed to be ignored.
  */
 
 #include <errno.h>
@@ -95,5 +99,50 @@ posix_fallocate(
 	}
 
 	errno = saved;
+	return 0;
+}
+
+/*
+ * Takes advice about how the bytes [offset, offset + length) of fd will be read.
+ * Returns 0 or an error number; errno is not set, as POSIX says.
+ */
+int
+posix_fadvise(
+	int fd,
+	off_t offset,
+	off_t length,
+	int advice)
+{
+	struct stat status;
+	int saved;
+	int status_result;
+	int error;
+
+	/* Advice covers any offset, so the offset itself is never wrong. */
+	(void)offset;
+
+	/* Refuses advice that is not one of the six POSIX names. */
+	if (advice < POSIX_FADV_NORMAL || advice > POSIX_FADV_NOREUSE)
+		return EINVAL;
+
+	/* A negative length names no range. */
+	if (length < 0)
+		return EINVAL;
+
+	/* Finds out whether fd is open, keeping the caller's errno. */
+	saved = errno;
+	status_result = fstat(fd, &status);
+	error = errno;
+	errno = saved;
+	if (status_result != 0)
+		return error;
+
+	/* A pipe, a FIFO or a socket has no file offset to give advice about. */
+	if (S_ISFIFO(status.st_mode))
+		return ESPIPE;
+	if (S_ISSOCK(status.st_mode))
+		return ESPIPE;
+
+	/* Succeeded: the advice is accepted and has no effect. */
 	return 0;
 }

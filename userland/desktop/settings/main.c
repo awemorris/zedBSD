@@ -658,6 +658,7 @@ main_timeout(
 	int storage;
 	int machine;
 	int bluetooth;
+	int dialog;
 	int limit;
 
 	/* A frame the last one asked for (a scroll it corrected), or the lit region's, is drawn at once. */
@@ -698,6 +699,11 @@ main_timeout(
 	bluetooth = se_bluetooth_wait(&main_app);
 	if (bluetooth >= 0 && bluetooth < limit)
 		limit = bluetooth;
+
+	/* And while the popup's ring turns, or until it has been left alone too long (ws199-p001). */
+	dialog = se_dialog_wait(&main_app);
+	if (dialog >= 0 && dialog < limit)
+		limit = dialog;
 
 	/* The limit (a held key's repeat shortens the wait within the application's). */
 	(void)now;

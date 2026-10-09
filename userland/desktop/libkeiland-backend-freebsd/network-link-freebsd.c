@@ -42,6 +42,7 @@ kl_backend_network_get_links(
 	size_t count;
 	size_t index;
 	size_t bytes;
+	int wireless;
 	int same;
 	int error;
 
@@ -166,6 +167,13 @@ kl_backend_network_get_links(
 
 	/* Releases the snapshot after copying all public fields. */
 	freeifaddrs(addresses);
+
+	/* Each radio, as net80211 answers it (BUG-284). */
+	for (index = 0; index < count; index++) {
+		wireless = kwpa_wireless(links[index].name);
+		if (wireless)
+			links[index].wireless = 1U;
+	}
 
 	/* Succeeded: reports native interfaces without retaining kernel resources. */
 	return count;

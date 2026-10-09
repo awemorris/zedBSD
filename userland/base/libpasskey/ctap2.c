@@ -765,6 +765,31 @@ pk_ctap2_get_assertion(
 	return 0;
 }
 
+/*
+ * Resets the key (authenticatorReset, ws199-p001): every credential and
+ * the PIN go.  The key takes it only soon after it was powered (a few
+ * seconds) and with the user's touch.  Returns 0, or EPROTO with the
+ * key's status in last_status (NOT_ALLOWED 0x30 out of the window,
+ * OPERATION_DENIED 0x27, USER_ACTION_TIMEOUT 0x2F, KEEPALIVE_CANCEL 0x2D),
+ * or another errno value.
+ */
+int
+pk_ctap2_reset(
+	struct pk_device *device)
+{
+	struct pk_cbor_reader answer;
+	uint8_t reply[16];
+	int error;
+
+	/* The command, with no request and no answer but its status. */
+	error = ctap2_call(device, PK_CTAP2_RESET, NULL, reply, sizeof(reply), &answer);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the key is as new. */
+	return 0;
+}
+
 /* Asks the user to touch this key among several (authenticatorSelection, CTAP 2.1). */
 int
 pk_ctap2_selection(

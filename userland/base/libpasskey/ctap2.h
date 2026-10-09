@@ -35,6 +35,7 @@
 
 /* The statuses the library and its callers act on. */
 #define PK_CTAP2_OK			0x00U
+#define PK_CTAP2_NOT_ALLOWED		0x30U
 #define PK_CTAP2_CREDENTIAL_EXCLUDED	0x19U
 #define PK_CTAP2_KEEPALIVE_CANCEL	0x2dU
 #define PK_CTAP2_NO_CREDENTIALS		0x2eU
@@ -191,6 +192,7 @@ int pk_ctap2_make_credential(struct pk_device *device, const struct pk_make_requ
 int pk_ctap2_get_assertion(struct pk_device *device, const struct pk_assertion_request *request,
     struct pk_assertion_reply *reply);
 int pk_ctap2_selection(struct pk_device *device);
+int pk_ctap2_reset(struct pk_device *device);
 int pk_ctap2_read_made(const char *rp_id, const uint8_t *data, size_t size, struct pk_made_credential *credential);
 
 #endif

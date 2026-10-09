@@ -56,3 +56,23 @@ p006のlazy coherent allocation/view出力へ、nonzero BLOBを同session typed 
 ## p006 binding所有のscoped出力（2026-10-09）
 
 buffer/imageのexact requirementsとsame-device VkMemory bindingを実装。resource/prepared jobはmemory objectを独立retainし、native view/BLOB/VMと退役を分離する。borrowed native VA/Normal NC CPU resolverはlogical extentを守り、mutex外のjobには独立referenceが必要。actual client/VA/MMU hostで退役順とbad bind拒否を確認、public runtime/worker bindingは後続。[p006詳細](../phase006/phase.md#i14-bufferimagebinding-checkpoint2026-10-09)。p005/i13 in-progress。
+
+
+## i14 whole native jobとclosed-session retirement checkpoint（2026-10-09）
+
+whole pending primary/current passをpersistent controller quarantineへallocation無しでtransferし、閉じたrenderer/namespaceは最後のtyped ownerまで保持する。actual checked reset→payload→closed session→translation recoveryの順を接続。actual Vulkan host18範囲/actual renderer close・provider reset failure・retained destructor host/named y warning/error0/style0 PASS。runner/recoveryのhostモデルはphysical DMA proofではない。transfer/barrier/submit/public dispatch/common bindingとKeiland/実機/p007は後続、Phase in-progress保持。内部lifetime契約、外国scope/HAL/UAPI変更無し。[詳細/再開点](../execution-20261009.md#i14-whole-pending-native-jobとclosed-rendererのsoftware出力2026-10-09)。
+
+
+## i14 explicit dependencies/implicit attachment layout checkpoint（2026-10-09）
+
+same-device coherent dependency nodeをwhole pending primaryに保持し、FIFO barrierは全imageのold layout/backing preflight後にvisibilityとnew layoutをpublishする。native passのinitial/final layout lifecycleもnative retirementへ接続。actual public barrier encoder/runtime host19範囲、actual close/reset host、final named y warning/error0/style0 PASS。UNDEFINED discardと末尾mismatchのatomic refusalを区別して確認。native transfer/primary queue submit/public/common binding・physical Keiland・p007は未達、Phase in-progress保持。内部runtime出力、foreign scope/HAL/UAPI変更無し。[詳細/次](../execution-20261009.md#i14-explicit-barrierとimplicit-pass-layoutのsoftware出力2026-10-09)。
+
+
+## i14 external-sharing dependency admission checkpoint（2026-10-09）
+
+actual WSIのfamily0↔external pairを、exact bound memoryのexternal declarationがある場合に限定してprivate barrierへ接続。typed export/private allocationに基づく数値resource-description fixtureで双方のadmission/refusalを確認し、actual public barrier/whole native graph host19範囲・named y warning/error0/style0 PASS。external provider/GPU実動作とpublic queue/fence publicationは未達。shared Vulkan headerの欠けたcore tokenはprivate標準値で表現、共有source/HAL/UAPI変更無し。native GPU meta transfer/runtime/physical/p007は後続、Phase in-progress保持。[証拠/再開点](../execution-20261009.md#i14-external-family共有メモリのadmission-checkpoint2026-10-09)。
+
+
+## i14 full-image native GPU clear checkpoint（2026-10-10）
+
+actual public vkCmdClearColorImage→typed immutable primary→prepared pending graph→zero-draw native tile clear/storeを接続。TRANSFER_DST用途・bound same-device・remaining ranges・FIFO current layout、独立output/9storage、OOM/budget rollback、zero-draw quarantine/reset lifetimeを確認。actual encoder/native owner＋explicit runner host20範囲、final named RPi4 y warning/error0/checks3/style0 PASS。CPU target write無し。mock runnerはGPU pixelを書かず、実機clear/Keiland成功は未確認。copy/blit/readback・primary queue submit/fence/semaphore/public/common binding・final runtime stack/p007が残り、Phase in-progress/WS incompleteを維持。Master/shared source/HAL/UAPI変更無し。[証拠/失敗と修正/復帰点](../execution-20261009.md#i14-full-image-gpu-clearのsoftware出力2026-10-10)。

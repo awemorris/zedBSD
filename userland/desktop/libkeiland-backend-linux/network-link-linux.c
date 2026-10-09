@@ -43,6 +43,7 @@ kl_backend_network_get_links(
 	size_t count;
 	size_t index;
 	int descriptor;
+	int wireless;
 	int error;
 	int same;
 	const char *printed;
@@ -134,6 +135,11 @@ kl_backend_network_get_links(
 	for (index = 0; index < count; index++) {
 		links[index].received_bytes = link_counter(links[index].name, "rx_bytes");
 		links[index].sent_bytes = link_counter(links[index].name, "tx_bytes");
+
+		/* A radio, as the kernel's interface tree tells it (BUG-284). */
+		wireless = kwpa_wireless(links[index].name);
+		if (wireless)
+			links[index].wireless = 1U;
 
 		/* Missing inquiry access must not prevent reporting other link fields. */
 		if (descriptor >= 0) {

@@ -26,6 +26,9 @@
 #include "drivers/gpu/bcm2711/buffer.h"
 #include "drivers/gpu/bcm2711/v3d-job.h"
 #include "drivers/gpu/bcm2711/render-device.h"
+#include "drivers/gpu/bcm2711/native-storage.h"
+#include "drivers/gpu/bcm2711/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vulkan-private.h"
 
 /* One prepared native job independently retains its mapped input allocation. */
 struct test_payload {
@@ -37,7 +40,7 @@ struct test_payload {
 static struct bcm2711_v3d test_engine;
 static uint32_t test_hub[0x4000 / 4];
 static uint32_t test_core[0x4000 / 4];
-static struct bcm2711_buffer test_buffers[32];
+static struct bcm2711_buffer test_buffers[64];
 static unsigned test_allocated;
 static unsigned test_released;
 static unsigned test_fail_allocation;
@@ -82,8 +85,11 @@ static void trace(uint32_t offset, uint32_t data);
 static unsigned find_write(uint32_t offset, unsigned from);
 static void check_jobs(void);
 static void check_resources(void);
+static void check_upload_storage(void);
 static void check_worker(struct bcm2711_render_session *session);
 static void check_reservations(void);
+static void check_closed_vulkan(void);
+static int destroy_retained_leaf(struct bcm2711_vulkan_session *session, void *payload);
 static struct test_payload *prepare_payload(struct bcm2711_render_resource *resource);
 static int execute_payload(struct bcm2711_render_device *controller, struct bcm2711_render_session *session, void *opaque, bool *retired);
 static int dispose_payload(struct bcm2711_render_device *controller, void *opaque, bool retired);
@@ -256,6 +262,7 @@ main(
 	check_jobs();
 
 	/* Exercises real renderer callbacks and quarantined native VA ownership after boot work. */
+	check_upload_storage();
 	check_resources();
 
 	/* Succeeded: ordinary and failed paths obey literal native ownership boundaries. */
@@ -276,7 +283,13 @@ bcm2711_buffer_create(
 	struct bcm2711_buffer *buffer;
 
 	/* Allocation failure occurs before any model owner is published. */
-	assert(limit == 0x3fffffff && alignment == 4096 && test_allocated < 32);
+	assert(alignment == 4096 && test_allocated < 64);
+
+	/* Private uploads use identified native reachability while existing display/boot allocations retain their low placement contract. */
+	if (limit != 0x3fffffff)
+		assert(limit == ((uint64_t)1 << test_engine.hardware.physical_bits) - 1U);
+
+	/* One selected physical allocation failure leaves no model storage owned by the caller. */
 	*result = NULL;
 	if (test_allocated + 1 == test_fail_allocation)
 		return ENOMEM;
@@ -285,10 +298,10 @@ bcm2711_buffer_create(
 	buffer = &test_buffers[test_allocated++];
 	memset(buffer, 0, sizeof(*buffer));
 	buffer->bytes = bytes;
-	buffer->memory.size = (size_t)bytes;
+	buffer->memory.size = (size_t)((bytes + 4095U) & ~4095ULL);
 	buffer->memory.paddr = 0x1000000 + test_allocated * 0x800000;
 	buffer->references = 1;
-	buffer->address = calloc(1, (size_t)bytes);
+	buffer->address = calloc(1, buffer->memory.size);
 	assert(buffer->address != NULL);
 	*result = buffer;
 
@@ -312,6 +325,30 @@ bcm2711_buffer_release(
 	if (buffer == test_engine.hardware.pages)
 		assert(!test_engine.hardware.mmu_published);
 	test_released++;
+}
+
+/*
+ * Refuses typed Vulkan allocation binding in the allocation-only hardware fixture.
+ *
+ * Actual typed Vulkan memory/BLOB ownership is exercised by the separate
+ * Vulkan-device host fixture.  This fixture never opens a Vulkan session.
+ */
+int
+bcm2711_vulkan_memory_blob(
+	struct bcm2711_vulkan_session *session,
+	const struct gpu_blob_create *request,
+	const struct gpu_placement *placement,
+	struct bcm2711_buffer **buffer)
+{
+	/* Placement is not consulted without a real typed protocol namespace. */
+	(void)placement;
+
+	/* Only a deliberately unsupported nonzero typed BLOB request reaches this fixture boundary. */
+	*buffer = NULL;
+	assert(session == NULL && request->blob_id != 0);
+
+	/* No synthetic typed allocation is reported as a successful Vulkan binding. */
+	return ENOTSUP;
 }
 
 /*
@@ -593,7 +630,7 @@ void
 bcm2711_stage_mark(
 	const char *family,
 	const char *format,
-    ...)
+	...)
 {
 	/* Model diagnostics do not contribute to any physical acceptance claim. */
 	assert(family != NULL && format != NULL);
@@ -1203,6 +1240,116 @@ find_write(
 	return test_writes;
 }
 
+/* Checks exact code upload and separates uncertain DMA from consumed failed-flush ownership. */
+static void
+check_upload_storage(
+	void)
+{
+	struct bcm2711_v3d_space space;
+	struct bcm2711_v3d_space foreign;
+	struct bcm2711_native_storage *storage;
+	struct bcm2711_native_storage *saved;
+	struct bcm2711_shader_binary binary;
+	struct bcm2711_buffer *buffer;
+	uint64_t code[2];
+	const uint8_t *uploaded;
+	unsigned releases;
+	uint32_t index;
+	int error;
+
+	/* The actual native MMU owner is ready before this private code-only mapping acquires a VA. */
+	fixture();
+	error = bcm2711_v3d_hardware_start(&test_engine);
+	assert(error == 0);
+	memset(&space, 0, sizeof(space));
+	space.native = &test_engine;
+	foreign = space;
+
+	/* Asymmetric numerical words expose byte order; this upload fixture does not execute the synthetic program. */
+	memset(&binary, 0, sizeof(binary));
+	code[0] = 0x3c003186bb800000ULL;
+	code[1] = 0x0102030405060708ULL;
+	binary.code = code;
+	binary.code_count = 2;
+	test_writes = 0;
+	error = bcm2711_native_program_upload(&space, &binary, &storage);
+	assert(error == 0 && storage != NULL && storage->space == &space && storage->bytes == 16);
+	assert(storage->view == space.views && storage->view->address == 4096 && storage->view->references == 1);
+	buffer = storage->view->buffer;
+	assert(buffer->references == 1 && buffer->bytes == 16 && buffer->memory.size == 4096);
+	uploaded = buffer->address;
+	assert(uploaded[0] == 0 && uploaded[1] == 0 && uploaded[2] == 0x80 && uploaded[3] == 0xbb);
+	assert(uploaded[4] == 0x86 && uploaded[5] == 0x31 && uploaded[6] == 0 && uploaded[7] == 0x3c);
+
+	/* The second word and every initialized page-padding byte survive whole-allocation cache publication. */
+	for (index = 0; index < 8; index++)
+		assert(uploaded[index + 8] == 8U - index);
+	for (index = 16; index < 4096; index++)
+		assert(uploaded[index] == 0);
+	assert(test_offsets[test_writes - 1] == 0x20000 && test_values[test_writes - 1] == 4096);
+
+	/* An uncertain DMA disposition retains the exact root, mapped reference, PTE and physical allocation. */
+	releases = test_released;
+	saved = storage;
+	error = bcm2711_native_storage_release(&space, &storage, false);
+	assert(error == EBUSY && storage == saved && test_released == releases);
+	assert(storage->view->references == 1 && buffer->references == 1);
+
+	/* The wrong controller cannot consume the owner's mapped reference even with an affirmative retirement argument. */
+	error = bcm2711_native_storage_release(&foreign, &storage, true);
+	assert(error == EINVAL && storage == saved && space.views == storage->view);
+
+	/* Confirmed no-launch retirement consumes the root only after actual unmap and both translation flushes. */
+	test_writes = 0;
+	error = bcm2711_native_storage_release(&space, &storage, true);
+	assert(error == 0 && storage == NULL && space.views == NULL && buffer->references == 0);
+	assert(test_released == releases + 1);
+	error = bcm2711_native_storage_release(&space, &storage, true);
+	assert(error == 0 && test_released == releases + 1);
+
+	/* Physical allocation refusal leaves neither a native mapping nor a published storage root. */
+	test_fail_allocation = test_allocated + 1;
+	error = bcm2711_native_storage_create(&space, 4096, &storage);
+	assert(error == ENOMEM && storage == NULL && space.views == NULL);
+	test_fail_allocation = 0;
+
+	/* Failed final flush consumes the CPU root once, while the existing native space owns the inaccessible run. */
+	test_writes = 0;
+	error = bcm2711_native_storage_create(&space, 4096, &storage);
+	assert(error == 0);
+	buffer = storage->view->buffer;
+	test_stuck_hub = 0x1000;
+	error = bcm2711_native_storage_release(&space, &storage, true);
+	assert(error == ETIMEDOUT && storage == NULL && space.views != NULL);
+	assert(space.views->quarantined && space.views->references == 0 && buffer->references == 1);
+
+	/* A provider reset failure cannot reclaim the retained translation/physical owner. */
+	test_reset_failed = true;
+	error = bcm2711_v3d_hardware_reset(&test_engine);
+	assert(error == ETIMEDOUT && buffer->references == 1 && space.views != NULL);
+	test_reset_failed = false;
+	test_stuck_hub = 0;
+	test_writes = 0;
+	error = bcm2711_v3d_hardware_reset(&test_engine);
+	assert(error == 0);
+	error = bcm2711_v3d_memory_recover(&space);
+	assert(error == 0 && space.views == NULL && buffer->references == 0);
+
+	/* Failed initial translation publication retains its unreturned allocation through the same checked recovery boundary. */
+	test_writes = 0;
+	test_stuck_hub = 0x1000;
+	error = bcm2711_native_storage_create(&space, 4096, &storage);
+	assert(error == ETIMEDOUT && storage == NULL && space.views != NULL);
+	buffer = space.views->buffer;
+	assert(space.views->quarantined && space.views->references == 0 && buffer->references == 1);
+	test_stuck_hub = 0;
+	test_writes = 0;
+	error = bcm2711_v3d_hardware_reset(&test_engine);
+	assert(error == 0);
+	error = bcm2711_v3d_memory_recover(&space);
+	assert(error == 0 && space.views == NULL && buffer->references == 0);
+}
+
 /* Checks real resource sharing and VA quarantine against the actual native MMU owner. */
 static void
 check_resources(
@@ -1321,6 +1468,9 @@ check_resources(
 
 	/* Private job tables exercise the actual fixed worker pool before production capability publication. */
 	check_reservations();
+
+	/* Native reset must preserve a closed protocol namespace until its last independent owner retires. */
+	check_closed_vulkan();
 }
 
 /* Exercises actual native execution, fixed queue capacity, callback retirement and fault drain. */
@@ -1576,6 +1726,74 @@ check_reservations(
 	assert(error == 0);
 	test_operations->close(test_controller, session);
 	assert(test_completed == 21 && test_completion_errors[20] == ECANCELED);
+}
+
+/* Checks actual close and checked reset ordering while an independent typed owner retains a closed renderer. */
+static void
+check_closed_vulkan(
+	void)
+{
+	struct bcm2711_render_session *render;
+	struct bcm2711_vulkan_session *session;
+	struct bcm2711_vulkan_object *leaf;
+	unsigned *destroyed;
+	void *object;
+	int error;
+
+	/* An actual open owns the private namespace before the fixture retains one typed dependency. */
+	error = test_operations->open(test_controller, &object);
+	assert(error == 0);
+	render = object;
+	error = bcm2711_vulkan_session_open(render, &render->vulkan);
+	assert(error == 0);
+	session = render->vulkan;
+	destroyed = kern_calloc(1, sizeof(*destroyed));
+	assert(destroyed != NULL);
+	error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_BUFFER, 1, destroyed, destroy_retained_leaf, &leaf);
+	assert(error == 0);
+	error = bcm2711_vulkan_object_retain(leaf);
+	assert(error == 0 && leaf->references == 2);
+
+	/* Closing withdraws the registry but preserves the renderer, arena and independent logical owner. */
+	test_operations->close(test_controller, render);
+	assert(test_controller->sessions == 0 && test_controller->closed == render);
+	assert(render->vulkan == session && session->closing && session->live_objects == 1);
+	assert(!leaf->published && leaf->references == 1 && *destroyed == 0);
+
+	/* A failed provider reset cannot consume the retained namespace or permit new admission. */
+	test_reset_failed = true;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == ETIMEDOUT && test_controller->closed == render);
+	assert(render->vulkan == session && session->live_objects == 1 && *destroyed == 0);
+
+	/* Independent owner retirement still borrows the retained renderer descriptor for its actual destructor. */
+	error = bcm2711_vulkan_object_release(leaf);
+	assert(error == 0 && session->live_objects == 0 && *destroyed == 1);
+	kern_free(destroyed);
+
+	/* Only checked successful reset can consume the closed namespace and then reopen worker admission. */
+	test_reset_failed = false;
+	error = test_operations->recovery->reset(test_controller);
+	assert(error == 0 && test_controller->closed == NULL && test_controller->quarantine == NULL);
+	printf("WS141 closed Vulkan renderer retention/provider reset failure/checked recovery: PASS\n");
+}
+
+/* Observes that an independent typed destructor still owns its exact renderer after common close. */
+static int
+destroy_retained_leaf(
+	struct bcm2711_vulkan_session *session,
+	void *payload)
+{
+	unsigned *destroyed;
+
+	/* The closed renderer and bounded protocol arena must remain live throughout this last dependency destructor. */
+	destroyed = payload;
+	assert(session->render->device == test_controller && test_controller->closed == session->render);
+	assert(session->arena.base != NULL && session->closing && *destroyed == 0);
+	*destroyed = 1;
+
+	/* Succeeded: this synthetic leaf's independently retained lifetime has ended. */
+	return 0;
 }
 
 /* Prepares independently generated noop CL bytes and retains their mapped view before submission. */

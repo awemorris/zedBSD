@@ -56,6 +56,10 @@ unsigned
 kl_system_capabilities(const struct kl_system *system)
 {
 	(void)system;
+	if (getenv("HOST_METHODS") != NULL)
+		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_KEY_OPS | KL_SYSTEM_HAS_METHODS;
+	if (getenv("HOST_KEYS") != NULL && getenv("HOST_KEY_OPS") != NULL)
+		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_KEY_OPS;
 	if (getenv("HOST_KEYS") != NULL)
 		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS;
 	if (getenv("HOST_ACCOUNT_RESULT") != NULL)
@@ -141,13 +145,44 @@ kl_system_account_set_pin(struct kl_system *system, const char *current, const c
 	return ENOTSUP;
 }
 
-/* What the user has enrolled (ws172-p002): never told by the stand-in. */
+/* What the user has enrolled (ws172-p002): told as HOST_ENROLLED says ("PIN KEYS", WS200), else never. */
 int
 kl_system_account_enrolled(const struct kl_system *system, unsigned *pin, unsigned *keys)
 {
+	const char *enrolled;
+
 	(void)system;
 	*pin = 0U;
 	*keys = 0U;
+	enrolled = getenv("HOST_ENROLLED");
+	if (enrolled == NULL || sscanf(enrolled, "%u %u", pin, keys) != 2)
+		return 0;
+	return 1;
+}
+
+/* The sign-in methods (WS200): HOST_METHODS's bits; a change asked is answered with HOST_ACCOUNT_RESULT. */
+int
+kl_system_account_methods(const struct kl_system *system, unsigned *methods)
+{
+	const char *told;
+
+	(void)system;
+	*methods = KL_SYSTEM_METHODS_ALL;
+	told = getenv("HOST_METHODS");
+	if (told == NULL)
+		return 0;
+	*methods = (unsigned)atoi(told);
+	return 1;
+}
+
+int
+kl_system_account_set_methods(struct kl_system *system, const char *password, unsigned methods, uint32_t *request)
+{
+	(void)system;
+	printf("HOST methods password=%zu methods=%u\n", strlen(password), methods);
+	*request = 84U;
+	host_account_request = 84U;
+	host_account_pending = 1;
 	return 0;
 }
 
@@ -187,6 +222,116 @@ kl_system_account_remove_key(struct kl_system *system, const char *password, con
 	return 0;
 }
 
+/*
+ * The keys' own operations (ws199-p001): offered with HOST_KEYS and
+ * HOST_KEY_OPS; what is there is HOST_KEY_COUNT keys (default 1), the
+ * one with a PIN unless HOST_KEY_NO_PIN; each request is answered with
+ * HOST_ACCOUNT_RESULT at the next take_result.
+ */
+int
+kl_system_account_key_info(struct kl_system *system, uint32_t *request)
+{
+	(void)system;
+	if (getenv("HOST_KEY_OPS") == NULL)
+		return ENOTSUP;
+	printf("HOST key info\n");
+	*request = 80U;
+	host_account_request = 80U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_info_get(const struct kl_system *system, struct kl_system_key_info *info)
+{
+	const char *count;
+
+	(void)system;
+	memset(info, 0, sizeof(*info));
+	count = getenv("HOST_KEY_COUNT");
+	info->count = 1U;
+	if (count != NULL)
+		info->count = (unsigned)atoi(count);
+	snprintf(info->name, sizeof(info->name), "YubiKey 5 NFC");
+	info->pin = getenv("HOST_KEY_NO_PIN") == NULL;
+	info->retries = 8U;
+	info->min = 4U;
+	return 1;
+}
+
+int
+kl_system_account_key_pin(struct kl_system *system, const char *current, const char *pin, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key pin current=%d pin=%zu\n", current != NULL, strlen(pin));
+	*request = 81U;
+	host_account_request = 81U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_reset(struct kl_system *system, const char *password, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key reset password=%zu\n", strlen(password));
+	*request = 82U;
+	host_account_request = 82U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_cancel(struct kl_system *system)
+{
+	(void)system;
+	printf("HOST key cancel\n");
+	return 0;
+}
+
+int
+kl_system_account_replugged(struct kl_system *system, uint32_t *request)
+{
+	(void)system;
+	(void)request;
+	return 0;
+}
+
+unsigned
+kl_system_account_key_removed(const struct kl_system *system)
+{
+	(void)system;
+	return 1U;
+}
+
+/* The key's options (ws199-p002): the PIN and the touch, or as HOST_KEY_OPTION says (1 touch only, 2 neither). */
+int
+kl_system_account_key_options(const struct kl_system *system, unsigned *key_pin, unsigned *key_touch)
+{
+	const char *option;
+
+	(void)system;
+	option = getenv("HOST_KEY_OPTION");
+	*key_pin = 1U;
+	*key_touch = 1U;
+	if (option != NULL && option[0] != '0')
+		*key_pin = 0U;
+	if (option != NULL && option[0] == '2')
+		*key_touch = 0U;
+	return getenv("HOST_KEY_OPS") != NULL;
+}
+
+int
+kl_system_account_set_key_options(struct kl_system *system, const char *password, unsigned key_pin, unsigned key_touch, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key options password=%zu pin=%u touch=%u\n", strlen(password), key_pin, key_touch);
+	*request = 83U;
+	host_account_request = 83U;
+	host_account_pending = 1;
+	return 0;
+}
+
 int
 kl_system_account_touched(struct kl_system *system, uint32_t *request)
 {
@@ -195,15 +340,19 @@ kl_system_account_touched(struct kl_system *system, uint32_t *request)
 	return 0;
 }
 
-/* No refusal's word without the administration. */
+/* A refusal's word as HOST_REFUSAL says (WS200), else none. */
 int
 kl_system_account_refusal(const struct kl_system *system, uint32_t request, char *reason, size_t size)
 {
+	const char *word;
+
 	(void)system;
 	(void)request;
-	(void)reason;
-	(void)size;
-	return 0;
+	word = getenv("HOST_REFUSAL");
+	if (word == NULL)
+		return 0;
+	snprintf(reason, size, "%s", word);
+	return 1;
 }
 
 /* Remote Login (ws089-p025): not offered by the stand-in. */
@@ -316,6 +465,18 @@ kl_system_printers_set_default(struct kl_system *system, uint32_t printer, uint3
 {
 	(void)system;
 	(void)printer;
+	(void)request;
+	return ENOTSUP;
+}
+
+/* A printer's name, IPP path or LPD queue changed (KL_VERSION 75): not offered by the stand-in. */
+int
+kl_system_printers_edit(struct kl_system *system, uint32_t printer, const char *name, const char *path, uint32_t *request)
+{
+	(void)system;
+	(void)printer;
+	(void)name;
+	(void)path;
 	(void)request;
 	return ENOTSUP;
 }

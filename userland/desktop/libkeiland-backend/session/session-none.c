@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 
 /*
  * Has no hand-over to wait for.
@@ -187,6 +188,143 @@ kl_backend_session_add_key(
 	if (backend == NULL)
 		return EINVAL;
 	return ENOTSUP;
+}
+
+/* Gives the key options' defaults (ws199-p001). */
+void
+kl_backend_session_options_get(
+	const struct kl_backend *backend,
+	unsigned *key_pin,
+	unsigned *key_touch)
+{
+	/* Both asked. */
+	(void)backend;
+	*key_pin = 1U;
+	*key_touch = 1U;
+}
+
+/* Sets no key options. */
+int
+kl_backend_session_set_options(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned key_pin,
+	unsigned key_touch)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	(void)key_pin;
+	(void)key_touch;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Gives every method: nothing is turned off without a session manager (WS200). */
+unsigned
+kl_backend_session_methods_get(
+	const struct kl_backend *backend)
+{
+	/* Every method. */
+	(void)backend;
+	return KL_BACKEND_METHODS_ALL;
+}
+
+/* Sets no methods. */
+int
+kl_backend_session_set_methods(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned methods)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	(void)methods;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Asks nothing about the keys (ws199-p001). */
+int
+kl_backend_session_key_info(
+	struct kl_backend *backend)
+{
+	/* Not here. */
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Gives no key. */
+void
+kl_backend_session_key_info_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_info *info)
+{
+	/* None. */
+	(void)backend;
+	memset(info, 0, sizeof(*info));
+}
+
+/* Asks nobody whose a key is (ws199-p001). */
+int
+kl_backend_session_key_owner(
+	struct kl_backend *backend)
+{
+	/* Not here. */
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Gives no owner. */
+void
+kl_backend_session_key_owner_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_owner *owner)
+{
+	/* None. */
+	(void)backend;
+	memset(owner, 0, sizeof(*owner));
+}
+
+/* Sets no key's PIN. */
+int
+kl_backend_session_key_pin(
+	struct kl_backend *backend,
+	const char *current,
+	const char *pin)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)current;
+	(void)pin;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Resets no key. */
+int
+kl_backend_session_key_reset(
+	struct kl_backend *backend,
+	const char *password)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* No registration removed. */
+unsigned
+kl_backend_session_key_removed(
+	const struct kl_backend *backend)
+{
+	/* None. */
+	(void)backend;
+	return 0U;
 }
 
 /*

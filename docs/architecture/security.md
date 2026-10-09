@@ -304,8 +304,9 @@ style of the account together. A wrong password given to set or remove a
 PIN or a key counts the same way.
 
 The PIN is offered for an account only after that account has logged in or
-unlocked with its password or a security key since sessiond started, like a
-phone that asks for its passcode after a restart. So a restart, which anyone
+unlocked with its password or a security key, or proved its password to set
+or remove its PIN or a key, since sessiond started, like a phone that asks for
+its passcode after a restart. So a restart, which anyone
 at the login screen can cause, gives no new PIN attempts. After five wrong
 PINs in a row the PIN is turned off again until the next password or
 security key login. A security key counts its own wrong PINs and locks
@@ -365,6 +366,22 @@ for the assertion. A key that holds none of the credentials answers `no-key`
 without ever seeing the PIN. Keys plugged in or tapped during the attempt are
 asked too.
 
+**A key held to an NFC reader.** passkey-fido2 also opens every smart card
+slot (`/dev/smartcardN`) and hands them to the helper, which powers a card
+and selects its FIDO applet only when it asks it; a slot whose card does not
+answer (a reader's SAM slot, a card that is not a security key) is let go and
+not counted. For an NFC key, being in the reader's field is the user's
+presence, and a card left lying on the reader counts too (the user's decision
+of 2026-10-10): a login asks the cards already on a reader after the USB
+keys, and when no key answers at all, the screen asks to touch the key or hold
+it to the reader and the helper waits for a card until the touch's time is
+nearly out (`timeout` when none came). So a key left on the reader is like a
+key that is touched: with the key's PIN not required, anyone at the machine
+signs in or unlocks with it, which Settings says when that choice is made.
+Registering counts a card already on the reader as the one key (two keys, USB
+or NFC, are refused), and with no key at all waits for one to be held there
+the same way.
+
 **Registering.** Registration asks for exactly one security key: with two or
 more present it is refused (`many-keys`), so a rogue device cannot slip in
 its own credential. The settings page shows the key's name and place before
@@ -376,6 +393,93 @@ The key's attestation statement is not checked, so the make of the key is
 not part of the trust: what registration protects against is a credential
 the user did not create on a key they hold, not a counterfeit key.
 
+**How a key signs in.** An account with a key chooses on Settings' Security
+Keys page how it signs in (a line of /etc/passkey,
+`name:uid:options:methods=...:key-pin=0|1:key-touch=0|1`, which WS200's
+Sign-in Methods shares; none, several or one that does not read are the
+defaults): the key's PIN and a touch (the default), a touch alone, or
+neither to unlock. The login screen always asks for a touch; only an unlock
+may go without one, and only after the lock screen's swipe. Without the
+PIN the key does not verify the user, so anyone who holds the key signs in
+with a touch; and a key left plugged in, or lying on an NFC reader (being
+in the field counts as a touch), signs in or unlocks for anyone at the
+machine. Settings says so, and asks the password, before a weaker choice.
+sessiond sends a key's login as `auth-fido2 NAME login PIN` and an unlock
+as `... unlock PIN`, and passkey-fido2 reads the account's line: an empty
+PIN only when the PIN is not asked, no touch only for an unlock when the
+touch is not asked, and the flags it checks in the answer follow. A key's
+login or unlock counts as a wrong attempt only when the key's PIN was wrong,
+the key is a clone or its answer does not verify; a key that was not there,
+not touched or taken away is not counted and is answered at once (the key
+counts its own wrong PINs). When an account's last key goes, its key's
+choice goes back to the default.
+
+**Sign-in methods.** The user chooses on Settings' Users page which of the
+password, the PIN and a security key the login and lock screens take (the
+same options line's `methods=password,pin,fido2` or part of it; `set-methods
+NAME PASSWORD METHODS`, checked by the account's password, through sessiond's
+`SETMETHODS`). A method takes effect only while it is set up (a PIN, a key
+registered); when none of the methods that take effect is the password or a
+key, the password takes effect too, because the PIN alone is never the first
+sign-in after a start. So the methods can never shut an account out of the
+screens, and `set-methods` refuses methods without the password or a key, and
+without the password unless the account has a key. passkey answers `styles`
+with the methods that take effect, and refuses `auth` in a method the account
+turned off with `style-off` before it looks at the secret (passkey-fido2 does
+the same for a key, and leaves such an account out of a key's owners). The
+console, `su`, `sudo`, `passwd` and SSH do not ask passkey and always take the
+password, which is how a user who turned the password off and lost the key
+gets back in. `enrolled` tells the methods as bits after `key-touch=`
+(`methods=N`: 1 the password, 2 the PIN, 4 a key).
+
+**The key's owner.** When a key is plugged in or held to a reader while the
+login screen shows (or while the lock screen's card shows, after a swipe),
+the screen asks sessiond whose it is (`KEYOWNER`; passkey's
+`key-owner NAME|-`). passkey-fido2 asks the one key there, silently (no
+touch, no PIN), which account's registrations it holds (every person's
+account that may log in, or on the lock screen the session's user alone),
+and checks the answer's signature with that account's own public key: an
+answer that does not verify names nobody. The answer is the owner and its
+key's choice (`user=NAME key-pin=0|1 key-touch=0|1 card=0|1`), or `none`,
+`many-owners`, `no-key` or `many-keys`. The screen then selects the owner
+and asks for the key's PIN (a keypad under the field) and its touch, or for
+the touch alone; a lock screen whose account asks neither says "Checking
+your security key..." for half a second at least and unlocks. `KEYOWNER` is
+not an attempt: it neither counts, clears the counts, delays nor offers the
+PIN, and sessiond answers one a second (the others `ERROR busy`; the screen
+asks for the last key of a burst). It tells whoever plugs in a registered key
+whose account it is, which the key's holder knows anyway. With the lock
+screen's card closed a key that comes or goes does nothing, and a sleep
+closes the card and cancels the key's attempt under way, so a key left
+plugged in never unlocks the screen without the swipe.
+
+**The key's own operations.** Settings' Security Keys page also asks what
+key is there, sets or changes the key's PIN, and resets the key, through
+sessiond's `KEYINFO`, `KEYPIN set|change` and `KEYRESET` (a session's only;
+the greeter cannot ask them) and passkey's `key-info`, `key-set-pin`,
+`key-change-pin` and `key-reset`, which passkey-fido2 carries out as
+above. What the key is (how many keys, a key's name, whether it has a PIN,
+its retries) is told without any secret. Its PIN is checked by the key
+alone, which counts the wrong ones itself (eight in all, three per power
+cycle), so `KEYINFO` and `KEYPIN` are not attempts of the account: they
+neither count, clear the counts, delay nor offer the six-digit PIN. A reset
+erases every credential and the PIN on the key, so it asks the account's
+password, counted as a password attempt; once passkey-fido2 says the
+password was right (`status verified`) the counts are cleared as by a
+password, and later failures are told at once. The key takes a reset only a
+few seconds after it is powered, so passkey-fido2 asks the user to plug it
+in again (`status replug`, or to take it from the reader and hold it there
+again), sends the reset as soon as the key comes back, after looking within
+a short time for which of this machine's credentials (of every account) it
+held, and removes their lines once the key says it is reset. A reset under
+way is cancelled with the key (CTAPHID_CANCEL) when sessiond ends the
+request (Cancel, the deadline of 75 seconds, the screen locking or the
+machine going to sleep): passkey ignores sessiond's SIGTERM and waits for
+passkey-fido2, which passes it to the helper and waits for the key's answer.
+Settings is told passkey's own word for a change (`bad-key-pin`,
+`key-locked`, `key-replug`, `no-pin`, `pin-policy`, `not-allowed`, ...);
+the login and lock screens are told the greeter's words as before.
+
 **Logging in.** passkey-fido2 makes a random 32-byte challenge and the client
 data hash `SHA-256("zedbsd.login" NUL name NUL challenge)`. The helper returns
 the chosen key's answer, and passkey-fido2 then:
@@ -383,8 +487,10 @@ the chosen key's answer, and passkey-fido2 then:
 1. finds the public key by the credential ID in the answer, among the
    account's own registrations;
 2. checks that the authenticator data's relying party hash is the hash of
-   `zedbsd.login`, that its flags say the user was present and verified, and
-   that it carries no attested data and nothing after its extensions;
+   `zedbsd.login`, that its flags say the user was present and verified (as
+   the account's choice asks: an unlock without the touch does not require
+   the user present, a login without the PIN not verified), and that it
+   carries no attested data and nothing after its extensions;
 3. checks the signature over the authenticator data and its own client data
    hash;
 4. checks the signature count: when the stored count or the new one is not 0,

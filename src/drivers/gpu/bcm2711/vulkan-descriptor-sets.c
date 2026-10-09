@@ -269,6 +269,10 @@ free_sets(
 		set = object->payload;
 		if (set->pool != pool_object || set->owner.device != device)
 			return EINVAL;
+
+		/* A pending prepared primary freezes every ordinary set before any selected free prefix is withdrawn. */
+		if (set->pending != 0)
+			return EBUSY;
 		for (previous = 0; previous < index; previous++) {
 			if (identities[previous] == identities[index])
 				return EINVAL;

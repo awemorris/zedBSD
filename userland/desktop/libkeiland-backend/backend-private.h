@@ -36,7 +36,10 @@
  * tick after it saw it (0 until then).  session_styles, session_pin,
  * session_keys and session_reason are what the manager last answered to
  * STYLES, ENROLLED and a refusal (ws172-p002); session_key_list holds the
- * keys ENROLLED listed (session_key_count of them, ws172-p003).
+ * keys ENROLLED listed (session_key_count of them, ws172-p003);
+ * session_key_info what KEYINFO last answered, session_key_removed the
+ * registrations a reset removed and session_key_owner what KEYOWNER last
+ * answered (ws199-p001).
  *
  * events_descriptor is where the system's events are read (ws132-p003),
  * or -1 when the system has none.  power_outcome is what the last sleep
@@ -58,6 +61,12 @@ struct kl_backend {
 	struct kl_backend_key session_key_list[KL_BACKEND_KEYS_MAX];
 	size_t session_key_count;
 	char session_reason[KL_BACKEND_SESSION_REASON];
+	struct kl_backend_key_info session_key_info;
+	unsigned session_key_pin;
+	unsigned session_key_touch;
+	unsigned session_methods;
+	unsigned session_key_removed;
+	struct kl_backend_key_owner session_key_owner;
 	int events_descriptor;
 	/*
 	 * A power button's press whose release is awaited (zedBSD's

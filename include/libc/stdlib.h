@@ -35,6 +35,9 @@ int posix_memalign(void **memory, size_t alignment, size_t size);
 char *strdup(const char *string);
 char *getenv(const char *name);
 char *secure_getenv(const char *name);
+
+/* Takes the next NAME or NAME=VALUE of a comma-separated option string and finds NAME in a list of tokens. */
+int getsubopt(char **, char *const *, char **);
 int setenv(const char *, const char *, int);
 int unsetenv(const char *);
 int putenv(char *);

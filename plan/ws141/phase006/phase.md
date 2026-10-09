@@ -98,3 +98,74 @@ same-device module/layout/passとactual native compilerを接続。唯一main en
 ## i14 pipeline wire checkpoint（2026-10-09）
 
 actual private client selected-state encoderをreadonly wrapperで実行、independent native finite decoder/complete batch/partial member resultsとcompiler/typed ownerへ接続。host9範囲/RPi4 y build/style PASS、single compiled stack framesを確認、total public runtime call pathは後続。p006/i14 in-progress、COMMAND/CAPSET/JOB未公開。[結果/限界/復帰点](../execution-20261009.md#i14-graphics-pipeline-wire-batchのsoftware出力2026-10-09)。next recorded command/native prepared draw/queue/common binding。
+
+## i14 primary/graphics recording checkpoint（2026-10-09）
+
+actual client primary pool/buffer codecsとreal public9vkCmdのfinite native recordingを接続。whole batch rollback、pending mutation拒否、pool非cycle/registry退役とindependent old graph、selected colour clear/raw state/typed interfaces、first node OOM→End failure/clean re-recordを確認。ordinary descriptor update-after-recordの想定をVulkan 1.0仕様へ修正し、set generation/current validationとpending update拒否を追加。host11範囲/RPi4 y build/style PASS、actual native CL/GPU completionの証拠にはしない。p005/p006/i13/i14 in-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007未達。next immutable current draw preparation/native VA/code/uniform/TMU/CL、transfer/barrier/queue/common/public runtime。Master変更無し。[正確な結果/想定訂正/失敗と修正/限界/復帰点](../execution-20261009.md#i14-primary-command所有とactual-vkcmd記録のsoftware出力2026-10-09)。
+
+## i14 ordered draw state checkpoint（2026-10-09）
+
+exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、stage別push/partial vertex/dynamic stateの2回walkを実装。logical fetch/compiled uniform/whole target/sample backing/alias feedbackをnative準備前に確認。actual host12範囲/RPi4 y build/style PASS。callbackはborrowed state観察のみ、独立native prepared owner/CL/DMA/queue/public bindingは後続、p006/i14 in-progress、Keiland/実機/p007未達。[結果/fixture correction/限界/再開](../execution-20261009.md#i14-ordered-draw-stateのsoftware出力2026-10-09)。
+
+## i14 prepared CPU graph checkpoint（2026-10-09）
+
+独立primary graph/consumed descriptor snapshots、distinct ordinary set/command pending charges、全OOM/counter rollback、pending free/reset/destroy guardを追加。actual host13範囲/RPi4 y build/style PASS。native code/VA/CL/DMA/queueは未接続。workerはfalse-retirement payloadを自動再disposeしないため、actual native disposerで明示quarantine transfer/checked reset後のreleaseを接続する残条件を記録。p006/i14 in-progress、Keiland/実機/p007未達。[正確な契約/結果/限界/再開](../execution-20261009.md#i14-immutable-prepared-cpu-graphのsoftware出力2026-10-09)。
+
+## i14 native recordとtexture配置のcheckpoint（2026-10-09）
+
+[実行記録](../execution-20261009.md#i14-native-shaderfetchtexture-recordとuif変換のsoftware出力2026-10-09): private 4.2 shader/attribute/texture/sampler serializerとstrict non-XOR UIF pixel変換を追加。callerはactual VPM capacity、uploaded code/uniform/default/fetch/scratchの独立owned intervalsを提供し、VCMを2 batchesとする。texture scratchの作成は先行image writeのnative completionとCPU visibility後のFIFO execution時。final fragment switchでscoreboardを取得し、real centre WをRF0へ供給するshader flagを有効にする。
+
+確認: [native-state-host-test.sh](../tests/native-state-host-test.sh) / [XMLと逆pixel oracle](../tests/native-state-check.py) で8 full record・4847 pixels/padding/raster・atomic refusal PASS、rpi4 y build warning/error0、style total0。GPU upload/CL/queue/public bindingと実機は未達。near-final full-standard/license/similarityはp007で再確認する。Phase in-progress、変更は同Phase内、foreign interface/dependency変更無し。
+
+## i14 native upload owner checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-native-upload-storageのsoftware出力2026-10-09): private cached code/scratch allocationとnative VAの独立ownerを追加。actual PA bitsで配置し、compiled codeのlittle-endian upload/full padded cache cleanを実施。retired=falseは全保持、trueはNULL消費し、failed translation retirementをnative space quarantineが保持。whole prepared job quarantineとclosing session lifetimeは後続接続のまま。
+
+[hardware host](../tests/v3d-hardware-host-test.sh) のactual mapping/refcount/cache/reset failure boundaryとcode bytes/padding確認がPASS、rpi4 y build warning/error0/style total0。fixtureの旧typed BLOB参照/linkとreset error期待を追従し、actual Vulkan source成功をmockで代替していない。public runtime/GPU launch/Keilandは未接続、Phase/WSをcleared/completedにしない。変更は同Phase内でforeign interface無し。
+
+## i14 integer viewport uniforms checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-integer-viewport-uniformのsoftware出力2026-10-09): copied IEEE viewportからXY shader scale/depth range/offsetをkernel integerのみでatomic生成。guard/round/stickyとnearest-evenを使用し、subnormal/逆depth/±zeroを保持。native-state hostのindependent host FP oracleで256境界＋1024固定sampleが全bits一致、既存XML/pixelもPASS、y build warning/error0/style total0。
+
+次にuniform streamとFIFO時点のUBO read、owned descriptor pointers/native storage/quarantineを接続する。general softfloat/public API/HAL変更は無し。同Phaseのinternal loweringで、foreign dependencyを変更しない。Phase in-progress、actual GPU/Keiland acceptance/p007未達。
+
+## i14 FIFO scalar uniforms checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-fifo-scalar-uniform-streamのsoftware出力2026-10-09): actual compiled順のconstant/push/viewport/UBO/current coherent read/native descriptor addressをindependent CPU streamへ完成。whole prefix OOM/late refusal解放、typed logical bounds、stage別copied stateとcanonical bindingを確認。actual Vulkan-device host14範囲とy build warning/error0/style0 PASS。GPU mapping ownership/queue launchは未接続。次はowned code/uniform/TMU/fetch preparation、whole-job/session quarantine/CL/queue/runtime、実機とp007。Phase in-progress、foreign commitment/HAL/UAPI変更無し。
+
+## i14 whole native draw preparation checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-whole-native-draw-preparationのsoftware出力2026-10-09): FIFOのactual sampled UIF/owned descriptors/code/uniform/default/packed fetch/shader recordsをnative mapping rootへ保持、job-wide256MiBの全page padding予算、firstVertex rebase・float default・late OOM全解放・uncertain保持を実装。actual Vulkan/compiler/MMU source host15とy build warning/error0/style0 PASS。既存pipelineのmissing-component未実装限定を解消し、実pipeline R32→vec2 compile/releaseも確認。native CL/GPU launchは未接続。whole prepared/native job quarantineとsession/queue/runtime、実機とp007は残る。Phase内部、foreign scope/HAL/UAPI変更無し、in-progress保持。
+
+## i14 native BCL/clipper checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-native-draw-bclとclipperのsoftware出力2026-10-09): 116byte complete native draw BCL stateをwhole ownerへcopied、4.2 integer fine/coarse/guardband depth/viewport edge、drawable-area-scissor restriction、facing/provoking/interpolation/disabled inherited state/owned shader/rebased drawを実装。zero-input dummy readも追加。fixed XML全byte、800 new arithmetic cases、actual compiler/MMU root15範囲、named y warning/error0/style0 PASS。source/license fixed hash確認。pass list/実GPU launch/runtime/whole job+session quarantine/実機/p007は未達、Phase in-progress。同Phase内部loweringでforeign interface/依存変更無し。
+
+
+## i14 whole native pass checkpoint（2026-10-09）
+
+Complete BCL/RCL/generic tile listと、independent output/linked draw/9pass storage ownersを追加。fixed XML全7stream、actual compiler/prepared/MMU host16範囲、named y build warning/error0/style0を確認。256supertile上限に合わせ最大64×64tilesは4×4groupへまとめる。prepare/OOM中のtarget mutation無し、false whole retain/true complete teardown、全padded budget/zero draws/late rollbackを確認。CLEARはraw stateコピーだけでexecution前rectangle clear/native launchは後続、whole job/controller quarantine/closing sessionを公開前に接続する。native execution/Keiland/実機の証拠ではない。p006/WS未達を保持。[詳細/訂正/復帰点](../execution-20261009.md#i14-whole-native-pass-clとgpu-ownerのsoftware出力2026-10-09)。
+
+## i14 private native executor checkpoint（2026-10-09）
+
+整数UNORM clear＋whole passのpreflight/exact rectangle clear→existing native CL runner→retirement/output visibilityを接続。1037 independent IEEE colour cases/actual native graph＋explicit runner fixtureのhost17範囲/named y build warning/error0/style0を確認。single-use replay refusal、outside pixels保持、fault前CPU mutation無し、syntheticuncertain全root保持。native runnerはこのhostで明示mock、physical GPU/IRQ/cache/resetの証拠ではない。公開前にwhole prepared/session/controller quarantineを実装する。WS/Phase acceptance保持。[詳細/復帰点](../execution-20261009.md#i14-deferred-clearとnative-pass-executorのsoftware出力2026-10-09)。
+
+
+## i14 whole native jobとclosed-session retirement checkpoint（2026-10-09）
+
+whole pending primary/current passをpersistent controller quarantineへallocation無しでtransferし、閉じたrenderer/namespaceは最後のtyped ownerまで保持する。actual checked reset→payload→closed session→translation recoveryの順を接続。actual Vulkan host18範囲/actual renderer close・provider reset failure・retained destructor host/named y warning/error0/style0 PASS。runner/recoveryのhostモデルはphysical DMA proofではない。transfer/barrier/submit/public dispatch/common bindingとKeiland/実機/p007は後続、Phase in-progress保持。内部lifetime契約、外国scope/HAL/UAPI変更無し。[詳細/再開点](../execution-20261009.md#i14-whole-pending-native-jobとclosed-rendererのsoftware出力2026-10-09)。
+
+
+## i14 explicit dependencies/implicit attachment layout checkpoint（2026-10-09）
+
+same-device coherent dependency nodeをwhole pending primaryに保持し、FIFO barrierは全imageのold layout/backing preflight後にvisibilityとnew layoutをpublishする。native passのinitial/final layout lifecycleもnative retirementへ接続。actual public barrier encoder/runtime host19範囲、actual close/reset host、final named y warning/error0/style0 PASS。UNDEFINED discardと末尾mismatchのatomic refusalを区別して確認。native transfer/primary queue submit/public/common binding・physical Keiland・p007は未達、Phase in-progress保持。内部runtime出力、foreign scope/HAL/UAPI変更無し。[詳細/次](../execution-20261009.md#i14-explicit-barrierとimplicit-pass-layoutのsoftware出力2026-10-09)。
+
+
+## i14 external-sharing dependency admission checkpoint（2026-10-09）
+
+actual WSIのfamily0↔external pairを、exact bound memoryのexternal declarationがある場合に限定してprivate barrierへ接続。typed export/private allocationに基づく数値resource-description fixtureで双方のadmission/refusalを確認し、actual public barrier/whole native graph host19範囲・named y warning/error0/style0 PASS。external provider/GPU実動作とpublic queue/fence publicationは未達。shared Vulkan headerの欠けたcore tokenはprivate標準値で表現、共有source/HAL/UAPI変更無し。native GPU meta transfer/runtime/physical/p007は後続、Phase in-progress保持。[証拠/再開点](../execution-20261009.md#i14-external-family共有メモリのadmission-checkpoint2026-10-09)。
+
+
+## i14 full-image native GPU clear checkpoint（2026-10-10）
+
+actual public vkCmdClearColorImage→typed immutable primary→prepared pending graph→zero-draw native tile clear/storeを接続。TRANSFER_DST用途・bound same-device・remaining ranges・FIFO current layout、独立output/9storage、OOM/budget rollback、zero-draw quarantine/reset lifetimeを確認。actual encoder/native owner＋explicit runner host20範囲、final named RPi4 y warning/error0/checks3/style0 PASS。CPU target write無し。mock runnerはGPU pixelを書かず、実機clear/Keiland成功は未確認。copy/blit/readback・primary queue submit/fence/semaphore/public/common binding・final runtime stack/p007が残り、Phase in-progress/WS incompleteを維持。Master/shared source/HAL/UAPI変更無し。[証拠/失敗と修正/復帰点](../execution-20261009.md#i14-full-image-gpu-clearのsoftware出力2026-10-10)。

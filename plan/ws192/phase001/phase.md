@@ -2,7 +2,7 @@
 
 # ws192-p001: 状態の島の操作パネル（glass）の設計と実装
 
-Status: test-wait（2026-10-09 P1 q917: 実装・host 試験 PASS・build warning 0。AAT は T1 の依頼（p002 を兼ねる））
+Status: cleared（2026-10-10 ユーザー「これで一通りUATの確認事項は確認したと思います。CloseできるものはCloseしましょう。USB LANの遅さ、だけが残りました。」。T1-496・T1-514 の PNG、5330 の UAT でパネルが開き、Mute の文字は BUG-278 で直した）
 Parent: [WS192](../ws.md)
 
 ## 手順

@@ -249,6 +249,7 @@ create_pipeline_layout(
 	if (reader->error != 0 || ranges > 2 || count != ranges)
 		return ENOTSUP;
 	declared_stages = 0;
+	description.range_count = ranges;
 	for (index = 0; index < ranges; index++) {
 		stages = drv_i915_wire_read_u32(reader);
 		offset = drv_i915_wire_read_u32(reader);
@@ -261,6 +262,11 @@ create_pipeline_layout(
 		if ((declared_stages & stages) != 0)
 			return EINVAL;
 		declared_stages |= stages;
+
+		/* Compatibility preserves the original stage grouping, not merely the union of word permissions. */
+		description.ranges[index].stageFlags = stages;
+		description.ranges[index].offset = offset;
+		description.ranges[index].size = bytes;
 		for (word = offset / 4U; word < (offset + bytes) / 4U; word++) {
 			if ((description.push[word] & stages) != 0)
 				return EINVAL;

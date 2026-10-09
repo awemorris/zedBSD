@@ -19,7 +19,13 @@
  *
  * Passwords and PINs are checked here with the C library's crypt() alone;
  * the security key style is passkey-fido2's (/usr/libexec/passkey-fido2,
- * ws172-p003), which gets the same request.
+ * ws172-p003), which gets the same request, as do a key's own operations
+ * (ws199-p001: key-info, key-set-pin, key-change-pin, key-reset,
+ * key-owner).  While
+ * passkey-fido2 runs, passkey ignores SIGTERM, SIGHUP and SIGPIPE and
+ * waits for it: sessiond's TERM reaches passkey-fido2 and its helper in
+ * the same process group, which end the key's work (a cancel the key
+ * answers) before passkey-fido2 answers and exits.
  */
 
 #include "passkey.h"
@@ -48,6 +54,10 @@
 /* The largest /etc/passkey, read and written whole. */
 #define PASSKEY_FILE_MAX	65536U
 
+/* What an options line's change sets: the key's PIN and touch (set-options), or the sign-in methods (set-methods, WS200). */
+#define PASSKEY_CHANGE_KEY	1
+#define PASSKEY_CHANGE_METHODS	2
+
 /* The exit statuses. */
 #define PASSKEY_EXIT_OK		0
 #define PASSKEY_EXIT_FAIL	1
@@ -63,6 +73,10 @@ static int passkey_file(char *text, size_t capacity, size_t *length, int need_pr
 static int passkey_auth_pin(const char *name, uid_t uid, char *pin);
 static int passkey_styles(const char *name, uid_t uid, int enrolled);
 static int passkey_change_pin(const char *name, uid_t uid, const char *pin);
+static int passkey_set_options(const char *name, uid_t uid, const char *key_pin, const char *key_touch);
+static int passkey_set_methods(const char *name, uid_t uid, const char *text);
+static int passkey_options_write(const char *name, uid_t uid, int change, int key_pin, int key_touch, unsigned methods);
+static int passkey_method_off(const char *name, uid_t uid, unsigned method);
 static int passkey_fido2(const char *request, size_t length);
 static void passkey_keys_listed(const char *text, size_t length, const char *name, uid_t uid, char *extra, size_t size);
 
@@ -78,8 +92,10 @@ main(
 	char strings[LOGIN_VERIFY_BUFFER];
 	char *secret;
 	size_t length;
+	unsigned method;
 	int found;
 	int same;
+	int off;
 	int error;
 	int status;
 
@@ -102,6 +118,10 @@ main(
 
 	/* The security key style goes to passkey-fido2 with the whole request. */
 	same = request.operation == PASSKEY_OP_ENROLL_FIDO2 || request.operation == PASSKEY_OP_REMOVE_FIDO2;
+	if (request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET)
+		same = 1;
+	if (request.operation == PASSKEY_OP_AUTH_FIDO2 || request.operation == PASSKEY_OP_KEY_OWNER)
+		same = 1;
 	if (request.operation == PASSKEY_OP_AUTH && strcmp(request.fields[2], "fido2") == 0)
 		same = 1;
 	if (same) {
@@ -128,7 +148,20 @@ main(
 		status = passkey_styles(request.fields[1], account.pw_uid, 1);
 		break;
 	case PASSKEY_OP_AUTH:
+		/* A method the account turned off is refused before its secret is looked at (WS200). */
 		secret = request.fields[3];
+		method = PASSKEY_METHOD_PASSWORD;
+		same = strcmp(request.fields[2], "pin");
+		if (same == 0)
+			method = PASSKEY_METHOD_PIN;
+		off = passkey_method_off(request.fields[1], account.pw_uid, method);
+		if (off) {
+			passkey_wipe(secret, strlen(secret));
+			status = passkey_fail("style-off");
+			break;
+		}
+
+		/* The password, or the PIN. */
 		if (strcmp(request.fields[2], "password") == 0) {
 			error = login_verify(request.fields[1], secret, &account, strings, sizeof(strings));
 			status = error == 0 ? passkey_ok(account.pw_uid, NULL) : passkey_fail("bad-secret");
@@ -155,6 +188,28 @@ main(
 		} else {
 			status = passkey_change_pin(request.fields[1], account.pw_uid, NULL);
 		}
+		break;
+	case PASSKEY_OP_SET_OPTIONS:
+		/* The user's password, then the key's PIN and touch for signing in (ws199-p001). */
+		error = login_verify(request.fields[1], request.fields[2], &account, strings, sizeof(strings));
+		if (error != 0) {
+			status = passkey_fail("bad-secret");
+			break;
+		}
+
+		/* The options written. */
+		status = passkey_set_options(request.fields[1], account.pw_uid, request.fields[3], request.fields[4]);
+		break;
+	case PASSKEY_OP_SET_METHODS:
+		/* The user's password, then the methods the login and locked screens take (WS200). */
+		error = login_verify(request.fields[1], request.fields[2], &account, strings, sizeof(strings));
+		if (error != 0) {
+			status = passkey_fail("bad-secret");
+			break;
+		}
+
+		/* The methods written. */
+		status = passkey_set_methods(request.fields[1], account.pw_uid, request.fields[3]);
 		break;
 	default:
 		status = passkey_fail("bad-request");
@@ -395,8 +450,12 @@ passkey_styles(
 	int enrolled)
 {
 	static char text[PASSKEY_FILE_MAX];
+	struct passkey_options options;
 	char extra[PASSKEY_REQUEST_MAX];
+	char styles[PASSKEY_METHODS_MAX];
 	size_t length;
+	unsigned methods;
+	unsigned effective;
 	int pins;
 	int keys;
 	int usable;
@@ -412,15 +471,27 @@ passkey_styles(
 	}
 	usable = passkey_usable(name, uid);
 
-	/* styles: the password, and the PIN and the keys when usable. */
+	/* The account's options, and its sign-in methods (WS200). */
+	passkey_options_default(&options);
+	if (error == 0)
+		(void)passkey_options_read(text, length, name, uid, &options);
+	methods = passkey_options_methods(&options);
+
+	/* styles: those of the methods set up and turned on, the PIN and the keys only when usable. */
 	if (!enrolled) {
-		snprintf(extra, sizeof(extra), "styles=password%s%s", usable && pins > 0 ? ",pin" : "",
-		    usable && keys > 0 ? ",fido2" : "");
+		effective = passkey_methods_effective(methods, usable && pins > 0, usable && keys > 0);
+		passkey_methods_text(effective, styles, sizeof(styles));
+		snprintf(extra, sizeof(extra), "styles=%s", styles);
 		return passkey_ok(uid, extra);
 	}
 
-	/* enrolled: the counts, then each key's reference and label (ws172-p003). */
-	snprintf(extra, sizeof(extra), "pin=%d fido2=%d", pins > 0, keys);
+	/*
+	 * enrolled: the counts, the key's PIN and touch for signing in
+	 * (ws199-p001), the methods turned on as bits (WS200), then each key's
+	 * reference and label (ws172-p003).
+	 */
+	snprintf(extra, sizeof(extra), "pin=%d fido2=%d key-pin=%d key-touch=%d methods=%u", pins > 0, keys, options.key_pin, options.key_touch,
+	    methods);
 	if (error == 0)
 		passkey_keys_listed(text, length, name, uid, extra, sizeof(extra));
 	return passkey_ok(uid, extra);
@@ -539,6 +610,199 @@ passkey_change_pin(
 	return passkey_ok(uid, NULL);
 }
 
+/*
+ * Sets whether the account's key asks its PIN and its touch to sign in
+ * (ws199-p001 section 2): "1" or "0" each, the touch left out only with
+ * the PIN; the account must have a key.  The methods of the line are kept
+ * (WS200's).
+ */
+static int
+passkey_set_options(
+	const char *name,
+	uid_t uid,
+	const char *key_pin,
+	const char *key_touch)
+{
+	int pin;
+	int touch;
+	int valid;
+	int status;
+
+	/* "0" or "1" each; no touch only without the PIN. */
+	pin = strcmp(key_pin, "1") == 0;
+	touch = strcmp(key_touch, "1") == 0;
+	valid = (pin || strcmp(key_pin, "0") == 0) && (touch || strcmp(key_touch, "0") == 0);
+	if (!valid || (pin && !touch))
+		return passkey_fail("bad-request");
+
+	/* Written, the methods kept. */
+	status = passkey_options_write(name, uid, PASSKEY_CHANGE_KEY, pin, touch, 0U);
+	return status;
+}
+
+/*
+ * Sets the methods the login and locked screens take (WS200): known words,
+ * each once, with the password or a key among them (the PIN alone is no
+ * first sign-in); without the password the account must have a key.  The
+ * key's PIN and touch of the line are kept.
+ */
+static int
+passkey_set_methods(
+	const char *name,
+	uid_t uid,
+	const char *text)
+{
+	unsigned methods;
+	int status;
+	int error;
+
+	/* The words, and a first sign-in among them. */
+	error = passkey_methods_parse(text, &methods);
+	if (error != 0)
+		return passkey_fail("bad-request");
+	if ((methods & (PASSKEY_METHOD_PASSWORD | PASSKEY_METHOD_FIDO2)) == 0U)
+		return passkey_fail("bad-request");
+
+	/* Written, the key's options kept. */
+	status = passkey_options_write(name, uid, PASSKEY_CHANGE_METHODS, 0, 0, methods);
+	return status;
+}
+
+/*
+ * Writes the account's options line with one change (the key's PIN and
+ * touch, or the methods), the other fields as they were, under the
+ * account files' lock; a line of the defaults is not kept.  A change of
+ * the key's options needs a key, as do methods without the password.
+ */
+static int
+passkey_options_write(
+	const char *name,
+	uid_t uid,
+	int change,
+	int key_pin,
+	int key_touch,
+	unsigned methods)
+{
+	static char text[PASSKEY_FILE_MAX];
+	static char output[PASSKEY_FILE_MAX + PASSKEY_REQUEST_MAX];
+	struct passkey_options options;
+	char line[PASSKEY_REQUEST_MAX];
+	sigset_t held;
+	sigset_t previous;
+	size_t length;
+	size_t written;
+	const char *added;
+	int keyless;
+	int keys;
+	int defaults;
+	int version;
+	int error;
+
+	/* The signals that would stop the change are held while the file changes. */
+	sigfillset(&held);
+	(void)sigprocmask(SIG_BLOCK, &held, &previous);
+	error = account_files_lock();
+	if (error != 0) {
+		(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+		return passkey_fail("busy");
+	}
+
+	/* The file read again under the lock, and whether the account has a key. */
+	error = passkey_file(text, sizeof(text), &length, 0);
+	version = passkey_record_version(text, length);
+	if (error == 0 && version > PASSKEY_VERSION)
+		error = EROFS;
+	keys = 0;
+	if (error == 0)
+		keys = passkey_record_count(text, length, name, uid, "fido2");
+
+	/* A change that needs a key the account does not have. */
+	keyless = 0;
+	if (change == PASSKEY_CHANGE_KEY)
+		keyless = 1;
+	if (change == PASSKEY_CHANGE_METHODS && (methods & PASSKEY_METHOD_PASSWORD) == 0U)
+		keyless = 1;
+	if (error == 0 && keyless && keys == 0) {
+		account_files_unlock();
+		(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+		return passkey_fail("not-enrolled");
+	}
+
+	/* The new line (none for the defaults), in place of the old one. */
+	passkey_options_default(&options);
+	if (error == 0) {
+		(void)passkey_options_read(text, length, name, uid, &options);
+		if (change == PASSKEY_CHANGE_KEY) {
+			options.key_pin = key_pin;
+			options.key_touch = key_touch;
+		} else {
+			passkey_methods_text(methods, options.methods, sizeof(options.methods));
+		}
+
+		/* The line. */
+		error = passkey_options_line(name, uid, &options, line, sizeof(line));
+	}
+
+	/* The defaults need no line. */
+	defaults = passkey_options_is_default(&options);
+	added = line;
+	if (defaults)
+		added = NULL;
+	if (error == 0)
+		error = passkey_record_replace(text, length, name, "options", added, output, sizeof(output), &written);
+	if (error == 0)
+		error = account_file_write(PASSKEY_FILE, 0600, output, written);
+	account_files_unlock();
+	(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+	if (error != 0)
+		return passkey_fail("internal");
+
+	/* Succeeded. */
+	return passkey_ok(uid, NULL);
+}
+
+/*
+ * Tells whether the account turned a method off for the login and locked
+ * screens (WS200): not among its methods, and not taken in its stead
+ * (the password when nothing else is a first sign-in).  An account whose
+ * file does not read has every method.
+ */
+static int
+passkey_method_off(
+	const char *name,
+	uid_t uid,
+	unsigned method)
+{
+	static char text[PASSKEY_FILE_MAX];
+	struct passkey_options options;
+	size_t length;
+	unsigned methods;
+	unsigned effective;
+	int pins;
+	int keys;
+	int error;
+
+	/* The file, its options and what the account has. */
+	error = passkey_file(text, sizeof(text), &length, 1);
+	if (error != 0)
+		return 0;
+	passkey_options_default(&options);
+	(void)passkey_options_read(text, length, name, uid, &options);
+	methods = passkey_options_methods(&options);
+	pins = passkey_record_count(text, length, name, uid, "pin");
+	keys = passkey_record_count(text, length, name, uid, "fido2");
+	effective = passkey_methods_effective(methods, pins > 0, keys > 0);
+
+	/* Among the methods, or taken in their stead. */
+	if ((methods & method) != 0U)
+		return 0;
+	if ((effective & method) != 0U)
+		return 0;
+
+	/* Turned off. */
+	return 1;
+}
+
 /* Hands the whole request to passkey-fido2 on its standard input; its answer and status are this one's. */
 static int
 passkey_fido2(
@@ -573,6 +837,11 @@ passkey_fido2(
 	(void)close(pipes[0]);
 	(void)write(pipes[1], request, length);
 	(void)close(pipes[1]);
+
+	/* sessiond's end of the work is passkey-fido2's to finish: passkey waits for it whatever comes (ws199-p001). */
+	(void)signal(SIGTERM, SIG_IGN);
+	(void)signal(SIGHUP, SIG_IGN);
+	(void)signal(SIGPIPE, SIG_IGN);
 
 	/* Its status. */
 	while (waitpid(child, &status, 0) < 0 && errno == EINTR)

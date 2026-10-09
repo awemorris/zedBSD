@@ -204,6 +204,18 @@
  *   request 5 remove_key(uint request, string password, string ref)       since version 14 (ws172-p003)
  *   event   3 key(string ref, string label)                                since version 14 (ws172-p003)
  *   event   4 touch(uint request)                                          since version 14 (ws172-p003)
+ *   request 6 key_info(uint request)                                       since version 25 (ws199-p001)
+ *   request 7 key_pin(uint request, string current, string pin)            since version 25
+ *   request 8 key_reset(uint request, string password)                     since version 25
+ *   request 9 key_cancel()                                                 since version 25
+ *   event   5 key_info(uint request, uint count, string name, uint pin, uint retries, uint min)  since version 25
+ *   event   6 replug(uint request)                                         since version 25
+ *   event   7 removed(uint request, uint count)                            since version 25
+ *   event   8 keys_changed()                                               since version 25
+ *   request 10 set_key_options(uint request, string password, uint key_pin, uint key_touch)  since version 25
+ *   event   9 options(uint key_pin, uint key_touch)                        since version 25
+ *   request 11 set_methods(uint request, string password, uint methods)    since version 26 (WS200)
+ *   event   10 methods(uint methods)                                       since version 26
  *   The compositor changes the password of the user it runs as, through
  *   the system (zedBSD: passwd; elsewhere unsupported), on a thread of its
  *   own, and answers ok, denied (the current password is wrong), invalid
@@ -244,6 +256,30 @@
  *   set_pin's.  remove_key removes one by the reference key gave.  Before
  *   each enrolled, an object of version 14 hears key(ref, label) for each
  *   of the user's keys.  Neither secret is logged or kept.
+ *   The keys' own operations (version 25, ws199-p001; zedBSD: sessiond's
+ *   KEYINFO, KEYPIN and KEYRESET): key_info asks what the keys there are
+ *   (key_info(count, and for one key its name, whether it has a PIN, its
+ *   retries, its PIN's fewest characters), then the result); key_pin sets
+ *   the one key's first PIN (current empty) or changes it, checked by the
+ *   key alone; key_reset resets the key the user plugs in again, checked by
+ *   the user's password: replug(request) while the key is to be plugged in
+ *   again, touch(request) while it is to be touched, removed(request,
+ *   count) with this machine's registrations that went, then the result
+ *   (a refusal's word first, passkey's own: bad-key-pin, key-locked,
+ *   key-replug, no-pin, pin-set, pin-policy, not-allowed, canceled, ...).
+ *   key_cancel stops the key's operation under way (its result comes as a
+ *   refusal).  While the screen is locked they are answered busy.
+ *   keys_changed comes when a security key came or went (a FIDO node, a
+ *   reader's card), and after an unlock.  options tells, before each
+ *   enrolled, whether the user's key asks its PIN to sign in and its touch
+ *   to unlock; set_key_options sets them, checked by the user's password
+ *   (zedBSD: sessiond's SETOPTIONS), answered as set_pin.
+ *   methods tells, before each options, the methods the login and locked
+ *   screens take for the user (KL_SYSTEM_METHOD_* bits: the password, the
+ *   PIN, a security key; version 26, WS200); set_methods sets them,
+ *   checked by the user's password, the password or a key among them
+ *   (zedBSD: sessiond's SETMETHODS), answered as set_pin.  The console,
+ *   su, sudo and SSH always take the password.
  *
  * kl_system_monitor_v1 (WS134 p012, plan/ws134/design.md section 1.3)
  *   request 0 destroy
@@ -285,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		24U
+#define KL_SYSTEM_MANAGER_VERSION		26U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -369,6 +405,12 @@
 
 /* Since when the manager has get_bluetooth (ws143-p006). */
 #define KL_SYSTEM_SINCE_BLUETOOTH		23U
+
+/* Since when the account has key_info, key_pin, key_reset and key_cancel, and their events (ws199-p001). */
+#define KL_SYSTEM_SINCE_KEY_OPS			25U
+
+/* Since when the account has set_methods and methods (WS200). */
+#define KL_SYSTEM_SINCE_METHODS			26U
 
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
@@ -644,11 +686,24 @@
 #define KL_SYSTEM_ACCOUNT_SET_PIN		3U
 #define KL_SYSTEM_ACCOUNT_ADD_KEY		4U
 #define KL_SYSTEM_ACCOUNT_REMOVE_KEY		5U
+#define KL_SYSTEM_ACCOUNT_KEY_INFO		6U
+#define KL_SYSTEM_ACCOUNT_KEY_PIN		7U
+#define KL_SYSTEM_ACCOUNT_KEY_RESET		8U
+#define KL_SYSTEM_ACCOUNT_KEY_CANCEL		9U
+#define KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS	10U
+#define KL_SYSTEM_ACCOUNT_SET_METHODS		11U
 #define KL_SYSTEM_ACCOUNT_EVENT_RESULT		0U
 #define KL_SYSTEM_ACCOUNT_EVENT_REFUSED		1U
 #define KL_SYSTEM_ACCOUNT_EVENT_ENROLLED	2U
 #define KL_SYSTEM_ACCOUNT_EVENT_KEY		3U
 #define KL_SYSTEM_ACCOUNT_EVENT_TOUCH		4U
+#define KL_SYSTEM_ACCOUNT_EVENT_KEY_INFO	5U
+#define KL_SYSTEM_ACCOUNT_EVENT_REPLUG		6U
+#define KL_SYSTEM_ACCOUNT_EVENT_REMOVED		7U
+#define KL_SYSTEM_ACCOUNT_EVENT_KEYS_CHANGED	8U
+#define KL_SYSTEM_ACCOUNT_EVENT_OPTIONS		9U
+#define KL_SYSTEM_ACCOUNT_EVENT_METHODS		10U
+#define KL_SYSTEM_KEY_NAME_MAX			63U
 #define KL_SYSTEM_KEY_LABEL_MAX			32U
 #define KL_SYSTEM_KEY_REF_MAX			16U
 #define KL_SYSTEM_PASSWORD_MAX			256U
@@ -696,6 +751,7 @@
 #define KL_SYSTEM_LINK_UP			0x1U
 #define KL_SYSTEM_LINK_RUNNING			0x2U
 #define KL_SYSTEM_LINK_LOOPBACK			0x4U
+#define KL_SYSTEM_LINK_WIRELESS			0x8U
 
 /* kl_system_audio_v1's requests and events. */
 #define KL_SYSTEM_AUDIO_DESTROY			0U

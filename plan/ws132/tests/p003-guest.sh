@@ -2,7 +2,7 @@
 # ws132-p003 on the desktop test guest (plan/ws079/tests/config-amd64-pen.mk built from this branch: a kernel with the
 # system's events of ws132-p002, started with plan/ws079/tests/pen-guest.sh start IMAGE).  The compositor under test
 # (BUILD/bin/wayland) is copied into the running guest; the output is 1280x800.  q35 has no battery and no AC adapter.
-#  1. The compositor's backend subscribes to /dev/system ("KL EVENTS subscribed classes=0x2f") and reads the power
+#  1. The compositor's backend subscribes to /dev/system ("KL EVENTS subscribed classes=0xaf") and reads the power
 #     as unknown ("KWL POWER source=unknown percent=-1"): no battery on the bar (bar.png is for the eye: no battery
 #     outline left of the clock).
 #  2. A USB keyboard plugged in through QMP (usb-kbd on xhci.0, on a free port QEMU chooses: the pen harness takes ports 1-4, and the
@@ -47,7 +47,7 @@ guest 'chmod 755 /bin/wayland; export XDG_RUNTIME_DIR=/tmp; rm -f /tmp/wayland-0
 /bin/wayland --testing --timeout=600 --width=1280 --height=800 --glass > /tmp/zdesktop.log 2>&1 </dev/null & for w in 1 2 3 4 5 6 7 8 9 10 11 12 13 14 15 16 17 18 19 20; do grep -q KWL.READY /tmp/zdesktop.log 2>/dev/null && break; sleep 0.5; done; sleep 2; echo started' >/dev/null
 
 # 1. The subscription and the power.
-expect_log subscribed 'KL EVENTS subscribed classes=0x2f'
+expect_log subscribed 'KL EVENTS subscribed classes=0xaf'
 expect_log power-unknown 'KWL POWER source=unknown percent=-1 charging=0'
 shot bar
 

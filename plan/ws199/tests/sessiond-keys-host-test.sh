@@ -1,0 +1,52 @@
+#!/bin/sh
+# ws199-p001 i03, i05: sessiond's requests of a security key's own (KEYINFO, KEYPIN, KEYRESET, KEYOWNER) and the words and delays
+# that changed with them (section 4.4, 4.6, review-2 N1/N6/N7/N8, review-3 R5), with a fake passkey, under ASan and UBSan.
+# usage: plan/ws199/tests/sessiond-keys-host-test.sh   (from the repository's top)
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+set -eu
+OUT=${OUT:-build/ws199-sessiond-keys-host}
+mkdir -p "$OUT"
+UID_SELF=$(id -u)
+NAME_SELF=$(id -un)
+printf 'owner\n' > "$OUT/owner-mode"
+
+# The fake passkey: its answer depends on the operation and the secrets.
+cat > "$OUT/passkey" <<SCRIPT
+#!/bin/sh
+read -r operation
+read -r name
+case "\$operation" in
+styles) echo "ok uid=$UID_SELF styles=password,pin"; exit 0 ;;
+enrolled) echo "ok uid=$UID_SELF pin=1 fido2=1"; exit 0 ;;
+key-info) echo "ok uid=$UID_SELF count=1 name=59 pin=1 retries=8 min=4"; exit 0 ;;
+key-set-pin) read -r pin; if [ "\$pin" = right ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail pin-policy"; exit 1 ;;
+key-change-pin) read -r pin; read -r fresh; if [ "\$pin" = right ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-key-pin"; exit 1 ;;
+key-reset)
+	read -r password
+	case "\$password" in
+	right) echo "status verified"; echo "status replug"; echo "status touch"; echo "ok uid=$UID_SELF removed=1"; exit 0 ;;
+	late) echo "status verified"; echo "status replug"; echo "fail not-allowed"; exit 1 ;;
+	*) echo "fail bad-secret"; exit 1 ;;
+	esac ;;
+enroll-fido2) read -r password; read -r label; read -r pin; echo "fail bad-key-pin"; exit 1 ;;
+auth|auth-fido2)
+	read -r context; read -r secret
+	case "\$context.\$secret" in
+	unlock.badpin) echo "fail bad-key-pin"; exit 1 ;;
+	unlock.nokey) echo "fail no-key"; exit 1 ;;
+	*) /bin/sleep 100 ;;
+	esac ;;
+key-owner) if [ "\$(cat "$PWD/$OUT/owner-mode" 2>/dev/null)" = none ]; then echo "fail none"; exit 1; fi; echo "ok uid=$UID_SELF user=$NAME_SELF key-pin=0 key-touch=1 card=1"; exit 0 ;;
+set-options) read -r password; read -r pin; read -r touch; if [ "\$password.\$pin.\$touch" = right.0.0 ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-request"; exit 1 ;;
+set-methods) read -r password; read -r methods; if [ "\$password.\$methods" = right.password,fido2 ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-request"; exit 1 ;;
+*) echo "fail bad-request"; exit 1 ;;
+esac
+SCRIPT
+chmod 0700 "$OUT/passkey"
+
+cc -std=c11 -D_DEFAULT_SOURCE -Wall -Wextra -Werror -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -I. \
+	-DSESSIOND_PASSKEY="\"$PWD/$OUT/passkey\"" -DSESSIOND_PASSKEY_MS=3000LL -DSESSIOND_PASSKEY_KEY_MS=3000LL \
+	-DSESSIOND_PASSKEY_RESET_MS=3000LL -DSESSIOND_PASSKEY_GRACE_MS=500LL -DTEST_OWNER_MODE="\"$PWD/$OUT/owner-mode\"" \
+	-o "$OUT/sessiond-keys-host-test" plan/ws199/tests/sessiond-keys-host-test.c userland/desktop/sessiond/auth.c \
+	userland/desktop/sessiond/auth-policy.c
+timeout 120 "$OUT/sessiond-keys-host-test" 2> "$OUT/log"

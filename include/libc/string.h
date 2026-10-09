@@ -32,6 +32,13 @@ size_t strcspn(const char *, const char *);
 char *strpbrk(const char *, const char *);
 size_t strspn(const char *, const char *);
 char *strtok(char *, const char *);
+
+/* The reentrant strtok: the place to go on from is kept in *saved. */
+char *strtok_r(char *, const char *, char **);
+
+/* Copy a string and report where its end was written (stpcpy) or the end of what was written (stpncpy). */
+char *stpcpy(char *, const char *);
+char *stpncpy(char *, const char *, size_t);
 char *strdup(const char *string);
 char *strndup(const char *string, size_t maximum);
 char *strerror(int error);
@@ -68,6 +75,9 @@ int strcoll_l(const char *, const char *, locale_t);
 size_t strxfrm_l(char *, const char *, size_t, locale_t);
 /* POSIX's reentrant strerror: fills the caller's buffer, returns an errno. */
 int strerror_r(int, char *, size_t);
+
+/* strerror in a locale; the messages have one language, so the locale changes nothing. */
+char *strerror_l(int, locale_t);
 
 #ifdef __cplusplus
 }

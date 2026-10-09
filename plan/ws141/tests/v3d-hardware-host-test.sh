@@ -5,11 +5,16 @@ set -eu
 out=${1:-build/ws141-v3d-hardware-host}
 mkdir -p "$out"
 cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
+    -ffunction-sections -fdata-sections \
     -Iplan/ws141/tests/host -Iinclude -Isrc -I. plan/ws141/tests/v3d-hardware-host-test.c \
     plan/ws141/tests/display-lock-host.c src/drivers/gpu/bcm2711/v3d-hardware.c \
     src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/bcm2711/v3d-job.c \
     src/drivers/gpu/bcm2711/v3d-diagnostic.c src/drivers/gpu/bcm2711/cl.c \
-    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/render-device.c \
+    src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/render-device.c \
     src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/render-worker.c \
+    src/drivers/gpu/bcm2711/vulkan-barrier.c src/drivers/gpu/bcm2711/vulkan-native-job.c src/drivers/gpu/bcm2711/vulkan-native-pass.c \
+    src/drivers/gpu/bcm2711/vulkan-native-draw.c src/drivers/gpu/bcm2711/vulkan-prepared.c \
+    src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-object.c \
+    src/drivers/gpu/bcm2711/vulkan-session.c -Wl,--gc-sections \
     -o "$out/v3d-hardware-host-test"
 "$out/v3d-hardware-host-test"

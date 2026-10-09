@@ -90,7 +90,7 @@ P2 の案 (a) kernel の試験の driver に CTAP2 の応答器、(b) userland �
   - `plan/ws131/tests/host-system.c`: capabilities に HAS_KEYS、鍵の追加と touch、一覧、誤った password、削除。
   - `plan/ws089/tests/host-kl-system.c`: `HOST_KEYS` の stand-in。
   - `plan/ws172/tests/passkey-host-test.c`: field と参照。
-  - 新しく `plan/ws172/tests/run-host-settings-keys.sh` を足した。
+  - 新しく run-host-settings-keys.sh（2026-10-10 削除: WS199 i01 で Users の頁から鍵の欄が消えたため、試験の整理の基準） を足した。
 
 ## 確認（段 B、2026-10-06 P2、host）
 
@@ -98,7 +98,7 @@ P2 の案 (a) kernel の試験の driver に CTAP2 の応答器、(b) userland �
 | --- | --- |
 | `plan/ws131/tests/host-session.sh` | 63/63 |
 | `plan/ws131/tests/host-system.sh` | PASS |
-| `plan/ws172/tests/run-host-settings-keys.sh`（2 本の一覧の絵、password を打つと Remove が参照で頼む。host の renderer は field に 1 文字しか打てないので、追加（PIN 4 文字以上）は QEMU で確かめる） | PASS |
+| run-host-settings-keys.sh（削除済み）（2 本の一覧の絵、password を打つと Remove が参照で頼む。host の renderer は field に 1 文字しか打てないので、追加（PIN 4 文字以上）は QEMU で確かめる） | PASS |
 | `plan/ws172/tests/passkey-host-test.sh`・`fido2-host-test.sh`・`sessiond-auth-host-test.sh` | PASS・PASS・ok |
 | build（zedBSD: libkeiland.so・wayland・settings・sessiond・passkey・passkey-fido2。Linux: `keiland-linux.mk all`） | 自分の code の warning 0（OpenSSL の package の build の警告は外部） |
 | style-check（変えた C） | 新しい違反 0（passkey の main.c の既存の 27 は変わらない） |

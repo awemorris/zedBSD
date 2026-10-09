@@ -62,11 +62,23 @@
  * Keys: the characters type into the password (US layout, Shift and Caps
  * Lock), Backspace erases, Esc clears, Enter logs in, Up, Down and Tab
  * choose the user.
+ *
+ * The security key's mode (ws199-p001 sections 3.6 to 3.8, lock-key.c):
+ * a key plugged in, or held to a reader, while the login screen shows (or
+ * while the lock screen's card shows) is asked about (KEYOWNER); its
+ * owner is selected and asked for the key's PIN (a keypad just under the
+ * field, lock-keypad.c) and its touch, or for the touch alone; the lock
+ * screen of an account that asks neither says "Checking your security
+ * key..." for half a second at least and unlocks.  Password goes back to
+ * the password; an attempt that ran out of time offers "Try again".  A
+ * sleep closes the lock screen's card and cancels an attempt under way.
  */
 
 #include "language.h"
 #include "glass.h"
 #include "lock-clock.h"
+#include "lock-key.h"
+#include "lock-keypad.h"
 #include "lock-swipe.h"
 
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
@@ -105,8 +117,17 @@
 #define GREETER_FIELD		44
 #define GREETER_AVATAR		72
 
-/* The line under the message that switches between the PIN and the password: its height. */
+/* The line under the message that switches between the PIN and the password: its height, and the card's margin under it. */
 #define GREETER_LINK		28
+#define GREETER_LINK_MARGIN	4
+
+/*
+ * The lock screen's styles side by side in that line instead (ws187-p003,
+ * BUG-283: taller buttons, the card growing downwards): their height and
+ * the card's margin under them.
+ */
+#define GREETER_STYLE_HEIGHT	40
+#define GREETER_STYLE_MARGIN	20
 
 /* A PIN's digits. */
 #define GREETER_PIN_DIGITS	6U
@@ -195,6 +216,8 @@ enum greeter_hit {
 	GREETER_HIT_LOGIN,
 	GREETER_HIT_SWITCH,
 	GREETER_HIT_STYLE,
+	GREETER_HIT_KEYPAD,
+	GREETER_HIT_AGAIN,
 	GREETER_HIT_RESTART,
 	GREETER_HIT_POWEROFF
 };
@@ -211,7 +234,9 @@ struct greeter_user {
  * Where the parts of the screen are this frame, in output pixels
  * (x, y, width, height), laid out again on every frame and press; on the
  * lock screen the styles offered side by side in the link's line, with
- * their KL_BACKEND_STYLE_* and how many (none while only the password is).
+ * their KL_BACKEND_STYLE_* and how many (none while only the password is);
+ * the keypad's keys while the field takes a PIN (none otherwise), and the
+ * message line's baseline.
  */
 struct greeter_layout {
 	int32_t card[4];
@@ -223,6 +248,9 @@ struct greeter_layout {
 	int32_t styles[GREETER_STYLES][4];
 	unsigned style_bits[GREETER_STYLES];
 	unsigned style_count;
+	struct kwl_keypad_key keys[KWL_KEYPAD_KEYS];
+	size_t key_count;
+	int32_t message;
 	int32_t restart[4];
 	int32_t poweroff[4];
 };
@@ -272,6 +300,17 @@ static unsigned greeter_submit_pending;
 
 /* A security key waits to be touched for the attempt under way (sessiond's TOUCH, ws172-p003). */
 static unsigned greeter_touch;
+
+/*
+ * The security key's mode (lock-key.c, ws199-p001) and the PIN's keypad
+ * under the field (lock-keypad.c): one of each, for the login screen or
+ * the lock screen that shows.
+ */
+static struct kwl_key_mode greeter_key;
+static struct kwl_keypad greeter_keypad;
+
+/* An attempt a sleep cancelled: its answer (a timeout) is not said on the screen the wake shows. */
+static unsigned greeter_answer_quiet;
 
 /*
  * The lock screen's moves and grace (ws187-p002): whether the lock was the
@@ -333,6 +372,19 @@ static void greeter_styles_ask(struct kwl_server *server);
 static void greeter_styles_take(struct kwl_server *server);
 static void greeter_style_switch(struct kwl_server *server);
 static void greeter_erase(void);
+static int greeter_keypad_wanted(void);
+static int greeter_field_wanted(void);
+static void greeter_draw_keypad(struct kwl_server *server, VkCommandBuffer command, const struct greeter_layout *layout);
+static void greeter_keypad_press(struct kwl_server *server, const struct greeter_layout *layout, unsigned index);
+static void greeter_type_character(struct kwl_server *server, char character);
+static int greeter_key_listening(struct kwl_server *server);
+static void greeter_key_tick(struct kwl_server *server);
+static void greeter_key_owner_taken(struct kwl_server *server, int error);
+static void greeter_key_enter(struct kwl_server *server, unsigned user);
+static void greeter_key_granted(struct kwl_server *server);
+static void greeter_key_try_again(struct kwl_server *server);
+static int greeter_user_index(const char *name);
+static void greeter_keypad_log(struct kwl_server *server);
 
 /*
  * Prepares the login screen: the users, and the answers' descriptor.
@@ -350,6 +402,11 @@ kwl_greeter_open(
 	greeter_erase();
 	greeter_message[0] = '\0';
 	greeter_styles_reset();
+
+	/* A key already there is asked about once the screen runs (ws199-p001). */
+	kwl_key_reset(&greeter_key, 0U);
+	kwl_key_listen(&greeter_key);
+	kwl_keypad_reset(&greeter_keypad, 0U);
 
 	/* sessiond's answers are read without waiting for them. */
 	flags = fcntl(server->auth_fd, F_GETFL);
@@ -405,8 +462,10 @@ kwl_lock(
 	greeter_waiting = 0U;
 	greeter_starting = 0U;
 
-	/* Whether the user's PIN can unlock it: sessiond is asked. */
+	/* Whether the user's PIN can unlock it: sessiond is asked; no key is listened to before the card (ws199-p001). */
 	greeter_styles_reset();
+	kwl_key_reset(&greeter_key, 1U);
+	kwl_keypad_reset(&greeter_keypad, 0U);
 
 	/* Whether the user chose the lock, and when it locked: the grace a swipe alone has (ws187-p002); only the clock shows. */
 	greeter_lock_manual = (unsigned)kwl_lock_reason_manual(reason);
@@ -414,8 +473,9 @@ kwl_lock(
 	greeter_lock_card = 0U;
 	kwl_lock_swipe_reset(&greeter_swipe);
 
-	/* The clipboard's history goes (clipboard.c). */
+	/* The clipboard's history goes (clipboard.c), and a security key's change of Settings is stopped (ws199-p001). */
 	kwl_clipboard_history_clear(server, "lock");
+	kwl_system_keys_cancel(server, "lock");
 
 	/* A swap of arranged windows being dragged is given up (arrange-shell.c, ws177-p036). */
 	kwl_arrange_swap_cancel(server, "lock");
@@ -446,15 +506,19 @@ kwl_lock_release(
 	greeter_waiting = 0U;
 	greeter_submit_pending = 0U;
 
-	/* The next lock starts with the clock alone and no move followed. */
+	/* The next lock starts with the clock alone, no move followed and no key's mode. */
 	greeter_lock_card = 0U;
 	kwl_lock_swipe_reset(&greeter_swipe);
+	kwl_key_reset(&greeter_key, 1U);
 
 	/* Succeeded: the desktop shows; the idle time starts again. */
 	server->locked = 0U;
 	server->lock_input_ms = kwl_milliseconds();
 	server->dirty = 1;
 	printf("KWL LOCK unlocked reason=%s\n", reason);
+
+	/* The keys there may have changed while it was locked (ws199-p001). */
+	kwl_system_keys_changed(server);
 }
 
 /*
@@ -477,14 +541,24 @@ kwl_greeter_answer(
 		greeter_styles_asked = 0U;
 		if (error != 0 || greeter_styles_wanted)
 			return;
-		if (server->greeter || server->locked)
+		if (server->greeter || server->locked) {
 			greeter_styles_take(server);
+			greeter_keypad_log(server);
+		}
+
+		/* Taken. */
 		return;
 	}
 
 	/* Only while the login screen or the lock screen shows. */
 	if (!server->greeter && !server->locked)
 		return;
+
+	/* Whose the key there is (ws199-p001). */
+	if (request == KL_BACKEND_SESSION_KEYOWNER) {
+		greeter_key_owner_taken(server, error);
+		return;
+	}
 
 	/* A security key waits to be touched: said until the answer (ws172-p003). */
 	if (request == KL_BACKEND_SESSION_TOUCH) {
@@ -615,6 +689,12 @@ kwl_greeter_button(
 	case GREETER_HIT_STYLE:
 		greeter_style_choose(server, layout.style_bits[user]);
 		break;
+	case GREETER_HIT_KEYPAD:
+		greeter_keypad_press(server, &layout, user);
+		break;
+	case GREETER_HIT_AGAIN:
+		greeter_key_try_again(server);
+		break;
 	case GREETER_HIT_RESTART:
 		if (!server->locked)
 			greeter_power(server, "reboot");
@@ -667,9 +747,10 @@ kwl_greeter_key(
 		if (modifies)
 			return 1;
 
-		/* Brings the card, and the key goes on into its field. */
+		/* Brings the card, and the key goes on into its field; a security key there is asked about (ws199-p001). */
 		greeter_lock_card = 1U;
 		kwl_lock_swipe_reset(&greeter_swipe);
+		kwl_key_listen(&greeter_key);
 		printf("KWL LOCK card via=key\n");
 	}
 
@@ -678,7 +759,13 @@ kwl_greeter_key(
 	switch (key) {
 	case GREETER_KEY_ENTER:
 	case GREETER_KEY_KPENTER:
-		/* Enter logs in. */
+		/* Enter tries the key again after its time ran out (ws199-p001), or logs in. */
+		if (greeter_key.step == KWL_KEY_AGAIN) {
+			greeter_key_try_again(server);
+			return 1;
+		}
+
+		/* Logs in. */
 		greeter_submit(server);
 		return 1;
 	case GREETER_KEY_BACKSPACE:
@@ -894,6 +981,9 @@ kwl_greeter_tick(
 	if (greeter_submit_pending && !greeter_styles_asked && !greeter_styles_wanted)
 		greeter_submit(server);
 
+	/* The security key's mode: whose a key is asked, and a grant held back for "Checking" (ws199-p001). */
+	greeter_key_tick(server);
+
 	/* The lock screen's card left alone with nothing typed goes, and the clock shows alone again (ws187-p002). */
 	if (server->locked &&
 	    greeter_lock_card &&
@@ -903,6 +993,7 @@ kwl_greeter_tick(
 		now_ms = kwl_milliseconds();
 		if (now_ms - server->lock_input_ms >= GREETER_CARD_IDLE_MS) {
 			greeter_lock_card = 0U;
+			(void)kwl_key_sleep(&greeter_key);
 			server->dirty = 1;
 			printf("KWL LOCK card hidden\n");
 		}
@@ -1010,10 +1101,15 @@ greeter_layout(
 	int32_t width;
 	int32_t height;
 	int32_t card_height;
+	int32_t base_height;
+	int32_t link_height;
+	int32_t link_margin;
+	int32_t keypad_height;
 	int32_t x;
 	int32_t y;
 	unsigned index;
 	unsigned rows;
+	int wanted;
 
 	/* The card: the avatar, the name, the other users' rows, the field and a line for messages. */
 	width = (int32_t)server->width;
@@ -1021,11 +1117,37 @@ greeter_layout(
 	rows = 0U;
 	if (greeter_user_count > 1U)
 		rows = greeter_user_count;
-	card_height = 28 + GREETER_AVATAR + 48 + (int32_t)rows * GREETER_ROW + 12 + GREETER_FIELD + 44 + GREETER_LINK;
+	base_height = 28 + GREETER_AVATAR + 48 + (int32_t)rows * GREETER_ROW + 12 + GREETER_FIELD + 40 + GREETER_LINK + GREETER_LINK_MARGIN;
+
+	/* The styles side by side (when sessiond offers more than the password) take a taller line, and the card grows downwards for them (BUG-283). */
+	link_height = GREETER_LINK;
+	link_margin = GREETER_LINK_MARGIN;
+	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) != 0U) {
+		link_height = GREETER_STYLE_HEIGHT;
+		link_margin = GREETER_STYLE_MARGIN;
+	}
+
+	/* The PIN's keypad just under the field, while the field takes a PIN (ws199-p001): the card grows downwards for it too. */
+	keypad_height = 0;
+	wanted = greeter_keypad_wanted();
+	if (wanted)
+		keypad_height = kwl_keypad_height() + 8;
+
+	/*
+	 * The card, placed by its height without the styles and the keypad
+	 * (its top stays where it was), as tall as its lines; raised as much
+	 * as its foot would pass the output's (the clock above it then
+	 * shrinks, lock-clock.c).
+	 */
+	card_height = base_height - GREETER_LINK - GREETER_LINK_MARGIN + link_height + link_margin + keypad_height;
 	layout->card[2] = GREETER_CARD_WIDTH;
 	layout->card[3] = card_height;
 	layout->card[0] = (width - GREETER_CARD_WIDTH) / 2;
-	layout->card[1] = height / 2 - card_height / 2 + height / 16;
+	layout->card[1] = height / 2 - base_height / 2 + height / 16;
+	if (layout->card[1] + card_height > height - GREETER_MARGIN)
+		layout->card[1] = height - GREETER_MARGIN - card_height;
+	if (layout->card[1] < GREETER_MARGIN)
+		layout->card[1] = GREETER_MARGIN;
 	x = layout->card[0];
 	y = layout->card[1] + 28;
 
@@ -1057,11 +1179,22 @@ greeter_layout(
 	layout->login[2] = GREETER_FIELD;
 	layout->login[3] = GREETER_FIELD;
 
-	/* The link that switches between the PIN and the password, under the message's line. */
+	/* The keypad's keys under the field (its letters, or its digits; the six digits of the PIN have the digits alone). */
+	layout->key_count = 0U;
+	greeter_keypad.digits_only = 0U;
+	if (greeter_style == KL_BACKEND_STYLE_PIN)
+		greeter_keypad.digits_only = 1U;
+	if (wanted) {
+		layout->key_count = kwl_keypad_layout(&greeter_keypad, x + 24, y + GREETER_FIELD + 8, GREETER_CARD_WIDTH - 48, layout->keys,
+		    KWL_KEYPAD_KEYS);
+	}
+
+	/* The message's line under the field (and the keypad), and under it the link that switches between the PIN and the password. */
+	layout->message = y + keypad_height + GREETER_FIELD + 28;
 	layout->link[0] = x + 24;
-	layout->link[1] = y + GREETER_FIELD + 40;
+	layout->link[1] = y + keypad_height + GREETER_FIELD + 40;
 	layout->link[2] = GREETER_CARD_WIDTH - 48;
-	layout->link[3] = GREETER_LINK;
+	layout->link[3] = link_height;
 
 	/* The lock screen's styles in the link's line. */
 	greeter_layout_styles(server, layout);
@@ -1086,6 +1219,8 @@ greeter_hit(
 {
 	unsigned index;
 	int inside;
+	int login;
+	int key;
 
 	/* A user's row, when rows are shown. */
 	for (index = 0U; greeter_user_count > 1U && index < greeter_user_count; index++) {
@@ -1096,13 +1231,24 @@ greeter_hit(
 		}
 	}
 
-	/* The field, Log In and the power buttons. */
+	/* "Try again" in the field's and Log In's place after an attempt of the key ran out of time (ws199-p001). */
 	inside = greeter_inside(layout->field, server->pointer_x, server->pointer_y);
+	login = greeter_inside(layout->login, server->pointer_x, server->pointer_y);
+	if ((inside || login) && greeter_key.step == KWL_KEY_AGAIN)
+		return GREETER_HIT_AGAIN;
+
+	/* The field, Log In and the power buttons. */
 	if (inside)
 		return GREETER_HIT_FIELD;
-	inside = greeter_inside(layout->login, server->pointer_x, server->pointer_y);
-	if (inside)
+	if (login)
 		return GREETER_HIT_LOGIN;
+
+	/* A key of the PIN's keypad. */
+	key = kwl_keypad_hit(layout->keys, layout->key_count, server->pointer_x, server->pointer_y);
+	if (key >= 0) {
+		*user = (unsigned)key;
+		return GREETER_HIT_KEYPAD;
+	}
 
 	/* One of the styles offered, in the link's line (ws187-p003, ws172-p007). */
 	for (index = 0U; index < layout->style_count; index++) {
@@ -1175,6 +1321,7 @@ greeter_draw_card(
 	int32_t baseline;
 	unsigned index;
 	int inside;
+	int field;
 
 	/* The card's shadow. */
 	glass_shape_init(&shape, (float)layout->card[0], (float)layout->card[1] + 10.0f, (float)layout->card[2], (float)layout->card[3]);
@@ -1231,18 +1378,20 @@ greeter_draw_card(
 		glass_draw_text(server, command, SIZE_BAR, layout->rows[index][0] + layout->rows[index][2] - 14 - glass_text_width(server, SIZE_BAR, greeter_users[index].name), layout->rows[index][1] + 26, greeter_users[index].name, 120, faint);
 	}
 
-	/* The password field and Log In. */
+	/* The password field and Log In (or what the security key's mode says in their place), and the PIN's keypad under them. */
 	greeter_draw_field(server, command, layout);
+	greeter_draw_keypad(server, command, layout);
 
-	/* The line under the field: a wrong password, or the wait for the answer. */
-	baseline = layout->field[1] + GREETER_FIELD + 28;
+	/* The line under the field: a wrong password, or the wait for the answer (said in the field's place in the key's mode). */
+	baseline = layout->message;
+	field = greeter_field_wanted();
 	if (greeter_starting) {
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, kl_tr("Starting session..."), GREETER_CARD_WIDTH - 32, faint);
-	} else if (greeter_waiting && greeter_touch) {
+	} else if (greeter_waiting && field && greeter_touch) {
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, kl_tr("Touch your security key."), GREETER_CARD_WIDTH - 32, ink);
-	} else if (greeter_waiting) {
+	} else if (greeter_waiting && field) {
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, kl_tr("Checking..."), GREETER_CARD_WIDTH - 32, faint);
-	} else if (greeter_message[0] != '\0') {
+	} else if (!greeter_waiting && greeter_message[0] != '\0') {
 		greeter_draw_centered(server, command, SIZE_TITLE, middle, baseline, greeter_message, GREETER_CARD_WIDTH - 32, warning);
 	}
 
@@ -1279,11 +1428,53 @@ greeter_draw_field(
 	static const float rim[4] = { 0.26f, 0.48f, 0.86f, 0.90f };
 	static const float dot[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
 	static const float hint[4] = { 0.10f, 0.14f, 0.22f, 0.45f };
+	static const float ink[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+	static const float faint[4] = { 0.10f, 0.14f, 0.22f, 0.62f };
 	const char *hint_text;
+	const char *first;
+	const char *second;
+	int32_t again[4];
+	int32_t middle;
 	float x;
 	float y;
 	unsigned index;
 	unsigned shown;
+	int wanted;
+
+	/* After an attempt of the key that ran out of time: "Try again" across the field's and Log In's place (ws199-p001). */
+	middle = layout->field[0] + (layout->login[0] + layout->login[2] - layout->field[0]) / 2;
+	if (greeter_key.step == KWL_KEY_AGAIN) {
+		again[0] = layout->field[0];
+		again[1] = layout->field[1];
+		again[2] = layout->login[0] + layout->login[2] - layout->field[0];
+		again[3] = layout->field[3];
+		greeter_draw_button(server, command, again, kl_tr("Try again"), 1);
+		return;
+	}
+
+	/* An attempt of the key's mode under way: what it waits for, in the field's place. */
+	wanted = greeter_field_wanted();
+	if (!wanted) {
+		first = kl_tr("Checking...");
+		second = NULL;
+		if (greeter_key.step == KWL_KEY_CHECKING)
+			first = kl_tr("Checking your security key...");
+		if (greeter_key.step == KWL_KEY_TOUCH && (greeter_touch || !greeter_key.key_pin)) {
+			first = kl_tr("Touch your security key");
+			second = kl_tr("or hold it to the reader.");
+		}
+
+		/* One line in the middle, or two. */
+		if (second == NULL) {
+			greeter_draw_centered(server, command, SIZE_TITLE, middle, layout->field[1] + 28, first, GREETER_CARD_WIDTH - 32, ink);
+			return;
+		}
+
+		/* Two: the touch, and the reader. */
+		greeter_draw_centered(server, command, SIZE_TITLE, middle, layout->field[1] + 18, first, GREETER_CARD_WIDTH - 32, ink);
+		greeter_draw_centered(server, command, SIZE_BAR, middle, layout->field[1] + 40, second, GREETER_CARD_WIDTH - 32, faint);
+		return;
+	}
 
 	/* The field: a blue rim around a white box. */
 	glass_draw_solid(server, command, (float)layout->field[0] - 2.0f, (float)layout->field[1] - 2.0f, (float)layout->field[2] + 4.0f, (float)layout->field[3] + 4.0f, 12.0f, rim);
@@ -1520,9 +1711,10 @@ greeter_lock_swiped(
 		return;
 	}
 
-	/* Otherwise the card, with the field taking the keys. */
+	/* Otherwise the card, with the field taking the keys; a security key there is asked about (ws199-p001). */
 	greeter_lock_card = 1U;
 	kwl_lock_swipe_reset(&greeter_swipe);
+	kwl_key_listen(&greeter_key);
 	server->dirty = 1;
 }
 
@@ -1580,6 +1772,8 @@ greeter_select(
 	struct kwl_server *server,
 	unsigned user)
 {
+	int match;
+
 	/* A user that is not there. */
 	if (user >= greeter_user_count)
 		return;
@@ -1591,6 +1785,13 @@ greeter_select(
 	greeter_styles_reset();
 	server->dirty = 1;
 	printf("KWL GREETER select user=%s\n", greeter_users[user].name);
+
+	/* Another user than the key's owner leaves the key's mode (ws199-p001). */
+	match = -1;
+	if (greeter_key.known)
+		match = strcmp(greeter_key.user, greeter_users[user].name);
+	if (match != 0)
+		kwl_key_leave(&greeter_key);
 }
 
 /* Types a key's character into the password. */
@@ -1618,8 +1819,25 @@ greeter_type(
 	if (character == 0)
 		return;
 
+	/* The character into the field. */
+	greeter_type_character(server, character);
+}
+
+/* Types one character into the field (from the keyboard or the keypad). */
+static void
+greeter_type_character(
+	struct kwl_server *server,
+	char character)
+{
+	int wanted;
+
 	/* While an answer is awaited, or the password is full, nothing is typed. */
 	if (greeter_waiting || greeter_password_length + 1U >= sizeof(greeter_password))
+		return;
+
+	/* Nor while the key's mode shows no field (ws199-p001). */
+	wanted = greeter_field_wanted();
+	if (!wanted)
 		return;
 
 	/* The PIN takes six digits only. */
@@ -1630,11 +1848,12 @@ greeter_type(
 			return;
 	}
 
-	/* The character. */
+	/* The character, drawn at the next frame. */
 	greeter_password[greeter_password_length] = character;
 	greeter_password_length++;
 	greeter_password[greeter_password_length] = '\0';
 	greeter_message[0] = '\0';
+	server->dirty = 1;
 }
 
 /* Sends the selected user's password to the session manager and erases it. */
@@ -1642,6 +1861,7 @@ static void
 greeter_submit(
 	struct kwl_server *server)
 {
+	int attempting;
 	int error;
 
 	/* One question at a time; while the styles are asked the secret waits for their answer. */
@@ -1653,6 +1873,13 @@ greeter_submit(
 		return;
 	}
 
+	/* The key's mode's attempt without its PIN (the touch alone, or the lock's check) sends nothing typed (ws199-p001). */
+	attempting = 0;
+	if (greeter_style == KL_BACKEND_STYLE_KEY)
+		attempting = kwl_key_attempting(&greeter_key);
+	if (attempting)
+		greeter_erase();
+
 	/* A PIN is six digits; a shorter one is not sent (it would count as a wrong one). */
 	if (greeter_style == KL_BACKEND_STYLE_PIN && greeter_password_length != GREETER_PIN_DIGITS) {
 		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("A PIN has six digits."));
@@ -1661,7 +1888,7 @@ greeter_submit(
 	}
 
 	/* A security key's PIN has at least four characters (CTAP's least). */
-	if (greeter_style == KL_BACKEND_STYLE_KEY && greeter_password_length < GREETER_KEY_PIN_MIN) {
+	if (greeter_style == KL_BACKEND_STYLE_KEY && !attempting && greeter_password_length < GREETER_KEY_PIN_MIN) {
 		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("A security key's PIN has at least four characters."));
 		server->dirty = 1;
 		return;
@@ -1689,7 +1916,12 @@ greeter_submit(
 	if (error != 0) {
 		printf("KWL GREETER send errno=%d\n", error);
 		greeter_waiting = 0;
+		(void)kwl_key_answer(&greeter_key, error, "internal", kwl_milliseconds());
 	}
+
+	/* The key's mode waits for the touch (or checks the key) from now. */
+	if (error == 0 && greeter_style == KL_BACKEND_STYLE_KEY)
+		kwl_key_started(&greeter_key, kwl_milliseconds());
 
 	/* The screen shows the wait. */
 	server->dirty = 1;
@@ -1815,7 +2047,9 @@ greeter_answered(
 	struct kwl_server *server,
 	int error)
 {
+	enum kwl_key_action action;
 	const char *answer;
+	int attempting;
 
 	/* The screen is redrawn with the result (no touch is awaited any more); the answer as the manager said it. */
 	server->dirty = 1;
@@ -1834,6 +2068,38 @@ greeter_answered(
 	/* The log names the answer and its word. */
 	printf("KWL GREETER answer=%s reason=%s\n", answer, kl_backend_session_reason(server->backend));
 
+	/* The attempt a sleep cancelled ends without a word. */
+	if (greeter_answer_quiet && greeter_waiting && error != 0) {
+		greeter_answer_quiet = 0U;
+		greeter_waiting = 0;
+		return;
+	}
+
+	/* Any other answer is said. */
+	greeter_answer_quiet = 0U;
+
+	/*
+	 * The key's mode's attempt (ws199-p001): granted at once, or once
+	 * "Checking" has shown half a second (the tick then unlocks); ended
+	 * because its key went (the owner is asked again, nothing is said).
+	 */
+	attempting = kwl_key_attempting(&greeter_key);
+	action = KWL_KEY_NOTHING;
+	if (greeter_waiting && attempting)
+		action = kwl_key_answer(&greeter_key, error, kl_backend_session_reason(server->backend), kwl_milliseconds());
+	if (action == KWL_KEY_WAIT) {
+		printf("KWL GREETER key granted wait\n");
+		return;
+	}
+
+	/* The attempt ended because its key went: nothing said, the owner asked again. */
+	if (attempting && action == KWL_KEY_NOTHING) {
+		greeter_waiting = 0;
+		greeter_message[0] = '\0';
+		printf("KWL GREETER key attempt ended step=%d\n", (int)greeter_key.step);
+		return;
+	}
+
 	/* Unlocked: the desktop shows again. */
 	if (error == 0 && greeter_waiting && server->locked) {
 		greeter_unlock(server);
@@ -1850,6 +2116,8 @@ greeter_answered(
 	}
 
 	/* A refusal says why; another failure says it failed. */
+	if (action == KWL_KEY_REFUSED)
+		printf("KWL GREETER key refused step=%d\n", (int)greeter_key.step);
 	if (error == EACCES) {
 		greeter_refused(server);
 	} else if (error == EBUSY) {
@@ -1904,6 +2172,14 @@ greeter_refused(
 		return;
 	}
 
+	/* A way to sign in the account turned off (WS200): said, and the styles asked again. */
+	same = strcmp(reason, "style-off");
+	if (same == 0) {
+		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("That way to sign in is turned off. Use another."));
+		greeter_styles_wanted = 1U;
+		return;
+	}
+
 	/* A security key's refusals (ws172-p003). */
 	if (greeter_style == KL_BACKEND_STYLE_KEY) {
 		greeter_key_refused(reason);
@@ -1926,11 +2202,13 @@ static void
 greeter_unlock(
 	struct kwl_server *server)
 {
-	/* No answer is awaited any more. */
+	/* No answer is awaited any more, and no key's mode stays. */
 	greeter_waiting = 0;
+	kwl_key_reset(&greeter_key, 1U);
 	server->locked = 0U;
 	server->lock_input_ms = kwl_milliseconds();
 	kwl_lid_unlocked(&server->lid);
+	kwl_system_keys_changed(server);
 }
 
 /* Starts the styles again for a new user or screen: the password until sessiond says more. */
@@ -1993,6 +2271,13 @@ greeter_styles_take(
 	for (index = 0U; index < layout.style_count; index++)
 		printf("KWL GREETER style-at style=%u x=%d y=%d width=%d height=%d\n", layout.style_bits[index], layout.styles[index][0], layout.styles[index][1], layout.styles[index][2], layout.styles[index][3]);
 
+	/* The key's mode keeps the key's style (its owner has a key, whatever was said, ws199-p001). */
+	if (greeter_key.step != KWL_KEY_OFF) {
+		greeter_styles |= KL_BACKEND_STYLE_KEY;
+		greeter_style = KL_BACKEND_STYLE_KEY;
+		return;
+	}
+
 	/* A style no longer offered gives way to the password, and what was typed for it goes. */
 	if (greeter_style != KL_BACKEND_STYLE_PASSWORD && (greeter_styles & greeter_style) == 0U) {
 		greeter_erase();
@@ -2017,15 +2302,8 @@ greeter_style_switch(
 	if ((greeter_styles & (KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY)) == 0U || greeter_waiting)
 		return;
 
-	/* The next style, with nothing typed. */
-	greeter_style = greeter_next_style();
-
-	/* The user chose it; nothing typed for the other stays. */
-	greeter_style_chosen = 1U;
-	greeter_erase();
-	greeter_message[0] = '\0';
-	server->dirty = 1;
-	printf("KWL GREETER style=%u\n", greeter_style);
+	/* The next style, chosen as a press chooses it. */
+	greeter_style_choose(server, greeter_next_style());
 }
 
 /*
@@ -2117,7 +2395,7 @@ greeter_draw_styles(
 			label = kl_tr("PIN");
 		if (layout->style_bits[index] == KL_BACKEND_STYLE_KEY)
 			label = kl_tr("Security Key");
-		greeter_draw_centered(server, command, SIZE_BAR, rect[0] + rect[2] / 2, rect[1] + 19, label, rect[2] - 8, color);
+		greeter_draw_centered(server, command, SIZE_BAR, rect[0] + rect[2] / 2, rect[1] + rect[3] / 2 + 5, label, rect[2] - 8, color);
 	}
 }
 
@@ -2130,6 +2408,8 @@ greeter_style_choose(
 	struct kwl_server *server,
 	unsigned style)
 {
+	enum kwl_key_action action;
+
 	/* Keeps the style while an answer is awaited. */
 	if (greeter_waiting)
 		return;
@@ -2138,13 +2418,26 @@ greeter_style_choose(
 	if (style == greeter_style)
 		return;
 
-	/* The style, chosen by the user, with nothing typed. */
+	/* The style, chosen by the user, with nothing typed; the PIN's keypad on its digits. */
 	greeter_style = style;
 	greeter_style_chosen = 1U;
 	greeter_erase();
 	greeter_message[0] = '\0';
+	kwl_keypad_reset(&greeter_keypad, 0U);
 	server->dirty = 1;
 	printf("KWL GREETER style=%u via=choice\n", greeter_style);
+	greeter_keypad_log(server);
+
+	/* Another style than the key's leaves the key's mode (ws199-p001). */
+	if (style != KL_BACKEND_STYLE_KEY) {
+		kwl_key_leave(&greeter_key);
+		return;
+	}
+
+	/* The key's: its owner's step when the owner is known, else the owner is asked. */
+	action = kwl_key_choose(&greeter_key, greeter_users[greeter_selected].name);
+	if (action == KWL_KEY_ENTER)
+		greeter_key_enter(server, greeter_selected);
 }
 
 /* Erases what has been typed. */
@@ -2211,6 +2504,426 @@ greeter_key_refused(
 	if (same == 0)
 		said = kl_tr("This security key cannot be used.");
 
+	/* A key that asks its PIN although the account does not (ws199-p001 R6). */
+	same = strcmp(reason, "pin-required");
+	if (same == 0)
+		said = kl_tr("Enter your security key's PIN.");
+
 	/* The line under the field. */
 	snprintf(greeter_message, sizeof(greeter_message), "%s", said);
+}
+
+/*
+ * Tells whether the PIN's keypad shows under the field (ws199-p001
+ * section 3.8): while the field takes the PIN or a security key's PIN,
+ * and nothing is awaited or starting.
+ */
+static int
+greeter_keypad_wanted(void)
+{
+	int field;
+
+	/* Nothing to type while starting or ending. */
+	if (greeter_starting || greeter_powering[0] != '\0')
+		return 0;
+
+	/* No field in its place. */
+	field = greeter_field_wanted();
+	if (!field)
+		return 0;
+
+	/* The PIN, or a security key's PIN. */
+	if (greeter_style == KL_BACKEND_STYLE_PIN || greeter_style == KL_BACKEND_STYLE_KEY)
+		return 1;
+
+	/* The password: the keyboard. */
+	return 0;
+}
+
+/*
+ * Tells whether the field shows: always but in the security key's mode
+ * while it waits for the touch, checks the key or offers "Try again".
+ */
+static int
+greeter_field_wanted(void)
+{
+	/* The key's mode's steps without the field. */
+	if (greeter_style == KL_BACKEND_STYLE_KEY && greeter_key.step != KWL_KEY_OFF && greeter_key.step != KWL_KEY_PIN)
+		return 0;
+
+	/* The field. */
+	return 1;
+}
+
+/* Draws the PIN's keypad under the field: each key frosted, lighter under the pointer. */
+static void
+greeter_draw_keypad(
+	struct kwl_server *server,
+	VkCommandBuffer command,
+	const struct greeter_layout *layout)
+{
+	static const float key_color[4] = { 1.0f, 1.0f, 1.0f, 0.62f };
+	static const float key_lit[4] = { 1.0f, 1.0f, 1.0f, 0.86f };
+	static const float key_mark[4] = { 0.86f, 0.91f, 1.0f, 0.86f };
+	static const float ink[4] = { 0.10f, 0.14f, 0.22f, 1.0f };
+	const struct kwl_keypad_key *key;
+	const float *color;
+	size_t index;
+	int inside;
+
+	/* Each key: its face, then its label. */
+	for (index = 0U; index < layout->key_count; index++) {
+		/* Lighter under the pointer; Shift tinted while it holds. */
+		key = &layout->keys[index];
+		inside = greeter_inside(key->rect, server->pointer_x, server->pointer_y);
+		color = key_color;
+		if (inside)
+			color = key_lit;
+		if (key->action == KWL_KEYPAD_SHIFT && greeter_keypad.upper != 0U)
+			color = key_mark;
+		glass_draw_solid(server, command, (float)key->rect[0], (float)key->rect[1], (float)key->rect[2], (float)key->rect[3], 8.0f, color);
+
+		/* Its label, in the middle. */
+		greeter_draw_centered(server, command, SIZE_TITLE, key->rect[0] + key->rect[2] / 2, key->rect[1] + key->rect[3] / 2 + 6, key->label,
+		    key->rect[2] - 4, ink);
+	}
+}
+
+/* Acts on a press of the keypad's key at index: a character typed, one erased, the PIN sent, or the keypad changed. */
+static void
+greeter_keypad_press(
+	struct kwl_server *server,
+	const struct greeter_layout *layout,
+	unsigned index)
+{
+	enum kwl_keypad_action action;
+	char character;
+
+	/* A key that is not there, or nothing to type while an answer is awaited. */
+	if (index >= layout->key_count || greeter_waiting)
+		return;
+
+	/* What the key does (the letters or the digits laid out again are logged for the tests' pointer). */
+	action = kwl_keypad_press(&greeter_keypad, &layout->keys[index], &character);
+	server->dirty = 1;
+	printf("KWL GREETER keypad press action=%d\n", (int)action);
+	if (action == KWL_KEYPAD_LETTERS || action == KWL_KEYPAD_DIGITS)
+		greeter_keypad_log(server);
+
+	/* A character, Backspace, or Enter. */
+	switch (action) {
+	case KWL_KEYPAD_CHARACTER:
+		greeter_type_character(server, character);
+		break;
+	case KWL_KEYPAD_BACKSPACE:
+		if (greeter_password_length > 0U) {
+			greeter_password_length--;
+			greeter_password[greeter_password_length] = '\0';
+		}
+
+		/* One erased. */
+		break;
+	case KWL_KEYPAD_ENTER:
+		greeter_submit(server);
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * Tells whether the screen listens for security keys (ws199-p001): the
+ * login screen while it is not starting or ending, the lock screen while
+ * its card shows.
+ */
+static int
+greeter_key_listening(
+	struct kwl_server *server)
+{
+	/* The lock screen: its card. */
+	if (server->locked) {
+		if (greeter_lock_card)
+			return 1;
+		return 0;
+	}
+
+	/* Not a login screen, or one starting or ending. */
+	if (!server->greeter || greeter_starting || greeter_powering[0] != '\0')
+		return 0;
+
+	/* Succeeded: the login screen listens. */
+	return 1;
+}
+
+/*
+ * Moves the security key's mode on, every tick: a grant held back until
+ * "Checking" has shown half a second, and KEYOWNER once it may be asked
+ * (after the styles, while nothing else is awaited, the display handed
+ * over).
+ */
+static void
+greeter_key_tick(
+	struct kwl_server *server)
+{
+	enum kwl_key_action action;
+	uint64_t now_ms;
+	int listening;
+	int due;
+	int error;
+
+	/* A grant held back that is due. */
+	now_ms = kwl_milliseconds();
+	action = kwl_key_tick(&greeter_key, now_ms);
+	if (action == KWL_KEY_GRANTED)
+		greeter_key_granted(server);
+
+	/* Whose a key is, once it may be asked. */
+	listening = greeter_key_listening(server);
+	if (!listening || greeter_waiting || greeter_styles_asked || greeter_styles_wanted || greeter_submit_pending || !server->handed_over)
+		return;
+	due = kwl_key_owner_due(&greeter_key, now_ms);
+	if (!due)
+		return;
+
+	/* Asked. */
+	error = kl_backend_session_key_owner(server->backend);
+	kwl_key_owner_sent(&greeter_key, now_ms, error);
+	printf("KWL GREETER key owner asked error=%d\n", error);
+}
+
+/* Takes KEYOWNER's answer: the owner selected in its step, a key not registered here said, or the password again when the key went. */
+static void
+greeter_key_owner_taken(
+	struct kwl_server *server,
+	int error)
+{
+	struct kl_backend_key_owner answer;
+	struct kwl_key_owner owner;
+	enum kwl_key_action action;
+	unsigned shown;
+	int listening;
+	int user;
+
+	/* The answer, nothing taken while the screen does not listen. */
+	kl_backend_session_key_owner_get(server->backend, &answer);
+	listening = greeter_key_listening(server);
+	if (!listening) {
+		greeter_key.owner_asked = 0U;
+		return;
+	}
+
+	/* The owner among the users shown (the lock screen's own user). */
+	user = -1;
+	if (answer.found)
+		user = greeter_user_index(answer.user);
+	shown = 0U;
+	if (user >= 0)
+		shown = 1U;
+
+	/* What the mode makes of it. */
+	memset(&owner, 0, sizeof(owner));
+	owner.error = error;
+	owner.found = answer.found;
+	owner.user = answer.user;
+	owner.key_pin = answer.key_pin;
+	owner.key_touch = answer.key_touch;
+	owner.card = answer.card;
+	owner.reason = answer.reason;
+	action = kwl_key_owner_answer(&greeter_key, &owner, shown);
+	printf("KWL GREETER key owner error=%d found=%u user=%s reason=%s action=%d\n", error, answer.found, answer.user, answer.reason,
+	    (int)action);
+	server->dirty = 1;
+
+	/* Acts on it. */
+	switch (action) {
+	case KWL_KEY_ENTER:
+		greeter_key_enter(server, (unsigned)user);
+		break;
+	case KWL_KEY_NOT_HERE:
+		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("This security key is not registered here."));
+		break;
+	case KWL_KEY_LEAVE:
+		/* The key went: the password again, with nothing typed. */
+		greeter_style = KL_BACKEND_STYLE_PASSWORD;
+		greeter_erase();
+		greeter_message[0] = '\0';
+		break;
+	default:
+		break;
+	}
+}
+
+/*
+ * Shows the owner's step of the security key's mode: the owner selected
+ * (the login screen), the key's style with nothing typed and the keypad
+ * on its digits; the attempt without the PIN goes at once (the touch, or
+ * the lock's check).
+ */
+static void
+greeter_key_enter(
+	struct kwl_server *server,
+	unsigned user)
+{
+	int attempting;
+
+	/* The owner, on the login screen (its styles are asked again). */
+	if (!server->locked && user != greeter_selected)
+		greeter_select(server, user);
+
+	/* The key's style, with nothing typed. */
+	greeter_styles |= KL_BACKEND_STYLE_KEY;
+	greeter_style = KL_BACKEND_STYLE_KEY;
+	greeter_style_chosen = 1U;
+	greeter_erase();
+	greeter_message[0] = '\0';
+	kwl_keypad_reset(&greeter_keypad, 0U);
+	server->dirty = 1;
+	printf("KWL GREETER key mode user=%s step=%d\n", greeter_users[greeter_selected].name, (int)greeter_key.step);
+	greeter_keypad_log(server);
+
+	/* The touch alone, or the lock's check: sent at once (after the styles, when they are asked). */
+	attempting = kwl_key_attempting(&greeter_key);
+	if (attempting)
+		greeter_submit(server);
+}
+
+/* The security key's attempt was granted after "Checking" showed long enough: the lock screen unlocks. */
+static void
+greeter_key_granted(
+	struct kwl_server *server)
+{
+	/* Only an attempt still awaited on the lock screen. */
+	if (!greeter_waiting || !server->locked)
+		return;
+
+	/* Unlocked: the desktop shows again. */
+	greeter_unlock(server);
+	server->dirty = 1;
+	printf("KWL LOCK unlocked via=key-checked\n");
+}
+
+/* Takes "Try again" after the key's attempt ran out of time: the owner's step again. */
+static void
+greeter_key_try_again(
+	struct kwl_server *server)
+{
+	enum kwl_key_action action;
+
+	/* Only while nothing is awaited. */
+	if (greeter_waiting)
+		return;
+
+	/* The step again. */
+	action = kwl_key_try_again(&greeter_key);
+	if (action == KWL_KEY_ENTER)
+		greeter_key_enter(server, greeter_selected);
+}
+
+/* Gives the index of the user shown with an account's name, or -1. */
+static int
+greeter_user_index(
+	const char *name)
+{
+	unsigned index;
+	int same;
+
+	/* Each user shown. */
+	for (index = 0U; index < greeter_user_count; index++) {
+		same = strcmp(greeter_users[index].name, name);
+		if (same == 0)
+			return (int)index;
+	}
+
+	/* None. */
+	return -1;
+}
+
+/*
+ * Takes a security key that came or went (the backend's keys_changed,
+ * ws199-p001): the screen that listens asks whose it is; a USB key that
+ * went during an attempt cancels it.
+ */
+void
+kwl_greeter_keys_changed(
+	struct kwl_server *server)
+{
+	enum kwl_key_action action;
+	int listening;
+	int error;
+
+	/* Only the login screen and the lock screen. */
+	if (!server->greeter && !server->locked)
+		return;
+
+	/* What the mode makes of it. */
+	listening = greeter_key_listening(server);
+	action = kwl_key_keys_changed(&greeter_key, (unsigned)listening);
+	if (action != KWL_KEY_CANCEL)
+		return;
+
+	/* The attempt's key went: cancelled (its answer asks the owner again). */
+	error = kl_backend_session_cancel(server->backend);
+	printf("KWL GREETER key went cancel error=%d\n", error);
+}
+
+/*
+ * Readies the login or lock screen for a sleep (ws199-p001 section 3.7,
+ * R5): the key's attempt under way is cancelled, and the lock screen's
+ * card closes (the wake shows the clock and the hint first).
+ */
+void
+kwl_greeter_sleep(
+	struct kwl_server *server)
+{
+	int attempting;
+	int error;
+
+	/* Only the login screen and the lock screen. */
+	if (!server->greeter && !server->locked)
+		return;
+
+	/* An attempt of the key's under way is cancelled. */
+	attempting = kwl_key_sleep(&greeter_key);
+	if (attempting) {
+		error = kl_backend_session_cancel(server->backend);
+		greeter_answer_quiet = 1U;
+		printf("KWL GREETER sleep cancel error=%d\n", error);
+	}
+
+	/* The lock screen's card closes, with nothing typed. */
+	if (server->locked && greeter_lock_card) {
+		greeter_lock_card = 0U;
+		kwl_lock_swipe_reset(&greeter_swipe);
+		greeter_erase();
+		greeter_message[0] = '\0';
+		server->dirty = 1;
+		printf("KWL LOCK card closed via=sleep\n");
+	}
+}
+
+/*
+ * Logs where the PIN's keypad is and its first and last keys, for the
+ * tests' pointer (its keys are a grid: the digits 3 by 4), or that none
+ * shows.
+ */
+static void
+greeter_keypad_log(
+	struct kwl_server *server)
+{
+	struct greeter_layout layout;
+	const struct kwl_keypad_key *last;
+
+	/* Where everything goes. */
+	greeter_layout(server, &layout);
+
+	/* No keypad. */
+	if (layout.key_count == 0U) {
+		printf("KWL GREETER keypad none\n");
+		return;
+	}
+
+	/* The first key and the last. */
+	last = &layout.keys[layout.key_count - 1U];
+	printf("KWL GREETER keypad keys=%zu letters=%u x=%d y=%d right=%d bottom=%d\n", layout.key_count, greeter_keypad.letters, layout.keys[0].rect[0],
+	    layout.keys[0].rect[1], last->rect[0] + last->rect[2], last->rect[1] + last->rect[3]);
 }

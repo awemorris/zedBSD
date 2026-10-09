@@ -177,6 +177,11 @@ struct system_network_wait {
 
 /* A PIN's digits, and the longest home directory the old PIN file is looked for in (ws172-p002). */
 #define SYSTEM_PIN_DIGITS	6U
+
+/* What the change that waits is (system_state.pin_kind, ws199-p001): a PIN's or a key's change, what the keys are, or a key's own operation. */
+#define SYSTEM_PIN_CHANGE	0U
+#define SYSTEM_PIN_KEYINFO	1U
+#define SYSTEM_PIN_KEYOP	2U
 #define SYSTEM_HOME_MAX		512U
 
 /* A mount or an eject waiting for volumed: the backend's number, and who asked (client, object, request). */
@@ -212,7 +217,9 @@ struct system_details_wait {
  *   - Remote Login's request waiting for sessiond (sharing), and the PIN's
  *     change waiting for sessiond's answer (pin, ws163-p003, ws172-p002),
  *     which is a security key's addition or removal when pin_key is set
- *     (ws172-p003: its touch is told to the object);
+ *     (ws172-p003: its touch is told to the object), and a key's own
+ *     operation by pin_kind (ws199-p001: SYSTEM_PIN_KEYINFO or
+ *     SYSTEM_PIN_KEYOP, whose replug is told too);
  *   - what the user has enrolled as sessiond last answered (enrolled_known,
  *     enrolled_pin, enrolled_keys, and the keys enrolled_list of
  *     enrolled_list_count), whether it is to be asked
@@ -247,9 +254,13 @@ struct system_state {
 	struct system_devices_wait pin;
 	unsigned pin_waiting;
 	unsigned pin_key;
+	unsigned pin_kind;
 	unsigned enrolled_known;
 	unsigned enrolled_pin;
 	unsigned enrolled_keys;
+	unsigned enrolled_key_pin;
+	unsigned enrolled_key_touch;
+	unsigned enrolled_methods;
 	struct kl_backend_key enrolled_list[KL_BACKEND_KEYS_MAX];
 	size_t enrolled_list_count;
 	unsigned enrolled_wanted;
@@ -271,6 +282,12 @@ static int system_devices_request(struct kwl_object *object, uint32_t opcode, co
 static int system_account_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
 static int system_account_pin(struct kwl_object *object, const unsigned char *bytes, size_t size);
 static int system_account_key(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+static int system_account_key_op(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+static int system_key_op_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *first, const char *second);
+static struct kwl_object *system_pin_object(struct kwl_server *server, unsigned version);
+static int system_key_options_begin(struct kwl_object *object, uint32_t number, const char *password, uint32_t key_pin, uint32_t key_touch);
+static int system_account_methods(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int system_methods_begin(struct kwl_object *object, uint32_t number, const char *password, uint32_t methods);
 static int system_key_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *password, const char *argument, const char *pin);
 static int system_pin_begin(struct kwl_object *object, uint32_t number, const char *current, const char *pin);
 static int system_pin_valid(const char *pin);
@@ -933,6 +950,7 @@ kwl_system_pin_answer(
 	unsigned char payload[64];
 	const char *reason;
 	size_t offset;
+	unsigned kind;
 
 	/* Only a change that waits takes it. */
 	if (!system_state.pin_waiting)
@@ -940,8 +958,10 @@ kwl_system_pin_answer(
 	wait = &system_state.pin;
 	system_state.pin_waiting = 0U;
 	reason = kl_backend_session_reason(server->backend);
-	printf("KWL SYSTEM account pin answer=%d reason=%s key=%u\n", error, reason, system_state.pin_key);
+	printf("KWL SYSTEM account pin answer=%d reason=%s key=%u kind=%u\n", error, reason, system_state.pin_key, system_state.pin_kind);
 	system_state.pin_key = 0U;
+	kind = system_state.pin_kind;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
 
 	/* What is enrolled may have changed. */
 	system_state.enrolled_wanted = 1U;
@@ -953,6 +973,13 @@ kwl_system_pin_answer(
 		object = kwl_find(client, wait->object);
 		if (object == NULL || object->dead || object->kind != KWL_SYSTEM_ACCOUNT)
 			return 1;
+
+		/* A key's operation: how many registrations a reset removed (ws199-p001). */
+		if (kind == SYSTEM_PIN_KEYOP && error == 0 && object->version >= KL_SYSTEM_SINCE_KEY_OPS) {
+			offset = system_put_word(payload, 0U, wait->number);
+			offset = system_put_word(payload, offset, kl_backend_session_key_removed(server->backend));
+			(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_REMOVED, payload, offset);
+		}
 
 		/* A refusal's word first, then the result. */
 		if (error != 0 && reason[0] != '\0' && object->version >= KL_SYSTEM_SINCE_ADMINISTER) {
@@ -1007,6 +1034,158 @@ kwl_system_key_touch(
 }
 
 /*
+ * Takes sessiond's answer to KEYINFO (handoff.c, ws199-p001): the asking
+ * object hears key_info, then the result.
+ */
+void
+kwl_system_key_info_answer(
+	struct kwl_server *server,
+	int error)
+{
+	struct kl_backend_key_info info;
+	struct kwl_object *object;
+	unsigned char payload[KL_BACKEND_KEY_NAME + 64U];
+	uint32_t number;
+	size_t offset;
+
+	/* Only a KEYINFO that waits. */
+	if (!system_state.pin_waiting || system_state.pin_kind != SYSTEM_PIN_KEYINFO) {
+		printf("KWL SYSTEM key info answer=%d unasked\n", error);
+		return;
+	}
+
+	/* Answered now. */
+	system_state.pin_waiting = 0U;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
+	number = system_state.pin.number;
+	kl_backend_session_key_info_get(server->backend, &info);
+	printf("KWL SYSTEM key info answer=%d count=%u pin=%u retries=%u min=%u\n", error, info.count, info.pin, info.retries, info.min);
+
+	/* The asking object, when it is still there: what the keys are, then the result. */
+	object = system_pin_object(server, KL_SYSTEM_SINCE_KEY_OPS);
+	if (object == NULL)
+		return;
+	if (error == 0) {
+		offset = system_put_word(payload, 0U, number);
+		offset = system_put_word(payload, offset, info.count);
+		offset = system_put_string(payload, offset, info.name);
+		offset = system_put_word(payload, offset, info.pin);
+		offset = system_put_word(payload, offset, info.retries);
+		offset = system_put_word(payload, offset, info.min);
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_KEY_INFO, payload, offset);
+	}
+
+	/* The result. */
+	system_result(object, KL_SYSTEM_ACCOUNT_EVENT_RESULT, number, system_result_of(error));
+}
+
+/*
+ * Takes sessiond's word that a key's reset waits for the key to be
+ * plugged in again (handoff.c, ws199-p001): the asking object hears
+ * replug.  Returns 1 when a key's operation waits.
+ */
+int
+kwl_system_key_replug(
+	struct kwl_server *server)
+{
+	struct kwl_object *object;
+	uint32_t word;
+
+	/* Only a key's operation that waits. */
+	if (!system_state.pin_waiting || system_state.pin_kind != SYSTEM_PIN_KEYOP)
+		return 0;
+	printf("KWL SYSTEM account key replug number=%u\n", system_state.pin.number);
+
+	/* The asking object, when it is still there. */
+	object = system_pin_object(server, KL_SYSTEM_SINCE_KEY_OPS);
+	if (object == NULL)
+		return 1;
+	word = system_state.pin.number;
+	(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_REPLUG, &word, sizeof(word));
+	return 1;
+}
+
+/*
+ * A security key came or went, or the screen was unlocked (ws199-p001):
+ * every account object of version 25 hears keys_changed.
+ */
+void
+kwl_system_keys_changed(
+	struct kwl_server *server)
+{
+	struct kwl_client *client;
+	struct kwl_object *object;
+
+	/* Each account object of every client that is not ending. */
+	printf("KWL SYSTEM keys changed\n");
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->fatal)
+			continue;
+		for (object = client->objects; object != NULL; object = object->next) {
+			if (object->kind != KWL_SYSTEM_ACCOUNT || object->dead || object->version < KL_SYSTEM_SINCE_KEY_OPS)
+				continue;
+			(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_KEYS_CHANGED, NULL, 0U);
+		}
+	}
+}
+
+/*
+ * Stops a security key's change or operation of Settings under way before
+ * the screen locks or the machine sleeps (ws199-p001 section 4.7, review-2
+ * N5): sessiond is told CANCEL, and the answer comes as usual.
+ */
+void
+kwl_system_keys_cancel(
+	struct kwl_server *server,
+	const char *why)
+{
+	int error;
+
+	/* Only a key's change or operation that waits for the user. */
+	if (!system_state.pin_waiting || (!system_state.pin_key && system_state.pin_kind != SYSTEM_PIN_KEYINFO))
+		return;
+
+	/* Cancelled. */
+	error = kl_backend_session_cancel(server->backend);
+	printf("KWL SYSTEM key cancel why=%s error=%d\n", why, error);
+}
+
+/* The backend's keys_changed (ws199-p001): the account objects hear it, and the login or lock screen (greeter.c). */
+void
+kwl_backend_keys_changed(
+	void *data)
+{
+	/* The compositor the backend was opened for. */
+	kwl_system_keys_changed(data);
+	kwl_greeter_keys_changed(data);
+}
+
+/* Finds the object that asked the change that waits, of at least version; NULL when it or its client went. */
+static struct kwl_object *
+system_pin_object(
+	struct kwl_server *server,
+	unsigned version)
+{
+	struct kwl_client *client;
+	struct kwl_object *object;
+	struct system_devices_wait *wait;
+
+	/* The asking client, then its object. */
+	wait = &system_state.pin;
+	for (client = server->clients; client != NULL; client = client->next) {
+		if (client->number != wait->client || client->fatal)
+			continue;
+		object = kwl_find(client, wait->object);
+		if (object == NULL || object->dead || object->kind != KWL_SYSTEM_ACCOUNT || object->version < version)
+			return NULL;
+		return object;
+	}
+
+	/* Gone. */
+	return NULL;
+}
+
+/*
  * Takes sessiond's answer to ENROLLED (handoff.c, ws172-p002): every
  * account object hears what the user has enrolled.
  */
@@ -1037,6 +1216,8 @@ kwl_system_enrolled_answer(
 	system_state.enrolled_pin = pin;
 	system_state.enrolled_keys = keys;
 	system_state.enrolled_list_count = listed;
+	kl_backend_session_options_get(server->backend, &system_state.enrolled_key_pin, &system_state.enrolled_key_touch);
+	system_state.enrolled_methods = kl_backend_session_methods_get(server->backend);
 	printf("KWL SYSTEM enrolled pin=%u keys=%u listed=%lu\n", pin, keys, (unsigned long)listed);
 
 	/* Each account object of every client that is not ending. */
@@ -1518,11 +1699,27 @@ system_account_request(
 		return 0;
 	}
 
+	/* A key's own operation, or its options, since version 25 (ws199-p001). */
+	if (opcode >= KL_SYSTEM_ACCOUNT_KEY_INFO && opcode <= KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
+		if (object->version < KL_SYSTEM_SINCE_KEY_OPS)
+			return EPROTO;
+		error = system_account_key_op(object, opcode, bytes, size);
+		return error;
+	}
+
 	/* A security key's addition or removal since version 14 (ws172-p003). */
 	if (opcode == KL_SYSTEM_ACCOUNT_ADD_KEY || opcode == KL_SYSTEM_ACCOUNT_REMOVE_KEY) {
 		if (object->version < KL_SYSTEM_SINCE_KEYS)
 			return EPROTO;
 		error = system_account_key(object, opcode, bytes, size);
+		return error;
+	}
+
+	/* The sign-in methods' change since version 26 (WS200). */
+	if (opcode == KL_SYSTEM_ACCOUNT_SET_METHODS) {
+		if (object->version < KL_SYSTEM_SINCE_METHODS)
+			return EPROTO;
+		error = system_account_methods(object, bytes, size);
 		return error;
 	}
 
@@ -1962,6 +2159,304 @@ system_key_begin(
 	return 0;
 }
 
+/*
+ * Carries out a key's own operation (ws199-p001): key_info (the request's
+ * number), key_pin (the current PIN, empty for a first one, and the new
+ * one), key_reset (the password), key_cancel.  The strings are copied out
+ * of the request and wiped from it.  While the screen is locked they are
+ * answered busy (review-2 N5).
+ */
+static int
+system_account_key_op(
+	struct kwl_object *object,
+	uint32_t opcode,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_server *server;
+	uint32_t values[2];
+	uint32_t number;
+	char *first;
+	char *second;
+	size_t next;
+	size_t end;
+	int error;
+
+	/* key_cancel: the operation this client asked, stopped. */
+	server = object->client->server;
+	if (opcode == KL_SYSTEM_ACCOUNT_KEY_CANCEL) {
+		if (size != 0U)
+			return EPROTO;
+		if (system_state.pin_waiting && system_state.pin.client == object->client->number)
+			kwl_system_keys_cancel(server, "asked");
+		return 0;
+	}
+
+	/* The request's number and its strings: none, one (the password) or two (the PINs). */
+	if (size < 4U)
+		return EPROTO;
+	number = system_word(bytes, 0U);
+	first = NULL;
+	second = NULL;
+	error = 0;
+	end = 4U;
+	if (opcode != KL_SYSTEM_ACCOUNT_KEY_INFO)
+		error = system_read_string(bytes, size, 4U, &first, &end);
+	if (error == 0 && opcode == KL_SYSTEM_ACCOUNT_KEY_PIN) {
+		next = end;
+		error = system_read_string(bytes, size, next, &second, &end);
+	}
+
+	/* The options' two words after the password. */
+	values[0] = 0U;
+	values[1] = 0U;
+	if (error == 0 && opcode == KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
+		if (size - end != 8U) {
+			error = EPROTO;
+		} else {
+			values[0] = system_word(bytes, end);
+			values[1] = system_word(bytes, end + 4U);
+			end += 8U;
+		}
+	}
+
+	/* Nothing after them. */
+	if (error == 0 && end != size)
+		error = EPROTO;
+
+	/* The request's own bytes held them: wiped now that they are copied. */
+	system_wipe((char *)(uintptr_t)bytes, size);
+
+	/* The operation starts, unless the request was malformed or the screen is locked. */
+	if (error == 0 && server->locked)
+		error = EBUSY;
+	if (error == 0 && opcode == KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS) {
+		error = system_key_options_begin(object, number, first, values[0], values[1]);
+	} else if (error == 0) {
+		error = system_key_op_begin(object, number, opcode, first, second);
+	}
+
+	/* The copies go, the secrets wiped. */
+	if (first != NULL) {
+		system_wipe(first, strlen(first));
+		free(first);
+	}
+
+	/* The second string. */
+	if (second != NULL) {
+		system_wipe(second, strlen(second));
+		free(second);
+	}
+
+	/* A malformed request ends the client. */
+	if (error == EPROTO)
+		return EPROTO;
+
+	/* An operation that could not start is answered now. */
+	if (error != 0)
+		system_result(object, KL_SYSTEM_ACCOUNT_EVENT_RESULT, number, system_result_of(error));
+	return 0;
+}
+
+/* Starts a key's own operation through the session manager.  Returns 0 when asked, or the errno value to answer with. */
+static int
+system_key_op_begin(
+	struct kwl_object *object,
+	uint32_t number,
+	uint32_t opcode,
+	const char *first,
+	const char *second)
+{
+	struct kl_backend *backend;
+	const char *current;
+	int managed;
+	int error;
+
+	/* One change at a time, through a session manager. */
+	if (system_state.pin_waiting)
+		return EBUSY;
+	backend = object->client->server->backend;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	/* What the keys are, a PIN (an empty current: the first PIN), or a reset. */
+	if (opcode == KL_SYSTEM_ACCOUNT_KEY_INFO) {
+		error = kl_backend_session_key_info(backend);
+	} else if (opcode == KL_SYSTEM_ACCOUNT_KEY_PIN) {
+		current = first;
+		if (current[0] == '\0')
+			current = NULL;
+		error = kl_backend_session_key_pin(backend, current, second);
+	} else {
+		error = kl_backend_session_key_reset(backend, first);
+	}
+
+	/* Logged (without a secret). */
+	printf("KWL SYSTEM account key op client=%llu number=%u opcode=%u error=%d\n", (unsigned long long)object->client->number, number, opcode,
+	    error);
+	if (error != 0)
+		return error;
+
+	/* The operation waits for its answer; a PIN's or a reset's touch and replug are told. */
+	system_state.pin.client = object->client->number;
+	system_state.pin.object = object->id;
+	system_state.pin.number = number;
+	system_state.pin_waiting = 1U;
+	system_state.pin_kind = SYSTEM_PIN_KEYOP;
+	system_state.pin_key = 1U;
+	if (opcode == KL_SYSTEM_ACCOUNT_KEY_INFO) {
+		system_state.pin_kind = SYSTEM_PIN_KEYINFO;
+		system_state.pin_key = 0U;
+	}
+
+	/* Succeeded: the operation is asked. */
+	return 0;
+}
+
+/* Starts a change of the key's options through the session manager (SETOPTIONS).  Returns 0 when asked, or the errno value to answer with. */
+static int
+system_key_options_begin(
+	struct kwl_object *object,
+	uint32_t number,
+	const char *password,
+	uint32_t key_pin,
+	uint32_t key_touch)
+{
+	struct kl_backend *backend;
+	size_t length;
+	int managed;
+	int error;
+
+	/* One change at a time, a password that fits, values of 0 or 1. */
+	if (system_state.pin_waiting)
+		return EBUSY;
+	length = strlen(password);
+	if (length == 0U || length > KL_SYSTEM_PASSWORD_MAX || key_pin > 1U || key_touch > 1U)
+		return EINVAL;
+	backend = object->client->server->backend;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	/* The change; the answer comes through kwl_system_pin_answer. */
+	error = kl_backend_session_set_options(backend, password, key_pin, key_touch);
+	printf("KWL SYSTEM account key options client=%llu number=%u pin=%u touch=%u error=%d\n", (unsigned long long)object->client->number, number, key_pin,
+	    key_touch, error);
+	if (error != 0)
+		return error;
+
+	/* The change waits for its answer. */
+	system_state.pin.client = object->client->number;
+	system_state.pin.object = object->id;
+	system_state.pin.number = number;
+	system_state.pin_waiting = 1U;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
+	system_state.pin_key = 0U;
+	return 0;
+}
+
+/*
+ * Carries out set_methods (WS200): the request's number, the password and
+ * the methods' bits.  The password is copied out of the request and wiped
+ * from it.  While the screen is locked it is answered busy.
+ */
+static int
+system_account_methods(
+	struct kwl_object *object,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_server *server;
+	uint32_t number;
+	uint32_t methods;
+	char *password;
+	size_t end;
+	int error;
+
+	/* The request's number, the password, and the methods' word after it, nothing more. */
+	if (size < 4U)
+		return EPROTO;
+	server = object->client->server;
+	number = system_word(bytes, 0U);
+	password = NULL;
+	methods = 0U;
+	error = system_read_string(bytes, size, 4U, &password, &end);
+	if (error == 0 && size - end != 4U)
+		error = EPROTO;
+	if (error == 0)
+		methods = system_word(bytes, end);
+
+	/* The request's own bytes held the password: wiped now that it is copied. */
+	system_wipe((char *)(uintptr_t)bytes, size);
+
+	/* The change starts, unless the request was malformed or the screen is locked. */
+	if (error == 0 && server->locked)
+		error = EBUSY;
+	if (error == 0)
+		error = system_methods_begin(object, number, password, methods);
+
+	/* The copy goes, wiped. */
+	if (password != NULL) {
+		system_wipe(password, strlen(password));
+		free(password);
+	}
+
+	/* A malformed request ends the client. */
+	if (error == EPROTO)
+		return EPROTO;
+
+	/* A change that could not start is answered now. */
+	if (error != 0)
+		system_result(object, KL_SYSTEM_ACCOUNT_EVENT_RESULT, number, system_result_of(error));
+	return 0;
+}
+
+/* Starts a change of the sign-in methods through the session manager (SETMETHODS).  Returns 0 when asked, or the errno value to answer with. */
+static int
+system_methods_begin(
+	struct kwl_object *object,
+	uint32_t number,
+	const char *password,
+	uint32_t methods)
+{
+	struct kl_backend *backend;
+	size_t length;
+	int managed;
+	int error;
+
+	/* One change at a time, a password that fits, known methods with the password or a key. */
+	if (system_state.pin_waiting)
+		return EBUSY;
+	length = strlen(password);
+	if (length == 0U || length > KL_SYSTEM_PASSWORD_MAX)
+		return EINVAL;
+	if ((methods & ~KL_BACKEND_METHODS_ALL) != 0U)
+		return EINVAL;
+	if ((methods & (KL_BACKEND_METHOD_PASSWORD | KL_BACKEND_METHOD_KEY)) == 0U)
+		return EINVAL;
+	backend = object->client->server->backend;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	/* The change; the answer comes through kwl_system_pin_answer. */
+	error = kl_backend_session_set_methods(backend, password, methods);
+	printf("KWL SYSTEM account methods client=%llu number=%u methods=%u error=%d\n", (unsigned long long)object->client->number, number, methods,
+	    error);
+	if (error != 0)
+		return error;
+
+	/* The change waits for its answer. */
+	system_state.pin.client = object->client->number;
+	system_state.pin.object = object->id;
+	system_state.pin.number = number;
+	system_state.pin_waiting = 1U;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
+	system_state.pin_key = 0U;
+	return 0;
+}
+
 /* Tells whether a PIN is exactly six decimal digits. */
 static int
 system_pin_valid(
@@ -2006,6 +2501,19 @@ system_account_enrolled(
 			offset = system_put_string(payload, offset, system_state.enrolled_list[index].label);
 			(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_KEY, payload, offset);
 		}
+	}
+
+	/* The sign-in methods, to an object of version 26 or later (WS200). */
+	if (object->version >= KL_SYSTEM_SINCE_METHODS) {
+		words[0] = system_state.enrolled_methods;
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_METHODS, words, sizeof(words[0]));
+	}
+
+	/* The key's options, to an object of version 25 or later (ws199-p001). */
+	if (object->version >= KL_SYSTEM_SINCE_KEY_OPS) {
+		words[0] = system_state.enrolled_key_pin;
+		words[1] = system_state.enrolled_key_touch;
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_OPTIONS, words, sizeof(words));
 	}
 
 	/* Whether a PIN is set, and the security keys. */
@@ -2471,6 +2979,8 @@ system_network_details_send(
 			flags |= KL_SYSTEM_LINK_RUNNING;
 		if (link->loopback)
 			flags |= KL_SYSTEM_LINK_LOOPBACK;
+		if (link->wireless)
+			flags |= KL_SYSTEM_LINK_WIRELESS;
 		(void)snprintf(hardware, sizeof(hardware), "%02x:%02x:%02x:%02x:%02x:%02x", link->hardware[0], link->hardware[1], link->hardware[2], link->hardware[3], link->hardware[4], link->hardware[5]);
 
 		/* name, flags, address, netmask, hardware, mtu, and the bytes received and sent in halves. */

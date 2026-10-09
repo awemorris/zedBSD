@@ -15,6 +15,8 @@
 
 #include "fido2.h"
 
+#include "userland/base/libpasskey/verify.h"
+
 #include <errno.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -163,10 +165,12 @@ fido2_message_parse(
 	char *line,
 	struct fido2_message *message)
 {
-	char *words[4];
+	char *words[5];
 	char *place;
 	size_t count;
 	size_t length;
+	char extra;
+	int parsed;
 	int same;
 	int error;
 
@@ -174,7 +178,7 @@ fido2_message_parse(
 	memset(message, 0, sizeof(*message));
 	count = 0U;
 	place = line;
-	while (count < 4U) {
+	while (count < 5U) {
 		words[count++] = place;
 		place = strchr(place, ' ');
 		if (place == NULL)
@@ -183,7 +187,7 @@ fido2_message_parse(
 		place++;
 	}
 
-	/* More than four words is no message. */
+	/* More than five words is no message. */
 	if (place != NULL)
 		return EINVAL;
 
@@ -202,6 +206,68 @@ fido2_message_parse(
 	if (same && length < sizeof(message->reason)) {
 		message->kind = FIDO2_MESSAGE_FAIL;
 		(void)snprintf(message->reason, sizeof(message->reason), "%s", words[1]);
+		return 0;
+	}
+
+	/* done (a key's PIN set or changed, ws199-p001). */
+	same = strcmp(words[0], "done") == 0;
+	if (same && count == 1U) {
+		message->kind = FIDO2_MESSAGE_DONE;
+		return 0;
+	}
+
+	/* info COUNT,CARD,INDEX,PIN,RETRIES,MIN (what the one key is, ws199-p001). */
+	same = strcmp(words[0], "info") == 0;
+	if (same && count == 2U) {
+		parsed = sscanf(words[1], "%u,%u,%u,%u,%u,%u%c", &message->info_count, &message->info_card, &message->info_index,
+		    &message->info_pin, &message->info_retries, &message->info_min, &extra);
+		if (parsed != 6)
+			return EINVAL;
+		message->kind = FIDO2_MESSAGE_INFO;
+		return 0;
+	}
+
+	/* reset MASK (the credentials the reset key held, by their places in the job, ws199-p001). */
+	same = strcmp(words[0], "reset") == 0;
+	if (same && count == 2U) {
+		parsed = sscanf(words[1], "%x%c", &message->held, &extra);
+		if (parsed != 1)
+			return EINVAL;
+		message->kind = FIDO2_MESSAGE_RESET;
+		return 0;
+	}
+
+	/*
+	 * owner MASK,CARD (no group held), or owner MASK,CARD ID AUTH-DATA
+	 * SIGNATURE (the first group's silent answer, ws199-p001).
+	 */
+	same = strcmp(words[0], "owner") == 0;
+	if (same && (count == 2U || count == 5U)) {
+		parsed = sscanf(words[1], "%x,%u%c", &message->held, &message->owner_card, &extra);
+		if (parsed != 2 || message->owner_card > 1U)
+			return EINVAL;
+
+		/* No group held: nothing more. */
+		if (count == 2U && message->held != 0U)
+			return EINVAL;
+		if (count == 2U) {
+			message->kind = FIDO2_MESSAGE_OWNER;
+			return 0;
+		}
+
+		/* A group held: its answer's bytes. */
+		if (message->held == 0U)
+			return EINVAL;
+		error = wire_hex_decode(words[2], message->id, sizeof(message->id), &message->id_size);
+		if (error == 0)
+			error = wire_hex_decode(words[3], message->auth_data, sizeof(message->auth_data), &message->auth_data_size);
+		if (error == 0)
+			error = wire_hex_decode(words[4], message->signature, sizeof(message->signature), &message->signature_size);
+		if (error != 0)
+			return EINVAL;
+
+		/* Succeeded: the owner's answer. */
+		message->kind = FIDO2_MESSAGE_OWNER;
 		return 0;
 	}
 
@@ -416,6 +482,45 @@ fido2_client_data_hash(
 		return error;
 
 	/* Succeeded: the hash. */
+	return 0;
+}
+
+/*
+ * Decides what a login or an unlock with a key asks and checks
+ * (auth-fido2, ws199-p002): the user verified when a PIN is given, the
+ * touch except to unlock with key_touch 0.  An empty PIN is taken only
+ * when the account does not ask for the key's PIN (key_pin 0).  Returns 0
+ * with the flags the assertion must carry and whether the key is asked
+ * for the touch, or EINVAL for an empty PIN the account asks for.
+ */
+int
+fido2_auth_flags(
+	int key_pin,
+	int key_touch,
+	int unlock,
+	int pin_given,
+	unsigned *required,
+	int *presence)
+{
+	/* An empty PIN is refused when the account asks for the key's PIN. */
+	if (!pin_given && key_pin)
+		return EINVAL;
+
+	/* By default the key is touched and the user verified by the PIN. */
+	*required = PK_FLAG_UP | PK_FLAG_UV;
+	*presence = 1;
+
+	/* Without a PIN the key cannot verify the user. */
+	if (!pin_given)
+		*required &= ~PK_FLAG_UV;
+
+	/* Only an unlock may go without the touch, and only when the account says so. */
+	if (unlock && !key_touch) {
+		*presence = 0;
+		*required &= ~PK_FLAG_UP;
+	}
+
+	/* Succeeded: the flags and the touch. */
 	return 0;
 }
 

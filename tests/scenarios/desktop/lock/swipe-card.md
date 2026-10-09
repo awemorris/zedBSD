@@ -20,7 +20,7 @@ desktop。
    確認事項: 手動の lock。正解: `KWL LOCK locked reason=key user=… manual=1`。時計は大きく中央より上にあり、下に「Swipe up to unlock」があり、card は無い。確認方法: log、撮影（人が見る）。
 2. 操作: 画面の下 15% の所から高さの 40% の所まで、左のボタンでドラッグする。
    確認事項: スワイプ。正解: `KWL LOCK swipe via=pointer grace=0 manual=1`。card が出て、時計と重ならない。PIN か key が登録済みなら、方式の選択が並ぶ。確認方法: log、撮影（人が見る）。
-3. 操作: password を打って Enter。
+3. 操作: 方式の選択が並ぶ（PIN か key が登録済み）なら Password を押してから（PIN が既定の欄なので、T1-520）、password を打って Enter。
    確認事項: 解除。正解: `KWL LOCK unlocked`。確認方法: log。
 
 ## 合格

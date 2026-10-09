@@ -324,7 +324,7 @@ _Static_assert(offsetof(struct system_usb_device_info, driver) == 32U,
 #define KERN_SYSTEM_EVENT_DISK		0x00000010U	/* a disk or partition added or removed */
 #define KERN_SYSTEM_EVENT_INPUT		0x00000020U	/* an input device added or removed */
 #define KERN_SYSTEM_EVENT_NETWORK	0x00000040U	/* a network interface added or removed */
-#define KERN_SYSTEM_EVENT_USB		0x00000080U	/* a USB device attached or detached */
+#define KERN_SYSTEM_EVENT_USB		0x00000080U	/* a USB device attached or detached; a smart card slot's card in or out (CHANGE) */
 #define KERN_SYSTEM_EVENT_OVERFLOW	0x80000000U	/* events were lost (always delivered) */
 #define KERN_SYSTEM_EVENT_CLASSES	0x000000ffU
 

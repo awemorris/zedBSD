@@ -15,6 +15,7 @@
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/share.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vulkan-native-job.h"
 
 /* These initial capabilities exclude Vulkan until the executor and compiler are bound. */
 #define RENDER_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE)
@@ -184,8 +185,9 @@ render_close(
 {
 	struct bcm2711_render_device *controller;
 	struct bcm2711_render_session *session;
+	int error;
 
-	/* Quarantined views retain storage independently of the closing session descriptor. */
+	/* Drain all callbacks before withdrawing protocol identities or retaining an internally closed descriptor. */
 	controller = opaque;
 	session = private_session;
 	bcm2711_render_worker_drain(session);
@@ -196,10 +198,25 @@ render_close(
 		__builtin_trap();
 	controller->sessions--;
 
+	/* Pending Vulkan owners withdraw public identities but retain this exact renderer through uncertain DMA retirement. */
+	error = bcm2711_vulkan_session_close(&session->vulkan);
+	if (session->vulkan != NULL) {
+		session->closed_next = controller->closed;
+		controller->closed = session;
+	} else {
+		/* No typed graph, prepared job or protocol arena still borrows this renderer descriptor. */
+		kern_free(session);
+	}
+
+	/* Translation or pending-owner refusal closes admission until explicit global recovery consumes every retained prefix. */
+	if (error != 0)
+		bcm2711_render_worker_fault(controller, error);
+
 	mutex_unlock(&controller->mutex);
 
-	/* No allocation, job or capability retains a pointer to this retired open. */
-	kern_free(session);
+	/* Common observers see failure only after the closing namespace and all persistent native/session owners are rooted. */
+	if (error != 0)
+		bcm2711_render_fail(controller, error);
 }
 
 /* Reports only actual native storage operations implemented by this node. */
@@ -606,6 +623,13 @@ render_reset(
 
 	/* Native reset verifies provider, all identifiers, MMU/cache and serviced IRQ admission. */
 	error = bcm2711_v3d_hardware_reset(controller->space.native);
+	if (error != 0) {
+		mutex_unlock(&controller->mutex);
+		return error;
+	}
+
+	/* Checked DMA stop retires whole prepared/native graphs and internally closed sessions before translation recovery. */
+	error = bcm2711_vulkan_native_jobs_recover(controller);
 	if (error != 0) {
 		mutex_unlock(&controller->mutex);
 		return error;

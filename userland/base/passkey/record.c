@@ -409,3 +409,265 @@ record_append(
 	*used += length;
 	return 0;
 }
+
+/* Sets an account's options to the defaults: every method, the key's PIN and touch asked (ws199-p001). */
+void
+passkey_options_default(
+	struct passkey_options *options)
+{
+	/* The strongest. */
+	memset(options, 0, sizeof(*options));
+	snprintf(options->methods, sizeof(options->methods), "%s", PASSKEY_METHODS_DEFAULT);
+	options->key_pin = 1;
+	options->key_touch = 1;
+}
+
+/*
+ * Reads an account's options line (ws199-p001 section 2): the defaults
+ * when it has none, two or more, or one that does not read.  Returns 1
+ * when a line was taken, 0 when the defaults are.
+ */
+int
+passkey_options_read(
+	const char *text,
+	size_t length,
+	const char *name,
+	uid_t uid,
+	struct passkey_options *options)
+{
+	char line[PASSKEY_FIELD_MAX];
+	char field[PASSKEY_METHODS_MAX + 16U];
+	struct passkey_options read;
+	unsigned index;
+	int count;
+	int error;
+	int same;
+	int fits;
+
+	/* The defaults, unless exactly one line reads. */
+	passkey_options_default(options);
+	count = passkey_record_count(text, length, name, uid, "options");
+	if (count != 1)
+		return 0;
+	error = passkey_record_find(text, length, name, uid, "options", 0U, line, sizeof(line));
+	if (error != 0)
+		return 0;
+
+	/* Its three fields after the kind, each a word=value. */
+	passkey_options_default(&read);
+	read.key_pin = -1;
+	read.key_touch = -1;
+	read.methods[0] = '\0';
+	for (index = 3U; index < 6U; index++) {
+		error = passkey_record_field(line, index, field, sizeof(field));
+		if (error != 0)
+			return 0;
+		same = strncmp(field, "methods=", 8U);
+		fits = strlen(field + 8) < sizeof(read.methods);
+		if (same == 0 && fits) {
+			snprintf(read.methods, sizeof(read.methods), "%.*s", (int)(sizeof(read.methods) - 1U), field + 8);
+			continue;
+		}
+
+		/* key-pin=. */
+		same = strcmp(field, "key-pin=0") == 0 || strcmp(field, "key-pin=1") == 0;
+		if (same) {
+			read.key_pin = field[8] - '0';
+			continue;
+		}
+
+		/* key-touch=. */
+		same = strcmp(field, "key-touch=0") == 0 || strcmp(field, "key-touch=1") == 0;
+		if (same) {
+			read.key_touch = field[10] - '0';
+			continue;
+		}
+
+		/* A field that is none of them. */
+		return 0;
+	}
+
+	/* No field after the three. */
+	error = passkey_record_field(line, 6U, field, sizeof(field));
+	if (error != ENOENT)
+		return 0;
+
+	/* Each field once, and no touch left out while the PIN is asked. */
+	if (read.methods[0] == '\0' || read.key_pin < 0 || read.key_touch < 0)
+		return 0;
+	if (read.key_touch == 0 && read.key_pin == 1)
+		return 0;
+
+	/* Succeeded: the line's. */
+	*options = read;
+	return 1;
+}
+
+/* Writes an account's options line (without its end).  Returns 0, or ENAMETOOLONG. */
+int
+passkey_options_line(
+	const char *name,
+	uid_t uid,
+	const struct passkey_options *options,
+	char *line,
+	size_t size)
+{
+	int written;
+
+	/* The line. */
+	written = snprintf(line, size, "%s:%u:options:methods=%s:key-pin=%d:key-touch=%d", name, (unsigned)uid, options->methods,
+	    options->key_pin != 0, options->key_touch != 0);
+	if (written < 0 || (size_t)written >= size)
+		return ENAMETOOLONG;
+
+	/* Succeeded. */
+	return 0;
+}
+
+/* Tells whether options are the defaults (their line need not be kept). */
+int
+passkey_options_is_default(
+	const struct passkey_options *options)
+{
+	int same;
+
+	/* Every method, the PIN and the touch. */
+	same = strcmp(options->methods, PASSKEY_METHODS_DEFAULT);
+	return same == 0 && options->key_pin && options->key_touch;
+}
+
+/*
+ * Reads a methods field ("password,pin,fido2" or part of it, WS200) into
+ * bits.  Returns 0, or EINVAL for an empty one, an unknown word, or a word
+ * twice.
+ */
+int
+passkey_methods_parse(
+	const char *text,
+	unsigned *methods)
+{
+	static const struct {
+		const char *word;
+		unsigned bit;
+	} words[] = {
+		{ "password", PASSKEY_METHOD_PASSWORD },
+		{ "pin", PASSKEY_METHOD_PIN },
+		{ "fido2", PASSKEY_METHOD_FIDO2 },
+	};
+	const char *start;
+	const char *end;
+	size_t length;
+	size_t index;
+	unsigned bit;
+	int same;
+
+	/* Each word up to a comma or the end. */
+	*methods = 0U;
+	start = text;
+	for (;;) {
+		end = strchr(start, ',');
+		if (end == NULL)
+			end = start + strlen(start);
+		length = (size_t)(end - start);
+
+		/* The word's bit. */
+		bit = 0U;
+		for (index = 0U; index < sizeof(words) / sizeof(words[0]); index++) {
+			same = strncmp(start, words[index].word, length);
+			if (same == 0 && words[index].word[length] == '\0')
+				bit = words[index].bit;
+		}
+
+		/* An unknown word, or one already read. */
+		if (bit == 0U || (*methods & bit) != 0U)
+			return EINVAL;
+		*methods |= bit;
+
+		/* The end, or the next word after the comma. */
+		if (*end == '\0')
+			break;
+		start = end + 1;
+	}
+
+	/* Succeeded: the bits. */
+	return 0;
+}
+
+/* Writes methods' bits as their field, the words in their order ("password,pin,fido2"). */
+void
+passkey_methods_text(
+	unsigned methods,
+	char *text,
+	size_t size)
+{
+	const char *separator;
+	size_t used;
+
+	/* Each method that is set, after a comma when one came before. */
+	text[0] = '\0';
+	used = 0U;
+	separator = "";
+	if ((methods & PASSKEY_METHOD_PASSWORD) != 0U) {
+		used += (size_t)snprintf(text + used, size - used, "%spassword", separator);
+		separator = ",";
+	}
+
+	/* The PIN. */
+	if ((methods & PASSKEY_METHOD_PIN) != 0U && used < size) {
+		used += (size_t)snprintf(text + used, size - used, "%spin", separator);
+		separator = ",";
+	}
+
+	/* A security key. */
+	if ((methods & PASSKEY_METHOD_FIDO2) != 0U && used < size)
+		(void)snprintf(text + used, size - used, "%sfido2", separator);
+}
+
+/*
+ * Gives the methods the login and locked screens offer and take (WS200):
+ * those set that the account has (the password always has one), and the
+ * password too when none of them is the password or a key.
+ */
+unsigned
+passkey_methods_effective(
+	unsigned methods,
+	int pin_enrolled,
+	int key_enrolled)
+{
+	unsigned had;
+	unsigned effective;
+
+	/* What the account has. */
+	had = PASSKEY_METHOD_PASSWORD;
+	if (pin_enrolled)
+		had |= PASSKEY_METHOD_PIN;
+	if (key_enrolled)
+		had |= PASSKEY_METHOD_FIDO2;
+
+	/* Those set, of those it has. */
+	effective = methods & had;
+
+	/* The PIN alone (or nothing) is no first sign-in: the password is taken too. */
+	if ((effective & (PASSKEY_METHOD_PASSWORD | PASSKEY_METHOD_FIDO2)) == 0U)
+		effective |= PASSKEY_METHOD_PASSWORD;
+
+	/* The methods. */
+	return effective;
+}
+
+/* Gives an options line's methods as bits: every method when its field does not read. */
+unsigned
+passkey_options_methods(
+	const struct passkey_options *options)
+{
+	unsigned methods;
+	int error;
+
+	/* The field, or every method. */
+	error = passkey_methods_parse(options->methods, &methods);
+	if (error != 0)
+		return PASSKEY_METHODS_ALL;
+
+	/* Succeeded: the field's. */
+	return methods;
+}

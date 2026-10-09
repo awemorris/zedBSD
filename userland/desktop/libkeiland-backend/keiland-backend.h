@@ -74,6 +74,7 @@ struct kl_backend_host {
 	void (*power_changed)(void *data);
 	void (*power_button)(void *data, unsigned button);
 	void (*lid_changed)(void *data, unsigned open);
+	void (*keys_changed)(void *data);
 };
 
 /*
@@ -312,8 +313,9 @@ int kl_backend_network_set_scanning(struct kl_backend_network *network, unsigned
 /*
  * One interface: its name, whether it is up and has its link, whether it
  * is the loopback, its IPv4 address and netmask (empty when it has none),
- * its hardware address and MTU, the bytes it has received and sent, and
- * its link's speed in Mb/s (0 while not known, BUG-222).
+ * its hardware address and MTU, the bytes it has received and sent, its
+ * link's speed in Mb/s (0 while not known, BUG-222), and whether it is a
+ * radio (Wi-Fi), as the system tells it (BUG-284: not by its name).
  */
 struct kl_backend_network_link {
 	char name[KL_BACKEND_NETWORK_NAME_MAX];
@@ -329,6 +331,7 @@ struct kl_backend_network_link {
 	unsigned wired_mode;
 	char router[KL_BACKEND_NETWORK_ADDRESS_MAX];
 	unsigned link_mbps;
+	unsigned wireless;
 };
 
 /*
@@ -1504,6 +1507,10 @@ int kl_backend_account_administer(const char *password, const char *operation, c
 #define KL_BACKEND_SESSION_ENROLL	6U	/* kl_backend_session_set_pin (ws172-p002) */
 #define KL_BACKEND_SESSION_ENROLLED	7U	/* kl_backend_session_enrolled (ws172-p002) */
 #define KL_BACKEND_SESSION_TOUCH	8U	/* not an answer: a security key waits to be touched (ws172-p003) */
+#define KL_BACKEND_SESSION_KEYINFO	9U	/* kl_backend_session_key_info (ws199-p001) */
+#define KL_BACKEND_SESSION_KEYOP	10U	/* kl_backend_session_key_pin, kl_backend_session_key_reset (ws199-p001) */
+#define KL_BACKEND_SESSION_REPLUG	11U	/* not an answer: the key is to be plugged in again (ws199-p001) */
+#define KL_BACKEND_SESSION_KEYOWNER	12U	/* kl_backend_session_key_owner (ws199-p001) */
 
 /*
  * The ways to log in or unlock (ws172-p002, docs/architecture/security.md
@@ -1600,6 +1607,33 @@ int kl_backend_session_enrolled(struct kl_backend *backend);
 void kl_backend_session_enrolled_get(const struct kl_backend *backend, unsigned *pin, unsigned *keys);
 
 /*
+ * The session user's key options as the last ENROLLED told them
+ * (ws199-p001): whether the key's PIN is asked to sign in, and whether its
+ * touch is asked to unlock (1 and 1 until told).  kl_backend_session_
+ * set_options sets them, checked by the user's password (SETOPTIONS, a
+ * session); the answer is session_answer(KL_BACKEND_SESSION_ENROLL, error)
+ * as kl_backend_session_set_pin's.  Returns as
+ * kl_backend_session_authenticate.
+ */
+void kl_backend_session_options_get(const struct kl_backend *backend, unsigned *key_pin, unsigned *key_touch);
+int kl_backend_session_set_options(struct kl_backend *backend, const char *password, unsigned key_pin, unsigned key_touch);
+
+/*
+ * The methods the login and locked screens take for the session user, as
+ * the last ENROLLED told them (WS200): KL_BACKEND_METHOD_* bits, every
+ * method until told.  kl_backend_session_set_methods sets them, checked by
+ * the user's password (SETMETHODS, a session), answered as
+ * kl_backend_session_set_options.  Returns as
+ * kl_backend_session_authenticate.
+ */
+#define KL_BACKEND_METHOD_PASSWORD	0x1U
+#define KL_BACKEND_METHOD_PIN		0x2U
+#define KL_BACKEND_METHOD_KEY		0x4U
+#define KL_BACKEND_METHODS_ALL		0x7U
+unsigned kl_backend_session_methods_get(const struct kl_backend *backend);
+int kl_backend_session_set_methods(struct kl_backend *backend, const char *password, unsigned methods);
+
+/*
  * Gives the security keys of the last ENROLLED answer (ws172-p003): at
  * most capacity of them in keys; returns how many there are.
  */
@@ -1620,6 +1654,78 @@ int kl_backend_session_add_key(struct kl_backend *backend, const char *password,
  * checked by the user's password.  Answered as kl_backend_session_set_pin.
  */
 int kl_backend_session_remove_key(struct kl_backend *backend, const char *password, const char *ref);
+
+/*
+ * What the security keys there are (ws199-p001 section 4.1): how many,
+ * and for one key its name, whether it has a PIN, its PIN's retries and
+ * its PIN's fewest characters.
+ */
+#define KL_BACKEND_KEY_NAME		64U
+struct kl_backend_key_info {
+	unsigned count;
+	char name[KL_BACKEND_KEY_NAME];
+	unsigned pin;
+	unsigned retries;
+	unsigned min;
+};
+
+/*
+ * Asks the manager what the security keys there are (KEYINFO, a session);
+ * the answer is session_answer(KL_BACKEND_SESSION_KEYINFO, error), and
+ * kl_backend_session_key_info_get then gives it.  Returns as
+ * kl_backend_session_authenticate.
+ */
+int kl_backend_session_key_info(struct kl_backend *backend);
+void kl_backend_session_key_info_get(const struct kl_backend *backend, struct kl_backend_key_info *info);
+
+/*
+ * Sets the one key's first PIN (current NULL) or changes its PIN (KEYPIN,
+ * a session; the key checks the PINs, no password).  The answer is
+ * session_answer(KL_BACKEND_SESSION_KEYOP, error): 0, EACCES with
+ * kl_backend_session_reason (bad-key-pin, key-locked, key-replug, no-pin,
+ * pin-set, pin-policy, no-key, many-keys, device), EIO.  Returns as
+ * kl_backend_session_authenticate.
+ */
+int kl_backend_session_key_pin(struct kl_backend *backend, const char *current, const char *pin);
+
+/*
+ * Resets the key the user plugs in again (KEYRESET, a session), checked by
+ * the user's password: session_answer(KL_BACKEND_SESSION_REPLUG, 0) while
+ * the key is to be plugged in again, KL_BACKEND_SESSION_TOUCH while it is
+ * to be touched, then session_answer(KL_BACKEND_SESSION_KEYOP, error) as
+ * kl_backend_session_key_pin's (bad-secret, not-allowed, timeout, canceled
+ * ...); kl_backend_session_key_removed gives how many of this machine's
+ * registrations went with it.  Returns as kl_backend_session_authenticate.
+ */
+int kl_backend_session_key_reset(struct kl_backend *backend, const char *password);
+unsigned kl_backend_session_key_removed(const struct kl_backend *backend);
+
+/*
+ * Whose the security key there is (KEYOWNER, ws199-p001 section 4.2):
+ * found 1 with the owner's account name, whether the key's PIN is asked
+ * to sign in, whether its touch is asked to unlock, and whether the key
+ * is a card held to a reader; found 0 with the manager's reason (none: no
+ * account's, many-owners, no-key, many-keys, ...).
+ */
+struct kl_backend_key_owner {
+	unsigned found;
+	char user[KL_BACKEND_KEY_LABEL];
+	unsigned key_pin;
+	unsigned key_touch;
+	unsigned card;
+	char reason[KL_BACKEND_SESSION_REASON];
+};
+
+/*
+ * Asks the manager whose the security key there is (KEYOWNER): of every
+ * account on the login screen, of the session's own user in a session.
+ * The answer is session_answer(KL_BACKEND_SESSION_KEYOWNER, error) (EBUSY
+ * when the manager was asked another within a second), and
+ * kl_backend_session_key_owner_get then gives it.  Returns as
+ * kl_backend_session_authenticate.
+ */
+int kl_backend_session_key_owner(struct kl_backend *backend);
+void kl_backend_session_key_owner_get(const struct kl_backend *backend, struct kl_backend_key_owner *owner);
 
 /*
  * Stops a security key's attempt under way (CANCEL): its answer is a

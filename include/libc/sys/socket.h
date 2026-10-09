@@ -25,6 +25,45 @@ extern "C" {
  */
 #define SOMAXCONN 128
 
+/*
+ * The socket type, message flags and socket options POSIX names that the
+ * kernel does not implement.  They are defined here rather than in
+ * <uapi/socket.h> because the kernel has no meaning for them.  Their values
+ * come from the free part of the kernel's number space (the message flags
+ * follow the Linux values the existing flags use, the options the BSD values),
+ * so that a program asking for one is refused rather than given something
+ * else:
+ *
+ * - socket() and socketpair() refuse SOCK_SEQPACKET with EINVAL,
+ * - send(), sendto() and sendmsg() refuse MSG_OOB, MSG_DONTROUTE and MSG_EOR,
+ *   and recv(), recvfrom() and recvmsg() refuse MSG_OOB, with EOPNOTSUPP,
+ * - setsockopt() and getsockopt() refuse the options with ENOPROTOOPT (an
+ *   internet datagram or ICMP socket reports EOPNOTSUPP).
+ *
+ * If the kernel takes one of them up, the definition moves to <uapi/socket.h>
+ * with the same value.
+ */
+#define SOCK_SEQPACKET	5
+#define MSG_OOB	0x0001
+#define MSG_DONTROUTE	0x0004
+#define MSG_EOR	0x0080
+#define SO_DEBUG	0x0001
+#define SO_ACCEPTCONN	0x0002
+#define SO_DONTROUTE	0x0010
+#define SO_LINGER	0x0080
+#define SO_OOBINLINE	0x0100
+#define SO_SNDLOWAT	0x1003
+#define SO_RCVLOWAT	0x1004
+
+/*
+ * The value of the SO_LINGER option: whether close() waits for data not yet
+ * sent, and for how many seconds.
+ */
+struct linger {
+	int l_onoff;
+	int l_linger;
+};
+
 /* The standard macro evaluates its message pointer once through a bounded helper. */
 #define CMSG_FIRSTHDR(message) __libc_cmsg_firsthdr(message)
 

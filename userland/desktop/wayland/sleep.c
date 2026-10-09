@@ -486,7 +486,13 @@ sleep_begin(
 	enum kwl_sleep_via via,
 	uint64_t now_ms)
 {
-	/* Pending from now. */
+	/*
+	 * Pending from now; a security key's change of Settings, and an
+	 * attempt of the login or lock screen's, are stopped first, and the
+	 * lock screen's card closes (ws199-p001, R5).
+	 */
+	kwl_system_keys_cancel(server, "sleep");
+	kwl_greeter_sleep(server);
 	kwl_sleep_begin(&server->sleep, via, now_ms);
 	printf("KWL SLEEP begin via=%s\n", kwl_sleep_via_name(via));
 

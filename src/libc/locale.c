@@ -1790,6 +1790,7 @@ snprintf_l(char *buffer, size_t size, locale_t locale, const char *format, ...)
 	va_list arguments;
 	int function_result;
 
+	/* The locale changes nothing here. */
 	(void)locale;
 	va_start(arguments, format);
 	function_result = vsnprintf(buffer, size, format, arguments);
@@ -1805,6 +1806,7 @@ asprintf_l(char **result, locale_t locale, const char *format, ...)
 	va_list arguments;
 	int function_result;
 
+	/* The locale changes nothing here. */
 	(void)locale;
 	va_start(arguments, format);
 	function_result = vasprintf(result, format, arguments);
@@ -1812,4 +1814,281 @@ asprintf_l(char **result, locale_t locale, const char *format, ...)
 
 	/* Returns the computed result. */
 	return function_result;
+}
+
+/*
+ * The byte classifications in a locale (POSIX).
+ *
+ * This C library classifies single bytes the same way in every locale (the
+ * locales differ in their messages and their multibyte encoding), so each
+ * asks the classification of the current locale.
+ */
+int
+isalnum_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isalnum(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isalpha() names, in a locale. */
+int
+isalpha_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isalpha(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isblank() names, in a locale. */
+int
+isblank_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isblank(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class iscntrl() names, in a locale. */
+int
+iscntrl_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = iscntrl(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isdigit() names, in a locale. */
+int
+isdigit_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isdigit(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isgraph() names, in a locale. */
+int
+isgraph_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isgraph(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class islower() names, in a locale. */
+int
+islower_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = islower(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isprint() names, in a locale. */
+int
+isprint_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isprint(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class ispunct() names, in a locale. */
+int
+ispunct_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = ispunct(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isspace() names, in a locale. */
+int
+isspace_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isspace(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isupper() names, in a locale. */
+int
+isupper_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isupper(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a byte is of the class isxdigit() names, in a locale. */
+int
+isxdigit_l(
+	int character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = isxdigit(character);
+
+	/* Succeeded: whether the byte is of the class. */
+	return answer;
+}
+
+/* Tells whether a wide character is a letter or a digit, in a locale. */
+int
+iswalnum_l(
+	wint_t character,
+	locale_t locale)
+{
+	int answer;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The classification is the same in every locale. */
+	answer = iswalnum(character);
+
+	/* Succeeded: whether the character is a letter or a digit. */
+	return answer;
+}
+
+/* Finds a character mapping by its name (tolower, toupper), in a locale. */
+wctrans_t
+wctrans_l(
+	const char *name,
+	locale_t locale)
+{
+	wctrans_t mapping;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The mappings are the same in every locale. */
+	mapping = wctrans(name);
+
+	/* Succeeded: the mapping, or 0 for a name there is none of. */
+	return mapping;
+}
+
+/* Maps a wide character with a mapping wctrans_l found, in a locale. */
+wint_t
+towctrans_l(
+	wint_t character,
+	wctrans_t mapping,
+	locale_t locale)
+{
+	wint_t mapped;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The mappings are the same in every locale. */
+	mapped = towctrans(character, mapping);
+
+	/* Succeeded: the mapped character. */
+	return mapped;
 }
