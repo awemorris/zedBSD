@@ -13,6 +13,7 @@
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
 #include "drivers/gpu/bcm2711/vulkan-barrier.h"
 #include "drivers/gpu/bcm2711/vulkan-transfer.h"
+#include "drivers/gpu/bcm2711/vulkan-buffer-copy.h"
 
 static int walk_records(struct bcm2711_vulkan_command_buffer *command, struct bcm2711_vulkan_draw_state *state, bcm2711_vulkan_draw_prepare_t prepare, void *payload);
 static void bind_sets(struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
@@ -95,6 +96,15 @@ walk_records(
 
 		/* Each event updates one ordinary graphics selection or emits a complete pass/draw preparation point. */
 		switch (record->opcode) {
+		case GPU_OP_CMD_COPY_BUFFER:
+			/* Synchronous coherent transfer work has its own complete immutable owner outside graphics pass state. */
+			if (state->pass != NULL)
+				return EINVAL;
+			error = bcm2711_vulkan_buffer_copy_validate(record, command->owner.device);
+			if (error != 0)
+				return error;
+			selected = true;
+			break;
 		case GPU_OP_CMD_COPY_IMAGE:
 		case GPU_OP_CMD_BLIT_IMAGE:
 			/* Complete transfer nodes keep their copied regions and independently retained images outside graphics pass state. */

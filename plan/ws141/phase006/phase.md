@@ -174,3 +174,13 @@ actual public vkCmdClearColorImage→typed immutable primary→prepared pending 
 ## i14 native image copy/blit checkpoint（2026-10-10）
 
 actual public copy/blit→完全immutable primary/pending graph→内部kernel-compiled texture quad/native passを接続。raw copy、nearest/linear拡縮・両axis反転・RGBA/BGRA conversion、source全sample footprint/physical alias、multi-region FIFO/whole-pass quarantineを確認。temporary数値metaのみで公開仮object無し、CPU destination pixel write無し。actual client/kernel-source＋明示runner host21範囲、final RPi4 y warning/error0/checks3/style0とown SPIR-V validator PASS。実GPU pixelはmockしないため実機/Keiland成功は未確認。buffer readback/transfer・QueueSubmit/fence/semaphore/public/common binding・final stack/p007が残り、Phase in-progress/WS incompleteを維持。Master変更無し。[正確な範囲/codec誤りの修正/確認/復帰点](../execution-20261009.md#i14-native-image-copyblitのsoftware出力2026-10-10)。
+
+
+## coherent buffer transfer手順（2026-10-10）
+
+buffer copy/upload/readbackはNormal NC coherent backingのCPU byte/row copyをFIFO native completion後に実行する。4.2 TFUのraster出力非対応と既存coherent memory境界に基づく内部手順の選択。image copy/blit/clearとKeilandのGPU描画条件は維持。physical aliases・whole preflight・explicit layout・paddingとnext native visibilityを確認する。p005のownership/public interface/dependency/WS acceptanceは変更無し。[統合と改訂理由](../execution-20261009.md#image-copyblitのmain統合とcoherent-transfer設計2026-10-10)。
+
+
+## coherent buffer copy checkpoint（2026-10-10）
+
+actual public CopyBufferのcomplete typed byte vectorをpending primaryへ保持し、FIFO native retirement後のNormal NC CPU転送へ接続。exact13/17byte以外保持、record後source更新、physical alias/末尾failure無部分retain・pending disposalをactual host22範囲で確認。native runnerは起動しない。RPi4 y warning/error0/checks3/style0 PASS。buffer/image upload/readback・queue/fence/semaphore/public/common binding・final stack/p007と実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](../execution-20261009.md#i14-coherent-buffer-copyのsoftware出力2026-10-10)。
