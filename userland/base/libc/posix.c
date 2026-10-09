@@ -12,6 +12,7 @@
  */
 
 #include "userland/base/libc/syscall.h"
+#include "userland/base/libc/account-internal.h"
 #include "src/libc/heap.h"
 #include "src/libc/stdio-internal.h"
 #include "include/libc/sandbox.h"
@@ -1579,6 +1580,18 @@ sysconf(
 		 * not guess is given, so it is generous rather than tight.
 		 */
 		return 1024;
+	case _SC_GETGR_R_SIZE_MAX:
+		/*
+		 * getgrnam() decodes a group, member list included, into a
+		 * buffer of this size, so any group it can return fits one.
+		 */
+		return ACCOUNT_RESULT_MAX;
+	case _SC_TTY_NAME_MAX:
+		/*
+		 * ttyname() keeps a path-sized buffer, so a terminal name it
+		 * finds anywhere under /dev fits one of this size.
+		 */
+		return PATH_MAX;
 	case _SC_STREAM_MAX:
 		/* Returns the computed result. */
 		return 32;

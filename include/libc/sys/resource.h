@@ -16,6 +16,13 @@ extern "C" {
 #include <uapi/resource.h>
 #include <sys/time.h>
 
+/*
+ * The number of resource limits, under the name FreeBSD and Linux give it.
+ * It is not POSIX; software that validates a resource number before calling
+ * getrlimit() (Python's resource module among them) is written against it.
+ */
+#define RLIM_NLIMITS RLIMIT_NLIMITS
+
 int getrlimit(int, struct rlimit *);
 int setrlimit(int, const struct rlimit *);
 int getpriority(int, id_t);
