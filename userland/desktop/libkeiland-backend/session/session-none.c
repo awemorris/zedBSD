@@ -220,6 +220,31 @@ kl_backend_session_set_options(
 	return ENOTSUP;
 }
 
+/* Gives every method: nothing is turned off without a session manager (WS200). */
+unsigned
+kl_backend_session_methods_get(
+	const struct kl_backend *backend)
+{
+	/* Every method. */
+	(void)backend;
+	return KL_BACKEND_METHODS_ALL;
+}
+
+/* Sets no methods. */
+int
+kl_backend_session_set_methods(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned methods)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	(void)methods;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
 /* Asks nothing about the keys (ws199-p001). */
 int
 kl_backend_session_key_info(

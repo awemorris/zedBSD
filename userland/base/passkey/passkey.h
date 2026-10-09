@@ -38,6 +38,7 @@
 #define PASSKEY_OP_SET_OPTIONS	12
 #define PASSKEY_OP_AUTH_FIDO2	13
 #define PASSKEY_OP_KEY_OWNER	14
+#define PASSKEY_OP_SET_METHODS	15
 
 /* The file, its first line, and the version this passkey writes. */
 #ifndef PASSKEY_FILE
@@ -78,11 +79,28 @@ struct passkey_options {
 	int key_touch;
 };
 
+/*
+ * The sign-in methods as bits (WS200): the password, the PIN, a security
+ * key.  The login and locked screens offer and take only the methods of
+ * the options line that the account has set up; when none of them is the
+ * password or a key, the password is taken too (the PIN alone cannot be
+ * the first sign-in after a start).  The console, su, sudo and SSH always
+ * take the password: they do not ask passkey.
+ */
+#define PASSKEY_METHOD_PASSWORD	0x1U
+#define PASSKEY_METHOD_PIN	0x2U
+#define PASSKEY_METHOD_FIDO2	0x4U
+#define PASSKEY_METHODS_ALL	0x7U
+
 int passkey_request_parse(char *text, size_t length, struct passkey_request *request);
 void passkey_options_default(struct passkey_options *options);
 int passkey_options_read(const char *text, size_t length, const char *name, uid_t uid, struct passkey_options *options);
 int passkey_options_line(const char *name, uid_t uid, const struct passkey_options *options, char *line, size_t size);
 int passkey_options_is_default(const struct passkey_options *options);
+int passkey_methods_parse(const char *text, unsigned *methods);
+void passkey_methods_text(unsigned methods, char *text, size_t size);
+unsigned passkey_methods_effective(unsigned methods, int pin_enrolled, int key_enrolled);
+unsigned passkey_options_methods(const struct passkey_options *options);
 int passkey_is_pin(const char *text);
 void passkey_wipe(void *memory, size_t size);
 int passkey_record_version(const char *text, size_t length);

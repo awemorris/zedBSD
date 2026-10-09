@@ -128,6 +128,8 @@ struct system_view {
 	unsigned key_options_known;
 	unsigned key_pin;
 	unsigned key_touch;
+	unsigned methods_known;
+	unsigned methods;
 	struct kl_sharing_state sharing;
 	struct kl_sharing_state sharing_pending;
 	unsigned sharing_touched;

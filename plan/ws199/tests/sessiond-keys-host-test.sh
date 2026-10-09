@@ -38,6 +38,7 @@ auth|auth-fido2)
 	esac ;;
 key-owner) if [ "\$(cat "$PWD/$OUT/owner-mode" 2>/dev/null)" = none ]; then echo "fail none"; exit 1; fi; echo "ok uid=$UID_SELF user=$NAME_SELF key-pin=0 key-touch=1 card=1"; exit 0 ;;
 set-options) read -r password; read -r pin; read -r touch; if [ "\$password.\$pin.\$touch" = right.0.0 ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-request"; exit 1 ;;
+set-methods) read -r password; read -r methods; if [ "\$password.\$methods" = right.password,fido2 ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-request"; exit 1 ;;
 *) echo "fail bad-request"; exit 1 ;;
 esac
 SCRIPT

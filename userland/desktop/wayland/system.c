@@ -260,6 +260,7 @@ struct system_state {
 	unsigned enrolled_keys;
 	unsigned enrolled_key_pin;
 	unsigned enrolled_key_touch;
+	unsigned enrolled_methods;
 	struct kl_backend_key enrolled_list[KL_BACKEND_KEYS_MAX];
 	size_t enrolled_list_count;
 	unsigned enrolled_wanted;
@@ -285,6 +286,8 @@ static int system_account_key_op(struct kwl_object *object, uint32_t opcode, con
 static int system_key_op_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *first, const char *second);
 static struct kwl_object *system_pin_object(struct kwl_server *server, unsigned version);
 static int system_key_options_begin(struct kwl_object *object, uint32_t number, const char *password, uint32_t key_pin, uint32_t key_touch);
+static int system_account_methods(struct kwl_object *object, const unsigned char *bytes, size_t size);
+static int system_methods_begin(struct kwl_object *object, uint32_t number, const char *password, uint32_t methods);
 static int system_key_begin(struct kwl_object *object, uint32_t number, uint32_t opcode, const char *password, const char *argument, const char *pin);
 static int system_pin_begin(struct kwl_object *object, uint32_t number, const char *current, const char *pin);
 static int system_pin_valid(const char *pin);
@@ -1214,6 +1217,7 @@ kwl_system_enrolled_answer(
 	system_state.enrolled_keys = keys;
 	system_state.enrolled_list_count = listed;
 	kl_backend_session_options_get(server->backend, &system_state.enrolled_key_pin, &system_state.enrolled_key_touch);
+	system_state.enrolled_methods = kl_backend_session_methods_get(server->backend);
 	printf("KWL SYSTEM enrolled pin=%u keys=%u listed=%lu\n", pin, keys, (unsigned long)listed);
 
 	/* Each account object of every client that is not ending. */
@@ -1708,6 +1712,14 @@ system_account_request(
 		if (object->version < KL_SYSTEM_SINCE_KEYS)
 			return EPROTO;
 		error = system_account_key(object, opcode, bytes, size);
+		return error;
+	}
+
+	/* The sign-in methods' change since version 26 (WS200). */
+	if (opcode == KL_SYSTEM_ACCOUNT_SET_METHODS) {
+		if (object->version < KL_SYSTEM_SINCE_METHODS)
+			return EPROTO;
+		error = system_account_methods(object, bytes, size);
 		return error;
 	}
 
@@ -2344,6 +2356,107 @@ system_key_options_begin(
 	return 0;
 }
 
+/*
+ * Carries out set_methods (WS200): the request's number, the password and
+ * the methods' bits.  The password is copied out of the request and wiped
+ * from it.  While the screen is locked it is answered busy.
+ */
+static int
+system_account_methods(
+	struct kwl_object *object,
+	const unsigned char *bytes,
+	size_t size)
+{
+	struct kwl_server *server;
+	uint32_t number;
+	uint32_t methods;
+	char *password;
+	size_t end;
+	int error;
+
+	/* The request's number, the password, and the methods' word after it, nothing more. */
+	if (size < 4U)
+		return EPROTO;
+	server = object->client->server;
+	number = system_word(bytes, 0U);
+	password = NULL;
+	methods = 0U;
+	error = system_read_string(bytes, size, 4U, &password, &end);
+	if (error == 0 && size - end != 4U)
+		error = EPROTO;
+	if (error == 0)
+		methods = system_word(bytes, end);
+
+	/* The request's own bytes held the password: wiped now that it is copied. */
+	system_wipe((char *)(uintptr_t)bytes, size);
+
+	/* The change starts, unless the request was malformed or the screen is locked. */
+	if (error == 0 && server->locked)
+		error = EBUSY;
+	if (error == 0)
+		error = system_methods_begin(object, number, password, methods);
+
+	/* The copy goes, wiped. */
+	if (password != NULL) {
+		system_wipe(password, strlen(password));
+		free(password);
+	}
+
+	/* A malformed request ends the client. */
+	if (error == EPROTO)
+		return EPROTO;
+
+	/* A change that could not start is answered now. */
+	if (error != 0)
+		system_result(object, KL_SYSTEM_ACCOUNT_EVENT_RESULT, number, system_result_of(error));
+	return 0;
+}
+
+/* Starts a change of the sign-in methods through the session manager (SETMETHODS).  Returns 0 when asked, or the errno value to answer with. */
+static int
+system_methods_begin(
+	struct kwl_object *object,
+	uint32_t number,
+	const char *password,
+	uint32_t methods)
+{
+	struct kl_backend *backend;
+	size_t length;
+	int managed;
+	int error;
+
+	/* One change at a time, a password that fits, known methods with the password or a key. */
+	if (system_state.pin_waiting)
+		return EBUSY;
+	length = strlen(password);
+	if (length == 0U || length > KL_SYSTEM_PASSWORD_MAX)
+		return EINVAL;
+	if ((methods & ~KL_BACKEND_METHODS_ALL) != 0U)
+		return EINVAL;
+	if ((methods & (KL_BACKEND_METHOD_PASSWORD | KL_BACKEND_METHOD_KEY)) == 0U)
+		return EINVAL;
+	backend = object->client->server->backend;
+	managed = kl_backend_session_managed(backend);
+	if (!managed)
+		return ENOTSUP;
+
+	/* The change; the answer comes through kwl_system_pin_answer. */
+	error = kl_backend_session_set_methods(backend, password, methods);
+	printf("KWL SYSTEM account methods client=%llu number=%u methods=%u error=%d\n", (unsigned long long)object->client->number, number, methods,
+	    error);
+	if (error != 0)
+		return error;
+
+	/* The change waits for its answer. */
+	system_state.pin.client = object->client->number;
+	system_state.pin.object = object->id;
+	system_state.pin.number = number;
+	system_state.pin_waiting = 1U;
+	system_state.pin_kind = SYSTEM_PIN_CHANGE;
+	system_state.pin_key = 0U;
+	return 0;
+}
+
 /* Tells whether a PIN is exactly six decimal digits. */
 static int
 system_pin_valid(
@@ -2388,6 +2501,12 @@ system_account_enrolled(
 			offset = system_put_string(payload, offset, system_state.enrolled_list[index].label);
 			(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_KEY, payload, offset);
 		}
+	}
+
+	/* The sign-in methods, to an object of version 26 or later (WS200). */
+	if (object->version >= KL_SYSTEM_SINCE_METHODS) {
+		words[0] = system_state.enrolled_methods;
+		(void)kwl_emit(object->client, object->id, KL_SYSTEM_ACCOUNT_EVENT_METHODS, words, sizeof(words[0]));
 	}
 
 	/* The key's options, to an object of version 25 or later (ws199-p001). */

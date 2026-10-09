@@ -1619,6 +1619,21 @@ void kl_backend_session_options_get(const struct kl_backend *backend, unsigned *
 int kl_backend_session_set_options(struct kl_backend *backend, const char *password, unsigned key_pin, unsigned key_touch);
 
 /*
+ * The methods the login and locked screens take for the session user, as
+ * the last ENROLLED told them (WS200): KL_BACKEND_METHOD_* bits, every
+ * method until told.  kl_backend_session_set_methods sets them, checked by
+ * the user's password (SETMETHODS, a session), answered as
+ * kl_backend_session_set_options.  Returns as
+ * kl_backend_session_authenticate.
+ */
+#define KL_BACKEND_METHOD_PASSWORD	0x1U
+#define KL_BACKEND_METHOD_PIN		0x2U
+#define KL_BACKEND_METHOD_KEY		0x4U
+#define KL_BACKEND_METHODS_ALL		0x7U
+unsigned kl_backend_session_methods_get(const struct kl_backend *backend);
+int kl_backend_session_set_methods(struct kl_backend *backend, const char *password, unsigned methods);
+
+/*
  * Gives the security keys of the last ENROLLED answer (ws172-p003): at
  * most capacity of them in keys; returns how many there are.
  */

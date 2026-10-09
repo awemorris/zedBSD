@@ -652,6 +652,84 @@ kl_backend_session_set_options(
 }
 
 /*
+ * Gives the methods the login and locked screens take for the session user,
+ * as the last ENROLLED told them (WS200).
+ */
+unsigned
+kl_backend_session_methods_get(
+	const struct kl_backend *backend)
+{
+	/* Every method, without a backend or before ENROLLED told them. */
+	if (backend == NULL || backend->session_methods == 0U)
+		return KL_BACKEND_METHODS_ALL;
+
+	/* Succeeded: the last answer's. */
+	return backend->session_methods;
+}
+
+/*
+ * Asks sessiond to set the methods the login and locked screens take
+ * (SETMETHODS, WS200): the password or a key among them.
+ */
+int
+kl_backend_session_set_methods(
+	struct kl_backend *backend,
+	const char *password,
+	unsigned methods)
+{
+	char line[SESSION_REQUEST_MAX];
+	char words[32];
+	const char *separator;
+	size_t used;
+	int valid;
+	int written;
+	int error;
+
+	/* Only a session sessiond started and still listens to; known methods with a first sign-in. */
+	if (backend == NULL || password == NULL)
+		return EINVAL;
+	if ((methods & ~KL_BACKEND_METHODS_ALL) != 0U)
+		return EINVAL;
+	if ((methods & (KL_BACKEND_METHOD_PASSWORD | KL_BACKEND_METHOD_KEY)) == 0U)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The password, one line. */
+	valid = session_secret_valid(password);
+	if (!valid || password[0] == '\0')
+		return EINVAL;
+
+	/* The methods' words, in their order. */
+	words[0] = '\0';
+	used = 0U;
+	separator = "";
+	if ((methods & KL_BACKEND_METHOD_PASSWORD) != 0U) {
+		used += (size_t)snprintf(words + used, sizeof(words) - used, "%spassword", separator);
+		separator = ",";
+	}
+
+	/* The PIN. */
+	if ((methods & KL_BACKEND_METHOD_PIN) != 0U) {
+		used += (size_t)snprintf(words + used, sizeof(words) - used, "%spin", separator);
+		separator = ",";
+	}
+
+	/* A security key. */
+	if ((methods & KL_BACKEND_METHOD_KEY) != 0U)
+		(void)snprintf(words + used, sizeof(words) - used, "%sfido2", separator);
+
+	/* The request; nothing of the password is kept once it is sent. */
+	written = snprintf(line, sizeof(line), "SETMETHODS %s\n%s\n", words, password);
+	error = session_ask(backend, KL_BACKEND_SESSION_ENROLL, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
  * Asks sessiond what the security keys there are (KEYINFO, ws199-p001).
  */
 int
@@ -1218,6 +1296,7 @@ session_take_enrolled(
 	const char *option;
 	unsigned pin;
 	unsigned keys;
+	unsigned methods;
 	int scanned;
 	int error;
 
@@ -1245,6 +1324,15 @@ session_take_enrolled(
 	option = strstr(list, " key-touch=0");
 	if (option != NULL)
 		backend->session_key_touch = 0U;
+
+	/* The methods the screens take (WS200): every one unless said otherwise. */
+	backend->session_methods = KL_BACKEND_METHODS_ALL;
+	option = strstr(list, " methods=");
+	if (option != NULL) {
+		scanned = sscanf(option, " methods=%u", &methods);
+		if (scanned == 1 && methods != 0U && (methods & ~KL_BACKEND_METHODS_ALL) == 0U)
+			backend->session_methods = methods;
+	}
 
 	/* Each key listed, while there is room (one that does not read is left out). */
 	backend->session_key_count = 0U;

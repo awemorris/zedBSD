@@ -39,6 +39,7 @@ static const struct policy_reason policy_reasons[] = {
 	{ "not-enrolled", "bad-secret" },
 	{ "locked-account", "locked" },
 	{ "pin-off", "pin-off" },
+	{ "style-off", "style-off" },
 	{ "no-key", "no-key" },
 	{ "many-keys", "many-keys" },
 	{ "key-locked", "locked" },

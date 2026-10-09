@@ -121,6 +121,7 @@ struct system_account_listener {
 	void (*removed)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
 	void (*keys_changed)(void *data, struct wl_proxy *proxy);
 	void (*options)(void *data, struct wl_proxy *proxy, uint32_t key_pin, uint32_t key_touch);
+	void (*methods)(void *data, struct wl_proxy *proxy, uint32_t methods);
 };
 
 /* The listener of kl_system_sharing_v1's events (ws089-p025), in their order. */
@@ -251,7 +252,9 @@ static void system_account_replug(void *data, struct wl_proxy *proxy, uint32_t r
 static void system_account_removed(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
 static void system_account_keys_changed(void *data, struct wl_proxy *proxy);
 static void system_account_options(void *data, struct wl_proxy *proxy, uint32_t key_pin, uint32_t key_touch);
+static void system_account_methods(void *data, struct wl_proxy *proxy, uint32_t methods);
 static int system_key_ops(struct kl_system *system);
+static int system_methods_offered(struct kl_system *system);
 static int system_key_secret_valid(const char *secret);
 static void system_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 static void system_sharing_state(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, const char *fingerprint);
@@ -312,7 +315,8 @@ static const struct system_account_listener system_account_listener = {
 	system_account_replug,
 	system_account_removed,
 	system_account_keys_changed,
-	system_account_options
+	system_account_options,
+	system_account_methods
 };
 
 /* The sharing object's callbacks (ws089-p025). */
@@ -552,6 +556,10 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_KEYS;
 	if ((bits & KL_SYSTEM_HAS_KEYS) != 0U && system->manager_version >= KL_SYSTEM_SINCE_KEY_OPS)
 		bits |= KL_SYSTEM_HAS_KEY_OPS;
+
+	/* The sign-in methods, offered with the PIN to a manager bound at version 26 (WS200). */
+	if ((bits & KL_SYSTEM_HAS_PIN) != 0U && system->manager_version >= KL_SYSTEM_SINCE_METHODS)
+		bits |= KL_SYSTEM_HAS_METHODS;
 
 	/* The monitor, offered to a manager bound at version 2 (WS134 p012). */
 	if ((system->view.capabilities & KL_SYSTEM_CAPABILITY_MONITOR) != 0U && system->manager_version >= 2U)
@@ -2491,6 +2499,24 @@ system_key_ops(
 	return (offered & KL_SYSTEM_HAS_KEY_OPS) != 0U;
 }
 
+/* Tells whether the sign-in methods are offered (WS200). */
+static int
+system_methods_offered(
+	struct kl_system *system)
+{
+	unsigned offered;
+
+	/* No account, or a lost compositor. */
+	if (system == NULL || system->account == NULL || system->lost)
+		return 0;
+
+	/* Offered. */
+	offered = kl_system_capabilities(system);
+	if ((offered & KL_SYSTEM_HAS_METHODS) == 0U)
+		return 0;
+	return 1;
+}
+
 /*
  * Asks what the security keys there are (ws199-p001).
  */
@@ -2701,6 +2727,58 @@ kl_system_account_set_key_options(
 	/* Sent with the application's next flush. */
 	number = system_number(system, request);
 	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_SET_KEY_OPTIONS, number, password, key_pin, key_touch);
+	return 0;
+}
+
+/* Gives the methods the login and locked screens take for the user, as the compositor last told them (WS200): 1 when known. */
+int
+kl_system_account_methods(
+	const struct kl_system *system,
+	unsigned *methods)
+{
+	/* Every method, until told. */
+	*methods = KL_SYSTEM_METHODS_ALL;
+	if (system == NULL || !system->view.methods_known)
+		return 0;
+
+	/* Told. */
+	*methods = system->view.methods;
+	return 1;
+}
+
+/* Asks for the methods the login and locked screens take to be set, checked by the password (WS200).  Nothing secret is kept here. */
+int
+kl_system_account_set_methods(
+	struct kl_system *system,
+	const char *password,
+	unsigned methods,
+	uint32_t *request)
+{
+	uint32_t number;
+	int offered;
+	int valid;
+
+	/* The methods offered (the PIN's session manager, a compositor of version 26); a password; a first sign-in among them. */
+	offered = system_methods_offered(system);
+	if (!offered)
+		return ENOTSUP;
+	if (password == NULL || password[0] == '\0')
+		return EINVAL;
+	if ((methods & ~KL_SYSTEM_METHODS_ALL) != 0U)
+		return EINVAL;
+	if ((methods & (KL_SYSTEM_METHOD_PASSWORD | KL_SYSTEM_METHOD_KEY)) == 0U)
+		return EINVAL;
+	valid = system_key_secret_valid(password);
+	if (!valid)
+		return EINVAL;
+
+	/* A refusal of an earlier request is not this one's. */
+	system->view.refused_request = 0U;
+	system->view.refused_reason[0] = '\0';
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_SET_METHODS, number, password, methods);
 	return 0;
 }
 
@@ -3461,6 +3539,23 @@ system_account_options(
 	system->view.key_options_known = 1U;
 	system->view.key_pin = key_pin != 0U;
 	system->view.key_touch = key_touch != 0U;
+}
+
+/* Keeps the methods the login and locked screens take (WS200), told before each options. */
+static void
+system_account_methods(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t methods)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Known now (enrolled, which follows, says it changed). */
+	system = data;
+	system->view.methods_known = 1U;
+	system->view.methods = methods & KL_SYSTEM_METHODS_ALL;
 }
 
 /* Keeps an answered request of any object. */

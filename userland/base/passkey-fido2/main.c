@@ -128,6 +128,7 @@ static int main_all_keys(struct main_all_keys *all);
 static int main_key_owner(const char *name);
 static int main_owners_gather(const char *name, const struct main_all_keys *all, struct main_owners *owners);
 static int main_owner_group(struct main_owners *owners, const char *name, const char *line);
+static int main_key_method_on(const char *name, uid_t uid);
 static int main_replug(void);
 static int main_job_failed(int error, const struct fido2_message *message, int kind);
 static uint64_t main_now_ms(void);
@@ -543,6 +544,13 @@ main_auth(
 		if (error != 0)
 			return main_fail("internal");
 		return main_fail("not-enrolled");
+	}
+
+	/* A security key the account turned off for the screens is refused (WS200). */
+	usable = main_key_method_on(name, uid);
+	if (!usable) {
+		passkey_wipe(pin, strlen(pin));
+		return main_fail("style-off");
 	}
 
 	/* Reads the account's options; the old auth request keeps the defaults (PIN and touch). */
@@ -1286,6 +1294,11 @@ main_owner_group(
 	if (!usable || owners->group_count >= FIDO2_IDS_MAX)
 		return -1;
 
+	/* An account that turned its keys off for the screens owns none there (WS200). */
+	usable = main_key_method_on(name, account.pw_uid);
+	if (!usable)
+		return -1;
+
 	/* A name the group can hold. */
 	length = strlen(name);
 	if (length >= sizeof(owners->names[0]))
@@ -1511,4 +1524,34 @@ main_verify_reason(
 
 	/* A malformed answer, or another party's. */
 	return "device";
+}
+
+/*
+ * Tells whether the account takes a security key on the login and locked
+ * screens (WS200): fido2 among the methods of its options line (every
+ * method without one, or when the file does not read).
+ */
+static int
+main_key_method_on(
+	const char *name,
+	uid_t uid)
+{
+	struct passkey_options options;
+	size_t length;
+	unsigned methods;
+	int error;
+
+	/* The account's options as the file has them. */
+	passkey_options_default(&options);
+	error = main_file(&length, 1);
+	if (error == 0)
+		(void)passkey_options_read(main_text, length, name, uid, &options);
+	methods = passkey_options_methods(&options);
+
+	/* A key among them. */
+	if ((methods & PASSKEY_METHOD_FIDO2) == 0U)
+		return 0;
+
+	/* Taken. */
+	return 1;
 }

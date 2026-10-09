@@ -33,6 +33,9 @@
  *                                   REPLUG while the key is to be plugged in again,
  *                                   TOUCH..., then OK removed=N or FAIL reason
  *   KEYOWNER                        as the greeter's, the session user's keys only
+ *   SETMETHODS METHODS, then the password's line: the methods the login
+ *                                   and locked screens take ("password,pin,fido2"
+ *                                   or part of it; WS200)
  *   CANCEL
  * (the keys' own requests, ws199-p001 section 4.4: KEYINFO and KEYPIN are
  * not attempts of the account and touch no count; KEYRESET counts as a
@@ -84,6 +87,7 @@ static const char *const auth_commands[SESSIOND_COMMAND_COUNT] = {
 	"KEYRESET",
 	"SETOPTIONS",
 	"KEYOWNER",
+	"SETMETHODS",
 };
 
 /* The words of the styles, by SESSIOND_STYLE_*. */
@@ -453,6 +457,18 @@ auth_parse(
 		return 0;
 	}
 
+	/* SETMETHODS takes the methods (passkey checks their words), then the password's line (WS200). */
+	if (command == SESSIOND_COMMAND_SETMETHODS) {
+		if (count < 2U)
+			return -1;
+		length = strlen(word[1]);
+		if (length >= sizeof(exchange->argument))
+			return -1;
+		memcpy(exchange->argument, word[1], length + 1U);
+		exchange->lines_wanted = 1U;
+		return 0;
+	}
+
 	/* KEYPIN set takes the new key PIN's line, KEYPIN change the key PIN's and the new one's. */
 	if (command == SESSIOND_COMMAND_KEYPIN) {
 		if (count < 2U)
@@ -601,7 +617,8 @@ auth_begin(
 	    exchange->style != SESSIOND_STYLE_FIDO2) {
 		sessiond_policy_attempt(exchange->count, exchange->style);
 	} else if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE ||
-		   exchange->command == SESSIOND_COMMAND_KEYRESET || exchange->command == SESSIOND_COMMAND_SETOPTIONS) {
+		   exchange->command == SESSIOND_COMMAND_KEYRESET || exchange->command == SESSIOND_COMMAND_SETOPTIONS ||
+		   exchange->command == SESSIOND_COMMAND_SETMETHODS) {
 		sessiond_policy_attempt(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
 
@@ -716,6 +733,9 @@ auth_request(
 		break;
 	case SESSIOND_COMMAND_KEYOWNER:
 		length = snprintf(request, size, "key-owner\n%s\n", exchange->name);
+		break;
+	case SESSIOND_COMMAND_SETMETHODS:
+		length = snprintf(request, size, "set-methods\n%s\n%s\n%s\n", exchange->name, exchange->lines[0], exchange->argument);
 		break;
 	case SESSIOND_COMMAND_COUNT:
 		break;
@@ -1060,9 +1080,9 @@ auth_granted(
 		sessiond_log("SESSIOND UNLOCK ok user=%s style=%s", exchange->name, style);
 	}
 
-	/* A change of the PIN, a key, or the key's options. */
+	/* A change of the PIN, a key, the key's options, or the methods. */
 	if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE ||
-	    exchange->command == SESSIOND_COMMAND_SETOPTIONS) {
+	    exchange->command == SESSIOND_COMMAND_SETOPTIONS || exchange->command == SESSIOND_COMMAND_SETMETHODS) {
 		syslog(LOG_NOTICE, "%s %s of %s", auth_commands[exchange->command], style, exchange->name);
 		sessiond_log("SESSIOND %s %s ok user=%s", auth_commands[exchange->command], style, exchange->name);
 	}
