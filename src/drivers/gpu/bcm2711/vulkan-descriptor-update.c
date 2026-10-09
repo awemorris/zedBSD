@@ -404,6 +404,14 @@ destination_prepare(
 	uint32_t index;
 	int error;
 
+	/* Ordinary Vulkan 1.0 bindings cannot be updated while native work uses them; generation wrap must never revive an old recording. */
+	if (set->pending != 0)
+		return EBUSY;
+
+	/* An update generation must never wrap into a stale ordinary recording's saved value. */
+	if (set->generation == UINT64_MAX)
+		return EOVERFLOW;
+
 	/* Repeated writes and copies share one staged state for each destination. */
 	for (entry = 0; entry < update->count; entry++) {
 		if (update->destinations[entry].set == set) {
@@ -496,6 +504,12 @@ update_release(
 	error = 0;
 	for (entry = 0; entry < update->count; entry++) {
 		destination = &update->destinations[entry];
+
+		/* One committed transaction advances each changed set once, invalidating its earlier ordinary recorded binds. */
+		if (publish)
+			destination->set->generation++;
+
+		/* Every replaced or staged binding retires independently even if another native owner reports uncertainty. */
 		for (index = 0; index < BCM2711_VULKAN_LAYOUT_BINDINGS; index++) {
 			if (publish) {
 				previous = destination->set->bindings[index];
