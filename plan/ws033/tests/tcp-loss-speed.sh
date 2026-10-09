@@ -62,8 +62,11 @@ iface=$(guest "ifconfig -a | awk '/^[a-z]+[0-9]+:/ {name = substr(\$1, 1, length
     tail -1)
 echo "interface: $iface"
 [ -n "$iface" ] || { echo "FAIL: no second adapter"; exit 1; }
-guest "ifconfig $iface inet 10.77.0.2 netmask 255.255.255.0 up; sleep 2; ping -c 1 10.77.0.1" > "$out/setup.txt"
-grep -q '1 packets received' "$out/setup.txt" || { cat "$out/setup.txt"; echo "FAIL: no way to 10.77.0.1"; exit 1; }
+# The address through networkd (net static, so that its DHCP on the hot-plugged adapter does not take it back), with
+# ifconfig's two steps when that is refused: zedBSD's ifconfig takes "inet ADDRESS netmask MASK" and "up" as separate
+# commands (T1-484: the one line "inet ... netmask ... up" printed the usage and left the adapter without an address).
+guest "net static $iface ipv4 10.77.0.2 netmask 255.255.255.0 || ifconfig $iface inet 10.77.0.2 netmask 255.255.255.0; ifconfig $iface up; sleep 2; ifconfig $iface; ping -c 3 10.77.0.1" > "$out/setup.txt"
+grep -qE ' [1-3] packets received' "$out/setup.txt" || { cat "$out/setup.txt"; echo "FAIL: no way to 10.77.0.1"; exit 1; }
 
 # One loss: three fetches, their MB/s and the median.
 measure() {
