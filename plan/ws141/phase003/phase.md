@@ -41,3 +41,7 @@ Queue: none
 - build: rpi4（driver y）exit 0・warning 0、rpi4 の driver n exit 0・warning 0（amd64 は rpi4.c を build しないので影響なし、未再試験）。host の試験: `plan/ws141/tests/stage-host-test.sh` が stage と list の 2 つを流し両方 PASS。改名の旧名 630 で driver に一致 0。`git diff --check` 0。
 - **再開点**: (1) Q1 経由で T1 に QEMU の回帰（raspi4b の boot-test、login prompt。N0 は emulator の判定で register を読まずに抜けるはず。PNG に行が写らないので、印を見るなら serial の対話か boot の後の dmesg を SSH で読む道を T1 と相談）。(2) 実機の写真（ユーザー）で P0・N0 の行と期待値を照合（N0 の行は 15 行前後で、25 行の console から P0 の行が流れる。必要なら `rpi4gpu.stop=N1` で止めて写真）。(3) 次の段 N1（firmware の list を写した自前の list、「次の list」の切り替え、今の list の一致の poll）。N1 の前に実機の N0 の結果（firmware の list の位置・word の範囲・plane の数）が要る。
 - 未実施: QEMU の回帰（N0 の版）、実機。
+
+## 独立Codexセッションの再開確認（2026-10-09）
+
+ユーザーがWS141を担当へ割当。開始tree a05865278のrpi4 kernelをdriver y/nでbuildし、両方exit 0・warning/error 0、stage/list host試験PASS。source修正は無し。詳細は[実行記録](../execution-20261009.md)。ユーザー回答「実機確認は後で行う」により実機条件は未達のまま保持。whole Phaseのclearanceは行っていない。
