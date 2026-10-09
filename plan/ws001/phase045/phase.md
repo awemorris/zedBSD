@@ -84,3 +84,9 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
 - 確かめ: amd64 の libc.so の build rc 0・warning 0、22 の関数が libc.so の dynamic symbol。変えた src/libc の 5 file は i386・aarch64 でも -Wall -Wextra -Werror で compile。host 試験（関数の定義を取り出して名前を替え、host の glibc で ASan・UBSan）: strtok_r（空の token の飛ばし、終わりの後の NULL）、stpcpy、stpncpy（詰めと切り詰め）、getsubopt（名前だけ・値つき・知らない名前・空の値・途中の名前の不一致・最後の位置）、wcsnlen、wcpncpy、wcpcpy、wcsncasecmp（大小、bound、長さ違い）→ PASS。style-check の新しい指摘 0。照合: 無い名前 123 → 89（base 79・XSI 1・option 9）。string.h・stdlib.h・ctype.h・wctype.h・net/if.h は 0、stdio.h・wchar.h に残るのは memory stream（fmemopen・open_memstream・open_wmemstream、p046）。
 - 未実施: QEMU（if_nameindex・dprintf は guest で、T1 に依頼していない。merge の前の T1 の依頼に入れる）。
 - 再開点: (B) cpio.h・tar.h → 照合の道具の誤検出（unistd.h の「if defined」の 6、sys/sem.h の匿名の構造体の member）。残りは p046〜p051 と kernel・toolchain が要る物（O_EXEC・O_SEARCH、uc_stack、wint_t）。
+
+## 2026-10-09 夜 P1（branch `agent/p1-p045`）: (B) cpio.h・tar.h
+
+- `include/libc/cpio.h`（C_I* の 20 と MAGIC "070707"）・`include/libc/tar.h`（TMAGIC・TMAGLEN・TVERSION・TVERSLEN、typeflag の 9、mode の 12）。値は規格の頁（`build/ws001-posix-ref/pages/cpio.h.html`・`tar.h.html`）から読んで照合した。tree の中に同じ名前を自分で定義する source や `<tar.h>`・`<cpio.h>` を include する source は無い（git grep）。
+- 確かめ: `check.py --header cpio.h --header tar.h` で 3 arch とも missing 0・header の error 無し。amd64 の libc.so の build（rc 0）で sysroot の `usr/include` に 2 つとも入る（既存の規則のまま、toolchain は変えていない）。照合の全体: 無い名前 89 → 89（cpio.h・tar.h は前は file が無く名前を数えていなかった。無い header は 5 → 3: complex.h・monetary.h・wordexp.h、p049・p050）。
+- 再開点: 照合の道具の誤検出（unistd.h の「if defined」の 6、sys/sem.h の匿名の構造体の member）。
