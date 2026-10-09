@@ -207,7 +207,7 @@ kwl_notify_log_draw(
 		kwl_notify_draw_glass(server, command, log_view.left, log_view.top, log_view.width, opacity);
 		memcpy(ink, soft, sizeof(ink));
 		ink[3] = opacity;
-		glass_draw_text_middle(server, command, SIZE_TITLE, log_view.left + log_view.width / 2, middle + 7, kl_tr("No notifications"), log_view.width, ink);
+		glass_draw_text_centred(server, command, SIZE_TITLE, log_view.left + log_view.width / 2, middle + 7, kl_tr("No notifications"), log_view.width, ink);
 		return;
 	}
 
@@ -223,7 +223,7 @@ kwl_notify_log_draw(
 		glass_draw_solid(server, command, (float)left, (float)top, (float)LOG_BUTTON_WIDTH, (float)LOG_BUTTON_HEIGHT, 8.0f, fill);
 		memcpy(ink, white, sizeof(ink));
 		ink[3] = opacity;
-		glass_draw_text_middle(server, command, SIZE_BAR, left + LOG_BUTTON_WIDTH / 2, top + 21, kl_tr("Clear all notifications"), LOG_BUTTON_WIDTH, ink);
+		glass_draw_text_centred(server, command, SIZE_BAR, left + LOG_BUTTON_WIDTH / 2, top + 21, kl_tr("Clear all notifications"), LOG_BUTTON_WIDTH, ink);
 	}
 
 	/* The arrows beside the board (the ring has the clearing board too). */
