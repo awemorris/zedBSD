@@ -35,6 +35,8 @@
 | Terminal の文字のドラッグ | ✘ 押し込みが要る、tap の後のドラッグで選べるように | [BUG-276](bugs/BUG-276.md) P1 |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) P1 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) P1 |
+| menuconfig（WS193） | ✔ | WS193 p002 cleared |
+| USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) 5330 の復帰の後に実機で測る。直らなければ既知の問題 |
 | App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べ（ベータ2 で直せるかは調べの後） |
 
 ## 必須
@@ -66,11 +68,9 @@
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
 | 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
 | 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
-| 11 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から USB LAN（ue0）経由で大きい file を scp。Settings の Network で link の速度を見る | 速さを教えてください（前回 950 KB/s）。link の速度が出る |
 | 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
 | 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
 | 14 | WS177 準正常系（USB-C・PIN・手書き・Notes） | USB-C の monitor・充電器を数回抜き差し／Terminal で `fidoctl` の PIN の設定／Notes の手書きで tap と書き込み／Notes の Save Clean Copy を PDF Viewer で開く | 固まらない・PIN が画面に出ない・手書きが崩れない・PDF が開ける |
-| 15 | [WS193](ws193/ws.md) menuconfig（host） | 自分の PC で `make menuconfig` → Build boot image | 新しい階層、進捗の bar と今の対象の名前。できた image が起動 |
 | 16 | [WS194](ws194/ws.md) keiland-linux（Debian など、任意） | `make keiland-linux` | 足りない package を y/N で聞く、build の後に install を y/N で聞く |
 | 22 | [BUG-189](bugs/BUG-189.md) 有線と Wi-Fi の両方の接続 | USB LAN と Wi-Fi の両方をつなぎ、Settings → Network の Active Network を見る | USB LAN（有線）が出る。再現しなければ close（2026-10-08 ユーザー） |
 | 23 | [BUG-212](bugs/BUG-212.md) 有線を抜いた後の Wi-Fi | 有線の接続中に Wi-Fi もつなぎ、有線の cable を抜く | Wi-Fi が切れずに使える。再現したら Wi-Fi の off・on の前に Q1 へ（SSH で networkd と intel-ax211 の log を取る）。再現しなければ close |
