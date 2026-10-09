@@ -313,6 +313,19 @@ static struct kwl_keypad greeter_keypad;
 static unsigned greeter_answer_quiet;
 
 /*
+ * The link's place and the styles' places last written to the log for the
+ * tests' pointer (ws172-p003, ws187-p003): they move with the keypad and
+ * the message line, so they are written again whenever the screen lays
+ * them out elsewhere.  greeter_places_logged is 0 until the first are
+ * written.
+ */
+static int32_t greeter_logged_link[4];
+static int32_t greeter_logged_styles[GREETER_STYLES][4];
+static unsigned greeter_logged_bits[GREETER_STYLES];
+static unsigned greeter_logged_count;
+static unsigned greeter_places_logged;
+
+/*
  * The lock screen's moves and grace (ws187-p002): whether the lock was the
  * user's choice (it always asks for the secret, kwl_lock_reason_manual),
  * when it locked on the wall clock, whether the card with the field shows
@@ -386,6 +399,8 @@ static void greeter_key_granted(struct kwl_server *server);
 static void greeter_key_try_again(struct kwl_server *server);
 static int greeter_user_index(const char *name);
 static void greeter_keypad_log(struct kwl_server *server);
+static void greeter_places_log(const struct greeter_layout *layout);
+static void greeter_places_report(struct kwl_server *server);
 
 /*
  * Prepares the login screen: the users, and the answers' descriptor.
@@ -575,6 +590,9 @@ kwl_greeter_answer(
 
 	/* The same answers for both. */
 	greeter_answered(server, error);
+
+	/* The answer may have moved the styles (a message line, the keypad back): where they are now. */
+	greeter_places_report(server);
 }
 
 /*
@@ -623,7 +641,8 @@ kwl_greeter_draw(
 		return;
 	}
 
-	/* The card with the users, the password and Log In. */
+	/* The card with the users, the password and Log In; where its styles are, when they moved. */
+	greeter_places_log(&layout);
 	greeter_draw_card(server, command, &layout);
 
 	/* The power buttons (not on a session's lock screen). */
@@ -2260,9 +2279,7 @@ static void
 greeter_styles_take(
 	struct kwl_server *server)
 {
-	struct greeter_layout layout;
 	unsigned styles;
-	unsigned index;
 
 	/*
 	 * The styles as sessiond offers them (WS200: the password too may be
@@ -2274,14 +2291,6 @@ greeter_styles_take(
 		greeter_styles = KL_BACKEND_STYLE_PASSWORD;
 	server->dirty = 1;
 	printf("KWL GREETER styles=%u\n", greeter_styles);
-
-	/* Where the link to the next style is, for the tests' pointer (ws172-p003). */
-	greeter_layout(server, &layout);
-	printf("KWL GREETER link x=%d y=%d width=%d height=%d\n", layout.link[0], layout.link[1], layout.link[2], layout.link[3]);
-
-	/* Where the styles are, for the tests' pointer too (ws187-p003, ws172-p007). */
-	for (index = 0U; index < layout.style_count; index++)
-		printf("KWL GREETER style-at style=%u x=%d y=%d width=%d height=%d\n", layout.style_bits[index], layout.styles[index][0], layout.styles[index][1], layout.styles[index][2], layout.styles[index][3]);
 
 	/* The key's mode keeps the key's style (its owner has a key, whatever was said, ws199-p001). */
 	if (greeter_key.step != KWL_KEY_OFF) {
@@ -2958,14 +2967,74 @@ greeter_keypad_log(
 	/* Where everything goes. */
 	greeter_layout(server, &layout);
 
-	/* No keypad. */
+	/* No keypad; the styles under the field then stand higher. */
 	if (layout.key_count == 0U) {
 		printf("KWL GREETER keypad none\n");
+		greeter_places_log(&layout);
 		return;
 	}
 
-	/* The first key and the last. */
+	/* The first key and the last; the styles under the keypad. */
 	last = &layout.keys[layout.key_count - 1U];
 	printf("KWL GREETER keypad keys=%zu letters=%u x=%d y=%d right=%d bottom=%d\n", layout.key_count, greeter_keypad.letters, layout.keys[0].rect[0],
 	    layout.keys[0].rect[1], last->rect[0] + last->rect[2], last->rect[1] + last->rect[3]);
+	greeter_places_log(&layout);
+}
+
+/*
+ * Logs where the link to the next style and the styles side by side are,
+ * for the tests' pointer (ws172-p003, ws187-p003, ws172-p007), when they are
+ * not where the log last said: the keypad and the message line move them.
+ */
+static void
+greeter_places_log(
+	const struct greeter_layout *layout)
+{
+	unsigned index;
+	int link_moved;
+	int styles_moved;
+	int bits_changed;
+
+	/* How the places differ from what the log last said. */
+	link_moved = memcmp(greeter_logged_link, layout->link, sizeof(greeter_logged_link));
+	styles_moved = memcmp(greeter_logged_styles, layout->styles, sizeof(greeter_logged_styles[0]) * layout->style_count);
+	bits_changed = memcmp(greeter_logged_bits, layout->style_bits, sizeof(greeter_logged_bits[0]) * layout->style_count);
+
+	/* The log says it already: lines were written, and the link, the count and each style are where they said. */
+	if (greeter_places_logged &&
+	    link_moved == 0 &&
+	    greeter_logged_count == layout->style_count &&
+	    styles_moved == 0 &&
+	    bits_changed == 0)
+		return;
+
+	/* Where the link to the next style is. */
+	printf("KWL GREETER link x=%d y=%d width=%d height=%d\n", layout->link[0], layout->link[1], layout->link[2], layout->link[3]);
+
+	/* Where each style offered is (none while only the password is). */
+	for (index = 0U; index < layout->style_count; index++) {
+		printf("KWL GREETER style-at style=%u x=%d y=%d width=%d height=%d\n", layout->style_bits[index], layout->styles[index][0], layout->styles[index][1],
+		    layout->styles[index][2], layout->styles[index][3]);
+	}
+
+	/* What the log now says, to be compared with the next layout. */
+	memcpy(greeter_logged_link, layout->link, sizeof(greeter_logged_link));
+	memcpy(greeter_logged_styles, layout->styles, sizeof(greeter_logged_styles[0]) * layout->style_count);
+	memcpy(greeter_logged_bits, layout->style_bits, sizeof(greeter_logged_bits[0]) * layout->style_count);
+	greeter_logged_count = layout->style_count;
+	greeter_places_logged = 1U;
+}
+
+/* Lays the screen out and logs where its styles are when they moved. */
+static void
+greeter_places_report(
+	struct kwl_server *server)
+{
+	struct greeter_layout layout;
+
+	/* Where everything goes now. */
+	greeter_layout(server, &layout);
+
+	/* The styles' lines, when they moved. */
+	greeter_places_log(&layout);
 }
