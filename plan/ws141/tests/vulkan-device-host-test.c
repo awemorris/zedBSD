@@ -7,6 +7,7 @@
 
 /* Real client record encoding/decoding crosses the native transport and typed root/query implementation. */
 #include <assert.h>
+#include <kern/dcache.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -28,6 +29,7 @@
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
 #include "drivers/gpu/bcm2711/vulkan-prepared.h"
 #include "drivers/gpu/bcm2711/vulkan-uniform.h"
+#include "drivers/gpu/bcm2711/vulkan-native-draw.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
@@ -57,6 +59,12 @@ static unsigned allocations;
 /* A selected ordinary heap failure must unwind parent/domain ownership acquired by native publication. */
 static unsigned fail_after;
 
+/* Unique numerical physical pages model independent cached upload allocation placement, without physical cache or GPU execution. */
+static uint64_t next_native_physical = 0x200000U;
+
+/* Complete cache-clean observations distinguish device-visible upload preparation from a GPU launch. */
+static unsigned native_cleans;
+
 /* Actual VA/page-table code consumes fixture RAM and an explicitly observed flush outcome. */
 static uint32_t native_pages[1048576];
 
@@ -79,6 +87,7 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void native_draw_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void uniform_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
 static void draw_test(struct bcm2711_vulkan_command_buffer *command);
@@ -217,8 +226,12 @@ bcm2711_buffer_release(
 
 	/* Independent GPU views and returned BLOB source holds retire before their final fixture RAM owner. */
 	buffer->references--;
-	if (buffer->references == 0)
+	if (buffer->references == 0) {
+		/* Independently allocated cached fixture runs retire their CPU storage after their last actual mapping owner. */
+		if (!buffer->uncached)
+			kern_free(buffer->address);
 		kern_free(buffer);
+	}
 }
 
 /*
@@ -250,6 +263,58 @@ bcm2711_buffer_create_uncached(
 
 	/* Succeeded: actual native VA ownership will retain this ordinary fixture source run. */
 	return 0;
+}
+
+/*
+ * Supplies independently owned cached upload RAM to actual native mapping and draw preparation source.
+ */
+int
+bcm2711_buffer_create(
+	uint64_t bytes,
+	uint64_t limit,
+	size_t alignment,
+	struct bcm2711_buffer **result)
+{
+	struct bcm2711_buffer *buffer;
+
+	/* Actual host CPU intervals are independent; numerical PA reachability is not physical device validation. */
+	*result = NULL;
+	assert(limit == 0xffffffffU && alignment == 4096 && bytes <= 1024U * 1024U);
+	buffer = kern_calloc(1, sizeof(*buffer));
+	if (buffer == NULL)
+		return ENOMEM;
+	buffer->bytes = bytes;
+	buffer->memory.size = (bytes + 4095U) & ~4095ULL;
+	buffer->address = kern_calloc(1, (size_t)buffer->memory.size);
+	if (buffer->address == NULL) {
+		kern_free(buffer);
+		return ENOMEM;
+	}
+
+	/* Distinct mapped PTEs cannot alias another fixture upload's independent source storage. */
+	buffer->memory.paddr = next_native_physical;
+	next_native_physical += buffer->memory.size;
+	buffer->references = 1;
+	*result = buffer;
+
+	/* Succeeded: actual mapping source acquires its own reference to this complete padded cached fixture run. */
+	return 0;
+}
+
+/*
+ * Observes complete padded cache-clean requests without claiming real host or device cache maintenance.
+ */
+void
+kern_dcache_clean_range(
+	const void *address,
+	size_t bytes)
+{
+	/* No coherent fixture alias is treated as cached upload storage. */
+	assert(address != NULL && address != backing_storage && bytes != 0 && (bytes & 4095U) == 0);
+	native_cleans++;
+
+	/* Succeeded: the complete cache-maintenance request has been observed. */
+	return;
 }
 
 /*
@@ -306,6 +371,7 @@ main(
 	memset(&view, 0, sizeof(view));
 	engine.hardware.ready = true;
 	engine.hardware.physical_bits = 32;
+	engine.hardware.core_ident[1] = 2U << 28;
 	page_buffer.address = native_pages;
 	engine.hardware.pages = &page_buffer;
 	spin_init(&engine.hardware.guard, LOCK_RANK_DEVICE, "vulkan-test");
@@ -695,6 +761,157 @@ command_test(
 	return;
 }
 
+/* Checks complete real pipeline upload preparation, owned fetch/TMU snapshots, budget refusal and uncertainty retention without GPU execution. */
+static void
+native_draw_test(
+	struct bcm2711_vulkan_session *session,
+	const struct bcm2711_vulkan_prepared_event *event)
+{
+	struct bcm2711_vulkan_native_draw *draw;
+	struct bcm2711_vulkan_prepared_event *changed;
+	struct bcm2711_vulkan_pipeline *pipeline;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_native_storage *storage;
+	struct bcm2711_v3d_view *view;
+	struct bcm2711_v3d_space *space;
+	void *cpu;
+	uint8_t *source;
+	uint8_t *record;
+	uint32_t address;
+	uint32_t index;
+	uint32_t byte;
+	unsigned baseline;
+	unsigned cleans;
+	unsigned used;
+	uint64_t available;
+	uint64_t owned;
+	int error;
+
+	/* Known six-vertex vec2 data and a distinct sampled raster use actual coherent resource interval resolution. */
+	space = &session->render->device->space;
+	baseline = allocations;
+	error = bcm2711_vulkan_resource_backing(event->vertices[0], 0, 48, &view, &address, &cpu);
+	assert(error == 0);
+	source = cpu;
+	for (index = 0; index < 48; index++)
+		source[index] = (uint8_t)(index + 1);
+	image_view = event->descriptors[0][0].view->payload;
+	image = image_view->owner.parent->payload;
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &cpu);
+	assert(error == 0 && image->bytes == 512);
+	memset(cpu, 0x75, 512);
+	cleans = native_cleans;
+	available = 1024U * 1024U;
+	error = bcm2711_vulkan_native_draw_create(space, event, &available, &draw);
+	assert(error == 0 && draw != NULL && draw->vertices == 6 && draw->attributes == 1 && draw->count == 11);
+	owned = draw->bytes;
+	assert(owned == 11U * 4096U && available == 1024U * 1024U - owned && native_cleans == cleans + 11);
+	assert(draw->bindings[0][0].texture == draw->storage[1]->view->address);
+	assert(draw->bindings[0][0].sampler == draw->storage[1]->view->address + 32);
+
+	/* Every shader code upload contains the actual independently compiled instruction bytes. */
+	for (index = 0; index < 3; index++) {
+		storage = draw->storage[2U + index * 2U];
+		source = storage->view->buffer->address;
+		for (byte = 0; byte < 8; byte++)
+			assert(source[byte] == (uint8_t)(event->pipeline->programs[index]->code[0] >> (byte * 8U)));
+	}
+
+	/* Packed fetch exactly copies the six logical vec2 vertices and every later padded byte stays initialized zero. */
+	storage = draw->storage[9];
+	assert(storage->bytes == 48);
+	source = storage->view->buffer->address;
+	for (index = 0; index < 48; index++)
+		assert(source[index] == index + 1U);
+	for (index = 48; index < 4096; index++)
+		assert(source[index] == 0);
+	storage = draw->storage[10];
+	assert(draw->shader == storage->view->address);
+	record = storage->view->buffer->address;
+	assert(record[40] == 10U && record[41] == 0x22U && record[44] == 8U && record[48] == 5U);
+
+	/* Later coherent raster/fetch mutation leaves the existing independent GPU input snapshot unchanged. */
+	error = bcm2711_vulkan_resource_backing(event->vertices[0], 0, 48, &view, &address, &cpu);
+	assert(error == 0);
+	memset(cpu, 0x93, 48);
+	assert(source[0] == 1 && source[47] == 48);
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &cpu);
+	assert(error == 0);
+	memset(cpu, 0x24, 512);
+	assert(((uint8_t *)draw->storage[0]->view->buffer->address)[0] == 0x75);
+	used = allocations;
+	error = bcm2711_vulkan_native_draw_release(&draw, false);
+	assert(error == EBUSY && draw != NULL && draw->bytes == owned && allocations == used);
+	error = bcm2711_vulkan_native_draw_release(&draw, true);
+	assert(error == 0 && draw == NULL && allocations == baseline);
+
+	/* Early and late ordinary OOM retire complete mapped prefixes, including an independently copied scalar stream. */
+	for (index = 1; index <= 4; index++) {
+		fail_after = index * 10U;
+		available = 1024U * 1024U;
+		error = bcm2711_vulkan_native_draw_create(space, event, &available, &draw);
+		assert(error == ENOMEM && draw == NULL && allocations == baseline && available == 1024U * 1024U);
+		assert(fail_after == 0);
+	}
+
+	/* An insufficient whole-job budget refuses after a valid allocation prefix and preserves the caller's exact budget. */
+	available = 4096;
+	error = bcm2711_vulkan_native_draw_create(space, event, &available, &draw);
+	assert(error == ENOMEM && draw == NULL && available == 4096 && allocations == baseline);
+
+	/* Complete synthetic prepared copies exercise firstVertex rebasing and late logical fetch refusal without changing the real primary. */
+	changed = kern_calloc(1, sizeof(*changed));
+	assert(changed != NULL);
+	*changed = *event;
+	changed->draw[0] = 3;
+	changed->draw[2] = 3;
+	error = bcm2711_vulkan_resource_backing(event->vertices[0], 0, 48, &view, &address, &cpu);
+	assert(error == 0);
+	for (index = 0; index < 48; index++)
+		((uint8_t *)cpu)[index] = (uint8_t)(index + 1);
+	available = 1024U * 1024U;
+	error = bcm2711_vulkan_native_draw_create(space, changed, &available, &draw);
+	assert(error == 0 && draw->vertices == 3 && draw->storage[9]->bytes == 24);
+	source = draw->storage[9]->view->buffer->address;
+	for (index = 0; index < 24; index++)
+		assert(source[index] == index + 25U);
+	error = bcm2711_vulkan_native_draw_release(&draw, true);
+	assert(error == 0 && draw == NULL && allocations == baseline + 1);
+
+	/* A valid narrower float format fills its absent shader component with zero instead of the next source word. */
+	pipeline = kern_calloc(1, sizeof(*pipeline));
+	assert(pipeline != NULL);
+	*pipeline = *event->pipeline;
+	pipeline->attributes[0].format = VK_FORMAT_R32_SFLOAT;
+	changed->pipeline = pipeline;
+	available = 1024U * 1024U;
+	error = bcm2711_vulkan_native_draw_create(space, changed, &available, &draw);
+	assert(error == 0 && draw->attributes == 1 && draw->storage[9]->bytes == 24);
+	source = draw->storage[9]->view->buffer->address;
+	for (index = 0; index < 3; index++) {
+		for (byte = 0; byte < 4; byte++) {
+			assert(source[index * 8U + byte] == index * 8U + byte + 25U);
+			assert(source[index * 8U + byte + 4U] == 0);
+		}
+	}
+
+	/* Synthetic pipeline metadata owns no real pipeline reference; only the upload root is retired here. */
+	error = bcm2711_vulkan_native_draw_release(&draw, true);
+	assert(error == 0 && draw == NULL && allocations == baseline + 2);
+	kern_free(pipeline);
+	changed->pipeline = event->pipeline;
+	changed->draw[0] = 4;
+	available = 1024U * 1024U;
+	error = bcm2711_vulkan_native_draw_create(space, changed, &available, &draw);
+	assert(error == EINVAL && draw == NULL && allocations == baseline + 1 && available == 1024U * 1024U);
+	kern_free(changed);
+	puts("WS141 real compiled/native mapped draw/TMU-fetch snapshots/budget/uncertain retirement: PASS");
+
+	/* Succeeded: every complete or refused upload prefix retires without changing the pending prepared primary. */
+	return;
+}
+
 /* Checks actual compiled consumption/cloned input ownership and synthetic UBO intervals against real coherent resource backing. */
 static void
 uniform_test(
@@ -939,6 +1156,7 @@ prepared_test(
 	assert(event->descriptors[0][0].view == view && event->descriptors[0][0].sampler == sampler);
 	assert(event->push[0][0] == 0x3f000000U && event->vertices[0]->bytes == 48);
 	assert(event->next->opcode == GPU_OP_CMD_END_RENDER_PASS && event->next->next == NULL);
+	native_draw_test(session, event);
 	uniform_test(session, event);
 	error = bcm2711_vulkan_prepared_create(command_object, &second);
 	assert(error == EBUSY && second == NULL && command->pending == 1 && set->pending == 1);
@@ -3243,10 +3461,12 @@ pipeline_test(
 	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
 	assert(error == ENOMEM && pipeline == NULL && allocations == with_inputs && layout->references == 1);
 
-	/* A scalar-only vertex attribute cannot supply the actual quad shader's second input component. */
+	/* Native packed fetch now supplies the quad shader's missing second float component with Vulkan's zero default. */
 	attribute.format = VK_FORMAT_R32_SFLOAT;
 	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
-	assert(error == ENOTSUP && pipeline == NULL && allocations == with_inputs && layout->references == 1);
+	assert(error == 0 && pipeline != NULL && pipeline->attributes[0].format == VK_FORMAT_R32_SFLOAT);
+	error = bcm2711_vulkan_pipeline_release(session, pipeline);
+	assert(error == 0 && allocations == with_inputs && layout->references == 1);
 	attribute.format = VK_FORMAT_R32G32_SFLOAT;
 	error = bcm2711_vulkan_pipeline_build(session, device, &info, &pipeline);
 	assert(error == 0 && pipeline != NULL && layout->references == 2);

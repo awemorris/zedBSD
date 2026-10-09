@@ -132,3 +132,7 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 ## i14 FIFO scalar uniforms checkpoint（2026-10-09）
 
 [詳細](../execution-20261009.md#i14-fifo-scalar-uniform-streamのsoftware出力2026-10-09): actual compiled順のconstant/push/viewport/UBO/current coherent read/native descriptor addressをindependent CPU streamへ完成。whole prefix OOM/late refusal解放、typed logical bounds、stage別copied stateとcanonical bindingを確認。actual Vulkan-device host14範囲とy build warning/error0/style0 PASS。GPU mapping ownership/queue launchは未接続。次はowned code/uniform/TMU/fetch preparation、whole-job/session quarantine/CL/queue/runtime、実機とp007。Phase in-progress、foreign commitment/HAL/UAPI変更無し。
+
+## i14 whole native draw preparation checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-whole-native-draw-preparationのsoftware出力2026-10-09): FIFOのactual sampled UIF/owned descriptors/code/uniform/default/packed fetch/shader recordsをnative mapping rootへ保持、job-wide256MiBの全page padding予算、firstVertex rebase・float default・late OOM全解放・uncertain保持を実装。actual Vulkan/compiler/MMU source host15とy build warning/error0/style0 PASS。既存pipelineのmissing-component未実装限定を解消し、実pipeline R32→vec2 compile/releaseも確認。native CL/GPU launchは未接続。whole prepared/native job quarantineとsession/queue/runtime、実機とp007は残る。Phase内部、foreign scope/HAL/UAPI変更無し、in-progress保持。

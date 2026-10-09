@@ -425,11 +425,11 @@ vertex_interface(
 				attribute = &pipeline->attributes[candidate];
 		}
 
-		/* Every shader-consumed scalar requires a declared native float component; implicit missing-component filling is not implemented. */
+		/* Every consumed scalar requires a declared float source; native FIFO packing fills missing format components with zero/one. */
 		if (attribute == NULL)
 			return ENOTSUP;
 		components = attribute_components(attribute->format);
-		if (components <= input->component)
+		if (components == 0 || input->component >= 4)
 			return ENOTSUP;
 	}
 
