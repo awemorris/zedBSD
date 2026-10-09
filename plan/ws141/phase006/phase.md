@@ -213,3 +213,7 @@ actual render openでcomplete Vulkan ownerを作り、production combined20route
 ## 最終software監査（2026-10-10）
 
 SPIR-V/compiler/typed Vulkan/QueueSubmit/public caller stackの最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。
+
+## software統合の終了（2026-10-10）
+
+i14 compiler/Vulkan/Keiland software経路のsoftware/統合部分をcleared。final runtime/stack/全source監査とmain merge5eb8867f3を確認。whole Phaseの実機/Keiland条件は未達、Statusはin-progressを維持。[全結果と復帰条件](../execution-20261009.md#i15-main統合software実行の終了2026-10-10)。

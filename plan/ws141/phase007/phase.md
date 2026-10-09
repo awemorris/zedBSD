@@ -2,7 +2,7 @@
 
 # ws141-p007: 全規約・license/類似・最終確認
 
-Status: in-progress
+Status: cleared
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: [完成までの承認と有限実行scope](../execution-20261009.md#完成までの継続承認2026-10-09)
@@ -28,3 +28,7 @@ public runtimeを含む最終software sourceの監査を開始。全文C/Guardra
 ## 全source software確認結果（2026-10-10）
 
 [全文audit](../p007-software-audit.md)・[183path final hash](../final-source-sha256.tsv)・[16KiB ordinary stack](../final-stack-report.json)を保存。規約のguard/return/macro、予備fragment preflight、stack一時table、独自filter生成を修正。全14host/y-n build/Python・shell/diff PASS。final source監査に未修正code残件無し。main統合後にi15/p007を判定する。physical全関門は他Phase/WSに保持し、hostをKeiland画面成功としない。
+
+## clearance（2026-10-10）
+
+i15の最終source監査・build/host・main統合criteriaを満たしcleared。source0f56e5200、main merge5eb8867f3、183path hash一致、ordinary16KiB stack/y-n build/全14host PASS。[統合と終了記録](../execution-20261009.md#i15-main統合software実行の終了2026-10-10)。実機/KeilandとWS acceptanceは未達のまま保持し、remote closure/projectionはQ1へ残す。

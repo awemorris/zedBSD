@@ -20,9 +20,9 @@
 | ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | cleared（software/統合部分範囲のみ） | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
 | ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software/統合部分） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
 | ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | cleared（software部分） | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
-| ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | in-progress | i11/i12の必要な実source出力を確認後 |
-| ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | in-progress（検証済みscoped owner/worker出力を使用） | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
-| ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | in-progress | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
+| ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | cleared（software/統合部分） | i11/i12の必要な実source出力を確認後 |
+| ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | cleared（software経路/統合部分。実機Keilandは未確認） | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
+| ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | cleared | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -890,3 +890,14 @@ final公表runtime binary SHA854c064e…とignored stack inventory/context、p00
 - host commandは各`sh plan/ws141/tests/{display,v3d-hardware,vulkan-device,shader,stage,v3d-power,uncached-mapping,noop,clear,native-state,native-pass,native-colour,vulkan-stream,vulkan-object}-host-test.sh build/ws141-i15-<scope>`、logs `build/ws141-i15-{display,hardware,runtime,shader,stage,power,mapping,noop,clear,state,pass,colour,stream,object}.log`。全14群exit0/PASS/warning-error0。runtime26scope、display4、hardware2、stage4、他のpacket/XML/QPU/1037colour/viewport/copy/owner profileもPASS。qpu最終改行後のshader `build/ws141-i15-verified-shader.log`、macro除去後のruntime `build/ws141-i15-final3-runtime.log`もそれぞれexit0/3PASS・26PASS/warning-error0。host fixtureのMMIO/scheduler/common observer/native runner境界を保持する。
 - final stack: `build/llvm/bin/llvm-objdump --no-show-raw-insn -d build/ws141-rpi4-y/kernel.elf > build/ws141-public-runtime-final-disassembly.txt`、`python3 plan/ws141/tests/stack-audit.py build/ws141-public-runtime-final-disassembly.txt build/ws141-i15-final3-stack.json` PASS。actual caller/IRQ/indirect context/有限再帰を含むordinary boundはworker12960・同期COMMAND15984・非同期SUBMIT12432、capacity16384/最小margin400。terminal invariant diagnostic/一般kernel/別config/実機の証明と混同しない。previous9344 estimateは訂正前のpartial履歴として保持。
 - software監査結果に未修正のcode残件無し。i15はmain統合待ちでin-progress。i13/i14のsoftware部分を満たしてもp002〜p006とWSのwhole physical acceptanceは保持。P0/N0/R0/P1/P2/P3/P5/V1〜V10、console RAM寿命、nativeGPU/Keiland画面、Q1/T1回帰未実施。Master/共有Queue/GitHub投影はQ1、push無し。
+
+
+## i15 main統合・software実行の終了（2026-10-10）
+
+source `0f56e5200`を最新main `558bfcca5f0d8ca93cd602f11e1ae5cdd5a42bf0`基点の専用worktreeでmergeし、`5eb8867f392b19e9a777a8cc97aa8961fddd2e37`をmain/ownへfast-forwardした。mergeのmain親との差分は担当WS141の70pathのみ、Master差分0。Q1のREADME/beta2/WS083/i915 video/WS197/Bluetooth/greeterのcommitを保持した。
+
+integrationの183path台帳は全hash一致。sourceと統合版の全kernel/header/platform/config/toolchain/Makefile/規約/Guardrail/actual libvulkan/host入力差分は、今回configでcompileしないGen12 `i915/render/video.c`のみ。実buildのi915 object/dependencyはread-only `compiler/spirv`と`render/codec`だけで、linked ELFにvideo runtime無し。actual Keiland `wayland/shaders.h`も一致。kernel/hostの検証入力が同じなので同一sourceのoptional再buildは行わない。main/own/integrationはread-back clean。
+
+i13/i14は承認されたsoftware/統合部分をcleared、p005/p006 wholeは実機待ちのままin-progress。i15/p007のsoftware全文監査/build/host/統合criteriaはcleared。この独立実行の全attemptに結果を保存し、software実行はfinished。i08 unclearedなど過去のattemptは改変しない。新Queueは開始しない。
+
+受け渡し: 最新mainのsource、[全audit](p007-software-audit.md)、[final source183path](final-source-sha256.tsv)、[ordinary stack](final-stack-report.json)、own buildの`build/ws141-rpi4-y/vmunix`（SHA948824a4…）がsoftware復帰点。WSはincomplete、実機P0/N0/R0/P1/P2/P3/P5/V1〜V10、console RAM寿命/Keiland画面・操作はユーザーの後日確認待ち。実機での異常は同WSでsource/写真/段の印を照合して再開する。Q1/T1回帰、Master/共有Queue/history/Guardrailの限定承認投影、GitHub公開はQ1担当の保留事項として維持。担当によるMaster authoring/push/外部送信無し。
