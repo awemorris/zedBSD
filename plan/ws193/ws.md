@@ -46,6 +46,11 @@ make menuconfigの実装です。メニュー階層を変更します。
 Build boot imageはプログレスバーを表示して、何をビルド中なのかも表示する。このメニューに限り、nprocの数だけ-jしてOKです。
 ```
 
+## 設計の決定（2026-10-09 ユーザー）
+
+- 原文に無い項目（Variant の disk の形・kernel option・driver の選択・試験の hook・Noct の GPU accel）: 「menu から外す」（config.mk の直接の記述だけ、読んだ値は保つ）。
+- 「Firmwareはトップレベルに階層を作る。X11とTestsはメニューから削除し、直接記述のみにする。」（Firmware の位置は Packages の次、Q1）
+
 ## 目標
 
 - toplevel を上の階層にする（CPU / Board、Boot Option、Development、Base（All / Select）、Desktop（All / Select）、Packages（userland/packages の分類の階層）、空行、Build boot image、空行、Exit）。
