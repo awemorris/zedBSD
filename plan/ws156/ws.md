@@ -44,3 +44,7 @@ app から通知を出せる仕組みを作り、画面の下の中央を headli
 | [ws156-p004](phase004/phase.md) | log（hotkey、ring の左右、すべて消去、個別に消した物は残さない） | cleared（2026-10-08 Q1、T1-375b PASS） | p003 |
 | ws156-p005 | 全文の規約と QEMU の回帰（T1）、実機の UAT | uncleared（2026-10-08 QEMU の回帰 T1-375b PASS、20 項目 ok、PNG 5 枚。残り: 5330 の実機の UAT。全文の規約の見直しはベータ3、2026-10-08 ユーザー） | p002〜p004 |
 | ws156-p006 | Linux: libkeiland-backend の D-Bus の `org.freedesktop.Notifications`（設計 p001 §11、2026-10-05 ユーザー「実装はあと回し」） | planning（後回し。Linux の作業は 10/13 以降、2026-10-08 ユーザー） | p002 |
+
+## 2026-10-10 WS197 p004c による変更（Q1）
+
+通知に lock_text を足した（notify_v1 の request 3 post_lock、manager の版 27、`kl_system_notify_lock`・`kl_app_notify_lock`）。ロック画面は lock_text のある通知だけを、その文だけで出す。WS197 の SMS の通知（本文はロック画面に出さない）のため。設計は [WS197 p004](../ws197/phase004/phase.md)。試験は WS156 の notify-model・notify-flow。

@@ -78,3 +78,4 @@ Primary Milestone: MG006
 ## 2026-10-10 WS197 p004b による変更（Q1）
 
 WS197 p004b（778c1e377）が userland/desktop/phone を変えた: 保存（番号の key は E.164、既定の国番号 81、会話の file、Source ごとの key の index、自分の送信の写しの重ね、知らない header を保つ）と同期（sync/bt-<address>.state の目印、§6.1・§6.2 の同期の手順、送信、既読の handle、`--peer NUMBER`）。設計は [WS197 p004](../ws197/phase004/phase.md) §6。試験は plan/ws197/tests/phone-store-host-test.sh。
+WS197 p004c（e7a478d33）: Settings の Bluetooth の「Use as phone」で phone.backend を 2（bluetooth）に、Phone の app が居ない時の SMS の通知を compositor が出す（notify.allow.phone、click で `phone --peer` を起動）。

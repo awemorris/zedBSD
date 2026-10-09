@@ -19,6 +19,7 @@
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
+- 2026-10-11 未明: WS197 p004a〜c を main に merge（bc4c7f9f6）。P1 は停止（ユーザーの指示、UAT の後に再開）。ユーザーは起きたら image を作り直して UAT（plan/beta2.md の「次の UAT」と plan/ws197/ws.md の「5330 の UAT の手順」）。
 - main の先頭（2026-10-10 夜）: WS199 i01〜i03（d8cb16814、KL_VERSION 77）、BUG-283・284・285・286 の直し、BUG-275（USB の zero-bandwidth の endpoint、Bluetooth）、BUG-222 の TCP の並び替え 44・ifconfig の media、rtld の dlopen の path、Noct 2.0.3。
 - 5330（10.0.30.3、zedBSD の単独起動）: SSH は `sshpass -p kei ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no kei@10.0.30.3`（鍵は今の image に無い）、sudo は `echo kei | sudo -S`。image は 10/09 の a42a544 以降の userland＋Q1 が入れた BUG-275 の kernel（ESP の vmunix、前は vmunix.old）。WS199 i02 以降（NFC・Security Keys の頁）は入っていない。/tmp/fidoctl.new に新しい fidoctl（ユーザーが鍵の up=false の確かめを流す、手順は Q1 が会話で渡した）。
 - ユーザーの判断待ち: passkey-fido2 だけを 5330 に入れ替えて NFC の login を試すか、image を作り直すか。fidoctl の `-s assert` の結果（WS199 p002 の前提）。
