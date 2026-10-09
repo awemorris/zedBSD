@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（i09でmailbox限定修正承認・適用、host/build PASS。mainへの統合中、実機は後で実施）
+Status: incomplete（i09のmailbox依存修正と初期scanout成果をmainへ統合済み。host/build PASS、実機は後で実施）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: ユーザー「mainにマージしてOKです。mailbox修正も承認します。」によりi09を実行。i08のLinux順初期scanout実装に必要なWS048容量0tag修正を提案の3 pathへ適用し、実mailbox host/新display hostとrpi4 y/n build PASS、warning/error0。初回scanout処理はboot framebufferと一致する唯一のHDMI出力・既存modeを使い、PLL/PV/video/FIFOとIRQによるlist採用確認まで構成する。最新mainとの専用worktree統合を確認中。実機/QEMU、flip/合成/resident登録、V3D投入、p007は未確認、WSはincomplete。i08のuncleared履歴は保持。詳細は[実行記録i09](execution-20261009.md#i09の追加承認2026-10-09)。
+Resume point: i09で承認済みmailbox容量0tag修正とLinux順初期scanout成果を最新mainへ統合済み（code統合dde7c1ba7）。統合版でも実mailbox host・display2host・rpi4 driver y/n build PASS、warning/error0。出力先はboot framebufferと一致する唯一のHDMI、modeは既存firmware progressive RGB8。初回完了はIRQで新listの採用を観測する。i09はsoftware/統合だけcleared、i08のuncleared履歴は保存。次はユーザーが後で行う実機でのR0/元の画面/buffer寿命・IRQ確認とQ1/T1回帰。flip/合成/resident登録・V3D投入・p007は残る。共有記録/WS048側の投影はQ1、Masterは担当から更新しない。[統合記録](execution-20261009.md#i09-mainへの統合結果2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -69,7 +69,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
-| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i09で容量0tag適用、host/build PASS。main統合中、実機未確認） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
+| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i09で容量0tag/初期scanoutをmain統合済み、host/build PASS。実機/後続機能は未確認） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | p005 | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planning | p003・p004 | 4h〜 |
 | p006 | 実行器（Vulkan・compiler）の方針の決定（別 WS にするか） | planning | p004 | 2h |
@@ -90,3 +90,8 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 ## i09: 依存修正とmergeの承認（2026-10-09）
 
 ユーザー「mainにマージしてOKです。mailbox修正も承認します。」でWS048 mailboxの提案3 pathとmain統合を承認。容量0tagを実sourceへ適用し、実mailbox host/新display host/rpi4 y/n buildを確認済み。i08の依存待ちを今回のattemptで解消し、最新mainへ統合を進める。p003/WS全体の実機受け入れ、Q1の共有記録/WS048投影、T1回帰、p007は残る。詳細は[実行記録](execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)。
+
+
+## i09の統合結果（2026-10-09）
+
+mailbox依存と初期表示R0成果を最新mainへ統合済み（dde7c1ba7）。実mailbox host/display host/rpi4 y/n build PASS、warning/error0。i09はsoftware/統合の部分範囲でcleared、p003の実機/後続機能の受け入れは残るためin-progress、WSはincomplete。i08のuncleared履歴は保持。実機の画面・buffer寿命/IRQ、T1回帰、最終監査p007とQ1の共有記録/WS048 body投影は未実施。[exact evidence](execution-20261009.md#i09-mainへの統合結果2026-10-09)。

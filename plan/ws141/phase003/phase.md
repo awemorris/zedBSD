@@ -2,7 +2,7 @@
 
 # ws141-p003: display（firmware出力先の特定 → Linux順の再初期化 → 初回scanout → flip/合成/統合）
 
-Status: in-progress（i09: mailbox修正を承認・適用、host/build PASS、main統合中。実機は後で確認）
+Status: in-progress（i09のsoftware/統合範囲はcleared、mainへ統合済み。whole Phaseの実機/後続機能は未達）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: none
@@ -75,3 +75,8 @@ list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexa
 ## i09: 依存判断の解決（2026-10-09）
 
 ユーザー「mainにマージしてOKです。mailbox修正も承認します。」を取得。i08の未適用mailbox依存を提案のsource/header/host3 pathへ適用して解消し、実sourceのmailbox hostとdisplay host、rpi4 y/n build warning/error0を確認した。p003をin-progressへ戻し、最新mainとの統合検証へ進む。以前のi08 unclearedは保持。whole Phaseの実機/flip/合成/登録の受け入れはまだ未達。結果とcommandsは[実行記録i09](../execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)、WSへの影響は[WS記録](../ws.md#i09-依存修正とmergeの承認2026-10-09)。
+
+
+## i09の統合・部分clearance（2026-10-09）
+
+承認済みmailbox修正とLinux順R0初期scanout成果を最新mainへ統合済み（dde7c1ba7）。統合版の実mailbox host/display hostとrpi4 y/n buildがPASS、warning/error0で、i09のsoftware/統合範囲をclearedにした。whole Phaseは実機/flip/合成/登録が未達のためin-progressのまま、closeしない。i08のuncleared履歴を保持し、実機の元の出力先・新list frame採用・buffer寿命/IRQとQ1/T1の回帰を再開条件に残す。commands/版/hash/未実施とWSへの投影は[統合記録](../execution-20261009.md#i09-mainへの統合結果2026-10-09)と[WS結果](../ws.md#i09の統合結果2026-10-09)。

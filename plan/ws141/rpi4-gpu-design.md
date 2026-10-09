@@ -247,3 +247,8 @@ P0 → N0 → N1 → N2 → P1 → P2 → P3（CPU で埋めた plane）→ P5�
 ## 2026-10-09 i09の依存解決
 
 ユーザーがmailbox修正とmain mergeを承認。容量0tagの限定修正を実sourceへ適用して実mailbox hostを確認し、i08で拒否されていた通知依存を解消した。display host/rpi4 y/n build PASS、最新mainとの統合を検証中。i08のuncleared履歴を保持し、実機での初期scanout・buffer寿命/IRQと後続機能の受け入れは別に残す。[実行記録i09](execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)。
+
+
+## 2026-10-09 i09のmain統合完了
+
+容量0tagの承認済み依存修正とR0初期表示成果をmainへ統合（dde7c1ba7）、統合版でも実mailbox/display hostとrpi4 y/n build PASS、warning/error0。i09はsoftware/統合範囲だけcleared。実機scanout/console RAM寿命・IRQ、後続機能・p007の受け入れは残る。i08の拒否結果は過去の結果として保存し、現在の再開点は[WS](ws.md)と[統合記録](execution-20261009.md#i09-mainへの統合結果2026-10-09)。

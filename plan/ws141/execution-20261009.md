@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: active（i09: ユーザーがmailbox限定修正とmain mergeを承認、実source適用・確認・統合中）
+- Status: finished（i09はcleared: 承認済みmailbox修正と初期scanout成果をmainへ統合、host/build PASS。実機/whole Phaseは残る）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -16,7 +16,7 @@
 | ws141-codex-20261009-i06 | p004/V7の1×1 noop command list生成 | cleared（software生成のみ） | BCL/RCL/tile sub-listを固定4.2 XMLと独立に照合しPASS。容量・VA・領域の重なり・失敗時のbyte保持を確認。rpi4 y/n build warning/error 0。GPUへの投入・起動への追加・実機clearanceは対象外 |
 | ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | cleared（統合のみ） | 最新mainとの統合版でnoop/XMLと既存4host試験PASS、rpi4 y/n build warning/error 0。merge 16024f1b9を共有mainへ取り込み済み。Master更新・実機clearance・pushは対象外 |
 | ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
-| ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | in-progress | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
+| ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | cleared（software/統合範囲のみ） | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -157,3 +157,16 @@
 - mailbox変更箇所の全文規約/所有/null値を使用するloopの境界をreview、補助style-check source/header total0、git diff --check0。formatter形状は既存ANSI定義/paragraphを保持、無関係なformatはしない。
 - i08で拒否された通知依存をsoftware上で解消。i08のuncleared履歴を遡って変更せず、このi09に結果を保存。最新main開始点`b224d174c150980a0cfe49f53ef5df71a7b455b5`はcleanで、i08起点以降の対象source/WS141には差分無し。次は専用worktreeで最新mainとのmerge・対象試験/buildを確認し、mainへ取り込み。
 - WS048 p003/WS側のAPI拡張の記録投影はQ1へ残す（承認された他WS編集は提案の3 pathのみ）。WS048全体の再開や実機受け入れをこの依存修正で宣言しない。
+
+
+## i09: mainへの統合結果（2026-10-09）
+
+- 実装commit `819803b63036b0c174c22590087ef9ea17ce17bb`（message WIP）。i08の`733e9d16f`と合わせ、WS141 driver/当該arm64 source列/WS記録とhost、承認されたWS048のmailbox source/header/host3 pathだけを統合。
+- 専用統合worktree `.claude/worktrees/ws141-integrate`を、実際の最新main `f9afbb573e7887557a7884d754a8a6a1c477c7cc`へ揃えてmerge。競合無し、merge `4bb7426b5aa5c7f911d30caf4c2532283fd96a67`（WIP）。開始時のb224d174c以降の他セッションの成果も保持した。
+- 統合版の`sh plan/ws141/tests/display-host-test.sh build/ws141-integration-i09/display-host` → 2試験PASS。実mailboxは`make -f plan/ws048/tests/host-test.mk OUT=build/ws141-integration-i09/mailbox-host build/ws141-integration-i09/mailbox-host/firmware-host-test`と同じDTB/ASAN_OPTIONS=detect_leaks=0で実行 → 200163 checks PASS。前述LSanの制約は保持。
+- 統合版のrpi4 driver y/n named vmunix target（i09実source確認と同じmake引数） → exit0、warning/error0、ELF/image checker各3 PASS。SHA256は実装branchと同じy `defcfcaeb820f13b050ffaa1a9ecb1ad74144c2af36fa7d5dc4af1261127858c`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。専用worktreeの`build/ws141-integration-i09/kernel-{y,n}.log`・`summary.json`へ保存。
+- mailbox変更範囲をclang-format-19（ColumnLimit0、lines175:194）で確認し、出力はsourceとbyte一致。実source/headerのstyle-check total0、source/記録のdiff-check0（保存した提案diffのcontext構文は除外）。全WSのp007は残る。
+- 検証中にmainが`b1972bf580150a3568c777f185fc0f871232c0b7`へ進んだため専用branchへ追加merge。変更はbeta2/bugの計画記録9 pathだけ。検証済み版とのsrc/include/platform/config/WS141/対象mailbox hostのdiffは0で、追加buildは不要と判断。結果commit `dde7c1ba7e27a0c2623280c368f31c1f8953a40b`（WIP）。
+- mainがcleanで上記統合版のancestorであることを確認し、`git merge --ff-only codex/ws141-integrate`で取り込み。main HEADがdde7c1ba7、実装819803b63がancestor、取り込み前b1972bf58との差が担当25 pathだけであることを読み返して確認。共有Master/Queue/Guardrail/HAL API/toolchainには本成果の変更無し。push/外部連絡無し。
+- i09はユーザーが承認したsoftware修正/build/統合の範囲でcleared。i08のuncleared結果を改変しない。p003はin-progress、WSはincomplete。実機でのR0 frame採用・元のHDMIへの復帰・buffer寿命/IRQ、T1回帰、flip/合成/resident登録・V3D投入・p007は未実施。
+- Q1の保留投影: WS048 p003/WSの容量0tag契約拡張とhost結果、共有記録のLinux順再初期化の新承認/旧方針の置換、T1への依頼。担当から共有bodyは編集しない。次の実装Queueは自動開始しない。統合済みi08/i09のpatchと容量0tag提案を再適用しない。
