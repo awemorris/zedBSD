@@ -149,7 +149,10 @@ create_target(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	object = bcm2711_vulkan_object_find(session, kind, identity);
@@ -240,7 +243,12 @@ decode_pass(
 	flags = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || structure != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO || chain != 0 || flags != 0 || count != 1 || array != 1)
+	if (reader->error != 0 ||
+	    structure != VK_STRUCTURE_TYPE_RENDER_PASS_CREATE_INFO ||
+	    chain != 0 ||
+	    flags != 0 ||
+	    count != 1 ||
+	    array != 1)
 		return ENOTSUP;
 	colour = &pass->colour;
 	colour->flags = drv_i915_wire_read_u32(reader);
@@ -254,11 +262,15 @@ decode_pass(
 	colour->finalLayout = drv_i915_wire_read_u32(reader);
 
 	/* Clear/load/discard remain distinct lowering obligations; only colour layouts and native RGBA/BGRA are admitted. */
-	if (reader->error != 0 || colour->flags != 0 || colour->samples != VK_SAMPLE_COUNT_1_BIT)
+	if (reader->error != 0 ||
+	    colour->flags != 0 ||
+	    colour->samples != VK_SAMPLE_COUNT_1_BIT)
 		return ENOTSUP;
 	if (colour->format != VK_FORMAT_R8G8B8A8_UNORM && colour->format != VK_FORMAT_B8G8R8A8_UNORM)
 		return ENOTSUP;
-	if (colour->loadOp != VK_ATTACHMENT_LOAD_OP_LOAD && colour->loadOp != VK_ATTACHMENT_LOAD_OP_CLEAR && colour->loadOp != VK_ATTACHMENT_LOAD_OP_DONT_CARE)
+	if (colour->loadOp != VK_ATTACHMENT_LOAD_OP_LOAD &&
+	    colour->loadOp != VK_ATTACHMENT_LOAD_OP_CLEAR &&
+	    colour->loadOp != VK_ATTACHMENT_LOAD_OP_DONT_CARE)
 		return ENOTSUP;
 	if (colour->storeOp != VK_ATTACHMENT_STORE_OP_STORE && colour->storeOp != VK_ATTACHMENT_STORE_OP_DONT_CARE)
 		return ENOTSUP;
@@ -279,13 +291,19 @@ decode_pass(
 		return error;
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count != 1 || array != 1)
+	if (reader->error != 0 ||
+	    count != 1 ||
+	    array != 1)
 		return ENOTSUP;
 	flags = drv_i915_wire_read_u32(reader);
 	attachment = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || flags != 0 || attachment != VK_PIPELINE_BIND_POINT_GRAPHICS || count != 0 || array != 0)
+	if (reader->error != 0 ||
+	    flags != 0 ||
+	    attachment != VK_PIPELINE_BIND_POINT_GRAPHICS ||
+	    count != 0 ||
+	    array != 0)
 		return ENOTSUP;
 
 	/* The sole subpass references attachment zero for colour and has no input, resolve, depth or preserve attachment. */
@@ -293,7 +311,11 @@ decode_pass(
 	array = drv_i915_wire_read_u64(reader);
 	attachment = drv_i915_wire_read_u32(reader);
 	layout = drv_i915_wire_read_u32(reader);
-	if (reader->error != 0 || count != 1 || array != 1 || attachment != 0 || layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
+	if (reader->error != 0 ||
+	    count != 1 ||
+	    array != 1 ||
+	    attachment != 0 ||
+	    layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL)
 		return ENOTSUP;
 	array = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || array != 0)
@@ -303,13 +325,17 @@ decode_pass(
 		return ENOTSUP;
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count != 0 || array != 0)
+	if (reader->error != 0 ||
+	    count != 0 ||
+	    array != 0)
 		return ENOTSUP;
 
 	/* Each external dependency is retained for conservative whole-job ordering and cache visibility during native execution. */
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count > BCM2711_VULKAN_PASS_DEPENDENCIES || array != count)
+	if (reader->error != 0 ||
+	    count > BCM2711_VULKAN_PASS_DEPENDENCIES ||
+	    array != count)
 		return ENOTSUP;
 	pass->count = count;
 	for (index = 0; index < count; index++) {
@@ -368,7 +394,12 @@ decode_framebuffer(
 	identity = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || structure != VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO || chain != 0 || flags != 0 || count != 1 || array != 1)
+	if (reader->error != 0 ||
+	    structure != VK_STRUCTURE_TYPE_FRAMEBUFFER_CREATE_INFO ||
+	    chain != 0 ||
+	    flags != 0 ||
+	    count != 1 ||
+	    array != 1)
 		return ENOTSUP;
 	framebuffer->owner.parent = bcm2711_vulkan_object_find(session, I915_VK_OBJ_RENDER_PASS, identity);
 	identity = drv_i915_wire_read_u64(reader);
@@ -376,9 +407,13 @@ decode_framebuffer(
 	framebuffer->width = drv_i915_wire_read_u32(reader);
 	framebuffer->height = drv_i915_wire_read_u32(reader);
 	layers = drv_i915_wire_read_u32(reader);
-	if (reader->error != 0 || framebuffer->owner.parent == NULL || framebuffer->view == NULL)
+	if (reader->error != 0 ||
+	    framebuffer->owner.parent == NULL ||
+	    framebuffer->view == NULL)
 		return EINVAL;
-	if (framebuffer->width == 0 || framebuffer->height == 0 || layers != 1)
+	if (framebuffer->width == 0 ||
+	    framebuffer->height == 0 ||
+	    layers != 1)
 		return ENOTSUP;
 
 	/* Succeeded: complete typed owners and declared dimensions are available for construction. */
@@ -403,7 +438,9 @@ build_framebuffer(
 	image = view->owner.parent->payload;
 	if (pass->owner.device != device || view->owner.device != device)
 		return EINVAL;
-	if (pass->colour.format != view->format || image->memory == NULL || (image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
+	if (pass->colour.format != view->format ||
+	    image->memory == NULL ||
+	    (image->usage & VK_IMAGE_USAGE_COLOR_ATTACHMENT_BIT) == 0)
 		return EINVAL;
 	if (framebuffer->width > image->width || framebuffer->height > image->height)
 		return EINVAL;
@@ -503,7 +540,9 @@ colour_layout(
 	VkImageLayout layout)
 {
 	/* Presentable client images are translated to GENERAL before the pass crosses the wire. */
-	if (layout != VK_IMAGE_LAYOUT_GENERAL && layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL && layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
+	if (layout != VK_IMAGE_LAYOUT_GENERAL &&
+	    layout != VK_IMAGE_LAYOUT_COLOR_ATTACHMENT_OPTIMAL &&
+	    layout != VK_IMAGE_LAYOUT_SHADER_READ_ONLY_OPTIMAL)
 		return ENOTSUP;
 
 	/* Succeeded: this colour lifecycle can be lowered without an unsupported transition. */
@@ -530,7 +569,10 @@ granularity(
 	present = drv_i915_wire_read_u64(reader);
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_RENDER_PASS, identity);
-	if (reader->error != 0 || present != 1 || device == NULL || object == NULL)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    device == NULL ||
+	    object == NULL)
 		return EINVAL;
 	pass = object->payload;
 	if (pass->owner.device != device)

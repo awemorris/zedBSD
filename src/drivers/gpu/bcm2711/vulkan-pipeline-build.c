@@ -104,7 +104,7 @@ build_pipeline(
 	struct bcm2711_vulkan_pass *pass;
 	struct bcm2711_vulkan_module *vertex;
 	struct bcm2711_vulkan_module *fragment;
-	struct bcm2711_shader_key key;
+	struct bcm2711_shader_key *key;
 	struct bcm2711_shader_diagnostic diagnostic;
 	enum bcm2711_shader_stage stage;
 	uint32_t index;
@@ -140,30 +140,48 @@ build_pipeline(
 		return error;
 	pipeline->owner.device = device;
 
+	/* Temporary interface storage remains CPU-owned and never competes with parser recursion for kernel stack space. */
+	key = kern_calloc(1, sizeof(*key));
+	if (key == NULL)
+		return ENOMEM;
+
 	/* Derive canonical fragment inputs from the read-only device-independent frontend before lowering either vertex variant. */
-	error = fragment_key(fragment, &key);
-	if (error != 0)
+	error = fragment_key(fragment, key);
+	if (error != 0) {
+		kern_free(key);
 		return error;
-	key.swap_red_blue = 0;
+	}
+
+	/* The immutable key selects the same channel and blend semantics for every native variant. */
+	key->swap_red_blue = 0;
 	if (pass->colour.format == VK_FORMAT_B8G8R8A8_UNORM)
-		key.swap_red_blue = 1;
-	key.premultiplied_blend = 0;
+		key->swap_red_blue = 1;
+	key->premultiplied_blend = 0;
 	if (pipeline->blend)
-		key.premultiplied_blend = 1;
+		key->premultiplied_blend = 1;
 
 	/* All three native programs share an exact varying ABI and independently owned code/uniform arrays. */
 	for (index = 0; index < 3; index++) {
 		stage = (enum bcm2711_shader_stage)index;
 		if (stage == BCM2711_SHADER_FRAGMENT)
-			error = bcm2711_shader_compile(fragment->words, fragment->word_count, stage, &key, &pipeline->programs[index], &diagnostic);
+			error = bcm2711_shader_compile(fragment->words, fragment->word_count, stage, key, &pipeline->programs[index], &diagnostic);
 		else
-			error = bcm2711_shader_compile(vertex->words, vertex->word_count, stage, &key, &pipeline->programs[index], &diagnostic);
-		if (error != 0)
+			error = bcm2711_shader_compile(vertex->words, vertex->word_count, stage, key, &pipeline->programs[index], &diagnostic);
+		if (error != 0) {
+			kern_free(key);
 			return error;
+		}
+
+		/* Every completed variant must fit the actual retained layout before another program can be acknowledged. */
 		error = program_interface(pipeline->programs[index], layout);
-		if (error != 0)
+		if (error != 0) {
+			kern_free(key);
 			return error;
+		}
 	}
+
+	/* Compiled programs contain independent interface values and retain no pointer to the temporary key. */
+	kern_free(key);
 
 	/* Vertex fetch declarations must supply every actual coordinate/render scalar in the compiler's canonical FIFO order. */
 	error = vertex_interface(pipeline);
@@ -198,7 +216,10 @@ select_modules(
 		return ENOTSUP;
 	for (index = 0; index < info->stageCount; index++) {
 		stage = &info->pStages[index];
-		if (stage->sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO || stage->pNext != NULL || stage->flags != 0 || stage->pSpecializationInfo != NULL)
+		if (stage->sType != VK_STRUCTURE_TYPE_PIPELINE_SHADER_STAGE_CREATE_INFO ||
+		    stage->pNext != NULL ||
+		    stage->flags != 0 ||
+		    stage->pSpecializationInfo != NULL)
 			return ENOTSUP;
 		if (stage->pName == NULL)
 			return EINVAL;
@@ -261,7 +282,9 @@ module_entry(
 		if (opcode == 15U) {
 			if (entries != 0 || length < 5)
 				return ENOTSUP;
-			if (module->words[offset + 1] != model || module->words[offset + 3] != 0x6e69616dU || module->words[offset + 4] != 0)
+			if (module->words[offset + 1] != model ||
+			    module->words[offset + 3] != 0x6e69616dU ||
+			    module->words[offset + 4] != 0)
 				return ENOTSUP;
 			entries++;
 		}
@@ -292,6 +315,11 @@ fragment_key(
 	uint32_t index;
 	uint32_t component;
 	int error;
+
+	/* The preliminary varying pass obeys the same stage and finite constant graph as all native compilation entry points. */
+	error = bcm2711_shader_preflight(module->words, module->word_count, BCM2711_SHADER_FRAGMENT, NULL);
+	if (error != 0)
+		return error;
 
 	/* Only the existing read-only Zlib scalar frontend is reused; no Gen12 pipeline or instruction backend participates. */
 	kern_memset(key, 0, sizeof(*key));
@@ -368,7 +396,9 @@ program_interface(
 		}
 
 		/* Constants and implicit viewport/depth words require no descriptor binding. */
-		if (uniform->kind != BCM2711_SHADER_BLOCK && uniform->kind != BCM2711_SHADER_TEXTURE && uniform->kind != BCM2711_SHADER_SAMPLER)
+		if (uniform->kind != BCM2711_SHADER_BLOCK &&
+		    uniform->kind != BCM2711_SHADER_TEXTURE &&
+		    uniform->kind != BCM2711_SHADER_SAMPLER)
 			continue;
 		if (uniform->set >= layout->count)
 			return EINVAL;

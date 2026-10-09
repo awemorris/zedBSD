@@ -312,7 +312,10 @@ capture_mode(
 		plane = &display->list.planes[index];
 		if ((uint64_t)(plane->pointer & 0x3fffffffU) != display->screen.physical)
 			continue;
-		if (plane->format != 7U || plane->scaled || plane->flipped || plane->words != 8U)
+		if (plane->format != 7U ||
+		    plane->scaled ||
+		    plane->flipped ||
+		    plane->words != 8U)
 			return ENOTSUP;
 		if ((plane->control & 0x00300000U) != 0)
 			return ENOTSUP;

@@ -279,4 +279,7 @@ write_bits(
 		selected = (field >> bit) & 1U;
 		bytes[position / 8U] |= (uint8_t)(selected << (position % 8U));
 	}
+
+	/* Succeeded: the selected field has been encoded without changing neighbouring bits. */
+	return;
 }

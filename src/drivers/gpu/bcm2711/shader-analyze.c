@@ -36,8 +36,10 @@ bcm2711_shader_analyze(
 
 	/* Only the two graphics stages have a native ABI in this compiler. */
 	ir = compiler->ir;
-	if (ir->instruction_count == 0 || ir->instruction_count > SHADER_MAX_INSTRUCTIONS ||
-	    ir->value_count == 0 || ir->value_count > SHADER_MAX_VALUES)
+	if (ir->instruction_count == 0 ||
+	    ir->instruction_count > SHADER_MAX_INSTRUCTIONS ||
+	    ir->value_count == 0 ||
+	    ir->value_count > SHADER_MAX_VALUES)
 		return E2BIG;
 	if (ir->stage != I915_STAGE_VERTEX && ir->stage != I915_STAGE_FRAGMENT)
 		return ENOTSUP;
@@ -113,8 +115,11 @@ input_interface(
 	/* Refuses builtins and malformed declarations until their distinct native payload ABIs are implemented. */
 	for (index = 0; index < compiler->ir->input_count; index++) {
 		input = &compiler->ir->inputs[index];
-		if (input->location >= 16 || input->components == 0 || input->components > 4 ||
-		    input->flat > 1 || input->noperspective > 1)
+		if (input->location >= 16 ||
+		    input->components == 0 ||
+		    input->components > 4 ||
+		    input->flat > 1 ||
+		    input->noperspective > 1)
 			return ENOTSUP;
 	}
 
@@ -152,8 +157,10 @@ input_interface(
 	for (index = 0; index < compiler->key->varying_count; index++) {
 		component = &binary->varyings[index];
 		*component = compiler->key->varyings[index];
-		if (component->location >= 16 || component->component >= 4 ||
-		    component->flat > 1 || component->noperspective > 1)
+		if (component->location >= 16 ||
+		    component->component >= 4 ||
+		    component->flat > 1 ||
+		    component->noperspective > 1)
 			return EINVAL;
 		if (index != 0) {
 			/* Strict ordering rejects duplicate or reversed FIFO identities. */
@@ -259,7 +266,8 @@ analyze_instruction(
 
 	/* Push loads consume exactly one aligned, declared word. */
 	if (instruction->op == I915_IR_LOAD_PUSH) {
-		if ((instruction->immediate & 3) != 0 || compiler->ir->push_bytes < 4 ||
+		if ((instruction->immediate & 3) != 0 ||
+		    compiler->ir->push_bytes < 4 ||
 		    instruction->immediate > compiler->ir->push_bytes - 4)
 			return EINVAL;
 	}
@@ -269,7 +277,8 @@ analyze_instruction(
 		if (instruction->location >= compiler->ir->uniform_count || (instruction->immediate & 3) != 0)
 			return EINVAL;
 		uniform = &compiler->ir->uniforms[instruction->location];
-		if (uniform->kind != I915_IR_UNIFORM_BLOCK || uniform->size < 4 ||
+		if (uniform->kind != I915_IR_UNIFORM_BLOCK ||
+		    uniform->size < 4 ||
 		    instruction->immediate < uniform->offset ||
 		    instruction->immediate - uniform->offset > uniform->size - 4)
 			return EINVAL;

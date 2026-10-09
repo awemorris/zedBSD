@@ -160,6 +160,9 @@ bcm2711_clock_report(
 			   (on_off & FIRMWARE_CLOCK_RUNNING) != 0 ? "on" : "off",
 			   (unsigned)hz,
 			   (unsigned)top_hz);
+
+	/* Succeeded: the firmware clock bounds and current state have been reported. */
+	return;
 }
 
 /* Sends one get tag about a clock and returns the value word of its answer. */

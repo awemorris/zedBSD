@@ -34,7 +34,9 @@ bcm2711_native_colour_pack(
 	uint32_t packed;
 
 	/* Missing storage or an unsupported channel choice refuses before the output changes. */
-	if (words == NULL || colour == NULL || swap > 1U)
+	if (words == NULL ||
+	    colour == NULL ||
+	    swap > 1U)
 		return EINVAL;
 
 	/* Read every component before publishing, permitting output to alias one input word. */

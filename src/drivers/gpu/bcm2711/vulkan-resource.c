@@ -70,7 +70,9 @@ bcm2711_vulkan_resource_dispatch(
 	/* Ordinary void destruction still permits the client's echoed-opcode flag. */
 	if (requested > 1)
 		return EINVAL;
-	if (opcode != GPU_OP_DESTROY_BUFFER && opcode != GPU_OP_DESTROY_IMAGE && requested != 1)
+	if (opcode != GPU_OP_DESTROY_BUFFER &&
+	    opcode != GPU_OP_DESTROY_IMAGE &&
+	    requested != 1)
 		return EINVAL;
 
 	/* Resource kind always follows the opcode, never an untyped identity lookup. */
@@ -133,7 +135,9 @@ bcm2711_vulkan_resource_backing(
 	*view = NULL;
 	*address = 0;
 	*cpu = NULL;
-	if (resource == NULL || resource->memory == NULL || bytes == 0)
+	if (resource == NULL ||
+	    resource->memory == NULL ||
+	    bytes == 0)
 		return EINVAL;
 	if (offset > resource->bytes || bytes > resource->bytes - offset)
 		return EINVAL;
@@ -143,11 +147,15 @@ bcm2711_vulkan_resource_backing(
 
 	/* The binding was bounded at publication; recheck the exact backing before exposing a draw/transfer span. */
 	begin = resource->offset + offset;
-	if (begin < resource->offset || begin > memory->bytes || bytes > memory->bytes - begin)
+	if (begin < resource->offset ||
+	    begin > memory->bytes ||
+	    bytes > memory->bytes - begin)
 		return EINVAL;
 	buffer = memory->view->buffer;
-	if (!buffer->uncached || buffer->address == NULL ||
-	    begin > buffer->bytes || bytes > buffer->bytes - begin)
+	if (!buffer->uncached ||
+	    buffer->address == NULL ||
+	    begin > buffer->bytes ||
+	    bytes > buffer->bytes - begin)
 		return EIO;
 	native = (uint64_t)memory->view->address + begin;
 	if (native >= 0x100000000ULL || bytes > 0x100000000ULL - native)
@@ -187,8 +195,11 @@ create_buffer(
 	i915_vkc_dec_VkBufferCreateInfo(reader, &session->arena, &info);
 	if (reader->error != 0)
 		return reader->error;
-	if (info.sType != VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO || info.flags != 0 ||
-	    info.size == 0 || info.size > VULKAN_RESOURCE_BYTES || info.usage == 0 ||
+	if (info.sType != VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO ||
+	    info.flags != 0 ||
+	    info.size == 0 ||
+	    info.size > VULKAN_RESOURCE_BYTES ||
+	    info.usage == 0 ||
 	    (info.usage & ~VULKAN_BUFFER_USAGE) != 0)
 		return ENOTSUP;
 	error = sharing_mode(info.sharingMode, info.queueFamilyIndexCount, info.pQueueFamilyIndices);
@@ -234,10 +245,17 @@ create_image(
 	i915_vkc_dec_VkImageCreateInfo(reader, &session->arena, &info);
 	if (reader->error != 0)
 		return reader->error;
-	if (info.sType != VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO || info.flags != 0 ||
-	    info.imageType != VK_IMAGE_TYPE_2D || info.extent.width == 0 || info.extent.width > 4096 ||
-	    info.extent.height == 0 || info.extent.height > 4096 || info.extent.depth != 1 ||
-	    info.mipLevels != 1 || info.arrayLayers != 1 || info.samples != VK_SAMPLE_COUNT_1_BIT)
+	if (info.sType != VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO ||
+	    info.flags != 0 ||
+	    info.imageType != VK_IMAGE_TYPE_2D ||
+	    info.extent.width == 0 ||
+	    info.extent.width > 4096 ||
+	    info.extent.height == 0 ||
+	    info.extent.height > 4096 ||
+	    info.extent.depth != 1 ||
+	    info.mipLevels != 1 ||
+	    info.arrayLayers != 1 ||
+	    info.samples != VK_SAMPLE_COUNT_1_BIT)
 		return ENOTSUP;
 	if (info.format != VK_FORMAT_R8G8B8A8_UNORM && info.format != VK_FORMAT_B8G8R8A8_UNORM)
 		return ENOTSUP;
@@ -295,7 +313,10 @@ publish_resource(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (device == NULL)
@@ -461,16 +482,20 @@ bind_memory(
 		return EINVAL;
 	resource = find_resource(session, kind, device_id, identity);
 	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_MEMORY, allocation);
-	if (resource == NULL || object == NULL || resource->memory != NULL)
+	if (resource == NULL ||
+	    object == NULL ||
+	    resource->memory != NULL)
 		return EINVAL;
 	memory = object->payload;
 	if (memory->device != resource->device)
 		return EINVAL;
 
 	/* Unsupported, misaligned or partial intervals never mutate the existing unbound resource. */
-	if (memory->view == NULL || memory->view->quarantined ||
+	if (memory->view == NULL ||
+	    memory->view->quarantined ||
 	    (offset & (resource->alignment - 1U)) != 0 ||
-	    offset > memory->bytes || resource->required_bytes > memory->bytes - offset) {
+	    offset > memory->bytes ||
+	    resource->required_bytes > memory->bytes - offset) {
 		drv_i915_wire_reply_u32(reply, (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY);
 		return 0;
 	}
@@ -511,9 +536,11 @@ image_layout(
 	kern_memset(&subresource, 0, sizeof(subresource));
 	i915_vkc_dec_VkImageSubresource(reader, &session->arena, &subresource);
 	output = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || output != 1 ||
+	if (reader->error != 0 ||
+	    output != 1 ||
 	    subresource.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-	    subresource.mipLevel != 0 || subresource.arrayLayer != 0)
+	    subresource.mipLevel != 0 ||
+	    subresource.arrayLayer != 0)
 		return EINVAL;
 	resource = find_resource(session, I915_VK_OBJ_IMAGE, device_id, identity);
 	if (resource == NULL || resource->tiling != VK_IMAGE_TILING_LINEAR)
@@ -582,7 +609,9 @@ external_declaration(
 	type = drv_i915_wire_read_u32(&checked);
 	next = drv_i915_wire_read_u64(&checked);
 	handles = drv_i915_wire_read_u32(&checked);
-	if (checked.error != 0 || type != expected || next != 0)
+	if (checked.error != 0 ||
+	    type != expected ||
+	    next != 0)
 		return ENOTSUP;
 	if (handles == 0 || (handles & ~0x201U) != 0)
 		return ENOTSUP;
@@ -601,7 +630,10 @@ sharing_mode(
 	/* Exclusive mode does not consume the standard's ignored family-index fields. */
 	if (mode == VK_SHARING_MODE_EXCLUSIVE)
 		return 0;
-	if (mode != VK_SHARING_MODE_CONCURRENT || count != 1 || families == NULL || families[0] != 0)
+	if (mode != VK_SHARING_MODE_CONCURRENT ||
+	    count != 1 ||
+	    families == NULL ||
+	    families[0] != 0)
 		return ENOTSUP;
 
 	/* Succeeded: one queue family owns every supported access to this native description. */
@@ -619,4 +651,7 @@ creation_reply(
 	drv_i915_wire_reply_u32(reply, (uint32_t)status);
 	drv_i915_wire_reply_u64(reply, 1);
 	drv_i915_wire_reply_u64(reply, identity);
+
+	/* Succeeded: the reply carries the selected resource status and identity. */
+	return;
 }

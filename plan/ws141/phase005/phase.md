@@ -106,3 +106,7 @@ native fence/binary semaphoreのtyped device ownership、初期状態/status/ato
 ## public runtimeのsoftware checkpoint（2026-10-10）
 
 actual render openでcomplete Vulkan ownerを作り、production combined20route/async immutable snapshot single-worker/real callback drain/capset168byte strict queue/owned domain/JOB capacityを登録前にbind。actual host26範囲とactual renderer register/open/close/hardware-owner host2 summary、final RPi4 y warning/error0/checks3 PASS。公開LTO ELFにruntimeが残ることを確認。受理後mutable input、whole CPU OOM unwind、fence completed after worker、16slot limit、close joinとfault error handoffをactual callbacksで確認。single-thread/common observerとMMIO fixtureの限界を保持し実機/Keiland成功と偽らない。legacy pending no-overtake EAGAINは内部手順でAPI/WS criteria不変。Statusはin-progress、whole callgraph16KiB/p007/full physical acceptanceは未達。[全手順・commands・結果・制限](../execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+
+## 最終software監査（2026-10-10）
+
+二node登録/share/Normal NC/public runtimeの最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。

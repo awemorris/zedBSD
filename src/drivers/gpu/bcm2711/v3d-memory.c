@@ -41,7 +41,9 @@ bcm2711_v3d_memory_map(
 	if (!ready)
 		return EIO;
 	bytes = buffer->memory.size;
-	if (bytes == 0 || bytes >= 0x100000000ULL || (bytes & 4095U) != 0)
+	if (bytes == 0 ||
+	    bytes >= 0x100000000ULL ||
+	    (bytes & 4095U) != 0)
 		return EINVAL;
 	physical_end = 1ULL << space->native->hardware.physical_bits;
 	if (buffer->memory.paddr >= physical_end || bytes > physical_end - buffer->memory.paddr)
@@ -102,9 +104,14 @@ bcm2711_v3d_memory_retain(
 	struct bcm2711_v3d_view *view)
 {
 	/* A dead or quarantined view cannot be resurrected by another descriptor. */
-	if (view->references == 0 || view->references == UINT32_MAX || view->quarantined)
+	if (view->references == 0 ||
+	    view->references == UINT32_MAX ||
+	    view->quarantined)
 		__builtin_trap();
 	view->references++;
+
+	/* Succeeded: the native allocation has another independent owner. */
+	return;
 }
 
 /*
@@ -217,6 +224,9 @@ remove_view(
 	if (*position == NULL)
 		__builtin_trap();
 	*position = view->next;
+
+	/* Succeeded: the released view no longer occupies the native allocation list. */
+	return;
 }
 
 /* Samples IRQ-owned fault admission without holding the guard across allocation or waits. */
@@ -231,7 +241,8 @@ memory_ready(
 	enabled = spin_lock_irqsave(&space->native->hardware.guard);
 
 	ready = false;
-	if (space->native->hardware.ready && !space->native->hardware.faulted &&
+	if (space->native->hardware.ready &&
+	    !space->native->hardware.faulted &&
 	    !space->native->hardware.job_busy)
 		ready = true;
 

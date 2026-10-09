@@ -164,6 +164,9 @@ bcm2711_shared_release(
 	/* Imported resources and native DMA holds own their own allocation references. */
 	bcm2711_buffer_release(shared->buffer);
 	kern_free(shared);
+
+	/* Succeeded: the retired capability owns no allocation or page-vector reference. */
+	return;
 }
 
 /*
@@ -194,7 +197,7 @@ bcm2711_shared_backing(
 	backing->page_bytes = 4096;
 	backing->flags = DRV_GPU_BACKING_CONTIGUOUS;
 
-	/* Succeeded: this is ordinary cached RAM with one verified physical run. */
+	/* Succeeded: this is one verified physical RAM run with the allocation's immutable cache policy. */
 	return 0;
 }
 
@@ -221,7 +224,8 @@ bcm2711_shared_lookup(
 	for (shared = exports; shared != NULL; shared = shared->next) {
 		if (shared->pages != backing->pages)
 			continue;
-		if (!shared->has_image || backing->page_count != shared->page_count ||
+		if (!shared->has_image ||
+		    backing->page_count != shared->page_count ||
 		    backing->bytes != shared->buffer->bytes)
 			continue;
 
@@ -274,7 +278,9 @@ bcm2711_shared_image(
 	uint64_t bytes;
 
 	/* Both native devices accept only the two complete four-byte linear color layouts. */
-	if (image->width == 0 || image->width > UINT32_MAX / 4U || image->height == 0)
+	if (image->width == 0 ||
+	    image->width > UINT32_MAX / 4U ||
+	    image->height == 0)
 		return EINVAL;
 	if (image->format != GPU_PIXEL_BGRA8888 && image->format != GPU_PIXEL_RGBA8888)
 		return ENOTSUP;
@@ -302,11 +308,16 @@ same_image(
 	const struct gpu_image_descriptor *second)
 {
 	/* Every application-visible layout field must come from the original export. */
-	if (first->width != second->width || first->height != second->height ||
-	    first->format != second->format || first->stride != second->stride ||
-	    first->offset != second->offset || first->allocation_bytes != second->allocation_bytes ||
-	    first->memory_type != second->memory_type || first->usage != second->usage ||
-	    first->tiling != second->tiling || first->reserved != second->reserved)
+	if (first->width != second->width ||
+	    first->height != second->height ||
+	    first->format != second->format ||
+	    first->stride != second->stride ||
+	    first->offset != second->offset ||
+	    first->allocation_bytes != second->allocation_bytes ||
+	    first->memory_type != second->memory_type ||
+	    first->usage != second->usage ||
+	    first->tiling != second->tiling ||
+	    first->reserved != second->reserved)
 		return false;
 
 	/* Succeeded: the two descriptions identify the same immutable image layout. */

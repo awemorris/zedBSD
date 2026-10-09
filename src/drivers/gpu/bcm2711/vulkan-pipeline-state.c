@@ -30,17 +30,30 @@ bcm2711_vulkan_pipeline_state(
 	int error;
 
 	/* Unsupported derivative, optional-stage, depth and rasterizer-discard contracts cannot enter this finite path implicitly. */
-	if (info->sType != VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO || info->pNext != NULL || info->flags != 0 || info->subpass != 0)
+	if (info->sType != VK_STRUCTURE_TYPE_GRAPHICS_PIPELINE_CREATE_INFO ||
+	    info->pNext != NULL ||
+	    info->flags != 0 ||
+	    info->subpass != 0)
 		return ENOTSUP;
-	if (info->pTessellationState != NULL || info->pDepthStencilState != NULL || info->basePipelineHandle != VK_NULL_HANDLE || info->basePipelineIndex != -1)
+	if (info->pTessellationState != NULL ||
+	    info->pDepthStencilState != NULL ||
+	    info->basePipelineHandle != VK_NULL_HANDLE ||
+	    info->basePipelineIndex != -1)
 		return ENOTSUP;
-	if (info->pVertexInputState == NULL || info->pInputAssemblyState == NULL || info->pRasterizationState == NULL || info->pMultisampleState == NULL || info->pViewportState == NULL || info->pColorBlendState == NULL)
+	if (info->pVertexInputState == NULL ||
+	    info->pInputAssemblyState == NULL ||
+	    info->pRasterizationState == NULL ||
+	    info->pMultisampleState == NULL ||
+	    info->pViewportState == NULL ||
+	    info->pColorBlendState == NULL)
 		return EINVAL;
 	error = fetch_state(pipeline, info->pVertexInputState);
 	if (error != 0)
 		return error;
 	assembly = info->pInputAssemblyState;
-	if (assembly->sType != VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO || assembly->pNext != NULL || assembly->flags != 0)
+	if (assembly->sType != VK_STRUCTURE_TYPE_PIPELINE_INPUT_ASSEMBLY_STATE_CREATE_INFO ||
+	    assembly->pNext != NULL ||
+	    assembly->flags != 0)
 		return ENOTSUP;
 	if (assembly->topology != VK_PRIMITIVE_TOPOLOGY_TRIANGLE_LIST || assembly->primitiveRestartEnable != VK_FALSE)
 		return ENOTSUP;
@@ -50,7 +63,9 @@ bcm2711_vulkan_pipeline_state(
 	if (error != 0)
 		return error;
 	viewport = info->pViewportState;
-	if (viewport->sType != VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO || viewport->pNext != NULL || viewport->flags != 0)
+	if (viewport->sType != VK_STRUCTURE_TYPE_PIPELINE_VIEWPORT_STATE_CREATE_INFO ||
+	    viewport->pNext != NULL ||
+	    viewport->flags != 0)
 		return ENOTSUP;
 	if (viewport->viewportCount != 1 || viewport->scissorCount != 1)
 		return ENOTSUP;
@@ -60,9 +75,14 @@ bcm2711_vulkan_pipeline_state(
 
 	/* Single-sample operation ignores unused mask bits and minSampleShading while refusing enabled optional sampling effects. */
 	samples = info->pMultisampleState;
-	if (samples->sType != VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO || samples->pNext != NULL || samples->flags != 0)
+	if (samples->sType != VK_STRUCTURE_TYPE_PIPELINE_MULTISAMPLE_STATE_CREATE_INFO ||
+	    samples->pNext != NULL ||
+	    samples->flags != 0)
 		return ENOTSUP;
-	if (samples->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT || samples->sampleShadingEnable != VK_FALSE || samples->alphaToCoverageEnable != VK_FALSE || samples->alphaToOneEnable != VK_FALSE)
+	if (samples->rasterizationSamples != VK_SAMPLE_COUNT_1_BIT ||
+	    samples->sampleShadingEnable != VK_FALSE ||
+	    samples->alphaToCoverageEnable != VK_FALSE ||
+	    samples->alphaToOneEnable != VK_FALSE)
 		return ENOTSUP;
 	if (samples->pSampleMask != NULL) {
 		if ((samples->pSampleMask[0] & 1U) == 0)
@@ -91,7 +111,9 @@ fetch_state(
 	uint32_t found;
 
 	/* The reported sixteen-binding/attribute and offset/stride limits bound exact native fetch declarations. */
-	if (input->sType != VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO || input->pNext != NULL || input->flags != 0)
+	if (input->sType != VK_STRUCTURE_TYPE_PIPELINE_VERTEX_INPUT_STATE_CREATE_INFO ||
+	    input->pNext != NULL ||
+	    input->flags != 0)
 		return ENOTSUP;
 	if (input->vertexBindingDescriptionCount > BCM2711_VULKAN_VERTEX_BINDINGS || input->vertexAttributeDescriptionCount > BCM2711_VULKAN_VERTEX_ATTRIBUTES)
 		return ENOTSUP;
@@ -101,7 +123,9 @@ fetch_state(
 		return EINVAL;
 	for (index = 0; index < input->vertexBindingDescriptionCount; index++) {
 		binding = &input->pVertexBindingDescriptions[index];
-		if (binding->binding >= BCM2711_VULKAN_VERTEX_BINDINGS || binding->stride > 2048U || binding->inputRate != VK_VERTEX_INPUT_RATE_VERTEX)
+		if (binding->binding >= BCM2711_VULKAN_VERTEX_BINDINGS ||
+		    binding->stride > 2048U ||
+		    binding->inputRate != VK_VERTEX_INPUT_RATE_VERTEX)
 			return ENOTSUP;
 		for (previous = 0; previous < index; previous++) {
 			if (input->pVertexBindingDescriptions[previous].binding == binding->binding)
@@ -115,9 +139,14 @@ fetch_state(
 	/* Every declared attribute has one unique finite location, supported raw float representation and declared binding. */
 	for (index = 0; index < input->vertexAttributeDescriptionCount; index++) {
 		attribute = &input->pVertexAttributeDescriptions[index];
-		if (attribute->location >= BCM2711_VULKAN_VERTEX_ATTRIBUTES || attribute->offset > 2047U || (attribute->offset & 3U) != 0)
+		if (attribute->location >= BCM2711_VULKAN_VERTEX_ATTRIBUTES ||
+		    attribute->offset > 2047U ||
+		    (attribute->offset & 3U) != 0)
 			return ENOTSUP;
-		if (attribute->format != VK_FORMAT_R32_SFLOAT && attribute->format != VK_FORMAT_R32G32_SFLOAT && attribute->format != VK_FORMAT_R32G32B32_SFLOAT && attribute->format != VK_FORMAT_R32G32B32A32_SFLOAT)
+		if (attribute->format != VK_FORMAT_R32_SFLOAT &&
+		    attribute->format != VK_FORMAT_R32G32_SFLOAT &&
+		    attribute->format != VK_FORMAT_R32G32B32_SFLOAT &&
+		    attribute->format != VK_FORMAT_R32G32B32A32_SFLOAT)
 			return ENOTSUP;
 		for (previous = 0; previous < index; previous++) {
 			if (input->pVertexAttributeDescriptions[previous].location == attribute->location)
@@ -154,9 +183,14 @@ raster_state(
 	uint32_t line;
 
 	/* No enabled raster feature may disappear behind a triangle-only native lowering. */
-	if (raster->sType != VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO || raster->pNext != NULL || raster->flags != 0)
+	if (raster->sType != VK_STRUCTURE_TYPE_PIPELINE_RASTERIZATION_STATE_CREATE_INFO ||
+	    raster->pNext != NULL ||
+	    raster->flags != 0)
 		return ENOTSUP;
-	if (raster->depthClampEnable != VK_FALSE || raster->rasterizerDiscardEnable != VK_FALSE || raster->depthBiasEnable != VK_FALSE || raster->polygonMode != VK_POLYGON_MODE_FILL)
+	if (raster->depthClampEnable != VK_FALSE ||
+	    raster->rasterizerDiscardEnable != VK_FALSE ||
+	    raster->depthBiasEnable != VK_FALSE ||
+	    raster->polygonMode != VK_POLYGON_MODE_FILL)
 		return ENOTSUP;
 	if ((raster->cullMode & ~VK_CULL_MODE_FRONT_AND_BACK) != 0)
 		return ENOTSUP;
@@ -183,7 +217,10 @@ blend_state(
 	const VkPipelineColorBlendAttachmentState *attachment;
 
 	/* One full colour attachment and disabled logic operation match the finite fragment tile-output ABI. */
-	if (blend->sType != VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO || blend->pNext != NULL || blend->flags != 0 || blend->logicOpEnable != VK_FALSE)
+	if (blend->sType != VK_STRUCTURE_TYPE_PIPELINE_COLOR_BLEND_STATE_CREATE_INFO ||
+	    blend->pNext != NULL ||
+	    blend->flags != 0 ||
+	    blend->logicOpEnable != VK_FALSE)
 		return ENOTSUP;
 	if (blend->attachmentCount != 1 || blend->pAttachments == NULL)
 		return ENOTSUP;
@@ -194,9 +231,13 @@ blend_state(
 		return EINVAL;
 	pipeline->blend = false;
 	if (attachment->blendEnable == VK_TRUE) {
-		if (attachment->srcColorBlendFactor != VK_BLEND_FACTOR_ONE || attachment->dstColorBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA || attachment->colorBlendOp != VK_BLEND_OP_ADD)
+		if (attachment->srcColorBlendFactor != VK_BLEND_FACTOR_ONE ||
+		    attachment->dstColorBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
+		    attachment->colorBlendOp != VK_BLEND_OP_ADD)
 			return ENOTSUP;
-		if (attachment->srcAlphaBlendFactor != VK_BLEND_FACTOR_ONE || attachment->dstAlphaBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA || attachment->alphaBlendOp != VK_BLEND_OP_ADD)
+		if (attachment->srcAlphaBlendFactor != VK_BLEND_FACTOR_ONE ||
+		    attachment->dstAlphaBlendFactor != VK_BLEND_FACTOR_ONE_MINUS_SRC_ALPHA ||
+		    attachment->alphaBlendOp != VK_BLEND_OP_ADD)
 			return ENOTSUP;
 		pipeline->blend = true;
 	}
@@ -217,7 +258,11 @@ dynamic_state(
 	/* Static or other dynamic-state variants remain explicit unsupported contracts until their native lowering exists. */
 	if (dynamic == NULL)
 		return ENOTSUP;
-	if (dynamic->sType != VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO || dynamic->pNext != NULL || dynamic->flags != 0 || dynamic->dynamicStateCount != 2 || dynamic->pDynamicStates == NULL)
+	if (dynamic->sType != VK_STRUCTURE_TYPE_PIPELINE_DYNAMIC_STATE_CREATE_INFO ||
+	    dynamic->pNext != NULL ||
+	    dynamic->flags != 0 ||
+	    dynamic->dynamicStateCount != 2 ||
+	    dynamic->pDynamicStates == NULL)
 		return ENOTSUP;
 	viewport = 0;
 	scissor = 0;

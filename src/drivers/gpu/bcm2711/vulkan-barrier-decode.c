@@ -108,8 +108,13 @@ decode_header(
 	next = drv_i915_wire_read_u64(reader);
 	entry->source = drv_i915_wire_read_u32(reader);
 	entry->destination = drv_i915_wire_read_u32(reader);
-	if (barrier->semantic_error == 0 && (type != (uint32_t)expected || next != 0))
+	if (barrier->semantic_error == 0 &&
+	    (type != (uint32_t)expected ||
+	     next != 0))
 		barrier->semantic_error = ENOTSUP;
+
+	/* Succeeded: the complete barrier header or its framing error is available to the caller. */
+	return;
 }
 
 /* Copies one exact buffer selection and its immutable logical range without taking a reference yet. */
@@ -132,6 +137,9 @@ decode_buffer(
 	entry->object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, identity);
 	if (barrier->semantic_error == 0 && entry->object == NULL)
 		barrier->semantic_error = EINVAL;
+
+	/* Succeeded: the complete buffer barrier or its framing error is available to the caller. */
+	return;
 }
 
 /* Copies one full-colour image layout transition and its exact typed resource without retaining a wire handle. */
@@ -159,4 +167,7 @@ decode_image(
 	entry->object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE, identity);
 	if (barrier->semantic_error == 0 && entry->object == NULL)
 		barrier->semantic_error = EINVAL;
+
+	/* Succeeded: the complete image barrier or its framing error is available to the caller. */
+	return;
 }

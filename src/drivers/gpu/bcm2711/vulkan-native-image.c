@@ -202,7 +202,7 @@ prepare_programs(
 	struct bcm2711_vulkan_meta_draw *meta,
 	VkFormat destination)
 {
-	struct bcm2711_shader_key key;
+	struct bcm2711_shader_key *key;
 	struct bcm2711_shader_diagnostic diagnostic;
 	const uint32_t *words;
 	size_t count;
@@ -210,11 +210,12 @@ prepare_programs(
 	int error;
 
 	/* One exact two-scalar varying interface joins coordinate, render-vertex and unblended fragment programs. */
-	kern_memset(&key, 0, sizeof(key));
-	key.varying_count = 2;
-	key.varyings[1].component = 1;
+	key = &meta->key;
+	kern_memset(key, 0, sizeof(*key));
+	key->varying_count = 2;
+	key->varyings[1].component = 1;
 	if (!meta->raw && destination == VK_FORMAT_B8G8R8A8_UNORM)
-		key.swap_red_blue = 1;
+		key->swap_red_blue = 1;
 	meta->pipeline.front = VK_FRONT_FACE_COUNTER_CLOCKWISE;
 
 	/* The ordinary kernel SPIR-V compiler owns code and consumed scalar metadata; no external native binary is imported. */
@@ -227,7 +228,7 @@ prepare_programs(
 		}
 
 		/* Generate this exact stage into an independently releasable compiler owner. */
-		error = bcm2711_shader_compile(words, count, (enum bcm2711_shader_stage)index, &key, &meta->pipeline.programs[index], &diagnostic);
+		error = bcm2711_shader_compile(words, count, (enum bcm2711_shader_stage)index, key, &meta->pipeline.programs[index], &diagnostic);
 		if (error != 0)
 			return error;
 	}

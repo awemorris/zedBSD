@@ -120,8 +120,10 @@ create_sync(
 	output = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 ||
-	    present != 1 || allocator != 0 ||
-	    output != 1 || identity == 0)
+	    present != 1 ||
+	    allocator != 0 ||
+	    output != 1 ||
+	    identity == 0)
 		return EINVAL;
 
 	/* Only the real same-session logical device can become this sync payload's independent parent. */
@@ -250,7 +252,8 @@ fence_status(
 	identity = drv_i915_wire_read_u64(reader);
 	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FENCE, identity);
 	if (reader->error != 0 ||
-	    device == NULL || object == NULL ||
+	    device == NULL ||
+	    object == NULL ||
 	    object->payload == NULL)
 		return EINVAL;
 	sync = object->payload;
@@ -302,8 +305,10 @@ reset_fences(
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 ||
-	    device == NULL || count == 0 ||
-	    count > VULKAN_SYNC_RESET_COUNT || array != count)
+	    device == NULL ||
+	    count == 0 ||
+	    count > VULKAN_SYNC_RESET_COUNT ||
+	    array != count)
 		return EINVAL;
 	objects = i915_vkc_array(reader, &session->arena, count, sizeof(*objects));
 	if (objects == NULL)

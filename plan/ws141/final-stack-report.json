@@ -1,0 +1,451 @@
+{
+  "kind": "ordinary configured runtime, one kernel IRQ; terminal invariant diagnostics excluded",
+  "limits": {
+    "execute_stream": 5,
+    "i915_spirv_operand_wide": 9,
+    "i915_spirv_type_size": 10,
+    "i915_spirv_io_map": 10,
+    "i915_spirv_type_has_int16": 10,
+    "i915_spirv_minor_determinant": 4,
+    "bcm2711_vulkan_object_release": 9,
+    "signal_send_process_info": 2
+  },
+  "bindings": {
+    "bcm2711_vulkan_object_release": [
+      "release_root",
+      "release_sync",
+      "release_memory",
+      "release_resource",
+      "release_input",
+      "release_set_layout",
+      "release_pipeline_layout",
+      "release_pool",
+      "release_pool.2250",
+      "release_set",
+      "release_target",
+      "bcm2711_vulkan_pipeline_release",
+      "bcm2711_vulkan_command_release"
+    ],
+    "bcm2711_vulkan_command_clear": [
+      "release_barrier",
+      "release_record",
+      "release_copy",
+      "release_transfer"
+    ],
+    "publish_layout": [
+      "release_set_layout",
+      "release_pipeline_layout"
+    ],
+    "walk_records": [
+      "prepare_event"
+    ],
+    "handle_put": [
+      "fence_release"
+    ],
+    "arm64_irq_handler": [
+      "irq_handler"
+    ],
+    "irq_handler": [
+      "service_sources",
+      "service_timing",
+      "service_compositor"
+    ]
+  },
+  "roots": {
+    "worker_main": [
+      7600,
+      [
+        "worker_main",
+        "execute_command",
+        "bcm2711_vulkan_stream_execute",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "bcm2711_vulkan_dispatch",
+        "bcm2711_vulkan_queue_dispatch",
+        "bcm2711_vulkan_native_job_execute",
+        "bcm2711_vulkan_native_image_create",
+        "prepare_programs.2300",
+        "bcm2711_shader_compile",
+        "drv_i915_shader_parse",
+        "i915_spirv_pass_body",
+        "i915_spirv_lower_branch_conditional",
+        "i915_spirv_loop_back_edge",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_emit",
+        "kern_calloc",
+        "kern_malloc"
+      ]
+    ],
+    "runtime_command": [
+      7504,
+      [
+        "runtime_command",
+        "bcm2711_vulkan_stream_execute",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "execute_stream",
+        "bcm2711_vulkan_dispatch",
+        "bcm2711_vulkan_queue_dispatch",
+        "bcm2711_vulkan_native_job_execute",
+        "bcm2711_vulkan_native_image_create",
+        "prepare_programs.2300",
+        "bcm2711_shader_compile",
+        "drv_i915_shader_parse",
+        "i915_spirv_pass_body",
+        "i915_spirv_lower_branch_conditional",
+        "i915_spirv_loop_back_edge",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_emit",
+        "kern_calloc",
+        "kern_malloc"
+      ]
+    ],
+    "runtime_submit": [
+      3952,
+      [
+        "runtime_submit",
+        "mutex_lock_interruptible",
+        "waitq_sleep",
+        "sched_sleep_locked",
+        "switch_without_enqueue",
+        "thread_sched_retired",
+        "tty_detach_process",
+        "process_signal_pgrp_except",
+        "signal_send_process",
+        "signal_send_process_info",
+        "process_continue",
+        "notify_parent_job_event_tree_locked",
+        "signal_send_process_info",
+        "sched_interrupt",
+        "sched_wakeup",
+        "queue_remove_thread",
+        "queue_remove",
+        "kern_logf",
+        "kern_vsnprintf",
+        "kcrt_emit_number"
+      ]
+    ],
+    "arm64_irq_current": [
+      5344,
+      [
+        "arm64_irq_current",
+        "arm64_irq_handler",
+        "sched_preempt",
+        "sched_yield",
+        "thread_sched_retired",
+        "tty_detach_process",
+        "process_signal_pgrp_except",
+        "signal_send_process",
+        "signal_send_process_info",
+        "process_continue",
+        "notify_parent_job_event_tree_locked",
+        "signal_send_process_info",
+        "sched_interrupt",
+        "sched_wakeup",
+        "queue_remove_thread",
+        "queue_remove",
+        "kern_logf",
+        "kern_vsnprintf",
+        "kcrt_emit_number"
+      ]
+    ],
+    "bcm2711_vulkan_pipeline_dispatch": [
+      6544,
+      [
+        "bcm2711_vulkan_pipeline_dispatch",
+        "bcm2711_vulkan_pipeline_build",
+        "bcm2711_shader_compile",
+        "drv_i915_shader_parse",
+        "i915_spirv_pass_body",
+        "i915_spirv_lower_branch_conditional",
+        "i915_spirv_loop_back_edge",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_operand_wide",
+        "i915_spirv_emit",
+        "kern_calloc",
+        "kern_malloc"
+      ]
+    ]
+  },
+  "outer_frames": {
+    "arm64_sync_lower": 288,
+    "arm64_sync_handler": 144,
+    "kernel_syscall_handler": 2336,
+    "file_ioctl": 96,
+    "cdev_ioctl_file": 0,
+    "gpu_ioctl": 176,
+    "gpu_command_ioctl": 96
+  },
+  "kernel_thread_prefix": 16,
+  "whole_bytes": {
+    "worker": 12960,
+    "synchronous_COMMAND": 15984,
+    "asynchronous_SUBMIT": 12432
+  },
+  "capacity": 16384,
+  "margin": 400,
+  "reachable": 435,
+  "indirect_classification": {
+    "fixed_callbacks": [
+      "arm64_irq_handler",
+      "bcm2711_vulkan_command_clear",
+      "bcm2711_vulkan_dispatch",
+      "bcm2711_vulkan_object_release",
+      "execute_stream",
+      "handle_put",
+      "irq_handler",
+      "publish_layout",
+      "walk_records",
+      "worker_main"
+    ],
+    "LLVM_intrafunction_switches": [
+      "bcm2711_shader_append",
+      "compile_program",
+      "i915_spirv_lower_atomic",
+      "i915_spirv_lower_compare",
+      "i915_spirv_lower_extended",
+      "i915_spirv_pass_body",
+      "i915_spirv_pass_declarations",
+      "signal_fields",
+      "walk_records"
+    ],
+    "NULL_heap_observers": [
+      "kern_free",
+      "kern_malloc"
+    ]
+  },
+  "unknown_indirect": {},
+  "inventory": {
+    "roots": [
+      "worker_main",
+      "runtime_command",
+      "runtime_submit"
+    ],
+    "reachable": 416,
+    "cycles": [
+      [
+        "notify_parent_job_event_tree_locked",
+        "process_continue",
+        "signal_send_process_info"
+      ],
+      [
+        "i915_spirv_operand_wide"
+      ],
+      [
+        "i915_spirv_shared_bytes"
+      ],
+      [
+        "i915_spirv_type_size"
+      ],
+      [
+        "i915_spirv_minor_determinant"
+      ],
+      [
+        "i915_spirv_io_map"
+      ],
+      [
+        "i915_spirv_type_has_int16"
+      ],
+      [
+        "execute_stream"
+      ]
+    ],
+    "unknown_sp": {},
+    "indirect": {
+      "bcm2711_shader_append": [
+        "ffff000000126d8c:      \tbr\tx12"
+      ],
+      "bcm2711_vulkan_command_clear": [
+        "ffff000000139c90:      \tblr\tx8"
+      ],
+      "bcm2711_vulkan_dispatch": [
+        "ffff000000129a5c:      \tblr\tx8"
+      ],
+      "bcm2711_vulkan_object_release": [
+        "ffff000000129234:      \tblr\tx8"
+      ],
+      "compile_program": [
+        "ffff0000001256c4:      \tbr\tx2",
+        "ffff000000125f2c:      \tbr\tx9"
+      ],
+      "execute_stream": [
+        "ffff000000129790:      \tblr\tx8"
+      ],
+      "handle_put": [
+        "ffff0000000ea4a0:      \tblr\tx8"
+      ],
+      "i915_spirv_lower_atomic": [
+        "ffff000000116338:      \tbr\tx10"
+      ],
+      "i915_spirv_lower_compare": [
+        "ffff0000001142f0:      \tbr\tx8"
+      ],
+      "i915_spirv_lower_extended": [
+        "ffff0000001191c0:      \tbr\tx9",
+        "ffff0000001196f0:      \tbr\tx8"
+      ],
+      "i915_spirv_pass_body": [
+        "ffff000000112150:      \tbr\tx9"
+      ],
+      "i915_spirv_pass_declarations": [
+        "ffff000000110cf4:      \tbr\tx14",
+        "ffff000000110d3c:      \tbr\tx17"
+      ],
+      "kern_free": [
+        "ffff0000000caf94:      \tblr\tx8"
+      ],
+      "kern_malloc": [
+        "ffff0000000cac60:      \tblr\tx9"
+      ],
+      "publish_layout": [
+        "ffff00000013373c:      \tblr\tx19",
+        "ffff000000133798:      \tblr\tx19"
+      ],
+      "signal_fields": [
+        "ffff00000012480c:      \tbr\tx10"
+      ],
+      "walk_records": [
+        "ffff00000013c4f0:      \tbr\tx9",
+        "ffff00000013cbb0:      \tblr\tx8"
+      ],
+      "worker_main": [
+        "ffff0000001453e8:      \tblr\tx9",
+        "ffff000000145598:      \tblr\tx8"
+      ]
+    },
+    "largest_frames": [
+      [
+        3712,
+        "drv_i915_shader_parse"
+      ],
+      [
+        960,
+        "prepare_records"
+      ],
+      [
+        960,
+        "kern_logf"
+      ],
+      [
+        864,
+        "signal_send_process_info"
+      ],
+      [
+        736,
+        "i915_spirv_loop_back_edge"
+      ],
+      [
+        624,
+        "bcm2711_vulkan_descriptor_sets_dispatch"
+      ],
+      [
+        608,
+        "drv_gpu_complete"
+      ],
+      [
+        576,
+        "bcm2711_vulkan_layout_dispatch"
+      ],
+      [
+        560,
+        "bcm2711_vulkan_record_dispatch"
+      ],
+      [
+        448,
+        "bcm2711_vulkan_device_dispatch"
+      ],
+      [
+        400,
+        "i915_spirv_lower_load_local"
+      ],
+      [
+        304,
+        "i915_spirv_lower_texture"
+      ],
+      [
+        304,
+        "bcm2711_vulkan_target_dispatch"
+      ],
+      [
+        304,
+        "bcm2711_vulkan_resource_dispatch"
+      ],
+      [
+        304,
+        "bcm2711_native_pass_encode"
+      ],
+      [
+        288,
+        "validate_overlaps"
+      ],
+      [
+        288,
+        "i915_spirv_lower_matrix_product"
+      ],
+      [
+        288,
+        "i915_spirv_lower_access_chain"
+      ],
+      [
+        256,
+        "walk_records"
+      ],
+      [
+        256,
+        "i915_spirv_lower_extended"
+      ],
+      [
+        256,
+        "bcm2711_vulkan_pipeline_dispatch"
+      ],
+      [
+        256,
+        "bcm2711_vulkan_buffer_copy_validate"
+      ],
+      [
+        240,
+        "i915_spirv_lower_store"
+      ],
+      [
+        240,
+        "i915_spirv_lower_fetch"
+      ],
+      [
+        224,
+        "prepare_programs"
+      ]
+    ]
+  },
+  "elf_sha256": "4fd13da58954150caa57299042552bc701d7e78bdef311abc66dd7258f8760c1",
+  "image_sha256": "948824a45cdcb0bbb3380e7dfefc9486cab7d3ec20d28747c6acdf4a4d7c793b",
+  "configuration": "config/ci/config-rpi4.mk CONFIG_DRIVER_BCM2711_GPU=y",
+  "compiler": "LLVM23.1.0"
+}

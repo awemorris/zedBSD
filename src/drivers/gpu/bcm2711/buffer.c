@@ -60,8 +60,9 @@ bcm2711_buffer_create(
 	if (buffer->memory.size != rounded ||
 	    (buffer->memory.paddr & (alignment - 1U)) != 0 ||
 	    buffer->memory.paddr > UINT64_MAX - (rounded - 1U) ||
-	    (limit != 0 && (buffer->memory.paddr > limit ||
-			    rounded - 1U > limit - buffer->memory.paddr))) {
+	    (limit != 0 &&
+	     (buffer->memory.paddr > limit ||
+	      rounded - 1U > limit - buffer->memory.paddr))) {
 		/* No device has seen this malformed placement, so physical retirement is safe. */
 		released = kern_pmem_free(&buffer->memory);
 		if (released != 0) {
@@ -158,6 +159,9 @@ bcm2711_buffer_retain(
 	buffer->references++;
 
 	spin_unlock_irqrestore(&buffer->guard, enabled);
+
+	/* Succeeded: the physical allocation has another independently protected owner. */
+	return;
 }
 
 /*
@@ -208,4 +212,7 @@ bcm2711_buffer_release(
 
 	/* No shared reference or native access remains. */
 	kern_free(buffer);
+
+	/* Succeeded: the last retired allocation no longer owns CPU or physical storage. */
+	return;
 }

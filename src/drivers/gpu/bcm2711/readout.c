@@ -309,6 +309,9 @@ read_screen(
 			   (unsigned)screen->width,
 			   (unsigned)screen->height,
 			   (unsigned)screen->pitch);
+
+	/* Succeeded: the boot framebuffer metadata has been reported. */
+	return;
 }
 
 /* Reads which channel feeds each HDMI port and shows every channel's state. */
@@ -350,6 +353,9 @@ read_channels(
 				   (unsigned)next,
 				   (unsigned)now);
 	}
+
+	/* Succeeded: the compositor channel state has been reported. */
+	return;
 }
 
 /*
@@ -408,6 +414,9 @@ read_list(
 
 	/* Checks every decoded plane against the actual boot framebuffer. */
 	display->screen_matches = bcm2711_list_screen_matches(&display->list, &display->screen);
+
+	/* Succeeded: the retained list and plane observations have been reported. */
+	return;
 }
 
 /* Shows one timing generator's enables and active size. */
@@ -442,6 +451,9 @@ read_timing(
 			   (vcontrol & READOUT_TIMING_VIDEO_ENABLE) != 0 ? "on" : "off",
 			   (unsigned)((horizontal & READOUT_TIMING_ACTIVE_MASK) * READOUT_PIXELS_PER_CLOCK),
 			   (unsigned)(vertical & READOUT_TIMING_ACTIVE_MASK));
+
+	/* Succeeded: the selected timing state has been reported. */
+	return;
 }
 
 /* Selects only a running output whose list displays the boot framebuffer. */

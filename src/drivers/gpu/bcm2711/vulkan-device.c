@@ -131,12 +131,17 @@ create_instance(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 
 	/* Native layers and extensions are absent; local WSI is stripped by the real client before this command. */
-	if (info.sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO || info.flags != 0 ||
-	    info.enabledLayerCount != 0 || info.enabledExtensionCount != 0)
+	if (info.sType != VK_STRUCTURE_TYPE_INSTANCE_CREATE_INFO ||
+	    info.flags != 0 ||
+	    info.enabledLayerCount != 0 ||
+	    info.enabledExtensionCount != 0)
 		return ENOTSUP;
 	version = VK_API_VERSION_1_0;
 	if (info.pApplicationInfo != NULL) {
@@ -186,7 +191,11 @@ enumerate_physical(
 	present = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 || array > 1 || (array != 0 && count != 1))
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    array > 1 ||
+	    (array != 0 &&
+	     count != 1))
 		return EINVAL;
 	instance = bcm2711_vulkan_object_find(session, I915_VK_OBJ_INSTANCE, instance_id);
 	if (instance == NULL)
@@ -252,20 +261,29 @@ create_device(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 	physical = bcm2711_vulkan_object_find(session, I915_VK_OBJ_PHYSICAL_DEVICE, parent_id);
 	if (physical == NULL)
 		return EINVAL;
 
 	/* Native extensions/layers are intentionally absent from the client's remote device request. */
-	if (info.sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO || info.flags != 0 ||
-	    info.enabledLayerCount != 0 || info.enabledExtensionCount != 0 ||
-	    info.queueCreateInfoCount != 1 || info.pQueueCreateInfos == NULL)
+	if (info.sType != VK_STRUCTURE_TYPE_DEVICE_CREATE_INFO ||
+	    info.flags != 0 ||
+	    info.enabledLayerCount != 0 ||
+	    info.enabledExtensionCount != 0 ||
+	    info.queueCreateInfoCount != 1 ||
+	    info.pQueueCreateInfos == NULL)
 		return ENOTSUP;
 	queue = info.pQueueCreateInfos;
-	if (queue->sType != VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO || queue->flags != 0 ||
-	    queue->queueFamilyIndex != 0 || queue->queueCount != VULKAN_NATIVE_QUEUES || queue->pQueuePriorities == NULL)
+	if (queue->sType != VK_STRUCTURE_TYPE_DEVICE_QUEUE_CREATE_INFO ||
+	    queue->flags != 0 ||
+	    queue->queueFamilyIndex != 0 ||
+	    queue->queueCount != VULKAN_NATIVE_QUEUES ||
+	    queue->pQueuePriorities == NULL)
 		return ENOTSUP;
 
 	/* Floating priority bits are examined without using the kernel's unavailable FP register state. */
@@ -331,9 +349,19 @@ device_queue(
 	index = drv_i915_wire_read_u32(reader);
 	output_present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 || output_present != 1 || chain != 1 || chain_next != 0 ||
-	    structure != VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2 || extension != VULKAN_TIMELINE_RECORD ||
-	    flags != 0 || family != 0 || index != 0 || timeline == 0 || timeline >= 64 || identity == 0)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    output_present != 1 ||
+	    chain != 1 ||
+	    chain_next != 0 ||
+	    structure != VK_STRUCTURE_TYPE_DEVICE_QUEUE_INFO_2 ||
+	    extension != VULKAN_TIMELINE_RECORD ||
+	    flags != 0 ||
+	    family != 0 ||
+	    index != 0 ||
+	    timeline == 0 ||
+	    timeline >= 64 ||
+	    identity == 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (device == NULL)
@@ -346,7 +374,9 @@ device_queue(
 	existing = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUEUE, identity);
 	if (existing != NULL) {
 		root = existing->payload;
-		if (root->parent != device || root->index != index || root->timeline != timeline)
+		if (root->parent != device ||
+		    root->index != index ||
+		    root->timeline != timeline)
 			return EEXIST;
 	} else {
 		/* One native family/index has only one protocol identity in this logical device. */
@@ -463,8 +493,11 @@ wait_idle(
 	enabled = spin_lock_irqsave(&hardware->guard);
 
 	status = VK_SUCCESS;
-	if (session->render->stopping || controller->worker.uncertain ||
-	    !hardware->ready || hardware->faulted || hardware->job_busy)
+	if (session->render->stopping ||
+	    controller->worker.uncertain ||
+	    !hardware->ready ||
+	    hardware->faulted ||
+	    hardware->job_busy)
 		status = VK_ERROR_DEVICE_LOST;
 
 	spin_unlock_irqrestore(&hardware->guard, enabled);
@@ -565,8 +598,10 @@ claim_timeline(
 	mask = UINT64_C(1) << timeline;
 	enabled = spin_lock_irqsave(&controller->space.native->hardware.guard);
 
-	if (render->stopping || controller->worker.uncertain ||
-	    !controller->space.native->hardware.ready || controller->space.native->hardware.faulted) {
+	if (render->stopping ||
+	    controller->worker.uncertain ||
+	    !controller->space.native->hardware.ready ||
+	    controller->space.native->hardware.faulted) {
 		spin_unlock_irqrestore(&controller->space.native->hardware.guard, enabled);
 		return EIO;
 	}

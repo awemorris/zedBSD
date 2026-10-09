@@ -36,6 +36,7 @@ struct bcm2711_vulkan_native_draw {
 /* One unpublished internal texture quad borrows an actual retained source and owns copied geometry/programs until native upload finishes. */
 struct bcm2711_vulkan_meta_draw {
 	struct bcm2711_vulkan_pipeline pipeline;
+	struct bcm2711_shader_key key;
 	struct bcm2711_vulkan_resource *image;
 	uint32_t vertices[36];
 	uint32_t viewport[6];

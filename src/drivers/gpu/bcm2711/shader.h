@@ -84,6 +84,7 @@ struct bcm2711_shader_diagnostic {
 	const char *reason;
 };
 
+int bcm2711_shader_preflight(const uint32_t *words, size_t word_count, enum bcm2711_shader_stage stage, struct bcm2711_shader_diagnostic *diagnostic);
 int bcm2711_shader_compile(const uint32_t *words, size_t word_count, enum bcm2711_shader_stage stage, const struct bcm2711_shader_key *key, struct bcm2711_shader_binary **binary, struct bcm2711_shader_diagnostic *diagnostic);
 void bcm2711_shader_binary_free(struct bcm2711_shader_binary *binary);
 

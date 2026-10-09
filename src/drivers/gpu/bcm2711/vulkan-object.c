@@ -33,8 +33,12 @@ bcm2711_vulkan_object_publish(
 	if (object == NULL)
 		return EINVAL;
 	*object = NULL;
-	if (session == NULL || payload == NULL || destroy == NULL || identity == 0 ||
-	    kind <= I915_VK_OBJ_NONE || kind >= I915_VK_OBJ_KIND_COUNT)
+	if (session == NULL ||
+	    payload == NULL ||
+	    destroy == NULL ||
+	    identity == 0 ||
+	    kind <= I915_VK_OBJ_NONE ||
+	    kind >= I915_VK_OBJ_KIND_COUNT)
 		return EINVAL;
 
 	/* Stop publication prevents a decoder from adding objects behind final-close retirement. */

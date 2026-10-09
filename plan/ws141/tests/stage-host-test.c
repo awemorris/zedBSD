@@ -39,20 +39,27 @@ void kern_logf(const char *format, ...);
 
 static void check(bool condition, const char *what);
 
-/* Stands in for the platform's handoff lookup. */
+/*
+ * Supplies the platform handoff lookup for the current stage fixture.
+ */
 void *
 kern_boot_handoff(
 	const char *name)
 {
+	int comparison;
+
 	/* Only the command line is asked for. */
-	if (strcmp(name, "boot.command-line") != 0)
+	comparison = strcmp(name, "boot.command-line");
+	if (comparison != 0)
 		return NULL;
 
 	/* Reports the test's line. */
 	return (void *)test_command_line;
 }
 
-/* Stands in for the kernel's whole-token search. */
+/*
+ * Supplies whole-token command-line matching for stage admission.
+ */
 int
 kern_boot_parameters_token_present(
 	const char *text,
@@ -60,6 +67,7 @@ kern_boot_parameters_token_present(
 {
 	size_t length;
 	const char *cursor;
+	int comparison;
 
 	/* No line has no tokens. */
 	if (text == NULL)
@@ -74,7 +82,8 @@ kern_boot_parameters_token_present(
 			cursor++;
 
 		/* Matches a token of the same length. */
-		if (strncmp(cursor, token, length) == 0) {
+		comparison = strncmp(cursor, token, length);
+		if (comparison == 0) {
 			if (cursor[length] == ' ' || cursor[length] == '\0')
 				return 1;
 		}
@@ -88,7 +97,9 @@ kern_boot_parameters_token_present(
 	return 0;
 }
 
-/* Stands in for the short wait; the test does not wait. */
+/*
+ * Observes stage pauses without delaying the host fixture.
+ */
 void
 kern_usleep_range(
 	unsigned min_us,
@@ -98,7 +109,9 @@ kern_usleep_range(
 	(void)max_us;
 }
 
-/* Stands in for the kernel log, keeping the last line. */
+/*
+ * Records the last stage diagnostic emitted by production code.
+ */
 void
 kern_logf(
 	const char *format,

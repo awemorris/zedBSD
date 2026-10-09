@@ -137,6 +137,9 @@ bcm2711_list_decode(
 		list->plane_count++;
 		index += words;
 	}
+
+	/* The bounded walk exhausted SRAM without an end marker; the list remains invalid. */
+	return;
 }
 
 /*
@@ -235,7 +238,9 @@ bcm2711_list_screen_matches(
 	uint32_t index;
 
 	/* Requires a complete framebuffer in the compositor's reachable aperture. */
-	if (screen->size == 0 || screen->width == 0 || screen->height == 0)
+	if (screen->size == 0 ||
+	    screen->width == 0 ||
+	    screen->height == 0)
 		return false;
 	if (screen->physical >= 0x40000000ULL)
 		return false;
@@ -256,7 +261,9 @@ bcm2711_list_screen_matches(
 	for (index = 0; index < count; index++) {
 		/* Requires enough words for a real unscaled packed-pixel plane. */
 		plane = &list->planes[index];
-		if (plane->words < LIST_PLANE_MIN_WORDS || plane->scaled || plane->flipped)
+		if (plane->words < LIST_PLANE_MIN_WORDS ||
+		    plane->scaled ||
+		    plane->flipped)
 			continue;
 		if (plane->format > LIST_FORMAT_LAST_SINGLE)
 			continue;
@@ -337,6 +344,9 @@ decode_plane(
 	/* Reads the pitch, which follows one pointer only in a single-plane format. */
 	if (plane->format <= LIST_FORMAT_LAST_SINGLE)
 		plane->pitch = memory[first + LIST_WORD_PITCH + shift] & LIST_PITCH_MASK;
+
+	/* Succeeded: the caller owns the decoded plane metadata. */
+	return;
 }
 
 /* Chooses the earliest complete gap while protecting the source and reservations. */
