@@ -1889,6 +1889,8 @@ btd_phone_request(
 		btd_write(client, "ERROR request\nDONE\n");
 		return;
 	}
+
+	/* Anyone but root is refused. */
 	if (client->uid != 0) {
 		btd_write(client, "ERROR permission\nDONE\n");
 		return;

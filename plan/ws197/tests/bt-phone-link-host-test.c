@@ -21,10 +21,28 @@
  *              one taken: the route, the session's share, the HID host's
  *              limit, the channel held Pending answered and served by the
  *              SDP server
- *   probe      PHONE PROBE against the phone's MAS: SDP finds channel 5,
- *              RFCOMM opens the DLC, OBEX connects, gets (the phone's OBEX
- *              server does not implement Get: 0xD1) and disconnects; and
- *              its refusals (not the phone, another class, busy)
+ *   profile    ws197-p003 section 5.8: the profile told the link is ready
+ *              while its owner sits at the seat, its SDP query (the MAS
+ *              record's channel 5), its DLC opened on bluetoothd's RFCOMM
+ *              session, and the link's end
+ *   lifecycle  ws197-p003 section 5 with a controller that answers Create
+ *              Connection Cancel, Authentication Requested and Read
+ *              Encryption Key Size as the test sets: bluetoothd's page to
+ *              a ready link (authentication, encryption, a key of 16), a
+ *              short key; the phone's own connection (its encryption
+ *              first, its authentication colliding with bluetoothd's: 0x0C,
+ *              the wait for it running out); the crossing of a page and
+ *              the phone's connection (Core 7.1.7: Cancel, Accept, the
+ *              cancelled page's 0x02 passed over; and a page that made its
+ *              link already: Reject and its own Connection Complete
+ *              passed over, Core 7.1.9); a Connection Request while ready
+ *              refused; the page's guard (Cancel); the stored key on a
+ *              ready link; Key Missing stopping the pages; the reasons of
+ *              a disconnection (0x08 pages again after the next step, a
+ *              short link moves the step, two minutes ready start it over,
+ *              three short 0x13 stop the pages); the owner leaving (a link
+ *              ended, a page cancelled and its link ended when it comes);
+ *              the HID host's six links holding the page
  *   notices    lost RFCOMM data closes its channel alone, lost events are
  *              counted, lost signalling ends the link; the link's end
  *              gives the HID host its links back
@@ -74,8 +92,32 @@
 #define TEST_RECORDS_MAX	256U
 #define TEST_ACL_BYTES		1100U
 
-/* The opcode the test looks for: Disconnect. */
+/*
+ * The opcodes the test looks for: Create Connection, Disconnect, Create
+ * Connection Cancel, Accept and Reject Connection Request, Link Key
+ * Request Reply, Authentication Requested, Set Connection Encryption, Read
+ * Encryption Key Size.
+ */
+#define TEST_CREATE		0x0405U
 #define TEST_DISCONNECT		0x0406U
+#define TEST_CANCEL		0x0408U
+#define TEST_ACCEPT		0x0409U
+#define TEST_REJECT		0x040aU
+#define TEST_KEY_REPLY		0x040bU
+#define TEST_AUTHENTICATE	0x0411U
+#define TEST_ENCRYPT		0x0413U
+#define TEST_KEY_SIZE		0x1408U
+
+/* The events the test gives: Connection Complete, Connection Request, Disconnection Complete, Authentication Complete, Encryption Change, Link Key Request. */
+#define TEST_EVENT_CONNECTED	0x03U
+#define TEST_EVENT_REQUEST	0x04U
+#define TEST_EVENT_DISCONNECTED	0x05U
+#define TEST_EVENT_AUTHENTICATED	0x06U
+#define TEST_EVENT_ENCRYPTION	0x08U
+#define TEST_EVENT_KEY_REQUEST	0x17U
+
+/* The MAS service class the profile asks for. */
+#define TEST_MAS_CLASS		0x1132U
 
 /* The phone's link, its device's last address byte, and the uid that paired it. */
 #define TEST_HANDLE		0x002aU
@@ -99,13 +141,18 @@ static unsigned failures;
 static unsigned checks;
 
 /*
- * The controller: its end of the socket pair, and what it was sent (under
- * the lock: the thread writes, the test takes): the commands' opcodes, and
- * the ACL packets not taken yet (a ring).
+ * The controller: its end of the socket pair, what it answers (the
+ * encryption key's size, Create Connection Cancel's and Authentication
+ * Requested's statuses: set by the test before the command), and what it
+ * was sent (under the lock: the thread writes, the test takes): the
+ * commands' opcodes, and the ACL packets not taken yet (a ring).
  */
 struct controller {
 	int descriptor;
 	pthread_mutex_t lock;
+	uint8_t key_size;
+	uint8_t cancel_status;
+	uint8_t auth_status;
 	unsigned command_count;
 	uint16_t opcodes[TEST_RECORDS_MAX];
 	unsigned acl_first;
@@ -138,7 +185,24 @@ struct fake {
 	uint16_t last_result;
 };
 
-/* The run's world: the controller and its thread, the session, the pairing, the router, the HID host, the phone link, the phone, and the probe's answer. */
+/*
+ * What the profile heard (ws197-p003 section 5.8): the link ready and
+ * ended, its SDP query's end and the MAS channel found, its DLC opened and
+ * closed, and DLCs that could not open.
+ */
+struct heard {
+	unsigned ready;
+	unsigned ended;
+	unsigned sdp_done;
+	int sdp_error;
+	unsigned channel;
+	unsigned opened;
+	unsigned dlci;
+	unsigned closed;
+	unsigned open_failed;
+};
+
+/* The run's world: the controller and its thread, the session, the pairing, the router, the HID host, the phone link, the phone, and what the profile heard. */
 struct world {
 	struct controller controller;
 	pthread_t thread;
@@ -149,7 +213,7 @@ struct world {
 	struct btd_phone phone;
 	struct btd_sdps_db records;
 	struct fake fake;
-	char answer[BTD_PHONE_ANSWER_MAX];
+	struct heard heard;
 };
 
 /* The run's world, one at a time; static for its size. */
@@ -158,6 +222,9 @@ static struct world world;
 /* The folder the script gives, and the world's own folder of bonds and records under it. */
 static const char *base_folder;
 static char folder[512];
+
+/* Whether the handoff finds TEST_UID at the seat (a pairing's owner is; 0 tells the link ends without the owner, Q14). */
+static int hand_seated = 1;
 
 /* The name of TEST_UID's account the hook gives (changed to tell a reused uid). */
 static char account_name[BTD_PHONEREC_USER_MAX];
@@ -182,7 +249,19 @@ static void fake_rf_data(void *context, unsigned dlci, const uint8_t *data, size
 static void fake_rf_writable(void *context, unsigned dlci);
 static int fake_ob_write(void *context, const uint8_t *data, size_t length, size_t *written);
 static int fake_ob_target(void *context, const uint8_t *target, size_t length);
-static void hook_answer(void *context, const char *line);
+static void heard_ready(void *context);
+static void heard_ended(void *context);
+static void heard_sdp(void *context, const struct btd_sdp *sdp, int error);
+static void heard_opened(void *context, unsigned dlci);
+static void heard_closed(void *context, unsigned dlci, int reason);
+static void heard_failed(void *context, unsigned server_channel);
+static void give_event(uint8_t code, const uint8_t *parameters, size_t length);
+static void give_connected(uint8_t status, uint16_t handle, uint8_t last, uint8_t encrypted);
+static void give_request(uint8_t last);
+static void give_handle_event(uint8_t code, uint8_t status, uint16_t handle, uint8_t extra, int with_extra);
+static void give_key_request(uint8_t last);
+static void present_world(void);
+static void page_to_ready(uint64_t now);
 static int no_bridge(void *context, int *descriptor);
 static void no_told(void *context, const uint8_t *address, const char *line);
 static void make_address(uint8_t *address, uint8_t last);
@@ -191,7 +270,13 @@ static int hand_over(uint8_t key_type, unsigned key_size, int have_class, uint32
 static void hand_notice(uint16_t handle, uint8_t flags, uint16_t cid);
 static void test_refusals(void);
 static void test_taken(void);
-static void test_probe(void);
+static void test_profile(void);
+static void test_page(void);
+static void test_inbound(void);
+static void test_crossing(void);
+static void test_guard_and_keys(void);
+static void test_reasons(void);
+static void test_absent(void);
 static void test_notices(void);
 static void test_snoop(void);
 static void test_records(void);
@@ -219,7 +304,13 @@ main(
 	/* Each part. */
 	test_refusals();
 	test_taken();
-	test_probe();
+	test_profile();
+	test_page();
+	test_inbound();
+	test_crossing();
+	test_guard_and_keys();
+	test_reasons();
+	test_absent();
 	test_notices();
 	test_snoop();
 	test_records();
@@ -255,6 +346,7 @@ open_world(void)
 {
 	struct btd_hid_hooks hooks;
 	struct btd_phone_hooks phone_hooks;
+	struct btd_phone_profile profile;
 	struct btd_router_phone owner;
 	struct btd_link_count *link;
 	char *made;
@@ -271,6 +363,7 @@ open_world(void)
 	/* The controller. */
 	memset(&world, 0, sizeof(world));
 	world.controller.descriptor = ends[1];
+	world.controller.key_size = 16U;
 	(void)pthread_mutex_init(&world.controller.lock, NULL);
 	status = pthread_create(&world.thread, NULL, controller_run, &world.controller);
 	if (status != 0) {
@@ -319,7 +412,17 @@ open_world(void)
 	btd_sdps_db_init(&world.records);
 	phone_hooks.context = NULL;
 	phone_hooks.account = hook_account;
-	btd_phone_init(&world.phone, &world.session, &world.router, &world.hid, &world.records, folder, &phone_hooks, hook_answer, NULL);
+	btd_phone_init(&world.phone, &world.session, &world.router, &world.hid, &world.records, folder, &phone_hooks);
+
+	/* The profile: what it hears is kept. */
+	memset(&profile, 0, sizeof(profile));
+	profile.ready = heard_ready;
+	profile.ended = heard_ended;
+	profile.sdp_done = heard_sdp;
+	profile.opened = heard_opened;
+	profile.closed = heard_closed;
+	profile.open_failed = heard_failed;
+	btd_phone_set_profile(&world.phone, &profile);
 	owner.context = &world.phone;
 	owner.wants = btd_phone_wants;
 	owner.claims = btd_phone_claims;
@@ -353,7 +456,10 @@ controller_run(
 {
 	struct controller *controller;
 	uint8_t packet[TEST_ACL_BYTES];
-	uint8_t answer[8];
+	uint8_t answer[16];
+	uint8_t key_size;
+	uint8_t cancel_status;
+	uint8_t auth_status;
 	uint16_t opcode;
 	unsigned slot;
 	size_t answer_length;
@@ -392,15 +498,18 @@ controller_run(
 			answer[7] = 0U;
 			answer_length = 8U;
 		} else if (packet[0] == 0x01U && got >= 4) {
-			/* A command: recorded, and its Command Status. */
+			/* A command: recorded, with what it is to be answered. */
 			opcode = (uint16_t)(packet[1] | (packet[2] << 8));
 			(void)pthread_mutex_lock(&controller->lock);
 			if (controller->command_count < TEST_RECORDS_MAX) {
 				controller->opcodes[controller->command_count] = opcode;
 				controller->command_count++;
 			}
+			key_size = controller->key_size;
+			cancel_status = controller->cancel_status;
+			auth_status = controller->auth_status;
 
-			/* The record is the test's again; the answer. */
+			/* The record is the test's again; the answer: a Command Status, or a Command Complete of the commands that have one. */
 			(void)pthread_mutex_unlock(&controller->lock);
 			answer[0] = BT_PACKET_EVENT;
 			answer[1] = 0x0fU;
@@ -410,6 +519,32 @@ controller_run(
 			answer[5] = (uint8_t)(opcode & 0xffU);
 			answer[6] = (uint8_t)(opcode >> 8);
 			answer_length = 7U;
+			if (opcode == TEST_AUTHENTICATE)
+				answer[3] = auth_status;
+			if (opcode == TEST_KEY_SIZE && got >= 6) {
+				/* Read Encryption Key Size: the status, the handle, the size. */
+				answer[1] = 0x0eU;
+				answer[2] = 7U;
+				answer[3] = 0x01U;
+				answer[4] = (uint8_t)(opcode & 0xffU);
+				answer[5] = (uint8_t)(opcode >> 8);
+				answer[6] = 0x00U;
+				answer[7] = packet[4];
+				answer[8] = packet[5];
+				answer[9] = key_size;
+				answer_length = 10U;
+			}
+			if (opcode == TEST_CANCEL && got >= 10) {
+				/* Create Connection Cancel: the status, the address. */
+				answer[1] = 0x0eU;
+				answer[2] = 10U;
+				answer[3] = 0x01U;
+				answer[4] = (uint8_t)(opcode & 0xffU);
+				answer[5] = (uint8_t)(opcode >> 8);
+				answer[6] = cancel_status;
+				memcpy(answer + 7, packet + 4, 6U);
+				answer_length = 13U;
+			}
 		} else {
 			/* Anything else is passed over. */
 			continue;
@@ -859,18 +994,6 @@ fake_ob_target(
 	return 0;
 }
 
-/* The probe's answer, kept. */
-static void
-hook_answer(
-	void *context,
-	const char *line)
-{
-	UNUSED_PARAMETER(context);
-
-	/* Kept. */
-	(void)snprintf(world.answer, sizeof(world.answer), "%s", line);
-}
-
 /* The HID host's bridge: none in this test. */
 static int
 no_bridge(
@@ -1003,6 +1126,7 @@ hand_over(
 	handoff.l2cap = &pairing;
 	handoff.reassembly = &frame;
 	*why = NULL;
+	btd_phone_set_seat(&world.phone, hand_seated, TEST_UID, btd_now_ms());
 	taken = btd_phone_handoff(&world.phone, &handoff, why);
 
 	/* Succeeded: the hook's answer. */
@@ -1106,61 +1230,521 @@ test_taken(void)
 	close_world();
 }
 
-/* PHONE PROBE against the phone's MAS, and its refusals. */
+/* The profile told the link is ready, its SDP query, its DLC, and the link's end. */
 static void
-test_probe(void)
+test_profile(void)
 {
-	uint8_t address[BTD_ADDRESS_BYTES];
 	const char *why;
-	int same;
 	int error;
 
-	/* No phone yet. */
+	/* A handed-over link whose owner is not at the seat ends at once (Q14), the profile not told. */
 	open_world();
-	make_address(address, TEST_PHONE);
-	error = btd_phone_probe(&world.phone, address, BTD_SDP_UUID_MAS, btd_now_ms());
-	check(error == ENOTCONN, "probe: no phone");
+	hand_seated = 0;
+	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	hand_seated = 1;
+	check(world.phone.state == BTD_PHONE_CLOSING && commands_of(TEST_DISCONNECT) == 1U && world.heard.ready == 0U, "profile: the owner away, the link ended");
+	close_world();
 
-	/* The phone's link, and the probe's refusals. */
+	/* The owner at the seat: told at the handoff, once. */
+	open_world();
 	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
 	exchange();
-	error = btd_phone_probe(&world.phone, address, 0x1234U, btd_now_ms());
-	check(error == EINVAL, "probe: another class");
-	address[0] = 0x52U;
-	error = btd_phone_probe(&world.phone, address, BTD_SDP_UUID_MAS, btd_now_ms());
-	check(error == ENOTCONN, "probe: another device");
+	check(world.phone.state == BTD_PHONE_READY && world.phone.present && world.heard.ready == 1U, "profile: told at the handoff");
+	btd_phone_set_seat(&world.phone, 1, TEST_UID, btd_now_ms());
+	check(world.heard.ready == 1U, "profile: told once");
 
-	/* The probe: SDP, RFCOMM, OBEX's Connect, Get (not implemented by the phone's server) and Disconnect. */
-	address[0] = TEST_PHONE;
-	error = btd_phone_probe(&world.phone, address, BTD_SDP_UUID_MAS, btd_now_ms());
-	check(error == 0, "probe: started");
-	error = btd_phone_probe(&world.phone, address, BTD_SDP_UUID_MAS, btd_now_ms());
-	check(error == EBUSY, "probe: one at a time");
+	/* Its SDP query. */
+	error = btd_phone_sdp_query(&world.phone, TEST_MAS_CLASS);
+	check(error == 0, "profile: a query on the ready link");
+	error = btd_phone_sdp_query(&world.phone, TEST_MAS_CLASS);
+	check(error == EBUSY, "profile: one query at a time");
 	exchange();
-	same = strcmp(world.answer, "PROBE uuid=0x1132 channel=5 connect=0xa0 get=0xd1 bytes=0 disconnect=0xa0");
-	check(same == 0, "probe: every step answered");
-	if (same != 0)
-		printf("  probe answer: %s\n", world.answer);
-	check(world.phone.rfcomm_active && world.fake.rfcomm_active, "probe: the RFCOMM session up");
+	check(world.heard.sdp_done == 1U && world.heard.sdp_error == 0 && world.heard.channel == TEST_MAS_CHANNEL, "profile: the MAS record's channel found");
+
+	/* A DLC to the MAS channel: the RFCOMM session made, the DLC opened. */
+	error = btd_phone_dlc_open(&world.phone, TEST_MAS_CHANNEL, btd_now_ms());
+	check(error == 0, "profile: the DLC asked for");
+	exchange();
+	check(world.phone.rfcomm_active && world.fake.rfcomm_active, "profile: the RFCOMM session up");
+	check(world.heard.opened == 1U && world.heard.dlci == 2U * TEST_MAS_CHANNEL, "profile: the DLC opened");
+
+	/* The owner leaves: the link ends, the profile hears its DLC and the end. */
+	btd_phone_set_seat(&world.phone, 0, 0, btd_now_ms());
+	check(world.phone.state == BTD_PHONE_CLOSING && commands_of(TEST_DISCONNECT) == 1U, "profile: the owner gone, the link ended");
+	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x16U, 1);
+	check(world.phone.state == BTD_PHONE_NONE && world.heard.ended == 1U && world.heard.closed >= 1U, "profile: the end heard");
+	check(world.phone.stopped && strcmp(world.phone.why, "absent") == 0, "profile: no page while the owner is away");
+	error = btd_phone_dlc_open(&world.phone, TEST_MAS_CHANNEL, btd_now_ms());
+	check(error == ENOTCONN, "profile: no DLC without a link");
 	close_world();
+}
+
+/* Bluetoothd's page to a ready link, and a short key. */
+static void
+test_page(void)
+{
+	uint64_t now;
+
+	/* The owner at the seat: a page at once. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	check(world.phone.state == BTD_PHONE_PAGING && commands_of(TEST_CREATE) == 1U && world.phone.page_outstanding, "page: Create Connection");
+
+	/* Its Connection Complete: authentication asked for at once. */
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_SECURING && world.phone.secure_step == BTD_PHONE_SECURE_AUTH, "page: securing, authentication first");
+	check(commands_of(TEST_AUTHENTICATE) == 1U && !world.phone.page_outstanding, "page: Authentication Requested, the page over");
+	check(btd_router_owner(&world.router, TEST_HANDLE) == BTD_OWNER_PHONE, "page: the route is the phone link's");
+
+	/* The phone's Link Key Request: the bond's key. */
+	give_key_request(TEST_PHONE);
+	check(commands_of(TEST_KEY_REPLY) == 1U, "page: the stored key given");
+
+	/* Authenticated, then encrypted, then a key of 16: ready, the profile told. */
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x00U, TEST_HANDLE, 0U, 0);
+	check(world.phone.secure_step == BTD_PHONE_SECURE_ENCRYPT && commands_of(TEST_ENCRYPT) == 1U, "page: encryption asked for");
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(commands_of(TEST_KEY_SIZE) == 1U && world.phone.key_size == 16U, "page: the key's size read");
+	check(world.phone.state == BTD_PHONE_READY && world.heard.ready == 1U, "page: ready, the profile told");
+
+	/* The ready link's Link Key Request (the phone authenticates again): the key once more. */
+	give_key_request(TEST_PHONE);
+	check(commands_of(TEST_KEY_REPLY) == 2U, "page: the key given on a ready link");
+	close_world();
+
+	/* A key of 7: the link ended, the longest wait. */
+	present_world();
+	now = btd_now_ms();
+	world.controller.key_size = 7U;
+	btd_phone_tick(&world.phone, now);
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x00U, TEST_HANDLE, 0U, 0);
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(world.phone.state == BTD_PHONE_CLOSING && strcmp(world.phone.why, "key-size") == 0, "page: a short key ends the link");
+	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x16U, 1);
+	check(world.phone.state == BTD_PHONE_NONE && world.phone.backoff_step == BTD_PHONE_BACKOFF_STEPS - 1U, "page: the longest wait after a short key");
+	check(world.heard.ready == 0U, "page: the profile never told");
+	close_world();
+
+	/* The HID host with six links: no page, a short wait. */
+	present_world();
+	for (now = 0U; now < BTD_HID_MAX; now++) {
+		world.hid.devices[now].used = 1;
+		world.hid.devices[now].state = BTD_HID_OPEN;
+	}
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	check(world.phone.state == BTD_PHONE_NONE && commands_of(TEST_CREATE) == 0U && strcmp(world.phone.why, "busy-links") == 0, "page: held while the HID host uses six links");
+	check(world.phone.next_page_at == now + BTD_PHONE_WAIT_MS, "page: tried again after a short wait");
+	close_world();
+}
+
+/* The phone's own connection: its encryption first, its authentication colliding with bluetoothd's, the wait for it running out. */
+static void
+test_inbound(void)
+{
+	uint64_t now;
+
+	/* Accepted with no role switch; its Connection Complete waits for the phone's own encryption. */
+	present_world();
+	give_request(TEST_PHONE);
+	check(world.phone.state == BTD_PHONE_ACCEPTING && commands_of(TEST_ACCEPT) == 1U && world.phone.inbound, "inbound: accepted");
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_SECURING && world.phone.secure_step == BTD_PHONE_SECURE_WAIT_PEER, "inbound: waiting for the phone's encryption");
+	check(commands_of(TEST_AUTHENTICATE) == 0U, "inbound: no authentication asked yet");
+
+	/* The phone encrypts: ready without bluetoothd's authentication. */
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(world.phone.state == BTD_PHONE_READY && commands_of(TEST_AUTHENTICATE) == 0U, "inbound: ready on the phone's encryption");
+	close_world();
+
+	/* The wait runs out: authentication asked; Command Disallowed (the phone began) waits again; then its encryption. */
+	present_world();
+	give_request(TEST_PHONE);
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	now = btd_now_ms();
+	world.controller.auth_status = 0x0cU;
+	btd_phone_tick(&world.phone, now + BTD_PHONE_PEER_MS + 1U);
+	check(commands_of(TEST_AUTHENTICATE) == 1U && world.phone.secure_step == BTD_PHONE_SECURE_WAIT_PEER, "inbound: Command Disallowed waits for the phone again");
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(world.phone.state == BTD_PHONE_READY, "inbound: ready after the collision");
+	close_world();
+
+	/* The wait runs out and bluetoothd authenticates: an LMP collision asked again once, then encryption. */
+	present_world();
+	give_request(TEST_PHONE);
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now + BTD_PHONE_PEER_MS + 1U);
+	check(world.phone.secure_step == BTD_PHONE_SECURE_AUTH, "inbound: authentication after the wait");
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x23U, TEST_HANDLE, 0U, 0);
+	check(world.phone.state == BTD_PHONE_SECURING && world.phone.auth_again_at != 0U, "inbound: a collision asked again later");
+	btd_phone_tick(&world.phone, world.phone.auth_again_at);
+	check(commands_of(TEST_AUTHENTICATE) == 2U, "inbound: authentication asked again");
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x00U, TEST_HANDLE, 0U, 0);
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(world.phone.state == BTD_PHONE_READY, "inbound: ready after asking again");
+	close_world();
+}
+
+/* A page crossing the phone's connection, and a Connection Request while ready. */
+static void
+test_crossing(void)
+{
+	uint64_t now;
+
+	/* Paging, the phone connects: the page cancelled, the phone accepted; the page's 0x02 passed over. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	give_request(TEST_PHONE);
+	check(commands_of(TEST_CANCEL) == 1U && commands_of(TEST_ACCEPT) == 1U, "crossing: Cancel, then Accept");
+	check(world.phone.state == BTD_PHONE_ACCEPTING && world.phone.page_outstanding, "crossing: accepting, the page's end to come");
+	give_connected(0x02U, 0x0000U, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_ACCEPTING && !world.phone.page_outstanding, "crossing: the cancelled page's 0x02 passed over");
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_SECURING && world.phone.secure_step == BTD_PHONE_SECURE_WAIT_PEER, "crossing: the phone's link secured");
+	close_world();
+
+	/* The page made its link already (Cancel answers 0x0B): the phone refused, its own Connection Complete passed over, the page's link taken. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	world.controller.cancel_status = 0x0bU;
+	give_request(TEST_PHONE);
+	check(commands_of(TEST_REJECT) == 1U && commands_of(TEST_ACCEPT) == 0U && world.phone.state == BTD_PHONE_PAGING, "crossing: a page with its link refuses the phone");
+	give_connected(0x0dU, 0x0000U, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_PAGING && !world.phone.reject_pending, "crossing: the refusal's Connection Complete passed over");
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_SECURING && world.phone.secure_step == BTD_PHONE_SECURE_AUTH, "crossing: the page's link secured");
+	close_world();
+
+	/* Ready: another Connection Request refused, its own Connection Complete passed over. */
+	present_world();
+	page_to_ready(btd_now_ms());
+	give_request(TEST_PHONE);
+	check(commands_of(TEST_REJECT) == 1U && world.phone.reject_pending, "crossing: refused while ready");
+	give_connected(0x0dU, 0x0000U, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_READY && !world.phone.reject_pending, "crossing: the ready link kept");
+	close_world();
+}
+
+/* The page's guard, Key Missing, and the wait after a failed page. */
+static void
+test_guard_and_keys(void)
+{
+	uint64_t now;
+
+	/* A page with no answer: cancelled after its guard; its 0x02 ends it, the next after 30 s. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	btd_phone_tick(&world.phone, now + BTD_PHONE_PAGE_MS);
+	check(world.phone.state == BTD_PHONE_CANCELLING && commands_of(TEST_CANCEL) == 1U, "guard: the page cancelled");
+	give_connected(0x02U, 0x0000U, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_NONE && world.phone.backoff_step == 1U, "guard: no link, a step on");
+	check(world.phone.next_page_at >= now + 30000U && world.phone.next_page_at <= btd_now_ms() + 30000U, "guard: the next page after 30 s");
+	close_world();
+
+	/* The phone forgot the bond: Key Missing ends the link, no page after it. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x06U, TEST_HANDLE, 0U, 0);
+	check(world.phone.state == BTD_PHONE_CLOSING && strcmp(world.phone.why, "key-missing") == 0, "keys: Key Missing ends the link");
+	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x16U, 1);
+	check(world.phone.state == BTD_PHONE_NONE && world.phone.stopped, "keys: no page after Key Missing");
+	btd_phone_tick(&world.phone, now + 700000U);
+	check(commands_of(TEST_CREATE) == 1U, "keys: no page later either");
+
+	/* A sleep's end pages again. */
+	btd_phone_resume(&world.phone, now);
+	btd_phone_tick(&world.phone, now);
+	check(commands_of(TEST_CREATE) == 2U, "keys: a sleep's end pages again");
+	close_world();
+}
+
+/* What a disconnection's reason leaves: the step, its start over, and the phone's user ending short links. */
+static void
+test_reasons(void)
+{
+	uint64_t now;
+	unsigned round;
+
+	/* Out of range (0x08) soon after ready: a short link, the next page after a step. */
+	present_world();
+	now = btd_now_ms();
+	page_to_ready(now);
+	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x08U, 1);
+	check(world.phone.state == BTD_PHONE_NONE && !world.phone.stopped && world.phone.backoff_step == 1U, "reasons: 0x08 pages again after a step");
+	check(world.heard.ended == 1U, "reasons: the profile hears the end");
+
+	/* Ready again and for two minutes: the wait starts over. */
+	world.phone.backoff_step = 3U;
+	page_to_ready(world.phone.next_page_at);
+	btd_phone_tick(&world.phone, world.phone.ready_since + BTD_PHONE_STABLE_MS);
+	check(world.phone.backoff_step == 0U, "reasons: two minutes ready start the wait over");
+	close_world();
+
+	/* The phone's user ends short links (0x13): twice the pages go on, the third time they stop. */
+	present_world();
+	now = btd_now_ms();
+	for (round = 0U; round < BTD_PHONE_PEER_CLOSED_MAX; round++) {
+		page_to_ready(now);
+		give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x13U, 1);
+		now = world.phone.next_page_at;
+		if (round + 1U < BTD_PHONE_PEER_CLOSED_MAX)
+			check(!world.phone.stopped, "reasons: a short 0x13 pages again");
+	}
+	check(world.phone.stopped && strcmp(world.phone.why, "peer-closed") == 0, "reasons: three short 0x13 stop the pages");
+
+	/* PHONE LINK on starts them again. */
+	(void)btd_phone_link_set(&world.phone, world.phone.record.address, TEST_UID, 1, -1);
+	check(!world.phone.stopped, "reasons: PHONE LINK on pages again");
+	close_world();
+}
+
+/* The owner leaving: a ready link ended, a page cancelled and its link ended when it comes. */
+static void
+test_absent(void)
+{
+	uint64_t now;
+
+	/* Paging when the owner leaves: cancelled, the link ended when it comes, no page after. */
+	present_world();
+	now = btd_now_ms();
+	btd_phone_tick(&world.phone, now);
+	btd_phone_set_seat(&world.phone, 1, TEST_OTHER_UID, now);
+	check(world.phone.state == BTD_PHONE_CANCELLING && world.phone.stop_wanted && commands_of(TEST_CANCEL) == 1U, "absent: the page cancelled");
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	check(world.phone.state == BTD_PHONE_CLOSING && commands_of(TEST_DISCONNECT) == 1U, "absent: the page's link ended at once");
+	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x16U, 1);
+	check(world.phone.state == BTD_PHONE_NONE && world.phone.stopped, "absent: no page while away");
+	btd_phone_tick(&world.phone, now + 700000U);
+	check(commands_of(TEST_CREATE) == 1U, "absent: no page later");
+
+	/* Back at the seat: a page at once. */
+	btd_phone_set_seat(&world.phone, 1, TEST_UID, now);
+	btd_phone_tick(&world.phone, now);
+	check(commands_of(TEST_CREATE) == 2U, "absent: back at the seat, a page");
+	close_world();
+}
+
+/* Gives the router an event of the controller. */
+static void
+give_event(
+	uint8_t code,
+	const uint8_t *parameters,
+	size_t length)
+{
+	uint8_t packet[64];
+
+	/* The event's header, then its parameters. */
+	packet[0] = BT_PACKET_EVENT;
+	packet[1] = code;
+	packet[2] = (uint8_t)length;
+	memcpy(packet + 3, parameters, length);
+	btd_router_handle(&world.router, &world.session, packet, length + 3U);
+}
+
+/* Gives Connection Complete (status, handle, a device, ACL, encryption). */
+static void
+give_connected(
+	uint8_t status,
+	uint16_t handle,
+	uint8_t last,
+	uint8_t encrypted)
+{
+	uint8_t parameters[11];
+
+	/* The status, the handle, the address, ACL, the encryption. */
+	parameters[0] = status;
+	parameters[1] = (uint8_t)(handle & 0xffU);
+	parameters[2] = (uint8_t)(handle >> 8);
+	make_address(parameters + 3, last);
+	parameters[9] = 0x01U;
+	parameters[10] = encrypted;
+	give_event(TEST_EVENT_CONNECTED, parameters, sizeof(parameters));
+}
+
+/* Gives Connection Request of a device: a phone's class, ACL. */
+static void
+give_request(
+	uint8_t last)
+{
+	uint8_t parameters[10];
+
+	/* The address, the class, ACL. */
+	make_address(parameters, last);
+	parameters[6] = 0x0cU;
+	parameters[7] = 0x02U;
+	parameters[8] = 0x5aU;
+	parameters[9] = 0x01U;
+	give_event(TEST_EVENT_REQUEST, parameters, sizeof(parameters));
+}
+
+/* Gives an event of a link: its status, its handle, and a byte after them (the reason, the encryption) when it has one. */
+static void
+give_handle_event(
+	uint8_t code,
+	uint8_t status,
+	uint16_t handle,
+	uint8_t extra,
+	int with_extra)
+{
+	uint8_t parameters[4];
+	size_t length;
+
+	/* The status, the handle, and the byte after them. */
+	parameters[0] = status;
+	parameters[1] = (uint8_t)(handle & 0xffU);
+	parameters[2] = (uint8_t)(handle >> 8);
+	parameters[3] = extra;
+	length = 3U;
+	if (with_extra)
+		length = 4U;
+	give_event(code, parameters, length);
+}
+
+/* Gives Link Key Request of a device. */
+static void
+give_key_request(
+	uint8_t last)
+{
+	uint8_t parameters[BTD_ADDRESS_BYTES];
+
+	/* The address. */
+	make_address(parameters, last);
+	give_event(TEST_EVENT_KEY_REQUEST, parameters, sizeof(parameters));
+}
+
+/* Makes a world whose phone's owner sits at the seat: the phone's bond and record, loaded. */
+static void
+present_world(void)
+{
+	/* The bond, the record, the load and the seat. */
+	open_world();
+	write_bond(TEST_PHONE, TEST_KEY_MITM);
+	write_record(TEST_PHONE, TEST_UID, "tester", 1);
+	(void)btd_phone_load(&world.phone);
+	btd_phone_set_seat(&world.phone, 1, TEST_UID, btd_now_ms());
+	check(world.phone.present, "setup: the owner at the seat");
+}
+
+/* Pages the phone at a time and makes its link ready (a fresh link each time). */
+static void
+page_to_ready(
+	uint64_t now)
+{
+	/* The page, its Connection Complete, authentication, encryption, the key's size. */
+	btd_phone_tick(&world.phone, now);
+	give_connected(0x00U, TEST_HANDLE, TEST_PHONE, 0U);
+	give_handle_event(TEST_EVENT_AUTHENTICATED, 0x00U, TEST_HANDLE, 0U, 0);
+	give_handle_event(TEST_EVENT_ENCRYPTION, 0x00U, TEST_HANDLE, 0x01U, 1);
+	check(world.phone.state == BTD_PHONE_READY, "setup: the paged link ready");
+}
+
+/* The profile heard the link ready. */
+static void
+heard_ready(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+
+	/* Counted. */
+	world.heard.ready++;
+}
+
+/* The profile heard the link's end. */
+static void
+heard_ended(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+
+	/* Counted. */
+	world.heard.ended++;
+}
+
+/* The profile heard its SDP query's end: the MAS record's channel kept. */
+static void
+heard_sdp(
+	void *context,
+	const struct btd_sdp *sdp,
+	int error)
+{
+	unsigned channel;
+	int found;
+
+	UNUSED_PARAMETER(context);
+
+	/* Counted, with the channel when it ended well. */
+	world.heard.sdp_done++;
+	world.heard.sdp_error = error;
+	if (error != 0)
+		return;
+	found = btd_sdp_rfcomm_channel(sdp, TEST_MAS_CLASS, 0U, &channel);
+	if (found == 0)
+		world.heard.channel = channel;
+}
+
+/* The profile heard its DLC open. */
+static void
+heard_opened(
+	void *context,
+	unsigned dlci)
+{
+	UNUSED_PARAMETER(context);
+
+	/* Counted, its DLCI kept. */
+	world.heard.opened++;
+	world.heard.dlci = dlci;
+}
+
+/* The profile heard a DLC close. */
+static void
+heard_closed(
+	void *context,
+	unsigned dlci,
+	int reason)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(dlci);
+	UNUSED_PARAMETER(reason);
+
+	/* Counted. */
+	world.heard.closed++;
+}
+
+/* The profile heard a DLC that could not open. */
+static void
+heard_failed(
+	void *context,
+	unsigned server_channel)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(server_channel);
+
+	/* Counted. */
+	world.heard.open_failed++;
 }
 
 /* The notices of the phone's link, and its end. */
 static void
 test_notices(void)
 {
-	uint8_t address[BTD_ADDRESS_BYTES];
 	uint8_t ended[7];
 	const char *why;
 	unsigned requests;
 	int error;
 
-	/* A link with an RFCOMM session (a probe made it). */
+	/* A link with an RFCOMM session (a profile's DLC made it). */
 	open_world();
-	make_address(address, TEST_PHONE);
 	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
 	exchange();
-	error = btd_phone_probe(&world.phone, address, BTD_SDP_UUID_MAS, btd_now_ms());
+	error = btd_phone_dlc_open(&world.phone, TEST_MAS_CHANNEL, btd_now_ms());
 	exchange();
 	check(error == 0 && world.phone.rfcomm_active, "notices: a session up");
 

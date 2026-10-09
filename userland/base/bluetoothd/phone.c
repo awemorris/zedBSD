@@ -1311,14 +1311,14 @@ phone_schedule(
 		return;
 	}
 
-	/* The longest wait. */
+	/* The next step (the first page went at once, step 0), or the longest wait. */
+	if (phone->backoff_step + 1U < BTD_PHONE_BACKOFF_STEPS)
+		phone->backoff_step++;
 	if (after == BTD_PHONE_AFTER_LONG)
 		phone->backoff_step = BTD_PHONE_BACKOFF_STEPS - 1U;
 
-	/* Succeeded: this step's wait, and the next step for the next time. */
+	/* Succeeded: that step's wait. */
 	phone->next_page_at = now + phone_backoff_ms[phone->backoff_step];
-	if (phone->backoff_step + 1U < BTD_PHONE_BACKOFF_STEPS)
-		phone->backoff_step++;
 }
 
 /*
@@ -1436,6 +1436,8 @@ phone_request(
 			phone_reject(phone, parameters, now);
 			return;
 		}
+
+		/* The record's phone, its connection accepted. */
 		memcpy(phone->address, parameters, BTD_ADDRESS_BYTES);
 		phone->uid = phone->record.uid;
 		phone->stop_wanted = 0;
@@ -1451,6 +1453,8 @@ phone_request(
 			phone_reject(phone, parameters, now);
 			return;
 		}
+
+		/* The page stopped in time: the phone's connection accepted. */
 		phone_accept_request(phone, now);
 		return;
 	}
@@ -1607,6 +1611,8 @@ phone_connect_failed(
 		phone_schedule(phone, BTD_PHONE_AFTER_NONE, now);
 		return;
 	}
+
+	/* The next page after the next step's wait. */
 	phone_schedule(phone, BTD_PHONE_AFTER_STEP, now);
 }
 
@@ -1863,6 +1869,8 @@ phone_encryption(
 			phone->why = "security";
 			phone_disconnect(phone, PHONE_REASON_SECURITY, BTD_PHONE_AFTER_STEP);
 		}
+
+		/* Still encrypted: nothing changes. */
 		return;
 	}
 
