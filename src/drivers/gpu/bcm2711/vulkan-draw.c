@@ -11,6 +11,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
+#include "drivers/gpu/bcm2711/vulkan-barrier.h"
 
 static int walk_records(struct bcm2711_vulkan_command_buffer *command, struct bcm2711_vulkan_draw_state *state, bcm2711_vulkan_draw_prepare_t prepare, void *payload);
 static void bind_sets(struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
@@ -93,6 +94,15 @@ walk_records(
 
 		/* Each event updates one ordinary graphics selection or emits a complete pass/draw preparation point. */
 		switch (record->opcode) {
+		case GPU_OP_CMD_PIPELINE_BARRIER:
+			/* Complete serial barriers execute outside a render pass and keep every typed dependency through preparation. */
+			if (state->pass != NULL)
+				return ENOTSUP;
+			error = bcm2711_vulkan_barrier_validate((const struct bcm2711_vulkan_barrier *)record, command->owner.device);
+			if (error != 0)
+				return error;
+			selected = true;
+			break;
 		case GPU_OP_CMD_BEGIN_RENDER_PASS:
 			/* A new target cannot replace an unclosed render pass. */
 			if (state->pass != NULL)

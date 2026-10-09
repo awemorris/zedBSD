@@ -76,6 +76,9 @@ bcm2711_vulkan_native_pass_run(
 	/* Completion and GPU output clean precede a following FIFO CPU read or independently staged sampled texture. */
 	kern_io_read_barrier();
 
+	/* The completed implicit render-pass transition becomes FIFO-visible only after successful native output retirement. */
+	pass->target->layout = pass->final_layout;
+
 	/* Succeeded: native bin/render completion and output visibility were proved by the existing IRQ/cache runner. */
 	return 0;
 }
@@ -104,6 +107,12 @@ validate_pass(
 	    !pass->space->native->hardware.ready ||
 	    !pass->space->native->power.ready)
 		return EIO;
+
+	/* A pass's explicit initial layout must match current FIFO state unless the application intentionally discards its earlier contents. */
+	if (pass->target == NULL)
+		return EINVAL;
+	if (pass->initial_layout != VK_IMAGE_LAYOUT_UNDEFINED && pass->initial_layout != pass->target->layout)
+		return EINVAL;
 
 	/* Actual output RAM stays coherent, mapped and independently referenced through every device write. */
 	buffer = pass->output->buffer;

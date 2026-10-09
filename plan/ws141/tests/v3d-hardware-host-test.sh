@@ -12,7 +12,7 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
     src/drivers/gpu/bcm2711/v3d-diagnostic.c src/drivers/gpu/bcm2711/cl.c \
     src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/native-storage.c src/drivers/gpu/bcm2711/render-device.c \
     src/drivers/gpu/bcm2711/share.c src/drivers/gpu/bcm2711/render-worker.c \
-    src/drivers/gpu/bcm2711/vulkan-native-job.c src/drivers/gpu/bcm2711/vulkan-native-pass.c \
+    src/drivers/gpu/bcm2711/vulkan-barrier.c src/drivers/gpu/bcm2711/vulkan-native-job.c src/drivers/gpu/bcm2711/vulkan-native-pass.c \
     src/drivers/gpu/bcm2711/vulkan-native-draw.c src/drivers/gpu/bcm2711/vulkan-prepared.c \
     src/drivers/gpu/bcm2711/vulkan-descriptor-sets.c src/drivers/gpu/bcm2711/vulkan-object.c \
     src/drivers/gpu/bcm2711/vulkan-session.c -Wl,--gc-sections \

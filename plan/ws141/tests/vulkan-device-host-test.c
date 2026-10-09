@@ -32,6 +32,7 @@
 #include "drivers/gpu/bcm2711/vulkan-native-draw.h"
 #include "drivers/gpu/bcm2711/vulkan-native-pass.h"
 #include "drivers/gpu/bcm2711/vulkan-native-job.h"
+#include "drivers/gpu/bcm2711/vulkan-barrier.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
@@ -107,6 +108,7 @@ static unsigned fail_sync;
 static uint8_t backing_storage[16384];
 
 void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t command_id);
+void ws141_client_encode_barrier(struct vulkan_writer *writer, uint64_t command_id, uint64_t buffer_id, const uint64_t *image_ids, const VkImageLayout *layouts);
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
@@ -119,6 +121,7 @@ static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711
 static void draw_test(struct bcm2711_vulkan_command_buffer *command);
 static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
 static void record_test(struct bcm2711_vulkan_session *session);
+static void barrier_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *primary);
 static void command_test(struct bcm2711_vulkan_session *session);
 static void pipeline_test(struct bcm2711_vulkan_session *session);
 static void target_test(struct bcm2711_vulkan_session *session);
@@ -1838,6 +1841,154 @@ draw_test(
 	return;
 }
 
+/* Checks real public barrier encoding, independently pending ownership and atomic FIFO layout publication. */
+static void
+barrier_test(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_vulkan_object *primary)
+{
+	struct bcm2711_vulkan_command_buffer *original;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_object *object;
+	struct bcm2711_vulkan_object *image_objects[2];
+	struct bcm2711_vulkan_framebuffer *framebuffer;
+	struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_resource *images[2];
+	struct bcm2711_vulkan_barrier *barrier;
+	struct bcm2711_vulkan_native_job *job;
+	struct vulkan_object pool;
+	VkCommandBufferAllocateInfo allocation;
+	VkCommandBufferBeginInfo recording;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint8_t wire[4096];
+	uint64_t image_ids[2];
+	VkImageLayout layouts[2];
+	uint32_t references[2];
+	unsigned baseline;
+	unsigned writes;
+	unsigned calls;
+	uint32_t index;
+	bool retired;
+	int error;
+
+	/* Actual immutable framebuffer and texture owners supply two independently bound coherent image resources. */
+	original = primary->payload;
+	framebuffer = ((struct bcm2711_vulkan_record *)original->first)->objects[1]->payload;
+	image_view = framebuffer->view->payload;
+	image_objects[0] = image_view->owner.parent;
+	image_objects[1] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_IMAGE, 180);
+	assert(image_objects[1] != NULL && image_objects[0] != image_objects[1]);
+
+	/* An explicit prior-layout fixture makes the late mismatch test distinct from Vulkan's legitimate UNDEFINED discard transition. */
+	images[1] = image_objects[1]->payload;
+	images[1]->layout = VK_IMAGE_LAYOUT_GENERAL;
+	for (index = 0; index < 2; index++) {
+		images[index] = image_objects[index]->payload;
+		image_ids[index] = image_objects[index]->identity;
+		layouts[index] = images[index]->layout;
+		references[index] = image_objects[index]->references;
+	}
+
+	/* A separate actual primary belongs to the existing reset-enabled device command pool. */
+	memset(&pool, 0, sizeof(pool));
+	pool.wire_id = 150;
+	memset(&allocation, 0, sizeof(allocation));
+	allocation.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_ALLOCATE_INFO;
+	allocation.commandPool = (VkCommandPool)(uintptr_t)&pool;
+	allocation.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
+	allocation.commandBufferCount = 1;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_COMMAND_BUFFERS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferAllocateInfo(&writer, &allocation);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 152);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_COMMAND_BUFFER, 152);
+	assert(object != NULL);
+	command = object->payload;
+	memset(&recording, 0, sizeof(recording));
+	recording.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
+
+	/* The real wrapper copies global, buffer and two image dependencies into one bounded immutable node. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 152);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+	writer.bytes -= 8;
+	ws141_client_encode_barrier(&writer, 152, 170, image_ids, layouts);
+	vulkan_write_u32(&writer, GPU_OP_END_COMMAND_BUFFER);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 152);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	barrier = (struct bcm2711_vulkan_barrier *)command->first;
+	assert(barrier->count == 4 && command->first == command->last);
+	assert(barrier->entries[1].bytes == VK_WHOLE_SIZE && barrier->entries[2].object == image_objects[0]);
+	for (index = 0; index < 2; index++)
+		assert(image_objects[index]->references == references[index] + 1);
+
+	/* A FIFO mismatch on the last image refuses atomically without layout publication or native launch. */
+	baseline = allocations;
+	writes = native_write_barriers;
+	calls = native_execute_calls;
+	session->render->vulkan = session;
+	error = bcm2711_vulkan_native_job_create(object, &job);
+	assert(error == 0 && command->pending == 1);
+	images[1]->layout = VK_IMAGE_LAYOUT_TRANSFER_DST_OPTIMAL;
+	error = bcm2711_vulkan_native_job_execute(session->render->device, session->render, job, &retired);
+	assert(error == EINVAL && retired && images[0]->layout == layouts[0]);
+	assert(native_write_barriers == writes && native_execute_calls == calls);
+	images[1]->layout = layouts[1];
+	error = bcm2711_vulkan_native_job_dispose(session->render->device, job, true);
+	assert(error == 0 && command->pending == 0 && allocations == baseline);
+
+	/* Complete successful serial execution changes both exact layouts once while retaining the primary until disposal. */
+	error = bcm2711_vulkan_native_job_create(object, &job);
+	assert(error == 0);
+	error = bcm2711_vulkan_native_job_execute(session->render->device, session->render, job, &retired);
+	assert(error == 0 && retired && command->pending == 1);
+	assert(images[0]->layout == VK_IMAGE_LAYOUT_GENERAL && images[1]->layout == VK_IMAGE_LAYOUT_GENERAL);
+	assert(native_write_barriers == writes + 1 && native_execute_calls == calls);
+	error = bcm2711_vulkan_native_job_dispose(session->render->device, job, true);
+	assert(error == 0 && command->pending == 0 && allocations == baseline);
+	session->render->vulkan = NULL;
+
+	/* Two overlapping layout transitions of one implemented subresource retain no partial recording owner. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_BEGIN_COMMAND_BUFFER, 1);
+	vulkan_write_u64(&writer, 152);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkCommandBufferBeginInfo(&writer, &recording);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	image_ids[1] = image_ids[0];
+	layouts[0] = VK_IMAGE_LAYOUT_GENERAL;
+	layouts[1] = VK_IMAGE_LAYOUT_GENERAL;
+	begin(&writer, wire, sizeof(wire), GPU_OP_END_COMMAND_BUFFER, 1);
+	writer.bytes -= 8;
+	ws141_client_encode_barrier(&writer, 152, 170, image_ids, layouts);
+	vulkan_write_u32(&writer, GPU_OP_END_COMMAND_BUFFER);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 152);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) != VK_SUCCESS);
+	assert(command->state == BCM2711_VULKAN_COMMAND_INVALID && command->first == NULL);
+	for (index = 0; index < 2; index++) {
+		assert(image_objects[index]->references == references[index]);
+		images[index]->layout = layouts[index];
+	}
+
+	/* Removing this fixture's primary leaves the real graphics recording and every original typed resource owner intact. */
+	error = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_COMMAND_BUFFER, 152);
+	assert(error == 0 && original->state == BCM2711_VULKAN_COMMAND_EXECUTABLE);
+	puts("WS141 actual public barrier recording/pending typed owners/atomic FIFO layouts/duplicate refusal: PASS");
+}
+
 /* Observes borrowed valid native state without claiming independently owned GPU preparation or execution. */
 static int
 draw_observe(
@@ -2073,6 +2224,9 @@ record_test(
 	draw_test(command);
 	prepared_test(session, command_object);
 
+	/* Explicit dependencies use the actual public client encoder and a separately owned native primary. */
+	barrier_test(session, command_object);
+
 	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
 	set->pending = 1;
 	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
@@ -2224,6 +2378,13 @@ dispatch(
 	if (handled != 0)
 		return 0;
 	error = bcm2711_vulkan_command_buffer_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Complete explicit dependencies retain typed resources independently of the public handles. */
+	error = bcm2711_vulkan_barrier_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled != 0)

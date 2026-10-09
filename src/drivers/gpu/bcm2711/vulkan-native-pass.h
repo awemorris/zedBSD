@@ -20,6 +20,10 @@ struct bcm2711_vulkan_native_pass {
 	struct bcm2711_v3d_space *space;
 	struct bcm2711_v3d_view *output;
 	void *cpu;
+	/* The enclosing pending primary retains this logical image through implicit pass layout transitions. */
+	struct bcm2711_vulkan_resource *target;
+	VkImageLayout initial_layout;
+	VkImageLayout final_layout;
 	struct bcm2711_vulkan_native_draw *first;
 	struct bcm2711_vulkan_native_draw *last;
 	struct bcm2711_native_storage *storage[BCM2711_VULKAN_PASS_STORAGE];

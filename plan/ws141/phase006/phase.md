@@ -154,3 +154,8 @@ Complete BCL/RCL/generic tile listと、independent output/linked draw/9pass sto
 ## i14 whole native jobとclosed-session retirement checkpoint（2026-10-09）
 
 whole pending primary/current passをpersistent controller quarantineへallocation無しでtransferし、閉じたrenderer/namespaceは最後のtyped ownerまで保持する。actual checked reset→payload→closed session→translation recoveryの順を接続。actual Vulkan host18範囲/actual renderer close・provider reset failure・retained destructor host/named y warning/error0/style0 PASS。runner/recoveryのhostモデルはphysical DMA proofではない。transfer/barrier/submit/public dispatch/common bindingとKeiland/実機/p007は後続、Phase in-progress保持。内部lifetime契約、外国scope/HAL/UAPI変更無し。[詳細/再開点](../execution-20261009.md#i14-whole-pending-native-jobとclosed-rendererのsoftware出力2026-10-09)。
+
+
+## i14 explicit dependencies/implicit attachment layout checkpoint（2026-10-09）
+
+same-device coherent dependency nodeをwhole pending primaryに保持し、FIFO barrierは全imageのold layout/backing preflight後にvisibilityとnew layoutをpublishする。native passのinitial/final layout lifecycleもnative retirementへ接続。actual public barrier encoder/runtime host19範囲、actual close/reset host、final named y warning/error0/style0 PASS。UNDEFINED discardと末尾mismatchのatomic refusalを区別して確認。native transfer/primary queue submit/public/common binding・physical Keiland・p007は未達、Phase in-progress保持。内部runtime出力、foreign scope/HAL/UAPI変更無し。[詳細/次](../execution-20261009.md#i14-explicit-barrierとimplicit-pass-layoutのsoftware出力2026-10-09)。

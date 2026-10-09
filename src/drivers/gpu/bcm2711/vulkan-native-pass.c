@@ -246,6 +246,11 @@ prepare_target(
 	pass->output = view;
 	pass->cpu = cpu;
 
+	/* The retained primary keeps the logical attachment alive while native execution commits its implicit layout lifecycle. */
+	pass->target = image;
+	pass->initial_layout = description->colour.initialLayout;
+	pass->final_layout = description->colour.finalLayout;
+
 	/* Every selected tile loads existing samples, preserving partial render areas and extra grouped supertile tiles. */
 	pass->state.width = framebuffer->width;
 	pass->state.height = framebuffer->height;
