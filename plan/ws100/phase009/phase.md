@@ -79,3 +79,8 @@ Queue: Q1 の投入（2026-10-08「WS100 p009（音量の曲線、約 0.5 LW）�
 | style-check（mix.c・pci-hda.c） | 新しい指摘 0（既存 88 → 87） |
 | QEMU（T1: `audiod-qemu.sh … curve soft hardware mute`、`volume-p004.sh`・`volume-p005.sh`、boot test） | 未実施 |
 | 5330（`hda: volume nid` の段と stepsize、耳で段ごとの差） | 未実施（p006 b と一緒に） |
+
+## T1-478 の回帰の FAIL（2026-10-09、P1）
+
+本体（curve・soft・mute・hardware）は PASS。回帰の volume-p004 は 1 回目だけ boot の時期（HANDOFF の行）で FAIL、2 回目 PASS（試験の時間の揺れ、製品の変化ではない）。volume-p005 は 2 回とも同じ 5 行が FAIL。原因は `/tmp/s.log` に Settings の行（SOUND report・ZSETTINGS CONTROL）が無く、MAP も新しく出ないこと。画面（sound.png）は Sound の頁で 60%。音量の曲線の変更とは関係が無い。読み: 最初の login で compositor が Settings の Welcome（ws164-p002、T1-267 の PASS の後に入った）を起動し、試験の `/bin/settings sound` が instance を Welcome に渡して終わる（Welcome の行は session の log へ）。**未確認の推定**。
+直し 7ad5d84ef（試験）: Settings の起動の前に `ps` を `processes.txt` に残し、動いている Settings を終える。再試験は T1 の行（Q1 が番号）。
