@@ -7,8 +7,9 @@
 
 /*
  * The system's events on zedBSD (ws132-p003): the compositor's backend
- * subscribes to /dev/system's POWER, LID, AC, BATTERY and INPUT classes
- * (ws132-p002) and tells the compositor through the host's callbacks.
+ * subscribes to /dev/system's POWER, LID, AC, BATTERY, INPUT and USB
+ * classes (ws132-p002) and tells the compositor through the host's
+ * callbacks.
  *
  * The descriptor is opened nonblocking when the backend opens and joins
  * the event loop's poll.  Each poll that finds it readable reads every
@@ -18,8 +19,13 @@
  *   - POWER's PRESS: power_button with the button the subject names,
  *     except a power button's release (events_power_release);
  *   - LID: lid_changed with the record's value (1 open, 0 closed);
- *   - OVERFLOW (records were lost): input_changed and power_changed, which
- *     make the compositor look at the devices and the power again.
+ *   - a security key that came or went (ws199-p001): an INPUT record of a
+ *     FIDO node (its detail's usage=f1d0:0001), or a USB record of a smart
+ *     card slot (smartcardN: the slot, or its card): keys_changed, once a
+ *     read;
+ *   - OVERFLOW (records were lost): input_changed, power_changed and
+ *     keys_changed, which make the compositor look at the devices, the
+ *     power and the keys again.
  * A kernel without the events (the subscription refused) and a descriptor
  * that fails are closed, and nothing more is heard; the compositor's own
  * scans still find input devices.
@@ -41,7 +47,11 @@
 
 /* The classes the compositor hears. */
 #define EVENTS_CLASSES	(KERN_SYSTEM_EVENT_POWER | KERN_SYSTEM_EVENT_LID | KERN_SYSTEM_EVENT_AC | \
-			 KERN_SYSTEM_EVENT_BATTERY | KERN_SYSTEM_EVENT_INPUT)
+			 KERN_SYSTEM_EVENT_BATTERY | KERN_SYSTEM_EVENT_INPUT | KERN_SYSTEM_EVENT_USB)
+
+/* A FIDO node's usage in an INPUT record's detail, and a smart card slot's subject (ws199-p001). */
+#define EVENTS_FIDO_USAGE	"usage=f1d0:0001"
+#define EVENTS_CARD_SUBJECT	"smartcard"
 
 /* The records one read takes. */
 #define EVENTS_READ	8U
@@ -55,6 +65,7 @@
 /* What one pass of records asks of the compositor once, after them. */
 #define EVENTS_INPUT	1U
 #define EVENTS_POWER	2U
+#define EVENTS_KEYS	4U
 
 static unsigned events_dispatch(struct kl_backend *backend, const struct system_event *event);
 static int events_power_release(struct kl_backend *backend, const struct system_event *event);
@@ -194,6 +205,8 @@ kl_backend_events_poll_done(
 		backend->host.input_changed(backend->host.data);
 	if ((asked & EVENTS_POWER) != 0U && backend->host.power_changed != NULL)
 		backend->host.power_changed(backend->host.data);
+	if ((asked & EVENTS_KEYS) != 0U && backend->host.keys_changed != NULL)
+		backend->host.keys_changed(backend->host.data);
 }
 
 /*
@@ -206,21 +219,33 @@ events_dispatch(
 	struct kl_backend *backend,
 	const struct system_event *event)
 {
+	const char *fido;
 	unsigned button;
 	unsigned open;
 	int sleep_button;
 	int release;
+	int card;
 
 	/* Each class. */
 	switch (event->class_bit) {
 	case KERN_SYSTEM_EVENT_INPUT:
+		/* A FIDO node is a security key too. */
+		fido = strstr(event->detail, EVENTS_FIDO_USAGE);
+		if (fido != NULL)
+			return EVENTS_INPUT | EVENTS_KEYS;
 		return EVENTS_INPUT;
+	case KERN_SYSTEM_EVENT_USB:
+		/* Only a smart card slot or its card is the compositor's (a key held to an NFC reader). */
+		card = strncmp(event->subject, EVENTS_CARD_SUBJECT, sizeof(EVENTS_CARD_SUBJECT) - 1U);
+		if (card == 0)
+			return EVENTS_KEYS;
+		return 0U;
 	case KERN_SYSTEM_EVENT_AC:
 	case KERN_SYSTEM_EVENT_BATTERY:
 		return EVENTS_POWER;
 	case KERN_SYSTEM_EVENT_OVERFLOW:
-		/* Records were lost: the devices and the power are looked at again. */
-		return EVENTS_INPUT | EVENTS_POWER;
+		/* Records were lost: the devices, the power and the keys are looked at again. */
+		return EVENTS_INPUT | EVENTS_POWER | EVENTS_KEYS;
 	case KERN_SYSTEM_EVENT_POWER:
 		/* A press of the power or the sleep button. */
 		if (event->action != KERN_SYSTEM_EVENT_PRESS)

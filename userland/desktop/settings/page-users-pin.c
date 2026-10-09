@@ -278,6 +278,7 @@ se_keys_soft_result(
 			done = "The PIN is removed. The login and locked screens take your password.";
 		keys->step = 0U;
 		se_dialog_step(app, "Software Security Key", 0U, 0U, done, "Done", 0);
+		se_dialog_final(app);
 		return;
 	}
 

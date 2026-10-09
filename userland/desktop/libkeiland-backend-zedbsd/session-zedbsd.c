@@ -26,6 +26,10 @@
  *                           ENROLL): OK; FAIL reason (a session)
  *   ENROLL fido2 LABEL      then the password's and the key PIN's lines:
  *                           TOUCH..., OK id=ID; FAIL reason (ws172-p003)
+ *   KEYINFO                 KEYINFO count=N [name=HEX pin= retries= min=]
+ *   KEYPIN set|change       then the PINs' lines: OK; FAIL reason
+ *   KEYRESET                then the password's line: REPLUG, TOUCH...,
+ *                           OK removed=N; FAIL reason (ws199-p001)
  *   REMOVE fido2 REF        then the password's line: OK; FAIL reason
  *   CANCEL                  (none): a security key's attempt stops
  *   POWER poweroff|reboot   OK; FAIL others; ERROR (login screen and session, power-zedbsd.c)
@@ -78,6 +82,7 @@ enum session_answer {
 	SESSION_ANSWER_SERVICE,
 	SESSION_ANSWER_STYLES,
 	SESSION_ANSWER_ENROLLED,
+	SESSION_ANSWER_KEYINFO,
 	SESSION_ANSWER_OK,
 	SESSION_ANSWER_FAIL,
 	SESSION_ANSWER_BUSY,
@@ -94,6 +99,7 @@ struct session_word {
 static const struct session_word session_words[] = {
 	{ "STYLES", SESSION_ANSWER_STYLES },
 	{ "ENROLLED", SESSION_ANSWER_ENROLLED },
+	{ "KEYINFO", SESSION_ANSWER_KEYINFO },
 	{ "OK", SESSION_ANSWER_OK },
 	{ "FAIL", SESSION_ANSWER_FAIL },
 	{ "ERROR busy", SESSION_ANSWER_BUSY },
@@ -108,6 +114,7 @@ static int session_name_valid(const char *name);
 static int session_ask(struct kl_backend *backend, unsigned request, char *line, int length);
 static void session_take_styles(struct kl_backend *backend, const char *list);
 static void session_take_enrolled(struct kl_backend *backend, const char *list);
+static void session_take_key_info(struct kl_backend *backend, const char *list);
 static int session_take_key(const char *word, struct kl_backend_key *key);
 static int session_hex_value(char digit);
 static int session_send(struct kl_backend *backend, unsigned request, const char *line);
@@ -584,6 +591,146 @@ kl_backend_session_remove_key(
 }
 
 /*
+ * Asks sessiond what the security keys there are (KEYINFO, ws199-p001).
+ */
+int
+kl_backend_session_key_info(
+	struct kl_backend *backend)
+{
+	char line[SESSION_REQUEST_MAX];
+	int written;
+	int error;
+
+	/* Only a session sessiond started and still listens to. */
+	if (backend == NULL)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The request. */
+	written = snprintf(line, sizeof(line), "KEYINFO\n");
+	error = session_ask(backend, KL_BACKEND_SESSION_KEYINFO, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
+ * Gives what sessiond last answered to KEYINFO.
+ */
+void
+kl_backend_session_key_info_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_info *info)
+{
+	/* None without a backend. */
+	memset(info, 0, sizeof(*info));
+	if (backend == NULL)
+		return;
+
+	/* Succeeded: the last answer. */
+	*info = backend->session_key_info;
+}
+
+/*
+ * Asks sessiond to set the key's first PIN (current NULL) or to change it (KEYPIN, ws199-p001).
+ */
+int
+kl_backend_session_key_pin(
+	struct kl_backend *backend,
+	const char *current,
+	const char *pin)
+{
+	char line[SESSION_REQUEST_MAX];
+	int valid;
+	int written;
+	int error;
+
+	/* Only a session sessiond started and still listens to. */
+	if (backend == NULL || pin == NULL)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The PINs, one line each, not empty. */
+	valid = session_secret_valid(pin);
+	if (!valid || pin[0] == '\0')
+		return EINVAL;
+	if (current != NULL) {
+		valid = session_secret_valid(current);
+		if (!valid || current[0] == '\0')
+			return EINVAL;
+	}
+
+	/* The request; nothing of the PINs is kept once it is sent. */
+	if (current == NULL) {
+		written = snprintf(line, sizeof(line), "KEYPIN set\n%s\n", pin);
+	} else {
+		written = snprintf(line, sizeof(line), "KEYPIN change\n%s\n%s\n", current, pin);
+	}
+
+	/* Sent. */
+	error = session_ask(backend, KL_BACKEND_SESSION_KEYOP, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
+ * Asks sessiond to reset the key the user plugs in again (KEYRESET, ws199-p001).
+ */
+int
+kl_backend_session_key_reset(
+	struct kl_backend *backend,
+	const char *password)
+{
+	char line[SESSION_REQUEST_MAX];
+	int valid;
+	int written;
+	int error;
+
+	/* Only a session sessiond started and still listens to. */
+	if (backend == NULL || password == NULL)
+		return EINVAL;
+	if (backend->options.session_descriptor < 0 || backend->session_gone)
+		return ENOTSUP;
+
+	/* The password, one line, not empty. */
+	valid = session_secret_valid(password);
+	if (!valid || password[0] == '\0')
+		return EINVAL;
+
+	/* The request; nothing of the password is kept once it is sent. */
+	backend->session_key_removed = 0U;
+	written = snprintf(line, sizeof(line), "KEYRESET\n%s\n", password);
+	error = session_ask(backend, KL_BACKEND_SESSION_KEYOP, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
+ * Gives how many registrations the last reset removed.
+ */
+unsigned
+kl_backend_session_key_removed(
+	const struct kl_backend *backend)
+{
+	/* None without a backend. */
+	if (backend == NULL)
+		return 0U;
+
+	/* Succeeded: the count. */
+	return backend->session_key_removed;
+}
+
+/*
  * Stops a security key's attempt under way (CANCEL); its answer comes as the attempt's.
  */
 int
@@ -795,6 +942,14 @@ session_answered(
 		return;
 	}
 
+	/* REPLUG: the key is to be plugged in again for its reset; the request is still under way (ws199-p001). */
+	same = strcmp(line, "REPLUG");
+	if (same == 0) {
+		if (backend->host.session_answer != NULL)
+			backend->host.session_answer(backend->host.data, KL_BACKEND_SESSION_REPLUG, 0);
+		return;
+	}
+
 	/* A sleep's answer is its outcome, never a login's or an action's answer (ws052-p011). */
 	if (backend->session_request == KL_BACKEND_SESSION_POWER && backend->power_asked == KL_BACKEND_POWER_SUSPEND) {
 		session_slept(backend, line);
@@ -821,8 +976,15 @@ session_answered(
 		session_take_enrolled(backend, line + strlen("ENROLLED "));
 		error = 0;
 		break;
+	case SESSION_ANSWER_KEYINFO:
+		/* What the keys there are. */
+		session_take_key_info(backend, line + strlen("KEYINFO"));
+		error = 0;
+		break;
 	case SESSION_ANSWER_OK:
-		/* Granted. */
+		/* Granted (a reset says how many registrations went). */
+		if (backend->session_request == KL_BACKEND_SESSION_KEYOP)
+			(void)sscanf(line, "OK removed=%u", &backend->session_key_removed);
 		error = 0;
 		break;
 	case SESSION_ANSWER_FAIL:
@@ -971,6 +1133,57 @@ session_take_enrolled(
 		if (error == 0)
 			backend->session_key_count++;
 		word = strstr(word + 5, " key=");
+	}
+}
+
+/* Takes KEYINFO's list (" count=N name=HEX pin=0|1 retries=N min=N"); a list that does not read is no key. */
+static void
+session_take_key_info(
+	struct kl_backend *backend,
+	const char *list)
+{
+	struct kl_backend_key_info *info;
+	const char *name;
+	const char *rest;
+	size_t length;
+	size_t index;
+	int scanned;
+	int high;
+	int low;
+	int character;
+
+	/* How many. */
+	info = &backend->session_key_info;
+	memset(info, 0, sizeof(*info));
+	scanned = sscanf(list, " count=%u", &info->count);
+	if (scanned != 1) {
+		info->count = 0U;
+		return;
+	}
+
+	/* The one key's facts. */
+	name = strstr(list, " name=");
+	if (info->count != 1U || name == NULL)
+		return;
+	rest = strchr(name + 1, ' ');
+	scanned = 0;
+	if (rest != NULL)
+		scanned = sscanf(rest, " pin=%u retries=%u min=%u", &info->pin, &info->retries, &info->min);
+	if (scanned != 3)
+		info->pin = 0U;
+
+	/* Its name: two digits a byte (a control character ends it). */
+	name += strlen(" name=");
+	length = strcspn(name, " ");
+	for (index = 0U; index < length / 2U && index + 1U < sizeof(info->name); index++) {
+		high = session_hex_value(name[2U * index]);
+		low = session_hex_value(name[2U * index + 1U]);
+		if (high < 0 || low < 0)
+			break;
+		character = high << 4 | low;
+		if (character < 0x20 || character == 0x7f)
+			break;
+		info->name[index] = (char)character;
 	}
 }
 
