@@ -25,3 +25,8 @@ Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §7
 commit: 40de43cab（試験と style の直し）、この記録と scenario と依頼の行は次の commit。
 
 再開点: T1 の結果を Q1 が判定（PASS で cleared、FAIL は直しの Queue）。fido2-p003-guest.sh・passkey-p002-guest.sh は p003 の keypad と KEYOWNER の後に未実行なので、撮影の比較や手順が合わなければ P1 が script を直す。
+
+## T1-523 の FAIL の直し（2026-10-10 P1、agent/p1）
+
+- key-keypad 手順 6（login の greeter.log に key owner の行が無い）: **試験**。greeter.log の順（`styles=7` → `keypad none` → `auth … style=1`）は、styles の答えの前に password と Enter が打たれた事を示す（PIN が提示されるのに keypad none は何かが打たれていた時だけ）。その時 greeter は送信を保留し、答えの直後の tick で login を先に送る（`greeter_waiting` の間と login の後は KEYOWNER を問わない。login を待たせない製品の振る舞いのまま）。scenario `tests/scenarios/desktop/lock/key-keypad.md` の手順 6 を「`key owner asked` が出るまで打たない」にした。
+- fido2-p003 の step 3（reason=timeout）: **試験**。p001 §5（line 175）と R3 のとおり、鍵が無く reader の slot が有れば `touch` を出して当てるのを触れる時間まで待つ（image には reader の slot が有る）。`plan/ws172/tests/fido2-p003-guest.sh` は `reason=(no-key|timeout)` を 100 秒まで待つ（後の手順の時の狂いもこれで直る見込み）。

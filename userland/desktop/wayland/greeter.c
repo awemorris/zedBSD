@@ -366,6 +366,7 @@ static void greeter_answered(struct kwl_server *server, int error);
 static void greeter_unlock(struct kwl_server *server);
 static void greeter_refused(struct kwl_server *server);
 static unsigned greeter_next_style(void);
+static unsigned greeter_first_style(void);
 static void greeter_key_refused(const char *reason);
 static void greeter_styles_reset(void);
 static void greeter_styles_ask(struct kwl_server *server);
@@ -2147,7 +2148,13 @@ greeter_refused(
 	if (same == 0) {
 		snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("Use your password."));
 		greeter_styles &= ~KL_BACKEND_STYLE_PIN;
-		greeter_style = KL_BACKEND_STYLE_PASSWORD;
+		if (greeter_styles == 0U)
+			greeter_styles = KL_BACKEND_STYLE_PASSWORD;
+		greeter_style = greeter_first_style();
+
+		/* The password turned off (WS200): another way. */
+		if (greeter_style != KL_BACKEND_STYLE_PASSWORD)
+			snprintf(greeter_message, sizeof(greeter_message), "%s", kl_tr("That way to sign in is turned off. Use another."));
 		return;
 	}
 
@@ -2257,9 +2264,14 @@ greeter_styles_take(
 	unsigned styles;
 	unsigned index;
 
-	/* The styles, the password always among them. */
+	/*
+	 * The styles as sessiond offers them (WS200: the password too may be
+	 * turned off); none known, the password.
+	 */
 	styles = kl_backend_session_styles_get(server->backend);
-	greeter_styles = styles | KL_BACKEND_STYLE_PASSWORD;
+	greeter_styles = styles & (KL_BACKEND_STYLE_PASSWORD | KL_BACKEND_STYLE_PIN | KL_BACKEND_STYLE_KEY);
+	if (greeter_styles == 0U)
+		greeter_styles = KL_BACKEND_STYLE_PASSWORD;
 	server->dirty = 1;
 	printf("KWL GREETER styles=%u\n", greeter_styles);
 
@@ -2278,10 +2290,10 @@ greeter_styles_take(
 		return;
 	}
 
-	/* A style no longer offered gives way to the password, and what was typed for it goes. */
-	if (greeter_style != KL_BACKEND_STYLE_PASSWORD && (greeter_styles & greeter_style) == 0U) {
+	/* A style no longer offered gives way to the first one offered, and what was typed for it goes. */
+	if ((greeter_styles & greeter_style) == 0U) {
 		greeter_erase();
-		greeter_style = KL_BACKEND_STYLE_PASSWORD;
+		greeter_style = greeter_first_style();
 	}
 
 	/* No PIN: the password (or the key the user chose). */
@@ -2458,20 +2470,50 @@ greeter_erase(
 static unsigned
 greeter_next_style(void)
 {
-	/* After the password: the PIN, else a key. */
-	if (greeter_style == KL_BACKEND_STYLE_PASSWORD) {
-		if ((greeter_styles & KL_BACKEND_STYLE_PIN) != 0U)
-			return KL_BACKEND_STYLE_PIN;
-		if ((greeter_styles & KL_BACKEND_STYLE_KEY) != 0U)
-			return KL_BACKEND_STYLE_KEY;
-		return KL_BACKEND_STYLE_PASSWORD;
+	static const unsigned order[GREETER_STYLES] = {
+		KL_BACKEND_STYLE_PASSWORD,
+		KL_BACKEND_STYLE_PIN,
+		KL_BACKEND_STYLE_KEY
+	};
+	unsigned at;
+	unsigned step;
+	unsigned next;
+
+	/* Where the field's style is in the order (the password when it is none of them). */
+	at = 0U;
+	for (step = 0U; step < GREETER_STYLES; step++) {
+		if (order[step] == greeter_style)
+			at = step;
 	}
 
-	/* After the PIN: a key, else the password. */
-	if (greeter_style == KL_BACKEND_STYLE_PIN && (greeter_styles & KL_BACKEND_STYLE_KEY) != 0U)
+	/* The next one offered after it, around the order (WS200: the password may be off). */
+	for (step = 1U; step <= GREETER_STYLES; step++) {
+		next = order[(at + step) % GREETER_STYLES];
+		if ((greeter_styles & next) != 0U)
+			return next;
+	}
+
+	/* None offered: the password. */
+	return KL_BACKEND_STYLE_PASSWORD;
+}
+
+/* Gives the first style offered in the order password, PIN, security key (the password when none is). */
+static unsigned
+greeter_first_style(void)
+{
+	/* The password. */
+	if ((greeter_styles & KL_BACKEND_STYLE_PASSWORD) != 0U)
+		return KL_BACKEND_STYLE_PASSWORD;
+
+	/* The PIN. */
+	if ((greeter_styles & KL_BACKEND_STYLE_PIN) != 0U)
+		return KL_BACKEND_STYLE_PIN;
+
+	/* A security key. */
+	if ((greeter_styles & KL_BACKEND_STYLE_KEY) != 0U)
 		return KL_BACKEND_STYLE_KEY;
 
-	/* After a key, back to the password. */
+	/* None offered: the password. */
 	return KL_BACKEND_STYLE_PASSWORD;
 }
 
