@@ -39,7 +39,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 | [p001](phase001/phase.md) | 設計（profile の役割、bluetoothd の構造、WS170 の API、試験）、review 3 回、ユーザーの決定 Q1〜Q16 | 4 | cleared |
 | p002 | RFCOMM・OBEX・SDP の server と client・phone.c・phone の pairing・linkmgr・drop の回復・WS143 の変更（i01〜i08）。詳細は branch の phase002/phase.md | 22 | **cleared**（host 約 2,500 checks、T1-518 HID の回帰 PASS、2026-10-10 Q1） |
 | p003 | MAP（MCE の MAS と MNS）、phone link の持ち主・記録・再接続、socket の PHONE。詳細設計 第 2.1 版（review 2 回）、i01〜i08。詳細は branch の phase003/phase.md | 24 | **in-progress**: i01（phonerec、PAIR の検査、PHONE LINK・SHOW、FORGET）・i02（outq、client の枠、長さ付きの入力）済み。i03（phone link の一生）の途中。i04 mapxml・i05 bMessage・i06 map.c と MNS・i07 phoneio と SUBSCRIBE・i08 T1 は未 |
-| p004 | Integration（WS170 Phone の app の backend: SMS・通話・連絡先の compositor の API、Settings のスマホの pairing と許可）。p003 §1.1 の変更（suspend、本文 16 KB、PAGE の cursor、PHONE GET を作らない）を前提に | 12 | planned |
+| [p004](phase004/phase.md) | Integration（WS170 Phone の app の backend: SMS・通話・連絡先の compositor の API、Settings のスマホの pairing と許可）。p003 §1.1 の変更（suspend、本文 16 KB、PAGE の cursor、PHONE GET を作らない）を前提に | 12 | planning（2026-10-10 詳細設計の第 1 版、SMS の層の流れと interface）|
 | p005 | PBAP（電話帳、vCard 2.1/3.0、連絡先の store） | 8 | planned |
 | p006 | HFP の制御（AT の SLC、indicator、応答・終話・発信、発信者、割り込み、codec の交渉） | 12 | planned |
 | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
