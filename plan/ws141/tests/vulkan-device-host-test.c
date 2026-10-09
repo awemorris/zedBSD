@@ -16,6 +16,7 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/vulkan-device.h"
+#include "drivers/gpu/bcm2711/vulkan-memory.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
 static struct bcm2711_buffer reply_buffer;
@@ -32,6 +33,24 @@ static unsigned allocations;
 /* A selected ordinary heap failure must unwind parent/domain ownership acquired by native publication. */
 static unsigned fail_after;
 
+/* Actual VA/page-table code consumes fixture RAM and an explicitly observed flush outcome. */
+static uint32_t native_pages[1048576];
+
+/* The page-table owner is fixture storage, not a separately allocated native backing run. */
+static struct bcm2711_buffer page_buffer;
+
+/* One imported allocation descriptor belongs to the fixture's exact open. */
+static struct bcm2711_render_resource imported_resource;
+
+/* Allocation observations distinguish declarations from first-export physical storage. */
+static unsigned backing_allocations;
+
+/* One failed native flush closes admission and exercises actual VA quarantine ownership. */
+static unsigned fail_sync;
+
+static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
+static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
+static void memory_free(struct bcm2711_vulkan_session *session, uint64_t identity);
 static int dispatch(struct bcm2711_vulkan_session *session, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static void begin(struct vulkan_writer *writer, void *storage, size_t capacity, uint32_t opcode, uint32_t requested);
 static int execute(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, struct vulkan_reader *reader);
@@ -111,7 +130,11 @@ bcm2711_render_find(
 	uint32_t identity)
 {
 	/* Missing or foreign resources cannot become reply backing. */
-	if (session != reply_resource.owner || identity != 1)
+	if (session != reply_resource.owner)
+		return NULL;
+	if (identity == 2 && imported_resource.view != NULL)
+		return &imported_resource;
+	if (identity != 1)
 		return NULL;
 
 	/* Succeeded: this borrowed descriptor remains fixture-owned through native stream execution. */
@@ -126,7 +149,7 @@ bcm2711_buffer_retain(
 	struct bcm2711_buffer *buffer)
 {
 	/* This fixture exposes only one live CPU buffer, never physical GPU ownership. */
-	assert(buffer == &reply_buffer && buffer->references != 0);
+	assert(buffer != NULL && buffer->references != 0);
 	buffer->references++;
 }
 
@@ -138,8 +161,66 @@ bcm2711_buffer_release(
 	struct bcm2711_buffer *buffer)
 {
 	/* The native release must never receive NULL or consume the fixture's descriptor reference. */
-	assert(buffer == &reply_buffer && buffer->references > 1);
+	assert(buffer != NULL && buffer->references != 0);
+	if (buffer == &reply_buffer) {
+		assert(buffer->references > 1);
+		buffer->references--;
+		return;
+	}
+
+	/* Independent GPU views and returned BLOB source holds retire before their final fixture RAM owner. */
 	buffer->references--;
+	if (buffer->references == 0)
+		kern_free(buffer);
+}
+
+/*
+ * Supplies a bounded coherent fixture run while observing the actual late placement requirements.
+ */
+int
+bcm2711_buffer_create_uncached(
+	uint64_t bytes,
+	uint64_t limit,
+	size_t alignment,
+	struct bcm2711_buffer **result)
+{
+	struct bcm2711_buffer *buffer;
+
+	/* The fixture does not model physical allocation or cache attributes; separate NC/VM source tests cover those owners. */
+	*result = NULL;
+	assert(limit <= 0x3fffffffU && alignment >= 4096 && alignment <= 0x100000);
+	buffer = kern_calloc(1, sizeof(*buffer));
+	if (buffer == NULL)
+		return ENOMEM;
+	buffer->bytes = bytes;
+	buffer->memory.size = (bytes + 4095U) & ~4095ULL;
+	buffer->memory.paddr = 0x100000;
+	buffer->address = buffer;
+	buffer->uncached = true;
+	buffer->references = 1;
+	backing_allocations++;
+	*result = buffer;
+
+	/* Succeeded: actual native VA ownership will retain this ordinary fixture source run. */
+	return 0;
+}
+
+/*
+ * Supplies an explicit native flush outcome without emulating actual hardware retirement.
+ */
+int
+bcm2711_v3d_hardware_pages_sync(
+	struct bcm2711_v3d *engine)
+{
+	/* Native flush refusal closes subsequent admission; actual VA source must retain its mapped storage. */
+	if (fail_sync != 0) {
+		fail_sync--;
+		engine->hardware.ready = false;
+		return EIO;
+	}
+
+	/* Succeeded: the software fixture permits the actual VA owner to finish its selected operation. */
+	return 0;
 }
 
 /*
@@ -177,6 +258,9 @@ main(
 	memset(&render, 0, sizeof(render));
 	memset(&view, 0, sizeof(view));
 	engine.hardware.ready = true;
+	engine.hardware.physical_bits = 32;
+	page_buffer.address = native_pages;
+	engine.hardware.pages = &page_buffer;
 	spin_init(&engine.hardware.guard, LOCK_RANK_DEVICE, "vulkan-test");
 	controller.space.native = &engine;
 	render.device = &controller;
@@ -316,6 +400,7 @@ main(
 	assert(render.timelines == (UINT64_C(1) << 7));
 	queue = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUEUE, 40);
 	assert(queue != NULL);
+	memory_test(session, &render);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -424,6 +509,13 @@ dispatch(
 	error = bcm2711_vulkan_query_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Allocation commands retain native views and real typed device ownership. */
+	error = bcm2711_vulkan_memory_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
 	if (handled == 0)
 		return ENOTSUP;
 
@@ -440,18 +532,26 @@ begin(
 	uint32_t opcode,
 	uint32_t requested)
 {
+	uint8_t header[8];
+
 	/* Fixed fixture storage uses actual primitives without invoking an unrelated local Vulkan object allocator. */
 	memset(writer, 0, sizeof(*writer));
 	writer->data = storage;
 	writer->capacity = capacity;
+	vulkan_command_begin(writer, opcode);
+	assert(requested == 1 && writer->bytes == sizeof(header));
+	memcpy(header, writer->data, sizeof(header));
+	writer->bytes = 0;
 	vulkan_write_u32(writer, GPU_OP_SET_REPLY_STREAM);
 	vulkan_write_u32(writer, 0);
 	vulkan_write_u64(writer, 1);
 	vulkan_write_u32(writer, 1);
 	vulkan_write_u64(writer, 0);
 	vulkan_write_u64(writer, sizeof(reply_storage));
-	vulkan_write_u32(writer, opcode);
-	vulkan_write_u32(writer, requested);
+
+	/* The actual ordinary client header requests an echoed opcode even for void Vulkan commands. */
+	memcpy(writer->data + writer->bytes, header, sizeof(header));
+	writer->bytes += sizeof(header);
 }
 
 /* Executes through actual native transport and makes a genuine client decoder cursor over the returned payload. */
@@ -570,7 +670,7 @@ encode_queue(
 	vulkan_write_u64(writer, identity);
 }
 
-/* Destroys an actual typed native root through its no-reply Vulkan command. */
+/* Destroys an actual typed native root through its empty-parameter-reply Vulkan command. */
 static void
 destroy(
 	struct bcm2711_vulkan_session *session,
@@ -583,9 +683,185 @@ destroy(
 	int error;
 
 	/* Native allocation callbacks remain absent and implicit child identities retire inside the actual command. */
-	begin(&writer, wire, sizeof(wire), opcode, 0);
+	begin(&writer, wire, sizeof(wire), opcode, 1);
 	vulkan_write_u64(&writer, identity);
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
 	assert(error == 0);
+}
+
+/* Exercises late placement, independent BLOB/import references and failed-flush quarantine through actual native VA source. */
+static void
+memory_test(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_render_session *render)
+{
+	struct gpu_blob_create request;
+	struct gpu_placement placement;
+	struct bcm2711_buffer *first;
+	struct bcm2711_buffer *second;
+	struct bcm2711_vulkan_object *object;
+	struct bcm2711_vulkan_memory *memory;
+	struct bcm2711_v3d_view *view;
+	unsigned baseline;
+	int error;
+
+	/* A declared allocation reserves its budget and device edge without allocating physical backing yet. */
+	baseline = allocations;
+	error = memory_allocate(session, 50, 8192, VK_STRUCTURE_TYPE_EXPORT_MEMORY_ALLOCATE_INFO, 0x200);
+	assert(error == VK_SUCCESS && backing_allocations == 0 && render->device->vulkan_memory_bytes == 8192);
+	object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_MEMORY, 50);
+	assert(object != NULL);
+	memory = object->payload;
+	assert(memory->view == NULL);
+
+	/* The first placed BLOB must use the actual alignment and full inclusive DMA ceiling before creating a native view. */
+	memset(&request, 0, sizeof(request));
+	memset(&placement, 0, sizeof(placement));
+	request.blob_id = 50;
+	request.bytes = 8192;
+	request.flags = GPU_BLOB_MAPPABLE | GPU_BLOB_SHAREABLE | GPU_BLOB_CROSS_DEVICE;
+	placement.flags = GPU_PLACEMENT_COHERENT | GPU_PLACEMENT_CONTIGUOUS;
+	placement.alignment = 65536;
+	placement.max_dma_address = 0x1fffff;
+	error = bcm2711_vulkan_memory_blob(session, &request, &placement, &first);
+	assert(error == 0 && first != NULL && backing_allocations == 1 && first->references == 2);
+	assert(memory->view != NULL && memory->view->references == 1);
+
+	/* Repeated aliases retain one immutable backing allocation and reject conditions it cannot actually satisfy. */
+	error = bcm2711_vulkan_memory_blob(session, &request, &placement, &second);
+	assert(error == 0 && second == first && backing_allocations == 1 && first->references == 3);
+	bcm2711_buffer_release(second);
+	placement.max_dma_address = 0x100fff;
+	error = bcm2711_vulkan_memory_blob(session, &request, &placement, &second);
+	assert(error == ENOTSUP && second == NULL && first->references == 2);
+	placement.max_dma_address = 0x1fffff;
+	placement.alignment = 3;
+	error = bcm2711_vulkan_memory_blob(session, &request, &placement, &second);
+	assert(error == EINVAL && second == NULL);
+	placement.alignment = 65536;
+
+	/* One independent resource view can survive VkMemory removal and supply a coherent import into another typed declaration. */
+	error = bcm2711_v3d_memory_map(&render->device->space, first, &view);
+	assert(error == 0 && first->references == 3);
+	imported_resource.owner = render;
+	imported_resource.blob = true;
+	imported_resource.shareable = true;
+	imported_resource.view = view;
+	error = memory_allocate(session, 51, 8192, 1000384002U, 2);
+	assert(error == VK_SUCCESS && view->references == 2 && render->device->vulkan_memory_bytes == 16384);
+	memory_free(session, 50);
+	assert(first->references == 2 && render->device->vulkan_memory_bytes == 8192);
+	bcm2711_buffer_release(first);
+
+	/* The imported allocation independently owns its view after the original resource descriptor retires. */
+	error = bcm2711_v3d_memory_release(&render->device->space, view);
+	assert(error == 0 && view->references == 1);
+	imported_resource.view = NULL;
+	memory_free(session, 51);
+	assert(render->device->space.views == NULL && render->device->vulkan_memory_bytes == 0 && allocations == baseline);
+
+	/* Aggregate declared heap exhaustion has an explicit Vulkan failure and no new backing allocation. */
+	error = memory_allocate(session, 52, 256ULL << 20, 0, 0);
+	assert(error == VK_SUCCESS);
+	error = memory_allocate(session, 53, 4096, 0, 0);
+	assert(error == (int)VK_ERROR_OUT_OF_DEVICE_MEMORY && backing_allocations == 1);
+	memory_free(session, 52);
+
+	/* Both ordinary payload and registry allocation refusal retire every budget charge and acquired device dependency. */
+	fail_after = 1;
+	error = memory_allocate(session, 54, 4096, 0, 0);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && allocations == baseline);
+	fail_after = 2;
+	error = memory_allocate(session, 54, 4096, 0, 0);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && allocations == baseline && render->device->vulkan_memory_bytes == 0);
+
+	/* Failed actual VA publication retains the backing in quarantine after logical memory identity retirement. */
+	error = memory_allocate(session, 55, 8192, 0, 0);
+	assert(error == VK_SUCCESS);
+	request.blob_id = 55;
+	request.flags = GPU_BLOB_MAPPABLE;
+	fail_sync = 1;
+	error = bcm2711_vulkan_memory_blob(session, &request, &placement, &first);
+	assert(error == EIO && first == NULL && backing_allocations == 2);
+	view = render->device->space.views;
+	assert(view != NULL && view->quarantined && view->references == 0 && view->buffer->references == 1);
+	memory_free(session, 55);
+	assert(render->device->vulkan_memory_bytes == 0 && allocations == baseline + 2);
+
+	/* The fixture explicitly supplies a later checked-reset boundary before actual quarantine recovery can release RAM. */
+	render->device->space.native->hardware.ready = true;
+	error = bcm2711_v3d_memory_recover(&render->device->space);
+	assert(error == 0 && render->device->space.views == NULL && allocations == baseline);
+	puts("WS141 Vulkan lazy memory/placed BLOB/import/budget/actual VA quarantine: PASS");
+}
+
+/* Encodes the actual client's allocation chain and decodes its full native result identity. */
+static int
+memory_allocate(
+	struct bcm2711_vulkan_session *session,
+	uint64_t identity,
+	uint64_t bytes,
+	uint32_t extension,
+	uint32_t argument)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint8_t wire[256];
+	uint32_t status;
+	uint64_t returned;
+	int error;
+
+	/* The exact allocation wire follows memory.c, using the actual ordinary header and client primitives. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u32(&writer, VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO);
+	if (extension == 0) {
+		vulkan_write_u64(&writer, 0);
+	} else {
+		vulkan_write_u64(&writer, 1);
+		vulkan_write_u32(&writer, extension);
+		vulkan_write_u64(&writer, 0);
+		vulkan_write_u32(&writer, argument);
+	}
+
+	/* Complete generated values are protocol identities, not host application pointers. */
+	vulkan_write_u64(&writer, bytes);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, identity);
+	error = execute(session, &writer, &reader);
+	assert(error == 0);
+	status = vulkan_read_u32(&reader);
+	assert(vulkan_read_u64(&reader) == 1);
+	returned = vulkan_read_u64(&reader);
+	if (status == VK_SUCCESS)
+		assert(returned == identity);
+	else
+		assert(returned == 0);
+
+	/* Succeeded: the caller sees the real structured Vulkan allocation outcome. */
+	return (int)status;
+}
+
+/* Sends the actual ordinary client void-command header and verifies echoed-opcode completion through native transport. */
+static void
+memory_free(
+	struct bcm2711_vulkan_session *session,
+	uint64_t identity)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint8_t wire[256];
+	int error;
+
+	/* FreeMemory carries no parameter reply, while its ordinary client header still requires an opcode echo. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_FREE_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, identity);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && reply_storage[0] == GPU_OP_FREE_MEMORY);
 }

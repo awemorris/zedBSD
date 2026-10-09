@@ -157,3 +157,7 @@ device-independent Zlib SPIR-V frontendをread-onlyで再利用し、独立QPU4.
 ## i14 root/query/Normal NCの統合（2026-10-09）
 
 Q1最新mainを保持し、object/session/transport/root/queryと承認済みNormal NC mappingを統合。統合treeのhost2/rpi4 y-n build PASS、warning/error0。実装途中のVulkan entrypointsはまだ公開しない。i13/i14はin-progress、次はVkDeviceMemory/nonzero BLOB/resource/pipeline/draw/queue。[統合evidence](execution-20261009.md#i14-rootquerynormal-ncのmain統合確認2026-10-09)。
+
+## i14 native memory/BLOB checkpoint（2026-10-09）
+
+lazy VkMemory/type0/export/importとactual placement後のNormal NC backing、nonzero BLOB/resourceへのprivate routingを追加。actual client headerでvoidのopcode echo要求を確認しroot destructionを修正。actual VA/MMUを使うhostでindependent owner/budget/OOM/quarantine PASS、rpi4 y build warning/error0。i13/i14とp005/p006はin-progress、COMMAND/CAPSET/JOB未公開。次はbuffer/image/bindingとtyped rendering runtime、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。

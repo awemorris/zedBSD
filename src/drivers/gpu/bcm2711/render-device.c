@@ -14,6 +14,7 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/share.h"
+#include "drivers/gpu/bcm2711/vulkan-memory.h"
 
 /* These initial capabilities exclude Vulkan until the executor and compiler are bound. */
 #define RENDER_CAPABILITIES (GPU_CAP_RESOURCE | GPU_CAP_BLOB | GPU_CAP_TRANSFER | GPU_CAP_MAPPING | GPU_CAP_SHARE | GPU_CAP_ALLOCATION_SHARE)
@@ -658,9 +659,16 @@ allocate_resource(
 	}
 
 	/* Acquires one source reference before creating the session's independent native view. */
-	error = bcm2711_blob_allocate(request, placement, &buffer);
+	if (request->blob_id != 0)
+		error = bcm2711_vulkan_memory_blob(session->vulkan, request, placement, &buffer);
+	else
+		error = bcm2711_blob_allocate(request, placement, &buffer);
 	if (error != 0) {
+		/* A lazy Vulkan backing map can fail after native translation publication became uncertain. */
+		ready = render_ready(controller);
 		mutex_unlock(&controller->mutex);
+		if (!ready)
+			bcm2711_render_fail(controller, error);
 		return error;
 	}
 
