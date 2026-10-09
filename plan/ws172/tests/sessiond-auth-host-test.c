@@ -23,6 +23,7 @@
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/stat.h>
+#include <sys/wait.h>
 #include <time.h>
 #include <unistd.h>
 
@@ -35,6 +36,7 @@ static int failures;
 static void check(int condition, const char *what);
 static void test_policy(void);
 static void test_exchange(const char *name);
+static void test_change_offers_pin(const char *name);
 static int answer(struct sessiond_exchange *exchange, int peer, char *line, size_t size, int timeout_ms);
 static void send_line(struct sessiond_exchange *exchange, const char *text);
 
@@ -67,7 +69,9 @@ int
 main(void)
 {
 	struct passwd *self;
+	pid_t child;
 	uid_t uid;
+	int status;
 
 	/* The counts' rules. */
 	test_policy();
@@ -76,6 +80,25 @@ main(void)
 	uid = getuid();
 	self = getpwuid(uid);
 	check(self != NULL, "the test's own account");
+
+	/* A change by the password offers the PIN (BUG-285), from the counts of a fresh sessiond: in a child, before any login here. */
+	if (self != NULL) {
+		child = fork();
+		if (child == 0) {
+			test_change_offers_pin(self->pw_name);
+			if (failures != 0)
+				_exit(1);
+			_exit(0);
+		}
+
+		/* The child's result. */
+		status = 1;
+		if (child > 0)
+			(void)waitpid(child, &status, 0);
+		check(child > 0 && WIFEXITED(status) && WEXITSTATUS(status) == 0, "a change offers the PIN (the child)");
+	}
+
+	/* The exchange from here on. */
 	if (self != NULL)
 		test_exchange(self->pw_name);
 
@@ -425,4 +448,54 @@ test_exchange(
 	sessiond_exchange_stop(&exchange);
 	close(pair[0]);
 	close(pair[1]);
+}
+
+/*
+ * A session that started without the password (an automatic login): no
+ * PIN until a change by the password, which proves it (BUG-285).
+ */
+static void
+test_change_offers_pin(
+	const char *name)
+{
+	struct sessiond_exchange exchange;
+	struct sessiond_account owner;
+	struct passwd *found;
+	char line[SESSIOND_LINE_MAX];
+	int pair[2];
+	int got;
+	int error;
+
+	/* The session's end and sessiond's. */
+	error = socketpair(AF_UNIX, SOCK_STREAM, 0, pair);
+	if (error != 0) {
+		check(0, "socketpair (change)");
+		return;
+	}
+
+	/* The session's own user. */
+	memset(&owner, 0, sizeof(owner));
+	found = NULL;
+	(void)getpwnam_r(name, &owner.passwd, owner.buffer, sizeof(owner.buffer), &found);
+	sessiond_exchange_init(&exchange, pair[0], &owner, NULL);
+
+	/* No PIN yet. */
+	send_line(&exchange, "STYLES");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "STYLES password") == 0, "no PIN before the password (change)");
+
+	/* The PIN set with the password. */
+	send_line(&exchange, "ENROLL pin");
+	send_line(&exchange, "right");
+	send_line(&exchange, "654321");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "OK") == 0, "enroll pin (change)");
+
+	/* Offered from now on. */
+	send_line(&exchange, "STYLES");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "STYLES password pin") == 0, "the PIN offered after a change by the password");
+	sessiond_exchange_stop(&exchange);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
 }

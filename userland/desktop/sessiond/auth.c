@@ -844,12 +844,18 @@ auth_granted(
 	int error;
 	int match;
 
-	/* The counts start again; a change proves the password, but does not offer the PIN. */
+	/*
+	 * The counts start again.  A change (a PIN or a key set or removed) is
+	 * checked by the account's password, so it proves the password as a
+	 * login does and offers the PIN from now on (BUG-285: a PIN set in a
+	 * session that started without the password, an automatic login, was
+	 * never offered on the lock screen).
+	 */
 	style = auth_styles[exchange->style];
 	if (exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) {
 		sessiond_policy_success(exchange->count, exchange->style);
 	} else {
-		sessiond_policy_success(exchange->count, SESSIOND_STYLE_PIN);
+		sessiond_policy_success(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
 
 	/* A greeter's login: the account sessiond starts the session for. */
