@@ -44,7 +44,7 @@ HID の経路は p002〜p005、利用者に見える形は p006。
 | [ws143-p005](phase005/phase.md) | usb-hid の glue の共有の module への refactor と USB の回帰、`/dev/input/bridge`（D3）、hid-report.c の fuzz、SDP・GATT client、HID host（BR/EDR と HOGP）、再接続、切断で key を離す | in-progress（i01a T1-419 PASS、i01b T1-421 FAIL → T1-426 input-bridge-p005 PASS・T1-432 の順序依存の直し PASS、i01c T1-423 boot PASS（i2c-hid の touchpad の実機の回帰は 5330）。i02（BR/EDR の HID host）・i03（LE の HOGP）は q904 P1 が実装、T1 待ち（bt-hid-p005、T1-463 は直して再試験待ち）。i04（5330 の実機の門、Q20 で p006 の前の必須）も未） | | p004（i02 は p004 の cleared） |
 | ws143-p006 | desktop: backend の口、zedBSD の backend、API と protocol の版、Settings の頁、system bar、pairing の確認の窓 | test-wait（q896 P1 実装、T1-438 一部 PASS（差 2 点）、直しの再試験 T1-446 は未実行） | | p005 |
 | ws143-p007 | Linux の backend（D-Bus の拡張、BlueZ）、FreeBSD の未対応の表示 | planned（Linux・FreeBSD は 10/13 以降、2026-10-08 ユーザー） | | p006 |
-| ws143-p008 | UAT（5330 の素の機械、D18。ユーザーの BR/EDR と LE のキーボード・マウス）、Wi-Fi との共存 | planned（5330 とユーザーの BR/EDR・LE の機器） | | p006、device の機種 |
+| [ws143-p008](phase008/phase.md) | UAT（5330 の素の機械、D18。ユーザーの BR/EDR と LE のキーボード・マウス）、Wi-Fi との共存 | planned（手順と確認の項目 B1〜B14 は 2026-10-09 夜 P1。5330 とユーザーの BR/EDR・LE の機器、T1-502 の後） | | p006、device の機種 |
 | ws143-p009 | 規約の全文との照合と回帰 | planned（全文規約はベータ3、2026-10-08 ユーザー） | | p002〜p008 |
 
 ## UAT（2026-10-08 夕、5330）
