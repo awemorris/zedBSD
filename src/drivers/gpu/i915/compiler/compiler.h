@@ -6,7 +6,7 @@
  */
 
 /*
- * The shader compiler: SPIR-V to scalar IR, and scalar IR to Gen12 EU code.
+ * The Gen12 backend: common scalar shader IR to Intel EU code.
  *
  * The compiler touches no device.  It returns the encoded instruction words
  * together with what a draw has to program around them; placing the words in
@@ -17,7 +17,7 @@
 #ifndef DRIVERS_GPU_I915_COMPILER_COMPILER_H
 #define DRIVERS_GPU_I915_COMPILER_COMPILER_H
 
-#include "ir.h"
+#include "../../compiler/spirv.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -32,14 +32,6 @@
 #define I915_SHADER_MAX_INPUTS		16U
 
 /*
- * The input locations a vertex kernel reads gl_VertexIndex and
- * gl_InstanceIndex at: past every attribute location, so they come last in
- * the payload order; the draw fills them from the vertex fetcher's
- * generated values (3DSTATE_VF_SGVS) instead of a vertex buffer.
- */
-#define I915_SHADER_LOCATION_VERTEX_INDEX	64U
-
-/*
  * The colour locations a fragment shader may write, one render target each,
  * and the binding table entry of render target n: entry 0 for the first
  * (the textures follow it at 1 + m), 16 + n past the sixteen textures for
@@ -47,30 +39,6 @@
  */
 #define I915_SHADER_MAX_COLOR_OUTPUTS		4U
 #define I915_SHADER_RT_BTI(n)			((uint32_t)(n) + 16U * (uint32_t)((n) != 0U))
-#define I915_SHADER_LOCATION_INSTANCE_INDEX	65U
-
-/*
- * The input location a fragment kernel reads gl_FrontFacing at: not an
- * interpolated input, but the thread payload's back-facing bit.
- */
-#define I915_SHADER_LOCATION_FRONT_FACING	66U
-
-/*
- * The input locations a fragment kernel reads gl_FragCoord and gl_PointCoord
- * at: gl_FragCoord is the thread payload's pixel position (and the source
- * depth and w), not an input of its own; gl_PointCoord is an input the setup
- * makes from the point sprite, not from a varying.
- */
-#define I915_SHADER_LOCATION_FRAG_COORD		67U
-#define I915_SHADER_LOCATION_POINT_COORD	68U
-
-/*
- * The location gl_PrimitiveID travels at (ws075-p007a): a geometry shader's
- * output written to it is a varying like a located one, and a fragment
- * shader reads its gl_PrimitiveID there as a Flat input.  It comes after
- * every user location, so it is the last varying of a VUE.
- */
-#define I915_SHADER_LOCATION_PRIMITIVE_ID	69U
 
 /*
  * Compute: the registers of per-thread push data after the cross-thread
@@ -78,22 +46,6 @@
  * of the thread's eight channels, a dword each (ws101-p002).
  */
 #define I915_SHADER_PER_THREAD_REGS	4U
-
-/* Compute: the most invocations one workgroup may have (the device reports it as maxComputeWorkGroupInvocations). */
-#define I915_SHADER_MAX_GROUP_INVOCATIONS	128U
-
-/*
- * Why a SPIR-V module was refused.
- *
- * `reason` is a static string; `opcode` and `word_offset` name the refused
- * instruction.  The parser fills it only on a refusal and clears it
- * otherwise.
- */
-struct i915_compile_diagnostic {
-	uint32_t opcode;
-	uint32_t word_offset;
-	const char *reason;
-};
 
 /*
  * One uniform block a kernel reads, delivered with its push constants.
@@ -126,7 +78,7 @@ struct i915_shader_binary {
 	uint32_t *code;
 	uint32_t code_bytes;
 	uint32_t entry_offset;
-	enum i915_shader_stage stage;
+	enum drv_gpu_shader_stage stage;
 	uint32_t grf_used;
 	uint32_t simd;
 	uint32_t thread_count;
@@ -216,7 +168,7 @@ struct i915_shader_binary {
 	 * registers of its own: the x, y and z of each channel's invocation in
 	 * the group and its linear index, one register each
 	 * (I915_SHADER_PER_THREAD_REGS).  A block whose set is
-	 * I915_IR_SYSTEM_SET takes the address of the three group counts.
+	 * DRV_GPU_IR_SYSTEM_SET takes the address of the three group counts.
 	 * Zero for another stage.
 	 */
 	uint32_t local_size[3];
@@ -234,7 +186,7 @@ struct i915_shader_binary {
 	/*
 	 * Geometry (ws075-p007a): what the draw programs in 3DSTATE_GS and the
 	 * URB -- the vertices of one input primitive, the primitive emitted
-	 * (3D_Prim_Topo_Type, I915_IR_OUTPUT_*), one output vertex and the
+	 * (3D_Prim_Topo_Type, DRV_GPU_IR_OUTPUT_*), one output vertex and the
 	 * control data header in 32-byte units, the header's format (0 cut
 	 * bits, 1 stream IDs), and the output URB entry in 64-byte units; and
 	 * nonzero when the kernel reads the input primitive's number (Include
@@ -251,10 +203,8 @@ struct i915_shader_binary {
 	uint32_t writes_layer;
 };
 
-int drv_i915_shader_parse(const uint32_t *words, size_t word_count, enum i915_shader_stage stage, struct i915_shader_ir **out, struct i915_compile_diagnostic *diagnostic);
-void drv_i915_shader_ir_free(struct i915_shader_ir *ir);
-int drv_i915_shader_compile(const struct i915_shader_ir *ir, struct i915_shader_binary **out);
-int drv_i915_shader_compile_stage(const struct i915_shader_ir *ir, const struct i915_shader_binary *producer, struct i915_shader_binary **out);
+int drv_i915_shader_compile(const struct drv_gpu_shader_ir *ir, struct i915_shader_binary **out);
+int drv_i915_shader_compile_stage(const struct drv_gpu_shader_ir *ir, const struct i915_shader_binary *producer, struct i915_shader_binary **out);
 void drv_i915_shader_binary_free(struct i915_shader_binary *binary);
 
 #endif /* DRIVERS_GPU_I915_COMPILER_COMPILER_H */

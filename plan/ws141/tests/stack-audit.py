@@ -92,10 +92,10 @@ for n in f:
  f[n]['direct']=[c for c in f[n]['direct'] if c!='hal_fatal']
 # Workgroup layout is unreachable after graphics model/storage preflight.
 for n in f:
- f[n]['direct']=[c for c in f[n]['direct'] if c not in ['i915_spirv_declare_shared','i915_spirv_shared_bytes','i915_spirv_shared_access']]
+ f[n]['direct']=[c for c in f[n]['direct'] if c not in ['drv_gpu_spirv_declare_shared','drv_gpu_spirv_shared_bytes','drv_gpu_spirv_shared_access']]
 # Finite active frames justified by source, not arbitrary loop cutoffs.
 # Object count includes one null-edge leaf after the eight-owner typed DAG.
-limits={'execute_stream':5,'i915_spirv_operand_wide':9,'i915_spirv_type_size':10,'i915_spirv_io_map':10,'i915_spirv_type_has_int16':10,'i915_spirv_minor_determinant':4,'bcm2711_vulkan_object_release':9,'signal_send_process_info':2}
+limits={'execute_stream':5,'drv_gpu_spirv_operand_wide':9,'drv_gpu_spirv_type_size':10,'drv_gpu_spirv_io_map':10,'drv_gpu_spirv_type_has_int16':10,'drv_gpu_spirv_minor_determinant':4,'bcm2711_vulkan_object_release':9,'signal_send_process_info':2}
 keys=tuple(limits)
 active=set()
 @lru_cache(None)
@@ -133,7 +133,7 @@ while todo:
  name=todo.pop()
  if name in seen:continue
  seen.add(name);todo+=f[name]['direct']
-switches={'bcm2711_shader_append','compile_program','i915_spirv_lower_atomic','i915_spirv_lower_compare','i915_spirv_lower_extended','i915_spirv_pass_body','i915_spirv_pass_declarations','signal_fields','walk_records'}
+switches={'bcm2711_shader_append','compile_program','drv_gpu_spirv_lower_atomic','drv_gpu_spirv_lower_compare','drv_gpu_spirv_lower_extended','drv_gpu_spirv_pass_body','drv_gpu_spirv_pass_declarations','signal_fields','walk_records'}
 callbacks=set(bindings)|{'bcm2711_vulkan_dispatch','execute_stream','worker_main'}
 absent_observers={'kern_malloc','kern_free'}
 unknown={n:f[n]['indirect'] for n in seen if f[n]['indirect'] and n not in switches|callbacks|absent_observers}

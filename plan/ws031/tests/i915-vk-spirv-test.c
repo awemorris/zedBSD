@@ -36,7 +36,7 @@ kern_free(void *pointer)
 	free(pointer);
 }
 
-#include "../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../src/drivers/gpu/compiler/spirv.c"
 
 /* Loads a SPIR-V file into a word buffer the caller frees. */
 static uint32_t *
@@ -88,7 +88,7 @@ load_compiler_spv(const char *name, size_t *words)
 
 /* Counts IR instructions of one opcode. */
 static unsigned
-count_op(const struct i915_shader_ir *ir, enum i915_shader_ir_op op)
+count_op(const struct drv_gpu_shader_ir *ir, enum drv_gpu_shader_ir_op op)
 {
 	unsigned found;
 	unsigned index;
@@ -112,35 +112,35 @@ test_vertex(void)
 {
 	uint32_t *code;
 	size_t words;
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	int error;
 
 	code = load_spv("cuboid.vert.spv", &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_VERTEX, &ir, &diag);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_VERTEX, &ir, &diag);
 	if (error != 0)
 		printf("  vkdemo VS refused: opcode %u at word %u: %s\n", diag.opcode, diag.word_offset, diag.reason);
 	assert(error == 0 && ir != NULL);
-	assert(ir->stage == I915_STAGE_VERTEX);
+	assert(ir->stage == DRV_GPU_STAGE_VERTEX);
 	assert(ir->input_count == 2U && ir->output_count == 1U && ir->uniform_count == 0U);
 	assert(ir->inputs[0].location == 0U && ir->inputs[0].components == 3U);
 	assert(ir->inputs[1].location == 1U && ir->inputs[1].components == 2U);
 	assert(ir->outputs[0].location == 0U && ir->outputs[0].components == 2U);
 	assert(ir->push_bytes == 4U);                                   /* one float: animation.seconds */
-	assert(count_op(ir, I915_IR_SIN) == 2U && count_op(ir, I915_IR_COS) == 2U);
-	assert(count_op(ir, I915_IR_FNEG) == 1U);                    /* -sy; the -1.6 is a constant */
-	assert(count_op(ir, I915_IR_LOAD_PUSH) == 2U);               /* seconds is read twice */
-	assert(count_op(ir, I915_IR_STORE_OUTPUT) == 6U);            /* gl_Position 4 + texture_coordinate 2 */
-	drv_i915_shader_ir_free(ir);
+	assert(count_op(ir, DRV_GPU_IR_SIN) == 2U && count_op(ir, DRV_GPU_IR_COS) == 2U);
+	assert(count_op(ir, DRV_GPU_IR_FNEG) == 1U);                    /* -sy; the -1.6 is a constant */
+	assert(count_op(ir, DRV_GPU_IR_LOAD_PUSH) == 2U);               /* seconds is read twice */
+	assert(count_op(ir, DRV_GPU_IR_STORE_OUTPUT) == 6U);            /* gl_Position 4 + texture_coordinate 2 */
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 }
 
 /* a minimal module: header, OpFunction, one body instruction, OpFunctionEnd */
 static int
-parse_body_instruction(const uint32_t *inst, unsigned inst_words, struct i915_compile_diagnostic *diag)
+parse_body_instruction(const uint32_t *inst, unsigned inst_words, struct drv_gpu_compile_diagnostic *diag)
 {
 	uint32_t module[32];
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	unsigned n = 0U, i;
 	int error;
 
@@ -151,9 +151,9 @@ parse_body_instruction(const uint32_t *inst, unsigned inst_words, struct i915_co
 		module[n++] = inst[i];
 	module[n++] = (1U << 16) | 253U;                                                                          /* OpReturn */
 	module[n++] = (1U << 16) | 56U;                                                                           /* OpFunctionEnd */
-	error = drv_i915_shader_parse(module, n, I915_STAGE_VERTEX, &ir, diag);
+	error = drv_gpu_shader_parse(module, n, DRV_GPU_STAGE_VERTEX, &ir, diag);
 	if (error == 0)
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 	else
 		assert(ir == NULL);
 	return error;
@@ -162,7 +162,7 @@ parse_body_instruction(const uint32_t *inst, unsigned inst_words, struct i915_co
 static void
 test_body_classification(void)
 {
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 	/* OpLine (debug): file id 5, line 1, column 1 -- no execution semantics */
 	static const uint32_t op_line[4] = { (4U << 16) | 8U, 5U, 1U, 1U };
 	/* OpFNegate %6 = -%7, where %7 is not a float value (nothing defines it): refused, not skipped */
@@ -189,17 +189,17 @@ test_body_classification(void)
 }
 
 /* Parses a geometry fixture, which must parse; the caller frees the IR. */
-static struct i915_shader_ir *
+static struct drv_gpu_shader_ir *
 parse_geometry(const char *name)
 {
-	struct i915_compile_diagnostic diag;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
 	uint32_t *code;
 	size_t words;
 	int error;
 
 	code = load_compiler_spv(name, &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_VERTEX, &ir, &diag);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_VERTEX, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused: opcode %u at word %u: %s\n", name, diag.opcode, diag.word_offset, diag.reason);
 	assert(error == 0 && ir != NULL);
@@ -209,14 +209,14 @@ parse_geometry(const char *name)
 
 /* Checks that every EMIT_VERTEX and END_PRIMITIVE is predicated (inside a loop) or not (straight code). */
 static void
-check_emits(const struct i915_shader_ir *ir, uint32_t predicated)
+check_emits(const struct drv_gpu_shader_ir *ir, uint32_t predicated)
 {
 	unsigned index;
-	const struct i915_shader_ir_inst *inst;
+	const struct drv_gpu_shader_ir_inst *inst;
 
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op != I915_IR_EMIT_VERTEX && inst->op != I915_IR_END_PRIMITIVE)
+		if (inst->op != DRV_GPU_IR_EMIT_VERTEX && inst->op != DRV_GPU_IR_END_PRIMITIVE)
 			continue;
 		assert(inst->component == predicated);
 		if (predicated != 0U)
@@ -231,69 +231,69 @@ check_emits(const struct i915_shader_ir *ir, uint32_t predicated)
 static void
 test_geometry_points(void)
 {
-	struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	unsigned index;
 	unsigned loads;
 
 	ir = parse_geometry("points.geom.spv");
-	assert(ir->stage == I915_STAGE_GEOMETRY);
+	assert(ir->stage == DRV_GPU_STAGE_GEOMETRY);
 	assert(ir->vertices_in == 1U);
-	assert(ir->output_topology == I915_IR_OUTPUT_TRIANGLE_STRIP);
+	assert(ir->output_topology == DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP);
 	assert(ir->max_vertices == 4U);
 	assert(ir->uses_end_primitive == 1U);
 	assert(ir->uses_primitive_id == 0U && ir->writes_layer == 0U);
 	assert(ir->input_count == 0U);
 	assert(ir->output_count == 1U && ir->outputs[0].location == 0U);
-	assert(count_op(ir, I915_IR_EMIT_VERTEX) == 4U);
-	assert(count_op(ir, I915_IR_END_PRIMITIVE) == 1U);
+	assert(count_op(ir, DRV_GPU_IR_EMIT_VERTEX) == 4U);
+	assert(count_op(ir, DRV_GPU_IR_END_PRIMITIVE) == 1U);
 	check_emits(ir, 0U);
 
 	/* The centre is the four components of vertex 0's position. */
 	loads = 0U;
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
-		assert(inst->location == I915_IR_LOCATION_POSITION);
+		assert(inst->location == DRV_GPU_IR_LOCATION_POSITION);
 		assert(inst->immediate == 0U);
 		assert(inst->component == loads);
 		loads++;
 	}
 	assert(loads == 4U);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 }
 
 /* glxtest's lines-with-adjacency shader: four input vertices, gl_in[3].gl_Position.x read, a store under a selection. */
 static void
 test_geometry_adjacency(void)
 {
-	struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	unsigned index;
 	unsigned loads;
 
 	ir = parse_geometry("adjacency.geom.spv");
 	assert(ir->vertices_in == 4U);
-	assert(ir->output_topology == I915_IR_OUTPUT_TRIANGLE_STRIP);
+	assert(ir->output_topology == DRV_GPU_IR_OUTPUT_TRIANGLE_STRIP);
 	assert(ir->max_vertices == 4U);
-	assert(count_op(ir, I915_IR_EMIT_VERTEX) == 4U);
-	assert(count_op(ir, I915_IR_END_PRIMITIVE) == 1U);
-	assert(count_op(ir, I915_IR_SELECT) >= 1U);
+	assert(count_op(ir, DRV_GPU_IR_EMIT_VERTEX) == 4U);
+	assert(count_op(ir, DRV_GPU_IR_END_PRIMITIVE) == 1U);
+	assert(count_op(ir, DRV_GPU_IR_SELECT) >= 1U);
 	check_emits(ir, 0U);
 
 	/* Only the fourth vertex's x is read. */
 	loads = 0U;
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
-		assert(inst->location == I915_IR_LOCATION_POSITION);
+		assert(inst->location == DRV_GPU_IR_LOCATION_POSITION);
 		assert(inst->immediate == 3U && inst->component == 0U);
 		loads++;
 	}
 	assert(loads == 1U);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 }
 
 /*
@@ -303,8 +303,8 @@ test_geometry_adjacency(void)
 static void
 test_geometry_layers(void)
 {
-	struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	unsigned index;
 	unsigned loads;
 	unsigned layers;
@@ -314,9 +314,9 @@ test_geometry_layers(void)
 	assert(ir->max_vertices == 6U);
 	assert(ir->writes_layer == 1U);
 	assert(ir->uses_end_primitive == 1U);
-	assert(count_op(ir, I915_IR_LOOP_BEGIN) == 2U);
-	assert(count_op(ir, I915_IR_EMIT_VERTEX) == 1U);
-	assert(count_op(ir, I915_IR_END_PRIMITIVE) == 1U);
+	assert(count_op(ir, DRV_GPU_IR_LOOP_BEGIN) == 2U);
+	assert(count_op(ir, DRV_GPU_IR_EMIT_VERTEX) == 1U);
+	assert(count_op(ir, DRV_GPU_IR_END_PRIMITIVE) == 1U);
 	check_emits(ir, 1U);
 
 	/* The position comes from the vertex i names; the layer is written to the VUE header's place. */
@@ -324,20 +324,20 @@ test_geometry_layers(void)
 	layers = 0U;
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op == I915_IR_STORE_OUTPUT && inst->location == I915_IR_LOCATION_LAYER) {
+		if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location == DRV_GPU_IR_LOCATION_LAYER) {
 			assert(inst->component == 0U);
 			layers++;
 		}
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
-		assert(inst->location == I915_IR_LOCATION_POSITION);
-		assert(inst->immediate == I915_IR_VERTEX_DYNAMIC);
+		assert(inst->location == DRV_GPU_IR_LOCATION_POSITION);
+		assert(inst->immediate == DRV_GPU_IR_VERTEX_DYNAMIC);
 		assert(inst->src[0] < ir->value_count);
 		loads++;
 	}
 	assert(loads == 4U);
 	assert(layers == 1U);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 }
 
 /*
@@ -347,8 +347,8 @@ test_geometry_layers(void)
 static void
 test_geometry_varyings(void)
 {
-	struct i915_shader_ir *ir;
-	const struct i915_shader_ir_inst *inst;
+	struct drv_gpu_shader_ir *ir;
+	const struct drv_gpu_shader_ir_inst *inst;
 	unsigned index;
 	unsigned seen[3];
 	unsigned primitive_id_loads;
@@ -370,16 +370,16 @@ test_geometry_varyings(void)
 	primitive_id_stores = 0U;
 	for (index = 0U; index < ir->instruction_count; index++) {
 		inst = &ir->instructions[index];
-		if (inst->op == I915_IR_LOAD_SYSTEM) {
-			assert(inst->component == I915_IR_SYSTEM_PRIMITIVE_ID);
+		if (inst->op == DRV_GPU_IR_LOAD_SYSTEM) {
+			assert(inst->component == DRV_GPU_IR_SYSTEM_PRIMITIVE_ID);
 			primitive_id_loads++;
 		}
-		if (inst->op == I915_IR_STORE_OUTPUT && inst->location == I915_SHADER_LOCATION_PRIMITIVE_ID)
+		if (inst->op == DRV_GPU_IR_STORE_OUTPUT && inst->location == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID)
 			primitive_id_stores++;
-		if (inst->op != I915_IR_LOAD_VERTEX_INPUT)
+		if (inst->op != DRV_GPU_IR_LOAD_VERTEX_INPUT)
 			continue;
-		assert(inst->immediate == I915_IR_VERTEX_DYNAMIC);
-		if (inst->location == I915_IR_LOCATION_POSITION)
+		assert(inst->immediate == DRV_GPU_IR_VERTEX_DYNAMIC);
+		if (inst->location == DRV_GPU_IR_LOCATION_POSITION)
 			continue;
 		assert(inst->location <= 2U);
 		seen[inst->location]++;
@@ -387,21 +387,21 @@ test_geometry_varyings(void)
 	assert(seen[0] == 3U && seen[1] == 2U && seen[2] == 1U);
 	assert(primitive_id_loads >= 1U);
 	assert(primitive_id_stores == 1U);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 }
 
 /* Parses a fixture the parser must refuse, and checks the reason names what is refused. */
 static void
 check_geometry_refused(const char *name, const char *reason)
 {
-	struct i915_compile_diagnostic diag;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
 	uint32_t *code;
 	size_t words;
 	int error;
 
 	code = load_compiler_spv(name, &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_VERTEX, &ir, &diag);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_VERTEX, &ir, &diag);
 	assert(error == ENOTSUP);
 	assert(ir == NULL);
 	assert(diag.reason != NULL);
@@ -415,7 +415,7 @@ check_geometry_refused(const char *name, const char *reason)
 static void
 test_geometry_refused(void)
 {
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_compile_diagnostic diag;
 	/* OpEmitVertex in a vertex shader */
 	static const uint32_t op_emit[1] = { (1U << 16) | 218U };
 
@@ -431,19 +431,19 @@ test_geometry_refused(void)
 static void
 test_fragment_primitive_id(void)
 {
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	uint32_t *code;
 	size_t words;
 	int error;
 
 	code = load_compiler_spv("primitive-id.frag.spv", &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_FRAGMENT, &ir, NULL);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_FRAGMENT, &ir, NULL);
 	assert(error == 0);
 	assert(ir->input_count == 1U);
-	assert(ir->inputs[0].location == I915_SHADER_LOCATION_PRIMITIVE_ID);
+	assert(ir->inputs[0].location == DRV_GPU_SHADER_LOCATION_PRIMITIVE_ID);
 	assert(ir->inputs[0].flat == 1U);
-	assert(count_op(ir, I915_IR_LOAD_INPUT) == 1U);
-	drv_i915_shader_ir_free(ir);
+	assert(count_op(ir, DRV_GPU_IR_LOAD_INPUT) == 1U);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 }
 
@@ -452,24 +452,24 @@ test_fragment(void)
 {
 	uint32_t *code;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	int error;
 
 	code = load_spv("cuboid.frag.spv", &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_FRAGMENT, &ir, NULL);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_FRAGMENT, &ir, NULL);
 	assert(error == 0);
 
 	/* The fragment shader samples one texture at an interpolated coordinate. */
-	assert(ir->stage == I915_STAGE_FRAGMENT);
+	assert(ir->stage == DRV_GPU_STAGE_FRAGMENT);
 	assert(ir->input_count == 1U);
 	assert(ir->inputs[0].location == 0U && ir->inputs[0].components == 2U);
 	assert(ir->output_count == 1U);
 	assert(ir->outputs[0].location == 0U && ir->outputs[0].components == 4U);
 	assert(ir->uniform_count == 1U);
 	assert(ir->uniforms[0].set == 0U && ir->uniforms[0].binding == 0U);
-	assert(count_op(ir, I915_IR_SAMPLE) >= 1U);
+	assert(count_op(ir, DRV_GPU_IR_SAMPLE) >= 1U);
 
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 }
 
@@ -479,19 +479,32 @@ test_rejects_garbage(void)
 	uint32_t bad[8];
 	uint32_t *code;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
 	int error;
+
+	/* A missing stream, output slot or unrepresentable count cannot publish parser state. */
+	memset(&diagnostic, 0x5a, sizeof(diagnostic));
+	error = drv_gpu_shader_parse(NULL, 8U, DRV_GPU_STAGE_VERTEX, &ir, &diagnostic);
+	assert(error == EINVAL && ir == NULL);
+	assert(diagnostic.opcode == 0U && diagnostic.reason == NULL);
+	error = drv_gpu_shader_parse(bad, 8U, DRV_GPU_STAGE_VERTEX, NULL, &diagnostic);
+	assert(error == EINVAL && diagnostic.reason == NULL);
+	error = drv_gpu_shader_parse(bad, (size_t)UINT32_MAX + 1U, DRV_GPU_STAGE_VERTEX, &ir, &diagnostic);
+	assert(error == EINVAL && ir == NULL);
+	error = drv_gpu_shader_parse(bad, 8U, (enum drv_gpu_shader_stage)-1, &ir, &diagnostic);
+	assert(error == EINVAL && ir == NULL);
 
 	/* A wrong magic is rejected without allocating an IR. */
 	memset(bad, 0, sizeof(bad));
 	bad[0] = 0x12345678U;
-	error = drv_i915_shader_parse(bad, 8U, I915_STAGE_VERTEX, &ir, NULL);
+	error = drv_gpu_shader_parse(bad, 8U, DRV_GPU_STAGE_VERTEX, &ir, NULL);
 	assert(error != 0);
 	assert(ir == NULL);
 
-	/* A valid module expected as a stage past I915_STAGE_COUNT is refused as inconsistent (ws075-p007a a4). */
+	/* A valid module expected as a stage past DRV_GPU_STAGE_COUNT is refused as inconsistent (ws075-p007a a4). */
 	code = load_spv("cuboid.frag.spv", &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_COUNT, &ir, NULL);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_COUNT, &ir, NULL);
 	assert(error == EINVAL);
 	assert(ir == NULL);
 	free(code);

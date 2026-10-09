@@ -16,7 +16,7 @@
 #include "broadcom/common/v3d_device_info.h"
 #include "broadcom/qpu/qpu_instr.h"
 #include "drivers/gpu/bcm2711/shader.h"
-#include "drivers/gpu/i915/compiler/compiler.h"
+#include "drivers/gpu/compiler/spirv.h"
 #include <uapi/errno.h>
 #include "userland/desktop/wayland/shaders.h"
 
@@ -57,16 +57,16 @@ static uint32_t float_bits(float number);
 static float bits_float(uint32_t bits);
 static uint32_t truth(int condition);
 static uint32_t sample_component(uint32_t s, uint32_t t, uint32_t component);
-static void source_program(const struct i915_shader_ir *ir, struct shader_machine *machine);
+static void source_program(const struct drv_gpu_shader_ir *ir, struct shader_machine *machine);
 static uint32_t machine_uniform(const struct bcm2711_shader_binary *binary, struct shader_machine *machine);
 static uint32_t machine_source(const struct v3d_device_info *device, const struct v3d_qpu_instr *instruction, const struct shader_machine *machine, enum v3d_qpu_mux mux);
 static uint32_t machine_add(const struct v3d_qpu_instr *instruction, struct shader_machine *machine, uint32_t left, uint32_t right);
 static void machine_write(const struct bcm2711_shader_binary *binary, struct shader_machine *machine, uint32_t address, uint32_t magic, uint32_t bits);
 static void machine_program(const struct v3d_device_info *device, const struct bcm2711_shader_binary *binary, struct shader_machine *machine);
-static void pipeline_key(const struct i915_shader_ir *ir, struct bcm2711_shader_key *key);
+static void pipeline_key(const struct drv_gpu_shader_ir *ir, struct bcm2711_shader_key *key);
 static void initialize_machine(struct shader_machine *machine, uint32_t fragment, uint32_t trial);
 static void compare_number(uint32_t native, uint32_t expected);
-static void verify_program(const struct v3d_device_info *device, const uint32_t *words, size_t word_count, const struct i915_shader_ir *ir, enum bcm2711_shader_stage stage, struct bcm2711_shader_key *key);
+static void verify_program(const struct v3d_device_info *device, const uint32_t *words, size_t word_count, const struct drv_gpu_shader_ir *ir, enum bcm2711_shader_stage stage, struct bcm2711_shader_key *key);
 static void verify_allocation_refusal(const struct bcm2711_shader_key *key);
 static void verify_graphics_profile(const struct bcm2711_shader_key *key);
 
@@ -168,9 +168,9 @@ main(
 {
 	const uint32_t *modules[4] = {kwl_quad_vert, kwl_quad_frag, kwl_panel_vert, kwl_panel_frag};
 	const size_t bytes[4] = {sizeof(kwl_quad_vert), sizeof(kwl_quad_frag), sizeof(kwl_panel_vert), sizeof(kwl_panel_frag)};
-	struct i915_shader_ir *vertex;
-	struct i915_shader_ir *fragment;
-	struct i915_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *vertex;
+	struct drv_gpu_shader_ir *fragment;
+	struct drv_gpu_compile_diagnostic diagnostic;
 	struct bcm2711_shader_key key;
 	struct v3d_device_info device;
 	uint32_t pair;
@@ -185,9 +185,9 @@ main(
 
 	/* Both production shader pairs use their real immutable SPIR-V arrays. */
 	for (pair = 0; pair < 2; pair++) {
-		error = drv_i915_shader_parse(modules[pair * 2], bytes[pair * 2] / 4, I915_STAGE_VERTEX, &vertex, &diagnostic);
+		error = drv_gpu_shader_parse(modules[pair * 2], bytes[pair * 2] / 4, DRV_GPU_STAGE_VERTEX, &vertex, &diagnostic);
 		assert(error == 0);
-		error = drv_i915_shader_parse(modules[pair * 2 + 1], bytes[pair * 2 + 1] / 4, I915_STAGE_FRAGMENT, &fragment, &diagnostic);
+		error = drv_gpu_shader_parse(modules[pair * 2 + 1], bytes[pair * 2 + 1] / 4, DRV_GPU_STAGE_FRAGMENT, &fragment, &diagnostic);
 		assert(error == 0);
 		pipeline_key(fragment, &key);
 
@@ -210,8 +210,8 @@ main(
 		}
 
 		/* Parser ownership retires only after all native variants have been checked. */
-		drv_i915_shader_ir_free(vertex);
-		drv_i915_shader_ir_free(fragment);
+		drv_gpu_shader_ir_free(vertex);
+		drv_gpu_shader_ir_free(fragment);
 	}
 
 	/* All compiler and parser objects must retire after the final completed program owner releases them. */
@@ -290,10 +290,10 @@ sample_component(
 /* Independently interprets the shared parser's source scalar semantics before native register allocation. */
 static void
 source_program(
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	struct shader_machine *machine)
 {
-	const struct i915_shader_ir_inst *instruction;
+	const struct drv_gpu_shader_ir_inst *instruction;
 	uint32_t *values;
 	uint32_t index;
 	uint32_t component;
@@ -318,65 +318,65 @@ source_program(
 
 		/* Pure if-conversion markers preserve all arithmetic; final source selection decides visible output. */
 		switch (instruction->op) {
-		case I915_IR_NOP:
-		case I915_IR_SKIP_BEGIN:
-		case I915_IR_SKIP_END:
+		case DRV_GPU_IR_NOP:
+		case DRV_GPU_IR_SKIP_BEGIN:
+		case DRV_GPU_IR_SKIP_END:
 			continue;
-		case I915_IR_CONST:
+		case DRV_GPU_IR_CONST:
 			bits = instruction->immediate;
 			break;
-		case I915_IR_LOAD_INPUT:
+		case DRV_GPU_IR_LOAD_INPUT:
 			bits = machine->input[instruction->location * 2 + instruction->component];
 			break;
-		case I915_IR_LOAD_PUSH:
+		case DRV_GPU_IR_LOAD_PUSH:
 			bits = machine->push[instruction->immediate / 4];
 			break;
-		case I915_IR_STORE_OUTPUT:
+		case DRV_GPU_IR_STORE_OUTPUT:
 			component = instruction->location * 4 + instruction->component;
-			if (instruction->location == I915_IR_LOCATION_POSITION)
+			if (instruction->location == DRV_GPU_IR_LOCATION_POSITION)
 				component = 64 + instruction->component;
 			assert(component < 68);
 			machine->output[component] = left;
 			continue;
-		case I915_IR_SAMPLE:
+		case DRV_GPU_IR_SAMPLE:
 			for (component = 0; component < 4; component++)
 				values[instruction->dst + component] = sample_component(left, right, component);
 			machine->lookups++;
 			continue;
-		case I915_IR_FADD:
+		case DRV_GPU_IR_FADD:
 			bits = float_bits(a + b);
 			break;
-		case I915_IR_FSUB:
+		case DRV_GPU_IR_FSUB:
 			bits = float_bits(a - b);
 			break;
-		case I915_IR_FMUL:
+		case DRV_GPU_IR_FMUL:
 			bits = float_bits(a * b);
 			break;
-		case I915_IR_RCP:
+		case DRV_GPU_IR_RCP:
 			bits = float_bits(1.0f / a);
 			break;
-		case I915_IR_SQRT:
+		case DRV_GPU_IR_SQRT:
 			bits = float_bits(sqrtf(a));
 			break;
-		case I915_IR_FABS:
+		case DRV_GPU_IR_FABS:
 			bits = left & 0x7fffffffU;
 			break;
-		case I915_IR_FMIN:
+		case DRV_GPU_IR_FMIN:
 			bits = float_bits(fminf(a, b));
 			break;
-		case I915_IR_FMAX:
+		case DRV_GPU_IR_FMAX:
 			bits = float_bits(fmaxf(a, b));
 			break;
-		case I915_IR_FLT:
+		case DRV_GPU_IR_FLT:
 			bits = truth(a < b);
 			break;
-		case I915_IR_AND:
+		case DRV_GPU_IR_AND:
 			bits = left & right;
 			break;
-		case I915_IR_NOT:
+		case DRV_GPU_IR_NOT:
 			bits = ~left;
 			break;
-		case I915_IR_SELECT:
+		case DRV_GPU_IR_SELECT:
 			bits = values[instruction->src[2]];
 			if (left != 0)
 				bits = right;
@@ -710,7 +710,7 @@ machine_program(
 /* Derives the canonical fragment scalar interface independently of frontend declaration order. */
 static void
 pipeline_key(
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	struct bcm2711_shader_key *key)
 {
 	struct bcm2711_shader_component *varying;
@@ -830,7 +830,7 @@ verify_program(
 	const struct v3d_device_info *device,
 	const uint32_t *words,
 	size_t word_count,
-	const struct i915_shader_ir *ir,
+	const struct drv_gpu_shader_ir *ir,
 	enum bcm2711_shader_stage stage,
 	struct bcm2711_shader_key *key)
 {
@@ -1096,8 +1096,8 @@ verify_allocation_refusal(
 	bcm2711_shader_binary_free(binary);
 	assert(allocations_live == baseline && attempts >= 5);
 
-	/* Compiler state and each final native allocation fail independently after earlier source-parser allocations succeeded. */
-	for (refusal = attempts - 4; refusal <= attempts; refusal++) {
+	/* Every frontend and native allocation fails independently without retaining partial ownership. */
+	for (refusal = 1; refusal <= attempts; refusal++) {
 		allocation_attempt = 0;
 		allocation_refusal = refusal;
 		binary = (void *)1;

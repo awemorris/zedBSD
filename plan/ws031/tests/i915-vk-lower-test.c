@@ -45,7 +45,7 @@ kern_free(void *pointer)
 	free(pointer);
 }
 
-#include "../../../src/drivers/gpu/i915/compiler/spirv.c"
+#include "../../../src/drivers/gpu/compiler/spirv.c"
 #include "../../../src/drivers/gpu/i915/compiler/eu.c"
 #include "../../../src/drivers/gpu/i915/compiler/compile.c"
 #include "../../../src/drivers/gpu/i915/tests/fixtures/generality-shaders-gen.inc"
@@ -121,7 +121,7 @@ boolean(int truth)
 static unsigned skip_regions_run, skip_regions_skipped;
 
 static void
-run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *skip_ok, int skipping, uint32_t poison)
+run_ir_mode(const struct drv_gpu_shader_ir *ir, struct machine *m, const uint32_t *skip_ok, int skipping, uint32_t poison)
 {
 	uint32_t *value = calloc(ir->value_count + 4U, sizeof(*value));
 	uint32_t *def_at = calloc(ir->value_count + 4U, sizeof(*def_at));
@@ -134,19 +134,19 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 	memset(m->written, 0, sizeof(m->written));
 	m->killed = 0;
 	for (index = 0U; index < ir->instruction_count; index++) {
-		const struct i915_shader_ir_inst *inst = &ir->instructions[index];
+		const struct drv_gpu_shader_ir_inst *inst = &ir->instructions[index];
 		unsigned sources = 0U, results = 1U, slot;
 		uint32_t a, b, c;
 		float fa, fb, rgba[4];
 
 		/* a skippable region the code generator skips, entered with the predicate false: jumped over, its values poisoned */
-		if (inst->op == I915_IR_SKIP_BEGIN) {
+		if (inst->op == DRV_GPU_IR_SKIP_BEGIN) {
 			assert(inst->src[0] < ir->value_count && defined[inst->src[0]] != 0U);
 			if (skipping && skip_ok[index] != 0U && value[inst->src[0]] == 0U) {
 				unsigned end = index + 1U;
 
 				/* every value made up to the region's end is poison */
-				while (ir->instructions[end].op != I915_IR_SKIP_END) {
+				while (ir->instructions[end].op != DRV_GPU_IR_SKIP_END) {
 					unsigned made = i915_compile_results(&ir->instructions[end]);
 
 					/* its results */
@@ -170,40 +170,40 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 		}
 
 		/* a region's end does nothing */
-		if (inst->op == I915_IR_SKIP_END)
+		if (inst->op == DRV_GPU_IR_SKIP_END)
 			continue;
 
 		switch (inst->op) {
-		case I915_IR_STORE_OUTPUT: sources = 1U; results = 0U; break;
-		case I915_IR_KILL: sources = 1U; results = 0U; break;
-		case I915_IR_LOOP_END: sources = 1U; results = 0U; break;
-		case I915_IR_LOOP_BEGIN: results = 0U; break;
-		case I915_IR_FNEG: case I915_IR_SIN: case I915_IR_COS: case I915_IR_RSQ:
-		case I915_IR_RCP: case I915_IR_SQRT: case I915_IR_EXP2: case I915_IR_LOG2:
-		case I915_IR_FABS: case I915_IR_FLOOR: case I915_IR_FRACT: case I915_IR_NOT:
-		case I915_IR_FTRUNC: case I915_IR_INEG: case I915_IR_INOT: case I915_IR_I2F: case I915_IR_U2F:
-		case I915_IR_F2I: case I915_IR_F2U: case I915_IR_MOVE: case I915_IR_FROUND_EVEN:
-		case I915_IR_UNPACK_HALF:
+		case DRV_GPU_IR_STORE_OUTPUT: sources = 1U; results = 0U; break;
+		case DRV_GPU_IR_KILL: sources = 1U; results = 0U; break;
+		case DRV_GPU_IR_LOOP_END: sources = 1U; results = 0U; break;
+		case DRV_GPU_IR_LOOP_BEGIN: results = 0U; break;
+		case DRV_GPU_IR_FNEG: case DRV_GPU_IR_SIN: case DRV_GPU_IR_COS: case DRV_GPU_IR_RSQ:
+		case DRV_GPU_IR_RCP: case DRV_GPU_IR_SQRT: case DRV_GPU_IR_EXP2: case DRV_GPU_IR_LOG2:
+		case DRV_GPU_IR_FABS: case DRV_GPU_IR_FLOOR: case DRV_GPU_IR_FRACT: case DRV_GPU_IR_NOT:
+		case DRV_GPU_IR_FTRUNC: case DRV_GPU_IR_INEG: case DRV_GPU_IR_INOT: case DRV_GPU_IR_I2F: case DRV_GPU_IR_U2F:
+		case DRV_GPU_IR_F2I: case DRV_GPU_IR_F2U: case DRV_GPU_IR_MOVE: case DRV_GPU_IR_FROUND_EVEN:
+		case DRV_GPU_IR_UNPACK_HALF:
 			sources = 1U; break;
-		case I915_IR_FADD: case I915_IR_FSUB: case I915_IR_FMUL: case I915_IR_FMIN: case I915_IR_FMAX:
-		case I915_IR_FLT: case I915_IR_FGE: case I915_IR_FEQ: case I915_IR_FNEU: case I915_IR_AND: case I915_IR_OR:
-		case I915_IR_IADD: case I915_IR_ISUB: case I915_IR_IMUL: case I915_IR_UDIV: case I915_IR_UMOD:
-		case I915_IR_IDIV: case I915_IR_IREM:
-		case I915_IR_IAND: case I915_IR_IOR: case I915_IR_IXOR: case I915_IR_SHL: case I915_IR_SHR: case I915_IR_ASR:
-		case I915_IR_ILT: case I915_IR_IGE: case I915_IR_ULT: case I915_IR_UGE: case I915_IR_IEQ: case I915_IR_INE:
-		case I915_IR_PACK_HALF:
+		case DRV_GPU_IR_FADD: case DRV_GPU_IR_FSUB: case DRV_GPU_IR_FMUL: case DRV_GPU_IR_FMIN: case DRV_GPU_IR_FMAX:
+		case DRV_GPU_IR_FLT: case DRV_GPU_IR_FGE: case DRV_GPU_IR_FEQ: case DRV_GPU_IR_FNEU: case DRV_GPU_IR_AND: case DRV_GPU_IR_OR:
+		case DRV_GPU_IR_IADD: case DRV_GPU_IR_ISUB: case DRV_GPU_IR_IMUL: case DRV_GPU_IR_UDIV: case DRV_GPU_IR_UMOD:
+		case DRV_GPU_IR_IDIV: case DRV_GPU_IR_IREM:
+		case DRV_GPU_IR_IAND: case DRV_GPU_IR_IOR: case DRV_GPU_IR_IXOR: case DRV_GPU_IR_SHL: case DRV_GPU_IR_SHR: case DRV_GPU_IR_ASR:
+		case DRV_GPU_IR_ILT: case DRV_GPU_IR_IGE: case DRV_GPU_IR_ULT: case DRV_GPU_IR_UGE: case DRV_GPU_IR_IEQ: case DRV_GPU_IR_INE:
+		case DRV_GPU_IR_PACK_HALF:
 			sources = 2U; break;
-		case I915_IR_SELECT: sources = 3U; break;
-		case I915_IR_SAMPLE: sources = 2U; results = 4U; break;
-		case I915_IR_TEXTURE:
+		case DRV_GPU_IR_SELECT: sources = 3U; break;
+		case DRV_GPU_IR_SAMPLE: sources = 2U; results = 4U; break;
+		case DRV_GPU_IR_TEXTURE:
 			/* a run of src[1] parameters from src[0], each defined before */
-			assert(inst->src[1] >= 1U && inst->src[1] <= I915_IR_TEXTURE_MAX_PARAMS);
+			assert(inst->src[1] >= 1U && inst->src[1] <= DRV_GPU_IR_TEXTURE_MAX_PARAMS);
 			for (k = 0U; k < inst->src[1]; k++)
 				assert(inst->src[0] + k < ir->value_count && defined[inst->src[0] + k] != 0U);
 			results = 4U;
 			break;
-		case I915_IR_CONST: case I915_IR_BOOL: case I915_IR_ICONST: case I915_IR_LOAD_INPUT: case I915_IR_LOAD_PUSH:
-		case I915_IR_LOAD_UBO:
+		case DRV_GPU_IR_CONST: case DRV_GPU_IR_BOOL: case DRV_GPU_IR_ICONST: case DRV_GPU_IR_LOAD_INPUT: case DRV_GPU_IR_LOAD_PUSH:
+		case DRV_GPU_IR_LOAD_UBO:
 			break;
 		default: assert(!"IR operation the interpreter does not know"); break;
 		}
@@ -212,7 +212,7 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 		for (k = 0U; k < results; k++) {
 			assert(inst->dst + k < ir->value_count);
 			/* defined once; again only by the same instruction (a loop's next pass) or by a MOVE */
-			assert(defined[inst->dst + k] == 0U || def_at[inst->dst + k] == index || inst->op == I915_IR_MOVE);
+			assert(defined[inst->dst + k] == 0U || def_at[inst->dst + k] == index || inst->op == DRV_GPU_IR_MOVE);
 			if (defined[inst->dst + k] == 0U)
 				def_at[inst->dst + k] = index;
 			defined[inst->dst + k] = 1U;
@@ -224,20 +224,20 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 		fb = fbits(b);
 
 		/* the logic operations, SELECT's condition, KILL and LOOP_END read Booleans only */
-		if (inst->op == I915_IR_AND || inst->op == I915_IR_OR)
+		if (inst->op == DRV_GPU_IR_AND || inst->op == DRV_GPU_IR_OR)
 			assert((a == 0U || a == 0xFFFFFFFFU) && (b == 0U || b == 0xFFFFFFFFU));
-		if (inst->op == I915_IR_NOT || inst->op == I915_IR_SELECT || inst->op == I915_IR_KILL ||
-		    inst->op == I915_IR_LOOP_END)
+		if (inst->op == DRV_GPU_IR_NOT || inst->op == DRV_GPU_IR_SELECT || inst->op == DRV_GPU_IR_KILL ||
+		    inst->op == DRV_GPU_IR_LOOP_END)
 			assert(a == 0U || a == 0xFFFFFFFFU);
-		if (inst->op == I915_IR_BOOL)
+		if (inst->op == DRV_GPU_IR_BOOL)
 			assert(inst->immediate == 0U || inst->immediate == 0xFFFFFFFFU);
 
 		switch (inst->op) {
-		case I915_IR_CONST: value[inst->dst] = inst->immediate; break;
-		case I915_IR_BOOL: value[inst->dst] = inst->immediate; break;
-		case I915_IR_ICONST: value[inst->dst] = inst->immediate; break;
-		case I915_IR_LOAD_INPUT:
-			if (inst->location == I915_SHADER_LOCATION_FRAG_COORD) {
+		case DRV_GPU_IR_CONST: value[inst->dst] = inst->immediate; break;
+		case DRV_GPU_IR_BOOL: value[inst->dst] = inst->immediate; break;
+		case DRV_GPU_IR_ICONST: value[inst->dst] = inst->immediate; break;
+		case DRV_GPU_IR_LOAD_INPUT:
+			if (inst->location == DRV_GPU_SHADER_LOCATION_FRAG_COORD) {
 				assert(inst->component < 4U);
 				value[inst->dst] = float_to_bits(m->frag_coord[inst->component]);
 				break;
@@ -245,7 +245,7 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 			assert(inst->location < SLOTS && inst->component < 4U);
 			value[inst->dst] = float_to_bits(m->input[inst->location][inst->component]);
 			break;
-		case I915_IR_PACK_HALF: {
+		case DRV_GPU_IR_PACK_HALF: {
 			_Float16 low = (_Float16)fa, high = (_Float16)fb;
 			uint16_t low_bits, high_bits;
 
@@ -254,7 +254,7 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 			value[inst->dst] = (uint32_t)low_bits | ((uint32_t)high_bits << 16);
 			break;
 		}
-		case I915_IR_UNPACK_HALF: {
+		case DRV_GPU_IR_UNPACK_HALF: {
 			uint16_t half_bits = (uint16_t)(a >> (16U * (inst->component & 1U)));
 			_Float16 half;
 
@@ -262,94 +262,94 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 			value[inst->dst] = float_to_bits((float)half);
 			break;
 		}
-		case I915_IR_LOAD_PUSH:
+		case DRV_GPU_IR_LOAD_PUSH:
 			assert(inst->immediate + 4U <= sizeof(m->push) && inst->immediate + 4U <= ir->push_bytes);
 			memcpy(&value[inst->dst], m->push + inst->immediate, 4U);
 			break;
-		case I915_IR_LOAD_UBO:
-			assert(inst->location < ir->uniform_count && ir->uniforms[inst->location].kind == I915_IR_UNIFORM_BLOCK);
+		case DRV_GPU_IR_LOAD_UBO:
+			assert(inst->location < ir->uniform_count && ir->uniforms[inst->location].kind == DRV_GPU_IR_UNIFORM_BLOCK);
 			assert(inst->location < 4U && inst->immediate + 4U <= sizeof(m->ubo[0]));
 			assert(inst->immediate >= ir->uniforms[inst->location].offset &&
 			       inst->immediate + 4U <= ir->uniforms[inst->location].offset + ir->uniforms[inst->location].size);
 			memcpy(&value[inst->dst], m->ubo[inst->location] + inst->immediate, 4U);
 			break;
-		case I915_IR_STORE_OUTPUT:
-			slot = inst->location == I915_IR_LOCATION_POSITION ? SLOT_POSITION : inst->location;
+		case DRV_GPU_IR_STORE_OUTPUT:
+			slot = inst->location == DRV_GPU_IR_LOCATION_POSITION ? SLOT_POSITION : inst->location;
 			assert(slot < SLOTS && inst->component < 4U);
-			assert(inst->location == I915_IR_LOCATION_POSITION || inst->location < SLOT_POSITION);
+			assert(inst->location == DRV_GPU_IR_LOCATION_POSITION || inst->location < SLOT_POSITION);
 			m->output[slot][inst->component] = fa;
 			m->written[slot][inst->component]++;
 			break;
-		case I915_IR_KILL: if (a != 0U) m->killed = 1; break;
-		case I915_IR_FADD: value[inst->dst] = float_to_bits(fa + fb); break;
-		case I915_IR_FSUB: value[inst->dst] = float_to_bits(fa - fb); break;
-		case I915_IR_FMUL: value[inst->dst] = float_to_bits(fa * fb); break;
-		case I915_IR_FNEG: value[inst->dst] = float_to_bits(-fa); break;
-		case I915_IR_SIN: value[inst->dst] = float_to_bits(sinf(fa)); break;
-		case I915_IR_COS: value[inst->dst] = float_to_bits(cosf(fa)); break;
-		case I915_IR_RSQ: value[inst->dst] = float_to_bits(1.0f / sqrtf(fa)); break;
-		case I915_IR_RCP: value[inst->dst] = float_to_bits(1.0f / fa); break;
-		case I915_IR_SQRT: value[inst->dst] = float_to_bits(sqrtf(fa)); break;
-		case I915_IR_EXP2: value[inst->dst] = float_to_bits(exp2f(fa)); break;
-		case I915_IR_LOG2: value[inst->dst] = float_to_bits(log2f(fa)); break;
-		case I915_IR_FABS: value[inst->dst] = float_to_bits(fabsf(fa)); break;
-		case I915_IR_FLOOR: value[inst->dst] = float_to_bits(floorf(fa)); break;
-		case I915_IR_FRACT: value[inst->dst] = float_to_bits(fa - floorf(fa)); break;
-		case I915_IR_FTRUNC: value[inst->dst] = float_to_bits(truncf(fa)); break;
-		case I915_IR_FMIN: value[inst->dst] = float_to_bits(fa < fb ? fa : fb); break;
-		case I915_IR_FMAX: value[inst->dst] = float_to_bits(fa >= fb ? fa : fb); break;
-		case I915_IR_FLT: value[inst->dst] = boolean(fa < fb); break;
-		case I915_IR_FGE: value[inst->dst] = boolean(fa >= fb); break;
-		case I915_IR_FEQ: value[inst->dst] = boolean(fa == fb); break;
-		case I915_IR_FNEU: value[inst->dst] = boolean(fa != fb); break;
-		case I915_IR_AND: value[inst->dst] = a & b; break;
-		case I915_IR_OR: value[inst->dst] = a | b; break;
-		case I915_IR_NOT: value[inst->dst] = ~a; break;
-		case I915_IR_SELECT: value[inst->dst] = a != 0U ? b : c; break;
-		case I915_IR_IADD: value[inst->dst] = a + b; break;
-		case I915_IR_ISUB: value[inst->dst] = a - b; break;
-		case I915_IR_IMUL: value[inst->dst] = a * b; break;
-		case I915_IR_INEG: value[inst->dst] = 0U - a; break;
+		case DRV_GPU_IR_KILL: if (a != 0U) m->killed = 1; break;
+		case DRV_GPU_IR_FADD: value[inst->dst] = float_to_bits(fa + fb); break;
+		case DRV_GPU_IR_FSUB: value[inst->dst] = float_to_bits(fa - fb); break;
+		case DRV_GPU_IR_FMUL: value[inst->dst] = float_to_bits(fa * fb); break;
+		case DRV_GPU_IR_FNEG: value[inst->dst] = float_to_bits(-fa); break;
+		case DRV_GPU_IR_SIN: value[inst->dst] = float_to_bits(sinf(fa)); break;
+		case DRV_GPU_IR_COS: value[inst->dst] = float_to_bits(cosf(fa)); break;
+		case DRV_GPU_IR_RSQ: value[inst->dst] = float_to_bits(1.0f / sqrtf(fa)); break;
+		case DRV_GPU_IR_RCP: value[inst->dst] = float_to_bits(1.0f / fa); break;
+		case DRV_GPU_IR_SQRT: value[inst->dst] = float_to_bits(sqrtf(fa)); break;
+		case DRV_GPU_IR_EXP2: value[inst->dst] = float_to_bits(exp2f(fa)); break;
+		case DRV_GPU_IR_LOG2: value[inst->dst] = float_to_bits(log2f(fa)); break;
+		case DRV_GPU_IR_FABS: value[inst->dst] = float_to_bits(fabsf(fa)); break;
+		case DRV_GPU_IR_FLOOR: value[inst->dst] = float_to_bits(floorf(fa)); break;
+		case DRV_GPU_IR_FRACT: value[inst->dst] = float_to_bits(fa - floorf(fa)); break;
+		case DRV_GPU_IR_FTRUNC: value[inst->dst] = float_to_bits(truncf(fa)); break;
+		case DRV_GPU_IR_FMIN: value[inst->dst] = float_to_bits(fa < fb ? fa : fb); break;
+		case DRV_GPU_IR_FMAX: value[inst->dst] = float_to_bits(fa >= fb ? fa : fb); break;
+		case DRV_GPU_IR_FLT: value[inst->dst] = boolean(fa < fb); break;
+		case DRV_GPU_IR_FGE: value[inst->dst] = boolean(fa >= fb); break;
+		case DRV_GPU_IR_FEQ: value[inst->dst] = boolean(fa == fb); break;
+		case DRV_GPU_IR_FNEU: value[inst->dst] = boolean(fa != fb); break;
+		case DRV_GPU_IR_AND: value[inst->dst] = a & b; break;
+		case DRV_GPU_IR_OR: value[inst->dst] = a | b; break;
+		case DRV_GPU_IR_NOT: value[inst->dst] = ~a; break;
+		case DRV_GPU_IR_SELECT: value[inst->dst] = a != 0U ? b : c; break;
+		case DRV_GPU_IR_IADD: value[inst->dst] = a + b; break;
+		case DRV_GPU_IR_ISUB: value[inst->dst] = a - b; break;
+		case DRV_GPU_IR_IMUL: value[inst->dst] = a * b; break;
+		case DRV_GPU_IR_INEG: value[inst->dst] = 0U - a; break;
 		/*
 		 * A zero divisor, and INT_MIN / -1, have no defined result (SPIR-V; ws031-p024): the interpreter gives 0
 		 * where the hardware gives some value, and the tests compare only defined words.
 		 */
-		case I915_IR_UDIV: value[inst->dst] = b != 0U ? a / b : 0U; break;
-		case I915_IR_UMOD: value[inst->dst] = b != 0U ? a % b : 0U; break;
-		case I915_IR_IDIV:
+		case DRV_GPU_IR_UDIV: value[inst->dst] = b != 0U ? a / b : 0U; break;
+		case DRV_GPU_IR_UMOD: value[inst->dst] = b != 0U ? a % b : 0U; break;
+		case DRV_GPU_IR_IDIV:
 			value[inst->dst] = 0U;
 			if (b != 0U && !(a == 0x80000000U && b == 0xFFFFFFFFU))
 				value[inst->dst] = (uint32_t)((int32_t)a / (int32_t)b);
 			break;
-		case I915_IR_IREM:
+		case DRV_GPU_IR_IREM:
 			value[inst->dst] = 0U;
 			if (b != 0U && !(a == 0x80000000U && b == 0xFFFFFFFFU))
 				value[inst->dst] = (uint32_t)((int32_t)a % (int32_t)b);
 			break;
-		case I915_IR_FROUND_EVEN: value[inst->dst] = float_to_bits(nearbyintf(fa)); break;
-		case I915_IR_IAND: value[inst->dst] = a & b; break;
-		case I915_IR_IOR: value[inst->dst] = a | b; break;
-		case I915_IR_IXOR: value[inst->dst] = a ^ b; break;
-		case I915_IR_INOT: value[inst->dst] = ~a; break;
-		case I915_IR_SHL: value[inst->dst] = a << (b & 31U); break;
-		case I915_IR_SHR: value[inst->dst] = a >> (b & 31U); break;
-		case I915_IR_ASR: value[inst->dst] = (uint32_t)((int32_t)a >> (b & 31U)); break;
-		case I915_IR_I2F: value[inst->dst] = float_to_bits((float)(int32_t)a); break;
-		case I915_IR_U2F: value[inst->dst] = float_to_bits((float)a); break;
-		case I915_IR_F2I: value[inst->dst] = (uint32_t)(int32_t)fa; break;
-		case I915_IR_F2U: value[inst->dst] = (uint32_t)fa; break;
-		case I915_IR_ILT: value[inst->dst] = boolean((int32_t)a < (int32_t)b); break;
-		case I915_IR_IGE: value[inst->dst] = boolean((int32_t)a >= (int32_t)b); break;
-		case I915_IR_ULT: value[inst->dst] = boolean(a < b); break;
-		case I915_IR_UGE: value[inst->dst] = boolean(a >= b); break;
-		case I915_IR_IEQ: value[inst->dst] = boolean(a == b); break;
-		case I915_IR_INE: value[inst->dst] = boolean(a != b); break;
-		case I915_IR_MOVE: value[inst->dst] = a; break;
-		case I915_IR_LOOP_BEGIN:
+		case DRV_GPU_IR_FROUND_EVEN: value[inst->dst] = float_to_bits(nearbyintf(fa)); break;
+		case DRV_GPU_IR_IAND: value[inst->dst] = a & b; break;
+		case DRV_GPU_IR_IOR: value[inst->dst] = a | b; break;
+		case DRV_GPU_IR_IXOR: value[inst->dst] = a ^ b; break;
+		case DRV_GPU_IR_INOT: value[inst->dst] = ~a; break;
+		case DRV_GPU_IR_SHL: value[inst->dst] = a << (b & 31U); break;
+		case DRV_GPU_IR_SHR: value[inst->dst] = a >> (b & 31U); break;
+		case DRV_GPU_IR_ASR: value[inst->dst] = (uint32_t)((int32_t)a >> (b & 31U)); break;
+		case DRV_GPU_IR_I2F: value[inst->dst] = float_to_bits((float)(int32_t)a); break;
+		case DRV_GPU_IR_U2F: value[inst->dst] = float_to_bits((float)a); break;
+		case DRV_GPU_IR_F2I: value[inst->dst] = (uint32_t)(int32_t)fa; break;
+		case DRV_GPU_IR_F2U: value[inst->dst] = (uint32_t)fa; break;
+		case DRV_GPU_IR_ILT: value[inst->dst] = boolean((int32_t)a < (int32_t)b); break;
+		case DRV_GPU_IR_IGE: value[inst->dst] = boolean((int32_t)a >= (int32_t)b); break;
+		case DRV_GPU_IR_ULT: value[inst->dst] = boolean(a < b); break;
+		case DRV_GPU_IR_UGE: value[inst->dst] = boolean(a >= b); break;
+		case DRV_GPU_IR_IEQ: value[inst->dst] = boolean(a == b); break;
+		case DRV_GPU_IR_INE: value[inst->dst] = boolean(a != b); break;
+		case DRV_GPU_IR_MOVE: value[inst->dst] = a; break;
+		case DRV_GPU_IR_LOOP_BEGIN:
 			assert(loop_depth < 16U);
 			loop_top[loop_depth++] = index;
 			break;
-		case I915_IR_LOOP_END:
+		case DRV_GPU_IR_LOOP_END:
 			assert(loop_depth != 0U);
 			if (a != 0U) {
 				assert(++passes < 100000U);
@@ -358,12 +358,12 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
 				loop_depth--;
 			}
 			break;
-		case I915_IR_SAMPLE:
+		case DRV_GPU_IR_SAMPLE:
 			fake_texture(inst->location, inst->immediate, fa, fb, rgba);
 			for (k = 0U; k < 4U; k++)
 				value[inst->dst + k] = float_to_bits(rgba[k]);
 			break;
-		case I915_IR_TEXTURE:
+		case DRV_GPU_IR_TEXTURE:
 			/* the interpreter has no image: the reply is the message type and the parameters' first word */
 			for (k = 0U; k < 4U; k++)
 				value[inst->dst + k] = (inst->component & 0x1fU) + value[inst->src[0]];
@@ -383,7 +383,7 @@ run_ir_mode(const struct i915_shader_ir *ir, struct machine *m, const uint32_t *
  * discard must be the same bit for bit (ws075-p023).
  */
 static void
-run_ir(const struct i915_shader_ir *ir, struct machine *m)
+run_ir(const struct drv_gpu_shader_ir *ir, struct machine *m)
 {
 	struct i915_compile_state state;
 	struct machine again;
@@ -503,11 +503,11 @@ begin_module(void)
 }
 
 static int
-end_module(struct i915_shader_ir **ir, struct i915_compile_diagnostic *diag)
+end_module(struct drv_gpu_shader_ir **ir, struct drv_gpu_compile_diagnostic *diag)
 {
 	op(253U, 0U);
 	op(56U, 0U);
-	return drv_i915_shader_parse(mod, mod_n, I915_STAGE_FRAGMENT, ir, diag);
+	return drv_gpu_shader_parse(mod, mod_n, DRV_GPU_STAGE_FRAGMENT, ir, diag);
 }
 
 static void
@@ -542,8 +542,8 @@ expect_out(const struct machine *m, unsigned slot, float x, float y, float z, fl
 static void
 test_local_store_load_overwrite(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 
 	begin_module();
@@ -560,7 +560,7 @@ test_local_store_load_overwrite(void)
 	set_inputs(&m);
 	run_ir(ir, &m);
 	expect_out(&m, 0U, 5.0f, 2.0f, 3.0f, -3.0f);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  local: store 5 / load / store 2 / load -> (5, 2), 5-2 = 3, 2-5 = -3\n");
 }
 
@@ -568,8 +568,8 @@ test_local_store_load_overwrite(void)
 static void
 test_vector_construct_extract_shuffle(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 
 	begin_module();
@@ -593,7 +593,7 @@ test_vector_construct_extract_shuffle(void)
 	run_ir(ir, &m);
 	expect_out(&m, 0U, 8.0f, 4.0f, 2.0f, 1.0f);
 	expect_out(&m, 1U, 10.0f, 9.0f, 24.0f, 9.0f);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  vector: (1,2,4,8) extracted, reversed, shuffled and rebuilt without losing a component\n");
 }
 
@@ -601,8 +601,8 @@ test_vector_construct_extract_shuffle(void)
 static void
 test_component_access(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 
 	begin_module();
@@ -634,7 +634,7 @@ test_component_access(void)
 	run_ir(ir, &m);
 	expect_out(&m, 0U, 1.0f, 2.0f, 16.0f, 8.0f);
 	expect_out(&m, 1U, 8.0f, 5.0f, 16.0f, 2.0f);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  access chain: one component of a local overwritten, inputs / outputs addressed by component\n");
 }
 
@@ -642,8 +642,8 @@ test_component_access(void)
 static void
 test_dot_negate_scale(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 	static const float a[4] = { 1.0f, 2.0f, 3.0f, 4.0f };
 
@@ -666,7 +666,7 @@ test_dot_negate_scale(void)
 	run_ir(ir, &m);
 	expect_out(&m, 0U, 70.0f, -70.0f, 65.0f, -65.0f);
 	expect_out(&m, 1U, -10.0f, -24.0f, -42.0f, -64.0f);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  arithmetic: dot = 70, negate = -70, 70-5 = 65, 5-70 = -65, vector * scalar per component\n");
 }
 
@@ -674,8 +674,8 @@ test_dot_negate_scale(void)
 static void
 test_refusals(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 
 	/* a load of a local (component) that was never stored */
 	begin_module();
@@ -737,7 +737,7 @@ test_refusals(void)
 	mod[5U + 2U + 3U + 1U] = 0U;
 	op(252U, 0U);
 	op(56U, 0U);
-	assert(drv_i915_shader_parse(mod, mod_n, I915_STAGE_VERTEX, &ir, &diag) == ENOTSUP && ir == NULL && diag.opcode == 252U);
+	assert(drv_gpu_shader_parse(mod, mod_n, DRV_GPU_STAGE_VERTEX, &ir, &diag) == ENOTSUP && ir == NULL && diag.opcode == 252U);
 
 	/* a decoration that would place data (Component = 31) is not ignored (Flat is kept for the draw, ws075-p004) */
 	begin_module();
@@ -760,8 +760,8 @@ test_refusals(void)
 static void
 test_harmless_decoration(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	unsigned function_at;
 	uint32_t tail[7];
 
@@ -773,7 +773,7 @@ test_harmless_decoration(void)
 	memcpy(mod + mod_n, tail, sizeof(tail));
 	mod_n += 7U;
 	assert(end_module(&ir, &diag) == 0);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 
 	/*
 	 * Flat and Centroid (ws075-p004) are accepted.  The decorations go after
@@ -789,7 +789,7 @@ test_harmless_decoration(void)
 	memcpy(mod + mod_n, tail, sizeof(tail));
 	mod_n += 7U;
 	assert(end_module(&ir, &diag) == 0);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 }
 
 /* ------------------------------------------------------------------ the fixed vkdemo shaders */
@@ -842,19 +842,19 @@ test_vkdemo_vertex_shader(void)
 	static const float times[3] = { 0.0f, 1.7f, 12.34f };
 	uint32_t *code;
 	size_t words;
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 	unsigned v, t, k;
 	int error;
 
 	code = load_spv("cuboid.vert.spv", &words);
-	error = drv_i915_shader_parse(code, words, I915_STAGE_VERTEX, &ir, &diag);
+	error = drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_VERTEX, &ir, &diag);
 	if (error != 0)
 		printf("  cuboid.vert.spv refused: opcode %u at word %u: %s\n", diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
 	assert(error == 0);
-	assert(ir->stage == I915_STAGE_VERTEX && ir->push_bytes == 4U);
+	assert(ir->stage == DRV_GPU_STAGE_VERTEX && ir->push_bytes == 4U);
 	assert(ir->input_count == 2U && ir->output_count == 1U);
 
 	for (v = 0U; v < 4U; v++) {
@@ -892,7 +892,7 @@ test_vkdemo_vertex_shader(void)
 	}
 	printf("  cuboid.vert.spv (-O0, as shipped): %u IR instructions, %u values; gl_Position and texture_coordinate match the GLSL source for 4 vertices x 3 times\n",
 		ir->instruction_count, ir->value_count);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 }
 
@@ -901,12 +901,12 @@ test_vkdemo_fragment_shader(void)
 {
 	uint32_t *code;
 	size_t words;
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct machine m;
 	float want[4];
 
 	code = load_spv("cuboid.frag.spv", &words);
-	assert(drv_i915_shader_parse(code, words, I915_STAGE_FRAGMENT, &ir, NULL) == 0);
+	assert(drv_gpu_shader_parse(code, words, DRV_GPU_STAGE_FRAGMENT, &ir, NULL) == 0);
 	assert(ir->uniform_count == 1U && ir->uniforms[0].set == 0U && ir->uniforms[0].binding == 0U);
 	memset(&m, 0, sizeof(m));
 	m.input[0][0] = 0.3f;
@@ -915,7 +915,7 @@ test_vkdemo_fragment_shader(void)
 	fake_texture(0U, 0U, 0.3f, 0.6f, want);
 	expect_out(&m, 0U, want[0], want[1], want[2], want[3]);
 	printf("  cuboid.frag.spv: texture(checker, texture_coordinate) with u, v in the right order, 4 components out\n");
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	free(code);
 }
 
@@ -952,17 +952,17 @@ load_spv_at(const char *directory, const char *name, size_t *words)
 #define FEATURE_SHADERS "src/drivers/gpu/i915/tests/render/feature-shaders"
 
 /* Parses a shader file, printing a refusal before failing. */
-static struct i915_shader_ir *
-parse_file(const char *directory, const char *name, enum i915_shader_stage stage)
+static struct drv_gpu_shader_ir *
+parse_file(const char *directory, const char *name, enum drv_gpu_shader_stage stage)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	uint32_t *code;
 	size_t words;
 	int error;
 
 	code = load_spv_at(directory, name, &words);
-	error = drv_i915_shader_parse(code, words, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(code, words, stage, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused (%d): opcode %u at word %u: %s\n", name, error, diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
@@ -973,7 +973,7 @@ parse_file(const char *directory, const char *name, enum i915_shader_stage stage
 
 /* Runs a fragment IR whose one input, location 0, is v. */
 static void
-run_fragment(const struct i915_shader_ir *ir, struct machine *m, const float v[4])
+run_fragment(const struct drv_gpu_shader_ir *ir, struct machine *m, const float v[4])
 {
 	memset(m, 0, sizeof(*m));
 	memcpy(m->input[0], v, 4U * sizeof(float));
@@ -1010,14 +1010,14 @@ static const float math_inputs[][4] = {
 static void
 test_glsl_std450_lowering(void)
 {
-	struct i915_shader_ir *unary, *exponent, *minmax, *divide;
+	struct drv_gpu_shader_ir *unary, *exponent, *minmax, *divide;
 	struct machine m;
 	unsigned i;
 
-	unary = parse_file(COMPILER_SHADERS, "unary.frag.spv", I915_STAGE_FRAGMENT);
-	exponent = parse_file(COMPILER_SHADERS, "exponent.frag.spv", I915_STAGE_FRAGMENT);
-	minmax = parse_file(COMPILER_SHADERS, "minmax.frag.spv", I915_STAGE_FRAGMENT);
-	divide = parse_file(COMPILER_SHADERS, "divide.frag.spv", I915_STAGE_FRAGMENT);
+	unary = parse_file(COMPILER_SHADERS, "unary.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	exponent = parse_file(COMPILER_SHADERS, "exponent.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	minmax = parse_file(COMPILER_SHADERS, "minmax.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	divide = parse_file(COMPILER_SHADERS, "divide.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	for (i = 0U; i < sizeof(math_inputs) / sizeof(math_inputs[0]); i++) {
 		const float *v = math_inputs[i];
 		float want[4], larger, length2, scale;
@@ -1058,10 +1058,10 @@ test_glsl_std450_lowering(void)
 		if (v[2] != 0.0f)
 			expect_color(&m, "divide.frag", v, want);
 	}
-	drv_i915_shader_ir_free(unary);
-	drv_i915_shader_ir_free(exponent);
-	drv_i915_shader_ir_free(minmax);
-	drv_i915_shader_ir_free(divide);
+	drv_gpu_shader_ir_free(unary);
+	drv_gpu_shader_ir_free(exponent);
+	drv_gpu_shader_ir_free(minmax);
+	drv_gpu_shader_ir_free(divide);
 	printf("  GLSL.std.450: abs floor fract sqrt exp2 log2 pow inversesqrt min max clamp mix normalize, and a / b, over %u inputs\n",
 		(unsigned)(sizeof(math_inputs) / sizeof(math_inputs[0])));
 }
@@ -1074,12 +1074,12 @@ test_comparisons_and_selection(void)
 		{ 1.0f, 2.0f, 5.0f, 3.0f }, { 2.0f, 1.0f, 3.0f, 5.0f }, { 3.0f, 3.0f, -1.0f, -1.0f },
 		{ -4.0f, 7.0f, -9.0f, 0.5f }, { 0.0f, -0.0f, 2.0f, 1.0f }, { 0.0f, 0.0f, 0.0f, 0.0f },
 	};
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct machine m;
 	unsigned i;
 	float nan_value;
 
-	ir = parse_file(COMPILER_SHADERS, "compare.frag.spv", I915_STAGE_FRAGMENT);
+	ir = parse_file(COMPILER_SHADERS, "compare.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	nan_value = bits_to_float(0x7FC00000U);
 	for (i = 0U; i < sizeof(inputs) / sizeof(inputs[0]) + 2U; i++) {
 		float v[4], want[4];
@@ -1102,7 +1102,7 @@ test_comparisons_and_selection(void)
 		want[3] = (float)(!(v[0] < v[1])) + 2.0f * (v[2] < v[3] ? v[3] : v[2]);
 		expect_color(&m, "compare.frag", v, want);
 	}
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  comparisons: < > <= >= == != && || ?: ! mix(bool), NaN on either side, -0 == 0\n");
 }
 
@@ -1113,8 +1113,8 @@ test_unordered_comparisons(void)
 	static const float pairs[][2] = {
 		{ 1.0f, 2.0f }, { 2.0f, 1.0f }, { 3.0f, 3.0f }, { 0.0f, 0.0f },
 	};
-	struct i915_shader_ir *ir[2];
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir[2];
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 	unsigned half, i, k;
 	float nan_value;
@@ -1177,8 +1177,8 @@ test_unordered_comparisons(void)
 			}
 		}
 	}
-	drv_i915_shader_ir_free(ir[0]);
-	drv_i915_shader_ir_free(ir[1]);
+	drv_gpu_shader_ir_free(ir[0]);
+	drv_gpu_shader_ir_free(ir[1]);
 	printf("  comparisons: the twelve FOrd* / FUnord* opcodes, ordered and unordered, with NaN on either or both sides\n");
 }
 
@@ -1234,12 +1234,12 @@ discard_reference(float x, float y, float want[4])
 static void
 test_branches_and_discard(void)
 {
-	struct i915_shader_ir *branch, *discard;
+	struct drv_gpu_shader_ir *branch, *discard;
 	struct machine m;
 	unsigned x, y, kills;
 
-	branch = parse_file(COMPILER_SHADERS, "branch.frag.spv", I915_STAGE_FRAGMENT);
-	discard = parse_file(COMPILER_SHADERS, "discard.frag.spv", I915_STAGE_FRAGMENT);
+	branch = parse_file(COMPILER_SHADERS, "branch.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	discard = parse_file(COMPILER_SHADERS, "discard.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	kills = 0U;
 	for (y = 0U; y < 64U; y++) {
 		for (x = 0U; x < 64U; x++) {
@@ -1268,8 +1268,8 @@ test_branches_and_discard(void)
 		}
 	}
 	assert(kills > 1024U && kills < 3072U);
-	drv_i915_shader_ir_free(branch);
-	drv_i915_shader_ir_free(discard);
+	drv_gpu_shader_ir_free(branch);
+	drv_gpu_shader_ir_free(discard);
 	printf("  control flow: nested if / else, && via phi, ?: via a local, discard in and out of branches, at 4096 pixels (%u discarded)\n",
 		kills);
 }
@@ -1278,8 +1278,8 @@ test_branches_and_discard(void)
 static void
 test_return_in_branch(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 	unsigned i;
 
@@ -1306,7 +1306,7 @@ test_return_in_branch(void)
 		run_fragment(ir, &m, v);
 		assert(m.output[0][0] == want && m.output[0][3] == want);
 	}
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  control flow: a return in a branch leaves the channels that took it out of the stores after the merge\n");
 }
 
@@ -1314,12 +1314,12 @@ test_return_in_branch(void)
 static void
 test_stage_vertex_shaders(void)
 {
-	struct i915_shader_ir *cells, *vsmath;
+	struct drv_gpu_shader_ir *cells, *vsmath;
 	struct machine m;
 	unsigned i, k;
 
-	cells = parse_file(COMPILER_SHADERS, "cells.vert.spv", I915_STAGE_VERTEX);
-	vsmath = parse_file(COMPILER_SHADERS, "vsmath.vert.spv", I915_STAGE_VERTEX);
+	cells = parse_file(COMPILER_SHADERS, "cells.vert.spv", DRV_GPU_STAGE_VERTEX);
+	vsmath = parse_file(COMPILER_SHADERS, "vsmath.vert.spv", DRV_GPU_STAGE_VERTEX);
 	for (i = 0U; i < sizeof(math_inputs) / sizeof(math_inputs[0]); i++) {
 		const float *v = math_inputs[i];
 		float n[3], length2, scale, lambert, want[4];
@@ -1351,8 +1351,8 @@ test_stage_vertex_shaders(void)
 		for (k = 0U; k < 4U; k++)
 			assert(float_to_bits(m.output[0][k]) == float_to_bits(want[k]));
 	}
-	drv_i915_shader_ir_free(cells);
-	drv_i915_shader_ir_free(vsmath);
+	drv_gpu_shader_ir_free(cells);
+	drv_gpu_shader_ir_free(vsmath);
 	printf("  vertex: normalize, max(dot, 0) with a constant vec3 (OpConstantComposite), clamp\n");
 }
 
@@ -1373,17 +1373,17 @@ test_feature_shaders(void)
 		7.0f, 7.0f, 7.0f, 7.0f, 6.0f, 6.0f, 6.0f, 6.0f, 0.25f, 0.5f, 0.75f, -1.0f, 5.0f, 5.0f, 5.0f, 5.0f,
 	};
 	static const float position[4] = { -0.5f, 0.75f, 0.25f, 1.0f };
-	struct i915_shader_ir *vert, *frag, *tex;
+	struct drv_gpu_shader_ir *vert, *frag, *tex;
 	struct machine m;
 	float want;
 	unsigned k, c;
 
-	vert = parse_file(FEATURE_SHADERS, "ubo.vert.spv", I915_STAGE_VERTEX);
-	frag = parse_file(FEATURE_SHADERS, "ubo.frag.spv", I915_STAGE_FRAGMENT);
-	tex = parse_file(FEATURE_SHADERS, "tex3.frag.spv", I915_STAGE_FRAGMENT);
+	vert = parse_file(FEATURE_SHADERS, "ubo.vert.spv", DRV_GPU_STAGE_VERTEX);
+	frag = parse_file(FEATURE_SHADERS, "ubo.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	tex = parse_file(FEATURE_SHADERS, "tex3.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 
 	/* One uniform block each, at the binding the GLSL names, read over the bytes the shader uses. */
-	assert(vert->uniform_count == 1U && vert->uniforms[0].kind == I915_IR_UNIFORM_BLOCK);
+	assert(vert->uniform_count == 1U && vert->uniforms[0].kind == DRV_GPU_IR_UNIFORM_BLOCK);
 	assert(vert->uniforms[0].set == 0U && vert->uniforms[0].binding == 0U);
 	assert(vert->uniforms[0].offset == 0U && vert->uniforms[0].size == 80U);
 	assert(frag->uniform_count == 1U && frag->uniforms[0].binding == 1U);
@@ -1426,9 +1426,9 @@ test_feature_shaders(void)
 	assert(m.output[0][1] == 0.5f);
 	assert(m.output[0][2] == 0.25f + 2.0f * 0.5f);
 	assert(m.output[0][3] == 1.0f);
-	drv_i915_shader_ir_free(vert);
-	drv_i915_shader_ir_free(frag);
-	drv_i915_shader_ir_free(tex);
+	drv_gpu_shader_ir_free(vert);
+	drv_gpu_shader_ir_free(frag);
+	drv_gpu_shader_ir_free(tex);
 	printf("  feature: mat4 uniform read as columns times a vec4 plus an offset; vec4, array element and mat4 column of a block; 3 samplers of 2 sets\n");
 }
 
@@ -1442,14 +1442,14 @@ test_mview_shaders(void)
 		{ 0.0f, 0.0f, 1.0f, 0.0f }, { 1.0f, 1.0f, 1.0f, 0.5f },
 	};
 	static const float vertex[8] = { 0.5f, -1.0f, 2.0f, 0.3f, -0.6f, 0.8f, 0.25f, 0.75f };
-	struct i915_shader_ir *vert, *frag, *cutout;
+	struct drv_gpu_shader_ir *vert, *frag, *cutout;
 	struct machine m;
 	float turned[3], length2, scale, lambert, shade, clip[4], want[4], rgba[4];
 	unsigned k, i;
 
-	vert = parse_file(MVIEW_SHADERS, "mview.vert.spv", I915_STAGE_VERTEX);
-	frag = parse_file(MVIEW_SHADERS, "mview.frag.spv", I915_STAGE_FRAGMENT);
-	cutout = parse_file(MVIEW_SHADERS, "cutout.frag.spv", I915_STAGE_FRAGMENT);
+	vert = parse_file(MVIEW_SHADERS, "mview.vert.spv", DRV_GPU_STAGE_VERTEX);
+	frag = parse_file(MVIEW_SHADERS, "mview.frag.spv", DRV_GPU_STAGE_FRAGMENT);
+	cutout = parse_file(MVIEW_SHADERS, "cutout.frag.spv", DRV_GPU_STAGE_FRAGMENT);
 	assert(vert->push_bytes == 112U && vert->input_count == 3U && vert->output_count == 2U);
 	assert(frag->push_bytes == 128U && cutout->push_bytes == 128U);
 
@@ -1516,23 +1516,23 @@ test_mview_shaders(void)
 			assert(m.output[0][3] == 1.0f);
 		}
 	}
-	drv_i915_shader_ir_free(vert);
-	drv_i915_shader_ir_free(frag);
-	drv_i915_shader_ir_free(cutout);
+	drv_gpu_shader_ir_free(vert);
+	drv_gpu_shader_ir_free(frag);
+	drv_gpu_shader_ir_free(cutout);
 	printf("  mview: mview.vert (normalize, max, OpConstantComposite) against its GLSL; mview.frag; cutout.frag discards below alpha 0.5\n");
 }
 
 /* ------------------------------------------------------------------ the generality test (p014 E2) */
 
 /* Parses one of the generality test's embedded modules. */
-static struct i915_shader_ir *
-parse_words(const char *name, const uint32_t *words, size_t bytes, enum i915_shader_stage stage)
+static struct drv_gpu_shader_ir *
+parse_words(const char *name, const uint32_t *words, size_t bytes, enum drv_gpu_shader_stage stage)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	int error;
 
-	error = drv_i915_shader_parse(words, bytes / 4U, stage, &ir, &diag);
+	error = drv_gpu_shader_parse(words, bytes / 4U, stage, &ir, &diag);
 	if (error != 0)
 		printf("  %s refused (%d): opcode %u at word %u: %s\n", name, error, diag.opcode, diag.word_offset,
 			diag.reason != NULL ? diag.reason : "-");
@@ -1593,15 +1593,15 @@ test_generality_fragment_shaders(void)
 		/* ws031-p039: 16-bit integers whose high half the compiler leaves undefined, made whole where it matters */
 		{ "int16.frag", i915_vke2_int16_frag, sizeof(i915_vke2_int16_frag), i915_vke2_int16_expected },
 	};
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct machine m;
 	unsigned step, x, y, loops, k;
 
 	for (step = 0U; step < 8U; step++) {
-		ir = parse_words(steps[step].name, steps[step].words, steps[step].bytes, I915_STAGE_FRAGMENT);
+		ir = parse_words(steps[step].name, steps[step].words, steps[step].bytes, DRV_GPU_STAGE_FRAGMENT);
 		loops = 0U;
 		for (k = 0U; k < ir->instruction_count; k++)
-			if (ir->instructions[k].op == I915_IR_LOOP_BEGIN)
+			if (ir->instructions[k].op == DRV_GPU_IR_LOOP_BEGIN)
 				loops++;
 		if (step == 3U)
 			assert(loops == 5U);            /* for, for { while }, do-while, while (true) */
@@ -1623,7 +1623,7 @@ test_generality_fragment_shaders(void)
 				}
 			}
 		}
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 	}
 	printf("  generality: matrix / int / float / loop / spill / edge / undef / int16 fragment shaders match regenerate.py at 8 x 4096 pixels (5 loops in loop.frag)\n");
 }
@@ -1648,12 +1648,12 @@ test_p004_fragment_shaders(void)
 		{ "coord.frag", i915_vke2_coord_frag, sizeof(i915_vke2_coord_frag), NULL },
 		{ "vformat.frag", i915_vke2_vformat_frag, sizeof(i915_vke2_vformat_frag), NULL },
 	};
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct machine m;
 	unsigned step, x, y, k;
 
 	for (step = 0U; step < 4U; step++) {
-		ir = parse_words(steps[step].name, steps[step].words, steps[step].bytes, I915_STAGE_FRAGMENT);
+		ir = parse_words(steps[step].name, steps[step].words, steps[step].bytes, DRV_GPU_STAGE_FRAGMENT);
 		for (y = 0U; y < 64U; y++) {
 			for (x = 0U; x < 64U; x++) {
 				uint32_t got, want;
@@ -1688,7 +1688,7 @@ test_p004_fragment_shaders(void)
 				}
 			}
 		}
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 	}
 	printf("  generality (ws075-p004): agg / matfn / coord / vformat fragment shaders match regenerate.py at 4 x 4096 pixels\n");
 }
@@ -1701,17 +1701,17 @@ test_p004_fragment_shaders(void)
 static void
 test_generality_interfaces(void)
 {
-	struct i915_shader_ir *vary_vert, *vary_frag, *subset, *vin_vert, *vin_frag, *matrix_vert, *spill;
+	struct drv_gpu_shader_ir *vary_vert, *vary_frag, *subset, *vin_vert, *vin_frag, *matrix_vert, *spill;
 	struct machine m;
 	unsigned k, c, x, y;
 
-	vary_vert = parse_words("vary16.vert", i915_vke2_vary16_vert, sizeof(i915_vke2_vary16_vert), I915_STAGE_VERTEX);
-	vary_frag = parse_words("vary16.frag", i915_vke2_vary16_frag, sizeof(i915_vke2_vary16_frag), I915_STAGE_FRAGMENT);
-	subset = parse_words("subset.frag", i915_vke2_subset_frag, sizeof(i915_vke2_subset_frag), I915_STAGE_FRAGMENT);
-	vin_vert = parse_words("vin16.vert", i915_vke2_vin16_vert, sizeof(i915_vke2_vin16_vert), I915_STAGE_VERTEX);
-	vin_frag = parse_words("vin16.frag", i915_vke2_vin16_frag, sizeof(i915_vke2_vin16_frag), I915_STAGE_FRAGMENT);
-	matrix_vert = parse_words("matrix.vert", i915_vke2_matrix_vert, sizeof(i915_vke2_matrix_vert), I915_STAGE_VERTEX);
-	spill = parse_words("spill.frag", i915_vke2_spill_frag, sizeof(i915_vke2_spill_frag), I915_STAGE_FRAGMENT);
+	vary_vert = parse_words("vary16.vert", i915_vke2_vary16_vert, sizeof(i915_vke2_vary16_vert), DRV_GPU_STAGE_VERTEX);
+	vary_frag = parse_words("vary16.frag", i915_vke2_vary16_frag, sizeof(i915_vke2_vary16_frag), DRV_GPU_STAGE_FRAGMENT);
+	subset = parse_words("subset.frag", i915_vke2_subset_frag, sizeof(i915_vke2_subset_frag), DRV_GPU_STAGE_FRAGMENT);
+	vin_vert = parse_words("vin16.vert", i915_vke2_vin16_vert, sizeof(i915_vke2_vin16_vert), DRV_GPU_STAGE_VERTEX);
+	vin_frag = parse_words("vin16.frag", i915_vke2_vin16_frag, sizeof(i915_vke2_vin16_frag), DRV_GPU_STAGE_FRAGMENT);
+	matrix_vert = parse_words("matrix.vert", i915_vke2_matrix_vert, sizeof(i915_vke2_matrix_vert), DRV_GPU_STAGE_VERTEX);
+	spill = parse_words("spill.frag", i915_vke2_spill_frag, sizeof(i915_vke2_spill_frag), DRV_GPU_STAGE_FRAGMENT);
 
 	/* vary16.vert: location 0 the coordinate, location k the seed times k + 1 plus (k, -k, k / 2, 16 - k) */
 	memset(&m, 0, sizeof(m));
@@ -1786,13 +1786,13 @@ test_generality_interfaces(void)
 		assert(m.output[SLOT_POSITION][3] == 1.0f);
 	}
 
-	drv_i915_shader_ir_free(vary_vert);
-	drv_i915_shader_ir_free(vary_frag);
-	drv_i915_shader_ir_free(subset);
-	drv_i915_shader_ir_free(vin_vert);
-	drv_i915_shader_ir_free(vin_frag);
-	drv_i915_shader_ir_free(matrix_vert);
-	drv_i915_shader_ir_free(spill);
+	drv_gpu_shader_ir_free(vary_vert);
+	drv_gpu_shader_ir_free(vary_frag);
+	drv_gpu_shader_ir_free(subset);
+	drv_gpu_shader_ir_free(vin_vert);
+	drv_gpu_shader_ir_free(vin_frag);
+	drv_gpu_shader_ir_free(matrix_vert);
+	drv_gpu_shader_ir_free(spill);
 	printf("  generality: 16 varyings out and in, 5 of 16 read, 16 attributes, row-/column-major placement chain\n");
 }
 
@@ -1803,8 +1803,8 @@ test_generality_interfaces(void)
 static void
 test_remainders(void)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diag;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diag;
 	struct machine m;
 	unsigned function_at;
 	uint32_t tail[7];
@@ -1838,7 +1838,7 @@ test_remainders(void)
 	run_ir(ir, &m);
 	expect_out(&m, 0U, -1.0f, 1.0f, 2.0f, -2.0f);
 	expect_out(&m, 1U, -1.5f, 0.5f, -1.5f, 0.5f);
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	printf("  remainders: SRem(-7,3) = -1, SRem(7,-3) = 1, SMod(-7,3) = 2, SMod(7,-3) = -2, FRem(-7.5,2) = -1.5, FMod = 0.5\n");
 }
 
@@ -1875,7 +1875,7 @@ static void
 test_switch(void)
 {
 	static const char *const names[2] = { "switch.frag.spv", "switch-O.frag.spv" };
-	struct i915_shader_ir *ir;
+	struct drv_gpu_shader_ir *ir;
 	struct machine m;
 	uint32_t *code;
 	size_t words;
@@ -1883,7 +1883,7 @@ test_switch(void)
 
 	for (variant = 0U; variant < 2U; variant++) {
 		code = load_switch_spv(names[variant], &words);
-		ir = parse_words(names[variant], code, words * 4U, I915_STAGE_FRAGMENT);
+		ir = parse_words(names[variant], code, words * 4U, DRV_GPU_STAGE_FRAGMENT);
 		for (y = 0U; y < 64U; y++) {
 			for (x = 0U; x < 64U; x++) {
 				float place_x = (float)x + 0.5f;
@@ -1931,7 +1931,7 @@ test_switch(void)
 				}
 			}
 		}
-		drv_i915_shader_ir_free(ir);
+		drv_gpu_shader_ir_free(ir);
 		free(code);
 	}
 	printf("  switch: switch.frag (6 literals, shared target, fall-through, default) and its -O form (merge-return) match at 2 x 4096 pixels\n");

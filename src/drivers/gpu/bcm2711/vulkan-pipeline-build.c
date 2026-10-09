@@ -11,7 +11,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/vulkan-pipeline.h"
-#include "drivers/gpu/i915/compiler/compiler.h"
+#include "drivers/gpu/compiler/spirv.h"
 
 static int build_pipeline(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *device, const VkGraphicsPipelineCreateInfo *info, struct bcm2711_vulkan_pipeline *pipeline);
 static int select_modules(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *device, const VkGraphicsPipelineCreateInfo *info, struct bcm2711_vulkan_module **vertex, struct bcm2711_vulkan_module **fragment);
@@ -307,10 +307,10 @@ fragment_key(
 	const struct bcm2711_vulkan_module *module,
 	struct bcm2711_shader_key *key)
 {
-	struct i915_shader_ir *ir;
-	struct i915_compile_diagnostic diagnostic;
+	struct drv_gpu_shader_ir *ir;
+	struct drv_gpu_compile_diagnostic diagnostic;
 	struct bcm2711_shader_component *varying;
-	const struct i915_shader_ir_io *input;
+	const struct drv_gpu_shader_ir_io *input;
 	uint32_t location;
 	uint32_t index;
 	uint32_t component;
@@ -324,7 +324,7 @@ fragment_key(
 	/* Only the existing read-only Zlib scalar frontend is reused; no Gen12 pipeline or instruction backend participates. */
 	kern_memset(key, 0, sizeof(*key));
 	ir = NULL;
-	error = drv_i915_shader_parse(module->words, module->word_count, I915_STAGE_FRAGMENT, &ir, &diagnostic);
+	error = drv_gpu_shader_parse(module->words, module->word_count, DRV_GPU_STAGE_FRAGMENT, &ir, &diagnostic);
 	if (error != 0)
 		return error;
 
@@ -359,7 +359,7 @@ fragment_key(
 	}
 
 	/* Temporary source IR retires on every finite-interface outcome. */
-	drv_i915_shader_ir_free(ir);
+	drv_gpu_shader_ir_free(ir);
 	if (error != 0)
 		return error;
 

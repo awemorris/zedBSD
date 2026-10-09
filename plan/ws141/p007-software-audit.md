@@ -62,3 +62,7 @@ actual Keiland shader/graphics writer、QueueSubmit/sync/primary/descriptorのpr
 LLVM23.1.0 read-only、clang-format19.1.7、GCC14.2.0。named rpi4 y/n vmunixはwarning/error0・各ARM64 checker3 PASS。host全14群PASS、runtime26scope、display4、hardware2、stage4、独立Mesa packet/QPU decodeとscalar/viewport/colour結果を保持。全commands/log/hashとmain統合は[実行記録](execution-20261009.md#i15-最終software監査と検証2026-10-10)に記載。
 
 software実装/監査/統合後もWS incomplete、p002〜p006のwhole acceptanceは実機待ち。RPi4のP0/N0/R0/P1/P2/P3/P5とV1〜V10、original HDMI復帰/console RAM寿命、native描画/flip/cache/IRQ/reset、Keiland画面と操作は未確認。Q1/T1の回帰・共有projection/GitHub公開は担当境界のまま。実機結果に応じ同WSを再開し、未確認をsoftware完了で置き換えない。
+
+## この監査後の共通compiler変更（2026-10-10）
+
+本体はi15/source0f56e5200の履歴。追加の共通compiler抽出・heap state・両backend移行後の新source/hash/build/host/stack監査は[今回i18](compiler-refactor-20261010.md#i17-software-clearancei18最終検証)と[新台帳](compiler-refactor-source-sha256.tsv)。旧「frontend/Gen12 read-only」と旧stack marginは当時の範囲、今回sourceの証拠として再利用しない。今回実機関門は未確認。

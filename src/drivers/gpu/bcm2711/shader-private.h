@@ -11,7 +11,7 @@
 
 #include "drivers/gpu/bcm2711/qpu.h"
 #include "drivers/gpu/bcm2711/shader.h"
-#include "drivers/gpu/i915/compiler/ir.h"
+#include "drivers/gpu/compiler/ir.h"
 
 /* User outputs occupy sixteen locations; clip position follows those sixty-four scalar slots. */
 #define BCM2711_SHADER_OUTPUT_WORDS 68U
@@ -40,7 +40,7 @@ struct bcm2711_shader_value {
 
 /* One compilation keeps bounded storage and checked interfaces private until every native word succeeds. */
 struct bcm2711_shader_compiler {
-	const struct i915_shader_ir *ir;
+	const struct drv_gpu_shader_ir *ir;
 	const struct bcm2711_shader_key *key;
 	struct bcm2711_shader_binary *binary;
 	struct bcm2711_shader_diagnostic *diagnostic;

@@ -106,7 +106,8 @@ for part in codec object dispatch transport instance vulkan fence objects reply 
     pipeline-prepare render-pass sync state batch math forget video video-mfx video-h264-tables; do
 	executor="$executor $driver/render/$part.c"
 done
-for part in spirv compile eu; do
+executor="$executor $repo/src/drivers/gpu/compiler/spirv.c"
+for part in compile eu; do
 	executor="$executor $driver/compiler/$part.c"
 done
 cp "$repo/userland/tests/vkdemo/shaders/cuboid.vert.spv" "$repo/userland/tests/vkdemo/shaders/cuboid.frag.spv" "$work/"
