@@ -21,7 +21,7 @@
 | ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software/統合部分） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
 | ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | cleared（software部分） | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
 | ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | in-progress | i11/i12の必要な実source出力を確認後 |
-| ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | pending | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
+| ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | in-progress（検証済みscoped owner/worker出力を使用） | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
 | ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | pending | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
 
 ## 継続の承認とi03の境界（2026-10-09）
@@ -284,3 +284,22 @@ source `f1afd22be`を専用統合treeでmerge `cfb3401f72940ea03a5fe0c528ab7c7b9
 - hostの`kern/thread.h`は既存kthread_create/thread_startのopaque APIだけを宣言するfixture header（native sigset_t/tid_tとhost libc型の衝突を避ける）。schedulerは動かさずactual worker_stepを使う。物理DMA/cache/SMP/thread schedulingの証拠ではない。初期fixtureのclosed session再利用を修正し、1MiBモデルcache spanの期待値を追加。productionのhidden test controlなし。
 - y build: `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` exit0、warning/error0、image checker3 PASS。ログ`build/ws141-i13-reservations-build.log`。vmunix SHA256 `c79948bc3c420ca545fe041394c886274d1b8e606a087f71534d32706465233a`。C全文manual/clang-format-19/definition tab復元/style total0、630hardware旧名一致0、git diff --check0。p007全WS最終監査は未実施。
 - i13/p005はin-progress。software owner/worker出力をp006のscoped prerequisiteとして使い、compiler/decoderの実装を進める。公開bindingとKeiland描画は後続、実機whole acceptanceは後日ユーザーが行う。Master/shared projections/GitHub/T1はQ1、push無し。
+
+
+## i13 worker統合とi14 compiler開始（2026-10-09）
+
+- worker/reservation source `d03cd23d5`を統合worktreeへmerge `203b78809e338b6f1208cf21d2ba6aa6e35df5a6`。actual native host PASS、named rpi4 y/n build exit0・warning/error0。y `c79948bc3c420ca545fe041394c886274d1b8e606a087f71534d32706465233a`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。Q1最新mainのamd64 CI config更新を保持し`4422a38023c111c60439b426073308026ae53aff`へmerge、main/担当をFF同期。Masterを作者編集していない。
+- i13/p005はin-progress。未公開のcommand/job table bindingはp006の実装と同時に完成させる。i14をin-progressにし、実装済みresource/VA/workerをscoped prerequisiteとしてV3D compilerを進める。whole p004/p005の実機clearanceを偽称しない。
+- 既存Zlibの`i915/compiler/spirv.c`はdevice/MMIOを触らないscalar IR parser。コードを変更せずarm64でsourceを再利用し、V3D専用QPU encoder/loweringを担当driver内へ新規実装する。Gen12 code generator/batchは再利用しない。Keiland compositorのquad/panel SPIR-Vを対象に実際のoperation/interfaceを確認する。公開HAL変更無し。
+- 固定Mesa commitのQPU/compiler一次sourceをignored tempへ取得し、各headerのMIT permission noticeを確認。命令のbit layout/入出力/hazard/終了はhardware事実として使用し、実装・構造・commentは独立Zlib。kernelへ外部compiler/NIRは取り込まない。file hash/licenseは監査表へ追記しp007で最終再検査する。
+
+## i14 compilerのsoftware checkpoint（2026-10-09）
+
+- 独立Zlib `qpu.c/.h` と `shader.c`、`shader-analyze.c`、`shader-lower.c`、`shader-output.c`、private headerを追加。既存Zlib scalar SPIR-V frontendはread-onlyでarm64のBCM source listへ追加。Gen12 code generatorや外部NIR/compiler実装を取り込まない。
+- QPU4.2 encoderは単一ALU、明示のregister/accumulator/正確なsmall constant、signal/flag/portのalias検証を使用。partial wordは公開しない。固定MIT Mesaのactual decoder/repackerと45semantic opcode、全64RF MOVE、全48small constants、predicate/flag/signal destination/refusalを照合。fixed decoderの旧VDWWT/IID name aliasだけをtestで明示補正し、actual IID packerで同じwordを再確認する。
+- graphics compilerはbounded SSAの定義順/meaningful source arity/last readerを検証、同じ入力をcanonical FIFO順で一度だけpreload、二threadの64RFからpayload/scratchを除いて値を割当。final outputsはepilogueまで保持。pure if-conversionのSKIP optimizationだけを省略し、SELECTをlane-wiseで維持。未対応loop/storage/discard/texture formはENOTSUPであり、未実装Vulkan featureは公開しない。
+- Coordinate shaderはclip XYZW+floor-converted .8 viewport XY、render vertexはXY/depth/reciprocal W+fragment canonical varyingsをVPMへ出し、4.2 VPM wait後に終了。fragmentはpayload W/coefficientによるsmooth interpolation、normalized2D/four-float TMU lookup、scoreboard-owning final double switch、float RGBA tile出力、premultiplied source-over、RGBA/BGRA swizzleを生成。full-width constant/push/block/texture/sampler/viewport uniformの各消費をruntime descriptor列へ保存。終了SWと2delay NOPをowned code内へ含める。physical latency/math/texture/cacheの確認は未実施。
+- `sh plan/ws141/tests/shader-host-test.sh build/ws141-i14-shader-final-host` PASS。actual Keiland quad/panelのcoordinate/vertex/fragment、fragmentのblend/swap4組合せを独立Mesa decoder/repackerで全word照合。別scalar IR interpreterとの32input差分（各panel mode/位置、nonunit W）、native uniform消費/TMU4result/TLB4channel/viewport/headerを確認。最後のnative4allocationを各々refuseし、partial binary非公開・全frontend/compiler ownership unwindを確認。普通のhost allocatorだけを置換、production test control無し。mock texture/単一laneはhardware execution・filter/derivatives・SMP/thread/hazardの証拠ではない。
+- named y build `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` exit0、warning/error0、checker3 PASS。log `build/ws141-i14-shader-build.log`。SHA256 `c79948bc3c420ca545fe041394c886274d1b8e606a087f71534d32706465233a`。runtime未接続で未参照compilerはLTO/section GCでimageから除かれるためhashはworker版と同じ。実際のnew source compilationをlogで確認した。
+- clang-format-19/定義引数tab復元、style total0、git diff --check0、既存630hardware rename旧名一致0。追加13Mesa sourceのheader許諾/hashを[license表](rpi4-gpu-license-audit.md#i14-compilerの追加参照2026-10-09)へ保存。p007の全WS最終規約/license/設計類似監査はまだ。
+- i13/p005、i14/p006はin-progress。次はVulkan wire/session/object/reply buffer/nonzero BLOB allocation/pipeline/descriptor/draw CL/queue native payload接続。complete binding後のみCOMMAND/CAPSET/jobsを公開する。Keiland表示と実機whole acceptanceは未達。Master/shared projections/GitHub/T1はQ1、push無し。
