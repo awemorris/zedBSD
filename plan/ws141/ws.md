@@ -161,3 +161,7 @@ Q1最新mainを保持し、object/session/transport/root/queryと承認済みNor
 ## i14 native memory/BLOB checkpoint（2026-10-09）
 
 lazy VkMemory/type0/export/importとactual placement後のNormal NC backing、nonzero BLOB/resourceへのprivate routingを追加。actual client headerでvoidのopcode echo要求を確認しroot destructionを修正。actual VA/MMUを使うhostでindependent owner/budget/OOM/quarantine PASS、rpi4 y build warning/error0。i13/i14とp005/p006はin-progress、COMMAND/CAPSET/JOB未公開。次はbuffer/image/bindingとtyped rendering runtime、Keiland/実機/p007は未達。Masterは更新しない。[結果/復帰点](execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。
+
+## i14 buffer/image/binding checkpoint（2026-10-09）
+
+実client codecでtyped buffer/image・requirements・same-device memory bind・linear colour pitchを追加。actual VA/MMU hostでbinding/prepared ownerの独立保持、logical extentとrequired sizeの区別、bad bind拒否を確認。host3範囲/rpi4 y build/style PASS。次はview/sampler/shader moduleからtyped draw/runtimeへ、COMMAND/CAPSET/JOB未公開、i13/i14/p005/p006 in-progress。Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-bufferimagerequirementsbindingのsoftware出力2026-10-09)。

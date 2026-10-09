@@ -17,6 +17,7 @@
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/vulkan-device.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
+#include "drivers/gpu/bcm2711/vulkan-resource.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
 static struct bcm2711_buffer reply_buffer;
@@ -48,6 +49,10 @@ static unsigned backing_allocations;
 /* One failed native flush closes admission and exercises actual VA quarantine ownership. */
 static unsigned fail_sync;
 
+/* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
+static uint8_t backing_storage[16384];
+
+static void resource_test(struct bcm2711_vulkan_session *session);
 static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
 static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
 static void memory_free(struct bcm2711_vulkan_session *session, uint64_t identity);
@@ -195,7 +200,7 @@ bcm2711_buffer_create_uncached(
 	buffer->bytes = bytes;
 	buffer->memory.size = (bytes + 4095U) & ~4095ULL;
 	buffer->memory.paddr = 0x100000;
-	buffer->address = buffer;
+	buffer->address = backing_storage;
 	buffer->uncached = true;
 	buffer->references = 1;
 	backing_allocations++;
@@ -401,6 +406,7 @@ main(
 	queue = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUEUE, 40);
 	assert(queue != NULL);
 	memory_test(session, &render);
+	resource_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -516,6 +522,13 @@ dispatch(
 	error = bcm2711_vulkan_memory_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Native storage requirements and retained memory binding consume their actual typed commands. */
+	error = bcm2711_vulkan_resource_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
 	if (handled == 0)
 		return ENOTSUP;
 
@@ -538,6 +551,9 @@ begin(
 	memset(writer, 0, sizeof(*writer));
 	writer->data = storage;
 	writer->capacity = capacity;
+
+	/* The actual native context negotiates opaque allocation capabilities before encoding public external declarations. */
+	writer->external_memory_type = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
 	vulkan_command_begin(writer, opcode);
 	assert(requested == 1 && writer->bytes == sizeof(header));
 	memcpy(header, writer->data, sizeof(header));
@@ -670,7 +686,7 @@ encode_queue(
 	vulkan_write_u64(writer, identity);
 }
 
-/* Destroys an actual typed native root through its empty-parameter-reply Vulkan command. */
+/* Destroys an actual typed native root or resource through its ordinary echoed-opcode command. */
 static void
 destroy(
 	struct bcm2711_vulkan_session *session,
@@ -684,6 +700,8 @@ destroy(
 
 	/* Native allocation callbacks remain absent and implicit child identities retire inside the actual command. */
 	begin(&writer, wire, sizeof(wire), opcode, 1);
+	if (opcode == GPU_OP_DESTROY_BUFFER || opcode == GPU_OP_DESTROY_IMAGE)
+		vulkan_write_u64(&writer, 30);
 	vulkan_write_u64(&writer, identity);
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
@@ -864,4 +882,148 @@ memory_free(
 	vulkan_write_u64(&writer, 0);
 	error = execute(session, &writer, &reader);
 	assert(error == 0 && reply_storage[0] == GPU_OP_FREE_MEMORY);
+}
+
+/* Exercises actual buffer/image codecs, immutable raster requirements and independently retained bindings through native source. */
+static void
+resource_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct bcm2711_vulkan_object *buffer;
+	struct bcm2711_vulkan_resource *description;
+	struct bcm2711_v3d_view *view;
+	struct bcm2711_buffer *blob;
+	struct gpu_blob_create request;
+	VkBufferCreateInfo buffer_info;
+	VkImageCreateInfo image_info;
+	VkExternalMemoryImageCreateInfo external_image;
+	VkMemoryRequirements requirements;
+	VkImageSubresource subresource;
+	VkSubresourceLayout layout;
+	uint8_t wire[1024];
+	void *cpu;
+	uint32_t address;
+	unsigned baseline;
+	int error;
+
+	/* The real buffer record creates a 65-byte public extent with a 128-byte native allocation requirement. */
+	baseline = allocations;
+	memset(&buffer_info, 0, sizeof(buffer_info));
+	buffer_info.sType = VK_STRUCTURE_TYPE_BUFFER_CREATE_INFO;
+	buffer_info.size = 65;
+	buffer_info.usage = VK_BUFFER_USAGE_VERTEX_BUFFER_BIT;
+	buffer_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_BUFFER, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkBufferCreateInfo(&writer, &buffer_info);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 60);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	assert(vulkan_read_u64(&reader) == 1 && vulkan_read_u64(&reader) == 60);
+	buffer = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, 60);
+	assert(buffer != NULL);
+	description = buffer->payload;
+	assert(description->bytes == 65 && description->required_bytes == 128 && description->memory == NULL);
+
+	/* The actual client requirement decoder receives exact size/alignment/native coherent type bit. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_BUFFER_MEMORY_REQUIREMENTS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 60);
+	vulkan_write_u64(&writer, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u64(&reader) == 1);
+	vulkan_decode_VkMemoryRequirements(&reader, &requirements);
+	assert(reader.error == VK_SUCCESS && requirements.size == 128 && requirements.alignment == 64 && requirements.memoryTypeBits == 1);
+
+	/* A linear non-square image reports one exact colour subresource, with native 64-byte row alignment. */
+	memset(&image_info, 0, sizeof(image_info));
+	image_info.sType = VK_STRUCTURE_TYPE_IMAGE_CREATE_INFO;
+	memset(&external_image, 0, sizeof(external_image));
+	external_image.sType = VK_STRUCTURE_TYPE_EXTERNAL_MEMORY_IMAGE_CREATE_INFO;
+	external_image.handleTypes = VK_EXTERNAL_MEMORY_HANDLE_TYPE_OPAQUE_FD_BIT;
+	image_info.pNext = &external_image;
+	image_info.imageType = VK_IMAGE_TYPE_2D;
+	image_info.format = VK_FORMAT_B8G8R8A8_UNORM;
+	image_info.extent.width = 17;
+	image_info.extent.height = 3;
+	image_info.extent.depth = 1;
+	image_info.mipLevels = 1;
+	image_info.arrayLayers = 1;
+	image_info.samples = VK_SAMPLE_COUNT_1_BIT;
+	image_info.tiling = VK_IMAGE_TILING_LINEAR;
+	image_info.usage = VK_IMAGE_USAGE_SAMPLED_BIT | VK_IMAGE_USAGE_TRANSFER_DST_BIT;
+	image_info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_IMAGE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageCreateInfo(&writer, &image_info);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 61);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	memset(&subresource, 0, sizeof(subresource));
+	subresource.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_IMAGE_SUBRESOURCE_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 61);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkImageSubresource(&writer, &subresource);
+	vulkan_write_u64(&writer, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u64(&reader) == 1);
+	vulkan_decode_VkSubresourceLayout(&reader, &layout);
+	assert(reader.error == VK_SUCCESS && layout.offset == 0 && layout.rowPitch == 128 && layout.size == 384);
+
+	/* Coherent allocation backing is created before binding through the actual native memory/BLOB path. */
+	error = memory_allocate(session, 62, 8192, 0, 0);
+	assert(error == VK_SUCCESS);
+	memset(&request, 0, sizeof(request));
+	request.blob_id = 62;
+	request.bytes = 8192;
+	request.flags = GPU_BLOB_MAPPABLE;
+	error = bcm2711_vulkan_memory_blob(session, &request, NULL, &blob);
+	assert(error == 0);
+
+	/* A misaligned bind refuses the operation without acquiring an allocation or changing the resource. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_BUFFER_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 60);
+	vulkan_write_u64(&writer, 62);
+	vulkan_write_u64(&writer, 1);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_OUT_OF_DEVICE_MEMORY && description->memory == NULL);
+	begin(&writer, wire, sizeof(wire), GPU_OP_BIND_BUFFER_MEMORY, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 60);
+	vulkan_write_u64(&writer, 62);
+	vulkan_write_u64(&writer, 64);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && description->offset == 64);
+
+	/* The binding retains the typed allocation after its public memory identity and separate BLOB hold retire. */
+	memory_free(session, 62);
+	bcm2711_buffer_release(blob);
+	error = bcm2711_vulkan_resource_backing(description, 1, 64, &view, &address, &cpu);
+	assert(error == 0 && address == view->address + 65 && cpu == backing_storage + 65);
+	error = bcm2711_vulkan_resource_backing(description, 65, 1, &view, &address, &cpu);
+	assert(error == EINVAL && view == NULL && address == 0 && cpu == NULL);
+
+	/* A prepared native owner survives registry destruction with its exact resource and memory binding intact. */
+	error = bcm2711_vulkan_object_retain(buffer);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_BUFFER, 60);
+	assert(buffer->references == 1 && session->render->device->vulkan_memory_bytes == 8192);
+	error = bcm2711_vulkan_resource_backing(description, 0, 65, &view, &address, &cpu);
+	assert(error == 0 && cpu == backing_storage + 64);
+	error = bcm2711_vulkan_object_release(buffer);
+	assert(error == 0 && session->render->device->vulkan_memory_bytes == 0);
+	destroy(session, GPU_OP_DESTROY_IMAGE, 61);
+	assert(allocations == baseline && session->render->device->space.views == NULL);
+	puts("WS141 Vulkan actual buffer/image layout/requirements/binding/prepared owner: PASS");
 }

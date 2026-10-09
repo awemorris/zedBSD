@@ -13,7 +13,7 @@ cc -std=c99 -D_POSIX_C_SOURCE=200809L -include time.h -Wall -Wextra -Werror \
     plan/ws141/tests/vulkan-device-host-test.c plan/ws141/tests/display-lock-host.c \
     src/drivers/gpu/bcm2711/vulkan-object.c src/drivers/gpu/bcm2711/vulkan-session.c \
     src/drivers/gpu/bcm2711/vulkan-stream.c src/drivers/gpu/bcm2711/vulkan-device.c \
-    src/drivers/gpu/bcm2711/vulkan-query.c src/drivers/gpu/bcm2711/vulkan-memory.c \
+    src/drivers/gpu/bcm2711/vulkan-query.c src/drivers/gpu/bcm2711/vulkan-memory.c src/drivers/gpu/bcm2711/vulkan-resource.c \
     src/drivers/gpu/bcm2711/v3d-memory.c src/drivers/gpu/bcm2711/mmu.c src/drivers/gpu/i915/render/codec.c \
     userland/desktop/libvulkan/wire.c userland/desktop/libvulkan/codec.c \
     -Wl,--gc-sections -o "$out/vulkan-device-host-test"

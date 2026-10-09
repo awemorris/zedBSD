@@ -52,3 +52,7 @@ shared4 pathの限定承認を得てGPU/VM mappingへNormal NC RAMを追加。pr
 ## native VkMemoryとのnonzero BLOB接続（2026-10-09）
 
 p006のlazy coherent allocation/view出力へ、nonzero BLOBを同session typed identityで接続。actual first-export placementをRAM確保前に検証し、元memory/view/resourceの独立referenceとfailed native flushのquarantineを保持。query256MiBはlive declarationsのbudget、surviving BLOB/VM/shareのphysical heap測定値ではない。actual VA/MMU host/rpi4 y build PASS、private Vulkan pointer/runtime入口はまだ未接続。nextはp006 complete runtimeとdrained final close/public job binding。[依存出力/制限](../execution-20261009.md#i14-vkdevicememoryとplaced-blobのsoftware出力2026-10-09)。p005/i13 in-progress。
+
+## p006 binding所有のscoped出力（2026-10-09）
+
+buffer/imageのexact requirementsとsame-device VkMemory bindingを実装。resource/prepared jobはmemory objectを独立retainし、native view/BLOB/VMと退役を分離する。borrowed native VA/Normal NC CPU resolverはlogical extentを守り、mutex外のjobには独立referenceが必要。actual client/VA/MMU hostで退役順とbad bind拒否を確認、public runtime/worker bindingは後続。[p006詳細](../phase006/phase.md#i14-bufferimagebinding-checkpoint2026-10-09)。p005/i13 in-progress。
