@@ -8,11 +8,23 @@ set -u
 OUT=${OUT:-build/ws197-phone-host}
 mkdir -p "$OUT"
 flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wdeclaration-after-statement -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude -I."
-if ! cc $flags -o "$OUT/bt-phone-host-test" plan/ws197/tests/bt-phone-host-test.c userland/base/bluetoothd/rfcomm.c; then
-	echo "bt-phone-host-test: FAIL (build)"
-	exit 1
-fi
-if timeout 300 "$OUT/bt-phone-host-test"; then
+status=0
+# Each test program: its name and its sources besides the test.
+for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
+	"bt-obex-host-test userland/base/bluetoothd/obex.c"; do
+	set -- $test
+	name=$1
+	shift
+	if ! cc $flags -o "$OUT/$name" "plan/ws197/tests/$name.c" "$@"; then
+		echo "$name: build FAILED"
+		status=1
+		continue
+	fi
+	if ! timeout 300 "$OUT/$name"; then
+		status=1
+	fi
+done
+if [ $status -eq 0 ]; then
 	echo "bt-phone-host-test: PASS"
 else
 	echo "bt-phone-host-test: FAIL"
