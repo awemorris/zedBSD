@@ -3,14 +3,14 @@
 # WS200: Settings の Users の頁のパスワード変更のウィザードと認証方式の選択
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Queue: q922（P1、2026-10-10、WS199 の後）
 Target: **ベータ2**（2026-10-10 ユーザー、クリック「ベータ2 に入れる」）
-Resume point: p001 から。
+Resume point: p001 の T1（T1-（Q1）、WS199 p004 と同じ行）の判定 → p002（5330 の UAT）。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-10 ユーザーの UAT）
@@ -38,5 +38,5 @@ WS199 i01 の popup の部品（userland/desktop/settings/dialog.c）を使う�
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| [p001](phase001/phase.md) | Change Password のウィザードと Sign-in Methods（WS199 の dialog.c と options の行の methods）、host 試験 | planned（WS199 p002 の後、約 6 LW） |
+| [p001](phase001/phase.md) | Change Password のウィザードと Sign-in Methods（WS199 の dialog.c と options の行の methods）、host 試験 | cleared 候補・test-wait（9b2ac1b99） |
 | [p002](phase002/phase.md) | 5330 の UAT | planning |
