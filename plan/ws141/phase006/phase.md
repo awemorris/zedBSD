@@ -90,3 +90,7 @@ actual client selected-field framing/generated copy recordでordered writes/copi
 ## i14 target checkpoint（2026-10-09）
 
 single-colour render pass/framebufferをactual client recordへ接続。clear/load/present mapping/backdrop dependencyを保持、bounded native target compatibility/ownershipとprepared graphを確認。host8範囲/RPi4 y build/style PASS、public runtime未公開、p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-render-passframebufferのsoftware出力2026-10-09)。next compiled graphics pipeline/recorded native draw/queue/common binding。
+
+## i14 compiled pipeline checkpoint（2026-10-09）
+
+same-device module/layout/passとactual native compilerを接続。唯一main entry/stage・canonical varying/FIFO・descriptor/push permission・attribute interfaceを確認しpartial compile/OOMを全退役。host9範囲/RPi4 y build/style PASS。wire create/destroy/public runtimeは未接続、native codeのGPU uploadはprepared draw ownerの後続責務。p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-compiled-pipeline-graphのsoftware出力2026-10-09)。
