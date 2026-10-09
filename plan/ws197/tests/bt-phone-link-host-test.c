@@ -197,6 +197,8 @@ struct heard {
 	int sdp_error;
 	unsigned channel;
 	unsigned opened;
+	unsigned opened_channel;
+	int ours;
 	unsigned dlci;
 	unsigned closed;
 	unsigned open_failed;
@@ -252,7 +254,7 @@ static int fake_ob_target(void *context, const uint8_t *target, size_t length);
 static void heard_ready(void *context);
 static void heard_ended(void *context);
 static void heard_sdp(void *context, const struct btd_sdp *sdp, int error);
-static void heard_opened(void *context, unsigned dlci);
+static void heard_opened(void *context, unsigned dlci, unsigned server_channel, int ours);
 static void heard_closed(void *context, unsigned dlci, int reason);
 static void heard_failed(void *context, unsigned server_channel);
 static void give_event(uint8_t code, const uint8_t *parameters, size_t length);
@@ -265,6 +267,7 @@ static void page_to_ready(uint64_t now);
 static int no_bridge(void *context, int *descriptor);
 static void no_told(void *context, const uint8_t *address, const char *line);
 static void make_address(uint8_t *address, uint8_t last);
+static int mns_record_offered(void);
 static size_t mas_record(uint8_t *bytes, size_t size);
 static int hand_over(uint8_t key_type, unsigned key_size, int have_class, uint32_t class_of_device, const char **why);
 static void hand_notice(uint16_t handle, uint8_t flags, uint16_t cid);
@@ -1250,6 +1253,7 @@ test_profile(void)
 	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
 	exchange();
 	check(world.phone.state == BTD_PHONE_READY && world.phone.present && world.heard.ready == 1U, "profile: told at the handoff");
+	check(mns_record_offered(), "profile: the MNS record offered while ready");
 	btd_phone_set_seat(&world.phone, 1, TEST_UID, btd_now_ms());
 	check(world.heard.ready == 1U, "profile: told once");
 
@@ -1267,12 +1271,14 @@ test_profile(void)
 	exchange();
 	check(world.phone.rfcomm_active && world.fake.rfcomm_active, "profile: the RFCOMM session up");
 	check(world.heard.opened == 1U && world.heard.dlci == 2U * TEST_MAS_CHANNEL, "profile: the DLC opened");
+	check(world.heard.opened_channel == TEST_MAS_CHANNEL && world.heard.ours == 1, "profile: the DLC's channel, opened by bluetoothd");
 
 	/* The owner leaves: the link ends, the profile hears its DLC and the end. */
 	btd_phone_set_seat(&world.phone, 0, 0, btd_now_ms());
 	check(world.phone.state == BTD_PHONE_CLOSING && commands_of(TEST_DISCONNECT) == 1U, "profile: the owner gone, the link ended");
 	give_handle_event(TEST_EVENT_DISCONNECTED, 0x00U, TEST_HANDLE, 0x16U, 1);
 	check(world.phone.state == BTD_PHONE_NONE && world.heard.ended == 1U && world.heard.closed >= 1U, "profile: the end heard");
+	check(!mns_record_offered() && !world.phone.mns_registered, "profile: the MNS record withdrawn with the link");
 	check(world.phone.stopped && strcmp(world.phone.why, "absent") == 0, "profile: no page while the owner is away");
 	error = btd_phone_dlc_open(&world.phone, TEST_MAS_CHANNEL, btd_now_ms());
 	check(error == ENOTCONN, "profile: no DLC without a link");
@@ -1694,13 +1700,17 @@ heard_sdp(
 static void
 heard_opened(
 	void *context,
-	unsigned dlci)
+	unsigned dlci,
+	unsigned server_channel,
+	int ours)
 {
 	UNUSED_PARAMETER(context);
 
-	/* Counted, its DLCI kept. */
+	/* Counted, its DLCI, server channel and opener kept. */
 	world.heard.opened++;
 	world.heard.dlci = dlci;
+	world.heard.opened_channel = server_channel;
+	world.heard.ours = ours;
 }
 
 /* The profile heard a DLC close. */
@@ -2007,4 +2017,44 @@ write_record(
 		fprintf(stderr, "btd_phonerec_write: %s\n", strerror(error));
 		exit(2);
 	}
+}
+
+/*
+ * Tells whether the SDP server offers bluetoothd's MNS record, its
+ * attributes byte for byte as written by hand from MAP section 7.1.2 and
+ * Core Vol 3 Part B sections 3 and 5.1 (sequences with a two-byte length,
+ * 0x36, as bluetoothd's writer makes them; the SDP server puts the handle
+ * first and the public browse group before 0x0006).
+ */
+static int
+mns_record_offered(void)
+{
+	static const uint8_t expected[] = {
+		0x09U, 0x00U, 0x00U, 0x0aU, 0x00U, 0x01U, 0x00U, 0x00U,
+		0x09U, 0x00U, 0x01U, 0x36U, 0x00U, 0x03U, 0x19U, 0x11U, 0x33U,
+		0x09U, 0x00U, 0x04U, 0x36U, 0x00U, 0x14U,
+		0x36U, 0x00U, 0x03U, 0x19U, 0x01U, 0x00U,
+		0x36U, 0x00U, 0x05U, 0x19U, 0x00U, 0x03U, 0x08U, 0x10U,
+		0x36U, 0x00U, 0x03U, 0x19U, 0x00U, 0x08U,
+		0x09U, 0x00U, 0x05U, 0x36U, 0x00U, 0x03U, 0x19U, 0x10U, 0x02U,
+		0x09U, 0x00U, 0x06U, 0x36U, 0x00U, 0x09U, 0x09U, 0x65U, 0x6eU, 0x09U, 0x00U, 0x6aU, 0x09U, 0x01U, 0x00U,
+		0x09U, 0x00U, 0x09U, 0x36U, 0x00U, 0x09U, 0x36U, 0x00U, 0x06U, 0x19U, 0x11U, 0x34U, 0x09U, 0x01U, 0x01U,
+		0x09U, 0x01U, 0x00U, 0x25U, 0x0bU, 'K', 'e', 'i', 'l', 'a', 'n', 'd', ' ', 'M', 'N', 'S'
+	};
+	unsigned index;
+	int same;
+
+	/* Each record offered: the MNS's, byte for byte. */
+	for (index = 0U; index < BTD_SDPS_RECORDS_MAX; index++) {
+		if (!world.records.records[index].used)
+			continue;
+		if (world.records.records[index].length != sizeof(expected))
+			continue;
+		same = memcmp(world.records.records[index].attributes, expected, sizeof(expected));
+		if (same == 0)
+			return 1;
+	}
+
+	/* Not offered. */
+	return 0;
 }

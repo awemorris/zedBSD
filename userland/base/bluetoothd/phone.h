@@ -116,7 +116,8 @@ struct btd_phone_hooks {
  * later): told when the link is ready for it (secured, its owner at the
  * seat) and when it ends, the end of its SDP query (error 0: the records
  * in sdp), whether a server channel of bluetoothd's is offered to the
- * phone, and its DLCs: opened, data, writable again, closed (a DLC asked
+ * phone, and its DLCs: opened (with its server channel, and whether
+ * bluetoothd opened it), data, writable again, closed (a DLC asked
  * for whose RFCOMM session never came up is told as open_failed with its
  * server channel).
  */
@@ -126,7 +127,7 @@ struct btd_phone_profile {
 	void (*ended)(void *context);
 	void (*sdp_done)(void *context, const struct btd_sdp *sdp, int error);
 	int (*accept)(void *context, unsigned server_channel);
-	void (*opened)(void *context, unsigned dlci);
+	void (*opened)(void *context, unsigned dlci, unsigned server_channel, int ours);
 	void (*data)(void *context, unsigned dlci, const uint8_t *data, size_t length);
 	void (*writable)(void *context, unsigned dlci);
 	void (*closed)(void *context, unsigned dlci, int reason);
@@ -160,7 +161,7 @@ struct btd_phone {
 	struct btd_session *session;
 	struct btd_router *router;
 	struct btd_hid *hid;
-	const struct btd_sdps_db *db;
+	struct btd_sdps_db *db;
 	const char *keys_folder;
 	struct btd_phone_hooks hooks;
 
@@ -225,6 +226,14 @@ struct btd_phone {
 	 */
 	int have_profile;
 	struct btd_phone_profile profile;
+
+	/*
+	 * bluetoothd's MNS record in the SDP server (ws197-p003 section 8.7):
+	 * whether it is offered, and its handle.  Offered while the link is
+	 * ready and the record's messages are on.
+	 */
+	int mns_registered;
+	uint32_t mns_handle;
 	int profile_started;
 	uint16_t sdp_uuid;
 	unsigned pending_count;
@@ -278,7 +287,8 @@ struct btd_phone {
 	unsigned refused;
 };
 
-void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, const struct btd_sdps_db *db, const char *keys_folder, const struct btd_phone_hooks *hooks);
+void btd_phone_init(struct btd_phone *phone, struct btd_session *session, struct btd_router *router, struct btd_hid *hid, struct btd_sdps_db *db, const char *keys_folder, const struct btd_phone_hooks *hooks);
+void btd_phone_profile_ok(struct btd_phone *phone);
 void btd_phone_set_profile(struct btd_phone *phone, const struct btd_phone_profile *profile);
 void btd_phone_set_seat(struct btd_phone *phone, int have_seat, uid_t uid, uint64_t now);
 void btd_phone_resume(struct btd_phone *phone, uint64_t now);

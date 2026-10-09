@@ -181,6 +181,8 @@ static int phone_take_record(struct btd_phone *phone, const struct btd_pair_hand
 static void phone_limit(struct btd_phone *phone);
 static const char *phone_link_name(const struct btd_phone *phone);
 static void phone_profiles_text(unsigned profiles, char *text, size_t size);
+static void phone_mns_update(struct btd_phone *phone);
+static size_t phone_mns_record(uint8_t *bytes, size_t size);
 
 /*
  * Prepares the phone link of a session: no record read, no seat, no
@@ -192,7 +194,7 @@ btd_phone_init(
 	struct btd_session *session,
 	struct btd_router *router,
 	struct btd_hid *hid,
-	const struct btd_sdps_db *db,
+	struct btd_sdps_db *db,
 	const char *keys_folder,
 	const struct btd_phone_hooks *hooks)
 {
@@ -206,6 +208,19 @@ btd_phone_init(
 	phone->hooks = *hooks;
 	phone->state = BTD_PHONE_NONE;
 	btd_l2cap_init(&phone->l2cap);
+}
+
+/*
+ * Notes that the profile came up on the link (MAP ready, ws197-p003
+ * section 5.2): the waits between pages start from the first again.
+ */
+void
+btd_phone_profile_ok(
+	struct btd_phone *phone)
+{
+	/* Succeeded: the wait and the run of short links forgotten. */
+	phone->backoff_step = 0U;
+	phone->peer_closed = 0U;
 }
 
 /* Sets the profile that uses the phone's link (ws197-p003 section 5.8). */
@@ -1057,9 +1072,10 @@ btd_phone_forget(
 }
 
 /*
- * Writes the line of PHONE SHOW (ws197-p003 section 9.2): the whole state
- * to the owner and root, the address and the switch to another the daemon
- * lets change things.  Returns 0, or ENOENT when there is no record or
+ * Writes the line of PHONE SHOW (ws197-p003 section 9.2) up to the link's
+ * state (the daemon adds MAP's part and why): the whole state to the
+ * owner and root, the address and the switch to another the daemon lets
+ * change things.  Returns 0, or ENOENT when there is no record or
  * nothing to show to that uid.
  */
 int
@@ -1106,12 +1122,13 @@ btd_phone_show(
 	/* Succeeded: the whole line. */
 	(void)snprintf(line,
 		       size,
-		       "PHONE address=%s owner=%s mine=%d enabled=%d profiles=%s present=0 link=%s messages=off send=0 notify=0",
+		       "PHONE address=%s owner=%s mine=%d enabled=%d profiles=%s present=%d link=%s",
 		       address,
 		       owner,
 		       mine,
 		       phone->record.enabled,
 		       profiles,
+		       phone->present,
 		       phone_link_name(phone));
 	return 0;
 }
@@ -1226,6 +1243,9 @@ phone_presence(
 {
 	struct btd_linkmgr *linkmgr;
 	int present;
+
+	/* bluetoothd's MNS record follows the record's messages. */
+	phone_mns_update(phone);
 
 	/* Wanted: a valid record that is on, its owner at the seat. */
 	present = 0;
@@ -1951,6 +1971,9 @@ phone_ready(
 	if (error == 0 && length != 0U)
 		(void)phone_send(phone, BTD_CID_SIGNALLING, answer, length);
 
+	/* bluetoothd's MNS record offered, for a phone that reads the records at once. */
+	phone_mns_update(phone);
+
 	/* Succeeded: the profile, when the owner is there. */
 	phone_profile_ready(phone);
 }
@@ -2587,8 +2610,11 @@ phone_ended(
 	phone->secure_step = 0U;
 	phone->stop_wanted = 0;
 
-	/* Succeeded: no link (the HID host's limit follows the record, not the link). */
+	/* No link (the HID host's limit follows the record, not the link). */
 	phone->state = BTD_PHONE_NONE;
+
+	/* Succeeded: bluetoothd's MNS record withdrawn with the link. */
+	phone_mns_update(phone);
 }
 
 /*
@@ -2829,12 +2855,20 @@ phone_rf_opened(
 	void *context,
 	unsigned dlci)
 {
+	const struct btd_rfcomm_dlc *dlc;
 	struct btd_phone *phone;
+	int ours;
 
-	/* Succeeded: the profile hears it. */
+	/* Whether bluetoothd opened it (the phone's server channel) or the phone (bluetoothd's). */
 	phone = context;
+	ours = 0;
+	dlc = btd_rfcomm_dlc(&phone->rfcomm, dlci);
+	if (dlc != NULL)
+		ours = dlc->ours;
+
+	/* Succeeded: the profile hears it, with its server channel (the DLCI's upper five bits). */
 	if (phone->have_profile && phone->profile.opened != NULL)
-		phone->profile.opened(phone->profile.context, dlci);
+		phone->profile.opened(phone->profile.context, dlci, dlci >> 1, ours);
 }
 
 /* RFCOMM's data of a DLC: to the profile. */
@@ -3107,4 +3141,116 @@ phone_profiles_text(
 
 	/* The last comma goes. */
 	text[used - 1U] = '\0';
+}
+
+/*
+ * Offers or withdraws bluetoothd's MNS record (ws197-p003 section 8.7):
+ * offered while the link is ready and the valid record's messages are on
+ * and enabled, withdrawn otherwise.  A record that cannot be offered is
+ * logged by its absence only (the phone then sends no notifications).
+ */
+static void
+phone_mns_update(
+	struct btd_phone *phone)
+{
+	uint8_t pairs[BTD_SDPS_RECORD_MAX];
+	size_t length;
+	int wanted;
+	int error;
+
+	/* Wanted: a ready link, a valid record with messages, enabled. */
+	wanted = 0;
+	if (phone->state == BTD_PHONE_READY &&
+	    phone->have_record &&
+	    phone->record_valid &&
+	    phone->record.enabled &&
+	    (phone->record.profiles & BTD_PHONEREC_MESSAGES) != 0U)
+		wanted = 1;
+
+	/* No database to offer it in. */
+	if (phone->db == NULL)
+		return;
+
+	/* Withdrawn. */
+	if (!wanted) {
+		if (phone->mns_registered)
+			(void)btd_sdps_unregister(phone->db, phone->mns_handle);
+		phone->mns_registered = 0;
+		return;
+	}
+
+	/* Offered already. */
+	if (phone->mns_registered)
+		return;
+
+	/* Offered. */
+	length = phone_mns_record(pairs, sizeof(pairs));
+	error = btd_sdps_register(phone->db, pairs, length, &phone->mns_handle);
+	if (error != 0)
+		return;
+
+	/* Succeeded: offered. */
+	phone->mns_registered = 1;
+}
+
+/*
+ * Writes the attribute pairs of bluetoothd's MNS record (MAP section
+ * 7.1.2, Q16 (a)): the class 0x1133, L2CAP and RFCOMM channel 16 and OBEX,
+ * the language base (English, UTF-8, 0x0100), MAP 1.1, the name.  The
+ * handle and the browse group are the SDP server's.  Gives the length.
+ */
+static size_t
+phone_mns_record(
+	uint8_t *bytes,
+	size_t size)
+{
+	struct btd_sdp_writer writer;
+
+	/* ServiceClassIDList: the MNS. */
+	btd_sdp_writer_init(&writer, bytes, size);
+	btd_sdp_put_uint16(&writer, 0x0001U);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x1133U);
+	btd_sdp_end(&writer);
+
+	/* ProtocolDescriptorList: L2CAP, RFCOMM on channel 16, OBEX. */
+	btd_sdp_put_uint16(&writer, 0x0004U);
+	btd_sdp_begin(&writer);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x0100U);
+	btd_sdp_end(&writer);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x0003U);
+	btd_sdp_put_uint8(&writer, (uint8_t)BTD_PHONE_MNS_CHANNEL);
+	btd_sdp_end(&writer);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x0008U);
+	btd_sdp_end(&writer);
+	btd_sdp_end(&writer);
+
+	/* LanguageBaseAttributeIDList: "en", UTF-8 (MIBenum 106), the base 0x0100. */
+	btd_sdp_put_uint16(&writer, 0x0006U);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uint16(&writer, 0x656eU);
+	btd_sdp_put_uint16(&writer, 0x006aU);
+	btd_sdp_put_uint16(&writer, 0x0100U);
+	btd_sdp_end(&writer);
+
+	/* BluetoothProfileDescriptorList: MAP 1.1. */
+	btd_sdp_put_uint16(&writer, 0x0009U);
+	btd_sdp_begin(&writer);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x1134U);
+	btd_sdp_put_uint16(&writer, 0x0101U);
+	btd_sdp_end(&writer);
+	btd_sdp_end(&writer);
+
+	/* ServiceName. */
+	btd_sdp_put_uint16(&writer, 0x0100U);
+	btd_sdp_put_text(&writer, "Keiland MNS");
+
+	/* Succeeded: the pairs' length (0 when they did not fit, which register refuses). */
+	if (writer.overflow)
+		return 0U;
+	return writer.used;
 }
