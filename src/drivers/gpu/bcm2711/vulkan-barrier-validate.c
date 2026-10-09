@@ -9,6 +9,7 @@
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/vulkan-barrier.h"
+#include "drivers/gpu/bcm2711/vulkan-memory.h"
 
 /* All admitted operations complete serially; stages unsupported by the native advertised graphics features remain refused. */
 #define BARRIER_STAGES (VK_PIPELINE_STAGE_TOP_OF_PIPE_BIT | VK_PIPELINE_STAGE_DRAW_INDIRECT_BIT | VK_PIPELINE_STAGE_VERTEX_INPUT_BIT | VK_PIPELINE_STAGE_VERTEX_SHADER_BIT | VK_PIPELINE_STAGE_FRAGMENT_SHADER_BIT | VK_PIPELINE_STAGE_EARLY_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_LATE_FRAGMENT_TESTS_BIT | VK_PIPELINE_STAGE_COLOR_ATTACHMENT_OUTPUT_BIT | VK_PIPELINE_STAGE_TRANSFER_BIT | VK_PIPELINE_STAGE_BOTTOM_OF_PIPE_BIT | VK_PIPELINE_STAGE_HOST_BIT | VK_PIPELINE_STAGE_ALL_GRAPHICS_BIT | VK_PIPELINE_STAGE_ALL_COMMANDS_BIT)
@@ -17,6 +18,7 @@
 #define BARRIER_ACCESS 0x1ffffU
 
 static int validate_entry(const struct bcm2711_vulkan_barrier_entry *entry, struct bcm2711_vulkan_object *device);
+static int validate_family(const struct bcm2711_vulkan_barrier_entry *entry, const struct bcm2711_vulkan_resource *resource);
 static int validate_image(const struct bcm2711_vulkan_barrier_entry *entry, const struct bcm2711_vulkan_resource *resource);
 static int colour_layout(VkImageLayout layout, bool destination);
 
@@ -78,14 +80,13 @@ validate_entry(
 	if (entry->object == NULL)
 		return 0;
 
-	/* The only queue family is zero; ignored ownership and same-family barriers need no external provider transfer. */
-	if (entry->source_family != entry->destination_family)
-		return ENOTSUP;
-	if (entry->source_family != 0 && entry->source_family != VK_QUEUE_FAMILY_IGNORED)
-		return ENOTSUP;
+	/* Every dependency selects same-device bound storage before any internal or external ownership scope can be admitted. */
 	resource = entry->object->payload;
 	if (resource->device != device || resource->memory == NULL)
 		return EINVAL;
+	error = validate_family(entry, resource);
+	if (error != 0)
+		return error;
 
 	/* Bound buffer selections cover nonempty exact ranges or the rest of the logical allocation. */
 	if (entry->object->kind == I915_VK_OBJ_BUFFER) {
@@ -103,6 +104,42 @@ validate_entry(
 	}
 
 	/* Succeeded: this dependency can retain its same-device resource independently of the public handle. */
+	return 0;
+}
+
+/* Admits the sole graphics family and explicit external sharing only for an allocation declared for the native shared-memory contract. */
+static int
+validate_family(
+	const struct bcm2711_vulkan_barrier_entry *entry,
+	const struct bcm2711_vulkan_resource *resource)
+{
+	const struct bcm2711_vulkan_memory *memory;
+	uint32_t external;
+
+	/* Equal zero or ignored indices order the same native family and perform no ownership transfer. */
+	if (entry->source_family == entry->destination_family) {
+		if (entry->source_family != 0 && entry->source_family != VK_QUEUE_FAMILY_IGNORED)
+			return ENOTSUP;
+		return 0;
+	}
+
+	/* A real ownership transfer always connects the single native family to one explicit external endpoint. */
+	if (entry->source_family == 0) {
+		external = entry->destination_family;
+	} else if (entry->destination_family == 0) {
+		external = entry->source_family;
+	} else {
+		return ENOTSUP;
+	}
+
+	/* Foreign queues and unrelated family indices have no implemented provider or cache-visibility contract. */
+	if (external != BCM2711_VULKAN_EXTERNAL_FAMILY)
+		return ENOTSUP;
+	memory = resource->memory->payload;
+	if (memory->external_type == 0)
+		return EINVAL;
+
+	/* Succeeded: exact coherent shared storage uses whole native completion and callback/timeline ordering at the external boundary. */
 	return 0;
 }
 

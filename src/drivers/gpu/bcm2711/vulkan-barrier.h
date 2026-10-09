@@ -15,6 +15,9 @@
 /* One node bounds the combined memory, buffer and image arrays, including Keiland's batch of thirty-two imports. */
 #define BCM2711_VULKAN_BARRIERS 64U
 
+/* The core/KHR external-family token is absent from the shared generated header; existing native WSI encodes this standardized value. */
+#define BCM2711_VULKAN_EXTERNAL_FAMILY 0xfffffffeU
+
 /* One immutable full-colour or buffer dependency owns its exact typed resource until the primary graph retires. */
 struct bcm2711_vulkan_barrier_entry {
 	struct bcm2711_vulkan_object *object;

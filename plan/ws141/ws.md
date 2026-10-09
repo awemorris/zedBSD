@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i14 whole pending job/closed-session recovery＋explicit barrier/implicit pass initial-final layoutをFIFOへ接続。actual public barrier encoder/runtime host19範囲/close-reset host/final named y warning/error0 PASS。次はnative transfer/copy/clear、primary QueueSubmit/public dispatch/common binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-explicit-barrierとimplicit-pass-layoutのsoftware出力2026-10-09)。
+Resume point: i14 whole pending job/closed-session recovery、explicit barrier/implicit pass layouts＋qualified external-family sharingを接続。actual public barrier/typed memory host19範囲/close-reset host/named y warning/error0 PASS。次はGPU copy/clear/blit meta lowering、primary QueueSubmit/public runtime/common binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-external-family共有メモリのadmission-checkpoint2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
