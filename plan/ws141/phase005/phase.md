@@ -91,3 +91,8 @@ actual public CopyBufferのcomplete typed byte vectorをpending primaryへ保持
 ## coherent buffer-image transfer checkpoint（2026-10-10）
 
 actual public upload/readbackをimmutable pending primaryとFIFO Normal NC CPU行copyへ接続。部分upload/packedとpadded readback/unused padding alias/late invalid region/OOM/layout failure不変/whole pending lifetimeをactual host23範囲で確認。RPi4 y warning/error0/checks3/scoped style0/diff0 PASS。native GPU launch無し。queue/fence/semaphore/public/common binding・final runtime stack/p007・実機/Keilandが残り、in-progress/incompleteを維持。Master変更無し。[正確な範囲/検証/復帰点](../execution-20261009.md#i14-coherent-buffer-image-uploadreadbackのsoftware出力2026-10-10)。
+
+
+## core sync checkpoint（2026-10-10）
+
+native fence/binary semaphoreのtyped device ownership、初期状態/status/atomic reset/destruction/OOMを実装。実client codec/transport＋明示pending/fault modelのhost24範囲、RPi4 y checks3/warning-error0/scoped style0 PASS。QueueSubmit completion/common marker/public binding/Keiland/physical/final runtime stack/p007は残り、in-progress/incompleteを維持。Master変更無し。[詳細/検証/復帰点](../execution-20261009.md#i14-core-fencebinary-semaphoreのsoftware出力2026-10-10)。
