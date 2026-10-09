@@ -100,7 +100,8 @@ for criterion in $criteria; do
 	case $criterion in
 	C1)
 		# Login and Log Out (black pictures fail the run), then the boot and Shut Down (ws099-p004; starts its own guest).
-		run C1 p126 1280x800 sh plan/ws035/tests/zdesktop-p126.sh "$out/c1" "$C1_CYCLES" --no-black
+		# Named c1-p126 so that C9's p126 does not write over its log and its failure files (T1-477).
+		run C1 c1-p126 1280x800 sh plan/ws035/tests/zdesktop-p126.sh "$out/c1" "$C1_CYCLES" --no-black
 		began=$(date +%s)
 		sh plan/ws099/tests/c1-boot-shutdown.sh "$image" "$out/c1-boot" > "$out/c1-boot-shutdown.log" 2>&1
 		code=$?

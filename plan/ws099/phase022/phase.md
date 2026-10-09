@@ -46,5 +46,5 @@ T1-477（image の tree 0d39d675e）: C4・C8・C9 PASS、C1 p126・C2・C3 c3-s
 | C7 | 全 70 の FAIL は Settings・Files の窓が無い画面の測定（Aurora-settings.png は壁紙だけ）。`$ends; … /bin/settings …` の guest の shell の行が BUG-274 の後の `ps -o args` で `[s]ettings` に当たり、shell が自分を kill して Settings・Files を起動しなかった | 試験（ps の args の変更） | `ps -o pid,comm`（argv[0]）で `(^|/)(wayland|popup-probe|settings|files)$` を終える（fake の ps で host 確認） |
 | C1 p126 | 最初の boot の自動 login の session が 30 秒以内に READY を出さず（`HANDOFF session ready=0 waited_ms=30001`、GO 無し）、`HANDOFF go written=3` の最初の待ちが MISSING。その後の 2 回の login・logout は黒 0・文字 0。同じ image の C9 の p126 は `ready=1 waited_ms=1485` で PASS | 未再現（1 回だけ） | 直し無し。T1 の再試験で C1 を見る。再現したら gdbstub で session の compositor の READY の前を止めて見る（推定: image の最初の起動で host の Venus の pipeline の compile が冷えていた） |
 
-注: criteria.sh の C1 と C9 の p126 はどちらも `$out/p126.log` に書くので、C1 の log は C9 の物で上書きされる（results.txt と c1/ の出力が C1 の証拠）。
+注: criteria.sh の C1 と C9 の p126 はどちらも `$out/p126.log` に書いていて、C1 の log は C9 の物で上書きされた（results.txt と c1/ の出力が C1 の証拠）。C1 の名前を `c1-p126` に変えた。
 確かめ: `sh -n`（c2・c3・c7）、`c5-parse.py` を T1-477 の log に流して `C5 RESULT pass=12 fail=0`。QEMU は T1。
