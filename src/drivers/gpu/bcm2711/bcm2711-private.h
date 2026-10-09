@@ -23,6 +23,7 @@
 
 #include "drivers/gpu/bcm2711/bcm2711-gpu.h"
 #include "drivers/gpu/bcm2711/display-flip.h"
+#include "drivers/gpu/bcm2711/v3d-hardware.h"
 
 /* The stage-mark family of the display path, and its boot parameter prefix. */
 #define BCM2711_FAMILY_DISPLAY		"rpi4gpu"
@@ -167,6 +168,17 @@ struct bcm2711_v3d_noop {
 	uint32_t pool_bytes;
 };
 
+/* A single unscaled tile clears a caller-owned RGBA8 raster without shaders. */
+struct bcm2711_v3d_clear {
+	struct bcm2711_v3d_noop lists;
+	uint32_t width;
+	uint32_t height;
+	uint32_t target_address;
+	uint32_t target_bytes;
+	uint32_t stride;
+	uint32_t color;
+};
+
 /*
  * One register window of a device.
  *
@@ -254,6 +266,16 @@ struct bcm2711_display {
 	bool screen_matches;
 };
 
+/* V3D alone owns these PM gates; its worker serializes startup and global reset. */
+struct bcm2711_v3d_power {
+	struct bcm2711_window control;
+	struct bcm2711_window legacy_bridge;
+	struct bcm2711_window bridge;
+	bool prepared;
+	bool attempted;
+	bool ready;
+};
+
 /*
  * The V3D 4.2 render engine.
  *
@@ -262,6 +284,8 @@ struct bcm2711_display {
  * the engine is read before its power and clock are up.
  */
 struct bcm2711_v3d {
+	struct bcm2711_v3d_power power;
+	struct bcm2711_v3d_hardware hardware;
 	bool present;
 	struct bcm2711_window hub;
 	struct bcm2711_window core;
@@ -280,6 +304,8 @@ void bcm2711_stage_pause(const char *family, const char *stage);
 /* Device tree helpers shared by both parts (fdt-util.c). */
 int bcm2711_fdt_find(const struct drv_fdt *fdt, const char *compatible, uint32_t *node);
 int bcm2711_fdt_window(const struct drv_fdt *fdt, uint32_t node, unsigned index, struct bcm2711_window *window);
+int bcm2711_fdt_string_index(const struct drv_fdt *fdt, uint32_t node, const char *property, const char *name, uint32_t *index);
+int bcm2711_fdt_named_window(const struct drv_fdt *fdt, uint32_t node, const char *name, struct bcm2711_window *window);
 int bcm2711_fdt_gic_irq(const struct drv_fdt *fdt, uint32_t node, unsigned index, int *irq);
 uint32_t bcm2711_fdt_reg_count(const struct drv_fdt *fdt, uint32_t node);
 int bcm2711_map_window(struct bcm2711_window *window);
@@ -302,6 +328,7 @@ int bcm2711_v3d_pages_unmap(uint32_t *table, uint32_t address, uint64_t bytes);
 
 /* Command-list generation without allocation or hardware access (cl.c). */
 int bcm2711_v3d_noop_prepare(struct bcm2711_v3d_noop *job);
+int bcm2711_v3d_clear_prepare(struct bcm2711_v3d_clear *job);
 
 /* The stages of the two parts (display.c, v3d.c). */
 int bcm2711_display_discover(const struct drv_fdt *fdt, struct bcm2711_display *display);
@@ -312,6 +339,10 @@ void bcm2711_display_frame_arm(struct bcm2711_display *display);
 void bcm2711_display_irq_mask(struct bcm2711_display *display);
 int bcm2711_display_start(const struct drv_fdt *fdt, struct bcm2711_display *display);
 int bcm2711_display_register(struct bcm2711_display *display);
+/* Preparation touches only FDT/maps; engine register access requires a ready domain. */
+int bcm2711_v3d_power_prepare(const struct drv_fdt *fdt, struct bcm2711_v3d *v3d);
+int bcm2711_v3d_power_start(struct bcm2711_v3d *v3d);
+int bcm2711_v3d_power_reset(struct bcm2711_v3d *v3d);
 int bcm2711_v3d_discover(const struct drv_fdt *fdt, struct bcm2711_v3d *v3d);
 
 #endif

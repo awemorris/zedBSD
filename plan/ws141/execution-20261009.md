@@ -18,9 +18,8 @@
 | ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
 | ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | cleared（software/統合範囲のみ） | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 | ws141-codex-20261009-i10 | p003/P1/P2部分: vblank sequence・inactive SRAMへの同期flip・console復帰/timeout時のbuffer保持 | cleared（software/統合部分範囲のみ） | 2026-10-09ユーザー「では続けてください。」。R0のbuild/host検証済み出力を使うsoftware/runtime部品。caller所有の連続RGB32 bufferを受け取る。allocator・P3合成・device登録・起動からのflipは対象外、実機受け入れは保持 |
-
-| ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software部分、統合待ち） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
-| ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | pending | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
+| ws141-codex-20261009-i11 | p003/P2/P3/P5: buffer owner・合成・display ops/登録の完成 | cleared（software/統合部分） | 最新継続指示。既存R0/flipの実sourceとhost/build出力を使い、実機の受け入れを別に保持 |
+| ws141-codex-20261009-i12 | p004/V1〜V10: 電源/MMU/cache/IRQ/job/reset統合とhost/build | in-progress | V0の発見骨格・MMU/noop generatorを使用。実機未実施を保持 |
 | ws141-codex-20261009-i13 | p005: 二deviceのresource共有・GPU API統合 | pending | i11/i12の必要な実source出力を確認後 |
 | ws141-codex-20261009-i14 | p006拡張: kernel Vulkan実行器とV3D SPIR-V compiler・Keiland描画経路 | pending | ユーザーが本WSへ含めると明示。i12/i13のjob/resourceを使う |
 | ws141-codex-20261009-i15 | p007: 最終changed source全規約/license/類似監査とbuild・統合 | pending | i11〜i14の最終成果、公開HAL API具体差分の事前承認を維持 |
@@ -226,3 +225,25 @@
 - named build: `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とdriver=n/BUILD末尾n → exit0、warning/error0、y checker3 PASS。ログ `build/ws141-display-i11{,-n}-build.log`。vmunix SHA256: y `3da45b164b6abb8e0782990f530af8280a61fcd1752709526b17e73dbef05493`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
 - C全文manual（object lifetime/排他/clock/adoption/unwind/条件と戻り）、clang-format-19/definition tab復元、補助style-check total0、git diff --check0。630hardware定数の旧名一致0、GPL source/改名表/作業文書はignored tempのみ。全WS/license/類似の最終監査p007は未実施。
 - i11はsoftware部分だけcleared、p003/WSは実機のR0/P1/P2/P3/P5/console RAM寿命とQ1/T1回帰が未達のためin-progress/incomplete。main統合と再確認へ進み、i12のV3D power/MMU/jobを続ける。Master/共有Queue/Guardrail/他WS投影・GitHub公開はQ1へ保留、push無し。
+
+
+## i11のmain統合とi12の再開（2026-10-09）
+
+- i11実装 `d0141f6e26998fcf01be1d3b4f4b1d618399eccb`を最新main `c4263e998`基点へ専用worktreeでmerge `dae9fa7d5`。host4 PASS、rpi4 y/n build exit0・warning/error0、y checker3 PASS、vmunix hashはi11と一致。その間のQ1の更新 `825759eef`（rtld/記録等、kernel差分なし）を保持してmerge `40ce86ac0cd80df46d193714cff71759a18e440c`、共有mainへFFしread-back cleanを確認。
+- push/GitHub公開/実機/QEMUは未実施。Master/他WSへの担当変更無し。i11部分cleared、whole p003/WSは未達を保持しi12へ継続。
+- i12はnative電源providerを固定firmware DTBから照合。欠落していたDTBを正本commitからignored tempへ復旧しSHA256 `75761b73c284e26623e4d1624bff13e67bce2ae620880efd81d6571a3739fcfb`を一致確認、dtcでprovider/clock/reset/窓の構成を読む。実機が渡すoverlay後のtreeは未観測。
+- `v3d-power.c`はdomain1/reset0/clock5の同一controllerとfirmware clock providerをFDTで検証。V1 native clock pulse→PM reset解除→clock on→ASB master/slave、V2 min/max/current照会・最大rate・running確認。V3D registerは未read。未知providerはwrite前に拒否。固定DTのRPiVid size0x20の直後にあるID word0x20を、同じpage内の既知4 byteとしてmapped span0x24へ拡張する（Linuxのpage-rounded mapによる同じアクセスと照合）。
+- `v3d-power-host-test.sh`は実固定DTB＋actual FDT/parser/provider codeでnativeのstartup/reset順、PMの他bit維持、master ACK timeout時のslave復旧・reset未達、startup timeout後のregister admission拒否、emulator revisionでnative provider read0、foreign domain拒否を確認しPASS。kernel y build exit0/warning/error0/checker3 PASS。source全文review/format/補助style total0。i12全体は未終了、V3〜V10/MMU/cache/IRQ/job・GPU上の実完了/回復は次の実装。
+- FDTのbounded string-list/reg-name lookupをshared internal helperへ移しdisplay startupも同じ実処理を使用。HAL/GPU公開APIの変更なし。GPL原文/改名表/fixed DTB/dtc出力はignored temp、最終license/類似監査はp007。
+
+
+## i12: native V3D/V1〜V10のsoftware結果（2026-10-09）
+
+- V1/V2のproviderに加え、`v3d-hardware.c/.h`でV3の4.2/単core/TFU/MMU/L3無し/VA32/PA30〜36の実read、V4の全L2T範囲とIRQ mask、V5の4 MiB表/scratchとnative PFN/readback/cache clean→barrier→MMU enable→page-entry flush→TLB clear、V6のcore/hub両bank ACK/latchを実装。旧世代のL2C/GCAを操作しない。公開後のPT/scratchは永続owner、cache/TLB timeout/IRQ fault/ASB失敗では保持する。resetはIRQ guardをjoinし、provider reset後の全hub/core IDの一致、表/cache/IRQの再設定を確認する。
+- `v3d-job.c/.h`のkernel内部runnerは一つのworker slotだけを許す。全direct spanのPTE/物理幅を検査、binの実IRQ→render、予備256 KiB overflow最大4つ、TFUのfinal input-configuration launch、CSDのfinal first-word launch＋必須TMU/L2T cleanを実装。入力/出力の所有はcaller、`retired=false`のlaunched失敗はallocation/VAをquarantineする契約。公開clientの裏で勝手にresetしない。500 msごとにcurrent/returnまたは残batchの進捗を確認し、最大4窓（2秒）の有限上限を置く。TFU/停止したqueueは最初の500 msでtimeout。
+- `cl.c`に1 tile（最大64x64、RGBA8、no MSAA）のclear/store生成を追加。clear値→2 dummy tile（最初にCLEAR、最後にVCD flush）→generic tile listの順。短い容量/geometry/stride/target alias/VA終端の拒否は全byte不変・used0。noopの既存imageは保持する。
+- `v3d-diagnostic.c`をV6後・render device登録前にboot接続。private 2 MiB/VA 0x100000を保持してV7 noop→V8全4096 raster pixel確認→V9独立xy patternの8x8 raster→UB-linear（64 pixel）確認→V10 self-branch/500 ms timeout→native reset→fresh noop。普通のstage stopは次の段へ進まず、既に完了したstorageのPTEを除去/flushしてrelease。失敗したreset/translation flushはallocationとdescriptorを保持。ここでのresetはまだ他clientが存在しないboot専有scope。
+- host: `sh plan/ws141/tests/v3d-power-host-test.sh build/ws141-power-i12-final` → PASS（actual固定DT/FDT/provider順）。`sh plan/ws141/tests/v3d-hardware-host-test.sh build/ws141-v3d-i12-final` → PASS（actual hardware/job/diagnostic source、literal MMU/cache/launch順、両bank IRQ、同時fault/完了、overflow、PTE tail欠落、cache/MMU/ASB timeout、CSD IRQ後clean、real packetからの出力model、missing store refusal、forced-loop reset→noop/PTE退去）。`sh plan/ws141/tests/clear-host-test.sh build/ws141-clear-i12-final` → C/primary XML oracleともPASS。hostの出力modelは物理V3Dの実行証拠ではない。
+- named build: `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とn/BUILD末尾n → exit0、warning/error0、y checker3 PASS。log `build/ws141-v3d-i12-final-build.log`/`build/ws141-v3d-i12-n-build.log`。SHA256 y `03bbf256302d6a96d386af14bc692c291f275f153a10237ae58287a92920fee0`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
+- C全文manual review（所有/retirement/IRQとworkerの排他/timeout/範囲と算術/段落と条件とreturn）、clang-format-19 19.1.7＋definition tab/packet table/one-argument-per-lineの復元、補助style total0、shell構文/diff check0。630 hardware旧名の語単位一致0。最終全WS/license/類似監査はp007で継続する。固定Mesa `v3dv_meta_copy.c`を正本commitから追加取得、MITのfile許諾/hashをlicense表へ追記、code/objectの取り込み無し。
+- i12は統合確認までin-progress。p004 whole acceptance/WS completionは実機待ちのまま。renderer登録/非同期worker/二device resource/shareはi13、Vulkan/SPIR-V/Keilandはi14、全最終検証はi15。Master/共有Queue/Guardrail/他WS/GitHub/T1の投影はQ1、push無し。

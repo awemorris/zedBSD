@@ -19,6 +19,7 @@
 
 #include <drivers/generic/fdt.h>
 #include <kern/irq.h>
+#include <kern/kcrt.h>
 #include <kern/pmem.h>
 #include <uapi/errno.h>
 
@@ -88,6 +89,83 @@ bcm2711_fdt_window(
 	window->mapped = NULL;
 
 	/* Succeeded: the window describes the device's registers. */
+	return 0;
+}
+
+/*
+ * Resolves a bounded string-list member without assuming binding order.
+ */
+int
+bcm2711_fdt_string_index(
+	const struct drv_fdt *fdt,
+	uint32_t node,
+	const char *property,
+	const char *name,
+	uint32_t *index)
+{
+	const uint8_t *names;
+	uint32_t length;
+	uint32_t first;
+	uint32_t end;
+	uint32_t ordinal;
+	int comparison;
+	int error;
+
+	/* Requires a complete binding string list before walking any member. */
+	error = drv_fdt_property(fdt, node, property, &names, &length);
+	if (error != 0)
+		return error;
+
+	/* Checks termination inside the property before comparing each string. */
+	first = 0;
+	ordinal = 0;
+	while (first < length) {
+		/* A truncated member cannot identify a provider or register role. */
+		end = first;
+		while (end < length && names[end] != 0)
+			end++;
+		if (end == length)
+			return EINVAL;
+		comparison = kern_strcmp((const char *)names + first, name);
+		if (comparison == 0) {
+			/* The ordinal is independent of the device's physical window ordering. */
+			*index = ordinal;
+			return 0;
+		}
+
+		/* Advances past one complete NUL-terminated member only. */
+		first = end + 1U;
+		ordinal++;
+	}
+
+	/* The requested role is absent from this binding property. */
+	return ENOENT;
+}
+
+/*
+ * Resolves one register role through reg-names and the native FDT translation.
+ */
+int
+bcm2711_fdt_named_window(
+	const struct drv_fdt *fdt,
+	uint32_t node,
+	const char *name,
+	struct bcm2711_window *window)
+{
+	uint32_t index;
+	int error;
+
+	/* Finds the role without relying on either firmware's reg ordering. */
+	error = bcm2711_fdt_string_index(fdt, node, "reg-names", name, &index);
+	if (error != 0)
+		return error;
+
+	/* Translates only the corresponding bounded register entry. */
+	error = bcm2711_fdt_window(fdt, node, index, window);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the CPU window belongs to the requested binding role. */
 	return 0;
 }
 

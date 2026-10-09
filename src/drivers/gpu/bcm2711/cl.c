@@ -32,6 +32,12 @@
 #define CL_RENDER_TILE_START 44U
 #define CL_RENDER_TILE_END 48U
 
+/* Clear adds one color configuration and two dummy tiles plus a VCD flush. */
+#define CL_CLEAR_RENDER_BYTES 106U
+#define CL_CLEAR_POOL_ADDRESS 39U
+#define CL_CLEAR_TILE_START 94U
+#define CL_CLEAR_TILE_END 98U
+
 /*
  * One reserved GPU interval used while validating the complete job.
  * The interval is half-open and held only for the preparation call.
@@ -107,10 +113,28 @@ static const uint8_t noop_tile_image[BCM2711_V3D_NOOP_TILE_BYTES] = {
 	27, 18
 };
 
+/* The color word is patched in this single 32-bpp render-target-zero configuration. */
+static const uint8_t clear_color_image[9] = {121, 3, 0, 0, 0, 0, 0, 0, 0};
+
+/*
+ * Two dummy tiles establish clear state and the 4.2 initial-tile workaround.
+ * The first clears color and depth/stencil; the second stores NONE and then
+ * drains VCD before executing the real generic tile list.  No shader runs.
+ */
+static const uint8_t clear_dummy_image[41] = {
+	124, 0, 0, 0, 26,
+	29, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	25, 3, 27,
+	124, 0, 0, 0, 26,
+	29, 8, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0, 0,
+	27, 19
+};
+
 static int validate_job(const struct bcm2711_v3d_noop *job);
 static int validate_buffer(const struct bcm2711_v3d_cl *buffer, uint32_t required);
+static int validate_clear(const struct bcm2711_v3d_clear *job);
 static void copy_image(uint8_t *destination, const uint8_t *source, uint32_t bytes);
-static void put_address(uint8_t *destination, uint32_t address);
+static void put_word(uint8_t *destination, uint32_t address);
 
 /*
  * Builds a complete 1x1 noop job into already allocated command buffers.
@@ -147,9 +171,9 @@ bcm2711_v3d_noop_prepare(
 
 	/* Relocates the pool and complete generic sub-list in the render image. */
 	tile_end = job->tile.address + BCM2711_V3D_NOOP_TILE_BYTES;
-	put_address(job->render.bytes + CL_RENDER_POOL_ADDRESS, job->pool_address);
-	put_address(job->render.bytes + CL_RENDER_TILE_START, job->tile.address);
-	put_address(job->render.bytes + CL_RENDER_TILE_END, tile_end);
+	put_word(job->render.bytes + CL_RENDER_POOL_ADDRESS, job->pool_address);
+	put_word(job->render.bytes + CL_RENDER_TILE_START, job->tile.address);
+	put_word(job->render.bytes + CL_RENDER_TILE_END, tile_end);
 
 	/* Publishes each stream only after the complete set of images is ready. */
 	job->bin.used = BCM2711_V3D_NOOP_BIN_BYTES;
@@ -157,6 +181,69 @@ bcm2711_v3d_noop_prepare(
 	job->tile.used = BCM2711_V3D_NOOP_TILE_BYTES;
 
 	/* Succeeded: the owner can clean these images before bin then render. */
+	return 0;
+}
+
+/*
+ * Builds one shader-free RGBA8 clear/store tile with the 4.2 dummy-tile sequence.
+ * Dimensions are at most 64x64, one layer/target and no MSAA or double buffering.
+ * All reservations and capacities are checked before writing any command byte;
+ * refused jobs preserve previous images and publish zero used lengths.
+ */
+int
+bcm2711_v3d_clear_prepare(
+	struct bcm2711_v3d_clear *job)
+{
+	struct bcm2711_v3d_noop *lists;
+	uint8_t *render;
+	uint8_t *tile;
+	uint64_t store;
+	uint32_t index;
+	int error;
+
+	/* A refused rebuild never leaves older packets eligible for another launch. */
+	lists = &job->lists;
+	lists->bin.used = 0;
+	lists->render.used = 0;
+	lists->tile.used = 0;
+	error = validate_clear(job);
+	if (error != 0)
+		return error;
+
+	/* Binning describes the exact one-tile geometry while retaining noop's shader-free prolog. */
+	copy_image(lists->bin.bytes, noop_bin_image, BCM2711_V3D_NOOP_BIN_BYTES);
+	lists->bin.bytes[7] = (uint8_t)(job->width - 1U);
+	lists->bin.bytes[9] = (uint8_t)(job->height - 1U);
+
+	/* Inserts color state and dummy tiles between immutable packet groups. */
+	render = lists->render.bytes;
+	copy_image(render, noop_render_image, 9);
+	render[2] = (uint8_t)job->width;
+	render[4] = (uint8_t)job->height;
+	copy_image(render + 9, clear_color_image, 9);
+	put_word(render + 11, job->color);
+	copy_image(render + 18, noop_render_image + 9, 34);
+	copy_image(render + 52, clear_dummy_image, sizeof(clear_dummy_image));
+	copy_image(render + 93, noop_render_image + 43, 13);
+	put_word(render + CL_CLEAR_POOL_ADDRESS, lists->pool_address);
+	put_word(render + CL_CLEAR_TILE_START, lists->tile.address);
+	put_word(render + CL_CLEAR_TILE_END, lists->tile.address + BCM2711_V3D_NOOP_TILE_BYTES);
+
+	/* RT0 raster store uses RGBA8 format 27 and the exact byte stride, with no R/B swap. */
+	tile = lists->tile.bytes;
+	copy_image(tile, noop_tile_image, BCM2711_V3D_NOOP_TILE_BYTES);
+	store = (uint64_t)27U << 12;
+	store |= (uint64_t)job->stride << 28;
+	for (index = 0; index < 8; index++)
+		tile[5 + index] = (uint8_t)(store >> (index * 8U));
+	put_word(tile + 13, job->target_address);
+
+	/* Publishing lengths last exposes only a complete group of relocated packet images. */
+	lists->bin.used = BCM2711_V3D_NOOP_BIN_BYTES;
+	lists->render.used = CL_CLEAR_RENDER_BYTES;
+	lists->tile.used = BCM2711_V3D_NOOP_TILE_BYTES;
+
+	/* Succeeded: the owner can clean inputs, submit bin/render and observe the clear output. */
 	return 0;
 }
 
@@ -262,6 +349,66 @@ validate_buffer(
 	return 0;
 }
 
+/* Bounds a one-tile raster and preserves all existing CL/pool reservations. */
+static int
+validate_clear(
+	const struct bcm2711_v3d_clear *job)
+{
+	const struct bcm2711_v3d_noop *lists;
+	struct cl_span spans[4];
+	uint64_t target_end;
+	uint32_t index;
+	int error;
+
+	/* Full clear render capacity is checked before any noop template is copied. */
+	lists = &job->lists;
+	error = validate_buffer(&lists->render, CL_CLEAR_RENDER_BYTES);
+	if (error != 0)
+		return error;
+	error = validate_job(lists);
+	if (error != 0)
+		return error;
+
+	/* One 32-bpp target without MSAA occupies at most one 64x64 tile. */
+	if (job->width == 0 || job->width > 64U)
+		return EINVAL;
+	if (job->height == 0 || job->height > 64U)
+		return EINVAL;
+	if (job->stride < job->width * 4U || job->stride > 0xfffffU)
+		return EINVAL;
+	if ((job->stride & 3U) != 0 || (job->target_address & 3U) != 0)
+		return EINVAL;
+	if (job->target_address < BCM2711_V3D_PAGE_BYTES)
+		return EINVAL;
+	if (job->target_bytes < (uint64_t)job->stride * job->height)
+		return EINVAL;
+	if (job->target_bytes > CL_VIRTUAL_END - job->target_address)
+		return EINVAL;
+
+	/* The complete target reservation cannot overlap commands or PTB-produced tile lists. */
+	spans[0].first = lists->bin.address;
+	spans[0].end = spans[0].first + lists->bin.capacity;
+	spans[1].first = lists->render.address;
+	spans[1].end = spans[1].first + lists->render.capacity;
+	spans[2].first = lists->tile.address;
+	spans[2].end = spans[2].first + lists->tile.capacity;
+	spans[3].first = lists->pool_address;
+	spans[3].end = spans[3].first + lists->pool_bytes;
+	target_end = (uint64_t)job->target_address + job->target_bytes;
+
+	/* Refuses a target alias before exposing any partially regenerated stream. */
+	for (index = 0; index < 4; index++) {
+		if (target_end <= spans[index].first)
+			continue;
+		if (spans[index].end <= job->target_address)
+			continue;
+		return EINVAL;
+	}
+
+	/* Succeeded: the output target and all command reservations are disjoint and bounded. */
+	return 0;
+}
+
 /* Installs a fixed packet image without touching the unused capacity tail. */
 static void
 copy_image(
@@ -276,9 +423,9 @@ copy_image(
 		destination[index] = source[index];
 }
 
-/* Writes a GPU byte address in the packet's little-endian representation. */
+/* Writes one 32-bit packet field in its little-endian representation. */
 static void
-put_address(
+put_word(
 	uint8_t *destination,
 	uint32_t address)
 {

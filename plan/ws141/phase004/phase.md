@@ -2,11 +2,13 @@
 
 # ws141-p004: V3D 4.2の電源・MMU・job・回復
 
-Status: in-progress（2026-10-09、V5のsoftwareページ表とV7のnoop CL生成済み。hardware待ち）
+Status: in-progress（2026-10-09、i12でnative V1〜V10/job/cache/MMU/IRQを接続しhost/build確認。実機whole acceptanceは未確認）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: [独立セッションの実行記録 i04](../execution-20261009.md)
 実行者: 独立Codexセッション。Q1はパッチの統合・共有記録の投影を担当。
+
+現行software attempt: [i12](../execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。main統合はユーザーが本担当へ承認済み、共有記録/GitHub/T1の投影はQ1。
 
 ## 範囲と目標
 
@@ -55,3 +57,15 @@ V7生成は最新mainへmerge `16024f1b9`で統合済み（i07）。統合版で
 ## p006の実装範囲確定に伴う依存（2026-10-09）
 
 ユーザー回答「WS141に実行器・compilerも含め、Keiland表示まで進める」でp006を本WS内の実装Phaseへ変更。p004はnative bin/render/TFU/CSDのjob/cache/MMU/reset出力をp006へ渡す。p004側のV1〜V10の受け入れは保持し、CSD/shaderの命令生成・Vulkan object/stream実行は[p006](../phase006/phase.md)。実機は後日、software実装と実機whole acceptanceを区別する。[起点/全体変更](../ws.md#完成までの自走p006の実装範囲確定2026-10-09)。
+
+
+## i12のnative電源処理（2026-10-09、継続中）
+
+p006の本WS内実装が承認済み、i12をin-progressへ。固定firmware treeのnative PM domain1/reset0/firmware clock5を検証し、V1/V2とnative resetの部品を実装/boot接続。actual FDT/provider codeの短いhost PASS、kernel build warning/error0。ASB停止timeoutはreset未達を保持し、READY falseでengine readを拒否する。V3〜V10/MMU/cache/IRQ/jobは継続、実機未確認とwhole Phase in-progressを保持。[source/commands/制限](../execution-20261009.md#i11のmain統合とi12の再開2026-10-09)。
+
+
+## i12のnative job/診断と後続interface（2026-10-09）
+
+V1〜V10をbootへ接続し、cache/MMU/IRQ/retained storageとtrusted bin/render/TFU/CSD runnerを実装。clearの全packetを固定XMLと照合し、hostはactual sourceでtimeout/両bank IRQ/同時fault/overflow/forced-reset/出力sentinelを確認、rpi4 y/n warning/error0。物理GPUの受け入れとは扱わずwhole Phaseはin-progress。[exact evidence](../execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。
+
+p005へ渡す契約はsingle worker、callerによる全buffer/VA保持、失敗launched jobのretired=false、公開clientがある場合のresetはcommon recoveryによる全owner処理後だけ。p006はこのtrusted job型でCL/TFU/CSDをlowerし、compiler output/indirect span/inputsを保持する。新public HAL/GPU API無し。foreign Phaseへ同契約を記録、ソフトウェアの統合後にi13を開始する。
