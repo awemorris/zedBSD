@@ -418,3 +418,19 @@ layoutはarena/application pointerを保存せず、immutable samplerとdevice�
 named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-layout-final-y.log`。layout router未参照でGC除去されるためhash不変、稼働可能との主張無し。clang-format-19後definition tab/full C manualを確認、style-check total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
 
 nextはactual Keilandの512-set pool/allocate/free/reset/update、immutable draw descriptor snapshots、render pass/framebuffer/graphics pipeline/native CL/queue/common worker/public runtime。pool/setの退役はold prepared ownerが保持するstorage/chargeと新しいpublic identityを分離する。Master/shared投影はQ1。
+
+### canonical layoutのmain統合確認
+
+source `d2887e8b7dbd282fa84181c9539c589328877f80` をQ1 latest `5ccfd126997d3202c20207c14b70ead78cf4040a` と専用treeでmergeし `389dd95f3afd964cd2843458aadf9561a91b6133`。統合版actual host5範囲/named rpi4 y build exit0/warning/error0/check3 PASS。対象外Q1変更を保持し、共有main/専用branch HEADをmerge SHAでreadback、main clean。nは当該private source無しで先行検証を保持。Master担当編集無し。i13/i14とp005/p006 in-progress、next pool/set/update/draw runtime、Keiland/実機/p007未達。
+
+## i14 descriptor pool/set所有のsoftware出力（2026-10-09）
+
+private `vulkan-descriptor.h`、`vulkan-descriptor-pool.c`、`vulkan-descriptor-sets.c` と当該arm64 source列を追加。actual client recordでpool create/destroy/reset、complete set batch allocate/freeを接続。poolはsame-device/free flag/finite capacityとsupported combined image/uniform typeだけを受け、live/old setのfinal ownerにcapacity chargeを結ぶ。one-command allocation/freeは最大64sets、session namespace4096を既存限界として保持。Keilandの512-set pool declarationを許容。
+
+Allocateはcomplete input/output arraysをconsumeしてからwhole-batch fresh IDs/same-device interfaces/duplicate IDs/capacityを確認。各setがdevice/pool/layout/immutable samplerを独立retainし、chargeはcomplete payloadのみで取得。partial batch OOMはpublish済みidentityと未publish payloadを別々に退役、全charge/edgeをrestore、output count0のstructured Vulkan failureを返す。freeはselected same-pool IDsを全検証してからregistry edgeを退役。pool reset/destroyはpublic child identityをwithdrawし、prepared setは旧storage/dependencies/chargeを保持、last ownerでpoolが退役。mutable draw bindings/descriptor updateはまだ未接続。
+
+`sh plan/ws141/tests/vulkan-device-host-test.sh build/ws141-i14-pool-sets-host` と `... build/ws141-i14-pool-sets-final-host` → actual client handle/record codec/native sourceの6範囲PASS。512-set declarationを持つbounded two-texture pool、2nd set registry OOMでfirst ID/双方charge/全parent unwind、complete batch output順序、exact free、reset後retained old setのcharge維持/capacity拒否/final release後reuse、public layout/pool退役後のprepared set graph保持、全heap0/timeline0/reply owner1。512sets同時の実確保・physical GPU/cache/IRQはこの試験では実施していない。
+
+named rpi4 y build → exit0/warning/error0/check3 PASS、log `build/ws141-i14-pool-sets-final-y.log`。routersは未公開/未参照、kernel機能稼働の証拠とは扱わない。clang-format-19/definition tab/full C manual（successful-retain-before-field-publication、charge-after-complete、null-safe independent release、first native error preservation）を確認、style total0/diff0。p005/p006とi13/i14はin-progress、COMMAND/CAPSET/JOB未公開、Keiland/実機/p007は未達。
+
+next: ordered descriptor write/copy updatesとimmutable draw snapshots、render pass/framebuffer/graphics pipeline、native CL/queue/common worker/public runtime。Master/shared投影はQ1。

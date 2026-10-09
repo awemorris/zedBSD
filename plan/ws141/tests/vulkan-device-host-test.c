@@ -20,6 +20,7 @@
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/vulkan-input.h"
 #include "drivers/gpu/bcm2711/vulkan-layout.h"
+#include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -55,6 +56,8 @@ static unsigned fail_sync;
 /* Fixture coherent storage provides valid host spans without simulating actual physical placement/cache. */
 static uint8_t backing_storage[16384];
 
+static void pool_test(struct bcm2711_vulkan_session *session);
+static int sets_allocate(struct bcm2711_vulkan_session *session, uint64_t pool, uint64_t layout, uint64_t first);
 static void layout_test(struct bcm2711_vulkan_session *session);
 static void input_test(struct bcm2711_vulkan_session *session);
 static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
@@ -415,6 +418,7 @@ main(
 	resource_test(session);
 	input_test(session);
 	layout_test(session);
+	pool_test(session);
 	baseline = allocations;
 
 	/* Repeating the exact native lookup neither reallocates a root nor changes its completion domain. */
@@ -549,6 +553,18 @@ dispatch(
 
 	/* Canonical descriptor and pipeline interfaces retain immutable dependency graphs independently of public IDs. */
 	error = bcm2711_vulkan_layout_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
+	/* Actual pool lifecycle and complete set batches acquire independently retained native graph ownership. */
+	error = bcm2711_vulkan_descriptor_pool_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+	error = bcm2711_vulkan_descriptor_sets_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
 		return error;
 	if (handled == 0)
@@ -1357,4 +1373,169 @@ layout_test(
 	error = bcm2711_vulkan_object_release(pipeline);
 	assert(error == 0 && allocations == baseline);
 	puts("WS141 Vulkan actual canonical descriptor/pipeline layout/immutable dependencies/push permissions: PASS");
+}
+
+/* Exercises complete descriptor batches, exact capacity accounting and retained old set ownership across pool reset/destruction. */
+static void
+pool_test(
+	struct bcm2711_vulkan_session *session)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct bcm2711_vulkan_object *layout;
+	struct bcm2711_vulkan_object *pool_object;
+	struct bcm2711_vulkan_object *old;
+	struct bcm2711_vulkan_object *remaining;
+	struct bcm2711_vulkan_descriptor_pool *pool;
+	VkDescriptorSetLayoutBinding binding;
+	VkDescriptorSetLayoutCreateInfo layout_info;
+	VkDescriptorPoolSize size;
+	VkDescriptorPoolCreateInfo pool_info;
+	uint8_t wire[512];
+	unsigned baseline;
+	unsigned with_pool;
+	int error;
+
+	/* A standard single combined-image binding supplies the same per-set capacity used by Keiland. */
+	baseline = allocations;
+	memset(&binding, 0, sizeof(binding));
+	binding.descriptorType = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	binding.descriptorCount = 1;
+	binding.stageFlags = VK_SHADER_STAGE_FRAGMENT_BIT;
+	memset(&layout_info, 0, sizeof(layout_info));
+	layout_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_LAYOUT_CREATE_INFO;
+	layout_info.bindingCount = 1;
+	layout_info.pBindings = &binding;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorSetLayoutCreateInfo(&writer, &layout_info);
+	error = input_created(session, &writer, 90);
+	assert(error == VK_SUCCESS);
+	layout = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, 90);
+	assert(layout != NULL && layout->references == 1);
+
+	/* The pool accepts Keiland's 512-set declaration while this bounded scenario uses only two texture slots. */
+	memset(&size, 0, sizeof(size));
+	size.type = VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER;
+	size.descriptorCount = 2;
+	memset(&pool_info, 0, sizeof(pool_info));
+	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
+	pool_info.maxSets = 512;
+	pool_info.poolSizeCount = 1;
+	pool_info.pPoolSizes = &size;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorPoolCreateInfo(&writer, &pool_info);
+	error = input_created(session, &writer, 92);
+	assert(error == VK_SUCCESS);
+	pool_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_POOL, 92);
+	assert(pool_object != NULL);
+	pool = pool_object->payload;
+	assert(pool->maximum_sets == 512 && pool->maximum_textures == 2 && pool->sets == 0);
+	with_pool = allocations;
+
+	/* Failure at the second set's registry allocation withdraws the first identity and restores both charges and all parent edges. */
+	fail_after = 4;
+	error = sets_allocate(session, 92, 90, 93);
+	assert(error == (int)VK_ERROR_OUT_OF_HOST_MEMORY && allocations == with_pool);
+	old = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 93);
+	remaining = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 94);
+	assert(old == NULL && remaining == NULL && pool->sets == 0 && pool->textures == 0 && layout->references == 1);
+	error = sets_allocate(session, 92, 90, 93);
+	assert(error == VK_SUCCESS && pool->sets == 2 && pool->textures == 2 && layout->references == 3);
+	old = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 93);
+	assert(old != NULL);
+	error = bcm2711_vulkan_object_retain(old);
+	assert(error == 0);
+
+	/* Free one exact selected set before reset withdraws the retained old set's remaining public identity. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_FREE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 92);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 94);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS && pool->sets == 1);
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_DESCRIPTOR_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 92);
+	vulkan_write_u32(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	assert(old->references == 1 && !old->published && pool->sets == 1 && pool->textures == 1);
+	error = sets_allocate(session, 92, 90, 95);
+	assert(error == (int)VK_ERROR_OUT_OF_POOL_MEMORY && pool->sets == 1);
+	error = bcm2711_vulkan_object_release(old);
+	assert(error == 0 && pool->sets == 0 && pool->textures == 0 && allocations == with_pool);
+
+	/* A fresh batch can use capacity only after old prepared owners retire, without reusing their typed object pointers. */
+	error = sets_allocate(session, 92, 90, 95);
+	assert(error == VK_SUCCESS);
+	old = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 95);
+	assert(old != NULL);
+	error = bcm2711_vulkan_object_retain(old);
+	assert(error == 0);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT, 90);
+	destroy(session, GPU_OP_DESTROY_DESCRIPTOR_POOL, 92);
+	assert(old->references == 1 && pool_object->references == 1 && layout->references == 1);
+	assert(pool->sets == 1 && pool->textures == 1);
+	error = bcm2711_vulkan_object_release(old);
+	assert(error == 0 && allocations == baseline);
+	puts("WS141 Vulkan actual pool/set batch rollback/free/reset/retained capacity ownership: PASS");
+}
+
+/* Encodes the real allocation record and verifies both outputs of one complete two-set native batch. */
+static int
+sets_allocate(
+	struct bcm2711_vulkan_session *session,
+	uint64_t pool,
+	uint64_t layout,
+	uint64_t first)
+{
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	struct vulkan_object client_pool;
+	struct vulkan_object client_layout;
+	VkDescriptorSetLayout layouts[2];
+	VkDescriptorSetAllocateInfo info;
+	uint8_t wire[512];
+	uint32_t status;
+	uint64_t count;
+	int error;
+
+	/* Actual local handle conversion supplies exact native pool/layout identities to the standard encoder. */
+	memset(&client_pool, 0, sizeof(client_pool));
+	memset(&client_layout, 0, sizeof(client_layout));
+	client_pool.wire_id = pool;
+	client_layout.wire_id = layout;
+	layouts[0] = (VkDescriptorSetLayout)(uintptr_t)&client_layout;
+	layouts[1] = layouts[0];
+	memset(&info, 0, sizeof(info));
+	info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO;
+	info.descriptorPool = (VkDescriptorPool)(uintptr_t)&client_pool;
+	info.descriptorSetCount = 2;
+	info.pSetLayouts = layouts;
+	begin(&writer, wire, sizeof(wire), GPU_OP_ALLOCATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkDescriptorSetAllocateInfo(&writer, &info);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, first);
+	vulkan_write_u64(&writer, first + 1U);
+	error = execute(session, &writer, &reader);
+	assert(error == 0);
+	status = vulkan_read_u32(&reader);
+	count = vulkan_read_u64(&reader);
+	if (status == VK_SUCCESS) {
+		assert(count == 2 && vulkan_read_u64(&reader) == first && vulkan_read_u64(&reader) == first + 1U);
+	} else {
+		assert(count == 0);
+	}
+
+	/* Succeeded: the exact complete batch outcome follows the actual client's allocation framing. */
+	return (int)status;
 }
