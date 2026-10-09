@@ -57,7 +57,7 @@ def check_packages() -> None:
 
     # Where each package is filed, and that the menu reaches it there.
     expected_group = {
-        "noct": "packages/lang",
+        "noct": "base",
         "emacs": "base",
         "libcxx": "packages/devel",
         "openssh": "packages/network",
@@ -89,6 +89,27 @@ def check_packages() -> None:
         if row[4].startswith("packages/") or row[4] == "base":
             if row[2] != "*":
                 fail(f"{row[0]} is offered only on {row[2]}")
+
+    # Noct is a base program beside Emacs, which is written in it, and the
+    # Packages menu no longer offers it (2026-10-09 user: "Noctは
+    # userland/base/noct/にあるけど、Baseメニューにないようなので、追加して
+    # ください。", "PackagesメニューからNoctを削除してください。").
+    for _label, group in menu.package_categories(rows):
+        for row in rows:
+            if row[4] == group and (row[0] == "noct" or row[5] == "base/noct"):
+                fail(f"the Packages menu ({group}) still offers Noct as {row[0]}")
+    base_values = {"ZEDBSD_PLATFORM": "amd64", "ZEDBSD_USER_PROGRAMS": set()}
+    base_names = [row[0] for row in menu.group_rows(base_values, menu.BASE_GROUPS)]
+    for name in ("noct", "emacs"):
+        if name not in base_names:
+            fail(f"Base > Select does not offer {name} on amd64")
+    selected = set()
+    if menu.package_select(rows, selected, "emacs") is not None:
+        fail("a requirement of Emacs is not provided")
+    if selected != {"emacs", "noct"}:
+        fail(f"choosing Emacs selected {sorted(selected)}")
+    if not menu.package_dependents(rows, selected, "noct"):
+        fail("Noct can be dropped while Emacs still needs it")
 
     # The server is built against the library, so one brings the other.
     selected: set = set()
