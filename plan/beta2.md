@@ -28,13 +28,14 @@
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
 | [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | 設計の書き直しと review の後に実装（走っている試験は済んだ） | 26 | P1・T1 |
+| [BUG-286](bugs/BUG-286.md) NFC の YubiKey で登録と login が失敗（passkey-fido2 が USB の鍵だけを開く） | WS199 の中で | 3 | P1・ユーザー |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
 | 次の UAT で出る Bug の枠 | — | 5 | P1 |
-| **計** | | **約 44.5 LW**（約 15 時間） | |
+| **計** | | **約 47.5 LW**（約 16 時間） | |
 
 ## 次の UAT で確認してほしい事項（5330、WS199・WS200 の後の image）
 
@@ -48,6 +49,7 @@
 | 6 | WS199 ロック画面のタッチ不要 | (c) の設定で lock。鍵を挿したまま／抜いて挿し直す | 挿したままならタッチを促す。lock の後に挿した鍵ならタッチ無しで解除 |
 | 7 | WS199 設定の変更 | 「PIN 不要」「タッチ不要」を入れる | パスワードを求め、「鍵を持つ人は誰でもログインできる」の警告が出る |
 | 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の Password・PIN・Security Key | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
+| 10 | [BUG-286](bugs/BUG-286.md) NFC の YubiKey | Settings で NFC の reader に当てて登録、NFC のタッチで login・解除 | USB と同じに使える |
 | 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 別の PC から ue0 経由で大きい file を scp | 速さを教えてください（10/06 は 950 KB/s、TCP の直しの後の値） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
