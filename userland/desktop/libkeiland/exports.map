@@ -140,6 +140,15 @@
 		kl_system_phone_send;
 		kl_system_phone_call;
 		kl_system_take_phone_event;
+		kl_system_phone_listen;
+		kl_system_phone_link;
+		kl_system_phone_sync;
+		kl_system_take_phone_item;
+		kl_system_phone_page_end;
+		kl_system_phone_send_text;
+		kl_system_phone_mark_read;
+		kl_system_phone_watch_link;
+		kl_system_phone_link_set;
 		kl_system_printers_get;
 		kl_system_print_jobs_get;
 		kl_system_printers_add;

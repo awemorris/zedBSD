@@ -18,7 +18,10 @@
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
+
+static void system_view_phone_mark(struct system_view *view, unsigned kind);
 
 /*
  * Starts a view with nothing told: the network not reached, the sound not
@@ -634,10 +637,14 @@ system_view_phone_event(
 {
 	unsigned slot;
 
-	/* A full ring drops its oldest. */
+	/*
+	 * A full ring drops its oldest; the next take tells KL_PHONE_DROPPED
+	 * first (ws197-p004a), so that the program synchronises again.
+	 */
 	if (view->phone_count == SYSTEM_VIEW_PHONE_EVENTS) {
 		view->phone_head = (view->phone_head + 1U) % SYSTEM_VIEW_PHONE_EVENTS;
 		view->phone_count--;
+		view->phone_lost = 1U;
 	}
 
 	/* The event after the newest, counted and told as a change. */
@@ -655,6 +662,14 @@ system_view_take_phone_event(
 	struct system_view *view,
 	struct kl_phone_event *event)
 {
+	/* Events the ring dropped are told first, as one. */
+	if (view->phone_lost) {
+		view->phone_lost = 0U;
+		memset(event, 0, sizeof(*event));
+		event->kind = KL_PHONE_DROPPED;
+		return 1;
+	}
+
 	/* None waits. */
 	if (view->phone_count == 0U)
 		return 0;
@@ -666,6 +681,257 @@ system_view_take_phone_event(
 
 	/* Succeeded: one event taken. */
 	return 1;
+}
+
+/*
+ * Keeps a phone item (ws197-p004a) with its own copy of the text (ended by
+ * a NUL) for kl_system_take_phone_item; a full queue drops its oldest and
+ * tells KL_PHONE_DROPPED.  The first item of an empty queue is told by one
+ * KL_PHONE_ITEMS.
+ */
+void
+system_view_phone_item(
+	struct system_view *view,
+	const struct kl_phone_item *item,
+	const void *text,
+	size_t length)
+{
+	struct system_view_phone_item *kept;
+	unsigned slot;
+	char *copy;
+
+	/* The text's copy; without memory the item is lost as a drop. */
+	copy = malloc(length + 1U);
+	if (copy == NULL) {
+		system_view_phone_mark(view, KL_PHONE_DROPPED);
+		return;
+	}
+
+	/* The bytes and the NUL. */
+	if (length > 0U)
+		memcpy(copy, text, length);
+	copy[length] = '\0';
+
+	/* A full queue drops its oldest, and the program synchronises again. */
+	if (view->phone_item_count == SYSTEM_VIEW_PHONE_ITEMS) {
+		free(view->phone_items[view->phone_item_head].text);
+		view->phone_items[view->phone_item_head].text = NULL;
+		view->phone_item_head = (view->phone_item_head + 1U) % SYSTEM_VIEW_PHONE_ITEMS;
+		view->phone_item_count--;
+		system_view_phone_mark(view, KL_PHONE_DROPPED);
+	}
+
+	/* The first item of an empty queue is told once. */
+	if (view->phone_item_count == 0U)
+		system_view_phone_mark(view, KL_PHONE_ITEMS);
+
+	/* The item after the newest, owning its text. */
+	slot = (view->phone_item_head + view->phone_item_count) % SYSTEM_VIEW_PHONE_ITEMS;
+	kept = &view->phone_items[slot];
+	kept->item = *item;
+	kept->item.text = NULL;
+	kept->item.length = length;
+	kept->text = copy;
+	view->phone_item_count++;
+	view->changed |= KL_SYSTEM_CHANGED_PHONE;
+}
+
+/*
+ * Takes the oldest phone item into the caller's structure of size bytes
+ * (a later version's larger one has the rest zeroed): 1 with it, 0 when
+ * none waits or the size is less than this version's.  Its text lives
+ * until the next take.
+ */
+int
+system_view_take_phone_item(
+	struct system_view *view,
+	struct kl_phone_item *item,
+	size_t size)
+{
+	struct system_view_phone_item *kept;
+
+	/* The text of the item taken last goes now. */
+	free(view->phone_taken_text);
+	view->phone_taken_text = NULL;
+
+	/* A structure of this version at least, and an item waiting. */
+	if (size < sizeof(*item))
+		return 0;
+	if (view->phone_item_count == 0U)
+		return 0;
+
+	/* The oldest, its text now the one taken last. */
+	kept = &view->phone_items[view->phone_item_head];
+	memset(item, 0, size);
+	*item = kept->item;
+	item->text = kept->text;
+	view->phone_taken_text = kept->text;
+	kept->text = NULL;
+	view->phone_item_head = (view->phone_item_head + 1U) % SYSTEM_VIEW_PHONE_ITEMS;
+	view->phone_item_count--;
+
+	/* Succeeded: one item taken. */
+	return 1;
+}
+
+/*
+ * Keeps a page's end (ws197-p004a) among the last ones, by its request.
+ */
+void
+system_view_phone_page_end(
+	struct system_view *view,
+	const struct system_view_page_end *end)
+{
+	/* Over the oldest. */
+	view->phone_ends[view->phone_end_next] = *end;
+	view->phone_end_next = (view->phone_end_next + 1U) % SYSTEM_VIEW_PHONE_ENDS;
+}
+
+/*
+ * Finds the end of a sync's page by its request: 0 with it, ENOENT when it
+ * did not come (or is older than the last ones kept).
+ */
+int
+system_view_phone_page_end_of(
+	const struct system_view *view,
+	uint32_t request,
+	struct system_view_page_end *end)
+{
+	unsigned index;
+
+	/* The request 0 is never a sync's. */
+	if (request == 0U)
+		return ENOENT;
+
+	/* Each end kept. */
+	for (index = 0U; index < SYSTEM_VIEW_PHONE_ENDS; index++) {
+		if (view->phone_ends[index].request == request) {
+			*end = view->phone_ends[index];
+			return 0;
+		}
+	}
+
+	/* Not among them. */
+	return ENOENT;
+}
+
+/*
+ * Keeps the phone link's state (ws197-p004a) and tells KL_PHONE_LINK_CHANGED.
+ */
+void
+system_view_phone_link(
+	struct system_view *view,
+	const struct kl_phone_link *link)
+{
+	/* The state, known from now on. */
+	view->phone_link = *link;
+	view->phone_link_known = 1U;
+	system_view_phone_mark(view, KL_PHONE_LINK_CHANGED);
+}
+
+/*
+ * Copies the phone link's state into the caller's structure of size bytes
+ * (a later version's larger one has the rest zeroed): 0, ENOENT before it
+ * was told, or EINVAL for a size less than this version's.
+ */
+int
+system_view_phone_link_get(
+	const struct system_view *view,
+	struct kl_phone_link *link,
+	size_t size)
+{
+	/* A structure of this version at least. */
+	if (size < sizeof(*link))
+		return EINVAL;
+
+	/* Not told yet. */
+	if (!view->phone_link_known)
+		return ENOENT;
+
+	/* Succeeded: the copy. */
+	memset(link, 0, size);
+	*link = view->phone_link;
+	return 0;
+}
+
+/*
+ * Tells KL_PHONE_DROPPED (ws197-p004a): items that came were lost on the
+ * way, the program synchronises again.
+ */
+void
+system_view_phone_dropped(
+	struct system_view *view)
+{
+	/* The mark. */
+	system_view_phone_mark(view, KL_PHONE_DROPPED);
+}
+
+/*
+ * Starts the program's sync of a request (ws197-p004a): 0, or EBUSY while
+ * another is under way and not older than SYSTEM_VIEW_PHONE_SYNC_MS.
+ */
+int
+system_view_phone_sync_start(
+	struct system_view *view,
+	uint32_t request,
+	uint64_t now_ms)
+{
+	uint64_t age;
+
+	/* One under way, answered or given up after its time. */
+	if (view->phone_sync_request != 0U) {
+		age = now_ms - view->phone_sync_started_ms;
+		if (age < SYSTEM_VIEW_PHONE_SYNC_MS)
+			return EBUSY;
+	}
+
+	/* Succeeded: this one is under way. */
+	view->phone_sync_request = request;
+	view->phone_sync_started_ms = now_ms;
+	return 0;
+}
+
+/*
+ * Takes a phone request's done (ws197-p004a): its result, and the end of
+ * the program's sync when it is the sync's.
+ */
+void
+system_view_phone_done(
+	struct system_view *view,
+	uint32_t request,
+	uint32_t code)
+{
+	/* The sync under way ends with its answer. */
+	if (request != 0U && request == view->phone_sync_request)
+		view->phone_sync_request = 0U;
+
+	/* The result for kl_system_take_result. */
+	system_view_result(view, request, code);
+}
+
+/*
+ * Frees what the phone's items own (ws197-p004a), when the view goes.
+ */
+void
+system_view_phone_release(
+	struct system_view *view)
+{
+	unsigned index;
+	unsigned slot;
+
+	/* The texts of the items waiting. */
+	for (index = 0U; index < view->phone_item_count; index++) {
+		slot = (view->phone_item_head + index) % SYSTEM_VIEW_PHONE_ITEMS;
+		free(view->phone_items[slot].text);
+		view->phone_items[slot].text = NULL;
+	}
+
+	/* None waits any more. */
+	view->phone_item_count = 0U;
+
+	/* The text of the item taken last. */
+	free(view->phone_taken_text);
+	view->phone_taken_text = NULL;
 }
 
 /*
@@ -712,6 +978,16 @@ system_view_error_of(
 		return ENETUNREACH;
 	case KL_SYSTEM_RESULT_STALE:
 		return ESTALE;
+	case KL_SYSTEM_RESULT_LOST:
+		return ECONNRESET;
+	case KL_SYSTEM_RESULT_TIMEOUT:
+		return ETIMEDOUT;
+	case KL_SYSTEM_RESULT_TOO_LARGE:
+		return EMSGSIZE;
+	case KL_SYSTEM_RESULT_NO_ROOM:
+		return ENOBUFS;
+	case KL_SYSTEM_RESULT_NOT_CONNECTED:
+		return ENOTCONN;
 	default:
 		break;
 	}
@@ -1136,4 +1412,18 @@ system_view_bluetooth_done(
 	memcpy(view->bluetooth_devices, view->bluetooth_devices_pending, view->bluetooth_pending_count * sizeof(view->bluetooth_devices[0]));
 	view->bluetooth_count = view->bluetooth_pending_count;
 	view->changed |= KL_SYSTEM_CHANGED_BLUETOOTH;
+}
+
+/* Keeps a phone event of a kind alone (KL_PHONE_ITEMS, _LINK_CHANGED, _DROPPED) for kl_system_take_phone_event. */
+static void
+system_view_phone_mark(
+	struct system_view *view,
+	unsigned kind)
+{
+	struct kl_phone_event event;
+
+	/* The event with its kind. */
+	memset(&event, 0, sizeof(event));
+	event.kind = kind;
+	system_view_phone_event(view, &event);
 }

@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 23; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 27; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -321,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		26U
+#define KL_SYSTEM_MANAGER_VERSION		27U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -411,6 +411,9 @@
 
 /* Since when the account has set_methods and methods (WS200). */
 #define KL_SYSTEM_SINCE_METHODS			26U
+
+/* Since when the phone has listen, sync, send_text, mark_read, link_set, watch_link and their events (ws197-p004a). */
+#define KL_SYSTEM_SINCE_PHONE_SYNC		27U
 
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
@@ -605,14 +608,72 @@
  *       a sent message's or a call's state (KL_SYSTEM_PHONE_*)
  *   event   2 result(uint request, uint applied, uint saved)
  *       the request taken (OK), or not: UNAVAILABLE without a backend
- * The backend is the desktop's setting phone.backend (0 none, 1 loopback).
+ * Since version 27 (ws197-p004a, plan/ws197/phase004/phase.md section 4):
+ *   request 3 listen(uint on)
+ *       the program hears the items, the link and the drops (the phone
+ *       program only, app_id "phone"); on tells the link once
+ *   request 4 sync(uint request, uint what, int since_high, uint since_low, uint limit, string cursor, uint count)
+ *       a page of the synchronisation: items, page_end, done
+ *   request 5 send_text(uint request, uint channel, string to, array text)
+ *       a text of up to 8192 bytes: done, then status
+ *   request 6 mark_read(uint request, string handle)
+ *   request 7 link_set(uint request, string address, uint on, uint profiles)
+ *       the phone's switch and its profiles (no app_id is asked)
+ *   request 8 watch_link(uint on)
+ *       the link only (Settings; no app_id is asked)
+ *   event   3 item(uint request, uint what, string handle, string key, uint folder, uint direction, int time_high,
+ *                  uint time_low, uint zone, string datetime, string peer, string name, uint flags, array text)
+ *       one message of a page (its request), or one that came (request 0)
+ *   event   4 page_end(uint request, string cursor, uint more, uint count, uint skipped, uint capped)
+ *   event   5 link(uint backend, uint linked, uint messages, uint can_send, uint notify, uint owner, uint enabled,
+ *                  uint profiles, uint present, string address, string why)
+ *   event   6 dropped()
+ *       items that came were lost: synchronise again
+ *   event   7 done(uint request, uint code)
+ *       a request of version 27 answered (KL_SYSTEM_RESULT_*)
+ * The new events go to objects of version 27 only; done, page_end, link
+ * and dropped are never lost (the compositor owes them until the client
+ * reads).  The backend is the desktop's setting phone.backend (0 none, 1
+ * loopback, 2 bluetooth).
  */
 #define KL_SYSTEM_PHONE_DESTROY			0U
 #define KL_SYSTEM_PHONE_SEND			1U
 #define KL_SYSTEM_PHONE_CALL			2U
+#define KL_SYSTEM_PHONE_LISTEN			3U
+#define KL_SYSTEM_PHONE_SYNC			4U
+#define KL_SYSTEM_PHONE_SEND_TEXT		5U
+#define KL_SYSTEM_PHONE_MARK_READ		6U
+#define KL_SYSTEM_PHONE_LINK_SET		7U
+#define KL_SYSTEM_PHONE_WATCH_LINK		8U
 #define KL_SYSTEM_PHONE_EVENT_RECEIVED		0U
 #define KL_SYSTEM_PHONE_EVENT_STATUS		1U
 #define KL_SYSTEM_PHONE_EVENT_RESULT		2U
+#define KL_SYSTEM_PHONE_EVENT_ITEM		3U
+#define KL_SYSTEM_PHONE_EVENT_PAGE_END		4U
+#define KL_SYSTEM_PHONE_EVENT_LINK		5U
+#define KL_SYSTEM_PHONE_EVENT_DROPPED		6U
+#define KL_SYSTEM_PHONE_EVENT_DONE		7U
+
+/* The channel of SMS (keiland.h's KL_PHONE_SMS) and what a sync asks for (KL_PHONE_MESSAGES). */
+#define KL_SYSTEM_PHONE_SMS			0U
+#define KL_SYSTEM_PHONE_MESSAGES		0U
+
+/* An item's flags (bits). */
+#define KL_SYSTEM_PHONE_ITEM_READ		0x1U
+#define KL_SYSTEM_PHONE_ITEM_PARTIAL		0x2U
+#define KL_SYSTEM_PHONE_ITEM_TRUNCATED		0x4U
+
+/* The lengths of the phone's texts on the wire with their NULs (keiland.h's KL_PHONE_*_MAX), and the longest texts. */
+#define KL_SYSTEM_PHONE_HANDLE_MAX		32U
+#define KL_SYSTEM_PHONE_KEY_MAX			20U
+#define KL_SYSTEM_PHONE_CURSOR_MAX		64U
+#define KL_SYSTEM_PHONE_PEER_MAX		132U
+#define KL_SYSTEM_PHONE_DATETIME_MAX		24U
+#define KL_SYSTEM_PHONE_ADDRESS_MAX		18U
+#define KL_SYSTEM_PHONE_WHY_MAX			32U
+#define KL_SYSTEM_PHONE_TO_MAX			33U
+#define KL_SYSTEM_PHONE_SEND_MAX		8192U
+#define KL_SYSTEM_PHONE_ITEM_TEXT_MAX		16384U
 
 /* A message's or call's state (status), and the channels (keiland.h's KL_PHONE_*). */
 #define KL_SYSTEM_PHONE_SENT			1U
@@ -626,6 +687,7 @@
 #define KL_SYSTEM_PHONE_SETTING			"phone.backend"
 #define KL_SYSTEM_PHONE_BACKEND_NONE		0
 #define KL_SYSTEM_PHONE_BACKEND_LOOPBACK	1
+#define KL_SYSTEM_PHONE_BACKEND_BLUETOOTH	2
 
 /*
  * kl_system_printers_v1's requests and events (ws145-p003,
@@ -841,5 +903,17 @@
 
 /* A displays' apply made against a snapshot that is no longer the last (ws113-p005). */
 #define KL_SYSTEM_RESULT_STALE			11U
+
+/*
+ * The phone's own failures (ws197-p004a): the link or the connection was
+ * lost on the way, an answer did not come in time, a listing was too
+ * large, the compositor could not pass the items on (the client read too
+ * little), the phone's messages are not connected.
+ */
+#define KL_SYSTEM_RESULT_LOST			12U
+#define KL_SYSTEM_RESULT_TIMEOUT		13U
+#define KL_SYSTEM_RESULT_TOO_LARGE		14U
+#define KL_SYSTEM_RESULT_NO_ROOM		15U
+#define KL_SYSTEM_RESULT_NOT_CONNECTED		16U
 
 #endif

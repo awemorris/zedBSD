@@ -34,7 +34,8 @@
  * lets an application's notifications show, on unless the user turns it
  * off on Settings' Notifications page (Mail, Calendar, Phone, Browser).
  * phone.backend (ws170-p004) chooses the
- * phone's backend: 0 none, 1 loopback (the tests' and a demo's).  The one
+ * phone's backend: 0 none, 1 loopback (the tests' and a demo's), 2 the paired
+ * phone by Bluetooth (ws197-p004a, set by Settings' "Use as phone").  The one
  * pointer setting of before (pointer.*) is only read, to be moved to the
  * mouse's (settings.c).  Files keeps the width of each list column the
  * user dragged (BUG-220), in pixels, 0 for the column's own width.
@@ -71,7 +72,7 @@ static const struct kl_settings_key settings_keys[] = {
 	{ "notify.allow.calendar", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
 	{ "notify.allow.phone", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
 	{ "notify.allow.browser", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_BOOL, 0, 1, 1, KL_SETTINGS_KEY_KEPT },
-	{ "phone.backend", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 1, 0, KL_SETTINGS_KEY_KEPT },
+	{ "phone.backend", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 2, 0, KL_SETTINGS_KEY_KEPT },
 	{ "power.sleep.ac", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 240, 30, KL_SETTINGS_KEY_KEPT },
 	{ "power.sleep.battery", KL_SETTINGS_RESOLVER_COMPOSITOR, KL_SETTINGS_TYPE_INT, 0, 240, 15, KL_SETTINGS_KEY_KEPT },
 	{ "terminal.ambiguous-wide", KL_SETTINGS_RESOLVER_APP, KL_SETTINGS_TYPE_BOOL, 0, 1, 0, 0U },

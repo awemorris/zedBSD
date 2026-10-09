@@ -376,6 +376,10 @@ kwl_object_destroy(
 	if (object->kind == KWL_SYSTEM_BLUETOOTH)
 		kwl_bluetooth_gone(object);
 
+	/* A phone object's hearing, what it was owed and its sync waiting go (phone-shell.c, ws197-p004a). */
+	if (object->kind == KWL_SYSTEM_PHONE)
+		kwl_phone_gone(object);
+
 	/* A toplevel's keyboard insets name nothing (inset.c). */
 	if (object->kind == KWL_TOPLEVEL)
 		kwl_inset_object_gone(object);

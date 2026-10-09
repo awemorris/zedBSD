@@ -534,6 +534,9 @@ kwl_system_tick(
 	/* Bluetooth: the service's news, the answers and a pairing's questions (bluetooth-shell.c, ws143-p006). */
 	kwl_bluetooth_tick(server);
 
+	/* The phone: the paired phone's news, the answers and the messages (phone-shell.c, ws197-p004a). */
+	kwl_phone_tick(server);
+
 	/* The sound's playback streams: what came of them, to their clients (audio-stream.c, WS191). */
 	kwl_audio_tick(server);
 
@@ -689,6 +692,7 @@ kwl_system_close(
 	kwl_sysmon_close(server);
 	kwl_machine_close(server);
 	kwl_bluetooth_close(server);
+	kwl_phone_close(server);
 	kwl_audio_close(server);
 
 	/* A job under way ends on its own (a file read or written to its end, a bus call answered). */

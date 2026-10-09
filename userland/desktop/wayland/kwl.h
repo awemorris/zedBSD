@@ -1915,6 +1915,10 @@ int kwl_mail_request(struct kwl_object *object, uint32_t opcode, const unsigned 
 void kwl_mail_settings_changed(struct kwl_server *server);
 int kwl_phone_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_phone_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_phone_tick(struct kwl_server *server);
+void kwl_phone_gone(struct kwl_object *object);
+void kwl_phone_refresh(void);
+void kwl_phone_close(struct kwl_server *server);
 int kwl_printers_available(void);
 int kwl_printers_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
 int kwl_printers_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);

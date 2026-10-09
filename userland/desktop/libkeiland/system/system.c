@@ -32,6 +32,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The largest document printed, and the bytes looked through for "%PDF-" (ws145-p003). */
@@ -146,11 +147,16 @@ struct system_mail_listener {
 	void (*allowed)(void *data, struct wl_proxy *proxy, uint32_t on);
 };
 
-/* The listener of kl_system_phone_v1's events (ws170-p004), in their order. */
+/* The listener of kl_system_phone_v1's events (ws170-p004; item and the others since 27, ws197-p004a), in their order. */
 struct system_phone_listener {
 	void (*received)(void *data, struct wl_proxy *proxy, uint32_t channel, const char *from, const char *text, uint32_t time_high, uint32_t time_low);
 	void (*status)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t state);
 	void (*result)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
+	void (*item)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text);
+	void (*page_end)(void *data, struct wl_proxy *proxy, uint32_t request, const char *cursor, uint32_t more, uint32_t count, uint32_t skipped, uint32_t capped);
+	void (*link)(void *data, struct wl_proxy *proxy, uint32_t backend, uint32_t linked, uint32_t messages, uint32_t can_send, uint32_t notify, uint32_t owner, uint32_t enabled, uint32_t profiles, uint32_t present, const char *address, const char *why);
+	void (*dropped)(void *data, struct wl_proxy *proxy);
+	void (*done)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t code);
 };
 
 /* The listener of kl_system_printers_v1's events (ws145-p003), in their order. */
@@ -206,6 +212,15 @@ static void system_mail_cut(char *to, size_t size, const char *from);
 static void system_mail_allowed(void *data, struct wl_proxy *proxy, uint32_t on);
 static void system_phone_received(void *data, struct wl_proxy *proxy, uint32_t channel, const char *from, const char *text, uint32_t time_high, uint32_t time_low);
 static void system_phone_status(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t state);
+static void system_phone_item(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text);
+static void system_phone_page_end(void *data, struct wl_proxy *proxy, uint32_t request, const char *cursor, uint32_t more, uint32_t count, uint32_t skipped, uint32_t capped);
+static void system_phone_link(void *data, struct wl_proxy *proxy, uint32_t backend, uint32_t linked, uint32_t messages, uint32_t can_send, uint32_t notify, uint32_t owner, uint32_t enabled, uint32_t profiles, uint32_t present, const char *address, const char *why);
+static void system_phone_dropped(void *data, struct wl_proxy *proxy);
+static void system_phone_done(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t code);
+static int system_phone_sync_offered(const struct kl_system *system);
+static int system_phone_number(const char *to, char *number, size_t size);
+static int system_phone_word(const char *word, size_t size);
+static uint64_t system_milliseconds(void);
 static void system_printer(void *data, struct wl_proxy *proxy, uint32_t id, uint32_t protocol, const char *host, uint32_t port, const char *path, const char *name, uint32_t flags);
 static void system_print_job(void *data, struct wl_proxy *proxy, uint32_t job, uint32_t printer, uint32_t state, const char *title, const char *detail);
 static void system_printers_done(void *data, struct wl_proxy *proxy, uint32_t serial);
@@ -345,7 +360,12 @@ static const struct system_mail_listener system_mail_listener = {
 static const struct system_phone_listener system_phone_listener = {
 	system_phone_received,
 	system_phone_status,
-	system_result
+	system_result,
+	system_phone_item,
+	system_phone_page_end,
+	system_phone_link,
+	system_phone_dropped,
+	system_phone_done
 };
 
 /* The printers object's callbacks (ws145-p003). */
@@ -466,7 +486,8 @@ kl_system_close(
 	if (system->queue != NULL)
 		wl_event_queue_destroy(system->queue);
 
-	/* Frees the record. */
+	/* The phone's items' texts (ws197-p004a), then the record. */
+	system_view_phone_release(&system->view);
 	free(system);
 }
 
@@ -534,6 +555,8 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_MAIL;
 	if (system->phone != NULL)
 		bits |= KL_SYSTEM_HAS_PHONE;
+	if (system->phone != NULL && system->manager_version >= KL_SYSTEM_SINCE_PHONE_SYNC)
+		bits |= KL_SYSTEM_HAS_PHONE_SYNC;
 	if (system->printers != NULL)
 		bits |= KL_SYSTEM_HAS_PRINTERS;
 	if (system->displays != NULL)
@@ -1506,6 +1529,323 @@ kl_system_take_phone_event(
 
 	/* Succeeded: one event taken. */
 	return 1;
+}
+
+/*
+ * Hears the phone's items, link and drops or not (ws197-p004a); the link
+ * is told once when the hearing starts.
+ */
+int
+kl_system_phone_listen(
+	struct kl_system *system,
+	unsigned on)
+{
+	int offered;
+
+	/* The compositor's messages of the phone. */
+	if (system == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_LISTEN, (uint32_t)(on != 0U));
+
+	/* Succeeded: asked. */
+	return 0;
+}
+
+/*
+ * Copies the phone link's state as last told (ws197-p004a): 0, ENOTSUP,
+ * ENOENT before it was told, or EINVAL.
+ */
+int
+kl_system_phone_link(
+	const struct kl_system *system,
+	struct kl_phone_link *link,
+	size_t size)
+{
+	int offered;
+	int error;
+
+	/* A system and somewhere to copy to. */
+	if (system == NULL || link == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+
+	/* The view's copy. */
+	error = system_view_phone_link_get(&system->view, link, size);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: copied. */
+	return 0;
+}
+
+/*
+ * Asks a page of the phone's synchronisation (ws197-p004a); one sync of
+ * this program at a time.
+ */
+int
+kl_system_phone_sync(
+	struct kl_system *system,
+	unsigned what,
+	int64_t since,
+	unsigned limit,
+	const char *cursor,
+	unsigned count,
+	uint32_t *request)
+{
+	uint32_t asked;
+	size_t length;
+	int offered;
+	int valid;
+	int error;
+
+	/* A system, the messages, and a page the compositor takes. */
+	if (system == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+	if (what != KL_PHONE_MESSAGES || since < 0)
+		return EINVAL;
+	if (count == 0U || count > 32U || limit > 500U)
+		return EINVAL;
+
+	/* A cursor of one word, or none at the start. */
+	if (cursor == NULL)
+		cursor = "";
+	length = strlen(cursor);
+	valid = system_phone_word(cursor, KL_PHONE_CURSOR_MAX);
+	if (length > 0U && !valid)
+		return EINVAL;
+
+	/* One sync of this program at a time (one not answered in its time lets the next go). */
+	asked = system->next_request;
+	error = system_view_phone_sync_start(&system->view, asked, system_milliseconds());
+	if (error != 0)
+		return error;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_SYNC, asked, (uint32_t)what, (int32_t)(since >> 32), (uint32_t)((uint64_t)since & 0xffffffffU), (uint32_t)limit,
+	    cursor, (uint32_t)count);
+
+	/* Succeeded: the items, the page's end and the result follow. */
+	return 0;
+}
+
+/*
+ * Takes the oldest phone item (ws197-p004a): 1 with it, 0 when none waits.
+ */
+int
+kl_system_take_phone_item(
+	struct kl_system *system,
+	struct kl_phone_item *item,
+	size_t size)
+{
+	int taken;
+
+	/* A system and somewhere to copy to. */
+	if (system == NULL || item == NULL)
+		return 0;
+
+	/* The view's queue. */
+	taken = system_view_take_phone_item(&system->view, item, size);
+	if (!taken)
+		return 0;
+
+	/* Succeeded: one item taken. */
+	return 1;
+}
+
+/*
+ * Copies the end of a sync's page by its request (ws197-p004a): 0, or
+ * ENOENT when it did not come.
+ */
+int
+kl_system_phone_page_end(
+	const struct kl_system *system,
+	uint32_t request,
+	char *cursor,
+	size_t cursor_size,
+	unsigned *more,
+	unsigned *count,
+	unsigned *skipped,
+	unsigned *capped)
+{
+	struct system_view_page_end end;
+	int error;
+
+	/* A system. */
+	if (system == NULL)
+		return EINVAL;
+
+	/* The view's ends. */
+	error = system_view_phone_page_end_of(&system->view, request, &end);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: each part asked for. */
+	if (cursor != NULL && cursor_size > 0U)
+		system_view_copy(cursor, cursor_size, end.cursor);
+	if (more != NULL)
+		*more = end.more;
+	if (count != NULL)
+		*count = end.count;
+	if (skipped != NULL)
+		*skipped = end.skipped;
+	if (capped != NULL)
+		*capped = end.capped;
+	return 0;
+}
+
+/*
+ * Sends a text to a number through the phone (ws197-p004a): the result 0
+ * says the phone's outbox has it; KL_PHONE_STATUS events follow.
+ */
+int
+kl_system_phone_send_text(
+	struct kl_system *system,
+	unsigned channel,
+	const char *to,
+	const char *text,
+	size_t length,
+	uint32_t *request)
+{
+	char number[KL_SYSTEM_PHONE_TO_MAX];
+	struct wl_array words;
+	const void *nul;
+	uint32_t asked;
+	int offered;
+	int error;
+
+	/* A system, the messages, and SMS (the others are not carried). */
+	if (system == NULL || to == NULL || text == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+	if (channel != KL_PHONE_SMS)
+		return ENOTSUP;
+
+	/* The number without its separators. */
+	error = system_phone_number(to, number, sizeof(number));
+	if (error != 0)
+		return error;
+
+	/* A text of 1 to KL_PHONE_SEND_MAX bytes without a NUL. */
+	if (length == 0U || length > KL_PHONE_SEND_MAX)
+		return EINVAL;
+	nul = memchr(text, '\0', length);
+	if (nul != NULL)
+		return EINVAL;
+
+	/* The text as the request's array, sent with the application's next flush. */
+	words.size = length;
+	words.alloc = length;
+	words.data = (void *)(uintptr_t)text;
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_SEND_TEXT, asked, (uint32_t)channel, number, &words);
+
+	/* Succeeded: the result follows, then its states. */
+	return 0;
+}
+
+/*
+ * Marks a message read on the phone by its item's handle (ws197-p004a).
+ */
+int
+kl_system_phone_mark_read(
+	struct kl_system *system,
+	const char *handle,
+	uint32_t *request)
+{
+	uint32_t asked;
+	int offered;
+	int valid;
+
+	/* A system and a handle of one word. */
+	if (system == NULL || handle == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+	valid = system_phone_word(handle, KL_PHONE_HANDLE_MAX);
+	if (!valid)
+		return EINVAL;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_MARK_READ, asked, handle);
+
+	/* Succeeded: the result follows. */
+	return 0;
+}
+
+/*
+ * Hears the phone link's changes or not (ws197-p004a, Settings): no other
+ * of the phone's events.
+ */
+int
+kl_system_phone_watch_link(
+	struct kl_system *system,
+	unsigned on)
+{
+	int offered;
+
+	/* The compositor's messages of the phone. */
+	if (system == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_WATCH_LINK, (uint32_t)(on != 0U));
+
+	/* Succeeded: asked. */
+	return 0;
+}
+
+/*
+ * Turns the phone's switch and its profiles (KL_PHONE_PROFILE_*) on or off
+ * (ws197-p004a, Settings).
+ */
+int
+kl_system_phone_link_set(
+	struct kl_system *system,
+	const char *address,
+	unsigned on,
+	unsigned profiles,
+	uint32_t *request)
+{
+	uint32_t asked;
+	size_t length;
+	int offered;
+
+	/* A system, an address and the profiles known. */
+	if (system == NULL || address == NULL)
+		return EINVAL;
+	offered = system_phone_sync_offered(system);
+	if (!offered)
+		return ENOTSUP;
+	length = strlen(address);
+	if (length != KL_PHONE_ADDRESS_MAX - 1U)
+		return EINVAL;
+	if ((profiles & ~(KL_PHONE_PROFILE_MESSAGES | KL_PHONE_PROFILE_CONTACTS | KL_PHONE_PROFILE_CALLS)) != 0U)
+		return EINVAL;
+
+	/* Sent with the application's next flush. */
+	asked = system_number(system, request);
+	wl_proxy_marshal(system->phone, KL_SYSTEM_PHONE_LINK_SET, asked, address, (uint32_t)(on != 0U), (uint32_t)profiles);
+
+	/* Succeeded: the result follows. */
+	return 0;
 }
 
 /*
@@ -3688,6 +4028,270 @@ system_phone_status(
 	event.request = request;
 	event.state = state;
 	system_view_phone_event(&system->view, &event);
+}
+
+/* One of the phone's messages, of a sync's page or one that came (ws197-p004a). */
+static void
+system_phone_item(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t what,
+	const char *handle,
+	const char *key,
+	uint32_t folder,
+	uint32_t direction,
+	int32_t time_high,
+	uint32_t time_low,
+	uint32_t zone,
+	const char *datetime,
+	const char *peer,
+	const char *name,
+	uint32_t flags,
+	struct wl_array *text)
+{
+	struct kl_system *system;
+	struct kl_phone_item item;
+	size_t length;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The fields, cut to their room. */
+	system = data;
+	memset(&item, 0, sizeof(item));
+	item.request = request;
+	item.what = what;
+	system_mail_cut(item.handle, sizeof(item.handle), handle);
+	system_mail_cut(item.key, sizeof(item.key), key);
+	item.folder = folder;
+	item.direction = direction;
+	item.time = (int64_t)(((uint64_t)(uint32_t)time_high << 32) | (uint64_t)time_low);
+	item.zone = zone;
+	system_mail_cut(item.datetime, sizeof(item.datetime), datetime);
+	system_mail_cut(item.peer, sizeof(item.peer), peer);
+	system_mail_cut(item.name, sizeof(item.name), name);
+
+	/* The flags. */
+	item.read = (flags & KL_SYSTEM_PHONE_ITEM_READ) != 0U;
+	item.partial = (flags & KL_SYSTEM_PHONE_ITEM_PARTIAL) != 0U;
+	item.truncated = (flags & KL_SYSTEM_PHONE_ITEM_TRUNCATED) != 0U;
+
+	/* The text, at most what a message has. */
+	length = 0U;
+	if (text != NULL)
+		length = text->size;
+	if (length > KL_PHONE_ITEM_TEXT_MAX)
+		length = KL_PHONE_ITEM_TEXT_MAX;
+
+	/* For kl_system_take_phone_item. */
+	if (length == 0U) {
+		system_view_phone_item(&system->view, &item, "", 0U);
+		return;
+	}
+
+	/* Succeeded: kept with its text. */
+	system_view_phone_item(&system->view, &item, text->data, length);
+}
+
+/* The end of a sync's page (ws197-p004a). */
+static void
+system_phone_page_end(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	const char *cursor,
+	uint32_t more,
+	uint32_t count,
+	uint32_t skipped,
+	uint32_t capped)
+{
+	struct kl_system *system;
+	struct system_view_page_end end;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* For kl_system_phone_page_end. */
+	system = data;
+	memset(&end, 0, sizeof(end));
+	end.request = request;
+	system_mail_cut(end.cursor, sizeof(end.cursor), cursor);
+	end.more = more;
+	end.count = count;
+	end.skipped = skipped;
+	end.capped = capped;
+	system_view_phone_page_end(&system->view, &end);
+}
+
+/* The phone link's state (ws197-p004a). */
+static void
+system_phone_link(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t backend,
+	uint32_t linked,
+	uint32_t messages,
+	uint32_t can_send,
+	uint32_t notify,
+	uint32_t owner,
+	uint32_t enabled,
+	uint32_t profiles,
+	uint32_t present,
+	const char *address,
+	const char *why)
+{
+	struct kl_system *system;
+	struct kl_phone_link link;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* For kl_system_phone_link. */
+	system = data;
+	memset(&link, 0, sizeof(link));
+	link.backend = backend;
+	link.linked = linked;
+	link.messages = messages;
+	link.can_send = can_send;
+	link.notify = notify;
+	link.owner = owner;
+	link.enabled = enabled;
+	link.profiles = profiles;
+	link.present = present;
+	system_mail_cut(link.address, sizeof(link.address), address);
+	system_mail_cut(link.why, sizeof(link.why), why);
+	system_view_phone_link(&system->view, &link);
+}
+
+/* Items that came were lost on the way (ws197-p004a). */
+static void
+system_phone_dropped(
+	void *data,
+	struct wl_proxy *proxy)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* KL_PHONE_DROPPED for the program. */
+	system = data;
+	system_view_phone_dropped(&system->view);
+}
+
+/* A phone request of version 27 answered (ws197-p004a). */
+static void
+system_phone_done(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t code)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The result, and the program's sync ended when it is the sync's. */
+	system = data;
+	system_view_phone_done(&system->view, request, code);
+}
+
+/* Tells whether the compositor offers the phone's messages (a phone of version 27, not lost). */
+static int
+system_phone_sync_offered(
+	const struct kl_system *system)
+{
+	/* The phone, of that version, while the compositor is there. */
+	if (system->phone == NULL || system->lost)
+		return 0;
+	if (system->manager_version < KL_SYSTEM_SINCE_PHONE_SYNC)
+		return 0;
+
+	/* Succeeded: offered. */
+	return 1;
+}
+
+/*
+ * Takes the separators ("-", " ", "(", ")", ".") out of a number and
+ * checks the rest: 1 to 32 of the digits, '+', '*' and '#'.  Returns 0
+ * with it, or EINVAL.
+ */
+static int
+system_phone_number(
+	const char *to,
+	char *number,
+	size_t size)
+{
+	size_t used;
+	size_t span;
+	const char *separator;
+
+	/* Each character but the separators, while there is room. */
+	used = 0U;
+	while (*to != '\0') {
+		separator = strchr("- ().", *to);
+		if (separator == NULL) {
+			if (used + 1U >= size)
+				return EINVAL;
+			number[used] = *to;
+			used++;
+		}
+
+		/* The next character. */
+		to++;
+	}
+
+	/* The end of the number. */
+	number[used] = '\0';
+
+	/* Not empty, and only the dialling characters. */
+	if (used == 0U)
+		return EINVAL;
+	span = strspn(number, "0123456789+*#");
+	if (span != used)
+		return EINVAL;
+
+	/* Succeeded: the number. */
+	return 0;
+}
+
+/* Tells whether a value is one word a request can carry: printable, no space or quote, shorter than size. */
+static int
+system_phone_word(
+	const char *word,
+	size_t size)
+{
+	size_t length;
+	size_t index;
+	unsigned char byte;
+
+	/* Not empty and within its room. */
+	length = strlen(word);
+	if (length == 0U || length >= size)
+		return 0;
+
+	/* Each byte printable, and none that parts or quotes. */
+	for (index = 0U; index < length; index++) {
+		byte = (unsigned char)word[index];
+		if (byte <= 0x20U || byte >= 0x7fU)
+			return 0;
+		if (byte == '"' || byte == '\\')
+			return 0;
+	}
+
+	/* Succeeded: a word. */
+	return 1;
+}
+
+/* Gives the monotonic clock in milliseconds. */
+static uint64_t
+system_milliseconds(
+	void)
+{
+	struct timespec now;
+
+	/* The monotonic clock. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+
+	/* Succeeded: milliseconds. */
+	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 }
 
 /* A message arrived, for this reader (ws169-p002). */
