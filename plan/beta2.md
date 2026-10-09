@@ -27,15 +27,15 @@
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | 設計の書き直しと review の後に実装（走っている試験は済んだ） | 26 | P1・T1 |
-| [BUG-286](bugs/BUG-286.md) NFC の YubiKey で登録と login が失敗（passkey-fido2 が USB の鍵だけを開く） | WS199 の中で | 3 | P1・ユーザー |
+| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | i01 頁・i02 NFC・i03 鍵の PIN と Reset を merge。次 i04 PIN 不要/タッチ不要、i05 greeter・lock の鍵のモードと keypad、i06 試験 | 12 | P1・T1 |
+| [BUG-286](bugs/BUG-286.md) NFC の YubiKey で登録と login が失敗 | 直して merge（i02、置きっ放しもタッチ）。5330 で確認待ち | 0.5 | ユーザー |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
 | 次の UAT で出る Bug の枠 | — | 5 | P1 |
-| **計** | | **約 47.5 LW**（約 16 時間） | |
+| **計** | | **約 31 LW**（約 10 時間） | |
 
 ## 次の UAT で確認してほしい事項（5330、WS199・WS200 の後の image）
 
@@ -58,7 +58,7 @@
 | --- | --- |
 | BUG-222（USB LAN の遅さ、直らなければ）、BUG-280（App Home への遷移の fps）、BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更・調べが要る |
 | BUG-255（蓋を閉じた間の HDMI）、BUG-159（電池で 5 fps）、BUG-145（AX211 の DHCP）、BUG-165（5330 の DSDT） | 調査が長い・実機の時間が要る |
-| WS197（Bluetooth のスマホ連携）、WS195（/opt/keiland）、WS196（useradd 等）、WS198（self-build）、[WS001 p045](ws001/phase045/phase.md) POSIX の header、[WS126](ws126/ws.md) Python | ベータ3 の列 |
+| WS201（/home の暗号化）、WS197（Bluetooth のスマホ連携）、WS195（/opt/keiland）、WS196（useradd 等）、WS198（self-build）、[WS001 p045](ws001/phase045/phase.md) POSIX の header、[WS126](ws126/ws.md) Python | ベータ3 の列 |
 | 規約の全文の見直しの Phase（各 WS） | ユーザーの決定でベータ3 |
 
 ## 運用

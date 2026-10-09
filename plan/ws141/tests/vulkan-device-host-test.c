@@ -30,6 +30,8 @@
 #include "drivers/gpu/bcm2711/vulkan-prepared.h"
 #include "drivers/gpu/bcm2711/vulkan-uniform.h"
 #include "drivers/gpu/bcm2711/vulkan-native-draw.h"
+#include "drivers/gpu/bcm2711/vulkan-native-pass.h"
+#include "drivers/gpu/bcm2711/vulkan-native-job.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* Synthetic UBO metadata borrows actual retained buffer backing; it is never published as a client pipeline or DMA job. */
@@ -42,6 +44,12 @@ struct uniform_fixture {
 	struct bcm2711_vulkan_object set_object;
 	struct bcm2711_shader_binary program;
 	struct bcm2711_shader_uniform uniforms[3];
+};
+
+/* Synthetic clear/area events borrow actual pending primary ownership without publishing replacement client records. */
+struct execute_fixture {
+	struct bcm2711_vulkan_record record;
+	struct bcm2711_vulkan_prepared_event events[3];
 };
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -65,6 +73,21 @@ static uint64_t next_native_physical = 0x200000U;
 /* Complete cache-clean observations distinguish device-visible upload preparation from a GPU launch. */
 static unsigned native_cleans;
 
+/* The explicit native-runner fixture reports selected completion outcomes; it never executes physical DMA or QPU work. */
+static int native_execute_error;
+
+/* Selected synthetic retirement observations test whole-owner preservation, without claiming a checked physical reset. */
+static bool native_execute_retired;
+
+/* Only expected executor handoffs increment this fixture counter; refused replay or preflight must leave it unchanged. */
+static unsigned native_execute_calls;
+
+/* Device publication barriers are observed independently of the mocked native runner in this single-thread host fixture. */
+static unsigned native_write_barriers;
+
+/* Output-visibility barriers are observed only after successful retired native-runner handoff. */
+static unsigned native_read_barriers;
+
 /* Actual VA/page-table code consumes fixture RAM and an explicitly observed flush outcome. */
 static uint32_t native_pages[1048576];
 
@@ -87,6 +110,9 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void native_job_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
+static void native_execute_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *begin);
+static void native_pass_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *begin);
 static void native_draw_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void uniform_test(struct bcm2711_vulkan_session *session, const struct bcm2711_vulkan_prepared_event *event);
 static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
@@ -333,6 +359,58 @@ bcm2711_v3d_hardware_pages_sync(
 
 	/* Succeeded: the software fixture permits the actual VA owner to finish its selected operation. */
 	return 0;
+}
+
+/*
+ * Supplies an explicit synthetic completion to the real private native-pass executor.
+ *
+ * This fixture validates the actual handoff and ownership result only; native
+ * job IRQ/cache/MMIO behavior is covered by its separate hardware fixture.
+ */
+int
+bcm2711_v3d_job_run(
+	struct bcm2711_v3d *engine,
+	const struct bcm2711_v3d_job *job,
+	struct bcm2711_v3d_job_result *result)
+{
+	/* Only a real independently prepared native CL job may reach this explicit host completion source. */
+	assert(engine != NULL && engine->hardware.ready && job->kind == BCM2711_V3D_JOB_CL);
+	assert(job->command.cl.bin_end > job->command.cl.bin_start && job->command.cl.render_end > job->command.cl.render_start);
+	assert(job->command.cl.overflow_count == 4 && job->command.cl.clean_output);
+	native_execute_calls++;
+	memset(result, 0, sizeof(*result));
+	result->retired = native_execute_retired;
+
+	/* Succeeded: the fixture reports its selected protocol outcome, never a physical retirement proof. */
+	return native_execute_error;
+}
+
+/*
+ * Observes the real executor's publication barrier without performing device I/O on the host.
+ */
+void
+kern_io_write_barrier(
+	void)
+{
+	/* The single-thread fixture counts the barrier independently of native runner calls. */
+	native_write_barriers++;
+
+	/* Succeeded: the fixture observed publication order. */
+	return;
+}
+
+/*
+ * Observes the real executor's output-read barrier without performing physical cache maintenance.
+ */
+void
+kern_io_read_barrier(
+	void)
+{
+	/* Only confirmed successful retirement should expose a subsequent FIFO CPU read. */
+	native_read_barriers++;
+
+	/* Succeeded: the fixture observed the output visibility boundary. */
+	return;
 }
 
 /*
@@ -951,6 +1029,351 @@ native_draw_test(
 	return;
 }
 
+/* Exercises whole mapped pass ownership with real prepared targets/draws and synthetic no-op/malformed event copies. */
+static void
+native_pass_test(
+	struct bcm2711_vulkan_session *session,
+	const struct bcm2711_vulkan_prepared_event *begin_event)
+{
+	struct bcm2711_vulkan_native_pass *pass;
+	const struct bcm2711_vulkan_prepared_event *following;
+	struct bcm2711_vulkan_prepared_event *events;
+	struct bcm2711_vulkan_framebuffer *framebuffer;
+	struct bcm2711_vulkan_image_view *image_view;
+	struct bcm2711_vulkan_resource *image;
+	struct bcm2711_v3d_view *view;
+	struct bcm2711_v3d_space *space;
+	void *cpu;
+	uint32_t address;
+	uint32_t references;
+	uint32_t index;
+	uint32_t byte;
+	unsigned baseline;
+	unsigned held;
+	unsigned cleans;
+	uint64_t available;
+	uint64_t bytes;
+	int error;
+
+	/* The actual immutable primary supplies its typed framebuffer and independently bound coherent colour allocation. */
+	space = &session->render->device->space;
+	framebuffer = begin_event->pass->objects[1]->payload;
+	image_view = framebuffer->view->payload;
+	image = image_view->owner.parent->payload;
+	error = bcm2711_vulkan_resource_backing(image, 0, image->bytes, &view, &address, &cpu);
+	assert(error == 0 && image->bytes == 512U);
+	references = view->references;
+	baseline = allocations;
+	memset(cpu, 0x6c, 512);
+	available = 8U * 1024U * 1024U;
+	cleans = native_cleans;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == 0 && pass != NULL && following == NULL);
+	assert(pass->output == view && view->references == references + 1U);
+	assert(pass->count == 9U && pass->draws == 1U && pass->first == pass->last && pass->last->next == NULL);
+	bytes = pass->bytes;
+	assert(bytes == 1646592U && available == 8U * 1024U * 1024U - bytes);
+	assert(native_cleans == cleans + 20U && pass->job.kind == BCM2711_V3D_JOB_CL);
+	assert(pass->job.command.cl.bin_end - pass->job.command.cl.bin_start == 130U);
+	assert(pass->job.command.cl.render_end - pass->job.command.cl.render_start == 106U);
+	assert(pass->job.command.cl.pool_bytes == 0x83000U && pass->job.command.cl.state_bytes == 4096U);
+	assert(pass->job.command.cl.overflow_count == 4U && pass->job.command.cl.clean_output);
+	assert(pass->state.output == address && pass->state.load == 1U && pass->state.store == 1U);
+	assert(pass->load == VK_ATTACHMENT_LOAD_OP_CLEAR && pass->cpu == cpu);
+	for (index = 0; index < BCM2711_NATIVE_BIN_BYTES; index++)
+		assert(((uint8_t *)pass->storage[0]->view->buffer->address)[BCM2711_NATIVE_PASS_BIN_PREFIX + index] == pass->first->bin[index]);
+	for (index = 0; index < 4U; index++) {
+		assert(pass->job.command.cl.overflow[index].address == pass->storage[5U + index]->view->address);
+		assert(pass->job.command.cl.overflow[index].bytes == 256U * 1024U);
+	}
+
+	/* A successfully prepared CLEAR pass still leaves every existing target sample untouched until actual execution. */
+	for (byte = 0; byte < 512U; byte++)
+		assert(((uint8_t *)cpu)[byte] == 0x6c);
+	held = allocations;
+	error = bcm2711_vulkan_native_pass_release(&pass, false);
+	assert(error == EBUSY && pass != NULL && allocations == held && pass->bytes == bytes);
+	assert(view->references == references + 1U && pass->first != NULL && pass->count == 9U);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && pass == NULL && allocations == baseline && view->references == references);
+
+	/* Selected late allocation failures retire complete draw/list/overflow prefixes and restore the caller's exact aggregate budget. */
+	for (index = 0; index < 3U; index++) {
+		fail_after = 10U + index * 25U;
+		available = 8U * 1024U * 1024U;
+		error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+		assert(error == ENOMEM && pass == NULL && following == NULL && fail_after == 0);
+		assert(allocations == baseline && view->references == references && available == 8U * 1024U * 1024U);
+	}
+
+	/* A budget sufficient for all draw owners but insufficient for the pass pool rolls back all earlier independent mappings. */
+	available = 64U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == ENOMEM && pass == NULL && following == NULL && allocations == baseline);
+	assert(view->references == references && available == 64U * 1024U);
+
+	/* Synthetic immutable event copies exercise no-op draws and missing-END refusal without mutating the pending real primary. */
+	events = kern_calloc(3, sizeof(*events));
+	assert(events != NULL);
+	events[0] = *begin_event;
+	events[1] = *begin_event->next;
+	events[2] = *begin_event->next->next;
+	events[0].next = &events[1];
+	events[1].next = &events[2];
+	events[1].draw[0] = 0;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == 0 && pass->draws == 0 && pass->first == NULL && pass->count == 9U);
+	assert(pass->job.command.cl.bin_end - pass->job.command.cl.bin_start == 14U);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1U && view->references == references);
+	events[1].draw[0] = 6;
+	events[1].draw[1] = 0;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == 0 && pass->draws == 0 && pass->first == NULL);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1U && view->references == references);
+	events[1].draw[1] = 1;
+	events[1].next = NULL;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, events, &available, &pass, &following);
+	assert(error == EINVAL && pass == NULL && following == NULL && available == 8U * 1024U * 1024U);
+	assert(allocations == baseline + 1U && view->references == references);
+	kern_free(events);
+
+	/* Overflow admission refuses before acquiring another framebuffer reference or native owner. */
+	view->references = 0xffffffffU;
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, begin_event, &available, &pass, &following);
+	assert(error == EOVERFLOW && pass == NULL && allocations == baseline);
+	view->references = references;
+	for (byte = 0; byte < 512U; byte++)
+		assert(((uint8_t *)cpu)[byte] == 0x6c);
+	puts("WS141 whole mapped native pass/CL-tile-overflow/output ownership/no-op draw/atomic rollback: PASS");
+
+	/* Succeeded: every complete or refused whole-pass root retires without modifying the real pending primary or target samples. */
+	return;
+}
+
+/* Tests real exact-rectangle clear and native-pass handoff against an explicit runner fixture, never physical GPU completion. */
+static void
+native_execute_test(
+	struct bcm2711_vulkan_session *session,
+	const struct bcm2711_vulkan_prepared_event *begin_event)
+{
+	struct execute_fixture *fixture;
+	struct bcm2711_vulkan_native_pass *pass;
+	struct bcm2711_v3d_job_result result;
+	const struct bcm2711_vulkan_prepared_event *following;
+	struct bcm2711_v3d_space *space;
+	uint8_t *cpu;
+	uint64_t available;
+	uint32_t x;
+	uint32_t y;
+	uint32_t index;
+	uint32_t component;
+	uint8_t expected[4];
+	unsigned baseline;
+	unsigned calls;
+	unsigned writes;
+	unsigned reads;
+	unsigned held;
+	int error;
+
+	/* Copied numerical clear/area metadata borrows the actual independently retained framebuffer and pending primary. */
+	space = &session->render->device->space;
+	baseline = allocations;
+	fixture = kern_calloc(1, sizeof(*fixture));
+	assert(fixture != NULL);
+	fixture->record = *begin_event->pass;
+	fixture->record.area.offset.x = 2;
+	fixture->record.area.offset.y = 1;
+	fixture->record.area.extent.width = 3;
+	fixture->record.area.extent.height = 2;
+	fixture->record.words[0] = 0x3e800000U;
+	fixture->record.words[1] = 0x3f000000U;
+	fixture->record.words[2] = 0x3f400000U;
+	fixture->record.words[3] = 0x3f800000U;
+	fixture->events[0] = *begin_event;
+	fixture->events[1] = *begin_event->next;
+	fixture->events[2] = *begin_event->next->next;
+	for (index = 0; index < 3; index++)
+		fixture->events[index].pass = &fixture->record;
+	fixture->events[0].next = &fixture->events[1];
+	fixture->events[1].next = &fixture->events[2];
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, fixture->events, &available, &pass, &following);
+	assert(error == 0 && pass->format == VK_FORMAT_R8G8B8A8_UNORM);
+	cpu = pass->cpu;
+	memset(cpu, 0x6c, 512);
+	space->native->hardware.initialized = true;
+	space->native->power.ready = true;
+	calls = native_execute_calls;
+	writes = native_write_barriers;
+	reads = native_read_barriers;
+
+	/* Faulted admission refuses before CPU clear, root execution publication or any mocked native handoff. */
+	space->native->hardware.ready = false;
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == EIO && result.retired && !pass->executed && native_execute_calls == calls);
+	for (index = 0; index < 512; index++)
+		assert(cpu[index] == 0x6c);
+	space->native->hardware.ready = true;
+	pass->area.extent.width = 4096;
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == EINVAL && result.retired && !pass->executed && native_execute_calls == calls);
+	pass->area.extent.width = 3;
+
+	/* The explicit runner fixture observes one real executor handoff with separately counted publication and visibility barriers. */
+	native_execute_error = 0;
+	native_execute_retired = true;
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == 0 && result.retired && pass->executed && pass->retired);
+	assert(native_execute_calls == calls + 1 && native_write_barriers == writes + 1 && native_read_barriers == reads + 1);
+	expected[0] = 64;
+	expected[1] = 128;
+	expected[2] = 191;
+	expected[3] = 255;
+	for (y = 0; y < 8U; y++) {
+		for (x = 0; x < 16U; x++) {
+			for (component = 0; component < 4U; component++) {
+				/* All surrounding samples and every byte outside the exact three-by-two rectangle survive unchanged. */
+				index = y * 64U + x * 4U + component;
+				if (x >= 2U && x < 5U && y >= 1U && y < 3U)
+					assert(cpu[index] == expected[component]);
+				else
+					assert(cpu[index] == 0x6c);
+			}
+		}
+	}
+
+	/* Completed roots cannot replay CPU clear or native work, even if the coherent target changes afterward. */
+	memset(cpu, 0x5d, 512);
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == EBUSY && result.retired && native_execute_calls == calls + 1);
+	assert(cpu[1U * 64U + 2U * 4U] == 0x5d);
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1);
+
+	/* Loading skips CPU clear, while uncertain synthetic native completion retains every whole-pass owner and refuses replay. */
+	available = 8U * 1024U * 1024U;
+	error = bcm2711_vulkan_native_pass_create(space, fixture->events, &available, &pass, &following);
+	assert(error == 0);
+	pass->load = VK_ATTACHMENT_LOAD_OP_LOAD;
+	cpu = pass->cpu;
+	memset(cpu, 0x6c, 512);
+	native_execute_error = ETIMEDOUT;
+	native_execute_retired = false;
+	held = allocations;
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == ETIMEDOUT && !result.retired && pass->executed && !pass->retired && allocations == held);
+	assert(native_execute_calls == calls + 2 && native_read_barriers == reads + 1);
+	for (index = 0; index < 512; index++)
+		assert(cpu[index] == 0x6c);
+	error = bcm2711_vulkan_native_pass_release(&pass, false);
+	assert(error == EBUSY && pass != NULL && allocations == held && pass->first != NULL);
+	error = bcm2711_vulkan_native_pass_run(pass, &result);
+	assert(error == EBUSY && !result.retired && native_execute_calls == calls + 2);
+
+	/* No host fixture DMA was launched; this true release supplies no evidence of a production global-reset retirement. */
+	error = bcm2711_vulkan_native_pass_release(&pass, true);
+	assert(error == 0 && allocations == baseline + 1);
+	native_execute_error = 0;
+	native_execute_retired = true;
+	kern_free(fixture);
+	assert(allocations == baseline);
+	puts("WS141 real rectangular coherent clear/native-runner fixture handoff/single-use retirement: PASS");
+
+	/* Succeeded: every complete or refused private executor root has retired within this explicit non-DMA host fixture. */
+	return;
+}
+
+/* Verifies actual pending/native pass payload transfer survives synthetic callback retirement until explicit recovery. */
+static void
+native_job_test(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_vulkan_object *command_object)
+{
+	struct bcm2711_vulkan_native_job *job;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_render_device *controller;
+	struct bcm2711_render_session *render;
+	unsigned baseline;
+	unsigned held;
+	uint32_t references;
+	uint32_t index;
+	bool retired;
+	int error;
+
+	/* Future runtime binding is explicit in this private fixture, without publishing COMMAND/CAPSET/JOB operations. */
+	render = session->render;
+	controller = render->device;
+	command = command_object->payload;
+	assert(command->pending == 0 && render->vulkan == NULL);
+	controller->space.native->hardware.initialized = true;
+	controller->space.native->power.ready = true;
+	render->vulkan = session;
+	baseline = allocations;
+	references = command_object->references;
+	for (index = 1; index <= 3U; index++) {
+		fail_after = index;
+		error = bcm2711_vulkan_native_job_create(command_object, &job);
+		assert(error == ENOMEM && job == NULL && allocations == baseline && command->pending == 0);
+		assert(command_object->references == references);
+	}
+
+	/* The complete queued CPU payload retains the primary before any coherent source snapshot or native allocation. */
+	error = bcm2711_vulkan_native_job_create(command_object, &job);
+	assert(error == 0 && job != NULL && job->pass == NULL && command->pending == 1);
+	native_execute_error = 0;
+	native_execute_retired = true;
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == 0 && retired && job->pass == NULL && job->executed && command->pending == 1);
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == EBUSY && retired);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == 0 && allocations == baseline && command->pending == 0 && controller->quarantine == NULL);
+
+	/* An explicit native-runner timeout keeps the complete current pass, pending primary and descriptor graph alive after false disposal. */
+	error = bcm2711_vulkan_native_job_create(command_object, &job);
+	assert(error == 0);
+	native_execute_error = ETIMEDOUT;
+	native_execute_retired = false;
+	error = bcm2711_vulkan_native_job_execute(controller, render, job, &retired);
+	assert(error == ETIMEDOUT && !retired && job->pass != NULL && command->pending == 1);
+	held = allocations;
+	error = bcm2711_vulkan_native_job_dispose(controller, job, false);
+	assert(error == 0 && controller->quarantine == job && job->quarantined && allocations == held);
+	assert(job->prepared != NULL && job->pass->first != NULL && job->pass->output != NULL);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, false);
+	assert(error == 0 && controller->quarantine == job && job->next == NULL && allocations == held);
+	error = bcm2711_vulkan_native_job_dispose(controller, job, true);
+	assert(error == EBUSY && controller->quarantine == job && command->pending == 1 && allocations == held);
+
+	/* External session ownership and unavailable native reset admission each leave the entire quarantined graph untouched. */
+	controller->sessions = 1;
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == EBUSY && controller->quarantine == job && command->pending == 1 && allocations == held);
+	controller->sessions = 0;
+	controller->space.native->hardware.ready = false;
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == EIO && controller->quarantine == job && command->pending == 1 && allocations == held);
+	controller->space.native->hardware.ready = true;
+
+	/* No physical fixture DMA ran; synthetic reset admission authorizes only this host owner-graph retirement, not production reset acceptance. */
+	error = bcm2711_vulkan_native_jobs_recover(controller);
+	assert(error == 0 && controller->quarantine == NULL && allocations == baseline && command->pending == 0);
+	assert(command_object->references == references);
+	native_execute_error = 0;
+	native_execute_retired = true;
+	render->vulkan = NULL;
+	puts("WS141 whole pending native job/controller quarantine/descriptor charges/explicit recovery: PASS");
+
+	/* Succeeded: callback disposal cannot discard the sole root of any uncertain native pass or pending primary. */
+	return;
+}
+
 /* Checks actual compiled consumption/cloned input ownership and synthetic UBO intervals against real coherent resource backing. */
 static void
 uniform_test(
@@ -1183,6 +1606,7 @@ prepared_test(
 	error = bcm2711_vulkan_prepared_release(prepared, true);
 	assert(error == 0 && command->pending == 0 && set->pending == 0 && allocations == baseline);
 	command->flags = 0;
+	native_job_test(session, command_object);
 
 	/* A complete prepared primary acquires one distinct set charge and one independent snapshot of each consumed view/sampler. */
 	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
@@ -1196,6 +1620,8 @@ prepared_test(
 	assert(event->push[0][0] == 0x3f000000U && event->vertices[0]->bytes == 48);
 	assert(event->next->opcode == GPU_OP_CMD_END_RENDER_PASS && event->next->next == NULL);
 	native_draw_test(session, event);
+	native_pass_test(session, prepared->first);
+	native_execute_test(session, prepared->first);
 	uniform_test(session, event);
 	error = bcm2711_vulkan_prepared_create(command_object, &second);
 	assert(error == EBUSY && second == NULL && command->pending == 1 && set->pending == 1);

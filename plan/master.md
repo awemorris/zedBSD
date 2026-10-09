@@ -8,24 +8,28 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-- **2026-10-09 未明（利用制限の後に再開、ユーザーの体制）**: N=2 は P1 と P3。P1 = ベータ2 の全部（UAT のデバッグが最優先、T1-475 の FAIL、BUG-273・272・173・242・120、WS102 p011）と合間のベータ3（WS031・075・068・052・172・095・155・046・004・001（4 LW まで）・126・171・009・026・106・139・094 p009・BUG-255）。P3 = 規約の全文の見直しだけ（Haiku、最初は ws190-p004、Q1 が能力を評価。.claude/agents/p3-conformance-haiku.md は再起動の後に使える、今は conformance-reviewer の model を haiku にして起動）。P2 は止めた。T1 = T1-481 を最優先に 477〜484。
+-->
+<!-- master:agents:start -->
+- **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=1（P1 だけ）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
+  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。今 WS199 p002（i04、PIN 不要・タッチ不要）。順は [WS199](ws199/ws.md) p002 → p003 → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。保留の branch: agent/p1-ws197（WS197 p003 の i03 の途中、10/17 の後に merge）、agent/p1-p045（WS001 p045、10/17 の後）。
+  - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
+  - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- main b63777dec（2026-10-08 夕）。今日の後半の統合: WS188 完了（host-machine は plan/tools/keiland-machine へ）、WS189 p002〜p004（DnD・Mail の添付）、WS190 p001〜p003（指の選択、KL_VERSION 74）、WS191 p001〜p004（kl_audio_stream、KL_VERSION 73、Linux alsa-lib の dlopen・FreeBSD OSS）、WS143 p006（Bluetooth の desktop、KL_VERSION 72）、BUG-256・BUG-265・BUG-266（resolved / 実機待ち）、BUG-267・BUG-268 の直し、WS083 p008 と照合の review の直し、WS177 p020・p021（Music）。
-- 5330 の状態: 最後の kernel の書き込み（BUG-267 の直し、cksum 180880581）の後に SSH が応答しなくなり（BUG-269）、ユーザーが再起動した直後。どの kernel で起動したかは未確認（ユーザーが SSH の見張りを止めた）。build/q1-uat2/vmunix（2563124650）は BUG-267 と BUG-268 の両方入り、/bin/wayland は 1600740716（BUG-266 の直し入り）。boot の行に `usbhid.dump=1`（診断、BUG-267 の後に外す）。
-- ユーザーへの確認待ち: BUG-267 の 2 本指（interface 1 の attach、contact=1）、BUG-268 の DP を抜いた後の eDP の戻り（1〜2 秒）、BUG-265 の実機の tap-drag、ws090-p009・p018・p020・p021 の PNG、`kl_audio_stream_*` を `kl_audio_*` に縮めるか（Q1 が問うた、未回答）。
+- main の先頭（2026-10-10 夜）: WS199 i01〜i03（d8cb16814、KL_VERSION 77）、BUG-283・284・285・286 の直し、BUG-275（USB の zero-bandwidth の endpoint、Bluetooth）、BUG-222 の TCP の並び替え 44・ifconfig の media、rtld の dlopen の path、Noct 2.0.3。
+- 5330（10.0.30.3、zedBSD の単独起動）: SSH は `sshpass -p kei ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no kei@10.0.30.3`（鍵は今の image に無い）、sudo は `echo kei | sudo -S`。image は 10/09 の a42a544 以降の userland＋Q1 が入れた BUG-275 の kernel（ESP の vmunix、前は vmunix.old）。WS199 i02 以降（NFC・Security Keys の頁）は入っていない。/tmp/fidoctl.new に新しい fidoctl（ユーザーが鍵の up=false の確かめを流す、手順は Q1 が会話で渡した）。
+- ユーザーの判断待ち: passkey-fido2 だけを 5330 に入れ替えて NFC の login を試すか、image を作り直すか。fidoctl の `-s assert` の結果（WS199 p002 の前提）。
 <!-- master:merge:end -->
 
 ### Q1 の次の手順
 
 <!-- master:next:start -->
-1. P1・P2・T1 を新しい世代で起動（再開点は上の agents）。merge は `source plan/tools/merge_one.sh && merge_one SHA`。
-2. **5330**（ユーザー「アップデートや再起動は自由にどうぞ」、SSH は kei@10.0.30.3、鍵は登録済み、sudo は `echo kei | sudo -S`）: まず起動中の kernel を確かめる。ESP への書き込みは BUG-269 で SSH が止まるので、書く前にユーザーに一言、書いたら電源の再投入を頼む。手順は script を /tmp に置き `nohup sh` で流し、終わりの印の file を見る。
-3. ベータ2 の残り: plan/agents/sweep-beta2-rc-20261008.md の §5（約 16.6 LW、WS143 が最大）。
-4. ユーザーの判断待ち: 上の merge の block の「ユーザーへの確認待ち」。
+1. 新しい Q1 は AGENTS.md・plan/beta2.md・この block・plan/ws199/ws.md・plan/ws200/ws.md を読む。P1・T1 の agent は会話に紐づくので、新しい session では P1・T1 を新しい世代で起動する（P1 は agent/p1 の worktree で WS199 p002 から、phase.md に「すること・やり方」）。
+2. merge は `source plan/tools/merge_one.sh && merge_one SHA`（merge だけを 1 つの Bash の呼び出しに、memory の規則）。T1 の台帳の番号は Q1 が振る（次は T1-523）。Bug の次の番号は BUG-287、Queue は q923、WS は WS202。
+3. 日程: 10/13 凍結の目標 → 10/14 RC・最終回帰（WS129 p006）→ 10/16 公開の準備（WS129 p008）、公開はユーザーの指示。Vulkan Video は T1-435 が PASS なら release の config に `ZEDBSD_BOOT_EXTRA_LINES += i915.debug=video`、でなければ OFF のまま。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断
@@ -490,10 +494,11 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS194](ws194/ws.md) | MG006 | make keiland-linux（apt・yum・pacman）・keiland-freebsd（pkg）の必要な package の確認と導入、build 後の install の確認（2026-10-09 ユーザー、ベータ2） | planned | p001 実装 |
 | [WS195](ws195/ws.md) | MG006 | zedBSD でも userland/desktop を /opt/keiland/ に、account-admin を base から Keiland へ（2026-10-09 ユーザー、ベータ3） | planning | p001 設計 |
 | [WS196](ws196/ws.md) | MG002 | useradd・usermod・userdel（2026-10-09 ユーザーの問い、ベータ3 以降の提案） | planning | p001 範囲 |
-| [WS197](ws197/ws.md) | MG006 | Bluetooth のスマホ連携: MAP（SMS）・Integration（WS170）・PBAP・HFP（通話、SCO）、約 121 LW（2026-10-09 ユーザー、beta2.md の必須の後） | planning | p001 設計 |
+| [WS197](ws197/ws.md) | MG006 | Bluetooth のスマホ連携: MAP（SMS）・Integration（WS170）・PBAP・HFP（通話、SCO）、約 129 LW、ベータ3（code は branch agent/p1-ws197） | incomplete | p001・p002 cleared、p003 i03 の途中（再開の手順は ws.md） |
 | [WS198](ws198/ws.md) | MG002 | zedBSD の上で zedBSD を self-build（host の clang、2026-10-09 ユーザー、優先度低、ベータ2 の見込み） | planning | p001 前提の調べ |
 | [WS199](ws199/ws.md) | MG006 | Settings のセキュリティキーの独立の頁とウィザード（2026-10-10 ユーザーの UAT、ベータ2） | planned | p001 |
 | [WS200](ws200/ws.md) | MG006 | Settings の Users のパスワード変更のウィザードと認証方式の選択（2026-10-10 ユーザーの UAT、ベータ2） | planned | p001 |
+| [WS201](ws201/ws.md) | MG002 | /home の暗号化（UFS の先頭の key slot、FIDO2 の hmac-secret／PRF と回復のパスワード、master key は初回に /dev/random）（2026-10-10 ユーザー、ベータ3、今は検討しない） | planning | p001 設計 |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 
@@ -529,6 +534,9 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
+- 2026-10-10 merge 5515a4dab（WS199）: R3「置きっ放しもタッチ」を passkey-fido2 に、kernel の smartcard.c の drv_smartcard_card が card の出入りで KERN_SYSTEM_EVENT_USB の CHANGE（detail card=0|1）を post（Q1 の許し、include/uapi/system.h は注釈 1 行だけで layout 不変）、host-kl-system.c の printers の stub、fido2-p003-guest.sh の段 4 を security-keys の頁に。
+- 2026-10-10 ユーザー（クリック）: WS199 R3 は「置きっ放しもタッチ」→ NFC の reader に載せたままの鍵もタッチと見なす（P1 の推しの「当て直し」は採らない）。
 - 2026-10-10 Q1 判定: WS199 i02 の kernel の src/drivers/generic/smartcard.c（WS161 の file）の変更を許す: card の出入りで既存の KERN_SYSTEM_EVENT_USB の CHANGE（subject smartcardN、detail card=1|0）を post。UAPI・HAL は変えない。試験の整理: plan/ws172/tests/run-host-settings-keys.sh を削除（Users の頁の鍵の欄が消えた、master・未完了の Phase の参照なし）。fido2-p003-guest.sh は T1 の回帰で使うので段 4 を security-keys の頁に直す（P1）。
 - 2026-10-10 ユーザー（WS199 の review の判断）:「Loginはタッチが必要。Unlockはタッチ不要。Unlockでは、スライドしないと認証画面に入れないので、キーが刺さったままでも自動認証される問題はない。」、keypad は推し、範囲は「全部ベータ2」、他は「全部推しどおり」→ plan/ws199/ws.md。
 - 2026-10-10: T1-435 の ESP の書き込み（T1 の sshpass＋sudo＋nohup の script）が Claude Code の安全の判定で拒否された（回避せず停止）。ユーザー:「イメージごと自分で作り直して置き換えます。トップレベルのconfig.mkで入るようにしておいてください。」→ Q1 が top の config.mk（untracked）に `ZEDBSD_BOOT_EXTRA_LINES += i915.debug=video`・`ZEDBSD_USER_PROGRAMS += vkvideo-probe`・試験の stream 13 個を /root/ws083/ へ（ZEDBSD_TEST_EXTRA_FILES）を足した。ユーザーの image の後に T1-435 の A〜E を SSH で（ESP に書かない）。hang の F1・F2 は試験の kernel が要るので今回は外す。
