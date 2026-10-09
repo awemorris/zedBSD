@@ -160,6 +160,8 @@ se_users_keys_draw(
 		if (users->key_fields[KEYS_PIN].length < KEYS_PIN_MIN)
 			hint = "Type the key's PIN. A new key needs one first: run fidoctl set-pin in Terminal.";
 	}
+
+	/* The line, quiet. */
 	if (hint != NULL)
 		(void)kl_text_draw_fit(app->text, canvas, x + 20, y + 18, hint, KEYS_TEXT_SUB, 0, width - 40, SE_COLOR_TEXT_SECONDARY);
 
