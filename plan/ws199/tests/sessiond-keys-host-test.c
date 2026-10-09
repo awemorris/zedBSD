@@ -346,6 +346,8 @@ test_owner(
 		check(0, "socketpair");
 		return;
 	}
+
+	/* The greeter's. */
 	error = socketpair(AF_UNIX, SOCK_STREAM, 0, other);
 	if (error != 0) {
 		check(0, "socketpair");

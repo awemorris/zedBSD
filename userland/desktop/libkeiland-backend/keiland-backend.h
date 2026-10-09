@@ -1510,6 +1510,7 @@ int kl_backend_account_administer(const char *password, const char *operation, c
 #define KL_BACKEND_SESSION_KEYINFO	9U	/* kl_backend_session_key_info (ws199-p001) */
 #define KL_BACKEND_SESSION_KEYOP	10U	/* kl_backend_session_key_pin, kl_backend_session_key_reset (ws199-p001) */
 #define KL_BACKEND_SESSION_REPLUG	11U	/* not an answer: the key is to be plugged in again (ws199-p001) */
+#define KL_BACKEND_SESSION_KEYOWNER	12U	/* kl_backend_session_key_owner (ws199-p001) */
 
 /*
  * The ways to log in or unlock (ws172-p002, docs/architecture/security.md
@@ -1683,6 +1684,33 @@ int kl_backend_session_key_pin(struct kl_backend *backend, const char *current, 
  */
 int kl_backend_session_key_reset(struct kl_backend *backend, const char *password);
 unsigned kl_backend_session_key_removed(const struct kl_backend *backend);
+
+/*
+ * Whose the security key there is (KEYOWNER, ws199-p001 section 4.2):
+ * found 1 with the owner's account name, whether the key's PIN is asked
+ * to sign in, whether its touch is asked to unlock, and whether the key
+ * is a card held to a reader; found 0 with the manager's reason (none: no
+ * account's, many-owners, no-key, many-keys, ...).
+ */
+struct kl_backend_key_owner {
+	unsigned found;
+	char user[KL_BACKEND_KEY_LABEL];
+	unsigned key_pin;
+	unsigned key_touch;
+	unsigned card;
+	char reason[KL_BACKEND_SESSION_REASON];
+};
+
+/*
+ * Asks the manager whose the security key there is (KEYOWNER): of every
+ * account on the login screen, of the session's own user in a session.
+ * The answer is session_answer(KL_BACKEND_SESSION_KEYOWNER, error) (EBUSY
+ * when the manager was asked another within a second), and
+ * kl_backend_session_key_owner_get then gives it.  Returns as
+ * kl_backend_session_authenticate.
+ */
+int kl_backend_session_key_owner(struct kl_backend *backend);
+void kl_backend_session_key_owner_get(const struct kl_backend *backend, struct kl_backend_key_owner *owner);
 
 /*
  * Stops a security key's attempt under way (CANCEL): its answer is a

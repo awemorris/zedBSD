@@ -27,6 +27,8 @@
  *   ENROLL fido2 LABEL      then the password's and the key PIN's lines:
  *                           TOUCH..., OK id=ID; FAIL reason (ws172-p003)
  *   KEYINFO                 KEYINFO count=N [name=HEX pin= retries= min=]
+ *   KEYOWNER                KEYOWNER user=NAME key-pin= key-touch= card=, or
+ *                           KEYOWNER REASON (login screen and session, ws199-p001)
  *   KEYPIN set|change       then the PINs' lines: OK; FAIL reason
  *   KEYRESET                then the password's line: REPLUG, TOUCH...,
  *                           OK removed=N; FAIL reason (ws199-p001)
@@ -83,6 +85,7 @@ enum session_answer {
 	SESSION_ANSWER_STYLES,
 	SESSION_ANSWER_ENROLLED,
 	SESSION_ANSWER_KEYINFO,
+	SESSION_ANSWER_KEYOWNER,
 	SESSION_ANSWER_OK,
 	SESSION_ANSWER_FAIL,
 	SESSION_ANSWER_BUSY,
@@ -100,6 +103,7 @@ static const struct session_word session_words[] = {
 	{ "STYLES", SESSION_ANSWER_STYLES },
 	{ "ENROLLED", SESSION_ANSWER_ENROLLED },
 	{ "KEYINFO", SESSION_ANSWER_KEYINFO },
+	{ "KEYOWNER", SESSION_ANSWER_KEYOWNER },
 	{ "OK", SESSION_ANSWER_OK },
 	{ "FAIL", SESSION_ANSWER_FAIL },
 	{ "ERROR busy", SESSION_ANSWER_BUSY },
@@ -115,6 +119,7 @@ static int session_ask(struct kl_backend *backend, unsigned request, char *line,
 static void session_take_styles(struct kl_backend *backend, const char *list);
 static void session_take_enrolled(struct kl_backend *backend, const char *list);
 static void session_take_key_info(struct kl_backend *backend, const char *list);
+static void session_take_key_owner(struct kl_backend *backend, const char *list);
 static int session_take_key(const char *word, struct kl_backend_key *key);
 static int session_hex_value(char digit);
 static int session_send(struct kl_backend *backend, unsigned request, const char *line);
@@ -674,6 +679,50 @@ kl_backend_session_key_info(
 }
 
 /*
+ * Asks sessiond whose the security key there is (KEYOWNER, ws199-p001).
+ */
+int
+kl_backend_session_key_owner(
+	struct kl_backend *backend)
+{
+	char line[SESSION_REQUEST_MAX];
+	int written;
+	int error;
+
+	/* The login screen, or a session sessiond started and still listens to. */
+	if (backend == NULL)
+		return EINVAL;
+	if (backend->options.greeter_descriptor < 0 && (backend->options.session_descriptor < 0 || backend->session_gone))
+		return ENOTSUP;
+
+	/* The request. */
+	written = snprintf(line, sizeof(line), "KEYOWNER\n");
+	error = session_ask(backend, KL_BACKEND_SESSION_KEYOWNER, line, written);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the answer comes through session_answer. */
+	return 0;
+}
+
+/*
+ * Gives what sessiond last answered to KEYOWNER.
+ */
+void
+kl_backend_session_key_owner_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_owner *owner)
+{
+	/* None without a backend. */
+	memset(owner, 0, sizeof(*owner));
+	if (backend == NULL)
+		return;
+
+	/* Succeeded: the last answer. */
+	*owner = backend->session_key_owner;
+}
+
+/*
  * Gives what sessiond last answered to KEYINFO.
  */
 void
@@ -1037,6 +1086,11 @@ session_answered(
 		session_take_key_info(backend, line + strlen("KEYINFO"));
 		error = 0;
 		break;
+	case SESSION_ANSWER_KEYOWNER:
+		/* Whose the key is, or why nobody's. */
+		session_take_key_owner(backend, line + strlen("KEYOWNER"));
+		error = 0;
+		break;
 	case SESSION_ANSWER_OK:
 		/* Granted (a reset says how many registrations went). */
 		if (backend->session_request == KL_BACKEND_SESSION_KEYOP)
@@ -1252,6 +1306,50 @@ session_take_key_info(
 			break;
 		info->name[index] = (char)character;
 	}
+}
+
+/*
+ * Takes KEYOWNER's answer (" user=NAME key-pin=0|1 key-touch=0|1
+ * card=0|1", or " REASON"); an answer that does not read is nobody's with
+ * the reason "internal".
+ */
+static void
+session_take_key_owner(
+	struct kl_backend *backend,
+	const char *list)
+{
+	struct kl_backend_key_owner *owner;
+	char user[KL_BACKEND_KEY_LABEL];
+	int scanned;
+	int same;
+	int valid;
+
+	/* Nobody's until it reads. */
+	owner = &backend->session_key_owner;
+	memset(owner, 0, sizeof(*owner));
+	user[0] = '\0';
+
+	/* An owner: the name (one word that may go in a request) and the key's options. */
+	same = strncmp(list, " user=", 6U);
+	if (same == 0) {
+		scanned = sscanf(list, " user=%32s key-pin=%u key-touch=%u card=%u", user, &owner->key_pin, &owner->key_touch, &owner->card);
+		valid = session_name_valid(user);
+		if (scanned == 4 && valid && owner->key_pin <= 1U && owner->key_touch <= 1U && owner->card <= 1U) {
+			snprintf(owner->user, sizeof(owner->user), "%s", user);
+			owner->found = 1U;
+			return;
+		}
+
+		/* A line that does not read. */
+		memset(owner, 0, sizeof(*owner));
+		snprintf(owner->reason, sizeof(owner->reason), "internal");
+		return;
+	}
+
+	/* The reason, one word. */
+	if (list[0] == ' ')
+		list++;
+	snprintf(owner->reason, sizeof(owner->reason), "%.*s", (int)strcspn(list, " "), list);
 }
 
 /* Takes one "REF/LABEL" word (up to a space or the end), the label's bytes in hexadecimal (no control character).  Returns 0 or EINVAL. */

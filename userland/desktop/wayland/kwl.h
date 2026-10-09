@@ -1729,6 +1729,8 @@ int kwl_sleep_lid_opened(struct kwl_server *server);
 int kwl_greeter_starting(void);
 void kwl_greeter_say(struct kwl_server *server, const char *text);
 void kwl_greeter_answer(struct kwl_server *server, unsigned request, int error);
+void kwl_greeter_keys_changed(struct kwl_server *server);
+void kwl_greeter_sleep(struct kwl_server *server);
 int kwl_emit(struct kwl_client *client, uint32_t object, uint32_t opcode, const void *payload, size_t size);
 int kwl_emit_fd(struct kwl_client *client, uint32_t object, uint32_t opcode, const void *payload, size_t size, int descriptor);
 void kwl_packet_free(struct kwl_packet *packet);

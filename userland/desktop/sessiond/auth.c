@@ -227,6 +227,8 @@ sessiond_exchange_line(
 			auth_reply(exchange, "ERROR busy");
 			return 1;
 		}
+
+		/* This one starts the next second. */
 		auth_owner_ms = now;
 	}
 
@@ -564,6 +566,8 @@ auth_begin(
 			sessiond_log("SESSIOND passkey start errno=%d", error);
 			auth_reply(exchange, "FAIL internal");
 		}
+
+		/* Its answer comes through the exchange's tick. */
 		return;
 	}
 

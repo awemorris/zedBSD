@@ -983,6 +983,8 @@ helper_owner(
 		helper_fail("no-key");
 		return;
 	}
+
+	/* Two keys or more: not one owner's to tell. */
 	if (count > 1U) {
 		helper_release(devices, &key);
 		helper_fail("many-keys");
@@ -1018,6 +1020,8 @@ helper_owner(
 			found = 1;
 			continue;
 		}
+
+		/* The second group held: enough. */
 		break;
 	}
 

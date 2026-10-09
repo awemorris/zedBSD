@@ -242,6 +242,28 @@ kl_backend_session_key_info_get(
 	memset(info, 0, sizeof(*info));
 }
 
+/* Asks nobody whose a key is (ws199-p001). */
+int
+kl_backend_session_key_owner(
+	struct kl_backend *backend)
+{
+	/* Not here. */
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Gives no owner. */
+void
+kl_backend_session_key_owner_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_owner *owner)
+{
+	/* None. */
+	(void)backend;
+	memset(owner, 0, sizeof(*owner));
+}
+
 /* Sets no key's PIN. */
 int
 kl_backend_session_key_pin(
