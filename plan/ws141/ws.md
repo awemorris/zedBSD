@@ -16,7 +16,8 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 
 - ユーザー「WS141をあなたが作業します。P1,P2とは別なセッションです。ws141/ws.mdはあなたがそのセッションが排他的に更新しますが、master.mdは更新しません。同じソースツリーを使いますが、作業は別なディレクトリで行い、パッチをあなたに提供するので、Q1がマージします。」に基づく。
 - 2026-10-09のユーザーの再確認: パッチの提供先はQ1、統合もQ1。この分担を保持する。
-- 担当: このCodexセッション。`plan/ws141/ws.md` は担当が排他的に更新する。共有のMaster・Queue・Guardrail・他WSは読み取りだけ、統合はQ1。
+- 追加承認（2026-10-09）: ユーザー「パッチの影響範囲が狭いので、あなたがマージしてOKです。」により、今回のN1/V5準備のmerge担当をCodexへ変更。mainへmerge commit `a326c5e24`で統合済み。最新mainとの統合版でもhost4試験PASS・rpi4 y/n build warning/error 0。詳細は[実行記録i05](execution-20261009.md#i05-mainへの統合2026-10-09)。
+- 担当: このCodexセッション。`plan/ws141/ws.md` は担当が排他的に更新する。共有のMaster・Queue・Guardrail・他WSは読み取りだけ。共有記録の投影・T1依頼は引き続きQ1。
 - 独立worktree: `/home/awe/zedBSD-claude1/.claude/worktrees/ws141-codex`、branch `codex/ws141-rpi4-gpu`、開始commit `a05865278`。sourceと成果のbuildはこのworktree内で行う。共有LLVMは読み取り専用のsymlinkで参照し、変更・再buildはしない。
 - ユーザー回答「実機確認は後で行う」。p002のP0・V0、p003のN0以降の実機確認は未実施のまま保持し、実機観測が必要な依存は満たした扱いにしない。
 - ユーザー「Q1でのマージは遅らせます。続きをお願いします。」により未マージの変更をこのbranchに積み上げる。N1の配置/コピーとV5のページ表を純粋な準備処理として実装しhost/buildを確認。詳細は[実行記録](execution-20261009.md)。

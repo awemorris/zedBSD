@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: finished（i01〜i04の部分範囲の確認を終了。WS・whole Phaseは未完了）
+- Status: finished（i01〜i05の部分範囲とmainへの統合を終了。WS・whole Phaseは未完了）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -12,6 +12,7 @@
 | ws141-codex-20261009-i02 | p001/p002の作業資料の復旧 | cleared（部分範囲のみ） | 固定sourceのhash・改名表を確認。詳細は下記 |
 | ws141-codex-20261009-i03 | p003/N1の配置計算とraw word複写の準備 | cleared（部分範囲のみ） | 起動経路へ組み込まない純粋な処理。snapshot・使用中list・filter等の予約範囲を受け取り、衝突しない連続領域と同一word列を生成。host PASS・y/n build warning/error 0。N1のhardware書き込み・切り替え・実機受け入れは対象外 |
 | ws141-codex-20261009-i04 | p004/V5の4 KiBページ表の生成・解除 | cleared（部分範囲のみ） | V0骨格と固定sourceのPTE形式を依存出力として使う純粋な処理。予約VA page 0、VA/PA範囲、既存mappingを確認して全体を更新。host PASS・y/n build warning/error 0。電源・register・cache/TLB操作・起動への統合は対象外 |
+| ws141-codex-20261009-i05 | ユーザー承認による最新mainとの統合 | cleared（統合範囲のみ） | 最新main基点の専用worktreeでmerge、host4試験PASS・rpi4 y/n build warning/error 0。その後共有mainへ取り込み。whole Phase/実機の条件は保持 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -65,3 +66,14 @@
 - 新host試験は未完了p003/p004の開発と次の統合に使う。WS完了時の恒久回帰化/削除の判断はQ1の試験整理規則に従う。Masterのtool登録は担当では変更しない。
 - 未実施: N0のQEMU回帰、P0/V0/N0/N1等の実機観測、N1のwrite/readback/pollとN2通知、V1の電源とV5のhardware設定、job実行、p005〜p007。whole Phase/WSのclearance・完了は行わない。
 - 統合・共有Master/Queue投影・T1への依頼・GitHub公開はQ1の担当として保留。今回のchatでQ1へのメッセージ送信やmerge/pushは行っていない。
+
+## i05: mainへの統合（2026-10-09）
+
+- 追加承認: ユーザー「パッチの影響範囲が狭いので、あなたがマージしてOKです。」。i01〜i04の成果について、当初のQ1のみのmerge担当とマージ延期をこの指示で置き換える。Master/共有Queue等の投影・GitHub公開・T1依頼の担当範囲は変更なし。
+- main開始点`3cca433174fbed822013a5f32f5cfb63c5352fe0`はclean。WS141以外の人間・他セッションのcommitを保持し、`codex/ws141-integrate`の専用worktreeへWS141 branch `25150d4c7`をmerge。競合なし、merge commit `a326c5e246a12e2f6963b89f61d3e76b7cdc42a6`（message WIP）。
+- 専用worktree: `/home/awe/zedBSD-claude1/.claude/worktrees/ws141-integrate`。共有LLVMを読み取り専用symlinkで参照。共有buildは変更せず、このworktreeのbuildへ出力。
+- `sh plan/ws141/tests/stage-host-test.sh build/ws141-host-integration` → stage/list/list-copy/mmuの4試験PASS。
+- `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`と、BUILD末尾n・driver=nの同target → 両方exit 0・warning/error 0。ログは専用worktreeの`build/ws141-integration/kernel-{y,n}.log`、summary.jsonへhashも保存。vmunixのhashはi04と同一。
+- `git diff --check HEAD^1 HEAD` → 0。統合の変更はWS141記録/host試験、当該driver、arm64の当該source列の13 pathのみ。HAL API・Master・Queueは変更なし。
+- 検証後、共有mainで`git merge --ff-only codex/ws141-integrate`を実行し、HEADが上記merge commitであることを読み返して確認。ローカル統合完了。push/GitHub公開・QEMU/実機試験は未実施。N1/V5のhardware統合やwhole Phase clearanceを意味しない。
+- 以前の累積パッチは統合済み成果の保存用となり、共有mainへ再適用しない。以後の変更はこのmergeを含むmainから積み上げる。
