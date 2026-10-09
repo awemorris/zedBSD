@@ -2,7 +2,7 @@
 
 Status: reference; the problems known in the 1.0.0 Beta 2 release.
 
-<!-- Draft of 2026-10-09 (ws129-p005, P1), for review. Taken from the Bug Board's open tickets and plan/beta2.md
+<!-- Draft of 2026-10-09 (ws129-p005, P1), for review. Taken from the open bug tickets and the beta 2 triage
      ("write as known issues"). The "review:" comments name rows that depend on fixes or tests still running; settle
      each one at the release candidate (10/13) and delete the comments. -->
 
@@ -52,7 +52,7 @@ guide.
 | Japanese input does not work in Phone. | — | BUG-203 |
 | Printing a PDF to some network printers (for example the Brother MFC-L3770CDW over IPP) fails. | Print over LPD if the printer offers it. | BUG-271 |
 
-<!-- review: the rows below are the bugs plan/beta2.md plans to fix before the RC, and the ones whose fixes wait for
+<!-- review: the rows below are the bugs the beta 2 triage plans to fix before the RC, and the ones whose fixes wait for
      T1. Move a row into the table above only if it is still open at the RC.
 | In Settings → Wi-Fi, clicking the switch to turn Wi-Fi off can press Scan instead. | — | BUG-184 |
 | In Settings → Wi-Fi, a single tap on a network does not join it. | Tap it twice. | BUG-188 |
