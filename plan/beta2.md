@@ -32,14 +32,15 @@
 | 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
 | Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) **直った（5330 で確認）**: 原因は USB の driver が Bluetooth の voice の endpoint（大きさ 0）を拒んでいた。新しい kernel で 8087:0033・/dev/bluetooth0・firmware の load・`STATE ready`・`POWER on`。ユーザーが Settings と HID の pairing を確かめて close |
-| Terminal の選んだ文字のドラッグ | ✘ 選択の上でダブルタップ（tap からの drag）を始めると最初の tap で選択が外れる | [BUG-276](bugs/BUG-276.md) 直した（範囲の上の tap は 350 ms 待って消す、その間の press と移動で範囲の drag）。QEMU で tap を注入できないので次の UAT で確認。Text Editor 等は範囲の drag が無く同じ不具合は無い |
-| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 の QEMU で戻りに address が付く、次の UAT で実機 |
-| Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
+| Terminal の選んだ文字のドラッグ | ✔ 2026-10-10 直った（BUG-276 close） | — |
+| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) **直っていない**（2026-10-10 ユーザー）。SSH: ue0 は RUNNING・2500Mbps・`static online`。static の設定の interface を backend か Settings が No cable と読む見込み → P1（BUG-283 の次） |
+| Settings の YubiKey | ✔ 2026-10-10 FIDO2 の鍵の登録と login（BUG-279 close）。要望: 独立の頁とウィザード → WS199、Users の頁のパスワード変更と認証方式 → WS200（ベータ2）、ロック画面の button の高さ → BUG-283 | — |
+| (旧) Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
 | WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
 | WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
 | BUG-189・BUG-212（有線と Wi-Fi） | ✔ close | — |
-| USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) ifconfig に `media: 2500Mbps` 等を出す直しと、CDC の通知の読みの直し（短い endpoint の device で link と速度の通知を落としていた）を merge、T1-515。Settings の Link speed は前から有る。5330 の値は次の UAT（`ifconfig ue0`・`dmesg | grep link`・Settings）。速さの調べは 5330 の復帰の後、直らなければ既知の問題 |
+| USB LAN の速さ（BUG-222） | ✘ 遅いまま。ifconfig は 2500Mbps（link は正しい） | [BUG-222](bugs/BUG-222.md) ifconfig に `media: 2500Mbps` 等を出す直しと、CDC の通知の読みの直し（短い endpoint の device で link と速度の通知を落としていた）を merge、T1-515。Settings の Link speed は前から有る。5330 の値は次の UAT（`ifconfig ue0`・`dmesg | grep link`・Settings）。速さの調べは 5330 の復帰の後、直らなければ既知の問題 |
 | App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べた: compositor は Linux と同じ code、差は driver（1 frame が 16.7 ms を越えて 30 fps、GPU の周波数が上がりきらない、present の待ち）。**決定（ユーザー）: ベータ2 は既知の問題**、5330 の計測の後に WS139（ベータ3） |
 
 ## 必須
@@ -56,6 +57,9 @@
 | [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |
 | WS192（状態の島のパネル）の UAT の指摘 | WS193・WS194 は UAT OK、WS192 は BUG-278（Mute の文字） | P1 | 1 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | — | ユーザー | — | ユーザー |
+| [WS199](ws199/ws.md) セキュリティキーの独立の頁とウィザード（2026-10-10 UAT の要望） | P1、BUG-283 の後 | — | 8 | P1・T1・ユーザー |
+| [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択（同） | P1、WS199 の後 | — | 6 | P1・T1・ユーザー |
+| [BUG-283](bugs/BUG-283.md) ロック画面の button の高さ | P1 | — | 1 | P1 |
 | UAT で出る Bug の debug の枠（2026-10-10 の 6 件: BUG-275〜280） | P1 が着手 | — | 10 | P1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）、WS192 のパネルの PNG（build/review/t1-496/） | — | ユーザー | —（15 分） | ユーザー |
 
