@@ -44,3 +44,12 @@ Q1 の割り当て（q920 (2)）。言語は英語（release.md §9 U13）、置
 - 既知の問題の更新: `docs/release/zedbsd-1.0.0-beta2-known-issues.md`。resolved の BUG-095・156・157・166・167・168・171・172・174・175・176・177・190 を外し、BUG-253/255（蓋）・189/212（有線と Wi-Fi）・222・205・206/207・203・271 を足した。RC までに直す予定の物（BUG-184・188・235・232・179/180・234・191・238/242）と Bluetooth の行は comment に置き、RC で残っていれば表へ移す。
 - 判断が要る点（Q1・ユーザー）: FFmpeg の LGPL 2.1 §6 の source の提供。ffmpeg.org への link だけより、release の asset に `ffmpeg-9.0.2.tar.xz` を載せる方が確実（release.yml の変更、p004 の範囲）。
 - 未実施: 機能の行の一つ一つの実機の確認（p007）。link は最終の tag ができるまで切れる。
+
+2026-10-09 ユーザーの決定（Q1 の中継、クリック）: FFmpeg の source は「ffmpeg.org への link だけ」。release notes の節を書き直した（版 9.0.2、ffmpeg.org と tarball の link と sha256、zedBSD は patch を当てず configure の引数は GitHub の tree の package の Makefile）。release.yml は変えない。review の comment を外した。
+既知の問題の下書きの comment から plan の file の名前を外した（docs から plan へ参照しない）。release notes の file（docs/release/zedbsd-1.0.0-beta2.md）は前の commit で git に入っていなかったので、8a050dff0 で加えた。
+
+## 2026-10-09 夜 P1: review の comment の整理
+
+- 既知の問題: ユーザーが確かめて close した BUG-271（IPP の PDF、表の行）、BUG-235・BUG-232・BUG-179/180（RC までに直す予定の comment の行）を外した（BUG-219・237 は元から無い）。comment に残るのは BUG-184・188・234・191・238/242 と、BUG-253（UAT 待ち）・BUG-189/212（UAT で再現しなければ close）・Bluetooth の条件。
+- release notes: Hardware の 2 つの comment（Bluetooth・Vulkan Video の OFF の差し替えと古い注記）を 1 つにまとめ、IPv6 の待ちを T1-478（音量の試験で誤り）から networkd の再試験 T1-500 に直した。操作パネルの comment を T1-496 の結果（QEMU は目視を除き pass、UAT の 1・6・7 待ち）に。
+- RC（10/13）で残す判断: link（tag の後に有効）、Windows の zip（`ZEDBSD_RELEASE_ZIP := n` のまま、行は無し）、Phone・Mail を preview と書くか（ユーザー）。

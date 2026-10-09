@@ -4,12 +4,13 @@
 #
 #   keiland-prerequisites.sh check linux|freebsd
 #       Lists the packages the build needs that the host's package manager (apt, dnf or yum, pacman; FreeBSD's pkg)
-#       does not have installed.  On a terminal it asks before installing them (y/N) and installs them with sudo;
-#       without a terminal, or when the answer is no, it prints what is missing and how to install it, and fails, so
-#       that the build does not start half equipped.  With everything there it says nothing and succeeds.
+#       does not have installed.  With a controlling terminal (/dev/tty) it asks before installing them (y/N) and
+#       installs them with sudo; without one, or when the answer is no, it prints what is missing and how to install
+#       it, and fails, so that the build does not start half equipped.  With everything there it says nothing and
+#       succeeds.
 #   keiland-prerequisites.sh offer-install linux|freebsd COMMAND...
-#       After a build that succeeded: on a terminal it asks whether to install now (y/N) and runs COMMAND (with sudo
-#       unless it runs as root); without a terminal it prints COMMAND and succeeds.
+#       After a build that succeeded: with a controlling terminal it asks whether to install now (y/N) and runs
+#       COMMAND (with sudo unless it runs as root); without one it prints COMMAND and succeeds.
 #
 # KEILAND_ASK=n in the environment (the make variable of the same name) asks nothing: missing packages are listed and
 # the build stops, and the install is only printed.
@@ -22,15 +23,19 @@ say() {
 	printf '%s\n' "$*" >&2
 }
 
-# Succeeds when the questions may be asked: both ends a terminal, and KEILAND_ASK not n.
+# Succeeds when the questions may be asked: a controlling terminal to ask on, and KEILAND_ASK not n.  The terminal
+# is /dev/tty, not the standard input and output: BSD make -j (FreeBSD's make -j8, which BSDmakefile turns into gmake)
+# gives a job neither (T1-498), and GNU make -j gives the standard input to one job only.
 interactive() {
-	[ "${KEILAND_ASK:-y}" != n ] && [ -t 0 ] && [ -t 1 ]
+	[ "${KEILAND_ASK:-y}" != n ] || return 1
+	# In a subshell: a redirection that fails on a special built-in ends the shell that runs it.
+	( : </dev/tty >/dev/tty ) 2>/dev/null
 }
 
-# Asks a yes-or-no question; succeeds on yes.  The default (Enter) is no.
+# Asks a yes-or-no question on the terminal; succeeds on yes.  The default (Enter) is no.
 ask() {
-	printf '%s [y/N] ' "$1"
-	read -r answer || return 1
+	printf '%s [y/N] ' "$1" >/dev/tty
+	read -r answer </dev/tty || return 1
 	case $answer in
 	y | Y | yes | YES | Yes)
 		return 0

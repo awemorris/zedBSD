@@ -129,10 +129,13 @@ order:
 
 ```
 vkvideo-probe --list
-vkvideo-probe [--frames=N] [--expect=FILE.sha256] STREAM.h264
+vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] STREAM.h264
 ```
 
 With `--expect` it compares each frame with a line of the file. Where the video
 family reports result status, each decode is in a result status query, and a
 decode that did not complete is printed as `picture N status S`. The run exits
 with a nonzero status when a frame differs or a decode did not complete.
+With `--time` it times each decode, from recording its commands to its fence
+(the hashing of the frame is not counted), and ends with a line
+`decode time: N decodes, total T ms, mean M ms, longest L ms`.

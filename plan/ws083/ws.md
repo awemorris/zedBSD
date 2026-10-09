@@ -50,8 +50,8 @@ Resume point: 2026-10-08 Q1 の判定（sweep-beta2-rc §2）: p001 cleared。p0
 | ws083-p005 | 実機: VCS の bring-up と I frame の hash（`i915.debug=video`）、HuC 不要の確認 | planning → T1-435（未実行、5330 の passthrough。2026-10-08 午後 ユーザー「5330はつけっぱなしですので、Videoのテストで使ってよいです」） | p004、5330 |
 | [ws083-p006a](phase006a/phase.md) | P・B と DPB、scaling list の fall-back、複数 slice の host の試験（vkvideo-probe の DPB と表示順） | in-progress（P2、host の範囲は済み） | p004 |
 | ws083-p006b | P・B と DPB の実機の hash | planning → T1-435 の C（未実行、p005 と同じ回） | p005、p006a |
-| [ws083-p007](phase007/phase.md) | `GRDOM_MEDIA` の engine 単位の reset と VCS の hang の回復 | in-progress（q876、P2。host の範囲と review の R-S2・S3・S5 は済み（q897）。実機の人工の hang の道具は未作成、R-S4 は実機で） | p005 |
-| ws083-p008 | 性能、`i915.debug=video` の門の既定化（p007 の後）、利用者への案内、SAMPLED・TRANSFER_SRC（HD5: 要らない）、result status query | in-progress（q897 で host の分: result status query と docs/reference/vulkan-video.md は済み。性能と `i915.debug=video` の既定化は実機の後） | p006b、p007（host の分は無し） |
+| [ws083-p007](phase007/phase.md) | `GRDOM_MEDIA` の engine 単位の reset と VCS の hang の回復 | in-progress（q876、P2。host の範囲と review の R-S2・S3・S5 は済み（q897）。人工の hang の道具 `-DI915_TEST_VIDEO_HANG_AT` は 2026-10-09 夜 P1 が作成、実機の F1・F2 と R-S4 は 5330 で） | p005 |
+| ws083-p008 | 性能、`i915.debug=video` の門の既定化（p007 の後）、利用者への案内、SAMPLED・TRANSFER_SRC（HD5: 要らない）、result status query | in-progress（q897 で host の分: result status query と docs/reference/vulkan-video.md は済み。2026-10-09 夜 P1: 性能の測り `vkvideo-probe --time`、門の確かめと OFF の手順（release の config の 1 行、既定化はベータ3 を推す）。性能の数字は実機の後） | p006b、p007（host の分は無し） |
 | ws083-p009 | 全文規約確認と回帰（必須の最終確認） | planning（ベータ3、2026-10-08 ユーザー） | 全 Phase |
 
 ## 設計と実装の照合の review（2026-10-08 q897、design-reviewer、HEAD 40766787a、読むだけ）

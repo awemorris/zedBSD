@@ -62,6 +62,8 @@ bcm2711_v3d_discover(
 	v3d->irq.irq = BCM2711_NO_IRQ;
 	v3d->irq.registered = false;
 	v3d->irq.count = 0;
+	v3d->irq.service = NULL;
+	v3d->irq.owner = NULL;
 	v3d->has_power_domain = false;
 	v3d->has_reset = false;
 	v3d->clock_id = 0;

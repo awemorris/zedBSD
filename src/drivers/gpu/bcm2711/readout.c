@@ -118,7 +118,7 @@ static void read_screen(const struct drv_bcm2711_boot_screen *screen);
 static void read_channels(struct bcm2711_display *display);
 static void read_list(struct bcm2711_display *display);
 static void read_timing(const struct bcm2711_display *display, unsigned port);
-static uint32_t choose_port(const struct bcm2711_display *display);
+static int choose_port(struct bcm2711_display *display);
 
 /*
  * Runs stage N0: reads what the firmware set up on the display path.
@@ -133,6 +133,7 @@ bcm2711_display_readout(
 	const struct drv_bcm2711_boot_screen *screen)
 {
 	uint32_t hdmi_hz;
+	uint32_t core_hz;
 	bool allowed;
 	bool emulator;
 	int error;
@@ -175,6 +176,13 @@ bcm2711_display_readout(
 		return ENODEV;
 	}
 
+	/* Requires the HVS core clock before its first register access as well. */
+	error = bcm2711_clock_hz(4U, &core_hz);
+	if (error != 0 || core_hz == 0) {
+		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "N0 core clock off (%d): no display", error);
+		return ENODEV;
+	}
+
 	/* Refuses a compositor window too small for the registers and the list memory. */
 	if (display->compositor.size < READOUT_COMPOSITOR_SPAN) {
 		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "N0 hvs window too small: no display");
@@ -185,7 +193,13 @@ bcm2711_display_readout(
 	read_channels(display);
 
 	/* Picks the port the firmware's screen goes out of and reads its list. */
-	display->port = choose_port(display);
+	error = choose_port(display);
+	if (error != 0) {
+		bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "N0 boot output unknown (%d)", error);
+		return error;
+	}
+
+	/* Reads only the list of the uniquely proven console output. */
 	display->channel = display->port_channel[display->port];
 	read_list(display);
 
@@ -340,7 +354,7 @@ read_channels(
 
 /*
  * Decodes the display list the chosen channel shows now and compares its
- * first plane with the firmware's framebuffer.
+ * retained planes with the firmware's framebuffer.
  */
 static void
 read_list(
@@ -392,25 +406,8 @@ read_list(
 				   (unsigned)plane->pitch);
 	}
 
-	/* Without a valid list with a plane there is nothing to compare. */
-	if (!display->list.valid || display->list.plane_count == 0)
-		return;
-
-	/* The first plane shows the framebuffer one to one when every field agrees. */
-	plane = &display->list.planes[0];
-	if (plane->scaled)
-		return;
-	if ((uint64_t)(plane->pointer & READOUT_BUS_ALIAS_MASK) != display->screen.physical)
-		return;
-	if (plane->width != display->screen.width || plane->height != display->screen.height)
-		return;
-	if (plane->pitch != display->screen.pitch)
-		return;
-	if (plane->x != 0 || plane->y != 0)
-		return;
-
-	/* The firmware's list shows exactly the framebuffer the console draws on. */
-	display->screen_matches = true;
+	/* Checks every decoded plane against the actual boot framebuffer. */
+	display->screen_matches = bcm2711_list_screen_matches(&display->list, &display->screen);
 }
 
 /* Shows one timing generator's enables and active size. */
@@ -447,25 +444,69 @@ read_timing(
 			   (unsigned)(vertical & READOUT_TIMING_ACTIVE_MASK));
 }
 
-/*
- * Picks the HDMI port the firmware's screen goes out of.
- *
- * The port whose output a channel feeds is the firmware's; when both are fed
- * (the firmware mirrors the screen), HDMI0 is taken, and when neither is,
- * HDMI0 is reported with no channel.
- */
-static uint32_t
+/* Selects only a running output whose list displays the boot framebuffer. */
+static int
 choose_port(
-	const struct bcm2711_display *display)
+	struct bcm2711_display *display)
 {
-	/* Prefers HDMI0 whenever a channel feeds it. */
-	if (display->port_channel[0] != BCM2711_NO_CHANNEL)
-		return 0;
+	struct bcm2711_list candidate;
+	const struct bcm2711_window *timing;
+	uint32_t control;
+	uint32_t video;
+	uint32_t channel;
+	uint32_t current;
+	uint32_t port;
+	uint32_t selected;
+	bool matches;
 
-	/* Falls back to HDMI1 when only it is fed. */
-	if (display->port_channel[1] != BCM2711_NO_CHANNEL)
-		return 1;
+	/* Keeps the selection invalid until exactly one proven output is found. */
+	selected = BCM2711_HDMI_COUNT;
+	control = read_compositor(display, READOUT_OUT_CONTROL);
+	if ((control & READOUT_OUT_ENABLE) == 0)
+		return ENODEV;
 
-	/* Neither port is fed: HDMI0 with no channel. */
+	/* Checks both ports rather than treating any HDMI0 mux as the boot output. */
+	for (port = 0; port < BCM2711_HDMI_COUNT; port++) {
+		/* Ignores disconnected muxes and missing timing generators. */
+		channel = display->port_channel[port];
+		if (channel >= BCM2711_CHANNEL_COUNT)
+			continue;
+		timing = &display->timing[port];
+		if (timing->mapped == NULL || timing->size < READOUT_TIMING_SPAN)
+			continue;
+
+		/* Requires both the compositor channel and its pixel stream to run. */
+		control = read_compositor(display, READOUT_CHANNEL_CONTROL(channel));
+		if ((control & READOUT_CHANNEL_ENABLE) == 0)
+			continue;
+		control = kern_mmio_read32(timing->mapped + READOUT_TIMING_CONTROL);
+		video = kern_mmio_read32(timing->mapped + READOUT_TIMING_VCONTROL);
+		if ((control & READOUT_TIMING_ENABLE) == 0)
+			continue;
+		if ((video & READOUT_TIMING_VIDEO_ENABLE) == 0)
+			continue;
+
+		/* Proves that this output displays the framebuffer from the handoff. */
+		current = read_compositor(display, READOUT_LIST_NOW(channel));
+		bcm2711_list_decode(
+			(const volatile uint32_t *)(display->compositor.mapped + READOUT_LIST_MEMORY),
+			current,
+			&candidate);
+		matches = bcm2711_list_screen_matches(&candidate, &display->screen);
+		if (!matches)
+			continue;
+
+		/* Refuses ambiguous mirrors instead of silently changing the chosen port. */
+		if (selected != BCM2711_HDMI_COUNT)
+			return EBUSY;
+		selected = port;
+	}
+
+	/* A mux alone cannot identify the firmware's actual console output. */
+	if (selected == BCM2711_HDMI_COUNT)
+		return ENODEV;
+
+	/* Succeeded: records the unique proven boot output. */
+	display->port = selected;
 	return 0;
 }

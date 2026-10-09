@@ -135,6 +135,16 @@ main(
 	CHECK(values[1] == 0xa1U);
 	CHECK(values[2] == 0xa2U);
 
+	/* Display ownership ends with no value buffer and no invented value word. */
+	CHECK(drv_rpi4_firmware_property(0x00030066U, NULL, 0, 0, &answered) == 0);
+	CHECK(seen_request[0] == 32U);
+	CHECK(seen_request[2] == 0x00030066U);
+	CHECK(seen_request[3] == 0);
+	CHECK(seen_request[4] == 0);
+	CHECK(seen_request[5] == 0);
+	CHECK(answered == 0);
+	CHECK(buffer_invalidated && irq_depth == 0);
+
 	/* The firmware refuses the request. */
 	answer_kind = ANSWER_REFUSED;
 	CHECK(drv_rpi4_firmware_notify_xhci_reset(&address) == EIO);
@@ -160,7 +170,9 @@ main(
 
 	/* Malformed requests. */
 	CHECK(drv_rpi4_firmware_property(1U, values, 2U, 1U, &answered) == EINVAL);
-	CHECK(drv_rpi4_firmware_property(1U, values, 0, 0, &answered) == EINVAL);
+	CHECK(drv_rpi4_firmware_property(1U, NULL, 0, 1U, &answered) == EINVAL);
+	CHECK(drv_rpi4_firmware_property(1U, NULL, 1U, 0, &answered) == EINVAL);
+	CHECK(drv_rpi4_firmware_property(1U, NULL, 0, 0, NULL) == EINVAL);
 	CHECK(drv_rpi4_firmware_property(1U, values, 0, DRV_RPI4_FIRMWARE_MAX_VALUES + 1U, &answered) == EINVAL);
 	CHECK(drv_rpi4_firmware_notify_xhci_reset(NULL) == EINVAL);
 
@@ -202,7 +214,8 @@ answer(
 		buffer[4] = 0;
 	} else {
 		buffer[4] = 0x80000000U | buffer[3];
-		buffer[5] = 0xa0U;
+		if (buffer[3] != 0)
+			buffer[5] = 0xa0U;
 		if (buffer[3] > 4U) {
 			buffer[6] = 0xa1U;
 			buffer[7] = 0xa2U;

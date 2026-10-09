@@ -14,6 +14,7 @@ fresh_out build/ws194-host
 out=$(cd build/ws194-host && pwd -P)
 script_path=$PWD/tools/build/keiland-prerequisites.sh
 terminal_tool=$(command -v script)
+session_tool=$(command -v setsid)
 status=0
 
 # The tools the script needs besides the stand-ins.
@@ -46,7 +47,9 @@ for name in rpm dnf sudo id; do stand_in dnf "$name"; done
 for name in pacman sudo id; do stand_in pacman "$name"; done
 for name in pkg sudo id make; do stand_in pkg "$name"; done
 
-# Runs the script with a manager's stand-ins: $1 manager, $2 terminal (yes/no), $3 answer, then its arguments.
+# Runs the script with a manager's stand-ins: $1 manager, $2 terminal (yes: a pseudo-terminal it reads and writes;
+# job: a controlling pseudo-terminal, but the standard input and output not it, as a BSD make -j job has them,
+# T1-498; no: no controlling terminal at all, setsid(1)), $3 answer, then its arguments.
 run() {
 	manager=$1
 	terminal=$2
@@ -56,8 +59,12 @@ run() {
 	if [ "$terminal" = yes ]; then
 		printf '%s\n' "$answer" | PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" \
 			"$terminal_tool" -qec "sh $script_path $*" /dev/null > "$out/output" 2>&1
+	elif [ "$terminal" = job ]; then
+		printf '%s\n' "$answer" | PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" \
+			"$terminal_tool" -qec "sh $script_path $* < /dev/null > $out/output 2>&1" /dev/null > "$out/terminal" 2>&1
 	else
-		PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" sh "$script_path" "$@" > "$out/output" 2>&1 < /dev/null
+		PATH="$out/$manager:$out/tools" KEILAND_ASK="${ASK:-y}" "$session_tool" -w sh "$script_path" "$@" \
+			> "$out/output" 2>&1 < /dev/null
 	fi
 	echo $?
 }
@@ -113,6 +120,13 @@ printf '%s\n' python3 meson ninja vulkan-headers vulkan-loader libdrm mesa-dri s
 code=$(run pkg yes y check freebsd)
 test "$code" = 0 && grep -qx 'sudo pkg install -y gmake' "$out/calls.log"
 expect "pkg, gmake missing, terminal, yes: installed" $?
+
+# FreeBSD pkg: seatd missing, asked on the controlling terminal although make -j gave the job no terminal on its
+# standard input and output (T1-498: BSD make -j8 printed the command and stopped).
+printf '%s\n' gmake python3 meson ninja vulkan-headers vulkan-loader libdrm mesa-dri > "$out/installed"
+code=$(run pkg job y check freebsd)
+test "$code" = 0 && grep -qx 'sudo pkg install -y seatd' "$out/calls.log" && grep -q 'Install them now' "$out/terminal"
+expect "pkg, seatd missing, make -j job on a terminal, yes: asked on /dev/tty, installed" $?
 
 # The install after the build: no terminal prints, a terminal and yes runs it with sudo, no does not.
 code=$(run apt no "" offer-install linux make -f userland/desktop/keiland-linux.mk install)

@@ -10,8 +10,8 @@
  *
  * The platform calls the driver once while it discovers the board's devices.
  * The driver opens the firmware's device tree, honors rpi4gpu.off=1, and runs
- * the discovery stages of its two parts: P0 for the display path and V0 for
- * the V3D engine.  Either part may be missing (QEMU's raspi4b emulates
+ * P0 discovery, N0 output readout and R0 initial scanout for the display,
+ * and V0 discovery for the V3D engine. Either part may be missing (QEMU's raspi4b emulates
  * neither) without stopping the other or the boot.
  */
 
@@ -99,9 +99,16 @@ drv_bcm2711_gpu_attach(
 	/* Runs the display path's discovery. */
 	display_error = bcm2711_display_discover(&fdt, &attach_display);
 
-	/* Reads the firmware's display once the display path is mapped. */
-	if (display_error == 0)
-		(void)bcm2711_display_readout(&attach_display, screen);
+	/* Reads the boot output before the driver relinquishes firmware ownership. */
+	if (display_error == 0) {
+		display_error = bcm2711_display_readout(&attach_display, screen);
+		if (display_error == 0) {
+			/* Starts only from a complete, unique readout of the boot output. */
+			display_error = bcm2711_display_start(&fdt, &attach_display);
+			if (display_error != 0)
+				bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "R0 not started (%d)", display_error);
+		}
+	}
 
 	/* Runs the V3D engine's discovery, whatever became of the display. */
 	v3d_error = bcm2711_v3d_discover(&fdt, &attach_v3d);

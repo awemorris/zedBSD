@@ -11,7 +11,7 @@
  * SHA-256 of each frame (ws083).
  *
  *   vkvideo-probe --list
- *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] STREAM.h264
+ *   vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] STREAM.h264
  *
  * The list names each queue family with its flags and video codec
  * operations and the device's video extensions; on a device without video
@@ -26,7 +26,10 @@
  * With --expect, each frame is compared with the file's line, and the exit
  * status says whether all matched.  Where the video family reports result
  * status (ws083-p008), each decode is in a result status query, and a
- * decode that did not complete is named and fails the run.
+ * decode that did not complete is named and fails the run.  With --time,
+ * each decode is timed from the recording of its commands to its fence, and
+ * a last line gives the count, the total, the mean and the longest
+ * (ws083-p008's decode times; the hashing of the frames is not counted).
  */
 
 #include "h264.h"
@@ -40,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <time.h>
 
 /* How long a decode may take before the probe gives up, in nanoseconds. */
 #define PROBE_WAIT_NS		5000000000ULL
@@ -76,6 +80,14 @@ struct probe_options {
 	const char *stream;
 	const char *expect;
 	uint32_t frames;
+	int time;
+};
+
+/* The decode times of a run with --time, in nanoseconds. */
+struct probe_timing {
+	uint32_t count;
+	uint64_t total;
+	uint64_t longest;
 };
 
 /*
@@ -157,6 +169,8 @@ static int probe_run(struct probe *probe, const struct probe_options *options);
 static void probe_close(struct probe *probe);
 static int probe_failed(VkResult result, const char *what);
 static uint8_t *probe_read(const char *path, size_t *size);
+static uint64_t probe_now(void);
+static void probe_timing_print(const struct probe_timing *timing);
 
 /*
  * Lists the device's video decode, or decodes a stream and prints its frames' hashes.
@@ -174,7 +188,7 @@ main(
 	memset(&options, 0, sizeof(options));
 	status = probe_arguments(argc, argv, &options);
 	if (status != 0) {
-		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] STREAM.h264\n");
+		fprintf(stderr, "usage: vkvideo-probe --list | vkvideo-probe [--frames=N] [--expect=FILE.sha256] [--time] STREAM.h264\n");
 		return 2;
 	}
 
@@ -240,6 +254,13 @@ probe_arguments(
 			continue;
 		}
 
+		/* --time: time each decode. */
+		differs = strcmp(argument, "--time");
+		if (differs == 0) {
+			options->time = 1;
+			continue;
+		}
+
 		/* --expect=FILE: the reference hashes. */
 		differs = strncmp(argument, "--expect=", 9U);
 		if (differs == 0) {
@@ -251,8 +272,10 @@ probe_arguments(
 		return -1;
 	}
 
-	/* Exactly one of the list and a stream. */
+	/* Exactly one of the list and a stream; --time goes with a stream. */
 	if (options->list && options->stream != NULL)
+		return -1;
+	if (options->list && options->time)
 		return -1;
 	if (!options->list && options->stream == NULL)
 		return -1;
@@ -1235,6 +1258,7 @@ probe_run(
 	static struct h264_picture picture;
 	static struct dpb dpb;
 	static struct probe_output output;
+	struct probe_timing timing;
 	const StdVideoH264SequenceParameterSet *sps;
 	struct dpb_plan plan;
 	const char *reason;
@@ -1243,6 +1267,8 @@ probe_run(
 	uint32_t index;
 	uint32_t frames;
 	char text[65];
+	uint64_t started;
+	uint64_t elapsed;
 	int found;
 	int first_sps;
 	int error;
@@ -1329,7 +1355,8 @@ probe_run(
 		}
 	}
 
-	/* Picture after picture. */
+	/* Picture after picture, with no decode timed yet. */
+	memset(&timing, 0, sizeof(timing));
 	frames = 0U;
 	for (;;) {
 		/* The next picture, or the end; a picture the probe cannot decode stops it. */
@@ -1358,7 +1385,9 @@ probe_run(
 		}
 
 		/* Decodes it and hashes the frame while its slot still holds it; a decode that did not complete is named. */
+		started = probe_now();
 		error = probe_decode(probe, &stream, &picture, &plan);
+		elapsed = probe_now() - started;
 		if (error != 0)
 			break;
 		if (probe->status != VK_QUERY_RESULT_STATUS_COMPLETE_KHR) {
@@ -1366,6 +1395,12 @@ probe_run(
 			output.failed++;
 		}
 		probe_hash(probe, (uint32_t)plan.setup, sps, text);
+
+		/* Counts the decode's time, from its commands to its fence; the hashing is not in it. */
+		timing.count++;
+		timing.total += elapsed;
+		if (elapsed > timing.longest)
+			timing.longest = elapsed;
 
 		/* The DPB after it, and the frame's place in the display order. */
 		reason = dpb_mark(&dpb, sps, &picture, &plan);
@@ -1389,6 +1424,12 @@ probe_run(
 	if (output.failed != 0U)
 		printf(", %u failed", output.failed);
 	printf("\n");
+
+	/* The decode times, when asked for. */
+	if (options->time)
+		probe_timing_print(&timing);
+
+	/* Reports the run's failure: a stopped decode, a frame that did not match, a decode that did not complete. */
 	if (error != 0)
 		return error;
 	if (options->expect != NULL && (output.matched != frames || frames == 0U))
@@ -1495,4 +1536,45 @@ probe_read(
 	/* Succeeded: the file's bytes. */
 	*size = got;
 	return data;
+}
+
+/* Reads the monotonic clock, in nanoseconds. */
+static uint64_t
+probe_now(
+	void)
+{
+	struct timespec now;
+
+	/* The clock; it does not fail for CLOCK_MONOTONIC. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+
+	/* Succeeded: the time in nanoseconds. */
+	return (uint64_t)now.tv_sec * 1000000000ULL + (uint64_t)now.tv_nsec;
+}
+
+/* Prints the decode times: how many, the total, the mean and the longest, in milliseconds. */
+static void
+probe_timing_print(
+	const struct probe_timing *timing)
+{
+	uint64_t mean;
+
+	/* A run that decoded nothing has no times. */
+	if (timing->count == 0U) {
+		printf("vkvideo-probe: decode time: no decode\n");
+		return;
+	}
+
+	/* The mean of the decodes. */
+	mean = timing->total / timing->count;
+
+	/* The line, in milliseconds with three decimals. */
+	printf("vkvideo-probe: decode time: %u decodes, total %llu.%03llu ms, mean %llu.%03llu ms, longest %llu.%03llu ms\n",
+	       timing->count,
+	       (unsigned long long)(timing->total / 1000000ULL),
+	       (unsigned long long)(timing->total / 1000ULL % 1000ULL),
+	       (unsigned long long)(mean / 1000000ULL),
+	       (unsigned long long)(mean / 1000ULL % 1000ULL),
+	       (unsigned long long)(timing->longest / 1000000ULL),
+	       (unsigned long long)(timing->longest / 1000ULL % 1000ULL));
 }

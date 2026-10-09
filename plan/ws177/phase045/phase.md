@@ -85,3 +85,8 @@ IPv6 の address を落とす経路を guest で起こせない。
 - host: `plan/ws177/tests/host-ipv6-r.sh` に slaac の寿命・作り直しの関数、merge の関数（file の文字列の入出力）、reconcile の差の群を足す。
 - build warning 0、style-check。QEMU（T1）: ws130 の `ipv6-p006.sh`・`ipv6-p007.sh`（dnsmasq の RA と DHCPv6）に、resolv.conf の RDNSS が
   DHCPv4 の書き直しの後も残ること、carrier down で SLAAC の address が消えることの確認を足す。
+
+## T1-479 の FAIL の直し（2026-10-09、P1）
+
+T1-479: `ipv6-r-dnsmasq` が 2 回とも `FAIL: IPv6 default routes: 2`（ue0 の fe80::2 と ue1 の dnsmasq の router）、p008 の回帰は PASS。読み: 試験は ue1 を up にして `service restart networkd` する。前の networkd が ue0 に置いた既定の route は新しい networkd の router の表に無く、新しい networkd が ue1 を選んだ時（同じ順位なら今の物を保つ）に消されない。
+直し cd50a24ea: `networkd_ipv6_start` が up の各 interface の既定の route を先に消す（その networkd はまだ router を知らず、選んだ router の広告で置き直す）。build（-Werror）exit 0。再試験は T1 の行（Q1 が番号）。

@@ -39,7 +39,9 @@ int drv_rpi4_firmware_init(const struct drv_fdt *fdt);
  *
  * values holds request_count words on entry and the answer on return;
  * capacity is how many words the tag's value buffer has.  answered reports
- * how many bytes the firmware wrote.  Returns EIO when the firmware refused
+ * how many bytes the firmware wrote.  A notification without values uses
+ * request_count=capacity=0 and may pass values=NULL; answered is required.
+ * Returns EIO when the firmware refused
  * the request, ENOTSUP when it did not understand the tag and ETIMEDOUT when
  * it did not answer.
  */
