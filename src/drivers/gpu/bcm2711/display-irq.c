@@ -5,7 +5,7 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* Device-source IRQ service for initial scanout, independent of DRM objects. */
+/* Device-source IRQ service for scanout and flips, independent of DRM objects. */
 #include <stdbool.h>
 #include <stdint.h>
 
@@ -39,6 +39,7 @@ bcm2711_display_irq_prepare(
 	}
 
 	/* Initializes IRQ-owned completion state before publishing callback owners. */
+	bcm2711_display_flip_init(display);
 	display->adoption_armed = false;
 	display->first_frame = false;
 	display->underruns = 0;
@@ -93,16 +94,17 @@ void
 bcm2711_display_frame_arm(
 	struct bcm2711_display *display)
 {
-	bool enabled;
+	unsigned long enabled;
 
-	/* Serializes source acknowledgement and arming against this CPU's handler. */
-	enabled = kern_irq_disable();
+	/* Serializes source acknowledgement and arming against every CPU's handler. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
 	display->adoption_armed = false;
 	kern_mmio_write32(display->timing[display->port].mapped + 0x28, 0x80);
 	display->first_frame = false;
 	display->adoption_armed = true;
-	if (enabled)
-		kern_irq_enable();
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 }
 
 /*
@@ -113,9 +115,16 @@ bcm2711_display_irq_mask(
 	struct bcm2711_display *display)
 {
 	uint32_t port;
+	unsigned long enabled;
+
+	/* Stops initial completion before masking lines on every delivery CPU. */
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
+	display->adoption_armed = false;
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
 	/* Keeps a failed display from issuing unowned events during later boot. */
-	display->adoption_armed = false;
 	kern_irq_mask(display->compositor_irq.irq);
 	for (port = 0; port < BCM2711_TIMING_COUNT; port++) {
 		/* The register mappings and callback owners remain alive. */
@@ -134,28 +143,42 @@ service_timing(
 	uint32_t status;
 	uint32_t current;
 	uint32_t control;
+	unsigned long enabled;
 
 	/* Ignores another device's source on a shared PV interrupt line. */
 	source = owner;
 	display = source->display;
 	timing = display->timing[source->port].mapped;
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
 	status = kern_mmio_read32(timing + 0x28);
-	if ((status & 0x80U) == 0)
+	if ((status & 0x80U) == 0) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
 		return false;
+	}
+
+	/* Quiets the owned source before sampling the current display list. */
 	kern_mmio_write32(timing + 0x28, 0x80);
 
 	/* Only the selected new-mode frame can complete this boot commit. */
-	if (source->port == display->port && display->adoption_armed) {
+	if (source->port == display->port) {
 		/* The HVS current pointer proves adoption rather than just submission. */
 		current = kern_mmio_read32(display->compositor.mapped + 0x30);
-		if (current == 43U && !display->first_frame) {
+		if (display->adoption_armed &&
+		    current == 43U &&
+		    !display->first_frame) {
 			/* Clears stale underrun before enabling its channel-zero source. */
 			kern_mmio_write32(display->compositor.mapped + 0x04, 0x200);
 			control = kern_mmio_read32(display->compositor.mapped);
 			kern_mmio_write32(display->compositor.mapped, control | 0x200U);
 			display->first_frame = true;
 		}
+
+		/* Runtime completion uses the same sampled list and selected-source guard. */
+		bcm2711_display_flip_vblank_locked(display, current);
 	}
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
 	/* Succeeded: an owned source was quieted before EOI. */
 	return true;
@@ -172,13 +195,20 @@ service_compositor(
 	uint32_t control;
 	uint32_t channel;
 	uint32_t bit;
+	unsigned long enabled;
 
 	/* Records only actual HVS channel IRQs on the owned mapping. */
 	source = owner;
 	display = source->display;
+	enabled = spin_lock_irqsave(&display->flip.guard);
+
 	status = kern_mmio_read32(display->compositor.mapped + 0x04);
-	if ((status & 0x3f3f3f00U) == 0)
+	if ((status & 0x3f3f3f00U) == 0) {
+		spin_unlock_irqrestore(&display->flip.guard, enabled);
 		return false;
+	}
+
+	/* Samples the source enables under the same guard as runtime publication. */
 	control = kern_mmio_read32(display->compositor.mapped);
 	for (channel = 0; channel < BCM2711_CHANNEL_COUNT; channel++) {
 		/* Masks an enabled underrun before another level interrupt can recur. */
@@ -194,6 +224,8 @@ service_compositor(
 
 	/* Retires device status before the common handler acknowledges the GIC. */
 	kern_mmio_write32(display->compositor.mapped + 0x04, 0x3f3f3f00U);
+
+	spin_unlock_irqrestore(&display->flip.guard, enabled);
 
 	/* Succeeded: the HVS source cannot keep the level IRQ asserted. */
 	return true;

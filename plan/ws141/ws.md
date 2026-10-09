@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（i09のmailbox依存修正と初期scanout成果をmainへ統合済み。host/build PASS、実機は後で実施）
+Status: incomplete（i10同期flip部品をmain統合済み、host/build PASS。実機・display登録等は未完了）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i09で承認済みmailbox容量0tag修正とLinux順初期scanout成果を最新mainへ統合済み（code統合dde7c1ba7）。統合版でも実mailbox host・display2host・rpi4 driver y/n build PASS、warning/error0。出力先はboot framebufferと一致する唯一のHDMI、modeは既存firmware progressive RGB8。初回完了はIRQで新listの採用を観測する。i09はsoftware/統合だけcleared、i08のuncleared履歴は保存。次はユーザーが後で行う実機でのR0/元の画面/buffer寿命・IRQ確認とQ1/T1回帰。flip/合成/resident登録・V3D投入・p007は残る。共有記録/WS048側の投影はQ1、Masterは担当から更新しない。[統合記録](execution-20261009.md#i09-mainへの統合結果2026-10-09)。
+Resume point: i10の同期flip/vblank sequence/console復帰・timeout buffer保持部品をmain統合済み（181339820）。統合版のhost3試験/driver y buildはPASS・warning/error0、nはup-to-date。起動からのflip/allocator/公開display ops/device登録・P3合成は未接続。次は保持maskを尊重するbuffer ownerとdisplay登録への接続、実機R0/IRQ/console RAM寿命・P1/P2の受け入れ。実機はユーザーが後で実施。Master/共有記録とT1依頼はQ1担当。[i10結果/再開](execution-20261009.md#i10のmain統合結果2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -69,7 +69,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | --- | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
-| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i09で容量0tag/初期scanoutをmain統合済み、host/build PASS。実機/後続機能は未確認） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
+| [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i10同期flip部品main統合済み、host/build PASS。実機/allocator/登録/合成は未達） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | p005 | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planning | p003・p004 | 4h〜 |
 | p006 | 実行器（Vulkan・compiler）の方針の決定（別 WS にするか） | planning | p004 | 2h |
@@ -95,3 +95,13 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 ## i09の統合結果（2026-10-09）
 
 mailbox依存と初期表示R0成果を最新mainへ統合済み（dde7c1ba7）。実mailbox host/display host/rpi4 y/n build PASS、warning/error0。i09はsoftware/統合の部分範囲でcleared、p003の実機/後続機能の受け入れは残るためin-progress、WSはincomplete。i08のuncleared履歴は保持。実機の画面・buffer寿命/IRQ、T1回帰、最終監査p007とQ1の共有記録/WS048 body投影は未実施。[exact evidence](execution-20261009.md#i09-mainへの統合結果2026-10-09)。
+
+
+## i10: 同期flip部品（2026-10-09）
+
+ユーザーの継続指示でp003/P1/P2のsoftware/runtime部品を実装。既存mode/channel0/boot HDMIを保ち、caller-owned連続RGB32 bufferをinactive listに公開し、actual selected-PV/current一致で完了する。timeout時は旧/新bufferを保持し、確認済みconsole復帰まで通常flipを拒否する。host3試験/driver y/n build PASS。起動からのflip/allocator/GPU登録・P3・実機受け入れは未実施。p003 in-progress/WS incompleteを保持。変更は同Phase内で、foreign Phaseの契約を変更しない。[詳細と再開条件](execution-20261009.md#i10の実装確認2026-10-09main統合前)。
+
+
+## i10の統合結果（2026-10-09）
+
+同期flip部品をmainへ統合済み（181339820）、統合版もhost3試験/buildがPASS。i10のsoftware/統合部分はcleared。全displayの受け入れではないためp003 in-progress/WS incomplete、残件/再開点は上記と[実行記録](execution-20261009.md#i10のmain統合結果2026-10-09)。Q1の共有投影/回帰依頼は担当から更新しない。

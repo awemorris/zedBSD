@@ -14,7 +14,7 @@ Queue q316 / 項目 q316-i01。実行 2026-09-23 03:10〜03:40（+09:00）、`/h
 | `plan/ws035/tests/refactor-refs.py` | 上の2つを再生成するscript（`git ls-files` を走査、結果は決定的: 2回実行して `cmp` 一致を確認） |
 | `plan/ws035/tests/kernel-include-audit.py` | kernel・HAL・kernel内libcのcompileをbuildログから `-M` で再実行し、読んだヘッダを分類。`--compare` で前後比較 |
 | `plan/ws035/phase001/include-audit/*.json` | 7構成の監査結果（p023の許可リスト）と模擬2構成 |
-| `plan/ws035/tests/baseline-toolchain.sh`・`baseline-build.sh`・`baseline-all.sh`・`baseline-userland.sh`・`baseline-summary.py` | refactor前後で同じ条件のbuildを行う道具 |
+| `（削除済み 2026-10-09: baseline-toolchain.sh）`・`baseline-build.sh`・`baseline-all.sh`・`baseline-userland.sh`・`baseline-summary.py` | refactor前後で同じ条件のbuildを行う道具 |
 | `plan/ws035/tests/config-{sun4u,x68k}.mk` | `tools/menuconfig.py` の既定値から生成した構成（既存の構成が無いため） |
 | `plan/ws035/tests/config-{amd64,pcat,pc98}-userland.mk` | `config/ci/` から firmware 3件（と amd64 の zedinst）を除いた構成（userland基準用） |
 | `plan/ws035/phase001/baseline/` | 各buildのログ（計6.6 MB）、`*.targets`、`summary.json` |
@@ -73,7 +73,7 @@ kernelをbuildし、amd64・i915 は成功（警告0）、pcat は移動前と�
 
 ### 4. refactor前のbuildの基準
 
-toolchain: このcheckoutには `build/` が無く、LLVMとNoctが未build。`sh plan/ws035/tests/baseline-toolchain.sh` で
+toolchain: このcheckoutには `build/` が無く、LLVMとNoctが未build。`sh （削除済み 2026-10-09: baseline-toolchain.sh）` で
 `~/zedBSD/build` の LLVM 23.1.0-zedbsd6（identityで受理される）、compiler-rt builtins、Noct 2.0.1-zedbsd12 を
 `build/ws035-p001/toolchain/` へ写し、sysrootも同じ場所に作った（`sysroot-amd64`・`sysroot-i386` のbuild）。
 `~/zedBSD` 側へは書いていない（`make -n` で全ての書込み先が `build/ws035-p001/` 内であることを確かめてから実行）。

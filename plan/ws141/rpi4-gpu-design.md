@@ -252,3 +252,10 @@ P0 → N0 → N1 → N2 → P1 → P2 → P3（CPU で埋めた plane）→ P5�
 ## 2026-10-09 i09のmain統合完了
 
 容量0tagの承認済み依存修正とR0初期表示成果をmainへ統合（dde7c1ba7）、統合版でも実mailbox/display hostとrpi4 y/n build PASS、warning/error0。i09はsoftware/統合範囲だけcleared。実機scanout/console RAM寿命・IRQ、後続機能・p007の受け入れは残る。i08の拒否結果は過去の結果として保存し、現在の再開点は[WS](ws.md)と[統合記録](execution-20261009.md#i09-mainへの統合結果2026-10-09)。
+
+
+## 2026-10-09: P1/P2の同期flip部品
+
+同じport/mode/channel0の初期scanoutを前提に、caller-owned連続RGB32 bufferの同期flip部品を追加する。専有2 slotと保存したconsole listを使い、CPU cache clean後にinactive listを完成してnextを更新する。完了は選択PVのIRQでcurrentとnextの採用を確認する。buffer ownerは状態snapshotの保持maskに従い、timeout後は旧/新bufferを保持する。遅れたframeの到着だけでは再利用を認めず、保存したconsoleのfresh adoptionが不確かさを解消する。IRQとcallerはdisplay内の永続spinlockで状態を保護する。実機R0が通ったとは仮定せず、attachはscanout開始/sole pipelineをruntimeで確認する。
+
+今回のi10は部品のbuild/host/統合まで。allocator/公開GPU ops/device登録・自動boot flip・P3合成/負荷clockは残りの段階に保つ。既存Phaseの外部契約は変えない。[実装と確認](execution-20261009.md#i10の実装確認2026-10-09main統合前)。
