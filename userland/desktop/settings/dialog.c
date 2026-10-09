@@ -468,6 +468,8 @@ se_dialog_draw(
 		enabled = !dialog->busy || dialog->cancellable;
 		(void)se_button_draw(app, canvas, right, y, cancel, 0, enabled, DIALOG_CANCEL);
 	}
+
+	/* Back, on the left, when the step offers it. */
 	if (dialog->can_back) {
 		button = se_button_width(app, "Back");
 		(void)se_button_draw(app, canvas, card.x + DIALOG_PAD, y, "Back", 0, !dialog->busy, DIALOG_BACK);

@@ -190,7 +190,13 @@ main(void)
 			return main_fail("bad-request");
 		}
 	}
-	is_key = request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET;
+
+	/* A key's own operation (ws199-p001): the info, its PIN or its reset. */
+	is_key = 0;
+	if (request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET)
+		is_key = 1;
+
+	/* Only the operations this program carries out. */
 	if (!is_auth && !is_key && request.operation != PASSKEY_OP_ENROLL_FIDO2 && request.operation != PASSKEY_OP_REMOVE_FIDO2) {
 		passkey_wipe(buffer, sizeof(buffer));
 		return main_fail("bad-request");
@@ -518,6 +524,7 @@ main_auth(
 	uint32_t count;
 	size_t matched;
 	size_t index;
+	int pin_given;
 	int usable;
 	int error;
 
@@ -538,23 +545,23 @@ main_auth(
 		return main_fail("not-enrolled");
 	}
 
-	/* The account's options: an empty PIN only when it is not asked, an unlock without the touch only when it is not asked. */
+	/* Reads the account's options; the old auth request keeps the defaults (PIN and touch). */
 	passkey_options_default(&options);
 	if (optional) {
 		error = main_file(&length, 1);
 		if (error == 0)
 			(void)passkey_options_read(main_text, length, name, uid, &options);
 	}
-	if (pin[0] == '\0' && options.key_pin)
+
+	/* Whether the caller gave the key's PIN. */
+	pin_given = 0;
+	if (pin[0] != '\0')
+		pin_given = 1;
+
+	/* What the key is asked and what its answer must carry; an empty PIN the account asks for is refused. */
+	error = fido2_auth_flags(options.key_pin, options.key_touch, unlock, pin_given, &required, &job.presence);
+	if (error != 0)
 		return main_fail("bad-request");
-	required = PK_FLAG_UP | PK_FLAG_UV;
-	job.presence = 1;
-	if (pin[0] == '\0')
-		required &= ~PK_FLAG_UV;
-	if (unlock && !options.key_touch) {
-		job.presence = 0;
-		required &= ~PK_FLAG_UP;
-	}
 
 	/* The challenge and the client data hash. */
 	error = pk_crypto_random(challenge, sizeof(challenge));
@@ -1456,6 +1463,8 @@ main_options_reset(
 		options.key_touch = 1;
 		error = passkey_options_line(name, uid, &options, line, sizeof(line));
 	}
+
+	/* The defaults need no line. */
 	defaults = passkey_options_is_default(&options);
 	added = line;
 	if (defaults)

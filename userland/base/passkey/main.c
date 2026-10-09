@@ -174,6 +174,8 @@ main(
 			status = passkey_fail("bad-secret");
 			break;
 		}
+
+		/* The options written. */
 		status = passkey_set_options(request.fields[1], account.pw_uid, request.fields[3], request.fields[4]);
 		break;
 	default:
@@ -631,6 +633,8 @@ passkey_set_options(
 		options.key_touch = touch;
 		error = passkey_options_line(name, uid, &options, line, sizeof(line));
 	}
+
+	/* The defaults need no line. */
 	defaults = passkey_options_is_default(&options);
 	added = line;
 	if (defaults)

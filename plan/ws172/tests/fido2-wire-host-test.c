@@ -11,10 +11,14 @@
  * the characters and lengths it refuses), hexadecimal, the helper's
  * messages, a key's line of /etc/passkey made, read and counted again,
  * the labels, and the login's hashes against the same bytes hashed by
- * hand.
+ * hand.  What a login or an unlock with a key asks and checks for each
+ * account option (ws199-p004, fido2_auth_flags): the touch is dropped only
+ * to unlock with key-touch=0, the user's verification only without a PIN,
+ * and an empty PIN is refused when the account asks for one.
  */
 
 #include "userland/base/passkey-fido2/fido2.h"
+#include "userland/base/libpasskey/verify.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -47,6 +51,8 @@ main(void)
 	char again[512];
 	size_t size;
 	size_t index;
+	unsigned required;
+	int presence;
 	int error;
 
 	/* base64url: RFC 4648's examples both ways, the URL alphabet, and what is refused. */
@@ -148,6 +154,33 @@ main(void)
 	part.size = 3U;
 	(void)pk_crypto_sha256(&part, 1U, expected);
 	expect(error == 0 && memcmp(bytes, expected, FIDO2_USER_ID_SIZE) == 0, "the user's ID");
+
+	/* The default account (PIN and touch): a login with the PIN asks for both, without the PIN it is refused. */
+	error = fido2_auth_flags(1, 1, 0, 1, &required, &presence);
+	expect(error == 0 && required == (PK_FLAG_UP | PK_FLAG_UV) && presence == 1, "PIN and touch: the login asks for both");
+	error = fido2_auth_flags(1, 1, 1, 1, &required, &presence);
+	expect(error == 0 && required == (PK_FLAG_UP | PK_FLAG_UV) && presence == 1, "PIN and touch: the unlock asks for both");
+	expect(fido2_auth_flags(1, 1, 0, 0, &required, &presence) == EINVAL, "PIN and touch: an empty PIN is refused");
+	expect(fido2_auth_flags(1, 1, 1, 0, &required, &presence) == EINVAL, "PIN and touch: an empty PIN is refused to unlock");
+
+	/* Touch only (key-pin=0): the touch without the verification; a PIN given is still verified. */
+	error = fido2_auth_flags(0, 1, 0, 0, &required, &presence);
+	expect(error == 0 && required == PK_FLAG_UP && presence == 1, "touch only: the login asks for the touch alone");
+	error = fido2_auth_flags(0, 1, 1, 0, &required, &presence);
+	expect(error == 0 && required == PK_FLAG_UP && presence == 1, "touch only: the unlock asks for the touch alone");
+	error = fido2_auth_flags(0, 1, 0, 1, &required, &presence);
+	expect(error == 0 && required == (PK_FLAG_UP | PK_FLAG_UV) && presence == 1, "touch only: a PIN given is verified");
+
+	/* Neither (key-pin=0, key-touch=0): the unlock asks for nothing, the login still for the touch. */
+	error = fido2_auth_flags(0, 0, 1, 0, &required, &presence);
+	expect(error == 0 && required == 0U && presence == 0, "neither: the unlock asks for nothing");
+	error = fido2_auth_flags(0, 0, 0, 0, &required, &presence);
+	expect(error == 0 && required == PK_FLAG_UP && presence == 1, "neither: the login still asks for the touch");
+
+	/* key-touch=0 with key-pin=1 (read as the default, but decided safely here): the PIN is still asked. */
+	expect(fido2_auth_flags(1, 0, 1, 0, &required, &presence) == EINVAL, "key-touch=0 alone: an empty PIN is refused");
+	error = fido2_auth_flags(1, 0, 1, 1, &required, &presence);
+	expect(error == 0 && required == PK_FLAG_UV && presence == 0, "key-touch=0 alone: the unlock verifies the PIN");
 
 	/* The verdict. */
 	if (failures != 0U) {

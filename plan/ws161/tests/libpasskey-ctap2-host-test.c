@@ -31,6 +31,12 @@
  * of extended APDUs.  A vendor command that the card echoes carries a
  * message of 600 bytes each way: three chained blocks out, three parts
  * back on the short reader.
+ *
+ * authenticatorReset (ws199-p004, pk_ctap2_reset): taken in the window it
+ * forgets every credential and the PIN; out of the window the key says
+ * NOT_ALLOWED (0x30) and keeps them; while it waits for the touch, a
+ * CTAPHID CANCEL sent from the keepalive makes it answer KEEPALIVE_CANCEL
+ * (0x2d) and keep them too.
  */
 
 #include "userland/base/libpasskey/cbor.h"
@@ -59,6 +65,11 @@
 #define RUN_HID		0
 #define RUN_NFC_SHORT	1
 #define RUN_NFC_EXTENDED	2
+
+/* How the authenticator takes authenticatorReset: at once, out of its window, or waiting for a touch that a CANCEL ends. */
+#define RESET_TAKEN	0
+#define RESET_LATE	1
+#define RESET_WAIT	2
 
 /* The vendor command the NFC card echoes, and the size of the echoed message. */
 #define NFC_ECHO	0x40U
@@ -96,6 +107,9 @@ static struct {
 	unsigned tail;
 	unsigned keepalives;
 	int lie_rp;
+	int reset_mode;
+	int reset_waiting;
+	unsigned cancels;
 } card;
 
 /*
@@ -642,6 +656,24 @@ answer(
 		pk_cbor_put_unsigned(&writer, 3);
 		pk_cbor_put_bytes(&writer, signature, signature_size);
 		break;
+	case PK_CTAP2_RESET:
+		CHECK(size == 0, "authenticatorReset carries no request");
+		if (card.reset_mode == RESET_LATE) {
+			reply[0] = PK_CTAP2_NOT_ALLOWED;
+			return 1;
+		}
+		if (card.reset_mode == RESET_WAIT) {
+			/* No answer yet: the touch is awaited, and a CANCEL ends it (io_write). */
+			card.reset_waiting = 1;
+			return 0;
+		}
+		for (index = 0; index < card.count; index++)
+			EVP_PKEY_free(card.keys[index]);
+		card.count = 0;
+		card.pin_set = 0;
+		card.retries = 8;
+		card.token_valid = 0;
+		return 1;
 	default:
 		reply[0] = 0x01;
 		return 1;
@@ -700,7 +732,24 @@ io_write(
 	}
 	if (card.command == PK_HID_CBOR) {
 		length = answer(card.message[0], card.message + 1, card.length - 1, reply);
+		if (length == 0) {
+			/* The touch awaited: KEEPALIVEs until a CANCEL comes. */
+			memset(init, 0, sizeof(init));
+			init[0] = PK_HID_KEEPALIVE_UP_NEEDED;
+			for (take = 0; take < 3; take++)
+				queue_message(card.channel, PK_HID_KEEPALIVE, init, 1);
+			return 0;
+		}
 		queue_message(card.channel, PK_HID_CBOR, reply, length);
+		return 0;
+	}
+	if (card.command == PK_HID_CANCEL) {
+		card.cancels++;
+		if (card.reset_waiting) {
+			card.reset_waiting = 0;
+			reply[0] = PK_CTAP2_KEEPALIVE_CANCEL;
+			queue_message(card.channel, PK_HID_CBOR, reply, 1);
+		}
 		return 0;
 	}
 	return 0;
@@ -1045,6 +1094,99 @@ run(
 		EVP_PKEY_free(card.keys[count]);
 }
 
+/* Sends CANCEL on the channel at the first KEEPALIVE, as the helper does on SIGTERM. */
+static void
+keepalive_cancel(
+	void *context,
+	uint8_t status)
+{
+	if (status != PK_HID_KEEPALIVE_UP_NEEDED)
+		return;
+	card.keepalives++;
+	if (card.keepalives == 1U)
+		CHECK(pk_hid_cancel(context) == 0, "CANCEL sent");
+}
+
+/* authenticatorReset over CTAPHID: out of the window, cancelled while it waits for the touch, and taken. */
+static void
+run_reset(void)
+{
+	struct pk_hid hid;
+	struct pk_hid_io io;
+	struct pk_transport transport;
+	struct pk_device device;
+	struct pk_make_request make;
+	struct pk_made_credential made;
+	uint8_t token[PK_PIN_TOKEN_MAX];
+	size_t token_size;
+	struct pk_info info;
+	unsigned index;
+	int error;
+
+	memset(&card, 0, sizeof(card));
+	card.protocol = 2;
+	card.ctap21 = 1;
+	card.retries = 8;
+	card.agreement = EVP_PKEY_Q_keygen(NULL, NULL, "EC", "P-256");
+	io.context = NULL;
+	io.write = io_write;
+	io.read = io_read;
+	error = pk_hid_open(&hid, &io, 1000);
+	CHECK(error == 0, "reset: INIT");
+	pk_hid_transport(&transport, &hid);
+	pk_device_init(&device, &transport, 1000);
+	device.keepalive = keepalive;
+
+	/* A key with a PIN and a credential. */
+	error = pk_ctap2_set_pin(&device, 2, "1234");
+	CHECK(error == 0, "reset: setPIN");
+	error = pk_ctap2_get_info(&device, &info);
+	CHECK(error == 0, "reset: GetInfo");
+	error = pk_ctap2_pin_token(&device, &info, 2, "1234", PK_PERMISSION_MAKE_CREDENTIAL, "zedbsd.login", token, &token_size);
+	CHECK(error == 0, "reset: token");
+	memset(&make, 0, sizeof(make));
+	make.rp_id = "zedbsd.login";
+	make.user_id = (const uint8_t *)"kei-user-id-0001";
+	make.user_id_size = 16;
+	make.user_name = "kei";
+	memset(make.client_data_hash, 0x11, 32);
+	make.pin_token = token;
+	make.pin_token_size = token_size;
+	make.pin_protocol = 2;
+	error = pk_ctap2_make_credential(&device, &make, &made);
+	CHECK(error == 0 && card.count == 1, "reset: a credential to forget");
+
+	/* Out of the window: NOT_ALLOWED, nothing forgotten. */
+	card.reset_mode = RESET_LATE;
+	error = pk_ctap2_reset(&device);
+	CHECK(error == EPROTO && device.last_status == PK_CTAP2_NOT_ALLOWED, "reset out of the window: NOT_ALLOWED");
+	CHECK(card.count == 1 && card.pin_set, "reset out of the window: the credential and the PIN kept");
+
+	/* Waiting for the touch, cancelled: KEEPALIVE_CANCEL, nothing forgotten. */
+	card.reset_mode = RESET_WAIT;
+	card.keepalives = 0;
+	device.keepalive = keepalive_cancel;
+	device.keepalive_context = &hid;
+	error = pk_ctap2_reset(&device);
+	CHECK(error == EPROTO && device.last_status == PK_CTAP2_KEEPALIVE_CANCEL, "reset cancelled: KEEPALIVE_CANCEL");
+	CHECK(card.cancels == 1 && !card.reset_waiting, "reset cancelled: one CANCEL ended the wait");
+	CHECK(card.count == 1 && card.pin_set, "reset cancelled: the credential and the PIN kept");
+
+	/* Taken: every credential and the PIN go. */
+	card.reset_mode = RESET_TAKEN;
+	device.keepalive = keepalive;
+	device.keepalive_context = NULL;
+	error = pk_ctap2_reset(&device);
+	CHECK(error == 0, "reset taken");
+	CHECK(card.count == 0 && !card.pin_set, "reset taken: the credential and the PIN gone");
+	error = pk_ctap2_get_info(&device, &info);
+	CHECK(error == 0 && (info.options & PK_OPTION_CLIENT_PIN_SET) == 0, "reset taken: no PIN in GetInfo");
+
+	EVP_PKEY_free(card.agreement);
+	for (index = 0; index < card.count; index++)
+		EVP_PKEY_free(card.keys[index]);
+}
+
 int
 main(void)
 {
@@ -1053,6 +1195,7 @@ main(void)
 	run(1, 0, RUN_HID);
 	run(2, 1, RUN_NFC_SHORT);
 	run(1, 0, RUN_NFC_EXTENDED);
+	run_reset();
 
 	if (failures != 0) {
 		printf("libpasskey-ctap2-host-test: FAIL (%u)\n", failures);
