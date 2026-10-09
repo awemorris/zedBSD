@@ -157,6 +157,7 @@ static int btd_arguments(int argc, char **argv);
 static void btd_system_open(void);
 static void btd_system_events(void);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
+static int btd_parse_pair(const char *text, uint8_t *address, unsigned *type, int *phone);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
 static void btd_client_close(int index);
 
@@ -861,7 +862,7 @@ btd_line(
 		return;
 	}
 
-	/* PAIR ADDRESS TYPE. */
+	/* PAIR ADDRESS TYPE [phone=1]. */
 	same = strncmp(line, "PAIR ", 5U);
 	if (same == 0) {
 		btd_pair(index, line + 5);
@@ -1254,8 +1255,11 @@ btd_scan_end(
 }
 
 /*
- * Starts a pairing for one who may change things (PAIR ADDRESS TYPE): the
- * client hears the questions when no agent answers for it, and the end.
+ * Starts a pairing for one who may change things (PAIR ADDRESS TYPE
+ * [phone=1]): the client hears the questions when no agent answers for it,
+ * and the end.  phone=1 pairs a phone for the phone link (ws197-p002
+ * section 7.1, BR/EDR only); its PAIRED line ends with phone=1, or phone=0
+ * and why.
  */
 static void
 btd_pair(
@@ -1266,6 +1270,7 @@ btd_pair(
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
 	int permitted;
+	int phone;
 	int busy;
 	int error;
 
@@ -1277,10 +1282,16 @@ btd_pair(
 		return;
 	}
 
-	/* The device. */
-	error = btd_parse_device(argument, address, &type);
+	/* The device, and whether it is a phone. */
+	error = btd_parse_pair(argument, address, &type, &phone);
 	if (error != 0) {
 		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* A phone is paired over BR/EDR alone. */
+	if (phone && type != BTD_ADDRESS_BREDR) {
+		btd_write(client, "ERROR phone-le\nDONE\n");
 		return;
 	}
 
@@ -1310,11 +1321,19 @@ btd_pair(
 	btd_pair_client = index;
 	client->waits_pair = 1;
 	btd_log("bluetoothd: pairing %s asked by uid %u\n", argument, (unsigned)client->uid);
-	error = btd_pair_start(&btd_pairing, address, type, 1);
+	error = btd_pair_start(&btd_pairing, address, type, 1, phone, client->uid);
 	if (error == EBUSY) {
 		btd_pair_client = BTD_NO_CLIENT;
 		client->waits_pair = 0;
 		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* A phone's pairing of an LE address (refused above already; the pairing says so too). */
+	if (error == EINVAL) {
+		btd_pair_client = BTD_NO_CLIENT;
+		client->waits_pair = 0;
+		btd_write(client, "ERROR phone-le\nDONE\n");
 	}
 }
 
@@ -1642,6 +1661,55 @@ btd_parse_device(
 		return EINVAL;
 
 	/* Succeeded: the device. */
+	return 0;
+}
+
+/*
+ * Reads PAIR's argument: the device (ADDRESS TYPE) and the one option
+ * there is, phone=1 (ws197-p002 section 7.1).  Returns 0, or EINVAL.
+ */
+static int
+btd_parse_pair(
+	const char *text,
+	uint8_t *address,
+	unsigned *type,
+	int *phone)
+{
+	char device[40];
+	const char *option;
+	size_t length;
+	int same;
+	int error;
+
+	/* The device's part: the text up to a space after the type, or all of it. */
+	*phone = 0;
+	option = NULL;
+	length = strlen(text);
+	if (length > 18U)
+		option = strchr(text + 18, ' ');
+	if (option != NULL)
+		length = (size_t)(option - text);
+	if (length >= sizeof(device))
+		return EINVAL;
+	memcpy(device, text, length);
+	device[length] = '\0';
+
+	/* The address and the type. */
+	error = btd_parse_device(device, address, type);
+	if (error != 0)
+		return EINVAL;
+
+	/* No option: an ordinary pairing. */
+	if (option == NULL)
+		return 0;
+
+	/* The option, which must be the phone's. */
+	same = strcmp(option + 1, "phone=1");
+	if (same != 0)
+		return EINVAL;
+	*phone = 1;
+
+	/* Succeeded: the device, for a phone. */
 	return 0;
 }
 

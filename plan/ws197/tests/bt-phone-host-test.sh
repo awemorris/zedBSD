@@ -1,12 +1,14 @@
 #!/bin/sh
 # The host test of bluetoothd's phone link parts (ws197-p002, plan/ws197/phase002/phase.md section 12.1): builds
-# userland/base/bluetoothd's RFCOMM, OBEX, SDP server, session, router and link manager parts with the host's compiler under ASan and UBSan and runs
-# plan/ws197/tests/bt-phone-host-test.c.  The last line is "bt-phone-host-test: PASS" or "... FAIL".
+# userland/base/bluetoothd's RFCOMM, OBEX, SDP server, session, router, link manager and phone pairing parts with the host's compiler under ASan
+# and UBSan and runs plan/ws197/tests/bt-phone-host-test.c and the others below (the bonds of the pairing's test go in a new folder of the
+# build).  The last line is "bt-phone-host-test: PASS" or "... FAIL".
 # usage: plan/ws197/tests/bt-phone-host-test.sh   (from the repository's top; OUT= to choose the build folder)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 OUT=${OUT:-build/ws197-phone-host}
 mkdir -p "$OUT"
+keys=$(mktemp -d "$OUT/pairkeys.XXXXXX")
 flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wdeclaration-after-statement -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude -I."
 status=0
 # Each test program: its name and its sources besides the test.
@@ -15,7 +17,8 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
 	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
 	"bt-session-host-test userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c -lpthread" \
-	"bt-router-host-test userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread"; do
+	"bt-router-host-test userland/base/bluetoothd/router.c userland/base/bluetoothd/linkmgr.c userland/base/bluetoothd/session.c userland/base/bluetoothd/pair.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread" \
+	"bt-pair-phone-host-test userland/base/bluetoothd/pair.c userland/base/bluetoothd/session.c userland/base/bluetoothd/hci.c userland/base/bluetoothd/intel.c userland/base/bluetoothd/acl.c userland/base/bluetoothd/l2cap.c userland/base/bluetoothd/smp.c userland/base/bluetoothd/crypto.c userland/base/bluetoothd/keys.c -lpthread"; do
 	set -- $test
 	name=$1
 	shift
@@ -24,7 +27,7 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 		status=1
 		continue
 	fi
-	if ! timeout 300 "$OUT/$name"; then
+	if ! timeout 300 "$OUT/$name" "$keys"; then
 		status=1
 	fi
 done

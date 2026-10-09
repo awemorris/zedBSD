@@ -642,7 +642,7 @@ test_le(void)
 
 	/* The identity is bonded: not paired over (forgotten first). */
 	hooks.done = 0;
-	error = btd_pair_start(&pair, identity_address, BTD_ADDRESS_LE_RANDOM, 1);
+	error = btd_pair_start(&pair, identity_address, BTD_ADDRESS_LE_RANDOM, 1, 0, 0);
 	expect(error == 0 && hooks.done && strcmp(hooks.end, "ERROR bonded") == 0, "le: a bonded device (%s)", hooks.end);
 
 	/* A private address the bond's IRK resolves (the IRK 0x11..., prand 0x4a 0x01 0x02): bonded too (review S-g). */
@@ -658,7 +658,7 @@ test_le(void)
 	rpa[1] = hash[1];
 	rpa[0] = hash[2];
 	hooks.done = 0;
-	error = btd_pair_start(&pair, rpa, BTD_ADDRESS_LE_RANDOM, 1);
+	error = btd_pair_start(&pair, rpa, BTD_ADDRESS_LE_RANDOM, 1, 0, 0);
 	expect(error == 0 && hooks.done && strcmp(hooks.end, "ERROR bonded") == 0, "le: a private address of a bond (%s)", hooks.end);
 
 	/* The same device paired again under its public address: its identity is bonded, nothing written over. */
@@ -945,7 +945,7 @@ run_pair(
 	clock = btd_now_ms();
 
 	/* The start. */
-	error = btd_pair_start(pair, address, type, 1);
+	error = btd_pair_start(pair, address, type, 1, 0, 0);
 	if (error != 0) {
 		(void)snprintf(hooks->end, sizeof(hooks->end), "start %d", error);
 		return;
