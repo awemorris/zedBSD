@@ -16,4 +16,16 @@
 unsigned if_nametoindex(const char *name);
 char *if_indextoname(unsigned index, char *name);
 
+/*
+ * One interface in the list if_nameindex() returns: its index and its name.
+ * The list ends with an entry whose index is 0 and whose name is NULL.
+ */
+struct if_nameindex {
+	unsigned if_index;
+	char *if_name;
+};
+
+struct if_nameindex *if_nameindex(void);
+void if_freenameindex(struct if_nameindex *);
+
 #endif

@@ -39,6 +39,16 @@ size_t wcslcpy(wchar_t *destination, const wchar_t *source, size_t size);
 size_t wcslcat(wchar_t *destination, const wchar_t *source, size_t size);
 int wcscmp(const wchar_t *, const wchar_t *);
 int wcsncmp(const wchar_t *, const wchar_t *, size_t);
+
+/* POSIX's wide string functions: copies that report their end, a bounded length, a copy, and comparisons that ignore case. */
+wchar_t *wcpcpy(wchar_t *, const wchar_t *);
+wchar_t *wcpncpy(wchar_t *, const wchar_t *, size_t);
+size_t wcsnlen(const wchar_t *, size_t);
+wchar_t *wcsdup(const wchar_t *);
+int wcscasecmp(const wchar_t *, const wchar_t *);
+int wcsncasecmp(const wchar_t *, const wchar_t *, size_t);
+int wcscasecmp_l(const wchar_t *, const wchar_t *, locale_t);
+int wcsncasecmp_l(const wchar_t *, const wchar_t *, size_t, locale_t);
 wchar_t *wcscpy(wchar_t *, const wchar_t *);
 wchar_t *wcsncpy(wchar_t *, const wchar_t *, size_t);
 wchar_t *wcschr(const wchar_t *, wchar_t);

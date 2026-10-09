@@ -320,3 +320,72 @@ int system(const char *command)
 	int status; while (waitpid(child, &status, 0) < 0) if (errno != EINTR) return -1;
 	return status;
 }
+
+/*
+ * Takes the next suboption of a comma-separated list (POSIX getsubopt).
+ *
+ * The suboption is NAME or NAME=VALUE, up to the next comma, which is
+ * overwritten with a NUL; *option moves past it.  *value points to VALUE,
+ * or is NULL without one.  The result is the index of NAME in the
+ * NULL-ended list of tokens, or -1 when NAME is not there; *value then
+ * points to the whole suboption, as glibc and the BSDs leave it.
+ */
+int
+getsubopt(
+	char **option,
+	char *const *tokens,
+	char **value)
+{
+	char *suboption;
+	char *end;
+	char *equals;
+	size_t name_length;
+	size_t token_length;
+	int index;
+	int found;
+	int differs;
+
+	/* The suboption runs to the next comma or to the end of the list. */
+	suboption = *option;
+	end = strchr(suboption, ',');
+	if (end != NULL) {
+		*end = '\0';
+		*option = end + 1;
+	} else {
+		*option = suboption + strlen(suboption);
+	}
+
+	/* Splits NAME=VALUE at its first equals sign. */
+	equals = strchr(suboption, '=');
+	if (equals != NULL) {
+		name_length = (size_t)(equals - suboption);
+		*value = equals + 1;
+	} else {
+		name_length = strlen(suboption);
+		*value = NULL;
+	}
+
+	/* Looks NAME up among the tokens, comparing the whole name. */
+	found = -1;
+	for (index = 0; tokens[index] != NULL; index++) {
+		token_length = strlen(tokens[index]);
+		if (token_length != name_length)
+			continue;
+
+		/* A token of the same length matches when its characters do. */
+		differs = memcmp(tokens[index], suboption, name_length);
+		if (differs == 0) {
+			found = index;
+			break;
+		}
+	}
+
+	/* NAME is not a token: the caller sees the whole suboption. */
+	if (found < 0) {
+		*value = suboption;
+		return -1;
+	}
+
+	/* Succeeded: the index of the token. */
+	return found;
+}

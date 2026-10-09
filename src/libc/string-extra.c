@@ -149,6 +149,7 @@ strcasecmp_l(
 {
 	int order;
 
+	/* The locale changes nothing here. */
 	(void)locale;
 
 	/* The comparison the current locale makes. */
@@ -171,6 +172,7 @@ strncasecmp_l(
 {
 	int order;
 
+	/* The locale changes nothing here. */
 	(void)locale;
 
 	/* The comparison the current locale makes. */
@@ -560,3 +562,108 @@ le64toh(uint64_t value)
 	return swap64(value);
 }
 #endif
+
+/*
+ * Splits a string into tokens, keeping the place to go on from in *saved.
+ *
+ * A first call names the string; later calls pass NULL and go on from
+ * *saved.  Each token ends where the next separator was, which is
+ * overwritten with a NUL.
+ */
+char *
+strtok_r(
+	char *string,
+	const char *separators,
+	char **saved)
+{
+	char *token;
+	char *end;
+
+	/* Goes on from where the last call stopped when no string is named. */
+	token = string;
+	if (token == NULL)
+		token = *saved;
+
+	/* A finished string has no more tokens. */
+	if (token == NULL)
+		return NULL;
+
+	/* Skips the separators before the token. */
+	token += strspn(token, separators);
+	if (*token == '\0') {
+		*saved = NULL;
+		return NULL;
+	}
+
+	/* Ends the token at the next separator and remembers what follows it. */
+	end = token + strcspn(token, separators);
+	if (*end != '\0') {
+		*end = '\0';
+		*saved = end + 1;
+	} else {
+		*saved = NULL;
+	}
+
+	/* Succeeded: the token. */
+	return token;
+}
+
+/* Copies a string and reports where its terminating NUL was written. */
+char *
+stpcpy(
+	char *destination,
+	const char *source)
+{
+	size_t length;
+
+	/* Copies the characters and the NUL. */
+	length = strlen(source);
+	memcpy(destination, source, length + 1U);
+
+	/* Succeeded: the place of the NUL. */
+	return destination + length;
+}
+
+/*
+ * Copies at most size bytes of a string, filling the rest with NULs, and
+ * reports the end of the copied characters.
+ *
+ * The result is the first NUL written, or destination + size when the
+ * source was not shorter than size (then nothing is terminated).
+ */
+char *
+stpncpy(
+	char *destination,
+	const char *source,
+	size_t size)
+{
+	size_t length;
+
+	/* Copies the characters that fit. */
+	length = strnlen(source, size);
+	memcpy(destination, source, length);
+
+	/* Fills what is left with NULs. */
+	memset(destination + length, 0, size - length);
+
+	/* Succeeded: the end of the copied characters. */
+	return destination + length;
+}
+
+/* Reports the message of an error number in a locale; the messages are in one language. */
+char *
+strerror_l(
+	int error,
+	locale_t locale)
+{
+	char *message;
+
+	/* The locale changes nothing here. */
+	(void)locale;
+
+	/* The same message strerror gives. */
+	message = strerror(error);
+
+	/* Succeeded: the message. */
+	return message;
+}

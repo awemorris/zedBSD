@@ -70,3 +70,17 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
   - 注意（未確かめ）: package の中に `#ifdef SO_LINGER` などで新しい名前の有無を見て setsockopt を呼ぶ物があると、これまで呼ばなかった呼び出しが ENOPROTOOPT で失敗するようになる。失敗を無視する物が普通だが、全 package は調べていない。kernel が SO_LINGER・SO_ACCEPTCONN を実装するかは Q1 の判断。
 - 再開点（Q1 の優先の変更、2026-10-09 夜、WS129・WS143・WS083 の後）: (C) の残り（stpcpy・stpncpy・strtok_r・strerror_l・getsubopt・dprintf・vdprintf・wcpcpy・wcpncpy・wcsnlen・wcsdup・wcscasecmp(_l)・wcsncasecmp(_l)・ctype の *_l 12・wctype の 3・if_nameindex・if_freenameindex）、(B) cpio.h・tar.h、照合の道具の誤検出（unistd.h の「if defined」の 6、sys/sem.h の member）、(A) の pthread・sched・spawn の宣言は p047。wint_t は最後（Q1 へ）。
 - 2026-10-09 Q1 の判定: この branch（`agent/p1-p045`、d42615bc7）はベータ2 の公開（10/17）の後に merge する（RC の直前に `#ifdef SO_LINGER` などで呼ぶ package の挙動が変わる危険を避ける）。SO_LINGER などを見る package の確認と、kernel で SO_LINGER・SO_ACCEPTCONN を実装するかの判断はその時に行う。再開はこの branch の上から。
+
+## 2026-10-09 夜 P1（branch `agent/p1-p045` の上、10/17 の後に merge）: (C) 小さい関数
+
+- 足した（header と実装）:
+  - `<string.h>`: strtok_r・stpcpy・stpncpy・strerror_l（`src/libc/string-extra.c`、strerror_l は strerror と同じ文、message は 1 つの言語）。
+  - `<ctype.h>`: isalnum_l〜isxdigit_l の 12（`src/libc/locale.c`、単一 byte の分類はどの locale でも同じなので is*() を呼ぶ。既存の toupper_l・iswalpha_l と同じ扱い）。
+  - `<wctype.h>`: iswalnum_l・wctrans_l・towctrans_l（`locale.c`）。
+  - `<wchar.h>`: wcpcpy・wcpncpy・wcsnlen・wcsdup・wcscasecmp・wcsncasecmp・wcscasecmp_l・wcsncasecmp_l（`src/libc/wide-extra.c`、towlower で比べる）。
+  - `<stdlib.h>`: getsubopt（`src/libc/stdlib-extra.c`、名前が無い時は *value に suboption 全体、glibc・BSD と同じ）。
+  - `<stdio.h>`: dprintf・vdprintf（`src/libc/stdio-extra.c`、vasprintf で全体を作り、短い書き込み・EINTR を続けて全部 write）。
+  - `<net/if.h>`: struct if_nameindex・if_nameindex・if_freenameindex（`userland/base/libc/socket.c`、SIOCGIFCONF で大きさを聞いてから読み、entry・終わり・名前を malloc の 1 block に。失敗は NULL と errno、memory が無い時は ENOBUFS）。
+- 確かめ: amd64 の libc.so の build rc 0・warning 0、22 の関数が libc.so の dynamic symbol。変えた src/libc の 5 file は i386・aarch64 でも -Wall -Wextra -Werror で compile。host 試験（関数の定義を取り出して名前を替え、host の glibc で ASan・UBSan）: strtok_r（空の token の飛ばし、終わりの後の NULL）、stpcpy、stpncpy（詰めと切り詰め）、getsubopt（名前だけ・値つき・知らない名前・空の値・途中の名前の不一致・最後の位置）、wcsnlen、wcpncpy、wcpcpy、wcsncasecmp（大小、bound、長さ違い）→ PASS。style-check の新しい指摘 0。照合: 無い名前 123 → 89（base 79・XSI 1・option 9）。string.h・stdlib.h・ctype.h・wctype.h・net/if.h は 0、stdio.h・wchar.h に残るのは memory stream（fmemopen・open_memstream・open_wmemstream、p046）。
+- 未実施: QEMU（if_nameindex・dprintf は guest で、T1 に依頼していない。merge の前の T1 の依頼に入れる）。
+- 再開点: (B) cpio.h・tar.h → 照合の道具の誤検出（unistd.h の「if defined」の 6、sys/sem.h の匿名の構造体の member）。残りは p046〜p051 と kernel・toolchain が要る物（O_EXEC・O_SEARCH、uc_stack、wint_t）。
