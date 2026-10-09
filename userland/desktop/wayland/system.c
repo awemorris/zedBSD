@@ -1147,13 +1147,14 @@ kwl_system_keys_cancel(
 	printf("KWL SYSTEM key cancel why=%s error=%d\n", why, error);
 }
 
-/* The backend's keys_changed (ws199-p001): the account objects hear it. */
+/* The backend's keys_changed (ws199-p001): the account objects hear it, and the login or lock screen (greeter.c). */
 void
 kwl_backend_keys_changed(
 	void *data)
 {
 	/* The compositor the backend was opened for. */
 	kwl_system_keys_changed(data);
+	kwl_greeter_keys_changed(data);
 }
 
 /* Finds the object that asked the change that waits, of at least version; NULL when it or its client went. */

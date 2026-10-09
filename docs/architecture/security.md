@@ -414,6 +414,27 @@ not touched or taken away is not counted and is answered at once (the key
 counts its own wrong PINs). When an account's last key goes, its key's
 choice goes back to the default.
 
+**The key's owner.** When a key is plugged in or held to a reader while the
+login screen shows (or while the lock screen's card shows, after a swipe),
+the screen asks sessiond whose it is (`KEYOWNER`; passkey's
+`key-owner NAME|-`). passkey-fido2 asks the one key there, silently (no
+touch, no PIN), which account's registrations it holds (every person's
+account that may log in, or on the lock screen the session's user alone),
+and checks the answer's signature with that account's own public key: an
+answer that does not verify names nobody. The answer is the owner and its
+key's choice (`user=NAME key-pin=0|1 key-touch=0|1 card=0|1`), or `none`,
+`many-owners`, `no-key` or `many-keys`. The screen then selects the owner
+and asks for the key's PIN (a keypad under the field) and its touch, or for
+the touch alone; a lock screen whose account asks neither says "Checking
+your security key..." for half a second at least and unlocks. `KEYOWNER` is
+not an attempt: it neither counts, clears the counts, delays nor offers the
+PIN, and sessiond answers one a second (the others `ERROR busy`; the screen
+asks for the last key of a burst). It tells whoever plugs in a registered key
+whose account it is, which the key's holder knows anyway. With the lock
+screen's card closed a key that comes or goes does nothing, and a sleep
+closes the card and cancels the key's attempt under way, so a key left
+plugged in never unlocks the screen without the swipe.
+
 **The key's own operations.** Settings' Security Keys page also asks what
 key is there, sets or changes the key's PIN, and resets the key, through
 sessiond's `KEYINFO`, `KEYPIN set|change` and `KEYRESET` (a session's only;
@@ -448,8 +469,10 @@ the chosen key's answer, and passkey-fido2 then:
 1. finds the public key by the credential ID in the answer, among the
    account's own registrations;
 2. checks that the authenticator data's relying party hash is the hash of
-   `zedbsd.login`, that its flags say the user was present and verified, and
-   that it carries no attested data and nothing after its extensions;
+   `zedbsd.login`, that its flags say the user was present and verified (as
+   the account's choice asks: an unlock without the touch does not require
+   the user present, a login without the PIN not verified), and that it
+   carries no attested data and nothing after its extensions;
 3. checks the signature over the authenticator data and its own client data
    hash;
 4. checks the signature count: when the stored count or the new one is not 0,

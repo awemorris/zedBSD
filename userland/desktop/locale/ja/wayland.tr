@@ -83,6 +83,13 @@ msg	Starting session...	セッションを開始しています...
 msg	Touch your security key.	セキュリティキーに触れてください。
 # userland/desktop/wayland/greeter.c:1235
 msg	Checking...	確認しています...
+# userland/desktop/wayland/greeter.c (the security key's mode, ws199-p003)
+msg	Try again	もう一度試す
+msg	Checking your security key...	セキュリティキーを確認しています...
+msg	Touch your security key	セキュリティキーに触れてください
+msg	or hold it to the reader.	またはリーダーにかざしてください。
+msg	This security key is not registered here.	このセキュリティキーはこのコンピュータに登録されていません。
+msg	Enter your security key's PIN.	セキュリティキーの PIN を入力してください。
 # userland/desktop/wayland/greeter.c:1250
 msg	Use your password	パスワードを使う
 # userland/desktop/wayland/greeter.c:1252

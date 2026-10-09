@@ -1117,6 +1117,8 @@ main_key_owner(
 				job.groups[index] = group;
 		}
 	}
+
+	/* As many as there are. */
 	job.id_count = owners->count;
 
 	/* The helper's answer. */
@@ -1246,6 +1248,7 @@ main_owner_group(
 	char strings[LOGIN_VERIFY_BUFFER];
 	char field[32];
 	unsigned long uid;
+	size_t length;
 	size_t group;
 	char *end;
 	int found;
@@ -1273,7 +1276,12 @@ main_owner_group(
 	if (!found || (unsigned long)account.pw_uid != uid)
 		return -1;
 	usable = main_usable(name, account.pw_uid);
-	if (!usable || owners->group_count >= FIDO2_IDS_MAX || strlen(name) >= sizeof(owners->names[0]))
+	if (!usable || owners->group_count >= FIDO2_IDS_MAX)
+		return -1;
+
+	/* A name the group can hold. */
+	length = strlen(name);
+	if (length >= sizeof(owners->names[0]))
 		return -1;
 
 	/* A new group. */
