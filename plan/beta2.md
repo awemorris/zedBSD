@@ -31,7 +31,7 @@
 | Settings の Wi-Fi の on/off | ✔ | — |
 | 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
-| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) source の調べで候補 3 つ（firmware の load の後に controller が戻らない・xHCI に列挙されない・intelbt の前の古い image）。5330 の SSH が要る。**Settings の文言と image の版をユーザーに確認** |
+| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) **原因の候補が絞れた**（2026-10-10 Q1 の SSH）: Bluetooth の USB の device（port 10、full-speed）の enumerate が `enumeration failed (3)` で失敗、firmware は入っている。xHCI の full-speed の扱いの見込み → P1 が最優先 |
 | Terminal の選んだ文字のドラッグ | ✘ 選択の上でダブルタップ（tap からの drag）を始めると最初の tap で選択が外れる | [BUG-276](bugs/BUG-276.md) 直した（範囲の上の tap は 350 ms 待って消す、その間の press と移動で範囲の drag）。QEMU で tap を注入できないので次の UAT で確認。Text Editor 等は範囲の drag が無く同じ不具合は無い |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 の QEMU で戻りに address が付く、次の UAT で実機 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
