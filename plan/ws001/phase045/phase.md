@@ -43,3 +43,8 @@ ws126-p002（Python の cross build）で libc の不足が続けて見つかっ
 - 最初の表（2026-10-09、`table-2026-10-09.md`）: 無い名前 438（base と CX 355、XSI 64、他の option 19。limits.h の省いてよい値 37 は別）。3 arch で同じ。無い header 5（complex.h・cpio.h・monetary.h・tar.h・wordexp.h。tgmath.h は complex.h が無いので通らない）。
   - 種類: constant 239、function 93、limit（XSI）51、member 27、type 14、struct 9、macro 4、variable 1。
   - function 93 のうち、libc に実装があって宣言だけ無い物 5（pthread_kill・pthread_sigmask（signal.h にも要る）、ctermid、tcgetpgrp・tcsetpgrp（unistd.h））、実装の無い物 88（`check.py` の results と libc.so の symbol の照合）。
+
+## 2026-10-09 Q1 の判定: 範囲と分けた Phase
+
+- この Phase: (A) 定数・limits（XSI を含む）・型・macro・構造体と member、(B) cpio.h・tar.h、(C) 小さい関数（宣言の足し 5 と、string・wchar・getsubopt・dprintf・vdprintf・strerror_l・*_l の locale 版・posix_fadvise・if_nameindex・if_freenameindex）。wint_t は最後（着手の前に Q1 へ）。
+- 分けた Phase（planning、Q1 の割当まで着手しない）: [p046](../phase046/phase.md) memory stream の関数、[p047](../phase047/phase.md) scheduling の関数と時計、[p048](../phase048/phase.md) netdb の network・protocol の database、[p049](../phase049/phase.md) monetary.h と wordexp.h、[p050](../phase050/phase.md) complex.h と tgmath.h、[p051](../phase051/phase.md) mlock 系と typed memory。
