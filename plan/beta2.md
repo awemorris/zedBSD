@@ -29,11 +29,11 @@
 | 窓の dock の解除のダブルタップ | ✔ 遅れなし | — |
 | ダブルタップからの title bar のドラッグ | ✔ | — |
 | Settings の Wi-Fi の on/off | ✔ | — |
-| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した（文字の中央の描き方の誤り、通知の履歴の文字も）、T1-514 の PNG で確認 |
+| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
 | Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) source の調べで候補 3 つ（firmware の load の後に controller が戻らない・xHCI に列挙されない・intelbt の前の古い image）。5330 の SSH が要る。**Settings の文言と image の版をユーザーに確認** |
 | Terminal の選んだ文字のドラッグ | ✘ 選択の上でダブルタップ（tap からの drag）を始めると最初の tap で選択が外れる | [BUG-276](bugs/BUG-276.md) 直した（範囲の上の tap は 350 ms 待って消す、その間の press と移動で範囲の drag）。QEMU で tap を注入できないので次の UAT で確認。Text Editor 等は範囲の drag が無く同じ不具合は無い |
-| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 で確認中、次の UAT で実機 |
+| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 の QEMU で戻りに address が付く、次の UAT で実機 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
 | WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
@@ -50,7 +50,7 @@
 | [WS129](ws129/ws.md) p013 利用の手引き | 下書き済み（[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)） | ユーザーの review | 0.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 未着手 | 10/14（RC の後） | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み（host の確かめ PASS） | 10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
-| T1 の再試験 T1-509〜512（window の C7、画面 keyboard の slide、USB LAN の試験、Python と unix socket の kernel の直し） | P1 が直して T1 が実行中 | T1 | 2 | T1 |
+| T1 の再試験の結果（2026-10-10）: 509 C7 PASS、510 画面 keyboard PASS、513 有線の戻り PASS、514 パネルの PNG。511 tcp-loss-speed FAIL（fetch が繋がらない）、512 Python（ベータ3）は 17/45 files 失敗、513 の tcp-receive-speed で fetch が 2 回に 1 回返らない | 511・513 の残りは P1 | 2 | P1・T1 |
 | 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
 | [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |

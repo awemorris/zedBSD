@@ -3,7 +3,7 @@
 # ws102-p010: L3 の計測の道具と基準値（遅れ・開く動き）
 
 Parent: [WS102](../ws.md)
-Status: in-progress（2026-10-08 夜 P1 q913: 道具を実装・build、基準値の計測を T1 へ）
+Status: cleared（2026-10-10 Q1 判定: T1-510 で osk-guest PASS、計測の道具は動く。frame p95 103 ms（目標 50 ms）と slide の max_gap p95 166 ms（目標 20 ms）は未達として記録、直しは p011）
 Disposition: normal
 Primary Milestone: MG006（WS から継承）
 Queue / attempts: q913（P1、Q1 の投入「WS102 p010・p011（画面 keyboard の L3 の計測と直し）。phase.md を立てて計測（host か QEMU の T1）と直し」）

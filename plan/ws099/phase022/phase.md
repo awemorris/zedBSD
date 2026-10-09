@@ -56,3 +56,7 @@ Settings の窓の PNG（c7/*-settings.png）では見出しの墨は x 340〜41
 見出しが 12 px 上がったのは ws090-p023（2026-10-06、`se_page_header` を libkeiland の `kl_header` に）の後の設計どおりの配置で、画面（タイトル・説明・見出し・tile）は正しい。区分は**試験**（箱の位置が古い）。製品の直しは無し。
 
 直し: `plan/ws099/tests/c7-contrast.sh` の s-section を `340 204 436 222` に。確かめ（host）: `c7-contrast.py` を T1-504 の 7 枚の settings の PNG に流して contrast 4.90〜5.81（全て ≥ 4.5）。`sh -n` ok。QEMU の再試験は T1（C7 だけでよい）。
+
+## 2026-10-10 Q1: 回帰の部分の判定
+
+T1-504（C1・C2・C3・C5 PASS）と T1-509（C7 pass=84 fail=0）で C1〜C9 の回帰は全部 PASS。この Phase の残りは規約の全文の見直し（ベータ3）。
