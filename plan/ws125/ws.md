@@ -9,7 +9,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1）
 Queue: none
-Resume point: 2026-10-09 P1 q916: p002 は cleared 候補（`--subtree DEST=DIR`、[phase002](phase002/phase.md)）。p001（vim の取得・検証・監査・cross build）は planned。旧: p001 と p002 が planned、互いに独立。
+Resume point: 2026-10-09 P1 q916: p002 は test-wait（Q1: ws126-p005 の image の T1 で boot を確かめてから cleared。`--subtree DEST=DIR`、[phase002](phase002/phase.md)）。p001（vim の取得・検証・監査・cross build）は planned。旧: p001 と p002 が planned、互いに独立。
 2026-10-02 user: packages（Emacs・vim・Python）は「リリースのイメージに入れます」→ vim も release の image に既定で入れる。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->

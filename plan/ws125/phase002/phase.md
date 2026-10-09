@@ -3,7 +3,7 @@
 # ws125-p002: package の staged tree を image に入れる共通の仕組み
 
 Parent: [WS125](../ws.md)
-Status: cleared 候補（2026-10-09 P1 q916: `--subtree DEST=DIRECTORY` を root の Makefile の tree の規則・UFS と FAT の image の道具と検査に足し、3243 entry の host 試験 PASS。boot-test は ws126-p005 の image と合わせて T1。Q1 の判定待ち）
+Status: test-wait（2026-10-09 Q1 判定: host の確かめは十分、全体の image と boot-test を ws126-p005 の python3 の image の T1 で確かめてから cleared）（旧: cleared 候補（2026-10-09 P1 q916: `--subtree DEST=DIRECTORY` を root の Makefile の tree の規則・UFS と FAT の image の道具と検査に足し、3243 entry の host 試験 PASS。boot-test は ws126-p005 の image と合わせて T1。Q1 の判定待ち）
 Disposition: normal
 Queue / attempts: q916（2026-10-09 Q1 承認、ユーザー「ベータ2のすべての作業をP1でスケジューリングして行います」）の 3（ws126-p005 の前提）
 Goal: package が数千の file（vim の runtime、Emacs の lisp、Python の標準 library）を、file ごとの `--file` を並べずに image へ入れられるようにする。
