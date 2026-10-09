@@ -7,9 +7,12 @@
 #   libmany-long-name-...-ws140.so   many-lib.c, long_value() returns 77; its name is longer than 64 bytes (U3)
 #   libphdr.so                       many-lib.c, phdr_value() returns 55, padded to more than 16 program headers (U3)
 #   libtls00.so .. libtls39.so       many-tls.c, a TLS variable starting at NN+1; even ones through TLSDESC (p002)
+#   dynload/libpathmod.so            many-lib.c, path_value() returns 66; in a directory no search reaches, dlopened
+#                                    by its path (T1-495: Python's extension modules)
 # and puts them all in OUT/../rtld-many.tar (ustar, for the guest's pax).  rtld-many.sh runs it in the guest.
 #
-#   plan/tools/rtld/build-many.sh BUILD OUT      (BUILD has dynamic/libc.so; OUT is made afresh)
+#   plan/tools/rtld/build-many.sh BUILD OUT      (BUILD has dynamic/libc.so; OUT is made afresh: a link to a new
+#                                               directory, plan/tools/fresh-out.sh)
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 cd "$(dirname -- "$0")/../../.."
@@ -25,8 +28,9 @@ cflags="-nostdinc -I. -Iinclude -isystem $sysroot/usr/include -DHAL_ARCH_AMD64 -
  -m64 -march=x86-64 -mno-red-zone -O2 -ffreestanding -fPIC -fno-builtin -fno-stack-protector -Wall -Wextra -Werror"
 ldshared="-m64 -nostdlib -shared -Wl,--hash-style=gnu,-z,now,-z,relro"
 [ -f "$build/dynamic/libc.so" ] || { echo "build-many: no $build/dynamic/libc.so" >&2; exit 1; }
-rm -rf "$out"
-mkdir -p "$out/obj"
+. plan/tools/fresh-out.sh
+fresh_out "$out"
+mkdir -p "$out/obj" "$out/dynload"
 
 # library NAME SYMBOL NUMBER [DEPENDENCY...]: one many-lib.c library.
 library() {
@@ -103,6 +107,10 @@ phnum=$(build/llvm/bin/llvm-readelf -h "$out/libphdr.so" | sed -n 's/.*Number of
 echo "build-many: libphdr.so program headers=$phnum"
 [ "$phnum" -gt 16 ] || { echo "build-many: too few program headers" >&2; exit 1; }
 
+# The library dlopened by its path, outside the search path.
+$cc $cflags -DMANY_SYMBOL=path_value -DMANY_NUMBER=66 -c $tests/many-lib.c -o "$out/obj/libpathmod.so.o"
+$cc $ldshared -Wl,-soname,libpathmod.so "$out/obj/libpathmod.so.o" -o "$out/dynload/libpathmod.so"
+
 # The TLS libraries: the even ones reach their variable through TLSDESC, the odd ones through __tls_get_addr.
 i=0
 while [ $i -lt 40 ]; do
@@ -136,5 +144,5 @@ echo "build-many: rtld-many NEEDED=$needed"
 [ "$needed" -eq 41 ] || { echo "build-many: rtld-many should have 41 DT_NEEDED entries" >&2; exit 1; }
 
 # One archive for the guest.
-(cd "$out" && tar --format=ustar -cf ../rtld-many.tar ./*.so rtld-many)
+(cd "$out" && tar --format=ustar -cf ../rtld-many.tar ./*.so ./dynload/libpathmod.so rtld-many)
 echo "build-many: $(dirname -- "$out")/rtld-many.tar"
