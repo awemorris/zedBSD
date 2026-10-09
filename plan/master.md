@@ -10,7 +10,7 @@
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
 -->
 <!-- master:agents:start -->
-- **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=1（P1 だけ）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
+- **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=2（P1 は WS197、P2 は WS083、2026-10-10 ユーザー）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
   - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。WS199 p002 は cleared（77a40b51f）、P1 は使用量のためラップアップ済み。次の P1 は [WS199](ws199/ws.md) p003 から（phase.md に「すること・やり方」）→ → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。branch agent/p1-ws197（WS197 p003 の i03 の途中。ベータ2 の必須になったので WS200 の後に P1 が再開し、区切りごとに main へ merge）、agent/p1-p045 は main に merge 済み（2026-10-10）。
   - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
   - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
@@ -535,6 +535,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
 - 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
+- 2026-10-10 ユーザー:「P2を立ててWS083 Videoを完了しましょう。」→ N=2（P1 は WS197、P2 は WS083 の完了）。P2: p002・p003a・p004・p006a の記録の照合（実機の p005・p006b で確かめた分）、p008 の残り（result status query、利用者への案内、性能の記録は T1-435 の E）、p007 の hang の回復の実機の手順（ESP に test の kernel が要る、ユーザーに頼む形）、p009 規約の全文の見直し。release の config は OFF のまま（ユーザー）。
 - 2026-10-10 ユーザー:「ws083-p005のテストをやってもらえますか？実機で」→ Q1 が 5330 で p005（bring-up・I frame 3 本）と p006b（P・B 3 本）を流し全部一致、hang なし。release の config の Vulkan Video はクリック「OFF のまま（推し）」（使う program は vkvideo-probe だけ、利用者は ZEDBSD.CFG に i915.debug=video で ON にできる。Video Player が使うようになったら ON）。
 - 2026-10-10 ユーザー（クリック）: WS197 p004 の SMS の設計の判断 P1〜P7 は「全部推しどおり」（P8 は Q1 が推しで）。WS197 の branch を c56043c2b（p003 i06 まで、T1-526 の HID の回帰 PASS）まで main に merge。p004 を p004a・b・c に分けた。
 - 2026-10-10 ユーザー:「P1はWS197に戻る前に、WS170のlibkeiland-backendにおけるMAPの実装について、bluetoothdをどう叩くのか、それから、bluetoothdに何が実装されるべきか、このあたりを明確にしておいて、別なセッションで判断の違いが生じないようにしてください。全般的に、SMS利用におけるPhone app, libkeiland, libkeiland-backend, bluetoothdの流れを明確にして、どのようなインタフェースになるか、関連WSに記載してください。」→ P1 が T1-523 の FAIL の後に plan/ws197/phase004/phase.md（main）に層の流れと各境界の interface を確定して書き、WS170 から link、design-reviewer。その後 WS197（T1-524 の HID の回帰が先）。
