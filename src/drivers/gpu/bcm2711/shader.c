@@ -13,6 +13,14 @@
 #include "drivers/gpu/bcm2711/shader-private.h"
 #include "drivers/gpu/i915/compiler/compiler.h"
 
+/* Nine constant levels match the shared frontend's eight aggregate edges followed by one scalar leaf. */
+#define GRAPHICS_CONSTANT_LEVELS 9U
+
+/* The shared frontend admits this finite ID space; private metadata occupies one heap byte per ID. */
+#define GRAPHICS_MODULE_IDS 65536U
+
+static int preflight_module(const uint32_t *words, size_t word_count, enum bcm2711_shader_stage stage, struct bcm2711_shader_diagnostic *diagnostic);
+static int preflight_declaration(const uint32_t *instruction, uint32_t count, uint8_t *levels, uint32_t bound, uint32_t model, const char **reason);
 static int compile_program(struct bcm2711_shader_compiler *compiler);
 
 /*
@@ -44,6 +52,11 @@ bcm2711_shader_compile(
 		return EINVAL;
 	if (key->swap_red_blue > 1 || key->premultiplied_blend > 1)
 		return EINVAL;
+
+	/* Bounds declaration recursion and fixes the graphics execution model before the shared parser allocates or expands constants. */
+	error = preflight_module(words, word_count, stage, diagnostic);
+	if (error != 0)
+		return error;
 
 	/* Both native vertex variants parse the same source stage; their VPM epilogues differ. */
 	parse_stage = I915_STAGE_VERTEX;
@@ -407,6 +420,184 @@ bcm2711_shader_fail(
 
 	/* The caller retains the exact checked failure for pipeline creation. */
 	return error;
+}
+
+/* Bounds graphics declaration graphs iteratively before the shared frontend can recurse through their constants. */
+static int
+preflight_module(
+	const uint32_t *words,
+	size_t word_count,
+	enum bcm2711_shader_stage stage,
+	struct bcm2711_shader_diagnostic *diagnostic)
+{
+	uint8_t *levels;
+	const uint32_t *instruction;
+	const char *reason;
+	size_t offset;
+	uint32_t bound;
+	uint32_t count;
+	uint32_t opcode;
+	uint32_t model;
+	int in_function;
+	int error;
+
+	/* A complete SPIR-V header must precede any ID-indexed metadata access. */
+	if (word_count < 5U)
+		return EINVAL;
+	if (words[0] != 0x07230203U)
+		return EINVAL;
+
+	/* The same finite ID range bounds every earlier-constant lookup. */
+	bound = words[3];
+	if (bound == 0 || bound > GRAPHICS_MODULE_IDS)
+		return EINVAL;
+
+	/* Unpublished heap metadata keeps the declared ID space off the finite kernel stack. */
+	levels = kern_calloc(bound, sizeof(*levels));
+	if (levels == NULL)
+		return ENOMEM;
+
+	/* Coordinate and vertex binaries share the vertex execution model; only the fragment binary admits Fragment. */
+	model = 0U;
+	if (stage == BCM2711_SHADER_FRAGMENT)
+		model = 4U;
+
+	/* Walks complete instruction frames with the same module/function boundary as the shared declaration pass. */
+	error = 0;
+	reason = "graphics module has an incomplete instruction";
+	in_function = 0;
+	offset = 5U;
+	while (offset < word_count) {
+		/* Framing prevents every declaration helper from borrowing words outside this exact module. */
+		instruction = words + offset;
+		count = instruction[0] >> 16;
+		opcode = instruction[0] & 0xffffU;
+		if (count == 0 || count > word_count - offset) {
+			error = EINVAL;
+			break;
+		}
+
+		/* Function bodies cannot create module-level constant owners in the shared frontend. */
+		if (opcode == 54U)
+			in_function = 1;
+		if (in_function != 0) {
+			if (opcode == 56U)
+				in_function = 0;
+			offset += count;
+			continue;
+		}
+
+		/* Each module declaration either preserves the finite native graph or refuses before parser recursion. */
+		error = preflight_declaration(instruction, count, levels, bound, model, &reason);
+		if (error != 0)
+			break;
+		offset += count;
+	}
+
+	/* No declaration metadata is retained by a source IR, native program, or diagnostic string. */
+	kern_free(levels);
+
+	/* A refusal names the exact source word and never publishes a partial program. */
+	if (error != 0) {
+		if (diagnostic != NULL) {
+			diagnostic->instruction = (uint32_t)offset;
+			diagnostic->reason = reason;
+		}
+
+		/* The caller receives the exact framing or declaration refusal after temporary metadata has retired. */
+		return error;
+	}
+
+	/* Succeeded: graphics-only declarations have a finite constant expansion depth. */
+	return 0;
+}
+
+/* Admits immutable earlier-constant edges and the requested graphics model without interpreting native instructions. */
+static int
+preflight_declaration(
+	const uint32_t *instruction,
+	uint32_t count,
+	uint8_t *levels,
+	uint32_t bound,
+	uint32_t model,
+	const char **reason)
+{
+	uint32_t opcode;
+	uint32_t identity;
+	uint32_t constituent;
+	uint32_t index;
+	uint32_t depth;
+	uint32_t child_depth;
+
+	/* Standard SPIR-V opcode numbers identify declarations; unselected semantics remain the shared frontend's responsibility. */
+	opcode = instruction[0] & 0xffffU;
+	if (opcode == 15U) {
+		/* An entry point must preserve the requested vertex or fragment model before the shared parser can overwrite its stage. */
+		*reason = "entry point does not match the native graphics stage";
+		if (count < 3U)
+			return EINVAL;
+		if (instruction[1] != model)
+			return ENOTSUP;
+
+		/* Succeeded: this entry cannot enable a compute-only declaration or recursive shared-memory layout. */
+		return 0;
+	}
+
+	/* Native graphics has no Workgroup storage; refuse it before the shared compute layout helper can run. */
+	if (opcode == 59U) {
+		*reason = "Workgroup storage is outside native graphics";
+		if (count < 4U)
+			return EINVAL;
+		if (instruction[3] == 4U)
+			return ENOTSUP;
+
+		/* Succeeded: ordinary graphics variable validation remains with the shared frontend. */
+		return 0;
+	}
+
+	/* Only the four constant declarations supported by the shared frontend can create recursive constant owners. */
+	if (opcode < 41U || opcode > 44U)
+		return 0;
+
+	/* Each constant ID is declared once, preserving the earlier-reference graph even if another declaration is malformed. */
+	*reason = "constant has an invalid or repeated result ID";
+	if (count < 3U)
+		return EINVAL;
+	identity = instruction[2];
+	if (identity == 0 || identity >= bound)
+		return EINVAL;
+	if (levels[identity] != 0)
+		return EINVAL;
+
+	/* Scalar and Boolean leaves consume one expansion level and borrow no recursive constituent. */
+	depth = 1U;
+	if (opcode == 44U) {
+		/* Composite edges refer only to already declared immutable constants, with the shared frontend's sixteen-member limit. */
+		*reason = "constant composite exceeds native expansion limits";
+		if (count < 4U || count > 19U)
+			return ENOTSUP;
+		for (index = 3U; index < count; index++) {
+			/* A forward, absent, or self edge cannot enter the constant recursion graph. */
+			constituent = instruction[index];
+			if (constituent == 0 || constituent >= bound)
+				return EINVAL;
+			child_depth = levels[constituent];
+			if (child_depth == 0)
+				return EINVAL;
+
+			/* One more aggregate edge must fit the same finite depth as the shared scalar type profile. */
+			if (child_depth >= GRAPHICS_CONSTANT_LEVELS)
+				return ENOTSUP;
+			if (child_depth + 1U > depth)
+				depth = child_depth + 1U;
+		}
+	}
+
+	/* The immutable depth belongs to the preflight pass only and is discarded before parser allocation. */
+	levels[identity] = (uint8_t)depth;
+
+	/* Succeeded: every constant expansion path stays within the finite graphics profile. */
+	return 0;
 }
 
 /* Builds a complete private program while leaving every allocation reachable through the caller's common unwind. */
