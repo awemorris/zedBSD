@@ -758,6 +758,8 @@ def files_open_programs(item):
 		f"chmod 755 {DESKTOP_FOLDER}/aat-clip.mp4 && cp /bin/ls {DESKTOP_FOLDER}/aat-ls && chmod 755 {DESKTOP_FOLDER}/aat-ls && "
 		f"chown kei {DESKTOP_FOLDER} {DESKTOP_FOLDER}/aat-clip.mp4 {DESKTOP_FOLDER}/aat-ls")
 	try:
+		# No Terminal from an earlier scenario, so a running one is this scenario's.
+		run.stop_programs()
 		clip = desktop_icon(item, "aat-clip.mp4", mark)
 		ls = desktop_icon(item, "aat-ls", mark)
 		run.shot(item, "desktop")
@@ -769,23 +771,26 @@ def files_open_programs(item):
 		launched = run.wait(r"ZFILES LAUNCH name=Video Player command=/bin/videoplayer .*aat-clip\.mp4", opened, 20)
 		time.sleep(3.0)
 		video = program_running("videoplayer")
-		terminal = run.lines(r"ZTERM START ", opened)
+		terminal = program_running("terminal")
 		ways = run.lines(r"ZFILES (OPEN|LAUNCH|SPAWN) ", opened)
-		item.step(f"double-clicked aat-clip.mp4 (x bits) at {clip[0]},{clip[1]}", f"{chosen}; {ways[-1] if ways else ''}; videoplayer running {video}; terminals {len(terminal)}")
+		item.step(f"double-clicked aat-clip.mp4 (x bits) at {clip[0]},{clip[1]}", f"{chosen}; {ways[-1] if ways else ''}; videoplayer running {video}; terminal running {terminal}")
 		run.shot(item, "video")
 		item.check(chosen, "the desktop did not open the clip")
 		item.check(launched and video and not terminal, "BUG-233 reproduced: the video was not opened in Video Player (or a Terminal ran it)")
 		run.stop_programs()
 		opened = run.mark()
 		run.click(*ls, "--count", "2")
-		started = run.wait(r"ZTERM START ", opened, 15)
+		# The Terminal the desktop's Files starts does not write its own lines (ZTERM START) to the session's log,
+		# as Video Player does not (T1-491): Files' OPEN line, the window and the program running tell it came.
+		started = run.wait(r"ZFILES OPEN path=\S*/aat-ls app=Run in Terminal error=0", opened, 15)
 		window = run.mapped_after(opened, 15, size_wait=2.0)
 		time.sleep(3.0)
+		terminal = program_running("terminal")
 		gone = run.lines(rf"KWL CLIENT gone client={window.client}\b", opened) if window else []
 		ways = run.lines(r"ZFILES (OPEN|LAUNCH|SPAWN) ", opened)
-		item.step(f"double-clicked aat-ls (a command line program) at {ls[0]},{ls[1]}", f"{ways[-1] if ways else ''}; {started}; window {window}; gone {len(gone)}")
+		item.step(f"double-clicked aat-ls (a command line program) at {ls[0]},{ls[1]}", f"{ways[-1] if ways else ''}; window {window}; terminal running {terminal}; gone {len(gone)}")
 		run.shot(item, "ls")
-		item.check(started and window, "BUG-234 reproduced: no Terminal came for the program")
+		item.check(started and window and terminal, "BUG-234 reproduced: no Terminal came for the program")
 		item.check(not gone, "BUG-234 reproduced: the Terminal went away when the program ended")
 	finally:
 		run.sh(f"rm -f {DESKTOP_FOLDER}/aat-clip.mp4 {DESKTOP_FOLDER}/aat-ls")
