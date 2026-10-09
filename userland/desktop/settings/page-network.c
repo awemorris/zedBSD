@@ -1270,9 +1270,17 @@ network_wired(
 	if (network->links[index].loopback != 0)
 		return 0;
 
-	/* Nor is the radio. */
+	/* Nor is the radio the network service names. */
 	differs = strcmp(network->links[index].name, network->state.wifi_interface);
 	if (network->state.wifi_interface[0] != '\0' && differs == 0)
+		return 0;
+
+	/*
+	 * Nor any radio the system tells (KL_VERSION 76): the service names its
+	 * radio only while it has one in use, and a radio that is up without a
+	 * network was drawn as an Ethernet card with no cable (BUG-284).
+	 */
+	if (network->links[index].wireless != 0)
 		return 0;
 
 	/* Any other interface is. */

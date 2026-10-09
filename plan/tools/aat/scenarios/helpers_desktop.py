@@ -892,6 +892,22 @@ def release_clients(item):
 	item.passed()
 
 
+def lock_choose_password(item, mark) -> None:
+	"""On a lock card that offers its styles side by side (a PIN or a key enrolled, ws187-p003), presses Password first:
+	the PIN is the field's style by default (T1-520), so a password typed as it is would go to the PIN."""
+	pattern = r"KWL GREETER style-at style=1 x=-?\d+ y=-?\d+ width=\d+ height=\d+"
+	places = run.lines(pattern, mark) or run.lines(pattern, None)
+	if not places:
+		item.step("styles side by side", "none (the password alone)")
+		return
+	line = places[-1]
+	x = int(aatlib.field(line, "x")) + int(aatlib.field(line, "width")) // 2
+	y = int(aatlib.field(line, "y")) + int(aatlib.field(line, "height")) // 2
+	run.click(x, y)
+	chosen = run.wait(r"KWL GREETER style=1 via=choice", mark, 5)
+	item.step("pressed Password among the styles", chosen or "the field took the password already")
+
+
 @run.define("desktop.lock.swipe-card")
 def lock_swipe_card(item):
 	# ws187-p001..p003: the clock and the hint alone, a swipe up from the lower part brings the card (a manual lock: no grace).
@@ -909,6 +925,7 @@ def lock_swipe_card(item):
 	item.step("dragged up from the lower part", swiped)
 	run.shot(item, "card")
 	item.check(swiped, "the swipe was not taken")
+	lock_choose_password(item, mark)
 	run.type(aatlib.PASSWORD)
 	run.key("enter")
 	unlocked = run.wait(r"KWL LOCK unlocked", mark, 15)
@@ -933,6 +950,7 @@ def lock_wheel_card(item):
 	item.step("turned the wheel up two notches", swiped)
 	run.shot(item, "card")
 	item.check(swiped, "the wheel was not taken")
+	lock_choose_password(item, mark)
 	run.type(aatlib.PASSWORD)
 	run.key("enter")
 	unlocked = run.wait(r"KWL LOCK unlocked", mark, 15)

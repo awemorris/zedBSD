@@ -312,8 +312,9 @@ int kl_backend_network_set_scanning(struct kl_backend_network *network, unsigned
 /*
  * One interface: its name, whether it is up and has its link, whether it
  * is the loopback, its IPv4 address and netmask (empty when it has none),
- * its hardware address and MTU, the bytes it has received and sent, and
- * its link's speed in Mb/s (0 while not known, BUG-222).
+ * its hardware address and MTU, the bytes it has received and sent, its
+ * link's speed in Mb/s (0 while not known, BUG-222), and whether it is a
+ * radio (Wi-Fi), as the system tells it (BUG-284: not by its name).
  */
 struct kl_backend_network_link {
 	char name[KL_BACKEND_NETWORK_NAME_MAX];
@@ -329,6 +330,7 @@ struct kl_backend_network_link {
 	unsigned wired_mode;
 	char router[KL_BACKEND_NETWORK_ADDRESS_MAX];
 	unsigned link_mbps;
+	unsigned wireless;
 };
 
 /*
