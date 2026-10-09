@@ -56,6 +56,8 @@ unsigned
 kl_system_capabilities(const struct kl_system *system)
 {
 	(void)system;
+	if (getenv("HOST_KEYS") != NULL && getenv("HOST_KEY_OPS") != NULL)
+		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS | KL_SYSTEM_HAS_KEY_OPS;
 	if (getenv("HOST_KEYS") != NULL)
 		return KL_SYSTEM_HAS_ACCOUNT | KL_SYSTEM_HAS_PIN | KL_SYSTEM_HAS_KEYS;
 	if (getenv("HOST_ACCOUNT_RESULT") != NULL)
@@ -185,6 +187,88 @@ kl_system_account_remove_key(struct kl_system *system, const char *password, con
 	printf("HOST key remove ref=%s password=%zu\n", ref, strlen(password));
 	*request = 78U;
 	return 0;
+}
+
+/*
+ * The keys' own operations (ws199-p001): offered with HOST_KEYS and
+ * HOST_KEY_OPS; what is there is HOST_KEY_COUNT keys (default 1), the
+ * one with a PIN unless HOST_KEY_NO_PIN; each request is answered with
+ * HOST_ACCOUNT_RESULT at the next take_result.
+ */
+int
+kl_system_account_key_info(struct kl_system *system, uint32_t *request)
+{
+	(void)system;
+	if (getenv("HOST_KEY_OPS") == NULL)
+		return ENOTSUP;
+	printf("HOST key info\n");
+	*request = 80U;
+	host_account_request = 80U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_info_get(const struct kl_system *system, struct kl_system_key_info *info)
+{
+	const char *count;
+
+	(void)system;
+	memset(info, 0, sizeof(*info));
+	count = getenv("HOST_KEY_COUNT");
+	info->count = 1U;
+	if (count != NULL)
+		info->count = (unsigned)atoi(count);
+	snprintf(info->name, sizeof(info->name), "YubiKey 5 NFC");
+	info->pin = getenv("HOST_KEY_NO_PIN") == NULL;
+	info->retries = 8U;
+	info->min = 4U;
+	return 1;
+}
+
+int
+kl_system_account_key_pin(struct kl_system *system, const char *current, const char *pin, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key pin current=%d pin=%zu\n", current != NULL, strlen(pin));
+	*request = 81U;
+	host_account_request = 81U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_reset(struct kl_system *system, const char *password, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key reset password=%zu\n", strlen(password));
+	*request = 82U;
+	host_account_request = 82U;
+	host_account_pending = 1;
+	return 0;
+}
+
+int
+kl_system_account_key_cancel(struct kl_system *system)
+{
+	(void)system;
+	printf("HOST key cancel\n");
+	return 0;
+}
+
+int
+kl_system_account_replugged(struct kl_system *system, uint32_t *request)
+{
+	(void)system;
+	(void)request;
+	return 0;
+}
+
+unsigned
+kl_system_account_key_removed(const struct kl_system *system)
+{
+	(void)system;
+	return 1U;
 }
 
 int

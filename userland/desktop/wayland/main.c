@@ -116,6 +116,7 @@ main(
 	backend_host.power_changed = kwl_backend_power_changed;
 	backend_host.power_button = kwl_backend_power_button;
 	backend_host.lid_changed = kwl_backend_lid_changed;
+	backend_host.keys_changed = kwl_backend_keys_changed;
 
 	/* Reads the command line; a mistake ends the run with the usage. */
 	error = parse_options(&server, count, arguments);

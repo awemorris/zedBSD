@@ -393,6 +393,33 @@ The key's attestation statement is not checked, so the make of the key is
 not part of the trust: what registration protects against is a credential
 the user did not create on a key they hold, not a counterfeit key.
 
+**The key's own operations.** Settings' Security Keys page also asks what
+key is there, sets or changes the key's PIN, and resets the key, through
+sessiond's `KEYINFO`, `KEYPIN set|change` and `KEYRESET` (a session's only;
+the greeter cannot ask them) and passkey's `key-info`, `key-set-pin`,
+`key-change-pin` and `key-reset`, which passkey-fido2 carries out as
+above. What the key is (how many keys, a key's name, whether it has a PIN,
+its retries) is told without any secret. Its PIN is checked by the key
+alone, which counts the wrong ones itself (eight in all, three per power
+cycle), so `KEYINFO` and `KEYPIN` are not attempts of the account: they
+neither count, clear the counts, delay nor offer the six-digit PIN. A reset
+erases every credential and the PIN on the key, so it asks the account's
+password, counted as a password attempt; once passkey-fido2 says the
+password was right (`status verified`) the counts are cleared as by a
+password, and later failures are told at once. The key takes a reset only a
+few seconds after it is powered, so passkey-fido2 asks the user to plug it
+in again (`status replug`, or to take it from the reader and hold it there
+again), sends the reset as soon as the key comes back, after looking within
+a short time for which of this machine's credentials (of every account) it
+held, and removes their lines once the key says it is reset. A reset under
+way is cancelled with the key (CTAPHID_CANCEL) when sessiond ends the
+request (Cancel, the deadline of 75 seconds, the screen locking or the
+machine going to sleep): passkey ignores sessiond's SIGTERM and waits for
+passkey-fido2, which passes it to the helper and waits for the key's answer.
+Settings is told passkey's own word for a change (`bad-key-pin`,
+`key-locked`, `key-replug`, `no-pin`, `pin-policy`, `not-allowed`, ...);
+the login and lock screens are told the greeter's words as before.
+
 **Logging in.** passkey-fido2 makes a random 32-byte challenge and the client
 data hash `SHA-256("zedbsd.login" NUL name NUL challenge)`. The helper returns
 the chosen key's answer, and passkey-fido2 then:

@@ -189,6 +189,24 @@ kwl_handoff_answer(
 			return;
 	}
 
+	/* A key's own operations (ws199-p001): what the keys are, a PIN or a reset, and a reset's replug. */
+	if (request == KL_BACKEND_SESSION_KEYINFO) {
+		kwl_system_key_info_answer(server, error);
+		return;
+	}
+
+	/* A PIN or a reset. */
+	if (request == KL_BACKEND_SESSION_KEYOP) {
+		(void)kwl_system_pin_answer(server, error);
+		return;
+	}
+
+	/* A reset waits for the key to come back. */
+	if (request == KL_BACKEND_SESSION_REPLUG) {
+		(void)kwl_system_key_replug(server);
+		return;
+	}
+
 	/* A security key's touch: a key's addition's, or the login or lock screen's (ws172-p003). */
 	if (request == KL_BACKEND_SESSION_TOUCH) {
 		taken = kwl_system_key_touch(server);

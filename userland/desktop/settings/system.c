@@ -80,6 +80,12 @@ se_system_poll(
 	if ((app->system_changed & KL_SYSTEM_CHANGED_TOUCH) != 0U)
 		se_keys_touched(app);
 
+	/* A key's reset waits for the key to come back, and a key came or went (ws199-p001). */
+	if ((app->system_changed & KL_SYSTEM_CHANGED_REPLUG) != 0U)
+		se_keys_replugged(app);
+	if ((app->system_changed & KL_SYSTEM_CHANGED_KEYS) != 0U)
+		se_keys_changed(app);
+
 	/* The machine's memory for About (ws089-p013): the newest frame of the monitor, when one came. */
 	se_about_follow(app);
 

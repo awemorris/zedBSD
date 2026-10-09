@@ -25,12 +25,20 @@
  *   touch                          the key waits for the user's touch
  *   assertion ID AUTH-DATA SIG     the chosen key's answer (hexadecimal)
  *   made AUTH-DATA                 a new credential's authenticator data
+ *   info N,CARD,INDEX,PIN,RETRIES,MIN  how many keys, and the one key: a
+ *                                  card or a USB key, its place, whether
+ *                                  it has a PIN, its retries, its PIN's
+ *                                  fewest characters (ws199-p001)
+ *   done                           the key's PIN set or changed
+ *   reset MASK                     the key was reset; the credentials of
+ *                                  the job it held (bits, hexadecimal)
  *   fail REASON                    one of passkey's reasons
  */
 
 #ifndef USERLAND_BASE_PASSKEY_FIDO2_H
 #define USERLAND_BASE_PASSKEY_FIDO2_H
 
+#include <signal.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <sys/types.h>
@@ -59,24 +67,36 @@
 /* What the helper is asked to do. */
 #define FIDO2_JOB_ASSERT	1
 #define FIDO2_JOB_MAKE		2
+#define FIDO2_JOB_INFO		3
+#define FIDO2_JOB_SET_PIN	4
+#define FIDO2_JOB_CHANGE_PIN	5
+#define FIDO2_JOB_RESET		6
+
+/* The most credentials a job names (a reset asks for every account's, ws199-p001). */
+#define FIDO2_IDS_MAX		32U
 
 /* The messages. */
 #define FIDO2_MESSAGE_TOUCH	1
 #define FIDO2_MESSAGE_ASSERTION	2
 #define FIDO2_MESSAGE_MADE	3
 #define FIDO2_MESSAGE_FAIL	4
+#define FIDO2_MESSAGE_INFO	5
+#define FIDO2_MESSAGE_DONE	6
+#define FIDO2_MESSAGE_RESET	7
 
 /*
  * The helper's job, made by passkey-fido2 before the helper starts: what
- * to do, the client data hash, the key's PIN, the account's credentials
- * (to allow, or to exclude), the user's ID and name for a new one.
+ * to do, the client data hash, the key's PIN (the current one to change
+ * it) and a new PIN, the credentials (to allow, to exclude, or a reset's
+ * to look for), the user's ID and name for a new one.
  */
 struct fido2_job {
 	int kind;
 	uint8_t client_data_hash[32];
 	char pin[72];
-	const uint8_t *ids[5];
-	size_t id_sizes[5];
+	char new_pin[72];
+	const uint8_t *ids[FIDO2_IDS_MAX];
+	size_t id_sizes[FIDO2_IDS_MAX];
 	size_t id_count;
 	uint8_t user_id[FIDO2_USER_ID_SIZE];
 	const char *user_name;
@@ -84,10 +104,18 @@ struct fido2_job {
 
 /*
  * A message read back: its kind, and for an assertion or a new
- * credential its bytes; for a failure its reason.
+ * credential its bytes; for a key's information its numbers; for a reset
+ * the credentials held; for a failure its reason.
  */
 struct fido2_message {
 	int kind;
+	unsigned info_count;
+	unsigned info_card;
+	unsigned info_index;
+	unsigned info_pin;
+	unsigned info_retries;
+	unsigned info_min;
+	unsigned held;
 	uint8_t id[PK_CREDENTIAL_ID_MAX];
 	size_t id_size;
 	uint8_t auth_data[PK_AUTH_DATA_MAX];
@@ -119,8 +147,10 @@ struct fido2_record {
  */
 struct fido2_devices {
 	struct pk_os_hid handles[PK_OS_DEVICES_MAX];
+	char names[PK_OS_DEVICES_MAX][PK_OS_NAME_MAX];
 	size_t count;
 	struct pk_os_card cards[PK_OS_DEVICES_MAX];
+	char card_names[PK_OS_DEVICES_MAX][PK_OS_NAME_MAX];
 	size_t card_count;
 };
 
@@ -138,6 +168,8 @@ int fido2_client_data_hash(const char *name, const uint8_t *challenge, uint8_t *
 int fido2_user_id(const char *name, uint8_t *id);
 
 /* device.c */
+extern volatile sig_atomic_t fido2_ended;
+void fido2_catch_end(void);
 int fido2_devices_open(struct fido2_devices *devices);
 void fido2_devices_close(struct fido2_devices *devices);
 int fido2_run_helper(struct fido2_devices *devices, const struct fido2_job *job, uid_t uid, gid_t gid,

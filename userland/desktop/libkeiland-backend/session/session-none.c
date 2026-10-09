@@ -19,6 +19,7 @@
 
 #include <errno.h>
 #include <stddef.h>
+#include <string.h>
 
 /*
  * Has no hand-over to wait for.
@@ -187,6 +188,66 @@ kl_backend_session_add_key(
 	if (backend == NULL)
 		return EINVAL;
 	return ENOTSUP;
+}
+
+/* Asks nothing about the keys (ws199-p001). */
+int
+kl_backend_session_key_info(
+	struct kl_backend *backend)
+{
+	/* Not here. */
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Gives no key. */
+void
+kl_backend_session_key_info_get(
+	const struct kl_backend *backend,
+	struct kl_backend_key_info *info)
+{
+	/* None. */
+	(void)backend;
+	memset(info, 0, sizeof(*info));
+}
+
+/* Sets no key's PIN. */
+int
+kl_backend_session_key_pin(
+	struct kl_backend *backend,
+	const char *current,
+	const char *pin)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)current;
+	(void)pin;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* Resets no key. */
+int
+kl_backend_session_key_reset(
+	struct kl_backend *backend,
+	const char *password)
+{
+	/* Nothing is sent, and nothing is kept. */
+	(void)password;
+	if (backend == NULL)
+		return EINVAL;
+	return ENOTSUP;
+}
+
+/* No registration removed. */
+unsigned
+kl_backend_session_key_removed(
+	const struct kl_backend *backend)
+{
+	/* None. */
+	(void)backend;
+	return 0U;
 }
 
 /*

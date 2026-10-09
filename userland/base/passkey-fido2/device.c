@@ -14,6 +14,12 @@
  * messages are read until its answer.  A "touch" is passed on at once as
  * passkey's "status touch".  A helper that does not answer within the
  * touch's time is killed and the attempt is a timeout.
+ *
+ * sessiond ends the work with SIGTERM to the process group (ws199-p001
+ * section 11, R1): passkey-fido2 notes it (fido2_catch_end), passes it on
+ * to the helper, which cancels the key's command, and waits a short time
+ * for the helper's answer (a reset already sent is waited for to its own
+ * end, so its lines are removed).
  */
 
 #include "fido2.h"
@@ -30,7 +36,37 @@
 /* How much longer than the touch the answer may take (the PIN's agreement and the key's work). */
 #define DEVICE_SLACK_MS		3000U
 
+/* How long the helper may take to answer once the work was ended. */
+#define DEVICE_END_MS		1500U
+
+/* Whether sessiond ended the work (SIGTERM). */
+volatile sig_atomic_t fido2_ended;
+
 static uint64_t device_now_ms(void);
+static void device_ended(int signal_number);
+
+/* Notes sessiond's SIGTERM instead of dying of it (the waits see EINTR). */
+void
+fido2_catch_end(void)
+{
+	struct sigaction ending;
+
+	/* No restart: a wait ends at once. */
+	memset(&ending, 0, sizeof(ending));
+	ending.sa_handler = device_ended;
+	sigemptyset(&ending.sa_mask);
+	(void)sigaction(SIGTERM, &ending, NULL);
+}
+
+/* Notes the end (async-signal-safe). */
+static void
+device_ended(
+	int signal_number)
+{
+	/* Only noted. */
+	(void)signal_number;
+	fido2_ended = 1;
+}
 
 /*
  * Opens and claims every security key's node, and attaches every smart
@@ -56,8 +92,10 @@ fido2_devices_open(
 	/* Each one opened and claimed; one another program holds is left alone. */
 	for (index = 0U; index < count; index++) {
 		error = pk_os_open(&devices->handles[devices->count], found[index].path, 1, &io);
-		if (error == 0)
-			devices->count++;
+		if (error != 0)
+			continue;
+		(void)snprintf(devices->names[devices->count], sizeof(devices->names[0]), "%s", found[index].name);
+		devices->count++;
 	}
 
 	/* The smart card slots, with a card or without (none is not an error). */
@@ -66,8 +104,10 @@ fido2_devices_open(
 		count = 0U;
 	for (index = 0U; index < count; index++) {
 		error = pk_os_card_attach(&devices->cards[devices->card_count], found[index].path);
-		if (error == 0)
-			devices->card_count++;
+		if (error != 0)
+			continue;
+		(void)snprintf(devices->card_names[devices->card_count], sizeof(devices->card_names[0]), "%s", found[index].name);
+		devices->card_count++;
 	}
 
 	/* Succeeded: the keys that could be claimed, and the slots. */
@@ -119,6 +159,7 @@ fido2_run_helper(
 	int result;
 	int error;
 	int answered;
+	int passed_on;
 
 	/* The helper's pipe. */
 	result = pipe(pipes);
@@ -149,6 +190,7 @@ fido2_run_helper(
 	deadline = device_now_ms() + FIDO2_TOUCH_MS + DEVICE_SLACK_MS;
 	used = 0U;
 	answered = 0;
+	passed_on = 0;
 	error = 0;
 	while (!answered && error == 0) {
 		/* A whole line already read is taken first. */
@@ -177,8 +219,16 @@ fido2_run_helper(
 			break;
 		}
 
-		/* More, before the deadline. */
+		/* The work ended: passed on to the helper once; its answer is waited for a short time (a reset's to its end). */
 		now = device_now_ms();
+		if (fido2_ended && !passed_on) {
+			passed_on = 1;
+			(void)kill(child, SIGTERM);
+			if (job->kind != FIDO2_JOB_RESET && deadline > now + DEVICE_END_MS)
+				deadline = now + DEVICE_END_MS;
+		}
+
+		/* More, before the deadline. */
 		if (now >= deadline || used == sizeof(line)) {
 			error = ETIMEDOUT;
 			break;

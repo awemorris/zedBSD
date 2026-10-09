@@ -13,13 +13,21 @@
  *   auth NAME fido2 KEY-PIN                   the login with a key
  *   enroll-fido2 NAME PASSWORD LABEL KEY-PIN  a new key for the account
  *   remove-fido2 NAME PASSWORD ID-OR-REF      one of the account's keys goes
+ *   key-info NAME                             what the key there is (ws199-p001)
+ *   key-set-pin NAME NEW-PIN                  the key's first PIN
+ *   key-change-pin NAME KEY-PIN NEW-PIN       the key's PIN changed
+ *   key-reset NAME PASSWORD                   the key reset after it is plugged
+ *                                             in again, its lines removed
  *
  * It runs as root alone (its real user ID), reads nothing from its command
  * line or environment, makes the challenge, opens and claims the keys,
  * starts the device helper (helper.c) and checks the key's answer itself:
  * the public key is the account's own line's, never the key's word.  The
- * answer is passkey's: "status touch" lines, then "ok uid=N" (with
- * "id=ID" after a registration) or "fail REASON"; the exit status 0, 1 or 2.
+ * answer is passkey's: "status touch" lines (and for a reset "status
+ * verified" once the password is right and "status replug" while the key
+ * is to be plugged in again), then "ok uid=N" (with "id=ID" after a
+ * registration, the key's facts after key-info, "removed=N" after a reset)
+ * or "fail REASON"; the exit status 0, 1 or 2.
  */
 
 #include "fido2.h"
@@ -62,10 +70,24 @@ struct main_keys {
 	size_t count;
 };
 
-/* The file's text, the new text and the account's keys (large; one request a run). */
+/* Every account's key lines (a reset removes the lines of every account the key held, ws199-p001). */
+struct main_all_keys {
+	char lines[FIDO2_IDS_MAX][MAIN_LINE_MAX];
+	char names[FIDO2_IDS_MAX][64];
+	struct fido2_record records[FIDO2_IDS_MAX];
+	size_t count;
+};
+
+/* How long a reset waits for the key to be plugged in again, and how often it looks. */
+#define MAIN_REPLUG_MS		30000U
+#define MAIN_REPLUG_STEP_MS	100U
+
+/* The file's text, the new text, the account's keys, every account's, and the keys the helper saw (large; one request a run). */
 static char main_text[MAIN_FILE_MAX];
 static char main_output[MAIN_FILE_MAX + MAIN_LINE_MAX];
 static struct main_keys main_account_keys;
+static struct main_all_keys main_all;
+static struct fido2_devices main_devices;
 
 static void main_setup(void);
 static int main_read(char *buffer, size_t capacity, size_t *length);
@@ -81,6 +103,13 @@ static int main_enroll(const char *name, uid_t uid, const char *label, char *pin
 static int main_remove(const char *name, uid_t uid, const char *id);
 static int main_change(const char *name, const char *field, const char *added);
 static int main_run(const struct fido2_job *job, struct fido2_message *message);
+static int main_key_info(uid_t uid);
+static int main_key_pin(uid_t uid, int kind, char *pin, char *fresh);
+static int main_key_reset(const char *name, uid_t uid);
+static int main_all_keys(struct main_all_keys *all);
+static int main_replug(void);
+static int main_job_failed(int error, const struct fido2_message *message, int kind);
+static uint64_t main_now_ms(void);
 static const char *main_verify_reason(int error);
 
 /* Answers one request. */
@@ -97,12 +126,14 @@ main(void)
 	uid_t real;
 	int found;
 	int is_auth;
+	int is_key;
 
 	/* Root alone, a clean environment, no core file. */
 	real = getuid();
 	if (real != 0)
 		return MAIN_EXIT_INTERNAL;
 	main_setup();
+	fido2_catch_end();
 
 	/* The request. */
 	length = 0U;
@@ -114,13 +145,32 @@ main(void)
 		return main_fail("bad-request");
 	}
 
-	/* A security key's: the login with one, a registration or a removal. */
+	/* A security key's: the login with one, a registration, a removal, or a key's own operation. */
 	is_auth = 0;
 	if (request.operation == PASSKEY_OP_AUTH)
 		is_auth = strcmp(request.fields[2], "fido2") == 0;
-	if (!is_auth && request.operation != PASSKEY_OP_ENROLL_FIDO2 && request.operation != PASSKEY_OP_REMOVE_FIDO2) {
+	is_key = request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET;
+	if (!is_auth && !is_key && request.operation != PASSKEY_OP_ENROLL_FIDO2 && request.operation != PASSKEY_OP_REMOVE_FIDO2) {
 		passkey_wipe(buffer, sizeof(buffer));
 		return main_fail("bad-request");
+	}
+
+	/* A key's own operation: the account is there; only a reset needs its password (ws199-p001). */
+	if (is_key && request.operation != PASSKEY_OP_KEY_RESET) {
+		found = main_account(request.fields[1], &account, strings, sizeof(strings));
+		if (!found) {
+			status = main_fail("no-such-user");
+		} else if (request.operation == PASSKEY_OP_KEY_INFO) {
+			status = main_key_info(account.pw_uid);
+		} else if (request.operation == PASSKEY_OP_KEY_SET_PIN) {
+			status = main_key_pin(account.pw_uid, FIDO2_JOB_SET_PIN, NULL, request.fields[2]);
+		} else {
+			status = main_key_pin(account.pw_uid, FIDO2_JOB_CHANGE_PIN, request.fields[2], request.fields[3]);
+		}
+
+		/* Nothing secret stays. */
+		passkey_wipe(buffer, sizeof(buffer));
+		return status;
 	}
 
 	/* The login's account. */
@@ -145,11 +195,16 @@ main(void)
 		return main_fail("bad-secret");
 	}
 
-	/* The registration, or the removal. */
-	if (request.operation == PASSKEY_OP_ENROLL_FIDO2)
+	/* The registration, the removal, or a reset (the password was right: sessiond clears the count). */
+	if (request.operation == PASSKEY_OP_ENROLL_FIDO2) {
 		status = main_enroll(request.fields[1], account.pw_uid, request.fields[3], request.fields[4]);
-	else
+	} else if (request.operation == PASSKEY_OP_REMOVE_FIDO2) {
 		status = main_remove(request.fields[1], account.pw_uid, request.fields[3]);
+	} else {
+		printf("status verified\n");
+		(void)fflush(stdout);
+		status = main_key_reset(request.fields[1], account.pw_uid);
+	}
 
 	/* Nothing secret stays. */
 	passkey_wipe(buffer, sizeof(buffer));
@@ -714,27 +769,357 @@ main_run(
 	const struct fido2_job *job,
 	struct fido2_message *message)
 {
-	static struct fido2_devices devices;
 	uid_t uid;
 	gid_t gid;
 	int error;
 
-	/* The helper's account, and the keys. */
+	/* The helper's account, and the keys (their names kept after they are closed). */
 	error = main_helper_account(&uid, &gid);
 	if (error != 0)
 		return error;
-	error = fido2_devices_open(&devices);
+	error = fido2_devices_open(&main_devices);
 	if (error != 0)
 		return error;
 
 	/* The helper's answer, the keys given back. */
-	error = fido2_run_helper(&devices, job, uid, gid, message);
-	fido2_devices_close(&devices);
+	error = fido2_run_helper(&main_devices, job, uid, gid, message);
+	fido2_devices_close(&main_devices);
 	if (error != 0)
 		return error;
 
 	/* Succeeded: the answer. */
 	return 0;
+}
+
+/*
+ * Tells what the key there is (Settings' wizards, ws199-p001 section
+ * 4.1): "ok uid=N count=N" and, for one key, "name=HEX pin=0|1
+ * retries=N min=N" (the name hexadecimal, as the device gives it).
+ */
+static int
+main_key_info(
+	uid_t uid)
+{
+	static struct fido2_job job;
+	static struct fido2_message message;
+	char name[2U * PK_OS_NAME_MAX + 1U];
+	char extra[3U * PK_OS_NAME_MAX];
+	const char *device;
+	int error;
+
+	/* The helper's answer. */
+	memset(&job, 0, sizeof(job));
+	job.kind = FIDO2_JOB_INFO;
+	error = main_run(&job, &message);
+	if (error != 0 || message.kind != FIDO2_MESSAGE_INFO)
+		return main_job_failed(error, &message, FIDO2_MESSAGE_INFO);
+
+	/* Not one key: how many. */
+	if (message.info_count != 1U) {
+		(void)snprintf(extra, sizeof(extra), "count=%u", message.info_count);
+		return main_ok(uid, extra);
+	}
+
+	/* The one key's name, from its node (a USB key's or a reader's). */
+	device = "";
+	if (message.info_index < PK_OS_DEVICES_MAX && message.info_card)
+		device = main_devices.card_names[message.info_index];
+	if (message.info_index < PK_OS_DEVICES_MAX && !message.info_card)
+		device = main_devices.names[message.info_index];
+	(void)fido2_hex_encode((const uint8_t *)device, strlen(device), name, sizeof(name));
+
+	/* Told. */
+	(void)snprintf(extra, sizeof(extra), "count=1 name=%s pin=%u retries=%u min=%u", name, message.info_pin, message.info_retries,
+	    message.info_min);
+	return main_ok(uid, extra);
+}
+
+/* Sets the key's first PIN (current NULL) or changes it; the key checks the PINs and counts the wrong ones. */
+static int
+main_key_pin(
+	uid_t uid,
+	int kind,
+	char *current,
+	char *fresh)
+{
+	static struct fido2_job job;
+	static struct fido2_message message;
+	int error;
+
+	/* The job: the PINs (the request's copies wiped). */
+	memset(&job, 0, sizeof(job));
+	job.kind = kind;
+	if (current != NULL) {
+		(void)snprintf(job.pin, sizeof(job.pin), "%s", current);
+		passkey_wipe(current, strlen(current));
+	}
+
+	/* The new PIN. */
+	(void)snprintf(job.new_pin, sizeof(job.new_pin), "%s", fresh);
+	passkey_wipe(fresh, strlen(fresh));
+
+	/* The helper's answer. */
+	error = main_run(&job, &message);
+	passkey_wipe(job.pin, sizeof(job.pin));
+	passkey_wipe(job.new_pin, sizeof(job.new_pin));
+	if (error != 0 || message.kind != FIDO2_MESSAGE_DONE)
+		return main_job_failed(error, &message, FIDO2_MESSAGE_DONE);
+
+	/* Succeeded. */
+	return main_ok(uid, NULL);
+}
+
+/*
+ * Resets the key (ws199-p001 section 4.5): the key is to be plugged in
+ * again (or held to the reader again), then at once the helper looks for
+ * the credentials of every account it holds and resets it with the touch;
+ * the lines of those it held are removed.  "ok uid=N removed=N".
+ */
+static int
+main_key_reset(
+	const char *name,
+	uid_t uid)
+{
+	static struct fido2_job job;
+	static struct fido2_message message;
+	struct main_all_keys *all;
+	char extra[32];
+	unsigned removed;
+	size_t index;
+	int usable;
+	int error;
+
+	/* A usable account. */
+	usable = main_usable(name, uid);
+	if (!usable)
+		return main_fail("locked-account");
+
+	/* Every account's credentials, for the helper to look for. */
+	all = &main_all;
+	error = main_all_keys(all);
+	if (error != 0)
+		return main_fail("internal");
+	memset(&job, 0, sizeof(job));
+	job.kind = FIDO2_JOB_RESET;
+	error = pk_crypto_random(job.client_data_hash, sizeof(job.client_data_hash));
+	if (error != 0)
+		return main_fail("internal");
+	for (index = 0U; index < all->count; index++) {
+		job.ids[index] = all->records[index].id;
+		job.id_sizes[index] = all->records[index].id_size;
+	}
+
+	/* As many as there are. */
+	job.id_count = all->count;
+
+	/* The key plugged in again. */
+	error = main_replug();
+	if (error == ECANCELED)
+		return main_fail("canceled");
+	if (error == EEXIST)
+		return main_fail("many-keys");
+	if (error != 0)
+		return main_fail("timeout");
+
+	/* The helper's answer. */
+	error = main_run(&job, &message);
+	if (error != 0 || message.kind != FIDO2_MESSAGE_RESET)
+		return main_job_failed(error, &message, FIDO2_MESSAGE_RESET);
+
+	/* The lines of the credentials it held go (every account's: the key no longer holds them). */
+	removed = 0U;
+	for (index = 0U; index < all->count && index < 32U; index++) {
+		if ((message.held & (1U << index)) == 0U)
+			continue;
+		error = main_change(all->names[index], all->records[index].id_text, NULL);
+		if (error == 0)
+			removed++;
+	}
+
+	/* Succeeded. */
+	(void)snprintf(extra, sizeof(extra), "removed=%u", removed);
+	return main_ok(uid, extra);
+}
+
+/* Gathers every account's key lines from /etc/passkey (a malformed line is left out).  Returns 0 or an errno value. */
+static int
+main_all_keys(
+	struct main_all_keys *all)
+{
+	char field[64];
+	size_t length;
+	size_t start;
+	size_t end;
+	int same;
+	int error;
+
+	/* The file. */
+	memset(all, 0, sizeof(*all));
+	error = main_file(&length, 1);
+	if (error != 0)
+		return error;
+
+	/* Each line of kind fido2 that reads, while there is room. */
+	start = 0U;
+	while (start < length && all->count < FIDO2_IDS_MAX) {
+		end = start;
+		while (end < length && main_text[end] != '\n')
+			end++;
+		if (end - start < MAIN_LINE_MAX && main_text[start] != '#') {
+			memcpy(all->lines[all->count], main_text + start, end - start);
+			all->lines[all->count][end - start] = '\0';
+			error = passkey_record_field(all->lines[all->count], 2U, field, sizeof(field));
+			same = error == 0 && strcmp(field, "fido2") == 0;
+			if (same)
+				error = passkey_record_field(all->lines[all->count], 0U, all->names[all->count], sizeof(all->names[0]));
+			if (same && error == 0)
+				error = fido2_record_parse(all->lines[all->count], &all->records[all->count]);
+			if (same && error == 0)
+				all->count++;
+		}
+
+		/* The next line. */
+		start = end + 1U;
+	}
+
+	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Waits for the key to be plugged in again: "status replug", then a USB
+ * key that was there must go and one come back, or a card must come to a
+ * reader (one already there taken away and held again).  Returns 0 as soon
+ * as one key is there, EEXIST for two USB keys, ECANCELED when sessiond
+ * ended the work, ETIMEDOUT, or another errno value.
+ */
+static int
+main_replug(void)
+{
+	struct pk_os_device found[PK_OS_DEVICES_MAX];
+	struct pk_os_card cards[PK_OS_DEVICES_MAX];
+	struct timespec step;
+	uint64_t deadline;
+	uint64_t now;
+	size_t card_count;
+	size_t count;
+	size_t index;
+	int inserted;
+	int gone;
+	int came;
+	int error;
+
+	/* The readers' slots, attached to hear their cards. */
+	card_count = 0U;
+	error = pk_os_list_slots(found, PK_OS_DEVICES_MAX, &count);
+	if (error != 0)
+		count = 0U;
+	for (index = 0U; index < count; index++) {
+		error = pk_os_card_attach(&cards[card_count], found[index].path);
+		if (error == 0)
+			card_count++;
+	}
+
+	/* The USB keys now: one there must go first. */
+	error = pk_os_list(found, PK_OS_DEVICES_MAX, &count);
+	gone = error != 0 || count == 0U;
+
+	/* Asked. */
+	printf("status replug\n");
+	(void)fflush(stdout);
+
+	/* Until a key comes back, the work ends, or the time is out. */
+	deadline = main_now_ms() + MAIN_REPLUG_MS;
+	came = 0;
+	error = ETIMEDOUT;
+	for (;;) {
+		/* Ended by sessiond. */
+		now = main_now_ms();
+		if (fido2_ended) {
+			error = ECANCELED;
+			break;
+		}
+
+		/* Out of time. */
+		if (now >= deadline)
+			break;
+
+		/* A card that came to a reader. */
+		for (index = 0U; index < card_count && !came; index++) {
+			for (;;) {
+				error = pk_os_card_event(&cards[index], &inserted);
+				if (error != 0)
+					break;
+				if (inserted)
+					came = 1;
+			}
+		}
+
+		/* One came. */
+		if (came) {
+			error = 0;
+			break;
+		}
+
+		/* The USB keys: none (it went), then one or more. */
+		error = pk_os_list(found, PK_OS_DEVICES_MAX, &count);
+		if (error != 0)
+			count = 0U;
+		if (count == 0U)
+			gone = 1;
+		if (gone && count == 1U) {
+			error = 0;
+			break;
+		}
+
+		/* Two or more. */
+		if (gone && count > 1U) {
+			error = EEXIST;
+			break;
+		}
+
+		/* A moment. */
+		step.tv_sec = 0;
+		step.tv_nsec = (long)MAIN_REPLUG_STEP_MS * 1000000L;
+		(void)nanosleep(&step, NULL);
+		error = ETIMEDOUT;
+	}
+
+	/* The slots let go. */
+	for (index = 0U; index < card_count; index++)
+		pk_os_card_close(&cards[index]);
+	return error;
+}
+
+/* Answers a job that did not give the message expected: the helper's own failure, a timeout, or the device. */
+static int
+main_job_failed(
+	int error,
+	const struct fido2_message *message,
+	int kind)
+{
+	/* The run itself failed. */
+	if (error == ETIMEDOUT)
+		return main_fail("timeout");
+	if (error != 0)
+		return main_fail("device");
+
+	/* The helper's own failure is the answer; any other message is the device's fault. */
+	(void)kind;
+	if (message->kind == FIDO2_MESSAGE_FAIL)
+		return main_fail(message->reason);
+	return main_fail("device");
+}
+
+/* Gives the monotonic time in milliseconds. */
+static uint64_t
+main_now_ms(void)
+{
+	struct timespec now;
+
+	/* The clock that does not go back. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+	return (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U;
 }
 
 /* Gives passkey's reason for an answer that did not verify. */

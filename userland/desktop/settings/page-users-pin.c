@@ -278,6 +278,7 @@ se_keys_soft_result(
 			done = "The PIN is removed. The login and locked screens take your password.";
 		keys->step = 0U;
 		se_dialog_step(app, "Software Security Key", 0U, 0U, done, "Done", 0);
+		se_dialog_final(app);
 		return;
 	}
 
@@ -288,10 +289,10 @@ se_keys_soft_result(
 		refused = kl_system_account_refusal(app->system, keys->request, reason, sizeof(reason));
 		locked = 1;
 		if (refused)
-			locked = strcmp(reason, "locked");
+			locked = strcmp(reason, "locked-account");
 		message = "The password is wrong.";
 		if (locked == 0)
-			message = "Too many wrong attempts, or your account is locked. Wait, then try again.";
+			message = "Your account is locked: it cannot have a PIN.";
 		break;
 	case EINVAL:
 		message = "The PIN is not accepted: use six digits.";

@@ -423,8 +423,9 @@ kwl_lock(
 	greeter_lock_card = 0U;
 	kwl_lock_swipe_reset(&greeter_swipe);
 
-	/* The clipboard's history goes (clipboard.c). */
+	/* The clipboard's history goes (clipboard.c), and a security key's change of Settings is stopped (ws199-p001). */
 	kwl_clipboard_history_clear(server, "lock");
+	kwl_system_keys_cancel(server, "lock");
 
 	/* A swap of arranged windows being dragged is given up (arrange-shell.c, ws177-p036). */
 	kwl_arrange_swap_cancel(server, "lock");
@@ -464,6 +465,9 @@ kwl_lock_release(
 	server->lock_input_ms = kwl_milliseconds();
 	server->dirty = 1;
 	printf("KWL LOCK unlocked reason=%s\n", reason);
+
+	/* The keys there may have changed while it was locked (ws199-p001). */
+	kwl_system_keys_changed(server);
 }
 
 /*
@@ -1954,6 +1958,7 @@ greeter_unlock(
 	server->locked = 0U;
 	server->lock_input_ms = kwl_milliseconds();
 	kwl_lid_unlocked(&server->lid);
+	kwl_system_keys_changed(server);
 }
 
 /* Starts the styles again for a new user or screen: the password until sessiond says more. */

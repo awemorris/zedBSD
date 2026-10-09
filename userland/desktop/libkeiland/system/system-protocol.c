@@ -114,7 +114,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
@@ -264,6 +264,10 @@ static const struct wl_message system_account_requests[] = {
 	{ "set_pin", "10uss", system_plain_types },
 	{ "add_key", "14usss", system_plain_types },
 	{ "remove_key", "14uss", system_plain_types },
+	{ "key_info", "25u", system_plain_types },
+	{ "key_pin", "25uss", system_plain_types },
+	{ "key_reset", "25us", system_plain_types },
+	{ "key_cancel", "25", system_plain_types },
 };
 
 /* The events of kl_system_account_v1 (refused since version 8, ws089-p026; enrolled since 11, ws172-p002). */
@@ -273,15 +277,19 @@ static const struct wl_message system_account_events[] = {
 	{ "enrolled", "11uu", system_plain_types },
 	{ "key", "14ss", system_plain_types },
 	{ "touch", "14u", system_plain_types },
+	{ "key_info", "25uusuuu", system_plain_types },
+	{ "replug", "25u", system_plain_types },
+	{ "removed", "25uu", system_plain_types },
+	{ "keys_changed", "25", system_plain_types },
 };
 
-/* kl_system_account_v1, made at the manager's version (14, ws172-p003): six requests and five events.  It lives for the program. */
+/* kl_system_account_v1, made at the manager's version (25, ws199-p001): ten requests and nine events.  It lives for the program. */
 const struct wl_interface kl_system_account_v1_interface = {
 	KL_SYSTEM_ACCOUNT_NAME,
-	KL_SYSTEM_SINCE_KEYS,
-	6,
+	KL_SYSTEM_SINCE_KEY_OPS,
+	10,
 	system_account_requests,
-	5,
+	9,
 	system_account_events
 };
 

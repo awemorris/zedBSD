@@ -486,7 +486,8 @@ sleep_begin(
 	enum kwl_sleep_via via,
 	uint64_t now_ms)
 {
-	/* Pending from now. */
+	/* Pending from now; a security key's change of Settings is stopped first (ws199-p001). */
+	kwl_system_keys_cancel(server, "sleep");
 	kwl_sleep_begin(&server->sleep, via, now_ms);
 	printf("KWL SLEEP begin via=%s\n", kwl_sleep_via_name(via));
 

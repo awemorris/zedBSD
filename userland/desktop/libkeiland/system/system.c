@@ -115,6 +115,11 @@ struct system_account_listener {
 	void (*enrolled)(void *data, struct wl_proxy *proxy, uint32_t pin, uint32_t keys);
 	void (*key)(void *data, struct wl_proxy *proxy, const char *ref, const char *label);
 	void (*touch)(void *data, struct wl_proxy *proxy, uint32_t request);
+	void (*key_info)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count, const char *name, uint32_t pin, uint32_t retries,
+	    uint32_t min);
+	void (*replug)(void *data, struct wl_proxy *proxy, uint32_t request);
+	void (*removed)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
+	void (*keys_changed)(void *data, struct wl_proxy *proxy);
 };
 
 /* The listener of kl_system_sharing_v1's events (ws089-p025), in their order. */
@@ -240,6 +245,11 @@ static void system_account_refused(void *data, struct wl_proxy *proxy, uint32_t 
 static void system_account_enrolled(void *data, struct wl_proxy *proxy, uint32_t pin, uint32_t keys);
 static void system_account_key(void *data, struct wl_proxy *proxy, const char *ref, const char *label);
 static void system_account_touch(void *data, struct wl_proxy *proxy, uint32_t request);
+static void system_account_key_info(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count, const char *name, uint32_t pin, uint32_t retries, uint32_t min);
+static void system_account_replug(void *data, struct wl_proxy *proxy, uint32_t request);
+static void system_account_removed(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t count);
+static void system_account_keys_changed(void *data, struct wl_proxy *proxy);
+static int system_key_ops(struct kl_system *system);
 static int system_key_secret_valid(const char *secret);
 static void system_result(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t applied, uint32_t saved);
 static void system_sharing_state(void *data, struct wl_proxy *proxy, uint32_t available, uint32_t enabled, uint32_t running, uint32_t port, uint32_t allowed, const char *fingerprint);
@@ -295,7 +305,11 @@ static const struct system_account_listener system_account_listener = {
 	system_account_refused,
 	system_account_enrolled,
 	system_account_key,
-	system_account_touch
+	system_account_touch,
+	system_account_key_info,
+	system_account_replug,
+	system_account_removed,
+	system_account_keys_changed
 };
 
 /* The sharing object's callbacks (ws089-p025). */
@@ -530,9 +544,11 @@ kl_system_capabilities(
 	if (system->account != NULL && (system->view.capabilities & KL_SYSTEM_CAPABILITY_PIN) != 0U && system->manager_version >= KL_SYSTEM_SINCE_PIN)
 		bits |= KL_SYSTEM_HAS_PIN;
 
-	/* The security keys, offered with the PIN to a manager bound at version 14 (ws172-p003). */
+	/* The security keys, offered with the PIN to a manager bound at version 14 (ws172-p003), and their own operations at 25 (ws199-p001). */
 	if ((bits & KL_SYSTEM_HAS_PIN) != 0U && system->manager_version >= KL_SYSTEM_SINCE_KEYS)
 		bits |= KL_SYSTEM_HAS_KEYS;
+	if ((bits & KL_SYSTEM_HAS_KEYS) != 0U && system->manager_version >= KL_SYSTEM_SINCE_KEY_OPS)
+		bits |= KL_SYSTEM_HAS_KEY_OPS;
 
 	/* The monitor, offered to a manager bound at version 2 (WS134 p012). */
 	if ((system->view.capabilities & KL_SYSTEM_CAPABILITY_MONITOR) != 0U && system->manager_version >= 2U)
@@ -2456,6 +2472,196 @@ kl_system_account_touched(
 	return 1;
 }
 
+/* Tells whether the keys' own operations are offered (ws199-p001). */
+static int
+system_key_ops(
+	struct kl_system *system)
+{
+	unsigned offered;
+
+	/* No account, or a lost compositor. */
+	if (system == NULL || system->account == NULL || system->lost)
+		return 0;
+
+	/* Offered. */
+	offered = kl_system_capabilities(system);
+	return (offered & KL_SYSTEM_HAS_KEY_OPS) != 0U;
+}
+
+/*
+ * Asks what the security keys there are (ws199-p001).
+ */
+int
+kl_system_account_key_info(
+	struct kl_system *system,
+	uint32_t *request)
+{
+	uint32_t number;
+	int offered;
+
+	/* The keys' own operations offered. */
+	offered = system_key_ops(system);
+	if (!offered)
+		return ENOTSUP;
+
+	/* Not known until its answer. */
+	system->view.key_info_known = 0U;
+	system->view.refused_request = 0U;
+	system->view.refused_reason[0] = '\0';
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_KEY_INFO, number);
+	return 0;
+}
+
+/*
+ * Gives what the compositor last told of the keys there.  Returns 1 when
+ * known, 0 before a key_info's answer.
+ */
+int
+kl_system_account_key_info_get(
+	const struct kl_system *system,
+	struct kl_system_key_info *info)
+{
+	/* Nothing known. */
+	memset(info, 0, sizeof(*info));
+	if (system == NULL || !system->view.key_info_known)
+		return 0;
+
+	/* Known. */
+	*info = system->view.key_info;
+	return 1;
+}
+
+/*
+ * Asks for the one key's first PIN to be set (current NULL) or for its PIN
+ * to be changed (ws199-p001).  Nothing secret is kept here.
+ */
+int
+kl_system_account_key_pin(
+	struct kl_system *system,
+	const char *current,
+	const char *pin,
+	uint32_t *request)
+{
+	uint32_t number;
+	int offered;
+	int valid;
+
+	/* The keys' own operations offered, and one line each. */
+	offered = system_key_ops(system);
+	if (!offered)
+		return ENOTSUP;
+	if (pin == NULL || pin[0] == '\0')
+		return EINVAL;
+	valid = system_key_secret_valid(pin);
+	if (current != NULL)
+		valid = valid && current[0] != '\0' && system_key_secret_valid(current);
+	if (!valid)
+		return EINVAL;
+
+	/* A refusal or a touch of an earlier request is not this one's. */
+	system->view.refused_request = 0U;
+	system->view.refused_reason[0] = '\0';
+	system->view.touched = 0U;
+
+	/* Sent with the application's next flush (an empty current sets the first PIN). */
+	number = system_number(system, request);
+	if (current == NULL)
+		current = "";
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_KEY_PIN, number, current, pin);
+	return 0;
+}
+
+/*
+ * Asks for the key the user plugs in again to be reset, checked by the
+ * user's password (ws199-p001).  Nothing secret is kept here.
+ */
+int
+kl_system_account_key_reset(
+	struct kl_system *system,
+	const char *password,
+	uint32_t *request)
+{
+	uint32_t number;
+	int offered;
+	int valid;
+
+	/* The keys' own operations offered, and one line. */
+	offered = system_key_ops(system);
+	if (!offered)
+		return ENOTSUP;
+	if (password == NULL || password[0] == '\0')
+		return EINVAL;
+	valid = system_key_secret_valid(password);
+	if (!valid)
+		return EINVAL;
+
+	/* Nothing of an earlier request. */
+	system->view.refused_request = 0U;
+	system->view.refused_reason[0] = '\0';
+	system->view.touched = 0U;
+	system->view.replugged = 0U;
+	system->view.key_removed = 0U;
+
+	/* Sent with the application's next flush. */
+	number = system_number(system, request);
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_KEY_RESET, number, password);
+	return 0;
+}
+
+/*
+ * Stops the key's operation under way (ws199-p001): its result comes as a refusal.
+ */
+int
+kl_system_account_key_cancel(
+	struct kl_system *system)
+{
+	int offered;
+
+	/* The keys' own operations offered. */
+	offered = system_key_ops(system);
+	if (!offered)
+		return ENOTSUP;
+
+	/* Sent with the application's next flush. */
+	wl_proxy_marshal(system->account, KL_SYSTEM_ACCOUNT_KEY_CANCEL);
+	return 0;
+}
+
+/*
+ * Gives, once, the request whose key is to be plugged in again
+ * (ws199-p001): 1 with it, 0 when none came since.
+ */
+int
+kl_system_account_replugged(
+	struct kl_system *system,
+	uint32_t *request)
+{
+	/* None. */
+	if (system == NULL || !system->view.replugged)
+		return 0;
+
+	/* Taken. */
+	system->view.replugged = 0U;
+	*request = system->view.replugged_request;
+	return 1;
+}
+
+/* Gives how many of this machine's registrations the last reset removed (ws199-p001). */
+unsigned
+kl_system_account_key_removed(
+	const struct kl_system *system)
+{
+	/* None without a system. */
+	if (system == NULL)
+		return 0U;
+
+	/* The count. */
+	return system->view.key_removed;
+}
+
 /*
  * Asks for an administrator's change of the people's accounts (ws089-p026):
  * the caller's password and the operation's lines.  Neither is kept here:
@@ -3102,6 +3308,85 @@ system_account_touch(
 	system->view.touched = 1U;
 	system->view.touched_request = request;
 	system->view.changed |= KL_SYSTEM_CHANGED_TOUCH;
+}
+
+/* Keeps what the keys there are (ws199-p001), before the key_info's result. */
+static void
+system_account_key_info(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t count,
+	const char *name,
+	uint32_t pin,
+	uint32_t retries,
+	uint32_t min)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(request);
+
+	/* Known now. */
+	system = data;
+	memset(&system->view.key_info, 0, sizeof(system->view.key_info));
+	system->view.key_info.count = count;
+	system_view_copy(system->view.key_info.name, sizeof(system->view.key_info.name), name);
+	system->view.key_info.pin = pin != 0U;
+	system->view.key_info.retries = retries;
+	system->view.key_info.min = min;
+	system->view.key_info_known = 1U;
+}
+
+/* Keeps that a key's reset waits for the key to be plugged in again (ws199-p001). */
+static void
+system_account_replug(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* The request, told once. */
+	system = data;
+	system->view.replugged = 1U;
+	system->view.replugged_request = request;
+	system->view.changed |= KL_SYSTEM_CHANGED_REPLUG;
+}
+
+/* Keeps how many registrations a reset removed (ws199-p001), before its result. */
+static void
+system_account_removed(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t count)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+	UNUSED_PARAMETER(request);
+
+	/* The count. */
+	system = data;
+	system->view.key_removed = count;
+}
+
+/* Notes that a security key came or went, or the screen was unlocked (ws199-p001). */
+static void
+system_account_keys_changed(
+	void *data,
+	struct wl_proxy *proxy)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Changed. */
+	system = data;
+	system->view.changed |= KL_SYSTEM_CHANGED_KEYS;
 }
 
 /* Keeps an answered request of any object. */

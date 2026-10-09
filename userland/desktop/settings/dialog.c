@@ -160,6 +160,7 @@ se_dialog_step(
 	dialog->link[0] = '\0';
 	dialog->busy = 0;
 	dialog->cancellable = 0;
+	dialog->final = 0;
 
 	/* The step. */
 	(void)snprintf(dialog->title, sizeof(dialog->title), "%s", title);
@@ -335,6 +336,16 @@ se_dialog_busy(
 	app->dirty = 1;
 }
 
+/* Makes the step shown the wizard's end: its button alone closes it (no Cancel). */
+void
+se_dialog_final(
+	struct se_app *app)
+{
+	/* The end. */
+	app->dialog.final = 1;
+	app->dirty = 1;
+}
+
 /*
  * Draws the popup over the window when it is open: the veil over
  * everything (which takes the clicks), then the card and its controls.
@@ -451,10 +462,12 @@ se_dialog_draw(
 	cancel = "Cancel";
 	if (dialog->primary[0] == '\0')
 		cancel = "Close";
-	button = se_button_width(app, cancel);
-	right -= button;
-	enabled = !dialog->busy || dialog->cancellable;
-	(void)se_button_draw(app, canvas, right, y, cancel, 0, enabled, DIALOG_CANCEL);
+	if (!dialog->final) {
+		button = se_button_width(app, cancel);
+		right -= button;
+		enabled = !dialog->busy || dialog->cancellable;
+		(void)se_button_draw(app, canvas, right, y, cancel, 0, enabled, DIALOG_CANCEL);
+	}
 	if (dialog->can_back) {
 		button = se_button_width(app, "Back");
 		(void)se_button_draw(app, canvas, card.x + DIALOG_PAD, y, "Back", 0, !dialog->busy, DIALOG_BACK);

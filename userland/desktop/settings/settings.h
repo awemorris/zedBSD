@@ -774,7 +774,7 @@ struct se_users {
  * busy (and with what, and whether Cancel works then), when it last had
  * input, and its owner's two functions.
  */
-#define SE_DIALOG_FIELDS	2
+#define SE_DIALOG_FIELDS	3
 enum se_dialog_action {
 	SE_DIALOG_PRIMARY,
 	SE_DIALOG_BACK,
@@ -801,6 +801,7 @@ struct se_dialog {
 	char error[SE_MESSAGE];
 	int busy;
 	int cancellable;
+	int final;
 	char busy_text[SE_MESSAGE];
 	uint64_t input_ms;
 	void (*act)(struct se_app *app, unsigned action);
@@ -813,14 +814,20 @@ struct se_dialog {
  * password kept between the steps that ask it and the one that sends it
  * (wiped then, when the popup closes, and when it is left alone), the new
  * key's name and the key a removal names, the change asked and its
- * request's number, and whether the key waits to be touched.
+ * request's number, and whether the key waits to be touched; with the
+ * keys' own operations (i03): a new PIN kept from its step to the
+ * registration that uses it, what the keys there are (asked, its request,
+ * known), the part of an addition under way (its first PIN, or the
+ * registration), and how many registrations a reset removed.
  */
 enum se_keys_flow {
 	SE_KEYS_FLOW_NONE,
 	SE_KEYS_FLOW_ADD,
 	SE_KEYS_FLOW_REMOVE,
 	SE_KEYS_FLOW_PIN_SET,
-	SE_KEYS_FLOW_PIN_REMOVE
+	SE_KEYS_FLOW_PIN_REMOVE,
+	SE_KEYS_FLOW_KEY_PIN,
+	SE_KEYS_FLOW_RESET
 };
 struct se_keys {
 	unsigned flow;
@@ -832,6 +839,13 @@ struct se_keys {
 	int asked;
 	uint32_t request;
 	int touch;
+	struct kl_field pin;
+	int info_asked;
+	uint32_t info_request;
+	int info_known;
+	struct kl_system_key_info info;
+	int setting_pin;
+	unsigned removed;
 };
 
 /*
@@ -1575,6 +1589,8 @@ int se_keys_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, i
 void se_keys_press(struct se_app *app, int index);
 int se_keys_result(struct se_app *app, uint32_t request, int error);
 void se_keys_touched(struct se_app *app);
+void se_keys_replugged(struct se_app *app);
+void se_keys_changed(struct se_app *app);
 void se_keys_close(struct se_app *app);
 void se_keys_end(struct se_app *app);
 int se_keys_soft_draw(struct se_app *app, struct kl_canvas *canvas, int x, int top, int width);
@@ -1599,6 +1615,7 @@ void se_dialog_focus(struct se_app *app, unsigned index);
 void se_dialog_link(struct se_app *app, const char *text);
 void se_dialog_error(struct se_app *app, const char *text);
 void se_dialog_busy(struct se_app *app, const char *text, int cancellable);
+void se_dialog_final(struct se_app *app);
 void se_dialog_draw(struct se_app *app, struct kl_canvas *canvas);
 int se_dialog_press(struct se_app *app, int index);
 int se_dialog_key(struct se_app *app, const struct se_event *event);
