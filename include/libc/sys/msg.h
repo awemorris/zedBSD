@@ -22,9 +22,14 @@ extern "C" {
 #define MSG_NOERROR 010000
 #define MSG_EXCEPT  020000
 
+/* The count of messages on a queue, and the bytes a queue may hold. */
+typedef size_t msgqnum_t;
+typedef size_t msglen_t;
+
 struct msqid_ds {
 	struct ipc_perm msg_perm;
-	size_t msg_qnum, msg_qbytes;
+	msgqnum_t msg_qnum;
+	msglen_t msg_qbytes;
 	pid_t msg_lspid, msg_lrpid;
 	time_t msg_stime, msg_rtime, msg_ctime;
 };

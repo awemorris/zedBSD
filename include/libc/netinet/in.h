@@ -11,6 +11,18 @@
 #include <uapi/netinet.h>
 
 /*
+ * Room for the longest written form of an IPv4 address with its null, which
+ * POSIX puts here as well as in <arpa/inet.h> (that header includes this).
+ */
+#define INET_ADDRSTRLEN 16
+
+/*
+ * The protocol number of raw IP packets.  zedBSD has no raw sockets
+ * (_POSIX_RAW_SOCKETS is -1); the number is the one the standard names.
+ */
+#define IPPROTO_RAW 255
+
+/*
  * The IPv6 address tests POSIX puts in this header.  Each takes a pointer to
  * a struct in6_addr and looks only at its bytes, so it holds in any byte
  * order.

@@ -15,8 +15,7 @@ extern "C" {
 #endif
 
 #include <locale-format.h>
-
-typedef int nl_item;
+#include <nl_types.h>
 
 #define CODESET KERN_LOCALE_KEY_CODESET
 #define RADIXCHAR KERN_LOCALE_KEY_DECIMAL_POINT
@@ -66,6 +65,36 @@ typedef int nl_item;
 #define MON_10 KERN_LOCALE_KEY_MON_10
 #define MON_11 KERN_LOCALE_KEY_MON_11
 #define MON_12 KERN_LOCALE_KEY_MON_12
+
+/*
+ * The month names as they stand alone (POSIX.1-2024), for a language that
+ * declines them inside a date.  zedBSD's locales keep one form of each
+ * name, so these give the same names as MON_n and ABMON_n.
+ */
+#define ALTMON_1 MON_1
+#define ALTMON_2 MON_2
+#define ALTMON_3 MON_3
+#define ALTMON_4 MON_4
+#define ALTMON_5 MON_5
+#define ALTMON_6 MON_6
+#define ALTMON_7 MON_7
+#define ALTMON_8 MON_8
+#define ALTMON_9 MON_9
+#define ALTMON_10 MON_10
+#define ALTMON_11 MON_11
+#define ALTMON_12 MON_12
+#define ABALTMON_1 ABMON_1
+#define ABALTMON_2 ABMON_2
+#define ABALTMON_3 ABMON_3
+#define ABALTMON_4 ABMON_4
+#define ABALTMON_5 ABMON_5
+#define ABALTMON_6 ABMON_6
+#define ABALTMON_7 ABMON_7
+#define ABALTMON_8 ABMON_8
+#define ABALTMON_9 ABMON_9
+#define ABALTMON_10 ABMON_10
+#define ABALTMON_11 ABMON_11
+#define ABALTMON_12 ABMON_12
 #define ERA KERN_LOCALE_KEY_ERA
 #define ERA_D_FMT KERN_LOCALE_KEY_ERA_D_FMT
 #define ERA_D_T_FMT KERN_LOCALE_KEY_ERA_D_T_FMT

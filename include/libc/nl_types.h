@@ -17,6 +17,9 @@ extern "C" {
 struct __nl_catalog;
 typedef struct __nl_catalog *nl_catd;
 
+/* An item nl_langinfo() is asked for (<langinfo.h> takes it from here). */
+typedef int nl_item;
+
 #define NL_SETD 1
 #define NL_CAT_LOCALE 1
 

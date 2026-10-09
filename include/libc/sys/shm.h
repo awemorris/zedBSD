@@ -23,11 +23,14 @@ extern "C" {
 #define SHM_RND    020000
 #define SHMLBA 4096
 
+/* The count of attachments of a shared memory segment. */
+typedef unsigned long shmatt_t;
+
 struct shmid_ds {
 	struct ipc_perm shm_perm;
 	size_t shm_segsz;
 	pid_t shm_lpid, shm_cpid;
-	unsigned long shm_nattch;
+	shmatt_t shm_nattch;
 	time_t shm_atime, shm_dtime, shm_ctime;
 };
 

@@ -15,6 +15,14 @@ extern "C" {
 #include <pthread.h>
 #include <time.h>
 
+/*
+ * The storage class of an object each thread has its own of.  C23 and C++
+ * spell it as a keyword; before them it is this header's macro.
+ */
+#if !defined(__cplusplus) && (!defined(__STDC_VERSION__) || __STDC_VERSION__ < 202311L)
+#define thread_local _Thread_local
+#endif
+
 #define ONCE_FLAG_INIT	PTHREAD_ONCE_INIT
 #define TSS_DTOR_ITERATIONS	4
 

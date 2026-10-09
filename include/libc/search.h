@@ -22,6 +22,9 @@ typedef struct entry {
 typedef enum { FIND, ENTER } ACTION;
 typedef enum { preorder, postorder, endorder, leaf } VISIT;
 
+/* A node of the trees tsearch() keeps; the caller sees only a pointer to its key's pointer first. */
+typedef void posix_tnode;
+
 int hcreate(size_t);
 void hdestroy(void);
 ENTRY *hsearch(ENTRY, ACTION);
