@@ -1,6 +1,6 @@
 # WS141 shader共通化 / 2026-10-10
 
-Status: active
+Status: finished
 Owner: WS141独立session、専用worktree `ws141-codex`
 Parent: [WS141](ws.md)
 
@@ -14,7 +14,7 @@ Parent: [WS141](ws.md)
 | --- | --- | --- | --- |
 | ws141-codex-20261010-i16 | p006 software静的レビュー・具体的欠陥の改善 | cleared（software静的レビュー部分） | 統合済みsource e100aa1ce。compiler/ownership/初期化/scanoutのsoftware契約を照合、見つけた機能欠陥を修正し短い対象確認を行う |
 | ws141-codex-20261010-i17 | p008共通compiler抽出・i915/VC4参照の移行 | cleared | i16出力。SPIR-V parser/IRをGPU共通へ移しdrv_gpu_型/関数・DRV_GPU_定数に改名。Gen12 EU/V3D QPU backendは各driver。IR数値/配置/compile動作とdiagnostic/ownershipを保持 |
-| ws141-codex-20261010-i18 | p007再監査・target build/host・main統合 | in-progress | i16/i17最終source。全文C/境界/licenseレビュー、RPi4 y/n・amd64 i915有効build warning0、parser/EU/QPUの短いhost確認、final ARM64 stack再評価、最新main統合/readback |
+| ws141-codex-20261010-i18 | p007再監査・target build/host・main統合 | cleared | i16/i17最終source。全文C/境界/licenseレビュー、RPi4 y/n・amd64 i915有効build warning0、parser/EU/QPUの短いhost確認、final ARM64 stack再評価、最新main統合/readback |
 
 依存: i16 → i17 → i18。実機は外部contextでユーザー担当、whole WSのcleared/completed条件を満たす証拠ではない。今回source変更で旧p007 final検証の適用は失効し、p007をunclearedから今回attemptへ再開する。終了時は実機用image/source/hashと未確認項目を記録し、WS incompleteを保持する。
 
@@ -28,7 +28,7 @@ Parent: [WS141](ws.md)
 
 ## 結果・handoff
 
-進行中。
+i16〜i18の今回承認されたsoftware実行は終了。静的改善・共通compiler・両driver移行・最終規約/対象検証を完了しmainへ統合済み。実機条件は未達としてWS incompleteを保持する。
 
 ## i16静的レビューと改善
 
@@ -65,4 +65,11 @@ Artifact SHA-256:
 | RPi4 n vmunix | d20ca5d4b340b2e37ee7c4353df0a5c8f1ce054c8567761dbe8a51461595ab10 |
 | amd64 i915 y vmunix | a0da49693a08a690fbb8279e3623a746cb75df052cb5f56aa8e668ae01132c4e |
 
-i18はmain統合待ち。今回hostのMMIO/scheduler/native-runner fixture境界は既存どおり、actual ioctl/実GPU/Keiland画面のPASSを主張しない。ユーザー担当のRPi4 P0/N0/R0/P1/P2/P3/P5/V1〜V10・console RAM寿命・Keiland画面/操作、およびQ1/T1のkernel/desktop回帰は未実施。WS incompleteを維持。共有Master/Queue/Guardrail/GitHub投影はQ1へpending、外部公開/pushなし。
+i18はmain統合/readbackを完了しcleared。今回hostのMMIO/scheduler/native-runner fixture境界は既存どおり、actual ioctl/実GPU/Keiland画面のPASSを主張しない。ユーザー担当のRPi4 P0/N0/R0/P1/P2/P3/P5/V1〜V10・console RAM寿命・Keiland画面/操作、およびQ1/T1のkernel/desktop回帰は未実施。WS incompleteを維持。共有Master/Queue/Guardrail/GitHub投影はQ1へpending、外部公開/pushなし。
+
+
+## i18 main統合・今回software実行の終了（2026-10-10）
+
+source commit `fca9cd37f0ef06a5c7c44278962c2ca2e92e1966` を最新main `0206f4f8881a6fa64fbdd45578b395f72e0ab5b8` へmerge `ab268b8578a78eb50221e2ac086a2bd8d99d4e9b` として統合した。main親からの差分は今回承認の48 pathのみ、Master/共有Queue/Guardrail/AGENTS/HAL/toolchainの差分は0。Q1のphone/desktop/WS197等の並行変更を保持した。source commitからmergeへの対象kernel/build/host入力は差分0、最終source台帳212/212 hash一致PASS。main・own・integrationのHEAD一致とcleanをread-backし、i18/p007をclearedと判定する。記録の終了更新だけを後続commitとして統合する。
+
+今回scopeは終了し次Queueは開始しない。RPi4実機の初期化/出力先/scanout/job/reset/cache/console RAM寿命とKeiland表示・操作は未実施で、p002〜p006の実機条件/WS incompleteを保持する。Q1/T1回帰、共有Master/Queue/Guardrail/GitHub投影はQ1担当へ残す。現役WS031/068/075/101試験の共通frontend参照変更に伴う担当記録の投影もQ1へ保留（各WSのfeature/acceptanceを変更していない）。外部公開/push無し。

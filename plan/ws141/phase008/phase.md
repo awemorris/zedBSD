@@ -22,3 +22,8 @@ Queue: [2026-10-10承認済みi17](../compiler-refactor-20261010.md)
 ## software clearance（2026-10-10）
 
 共通parser/IR/APIと両backend参照を移行し、IR token/layout互換、対象RPi4/amd64 build、parser/EU/QPU/actual client hostを確認してi17/software criteriaを満たした。heap stateの全拒否時cleanupを確認、実機未実施は他Phase/WSに保持。[最終source/commands/results](../compiler-refactor-20261010.md#i17-software-clearancei18最終検証)。main統合はi18で実施、remote closure/projectionはQ1。
+
+
+## main統合（2026-10-10）
+
+i18により共通compiler source `fca9cd37f` をmerge `ab268b857` でmainへ統合し、212path hash/対象入力一致を確認。p008のsoftware clearanceを保持する。[統合/終了](../compiler-refactor-20261010.md#i18-main統合今回software実行の終了2026-10-10)。WSの実機acceptanceは未確認。
