@@ -31,6 +31,9 @@
 #define EC_STATUS_IBF		0x02U
 #define EC_STATUS_SCI_EVT	0x20U
 
+/* How many times each query's run is logged (BUG-255). */
+#define EC_QUERY_LOGGED		8U
+
 /*
  * The EC commands.
  */
@@ -99,6 +102,13 @@ static struct {
 	uint8_t has_gpe;
 	uint8_t from_ecdt;
 } ec;
+
+/*
+ * How many times each query (_Q00 to _QFF) has run, up to EC_QUERY_LOGGED:
+ * only the query handler, which runs one query at a time, counts them, and
+ * they live as long as the kernel (BUG-255).
+ */
+static uint8_t ec_queries_logged[256];
 
 static int attach_device(void);
 static uint64_t load_u64(const uint8_t *bytes);
@@ -757,6 +767,12 @@ run_query(
 	name[2] = digits[query >> 4];
 	name[3] = digits[query & 0x0fU];
 	name[4] = '\0';
+
+	/* Logs the query's first few runs (BUG-255: which queries a lid or a button raises). */
+	if (ec_queries_logged[query] < EC_QUERY_LOGGED) {
+		ec_queries_logged[query]++;
+		drv_acpi_os_log("ACPI: EC query %s #%u\n", name, (unsigned)ec_queries_logged[query]);
+	}
 
 	/* Runs it; a query without a method is logged. */
 	result = NULL;

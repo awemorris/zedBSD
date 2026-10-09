@@ -8,7 +8,7 @@ Primary Milestone: MG001
 Related Milestones: MG006
 Parent: [Master](../master.md)
 Queue: なし（q540 finished、partial scope cleared）
-Resume point: ime-probe の非競合回答後、p002残り2filesを選定。p003は全移動後。
+Resume point: 2026-10-09 P1: p002 は cleared 候補（ime-probe は 2026-10-07 に別の作業で userland/tests へ移っていた、照合と build を記録）。次は p003（全文規約・build/install・最終 boot）。旧: ime-probe の非競合回答後、p002残り2filesを選定。p003は全移動後。
 2026-10-02 user:「IME の人間の作業が終わったので、ime-probe を試験の場所へ移す作業を再開してよいです。」→ p002 の ime-probe の移動の判断待ちは解消。p002 を再開候補にする。
 Target: **ベータ3**（2026-10-08 ユーザー「ベータ3にします：WS009・026・106 文書・試験の整理・試験アプリの集約、WS139 デスクトップの速さ」）
 <!-- awesome-plan-current:end -->
@@ -47,7 +47,7 @@ WS105 の既存 Linux 出力を利用。WS095 の ime-probe は人間の作業�
 | ID / Phase | 目的 | Goal | Status | 依存 |
 | --- | --- | --- | --- | --- |
 | [ws106p001](phase001/phase.md) | 対象・参照・build 契約を確定 | 台帳と移動手順、実際の build/config/check command を固定。所有が未調整なら ime-probe の実行を選定しない。 | cleared | なし |
-| [ws106p002](phase002/phase.md) | source・データと参照を移動 | T1/T2 を満たす。source とデータの move 前後の hash と差分を記録する。 | uncleared | p001 |
+| [ws106p002](phase002/phase.md) | source・データと参照を移動 | T1/T2 を満たす。source とデータの move 前後の hash と差分を記録する。 | cleared 候補（2026-10-09 P1） | p001 |
 | [ws106p003](phase003/phase.md) | 全文規約・build/install・最終 boot | T1〜T4 と全 Phase の成果を照合。未実施の機種・アプリ実行は区別して記録する。 | planning | p002 |
 
 

@@ -2,7 +2,7 @@
 
 # ws106p002: source・データと参照を移動
 
-Status: uncleared
+Status: cleared 候補（2026-10-09 P1: 残りの ime-probe は 2026-10-07 に userland/tests/ime-probe へ移っていた（71c8a1487、ユーザーの make menuconfig の指示による）。全 30 件の照合と build。Q1 の判定待ち）（旧: uncleared）
 Disposition: normal
 Parent: [WS106](../ws.md)
 Queue / Attempt: q540 / q540-i01
@@ -71,3 +71,13 @@ ime-probeは未変更で人間作業の非競合回答待ち、whole Phaseはま
 限定されたQueue itemのclearanceとwhole Phaseの未達を分ける。T1/T2全30件は未達（ime-probe1件のみ）。所有確認後に同じPhaseの残り2filesを新attemptで選定し、全30件のregistry/style/hashを再照合する。
 [検証checkpoint](../verification-checkpoint.md)、[BUG-129](../../bugs/BUG-129.md)、[boot PNG](../../history/ws106/q540/evidence/login.png)。
 Phaseはremote closeしない。Event: ws106-q540-partial-cleared、Phase/WS/Queue/Board delivery outbox pending。
+
+## 2026-10-09 P1: 残りの 1 件（ime-probe）の照合
+
+- ime-probe は既に `userland/tests/ime-probe/`（Makefile と main.c）にある。移したのは 71c8a1487（2026-10-07、master.md の「ユーザー（make menuconfig）: desktop の下の試験の program は tree ごと tests へ（userland/desktop/ime-probe → userland/tests/ime-probe）」）。この Phase の新しい attempt で移す物は残っていない。
+- 照合:
+  - [inventory.md](../inventory.md) の移動先の `userland/tests/*` は全部ある。
+  - 移動元で残るのは `userland/base/test`（POSIX の test、対象外）と `userland/desktop/keiland-linux.mk`（参照の file、移さない）だけ。
+  - 古い path（`desktop/ime-probe`・`base/ime-probe`）を参照する make・shell・python・md は、master.md の履歴の 1 行のほかに無い（`grep -rn`、build/・plan/history・plan/ws106 を除く）。
+- build: `make ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p1-ws177 build/p1-ws177/bin/ime-probe` は rc 0、warning 0。ELF の検査（libwayland-client.so・libc.so）は PASS。
+- 未実施: ime-probe の移動の前後の hash と mode の比較（移したのは別の作業で、前の版との比較の記録は無い）。p003 の全体の build・install・boot。

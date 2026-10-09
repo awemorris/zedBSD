@@ -31,7 +31,13 @@ libffi-3.8.0/ChangeLog.old
 libffi-3.8.0/LICENSE-BUILDTOOLS
 libffi-3.8.0/libtool-ldflags
 libffi-3.8.0/msvcc.sh
-zlib-1.3.2/FAQ'
+zlib-1.3.2/FAQ
+Python-3.14.8/Doc/license.rst
+Python-3.14.8/LICENSE
+Python-3.14.8/Mac/BuildScript/resources/License.rtf
+Python-3.14.8/README.rst'
+# ws126-p001 の判定（2026-10-09 P1）: Python の 4 件は PSF の license の文と README で、「GPL と両立する」「GPL の code を
+# 含まない」と述べるだけ（GPL の code ではない）。
 # ws129-p002 の判定（2026-10-04）: 上の 8 件は文書（ABOUT-NLS・ChangeLog.old・FAQ）と build の補助（m4・libtool の
 # 補助・MSVC の wrapper、LICENSE-BUILDTOOLS はそれらの license）で、image の binary に入らない。
 

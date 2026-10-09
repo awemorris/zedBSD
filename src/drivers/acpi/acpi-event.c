@@ -129,6 +129,12 @@
 #define GPE_MAX			256U
 
 /*
+ * How many times each GPE's handling is logged (BUG-255: which GPEs a lid,
+ * a button or the EC raise on a machine, from the boot log).
+ */
+#define GPE_LOGGED		8U
+
+/*
  * How long the switch into ACPI mode may take, in 10-microsecond polls.
  */
 #define ACPI_ENABLE_POLLS	30000U
@@ -224,6 +230,7 @@ static struct {
 	uint8_t ready;
 	uint8_t sleeping;
 	uint8_t gpe_pending[GPE_MAX / 8U];
+	uint8_t gpe_logged[GPE_MAX];
 	struct gpe_entry gpes[GPE_MAX];
 	struct fixed_entry fixed[FIXED_EVENT_COUNT];
 } events;
@@ -280,6 +287,7 @@ static int gpe_method_visitor(struct drv_acpi_node *node, unsigned depth, void *
 static int wake_visitor(struct drv_acpi_node *node, unsigned depth, void *argument);
 static int hex_digit(uint8_t character);
 static void process_gpe(unsigned gpe);
+static void log_gpe_list(const char *what, bool wake);
 static bool gpe_wanted(unsigned gpe);
 static bool gpe_is_pending(unsigned gpe);
 static void log_event_state(unsigned runtime);
@@ -411,6 +419,14 @@ drv_acpi_events_init(
 
 	/* Logs the mode and the enabled events, so that a boot log shows the event hardware armed. */
 	log_event_state(runtime);
+
+	/*
+	 * Names the GPEs with a method that run, and the ones a _PRW keeps for
+	 * waking only (masked while the machine runs): a boot that counts other
+	 * runtime GPEs than another shows which one changed (BUG-255).
+	 */
+	log_gpe_list("runtime GPEs", false);
+	log_gpe_list("wake-only GPEs with a method", true);
 
 	/* Succeeded: the platform raises SCIs for the enabled events. */
 	return 0;
@@ -1671,8 +1687,10 @@ wake_visitor(
 {
 	struct drv_acpi_object *result;
 	struct drv_acpi_object *first;
+	char path[64];
 	uint32_t wake_name;
 	uint64_t gpe;
+	int path_error;
 	int error;
 
 	UNUSED_PARAMETER(depth);
@@ -1683,10 +1701,15 @@ wake_visitor(
 	if (node->name != wake_name)
 		return 0;
 
-	/* Evaluates it: a package whose first element is the GPE number. */
+	/* Evaluates it: a package whose first element is the GPE number; a failure is logged with the object's path (BUG-255). */
 	error = drv_acpi_evaluate(node, NULL, NULL, 0, &result);
-	if (error != 0 || result == NULL)
+	if (error != 0 || result == NULL) {
+		path_error = drv_acpi_node_path(node, path, sizeof(path));
+		if (path_error != 0)
+			path[0] = '\0';
+		drv_acpi_os_log("ACPI: %s failed (error %d); its GPE is not kept for waking\n", path, error);
 		return 0;
+	}
 
 	/* Marks the GPE an integer first element names; wake keeps it masked at runtime. */
 	first = drv_acpi_object_package_element(result, 0);
@@ -1730,12 +1753,22 @@ process_gpe(
 {
 	struct gpe_entry *entry;
 	struct drv_acpi_object *result;
+	const char *trigger;
 	unsigned long state;
 	bool wanted;
 	int error;
 
-	/* An edge event is cleared first, so that a new edge is not lost. */
+	/* Logs the GPE's first few handlings, with how it triggers (BUG-255). */
 	entry = &events.gpes[gpe];
+	if (events.gpe_logged[gpe] < GPE_LOGGED) {
+		events.gpe_logged[gpe]++;
+		trigger = "level";
+		if (entry->edge)
+			trigger = "edge";
+		drv_acpi_os_log("ACPI: GPE 0x%x (%s) #%u\n", gpe, trigger, (unsigned)events.gpe_logged[gpe]);
+	}
+
+	/* An edge event is cleared first, so that a new edge is not lost. */
 	if (entry->edge)
 		gpe_clear(gpe);
 
@@ -1813,6 +1846,40 @@ gpe_is_pending(
 
 	/* The thread has nothing of the GPE to handle. */
 	return false;
+}
+
+/*
+ * Logs the numbers of the GPEs with a method that run at runtime (wake
+ * false), or of those a _PRW keeps masked for waking only (wake true).
+ */
+static void
+log_gpe_list(
+	const char *what,
+	bool wake)
+{
+	char line[160];
+	size_t used;
+	unsigned gpe;
+	int written;
+
+	/* Gathers the numbers, as many as the line holds. */
+	used = 0;
+	line[0] = '\0';
+	for (gpe = 0; gpe < events.gpe_count; gpe++) {
+		if (events.gpes[gpe].kind != GPE_METHOD || (events.gpes[gpe].wake != 0) != wake)
+			continue;
+		written = kern_snprintf(line + used, sizeof(line) - used, " 0x%x", gpe);
+		if (written < 0 || (size_t)written >= sizeof(line) - used)
+			break;
+		used += (size_t)written;
+	}
+
+	/* Writes the line; an empty list says so. */
+	if (used == 0) {
+		drv_acpi_os_log("ACPI: %s: none\n", what);
+	} else {
+		drv_acpi_os_log("ACPI: %s:%s\n", what, line);
+	}
 }
 
 /* Logs whether SCI_EN is set, the PM1 enable bits and how many GPEs run. */
