@@ -250,9 +250,13 @@ drv_smartcard_card(
 
 	spin_unlock_irqrestore(&smartcard->lock, irq);
 
-	/* Every open hears the change. */
-	if (changed)
-		smartcard_event(smartcard, kind);
+	/* Nothing changed: nothing to tell. */
+	if (!changed)
+		return;
+
+	/* Every open hears the change, and the desktop too (ws199-p001: a key held to an NFC reader). */
+	smartcard_event(smartcard, kind);
+	smartcard_post(smartcard, KERN_SYSTEM_EVENT_CHANGE);
 }
 
 /*
@@ -990,7 +994,12 @@ smartcard_finalize(
 	kern_free(data);
 }
 
-/* Tells the system's events that a slot came or went (the class of the USB devices). */
+/*
+ * Tells the system's events that a slot came or went, or that its card
+ * did (CHANGE, ws199-p001), in the class of the USB devices; the detail
+ * says whether a card is in the slot (card=, before the name, which may
+ * be cut short).
+ */
 static void
 smartcard_post(
 	const struct drv_smartcard *smartcard,
@@ -1005,8 +1014,9 @@ smartcard_post(
 
 	/* The node, the detail, then the event. */
 	kern_snprintf(subject, sizeof(subject), "smartcard%u", smartcard->number);
-	kern_snprintf(detail, sizeof(detail), "vendor=%04x product=%04x slot=%u name=%s",
+	kern_snprintf(detail, sizeof(detail), "vendor=%04x product=%04x slot=%u card=%u name=%s",
 		      (unsigned)smartcard->info.vendor, (unsigned)smartcard->info.product,
-		      (unsigned)smartcard->info.slot, smartcard->info.name);
+		      (unsigned)smartcard->info.slot, (unsigned)(smartcard->state != CCID_CARD_ABSENT),
+		      smartcard->info.name);
 	kern_system_event_post(KERN_SYSTEM_EVENT_USB, action, 0, subject, detail);
 }
