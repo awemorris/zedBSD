@@ -24,6 +24,8 @@
  *   KEYINFO                         KEYINFO count=N [name=HEX pin=0|1 retries=N min=N]
  *   KEYPIN set, then the new key PIN's line
  *   KEYPIN change, then the key PIN's and the new one's lines
+ *   SETOPTIONS PIN TOUCH, then the password's line: the key's PIN and touch
+ *                                   for signing in (each 0 or 1; ws199-p001)
  *   KEYRESET, then the password's line
  *                                   REPLUG while the key is to be plugged in again,
  *                                   TOUCH..., then OK removed=N or FAIL reason
@@ -74,6 +76,7 @@ static const char *const auth_commands[SESSIOND_COMMAND_COUNT] = {
 	"KEYINFO",
 	"KEYPIN",
 	"KEYRESET",
+	"SETOPTIONS",
 };
 
 /* The words of the styles, by SESSIOND_STYLE_*. */
@@ -400,6 +403,19 @@ auth_parse(
 		return 0;
 	}
 
+	/* SETOPTIONS takes the key's PIN and touch (0 or 1 each), then the password's line. */
+	if (command == SESSIOND_COMMAND_SETOPTIONS) {
+		if (count < 3U)
+			return -1;
+		match = strcmp(word[1], "0") == 0 || strcmp(word[1], "1") == 0;
+		set = strcmp(word[2], "0") == 0 || strcmp(word[2], "1") == 0;
+		if (!match || !set)
+			return -1;
+		snprintf(exchange->argument, sizeof(exchange->argument), "%s\n%s", word[1], word[2]);
+		exchange->lines_wanted = 1U;
+		return 0;
+	}
+
 	/* KEYPIN set takes the new key PIN's line, KEYPIN change the key PIN's and the new one's. */
 	if (command == SESSIOND_COMMAND_KEYPIN) {
 		if (count < 2U)
@@ -523,10 +539,11 @@ auth_begin(
 	 * An attempt counts before passkey runs: a login or an unlock in its
 	 * style, a change by its password.
 	 */
-	if (exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) {
+	if ((exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) &&
+	    exchange->style != SESSIOND_STYLE_FIDO2) {
 		sessiond_policy_attempt(exchange->count, exchange->style);
 	} else if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE ||
-		   exchange->command == SESSIOND_COMMAND_KEYRESET) {
+		   exchange->command == SESSIOND_COMMAND_KEYRESET || exchange->command == SESSIOND_COMMAND_SETOPTIONS) {
 		sessiond_policy_attempt(exchange->count, SESSIOND_STYLE_PASSWORD);
 	}
 
@@ -568,6 +585,7 @@ auth_request(
 	char *request,
 	size_t size)
 {
+	const char *context;
 	const char *style;
 	int length;
 
@@ -583,7 +601,18 @@ auth_request(
 		break;
 	case SESSIOND_COMMAND_AUTH:
 	case SESSIOND_COMMAND_UNLOCK:
+		/* A key's: the login or the unlock, as the account's options ask (ws199-p001). */
+		if (exchange->style == SESSIOND_STYLE_FIDO2) {
+			context = "login";
+			if (exchange->command == SESSIOND_COMMAND_UNLOCK)
+				context = "unlock";
+			length = snprintf(request, size, "auth-fido2\n%s\n%s\n%s\n", exchange->name, context, exchange->lines[0]);
+			break;
+		}
 		length = snprintf(request, size, "auth\n%s\n%s\n%s\n", exchange->name, style, exchange->lines[0]);
+		break;
+	case SESSIOND_COMMAND_SETOPTIONS:
+		length = snprintf(request, size, "set-options\n%s\n%s\n%s\n", exchange->name, exchange->lines[0], exchange->argument);
 		break;
 	case SESSIOND_COMMAND_ENROLL:
 		if (exchange->style == SESSIOND_STYLE_PIN) {
@@ -962,8 +991,9 @@ auth_granted(
 		sessiond_log("SESSIOND UNLOCK ok user=%s style=%s", exchange->name, style);
 	}
 
-	/* A change of the PIN or a key. */
-	if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE) {
+	/* A change of the PIN, a key, or the key's options. */
+	if (exchange->command == SESSIOND_COMMAND_ENROLL || exchange->command == SESSIOND_COMMAND_REMOVE ||
+	    exchange->command == SESSIOND_COMMAND_SETOPTIONS) {
 		syslog(LOG_NOTICE, "%s %s of %s", auth_commands[exchange->command], style, exchange->name);
 		sessiond_log("SESSIOND %s %s ok user=%s", auth_commands[exchange->command], style, exchange->name);
 	}
@@ -986,6 +1016,7 @@ auth_refused(
 	const char *told;
 	unsigned delay;
 	int timeout;
+	int counts;
 
 	/* What failed, for syslog; the word told (the greeter's words for a login or an unlock, passkey's own for a change). */
 	told = reason;
@@ -998,11 +1029,26 @@ auth_refused(
 		what = "unlock";
 
 	/*
+	 * A key's login or unlock counts by its answer (R4): a wrong key PIN,
+	 * a clone or an answer that does not verify; the others are told at
+	 * once.
+	 */
+	counts = 1;
+	if ((exchange->command == SESSIOND_COMMAND_AUTH || exchange->command == SESSIOND_COMMAND_UNLOCK) &&
+	    exchange->style == SESSIOND_STYLE_FIDO2) {
+		counts = sessiond_policy_key_counts(reason);
+		if (counts)
+			sessiond_policy_attempt(exchange->count, exchange->style);
+	}
+
+	/*
 	 * The failure goes on record.  One sessiond ended (CANCEL, the
 	 * deadline) without passkey's judgment is told at once: it says nothing
 	 * of the secret (R5).
 	 */
 	delay = sessiond_policy_delay(exchange->count);
+	if (!counts)
+		delay = 0U;
 	timeout = strcmp(reason, "timeout") == 0 || strcmp(reason, "canceled") == 0;
 	if (exchange->term_ms != 0 && timeout)
 		delay = 0U;

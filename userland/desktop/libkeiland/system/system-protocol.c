@@ -268,6 +268,7 @@ static const struct wl_message system_account_requests[] = {
 	{ "key_pin", "25uss", system_plain_types },
 	{ "key_reset", "25us", system_plain_types },
 	{ "key_cancel", "25", system_plain_types },
+	{ "set_key_options", "25usuu", system_plain_types },
 };
 
 /* The events of kl_system_account_v1 (refused since version 8, ws089-p026; enrolled since 11, ws172-p002). */
@@ -281,15 +282,16 @@ static const struct wl_message system_account_events[] = {
 	{ "replug", "25u", system_plain_types },
 	{ "removed", "25uu", system_plain_types },
 	{ "keys_changed", "25", system_plain_types },
+	{ "options", "25uu", system_plain_types },
 };
 
-/* kl_system_account_v1, made at the manager's version (25, ws199-p001): ten requests and nine events.  It lives for the program. */
+/* kl_system_account_v1, made at the manager's version (25, ws199-p001): eleven requests and ten events.  It lives for the program. */
 const struct wl_interface kl_system_account_v1_interface = {
 	KL_SYSTEM_ACCOUNT_NAME,
 	KL_SYSTEM_SINCE_KEY_OPS,
-	10,
+	11,
 	system_account_requests,
-	9,
+	10,
 	system_account_events
 };
 

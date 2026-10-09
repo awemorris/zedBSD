@@ -61,6 +61,8 @@ struct kl_backend {
 	size_t session_key_count;
 	char session_reason[KL_BACKEND_SESSION_REASON];
 	struct kl_backend_key_info session_key_info;
+	unsigned session_key_pin;
+	unsigned session_key_touch;
 	unsigned session_key_removed;
 	int events_descriptor;
 	/*

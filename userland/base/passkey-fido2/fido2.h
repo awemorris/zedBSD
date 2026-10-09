@@ -95,6 +95,7 @@ struct fido2_job {
 	uint8_t client_data_hash[32];
 	char pin[72];
 	char new_pin[72];
+	int presence;
 	const uint8_t *ids[FIDO2_IDS_MAX];
 	size_t id_sizes[FIDO2_IDS_MAX];
 	size_t id_count;

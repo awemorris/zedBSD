@@ -27,7 +27,14 @@ key-reset)
 	*) echo "fail bad-secret"; exit 1 ;;
 	esac ;;
 enroll-fido2) read -r password; read -r label; read -r pin; echo "fail bad-key-pin"; exit 1 ;;
-auth) read -r style; read -r secret; /bin/sleep 100 ;;
+auth|auth-fido2)
+	read -r context; read -r secret
+	case "\$context.\$secret" in
+	unlock.badpin) echo "fail bad-key-pin"; exit 1 ;;
+	unlock.nokey) echo "fail no-key"; exit 1 ;;
+	*) /bin/sleep 100 ;;
+	esac ;;
+set-options) read -r password; read -r pin; read -r touch; if [ "\$password.\$pin.\$touch" = right.0.0 ]; then echo "ok uid=$UID_SELF"; exit 0; fi; echo "fail bad-request"; exit 1 ;;
 *) echo "fail bad-request"; exit 1 ;;
 esac
 SCRIPT

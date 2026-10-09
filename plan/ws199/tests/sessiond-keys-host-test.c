@@ -272,6 +272,30 @@ test_keys(
 	got = answer(&exchange, pair[1], line, sizeof(line), 8000);
 	check(got && strcmp(line, "FAIL bad-key-pin") == 0, "ENROLL tells bad-key-pin");
 
+	/* SETOPTIONS: the password's line and the two values, to passkey's set-options (ws199-p001 i04). */
+	send_line(&exchange, "SETOPTIONS 0 0");
+	send_line(&exchange, "right");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "OK") == 0, "SETOPTIONS 0 0 OK");
+
+	/* A key's unlock that did not find the key: not counted, told at once (review-3 R4). */
+	started = sessiond_milliseconds();
+	send_line(&exchange, "UNLOCK fido2");
+	send_line(&exchange, "nokey");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	took = sessiond_milliseconds() - started;
+	check(got && strcmp(line, "FAIL no-key") == 0, "a key's unlock without the key tells no-key");
+	check(took < TEST_AT_ONCE_MS, "a key's unlock without the key is told at once");
+
+	/* A key's unlock with a wrong key PIN: counted, delayed, told bad-secret. */
+	started = sessiond_milliseconds();
+	send_line(&exchange, "UNLOCK fido2");
+	send_line(&exchange, "badpin");
+	got = answer(&exchange, pair[1], line, sizeof(line), 8000);
+	took = sessiond_milliseconds() - started;
+	check(got && strcmp(line, "FAIL bad-secret") == 0, "a key's unlock with a wrong key PIN tells bad-secret");
+	check(took >= TEST_DELAYED_MS, "a key's wrong PIN waits out the delay");
+
 	/* UNLOCK fido2 CANCEL'ed: timeout at once (review-3 R5). */
 	started = sessiond_milliseconds();
 	send_line(&exchange, "UNLOCK fido2");

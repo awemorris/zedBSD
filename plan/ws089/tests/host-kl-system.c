@@ -271,6 +271,34 @@ kl_system_account_key_removed(const struct kl_system *system)
 	return 1U;
 }
 
+/* The key's options (ws199-p002): the PIN and the touch, or as HOST_KEY_OPTION says (1 touch only, 2 neither). */
+int
+kl_system_account_key_options(const struct kl_system *system, unsigned *key_pin, unsigned *key_touch)
+{
+	const char *option;
+
+	(void)system;
+	option = getenv("HOST_KEY_OPTION");
+	*key_pin = 1U;
+	*key_touch = 1U;
+	if (option != NULL && option[0] != '0')
+		*key_pin = 0U;
+	if (option != NULL && option[0] == '2')
+		*key_touch = 0U;
+	return getenv("HOST_KEY_OPS") != NULL;
+}
+
+int
+kl_system_account_set_key_options(struct kl_system *system, const char *password, unsigned key_pin, unsigned key_touch, uint32_t *request)
+{
+	(void)system;
+	printf("HOST key options password=%zu pin=%u touch=%u\n", strlen(password), key_pin, key_touch);
+	*request = 83U;
+	host_account_request = 83U;
+	host_account_pending = 1;
+	return 0;
+}
+
 int
 kl_system_account_touched(struct kl_system *system, uint32_t *request)
 {

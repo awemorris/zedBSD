@@ -68,6 +68,7 @@ static int passkey_file(char *text, size_t capacity, size_t *length, int need_pr
 static int passkey_auth_pin(const char *name, uid_t uid, char *pin);
 static int passkey_styles(const char *name, uid_t uid, int enrolled);
 static int passkey_change_pin(const char *name, uid_t uid, const char *pin);
+static int passkey_set_options(const char *name, uid_t uid, const char *key_pin, const char *key_touch);
 static int passkey_fido2(const char *request, size_t length);
 static void passkey_keys_listed(const char *text, size_t length, const char *name, uid_t uid, char *extra, size_t size);
 
@@ -108,6 +109,8 @@ main(
 	/* The security key style goes to passkey-fido2 with the whole request. */
 	same = request.operation == PASSKEY_OP_ENROLL_FIDO2 || request.operation == PASSKEY_OP_REMOVE_FIDO2;
 	if (request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET)
+		same = 1;
+	if (request.operation == PASSKEY_OP_AUTH_FIDO2)
 		same = 1;
 	if (request.operation == PASSKEY_OP_AUTH && strcmp(request.fields[2], "fido2") == 0)
 		same = 1;
@@ -162,6 +165,15 @@ main(
 		} else {
 			status = passkey_change_pin(request.fields[1], account.pw_uid, NULL);
 		}
+		break;
+	case PASSKEY_OP_SET_OPTIONS:
+		/* The user's password, then the key's PIN and touch for signing in (ws199-p001). */
+		error = login_verify(request.fields[1], request.fields[2], &account, strings, sizeof(strings));
+		if (error != 0) {
+			status = passkey_fail("bad-secret");
+			break;
+		}
+		status = passkey_set_options(request.fields[1], account.pw_uid, request.fields[3], request.fields[4]);
 		break;
 	default:
 		status = passkey_fail("bad-request");
@@ -402,6 +414,7 @@ passkey_styles(
 	int enrolled)
 {
 	static char text[PASSKEY_FILE_MAX];
+	struct passkey_options options;
 	char extra[PASSKEY_REQUEST_MAX];
 	size_t length;
 	int pins;
@@ -426,8 +439,11 @@ passkey_styles(
 		return passkey_ok(uid, extra);
 	}
 
-	/* enrolled: the counts, then each key's reference and label (ws172-p003). */
-	snprintf(extra, sizeof(extra), "pin=%d fido2=%d", pins > 0, keys);
+	/* enrolled: the counts, the key's PIN and touch for signing in (ws199-p001), then each key's reference and label (ws172-p003). */
+	passkey_options_default(&options);
+	if (error == 0)
+		(void)passkey_options_read(text, length, name, uid, &options);
+	snprintf(extra, sizeof(extra), "pin=%d fido2=%d key-pin=%d key-touch=%d", pins > 0, keys, options.key_pin, options.key_touch);
 	if (error == 0)
 		passkey_keys_listed(text, length, name, uid, extra, sizeof(extra));
 	return passkey_ok(uid, extra);
@@ -539,6 +555,90 @@ passkey_change_pin(
 	account_files_unlock();
 	(void)sigprocmask(SIG_SETMASK, &previous, NULL);
 	passkey_wipe(hash, sizeof(hash));
+	if (error != 0)
+		return passkey_fail("internal");
+
+	/* Succeeded. */
+	return passkey_ok(uid, NULL);
+}
+
+/*
+ * Sets whether the account's key asks its PIN and its touch to sign in
+ * (ws199-p001 section 2): "1" or "0" each, the touch left out only with
+ * the PIN; the account must have a key.  The methods of the line are kept
+ * (WS200's); a line of the defaults is not kept.
+ */
+static int
+passkey_set_options(
+	const char *name,
+	uid_t uid,
+	const char *key_pin,
+	const char *key_touch)
+{
+	static char text[PASSKEY_FILE_MAX];
+	static char output[PASSKEY_FILE_MAX + PASSKEY_REQUEST_MAX];
+	struct passkey_options options;
+	char line[PASSKEY_REQUEST_MAX];
+	sigset_t held;
+	sigset_t previous;
+	size_t length;
+	size_t written;
+	const char *added;
+	int pin;
+	int touch;
+	int valid;
+	int keys;
+	int defaults;
+	int version;
+	int error;
+
+	/* "0" or "1" each; no touch only without the PIN. */
+	pin = strcmp(key_pin, "1") == 0;
+	touch = strcmp(key_touch, "1") == 0;
+	valid = (pin || strcmp(key_pin, "0") == 0) && (touch || strcmp(key_touch, "0") == 0);
+	if (!valid || (pin && !touch))
+		return passkey_fail("bad-request");
+
+	/* The signals that would stop the change are held while the file changes. */
+	sigfillset(&held);
+	(void)sigprocmask(SIG_BLOCK, &held, &previous);
+	error = account_files_lock();
+	if (error != 0) {
+		(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+		return passkey_fail("busy");
+	}
+
+	/* The file read again under the lock: the account has a key, and its methods kept. */
+	error = passkey_file(text, sizeof(text), &length, 0);
+	version = passkey_record_version(text, length);
+	if (error == 0 && version > PASSKEY_VERSION)
+		error = EROFS;
+	keys = 0;
+	if (error == 0)
+		keys = passkey_record_count(text, length, name, uid, "fido2");
+	if (error == 0 && keys == 0) {
+		account_files_unlock();
+		(void)sigprocmask(SIG_SETMASK, &previous, NULL);
+		return passkey_fail("not-enrolled");
+	}
+
+	/* The new line (none for the defaults), in place of the old one. */
+	if (error == 0) {
+		(void)passkey_options_read(text, length, name, uid, &options);
+		options.key_pin = pin;
+		options.key_touch = touch;
+		error = passkey_options_line(name, uid, &options, line, sizeof(line));
+	}
+	defaults = passkey_options_is_default(&options);
+	added = line;
+	if (defaults)
+		added = NULL;
+	if (error == 0)
+		error = passkey_record_replace(text, length, name, "options", added, output, sizeof(output), &written);
+	if (error == 0)
+		error = account_file_write(PASSKEY_FILE, 0600, output, written);
+	account_files_unlock();
+	(void)sigprocmask(SIG_SETMASK, &previous, NULL);
 	if (error != 0)
 		return passkey_fail("internal");
 

@@ -10,7 +10,11 @@
  * file, no process, no clock, so the host test runs them alone.
  *
  * An attempt counts before passkey runs, and only a success clears the
- * counts, so an attempt cut short counts as a failure.  The answer to a
+ * counts, so an attempt cut short counts as a failure; but a security
+ * key's login or unlock counts by its answer (ws199-p001, review-3 R4):
+ * a wrong key PIN, a cloned key or an answer that does not verify counts,
+ * a key that was not there, not touched, or taken away does not (the key
+ * counts its own wrong PINs).  The answer to a
  * failure waits 2 seconds, twice as long after every three in a row, at
  * most 16.  The PIN is offered only after the account's password or
  * security key has been accepted since sessiond started, and is turned off
@@ -47,7 +51,8 @@ static const struct policy_reason policy_reasons[] = {
 	{ "pin-set", "device" },
 	{ "timeout", "timeout" },
 	{ "device", "device" },
-	{ "cloned", "bad-secret" },
+	{ "cloned", "cloned" },
+	{ "pin-required", "pin-required" },
 	{ "busy", "busy" },
 	{ "bad-request", "bad-request" },
 	{ "internal", "internal" },
@@ -277,4 +282,36 @@ sessiond_policy_styles(
 		/* The next listed style. */
 		word = sessiond_policy_word(&cursor, ',');
 	}
+}
+
+/*
+ * Tells whether a security key's failed login or unlock counts as a wrong
+ * attempt (ws199-p001, review-3 R4): the key's PIN was wrong (passkey's
+ * bad-key-pin, or bad-secret), the key is a clone, or its answer did not
+ * verify; not a key that was not there, not touched, cancelled, busy or
+ * broken.  Returns 1 when it counts.
+ */
+int
+sessiond_policy_key_counts(
+	const char *passkey_reason)
+{
+	static const char *const counted[] = {
+		"bad-key-pin",
+		"bad-secret",
+		"cloned",
+		"key-locked",
+		"key-replug",
+	};
+	size_t index;
+	int match;
+
+	/* One of the words that count. */
+	for (index = 0U; index < sizeof(counted) / sizeof(counted[0]); index++) {
+		match = strcmp(counted[index], passkey_reason);
+		if (match == 0)
+			return 1;
+	}
+
+	/* Any other does not. */
+	return 0;
 }

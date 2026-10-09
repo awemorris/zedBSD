@@ -827,7 +827,8 @@ enum se_keys_flow {
 	SE_KEYS_FLOW_PIN_SET,
 	SE_KEYS_FLOW_PIN_REMOVE,
 	SE_KEYS_FLOW_KEY_PIN,
-	SE_KEYS_FLOW_RESET
+	SE_KEYS_FLOW_RESET,
+	SE_KEYS_FLOW_OPTIONS
 };
 struct se_keys {
 	unsigned flow;
@@ -846,6 +847,9 @@ struct se_keys {
 	struct kl_system_key_info info;
 	int setting_pin;
 	unsigned removed;
+	unsigned option_pin;
+	unsigned option_touch;
+	int weaker;
 };
 
 /*

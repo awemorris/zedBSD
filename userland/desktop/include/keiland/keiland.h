@@ -2152,6 +2152,18 @@ int kl_system_account_replugged(struct kl_system *system, uint32_t *request);
 unsigned kl_system_account_key_removed(const struct kl_system *system);
 
 /*
+ * Whether the user's security key asks its PIN to sign in (key_pin 1) and
+ * its touch to unlock (key_touch 1), as the compositor last told with each
+ * enrolled (KL_VERSION 77, ws199-p001): 1 when known.  Set with
+ * kl_system_account_set_key_options, checked by the user's password
+ * (no touch only without the PIN), answered as kl_system_account_set_pin
+ * (the refusal's word: bad-secret, not-enrolled, ...).  Returns 0,
+ * ENOTSUP without KL_SYSTEM_HAS_KEY_OPS, or EINVAL.
+ */
+int kl_system_account_key_options(const struct kl_system *system, unsigned *key_pin, unsigned *key_touch);
+int kl_system_account_set_key_options(struct kl_system *system, const char *password, unsigned key_pin, unsigned key_touch, uint32_t *request);
+
+/*
  * Copies the word of a refused kl_system_account_administer request
  * (not-administrator, bad-password, no-such-user, name-taken, bad-name,
  * weak-password, last-administrator, self, root, busy, home-exists,
