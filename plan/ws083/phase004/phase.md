@@ -2,7 +2,7 @@
 
 # ws083-p004: MFX AVC の I frame の builder、NV12 Tile Y、genxml の独立の decoder、試験の stream、vkvideo-probe
 
-Status: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS（Q1 判定、ws.md の表）。review の R-S1 の直し（q897）は host のみ。実機の hash は p005（T1-435、未実行））（旧: in-progress（q857-i01、P2。2026-10-08 実装と host 試験は済み、§8.2 の QEMU 回帰は T1 待ち））
+Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 4・5 行目 PASS、build warning 0、T1 の §8.2 は T1-371 PASS）を満たし、I frame の実機の hash も 5330 で一致。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS（Q1 判定、ws.md の表）。review の R-S1 の直し（q897）は host のみ。実機の hash は p005（T1-435、未実行））（旧: in-progress（q857-i01、P2。2026-10-08 実装と host 試験は済み、§8.2 の QEMU 回帰は T1 待ち）））
 Disposition: normal
 Parent: [WS083](../ws.md)
 
@@ -45,3 +45,10 @@ Parent: [WS083](../ws.md)
 ## T1-371 の判定（2026-10-08 Q1）
 
 PASS（QEMU Venus、main b84e680a8）: boot-test、compositor（zdesktop-p054）、vkdemo（frames=23、offscreen の rgb_sha256 は T1-313 と同じ）、`vkvideo-probe --list` は `video families 0, video extensions 0`（family 0 だけ、sync2 の行無し）、存在しない file で exit 1。QEMU の回帰（§8.2）を満たす。実機は p005。
+
+## 2026-10-10 の照合（P2、実機の結果で）
+
+- 受け入れ（design §9 の p004）: §8.1 の 4 行目（MFX の command stream、`run-host-mfx-avc.sh` 4 case）・5 行目（NV12 の layout、roundtrip）PASS、I frame の stream 3 本（2 本以上）、build warning 0、T1 の §8.2（T1-371 PASS、Q1 判定）→ 満たした。
+- 実機: 5330 の実機（2026-10-10 Q1、image 588c5cd、boot に `i915.debug=video`、SSH。ws.md の p005・p006b の行）で i-baseline-64・i-main-352-slices・i-high-352-cqm が各 `3 frames decoded, 3 match the reference`（exit 0）。MFX の命令列（U1 short format・U5 MV buffer 4 KiB・U16 D21・U18 bitstream の upper bound の page の切り上げ（R-S1））と NV12 の Tile Y が実機で正しく decode することを確かめた。result status（p008 の S6）: probe は family が TRUE なら decode ごとに query を読み、COMPLETE でない picture があれば `, N failed` を足して exit 5 にする。記録の要約の行に `, N failed` は無いので失敗の status は無い。pool が作れずに query 無しで走った場合は `vkvideo-probe: no result status query (…)` の行が出るが、その行の有無は記録に無い（Q1 に確かめる。p008 の受け入れの材料）。
+- 588c5cd と照合の時の main（1b08d90b9）の間に `src/drivers/gpu/i915`・`userland/desktop/libvulkan`・`userland/tests/vkvideo-probe`・`src/kern/boot.c`・`include/uapi/gpu-op.h` の差は無い（`git diff --stat` が空）ので、実機の結果は今の code に当たる。host 試験（`plan/ws083/tests/run-host-*.sh` の 8 本: boot-video・libvulkan-native・libvulkan-status・libvulkan-video・mfx-avc・vcs-worker・video-roundtrip・vkvideo-probe）は 1b08d90b9 で全部 PASS（2026-10-10 P2）。
+- 残り: 無し（受け入れの条件は全部満たす）。ユーザーの 1920x1080 の `sample-h264-*.h264` の最初の IDR の hash（「残り・次」の文）は受け入れの外で、性能（p008 の E、`--time --frames=60`、hash は見ない）で decode を通す。

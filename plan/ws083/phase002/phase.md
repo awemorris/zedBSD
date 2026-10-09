@@ -2,7 +2,7 @@
 
 # ws083-p002: libvulkan の Vulkan Video の骨組み
 
-Status: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS。実機の family・拡張の列挙は T1-435 の A（未実行））（旧: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1））
+Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（host の試験 PASS・build warning 0・export の数 192・PROVENANCE）は 2026-10-07 に満たし、§8.2 の QEMU 回帰は T1-371 PASS、実機の family・拡張の列挙も 5330 で確かめた。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS。実機の family・拡張の列挙は T1-435 の A（未実行））（旧: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1）））
 Disposition: normal
 Parent: [WS083](../ws.md)
 
@@ -59,3 +59,10 @@ kernel（boot.c）と i915 は触らない（p003b）。toolchain は触らな�
 ## T1-351 の判定（2026-10-07 Q1）
 
 T1-348 の C（i915.debug=video）・D（既定）の zdesktop の capture を 5330 の passthrough で流し直した（capture.c の build error は be2544532 で直した）。sheet.png の desktop は C・D とも普段どおり → 門（video）を入れても desktop は変わらない、の受け入れは満たす。result.json の `wiseview_closes`・`close_ends_viewer` が C・D とも false（門に依らない）。WS181 の Wiseview・App Home の作り直しに capture の scenario（plan/ws031/tests/i915-capture.py）が追いついていない疑い。scenario を使う時に、試験の整理の基準で直すか削除する。C の guest の video の行の確認は未実施。
+
+## 2026-10-10 の照合（P2、実機の結果で）
+
+- 受け入れ（design §9 の p002）: host の試験 §8.1 の 1 行目 PASS、build warning 0、export の数（192 で manifest と一致）、PROVENANCE（API-PROVENANCE.md）→ 2026-10-07 に満たした（上の表）。T1 の §8.2 は p004 の受け入れで T1-371 PASS。
+- 実機: 5330 の実機（2026-10-10 Q1、image 588c5cd、boot に `i915.debug=video`、SSH。ws.md の p005・p006b の行）で `vkvideo-probe --list` の最後が `video families 1, video extensions 3`、dmesg に `i915: vk: capset declares H.264 video decode`。capset の 176 byte の native の語（context.c）・`physical_load_video`・D3 の濾し・4 拡張の列挙と照合（instance.c・device.c）が実機の経路で通った（未実施に書いていた context.c・instance.c の経路は R-S6 の host 試験 `run-host-libvulkan-native.sh` と、この実機で確かめた）。decode の 6 本の一致（p005・p006b）は video.c・sync2.c の record が実機の実行器に正しく届くことも示す。
+- 588c5cd と照合の時の main（1b08d90b9）の間に `src/drivers/gpu/i915`・`userland/desktop/libvulkan`・`userland/tests/vkvideo-probe`・`src/kern/boot.c`・`include/uapi/gpu-op.h` の差は無い（`git diff --stat` が空）ので、実機の結果は今の code に当たる。host 試験（`plan/ws083/tests/run-host-*.sh` の 8 本: boot-video・libvulkan-native・libvulkan-status・libvulkan-video・mfx-avc・vcs-worker・video-roundtrip・vkvideo-probe）は 1b08d90b9 で全部 PASS（2026-10-10 P2）。
+- 残り: 無し（受け入れの条件は全部満たす）。気づいた事の `plan/ws014/tests/run-libvulkan-external-properties-test.sh`（c89 で vulkan.h を読めない）は master の試験の一覧に無い開発の試験（試験の整理の基準で、使う時に直すか削除）。
