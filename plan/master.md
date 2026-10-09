@@ -8,7 +8,12 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
-- **2026-10-09 未明（利用制限の後に再開、ユーザーの体制）**: N=2 は P1 と P3。P1 = ベータ2 の全部（UAT のデバッグが最優先、T1-475 の FAIL、BUG-273・272・173・242・120、WS102 p011）と合間のベータ3（WS031・075・068・052・172・095・155・046・004・001（4 LW まで）・126・171・009・026・106・139・094 p009・BUG-255）。P3 = 規約の全文の見直しだけ（Haiku、最初は ws190-p004、Q1 が能力を評価。.claude/agents/p3-conformance-haiku.md は再起動の後に使える、今は conformance-reviewer の model を haiku にして起動）。P2 は止めた。T1 = T1-481 を最優先に 477〜484。
+-->
+<!-- master:agents:start -->
+- **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=1（P1 だけ）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
+  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。今 WS199 p002（i04、PIN 不要・タッチ不要）。順は [WS199](ws199/ws.md) p002 → p003 → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。保留の branch: agent/p1-ws197（WS197 p003 の i03 の途中、10/17 の後に merge）、agent/p1-p045（WS001 p045、10/17 の後）。
+  - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
+  - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
