@@ -80,3 +80,26 @@ T1-495: image（0）・boot-test（1）は PASS、python3-guest の P2・P3・P5
 確かめ: `make BUILD=build/p1-rtld build/p1-rtld/dynamic/ld.so`（-Werror、warning 0）。rtld は guest でしか動かないので host の試験は無し。回帰の道具 `plan/tools/rtld/`（Master の Tools）に段 `path` を足した（検索の届かない `dynload/libpathmod.so` を絶対 path・`./` の相対 path・再度の絶対 path で開いて同じ関数の address、無い path は NULL）。`rtld-many.c` は target の clang で -Werror の compile のみ。`build-many.sh` の host の `rm -rf "$out"` は `fresh_out` に替えた（2026-10-06 の規則）。
 未実施（T1）: `rtld-many.sh`（新しい段 path を含む 17 段）と、T1-495 の python3-guest の再試験。
 注: `plan/ws074/tests/rtld-dlopen.*`（ws074-p017、cleared）は「/usr/lib/libcrypto.so の絶対 path は断る」を確かめる試験で、今の挙動と合わない。Master の Tools にも未完了の Phase にも無いので、直さずに削除を Q1 に依頼する。 → 2026-10-09 Q1 が削除した（ユーザーが ld.so の変更を承認、試験の整理の基準）。
+
+## T1-508 の FAIL の解析と直し（2026-10-10、P1）
+
+T1-508（image の tree 854a7ccbc）: ImportError は解消。P1・P3・P7 ok、P2・P6 FAIL、P5 は `run=45/45 failed=42`。分けた結果:
+
+| 症状 | 原因 | 区分 | 直し |
+| --- | --- | --- | --- |
+| P2 `asyncio_module: ValueError: unrecognized configuration name`、P5 の 39 file（test_json・test_os・test_asyncio.* など、doctest→pdb→asyncio の import で落ちる） | `Lib/asyncio/selector_events.py` が import の時に `os.sysconf('SC_IOV_MAX')` を呼び、`OSError` だけを捕まえる。libc の `<unistd.h>` に `_SC_IOV_MAX` が無いので posixmodule の表に名前が無く `ValueError` | 製品（libc の POSIX の不足） | `include/libc/unistd.h` に `_SC_IOV_MAX`（35）、`sysconf()` は `IOV_MAX`（16、kernel の readv・writev の上限と同じ）、getconf の表に `IOV_MAX` |
+| P5 test_re の 1 error（`multiprocessing.forkserver` の `recvmsg` が `OSError: [Errno 21] Operation not supported`） | CPython の `recvmsg` は常に msg_name の場所を渡す。kernel の `unix_socket_receive_begin` は stream の socket で address が渡ると `EOPNOTSUPP` を返していた（POSIX では connection-mode の msg_name は無視） | 製品（kernel） | `src/kern/net/unix-socket.c`: stream では address の場所に長さ 0 を返して受け取る（recvfrom も同じ道） |
+| P5 test_datetime が 10 分の timeout（`test_concurrent_initialization_subinterpreter`、InterpreterPoolExecutor の 8 つの subinterpreter の子が終わらない） | 未解析（subinterpreter と thread の組み合わせ） | 制限（ベータ3 の WS126 の残り） | `python3-guest.sh` の regrtest に `--ignore test_concurrent_initialization_subinterpreter`（T1 の時間を 10 分食うため）。要る時に別に調べる |
+| P6 `repl: pyrepl`・`FAIL: the interpreter ended with None`（6*7 → 42 は ok） | `repl-pty.py` が `exit()` の後 terminal を読まずに `wait` していた。pyrepl は終わる時に `tcsetattr(TCSADRAIN)` で端末を戻し、kernel の pty の drain（`tty_backend_drain`）は controller が読むまで待つ（POSIX どおり）ので、互いに待った | 試験 | 終わるのを待つ間も terminal を読む `wait_reading`、FAIL の時は最後の出力を出す |
+
+確かめ（host）:
+
+| コマンド | 結果 |
+| --- | --- |
+| `make BUILD=build/amd64 build/amd64/dynamic/libc.so build/amd64/bin/getconf build/amd64/vmunix`（-Werror） | rc 0、warning 0 |
+| `dgram-eof-host.c` の fixture を写した使い捨ての host 試験（scratchpad、kernel の本物の unix-socket.c）: stream の pair で name の場所付きの receive | 新: 1 byte・name length 0・PASS。直す前の unix-socket.c: -21（EOPNOTSUPP） |
+| `sh plan/bugs/BUG-263/dgram-eof-host.sh`・`sh plan/ws014/tests/run-handle-fd-test.sh` | PASS・PASS（AF_UNIX の回帰） |
+| `python3 -B plan/ws126/tests/repl-pty.py`（host の Python 3.13） | `repl: pyrepl`・`repl-pty: PASS` |
+| `sh -n plan/ws126/tests/python3-guest.sh` | ok |
+
+未実施（T1）: T1-508 と同じ python3-guest（image は python3 の package を libc の header の変更の後で作り直すこと: posixmodule が `_SC_IOV_MAX` を見て compile される）。期待: P2 ok、P6 ok、P5 は結果の行と残りの失敗を記録。
