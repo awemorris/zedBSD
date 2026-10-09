@@ -64,7 +64,7 @@ Primary Milestone: MG006
 | p002 | 連絡先と会話の保存（`~/Documents/`）、host の試験 | cleared（2026-10-07、T1-298） | p001 |
 | p003 | Phone の app: 連絡先の一覧とタイムラインの表示（保存から、送受信と通話は p004 の口で） | cleared（2026-10-07、T1-298） | p002・p004 |
 | p004 | compositor のメッセージの API の骨格と偽の backend | cleared（2026-10-07、T1-298） | p001 |
-| 後（別の Phase、範囲の外） | 本物の SMS・MMS・RCS の送受信、モデム、スマホの bridge、VoIP、chat の API の統合 | — | — |
+| 後（別の Phase、範囲の外） | 本物の SMS・MMS・RCS の送受信、モデム、スマホの bridge、VoIP、chat の API の統合。Bluetooth のスマホの bridge（SMS の MAP、連絡先の PBAP、通話の HFP）の層の流れと interface は [WS197 p004](../ws197/phase004/phase.md)（2026-10-10 ユーザーの指示で P1 が確定） | — | — |
 | p005 | 全文規約の見直し（最初の範囲） | planning | p002〜p004 |
 
 ## 2026-10-06 UAT のフィードバック
