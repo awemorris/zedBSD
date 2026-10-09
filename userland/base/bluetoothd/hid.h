@@ -206,8 +206,14 @@ struct btd_hid {
 	int page_scan;
 	unsigned refused;
 
-	/* ws197-p002: the session's notices of dropped packets that ended nothing (section 3.5). */
+	/*
+	 * ws197-p002: the session's notices of dropped packets that ended
+	 * nothing (section 3.5), and how many devices may be connected or
+	 * connecting at once (BTD_HID_MAX, or fewer while a phone's link takes
+	 * one of the session's links, section 7.5).
+	 */
 	unsigned notices;
+	unsigned limit;
 
 	/* LE's auto-connect: whether it is set (an LE Create Connection from the filter accept list), how often it was, and when a refused one is tried again (0: at once). */
 	int le_armed;
@@ -224,6 +230,8 @@ void btd_hid_release(struct btd_hid *hid, const uint8_t *address, unsigned type)
 void btd_hid_resume(struct btd_hid *hid);
 void btd_hid_status(const struct btd_hid *hid, unsigned index, char *line, size_t size);
 unsigned btd_hid_open_count(const struct btd_hid *hid);
+unsigned btd_hid_link_count(const struct btd_hid *hid);
+void btd_hid_set_limit(struct btd_hid *hid, unsigned limit);
 int btd_hid_busy(const struct btd_hid *hid, const uint8_t *address);
 void btd_hid_hold(struct btd_hid *hid, int held);
 void btd_hid_tick(struct btd_hid *hid, uint64_t now);

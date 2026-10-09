@@ -152,6 +152,7 @@ static void hid_page(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_page_scan(struct btd_hid *hid);
 static void hid_page_over(struct btd_hid *hid, struct btd_hid_device *device);
 static void hid_notice(struct btd_hid *hid, const uint8_t *packet);
+static int hid_full(const struct btd_hid *hid);
 static void hid_retry_later(struct btd_hid_device *device, uint64_t now);
 static void hid_answer(struct btd_hid *hid, struct btd_hid_device *device, const char *line);
 static void hid_connected_line(const struct btd_hid *hid, const struct btd_hid_device *device, char *line, size_t size);
@@ -181,12 +182,13 @@ btd_hid_init(
 {
 	unsigned index;
 
-	/* Nothing in the table. */
+	/* Nothing in the table, and as many connections as it holds. */
 	memset(hid, 0, sizeof(*hid));
 	hid->session = session;
 	hid->keys_folder = keys_folder;
 	hid->router = router;
 	hid->hooks = *hooks;
+	hid->limit = BTD_HID_MAX;
 
 	/* No input device yet. */
 	for (index = 0U; index < BTD_HID_MAX; index++)
@@ -279,6 +281,7 @@ btd_hid_connect(
 	struct btd_hid_device *device;
 	struct btd_bond bond;
 	int keyed;
+	int full;
 	int le;
 	int error;
 
@@ -324,6 +327,13 @@ btd_hid_connect(
 	/* An open device is answered as it is. */
 	if (device->state == BTD_HID_OPEN) {
 		hid_connected_line(hid, device, answer, size);
+		return 1;
+	}
+
+	/* No more connections while the limit is reached (a phone's link takes a link, ws197-p002 section 7.5). */
+	full = hid_full(hid);
+	if (full) {
+		(void)snprintf(answer, size, "%s", "ERROR busy-links");
 		return 1;
 	}
 
@@ -530,6 +540,44 @@ btd_hid_status(
 		       device->reports,
 		       device->malformed,
 		       device->oversize + device->hog.oversize);
+}
+
+/*
+ * Tells how many devices are connected or connecting (any state but idle),
+ * the count the limit of section 7.5 (ws197-p002) bounds.
+ */
+unsigned
+btd_hid_link_count(
+	const struct btd_hid *hid)
+{
+	unsigned index;
+	unsigned count;
+
+	/* Each device whose connection is under way or up. */
+	count = 0U;
+	for (index = 0U; index < BTD_HID_MAX; index++) {
+		if (hid->devices[index].used && hid->devices[index].state != BTD_HID_IDLE)
+			count++;
+	}
+
+	/* Succeeded: the count. */
+	return count;
+}
+
+/*
+ * Sets how many devices may be connected or connecting at once
+ * (ws197-p002 section 7.5: fewer while a phone's link is up).  Connections
+ * up already stay; no new one starts or is taken past the limit.
+ */
+void
+btd_hid_set_limit(
+	struct btd_hid *hid,
+	unsigned limit)
+{
+	/* At most the table's size. */
+	if (limit > BTD_HID_MAX)
+		limit = BTD_HID_MAX;
+	hid->limit = limit;
 }
 
 /*
@@ -1200,6 +1248,7 @@ hid_request(
 	struct btd_hid_device *device;
 	uint8_t accept[BTD_ADDRESS_BYTES + 1U];
 	uint8_t reject[BTD_ADDRESS_BYTES + 1U];
+	int full;
 	int error;
 
 	/* A whole event of a device in the table. */
@@ -1207,8 +1256,9 @@ hid_request(
 		return;
 	device = hid_find(hid, parameters);
 
-	/* A device whose connection is under way already (its page crossed this) is refused, as the router refuses strangers. */
-	if (device == NULL || device->state != BTD_HID_IDLE) {
+	/* A device whose connection is under way already (its page crossed this), or past the limit (section 7.5), is refused as the router refuses strangers. */
+	full = hid_full(hid);
+	if (device == NULL || device->state != BTD_HID_IDLE || full) {
 		memcpy(reject, parameters, BTD_ADDRESS_BYTES);
 		reject[BTD_ADDRESS_BYTES] = HID_REASON_REFUSED;
 		(void)hid_command(hid, HID_REJECT_CONNECTION, reject, sizeof(reject));
@@ -2350,10 +2400,18 @@ hid_page(
 	struct btd_linkmgr *linkmgr;
 	uint8_t parameters[13];
 	uint64_t now;
+	int full;
 	int error;
 
-	/* The controller's one BR/EDR page (ws197-p002 section 6.2): while another party's is out, the page waits a little, not counted as a try. */
+	/* No more connections while the limit is reached (ws197-p002 section 7.5): the page waits, not counted as a try. */
 	now = btd_now_ms();
+	full = hid_full(hid);
+	if (full) {
+		device->retry_at = now + HID_PAGE_WAIT_MS;
+		return;
+	}
+
+	/* The controller's one BR/EDR page (ws197-p002 section 6.2): while another party's is out, the page waits a little, not counted as a try. */
 	linkmgr = hid->router->linkmgr;
 	if (linkmgr != NULL) {
 		error = btd_linkmgr_page_begin(linkmgr, BTD_LINKMGR_HID, device->address, now);
@@ -3022,10 +3080,16 @@ hid_le_arm(
 	uint8_t parameters[39];
 	unsigned index;
 	unsigned resolving;
+	int full;
 	int error;
 
-	/* A list of its own, and the resolving list emptied while resolution is off. */
+	/* No auto-connect while the limit is reached (ws197-p002 section 7.5): tried again later. */
 	hid->le_retry_at = btd_now_ms() + BTD_HID_RETRY_FIRST_MS;
+	full = hid_full(hid);
+	if (full)
+		return;
+
+	/* A list of its own, and the resolving list emptied while resolution is off. */
 	error = hid_command(hid, HID_LE_CLEAR_LIST, NULL, 0U);
 	if (error != 0)
 		return;
@@ -3290,6 +3354,22 @@ hid_handle_at(
 
 	/* Succeeded: the handle. */
 	return (uint16_t)value;
+}
+
+/* Tells whether the HID host has as many connections, made or under way, as it may have (ws197-p002 section 7.5). */
+static int
+hid_full(
+	const struct btd_hid *hid)
+{
+	unsigned count;
+
+	/* Those connected or connecting, against the limit. */
+	count = btd_hid_link_count(hid);
+	if (count >= hid->limit)
+		return 1;
+
+	/* Room for one more. */
+	return 0;
 }
 
 /* Tells whether a page is under way (the controller pages one device at a time). */

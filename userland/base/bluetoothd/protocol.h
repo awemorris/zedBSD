@@ -23,8 +23,12 @@
  * ws143-p004 to p006 add PAIR, AGENT, FORGET and BONDS (plan/ws143/phase004
  * section 5).  SHOW ends with "POWER on|off" (ws143-p006).  ws197-p002
  * adds PAIR's option phone=1 (a phone for the phone link, BR/EDR only:
- * ERROR phone-le otherwise), whose PAIRED line ends with "phone=1", or
- * "phone=0 why=WORD" when the phone link did not take it.  A pairing's
+ * ERROR phone-le otherwise, ERROR busy-links while the HID host uses every
+ * link), whose PAIRED line ends with "phone=1", or "phone=0 why=WORD" when
+ * the phone link did not take it; and, for root, PHONE PROBE ADDRESS
+ * uuid=0x1132|0x112F (SDP, RFCOMM and OBEX tried on the phone's link,
+ * answered "PROBE uuid=... channel=... connect=0x.. get=0x.. bytes=N
+ * disconnect=0x.." or ERROR WHY) and PHONE DROP ADDRESS.  A pairing's
  * questions, to the agent or the pairing's client, name the device and
  * who started it:
  *

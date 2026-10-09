@@ -36,6 +36,7 @@
 #include "userland/base/bluetoothd/hid.h"
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/pair.h"
+#include "userland/base/bluetoothd/phone.h"
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/linkmgr.h"
@@ -115,6 +116,7 @@ struct btd_client {
 	int waits_pair;
 	int waits_connect;
 	uint8_t connect_address[BTD_ADDRESS_BYTES];
+	int waits_probe;
 };
 
 static void btd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -150,6 +152,8 @@ static int btd_permitted(uid_t uid);
 static void btd_connect(int index, const char *argument);
 static void btd_disconnect(struct btd_client *client, const char *argument);
 static void btd_status(struct btd_client *client);
+static void btd_phone_request(int index, const char *argument);
+static void btd_probed(void *context, const char *line);
 static int btd_hid_bridge(void *context, int *descriptor);
 static void btd_hid_told(void *context, const uint8_t *address, const char *line);
 static void btd_hid_holding(void);
@@ -204,6 +208,18 @@ static struct btd_hid btd_hid_host;
 static struct btd_linkmgr btd_links;
 
 /*
+ * The phone link (ws197-p002 section 11): the router's owner of a phone's
+ * link that a phone's pairing handed over, and the SDP records it offers
+ * (none in this Phase: the profiles register theirs).  They live as long as
+ * the daemon; a closed node ends the phone's link.
+ */
+static struct btd_phone btd_phone_link;
+static struct btd_sdps_db btd_records;
+
+/* The client waiting for a probe of the phone's link (BTD_NO_CLIENT: none). */
+static int btd_probe_client = BTD_NO_CLIENT;
+
+/*
  * The clients of a pairing: the one that asked for it, the agent that
  * named itself (it answers for pairings of its uid, or of anyone when it
  * is the seat's user), and the one asked the question now
@@ -225,6 +241,13 @@ static int btd_system = -1;
 /* The btsnoop record given with -s (ws143-p005 section 9.11): its path (NULL: none) and the child's open file (-1). */
 static const char *btd_snoop_path;
 static int btd_snoop = -1;
+
+/*
+ * A packet of a phone's link with its data hidden, as the btsnoop record
+ * gets it (ws197-p002 section 11).  The trace fills and writes it in one
+ * call on the daemon's one thread.
+ */
+static uint8_t btd_trace_copy[BT_ACL_PACKET_MAX];
 
 /*
  * How many starts in a row failed (0 again after a ready start), and
@@ -271,6 +294,7 @@ main(
 	struct pollfd descriptors[4U + BTD_CLIENTS_MAX];
 	struct btd_hid_hooks hid_hooks;
 	struct btd_router_hid router_hid;
+	struct btd_router_phone router_phone;
 	char expired_text[24];
 	unsigned count;
 	unsigned index;
@@ -348,6 +372,16 @@ main(
 	btd_router_set_hid(&btd_routing, &router_hid);
 	btd_pair_set_handoff(&btd_pairing, btd_hid_handoff, &btd_hid_host);
 
+	/* The phone link, the router's owner of a phone's link and the pairing's phone hook (ws197-p002). */
+	btd_sdps_db_init(&btd_records);
+	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, btd_probed, NULL);
+	router_phone.context = &btd_phone_link;
+	router_phone.wants = btd_phone_wants;
+	router_phone.claims = btd_phone_claims;
+	router_phone.handle = btd_phone_handle;
+	btd_router_set_phone(&btd_routing, &router_phone);
+	btd_pair_set_phone_handoff(&btd_pairing, btd_phone_handoff, &btd_phone_link);
+
 	/* The controller there is now. */
 	btd_open();
 	btd_log("BLUETOOTHD READY state=%s uid=%u\n", btd_state_name(btd_session.state), (unsigned)getuid());
@@ -415,6 +449,12 @@ main(
 		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
 			btd_hid_holding();
 			btd_hid_tick(&btd_hid_host, now);
+		}
+
+		/* The phone link's deadlines, and its frames moved on to the session. */
+		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
+			btd_phone_tick(&btd_phone_link, now);
+			btd_phone_pump(&btd_phone_link);
 		}
 
 		/* The link manager's refused page scan write, and a page nobody ended in time. */
@@ -632,6 +672,7 @@ btd_close(
 	/* A pairing cannot go on without the controller (review S-f), and no connection or page is left. */
 	btd_pair_lost(&btd_pairing);
 	btd_hid_lost(&btd_hid_host);
+	btd_phone_lost(&btd_phone_link);
 	btd_router_clear(&btd_routing);
 	btd_linkmgr_reset(&btd_links);
 
@@ -713,8 +754,15 @@ btd_timeout(
 	deadline = btd_hid_deadline(&btd_hid_host);
 	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
+	deadline = btd_phone_deadline(&btd_phone_link);
+	if (btd_session_open &&
+	    deadline != 0U &&
+	    (earliest == 0U || deadline < earliest))
+		earliest = deadline;
 	deadline = btd_linkmgr_deadline(&btd_links, now);
-	if (btd_session_open && deadline != 0U && (earliest == 0U || deadline < earliest))
+	if (btd_session_open &&
+	    deadline != 0U &&
+	    (earliest == 0U || deadline < earliest))
 		earliest = deadline;
 	if (!btd_session_open && !btd_stopped) {
 		deadline = btd_looked_ms + BTD_RETRY_MS;
@@ -853,8 +901,11 @@ btd_line(
 		return;
 	}
 
-	/* A client waiting for its scan, its pairing or its connection asks nothing more until it is answered. */
-	if (client->waits_scan || client->waits_pair || client->waits_connect)
+	/* A client waiting for its scan, its pairing, its connection or its probe asks nothing more until it is answered. */
+	if (client->waits_scan ||
+	    client->waits_pair ||
+	    client->waits_connect ||
+	    client->waits_probe)
 		return;
 
 	/* SHOW. */
@@ -931,6 +982,13 @@ btd_line(
 	same = strncmp(line, "POWER ", 6U);
 	if (same == 0) {
 		btd_power(client, line + 6);
+		return;
+	}
+
+	/* PHONE PROBE ADDRESS uuid=0x1132|0x112F, PHONE DROP ADDRESS (ws197-p002, root). */
+	same = strncmp(line, "PHONE ", 6U);
+	if (same == 0) {
+		btd_phone_request(index, line + 6);
 		return;
 	}
 
@@ -1299,6 +1357,7 @@ btd_pair(
 	struct btd_client *client;
 	uint8_t address[BTD_ADDRESS_BYTES];
 	unsigned type;
+	unsigned links;
 	int permitted;
 	int phone;
 	int busy;
@@ -1334,6 +1393,13 @@ btd_pair(
 	/* None while the user has Bluetooth off. */
 	if (btd_powered_off) {
 		btd_write(client, "ERROR off\nDONE\n");
+		return;
+	}
+
+	/* A phone needs a link the HID host does not use (ws197-p002 section 7.5). */
+	links = btd_hid_link_count(&btd_hid_host);
+	if (phone && links >= BTD_HID_MAX) {
+		btd_write(client, "ERROR busy-links\nDONE\n");
 		return;
 	}
 
@@ -1589,12 +1655,16 @@ btd_paired(
 	void *context,
 	const char *answer)
 {
+	const char *taken;
 	int index;
 
 	UNUSED_PARAMETER(context);
 
-	/* Logged. */
+	/* Logged; a phone taken without a known Class of Device says so (ws197-p002 section 7.4). */
 	btd_log("bluetoothd: pairing: %s\n", answer);
+	taken = strstr(answer, " phone=1");
+	if (taken != NULL && btd_phone_link.class_unknown)
+		btd_log("bluetoothd: phone: cod=unknown\n");
 
 	/* No question waits any more (the one asked hears it is over); the client that asked hears the end. */
 	btd_asked_client = BTD_NO_CLIENT;
@@ -1605,6 +1675,151 @@ btd_paired(
 		return;
 	btd_clients[index].waits_pair = 0;
 	btd_write(&btd_clients[index], "%s\nDONE\n", answer);
+}
+
+/*
+ * Answers PHONE (ws197-p002 section 11, root only): PROBE ADDRESS
+ * uuid=0x1132|0x112F tries the phone's link through SDP, RFCOMM and OBEX
+ * (answered when it ends); DROP ADDRESS ends the phone's link.
+ */
+static void
+btd_phone_request(
+	int index,
+	const char *argument)
+{
+	struct btd_client *client;
+	char address_text[18];
+	uint8_t address[BTD_ADDRESS_BYTES];
+	const char *rest;
+	size_t length;
+	uint16_t uuid;
+	int probe;
+	int drop;
+	int same;
+	int error;
+
+	/* Root alone. */
+	client = &btd_clients[index];
+	if (client->uid != 0) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* PROBE or DROP. */
+	probe = 0;
+	drop = 0;
+	rest = NULL;
+	same = strncmp(argument, "PROBE ", 6U);
+	if (same == 0) {
+		probe = 1;
+		rest = argument + 6;
+	}
+
+	/* DROP. */
+	same = strncmp(argument, "DROP ", 5U);
+	if (same == 0) {
+		drop = 1;
+		rest = argument + 5;
+	}
+
+	/* Another request. */
+	if (rest == NULL) {
+		btd_write(client, "ERROR request\nDONE\n");
+		return;
+	}
+
+	/* The address. */
+	length = strlen(rest);
+	if (length < 17U) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* Its seventeen characters, read. */
+	memcpy(address_text, rest, 17U);
+	address_text[17] = '\0';
+	error = btd_address_parse(address_text, address);
+	if (error != 0) {
+		btd_write(client, "ERROR address\nDONE\n");
+		return;
+	}
+
+	/* A ready controller. */
+	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
+		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* DROP: the link ends (its end comes with the link's Disconnection Complete). */
+	if (drop) {
+		error = btd_phone_drop(&btd_phone_link, address);
+		if (error != 0) {
+			btd_write(client, "ERROR not-connected\nDONE\n");
+			return;
+		}
+
+		/* Asked. */
+		btd_write(client, "DONE\n");
+		return;
+	}
+
+	/* PROBE: MAS's class or PSE's. */
+	uuid = 0U;
+	same = strcmp(rest + 17, " uuid=0x1132");
+	if (probe && same == 0)
+		uuid = BTD_SDP_UUID_MAS;
+	same = strcmp(rest + 17, " uuid=0x112F");
+	if (probe && same == 0)
+		uuid = BTD_SDP_UUID_PSE;
+	same = strcmp(rest + 17, " uuid=0x112f");
+	if (probe && same == 0)
+		uuid = BTD_SDP_UUID_PSE;
+	if (uuid == 0U) {
+		btd_write(client, "ERROR uuid\nDONE\n");
+		return;
+	}
+
+	/* One probe at a time. */
+	if (btd_probe_client != BTD_NO_CLIENT) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* Started, or why not. */
+	error = btd_phone_probe(&btd_phone_link, address, uuid, btd_now_ms());
+	if (error == ENOTCONN) {
+		btd_write(client, "ERROR not-connected\nDONE\n");
+		return;
+	} else if (error != 0) {
+		btd_write(client, "ERROR busy\nDONE\n");
+		return;
+	}
+
+	/* Succeeded: the client waits for the probe's end. */
+	btd_probe_client = index;
+	client->waits_probe = 1;
+}
+
+/* Tells the client that asked the end of a probe (the phone link's hook) and logs it (the line says no content, p001 R22). */
+static void
+btd_probed(
+	void *context,
+	const char *line)
+{
+	int index;
+
+	UNUSED_PARAMETER(context);
+
+	/* Logged. */
+	btd_log("bluetoothd: phone: %s\n", line);
+
+	/* The client that asked hears it. */
+	index = btd_probe_client;
+	btd_probe_client = BTD_NO_CLIENT;
+	if (index == BTD_NO_CLIENT)
+		return;
+	btd_clients[index].waits_probe = 0;
+	btd_write(&btd_clients[index], "%s\nDONE\n", line);
 }
 
 /*
@@ -1821,6 +2036,11 @@ btd_client_close(
 	client->waits_scan = 0;
 	client->waits_pair = 0;
 	client->waits_connect = 0;
+	client->waits_probe = 0;
+
+	/* The client waiting for a probe is gone: the probe's end has nobody to tell. */
+	if (btd_probe_client == index)
+		btd_probe_client = BTD_NO_CLIENT;
 
 	/* The agent is gone; a question it was asked is no, and it hears no ASK-END. */
 	if (btd_agent_client == index)
@@ -2130,11 +2350,33 @@ btd_trace(
 	size_t length,
 	int received)
 {
-	(void)context;
+	uint16_t handle;
+	size_t copied;
+	int hidden;
+
+	UNUSED_PARAMETER(context);
 
 	/* A packet with its type's byte, while the record is open. */
 	if (btd_snoop < 0 || length < 1U)
 		return;
+
+	/* A phone's ACL data is hidden: its link's, and its pairing's (ws197-p002 section 11). */
+	hidden = 0;
+	if (packet[0] == BT_PACKET_ACL && length >= 3U) {
+		handle = (uint16_t)(((unsigned)packet[1] | ((unsigned)packet[2] << 8)) & 0x0fffU);
+		hidden = btd_phone_owns(&btd_phone_link, handle);
+		if (btd_pairing.phone &&
+		    btd_pairing.connected &&
+		    btd_pairing.handle == handle)
+			hidden = 1;
+	}
+
+	/* The phone's: its headers and zeros. */
+	if (hidden) {
+		copied = btd_snoop_hide(packet, length, btd_trace_copy, sizeof(btd_trace_copy));
+		btd_snoop_write(btd_snoop, btd_trace_copy[0], received, btd_trace_copy + 1, copied - 1U);
+		return;
+	}
 
 	/* Succeeded: appended. */
 	btd_snoop_write(btd_snoop, packet[0], received, packet + 1, length - 1U);
