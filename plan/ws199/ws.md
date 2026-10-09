@@ -65,5 +65,10 @@ NFC の reader に載せたままの鍵も、そのまま「タッチ」と見�
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| p001 | 調べ・設計（第 4 版、review-1〜3）と実装 i01〜i06（i01 popup と頁、i02 NFC（BUG-286）、i03 KEYINFO・KEYPIN・KEYRESET と Insert/Set PIN/Change PIN/Reset、i04 options と auth-fido2、i05 KEYOWNER と greeter・lock の鍵のモードと keypad、i06 試験と T1）、約 23 LW。2026-10-10: i01（cfa5351a1）・i02（0b44c7008、R3 は 5515a4dab）・i03（d8cb16814、鍵の情報・Set/Change PIN・Reset Key、KL_VERSION 77）を main に merge | in-progress |
-| p002 | T1 の AAT と 5330 の UAT | planning |
+| [p001](phase001/phase.md) | 調べ・設計（第 4.1 版、review-1〜3）と実装 i01 頁と popup・i02 NFC（BUG-286）・i03 鍵の情報・Set/Change PIN・Reset。i01（cfa5351a1）・i02（0b44c7008・5515a4dab）・i03（d8cb16814、KL_VERSION 77）を main に merge | cleared 候補（実装の分。実機は p005） |
+| [p002](phase002/phase.md) | PIN 不要・タッチ不要の設定（options の行、set-options・auth-fido2、radio と警告）＝ i04 | planned、次 |
+| [p003](phase003/phase.md) | greeter・lock の鍵のモード、user の自動の選択、0.5 秒、keypad、sleep で card を閉じる ＝ i05 | planned |
+| [p004](phase004/phase.md) | host 試験の残り・style・T1 の AAT を 1 回で ＝ i06 | planned |
+| [p005](phase005/phase.md) | 5330 の UAT | planning |
+
+見積もり（2026-10-10）: p002 4 LW、p003 6 LW、p004 2 LW。使用量の都合で、p004 の T1 は 1 回にまとめる。

@@ -14,18 +14,17 @@
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- main b63777dec（2026-10-08 夕）。今日の後半の統合: WS188 完了（host-machine は plan/tools/keiland-machine へ）、WS189 p002〜p004（DnD・Mail の添付）、WS190 p001〜p003（指の選択、KL_VERSION 74）、WS191 p001〜p004（kl_audio_stream、KL_VERSION 73、Linux alsa-lib の dlopen・FreeBSD OSS）、WS143 p006（Bluetooth の desktop、KL_VERSION 72）、BUG-256・BUG-265・BUG-266（resolved / 実機待ち）、BUG-267・BUG-268 の直し、WS083 p008 と照合の review の直し、WS177 p020・p021（Music）。
-- 5330 の状態: 最後の kernel の書き込み（BUG-267 の直し、cksum 180880581）の後に SSH が応答しなくなり（BUG-269）、ユーザーが再起動した直後。どの kernel で起動したかは未確認（ユーザーが SSH の見張りを止めた）。build/q1-uat2/vmunix（2563124650）は BUG-267 と BUG-268 の両方入り、/bin/wayland は 1600740716（BUG-266 の直し入り）。boot の行に `usbhid.dump=1`（診断、BUG-267 の後に外す）。
-- ユーザーへの確認待ち: BUG-267 の 2 本指（interface 1 の attach、contact=1）、BUG-268 の DP を抜いた後の eDP の戻り（1〜2 秒）、BUG-265 の実機の tap-drag、ws090-p009・p018・p020・p021 の PNG、`kl_audio_stream_*` を `kl_audio_*` に縮めるか（Q1 が問うた、未回答）。
+- main の先頭（2026-10-10 夜）: WS199 i01〜i03（d8cb16814、KL_VERSION 77）、BUG-283・284・285・286 の直し、BUG-275（USB の zero-bandwidth の endpoint、Bluetooth）、BUG-222 の TCP の並び替え 44・ifconfig の media、rtld の dlopen の path、Noct 2.0.3。
+- 5330（10.0.30.3、zedBSD の単独起動）: SSH は `sshpass -p kei ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no kei@10.0.30.3`（鍵は今の image に無い）、sudo は `echo kei | sudo -S`。image は 10/09 の a42a544 以降の userland＋Q1 が入れた BUG-275 の kernel（ESP の vmunix、前は vmunix.old）。WS199 i02 以降（NFC・Security Keys の頁）は入っていない。/tmp/fidoctl.new に新しい fidoctl（ユーザーが鍵の up=false の確かめを流す、手順は Q1 が会話で渡した）。
+- ユーザーの判断待ち: passkey-fido2 だけを 5330 に入れ替えて NFC の login を試すか、image を作り直すか。fidoctl の `-s assert` の結果（WS199 p002 の前提）。
 <!-- master:merge:end -->
 
 ### Q1 の次の手順
 
 <!-- master:next:start -->
-1. P1・P2・T1 を新しい世代で起動（再開点は上の agents）。merge は `source plan/tools/merge_one.sh && merge_one SHA`。
-2. **5330**（ユーザー「アップデートや再起動は自由にどうぞ」、SSH は kei@10.0.30.3、鍵は登録済み、sudo は `echo kei | sudo -S`）: まず起動中の kernel を確かめる。ESP への書き込みは BUG-269 で SSH が止まるので、書く前にユーザーに一言、書いたら電源の再投入を頼む。手順は script を /tmp に置き `nohup sh` で流し、終わりの印の file を見る。
-3. ベータ2 の残り: plan/agents/sweep-beta2-rc-20261008.md の §5（約 16.6 LW、WS143 が最大）。
-4. ユーザーの判断待ち: 上の merge の block の「ユーザーへの確認待ち」。
+1. 新しい Q1 は AGENTS.md・plan/beta2.md・この block・plan/ws199/ws.md・plan/ws200/ws.md を読む。P1・T1 の agent は会話に紐づくので、新しい session では P1・T1 を新しい世代で起動する（P1 は agent/p1 の worktree で WS199 p002 から、phase.md に「すること・やり方」）。
+2. merge は `source plan/tools/merge_one.sh && merge_one SHA`（merge だけを 1 つの Bash の呼び出しに、memory の規則）。T1 の台帳の番号は Q1 が振る（次は T1-523）。Bug の次の番号は BUG-287、Queue は q923、WS は WS202。
+3. 日程: 10/13 凍結の目標 → 10/14 RC・最終回帰（WS129 p006）→ 10/16 公開の準備（WS129 p008）、公開はユーザーの指示。Vulkan Video は T1-435 が PASS なら release の config に `ZEDBSD_BOOT_EXTRA_LINES += i915.debug=video`、でなければ OFF のまま。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断

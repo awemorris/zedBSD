@@ -38,5 +38,5 @@ WS199 i01 の popup の部品（userland/desktop/settings/dialog.c）を使う�
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| p001 | 今の Users の頁・passwd の経路・greeter と lock の方式の選択（ws172-p007）の調べ、設計、実装、host 試験 | planned |
-| p002 | T1 の AAT と 5330 の UAT | planning |
+| [p001](phase001/phase.md) | Change Password のウィザードと Sign-in Methods（WS199 の dialog.c と options の行の methods）、host 試験 | planned（WS199 p002 の後、約 6 LW） |
+| [p002](phase002/phase.md) | 5330 の UAT | planning |
