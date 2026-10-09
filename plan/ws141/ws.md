@@ -173,3 +173,7 @@ colour image view、single-level nearest/linear sampler、owned SPIR-V moduleを
 ## i14 canonical layout checkpoint（2026-10-09）
 
 descriptor/pipeline layoutのexact client decoder、canonical binding、immutable parent所有、8texture/4uniform/4set/128byte push許可を追加。actual host5範囲/rpi4 y build/style PASS。次はpool/set/updateとdraw descriptor snapshot、public runtime/Keiland/実機/p007未達。i13/i14/p005/p006 in-progress、Master変更無し。[結果/復帰点](execution-20261009.md#i14-canonical-descriptorpipeline-layoutのsoftware出力2026-10-09)。
+
+## i14 pool/set checkpoint（2026-10-09）
+
+descriptor pool lifecycle/complete set batch allocation/freeを接続。old prepared ownersのstorage/chargeをpublic reset/destructionと分離、actual hostでrollback/retentionを確認。host6範囲/rpi4 y build/style PASS、次はdescriptor update/copyとdraw snapshot。i13/i14/p005/p006 in-progress、public runtime/Keiland/実機/p007未達。Master変更無し。[結果/復帰点](execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。

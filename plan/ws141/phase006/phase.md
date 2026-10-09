@@ -78,3 +78,7 @@ actual client handle/record encoderとnative sourceでcolour view・nearest/line
 ## i14 canonical layout checkpoint（2026-10-09）
 
 actual client recordでdescriptor/pipeline layoutを追加。canonical bindings・same-device immutable sampler・finite set/push interfaceとindependent graph retentionをhostで確認。host5範囲/rpi4 y build/style PASS、次は512-set pool/set/updateとimmutable draw snapshot。public runtime未公開、p006/i14 in-progress。[結果/制限/再開](../execution-20261009.md#i14-canonical-descriptorpipeline-layoutのsoftware出力2026-10-09)。
+
+## i14 pool/set checkpoint（2026-10-09）
+
+actual client recordでfinite pool/reset/destroyとall-or-nothing set batch allocate/freeを追加。old prepared setのindependent graph/charge保持とcapacity reuse、2nd registry OOMの全rollbackをnative hostで確認。host6範囲/rpi4 y build/style PASS、next ordered descriptor update/copyとdraw snapshot。public runtime未公開、p006/i14 in-progress。[結果/限界/復帰点](../execution-20261009.md#i14-descriptor-poolset所有のsoftware出力2026-10-09)。
