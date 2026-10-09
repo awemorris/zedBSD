@@ -67,6 +67,8 @@ extern "C" {
  */
 #define _SC_GETGR_R_SIZE_MAX 33
 #define _SC_TTY_NAME_MAX 34
+/* How many buffers one readv, writev or sendmsg takes (IOV_MAX of <sys/uio.h>). */
+#define _SC_IOV_MAX 35
 
 #define _PC_LINK_MAX 1
 #define _PC_MAX_CANON 2

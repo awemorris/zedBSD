@@ -2,7 +2,7 @@
 
 # ws194-p001: keiland-linux・keiland-freebsd の package の確認と install の確認
 
-Status: planned（2026-10-09 Q1、q919 P1）
+Status: cleared（2026-10-09 Q1 判定: Debian（T1-498）で一覧→y/N→導入→build→install の y/N→rc 0、FreeBSD（T1-506）で質問・MAKE_RC=0・install、端末なしは両方 PASS。T1-506 の Debian の再確認は emoji の取得の 504 で build が止まり install の質問は未確認だが、同じ script の T1-498 で確認済み）
 Parent: [WS194](../ws.md)
 
 ## 手順

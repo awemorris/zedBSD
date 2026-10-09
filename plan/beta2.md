@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=beta2-triage -->
 
-# ベータ2 の残り作業とトリアージ（2026-10-09 Q1、同日更新）
+# ベータ2 の残り作業とトリアージ（2026-10-09 Q1、2026-10-10 未明 更新）
 
 公開は 10/17（OSC 当日、朝から会場）なので、**10/16 中にリリースの準備を終える**。作業日は 10/09〜10/16。
 体制: P1（実装・debug）＋T1（QEMU の試験）＋ユーザー（5330 の UAT・判断）。この表は計画で、Queue の承認ではない。
@@ -15,22 +15,28 @@
 | 10/14〜10/15 | 最終回帰（QEMU）と 5330 の確認、出た Bug を「直す／既知の問題に書く」で仕分け |
 | **10/16** | 最終の image・配布物・license の一覧・release notes を確定。WS143・WS083 は必須（2026-10-09 ユーザー）。間に合わなければここで OFF。公開の手順の確認（公開はユーザーの指示で） |
 
+## 今の状況（2026-10-10 未明）
+
+- **P1 の実装・直しの必須は済んだ。** 残りの必須は全部「待ち」: T1 の再試験、ユーザーの review と UAT、5330 の復帰、日程の決まった作業（10/14 の最終回帰、10/16 の公開の準備）。
+- その間の P1 は WS197（Bluetooth のスマホ連携、ベータ3）を 10/17 まで main に入れない別の branch で進める（ユーザー「beta2.mdの必須が終わってから」）。T1 の FAIL・UAT の Bug が来たら P1 はすぐそちらへ戻る。
+- **ユーザーに頼みたい事**: 5330 の電源か network（10/09 夜から ping も SSH も届かない、T1-435 が待っている）、release の文書の review、UAT、PNG の確認、試験の機器の情報。
+
 ## 必須
 
-| 項目 | 状態 | LW | 担当 |
-| --- | --- | --- | --- |
-| [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み、ユーザーの review 待ち・comment の整理 | 1 | P1・ユーザー |
-| [WS129](ws129/ws.md) p013 利用の手引きの更新 | 下書き済み、ユーザーの review 待ち | 0.5 | P1・ユーザー |
-| [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
-| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 手順を phase.md に用意済み（host の確かめ PASS）、実行は 10/16 | 0.5 | P1・Q1 |
-| T1 の未実行の試験: T1-483・484・435（5330 の実機） | 2026-10-09 夜: 499・500・502 PASS、501・503(FreeBSD)・495・477 FAIL | 2 | T1 |
-| 試験の FAIL の直し: T1-477（WS099 の回帰 C1・C2・C3・C5・C7）、T1-501（volume-p005 の SOUND report 1 行、Welcome の Settings）、T1-503（FreeBSD で /dev/tty の read が EIO）、T1-495（Python の import、ベータ3） | P1 次の世代 | 4 | P1 |
-| WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
-| 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
-| UAT で出る Bug の debug の枠 | — | 10 | P1 |
-| [WS143](ws143/ws.md) Bluetooth の HID（BR/EDR・LE のキーボード・マウス）。release の config に入れ済み | 実装・host 試験済み。T1-502 の回帰・残りの Phase・5330 の確認と直し | 4.5 | P1・T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の残り済み（hang の道具・`--time`・門）。T1-435（5330 の実機、F1・F2 を足す）と FAIL の直し。門は boot の `i915.debug=video`（今の release の config は OFF）。ON は release の config に 1 行、T1-435 が PASS したら入れる | 2.5 | P1・T1 |
-| T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）の判定 | ユーザー待ち | —（15 分） | ユーザー |
+| 項目 | 状態 | 待っている物 | LW | 担当 |
+| --- | --- | --- | --- | --- |
+| [WS129](ws129/ws.md) p005 release notes と既知の問題 | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)） | ユーザーの review。RC で review の comment を消す | 0.5 | ユーザー・P1 |
+| [WS129](ws129/ws.md) p013 利用の手引き | 下書き済み（[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)） | ユーザーの review | 0.5 | ユーザー・P1 |
+| [WS129](ws129/ws.md) p006 最終回帰（release の image） | 未着手 | 10/14（RC の後） | 3 | T1 |
+| [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み（host の確かめ PASS） | 10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
+| T1 の再試験 T1-509〜512（window の C7、画面 keyboard の slide、USB LAN の試験、Python と unix socket の kernel の直し） | P1 が直して T1 が実行中 | T1 | 2 | T1 |
+| 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
+| [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |
+| WS192（状態の島のパネル）・WS193（menuconfig）・WS194（package の確認）の UAT の指摘 | WS193・WS194 は cleared、WS192 はパネルの写真の確認待ち | UAT | 3 | ユーザー・P1 |
+| 5330 の UAT（下の「UAT の確認項目」） | — | ユーザー | — | ユーザー |
+| UAT で出る Bug の debug の枠 | — | UAT | 10 | P1 |
+| T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）、WS192 のパネルの PNG（build/review/t1-496/） | — | ユーザー | —（15 分） | ユーザー |
 
 ## UAT の確認項目（ユーザー、5330 の release の image）
 
@@ -59,8 +65,8 @@
 
 | 区分 | LW |
 | --- | --- |
-| 必須（WS143・WS083 を含む） | 37 |
-| **計** | **37 LW**（約 13 時間。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
+| 必須（WS143・WS083 を含む、残り） | 26 |
+| **計** | **26 LW**（約 9 時間、大半は待ちの後の作業。P1 と T1 が並行するので 7 日の中に余裕がある。UAT の待ちは含まない） |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
@@ -74,4 +80,4 @@
 ## 運用
 
 - 凍結の目標の 10/13 の後も、ベータなので UAT の Bug の直しは 10/16 の準備に間に合う範囲で続ける。新しい仕様の変更は「ベータ3 に回すか」を Q1 がユーザーに聞く。
-- 毎日の終わりに Q1 がこの表を更新し、完了した項目を消す。
+- Q1 は進むたびにこの表を更新し、完了した項目を消す（2026-10-09 ユーザー「都度、beta2.mdを更新していただけると、進捗がわかって助かります」）。

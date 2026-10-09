@@ -2,7 +2,7 @@
 
 # ws193-p001: menuconfig の新しい階層と Build boot image
 
-Status: planned（2026-10-09 Q1、q918 P1）
+Status: cleared（2026-10-09 Q1 判定: T1-497 PASS（menu の画面・Build succeeded・boot-test）。Noct・Emacs の Base への移動（4877a9d5a）は menuconfig-host-test と pty の確認。ユーザーの確認は UAT の 15）
 Parent: [WS193](../ws.md)
 
 ## 手順

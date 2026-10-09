@@ -39,3 +39,21 @@ Queue / attempts: q913（P1、Q1 の投入「WS102 p010・p011（画面 keyboard
 ## 基準値
 
 （T1 の結果を待つ）
+
+## T1-483 の FAIL の解析と直し（2026-10-10、P1）
+
+T1-483（image の tree 0d39d675e）: qwerty・roll は ok、`latency` は send 60・frame 60 は測れたが `slide end` が 6・7 行で、要件の 9（3 回 × 開く・入れ替え・閉じる）に足りず FAIL。
+latency.log（out3）の slide の行は回ごとに 1・2・3（leaving=1 の閉じは 3 回で 1 行だけ）で、3 種類の slide のどれも抜けることがある。
+
+原因（製品の計測の道具の不具合）: `keyboard_slide_frame` は slide の終わりを「終わり（200 ms）を過ぎた最初の frame」で log するが、`kwl_keyboard_tick` が描画を頼む（`server->dirty`）のは slide の 200 ms の間だけだった。
+QEMU では frame の間が 85〜174 ms と長く、最後の frame が 200 ms の前に描かれると、終わりを過ぎた frame は他の何か（次の tap など）が描くまで来ない（開く slide の log が遅れ、次の回の始めに混じる）。
+閉じる slide は 200 ms を過ぎた最初の tick で `keyboard.leaving` が PANEL_NONE にされ、終わりの frame を描かないので log がほぼ出ない。実機でも slide の最後の frame が終わりの位置で描かれない場合がある（ease-out で差は 1 px 未満）。
+
+直し（`userland/desktop/wayland/keyboard.c`）: `keyboard_slide_unfinished(now)` を足し、slide の終わりから 300 ms（`KEYBOARD_SLIDE_TAIL_MS`）までは、まだ frame が描かれていない slide か終わりが log されていない slide の間 `server->dirty` を立て、閉じる panel の `leaving` は終わりの frame の後に外す。panel が描かれない場合も 300 ms で止まる（frame を出し続けない）。
+
+| コマンド | 結果 |
+| --- | --- |
+| `make BUILD=build/amd64 build/amd64/bin/wayland`（-Werror） | rc 0、warning 0 |
+| `python3 plan/tools/style-check.py userland/desktop/wayland/keyboard.c` | 2（既存の 1636・2144、変更の所は 0） |
+
+未実施（T1）: T1-483 と同じ手順の再試験（`latency qwerty roll`、slide 9 以上）。

@@ -1593,6 +1593,12 @@ sysconf(
 		 * finds anywhere under /dev fits one of this size.
 		 */
 		return PATH_MAX;
+	case _SC_IOV_MAX:
+		/*
+		 * The kernel's readv and writev take at most this many
+		 * buffers (Python's asyncio asks for it on import, T1-508).
+		 */
+		return IOV_MAX;
 	case _SC_STREAM_MAX:
 		/* Returns the computed result. */
 		return 32;

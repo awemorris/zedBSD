@@ -24,7 +24,9 @@ C7_TITLE=${C7_TITLE:-480 250 600 278}
 # The applications' text (x0 y0 x1 y1 at 1280x800, the windows' default places), NAME:REGION pairs.
 # 2026-10-05 (T1-169, ws138-p002): s-section, f-group, f-side-recents, f-hint and f-inactive (now the Desktop row) moved to where the labels are now (Files'
 # sidebar gained Today and Home in ws127-p011; Settings' section heading sits lower); measured on the T1-169 shots.
-C7_SETTINGS=${C7_SETTINGS:-"s-title 338 130 466 160 s-subtitle 338 166 592 186 s-section 340 216 436 233 s-side-wifi 100 115 143 133 s-side-appearance 100 309 194 327 s-bar-title 94 59 155 77"}
+# 2026-10-10 (T1-504): s-section up 12 to the heading's place under libkeiland's kl_header (ws090-p023, 2026-10-06; the
+# old box held no text, text=glass on every wallpaper); measured on the T1-504 shots (ink at 340..418 x 207..217).
+C7_SETTINGS=${C7_SETTINGS:-"s-title 338 130 466 160 s-subtitle 338 166 592 186 s-section 340 204 436 222 s-side-wifi 100 115 143 133 s-side-appearance 100 309 194 327 s-bar-title 94 59 155 77"}
 C7_FILES=${C7_FILES:-"f-heading 326 324 394 341 f-group 96 404 160 416 f-side-recents 124 432 182 446 f-bar-home 290 59 335 77"}
 C7_INFO=${C7_INFO:-"f-hint 326 426 507 443 f-inactive 124 214 184 230"}
 C7_CLIENTS=${C7_CLIENTS:-1}

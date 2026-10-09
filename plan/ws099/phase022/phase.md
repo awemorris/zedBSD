@@ -48,3 +48,11 @@ T1-477（image の tree 0d39d675e）: C4・C8・C9 PASS、C1 p126・C2・C3 c3-s
 
 注: criteria.sh の C1 と C9 の p126 はどちらも `$out/p126.log` に書いていて、C1 の log は C9 の物で上書きされた（results.txt と c1/ の出力が C1 の証拠）。C1 の名前を `c1-p126` に変えた。
 確かめ: `sh -n`（c2・c3・c7）、`c5-parse.py` を T1-477 の log に流して `C5 RESULT pass=12 fail=0`。QEMU は T1。
+
+## T1-504 の C7 の残り 7 の解析（2026-10-10、P1）
+
+T1-504（image の tree b07e745d6）: C1・C2・C3・C5 PASS、C7 `pass=77 fail=7`。7 つの FAIL は全て s-section（Settings の Home の群の見出し「Connectivity」）で、7 枚の壁紙の全部で `text≈glass`（contrast 1.00〜1.02）、つまり測る箱に文字が無い。
+Settings の窓の PNG（c7/*-settings.png）では見出しの墨は x 340〜418・y 207〜217 にあり、箱（340 216 436 233、T1-169 の 2026-10-05 の測り）は見出しの下の空白だった。
+見出しが 12 px 上がったのは ws090-p023（2026-10-06、`se_page_header` を libkeiland の `kl_header` に）の後の設計どおりの配置で、画面（タイトル・説明・見出し・tile）は正しい。区分は**試験**（箱の位置が古い）。製品の直しは無し。
+
+直し: `plan/ws099/tests/c7-contrast.sh` の s-section を `340 204 436 222` に。確かめ（host）: `c7-contrast.py` を T1-504 の 7 枚の settings の PNG に流して contrast 4.90〜5.81（全て ≥ 4.5）。`sh -n` ok。QEMU の再試験は T1（C7 だけでよい）。
