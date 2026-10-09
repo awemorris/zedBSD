@@ -20,25 +20,21 @@
 - 2026-10-10 の UAT は一通り済んだ。残る既知の Bug は USB LAN の遅さ（BUG-222、最悪ベータ2 では遅くてよい）。
 - 順（ユーザー）: 走っている Bug の直しと試験を全部終える → WS199（Vulkan Video より優先）→ WS200。
 - P1: WS199 の設計を新しい仕様で書き直し design-reviewer に通している（code は試験が片付いてから）。
-- T1: T1-521（ロック画面・Ethernet の頁）→ T1-522（PIN の登録の後の解除）→ T1-435（Vulkan Video の 5330）。
+- T1: T1-521（ロック画面・Ethernet の頁）・T1-522（PIN の登録の後の解除）は PASS（BUG-283・284・285 は QEMU で確認、実機は次の UAT）。今 T1-435（Vulkan Video の 5330、5330 は使えない）。
 - WS197（Bluetooth のスマホ連携）はベータ3、10/17 まで main に入れない branch で止めてある。
 
 ## 必須
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [BUG-283](bugs/BUG-283.md) ロック画面の方式の button の高さ | 直した（28 → 40 px）。T1-521 で確認中 | 0.5 | T1 |
-| [BUG-284](bugs/BUG-284.md) Ethernet の頁に wlan0 が出る | 直した（Wi-Fi を system の判定で除く、KL_VERSION 76）。T1-521、実機は次の UAT | 0.5 | T1 |
-| [BUG-285](bugs/BUG-285.md) PIN の登録の直後に PIN が出ない | 直した（パスワードで確かめた登録も sign-in と数える、ユーザーの決定 (B)）。T1-522 で確認 | 0.5 | T1 |
-| 上の試験で出る FAIL の直し | — | 2 | P1 |
-| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | 設計の書き直しと review 中、実装は試験の後 | 26 | P1・T1 |
+| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | 設計の書き直しと review の後に実装（走っている試験は済んだ） | 26 | P1・T1 |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | WS199 の後 | 6 | P1・T1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | release の config は OFF。T1-435（5330）が PASS なら ON の 1 行。直しは WS199 の後 | 2 | T1・P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
 | 次の UAT で出る Bug の枠 | — | 5 | P1 |
-| **計** | | **約 48 LW**（約 16 時間） | |
+| **計** | | **約 44.5 LW**（約 15 時間） | |
 
 ## 次の UAT で確認してほしい事項（5330、WS199・WS200 の後の image）
 
