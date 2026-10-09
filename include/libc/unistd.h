@@ -61,6 +61,13 @@ extern "C" {
  */
 #define _SC_GETPW_R_SIZE_MAX 32
 
+/*
+ * How large a buffer getgrnam_r and getgrgid_r may need for one group, and
+ * ttyname_r for one terminal name.
+ */
+#define _SC_GETGR_R_SIZE_MAX 33
+#define _SC_TTY_NAME_MAX 34
+
 #define _PC_LINK_MAX 1
 #define _PC_MAX_CANON 2
 #define _PC_MAX_INPUT 3

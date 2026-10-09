@@ -68,10 +68,16 @@ ZEDBSD_PYTHON3_LICENSE := $(ZEDBSD_EXT_python3_SRCDIR)/LICENSE
 # The answers configure cannot find out in a cross build (plan/ws126/design.md):
 # getaddrinfo works, IPv6 included; /dev/ptmx is there and the old BSD
 # /dev/ptc is not.
+#
+# <netpacket/packet.h> exists, but zedBSD's packet sockets are addressed by
+# struct sockaddr_l2, not by the Linux struct sockaddr_ll (and PACKET_HOST)
+# that the socket module writes its AF_PACKET support against.  configure is
+# told the header is absent, so the module is built without AF_PACKET.
 ZEDBSD_PYTHON3_CACHE := \
 	ac_cv_buggy_getaddrinfo=no \
 	ac_cv_file__dev_ptmx=yes \
-	ac_cv_file__dev_ptc=no
+	ac_cv_file__dev_ptc=no \
+	ac_cv_header_netpacket_packet_h=no
 
 # pkg-config sees only what was staged for zedBSD: the host's own libraries
 # (libffi, liblzma, zstd) would otherwise be taken for the target's.

@@ -9,7 +9,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1）
 Queue: none
-Resume point: 2026-10-09 P1: p001 は cleared 候補（3.14.8、[provenance.md](provenance.md)、[design.md](design.md)）。次は p002（host 用 Python と target の interpreter・T1 の cross build）。旧: p001（取得・検証・監査、cross build の方針、module ごとの依存の実測）が planned。すぐ Queue にできる。p004 は module の範囲（下の D1）の判断待ち。p005 は ws125-p002 の成果待ち。
+Resume point: 2026-10-09 P1 q916: p002 は cleared 候補（libc の不足を直し、T1 の module を cross build・stage、guest の試しは p005 の image で T1 へ回す案）。次は p003（OpenSSL の `_ssl`・`_hashlib`、expat）。旧: p001 cleared 候補（3.14.8、[provenance.md](provenance.md)、[design.md](design.md)）。p004 は module の範囲（下の D1）の判断待ち。p005 は ws125-p002 の成果待ち。
 2026-10-02 user:「Python の module の範囲はまずコアが動くことを目指します。そのあとpipも目指しますが、後回しでいいです。」→ ベータ1 はまず core（外部依存の無い標準 module）で動くこと、release の image に入れる。pip（ensurepip）は後回し。
 Target: ベータ3 の合間の仕事（2026-10-09 のユーザーの一覧に WS126 が明示され、下の 2026-10-05 の「ベータ4 以降」より新しいので優先、Q1 2026-10-09）。旧: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
@@ -61,7 +61,7 @@ cross build: CPython は同じ版の build 用の Python（`--with-build-python`
 | Phase | 目的 | Status | 依存 | 目安 |
 | --- | --- | --- | --- | --- |
 | [ws126-p001](phase001/phase.md) | 取得・検証・license 監査、zedbsd の configure の試行、module ごとの依存の実測、cross build の方針 | cleared 候補（2026-10-09 P1） | — | 2〜3h |
-| [ws126-p002](phase002/phase.md) | host 用 Python（同じ版）と、target の interpreter（`libpython`、`python3`）と T1 の cross build・stage | uncleared（2026-10-09 P1: libc の `<sys/types.h>` に time_t ほかが無く止まる。libc の直し待ち） | p001 | 3〜4h |
+| [ws126-p002](phase002/phase.md) | host 用 Python（同じ版）と、target の interpreter（`libpython`、`python3`）と T1 の cross build・stage | cleared 候補（2026-10-09 P1 q916、guest の試しは p005 へ回す案） | p001 | 3〜4h |
 | [ws126-p003](phase003/phase.md) | T2: OpenSSL（`_ssl`・`_hashlib`）と expat | planning | p002 | 2h |
 | [ws126-p004](phase004/phase.md) | T3: 選んだ依存の package（`libs/libffi`・`libs/sqlite` ほか）と `_ctypes`・`_sqlite3` ほか | planning（D1 の判断待ち、libffi の所有の調整） | p002、D1 | 3〜4h |
 | [ws126-p005](phase005/phase.md) | menuconfig への登録、標準 library の tree の image への導入、guest の受け入れ P1〜P8 | planning | p003（p004 を行うならそれも）、ws125-p002 | 3h |

@@ -23,8 +23,9 @@
 #include <string.h>
 #include <unistd.h>
 
+#include "userland/base/libc/account-internal.h"
+
 #define ACCOUNT_LINE_MAX 1024
-#define ACCOUNT_RESULT_MAX 2048
 #define ACCOUNT_GROUP_MAX 16
 
 #if defined(KERN_DYNAMIC_LIBC) || defined(KERN_STATIC_TLS)
