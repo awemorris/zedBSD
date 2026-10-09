@@ -2,7 +2,7 @@
 
 # ws141-p004: V3D 4.2の電源・MMU・job・回復
 
-Status: in-progress（2026-10-09、V5の純粋なページ表生成だけを開始）
+Status: in-progress（2026-10-09、V5のsoftwareページ表とV7のnoop CL生成済み。hardware待ち）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: [独立セッションの実行記録 i04](../execution-20261009.md)
@@ -27,6 +27,12 @@ Queue: [独立セッションの実行記録 i04](../execution-20261009.md)
 - Whole Phaseの受け入れ: V1〜V10の段ごとの実機の印と値、V7 bin→render完了、V8の出力、V9のTFU、V10の回復後V7。QEMUはQ1経由T1の起動回帰だけで、V3D実機を代替しない。
 - 今回の試験はページ表のword列・境界・既存mappingの保持を確認する。hardware MMU/cache/TLBが動く証拠にはしない。
 
+## i06: V7のsoftware生成
+
+統合済みの状態からユーザーの継続指示で実行。1×1のBCL・RCL・generic tile sub-listを独立したbyte serializerで組み、アドレスをlittle-endianで入れる。caller-owned bufferとmapped tile poolが入力で、容量不足・GPU VAのoverflow・使用領域の重なりを拒否し、完全な生成後にused lengthを公開する。
+
+出典は監査済み固定MesaのMIT noop/prologのpacket使用とXMLの4.2形式。XML自体の既定MIT扱いは既存のユーザー決定を保持。hostは4.2のXMLのfield/default/minus-oneから独立に作る期待列と照合し、拒否時のbuffer保持も確認。GPL旧名照合、全文C/format/style-check、rpi4 build warning 0を行う。GPUへの実投入、MMU/cache/IRQの統合と実機観測はこの部分attemptには含めず、whole Phaseの段順/受け入れは変更しない。
+
 ## 再開条件
 
 i04のhost/build結果を記録した後、実機V0を確認しV1へ進む。電源domainとresetの実装は既存HAL/FDT/firmwareの責務を照合して進める。HAL APIが必要なら適用前に具体的差分をplanへ置く。
@@ -36,3 +42,9 @@ i04のhost/build結果を記録した後、実機V0を確認しV1へ進む。電
 mmu.cのmap/unmapとprivate宣言・buildへの追加を実装。mmu-host-test.cのliteral PTE/最終VA/PA/衝突・hole/不正span/larger-page拒否がPASS。stage/list/list-copyの既存確認もPASS。rpi4 y/n build exit 0・warning/error 0、全文C reviewとstyle-check total 0。詳細は[実行記録 i03/i04の結果](../execution-20261009.md#i03i04の結果2026-10-09)。
 
 この部分attemptだけをclearedとしwhole Phaseはin-progress。電源・clock・MMUのregister・cache/TLB flush、IRQ、CL、TFU、reset/jobの実機動作は未実施。元のstage順・whole Phase条件は変更していない。[WS](../ws.md)のPhase表/再開点を同時に更新。次は実機V0の観測とV1の電源処理、V5の表確保・寿命管理・hardware設定の統合。
+
+## 結果（2026-10-09、i06）
+
+V7のBCL/RCL/generic tile sub-listをcl.cで生成する処理を実装。caller-owned bufferとpoolの全予約範囲を検証し、全検査後に14/56/19 byteを生成・公開する。CPU storageとGPU mapping/cache/job投入は後続の所有者の責務として明記。NONE store、shader無しで起動から呼ばない。
+
+noop-host-testは成功・容量/VA/予約等の拒否とbyte保持を確認しPASS。固定XMLから独立にopcode/field/default/minus-oneを解釈するnoop-packet-checkで3列全体が一致しPASS。既存4試験PASS、rpi4 y/n build warning/error 0、全文C review/format/補助style-check/構文/diff確認済み。詳細は[実行記録 i06](../execution-20261009.md#i06の結果2026-10-09)。このsoftware部分だけcleared、whole Phaseはin-progress。V7がGPU上で完了したとの主張はしない。WSのPhase表/再開点を同時に更新。V8生成を次のsoftware段とし、実投入は元のV0〜V6の確認/実装後。

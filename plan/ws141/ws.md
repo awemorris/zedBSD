@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: 独立Codexセッションを開始（2026-10-09、基点a05865278）。骨格・N0の現行rpi4 kernelはdriver y/nともbuild exit 0、warning/error 0。stage/list host試験PASS（[実行記録](execution-20261009.md)）。N1のraw listコピー/予約範囲を避ける配置と、V5の4 KiBページ表の生成/解除を追加しhost PASS・y/n build warning/error 0。起動からはまだ呼ばない。次はN0の版のQEMU回帰をQ1経由でT1へ、ユーザーの実機P0・V0・N0の写真で観測値を確認し、N1/V1のhardware処理と統合を進める。p001のQ1判定は残る。旧temp資料は旧P2 cacheから復旧し、Linux/Mesaの監査対象121 fileのSHA256一致、630定数の旧名が現行driverに0件を確認済み。実機はユーザー回答により後で実施。
+Resume point: 独立Codexセッションを開始（2026-10-09、基点a05865278）。骨格・N0の現行rpi4 kernelはdriver y/nともbuild exit 0、warning/error 0。stage/list host試験PASS（[実行記録](execution-20261009.md)）。N1のraw listコピー/予約範囲を避ける配置と、V5の4 KiBページ表の生成/解除を追加しhost PASS・y/n build warning/error 0。V7の1×1 noop CL生成も追加し、固定4.2 XMLとのbyte照合・host・build PASS。これらを起動からはまだ呼ばない。次のsoftware段はV8のclear/store。hardwareはN0の版のQEMU回帰をQ1経由でT1へ、ユーザーの実機P0・V0・N0の写真で観測値を確認し、N1/V1のhardware処理と統合を進める。p001のQ1判定は残る。旧temp資料は旧P2 cacheから復旧し、Linux/Mesaの監査対象121 fileのSHA256一致、630定数の旧名が現行driverに0件を確認済み。実機はユーザー回答により後で実施。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -69,7 +69,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p001](phase001/phase.md) | 文書: Linux の vc4・v3d の初期化の順と command の投入の順、正本の一覧と license の監査、BCM2711 の display と V3D の構成、我々の interface への対応表、段の印の設計 | in-progress（q691、文書と review 済み、判定待ち） | なし | 4〜6h |
 | [p002](phase002/phase.md) | **定数の一括の改名**（作業の文書、temp）の後に、段の印の仕組み（framebuffer に進み具合を書く debug の口）と driver の骨格（FDT の attach、MMIO の map、clock・power の mailbox、IRQ） | in-progress（q695、実装済み。骨格版のT1-092 PASS、2026-10-09 y/n build・host PASS。実機待ち） | p001 | 4h |
 | [p003](phase003/phase.md) | display（[design](rpi4-gpu-design.md) の N0〜N2・P1〜P3・P5、P4 は後）: firmware の framebuffer の readout と引き継ぎ、HVS の plane、pixelvalve・HDMI の mode set、vblank と page flip（i915 の resident display を手本に） | in-progress（N0とN1の配置/コピー準備を実装、build・host PASS。N1のwrite/readback/pollは実機N0観測後） | p002 | 6h〜 |
-| [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のsoftwareページ表だけを実装、build・host PASS。電源/register/jobは未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
+| [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V5のページ表・V7のnoop CL生成を実装、固定XML照合・host/build PASS。電源/register/job投入は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | p005 | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | planning | p003・p004 | 4h〜 |
 | p006 | 実行器（Vulkan・compiler）の方針の決定（別 WS にするか） | planning | p004 | 2h |
 | p007 | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planning | 全て | 3〜4h |
