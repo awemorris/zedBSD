@@ -11,8 +11,9 @@
  * The compositor composes each output channel from a display list: a run of
  * planes in the compositor's own list memory, each plane a few 32-bit words
  * that start with a control word, and the run closed by an end word.  This
- * file only reads a list; it touches no register and allocates nothing, so
- * the host test drives it with an ordinary array.
+ * file reads a list and prepares its unchanged words for relocation.  It
+ * touches no register and allocates nothing, so the host test drives it
+ * with ordinary arrays.
  *
  * The word layout is the BCM2711 compositor's (the fifth generation of the
  * VideoCore compositor); the bit positions are hardware facts.
@@ -76,6 +77,7 @@
 #define LIST_PLANE_LIMIT		256U
 
 static void decode_plane(const volatile uint32_t *memory, uint32_t first, uint32_t words, struct bcm2711_list_plane *plane);
+static uint32_t choose_copy_start(uint32_t words, uint32_t source, const struct bcm2711_list_range *reserved, unsigned reserved_count);
 
 /*
  * Decodes the display list that starts at a word of the list memory.
@@ -137,6 +139,84 @@ bcm2711_list_decode(
 	}
 }
 
+/*
+ * Prepares an unchanged display list at an unoccupied SRAM position.
+ *
+ * snapshot contains BCM2711_LIST_WORDS stable words.  reserved must describe
+ * every other current and pending list, filter table and firmware-owned
+ * region; this routine cannot infer those reservations from one list.
+ * The source list, including its end marker, is protected automatically.
+ *
+ * image is separate caller-owned storage, never the hardware SRAM or part
+ * of snapshot.  On refusal it remains unchanged and copy has zero words.
+ * On success its raw words preserve opaque plane fields and filter pointers.
+ * The caller must revalidate firmware ownership before any hardware write.
+ */
+bool
+bcm2711_list_copy_prepare(
+	const uint32_t *snapshot,
+	uint32_t source,
+	const struct bcm2711_list_range *reserved,
+	unsigned reserved_count,
+	uint32_t *image,
+	uint32_t image_words,
+	struct bcm2711_list_copy *copy)
+{
+	struct bcm2711_list list;
+	uint32_t words;
+	uint32_t destination;
+	uint32_t index;
+	unsigned reservation;
+
+	/* Leaves no relocation that a caller could publish after a refusal. */
+	copy->source = 0;
+	copy->destination = 0;
+	copy->words = 0;
+
+	/* Rejects occupied intervals that cannot describe this SRAM. */
+	for (reservation = 0; reservation < reserved_count; reservation++) {
+		/* A reservation must contain at least one word. */
+		if (reserved[reservation].words == 0)
+			return false;
+
+		/* Bounds the start before subtracting it from SRAM capacity. */
+		if (reserved[reservation].first >= BCM2711_LIST_WORDS)
+			return false;
+
+		/* Refuses a length that crosses SRAM's end, including wraparound. */
+		if (reserved[reservation].words >
+		    BCM2711_LIST_WORDS - reserved[reservation].first)
+			return false;
+	}
+
+	/* Finds the complete source run, including its closing word. */
+	bcm2711_list_decode(snapshot, source, &list);
+	if (!list.valid)
+		return false;
+
+	/* Keeps the closing word even when there are no planes. */
+	words = list.end - list.start + 1U;
+	if (words > image_words)
+		return false;
+
+	/* Finds an independent run before changing the caller's image. */
+	destination = choose_copy_start(words, source, reserved, reserved_count);
+	if (destination == BCM2711_LIST_WORDS)
+		return false;
+
+	/* Preserves all plane words rather than rebuilding only decoded fields. */
+	for (index = 0; index < words; index++)
+		image[index] = snapshot[source + index];
+
+	/* Publishes the prepared run only after its complete image exists. */
+	copy->source = source;
+	copy->destination = destination;
+	copy->words = words;
+
+	/* Succeeded: the caller owns an exact image and a nonoverlapping position. */
+	return true;
+}
+
 /* Decodes the words of one plane that starts at a control word. */
 static void
 decode_plane(
@@ -192,4 +272,64 @@ decode_plane(
 	/* Reads the pitch, which follows one pointer only in a single-plane format. */
 	if (plane->format <= LIST_FORMAT_LAST_SINGLE)
 		plane->pitch = memory[first + LIST_WORD_PITCH + shift] & LIST_PITCH_MASK;
+}
+
+/* Chooses the earliest complete gap while protecting the source and reservations. */
+static uint32_t
+choose_copy_start(
+	uint32_t words,
+	uint32_t source,
+	const struct bcm2711_list_range *reserved,
+	unsigned reserved_count)
+{
+	uint32_t candidate;
+	uint32_t end;
+	uint32_t next;
+	uint32_t occupied_end;
+	unsigned reservation;
+
+	/* Advances past intersecting intervals until a complete run fits. */
+	candidate = 0;
+	while (candidate <= BCM2711_LIST_WORDS - words) {
+		/* Keeps the source live until hardware has accepted another list. */
+		end = candidate + words;
+		next = candidate;
+		occupied_end = source + words;
+		if (candidate < occupied_end) {
+			/* A candidate ending at the source start is still disjoint. */
+			if (source < end)
+				next = occupied_end;
+		}
+
+		/* Handles unsorted and overlapping reservations without allocating. */
+		for (reservation = 0; reservation < reserved_count; reservation++) {
+			/* Ignores an interval wholly before the candidate. */
+			occupied_end = reserved[reservation].first;
+			occupied_end += reserved[reservation].words;
+			if (candidate >= occupied_end)
+				continue;
+
+			/* Ignores an interval wholly after the candidate. */
+			if (reserved[reservation].first >= end)
+				continue;
+
+			/* Moves forward, even when a later reservation starts earlier. */
+			if (occupied_end > next)
+				next = occupied_end;
+		}
+
+		/* A gap must fit the closing word as well as every plane word. */
+		if (next == candidate)
+			break;
+
+		/* Every collision advances the walk; full SRAM terminates it. */
+		candidate = next;
+	}
+
+	/* Refuses relocation when no separate complete run remains. */
+	if (candidate > BCM2711_LIST_WORDS - words)
+		return BCM2711_LIST_WORDS;
+
+	/* Succeeded: the complete run is separate from all occupied intervals. */
+	return candidate;
 }

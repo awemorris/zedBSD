@@ -53,3 +53,7 @@ Queue: q695
 - GPL の名前の照合: `rename-map.tsv` の旧名 630 で `src/drivers/gpu/bcm2711/` を語単位で grep し 0 件。driver の局所の macro も `V3D_` で始めない（`ENGINE_`）。
 - QEMU の回帰: T1-092 PASS（2026-10-04、raspi4b の boot-test で login prompt。P0・V0・clk の行は画面の外に流れて PNG に写らず、値は未取得）。
 - 未実施: 実機（ユーザー）。
+
+## 独立Codexセッションの再開確認（2026-10-09）
+
+ユーザーがWS141を担当へ割当。開始tree a05865278のrpi4 kernelをdriver y/nでbuildし、両方exit 0・warning/error 0、stage/list host試験PASS。source修正は無し。詳細は[実行記録](../execution-20261009.md)。ユーザー回答「実機確認は後で行う」により実機条件は未達のまま保持。whole Phaseのclearanceは行っていない。
