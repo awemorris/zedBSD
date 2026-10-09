@@ -26,6 +26,7 @@
 #include "drivers/gpu/bcm2711/vulkan-command.h"
 #include "drivers/gpu/bcm2711/vulkan-record.h"
 #include "drivers/gpu/bcm2711/vulkan-draw.h"
+#include "drivers/gpu/bcm2711/vulkan-prepared.h"
 #include "userland/desktop/wayland/shaders.h"
 
 /* One ordinary fixture reply blob retains its CPU owner across actual stream decoding. */
@@ -65,6 +66,7 @@ void ws141_client_encode_recording(struct vulkan_writer *writer, uint64_t comman
 
 void ws141_client_encode_graphics(struct vulkan_writer *writer, const VkGraphicsPipelineCreateInfo *source);
 
+static void prepared_test(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *command);
 static void draw_test(struct bcm2711_vulkan_command_buffer *command);
 static int draw_observe(void *payload, const struct bcm2711_vulkan_draw_state *state, const struct bcm2711_vulkan_record *record);
 static void record_test(struct bcm2711_vulkan_session *session);
@@ -679,6 +681,156 @@ command_test(
 	return;
 }
 
+/* Exercises actual prepared ownership, pending guards and complete rollback without launching native GPU work. */
+static void
+prepared_test(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_vulkan_object *command_object)
+{
+	struct bcm2711_vulkan_prepared *prepared;
+	struct bcm2711_vulkan_prepared *second;
+	struct bcm2711_vulkan_prepared_event *event;
+	struct bcm2711_vulkan_command_buffer *command;
+	struct bcm2711_vulkan_descriptor_set *set;
+	struct bcm2711_vulkan_object *set_object;
+	struct bcm2711_vulkan_object *sampler;
+	struct bcm2711_vulkan_object *view;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	uint8_t wire[8192];
+	unsigned baseline;
+	uint32_t index;
+	uint32_t command_references;
+	uint32_t view_references;
+	uint32_t sampler_references;
+	int error;
+
+	/* Every actual prepared allocation stage must retire its earlier prefix and acquired primary edge on ordinary OOM. */
+	command = command_object->payload;
+	baseline = allocations;
+	command_references = command_object->references;
+	set_object = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 163);
+	assert(set_object != NULL);
+	set = set_object->payload;
+	view = set->bindings[0].view;
+	sampler = set->bindings[0].sampler;
+	view_references = view->references;
+	sampler_references = sampler->references;
+	for (index = 1; index <= 6; index++) {
+		fail_after = index;
+		error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+		assert(error == ENOMEM && prepared == NULL && allocations == baseline);
+		assert(command_object->references == command_references && command->pending == 0 && set->pending == 0);
+		assert(view->references == view_references && sampler->references == sampler_references);
+	}
+
+	/* A sampler retain overflow must release the newly retained view and all complete prior preparation nodes. */
+	sampler->references = 0xffffffffU;
+	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+	assert(error == EOVERFLOW && prepared == NULL && allocations == baseline && view->references == view_references);
+	sampler->references = sampler_references;
+	set->pending = 0xffffffffU;
+	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+	assert(error == EOVERFLOW && prepared == NULL && allocations == baseline && command->pending == 0);
+	set->pending = 0;
+
+	/* Simultaneous-use metadata permits checking primary counter overflow without bypassing admission policy. */
+	command->flags = VK_COMMAND_BUFFER_USAGE_SIMULTANEOUS_USE_BIT;
+	command->pending = 0xffffffffU;
+	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+	assert(error == EOVERFLOW && prepared == NULL && allocations == baseline && set->pending == 0);
+	command->pending = 0;
+	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+	assert(error == 0 && prepared != NULL);
+	error = bcm2711_vulkan_prepared_create(command_object, &second);
+	assert(error == 0 && second != NULL && command->pending == 2 && set->pending == 2);
+	error = bcm2711_vulkan_prepared_release(second, true);
+	assert(error == 0 && command->pending == 1 && set->pending == 1);
+	error = bcm2711_vulkan_prepared_release(prepared, true);
+	assert(error == 0 && command->pending == 0 && set->pending == 0 && allocations == baseline);
+	command->flags = 0;
+
+	/* A complete prepared primary acquires one distinct set charge and one independent snapshot of each consumed view/sampler. */
+	error = bcm2711_vulkan_prepared_create(command_object, &prepared);
+	assert(error == 0 && prepared != NULL && prepared->pending && command->pending == 1 && set->pending == 1);
+	assert(command_object->references == command_references + 1 && view->references == view_references + 1 && sampler->references == sampler_references + 1);
+	event = prepared->first;
+	assert(event->opcode == GPU_OP_CMD_BEGIN_RENDER_PASS && event->pass != NULL);
+	event = event->next;
+	assert(event->opcode == GPU_OP_CMD_DRAW && event->draw[0] == 6 && event->used[0] == 1);
+	assert(event->descriptors[0][0].view == view && event->descriptors[0][0].sampler == sampler);
+	assert(event->push[0][0] == 0x3f000000U && event->vertices[0]->bytes == 48);
+	assert(event->next->opcode == GPU_OP_CMD_END_RENDER_PASS && event->next->next == NULL);
+	error = bcm2711_vulkan_prepared_create(command_object, &second);
+	assert(error == EBUSY && second == NULL && command->pending == 1 && set->pending == 1);
+	error = bcm2711_vulkan_prepared_release(prepared, false);
+	assert(error == EBUSY && command->pending == 1 && set->pending == 1 && event->descriptors[0][0].view == view);
+
+	/* Actual ordinary descriptor update refuses a pending set and leaves its independently cloned sampled inputs unchanged. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_UPDATE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 1);
+	vulkan_write_u64(&writer, 1);
+	encode_image_write(&writer, 163, 161, 104);
+	vulkan_write_u32(&writer, 0);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && set->bindings[0].view == view && event->descriptors[0][0].view == view);
+
+	/* Actual command reset refuses mutation while prepared work owns the frozen primary nodes. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_COMMAND_POOL, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 150);
+	vulkan_write_u32(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY && command->state == BCM2711_VULKAN_COMMAND_EXECUTABLE && command->first != NULL);
+
+	/* Pending descriptor free validates the whole two-member vector before withdrawing even its idle first selection. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_FREE_DESCRIPTOR_SETS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 160);
+	vulkan_write_u32(&writer, 2);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 164);
+	vulkan_write_u64(&writer, 163);
+	error = execute(session, &writer, &reader);
+	assert(error == EBUSY);
+	assert(bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 164) != NULL && set_object->published);
+
+	/* Pool reset and destroy also reject the complete operation before withdrawing any idle or pending set identity. */
+	for (index = 0; index < 2; index++) {
+		if (index == 0) {
+			begin(&writer, wire, sizeof(wire), GPU_OP_RESET_DESCRIPTOR_POOL, 1);
+		} else {
+			begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_DESCRIPTOR_POOL, 1);
+		}
+
+		/* Both lifecycle variants address the same complete device/pool record. */
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 160);
+		if (index == 0) {
+			vulkan_write_u32(&writer, 0);
+		} else {
+			vulkan_write_u64(&writer, 0);
+		}
+
+		/* Execute the actual pending guard and verify that no public identity prefix changed. */
+		error = execute(session, &writer, &reader);
+		assert(error == EBUSY && set_object->published);
+		assert(bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_POOL, 160) != NULL);
+		assert(bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, 164) != NULL);
+	}
+
+	/* Before native launch the caller can prove retirement directly, release all snapshots, and restore normal mutation admission. */
+	error = bcm2711_vulkan_prepared_release(prepared, true);
+	assert(error == 0 && command->pending == 0 && set->pending == 0 && allocations == baseline);
+	assert(command_object->references == command_references && view->references == view_references && sampler->references == sampler_references);
+	puts("WS141 Vulkan actual prepared CPU graph/descriptor snapshots/pending free-reset guards/uncertainty retain/OOM rollback: PASS");
+
+	/* Succeeded: no actual DMA was launched and every prepared owner returned to the unchanged recording baseline. */
+	return;
+}
+
 /* Verifies complete state admission and explicitly injected fixture faults against actual native draw walking. */
 static void
 draw_test(
@@ -962,6 +1114,7 @@ record_test(
 	size.descriptorCount = 2;
 	memset(&pool_info, 0, sizeof(pool_info));
 	pool_info.sType = VK_STRUCTURE_TYPE_DESCRIPTOR_POOL_CREATE_INFO;
+	pool_info.flags = VK_DESCRIPTOR_POOL_CREATE_FREE_DESCRIPTOR_SET_BIT;
 	pool_info.maxSets = 2;
 	pool_info.poolSizeCount = 1;
 	pool_info.pPoolSizes = &size;
@@ -1056,6 +1209,7 @@ record_test(
 
 	/* Native state walking consumes the complete actual client recording before any GPU work is prepared. */
 	draw_test(command);
+	prepared_test(session, command_object);
 
 	/* Explicit pending fixture ownership refuses mutation before changing a set generation or any resource edge. */
 	set->pending = 1;

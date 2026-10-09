@@ -17,6 +17,7 @@
 static int create_pool(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int retire_pool(struct bcm2711_vulkan_session *session, bool reset, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int withdraw_sets(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *pool);
+static int pool_pending(struct bcm2711_vulkan_session *session, struct bcm2711_vulkan_object *pool);
 static int release_pool(struct bcm2711_vulkan_session *session, void *payload);
 static void pool_reply(struct i915_wire_writer *reply, VkResult status, uint64_t identity);
 
@@ -220,6 +221,11 @@ retire_pool(
 	if (pool->owner.device != device)
 		return EINVAL;
 
+	/* Complete pending-set validation precedes all child and pool registry mutation. */
+	error = pool_pending(session, object);
+	if (error != 0)
+		return error;
+
 	/* Child identities retire before the pool's registry edge; old retained set charges remain until their final destructor. */
 	error = withdraw_sets(session, object);
 	if (!reset) {
@@ -235,6 +241,28 @@ retire_pool(
 		drv_i915_wire_reply_u32(reply, VK_SUCCESS);
 
 	/* Succeeded: selected public identities retired while independent prepared data remained owned. */
+	return 0;
+}
+
+/* Refuses a pool operation before any public child is withdrawn when an ordinary set belongs to prepared native work. */
+static int
+pool_pending(
+	struct bcm2711_vulkan_session *session,
+	struct bcm2711_vulkan_object *pool)
+{
+	struct bcm2711_vulkan_object *object;
+	struct bcm2711_vulkan_descriptor_set *set;
+
+	/* A closing session may withdraw identities directly, but then no public pool operation remains available on that identity. */
+	for (object = session->objects; object != NULL; object = object->next) {
+		if (object->kind != I915_VK_OBJ_DESCRIPTOR_SET)
+			continue;
+		set = object->payload;
+		if (set->pool == pool && set->pending != 0)
+			return EBUSY;
+	}
+
+	/* Succeeded: this pool's public children contain no pending prepared native user. */
 	return 0;
 }
 
