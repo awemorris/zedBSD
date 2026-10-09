@@ -32,3 +32,7 @@ libpasskey（CTAPHID・NFC の APDU・CTAP2・CBOR・PIN/UV、暗号は OpenSSL�
 | [ws161-p005](phase005/phase.md) | libpasskey: transport-nfc と `/dev/smartcard*`、host 試験 | cleared（2026-10-08 T1-374 QEMU PASS、実機は p006） | p003・p004 |
 | ws161-p006 | 実機の UAT（YubiKey 5 の USB、ACR1252U と YubiKey 5 NFC）、Linux・FreeBSD の build | planned（5330 とユーザーの鍵・reader。Linux・FreeBSD の build は 10/13 以降、2026-10-08 ユーザー） | p005 |
 | ws161-p007 | 全文規約の見直し | planned（ベータ3、2026-10-08 ユーザー） | p006 |
+
+## 2026-10-10 UAT（Q1）
+
+「FIDO2のキー登録とログインができました。」（USB の YubiKey）。p006 の USB の分は確認済み。NFC（ACR1252U と YubiKey 5 NFC）と Linux・FreeBSD の build は未確認のまま（10/13 以降）。

@@ -145,7 +145,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-275](bugs/BUG-275.md) | Settings の Bluetooth の頁で 5330 に Bluetooth の device が無いと出る | reproduced（実機） / resolved（2026-10-10 USB の直しの後、ユーザーの UAT で keyboard・mouse を確認） | UAT 2026-10-10 | WS143 |
 | [BUG-276](bugs/BUG-276.md) | Terminal で選んだ文字を tap からの drag で drag しようとすると、最初の tap で選択が外れる | reproduced（実機） / resolved（2026-10-10 ユーザーの UAT で OK） | UAT 2026-10-10 | WS183 p002 |
 | [BUG-277](bugs/BUG-277.md) | Settings の Ethernet が接続しているのに No Cable と出る | reproduced（実機） / resolved（2026-10-10 ue0 は Connected、No cable は wlan0 の card で BUG-284） | UAT 2026-10-10 | WS089 Settings の Network と networkd の carrier の状態 |
-| [BUG-278](bugs/BUG-278.md) | 状態の島のパネルの Mute の button の文字が右にずれる | reproduced（実機） / tracking | UAT 2026-10-10 | WS192 |
+| [BUG-278](bugs/BUG-278.md) | 状態の島のパネルの Mute の button の文字が右にずれる | reproduced（実機） / resolved（2026-10-10 UAT） | UAT 2026-10-10 | WS192 |
 | [BUG-279](bugs/BUG-279.md) | Settings で「No security key registered」と出て YubiKey を操作できない | reproduced（実機） / resolved（2026-10-10 ユーザー「FIDO2のキー登録とログインができました」） | UAT 2026-10-10 | WS161・WS172 |
 | [BUG-280](bugs/BUG-280.md) | App Home への遷移が Linux の driver より滑らかでない（fps が半分〜75% くらいに見える） | reproduced（実機） / tracking | UAT 2026-10-10 | WS094・WS139 |
 | [BUG-281](bugs/BUG-281.md) | QEMU の guest で SSH の session が約 1〜2 分止まって戻ることがある（間欠） | reproduced（QEMU） / tracking | T1-513・T1-515 2026-10-10 | 未定 |

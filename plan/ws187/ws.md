@@ -35,3 +35,7 @@ Resume point: 2026-10-08 q902 P1 の照合: p001〜p003 cleared（T1-379）、�
 | [p002](phase002/phase.md) | 解除の操作（下部から上へのスワイプ・wheel の上）と猶予（自動の lock の後の一定時間は認証なし、手動の lock は常に認証） | cleared（T1-379 QEMU、実機の UAT は未実施） | p001 |
 | [p003](phase003/phase.md) | 認証の入力の画面: Password・PIN・Hardware Key の選択（登録の無い方式は出さない、Hardware Key は sessiond が返した時だけ） | cleared（T1-379 QEMU、実機の UAT は未実施） | p002、PIN は ws172-p002 |
 | [p004](phase004/phase.md) | 規約の全文の見直し | 見直し済み、Q1 の判定待ち | p001〜p003 |
+
+## 2026-10-10 UAT（Q1）
+
+2026-10-10 ユーザー「これで一通りUATの確認事項は確認したと思います。CloseできるものはCloseしましょう。USB LANの遅さ、だけが残りました。」 → 実機の UAT（時計・スワイプ・wheel・PIN・Hardware Key）は確認済み。ロック画面の方式の button の高さは BUG-283（直しは main、T1-520 で height=40）。p004（規約）は Q1 の判定待ち、ベータ3。

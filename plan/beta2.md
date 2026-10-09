@@ -17,7 +17,7 @@
 
 ## 今の状況（2026-10-10 未明）
 
-- **2026-10-10 の UAT で 6 件の Bug（BUG-275〜280）が出たので、P1 は WS197 を止めてこちらを先に直す。**
+- **2026-10-10: UAT は一通り確認済み（ユーザー）。残りの Bug は USB LAN の遅さ（BUG-222）だけ。** P1 は BUG-284（Ethernet の頁の wlan0）→ WS199 → WS200（ベータ2 の新しい要望）。
 - P1 の実装・直しの必須は済んでいた。 残りの必須は全部「待ち」: T1 の再試験、ユーザーの review と UAT、5330 の復帰、日程の決まった作業（10/14 の最終回帰、10/16 の公開の準備）。
 - その間の P1 は WS197（Bluetooth のスマホ連携、ベータ3）を 10/17 まで main に入れない別の branch で進める（ユーザー「beta2.mdの必須が終わってから」）。T1 の FAIL・UAT の Bug が来たら P1 はすぐそちらへ戻る。
 - **ユーザーに頼みたい事**: 5330 の電源か network（10/09 夜から ping も SSH も届かない、T1-435 が待っている）、release の文書の review、UAT、PNG の確認、試験の機器の情報。
@@ -29,13 +29,13 @@
 | 窓の dock の解除のダブルタップ | ✔ 遅れなし | — |
 | ダブルタップからの title bar のドラッグ | ✔ | — |
 | Settings の Wi-Fi の on/off | ✔ | — |
-| 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
+| 状態の島のパネル（WS192） | ✔（WS192 completed、BUG-278 close） | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
 | Settings の Bluetooth と HID | ✔ 2026-10-10 keyboard・mouse の接続と利用を確認（BUG-275 close、WS143 p008 cleared） | — |
 | Terminal の選んだ文字のドラッグ | ✔ 2026-10-10 直った（BUG-276 close） | — |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) ✔ ue0 は Connected（BUG-277 close）。No cable は wlan0 の card が Ethernet の頁に出ていた → [BUG-284](bugs/BUG-284.md) P1 |
 | Settings の YubiKey | ✔ 2026-10-10 FIDO2 の鍵の登録と login（BUG-279 close）。要望: 独立の頁とウィザード → WS199、Users の頁のパスワード変更と認証方式 → WS200（ベータ2）、ロック画面の button の高さ → BUG-283 | — |
-| (旧) Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
+| (旧) Settings の YubiKey（close） | — | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
 | WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
 | WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
@@ -62,19 +62,9 @@
 | UAT で出る Bug の debug の枠（2026-10-10 の 6 件: BUG-275〜280） | P1 が着手 | — | 10 | P1 |
 | T1-481 の needs-person の PNG 11 枚（build/review/bugsweep/）、WS192 のパネルの PNG（build/review/t1-496/） | — | ユーザー | —（15 分） | ユーザー |
 
-## UAT の確認項目（ユーザー、5330 の release の image）
+## UAT の確認項目
 
-迷ったら PNG か一言を Q1 へ。✔ は動けば OK、✘ はその場の様子（何をしたら何が起きたか）を教えてください。
-
-| # | 項目 | 手順（自明でない物だけ） | 期待 |
-| --- | --- | --- | --- |
-| 1 | [WS192](ws192/ws.md) 状態の島の操作パネル | 右上の icon の島を指で tap（mouse の click でも） | 右上に glass のパネル。Wi-Fi の switch、音量の slider と mute、Input の行の tap で言語の切り替え、Wi-Fi の「›」で AP の一覧。外の tap・Esc・島の再 tap で閉じる |
-| 5 | [WS183](ws183/ws.md) touchpad の tap | 1 本指の tap、素早い 2 回の tap、tap の直後に指を置いて動かす | tap はすぐ click（遅れを感じない）、2 回は double click、最後は drag |
-| 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
-| 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
-| 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
-| 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
-| 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
+2026-10-10 ユーザー: 一通り確認済み。残りは USB LAN の遅さ（BUG-222）だけ。次の UAT は WS199・WS200・BUG-283・BUG-284 の直しの後。
 
 ## 合計
 
