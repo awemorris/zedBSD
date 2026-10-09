@@ -13,9 +13,6 @@
 #include "drivers/gpu/bcm2711/vulkan-record.h"
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 
-/* One primary recording has bounded retained event storage independently of transport stream batch boundaries. */
-#define VULKAN_RECORD_BYTES (1024U * 1024U)
-
 static int append_record(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *decoded);
 static int release_record(struct bcm2711_vulkan_command_node *node);
 
@@ -153,7 +150,7 @@ append_record(
 	int retired;
 
 	/* Transport batch flushing does not reset retained native recording capacity. */
-	if (command->recorded_bytes > VULKAN_RECORD_BYTES - sizeof(*record))
+	if (command->recorded_bytes > BCM2711_VULKAN_RECORD_BYTES - sizeof(*record))
 		return ENOMEM;
 
 	/* Allocate one event without changing the primary list on ordinary OOM. */

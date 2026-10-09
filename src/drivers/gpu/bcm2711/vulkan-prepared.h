@@ -15,6 +15,8 @@
 struct bcm2711_vulkan_prepared_event {
 	struct bcm2711_vulkan_prepared_event *next;
 	uint32_t opcode;
+	/* The independently retained primary keeps each immutable dependency record alive until native retirement. */
+	const struct bcm2711_vulkan_record *record;
 	const struct bcm2711_vulkan_record *pass;
 	struct bcm2711_vulkan_pipeline *pipeline;
 	struct bcm2711_vulkan_resource *vertices[BCM2711_VULKAN_VERTEX_BINDINGS];

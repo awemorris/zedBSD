@@ -190,6 +190,7 @@ prepare_event(
 
 	/* The primary reference keeps the exact immutable pass record and compiled pipeline graph independent of public identities. */
 	event->opcode = record->opcode;
+	event->record = record;
 	event->pass = state->pass;
 	if (record->opcode == GPU_OP_CMD_DRAW) {
 		event->pipeline = state->pipeline;

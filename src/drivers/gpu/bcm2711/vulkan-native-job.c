@@ -11,6 +11,7 @@
 
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/vulkan-native-job.h"
+#include "drivers/gpu/bcm2711/vulkan-barrier.h"
 
 /* All concurrently resident native pass/draw uploads share this submission-wide padded budget. */
 #define NATIVE_JOB_BYTES (256ULL * 1024U * 1024U)
@@ -95,7 +96,7 @@ bcm2711_vulkan_native_job_execute(
 	job = payload;
 
 	/* The accepted payload must belong to the same exact renderer namespace and native controller. */
-	if (controller == NULL || session == NULL || job == NULL || job->prepared == NULL || job->session != session || session->device != controller)
+	if (controller == NULL || session == NULL || job == NULL || job->prepared == NULL || job->session != session || session->device != controller || controller->space.native == NULL)
 		return EINVAL;
 
 	/* A completed or uncertain payload never replays coherent source reads, clear or native work. */
@@ -104,12 +105,27 @@ bcm2711_vulkan_native_job_execute(
 		return EBUSY;
 	}
 
+	/* A stopped controller refuses both native launches and CPU layout publication before the primary becomes single-use work. */
+	if (!controller->space.native->hardware.initialized ||
+	    !controller->space.native->hardware.ready ||
+	    !controller->space.native->power.ready)
+		return EIO;
+
 	/* One finite resident upload budget covers every pass and its complete independent draw input prefix. */
 	job->executed = true;
 	remaining = NATIVE_JOB_BYTES;
 	event = job->prepared->first;
 	while (event != NULL) {
-		/* This private graphics executor requires an explicit complete pass; transfer/barrier lowering is added before public binding. */
+		/* Every earlier native pass completed before this explicit dependency can publish FIFO-visible layout state. */
+		if (event->opcode == GPU_OP_CMD_PIPELINE_BARRIER) {
+			error = bcm2711_vulkan_barrier_run(event->record);
+			if (error != 0)
+				return error;
+			event = event->next;
+			continue;
+		}
+
+		/* This private executor requires a complete graphics pass or implemented dependency; transfers are added before public binding. */
 		if (event->opcode != GPU_OP_CMD_BEGIN_RENDER_PASS)
 			return ENOTSUP;
 

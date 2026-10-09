@@ -135,6 +135,78 @@ ws141_client_encode_recording(
 }
 
 /*
+ * Appends one actual public barrier record using independently copied finite host object metadata.
+ */
+void
+ws141_client_encode_barrier(
+	struct vulkan_writer *writer,
+	uint64_t command_id,
+	uint64_t buffer_id,
+	const uint64_t *image_ids,
+	const VkImageLayout *layouts)
+{
+	struct vulkan_context context;
+	struct VkCommandBuffer_T command;
+	struct vulkan_object buffer;
+	struct vulkan_object images[2];
+	VkMemoryBarrier memory;
+	VkBufferMemoryBarrier buffer_barrier;
+	VkImageMemoryBarrier image_barriers[2];
+	uint32_t index;
+
+	/* The real recording wrapper owns its writer and the same native command identity used by the actual runtime fixture. */
+	memset(&context, 0, sizeof(context));
+	context.max_resource_bytes = 1024U * 1024U;
+	memset(&command, 0, sizeof(command));
+	command.object.context = &context;
+	command.object.wire_id = command_id;
+	command.state = VULKAN_COMMAND_RECORDING;
+	vulkan_writer_init(&command.recording);
+
+	/* One global memory dependency and one full logical buffer dependency use the actual public core encoder. */
+	memset(&memory, 0, sizeof(memory));
+	memory.sType = VK_STRUCTURE_TYPE_MEMORY_BARRIER;
+	memory.srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+	memory.dstAccessMask = VK_ACCESS_MEMORY_READ_BIT;
+	memset(&buffer, 0, sizeof(buffer));
+	buffer.wire_id = buffer_id;
+	memset(&buffer_barrier, 0, sizeof(buffer_barrier));
+	buffer_barrier.sType = VK_STRUCTURE_TYPE_BUFFER_MEMORY_BARRIER;
+	buffer_barrier.srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	buffer_barrier.dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+	buffer_barrier.buffer = (VkBuffer)(uintptr_t)&buffer;
+	buffer_barrier.size = VK_WHOLE_SIZE;
+
+	/* Two colour images provide independent copied source layouts and owned handle translation, including duplicate-handle refusal cases. */
+	memset(images, 0, sizeof(images));
+	memset(image_barriers, 0, sizeof(image_barriers));
+	for (index = 0; index < 2; index++) {
+		images[index].wire_id = image_ids[index];
+		image_barriers[index].sType = VK_STRUCTURE_TYPE_IMAGE_MEMORY_BARRIER;
+		image_barriers[index].srcAccessMask = VK_ACCESS_HOST_WRITE_BIT;
+		image_barriers[index].dstAccessMask = VK_ACCESS_SHADER_READ_BIT;
+		image_barriers[index].oldLayout = layouts[index];
+		image_barriers[index].newLayout = VK_IMAGE_LAYOUT_GENERAL;
+		image_barriers[index].srcQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		image_barriers[index].dstQueueFamilyIndex = VK_QUEUE_FAMILY_IGNORED;
+		image_barriers[index].image = (VkImage)(uintptr_t)&images[index];
+		image_barriers[index].subresourceRange.aspectMask = VK_IMAGE_ASPECT_COLOR_BIT;
+		image_barriers[index].subresourceRange.levelCount = VK_REMAINING_MIP_LEVELS;
+		image_barriers[index].subresourceRange.layerCount = VK_REMAINING_ARRAY_LAYERS;
+	}
+
+	/* The public wrapper supplies exact opcode, command identity, array counts and copied Vulkan records. */
+	vkCmdPipelineBarrier(&command, VK_PIPELINE_STAGE_HOST_BIT, VK_PIPELINE_STAGE_ALL_COMMANDS_BIT, 0, 1, &memory, 1, &buffer_barrier, 2, image_barriers);
+	if (command.error != VK_SUCCESS)
+		writer->error = command.error;
+	vulkan_write_bytes(writer, command.recording.data, command.recording.bytes);
+	vulkan_writer_finish(&command.recording);
+
+	/* Succeeded: no application structure or opaque client object survives the copied recording bytes. */
+	return;
+}
+
+/*
  * Encodes one actual client graphics record using real selected-state and handle conversion functions.
  */
 void

@@ -12,6 +12,9 @@
 #include "drivers/gpu/bcm2711/vulkan-command.h"
 #include "drivers/gpu/bcm2711/vulkan-pipeline.h"
 
+/* Every primary shares this whole immutable recording budget across graphics, transfer and dependency nodes. */
+#define BCM2711_VULKAN_RECORD_BYTES (1024U * 1024U)
+
 /* One bounded graphics event copies its selected scalar payload and independently retains every referenced object. */
 struct bcm2711_vulkan_record {
 	struct bcm2711_vulkan_command_node node;
