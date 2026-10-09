@@ -520,6 +520,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-09 ユーザー:「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」→ [ws001-p045](ws001/phase045/phase.md)（planned、ベータ3 の P1 の列）。
 - 2026-10-09 ユーザー:「<sys/socket.h> ですが、libcに入れてくれますか？」→ ws126-p002 の SOMAXCONN（128）は libc の include/libc/sys/socket.h に置き、uapi と kernel の unix-socket.c は変えない（Q1 の uapi 案を取り消し）。
 - 2026-10-09 Q1 判定: P4（Sonnet 5.5・effort low）の ws183-p003 規約の見直しは合格（fbd1da9e7）。手順（違反の一覧・build warning 0・host 試験・記録・cleared 候補で返す）を省かず、動作の変更なし、comment は正確。Haiku 4.5 low は手順を省いた（前記）。規約の見直しは Sonnet 5.5 low で足りる。P4 は終了。
 - 2026-10-09 ユーザー:「では、P3はラップアップします。P4は作業ができたかどうかを評価したら終了します。N=1でP1のみで継続します。」→ P3 は安全な地点で終える。P4（Sonnet 5.5 low の試し、WS183 の規約の見直し、.claude/agents/p3-conformance-sonnet-low.md が読み込まれたら起動）は 1 回の評価で終わる。以後 N=1（P1 だけ）＋T1。

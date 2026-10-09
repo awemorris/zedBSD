@@ -65,6 +65,7 @@ Shared tests: [WS001 test index](tests/README.md)
 | `ws001-p042` | [find の XCU の primary と式](phase042/phase.md) | in-progress（2026-10-07 P2） | -exec … {} + の束ね、-perm の symbolic mode、-L/-H の dangling link、loop の診断。host の差分 38/38、zedBSD の build。guest は T1 待ち |
 | `ws001-p043` | [tabs の XCU の形と幅](phase043/phase.md) | in-progress（2026-10-07 P2） | -0、-1・-2、column 1 の `\E[0C` のずれ、幅（COLUMNS・端末・cols）、TERM の既定、複数の operand。host の比較 55/55、zedBSD の build。guest は T1 待ち |
 | `ws001-p044` | [ps の XCU の形](phase044/phase.md) | test-wait（2026-10-09 P1） | -o の field=header（引数の終わりまで）、XCU の field と header、列の幅、選択の和と既定（実効 user と session）、-f の command line、`[dd-]hh:mm:ss`。host 15/15、zedBSD の build。pcpu・etime・実の user・tty の名前は kernel に無く記録。guest は T1 待ち |
+| `ws001-p045` | [POSIX の header の全数の照合と補完](phase045/phase.md) | planned（2026-10-09 Q1、ユーザーの指示） | 全 header の型・定数・宣言を照合し、不足を補う。ws126-p002 の libc の不足が発端 |
 
 ### q042 pre-merge identifier migration
 
