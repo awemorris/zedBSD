@@ -68,6 +68,35 @@ echo "interface: $iface"
 guest "net static $iface ipv4 10.77.0.2 netmask 255.255.255.0 || ifconfig $iface inet 10.77.0.2 netmask 255.255.255.0; ifconfig $iface up; sleep 2; ifconfig $iface; ping -c 3 10.77.0.1" > "$out/setup.txt"
 grep -qE ' [1-3] packets received' "$out/setup.txt" || { cat "$out/setup.txt"; echo "FAIL: no way to 10.77.0.1"; exit 1; }
 
+# A TCP probe before the measurement (T1-511: ping answered, but every fetch failed with "cannot connect" after about
+# 30 s and the server saw no request): a small file fetched while the packets are captured on both ends of the segment,
+# the tap (what QEMU sends and gets) and the namespace's veth (what the server sends and gets).  When it fails, the
+# captures, the guest's interfaces and routes and the namespace's sockets and neighbours are kept, and the measurement
+# is not run (nine fetches that each wait out the connect would tell nothing more).
+head -c 65536 /dev/urandom > "$out/www/small.bin"
+sudo dumpcap -q -i zbltap0 -a duration:25 -w - > "$out/probe-tap.pcapng" 2> "$out/probe-tap.err" &
+tap_capture=$!
+sudo ip netns exec zbl dumpcap -q -i zblv1 -a duration:25 -w - > "$out/probe-veth.pcapng" 2> "$out/probe-veth.err" &
+veth_capture=$!
+sleep 3
+guest "timeout 15 fetch -q -o /tmp/small.bin http://10.77.0.1:8080/small.bin; echo exit=\$?; ls -l /tmp/small.bin" > "$out/probe.txt"
+guest "ifconfig -a; route show" > "$out/probe-guest.txt"
+{ sudo ip netns exec zbl ss -tan; sudo ip netns exec zbl ip neigh; sudo ip netns exec zbl ip -s link show zblv1; } > "$out/probe-namespace.txt" 2>&1
+wait "$tap_capture" "$veth_capture"
+tshark -r "$out/probe-tap.pcapng" -n > "$out/probe-tap.txt" 2>&1
+tshark -r "$out/probe-veth.pcapng" -n > "$out/probe-veth.txt" 2>&1
+if ! grep -q '^exit=0' "$out/probe.txt"; then
+	cat "$out/probe.txt"
+	echo "tap (QEMU's side):"
+	grep -E 'TCP|ARP' "$out/probe-tap.txt" | head -12
+	echo "veth (the server's side):"
+	grep -E 'TCP|ARP' "$out/probe-veth.txt" | head -12
+	echo "FAIL: no TCP connection to 10.77.0.1:8080 (probe-*.txt in $out)"
+	echo "tcp-loss-speed: FAIL"
+	exit 1
+fi
+echo "probe: ok"
+
 # One loss: three fetches, their MB/s and the median.
 measure() {
 	loss=$1
