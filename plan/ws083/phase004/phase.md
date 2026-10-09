@@ -2,7 +2,7 @@
 
 # ws083-p004: MFX AVC の I frame の builder、NV12 Tile Y、genxml の独立の decoder、試験の stream、vkvideo-probe
 
-Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 4・5 行目 PASS、build warning 0、T1 の §8.2 は T1-371 PASS）を満たし、I frame の実機の hash も 5330 で一致。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS（Q1 判定、ws.md の表）。review の R-S1 の直し（q897）は host のみ。実機の hash は p005（T1-435、未実行））（旧: in-progress（q857-i01、P2。2026-10-08 実装と host 試験は済み、§8.2 の QEMU 回帰は T1 待ち）））
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 4・5 行目 PASS、build warning 0、T1 の §8.2 は T1-371 PASS）を満たし、I frame の実機の hash も 5330 で一致。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS（Q1 判定、ws.md の表）。review の R-S1 の直し（q897）は host のみ。実機の hash は p005（T1-435、未実行））（旧: in-progress（q857-i01、P2。2026-10-08 実装と host 試験は済み、§8.2 の QEMU 回帰は T1 待ち）））
 Disposition: normal
 Parent: [WS083](../ws.md)
 

@@ -2,7 +2,7 @@
 
 # ws083-p002: libvulkan の Vulkan Video の骨組み
 
-Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（host の試験 PASS・build warning 0・export の数 192・PROVENANCE）は 2026-10-07 に満たし、§8.2 の QEMU 回帰は T1-371 PASS、実機の family・拡張の列挙も 5330 で確かめた。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS。実機の family・拡張の列挙は T1-435 の A（未実行））（旧: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1）））
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（host の試験 PASS・build warning 0・export の数 192・PROVENANCE）は 2026-10-07 に満たし、§8.2 の QEMU 回帰は T1-371 PASS、実機の family・拡張の列挙も 5330 で確かめた。判定は Q1）（旧: in-progress（2026-10-08 q902 P1 の照合: §8.2 の QEMU 回帰は T1-371 PASS。実機の family・拡張の列挙は T1-435 の A（未実行））（旧: in-progress（q833、P1。2026-10-07 夜 段 1〜3 の実装と host 試験済み、QEMU の回帰は p004 の受け入れで T1）））
 Disposition: normal
 Parent: [WS083](../ws.md)
 

@@ -2,7 +2,7 @@
 
 # ws083-p006a: P・B と DPB、scaling list、複数 slice の host の試験
 
-Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の P・B PASS）を満たし、P・B の実機の hash（p006b）も 5330 で一致。判定は Q1）（旧: in-progress（P2、2026-10-08 Q1 の指示「待つ間に ws083-p006a を進めてよい」。host の範囲は実装と試験済み））
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の P・B PASS）を満たし、P・B の実機の hash（p006b）も 5330 で一致。判定は Q1）（旧: in-progress（P2、2026-10-08 Q1 の指示「待つ間に ws083-p006a を進めてよい」。host の範囲は実装と試験済み））
 Disposition: normal
 Parent: [WS083](../ws.md)
 

@@ -2,7 +2,7 @@
 
 # ws083-p003a: i915 の VCS の土台（engine record VCS0・worker の video の context・hang の封じ込め）
 
-Status: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 6 行目 PASS、vmunix の build warning 0）は 2026-10-07 に満たし、VCS0 の context の実機の bring-up も 5330 で確かめた。判定は Q1）（旧: in-progress（q833、P1。2026-10-07 実装と host 試験、実機は p005））
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 6 行目 PASS、vmunix の build warning 0）は 2026-10-07 に満たし、VCS0 の context の実機の bring-up も 5330 で確かめた。判定は Q1）（旧: in-progress（q833、P1。2026-10-07 実装と host 試験、実機は p005））
 Disposition: normal
 Parent: [WS083](../ws.md)
 
