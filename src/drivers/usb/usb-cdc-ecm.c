@@ -987,8 +987,19 @@ ecm_stop(
 	/* Drops the frames still waiting; no transfer refers to them. */
 	ecm_tx_queue_free(adapter);
 
-	/* Handles the net device availability. */
-	if (adapter->net_device != NULL)
+	/*
+	 * The carrier is the device's last word on its link and stays as it
+	 * was across an administrative close: the device tells a link only
+	 * when it changes (its NetworkConnection notification), so a carrier
+	 * cleared here was never set again when the interface came back up
+	 * with the cable still in, and Settings said "No cable" over a
+	 * working link (BUG-277: a cable that went and came back before
+	 * networkd took the interface down and up).  A cable pulled while the
+	 * interface is down is told by the notification the device holds for
+	 * the next open.  A stop that failed leaves the device quarantined,
+	 * without a link.
+	 */
+	if (error != 0 && adapter->net_device != NULL)
 		(void)net_device_set_carrier(adapter->net_device, 0);
 
 	/* Reports the failure. */
