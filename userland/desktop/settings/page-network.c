@@ -1270,9 +1270,19 @@ network_wired(
 	if (network->links[index].loopback != 0)
 		return 0;
 
-	/* Nor is the radio. */
+	/* Nor is the radio the network service names. */
 	differs = strcmp(network->links[index].name, network->state.wifi_interface);
 	if (network->state.wifi_interface[0] != '\0' && differs == 0)
+		return 0;
+
+	/*
+	 * Nor any radio by its name (zedBSD's and FreeBSD's wlanN, Linux's
+	 * wlpNsN, wlanN and wlxM): the service names its radio only while it
+	 * has one in use, and a radio that is up without a network was drawn as
+	 * an Ethernet card with no cable (BUG-277).
+	 */
+	differs = strncmp(network->links[index].name, "wl", 2U);
+	if (differs == 0)
 		return 0;
 
 	/* Any other interface is. */
