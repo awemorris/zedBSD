@@ -31,7 +31,7 @@
 | Settings の Wi-Fi の on/off | ✔ | — |
 | 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
-| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) **原因の候補が絞れた**（2026-10-10 Q1 の SSH）: Bluetooth の USB の device（port 10、full-speed）の enumerate が `enumeration failed (3)` で失敗、firmware は入っている。xHCI の full-speed の扱いの見込み → P1 が最優先 |
+| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) **直った（5330 で確認）**: 原因は USB の driver が Bluetooth の voice の endpoint（大きさ 0）を拒んでいた。新しい kernel で 8087:0033・/dev/bluetooth0・firmware の load・`STATE ready`・`POWER on`。ユーザーが Settings と HID の pairing を確かめて close |
 | Terminal の選んだ文字のドラッグ | ✘ 選択の上でダブルタップ（tap からの drag）を始めると最初の tap で選択が外れる | [BUG-276](bugs/BUG-276.md) 直した（範囲の上の tap は 350 ms 待って消す、その間の press と移動で範囲の drag）。QEMU で tap を注入できないので次の UAT で確認。Text Editor 等は範囲の drag が無く同じ不具合は無い |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 の QEMU で戻りに address が付く、次の UAT で実機 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) 見込み: 買ったままの鍵に PIN が無く Add が押せなかった。足りない物を表示（PIN が無ければ「run fidoctl set-pin in Terminal」）。次の UAT で確認。Settings の中で PIN を付けるのはベータ3 の候補 |
@@ -71,7 +71,6 @@
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
 | 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
 | 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
-| 12 | [BUG-269](bugs/BUG-269.md) ESP の書き込み | Q1 が SSH で kernel を ESP に書く。ユーザーは止まった時の電源の再投入だけ | SSH が止まらない |
 | 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
 
