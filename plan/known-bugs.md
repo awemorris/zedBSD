@@ -142,7 +142,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-272](bugs/BUG-272.md) | 起動時の Ctrl+Shift（C3）を loader が間欠に検出しない（T1-214 の 12 回に 1 回、再試行で PASS） | reproduced（QEMU） / tracking・**blocked（UAT 待ち）**（q914: QEMU の C3 の頻度を T1 で測り、判定は 5330 の UAT） | 2026-10-08 ws174-p003（T1-214） | 未定（5330 の UAT で出たら） |
 | [BUG-273](bugs/BUG-273.md) | x11-p004 の段 3: docked の X11 の窓を bar の close で閉じても glxtest・X server が終わらない（WS178 の前から） | reproduced（QEMU） / duplicate（BUG-245、T1-344 で x11-p004 PASS、2026-10-09 P1） | 2026-10-08 ws178-p001（T1-340・341） | 無し（再発したら BUG-245 を開く） |
 | [BUG-274](bugs/BUG-274.md) | `ps -o args` が argv[0] だけ（引数が出ない）。試験の不具合 2 つの根 | reproduced（QEMU） / scheduled（修正は main、guest の確かめは security の判定で飛ばした、blocked（UAT 待ち）） | 2026-10-09 Q1 | P1 |
-| [BUG-275](bugs/BUG-275.md) | Settings の Bluetooth の頁で 5330 に Bluetooth の device が無いと出る | reproduced（実機） / tracking | UAT 2026-10-10 | WS143 |
+| [BUG-275](bugs/BUG-275.md) | Settings の Bluetooth の頁で 5330 に Bluetooth の device が無いと出る | reproduced（実機） / resolved（2026-10-10 USB の直しの後、ユーザーの UAT で keyboard・mouse を確認） | UAT 2026-10-10 | WS143 |
 | [BUG-276](bugs/BUG-276.md) | Terminal で選んだ文字を tap からの drag で drag しようとすると、最初の tap で選択が外れる | reproduced（実機） / resolved（2026-10-10 ユーザーの UAT で OK） | UAT 2026-10-10 | WS183 p002 |
 | [BUG-277](bugs/BUG-277.md) | Settings の Ethernet が接続しているのに No Cable と出る | reproduced（実機） / tracking（2026-10-10 直しの後も実機で No cable、static の設定の見込み） | UAT 2026-10-10 | WS089 Settings の Network と networkd の carrier の状態 |
 | [BUG-278](bugs/BUG-278.md) | 状態の島のパネルの Mute の button の文字が右にずれる | reproduced（実機） / tracking | UAT 2026-10-10 | WS192 |

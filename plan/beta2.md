@@ -31,7 +31,7 @@
 | Settings の Wi-Fi の on/off | ✔ | — |
 | 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) 直した。T1-514 の PNG で Mute と「No notifications」が中央（build/review/t1-514/）、ユーザーの目視で close |
 | BUG-253（蓋） | ✔ close | — |
-| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) **直った（5330 で確認）**: 原因は USB の driver が Bluetooth の voice の endpoint（大きさ 0）を拒んでいた。新しい kernel で 8087:0033・/dev/bluetooth0・firmware の load・`STATE ready`・`POWER on`。ユーザーが Settings と HID の pairing を確かめて close |
+| Settings の Bluetooth と HID | ✔ 2026-10-10 keyboard・mouse の接続と利用を確認（BUG-275 close、WS143 p008 cleared） | — |
 | Terminal の選んだ文字のドラッグ | ✔ 2026-10-10 直った（BUG-276 close） | — |
 | Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) **直っていない**（2026-10-10 ユーザー）。SSH: ue0 は RUNNING・2500Mbps・`static online`。static の設定の interface を backend か Settings が No cable と読む見込み → P1（BUG-283 の次） |
 | Settings の YubiKey | ✔ 2026-10-10 FIDO2 の鍵の登録と login（BUG-279 close）。要望: 独立の頁とウィザード → WS199、Users の頁のパスワード変更と認証方式 → WS200（ベータ2）、ロック画面の button の高さ → BUG-283 | — |
@@ -54,7 +54,6 @@
 | T1 の再試験の結果（2026-10-10）: 509 C7 PASS、510 画面 keyboard PASS、513 有線の戻り PASS、514 パネルの PNG。511 tcp-loss-speed FAIL（fetch が繋がらない）、512 Python（ベータ3）は 17/45 files 失敗、513 の tcp-receive-speed で fetch が 2 回に 1 回返らない | P1 の見立て: 試験の host 側は正しく、guest の USB LAN で SYN か SYN-ACK が落ちる・ue0 の TCP が約 2 分止まる（packet の pool の枯渇の見込み、未確認）。T1-516: 接続の失敗は再現せず転送は完走、ただし損失 2% で 0.58 MB/s（損失 0% の 6.19 の 1/4 未満）、受信の 6 回は全部 ok（約 10 MB/s、止まらず）。T1-515: ifconfig の media・Settings の Link speed（QEMU は Unknown）PASS、lan-hotplug が 2 回に 1 回 FAIL → P1: 回帰ではなく SSH の呼び出しが約 60 s 止まる前からの flake（[BUG-281](bugs/BUG-281.md)、試験は取り直す形に）。損失の回復: 並び替えの持ち数を 16 → 44（window の全部、64-bit）に直した（1 定数）。**T1-517 PASS**（損失 2% で 0.58 → 2.59 MB/s、0% も 6.19 → 8.42、hot-plug・受信も ok）。受信の SACK はベータ3 の候補（約 3 LW）。実機は 5330 の UAT | 2 | P1・T1 |
 | 上の再試験で出る FAIL の直し | — | T1 の結果 | 2 | P1 |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | host の作業は済み。release の config は OFF、T1-435 が PASS したら ON の 1 行 | **5330 の復帰**（T1-435） | 2 | T1・P1 |
-| [WS143](ws143/ws.md) Bluetooth の HID | QEMU の回帰 PASS（T1-502）。UAT の確認表 B1〜B14 は [phase008](ws143/phase008/phase.md) | 5330 の UAT と機器の情報 | 3 | ユーザー・P1 |
 | WS192（状態の島のパネル）の UAT の指摘 | WS193・WS194 は UAT OK、WS192 は BUG-278（Mute の文字） | P1 | 1 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | — | ユーザー | — | ユーザー |
 | [WS199](ws199/ws.md) セキュリティキーの独立の頁とウィザード（2026-10-10 UAT の要望） | P1、BUG-283 の後 | — | 8 | P1・T1・ユーザー |
@@ -73,7 +72,6 @@
 | 5 | [WS183](ws183/ws.md) touchpad の tap | 1 本指の tap、素早い 2 回の tap、tap の直後に指を置いて動かす | tap はすぐ click（遅れを感じない）、2 回は double click、最後は drag |
 | 6 | [WS187](ws187/ws.md) ロック画面 | (a) 手動で Lock、(b) 蓋を閉じて開ける・放置で自動 lock（5 分以内） | 時計が中央より上に大きい。画面の下の方から上へ swipe（touchpad・touchscreen）か mouse の wheel を上で解除の画面。(a) は必ず認証、(b) は 5 分以内なら swipe だけで解除 |
 | 7 | [WS161](ws161/ws.md)・WS172 YubiKey | YubiKey 5（USB）を挿し、ロック画面か login で Hardware Key を選び鍵に触れる。NFC は ACR1252U に YubiKey 5 NFC を置く | 解除・login できる。PIN・Password の選択も出る |
-| 8 | [WS143](ws143/ws.md) Bluetooth のキーボード・マウス | Settings → Bluetooth で BR/EDR（従来型）と LE の機器をそれぞれ pairing、文字を打つ・pointer を動かす。その間 Wi-Fi も使う | 入力が効く。Wi-Fi が切れない。✘ なら 10/16 に OFF |
 | 9 | [WS083](ws083/ws.md) Vulkan Video | ユーザーの UAT は無し（release の image の Video Player は FFmpeg の CPU の decode で、Vulkan Video を使う program は入っていない。2026-10-09 P1 の調べ）。実機の確かめは T1-435 と人工の hang F1・F2 | — |
 | 13 | [WS090](ws090/ws.md) 描画の速さ | desktop で範囲選択の枠を drag、Text Editor・Files で scroll | もたつかない（体感で、遅い所を教えてください） |
 | 17 | 写真の判定 | build/review/bugsweep/ の PNG 11 枚（T1-481 の needs-person） | 見た目が正しいかを OK／NG で |
