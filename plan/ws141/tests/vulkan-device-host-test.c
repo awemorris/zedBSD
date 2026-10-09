@@ -17,6 +17,7 @@
 #include "drivers/gpu/bcm2711/bcm2711-private.h"
 #include "drivers/gpu/bcm2711/render-device.h"
 #include "drivers/gpu/bcm2711/vulkan-device.h"
+#include "drivers/gpu/bcm2711/vulkan-sync.h"
 #include "drivers/gpu/bcm2711/vulkan-memory.h"
 #include "drivers/gpu/bcm2711/vulkan-resource.h"
 #include "drivers/gpu/bcm2711/vulkan-input.h"
@@ -143,6 +144,7 @@ static void layout_test(struct bcm2711_vulkan_session *session);
 static void input_test(struct bcm2711_vulkan_session *session);
 static int input_created(struct bcm2711_vulkan_session *session, struct vulkan_writer *writer, uint64_t identity);
 static void resource_test(struct bcm2711_vulkan_session *session);
+static void sync_test(struct bcm2711_vulkan_session *session);
 static void memory_test(struct bcm2711_vulkan_session *session, struct bcm2711_render_session *render);
 static void external_barrier_test(struct bcm2711_vulkan_object *memory_object);
 static int memory_allocate(struct bcm2711_vulkan_session *session, uint64_t identity, uint64_t bytes, uint32_t extension, uint32_t argument);
@@ -605,6 +607,7 @@ main(
 	assert(render.timelines == (UINT64_C(1) << 7));
 	queue = bcm2711_vulkan_object_find(session, I915_VK_OBJ_QUEUE, 40);
 	assert(queue != NULL);
+	sync_test(session);
 	memory_test(session, &render);
 	resource_test(session);
 	input_test(session);
@@ -3233,6 +3236,13 @@ dispatch(
 	if (handled != 0)
 		return 0;
 
+	/* Core native fences and semaphores keep their independent typed device owners. */
+	error = bcm2711_vulkan_sync_dispatch(session, opcode, requested, reader, reply, &handled);
+	if (error != 0)
+		return error;
+	if (handled != 0)
+		return 0;
+
 	/* Actual physical records use the independently implemented native query table. */
 	error = bcm2711_vulkan_query_dispatch(session, opcode, requested, reader, reply, &handled);
 	if (error != 0)
@@ -3345,6 +3355,188 @@ dispatch(
 
 	/* Succeeded: one real typed native module consumed the complete selected command. */
 	return 0;
+}
+
+/* Exercises exact client sync records, native payload observation and atomic reset/destruction across independent pending owners. */
+static void
+sync_test(
+    struct bcm2711_vulkan_session *session)
+{
+	struct bcm2711_vulkan_object *device;
+	struct bcm2711_vulkan_object *objects[3];
+	struct bcm2711_vulkan_object *found;
+	struct bcm2711_vulkan_sync *fence;
+	struct bcm2711_vulkan_sync *other;
+	struct bcm2711_vulkan_sync *semaphore;
+	struct vulkan_writer writer;
+	struct vulkan_reader reader;
+	VkFenceCreateInfo create;
+	VkSemaphoreCreateInfo sem_create;
+	uint8_t wire[512];
+	uint32_t index;
+	uint32_t references;
+	unsigned baseline;
+	int error;
+
+	/* The real client codec emits the flags-only native shape read from sync_create, without fabricated public API or GPU completion. */
+	baseline = allocations;
+	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, 30);
+	assert(device != NULL);
+	references = device->references;
+	memset(&create, 0, sizeof(create));
+	create.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
+	create.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FENCE, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkFenceCreateInfo(&writer, &create);
+		vulkan_write_u64(&writer, 0);
+		vulkan_write_u64(&writer, 1);
+		vulkan_write_u64(&writer, 90U + index);
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+		assert(vulkan_read_u64(&reader) == 1 && vulkan_read_u64(&reader) == 90U + index);
+		objects[index] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FENCE, 90U + index);
+		assert(objects[index] != NULL);
+	}
+
+	/* An ordinary binary semaphore starts with no reserved or completed signal/wait and owns its independent device edge. */
+	memset(&sem_create, 0, sizeof(sem_create));
+	sem_create.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
+	begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_SEMAPHORE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 1);
+	vulkan_encode_VkSemaphoreCreateInfo(&writer, &sem_create);
+	vulkan_write_u64(&writer, 0);
+	vulkan_write_u64(&writer, 1);
+	vulkan_write_u64(&writer, 92);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	assert(vulkan_read_u64(&reader) == 1 && vulkan_read_u64(&reader) == 92);
+	objects[2] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_SEMAPHORE, 92);
+	assert(objects[2] != NULL && device->references == references + 3U);
+	fence = objects[0]->payload;
+	other = objects[1]->payload;
+	semaphore = objects[2]->payload;
+	assert(fence->signaled && other->signaled && !semaphore->signaled);
+	assert(semaphore->signals_reserved == 0 && semaphore->waits_reserved == 0);
+	assert(semaphore->signals_completed == 0 && semaphore->waits_completed == 0);
+
+	/* Payload and registry allocation failures return ordinary Vulkan OOM with zero output and no retained parent residue. */
+	for (index = 1; index <= 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_CREATE_FENCE, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 1);
+		vulkan_encode_VkFenceCreateInfo(&writer, &create);
+		vulkan_write_u64(&writer, 0);
+		vulkan_write_u64(&writer, 1);
+		vulkan_write_u64(&writer, 93);
+		fail_after = index;
+		error = execute(session, &writer, &reader);
+		assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_OUT_OF_HOST_MEMORY);
+		assert(vulkan_read_u64(&reader) == 1 && vulkan_read_u64(&reader) == 0);
+		found = bcm2711_vulkan_object_find(session, I915_VK_OBJ_FENCE, 93);
+		assert(found == NULL && device->references == references + 3U && allocations == baseline + 6U);
+	}
+
+	/* A trailing invalid ID or explicitly modeled pending owner refuses reset without unsignaling an earlier selected payload. */
+	for (index = 0; index < 2; index++) {
+		begin(&writer, wire, sizeof(wire), GPU_OP_RESET_FENCES, 1);
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u32(&writer, 2);
+		vulkan_write_u64(&writer, 2);
+		vulkan_write_u64(&writer, 90);
+		if (index == 0) {
+			vulkan_write_u64(&writer, 93);
+		} else {
+			other->pending = true;
+			vulkan_write_u64(&writer, 91);
+		}
+
+		/* Only explicit pending metadata is synthetic; the decoder and both selected fence owners are actual source. */
+		error = execute(session, &writer, &reader);
+		if (index == 0) {
+			assert(error == EINVAL);
+		} else {
+			assert(error == EBUSY);
+		}
+
+		/* Neither refused complete vector published an earlier reset. */
+		assert(fence->signaled && other->signaled);
+	}
+
+	/* A pending native payload is never reported signaled even when its retained prior flag was true. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_FENCE_STATUS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 91);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_NOT_READY);
+	other->pending = false;
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_FENCE_STATUS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 91);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+
+	/* IRQ/controller loss takes precedence over an initially signaled payload. */
+	session->render->device->space.native->hardware.faulted = true;
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_FENCE_STATUS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 91);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == (uint32_t)VK_ERROR_DEVICE_LOST);
+	session->render->device->space.native->hardware.faulted = false;
+
+	/* One complete reset publishes both unsignaled payloads after all IDs passed preflight. */
+	begin(&writer, wire, sizeof(wire), GPU_OP_RESET_FENCES, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u32(&writer, 2);
+	vulkan_write_u64(&writer, 2);
+	vulkan_write_u64(&writer, 90);
+	vulkan_write_u64(&writer, 91);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_SUCCESS);
+	assert(!fence->signaled && !other->signaled);
+	begin(&writer, wire, sizeof(wire), GPU_OP_GET_FENCE_STATUS, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 90);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && vulkan_read_u32(&reader) == VK_NOT_READY);
+
+	/* Actual namespace removal preserves an explicit independent pending reference until its exact owner releases it. */
+	error = bcm2711_vulkan_object_retain(objects[0]);
+	assert(error == 0);
+	begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_FENCE, 1);
+	vulkan_write_u64(&writer, 30);
+	vulkan_write_u64(&writer, 90);
+	vulkan_write_u64(&writer, 0);
+	error = execute(session, &writer, &reader);
+	assert(error == 0 && !objects[0]->published && objects[0]->references == 1);
+	assert(fence->device == device && device->references == references + 3U);
+	error = bcm2711_vulkan_object_release(objects[0]);
+	assert(error == 0 && device->references == references + 2U);
+	for (index = 1; index < 3; index++) {
+		if (index == 2) {
+			begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_SEMAPHORE, 1);
+		} else {
+			begin(&writer, wire, sizeof(wire), GPU_OP_DESTROY_FENCE, 1);
+		}
+
+		/* The selected destruction consumes the exact remaining device-owned identity. */
+		vulkan_write_u64(&writer, 30);
+		vulkan_write_u64(&writer, 90U + index);
+		vulkan_write_u64(&writer, 0);
+		error = execute(session, &writer, &reader);
+		assert(error == 0);
+	}
+
+	/* Every independently retained native parent and CPU payload has retired without a physical GPU or queue completion claim. */
+	assert(allocations == baseline && device->references == references);
+	puts("WS141 exact client sync records/native initial status/atomic reset/pending owner/OOM/fault precedence: PASS");
+
+	/* Succeeded: core native fence and binary semaphore ownership matches the actual finite client wire boundary. */
+	return;
 }
 
 /* Begins a real client-encoded command with an actual session reply selection. */
