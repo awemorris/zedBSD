@@ -1,0 +1,98 @@
+--- a/include/drivers/gpu/gpu.h
++++ b/include/drivers/gpu/gpu.h
+@@ -21,6 +21,8 @@
+ 
+ #define DRV_GPU_INTERFACE_VERSION	9U
+ #define DRV_GPU_MAPPING_DEVICE		1U
++/* Normal non-cacheable RAM keeps ordinary byte access and managed-memory identity. */
++#define DRV_GPU_MAPPING_UNCACHED_RAM	2U
+ 
+ struct drv_gpu_device;
+ struct drv_gpu_completion;
+@@ -88,7 +90,8 @@
+ /*
+  * An immutable CPU view borrowed from one retained resource. The GPU core
+  * retains the resource and its open file through every VM mapping and pin.
+- * DEVICE distinguishes uncached MMIO from ordinary coherently mapped DMA RAM.
++ * DEVICE distinguishes MMIO from managed RAM; UNCACHED_RAM preserves a backend
++ * Normal non-cacheable alias in userspace without treating RAM as device registers.
+  */
+ struct drv_gpu_mapping {
+ 	uint64_t physical;
+--- a/include/kern/vm-device.h
++++ b/include/kern/vm-device.h
+@@ -17,6 +17,8 @@
+ #include <stdint.h>
+ 
+ #define VM_DEVICE_MMIO 1U
++/* Normal non-cacheable RAM remains managed memory and permits ordinary byte copies. */
++#define VM_DEVICE_UNCACHED_RAM 2U
+ 
+ struct file;
+ 
+--- a/src/drivers/gpu/gpu.c
++++ b/src/drivers/gpu/gpu.c
+@@ -2905,7 +2905,8 @@
+ 		    view.bytes == 0 ||
+ 		    view.bytes < resource->bytes ||
+ 		    view.bytes > SIZE_MAX ||
+-		    (view.attributes & ~DRV_GPU_MAPPING_DEVICE) != 0)
++		    (view.attributes & ~(DRV_GPU_MAPPING_DEVICE | DRV_GPU_MAPPING_UNCACHED_RAM)) != 0 ||
++		    view.attributes == (DRV_GPU_MAPPING_DEVICE | DRV_GPU_MAPPING_UNCACHED_RAM))
+ 			return EIO;
+ 
+ 		/* Every alias and extent must represent whole pages for the VM insertion. */
+@@ -3036,6 +3037,10 @@
+ 	attributes = 0U;
+ 	if ((resource->mapping.attributes & DRV_GPU_MAPPING_DEVICE) != 0)
+ 		attributes = VM_DEVICE_MMIO;
++
++	/* Normal uncached RAM keeps the backend's cache policy in every user translation. */
++	if ((resource->mapping.attributes & DRV_GPU_MAPPING_UNCACHED_RAM) != 0)
++		attributes = VM_DEVICE_UNCACHED_RAM;
+ 
+ 	/* A successful VM owner consumes the release callback and independently retains the file. */
+ 	error = vm_device_create(
+--- a/src/kern/vm-device.c
++++ b/src/kern/vm-device.c
+@@ -66,8 +66,9 @@
+ 	if (bytes - 1U > UINTPTR_MAX - (uintptr_t)address)
+ 		return EOVERFLOW;
+ 
+-	/* Device storage cannot become executable through later mprotect calls. */
+-	if ((attributes & ~VM_DEVICE_MMIO) != 0)
++	/* MMIO and Normal non-cacheable RAM are mutually exclusive storage identities. */
++	if ((attributes & ~(VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM)) != 0 ||
++	    attributes == (VM_DEVICE_MMIO | VM_DEVICE_UNCACHED_RAM))
+ 		return EINVAL;
+ 
+ 	/* The original device open grants only a nonempty subset of read and write. */
+@@ -152,6 +153,10 @@
+ 	if ((mapping->attributes & VM_DEVICE_MMIO) != 0)
+ 		return HAL_SPACE_DEVICE | HAL_SPACE_NOCACHE;
+ 
++	/* Managed uncached RAM uses Normal memory attributes, preserving unaligned byte access. */
++	if ((mapping->attributes & VM_DEVICE_UNCACHED_RAM) != 0)
++		return HAL_SPACE_NOCACHE;
++
+ 	/* Succeeded: ordinary DMA RAM requires no device-only page attributes. */
+ 	return 0U;
+ }
+@@ -182,7 +187,7 @@
+ 	if (offset > mapping->bytes || bytes > mapping->bytes - offset)
+ 		return EFAULT;
+ 
+-	/* Ordinary DMA RAM keeps its established cached alias. */
++	/* Managed RAM uses its retained cached or Normal non-cacheable kernel alias. */
+ 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
+ 		kern_memcpy(destination, (const uint8_t *)mapping->address + offset, bytes);
+ 
+@@ -232,7 +237,7 @@
+ 	if (offset > mapping->bytes || bytes > mapping->bytes - offset)
+ 		return EFAULT;
+ 
+-	/* Ordinary DMA RAM uses its existing cached kernel alias. */
++	/* Managed RAM uses the same cached or Normal non-cacheable alias as its owner. */
+ 	if ((mapping->attributes & VM_DEVICE_MMIO) == 0) {
+ 		kern_memcpy((uint8_t *)mapping->address + offset, source, bytes);
+ 

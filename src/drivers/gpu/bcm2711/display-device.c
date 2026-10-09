@@ -577,7 +577,11 @@ resource_map(
 	mapping->bytes = resource->buffer->bytes;
 	mapping->attributes = 0;
 
-	/* Succeeded: the mapping describes cached RAM rather than MMIO. */
+	/* Every user mapping preserves the allocation's immutable CPU cache policy. */
+	if (resource->buffer->uncached)
+		mapping->attributes = DRV_GPU_MAPPING_UNCACHED_RAM;
+
+	/* Succeeded: the mapping describes managed RAM with its owner's CPU cache policy. */
 	return 0;
 }
 

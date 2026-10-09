@@ -417,7 +417,11 @@ render_map(
 	mapping->bytes = buffer->bytes;
 	mapping->attributes = 0;
 
-	/* Succeeded: the common core pins ordinary cached RAM through every VM mapping. */
+	/* Every user mapping preserves the allocation's immutable CPU cache policy. */
+	if (buffer->uncached)
+		mapping->attributes = DRV_GPU_MAPPING_UNCACHED_RAM;
+
+	/* Succeeded: the common core pins RAM with the same cache policy through every VM mapping. */
 	return 0;
 }
 
