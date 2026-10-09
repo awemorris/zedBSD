@@ -287,7 +287,8 @@ On amd64 the default disk image is the native layout: a GPT disk whose
 ESP holds the UEFI loader and the kernel, a read-write UFS root
 partition, and a swap partition. `make run` starts QEMU with OVMF and
 an NVMe disk. Hybrid (UEFI and BIOS), UEFI-only, and BIOS-only layouts
-can be selected in `make menuconfig`.
+are chosen by setting `ZEDBSD_VARIANT` (`hybrid`, `uefi`, `bios`) in
+`config.mk`; `make menuconfig` keeps the value it reads.
 
 ```sh
 make                   # same as disk-image

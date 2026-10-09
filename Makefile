@@ -1092,6 +1092,11 @@ ZEDBSD_GRAPHICAL_BOOT ?= y
 # screen, also under the graphical boot.  A config that does not name it keeps
 # the old behaviour: quiet with the graphical boot, shown without it.
 ZEDBSD_BOOT_KERNEL_MESSAGES ?= $(if $(filter y,$(ZEDBSD_GRAPHICAL_BOOT)),n,y)
+# WS193 (2026-10-09 user): whether the graphical login starts Keiland by
+# itself (login=graphical) is a menu choice of its own ("Graphical login"),
+# apart from the boot logo; by default it follows the graphical boot, which
+# is what it was part of before.
+ZEDBSD_GRAPHICAL_LOGIN ?= $(ZEDBSD_GRAPHICAL_BOOT)
 # A target without a sysroot has no development files.
 ifeq ($(strip $(ZEDBSD_TARGET_SYSROOT)),)
 override ZEDBSD_ROOTFS_DEVELOPMENT := n

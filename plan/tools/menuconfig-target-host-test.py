@@ -49,7 +49,7 @@ def check_packages() -> None:
                 fail(f"{row[0]} requires {requirement}, which nothing provides")
 
     offered = set()
-    for _label, group in menu.PACKAGE_CATEGORIES:
+    for _label, group in menu.package_categories(rows):
         offered.update(row[0] for row in rows if row[4] == group)
     for row in rows:
         if row[4].startswith("packages/") and row[0] not in offered:
@@ -146,6 +146,116 @@ def check_fonts_menu() -> None:
         fail("choosing it from Packages > Fonts did not select noto-color-emoji")
 
 
+def scratch_directory(name: str) -> Path:
+    """A new directory under build/tmp for one check (left there: removing is the main session's step)."""
+    parent = REPO / "build" / "tmp"
+    parent.mkdir(parents=True, exist_ok=True)
+    return Path(tempfile.mkdtemp(prefix=f"menuconfig-{name}.", dir=parent))
+
+
+def check_menu_layout() -> None:
+    """The menu the 2026-10-09 user decisions laid out (WS193): the main menu's
+    entries, the Boot Option toggles, Base's All, a value the menu no longer
+    shows kept through a save, and the build's progress reading make's trace."""
+    shown: list[tuple[str, list[str]]] = []
+
+    def choose(_screen, title, labels, _target, _selected=0):
+        shown.append((title, list(labels)))
+        return labels.index("Exit") if "Exit" in labels else None
+
+    real_choose, real_save, real_cursor = menu.choose, menu.save, menu.curses.curs_set
+    menu.choose = choose
+    menu.save = lambda _path, _values: None
+    menu.curses.curs_set = lambda _visibility: None
+    try:
+        menu.tui(_FakeScreen(), menu.defaults(), Path("/nonexistent"))
+    finally:
+        menu.choose, menu.save, menu.curses.curs_set = real_choose, real_save, real_cursor
+    expected = ["CPU / Board", "Boot Option", "Development", "Base", "Desktop",
+                "Packages", "Firmware", "", "Build boot image", "", "Exit"]
+    if not shown or shown[0][1] != expected:
+        fail(f"the main menu is {shown[0][1] if shown else 'not shown'}, not {expected}")
+
+    values = menu.defaults()
+    answers = iter([0, 0, 1, 3])
+
+    def boot_choose(_screen, _title, _labels, _target, _selected=0):
+        return next(answers)
+
+    menu.choose = boot_choose
+    try:
+        menu.boot_options(None, values)
+    finally:
+        menu.choose = real_choose
+    if (values["ZEDBSD_GRAPHICAL_BOOT"], values["ZEDBSD_BOOT_KERNEL_MESSAGES"],
+            values["ZEDBSD_GRAPHICAL_LOGIN"]) != ("y", "n", "n"):
+        fail(f"Boot Option toggles left {values['ZEDBSD_GRAPHICAL_BOOT']}/"
+             f"{values['ZEDBSD_BOOT_KERNEL_MESSAGES']}/{values['ZEDBSD_GRAPHICAL_LOGIN']}")
+
+    values = menu.defaults()
+    base = {row[0] for row in menu.group_rows(values, menu.BASE_GROUPS)}
+    menu.toggle_all(values, menu.BASE_GROUPS)
+    if not base <= values["ZEDBSD_USER_PROGRAMS"] or not menu.all_selected(values, menu.BASE_GROUPS):
+        fail("Base > All did not select every base program")
+    menu.toggle_all(values, menu.BASE_GROUPS)
+    defaults = {row[0] for row in menu.group_rows(values, menu.BASE_GROUPS) if row[3] == "y"}
+    if values["ZEDBSD_USER_PROGRAMS"] & base != defaults:
+        fail("Base > All a second time did not go back to the defaults")
+
+    path = scratch_directory("layout") / "config.mk"
+    values = menu.defaults()
+    values["ZEDBSD_USER_PROGRAMS"].add("zterm")
+    values["CONFIG_BUF_CACHE_KIB"] = "4096"
+    menu.save(path, values)
+    kept = menu.load(path)
+    if "zterm" not in kept["ZEDBSD_USER_PROGRAMS"] or kept["CONFIG_BUF_CACHE_KIB"] != "4096":
+        fail("a selection the menu does not show (X11, the kernel options) was not kept")
+
+    if menu.trace_target("Makefile:12: update target 'build/amd64/vmunix' due to: x") != "build/amd64/vmunix":
+        fail("the build's progress does not read make's trace")
+    if menu.trace_target("cc -c x.c") is not None:
+        fail("the build's progress counts a line that is no target")
+
+
+def check_build_progress() -> None:
+    """Build boot image on a stand-in tree whose disk-image has three steps:
+    the progress counts the targets make's trace names, and the result says
+    the build succeeded (and, for a failing tree, shows the log's end)."""
+    drawn: list[tuple[int, int, str]] = []
+    results: list[list[str]] = []
+    real = (menu.REPO, menu.choose, menu.save, menu.draw_progress, menu.message)
+    menu.choose = lambda _screen, _title, _labels, _target, _selected=0: 0
+    menu.save = lambda _path, _values: None
+    menu.draw_progress = lambda _screen, _values, done, total, current: drawn.append((done, total, current))
+    menu.message = lambda _screen, _title, lines, _target: results.append(list(lines))
+    try:
+        tree = scratch_directory("build")
+        menu.REPO = tree
+        (tree / "Makefile").write_text(
+            "disk-image: first second\n\t@true\nfirst:\n\t@true\nsecond:\n\t@true\n"
+            "broken:\n", encoding="utf-8")
+        values = {"ZEDBSD_PLATFORM": "amd64"}
+        menu.build_boot_image(None, values, tree / "config.mk")
+        if not results or results[-1][0] != "Build succeeded.":
+            fail(f"the stand-in build did not succeed: {results}")
+        counted = [entry for entry in drawn if entry[2] in ("first", "second", "disk-image")]
+        if len(counted) != 3 or counted[-1][0] != 3 or counted[-1][1] != 3:
+            fail(f"the progress counted {drawn}")
+        (tree / "Makefile").write_text("disk-image:\n\t@echo the step that failed; false\n", encoding="utf-8")
+        menu.build_boot_image(None, values, tree / "config.mk")
+        if not results[-1][0].startswith("Build failed") or "the step that failed" not in results[-1]:
+            fail(f"a failed build did not show the log's end: {results[-1]}")
+    finally:
+        menu.REPO, menu.choose, menu.save, menu.draw_progress, menu.message = real
+
+
+class _FakeScreen:
+    """A screen the main menu can be opened on without a terminal."""
+
+    def keypad(self, _flag):
+        return None
+
+
 def main() -> None:
     expected_targets = {(record[1], record[2]) for record in menu.PLATFORMS}
     if set(menu.BOARD_VARIANTS) != expected_targets:
@@ -159,6 +269,8 @@ def main() -> None:
 
     check_packages()
     check_fonts_menu()
+    check_menu_layout()
+    check_build_progress()
 
     template = menu.defaults()
 
@@ -174,6 +286,7 @@ def main() -> None:
         values["ZEDBSD_PLATFORM"] = platform
         values["ZEDBSD_VARIANT"] = variant
         values["CONFIG_BUF_CACHE_KIB"] = "1024"
+        values["ZEDBSD_GRAPHICAL_LOGIN"] = "n"
         path = directory / f"config-{suffix}.mk"
         menu.save(path, values)
         restored = menu.load(path)
@@ -182,6 +295,7 @@ def main() -> None:
             "ZEDBSD_PLATFORM": platform,
             "ZEDBSD_VARIANT": variant,
             "CONFIG_BUF_CACHE_KIB": "1024",
+            "ZEDBSD_GRAPHICAL_LOGIN": "n",
         }
         for key, value in expected.items():
             if str(restored.get(key)) != value:
@@ -286,7 +400,7 @@ def main() -> None:
 
     print("MAC-T001 menuconfig round-trip: PASS "
           "(6 targets, 3 amd64 Variants, obsolete capacity removed, "
-          "package requirements resolved)")
+          "package requirements resolved, the WS193 menu)")
 
 
 if __name__ == "__main__":
