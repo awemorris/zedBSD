@@ -31,9 +31,9 @@
 | Settings の Wi-Fi の on/off | ✔ | — |
 | 状態の島のパネル（WS192） | ✔ 開く。✘ Mute の文字が右にずれる | [BUG-278](bugs/BUG-278.md) P1 |
 | BUG-253（蓋） | ✔ close | — |
-| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) P1（WS143 は必須） |
+| Settings の Bluetooth | ✘ device が無いと出る | [BUG-275](bugs/BUG-275.md) source の調べで候補 3 つ（firmware の load の後に controller が戻らない・xHCI に列挙されない・intelbt の前の古い image）。5330 の SSH が要る。**Settings の文言と image の版をユーザーに確認** |
 | Terminal の文字のドラッグ | ✘ 押し込みが要る、tap の後のドラッグで選べるように | [BUG-276](bugs/BUG-276.md) P1 |
-| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) P1 |
+| Settings の Ethernet | ✘ 接続中に No Cable | [BUG-277](bugs/BUG-277.md) 直した（USB LAN の stop が carrier を 0 にしたまま）、T1-513 で確認中、次の UAT で実機 |
 | Settings の YubiKey | ✘ No security key registered で操作できない | [BUG-279](bugs/BUG-279.md) P1 |
 | menuconfig（WS193） | ✔ | WS193 p002 cleared |
 | WS177 準正常系（USB-C・PIN・手書き・Notes） | ✔ | p002・p003・p006・p011 と U の p033〜p038 を cleared。残りは p019（Browser の IME・form、T1-425 の残り） |
