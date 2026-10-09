@@ -55,3 +55,20 @@ Queue: q668（Q1 の dispatch、2026-10-04）
 2026-10-04 q669: ユーザーの判断で D1（remacs を userland/base/emacs に取り込み zlib に）・D2（i915-old を削除）を実施（licenses.md）。kernel の build と
 check-kernel-includes（`amd64 vmunix check: PASS`）、rootfs の build rc=0・新しい warning 0、`license-inventory.py --rootfs` の open 0、host 試験 PASS
 （期待を open 0 に）、menuconfig の host 試験 PASS。
+
+## ベータ2 の再生成（2026-10-09、q920、P1）
+
+Q1 の割り当て:「p002 license の一覧を今の release の image（config）に合わせて再生成し audit（新しく入った package・firmware・intelbt 等）」。
+詳細は [licenses.md](../licenses.md) の「ベータ2 の再生成」。
+
+- `license-inventory.py --config config/release/config-amd64-beta2.mk --distfiles <main>/build/distfiles` → `26 components, 0 open items`。
+  生成物を plan/ws129 に置き換えた。差: FFmpeg（LGPL、decided、build の config.h で GPL・nonfree・version3 が 0 を確かめた）・Hershey・SKK の辞書が増え、
+  Inter → Mahora、Venus の宣言（libvulkan が Kei GPU の protocol になった）と expat（デモの config だけ）が減った。
+- `intelbt-firmware` は release の config に無い（UAT だけ）。WS143 を出すなら足す要がある → **Q1・ユーザーの判断**。足しても `27 components, 0 open items`。
+- `audit-licenses.sh`: FFmpeg を package の判定に足し、展開先を fresh-out の `build/tmp/audit-licenses` にして script の rm をやめた。
+  未知は main の distfiles に残る使われない `remacs-1a724393053e.tar.gz` の README だけ（Q1 が外せば all known: yes）。
+- host 試験 `sh plan/ws129/tests/license-inventory-test.sh` → PASS。
+- 未実施: release の image の rootfs への `--rootfs` の当て（image の build は T1・Q1）。release の rootfs ができたら
+  `license-inventory.py --config config/release/config-amd64-beta2.mk --rootfs <rootfs>` で本文の有無を確かめる。
+
+状態: ベータ2 の分は cleared 候補（intelbt の判断と release の rootfs への `--rootfs` は残り）。

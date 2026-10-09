@@ -15,8 +15,10 @@ set -eu
 
 root=$(CDPATH= cd -- "$(dirname -- "$0")/../../.." && pwd)
 dist=${1:-$root/build/distfiles}
-work=$(mktemp -d)
-trap 'rm -rf "$work"' EXIT HUP INT TERM
+# 展開先は build/tmp の新しい directory（2026-10-06 ユーザー: 消すのは Q1 の plan/tools/q1-clean.sh）。
+. "$root/plan/tools/fresh-out.sh"
+fresh_out "$root/build/tmp/audit-licenses"
+work=$fresh_dir
 
 # 判定済みの既知ファイル（provenance.md §4.1）。
 known='openssh-10.5p1/config.guess
@@ -44,7 +46,10 @@ Python-3.14.8/README.rst'
 # GPL・LGPL の package（全体を一つの判定とする archive の上の directory、ws129-p002）。image に入らない（CI の
 # config は選ばない）か、入れるならユーザーの判断。REmacs の archive は 2026-10-04 から取得しない（作者が zlib にして
 # userland/base/emacs に取り込み、ime-dict-ja の辞書も userland/desktop/ime/dict に写した）。
-packages='gtk-4.18.6 glib-2.84.4 pango-1.56.4 cairo-1.18.6 fribidi-1.0.17 gdk-pixbuf-2.44.8 gperf-3.3'
+# FFmpeg（2026-10-09 ws129-p002）: ベータ1 からユーザーの判断で image に入る（WS122）。LGPL 2.1 or later として build し
+# （--disable-gpl --disable-nonfree、version3 なし。build の config.h は FFMPEG_LICENSE "LGPL version 2.1 or later"、
+# CONFIG_GPL 0）、GPL だけの部分（postproc・GPL の filter など）は build されない。archive の中の GPL の文言は package の判定とする。
+packages='gtk-4.18.6 glib-2.84.4 pango-1.56.4 cairo-1.18.6 fribidi-1.0.17 gdk-pixbuf-2.44.8 gperf-3.3 ffmpeg-9.0.2'
 
 # build の時だけ使う autotools・libtool・GNU の補助の file の名前（どの archive でも）。
 helpers='config.guess config.sub ltmain.sh libtool.m4 ltoptions.m4 ltsugar.m4 ltversion.m4 lt~obsolete.m4 compile
