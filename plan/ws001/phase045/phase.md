@@ -2,7 +2,7 @@
 
 # ws001-p045: POSIX.1-2024 の header の全数の照合と補完
 
-Status: planned（2026-10-09 Q1、ユーザー「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」）
+Status: planned（2026-10-09 Q1、P1 q916 に割当。ユーザー「WS001に、POSIXのヘッダがすべてそろっているチェックして揃えるPhaseを入れておいてください。」）
 Parent: [WS001](../ws.md)
 Queue: 未割当（ベータ3、P1 の列）
 
