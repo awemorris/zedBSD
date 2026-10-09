@@ -12,10 +12,10 @@ zedBSD and Keiland Desktop
 </div><br>
 
 `zedBSD` is an operating system for modern computers, including those
-with touch displays. It consists of POSIX-compatible kernel and base
+with touch displays.  It consists of POSIX-compatible kernel and base
 system written from scratch, and ships with `Keiland Desktop`, a
-Wayland compositor and apps that unify the classic desktop UI/UX and a
-futuristic touch UI/UX.
+Wayland-based desktop environment that unifies the classic mouse UI/UX
+and a futuristic touch UI/UX.
 
 zedBSD aim to become a commercial UNIX in the line of macOS and
 Solaris: an operating system made for newly-designed cutting-edge
