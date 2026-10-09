@@ -11,8 +11,15 @@
 
 #include "drivers/gpu/bcm2711/native-viewport.h"
 
+static uint32_t half_dimension(uint32_t bits);
+static uint32_t add_magnitudes(uint32_t left, uint32_t right);
+static uint32_t add_signed(uint32_t left, uint32_t right);
+static uint32_t offset_word(uint32_t coordinate, uint32_t dimension);
+static uint32_t positive_fixed(uint32_t bits);
+static uint32_t integer_bits(uint32_t value);
+static int32_t truncate_signed(uint32_t bits);
 static uint32_t scale_xy(uint32_t bits);
-static uint32_t subtract_depth(uint32_t left, uint32_t right);
+static uint32_t subtract_magnitudes(uint32_t left, uint32_t right);
 static uint32_t decode_significand(uint32_t bits, uint32_t *exponent);
 static uint64_t shift_sticky(uint64_t significand, uint32_t shift);
 
@@ -66,12 +73,305 @@ bcm2711_native_viewport_prepare(
 	/* All values are prepared before publication, including when the output aliases copied input words. */
 	prepared.x_scale = scale_xy(words[2]);
 	prepared.y_scale = scale_xy(words[3]);
-	prepared.depth_scale = subtract_depth(words[5], words[4]);
+	prepared.depth_scale = subtract_magnitudes(words[5], words[4]);
 	prepared.depth_offset = words[4];
 	*viewport = prepared;
 
 	/* Succeeded: native shaders and later clipper records can share the same exact viewport depth convention. */
 	return 0;
+}
+
+/*
+ * Computes native fine/coarse viewport offsets and the 4.2 clipper's nondegenerate depth transform.
+ *
+ * Exact shader depth remains unchanged.  Only clipper guardband arithmetic
+ * uses the minimum nonzero range needed by 4.2 hardware; min/max planes use
+ * that same clipped transform.  All calculations use integer IEEE bits.
+ */
+int
+bcm2711_native_viewport_clip_prepare(
+	const uint32_t words[6],
+	struct bcm2711_native_viewport_clip *clip)
+{
+	struct bcm2711_native_viewport viewport;
+	struct bcm2711_native_viewport_clip prepared;
+	uint32_t end;
+	uint32_t temporary;
+	uint32_t magnitude;
+	uint32_t half;
+	uint32_t centre;
+	uint32_t edge;
+	uint32_t axis;
+	int error;
+
+	/* Atomic output cannot be supplied through absent storage. */
+	if (clip == NULL)
+		return EINVAL;
+	error = bcm2711_native_viewport_prepare(words, &viewport);
+	if (error != 0)
+		return error;
+
+	/* Hardware unsigned fine coordinates are accompanied by signed coarse offsets in units of sixty-four pixels. */
+	prepared.x_offset = offset_word(words[0], words[2]);
+	prepared.y_offset = offset_word(words[1], words[3]);
+	prepared.depth_scale = viewport.depth_scale;
+	prepared.depth_offset = viewport.depth_offset;
+
+	/* Native 4.2 guardband clipping fails with very small depth scales; 0.0005 is the audited finite minimum. */
+	magnitude = prepared.depth_scale & 0x7fffffffU;
+	if (magnitude < 0x3a03126fU) {
+		prepared.depth_scale = 0x3a03126fU;
+		if (magnitude != 0 && (viewport.depth_scale & 0x80000000U) != 0)
+			prepared.depth_scale |= 0x80000000U;
+	}
+
+	/* Plane bounds follow the same once-rounded native transform, including reversed depth ranges. */
+	end = add_signed(prepared.depth_offset, prepared.depth_scale);
+	prepared.minimum = prepared.depth_offset;
+	prepared.maximum = end;
+	if ((prepared.depth_scale & 0x80000000U) != 0) {
+		temporary = prepared.minimum;
+		prepared.minimum = prepared.maximum;
+		prepared.maximum = temporary;
+	}
+
+	/* Guardband clipping also needs the viewport's integer edges before intersecting the drawable and user scissor. */
+	for (axis = 0; axis < 2; axis++) {
+		half = half_dimension(words[axis + 2U]);
+		centre = add_signed(words[axis], half);
+		edge = add_signed(centre, half | 0x80000000U);
+		prepared.bounds[axis] = truncate_signed(edge);
+		edge = add_signed(centre, half);
+		prepared.bounds[axis + 2U] = truncate_signed(edge);
+	}
+
+	/* No failed validation publishes even part of the clipper state. */
+	*clip = prepared;
+
+	/* Succeeded: later packet encoding needs no floating-point arithmetic or borrowed source words. */
+	return 0;
+}
+
+/* Halves a finite positive dimension with nearest-even rounding at the normal/subnormal boundary. */
+static uint32_t
+half_dimension(
+	uint32_t bits)
+{
+	uint32_t exponent;
+	uint32_t significand;
+	uint32_t rounded;
+
+	/* A normal exponent above one is halved exactly. */
+	exponent = (bits >> 23) & 255U;
+	if (exponent > 1U)
+		return bits - (1U << 23);
+
+	/* Tiny dimensions may lose one low bit when halved into subnormal storage. */
+	significand = bits & 0x7fffffU;
+	if (exponent == 1U)
+		significand |= 0x800000U;
+	rounded = significand >> 1;
+	if ((significand & 1U) != 0 && (rounded & 1U) != 0)
+		rounded++;
+
+	/* The raw rounded significand also represents the possible smallest-normal carry. */
+	return rounded;
+}
+
+/* Adds two admitted finite magnitudes using guard/round/sticky bits and a single nearest-even rounding. */
+static uint32_t
+add_magnitudes(
+	uint32_t left,
+	uint32_t right)
+{
+	uint32_t left_exponent;
+	uint32_t right_exponent;
+	uint32_t left_significand;
+	uint32_t right_significand;
+	uint32_t temporary;
+	uint32_t rounded;
+	uint32_t remainder;
+	uint64_t sum;
+	uint64_t aligned;
+
+	/* Larger magnitudes have no smaller effective exponents, including the subnormal boundary. */
+	if (left < right) {
+		temporary = left;
+		left = right;
+		right = temporary;
+	}
+
+	/* Effective exponents align both exact significands before a single final rounding. */
+	left_significand = decode_significand(left, &left_exponent);
+	right_significand = decode_significand(right, &right_exponent);
+	aligned = shift_sticky((uint64_t)right_significand << 3, left_exponent - right_exponent);
+	sum = ((uint64_t)left_significand << 3) + aligned;
+
+	/* A carry shifts all retained information once and preserves the discarded sticky bit. */
+	if (sum >= 0x8000000U) {
+		sum = (sum >> 1) | (sum & 1U);
+		left_exponent++;
+	}
+
+	/* Exactly halfway values retain the even significand; larger remainders round upward. */
+	rounded = (uint32_t)(sum >> 3);
+	remainder = (uint32_t)(sum & 7U);
+	if (remainder > 4U || (remainder == 4U && (rounded & 1U) != 0))
+		rounded++;
+	if (rounded == 0x1000000U) {
+		rounded >>= 1;
+		left_exponent++;
+	}
+
+	/* Subnormal sums have no implicit leading bit. */
+	if (rounded < 0x800000U)
+		return rounded;
+
+	/* Finite admitted coordinates cannot approach an exponent overflow. */
+	return (left_exponent << 23) | (rounded & 0x7fffffU);
+}
+
+/* Adds finite signed words within the viewport domain, preserving ordinary nearest-even cancellation. */
+static uint32_t
+add_signed(
+	uint32_t left,
+	uint32_t right)
+{
+	uint32_t left_magnitude;
+	uint32_t right_magnitude;
+	uint32_t result;
+
+	/* Equal signs use magnitude addition and keep negative zero only when both zero operands were negative. */
+	left_magnitude = left & 0x7fffffffU;
+	right_magnitude = right & 0x7fffffffU;
+	if (((left ^ right) & 0x80000000U) == 0) {
+		result = add_magnitudes(left_magnitude, right_magnitude);
+		result |= left & 0x80000000U;
+	} else {
+		/* Opposite signs reduce to ordered magnitude subtraction; exact cancellation is positive zero. */
+		if ((left & 0x80000000U) != 0)
+			result = subtract_magnitudes(right_magnitude, left_magnitude);
+		else
+			result = subtract_magnitudes(left_magnitude, right_magnitude);
+	}
+
+	/* The signed sum is fully rounded before later native fixed-point packing. */
+	return result;
+}
+
+/* Encodes one centre coordinate using an unsigned u14.8 fine value and a signed coarse sixty-four-pixel offset. */
+static uint32_t
+offset_word(
+	uint32_t coordinate,
+	uint32_t dimension)
+{
+	uint32_t half;
+	uint32_t centre;
+	uint32_t magnitude;
+	uint32_t significand;
+	uint32_t exponent;
+	uint32_t shift;
+	uint32_t blocks;
+	uint32_t coarse;
+	uint32_t fine;
+	uint32_t adjustment;
+
+	/* The half dimension and centre follow the same two nearest-even IEEE operations as native viewport setup. */
+	half = half_dimension(dimension);
+	centre = add_signed(coordinate, half);
+	magnitude = centre & 0x7fffffffU;
+	coarse = 0;
+
+	/* Negative centres need a whole number of sixty-four-pixel blocks before unsigned fine packing. */
+	if ((centre & 0x80000000U) != 0 && magnitude != 0) {
+		significand = decode_significand(magnitude, &exponent);
+		shift = 156U - exponent;
+		blocks = 1;
+		if (shift < 32U) {
+			blocks = significand >> shift;
+			if ((significand & (((uint32_t)1 << shift) - 1U)) != 0)
+				blocks++;
+		}
+
+		/* Every adjustment is an exactly representable bounded integer; its addition rounds only once. */
+		adjustment = integer_bits(blocks * 64U);
+		centre = subtract_magnitudes(adjustment, magnitude);
+		coarse = (0U - blocks) & 1023U;
+	}
+
+	/* Fixed-point rounding uses ties away from zero, matching the unsigned native packet field. */
+	fine = positive_fixed(centre & 0x7fffffffU);
+
+	/* Admitted centres fit fine's fourteen integer bits and coarse's signed ten-bit range. */
+	return (coarse << 22) | fine;
+}
+
+/* Rounds an admitted positive IEEE value times 256 to the nearest integer, with half ties rounded upward. */
+static uint32_t
+positive_fixed(
+	uint32_t bits)
+{
+	uint32_t exponent;
+	uint32_t significand;
+	uint32_t shift;
+	uint32_t rounded;
+
+	/* Fine coordinates are bounded below 16384 pixels, so all nonzero results use a finite right shift. */
+	significand = decode_significand(bits, &exponent);
+	shift = 142U - exponent;
+	if (shift >= 32U)
+		return 0;
+	rounded = significand >> shift;
+
+	/* The native unsigned fixed-point packer resolves exact half ties away from zero. */
+	if ((significand & ((uint32_t)1 << (shift - 1U))) != 0)
+		rounded++;
+
+	/* The complete native fine value has no floating-point source dependency. */
+	return rounded;
+}
+
+/* Encodes one bounded nonzero integer exactly as an IEEE word without a kernel floating-point conversion. */
+static uint32_t
+integer_bits(
+	uint32_t value)
+{
+	uint32_t leading;
+	uint32_t probe;
+
+	/* At most 4096 pixels of coarse adjustment fit well below the twenty-four-bit significand precision. */
+	leading = 0;
+	probe = value;
+	while (probe > 1U) {
+		probe >>= 1;
+		leading++;
+	}
+
+	/* The explicit exponent and mantissa preserve every integer bit exactly. */
+	return ((127U + leading) << 23) | ((value << (23U - leading)) & 0x7fffffU);
+}
+
+/* Converts one admitted finite signed viewport edge to an integer pixel coordinate with truncation toward zero. */
+static int32_t
+truncate_signed(
+	uint32_t bits)
+{
+	uint32_t exponent;
+	uint32_t significand;
+	uint32_t shift;
+	int32_t result;
+
+	/* Viewport centres and edges stay below 8192, so normal integer conversion uses a bounded right shift. */
+	significand = decode_significand(bits & 0x7fffffffU, &exponent);
+	shift = 150U - exponent;
+	result = 0;
+	if (shift < 32U)
+		result = (int32_t)(significand >> shift);
+	if ((bits & 0x80000000U) != 0)
+		result = -result;
+
+	/* The signed pixel edge preserves truncation without any kernel floating-point conversion. */
+	return result;
 }
 
 /* Multiplies an admitted positive dimension by 128 without rounding away any input precision. */
@@ -103,9 +403,9 @@ scale_xy(
 	return (exponent << 23) | (significand & 0x7fffffU);
 }
 
-/* Subtracts two admitted nonnegative depth endpoints with three guard/round/sticky bits. */
+/* Subtracts two bounded finite nonnegative viewport magnitudes with three guard/round/sticky bits. */
 static uint32_t
-subtract_depth(
+subtract_magnitudes(
 	uint32_t left,
 	uint32_t right)
 {

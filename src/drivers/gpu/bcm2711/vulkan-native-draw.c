@@ -85,6 +85,8 @@ bcm2711_vulkan_native_draw_create(
 		error = prepare_programs(created, event, *available, &shader);
 	if (error == 0)
 		error = prepare_records(created, event, *available, &shader);
+	if (error == 0)
+		error = bcm2711_vulkan_native_bin_prepare(event, created);
 
 	/* Pre-launch retirement is proven here; failed translation teardown remains in the native space's quarantine. */
 	if (error != 0) {
@@ -437,6 +439,18 @@ prepare_records(
 	error = prepare_fetch(draw, event, available, attributes);
 	if (error != 0)
 		return error;
+
+	/* V3D 4.2 requires at least one CS/VS attribute read even when neither compiled program consumes an input (GFXH-930). */
+	if (draw->attributes == 0) {
+		attributes[0].address = shader->defaults;
+		attributes[0].components = 1;
+		attributes[0].coordinate_values = 1;
+		attributes[0].vertex_values = 1;
+		attributes[0].maximum_index = draw->vertices - 1U;
+		draw->attributes = 1;
+	}
+
+	/* The mandatory unused fetch reuses owned defaults and requires no extra physical allocation. */
 	bytes = BCM2711_NATIVE_SHADER_BYTES + draw->attributes * BCM2711_NATIVE_ATTRIBUTE_BYTES;
 	error = allocate_storage(draw, bytes, available, NULL, &records);
 	if (error != 0)

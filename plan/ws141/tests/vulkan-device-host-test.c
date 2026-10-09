@@ -770,6 +770,7 @@ native_draw_test(
 	struct bcm2711_vulkan_native_draw *draw;
 	struct bcm2711_vulkan_prepared_event *changed;
 	struct bcm2711_vulkan_pipeline *pipeline;
+	struct bcm2711_shader_binary *programs;
 	struct bcm2711_vulkan_resource *image;
 	struct bcm2711_vulkan_image_view *image_view;
 	struct bcm2711_native_storage *storage;
@@ -809,6 +810,10 @@ native_draw_test(
 	assert(owned == 11U * 4096U && available == 1024U * 1024U - owned && native_cleans == cleans + 11);
 	assert(draw->bindings[0][0].texture == draw->storage[1]->view->address);
 	assert(draw->bindings[0][0].sampler == draw->storage[1]->view->address + 32);
+	assert(draw->bin_bytes == BCM2711_NATIVE_BIN_BYTES && draw->bin[20] == 16 && draw->bin[22] == 8);
+	address = draw->shader | draw->attributes;
+	for (byte = 0; byte < 4; byte++)
+		assert(draw->bin[102U + byte] == (uint8_t)(address >> (byte * 8U)));
 
 	/* Every shader code upload contains the actual independently compiled instruction bytes. */
 	for (index = 0; index < 3; index++) {
@@ -866,6 +871,10 @@ native_draw_test(
 	*changed = *event;
 	changed->draw[0] = 3;
 	changed->draw[2] = 3;
+	changed->scissor.offset.x = 2;
+	changed->scissor.offset.y = 1;
+	changed->scissor.extent.width = 4;
+	changed->scissor.extent.height = 3;
 	error = bcm2711_vulkan_resource_backing(event->vertices[0], 0, 48, &view, &address, &cpu);
 	assert(error == 0);
 	for (index = 0; index < 48; index++)
@@ -873,9 +882,16 @@ native_draw_test(
 	available = 1024U * 1024U;
 	error = bcm2711_vulkan_native_draw_create(space, changed, &available, &draw);
 	assert(error == 0 && draw->vertices == 3 && draw->storage[9]->bytes == 24);
+	assert(draw->bin[16] == 2 && draw->bin[18] == 1 && draw->bin[20] == 4 && draw->bin[22] == 3);
 	source = draw->storage[9]->view->buffer->address;
 	for (index = 0; index < 24; index++)
 		assert(source[index] == index + 25U);
+
+	/* The numerical lowering also preserves an entirely off-drawable empty scissor without wrapped coordinates. */
+	changed->scissor.offset.x = 4096;
+	error = bcm2711_vulkan_native_bin_prepare(changed, draw);
+	assert(error == 0 && draw->bin[16] == 0 && draw->bin[20] == 0 && draw->bin[22] == 3);
+	changed->scissor.offset.x = 2;
 	error = bcm2711_vulkan_native_draw_release(&draw, true);
 	assert(error == 0 && draw == NULL && allocations == baseline + 1);
 
@@ -899,6 +915,29 @@ native_draw_test(
 	/* Synthetic pipeline metadata owns no real pipeline reference; only the upload root is retired here. */
 	error = bcm2711_vulkan_native_draw_release(&draw, true);
 	assert(error == 0 && draw == NULL && allocations == baseline + 2);
+
+	/* Synthetic zero-input metadata verifies the 4.2 mandatory unused CS/VS fetch; actual QPU execution is not simulated. */
+	programs = kern_calloc(2, sizeof(*programs));
+	assert(programs != NULL);
+	for (index = 0; index < 2; index++) {
+		programs[index] = *event->pipeline->programs[index];
+		programs[index].input_count = 0;
+		pipeline->programs[index] = &programs[index];
+	}
+
+	/* Defaults already belong to the native root, so the dummy needs no extra fetch mapping. */
+	pipeline->attribute_count = 0;
+	available = 1024U * 1024U;
+	error = bcm2711_vulkan_native_draw_create(space, changed, &available, &draw);
+	assert(error == 0 && draw->attributes == 1 && draw->count == 10);
+	record = draw->storage[9]->view->buffer->address;
+	assert(record[40] == 9U && record[41] == 0x11U && record[44] == 0);
+	address = draw->storage[8]->view->address;
+	for (byte = 0; byte < 4; byte++)
+		assert(record[36U + byte] == (uint8_t)(address >> (byte * 8U)));
+	error = bcm2711_vulkan_native_draw_release(&draw, true);
+	assert(error == 0 && draw == NULL && allocations == baseline + 3);
+	kern_free(programs);
 	kern_free(pipeline);
 	changed->pipeline = event->pipeline;
 	changed->draw[0] = 4;

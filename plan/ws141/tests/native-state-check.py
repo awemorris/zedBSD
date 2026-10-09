@@ -148,14 +148,53 @@ def main():
             "Number of values read by Vertex shader": components - 1,
             "Stride": 2048, "Maximum Index": 0x12345678,
         })
-    if observed.keys() != expected.keys() | {"tiled", "raster"}:
+    if observed.keys() != expected.keys() | {"tiled", "raster", "bin"}:
         raise ValueError("missing or unexpected native images")
     for name, (structure, fields) in expected.items():
         encoded = structure_image(root, structure, fields)
         if encoded != observed[name]:
             raise ValueError(f"{name} differs from pinned XML: {encoded.hex()} != {observed[name].hex()}")
+    packets = [
+        ("Point size", {"Point Size": 0x3f800000}),
+        ("Line width", {"Line width": 0x3f800000}),
+        ("Sample State", {"Mask": 15, "Coverage": 0x3f80}),
+        ("clip_window", {"Clip Window Left Pixel Coordinate": 3,
+                         "Clip Window Bottom Pixel Coordinate": 4,
+                         "Clip Window Width in pixels": 5,
+                         "Clip Window Height in pixels": 6}),
+        ("Clipper XY Scaling", {"Viewport Half-Width in 1/256th of pixel": 0x45000000,
+                                "Viewport Half-Height in 1/256th of pixel": 0x44800000}),
+        ("Clipper Z Scale and Offset", {"Viewport Z Scale (Zc to Zs)": 0x3f800000}),
+        ("Clipper Z min/max clipping planes", {"Maximum Zw": 0x3f800000}),
+        ("Viewport Offset", {"Coarse X": 1023, "Fine X": 40 * 256,
+                             "Coarse Y": 1023, "Fine Y": 4 * 256}),
+        ("Cfg Bits", {"Direct3D Provoking Vertex": 1, "Depth-Test Function": 7,
+                      "Line Rasterization": 1, "Enable Reverse Facing Primitive": 1,
+                      "Clockwise Primitives": 1}),
+        ("Color Write Masks", {"Mask": 0xfff0}),
+        ("Blend Enables", {}),
+        ("Transform Feedback Specs", {}),
+        ("Occlusion Query Counter", {}),
+    ]
+    for name, noun, mask in (("Flat Shade Flags", "Flat Shade", 0x81000001),
+                             ("Non-perspective Flags", "Non-perspective", 0x40000002)):
+        packets.append((name, {f"{noun} Flags for varyings V0*24": mask & 0xffffff,
+                               f"Action for {noun} Flags of higher numbered varyings": 1}))
+        packets.append((name, {"Varying offset V0": 1,
+                               f"{noun} Flags for varyings V0*24": mask >> 24,
+                               f"Action for {noun} Flags of higher numbered varyings": 1}))
+    packets.extend([
+        ("Zero All Centroid Flags", {}),
+        ("VCM Cache Size", {"Number of 16-vertex batches for rendering": 2,
+                            "Number of 16-vertex batches for binning": 2}),
+        ("GL Shader State", {"address": 0x12345000, "number of attribute arrays": 3}),
+        ("Vertex Array Prims", {"mode": 4, "Length": 9}),
+    ])
+    bin_image = b"".join(oracle["packet_image"](root, name, fields) for name, fields in packets)
+    if observed["bin"] != bin_image:
+        raise ValueError(f"bin differs from fixed XML: {bin_image.hex()} != {observed['bin'].hex()}")
     decode_pixels(observed["tiled"], observed["raster"])
-    print("native-state-check: PASS (8 full 4.2 records; 4847 pixels, zero UIF padding and unchanged raster)")
+    print("native-state-check: PASS (8 full 4.2 records and complete draw BCL; 4847 pixels, zero UIF padding and unchanged raster)")
 
 
 if __name__ == "__main__":

@@ -136,3 +136,7 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 ## i14 whole native draw preparation checkpoint（2026-10-09）
 
 [詳細](../execution-20261009.md#i14-whole-native-draw-preparationのsoftware出力2026-10-09): FIFOのactual sampled UIF/owned descriptors/code/uniform/default/packed fetch/shader recordsをnative mapping rootへ保持、job-wide256MiBの全page padding予算、firstVertex rebase・float default・late OOM全解放・uncertain保持を実装。actual Vulkan/compiler/MMU source host15とy build warning/error0/style0 PASS。既存pipelineのmissing-component未実装限定を解消し、実pipeline R32→vec2 compile/releaseも確認。native CL/GPU launchは未接続。whole prepared/native job quarantineとsession/queue/runtime、実機とp007は残る。Phase内部、foreign scope/HAL/UAPI変更無し、in-progress保持。
+
+## i14 native BCL/clipper checkpoint（2026-10-09）
+
+[詳細](../execution-20261009.md#i14-native-draw-bclとclipperのsoftware出力2026-10-09): 116byte complete native draw BCL stateをwhole ownerへcopied、4.2 integer fine/coarse/guardband depth/viewport edge、drawable-area-scissor restriction、facing/provoking/interpolation/disabled inherited state/owned shader/rebased drawを実装。zero-input dummy readも追加。fixed XML全byte、800 new arithmetic cases、actual compiler/MMU root15範囲、named y warning/error0/style0 PASS。source/license fixed hash確認。pass list/実GPU launch/runtime/whole job+session quarantine/実機/p007は未達、Phase in-progress。同Phase内部loweringでforeign interface/依存変更無し。

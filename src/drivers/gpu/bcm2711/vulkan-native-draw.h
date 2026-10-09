@@ -10,6 +10,7 @@
 #define KERN_DRIVERS_GPU_BCM2711_VULKAN_NATIVE_DRAW_H
 
 #include "drivers/gpu/bcm2711/native-storage.h"
+#include "drivers/gpu/bcm2711/native-bin.h"
 #include "drivers/gpu/bcm2711/vulkan-uniform.h"
 
 /* Each canonical slot needs at most one image and one descriptor allocation, plus three code/uniform pairs and fetch/default/shader storage. */
@@ -25,6 +26,9 @@ struct bcm2711_vulkan_native_draw {
 	uint32_t shader;
 	uint32_t attributes;
 	uint32_t vertices;
+	/* Complete numerical BCL state contains only pointers into this root's independently owned mappings. */
+	uint32_t bin_bytes;
+	uint8_t bin[BCM2711_NATIVE_BIN_BYTES];
 };
 
 /* The controller mutex and earlier queue completion/CPU visibility are prerequisites; available counts the enclosing job's remaining padded native budget. */
@@ -32,5 +36,8 @@ int bcm2711_vulkan_native_draw_create(struct bcm2711_v3d_space *space, const str
 
 /* true consumes/nulls all storage even when translation teardown fails; false keeps the whole root unchanged. */
 int bcm2711_vulkan_native_draw_release(struct bcm2711_vulkan_native_draw **draw, bool retired);
+
+/* Internal lowering runs only while the unpublished draw root and prepared event are protected by the controller mutex. */
+int bcm2711_vulkan_native_bin_prepare(const struct bcm2711_vulkan_prepared_event *event, struct bcm2711_vulkan_native_draw *draw);
 
 #endif

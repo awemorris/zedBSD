@@ -8,12 +8,14 @@
 /* Native records are compared with the pinned XML; the pixel image is decoded by a separate inverse block walker. */
 #include <assert.h>
 #include <fenv.h>
+#include <math.h>
 #include <stdio.h>
 #include <string.h>
 #include <uapi/errno.h>
 
 #include "drivers/gpu/bcm2711/native-state.h"
 #include "drivers/gpu/bcm2711/native-viewport.h"
+#include "drivers/gpu/bcm2711/native-bin.h"
 
 /* Unaligned output reservations retain canaries before and after their exact record lengths. */
 static uint8_t record_bytes[80];
@@ -32,6 +34,9 @@ static void verify_attributes(void);
 static void verify_textures(void);
 static void verify_copy(void);
 static void unchanged_record(void);
+static void verify_bins(void);
+static void verify_clippers(void);
+static void verify_clipper_case(uint32_t x, uint32_t width, uint32_t minimum, uint32_t maximum);
 static void verify_viewports(void);
 static void verify_viewport_case(uint32_t width, uint32_t height, uint32_t minimum, uint32_t maximum);
 
@@ -48,6 +53,8 @@ main(
 	verify_textures();
 	verify_copy();
 	verify_viewports();
+	verify_clippers();
+	verify_bins();
 
 	/* The external XML and inverse-pixel oracles consume these actual encoder outputs. */
 	puts("native-state-host-test PASS");
@@ -454,4 +461,221 @@ verify_viewport_case(
 		printf("viewport mismatch %08x %08x %08x %08x: native %08x %08x %08x %08x expected %08x %08x %08x %08x\n", width, height, minimum, maximum, viewport.x_scale, viewport.y_scale, viewport.depth_scale, viewport.depth_offset, expected.x_scale, expected.y_scale, expected.depth_scale, expected.depth_offset);
 		assert(same == 0);
 	}
+}
+
+/* Checks integer clipper preparation against independently evaluated host IEEE centres, fixed rounding and guarded depth arithmetic. */
+static void
+verify_clippers(
+	void)
+{
+	uint32_t coordinates[12];
+	uint32_t dimensions[8];
+	uint32_t x;
+	uint32_t width;
+	uint32_t seed;
+	uint32_t index;
+	uint32_t left;
+	uint32_t right;
+
+	/* Coarse transitions, half-unit rounding, cancellation and tiny signed centres exercise distinct packet representations. */
+	coordinates[0] = 0;
+	coordinates[1] = 0x80000000U;
+	coordinates[2] = 1;
+	coordinates[3] = 0x80000001U;
+	coordinates[4] = 0x3b000000U;
+	coordinates[5] = 0xbb000000U;
+	coordinates[6] = 0x42800000U;
+	coordinates[7] = 0xc2800000U;
+	coordinates[8] = 0xc2800001U;
+	coordinates[9] = 0xc27fffffU;
+	coordinates[10] = 0x45800000U;
+	coordinates[11] = 0xc5800000U;
+	dimensions[0] = 1;
+	dimensions[1] = 2;
+	dimensions[2] = 3;
+	dimensions[3] = 0x00ffffffU;
+	dimensions[4] = 0x3b800000U;
+	dimensions[5] = 0x3f800000U;
+	dimensions[6] = 0x43000000U;
+	dimensions[7] = 0x45800000U;
+	for (left = 0; left < 12; left++) {
+		for (right = 0; right < 8; right++) {
+			verify_clipper_case(coordinates[left], dimensions[right], 0, 0x3f800000U);
+			verify_clipper_case(coordinates[left], dimensions[right], 0x3f800000U, 0x3f800000U);
+			verify_clipper_case(coordinates[left], dimensions[right], 0x39800000U, 0);
+		}
+	}
+
+	/* Finite deterministic centres cover unlike exponent addition/subtraction, without an unbounded fuzz campaign. */
+	seed = 0x6e617469U;
+	for (index = 0; index < 512; index++) {
+		seed = seed * 1664525U + 1013904223U;
+		x = seed % 0x45800001U;
+		if ((seed & 1U) != 0)
+			x |= 0x80000000U;
+		seed = seed * 1664525U + 1013904223U;
+		width = 1U + seed % 0x45800000U;
+		verify_clipper_case(x, width, 0x3f000000U, 0x3f000001U);
+	}
+
+	/* Succeeded: offset words and guarded depth fields agree bit-for-bit with the independent host oracle. */
+	puts("native-clipper-check PASS (288 boundary and 512 seeded cases)");
+	return;
+}
+
+/* Compares one finite clipper state to ordinary host IEEE arithmetic and numerical coarse/fine packing. */
+static void
+verify_clipper_case(
+	uint32_t x,
+	uint32_t width,
+	uint32_t minimum,
+	uint32_t maximum)
+{
+	struct bcm2711_native_viewport_clip clip;
+	uint32_t words[6];
+	uint32_t expected_offset;
+	uint32_t expected_scale;
+	uint32_t expected_minimum;
+	uint32_t expected_maximum;
+	uint32_t temporary;
+	volatile float coordinate;
+	volatile float dimension;
+	volatile float half;
+	volatile float centre;
+	volatile float edge_low;
+	volatile float edge_high;
+	volatile float low;
+	volatile float high;
+	volatile float scale;
+	volatile float end;
+	float adjustment;
+	float absolute_scale;
+	uint32_t fine;
+	int32_t coarse;
+	int error;
+
+	/* X and Y use identical inputs so both independently encoded native words must agree. */
+	words[0] = x;
+	words[1] = x;
+	words[2] = width;
+	words[3] = width;
+	words[4] = minimum;
+	words[5] = maximum;
+	error = bcm2711_native_viewport_clip_prepare(words, &clip);
+	assert(error == 0);
+	memcpy((void *)&coordinate, &x, 4);
+	memcpy((void *)&dimension, &width, 4);
+	half = dimension * 0.5f;
+	centre = half + coordinate;
+	edge_low = centre - half;
+	edge_high = centre + half;
+	assert(clip.bounds[0] == (int32_t)edge_low && clip.bounds[1] == (int32_t)edge_low);
+	assert(clip.bounds[2] == (int32_t)edge_high && clip.bounds[3] == (int32_t)edge_high);
+	coarse = 0;
+	if (centre < 0) {
+		/* Coarse block count is a mathematical ceiling; double avoids underflow when a tiny negative float is divided by sixty-four. */
+		adjustment = (float)ceil(fabs((double)centre) / 64.0);
+		coarse = -(int32_t)adjustment;
+		centre = centre + adjustment * 64.0f;
+	}
+
+	/* Native unsigned fixed fields round halfway positive values upward. */
+	fine = (uint32_t)lroundf(centre * 256.0f);
+	expected_offset = (((uint32_t)coarse & 1023U) << 22) | fine;
+	if (clip.x_offset != expected_offset || clip.y_offset != expected_offset)
+		fprintf(stderr, "clipper mismatch x=%08x width=%08x actual=%08x expected=%08x\n", x, width, clip.x_offset, expected_offset);
+	assert(clip.x_offset == expected_offset && clip.y_offset == expected_offset);
+	memcpy((void *)&low, &minimum, 4);
+	memcpy((void *)&high, &maximum, 4);
+	scale = high - low;
+	absolute_scale = fabsf(scale);
+	if (absolute_scale < 0.0005f) {
+		if (scale < 0)
+			scale = -0.0005f;
+		else
+			scale = 0.0005f;
+	}
+
+	/* Plane endpoints use the same guarded transform, including sign reversal. */
+	end = low + scale;
+	memcpy(&expected_scale, (const void *)&scale, 4);
+	memcpy(&expected_minimum, (const void *)&low, 4);
+	memcpy(&expected_maximum, (const void *)&end, 4);
+	if (scale < 0) {
+		temporary = expected_minimum;
+		expected_minimum = expected_maximum;
+		expected_maximum = temporary;
+	}
+
+	/* Every guarded endpoint and its scale must match the independently evaluated host values. */
+	assert(clip.depth_scale == expected_scale && clip.depth_offset == minimum);
+	assert(clip.minimum == expected_minimum && clip.maximum == expected_maximum);
+
+	/* Succeeded: all native fields match the independent host operations for this exact finite case. */
+	return;
+}
+
+/* Emits a complete synthetic native bin sequence for the pinned XML oracle and checks late atomic refusal. */
+static void
+verify_bins(
+	void)
+{
+	struct bcm2711_native_bin state;
+	uint32_t viewport[6];
+	uint8_t bytes[BCM2711_NATIVE_BIN_BYTES + 4U];
+	uint8_t saved[BCM2711_NATIVE_BIN_BYTES + 4U];
+	uint32_t index;
+	int error;
+	int same;
+
+	/* Numerical native addresses and state are synthetic; an enclosing real job must own and clean their complete intervals. */
+	memset(&state, 0, sizeof(state));
+	viewport[0] = 0xc2000000U;
+	viewport[1] = 0xc2800000U;
+	viewport[2] = 0x41800000U;
+	viewport[3] = 0x41000000U;
+	viewport[4] = 0;
+	viewport[5] = 0x3f800000U;
+	error = bcm2711_native_viewport_prepare(viewport, &state.viewport);
+	assert(error == 0);
+	error = bcm2711_native_viewport_clip_prepare(viewport, &state.clipper);
+	assert(error == 0);
+	state.window[0] = 3;
+	state.window[1] = 4;
+	state.window[2] = 5;
+	state.window[3] = 6;
+	state.shader = 0x12345000U;
+	state.attributes = 3;
+	state.vertices = 9;
+	state.reverse = 1;
+	state.clockwise = 1;
+	state.flat = 0x81000001U;
+	state.noperspective = 0x40000002U;
+	memset(bytes, 0xa5, sizeof(bytes));
+	error = bcm2711_native_bin_encode(&state, bytes, sizeof(bytes));
+	assert(error == 0);
+	print_bytes("bin", bytes, BCM2711_NATIVE_BIN_BYTES);
+	for (index = BCM2711_NATIVE_BIN_BYTES; index < sizeof(bytes); index++)
+		assert(bytes[index] == 0xa5);
+	memcpy(saved, bytes, sizeof(saved));
+
+	/* Short capacity, mandatory dummy fetch omission and a wrapped complete shader-record span leave all previous bytes unchanged. */
+	error = bcm2711_native_bin_encode(&state, bytes, BCM2711_NATIVE_BIN_BYTES - 1U);
+	assert(error == ENOSPC);
+	same = memcmp(bytes, saved, sizeof(saved));
+	assert(same == 0);
+	state.attributes = 0;
+	error = bcm2711_native_bin_encode(&state, bytes, sizeof(bytes));
+	assert(error == EINVAL);
+	same = memcmp(bytes, saved, sizeof(saved));
+	assert(same == 0);
+	state.attributes = 16;
+	state.shader = 0xffffffc0U;
+	error = bcm2711_native_bin_encode(&state, bytes, sizeof(bytes));
+	assert(error == EINVAL);
+	same = memcmp(bytes, saved, sizeof(saved));
+	assert(same == 0);
+
+	/* Succeeded: the independent XML oracle can compare every complete packet byte, relocation, fixed value and varying flag. */
+	return;
 }
