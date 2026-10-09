@@ -40,7 +40,7 @@
 | WS194 keiland-linux の package の確認 | ✔ | p002 cleared |
 | BUG-189・BUG-212（有線と Wi-Fi） | ✔ close | — |
 | USB LAN の速さ（BUG-222） | ✘ 遅いまま | [BUG-222](bugs/BUG-222.md) 5330 の復帰の後に実機で測る。直らなければ既知の問題 |
-| App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べた: compositor は Linux と同じ code、差は driver（1 frame が 16.7 ms を越えて 30 fps、GPU の周波数が上がりきらない、present の待ち）。推し: ベータ2 は既知の問題、5330 の計測の後に WS139（ベータ3） |
+| App Home への遷移の滑らかさ | ✘ Linux の driver より fps が低く見える | [BUG-280](bugs/BUG-280.md) 調べた: compositor は Linux と同じ code、差は driver（1 frame が 16.7 ms を越えて 30 fps、GPU の周波数が上がりきらない、present の待ち）。**決定（ユーザー）: ベータ2 は既知の問題**、5330 の計測の後に WS139（ベータ3） |
 
 ## 必須
 
@@ -86,7 +86,7 @@
 
 | 項目 | 理由 |
 | --- | --- |
-| BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更が要る |
+| BUG-280（App Home への遷移の fps）、BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更が要る |
 | BUG-255（蓋を閉じた間の HDMI）、BUG-159（電池で 5 fps）、BUG-145（AX211 の DHCP）、BUG-165（5330 の DSDT） | 調査が長い・実機の時間が要る |
 | [WS001 p045](ws001/phase045/phase.md) POSIX の header の残り・p046〜p051、[WS126](ws126/ws.md) Python | ベータ3 の列（合間に P1） |
 | 規約の全文の見直しの Phase（各 WS） | ユーザーの決定でベータ3 |
