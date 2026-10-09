@@ -12,3 +12,11 @@ cc -std=c99 -Wall -Wextra -Werror -Iinclude -Isrc -I. \
 	plan/ws141/tests/list-host-test.c src/drivers/gpu/bcm2711/list.c \
 	-o "$out/list-host-test"
 "$out/list-host-test"
+cc -std=c99 -Wall -Wextra -Werror -Iinclude -Isrc -I. \
+	plan/ws141/tests/list-copy-host-test.c src/drivers/gpu/bcm2711/list.c \
+	-o "$out/list-copy-host-test"
+"$out/list-copy-host-test"
+cc -std=c99 -Wall -Wextra -Werror -Iinclude -Isrc -I. \
+	plan/ws141/tests/mmu-host-test.c src/drivers/gpu/bcm2711/mmu.c \
+	-o "$out/mmu-host-test"
+"$out/mmu-host-test"
