@@ -41,6 +41,8 @@ PHONE_COMPOSER = 60
 PHONE_SHARE = 0.34
 
 DESKTOP_FOLDER = "/home/kei/Desktop"
+# kei's own store of Wi-Fi keys (net wifi add as kei writes it; the desktop reads the saved networks from it).
+WIFI_STORE = "/home/kei/.wifi.conf"
 
 
 # Shared steps.
@@ -290,6 +292,14 @@ def settings_wifi(item):
 	# stopped for the scenario: the watch ends, the compositor watches again within a second and finds network-probe
 	# (T1-481: with only the socket moved aside, the old watch kept "wifi=absent" and the page had no Wi-Fi switch).
 	# Stopping networkd leaves the wired interface as it is (it retires only the Wi-Fi radios).
+	# A tap joins at once only a network whose key kei has saved (an open one is refused, a new secured one opens
+	# the key's line: T1-491 tapped Cafe Guest, open and unsaved, and the page said open networks come later).  Kei
+	# Lab's key goes into kei's store (/home/kei/.wifi.conf) while networkd still runs, and the store is put back at
+	# the end.
+	add = shlex.quote('net wifi delete "Kei Lab" >/dev/null 2>&1; net wifi add "Kei Lab" --password keilab-2026 --auto yes')
+	_, saved = run.sh(f"if [ -f {WIFI_STORE} ]; then cp -p {WIFI_STORE} /tmp/aat-wifi.conf.kept; fi; /bin/su kei -c {add}; echo status=$?")
+	item.step("saved Kei Lab's key in kei's store", " ".join(saved.split())[:200])
+	item.check("status=0" in saved, "the key for Kei Lab was not saved")
 	mark = run.mark()
 	run.sh("/sbin/service stop networkd > /tmp/aat-networkd-stop.log 2>&1; i=0; while [ -S /run/networkd.sock ] && [ $i -lt 20 ]; do sleep 0.5; i=$((i+1)); done; "
 		"[ -S /run/networkd.sock.aat ] || [ ! -S /run/networkd.sock ] || mv /run/networkd.sock /run/networkd.sock.aat; "
@@ -324,15 +334,15 @@ def settings_wifi(item):
 		item.check(run.wait(r"ZSETTINGS NETWORK scan count=3", mark, 15), "the networks did not come back")
 		time.sleep(1.0)
 		controls = run.controls(since, "wifi")
-		item.check(101 in controls, "no second network's row (control 101)")
-		x, y, width, height = controls[101]
+		item.check(100 in controls, "no first network's row (control 100, Kei Lab)")
+		x, y, width, height = controls[100]
 		point = (window.x + x + width // 3, window.y + y + height // 2)
 		probe = run.mark("/tmp/aat-probe.log")
 		mark = run.mark()
 		run.aat("tap", str(point[0]), str(point[1]))
 		request = run.wait(r"NETPROBE request op=\d+ ssid=\S.*", probe, 8, log="/tmp/aat-probe.log")
 		joined = run.wait(r"ZSETTINGS NETWORK state reachable=1 connected=1 .*wifi=4 ssid=\S", mark, 10)
-		item.step(f"one tap on the second network's row at {point[0]},{point[1]}", f"{request}; {joined}")
+		item.step(f"one tap on Kei Lab's row (saved) at {point[0]},{point[1]}", f"{request}; {joined}")
 		run.shot(item, "tapped")
 		item.check(request, "BUG-188 reproduced: one tap asked for no join (network-probe got no request)")
 		item.check(joined, "the tap's join did not end connected")
@@ -340,6 +350,7 @@ def settings_wifi(item):
 	finally:
 		kill_program("network-probe")
 		run.sh("if [ -S /run/networkd.sock.aat ]; then rm -f /run/networkd.sock; mv /run/networkd.sock.aat /run/networkd.sock; fi; "
+			f"if [ -f /tmp/aat-wifi.conf.kept ]; then mv /tmp/aat-wifi.conf.kept {WIFI_STORE}; else rm -f {WIFI_STORE}; fi; "
 			"/sbin/service start networkd > /tmp/aat-networkd-start.log 2>&1; true")
 
 
