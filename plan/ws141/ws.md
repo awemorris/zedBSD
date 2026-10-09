@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: i14 whole pass BCL/RCL/generic tile list＋independent draw/command/tile/overflow/output ownersを実装。fixed XML7whole streams/actual compiler-MMU host16/named y build PASS。次はdeferred clear/native execution、transfer/barrier/queue/public/commonとwhole-job/session quarantine。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-whole-native-pass-clとgpu-ownerのsoftware出力2026-10-09)。
+Resume point: i14 whole native pass＋deferred exact rectangular clear/native runner handoff/single-use retirementを実装、integer IEEE host1037/actual graph＋explicit runner fixture17範囲/named y build PASS。次はwhole prepared/job/controller quarantineとclosing session、transfer/barrier/queue/public/common binding。COMMAND/CAPSET/JOB未公開、Keiland/実機/console RAM寿命/p007未達。Master/共有投影はQ1。[最新software結果](execution-20261009.md#i14-deferred-clearとnative-pass-executorのsoftware出力2026-10-09)。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 

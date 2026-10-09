@@ -33,10 +33,16 @@ struct bcm2711_vulkan_native_pass {
 	VkFormat format;
 	VkAttachmentLoadOp load;
 	uint32_t clear[4];
+	/* Single-use execution refuses replay and preserves the last native DMA-retirement result. */
+	bool executed;
+	bool retired;
 };
 
 /* Earlier queue writes must have completed and become CPU-visible; next borrows the event after this pass's END from the enclosing prepared primary. */
 int bcm2711_vulkan_native_pass_create(struct bcm2711_v3d_space *space, const struct bcm2711_vulkan_prepared_event *begin, uint64_t *available, struct bcm2711_vulkan_native_pass **pass, const struct bcm2711_vulkan_prepared_event **next);
+
+/* Run once under the controller mutex, then retain the whole parent payload when the returned native retirement proof is false. */
+int bcm2711_vulkan_native_pass_run(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_v3d_job_result *result);
 
 /* false preserves the complete root, including output and every draw; a controller quarantine transfer is still required before worker payload disposal. */
 int bcm2711_vulkan_native_pass_release(struct bcm2711_vulkan_native_pass **pass, bool retired);

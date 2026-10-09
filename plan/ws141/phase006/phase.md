@@ -145,3 +145,7 @@ exact push ranges/canonical set prefix compatibilityとdescriptor disturbance、
 ## i14 whole native pass checkpoint（2026-10-09）
 
 Complete BCL/RCL/generic tile listと、independent output/linked draw/9pass storage ownersを追加。fixed XML全7stream、actual compiler/prepared/MMU host16範囲、named y build warning/error0/style0を確認。256supertile上限に合わせ最大64×64tilesは4×4groupへまとめる。prepare/OOM中のtarget mutation無し、false whole retain/true complete teardown、全padded budget/zero draws/late rollbackを確認。CLEARはraw stateコピーだけでexecution前rectangle clear/native launchは後続、whole job/controller quarantine/closing sessionを公開前に接続する。native execution/Keiland/実機の証拠ではない。p006/WS未達を保持。[詳細/訂正/復帰点](../execution-20261009.md#i14-whole-native-pass-clとgpu-ownerのsoftware出力2026-10-09)。
+
+## i14 private native executor checkpoint（2026-10-09）
+
+整数UNORM clear＋whole passのpreflight/exact rectangle clear→existing native CL runner→retirement/output visibilityを接続。1037 independent IEEE colour cases/actual native graph＋explicit runner fixtureのhost17範囲/named y build warning/error0/style0を確認。single-use replay refusal、outside pixels保持、fault前CPU mutation無し、syntheticuncertain全root保持。native runnerはこのhostで明示mock、physical GPU/IRQ/cache/resetの証拠ではない。公開前にwhole prepared/session/controller quarantineを実装する。WS/Phase acceptance保持。[詳細/復帰点](../execution-20261009.md#i14-deferred-clearとnative-pass-executorのsoftware出力2026-10-09)。
