@@ -34,3 +34,13 @@ p001、各 WS の成果。
 ## 追加（2026-10-05 Q1、ws122-p001 の P2 の依頼）
 
 release notes に FFmpeg（libavcodec ほか、LGPL 2.1 以降）の告知と source の在り処（FFmpeg 9.0.2 の tarball の URL と sha256、zedBSD の build の Makefile）を書く。image には `/usr/share/licenses/ffmpeg/` に COPYING.LGPLv2.1 と LICENSE.md が入る。
+
+## 下書き（2026-10-09、q920、P1）
+
+Q1 の割り当て（q920 (2)）。言語は英語（release.md §9 U13）、置き場所は docs/release/（U8）。
+- release notes の下書き: `docs/release/zedbsd-1.0.0-beta2.md`（release.yml が `docs/release/zedbsd-<VERSION>.md` を本文にする）。Downloads・Signing in・機能（desktop・app・hardware・開発）・license と FFmpeg の source（tarball の URL と sha256、Makefile）。
+  確かめていない・条件付きの行は HTML の comment の `review:` に理由と差し替えの文を書いた（GitHub では見えない、RC で消す）。
+- 2026-10-09 ユーザーの決定（Q1 の中継）: WS143 Bluetooth と WS083 Vulkan Video は入れ、間に合わなければ 10/16 に OFF。両方「入る」で書き、OFF の時の差し替えの文を comment に用意した。Vulkan Video が `i915.debug=video` の門のままなら、その旨を行に書く（p008 の既定化しだい）。
+- 既知の問題の更新: `docs/release/zedbsd-1.0.0-beta2-known-issues.md`。resolved の BUG-095・156・157・166・167・168・171・172・174・175・176・177・190 を外し、BUG-253/255（蓋）・189/212（有線と Wi-Fi）・222・205・206/207・203・271 を足した。RC までに直す予定の物（BUG-184・188・235・232・179/180・234・191・238/242）と Bluetooth の行は comment に置き、RC で残っていれば表へ移す。
+- 判断が要る点（Q1・ユーザー）: FFmpeg の LGPL 2.1 §6 の source の提供。ffmpeg.org への link だけより、release の asset に `ffmpeg-9.0.2.tar.xz` を載せる方が確実（release.yml の変更、p004 の範囲）。
+- 未実施: 機能の行の一つ一つの実機の確認（p007）。link は最終の tag ができるまで切れる。

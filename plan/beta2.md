@@ -24,8 +24,8 @@
 | [WS129](ws129/ws.md) p002 license の一覧を release の image の rootfs で確かめる | 一覧は再生成済み（27 components、open 0） | 0.5 | P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14〜 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物の確認） | 10/16 | 1.5 | P1・Q1 |
-| T1 の未実行の試験 15 本: T1-493・494（再試験）、T1-496 [WS192](ws192/ws.md) パネル、T1-497 [WS193](ws193/ws.md) menuconfig、T1-498 [WS194](ws194/ws.md) prerequisites、T1-495 Python、T1-477〜484・486 | 実装済み・試験待ち | 8 | T1 |
-| 上の試験で出る FAIL の直し | — | 4 | P1 |
+| T1 の未実行の試験 8 本: T1-497 [WS193](ws193/ws.md) menuconfig、T1-498 [WS194](ws194/ws.md) prerequisites、T1-495 Python、T1-477・483・484、T1-494・478・479 の再試験 | 2026-10-09 夕: 480・482・493・486・496（パネルは写真の確認待ち）は済み | 5 | T1 |
+| 上の試験で出る FAIL の直し: T1-494（BUG-234・BUG-188 がまだ fail）、T1-479（IPv6 の default route が 2 本）、T1-478（音量の回帰 volume-p005） | P1 解析中 | 4 | P1 |
 | WS192・WS193・WS194 の UAT の指摘の直し | — | 3 | P1 |
 | 5330 の UAT（下の「UAT の確認項目」） | ユーザー待ち | —（ユーザーの時間） | ユーザー |
 | UAT で出る Bug の debug の枠 | — | 10 | P1 |

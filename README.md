@@ -101,6 +101,14 @@ make keiland-linux
 make keiland-linux-install
 ```
 
+`make keiland-linux` first checks with the package manager (apt, dnf or
+yum, pacman) that the packages the build needs are installed. When some are
+missing it lists them and, on a terminal, offers to install them with sudo;
+otherwise it prints the command and stops. After a good build it offers to
+install Keiland at once, which makes `make keiland-linux-install`
+unnecessary. `KEILAND_ASK=n` asks nothing and only prints. The package
+names are in [userland/desktop/LINUX.md](userland/desktop/LINUX.md).
+
 Then restart your display manager such as GDM.
 
 To run Keiland manually, type:
@@ -117,6 +125,10 @@ cd zedBSD
 make keiland-freebsd
 make keiland-freebsd-install
 ```
+
+As on Linux, `make keiland-freebsd` checks the needed packages with `pkg`,
+offers to install the missing ones, and offers the install after a good
+build ([userland/desktop/README.freebsd.md](userland/desktop/README.freebsd.md)).
 
 To run Keiland manually, type:
 
