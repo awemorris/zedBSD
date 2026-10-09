@@ -33,3 +33,10 @@ Queue: なし（p002 の T1 の結果の後に投入）
   - Tab: login の画面では今どおり次の user を選ぶ（方式は press で選ぶ）。lock の画面では次の方式（WS187 p003 のまま）。
   - 試験の追従: `plan/ws172/tests/fido2-p003-guest.sh` は link の真ん中を押していた（横並びでは pill の間に当たる）。`style_at N`（`KWL GREETER style-at`）で key（4）と password（1）の pill の真ん中を押す形にし、`KWL GREETER style=N via=choice` も受ける。`passkey-p002-guest.sh` は link を押さない（PIN が既定、keyboard だけ）ので変えていない。
   - 確認: `make ZEDBSD_CONFIG=plan/ws035/tests/config-amd64-zdesktop.mk BUILD=build/p1-ws177 build/p1-ws177/bin/wayland`（-Werror、成功、warning 0）、style-check の新しい指摘 0、`sh -n` ok。QEMU は未実施（T1）。
+
+## 2026-10-09 P1: T1-490 の passkey の FAIL の解析と試験の直し（q916 の 3 (a)）
+
+- T1-490 (2) の `no-pin-after-restart: FAIL (1)` は p007 の変更ではなく試験の側の不具合。BUG-274 の直し（ps の 4520a9847・8f3edd5e0・65e3cb9ba、image の tree a9fb20a0a に入っている）で `ps -o args` が command の行の全体を出すようになり、試験の `stop_all`（`ps -A -o pid,args | grep -E "[s]essiond|[w]ayland( |$)"` の pid を kill）が、それを走らせている guest の shell 自身（行に `/sbin/sessiond --graphical` や `sessiond.log` を含む）を kill していた。その後の `rm -f /var/log/greeter.log` と sessiond の起動が走らず、手順 6 は手順 1・5 の古い greeter.log（手順 5 の `styles=3` を含む）を数えていた。
+  - 証拠: T1 の build/t1-490/passkey2/ の最後の greeter.log は greeter が 2 つ（pid 66 の `styles=1`・password、pid 270 の `styles=3`・PIN）だけで、手順 6 の 3 つ目の greeter が無い。sessiond.log は手順 6 の `SESSIOND STOP` で終わり、新しい sessiond の起動の行が無い（手順 6 の `SESSIOND AUTH ok … style=password` の ok は手順 1 の行に当たっていた）。
+- 直し: `plan/ws172/tests/passkey-p002-guest.sh` と `fido2-p003-guest.sh` の `stop_all` を、`ps -A -o pid,comm`（argv[0]、例 `/bin/wayland`・`/sbin/sessiond`）の basename で選ぶ形（awk `$2 ~ /(^|\/)(sessiond|wayland)$/`）に変えた。host で偽の ps の出力に当てて、`/sbin/sessiond`・`/bin/wayland`・`wayland` を選び `sh`・`sessiondx` を選ばないこと、quoting が guest の shell まで保たれることを確かめた。`bash -n` ok。
+- 再試験は T1（plan/agents/T1/requests.md に依頼の行）。p007 は test-wait のまま。
