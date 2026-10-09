@@ -24,6 +24,7 @@ KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
 	userland/desktop/libkeiland-backend/unsupported/backlight-unsupported.c \
 	userland/desktop/libkeiland-backend/unsupported/volume-unsupported.c \
 	userland/desktop/libkeiland-backend/unsupported/bluetooth-unsupported.c \
+	userland/desktop/libkeiland-backend/unsupported/phone-unsupported.c \
 	userland/desktop/libkeiland-backend/unsupported/sharing-unsupported.c \
 	userland/desktop/libkeiland-backend/session/session-none.c \
 	userland/desktop/libkeiland-backend-linux/dbus-linux.c \

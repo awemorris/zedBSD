@@ -114,7 +114,7 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
 	KL_SYSTEM_MANAGER_NAME,
 	KL_SYSTEM_MANAGER_VERSION,
@@ -400,27 +400,38 @@ const struct wl_interface kl_system_mail_v1_interface = {
 	system_mail_events
 };
 
-/* The requests of kl_system_phone_v1 (ws170-p004). */
+/* The requests of kl_system_phone_v1 (ws170-p004; listen and the others since 27, ws197-p004a). */
 static const struct wl_message system_phone_requests[] = {
 	{ "destroy", "", NULL },
 	{ "send", "uuss", system_plain_types },
 	{ "call", "uus", system_plain_types },
+	{ "listen", "27u", system_plain_types },
+	{ "sync", "27uuiuusu", system_plain_types },
+	{ "send_text", "27uusa", system_plain_types },
+	{ "mark_read", "27us", system_plain_types },
+	{ "link_set", "27usuu", system_plain_types },
+	{ "watch_link", "27u", system_plain_types },
 };
 
-/* The events of kl_system_phone_v1. */
+/* The events of kl_system_phone_v1 (item and the others since 27, ws197-p004a). */
 static const struct wl_message system_phone_events[] = {
 	{ "received", "ussuu", system_plain_types },
 	{ "status", "uu", system_plain_types },
 	{ "result", "uuu", system_plain_types },
+	{ "item", "27uussuuiuusssua", system_plain_types },
+	{ "page_end", "27usuuuu", system_plain_types },
+	{ "link", "27uuuuuuuuuss", system_plain_types },
+	{ "dropped", "27", system_plain_types },
+	{ "done", "27uu", system_plain_types },
 };
 
-/* kl_system_phone_v1, made at the manager's version (16): three requests and three events.  It lives for the program. */
+/* kl_system_phone_v1, made at the manager's version (16, its messages' syncs since 27): nine requests and eight events.  It lives for the program. */
 const struct wl_interface kl_system_phone_v1_interface = {
 	KL_SYSTEM_PHONE_NAME,
-	KL_SYSTEM_SINCE_PHONE,
-	3,
+	KL_SYSTEM_SINCE_PHONE_SYNC,
+	9,
 	system_phone_requests,
-	3,
+	8,
 	system_phone_events
 };
 

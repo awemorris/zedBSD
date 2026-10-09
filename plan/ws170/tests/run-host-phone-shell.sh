@@ -13,5 +13,6 @@ ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
 	-I. -I"$(dirname -- "$out")/include" \
 	plan/ws170/tests/host-phone-shell.c userland/desktop/wayland/phone-shell.c \
+	userland/desktop/libkeiland-backend/unsupported/phone-unsupported.c \
 	userland/desktop/libkeiland/system/system-view.c -o "$out"
 timeout 60 "$out"

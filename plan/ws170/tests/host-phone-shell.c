@@ -139,6 +139,15 @@ kwl_object_destroy(
 	object->dead = 1U;
 }
 
+/* The compositor's clock (ws197-p004a's phone-shell.c reads it): the test's time stands still. */
+uint64_t
+kwl_milliseconds(
+	void)
+{
+	/* A fixed time. */
+	return 1000U;
+}
+
 /* The fake desktop's settings: only phone.backend exists. */
 int
 kwl_settings_number(
@@ -264,7 +273,7 @@ main(void)
 	error = kwl_phone_request(phone, KL_SYSTEM_PHONE_CALL, bytes, 8U);
 	test_check("malformed", error == EPROTO, "");
 
-	/* The view's ring: seventeen events keep the newest sixteen and tell the change. */
+	/* The view's ring: seventeen events keep the newest sixteen and tell the change; the loss is told first (ws197-p004a). */
 	memset(&view, 0, sizeof(view));
 	for (index = 0; index < 17U; index++) {
 		memset(&event, 0, sizeof(event));
@@ -273,6 +282,8 @@ main(void)
 		system_view_phone_event(&view, &event);
 	}
 	changed = system_view_take_changed(&view);
+	got = system_view_take_phone_event(&view, &taken);
+	test_check("ring-dropped", got == 1 && taken.kind == KL_PHONE_DROPPED, "");
 	got = system_view_take_phone_event(&view, &taken);
 	test_check("ring", got == 1 && taken.request == 1U && (changed & KL_SYSTEM_CHANGED_PHONE) != 0U, "");
 

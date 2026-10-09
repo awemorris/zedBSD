@@ -35,6 +35,13 @@
 /* How many phone events wait for kl_system_take_phone_event (ws170-p004). */
 #define SYSTEM_VIEW_PHONE_EVENTS	16U
 
+/* How many phone items wait for kl_system_take_phone_item, and how many pages' ends are kept (ws197-p004a). */
+#define SYSTEM_VIEW_PHONE_ITEMS		64U
+#define SYSTEM_VIEW_PHONE_ENDS		8U
+
+/* How long a program's sync keeps the next one waiting when its answer does not come (milliseconds, ws197-p004a). */
+#define SYSTEM_VIEW_PHONE_SYNC_MS	180000U
+
 /* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language, the mounts (ws188-p004). */
 #define SYSTEM_VIEW_MACHINE_PARTS	5U
 
@@ -45,6 +52,22 @@
 struct system_view_queued {
 	uint32_t request;
 	uint32_t job;
+};
+
+/* One phone item waiting to be taken, with the text it owns (ws197-p004a). */
+struct system_view_phone_item {
+	struct kl_phone_item item;
+	char *text;
+};
+
+/* One page's end, kept for kl_system_phone_page_end by its sync's request (ws197-p004a). */
+struct system_view_page_end {
+	uint32_t request;
+	char cursor[KL_PHONE_CURSOR_MAX];
+	unsigned more;
+	unsigned count;
+	unsigned skipped;
+	unsigned capped;
 };
 
 /* One answered request and its error. */
@@ -150,6 +173,26 @@ struct system_view {
 	struct kl_phone_event phone_events[SYSTEM_VIEW_PHONE_EVENTS];
 	unsigned phone_head;
 	unsigned phone_count;
+	/*
+	 * The phone's messages (ws197-p004a): whether the event ring dropped
+	 * events since the last take (told first as one KL_PHONE_DROPPED), the
+	 * items waiting (a ring that owns their texts) and the text of the one
+	 * taken last (freed by the next take), the last pages' ends (a ring by
+	 * phone_end_next), the link as last told (phone_link_known 0 until
+	 * then), and the program's sync under way (its request, 0 for none,
+	 * and when it started on the monotonic clock in milliseconds).
+	 */
+	unsigned phone_lost;
+	struct system_view_phone_item phone_items[SYSTEM_VIEW_PHONE_ITEMS];
+	unsigned phone_item_head;
+	unsigned phone_item_count;
+	char *phone_taken_text;
+	struct system_view_page_end phone_ends[SYSTEM_VIEW_PHONE_ENDS];
+	unsigned phone_end_next;
+	struct kl_phone_link phone_link;
+	unsigned phone_link_known;
+	uint32_t phone_sync_request;
+	uint64_t phone_sync_started_ms;
 	struct kl_printer printers[KL_PRINTERS_MAX];
 	size_t printer_count;
 	struct kl_printer printers_pending[KL_PRINTERS_MAX];
@@ -319,6 +362,16 @@ int system_view_take_mail_event(struct system_view *view, struct kl_mail_event *
 void system_view_mail_allowed(struct system_view *view, unsigned on);
 void system_view_phone_event(struct system_view *view, const struct kl_phone_event *event);
 int system_view_take_phone_event(struct system_view *view, struct kl_phone_event *event);
+void system_view_phone_item(struct system_view *view, const struct kl_phone_item *item, const void *text, size_t length);
+int system_view_take_phone_item(struct system_view *view, struct kl_phone_item *item, size_t size);
+void system_view_phone_page_end(struct system_view *view, const struct system_view_page_end *end);
+int system_view_phone_page_end_of(const struct system_view *view, uint32_t request, struct system_view_page_end *end);
+void system_view_phone_link(struct system_view *view, const struct kl_phone_link *link);
+int system_view_phone_link_get(const struct system_view *view, struct kl_phone_link *link, size_t size);
+void system_view_phone_dropped(struct system_view *view);
+int system_view_phone_sync_start(struct system_view *view, uint32_t request, uint64_t now_ms);
+void system_view_phone_done(struct system_view *view, uint32_t request, uint32_t code);
+void system_view_phone_release(struct system_view *view);
 void system_view_printer(struct system_view *view, const struct kl_printer *printer);
 void system_view_print_job(struct system_view *view, const struct kl_print_job *job);
 void system_view_printers_done(struct system_view *view);

@@ -862,6 +862,182 @@ int kl_backend_bluetooth_answer(struct kl_backend_bluetooth *bluetooth, uint32_t
 int kl_backend_bluetooth_cancel(struct kl_backend_bluetooth *bluetooth);
 
 /*
+ * The phone (ws197-p004a, plan/ws197/phase004/phase.md section 5.3): the
+ * user's paired phone's messages as bluetoothd relays them (MAP), the
+ * phone link's state, and the requests of the desktop: a page of the
+ * synchronisation, a message marked read on the phone, a text sent, the
+ * phone's switch.  Nothing here keeps a message: an item lives until the
+ * next take.  zedBSD's is bluetoothd's socket (three connections: the
+ * events, the synchronisation and the other requests); elsewhere every
+ * request is refused with ENOTSUP.
+ *
+ * Nothing here waits: kl_backend_phone_update reads what has arrived,
+ * writes what waits and starts what is due.  The answers come later as
+ * results, numbered by the id each request gave.
+ */
+struct kl_backend_phone;
+
+/* What kl_backend_phone_update found changed (bits). */
+#define KL_BACKEND_PHONE_CHANGED_STATE		1U	/* the state changed */
+#define KL_BACKEND_PHONE_CHANGED_ITEM		2U	/* an item came */
+#define KL_BACKEND_PHONE_CHANGED_RESULT		4U	/* a request's result came */
+#define KL_BACKEND_PHONE_CHANGED_SENT		8U	/* a sent message's state came on the events */
+#define KL_BACKEND_PHONE_CHANGED_DROPPED	16U	/* bluetoothd or this dropped an event (synchronise again) */
+
+/* A sent message's state (keiland.h's KL_PHONE_SENT, _DELIVERED and _FAILED have the same values). */
+#define KL_BACKEND_PHONE_SENT		1U
+#define KL_BACKEND_PHONE_DELIVERED	2U
+#define KL_BACKEND_PHONE_FAILED		3U
+
+/* The state of the messages on the phone link. */
+#define KL_BACKEND_PHONE_MESSAGES_OFF		0U
+#define KL_BACKEND_PHONE_MESSAGES_CONNECTING	1U
+#define KL_BACKEND_PHONE_MESSAGES_READY		2U
+#define KL_BACKEND_PHONE_MESSAGES_FAILED	3U
+
+/* The profiles of the phone's switch (bits). */
+#define KL_BACKEND_PHONE_PROFILE_MESSAGES	1U
+#define KL_BACKEND_PHONE_PROFILE_CONTACTS	2U
+#define KL_BACKEND_PHONE_PROFILE_CALLS		4U
+
+/* What a page asks for (the contacts and the calls come with PBAP and HFP). */
+#define KL_BACKEND_PHONE_WHAT_MESSAGES		0U
+
+/* An item's folder, direction and where its time came from. */
+#define KL_BACKEND_PHONE_FOLDER_INBOX		0U
+#define KL_BACKEND_PHONE_FOLDER_SENT		1U
+#define KL_BACKEND_PHONE_DIRECTION_IN		0U
+#define KL_BACKEND_PHONE_DIRECTION_OUT		1U
+#define KL_BACKEND_PHONE_ZONE_PHONE		0U
+#define KL_BACKEND_PHONE_ZONE_MSE		1U
+#define KL_BACKEND_PHONE_ZONE_LOCAL		2U
+#define KL_BACKEND_PHONE_ZONE_RECEIVED		3U
+
+/* The lengths of an item's texts with their NULs, the longest text and the longest text sent. */
+#define KL_BACKEND_PHONE_HANDLE_MAX	32U
+#define KL_BACKEND_PHONE_KEY_MAX	20U
+#define KL_BACKEND_PHONE_DATETIME_MAX	24U
+#define KL_BACKEND_PHONE_PEER_MAX	132U
+#define KL_BACKEND_PHONE_CURSOR_MAX	64U
+#define KL_BACKEND_PHONE_NUMBER_MAX	33U
+#define KL_BACKEND_PHONE_TEXT_MAX	16384U
+#define KL_BACKEND_PHONE_SEND_MAX	8192U
+
+/* The most items a page has, and the most a synchronisation takes from a folder (0: no limit). */
+#define KL_BACKEND_PHONE_PAGE_MAX	32U
+#define KL_BACKEND_PHONE_LIMIT_MAX	500U
+
+/*
+ * The state as last read: whether bluetoothd answers, whether this
+ * follows the phone's events (the owner does), whether there is a phone
+ * record, whether the phone link is ready, the messages' state
+ * (KL_BACKEND_PHONE_MESSAGES_*), whether a text can be sent, whether new
+ * messages are told, whether the owner is at the seat, the phone's switch
+ * and its profiles (KL_BACKEND_PHONE_PROFILE_*), the phone's address, and
+ * why the link or the messages stopped (a word of section 3.5, or empty).
+ */
+struct kl_backend_phone_state {
+	unsigned reachable;
+	unsigned subscribed;
+	unsigned have_record;
+	unsigned linked;
+	unsigned messages;
+	unsigned can_send;
+	unsigned notify;
+	unsigned present;
+	unsigned enabled;
+	unsigned profiles;
+	char address[KL_BACKEND_BT_ADDRESS_MAX];
+	char why[KL_BACKEND_BT_REASON_MAX];
+};
+
+/*
+ * One message: the page's id (0 for one that came by itself), its handle
+ * for kl_backend_phone_read (good for the phone's session only), its key
+ * (16 hexadecimal digits, the same across sessions, or "-" when it has
+ * none), folder, direction, time (UNIX seconds) and where that came from,
+ * the phone's datetime as written, the other side's number and name,
+ * whether it is read, has no key, or was cut, and its text (UTF-8 ended
+ * by a NUL, in the backend's buffer until the next take).
+ */
+struct kl_backend_phone_item {
+	uint32_t id;
+	char handle[KL_BACKEND_PHONE_HANDLE_MAX];
+	char key[KL_BACKEND_PHONE_KEY_MAX];
+	unsigned folder;
+	unsigned direction;
+	int64_t time;
+	unsigned zone;
+	char datetime[KL_BACKEND_PHONE_DATETIME_MAX];
+	char peer[KL_BACKEND_PHONE_PEER_MAX];
+	char name[KL_BACKEND_PHONE_PEER_MAX];
+	unsigned read;
+	unsigned partial;
+	unsigned truncated;
+	const char *text;
+	size_t length;
+};
+
+/*
+ * A request's result: its id, its errno value (section 3.5), and for a
+ * page where the next starts, whether more follow, how many items came,
+ * how many were skipped and whether a folder's limit stopped it; for a
+ * text sent, bluetoothd's number for its later states.
+ */
+struct kl_backend_phone_result {
+	uint32_t id;
+	int error;
+	char cursor[KL_BACKEND_PHONE_CURSOR_MAX];
+	unsigned more;
+	unsigned count;
+	unsigned skipped;
+	unsigned capped;
+	uint32_t sent_request;
+};
+
+/* Starts following the phone.  Returns NULL only without memory (elsewhere a phone that refuses everything). */
+struct kl_backend_phone *kl_backend_phone_open(void);
+
+/* Stops following; the requests going on are dropped (the caller answers them). */
+void kl_backend_phone_close(struct kl_backend_phone *phone);
+
+/* Reads and writes without waiting; *changed has the KL_BACKEND_PHONE_CHANGED_* bits.  Returns 0 or EINVAL. */
+int kl_backend_phone_update(struct kl_backend_phone *phone, unsigned *changed);
+
+/* Copies the state as last read. */
+void kl_backend_phone_get_state(const struct kl_backend_phone *phone, struct kl_backend_phone_state *state);
+
+/*
+ * Asks a page of the synchronisation: what (KL_BACKEND_PHONE_WHAT_*), the
+ * messages since a time, at most limit a folder (0: all), from a cursor
+ * (empty: the start), count items (1 to KL_BACKEND_PHONE_PAGE_MAX).  The
+ * items come numbered *id, then the result.  Returns 0, ENOTCONN without
+ * bluetoothd, ENOTSUP, EINVAL, or EBUSY when too many wait.
+ */
+int kl_backend_phone_page(struct kl_backend_phone *phone, unsigned what, int64_t since, unsigned limit, const char *cursor, unsigned count, uint32_t *id);
+
+/* Marks a message read on the phone by its handle.  Returns as kl_backend_phone_page. */
+int kl_backend_phone_read(struct kl_backend_phone *phone, const char *handle, uint32_t *id);
+
+/* Sends a text (1 to KL_BACKEND_PHONE_SEND_MAX bytes, no NUL) to a number ([0-9+*#], 1 to 32).  Returns as kl_backend_phone_page. */
+int kl_backend_phone_send(struct kl_backend_phone *phone, const char *to, const uint8_t *text, size_t length, uint32_t *id);
+
+/* Turns the phone's switch and its profiles (KL_BACKEND_PHONE_PROFILE_*) on or off.  Returns as kl_backend_phone_page. */
+int kl_backend_phone_link_set(struct kl_backend_phone *phone, const char *address, unsigned on, unsigned profiles, uint32_t *id);
+
+/* Takes the oldest item.  Returns 1 with one, 0 when none waits. */
+int kl_backend_phone_take_item(struct kl_backend_phone *phone, struct kl_backend_phone_item *item);
+
+/* Takes the oldest result.  Returns 1 with one, 0 when none waits. */
+int kl_backend_phone_take_result(struct kl_backend_phone *phone, struct kl_backend_phone_result *result);
+
+/* Takes the oldest state of a sent text (bluetoothd's number, KL_BACKEND_PHONE_SENT and the others).  Returns 1 or 0. */
+int kl_backend_phone_take_sent(struct kl_backend_phone *phone, uint32_t *sent_request, unsigned *state);
+
+/* Reads the record and follows the events again at once (after a pairing of the phone or a forget). */
+void kl_backend_phone_refresh(struct kl_backend_phone *phone);
+
+/*
  * The printers (ws145-p003, plan/ws145/design.md section 4): the user's
  * printers, kept in a file of the user's (~/.config/keiland/printers.conf),
  * and the jobs sent to them.  The jobs go to the user's printer daemon,
