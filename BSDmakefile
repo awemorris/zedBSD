@@ -7,6 +7,10 @@ NATIVE_OVERRIDES= ${.MAKEOVERRIDES:@name@${name}=${${name}:Q}@}
 
 # WS194: the packages first (gmake among them, asked before they are installed), then the build, then the install
 # offered; KEILAND_ASK=n asks nothing and only prints.
+# The targets run in the foreground of the terminal (-B: one command at a time, make's own process group): make -j
+# runs each job in a process group of its own, where the questions' read of /dev/tty fails with EIO (T1-503).  The
+# build's own parallel jobs are gmake's (-j ${.MAKE.JOBS}).
+.MAKEFLAGS: -B
 KEILAND_ASK?= y
 PREREQUISITES= KEILAND_ASK=${KEILAND_ASK} sh tools/build/keiland-prerequisites.sh
 
