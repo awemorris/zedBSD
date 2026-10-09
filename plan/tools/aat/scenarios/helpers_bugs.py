@@ -76,14 +76,15 @@ def write_file(path: str, text: str) -> None:
 
 
 def program_running(name: str) -> bool:
-	"""Whether a program of that name runs on the target."""
-	_, output = run.sh(f"ps -A -o args | grep -c '[/]bin/{name}'")
+	"""Whether a program of that name runs on the target: a process whose argv[0], without its directory, is the name
+	(Files starts Terminal as "terminal --command=...", Video Player as "/bin/videoplayer", T1-494)."""
+	_, output = run.sh(f"ps -A -o args | awk '{{n = $1; sub(/.*\\//, \"\", n)}} n == \"{name}\" {{c++}} END {{print c + 0}}'")
 	return output.strip().splitlines()[-1:] != ["0"] if output.strip() else False
 
 
 def kill_program(name: str) -> None:
-	"""Ends every process of a program (by its /bin/ path in ps)."""
-	run.sh(f"for p in $(ps -A -o pid,args | grep '[/]bin/{name}' | awk '{{print $1}}'); do kill $p; done; sleep 1; true")
+	"""Ends every process of a program (argv[0] without its directory, as program_running)."""
+	run.sh(f"for p in $(ps -A -o pid,args | awk '{{n = $2; sub(/.*\\//, \"\", n)}} n == \"{name}\" {{print $1}}'); do kill $p; done; sleep 1; true")
 
 
 def maximize(item, window) -> str:

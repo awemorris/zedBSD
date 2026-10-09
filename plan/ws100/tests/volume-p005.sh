@@ -114,6 +114,12 @@ expect_more $log 'KWL VOLUME reachable=1 device=1' 0 20
 guest 'audiod-feedback volume 60' >/dev/null
 sleep 2
 conf_start=$(guest "grep -E '^sound\\.(volume|muted)=' $conf" | tr '\n' ' ')
+
+# A Settings already running (the Welcome the session starts at a first login, ws164-p002) would take the page this
+# test asks for, with its lines in the session's log and its window mapped before (T1-478: the five lines that read
+# Settings' log failed): it ends first.  What ran is kept (processes.txt).
+guest 'ps -A -o pid,args' > "$out/processes.txt"
+guest 'for p in $(ps -A -o pid,args | awk '"'"'{n = $2; sub(/.*\//, "", n)} n == "settings" {print $1}'"'"'); do kill $p; done; sleep 2; echo ended' >/dev/null
 maps=$(count $log 'KWL MAP client=')
 # Settings runs as kei (runas): the compositor serves its system extension only to its own user (WS131 p011, D5), so a
 # Settings root started would find no sound (T2-021).

@@ -313,6 +313,7 @@ networkd_ipv6_start(void)
 	struct ifreq flags;
 	unsigned count;
 	unsigned index;
+	unsigned ifindex;
 	int descriptor;
 	int status;
 
@@ -335,6 +336,16 @@ networkd_ipv6_start(void)
 			continue;
 		if ((flags.ifr_flags & IFF_UP) == 0 || (flags.ifr_flags & IFF_LOOPBACK) != 0)
 			continue;
+
+		/*
+		 * A default route an earlier networkd put goes: this one knows
+		 * no router yet, and puts the chosen one's route when its
+		 * advertisement comes (T1-479: after a service restart, the
+		 * one left on the other interface made two).
+		 */
+		ifindex = if_nametoindex(interfaces[index].ifr_name);
+		if (ifindex != 0U)
+			ipv6_route_delete(ifindex);
 		ipv6_setup(interfaces[index].ifr_name);
 	}
 
