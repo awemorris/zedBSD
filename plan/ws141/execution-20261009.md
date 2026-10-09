@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: active（i01〜i06は終了。i07でV7生成の最新mainとの統合を確認。WS・whole Phaseは未完了）
+- Status: finished（i01〜i07の部分範囲と統合を終了。WS・whole Phaseは未完了）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -14,7 +14,7 @@
 | ws141-codex-20261009-i04 | p004/V5の4 KiBページ表の生成・解除 | cleared（部分範囲のみ） | V0骨格と固定sourceのPTE形式を依存出力として使う純粋な処理。予約VA page 0、VA/PA範囲、既存mappingを確認して全体を更新。host PASS・y/n build warning/error 0。電源・register・cache/TLB操作・起動への統合は対象外 |
 | ws141-codex-20261009-i05 | ユーザー承認による最新mainとの統合 | cleared（統合範囲のみ） | 最新main基点の専用worktreeでmerge、host4試験PASS・rpi4 y/n build warning/error 0。その後共有mainへ取り込み。whole Phase/実機の条件は保持 |
 | ws141-codex-20261009-i06 | p004/V7の1×1 noop command list生成 | cleared（software生成のみ） | BCL/RCL/tile sub-listを固定4.2 XMLと独立に照合しPASS。容量・VA・領域の重なり・失敗時のbyte保持を確認。rpi4 y/n build warning/error 0。GPUへの投入・起動への追加・実機clearanceは対象外 |
-| ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | in-progress | WS141の狭い変更のマージ承認と継続指示を保持。専用統合worktreeで最新mainと照合・host/kernel build後に統合。Master更新・実機clearance・pushは対象外 |
+| ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | cleared（統合のみ） | 最新mainとの統合版でnoop/XMLと既存4host試験PASS、rpi4 y/n build warning/error 0。merge 16024f1b9を共有mainへ取り込み済み。Master更新・実機clearance・pushは対象外 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -98,3 +98,11 @@
 - OracleのXMLはignored cacheにある。別のworktreeで確認する場合はrunnerの第2引数へこの担当の固定XMLの絶対pathを渡せる。hashの違うXMLは拒否する。再cloneの入手先/commit/hashは既存license監査の表を使用し、GPL対応表をパッチへ入れない。
 - 次のsoftware段はV8のclear/store。実投入の前にはV0の実機観測とV1〜V6（電源・識別・表/cache/TLB・IRQ）、buffer所有と完了の順の統合が必要。p003/N1の実機N0観測も引き続き待つ。whole Phase/WSは未完了。
 - 最終のcomment/format復元後にnoop-host/oracle/style-checkとdriver y buildを再確認し全てPASS・warning/error 0（kernel-y-i06-final.log）。driver nはcl.cを含まずi06の確認を保持。
+
+## i07の統合結果（2026-10-09）
+
+- 前turnの「パッチの影響範囲が狭いので、あなたがマージしてOKです。」と今回の継続指示を保持し、同じWS141のdriver・private header・当該build source列・WS記録/host試験の10 pathだけを統合。
+- 実装commit `d93d4507e`を最新main `d0be6aa267ea3d74f8aa5847f6d5152e7c996e4c`基点へmergeし、競合無し。merge commit `16024f1b967402e1e020f097c8be3563e5c89059`（WIP）。専用統合worktreeで再確認後、共有mainへfast-forwardしHEADを読み返して確認。
+- 統合版: noop-host/oracleと既存stage/list/list-copy/mmuの確認が全てPASS。XMLはrunner第2引数から担当worktreeの固定snapshotを読み取る。rpi4 driver y/nのkernel buildもexit 0・warning/error 0。ログ`build/ws141-integration/kernel-{y,n}-i07.log`と`i07-summary.json`、diff-check 0。
+- Master・共有Queue・HAL API・toolchainは変更無し。push/GitHub公開/QEMU/実機は未実施。whole Phase/WSは未完了のまま。
+- V8の次の実装で注意する点も固定MIT sourceを確認: clear値の設定だけでなく、初期tile bufferを準備する2回のdummy tile（NONE store、最初にCLEAR、最後にVCD cache flush）の段がある。V7のnoopをそのままcolor storeへ置換してclear済みとは扱わない。詳細は次のp004 software準備で展開し、実機のbuffer観測を受け入れに残す。
