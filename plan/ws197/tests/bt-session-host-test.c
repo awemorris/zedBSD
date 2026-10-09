@@ -9,8 +9,10 @@
  * The host test of the session's receiving and sending changed for the
  * phone link (ws197-p002, plan/ws197/phase002/phase.md sections 3, 4 and
  * 12.1), built with the host's compiler under ASan and UBSan.  The
- * controller is a socket pair loaded with packets before each command (the
- * session reads them in order, queueing what is not the command's answer).
+ * controller is a socket pair: each part writes its packets into a script,
+ * and a thread writes the script to the controller's end while the session
+ * waits for a command (a flood larger than the socket's buffer goes in as
+ * the session reads it, queueing what is not the command's answer).
  *
  *   receiving  (a) a flood of one link's ACL data during a command: the
  *              counted events, the events and an earlier link's data
@@ -20,14 +22,15 @@
  *              command inside the handler while the queue drains: the
  *              sealed link's data in it is dropped too; (c) a continuing
  *              packet after the notice is passed over until a first one;
- *              (d) pending says yes while a notice is due; (e) the last
+ *              (d) pending says yes while a notice is due and the queue
+ *              is empty; (e) the last
  *              channel follows the order of arrival, not of handling; (f)
  *              a hardware error with the queue full is handled; (g) a
  *              connection event that does not fit is noticed as counted
- *   sending    a link limited to 8 frames and 1 packet in the controller:
- *              its ninth frame refused, another link's frames still taken
- *              and sent in turn; the room left; the limits reset with a
- *              new connection of the handle
+ *   sending    a link limited to 8 waiting frames and 1 packet in the
+ *              controller: its frame past those refused, another link's
+ *              frames still taken and sent past it; the room left; the
+ *              limits reset with a new connection of the handle
  *
  *   plan/ws197/tests/bt-phone-host-test.sh
  */
@@ -37,7 +40,7 @@
 #include "userland/base/bluetoothd/session.h"
 
 #include <errno.h>
-#include <fcntl.h>
+#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -56,19 +59,27 @@
 /* What the handler keeps of what it is handed. */
 #define TEST_HANDED_MAX		512U
 
+/* The bytes of a part's script of packets (each a 2-byte length and the packet). */
+#define TEST_SCRIPT_BYTES	(256U * 1024U)
+
 /* The checks that failed, and those that ran. */
 static unsigned failures;
 static unsigned checks;
 
 /*
- * The run: the controller's end of the socket pair, and what the handler
- * was handed in order (the packet's type, the handle, the first byte after
- * the ACL header, a notice's flags, channel and count), and a command to
- * run inside the handler when the keyboard's data comes.
+ * The run: the controller's end of the socket pair, the script of packets
+ * the writer thread writes to it (and whether the thread runs), what the
+ * handler was handed in order (the packet's type, the handle, the first
+ * byte after the ACL header, a notice's flags, channel and count), and a
+ * command to run inside the handler when the keyboard's data comes.
  */
 struct run {
 	int controller;
 	struct btd_session *session;
+	uint8_t *script;
+	size_t script_used;
+	pthread_t writer;
+	int writing;
 	unsigned count;
 	uint8_t types[TEST_HANDED_MAX];
 	uint16_t handles[TEST_HANDED_MAX];
@@ -84,6 +95,9 @@ static void handler(void *context, struct btd_session *session, const uint8_t *p
 static void open_run(struct run *run, struct btd_session *session, unsigned pool);
 static void close_run(struct run *run);
 static void put(struct run *run, const uint8_t *packet, size_t length);
+static void start_writer(struct run *run);
+static void wait_writer(struct run *run);
+static void *writer_run(void *argument);
 static void put_acl(struct run *run, uint16_t handle, int continuing, uint16_t cid, uint8_t mark, size_t length);
 static void put_connected(struct run *run, uint16_t handle);
 static void put_disconnected(struct run *run, uint16_t handle);
@@ -186,24 +200,26 @@ open_run(
 	unsigned pool)
 {
 	int ends[2];
-	int size;
 	int status;
 
-	/* A socket pair that keeps packets apart, as the node does, with room for a flood. */
+	/* A socket pair that keeps packets apart, as the node does; the writer blocks while the session's end is full. */
 	status = socketpair(AF_UNIX, SOCK_SEQPACKET, 0, ends);
 	if (status != 0) {
 		perror("socketpair");
 		exit(2);
 	}
-	size = 4 * 1024 * 1024;
-	(void)setsockopt(ends[0], SOL_SOCKET, SO_RCVBUF, &size, sizeof(size));
-	(void)setsockopt(ends[1], SOL_SOCKET, SO_SNDBUF, &size, sizeof(size));
-	(void)fcntl(ends[1], F_SETFL, O_NONBLOCK);
 
-	/* The session, ready, with its pools and the run as its handler. */
+	/* The run, with room for its script. */
 	memset(run, 0, sizeof(*run));
 	run->controller = ends[1];
 	run->session = session;
+	run->script = malloc(TEST_SCRIPT_BYTES);
+	if (run->script == NULL) {
+		perror("malloc");
+		exit(2);
+	}
+
+	/* The session, ready, with its pools and the run as its handler. */
 	btd_session_init(session, ends[0], NULL, NULL, "fake", "/nonexistent");
 	session->timing.command_ms = 300U;
 	session->state = BTD_STATE_READY;
@@ -221,31 +237,105 @@ open_run(
 	run->count = 0U;
 }
 
-/* Closes both ends. */
+/* Closes both ends once the writer is done, and frees the script. */
 static void
 close_run(
 	struct run *run)
 {
-	/* Both ends. */
+	/* The writer first: it writes to the controller's end. */
+	wait_writer(run);
+
+	/* Both ends, and the script. */
 	(void)close(run->session->descriptor);
 	(void)close(run->controller);
+	free(run->script);
+	run->script = NULL;
 }
 
-/* Writes one packet as the controller. */
+/* Adds one packet the controller sends to the script. */
 static void
 put(
 	struct run *run,
 	const uint8_t *packet,
 	size_t length)
 {
-	ssize_t written;
-
-	/* One packet; the test's buffers hold them all. */
-	written = write(run->controller, packet, length);
-	if (written != (ssize_t)length) {
-		perror("write");
+	/* Room for its length and itself; the parts are written to fit. */
+	if (run->writing || length > 0xffffU || run->script_used + 2U + length > TEST_SCRIPT_BYTES) {
+		fprintf(stderr, "bt-session-host-test: the script is full or being written\n");
 		exit(2);
 	}
+
+	/* Its length, least significant first, then the packet. */
+	run->script[run->script_used] = (uint8_t)(length & 0xffU);
+	run->script[run->script_used + 1U] = (uint8_t)(length >> 8);
+	memcpy(run->script + run->script_used + 2U, packet, length);
+	run->script_used += 2U + length;
+}
+
+/* Starts the thread that writes the script to the controller's end. */
+static void
+start_writer(
+	struct run *run)
+{
+	int status;
+
+	/* One writer at a time. */
+	if (run->writing)
+		return;
+
+	/* The thread. */
+	status = pthread_create(&run->writer, NULL, writer_run, run);
+	if (status != 0) {
+		perror("pthread_create");
+		exit(2);
+	}
+
+	/* The thread runs until the script is written. */
+	run->writing = 1;
+}
+
+/* Waits until the whole script is written, and empties it for the next part. */
+static void
+wait_writer(
+	struct run *run)
+{
+	/* Nothing runs. */
+	if (!run->writing)
+		return;
+
+	/* The thread's end, then an empty script. */
+	(void)pthread_join(run->writer, NULL);
+	run->writing = 0;
+	run->script_used = 0U;
+}
+
+/* Writes each packet of the script in order, waiting while the session's end is full. */
+static void *
+writer_run(
+	void *argument)
+{
+	struct run *run;
+	size_t offset;
+	size_t length;
+	ssize_t written;
+
+	/* Each packet. */
+	run = argument;
+	offset = 0U;
+	while (offset < run->script_used) {
+		length = (size_t)run->script[offset] | ((size_t)run->script[offset + 1U] << 8);
+		written = write(run->controller, run->script + offset + 2U, length);
+		if (written != (ssize_t)length) {
+			perror("write");
+			exit(2);
+		}
+
+		/* The next packet. */
+		offset += 2U + length;
+	}
+
+	/* Succeeded: all written. */
+	return NULL;
 }
 
 /*
@@ -285,6 +375,8 @@ put_acl(
 		packet[7] = (uint8_t)(cid & 0xffU);
 		packet[8] = (uint8_t)(cid >> 8);
 	}
+
+	/* The mark, the last byte. */
 	packet[5U + length - 1U] = mark;
 	put(run, packet, 5U + length);
 }
@@ -383,13 +475,17 @@ put_answer(
 	put(run, packet, sizeof(packet));
 }
 
-/* Hands everything the session holds and the node has to the handler. */
+/* Writes what the script holds, then hands everything the session holds and the node has to the handler. */
 static void
 drain(
 	struct run *run)
 {
 	unsigned rounds;
 	int error;
+
+	/* The script written whole (a part's packets after a command fit the socket's buffer). */
+	start_writer(run);
+	wait_writer(run);
 
 	/* Until the node has nothing (bounded). */
 	for (rounds = 0U; rounds < 10000U; rounds++) {
@@ -409,7 +505,7 @@ drain_controller(
 
 	/* Until nothing is left. */
 	for (;;) {
-		got = read(run->controller, packet, sizeof(packet));
+		got = recv(run->controller, packet, sizeof(packet), MSG_DONTWAIT);
 		if (got <= 0)
 			break;
 	}
@@ -434,10 +530,11 @@ find_notice(
 }
 
 /*
- * (a) and (d): during a command, the keyboard's data, then 40 KB of the
- * phone's data (past the queue), then an Encryption Change, a third
- * connection's Connection and Disconnection Complete, and LE reports, then
- * the answer.
+ * (a): during a command, the keyboard's data, then 40 KB of the phone's
+ * data (past the queue), then an Encryption Change, a third connection's
+ * Connection and Disconnection Complete, and 40 LE reports (more than the
+ * room above the events' reserve that the phone's flood leaves), then the
+ * answer.
  */
 static void
 test_flood(void)
@@ -451,7 +548,6 @@ test_flood(void)
 	int keyboard_seen;
 	int encryption_seen;
 	int third_seen;
-	int pending;
 	int error;
 
 	/* The packets, then the command. */
@@ -462,20 +558,15 @@ test_flood(void)
 	put_encryption(&run, TEST_KEYBOARD);
 	put_connected(&run, TEST_THIRD);
 	put_disconnected(&run, TEST_THIRD);
-	for (index = 0U; index < 10U; index++)
+	for (index = 0U; index < 40U; index++)
 		put_report(&run);
 	put_answer(&run, 0xfc01U);
+	start_writer(&run);
 	error = btd_session_command(&session, 0xfc01U, NULL, 0U);
+	wait_writer(&run);
 	check(error == 0, "flood: the command answered");
 	check(session.queue_dropped != 0U, "flood: the queue was full");
-	check(session.scan_dropped == 10U, "flood: the reports dropped");
-
-	/* Handed until the last queued packet: then the notice is due and pending says so. */
-	pending = 0;
-	while (session.queue_used != 0U)
-		(void)btd_session_input(&session);
-	pending = btd_session_pending(&session);
-	check(pending, "flood: pending while the notice is due");
+	check(session.scan_dropped != 0U && session.scan_dropped < 40U, "flood: the reports past the room dropped");
 	drain(&run);
 
 	/* What was handed: the keyboard's data, the events, the phone's data before the drop, one notice after it. */
@@ -496,6 +587,8 @@ test_flood(void)
 				phone_after++;
 		}
 	}
+
+	/* The third connection's two events are among the events counted. */
 	third_seen = encryption_seen;
 	check(keyboard_seen, "flood: the keyboard's data came");
 	check(third_seen >= 3, "flood: the encryption change and the third connection's events came");
@@ -536,7 +629,9 @@ test_inside(void)
 	/* The second command's packets: the phone's continuing packet, then its answer. */
 	put_acl(&run, TEST_PHONE, 1, 0U, 0xc2U, 100U);
 	put_answer(&run, 0xfc02U);
+	start_writer(&run);
 	error = btd_session_command(&session, 0xfc01U, NULL, 0U);
+	wait_writer(&run);
 	check(error == 0, "inside: the first command answered");
 	run.command_inside = 1;
 	drain(&run);
@@ -548,6 +643,8 @@ test_inside(void)
 		if (run.types[index] == BT_PACKET_ACL && run.marks[index] == 0xc2U)
 			bad = 1;
 	}
+
+	/* The phone's notice. */
 	notice = find_notice(&run, TEST_PHONE);
 	check(notice != TEST_HANDED_MAX, "inside: the notice");
 	check(!bad, "inside: the continuing packet dropped");
@@ -563,10 +660,12 @@ test_inside(void)
 }
 
 /*
- * (e) and (f): the phone's signalling packets are queued, the queue fills,
- * then its data on channel 0x40 is dropped: the notice says data on 0x40,
- * and handling the old signalling packets does not change the last channel
- * back; a hardware error with the queue full is still handled.
+ * (d), (e) and (f): the phone's signalling packets are queued, the queue
+ * fills, then its data on channel 0x40 is dropped: the notice says data on
+ * 0x40, and handling the old signalling packets does not change the last
+ * channel back; a hardware error with the queue full is still handled.
+ * Nothing is queued after the drop, so once the queue is empty the notice
+ * is due and not yet handed: pending says yes then.
  */
 static void
 test_arrival(void)
@@ -576,6 +675,7 @@ test_arrival(void)
 	unsigned index;
 	unsigned notice;
 	uint8_t hardware[4];
+	int pending;
 	int error;
 
 	/* Signalling first (queued), the flood on 0x40, a hardware error, the answer. */
@@ -590,10 +690,20 @@ test_arrival(void)
 	hardware[3] = 0x05U;
 	put(&run, hardware, sizeof(hardware));
 	put_answer(&run, 0xfc01U);
+	start_writer(&run);
 	error = btd_session_command(&session, 0xfc01U, NULL, 0U);
+	wait_writer(&run);
 	check(error == 0, "arrival: the command answered");
 	check(session.hardware_errors == 1U && session.state == BTD_STATE_ERROR, "arrival: the hardware error handled");
+
+	/* Handed until the queue is empty: the notice is due and still waits, and pending says so. */
+	while (session.queue_used != 0U)
+		(void)btd_session_input(&session);
+	pending = btd_session_pending(&session);
+	check(find_notice(&run, TEST_PHONE) == TEST_HANDED_MAX, "arrival: the notice not handed yet");
+	check(pending, "arrival: pending while the notice is due");
 	drain(&run);
+	check(!btd_session_pending(&session), "arrival: nothing pending after the notice");
 
 	/* The notice says data on 0x40 (the last channel as it arrived). */
 	notice = find_notice(&run, TEST_PHONE);
@@ -620,10 +730,12 @@ test_counted(void)
 	open_run(&run, &session, 4U);
 	for (index = 0U; index < 40U; index++)
 		put_acl(&run, TEST_PHONE, 0, TEST_CID_DATA, 0x31U, 1000U);
-	for (index = 0U; index < 450U; index++)
+	for (index = 0U; index < 600U; index++)
 		put_disconnected(&run, (uint16_t)(0x0100U + index));
 	put_answer(&run, 0xfc01U);
+	start_writer(&run);
 	error = btd_session_command(&session, 0xfc01U, NULL, 0U);
+	wait_writer(&run);
 	check(error == 0, "counted: the command answered");
 	drain(&run);
 
@@ -634,10 +746,11 @@ test_counted(void)
 }
 
 /*
- * Sending: the phone limited to 8 frames and 1 packet in the controller,
- * a pool of 4: its ninth frame refused, the keyboard's 6 taken; the
- * packets go in turn; the room; a new connection of the handle has no
- * limit.
+ * Sending: the phone limited to 8 waiting frames and 1 packet in the
+ * controller, a pool of 4: its first frame goes at once, 8 more wait and
+ * the tenth is refused; the keyboard's 6 are taken and 3 of them go past
+ * the phone's waiting frames; the room; a new connection of the handle has
+ * no limit.
  */
 static void
 test_sending(void)
@@ -660,14 +773,16 @@ test_sending(void)
 	error = btd_session_set_link_limits(&session, 0x0099U, 1U, 1U);
 	check(error == ENOTCONN, "sending: an unknown connection");
 
-	/* Eight frames of the phone taken, the ninth refused. */
+	/* Nine frames of the phone taken (the first in the controller, 8 waiting), the tenth refused. */
 	memset(payload, 0x5aU, sizeof(payload));
-	for (index = 0U; index < 8U; index++) {
+	for (index = 0U; index < 9U; index++) {
 		error = btd_session_send(&session, TEST_PHONE, 0x0040U, payload, sizeof(payload));
 		check(error == 0, "sending: a phone frame");
 	}
+
+	/* The tenth. */
 	error = btd_session_send(&session, TEST_PHONE, 0x0040U, payload, sizeof(payload));
-	check(error == ENOBUFS, "sending: the ninth refused");
+	check(error == ENOBUFS, "sending: the tenth refused");
 	room = btd_session_link_room(&session, TEST_PHONE);
 	check(room == 0U, "sending: no room left for the phone");
 
@@ -676,13 +791,16 @@ test_sending(void)
 		error = btd_session_send(&session, TEST_KEYBOARD, 0x0001U, payload, sizeof(payload));
 		check(error == 0, "sending: a keyboard frame");
 	}
+
+	/* The keyboard's room: its own share and the table's. */
 	room = btd_session_link_room(&session, TEST_KEYBOARD);
-	check(room == 2U, "sending: the table's room for the keyboard");
+	check(session.frame_count == 11U, "sending: 8 of the phone's and 3 of the keyboard's wait");
+	check(room == BTD_SEND_FRAMES - 11U, "sending: the table's room for the keyboard");
 
 	/* What went: one phone packet (its limit) and three of the keyboard's. */
 	count = 0U;
 	for (;;) {
-		got = read(run.controller, packet, sizeof(packet));
+		got = recv(run.controller, packet, sizeof(packet), MSG_DONTWAIT);
 		if (got <= 0)
 			break;
 		if (packet[0] == BT_PACKET_ACL && count < 8U) {
@@ -690,6 +808,8 @@ test_sending(void)
 			count++;
 		}
 	}
+
+	/* The packets the pool took. */
 	check(count == 4U, "sending: the pool's four packets");
 	check(count == 4U && order[0] == TEST_PHONE && order[1] == TEST_KEYBOARD, "sending: in turn");
 	check(session.links[0].outstanding == 1U, "sending: the phone at its limit in the controller");

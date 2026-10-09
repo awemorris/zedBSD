@@ -377,6 +377,6 @@ firmware の要らない USB の Bluetooth の dongle が 2 本ある時だけ�
 | i05 RFCOMM | c5a174129 | 実装と host 試験 PASS（bt-phone-host-test、302 checks） |
 | i06 OBEX | 0f5d78fb8 | 実装と host 試験 PASS（bt-obex-host-test、2073 checks） |
 | i07 SDP の server と client の一般化 | e90f6822d | 実装と host 試験 PASS（bt-sdp-host-test、45 checks）、WS143 の host 試験 PASS |
-| i01 session の受けの drop と送りの上限 | この commit | session.c・session.h を実装（§3・§4、build warning 0、style-check 0）、WS143 の host 試験 PASS（bt-link-host-test の queue の期待値を「events の知らせ 1 つ」で 201 に直した）。新しい試験 `plan/ws197/tests/bt-session-host-test.c` は書いたが未完: socket pair の送りの buffer が 40 KB の flood を一度に持てず（write が EAGAIN）、(a) の flood の段が走らない。直し方の案: 偽の controller を thread にして読みと並べて書く（WS143 の bt-link-host-test の fake_run と同じ形）か、flood を小さく（BTD_QUEUE_BYTES を試験の build だけで小さくはしない: 試験は既定の経路で） |
+| i01 session の受けの drop と送りの上限 | 3c73e181c（実装）、この commit（試験） | session.c・session.h を実装（§3・§4、build warning 0、style-check 0）、WS143 の host 試験 PASS（bt-link-host-test の queue の期待値を「events の知らせ 1 つ」で 201 に直した）。新しい試験 `plan/ws197/tests/bt-session-host-test.c`（51 checks）PASS、`bt-phone-host-test.sh` に足した: 偽の controller の script を thread で書く形にし（socket の buffer を越える flood を session が読みながら入れる）、試験の期待値の誤り 4 つを直した（ring の計算では 10 の report は余白に入るので 40 に、(d) は ring が空で知らせが期日の時の場面へ移した、数えた事象は 600 で溢れる、送りの frames は待つ frame の数なので 1 つ目は送られて 10 本目が断られる）。実装の直しは無し |
 
-再開点: bt-session-host-test の偽の controller を thread に直して (a)〜(g) と送りの試験を通す → `bt-phone-host-test.sh` に足す → i02（router）。2026-10-10 Q1 の割り込み（ベータ2 の UAT の BUG-275〜280）で中断。
+再開点: i02（router と linkmgr）。2026-10-10 Q1 の割り込み（ベータ2 の UAT の BUG-275〜280、BUG-222）で中断したのち、同日 bt-session-host-test を通した。
