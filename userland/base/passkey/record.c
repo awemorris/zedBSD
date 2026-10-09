@@ -487,6 +487,11 @@ passkey_options_read(
 		return 0;
 	}
 
+	/* No field after the three. */
+	error = passkey_record_field(line, 6U, field, sizeof(field));
+	if (error != ENOENT)
+		return 0;
+
 	/* Each field once, and no touch left out while the PIN is asked. */
 	if (read.methods[0] == '\0' || read.key_pin < 0 || read.key_touch < 0)
 		return 0;

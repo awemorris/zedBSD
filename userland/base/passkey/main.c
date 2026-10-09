@@ -624,6 +624,7 @@ passkey_set_options(
 	}
 
 	/* The new line (none for the defaults), in place of the old one. */
+	passkey_options_default(&options);
 	if (error == 0) {
 		(void)passkey_options_read(text, length, name, uid, &options);
 		options.key_pin = pin;
