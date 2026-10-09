@@ -38,6 +38,7 @@ static const struct request_shape request_shapes[] = {
 	{ "key-reset", PASSKEY_OP_KEY_RESET, 3U },
 	{ "set-options", PASSKEY_OP_SET_OPTIONS, 5U },
 	{ "auth-fido2", PASSKEY_OP_AUTH_FIDO2, 4U },
+	{ "key-owner", PASSKEY_OP_KEY_OWNER, 2U },
 };
 
 /*

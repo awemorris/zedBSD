@@ -92,6 +92,23 @@ main(void)
 	expect(fido2_message_parse(line, &message) == EINVAL, "a byte that is not hexadecimal");
 	(void)snprintf(line, sizeof(line), "made ABCD");
 	expect(fido2_message_parse(line, &message) == EINVAL, "capital digits are not the helper's");
+	(void)snprintf(line, sizeof(line), "owner 0,1");
+	error = fido2_message_parse(line, &message);
+	expect(error == 0 && message.kind == FIDO2_MESSAGE_OWNER && message.held == 0U && message.owner_card == 1U, "owner: none held");
+	(void)snprintf(line, sizeof(line), "owner 5,0 0102 a0a1a2 3044");
+	error = fido2_message_parse(line, &message);
+	expect(error == 0 && message.kind == FIDO2_MESSAGE_OWNER && message.held == 5U && message.owner_card == 0U &&
+	    message.id_size == 2U && message.auth_data_size == 3U && message.signature_size == 2U, "owner: two groups and the first's answer");
+	(void)snprintf(line, sizeof(line), "owner 1,0");
+	expect(fido2_message_parse(line, &message) == EINVAL, "owner: a group held without its answer");
+	(void)snprintf(line, sizeof(line), "owner 0,0 0102 a0a1a2 3044");
+	expect(fido2_message_parse(line, &message) == EINVAL, "owner: an answer without a group");
+	(void)snprintf(line, sizeof(line), "owner 1,2 0102 a0a1a2 3044");
+	expect(fido2_message_parse(line, &message) == EINVAL, "owner: a card that is neither");
+	(void)snprintf(line, sizeof(line), "owner 1,0 0102 a0a1a2");
+	expect(fido2_message_parse(line, &message) == EINVAL, "owner: an answer without its signature");
+	(void)snprintf(line, sizeof(line), "owner 1,0 0102 a0a1a2 3044 extra");
+	expect(fido2_message_parse(line, &message) == EINVAL, "owner: a word too many");
 	(void)snprintf(line, sizeof(line), "touched");
 	expect(fido2_message_parse(line, &message) == EINVAL, "an unknown message");
 

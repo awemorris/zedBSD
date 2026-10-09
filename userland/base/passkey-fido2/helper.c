@@ -82,6 +82,8 @@ static int helper_one(struct fido2_devices *devices, struct helper_key *key, int
 static void helper_info(struct fido2_devices *devices);
 static void helper_pin(struct fido2_devices *devices, const struct fido2_job *job);
 static void helper_reset(struct fido2_devices *devices, const struct fido2_job *job);
+static void helper_owner(struct fido2_devices *devices, const struct fido2_job *job);
+static int helper_owner_group(struct helper_key *key, const struct fido2_job *job, unsigned group, struct pk_assertion_reply *reply);
 static void helper_terminated(int signal_number);
 static uint64_t helper_now_ms(void);
 static void helper_assert(struct fido2_devices *devices, const struct fido2_job *job);
@@ -136,6 +138,9 @@ fido2_helper(
 	case FIDO2_JOB_SET_PIN:
 	case FIDO2_JOB_CHANGE_PIN:
 		helper_pin(devices, job);
+		break;
+	case FIDO2_JOB_OWNER:
+		helper_owner(devices, job);
 		break;
 	default:
 		helper_reset(devices, job);
@@ -904,6 +909,200 @@ helper_reset(
 	/* Done: what it held. */
 	(void)snprintf(line, sizeof(line), "reset %x", held);
 	helper_send(line);
+}
+
+/*
+ * Tells whose the one key there is (ws199-p001 section 4.2): which of the
+ * job's groups (the accounts, in order) it holds a credential of, each
+ * asked silently (without the user, without the PIN), the allow list cut
+ * to what the key takes at once; and the first group's answer, which
+ * passkey-fido2 checks.  It stops at the second group held.  No key is
+ * waited for: a card counts only while it lies on a reader.
+ */
+static void
+helper_owner(
+	struct fido2_devices *devices,
+	const struct fido2_job *job)
+{
+	static struct helper_key key;
+	static struct helper_key other;
+	static struct pk_assertion_reply first;
+	struct pk_assertion_reply reply;
+	char line[FIDO2_MESSAGE_MAX];
+	char id[2U * PK_CREDENTIAL_ID_MAX + 1U];
+	char auth_data[2U * PK_AUTH_DATA_MAX + 1U];
+	char signature[2U * PK_SIGNATURE_MAX + 1U];
+	unsigned groups;
+	unsigned group;
+	unsigned held;
+	unsigned count;
+	size_t index;
+	size_t slot;
+	int present;
+	int found;
+	int card;
+	int error;
+
+	/* The USB keys that answer, the first kept. */
+	count = 0U;
+	key.card = -1;
+	other.card = -1;
+	for (index = 0U; index < devices->count; index++) {
+		if (count == 0U) {
+			error = helper_open(devices, index, &key);
+		} else {
+			error = helper_open(devices, index, &other);
+		}
+
+		/* One that does not answer is not counted. */
+		if (error == 0)
+			count++;
+	}
+
+	/* The cards lying on a reader that answer as keys, the first kept when no USB key was. */
+	for (slot = 0U; slot < devices->card_count; slot++) {
+		error = pk_os_card_present(&devices->cards[slot], &present);
+		if (error != 0 || !present)
+			continue;
+		if (count == 0U) {
+			error = helper_open_card(devices, slot, &key);
+		} else {
+			error = helper_open_card(devices, slot, &other);
+		}
+
+		/* A card that is not a key is not counted; one more than the first is let go. */
+		if (error != 0)
+			continue;
+		if (count != 0U)
+			helper_release(devices, &other);
+		count++;
+	}
+
+	/* No key, or more than one: nobody's. */
+	if (count == 0U) {
+		helper_fail("no-key");
+		return;
+	}
+	if (count > 1U) {
+		helper_release(devices, &key);
+		helper_fail("many-keys");
+		return;
+	}
+
+	/* Whether the one key is a card on a reader. */
+	card = 0;
+	if (key.card >= 0)
+		card = 1;
+
+	/* The groups there are (the last one's number and one). */
+	groups = 0U;
+	for (index = 0U; index < job->id_count; index++) {
+		if (job->groups[index] + 1U > groups)
+			groups = job->groups[index] + 1U;
+	}
+
+	/* Each group, until two are held or the work ends. */
+	held = 0U;
+	found = 0;
+	for (group = 0U; group < groups && group < 32U; group++) {
+		if (helper_ended)
+			break;
+		error = helper_owner_group(&key, job, group, &reply);
+		if (error != 0)
+			continue;
+
+		/* The first group held keeps its answer; a second ends the look. */
+		held |= 1U << group;
+		if (!found) {
+			first = reply;
+			found = 1;
+			continue;
+		}
+		break;
+	}
+
+	/* The work ended: no answer that could be half of it. */
+	if (helper_ended) {
+		helper_release(devices, &key);
+		helper_fail("canceled");
+		return;
+	}
+
+	/* No group held: the key is not registered here. */
+	if (!found) {
+		helper_release(devices, &key);
+		(void)snprintf(line, sizeof(line), "owner 0,%d", card);
+		helper_send(line);
+		return;
+	}
+
+	/* The groups held, and the first one's answer. */
+	(void)fido2_hex_encode(first.credential_id, first.credential_id_size, id, sizeof(id));
+	(void)fido2_hex_encode(first.auth_data, first.auth_data_size, auth_data, sizeof(auth_data));
+	(void)fido2_hex_encode(first.signature, first.signature_size, signature, sizeof(signature));
+	(void)snprintf(line, sizeof(line), "owner %x,%d %s %s %s", held, card, id, auth_data, signature);
+	helper_release(devices, &key);
+	helper_send(line);
+}
+
+/*
+ * Asks the key silently whether it holds one of a group's credentials,
+ * as many in one question as the key takes (one when it does not say).
+ * Returns 0 with its answer, or an errno value.
+ */
+static int
+helper_owner_group(
+	struct helper_key *key,
+	const struct fido2_job *job,
+	unsigned group,
+	struct pk_assertion_reply *reply)
+{
+	struct pk_assertion_request request;
+	const uint8_t *ids[FIDO2_IDS_MAX];
+	size_t sizes[FIDO2_IDS_MAX];
+	size_t most;
+	size_t count;
+	size_t index;
+	int error;
+
+	/* The most credentials the key takes in one allow list. */
+	most = key->info.max_credential_count;
+	if (most == 0U)
+		most = 1U;
+
+	/* The question: the login's relying party and the job's hash, without the user and without the PIN. */
+	memset(&request, 0, sizeof(request));
+	request.rp_id = FIDO2_RP;
+	memcpy(request.client_data_hash, job->client_data_hash, sizeof(request.client_data_hash));
+	request.allow_ids = ids;
+	request.allow_sizes = sizes;
+
+	/* The group's credentials, asked a list at a time, the last list maybe shorter. */
+	count = 0U;
+	error = ENOENT;
+	for (index = 0U; index <= job->id_count; index++) {
+		if (index < job->id_count && job->groups[index] == group) {
+			ids[count] = job->ids[index];
+			sizes[count] = job->id_sizes[index];
+			count++;
+		}
+
+		/* A list full, or the last one, is asked. */
+		if (count == 0U)
+			continue;
+		if (count < most && index < job->id_count)
+			continue;
+		request.allow_count = count;
+		error = pk_ctap2_get_assertion(&key->device, &request, reply);
+		if (error == 0)
+			return 0;
+		if (helper_ended)
+			return ECANCELED;
+		count = 0U;
+	}
+
+	/* None of the group's is held. */
+	return error;
 }
 
 /* Notes that sessiond ended the work (SIGTERM): the key's command is cancelled at its next keepalive. */

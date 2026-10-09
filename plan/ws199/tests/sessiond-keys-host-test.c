@@ -13,11 +13,14 @@
  * delayed password failure, a reset whose password was right clears the
  * counts (the PIN is offered) and its later failure is told at once, the
  * status lines become REPLUG and TOUCH, a change is told passkey's own
- * word, and a CANCEL'ed attempt is told at once.
+ * word, and a CANCEL'ed attempt is told at once.  KEYOWNER (i05) tells
+ * the owner or passkey's reason, at once and once a second at most, to a
+ * session and to the greeter, and proves nothing (the PIN is not offered).
  */
 
 #include "userland/desktop/sessiond/auth.h"
 
+#include <fcntl.h>
 #include <poll.h>
 #include <pwd.h>
 #include <stdarg.h>
@@ -39,6 +42,8 @@ static void check(int condition, const char *what);
 static void send_line(struct sessiond_exchange *exchange, const char *text);
 static int answer(struct sessiond_exchange *exchange, int peer, char *line, size_t size, int timeout_ms);
 static void test_keys(const char *name);
+static void test_owner(const char *name);
+static void test_owner_mode(const char *mode);
 
 /* sessiond's own (main.c), for the test. */
 long long
@@ -73,6 +78,8 @@ main(void)
 	/* About the test's own account (the fake passkey answers its user ID). */
 	self = getpwuid(getuid());
 	check(self != NULL, "the test's own account");
+	if (self != NULL)
+		test_owner(self->pw_name);
 	if (self != NULL)
 		test_keys(self->pw_name);
 
@@ -311,4 +318,112 @@ test_keys(
 	sessiond_exchange_stop(&exchange);
 	(void)close(pair[0]);
 	(void)close(pair[1]);
+}
+
+/* KEYOWNER, of a session and of the greeter (ws199-p001 i05, R2, R10). */
+static void
+test_owner(
+	const char *name)
+{
+	struct sessiond_exchange exchange;
+	struct sessiond_exchange greeter;
+	struct sessiond_account owner;
+	struct passwd *found;
+	struct timespec pause;
+	char expected[SESSIOND_LINE_MAX];
+	char line[SESSIOND_LINE_MAX];
+	long long started;
+	long long took;
+	int pair[2];
+	int other[2];
+	int got;
+	int same;
+	int error;
+
+	/* The session's end and sessiond's, and the greeter's. */
+	error = socketpair(AF_UNIX, SOCK_STREAM, 0, pair);
+	if (error != 0) {
+		check(0, "socketpair");
+		return;
+	}
+	error = socketpair(AF_UNIX, SOCK_STREAM, 0, other);
+	if (error != 0) {
+		check(0, "socketpair");
+		return;
+	}
+
+	/* The session's own user; the greeter has none. */
+	memset(&owner, 0, sizeof(owner));
+	found = NULL;
+	(void)getpwnam_r(name, &owner.passwd, owner.buffer, sizeof(owner.buffer), &found);
+	sessiond_exchange_init(&exchange, pair[0], &owner, NULL);
+	sessiond_exchange_init(&greeter, other[0], NULL, NULL);
+
+	/* A session's KEYOWNER: its user, the key's options, at once. */
+	snprintf(expected, sizeof(expected), "KEYOWNER user=%s key-pin=0 key-touch=1 card=1", name);
+	started = sessiond_milliseconds();
+	send_line(&exchange, "KEYOWNER");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	took = sessiond_milliseconds() - started;
+	same = got && strcmp(line, expected) == 0;
+	check(same, "a session's KEYOWNER names its user");
+	check(took < TEST_AT_ONCE_MS, "KEYOWNER is told at once");
+
+	/* Another within the second, from anywhere: busy (R10). */
+	send_line(&greeter, "KEYOWNER");
+	got = answer(&greeter, other[1], line, sizeof(line), 2000);
+	check(got && strcmp(line, "ERROR busy") == 0, "a second KEYOWNER within a second is busy");
+
+	/* After the second, the greeter's: the owner too. */
+	pause.tv_sec = 1;
+	pause.tv_nsec = 100000000L;
+	(void)nanosleep(&pause, NULL);
+	send_line(&greeter, "KEYOWNER");
+	got = answer(&greeter, other[1], line, sizeof(line), 5000);
+	same = got && strcmp(line, expected) == 0;
+	check(same, "the greeter's KEYOWNER names the owner");
+
+	/* The greeter may not ask a session's requests still. */
+	send_line(&greeter, "KEYINFO");
+	got = answer(&greeter, other[1], line, sizeof(line), 2000);
+	check(got && strcmp(line, "ERROR") == 0, "the greeter may not ask KEYINFO");
+
+	/* passkey's reason, as it is (the fake passkey reads its mode from the file). */
+	test_owner_mode("none\n");
+	(void)nanosleep(&pause, NULL);
+	send_line(&greeter, "KEYOWNER");
+	got = answer(&greeter, other[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "KEYOWNER none") == 0, "KEYOWNER tells none");
+	test_owner_mode("owner\n");
+
+	/* None of it proved anything: the PIN is not offered. */
+	send_line(&exchange, "STYLES");
+	got = answer(&exchange, pair[1], line, sizeof(line), 5000);
+	check(got && strcmp(line, "STYLES password") == 0, "KEYOWNER does not offer the PIN");
+
+	/* The exchanges end. */
+	sessiond_exchange_stop(&exchange);
+	sessiond_exchange_stop(&greeter);
+	(void)close(pair[0]);
+	(void)close(pair[1]);
+	(void)close(other[0]);
+	(void)close(other[1]);
+}
+
+/* Writes the fake passkey's mode for key-owner over the last one. */
+static void
+test_owner_mode(
+	const char *mode)
+{
+	ssize_t written;
+	int file;
+
+	/* The file, written over. */
+	file = open(TEST_OWNER_MODE, O_WRONLY | O_CREAT | O_TRUNC, 0600);
+	check(file >= 0, "the fake passkey's mode");
+	if (file < 0)
+		return;
+	written = write(file, mode, strlen(mode));
+	check(written == (ssize_t)strlen(mode), "the fake passkey's mode written");
+	(void)close(file);
 }

@@ -37,6 +37,7 @@
 #define PASSKEY_OP_KEY_RESET	11
 #define PASSKEY_OP_SET_OPTIONS	12
 #define PASSKEY_OP_AUTH_FIDO2	13
+#define PASSKEY_OP_KEY_OWNER	14
 
 /* The file, its first line, and the version this passkey writes. */
 #ifndef PASSKEY_FILE

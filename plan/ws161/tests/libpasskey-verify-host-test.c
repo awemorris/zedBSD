@@ -258,8 +258,12 @@ main(void)
 	/* No presence; no verification when it is required (and accepted when it is not). */
 	other_size = make_auth_data(other, "zedbsd.login", PK_FLAG_UV, 9U, NULL, 0U);
 	signature_size = sign(other, other_size, client_hash, signature);
+	error = check("zedbsd.login", PK_FLAG_UP | PK_FLAG_UV, 0U, credential_id, other, other_size, signature, signature_size, &count);
+	expect(error == PK_VERIFY_FLAGS, "no presence when it is required");
 	error = check("zedbsd.login", PK_FLAG_UV, 0U, credential_id, other, other_size, signature, signature_size, &count);
-	expect(error == PK_VERIFY_FLAGS, "no presence");
+	expect(error == 0, "no presence when it is not required (an unlock without the touch, ws199)");
+	error = check("zedbsd.login", 0U, 0U, credential_id, other, other_size, signature, signature_size, &count);
+	expect(error == 0, "nothing required (a key's owner, ws199)");
 	other_size = make_auth_data(other, "zedbsd.login", PK_FLAG_UP, 9U, NULL, 0U);
 	signature_size = sign(other, other_size, client_hash, signature);
 	error = check("zedbsd.login", PK_FLAG_UV, 0U, credential_id, other, other_size, signature, signature_size, &count);

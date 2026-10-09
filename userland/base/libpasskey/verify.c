@@ -101,9 +101,12 @@ pk_verify_assertion(
 	if (!same)
 		return PK_VERIFY_WRONG_PARTY;
 
-	/* The user was present, and verified when that is required. */
-	if ((flags & PK_FLAG_UP) == 0U)
-		return PK_VERIFY_FLAGS;
+	/*
+	 * The user was present and verified as the verifier requires: a
+	 * login's answer requires both, the unlock of an account that asks no
+	 * touch neither (ws199-p001 section 4.3), and a key's silent answer
+	 * that only names its owner nothing (section 4.2).
+	 */
 	if ((flags & expectation->required_flags) != expectation->required_flags)
 		return PK_VERIFY_FLAGS;
 

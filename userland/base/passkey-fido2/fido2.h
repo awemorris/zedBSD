@@ -32,6 +32,11 @@
  *   done                           the key's PIN set or changed
  *   reset MASK                     the key was reset; the credentials of
  *                                  the job it held (bits, hexadecimal)
+ *   owner MASK,CARD[ ID AUTH SIG]  the accounts whose credentials the one
+ *                                  key holds (bits of the job's groups,
+ *                                  hexadecimal), whether it is a card,
+ *                                  and the first one's silent answer
+ *                                  (ws199-p001 section 4.2)
  *   fail REASON                    one of passkey's reasons
  */
 
@@ -71,6 +76,7 @@
 #define FIDO2_JOB_SET_PIN	4
 #define FIDO2_JOB_CHANGE_PIN	5
 #define FIDO2_JOB_RESET		6
+#define FIDO2_JOB_OWNER		7
 
 /* The most credentials a job names (a reset asks for every account's, ws199-p001). */
 #define FIDO2_IDS_MAX		32U
@@ -83,12 +89,14 @@
 #define FIDO2_MESSAGE_INFO	5
 #define FIDO2_MESSAGE_DONE	6
 #define FIDO2_MESSAGE_RESET	7
+#define FIDO2_MESSAGE_OWNER	8
 
 /*
  * The helper's job, made by passkey-fido2 before the helper starts: what
  * to do, the client data hash, the key's PIN (the current one to change
  * it) and a new PIN, the credentials (to allow, to exclude, or a reset's
- * to look for), the user's ID and name for a new one.
+ * or an owner's question's to look for, the latter with the account each
+ * belongs to: its group, in order), the user's ID and name for a new one.
  */
 struct fido2_job {
 	int kind;
@@ -99,6 +107,7 @@ struct fido2_job {
 	const uint8_t *ids[FIDO2_IDS_MAX];
 	size_t id_sizes[FIDO2_IDS_MAX];
 	size_t id_count;
+	unsigned groups[FIDO2_IDS_MAX];
 	uint8_t user_id[FIDO2_USER_ID_SIZE];
 	const char *user_name;
 };
@@ -106,7 +115,9 @@ struct fido2_job {
 /*
  * A message read back: its kind, and for an assertion or a new
  * credential its bytes; for a key's information its numbers; for a reset
- * the credentials held; for a failure its reason.
+ * the credentials held; for an owner's question the groups held, whether
+ * the key is a card and the first group's answer (its bytes, none when no
+ * group is held); for a failure its reason.
  */
 struct fido2_message {
 	int kind;
@@ -117,6 +128,7 @@ struct fido2_message {
 	unsigned info_retries;
 	unsigned info_min;
 	unsigned held;
+	unsigned owner_card;
 	uint8_t id[PK_CREDENTIAL_ID_MAX];
 	size_t id_size;
 	uint8_t auth_data[PK_AUTH_DATA_MAX];

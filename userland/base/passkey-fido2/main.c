@@ -20,6 +20,8 @@
  *   key-change-pin NAME KEY-PIN NEW-PIN       the key's PIN changed
  *   key-reset NAME PASSWORD                   the key reset after it is plugged
  *                                             in again, its lines removed
+ *   key-owner NAME|-                          whose the key there is: the account
+ *                                             named, or every account (-)
  *
  * It runs as root alone (its real user ID), reads nothing from its command
  * line or environment, makes the challenge, opens and claims the keys,
@@ -80,6 +82,19 @@ struct main_all_keys {
 	size_t count;
 };
 
+/*
+ * The accounts an owner's question looks for (ws199-p001 section 4.2):
+ * each group's name and user ID, and for each credential asked its line
+ * in main_all and its group.
+ */
+struct main_owners {
+	char names[FIDO2_IDS_MAX][64];
+	uid_t uids[FIDO2_IDS_MAX];
+	size_t group_count;
+	size_t records[FIDO2_IDS_MAX];
+	size_t count;
+};
+
 /* How long a reset waits for the key to be plugged in again, and how often it looks. */
 #define MAIN_REPLUG_MS		30000U
 #define MAIN_REPLUG_STEP_MS	100U
@@ -89,6 +104,7 @@ static char main_text[MAIN_FILE_MAX];
 static char main_output[MAIN_FILE_MAX + MAIN_LINE_MAX];
 static struct main_keys main_account_keys;
 static struct main_all_keys main_all;
+static struct main_owners main_owners;
 static struct fido2_devices main_devices;
 
 static void main_setup(void);
@@ -109,6 +125,9 @@ static int main_key_info(uid_t uid);
 static int main_key_pin(uid_t uid, int kind, char *pin, char *fresh);
 static int main_key_reset(const char *name, uid_t uid);
 static int main_all_keys(struct main_all_keys *all);
+static int main_key_owner(const char *name);
+static int main_owners_gather(const char *name, const struct main_all_keys *all, struct main_owners *owners);
+static int main_owner_group(struct main_owners *owners, const char *name, const char *line);
 static int main_replug(void);
 static int main_job_failed(int error, const struct fido2_message *message, int kind);
 static uint64_t main_now_ms(void);
@@ -148,6 +167,13 @@ main(void)
 	if (error != 0) {
 		passkey_wipe(buffer, sizeof(buffer));
 		return main_fail("bad-request");
+	}
+
+	/* Whose the key there is: no secret and, for the login screen (-), no account (ws199-p001). */
+	if (request.operation == PASSKEY_OP_KEY_OWNER) {
+		status = main_key_owner(request.fields[1]);
+		passkey_wipe(buffer, sizeof(buffer));
+		return status;
 	}
 
 	/* A security key's: the login with one, a registration, a removal, or a key's own operation. */
@@ -1027,6 +1053,236 @@ main_all_keys(
 
 	/* Succeeded. */
 	return 0;
+}
+
+/*
+ * Tells whose the key there is (ws199-p001 section 4.2): the accounts
+ * looked for are the one named, or with "-" every person's account that
+ * may log in; the key is asked silently which of them it holds, and the
+ * answer of the one it holds is checked against that account's own public
+ * keys (an answer that does not verify names nobody).  "ok uid=N user=NAME
+ * key-pin=0|1 key-touch=0|1 card=0|1", or "fail none" (no account's),
+ * "fail many-owners" (two accounts' or more), "fail no-key",
+ * "fail many-keys", or another failure.  Nothing is written and nothing is
+ * counted.
+ */
+static int
+main_key_owner(
+	const char *name)
+{
+	static struct fido2_job job;
+	static struct fido2_message message;
+	struct passkey_options options;
+	struct pk_credential allowed[FIDO2_IDS_MAX];
+	struct pk_expectation expectation;
+	struct pk_assertion assertion;
+	struct main_owners *owners;
+	struct fido2_record *record;
+	char extra[160];
+	uint32_t count;
+	size_t matched;
+	size_t allowed_count;
+	size_t length;
+	size_t index;
+	unsigned group;
+	int same;
+	int error;
+
+	/* Every account's key lines, and those of the accounts looked for, grouped by account. */
+	error = main_all_keys(&main_all);
+	if (error != 0)
+		return main_fail("internal");
+	owners = &main_owners;
+	error = main_owners_gather(name, &main_all, owners);
+	if (error != 0)
+		return main_fail("internal");
+
+	/* The job: a hash nobody signs anything else with, the credentials and their groups. */
+	memset(&job, 0, sizeof(job));
+	job.kind = FIDO2_JOB_OWNER;
+	error = pk_crypto_random(job.client_data_hash, sizeof(job.client_data_hash));
+	if (error != 0)
+		return main_fail("internal");
+	for (index = 0U; index < owners->count; index++) {
+		record = &main_all.records[owners->records[index]];
+		job.ids[index] = record->id;
+		job.id_sizes[index] = record->id_size;
+	}
+
+	/* Their groups (the job was cleared), and as many as there are. */
+	for (index = 0U; index < owners->count; index++) {
+		for (group = 0U; group < owners->group_count; group++) {
+			same = strcmp(main_all.names[owners->records[index]], owners->names[group]);
+			if (same == 0)
+				job.groups[index] = group;
+		}
+	}
+	job.id_count = owners->count;
+
+	/* The helper's answer. */
+	error = main_run(&job, &message);
+	if (error != 0 || message.kind != FIDO2_MESSAGE_OWNER)
+		return main_job_failed(error, &message, FIDO2_MESSAGE_OWNER);
+
+	/* No account's key, or more than one account's. */
+	if (message.held == 0U)
+		return main_fail("none");
+	if ((message.held & (message.held - 1U)) != 0U)
+		return main_fail("many-owners");
+
+	/* The one group held. */
+	group = 0U;
+	while ((message.held & (1U << group)) == 0U)
+		group++;
+	if (group >= owners->group_count)
+		return main_fail("none");
+
+	/*
+	 * What is expected: the login's relying party, this hash, nothing of
+	 * the user (a silent answer), that account's credentials; the stored
+	 * counts are not compared (nothing is kept, and the login itself checks
+	 * them).
+	 */
+	allowed_count = 0U;
+	for (index = 0U; index < owners->count; index++) {
+		if (job.groups[index] != group)
+			continue;
+		record = &main_all.records[owners->records[index]];
+		allowed[allowed_count].id = record->id;
+		allowed[allowed_count].id_size = record->id_size;
+		allowed[allowed_count].cose_key = record->cose_key;
+		allowed[allowed_count].cose_key_size = record->cose_key_size;
+		allowed[allowed_count].sign_count = 0U;
+		allowed_count++;
+	}
+
+	/* The relying party, the hash, no flags, the account's keys. */
+	memset(&expectation, 0, sizeof(expectation));
+	expectation.rp_id = FIDO2_RP;
+	memcpy(expectation.client_data_hash, job.client_data_hash, sizeof(expectation.client_data_hash));
+	expectation.required_flags = 0U;
+	expectation.credentials = allowed;
+	expectation.credential_count = allowed_count;
+
+	/* The answer, checked here: one that does not verify names nobody. */
+	assertion.credential_id = message.id;
+	assertion.credential_id_size = message.id_size;
+	assertion.auth_data = message.auth_data;
+	assertion.auth_data_size = message.auth_data_size;
+	assertion.signature = message.signature;
+	assertion.signature_size = message.signature_size;
+	error = pk_verify_assertion(&expectation, &assertion, &matched, &count);
+	if (error != 0)
+		return main_fail("none");
+
+	/* The owner's options, read as the login reads them. */
+	passkey_options_default(&options);
+	error = main_file(&length, 1);
+	if (error == 0)
+		(void)passkey_options_read(main_text, length, owners->names[group], owners->uids[group], &options);
+
+	/* Succeeded: the owner. */
+	(void)snprintf(extra, sizeof(extra), "user=%s key-pin=%d key-touch=%d card=%u", owners->names[group], options.key_pin,
+	    options.key_touch, message.owner_card);
+	return main_ok(owners->uids[group], extra);
+}
+
+/*
+ * Picks the key lines an owner's question looks for: those of the account
+ * named (or of every account, "-") whose account is in passwd with the
+ * line's user ID and may use a key; grouped by account in their order.
+ * Returns 0 or an errno value.
+ */
+static int
+main_owners_gather(
+	const char *name,
+	const struct main_all_keys *all,
+	struct main_owners *owners)
+{
+	size_t index;
+	int every;
+	int same;
+	int group;
+
+	/* Every account, or the one named. */
+	memset(owners, 0, sizeof(*owners));
+	every = 0;
+	same = strcmp(name, "-");
+	if (same == 0)
+		every = 1;
+
+	/* Each line of an account looked for, whose account may use it. */
+	for (index = 0U; index < all->count && owners->count < FIDO2_IDS_MAX; index++) {
+		if (!every) {
+			same = strcmp(all->names[index], name);
+			if (same != 0)
+				continue;
+		}
+
+		/* Its account's group; a line of an account that may not use a key is left out. */
+		group = main_owner_group(owners, all->names[index], all->lines[index]);
+		if (group < 0)
+			continue;
+		owners->records[owners->count] = index;
+		owners->count++;
+	}
+
+	/* Succeeded: the lines and their groups. */
+	return 0;
+}
+
+/*
+ * Finds or adds the group of a line's account: in passwd with the line's
+ * user ID, a person's, its password neither locked nor expired.  Returns
+ * the group, or -1 for an account that may not use a key.
+ */
+static int
+main_owner_group(
+	struct main_owners *owners,
+	const char *name,
+	const char *line)
+{
+	struct passwd account;
+	char strings[LOGIN_VERIFY_BUFFER];
+	char field[32];
+	unsigned long uid;
+	size_t group;
+	char *end;
+	int found;
+	int usable;
+	int same;
+	int error;
+
+	/* A group already made for the account. */
+	for (group = 0U; group < owners->group_count; group++) {
+		same = strcmp(owners->names[group], name);
+		if (same == 0)
+			return (int)group;
+	}
+
+	/* The line's user ID. */
+	error = passkey_record_field(line, 1U, field, sizeof(field));
+	if (error != 0)
+		return -1;
+	uid = strtoul(field, &end, 10);
+	if (end == field || *end != '\0')
+		return -1;
+
+	/* The account in passwd, with that user ID, that may use a key. */
+	found = main_account(name, &account, strings, sizeof(strings));
+	if (!found || (unsigned long)account.pw_uid != uid)
+		return -1;
+	usable = main_usable(name, account.pw_uid);
+	if (!usable || owners->group_count >= FIDO2_IDS_MAX || strlen(name) >= sizeof(owners->names[0]))
+		return -1;
+
+	/* A new group. */
+	(void)snprintf(owners->names[owners->group_count], sizeof(owners->names[0]), "%s", name);
+	owners->uids[owners->group_count] = account.pw_uid;
+	owners->group_count++;
+
+	/* Succeeded: the new group. */
+	return (int)(owners->group_count - 1U);
 }
 
 /*
