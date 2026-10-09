@@ -16,8 +16,11 @@ Video decode is offered only when all of these hold:
   Without it the device looks exactly as before: no video queue family, no
   video extension, no `VK_KHR_synchronization2`.
 
-The boot word is a safety gate while the video engine's recovery from a hang is
-being verified on hardware. When it is removed, this page will say so.
+The boot word is off by default, also in the release image. To turn it on, put
+the line `i915.debug=video` in `zedbsd.cfg` on the boot drive's EFI partition
+(FAT); if the file already has an `i915.debug=` line, add `video` to its words
+(`i915.debug=display,video`) instead of adding a second line. The gate stays
+while the video engine's recovery from a hang is being verified on hardware.
 
 A program checks for video decode as on any Vulkan implementation: a queue
 family whose `queueFlags` has `VK_QUEUE_VIDEO_DECODE_BIT_KHR`, and the device

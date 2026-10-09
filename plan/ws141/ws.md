@@ -3,12 +3,12 @@
 # WS141: Raspberry Pi 4 のグラフィックス driver（VideoCore VI: HVS・pixelvalve・HDMI の display と V3D 4.2）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build PASS。whole stack/p007/Keiland実機確認は未完了）
+Status: incomplete（display/V1〜V10/二device share/Normal NC/worker/SPIR-V compiler/typed Vulkan/native draw-transfer/QueueSubmitとpublic runtimeを実装。host/build/whole ordinary stack/p007 software監査 PASS。main統合済み。Keiland実機確認待ち）
 Primary Milestone: MG006
 Related Milestones: MG008
 Parent: [Master](../master.md)
 Queue: 既存履歴 q691（p001）・q695（p002）。現在の独立セッションの実行範囲は [execution-20261009.md](execution-20261009.md)
-Resume point: public CAPSET/COMMAND/NOTIFICATION/JOB/JOB_CAPACITYをactual render sessionとsingle workerへ接続。host26範囲＋actual node open/close/hardware owner host2 summary、RPi4 y warning/error0/checks3 PASS。次はactual client/displayの残るsoftware gate、whole public LTO callgraph16KiBとp007全文規約/license/類似/BLOB。Keiland/実機/console RAM寿命未確認、Master/shared投影はQ1。[最新software結果](execution-20261009.md#i14-public-native-vulkan-runtimeの接続2026-10-10)。
+Resume point: i11〜i15の承認済みsoftware実装/全source監査/build/host/main統合を終了。final merge5eb8867f3、RPi4 y/n warning-error0/checks3、全14host、caller/IRQ込み16KiB ordinary stack PASS。次はユーザーのRPi4/Keiland/console RAM寿命確認とQ1/T1回帰。[最終audit](p007-software-audit.md)・[統合/終了/未確認条件](execution-20261009.md#i15-main統合software実行の終了2026-10-10)。共有投影/GitHubはQ1。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -45,7 +45,7 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 
 1. **作業の文書は repository に入れない**: vc4・v3d の GPL の source から作る文書（初期化の順・command の順の書き写し）は `plan/ws141/temp/`（`.gitignore` の `plan/ws*/temp/`）に置き、**commit しない**。手順の書き写しが基本、表現が難しい所は code の書き写しも可。
 2. **定数の一括の改名**: zedBSD の code を書く前に、作業の文書の定数（register・bit・field の名前）を**全て一括で独自の名前に変える**（対応表も temp に置き、commit しない）。zedBSD の code は改名の後の文書から書く。
-3. **最後の監査**: WS の最後に、license の問題が無いか、GPL の code と**字面でも設計でも類似が無いか**を監査する（類似の検出の道具と目視、[p007](../ws.md)）。結果を commit できる形（類似の検出の結果の要約、GPL の file の一覧と hash）で残す。
+3. **最後の監査**: WS の最後に、license の問題が無いか、GPL の code と**字面でも設計でも類似が無いか**を監査する（類似の検出の道具と目視、[p007](phase007/phase.md)）。結果を commit できる形（類似の検出の結果の要約、GPL の file の一覧と hash）で残す。
 4. **BLOB**: source の中に firmware に相当しそうな BLOB（byte の配列など）があれば、`userland/firmware/` に移し、file から load する（RTL8822B・i915 の firmware と同じ形）。license は個別に確かめる。
 5. **register の定義と packet の形の出典**（2026-10-04 ユーザー「これはそうしたいですね。」）: zedBSD の code の register の定義・command の packet の形は、**MIT の Mesa（`src/broadcom/`、例 `cle/v3d_packet.xml`）、Broadcom の公開の文書、device tree の binding** から取り、**file ごとに license を監査**する（path・SHA-256・license の表、[i915-license-audit](../ws029/i915-license-audit.md) の形）。GPL の vc4・v3d は手順の理解と作業の文書のためだけに使う。
 6. zedBSD の code は独自の license（Zlib）。repository には GPL の code・作業の文書を入れない。
@@ -72,8 +72,8 @@ Raspberry Pi 4（BCM2711、VideoCore VI）で、zedBSD の自前の GPU driver �
 | [p003](phase003/phase.md) | display: boot出力先/modeの特定→Linux順R0再初期化/初回scanout→vblank/flip/合成/resident統合。旧コピー引き継ぎ/P4後回しは置換 | in-progress（i11 allocator/登録/copy present/2-plane合成/起動診断を実装、host/build PASS。実機待ち） | p002の骨格・WS048 mailbox限定修正。実機のwhole acceptanceは残る | 6h〜 |
 | [p004](phase004/phase.md) | V3D: power・MMU・buffer object、bin/render・TFUのjob、reset、fence（CSDはp006後） | in-progress（V1〜V10/native runnerを実装、固定XML照合・host/build PASS。実機電源/register/job観測は未実施） | p002（骨格出力でsoftware準備、hardwareは実機V0確認後） | 6h〜 |
 | [p005](phase005/phase.md) | `drv_gpu_interface` への統合と desktop の表示（Keiland の compositor） | in-progress | p003・p004のsoftware出力、desktopはp006 | 4h〜 |
-| [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | in-progress（compiler/private Vulkan object/pipeline/recording/draw stateはhost/build PASS、native prepared job/public binding/実機は未達） | p004・p005 | 未見積 |
-| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | planned | 全て | 3〜4h |
+| [p006](phase006/phase.md) | kernel Vulkan実行器・SPIR-V compilerとKeiland描画経路（2026-10-09 scope拡張） | in-progress（compiler/native prepared job/public runtime/Keiland software経路とhost/build/stack監査PASS、実機待ち） | p004・p005 | 未見積 |
+| [p007](phase007/phase.md) | 規約の全文の確認と最終の確認。**license と GPL の code との類似の監査**（字面・設計、道具と目視）、BLOB の移動の確認 | cleared（i15全source software監査/build/host/main統合。実機関門は他Phaseに保持） | 全て | 3〜4h |
 
 ## 要検討・ブロック（2026-10-05）
 
@@ -257,3 +257,7 @@ native fence/binary semaphoreのtyped device ownership、初期状態/status/ato
 ## public runtime stack修正と次のsoftware確認（2026-10-10）
 
 p006で4件pipelineのtemporary recordをcommand arenaへ移し、LTO frame4560→256byte。shared parserを変更せずprivate graphics stage/constant-depth admissionを追加。実Keiland compiler/深度境界/OOMとactual4件batch/arena reuse、host26/最終RPi4 y/styleはPASS。whole IRQ/caller stack、actual2node runtime、p007全WS監査と実機/Keiland/console RAM寿命は残る。in-progress/incompleteを維持、Master担当変更なし。[証拠/訂正/復帰点](execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。
+
+## software実行の終了（2026-10-10）
+
+i13/i14のsoftware/統合部分とi15/p007をcleared。全実装/検証/監査記録をmainへ統合済み。WS acceptanceの実機/Keiland画面/console RAM寿命は後日確認待ちで、Statusはincompleteを保持する。新Queue・remote公開・Master独自更新は行わない。対象、全commands/hash、user/Q1担当の残る条件は[最終受け渡し](execution-20261009.md#i15-main統合software実行の終了2026-10-10)。

@@ -2,7 +2,7 @@
 
 # ws083-p003a: i915 の VCS の土台（engine record VCS0・worker の video の context・hang の封じ込め）
 
-Status: in-progress（q833、P1。2026-10-07 実装と host 試験、実機は p005）
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の 6 行目 PASS、vmunix の build warning 0）は 2026-10-07 に満たし、VCS0 の context の実機の bring-up も 5330 で確かめた。判定は Q1）（旧: in-progress（q833、P1。2026-10-07 実装と host 試験、実機は p005））
 Disposition: normal
 Parent: [WS083](../ws.md)
 
@@ -24,3 +24,10 @@ Parent: [WS083](../ws.md)
 | `make -j16 BUILD=build/p1-k ZEDBSD_CONFIG=config/ci/config-amd64.mk build/p1-k/vmunix` | 成功、warning 0 |
 
 未実施: 実機（VCS0 の context の LRC・空の batch の bring-up は p005）、session の quarantine の呼び出しと video の batch の保持（p003b、実行器の video submit の中）。
+
+## 2026-10-10 の照合（P2、実機の結果で）
+
+- 受け入れ（design §9 の p003a）: §8.1 の 6 行目（VCS の立ち上げの host、`run-host-vcs-worker.sh`）PASS、vmunix の build warning 0 → 2026-10-07 に満たした（上の表）。
+- 実機: 5330 の実機（2026-10-10 Q1、image 588c5cd、boot に `i915.debug=video`、SSH。ws.md の p005・p006b の行）で dmesg に `engine[2] vcs0: … reset_domain=0x20` と `Vulkan video decode is offered on a GT with VCS0`、VCS0 の context の遅延の attach・LRC・execlists への submit が 6 本の stream の decode（I 3 本・P/B 3 本、全 frame 一致）で通り、hang・reset の行は無い。未実施に書いていた「VCS0 の context の LRC・空の batch の bring-up」は p005 の受け入れとして実機で満たした（design §8.3 の 1 行目の kernel の scenario の代わりに decode の batch で確かめた、Q1 の p005 の判定）。hang の封じ込めの実機は p007（人工の hang の F1・F2）。
+- 588c5cd と照合の時の main（1b08d90b9）の間に `src/drivers/gpu/i915`・`userland/desktop/libvulkan`・`userland/tests/vkvideo-probe`・`src/kern/boot.c`・`include/uapi/gpu-op.h` の差は無い（`git diff --stat` が空）ので、実機の結果は今の code に当たる。host 試験（`plan/ws083/tests/run-host-*.sh` の 8 本: boot-video・libvulkan-native・libvulkan-status・libvulkan-video・mfx-avc・vcs-worker・video-roundtrip・vkvideo-probe）は 1b08d90b9 で全部 PASS（2026-10-10 P2）。
+- 残り: 無し（この Phase の受け入れの条件は全部満たす。hang の実機は p007 の受け入れ）。

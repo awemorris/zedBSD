@@ -69,3 +69,7 @@ p006の本WS内実装が承認済み、i12をin-progressへ。固定firmware tre
 V1〜V10をbootへ接続し、cache/MMU/IRQ/retained storageとtrusted bin/render/TFU/CSD runnerを実装。clearの全packetを固定XMLと照合し、hostはactual sourceでtimeout/両bank IRQ/同時fault/overflow/forced-reset/出力sentinelを確認、rpi4 y/n warning/error0。物理GPUの受け入れとは扱わずwhole Phaseはin-progress。[exact evidence](../execution-20261009.md#i12-native-v3dv1v10のsoftware結果2026-10-09)。
 
 p005へ渡す契約はsingle worker、callerによる全buffer/VA保持、失敗launched jobのretired=false、公開clientがある場合のresetはcommon recoveryによる全owner処理後だけ。p006はこのtrusted job型でCL/TFU/CSDをlowerし、compiler output/indirect span/inputsを保持する。新public HAL/GPU API無し。foreign Phaseへ同契約を記録、ソフトウェアの統合後にi13を開始する。
+
+## 最終software監査（2026-10-10）
+
+native電源/MMU/IRQ/job/resetの最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。

@@ -209,3 +209,11 @@ actual render openでcomplete Vulkan ownerを作り、production combined20route
 ## public runtime stack修正のcheckpoint（2026-10-10）
 
 全命令LTO inspectionでpipeline frame4560byteを発見し、4件metadataを既存command arenaへ移して256byteに削減。深いconstant graphとparserによるcompute stage上書きをprivate compilerのiterative preflightで止め、read-only共有parserを維持。actual graphics4件partial batch/arena再利用、実Keiland scalar/decoderと2048段拒否・exact9level受け入れ・OOM/診断のhost、RPi4 y warning/error0/checks3/style0を確認。partial context estimateはworker9344byteで、IRQ/outer caller/unknown indirectを含むwhole16KiB証明は後続。whole Phase/p007/実機関門は未clear。[命令の取りこぼしの訂正/範囲/検証/残件](../execution-20261009.md#i14-public-runtimeのstack修正とgraphics-admission2026-10-10)。
+
+## 最終software監査（2026-10-10）
+
+SPIR-V/compiler/typed Vulkan/QueueSubmit/public caller stackの最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。
+
+## software統合の終了（2026-10-10）
+
+i14 compiler/Vulkan/Keiland software経路のsoftware/統合部分をcleared。final runtime/stack/全source監査とmain merge5eb8867f3を確認。whole Phaseの実機/Keiland条件は未達、Statusはin-progressを維持。[全結果と復帰条件](../execution-20261009.md#i15-main統合software実行の終了2026-10-10)。

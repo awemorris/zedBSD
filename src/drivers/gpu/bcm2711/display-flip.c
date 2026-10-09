@@ -56,6 +56,9 @@ bcm2711_display_flip_init(
 	display->flip.active_list = FLIP_CONSOLE_LIST;
 	display->flip.pending_list = FLIP_NO_LIST;
 	display->flip.initialized = true;
+
+	/* Succeeded: the private flip state starts with no pending publication. */
+	return;
 }
 
 /*
@@ -332,6 +335,9 @@ bcm2711_display_flip_snapshot(
 	}
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Succeeded: the caller owns one coherent flip-state observation. */
+	return;
 }
 
 /*
@@ -373,6 +379,9 @@ bcm2711_display_flip_vblank_locked(
 	control = kern_mmio_read32(display->compositor.mapped);
 	kern_mmio_write32(display->compositor.mapped, control | 0x200U);
 	display->flip.completed = true;
+
+	/* Succeeded: the adopted list has one completed sequence visible to waiters. */
+	return;
 }
 
 /* Publishes one completely prepared primary or composed list with identical DMA holds. */
@@ -605,6 +614,9 @@ finish_adoption(
 	display->flip.busy = false;
 
 	spin_unlock_irqrestore(&display->flip.guard, enabled);
+
+	/* Succeeded: the adopted output state and clock outcome are visible under the flip guard. */
+	return;
 }
 
 /* Checks sole ownership and unchanged timing before any list publication. */
@@ -664,12 +676,16 @@ check_pipeline(
 	if (recovering) {
 		/* Known private pointers are the only uncertainty this component owns. */
 		if (current != FLIP_CONSOLE_LIST &&
-		    current != 64U && current != 80U &&
-		    current != 128U && current != 160U)
+		    current != 64U &&
+		    current != 80U &&
+		    current != 128U &&
+		    current != 160U)
 			return EBUSY;
 		if (next != FLIP_CONSOLE_LIST &&
-		    next != 64U && next != 80U &&
-		    next != 128U && next != 160U)
+		    next != 64U &&
+		    next != 80U &&
+		    next != 128U &&
+		    next != 160U)
 			return EBUSY;
 	} else {
 		/* Ordinary publication requires the last completed list on both pointers. */
@@ -768,6 +784,9 @@ publish_list(
 	kern_io_write_barrier();
 	kern_mmio_write32(display->compositor.mapped + 0x20, list);
 	kern_io_write_barrier();
+
+	/* Succeeded: the complete SRAM list precedes device publication. */
+	return;
 }
 
 /* Waits for IRQ-confirmed adoption, retaining all holds across uncertain timeout. */

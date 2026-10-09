@@ -201,6 +201,9 @@ discover_timing(
 			   (unsigned long long)window->size,
 			   line->irq,
 			   error == 0 ? " (masked)" : " (no handler)");
+
+	/* Succeeded: the timing role and its IRQ outcome have been reported. */
+	return;
 }
 
 /* Finds and shows one HDMI encoder; P0 records its first window only. */
@@ -238,6 +241,9 @@ discover_hdmi(
 			   port,
 			   (unsigned long long)display->hdmi_physical[port],
 			   (unsigned)display->hdmi_window_count[port]);
+
+	/* Succeeded: the selected HDMI register windows have been reported. */
+	return;
 }
 
 /* Shows whether a node of the display path exists and whether it is enabled. */
@@ -261,4 +267,7 @@ report_node(
 	/* Shows the node's status as the firmware left it. */
 	enabled = drv_fdt_node_enabled(fdt, node);
 	bcm2711_stage_mark(BCM2711_FAMILY_DISPLAY, "P0 %s: %s", label, enabled ? "okay" : "disabled");
+
+	/* Succeeded: the node discovery result has been reported. */
+	return;
 }

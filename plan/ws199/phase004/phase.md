@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p004 -->
 # ws199-p004: 試験の残りと T1 の依頼（設計の i06）
 
-Status: cleared 候補・test-wait（T1-（Q1）、Q1 が番号を振る。WS200 p001 の分も同じ行に足す）（2026-10-10 P1）
+Status: cleared（2026-10-10 Q1 判定: T1-523・525・528 で security-keys・key-keypad・swipe/wheel-card・fido2-p003・passkey-p002 が PASS（swipe-card は needs-person）。実機は p005）
 Parent: [WS199](../ws.md) ・設計: [phase001](../phase001/phase.md) §7
 
 ## ゴール

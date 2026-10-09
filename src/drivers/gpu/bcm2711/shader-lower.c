@@ -173,7 +173,9 @@ lower_instruction(
 
 	/* Source constants remain exact bits until a consuming operation chooses a small constant or full uniform. */
 	scalar = &compiler->values[instruction->dst];
-	if (instruction->op == I915_IR_CONST || instruction->op == I915_IR_BOOL || instruction->op == I915_IR_ICONST) {
+	if (instruction->op == I915_IR_CONST ||
+	    instruction->op == I915_IR_BOOL ||
+	    instruction->op == I915_IR_ICONST) {
 		scalar->constant = 1;
 		scalar->number = instruction->immediate;
 		return 0;
@@ -402,7 +404,9 @@ lower_arithmetic(
 			return error;
 
 		/* Equal max operands cannot select its distinct mux ordering and are exactly a bit-preserving move. */
-		if (native == BCM2711_QPU_FLOAT_MAXIMUM && left.kind == right.kind && left.number == right.number)
+		if (native == BCM2711_QPU_FLOAT_MAXIMUM &&
+		    left.kind == right.kind &&
+		    left.number == right.number)
 			native = BCM2711_QPU_MOVE;
 		error = bcm2711_shader_operation(compiler, native, destination, 0, left, right, 0, 0);
 		if (error != 0)
@@ -458,8 +462,10 @@ lower_arithmetic(
 	}
 
 	/* Native comparison flags preserve ordered NaN semantics rather than approximating a comparison by subtraction. */
-	if (instruction->op == I915_IR_FLT || instruction->op == I915_IR_FGE ||
-	    instruction->op == I915_IR_FEQ || instruction->op == I915_IR_FNEU) {
+	if (instruction->op == I915_IR_FLT ||
+	    instruction->op == I915_IR_FGE ||
+	    instruction->op == I915_IR_FEQ ||
+	    instruction->op == I915_IR_FNEU) {
 		error = operands(compiler, instruction->src[0], instruction->src[1], &left, &right);
 		if (error != 0)
 			return error;
@@ -681,7 +687,9 @@ operands(
 		return error;
 
 	/* Two different native constants cannot share read port B and therefore require one explicit register move. */
-	if (first->kind == BCM2711_QPU_CONSTANT && second->kind == BCM2711_QPU_CONSTANT && first->number != second->number) {
+	if (first->kind == BCM2711_QPU_CONSTANT &&
+	    second->kind == BCM2711_QPU_CONSTANT &&
+	    first->number != second->number) {
 		error = force_register(compiler, first, BCM2711_SHADER_SCRATCH_LEFT);
 		if (error != 0)
 			return error;
@@ -727,9 +735,14 @@ retire_values(
 	/* Input aliases remain pinned; final stage outputs have a last reader after the source instruction stream. */
 	for (index = 0; index < compiler->ir->value_count; index++) {
 		scalar = &compiler->values[index];
-		if (scalar->register_live != 0 && scalar->pinned == 0 && scalar->last_read == compiler->instruction) {
+		if (scalar->register_live != 0 &&
+		    scalar->pinned == 0 &&
+		    scalar->last_read == compiler->instruction) {
 			compiler->registers[scalar->number] = 0;
 			scalar->register_live = 0;
 		}
 	}
+
+	/* Succeeded: the consumed scalar values no longer occupy compiler registers. */
+	return;
 }

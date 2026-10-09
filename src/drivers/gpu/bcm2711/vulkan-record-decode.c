@@ -359,8 +359,10 @@ decode_clear(
 		}
 
 		/* Standard remaining-count sentinels select the same sole implemented subresource. */
-		if ((levels != 1 && levels != VK_REMAINING_MIP_LEVELS) ||
-		    (layers != 1 && layers != VK_REMAINING_ARRAY_LAYERS)) {
+		if ((levels != 1 &&
+		     levels != VK_REMAINING_MIP_LEVELS) ||
+		    (layers != 1 &&
+		     layers != VK_REMAINING_ARRAY_LAYERS)) {
 			if (record->semantic_error == 0)
 				record->semantic_error = EINVAL;
 		}

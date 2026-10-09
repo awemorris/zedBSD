@@ -2,7 +2,7 @@
 
 # ws083-p006a: P・B と DPB、scaling list、複数 slice の host の試験
 
-Status: in-progress（P2、2026-10-08 Q1 の指示「待つ間に ws083-p006a を進めてよい」。host の範囲は実装と試験済み）
+Status: cleared（2026-10-10 Q1 判定: 5330 の実機の p005・p006b と照合）（旧: cleared 候補（2026-10-10 P2 の照合: design §9 の受け入れ（§8.1 の P・B PASS）を満たし、P・B の実機の hash（p006b）も 5330 で一致。判定は Q1）（旧: in-progress（P2、2026-10-08 Q1 の指示「待つ間に ws083-p006a を進めてよい」。host の範囲は実装と試験済み））
 Disposition: normal
 Parent: [WS083](../ws.md)
 
@@ -31,3 +31,10 @@ Parent: [WS083](../ws.md)
 ## 残り
 
 - p006b: 5330 で P・B の stream の hash（`vkvideo-probe --expect`、tests/streams の 3 本と sample-h264 の 3 本、sample の参照は host の ffmpeg で作る）。
+
+## 2026-10-10 の照合（P2、実機の結果で）
+
+- 受け入れ（design §9 の p006a）: §8.1（P・B）PASS → `run-host-vkvideo-probe.sh` の 6 本の DPB の計画・marking・表示順と、p004 の host の golden（references・intra-cqm・flat・defaults）で満たした（上の表）。
+- 実機（p006b の受け入れ、この Phase の受け入れの外だが参照の正しさの確かめ）: 5330 の実機（2026-10-10 Q1、image 588c5cd、boot に `i915.debug=video`、SSH。ws.md の p005・p006b の行）で p-baseline-64 10/10・pb-main-352 15/15・pb-high-352-pyramid 15/15 match、hang・reset の行なし。上の「未実施: 参照の正しさは実機の hash でしか確かめられない」は満たした。
+- 588c5cd と照合の時の main（1b08d90b9）の間に `src/drivers/gpu/i915`・`userland/desktop/libvulkan`・`userland/tests/vkvideo-probe`・`src/kern/boot.c`・`include/uapi/gpu-op.h` の差は無い（`git diff --stat` が空）ので、実機の結果は今の code に当たる。host 試験（`plan/ws083/tests/run-host-*.sh` の 8 本: boot-video・libvulkan-native・libvulkan-status・libvulkan-video・mfx-avc・vcs-worker・video-roundtrip・vkvideo-probe）は 1b08d90b9 で全部 PASS（2026-10-10 P2）。
+- 残り: 無し。tree の外の 1920x1080 の sample の全 frame の hash は受け入れの外（性能の E で decode を通す）。

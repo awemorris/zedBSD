@@ -12,8 +12,17 @@
 
 #include "drivers/gpu/bcm2711/vulkan-descriptor.h"
 
-/* One immutable command keeps batch allocation/free bookkeeping finite on the kernel stack. */
+/* One immutable command keeps descriptor allocation and free batches finite. */
 #define VULKAN_SET_BATCH 64U
+
+/* One arena-owned allocation attempt records every partial owner until atomic batch publication or complete rollback. */
+struct vulkan_set_batch {
+	struct bcm2711_vulkan_descriptor_set *prepared[VULKAN_SET_BATCH];
+	struct bcm2711_vulkan_object *published[VULKAN_SET_BATCH];
+	struct bcm2711_vulkan_object *layouts[VULKAN_SET_BATCH];
+	uint64_t layout_ids[VULKAN_SET_BATCH];
+	uint64_t identities[VULKAN_SET_BATCH];
+};
 
 static int allocate_sets(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
 static int free_sets(struct bcm2711_vulkan_session *session, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
@@ -91,16 +100,12 @@ allocate_sets(
 	struct i915_wire_reader *reader,
 	struct i915_wire_writer *reply)
 {
-	struct bcm2711_vulkan_descriptor_set *prepared[VULKAN_SET_BATCH];
-	struct bcm2711_vulkan_object *published[VULKAN_SET_BATCH];
-	struct bcm2711_vulkan_object *layouts[VULKAN_SET_BATCH];
+	struct vulkan_set_batch *batch;
 	struct bcm2711_vulkan_object *device;
 	struct bcm2711_vulkan_object *pool_object;
 	struct bcm2711_vulkan_object *existing;
 	struct bcm2711_vulkan_descriptor_pool *pool;
 	struct bcm2711_vulkan_set_layout *layout;
-	uint64_t layout_ids[VULKAN_SET_BATCH];
-	uint64_t identities[VULKAN_SET_BATCH];
 	uint64_t device_id;
 	uint64_t pool_id;
 	uint64_t present;
@@ -124,16 +129,28 @@ allocate_sets(
 	pool_id = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || present != 1 || type != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO ||
-	    chain != 0 || count == 0 || count > VULKAN_SET_BATCH || array != count)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    type != VK_STRUCTURE_TYPE_DESCRIPTOR_SET_ALLOCATE_INFO ||
+	    chain != 0 ||
+	    count == 0 ||
+	    count > VULKAN_SET_BATCH ||
+	    array != count)
 		return ENOTSUP;
+
+	/* Existing command metadata owns the complete temporary rollback table; no published payload borrows it. */
+	batch = i915_vkc_array(reader, &session->arena, 1, sizeof(*batch));
+	if (batch == NULL)
+		return EINVAL;
+
+	/* Consume the complete layout and fresh output vectors before any pool capacity or parent ownership changes. */
 	for (index = 0; index < count; index++)
-		layout_ids[index] = drv_i915_wire_read_u64(reader);
+		batch->layout_ids[index] = drv_i915_wire_read_u64(reader);
 	array = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || array != count)
 		return EINVAL;
 	for (index = 0; index < count; index++)
-		identities[index] = drv_i915_wire_read_u64(reader);
+		batch->identities[index] = drv_i915_wire_read_u64(reader);
 
 	/* Device and pool identities are exact same-open typed owners. */
 	if (reader->error != 0)
@@ -150,40 +167,41 @@ allocate_sets(
 	textures = 0;
 	uniforms = 0;
 	for (index = 0; index < count; index++) {
-		layouts[index] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, layout_ids[index]);
-		if (layouts[index] == NULL || identities[index] == 0)
+		batch->layouts[index] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET_LAYOUT, batch->layout_ids[index]);
+		if (batch->layouts[index] == NULL || batch->identities[index] == 0)
 			return EINVAL;
-		layout = layouts[index]->payload;
+		layout = batch->layouts[index]->payload;
 		if (layout->owner.device != device)
 			return EINVAL;
 		textures += layout->textures;
 		uniforms += layout->uniforms;
-		existing = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, identities[index]);
+		existing = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, batch->identities[index]);
 		if (existing != NULL)
 			return EEXIST;
 		for (previous = 0; previous < index; previous++) {
-			if (identities[previous] == identities[index])
+			if (batch->identities[previous] == batch->identities[index])
 				return EEXIST;
 		}
 	}
 
 	/* Old retained sets keep charges even after pool reset has removed their public identities. */
-	if (pool->sets > pool->maximum_sets || pool->textures > pool->maximum_textures ||
-	    pool->uniforms > pool->maximum_uniforms || count > pool->maximum_sets - pool->sets ||
-	    textures > pool->maximum_textures - pool->textures || uniforms > pool->maximum_uniforms - pool->uniforms) {
+	if (pool->sets > pool->maximum_sets ||
+	    pool->textures > pool->maximum_textures ||
+	    pool->uniforms > pool->maximum_uniforms ||
+	    count > pool->maximum_sets - pool->sets ||
+	    textures > pool->maximum_textures - pool->textures ||
+	    uniforms > pool->maximum_uniforms - pool->uniforms) {
 		allocation_reply(reply, VK_ERROR_OUT_OF_POOL_MEMORY, 0, NULL);
 		return 0;
 	}
 
 	/* Each construction and registry allocation can fail ordinarily; keep exact acquired owners for rollback. */
-	kern_memset(prepared, 0, sizeof(prepared));
-	kern_memset(published, 0, sizeof(published));
 	error = 0;
 	for (index = 0; index < count; index++) {
-		error = prepare_set(session, device, pool_object, layouts[index], &prepared[index]);
+		error = prepare_set(session, device, pool_object, batch->layouts[index], &batch->prepared[index]);
 		if (error != 0)
 			break;
-		error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_DESCRIPTOR_SET, identities[index], prepared[index], release_set, &published[index]);
+		error = bcm2711_vulkan_object_publish(session, I915_VK_OBJ_DESCRIPTOR_SET, batch->identities[index], batch->prepared[index], release_set, &batch->published[index]);
 		if (error != 0)
 			break;
 	}
@@ -193,10 +211,10 @@ allocate_sets(
 		retirement_error = 0;
 		for (index = 0; index < count; index++) {
 			retired = 0;
-			if (published[index] != NULL)
-				retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, identities[index]);
-			else if (prepared[index] != NULL)
-				retired = release_set(session, prepared[index]);
+			if (batch->published[index] != NULL)
+				retired = bcm2711_vulkan_object_remove(session, I915_VK_OBJ_DESCRIPTOR_SET, batch->identities[index]);
+			else if (batch->prepared[index] != NULL)
+				retired = release_set(session, batch->prepared[index]);
 			if (retired != 0 && retirement_error == 0)
 				retirement_error = retired;
 		}
@@ -214,7 +232,7 @@ allocate_sets(
 	}
 
 	/* Acknowledge only the complete independently retained batch in its original client output order. */
-	allocation_reply(reply, VK_SUCCESS, count, identities);
+	allocation_reply(reply, VK_SUCCESS, count, batch->identities);
 
 	/* Succeeded: every requested set identity owns a complete pool/interface/resource dependency graph. */
 	return 0;
@@ -247,7 +265,9 @@ free_sets(
 	pool_id = drv_i915_wire_read_u64(reader);
 	count = drv_i915_wire_read_u32(reader);
 	array = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || count > VULKAN_SET_BATCH || array != count)
+	if (reader->error != 0 ||
+	    count > VULKAN_SET_BATCH ||
+	    array != count)
 		return EINVAL;
 	for (index = 0; index < count; index++)
 		identities[index] = drv_i915_wire_read_u64(reader);
@@ -393,7 +413,9 @@ release_set(
 	if (set->charged) {
 		pool = set->pool->payload;
 		layout = set->layout->payload;
-		if (pool->sets == 0 || pool->textures < layout->textures || pool->uniforms < layout->uniforms)
+		if (pool->sets == 0 ||
+		    pool->textures < layout->textures ||
+		    pool->uniforms < layout->uniforms)
 			__builtin_trap();
 		pool->sets--;
 		pool->textures -= layout->textures;
@@ -433,4 +455,7 @@ allocation_reply(
 	drv_i915_wire_reply_u64(reply, count);
 	for (index = 0; index < count; index++)
 		drv_i915_wire_reply_u64(reply, identities[index]);
+
+	/* Succeeded: the reply carries the selected allocation status and complete output vector. */
+	return;
 }

@@ -84,7 +84,9 @@ bcm2711_vulkan_input_dispatch(
 	}
 
 	/* Ordinary destruction still permits an opcode echo without a parameter reply. */
-	if (requested > 1 || (create && requested != 1))
+	if (requested > 1 ||
+	    (create &&
+	     requested != 1))
 		return EINVAL;
 
 	/* Each input's immutable payload and dependencies retire only with its final retained owner. */
@@ -138,7 +140,10 @@ create_input(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    identity == 0)
 		return EINVAL;
 	device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (device == NULL)
@@ -258,7 +263,9 @@ record_prefix(
 		expected = VK_STRUCTURE_TYPE_IMAGE_VIEW_CREATE_INFO;
 	else if (kind == I915_VK_OBJ_SAMPLER)
 		expected = VK_STRUCTURE_TYPE_SAMPLER_CREATE_INFO;
-	if (checked.error != 0 || type != expected || chain != 0)
+	if (checked.error != 0 ||
+	    type != expected ||
+	    chain != 0)
 		return ENOTSUP;
 	if (kind != I915_VK_OBJ_SHADER_MODULE)
 		return 0;
@@ -267,8 +274,12 @@ record_prefix(
 	flags = drv_i915_wire_read_u32(&checked);
 	bytes = drv_i915_wire_read_u64(&checked);
 	count = drv_i915_wire_read_u64(&checked);
-	if (checked.error != 0 || flags != 0 || bytes < 20 || bytes > VULKAN_MODULE_BYTES ||
-	    (bytes & 3U) != 0 || count != bytes / 4U)
+	if (checked.error != 0 ||
+	    flags != 0 ||
+	    bytes < 20 ||
+	    bytes > VULKAN_MODULE_BYTES ||
+	    (bytes & 3U) != 0 ||
+	    count != bytes / 4U)
 		return ENOTSUP;
 
 	/* Succeeded: the generated decoder cannot leave retained source words outside its represented code extent. */
@@ -289,9 +300,11 @@ build_view(
 	int error;
 
 	/* Views address the sole supported colour subresource, without mutable-format reinterpretation. */
-	if (info->flags != 0 || info->viewType != VK_IMAGE_VIEW_TYPE_2D ||
+	if (info->flags != 0 ||
+	    info->viewType != VK_IMAGE_VIEW_TYPE_2D ||
 	    info->subresourceRange.aspectMask != VK_IMAGE_ASPECT_COLOR_BIT ||
-	    info->subresourceRange.baseMipLevel != 0 || info->subresourceRange.baseArrayLayer != 0)
+	    info->subresourceRange.baseMipLevel != 0 ||
+	    info->subresourceRange.baseArrayLayer != 0)
 		return ENOTSUP;
 	if (info->subresourceRange.levelCount != 1 && info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS)
 		return ENOTSUP;
@@ -349,8 +362,10 @@ build_sampler(
 	int error;
 
 	/* Every published sampler has native filter and normalized 2D semantics; optional comparison/anisotropy remain absent. */
-	if (info->flags != 0 || info->anisotropyEnable != VK_FALSE ||
-	    info->compareEnable != VK_FALSE || info->unnormalizedCoordinates != VK_FALSE)
+	if (info->flags != 0 ||
+	    info->anisotropyEnable != VK_FALSE ||
+	    info->compareEnable != VK_FALSE ||
+	    info->unnormalizedCoordinates != VK_FALSE)
 		return ENOTSUP;
 	if (info->magFilter != VK_FILTER_NEAREST && info->magFilter != VK_FILTER_LINEAR)
 		return ENOTSUP;
@@ -372,8 +387,10 @@ build_sampler(
 	kern_memcpy(&bias, &info->mipLodBias, sizeof(bias));
 	kern_memcpy(&minimum, &info->minLod, sizeof(minimum));
 	kern_memcpy(&maximum, &info->maxLod, sizeof(maximum));
-	if ((bias & 0x7fffffffU) != 0 || (minimum & 0x7fffffffU) != 0 ||
-	    ((maximum & 0x80000000U) != 0 && (maximum & 0x7fffffffU) != 0) ||
+	if ((bias & 0x7fffffffU) != 0 ||
+	    (minimum & 0x7fffffffU) != 0 ||
+	    ((maximum & 0x80000000U) != 0 &&
+	     (maximum & 0x7fffffffU) != 0) ||
 	    (maximum & 0x7f800000U) == 0x7f800000U)
 		return ENOTSUP;
 	sampler = kern_calloc(1, sizeof(*sampler));
@@ -401,8 +418,11 @@ build_module(
 	uint32_t count;
 
 	/* Header validity precedes copying; actual stage/entry/interface/instruction support is checked by the compiler at pipeline creation. */
-	if (info->flags != 0 || info->pCode == NULL || info->pCode[0] != 0x07230203U ||
-	    info->pCode[3] == 0 || info->pCode[4] != 0)
+	if (info->flags != 0 ||
+	    info->pCode == NULL ||
+	    info->pCode[0] != 0x07230203U ||
+	    info->pCode[3] == 0 ||
+	    info->pCode[4] != 0)
 		return ENOTSUP;
 	count = (uint32_t)(info->codeSize / 4U);
 	module = kern_calloc(1, sizeof(*module) + (size_t)(count - 1U) * sizeof(uint32_t));
@@ -485,4 +505,7 @@ input_reply(
 	drv_i915_wire_reply_u32(reply, (uint32_t)status);
 	drv_i915_wire_reply_u64(reply, 1);
 	drv_i915_wire_reply_u64(reply, identity);
+
+	/* Succeeded: the reply carries the selected input status and identity. */
+	return;
 }

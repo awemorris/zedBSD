@@ -41,8 +41,10 @@ bcm2711_vulkan_layout_dispatch(
 
 	/* Every implemented layout opcode has ordinary client creation or echoed-opcode destruction semantics. */
 	*handled = 1;
-	if (opcode != GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT && opcode != GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT &&
-	    opcode != GPU_OP_CREATE_PIPELINE_LAYOUT && opcode != GPU_OP_DESTROY_PIPELINE_LAYOUT) {
+	if (opcode != GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT &&
+	    opcode != GPU_OP_DESTROY_DESCRIPTOR_SET_LAYOUT &&
+	    opcode != GPU_OP_CREATE_PIPELINE_LAYOUT &&
+	    opcode != GPU_OP_DESTROY_PIPELINE_LAYOUT) {
 		*handled = 0;
 		return 0;
 	}
@@ -50,7 +52,9 @@ bcm2711_vulkan_layout_dispatch(
 	/* Creation requires its acknowledged identity; destruction may still request only the opcode echo. */
 	if (requested > 1)
 		return EINVAL;
-	if ((opcode == GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT || opcode == GPU_OP_CREATE_PIPELINE_LAYOUT) && requested != 1)
+	if ((opcode == GPU_OP_CREATE_DESCRIPTOR_SET_LAYOUT ||
+	     opcode == GPU_OP_CREATE_PIPELINE_LAYOUT) &&
+	    requested != 1)
 		return EINVAL;
 
 	/* Typed dispatch keeps descriptor and pipeline layouts distinct even for equal numeric identities. */
@@ -101,7 +105,9 @@ create_set_layout(
 	kern_memset(immutable, 0, sizeof(immutable));
 	description.count = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || description.count > BCM2711_VULKAN_LAYOUT_BINDINGS || count != description.count)
+	if (reader->error != 0 ||
+	    description.count > BCM2711_VULKAN_LAYOUT_BINDINGS ||
+	    count != description.count)
 		return ENOTSUP;
 
 	/* Each encoded binding names one sampled image or uniform buffer with only supported graphics-stage visibility. */
@@ -112,8 +118,11 @@ create_set_layout(
 		binding.stages = drv_i915_wire_read_u32(reader);
 		binding.immutable = NULL;
 		count = drv_i915_wire_read_u64(reader);
-		if (reader->error != 0 || elements != 1 || count > 1 ||
-		    binding.stages == 0 || (binding.stages & ~VULKAN_LAYOUT_STAGES) != 0)
+		if (reader->error != 0 ||
+		    elements != 1 ||
+		    count > 1 ||
+		    binding.stages == 0 ||
+		    (binding.stages & ~VULKAN_LAYOUT_STAGES) != 0)
 			return ENOTSUP;
 		if (binding.type == VK_DESCRIPTOR_TYPE_COMBINED_IMAGE_SAMPLER)
 			description.textures++;
@@ -238,7 +247,9 @@ create_pipeline_layout(
 	kern_memset(&description, 0, sizeof(description));
 	description.count = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || description.count > BCM2711_VULKAN_PIPELINE_SETS || count != description.count)
+	if (reader->error != 0 ||
+	    description.count > BCM2711_VULKAN_PIPELINE_SETS ||
+	    count != description.count)
 		return ENOTSUP;
 	for (index = 0; index < description.count; index++)
 		identities[index] = drv_i915_wire_read_u64(reader);
@@ -246,7 +257,9 @@ create_pipeline_layout(
 	/* Every retained push word has exact vertex/fragment visibility inside the queried 128-byte range. */
 	ranges = drv_i915_wire_read_u32(reader);
 	count = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || ranges > 2 || count != ranges)
+	if (reader->error != 0 ||
+	    ranges > 2 ||
+	    count != ranges)
 		return ENOTSUP;
 	declared_stages = 0;
 	description.range_count = ranges;
@@ -254,8 +267,14 @@ create_pipeline_layout(
 		stages = drv_i915_wire_read_u32(reader);
 		offset = drv_i915_wire_read_u32(reader);
 		bytes = drv_i915_wire_read_u32(reader);
-		if (reader->error != 0 || stages == 0 || (stages & ~VULKAN_LAYOUT_STAGES) != 0 ||
-		    bytes == 0 || (offset & 3U) != 0 || (bytes & 3U) != 0 || offset > 128 || bytes > 128 - offset)
+		if (reader->error != 0 ||
+		    stages == 0 ||
+		    (stages & ~VULKAN_LAYOUT_STAGES) != 0 ||
+		    bytes == 0 ||
+		    (offset & 3U) != 0 ||
+		    (bytes & 3U) != 0 ||
+		    offset > 128 ||
+		    bytes > 128 - offset)
 			return ENOTSUP;
 
 		/* Each stage has one complete declared push range, even when separate ranges would not overlap in bytes. */
@@ -301,7 +320,9 @@ create_pipeline_layout(
 		set = object->payload;
 		textures += set->textures;
 		uniforms += set->uniforms;
-		if (set->owner.device != device || textures > 8 || uniforms > 4) {
+		if (set->owner.device != device ||
+		    textures > 8 ||
+		    uniforms > 4) {
 			retired = release_pipeline_layout(session, layout);
 			if (retired != 0)
 				return retired;
@@ -348,7 +369,11 @@ creation_header(
 	type = drv_i915_wire_read_u32(reader);
 	chain = drv_i915_wire_read_u64(reader);
 	flags = drv_i915_wire_read_u32(reader);
-	if (reader->error != 0 || present != 1 || type != expected || chain != 0 || flags != 0)
+	if (reader->error != 0 ||
+	    present != 1 ||
+	    type != expected ||
+	    chain != 0 ||
+	    flags != 0)
 		return ENOTSUP;
 
 	/* Succeeded: the selected finite record body follows this supported prefix. */
@@ -371,7 +396,10 @@ creation_tail(
 	allocator = drv_i915_wire_read_u64(reader);
 	present = drv_i915_wire_read_u64(reader);
 	*identity = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || allocator != 0 || present != 1 || *identity == 0)
+	if (reader->error != 0 ||
+	    allocator != 0 ||
+	    present != 1 ||
+	    *identity == 0)
 		return EINVAL;
 	*device = bcm2711_vulkan_object_find(session, I915_VK_OBJ_DEVICE, device_id);
 	if (*device == NULL)
@@ -543,4 +571,7 @@ layout_reply(
 	drv_i915_wire_reply_u32(reply, (uint32_t)status);
 	drv_i915_wire_reply_u64(reply, 1);
 	drv_i915_wire_reply_u64(reply, identity);
+
+	/* Succeeded: the reply carries the selected layout status and identity. */
+	return;
 }

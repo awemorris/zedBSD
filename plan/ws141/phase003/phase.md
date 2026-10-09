@@ -107,3 +107,7 @@ allocator/reference owner、2-plane/clock/adoption、ordinary copy presentのdis
 ## i11統合確認（2026-10-09）
 
 実装d0141f6e2を専用worktreeでhost4/y-n build確認し、Q1の後続更新も保持してmain40ce86ac0へ統合。i11部分cleared、実機/console RAM寿命は未達のまま。i12でFDT name lookupを共通internal helperへ移すが、displayのlookup/translation契約は保つ。[結果](../execution-20261009.md#i11のmain統合とi12の再開2026-10-09)。
+
+## 最終software監査（2026-10-10）
+
+Linux順initial scanout/独自filter/flip/二node presentの最終sourceを[p007 audit](../p007-software-audit.md)で確認。対応hostとnamed rpi4 y/n build PASS、code修正と制限は[実行記録i15](../execution-20261009.md#i15-最終software監査と検証2026-10-10)。software結果で実機のwhole acceptanceをclearせず、Statusはin-progressを保持する。Master/共有投影はQ1。

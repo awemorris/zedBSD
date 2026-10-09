@@ -68,6 +68,19 @@
 #ifndef I915_TEST_VIDEO_HANG_COUNT
 #define I915_TEST_VIDEO_HANG_COUNT	1U
 #endif
+
+/*
+ * How far apart the hung runs are when the build gives no step: 1 hangs runs
+ * in a row, 2 lets one run decode between two hung ones, so one boot shows
+ * both the recovery and the limit of resets.
+ */
+#ifndef I915_TEST_VIDEO_HANG_STEP
+#define I915_TEST_VIDEO_HANG_STEP	1U
+#endif
+
+#if I915_TEST_VIDEO_HANG_STEP < 1
+#error "I915_TEST_VIDEO_HANG_STEP is at least 1"
+#endif
 #endif
 
 /* The H.264 decode limits the executor reports and holds sessions to (design §3.3). */
@@ -3214,10 +3227,11 @@ i915_video_write(
 #ifdef I915_TEST_VIDEO_HANG_AT
 /*
  * Ends a run's batch in a loop that never finishes when the run is one the
- * test build hangs: runs I915_TEST_VIDEO_HANG_AT to I915_TEST_VIDEO_HANG_AT +
- * I915_TEST_VIDEO_HANG_COUNT - 1, counted from 1 over every session since
- * boot.  The decode before the loop runs; the request then times out, and the
- * worker resets the video engine as it would after a real hang.
+ * test build hangs: I915_TEST_VIDEO_HANG_COUNT runs from run
+ * I915_TEST_VIDEO_HANG_AT, I915_TEST_VIDEO_HANG_STEP apart, counted from 1
+ * over every session since boot.  The decode before the loop runs; the
+ * request then times out, and the worker resets the video engine as it would
+ * after a real hang.
  */
 static void
 i915_video_test_hang(
@@ -3226,6 +3240,7 @@ i915_video_test_hang(
 {
 	uint64_t loop_va;
 	unsigned run;
+	unsigned distance;
 
 	/* Numbers this run among every video run since boot, from 1. */
 	run = atomic_fetch_add_relaxed(&i915_video_test_runs, 1U) + 1U;
@@ -3234,8 +3249,13 @@ i915_video_test_hang(
 	if (run < (unsigned)I915_TEST_VIDEO_HANG_AT)
 		return;
 
-	/* Leaves the runs after the hung ones as they are. */
-	if (run >= (unsigned)I915_TEST_VIDEO_HANG_AT + (unsigned)I915_TEST_VIDEO_HANG_COUNT)
+	/* Leaves the runs between two hung ones as they are. */
+	distance = run - (unsigned)I915_TEST_VIDEO_HANG_AT;
+	if (distance % (unsigned)I915_TEST_VIDEO_HANG_STEP != 0U)
+		return;
+
+	/* Leaves the runs after the last hung one as they are. */
+	if (distance / (unsigned)I915_TEST_VIDEO_HANG_STEP >= (unsigned)I915_TEST_VIDEO_HANG_COUNT)
 		return;
 
 	/* The loop and the batch's end have to fit behind the decode. */

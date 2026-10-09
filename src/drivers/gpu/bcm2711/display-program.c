@@ -24,10 +24,10 @@
 #define PROGRAM_FILTER_START 32U
 #define PROGRAM_PRIMARY_START 43U
 
-/* Signed nine-bit samples of the symmetric B=C=1/3 reconstruction filter. */
+/* Independently sampled Mitchell-Netravali B=C=1/3 coefficients; every eight-phase DC sum is exactly 256. */
 static const int16_t program_filter_samples[18] = {
-    0, -2, -6, -8, -10, -8, -3, 2, 18,
-    50, 82, 119, 155, 187, 213, 227, 227, 0};
+    0, -2, -5, -8, -9, -8, -3, 7, 24,
+    50, 83, 119, 154, 186, 211, 225, 225, 0};
 
 static void append(struct bcm2711_display_program *program, enum bcm2711_display_operation operation, uint32_t region, uint32_t offset, uint32_t mask, uint32_t value, uint32_t limit_us);
 static void write_word(struct bcm2711_display_program *program, uint32_t region, uint32_t offset, uint32_t value);
@@ -324,6 +324,9 @@ append(
 	command->value = value;
 	command->limit_us = limit_us;
 	program->count++;
+
+	/* Succeeded: the prepared operation belongs to the bounded display program. */
+	return;
 }
 
 /* Appends an exact 32-bit register write. */
@@ -336,6 +339,9 @@ write_word(
 {
 	/* Replaces the complete register value. */
 	append(program, BCM2711_DISPLAY_WRITE, region, offset, 0, value, 0);
+
+	/* Succeeded: the requested register or shader record word is encoded in caller storage. */
+	return;
 }
 
 /* Appends a read/modify/write with explicit replacement fields. */
@@ -349,6 +355,9 @@ change_word(
 {
 	/* Bits outside mask are retained, then value bits are asserted. */
 	append(program, BCM2711_DISPLAY_UPDATE, region, offset, mask, value, 0);
+
+	/* Succeeded: the program carries a masked register update. */
+	return;
 }
 
 /* Appends a bounded register wait. */
@@ -363,6 +372,9 @@ wait_word(
 {
 	/* Execution fails if the requested state never appears. */
 	append(program, BCM2711_DISPLAY_WAIT, region, offset, mask, value, limit_us);
+
+	/* Succeeded: the program carries a finite register acknowledgement wait. */
+	return;
 }
 
 /* Appends a firmware clock request. */
@@ -374,6 +386,9 @@ clock_rate(
 {
 	/* Shared-clock aggregation belongs to the single selected-output program. */
 	append(program, BCM2711_DISPLAY_CLOCK_RATE, id, 0, 0, hz, 0);
+
+	/* Succeeded: the program carries the selected output clock requirement. */
+	return;
 }
 
 /* Prepares one encoder's runtime clocks and effective reset writes. */
@@ -390,6 +405,9 @@ encoder_bind(
 	change_word(program, BCM2711_REGION_GLUE, 0x08, 1U << (3U + port), 0);
 	write_word(program, base + BCM2711_ENCODER_SHARED, 0, 0);
 	change_word(program, base + BCM2711_ENCODER_DVP, 0xbc, 0, 2);
+
+	/* Succeeded: the program carries the encoder clock and reset prerequisites. */
+	return;
 }
 
 /* Prepares the oscillator, lane tuning and PLL release for one encoder. */
@@ -533,6 +551,9 @@ phy_program(
 	write_word(program, base + BCM2711_ENCODER_PHY, 0x4c, swap);
 	change_word(program, base + BCM2711_ENCODER_PHY, 0x00, 0x30, 0);
 	change_word(program, base + BCM2711_ENCODER_PHY, 0x00, 0, 0x30);
+
+	/* Succeeded: the program carries the selected oscillator and lane settings. */
+	return;
 }
 
 /* Prepares RGB8 progressive HDMI timing and opens its pixel clock gate. */
@@ -565,6 +586,9 @@ encoder_timing(
 	change_word(program, base + BCM2711_ENCODER_CORE, 0x178, 0, 0x80000000U);
 	change_word(program, base + BCM2711_ENCODER_CORE, 0x100, 0x0f, 0);
 	write_word(program, base + BCM2711_ENCODER_DVP, 0xbc, 0);
+
+	/* Succeeded: the program carries the complete selected timing. */
+	return;
 }
 
 /* Packs one infoframe into its entire hardware slot, including zero padding. */
@@ -607,6 +631,9 @@ packet_program(
 	write_word(program, base + BCM2711_ENCODER_PACKET, first + 32U, 0);
 	change_word(program, base + BCM2711_ENCODER_CORE, 0xbc, 0, 1U << slot);
 	wait_word(program, base + BCM2711_ENCODER_CORE, 0xc4, 1U << slot, 1U << slot, 100000);
+
+	/* Succeeded: the program carries the prepared AVI packet and acknowledgement. */
+	return;
 }
 
 /* Rejects any mode that cannot be restarted without inventing sink policy. */
@@ -623,7 +650,9 @@ validate_mode(
 	uint32_t expected_order;
 
 	/* Requires a real output, a known packed-pixel order and a usable core clock. */
-	if (port >= BCM2711_HDMI_COUNT || order < 2U || order > 3U)
+	if (port >= BCM2711_HDMI_COUNT ||
+	    order < 2U ||
+	    order > 3U)
 		return EINVAL;
 	if (max_core_hz == 0)
 		return EINVAL;
@@ -674,7 +703,9 @@ validate_mode(
 	/* A captured HDMI AVI must describe RGB without pixel repetition. */
 	if (mode->hdmi) {
 		/* Header, payload and checksum are verified before any notification. */
-		if (mode->avi[0] != 0x82 || mode->avi[1] != 2 || mode->avi[2] != 13)
+		if (mode->avi[0] != 0x82 ||
+		    mode->avi[1] != 2 ||
+		    mode->avi[2] != 13)
 			return EINVAL;
 		if ((mode->avi[4] & 0x60U) != 0 || (mode->avi[8] & 0x0fU) != 0)
 			return ENOTSUP;

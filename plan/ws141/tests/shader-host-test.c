@@ -1094,10 +1094,10 @@ verify_allocation_refusal(
 	assert(error == 0);
 	attempts = allocation_attempt;
 	bcm2711_shader_binary_free(binary);
-	assert(allocations_live == baseline && attempts >= 4);
+	assert(allocations_live == baseline && attempts >= 5);
 
-	/* Each final native allocation fails independently after all earlier source-parser allocations succeeded. */
-	for (refusal = attempts - 3; refusal <= attempts; refusal++) {
+	/* Compiler state and each final native allocation fail independently after earlier source-parser allocations succeeded. */
+	for (refusal = attempts - 4; refusal <= attempts; refusal++) {
 		allocation_attempt = 0;
 		allocation_refusal = refusal;
 		binary = (void *)1;

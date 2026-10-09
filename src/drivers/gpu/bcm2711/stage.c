@@ -132,6 +132,9 @@ bcm2711_stage_mark(
 
 	/* Publishes the line to the console and the kernel log. */
 	kern_logf("%s\n", line);
+
+	/* Succeeded: the bounded stage diagnostic has reached the kernel log. */
+	return;
 }
 
 /*
@@ -154,6 +157,9 @@ bcm2711_stage_pause(
 	/* Waits out the pause one millisecond at a time. */
 	for (waited_ms = 0; waited_ms < BCM2711_STAGE_PAUSE_MS; waited_ms++)
 		kern_usleep_range(STAGE_PAUSE_STEP_US, STAGE_PAUSE_STEP_US);
+
+	/* Succeeded: the announced pre-write observation interval has ended. */
+	return;
 }
 
 /* Finds the raw boot command line, or NULL when the boot gave none. */

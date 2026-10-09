@@ -352,6 +352,9 @@ irq_handler(
 
 	/* Retires the acknowledgement before returning, as every handler must. */
 	kern_irq_send_eoi(acknowledge);
+
+	/* Succeeded: this interrupt acknowledgement no longer belongs to the private handler. */
+	return;
 }
 
 /* Finds the interrupt controller that serves a node, climbing its ancestors. */

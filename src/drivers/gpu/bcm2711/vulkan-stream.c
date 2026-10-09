@@ -54,7 +54,10 @@ bcm2711_vulkan_stream_execute(
 	int error;
 
 	/* The caller holds the controller mutex and supplies an already copied immutable submission. */
-	if (session == NULL || wire == NULL || bytes == 0 || dispatch == NULL)
+	if (session == NULL ||
+	    wire == NULL ||
+	    bytes == 0 ||
+	    dispatch == NULL)
 		return EINVAL;
 	if (session->closing)
 		return ECANCELED;
@@ -120,7 +123,9 @@ execute_command(
 		return EINVAL;
 
 	/* Selector, seek and external-stream wrappers never produce a Vulkan result reply themselves. */
-	if (opcode == GPU_OP_SET_REPLY_STREAM || opcode == GPU_OP_SEEK_REPLY_STREAM || opcode == GPU_OP_EXECUTE_STREAMS) {
+	if (opcode == GPU_OP_SET_REPLY_STREAM ||
+	    opcode == GPU_OP_SEEK_REPLY_STREAM ||
+	    opcode == GPU_OP_EXECUTE_STREAMS) {
 		if (requested != 0)
 			return EINVAL;
 	}
@@ -190,14 +195,19 @@ select_reply(
 
 	/* The controller mutex keeps the borrowed resource stable until its actual CPU backing is retained. */
 	resource = bcm2711_render_find(stream->session->render, identifier);
-	if (resource == NULL || !resource->blob || resource->view == NULL)
+	if (resource == NULL ||
+	    !resource->blob ||
+	    resource->view == NULL)
 		return EINVAL;
 	buffer = resource->view->buffer;
 	if (buffer == NULL || buffer->address == NULL)
 		return EINVAL;
 
 	/* The whole reply extent fits its allocation and every completion word has natural four-byte alignment. */
-	if ((offset & 3) != 0 || offset > buffer->bytes || capacity > buffer->bytes - offset || capacity < 20)
+	if ((offset & 3) != 0 ||
+	    offset > buffer->bytes ||
+	    capacity > buffer->bytes - offset ||
+	    capacity < 20)
 		return EINVAL;
 
 	/* Retaining the replacement first permits selecting the same backing without a transient last-owner release. */
@@ -224,7 +234,10 @@ seek_reply(
 
 	/* Reply seeks cannot invent a region or place an atomic trailer at an unaligned address. */
 	offset = drv_i915_wire_read_u64(reader);
-	if (reader->error != 0 || stream->reply_buffer == NULL || offset > stream->reply.size || (offset & 3) != 0)
+	if (reader->error != 0 ||
+	    stream->reply_buffer == NULL ||
+	    offset > stream->reply.size ||
+	    (offset & 3) != 0)
 		return EINVAL;
 	stream->reply.offset = (size_t)offset;
 
@@ -245,7 +258,8 @@ version_reply(
 	present = drv_i915_wire_read_u64(reader);
 	if (reader->error != 0 || present != 1)
 		return EINVAL;
-	if ((stream->reply.offset & 3) != 0 || stream->reply.offset > stream->reply.size ||
+	if ((stream->reply.offset & 3) != 0 ||
+	    stream->reply.offset > stream->reply.size ||
 	    stream->reply.size - stream->reply.offset < 16)
 		return EINVAL;
 
@@ -297,17 +311,29 @@ external_stream(
 	flags = drv_i915_wire_read_u32(reader);
 	if (reader->error != 0)
 		return EINVAL;
-	if (count != 1 || present != 1 || reply_offsets != 0 || dependencies != 0 || dependency_pointer != 0 || flags != 0)
+	if (count != 1 ||
+	    present != 1 ||
+	    reply_offsets != 0 ||
+	    dependencies != 0 ||
+	    dependency_pointer != 0 ||
+	    flags != 0)
 		return ENOTSUP;
-	if (bytes == 0 || bytes > stream->copy_budget || stream->depth == VULKAN_STREAM_DEPTH)
+	if (bytes == 0 ||
+	    bytes > stream->copy_budget ||
+	    stream->depth == VULKAN_STREAM_DEPTH)
 		return E2BIG;
 
 	/* Actual session-local blob storage must contain the complete requested immutable copy. */
 	resource = bcm2711_render_find(stream->session->render, identifier);
-	if (resource == NULL || !resource->blob || resource->view == NULL)
+	if (resource == NULL ||
+	    !resource->blob ||
+	    resource->view == NULL)
 		return EINVAL;
 	buffer = resource->view->buffer;
-	if (buffer == NULL || buffer->address == NULL || offset > buffer->bytes || bytes > buffer->bytes - offset)
+	if (buffer == NULL ||
+	    buffer->address == NULL ||
+	    offset > buffer->bytes ||
+	    bytes > buffer->bytes - offset)
 		return EINVAL;
 
 	/* The global frame budget bounds total retained recursive copy storage, rather than each wrapper separately. */
