@@ -529,6 +529,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-10 merge 5515a4dab（WS199）: R3「置きっ放しもタッチ」を passkey-fido2 に、kernel の smartcard.c の drv_smartcard_card が card の出入りで KERN_SYSTEM_EVENT_USB の CHANGE（detail card=0|1）を post（Q1 の許し、include/uapi/system.h は注釈 1 行だけで layout 不変）、host-kl-system.c の printers の stub、fido2-p003-guest.sh の段 4 を security-keys の頁に。
 - 2026-10-10 ユーザー（クリック）: WS199 R3 は「置きっ放しもタッチ」→ NFC の reader に載せたままの鍵もタッチと見なす（P1 の推しの「当て直し」は採らない）。
 - 2026-10-10 Q1 判定: WS199 i02 の kernel の src/drivers/generic/smartcard.c（WS161 の file）の変更を許す: card の出入りで既存の KERN_SYSTEM_EVENT_USB の CHANGE（subject smartcardN、detail card=1|0）を post。UAPI・HAL は変えない。試験の整理: plan/ws172/tests/run-host-settings-keys.sh を削除（Users の頁の鍵の欄が消えた、master・未完了の Phase の参照なし）。fido2-p003-guest.sh は T1 の回帰で使うので段 4 を security-keys の頁に直す（P1）。
 - 2026-10-10 ユーザー（WS199 の review の判断）:「Loginはタッチが必要。Unlockはタッチ不要。Unlockでは、スライドしないと認証画面に入れないので、キーが刺さったままでも自動認証される問題はない。」、keypad は推し、範囲は「全部ベータ2」、他は「全部推しどおり」→ plan/ws199/ws.md。
