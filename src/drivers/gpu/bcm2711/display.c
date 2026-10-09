@@ -67,6 +67,8 @@ bcm2711_display_discover(
 	display->compositor_irq.irq = BCM2711_NO_IRQ;
 	display->compositor_irq.registered = false;
 	display->compositor_irq.count = 0;
+	display->compositor_irq.service = NULL;
+	display->compositor_irq.owner = NULL;
 
 	/* Clears the ports' timing generators and encoders. */
 	for (port = 0; port < BCM2711_TIMING_COUNT; port++) {
@@ -74,6 +76,8 @@ bcm2711_display_discover(
 		display->timing_irq[port].irq = BCM2711_NO_IRQ;
 		display->timing_irq[port].registered = false;
 		display->timing_irq[port].count = 0;
+		display->timing_irq[port].service = NULL;
+		display->timing_irq[port].owner = NULL;
 		display->hdmi_physical[port] = 0;
 		display->hdmi_window_count[port] = 0;
 	}

@@ -1,13 +1,23 @@
 <!-- awesome-plan project=zedbsd record=ws141-p003 -->
 
-# ws141-p003: display（N0 → N1 → N2 → P1 → P2 → P3 → P5、P4 は後）
+# ws141-p003: display（firmware出力先の特定 → Linux順の再初期化 → 初回scanout → flip/合成/統合）
 
-Status: in-progress（N0実装済み、N1の純粋な配置/コピー準備を実装。実機待ち）
+Status: in-progress（i09: mailbox修正を承認・適用、host/build PASS、main統合中。実機は後で確認）
 Disposition: normal
 Parent: [WS141](../ws.md)
 Queue: none
 依存: [p002](../phase002/phase.md)（骨格・段の印・P0。p002 の QEMU の回帰と実機の P0 の写真が先にあると安全）
 実行者: 独立Codexセッション（旧P2 generation13の実装を引き継ぐ）
+
+## 現行の設計変更（2026-10-09、i08）
+
+ユーザーの「Linuxドライバと寸分違わず同じ手順…VC4の初期化と、scanoutの開始まで」と追加回答「Linuxと同じ再初期化へ変更する」で、下の旧N1コピー→N2通知→P4後回しは今回の起動の現行手順ではなくなった。理由は固定Linuxの起動経路がfirmwareのdisplay終了を通知してからHVS/HDMIを初期化し、初回commitでchannel・PHY・pixelvalveを新たに構成するため。途中の画面消失は承認済み。旧コード/結果は履歴として保持。
+
+初期化の前にboot framebufferを表示する出力とfirmware modeを読む。表示終了通知→HVSの初期化→HDMI clock/reset→PVの準備→初回commit/scanoutのhardware操作を固定sourceの実処理順へ対応させる。mode/portの選択範囲は以前のfirmware mode/portのみ。新規mode選択・DDC/EDID追加・他portの点灯は含めない。準備の検証に失敗したら通知/resetを始めない。scanout開始はcurrent listの一致とPVのframe境界を確認して判定し、単なるenable bitで成功にしない。
+
+このattemptでhost/buildまで確認できても、Q1経由T1のQEMU回帰と実機写真/scanout観測はwhole Phaseの関門として残る。LinuxとのOS glueの差、非対応mode、未確認のfirmware framebuffer寿命を明示する。HAL APIが必要と分かった場合の具体差分事前承認は保持。詳細と限定mailbox修正の判断は[実行記録i08](../execution-20261009.md#i08の承認設計変更2026-10-09)。
+
+## 旧設計の履歴
 
 ## 範囲（[design](../rpi4-gpu-design.md) §3.1・§10 の p003）
 
@@ -51,3 +61,17 @@ Queue: none
 ユーザーの継続指示により、実機観測と独立な配置計算とraw wordコピーだけを実装。list.cの`bcm2711_list_copy_prepare`はsnapshotと予約範囲から終端込みの連続領域を選び、decoded summaryを再構成せず全wordを保持する。予約範囲には全channelのcurrent/next list、filter、firmware専有範囲を含める責務を呼び手に明記。起動経路での呼び出し・hardware書き込みは無し。
 
 list-copy-host-test.cで順不同/重複予約、filter回避、SRAM枯渇とexact fit、9 planeとscaling/contextの完全一致、snapshot不変、失敗時のimage不変を確認しPASS。rpi4 y/n build warning/error 0、全文C review・補助style-check total 0。詳細は[実行記録 i03/i04の結果](../execution-20261009.md#i03i04の結果2026-10-09)。この部分attemptのみcleared、whole Phaseはin-progress。次は実機N0観測を元にsnapshotと全予約範囲の取得を統合し、再検証後のwrite/readback・次listの切り替え・時限付きpollを進める。p004の独立したsoftware準備も[WS](../ws.md)へ投影済み。N1の実機条件は保持。
+
+
+## i08の保存結果と再開条件（2026-10-09）
+
+- 部分範囲: bootで表示されている既存progressive RGB8 mode/portだけを選び、Linux順R0の初期化から初回scanoutまで実装・照合。新mode/他port/EDID/DDC・V3Dは含まない。
+- 現行のsoftware確認条件: 通知前にmode・buffer・reg span・serviced IRQ依存を検証し、唯一のboot出力を選ぶ。固定hardware値/順序、両portのlane/FIFO/timing、失敗時の後続停止をhostで確認、rpi4 y/nをwarning/error 0でbuild。初回完了にはIRQがcurrent list43を観測したvblankを要求。host2試験・既存4host・y/n buildはPASS。
+- 未達: 実mailbox clientは値なしtagを拒否するため、現kernelではR0 op0 EINVALでMMIO write 0。WS048の3 pathの限定提案を作業コピーで確認したが実source未適用、適用判断のユーザー回答待ち。したがってi08はuncleared、以前のwhole Phaseの実機/flip/合成/統合も未達。build PASSをnative scanout成功とは扱わない。
+- 旧「N1/N2で画面が変わらない」という受け入れ条件は今回の再初期化についてwithdrawn。新hardware条件は元のport/modeへ戻り、R0 ok（採用された新listのframe）、console framebufferの寿命/内容・画面・vblank/underrunを実機で確認すること。framebuffer geometryの一致だけではRAM寿命を証明しない。実機はユーザーが後で実施、QEMUはQ1/T1経由で後続回帰として残す。
+- 再開は限定mailbox修正の承認/依存統合から。同じPhaseの新attemptに前回unclearedを保持して結果を記録し、最新mainとの統合検証へ進む。HALの契約拡張が必要なら具体差分を事前提示。exact commands/参照版/hash・skipped checks・Linux全driverとの相違は[実行記録i08](../execution-20261009.md#i08の結果と再開条件2026-10-09)。WSへの設計変更/受け入れへの影響は[WS記録](../ws.md#i08の設計変更と依存待ち2026-10-09)。
+
+
+## i09: 依存判断の解決（2026-10-09）
+
+ユーザー「mainにマージしてOKです。mailbox修正も承認します。」を取得。i08の未適用mailbox依存を提案のsource/header/host3 pathへ適用して解消し、実sourceのmailbox hostとdisplay host、rpi4 y/n build warning/error0を確認した。p003をin-progressへ戻し、最新mainとの統合検証へ進む。以前のi08 unclearedは保持。whole Phaseの実機/flip/合成/登録の受け入れはまだ未達。結果とcommandsは[実行記録i09](../execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)、WSへの影響は[WS記録](../ws.md#i09-依存修正とmergeの承認2026-10-09)。

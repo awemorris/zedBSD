@@ -15,6 +15,14 @@
 
 正本の版・hash・license は [rpi4-gpu-license-audit.md](rpi4-gpu-license-audit.md)。
 
+## 2026-10-09: VC4起動経路の設計変更
+
+ユーザーがLinux順の照合・修正を指示し、画面が一度消える再初期化を説明した上で「Linuxと同じ再初期化へ変更する」と回答した。旧§3の「Linuxとは違う道」、N1コピー後のN2、P4後回し、underrun後だけのclock引上げは、今回の初期化〜初回scanoutでは現行方針ではない。以前の判断と実装成果は履歴として残す。
+
+初期化前にfirmware modeとboot framebufferを出すHDMIを取得し、同じ出力先で表示pipelineを構成する。hardware操作の順序は固定Linux v6.19の実経路と照合する。DRMやclock frameworkのソース構造は移植せず、zedBSDの所有・APIで独立実装する。firmwareの出力先以外を自主的に点灯しない制約、既存modeだけを最初に扱う制約、GPL作業資料の非commit、HAL APIの具体差分事前承認は保持。
+
+変更の起点/新しいverification/resume条件は[p003](phase003/phase.md)、承認文と実行範囲は[実行記録i08](execution-20261009.md#i08の承認設計変更2026-10-09)。p004/V3Dの処理順やAPIは変更せず、V8は今回選択しない。p005のdisplay統合はLinux順で開始する初回scanoutを依存出力とする。
+
 ## 1. BCM2711 の display と V3D の構成
 
 ### 1.1 部品
@@ -229,3 +237,13 @@ P0 → N0 → N1 → N2 → P1 → P2 → P3（CPU で埋めた plane）→ P5�
 - p004: V1〜V10。V7・V8 の CL の生成は host の試験を先に。判断の項目 2・4・5・12・13。
 - p005: V3D の出力を display に載せ（share の口）、desktop を出す。p003・p004 に依存（ws.md の表の通り）。
 - 試験: 実機（判断の項目 6）と、QEMU の boot が壊れないことの回帰（T1）。QEMU では HVS・V3D の試験はできない。
+
+
+## 2026-10-09 i08の保存状態
+
+初期表示R0を生成/実行/IRQ採用確認の独立構造で実装し、両portのhostとrpi4 y/n buildを確認した。値なしの表示終了通知をWS048 clientが拒否する必須依存は未適用のため、実kernelの再初期化はop0 EINVALで始まらない。i08/p003はuncleared。限定差分の適用回答後に依存確認・統合検証へ再開する。scope/相違/実機を含む未達とcommandsは[実行記録](execution-20261009.md#i08の結果と再開条件2026-10-09)、WS acceptanceへの影響は[WS記録](ws.md#i08の設計変更と依存待ち2026-10-09)。
+
+
+## 2026-10-09 i09の依存解決
+
+ユーザーがmailbox修正とmain mergeを承認。容量0tagの限定修正を実sourceへ適用して実mailbox hostを確認し、i08で拒否されていた通知依存を解消した。display host/rpi4 y/n build PASS、最新mainとの統合を検証中。i08のuncleared履歴を保持し、実機での初期scanout・buffer寿命/IRQと後続機能の受け入れは別に残す。[実行記録i09](execution-20261009.md#i09-mailbox実sourceの確認2026-10-09)。

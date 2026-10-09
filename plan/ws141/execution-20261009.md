@@ -1,7 +1,7 @@
 # WS141 独立Codexセッションの実行記録
 
 - Cycle ID: ws141-codex-20261009
-- Status: finished（i01〜i07の部分範囲と統合を終了。WS・whole Phaseは未完了）
+- Status: active（i09: ユーザーがmailbox限定修正とmain mergeを承認、実source適用・確認・統合中）
 - 承認: 2026-10-09、このchatのユーザーがWS141を担当に割当。原文と所有範囲は [ws.md](ws.md#独立セッションの担当2026-10-09)。共有Queueの採番・更新はQ1。
 - 検証範囲: buildと短いhost試験。QEMUはQ1経由T1、実機はユーザー（後で実施）。
 - 実装の判断・licenseの決定: [既存design](rpi4-gpu-design.md) §9、2026-10-04の項目1〜17の承認を保持。新しいHAL API差分は事前承認のまま。
@@ -15,6 +15,8 @@
 | ws141-codex-20261009-i05 | ユーザー承認による最新mainとの統合 | cleared（統合範囲のみ） | 最新main基点の専用worktreeでmerge、host4試験PASS・rpi4 y/n build warning/error 0。その後共有mainへ取り込み。whole Phase/実機の条件は保持 |
 | ws141-codex-20261009-i06 | p004/V7の1×1 noop command list生成 | cleared（software生成のみ） | BCL/RCL/tile sub-listを固定4.2 XMLと独立に照合しPASS。容量・VA・領域の重なり・失敗時のbyte保持を確認。rpi4 y/n build warning/error 0。GPUへの投入・起動への追加・実機clearanceは対象外 |
 | ws141-codex-20261009-i07 | V7生成の最新mainとの統合 | cleared（統合のみ） | 最新mainとの統合版でnoop/XMLと既存4host試験PASS、rpi4 y/n build warning/error 0。merge 16024f1b9を共有mainへ取り込み済み。Master更新・実機clearance・pushは対象外 |
+| ws141-codex-20261009-i08 | p003: Linuxと同じ再初期化への設計変更・VC4初期化〜初回scanoutの実装照合/修正 | uncleared（WS048限定修正の適用判断待ち） | 今回のユーザー指示と追加回答を下に保存。出力先はboot framebufferを実際に表示するHDMI、範囲は既存firmware mode。build/hostで確認、実機受け入れは後で実施 |
+| ws141-codex-20261009-i09 | p003: 承認済みmailbox容量0修正の適用と初期scanout成果の最新main統合 | in-progress | 2026-10-09ユーザー「mainにマージしてOKです。mailbox修正も承認します。」。提案の3 pathを適用、実mailbox hostとrpi4 y/n build、独立統合版確認後にmainへmerge。実機は後で実施 |
 
 ## 継続の承認とi03の境界（2026-10-09）
 
@@ -106,3 +108,52 @@
 - 統合版: noop-host/oracleと既存stage/list/list-copy/mmuの確認が全てPASS。XMLはrunner第2引数から担当worktreeの固定snapshotを読み取る。rpi4 driver y/nのkernel buildもexit 0・warning/error 0。ログ`build/ws141-integration/kernel-{y,n}-i07.log`と`i07-summary.json`、diff-check 0。
 - Master・共有Queue・HAL API・toolchainは変更無し。push/GitHub公開/QEMU/実機は未実施。whole Phase/WSは未完了のまま。
 - V8の次の実装で注意する点も固定MIT sourceを確認: clear値の設定だけでなく、初期tile bufferを準備する2回のdummy tile（NONE store、最初にCLEAR、最後にVCD cache flush）の段がある。V7のnoopをそのままcolor storeへ置換してclear済みとは扱わない。詳細は次のp004 software準備で展開し、実機のbuffer観測を受け入れに残す。
+
+## i08の承認・設計変更（2026-10-09）
+
+- ユーザー原文:「初期化の手順について、Linuxドライバと寸分違わず同じ手順になっているか、チェックして修正してください。VC4の初期化と、scanoutの開始まで。」
+- 旧方針との差を説明し、ユーザー回答「Linuxと同じ再初期化へ変更する」を取得。途中の画面消失を許容し、旧designの項目7（画面を消さないコピー引き継ぎ）、8（コピー後の通知）、9（P4後回し）、15（underrun後のclock引上げ）を今回の表示再初期化について置換。旧履歴は保存する。
+- 新しい処理はLinux v6.19固定commitの実際のhardware side effect、clock/reset provider、commit/encoder hookの呼び出し順で照合する。OSのDRM登録・allocator/clock参照管理をコピーせず、zedBSDの所有と独立した実装に対応させる。GPL由来の詳細trace/作業文書はignored tempだけ、hardware値の独自命名とZlib/最終監査の既存条件を保持。
+- 元のソースは発見/P0・readout/N0のみで、自前のscanout開始は未実装。N1コピーhelperも未使用。このattemptの目的は初期化開始から最初のscanoutまでの差を修正することで、既存helperのPASSをhardware達成と読み替えない。
+- 出力先はboot framebufferとの一致で選択する。単なるHDMI0優先では別の出力を選びうる。firmware mode以外の選択、EDID/DDC拡張、他ポートの点灯、V3D/V8、resident displayの後続APIはこのattemptに含めない。
+- 最初の対象は既存designのfirmware mode（1920x1080@60、RGB8 progressive）。他のfirmware modeを受け付けるには各形式/fieldの検証を通す必要があり、未対応の入力では破壊的な再初期化を始めない。
+- WS048のmailboxはcapacity=0を拒否するため、Linuxと同じ値なしのdisplay終了通知が不可能。限定差分をproposed/firmware-empty-tag.diffへ用意し、この担当範囲外の修正適用をユーザーへ確認中。回答前に当該sourceを編集しない。
+- 実機確認「後で行う」の決定を保持。コード実装/buildと実機での動作確認を区別し、p003/WS全体は未完了。Master/共有Queue/Guardrail/standard投影はQ1担当、今回編集しない。
+
+
+## i08の結果と再開条件（2026-10-09）
+
+- 起点: `40a3541356b1f2610ba691cf98b2fbc3cc1f23cd`。このattemptは実装・build・host確認まで保存したが、必須のmailbox依存が未適用のため**uncleared**。scanout成功・whole Phase clearance・WS完了・mainへの統合を主張しない。
+- 差の確認: 旧N0はHDMI0を優先し、自前のscanout開始がなかった。boot framebufferと一致する稼働中list/PVを両portで調べ、唯一の出力を選択する。曖昧なmirrorはEBUSYで止める。core/HSMのclockが0なら対応registerへ進まない。
+- 実装: `display-program.c/.h`が検証済みmode/planeから完全な操作列を作り、`display-start.c`が既存mode/AVI/PHYのrateを通知前に取得、`display-execute.c`が既存mailboxとordered MMIO/cacheを実行、`display-irq.c`がsourceをEOI前に退役させてlist43を採用したvblankで完了を確定。登録済みIRQ sourceが無いなら通知前に拒否し、実行中の失敗は後続操作を止め、lineをmaskする。起動経路へR0を接続した。`rpi4gpu.stop=R0`と旧`stop=N1`は通知前の停止として有効。
+- 固定Linux v6.19 `05f7e89ab9731565d8a62e3b5d1ec206485eeb0b`の実際の呼び手・clock/reset providerまで照合。表示終了通知の位置、HVS shared buffer/IRQ、初回commitのcore増減、channel/PHY/PV/HDMI video/FIFO/vblankの前後関係を対応させた。PLL固定小数計算の係数2、HDMI1の物理lane map、PV FIFO閾値（HDMI0=238、HDMI1=32）、PV水平timingの2画素clock換算を確認。固定DVP reset providerはreset_usが無くENOTSUPPになるため、存在しないSW_RESET pulseは追加しない。詳細traceとGPL由来資料はignored tempのみ。
+- 成功時のhardware処理順を対応させた範囲は既存firmware modeのprogressive RGB8、25 MHz以上340 MHz未満。interlace・deep colour・pixel repetition・YUV・SCDC高rate・新mode/EDID/DDCは未対応で、通知前に拒否。zedBSD登録/所有/clock providerのglue、既存sink modeのAVI再利用、失敗時の停止方針はLinuxの全driverと同一ではない。「寸分違わず同じ」や全mode対応は主張しない。
+- framebufferは既存HAL consoleが保持するものを使う。通知後にwidth/height/pitchを照合するが、同値でもRAMの寿命やfirmwareによる再使用を証明しない。実機でのRAM/画面/IRQの観測が残る。寿命の契約/API追加が必要なら具体HAL差分を先に提示する。
+- `sh plan/ws141/tests/display-host-test.sh build/ws141-display-i08-release` → generator/実executorと実IRQ source serviceの2試験PASS。literal1080pの値/PLL ratio、両portの配線/FIFO/timing、VIDEOより先のVIDEN、setup core保持と採用後のrate低下、旧listによる誤完了拒否、HVS underrunのmask/W1C、通知拒否/geometry変化/clock failure/zero HSM/frame timeoutの停止境界を確認。modelは実firmware/GPU/電気的timingの成功証拠ではない。
+- `sh plan/ws141/tests/stage-host-test.sh build/ws141-host-i08-final` → stage/list/list-copy/mmuの4試験PASS。新しいframebuffer一致判定は先頭以外のplaneも確認し、反転や異なるbufferを拒否。
+- `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix` → exit 0、warning/error 0、arm64 ELF/image checker PASS。同targetのBUILD=n・driver=nもexit 0、warning/error 0。共有LLVM 23.1.0はreadonly、GCC 14.2.0でhostを確認。ログ`build/ws141-init-i08/kernel-y-final-irq.log`・`kernel-n-final.log`と`summary.json`。
+- vmunix SHA256: y `0adc41dfe97254a15852be7944401151055102a0832a0bb0dc458a02750a506f`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。今回は新起動処理がlinkされるためyは旧版と異なる。nはdriverを含まない。
+- 全文C reviewは`plan/coding-style.md`を使用（簡約版無し）。宣言/公開-static順/forward/段落/条件/return/fieldの境界/所有・IRQ owner寿命を確認。clang-format-19 19.1.7（ColumnLimit 0）後、定義引数tabを復元。新source・list/fdt-util・新host2試験の補助style-check total 0。旧display/readout/v3dの短い対称なformat文字列の三項13件は既存のままで、全文規約の短い対称選択として目視確認。source/記録の`git diff --check -- . ":!*.diff"`、runnerの`sh -n`は0。提案diffのcontext行はpatch構文として空白+tab/空行prefixを保持するためwhitespace検査から除外し、`git apply --check plan/ws141/proposed/firmware-empty-tag.diff`を別に確認。630 hardware旧名の語単位一致0。原文/改名表はignored、BLOBの追加無し。全WSの最終license/設計類似/全文準拠p007は未実施。
+- 必須依存: `drv_rpi4_firmware_property`は容量0をEINVALとして拒否する。**現在の実kernelではR0 op0でEINVALとなり、scanout再初期化のMMIO writeは0**。新host executor modelは通知を受理するmodelなので、この依存を検証済みとは扱わない。
+- [proposed/firmware-empty-tag.diff](proposed/firmware-empty-tag.diff)はWS048 source/headerと既存host試験の必要な期待値/model修正を含む3 pathの限定提案。HAL APIは変更しない。ユーザーへ適用またはQ1への引渡しを確認済み、回答待ち。WS048の実source/header/testには未適用。
+- 提案のみの確認: `build/ws141-init-i08/empty-tag-proposal/`にsource/testの作業コピーを置き、既存WS048 modelをコンパイルして通常/USB notificationと値なしの32 byte tag/answered=0を確認。`ASAN_OPTIONS=detect_leaks=0 .../firmware-host-test /home/awe/zedBSD-claude1/vendor/raspberrypi-firmware/boot/bcm2711-rpi-4-b.dtb` → 200163 checks PASS、ASan/UBSan。最初の実行はsandboxのptrace下でLeakSanitizerが終了時に使えず失敗したため、leak検出のみ無効化。これは提案の確認で、実source適用済みという証拠ではない。
+- 再開: 限定修正の承認ならそのexact scopeを適用し、既存mailbox hostと対象buildを確認して新attemptへ保存。その後最新mainとの独立統合と検証。Q1への引渡しの回答なら依存をQ1へ残し、当該依存の統合を確認するまで表示開始成功扱いにしない。回答前のmain mergeは行わない。
+- 実機はユーザーが後で実施、QEMUはQ1/T1経由。途中の画面消失は承認済みだが、実機IRQ・scanout・console buffer寿命・T1回帰、flip/合成/resident登録・V3D投入・p007は残る。Master/共有Queue/Guardrail/standards/他WS投影はQ1担当で未更新。push/外部連絡は無し。
+
+
+## i09の追加承認（2026-10-09）
+
+- 承認者/出典: このchatのユーザー、原文「mainにマージしてOKです。mailbox修正も承認します。」。
+- 承認範囲: `proposed/firmware-empty-tag.diff`の実mailbox source/header/既存host試験の3 pathと、i08のWS141初期scanout成果のmain統合。HAL APIは変更しない。i08のuncleared履歴は保存する。
+- 実sourceのmailbox host、display hostとrpi4 driver y/nのnamed kernel buildを確認し、最新mainとの専用worktreeで統合検証してから共有mainへ取り込む。実機/whole Phase・WS acceptanceは未達のまま。Master/共有Queue/Guardrail/他WSの記録投影とpushは対象外。
+
+
+## i09: mailbox実sourceの確認（2026-10-09）
+
+- 承認済み提案をそのまま`src/drivers/platform/rpi4/rpi4-firmware.c/.h`・`plan/ws048/tests/firmware-host-test.c`へ適用。capacity0/request_count0のtagはvalues=NULLを許可し、非emptyのstorage・上限・request_countの検査は保持。空tagのmodelがend markerを値で上書きしないよう既存host modelを修正。HAL API変更無し。
+- `make -f plan/ws048/tests/host-test.mk OUT=build/ws141-init-i09/mailbox-host build/ws141-init-i09/mailbox-host/firmware-host-test` → 実mailbox clientのhost executableをbuild（ASan/UBSan）。`ASAN_OPTIONS=detect_leaks=0 build/ws141-init-i09/mailbox-host/firmware-host-test /home/awe/zedBSD-claude1/vendor/raspberrypi-firmware/boot/bcm2711-rpi-4-b.dtb` → 200163 checks PASS。値なし32 byte通知/answered0と通常tag/USB通知を確認。LSanは既知のsandbox ptrace制約により無効、実firmwareではない。
+- `sh plan/ws141/tests/display-host-test.sh build/ws141-display-i09` → program/実executor+IRQ sourceの2試験PASS。
+- `make -j2 ZEDBSD_CONFIG=config/ci/config-rpi4.mk BUILD=build/ws141-rpi4-y CONFIG_DRIVER_BCM2711_GPU=y vmunix`とBUILD=n・driver=nの同target → exit0、warning/error0、ELF/image checker各PASS。ログ`build/ws141-init-i09/kernel-{y,n}.log`。SHA256: y `defcfcaeb820f13b050ffaa1a9ecb1ad74144c2af36fa7d5dc4af1261127858c`、n `e7446d4f070cc09d1a41c79c3e8d00d0343d33290af8a3f759db8b94e9013e26`。
+- mailbox変更箇所の全文規約/所有/null値を使用するloopの境界をreview、補助style-check source/header total0、git diff --check0。formatter形状は既存ANSI定義/paragraphを保持、無関係なformatはしない。
+- i08で拒否された通知依存をsoftware上で解消。i08のuncleared履歴を遡って変更せず、このi09に結果を保存。最新main開始点`b224d174c150980a0cfe49f53ef5df71a7b455b5`はcleanで、i08起点以降の対象source/WS141には差分無し。次は専用worktreeで最新mainとのmerge・対象試験/buildを確認し、mainへ取り込み。
+- WS048 p003/WS側のAPI拡張の記録投影はQ1へ残す（承認された他WS編集は提案の3 pathのみ）。WS048全体の再開や実機受け入れをこの依存修正で宣言しない。
