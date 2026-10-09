@@ -194,3 +194,15 @@ BCM2711 ARM Peripherals の条件: 「Raspberry Pi の製品と一緒に使う�
 | `src/broadcom/compiler/vir_register_allocate.c` | `ff2493df97d6191e2e4fd0726fa47ffe42808d5d3b813bb66b7690686e6d38b9` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
 | `src/broadcom/vulkan/v3dv_pipeline.c` | `53dec555a2cf7a785d73cbc11b02eb06ed6d61634544b31f5ca572815468d562` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
 | `src/broadcom/compiler/meson.build` | `8fc878fac85e2450999e83c1a7676b79128b498f1189ae50f06cef4deaf00f78` | MIT（各file先頭の許諾を確認） | ABI/latency/VPM/TMU/TLB/thread規則を読むだけ。外部compiler実装の取り込み無し |
+
+## native shader/texture stateの一次資料追加（2026-10-09）
+
+固定Mesa25.3.6 commit `06f9e28304d5d3f109c33535c1c25b9df5769af2` の公式GitLab rawから取得し先頭MIT許諾を確認。XML schemaとnative stateの意味を照合するignored作業資料。whole p007 auditは未達。
+
+| path | SHA-256 | license | 扱い |
+| --- | --- | --- | --- |
+| `src/broadcom/vulkan/v3dvx_pipeline.c` | `59bf28e7143f60bf6b264064773b63937ff04ed4dff96087ffb1f09181007158` | MIT（先頭許諾確認） | ignored `temp/v3dvx_pipeline-fetch.c`、hardware事実と手順を読むだけ、source/objectの取り込み無し |
+| `src/broadcom/vulkan/v3dvx_image.c` | `95d3219b72adb1c342a165d0f82275c5ccc6f5b997b40f837d0beebb8c4264e7` | MIT（先頭許諾確認） | ignored `temp/v3dvx_image-fetch.c`、hardware事実と手順を読むだけ、source/objectの取り込み無し |
+| `src/broadcom/vulkan/v3dvx_descriptor_set.c` | `1247acafa2ffeebaef00f49a800f3cabf319793dae90ff7c4326fff15b325757` | MIT（先頭許諾確認） | ignored `temp/v3dvx_descriptor_set-fetch.c`、hardware事実と手順を読むだけ、source/objectの取り込み無し |
+| `src/broadcom/vulkan/v3dv_image.c` | `1d86296404f2a133aa96de2ff3c49dadea1f02c0e84df7d484397f5208c28474` | MIT（先頭許諾確認） | ignored `temp/v3dv_image-fetch.c`、hardware事実と手順を読むだけ、source/objectの取り込み無し |
+| `src/broadcom/compiler/vir.c` | `a1f314656a6bdb53a68b682e665303644fb8bbb74078a76d5c447107a9a7ccaf` | MIT（Broadcom 2016–2017、先頭許諾確認） | ignored `temp/vir-fetch.c`、VPM sectorと共有segmentのhardware事実のみ。source/object取り込み無し |
