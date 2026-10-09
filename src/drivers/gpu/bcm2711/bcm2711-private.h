@@ -22,6 +22,7 @@
 #include <drivers/generic/fdt.h>
 
 #include "drivers/gpu/bcm2711/bcm2711-gpu.h"
+#include "drivers/gpu/bcm2711/display-flip.h"
 
 /* The stage-mark family of the display path, and its boot parameter prefix. */
 #define BCM2711_FAMILY_DISPLAY		"rpi4gpu"
@@ -230,6 +231,9 @@ struct bcm2711_display {
 
 	/* Set only after the new list and a fresh scanout frame are observed. */
 	bool scanout_started;
+
+	/* Persistent synchronous flip state shares lifetime with its IRQ owners. */
+	struct bcm2711_flip_state flip;
 
 	/* IRQ-written completion state; initialization arms only the new-mode frame. */
 	volatile bool adoption_armed;
