@@ -12,6 +12,9 @@
  *   STYLES name                     STYLES password[ pin][ fido2]
  *   AUTH name style, then the secret's line
  *                                   TOUCH..., then OK, or FAIL reason after the delay
+ *   KEYOWNER                        KEYOWNER user=NAME key-pin=0|1 key-touch=0|1 card=0|1,
+ *                                   or KEYOWNER REASON (none, many-owners, no-key,
+ *                                   many-keys, ...): whose the key there is (ws199-p001)
  *   CANCEL                          stops a security key attempt (FAIL timeout)
  * The session's:
  *   STYLES                          the session user's
@@ -29,13 +32,16 @@
  *   KEYRESET, then the password's line
  *                                   REPLUG while the key is to be plugged in again,
  *                                   TOUCH..., then OK removed=N or FAIL reason
+ *   KEYOWNER                        as the greeter's, the session user's keys only
  *   CANCEL
  * (the keys' own requests, ws199-p001 section 4.4: KEYINFO and KEYPIN are
  * not attempts of the account and touch no count; KEYRESET counts as a
  * password attempt until passkey-fido2 says the password was right, which
  * clears the counts as a password does, and its later failures are told
  * at once.  ENROLL, REMOVE and the keys' requests are told passkey's own
- * reason word; AUTH and UNLOCK the greeter's words.)
+ * reason word; AUTH and UNLOCK the greeter's words.  KEYOWNER is no
+ * attempt either: it touches no count, has no delay and is not logged as
+ * a failure; sessiond answers at most one a second, the others ERROR busy.)
  * A request that comes while another is answered is ERROR busy.  The lines
  * after a request are always its secrets, never requests.  Every secret is
  * written to passkey's standard input and erased.
@@ -77,6 +83,7 @@ static const char *const auth_commands[SESSIOND_COMMAND_COUNT] = {
 	"KEYPIN",
 	"KEYRESET",
 	"SETOPTIONS",
+	"KEYOWNER",
 };
 
 /* The words of the styles, by SESSIOND_STYLE_*. */
@@ -88,6 +95,9 @@ static const char *const auth_styles[] = {
 
 /* The counts, for sessiond's life (in memory only). */
 static struct sessiond_policy auth_policy;
+
+/* When sessiond last started a KEYOWNER (the monotonic milliseconds; 0 before the first), for its once a second. */
+static long long auth_owner_ms;
 
 static int auth_command_find(const char *line);
 static int auth_parse(struct sessiond_exchange *exchange, const char *line);
@@ -101,6 +111,7 @@ static void auth_listing(struct sessiond_exchange *exchange, int ok, const char 
 static void auth_granted(struct sessiond_exchange *exchange, unsigned answer_uid, const char *extra);
 static void auth_refused(struct sessiond_exchange *exchange, const char *reason);
 static void auth_key_answer(struct sessiond_exchange *exchange, int ok, const char *reason, const char *extra);
+static void auth_owner_answer(struct sessiond_exchange *exchange, int ok, unsigned answer_uid, const char *reason, const char *extra);
 static int auth_status(struct sessiond_exchange *exchange, const char *line);
 static void auth_reply(struct sessiond_exchange *exchange, const char *line);
 static int auth_lookup(const char *name, uid_t *uid);
@@ -169,6 +180,7 @@ sessiond_exchange_line(
 	struct sessiond_exchange *exchange,
 	char *line)
 {
+	long long now;
 	size_t length;
 	int command;
 	int match;
@@ -206,6 +218,16 @@ sessiond_exchange_line(
 	if (busy) {
 		auth_reply(exchange, "ERROR busy");
 		return 1;
+	}
+
+	/* A key's owner is asked at most once a second of the whole sessiond (R10). */
+	if (command == SESSIOND_COMMAND_KEYOWNER) {
+		now = sessiond_milliseconds();
+		if (auth_owner_ms != 0 && now - auth_owner_ms < SESSIOND_KEYOWNER_MS) {
+			auth_reply(exchange, "ERROR busy");
+			return 1;
+		}
+		auth_owner_ms = now;
 	}
 
 	/* The request's words; a malformed one is answered ERROR. */
@@ -360,17 +382,30 @@ auth_parse(
 	exchange->lines_wanted = 0U;
 	exchange->lines_have = 0U;
 
-	/* The greeter may only ask STYLES and AUTH; a session anything but AUTH. */
+	/* The greeter may only ask STYLES, AUTH and KEYOWNER; a session anything but AUTH. */
 	greeter_only = 0;
 	if (command == SESSIOND_COMMAND_AUTH)
 		greeter_only = 1;
 	session_only = 1;
-	if (command == SESSIOND_COMMAND_STYLES || command == SESSIOND_COMMAND_AUTH)
+	if (command == SESSIOND_COMMAND_STYLES || command == SESSIOND_COMMAND_AUTH || command == SESSIOND_COMMAND_KEYOWNER)
 		session_only = 0;
 	if (exchange->session && greeter_only)
 		return -1;
 	if (!exchange->session && session_only)
 		return -1;
+
+	/*
+	 * KEYOWNER takes nothing more: the greeter's looks for every account
+	 * ("-"), a session's for its user's alone (R2).
+	 */
+	if (command == SESSIOND_COMMAND_KEYOWNER) {
+		exchange->style = SESSIOND_STYLE_FIDO2;
+		exchange->verified = 0;
+		snprintf(exchange->name, sizeof(exchange->name), "-");
+		if (exchange->session && exchange->owner != NULL)
+			snprintf(exchange->name, sizeof(exchange->name), "%s", exchange->owner->passwd.pw_name);
+		return 0;
+	}
 
 	/* The greeter names the account in its second word; the session's is its user. */
 	if (!exchange->session) {
@@ -510,6 +545,25 @@ auth_begin(
 
 		/* The others fail. */
 		auth_reply(exchange, "FAIL internal");
+		return;
+	}
+
+	/* A key's owner is no attempt: no count is looked at, and passkey runs as for KEYINFO (R2). */
+	if (exchange->command == SESSIOND_COMMAND_KEYOWNER) {
+		exchange->uid = (uid_t)-1;
+		exchange->count = NULL;
+		length = auth_request(exchange, request, sizeof(request));
+		if (length < 0) {
+			auth_reply(exchange, "FAIL internal");
+			return;
+		}
+
+		/* passkey runs. */
+		error = auth_start(exchange, request, (size_t)length, SESSIOND_PASSKEY_MS);
+		if (error != 0) {
+			sessiond_log("SESSIOND passkey start errno=%d", error);
+			auth_reply(exchange, "FAIL internal");
+		}
 		return;
 	}
 
@@ -653,6 +707,9 @@ auth_request(
 		break;
 	case SESSIOND_COMMAND_KEYRESET:
 		length = snprintf(request, size, "key-reset\n%s\n%s\n", exchange->name, exchange->lines[0]);
+		break;
+	case SESSIOND_COMMAND_KEYOWNER:
+		length = snprintf(request, size, "key-owner\n%s\n", exchange->name);
 		break;
 	case SESSIOND_COMMAND_COUNT:
 		break;
@@ -870,6 +927,12 @@ auth_finish(
 
 	/* The answer is not kept. */
 	auth_wipe(exchange->answer, sizeof(exchange->answer));
+
+	/* A key's owner is told as it is, touching no count (R2). */
+	if (exchange->command == SESSIOND_COMMAND_KEYOWNER) {
+		auth_owner_answer(exchange, ok, answer_uid, reason, extra);
+		return;
+	}
 
 	/* An answer about another user than the one asked about is a failure. */
 	if (ok && exchange->uid == (uid_t)-1) {
@@ -1107,6 +1170,70 @@ auth_key_answer(
 	snprintf(reply, sizeof(reply), "OK");
 	if (extra[0] != '\0')
 		snprintf(reply, sizeof(reply), "OK %s", extra);
+	auth_reply(exchange, reply);
+}
+
+/*
+ * Answers KEYOWNER (ws199-p001 section 4.2): the owner passkey named, its
+ * name looked up again in passwd with the user ID passkey gave (and a
+ * session's own user only), with its key's options and whether the key is
+ * a card; or passkey's reason.  Nothing is counted, delayed or logged as a
+ * failure.
+ */
+static void
+auth_owner_answer(
+	struct sessiond_exchange *exchange,
+	int ok,
+	unsigned answer_uid,
+	const char *reason,
+	const char *extra)
+{
+	struct passwd account;
+	struct passwd *found;
+	char buffer[SESSIOND_ACCOUNT_BUFFER];
+	char reply[SESSIOND_LINE_MAX];
+	char name[SESSIOND_NAME_MAX];
+	unsigned key_pin;
+	unsigned key_touch;
+	unsigned card;
+	int scanned;
+	int same;
+	int error;
+
+	/* passkey's reason, as it said it. */
+	if (!ok) {
+		snprintf(reply, sizeof(reply), "KEYOWNER %s", reason);
+		auth_reply(exchange, reply);
+		return;
+	}
+
+	/* The owner's name and its key's options. */
+	scanned = sscanf(extra, "user=%63s key-pin=%u key-touch=%u card=%u", name, &key_pin, &key_touch, &card);
+	if (scanned != 4 || key_pin > 1U || key_touch > 1U || card > 1U) {
+		auth_reply(exchange, "KEYOWNER internal");
+		return;
+	}
+
+	/* The name is an account's, with the user ID passkey gave. */
+	found = NULL;
+	error = getpwnam_r(name, &account, buffer, sizeof(buffer), &found);
+	if (error != 0 || found == NULL || account.pw_uid != (uid_t)answer_uid) {
+		sessiond_log("SESSIOND KEYOWNER answered uid=%u user=%s", answer_uid, name);
+		auth_reply(exchange, "KEYOWNER internal");
+		return;
+	}
+
+	/* A session hears of its own user alone. */
+	if (exchange->session) {
+		same = strcmp(name, exchange->name);
+		if (same != 0) {
+			auth_reply(exchange, "KEYOWNER none");
+			return;
+		}
+	}
+
+	/* Succeeded: the owner. */
+	snprintf(reply, sizeof(reply), "KEYOWNER user=%s key-pin=%u key-touch=%u card=%u", name, key_pin, key_touch, card);
 	auth_reply(exchange, reply);
 }
 

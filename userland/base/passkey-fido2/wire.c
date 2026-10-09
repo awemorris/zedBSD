@@ -163,7 +163,7 @@ fido2_message_parse(
 	char *line,
 	struct fido2_message *message)
 {
-	char *words[4];
+	char *words[5];
 	char *place;
 	size_t count;
 	size_t length;
@@ -176,7 +176,7 @@ fido2_message_parse(
 	memset(message, 0, sizeof(*message));
 	count = 0U;
 	place = line;
-	while (count < 4U) {
+	while (count < 5U) {
 		words[count++] = place;
 		place = strchr(place, ' ');
 		if (place == NULL)
@@ -185,7 +185,7 @@ fido2_message_parse(
 		place++;
 	}
 
-	/* More than four words is no message. */
+	/* More than five words is no message. */
 	if (place != NULL)
 		return EINVAL;
 
@@ -232,6 +232,40 @@ fido2_message_parse(
 		if (parsed != 1)
 			return EINVAL;
 		message->kind = FIDO2_MESSAGE_RESET;
+		return 0;
+	}
+
+	/*
+	 * owner MASK,CARD (no group held), or owner MASK,CARD ID AUTH-DATA
+	 * SIGNATURE (the first group's silent answer, ws199-p001).
+	 */
+	same = strcmp(words[0], "owner") == 0;
+	if (same && (count == 2U || count == 5U)) {
+		parsed = sscanf(words[1], "%x,%u%c", &message->held, &message->owner_card, &extra);
+		if (parsed != 2 || message->owner_card > 1U)
+			return EINVAL;
+
+		/* No group held: nothing more. */
+		if (count == 2U && message->held != 0U)
+			return EINVAL;
+		if (count == 2U) {
+			message->kind = FIDO2_MESSAGE_OWNER;
+			return 0;
+		}
+
+		/* A group held: its answer's bytes. */
+		if (message->held == 0U)
+			return EINVAL;
+		error = wire_hex_decode(words[2], message->id, sizeof(message->id), &message->id_size);
+		if (error == 0)
+			error = wire_hex_decode(words[3], message->auth_data, sizeof(message->auth_data), &message->auth_data_size);
+		if (error == 0)
+			error = wire_hex_decode(words[4], message->signature, sizeof(message->signature), &message->signature_size);
+		if (error != 0)
+			return EINVAL;
+
+		/* Succeeded: the owner's answer. */
+		message->kind = FIDO2_MESSAGE_OWNER;
 		return 0;
 	}
 

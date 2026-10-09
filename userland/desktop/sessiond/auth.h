@@ -45,6 +45,11 @@
 #define SESSIOND_PASSKEY_RESET_MS	75000LL
 #endif
 
+/* The fewest milliseconds between two KEYOWNER of the whole sessiond (ws199-p001 R10: the screen asks for the last key of a burst). */
+#ifndef SESSIOND_KEYOWNER_MS
+#define SESSIOND_KEYOWNER_MS		1000LL
+#endif
+
 /* The longest request written to passkey (its own bound), and how often a busy exchange is looked at (milliseconds). */
 #define SESSIOND_REQUEST_SIZE		4096U
 #define SESSIOND_EXCHANGE_TICK_MS	100
@@ -66,6 +71,7 @@ enum sessiond_command {
 	SESSIOND_COMMAND_KEYPIN,
 	SESSIOND_COMMAND_KEYRESET,
 	SESSIOND_COMMAND_SETOPTIONS,
+	SESSIOND_COMMAND_KEYOWNER,
 	SESSIOND_COMMAND_COUNT
 };
 

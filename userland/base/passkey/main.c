@@ -20,7 +20,8 @@
  * Passwords and PINs are checked here with the C library's crypt() alone;
  * the security key style is passkey-fido2's (/usr/libexec/passkey-fido2,
  * ws172-p003), which gets the same request, as do a key's own operations
- * (ws199-p001: key-info, key-set-pin, key-change-pin, key-reset).  While
+ * (ws199-p001: key-info, key-set-pin, key-change-pin, key-reset,
+ * key-owner).  While
  * passkey-fido2 runs, passkey ignores SIGTERM, SIGHUP and SIGPIPE and
  * waits for it: sessiond's TERM reaches passkey-fido2 and its helper in
  * the same process group, which end the key's work (a cancel the key
@@ -110,7 +111,7 @@ main(
 	same = request.operation == PASSKEY_OP_ENROLL_FIDO2 || request.operation == PASSKEY_OP_REMOVE_FIDO2;
 	if (request.operation >= PASSKEY_OP_KEY_INFO && request.operation <= PASSKEY_OP_KEY_RESET)
 		same = 1;
-	if (request.operation == PASSKEY_OP_AUTH_FIDO2)
+	if (request.operation == PASSKEY_OP_AUTH_FIDO2 || request.operation == PASSKEY_OP_KEY_OWNER)
 		same = 1;
 	if (request.operation == PASSKEY_OP_AUTH && strcmp(request.fields[2], "fido2") == 0)
 		same = 1;
