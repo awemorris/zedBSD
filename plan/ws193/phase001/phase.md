@@ -40,3 +40,12 @@ Parent: [WS193](../ws.md)
 - pty で実際の curses の menu を動かした（Base → All、Desktop → All、Exit）: 保存した config.mk で base 189/189・desktop 33/33 が選ばれた。
 - boot の cfg: `ZEDBSD_GRAPHICAL_LOGIN=n` で login=graphical が無く、既定（y）は前と同じ行の並び（logo、login、kmsg）。
 - 未実施: 実際の image を menu の Build boot image で作ること（P は disk-image を流さない、T1）、進捗の画面の撮影、boot-test。
+
+## Noct と Emacs を Base に（2026-10-09 深夜、P1、Q1 の割り込み）
+
+ユーザー（2026-10-09）:「make menuconfigで、Noctはuserland/base/noct/にあるけど、Baseメニューにないようなので、追加してください。base/emacsもBaseメニューに追加です。Emacsの依存はbase/noct/に修正です。」「PackagesメニューからNoctを削除してください。Baseに移動するためです。」
+
+- 調べ: menu の分類は各 package の登録（`ZEDBSD_USERLAND_PACKAGE` の 8 番目の引数、`USERLAND_<name>_MENU`）で、`make list-user-programs` の 5 列目を menuconfig.py が読む。noct の登録（`userland/base/noct/Makefile`）は `packages/lang` で、Packages → Languages に出て Base に出なかった。emacs は既に `base`、依存は既に `REQUIRE = base/noct`（`userland/base/emacs/Makefile`）で、Base → Select の 189 項目の 43 番目にある（一覧は登録の順で、名前の順ではない）。noct を指す package は userland/packages に他に無い（重複・別名なし）。
+- 直し: noct の登録の menu の引数を `packages/lang` → `base`（build の規則・既定値・platform は変えない。toolchain の規則に触れない、Q1 の範囲）。`USERLAND_*_MENU` は list-user-programs の表示だけに使われ、build の選択には効かない（Makefile 443 行だけ）。program の名前 `noct` は変わらないので、既存の config.mk の `noct` の選択はそのまま読める。
+- 確かめ: `make menuconfig-host-test` PASS（試験を追従: noct の分類を base に、Packages のどの分類にも noct（名前か base/noct）が無い、amd64 の Base → Select に noct と emacs、emacs を選ぶと noct も選ばれ、emacs が選ばれている間は noct を外すと警告）。screen の pty で実の curses の menu を開き、Base → Select の 43 番目「[ ] Emacs editor」、109 番目「[ ] Noct language」の行が出ることを hardcopy で確かめた。`config/release/config-amd64-beta2.mk` と `config/current-uat.mk` の展開後の `ZEDBSD_USER_PROGRAMS` に noct・emacs が両方あり（変わらない）。
+- 未実施: image の build（選択は変わらないので不要と判断）。

@@ -109,8 +109,12 @@ NOCT_PACKAGE_HOLORIS := $(NOCT_SOURCE_DIR)/resources/apps/holoris/holoris.noct
 
 # i386 uses the interpreter for the PC98 i486 baseline. Remacs stays held
 # independently until its own application acceptance is scheduled.
+# The menu files Noct with the base programs, beside Emacs that needs it, and
+# not under Packages (2026-10-09 user: "Noctはuserland/base/noct/にあるけど、
+# Baseメニューにないようなので、追加してください。", "PackagesメニューからNoctを
+# 削除してください。Baseに移動するためです。").  Only the menu group changed.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,noct,Noct language,amd64 i386 pc98 rpi4,n,package,,y,\
-	packages/lang,base/noct,))
+	base,base/noct,))
 
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter noct,$(ZEDBSD_USER_PROGRAMS)),\
 	$(BUILD)/bin/noct $(NOCT_PACKAGE_HOLORIS))
