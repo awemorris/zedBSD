@@ -83,6 +83,12 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/tty.c \
  src/drivers/generic/system-device.c src/kern/system-event.c src/drivers/generic/memory-device.c src/kern/shutdown.c \
 	src/kern/init.c
+# Onboard Ethernet uses the SCB bus, without PCIe or USB.
+ifeq ($(CONFIG_DRIVER_BCM2711_GENET),y)
+ARM64_KERNEL_SOURCES += src/drivers/ethernet/bcm54213pe.c \
+	src/drivers/platform/rpi4/rpi4-ethernet.c
+endif
+
 # USB behind the Pi 4's PCIe (ws048): the core comes with any USB driver.
 ARM64_USB_SOURCES :=
 ifneq ($(filter y,$(CONFIG_DRIVER_PCI_XHCI) $(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_USB_HUB) $(CONFIG_DRIVER_USB_STORAGE) $(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM) $(CONFIG_DRIVER_USB_CCID) $(CONFIG_DRIVER_USB_BT) $(CONFIG_DRIVER_USB_RTL8822BU)),)

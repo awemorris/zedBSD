@@ -3,3 +3,4 @@
 -|fixed|PL011 console and BCM2711 platform devices|rpi4|y|
 -|fixed|BCM2711 PCIe root complex and PCI core|rpi4|y|
 CONFIG_DRIVER_BCM2711_GPU|bool|BCM2711 GPU: HVS display and V3D (experimental)|rpi4|y|
+CONFIG_DRIVER_BCM2711_GENET|bool|BCM2711 GENET: Raspberry Pi 4 onboard Ethernet|rpi4|y|

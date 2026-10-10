@@ -209,6 +209,8 @@ CONFIG_DRIVER_PCI_I915 ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 # by the menu names it explicitly.
 CONFIG_DRIVER_PCI_HDA ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_DRIVER_PCI_INTEL_AX211 ?= n
+# The Pi 4 onboard Ethernet works independently of the USB host controller.
+CONFIG_DRIVER_BCM2711_GENET ?= $(if $(filter rpi4,$(ZEDBSD_PLATFORM)),y,n)
 # The BCM2711 graphics driver (ws141) is on by default on the Raspberry Pi 4,
 # where it builds; it changes nothing until its later stages exist.
 CONFIG_DRIVER_BCM2711_GPU ?= $(if $(filter rpi4,$(ZEDBSD_PLATFORM)),y,n)
@@ -581,6 +583,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_I915=$(if $(filter y,$(CONFIG_DRIVER_PCI_I915)),1,0) \
 	-DCONFIG_DRIVER_PCI_HDA=$(if $(filter y,$(CONFIG_DRIVER_PCI_HDA)),1,0) \
 	-DCONFIG_DRIVER_PCI_INTEL_AX211=$(if $(filter y,$(CONFIG_DRIVER_PCI_INTEL_AX211)),1,0) \
+	-DCONFIG_DRIVER_BCM2711_GENET=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_GENET)),1,0) \
 	-DCONFIG_DRIVER_BCM2711_GPU=$(if $(filter y,$(CONFIG_DRIVER_BCM2711_GPU)),1,0) \
 	-DCONFIG_DRIVER_ACPI=$(if $(filter y,$(CONFIG_DRIVER_ACPI)),1,0) \
 	-DCONFIG_DRIVER_TYPEC=$(if $(filter y,$(CONFIG_DRIVER_TYPEC)),1,0) \

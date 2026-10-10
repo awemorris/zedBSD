@@ -19,6 +19,10 @@
 #include <kern/partition.h>
 #include <kern/platform.h>
 #include <kern/boot.h>
+#if CONFIG_DRIVER_BCM2711_GENET
+#include "drivers/platform/rpi4/rpi4-ethernet.h"
+#include <kern/klog.h>
+#endif
 #if CONFIG_DRIVER_USB_HID
 #include <drivers/usb/usb-hid.h>
 #endif
@@ -47,6 +51,9 @@ kern_platform_init(
 	struct drv_bcm2711_boot_screen screen;
 #endif
 	unsigned i;
+#if CONFIG_DRIVER_BCM2711_GENET
+	int ethernet_error;
+#endif
 
 	rpi4 = (const void *)handoff;
 
@@ -80,6 +87,16 @@ kern_platform_init(
 			return 0;
 		hal_puts("sdhci: using QEMU legacy-controller fallback\n");
 	}
+
+#if CONFIG_DRIVER_BCM2711_GENET
+	/* Starts onboard Ethernet independently of USB and PCIe discovery. */
+	ethernet_error = drv_rpi4_ethernet_init(rpi4->fdt_phys);
+	if (ethernet_error != 0) {
+		kern_logf(
+			"genet: onboard Ethernet unavailable (%d)\n",
+			ethernet_error);
+	}
+#endif
 
 	/*
 	 * Brings up PCIe and what sits behind it.  A board or emulator without
@@ -136,6 +153,11 @@ kern_platform_refresh_devices(
 {
 	(void)d;
 	(void)n;
+
+#if CONFIG_DRIVER_BCM2711_GENET
+	/* Starts periodic link and missed-interrupt service after discovery. */
+	drv_rpi4_ethernet_refresh();
+#endif
 
 	/* Has the USB controllers behind PCIe find their devices. */
 	drv_rpi4_pcie_refresh();
