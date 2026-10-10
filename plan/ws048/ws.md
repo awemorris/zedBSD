@@ -9,7 +9,7 @@ Related Milestones: MG003, MG006
 Objectives: O2, O4
 Parent: [Master](../master.md)
 Queue: [command-freeze限定Queue](codex-command-freeze-20261011.md) finished。旧PCIe boot/USB/sessiond実行記録は保持。
-Resume point: p012の具体的commitをmain統合後、新kernelの起動/USB入力をuserが確認。p011はmain統合済み、最新写真ではport reset後にboot停止。従来p005〜p007の履歴/未完criteriaは保持。
+Resume point: p012 source17898a746はmain統合済み、新kernelの起動/USB入力をuserが確認。p011はmain統合済み、最新写真ではport reset後にboot停止。従来p005〜p007の履歴/未完criteriaは保持。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -128,3 +128,7 @@ Current user「main仁藤剛してください。」を直前の7b16e364c統合�
 ### p011 main integration / 2026-10-11
 
 Current user「mainへ統合する」で具体的commit `16c139e9f` を承認。clean main `402598d27` から同commitへfast-forward、競合なし。全6 source/test SHA256一致、source差分なし、config.mkは検証worktreeとbyte-identical。警告0 kernel buildと限定host checksは統合sourceにも適用される。main統合は完了し、先行の承認待ちは当時の履歴。新kernelでのUSB入力受入は未確認でWS incompleteを維持。GPU source変更なし。push・実機更新/rebootなし。共有Master/Queue/history/cache/GitHub投影はQ1 pending。
+
+## Main integration / 2026-10-11
+
+Current user「mainにマージしてください。」approves the exact USB repair commit `17898a7465b9125bb5f4afef9539cdeb66e9b162`. Clean main `9a0ddc6cb` fast-forwarded to this commit without conflict. Read-back confirms all seven integrated files byte-identical to the verified private worktree; config.mk matches the warning0 arm64 build configuration and xHCI SHA256 matches the recorded final source hash. Previous nine host scenarios and kernel/raw-image validation apply to this identical source; no redundant rebuild/test. Source integration is complete; earlier integration-pending statements are historical. Physical boot/USB recovery remains unverified and WS048 stays incomplete. Pending boot0/CI commits remain separate. No push or remote update/reboot. Shared Master/Queue/history/cache/GitHub projections remain Q1 pending.
