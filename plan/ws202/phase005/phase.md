@@ -2,7 +2,7 @@
 
 # ws202-p005: AAC の構文と表
 
-Status: uncleared（Huffman数値部分はcleared、全AAC parserは未実装）
+Status: uncleared（i05 入力metadata/Huffman部分はcleared、wholeは未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
@@ -61,3 +61,11 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
 ## 構造改訂と部分結果（2026-10-10）
 
 12 Huffman数値の生成器/aac-huffman.[ch]を実装・構造/生成一致/C89確認PASS。p005全体は未完としてuncleared。H5はユーザー承認済み。AOT5/29/SBR/PSは拒否し、degraded=1でcoreを受ける旧手順は失効。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## 2026-10-10 i05のpartial scope
+
+[有限実行AAC入力](../policy-20261010.md#有限実行-codex-ws202-20261010-aac-input)でASC/ADTS/PCEと既存12bookのruntime復号を続ける。HE-AAC拒否とPCM未実装を明示し、p002の全fixture/p003のpicture/soundに依存するwhole raw_data_blockは未着手として保存。
+
+## 2026-10-10 i05部分結果
+
+i05の具体partial scopeをclearedとして終了。[source/設計の具体化・host/build・C全文review・制限](../aac-input-result-20261010.md)。ASC/ADTS/PCE metadataと独自Huffman runtimeは通常libmedia buildへ登録。探索は2段lookupからonce初期化のbounded prefix treeへ具体化した（Phase内部、API/依存の追加無し）。raw_data_block/ICS/tool構文、FILのSBR検出、CRC検算、残る規格表/PCMは未実装。 p005全体をclearedとしてcloseしない。Q1への統合・共有projectionはpending。

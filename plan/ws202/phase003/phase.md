@@ -2,7 +2,7 @@
 
 # ws202-p003: libmedia の共通の部品と back end の表
 
-Status: planned
+Status: uncleared（i04 bits部分はcleared、wholeは未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 7 LW
@@ -66,3 +66,11 @@ AAC と H.264 の back end が共有する部品を作り、decoder.c と `media
 ## 構造改訂と部分結果（2026-10-10）
 
 libraryのops表はnativeだけ。avcodec opsの導入/外部ops注入/degraded引数/2段選択を廃止し、FFmpeg固有load/reason/bitstream責務をapp側へ移す。具体的移管手順はpolicyのlibraryとapp境界を正とする。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## 2026-10-10 i04開始
+
+[有限実行AAC入力](../policy-20261010.md#有限実行-codex-ws202-20261010-aac-input)のbits部分をユーザー継続指示で開始。p001のwhole clearanceを代用せず、metadata/Huffmanに必要な独立private部品だけを先に作る。picture/sound/ops/全共通部品は未完。
+
+## 2026-10-10 i04部分結果
+
+i04の具体partial scopeをclearedとして終了。[source/設計の具体化・host/build・C全文review・制限](../aac-input-result-20261010.md)。picture/sound/opsのwhole criteriaは未実装。 p003全体をclearedとしてcloseしない。Q1への統合・共有projectionはpending。

@@ -3,14 +3,14 @@
 # WS202: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（libmedia の自前の decoder、Video Player・Music）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（実装方針をユーザーが変更。p005のHuffman数値部分は抽出/検証済み、native decoder/app fallback/標準GPU読戻しは未実装）
+Status: incomplete（実装方針をユーザーが変更。bitsとAAC入力metadata/Huffman runtimeは実装/検証済み、native decoder/app fallbackは未実装、標準GPU読戻しはsoftware確認済み）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Target: **ベータ3**（判断の点 H4「ベータ2 に入れるか」）
-Queue: [Huffman部分結果](policy-20261010.md#今回の有限実行-codex-ws202-20261010-aac-tables)と[readback部分結果](policy-20261010.md#有限実行-codex-ws202-20261010-readback)（両finite runはfinished、WSはincomplete）
-Resume point: [2026-10-10ユーザー決定と実装境界](policy-20261010.md)を正本とし、p001再review/各Phase具体手順を改訂する。新p016のi915/必要なlibvulkan補完はユーザー承認済み、software実装・対象host/buildはPASS、Q1統合と実機hash待ち。Huffman数値出力のみcleared。実機/WS完了は未達。
+Queue: [AAC入力部分結果（finite run finished）](policy-20261010.md#有限実行-codex-ws202-20261010-aac-input)。履歴: [Huffman部分結果](policy-20261010.md#今回の有限実行-codex-ws202-20261010-aac-tables)と[readback部分結果](policy-20261010.md#有限実行-codex-ws202-20261010-readback)（両finite runはfinished、WSはincomplete）
+Resume point: [2026-10-10ユーザー決定と実装境界](policy-20261010.md)を正本とし、p001再review/各Phase具体手順を改訂する。新p016のi915/必要なlibvulkan補完はユーザー承認済み、software実装・対象host/buildはPASS、Q1統合と実機hash待ち。bits/AAC入力のpartial scopeもcleared（[証拠](aac-input-result-20261010.md)）。raw_data_block/信号処理/native接続とH.264/app移管を続けるためのPhase詳細・依存をQ1の第3版設計へ意味の統合。実機/WS完了は未達。
 <!-- awesome-plan-current:end -->
 
 ## 現在の設計境界
@@ -76,9 +76,9 @@ GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvu
 | --- | --- | --- | --- | --- |
 | [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 4 | in-progress（第3版への方針改訂） | — |
 | [ws202-p002](phase002/phase.md) | 試験の stream と参照（`make-streams.sh`、x264 で直に mp4、ADTS・mkv・TS・AVI・ctts 無し、合成の 1080p）、host 試験の枠 | 4 | planned | p001、J5 |
-| [ws202-p003](phase003/phase.md) | 共通の部品: bits、picture と pool と scaler、sound（64 tap の resampler、音の約束、trim）、back end の表・問題・2 段の試し・新しい口 | 7 | planned | p001、H2、J1 |
+| [ws202-p003](phase003/phase.md) | 共通bitsは実装済み。picture/pool/scaler/sound、native opsと問題/APIは未完（旧degraded/2段選択は失効） | 7 | uncleared（bits部分cleared） | p001の残り設計。bitsの独立出力は確認済み |
 | [ws202-p004](phase004/phase.md) | mediafile: pasp・colr（nclx・nclc）・`end_us` | 2 | planned | p001 |
-| [ws202-p005](phase005/phase.md) | AAC-LC構文/規格数値、HE-AAC拒否。Huffman部分だけ実装済み | 8 | uncleared（部分出力のみcleared） | p002、p003、H3、H5 |
+| [ws202-p005](phase005/phase.md) | AAC入力metadata/Huffman runtimeは実装済み。raw_data_block/ICS/tool/FILと残る規格表は未完 | 8 | uncleared（入力部分cleared） | p002のwhole fixtureとp003の必要出力。H3/H5は確定済み |
 | [ws202-p006](phase006/phase.md) | AAC の信号処理と back end（M/S の除外、切り詰め、trim、ADTS の入力）、精度の試験 | 9 | planned | p004、p005 |
 | [ws202-p007](phase007/phase.md) | Music（起動の門、notice、log、trim、AAT の helper と scenario） | 3 | planned | p006 |
 | [ws202-p008](phase008/phase.md) | H.264 の parser と DPB の写し（AU 単位、VUI、POC type 1、表示順の深さ）、probe との一致の試験 | 7 | planned | p002、p003 |
@@ -145,3 +145,11 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 [p016 i03結果](phase016/phase.md#i03-software部分の結果2026-10-10): 標準NV12 plane readback、i915/libvulkan usage/feature補完、通常+ASan/UBSan hostとnamed build/link/ELF確認PASS。i03部分scopeはcleared、whole p016はuncleared（実機hash未確認）。native AAC/H.264 runtimeとapp移管はまだ未実装。Q1統合・共有投影pending。
 
 [Q1向け統合記録](handoff-20261010.md): 実装commit eb14468e3、mainの別sessionによるdesign第3版との競合を保存。design以外のpatchのapply --checkはPASS、未適用。
+
+### 2026-10-10 継続: AAC入力の独立部品
+
+ユーザー「続けてください。」によりp003 bitsとp005 ASC/ADTS/PCE/Huffman runtimeのpartial scopeを実行。PCM/画像/sound/全ops移管は未完。新しいmain設計第3版/review-002と別sessionのws編集を読み取り確認して保存。Q1との意味の統合はpending。
+
+## 2026-10-10 AAC入力の部分結果
+
+[bits/AAC入力の証拠](aac-input-result-20261010.md)。p003 i04とp005 i05の有限partial scopeをclearedとして終了、wholeはuncleared。private sourceはlibmediaへ通常build登録し、host plain/ASan/UBSan・warning0 build・exports/C全文reviewを確認。PCM/暗黙FIL SBR/CRC/全parser/backend/app移管/H.264の残件は保存。現役host試験は[run-host-aac-input.sh](tests/run-host-aac-input.sh)と[host-aac-input.c](tests/host-aac-input.c)。main `ee7df65dc`の第3版WS/designとの意味の統合、Master/共有Queue/Guardrail/GitHubはQ1へpending。
