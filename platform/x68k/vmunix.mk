@@ -22,7 +22,7 @@ M68K_USER_CFLAGS := -m68030 -msoft-float -ffreestanding -fno-pic -fno-pie \
 	-fno-builtin -fno-common -ffunction-sections -fdata-sections \
 	-Os -Wall -Wextra -Werror
 M68K_USER_CPPFLAGS := -nostdinc -Iinclude -Isrc -I. \
-	-Iinclude/libc -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
+	-Iinclude/libc -DKERN_UAPI_NATIVE -DHAL_ARCH_M68K -DKERN_USER_ABI_M68K \
 	-DKERN_USER_PAGE_SIZE=4096 \
 	-DKERN_NO_PRINTF_FLOAT
 
@@ -304,8 +304,11 @@ $(BUILD)/bin/$(1): $(X68K_CRT0_OBJ) $(X68K_USER_RUNTIME_OBJS) \
 	@test -z "$$$$($(M68K_NM) -u $$@)" || { $(M68K_NM) -u $$@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine m68k $$@
 endef
-$(foreach command,$(USER_BASIC_COMMANDS),\
+$(foreach command,$(sort $(USER_BASIC_COMMANDS) sysctl mount),\
 	$(eval $(call X68K_USER_BASIC_COMMAND,$(command))))
+$(BUILD)/bin/umount: $(BUILD)/bin/mount
+	cp $< $@
+
 $(BUILD)/bootloader/x68k/%.o: bootloader/x68k/%.S bootloader/x68k/boot-layout.h
 	@mkdir -p $(dir $@)
 	$(M68K_CC) $(M68K_CPPFLAGS) -m68030 -msoft-float -ffreestanding \
@@ -371,8 +374,11 @@ $(BUILD)/zedbsd-x68k.hd: $(BUILD)/stage1.bin $(BUILD)/stage2.bin \
  --stage1 $(BUILD)/stage1.bin --stage2 $(BUILD)/stage2.bin \
  --kernel $(BUILD)/vmunix --shell $(BUILD)/bin/sh $@
 
-X68K_ROOTFS_FILES := --file /bin/sh=$(BUILD)/bin/sh
-$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,m68k,$(BUILD)/bin/sh,$(X68K_ROOTFS_FILES)))
+# X68k currently implements only the static user ABI.
+ZEDBSD_ROOTFS_DYNAMIC := n
+include platform/common/userland-rootfs.mk
+X68K_ROOTFS_FILES := $(ZEDBSD_ROOTFS_FILES)
+$(eval $(call ZEDBSD_ROOTFS_TREE_RULE,m68k,$(ZEDBSD_ROOTFS_INPUTS),$(X68K_ROOTFS_FILES)))
 
 rootfs: $(BUILD)/rootfs/.stamp
 

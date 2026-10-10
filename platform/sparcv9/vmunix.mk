@@ -85,7 +85,7 @@ SPARCV9_STAGE2_OBJS := $(BUILD)/boot/stage2/stage2-entry.o \
 	$(BUILD)/boot/stage2/stage2.o $(BUILD)/boot/stage2/handoff.o \
 	$(BUILD)/boot/stage2/ofw.o
 
-SPARCV9_USER_CFLAGS := $(SPARCV9_CFLAGS) -fno-builtin \
+SPARCV9_USER_CFLAGS := $(SPARCV9_CFLAGS) -DKERN_UAPI_NATIVE -fno-builtin \
 	-ffunction-sections -fdata-sections
 SPARCV9_USER_RUNTIME_SOURCES := userland/base/libc/posix.c userland/base/libc/dlfcn.c userland/base/libc/static-tls.c userland/base/libc/poll.c \
 	userland/base/libc/termios.c \
@@ -298,7 +298,7 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 # ELF64 runtime linker and shared libc for the SPARC V9 userland.
 SPARCV9_DYNAMIC_DIR := $(BUILD)/dynamic
 SPARCV9_DYNAMIC_CPPFLAGS := -nostdinc -I. -Iinclude \
-	-Iinclude/libc -DHAL_ARCH_SPARCV9 -DKERN_USER_ABI_SPARCV9 \
+	-Iinclude/libc -DKERN_UAPI_NATIVE -DHAL_ARCH_SPARCV9 -DKERN_USER_ABI_SPARCV9 \
 	-DKERN_USER_ABI_LP64 -DKERN_USER_PAGE_SIZE=8192 \
 	-DKERN_DYNAMIC_LIBC
 SPARCV9_DYNAMIC_CFLAGS := -m64 -mcpu=ultrasparc -mstack-bias \
@@ -494,23 +494,9 @@ $(BUILD)/boot/stage2.elf: $(SPARCV9_STAGE2_OBJS) \
 $(BUILD)/boot/stage2.bin: $(BUILD)/boot/stage2.elf
 	$(SPARCV9_OBJCOPY) -O binary $< $@
 
-SPARCV9_ROOTFS_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
-	$(SPARCV9_DYNAMIC_DIR)/ld.so $(SPARCV9_DYNAMIC_DIR)/libc.so \
-	$(SPARCV9_DYNAMIC_DIR)/tlstest.so $(SPARCV9_DYNAMIC_DIR)/dyntest \
-	$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
-	$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
-	$(SPARCV9_DYNAMIC_DIR)/verstest.so \
-	$(SPARCV9_DYNAMIC_DIR)/versuse.so
-SPARCV9_ROOTFS_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
-	--file /lib/ld.so=$(SPARCV9_DYNAMIC_DIR)/ld.so \
-	--file /lib/libc.so=$(SPARCV9_DYNAMIC_DIR)/libc.so \
-	--file /lib/tlstest.so=$(SPARCV9_DYNAMIC_DIR)/tlstest.so \
-	--file /bin/dyntest=$(SPARCV9_DYNAMIC_DIR)/dyntest \
-	--file /lib/alt/rpathdep.so=$(SPARCV9_DYNAMIC_DIR)/alt/rpathdep.so \
-	--file /lib/rpthtest.so=$(SPARCV9_DYNAMIC_DIR)/rpathtest.so \
-	--file /lib/verstest.so=$(SPARCV9_DYNAMIC_DIR)/verstest.so \
-	--file /lib/versuse.so=$(SPARCV9_DYNAMIC_DIR)/versuse.so
+include platform/common/userland-rootfs.mk
+SPARCV9_ROOTFS_INPUTS := $(ZEDBSD_ROOTFS_INPUTS)
+SPARCV9_ROOTFS_FILES := $(ZEDBSD_ROOTFS_FILES)
 $(eval $(call ZEDBSD_ROOTFS_TREE_RULE,sparcv9,$(SPARCV9_ROOTFS_INPUTS),$(SPARCV9_ROOTFS_FILES)))
 
 rootfs: $(BUILD)/rootfs/.stamp
@@ -581,3 +567,5 @@ $(BUILD)/ufs-root-hdd-image.img: $(BUILD)/vmunix $(BUILD)/bin/sh \
 $(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
 	@mkdir -p $(dir $@)
 	$(SPARCV9_CC) $(SPARCV9_CPPFLAGS) $(SPARCV9_CFLAGS) -MMD -MP -c $< -o $@
+
+$(eval $(call ZEDBSD_LIBUTIL_RULE,$(SPARCV9_DYNAMIC_DIR),$(SPARCV9_LD),-m elf64_sparc -T $(SPARCV9_PLATFORM)/dynamic-plt.ld -z max-page-size=8192,sparcv9))

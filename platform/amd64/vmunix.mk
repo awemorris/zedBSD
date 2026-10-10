@@ -1055,38 +1055,9 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 .PHONY: dynamic-userland-check
 
 AMD64_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/amd64.img
-AMD64_ARCH_INPUTS := $(BUILD)/bin/sh \
-	$(BUILD)/bin/sysctl \
-	$(BUILD)/bin/mount $(BUILD)/bin/umount \
-	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/libutil.so \
-	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest \
-	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
-	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
-AMD64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
-	--file /sbin/mount=$(BUILD)/bin/mount \
-	--file /sbin/umount=$(BUILD)/bin/umount \
-	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
-	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
-	--file /lib/libutil.so=$(DYNAMIC_DIR)/libutil.so \
-	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
-	--file /lib/alt/rpathdep.so=$(DYNAMIC_DIR)/alt/rpathdep.so \
-	--file /lib/rpthtest.so=$(DYNAMIC_DIR)/rpathtest.so \
-	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
-	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
-	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
-AMD64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
-AMD64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AMD64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-AMD64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AMD64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USER_STATIC_COMMANDS))
-AMD64_ARCH_FILES += $(foreach command,$(USER_STATIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AMD64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
-AMD64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
-AMD64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
-AMD64_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
-AMD64_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
+include platform/common/userland-rootfs.mk
+AMD64_ARCH_INPUTS := $(ZEDBSD_ROOTFS_INPUTS)
+AMD64_ARCH_FILES := $(ZEDBSD_ROOTFS_FILES)
 # E-127: a test image may replace rc.conf and add files (a oneshot service) from the command line:
 #   make ... ZEDBSD_TEST_RC_CONF=plan/ws031/tests/vkprobe-rc.conf \
 #            ZEDBSD_TEST_EXTRA_FILES='--file /etc/service.d/vkprobe=plan/ws031/tests/vkprobe-service' \

@@ -945,10 +945,11 @@ $(ZEDBSD_ARCH_IMAGE_CONFIG_STAMP): FORCE_ZEDBSD_ROOTFS_CONFIG
  programs='$(strip $(ZEDBSD_USER_PROGRAMS))'; \
  data='$(strip $(ZEDBSD_USERLAND_DATA_FILES))'; \
  files='$(strip $(ZEDBSD_PACKAGE_FILES))'; \
+ platform_files='$(strip $(ZEDBSD_ROOTFS_FILES))'; \
  modes='$(strip $(ZEDBSD_USERLAND_FILE_MODES))'; \
  links='$(strip $(ZEDBSD_PACKAGE_LINKS))'; \
  development='$(ZEDBSD_ROOTFS_DEVELOPMENT)'; \
- value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;data=$$data;files=$$files;modes=$$modes;links=$$links;development=$$development"; \
+ value="platform=$$platform;architecture=$$architecture;board=$$board;programs=$$programs;data=$$data;files=$$files;platform_files=$$platform_files;modes=$$modes;links=$$links;development=$$development"; \
  if ! test -f $@ || ! grep -Fqx -- "$$value" $@; then \
  printf '%s\n' "$$value" > $@.tmp; \
  mv $@.tmp $@; \
@@ -1144,6 +1145,8 @@ $(1): $(BUILD)/rootfs/.stamp $(ARCH_UFS_IMAGE_TOOLS)
  --backend $$(abspath $$(ZEDBSD_IMAGE_HOST)) --force \
  --profile $(2) --output $$@ --tree $(BUILD)/rootfs
 endef
+
+include platform/common/userland-runtime.mk
 
 ifneq ($(strip $(ZEDBSD_PLATFORM)),)
 include $(PLATFORM_MAKEFILE)

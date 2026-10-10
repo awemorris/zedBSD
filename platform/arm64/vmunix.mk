@@ -558,33 +558,9 @@ dynamic-userland-check: $(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
 	@echo "zedBSD aarch64 dynamic userland artifacts: PASS"
 .PHONY: dynamic-userland-check
 
-AARCH64_ARCH_INPUTS := $(BUILD)/bin/sh $(BUILD)/bin/sysctl \
-	$(BUILD)/bin/mount $(BUILD)/bin/umount \
-	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/libc.so \
-	$(DYNAMIC_DIR)/tlstest.so $(DYNAMIC_DIR)/dyntest \
-	$(DYNAMIC_DIR)/alt/rpathdep.so $(DYNAMIC_DIR)/rpathtest.so \
-	$(DYNAMIC_DIR)/verstest.so $(DYNAMIC_DIR)/versuse.so
-AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
-	--file /sbin/mount=$(BUILD)/bin/mount \
-	--file /sbin/umount=$(BUILD)/bin/umount \
-	--file /lib/ld.so=$(DYNAMIC_DIR)/ld.so \
-	--file /lib/libc.so=$(DYNAMIC_DIR)/libc.so \
-	--file /lib/tlstest.so=$(DYNAMIC_DIR)/tlstest.so \
-	--file /lib/alt/rpathdep.so=$(DYNAMIC_DIR)/alt/rpathdep.so \
-	--file /lib/rpthtest.so=$(DYNAMIC_DIR)/rpathtest.so \
-	--file /lib/verstest.so=$(DYNAMIC_DIR)/verstest.so \
-	--file /lib/versuse.so=$(DYNAMIC_DIR)/versuse.so \
-	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
-AARCH64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
-AARCH64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS) $(USER_STATIC_TARGETS)
-AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS) $(USER_STATIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AARCH64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
-AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
-AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
-AARCH64_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
-AARCH64_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
+include platform/common/userland-rootfs.mk
+AARCH64_ARCH_INPUTS := $(ZEDBSD_ROOTFS_INPUTS)
+AARCH64_ARCH_FILES := $(ZEDBSD_ROOTFS_FILES)
 $(eval $(call ZEDBSD_ROOTFS_TREE_RULE,aarch64,$(AARCH64_ARCH_INPUTS),$(AARCH64_ARCH_FILES)))
 AARCH64_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/aarch64.ufs
 $(eval $(call ZEDBSD_ROOTFS_UFS_IMAGE_RULE,$(AARCH64_ARCH_UFS_IMAGE),aarch64))

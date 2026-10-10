@@ -5,18 +5,7 @@
 # stay identical on amd64 and arm64; libc, rtld and assembly stay platform-owned.
 DYNAMIC_PORTABLE_PROGRAMS := vkdemo vkvideo-probe media-probe display-events wayland wltest acquire-fence-test gpu-forge-test menu-probe keiland-settings keiland-system printtest keiland-notify mediastorage fidoctl passkey-fido2 titlebar-probe popup-probe subsurface-probe seat-probe tablet-probe data-probe extras-probe wlshm keiland-ime ime-probe mview terminal files settings monitor notes pdfviewer imageview videoplayer music photos phone calendar mailer textedit kuidemo browser browser-probe glxtest zgears egltest glescompute xserver gpu-fence-test gpu-share-test
 
-# The utility library.  It holds what is not part of the C library and not
-# wanted by every program, and is built from the same tree so that the two
-# cannot drift apart.
-DYNAMIC_LIBUTIL_OBJS := $(DYNAMIC_DIR)/obj/src/libc/libutil.o
-
-$(DYNAMIC_DIR)/libutil.so: $(DYNAMIC_LIBUTIL_OBJS) $(DYNAMIC_DIR)/libc.so \
-	tools/build/check-dynamic-elf.py
-	$(LD) $(DYNAMIC_LINK_LDFLAGS) -shared -soname libutil.so --hash-style=both -Bsymbolic-functions \
- -z defs -z now -z relro -z separate-code -z stack-size=0x100000 \
- $(DYNAMIC_LIBUTIL_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine $(DYNAMIC_ELF_MACHINE) \
- --role shared-library --needed libc.so --soname libutil.so $@
+$(eval $(call ZEDBSD_LIBUTIL_RULE,$(DYNAMIC_DIR),$(LD),$(DYNAMIC_LINK_LDFLAGS),$(DYNAMIC_ELF_MACHINE)))
 
 # Wayland client transport is a normal shared dependency of the Vulkan WSI.
 DYNAMIC_WAYLAND_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libwayland-client)

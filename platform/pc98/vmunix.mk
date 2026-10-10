@@ -237,33 +237,9 @@ USER_BASIC_COMMANDS := $(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_BASIC_PROGRAM
 USER_BASIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_BASIC_COMMANDS))
 
 I386_ARCH_IMAGE := $(ARCH_IMAGE_DIR)/i386.img
-I386_ARCH_INPUTS := $(BUILD)/bin/sh \
-	$(BUILD)/bin/sysctl $(BUILD)/bin/mount $(BUILD)/bin/umount \
-	$(BUILD)/dynamic/ld.so $(BUILD)/dynamic/libc.so \
-	$(BUILD)/dynamic/tlstest.so $(BUILD)/dynamic/dyntest \
-	$(BUILD)/dynamic/alt/rpathdep.so $(BUILD)/dynamic/rpathtest.so \
-	$(BUILD)/dynamic/verstest.so $(BUILD)/dynamic/versuse.so
-I386_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
-	--file /sbin/sysctl=$(BUILD)/bin/sysctl \
-	--file /sbin/mount=$(BUILD)/bin/mount \
-	--file /sbin/umount=$(BUILD)/bin/umount \
-	--file /lib/ld.so=$(BUILD)/dynamic/ld.so \
-	--file /lib/libc.so=$(BUILD)/dynamic/libc.so \
-	--file /lib/tlstest.so=$(BUILD)/dynamic/tlstest.so \
-	--file /lib/alt/rpathdep.so=$(BUILD)/dynamic/alt/rpathdep.so \
-	--file /lib/rpthtest.so=$(BUILD)/dynamic/rpathtest.so \
-	--file /lib/verstest.so=$(BUILD)/dynamic/verstest.so \
-	--file /lib/versuse.so=$(BUILD)/dynamic/versuse.so \
-	--file /bin/dyntest=$(BUILD)/dynamic/dyntest
-I386_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
-I386_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-I386_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-I386_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-I386_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
-I386_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
-I386_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
-I386_ARCH_INPUTS += $(ZEDBSD_BASE_DATA_INPUTS)
-I386_ARCH_FILES += $(ZEDBSD_BASE_DATA_FILES)
+include platform/common/userland-rootfs.mk
+I386_ARCH_INPUTS := $(ZEDBSD_ROOTFS_INPUTS)
+I386_ARCH_FILES := $(ZEDBSD_ROOTFS_FILES)
 $(eval $(call ZEDBSD_ARCH_IMAGE_RULE,$(I386_ARCH_IMAGE),i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 $(eval $(call ZEDBSD_ROOTFS_TREE_RULE,i386,$(I386_ARCH_INPUTS),$(I386_ARCH_FILES)))
 I386_ARCH_UFS_IMAGE := $(ZEDBSD_ROOTFS_IMAGE_DIR)/i386.ufs
@@ -812,3 +788,5 @@ $(BUILD)/userland/%.o: userland/%.c $(ZEDBSD_SYSROOT_I386)/.zedbsd-sysroot-compl
 
 # Preserve the CPU architecture in uname -m; identify this platform in -v/-a.
 $(BUILD)/userland/base/uname/main.o: OBJ_CPPFLAGS += -DKERN_UNAME_PC98
+
+$(eval $(call ZEDBSD_LIBUTIL_RULE,$(DYNAMIC_DIR),$(LD),-m elf_i386,i386))

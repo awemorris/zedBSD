@@ -31,3 +31,7 @@ libbrowserと全DSO依存の実arm64 build/ELF検査PASS、warning/error 0。共
 rpi4-config-build-20261011-i01 cleared。現在configのライブラリ/選択app/static preview、kernel、承認済みNoct、外部package、rootfs、SD imageの通常make -j16が完了。イメージ終盤の固定256MiB容量不足もこのconfigのbuild修正として、FAT配置/root開始LBAを保って必要な大きさへ伸長。最終root199MiB、SD image328MiB。
 `make check-disk-image`でMBR/FAT/収録payload/UFS byte一致PASS。最終変更全文の規則review、Python syntax、amd64移動recipeの逆置換全文一致、ELF arm64 alias/異CPU拒否、diff-check PASS。変更coreのcompiler警告0、外部packageの既存warningとtoolchain固定/未bootの制限は[証拠](../tests/rpi4-build-20261011.md)に記録。
 main統合は具体的WIP commitの承認待ち。共有Master/Queue/Past Log投影とGitHub公開はQ1へ保留。WS全体p003/実機受入をこのbuildのみでclearにしない。
+
+## Runtime follow-up / 2026-10-11
+
+RPi4 UAT写真でssh-keygenの依存不足を確認。上記のlibutil copyはpackageリンク用で、arm64 rootへの収録が抜けていた。p008の当時のbuild-only結果/clearedは保持し、[p010](../phase010/phase.md)でruntime配置とCPU共通rootfs manifestを補完。p008のbuild成功をOpenSSH実行成功とはしない。構造の追加と結果はWS記録へ反映、shared投影/GitHubはQ1 pending。
