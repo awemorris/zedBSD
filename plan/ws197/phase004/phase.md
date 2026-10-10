@@ -638,3 +638,10 @@ P1〜P7 はクリック「全部推しどおり」: P1 app が閉じている間
 - 承認済み手順で元の実機daemonを`/tmp/bluetoothd-ws197-original`へ保存し、修正したbluetoothdを転送、stop/copy/start。09:08:44 UTCにMAP ready/MNS接続を確認。ユーザー最終回答「ゴミは消え、日本語も受信できました」を実機受信表示の合格として記録。本文/番号は証拠へ保存していない。
 - 最終host: MMS/bMessage抽出、MAP live notificationとlisting、backendのMMS flag、保存/reopen時のchannelを検証。CRLF/LFの実描画canvasを比較して差分0、別の本文では画素が変わることも確認。各PASS。named build warning0、最終変更source全文規約/format/style-check/diff-checkもPASS（[p005検証詳細](../phase005/phase.md)）。
 - 実機は旧beta2+ge8adcdfのcompositor/libkeiland/Phoneでdaemonだけ更新。日本語本文と末尾修正は実機確認済み、PH_MMS channelとPBAP/改行の新Phone描画はhostとbuild確認。新desktop全体の実機UATはp008に残す。原本バックアップは残し、Phoneの既存履歴は書き換えない。
+
+## 2026-10-10 写真がファイル名になる現象の解析（実装範囲の追加は未承認）
+
+- ユーザー報告: 写真を受信すると画像ではなくファイル名になる。今回の依頼は解析。前回のMMSテキスト受信の受け入れを取り消す条件ではなく、画像添付は既存承認の対象外。
+- codeで確認: `map.c:map_run_get`はGetMessageで`Attachment=0`を送るため画像本体を要求しない。`mms.c:mms_part`は明示的attachmentとimage/*を読み飛ばし、text/plainだけを取り出す。MIMEヘッダーのfilename/nameを本文に写すコードは無い。従ってファイル名表示はスマホが返した代替text/plainである可能性が高いが、当該bMessageの構造は未取得なので断定しない。
+- `view.c:view_photo`は現状、図形でサンプル画像を描く仮表示。MMS画像の取得・保存・画像decode/表示へつながっていない。既存MAP/bMessageの全体上限65536byteも写真対応時には見直しが要る。
+- 必要な拡張: 添付を含むMAP取得、MIMEの画像partとテキストの対応づけ、bluetoothd→compositor→libkeiland→Phoneの添付中継、Phone所有の画像保存と既存decoderによる描画、写真を扱う受信上限/メモリの設計。新しいQueueの範囲として画像対応を承認する前に、許容形式/上限を具体化する。今回sourceと実機daemonは変更していない。

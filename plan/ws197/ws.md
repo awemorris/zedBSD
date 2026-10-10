@@ -97,3 +97,10 @@ p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/
 ## main統合確認（2026-10-10）
 
 実装/検証/完了記録のsource commit `6bca6f2a2`をmainへmerge `bee41dded`で統合した。merge前のmain `5e178dd17`のbeta2.md更新を保持。master/共有Queueは未変更、push/公開は行わない。変更sourceは検証したprivate treeと同一。Q1向けの残り投影/整理は既述どおり。
+
+## 2026-10-10 写真がファイル名になる現象の解析（実装範囲の追加は未承認）
+
+- ユーザー報告: 写真を受信すると画像ではなくファイル名になる。今回の依頼は解析。前回のMMSテキスト受信の受け入れを取り消す条件ではなく、画像添付は既存承認の対象外。
+- codeで確認: `map.c:map_run_get`はGetMessageで`Attachment=0`を送るため画像本体を要求しない。`mms.c:mms_part`は明示的attachmentとimage/*を読み飛ばし、text/plainだけを取り出す。MIMEヘッダーのfilename/nameを本文に写すコードは無い。従ってファイル名表示はスマホが返した代替text/plainである可能性が高いが、当該bMessageの構造は未取得なので断定しない。
+- `view.c:view_photo`は現状、図形でサンプル画像を描く仮表示。MMS画像の取得・保存・画像decode/表示へつながっていない。既存MAP/bMessageの全体上限65536byteも写真対応時には見直しが要る。
+- 必要な拡張: 添付を含むMAP取得、MIMEの画像partとテキストの対応づけ、bluetoothd→compositor→libkeiland→Phoneの添付中継、Phone所有の画像保存と既存decoderによる描画、写真を扱う受信上限/メモリの設計。新しいQueueの範囲として画像対応を承認する前に、許容形式/上限を具体化する。今回sourceと実機daemonは変更していない。
