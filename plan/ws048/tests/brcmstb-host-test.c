@@ -38,6 +38,10 @@
 
 static unsigned checks;
 
+/* Last DMA provider window captured before publication to the fake PCI core. */
+static uint64_t published_bus_offset;
+static uint64_t published_physical_limit;
+
 #define CHECK(expression)                                                   \
 	do {                                                                 \
 		checks++;                                                    \
@@ -153,6 +157,7 @@ static void test_configuration_access(void);
 static void test_mapping_and_interrupts(void);
 static void test_failures(void);
 static void test_multifunction(void);
+static void test_high_dma_alias(void);
 
 int
 main(
@@ -177,6 +182,16 @@ main(
 	test_mapping_and_interrupts();
 	test_failures();
 	test_multifunction();
+
+	/*
+	 * Retires the first published fixture before another publication
+	 * replaces it.
+	 */
+	free(published_host);
+	published_host = NULL;
+
+	/* Checks high aliases after retiring the preceding fixture. */
+	test_high_dma_alias();
 	free(firmware);
 	free(disabled);
 	printf("ws048-brcmstb: %u checks passed\n", checks);
@@ -530,6 +545,47 @@ test_failures(void)
 	model_reset(&scenario);
 	CHECK(drv_pci_brcmstb_start(&config, &host) == ENOSPC);
 	CHECK((registers[REG_SW_INIT / 4U] & SW_INIT_PERST) != 0);
+}
+
+/* Checks firmware PCI aliases without moving the driver's low CPU backing. */
+static void
+test_high_dma_alias(
+	void)
+{
+	struct drv_pci_brcmstb_config config;
+	struct drv_pci_brcmstb *host;
+	struct model_options scenario;
+	unsigned index;
+	int error;
+
+	/* Models a high inbound PCI base on either larger memory configuration. */
+	for (index = 0; index < 2U; index++) {
+		memset(&scenario, 0, sizeof(scenario));
+		scenario.bar0_size = 0x1000U;
+		model_reset(&scenario);
+		standard_config(&config);
+		config.inbound_pci_base = UINT64_C(0x100000000) << index;
+
+		/* Hardware and the published DMA provider must describe the same bus alias. */
+		error = drv_pci_brcmstb_start(&config, &host);
+		CHECK(error == 0);
+		CHECK(registers[REG_RC_BAR2_LO / 4U] == 17U);
+		CHECK(registers[REG_RC_BAR2_HI / 4U] == 1U << index);
+		error = drv_pci_brcmstb_publish(host);
+		CHECK(error == 0);
+		CHECK(published_bus_offset == config.inbound_pci_base);
+		CHECK(published_physical_limit == 0x7fffffffU);
+		CHECK(published_constraints.address_bits == 64U);
+		CHECK(published_constraints.coherent == 0);
+		free(host);
+		published_host = NULL;
+	}
+
+	/* Refuses an inbound region that wraps around the bus address space. */
+	standard_config(&config);
+	config.inbound_pci_base = UINT64_MAX - 0x1000U;
+	error = drv_pci_brcmstb_start(&config, &host);
+	CHECK(error == EINVAL);
 }
 
 /* A multifunction endpoint gets both functions' BARs, one after the other. */
@@ -1023,6 +1079,29 @@ spin_unlock_irqrestore(
 	CHECK(enabled == 1);
 	CHECK(lock_depth == 1);
 	lock_depth--;
+}
+
+/* Captures bus translation while preserving the ordinary DMA fixture. */
+int
+drv_dma_device_create_window(
+	const struct drv_dma_constraints *constraints,
+	uint64_t bus_offset,
+	uint64_t physical_limit,
+	struct drv_dma_device **result)
+{
+	int error;
+
+	/* Creates the fixture owner before publishing its translated window. */
+	error = drv_dma_device_create(constraints, result);
+	if (error != 0)
+		return error;
+
+	/* Records the parameters handed to the production DMA implementation. */
+	published_bus_offset = bus_offset;
+	published_physical_limit = physical_limit;
+
+	/* Succeeded: the fake PCI core can observe the complete DMA contract. */
+	return 0;
 }
 
 int

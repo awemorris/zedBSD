@@ -51,6 +51,15 @@ struct drv_dma_constraints {
 int drv_dma_device_create(const struct drv_dma_constraints *constraints,
 			  struct drv_dma_device **result);
 /*
+ * Creates an unpublished device whose bus addresses are physical addresses
+ * plus bus_offset. physical_limit is inclusive; zero adds no backing limit.
+ * The alias must preserve segment boundaries and allocation alignment.
+ * Identity callers keep using drv_dma_device_create with no layout change.
+ */
+int drv_dma_device_create_window(const struct drv_dma_constraints *constraints,
+				 uint64_t bus_offset, uint64_t physical_limit,
+				 struct drv_dma_device **result);
+/*
  * Destroy closes the device to new allocations and mappings.  EBUSY means an
  * operation or coherent allocation is still live; free the remaining buffers
  * and retry.  A device is not reopened after destruction has begun.  As with

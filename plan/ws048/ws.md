@@ -52,6 +52,7 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 | [ws048-p008](phase008/phase.md) | ユーザー報告のPCIe最初のMMIO読み出し例外を修正 | cleared（ユーザー実機でlogin到達、2026-10-11） | 現在main/config | API変更なし |
 | [ws048-p009](phase009/phase.md) | USB入力のactivationと選択済みclass driverの接続 | uncleared（source/build済み、実機入力待ち） | 現在main/config | API変更なし |
 | [ws048-p010](phase010/phase.md) | VL805起動時の非coherent DMA size契約と最終規約/build | cleared（source/buildのみ、実機未実施） | 現在main/configと実機写真 | API変更なし |
+| [ws048-p011](phase011/phase.md) | VL805 command completion / PCI DMA aliasとdoorbell flush | cleared（source/buildのみ、実機USB未確認） | main402598d27 / 実機log | HAL API不変 |
 | [ws048-p007](phase007/phase.md) | 規約の全文の確認と回帰、実機の結果の取りまとめ | planned | p002〜p006 | 不要 |
 
 注: QEMU の raspi4b は PCIe を持たない（DTB の PCIe の node を disabled にする）。p002〜p006 の動作の確認は実機だけで、
@@ -108,3 +109,11 @@ User explicitly instructed「mainにマージしてください。」for source 
 ## Main integration / 2026-10-11
 
 Current user「main仁藤剛してください。」を直前の7b16e364c統合承認への回答（mainに統合してください）として受領。clean main6b722f47eから修正7b16e364c53761f96a982797f88793f7f520dbb6へfast-forward統合、競合なし。先行read-only調査記録08e919a08も含む。main上で全8 source/test SHA256一致、source diffなし、現在config.mkが検証済みworktreeとbyte-identicalであることをread-back確認。前turnのwarning0 kernel buildと限定host checksが統合sourceに適用されるため追加のbuild/試験は行わない。sourceのmain統合は完了、先行の承認待ち表記は当時の履歴。新imageでの実機DHCP/SSH・USB入力受入は未達のまま、WS203/WS048はincomplete。pushなし。共有Master/Queue/history/FutureWork/GitHubはQ1投影保留。
+
+## 2026-10-11 Enable Slot timeoutの限定修正
+
+実機でcontroller start成功を確認し、p010のsource/build clearanceは保持。Enable Slot timeoutが新しい停止位置。[p011](phase011/phase.md)と[限定Queue](codex-command-repair-20261011.md)を追加。USB入力/WS受入は未達。共有投影/GitHubはQ1 pending。
+
+### p011 source/build result
+
+[p011](phase011/phase.md)の限定source/build criteria cleared。4/8GiB PCI aliasをCPU backingと分け、全doorbell readbackとtimeout状態logを追加。既存constraints layout/identity API/HAL/UAPIは維持。限定ASan/UBSan/LSan modelsと現在config warning0 kernel build、最終全文規約review PASS。[証拠](tests/command-repair-20261011.md)。新kernelのUSB復旧は未確認、WS incomplete。GPU実機logの2停止点は同証拠に保存し、GPU sourceは未変更。main承認・共有投影/GitHubはQ1 pending。

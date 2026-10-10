@@ -64,3 +64,7 @@ User reports sshd process startup and apparent link, with DHCP address missing. 
 ## Main integration / 2026-10-11
 
 Current user「main仁藤剛してください。」を直前の7b16e364c統合承認への回答（mainに統合してください）として受領。clean main6b722f47eから修正7b16e364c53761f96a982797f88793f7f520dbb6へfast-forward統合、競合なし。先行read-only調査記録08e919a08も含む。main上で全8 source/test SHA256一致、source diffなし、現在config.mkが検証済みworktreeとbyte-identicalであることをread-back確認。前turnのwarning0 kernel buildと限定host checksが統合sourceに適用されるため追加のbuild/試験は行わない。sourceのmain統合は完了、先行の承認待ち表記は当時の履歴。新imageでの実機DHCP/SSH・USB入力受入は未達のまま、WS203/WS048はincomplete。pushなし。共有Master/Queue/history/FutureWork/GitHubはQ1投影保留。
+
+## SSH physical evidence / 2026-10-11
+
+User reports Ethernet working and supplies 10.0.30.2. Read-only SSH succeeds (g402598d arm64); en0 UP/RUNNING, IPv4 assigned, 1000Mbps full-duplex, RX/TX counters both advance, errors/dropped zero. GENET ready/RX-TX enabled/link-up confirms p004 startup repair on hardware. DHCP lease origin and cable unplug/replug were not separately verified; p003 stays uncleared for remaining full physical criteria, WS incomplete. No remote mutation/restart. Shared projections/GitHub Q1 pending.

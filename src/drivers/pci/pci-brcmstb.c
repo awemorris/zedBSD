@@ -419,6 +419,8 @@ drv_pci_brcmstb_publish(
 	struct drv_pci_brcmstb *host)
 {
 	struct drv_dma_constraints constraints;
+	uint64_t bus_offset;
+	uint64_t physical_limit;
 	int error;
 
 	/* Refuses a missing host and a second publication. */
@@ -428,17 +430,33 @@ drv_pci_brcmstb_publish(
 		return EBUSY;
 
 	/*
-	 * Describes what devices can reach.  The inbound window starts at CPU 0
-	 * but PCI addresses from the outbound window upward are not system
-	 * memory, so DMA stays below 2 GiB, which every board's window covers.
-	 * The controller does not snoop the CPU caches.
+	 * Keeps backing below 2 GiB and inside the firmware's usable DMA range.
+	 * The inbound window starts at CPU 0, but its PCI address need not be
+	 * zero. Devices must receive that PCI alias rather than the CPU address.
+	 * Identity windows retain the existing 31-bit mask and the controller
+	 * never snoops the CPU caches.
 	 */
 	kern_memset(&constraints, 0, sizeof(constraints));
 	constraints.address_bits = BRCMSTB_DMA_ADDRESS_BITS;
 	constraints.max_segment_size = BRCMSTB_DMA_MAX_SEGMENT;
 	constraints.segment_boundary = 0;
 	constraints.coherent = 0;
-	error = drv_dma_device_create(&constraints, &host->dma);
+	bus_offset = host->config.inbound_pci_base;
+	physical_limit = (UINT64_C(1) << BRCMSTB_DMA_ADDRESS_BITS) - 1U;
+
+	/* Restricts allocations to memory that the device tree permits DMA to reach. */
+	if (physical_limit >= host->config.inbound_size)
+		physical_limit = host->config.inbound_size - 1U;
+
+	/* Accounts for the nonzero PCI alias in the device-visible address width. */
+	if (bus_offset != 0)
+		constraints.address_bits = 64U;
+
+	/* Publishes the translated DMA space after both windows are programmed. */
+	error = drv_dma_device_create_window(&constraints,
+					     bus_offset,
+					     physical_limit,
+					     &host->dma);
 	if (error != 0)
 		return error;
 
@@ -703,6 +721,10 @@ check_config(
 	if (config->inbound_cpu_base != 0)
 		return EINVAL;
 
+	/* Refuses an inbound alias whose last byte wraps around PCI address space. */
+	if (config->inbound_pci_base > UINT64_MAX - (config->inbound_size - 1U))
+		return EINVAL;
+
 	/* Succeeded: the controller can be programmed with this configuration. */
 	return 0;
 }
@@ -870,6 +892,13 @@ set_inbound_window(
 	/* Masks and clears the controller's own interrupts; nothing here uses them. */
 	register_write(host, BRCMSTB_INTR2_MASK_SET, 0xffffffffU);
 	register_write(host, BRCMSTB_INTR2_CLEAR, 0xffffffffU);
+
+	/* Exposes the firmware-selected DMA alias for physical diagnosis. */
+	kern_logf("pcie: brcmstb DMA PCI %llx CPU %llx size %llx window %llx\n",
+		  (unsigned long long)host->config.inbound_pci_base,
+		  (unsigned long long)host->config.inbound_cpu_base,
+		  (unsigned long long)host->config.inbound_size,
+		  (unsigned long long)window);
 
 	/* Succeeded: devices can reach system memory once the link is up. */
 	return 0;

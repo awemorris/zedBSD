@@ -34,8 +34,12 @@ struct dma_allocation {
 	struct dma_allocation *next;
 };
 
+/* A DMA owner keeps its address window and locked allocation list alive. */
 struct drv_dma_device {
 	struct drv_dma_constraints constraints;
+	/* Immutable bus alias and inclusive backing limit, set before publication. */
+	uint64_t bus_offset;
+	uint64_t physical_limit;
 	struct spinlock lock;
 	struct dma_allocation *allocations;
 	unsigned active_operations;
@@ -119,6 +123,59 @@ drv_dma_device_create(
 	spin_init(&device->lock, LOCK_RANK_DEVICE, "DMA allocation list");
 	*result = device;
 	/* Succeeded. */
+	return 0;
+}
+
+/*
+ * Creates a DMA owner for a translated bus window before publishing it.
+ * Existing identity callers retain their original constraints layout.
+ */
+int
+drv_dma_device_create_window(
+	const struct drv_dma_constraints *constraints,
+	uint64_t bus_offset,
+	uint64_t physical_limit,
+	struct drv_dma_device **result)
+{
+	struct drv_dma_device *device;
+	uint64_t maximum;
+	int error;
+
+	/* Requires an address width before converting the bus mask. */
+	if (constraints == NULL || result == NULL)
+		return EINVAL;
+
+	/* Refuses a mask width that cannot be expressed as a bus address. */
+	if (constraints->address_bits == 0 || constraints->address_bits > 64U)
+		return EINVAL;
+
+	/* Converts the device address width to an inclusive bus limit. */
+	maximum = UINT64_MAX;
+	if (constraints->address_bits < 64U)
+		maximum = (UINT64_C(1) << constraints->address_bits) - 1U;
+
+	/* Refuses an alias that the device cannot address. */
+	if (bus_offset > maximum)
+		return EINVAL;
+
+	/* Preserves allocation boundaries when translating to the bus. */
+	if (constraints->segment_boundary != 0) {
+		/* Refuses aliases that shift a segment across a bus boundary. */
+		if (bus_offset % constraints->segment_boundary != 0)
+			return EINVAL;
+	}
+
+	/* Acquires the ordinary DMA owner without publishing an incomplete window. */
+	error = drv_dma_device_create(constraints, &device);
+	if (error != 0)
+		return error;
+
+	/* Makes the translated window immutable before any caller can allocate. */
+	device->bus_offset = bus_offset;
+	device->physical_limit = physical_limit;
+	*result = device;
+
+	/* Succeeded: the caller owns one fully configured DMA window. */
 	return 0;
 }
 
@@ -235,7 +292,10 @@ drv_dma_alloc_coherent(
 	size_t page_size;
 	uint64_t maximum;
 	uint64_t boundary;
+	uint64_t bus_address;
 	int error;
+	int allocation_valid;
+	int release_error;
 
 	/* Handles the device availability. */
 	if (device == NULL || buffer == NULL || size == 0)
@@ -291,10 +351,26 @@ drv_dma_alloc_coherent(
 	/* Aligns the physical run for the page mapping and the device's requirement. */
 	if (alignment < page_size)
 		alignment = page_size;
+
+	/* Preserves the caller's alignment after translating to the bus alias. */
+	if (device->bus_offset % alignment != 0) {
+		kern_free(allocation);
+		device_operation_end(device);
+		return EINVAL;
+	}
+
+	/* Converts the bus mask into a CPU allocation limit without overflowing the alias. */
 	maximum = device->constraints.address_bits == 64U
 			  ? UINT64_MAX
 			  : ((UINT64_C(1) << device->constraints.address_bits) -
 			     1U);
+	maximum -= device->bus_offset;
+
+	/* Keeps backing inside the platform's reachable physical memory. */
+	if (device->physical_limit != 0 && maximum > device->physical_limit)
+		maximum = device->physical_limit;
+
+	/* Retains segment boundaries during the physical allocation. */
 	boundary = device->constraints.segment_boundary;
 
 	/*
@@ -308,17 +384,39 @@ drv_dma_alloc_coherent(
 	error = kern_pmem_alloc_limited(allocation_bytes, alignment, maximum,
 					(size_t)boundary,
 					&allocation->memory);
-	if (error != 0 ||
-	    !address_fits(device, allocation->memory.paddr,
-			  allocation->memory.size) ||
+
+	/* Validates backing before forming a potentially overflowing bus address. */
+	allocation_valid = 0;
+	bus_address = 0;
+	if (error == 0 &&
+	    allocation->memory.paddr <= maximum &&
+	    allocation->memory.size != 0) {
+		/* Checks the entire physical run against the platform's upper limit. */
+		if (allocation->memory.size - 1U <=
+		    maximum - allocation->memory.paddr) {
+			bus_address =
+			    allocation->memory.paddr + device->bus_offset;
+			allocation_valid =
+			    address_fits(device,
+					 bus_address,
+					 allocation->memory.size);
+		}
+	}
+
+	/* Rejects inaccessible backing or a payload crossing its bus boundary. */
+	if (error != 0 || !allocation_valid ||
 	    (device->constraints.segment_boundary != 0 &&
 	     size > device->constraints.segment_boundary -
-			     allocation->memory.paddr %
-				     device->constraints.segment_boundary)) {
-		/* Checks the hal pmem free result. */
-		if (allocation->memory.size != 0 &&
-		    kern_pmem_free(&allocation->memory) != 0)
-			__builtin_trap();
+			allocation->memory.paddr %
+			    device->constraints.segment_boundary)) {
+		/* Releases any rejected run before its allocation owner disappears. */
+		if (allocation->memory.size != 0) {
+			release_error = kern_pmem_free(&allocation->memory);
+			if (release_error != 0)
+				__builtin_trap();
+		}
+
+		/* Returns without publishing an address the device cannot reach. */
 		kern_free(allocation);
 		device_operation_end(device);
 
@@ -326,6 +424,7 @@ drv_dma_alloc_coherent(
 		return ENOMEM;
 	}
 
+	/* Retains the actual backing length for allocation accounting. */
 	allocation_bytes = allocation->memory.size;
 
 	/* Gives the CPU its view of the payload, uncached for a device that does not snoop. */
@@ -385,7 +484,7 @@ drv_dma_alloc_coherent(
 	spin_unlock_irqrestore(&device->lock, irq);
 
 	buffer->address = allocation->address;
-	buffer->device_address = allocation->memory.paddr;
+	buffer->device_address = bus_address;
 	buffer->size = size;
 	buffer->private_data[0] = (uintptr_t)allocation;
 	buffer->private_data[1] = 0;
@@ -539,8 +638,8 @@ drv_dma_map(
 		if (start < base || start - base > allocation->payload_size ||
 		    size > allocation->payload_size - (start - base))
 			continue;
-		mapping->segment.address =
-			allocation->memory.paddr + start - base;
+		mapping->segment.address = allocation->memory.paddr +
+					   device->bus_offset + start - base;
 		mapping->segment.length = size;
 		mapping->direction = direction;
 		spin_unlock_irqrestore(&device->lock, irq);

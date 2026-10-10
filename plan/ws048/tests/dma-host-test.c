@@ -55,12 +55,14 @@ static int refuse_unmap __attribute__((unused));
 static struct drv_dma_device *make_device(int coherent, unsigned address_bits);
 static void test_coherent_device(void);
 static void test_noncoherent_device(void);
+static void test_bus_alias(void);
 
 int
 main(void)
 {
 	test_coherent_device();
 	test_noncoherent_device();
+	test_bus_alias();
 	CHECK(pmem_outstanding == 0);
 	CHECK(uncached_outstanding == 0);
 	printf("ws048-dma%s: %u checks passed\n",
@@ -178,6 +180,122 @@ test_noncoherent_device(void)
 	(void)segment;
 	CHECK(drv_dma_device_destroy(device) == 0);
 #endif
+}
+
+/* Checks device-visible aliases through allocations, streaming maps and vectors. */
+static void
+test_bus_alias(
+	void)
+{
+	struct drv_dma_constraints constraints;
+	struct drv_dma_device *device;
+	struct drv_dma_buffer buffer;
+	struct drv_dma_mapping *mapping;
+	struct drv_dma_segment segment;
+	struct drv_dma_vector *vector;
+	uint64_t offset;
+	unsigned index;
+	unsigned scenarios;
+	int error;
+
+	/* Models both high aliases used by firmware with identity CPU backing. */
+	scenarios = 2U;
+#ifdef WS048_UNCACHED
+	scenarios = 4U;
+#endif
+	for (index = 0; index < scenarios; index++) {
+		offset = UINT64_C(0x100000000) << (index % 2U);
+		memset(&constraints, 0, sizeof(constraints));
+		constraints.address_bits = 36U;
+		constraints.max_segment_size = 16U * 1024U * 1024U;
+		constraints.coherent = 1;
+
+		/* Exercises the same translation through noncoherent CPU mappings. */
+		if (index >= 2U)
+			constraints.coherent = 0;
+
+		/* The CPU view stays low while hardware receives the high PCI address. */
+		error = drv_dma_device_create_window(&constraints,
+						     offset,
+						     PHYSICAL_BASE + PAGE - 1U,
+						     &device);
+		CHECK(error == 0);
+		error = drv_dma_alloc_coherent(device, 100U, 64U, &buffer);
+		CHECK(error == 0);
+		if (index < 2U) {
+			CHECK(buffer.address == ram);
+		} else {
+			CHECK(buffer.address == uncached_window);
+		}
+
+		CHECK(buffer.device_address == offset + PHYSICAL_BASE);
+		error = drv_dma_map(device,
+				    (uint8_t *)buffer.address + 8U,
+				    16U,
+				    DRV_DMA_TO_DEVICE,
+				    &mapping);
+		CHECK(error == 0);
+		error = drv_dma_mapping_segment(mapping, 0, &segment);
+		CHECK(error == 0);
+		CHECK(segment.address == buffer.device_address + 8U);
+		drv_dma_unmap(device, mapping);
+		drv_dma_free_coherent(device, &buffer);
+
+		/* A vector preserves the bus alias and cannot allocate past the CPU limit. */
+		error = drv_dma_vector_create(device, PAGE, &vector);
+		CHECK(error == 0);
+		error = drv_dma_vector_segment(vector, 0, &segment);
+		CHECK(error == 0);
+		CHECK(segment.address == offset + PHYSICAL_BASE);
+		error = drv_dma_vector_free(vector);
+		CHECK(error == 0);
+		error =
+		    drv_dma_alloc_coherent(device, 2U * PAGE, PAGE, &buffer);
+		CHECK(error == ENOMEM);
+		error = drv_dma_device_destroy(device);
+		CHECK(error == 0);
+	}
+
+	/* Rejects an alias outside the device's bus mask before allocating backing. */
+	constraints.address_bits = 32U;
+	error = drv_dma_device_create_window(&constraints,
+					     offset,
+					     PHYSICAL_BASE + PAGE - 1U,
+					     &device);
+	CHECK(error == EINVAL);
+
+	/* Refuses a translated address whose mask leaves no room for physical RAM. */
+	constraints.address_bits = 64U;
+	offset = UINT64_MAX - PAGE + 1U;
+	error = drv_dma_device_create_window(&constraints,
+					     offset,
+					     PHYSICAL_BASE + PAGE - 1U,
+					     &device);
+	CHECK(error == 0);
+	error = drv_dma_alloc_coherent(device, PAGE, PAGE, &buffer);
+	CHECK(error == ENOMEM);
+	error = drv_dma_device_destroy(device);
+	CHECK(error == 0);
+
+	/* Segment boundaries and requested alignment must survive translation. */
+	offset = 8U;
+	constraints.segment_boundary = PAGE;
+	constraints.max_segment_size = PAGE;
+	error = drv_dma_device_create_window(&constraints,
+					     offset,
+					     PHYSICAL_BASE + PAGE - 1U,
+					     &device);
+	CHECK(error == EINVAL);
+	constraints.segment_boundary = 0;
+	error = drv_dma_device_create_window(&constraints,
+					     offset,
+					     PHYSICAL_BASE + PAGE - 1U,
+					     &device);
+	CHECK(error == 0);
+	error = drv_dma_alloc_coherent(device, 64U, PAGE, &buffer);
+	CHECK(error == EINVAL);
+	error = drv_dma_device_destroy(device);
+	CHECK(error == 0);
 }
 
 /*

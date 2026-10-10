@@ -301,6 +301,8 @@ static void xhci_sg_enqueue(struct xhci_ring *ring, const struct xhci_request *r
 static void xhci_request_release(struct xhci_controller *, struct xhci_request *);
 static uint8_t rd8(volatile uint8_t *b, unsigned o);
 static uint32_t rd32(volatile uint8_t *b, unsigned o);
+static void xhci_ring_doorbell(struct xhci_controller *controller, unsigned slot, uint32_t target);
+static void xhci_command_timeout_report(struct xhci_controller *controller);
 static void wr32(volatile uint8_t *b, unsigned o, uint32_t v);
 static void wr8(volatile uint8_t *b, unsigned o, uint8_t v);
 static void wr64(volatile uint8_t *b, unsigned o, uint64_t v);
@@ -524,8 +526,14 @@ rd32(
 	volatile uint8_t *b,
 	unsigned o)
 {
-	/* Returns the computed result. */
-	return *(volatile uint32_t *)(b + o);
+	uint32_t register_value;
+
+	/* Orders later DMA reads after the device register has been observed. */
+	register_value = *(volatile uint32_t *)(b + o);
+	kern_io_read_barrier();
+
+	/* Succeeded: the caller sees the ordered device register. */
+	return register_value;
 }
 /* Writes one 32-bit controller register. */
 static void
@@ -557,6 +565,86 @@ wr64(
 {
 	wr32(b, o, (uint32_t)v);
 	wr32(b, o + 4U, (uint32_t)(v >> 32));
+}
+
+/* Completes a posted PCI doorbell before the caller waits for DMA events. */
+static void
+xhci_ring_doorbell(
+	struct xhci_controller *controller,
+	unsigned slot,
+	uint32_t target)
+{
+	unsigned offset;
+
+	/* Delivers ring publication across the bridge, then flushes the posted write. */
+	offset = slot * 4U;
+	wr32(controller->doorbells, offset, target);
+	(void)rd32(controller->doorbells, offset);
+}
+
+/* Captures the command and event engine state after command admission has failed. */
+static void
+xhci_command_timeout_report(
+	struct xhci_controller *controller)
+{
+	uint32_t usb_status;
+	uint32_t command_control;
+	uint32_t command_high;
+	uint32_t interrupt_management;
+	uint32_t event_control;
+	unsigned event_index;
+	unsigned event_cycle;
+	uint16_t pci_command;
+	int error;
+	bool enabled;
+
+	/* Samples the PCI and xHCI engines without acknowledging or resetting them. */
+	pci_command = 0;
+	error = drv_pci_device_config_read16(controller->pci,
+					     XHCI_PCI_COMMAND,
+					     &pci_command);
+	if (error != 0) {
+		kern_logf("xhci: timeout PCI command read failed (%d)\n",
+			  error);
+	}
+
+	/* Reads controller status even when PCI configuration is unavailable. */
+	usb_status = rd32(controller->operational, XHCI_USBSTS);
+	command_control = rd32(controller->operational, XHCI_CRCR);
+	command_high = rd32(controller->operational, XHCI_CRCR + 4U);
+	interrupt_management = rd32(controller->runtime, 0x20U);
+
+	/* Keeps the event cursor and expected cycle consistent with IRQ consumption. */
+	enabled = kern_irq_disable();
+	event_lock(controller);
+
+	event_index = controller->event_dequeue;
+	event_cycle = controller->event_cycle;
+	event_control = controller->events[event_index].control;
+
+	event_unlock(controller);
+
+	/* Restores delivery after the protected cursor snapshot. */
+	if (enabled)
+		kern_irq_enable();
+
+	/* Distinguishes stopped/faulted DMA from an event-ring or PCI command failure. */
+	kern_logf("xhci: timeout USBSTS=%08x CRCR=%08x:%08x IMAN=%08x PCI=%04x "
+		  "read=%d\n",
+		  usb_status,
+		  command_high,
+		  command_control,
+		  interrupt_management,
+		  (unsigned)pci_command,
+		  error);
+	kern_logf("xhci: timeout command=%llx event=%llx ERST=%llx dequeue=%u "
+		  "cycle=%u control=%08x\n",
+		  (unsigned long long)controller->command.dma.device_address,
+		  (unsigned long long)controller->event_memory.device_address,
+		  (unsigned long long)controller->erst_memory.device_address,
+		  event_index,
+		  event_cycle,
+		  event_control);
 }
 /* Takes the controller behind a host controller handle. */
 static struct xhci_controller *
@@ -1115,7 +1203,7 @@ command_ex(
 	c->command_address = command_address;
 	c->command_event_ready = 0;
 	event_unlock(c);
-	wr32(c->doorbells, 0, 0);
+	xhci_ring_doorbell(c, 0, 0);
 	/* Process each element required by the operation. */
 	for (n = 0; n < XHCI_TIMEOUT; n++) {
 		event_lock(c);
@@ -1213,6 +1301,7 @@ command_ex(
 	if (result == ETIMEDOUT) {
 		kern_logf("xhci: command %u timed out\n",
 			   (control >> 10) & 0x3fU);
+		xhci_command_timeout_report(c);
 	}
 
 	/* Returns the computed result. */
@@ -2887,7 +2976,7 @@ xhci_endpoint_restart_empty(
 	 * publish Running before either recovery succeeds or cancelled DMA
 	 * ownership is released.
 	 */
-	wr32(c->doorbells, d->slot * 4U, dci | (stream << 16));
+	xhci_ring_doorbell(c, d->slot, dci | (stream << 16));
 	deadline = sched_ticks() + kern_ms_to_ticks(XHCI_WAIT_MS);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
@@ -3815,7 +3904,7 @@ xhci_urb_enqueue(
 
 	/* Rings the endpoint, unless a suspend holds it: the resume rings every endpoint (ws052-p004). */
 	if (c->suspend_state == XHCI_SUSPEND_NONE)
-		wr32(c->doorbells, d->slot * 4U, dci | (r->stream_id << 16));
+		xhci_ring_doorbell(c, d->slot, dci | (r->stream_id << 16));
 
 	/* Leaves the endpoint's recovery window. */
 	xhci_recovery_leave_locked(c, ep);
@@ -6840,13 +6929,16 @@ xhci_resume_endpoints(
 
 			/* An endpoint without streams is rung once. */
 			if (endpoint->maximum_stream_id == 0) {
-				wr32(c->doorbells, device->slot * 4U, dci);
+				xhci_ring_doorbell(c, device->slot, dci);
 				continue;
 			}
 
 			/* Rings each stream. */
-			for (stream = 1; stream <= endpoint->maximum_stream_id; stream++)
-				wr32(c->doorbells, device->slot * 4U, dci | (stream << 16));
+			for (stream = 1; stream <= endpoint->maximum_stream_id; stream++) {
+				xhci_ring_doorbell(c,
+						   device->slot,
+						   dci | (stream << 16));
+			}
 		}
 	}
 

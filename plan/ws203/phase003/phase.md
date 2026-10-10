@@ -24,3 +24,7 @@ User reports sshd now starts after the independent WS193 libutil fix, but DHCP a
 ## Physical result / 2026-10-11
 
 User写真でPHY認識後GENET initialization failed21、MMIO release failed3を確認。en0登録前なのでDHCP/SSH受入は未達、p003はuncleared。既存自動network起動定義は共通、net lan enable未実行との推測は写真で更新。[p004](../phase004/phase.md)が既存HAL IRQとMMIO契約を修正しsource/buildまでclear。新imageで有線LAN/DHCP/SSH再試験がresume条件、既存成果を実機成功とはしない。
+
+## SSH physical evidence / 2026-10-11
+
+User reports Ethernet working and supplies 10.0.30.2. Read-only SSH succeeds (g402598d arm64); en0 UP/RUNNING, IPv4 assigned, 1000Mbps full-duplex, RX/TX counters both advance, errors/dropped zero. GENET ready/RX-TX enabled/link-up confirms p004 startup repair on hardware. DHCP lease origin and cable unplug/replug were not separately verified; p003 stays uncleared for remaining full physical criteria, WS incomplete. No remote mutation/restart. Shared projections/GitHub Q1 pending.
