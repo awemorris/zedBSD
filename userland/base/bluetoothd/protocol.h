@@ -32,8 +32,12 @@
  * PHONE STATE, PHONE MESSAGE with its text, PHONE SENT, PHONE
  * MESSAGE-GONE, PHONE DROPPED), PHONE PAGE messages since=N [limit=N]
  * [cursor=C] count=N, PHONE READ handle=H and PHONE SEND to="N" length=N
- * followed by the text's bytes.  The daemon's phone lines are up to 2047
- * bytes, and a line ending in length=N is followed by N bytes.  A
+ * followed by the text's bytes.  ws197-p005 adds PHONE PAGE contacts
+ * [cursor=C] count=N and PHONE PAGE calls since=N [cursor=C] count=N
+ * (plan/ws197/phase005/phase.md section 5.2: PHONE CONTACT with its
+ * reduced vCard, PHONE CALL-LOG, PHONE PAGE-END), and contacts= and
+ * contacts_why= in SHOW's and STATE's line.  The daemon's phone lines are
+ * up to 2047 bytes, and a line with length=N is followed by N bytes.  A
  * pairing's questions, to the agent or the pairing's client, name the
  * device and who started it:
  *

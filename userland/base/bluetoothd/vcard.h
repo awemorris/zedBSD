@@ -136,6 +136,7 @@ struct btd_vcard_call {
 };
 
 int btd_vcard_next(const uint8_t *body, size_t length, size_t *at, size_t *card_start, size_t *card_length);
+unsigned btd_vcard_count(const uint8_t *body, size_t length);
 int btd_vcard_contact_read(const uint8_t *card, size_t length, struct btd_vcard_contact *contact);
 int btd_vcard_reduce(const struct btd_vcard_contact *contact, char *output, size_t size, size_t *used);
 int btd_vcard_call_read(const uint8_t *card, size_t length, int folder_kind, struct btd_vcard_call *call);

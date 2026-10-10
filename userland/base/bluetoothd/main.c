@@ -38,6 +38,7 @@
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/phone.h"
 #include "userland/base/bluetoothd/phonemux.h"
+#include "userland/base/bluetoothd/pbap.h"
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/linkmgr.h"
@@ -240,6 +241,10 @@ static int btd_messages_wanted(void *context);
 static int btd_messages_sdp(void *context, uint16_t uuid);
 static int btd_messages_open(void *context, unsigned server_channel);
 static int btd_profiles_sdp(void *context, uint16_t uuid);
+static int btd_contacts_wanted(void *context);
+static int btd_contacts_address(void *context, uint8_t *address);
+static int btd_contacts_sdp(void *context, uint16_t uuid);
+static int btd_contacts_open(void *context, unsigned server_channel);
 static int btd_profiles_open(void *context, unsigned server_channel);
 static void btd_profiles_close(void *context, unsigned dlci);
 static int btd_messages_write(void *context, unsigned dlci, const uint8_t *data, size_t length, size_t *written);
@@ -318,6 +323,16 @@ static struct btd_map btd_messages;
  */
 static struct btd_phonemux btd_profiles;
 static unsigned btd_messages_child;
+
+/*
+ * The PBAP client on the phone link (ws197-p005 section 5): started when
+ * the link is ready and the owner wants contacts, its pages answered to
+ * the clients through main's hooks (MAP's, which do not depend on the
+ * profile); and its index among the mux's children.  They live as long as
+ * the daemon.
+ */
+static struct btd_pbap btd_contacts;
+static unsigned btd_contacts_child;
 
 /*
  * What the phone's subscribers were told last (the line of PHONE STATE,
@@ -426,7 +441,9 @@ main(
 	struct btd_phone_profile phone_profile;
 	struct btd_phonemux_hooks mux_hooks;
 	struct btd_map_hooks map_hooks;
+	struct btd_pbap_hooks pbap_hooks;
 	uint32_t first_session;
+	uint32_t first_generation;
 	char expired_text[24];
 	size_t pending;
 	unsigned count;
@@ -563,6 +580,38 @@ main(
 	phone_profile.open_failed = btd_map_open_failed;
 	(void)btd_phonemux_add(&btd_profiles, &phone_profile, &btd_messages_child);
 
+	/* The PBAP client, its cursors' generations from a number drawn now; MAP's hooks where they serve it too. */
+	memset(&pbap_hooks, 0, sizeof(pbap_hooks));
+	pbap_hooks.clock = btd_messages_clock;
+	pbap_hooks.wall = btd_messages_wall;
+	pbap_hooks.local_offset = btd_messages_offset;
+	pbap_hooks.wanted = btd_contacts_wanted;
+	pbap_hooks.address = btd_contacts_address;
+	pbap_hooks.sdp_query = btd_contacts_sdp;
+	pbap_hooks.dlc_open = btd_contacts_open;
+	pbap_hooks.dlc_write = btd_messages_write;
+	pbap_hooks.dlc_close = btd_messages_close;
+	pbap_hooks.answer = btd_messages_answer;
+	pbap_hooks.room = btd_messages_room;
+	pbap_hooks.up = btd_messages_up;
+	pbap_hooks.log = btd_messages_log;
+	btd_random(NULL, (uint8_t *)&first_generation, sizeof(first_generation));
+	btd_pbap_init(&btd_contacts, &pbap_hooks, first_generation);
+
+	/* The PBAP client as the mux's second child. */
+	memset(&phone_profile, 0, sizeof(phone_profile));
+	phone_profile.context = &btd_contacts;
+	phone_profile.ready = btd_pbap_ready;
+	phone_profile.ended = btd_pbap_ended;
+	phone_profile.sdp_done = btd_pbap_sdp_done;
+	phone_profile.accept = btd_pbap_accept;
+	phone_profile.opened = btd_pbap_opened;
+	phone_profile.data = btd_pbap_data;
+	phone_profile.writable = btd_pbap_writable;
+	phone_profile.closed = btd_pbap_closed;
+	phone_profile.open_failed = btd_pbap_open_failed;
+	(void)btd_phonemux_add(&btd_profiles, &phone_profile, &btd_contacts_child);
+
 	/* The mux as the phone link's profile. */
 	btd_phonemux_profile(&btd_profiles, &phone_profile);
 	btd_phone_set_profile(&btd_phone_link, &phone_profile);
@@ -649,6 +698,9 @@ main(
 
 		/* MAP's timers (its DLCs to close, OBEX's answers, the attempts after failures, the slow clients). */
 		btd_map_tick(&btd_messages, now);
+
+		/* PBAP's timers, the same kinds. */
+		btd_pbap_tick(&btd_contacts, now);
 
 		/* The link manager's refused page scan write, and a page nobody ended in time. */
 		if (btd_session_open && btd_session.state == BTD_STATE_READY) {
@@ -986,6 +1038,11 @@ btd_timeout(
 
 	/* MAP's next timer (its own clock is the same). */
 	deadline = btd_map_deadline(&btd_messages);
+	if (deadline != 0U && (earliest == 0U || deadline < earliest))
+		earliest = deadline;
+
+	/* PBAP's next timer. */
+	deadline = btd_pbap_deadline(&btd_contacts);
 	if (deadline != 0U && (earliest == 0U || deadline < earliest))
 		earliest = deadline;
 	deadline = btd_linkmgr_deadline(&btd_links, now);
@@ -2343,8 +2400,9 @@ btd_phone_link_request(
 	btd_log("bluetoothd: phone link of %s %s by uid %u\n", address_text, switched, (unsigned)client->uid);
 	btd_write(client, "DONE\n");
 
-	/* MAP follows the switch and the profiles (stopped, started, or a failed one tried again at once). */
+	/* MAP and PBAP follow the switch and the profiles (stopped, started, or a failed one tried again at once). */
 	btd_map_check(&btd_messages);
+	btd_pbap_check(&btd_contacts);
 }
 
 /* Gives the name of a uid's account (the phone link's hook).  Returns 0 or ENOENT. */
@@ -2640,8 +2698,12 @@ btd_client_close(
 	client->waits_connect = 0;
 
 	/* Its phone request is forgotten (an answer still to come reaches nobody), and it subscribes no more. */
-	if (client->waits_phone)
+	if (client->waits_phone) {
 		btd_map_cancel(&btd_messages, btd_token(index));
+		btd_pbap_cancel(&btd_contacts, btd_token(index));
+	}
+
+	/* It waits for nothing and hears nothing more. */
 	client->waits_phone = 0;
 	client->subscribed = 0;
 	client->sub_dropped = 0;
@@ -3348,6 +3410,8 @@ btd_phone_line(
 {
 	char phone[BTD_PHONEIO_OUT_MAX];
 	char messages[96];
+	char contacts[96];
+	char both[200];
 	const char *whole;
 	const char *own_why;
 	int error;
@@ -3369,17 +3433,23 @@ btd_phone_line(
 	if (error != 0)
 		messages[0] = '\0';
 
+	/* PBAP's part after it (ws197-p005 section 5.4). */
+	error = btd_pbap_state_text(&btd_contacts, contacts, sizeof(contacts));
+	if (error != 0)
+		contacts[0] = '\0';
+	(void)snprintf(both, sizeof(both), "%s %s", messages, contacts);
+
 	/* Why the link stopped, when MAP says no why of its own. */
 	own_why = strstr(messages, " why=");
 	if (btd_phone_link.why != NULL &&
 	    btd_phone_link.state != BTD_PHONE_READY &&
 	    own_why == NULL) {
-		(void)snprintf(line, size, "%s%s %s why=%s", prefix, phone + strlen("PHONE "), messages, btd_phone_link.why);
+		(void)snprintf(line, size, "%s%s %s why=%s", prefix, phone + strlen("PHONE "), both, btd_phone_link.why);
 		return 0;
 	}
 
 	/* Succeeded: the whole line. */
-	(void)snprintf(line, size, "%s%s %s", prefix, phone + strlen("PHONE "), messages);
+	(void)snprintf(line, size, "%s%s %s", prefix, phone + strlen("PHONE "), both);
 	return 0;
 }
 
@@ -3434,18 +3504,24 @@ btd_phone_watch(void)
 			if (!closes[index])
 				continue;
 			client = &btd_clients[index];
-			if (client->waits_phone)
+			if (client->waits_phone) {
 				btd_map_cancel(&btd_messages, btd_token((int)index));
+				btd_pbap_cancel(&btd_contacts, btd_token((int)index));
+			}
+
+			/* Closed at the round's end. */
 			client->waits_phone = 0;
 			client->dead = 1;
 		}
 
-		/* MAP looks again whether it is wanted. */
+		/* MAP and PBAP look again whether they are wanted. */
 		btd_map_check(&btd_messages);
+		btd_pbap_check(&btd_contacts);
 	}
 
 	/* The pages waiting for their clients' room. */
 	btd_map_pump(&btd_messages);
+	btd_pbap_pump(&btd_contacts);
 
 	/* Each subscriber whose queue is short again hears what it lost. */
 	subscribers = 0U;
@@ -3539,7 +3615,9 @@ btd_phone_page_request(
 	int64_t since;
 	unsigned limit;
 	unsigned count;
+	unsigned what;
 	int have_since;
+	int have_limit;
 	int allowed;
 	int error;
 	int got;
@@ -3553,9 +3631,27 @@ btd_phone_page_request(
 		return;
 	}
 
-	/* The messages, the only kind of this Phase. */
+	/* What is read: messages (MAP), contacts or calls (PBAP, ws197-p005 section 5.2). */
+	what = 0U;
+	cursor = argument;
 	same = strncmp(argument, "messages", 8U);
-	if (same != 0 || (argument[8] != ' ' && argument[8] != '\0')) {
+	if (same == 0 && (argument[8] == ' ' || argument[8] == '\0'))
+		cursor = argument + 8;
+	same = strncmp(argument, "contacts", 8U);
+	if (same == 0 && (argument[8] == ' ' || argument[8] == '\0')) {
+		what = BTD_PBAP_WHAT_CONTACTS;
+		cursor = argument + 8;
+	}
+
+	/* The calls. */
+	same = strncmp(argument, "calls", 5U);
+	if (same == 0 && (argument[5] == ' ' || argument[5] == '\0')) {
+		what = BTD_PBAP_WHAT_CALLS;
+		cursor = argument + 5;
+	}
+
+	/* None of them. */
+	if (cursor == argument) {
 		btd_write(client, "ERROR argument\nDONE\n");
 		return;
 	}
@@ -3564,9 +3660,9 @@ btd_phone_page_request(
 	have_since = 0;
 	since = 0;
 	limit = BTD_PAGE_LIMIT;
+	have_limit = 0;
 	count = 0U;
 	cursor_text[0] = '\0';
-	cursor = argument + 8;
 	for (;;) {
 		got = btd_phoneio_next(&cursor, key, sizeof(key), value, sizeof(value));
 		if (got == BTD_PHONEIO_END)
@@ -3609,6 +3705,7 @@ btd_phone_page_request(
 		same = strcmp(key, "limit");
 		if (same == 0) {
 			limit = (unsigned)number;
+			have_limit = 1;
 			continue;
 		}
 
@@ -3624,15 +3721,33 @@ btd_phone_page_request(
 		return;
 	}
 
-	/* since and count given. */
-	if (!have_since || count == 0U) {
+	/* A count given; since too, except for contacts; a limit only for messages. */
+	if (count == 0U) {
 		btd_write(client, "ERROR argument\nDONE\n");
 		return;
 	}
 
-	/* Asked of MAP, the client waiting for its DONE (a refusal answered now). */
+	/* since for messages and calls. */
+	if (!have_since && what != BTD_PBAP_WHAT_CONTACTS) {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* A limit for messages alone. */
+	if (have_limit && what != 0U) {
+		btd_write(client, "ERROR argument\nDONE\n");
+		return;
+	}
+
+	/* Asked of MAP or PBAP, the client waiting for its DONE (a refusal answered now). */
 	client->waits_phone = 1;
-	refused = btd_map_page(&btd_messages, btd_token(index), since, limit, cursor_text, count);
+	if (what == 0U) {
+		refused = btd_map_page(&btd_messages, btd_token(index), since, limit, cursor_text, count);
+	} else {
+		refused = btd_pbap_page(&btd_contacts, btd_token(index), what, since, cursor_text, count);
+	}
+
+	/* A refusal answered now, the client waiting no more. */
 	if (refused != NULL) {
 		client->waits_phone = 0;
 		btd_write(client, "ERROR %s\nDONE\n", refused);
@@ -3749,6 +3864,74 @@ btd_messages_wanted(
 
 	/* Wanted. */
 	return 1;
+}
+
+/* Tells PBAP whether contacts are wanted: a valid record that is on, with its contacts (ws197-p005 section 8). */
+static int
+btd_contacts_wanted(
+	void *context)
+{
+	UNUSED_PARAMETER(context);
+
+	/* No valid record. */
+	if (!btd_phone_link.have_record || !btd_phone_link.record_valid)
+		return 0;
+
+	/* Off, or without contacts. */
+	if (!btd_phone_link.record.enabled)
+		return 0;
+	if ((btd_phone_link.record.profiles & BTD_PHONEREC_CONTACTS) == 0U)
+		return 0;
+
+	/* Wanted. */
+	return 1;
+}
+
+/* Gives PBAP the phone's address on the link (its record's).  Returns 0, or ENOENT without a record. */
+static int
+btd_contacts_address(
+	void *context,
+	uint8_t *address)
+{
+	UNUSED_PARAMETER(context);
+
+	/* No record. */
+	if (!btd_phone_link.have_record)
+		return ENOENT;
+
+	/* Succeeded: the record's phone. */
+	memcpy(address, btd_phone_link.record.address, BTD_ADDRESS_BYTES);
+	return 0;
+}
+
+/* PBAP's SDP query, through the mux. */
+static int
+btd_contacts_sdp(
+	void *context,
+	uint16_t uuid)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The mux's query for PBAP. */
+	error = btd_phonemux_sdp_query(&btd_profiles, btd_contacts_child, uuid);
+	return error;
+}
+
+/* PBAP's DLC asked for, through the mux. */
+static int
+btd_contacts_open(
+	void *context,
+	unsigned server_channel)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The mux's DLC for PBAP. */
+	error = btd_phonemux_dlc_open(&btd_profiles, btd_contacts_child, server_channel);
+	return error;
 }
 
 /* MAP's SDP query, on the phone link. */

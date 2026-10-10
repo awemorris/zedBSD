@@ -71,6 +71,7 @@ static void test_arguments(void);
 static void test_length(void);
 static void test_input(void);
 static void test_rules(void);
+static void test_items(void);
 
 /*
  * Runs every part and reports the checks.
@@ -83,6 +84,7 @@ main(void)
 	test_length();
 	test_input();
 	test_rules();
+	test_items();
 
 	/* The count of what failed. */
 	printf("bt-phoneio-host-test: %u checks, %u failed\n", checks, failures);
@@ -475,4 +477,45 @@ test_rules(void)
 	check(btd_phoneio_accept(1001, 1, 4U, 4U, 6U, 4U), "rules: the seat's user into the reserve and past the share");
 	check(btd_phoneio_accept(0, 0, 1U, 4U, 9U, 4U), "rules: root");
 	check(!btd_phoneio_accept(0, 0, 0U, 4U, 0U, 4U), "rules: no slot at all");
+}
+
+/*
+ * The item lines of PBAP (ws197-p005 section 5.2), byte for byte: the
+ * daemon's fields before the phone's strings, length before them, the
+ * call's length=0, the escapes, a line too long refused, and a name that
+ * looks like a field kept inside its quotes.
+ */
+static void
+test_items(void)
+{
+	char line[BTD_PHONEIO_OUT_MAX + 1U];
+	char name[400];
+	int error;
+	int same;
+
+	/* A contact. */
+	error = btd_phoneio_contact_line(line, sizeof(line), "0123456789abcdef", 2U, 120U, "+15551234", "Ann \"A\"");
+	same = strcmp(line, "PHONE CONTACT key=0123456789abcdef tels=2 length=120 peer=\"+15551234\" name=\"Ann \\\"A\\\"\"");
+	check(error == 0 && same == 0, "items: a contact's line");
+
+	/* A call, its zone a word and no text after it. */
+	error = btd_phoneio_call_line(line, sizeof(line), "fedcba9876543210", "missed", 1704110400, "phone", 0, "20240101T120000Z", "+15559999", "Bob");
+	same = strcmp(line, "PHONE CALL-LOG key=fedcba9876543210 kind=missed time=1704110400 zone=phone partial=0 length=0 datetime=\"20240101T120000Z\" peer=\"+15559999\" name=\"Bob\"");
+	check(error == 0 && same == 0, "items: a call's line");
+
+	/* A name that looks like a field stays inside its quotes, after length. */
+	error = btd_phoneio_contact_line(line, sizeof(line), "0123456789abcdef", 1U, 5U, "1", "x length=999");
+	check(error == 0 && strstr(line, "length=5 peer=\"1\" name=\"x length=999\"") != NULL, "items: a field in a name stays a name");
+
+	/* A control byte escaped; a long name cut at 128 bytes. */
+	memset(name, 'n', sizeof(name) - 1U);
+	name[sizeof(name) - 1U] = '\0';
+	name[0] = '\n';
+	error = btd_phoneio_call_line(line, sizeof(line), "fedcba9876543210", "received", 0, "none", 1, "", "", name);
+	check(error == 0 && strstr(line, "name=\"\\x0a") != NULL, "items: a control byte escaped");
+	check(error == 0 && strlen(strstr(line, "name=\"")) == 6U + 4U + 127U + 1U, "items: a name cut at 128 bytes");
+
+	/* No room. */
+	error = btd_phoneio_contact_line(line, 40U, "0123456789abcdef", 1U, 5U, "1", "x");
+	check(error == ENOSPC, "items: a line without room refused");
 }
