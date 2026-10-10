@@ -1,7 +1,7 @@
 # ws197-p013: Bluetooth無応答の診断と復旧操作
 
 Parent: [../ws.md](../ws.md)
-Status: in-progress
+Status: cleared
 Disposition: normal
 Queue: [bluetooth-recovery-20261010](../codex-queue.md)
 Approval: 2026-10-10ユーザー「Bluetoothサブシステムが応答してないっぽい」「bluetoothdが固まってるならデーモン再起動の方法」「デバイスが固まってるなら、デバイスを開き直したりリセットしたりする方法が必要」。以前のSSH/実機更新/main統合承認を保持。
@@ -27,3 +27,8 @@ Verification bounds: 短いprivate host probeとnamed bt/bluetoothd build、実�
 実機の初回停止注入は親501/子502→watchdog log→親523/子524、HCI ready。CLIのalarm式はhostではPASSだがnativeでは12秒のSSH timeoutとなった。未達を保持し、socketをnonblocking、読み取りをdeadline付きpollとbufferへ変更。実機追加停止注入でbt showは5.11秒/exit2、13:36:13停止→13:36:28 watchdog→13:36:33 ready（親583/子584）。再起動完了前に先行したreopen/check/resetはsocket断/接続拒否で、device操作の成功には数えない。完了後のreopen・resetは各exit0、各直後のCHECKもexit0。
 
 スマホ側の接続削除はユーザー了承済みの現状として保持。bond/power設定を削除せず、desktop/Phone/sessiondを再起動せず実機bt/bluetoothdを更新。現象の元のblocking stack/根因は未確定。自動再起動は既存initの最大5failure restart制限を保つ。WS全体p009/HFP/PBAP/MMS送信は本scope外。共有Board/cache/GitHub投影はQ1。
+
+
+## Clearance / main read-back
+
+bt-recovery-i01 cleared。source/検証記録7fa0a0e9cをmainへfast-forwardし、HEADのread-back・clean treeを確認。限定criteria（CLI deadline/ fresh CHECK/REOPEN/RESET/親監視/host/全文規約/build/実機/main）は満たす。WS197全体はincomplete、shared Board/cache/GitHubの投影とIssue closeはQ1へ引き継ぎ。元hangの具体的根因が分かる新証拠は別の調査scopeで扱う。

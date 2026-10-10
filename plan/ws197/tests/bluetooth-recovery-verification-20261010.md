@@ -46,3 +46,5 @@ root親がmain-loopのALIVEを監視、通常15秒・firmware初期化90秒。st
 manual fallback: sudo service restart bluetoothd。fresh HCI診断: bt check。daemonは応答するがcontrollerをやり直したい時: bt reopen、bt reset（接続は一時切断）。CLI SHOW/CHECK5秒、REOPEN/RESET60秒、一般30秒/scan+15秒、pair/agentはhuman waitを保持。
 
 QEMU、image build、aggregate make check、負荷/耐久、full HID regressionsは未実施（今回の有限scope/user方針）。main統合後read-backはphase/Queue/WSに記録。GitHub/shared Board/cacheの投影はQ1、push無し。
+
+Source/証拠7fa0a0e9cをmainへfast-forward、HEAD read-back・clean tree確認。以後の変更はPhase/Queue/WSの結果記録のみ。

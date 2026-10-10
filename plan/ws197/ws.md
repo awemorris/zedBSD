@@ -8,9 +8,9 @@ Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex承認済み実行記録](codex-queue.md)、bluetooth-recovery-20261010 active。共有QueueはQ1が反映。
+Queue: [Codex承認済み実行記録](codex-queue.md)、bluetooth-recovery-20261010 finished。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005/p011/p012 cleared。媒体UAT修正をmain e654733f1へ統合、Phone起動SIGSEGVは実機修正版exit0。添付操作GUI UATは次回起動。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
+Resume point: p005/p011/p012/p013 cleared。Bluetooth無応答のroot親監視→init自動restart、bt check/reopen/reset、CLI deadlineをmain 7fa0a0e9cへ統合・実機更新済み。停止注入で自動復旧、CLI5秒timeout、reopen/reset後HCI ready。スマホ側の接続削除は現状維持。媒体UAT修正をmain e654733f1へ統合、Phone起動SIGSEGVは実機修正版exit0。添付操作GUI UATは次回起動。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -51,7 +51,7 @@ Resume point: p005/p011/p012 cleared。媒体UAT修正をmain e654733f1へ統合
 | [p010](phase010/phase.md) | MMS写真/動画送受信（受信統合済み、送信は未完。p012がviewer起動を補完） | — | in-progress |
 | [ws197-p011](phase011/phase.md) | Phoneの＋によるメディア選択とDnD・仮添付（ws157-p006 API出力に依存） | — | cleared |
 | [ws197-p012](phase012/phase.md) | 添付のdouble-click起動・draftサムネイル・captionなし写真の起動SIGSEGV修正 | — | cleared |
-| [ws197-p013](phase013/phase.md) | Bluetooth無応答の診断、daemon restartとdevice check/reopen/reset | — | in-progress |
+| [ws197-p013](phase013/phase.md) | Bluetooth無応答の診断、daemon restartとdevice check/reopen/reset、親監視→自動restart | — | cleared |
 
 関連の Bug: [BUG-282](../bugs/BUG-282.md)（WS143 の hid.c の page の途中の Connection Request の取り違え、p003 i03 と同じ形で直す）。Future Work: fw-bt-goep2（ERTM・GOEP 2.0、MAP 1.4・PBAP 1.2）、F-086（SUBSCRIBE の phone の分は p003）。
 
@@ -150,3 +150,8 @@ ws197-p012 cleared。source `e654733f1eb6e1296eacf34b5dff6002a5dd17e1` をmain�
 p013を追加。実機ではprocessが残りbt showが無応答、既存service restartでdaemon応答を回復。CLIのHCI checkとnode reopen/USB reset、有限待ちを追加する。ws143既存transport/UAPIを使用し、GUI/OS境界は変更しない。停止の根因とスマホ認証失敗は未確定、鍵の削除や再pairは行わない。今回の有限scopeの全文確認はp013で実施し、WS全体p009を代替しない。shared投影はQ1。
 
 2026-10-10追加設計: p013はユーザーの自動restart要求も含む。root親のALIVE/STARTING監視→子終了→init on-failureを利用する。sessiond/compositorの新権限操作は追加せず、スマホ接続削除はユーザー指示どおり現状維持。
+
+
+## 2026-10-10 Codex p013 clearance
+
+[p013](phase013/phase.md) / bt-recovery-i01 cleared。main 7fa0a0e9cへ統合しread-back済み。root親が15秒の処理進捗停止を検知→子TERM/3秒後KILL/reap→parent exit1、initが既存on-failureで再起動。実機でCLI5.11秒timeoutと約20秒でHCI readyへの復旧、bt reopen/reset各exit0を確認。sessiond/compositorへの新root API無し。build warning0、6source全文規約/manual/host PASS。[詳細証拠](tests/bluetooth-recovery-verification-20261010.md)。初回native CLI timeout未達を記録し、deadline pollへ修正して追加1回検証。既存init上限5failure restarts、元hang根因未確定を保持。スマホ再pair無し。今回のQueueはfinished、WS全体incompleteを維持しshared/remote投影はQ1。
