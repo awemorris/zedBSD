@@ -729,6 +729,8 @@ pair_event(
 			pair->fail_event = "ssp";
 			pair->fail_status = parameters[0];
 		}
+
+		/* The refusal the authentication's end gives. */
 		if (ours && parameters[0] != 0U && pair->refusal == NULL)
 			pair->refusal = "rejected";
 		break;
