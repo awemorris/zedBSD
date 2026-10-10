@@ -58,6 +58,16 @@
 #define BTD_PAIR_SMP_MS		30000U
 #define BTD_PAIR_AGENT_MS	25000U
 #define BTD_PAIR_PROBE_MS	2000U
+
+/*
+ * What btd_pair_start's phone asks (BUG-287): not a phone (0), a phone
+ * paired again with the numbers compared (never the stored key, ws197-p003
+ * section 3.2 N2), or a phone whose bond the same uid made in this run of
+ * the daemon with an authenticated key: its stored key is used, so the
+ * phone is not asked to pair again (its owner confirmed the numbers then).
+ */
+#define BTD_PAIR_PHONE		1
+#define BTD_PAIR_PHONE_OWN	2
 #define BTD_PAIR_CLOSE_MS	3000U
 
 /* Asks the agent (kind BTD_PAIR_ASK_*, the number); a confirmation or a consent is answered with btd_pair_answer. */
@@ -182,6 +192,7 @@ struct btd_pair {
 	 * the connection), which the PAIRED line ends with.
 	 */
 	int phone;
+	int phone_own;
 	uid_t uid;
 	btd_pair_phone_fn phone_handoff;
 	void *phone_context;
@@ -195,6 +206,16 @@ struct btd_pair {
 	 */
 	struct btd_linkmgr *linkmgr;
 	int paging;
+
+	/*
+	 * BUG-287: what failed a pairing, for the daemon's log (NULL: none
+	 * known): "agent" (the agent said no), "ssp" (Simple Pairing Complete)
+	 * or "auth" (Authentication Complete) with the controller's status;
+	 * and whether the pairing stored a new authenticated BR/EDR key.
+	 */
+	const char *fail_event;
+	unsigned fail_status;
+	int new_authenticated;
 };
 
 void btd_pair_init(struct btd_pair *pair, struct btd_session *session, const char *keys_folder, btd_pair_ask_fn ask, btd_pair_done_fn done, void *context, btd_random_fn random, void *random_context);

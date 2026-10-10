@@ -255,6 +255,9 @@ btd_pair_start(
 	pair->confirmed = 0;
 	pair->have_link_key = 0;
 	pair->refusal = NULL;
+	pair->fail_event = NULL;
+	pair->fail_status = 0U;
+	pair->new_authenticated = 0;
 	pair->probed = 0;
 	pair->key_size = 0U;
 	pair->answer[0] = '\0';
@@ -266,7 +269,12 @@ btd_pair_start(
 	 * the phone's SDP and RFCOMM channels held Pending until the handoff
 	 * (any other pairing refuses every channel, as before).
 	 */
-	pair->phone = phone;
+	pair->phone = 0;
+	if (phone != 0)
+		pair->phone = 1;
+	pair->phone_own = 0;
+	if (phone == BTD_PAIR_PHONE_OWN)
+		pair->phone_own = 1;
 	pair->uid = uid;
 	pair->phone_taken = 0;
 	pair->phone_why = NULL;
@@ -420,6 +428,8 @@ btd_pair_answer(
 
 	/* The refusal: the authentication's end says the rest. */
 	pair->refusal = "rejected";
+	if (pair->fail_event == NULL)
+		pair->fail_event = "agent";
 	pair_reply(pair, PAIR_CONFIRM_NEGATIVE, pair->address, NULL, 0U);
 }
 
@@ -715,6 +725,10 @@ pair_event(
 		if (length < 7U)
 			break;
 		ours = pair_ours(pair, parameters + 1);
+		if (ours && parameters[0] != 0U && pair->fail_event == NULL) {
+			pair->fail_event = "ssp";
+			pair->fail_status = parameters[0];
+		}
 		if (ours && parameters[0] != 0U && pair->refusal == NULL)
 			pair->refusal = "rejected";
 		break;
@@ -998,6 +1012,12 @@ pair_authenticated(
 	if (pair->state != PAIR_AUTHENTICATING || !pair->connected || connection != pair->handle)
 		return;
 
+	/* The status kept for the log (BUG-287), unless an earlier step failed. */
+	if (parameters[0] != 0U && pair->fail_event == NULL) {
+		pair->fail_event = "auth";
+		pair->fail_status = parameters[0];
+	}
+
 	/* A refusal this side named comes first (a debug key, a PIN, the agent's no). */
 	if (parameters[0] != 0U && pair->refusal != NULL) {
 		pair_fail(pair, pair->refusal);
@@ -1075,16 +1095,17 @@ pair_encryption(
 
 /*
  * Answers Link Key Request: the pairing's stored key, or none (the
- * controller pairs then).  A phone's pairing takes only an authenticated
- * stored key (ws197-p002 section 7.1): with a Just Works one the controller
- * runs Secure Simple Pairing again, so a phone that can confirm a number
- * gets a key the phone link takes.
+ * controller pairs then).  A phone's pairing takes no stored key but the
+ * authenticated one of a bond its uid made in this run (BUG-287); without
+ * it the controller runs Secure Simple Pairing again, so a phone that can
+ * confirm a number gets a key the phone link takes.
  */
 static void
 pair_key_request(
 	struct btd_pair *pair,
 	const uint8_t *address)
 {
+	int reusable;
 	int ours;
 
 	/* Another device, or no stored key: Negative Reply. */
@@ -1095,12 +1116,18 @@ pair_key_request(
 	}
 
 	/*
-	 * A phone's pairing never uses the stored key: Negative Reply, and the
-	 * numbers are compared anew, so the phone shows the pairing to its
+	 * A phone's pairing does not use the stored key: Negative Reply, and
+	 * the numbers are compared anew, so the phone shows the pairing to its
 	 * owner and nobody takes a bonded phone silently (ws197-p003 section
-	 * 3.2, review-2 N2).
+	 * 3.2, review-2 N2).  The exception is a bond the same uid made with
+	 * an authenticated key in this run (BTD_PAIR_PHONE_OWN, BUG-287): its
+	 * owner confirmed the numbers then, and a phone asked to pair again
+	 * while it keeps its own key may refuse.
 	 */
-	if (pair->phone) {
+	reusable = 0;
+	if (pair->phone_own && (pair->stored.link_key_type == PAIR_KEY_P192_MITM || pair->stored.link_key_type == PAIR_KEY_P256_MITM))
+		reusable = 1;
+	if (pair->phone && !reusable) {
 		pair_reply(pair, PAIR_LINK_KEY_NEGATIVE, address, NULL, 0U);
 		return;
 	}
@@ -1316,6 +1343,8 @@ pair_store_bredr(
 
 	/* Written whole. */
 	error = btd_keys_write(pair->keys_folder, pair->session->address, &bond);
+	if (error == 0)
+		pair->new_authenticated = bond.authenticated;
 	memset(&bond, 0, sizeof(bond));
 	if (error != 0)
 		pair_fail(pair, "store");
