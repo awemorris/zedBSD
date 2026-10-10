@@ -9,7 +9,7 @@
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
 - **2026-10-11（Q1）**: 体制は N=1 P1＋T1（P2 は WS083 を終えて退いた）。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する）。
-  - P1: branch agent/p1-ws197、worktree /home/awe/zedBSD-worktrees/p1。WS197 p005（PBAP）の i05（backend・compositor・libkeiland、KL_VERSION 80・KL_SYSTEM_MANAGER_VERSION 28 を Q1 が割当）を実行中。i01〜i04 と設計 v3.1 は main に merge 済み（1821cbd11）。再開は plan/ws197/phase005/phase.md の末尾。i06・i07 はユーザーの Pc1〜Pc6 待ち（推しを仮で入れてよい）。P1 の test runner は build/ws197-phone-host/ に pairkeys.*・pr.* を残すので Q1 が消す。
+  - P1: branch agent/p1-ws197、worktree /home/awe/zedBSD-worktrees/p1。WS197 p005（PBAP）の i06 後半（Phone app の store・名前の引き・同期の流れ）と i07（Settings）を実行中。i01〜i05 と i06 前半は main に merge 済み（a10f68c32、KL_VERSION 80・manager 28）。再開は plan/ws197/phase005/phase.md の末尾。i06・i07 はユーザーの Pc1〜Pc6 待ち（推しを仮で入れてよい）。P1 の test runner は build/ws197-phone-host/ に pairkeys.*・pr.* を残すので Q1 が消す。
   - T1: branch agent/t1。今は依頼なし。WS143 の HID の回帰はもう流さない（ユーザー）。
   - WS202（libmedia の mp4・m4a）は設計だけ完了（第 4 版、review 3 回）、ユーザーの H1〜H6・J1〜J10 待ち、実装は別のセッション。
 <!-- master:agents:end -->
