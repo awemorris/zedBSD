@@ -125,6 +125,17 @@ main(
 	return 0;
 }
 
+/*
+ * Supplies the store's diagnostics without retaining fixture message bodies.
+ */
+void
+ph_log(
+	const char *format,
+	...)
+{
+	(void)format;
+}
+
 /* Prints a check's outcome. */
 static void
 test_check(

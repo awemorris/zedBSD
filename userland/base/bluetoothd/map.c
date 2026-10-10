@@ -39,9 +39,10 @@
 #define MAP_ATTRIBUTE_TYPES		0x0316U
 #define MAP_ATTRIBUTE_FEATURES		0x0317U
 
-/* The message types of a MAS record (SupportedMessageTypes): SMS of GSM and of CDMA. */
+/* The message types of a MAS record (SupportedMessageTypes): GSM/CDMA SMS and MMS. */
 #define MAP_TYPES_SMS_GSM		0x02U
 #define MAP_TYPES_SMS_CDMA		0x04U
+#define MAP_TYPES_MMS			0x08U
 
 /*
  * The features of a MAS record (MapSupportedFeatures): notification
@@ -75,12 +76,12 @@
 #define MAP_TAG_MSE_TIME		0x19U
 
 /*
- * The values a listing asks with: e-mail and MMS left out (IM's bit is
+ * The values a listing asks with: e-mail left out (IM's bit is
  * reserved for a 1.1 phone), and the fields wanted: datetime, the
  * sender's and the recipient's names and addresses, type, reception
  * status and read.
  */
-#define MAP_FILTER_NOT_SMS		0x0cU
+#define MAP_FILTER_NOT_TEXT		0x04U
 #define MAP_PARAMETER_MASK		0x0000117eUL
 
 /* A message's text in UTF-8, without attachments; the read status set, as unread or read. */
@@ -303,7 +304,7 @@ btd_map_sdp_done(
 		error = btd_sdp_uint_attribute(sdp, BTD_SDP_UUID_MAS, nth, MAP_ATTRIBUTE_TYPES, &types);
 		if (error != 0)
 			continue;
-		if ((types & (MAP_TYPES_SMS_GSM | MAP_TYPES_SMS_CDMA)) == 0U)
+		if ((types & (MAP_TYPES_SMS_GSM | MAP_TYPES_SMS_CDMA | MAP_TYPES_MMS)) == 0U)
 			continue;
 
 		/* Its RFCOMM channel. */
@@ -461,6 +462,7 @@ btd_map_data(
 	if (dlci != 0U && dlci == map->mas_dlci) {
 		btd_obex_input(&map->mas, data, length, now);
 	} else if (dlci != 0U && dlci == map->mns_dlci) {
+		map_log(map, "map: MNS input bytes=%lu", (unsigned long)length);
 		btd_obex_input(&map->mns, data, length, now);
 	}
 
@@ -1726,7 +1728,7 @@ map_run_listing(
 	}
 
 	/* The filter of types and of time. */
-	map_parameter8(parameters, &used, MAP_TAG_FILTER_TYPE, MAP_FILTER_NOT_SMS);
+	map_parameter8(parameters, &used, MAP_TAG_FILTER_TYPE, MAP_FILTER_NOT_TEXT);
 	map_parameter(parameters, &used, MAP_TAG_FILTER_BEGIN, (const uint8_t *)begin, strlen(begin));
 
 	/* The fields wanted, for a listing that lists. */
@@ -2436,10 +2438,10 @@ map_page_continue(
 		return;
 	}
 
-	/* Each entry left: an SMS is fetched, anything else skipped. */
+	/* Each entry left: an SMS or MMS is fetched, other types are skipped. */
 	while (page->next_entry < page->entry_count) {
 		entry = &page->entries[page->next_entry];
-		if (entry->type != BTD_MAP_TYPE_SMS_GSM && entry->type != BTD_MAP_TYPE_SMS_CDMA) {
+		if (entry->type != BTD_MAP_TYPE_SMS_GSM && entry->type != BTD_MAP_TYPE_SMS_CDMA && entry->type != BTD_MAP_TYPE_MMS) {
 			page->skipped++;
 			page->next_entry++;
 			continue;
@@ -2706,8 +2708,11 @@ map_event(
 	unsigned old_folder;
 	int own;
 	int known;
-	int sms;
+	int text_message;
 	int pushing;
+
+	/* Records event classification without a handle, peer or message text. */
+	map_log(map, "map: event type=%d message-type=%d handle-present=%d", event->type, event->msg_type, event->has_handle);
 
 	/* Events about one message. */
 	if (!event->has_handle) {
@@ -2715,10 +2720,10 @@ map_event(
 		return;
 	}
 
-	/* SMS, and a PushMessage awaiting its answer. */
-	sms = 0;
-	if (event->msg_type == BTD_MAP_TYPE_SMS_GSM || event->msg_type == BTD_MAP_TYPE_SMS_CDMA)
-		sms = 1;
+	/* SMS or MMS text, and a PushMessage awaiting its answer. */
+	text_message = 0;
+	if (event->msg_type == BTD_MAP_TYPE_SMS_GSM || event->msg_type == BTD_MAP_TYPE_SMS_CDMA || event->msg_type == BTD_MAP_TYPE_MMS)
+		text_message = 1;
 	pushing = 0;
 	if (map->running && map->current.kind == BTD_MAP_OP_PUSH)
 		pushing = 1;
@@ -2726,9 +2731,9 @@ map_event(
 	/* Each kind of event. */
 	switch (event->type) {
 	case BTD_MAP_EVENT_NEW_MESSAGE:
-		/* An SMS of the inbox or the sent folder is fetched. */
+		/* A text message of the inbox or sent folder is fetched. */
 		known = map_folder_of(event->folder, &folder);
-		if (!sms ||
+		if (!text_message ||
 		    !known ||
 		    folder >= BTD_MAP_FOLDERS)
 			break;
@@ -2753,7 +2758,7 @@ map_event(
 		}
 
 		/* Else a message the phone's user sent. */
-		if (sms)
+		if (text_message)
 			map_live_start(map, event->handle, BTD_MAP_FOLDER_SENT);
 		break;
 	case BTD_MAP_EVENT_SENDING_SUCCESS:
@@ -2993,6 +2998,9 @@ map_item(
 	const char *name;
 	const char *zone;
 	const char *direction;
+	const char *type_field;
+	unsigned key_folder;
+	uint64_t key_value;
 	char key[20];
 	int64_t wall;
 	int64_t seconds;
@@ -3023,6 +3031,11 @@ map_item(
 			name = entry->recipient_name;
 	}
 
+	/* MMS keys have a separate identity domain; existing SMS keys stay stable. */
+	key_folder = folder;
+	if (message->type == BTD_MAP_TYPE_MMS)
+		key_folder |= 0x100U;
+
 	/* The phone's datetime, from the listing. */
 	if (entry != NULL)
 		datetime = entry->datetime;
@@ -3038,10 +3051,11 @@ map_item(
 		if (from == BTD_MAP_FROM_MSE)
 			zone = "mse";
 		partial = 0;
+		key_value = map_key(key_folder, datetime, peer, (const uint8_t *)message->text, message->text_length);
 		(void)snprintf(key,
 			       sizeof(key),
 			       "%016llx",
-			       (unsigned long long)map_key(folder, datetime, peer, (const uint8_t *)message->text, message->text_length));
+			       (unsigned long long)key_value);
 	} else {
 		seconds = wall;
 		zone = "received";
@@ -3067,17 +3081,23 @@ map_item(
 	if (folder == BTD_MAP_FOLDER_INBOX)
 		direction = "in";
 
+	/* Existing SMS metadata stays compatible; MMS carries an explicit type. */
+	type_field = "";
+	if (message->type == BTD_MAP_TYPE_MMS)
+		type_field = " type=mms";
+
 	/* The fields before the strings. */
 	written = snprintf(line,
 			   size,
-			   "PHONE MESSAGE handle=%08lx.%016llx key=%s folder=%s dir=%s time=%lld zone=%s datetime=",
+			   "PHONE MESSAGE handle=%08lx.%016llx key=%s folder=%s dir=%s time=%lld zone=%s%s datetime=",
 			   (unsigned long)map->session,
 			   (unsigned long long)handle,
 			   key,
 			   map_folder_names[folder],
 			   direction,
 			   (long long)seconds,
-			   zone);
+			   zone,
+			   type_field);
 	if (written < 0 || (size_t)written >= size)
 		return ENOSPC;
 	used = (size_t)written;
@@ -3681,8 +3701,10 @@ map_mns_put(
 
 	/* The report. */
 	error = btd_mapxml_event(body, body_length, &event);
-	if (error != 0)
+	if (error != 0) {
+		map_log(map, "map: event report rejected error=%d bytes=%lu", error, (unsigned long)body_length);
 		return BTD_OBEX_BAD_REQUEST;
+	}
 
 	/* Kept, or counted as lost when too many wait. */
 	if (map->event_count >= BTD_MAP_EVENTS_MAX) {

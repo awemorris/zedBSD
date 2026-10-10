@@ -17,7 +17,7 @@ U=userland/desktop
 K=$U/libkeiland/ui
 L=$U/libkeiland
 cc -std=c11 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror -I"$dir/inc" -I. -I$K -I$U/libtruetype \
-	plan/ws170/tests/host-phone.c plan/ws170/tests/host-phone-data.c $U/phone/view.c $U/phone/store.c \
+	plan/ws170/tests/host-phone.c plan/ws170/tests/host-phone-data.c $U/phone/view.c $U/phone/store.c $U/phone/phonebook.c \
 	$K/canvas.c $K/text.c $K/icons.c $K/icons-line.c $K/theme.c $K/input.c $K/scroll.c $K/scroll-bar.c \
 	$K/text-touch.c $K/text-bar.c $K/text-select.c $K/ui.c $K/widgets.c $K/field.c $K/list.c $K/cards.c \
 	$L/gesture.c $L/motion.c $L/scroll.c \

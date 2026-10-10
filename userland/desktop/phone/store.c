@@ -115,7 +115,9 @@ static int store_item_field(struct ph_item *item, const char *key, char *value);
 static int store_key_folder(const char *key, char *folder, size_t size);
 static int store_folder_key(const char *folder, char *key, size_t size);
 static int store_key_valid(const char *key);
-static int store_find_key(const char *key, long *contact, size_t *item);
+static int store_find_key(const char *source, const char *key, char prefix, long *contact, size_t *item);
+static int store_load_reserved(const char *id, const char *name);
+static long store_special_conversation(const char *id, const char *name, int create);
 static int store_candidate(long contact, const struct ph_phone_message *message, int with_source, size_t *item);
 static int store_same_words(const char *kept, const char *came);
 static int store_overlay(long contact, size_t item, const struct ph_phone_message *message, size_t *placed);
@@ -158,6 +160,14 @@ ph_store_open(
 	(void)snprintf(path, sizeof(path), "%s/sync", store_root);
 	(void)mkdir(path, 0700);
 
+	/* Preserves reserved histories regardless of directory iteration order at the bound. */
+	error = store_load_reserved("o", "Other numbers");
+	if (error != 0)
+		return error;
+	error = store_load_reserved("w", "No caller ID");
+	if (error != 0)
+		return error;
+
 	/* Everything in them: the contacts, then the numbers' conversations (ws197-p004b). */
 	error = store_load_contacts();
 	if (error != 0)
@@ -165,6 +175,12 @@ ph_store_open(
 	error = store_load_conversations();
 	if (error != 0)
 		return error;
+
+	/* Loads imported names without changing conversation membership. */
+	error = ph_phonebook_open(store_root);
+	if (error != 0)
+		return error;
+	ph_store_apply_phone_names();
 
 	/* Succeeded: the latest contact first. */
 	store_sort_contacts();
@@ -189,6 +205,9 @@ ph_store_close(void)
 		free(store_contacts[contact].name);
 		free(store_contacts[contact].number);
 	}
+
+	/* Releases the isolated imported copy and its lookup index. */
+	ph_phonebook_close();
 
 	/* The array. */
 	free(store_contacts);
@@ -476,6 +495,10 @@ ph_store_set_country(
 
 	/* Kept. */
 	(void)snprintf(store_country, sizeof(store_country), "%s", code);
+
+	/* Reinterprets imported national numbers in the new region. */
+	(void)ph_phonebook_reindex();
+	ph_store_apply_phone_names();
 }
 
 /*
@@ -620,9 +643,14 @@ ph_store_conversation(
 	if (!create)
 		return -1;
 
-	/* The folder and the conversation, named as the phone names the other side. */
+	/* Reserves one row for numbers arriving after the ordinary row limit. */
+	if (store_contact_count >= STORE_CONTACTS_MAX - 1U) {
+		error = (int)store_special_conversation("o", "Other numbers", 1);
+		return (long)error;
+	}
+
+	/* The conversation, named as the phone names the other side. */
 	(void)snprintf(path, sizeof(path), "%s/messages/%s", store_root, folder);
-	(void)mkdir(path, 0700);
 	shown = number;
 	if (name != NULL && name[0] != '\0')
 		shown = name;
@@ -630,6 +658,12 @@ ph_store_conversation(
 	if (error != 0)
 		return -1;
 	store_contacts[store_contact_count - 1U].conversation = 1;
+
+	/* Makes no orphan folder when the row cannot be allocated. */
+	error = mkdir(path, 0700);
+	if (error != 0 && errno != EEXIST)
+		ph_log("STORE conversation-folder error=%d", errno);
+	ph_store_apply_phone_names();
 
 	/* Succeeded: the new conversation. */
 	return (long)store_contact_count - 1L;
@@ -653,6 +687,7 @@ ph_store_phone_message(
 	int *merge)
 {
 	struct ph_item *kept;
+	char source[STORE_LINE_MAX];
 	size_t found;
 	size_t placed;
 	long conversation;
@@ -662,7 +697,8 @@ ph_store_phone_message(
 	int error;
 
 	/* A message from a number, with words, and a key that names a file. */
-	if (message->peer == NULL || message->peer[0] == '\0' || message->text == NULL || message->key == NULL)
+	if (message->peer == NULL || message->peer[0] == '\0' || message->text == NULL || message->key == NULL ||
+	    (message->channel != PH_SMS && message->channel != PH_MMS))
 		return EINVAL;
 	same = strcmp(message->key, "-");
 	partial = 0;
@@ -676,7 +712,8 @@ ph_store_phone_message(
 
 	/* Step 1: a message the store has by its key; read when the phone read it. */
 	if (!partial) {
-		matched = store_find_key(message->key, contact, item);
+		(void)snprintf(source, sizeof(source), "bt:%s:map:%s", message->address, message->key);
+		matched = store_find_key(source, message->key, 's', contact, item);
 		if (matched) {
 			kept = &store_contacts[*contact].items[*item];
 			if (!message->outgoing && message->read && kept->state == PH_STATE_UNREAD) {
@@ -1033,7 +1070,168 @@ ph_phonebook_forget(
 	return 0;
 }
 
-/* Reads every contact's file. */
+/*
+ * Resolves an imported name only when no editable local contact owns the number.
+ */
+const char *
+ph_store_phone_name(
+	const char *number)
+{
+	char key[PH_NUMBER_KEY_MAX];
+	char other[PH_NUMBER_KEY_MAX];
+	const char *name;
+	size_t i;
+	int error;
+	int same;
+
+	/* Compares local contacts by normalized number, excluding conversation rows. */
+	error = ph_number_key(number, key, sizeof(key));
+	if (error != 0)
+		return NULL;
+	for (i = 0U; i < store_contact_count; i++) {
+		if (store_contacts[i].conversation)
+			continue;
+		error = ph_number_key(store_contacts[i].number, other, sizeof(other));
+		if (error != 0)
+			continue;
+		same = strcmp(key, other);
+		if (same == 0)
+			return NULL;
+	}
+
+	/* Succeeded: only this number's imported name is eligible. */
+	name = ph_phonebook_name(number);
+	return name;
+}
+
+/*
+ * Applies imported names without adding, removing or reordering rows.
+ */
+void
+ph_store_apply_phone_names(void)
+{
+	struct ph_contact *contact;
+	const char *name;
+	char *copy;
+	size_t i;
+
+	/* Updates only dialable conversation rows; missing names remain as last shown. */
+	for (i = 0U; i < store_contact_count; i++) {
+		contact = &store_contacts[i];
+		contact->phone_named = 0;
+		if (!contact->conversation || contact->number[0] == '\0')
+			continue;
+		name = ph_store_phone_name(contact->number);
+		if (name == NULL)
+			continue;
+		copy = strdup(name);
+		if (copy == NULL)
+			continue;
+		free(contact->name);
+		contact->name = copy;
+		contact->phone_named = 1;
+		store_initials(name, contact->initials, sizeof(contact->initials));
+		contact->color = store_color(name);
+	}
+}
+
+/*
+ * Gets the reserved conversation for calls without a caller number.
+ */
+long
+ph_store_withheld_conversation(
+	int create)
+{
+	long contact;
+
+	/* Finds or creates one stable row, never an empty normalized number. */
+	contact = store_special_conversation("w", "No caller ID", create);
+	if (contact < 0)
+		return -1;
+
+	/* Succeeded: the row has no dialable peer. */
+	return contact;
+}
+
+/*
+ * Imports one line call without notifying or rewriting a known call.
+ */
+int
+ph_store_phone_call(
+	const char *address,
+	const struct kl_phone_item *call)
+{
+	struct ph_item made;
+	char source[STORE_LINE_MAX];
+	char path[STORE_PATH_MAX];
+	char peer[STORE_LINE_MAX];
+	char extra[STORE_LINE_MAX + 8U];
+	long contact;
+	size_t item;
+	int valid;
+	int known;
+	int error;
+
+	/* Rejects unsupported call identities before touching storage. */
+	valid = store_key_valid(call->key);
+	if (!valid || call->folder > 2U)
+		return EINVAL;
+	(void)snprintf(source, sizeof(source), "bt:%s:pbap:%s", address, call->key);
+	known = store_find_key(source, call->key, 'c', &contact, &item);
+	if (known)
+		return 0;
+
+	/* Withheld calls have their own reserved conversation. */
+	if (call->peer[0] == '\0') {
+		contact = ph_store_withheld_conversation(1);
+	} else {
+		contact = ph_store_conversation(call->peer, call->name, 1);
+	}
+
+	/* Reports when no row can retain this call. */
+	if (contact < 0)
+		return ENOSPC;
+
+	/* Maps received, dialled and missed history onto the existing call timeline. */
+	memset(&made, 0, sizeof(made));
+	made.kind = PH_CALL;
+	made.channel = PH_LINE;
+	made.date = (time_t)call->time;
+	made.state = PH_STATE_ANSWERED;
+	if (call->folder == 1U) {
+		made.outgoing = 1;
+		made.state = PH_STATE_NONE;
+	} else if (call->folder == 2U) {
+		made.state = PH_STATE_MISSED;
+	}
+
+	/* Preserves the phone-qualified identity and available caller name. */
+	made.source = source;
+	if (call->name[0] != '\0')
+		made.name = (char *)call->name;
+	made.partial = call->partial;
+	if (call->zone == 3U)
+		made.partial = 1;
+	(void)snprintf(path, sizeof(path), "%s/messages/%s/c%s.txt", store_root, store_contacts[contact].id, call->key);
+	made.path = path;
+
+	/* Preserves the actual peer in overflow and ordinary call files. */
+	store_clean_line(call->peer, peer, sizeof(peer));
+	(void)snprintf(extra, sizeof(extra), "Peer: %s\n", peer);
+	made.extra = extra;
+	error = store_write_item(&made, path);
+	if (error != 0)
+		return error;
+	error = store_append_item(contact, &made);
+	if (error != 0)
+		return error;
+	(void)store_place_item(contact, store_contacts[contact].item_count - 1U);
+
+	/* Succeeded: call history is retained without an unread notification. */
+	return 0;
+}
+
+/* Reads every editable local contact file. */
 static int
 store_load_contacts(void)
 {
@@ -1143,6 +1341,12 @@ store_load_contact(
 
 	/* Kept, then its items. */
 	error = store_append_contact(id, name, number);
+	if (error == ENOSPC) {
+		ph_log("STORE skipped local contact at row limit");
+		return 0;
+	}
+
+	/* Reports an allocation failure while keeping existing contacts intact. */
 	if (error != 0)
 		return error;
 	error = store_load_items((long)store_contact_count - 1L, id);
@@ -1204,8 +1408,23 @@ store_load_conversations(void)
 
 		/* The contact of that number, or a conversation of its own named by the number. */
 		contact = ph_store_conversation(key, NULL, 0);
+		if (entry->d_name[0] == 'o' || entry->d_name[0] == 'w') {
+			name = "Other numbers";
+			if (entry->d_name[0] == 'w')
+				name = "No caller ID";
+			contact = store_special_conversation(entry->d_name, name, 1);
+		}
+
+		/* Older stores beyond the bound remain open; skipped rows are logged. */
 		if (contact < 0) {
 			error = store_append_contact(entry->d_name, key, key);
+			if (error == ENOSPC) {
+				ph_log("STORE skipped conversation at row limit");
+				error = 0;
+				continue;
+			}
+
+			/* Reports allocation failures rather than silently losing a readable row. */
 			if (error != 0)
 				break;
 			contact = (long)store_contact_count - 1L;
@@ -1219,10 +1438,10 @@ store_load_conversations(void)
 
 		/* A conversation of its own is named as the phone named the other side last. */
 		kept = &store_contacts[contact];
-		if (!kept->conversation)
+		if (!kept->conversation || kept->number[0] == '\0')
 			continue;
 		for (index = kept->item_count; index > 0U; index--) {
-			if (kept->items[index - 1U].name == NULL)
+			if (kept->items[index - 1U].name == NULL || kept->items[index - 1U].name[0] == '\0')
 				continue;
 
 			/* The name (the key stays without memory). */
@@ -1456,7 +1675,23 @@ store_append_contact(
 	struct ph_contact *grown;
 	struct ph_contact *kept;
 	size_t capacity;
+	size_t index;
+	int have_overflow;
+	int reserved;
 	int failed;
+
+	/* Leaves the last row available for the overflow conversation. */
+	reserved = strcmp(id, "o");
+	have_overflow = 0;
+	for (index = 0U; index < store_contact_count; index++) {
+		failed = strcmp(store_contacts[index].id, "o");
+		if (failed == 0)
+			have_overflow = 1;
+	}
+
+	/* Existing overflow already occupies the reservation, so other rows may use the remainder. */
+	if (!have_overflow && reserved != 0 && store_contact_count >= STORE_CONTACTS_MAX - 1U)
+		return ENOSPC;
 
 	/* Room for one more. */
 	if (store_contact_count == STORE_CONTACTS_MAX)
@@ -1858,6 +2093,13 @@ store_initials(
 	size_t first_length;
 	size_t last_length;
 
+	/* Empty names have no initial and no second byte to inspect. */
+	if (size == 0U)
+		return;
+	initials[0] = '\0';
+	if (name[0] == '\0')
+		return;
+
 	/* The first character (all of its UTF-8 bytes). */
 	first_length = 1;
 	while (name[first_length] != '\0' && ((unsigned char)name[first_length] & 0xc0U) == 0x80U)
@@ -2087,6 +2329,14 @@ store_folder_key(
 	int fields;
 	int written;
 
+	/* Reserved conversations deliberately have no dialable number. */
+	if (folder[0] == 'o' || folder[0] == 'w') {
+		if (folder[1] != '\0')
+			return EINVAL;
+		key[0] = '\0';
+		return 0;
+	}
+
 	/* The digits of a number. */
 	length = strlen(folder);
 	if (folder[0] == 'n') {
@@ -2152,61 +2402,53 @@ store_key_valid(
  */
 static int
 store_find_key(
+	const char *source,
 	const char *key,
+	char prefix,
 	long *contact,
 	size_t *item)
 {
-	char suffix[STORE_KEY_MAX + 8U];
 	char file_name[STORE_KEY_MAX + 8U];
 	const struct ph_item *kept;
 	const char *base;
-	size_t length;
-	size_t suffix_length;
 	size_t index;
 	size_t at;
 	int same;
 
-	/* The source's end and the file's name of the key. */
-	(void)snprintf(suffix, sizeof(suffix), ":map:%s", key);
-	(void)snprintf(file_name, sizeof(file_name), "s%s.txt", key);
-	suffix_length = strlen(suffix);
-
-	/* Each item of each contact. */
+	/* Matches a full phone-qualified identity, not another phone's key suffix. */
+	(void)snprintf(file_name, sizeof(file_name), "%c%s.txt", prefix, key);
 	for (index = 0U; index < store_contact_count; index++) {
 		for (at = 0U; at < store_contacts[index].item_count; at++) {
 			kept = &store_contacts[index].items[at];
-
-			/* By its source. */
 			if (kept->source != NULL) {
-				length = strlen(kept->source);
-				if (length >= suffix_length) {
-					same = strcmp(kept->source + length - suffix_length, suffix);
-					if (same == 0) {
-						*contact = (long)index;
-						*item = at;
-						return 1;
-					}
+				same = strcmp(kept->source, source);
+				if (same != 0)
+					continue;
+			} else {
+				/* Supports legacy files whose source header was lost. */
+				if (kept->path == NULL)
+					continue;
+				base = strrchr(kept->path, '/');
+				if (base == NULL) {
+					base = kept->path;
+				} else {
+					base++;
 				}
+
+				/* Matches only source-less legacy files by their kind-specific filename. */
+				same = strcmp(base, file_name);
+				if (same != 0)
+					continue;
 			}
 
-			/* By its file's name. */
-			if (kept->path == NULL)
-				continue;
-			base = strrchr(kept->path, '/');
-			if (base == NULL)
-				base = kept->path;
-			else
-				base++;
-			same = strcmp(base, file_name);
-			if (same != 0)
-				continue;
+			/* Succeeded: reports the existing timeline item. */
 			*contact = (long)index;
 			*item = at;
 			return 1;
 		}
 	}
 
-	/* None. */
+	/* No matching item has been imported. */
 	return 0;
 }
 
@@ -2235,7 +2477,7 @@ store_candidate(
 	best_difference = 0;
 	for (index = 0U; index < store_contacts[contact].item_count; index++) {
 		kept = &store_contacts[contact].items[index];
-		if (kept->kind != PH_TEXT || kept->outgoing != message->outgoing)
+		if (kept->kind != PH_TEXT || kept->outgoing != message->outgoing || kept->channel != message->channel)
 			continue;
 		if (kept->source != NULL && !with_source)
 			continue;
@@ -2410,6 +2652,8 @@ store_new_message(
 {
 	struct ph_item made;
 	char source[STORE_LINE_MAX];
+	char peer[STORE_LINE_MAX];
+	char extra[STORE_LINE_MAX + 8U];
 	char path[STORE_PATH_MAX];
 	int error;
 
@@ -2418,7 +2662,7 @@ store_new_message(
 	if (partial) {
 		store_serial++;
 		(void)snprintf(path, sizeof(path), "%s/messages/%s/%lld-%lu-%s.txt", store_root, store_contacts[contact].id, (long long)message->date, store_serial,
-		    store_direction(message->outgoing));
+			       store_direction(message->outgoing));
 		made.partial = 1;
 	} else {
 		(void)snprintf(path, sizeof(path), "%s/messages/%s/s%s.txt", store_root, store_contacts[contact].id, message->key);
@@ -2428,7 +2672,7 @@ store_new_message(
 
 	/* The message: received unread unless the phone read it, one's own sent. */
 	made.kind = PH_TEXT;
-	made.channel = PH_SMS;
+	made.channel = message->channel;
 	made.outgoing = message->outgoing;
 	made.date = message->date;
 	made.state = PH_STATE_UNREAD;
@@ -2441,6 +2685,12 @@ store_new_message(
 	if (message->name != NULL && message->name[0] != '\0')
 		made.name = (char *)message->name;
 	made.path = path;
+
+	/* Keeps the actual peer even when several numbers share the overflow row. */
+	store_clean_line(message->peer, peer, sizeof(peer));
+	(void)snprintf(extra, sizeof(extra), "Peer: %s\n", peer);
+	if (store_contacts[contact].id[0] == 'o')
+		made.extra = extra;
 
 	/* Written. */
 	error = store_write_item(&made, path);
@@ -2583,5 +2833,74 @@ store_sync_path(
 
 	/* Its path. */
 	(void)snprintf(path, size, "%s/sync/bt-%s.state", store_root, address);
+	return 0;
+}
+
+/* Finds or creates a reserved row, making its directory only after allocation. */
+static long
+store_special_conversation(
+	const char *id,
+	const char *name,
+	int create)
+{
+	char path[STORE_PATH_MAX];
+	size_t i;
+	int same;
+	int error;
+
+	/* Reuses the reserved row regardless of the ordinary row limit. */
+	for (i = 0U; i < store_contact_count; i++) {
+		same = strcmp(store_contacts[i].id, id);
+		if (same == 0)
+			return (long)i;
+	}
+
+	/* Leaves an absent reserved conversation uncreated for lookup-only callers. */
+	if (!create)
+		return -1;
+	error = store_append_contact(id, name, "");
+	if (error != 0)
+		return -1;
+	store_contacts[store_contact_count - 1U].conversation = 1;
+
+	/* The row exists before its folder can become visible on the next open. */
+	(void)snprintf(path, sizeof(path), "%s/messages/%s", store_root, id);
+	error = mkdir(path, 0700);
+	if (error != 0 && errno != EEXIST)
+		ph_log("STORE reserved-folder error=%d", errno);
+
+	/* Succeeded: reports the reserved conversation. */
+	return (long)store_contact_count - 1L;
+}
+
+/* Loads a reserved folder first when it exists, without creating empty rows on first use. */
+static int
+store_load_reserved(
+	const char *id,
+	const char *name)
+{
+	char path[STORE_PATH_MAX];
+	struct stat status;
+	long contact;
+	int error;
+
+	/* Absence means this reserved conversation has never been used. */
+	(void)snprintf(path, sizeof(path), "%s/messages/%s", store_root, id);
+	error = stat(path, &status);
+	if (error != 0) {
+		if (errno == ENOENT)
+			return 0;
+		return errno;
+	}
+
+	/* Allocates the reserved row before ordinary rows consume their bounded capacity. */
+	contact = store_special_conversation(id, name, 1);
+	if (contact < 0)
+		return ENOMEM;
+	error = store_load_items(contact, id);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: its timeline is already loaded when the ordinary directory scan starts. */
 	return 0;
 }

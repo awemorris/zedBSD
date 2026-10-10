@@ -773,13 +773,13 @@ page_count(
 	found = find_header(packet, length, 3U, 0x42U, &header);
 	check(found && header.length == 21U && memcmp(header.data, "x-bt/MAP-msg-listing", 21U) == 0, "count: Type with its NUL");
 
-	/* MaxListCount 0, FilterMessageType 0x0C, FilterPeriodBegin. */
+	/* MaxListCount 0, FilterMessageType 0x04, FilterPeriodBegin. */
 	found = find_header(packet, length, 3U, 0x4cU, &header);
 	check(found, "count: application parameters");
 	found = find_parameter(&header, 0x01U, &value, &used);
 	check(found && used == 2U && value[0] == 0U && value[1] == 0U, "count: MaxListCount 0");
 	found = find_parameter(&header, 0x03U, &value, &used);
-	check(found && used == 1U && value[0] == 0x0cU, "count: FilterMessageType 0x0C");
+	check(found && used == 1U && value[0] == 0x04U, "count: FilterMessageType keeps SMS and MMS");
 	found = find_parameter(&header, 0x04U, &value, &used);
 	check(found && used == 15U && memcmp(value, begin, 15U) == 0, "count: FilterPeriodBegin");
 	found = find_parameter(&header, 0x10U, &value, &used);
@@ -887,20 +887,22 @@ static void
 test_page(void)
 {
 	static const char list_parameters[] =
-		"\x01\x02\x00\x02\x02\x02\x00\x00\x03\x01\x0c\x04\x0f" "20231115T091320" "\x10\x04\x00\x00\x11\x7e";
+	    "\x01\x02\x00\x02\x02\x02\x00\x00\x03\x01\x04\x04\x0f"
+	    "20231115T091320"
+	    "\x10\x04\x00\x00\x11\x7e";
 	static const char listing[] =
-		"<MAP-msg-listing version=\"1.0\">"
-		"<msg handle=\"10\" datetime=\"20231115T090000+1100\" sender_name=\"Jamie\" sender_addressing=\"+15551234\" type=\"SMS_GSM\" read=\"no\"/>"
-		"<msg handle=\"11\" datetime=\"20231115T080000+1100\" type=\"EMAIL\" read=\"yes\"/>"
-		"</MAP-msg-listing>";
+	    "<MAP-msg-listing version=\"1.0\">"
+	    "<msg handle=\"10\" datetime=\"20231115T090000+1100\" sender_name=\"Jamie\" sender_addressing=\"+15551234\" type=\"SMS_GSM\" read=\"no\"/>"
+	    "<msg handle=\"11\" datetime=\"20231115T080000+1100\" type=\"EMAIL\" read=\"yes\"/>"
+	    "</MAP-msg-listing>";
 	/* The text "Hello" (5): LENGTH 11 + 5 + 11 = 27. */
 	static const char message[] =
-		"BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:SMS_GSM\r\nFOLDER:TELECOM/MSG/INBOX\r\n"
-		"BEGIN:VCARD\r\nVERSION:2.1\r\nN:\r\nTEL:+15551234\r\nEND:VCARD\r\n"
-		"BEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nLENGTH:27\r\nBEGIN:MSG\r\nHello\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n";
+	    "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:SMS_GSM\r\nFOLDER:TELECOM/MSG/INBOX\r\n"
+	    "BEGIN:VCARD\r\nVERSION:2.1\r\nN:\r\nTEL:+15551234\r\nEND:VCARD\r\n"
+	    "BEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nLENGTH:27\r\nBEGIN:MSG\r\nHello\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n";
 	static const char item[] =
-		"7: PHONE MESSAGE handle=" TEST_SESSION_TEXT ".0000000000000010 key=23ef6660912108a2 folder=inbox dir=in time=1699999200 zone=phone "
-		"datetime=\"20231115T090000+1100\" peer=\"+15551234\" name=\"Jamie\" read=0 partial=0 truncated=0 length=5\nHello";
+	    "7: PHONE MESSAGE handle=" TEST_SESSION_TEXT ".0000000000000010 key=23ef6660912108a2 folder=inbox dir=in time=1699999200 zone=phone "
+	    "datetime=\"20231115T090000+1100\" peer=\"+15551234\" name=\"Jamie\" read=0 partial=0 truncated=0 length=5\nHello";
 	struct btd_obex_header header;
 	uint8_t packet[1024];
 	uint8_t first[1024];
@@ -1107,14 +1109,14 @@ static void
 test_live(void)
 {
 	static const char event_20[] =
-		"<MAP-event-report version=\"1.0\"><event type=\"NewMessage\" handle=\"20\" folder=\"TELECOM/MSG/INBOX\" msg_type=\"SMS_GSM\"/></MAP-event-report>";
+	    "<MAP-event-report version=\"1.0\"><event type=\"NewMessage\" handle=\"20\" folder=\"TELECOM/MSG/INBOX\" msg_type=\"SMS_GSM\"/></MAP-event-report>";
 	static const char listing_20[] =
-		"<MAP-msg-listing version=\"1.0\"><msg handle=\"20\" datetime=\"20231115T120000+1100\" sender_name=\"Ann\" "
-		"sender_addressing=\"+15550000\" type=\"SMS_GSM\" read=\"no\"/></MAP-msg-listing>";
+	    "<MAP-msg-listing version=\"1.0\"><msg handle=\"20\" datetime=\"20231115T120000+1100\" sender_name=\"Ann\" "
+	    "sender_addressing=\"+15550000\" type=\"SMS_GSM\" read=\"no\"/></MAP-msg-listing>";
 	/* "Live one" (8): LENGTH 11 + 8 + 11 = 30. */
 	static const char message_20[] =
-		"BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:SMS_GSM\r\nFOLDER:\r\nBEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\n"
-		"LENGTH:30\r\nBEGIN:MSG\r\nLive one\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n";
+	    "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:SMS_GSM\r\nFOLDER:\r\nBEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\n"
+	    "LENGTH:30\r\nBEGIN:MSG\r\nLive one\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n";
 	struct btd_obex_header header;
 	uint8_t packet[4096];
 	const uint8_t *value;
@@ -1200,6 +1202,22 @@ test_live(void)
 	/* A deleted message told. */
 	mns_event(0U, "x-bt/MAP-event-report", "<MAP-event-report><event type=\"MessageDeleted\" handle=\"20\" folder=\"telecom/msg/inbox\" msg_type=\"SMS_GSM\"/></MAP-event-report>", &code);
 	check(has_emit("PHONE MESSAGE-GONE handle=" TEST_SESSION_TEXT ".0000000000000020"), "live: MESSAGE-GONE");
+	/* An MMS NewMessage follows the same live fetch path and emits decoded text. */
+	setup();
+	mns_event(0U, "x-bt/MAP-event-report", "<MAP-event-report><event type=\"NewMessage\" handle=\"22\" folder=\"telecom/msg/inbox\" msg_type=\"MMS\"/></MAP-event-report>", &code);
+	length = take(packet, sizeof(packet));
+	check(code == 0xa0U && length != 0U, "MMS: notification starts a fetch");
+	respond_body(0xa0U, "<MAP-msg-listing><msg handle=\"22\" datetime=\"20231115T120000+1100\" sender_addressing=\"+15550000\" type=\"MMS\" read=\"no\"/></MAP-msg-listing>");
+	length = take(packet, sizeof(packet));
+	found = find_header(packet, length, 3U, 0x01U, &header);
+	check(found && is_text(&header, "0000000000000022"), "MMS: announced handle fetched");
+	respond_body(0xa0U, "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:MMS\r\nBEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nBEGIN:MSG\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\nTGl2ZSBNTVM=\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n");
+	found = has_emit("type=mms");
+	check(found, "MMS: type metadata preserved");
+	found = has_emit("length=8\nLive MMS");
+	check(found, "MMS: only decoded body emitted");
+	(void)take(packet, sizeof(packet));
+	respond(0xa0U, NULL, 0U);
 }
 
 /* Sending, its events, once each. */

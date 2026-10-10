@@ -452,6 +452,13 @@ main(
 	got = kl_backend_phone_take_item(phone, &item);
 	check(got == 0, "one live item only");
 
+	/* MMS type crosses the existing item field without changing its structure. */
+	fake_write(events, "PHONE MESSAGE handle=0000000a.00000000000000fd key=- folder=sent dir=out time=7 zone=phone type=mms datetime=\"\" peer=\"5\" name=\"\" read=1 partial=1 truncated=0 length=4\ntext");
+	changed = step(phone);
+	check((changed & KL_BACKEND_PHONE_CHANGED_ITEM) != 0U, "MMS item delivered");
+	got = kl_backend_phone_take_item(phone, &item);
+	check(got == 1 && item.folder == (KL_BACKEND_PHONE_FOLDER_SENT | KL_BACKEND_PHONE_FOLDER_MMS), "MMS folder/type preserved");
+
 	/* A name and a datetime posing as fields (" length=1", " read=1", an escaped quote): the fields outside the quotes count (ws197-p005 review M1). */
 	fake_write(events, "PHONE MESSAGE handle=0000000a.00000000000000fe key=- folder=inbox dir=in time=7 zone=phone datetime=\"a length=1 \\\" read=1\" peer=\"5\" name=\"x length=1 dir=out\" read=0 partial=0 truncated=0 length=4\nabcd");
 	changed = step(phone);

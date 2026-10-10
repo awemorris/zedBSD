@@ -3,14 +3,14 @@
 # WS197: Bluetooth のスマホ連携（SMS の MAP、通話の HFP、連絡先の PBAP）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（ベータ2 の必須。code は branch agent/p1-ws197、区切りごとに main へ merge）
+Status: incomplete（p005 cleared、HFP・実機PBAP UAT・WS最終規約は未完）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: P1、WS200 の後（2026-10-10 ユーザー: N=1 のまま）
+Queue: [Codex承認済み実行記録](codex-queue.md)、p005と新規受信修正は終了。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の head 2bf274a38、build は通る、host の試験の一部は未更新で通らない）。
+Resume point: p005 i01〜i07 cleared。次はp006 HFPの選択/承認、p008で実機PBAP UAT。旧P1再開情報は履歴として保持。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -20,7 +20,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 
 参考（Q1 の説明、2026-10-09）: Microsoft の Phone Link は iPhone では Bluetooth の HFP・MAP・PBAP・ANCS の標準だけを使い、Android では独自の app と IP（通話の音は HFP）。
 
-## 再開の手順（2026-10-10 Q1、別の session への引き継ぎ）
+## 以前の再開の手順（2026-10-10 Q1、履歴。現状は上のResume point）
 
 - **code と詳細の記録は保留の branch `agent/p1-ws197`（head 2bf274a38）にある。** main には無い（10/17 の公開まで release の bluetoothd を変えないため、Q1 の判断）。p002・p003 の phase.md と review は 2026-10-10 に branch の f06bf4dbb の物を main にも写した（ユーザーの依頼）。branch で更新したら main へも写す（branch の main の merge で揃う）。試験（plan/ws197/tests/）は branch の code が要るので branch にだけある。
 - 再開の時: (1) branch に main を merge する（`git switch agent/p1-ws197 && git merge main`。WS143・WS199 の bluetoothd・passkey の変更と衝突しうるので WS143 の host 試験 `plan/ws143/tests/bt-daemon-host-test.sh` と `plan/ws197/tests/bt-phone-host-test.sh` を流す）。(2) branch の plan/ws197/phase003/phase.md の「進み」の最後の行の**再開点**から続ける。(3) 区切りごとに main へ merge（ベータ2 に入れる、2026-10-10 ユーザー）。merge の前の T1 の HID の回帰はやめた（2026-10-10 ユーザー「流しすぎです。もう不要」）、host 試験と build で merge し実機の UAT で確かめる。
@@ -38,12 +38,12 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 | --- | --- | --- | --- |
 | [p001](phase001/phase.md) | 設計（profile の役割、bluetoothd の構造、WS170 の API、試験）、review 3 回、ユーザーの決定 Q1〜Q16 | 4 | cleared |
 | p002 | RFCOMM・OBEX・SDP の server と client・phone.c・phone の pairing・linkmgr・drop の回復・WS143 の変更（i01〜i08）。詳細は branch の phase002/phase.md | 22 | **cleared**（host 約 2,500 checks、T1-518 HID の回帰 PASS、2026-10-10 Q1） |
-| p003 | MAP（MCE の MAS と MNS）。2026-10-10: i01〜i07 実装済み、c56043c2b（i06）まで main に merge（T1-526 PASS）、i07＋owner の純粋な関数 5c6219e7a も T1-527 PASS（p004 の 1 回目の Just Works の CONSENT は前からの flake、T1-502 と同じ）で main に merge。**p003 は cleared**（実機の MAP は p008）。、phone link の持ち主・記録・再接続、socket の PHONE。詳細設計 第 2.1 版（review 2 回）、i01〜i08。詳細は branch の phase003/phase.md | 24 | **in-progress**: i01（phonerec、PAIR の検査、PHONE LINK・SHOW、FORGET）・i02（outq、client の枠、長さ付きの入力）済み。i03（phone link の一生）の途中。i04 mapxml・i05 bMessage・i06 map.c と MNS・i07 phoneio と SUBSCRIBE・i08 T1 は未 |
+| p003 | MAP（MCE の MAS と MNS）。2026-10-10: i01〜i07 実装済み、c56043c2b（i06）まで main に merge（T1-526 PASS）、i07＋owner の純粋な関数 5c6219e7a も T1-527 PASS（p004 の 1 回目の Just Works の CONSENT は前からの flake、T1-502 と同じ）で main に merge。**p003 は cleared**（実機の MAP は p008）。、phone link の持ち主・記録・再接続、socket の PHONE。詳細設計 第 2.1 版（review 2 回）、i01〜i08。詳細は branch の phase003/phase.md | 24 | cleared（main統合済み、実機UATはp008） |
 | [p004](phase004/phase.md) | SMS の層の interface の設計（Phone app・libkeiland・compositor・libkeiland-backend・bluetoothd、v3.1、review 3 回）。ユーザーの決定 P1〜P8 | — | cleared（設計、2026-10-10） |
 | p004a | libkeiland-backend の phone-zedbsd.c（bluetoothd の socket）・compositor の phone-shell.c の bluetooth の backend・libkeiland の追加（phase004 §3〜§5・§11.2〜§11.4） | 6.5 | cleared 候補（2026-10-10、main に merge 4faf17473、KL_VERSION 79・manager 27、host 試験 PASS。実機は下の UAT。詳細は [phase004](phase004/phase.md) の「実装の進み」） |
 | p004b | Phone の app の保存と同期（目印・merge・E.164 の key・送信の状態） | 3.5 | cleared 候補（2026-10-10、main に merge 778c1e377、host 試験 PASS。region の設定が無いので国番号は既定 81（P8）） |
 | p004c | Settings の「Use as phone」と通知（WS156 の lock_text の変更は P1 が同じ Phase で行う、Q1） | 1.5 | cleared 候補（2026-10-10 P1、e7a478d33、host 試験 PASS、merge 待ち。実機は下の UAT） |
-| [p005](phase005/phase.md) | PBAP（電話帳、vCard 2.1/3.0、電話帳の写しと名前の引き、通話の履歴）。詳細設計 第 3 版（review 2 回）、i01〜i07 | 11.5 | **planning**（2026-10-11: 第 3.1 版、i01〜i05 実装済み（i05 の中継は KL_VERSION 80・manager 28）、i06 は前半（目印・消しの計画・写しの消しの判断）だけ。i06 の後半と i07 Settings が残り（phase.md の「再開の手順」）。ユーザーの判断 Pc1〜Pc6 待ち、推しを仮に入れた） |
+| [p005](phase005/phase.md) | PBAP・Phoneの電話帳/名前/通話履歴・直列同期・Settings。第3.1版i01〜i07 | 11.5 | cleared（2026-10-10 Codex、host・全文規約・named build warning0。実機PBAPはp008） |
 | p006 | HFP の制御（AT の SLC、indicator、応答・終話・発信、発信者、割り込み、codec の交渉） | 12 | planned |
 | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
 | p008 | 実機（Android が先、iPhone は HFP の後、Q13）。PHONE PROBE は p003 で消すので MAP の操作で確かめる | 20 | planned |
@@ -81,3 +81,15 @@ bt-loopback-p002・bt-daemon-p003（SHOW・BONDS）・bt-pair-p004 は PASS。**
 集める物: 失敗した時は、compositor の log の `KWL PHONE` の行、Phone の app の stderr の `PHONE` の行（番号・本文は出ない、長さだけ）、bluetoothd の log、`~/Documents/Phone/messages/` と `~/Documents/Phone/sync/bt-<address>.state` の中身、Settings の画面の写真。
 
 限界（記録）: 番号の国番号の既定は 81（Settings に地域の設定が無い、P8）。app が閉じている間の SMS は保存されず、次の起動の同期で入る（P1、Q2）。
+
+## 2026-10-10 Codex 引き継ぎ
+
+ユーザーが p005 完了と新規受信SMSの修正を指定。p005はin-progress、Pc1〜Pc6は推奨どおり確定。main `c5af76952` の i01〜i05 を前提として [実行記録](codex-queue.md) の i06/i07 と診断を実施。master は Q1 が反映。
+
+## 2026-10-10 新規受信の診断とMMSテキスト承認
+
+実機 beta2+ge8adcdf の17:41 JSTのMNS通知は `type=1 message-type=3 handle-present=1`（NewMessage / MMS）。通知自体は到達し、MAPのSMS限定条件とlisting filterで除外されていた。本文・番号・handleは記録しない。ユーザー回答「MMSのテキスト受信も含める」により、SMS受信修正へMMSのテキスト本文の抽出・履歴取り込み・通知・保存・表示を追加する。添付画像・動画は対象外、MIME生データを本文として表示しない。MIME parserは独自Zlib実装、RFC2045/2046のtransfer encodingとmultipartを参照。共有master/queueへの投影はQ1に保留。
+
+## 2026-10-10 Codex 完了報告
+
+p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/Linux named buildを検証、p005をclearedとする（詳細/コマンド/限界は[p005結果](phase005/phase.md)）。新規受信はスマホがMMSとして通知していたためSMSフィルタで落ちていた。ユーザー承認のMMSテキスト抽出・履歴/通知/保存/表示を追加し、さらにCRLFを正規化、Phoneの本文と一覧previewでは改行コードを描画しない。修正版bluetoothdを実機へ更新後、ユーザーが「ゴミは消え、日本語も受信できました」と確認。p004のMMSテキスト追加と受信修正はcleared、添付画像/動画は対象外。WS全体はHFP・実機PBAP UAT・最終WS conformanceが残るためincomplete。master/共有Queueの投影とWS199のcompleted整理はQ1に引き継ぐ。

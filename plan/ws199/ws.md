@@ -3,14 +3,14 @@
 # WS199: セキュリティキーの管理の頁（Software Security Key を含む）と、ログイン画面のキーの自動のログイン
 
 <!-- awesome-plan-current:start -->
-Status: incomplete
+Status: completed
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Queue: q921（P1、2026-10-10）
 Target: **ベータ2**（2026-10-10 ユーザー。走っている Bug と試験の後に着手）
-Resume point: p004 の T1 の結果（T1-（Q1））を Q1 が判定 → p005（5330 の UAT、一覧は下の「5330 の UAT の一覧」）。
+Resume point: closed（ユーザーの完了・close 指示）。共有 projection と試験資材の整理は Q1 に引き継ぐ。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-10 ユーザーの UAT）
@@ -70,11 +70,11 @@ NFC の reader に載せたままの鍵も、そのまま「タッチ」と見�
 
 | Phase | 目的 | Status |
 | --- | --- | --- |
-| [p001](phase001/phase.md) | 調べ・設計（第 4.1 版、review-1〜3）と実装 i01 頁と popup・i02 NFC（BUG-286）・i03 鍵の情報・Set/Change PIN・Reset。i01（cfa5351a1）・i02（0b44c7008・5515a4dab）・i03（d8cb16814、KL_VERSION 77）を main に merge | cleared 候補（実装の分。実機は p005） |
+| [p001](phase001/phase.md) | 調べ・設計（第 4.1 版、review-1〜3）と実装 i01 頁と popup・i02 NFC（BUG-286）・i03 鍵の情報・Set/Change PIN・Reset。i01（cfa5351a1）・i02（0b44c7008・5515a4dab）・i03（d8cb16814、KL_VERSION 77）を main に merge | cleared（実装 main、p004 の最終検証） |
 | [p002](phase002/phase.md) | PIN 不要・タッチ不要の設定（options の行、set-options・auth-fido2、radio と警告）＝ i04 | cleared（77a40b51f） |
-| [p003](phase003/phase.md) | greeter・lock の鍵のモード、user の自動の選択、0.5 秒、keypad、sleep で card を閉じる ＝ i05 | cleared 候補（2f414c00e、QEMU は p004 の T1） |
+| [p003](phase003/phase.md) | greeter・lock の鍵のモード、user の自動の選択、0.5 秒、keypad、sleep で card を閉じる ＝ i05 | cleared（2f414c00e、T1-525・528） |
 | [p004](phase004/phase.md) | host 試験の残り・style・T1 の AAT を 1 回で ＝ i06 | cleared（T1-523・525・528） |
-| [p005](phase005/phase.md) | 5330 の UAT | planning |
+| [p005](phase005/phase.md) | 5330 の UAT | cleared（ユーザー受け入れ） |
 
 ## 5330 の UAT の一覧（p005、ws199-p004 で 2026-10-10 P1）
 
@@ -97,3 +97,11 @@ NFC の reader に載せたままの鍵も、そのまま「タッチ」と見�
 | U13 | console・SSH | console の login・su・sudo・SSH | password だけ（鍵・PIN は出ない） |
 
 見積もり（2026-10-10）: p002 4 LW、p003 6 LW、p004 2 LW。使用量の都合で、p004 の T1 は 1 回にまとめる。
+
+## 完了・close（2026-10-10、ユーザー受け入れ）
+
+- ユーザー「また、WS199をcompleteでcloseしておいてください」を完成受け入れとして記録。Settings頁・Software Security Key・鍵の管理・PIN/タッチ設定、greeter/lockの自動選択とkeypadは main に実装済み。
+- 最終検証は p004 の既存証拠（host回帰、48 C の全文規約、named build warning 0、Linux/FreeBSD build、T1-523・525・528）を採用。今回の終了操作で新しい試験を実行したとは主張しない。
+- SSHで実機 `ge8adcdf` の sessiond 記録を追加確認: ENROLL fido2 ok、SETOPTIONS password ok 3回、UNLOCK fido2 ok 8回。ユーザーが現在imageで設定変更と解除に成功した証拠。ただしU1〜U13全項目それぞれの実施報告は無く、過去の未実施項目をPASSに書き換えない。
+- 同日 GitHub の全issueをページ送りして logical marker・WS199 title を検索、対象issue無し。local記録のcloseを完了し、存在しないremote issueをcloseしたとは主張しない。公開は既存方針どおり保留。
+- Q1引き継ぎ: master/Queueのcompleted projection、Phase directory・WS固有試験の整理（外部セッションの削除禁止規則のため本セッションでは削除しない）。継続回帰を残す場合は plan/tools へ移管しToolsに登録。source変更は無い。

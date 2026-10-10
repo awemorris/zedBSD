@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws199-p005 -->
 # ws199-p005: 5330 の UAT（YubiKey 5 NFC、USB と ACR1552）
 
-Status: planning（p004 の後、ユーザーが image を作り直してから）
+Status: cleared（2026-10-10、実装・p004検証とユーザーのWS199完了受け入れ）
 Parent: [WS199](../ws.md)
 
 ## ゴール
@@ -11,3 +11,7 @@ Parent: [WS199](../ws.md)
 ## やり方
 - image はユーザーが top の config.mk で作り直す（Vulkan Video の試験の設定も入っている）。急ぐ時は Q1 が SSH で passkey・passkey-fido2・sessiond だけを入れ替えられる（ユーザーの許可を取る）。
 - 手順と期待は plan/beta2.md の「次の UAT」の表。
+
+## 2026-10-10 終了
+
+ユーザーのWS199 complete・close 指示で受け入れ。詳細は [WS完了記録](../ws.md#完了close2026-10-10ユーザー受け入れ)。今回追加実施した全UATとは扱わない。remote issue無し、local cleared。Q1資材整理待ち。
