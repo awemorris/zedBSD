@@ -83,7 +83,7 @@ blocking 無し。MFX の命令列（順・opcode・長さ・全 field）・slic
 
 利用者向けの説明は `docs/reference/vulkan-video.md`。WS083 の到達点の制限:
 
-- **既定は OFF**: kernel は boot の `i915.debug=video`（か `display,video`）がある時だけ video decode を出す。release の image（beta2）は OFF（2026-10-10 ユーザー）。ON は `zedbsd.cfg` の 1 行。image の中で使う program は試験の `vkvideo-probe` だけ（Video Player は libmedia → FFmpeg で CPU、FFmpeg は `--disable-hwaccels`）。
+- **既定は ON**（2026-10-11 ユーザー「Vulkan Videoをデバッグオプションでなくてデフォルトで有効な機能にしてください。」）: kernel は VCS0 のある GT で video decode を出す。`i915.debug=video` は受けるが何も変えない。2026-10-10 の「release は OFF」を置き換えた。image の中で使う program は試験の `vkvideo-probe` だけ（Video Player は libmedia → FFmpeg で CPU、FFmpeg は `--disable-hwaccels`、自前の decoder は [WS202](../ws202/ws.md)）。
 - **形**: H.264 の decode だけ（Baseline・Main・High、8 bit、4:2:0、progressive、4096x4096・level 5.1 まで）。interlaced（field・MBAFF・PAFF）・4:2:2 以上・10 bit・encode・H.265・AV1 は無い（Future）。
 - **規格に合わない点**（HD6）: N1 apiVersion 1.0 のまま video の拡張を名乗る（sync2 は 1.0 の command への翻訳）、N2 ycbcr の拡張無しで NV12 と plane の aspect、N3 OPTIMAL の subresource layout を返す、N4 slice が 256 を超える picture は飛ばす（libvulkan の README）。result status の pool は profile を見ない。
 - **出力の使い道**: decode の picture は host から読むだけ（SAMPLED・TRANSFER_SRC は無い、HD5）。表示には app が de-tile して別の image に写す。
