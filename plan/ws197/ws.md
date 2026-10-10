@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: [Codex承認済み実行記録](codex-queue.md)、メディア管理先行scopeまで終了。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/buildとSSHでの履歴写真保存を確認、新規テキスト/写真MMSの通知・実表示はユーザー確認待ち。codex/ws197-media-receiveで記録。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
+Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -128,6 +128,8 @@ p010受信部分でAttachment=1とMIME/FD→mediastorage保存→Phone実画像�
 ## 2026-10-10 再作成後のMIME回帰の修正
 
 p010の[部分Queue i02](codex-queue.md)で、スマホがleaf/WAP Content-Typeにboundaryを付けるMMSを正しくpart解析するよう修正。本文header露出、画像のENODATA/EOPNOTSUPPは同じroot分類の問題。host codec/実Phone→CLI原本保存/decode/再open、3target build warning0、変更source全文規約を通過し、実機の3実行ファイル更新・Bluetooth/desktop restart後に履歴画像保存を確認。新規テキスト/写真MMSの通知・画面表示はユーザー確認待ち。WSはincomplete、p010全体未完とQ1への共有投影保留を保持。詳細は[検証記録](tests/media-receive-verification-20261010.md)。
+
+その後ユーザーがテキスト/写真MMSの「受信し、表示されました。」を確認。SSHでも通知・原本保存を確認し、受信部分check cleared/Queue finished、source `89d487814`。p010全体は未完、WS incomplete、共有投影Q1保留を保持。
 
 main統合checkpoint: `035d1d25b` (WIP) fast-forward済み、c43a01797の既存変更を保持。hostで確認した受信経路をmainへ反映、pushなし。SSH/UAT待ちを解消した記録とはしない。
 

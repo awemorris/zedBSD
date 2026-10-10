@@ -56,3 +56,5 @@ mainへ受信source/evidence `035d1d25b` をfast-forward統合済み。source同
 ユーザーがテキストのMIMEヘッダ露出と画像MMSの通知欠落を報告。[Queue i02](../codex-queue.md)として修正を再開。実機50feed3は4ファイルCRC一致・mediastorage導入済みで、mixed binaryを原因としない。MNS NewMessage/MMSは届いていたがMAP本文解析はENODATA、別画像は保存EOPNOTSUPP、既存本文にはboundaryとpart headerが残っていた。
 
 `mms_part`がmultipart/*だけで区切りを解析していたことが原因。明示boundaryを先に評価してleaf/WAP型でもpartを取り出す。標準multipartのboundary欠落は従来どおりエラー。公開API・上限・SMS動作は変更しない。独自codec/Phone実fixtureで本文と画像byteの分離・原本保存/decode/再openを確認し、3target build warning0、全文規約/変更3C style-check0。既存承認の3ファイル交換とBluetooth/desktop restartを実施し、MAP/PBAP ready、履歴画像の保存成功をSSH確認。i02部分scopeはcleared、新規受信の通知/実表示はユーザー確認待ち、Phase全体はin-progress。詳細/CRC/復旧用backupは[証拠](../tests/media-receive-verification-20261010.md)。旧試行の実機失敗は履歴として保持する。
+
+確認結果追記: テキスト/写真MMSの実機確認依頼にユーザー「受信し、表示されました。」。SSHでもMNS MMS通知と写真保存件数の増加を確認した。source `89d487814`、受信部分check cleared、有限Queue finished。これはp010全体のclearanceではない。送信/動画player起動等は残す。
