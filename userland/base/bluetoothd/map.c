@@ -18,6 +18,7 @@
 #include "userland/base/bluetoothd/map.h"
 
 #include "userland/base/bluetoothd/phoneio.h"
+#include "userland/base/bluetoothd/rfcomm.h"
 
 #include <errno.h>
 #include <stdarg.h>
@@ -334,11 +335,19 @@ btd_map_sdp_done(
 	if (error == 0)
 		map->features = value;
 
-	/* The DLC to the MAS. */
+	/*
+	 * The DLC to the MAS.  A channel whose earlier DLC is still closing is
+	 * busy (ws197-p005 section 3.1): the setting up starts again shortly,
+	 * from the SDP query.
+	 */
 	map->state = BTD_MAP_OPENING;
 	error = map->hooks.dlc_open(map->hooks.context, channel);
-	if (error != 0)
+	if (error == EBUSY) {
+		map->state = BTD_MAP_SDP;
+		map->sdp_again_at = map_now(map) + BTD_MAP_BUSY_MS;
+	} else if (error != 0) {
 		map_fail(map, "rfcomm", MAP_RETRY_STEP);
+	}
 
 	/* Succeeded: what follows is settled. */
 	map_settle(map);
@@ -481,8 +490,10 @@ btd_map_writable(
 
 /*
  * Takes a DLC that closed (the profile's closed hook): the MAS's fails
- * MAP; the MNS's alone asks the phone for notifications again (it turned
- * them off, MAP section 4.1) and waits for the MNS to come back.
+ * MAP; the MAS's DLC asked for that closed without opening (the phone's
+ * DM, or RFCOMM giving up, ws197-p005 section 3.2) fails MAP by its
+ * reason; the MNS's alone asks the phone for notifications again (it
+ * turned them off, MAP section 4.1) and waits for the MNS to come back.
  */
 void
 btd_map_closed(
@@ -492,14 +503,31 @@ btd_map_closed(
 {
 	struct btd_map_op op;
 	struct btd_map *map;
-
-	UNUSED_PARAMETER(reason);
+	const char *why;
 
 	/* The MAS's: MAP fails, tried again later. */
 	map = context;
 	if (dlci != 0U && dlci == map->mas_dlci) {
 		map->mas_dlci = 0U;
 		map_fail(map, "closed", MAP_RETRY_STEP);
+		map_settle(map);
+		return;
+	}
+
+	/* The MAS's DLC asked for, closed before it opened: MAP fails by why, tried again later. */
+	if (dlci != 0U &&
+	    map->state == BTD_MAP_OPENING &&
+	    map->mas_dlci == 0U &&
+	    (dlci >> 1) == map->mas_channel) {
+		why = "closed";
+		if (reason == BTD_RFCOMM_CLOSED_REFUSED) {
+			why = "refused";
+		} else if (reason == BTD_RFCOMM_CLOSED_TIMEOUT) {
+			why = "timeout";
+		}
+
+		/* Failed, and what follows settled. */
+		map_fail(map, why, MAP_RETRY_STEP);
 		map_settle(map);
 		return;
 	}
