@@ -14,4 +14,6 @@ Graph: media-rx-i01 → media-rx-check-i01。以前の完了Queueは[履歴](his
 
 ## 2026-10-10 更新の承認と検証checkpoint
 
-ユーザー回答「更新・再起動してよい」を4ファイル交換とBluetooth/desktop restartの承認として保存。host受信・再open・実decoder、zedBSD4target、Linux共通interface/compositor、OS境界、最終変更source全文規約は通過。[証拠](tests/media-receive-verification-20261010.md)。実機への更新と新desktop/Phone起動までは確認したが、Bluetooth再接続が停止し、再restart後のSSHもtimeout。画面応答/必要なら実機restartをユーザーに依頼中。新写真の実機受信・最終Phone差し替え・main統合記録をcheck項目の残りとして保持し、Queue全体はactive。
+ユーザー回答「更新・再起動してよい」を4ファイル交換とBluetooth/desktop restartの承認として保存。host受信・再open・実decoder、zedBSD4target、Linux共通interface/compositor、OS境界、最終変更source全文規約は通過。[証拠](tests/media-receive-verification-20261010.md)。実機への更新と新desktop/Phone起動までは確認したが、Bluetooth再接続が停止し、再restart後のSSHもtimeout。画面応答/必要なら実機restartをユーザーに依頼中。新写真の実機受信・最終Phone差し替えをcheck項目の残りとして保持し、Queue全体はactive。
+
+main統合: source/evidence `035d1d25b` をc43a01797からfast-forward済み、source同一/cleanを確認。check項目はSSH/UAT待ちでin-progressを維持。

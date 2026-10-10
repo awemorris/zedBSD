@@ -124,3 +124,5 @@ ws197-p011 cleared、前提のws157-p006/p007もcleared。main `874e12d3b`、[�
 ## 2026-10-10 受信メディアのcheckpoint
 
 p010受信部分でAttachment=1とMIME/FD→mediastorage保存→Phone実画像表示/再openを実装し、host/build/変更source全文規約/OS境界を確認。[証拠](tests/media-receive-verification-20261010.md)。承認済みの実機4ファイル交換・desktop restartは新sessionの起動まで確認したが、Bluetooth再接続が停止し、その再restart後はSSH timeout。ユーザーへ画面応答と必要なら実機restartを依頼。接続回復後に最終Phone更新と新写真受信を確認する。WSはincomplete、p010全体の送信/動画player起動、HFP/PBAP UAT/p009を保持。共有master/Queue投影はQ1担当に保留。
+
+main統合checkpoint: `035d1d25b` (WIP) fast-forward済み、c43a01797の既存変更を保持。hostで確認した受信経路をmainへ反映、pushなし。SSH/UAT待ちを解消した記録とはしない。

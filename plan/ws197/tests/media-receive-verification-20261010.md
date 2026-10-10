@@ -84,3 +84,7 @@ Logs: private buildの `ws197-media-receive-{build,linux-final,tests,map,mms-tex
 写真の実機受信はまだ成功としない。Media/Filesに3件はあったが、この受信経路で保存した証拠ではない。新しい写真の時刻/Phone画像表示と保存pathを待つ。接続回復後は最終Phoneを更新し、MNS/MAP→FD→CLI→Media-Photoの保存と実表示を確認する。WS197/p010全体の送信と動画player起動、PBAP UAT/HFP/p009の未完条件は維持する。
 
 共有master/Queue/historyへの投影はQ1担当につき保留。GitHub同期状態がこのcheckoutにないため、local記録を公開/同期済みとはしない。pushは行わない。
+
+## main統合の確認
+
+source/evidence commit `035d1d25ba6f9e7fb20ad97544e6c38f3f258f03` (WIP) をmain c43a01797からfast-forward統合した。main/private worktreeともclean、変更sourceは検証したものと同一。READMEの既存変更c43a01797を保持し、共有master/Queue/Guardrail/cacheは未変更。pushなし。SSH受信UATと最終Phone更新は未完のまま保持する。

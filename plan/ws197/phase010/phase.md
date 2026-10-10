@@ -48,3 +48,5 @@ p004のMMS text-only判断から、ユーザー指示で写真/動画の双方�
 受信部分のsourceはcodex/ws197-media-receive (base c43a01797)、[検証記録](../tests/media-receive-verification-20261010.md)。写真/動画Get、MIME匿名FD v30/lib82、mediastorage original/path、message再open、実Photo decoderをhostで確認し、named buildと変更source全文規約を実施した。旧prototypeの送信APIは今回sourceへ導入しない。shared codecはOS非依存のdesktop/libmmsに置き、A5を含むOS境界checkerを通した。
 
 4ファイル交換とdesktop/Bluetooth restartはユーザーが明示承認。新desktop自動loginとPhone起動まで実機確認したが、Bluetoothはunreachable、再restart後SSHもtimeout。受信実機UATと最終Phone更新は接続回復待ち。部分実装はmain統合可能な状態だが、Phase全体はin-progress、4機能の完了を主張しない。原本バックアップ/CRC/再開手順は上記証拠へ保存。
+
+mainへ受信source/evidence `035d1d25b` をfast-forward統合済み。source同一/clean、pushなし。実機受信UAT未確認・全p010未完は維持。
