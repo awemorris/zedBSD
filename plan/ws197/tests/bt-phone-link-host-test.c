@@ -415,6 +415,7 @@ open_world(void)
 	btd_sdps_db_init(&world.records);
 	phone_hooks.context = NULL;
 	phone_hooks.account = hook_account;
+	phone_hooks.log = NULL;
 	btd_phone_init(&world.phone, &world.session, &world.router, &world.hid, &world.records, folder, &phone_hooks);
 
 	/* The profile: what it hears is kept. */

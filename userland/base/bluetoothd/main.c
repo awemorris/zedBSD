@@ -495,6 +495,7 @@ main(
 	btd_sdps_db_init(&btd_records);
 	phone_hooks.context = NULL;
 	phone_hooks.account = btd_account;
+	phone_hooks.log = btd_messages_log;
 	btd_phone_init(&btd_phone_link, &btd_session, &btd_routing, &btd_hid_host, &btd_records, BTD_KEYS_FOLDER, &phone_hooks);
 	router_phone.context = &btd_phone_link;
 	router_phone.wants = btd_phone_wants;
