@@ -48,3 +48,7 @@ V3 reports version42, one core, PA35/VA35, then ENOTSUP21. `v3d-hardware.c ident
 - [Linux xHCI doorbell publication](https://raw.githubusercontent.com/torvalds/linux/master/drivers/usb/host/xhci-ring.c): posted command and endpoint writes are flushed by readback.
 - [RPi Linux PCIe inbound windows](https://raw.githubusercontent.com/raspberrypi/linux/rpi-6.12.y/drivers/pci/controller/pcie-brcmstb.c): PCI inbound offset follows firmware DMA ranges and CPU-side base is zero; firmware may edit ranges for board memory/revision.
 - [Linux V3D MMU registers](https://raw.githubusercontent.com/torvalds/linux/master/drivers/gpu/drm/v3d/v3d_regs.h) and [MMU procedure](https://raw.githubusercontent.com/torvalds/linux/master/drivers/gpu/drm/v3d/v3d_mmu.c): used for read-only comparison, no external implementation code copied.
+
+## Main integration read-back / 2026-10-11
+
+Exact user approval: `16c139e9f` →「mainへ統合する」. Main was clean at `402598d27`; `git merge --ff-only 16c139e9f` succeeded without conflict. `git status --short` is empty; all six entries in command-repair-20261011.sha256 match. Source diff against the verified commit is empty and main config.mk equals the owned worktree config.mk. No source changes after verification, so prior final host/build results apply without repeating tests. No push, remote deployment or reboot. Actual new-kernel USB recovery is unverified. Earlier integration-pending statements are historical; shared/remote projections remain Q1 pending.

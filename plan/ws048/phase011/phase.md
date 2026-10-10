@@ -19,3 +19,7 @@ Generic DMAはdevice addressにCPU paddrをそのまま返すが、brcmstbは非
 ## Terminal source/build result / 2026-10-11
 
 Limited source/build criteria cleared. [Evidence, final hashes, exact commands, versions, transient failures and limitations](../tests/command-repair-20261011.md). DMA/PCIe models PASS with normal sanitizers, current config warning0 kernel build PASS, final changed-source full-standard review complete. The final design adds a window creation API while preserving the original constraints layout and all identity callers; this is internal to the Phase and does not change HAL/UAPI or foreign Phase commitments. Actual USB recovery is unverified and p009/p006 remain uncleared/planned. No remote update/reboot. Main concrete-commit approval and shared projections/GitHub are pending.
+
+## Main integration follow-up / 2026-10-11
+
+User approved `16c139e9f` with「mainへ統合する」. Main fast-forward `402598d27` → `16c139e9f` completed without conflict; clean read-back, six source/test hashes, empty source diff and identical config.mk verify the integrated source equals the tested worktree. Prior integration-pending text is historical. No additional source changes, push or physical update/reboot. Phase remains cleared for its source/build criteria; physical USB acceptance and Q1 shared/remote projections remain pending.

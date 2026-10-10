@@ -14,3 +14,7 @@ Graph: main402598d27 (context) → i01 → user physical USB acceptance (context
 ## Terminal result
 
 The selected source/build item cleared. [Evidence](tests/command-repair-20261011.md), [Phase](phase011/phase.md). Original constraints/identity API and HAL/UAPI retained. Actual USB input acceptance remains uncleared, GPU log investigation remains read-only. Concrete-commit main approval and Q1 shared/remote projections pending. No next Queue automatically started.
+
+## Main integration follow-up / 2026-10-11
+
+Current user approved the exact commit `16c139e9f` with「mainへ統合する」. Clean main `402598d27` fast-forwarded to `16c139e9f` without conflict. All six recorded source/test hashes match on main, source diff is empty, and config.mk matches the verified worktree byte-for-byte. Main integration is complete; preceding approval-pending text is historical. Existing warning0 kernel build and limited host checks apply to the identical integrated source. No push or remote update/reboot. Physical USB acceptance remains pending; shared/remote projections remain Q1 pending.

@@ -117,3 +117,7 @@ Current user「main仁藤剛してください。」を直前の7b16e364c統合�
 ### p011 source/build result
 
 [p011](phase011/phase.md)の限定source/build criteria cleared。4/8GiB PCI aliasをCPU backingと分け、全doorbell readbackとtimeout状態logを追加。既存constraints layout/identity API/HAL/UAPIは維持。限定ASan/UBSan/LSan modelsと現在config warning0 kernel build、最終全文規約review PASS。[証拠](tests/command-repair-20261011.md)。新kernelのUSB復旧は未確認、WS incomplete。GPU実機logの2停止点は同証拠に保存し、GPU sourceは未変更。main承認・共有投影/GitHubはQ1 pending。
+
+### p011 main integration / 2026-10-11
+
+Current user「mainへ統合する」で具体的commit `16c139e9f` を承認。clean main `402598d27` から同commitへfast-forward、競合なし。全6 source/test SHA256一致、source差分なし、config.mkは検証worktreeとbyte-identical。警告0 kernel buildと限定host checksは統合sourceにも適用される。main統合は完了し、先行の承認待ちは当時の履歴。新kernelでのUSB入力受入は未確認でWS incompleteを維持。GPU source変更なし。push・実機更新/rebootなし。共有Master/Queue/history/cache/GitHub投影はQ1 pending。
