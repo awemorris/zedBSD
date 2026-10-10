@@ -3,14 +3,14 @@
 # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（p004〜p006 sourceはmain統合済み、p007のDrivers追加/選択保持を確認済み）
+Status: incomplete（p004〜p007 sourceはmain統合済み、p008のRPi4選択config buildはcleared）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex Drivers選択](codex-drivers-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+Queue: [Codex RPi4 build](codex-rpi4-build-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p007の具体的成果のmain統合承認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p008の具体的成果のmain統合承認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -76,7 +76,8 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 | [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
 | [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
 | [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、c2b97e953 main統合済み） | p005 source |
-| [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、main統合待ち） | p006 source |
+| [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、a1c65db6a main統合済み） | p006 source |
+| [p008](phase008/phase.md) | 選択したRPi4 configのrootfs/desktopビルドルール補完 | cleared（選択config/image build、main統合待ち） | p005〜p007 main source |
 
 ## 2026-10-10 RPi4 UAT前のarm64選択修正
 
@@ -102,3 +103,9 @@ userがBoot OptionとDevelopmentの間へのDrivers追加、全CPU共通選択�
 既存23boolを共通表示、normalizeの互換性filterを外しsave/CPU切替で保持。初期/未指定driver既定値の旧実装との一致も確認。対象host/PTY/Make条件分岐/全文review PASS。ECMはx86で既存build切替あり、arm64にはsource未接続であり移植の成功とはしない。固定driverには選択flagを追加していない。WS全体のp003/受入は未完。具体的成果commitのmain統合を確認し、shared投影/GitHubはQ1へ保留、push無し。
 
 2026-10-11 userの追加指定でp007内の未統合UIを機能別に階層化。Disk/Input/GPU/Audio/Ethernet/WiFi/USB/Platformに既存23boolを配置。全6platformの実カテゴリhandler・全件toggle/save/load・初期既定値の一致、RPi4 real PTYのDrivers→Ethernet→ECM操作と保存を最終sourceで再確認PASS。p007 cleared、独立Queue finished。p001等の当時の結果は保持。main統合はこの最終差分の具体的commit承認待ち、共有投影/GitHub公開はQ1へ保留。
+
+## 2026-10-11 RPi4ビルド失敗の修正
+
+userが現在config.mkでmake -j16時のlibbrowser.soルール不足を報告し修正を依頼。p008と独立有限Queueを追加。共通の選択registryに対して不足したarm64 link/配置ルールを補う。main ad9d2f6d3でp007 source a1c65db6aの統合を再確認。shared投影/GitHubはQ1へ保留。
+
+p008 cleared: 保存した現在configの通常make -j16がライブラリ/全選択app/static preview/Noct/kernel/外部package/rootfs/SD imageまで完了、check-disk-image PASS。amd64のportable source/link/check recipeは共通化前と逆置換で全文一致、変更の最終規則review PASS。[証拠](tests/rpi4-build-20261011.md)。外部package既存warningと共有toolchain固定は明記、実機/boot未実施。p008の具体的commit統合承認を確認し、WS全体p003/受入は未完のまま。共有Master/Queue/Past LogとGitHub投影はQ1 pending、pushなし。

@@ -66,6 +66,9 @@ def unpack_table(data, offset, count, size, fmt, path, what):
 
 def check(path, machine_name, role, expected_needed=None, expected_soname=None, exports_tsv=None):
     data = path.read_bytes()
+    # Build configurations call the AArch64 architecture arm64.
+    if machine_name == "arm64":
+        machine_name = "aarch64"
     elf_class, machine, endian, allowed_relocs = MACHINES[machine_name]
     if len(data) < 64 or data[:4] != b"\x7fELF" or data[4] != elf_class:
         fail(path, f"expected ELF{elf_class * 32}")
@@ -330,7 +333,7 @@ def check(path, machine_name, role, expected_needed=None, expected_soname=None, 
 
 def main():
     parser = argparse.ArgumentParser()
-    parser.add_argument("--machine", choices=MACHINES, required=True)
+    parser.add_argument("--machine", choices=(*MACHINES, "arm64"), required=True)
     parser.add_argument("--role", choices=("interpreter", "libc", "module",
                                             "rpath-module", "version-definition",
                                             "version-consumer", "program",

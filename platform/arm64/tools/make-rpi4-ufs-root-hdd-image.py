@@ -36,9 +36,10 @@ def build(args: argparse.Namespace) -> None:
             '--swapfile',str(args.swapfile),'--config',str(args.config),
             '--firmware-dir',str(args.firmware_dir),str(temporary))
         blocks=args.ufs_root.stat().st_size//SECTOR
-        if ROOT_LBA+blocks>temporary.stat().st_size//SECTOR:
-            raise SystemExit('UFS root exceeds Raspberry Pi image')
+        required_size=(ROOT_LBA+blocks)*SECTOR
         with temporary.open('r+b') as image:
+            # Keep the FAT layout and grow only when the selected root needs it.
+            image.truncate(max(temporary.stat().st_size,required_size))
             image.seek(0x1CE)
             image.write(struct.pack('<B3sB3sII',0,b'\xfe\xff\xff',0xA5,
                                     b'\xfe\xff\xff',ROOT_LBA,blocks))

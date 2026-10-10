@@ -78,13 +78,13 @@ ZEDBSD_EXTERNAL_CROSS_INPUTS := $(ZEDBSD_EXTERNAL_GEN_CROSS) \
 # one when a package is built on its own).  Only the soname reaches a
 # program, so any build of this tree's libraries serves.  The list is what
 # the packages link: the C library, and libutil (openpty, for OpenSSH),
-# which only amd64 builds; a package that links another of this tree's
+# available on both LP64 targets; a package that links another of this tree's
 # shared libraries adds it here.  A copy is refreshed whenever its source
 # changes, and the copies are order-only prerequisites of the wrappers: they
 # have to exist before a package links, and a new C library does not
 # configure the packages again.
 ZEDBSD_EXTERNAL_LINK_DIR := $(ZEDBSD_EXTERNAL_CROSS_DIR)/lib
-ZEDBSD_EXTERNAL_LINK_LIBS := libc.so $(if $(filter amd64,$(ZEDBSD_ARCHITECTURE)),libutil.so)
+ZEDBSD_EXTERNAL_LINK_LIBS := libc.so $(if $(filter amd64 arm64,$(ZEDBSD_ARCHITECTURE)),libutil.so)
 ZEDBSD_EXTERNAL_LINK_SOURCE := $(if $(ZEDBSD_TOPLEVEL_BUILD),\
 	$(BUILD)/dynamic,$(ZEDBSD_EXTERNAL_DYNAMIC))
 

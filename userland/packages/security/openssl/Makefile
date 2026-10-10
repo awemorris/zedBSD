@@ -21,13 +21,14 @@ ZEDBSD_EXT_openssl_ARCHIVE := openssl-3.5.8.tar.gz
 ZEDBSD_EXT_openssl_URL := https://github.com/openssl/openssl/releases/download/openssl-3.5.8/openssl-3.5.8.tar.gz
 ZEDBSD_EXT_openssl_SIZE := 53213818
 ZEDBSD_EXT_openssl_SHA256 := a8f84a39918ec6415ce765d9b429d313ba97b8143169c172e734b9514464f5b2
-ZEDBSD_EXT_openssl_PATCH_LEVEL := zedbsd6
+ZEDBSD_EXT_openssl_PATCH_LEVEL := zedbsd7
 ZEDBSD_EXT_openssl_PATCHES := $(sort $(wildcard $(abspath $(ZEDBSD_OPENSSL_DIR))/patches/*.patch))
 
 # The Configure target name follows the configured architecture.
 ZEDBSD_OPENSSL_TARGET := $(strip \
 	$(if $(filter amd64,$(ZEDBSD_ARCHITECTURE)),zedbsd-x86_64,\
-	$(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),zedbsd-x86,)))
+	$(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),zedbsd-x86,\
+	$(if $(filter arm64,$(ZEDBSD_ARCHITECTURE)),zedbsd-aarch64,))))
 
 $(eval $(call ZEDBSD_EXTERNAL_SOURCE,openssl))
 

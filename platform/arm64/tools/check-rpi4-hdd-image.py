@@ -39,7 +39,13 @@ def same_file(image: Path, name: str, source: Path) -> None:
 
 def check(args: argparse.Namespace) -> None:
     size = args.image.stat().st_size
-    if size != IMAGE_BLOCKS * SECTOR:
+    expected_size = IMAGE_BLOCKS * SECTOR
+    if args.ufs_root is not None:
+        root_size = args.ufs_root.stat().st_size
+        if root_size == 0 or root_size % SECTOR:
+            fail("invalid UFS root size")
+        expected_size = max(expected_size, ROOT_LBA * SECTOR + root_size)
+    if size != expected_size:
         fail("unexpected image size")
     with args.image.open("rb") as stream:
         mbr = stream.read(SECTOR)

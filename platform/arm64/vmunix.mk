@@ -275,8 +275,6 @@ $(BUILD)/bin/$(1): $(ARM64_APP_INPUTS) $(addprefix $(ARM64_APP_OBJ)/userland/bas
  $(call ZEDBSD_USERLAND_OBJECTS,$(ARM64_APP_OBJ),$(1)) $(ARM64_APP_LIBS) -o $$@
 	$(ARM64_APP_CHECK) $$@
 endef
-$(foreach command,$(USER_BASIC_COMMANDS),\
-	$(eval $(call ARM64_USER_BASIC_COMMAND,$(command))))
 
 ARM64_USER_NET_COMMANDS := $(USERLAND_SELECTED_NETWORK_PROGRAMS)
 ARM64_USER_NET_COMMON_OBJS := $(BUILD)/user/userland/base/net/netutil.o \
@@ -334,6 +332,43 @@ $(BUILD)/POSIX-R2-REMAINING.ELF: \
 	@test -z "$$($(ARM64_NM) -u $@ | $(AWK) '$$1 == "U"')" || \
 		{ $(ARM64_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $@
+
+# Sandbox helpers keep their registered static class on arm64 as on amd64.
+USER_STATIC_COMMANDS := $(foreach program,$(filter $(ZEDBSD_USER_PROGRAMS),$(USERLAND_PACKAGES)),\
+	$(if $(filter static,$(USERLAND_$(program)_CLASS)),$(program)))
+USER_STATIC_TARGETS := $(addprefix $(BUILD)/bin/,$(USER_STATIC_COMMANDS))
+
+# The sandboxed preview includes math and number parsing without loading a DSO.
+ARM64_USER_FLOAT_OBJS := $(patsubst src/libc/%.c,$(BUILD)/user-float/%.o,\
+	$(ZEDBSD_LIBM_SOURCES) src/libc/softfloat.c src/libc/compiler-runtime.c \
+	src/libc/softfloat128.c src/libc/compiler-runtime128.c src/libc/float-parse.c)
+ARM64_USER_STATIC_EXTRA_keiland-preview := $(ARM64_USER_FLOAT_OBJS)
+
+$(ARM64_USER_FLOAT_OBJS): $(BUILD)/user-float/%.o: src/libc/%.c \
+	$(ZEDBSD_LIBM_HEADERS) src/libc/softfloat.h src/libc/softfloat128.h \
+	$(ZEDBSD_SYSROOT_ARM64)/.zedbsd-sysroot-complete
+	@mkdir -p $(dir $@)
+	$(ARM64_CC) $(ARM64_USER_CPPFLAGS) $(ARM64_USER_CFLAGS) -c $< -o $@
+
+define ARM64_USER_STATIC_COMMAND
+$(BUILD)/bin/$(1): $(ARM64_USER_RUNTIME_OBJS) \
+	$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user,$(1)) \
+	$(ARM64_USER_STATIC_EXTRA_$(1)) \
+	$(ZEDBSD_SYSROOT_ARM64)/usr/lib/libclang_rt.builtins.a \
+	$(ARM64_PLATFORM)/user.ld tools/build/check-user-elf.py
+	@mkdir -p $$(dir $$@)
+	$(ARM64_LD) --gc-sections -nostdlib -static -z max-page-size=4096 \
+ -z stack-size=0x100000 -T $(ARM64_PLATFORM)/user.ld \
+ $(ARM64_USER_RUNTIME_OBJS) \
+ $(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user,$(1)) \
+ $(ARM64_USER_STATIC_EXTRA_$(1)) \
+ $(ZEDBSD_SYSROOT_ARM64)/usr/lib/libclang_rt.builtins.a -o $$@
+	$(PYTHON) tools/build/check-user-elf.py --machine aarch64 $$@
+endef
+$(foreach command,$(USER_STATIC_COMMANDS),\
+	$(eval $(call ARM64_USER_STATIC_COMMAND,$(command))))
+# No substitute-font file can be opened by the sandboxed preview helper.
+$(call ZEDBSD_USERLAND_OBJECTS,$(BUILD)/user,keiland-preview): ARM64_USER_CPPFLAGS += -DPDF_FONT_FILES=0
 
 # ELF64 runtime linker and shared libc for the aarch64 architecture overlay.
 DYNAMIC_DIR := $(BUILD)/dynamic
@@ -423,6 +458,17 @@ $(DYNAMIC_DIR)/libc.so: $(DYNAMIC_LIBC_OBJS)
 	$(ARM64_LD) -shared -soname libc.so --hash-style=both -z now -z relro \
  -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
  --allow-shlib-undefined $^ -o $@
+
+# Portable libraries and applications use the same graph as amd64.
+DYNAMIC_SYSROOT := $(ZEDBSD_SYSROOT_ARM64)
+DYNAMIC_LINK_CFLAGS := -march=armv8-a -mno-outline-atomics
+DYNAMIC_LINK_LDFLAGS := -m aarch64elf -z max-page-size=4096
+DYNAMIC_ELF_MACHINE := aarch64
+include platform/common/userland-dynamic.mk
+
+$(foreach command,$(filter-out $(DYNAMIC_PORTABLE_PROGRAMS),$(USER_BASIC_COMMANDS)),\
+	$(eval $(call ARM64_USER_BASIC_COMMAND,$(command))))
+
 $(DYNAMIC_DIR)/alt/rpathdep.so: \
 	$(DYNAMIC_DIR)/obj/userland/tests/rpathdep.o $(DYNAMIC_DIR)/ld.so
 	@mkdir -p $(dir $@)
@@ -455,82 +501,6 @@ $(DYNAMIC_DIR)/versuse.so: \
  -z now -z relro -z separate-code -z max-page-size=4096 \
  $< -L$(DYNAMIC_DIR) -l:verstest.so -o $@
 
-# libz-compat (ws071-p010): the zlib interface of the base programs; it needs nothing but the C library.
-DYNAMIC_Z_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libz-compat)
-
-$(DYNAMIC_DIR)/libz-compat.so: $(DYNAMIC_Z_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.so \
-	userland/base/libz-compat/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libz-compat.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/base/libz-compat/exports.map \
- $(DYNAMIC_Z_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libc.so --soname libz-compat.so $@
-
-# libpng-compat (ws071-p010): libpng's simplified API of the base programs, over libz-compat.
-DYNAMIC_PNG_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libpng-compat)
-
-$(DYNAMIC_DIR)/libpng-compat.so: $(DYNAMIC_PNG_COMPAT_OBJS) $(DYNAMIC_DIR)/libz-compat.so $(DYNAMIC_DIR)/libc.so \
-	userland/base/libpng-compat/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libpng-compat.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/base/libpng-compat/exports.map \
- $(DYNAMIC_PNG_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libz-compat.so -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libz-compat.so --needed libc.so --soname libpng-compat.so $@
-
-# libjpeg-compat (ws074-p019): the libjpeg decompression interface of the base programs; it needs nothing
-# but the C library.
-DYNAMIC_JPEG_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libjpeg-compat)
-
-$(DYNAMIC_DIR)/libjpeg-compat.so: $(DYNAMIC_JPEG_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.so \
-	userland/base/libjpeg-compat/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libjpeg-compat.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/base/libjpeg-compat/exports.map \
- $(DYNAMIC_JPEG_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libc.so --soname libjpeg-compat.so $@
-
-# The TrueType reader (ws079-p007: libpdf draws text with it); it needs nothing but the C library.
-DYNAMIC_TRUETYPE_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libtruetype)
-
-$(DYNAMIC_DIR)/libtruetype.so: $(DYNAMIC_TRUETYPE_OBJS) $(DYNAMIC_DIR)/libc.so \
-	userland/desktop/libtruetype/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libtruetype.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/desktop/libtruetype/exports.map \
- $(DYNAMIC_TRUETYPE_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libc.so --soname libtruetype.so $@
-
-# libpdf (ws079-p004): the PDF library of the base programs; its reader decodes Flate streams through
-# libz-compat and JPEG images through libjpeg-compat (ws079-p006), and draws the glyphs of text through
-# libtruetype (ws079-p007).
-DYNAMIC_PDF_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libpdf)
-
-$(DYNAMIC_DIR)/libpdf.so: $(DYNAMIC_PDF_OBJS) $(DYNAMIC_DIR)/libz-compat.so $(DYNAMIC_DIR)/libjpeg-compat.so \
-	$(DYNAMIC_DIR)/libtruetype.so $(DYNAMIC_DIR)/libc.so \
-	userland/base/libpdf/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libpdf.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/base/libpdf/exports.map \
- $(DYNAMIC_PDF_OBJS) -L$(DYNAMIC_DIR) -l:libz-compat.so -l:libjpeg-compat.so -l:libtruetype.so -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libz-compat.so --needed libjpeg-compat.so --needed libtruetype.so --needed libc.so --soname libpdf.so $@
-
-# libgif-compat (ws074-p051): giflib's decoding interface of the base programs; it needs nothing but the
-# C library.
-DYNAMIC_GIF_COMPAT_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libgif-compat)
-
-$(DYNAMIC_DIR)/libgif-compat.so: $(DYNAMIC_GIF_COMPAT_OBJS) $(DYNAMIC_DIR)/libc.so \
-	userland/base/libgif-compat/exports.map tools/build/check-dynamic-elf.py
-	$(ARM64_LD) -shared -soname libgif-compat.so --hash-style=both \
- -z defs -z now -z relro -z separate-code -z max-page-size=4096 -z stack-size=0x100000 \
- --version-script=userland/base/libgif-compat/exports.map \
- $(DYNAMIC_GIF_COMPAT_OBJS) -L$(DYNAMIC_DIR) -l:libc.so -o $@
-	$(PYTHON) tools/build/check-dynamic-elf.py --machine aarch64 --role shared-library \
- --needed libc.so --soname libgif-compat.so $@
 $(DYNAMIC_DIR)/dyntest: $(ZEDBSD_SYSROOT_ARM64)/usr/lib/crt1.o \
 	$(DYNAMIC_DIR)/obj/userland/tests/dyntest.o $(DYNAMIC_DIR)/libc.so \
 	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_DIR)/tlstest.so \
@@ -577,8 +547,8 @@ AARCH64_ARCH_FILES := --file /bin/sh=$(BUILD)/bin/sh \
 	--file /bin/dyntest=$(DYNAMIC_DIR)/dyntest
 AARCH64_ARCH_INPUTS += $(addprefix $(BUILD)/bin/,$(USERLAND_SELECTED_NETWORK_PROGRAMS))
 AARCH64_ARCH_FILES += $(foreach command,$(USERLAND_SELECTED_NETWORK_PROGRAMS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
-AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS)
-AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
+AARCH64_ARCH_INPUTS += $(USER_BASIC_TARGETS) $(USER_STATIC_TARGETS)
+AARCH64_ARCH_FILES += $(foreach command,$(USER_BASIC_COMMANDS) $(USER_STATIC_COMMANDS),--file $(call zedbsd_userland_destination,$(command))=$(BUILD)/bin/$(command))
 AARCH64_ARCH_FILES += $(ZEDBSD_USERLAND_FILE_MODES)
 AARCH64_ARCH_INPUTS += $(ZEDBSD_ACCOUNT_INPUTS)
 AARCH64_ARCH_FILES += $(ZEDBSD_ACCOUNT_FILES)
@@ -630,6 +600,7 @@ $(BUILD)/vmunix: $(BUILD)/kernel.elf \
 -include $(ARM64_BOOT_OBJS:.o=.d) $(ARM64_KERNEL_OBJS:.o=.d)
 
 -include $(ARM64_USER_OBJS:.o=.d)
+-include $(wildcard $(DYNAMIC_DIR)/obj/*/*/*.d $(DYNAMIC_DIR)/obj/*/*/*/*.d $(DYNAMIC_DIR)/obj/*/*/*/*/*.d)
 
 $(BUILD)/src/hal/pmem-constraints.o: src/hal/pmem-constraints.c
 	@mkdir -p $(dir $@)
