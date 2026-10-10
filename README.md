@@ -354,6 +354,47 @@ make help              # short command summary
 
 ---
 
+## Cost Breakdown
+
+The following is our initial cost estimation:
+
+| Item                                  | Initial Cost       | Per-unit Royalty @100 | Per-unit Royalty @1000 | Per-unit Royalty @10000 |
+|---------------------------------------|--------------------|-----------------------|------------------------|-------------------------|
+| UNIX® Certification (The Open Group) | $13,300 (50% off?) | $0                    | $0                     | $0                      |
+| H.264 (Via LA)                        | $0                 | $0                    | $0                     | $0                      |
+| AAC                                   | $0                 | $1                    | $1                     | $1                      |
+| Bluetooth (Bluetooth SIG)             | $30,000            | $0                    | $0                     | $0                      |
+| Commercial Fonts                      | $5,000             | $10                   | $10                    | $10                     |
+| Crypto Export Administration          | $3,300             | $0                    | $0                     | $0                      |
+
+So, the total initial cost is around $45000. (The UNIX certification is 50% off, based on our software volume tier.)
+
+| Lot                | Price per copy | 
+|--------------------|----------------|
+| Starting at 1000   | $56            |
+| Starting at 10000  | $16            |
+| Starting at 100000 | $12            |
+
+If we wouldn't get UNIX and Bluetooth licenses, the price for @10000
+won't change a lot.
+
+| Lot                | Price per copy |
+|--------------------|----------------|
+| Starting at 1000   | $25            |
+| Starting at 10000  | $13            |
+| Starting at 100000 | $12            |
+
+Targeting an initial release of **10,000 copies** puts our effective
+cost at around $16, allowing a retail price of **$20-$30 per copy**,
+which is highly competitive and reasonable.
+
+**Conclusion:**
+To cover the initial release, we would need to fund this project via crowdfunding by securing either:
+- **~10,000 backers at $5 each**, or
+- **~1,000 backers at $50 each**.
+
+---
+
 ## License
 
 zedBSD and Keiland Desktop are distributed under the zlib License. See
