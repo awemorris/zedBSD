@@ -27,10 +27,9 @@
 
 | 項目 | 状態 | LW | 担当 |
 | --- | --- | --- | --- |
-| [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p004 を merge（host 試験・Linux の build まで）。T1-523（2026-10-10）: security-keys・passkey-p002・wheel-card・FreeBSD の build PASS。FAIL: key-keypad の 6（login の log に key owner の行が無い）、fido2-p003 の step 3（鍵が無い時に NFC の待ちで reason=timeout になり no-key にならない）→ P1 が直す。p005 は 5330 の UAT（U1〜U13 は ws.md） | 0.5 | P1・T1 |
-| [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared、p003 MAP は i01〜i07 実装（i06 まで main に merge、i07 は T1-527）、p004 の SMS の interface の設計は cleared（判断 P1〜P8 は推しどおり）。p004a〜c（SMS を Phone の app で）を 2026-10-10 夜に main に merge（bc4c7f9f6、host 試験 PASS、実機は UAT）。p005 PBAP は設計の第 1 版と review-1（blocker 1）、ユーザーの判断 Pc1〜Pc6 待ち、i01（vCard の読み）は先に始めてよい（55e471604、backend の欄の読みの欠陥の直しも merge） → p006・p007 HFP → p008 実機 | 約 64 | P1 |
-| [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | p001 cleared（QEMU の T1-525・528 PASS）。POSIX（p045）も PASS。Sign-in Methods は Users の頁の card の switch（押すと password の popup） | 0.5 | T1・ユーザー |
 | [WS083](ws083/ws.md) Vulkan Video（H.264） | p001〜p006・p008 cleared（実機で全 stream 一致、1080p 相当 1 frame 約 5 ms）。2026-10-11 から既定で ON（ユーザー）。残り: p007 の hang の回復の実機の確かめ（hang の kernel を 1 回置く、手順は phase007、ユーザーの判断） | 0.5 | ユーザー・Q1 |
+| [WS202](ws202/ws.md) 動画再生） | libmediaにH.264, AACを実装、動画app, 音楽appで利用。） | 4.0 | ユーザー |
+| [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared、p003 MAP は i01〜i07 実装（i06 まで main に merge、i07 は T1-527）、p004 の SMS の interface の設計は cleared（判断 P1〜P8 は推しどおり）。p004a〜c（SMS を Phone の app で）を 2026-10-10 夜に main に merge（bc4c7f9f6、host 試験 PASS、実機は UAT）。p005 PBAP は設計の第 1 版と review-1（blocker 1）、ユーザーの判断 Pc1〜Pc6 待ち、i01（vCard の読み）は先に始めてよい（55e471604、backend の欄の読みの欠陥の直しも merge） → p006・p007 HFP → p008 実機 | 約 64 | P1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |
@@ -41,19 +40,12 @@
 
 | # | 項目 | 手順 | 期待 |
 | --- | --- | --- | --- |
-| 4 | [WS199](ws199/ws.md) セキュリティキーの頁 | Settings → Security Keys で鍵の一覧、Add Key のウィザード（名前・PIN の設定・初期化・PIN の変更）、Software Security Key（今の PIN） | ウィザードで登録・PIN の変更・初期化ができる。処理中は操作できない表示 |
-| 5 | WS199 ログイン画面のキー | 鍵を挿す（(a) 既定、(b)「PIN 不要」、(c)「PIN 不要」＋「タッチ不要」の設定で） | 自動で鍵のモードとその鍵の user に。(a) PIN（欄の下に OSK）とタッチ、(b) タッチだけ、(c) 「確認中」の後に最低 0.5 秒「確認した」を出してデスクトップへ |
-| 6 | WS199 ロック画面のタッチ不要 | (c) の設定で lock。鍵を挿したまま／抜いて挿し直す | 挿したままならタッチを促す。lock の後に挿した鍵ならタッチ無しで解除 |
-| 7 | WS199 設定の変更 | 「PIN 不要」「タッチ不要」を入れる | パスワードを求め、「鍵を持つ人は誰でもログインできる」の警告が出る |
-| 8 | [WS200](ws200/ws.md) Users の頁 | Change Password のウィザード、Sign-in Methods の card の switch（Password・PIN・Security Key、押すと password の popup） | パスワードを変えられる。外した方式は lock・greeter に出ない。console・SSH は password のまま |
 | 11 | [WS197](ws197/ws.md) スマホの SMS（Android） | 手順は ws197/ws.md の「5330 の UAT の手順」: Settings → Bluetooth でスマホを pairing して「Use as phone」→ Phone の app で受信・送信・同期、app を閉じている間の通知 | SMS が送受信でき、履歴が同期される |
-| 9 | [BUG-222](bugs/BUG-222.md) USB LAN の速さ | 2026-10-10 は 4.9 MB/s（前は 950 KB/s） | 既知の問題に書くか close はユーザー |
 
 ## 既知の問題に書いて出す（ベータ3 以降）
 
 | 項目 | 理由 |
 | --- | --- |
-| BUG-222（USB LAN の遅さ、直らなければ）、BUG-280（App Home への遷移の fps）、BUG-217（最大化の session の状態）、BUG-223（動画の全画面）、BUG-205（太字の font） | 設計の変更・調べが要る |
 | BUG-255（蓋を閉じた間の HDMI）、BUG-159（電池で 5 fps）、BUG-145（AX211 の DHCP）、BUG-165（5330 の DSDT） | 調査が長い・実機の時間が要る |
 | WS201（/home の暗号化）、WS195（/opt/keiland）、WS196（useradd 等）、WS198（self-build）、[WS001 p045](ws001/phase045/phase.md) POSIX の header、[WS126](ws126/ws.md) Python | ベータ3 の列 |
 | 規約の全文の見直しの Phase（各 WS） | ユーザーの決定でベータ3 |
