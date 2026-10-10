@@ -34,8 +34,14 @@ jobs:
           cp config/ci/config-amd64.mk config.mk
           make -j4
           mkdir -p artifacts
-          # The 2 GiB native image is published gzip-compressed.
-          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-amd64.img.gz
+          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-intel.img.gz
+
+      - name: Build arm64
+        run: |
+          cp config/ci/config-rpi4.mk config.mk
+          make -j4
+          mkdir -p artifacts
+          gzip -9 -c build/amd64/hdd-image.img > artifacts/zedbsd-rpi4.img.gz
 
       - name: Package Kei-nightly.zip
         # Until the base package is on the rev-0 release, a failure here leaves
@@ -90,11 +96,13 @@ jobs:
             zedBSD OS
             =========
             
-            | CPU     | Machine      | File                  | Description                                             |
-            |---------|--------------|-----------------------|---------------------------------------------------------|
-            | amd64   | PC (UEFI)    | `zedbsd-amd64.img.gz` | USB image, gzip-compressed (`gunzip` before writing).   |
-            | amd64   | Windows      | `Kei-nightly.zip`     | Kei in QEMU with Vulkan (Venus). Unzip and run `boot.bat`. |
+            | CPU     | Machine        | File                  | Description                                  |
+            |---------|----------------|-----------------------|----------------------------------------------|
+            | Intel   | UEFI           | `zedbsd-intel.img.gz` | USB image                                    |
+            | Arm64   | Raspberry Pi 4 | `zedbsd-rpi4.img.gz`  | SD image                                     |
+            | Intel   | Windows        | `Kei-nightly.zip`     | NVMe image with QEMU binary. Run `boot.bat`. |
 
           files: |
-            artifacts/zedbsd-amd64.img.gz
+            artifacts/zedbsd-intel.img.gz
+            artifacts/zedbsd-rpi4.img.gz
             artifacts/Kei-nightly.zip
