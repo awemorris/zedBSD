@@ -67,6 +67,8 @@
 #define XHCI_RING_TRBS 256U
 #define XHCI_TRANSFER_RESERVE_SIZE DRV_USB_URB_RECLAIM_SAFE_MAX_SIZE
 #define XHCI_TIMEOUT 10000000U
+/* Maximum command completion wait, independent of polling speed. */
+#define XHCI_COMMAND_WAIT_SECONDS 5U
 /* Bounded waits for a quiescence, a reset or an endpoint to run again. */
 #define XHCI_WAIT_MS 1000U
 #define XHCI_ROOT_POLL_MS 100U
@@ -1159,32 +1161,55 @@ command_ex(
 {
 	int available;
 	struct xhci_trb event;
-	unsigned n, type;
+	unsigned n;
+	unsigned type;
 	uint64_t command_address;
-	bool enabled = kern_irq_disable();
-	int result = ETIMEDOUT;
+	uint64_t counter_start;
+	uint64_t counter_now;
+	uint64_t counter_frequency;
+	uint64_t sample_frequency;
+	uint64_t tick_start;
+	uint64_t tick_now;
+	uint64_t event_pointer;
+	uint64_t tick_limit;
+	bool enabled;
+	bool have_counter;
+	bool counter_sampled;
+	int command_error;
+	int matches;
+	unsigned command_owner;
 
-	/* Handles the completion condition. */
+	/* Saves the caller's IRQ state before claiming command ownership. */
+	enabled = kern_irq_disable();
+	command_error = ETIMEDOUT;
+
+	/* Initializes the optional completion-code output. */
 	if (completion)
 		*completion = 0;
-	/* Continue while the operation condition remains true. */
-	while (__atomic_exchange_n(&c->command_busy, 1U, __ATOMIC_ACQUIRE)) {
-		/* Handles the enabled condition. */
+
+	/* Waits for exclusive ownership of the command ring. */
+	for (;;) {
+		command_owner =
+		    __atomic_exchange_n(&c->command_busy, 1U, __ATOMIC_ACQUIRE);
+		if (command_owner == 0U)
+			break;
+
+		/* Restores the caller's permitted interrupt delivery. */
 		if (enabled)
 			kern_irq_enable();
 		sched_yield();
 		enabled = kern_irq_disable();
 	}
 
-	/* Checks the operation status. */
+	/* Refuses a controller whose command or DMA ownership is unresolved. */
 	if (c->dma_quiesced || c->command_failed) {
 		__atomic_store_n(&c->command_busy, 0U, __ATOMIC_RELEASE);
 
-		/* Handles the enabled condition. */
+		/* Restores the caller's permitted interrupt delivery. */
 		if (enabled)
 			kern_irq_enable();
 
-		/* Failed. */
+		/* Refuses another command while the controller retains unresolved DMA. */
 		return EIO;
 	}
 
@@ -1199,16 +1224,82 @@ command_ex(
 	 * interrupt was dropped and the ring stalled until the next command.
 	 */
 	command_address = ring_push(&c->command, parameter, status, control);
+
+	/* Publishes the descriptor identity before IRQ can consume its completion. */
 	event_lock(c);
+
 	c->command_address = command_address;
 	c->command_event_ready = 0;
+
 	event_unlock(c);
+
+	/* Starts one deadline before publishing the command to the device. */
+	counter_start = 0;
+	counter_frequency = 0;
+	have_counter =
+	    kern_rtc_read_counter(&counter_start, &counter_frequency);
+
+	/* A counter without a frequency cannot express an elapsed deadline. */
+	if (counter_frequency == 0)
+		have_counter = false;
+
+	/* Captures the fallback deadline even if the counter is unavailable. */
+	tick_start = sched_ticks();
+	tick_limit = kern_ms_to_ticks(XHCI_COMMAND_WAIT_SECONDS * 1000U);
+
+	/* Allows the IRQ consumer to hand back completions while this owner waits. */
+	if (enabled)
+		kern_irq_enable();
+
+#if defined(HAL_BOARD_RPI4)
+	/* Distinguishes a blocked PCI doorbell access from missing DMA events. */
+	if (((control >> 10) & 0x3fU) == 9U) {
+		kern_logf("xhci: enable slot doorbell begin command=%llx\n",
+			  (unsigned long long)command_address);
+	}
+#endif
+
+	/* Publishes the command before polling its completion. */
 	xhci_ring_doorbell(c, 0, 0);
-	/* Process each element required by the operation. */
+#if defined(HAL_BOARD_RPI4)
+	/* Confirms that the posted write and its readback returned. */
+	if (((control >> 10) & 0x3fU) == 9U)
+		kern_logf("xhci: enable slot doorbell complete\n");
+#endif
+
+	/* Bounds completion by elapsed time even when the caller cannot enable IRQ. */
 	for (n = 0; n < XHCI_TIMEOUT; n++) {
+		/* Chooses an IRQ-independent clock when the HAL supplies one. */
+		if (have_counter) {
+			/* Treats a lost or changed time base as an uncompleted command. */
+			counter_sampled = kern_rtc_read_counter(
+			    &counter_now,
+			    &sample_frequency);
+			if (!counter_sampled ||
+			    sample_frequency != counter_frequency)
+				break;
+
+			/* Limits a missing completion to the same elapsed wait on every CPU. */
+			if ((counter_now - counter_start) / counter_frequency >=
+			    XHCI_COMMAND_WAIT_SECONDS)
+				break;
+		} else {
+			/* Uses scheduler time where a hardware counter is unavailable. */
+			tick_now = sched_ticks();
+			if (tick_now - tick_start >= tick_limit)
+				break;
+		}
+
+		/* Lets init and networking run between short event-ring critical sections. */
+		if (enabled) {
+			sched_yield();
+			(void)kern_irq_disable();
+		}
+
+		/* Serializes the shared event consumer against the controller IRQ. */
 		event_lock(c);
 
-		/* Classifies the current input character. */
+		/* Takes the IRQ handoff before polling another hardware event. */
 		if (c->command_event_ready) {
 			event = c->command_event;
 			c->command_event_ready = 0;
@@ -1217,54 +1308,64 @@ command_ex(
 			available = event_take(c, &event);
 		}
 
-		/* Handles the available condition. */
+		/* Claims transfer ownership before releasing the shared event lock. */
 		type = available ? (event.control >> 10) & 0x3fU : 0;
 		if (available && type == 32U)
 			(void)transfer_claim(c, &event);
+
 		event_unlock(c);
 
-		/* Handles the available condition. */
+		/* Reopens IRQ delivery before inspecting or waiting for the next event. */
+		if (enabled)
+			kern_irq_enable();
+
+		/* Waits for the next event when the ring is empty. */
 		if (!available)
 			continue;
 
-		/* Handles the type condition. */
+		/* Defers claimed transfer callbacks until the command gate is open. */
 		if (type == 32U)
 			continue;
 
-		/* Handles the type condition. */
+		/* Wakes the port worker for a root-port state change. */
 		if (type == 34U) {
 			port_change_defer(c);
 			continue;
 		}
 
-		/* Handles the type condition. */
+		/* Only a command completion can retire this command. */
 		if (type != 33U)
 			continue;
 
-		/* Checks the drv xhci command completion matches result. */
-		if (!drv_xhci_command_completion_matches(
-			    command_address, xhci_event_pointer(&event))) {
+		/* Rejects a completion for another descriptor. */
+		event_pointer = xhci_event_pointer(&event);
+		matches = drv_xhci_command_completion_matches(
+		    command_address,
+		    event_pointer);
+		if (!matches) {
 			kern_logf("xhci: ignored command completion for "
-				   "%x:%x, expected %x:%x\n",
-				   event.parameter_high, event.parameter_low,
-				   (uint32_t)(command_address >> 32),
-				   (uint32_t)command_address);
+				  "%x:%x, expected %x:%x\n",
+				  event.parameter_high,
+				  event.parameter_low,
+				  (uint32_t)(command_address >> 32),
+				  (uint32_t)command_address);
 			continue;
 		}
 
-		/* Handles the slot condition. */
+		/* Publishes the optional slot identity from the matching completion. */
 		if (slot)
 			*slot = event.control >> 24;
-		/* Handles the completion condition. */
+
+		/* Publishes the controller's completion code when requested. */
 		if (completion)
 			*completion = (event.status >> 24) & 0xffU;
 
-		/* Checks the operation result. */
-		result = ((event.status >> 24) & 0xffU) == 1U ? 0 : EIO;
-		if (result) {
+		/* Reports the controller's refusal while retaining normal ring ownership. */
+		command_error = ((event.status >> 24) & 0xffU) == 1U ? 0 : EIO;
+		if (command_error) {
 			kern_logf("xhci: command %u failed, completion=%u\n",
-				   (control >> 10) & 0x3fU,
-				   (event.status >> 24) & 0xffU);
+				  (control >> 10) & 0x3fU,
+				  (event.status >> 24) & 0xffU);
 		}
 
 		break;
@@ -1276,17 +1377,20 @@ command_ex(
 	 * controller raise their interrupt again, and it is served once this
 	 * CPU enables interrupts below.
 	 */
+	(void)kern_irq_disable();
 	event_lock(c);
+
 	c->command_address = 0;
 	c->command_event_ready = 0;
+
 	event_unlock(c);
 
-	/* Checks the operation result. */
-	if (result == ETIMEDOUT)
+	/* Blocks reuse of a ring whose last command was never completed. */
+	if (command_error == ETIMEDOUT)
 		c->command_failed = 1;
 	__atomic_store_n(&c->command_busy, 0U, __ATOMIC_RELEASE);
 
-	/* Handles the enabled condition. */
+	/* Restores the caller's permitted interrupt delivery. */
 	if (enabled)
 		kern_irq_enable();
 
@@ -1297,15 +1401,19 @@ command_ex(
 	 */
 	xhci_completion_drain(c);
 
-	/* Checks the operation result. */
-	if (result == ETIMEDOUT) {
+	/* Records the uncompleted command and the retained hardware state. */
+	if (command_error == ETIMEDOUT) {
 		kern_logf("xhci: command %u timed out\n",
-			   (control >> 10) & 0x3fU);
+			  (control >> 10) & 0x3fU);
 		xhci_command_timeout_report(c);
 	}
 
-	/* Returns the computed result. */
-	return result;
+	/* Reports the command failure without releasing controller-owned DMA. */
+	if (command_error != 0)
+		return command_error;
+
+	/* Succeeded: the caller receives the matching command completion. */
+	return 0;
 }
 
 /* Runs one controller command. */

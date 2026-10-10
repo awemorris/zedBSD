@@ -3,13 +3,13 @@
 # WS048: Raspberry Pi 4 の USB（PCIe・VL805 の xHCI・USB キーボード）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（p008実機boot例外はcleared、p009 USB修正source/build済み・実機入力待ち）
+Status: incomplete（p012 command待機のsource/host/build cleared、最新実機フリーズの復旧未確認）
 Primary Milestone: MG008
 Related Milestones: MG003, MG006
 Objectives: O2, O4
 Parent: [Master](../master.md)
-Queue: [Codex USB/sessiond](codex-usb-session-queue.md) finished。旧PCIe boot/2026-09-27の実行記録は保持。
-Resume point: p009 source 8c93ba8e0はmain統合済み、USB keyboard/mouse実機受入。従来p005〜p007の履歴/未完criteriaは保持。
+Queue: [command-freeze限定Queue](codex-command-freeze-20261011.md) finished。旧PCIe boot/USB/sessiond実行記録は保持。
+Resume point: p012の具体的commitをmain統合後、新kernelの起動/USB入力をuserが確認。p011はmain統合済み、最新写真ではport reset後にboot停止。従来p005〜p007の履歴/未完criteriaは保持。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -49,11 +49,18 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 | [ws048-p004](phase004/phase.md) | 非 coherent な DMA（`hal_pmem_map_uncached` と `dma.c`） | cleared（2026-09-27。承認済みの hal.h の差分を適用、host 試験・rpi4 と amd64 の boot test PASS。実機は未実施） | p001 | 済み（Guardrail の表） |
 | [ws048-p005](phase005/phase.md) | xHCI を rpi4 で | uncleared（build と glue の準備は済み。有効にするのは p004 の後） | p002・p003・p004 | 不要 |
 | [ws048-p006](phase006/phase.md) | USB の hub と HID キーボードで console に入力 | planned | p005 | 不要 |
+| [ws048-p007](phase007/phase.md) | 規約の全文の確認と回帰、実機の結果の取りまとめ | planned | p002〜p006 | 不要 |
 | [ws048-p008](phase008/phase.md) | ユーザー報告のPCIe最初のMMIO読み出し例外を修正 | cleared（ユーザー実機でlogin到達、2026-10-11） | 現在main/config | API変更なし |
 | [ws048-p009](phase009/phase.md) | USB入力のactivationと選択済みclass driverの接続 | uncleared（source/build済み、実機入力待ち） | 現在main/config | API変更なし |
 | [ws048-p010](phase010/phase.md) | VL805起動時の非coherent DMA size契約と最終規約/build | cleared（source/buildのみ、実機未実施） | 現在main/configと実機写真 | API変更なし |
 | [ws048-p011](phase011/phase.md) | VL805 command completion / PCI DMA aliasとdoorbell flush | cleared（source/buildのみ、実機USB未確認） | main402598d27 / 実機log | HAL API不変 |
-| [ws048-p007](phase007/phase.md) | 規約の全文の確認と回帰、実機の結果の取りまとめ | planned | p002〜p006 | 不要 |
+| [ws048-p012](phase012/phase.md) | Command待機の実時間上限とIRQ/CPU進行 | cleared（限定source/host/build、実機復旧未確認） | main9a0ddc6cb / 起動停止写真 | HAL API不変 |
+
+## 2026-10-11 port reset後の起動停止
+
+Userのフリーズ写真で[p012](phase012/phase.md)/[限定Queue](codex-command-freeze-20261011.md)を開始。SSHはtimeout、実機の正確な停止位置は未確認。既存command_exの長いIRQ-off pollを実時間で制限し、IRQ許可callerでは保護区間外のCPU進行を確保する。p011の限定source/build clearanceと未達のUSB実機受入は保持。boot0/CI承認待ちcommitは別branchに保存したまま混ぜない。WS incomplete、共有投影/GitHub Q1 pending。
+
+p012 terminal: 5秒のcounter deadline、IRQ許可callerの保護区間外IRQ/CPU進行、Enable Slot doorbell前後logを実装。production関数をそのまま抽出する9 host scenariosと現在config warning0 kernel/vmunix check PASS、最終changed-source全文規約review/diff-check済み。[証拠](tests/command-freeze-20261011.md)。User「そもそもフリーズしてSSHは起動してないです」を受領、SSH確認は保留。実機boot/USB受入は未確認、main統合は別途具体的commitの承認待ち。
 
 注: QEMU の raspi4b は PCIe を持たない（DTB の PCIe の node を disabled にする）。p002〜p006 の動作の確認は実機だけで、
 このリポジトリに実機の試験の仕組みは無い。実機の確認はユーザーに頼み、行うまで「未実施」と書く。
