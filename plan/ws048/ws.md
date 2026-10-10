@@ -9,7 +9,7 @@ Related Milestones: MG003, MG006
 Objectives: O2, O4
 Parent: [Master](../master.md)
 Queue: [Codex USB/sessiond](codex-usb-session-queue.md) finished。旧PCIe boot/2026-09-27の実行記録は保持。
-Resume point: p009の具体的commit統合承認、USB keyboard/mouse実機受入。従来p005〜p007の履歴/未完criteriaは保持。
+Resume point: p009 source 8c93ba8e0はmain統合済み、USB keyboard/mouse実機受入。従来p005〜p007の履歴/未完criteriaは保持。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -91,3 +91,7 @@ p008のsource/host/buildは完了、実機再起動結果がないためuncleare
 p008 follow-up: user confirms login and VC4 initialization after main fbcb2b543, so only that boot-exception Phase clears. Original attempt/outcome remains historical, new USB/desktop work is p009; WS048 full physical acceptance stays incomplete.
 
 p009 terminal: HID pending activationと選択classの不足を補完、現在configのkernel/full image buildとimage check、最終差分全文review PASS。USBの現在の実機動作は未確認なのでuncleared。[証拠](tests/rpi4-usb-session-20261011.md)。共有投影/GitHubはQ1 pending。
+
+## Main integration follow-up / 2026-10-11
+
+User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.

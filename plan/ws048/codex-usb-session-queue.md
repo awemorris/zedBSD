@@ -15,3 +15,7 @@ Graph: main/context → both items; items independent. No automatic next Queue. 
 ## Terminal results
 
 Both selected source outcomes are durable: USB source/build ready but physical acceptance pending, Graphical login option packaging criteria cleared. [Evidence](tests/rpi4-usb-session-20261011.md). Source integration awaits individual commit approval; final image and physical greeter/USB testing remain user-owned. Former p008 exception clears only by the user reporting login reached. Full WS acceptance not inferred, no automatic next Queue. Q1 shared projections/GitHub pending.
+
+## Main integration follow-up / 2026-10-11
+
+User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.

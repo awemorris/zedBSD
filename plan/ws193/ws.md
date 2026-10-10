@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: [Codex USB/sessiond](../ws048/codex-usb-session-queue.md) finished。旧build/arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p009の具体的成果のmain統合承認と実機desktop確認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p009 source 8c93ba8e0はmain統合済み、実機desktop確認とWS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -116,3 +116,7 @@ p008 cleared: 保存した現在configの通常make -j16がライブラリ/全�
 ユーザーの指示で[p009](phase009/phase.md)と[独立Queue](../ws048/codex-usb-session-queue.md)を追加。USB入力と選択済みclassのglue、Graphical loginのfirmware command lineを補う。ロゴ/kernel animationは明示延期。過去の実機未確認・WS全体の受入は保持。共有投影/GitHubはQ1 pending。
 
 p009 cleared: login=graphical/consoleをSD FATへ収録し、設定y→n→y時のimage再生成/readbackと不変時mtimeを確認。full selected-config build/check-disk-image、sessiond/greeter/account収録、最終差分規則review PASS。[証拠](../ws048/tests/rpi4-usb-session-20261011.md)。実機greeter/desktopは未実施でWS全体はincomplete。共有投影/GitHubはQ1 pending。
+
+## Main integration follow-up / 2026-10-11
+
+User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.

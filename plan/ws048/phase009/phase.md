@@ -24,3 +24,7 @@ Current-config full image validation uses a fresh owned build, current main sysr
 ## Terminal source/build outcome / 2026-10-11
 
 rpi4-usb-session-20261011-i01 ends uncleared only because current USB physical acceptance remains absent. Source glue and selected portable class integration complete, current config kernel build warning0 and full selected image build/image checks pass; final changed-source full-standard review complete. [Evidence](../tests/rpi4-usb-session-20261011.md). Do not claim controller/HID physically working from build success. Resume after approved specific commit integration: user boots rebuilt image, verifies USB keyboard/mouse and provides dmesg/physical evidence if it still fails. Previous p008 boot-crash clearance is separate. No next Queue, shared projections/publication Q1 pending.
+
+## Main integration follow-up / 2026-10-11
+
+User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.
