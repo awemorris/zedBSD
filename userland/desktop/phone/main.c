@@ -1483,8 +1483,8 @@ ph_sync_start(
 	struct ph_window *phone)
 {
 	struct ph_sync *sync;
+	struct ph_sync_marks marks;
 	int64_t since;
-	int64_t deep_at;
 	time_t now;
 	int error;
 
@@ -1500,11 +1500,11 @@ ph_sync_start(
 	sync->retry_at = 0;
 
 	/* The mark (none: the first). */
-	since = 0;
-	deep_at = 0;
+	memset(&marks, 0, sizeof(marks));
 	error = ENOENT;
 	if (phone->link.address[0] != '\0')
-		error = ph_store_sync_load(phone->link.address, &since, &deep_at);
+		error = ph_store_sync_load(phone->link.address, &marks);
+	since = marks.messages_since;
 
 	/* The kind: over the mark first, then the deep one, then the five minutes'. */
 	memset(sync->cursor, 0, sizeof(sync->cursor));
@@ -1658,8 +1658,7 @@ ph_sync_end(
 	int succeeded)
 {
 	struct ph_sync *sync;
-	int64_t since;
-	int64_t deep_at;
+	struct ph_sync_marks marks;
 	unsigned kind;
 	int again;
 	int error;
@@ -1675,16 +1674,14 @@ ph_sync_end(
 	if (!succeeded)
 		return;
 
-	/* The mark of the phone. */
-	since = 0;
-	deep_at = 0;
+	/* The mark of the phone (its other marks as they were). */
 	if (phone->link.address[0] != '\0') {
-		(void)ph_store_sync_load(phone->link.address, &since, &deep_at);
+		(void)ph_store_sync_load(phone->link.address, &marks);
 		if (kind == PH_SYNC_DEEP)
-			deep_at = (int64_t)time(NULL);
+			marks.deep_at = (int64_t)time(NULL);
 		else
-			since = sync->started - PH_DAY_SECONDS;
-		error = ph_store_sync_save(phone->link.address, since, deep_at);
+			marks.messages_since = sync->started - PH_DAY_SECONDS;
+		error = ph_store_sync_save(phone->link.address, &marks);
 		if (error != 0)
 			ph_log("SYNC save error=%d", error);
 	}
@@ -1712,8 +1709,7 @@ ph_sync_timers(
 	struct ph_window *phone)
 {
 	struct ph_sync *sync;
-	int64_t since;
-	int64_t deep_at;
+	struct ph_sync_marks marks;
 	uint64_t now_us;
 	time_t now;
 	int error;
@@ -1745,10 +1741,8 @@ ph_sync_timers(
 	if (now < sync->deep_check_at || phone->link.address[0] == '\0')
 		return;
 	sync->deep_check_at = now + PH_STALE_SECONDS;
-	since = 0;
-	deep_at = 0;
-	error = ph_store_sync_load(phone->link.address, &since, &deep_at);
-	if (error == 0 && (int64_t)now - deep_at >= PH_DAY_SECONDS)
+	error = ph_store_sync_load(phone->link.address, &marks);
+	if (error == 0 && (int64_t)now - marks.deep_at >= PH_DAY_SECONDS)
 		ph_sync_want(phone, PH_SYNC_DEEP);
 }
 

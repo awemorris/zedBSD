@@ -43,6 +43,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 #include <unistd.h>
@@ -123,6 +124,8 @@ static size_t store_place_item(long contact, size_t item);
 static void store_count_unread(long contact);
 static void store_clean_line(const char *text, char *clean, size_t size);
 static int store_sync_path(const char *address, char *path, size_t size);
+static int store_is_mark_line(const char *line);
+static int store_key_compare(const void *left, const void *right);
 static void store_words(struct ph_item *item, time_t now);
 static void store_initials(const char *name, char *initials, size_t size);
 static kl_color store_color(const char *name);
@@ -764,15 +767,15 @@ ph_store_find_serial(
 }
 
 /*
- * Reads how far a paired phone's messages were brought in (ws197-p004
- * section 6.2): 0 with the times, ENOENT when nothing was, or EINVAL for
+ * Reads how far a paired phone was brought in (ws197-p004 section 6.2;
+ * the contacts' and the calls' marks, ws197-p005 section 7.1): 0 with the
+ * marks (0 for a line not there), ENOENT when nothing was, or EINVAL for
  * an address that is not one.
  */
 int
 ph_store_sync_load(
 	const char *address,
-	int64_t *since,
-	int64_t *deep_at)
+	struct ph_sync_marks *marks)
 {
 	char path[STORE_PATH_MAX];
 	char line[STORE_LINE_MAX];
@@ -783,6 +786,7 @@ ph_store_sync_load(
 	int error;
 
 	/* The file of the phone. */
+	memset(marks, 0, sizeof(*marks));
 	error = store_sync_path(address, path, sizeof(path));
 	if (error != 0)
 		return error;
@@ -790,23 +794,37 @@ ph_store_sync_load(
 	if (file == NULL)
 		return ENOENT;
 
-	/* Each line it knows. */
-	*since = 0;
-	*deep_at = 0;
+	/* Each line it knows; another is left as it is. */
 	for (;;) {
 		read_line = fgets(line, (int)sizeof(line), file);
 		if (read_line == NULL)
 			break;
+
+		/* The messages brought in since. */
 		fields = sscanf(line, "messages_since %lld", &value);
 		if (fields == 1) {
-			*since = (int64_t)value;
+			marks->messages_since = (int64_t)value;
 			continue;
 		}
 
 		/* The last deep synchronisation. */
 		fields = sscanf(line, "deep_at %lld", &value);
+		if (fields == 1) {
+			marks->deep_at = (int64_t)value;
+			continue;
+		}
+
+		/* The last whole reading of the contacts. */
+		fields = sscanf(line, "contacts_at %lld", &value);
+		if (fields == 1) {
+			marks->contacts_at = (int64_t)value;
+			continue;
+		}
+
+		/* The calls brought in since. */
+		fields = sscanf(line, "calls_since %lld", &value);
 		if (fields == 1)
-			*deep_at = (int64_t)value;
+			marks->calls_since = (int64_t)value;
 	}
 
 	/* Succeeded: read. */
@@ -815,32 +833,201 @@ ph_store_sync_load(
 }
 
 /*
- * Writes how far a paired phone's messages were brought in.  Returns 0,
- * EINVAL for an address that is not one, or an errno value.
+ * Writes how far a paired phone was brought in: every mark's line, and
+ * after them the lines of the file this program does not know, as they
+ * were (ws197-p005 review-1 minor 6).  Returns 0, EINVAL for an address
+ * that is not one, or an errno value.
  */
 int
 ph_store_sync_save(
 	const char *address,
-	int64_t since,
-	int64_t deep_at)
+	const struct ph_sync_marks *marks)
 {
 	char path[STORE_PATH_MAX];
-	char text[128];
-	int length;
+	char line[STORE_LINE_MAX];
+	char text[STORE_LINE_MAX * 4U];
+	char *read_line;
+	size_t used;
+	size_t length;
+	FILE *file;
+	int written;
+	int known;
 	int error;
 
-	/* The file of the phone and its lines. */
+	/* The file of the phone and the marks' lines. */
 	error = store_sync_path(address, path, sizeof(path));
 	if (error != 0)
 		return error;
-	length = snprintf(text, sizeof(text), "messages_since %lld\ndeep_at %lld\n", (long long)since, (long long)deep_at);
-	if (length < 0 || (size_t)length >= sizeof(text))
+	written = snprintf(text,
+			   sizeof(text),
+			   "messages_since %lld\ndeep_at %lld\ncontacts_at %lld\ncalls_since %lld\n",
+			   (long long)marks->messages_since,
+			   (long long)marks->deep_at,
+			   (long long)marks->contacts_at,
+			   (long long)marks->calls_since);
+	if (written < 0 || (size_t)written >= sizeof(text))
 		return E2BIG;
+	used = (size_t)written;
+
+	/* The lines of the old file not known here, after them (none when there is no file). */
+	file = fopen(path, "r");
+	while (file != NULL) {
+		read_line = fgets(line, (int)sizeof(line), file);
+		if (read_line == NULL)
+			break;
+
+		/* A mark's line is the new one. */
+		known = store_is_mark_line(line);
+		if (known)
+			continue;
+
+		/* Kept while there is room, with its newline. */
+		length = strlen(line);
+		if (length == 0U || line[length - 1U] != '\n')
+			continue;
+		if (used + length >= sizeof(text))
+			continue;
+		memcpy(text + used, line, length);
+		used += length;
+		text[used] = '\0';
+	}
+
+	/* The old file read. */
+	if (file != NULL)
+		fclose(file);
 
 	/* Written. */
-	error = store_write_file(path, text, (size_t)length);
+	error = store_write_file(path, text, used);
 	if (error != 0)
 		return error;
+
+	/* Succeeded: kept. */
+	return 0;
+}
+
+/*
+ * Plans what a whole reading of the phone's contacts lets go of
+ * (ws197-p005 section 7.2, review-1 M2): current are the keys of the
+ * copy, received those of the reading, missing those the last reading
+ * did not have (received and missing sorted, ph_phonebook_sort_keys).
+ * The reading counts only when it ended (complete), no page was capped,
+ * and it brought one key at least and half of the copy's.  Then a key of
+ * the copy not received is removed (remove[i] 1) when the last reading
+ * missed it too, else it is missing from now on (missing_next[i] 1).
+ * Returns 1 when the reading counts, 0 when it does not (nothing to
+ * remove, the missing keys kept as they were).
+ */
+int
+ph_phonebook_prune_plan(
+	const char *const *current,
+	size_t current_count,
+	const char *const *received,
+	size_t received_count,
+	const char *const *missing,
+	size_t missing_count,
+	int complete,
+	unsigned capped,
+	unsigned char *remove,
+	unsigned char *missing_next)
+{
+	const void *found;
+	size_t index;
+
+	/* Nothing planned yet. */
+	if (current_count > 0U) {
+		memset(remove, 0, current_count);
+		memset(missing_next, 0, current_count);
+	}
+
+	/* A reading that ended, with no page capped. */
+	if (!complete)
+		return 0;
+	if (capped != 0U)
+		return 0;
+
+	/* One key at least, and half of the copy's (a phone that showed little for a while removes nothing). */
+	if (received_count == 0U)
+		return 0;
+	if (received_count * 2U < current_count)
+		return 0;
+
+	/* Each key of the copy the reading did not bring. */
+	for (index = 0U; index < current_count; index++) {
+		found = bsearch(&current[index], received, received_count, sizeof(received[0]), store_key_compare);
+		if (found != NULL)
+			continue;
+
+		/* Missed twice: removed; missed once: missing. */
+		found = NULL;
+		if (missing_count > 0U)
+			found = bsearch(&current[index], missing, missing_count, sizeof(missing[0]), store_key_compare);
+		if (found != NULL) {
+			remove[index] = 1U;
+		} else {
+			missing_next[index] = 1U;
+		}
+	}
+
+	/* Succeeded: the reading counts. */
+	return 1;
+}
+
+/*
+ * Sorts keys for ph_phonebook_prune_plan.
+ */
+void
+ph_phonebook_sort_keys(
+	const char **keys,
+	size_t count)
+{
+	/* Nothing to sort. */
+	if (count < 2U)
+		return;
+
+	/* By their bytes. */
+	qsort(keys, count, sizeof(keys[0]), store_key_compare);
+}
+
+/*
+ * Tells whether the copy of a phone's contacts (taken from the phone at
+ * copy_address, "AA:BB:CC:DD:EE:FF") is to be let go of, from the link's
+ * state (ws197-p005 section 8.2, review-3 R1 and R2; Pc3 (b) provisional,
+ * awaiting the user's answer): the record is known and gone (record 1),
+ * or known and this user's (record 2, owner 1) with the switch off for
+ * that phone or with another phone.  Not while the record is not known
+ * (record 0), nor another user's.  Returns 1 to let it go, 0 to keep it.
+ */
+int
+ph_phonebook_forget(
+	const char *copy_address,
+	const struct kl_phone_link *link)
+{
+	int differs;
+
+	/* No copy. */
+	if (copy_address == NULL || copy_address[0] == '\0')
+		return 0;
+
+	/* The record not known: nothing to decide on. */
+	if (link->record == 0U)
+		return 0;
+
+	/* The record gone (unpaired, forgotten). */
+	if (link->record == 1U)
+		return 1;
+
+	/* Another user's record says nothing of this user's copy. */
+	if (!link->owner)
+		return 0;
+
+	/* This user's record of another phone. */
+	differs = strcasecmp(link->address, copy_address);
+	if (link->address[0] != '\0' && differs != 0)
+		return 1;
+
+	/* This user's record of the same phone, its switch off (Stop using as phone). */
+	if (differs == 0 && !link->enabled)
+		return 1;
 
 	/* Succeeded: kept. */
 	return 0;
@@ -2337,6 +2524,45 @@ store_clean_line(
 
 	/* Its end. */
 	clean[index] = '\0';
+}
+
+/* Tells whether a line of a phone's synchronisation file is one of the marks' (its word then a space). */
+static int
+store_is_mark_line(
+	const char *line)
+{
+	static const char *const words[] = { "messages_since ", "deep_at ", "contacts_at ", "calls_since " };
+	size_t index;
+	int differs;
+
+	/* Each mark's word. */
+	for (index = 0U; index < sizeof(words) / sizeof(words[0]); index++) {
+		differs = strncmp(line, words[index], strlen(words[index]));
+		if (differs == 0)
+			return 1;
+	}
+
+	/* Another line. */
+	return 0;
+}
+
+/* Compares two keys (pointers to strings) by their bytes, for qsort and bsearch. */
+static int
+store_key_compare(
+	const void *left,
+	const void *right)
+{
+	const char *const *left_key;
+	const char *const *right_key;
+	int order;
+
+	/* The strings. */
+	left_key = left;
+	right_key = right;
+	order = strcmp(*left_key, *right_key);
+
+	/* Their order. */
+	return order;
 }
 
 /* Names the file of a paired phone's synchronisation.  Returns 0, or EINVAL for an address that is not "AA:BB:CC:DD:EE:FF". */
