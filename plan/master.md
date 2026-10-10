@@ -8,34 +8,34 @@
   Q1 の操作盤。先頭（awesome-plan-current）は「今」だけを書き、各 block は「master:<名前>:start」〜「master:<名前>:end」で丸ごと置き換えてよい。
   block: updated・agents・merge・next・open-decisions・focus・blocked（先頭）、priority・outlook（本体）、decisions-log・history-log（末尾の付録、新しい物を block の先頭に足す）。
   置き換え: sed -i '/master:agents:start/,/master:agents:end/{//!d}' plan/master.md の後に sed -i '/master:agents:start/r new.md' plan/master.md。
--->
-<!-- master:agents:start -->
-- **2026-10-10 夜（Q1 の引き継ぎ）**: 体制は N=2（P1 は WS197、P2 は WS083、2026-10-10 ユーザー）＋T1。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する、ユーザーの指示）。
-  - P1: branch agent/p1、worktree /home/awe/zedBSD-worktrees/p1。WS199 p002 は cleared（77a40b51f）、P1 は使用量のためラップアップ済み。次の P1 は [WS199](ws199/ws.md) p003 から（phase.md に「すること・やり方」）→ → p004（T1 は 1 回にまとめる）→ [WS200](ws200/ws.md) p001。branch agent/p1-ws197（WS197 p003 の i03 の途中。ベータ2 の必須になったので WS200 の後に P1 が再開し、区切りごとに main へ merge）、agent/p1-p045 は main に merge 済み（2026-10-10）。
-  - T1: branch agent/t1、worktree /home/awe/zedBSD-worktrees/t1。今は依頼なし。T1-435（Vulkan Video の 5330）はユーザーが top の config.mk で image を作り直した後に A〜E を SSH で（ESP に書かない、Claude Code の安全の判定で T1 の ESP の書き込みが拒否されたため）。build/t1-v・t1-vh2・t1-vh14 は残してある。
-  - 使用量（2026-10-10 ユーザー: 週の残り 13%、水曜 6:00 に reset）: Q1 の turn を減らす、merge はまとめる、T1 は 1 回、plan はこまめに commit。
+- **2026-10-11（Q1）**: 体制は N=1 P1＋T1（P2 は WS083 を終えて退いた）。ベータ2 の残りは [plan/beta2.md](beta2.md) が正（毎回更新する）。
+  - P1: branch agent/p1-ws197、worktree /home/awe/zedBSD-worktrees/p1。WS197 p005（PBAP）の i05（backend・compositor・libkeiland、KL_VERSION 80・KL_SYSTEM_MANAGER_VERSION 28 を Q1 が割当）を実行中。i01〜i04 と設計 v3.1 は main に merge 済み（1821cbd11）。再開は plan/ws197/phase005/phase.md の末尾。i06・i07 はユーザーの Pc1〜Pc6 待ち（推しを仮で入れてよい）。P1 の test runner は build/ws197-phone-host/ に pairkeys.*・pr.* を残すので Q1 が消す。
+  - T1: branch agent/t1。今は依頼なし。WS143 の HID の回帰はもう流さない（ユーザー）。
+  - WS202（libmedia の mp4・m4a）は設計だけ完了（第 4 版、review 3 回）、ユーザーの H1〜H6・J1〜J10 待ち、実装は別のセッション。
 <!-- master:agents:end -->
 
 ### 統合と試験の待ち
 
 <!-- master:merge:start -->
-- 2026-10-11 未明: WS197 p004a〜c を main に merge（bc4c7f9f6）。P1 は停止（ユーザーの指示、UAT の後に再開）。ユーザーは起きたら image を作り直して UAT（plan/beta2.md の「次の UAT」と plan/ws197/ws.md の「5330 の UAT の手順」）。
-- main の先頭（2026-10-10 夜）: WS199 i01〜i03（d8cb16814、KL_VERSION 77）、BUG-283・284・285・286 の直し、BUG-275（USB の zero-bandwidth の endpoint、Bluetooth）、BUG-222 の TCP の並び替え 44・ifconfig の media、rtld の dlopen の path、Noct 2.0.3。
-- 5330（10.0.30.3、zedBSD の単独起動）: SSH は `sshpass -p kei ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no kei@10.0.30.3`（鍵は今の image に無い）、sudo は `echo kei | sudo -S`。image は 10/09 の a42a544 以降の userland＋Q1 が入れた BUG-275 の kernel（ESP の vmunix、前は vmunix.old）。WS199 i02 以降（NFC・Security Keys の頁）は入っていない。/tmp/fidoctl.new に新しい fidoctl（ユーザーが鍵の up=false の確かめを流す、手順は Q1 が会話で渡した）。
-- ユーザーの判断待ち: passkey-fido2 だけを 5330 に入れ替えて NFC の login を試すか、image を作り直すか。fidoctl の `-s assert` の結果（WS199 p002 の前提）。
+- 2026-10-11: Vulkan Video を既定で ON（c7aeea0c7、ユーザー）。BUG-287 の直し全部（usb-bt の Transaction Error 後の回復、同じ人の bond での phone=1、settings の store 24→64、Settings の Connect・案内、Phone app の案内、phone link の log）を merge（7bfc667e7）。WS197 p005 i01〜i04（vCard・rfcomm の DLC 単位の timeout・phonemux・MAP の OPENING の穴・pbap.c）を merge（1821cbd11）。
+- ユーザーは BUG-287 の後の image を作り直して UAT（plan/beta2.md の「次の UAT」、BUG-287 の ticket の 5 項目）。
+- 5330（10.0.30.3）: SSH は `sshpass -p kei ssh -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o PubkeyAuthentication=no kei@10.0.30.3`、sudo は `echo kei | sudo -S`、service は `service start bluetoothd`（順に注意）。btsnoop は `/sbin/bluetoothd -s /var/tmp/x.snoop`（/var/tmp を 1777 に、daemon は uid 80 に落ちる）。
 <!-- master:merge:end -->
 
 ### Q1 の次の手順
 
 <!-- master:next:start -->
-1. 新しい Q1 は AGENTS.md・plan/beta2.md・この block・plan/ws199/ws.md・plan/ws200/ws.md を読む。P1・T1 の agent は会話に紐づくので、新しい session では P1・T1 を新しい世代で起動する（P1 は agent/p1 の worktree で WS199 p002 から、phase.md に「すること・やり方」）。
-2. merge は `source plan/tools/merge_one.sh && merge_one SHA`（merge だけを 1 つの Bash の呼び出しに、memory の規則）。T1 の台帳の番号は Q1 が振る（次は T1-523）。Bug の次の番号は BUG-287、Queue は q923、WS は WS202。
-3. 日程: 10/13 凍結の目標 → 10/14 RC・最終回帰（WS129 p006）→ 10/16 公開の準備（WS129 p008）、公開はユーザーの指示。Vulkan Video は T1-435 が PASS なら release の config に `ZEDBSD_BOOT_EXTRA_LINES += i915.debug=video`、でなければ OFF のまま。
+1. 新しい Q1 は AGENTS.md・plan/beta2.md・この block・plan/ws197/ws.md・plan/ws197/phase005/phase.md を読む。P1・T1 は新しい世代で起動する（P1 は agent/p1-ws197 で p005 の再開の手順から）。
+2. merge は `source plan/tools/merge_one.sh && merge_one SHA`（merge だけを 1 つの Bash の呼び出しに）。次の番号: BUG-288、WS203、KL_VERSION 81・manager 29（80・28 は P1 の i05）。
+3. 日程: 10/13 凍結の目標 → 10/14 RC・最終回帰（WS129 p006）→ 10/16 公開の準備（WS129 p008）、公開はユーザーの指示。Vulkan Video は既定で ON（release も）。
 <!-- master:next:end -->
 
 ### ユーザーの未決の判断
 
 <!-- master:open-decisions:start -->
+- **WS197 p005 Pc1〜Pc6**（スマホの連絡先・通話の履歴、推しは Pc1 a・Pc2 a・Pc3 b・Pc4 a・Pc5 a・Pc6 a、phase005/phase.md §12）。
+- **WS202 H1〜H6・J1〜J10**（libmedia の mp4・m4a、推しは ws202/ws.md の表）。
+- BUG-222 を既知の問題にするか close か。WS083 p007（hang の回復の実機）をいつ流すか。
 - **WS084 の 10 回の reboot（素の起動）**: ユーザーが zedBSD で起動する時。
 - WS153 U2〜U15 はユーザーが検討中（聞かない）。
 - （解決 2026-10-08）WS005（ネットワークと WiFi）: ユーザー「記録のミス、とっくに完了」→ completed。
