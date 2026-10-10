@@ -3,14 +3,14 @@
 # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
 
 <!-- awesome-plan-current:start -->
-Status: planned
+Status: incomplete（p004のarm64選択修正を実行、既存p001/p002のcleared履歴は保持）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: q918（P1、2026-10-09）
+Queue: [Codex arm64選択修正](codex-queue.md) finished、main統合承認待ち。旧q918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p001 から。
+Resume point: p004のarm64選択修正/検証済み成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -70,6 +70,13 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 
 | Phase | 目的 | Status | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 今の tools/menuconfig.py の調べ、新しい階層と Build boot image の実装、host 試験 | planned | — |
+| [p001](phase001/phase.md) | 今の tools/menuconfig.py の調べ、新しい階層と Build boot image の実装、host 試験 | cleared（phase001の既存記録との投影を照合） | — |
 | p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |
+| [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、main統合待ち） | p001 source |
+
+## 2026-10-10 RPi4 UAT前のarm64選択修正
+
+ユーザーがCPU arm64を選んでもx86_64表示が残ると報告し修正を依頼。p004と独立Queueを追加。実関数でarchitecture名をplatformに入れるとnormalizeでamd64へ戻ると再現した。p001/p002の過去のclearedは維持し、この限定バグを修正する。WSのtableに残っていたp001 plannedはphase本文の既存clearedへ投影を整えた。shared master/Queue/cache、GitHub公開はQ1。
+
+p004 cleared。3行のplatform field統一、実関数/PTYでCPU/Board/Headerと選択indexを確認、save/load/make validation/Python syntax/diff-check PASS。[証拠](tests/arm64-selection-20261010.md)。今回の具体的commitのmain統合を最後に確認。WS全体の未完criteriaは維持、push無し。

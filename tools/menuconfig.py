@@ -466,7 +466,7 @@ def select_cpu_board(screen, values: dict[str, object]) -> None:
     """CPU / Board: the CPU, and the board it boots on."""
     while True:
         platform = str(values["ZEDBSD_PLATFORM"])
-        current = next((item for item in MENU_CPUS if item[0] == platform), None)
+        current = next((item for item in MENU_CPUS if item[2] == platform), None)
         cpu = current[1] if current else platform_record(platform)[1]
         board = current[3] if current else BOARD_LABELS[platform_record(platform)[2]]
         choice = choose(screen, "CPU / Board",
@@ -478,9 +478,9 @@ def select_cpu_board(screen, values: dict[str, object]) -> None:
             index = choose(screen, "CPU", [item[1] for item in MENU_CPUS],
                            target_label(values),
                            next((i for i, item in enumerate(MENU_CPUS)
-                                 if item[0] == platform), 0))
+                                 if item[2] == platform), 0))
             if index is not None:
-                values["ZEDBSD_PLATFORM"] = MENU_CPUS[index][0]
+                values["ZEDBSD_PLATFORM"] = MENU_CPUS[index][2]
                 normalize(values)
         else:
             message(screen, "Board", [f"{cpu} boots on {board}.",
