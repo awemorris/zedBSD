@@ -4,7 +4,7 @@
 
 Phase ID: `ws197-p005`
 Parent: [WS197](../ws.md)
-Status: planning（2026-10-11 P1: 詳細設計の第 1 版。design-reviewer の review の前）
+Status: planning（2026-10-11 P1: 詳細設計の第 1 版の review-1（[review-1.md](review-1.md)）: blocker 1・major 13・minor 14。**i01 vcard.c だけ GO**、他は第 2 版で直してから。M1 は既存の欠陥として直した（eee2a5d12）。ユーザーの判断 Pc1〜Pc6 は Q1 に送った。再開点は下の「再開の手順」）
 Phase disposition: normal
 Queue: Q1 の投入（2026-10-11「次は WS197 p005（PBAP、plan/ws197/ws.md の Phase の表どおり）に進んで」、ユーザー 2026-10-09 の順「OBEX, MAP, Integration, PBAP, HFP」）
 Branch: `agent/p1-ws197`（区切りごとに main へ merge、ベータ2 に入れる、2026-10-10 ユーザー）
@@ -242,3 +242,12 @@ i01 1.5、i02 1、i03 1.5、i04 1.5、i05 1、i06 2、i07 0.5、計 **9 LW**（w
 ## Event
 
 - 2026-10-11: 第 1 版（P1）。PBAP 1.2.3 の §2.7・§3.1・§5.1・§6.2〜§6.4・§7.1・§9 を読んで書いた。
+- 2026-10-11: design-reviewer（agent ad782c2d4ddaad97c）→ [review-1.md](review-1.md)。blocker B1（スマホの連絡先を store の配列に混ぜる形）、major 13、minor 14、追加の判断 Pc3〜Pc6。i01 は GO。
+- 2026-10-11: M1（backend の `phone_field` が引用の中の ` length=` を欄と読む、今の `PHONE MESSAGE` にもある既存の欠陥）を直した（eee2a5d12、phone-backend-host-test に偽の欄の例、PASS、zedBSD の libkeiland.so の build rc 0）。
+
+## 再開の手順（2026-10-11 P1 のラップアップ、context の上限）
+
+1. Q1 からユーザーの判断 Pc1〜Pc6 の答えを受ける（Pc1・Pc2 は §7.4、Pc3〜Pc6 は review-1）。
+2. 第 2 版を書く: review-1 の B1（スマホの連絡先は store の配列でなく別の名前の表、item は番号の会話か手元の連絡先の folder）、M2〜M13、minor を各節に `[B1]`・`[M2]` の印で入れる。特に M3（handoff の profiles の既定を MESSAGES に）、M8（PCE の record の置き場所）、M9（Connect に App Parameters を付けるか、推し (a) 付けない）、M10（DM の closed、MAP の同じ穴も）、M11（cursor の照合を同期の通し番号に）。
+3. design-reviewer の再確認（review-2）。i01（vcard.c）は GO なので第 2 版と並べて始めてよい。
+
