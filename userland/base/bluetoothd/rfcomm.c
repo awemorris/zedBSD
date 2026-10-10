@@ -118,6 +118,8 @@ static void rfcomm_msc(struct btd_rfcomm *rf, const uint8_t *value, size_t lengt
 static void rfcomm_rpn(struct btd_rfcomm *rf, const uint8_t *value, size_t length);
 static void rfcomm_connected(struct btd_rfcomm *rf, struct btd_rfcomm_dlc *dlc);
 static void rfcomm_open_dlc(struct btd_rfcomm *rf, struct btd_rfcomm_dlc *dlc, uint64_t now);
+static void rfcomm_dlc_expired(struct btd_rfcomm *rf, struct btd_rfcomm_dlc *dlc, uint64_t now);
+static int rfcomm_closing_reason(const struct btd_rfcomm_dlc *dlc);
 
 /*
  * Computes the FCS of a frame's covered bytes (TS 27.010 section 5.2.1.6:
@@ -463,10 +465,13 @@ btd_rfcomm_pump(
 }
 
 /*
- * Carries out the deadlines that passed: a timer of the session or of a
- * DLC that ran out ends the session (RFCOMM 1.2 section 5.3), a PN the peer
- * never followed with SABM is forgotten, and a session idle since its last
- * DLC closed is closed.
+ * Carries out the deadlines that passed: the session's own timer on DLCI
+ * 0 ends the session (RFCOMM 1.2 section 5.3); a DLC's timer that ran out
+ * ends that DLC alone (ws197-p005 section 3.2), so that a phone that
+ * leaves one profile's DLC unanswered while its user decides does not
+ * take the other profiles' DLCs with it; a PN the peer never followed
+ * with SABM is forgotten; and a session idle since its last DLC closed is
+ * closed.
  */
 void
 btd_rfcomm_tick(
@@ -494,16 +499,12 @@ btd_rfcomm_tick(
 		    now < dlc->deadline)
 			continue;
 
-		/* A peer's PN never followed by its SABM is forgotten quietly. */
-		if (dlc->state == BTD_RFCOMM_DLC_NEGOTIATED) {
-			rfcomm_free(rf, dlc, 0, now);
-			continue;
-		}
-
-		/* Any other answer that did not come ends the session. */
-		dlc->deadline = 0U;
-		if (rf->failed == 0)
-			rf->failed = BTD_RFCOMM_CLOSED_TIMEOUT;
+		/*
+		 * The DLC alone gives up.  A hook told of its end may open
+		 * another DLC; that one takes a free slot whose deadline lies in
+		 * the future, so this pass does not end it.
+		 */
+		rfcomm_dlc_expired(rf, dlc, now);
 	}
 
 	/* An open session idle since its last DLC closed: DISC on DLCI 0 (RFCOMM 1.2 section 5.2.2). */
@@ -1523,6 +1524,7 @@ rfcomm_frame_ua(
 	uint64_t now)
 {
 	struct btd_rfcomm_dlc *dlc;
+	int reason;
 
 	/* A DLC waiting for it. */
 	dlc = rfcomm_find(rf, dlci);
@@ -1535,9 +1537,11 @@ rfcomm_frame_ua(
 		return;
 	}
 
-	/* DISC answered: closed as asked. */
-	if (dlc->state == BTD_RFCOMM_DLC_CLOSING)
-		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_LOCAL, now);
+	/* DISC answered: closed as asked, or as given up. */
+	if (dlc->state == BTD_RFCOMM_DLC_CLOSING) {
+		reason = rfcomm_closing_reason(dlc);
+		rfcomm_free(rf, dlc, reason, now);
+	}
 }
 
 /* Takes DM on a DLC: this side's PN or SABM refused, its DISC on a DLC already gone, or the peer's end of an open DLC. */
@@ -1548,6 +1552,7 @@ rfcomm_frame_dm(
 	uint64_t now)
 {
 	struct btd_rfcomm_dlc *dlc;
+	int reason;
 
 	/* The DLC, if any. */
 	dlc = rfcomm_find(rf, dlci);
@@ -1559,8 +1564,9 @@ rfcomm_frame_dm(
 		/* Refused. */
 		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_REFUSED, now);
 	} else if (dlc->state == BTD_RFCOMM_DLC_CLOSING) {
-		/* Gone already: closed as asked. */
-		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_LOCAL, now);
+		/* Gone already: closed as asked, or as given up. */
+		reason = rfcomm_closing_reason(dlc);
+		rfcomm_free(rf, dlc, reason, now);
 	} else {
 		/* Ended by the peer. */
 		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_REMOTE, now);
@@ -1885,13 +1891,18 @@ rfcomm_pn_response(
 	cl = (unsigned)(value[1] >> 4);
 	n1 = (unsigned)value[4] | ((unsigned)value[5] << 8);
 
-	/* A peer without credits (Bluetooth 1.0B) or a larger frame than asked: refused. */
+	/*
+	 * A peer without credits (Bluetooth 1.0B) or a larger frame than asked:
+	 * this side refuses it, which is an error of the DLC and not the
+	 * peer's refusal (REFUSED is kept for the peer's DM, which a profile
+	 * may read as its user saying no).
+	 */
 	if (cl != RFCOMM_PN_CL_RESPONSE ||
 	    n1 == 0U ||
 	    n1 > dlc->n1) {
 		rf->refused++;
 		(void)rfcomm_send_control(rf, dlci, 0, (uint8_t)(RFCOMM_DM | RFCOMM_PF));
-		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_REFUSED, now);
+		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_ERROR, now);
 		return;
 	}
 
@@ -2041,4 +2052,88 @@ rfcomm_open_dlc(
 
 	/* Succeeded: sent (or waiting in order). */
 	dlc->msc_sent = 1;
+}
+
+/*
+ * Ends a DLC whose timer ran out, alone: a PN the peer never followed
+ * with SABM is forgotten quietly; this side's PN unanswered ends the DLC
+ * without a frame (the peer's PN state resets with its next PN); this
+ * side's SABM or a modem status unanswered sends DISC, so that a late UA
+ * does not open it, and the DLC closes as timed out when the DISC is
+ * answered or its own timer runs out (a DLC the peer opened and the
+ * owner was never told of goes quietly); this side's DISC unanswered
+ * ends the DLC without a frame.
+ */
+static void
+rfcomm_dlc_expired(
+	struct btd_rfcomm *rf,
+	struct btd_rfcomm_dlc *dlc,
+	uint64_t now)
+{
+	unsigned dlci;
+	int reason;
+	int error;
+
+	/* The timer is spent. */
+	dlc->deadline = 0U;
+
+	/* A peer's PN never followed by its SABM is forgotten quietly. */
+	if (dlc->state == BTD_RFCOMM_DLC_NEGOTIATED) {
+		rfcomm_free(rf, dlc, 0, now);
+		return;
+	}
+
+	/* This side's PN unanswered: the DLC ends without a frame. */
+	if (dlc->state == BTD_RFCOMM_DLC_NEGOTIATING) {
+		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_TIMEOUT, now);
+		return;
+	}
+
+	/* This side's DISC unanswered: the DLC ends without a frame, for the reason it was closing. */
+	if (dlc->state == BTD_RFCOMM_DLC_CLOSING) {
+		reason = rfcomm_closing_reason(dlc);
+		rfcomm_free(rf, dlc, reason, now);
+		return;
+	}
+
+	/* No other state has a timer of its own; one that had would end the session as before. */
+	if (dlc->state != BTD_RFCOMM_DLC_CONNECTING && dlc->state != BTD_RFCOMM_DLC_OPEN) {
+		if (rf->failed == 0)
+			rf->failed = BTD_RFCOMM_CLOSED_TIMEOUT;
+		return;
+	}
+
+	/* DISC, so that the peer does not keep the DLC open. */
+	dlci = dlc->dlci;
+	error = rfcomm_send_control(rf, dlci, 1, (uint8_t)(RFCOMM_DISC | RFCOMM_PF));
+
+	/* A DLC the peer opened and the owner never heard of goes quietly. */
+	if (!dlc->ours) {
+		rfcomm_free(rf, dlc, 0, now);
+		return;
+	}
+
+	/* A DISC that could not be written: the DLC ends at once. */
+	if (error != 0) {
+		rfcomm_free(rf, dlc, BTD_RFCOMM_CLOSED_TIMEOUT, now);
+		return;
+	}
+
+	/* Succeeded: closing, to be told as timed out when the DISC is answered or its timer runs out. */
+	dlc->state = BTD_RFCOMM_DLC_CLOSING;
+	dlc->close_reason = BTD_RFCOMM_CLOSED_TIMEOUT;
+	dlc->deadline = now + BTD_RFCOMM_T1_MS;
+}
+
+/* Gives the reason a closing DLC is told it closed for: the one it was given up for, else closed as asked. */
+static int
+rfcomm_closing_reason(
+	const struct btd_rfcomm_dlc *dlc)
+{
+	/* Given up after a timer ran out. */
+	if (dlc->close_reason != 0)
+		return dlc->close_reason;
+
+	/* Closed as this side asked. */
+	return BTD_RFCOMM_CLOSED_LOCAL;
 }

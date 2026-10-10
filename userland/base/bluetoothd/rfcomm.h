@@ -119,8 +119,10 @@ struct btd_rfcomm_events {
  * One data link connection: its DLCI and state, whether bluetoothd opened
  * it, its frame size, the credits each side holds (tx: frames bluetoothd
  * may still send; rx: frames the peer may still send on credits given and
- * not used), the modem status exchange, and the deadline of the answer it
- * waits for (0: none).  Credits the peer used are given back by the
+ * not used), the modem status exchange, the deadline of the answer it
+ * waits for (0: none), and the reason it is told it closed for once its
+ * DISC is answered (0: closed as asked; BTD_RFCOMM_CLOSED_TIMEOUT for a
+ * DLC given up after a timer ran out, ws197-p005 section 3.2).  Credits the peer used are given back by the
  * difference to the DLC's share, so a credit frame the send hook refused is
  * not lost: the next pump sends the same difference.
  */
@@ -135,6 +137,7 @@ struct btd_rfcomm_dlc {
 	int msc_answered;
 	int msc_received;
 	uint64_t deadline;
+	int close_reason;
 };
 
 /* A control frame the send hook had no room for, written again before anything else. */
