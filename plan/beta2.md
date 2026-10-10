@@ -13,16 +13,15 @@
 | 10/10〜10/12 | 走っている Bug の直しと試験を終える → WS199（セキュリティキー）→ WS200 |
 | **10/13** | 機能の凍結の目標。ベータなので UAT の Bug は直し切れなくてよく、code freeze はぎりぎりまで行わないこともある |
 | 10/14〜10/15 | 最終回帰（QEMU）と 5330 の UAT、出た Bug を「直す／既知の問題に書く」で仕分け |
-| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。Vulkan Video は release では OFF（2026-10-10 ユーザー）。公開の手順の確認（公開はユーザーの指示で） |
+| **10/16** | 最終の image・配布物・license の一覧・release notes を確定。Vulkan Video は既定で ON（2026-10-11 ユーザー）。公開の手順の確認（公開はユーザーの指示で） |
 
 ## 今の状況
 
-- 2026-10-10 夜の UAT: BUG-283・284・285・286 close、WS199 の頁とログイン画面のキー（PIN あり、NFC）OK、BUG-222 は 4.9 MB/s。PIN 不要・タッチ不要の card は image が古く未確認。WS200 は未実装。WS197 を必須に（ユーザー）。
-- 2026-10-10 の UAT は一通り済んだ。残る既知の Bug は USB LAN の遅さ（BUG-222、最悪ベータ2 では遅くてよい）。
-- 順（ユーザー）: 走っている Bug の直しと試験を全部終える → WS199（Vulkan Video より優先）→ WS200。
-- P1: WS199 の設計を新しい仕様で書き直し design-reviewer に通している（code は試験が片付いてから）。
-- T1: T1-521（ロック画面・Ethernet の頁）・T1-522（PIN の登録の後の解除）は PASS（BUG-283・284・285 は QEMU で確認、実機は次の UAT）。今 T1-435（Vulkan Video の 5330、5330 は使えない）。
-- WS197（Bluetooth のスマホ連携）はベータ3、10/17 まで main に入れない branch で止めてある。
+- 2026-10-11: [BUG-287](bugs/BUG-287.md)（スマホ連携が「connecting」のまま）の原因は USB の Transaction Error の後に Bluetooth の受けが止まること。P1 の直し（usb-bt の回復、同じ人の bond での phone=1、settings の store 24→64）を main に merge（b91d5675c、kernel の build warning 0）。**image を作り直してよい**。Settings の Connect・Phone app の案内は P1 が作業中。
+- WS199・WS200 は実装と QEMU の試験が済み、残りは次の UAT（#4〜#8）。
+- WS083（Vulkan Video）は既定で ON にした（2026-10-11 ユーザー）。残りは p007 の hang の実機の確かめ。libavcodec なしで libmedia だけで mp4（H.264・AAC）と .m4a を再生する [WS202](ws202/ws.md) は設計だけを書き、実装は別のセッション。
+- T1 の WS143 の HID の回帰はもう流さない（ユーザー）。P2 は WS083 を終えて退いた。
+- 残る既知の Bug は USB LAN の遅さ（BUG-222、4.9 MB/s）。
 
 ## 必須
 
@@ -31,7 +30,7 @@
 | [WS199](ws199/ws.md) セキュリティキーの管理の頁（Software Security Key を含む）とログイン画面のキーの自動のログイン | p001〜p004 を merge（host 試験・Linux の build まで）。T1-523（2026-10-10）: security-keys・passkey-p002・wheel-card・FreeBSD の build PASS。FAIL: key-keypad の 6（login の log に key owner の行が無い）、fido2-p003 の step 3（鍵が無い時に NFC の待ちで reason=timeout になり no-key にならない）→ P1 が直す。p005 は 5330 の UAT（U1〜U13 は ws.md） | 0.5 | P1・T1 |
 | [WS197](ws197/ws.md) Bluetooth のスマホ連携（SMS の MAP・通話の HFP・連絡先の PBAP）（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」） | p001・p002 cleared、p003 MAP は i01〜i07 実装（i06 まで main に merge、i07 は T1-527）、p004 の SMS の interface の設計は cleared（判断 P1〜P8 は推しどおり）。p004a〜c（SMS を Phone の app で）を 2026-10-10 夜に main に merge（bc4c7f9f6、host 試験 PASS、実機は UAT）。次 p005 PBAP → p006・p007 HFP → p008 実機 | 約 64 | P1 |
 | [WS200](ws200/ws.md) Users の頁のパスワード変更のウィザードと認証方式の選択 | p001 cleared（QEMU の T1-525・528 PASS）。POSIX（p045）も PASS。Sign-in Methods は Users の頁の card の switch（押すと password の popup） | 0.5 | T1・ユーザー |
-| [WS083](ws083/ws.md) Vulkan Video（H.264） | p001〜p006・p008 cleared（実機で全 stream 一致、1080p 相当 1 frame 約 5 ms）、release は OFF。残り: p007 の hang の回復の実機の確かめ（hang の kernel を 1 回置く、手順は phase007、ユーザーの判断） | 0.5 | ユーザー・Q1 |
+| [WS083](ws083/ws.md) Vulkan Video（H.264） | p001〜p006・p008 cleared（実機で全 stream 一致、1080p 相当 1 frame 約 5 ms）。2026-10-11 から既定で ON（ユーザー）。残り: p007 の hang の回復の実機の確かめ（hang の kernel を 1 回置く、手順は phase007、ユーザーの判断） | 0.5 | ユーザー・Q1 |
 | [WS129](ws129/ws.md) p005・p013 release notes・既知の問題・利用の手引き | 下書き済み（[notes](../docs/release/zedbsd-1.0.0-beta2.md)・[known issues](../docs/release/zedbsd-1.0.0-beta2-known-issues.md)・[guide](../docs/release/zedbsd-1.0.0-beta2-guide.md)）。**ユーザーの review 待ち**。WS199・WS200 の機能を足し、RC で review の comment を消す | 1.5 | ユーザー・P1 |
 | [WS129](ws129/ws.md) p006 最終回帰（release の image） | 10/14 | 3 | T1 |
 | [WS129](ws129/ws.md) p008 公開の準備（tag・CI・配布物） | 手順は用意済み。10/16、公開はユーザーの指示 | 0.5 | Q1・P1 |

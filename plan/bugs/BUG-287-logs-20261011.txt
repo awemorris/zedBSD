@@ -1,0 +1,132 @@
+KWL PHONE open ok=1
+KWL PHONE backend=0
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=unreachable
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE object client=3 id=50
+KWL PHONE watch client=3 on=1
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=1 messages=1 why=
+KWL PHONE state reachable=1 subscribed=1 linked=1 messages=1 why=
+KWL PHONE link_set client=3 request=64 on=1 profiles=1
+KWL PHONE state reachable=1 subscribed=1 linked=1 messages=1 why=
+KWL PHONE done client=3 request=64 code=0
+KWL SETTINGS set key=phone.backend client=3 applied=2
+KWL PHONE object client=4 id=50
+KWL PHONE listen client=4 on=1 app=1
+KWL PHONE send client=4 channel=2 to=11 text=6 backend=none
+KWL PHONE state reachable=1 subscribed=1 linked=0 messages=0 why=lost
+KWL PHONE link_set client=3 request=206 on=0 profiles=1
+KWL PHONE state reachable=1 subscribed=1 linked=0 messages=0 why=absent
+KWL PHONE done client=3 request=206 code=0
+KWL SETTINGS set key=phone.backend client=3 applied=2
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=absent
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE send client=4 channel=2 to=11 text=5 backend=none
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE send client=4 channel=2 to=11 text=5 backend=none
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE watch client=3 on=0
+KWL PHONE watch client=3 on=1
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE send client=4 channel=2 to=11 text=5 backend=none
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=0 linked=0 messages=0 why=no-record
+KWL PHONE state reachable=1 subscribed=1 linked=1 messages=1 why=
+KWL PHONE link_set client=3 request=602 on=1 profiles=1
+KWL PHONE state reachable=1 subscribed=1 linked=1 messages=1 why=
+KWL PHONE done client=3 request=602 code=0
+KWL SETTINGS set key=phone.backend client=3 applied=2
+KWL PHONE send client=4 channel=2 to=11 text=5 backend=none
+KWL PHONE state reachable=1 subscribed=1 linked=0 messages=0 why=absent
+KWL PHONE state reachable=1 subscribed=1 linked=0 messages=0 why=security
+KWL PHONE state reachable=1 subscribed=1 linked=0 messages=0 why=security
+KWL PHONE object client=5 id=57
+===2
+<30>Oct 10 00:40:03 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:05 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:11 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:13 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:20 bluetoothd[9]: bluetoothd: scan ended: 3 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:20 bluetoothd[9]: bluetoothd: forgot 04:C8:B0:BC:8F:A5 bredr
+<30>Oct 10 00:40:22 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:28 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:30 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:36 bluetoothd[9]: bluetoothd: scan ended: 3 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:38 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:44 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:46 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:40:52 bluetoothd[9]: bluetoothd: scan ended: 5 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:40:54 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:00 bluetoothd[9]: bluetoothd: scan ended: 6 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:00 bluetoothd[9]: bluetoothd: pairing 04:C8:B0:BC:8F:A5 bredr phone=1 asked by uid 1000
+<30>Oct 10 00:41:06 bluetoothd[9]: bluetoothd: pairing: PAIRED address=04:C8:B0:BC:8F:A5 type=bredr authenticated=1 secure=1 legacy=0 key_size=16 stored=0 l2cap=0 phone=1
+<30>Oct 10 00:41:06 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:06 bluetoothd[9]: bluetoothd: phone link of 04:C8:B0:BC:8F:A5 on by uid 1000
+<30>Oct 10 00:41:12 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:14 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:20 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:22 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:28 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:30 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:36 bluetoothd[9]: bluetoothd: scan ended: 4 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:38 bluetoothd[9]: bluetoothd: scan of 6 s started
+<37>Oct 10 00:41:42 sudo[146]: kei : TTY=none ; USER=root ; COMMAND=grep -a -i -E bluetoothd /var/log/messages
+<30>Oct 10 00:41:44 bluetoothd[9]: bluetoothd: scan ended: 5 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:46 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:41:52 bluetoothd[9]: bluetoothd: scan ended: 5 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:41:54 bluetoothd[9]: bluetoothd: scan of 6 s started
+<30>Oct 10 00:42:00 bluetoothd[9]: bluetoothd: scan ended: 5 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:42:02 bluetoothd[9]: bluetoothd: scan of 6 s started
+<37>Oct 10 00:42:08 sudo[158]: kei : TTY=none ; USER=root ; COMMAND=grep -a -i bluetoothd /var/log/messages
+<30>Oct 10 00:42:08 bluetoothd[9]: bluetoothd: scan ended: 7 devices (dropped 0, malformed 0, error 0)
+<30>Oct 10 00:42:09 bluetoothd[9]: bluetoothd: hid: ERROR unreachable
+<30>Oct 10 00:42:09 bluetoothd[9]: bluetoothd: connecting 04:C8:B0:BC:8F:A5 bredr asked by uid 1000
+<30>Oct 10 00:43:13 bluetoothd[9]: bluetoothd: map: failed (sdp)
+<37>Oct 10 00:44:35 sudo[194]: kei : TTY=none ; USER=root ; COMMAND=sh -c echo ===1; grep -a -h -E "KWL PHONE|KWL SETTINGS (set|reset) key=phone" /run/user/1000/*.log; echo ===2; grep -a bluetoothd /var/log/messages | sed -n "/00:40/,\$p"; echo ===3;
+===3
+crw------- 1 kei kei 0 Jan  1  1970 /dev/gpu0
+total 32
+-rw------- 1 _bluetooth _bluetooth 118 Oct 10 00:41 04:C8:B0:BC:8F:A5-bredr
+-rw------- 1 _bluetooth _bluetooth  68 Oct 10 00:41 04:C8:B0:BC:8F:A5-bredr.phone
+version 1
+uid 1000
+user kei
+messages 1
+contacts 0
+calls 0
+enabled 1
+===4
+which: nc: not found
+sh: 1: nc: not found

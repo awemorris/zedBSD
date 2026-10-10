@@ -535,6 +535,8 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 - 2026-10-08 午後 ユーザー:「5330はつけっぱなしですので、Videoのテストで使ってよいです。アップデートや再起動は自由にどうぞ。」→ T1-435（WS083 の実機）を T1 に。UAT の USB-C DP は BUG-256 のまま（ユーザー「ディスプレイは点灯せず。Settingsに認識されていないです」）、P2 に割当（q898、WS191 は後）。
 - 2026-10-08 午後 ユーザー:「ブラウザはベータ3に移します」→ WS074（Web ブラウザ）と q893（Browser の合成の確定・OSK の content type、T1-425 の残り）はベータ3。P2 は q893 を止めて WS083 へ。
 - 2026-10-08 午後 ユーザー:「じゃあP2はi915 videoに回して」→ P2 は q893 を安全な地点で区切り WS083 Vulkan Video（q897）へ。WS191（再生の音）はその後。
+- 2026-10-11 ユーザー:「まず、Vulkan Videoをデバッグオプションでなくてデフォルトで有効な機能にしてください。」→ Q1 が i915 の video decode を既定で ON にした（src/drivers/gpu/i915/device.c、`i915.debug=video` は受けるが何も変えない）。2026-10-07 の HD2「既定では出さない」と 2026-10-10 の「release は OFF のまま」を置き換える。p007（hang の回復の実機の確かめ）は未実施のまま。docs/reference/vulkan-video.md・release notes を直した。
+- 2026-10-11 ユーザー:「libavcodecなしで、我々の独自のlibmediaの機能だけで、H.264とAACのmp4動画を再生できるようにしてください。また、libavcodecなしで、音楽アプリがlibmediaを使って.m4aを再生できるようにしてください。」「libmediaと動画アプリ、音楽アプリは、WSを立てて設計だけ書いてください。実装は別なセッションで行います。」→ [WS202](ws202/ws.md)（設計まで、実装は別のセッション）。
 - 2026-10-10 ユーザー:「ベータ3でホームディレクトリの暗号化を行います。WSだけ追加してください。検討は今は不要です。」（UFS の先頭の key slot、FIDO2 の PRF、/home だけ、inode の flag、master key は初回に /dev/random）→ [WS201](ws201/ws.md)（原文を記録）。
 - 2026-10-10 深夜 ユーザー:「私は寝ますので、P1はp004cまで完了したらテストは実機UATに任せて、ラップアップして停止してください。起きたらUATでレポートします。」→ P1 は p004a〜c の後に停止。Q1 は merge して止まる。
 - 2026-10-10 ユーザー:「WS143’s four keyboard/mouse Bluetooth testsというリグレッションテストは、流しすぎです。もう不要と思います。」→ WS197 の merge の前の T1 の HID の回帰（WS143 の 4 本）はやめる。host 試験（bt-phone・bt-daemon）と build で merge し、確かめは実機の UAT で。

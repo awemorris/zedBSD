@@ -8,7 +8,7 @@
 /*
  * The video decode part of the Vulkan executor (ws083): H.264 decode on the
  * video decode engine VCS0, offered only on a device whose executor has
- * `video` set (i915.debug=video and a GT with VCS0).
+ * `video` set (the default, on a GT with VCS0).
  *
  * The commands are zedBSD's own (uapi/gpu-op.h, GPU_OP_OWN_FIRST onward).
  * The physical-device queries, the sessions and the parameters objects are

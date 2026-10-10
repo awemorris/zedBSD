@@ -157,8 +157,8 @@ struct i915_render_device {
 	uint32_t capset_bytes;
 
 	/*
-	 * Nonzero when the device offers Vulkan video decode: the boot asked
-	 * for it (i915.debug=video) and the GT has the video decode engine
+	 * Nonzero when the device offers Vulkan video decode: video decode is
+	 * offered (the default) and the GT has the video decode engine
 	 * VCS0.  It is fixed at attach and decides the capset's native word,
 	 * the second queue family and every video command.
 	 */
