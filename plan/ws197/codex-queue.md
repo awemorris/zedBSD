@@ -9,7 +9,7 @@ Owner: 本Codexセッション、codex/ws197-media-library、base main 9dfebc99b
 
 | Item | Phase | 範囲・判定 | Status | 依存 |
 | --- | --- | --- | --- | --- |
-| media-cli | ws157-p006 | 既存Library形式を維持したCLI取得/追加/更新、画像・動画、同時更新/復旧、通知 | cleared | 既存p004 source確認済み |
+| media-cli | ws157-p006 | Media JSON/Files形式のCLI取得/追加/更新、画像・動画、同時更新/復旧、通知 | cleared | 既存p004 source確認済み |
 | media-api | ws157-p006 | backend CLI実行、compositor API/監視、libkeiland API、Photos利用 | cleared | media-cli |
 | phone-select | ws197-p011 | ＋でlibraryから選択・仮添付、image/video/text DnD、取消・未送信 | cleared | media-api |
 | conformance | ws157-p007 / ws197-p011 | 全変更のC全文規約・意味のあるhost回帰・named build warning0・main統合 | cleared | 上の3件 |
