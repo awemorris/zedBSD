@@ -172,7 +172,7 @@ static int read_esds(const struct mp4_box *esds, struct media_track *info);
 static int descriptor_next(const unsigned char *data, size_t size, size_t *offset, unsigned *tag, size_t *length);
 static void codec_of(struct media_track *info, const char *type);
 static int is_configuration(const char *type);
-static void read_edit_list(const struct mp4_box *trak, uint32_t movie_timescale, struct mp4_track *track);
+static void read_edit_list(const struct mp4_box *trak, uint32_t movie_timescale, struct mp4_track *track, struct media_track *info);
 static int find_tables(const struct mp4_box *stbl, struct mp4_tables *tables);
 static int build_samples(const struct mp4_tables *tables, struct mp4_track *track);
 static int fill_sizes(const struct mp4_tables *tables, struct mp4_track *track);
@@ -757,6 +757,9 @@ read_track(
 
 	/* The samples the tables describe. */
 	if (error == 0) {
+		/* Unfragmented video without composition offsets supplies a display clock sequence, not picture-specific PTS. */
+		if (info->kind == MEDIA_TRACK_VIDEO && !tables.has_ctts && !state->fragmented)
+			info->decode_order_times = 1;
 		error = build_samples(&tables, track);
 		if (error != 0)
 			return error;
@@ -764,7 +767,7 @@ read_track(
 
 	/* The track's ID (for its fragments), the edit list's shift, and the track is counted. */
 	read_track_id(trak, track);
-	read_edit_list(trak, state->movie_timescale, track);
+	read_edit_list(trak, state->movie_timescale, track, info);
 	file->track_count++;
 
 	/* Succeeded: the track is read. */
@@ -910,14 +913,50 @@ read_visual_entry(
 		compared = memcmp(child.type, "esds", 4);
 		if (compared == 0) {
 			error = read_esds(&child, info);
-			return error;
+			if (error != 0)
+				return error;
+			continue;
+		}
+
+		/* Optional sample geometry and numeric colour metadata may follow the codec configuration box. */
+		compared = memcmp(child.type, "pasp", 4U);
+		if (compared == 0 && child.size >= 8U) {
+			info->aspect_num = mf_be32(child.payload);
+			info->aspect_den = mf_be32(child.payload + 4U);
+			if (info->aspect_num == 0U || info->aspect_den == 0U) {
+				info->aspect_num = 0U;
+				info->aspect_den = 0U;
+			}
+
+			continue;
+		}
+
+		/* Read standard colour metadata independently of sample aspect ratio. */
+		compared = memcmp(child.type, "colr", 4U);
+		if (compared == 0 && child.size >= 10U) {
+			compared = memcmp(child.payload, "nclx", 4U);
+			if (compared == 0 && child.size >= 11U) {
+				info->colour_present = 1;
+				info->colour_matrix = mf_be16(child.payload + 8U);
+				info->full_range = (child.payload[10] >> 7U) & 1U;
+			} else {
+				compared = memcmp(child.payload, "nclc", 4U);
+				if (compared == 0) {
+					info->colour_present = 1;
+					info->colour_matrix = mf_be16(child.payload + 8U);
+				}
+			}
+
+			continue;
 		}
 
 		/* The configuration boxes of H.264, H.265, AV1 and VP9 are kept whole. */
 		configuration = is_configuration(child.type);
 		if (configuration) {
 			error = mf_keep_private(info, child.payload, child.size);
-			return error;
+			if (error != 0)
+				return error;
+			continue;
 		}
 	}
 }
@@ -1164,7 +1203,8 @@ static void
 read_edit_list(
 	const struct mp4_box *trak,
 	uint32_t movie_timescale,
-	struct mp4_track *track)
+	struct mp4_track *track,
+	struct media_track *info)
 {
 	struct mp4_box edts;
 	struct mp4_box elst;
@@ -1213,6 +1253,7 @@ read_edit_list(
 
 		/* The first real edit: the presentation starts at its media time, after the delay. */
 		track->shift = media_time - (delay_us * (int64_t)track->timescale) / 1000000;
+		info->end_us = delay_us + mf_scale_us((int64_t)(segment & 0x7fffffffffffffffULL), movie_timescale);
 		return;
 	}
 }

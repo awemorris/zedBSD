@@ -2,7 +2,7 @@
 
 # ws202-p011: Video Player、media-probe の音、利用者の文書
 
-Status: planned
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 3 LW
@@ -44,3 +44,23 @@ Video Player を自前の decoder に合わせ、p012 に要る音の道具と s
 | image の package の一覧（`config-media.mk`） | libmedia・videoplayer・music・openssh・audiod・media-probe があり、libavcodec が無い（H-07） |
 
 QEMU・実機は p012。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+Video Playerはapp共通adapterでtrackごとにnativeを試し、非対応ならapp所有のdlopen fallback。libmedia backend表にavcodecを入れない。native/fallback双方のframe/scaler寿命とno-FFmpeg noticeを確認する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p011`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+Video PlayerのSAR/trim/codec-backend OPEN/FRAMES-time-late/end-audio-drain/failure、native audio RMS probe、英語文書を実装。buildと独立RMSはPASS。AAT共有変更はproposal、window/音/同期はT1・ユーザー待ち。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p011`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。
+
+共有AAT helper/scenarioと旧host-codec/layoutの移管追従は今回mainへ適用。実行結果は統合記録に記載し、旧proposal/pendingを現在の状態として扱わない。

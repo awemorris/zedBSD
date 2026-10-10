@@ -2,7 +2,7 @@
 
 # ws202-p016: 参照の list の計算と欠けた参照の判定（D25）
 
-Status: planned
+Status: uncleared（規格ref-list実装/host証拠あり、missing-packet実画素等は未確認）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 4 LW
@@ -50,3 +50,12 @@ DEVICE_LOST にし（`render/video.c` 2621〜2631）、MFD は渡した DPB か�
 - MFD が規格と同じ手順で list を作ることは前提（U16）。WS083 の実機の hash（B・長期・modification の stream）の一致から推し、p012 の 5330 の `h264-gap.mp4` の hash
   （出た frame が元の stream と一致）で確かめる。
 - J8 の答えが (b)・(c) ならこの Phase は取り消す（canceled、理由を書く）。(b) で i915 の変更が要ると分かったら WS083 の範囲なので Q1 に戻す。
+
+
+## 規格照合・software実装・main統合（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p016`。mainのcanonical ID/参照listの目的は維持。独立branchの同ID（標準readback）は別の[p017](../phase017/phase.md)へmapping修復し、両方の履歴を保存した。
+
+ユーザーの自走承認i08で、全sliceの初期list/modification/active-prefixをlogical DPBと実GPU DPBで比較する処理を`libmedia/h264-dpb.c`に実装。POC type0のgapで推定したnon-existing frameはITU-T H.264 8.2.4.2.3に従いBの初期listから除外する。第4版の「不明なPOCがあるBは一律保守的に捨てる」という手順をこの規格上の扱いへ訂正し、modificationが存在しない参照を要求するpictureはdropする。scope/規格照合の詳細は[H.264記録](../h264-progress-20261010.md)、実装とactual host/限界は[software結果](../playback-result-20261010.md)。p008/p015/p009とWS/designにもこの改訂を記録した。
+
+hand vectorと独立4-slice/B bitstreamはPASS、実行部分はhost GPU stand-in。`h264-gap-orig.mp4`とのmissing-packet実decode画素比較、ITU conformance全matrixは未実施。whole uncleared。再開はT1のi915画素結果と未実施matrix。標準readbackだけの成功をref-listのclearanceとしない。

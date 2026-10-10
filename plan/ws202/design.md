@@ -1,5 +1,7 @@
 # WS202 の設計: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（ws202-p001）
 
+> **承認済み改訂・main統合（2026-10-10）**: この第4版本文はreviewの履歴/未達acceptanceを保持。後の明示指示により、libmediaは自前のみ、HE-AAC/SBR/PSは拒否、任意FFmpegはapp所有dlopen、GPU読戻しは標準Vulkanのみ。i915/libvulkan補完をこのWSに含める。現行手順は[policy](policy-20261010.md)、actual source/resultsは[統合記録](main-integration-20261010.md)。旧degraded/ライブラリ内FFmpeg/Intel Tile Y手順、答え待ちの記述は現行手順ではない。
+
 **第 4 版**（2026-10-10、設計の担当、最後の版）。第 3 版への [review-003](review-003.md) の H3-01・M3-02〜M3-05・L3-01〜L3-07 を織り込んだ（対応は §16.3。
 方式の選び直しは無い）。以下は第 3 版までの経過: **第 3 版**（2026-10-10、設計の担当）。第 1 版に [review-001](review-001.md) の H-01〜H-07・M-01〜M-13・L-01〜L-11・L-13 を織り込んだのが
 第 2 版（L-12 は Q1 が WS083 の側で直した）、第 2 版への [review-002](review-002.md) の H2-01・M2-01・M2-02・M2-04・M2-06・M2-08・M2-09・M2-10・
@@ -870,3 +872,17 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 - H.264 の CPU の decoder、HE-AAC の SBR・PS、GPU の image の共有の表示、TRANSFER_SRC の経路。
 - vkvideo-probe と libmedia の parser の重複の解消（probe が MMCO 5・gap を扱えるようにもなる）。
 - stsd の複数の entry、`iTunSMPB`、decode の非同期化（M-07 を満たさない時）、再生の途中の libavcodec への切り替え（J6 (b)）。
+
+
+## 18. 承認済み実装への改訂と統合（2026-10-10）
+
+Event: `ws202-main-integration-20261010-design`。承認者current user、明示「mainへの統合はあなたがやってOKです。」。決定源は[policy](policy-20261010.md)、actual境界/API/job同期/error/原実装と確認は[software結果](playback-result-20261010.md)。第4版の87 LW/acceptanceとreviewを過去の記録として保存し、未実施の全matrix/実機/性能/whole p014を免除しない。
+
+- libmediaの表は `{ vkvideo, aac }`。FFmpeg adapterはmedia-appとしてVideo Player/Musicへcompile。libraryへの外部ops注入はしない。拒否時だけappがdlopen、受理後の障害は停止。
+- AACはLCのみ。明示/後方互換/暗黙FILのSBR/PSをpacket全体で拒否して出力しない。Huffman/帯域数値は固定archiveから数値だけ、アルゴリズムは原実装。
+- OPTIMAL画像の私有layoutへ依存せずprofile/format/queueをquery。COINCIDE/DISTINCT、decode→transfer→host同期、CopyImageToBufferの各planeとcoherent/非coherentを扱う。driver内のde-tileのみ許可。
+- 規格H.264 8.2.4.2.3によりtype0 gapで推定したnon-existing frameをB初期listから除外する。全sliceのlogical/real listのactive prefixを比較し、欠けた参照が必要なpictureはdropする。p008/p015/p016/p009へ影響を投影した。
+- offline同IDの衝突: p016はmainのref-list、標準readbackは新p017。旧p016 readbackの承認/履歴はp017へ由来付きで保存。p009/p010はp017の実装済みstandard-copy出力に依存する。whole p017のpixel未確認を検証済みとしない。
+- Vulkan instance/deviceはdecoderごとのownerで寿命を管理する。共有loaderのみ一度load。主たる完成範囲はMP4 native再生、全container/fixtureの回帰は残るacceptance。
+
+software確認用fixture/probe/app/APIはmainへ統合。実機、QEMU、性能とUAT後whole p014はT1/ユーザー/Q1の残件であり、WSはincomplete。

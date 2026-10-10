@@ -7,8 +7,7 @@
 
 /*
  * What libmedia's parts share inside the library (ws177-p031): the table
- * of a decoding back end's operations (decoder.c calls them; avcodec.c is
- * one), the conversion of packets into what a decoder reads without
+ * of a native decoding backend's operations (decoder.c calls them), the conversion of packets into what a decoder reads without
  * private data (bitstream.c), and the library's log.
  */
 
@@ -47,6 +46,15 @@ struct media_decoder_ops {
 	void (*picture_size)(const void *picture, int *width, int *height);
 	int (*picture_scale)(const void *picture, void **scaler, uint32_t *pixels, size_t stride, int width, int height);
 	void (*scaler_free)(void *scaler);
+	int (*trim)(void *state, int64_t before_us);
+	int64_t (*frame_us)(const void *state);
+	void (*picture_aspect)(const void *picture, int *num, int *den);
+};
+
+/* A retained native picture owns its backend operation table and CPU representation until media_frame_free. */
+struct media_frame {
+	const struct media_decoder_ops *ops;
+	void *picture;
 };
 
 /*
@@ -70,8 +78,9 @@ struct media_bitstream {
 	size_t output_room;
 };
 
-/* The add-in that opens FFmpeg's libavcodec (avcodec.c). */
-extern const struct media_decoder_ops media_avcodec_ops;
+/* Original LC reconstruction, with optional GPU video kept in a separate native backend. */
+extern const struct media_decoder_ops media_aac_ops;
+extern const struct media_decoder_ops media_vkvideo_ops;
 
 /* The bitstream conversion (bitstream.c). */
 int media_bitstream_open(struct media_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);

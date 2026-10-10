@@ -8,8 +8,8 @@
 /*
  * The player of a song (play.c, ws120-p009), apart from music.h so that
  * the view and its host tests do not need Video Player's sound and
- * decoding: they are compiled into Music from userland/desktop/videoplayer
- * (audio.c, codec.c, bitstream.c) with mediafile.
+ * decoding: audio.c supplies the stream, libmedia supplies native codecs,
+ * and media-app supplies the application's optional software fallback.
  */
 
 #ifndef MUSIC_PLAY_H

@@ -2,13 +2,13 @@
 
 # ws202-p001: 設計（design.md）と review
 
-Status: in-progress（2026-10-10 第 4 版＝最後の版。ユーザーの判断 H1〜H6・J1〜J10 の答え待ち）
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 5 LW（第 1 版 3、第 2 版 1、第 3 版・第 4 版 1）
 依存: —
 
-## 範囲
+## 範囲（第4版設計時点、下の承認済み改訂を優先）
 
 [design.md](../design.md) を書く。実装・build はしない（2026-10-11 ユーザー「設計だけ書いてください。実装は別なセッションで行います。」）。
 
@@ -34,3 +34,21 @@ Parent: [WS202](../ws.md)
 1. 答えを ws.md と design.md に記録し、推しと違う答えの Phase を直す（例 H1 (b) なら CPU の decoder の Phase、J8 (b)・(c) なら p016 の取り消しと p009 の参照の渡し方、
    J1 で container を絞るなら §3.1 と p010 の試験を縮める）。
 2. WS を planned に、この Phase を cleared に（Q1 の判定）。設計の直しの差分は Q1 が照らす（4 回目の review は要らない、review-003 の推し）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+p001は設計だけの旧制限を今回ユーザーの実装依頼で置換。native-only library/app fallback/API readbackへ構造改訂し再reviewが必要。旧clearance条件はそのまま実装承認に使わない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p001`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+ユーザー決定のnative-only library/app fallbackと標準readbackを実装へ適用し、第4版referenceを保持した。共有design/レビューとの意味の統合とp016 ID衝突解消はQ1 pending。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p001`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。

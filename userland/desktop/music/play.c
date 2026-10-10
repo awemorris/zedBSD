@@ -42,9 +42,10 @@
 struct play_reader {
 	struct mu_player *player;
 	struct media_file *file;
-	struct media_decoder *decoder;
+	struct app_decoder *decoder;
 	unsigned track;
 	double skip_before;
+	int sound_trimmed;
 	unsigned bad;
 	int16_t samples[PLAY_FRAMES * 2];
 };
@@ -385,6 +386,10 @@ play_reader_open(
 	const char *path)
 {
 	const struct media_track *track;
+	const char *codec;
+	const char *backend;
+	const char *container;
+	int64_t duration_ms;
 	unsigned count;
 	unsigned index;
 	int status;
@@ -404,7 +409,7 @@ play_reader_open(
 			continue;
 
 		/* Its decoder; the add-in missing ends the search. */
-		status = media_decoder_open(track, &reader->decoder);
+		status = app_decoder_open(track, &reader->decoder);
 		if (status == 0) {
 			reader->track = index;
 			break;
@@ -424,8 +429,15 @@ play_reader_open(
 	}
 
 	/* Succeeded: the log line the tests read. */
-	mu_log("PLAY open codec=%s container=%s duration_ms=%lld", media_decoder_name(reader->decoder),
-	    media_file_format_name(reader->file), (long long)(media_file_duration_us(reader->file) / 1000));
+	codec = app_decoder_name(reader->decoder);
+	backend = app_decoder_backend(reader->decoder);
+	container = media_file_format_name(reader->file);
+	duration_ms = media_file_duration_us(reader->file) / 1000;
+	mu_log("PLAY open codec=%s backend=%s container=%s duration_ms=%lld",
+	    codec,
+	    backend,
+	    container,
+	    (long long)duration_ms);
 	return 0;
 }
 
@@ -435,7 +447,7 @@ play_reader_close(
 	struct play_reader *reader)
 {
 	/* The decoder and the file, when they were opened. */
-	media_decoder_close(reader->decoder);
+	app_decoder_close(reader->decoder);
 	reader->decoder = NULL;
 	if (reader->file != NULL)
 		media_file_close(reader->file);
@@ -459,19 +471,31 @@ play_feed(
 	/* Sent; a full decoder gives its sound first, then takes the packet. */
 	status = 0;
 	for (tries = 0; tries < 2; tries++) {
-		status = media_decoder_send(reader->decoder, packet);
+		status = app_decoder_send(reader->decoder, packet);
 		if (status != EAGAIN)
 			break;
 
 		/* What it holds, written. */
 		for (;;) {
-			received = media_decoder_receive(reader->decoder, &time_us);
-			if (!received)
+			received = app_decoder_receive(reader->decoder, &time_us);
+			if (received < 0) {
+				play_fail(reader, MU_FAIL_DECODE);
+				return 1;
+			}
+
+			/* Request another compressed packet only after all available sound was handled. */
+			if (received == 0)
 				break;
 			status = play_sound(reader, (double)time_us / 1000000.0);
 			if (status != 0)
 				return status;
 		}
+	}
+
+	/* A failed drain cannot be treated as a successfully played end. */
+	if (packet == NULL && status != 0) {
+		play_fail(reader, MU_FAIL_DECODE);
+		return 1;
 	}
 
 	/* A packet that does not decode; too many in a row stop the song. */
@@ -489,8 +513,14 @@ play_feed(
 
 	/* What comes out of it. */
 	for (;;) {
-		received = media_decoder_receive(reader->decoder, &time_us);
-		if (!received)
+		received = app_decoder_receive(reader->decoder, &time_us);
+		if (received < 0) {
+			play_fail(reader, MU_FAIL_DECODE);
+			return 1;
+		}
+
+		/* Finish feeding when the decoder has no further sound available. */
+		if (received == 0)
 			return 0;
 		status = play_sound(reader, (double)time_us / 1000000.0);
 		if (status != 0)
@@ -512,11 +542,11 @@ play_sound(
 
 	/* Sound before the time sought is passed over. */
 	player = reader->player;
-	if (time < reader->skip_before)
+	if (time < reader->skip_before && reader->sound_trimmed == 0)
 		return 0;
 
 	/* Converted. */
-	converted = media_decoder_sound(reader->decoder, reader->samples, PLAY_FRAMES, player->audio.rate);
+	converted = app_decoder_sound(reader->decoder, reader->samples, PLAY_FRAMES, player->audio.rate);
 	if (converted == 0U)
 		return 0;
 
@@ -556,6 +586,10 @@ play_seek(
 	struct mu_player *player;
 	double seconds;
 	int wanted;
+	int error;
+	int64_t target;
+	int64_t preroll;
+	int64_t start;
 
 	/* A seek asked for. */
 	player = reader->player;
@@ -567,8 +601,23 @@ play_seek(
 		return 0;
 
 	/* The file before it, the decoder and the sound emptied. */
-	(void)media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
-	media_decoder_flush(reader->decoder);
+	target = (int64_t)(seconds * 1000000.0);
+	preroll = app_decoder_frame_us(reader->decoder);
+	start = target - preroll;
+	if (start < 0)
+		start = 0;
+	error = media_file_seek(reader->file, start);
+	if (error != 0) {
+		play_fail(reader, MU_FAIL_READ);
+		return 1;
+	}
+
+	/* Reset overlap and output trimming only after the file seek succeeded. */
+	app_decoder_flush(reader->decoder);
+	reader->sound_trimmed = 0;
+	error = app_decoder_trim(reader->decoder, target);
+	if (error == 0)
+		reader->sound_trimmed = 1;
 	(void)vp_audio_flush(&player->audio);
 
 	/* What decodes before the time sought is passed over. */

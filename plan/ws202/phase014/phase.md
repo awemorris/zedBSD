@@ -13,7 +13,7 @@ Parent: [WS202](../ws.md)
 WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文（§14 の checklist を含む）と照らし、書き方だけを直す（動作は変えない）。残す試験を master.md に登録し、
 開発の途中だけの試験を片付ける（2026-10-06 の試験の整理の基準、review-001 L-11）。
 
-## 範囲
+## 範囲（第4版設計時点、下の承認済み改訂を優先）
 
 - `userland/desktop/libmedia/`（新しい file と、`decoder.c`・`media-decoder.h`・`media-private.h`・`avcodec.c`・`Makefile` の差分）、`userland/desktop/mediafile/` の差分、
   `userland/desktop/videoplayer/`・`music/` の差分、`userland/tests/media-probe/`。
@@ -35,3 +35,19 @@ WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文�
 ## 記録
 
 範囲の file、直した規則の種類と数、確認の結果、Q1 に送った試験の整理の一覧。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+native-only library、app共有adapter/FFmpeg移管、必要なdriver/readback補完と新table生成器を全文レビュー対象に追加。規格数値と外部codeを区別する。共有Tool/Guardrail投影はQ1へ。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## i11のsoftware source確認（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p014`。最新の自走承認に含まれるi11で、現在のnative/app/probe/driver差分の全文規約review、対象host/sanitizer、named build/ELF/diff確認を実施した。[対象とbaseline・実command・残件](../playback-result-20261010.md)。無関係な旧codeの一括整形やUAT後の全WS整理を先行していない。whole p014はplanned（beta3）を保持。最終UAT後の再validationと共有Tool/Master登録、既存runner移管追従はQ1へpending。新runner/sourceは未完WSから参照し、不要な開発資材の削除はQ1へ。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p014`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。
+
+共有AAT helper/scenarioと旧host-codec/layoutの移管追従は今回mainへ適用。実行結果は統合記録に記載し、旧proposal/pendingを現在の状態として扱わない。

@@ -108,9 +108,9 @@ struct vp_player {
 	struct vp_media media;
 
 	/* The picture shown, its time, the converter that fits it, and how many were shown. */
-	struct media_frame *picture;
+	struct app_frame *picture;
 	double picture_time;
-	struct media_scaler *scaler;
+	struct app_scaler *scaler;
 
 	/* What the window says instead of a picture when a file could not be played ("" for nothing). */
 	char notice[160];
@@ -254,11 +254,14 @@ main(
 		vp_open(&player, file);
 	status = vp_loop(&player, timeout);
 
+	/* Record the final presentation state before closing the reader and its audio clock. */
+	vp_log("FRAMES shown=%u time_ms=%lld late=%u", player.shown, (long long)(vp_media_clock(&player.media) * 1000.0), player.media.late);
+
 	/* Everything goes. */
 	vp_media_close(&player.media);
 	vp_audio_close(&player.audio);
-	media_frame_free(&player.picture);
-	media_scaler_free(player.scaler);
+	app_frame_free(&player.picture);
+	app_scaler_free(player.scaler);
 	kl_file_chooser_destroy(player.chooser);
 	kl_ui_destroy(player.ui);
 	if (player.canvas_made)
@@ -545,7 +548,7 @@ vp_action(
 		break;
 	case VP_ACTION_CLOSE:
 		vp_media_close(&player->media);
-		media_frame_free(&player->picture);
+		app_frame_free(&player->picture);
 		player->notice[0] = '\0';
 		vp_log("CLOSE");
 		break;
@@ -596,7 +599,7 @@ vp_open(
 	int error;
 
 	/* The media; the picture shown before goes. */
-	media_frame_free(&player->picture);
+	app_frame_free(&player->picture);
 	player->notice[0] = '\0';
 	error = vp_media_open(&player->media, path);
 	vp_log("OPENED path=%s error=%d codec=%d", path, error, player->media.codec_problem);
@@ -628,7 +631,7 @@ vp_toggle(
 	/* The other. */
 	if (state == VP_PLAYING) {
 		vp_media_pause(&player->media);
-		vp_log("PAUSE shown=%u time_ms=%lld", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0));
+		vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0), player->media.late);
 	} else if (state != VP_EMPTY) {
 		vp_log("PLAY shown=%u time_ms=%lld", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0));
 		vp_media_play(&player->media);
@@ -747,13 +750,27 @@ vp_draw(
 	struct vp_player *player,
 	uint64_t now_us)
 {
-	struct media_frame *picture;
+	struct app_frame *picture;
 	uint64_t shown_us;
 	uint64_t after_ms;
 	double clock;
 	double time;
 	double next;
 	int status;
+	int failure;
+	int played_out;
+	uint64_t read_frames;
+	uint64_t written_frames;
+
+	/* A decoder failure is a user-visible playback state, rather than an apparent end of the file. */
+	(void)pthread_mutex_lock(&player->media.lock);
+	failure = player->media.failure;
+	player->media.failure = 0;
+	(void)pthread_mutex_unlock(&player->media.lock);
+	if (failure != 0) {
+		(void)snprintf(player->notice, sizeof(player->notice), "Playback stopped because the media could not be decoded.");
+		player->dirty = 1;
+	}
 
 	/* The picture whose time has come (the first one at once after an open or a seek). */
 	clock = vp_media_clock(&player->media);
@@ -761,20 +778,37 @@ vp_draw(
 	if (picture == NULL && player->need_picture && next >= 0.0)
 		picture = vp_media_take(&player->media, next, &time, &next);
 	if (picture != NULL) {
-		media_frame_free(&player->picture);
+		app_frame_free(&player->picture);
 		player->picture = picture;
 		player->picture_time = time;
 		player->need_picture = 0;
 		player->shown++;
 		player->dirty = 1;
 		if (player->shown == 1U || player->shown % 100U == 0U)
-			vp_log("FRAMES shown=%u time_ms=%lld", player->shown, (long long)(time * 1000.0));
+			vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(time * 1000.0), player->media.late);
 	}
 
 	/* The end of the file: the last picture shown and nothing left. */
 	(void)pthread_mutex_lock(&player->media.lock);
-	if (player->media.state == VP_PLAYING && player->media.eof && player->media.picture_count == 0U && clock >= player->picture_time) {
+	played_out = 0;
+	if (player->media.has_audio) {
+		read_frames = vp_audio_read_position(&player->audio);
+		written_frames = vp_audio_write_position(&player->audio);
+		if (read_frames >= written_frames)
+			played_out = 1;
+	} else if (player->media.duration <= 0.0 || clock >= player->media.duration) {
+		played_out = 1;
+	}
+
+	/* Publish end only after both due pictures and sound have been presented. */
+	if (
+		player->media.state == VP_PLAYING &&
+		player->media.eof &&
+		player->media.picture_count == 0U &&
+		clock >= player->picture_time &&
+		played_out) {
 		player->media.state = VP_ENDED;
+		vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(clock * 1000.0), player->media.late);
 		vp_log("ENDED shown=%u", player->shown);
 		player->dirty = 1;
 	}
@@ -821,10 +855,12 @@ vp_draw_picture(
 {
 	struct kl_rect whole;
 	struct kl_text_line line;
-	struct media_frame *picture;
+	struct app_frame *picture;
 	double aspect;
 	int picture_width;
 	int picture_height;
+	int sar_num;
+	int sar_den;
 	int text_width;
 	int width;
 	int height;
@@ -852,10 +888,11 @@ vp_draw_picture(
 	}
 
 	/* The picture's shape (square samples: the add-in reads no aspect field), fitted to the window. */
-	media_frame_size(picture, &picture_width, &picture_height);
+	app_frame_size(picture, &picture_width, &picture_height);
 	if (picture_width <= 0 || picture_height <= 0)
 		return;
-	aspect = (double)picture_width / (double)picture_height;
+	app_frame_aspect(picture, &sar_num, &sar_den);
+	aspect = (double)picture_width * sar_num / ((double)picture_height * sar_den);
 	width = (int)player->width;
 	height = (int)((double)width / aspect);
 	if (height > (int)player->height) {
@@ -870,7 +907,7 @@ vp_draw_picture(
 	y = ((int)player->height - height) / 2;
 
 	/* Scaled straight into the frame (BGRA is the canvas's 0xAARRGGBB, opaque); the scaler is remade when the sizes change. */
-	status = media_frame_scale(picture, &player->scaler, player->pixels + (size_t)y * player->width + (size_t)x,
+	status = app_frame_scale(picture, &player->scaler, player->pixels + (size_t)y * player->width + (size_t)x,
 	    player->width * sizeof(uint32_t), width, height);
 	if (status != 0)
 		vp_log("SCALE failed width=%d height=%d", picture_width, picture_height);
@@ -890,6 +927,15 @@ vp_notice(
 		break;
 	case MEDIA_PROBLEM_VERSION:
 		(void)snprintf(player->notice, sizeof(player->notice), "This version of libavcodec is not supported.");
+		break;
+	case MEDIA_PROBLEM_DEVICE:
+		(void)snprintf(player->notice, sizeof(player->notice), "Video decoding is unavailable on this system.");
+		break;
+	case MEDIA_PROBLEM_PROFILE:
+		(void)snprintf(player->notice, sizeof(player->notice), "This media format is not supported.");
+		break;
+	case MEDIA_PROBLEM_BUSY:
+		(void)snprintf(player->notice, sizeof(player->notice), "The video decoder is busy. Try again after closing another video.");
 		break;
 	case MEDIA_PROBLEM_FORMAT:
 		(void)snprintf(player->notice, sizeof(player->notice), "The video's format is not supported.");

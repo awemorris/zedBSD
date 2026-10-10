@@ -2,11 +2,11 @@
 
 # ws202-p009: Vulkan Video の back end (1) device・session・decode・読み出し
 
-Status: planned
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
-依存: p015（slot を持つ entry だけを積む計画の形）、H1、J6。D25 の判定の口は p016 と並べて作り、p010 で両方を合わせる（L3-06）
+依存: p015（slot を持つ entry だけを積む計画の形）、H1、J6。D25 の判定の口は p016 と並べて作り、p010 で両方を合わせる（L3-06）、p017（標準NV12読み戻しのsource出力）
 
 ## 目的
 
@@ -56,3 +56,31 @@ H.264 の picture を Vulkan Video で decode し、出力を linear の NV12 �
 
 - 偽の Vulkan は本番の dlopen の道を通らない。本物は p010 の終わりの 5330 の小さい確認で。実装の担当は QEMU・実機を起動しない。
 - libvulkan・i915 を変えない。疑いは Q1 に報告。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+Vulkan queryで選び、機種名/i915の固定判定をしない。Tile Yをlibmediaで読まない。標準NV12 readbackのp016出力を追加依存とする。COINCIDE/DISTINCT・format usageも能力を問い合わせる。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## p016の出力を受ける具体的変更（2026-10-10）
+
+標準Vulkan Video queryでNV12のDECODE_DST/必要なDPBとTRANSFER_SRCを要求する。decode queueとは別にgraphics/transfer queueを選ぶ場合、共有する出力imageは標準CONCURRENT sharing（両familyを列挙）または正しいownership transferとする。decode fence/status成功後、PLANE_0のextentはwidth/height、PLANE_1はceil(width/2)/ceil(height/2)、format compatible texelは1/2 byte。両planeのVkBufferImageCopyをHOST_VISIBLE staging bufferへ記録し、transfer fenceと必要なinvalidate後にlinear NV12だけをpictureへ渡す。offset/rowLengthをsample単位で計算し、容量/overflowを確認。libmedia内Tile Yとprivate subresourceLayoutの読取りは廃止。対応がないdeviceは明示DEVICE/PROFILE、app側adapterがfallbackする。
+
+ユーザー承認のdriver/libvulkan補完はp016でsoftware確認済み、実機画素は未確認。p009自体は未実装/未実行。H.264のreorder/seek/timeout結果、DPB再利用前copy退役はp010を含めて確認する。
+
+## H.264規格照合の設計補正（2026-10-10）
+
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](../h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p009`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+標準能力/level/complete usage照会、COINCIDE/DISTINCT resources、2queue semaphore/barrier/fence、HOST_VISIBLE readback、retirement-aware cleanupを実装。標準command stand-inの契約を確認しallocation/query errno伝播を改善。実機GPU pixels/loader経路/退役は未確認。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p009`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。

@@ -10,8 +10,8 @@
  * the decoding back ends.  A track's decoder is opened by the first back
  * end of the table that takes its codec; the decoder, its pictures and
  * their scaler keep the back end that made them, and every call goes to
- * it.  Today the table holds the add-in that opens FFmpeg's libavcodec
- * (avcodec.c); a GPU decoder (WS083's Vulkan Video) goes before it.
+ * it. The native table contains standard Vulkan Video H.264 and original
+ * AAC-LC reconstruction. Optional software fallback belongs to applications.
  */
 
 #include "media-private.h"
@@ -29,15 +29,6 @@ struct media_decoder {
 };
 
 /*
- * A picture taken from a decoder: the back end's own object, freed and
- * scaled by that back end.
- */
-struct media_frame {
-	const struct media_decoder_ops *ops;
-	void *picture;
-};
-
-/*
  * A scaler kept between a program's pictures: the back end whose pictures
  * it draws, and that back end's scaler (NULL until the first picture).
  */
@@ -51,45 +42,37 @@ struct media_scaler {
  * that cannot work, or does not take the codec, passes it on).
  */
 static const struct media_decoder_ops *const decoder_backends[] = {
-	&media_avcodec_ops,
+	&media_vkvideo_ops,
+	&media_aac_ops,
 };
 
 /*
- * Loads the software decoding add-in once.  Returns 0 when it can decode,
- * MEDIA_PROBLEM_MISSING when libavcodec is not installed, or
- * MEDIA_PROBLEM_VERSION for a version it does not know.
+ * Reports built-in decoder availability without loading any optional software codec.
+ * Track-specific GPU and profile capabilities are checked by media_decoder_open.
  */
 int
-media_codec_load(void)
+media_codec_load(
+	void)
 {
-	int status;
-
-	/* The add-in's own load. */
-	status = media_avcodec_ops.load();
-	if (status != 0)
-		return status;
-
-	/* Succeeded: the add-in decodes. */
+	/* Succeeded: built-in codecs have no optional software-library prerequisite. */
 	return 0;
 }
 
 /*
- * Reports why the add-in could not load ("" when it loaded).
+ * Reports no process-wide failure; native admission errors are returned for each track.
  */
 const char *
-media_codec_reason(void)
+media_codec_reason(
+	void)
 {
-	const char *reason;
-
-	/* The add-in's text. */
-	reason = media_avcodec_ops.reason();
-	return reason;
+	/* Native capability problems belong to the selected track, not process startup. */
+	return "";
 }
 
 /*
  * Opens a decoder for a track: the first back end that takes its codec.
  * Returns 0, the first back end's problem when none takes it
- * (MEDIA_PROBLEM_MISSING, _VERSION or _FORMAT), or ENOMEM.
+ * (MEDIA_PROBLEM_FORMAT, _DEVICE, _PROFILE or _BUSY), or an allocation errno.
  */
 int
 media_decoder_open(
@@ -110,11 +93,10 @@ media_decoder_open(
 		status = decoder_backends[index]->open(track, &state);
 		if (status == ENOMEM)
 			return ENOMEM;
-		if (status != 0) {
-			if (index == 0)
-				first = status;
+		if (status == MEDIA_PROBLEM_FORMAT)
 			continue;
-		}
+		if (status != 0)
+			return status;
 
 		/* The decoder, keeping its back end. */
 		opened = malloc(sizeof(*opened));
@@ -355,4 +337,74 @@ media_scaler_free(
 	if (scaler->state != NULL)
 		scaler->ops->scaler_free(scaler->state);
 	free(scaler);
+}
+
+/*
+ * Reports the selected native execution backend separately from the codec.
+ */
+const char *
+media_decoder_backend(
+	const struct media_decoder *decoder)
+{
+	/* A missing decoder has no selected backend. */
+	if (decoder == NULL)
+		return "none";
+
+	/* Succeeded: the backend identity stays stable for this decoder's lifetime. */
+	return decoder->ops->name;
+}
+
+/*
+ * Trims native audio at the source-sample boundary following a seek.
+ */
+int
+media_decoder_trim(
+	struct media_decoder *decoder,
+	int64_t before_us)
+{
+	int error;
+
+	/* Only native audio backends with an exact trimming contract implement this operation. */
+	if (decoder->ops->trim == NULL)
+		return ENOTSUP;
+	error = decoder->ops->trim(decoder->state, before_us);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: subsequent output will begin at the requested sample boundary. */
+	return 0;
+}
+
+/*
+ * Reports the native codec frame duration needed to reconstruct overlap before a seek target.
+ */
+int64_t
+media_decoder_frame_us(
+	const struct media_decoder *decoder)
+{
+	int64_t duration;
+
+	/* Backends without overlap preroll report no required preceding frame. */
+	if (decoder->ops->frame_us == NULL)
+		return 0;
+	duration = decoder->ops->frame_us(decoder->state);
+
+	/* Succeeded: callers may seek this far before their desired trimmed position. */
+	return duration;
+}
+
+/*
+ * Reports a retained picture's sample aspect ratio for presentation geometry.
+ */
+void
+media_frame_aspect(
+	const struct media_frame *frame,
+	int *num,
+	int *den)
+{
+	/* Unspecified picture metadata uses square samples. */
+	*num = 1;
+	*den = 1;
+	if (frame->ops->picture_aspect != NULL)
+		frame->ops->picture_aspect(frame->picture, num, den);
 }

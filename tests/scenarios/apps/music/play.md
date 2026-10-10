@@ -3,23 +3,23 @@ id: apps.music.play
 title: Music で ~/Music の m4a を再生し、次の曲・一時停止・曲の終わりを確かめる
 status: active
 areas: [music, audio]
-paths: [userland/desktop/music/, userland/desktop/libmedia/avcodec.c, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
+paths: [userland/desktop/music/, userland/desktop/libmedia/aac.c, userland/desktop/media-app/, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
 machine: either
 human: look
 since: ws120
 ---
 
 ## 目的
-`~/Music` の m4a（AAC）が album ごとに一覧に出て、libavcodec の add-in で decode され libkeiland の音の stream（compositor から audiod、WS191）で鳴り（再生の位置が進む）、次の曲・一時停止・再開・曲の終わり（最後の曲の後で止まる）が動くことを確かめる（WS120 p008・p009）。音そのものは耳で聞かない（QEMU）。
+`~/Music` の m4a（AAC）が album ごとに一覧に出て、libmedia の自前 AAC-LC で decode され libkeiland の音の stream（compositor から audiod、WS191）で鳴り（再生の位置が進む）、次の曲・一時停止・再開・曲の終わり（最後の曲の後で止まる）が動くことを確かめる（WS120 p008・p009）。音そのものは耳で聞かない（QEMU）。
 
 ## 準備
-host の ffmpeg で 8 秒の正弦波の m4a を 2 つ作る（440 Hz と 660 Hz、AAC、題 Tone A・Tone B、artist AAT、album AAT Tones、番号 1・2、Tone A に PNG の cover）。kei の `~/Music/AAT/` に置く。image に libavcodec の package と audiod。QEMU では音の device が要る（無いと stream が `ENODEV` で開かず、`MUSIC AUDIO error=` が 0 でない。T1-301 の頃は audiod の直の client だった）: `plan/tools/guest/guest.sh start` に `--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'`。
+host の ffmpeg で 8 秒の正弦波の m4a を 2 つ作る（440 Hz と 660 Hz、AAC、題 Tone A・Tone B、artist AAT、album AAT Tones、番号 1・2、Tone A に PNG の cover）。kei の `~/Music/AAT/` に置く。image に libmedia と audiod。AAC-LC では libavcodec の package は不要。QEMU では音の device が要る（無いと stream が `ENODEV` で開かず、`MUSIC AUDIO error=` が 0 でない。T1-301 の頃は audiod の直の client だった）: `plan/tools/guest/guest.sh start` に `--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'`。
 
 ## 操作と確認
 1. 操作: App Home から Music を開く。
-   確認事項: 一覧。正解: `MUSIC LIBRARY songs=2 error=0`、`MUSIC AUDIO error=0`、`MUSIC CODEC load error=0`、`MUSIC COVER album=0 error=0`（cover は初めて描く時に file から読む、ws177-p020）、左に All Songs と AAT Tones（cover）。確認方法: log、撮影。
+   確認事項: 一覧。正解: `MUSIC LIBRARY songs=2 error=0`、`MUSIC AUDIO error=0`、`MUSIC COVER album=0 error=0`（cover は初めて描く時に file から読む、ws177-p020）、左に All Songs と AAT Tones（cover）。確認方法: log、撮影。
 2. 操作: 右の上の Play。
-   確認事項: 再生。正解: `MUSIC PLAY song=0 error=0`、`MUSIC PLAY open codec=aac`、3 秒ほどで `MUSIC POSITION song=0 ms=` が 2000 以上、下の bar に Tone A と cover・位置。確認方法: log、撮影。
+   確認事項: 再生。正解: `MUSIC PLAY song=0 error=0`、`MUSIC PLAY open codec=aac-lc backend=libmedia`、3 秒ほどで `MUSIC POSITION song=0 ms=` が 2000 以上、下の bar に Tone A と cover・位置。確認方法: log、撮影。
 3. 操作: 下の bar の次（▶▶|）。
    確認事項: 次の曲。正解: `MUSIC PLAY song=1 error=0`。確認方法: log。
 4. 操作: Space、続けてもう一度 Space。

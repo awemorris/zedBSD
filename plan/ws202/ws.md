@@ -3,14 +3,14 @@
 # WS202: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（libmedia の自前の decoder、Video Player・Music）
 
 <!-- awesome-plan-current:start -->
-Status: planning（2026-10-10 設計の第 4 版＝最後の版（[review-001](review-001.md)・[review-002](review-002.md)・[review-003](review-003.md) を反映、J7〜J10 は推しを仮に採った）。ユーザーの判断 H1〜H6・J1〜J10 の答え待ち）
+Status: incomplete（native再生softwareをmainへ統合、実機と全受入matrixは未確認）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Target: **ベータ3**（判断の点 H4「ベータ2 に入れるか」）
-Queue: —
-Resume point: ユーザーの判断 H1〜H6・J1〜J10 の答え → 答えを design・ws.md に記録（推しと違えば該当の Phase を直す）→ planned → p002 から。4 回目の review は要らない（review-003 の推し、直しの差分は Q1 が照らす）。実装は別のセッション（2026-10-11 ユーザー）。
+Target: **ベータ2の必須列へ追加された状態**（統合中の共有 `plan/beta2.md` の編集を読み取り確認。release判断/共有投影はQ1、whole p014はベータ3の既存方針を保持）
+Queue: [codex-ws202-playback](policy-20261010.md#自走の実行承認-codex-ws202-playback) finished（software handoff）、main統合はユーザーが追加承認
+Resume point: mainのbuild/回帰結果を[統合記録](main-integration-20261010.md)で確認 → [T1の再生確認](t1-playback-request-20261010.md) → 残るfixture/性能matrixとUser UAT → whole p014。MasterはQ1所有のため投影pending。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-11 ユーザー）
@@ -30,6 +30,8 @@ Resume point: ユーザーの判断 H1〜H6・J1〜J10 の答え → 答えを d
 
 ## 範囲
 
+後の[ユーザー決定](policy-20261010.md)を優先。libmediaは自前AAC-LC/Vulkan Videoのみ。任意FFmpegはapp側media-appでdlopen。標準NV12読み戻しのi915/必要なlibvulkan補完（p017）を含む。旧2段degraded・library内FFmpegは採用しない。
+
 - libmedia（`userland/desktop/libmedia/`）: 自前の back end 2 つ（Vulkan Video の H.264、AAC-LC）、共通の部品（bit の reader、NV12 の picture と scaler、
   音の downmix・resample）、back end の表・問題の code・2 段の試し・音の約束・切り詰め。
 - mediafile（`mp4.c`）: pasp・colr・表示の終わり。
@@ -40,7 +42,7 @@ Resume point: ユーザーの判断 H1〜H6・J1〜J10 の答え → 答えを d
 ## 非範囲
 
 H.264 の CPU の decoder（H1）、HE-AAC の SBR・PS の再現（H3）、他の codec、encode、interlaced・10 bit、AAC の Main・LTP・SSR・ER 系、DRM、streaming、
-GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvulkan・i915 の変更（WS083 の範囲）、`iTunSMPB`、再生の途中の libavcodec への切り替え（J6）。
+GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvulkan・i915 の標準NV12読み戻し補完以外の変更、`iTunSMPB`、再生の途中の libavcodec への切り替え（J6）。
 
 ## 完了の条件
 
@@ -79,24 +81,25 @@ GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvu
 
 | Phase | 目的 | 見積もり | Status | 依存 |
 | --- | --- | --- | --- | --- |
-| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 5 | in-progress（第 4 版＝最後の版。ユーザーの判断 H1〜H6・J1〜J10 の答え待ち） | — |
-| [ws202-p002](phase002/phase.md) | 試験の stream と参照（x264 で直に mp4、pts 付きの参照、ADTS・mkv・TS・Annex B の AVI・ctts 無し、合成の gap、合成の 1080p）、host 試験の枠 | 5 | planned | p001、J5 |
-| [ws202-p003](phase003/phase.md) | 共通の部品: bits、picture と pool と scaler、sound（resample の up・down、音の約束、trim）、back end の表・問題・2 段の試し・新しい口 | 8 | planned | p001、H2、J1、J7 |
-| [ws202-p004](phase004/phase.md) | mediafile: pasp・colr（nclx・nclc）・`end_us`（と J1 で絞る時の `container`） | 2 | planned | p001 |
-| [ws202-p005](phase005/phase.md) | AAC の構文（ASC・ADTS（複数の block）・要素・ICS・Huffman）、表の生成、HE-AAC の signalling と D26 の試験 | 8 | planned | p002、p003、H3、H5 |
-| [ws202-p006](phase006/phase.md) | AAC の信号処理と back end（M/S の除外、切り詰め、trim、pre-roll、ADTS の入力、D26）、精度の試験 | 10 | planned | p004、p005 |
-| [ws202-p007](phase007/phase.md) | Music（起動の門、notice、log、trim と pre-roll の seek、AAT の helper と scenario） | 3 | planned | p006 |
-| [ws202-p008](phase008/phase.md) | H.264 の parser と DPB の写し（AU 単位、VUI、POC type 1、全 NAL の emulation prevention、slice ごとの list の情報、表示順）、probe との一致の試験 | 7 | planned | p002、p003 |
-| [ws202-p015](phase015/phase.md) | H.264 の欠けた参照の entry・frame_num の gap（non-existing の POC と POC の状態）・MMCO 5・seek の後の DPB（leading の参照の marking、MMCO の対象が無い時）、seek の後の試験 | 5 | planned | p008、J4 |
-| [ws202-p016](phase016/phase.md) | 参照の list の計算（8.2.4）と欠けた参照の判定（D25、POC の不明な non-existing の B の保守的な判定）、`h264-gap-orig.mp4` を正解とする試験 | 4 | planned | p015、J8 |
-| [ws202-p009](phase009/phase.md) | Vulkan Video の back end (1): `/lib/libvulkan.so` の dlopen、共有の device（1.0・properties2、参照の数 0 で instance を壊す）、**open で** capability・level・session・image（D28）、decode、de-tile | 8 | planned | p015、H1、J6（p016 と並べる） |
-| [ws202-p010](phase010/phase.md) | Vulkan Video の back end (2): POC の表示順と時刻（D29: 出ない picture は空の entry で時刻を消費）、in-band だけの track、flush・seek、失敗と作り直し、表の先頭へ、media-probe の video、`config-media.mk`、5330 の小さい確認（scp、J10） | 9 | planned | p009、p016、J10 |
-| [ws202-p011](phase011/phase.md) | Video Player（notice・縦横比・log・trim）、media-probe の音、利用者の文書 | 3 | planned | p007、p010 |
-| [ws202-p012](phase012/phase.md) | T1: QEMU（libavcodec 無し・有り）と 5330 の実機（USB の 1 回の起動、J10）、zgears の fps（J9） | 4 | planned | p011、J9 |
-| [ws202-p013](phase013/phase.md) | 5330 の UAT（ユーザー、p012 と同じ起動） | 2 | planned | p012 |
-| [ws202-p014](phase014/phase.md) | 全文規約の見直しと、残す試験の登録（master.md の Tools）・開発だけの試験の削除の依頼 | 4 | planned | p013 |
+| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 5 | uncleared（software出力あり、whole未達） | — |
+| [ws202-p002](phase002/phase.md) | 試験の stream と参照（x264 で直に mp4、pts 付きの参照、ADTS・mkv・TS・Annex B の AVI・ctts 無し、合成の gap、合成の 1080p）、host 試験の枠 | 5 | uncleared（software出力あり、whole未達） | p001、J5 |
+| [ws202-p003](phase003/phase.md) | 共通の部品: bits、picture と pool と scaler、sound（resample の up・down、音の約束、trim）、自前backend表・error分類・app所有fallback境界 | 8 | uncleared（software出力あり、whole未達） | p001、H2、J1、J7 |
+| [ws202-p004](phase004/phase.md) | mediafile: pasp・colr（nclx・nclc）・`end_us`（と J1 で絞る時の `container`） | 2 | uncleared（software出力あり、whole未達） | p001 |
+| [ws202-p005](phase005/phase.md) | AAC の構文（ASC・ADTS（複数の block）・要素・ICS・Huffman）、表の生成、HE-AAC の signalling と D26 の試験 | 8 | uncleared（software出力あり、whole未達） | p002、p003、H3、H5 |
+| [ws202-p006](phase006/phase.md) | AAC の信号処理と back end（TNS/M/S/PNS/intensity、切り詰め、trim、pre-roll、ADTS の入力、D26）、精度の試験 | 10 | uncleared（software出力あり、whole未達） | p004、p005 |
+| [ws202-p007](phase007/phase.md) | Music（起動の門、notice、log、trim と pre-roll の seek、AAT の helper と scenario） | 3 | uncleared（software出力あり、whole未達） | p006 |
+| [ws202-p008](phase008/phase.md) | H.264 の parser と DPB の写し（AU 単位、VUI、POC type 1、全 NAL の emulation prevention、slice ごとの list の情報、表示順）、probe との一致の試験 | 7 | uncleared（software出力あり、whole未達） | p002、p003 |
+| [ws202-p015](phase015/phase.md) | H.264 の欠けた参照の entry・frame_num の gap（non-existing の POC と POC の状態）・MMCO 5・seek の後の DPB（leading の参照の marking、MMCO の対象が無い時）、seek の後の試験 | 5 | uncleared（software出力あり、whole未達） | p008、J4 |
+| [ws202-p016](phase016/phase.md) | 参照の list の計算（8.2.4）と欠けた参照の判定（D25、non-existingの規格上のB-list除外）、`h264-gap-orig.mp4` を正解とする試験 | 4 | uncleared（software出力あり、whole未達） | p015、J8 |
+| [ws202-p009](phase009/phase.md) | Vulkan Video の back end (1): `/lib/libvulkan.so` の dlopen、decoder所有のinstance/deviceとloader、**open で** capability・level・session・image（D28）、decode、標準plane readback | 8 | uncleared（software出力あり、whole未達） | p015、H1、J6（p016 と並べる）、p017 source出力 |
+| [ws202-p010](phase010/phase.md) | Vulkan Video の back end (2): POC の表示順と時刻（D29: 出ない picture は空の entry で時刻を消費）、in-band だけの track、flush・seek、失敗と作り直し、表の先頭へ、media-probe の video、`config-media.mk`、5330 の小さい確認（scp、J10） | 9 | uncleared（software出力あり、whole未達） | p009、p016、J10、p017 source出力 |
+| [ws202-p011](phase011/phase.md) | Video Player（notice・縦横比・log・trim）、media-probe の音、利用者の文書 | 3 | uncleared（software出力あり、whole未達） | p007、p010 |
+| [ws202-p012](phase012/phase.md) | T1: QEMU（libavcodec 無し・有り）と 5330 の実機（USB の 1 回の起動、J10）、zgears の fps（J9） | 4 | planned（T1/User UAT/whole規約待ち） | p011、J9 |
+| [ws202-p013](phase013/phase.md) | 5330 の UAT（ユーザー、p012 と同じ起動） | 2 | planned（T1/User UAT/whole規約待ち） | p012 |
+| [ws202-p014](phase014/phase.md) | 全文規約の見直しと、残す試験の登録（master.md の Tools）・開発だけの試験の削除の依頼 | 4 | planned（T1/User UAT/whole規約待ち） | p013 |
+| [ws202-p017](phase017/phase.md) | Vulkan標準NV12 readback補完（offline p016衝突を由来付きで修復） | —（承認済み補完） | uncleared（software接続/build済み、実機pixel待ち） | WS083の実装source、i03承認 |
 
-### 並べて進める時の merge の順（L-13）
+### 並べて進める時の merge の順（L-13、第4版時点の履歴）
 
 共有の file（`decoder.c` の表、`media-private.h`、`media-decoder.h`、`Makefile`、`plan/tools/media/run-host-codec.sh` の期待）を 2 つの列が変える。
 
@@ -111,7 +114,7 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 `plan/tools/media/` へ移し、`media-probe`（`userland/tests/` の package なので移さない、L2-14）と合わせて master.md の Tools・試験の一覧に登録する依頼を Q1 に出す。開発の途中だけの試験は削除の path を Q1 に送る（rm は Q1）。
 完了の後、ws.md を完了の形に書き直し、Phase の directory の削除は Q1。
 
-## 人の判断の点（各々に推し、詳しくは design §13）
+## 人の判断の点（第4版設計時点の一覧、現行はpolicyと統合記録）
 
 | ID | 問い | 選択肢 | 推し | 理由 |
 | --- | --- | --- | --- | --- |
@@ -144,3 +147,10 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 - seek の前の picture（parse していない）を参照する trailing の picture は検出できない（x264 は modification と MMCO 1 で避ける、review-003 M3-04）。in-band だけの H.264（TS・AVI・avc3）は libavcodec の無い時だけ自前が受け、範囲の外の
   profile は open の後に分かる（notice にならず再生の失敗）。
 - kernel の video の context は 8 個で、9 個目の process は BUSY。
+
+
+## main統合・構造/状態の投影（2026-10-10）
+
+Event: `ws202-main-integration-20261010-ws`。ユーザーのmain統合承認により、native AAC/Vulkan Video/libmedia、app所有fallback、MP4metadata、probe、i915標準readback、source fixtures/host/docs/buildと共有回帰/AAT追従を統合。第4版design/reviews/criteria/Phase目的を保存してdated policy/resultsを統合した。offline p016衝突はmain p016（ref-list）を維持、readbackを新p017へ由来付きmapping。p001〜p016のaffected recordと新p017、designに理由/依存/結果/限界を記載した。
+
+software-only i11はcleared、i06〜i10/whole code Phasesはuncleared。p012/p013/p014はplanned、WS acceptanceは未達。各source出力は統合済みでT1へ渡せる。実機のhash/音/同期/性能・全fixture matrix・UAT後全文確認/Tools登録は残件。[mainのactual検証](main-integration-20261010.md)。Master/共有Queue/Guardrail/履歴/GitHubのprojectionはQ1所有のためpending。pushしない。

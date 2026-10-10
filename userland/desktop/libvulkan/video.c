@@ -195,8 +195,8 @@ vkGetPhysicalDeviceVideoFormatPropertiesKHR(
 	if (status != VK_SUCCESS)
 		return status;
 
-	/* A decode picture is only ever a decode output or a reference picture. */
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+	/* Decode pictures may also be copied into a staging buffer for host readback. */
+	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	if ((pVideoFormatInfo->imageUsage & ~video_usage) != 0)
 		return VK_ERROR_IMAGE_USAGE_NOT_SUPPORTED_KHR;
 

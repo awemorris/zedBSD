@@ -856,7 +856,7 @@ $(BUILD)/bin/$(1): $(AMD64_APP_INPUTS) $(AMD64_USER_BASIC_COMMON_OBJ) \
  $(call ZEDBSD_USERLAND_OBJECTS,$(AMD64_APP_OBJ),$(1)) $(AMD64_APP_LIBS) -o $$@
 	$(AMD64_APP_CHECK) $$@
 endef
-$(foreach command,$(filter-out vkdemo vkvideo-probe display-events wltest wlshm mview wayland terminal files notes monitor pdfviewer settings imageview textedit videoplayer music photos phone calendar mailer kuidemo browser browser-probe xserver egltest glescompute glxtest zgears gpu-share-test gpu-fence-test acquire-fence-test gpu-forge-test menu-probe titlebar-probe popup-probe subsurface-probe seat-probe data-probe extras-probe tablet-probe keiland-ime ime-probe keiland-settings keiland-system keiland-notify printtest fidoctl passkey-fido2,$(USER_BASIC_COMMANDS)),\
+$(foreach command,$(filter-out vkdemo vkvideo-probe media-probe display-events wltest wlshm mview wayland terminal files notes monitor pdfviewer settings imageview textedit videoplayer music photos phone calendar mailer kuidemo browser browser-probe xserver egltest glescompute glxtest zgears gpu-share-test gpu-fence-test acquire-fence-test gpu-forge-test menu-probe titlebar-probe popup-probe subsurface-probe seat-probe data-probe extras-probe tablet-probe keiland-ime ime-probe keiland-settings keiland-system keiland-notify printtest fidoctl passkey-fido2,$(USER_BASIC_COMMANDS)),\
 	$(eval $(call AMD64_USER_BASIC_COMMAND,$(command))))
 # Static programs (the class static, ws168-p002): linked with the static C
 # library alone and no runtime linker, as a child that sandbox_spawn starts
@@ -1186,6 +1186,23 @@ $(BUILD)/bin/vkvideo-probe: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  -l:libvulkan.so -l:libc.so -o $@
 	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
  --needed libvulkan.so --needed libc.so $@
+
+# Native media diagnostics link libmedia; optional application codecs are deliberately absent.
+DYNAMIC_MEDIA_PROBE_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,media-probe)
+
+$(BUILD)/bin/media-probe: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
+	$(DYNAMIC_MEDIA_PROBE_OBJS) $(DYNAMIC_DIR)/libmedia.so $(DYNAMIC_DIR)/libc.so \
+	$(DYNAMIC_DIR)/ld.so $(DYNAMIC_VULKAN_CHECK)
+	@mkdir -p $(dir $@)
+	$(CC) -m64 -nostdlib -pie -Wl,--no-relax \
+ -Wl,--hash-style=gnu,-z,now,-z,relro,-z,separate-code \
+ -Wl,-z,stack-size=0x100000,--allow-shlib-undefined \
+ -Wl,--dynamic-linker=/lib/ld.so \
+ $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o $(DYNAMIC_MEDIA_PROBE_OBJS) \
+ -L$(DYNAMIC_DIR) -Wl,-rpath-link,$(DYNAMIC_DIR) \
+ -l:libmedia.so -l:libc.so -o $@
+	$(PYTHON) $(DYNAMIC_VULKAN_CHECK) --machine amd64 --role application \
+ --needed libmedia.so --needed libc.so $@
 
 # The Vulkan display events probe (ws113-p003) is a plain Vulkan client like vkdemo.
 DYNAMIC_DISPLAY_EVENTS_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,display-events)
@@ -1744,7 +1761,7 @@ $(BUILD)/bin/imageview: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 
 # Video Player (WS122) imports standard Wayland, Vulkan, TrueType and C library entry points, the window and the
 # widgets through libkeiland, and the container reader and the decoders through libmedia (ws177-p031).  It is not
-# linked to FFmpeg: libmedia's decoding add-in (WS122 p004) opens libavcodec, libavutil and libswscale with dlopen
+# linked to FFmpeg: its application adapter opens optional libavcodec, libavutil and libswscale with dlopen
 # when the system has them (the libavcodec package), without FFmpeg's headers.
 DYNAMIC_VIDEOPLAYER_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,videoplayer)
 
@@ -1767,7 +1784,7 @@ $(BUILD)/bin/videoplayer: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
 # Music (WS120) imports standard Wayland, Vulkan, TrueType and C library entry points, the window and the widgets
 # through libkeiland, and the covers' decoding through libjpeg-compat and libpng-compat (picture.c's GIF part needs
 # libgif-compat), and the container reader and the decoders through libmedia (ws177-p031).  Like Video Player it is
-# not linked to FFmpeg: libmedia's decoding add-in opens libavcodec with dlopen.
+# not linked to FFmpeg: its application adapter opens optional libavcodec with dlopen.
 DYNAMIC_MUSIC_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,music)
 
 $(BUILD)/bin/music: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
@@ -1912,8 +1929,8 @@ $(BUILD)/bin/kuidemo: $(ZEDBSD_SYSROOT_AMD64)/usr/lib/crt1.o \
  --needed libvulkan.so --needed libwayland-client.so --needed libkeiland.so --needed libtruetype.so \
  --needed libc.so $@
 
-# libmedia (ws121-p002): the playing of media files (the container reader, the decoding add-in that opens libavcodec
-# with dlopen, the audiod client and the engine); it needs nothing but the C library.
+# libmedia (ws121-p002, WS202): media containers, original AAC-LC and standard Vulkan Video H.264
+# (optional Vulkan loader through dlopen, the audiod client and the engine); it links only the C library.
 DYNAMIC_MEDIA_LIBRARY_OBJS := $(call ZEDBSD_USERLAND_OBJECTS,$(DYNAMIC_DIR)/obj,libmedia)
 
 $(DYNAMIC_DIR)/libmedia.so: $(DYNAMIC_MEDIA_LIBRARY_OBJS) $(DYNAMIC_DIR)/libc.so \

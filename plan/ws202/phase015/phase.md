@@ -2,7 +2,7 @@
 
 # ws202-p015: H.264 の欠けた参照・frame_num の gap・MMCO 5・seek の後の DPB
 
-Status: planned
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 5 LW
@@ -54,3 +54,25 @@ vkvideo-probe に無い DPB の扱い（design §5.3・§5.7）を足す: 欠け
 ## 注意
 
 - conformance の stream は tree に入れない。5330 で使うなら p012 の依頼に（T1 が host から scp）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+gap/MMCO5のscopeは維持。conformanceの取得/利用条件は未確認のため未実施として保持し、標準readbackとの実hashをp016/p012で確認する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## H.264規格照合の設計補正（2026-10-10）
+
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](../h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p015`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+全sliceのP/B initial/modified active-prefix refsを計算、inferred/non-existing entryをGPUに渡さずmissingをdrop、MMCO5前後POC/historyとseek epochを分離。手計算/ref admissionのhostはPASS。本物のmissing-packet/conformance pixelsは未確認、ASO/redundantは明示拒否の未対応。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p015`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。

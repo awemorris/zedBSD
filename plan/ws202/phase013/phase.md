@@ -36,3 +36,13 @@ UAT の試料は `/home/awe/zedbsd-media/` の sample（`sample-h264-high-aac.mp
 
 - ユーザーの回答を ws.md の「5330 の UAT」の節（この Phase で足す）に原文で。問題は Bug Board か、担当の Phase を uncleared に戻すかを Q1 が決める。
 - UAT の後、docs（p011）に実機で確かめた範囲を反映する。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+自前AAC-LC/H.264とapp fallback/no-libraryを区別してUATする。HE-AAC core縮退再生を成功条件にしない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p013`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。

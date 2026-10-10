@@ -8,7 +8,7 @@
 /*
  * ws122-p004: checks that the decoding add-in's view of the first fields
  * of AVPacket, AVFrame, AVCodecParameters and AVCodec
- * (userland/desktop/libmedia/avcodec-layout.h)
+ * (userland/desktop/media-app/avcodec-layout.h)
  * matches FFmpeg's public headers of one version.  Compiled once for each
  * version the add-in knows, against that version's headers (the host's
  * Debian 13 FFmpeg 7, libavcodec 61; the image's FFmpeg 9.0.2 package,
@@ -18,7 +18,7 @@
  *   host-layout MAJOR      prints "host-layout: PASS major=N" or FAIL
  */
 
-#include "userland/desktop/libmedia/avcodec-layout.h"
+#include "userland/desktop/media-app/avcodec-layout.h"
 
 #include <libavcodec/avcodec.h>
 #include <libavutil/frame.h>

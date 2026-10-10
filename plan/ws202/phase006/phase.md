@@ -2,7 +2,7 @@
 
 # ws202-p006: AAC の信号処理と back end
 
-Status: planned
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 10 LW
@@ -53,3 +53,25 @@ p005 の構文の結果から PCM を作り、`media_aac_ops` として decoder 
 
 - 基準を満たさない時は、どの道具で外れるかを stream ごとに切り分けて直す。基準を緩めない。
 - ffmpeg の decoder の内部の値を読まない（出力の PCM だけ）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+AAC-LCだけを実装。HE-AAC/非対応toolはPROFILEを返す。avcodec opsをlibraryの表へ入れず、音のfallbackはapp側。Huffman数値部分以外のparser/filterbankは未実装。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## 2026-10-10 自走実装の進捗
+
+ユーザーの動画プレイヤで再生可能になるまで自走する指示により、[codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)を継続中。旧degraded/LC-core-only/FFmpeg-library-backendの手順は適用しない。[AACの実PCM・共通音声の途中証拠](../aac-native-progress-20261010.md)を保存。whole Phaseのclearanceではなく、app/H.264/end_us/seek等の未完criteriaを保持する。独立sourceのみ変更、Master/共有Queue/他担当投影はQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p006`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+独自FFT/IMDCT/window/overlap、逆量子化/MS/PNS/intensity/TNS、AAC native backendとdownmix/soundを実装。5独立AACの精度/raw-ADTS一致/HE-AAC拒否、MP4 seek trim/96000frame/RMSを確認。全multichannel/PCE/band別PNS/TSanは未完。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p006`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。

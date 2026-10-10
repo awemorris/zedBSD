@@ -26,6 +26,7 @@
 #define VIDEOPLAYER_VIDEOPLAYER_H
 
 #include "userland/desktop/libmedia/media.h"
+#include "userland/desktop/media-app/decoder.h"
 
 #include <pthread.h>
 #include <stddef.h>
@@ -38,6 +39,7 @@
 #define VP_EMPTY		0U	/* nothing open */
 #define VP_PLAYING		1U
 #define VP_PAUSED		2U
+#define VP_FAILED        4U	/* decoding stopped with an error */
 #define VP_ENDED		3U	/* played to its end */
 
 struct kl_audio_stream;
@@ -85,12 +87,14 @@ struct vp_media {
 
 	/* Why the last open failed (MEDIA_PROBLEM_*, 0 for another reason or none). */
 	int codec_problem;
+	int failure;
 
 	/* The pictures decoded ahead (a ring of references), with their times (seconds). */
-	struct media_frame *pictures[VP_PICTURES];
+	struct app_frame *pictures[VP_PICTURES];
 	double picture_times[VP_PICTURES];
 	unsigned picture_first;
 	unsigned picture_count;
+	unsigned late;	/* Due pictures superseded before presentation; the window owns this count. */
 
 	/* The clock: the time at an anchor, and the anchor (the stream's position heard, or the monotonic time). */
 	double clock_time;
@@ -124,7 +128,7 @@ void vp_media_play(struct vp_media *media);
 void vp_media_pause(struct vp_media *media);
 void vp_media_seek(struct vp_media *media, double seconds);
 double vp_media_clock(struct vp_media *media);
-struct media_frame *vp_media_take(struct vp_media *media, double clock, double *time, double *next);
+struct app_frame *vp_media_take(struct vp_media *media, double clock, double *time, double *next);
 
 /* The log the tests read (main.c). */
 void vp_log(const char *format, ...) __attribute__((format(printf, 1, 2)));

@@ -2,7 +2,7 @@
 
 # ws202-p002: 試験の stream と参照、host 試験の共通の枠
 
-Status: planned
+Status: uncleared（software実装あり、全条件の確認は未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 5 LW
@@ -61,3 +61,21 @@ AAC と H.264 の Phase が使う試験の stream と参照を、host の ffmpeg
 
 - tree の外の 1080p の sample（`/home/awe/zedbsd-media/`）は UAT だけに使う。
 - 試験の image の入力は tree の中の file だけ。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+AAC-LC成功、HE-AAC拒否、app fallbackと未導入、未対応Vulkan GPUのエラーを独立に確認する。参照にLC coreの縮退再生を採らない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p002`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+固定encoderによるAAC5素材、2秒H.264/B、no-ctts、4slice、12秒open GOP UATと独立参照を実装。source-owned素材と生成器を保存した。WS083の6MP4/crop/SAR/欠落packet/全conformance/1080p matrixは未達。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
+
+
+## main統合の追記（2026-10-10）
+
+Event: `ws202-main-integration-20261010-p002`。ユーザー「mainへの統合はあなたがやってOKです。」によりsourceと記録をmainへ統合。最新の承認済み方針・手順・確認・残件は[統合記録](../main-integration-20261010.md)と[policy](../policy-20261010.md)。上の設計時点の推奨、旧未実装/統合pendingは履歴として保存する。software出力の有無とwhole clearanceを区別する。標準readbackの依存はp017、ref-listは既存p016。p012/T1→p013/User UAT→whole p014の確認は未実施、Master/共有Board/GitHubへの投影はQ1に保持。
