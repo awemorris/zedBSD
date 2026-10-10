@@ -46,19 +46,22 @@
 #define PHONEREC_KEY_CONTACTS	4U
 #define PHONEREC_KEY_CALLS	5U
 #define PHONEREC_KEY_ENABLED	6U
-#define PHONEREC_KEYS		7U
+#define PHONEREC_KEY_ASKED	7U
+#define PHONEREC_KEYS		8U
 
-/* Every key's bit: a record has them all. */
+/* The bits of the keys a record must have (every key but "asked", which a record before ws197-p005 lacks). */
 #define PHONEREC_KEYS_ALL	0x7fU
 
 /* The keys, in the order of the numbers above. */
 static const char *const phonerec_keys[PHONEREC_KEYS] = {
-	"version", "uid", "user", "messages", "contacts", "calls", "enabled",
+	"version", "uid", "user", "messages", "contacts", "calls", "enabled", "asked",
 };
 
 static int phonerec_key(struct btd_phonerec *record, unsigned *seen, const char *key, const char *value);
 static int phonerec_number(const char *text, unsigned long maximum, unsigned long *value);
 static int phonerec_flag(const char *text, int *flag);
+static int phonerec_profiles(const char *text, unsigned *profiles);
+static void phonerec_profiles_text(unsigned profiles, char *text, size_t size);
 static int phonerec_folder(const char *folder, const uint8_t *controller, char *path, size_t size);
 static int phonerec_name_address(const char *name, uint8_t *address);
 
@@ -132,6 +135,7 @@ btd_phonerec_format(
 	char *text,
 	size_t size)
 {
+	char asked[8];
 	int name_ok;
 	int written;
 
@@ -140,17 +144,24 @@ btd_phonerec_format(
 	if (!name_ok)
 		return EINVAL;
 
+	/*
+	 * The profiles as asked for: what is on is what was asked for, since
+	 * this daemon turns on nothing by itself (ws197-p005 section 8.1).
+	 */
+	phonerec_profiles_text(record->profiles, asked, sizeof(asked));
+
 	/* The lines, one key each. */
 	written = snprintf(text,
 			   size,
-			   "version %lu\nuid %lu\nuser %s\nmessages %d\ncontacts %d\ncalls %d\nenabled %d\n",
+			   "version %lu\nuid %lu\nuser %s\nmessages %d\ncontacts %d\ncalls %d\nenabled %d\nasked %s\n",
 			   PHONEREC_VERSION,
 			   (unsigned long)record->uid,
 			   record->user,
 			   (record->profiles & BTD_PHONEREC_MESSAGES) != 0U,
 			   (record->profiles & BTD_PHONEREC_CONTACTS) != 0U,
 			   (record->profiles & BTD_PHONEREC_CALLS) != 0U,
-			   record->enabled != 0);
+			   record->enabled != 0,
+			   asked);
 	if (written < 0 || (size_t)written >= size)
 		return ENAMETOOLONG;
 
@@ -208,8 +219,8 @@ btd_phonerec_parse(
 			return error;
 	}
 
-	/* Every key there. */
-	if (seen != PHONEREC_KEYS_ALL)
+	/* Every key a record must have there. */
+	if ((seen & PHONEREC_KEYS_ALL) != PHONEREC_KEYS_ALL)
 		return EBADMSG;
 
 	/* Succeeded: the record. */
@@ -555,6 +566,29 @@ btd_phonerec_prune(
 	return 0;
 }
 
+/*
+ * Brings a record written before ws197-p005 up to date (section 8.1): its
+ * pairing turned every profile on by itself, so contacts and calls go
+ * off and only messages stays as it was; the "asked" line is then
+ * written with what is left.  The user turns contacts on again from
+ * Settings or with LINK.  Returns 1 when the record changed (the caller
+ * writes it), 0 for a record already up to date.
+ */
+int
+btd_phonerec_migrate(
+	struct btd_phonerec *record)
+{
+	/* Up to date already. */
+	if (record->have_asked)
+		return 0;
+
+	/* Succeeded: messages alone kept, the rest off, as asked from now on. */
+	record->profiles &= BTD_PHONEREC_MESSAGES;
+	record->asked = record->profiles;
+	record->have_asked = 1;
+	return 1;
+}
+
 /* Reads one line of a record; a known key may come once, an unknown one is passed over.  Returns 0 or EBADMSG. */
 static int
 phonerec_key(
@@ -600,6 +634,15 @@ phonerec_key(
 		error = phonerec_number(value, PHONEREC_VERSION, &number);
 		if (error != 0 || number != PHONEREC_VERSION)
 			return EBADMSG;
+		return 0;
+	}
+
+	/* The profiles asked for. */
+	if (index == PHONEREC_KEY_ASKED) {
+		error = phonerec_profiles(value, &record->asked);
+		if (error != 0)
+			return EBADMSG;
+		record->have_asked = 1;
 		return 0;
 	}
 
@@ -759,4 +802,95 @@ phonerec_name_address(
 
 	/* Succeeded: the address. */
 	return 0;
+}
+
+/*
+ * Reads the profiles of an "asked" line: "-" for none, else the letters m
+ * (messages), c (contacts) and h (calls) with ',' between them, each
+ * once.  Returns 0 or EBADMSG.
+ */
+static int
+phonerec_profiles(
+	const char *text,
+	unsigned *profiles)
+{
+	size_t index;
+	unsigned bit;
+
+	/* None. */
+	*profiles = 0U;
+	if (text[0] == '-' && text[1] == '\0')
+		return 0;
+
+	/* Each letter, a ',' between two. */
+	for (index = 0U; text[index] != '\0'; index++) {
+		/* A ',' only between two letters. */
+		if ((index & 1U) != 0U) {
+			if (text[index] != ',' || text[index + 1U] == '\0')
+				return EBADMSG;
+			continue;
+		}
+
+		/* The letter's profile. */
+		bit = 0U;
+		if (text[index] == 'm') {
+			bit = BTD_PHONEREC_MESSAGES;
+		} else if (text[index] == 'c') {
+			bit = BTD_PHONEREC_CONTACTS;
+		} else if (text[index] == 'h') {
+			bit = BTD_PHONEREC_CALLS;
+		}
+
+		/* A letter not known, or one given twice. */
+		if (bit == 0U || (*profiles & bit) != 0U)
+			return EBADMSG;
+		*profiles |= bit;
+	}
+
+	/* An empty value. */
+	if (index == 0U)
+		return EBADMSG;
+
+	/* Succeeded: the profiles. */
+	return 0;
+}
+
+/* Writes profiles as an "asked" value: "m,c,h" (each letter when on), or "-" for none. */
+static void
+phonerec_profiles_text(
+	unsigned profiles,
+	char *text,
+	size_t size)
+{
+	static const unsigned bits[3] = { BTD_PHONEREC_MESSAGES, BTD_PHONEREC_CONTACTS, BTD_PHONEREC_CALLS };
+	static const char letters[3] = { 'm', 'c', 'h' };
+	size_t used;
+	size_t index;
+
+	/* Each profile on, a ',' before all but the first (the room holds "m,c,h" and its NUL). */
+	used = 0U;
+	for (index = 0U; index < 3U && used + 3U <= size; index++) {
+		/* A profile that is off. */
+		if ((profiles & bits[index]) == 0U)
+			continue;
+
+		/* The ',' and the letter. */
+		if (used != 0U) {
+			text[used] = ',';
+			used++;
+		}
+
+		/* The letter. */
+		text[used] = letters[index];
+		used++;
+	}
+
+	/* None on. */
+	if (used == 0U) {
+		text[used] = '-';
+		used++;
+	}
+
+	/* The end. */
+	text[used] = '\0';
 }

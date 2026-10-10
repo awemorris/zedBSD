@@ -91,8 +91,8 @@
 /* Bluetoothd's RFCOMM server channel for MAP's MNS (p001 section 5.4; SDP tells it). */
 #define BTD_PHONE_MNS_CHANNEL		16U
 
-/* How many DLCs a profile may ask for before the RFCOMM session is up. */
-#define BTD_PHONE_PENDING_DLCS		2U
+/* How many DLCs the profiles may ask for before the RFCOMM session is up (MAP's, PBAP's, HFP's, ws197-p005). */
+#define BTD_PHONE_PENDING_DLCS		4U
 
 /* How many frames wait for the session, and how many SDP channels the phone may open at a time. */
 #define BTD_PHONE_QUEUE		16U
@@ -237,6 +237,14 @@ struct btd_phone {
 	 */
 	int mns_registered;
 	uint32_t mns_handle;
+
+	/*
+	 * bluetoothd's PCE record (ws197-p005 section 3.3): whether it is
+	 * offered, and its handle.  Offered while the link is ready and the
+	 * record's contacts are on.
+	 */
+	int pce_registered;
+	uint32_t pce_handle;
 	int profile_started;
 	uint16_t sdp_uuid;
 	unsigned pending_count;
