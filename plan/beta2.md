@@ -17,7 +17,7 @@
 
 ## 今の状況
 
-- 2026-10-11: [BUG-287](bugs/BUG-287.md)（スマホ連携が「connecting」のまま）の原因は USB の Transaction Error の後に Bluetooth の受けが止まること。P1 の直し（usb-bt の回復、同じ人の bond での phone=1、settings の store 24→64）を main に merge（b91d5675c、kernel の build warning 0）。**image を作り直してよい**。Settings の Connect・Phone app の案内は P1 が作業中。
+- 2026-10-11: [BUG-287](bugs/BUG-287.md)（スマホ連携が「connecting」のまま）の原因は USB の Transaction Error の後に Bluetooth の受けが止まること。P1 の直し（usb-bt の回復、同じ人の bond での phone=1、settings の store 24→64）を main に merge（b91d5675c、kernel の build warning 0）。Settings の Connect を phone に出さない・失敗の案内・Phone app の案内・phone link の log も merge（7bfc667e7）。BUG-287 の直しは全部 main に入った。**image を作り直してよい**。
 - WS199・WS200 は実装と QEMU の試験が済み、残りは次の UAT（#4〜#8）。
 - WS083（Vulkan Video）は既定で ON にした（2026-10-11 ユーザー）。残りは p007 の hang の実機の確かめ。libavcodec なしで libmedia だけで mp4（H.264・AAC）と .m4a を再生する [WS202](ws202/ws.md) は設計だけを書き、実装は別のセッション。
 - T1 の WS143 の HID の回帰はもう流さない（ユーザー）。P2 は WS083 を終えて退いた。
