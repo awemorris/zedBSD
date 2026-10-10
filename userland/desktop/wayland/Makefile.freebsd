@@ -54,7 +54,7 @@ WAYLAND_FREEBSD_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/settings.c \
 	userland/desktop/wayland/settings-store.c \
 	userland/desktop/wayland/shot-none.c \
-	userland/desktop/wayland/system.c \
+	userland/desktop/wayland/system.c userland/desktop/wayland/media-library.c \
 	userland/desktop/wayland/sysmon.c \
 	userland/desktop/wayland/notify.c \
 	userland/desktop/wayland/notify-shell.c \

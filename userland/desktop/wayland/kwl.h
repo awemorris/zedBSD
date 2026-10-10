@@ -260,6 +260,8 @@ enum kwl_kind {
 	KWL_SYSTEM_MACHINE,
 	/* The system extension's Bluetooth (bluetooth-shell.c, ws143-p006). */
 	KWL_SYSTEM_BLUETOOTH,
+	/* The CLI-owned photo/video library and its watchers (media-library.c). */
+	KWL_SYSTEM_MEDIA,
 	/* The sound's playback streams, kl_audio_v1 and its streams (audio-stream.c, WS191). */
 	KWL_AUDIO,
 	KWL_AUDIO_STREAM,
@@ -762,6 +764,9 @@ struct kwl_object {
 	 * again ends at bluetooth_scan_until (kwl_milliseconds' clock).
 	 */
 	unsigned bluetooth_watch;
+	/* Media watchers hear each committed CLI generation once. */
+	unsigned media_watching;
+	uint32_t media_generation;
 	unsigned bluetooth_scan;
 	uint64_t bluetooth_scan_until;
 	/*
@@ -2201,5 +2206,13 @@ void kwl_input_touchpads_changed(struct kwl_server *server);
 void kwl_input_close(struct kwl_server *server, struct kwl_input_device *device);
 void kwl_input_forget(struct kwl_server *server, struct kwl_input_device *device);
 void kwl_input_cleanup(struct kwl_server *server);
+
+/* The metadata library delegates persistence to the mediastorage CLI. */
+int kwl_media_library_create(struct kwl_object *manager, const unsigned char *bytes, size_t size);
+int kwl_media_library_request(struct kwl_object *object, uint32_t opcode, const unsigned char *bytes, size_t size);
+void kwl_media_library_tick(struct kwl_server *server);
+void kwl_media_library_gone(struct kwl_object *object);
+int kwl_media_library_child(int64_t child, int status);
+void kwl_media_library_close(void);
 
 #endif

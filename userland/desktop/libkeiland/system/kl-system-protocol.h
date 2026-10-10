@@ -321,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		28U
+#define KL_SYSTEM_MANAGER_VERSION 29U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -946,5 +946,21 @@
 #define KL_SYSTEM_RESULT_TOO_LARGE		14U
 #define KL_SYSTEM_RESULT_NO_ROOM		15U
 #define KL_SYSTEM_RESULT_NOT_CONNECTED		16U
+
+/* Since manager version 29, mediastorage owns photo/video persistence. */
+#define KL_SYSTEM_SINCE_MEDIA 29U
+#define KL_SYSTEM_MANAGER_GET_MEDIA 16U
+#define KL_SYSTEM_CAPABILITY_MEDIA 0x20000U
+#define KL_SYSTEM_MEDIA_NAME "kl_system_media_v1"
+#define KL_SYSTEM_MEDIA_DESTROY 0U
+#define KL_SYSTEM_MEDIA_LIST 1U
+#define KL_SYSTEM_MEDIA_ADD 2U
+#define KL_SYSTEM_MEDIA_APPLY 3U
+#define KL_SYSTEM_MEDIA_WATCH 4U
+#define KL_SYSTEM_MEDIA_NOTIFY 5U
+#define KL_SYSTEM_MEDIA_EVENT_SNAPSHOT 0U
+#define KL_SYSTEM_MEDIA_EVENT_DONE 1U
+#define KL_SYSTEM_MEDIA_EVENT_CHANGED 2U
+#define KL_SYSTEM_MEDIA_PATHS_MAX 32768U
 
 #endif

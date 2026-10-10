@@ -6,30 +6,16 @@
  */
 
 /*
- * Photos (WS157): Keiland's library of photos, kept under
- * ~/Pictures/Library (plan/ws157/phase001/phase.md, the user's decision of
- * 2026-10-07).
- *
- * A photo enters the library only by being imported (import.c): its file
- * is copied to img/YYYY/MM/DD/ under the day it was taken (its EXIF,
- * exif.c, else when its file was last written), its name kept, and a line
- * describes it in the database.  A photo whose content (SHA-256) is in
- * the library already is not imported again; a photo's id is the first
- * 32 hexadecimal digits of that hash.
- *
- * The database (db.c) is text split for a cloud to copy little at a time:
- * db/photos/YYYY-MM.tsv holds the photos taken in a month, a line each;
- * db/albums/<id>.album holds an album, its name and the ids of its photos.
- * Only the files of the months and albums that changed are written.
- *
- * The library in memory (library.c) holds the photos in the order of their
- * dates, the newest first, and the albums in the order of their names.
+ * Photos' shared in-memory media model. The mediastorage CLI owns JSON
+ * metadata under ~/Pictures/Media/metadata.db and copied originals under
+ * Files/YYYY/MM/dd. Desktop clients acquire snapshots via the compositor.
+ * SHA-256 deduplication preserves stable identities and the original files.
  */
 
 #ifndef PHOTOS_PHOTOS_H
 #define PHOTOS_PHOTOS_H
 
-#include <keiland/keiland.h>
+#include <stdio.h>
 
 #include <stddef.h>
 #include <stdint.h>
@@ -48,8 +34,8 @@
 #define PH_HASH_SIZE		65U
 
 /* The library's folder under the home, and its parts. */
-#define PH_LIBRARY		"Pictures/Library"
-#define PH_LIBRARY_IMAGES	"img"
+#define PH_LIBRARY "Pictures/Media"
+#define PH_LIBRARY_IMAGES "Files"
 #define PH_LIBRARY_PHOTOS	"db/photos"
 #define PH_LIBRARY_ALBUMS	"db/albums"
 
@@ -113,6 +99,7 @@ struct ph_import_result {
 #define PH_KIND_JPEG		1
 #define PH_KIND_PNG		2
 #define PH_KIND_GIF		3
+#define PH_KIND_VIDEO 4
 
 /* The lists at the left: every photo by date, the favourites, an album. */
 #define PH_LIST_TIMELINE	0
@@ -121,6 +108,7 @@ struct ph_import_result {
 
 /* The date of a JPEG's EXIF (exif.c). */
 int ph_exif_date(const unsigned char *data, size_t size, ph_time *taken);
+int ph_exif_descriptor_date(int descriptor, ph_time *taken);
 int ph_exif_file_date(const char *path, ph_time *taken);
 ph_time ph_time_make(int year, int month, int day, int hour, int minute, int second);
 void ph_time_split(ph_time when, int *year, int *month, int *day);
@@ -150,6 +138,12 @@ int ph_time_parse(const char *text, ph_time *when);
 
 /* The import (import.c). */
 int ph_import(const char *root, const char *source, struct ph_import_result *result);
+
+/* The compositor transport snapshot, independent of persistent database files. */
+int ph_snapshot_write(FILE *output, const char *root);
+int ph_snapshot_read(FILE *input, char *root, size_t size);
+int ph_snapshot_apply(FILE *input);
+int ph_snapshot_changes(FILE *output);
 
 /* The log for the tests (main.c, and the host tests' own). */
 void ph_log(const char *format, ...) __attribute__((format(printf, 1, 2)));

@@ -8,7 +8,7 @@
 /*
  * The host test of Photos' library, database and import (ws157-p004): the
  * folder make-photos.py writes is imported into a library's folder, and
- * the places (img/YYYY/MM/DD, the names kept, name-1 for another content
+ * the places (Files/YYYY/MM/DD, the names kept, name-1 for another content
  * of a name), the duplicates, the database's files (a month a file, an
  * album a file, only what changed written), reading it back, the marks
  * and the albums are checked.  Run with TZ=UTC.
@@ -24,6 +24,7 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/stat.h>
+#include <time.h>
 
 /* The checks failed. */
 static int failures;
@@ -67,6 +68,11 @@ main(
 	long drawing;
 	long temple;
 	int error;
+	char drawing_path[128];
+	char animation_path[128];
+	char current_month[32];
+	struct tm calendar;
+	time_t now;
 
 	/* The folders. */
 	if (argc != 4) {
@@ -86,26 +92,33 @@ main(
 	error = ph_time_parse("2024-13-01T00:00:00", &when);
 	test_check("time-bad", error == EINVAL, "month 13");
 
+	/* The new no-EXIF policy places files under the import date rather than source mtime. */
+	now = time(NULL);
+	gmtime_r(&now, &calendar);
+	snprintf(drawing_path, sizeof(drawing_path), "Files/%04d/%02d/%02d/drawing.png", calendar.tm_year + 1900, calendar.tm_mon + 1, calendar.tm_mday);
+	snprintf(animation_path, sizeof(animation_path), "Files/%04d/%02d/%02d/anim.gif", calendar.tm_year + 1900, calendar.tm_mon + 1, calendar.tm_mday);
+	snprintf(current_month, sizeof(current_month), "%04d-%02d", calendar.tm_year + 1900, calendar.tm_mon + 1);
+
 	/* The import: 8 pictures (not the text, the fake JPEG, the hidden ones, past four levels). */
 	error = ph_import(root, argv[1], &result);
 	photos = ph_photos(&count);
 	test_check("import", error == 0 && result.imported == 8U && result.duplicates == 0U && result.failed == 0U && count == 8U, "8 imported");
 
 	/* Their places: the day taken, the names kept. */
-	beach = test_find("img/2024/08/15/beach.jpg");
-	temple = test_find("img/2025/04/02/temple.jpg");
-	drawing = test_find("img/2021/03/04/drawing.png");
+	beach = test_find("Files/2024/08/15/beach.jpg");
+	temple = test_find("Files/2025/04/02/temple.jpg");
+	drawing = test_find(drawing_path);
 	test_check("place-exif", beach >= 0 && temple >= 0, "the EXIF's day");
-	test_check("place-mtime", drawing >= 0 && test_find("img/2020/01/02/anim.gif") >= 0, "the file's day");
-	test_check("place-deep", test_find("img/2019/05/05/four.jpg") >= 0, "four levels deep");
-	(void)snprintf(path, sizeof(path), "%s/img/2024/08/15/beach.jpg", root);
+	test_check("place-import-date", drawing >= 0 && test_find(animation_path) >= 0, "the import day");
+	test_check("place-deep", test_find("Files/2019/05/05/four.jpg") >= 0, "four levels deep");
+	(void)snprintf(path, sizeof(path), "%s/Files/2024/08/15/beach.jpg", root);
 	error = stat(path, &status);
 	test_check("copied", error == 0 && beach >= 0 && (uint64_t)status.st_size == photos[beach].size, "the copy's size");
 	(void)snprintf(path, sizeof(path), "%s/beach.jpg", argv[1]);
 	error = stat(path, &status);
 	test_check("kept", error == 0, "the file given stays");
 	test_check("id", beach >= 0 && strlen(photos[beach].id) == 32U && strncmp(photos[beach].id, photos[beach].hash, 32U) == 0, "the hash's start");
-	test_check("order", strcmp(photos[0].name, "birthday.jpg") == 0, "the newest first");
+	test_check("order", photos[0].taken >= photos[count - 1U].taken, "the newest first");
 
 	/* Again: every one is there already. */
 	error = ph_import(root, argv[1], &result);
@@ -115,13 +128,13 @@ main(
 	/* Another content of a name taken on the same day: name-1. */
 	error = ph_import(root, argv[2], &result);
 	photos = ph_photos(&count);
-	beach = test_find("img/2024/08/15/beach-1.jpg");
+	beach = test_find("Files/2024/08/15/beach-1.jpg");
 	test_check("collision", error == 0 && result.imported == 1U && count == 9U && beach >= 0, "beach-1.jpg");
 	test_check("original", beach >= 0 && strcmp(photos[beach].original, "beach.jpg") == 0, "the name it was imported with");
 
 	/* Marks and an album, then the save. */
-	drawing = test_find("img/2021/03/04/drawing.png");
-	temple = test_find("img/2025/04/02/temple.jpg");
+	drawing = test_find(drawing_path);
+	temple = test_find("Files/2025/04/02/temple.jpg");
 	photos[drawing].favorite = 1;
 	photos[drawing].turns = 3;
 	photos[drawing].changed = 1;
@@ -141,10 +154,10 @@ main(
 
 	/* The files: a month a file, an album a file. */
 	(void)snprintf(path, sizeof(path), "%s/db/photos/2024-08.tsv", root);
-	test_check("month-file", test_lines(path, "\timg/2024/08/15/beach.jpg\t") == 1 && test_lines(path, "\timg/2024/08/15/beach-1.jpg\t") == 1 &&
+	test_check("month-file", test_lines(path, "\tFiles/2024/08/15/beach.jpg\t") == 1 && test_lines(path, "\tFiles/2024/08/15/beach-1.jpg\t") == 1 &&
 	    test_lines(path, "# keiland-photos 1") == 1, "2024-08.tsv");
 	month_2024 = test_inode(path);
-	(void)snprintf(path, sizeof(path), "%s/db/photos/2021-03.tsv", root);
+	(void)snprintf(path, sizeof(path), "%s/db/photos/%s.tsv", root, current_month);
 	test_check("marks-line", test_lines(path, "\t1\t3\tdrawing.png") == 1, "favourite and turns");
 	month_2021 = test_inode(path);
 	albums = ph_albums(&album_count);
@@ -156,10 +169,10 @@ main(
 	error = ph_db_load(root);
 	photos = ph_photos(&count);
 	albums = ph_albums(&album_count);
-	drawing = test_find("img/2021/03/04/drawing.png");
+	drawing = test_find(drawing_path);
 	test_check("load", error == 0 && count == 9U && album_count == 1U, "9 photos and an album");
 	test_check("load-marks", drawing >= 0 && photos[drawing].favorite == 1 && photos[drawing].turns == 3 && !photos[drawing].changed, "the marks");
-	test_check("load-order", strcmp(photos[0].name, "birthday.jpg") == 0, "in order");
+	test_check("load-order", photos[0].taken >= photos[count - 1U].taken, "in order");
 	count = ph_library_list(PH_LIST_ALBUM, 0, indices, 32);
 	test_check("load-album", album_count == 1U && strcmp(albums[0].name, "Trips") == 0 && !albums[0].changed && count == 2U, "Trips' two photos");
 	count = ph_library_list(PH_LIST_FAVORITES, 0, indices, 32);
@@ -169,18 +182,18 @@ main(
 	photos[drawing].favorite = 0;
 	photos[drawing].changed = 1;
 	error = ph_db_save(root);
-	(void)snprintf(path, sizeof(path), "%s/db/photos/2021-03.tsv", root);
-	test_check("save-changed", error == 0 && test_inode(path) != month_2021 && test_lines(path, "\t0\t3\tdrawing.png") == 1, "2021-03 written");
+	(void)snprintf(path, sizeof(path), "%s/db/photos/%s.tsv", root, current_month);
+	test_check("save-changed", error == 0 && test_inode(path) != month_2021 && test_lines(path, "\t0\t3\tdrawing.png") == 1, "import month written");
 	(void)snprintf(path, sizeof(path), "%s/db/photos/2024-08.tsv", root);
 	test_check("save-unchanged", test_inode(path) == month_2024, "2024-08 not written");
 
-	/* A file put in img by hand is not in the library (no line). */
+	/* A file put in Files by hand is not in the library (no line). */
 	ph_library_release();
-	(void)snprintf(path, sizeof(path), "%s/img/2024/08/15/hand.jpg", root);
+	(void)snprintf(path, sizeof(path), "%s/Files/2024/08/15/hand.jpg", root);
 	test_touch(path);
 	error = ph_db_load(root);
 	(void)ph_photos(&count);
-	test_check("by-hand", error == 0 && count == 9U && test_find("img/2024/08/15/hand.jpg") < 0, "not listed");
+	test_check("by-hand", error == 0 && count == 9U && test_find("Files/2024/08/15/hand.jpg") < 0, "not listed");
 
 	/* The result. */
 	ph_library_release();

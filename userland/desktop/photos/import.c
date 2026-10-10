@@ -10,13 +10,14 @@
  * D5): a file, or a folder looked through four levels deep (leaving out
  * what is hidden), each JPEG, PNG and GIF in it: its SHA-256, and nothing
  * more when the library has that content already; else the day it was
- * taken (EXIF, else the file's time in the local calendar), its place
- * img/YYYY/MM/DD/<its name> (name-1.ext, name-2.ext... when another
+ * taken (EXIF, else the import date in the local calendar), its place
+ * Files/YYYY/MM/dd/<its name> (name-1.ext, name-2.ext... when another
  * content has the name), a copy there (the file given stays where it is)
  * and its line in the library, to be written by ph_db_save.
  */
 
 #include "photos.h"
+#include "userland/desktop/mediastorage/dimensions.h"
 
 #include <dirent.h>
 #include <errno.h>
@@ -36,6 +37,7 @@
 
 static void import_walk(const char *root, const char *folder, int depth, struct ph_import_result *result);
 static void import_file(const char *root, const char *path, struct ph_import_result *result);
+static int import_descriptor(const char *root, int fd, const char *name, const struct stat *status);
 static int import_one(const char *root, const char *path, const struct stat *status);
 static int import_hash(int fd, char *hash, unsigned char *head, size_t head_size, size_t *head_length);
 static int import_place(const char *root, const char *name, ph_time taken, char *relative, size_t size);
@@ -160,73 +162,89 @@ import_file(
 	ph_log("IMPORT file=%s error=%d", path, error);
 }
 
-/*
- * Imports one file.  Returns 0, EEXIST when its content is in the library,
- * ENOTSUP for a file that is not a picture, or an errno value.
- */
+/* Imports a named file through the same descriptor path used by received media. */
 static int
 import_one(
 	const char *root,
 	const char *path,
 	const struct stat *status)
 {
+	const char *name;
+	const char *slash;
+	int descriptor;
+	int error;
+
+	/* Opens the stable source before hashing and copying it. */
+	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return errno;
+	slash = strrchr(path, '/');
+	name = path;
+	if (slash != NULL)
+		name = slash + 1;
+	error = import_descriptor(root, descriptor, name, status);
+	close(descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the original remains intact and the library owns its copy. */
+	return 0;
+}
+
+static int
+import_descriptor(
+	const char *root,
+	int fd,
+	const char *name,
+	const struct stat *status)
+{
 	unsigned char head[16];
 	struct ph_photo photo;
 	char relative[PH_PATH_MAX];
 	char destination[PH_PATH_MAX];
-	const char *name;
-	const char *slash;
 	const char *bad;
 	size_t head_length;
 	long found;
 	int kind;
 	int error;
 	int length;
-	int fd;
+	time_t now;
 
 	/* A name that can be a line. */
-	slash = strrchr(path, '/');
-	name = path;
-	if (slash != NULL)
-		name = slash + 1;
-	bad = strpbrk(name, "\t\r\n");
+	bad = strpbrk(name, "/\t\r\n");
 	if (bad != NULL || name[0] == '\0')
 		return EINVAL;
 
 	/* Its hash and its first bytes. */
-	fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return errno;
 	error = import_hash(fd, photo.hash, head, sizeof(head), &head_length);
 	if (error != 0) {
-		(void)close(fd);
 		return error;
 	}
 
 	/* A picture, not in the library yet. */
 	kind = ph_picture_kind(head, head_length);
 	if (kind == PH_KIND_NONE) {
-		(void)close(fd);
 		return ENOTSUP;
 	}
 
 	/* Not in the library yet. */
 	found = ph_library_find_hash(photo.hash);
 	if (found >= 0) {
-		(void)close(fd);
 		return EEXIST;
 	}
 
 	/* Its line: the id, the dates, no marks. */
+	now = time(NULL);
 	memset(&photo.id, 0, sizeof(photo.id));
 	memcpy(photo.id, photo.hash, PH_ID_SIZE - 1U);
 	photo.size = (uint64_t)status->st_size;
-	photo.imported = import_local(time(NULL));
-	photo.taken = import_local(status->st_mtime);
+	photo.imported = import_local(now);
+	photo.taken = photo.imported;
 	if (kind == PH_KIND_JPEG)
-		(void)ph_exif_file_date(path, &photo.taken);
-	photo.width = 0;
-	photo.height = 0;
+		(void)ph_exif_descriptor_date(fd, &photo.taken);
+
+	/* Dimensions are read from headers without decoding the retained original. */
+	media_dimensions(fd, kind, &photo.width, &photo.height);
 	photo.favorite = 0;
 	photo.turns = 0;
 	photo.changed = 1;
@@ -244,16 +262,19 @@ import_one(
 			error = import_copy(fd, destination, photo.size);
 	}
 
-	/* The file given is not needed any more. */
-	(void)close(fd);
+	/* Reports a failed copy without publishing a database row. */
 	if (error != 0)
 		return error;
 
 	/* In the library. */
 	error = ph_library_add(&photo, root, relative, name);
-	if (error != 0)
+	if (error != 0) {
 		(void)unlink(destination);
-	return error;
+		return error;
+	}
+
+	/* Succeeded: the metadata owns a recoverable file copy. */
+	return 0;
 }
 
 /* Hashes a whole file and keeps its first bytes; 0 or an errno value. */
@@ -305,7 +326,7 @@ import_hash(
 }
 
 /*
- * Finds the place of a file taken on a day: img/YYYY/MM/DD/<name>, or
+ * Finds the place of a file taken on a day: Files/YYYY/MM/dd/<name>, or
  * <stem>-N<extension> when the name is taken.  Returns 0 or EEXIST.
  */
 static int
@@ -368,6 +389,7 @@ import_copy(
 	int error;
 	int closed;
 	int out;
+	size_t copied;
 
 	/* The folders and the new file. */
 	error = ph_db_folders(to);
@@ -394,10 +416,24 @@ import_copy(
 			error = EIO;
 		if (got <= 0)
 			break;
-		wrote = write(out, chunk, (size_t)got);
-		if (wrote != got)
-			error = EIO;
-		done += (uint64_t)got;
+		/* Writes each complete chunk even when the filesystem accepts only part of it. */
+		copied = 0U;
+		while (copied < (size_t)got) {
+			wrote = write(out, chunk + copied, (size_t)got - copied);
+			if (wrote < 0 && errno == EINTR)
+				continue;
+			if (wrote <= 0) {
+				error = EIO;
+				break;
+			}
+
+			/* Continues at the first byte not accepted by the output file. */
+			copied += (size_t)wrote;
+		}
+
+		/* Only a complete chunk advances the original's offset. */
+		if (error == 0)
+			done += (uint64_t)got;
 	}
 
 	/* Closed; a short or failed copy leaves nothing. */
@@ -407,9 +443,13 @@ import_copy(
 		error = EIO;
 	if (error == 0 && done != size)
 		error = EIO;
-	if (error != 0)
+	if (error != 0) {
 		(void)unlink(to);
-	return error;
+		return error;
+	}
+
+	/* Succeeded: the complete original was copied. */
+	return 0;
 }
 
 /* A time as the local calendar has it (ph_time). */

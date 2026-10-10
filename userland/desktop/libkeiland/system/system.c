@@ -28,6 +28,7 @@
 
 #include <errno.h>
 #include <fcntl.h>
+#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -64,9 +65,22 @@ struct kl_system {
 	struct wl_proxy *displays;
 	struct wl_proxy *machine;
 	struct wl_proxy *bluetooth;
+	/* One metadata request owns its response until returned to the caller. */
+	struct wl_proxy *media;
+	uint32_t media_request;
+	int media_descriptor;
+	int media_done;
+	int media_error;
 	struct system_view view;
 	uint32_t next_request;
 	unsigned lost;
+};
+
+/* The metadata object's callbacks in wire order. */
+struct system_media_listener {
+	void (*snapshot)(void *data, struct wl_proxy *proxy, uint32_t request, int descriptor);
+	void (*done)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t error);
+	void (*changed)(void *data, struct wl_proxy *proxy, uint32_t generation);
 };
 
 /* What the registry search found: the manager's global name (0 for none) and the version it offers. */
@@ -203,6 +217,12 @@ struct system_devices_listener {
 	void (*busy)(void *data, struct wl_proxy *proxy, uint32_t request, const char *program);
 	void (*volume)(void *data, struct wl_proxy *proxy, const char *id, const char *fs, uint32_t bytes_high, uint32_t bytes_low);
 };
+
+static void system_media_snapshot(void *data, struct wl_proxy *proxy, uint32_t request, int descriptor);
+static void system_media_done(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t error);
+static void system_media_changed(void *data, struct wl_proxy *proxy, uint32_t generation);
+static int system_media_run(struct kl_system *system, uint32_t opcode, const char *paths, int input, int *output);
+static int system_media_wait(struct kl_system *system);
 
 static void system_global(void *data, struct wl_registry *registry, uint32_t name, const char *interface, uint32_t version);
 static void system_notify_posted(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t id);
@@ -406,6 +426,12 @@ static const struct system_bluetooth_listener system_bluetooth_listener = {
 	system_result
 };
 
+/* The library object receives CLI metadata and committed change wakeups. */
+static const struct system_media_listener system_media_listener = {
+    system_media_snapshot,
+    system_media_done,
+    system_media_changed};
+
 /* The devices object's callbacks. */
 static const struct system_devices_listener system_devices_listener = {
 	system_device,
@@ -441,6 +467,7 @@ kl_system_open(
 	/* Nothing told yet. */
 	system->display = display;
 	system->next_request = 1U;
+	system->media_descriptor = -1;
 	system_view_init(&system->view);
 
 	/* Binds the extension and takes the first state. */
@@ -483,6 +510,9 @@ kl_system_close(
 	system_destroy(system->displays, KL_SYSTEM_DISPLAYS_DESTROY);
 	system_destroy(system->machine, KL_SYSTEM_MACHINE_DESTROY);
 	system_destroy(system->bluetooth, KL_SYSTEM_BLUETOOTH_DESTROY);
+	system_destroy(system->media, KL_SYSTEM_MEDIA_DESTROY);
+	if (system->media_descriptor >= 0)
+		close(system->media_descriptor);
 	system_destroy(system->manager, KL_SYSTEM_MANAGER_DESTROY);
 
 	/* Then the queue they lived on. */
@@ -570,6 +600,8 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_MACHINE;
 	if (system->bluetooth != NULL)
 		bits |= KL_SYSTEM_HAS_BLUETOOTH;
+	if (system->media != NULL)
+		bits |= KL_SYSTEM_HAS_MEDIA;
 
 	/* The administration of the accounts, offered with the account to a manager bound at version 8 (ws089-p026). */
 	if (system->account != NULL && (system->view.capabilities & KL_SYSTEM_CAPABILITY_ADMINISTER) != 0U && system->manager_version >= KL_SYSTEM_SINCE_ADMINISTER)
@@ -2892,6 +2924,143 @@ kl_system_account_touched(
 	return 1;
 }
 
+/*
+ * Retrieves a metadata snapshot with absolute paths; the caller closes its descriptor.
+ */
+int
+kl_system_media_list(
+	struct kl_system *system,
+	int *descriptor)
+{
+	int error;
+
+	/* Original image/video bytes remain in the ordinary files named by the snapshot. */
+	error = system_media_run(system, KL_SYSTEM_MEDIA_LIST, "", -1, descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller owns the current CLI metadata. */
+	return 0;
+}
+
+/*
+ * Adds a finite list of paths through the compositor and returns the newest metadata.
+ */
+int
+kl_system_media_add_paths(
+	struct kl_system *system,
+	const char *const *paths,
+	size_t count,
+	int *descriptor)
+{
+	char *list;
+	size_t index;
+	size_t length;
+	size_t used;
+	size_t clean;
+	int error;
+
+	/* Requires complete path lines without loading image or video contents. */
+	if (paths == NULL || count == 0U || count > 256U)
+		return EINVAL;
+	list = malloc(KL_SYSTEM_MEDIA_PATHS_MAX + 1U);
+	if (list == NULL)
+		return ENOMEM;
+
+	/* Encodes paths as data; spaces and non-ASCII names need no shell quoting. */
+	used = 0U;
+	error = 0;
+	for (index = 0U; index < count; index++) {
+		if (paths[index] == NULL) {
+			error = EINVAL;
+			break;
+		}
+
+		/* Reports filenames that cannot be represented in the line-oriented list. */
+		length = strlen(paths[index]);
+		clean = strcspn(paths[index], "\r\n");
+		if (length == 0U || clean != length || length + 1U > KL_SYSTEM_MEDIA_PATHS_MAX - used) {
+			error = EINVAL;
+			break;
+		}
+
+		/* Separates each complete source with one newline. */
+		memcpy(list + used, paths[index], length);
+		used += length;
+		list[used++] = '\n';
+	}
+
+	/* The CLI makes recoverable copies and returns only metadata. */
+	list[used] = '\0';
+	if (error == 0)
+		error = system_media_run(system, KL_SYSTEM_MEDIA_ADD, list, -1, descriptor);
+	free(list);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the returned snapshot names all accepted files. */
+	return 0;
+}
+
+/*
+ * Applies id-based mutable metadata, preserving concurrent library additions.
+ */
+int
+kl_system_media_apply(
+	struct kl_system *system,
+	int changes,
+	int *descriptor)
+{
+	int error;
+
+	/* Borrows the caller's rewound metadata descriptor until marshalling completes. */
+	if (changes < 0)
+		return EINVAL;
+	error = system_media_run(system, KL_SYSTEM_MEDIA_APPLY, "", changes, descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the CLI merged these identities with its latest database. */
+	return 0;
+}
+
+/*
+ * Subscribes to library changes made by any CLI invocation in this session.
+ */
+int
+kl_system_media_watch(
+	struct kl_system *system,
+	unsigned on)
+{
+	/* A missing object means that this compositor does not offer media management. */
+	if (system == NULL || system->media == NULL)
+		return ENOTSUP;
+	if (system->lost)
+		return EPIPE;
+	wl_proxy_marshal(system->media, KL_SYSTEM_MEDIA_WATCH, on);
+
+	/* Succeeded: dispatch reports stale metadata with KL_SYSTEM_CHANGED_MEDIA. */
+	return 0;
+}
+
+/*
+ * Publishes a completed CLI database mutation to compositor media watchers.
+ */
+int
+kl_system_media_notify(
+	struct kl_system *system)
+{
+	/* The compositor mediates this wakeup without exposing a daemon socket to the CLI. */
+	if (system == NULL || system->media == NULL)
+		return ENOTSUP;
+	if (system->lost)
+		return EPIPE;
+	wl_proxy_marshal(system->media, KL_SYSTEM_MEDIA_NOTIFY);
+
+	/* Succeeded: a later flush or round trip delivers the committed-change notification. */
+	return 0;
+}
+
 /* Tells whether the keys' own operations are offered (ws199-p001). */
 static int
 system_key_ops(
@@ -4564,6 +4733,10 @@ system_bind(
 	if (system->manager_version >= KL_SYSTEM_SINCE_BLUETOOTH)
 		system->bluetooth = system_make(system, KL_SYSTEM_CAPABILITY_BLUETOOTH, KL_SYSTEM_MANAGER_GET_BLUETOOTH, &kl_system_bluetooth_v1_interface, &system_bluetooth_listener);
 
+	/* Media metadata is offered independently of the Bluetooth or Phone backends. */
+	if (system->manager_version >= KL_SYSTEM_SINCE_MEDIA)
+		system->media = system_make(system, KL_SYSTEM_CAPABILITY_MEDIA, KL_SYSTEM_MANAGER_GET_MEDIA, &kl_system_media_v1_interface, &system_media_listener);
+
 	/* Waits for their first state: each object's state and its done. */
 	status = wl_display_roundtrip_queue(system->display, system->queue);
 	if (status < 0)
@@ -5116,4 +5289,193 @@ system_machine_mount(
 
 	/* Kept until the answer's result. */
 	system_view_machine_mount(&system->view, &mount);
+}
+
+/* Retains a metadata descriptor only for the currently waiting operation. */
+static void
+system_media_snapshot(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	int descriptor)
+{
+	struct kl_system *system;
+
+	/* The owning system and request IDs identify these events. */
+	(void)proxy;
+
+	/* Late responses after a timeout must not replace another operation's metadata. */
+	system = data;
+	if (request != system->media_request || system->media_done) {
+		close(descriptor);
+		return;
+	}
+
+	/* Closes a duplicate before accepting its replacement. */
+	if (system->media_descriptor >= 0)
+		close(system->media_descriptor);
+	system->media_descriptor = descriptor;
+}
+
+/* Records the CLI errno for the matching metadata request. */
+static void
+system_media_done(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t error)
+{
+	struct kl_system *system;
+
+	/* The owning system and request IDs identify these events. */
+	(void)proxy;
+
+	/* Unrelated or late answers do not finish the current request. */
+	system = data;
+	if (request != system->media_request)
+		return;
+	system->media_error = (int)error;
+	system->media_done = 1;
+}
+
+/* Marks the app's library stale without transporting image/video bytes. */
+static void
+system_media_changed(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t generation)
+{
+	struct kl_system *system;
+
+	/* The notification only invalidates the current metadata view. */
+	(void)proxy;
+	(void)generation;
+
+	/* Coalesced events are enough because list always queries the latest database. */
+	system = data;
+	system->view.changed |= KL_SYSTEM_CHANGED_MEDIA;
+}
+
+/* Marshals a metadata operation and transfers its final response to the caller. */
+static int
+system_media_run(
+	struct kl_system *system,
+	uint32_t opcode,
+	const char *paths,
+	int input,
+	int *output)
+{
+	int error;
+
+	/* One synchronous operation owns the response slot at a time. */
+	if (system == NULL || output == NULL)
+		return EINVAL;
+	*output = -1;
+	if (system->media == NULL)
+		return ENOTSUP;
+	if (system->lost)
+		return EPIPE;
+	if (system->media_request != 0U)
+		return EBUSY;
+	system->media_request = system_number(system, NULL);
+	system->media_done = 0;
+	system->media_error = 0;
+	if (opcode == KL_SYSTEM_MEDIA_ADD)
+		wl_proxy_marshal(system->media, opcode, system->media_request, paths);
+	else if (opcode == KL_SYSTEM_MEDIA_APPLY)
+		wl_proxy_marshal(system->media, opcode, system->media_request, input);
+	else
+		wl_proxy_marshal(system->media, opcode, system->media_request);
+
+	/* Waits on the private system queue; app callbacks stay on their own queue. */
+	error = system_media_wait(system);
+	if (error == 0)
+		error = system->media_error;
+	if (error == 0 && system->media_descriptor < 0)
+		error = EPROTO;
+	if (error != 0) {
+		if (system->media_descriptor >= 0)
+			close(system->media_descriptor);
+	} else {
+		*output = system->media_descriptor;
+	}
+
+	/* Retires the request before another operation may own a response. */
+	system->media_descriptor = -1;
+	system->media_request = 0U;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the caller now owns the CLI's metadata snapshot. */
+	return 0;
+}
+
+/* Reads the private queue with a finite monotonic deadline while the CLI runs. */
+static int
+system_media_wait(
+	struct kl_system *system)
+{
+	struct pollfd descriptor;
+	struct timespec now;
+	int64_t deadline;
+	int64_t remaining;
+	int status;
+	int prepared;
+	int error;
+
+	/* A wall-clock adjustment cannot extend the helper's bounded wait. */
+	status = clock_gettime(CLOCK_MONOTONIC, &now);
+	if (status != 0)
+		return errno;
+	deadline = (int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000 + 125000;
+	descriptor.fd = wl_display_get_fd(system->display);
+	descriptor.events = POLLIN;
+	while (!system->media_done) {
+		status = wl_display_dispatch_queue_pending(system->display, system->queue);
+		if (status < 0)
+			return EPIPE;
+		if (system->media_done)
+			break;
+		status = clock_gettime(CLOCK_MONOTONIC, &now);
+		if (status != 0)
+			return errno;
+		remaining = deadline - ((int64_t)now.tv_sec * 1000 + now.tv_nsec / 1000000);
+		if (remaining <= 0)
+			return ETIMEDOUT;
+		prepared = wl_display_prepare_read_queue(system->display, system->queue);
+		if (prepared != 0)
+			continue;
+
+		/* Flushes the request before waiting, polling writability on backpressure. */
+		descriptor.events = POLLIN;
+		status = wl_display_flush(system->display);
+		if (status < 0 && errno != EAGAIN) {
+			wl_display_cancel_read(system->display);
+			return EPIPE;
+		}
+
+		/* Routes socket input only after a successful prepare-read. */
+		if (status < 0)
+			descriptor.events |= POLLOUT;
+		status = poll(&descriptor, 1U, (int)remaining);
+		if (status < 0 || (descriptor.revents & POLLIN) == 0) {
+			error = errno;
+			wl_display_cancel_read(system->display);
+			if (status < 0 && error != EINTR)
+				return error;
+			if (status == 0)
+				return ETIMEDOUT;
+			if (status > 0 && (descriptor.revents & (POLLERR | POLLHUP | POLLNVAL)) != 0)
+				return EPIPE;
+			continue;
+		}
+
+		/* libwayland assigns these messages to their correct app or system queue. */
+		status = wl_display_read_events(system->display);
+		if (status < 0)
+			return EPIPE;
+	}
+
+	/* Succeeded: the compositor finished this operation before the deadline. */
+	return 0;
 }

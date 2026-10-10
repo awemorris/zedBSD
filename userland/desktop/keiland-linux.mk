@@ -104,6 +104,7 @@ KEILAND_LINUX_PACKAGES ?= userland/base/libz-compat/Makefile.linux \
 include $(KEILAND_LINUX_PACKAGES)
 
 include userland/tests/vkdemo/Makefile.linux
+include userland/desktop/mediastorage/Makefile.linux
 include userland/tests/wltest/Makefile.linux
 include userland/tests/mview/Makefile.linux
 

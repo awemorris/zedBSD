@@ -52,7 +52,7 @@ WAYLAND_LINUX_SOURCES := userland/desktop/wayland/main.c \
 	userland/desktop/wayland/network.c \
 	userland/desktop/wayland/volume.c \
 	userland/desktop/wayland/language.c \
-	userland/desktop/wayland/media.c \
+	userland/desktop/wayland/media.c userland/desktop/wayland/media-library.c \
 	userland/desktop/wayland/settings.c \
 	userland/desktop/wayland/settings-store.c \
 	userland/desktop/wayland/shot-none.c \

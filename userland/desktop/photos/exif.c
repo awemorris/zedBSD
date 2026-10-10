@@ -132,20 +132,39 @@ ph_exif_file_date(
 	const char *path,
 	ph_time *taken)
 {
+	int descriptor;
+	int error;
+
+	/* Opens one source and uses the descriptor parser shared by received media. */
+	descriptor = open(path, O_RDONLY | O_CLOEXEC);
+	if (descriptor < 0)
+		return errno;
+	error = ph_exif_descriptor_date(descriptor, taken);
+	close(descriptor);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the original photo's EXIF date is available. */
+	return 0;
+}
+
+/*
+ * Reads a JPEG's EXIF date from an independent descriptor without moving its offset.
+ */
+int
+ph_exif_descriptor_date(
+	int descriptor,
+	ph_time *taken)
+{
 	static unsigned char data[EXIF_READ];
 	ssize_t got;
 	size_t size;
 	size_t at;
 	size_t length;
 	int status;
-	int fd;
 
 	/* The start of the file. */
-	fd = open(path, O_RDONLY | O_CLOEXEC);
-	if (fd < 0)
-		return errno;
-	got = read(fd, data, sizeof(data));
-	(void)close(fd);
+	got = pread(descriptor, data, sizeof(data), 0);
 	if (got < 4)
 		return ENOENT;
 	size = (size_t)got;

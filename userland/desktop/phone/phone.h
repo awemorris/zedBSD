@@ -197,6 +197,15 @@ struct ph_sync_marks {
  * until a time, whether the paired phone takes no text to send (the send
  * button grey, ws197-p004b), and whether the program is to end.
  */
+/* A finite draft keeps ordinary file paths and stays bound to a stable contact ID. */
+#define PH_DRAFT_MAX 16U
+struct ph_attachment {
+	char *path;
+	char *contact;
+	int video;
+	int temporary;
+};
+
 struct ph_view {
 	struct kl_field search;
 	struct kl_field message;
@@ -215,6 +224,9 @@ struct ph_view {
 	struct kl_field new_number;
 	struct ph_request requests[PH_REQUESTS_MAX];
 	size_t request_count;
+	struct ph_attachment attachments[PH_DRAFT_MAX];
+	size_t attachment_count;
+	size_t attachment_page;
 	int cannot_send;
 	int quit;
 };
@@ -253,6 +265,14 @@ const char *ph_store_phone_name(const char *number);
 void ph_store_apply_phone_names(void);
 long ph_store_withheld_conversation(int create);
 int ph_store_phone_call(const char *address, const struct kl_phone_item *call);
+
+/* Unsent media drafts and dropped URI/text data (media.c). */
+int ph_draft_add(struct ph_view *view, const char *path, const char *contact, int temporary);
+void ph_draft_remove(struct ph_view *view, size_t index);
+void ph_draft_release(struct ph_view *view);
+size_t ph_draft_count(const struct ph_view *view, const char *contact);
+int ph_draft_text(struct ph_view *view, const char *text, size_t length);
+int ph_draft_uris(struct ph_view *view, const char *text, size_t length, const char *contact);
 
 /* The view (view.c). */
 int ph_view_init(struct ph_view *view);

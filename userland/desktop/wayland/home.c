@@ -1148,6 +1148,7 @@ kwl_home_tick(
 	pid_t child;
 	int status;
 	int coming;
+	int media_child;
 
 	/*
 	 * The applications' list is read ahead once the output shows
@@ -1164,6 +1165,10 @@ kwl_home_tick(
 		child = waitpid(-1, &status, WNOHANG);
 		if (child <= 0)
 			break;
+		/* The media queue owns its helper response even when this general collector reaps it. */
+		media_child = kwl_media_library_child((int64_t)child, status);
+		if (media_child)
+			continue;
 		printf("KWL HOME ended pid=%d status=%d\n", (int)child, status);
 	}
 

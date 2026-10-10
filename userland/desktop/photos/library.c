@@ -14,6 +14,7 @@
  */
 
 #include "photos.h"
+#include "userland/desktop/picture/media-kind.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -393,28 +394,13 @@ ph_picture_kind(
 	const unsigned char *data,
 	size_t size)
 {
-	int same;
+	int kind;
 
-	/* A JPEG: FF D8 FF. */
-	if (size >= 3U && data[0] == 0xffU && data[1] == 0xd8U && data[2] == 0xffU)
-		return PH_KIND_JPEG;
+	/* Shares import classification with other media consumers. */
+	kind = kl_media_kind(data, size);
 
-	/* A PNG's signature. */
-	if (size >= 8U) {
-		same = memcmp(data, "\x89PNG\r\n\x1a\n", 8U);
-		if (same == 0)
-			return PH_KIND_PNG;
-	}
-
-	/* A GIF: GIF87a or GIF89a. */
-	if (size >= 6U) {
-		same = memcmp(data, "GIF8", 4U);
-		if (same == 0 && (data[4] == '7' || data[4] == '9') && data[5] == 'a')
-			return PH_KIND_GIF;
-	}
-
-	/* Something else. */
-	return PH_KIND_NONE;
+	/* Succeeded: the classifier includes unsupported contents as PH_KIND_NONE. */
+	return kind;
 }
 
 /* Orders two photos: the newest first, then by path. */

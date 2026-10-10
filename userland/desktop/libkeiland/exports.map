@@ -487,6 +487,11 @@
 		kl_audio_stream_position;
 		kl_audio_stream_capacity;
 		kl_audio_stream_dispatch;
+		kl_system_media_list;
+		kl_system_media_add_paths;
+		kl_system_media_apply;
+		kl_system_media_watch;
+		kl_system_media_notify;
 	local:
 		*;
 };

@@ -17,7 +17,7 @@ ${CC:-cc} -std=gnu99 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror \
 	-fsanitize=address,undefined -fno-sanitize-recover=all -fno-omit-frame-pointer \
 	-I. -I"$dir/inc" -Iuserland/desktop/photos plan/ws157/tests/host-photos-db.c \
 	userland/desktop/photos/exif.c userland/desktop/photos/library.c userland/desktop/photos/db.c \
-	userland/desktop/photos/import.c "$dir/sha2.o" -o "$out"
+	userland/desktop/photos/import.c userland/desktop/mediastorage/dimensions.c "$dir/sha2.o" -o "$out"
 run=$(mktemp -d "$(pwd)/$dir/photos-db.XXXXXX")
 python3 plan/ws157/tests/make-photos.py "$run/Pictures"
 python3 plan/ws157/tests/make-photos.py --other "$run/Other"

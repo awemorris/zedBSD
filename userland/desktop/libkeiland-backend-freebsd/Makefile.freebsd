@@ -1,7 +1,7 @@
 # The FreeBSD side of libkeiland-backend (WS131, plan/ws131/design.md section 3.6): a static library the
 # compositor links (and libkeiland, while it forwards its old network and sound calls here, until ws131-p011).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KEILAND_FREEBSD_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
+KEILAND_FREEBSD_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/media/media.c \
 	userland/desktop/libkeiland-backend/print/print.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \

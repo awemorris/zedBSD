@@ -3,7 +3,7 @@
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # keiland-linux-sync: only userland/desktop/libkeiland-backend/* the shared backend sources (no zedBSD Makefile pair)
 # keiland-linux-sync: only userland/desktop/libkeiland-backend-linux/* the Linux backend (no zedBSD Makefile pair)
-KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c \
+KEILAND_LINUX_BACKEND_SOURCES := userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/media/media.c \
 	userland/desktop/libkeiland-backend/print/print.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \

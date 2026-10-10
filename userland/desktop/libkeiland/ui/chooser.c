@@ -39,6 +39,7 @@
 #include <errno.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The corner radius of the window's panel (the compositor's windows') and of the two cards on it. */
 #define CHOOSER_GLASS_RADIUS	14
@@ -123,6 +124,8 @@ kl_file_chooser_open(
 	void *data)
 {
 	struct kl_window_options window_options;
+	struct kl_system *media;
+	int descriptor;
 	struct kl_file_chooser *chooser;
 	const char *font;
 	const char *fallback;
@@ -152,6 +155,29 @@ kl_file_chooser_open(
 		kl_file_chooser_destroy(chooser);
 		errno = error;
 		return NULL;
+	}
+
+	/* A media selector obtains only metadata through the compositor. */
+	if (options->mode == KL_FILE_CHOOSER_MEDIA) {
+		media = kl_system_open(display);
+		error = ENOTSUP;
+		if (media != NULL) {
+			error = kl_system_media_list(media, &descriptor);
+			if (error == 0) {
+				error = keiui_chooser_media(&chooser->model, descriptor);
+				close(descriptor);
+			}
+
+			/* The snapshot no longer needs its temporary system connection. */
+			kl_system_close(media);
+		}
+
+		/* An unavailable library cannot fall back to unrelated filesystem entries. */
+		if (error != 0) {
+			kl_file_chooser_destroy(chooser);
+			errno = error;
+			return NULL;
+		}
 	}
 
 	/* The fonts, the application's or the system's. */

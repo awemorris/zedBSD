@@ -68,10 +68,14 @@ keiui_chooser_init(
 	/* Nothing is set yet. */
 	memset(chooser, 0, sizeof(*chooser));
 
-	/* Only the two modes, and filters within the bounds. */
+	/* Only documented modes and filters within the bounds. */
 	if (options == NULL)
 		return EINVAL;
-	if (options->mode != KL_FILE_CHOOSER_OPEN && options->mode != KL_FILE_CHOOSER_SAVE)
+	if (options->mode != KL_FILE_CHOOSER_OPEN &&
+	    options->mode != KL_FILE_CHOOSER_SAVE &&
+	    options->mode != KL_FILE_CHOOSER_MEDIA)
+		return EINVAL;
+	if (options->mode == KL_FILE_CHOOSER_MEDIA && options->filter_count != 0U)
 		return EINVAL;
 	if (options->filter_count > KL_FILE_CHOOSER_FILTERS_MAX)
 		return EINVAL;
@@ -107,6 +111,14 @@ keiui_chooser_init(
 	/* How many there are, and the one chosen first. */
 	chooser->filter_count = options->filter_count;
 	chooser->filter = options->filter;
+
+	/* A media chooser has one virtual location and receives its entries as metadata. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA) {
+		model_add_place(chooser, "Media Library", "Media Library", KL_ICON_PICTURES);
+		snprintf(chooser->folder, sizeof(chooser->folder), "Media Library");
+		chooser->want_focus = KEIUI_CHOOSER_ID_LIST;
+		return 0;
+	}
 
 	/* The places of the sidebar. */
 	model_places(chooser);
@@ -169,6 +181,10 @@ keiui_chooser_go(
 	char *found;
 	int folder;
 
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return ENOTSUP;
+
 	/* The folder's real path. */
 	found = realpath(path, resolved);
 	if (found == NULL)
@@ -206,6 +222,10 @@ keiui_chooser_go_recent(
 	int regular;
 	int matches;
 	int error;
+
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return;
 
 	/* The folder's items go; Recent is shown even when it cannot be read. */
 	model_clear(chooser);
@@ -287,6 +307,10 @@ keiui_chooser_go_place(
 	struct keiui_chooser *chooser,
 	size_t place)
 {
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return;
+
 	/* No such place. */
 	if (place >= chooser->place_count)
 		return;
@@ -498,6 +522,10 @@ keiui_chooser_open_path(
 	char text[KEIUI_CHOOSER_PATH_MAX];
 	const char *folder;
 
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return;
+
 	/* The folder with a slash after it, ready for a name. */
 	folder = chooser->folder;
 	if (chooser->recent)
@@ -672,6 +700,10 @@ keiui_chooser_can_go_up(
 {
 	int root;
 
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return 0;
+
 	/* Recent has nothing above it. */
 	if (chooser->recent)
 		return 0;
@@ -721,6 +753,107 @@ keiui_chooser_home(void)
 
 	/* Succeeded: the home folder. */
 	return home;
+}
+
+/*
+ * Lists media names and absolute paths from a compositor metadata snapshot.
+ */
+int
+keiui_chooser_media(
+	struct keiui_chooser *chooser,
+	int descriptor)
+{
+	struct stat status;
+	FILE *input;
+	char line[16384];
+	char *fields[12];
+	char *part;
+	char *got;
+	size_t count;
+	size_t length;
+	int copy;
+	int same;
+	int error;
+
+	/* The caller retains its descriptor; the stream owns a separate duplicate. */
+	if (chooser->mode != KL_FILE_CHOOSER_MEDIA)
+		return EINVAL;
+	copy = dup(descriptor);
+	if (copy < 0)
+		return errno;
+	input = fdopen(copy, "r");
+	if (input == NULL) {
+		error = errno;
+		close(copy);
+		return error;
+	}
+
+	/* Requires the versioned metadata header before accepting any path. */
+	got = fgets(line, sizeof(line), input);
+	error = EPROTO;
+	if (got != NULL) {
+		same = strncmp(line, "# keiland-media 1\t", 18U);
+		if (same == 0)
+			error = 0;
+	}
+
+	/* Replaces the virtual list with complete metadata rows; media bytes stay in files. */
+	model_clear(chooser);
+	while (error == 0) {
+		got = fgets(line, sizeof(line), input);
+		if (got == NULL)
+			break;
+		length = strlen(line);
+		if (length == 0U || line[length - 1U] != '\n') {
+			error = EPROTO;
+			break;
+		}
+
+		/* Only media rows become selectable; album rows belong to the Photos view. */
+		if (line[0] != 'P' || line[1] != '\t')
+			continue;
+		line[length - 1U] = '\0';
+		count = 0U;
+		part = line;
+		while (part != NULL && count < 12U) {
+			fields[count++] = part;
+			part = strchr(part, '\t');
+			if (part != NULL)
+				*part++ = '\0';
+		}
+
+		/* The snapshot's twelve fields include the original name and an absolute path. */
+		if (count != 12U || part != NULL || fields[2][0] != '/') {
+			error = EPROTO;
+			break;
+		}
+
+		/* Sortable size and capture time come from metadata, not another database read. */
+		memset(&status, 0, sizeof(status));
+		status.st_mode = S_IFREG;
+		status.st_size = (off_t)strtoll(fields[4], NULL, 10);
+		status.st_mtime = (time_t)strtoll(fields[5], NULL, 10);
+		error = model_add_entry(chooser, fields[11], fields[2], &status);
+	}
+
+	/* Stream failures or malformed snapshots never leave a selectable partial list. */
+	same = ferror(input);
+	if (same != 0 && error == 0)
+		error = EIO;
+	fclose(input);
+	if (error != 0) {
+		model_clear(chooser);
+		model_shown(chooser);
+		return error;
+	}
+
+	/* Shows the complete library in the ordinary chooser's name order. */
+	if (chooser->count > 1U)
+		qsort(chooser->entries, chooser->count, sizeof(chooser->entries[0]), model_compare);
+	model_shown(chooser);
+
+	/* Succeeded: selecting a row returns its original file path. */
+	return 0;
 }
 
 /* Makes the sidebar's places: Recent (Open), Home and its usual folders, and the root. */
@@ -1031,6 +1164,10 @@ model_reload(
 	struct keiui_chooser *chooser)
 {
 	char folder[KEIUI_CHOOSER_PATH_MAX];
+
+	/* Media entries come only from the compositor snapshot. */
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+		return;
 
 	/* Recent, or the folder. */
 	if (chooser->recent) {

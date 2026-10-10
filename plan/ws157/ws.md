@@ -29,6 +29,8 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 | [ws157-p003](phase003/phase.md) | 最初の既定案の app | uncleared・canceled（置き換え） | — |
 | [ws157-p004](phase004/phase.md) | library・db（月ごとの TSV・album ごと）・取り込み（複写、重複は取り込まない）と host 試験 | cleared（2026-10-07 Q1、T1-331） | p001 |
 | [ws157-p005](phase005/phase.md) | app（取り込み・album の card・縮小画像の cache、AAT） | cleared（2026-10-07 Q1、T1-331） | p004 |
+| [ws157-p006](phase006/phase.md) | メディアCLI・compositor API・Photos移行 | in-progress | p004 source |
+| [ws157-p007](phase007/phase.md) | 最終全文規約・build・回帰 | in-progress | p006、ws197-p011 |
 
 ## p001 の観点（要件の検討）
 
@@ -40,3 +42,13 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 - 共有: クラウドストレージ（WS146・WS147）との関係。
 - 既存の Image Viewer（WS128 の imageview）との役割の分け方。
 - 他の app（Apple Photos・Google Photos・Shotwell・digiKam）の調べ。模倣の範囲に注意（Files の Tags の件と同じく、特定の製品の固有の UI の写しは避ける）。
+
+## 2026-10-10 メディア管理の先行実装
+
+ユーザーの新規承認により、PhotosのDB処理をCLI所有にしcompositor APIから使う。Phoneの＋とDnDは同じAPIを使う。既存Photos p004/p005のcleared履歴は維持、新p006/p007とws197-p011で変更後を検証する。MMS写真/動画送受信は基盤完成後に接続。旧途中treeは未統合。共有master/Queueへの投影はQ1に保留。
+
+2026-10-10構造更新: ws157-p006はメディアCLI/API/Photos、ws157-p007はその最終全文規約、ws197-p011はPhone選択/DnDと自身の全文規約。p011はp006の検証済みAPI出力に依存する。全scopeはユーザーのメディア管理先行承認を維持。
+
+## 2026-10-10 保存形式の変更承認
+
+ユーザー指定を優先し、従来の `~/Pictures/Library` 月別TSV保存を現scopeで置き換える。`~/Pictures/Media/metadata.db` はversion付きJSON、原本copyは `Media/Files/YYYY/MM/dd/名前`。JPEG EXIF撮影日時がなければPNG/JPEG/動画等は取り込み日で整理する（元ファイルmtimeは使わない）。日付・バイト数・画像寸法・hash・原名・favorite・rotation・albumを保持し、未知のJSON fieldを更新時にも保存することで撮影地等へ拡張可能にする。既存Libraryの自動移動/削除はしない。旧ファイルはそのまま、必要な原本はmediastorage addで再取り込みできる。p006設計・p007検証・p011の選択元へ同じ承認を反映。以前のcleared履歴は旧形式の履歴として維持する。

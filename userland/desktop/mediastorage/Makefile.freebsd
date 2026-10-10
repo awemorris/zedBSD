@@ -1,0 +1,5 @@
+# zedBSD; Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+KEILAND_FREEBSD_MEDIASTORAGE_SOURCES := userland/desktop/mediastorage/main.c userland/desktop/mediastorage/notify.c \
+	userland/desktop/mediastorage/database.c userland/desktop/mediastorage/json.c userland/desktop/mediastorage/dimensions.c userland/desktop/photos/cache-folders.c userland/desktop/photos/import.c userland/desktop/photos/exif.c \
+	userland/desktop/photos/library.c userland/desktop/photos/snapshot.c
+$(eval $(call KEILAND_FREEBSD_PROGRAM,mediastorage,bin,$(KEILAND_FREEBSD_MEDIASTORAGE_SOURCES),libkeiland-compat.a libkeiland.so libwayland-client.so,))

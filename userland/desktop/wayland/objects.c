@@ -376,6 +376,10 @@ kwl_object_destroy(
 	if (object->kind == KWL_SYSTEM_BLUETOOTH)
 		kwl_bluetooth_gone(object);
 
+	/* A media object no longer owns queued CLI responses or watches. */
+	if (object->kind == KWL_SYSTEM_MEDIA)
+		kwl_media_library_gone(object);
+
 	/* A phone object's hearing, what it was owed and its sync waiting go (phone-shell.c, ws197-p004a). */
 	if (object->kind == KWL_SYSTEM_PHONE)
 		kwl_phone_gone(object);

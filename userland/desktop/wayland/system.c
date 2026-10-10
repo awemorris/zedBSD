@@ -394,6 +394,10 @@ kwl_system_bind(
 	if (manager->version >= KL_SYSTEM_SINCE_BLUETOOTH)
 		bits |= KL_SYSTEM_CAPABILITY_BLUETOOTH;
 
+	/* The metadata library is unavailable on the login compositor. */
+	if (manager->version >= KL_SYSTEM_SINCE_MEDIA && !manager->client->server->greeter)
+		bits |= KL_SYSTEM_CAPABILITY_MEDIA;
+
 	/* The administration of the accounts, at version 8 where the system has its tool (ws089-p026). */
 	administer = kl_backend_account_can_administer();
 	if (manager->version >= KL_SYSTEM_SINCE_ADMINISTER && administer)
@@ -468,6 +472,9 @@ kwl_system_request(
 	case KWL_SYSTEM_BLUETOOTH:
 		error = kwl_bluetooth_request(object, opcode, bytes, size);
 		break;
+	case KWL_SYSTEM_MEDIA:
+		error = kwl_media_library_request(object, opcode, bytes, size);
+		break;
 	default:
 		error = EPROTO;
 		break;
@@ -533,6 +540,7 @@ kwl_system_tick(
 
 	/* Bluetooth: the service's news, the answers and a pairing's questions (bluetooth-shell.c, ws143-p006). */
 	kwl_bluetooth_tick(server);
+	kwl_media_library_tick(server);
 
 	/* The phone: the paired phone's news, the answers and the messages (phone-shell.c, ws197-p004a). */
 	kwl_phone_tick(server);
@@ -693,6 +701,7 @@ kwl_system_close(
 	kwl_machine_close(server);
 	kwl_bluetooth_close(server);
 	kwl_phone_close(server);
+	kwl_media_library_close();
 	kwl_audio_close(server);
 
 	/* A job under way ends on its own (a file read or written to its end, a bus call answered). */
@@ -811,6 +820,16 @@ system_manager_request(
 		if (manager->version < KL_SYSTEM_SINCE_BLUETOOTH)
 			return EPROTO;
 		error = kwl_bluetooth_create(manager, bytes, size);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
+	/* Media operations are served by the asynchronous CLI backend. */
+	if (opcode == KL_SYSTEM_MANAGER_GET_MEDIA) {
+		if (manager->version < KL_SYSTEM_SINCE_MEDIA || manager->client->server->greeter)
+			return EPROTO;
+		error = kwl_media_library_create(manager, bytes, size);
 		if (error != 0)
 			return error;
 		return 0;

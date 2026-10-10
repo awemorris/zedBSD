@@ -2068,4 +2068,18 @@ int kl_backend_sharing_request(struct kl_backend *backend, unsigned action);
 /* Copies Remote Login's state as last answered. */
 void kl_backend_sharing_get(const struct kl_backend *backend, struct kl_backend_sharing *state);
 
+/* The media database CLI operations offered by every desktop OS backend. */
+#define KL_BACKEND_MEDIA_LIST 1U
+#define KL_BACKEND_MEDIA_ADD 2U
+#define KL_BACKEND_MEDIA_APPLY 4U
+
+/* An asynchronous spawned CLI queue with pipe input/output; notification uses libkeiland. */
+struct kl_backend_media;
+struct kl_backend_media *kl_backend_media_open(void);
+int kl_backend_media_child(struct kl_backend_media *media, int64_t child, int status);
+void kl_backend_media_close(struct kl_backend_media *media);
+int kl_backend_media_request(struct kl_backend_media *media, unsigned command, const char *argument, int descriptor, uint32_t *id);
+void kl_backend_media_update(struct kl_backend_media *media);
+int kl_backend_media_take(struct kl_backend_media *media, uint32_t *id, int *error, int *descriptor);
+
 #endif

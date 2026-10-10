@@ -33,6 +33,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The fonts, the window's first size, and the longest wait for input. */
 #define PH_FONT			KEILAND_DATADIR "/fonts/keiland.ttf"
@@ -66,6 +67,8 @@
  */
 struct ph_window {
 	struct kl_app *app;
+	/* The compositor is the only entry point to the CLI-owned library. */
+	struct kl_system *system;
 	struct kl_window *window;
 	struct kl_ui *ui;
 	uint32_t *pixels;
@@ -78,6 +81,7 @@ struct ph_window {
 	struct ph_view view;
 	char root[PH_PATH_MAX];
 	int root_known;
+	int marks_failed;
 	struct kl_file_chooser *chooser;
 	unsigned chooser_for;
 	int answered;
@@ -156,11 +160,6 @@ main(
 	if (error != 0)
 		ph_log("FONT missing error=%d", error);
 
-	/* The library, and the import asked for. */
-	ph_library_start(&photos);
-	if (source != NULL)
-		ph_import_path(&photos, source, 0);
-
 	/* The view's state. */
 	error = ph_view_init(&photos.view);
 	if (error != 0) {
@@ -188,6 +187,15 @@ main(
 		return 1;
 	}
 
+	/* Obtains metadata through the compositor before creating the initial view. */
+	photos.system = kl_system_open(kl_app_display(photos.app));
+	ph_library_start(&photos);
+	if (source != NULL)
+		ph_import_path(&photos, source, 0);
+	(void)ph_view_reset(&photos.view);
+	if (photos.system != NULL)
+		(void)kl_system_media_watch(photos.system, 1U);
+
 	/* Its window. */
 	memset(&window_options, 0, sizeof(window_options));
 	window_options.title = "Photos";
@@ -197,6 +205,7 @@ main(
 	photos.window = kl_app_window_create(photos.app, &window_options);
 	if (photos.window == NULL) {
 		ph_log("FAILED operation=window error=%d", errno);
+		kl_system_close(photos.system);
 		kl_app_close(photos.app);
 		ph_worker_stop();
 		ph_view_release(&photos.view);
@@ -207,6 +216,7 @@ main(
 	photos.ui = kl_ui_create();
 	if (photos.ui == NULL) {
 		ph_log("FAILED operation=ui error=%d", errno);
+		kl_system_close(photos.system);
 		kl_app_close(photos.app);
 		ph_worker_stop();
 		ph_view_release(&photos.view);
@@ -230,6 +240,7 @@ main(
 	if (photos.canvas_made)
 		kl_canvas_release(&photos.canvas);
 	free(photos.pixels);
+	kl_system_close(photos.system);
 	kl_app_close(photos.app);
 	ph_view_release(&photos.view);
 	ph_library_release();
@@ -325,18 +336,34 @@ static void
 ph_library_start(
 	struct ph_window *photos)
 {
-	size_t count;
-	size_t albums;
+	FILE *snapshot;
+	int descriptor;
 	int error;
 
-	/* The library's folder and its database. */
-	error = ph_library_root(photos->root, sizeof(photos->root));
-	photos->root_known = error == 0;
-	if (photos->root_known)
-		error = ph_db_load(photos->root);
-	(void)ph_photos(&count);
-	(void)ph_albums(&albums);
-	ph_log("LIBRARY root=%s photos=%lu albums=%lu error=%d", photos->root, (unsigned long)count, (unsigned long)albums, error);
+	/* Queries the CLI via the compositor; no GUI code reads database files. */
+	photos->root_known = 0;
+	error = kl_system_media_list(photos->system, &descriptor);
+	if (error == 0) {
+		snapshot = fdopen(descriptor, "r");
+		if (snapshot == NULL) {
+			error = errno;
+			close(descriptor);
+		} else {
+			error = ph_snapshot_read(snapshot, photos->root, sizeof(photos->root));
+			fclose(snapshot);
+		}
+	}
+
+	/* A failed snapshot never leaves a partially filled library on screen. */
+	if (error != 0) {
+		ph_library_release();
+		ph_view_notice(&photos->view, "The media library is unavailable.", kl_clock_us());
+	} else {
+		photos->root_known = 1;
+	}
+
+	/* Logs the outcome without filenames or personal metadata. */
+	ph_log("LIBRARY error=%d", error);
 }
 
 /*
@@ -350,31 +377,26 @@ ph_import_path(
 	const char *source,
 	int notice)
 {
-	struct ph_import_result result;
-	char words[160];
+	const char *paths[1];
+	int descriptor;
 	int error;
-	int saved;
 
-	/* Into the library, written. */
-	if (!photos->root_known)
-		return;
-	error = ph_import(photos->root, source, &result);
-	saved = ph_db_save(photos->root);
-	ph_log("IMPORT done source=%s imported=%u duplicates=%u failed=%u error=%d save=%d", source, result.imported, result.duplicates, result.failed,
-	    error, saved);
-	if (!notice)
-		return;
+	/* Supplies only original file paths; the CLI owns copying and metadata updates. */
+	paths[0] = source;
+	error = kl_system_media_add_paths(photos->system, paths, 1U, &descriptor);
+	if (error == 0)
+		close(descriptor);
 
-	/* The view on the new order, and what came of it. */
-	ph_worker_drop_thumbs();
-	(void)ph_view_reset(&photos->view);
-	if (error != 0)
-		(void)snprintf(words, sizeof(words), "Nothing could be imported.");
-	else if (result.duplicates > 0U)
-		(void)snprintf(words, sizeof(words), "Imported %u photos (%u already in the library).", result.imported, result.duplicates);
-	else
-		(void)snprintf(words, sizeof(words), "Imported %u photos.", result.imported);
-	ph_view_notice(&photos->view, words, kl_clock_us());
+	/* Requeries even after a partial import so saved successes become visible. */
+	ph_refresh(photos);
+	if (notice) {
+		if (error != 0)
+			ph_view_notice(&photos->view, "Some media could not be imported.", kl_clock_us());
+		else
+			ph_view_notice(&photos->view, "Media imported into the library.", kl_clock_us());
+	}
+
+	/* The current model and thumbnails have been reset through the compositor. */
 	photos->dirty = 1;
 }
 
@@ -384,6 +406,14 @@ ph_refresh(
 	struct ph_window *photos)
 {
 	int error;
+
+	/* A failed metadata update must not be discarded by an unrelated library notification. */
+	if (photos->marks_failed) {
+		photos->view.save = 1;
+		ph_marks(photos);
+		if (photos->marks_failed)
+			return;
+	}
 
 	/* The library again. */
 	ph_worker_drop_thumbs();
@@ -408,9 +438,8 @@ ph_choose(
 	unsigned purpose)
 {
 	static const struct kl_file_filter filters[] = {
-		{ "Pictures", "jpg jpeg jpe png gif" },
-		{ "All files", NULL }
-	};
+	    {"Photos and Videos", "jpg jpeg jpe png gif mp4 mov m4v 3gp webm mkv avi"},
+	    {"All files", NULL}};
 	static const struct kl_file_chooser_listener listener = {
 		ph_chooser_done
 	};
@@ -529,6 +558,7 @@ ph_loop(
 	uint64_t started;
 	uint64_t now;
 	int status;
+	unsigned changed;
 	int taken;
 	int moved;
 	int wait;
@@ -549,6 +579,15 @@ ph_loop(
 		if (status != 0) {
 			ph_log("DONE reason=disconnected");
 			return 0;
+		}
+
+		/* A direct CLI import wakes every watching Photos instance. */
+		changed = 0U;
+		if (photos->system != NULL)
+			(void)kl_system_dispatch(photos->system, &changed);
+		if ((changed & KL_SYSTEM_CHANGED_MEDIA) != 0U) {
+			ph_marks(photos);
+			ph_refresh(photos);
 		}
 
 		/* The window's input and the actions of its menu. */
@@ -941,20 +980,63 @@ static void
 ph_marks(
 	struct ph_window *photos)
 {
+	FILE *changes;
+	int descriptor;
 	int error;
+	int closed;
+	struct ph_photo *list;
+	struct ph_album *albums;
+	size_t count;
+	size_t index;
 
-	/* Nothing changed, or nowhere to keep them. */
+	/* A read-only frame produces no CLI mutation. */
 	if (!photos->view.save)
 		return;
 	photos->view.save = 0;
-	if (!photos->root_known)
+	photos->marks_failed = 1;
+	changes = tmpfile();
+	if (changes == NULL) {
+		ph_view_notice(&photos->view, "The media changes could not be prepared.", kl_clock_us());
 		return;
+	}
 
-	/* Written: the months and the albums that changed. */
-	error = ph_db_save(photos->root);
-	ph_log("SAVE error=%d", error);
-	if (error != 0)
-		ph_view_notice(&photos->view, "The library could not be saved.", kl_clock_us());
+	/* Sends only dirty id-based marks and albums, preserving concurrent imports. */
+	error = ph_snapshot_changes(changes);
+	if (error == 0) {
+		closed = fflush(changes);
+		if (closed != 0)
+			error = EIO;
+	}
+
+	/* Rewinds the metadata update before borrowing its descriptor for the request. */
+	if (error == 0) {
+		closed = fseek(changes, 0L, SEEK_SET);
+		if (closed != 0)
+			error = EIO;
+	}
+
+	/* The CLI returns metadata after the update, not image/video contents. */
+	if (error == 0) {
+		error = kl_system_media_apply(photos->system, fileno(changes), &descriptor);
+		if (error == 0)
+			close(descriptor);
+	}
+
+	/* Keeps dirty rows after a failed update so an explicit retry can preserve them. */
+	fclose(changes);
+	if (error != 0) {
+		ph_view_notice(&photos->view, "The media changes could not be saved.", kl_clock_us());
+		return;
+	}
+
+	/* Clears only the local dirty marks after the CLI accepted them. */
+	photos->marks_failed = 0;
+	list = ph_photos(&count);
+	for (index = 0U; index < count; index++)
+		list[index].changed = 0;
+	albums = ph_albums(&count);
+	for (index = 0U; index < count; index++)
+		albums[index].changed = 0;
 }
 
 /*

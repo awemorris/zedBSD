@@ -3,7 +3,7 @@
 # Makefile includes every userland/*/*/Makefile as a package); the compositor's Makefile includes it.  Since
 # ws131-p011 nothing else links it: libkeiland reaches the system only through the compositor.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c \
+KL_BACKEND_ZEDBSD_SOURCES := userland/desktop/libkeiland-backend/backend.c userland/desktop/libkeiland-backend/media/media.c \
 	userland/desktop/libkeiland-backend/print/print.c \
 	userland/desktop/libkeiland-backend/machine/machine.c \
 	userland/desktop/libkeiland-backend/machine/filesystems.c \

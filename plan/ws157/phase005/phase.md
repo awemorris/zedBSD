@@ -45,3 +45,7 @@ check を足した（直しを外すと `FAIL save`、直しで 33 PASS）。zed
 - host: `plan/ws157/tests/run-host-photos.sh` は 2026-10-08 の main で PASS（import-saved・albums・thumb-broken・columns・favorites・broken-whole・import-request）。9 枚の import は host で 1 秒もかからない。
 - helper の窓の待ちは、その後 40 s に延びている（5fda97c5a）。
 - 直す code は無い。**再発の防止の案**: T1 は AAT の image を作る時に、使う tree で全ての package を build し直す（`build/aat-t1202` を使い回すと古い app が残る）。依頼の時、image の tree の SHA と、`/bin/photos --help` のような使い方の行を確かめる。
+
+## 2026-10-10 後続設計
+
+ユーザーのメディア管理指示でDB取得/追加/metadata更新は後続[p006](../phase006/phase.md)のCLIとcompositor APIへ移す。本Phaseの過去のcleared結果は保存し、変更後の検証を[p007](../phase007/phase.md)へ依存させる。Photosの再起動/監視更新とPhone利用は新Phaseが検証する。

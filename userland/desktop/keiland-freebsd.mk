@@ -119,6 +119,7 @@ KEILAND_FREEBSD_PACKAGES ?= userland/base/libz-compat/Makefile.freebsd \
 	userland/tests/mview/Makefile.freebsd \
 	userland/tests/kuidemo/Makefile.freebsd
 include $(KEILAND_FREEBSD_PACKAGES)
+include userland/desktop/mediastorage/Makefile.freebsd
 
 # App Home uses the compositor's existing config parser; no common built-in list changes.
 $(KEILAND_FREEBSD_BUILD)/etc/keiland/apps.conf: userland/desktop/wayland/data/apps-freebsd.conf.in

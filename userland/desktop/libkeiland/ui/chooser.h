@@ -140,6 +140,7 @@ struct keiui_chooser {
 
 /* The model (chooser-model.c). */
 int keiui_chooser_init(struct keiui_chooser *chooser, const struct kl_file_chooser_options *options);
+int keiui_chooser_media(struct keiui_chooser *chooser, int descriptor);
 void keiui_chooser_fini(struct keiui_chooser *chooser);
 int keiui_chooser_go(struct keiui_chooser *chooser, const char *path);
 void keiui_chooser_go_recent(struct keiui_chooser *chooser);

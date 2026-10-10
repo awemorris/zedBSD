@@ -69,6 +69,9 @@ static const struct wl_interface *system_get_machine_types[] = {
 	&kl_system_machine_v1_interface,
 };
 
+/* The manager creates the media object on the shared system queue. */
+static const struct wl_interface *system_get_media_types[] = {&kl_system_media_v1_interface};
+
 /* The arguments of messages that name no interface (at most sixteen, a monitor's disk's). */
 static const struct wl_interface *system_plain_types[] = {
 	NULL,
@@ -91,22 +94,23 @@ static const struct wl_interface *system_plain_types[] = {
 
 /* The requests of kl_system_manager_v1. */
 static const struct wl_message system_manager_requests[] = {
-	{ "destroy", "", NULL },
-	{ "get_settings", "n", system_get_settings_types },
-	{ "get_network", "n", system_get_network_types },
-	{ "get_audio", "n", system_get_audio_types },
-	{ "get_power", "n", system_get_power_types },
-	{ "get_devices", "n", system_get_devices_types },
-	{ "get_monitor", "2nu", system_get_monitor_types },
-	{ "get_account", "4n", system_get_account_types },
-	{ "get_sharing", "7n", system_get_sharing_types },
-	{ "get_notify", "13n", system_get_notify_types },
-	{ "get_mail", "15n", system_get_mail_types },
-	{ "get_phone", "16n", system_get_phone_types },
-	{ "get_printers", "17n", system_get_printers_types },
-	{ "get_displays", "18n", system_get_displays_types },
-	{ "get_machine", "21n", system_get_machine_types },
-	{ "get_bluetooth", "23n", system_get_bluetooth_types },
+    {"destroy", "", NULL},
+    {"get_settings", "n", system_get_settings_types},
+    {"get_network", "n", system_get_network_types},
+    {"get_audio", "n", system_get_audio_types},
+    {"get_power", "n", system_get_power_types},
+    {"get_devices", "n", system_get_devices_types},
+    {"get_monitor", "2nu", system_get_monitor_types},
+    {"get_account", "4n", system_get_account_types},
+    {"get_sharing", "7n", system_get_sharing_types},
+    {"get_notify", "13n", system_get_notify_types},
+    {"get_mail", "15n", system_get_mail_types},
+    {"get_phone", "16n", system_get_phone_types},
+    {"get_printers", "17n", system_get_printers_types},
+    {"get_displays", "18n", system_get_displays_types},
+    {"get_machine", "21n", system_get_machine_types},
+    {"get_bluetooth", "23n", system_get_bluetooth_types},
+    {"get_media", "29n", system_get_media_types},
 };
 
 /* The events of kl_system_manager_v1. */
@@ -114,15 +118,14 @@ static const struct wl_message system_manager_events[] = {
 	{ "capabilities", "u", system_plain_types },
 };
 
-/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: sixteen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28) and one event.  It lives for the program. */
+/* kl_system_manager_v1, at KL_SYSTEM_MANAGER_VERSION: seventeen requests (get_monitor since 2, get_account since 4, get_sharing since 7, get_notify since 13, get_mail since 15, get_phone since 16, get_printers since 17, get_displays since 18; the displays' set_shown since 19; the mail's allowed since 20; get_machine since 21; the machine's mounts since 22; get_bluetooth since 23; the printers' edit since 24; the account's key operations since 25; its methods since 26; the phone's messages since 27; the phone's contacts and calls since 28; media metadata since 29) and one event.  It lives for the program. */
 const struct wl_interface kl_system_manager_v1_interface = {
-	KL_SYSTEM_MANAGER_NAME,
-	KL_SYSTEM_MANAGER_VERSION,
-	16,
-	system_manager_requests,
-	1,
-	system_manager_events
-};
+    KL_SYSTEM_MANAGER_NAME,
+    KL_SYSTEM_MANAGER_VERSION,
+    17,
+    system_manager_requests,
+    1,
+    system_manager_events};
 
 /* The requests of kl_system_settings_v1. */
 static const struct wl_message system_settings_requests[] = {
@@ -545,3 +548,24 @@ const struct wl_interface kl_system_machine_v1_interface = {
 	7,
 	system_machine_events
 };
+
+/* The media object's bounded metadata and FD transport requests. */
+static const struct wl_message system_media_requests[] = {
+    {"destroy", "", NULL},
+    {"list", "u", system_plain_types},
+    {"add", "us", system_plain_types},
+    {"apply", "uh", system_plain_types},
+    {"watch", "u", system_plain_types},
+    {"notify", "", NULL},
+};
+
+/* Each CLI response is a snapshot descriptor followed by its completion errno. */
+static const struct wl_message system_media_events[] = {
+    {"snapshot", "uh", system_plain_types},
+    {"done", "uu", system_plain_types},
+    {"changed", "u", system_plain_types},
+};
+
+/* A version-one media object is obtained from version 29 of the manager. */
+const struct wl_interface kl_system_media_v1_interface = {
+    KL_SYSTEM_MEDIA_NAME, 1, 6, system_media_requests, 3, system_media_events};

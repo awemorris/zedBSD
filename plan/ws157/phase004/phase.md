@@ -30,3 +30,7 @@ Queue: q835（2026-10-07、P2）
   album の作成と追加（同じ写真は 1 度、tab の名前は EINVAL）、月の file・印の行・album の file、空の library への読み戻し（印・順・album・Favorites）、1 か月だけ変えると
   その月の file だけが書き直される（inode）、img に手で置いた file は一覧に出ない。
 - style-check 0（photos.h・library.c・db.c・import.c・試験の C）。
+
+## 2026-10-10 後続設計
+
+ユーザーのメディア管理指示でDB取得/追加/metadata更新は後続[p006](../phase006/phase.md)のCLIとcompositor APIへ移す。本Phaseの過去のcleared結果は保存し、変更後の検証を[p007](../phase007/phase.md)へ依存させる。Photosの再起動/監視更新とPhone利用は新Phaseが検証する。

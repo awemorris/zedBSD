@@ -181,6 +181,9 @@ void
 ph_view_release(
 	struct ph_view *view)
 {
+	/* Unsent temporary pictures and retained paths belong to the view. */
+	ph_draft_release(view);
+
 	/* The scrolls. */
 	kl_scroll_release(&view->timeline_scroll);
 	kl_scroll_release(&view->contacts_scroll);
@@ -205,6 +208,7 @@ ph_view_select(
 
 	/* Shown from its end, with the field emptied. */
 	view->selected = index;
+	view->attachment_page = 0U;
 	view->to_end = 1;
 	view->adding = 0;
 	kl_field_set(&view->message, "");
@@ -229,7 +233,7 @@ ph_view_action(
 	switch (action) {
 	case PH_ACTION_SEND:
 		/* Nothing written, or nobody to send to: nothing to send. */
-		if (view->message.length == 0U || view->selected < 0)
+		if (view->selected < 0)
 			break;
 
 		/* The paired phone takes no text to send (ws197-p004b). */
@@ -250,8 +254,9 @@ ph_view_action(
 		ph_log("REQUEST action=call contact=%ld", view->selected);
 		break;
 	case PH_ACTION_ATTACH:
-		ph_view_notice(view, "Attachments cannot be sent yet.", now_us);
-		ph_log("NOBACKEND action=attach contact=%ld", view->selected);
+		/* Selects media without sending or recording a timeline item. */
+		if (view->selected >= 0)
+			view_request(view, PH_ACTION_ATTACH, view->selected);
 		break;
 	case PH_ACTION_ADD:
 		/* The form of a new contact, in place of the timeline. */
@@ -951,6 +956,9 @@ view_conversation(
 	struct kl_rect composer;
 	size_t count;
 
+	int composer_height;
+	size_t draft_count;
+
 	/* A new contact being added. */
 	if (view->adding) {
 		view_new_contact(view, ui, style, area, now_us);
@@ -975,11 +983,15 @@ view_conversation(
 	header = *area;
 	header.height = PH_VIEW_HEADER;
 	composer = *area;
-	composer.y = area->y + area->height - PH_VIEW_COMPOSER;
-	composer.height = PH_VIEW_COMPOSER;
+	composer_height = PH_VIEW_COMPOSER;
+	draft_count = ph_draft_count(view, contact->id);
+	if (draft_count != 0U)
+		composer_height += 54;
+	composer.y = area->y + area->height - composer_height;
+	composer.height = composer_height;
 	timeline = *area;
 	timeline.y = area->y + PH_VIEW_HEADER;
-	timeline.height = area->height - PH_VIEW_HEADER - PH_VIEW_COMPOSER;
+	timeline.height = area->height - PH_VIEW_HEADER - composer_height;
 	view_timeline(view, ui, style, contact, &timeline, now_us);
 	view_header(view, ui, style, contact, &header, now_us);
 	view_composer(view, ui, style, contact, &composer, now_us);
@@ -1570,6 +1582,15 @@ view_composer(
 	unsigned changes;
 	unsigned hit;
 
+	struct kl_rect input;
+	const char *name;
+	size_t index;
+	size_t shown;
+	int same;
+	int removed;
+	size_t skipped;
+	size_t total;
+
 	/* The band (white on an opaque window), its edge against the items (inset on glass). */
 	edge = *area;
 	edge.height = 1;
@@ -1582,9 +1603,74 @@ view_composer(
 		kl_canvas_fill(style->canvas, &edge, style->theme->separator);
 	}
 
+	/* Draft cards show file names and photo/video icons, with an explicit remove action. */
+	input = *area;
+	input.y += area->height - PH_VIEW_COMPOSER;
+	input.height = PH_VIEW_COMPOSER;
+	shown = 0U;
+	skipped = 0U;
+	total = ph_draft_count(view, contact->id);
+	if (view->attachment_page >= total)
+		view->attachment_page = 0U;
+	for (index = 0U; index < view->attachment_count; index++) {
+		same = strcmp(view->attachments[index].contact, contact->id);
+		if (same != 0)
+			continue;
+		if (skipped++ < view->attachment_page)
+			continue;
+		button.x = input.x + 12 + (int)shown * 156;
+		button.y = area->y + 8;
+		button.width = 148;
+		button.height = 40;
+		if (button.x + button.width > area->x + area->width - 58)
+			break;
+		kl_canvas_round(style->canvas, (float)button.x, (float)button.y, (float)button.width, (float)button.height, 8.0f, style->theme->track);
+		if (view->attachments[index].video)
+			kl_icon_draw(style->canvas, KL_ICON_MOVIES, (float)button.x + 6.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
+		else
+			kl_icon_draw(style->canvas, KL_ICON_PICTURES, (float)button.x + 6.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
+		name = strrchr(view->attachments[index].path, '/');
+		if (name != NULL)
+			name++;
+		else
+			name = view->attachments[index].path;
+		(void)kl_text_draw_fit(style->text, style->canvas, button.x + 30, button.y + 25, name, PH_VIEW_TEXT_SMALL, 0, 84, style->theme->text);
+		button.x += 118;
+		button.width = 28;
+		hit = kl_ui_hit(ui, 900U + (uint32_t)index, 0U, &button);
+		kl_icon_draw(style->canvas, KL_ICON_CLOSE, (float)button.x + 6.0f, (float)button.y + 12.0f, 16.0f, style->theme->icon);
+		removed = 0;
+		if ((hit & KL_HIT_CLICKED) != 0U) {
+			ph_draft_remove(view, index);
+			removed = 1;
+		}
+
+		/* Removal shifts later slots; stop this frame before drawing stale indexes. */
+		if (removed)
+			break;
+		shown++;
+	}
+
+	/* Paging makes every retained attachment reachable even in a narrow composer. */
+	if (total != 0U) {
+		button.x = area->x + area->width - 54;
+		button.y = area->y + 8;
+		button.width = 24;
+		button.height = 40;
+		hit = kl_ui_hit(ui, 950U, 0U, &button);
+		kl_icon_draw(style->canvas, KL_ICON_BACK, (float)button.x + 2.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
+		if ((hit & KL_HIT_CLICKED) != 0U && view->attachment_page != 0U)
+			view->attachment_page--;
+		button.x += 26;
+		hit = kl_ui_hit(ui, 951U, 0U, &button);
+		kl_icon_draw(style->canvas, KL_ICON_FORWARD, (float)button.x + 2.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
+		if ((hit & KL_HIT_CLICKED) != 0U && view->attachment_page + shown < total)
+			view->attachment_page++;
+	}
+
 	/* Attach: a plus in a grey circle. */
-	button.x = area->x + 12;
-	button.y = area->y + 14;
+	button.x = input.x + 12;
+	button.y = input.y + 14;
 	button.width = 32;
 	button.height = 32;
 	hit = kl_ui_hit(ui, PH_ID_ATTACH, 0U, &button);
@@ -1601,8 +1687,8 @@ view_composer(
 	message = view_last_message(contact);
 	if (message != NULL && message->channel == PH_RCS)
 		placeholder = "RCS Message";
-	field.x = area->x + 54;
-	field.y = area->y + 12;
+	field.x = input.x + 54;
+	field.y = input.y + 12;
 	field.width = area->width - 54 - 56;
 	field.height = 36;
 	changes = kl_field(ui, style, PH_ID_MESSAGE, &field, &view->message, placeholder);
@@ -1610,8 +1696,8 @@ view_composer(
 		ph_view_action(view, PH_ACTION_SEND, now_us);
 
 	/* Send: an arrow up in a circle of the accent, grey while nothing is written or the paired phone takes no text. */
-	button.x = area->x + area->width - 46;
-	button.y = area->y + 12;
+	button.x = input.x + input.width - 46;
+	button.y = input.y + 12;
 	button.width = 36;
 	button.height = 36;
 	hit = kl_ui_hit(ui, PH_ID_SEND, 0U, &button);

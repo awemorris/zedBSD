@@ -21,6 +21,7 @@
 #define PHOTOS_APP_H
 
 #include "photos.h"
+#include <keiland/keiland.h>
 
 /* A thumbnail's side, and the most thumbnails kept at once. */
 #define PH_THUMB_SIDE		160

@@ -33,5 +33,6 @@ extern const struct wl_interface kl_system_printers_v1_interface;
 extern const struct wl_interface kl_system_bluetooth_v1_interface;
 extern const struct wl_interface kl_system_displays_v1_interface;
 extern const struct wl_interface kl_system_machine_v1_interface;
+extern const struct wl_interface kl_system_media_v1_interface;
 
 #endif
