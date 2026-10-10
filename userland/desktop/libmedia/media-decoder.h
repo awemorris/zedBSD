@@ -30,6 +30,9 @@
 #define MEDIA_PROBLEM_MISSING	1	/* libavcodec is not installed */
 #define MEDIA_PROBLEM_VERSION	2	/* a version of libavcodec the add-in does not know */
 #define MEDIA_PROBLEM_FORMAT	3	/* the file's codec has no decoder */
+#define MEDIA_PROBLEM_DEVICE	4	/* no GPU with the required standard video capabilities */
+#define MEDIA_PROBLEM_PROFILE	5	/* a native codec's signalled profile or tools are unsupported */
+#define MEDIA_PROBLEM_BUSY	6	/* all hardware video contexts are occupied */
 
 struct media_decoder;
 struct media_frame;

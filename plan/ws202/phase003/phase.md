@@ -2,7 +2,7 @@
 
 # ws202-p003: libmedia の共通の部品と back end の表
 
-Status: uncleared（i04 bits部分はcleared、wholeは未完）
+Status: in-progress（i04 bits部分はcleared、wholeは未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 7 LW
@@ -74,3 +74,7 @@ libraryのops表はnativeだけ。avcodec opsの導入/外部ops注入/degraded�
 ## 2026-10-10 i04部分結果
 
 i04の具体partial scopeをclearedとして終了。[source/設計の具体化・host/build・C全文review・制限](../aac-input-result-20261010.md)。picture/sound/opsのwhole criteriaは未実装。 p003全体をclearedとしてcloseしない。Q1への統合・共有projectionはpending。
+
+## 2026-10-10 自走実装の進捗
+
+ユーザーの動画プレイヤで再生可能になるまで自走する指示により、[codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)を継続中。旧degraded/LC-core-only/FFmpeg-library-backendの手順は適用しない。[AACの実PCM・共通音声の途中証拠](../aac-native-progress-20261010.md)を保存。whole Phaseのclearanceではなく、app/H.264/end_us/seek等の未完criteriaを保持する。独立sourceのみ変更、Master/共有Queue/他担当投影はQ1へpending。

@@ -229,6 +229,8 @@ const struct media_decoder_ops media_avcodec_ops = {
 	addin_picture_size,
 	addin_picture_scale,
 	addin_scaler_free,
+	NULL,
+	NULL,
 };
 
 /*

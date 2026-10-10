@@ -9,8 +9,8 @@ Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Target: **ベータ3**（判断の点 H4「ベータ2 に入れるか」）
-Queue: [AAC入力部分結果（finite run finished）](policy-20261010.md#有限実行-codex-ws202-20261010-aac-input)。履歴: [Huffman部分結果](policy-20261010.md#今回の有限実行-codex-ws202-20261010-aac-tables)と[readback部分結果](policy-20261010.md#有限実行-codex-ws202-20261010-readback)（両finite runはfinished、WSはincomplete）
-Resume point: [2026-10-10ユーザー決定と実装境界](policy-20261010.md)を正本とし、p001再review/各Phase具体手順を改訂する。新p016のi915/必要なlibvulkan補完はユーザー承認済み、software実装・対象host/buildはPASS、Q1統合と実機hash待ち。bits/AAC入力のpartial scopeもcleared（[証拠](aac-input-result-20261010.md)）。raw_data_block/信号処理/native接続とH.264/app移管を続けるためのPhase詳細・依存をQ1の第3版設計へ意味の統合。実機/WS完了は未達。
+Queue: [自走playback（active）](policy-20261010.md#有限実行-codex-ws202-20261010-aac-input)。履歴: [Huffman部分結果](policy-20261010.md#今回の有限実行-codex-ws202-20261010-aac-tables)と[readback部分結果](policy-20261010.md#有限実行-codex-ws202-20261010-readback)（両finite runはfinished、WSはincomplete）
+Resume point: userの自走指示でplaybackまで継続。fixture/common→AAC→H.264/Vulkan→app移管→software検証/実機hand-offを実行する。前回の再開記録: [2026-10-10ユーザー決定と実装境界](policy-20261010.md)を正本とし、p001再review/各Phase具体手順を改訂する。新p016のi915/必要なlibvulkan補完はユーザー承認済み、software実装・対象host/buildはPASS、Q1統合と実機hash待ち。bits/AAC入力のpartial scopeもcleared（[証拠](aac-input-result-20261010.md)）。raw_data_block/信号処理/native接続とH.264/app移管を続けるためのPhase詳細・依存をQ1の第3版設計へ意味の統合。実機/WS完了は未達。
 <!-- awesome-plan-current:end -->
 
 ## 現在の設計境界

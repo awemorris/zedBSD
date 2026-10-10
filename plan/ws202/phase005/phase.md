@@ -2,7 +2,7 @@
 
 # ws202-p005: AAC の構文と表
 
-Status: uncleared（i05 入力metadata/Huffman部分はcleared、wholeは未完）
+Status: in-progress（i05 入力metadata/Huffman部分はcleared、wholeは未完）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
@@ -69,3 +69,7 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
 ## 2026-10-10 i05部分結果
 
 i05の具体partial scopeをclearedとして終了。[source/設計の具体化・host/build・C全文review・制限](../aac-input-result-20261010.md)。ASC/ADTS/PCE metadataと独自Huffman runtimeは通常libmedia buildへ登録。探索は2段lookupからonce初期化のbounded prefix treeへ具体化した（Phase内部、API/依存の追加無し）。raw_data_block/ICS/tool構文、FILのSBR検出、CRC検算、残る規格表/PCMは未実装。 p005全体をclearedとしてcloseしない。Q1への統合・共有projectionはpending。
+
+## 2026-10-10 自走実装の進捗
+
+ユーザーの動画プレイヤで再生可能になるまで自走する指示により、[codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)を継続中。旧degraded/LC-core-only/FFmpeg-library-backendの手順は適用しない。[AACの実PCM・共通音声の途中証拠](../aac-native-progress-20261010.md)を保存。whole Phaseのclearanceではなく、app/H.264/end_us/seek等の未完criteriaを保持する。独立sourceのみ変更、Master/共有Queue/他担当投影はQ1へpending。

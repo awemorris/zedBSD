@@ -47,6 +47,8 @@ struct media_decoder_ops {
 	void (*picture_size)(const void *picture, int *width, int *height);
 	int (*picture_scale)(const void *picture, void **scaler, uint32_t *pixels, size_t stride, int width, int height);
 	void (*scaler_free)(void *scaler);
+	int (*trim)(void *state, int64_t before_us);
+	int64_t (*frame_us)(const void *state);
 };
 
 /*
@@ -72,6 +74,9 @@ struct media_bitstream {
 
 /* The add-in that opens FFmpeg's libavcodec (avcodec.c). */
 extern const struct media_decoder_ops media_avcodec_ops;
+
+/* Original LC reconstruction, with optional GPU video kept in a separate native backend. */
+extern const struct media_decoder_ops media_aac_ops;
 
 /* The bitstream conversion (bitstream.c). */
 int media_bitstream_open(struct media_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);

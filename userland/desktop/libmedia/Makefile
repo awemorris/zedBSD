@@ -12,6 +12,8 @@ LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia
 	userland/desktop/libmedia/avcodec.c userland/desktop/libmedia/bitstream.c \
 	userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c \
 	userland/desktop/libmedia/aac-huffman.c userland/desktop/libmedia/aac-codec.c \
+	userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
+	userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
 	userland/desktop/mediafile/mediafile.c userland/desktop/mediafile/mp4.c userland/desktop/mediafile/mkv.c \
 	userland/desktop/mediafile/ts.c userland/desktop/mediafile/ogg.c userland/desktop/mediafile/avi.c
 LIBMEDIA_IMAGE_DATA := $(if $(ZEDBSD_TOPLEVEL_BUILD),/lib/libmedia.so=$(BUILD)/dynamic/libmedia.so)

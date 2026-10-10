@@ -2,7 +2,7 @@
 
 # ws202-p006: AAC の信号処理と back end
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 9 LW
@@ -55,3 +55,7 @@ p005 の構文の結果から PCM を作り、`media_aac_ops` として decoder 
 ## 構造改訂と部分結果（2026-10-10）
 
 AAC-LCだけを実装。HE-AAC/非対応toolはPROFILEを返す。avcodec opsをlibraryの表へ入れず、音のfallbackはapp側。Huffman数値部分以外のparser/filterbankは未実装。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## 2026-10-10 自走実装の進捗
+
+ユーザーの動画プレイヤで再生可能になるまで自走する指示により、[codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)を継続中。旧degraded/LC-core-only/FFmpeg-library-backendの手順は適用しない。[AACの実PCM・共通音声の途中証拠](../aac-native-progress-20261010.md)を保存。whole Phaseのclearanceではなく、app/H.264/end_us/seek等の未完criteriaを保持する。独立sourceのみ変更、Master/共有Queue/他担当投影はQ1へpending。
