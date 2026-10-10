@@ -147,7 +147,7 @@ struct system_mail_listener {
 	void (*allowed)(void *data, struct wl_proxy *proxy, uint32_t on);
 };
 
-/* The listener of kl_system_phone_v1's events (ws170-p004; item and the others since 27, ws197-p004a), in their order. */
+/* The listener of kl_system_phone_v1's events (ws170-p004; item and the others since 27, ws197-p004a; link_contacts since 28, ws197-p005), in their order. */
 struct system_phone_listener {
 	void (*received)(void *data, struct wl_proxy *proxy, uint32_t channel, const char *from, const char *text, uint32_t time_high, uint32_t time_low);
 	void (*status)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t state);
@@ -157,6 +157,7 @@ struct system_phone_listener {
 	void (*link)(void *data, struct wl_proxy *proxy, uint32_t backend, uint32_t linked, uint32_t messages, uint32_t can_send, uint32_t notify, uint32_t owner, uint32_t enabled, uint32_t profiles, uint32_t present, const char *address, const char *why);
 	void (*dropped)(void *data, struct wl_proxy *proxy);
 	void (*done)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t code);
+	void (*link_contacts)(void *data, struct wl_proxy *proxy, uint32_t contacts, uint32_t record, const char *contacts_why);
 };
 
 /* The listener of kl_system_printers_v1's events (ws145-p003), in their order. */
@@ -217,6 +218,7 @@ static void system_phone_page_end(void *data, struct wl_proxy *proxy, uint32_t r
 static void system_phone_link(void *data, struct wl_proxy *proxy, uint32_t backend, uint32_t linked, uint32_t messages, uint32_t can_send, uint32_t notify, uint32_t owner, uint32_t enabled, uint32_t profiles, uint32_t present, const char *address, const char *why);
 static void system_phone_dropped(void *data, struct wl_proxy *proxy);
 static void system_phone_done(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t code);
+static void system_phone_link_contacts(void *data, struct wl_proxy *proxy, uint32_t contacts, uint32_t record, const char *contacts_why);
 static int system_phone_sync_offered(const struct kl_system *system);
 static int system_phone_number(const char *to, char *number, size_t size);
 static int system_phone_word(const char *word, size_t size);
@@ -365,7 +367,8 @@ static const struct system_phone_listener system_phone_listener = {
 	system_phone_page_end,
 	system_phone_link,
 	system_phone_dropped,
-	system_phone_done
+	system_phone_done,
+	system_phone_link_contacts
 };
 
 /* The printers object's callbacks (ws145-p003). */
@@ -557,6 +560,8 @@ kl_system_capabilities(
 		bits |= KL_SYSTEM_HAS_PHONE;
 	if (system->phone != NULL && system->manager_version >= KL_SYSTEM_SINCE_PHONE_SYNC)
 		bits |= KL_SYSTEM_HAS_PHONE_SYNC;
+	if (system->phone != NULL && system->manager_version >= KL_SYSTEM_SINCE_PHONE_CONTACTS)
+		bits |= KL_SYSTEM_HAS_PHONE_CONTACTS;
 	if (system->printers != NULL)
 		bits |= KL_SYSTEM_HAS_PRINTERS;
 	if (system->displays != NULL)
@@ -1659,15 +1664,25 @@ kl_system_phone_sync(
 	int valid;
 	int error;
 
-	/* A system, the messages, and a page the compositor takes. */
+	/* A system, and the compositor's messages of the phone. */
 	if (system == NULL)
 		return EINVAL;
 	offered = system_phone_sync_offered(system);
 	if (!offered)
 		return ENOTSUP;
-	if (what != KL_PHONE_MESSAGES || since < 0)
+
+	/* The messages, the contacts or the calls (the last two since KL_VERSION 80). */
+	if (what > KL_PHONE_CALLS || since < 0)
 		return EINVAL;
+	if (what != KL_PHONE_MESSAGES && system->manager_version < KL_SYSTEM_SINCE_PHONE_CONTACTS)
+		return ENOTSUP;
+
+	/* A page the compositor takes: a limit for the messages alone, since not for the contacts. */
 	if (count == 0U || count > 32U || limit > 500U)
+		return EINVAL;
+	if (what != KL_PHONE_MESSAGES && limit != 0U)
+		return EINVAL;
+	if (what == KL_PHONE_CONTACTS && since != 0)
 		return EINVAL;
 
 	/* A cursor of one word, or none at the start. */
@@ -4245,6 +4260,24 @@ system_phone_done(
 	/* The result, and the program's sync ended when it is the sync's. */
 	system = data;
 	system_view_phone_done(&system->view, request, code);
+}
+
+/* The contacts' part of the link that follows it (ws197-p005). */
+static void
+system_phone_link_contacts(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t contacts,
+	uint32_t record,
+	const char *contacts_why)
+{
+	struct kl_system *system;
+
+	UNUSED_PARAMETER(proxy);
+
+	/* Kept for the link that follows. */
+	system = data;
+	system_view_phone_link_contacts(&system->view, contacts, record, contacts_why);
 }
 
 /* Tells whether the compositor offers the phone's messages (a phone of version 27, not lost). */

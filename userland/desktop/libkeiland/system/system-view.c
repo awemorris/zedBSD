@@ -18,6 +18,7 @@
 #include "userland/desktop/libkeiland/system/kl-system-protocol.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -738,9 +739,9 @@ system_view_phone_item(
 
 /*
  * Takes the oldest phone item into the caller's structure of size bytes
- * (a later version's larger one has the rest zeroed): 1 with it, 0 when
- * none waits or the size is less than this version's.  Its text lives
- * until the next take.
+ * (a later version's larger one has the rest zeroed, a smaller one gets
+ * the fields it has): 1 with it, 0 when none waits or the size is less
+ * than KL_VERSION 79's.  Its text lives until the next take.
  */
 int
 system_view_take_phone_item(
@@ -749,22 +750,32 @@ system_view_take_phone_item(
 	size_t size)
 {
 	struct system_view_phone_item *kept;
+	struct kl_phone_item copy;
+	size_t copied;
 
 	/* The text of the item taken last goes now. */
 	free(view->phone_taken_text);
 	view->phone_taken_text = NULL;
 
-	/* A structure of this version at least, and an item waiting. */
-	if (size < sizeof(*item))
+	/* A structure of KL_VERSION 79 at least (an item has not grown since), and an item waiting. */
+	if (size < SYSTEM_VIEW_PHONE_ITEM_SIZE_79)
 		return 0;
 	if (view->phone_item_count == 0U)
 		return 0;
 
-	/* The oldest, its text now the one taken last. */
+	/* The oldest, with its text. */
 	kept = &view->phone_items[view->phone_item_head];
+	copy = kept->item;
+	copy.text = kept->text;
+
+	/* As much as the caller's structure holds, the rest of it zero. */
+	copied = sizeof(copy);
+	if (copied > size)
+		copied = size;
 	memset(item, 0, size);
-	*item = kept->item;
-	item->text = kept->text;
+	memcpy(item, &copy, copied);
+
+	/* Its text now the one taken last. */
 	view->phone_taken_text = kept->text;
 	kept->text = NULL;
 	view->phone_item_head = (view->phone_item_head + 1U) % SYSTEM_VIEW_PHONE_ITEMS;
@@ -816,7 +827,9 @@ system_view_phone_page_end_of(
 }
 
 /*
- * Keeps the phone link's state (ws197-p004a) and tells KL_PHONE_LINK_CHANGED.
+ * Keeps the phone link's state (ws197-p004a) and tells
+ * KL_PHONE_LINK_CHANGED.  The contacts' part comes from the link_contacts
+ * told just before (ws197-p005); a link without one has none.
  */
 void
 system_view_phone_link(
@@ -826,13 +839,48 @@ system_view_phone_link(
 	/* The state, known from now on. */
 	view->phone_link = *link;
 	view->phone_link_known = 1U;
+
+	/* The contacts' part told for this link (none from a compositor that did not tell it). */
+	view->phone_link.contacts = 0U;
+	view->phone_link.record = 0U;
+	view->phone_link.contacts_why[0] = '\0';
+	if (view->phone_contacts_told) {
+		view->phone_link.contacts = view->phone_contacts;
+		view->phone_link.record = view->phone_record;
+		(void)snprintf(view->phone_link.contacts_why, sizeof(view->phone_link.contacts_why), "%s", view->phone_contacts_why);
+	}
+
+	/* Taken: the next link needs its own. */
+	view->phone_contacts_told = 0U;
+
+	/* Told to the program. */
 	system_view_phone_mark(view, KL_PHONE_LINK_CHANGED);
 }
 
 /*
+ * Keeps the contacts' part of the link that follows (ws197-p005): the
+ * contacts' state, whether the phone's record is known, and why the
+ * contacts stopped.  A second one before the link replaces the first.
+ */
+void
+system_view_phone_link_contacts(
+	struct system_view *view,
+	unsigned contacts,
+	unsigned record,
+	const char *why)
+{
+	/* Kept for the next link. */
+	view->phone_contacts = contacts;
+	view->phone_record = record;
+	(void)snprintf(view->phone_contacts_why, sizeof(view->phone_contacts_why), "%s", why);
+	view->phone_contacts_told = 1U;
+}
+
+/*
  * Copies the phone link's state into the caller's structure of size bytes
- * (a later version's larger one has the rest zeroed): 0, ENOENT before it
- * was told, or EINVAL for a size less than this version's.
+ * (a later version's larger one has the rest zeroed; KL_VERSION 79's
+ * smaller one gets the fields it has, ws197-p005 review-1 M6): 0, ENOENT
+ * before it was told, or EINVAL for a size less than KL_VERSION 79's.
  */
 int
 system_view_phone_link_get(
@@ -840,17 +888,24 @@ system_view_phone_link_get(
 	struct kl_phone_link *link,
 	size_t size)
 {
-	/* A structure of this version at least. */
-	if (size < sizeof(*link))
+	size_t copied;
+
+	/* A structure of KL_VERSION 79 at least. */
+	if (size < SYSTEM_VIEW_PHONE_LINK_SIZE_79)
 		return EINVAL;
 
 	/* Not told yet. */
 	if (!view->phone_link_known)
 		return ENOENT;
 
-	/* Succeeded: the copy. */
+	/* As much as the caller's structure holds, the rest of it zero. */
+	copied = sizeof(view->phone_link);
+	if (copied > size)
+		copied = size;
 	memset(link, 0, size);
-	*link = view->phone_link;
+	memcpy(link, &view->phone_link, copied);
+
+	/* Succeeded: the copy. */
 	return 0;
 }
 

@@ -12,7 +12,7 @@
  * compositor serves them and libkeiland speaks them; both include this
  * header and neither the other's code (WS131 D4 (c)).
  *
- * kl_system_manager_v1 (a global, version 27; its objects are made at its version)
+ * kl_system_manager_v1 (a global, version 28; its objects are made at its version)
  *   request 0 destroy
  *   request 1 get_settings(new_id kl_system_settings_v1)
  *   request 2 get_network(new_id kl_system_network_v1)    (WS131 p010)
@@ -321,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION		27U
+#define KL_SYSTEM_MANAGER_VERSION		28U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -417,6 +417,9 @@
 
 /* Since when the notifications have post_lock (ws197-p004c). */
 #define KL_SYSTEM_SINCE_NOTIFY_LOCK		27U
+
+/* Since when the phone's syncs read the contacts and the calls, and the phone has link_contacts (ws197-p005). */
+#define KL_SYSTEM_SINCE_PHONE_CONTACTS		28U
 
 /* The interfaces' names (WS131 p010). */
 #define KL_SYSTEM_NETWORK_NAME			"kl_system_network_v1"
@@ -639,10 +642,27 @@
  *       items that came were lost: synchronise again
  *   event   7 done(uint request, uint code)
  *       a request of version 27 answered (KL_SYSTEM_RESULT_*)
- * The new events go to objects of version 27 only; done, page_end, link
- * and dropped are never lost (the compositor owes them until the client
- * reads).  The backend is the desktop's setting phone.backend (0 none, 1
- * loopback, 2 bluetooth).
+ * Since version 28 (ws197-p005, plan/ws197/phase005/phase.md section 6):
+ *   sync's what may be 1 (the phone's contacts: since and limit 0) or 2
+ *       (its calls since a time: limit 0); an item's what says which.  A
+ *       contact's item: its key, how many numbers (folder), its first
+ *       number (peer), its name and its reduced vCard 3.0 (text).  A
+ *       call's: its key, its kind (folder: 0 received, 1 dialed, 2
+ *       missed), out for one dialed, its time and zone (0 the phone's, 2
+ *       this computer's, 3 when it came, partial), the phone's datetime,
+ *       the number, the name, and no text.  page_end's capped is bits: 1
+ *       a limit stopped it, 2 the contacts' count changed while they were
+ *       read, 4 a page's count is not to be trusted.
+ *   event   8 link_contacts(uint contacts, uint record, string contacts_why)
+ *       sent just before each link, which it belongs to: the contacts'
+ *       state (0 off, 1 connecting, 2 ready, 3 failed), whether the
+ *       phone's record is known (0 not known, 1 none, 2 there is one),
+ *       and why the contacts stopped
+ * The new events go to objects of version 27 only (link_contacts to
+ * those of 28); done, page_end, link and dropped are never lost (the
+ * compositor owes them until the client reads; a link owed is sent again
+ * with its link_contacts).  The backend is the desktop's setting
+ * phone.backend (0 none, 1 loopback, 2 bluetooth).
  */
 #define KL_SYSTEM_PHONE_DESTROY			0U
 #define KL_SYSTEM_PHONE_SEND			1U
@@ -661,10 +681,13 @@
 #define KL_SYSTEM_PHONE_EVENT_LINK		5U
 #define KL_SYSTEM_PHONE_EVENT_DROPPED		6U
 #define KL_SYSTEM_PHONE_EVENT_DONE		7U
+#define KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS	8U
 
-/* The channel of SMS (keiland.h's KL_PHONE_SMS) and what a sync asks for (KL_PHONE_MESSAGES). */
+/* The channel of SMS (keiland.h's KL_PHONE_SMS) and what a sync asks for (KL_PHONE_MESSAGES, _CONTACTS and _CALLS). */
 #define KL_SYSTEM_PHONE_SMS			0U
 #define KL_SYSTEM_PHONE_MESSAGES		0U
+#define KL_SYSTEM_PHONE_CONTACTS		1U
+#define KL_SYSTEM_PHONE_CALLS			2U
 
 /* An item's flags (bits). */
 #define KL_SYSTEM_PHONE_ITEM_READ		0x1U

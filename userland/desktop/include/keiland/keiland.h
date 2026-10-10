@@ -45,8 +45,8 @@
 extern "C" {
 #endif
 
-/* The interface version this header describes (2: the System Menu; 3: the recent files; 4: the titlebar; 5: the glass panels; 6: context menus; 7: drop targets in the titlebar; 8: the network; 9: the touch motion; 10: the scroller and the gestures; 11: the network's links, DNS and saved keys; 12: the file chooser (moved to the widgets with 16); 13: the desktop's preferences; 14: the desktop surface; 15: the sound output's volume; 16: the file chooser removed, now the widgets' kl_file_chooser; 17: kl_glass_set_blur; 18: the keyboard inset; 19: the editing operations; 20: the titlebar's sheet mode; 21: whether a sound service runs; 22: the network and the sound moved to kl_system_*, the old network and sound calls removed; 23: the machine's monitor, kl_system_monitor_*; 24: kl_system_network_set_scanning; 25: kl_titlebar_set_suggestions; 26: the application, kl_app_*, and the declarative menus, controls and glass of a window; 27: kl_system_account_set_password; 28: the removable volumes, kl_system_devices_mount; 29: the wired interfaces' configuration, kl_system_network_configure_wired; 30: Remote Login, kl_system_sharing_*; 31: the administration of the accounts, kl_system_account_administer; 32: one copy of a program and the activation, kl_instance_* and kl_activation_*; 33: a removable device's file system and size, kl_system_devices_info; 34: the lock screen's PIN, kl_system_account_set_pin; 35: the desktop's appearance, light or dark, kl_appearance_*; 36: what the user has enrolled, kl_system_account_enrolled; 37: the translations, kl_tr_*; 38: an input method's text for the focused widget, kl_ui_text and kl_ui_text_wanted; 39: a network link's speed, kl_network_link's link_mbps; 40: a touch pad's scrolling that flies on, kl_window_event's axis_source and KL_WINDOW_AXIS_STOP, kl_ui_axis, kl_scroll_axis and kl_axis_track; 41: the one inertia of every program, a touch pad's fingers on kl_scroller, kl_scroller_axis, _axis_stop and _axis_holding, kl_scroller_release's answer; 42: what a window shows, kl_window_set_content_type; 43: KL_WINDOW_AXIS_STOP is 18, apart from KL_WINDOW_ACTION; 44: a window's tabs, its selections' changes, drag and drop, kl_window_set_tabs and the others; 45: a window maximized, minimized, its screen's mode, its device, its frame's times and a breadcrumb's parts; 46: the desktop surface's role, drag and drop's actions and data, a drag over the titlebar's controls; 47: a window's input for its widgets and the text input of their fields, kl_ui_window_input and kl_ui_window_text, and the text area; 48: kl_slider_flags, kl_sidebar_place, kl_text_companions; 49: notifications, kl_system_notify, kl_system_notify_withdraw, kl_system_take_notify_event and kl_app_notify; 50: the recent list emptied and stopped, kl_recent_clear, kl_recent_set_keep and kl_recent_keep; 51: an application watches up to 64 descriptors, KL_APP_FDS_MAX; 52: the user's security keys, kl_system_account_add_key, kl_system_account_remove_key, kl_system_account_keys and kl_system_account_touched; 53: the views of many items, kl_list_header, kl_list_item, kl_list_cell, kl_grid_layout, kl_grid_cell, kl_grid_icon, kl_grid_item and kl_band; 54: the arrivals of mail, kl_system_mail_arrived, kl_system_mail_listen and kl_system_take_mail_event; 55: the phone, kl_system_phone_send, kl_system_phone_call and kl_system_take_phone_event; 56: the printers, kl_system_printers_* and kl_system_print_*; 57: the accent the user chose, kl_accent_get and kl_accent_values, the theme's accent_ink and accent_text; 58: the displays, kl_system_displays_*; 59: a display turned off, kl_system_displays_set_shown and KL_DISPLAY_OFF; 60: a button that is a picture alone, kl_icon_button, KL_ICON_DISCONNECT and KL_ICON_EJECT, and a button or a sidebar's place drawn without a kl_ui; 61: a scroll's own ends and rubber band, kl_scroll_set_bounds, the touch pad's times and velocity, kl_scroll_axis_at, kl_scroll_axis_stop_at and kl_scroll_axis_holding, and kl_scroll_fling's answer; 62: the part a change of the lit widget needs drawn again, kl_ui_take_damage, and kl_canvas_clear within the clip; 63: a frame shown by its changed part, kl_window_present_part; 64: a field's own limit, kl_field's limit and kl_field_set_limit; 65: the notification events a full ring lost, KL_NOTIFY_LOST, and whether a mail reader is allowed, kl_system_mail_allowed; 66: the recent list's stamp, kl_recent_stamp; 67: the text widgets' undo and redo, clipboard and words, Ctrl+Z, Ctrl+Y, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Left and Ctrl+Right, with kl_ui_window_text tying the input to its window; 68: what an input method reads around the caret, kl_window_text_context; 69: what Settings reads of the computer, kl_system_machine_*; 70: drag and drop of pictures between applications, KL_DROP_IMAGE, kl_window_start_drag_icon, kl_window_drag_fill, kl_drop_frame, kl_drop_caret and kl_ui_pointer_cancel; 71: the mounted file systems, kl_system_machine_mounts and KL_MACHINE_MOUNTS; 72: Bluetooth, kl_system_bluetooth_*; 73: the sound's playback streams, kl_audio_stream_*; 74: the fingers' selection of the fields and the text area with handles and a bar of editing buttons, kl_text_bar_*, kl_text_touch_select, kl_text_touch_hide_bar, kl_text_touch_toggle_bar, kl_text_touch's bar and KL_TEXT_TOUCH_BAR, kl_ui_set_text_bar; 75: a printer's name, IPP path or LPD queue changed, kl_system_printers_edit; 76: a network link that is a radio, kl_network_link's wireless; 77: a security key's own operations, kl_system_account_key_info, _key_info_get, _key_pin, _key_reset, _key_cancel, _replugged and _key_removed, KL_SYSTEM_HAS_KEY_OPS, KL_SYSTEM_CHANGED_KEYS and KL_SYSTEM_CHANGED_REPLUG; 78: the sign-in methods of the login and locked screens, kl_system_account_methods and _set_methods, KL_SYSTEM_HAS_METHODS; 79: the phone's messages synchronised, kl_system_phone_listen, _link, _watch_link, _link_set, _sync, _page_end, _send_text, _mark_read and kl_system_take_phone_item, KL_SYSTEM_HAS_PHONE_SYNC, KL_BLUETOOTH_PAIR_PHONE, and a notification's words for the lock screen, kl_system_notify_lock and kl_app_notify_lock). */
-#define KL_VERSION	79U
+/* The interface version this header describes (2: the System Menu; 3: the recent files; 4: the titlebar; 5: the glass panels; 6: context menus; 7: drop targets in the titlebar; 8: the network; 9: the touch motion; 10: the scroller and the gestures; 11: the network's links, DNS and saved keys; 12: the file chooser (moved to the widgets with 16); 13: the desktop's preferences; 14: the desktop surface; 15: the sound output's volume; 16: the file chooser removed, now the widgets' kl_file_chooser; 17: kl_glass_set_blur; 18: the keyboard inset; 19: the editing operations; 20: the titlebar's sheet mode; 21: whether a sound service runs; 22: the network and the sound moved to kl_system_*, the old network and sound calls removed; 23: the machine's monitor, kl_system_monitor_*; 24: kl_system_network_set_scanning; 25: kl_titlebar_set_suggestions; 26: the application, kl_app_*, and the declarative menus, controls and glass of a window; 27: kl_system_account_set_password; 28: the removable volumes, kl_system_devices_mount; 29: the wired interfaces' configuration, kl_system_network_configure_wired; 30: Remote Login, kl_system_sharing_*; 31: the administration of the accounts, kl_system_account_administer; 32: one copy of a program and the activation, kl_instance_* and kl_activation_*; 33: a removable device's file system and size, kl_system_devices_info; 34: the lock screen's PIN, kl_system_account_set_pin; 35: the desktop's appearance, light or dark, kl_appearance_*; 36: what the user has enrolled, kl_system_account_enrolled; 37: the translations, kl_tr_*; 38: an input method's text for the focused widget, kl_ui_text and kl_ui_text_wanted; 39: a network link's speed, kl_network_link's link_mbps; 40: a touch pad's scrolling that flies on, kl_window_event's axis_source and KL_WINDOW_AXIS_STOP, kl_ui_axis, kl_scroll_axis and kl_axis_track; 41: the one inertia of every program, a touch pad's fingers on kl_scroller, kl_scroller_axis, _axis_stop and _axis_holding, kl_scroller_release's answer; 42: what a window shows, kl_window_set_content_type; 43: KL_WINDOW_AXIS_STOP is 18, apart from KL_WINDOW_ACTION; 44: a window's tabs, its selections' changes, drag and drop, kl_window_set_tabs and the others; 45: a window maximized, minimized, its screen's mode, its device, its frame's times and a breadcrumb's parts; 46: the desktop surface's role, drag and drop's actions and data, a drag over the titlebar's controls; 47: a window's input for its widgets and the text input of their fields, kl_ui_window_input and kl_ui_window_text, and the text area; 48: kl_slider_flags, kl_sidebar_place, kl_text_companions; 49: notifications, kl_system_notify, kl_system_notify_withdraw, kl_system_take_notify_event and kl_app_notify; 50: the recent list emptied and stopped, kl_recent_clear, kl_recent_set_keep and kl_recent_keep; 51: an application watches up to 64 descriptors, KL_APP_FDS_MAX; 52: the user's security keys, kl_system_account_add_key, kl_system_account_remove_key, kl_system_account_keys and kl_system_account_touched; 53: the views of many items, kl_list_header, kl_list_item, kl_list_cell, kl_grid_layout, kl_grid_cell, kl_grid_icon, kl_grid_item and kl_band; 54: the arrivals of mail, kl_system_mail_arrived, kl_system_mail_listen and kl_system_take_mail_event; 55: the phone, kl_system_phone_send, kl_system_phone_call and kl_system_take_phone_event; 56: the printers, kl_system_printers_* and kl_system_print_*; 57: the accent the user chose, kl_accent_get and kl_accent_values, the theme's accent_ink and accent_text; 58: the displays, kl_system_displays_*; 59: a display turned off, kl_system_displays_set_shown and KL_DISPLAY_OFF; 60: a button that is a picture alone, kl_icon_button, KL_ICON_DISCONNECT and KL_ICON_EJECT, and a button or a sidebar's place drawn without a kl_ui; 61: a scroll's own ends and rubber band, kl_scroll_set_bounds, the touch pad's times and velocity, kl_scroll_axis_at, kl_scroll_axis_stop_at and kl_scroll_axis_holding, and kl_scroll_fling's answer; 62: the part a change of the lit widget needs drawn again, kl_ui_take_damage, and kl_canvas_clear within the clip; 63: a frame shown by its changed part, kl_window_present_part; 64: a field's own limit, kl_field's limit and kl_field_set_limit; 65: the notification events a full ring lost, KL_NOTIFY_LOST, and whether a mail reader is allowed, kl_system_mail_allowed; 66: the recent list's stamp, kl_recent_stamp; 67: the text widgets' undo and redo, clipboard and words, Ctrl+Z, Ctrl+Y, Ctrl+C, Ctrl+X, Ctrl+V, Ctrl+Left and Ctrl+Right, with kl_ui_window_text tying the input to its window; 68: what an input method reads around the caret, kl_window_text_context; 69: what Settings reads of the computer, kl_system_machine_*; 70: drag and drop of pictures between applications, KL_DROP_IMAGE, kl_window_start_drag_icon, kl_window_drag_fill, kl_drop_frame, kl_drop_caret and kl_ui_pointer_cancel; 71: the mounted file systems, kl_system_machine_mounts and KL_MACHINE_MOUNTS; 72: Bluetooth, kl_system_bluetooth_*; 73: the sound's playback streams, kl_audio_stream_*; 74: the fingers' selection of the fields and the text area with handles and a bar of editing buttons, kl_text_bar_*, kl_text_touch_select, kl_text_touch_hide_bar, kl_text_touch_toggle_bar, kl_text_touch's bar and KL_TEXT_TOUCH_BAR, kl_ui_set_text_bar; 75: a printer's name, IPP path or LPD queue changed, kl_system_printers_edit; 76: a network link that is a radio, kl_network_link's wireless; 77: a security key's own operations, kl_system_account_key_info, _key_info_get, _key_pin, _key_reset, _key_cancel, _replugged and _key_removed, KL_SYSTEM_HAS_KEY_OPS, KL_SYSTEM_CHANGED_KEYS and KL_SYSTEM_CHANGED_REPLUG; 78: the sign-in methods of the login and locked screens, kl_system_account_methods and _set_methods, KL_SYSTEM_HAS_METHODS; 79: the phone's messages synchronised, kl_system_phone_listen, _link, _watch_link, _link_set, _sync, _page_end, _send_text, _mark_read and kl_system_take_phone_item, KL_SYSTEM_HAS_PHONE_SYNC, KL_BLUETOOTH_PAIR_PHONE, and a notification's words for the lock screen, kl_system_notify_lock and kl_app_notify_lock; 80: the phone's contacts and calls, KL_PHONE_CONTACTS and KL_PHONE_CALLS for kl_system_phone_sync, kl_phone_link's contacts, contacts_why and record, KL_SYSTEM_HAS_PHONE_CONTACTS). */
+#define KL_VERSION	80U
 
 /*
  * Reports the interface version of the library that was loaded.
@@ -1263,6 +1263,7 @@ int kl_settings_take_result(struct kl_settings *settings, uint32_t *request, int
 #define KL_SYSTEM_HAS_KEY_OPS	0x40000U	/* kl_system_account_key_info, _key_pin, _key_reset (KL_VERSION 77, ws199-p001) */
 #define KL_SYSTEM_HAS_METHODS	0x80000U	/* kl_system_account_methods and _set_methods (KL_VERSION 78, WS200) */
 #define KL_SYSTEM_HAS_PHONE_SYNC	0x100000U	/* kl_system_phone_listen, _link, _watch_link, _link_set, _sync, _page_end, _send_text, _mark_read, kl_system_take_phone_item (KL_VERSION 79, ws197-p004a) */
+#define KL_SYSTEM_HAS_PHONE_CONTACTS	0x200000U	/* kl_system_phone_sync of KL_PHONE_CONTACTS and KL_PHONE_CALLS, kl_phone_link's contacts and record (KL_VERSION 80, ws197-p005) */
 
 /* What a kl_system_dispatch found changed. */
 #define KL_SYSTEM_CHANGED_NETWORK	0x1U	/* the network's state */
@@ -1702,7 +1703,18 @@ int kl_system_take_phone_event(struct kl_system *system, struct kl_phone_event *
  * marks a message read on the phone by the handle of its item.
  * kl_system_phone_watch_link and kl_system_phone_link_set are Settings':
  * the link's changes alone, and the phone's switch and its profiles
- * (KL_PHONE_PROFILE_*).
+ * (KL_PHONE_PROFILE_*; off keeps the phone's profiles as they are).
+ *
+ * KL_VERSION 80 (ws197-p005, plan/ws197/phase005/phase.md section 6.1,
+ * KL_SYSTEM_HAS_PHONE_CONTACTS): kl_system_phone_sync also reads the
+ * phone's contacts (KL_PHONE_CONTACTS: since and limit 0) and its calls'
+ * history (KL_PHONE_CALLS: the calls since a time, limit 0), Bluetooth's
+ * PBAP.  The page's capped is bits: 1 a limit stopped it (5000 contacts,
+ * 500 calls of a kind), 2 the contacts' count changed while they were
+ * read, 4 a page's count is not to be trusted (a card did not end); a
+ * program that forgets what did not come keeps it while any is set.
+ * kl_phone_link tells the contacts' state and whether the phone's record
+ * is known.
  *
  * Every request is answered once by its result (kl_system_take_result):
  * 0, ENODEV without a backend, ENOTSUP, ENOTCONN (the phone's messages
@@ -1723,6 +1735,8 @@ int kl_system_take_phone_event(struct kl_system *system, struct kl_phone_event *
  * so that a later version adds fields at their end.
  */
 #define KL_PHONE_MESSAGES		0U
+#define KL_PHONE_CONTACTS		1U
+#define KL_PHONE_CALLS			2U
 #define KL_PHONE_ITEMS			10U
 #define KL_PHONE_LINK_CHANGED		11U
 #define KL_PHONE_DROPPED		12U
@@ -1750,6 +1764,15 @@ int kl_system_take_phone_event(struct kl_system *system, struct kl_phone_event *
  * and name (empty when none), whether it is read, has no key, or was cut
  * to KL_PHONE_ITEM_TEXT_MAX bytes, and its text (UTF-8, ended by a NUL)
  * and length.
+ *
+ * KL_VERSION 80: a contact (what KL_PHONE_CONTACTS) has its key, how many
+ * numbers it has (folder), its first number (peer), its name and its
+ * reduced vCard 3.0 (text), the rest 0.  A call (KL_PHONE_CALLS) has its
+ * key, its kind (folder: 0 received, 1 dialed, 2 missed), direction 1 for
+ * one dialed, its time and where that came from (0 the phone's datetime
+ * with its zone, 2 the phone's datetime read in this computer's zone, 3
+ * the phone gave none or one not read: the time it came, partial), the
+ * phone's datetime, the number and the name, and no text.
  */
 struct kl_phone_item {
 	uint32_t request;
@@ -1777,6 +1800,14 @@ struct kl_phone_item {
  * this user owns the phone, the phone's switch and its profiles
  * (KL_PHONE_PROFILE_*), whether the owner is at the seat, the phone's
  * address, and why it does not work (a word, or empty).
+ *
+ * KL_VERSION 80 (at the end, 0 from an older compositor): the contacts (0
+ * off, 1 connecting, 2 ready, 3 failed), why they stopped (a word, or
+ * empty), and whether the phone's record is known (0 not known: the
+ * loopback, or the phone's service not answering, or not read yet since
+ * it answered; 1 there is none; 2 there is one), told whatever the
+ * backend chosen.  A program of KL_VERSION 79 passes the smaller size and
+ * gets the fields it knows.
  */
 struct kl_phone_link {
 	unsigned backend;
@@ -1790,6 +1821,9 @@ struct kl_phone_link {
 	unsigned present;
 	char address[KL_PHONE_ADDRESS_MAX];
 	char why[KL_PHONE_WHY_MAX];
+	unsigned contacts;
+	char contacts_why[KL_PHONE_WHY_MAX];
+	unsigned record;
 };
 
 /* The phone's messages' calls, as told above (KL_SYSTEM_HAS_PHONE_SYNC). */
