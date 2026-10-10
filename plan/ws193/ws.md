@@ -3,14 +3,14 @@
 # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（p004のarm64選択修正を実行、既存p001/p002のcleared履歴は保持）
+Status: incomplete（p004はmain統合済み、p005のCPU共通選択/FFmpeg build確認済み）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex arm64選択修正](codex-queue.md) finished、main統合承認待ち。旧q918（P1）の履歴は保持。
+Queue: [Codexユーザーランド選択](codex-userland-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p004のarm64選択修正/検証済み成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p005の検証済みWIP成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -73,10 +73,19 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 | [p001](phase001/phase.md) | 今の tools/menuconfig.py の調べ、新しい階層と Build boot image の実装、host 試験 | cleared（phase001の既存記録との投影を照合） | — |
 | p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |
-| [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、main統合待ち） | p001 source |
+| [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
+| [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、main統合待ち） | p004 source |
 
 ## 2026-10-10 RPi4 UAT前のarm64選択修正
 
 ユーザーがCPU arm64を選んでもx86_64表示が残ると報告し修正を依頼。p004と独立Queueを追加。実関数でarchitecture名をplatformに入れるとnormalizeでamd64へ戻ると再現した。p001/p002の過去のclearedは維持し、この限定バグを修正する。WSのtableに残っていたp001 plannedはphase本文の既存clearedへ投影を整えた。shared master/Queue/cache、GitHub公開はQ1。
 
 p004 cleared。3行のplatform field統一、実関数/PTYでCPU/Board/Headerと選択indexを確認、save/load/make validation/Python syntax/diff-check PASS。[証拠](tests/arm64-selection-20261010.md)。今回の具体的commitのmain統合を最後に確認。WS全体の未完criteriaは維持、push無し。
+
+## 2026-10-10 CPU共通のユーザーランド選択
+
+ユーザーがarm64でFFmpegが消えると報告。「全項目を全CPUで選択可能にしたい」と回答したためp005を追加。Base/Desktop/Packagesを共通registryで選択・保存し、FFmpegのarm64設定/buildを確認する。Firmwareと直接記述専用Tests/X11は従前の対象条件を持つ。全optional packageの全CPU実行成功は今回の受入ではない。shared Master/QueueとGitHub公開はQ1へ保留。
+
+p004のsource 93914124cはユーザーの個別承認でmain統合済み（このQueue開始時のmain HEADから確認）。前Queueの統合待ちの記録は当時の状態として保持し、現在の投影を上で訂正した。後続docs commit 308800bc2/2e48f7341は別branchに残り、この修正へ取り込んでいない。
+
+p005 cleared: 共通registryをrootに一箇所で適用し、全6platformの255項目の選択/保存/Make実効値PASS、RPi4実メニューのFFmpeg表示PASS、FFmpeg arm64 package buildと全5 ELF検証PASS。[証拠](tests/userland-selection-20261010.md)。外部sourceの警告、全optional package/実機の未確認は証拠に明記。WS全体の受入は維持し完了扱いにはしない。mainへ具体的成果の承認を確認する。

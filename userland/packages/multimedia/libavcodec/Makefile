@@ -42,13 +42,19 @@ ZEDBSD_LIBAVCODEC_LICENSES := $(ZEDBSD_EXT_libavcodec_SRCDIR)/COPYING.LGPLv2.1 $
 #   no encoders or muxers (nothing here writes media), no filters (libavfilter) or devices (libavdevice), no network
 #   protocols (a player of files), no hardware decoding (no VA-API here: WS083 brings the GPU's), no programs, no
 #   documentation, no debug information;
-#   the x86 assembly (nasm, which the build machine has: libjpeg-turbo uses it too) stays for speed.
+#   target assembly stays for speed (x86 uses nasm; AArch64 uses the cross compiler).
 # configure is told the cross tools by name; zedBSD is not one of its systems, so the target is "none" (ELF, POSIX
 # threads are found by their probe).
+ZEDBSD_LIBAVCODEC_ARCH := $(strip \
+	$(if $(filter amd64,$(ZEDBSD_ARCHITECTURE)),x86_64,\
+	$(if $(filter i386,$(ZEDBSD_ARCHITECTURE)),x86_32,\
+	$(if $(filter arm64,$(ZEDBSD_ARCHITECTURE)),aarch64,\
+	$(if $(filter sparcv9,$(ZEDBSD_ARCHITECTURE)),sparc64,$(ZEDBSD_ARCHITECTURE))))))
+ZEDBSD_LIBAVCODEC_ELF_MACHINE := $(if $(filter arm64,$(ZEDBSD_ARCHITECTURE)),aarch64,$(ZEDBSD_ARCHITECTURE))
 ZEDBSD_LIBAVCODEC_CONFIGURE_OPTIONS := \
 	--prefix=/usr --libdir=/usr/lib --shlibdir=/usr/lib --incdir=/usr/include \
-	--enable-cross-compile --target-os=none --arch=$(if $(filter amd64,$(ZEDBSD_ARCHITECTURE)),x86_64,x86_32) \
-	--pkg-config=false --x86asmexe=nasm \
+	--enable-cross-compile --target-os=none --arch=$(ZEDBSD_LIBAVCODEC_ARCH) \
+	--pkg-config=false $(if $(filter x86_64 x86_32,$(ZEDBSD_LIBAVCODEC_ARCH)),--x86asmexe=nasm) \
 	--disable-autodetect --disable-gpl --disable-nonfree \
 	--disable-static --enable-shared --enable-pic --enable-pthreads \
 	--disable-programs --disable-doc --disable-debug --disable-stripping \
@@ -84,11 +90,11 @@ $(ZEDBSD_LIBAVCODEC_STAGED): $(ZEDBSD_LIBAVCODEC_CONFIGURED)
 	$(MAKE) -C '$(ZEDBSD_EXT_libavcodec_BUILDDIR)' $(ZEDBSD_LIBAVCODEC_VERSION_SCRIPT) \
 		DESTDIR='$(ZEDBSD_EXT_libavcodec_STAGEDIR)' install
 	@$(PYTHON) '$(ZEDBSD_EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
-		--machine $(ZEDBSD_ARCHITECTURE) --role shared-library \
+		--machine $(ZEDBSD_LIBAVCODEC_ELF_MACHINE) --role shared-library \
 		--soname libavutil.so.61 --needed libc.so \
 		'$(ZEDBSD_EXT_libavcodec_STAGEDIR)/usr/lib/libavutil.so.61'
 	@$(PYTHON) '$(ZEDBSD_EXTERNAL_ROOT)/tools/build/check-dynamic-elf.py' \
-		--machine $(ZEDBSD_ARCHITECTURE) --role shared-library \
+		--machine $(ZEDBSD_LIBAVCODEC_ELF_MACHINE) --role shared-library \
 		--soname libavcodec.so.63 --needed libswresample.so.7 --needed libavutil.so.61 --needed libc.so \
 		'$(ZEDBSD_EXT_libavcodec_STAGEDIR)/usr/lib/libavcodec.so.63'
 	@touch '$@'
@@ -105,7 +111,7 @@ libavcodec: $(ZEDBSD_LIBAVCODEC_STAGED)
 
 # ---------------------------------------------------------------- packaging
 
-$(eval $(call ZEDBSD_USERLAND_PACKAGE,libavcodec,FFmpeg audio and video libraries (LGPL),amd64,n,package,,y,\
+$(eval $(call ZEDBSD_USERLAND_PACKAGE,libavcodec,FFmpeg audio and video libraries (LGPL),*,n,package,,y,\
 	packages/multimedia,multimedia/libavcodec,))
 
 # The runtime: each library under its soname (the name the loader asks for) and the license texts.  The headers and

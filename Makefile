@@ -262,7 +262,9 @@ ZEDBSD_USERLAND_PATCH_TARGETS :=
 define ZEDBSD_USERLAND_PACKAGE
 USERLAND_PACKAGES += $(1)
 USERLAND_$(1)_LABEL := $(2)
-USERLAND_$(1)_PLATFORMS := $(3)
+# Base, Desktop and Packages share one CPU-independent selection catalog.
+# Device firmware and the direct-config-only test/X11 groups keep their limits.
+USERLAND_$(1)_PLATFORMS := $(if $(filter base comp desktop packages/%,$(8)),*,$(3))
 USERLAND_$(1)_DEFAULT := $(4)
 USERLAND_$(1)_CLASS := $(5)
 USERLAND_$(1)_SOURCES := $(6)
@@ -286,8 +288,8 @@ USERLAND_PACKAGE_MAKEFILES := $(filter-out userland/noct/%,$(sort \
 include $(USERLAND_PACKAGE_MAKEFILES)
 ZEDBSD_ALL_USER_PROGRAMS := $(foreach program,$(USERLAND_PACKAGES),\
 	$(if $(filter y,$(USERLAND_$(program)_SELECTABLE)),$(program)))
-# A program's platform list says where it builds (* is everywhere); the
-# default set is only what builds for this platform.
+# Userland menus and build selection use the same registered platform policy.
+# Only platform-bound groups filter their defaults by the selected platform.
 user_program_applies = $(or $(filter *,$(USERLAND_$(1)_PLATFORMS)),\
 	$(filter $(ZEDBSD_PLATFORM),$(USERLAND_$(1)_PLATFORMS)))
 ZEDBSD_DEFAULT_USER_PROGRAMS := $(foreach program,$(ZEDBSD_ALL_USER_PROGRAMS),\
@@ -354,9 +356,8 @@ endif
 # Every image carries the project's own license first in its list (ws129-p002).
 override ZEDBSD_USER_PROGRAMS := $(sort \
 	$(ZEDBSD_USER_PROGRAMS) zedbsd-license)
-# A saved configuration may be reused after changing targets. Do not let
-# packages selected for another ABI become impossible prerequisites of the
-# current root filesystem (PC/AT i386 is named "pcat" by the build system).
+# Preserve CPU-independent userland selections when changing targets. Only
+# platform-bound groups (firmware, tests and X11) discard incompatible entries.
 ZEDBSD_USER_PLATFORM := $(ZEDBSD_PLATFORM)
 override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 	$(if $(filter * $(ZEDBSD_USER_PLATFORM),\

@@ -71,22 +71,10 @@ def check_packages() -> None:
         if row[4] != group:
             fail(f"{name} is filed under {row[4]} rather than {group}")
 
-    # A base program or a package is chosen by whoever configures the
-    # build, not by the platform: only the kernel options, the drivers, the
-    # desktop and the firmware are tied to one (BUG-080).  noct and zedinst
-    # need the Noct runtime, which some platforms lack.  The security-key
-    # programs (fidoctl, passkey-fido2: OpenSSL and the hidraw device) and
-    # libavcodec (the media add-in) are built for amd64 only (2026-10-07 Q1).
-    # The desktop's own packages (packages/desktop, such as GTK 4) go with
-    # the desktop, which only some platforms have (BUG-129).
-    # bluetoothd and its CLI bt need the input bridge, which only amd64 builds (ws143-p005).
-    platform_tied = {"noct", "fidoctl", "passkey-fido2", "libavcodec", "bluetoothd", "bt"}
+    # 2026-10-10 user: all Base, Desktop and Packages entries are selectable
+    # on every CPU. Firmware and the direct-config-only groups stay separate.
     for row in rows:
-        if row[0] in platform_tied:
-            continue
-        if row[4] == "packages/desktop":
-            continue
-        if row[4].startswith("packages/") or row[4] == "base":
+        if row[4].startswith("packages/") or row[4] in ("base", "comp", "desktop"):
             if row[2] != "*":
                 fail(f"{row[0]} is offered only on {row[2]}")
 
