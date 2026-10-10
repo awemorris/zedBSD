@@ -35,5 +35,11 @@ ffmpeg -nostdin -v error -f lavfi -i 'testsrc2=size=320x180:rate=25:duration=2' 
     -c:a aac -profile:a aac_low -movflags +faststart -shortest "$work/h264-high-b-aac.mp4"
 ffmpeg -nostdin -v error -i "$work/h264-high-b-aac.mp4" -an -c:v copy -bsf:v h264_mp4toannexb -f h264 "$work/h264-high-b.h264"
 ffmpeg -nostdin -v error -i "$work/h264-high-b-aac.mp4" -an -pix_fmt nv12 -f rawvideo "$work/h264-high-b.nv12"
-ffprobe -v error -select_streams v -show_entries frame=pts,pkt_dts,pict_type,coded_picture_number -of json "$work/h264-high-b-aac.mp4" > "$work/h264-high-b-frames.json"
+ffmpeg -nostdin -v error -i "$work/h264-high-b-aac.mp4" -an -c:v libx264 -profile:v high \
+    -x264-params 'bframes=3:ref=3:keyint=25:threads=1:slices=4' -f h264 "$work/h264-multislice.h264"
+ffmpeg -nostdin -v error -r 25 -i "$work/h264-high-b.h264" -c:v copy -movflags +faststart "$work/h264-nocts.mp4"
+ffprobe -v error -select_streams v -show_entries frame=pts,pts_time,pkt_dts,pict_type,coded_picture_number -of json "$work/h264-high-b-aac.mp4" > "$work/h264-high-b-frames.json"
+ffprobe -v error -select_streams v -show_entries packet=pts_time -of json "$work/h264-nocts.mp4" > "$work/h264-nocts-packets.json"
+ffmpeg -nostdin -v error -i "$work/h264-high-b-aac.mp4" -vn -t 2 -af 'pan=stereo|c0=c0|c1=c0' -ar 48000 -ac 2 -f s16le "$work/h264-high-b-aac.s16"
+python3 "$repo/plan/ws202/tests/make-reference.py" "$work"
 printf '%s\n' "$work"

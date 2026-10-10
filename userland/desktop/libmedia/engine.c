@@ -116,6 +116,7 @@ static int engine_drain(struct media_engine *engine, struct media_decoder *decod
 static int engine_picture(struct media_engine *engine, struct media_frame *picture, double time);
 static int engine_seek(struct media_engine *engine);
 static void engine_end(struct media_engine *engine);
+static void engine_fail(struct media_engine *engine, int error);
 static double engine_clock(struct media_engine *engine);
 static void engine_drop_pictures(struct media_engine *engine);
 static int engine_stopping(struct media_engine *engine);
@@ -508,6 +509,7 @@ engine_run(
 	int status;
 	int read;
 	int stop;
+	int fed;
 
 	/* The file and its decoder. */
 	engine = argument;
@@ -537,25 +539,38 @@ engine_run(
 		if (sought)
 			continue;
 
+		/* A decode failure waits for a seek without treating an interrupted feed as failure. */
+		(void)pthread_mutex_lock(&engine->lock);
+		stop = 0;
+		if (engine->state == MEDIA_FAILED)
+			stop = 1;
+		(void)pthread_mutex_unlock(&engine->lock);
+		if (stop) {
+			engine_sleep_ms(ENGINE_WAIT_MS * 5);
+			continue;
+		}
+
 		/* The next packet; the end of the file drains the decoders and waits. */
 		read = media_file_read(engine->file, &packet);
-		if (read != 0) {
+		if (read == ENODATA) {
 			engine_end(engine);
 			continue;
 		}
 
-		/* Its decoder. */
-		if (engine->video != NULL && packet.track == engine->video_track)
-			status = engine_feed(engine, engine->video, &packet);
-		else if (engine->sound != NULL && packet.track == engine->sound_track)
-			status = engine_feed(engine, engine->sound, &packet);
-		if (status < 0) {
-			(void)pthread_mutex_lock(&engine->lock);
-			engine->state = MEDIA_FAILED;
-			engine->problem = 0;
-			(void)pthread_mutex_unlock(&engine->lock);
-			engine_wake(engine);
+		/* Publish a read failure without successful end-of-stream semantics. */
+		if (read != 0) {
+			engine_fail(engine, read);
+			continue;
 		}
+
+		/* Its decoder. */
+		fed = 0;
+		if (engine->video != NULL && packet.track == engine->video_track)
+			fed = engine_feed(engine, engine->video, &packet);
+		else if (engine->sound != NULL && packet.track == engine->sound_track)
+			fed = engine_feed(engine, engine->sound, &packet);
+		if (fed < 0)
+			engine_fail(engine, -fed);
 	}
 
 	/* What the thread opened goes with it. */
@@ -715,6 +730,7 @@ engine_feed(
 			return status;
 	}
 
+	/* Preserve a failed send as a negative runtime error for the reading thread. */
 	if (status != 0)
 		return -status;
 
@@ -814,6 +830,7 @@ engine_seek(
 {
 	double seconds;
 	int wanted;
+	int error;
 
 	/* A seek asked for. */
 	(void)pthread_mutex_lock(&engine->lock);
@@ -824,7 +841,16 @@ engine_seek(
 		return 0;
 
 	/* The file at the key frame before it, the decoders and the sound emptied. */
-	(void)media_file_seek(engine->file, (int64_t)(seconds * 1000000.0));
+	error = media_file_seek(engine->file, (int64_t)(seconds * 1000000.0));
+	if (error != 0) {
+		(void)pthread_mutex_lock(&engine->lock);
+		engine->seek_wanted = 0;
+		(void)pthread_mutex_unlock(&engine->lock);
+		engine_fail(engine, error);
+		return 1;
+	}
+
+	/* Flush native decoders only after the container seek succeeded. */
 	if (engine->video != NULL)
 		media_decoder_flush(engine->video);
 	if (engine->sound != NULL)
@@ -839,6 +865,9 @@ engine_seek(
 	engine->clock_time = seconds;
 	engine->clock_us = engine_now_us();
 	engine->eof = 0;
+	engine->error = 0;
+	if (engine->state == MEDIA_FAILED)
+		engine->state = MEDIA_PAUSED;
 	engine->seek_wanted = 0;
 	(void)pthread_mutex_unlock(&engine->lock);
 	media_log("MEDIA seek to_ms=%lld", (long long)(seconds * 1000.0));
@@ -860,17 +889,25 @@ engine_end(
 	double clock;
 	int drained;
 	int ended;
+	int status;
 
 	/* The decoders' last pictures and sound, once. */
 	(void)pthread_mutex_lock(&engine->lock);
 	drained = engine->eof;
-	engine->eof = 1;
 	(void)pthread_mutex_unlock(&engine->lock);
 	if (!drained) {
+		status = 0;
 		if (engine->video != NULL)
-			(void)engine_feed(engine, engine->video, NULL);
-		if (engine->sound != NULL)
-			(void)engine_feed(engine, engine->sound, NULL);
+			status = engine_feed(engine, engine->video, NULL);
+		if (status == 0 && engine->sound != NULL)
+			status = engine_feed(engine, engine->sound, NULL);
+		if (status < 0)
+			engine_fail(engine, -status);
+		if (status != 0)
+			return;
+		(void)pthread_mutex_lock(&engine->lock);
+		engine->eof = 1;
+		(void)pthread_mutex_unlock(&engine->lock);
 	}
 
 	/* Played out: no picture waits, and the clock reached the length. */
@@ -896,6 +933,21 @@ engine_end(
 
 	/* A little wait before the next look. */
 	engine_sleep_ms(ENGINE_WAIT_MS * 5);
+}
+
+/* Publishes a failed read or decode and leaves the reader available for a later seek. */
+static void
+engine_fail(
+	struct media_engine *engine,
+	int error)
+{
+	/* Runtime errors use errno; decoder admission separately records MEDIA_PROBLEM_* values. */
+	(void)pthread_mutex_lock(&engine->lock);
+	engine->error = error;
+	engine->problem = 0;
+	engine->state = MEDIA_FAILED;
+	(void)pthread_mutex_unlock(&engine->lock);
+	engine_wake(engine);
 }
 
 /*

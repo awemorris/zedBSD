@@ -22,7 +22,9 @@ static float pcm_sample(const struct media_pcm *sound, int64_t position, unsigne
 static int16_t pcm_integer(double value);
 static int64_t pcm_time(const struct media_pcm *sound);
 
-/* Establish a bounded source queue with no output-rate assumption before the caller asks for sound. */
+/*
+ * Establish a bounded source queue with no output-rate assumption before the caller asks for sound.
+ */
 int
 media_pcm_init(
 	struct media_pcm *sound,
@@ -32,7 +34,7 @@ media_pcm_init(
 	/* Native AAC supports the normative rate table, including 96 kHz down sampling. */
 	if (sound == NULL)
 		return EINVAL;
-	if (rate < 8000U)
+	if (rate < 7350U)
 		return ENOTSUP;
 	if (rate > 96000U)
 		return ENOTSUP;
@@ -44,7 +46,9 @@ media_pcm_init(
 	return 0;
 }
 
-/* Append one complete stereo source block while retaining old samples used by the convolution. */
+/*
+ * Append one complete stereo source block while retaining old samples used by the convolution.
+ */
 int
 media_pcm_push(
 	struct media_pcm *sound,
@@ -82,7 +86,9 @@ media_pcm_push(
 	return 0;
 }
 
-/* Expose at most one source block, with real future samples except at the declared end. */
+/*
+ * Expose at most one source block, with real future samples except at the declared end.
+ */
 int
 media_pcm_receive(
 	struct media_pcm *sound,
@@ -154,7 +160,9 @@ media_pcm_receive(
 	return 1;
 }
 
-/* Convert the exposed block into bounded 16-bit stereo at the caller's requested rate. */
+/*
+ * Convert the exposed block into bounded 16-bit stereo at the caller's requested rate.
+ */
 size_t
 media_pcm_read(
 	struct media_pcm *sound,
@@ -196,8 +204,12 @@ media_pcm_read(
 
 		/* Build the kernel before publishing a new output-rate clock. */
 		error = pcm_kernel(sound, rate);
-		if (error != 0)
+		if (error != 0) {
+			sound->error = error;
 			return 0U;
+		}
+
+		/* Publish the new rational output clock only after kernel allocation succeeded. */
 		sound->phase = sound->cursor * rate;
 	}
 
@@ -258,7 +270,9 @@ media_pcm_read(
 	return written;
 }
 
-/* Set the sample-level start boundary while keeping already decoded overlap and convolution history. */
+/*
+ * Set the sample-level start boundary while keeping already decoded overlap and convolution history.
+ */
 void
 media_pcm_trim(
 	struct media_pcm *sound,
@@ -271,7 +285,9 @@ media_pcm_trim(
 	return;
 }
 
-/* Flush a continuous segment while retaining reusable mathematical kernel storage. */
+/*
+ * Flush a continuous segment while retaining reusable mathematical kernel storage.
+ */
 void
 media_pcm_reset(
 	struct media_pcm *sound)
@@ -288,10 +304,13 @@ media_pcm_reset(
 	sound->started = 0;
 	sound->active = 0;
 	sound->drained = 0;
+	sound->error = 0;
 	return;
 }
 
-/* Release decoder-local conversion resources after every retained source sample is discarded. */
+/*
+ * Release decoder-local conversion resources after every retained source sample is discarded.
+ */
 void
 media_pcm_close(
 	struct media_pcm *sound)

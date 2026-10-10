@@ -48,7 +48,9 @@ static unsigned picture_clamp(int32_t value);
 static uint32_t picture_blend(uint32_t a, uint32_t b, unsigned fraction);
 static int picture_scaler_prepare(struct picture_scaler *scaler, uint32_t source_width, int width);
 
-/* Create a pool whose visible dimensions and even NV12 pitch are fixed for its lifetime. */
+/*
+ * Create a pool whose visible dimensions and even NV12 pitch are fixed for its lifetime.
+ */
 struct media_picture_pool *
 media_picture_pool_create(
 	uint32_t width,
@@ -80,7 +82,9 @@ media_picture_pool_create(
 	return pool;
 }
 
-/* Obtain a picture without a fixed checked-out limit; slow consumers cannot exhaust a decoder's tiny ring. */
+/*
+ * Obtain a picture without a fixed checked-out limit; slow consumers cannot exhaust a decoder's tiny ring.
+ */
 struct media_picture *
 media_picture_pool_get(
 	struct media_picture_pool *pool)
@@ -95,6 +99,8 @@ media_picture_pool_get(
 		pthread_mutex_unlock(&pool->lock);
 		return NULL;
 	}
+
+	/* Check the idle cache before allocating fresh pixel storage. */
 	picture = pool->idle;
 	if (picture != NULL) {
 		pool->idle = picture->next;
@@ -106,6 +112,8 @@ media_picture_pool_get(
 			pthread_mutex_unlock(&pool->lock);
 			return NULL;
 		}
+
+		/* Compute both plane sizes from the pool's fixed even pitch. */
 		luma = (size_t)pool->pitch * pool->height;
 		chroma = (size_t)pool->pitch * ((pool->height + 1U) / 2U);
 		picture->luma = malloc(luma + chroma);
@@ -114,6 +122,8 @@ media_picture_pool_get(
 			pthread_mutex_unlock(&pool->lock);
 			return NULL;
 		}
+
+		/* Bind fresh plane storage and dimensions to the owning pool. */
 		picture->chroma = picture->luma + luma;
 		picture->pool = pool;
 		picture->width = pool->width;
@@ -133,7 +143,9 @@ media_picture_pool_get(
 	return picture;
 }
 
-/* Retire idle storage now while allowing exported pictures to retain their pool after decoder close. */
+/*
+ * Retire idle storage now while allowing exported pictures to retain their pool after decoder close.
+ */
 void
 media_picture_pool_close(
 	struct media_picture_pool *pool)
@@ -158,6 +170,8 @@ media_picture_pool_close(
 		pool->live--;
 		picture = next;
 	}
+
+	/* Snapshot remaining live storage before releasing the pool lock. */
 	live = pool->live;
 	pthread_mutex_unlock(&pool->lock);
 
@@ -167,7 +181,9 @@ media_picture_pool_close(
 	return;
 }
 
-/* Retain one exported picture under the same lock protecting idle recycling. */
+/*
+ * Retain one exported picture under the same lock protecting idle recycling.
+ */
 void
 media_picture_ref(
 	struct media_picture *picture)
@@ -178,7 +194,9 @@ media_picture_ref(
 	return;
 }
 
-/* Return a picture to its bounded idle cache, or release the final closed-pool allocation. */
+/*
+ * Return a picture to its bounded idle cache, or release the final closed-pool allocation.
+ */
 void
 media_picture_unref(
 	void *object)
@@ -211,6 +229,8 @@ media_picture_unref(
 		if (pool->closed != 0 && pool->live == 0U)
 			destroy = 1;
 	}
+
+	/* Release the pool lock before destroying its final allocation. */
 	pthread_mutex_unlock(&pool->lock);
 
 	/* No decoder or picture can reach a closed pool after the last live allocation retires. */
@@ -219,7 +239,9 @@ media_picture_unref(
 	return;
 }
 
-/* Report visible cropped dimensions rather than padded GPU decode extents. */
+/*
+ * Report visible cropped dimensions rather than padded GPU decode extents.
+ */
 void
 media_picture_size(
 	const void *object,
@@ -235,7 +257,9 @@ media_picture_size(
 	return;
 }
 
-/* Report sample aspect without baking it into either the pixel data or scaler's dimensions. */
+/*
+ * Report sample aspect without baking it into either the pixel data or scaler's dimensions.
+ */
 void
 media_picture_aspect(
 	const void *object,
@@ -248,14 +272,20 @@ media_picture_aspect(
 	picture = object;
 	*num = 1;
 	*den = 1;
-	if (picture->aspect_num != 0U && picture->aspect_num <= 2147483647U)
-		*num = (int)picture->aspect_num;
-	if (picture->aspect_den != 0U && picture->aspect_den <= 2147483647U)
-		*den = (int)picture->aspect_den;
+	if (
+		picture->aspect_num == 0U ||
+		picture->aspect_num > 2147483647U ||
+		picture->aspect_den == 0U ||
+		picture->aspect_den > 2147483647U)
+		return;
+	*num = (int)picture->aspect_num;
+	*den = (int)picture->aspect_den;
 	return;
 }
 
-/* Convert colour and scale a retained linear picture into the caller's ARGB canvas. */
+/*
+ * Convert colour and scale a retained linear picture into the caller's ARGB canvas.
+ */
 int
 media_picture_scale(
 	const void *object,
@@ -278,7 +308,10 @@ media_picture_scale(
 	int error;
 
 	/* Validate destination shape before allocating a scaler or addressing source rows. */
-	if (object == NULL || state == NULL || pixels == NULL)
+	if (
+		object == NULL ||
+		state == NULL ||
+		pixels == NULL)
 		return EINVAL;
 	if (width <= 0 || width > 8192)
 		return EINVAL;
@@ -300,6 +333,8 @@ media_picture_scale(
 				pixels[x] = picture_pixel(picture, x, (uint32_t)y);
 			pixels = (uint32_t *)((uint8_t *)pixels + stride);
 		}
+
+		/* Return success after the same-size conversion filled every output row. */
 		return 0;
 	}
 
@@ -311,6 +346,8 @@ media_picture_scale(
 			return ENOMEM;
 		*state = scaler;
 	}
+
+	/* Prepare reusable horizontal mapping for the requested scaled width. */
 	error = picture_scaler_prepare(scaler, picture->width, width);
 	if (error != 0)
 		return error;
@@ -340,12 +377,18 @@ media_picture_scale(
 			bottom = picture_blend(scaler->rows[picture->width + scaler->indices[x * 2U]], scaler->rows[picture->width + scaler->indices[x * 2U + 1U]], scaler->fractions[x]);
 			pixels[x] = picture_blend(top, bottom, fraction);
 		}
+
+		/* Advance the destination using its caller-supplied byte stride. */
 		pixels = (uint32_t *)((uint8_t *)pixels + stride);
 	}
+
+	/* Return success after every scaled output row has been written. */
 	return 0;
 }
 
-/* Release only scaler-owned scratch; no picture or Vulkan object is retained by this operation. */
+/*
+ * Release only scaler-owned scratch; no picture or Vulkan object is retained by this operation.
+ */
 void
 media_picture_scaler_free(
 	void *state)
@@ -390,6 +433,8 @@ picture_initialize(
 			kr = 0.2627;
 			kb = 0.0593;
 		}
+
+		/* Derive the green coefficient from the selected standard matrix. */
 		kg = 1.0 - kr - kb;
 
 		/* Limited-range luma/chroma use their different normative digital excursions. */
@@ -414,6 +459,8 @@ picture_initialize(
 			}
 		}
 	}
+
+	/* Finish publishing all immutable colour contribution tables. */
 	return;
 }
 
@@ -444,7 +491,7 @@ picture_pixel(
 	uint32_t x,
 	uint32_t y)
 {
-	int32_t (*table)[256];
+	int32_t(*table)[256];
 	int32_t luma;
 	unsigned u;
 	unsigned v;
@@ -495,6 +542,8 @@ picture_blend(
 		channel = (((a >> shift) & 255U) * (65536U - fraction) + ((b >> shift) & 255U) * fraction + 32768U) >> 16U;
 		result |= channel << shift;
 	}
+
+	/* Return the packed opaque ARGB pixel assembled from its clamped channels. */
 	return result;
 }
 
@@ -516,13 +565,23 @@ picture_scaler_prepare(
 	/* A fixed geometry reuses all mapping and row storage across successive pictures. */
 	if (scaler->width == width && scaler->source_width == source_width)
 		return 0;
+	/* Allocate horizontal source indices before their fractional weights. */
 	indices = malloc((size_t)width * 2U * sizeof(*indices));
+	if (indices == NULL)
+		return ENOMEM;
+
+	/* Allocate interpolation weights without changing the old scaler on failure. */
 	fractions = malloc((size_t)width * sizeof(*fractions));
+	if (fractions == NULL) {
+		free(indices);
+		return ENOMEM;
+	}
+
+	/* Allocate both conversion rows only after the new mapping arrays exist. */
 	rows = malloc((size_t)source_width * 2U * sizeof(*rows));
-	if (indices == NULL || fractions == NULL || rows == NULL) {
+	if (rows == NULL) {
 		free(indices);
 		free(fractions);
-		free(rows);
 		return ENOMEM;
 	}
 
@@ -541,6 +600,8 @@ picture_scaler_prepare(
 		indices[x * 2U + 1U] = x1;
 		fractions[x] = (unsigned)((coordinate - x0) * 65536.0 + 0.5);
 	}
+
+	/* Replace scaler mapping only after all three new allocations succeeded. */
 	free(scaler->indices);
 	free(scaler->fractions);
 	free(scaler->rows);

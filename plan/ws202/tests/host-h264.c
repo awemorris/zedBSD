@@ -68,6 +68,8 @@ main(
 			fprintf(stderr, "H264 parser picture %u: %s errno %d\n", pictures, reason, stream->error);
 			return 1;
 		}
+
+		/* Prepare references using the actual sequence associated with this parsed picture. */
 		sps = &stream->sps[picture->info.seq_parameter_set_id];
 		if (pictures == 0U)
 			h264_dpb_init(&dpb, sps->max_num_ref_frames);
@@ -76,6 +78,8 @@ main(
 			fprintf(stderr, "H264 prepare picture %u errno %d\n", pictures, error);
 			return 1;
 		}
+
+		/* Count recoverable drops separately from successfully admitted pictures. */
 		if (!plan.decode)
 			dropped++;
 		if (picture->slice_type == H264_SLICE_B)
@@ -86,6 +90,8 @@ main(
 			assert((unsigned)plan.references[index] < dpb.slots);
 			assert(dpb.active[plan.references[index]]);
 		}
+
+		/* Commit marking after checking every physical reference slot. */
 		error = h264_dpb_mark(&dpb, sps, picture, &plan);
 		assert(error == 0);
 		pictures++;

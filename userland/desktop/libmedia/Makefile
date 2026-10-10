@@ -1,13 +1,6 @@
-include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
-
-# libmedia (ws121-p002, ws177-p031): the playing of media files the desktop's programs share -- the browser's <video>
-# and <audio>, Video Player and Music: the container reader (userland/desktop/mediafile), the decoders (decoder.c, a
-# table of back ends; today the add-in avcodec.c that opens FFmpeg's
-# libavcodec with dlopen when the system has it (the libavcodec package, LGPL; built without FFmpeg's headers and not
-# linked to it)), and the engine that plays one file on a thread of its own (media.h), without sound (WS191: it may not
-# reach Keiland's sound streams, which libbrowser may not).  Its NEEDED is the C library alone.  amd64 zedBSD.
+# libmedia: original AAC-LC and standard Vulkan Video H.264 decoding, container readers and a silent video engine.
+# Optional software codecs and sound streams belong to applications; this library needs libc alone.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
-# WS202 private bit/AAC input helpers are linked normally; the native decoder and app adapter migration follow.
 LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder.c \
 	userland/desktop/libmedia/bitstream.c userland/desktop/libmedia/picture.c \
 	userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \

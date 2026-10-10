@@ -212,7 +212,7 @@ static void addin_picture_size(const void *frame, int *width, int *height);
 static int addin_picture_scale(const void *frame, void **scaler, uint32_t *pixels, size_t stride, int width, int height);
 static void addin_scaler_free(void *scaler);
 
-/* The add-in as libmedia's decoder.c calls it: the software decoding back end. */
+/* The optional software operations used only by the application's native-first adapter. */
 const struct app_decoder_ops app_avcodec_ops = {
 	"libavcodec",
 	addin_load,
@@ -421,6 +421,8 @@ addin_send(
 		status = codec.avcodec_send_packet(decoder->context, NULL);
 		if (status == -EAGAIN)
 			return EAGAIN;
+		if (status < 0 && status != CODEC_ERROR_EOF)
+			return EINVAL;
 		return 0;
 	}
 
@@ -484,8 +486,10 @@ addin_receive(
 	/* The next one. */
 	codec.av_frame_unref(decoder->frame);
 	status = codec.avcodec_receive_frame(decoder->context, decoder->frame);
-	if (status < 0)
+	if (status == -EAGAIN || status == CODEC_ERROR_EOF)
 		return 0;
+	if (status < 0)
+		return -EINVAL;
 
 	/* A picture takes the smallest time waiting. */
 	*time_us = 0;

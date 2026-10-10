@@ -6,16 +6,12 @@
  */
 
 /*
- * libmedia's decoding (ws177-p031): a track's packets (mediafile.h) made
- * into pictures and sound.  A decoder is opened by the first of libmedia's
- * decoding back ends that takes the track's codec (the table in
- * decoder.c: today the add-in that opens FFmpeg's libavcodec with dlopen,
- * avcodec.c; a GPU decoder goes before it later).  A picture is the back
- * end's own, scaled into the caller's pixels through a scaler kept
- * between calls.
+ * Video Player and Music's shared decoder adapter: public native media
+ * is tried first. Unsupported codecs, profiles and devices may use the
+ * application's optional libavcodec adapter, loaded with dlopen.
+ * Pictures retain their backend ownership independently of decoder close.
  *
- * The library's internal API, for the desktop's programs; not a part of
- * any SDK.
+ * This application module is not part of libmedia or a public SDK.
  */
 
 #ifndef MEDIA_APP_DECODER_H
@@ -26,13 +22,11 @@
 #include <stddef.h>
 #include <stdint.h>
 
-/* Why decoding could not start (app_codec_load, app_decoder_open). */
-
 struct app_decoder;
 struct app_frame;
 struct app_scaler;
 
-/* The software decoding add-in, loaded once (0, or MEDIA_PROBLEM_MISSING or _VERSION, with a reason). */
+/* Native startup needs no optional library; reasons describe fallback admission failures only. */
 int app_codec_load(void);
 const char *app_codec_reason(void);
 

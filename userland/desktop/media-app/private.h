@@ -6,10 +6,9 @@
  */
 
 /*
- * What libmedia's parts share inside the library (ws177-p031): the table
- * of a decoding back end's operations (decoder.c calls them; avcodec.c is
- * one), the conversion of packets into what a decoder reads without
- * private data (bitstream.c), and the library's log.
+ * What Video Player and Music share inside their optional codec adapter:
+ * software decoder operations, packet conversion for libavcodec, and
+ * the application's diagnostics. Native reconstruction stays in libmedia.
  */
 
 #ifndef MEDIA_APP_PRIVATE_H
@@ -21,15 +20,15 @@
 #include <stdint.h>
 
 /* The largest packet the bitstream conversion builds (mediafile's 64 MiB and the prefix). */
-#define MEDIA_BITSTREAM_MAX	(65U * 1024U * 1024U)
+#define MEDIA_BITSTREAM_MAX (65U * 1024U * 1024U)
 
 /*
  * A decoding back end: whether it can work (load, and why not), a
  * decoder for a track (open answers MEDIA_PROBLEM_FORMAT for a codec it
  * does not take), the decoder's operations on its own state, and the
- * pictures it gives (its own objects) and their scaler.  decoder.c tries
- * the back ends in its table's order; the first that opens a track
- * decodes it.  The operations follow media-decoder.h's.
+ * pictures it gives (its own objects) and their scaler. Application
+ * decoder.c first tries public native decoding, then these operations
+ * when native admission reports an unsupported codec, profile or device.
  */
 struct app_decoder_ops {
 	const char *name;
@@ -76,16 +75,12 @@ struct app_bitstream {
 /* The add-in that opens FFmpeg's libavcodec (avcodec.c). */
 extern const struct app_decoder_ops app_avcodec_ops;
 
-/* Original LC reconstruction, with optional GPU video kept in a separate native backend. */
-
-
-
 /* The bitstream conversion (bitstream.c). */
 int app_bitstream_open(struct app_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);
 int app_bitstream_convert(struct app_bitstream *stream, const unsigned char *data, size_t size, int keyframe, const unsigned char **result, size_t *result_size);
 void app_bitstream_close(struct app_bitstream *stream);
 
-/* A line of the library's log, to the caller's function (media_set_log). */
+/* An application diagnostic about native selection or optional software loading. */
 void app_codec_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 #endif

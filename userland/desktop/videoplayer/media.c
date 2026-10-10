@@ -55,6 +55,7 @@ static int media_drain(struct media_reader *reader, struct app_decoder *decoder)
 static int media_picture(struct media_reader *reader, struct app_frame *picture, double time);
 static int media_sound(struct media_reader *reader, double time);
 static int media_seek(struct media_reader *reader);
+static void media_fail(struct media_reader *reader, int error);
 static void media_drop_pictures(struct vp_media *media);
 static int media_stopping(struct vp_media *media);
 static uint64_t media_now_us(void);
@@ -102,6 +103,7 @@ vp_media_open(
 	reader->media = media;
 	media->codec_problem = 0;
 	media->failure = 0;
+	media->late = 0U;
 	error = media_reader_open(reader, path);
 	if (error != 0) {
 		media_reader_close(reader);
@@ -188,7 +190,7 @@ vp_media_play(
 	(void)pthread_mutex_unlock(&media->lock);
 	if (state == VP_ENDED)
 		vp_media_seek(media, 0.0);
-	if (state == VP_EMPTY || state == VP_PLAYING)
+	if (state == VP_EMPTY || state == VP_PLAYING || state == VP_FAILED)
 		return;
 
 	/* The clock goes on from where it stood. */
@@ -315,7 +317,9 @@ vp_media_take(
 			break;
 		}
 
-		/* Due: it replaces the one taken before it. */
+		/* Due: it replaces the one taken before it, which never reached presentation. */
+		if (taken != NULL)
+			media->late++;
 		app_frame_free(&taken);
 		taken = media->pictures[slot];
 		*time = media->picture_times[slot];
@@ -354,6 +358,7 @@ media_run(
 		if (status != 0)
 			continue;
 
+		/* Wait in the failed state while leaving seek and stop requests available. */
 		(void)pthread_mutex_lock(&media->lock);
 		stop = 0;
 		if (media->state == VP_FAILED)
@@ -366,14 +371,22 @@ media_run(
 
 		/* The next packet; the end of the file drains the decoders and waits. */
 		status = media_file_read(reader->file, &packet);
-		if (status != 0) {
+		if (status == ENODATA) {
 			(void)pthread_mutex_lock(&media->lock);
 			drained = media->eof;
 			(void)pthread_mutex_unlock(&media->lock);
 			if (!drained) {
-				(void)media_feed(reader, reader->video, NULL);
-				if (reader->sound != NULL)
-					(void)media_feed(reader, reader->sound, NULL);
+				status = media_feed(reader, reader->video, NULL);
+				if (status == 0 && reader->sound != NULL)
+					status = media_feed(reader, reader->sound, NULL);
+				if (status < 0) {
+					media_fail(reader, -status);
+					continue;
+				}
+
+				/* An interrupted drain is retried after the pending seek or stop. */
+				if (status != 0)
+					continue;
 			}
 
 			/* The end is noted once, and the reader waits for a seek or the end of the thread. */
@@ -386,20 +399,20 @@ media_run(
 			continue;
 		}
 
+		/* A read error has no successful end-of-file or decoder-drain semantics. */
+		if (status != 0) {
+			media_fail(reader, status);
+			continue;
+		}
+
 		/* A runtime decode failure pauses the file and is published to the window once. */
 		status = 0;
 		if (packet.track == reader->video_track)
 			status = media_feed(reader, reader->video, &packet);
 		else if (reader->sound != NULL && packet.track == reader->sound_track)
 			status = media_feed(reader, reader->sound, &packet);
-		if (status < 0) {
-			(void)pthread_mutex_lock(&media->lock);
-			media->failure = -status;
-			media->state = VP_FAILED;
-			(void)pthread_mutex_unlock(&media->lock);
-			(void)vp_audio_stop(media->audio);
-			vp_log("DECODE failed error=%d", -status);
-		}
+		if (status < 0)
+			media_fail(reader, -status);
 
 	}
 
@@ -415,6 +428,13 @@ media_reader_open(
 	struct media_reader *reader,
 	const char *path)
 {
+	const char *video_name;
+	const char *video_backend;
+	const char *sound_name;
+	const char *sound_backend;
+	const char *container_name;
+	const struct media_track *video_info;
+	uint64_t dropped;
 	long long length;
 	int64_t length_us;
 	int status;
@@ -445,10 +465,26 @@ media_reader_open(
 	length_us = media_file_duration_us(reader->file);
 	if (length_us > 0)
 		length = (long long)(length_us / 1000);
-	vp_log("OPEN path=%s width=%u height=%u duration_ms=%lld video=%s audio=%s container=%s dropped=%llu",
-	    path, media_file_track(reader->file, reader->video_track)->width, media_file_track(reader->file, reader->video_track)->height, length,
-	    app_decoder_name(reader->video), app_decoder_name(reader->sound), media_file_format_name(reader->file),
-	    (unsigned long long)media_file_dropped(reader->file));
+	video_name = app_decoder_name(reader->video);
+	video_backend = app_decoder_backend(reader->video);
+	sound_name = app_decoder_name(reader->sound);
+	sound_backend = app_decoder_backend(reader->sound);
+	container_name = media_file_format_name(reader->file);
+	video_info = media_file_track(reader->file, reader->video_track);
+	if (video_info == NULL)
+		return EINVAL;
+	dropped = media_file_dropped(reader->file);
+	vp_log("OPEN path=%s width=%u height=%u duration_ms=%lld video=%s/%s audio=%s/%s container=%s dropped=%llu",
+	    path,
+	    video_info->width,
+	    video_info->height,
+	    length,
+	    video_name,
+	    video_backend,
+	    sound_name,
+	    sound_backend,
+	    container_name,
+	    (unsigned long long)dropped);
 	return 0;
 }
 
@@ -688,7 +724,16 @@ media_seek(
 		return 0;
 
 	/* The file at the key frame before it, the decoders and the sound emptied. */
-	(void)media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
+	error = media_file_seek(reader->file, (int64_t)(seconds * 1000000.0));
+	if (error != 0) {
+		(void)pthread_mutex_lock(&media->lock);
+		media->seek_wanted = 0;
+		(void)pthread_mutex_unlock(&media->lock);
+		media_fail(reader, error);
+		return 1;
+	}
+
+	/* Reset decoded output only after the container seek succeeded. */
 	app_decoder_flush(reader->video);
 	if (reader->sound != NULL) {
 		app_decoder_flush(reader->sound);
@@ -718,6 +763,24 @@ media_seek(
 
 	/* Carried out. */
 	return 1;
+}
+
+/* Publishes a terminal read or decode error; a successful seek may restart the reader. */
+static void
+media_fail(
+	struct media_reader *reader,
+	int error)
+{
+	struct vp_media *media;
+
+	/* The window consumes the reason while the reader waits in the failed state. */
+	media = reader->media;
+	(void)pthread_mutex_lock(&media->lock);
+	media->failure = error;
+	media->state = VP_FAILED;
+	(void)pthread_mutex_unlock(&media->lock);
+	(void)vp_audio_stop(media->audio);
+	vp_log("PLAYBACK failed error=%d", error);
 }
 
 /* Frees the pictures that wait (the lock held). */

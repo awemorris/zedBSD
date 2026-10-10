@@ -111,11 +111,15 @@ h264_dpb_prepare(
 					free(gap);
 					return error;
 				}
+
+				/* Find logical storage after sliding-window marking made space. */
 				free_index = h264_dpb_free(dpb);
 				if (free_index < 0) {
 					free(gap);
 					return EINVAL;
 				}
+
+				/* Record an inferred reference without allocating a GPU image. */
 				entry = &dpb->entry[free_index];
 				memset(entry, 0, sizeof(*entry));
 				entry->reference = H264_DPB_SHORT;
@@ -131,12 +135,18 @@ h264_dpb_prepare(
 						free(gap);
 						return error;
 					}
+
+					/* Store the inferred frame's calculated order for types one and two. */
 					entry->poc[0] = gap->info.PicOrderCnt[0];
 					entry->poc[1] = gap->info.PicOrderCnt[1];
 				}
+
+				/* Advance the reference frame-number chain through each inferred gap. */
 				stream->previous_reference_frame_num = missing;
 				missing = (missing + 1U) % maximum;
 			}
+
+			/* Release inference scratch after all missing frame numbers have been recorded. */
 			free(gap);
 		}
 	}
@@ -155,6 +165,8 @@ h264_dpb_prepare(
 	} else if (dpb->seek == 2 && poc < dpb->seek_poc) {
 		return 0;
 	}
+
+	/* Compare every active slice index against available real images. */
 	error = h264_lists_admit(dpb, sps, picture);
 	if (error == ENOENT)
 		return 0;
@@ -169,6 +181,8 @@ h264_dpb_prepare(
 			if (entry->reference != H264_DPB_UNUSED && entry->slot == (int)slot)
 				free_index = 0;
 		}
+
+		/* Reserve one free image and retire any stale device association for that slot. */
 		if (free_index != 0 && plan->setup < 0)
 			plan->setup = (int32_t)slot;
 		if (free_index != 0 && dpb->active[slot]) {
@@ -176,6 +190,8 @@ h264_dpb_prepare(
 			plan->deactivate_count++;
 		}
 	}
+
+	/* Reject a picture when no physical current-picture slot is available. */
 	if (plan->setup < 0)
 		return EINVAL;
 	for (index = 0U; index < H264_DPB_SLOTS; index++) {
@@ -195,12 +211,16 @@ h264_dpb_prepare(
 		plan->setup_info.flags.used_for_long_term_reference = 1;
 		plan->setup_info.FrameNum = 0U;
 	}
+
+	/* Represent an explicitly long-term current reference with its persistent index. */
 	for (index = 0U; index < picture->mmco_count; index++) {
 		if (picture->mmco[index].operation == H264_MMCO_CURRENT_TO_LONG) {
 			plan->setup_info.flags.used_for_long_term_reference = 1;
 			plan->setup_info.FrameNum = (uint16_t)picture->mmco[index].long_term_frame_idx;
 		}
 	}
+
+	/* Reset device coding state before its first actual submission. */
 	if (!dpb->device_started)
 		plan->reset = 1;
 	plan->decode = 1;
@@ -244,6 +264,8 @@ h264_dpb_mark(
 		if (picture->info.flags.is_reference)
 			dpb->active[plan->setup] = 1;
 	}
+
+	/* Non-reference pictures do not consume logical reference capacity. */
 	if (!picture->info.flags.is_reference)
 		return 0;
 	maximum = 1U << (sps->log2_max_frame_num_minus4 + 4U);
@@ -329,6 +351,8 @@ h264_dpb_mark(
 		entry->reference = H264_DPB_LONG;
 		entry->long_index = long_index;
 	}
+
+	/* Normalize stored reference numbering only after the MMCO-5 picture was decoded. */
 	if (picture->mmco5) {
 		minimum = entry->poc[0];
 		if (entry->poc[1] < minimum)
@@ -337,11 +361,15 @@ h264_dpb_mark(
 		entry->poc[1] -= minimum;
 		entry->frame_num = 0U;
 	}
+
+	/* Count the committed logical reference set before accepting its capacity. */
 	count = 0U;
 	for (index = 0U; index < H264_DPB_SLOTS; index++) {
 		if (dpb->entry[index].reference != H264_DPB_UNUSED)
 			count++;
 	}
+
+	/* Reject marking which leaves more references than the sequence permits. */
 	if (count > dpb->max_references)
 		return EINVAL;
 
@@ -465,6 +493,8 @@ h264_sliding(
 			minimum = number;
 		}
 	}
+
+	/* Avoid removing a short-term reference when capacity is already available. */
 	if (count < dpb->max_references)
 		return 0;
 	if (oldest < 0)
@@ -506,6 +536,8 @@ h264_list_before(
 			return 1;
 		return 0;
 	}
+
+	/* Sort predictive lists by descending short-term picture number. */
 	if (type != H264_SLICE_B) {
 		ap = h264_pic_num(a, current, maximum);
 		bp = h264_pic_num(b, current, maximum);
@@ -530,11 +562,17 @@ h264_list_before(
 		if (bp > poc)
 			b_group = 0;
 	}
+
+	/* Order the past and future groups according to the selected B list. */
 	if (a_group < b_group)
 		return 1;
 	if (a_group > b_group)
 		return 0;
-	if ((list == 0U && a_group == 0) || (list == 1U && a_group == 1)) {
+	if (
+		(list == 0U &&
+		a_group == 0) ||
+		(list == 1U &&
+		a_group == 1)) {
 		if (ap > bp)
 			return 1;
 	} else {
@@ -580,11 +618,16 @@ h264_initial_lists(
 				continue;
 			if (real_only && entry->slot < 0)
 				continue;
-			if (type == H264_SLICE_B && sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_0 && entry->inferred)
+			if (
+				type == H264_SLICE_B &&
+				sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_0 &&
+				entry->inferred)
 				continue;
 			lists[list].entry[lists[list].count] = (int)index;
 			lists[list].count++;
 		}
+
+		/* Sort each initial list in place using normative reference comparisons. */
 		for (cursor = 1U; cursor < lists[list].count; cursor++) {
 			moving = lists[list].entry[cursor];
 			position = cursor;
@@ -595,6 +638,8 @@ h264_initial_lists(
 				lists[list].entry[position] = lists[list].entry[position - 1U];
 				position--;
 			}
+
+			/* Place the saved reference after shifting its predecessors. */
 			lists[list].entry[position] = moving;
 		}
 	}
@@ -606,6 +651,8 @@ h264_initial_lists(
 			if (lists[0].entry[index] != lists[1].entry[index])
 				same = 0;
 		}
+
+		/* Swap the first two entries only when complete B lists are identical. */
 		if (same) {
 			moving = lists[1].entry[0];
 			lists[1].entry[0] = lists[1].entry[1];
@@ -650,6 +697,8 @@ h264_modify_list(
 		} else {
 			found = h264_find_long(dpb, syntax->argument[operation]);
 		}
+
+		/* Refuse a modification target that has no admissible logical or real image. */
 		if (found < 0)
 			return ENOENT;
 		if (real_only && dpb->entry[found].slot < 0)
@@ -667,6 +716,8 @@ h264_modify_list(
 				write++;
 			}
 		}
+
+		/* Publish the list length after removing duplicate entries. */
 		list->count = write;
 	}
 
@@ -733,6 +784,8 @@ h264_reference_info(
 		info->flags.used_for_long_term_reference = 1;
 		info->FrameNum = (uint16_t)entry->long_index;
 	}
+
+	/* Publish both field order counts after selecting short- or long-term numbering. */
 	info->PicOrderCnt[0] = entry->poc[0];
 	info->PicOrderCnt[1] = entry->poc[1];
 }

@@ -42,7 +42,8 @@ static int app_fallback_problem(int problem);
  * Reports built-in decoding readiness without loading an optional codec library at application startup.
  */
 int
-app_codec_load(void)
+app_codec_load(
+	void)
 {
 	/* Succeeded: the application's optional fallback is selected only for an unsupported track. */
 	return 0;
@@ -52,7 +53,8 @@ app_codec_load(void)
  * Reports the optional fallback loader's most recent refusal text.
  */
 const char *
-app_codec_reason(void)
+app_codec_reason(
+	void)
 {
 	const char *reason;
 
@@ -87,9 +89,13 @@ app_decoder_open(
 			free(decoder);
 			return ENOMEM;
 		}
+
+		/* Copy codec initialization so optional fallback can open after the original track is gone. */
 		memcpy(decoder->private_data, track->private_data, track->private_size);
 		decoder->track.private_data = decoder->private_data;
 	}
+
+	/* Try the native library before opening optional application software. */
 	problem = media_decoder_open(&decoder->track, &decoder->native);
 	if (problem != 0) {
 		fallback = app_fallback_problem(problem);
@@ -184,6 +190,8 @@ app_decoder_send(
 	} else {
 		error = app_avcodec_ops.send(decoder->fallback, packet);
 	}
+
+	/* Return the original packet's send result after an admitted boundary fallback. */
 	if (error != 0)
 		return error;
 	if (packet != NULL)
@@ -412,6 +420,8 @@ app_frame_scale(
 			return ENOMEM;
 		*scaler = context;
 	}
+
+	/* Choose scaling from the backend which owns this retained picture. */
 	if (frame->native != NULL)
 		error = media_frame_scale(frame->native, &context->native, pixels, stride, width, height);
 	else

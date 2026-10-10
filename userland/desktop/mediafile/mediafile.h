@@ -80,6 +80,7 @@ struct media_track {
 	unsigned colour_matrix;
 	int colour_present;
 	int full_range;
+	int decode_order_times;	/* No container composition times: assign this time sequence after picture reordering. */
 };
 
 /*

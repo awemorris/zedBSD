@@ -114,6 +114,7 @@ struct vkvideo_runtime {
 	VkVideoCapabilitiesKHR capabilities;
 	VkVideoDecodeCapabilitiesKHR decode_caps;
 	VkVideoDecodeH264CapabilitiesKHR h264_caps;
+	StdVideoH264LevelIdc level;
 	VkExtent2D extent;
 	VkExtent2D image_extent;
 	VkImageUsageFlags reference_usage;
@@ -230,6 +231,7 @@ static pthread_once_t vkvideo_loader_once = PTHREAD_ONCE_INIT;
 static void vkvideo_loader(void);
 static int vkvideo_dispatch(struct vkvideo_runtime *video, int instance);
 static int vkvideo_instance(struct vkvideo_runtime *video);
+static int vkvideo_resources(struct vkvideo_runtime *video);
 static int vkvideo_device(struct vkvideo_runtime *video);
 static int vkvideo_family(struct vkvideo_runtime *video);
 static int vkvideo_formats(struct vkvideo_runtime *video, VkImageUsageFlags usage);
@@ -240,7 +242,7 @@ static int vkvideo_picture(struct vkvideo_runtime *video, uint32_t slot);
 static int vkvideo_bitstream(struct vkvideo_runtime *video, size_t bytes);
 static int vkvideo_session(struct vkvideo_runtime *video);
 static int vkvideo_commands(struct vkvideo_runtime *video);
-static void vkvideo_status_pool(struct vkvideo_runtime *video);
+static int vkvideo_status_pool(struct vkvideo_runtime *video);
 static int vkvideo_failed(VkResult result, const char *operation);
 static int vkvideo_mapped_range(struct vkvideo_runtime *video, VkDeviceMemory memory, int invalidate);
 static void vkvideo_barrier(struct vkvideo_runtime *video, VkCommandBuffer command, VkImage image, VkImageLayout old_layout, VkImageLayout new_layout, VkPipelineStageFlags2 source_stage, VkAccessFlags2 source_access, VkPipelineStageFlags2 destination_stage, VkAccessFlags2 destination_access);
@@ -255,7 +257,6 @@ media_vkvideo_runtime_open(
 	struct vkvideo_runtime **runtime)
 {
 	struct vkvideo_runtime *video;
-	unsigned slot;
 	int error;
 
 	/* The loader is optional; native media reports unavailable video without loading FFmpeg. */
@@ -266,6 +267,7 @@ media_vkvideo_runtime_open(
 	video = calloc(1U, sizeof(*video));
 	if (video == NULL)
 		return ENOMEM;
+	video->level = sps->level_idc;
 	video->extent.width = (sps->pic_width_in_mbs_minus1 + 1U) * 16U;
 	video->extent.height = (sps->pic_height_in_map_units_minus1 + 1U) * 16U;
 	video->max_references = sps->max_num_ref_frames;
@@ -287,50 +289,22 @@ media_vkvideo_runtime_open(
 	video->profile_list.profileCount = 1U;
 	video->profile_list.pProfiles = &video->profile;
 
-	/* All resources are created in dependency order and unwind through one retirement-aware owner. */
-	error = vkvideo_instance(video);
-	if (error != 0)
-		goto failed;
-	error = vkvideo_device(video);
-	if (error != 0)
-		goto failed;
-	error = vkvideo_session(video);
-	if (error != 0)
-		goto failed;
-	for (slot = 0U; slot < video->slots; slot++) {
-		error = vkvideo_picture(video, slot);
-		if (error != 0)
-			goto failed;
+	/* One resource routine leaves every partially created object with the same owner. */
+	error = vkvideo_resources(video);
+	if (error != 0) {
+		media_vkvideo_runtime_close(video);
+		if (error == ENOTSUP)
+			return MEDIA_PROBLEM_PROFILE;
+		if (error == EBUSY)
+			return MEDIA_PROBLEM_BUSY;
+		if (error == EIO || error == ENODEV)
+			return MEDIA_PROBLEM_DEVICE;
+		return error;
 	}
-	if (video->distinct) {
-		error = vkvideo_picture(video, video->slots);
-		if (error != 0)
-			goto failed;
-	}
-	error = vkvideo_bitstream(video, 1024U * 1024U);
-	if (error != 0)
-		goto failed;
-	error = vkvideo_readback(video);
-	if (error != 0)
-		goto failed;
-	error = vkvideo_commands(video);
-	if (error != 0)
-		goto failed;
 
 	/* Succeeded: the context owns every image, buffer and session required for standard readback. */
 	*runtime = video;
 	return 0;
-
-failed:
-	/* Preserve the original admission reason while releasing resources never submitted to a queue. */
-	media_vkvideo_runtime_close(video);
-	if (error == ENOTSUP)
-		return MEDIA_PROBLEM_PROFILE;
-	if (error == EBUSY)
-		return MEDIA_PROBLEM_BUSY;
-	if (error == EIO || error == ENODEV)
-		return MEDIA_PROBLEM_DEVICE;
-	return error;
 }
 
 /*
@@ -344,6 +318,9 @@ media_vkvideo_runtime_reset(
 	video->reset = 1;
 }
 
+/*
+ * Replace the session parameter object with the parser's currently published SPS and PPS sets.
+ */
 int
 media_vkvideo_runtime_parameters(
 	struct vkvideo_runtime *video,
@@ -358,6 +335,7 @@ media_vkvideo_runtime_parameters(
 	uint32_t sps_count;
 	uint32_t pps_count;
 	uint32_t index;
+	int error;
 
 	/* The sets the stream has. */
 	sps_count = 0U;
@@ -367,6 +345,8 @@ media_vkvideo_runtime_parameters(
 		sps[sps_count] = stream->sps[index];
 		sps_count++;
 	}
+
+	/* Collect all currently published PPS entries for the session parameter object. */
 	pps_count = 0U;
 	for (index = 0U; index < H264_PPS_IDS; index++) {
 		if (!stream->has_pps[index])
@@ -398,13 +378,18 @@ media_vkvideo_runtime_parameters(
 	info.pNext = &h264;
 	info.videoSession = video->session;
 	result = video->fn.vkCreateVideoSessionParametersKHR(video->device, &info, NULL, &video->parameters);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateVideoSessionParametersKHR");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateVideoSessionParametersKHR");
+		return error;
+	}
 
 	/* Succeeded: the parameters. */
 	return 0;
 }
 
+/*
+ * Submit one admitted picture and read both standard NV12 planes after queue retirement.
+ */
 int
 media_vkvideo_runtime_decode(
 	struct vkvideo_runtime *video,
@@ -452,6 +437,8 @@ media_vkvideo_runtime_decode(
 			return EINVAL;
 		at += 3U + picture->slice_sizes[slice];
 	}
+
+	/* Pad the bitstream range to the queried device alignment. */
 	alignment = video->capabilities.minBitstreamBufferSizeAlignment;
 	aligned = ((at + alignment - 1U) / alignment) * alignment;
 	if (aligned > VKVIDEO_SOURCE_MAX)
@@ -467,6 +454,8 @@ media_vkvideo_runtime_decode(
 		if (error != 0)
 			return error;
 	}
+
+	/* Pack complete Annex-B slice NALs into the mapped source buffer. */
 	at = 0U;
 	for (slice = 0U; slice < picture->slice_count; slice++) {
 		offsets[slice] = (uint32_t)at;
@@ -476,6 +465,8 @@ media_vkvideo_runtime_decode(
 		memcpy(video->buffer_map + at + 3U, stream->data + picture->slice_offsets[slice], picture->slice_sizes[slice]);
 		at += 3U + picture->slice_sizes[slice];
 	}
+
+	/* Zero only the required alignment padding after the final slice. */
 	memset(video->buffer_map + at, 0, (size_t)aligned - at);
 	if (!video->buffer_coherent) {
 		error = vkvideo_mapped_range(video, video->buffer_memory, 0);
@@ -498,8 +489,10 @@ media_vkvideo_runtime_decode(
 	record.sType = VK_STRUCTURE_TYPE_COMMAND_BUFFER_BEGIN_INFO;
 	record.flags = VK_COMMAND_BUFFER_USAGE_ONE_TIME_SUBMIT_BIT;
 	result = video->fn.vkBeginCommandBuffer(video->command, &record);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBeginCommandBuffer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBeginCommandBuffer");
+		return error;
+	}
 
 	/* The status query starts unavailable, outside the scope. */
 	if (video->status_pool != VK_NULL_HANDLE)
@@ -512,6 +505,8 @@ media_vkvideo_runtime_decode(
 		if (video->distinct)
 			vkvideo_barrier(video, video->command, video->image[video->slots], VK_IMAGE_LAYOUT_UNDEFINED, VK_IMAGE_LAYOUT_VIDEO_DECODE_DST_KHR, VK_PIPELINE_STAGE_2_NONE, 0U, VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR, VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR);
 	}
+
+	/* Select either the coincident current DPB image or the distinct output image. */
 	output_slot = (uint32_t)plan->setup;
 	output_layout = VK_IMAGE_LAYOUT_VIDEO_DECODE_DPB_KHR;
 	destination = resources[plan->setup];
@@ -530,12 +525,16 @@ media_vkvideo_runtime_decode(
 		bound[count].pPictureResource = &resources[plan->references[index]];
 		count++;
 	}
+
+	/* Deactivate stale device slots before associating the new current picture. */
 	for (index = 0U; index < plan->deactivate_count; index++) {
 		bound[count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
 		bound[count].slotIndex = plan->deactivate[index];
 		bound[count].pPictureResource = NULL;
 		count++;
 	}
+
+	/* Bind the current picture resource without an old reference-slot association. */
 	bound[count].sType = VK_STRUCTURE_TYPE_VIDEO_REFERENCE_SLOT_INFO_KHR;
 	bound[count].slotIndex = -1;
 	bound[count].pPictureResource = &resources[plan->setup];
@@ -608,12 +607,19 @@ media_vkvideo_runtime_decode(
 	/* Read both NV12 planes in their standard sample coordinates, never an optimal image's host layout. */
 	vkvideo_barrier(video, video->command, video->image[output_slot], output_layout, VK_IMAGE_LAYOUT_TRANSFER_SRC_OPTIMAL, VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR, VK_ACCESS_2_VIDEO_DECODE_WRITE_BIT_KHR, VK_PIPELINE_STAGE_2_NONE, 0U);
 	result = video->fn.vkEndCommandBuffer(video->command);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkEndCommandBuffer video");
-	result = video->fn.vkBeginCommandBuffer(video->transfer_command, &record);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBeginCommandBuffer transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkEndCommandBuffer video");
+		return error;
+	}
 
+	/* Begin transfer recording after the video coding scope was closed. */
+	result = video->fn.vkBeginCommandBuffer(video->transfer_command, &record);
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBeginCommandBuffer transfer");
+		return error;
+	}
+
+	/* Describe both NV12 planes using standard per-plane sample coordinates. */
 	memset(copies, 0, sizeof(copies));
 	copies[0].imageSubresource.aspectMask = VK_IMAGE_ASPECT_PLANE_0_BIT;
 	copies[0].imageSubresource.layerCount = 1U;
@@ -644,8 +650,10 @@ media_vkvideo_runtime_decode(
 	host_dependency.pBufferMemoryBarriers = &host_barrier;
 	video->fn.vkCmdPipelineBarrier2KHR(video->transfer_command, &host_dependency);
 	result = video->fn.vkEndCommandBuffer(video->transfer_command);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkEndCommandBuffer transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkEndCommandBuffer transfer");
+		return error;
+	}
 
 	/* Binary semaphores carry memory dependencies between dedicated video and transfer families. */
 	memset(&submit, 0, sizeof(submit));
@@ -660,9 +668,15 @@ media_vkvideo_runtime_decode(
 		submit.pWaitSemaphores = &video->returned;
 		submit.pWaitDstStageMask = &wait_stage;
 	}
+
+	/* Submit decoding after attaching the preceding transfer's reverse dependency. */
 	result = video->fn.vkQueueSubmit(video->queue, 1U, &submit, VK_NULL_HANDLE);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkQueueSubmit video");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkQueueSubmit video");
+		return error;
+	}
+
+	/* Retain all submission resources as soon as decoding enters the queue. */
 	video->inflight = 1;
 	video->returned_pending = 0;
 	wait_stage = VK_PIPELINE_STAGE_TRANSFER_BIT;
@@ -672,34 +686,53 @@ media_vkvideo_runtime_decode(
 	submit.pCommandBuffers = &video->transfer_command;
 	submit.pSignalSemaphores = &video->returned;
 	result = video->fn.vkQueueSubmit(video->transfer_queue, 1U, &submit, video->fence);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkQueueSubmit transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkQueueSubmit transfer");
+		return error;
+	}
+
+	/* Record the reverse semaphore dependency after transfer submission succeeded. */
 	video->returned_pending = 1;
 	result = video->fn.vkWaitForFences(video->device, 1U, &video->fence, VK_TRUE, VKVIDEO_WAIT_NS);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkWaitForFences readback");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkWaitForFences readback");
+		return error;
+	}
+
+	/* Mark both queue submissions retired only after the transfer fence completed. */
 	video->inflight = 0;
 	video->initialized = 1;
 	video->reset = 0;
 
 	/* The fence and the buffer for the next picture. */
 	result = video->fn.vkResetFences(video->device, 1U, &video->fence);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkResetFences");
-	result = video->fn.vkResetCommandBuffer(video->command, 0U);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkResetCommandBuffer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkResetFences");
+		return error;
+	}
 
+	/* Reset video recording after resetting the retired completion fence. */
+	result = video->fn.vkResetCommandBuffer(video->command, 0U);
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkResetCommandBuffer");
+		return error;
+	}
+
+	/* Reset transfer recording only after its fence has retired both submissions. */
 	result = video->fn.vkResetCommandBuffer(video->transfer_command, 0U);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkResetCommandBuffer transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkResetCommandBuffer transfer");
+		return error;
+	}
 
 	/* Whether the decode completed: its query's status, when there is one. */
 	video->status = VK_QUERY_RESULT_STATUS_COMPLETE_KHR;
 	if (video->status_pool != VK_NULL_HANDLE) {
 		result = video->fn.vkGetQueryPoolResults(video->device, video->status_pool, 0U, 1U, sizeof(video->status), &video->status, sizeof(video->status), VK_QUERY_RESULT_WITH_STATUS_BIT_KHR | VK_QUERY_RESULT_WAIT_BIT);
-		if (result != VK_SUCCESS)
-			return vkvideo_failed(result, "vkGetQueryPoolResults");
+		if (result != VK_SUCCESS) {
+			error = vkvideo_failed(result, "vkGetQueryPoolResults");
+			return error;
+		}
 	}
 
 	/* A status failure is an actual decode error; no unverified pixels are exposed to the caller. */
@@ -710,12 +743,17 @@ media_vkvideo_runtime_decode(
 		if (error != 0)
 			return error;
 	}
+
+	/* Copy cropped linear NV12 bytes only after retirement and host visibility. */
 	vkvideo_copy_output(video, sps, output);
 
 	/* Succeeded: the cropped CPU picture is independent of decoder and GPU image lifetime. */
 	return 0;
 }
 
+/*
+ * Retire GPU work and release this runtime, preserving resources when retirement cannot be proven.
+ */
 void
 media_vkvideo_runtime_close(
 	struct vkvideo_runtime *video)
@@ -729,11 +767,18 @@ media_vkvideo_runtime_close(
 
 	/* The device's objects, then the device. */
 	if (video->device != VK_NULL_HANDLE) {
-		result = video->fn.vkDeviceWaitIdle(video->device);
-		if (video->inflight && result != VK_SUCCESS && result != VK_ERROR_DEVICE_LOST) {
+		result = VK_SUCCESS;
+		if (video->fn.vkDeviceWaitIdle != NULL)
+			result = video->fn.vkDeviceWaitIdle(video->device);
+		if (
+			video->inflight &&
+			result != VK_SUCCESS &&
+			result != VK_ERROR_DEVICE_LOST) {
 			media_log("Vulkan Video retains an unretired context after failed idle (%d)", (int)result);
 			return;
 		}
+
+		/* Destroy optional command and query resources after device retirement. */
 		if (video->status_pool != VK_NULL_HANDLE)
 			video->fn.vkDestroyQueryPool(video->device, video->status_pool, NULL);
 		if (video->fence != VK_NULL_HANDLE)
@@ -772,15 +817,65 @@ media_vkvideo_runtime_close(
 			if (video->image_memory[index] != VK_NULL_HANDLE)
 				video->fn.vkFreeMemory(video->device, video->image_memory[index], NULL);
 		}
-		video->fn.vkDestroyDevice(video->device, NULL);
+
+		/* Destroy a partially admitted device only when dispatch supplied its destructor. */
+		if (video->fn.vkDestroyDevice != NULL)
+			video->fn.vkDestroyDevice(video->device, NULL);
 	}
 
 	/* The instance. */
-	if (video->instance != VK_NULL_HANDLE)
+	if (video->instance != VK_NULL_HANDLE && video->fn.vkDestroyInstance != NULL)
 		video->fn.vkDestroyInstance(video->instance, NULL);
 	free(video);
 }
 
+/* Create one session and its standard decode/readback resources in dependency order. */
+static int
+vkvideo_resources(
+	struct vkvideo_runtime *video)
+{
+	unsigned slot;
+	int error;
+
+	/* All resources are created in dependency order and unwind through one retirement-aware owner. */
+	error = vkvideo_instance(video);
+	if (error != 0)
+		return error;
+	error = vkvideo_device(video);
+	if (error != 0)
+		return error;
+	error = vkvideo_session(video);
+	if (error != 0)
+		return error;
+	for (slot = 0U; slot < video->slots; slot++) {
+		error = vkvideo_picture(video, slot);
+		if (error != 0)
+			return error;
+	}
+
+	/* Allocate a separate destination only for a distinct-output device. */
+	if (video->distinct) {
+		error = vkvideo_picture(video, video->slots);
+		if (error != 0)
+			return error;
+	}
+
+	/* Create the host source buffer before the staging readback buffer. */
+	error = vkvideo_bitstream(video, 1024U * 1024U);
+	if (error != 0)
+		return error;
+	error = vkvideo_readback(video);
+	if (error != 0)
+		return error;
+	error = vkvideo_commands(video);
+	if (error != 0)
+		return error;
+
+	/* Success transfers no ownership; the caller already owns the complete resource set. */
+	return 0;
+}
+
+/* Allocate one profile-compatible optimal NV12 image and its decode resource view. */
 static int
 vkvideo_picture(
 	struct vkvideo_runtime *video,
@@ -817,10 +912,14 @@ vkvideo_picture(
 		image.queueFamilyIndexCount = 2U;
 		image.pQueueFamilyIndices = families;
 	}
+
+	/* Create every image from an undefined initial layout. */
 	image.initialLayout = VK_IMAGE_LAYOUT_UNDEFINED;
 	result = video->fn.vkCreateImage(video->device, &image, NULL, &video->image[slot]);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateImage");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateImage");
+		return error;
+	}
 
 	/* Its memory, bound and mapped. */
 	video->fn.vkGetImageMemoryRequirements(video->device, video->image[slot], &requirements);
@@ -828,8 +927,10 @@ vkvideo_picture(
 	if (error != 0)
 		return error;
 	result = video->fn.vkBindImageMemory(video->device, video->image[slot], video->image_memory[slot], 0U);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBindImageMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBindImageMemory");
+		return error;
+	}
 
 	/* Its view. */
 	memset(&view, 0, sizeof(view));
@@ -841,13 +942,16 @@ vkvideo_picture(
 	view.subresourceRange.levelCount = 1U;
 	view.subresourceRange.layerCount = 1U;
 	result = video->fn.vkCreateImageView(video->device, &view, NULL, &video->view[slot]);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateImageView");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateImageView");
+		return error;
+	}
 
 	/* Succeeded: the slot's picture. */
 	return 0;
 }
 
+/* Grow the host-visible compressed source buffer without changing in-flight allocations. */
 static int
 vkvideo_bitstream(
 	struct vkvideo_runtime *video,
@@ -868,8 +972,10 @@ vkvideo_bitstream(
 	buffer.usage = VK_BUFFER_USAGE_VIDEO_DECODE_SRC_BIT_KHR;
 	buffer.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	result = video->fn.vkCreateBuffer(video->device, &buffer, NULL, &video->buffer);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateBuffer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateBuffer");
+		return error;
+	}
 
 	/* Its memory, bound and mapped. */
 	video->fn.vkGetBufferMemoryRequirements(video->device, video->buffer, &requirements);
@@ -877,25 +983,33 @@ vkvideo_bitstream(
 	if (error != 0)
 		return error;
 	result = video->fn.vkBindBufferMemory(video->device, video->buffer, video->buffer_memory, 0U);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBindBufferMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBindBufferMemory");
+		return error;
+	}
+
+	/* Map the newly bound compressed source allocation for host writes. */
 	result = video->fn.vkMapMemory(video->device, video->buffer_memory, 0U, VK_WHOLE_SIZE, 0U, &map);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkMapMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkMapMemory");
+		return error;
+	}
+
+	/* Publish the source mapping only after mapping succeeded. */
 	video->buffer_map = map;
 
 	/* Succeeded: the buffer. */
 	return 0;
 }
 
+/* Create and bind a standard H.264 session for the admitted sequence capacity. */
 static int
 vkvideo_session(
 	struct vkvideo_runtime *video)
 {
 	static const VkExtensionProperties header = {
-		VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_EXTENSION_NAME,
-		VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_SPEC_VERSION
-	};
+	    VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_EXTENSION_NAME,
+	    VK_STD_VULKAN_VIDEO_CODEC_H264_DECODE_SPEC_VERSION};
 	VkVideoSessionCreateInfoKHR info;
 	VkVideoSessionMemoryRequirementsKHR requirements[VKVIDEO_BINDINGS];
 	VkBindVideoSessionMemoryInfoKHR binds[VKVIDEO_BINDINGS];
@@ -916,8 +1030,10 @@ vkvideo_session(
 	info.maxActiveReferencePictures = video->max_references;
 	info.pStdHeaderVersion = &header;
 	result = video->fn.vkCreateVideoSessionKHR(video->device, &info, NULL, &video->session);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateVideoSessionKHR");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateVideoSessionKHR");
+		return error;
+	}
 
 	/* What memory it asks for. */
 	memset(requirements, 0, sizeof(requirements));
@@ -925,8 +1041,10 @@ vkvideo_session(
 		requirements[index].sType = VK_STRUCTURE_TYPE_VIDEO_SESSION_MEMORY_REQUIREMENTS_KHR;
 	count = VKVIDEO_BINDINGS;
 	result = video->fn.vkGetVideoSessionMemoryRequirementsKHR(video->device, video->session, &count, requirements);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkGetVideoSessionMemoryRequirementsKHR");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkGetVideoSessionMemoryRequirementsKHR");
+		return error;
+	}
 
 	/* One allocation for each binding, then all bound at once. */
 	memset(binds, 0, sizeof(binds));
@@ -941,14 +1059,19 @@ vkvideo_session(
 		binds[index].memoryOffset = 0U;
 		binds[index].memorySize = requirements[index].memoryRequirements.size;
 	}
+
+	/* Bind all allocated session memory ranges in one standard call. */
 	result = video->fn.vkBindVideoSessionMemoryKHR(video->device, video->session, count, binds);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBindVideoSessionMemoryKHR");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBindVideoSessionMemoryKHR");
+		return error;
+	}
 
 	/* Succeeded: the session is bound. */
 	return 0;
 }
 
+/* Create family-specific command pools, completion fence and cross-queue semaphores. */
 static int
 vkvideo_commands(
 	struct vkvideo_runtime *video)
@@ -958,6 +1081,7 @@ vkvideo_commands(
 	VkFenceCreateInfo fence;
 	VkSemaphoreCreateInfo semaphore;
 	VkResult result;
+	int error;
 
 	/* The pool, whose buffer is reset before each picture. */
 	memset(&pool, 0, sizeof(pool));
@@ -965,8 +1089,10 @@ vkvideo_commands(
 	pool.flags = VK_COMMAND_POOL_CREATE_RESET_COMMAND_BUFFER_BIT;
 	pool.queueFamilyIndex = video->family;
 	result = video->fn.vkCreateCommandPool(video->device, &pool, NULL, &video->pool);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateCommandPool");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateCommandPool");
+		return error;
+	}
 
 	/* The buffer. */
 	memset(&command, 0, sizeof(command));
@@ -975,52 +1101,74 @@ vkvideo_commands(
 	command.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	command.commandBufferCount = 1U;
 	result = video->fn.vkAllocateCommandBuffers(video->device, &command, &video->command);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkAllocateCommandBuffers");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkAllocateCommandBuffers");
+		return error;
+	}
 
 	/* The fence. */
 	memset(&fence, 0, sizeof(fence));
 	fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
 	result = video->fn.vkCreateFence(video->device, &fence, NULL, &video->fence);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateFence");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateFence");
+		return error;
+	}
 
 	/* A separate transfer command permits drivers with a dedicated video-only queue. */
 	pool.queueFamilyIndex = video->transfer_family;
 	result = video->fn.vkCreateCommandPool(video->device, &pool, NULL, &video->transfer_pool);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateCommandPool transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateCommandPool transfer");
+		return error;
+	}
+
+	/* Allocate the transfer command from the transfer family's pool. */
 	command.commandPool = video->transfer_pool;
 	result = video->fn.vkAllocateCommandBuffers(video->device, &command, &video->transfer_command);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkAllocateCommandBuffers transfer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkAllocateCommandBuffers transfer");
+		return error;
+	}
+
+	/* Create the decode-to-transfer semaphore before its reverse counterpart. */
 	memset(&semaphore, 0, sizeof(semaphore));
 	semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
 	result = video->fn.vkCreateSemaphore(video->device, &semaphore, NULL, &video->decoded);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateSemaphore decoded");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateSemaphore decoded");
+		return error;
+	}
+
+	/* Create the transfer-to-next-decode semaphore independently. */
 	result = video->fn.vkCreateSemaphore(video->device, &semaphore, NULL, &video->returned);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateSemaphore returned");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateSemaphore returned");
+		return error;
+	}
 
 	/* The result status query, where the family has it. */
-	vkvideo_status_pool(video);
+	error = vkvideo_status_pool(video);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the commands. */
 	return 0;
 }
 
-static void
+/* Create a decode-status query only when the selected queue family exposes it. */
+static int
 vkvideo_status_pool(
 	struct vkvideo_runtime *video)
 {
 	VkQueryPoolCreateInfo info;
 	VkResult result;
+	int error;
 
 	/* No status: every decode counts as complete. */
 	video->status = VK_QUERY_RESULT_STATUS_COMPLETE_KHR;
 	if (!video->status_supported)
-		return;
+		return 0;
 
 	/* One query of the decode's profile. */
 	memset(&info, 0, sizeof(info));
@@ -1031,12 +1179,18 @@ vkvideo_status_pool(
 	result = video->fn.vkCreateQueryPool(video->device, &info, NULL, &video->status_pool);
 	if (result != VK_SUCCESS) {
 		video->status_pool = VK_NULL_HANDLE;
+		error = vkvideo_failed(result, "vkCreateQueryPool");
+		return error;
 	}
+
+	/* Succeeded: a supported status query cannot silently disappear after allocation failure. */
+	return 0;
 }
 
 /* Publish the optional standard loader once without using a codec library as a media backend. */
 static void
-vkvideo_loader(void)
+vkvideo_loader(
+	void)
 {
 	/* Distribution SONAMEs are tried in their normal order and retained for process lifetime. */
 	vkvideo_library = dlopen("libvulkan.so.1", RTLD_NOW | RTLD_LOCAL);
@@ -1059,11 +1213,13 @@ vkvideo_dispatch(
 	if (video->fn.vkGetInstanceProcAddr == NULL) {
 		symbol = dlsym(vkvideo_library, "vkGetInstanceProcAddr");
 		if (symbol == NULL)
-			return MEDIA_PROBLEM_DEVICE;
+			return ENODEV;
 		if (sizeof(symbol) != sizeof(video->fn.vkGetInstanceProcAddr))
-			return MEDIA_PROBLEM_DEVICE;
+			return ENODEV;
 		memcpy(&video->fn.vkGetInstanceProcAddr, &symbol, sizeof(symbol));
 	}
+
+	/* Load every dispatch symbol even when an earlier entry was unavailable. */
 	missing = 0;
 	for (index = 0U; index < sizeof(vkvideo_symbols) / sizeof(vkvideo_symbols[0]); index++) {
 		if (vkvideo_symbols[index].instance != instance)
@@ -1077,8 +1233,9 @@ vkvideo_dispatch(
 		memcpy((uint8_t *)&video->fn + vkvideo_symbols[index].offset, &address, sizeof(address));
 	}
 
+	/* Reject incomplete dispatch after recording all available cleanup functions. */
 	if (missing)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 
 	/* Succeeded: every operation required by this dispatch phase is present. */
 	return 0;
@@ -1102,12 +1259,14 @@ vkvideo_instance(
 	if (video->fn.vkGetInstanceProcAddr == NULL) {
 		symbol = dlsym(vkvideo_library, "vkGetInstanceProcAddr");
 		if (symbol == NULL)
-			return MEDIA_PROBLEM_DEVICE;
+			return ENODEV;
 		memcpy(&video->fn.vkGetInstanceProcAddr, &symbol, sizeof(symbol));
 	}
+
+	/* Resolve instance creation from the process-wide Vulkan loader. */
 	address = video->fn.vkGetInstanceProcAddr(VK_NULL_HANDLE, "vkCreateInstance");
 	if (address == NULL)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 	memcpy(&video->fn.vkCreateInstance, &address, sizeof(address));
 	memset(&application, 0, sizeof(application));
 	application.sType = VK_STRUCTURE_TYPE_APPLICATION_INFO;
@@ -1119,8 +1278,12 @@ vkvideo_instance(
 	info.enabledExtensionCount = 1U;
 	info.ppEnabledExtensionNames = extensions;
 	result = video->fn.vkCreateInstance(&info, NULL, &video->instance);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateInstance");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateInstance");
+		return error;
+	}
+
+	/* Resolve instance dispatch before probing any physical device. */
 	error = vkvideo_dispatch(video, 1);
 	if (error != 0)
 		return error;
@@ -1146,7 +1309,7 @@ vkvideo_family(
 	count = 0U;
 	video->fn.vkGetPhysicalDeviceQueueFamilyProperties2KHR(video->physical, &count, NULL);
 	if (count == 0U || count > VKVIDEO_FAMILIES)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 	memset(families, 0, sizeof(families));
 	memset(properties, 0, sizeof(properties));
 	memset(status, 0, sizeof(status));
@@ -1157,6 +1320,8 @@ vkvideo_family(
 		properties[index].pNext = &status[index];
 		status[index].sType = VK_STRUCTURE_TYPE_QUEUE_FAMILY_QUERY_RESULT_STATUS_PROPERTIES_KHR;
 	}
+
+	/* Fill the initialized per-family capability chains. */
 	video->fn.vkGetPhysicalDeviceQueueFamilyProperties2KHR(video->physical, &count, families);
 	transfer = -1;
 	decoder = -1;
@@ -1170,6 +1335,8 @@ vkvideo_family(
 		decoder = (int)index;
 		video->status_supported = status[index].queryResultStatusSupport;
 	}
+
+	/* Require both an H.264 decode family and a transfer-capable family. */
 	if (decoder >= 0 && transfer >= 0) {
 		video->family = (uint32_t)decoder;
 		video->transfer_family = (uint32_t)transfer;
@@ -1177,7 +1344,7 @@ vkvideo_family(
 	}
 
 	/* No family exposes the full standard decode-and-readback operation set. */
-	return MEDIA_PROBLEM_DEVICE;
+	return ENODEV;
 }
 
 /* Admit an optimal NV12 image only after querying its complete combined usage. */
@@ -1191,6 +1358,7 @@ vkvideo_formats(
 	VkResult result;
 	uint32_t count;
 	unsigned index;
+	int error;
 
 	/* Combined usage is essential: independent capability flags do not prove one image supports all operations. */
 	memset(&info, 0, sizeof(info));
@@ -1199,14 +1367,24 @@ vkvideo_formats(
 	info.imageUsage = usage;
 	count = 0U;
 	result = video->fn.vkGetPhysicalDeviceVideoFormatPropertiesKHR(video->physical, &info, &count, NULL);
-	if (result != VK_SUCCESS || count == 0U || count > 32U)
-		return MEDIA_PROBLEM_PROFILE;
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkGetPhysicalDeviceVideoFormatPropertiesKHR count");
+		return error;
+	}
+
+	/* A successful query with no bounded NV12 candidates is an unsupported allocation model. */
+	if (count == 0U || count > 32U)
+		return ENOTSUP;
 	memset(formats, 0, sizeof(formats));
 	for (index = 0U; index < count; index++)
 		formats[index].sType = VK_STRUCTURE_TYPE_VIDEO_FORMAT_PROPERTIES_KHR;
 	result = video->fn.vkGetPhysicalDeviceVideoFormatPropertiesKHR(video->physical, &info, &count, formats);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkGetPhysicalDeviceVideoFormatPropertiesKHR");
+		return error;
+	}
+
+	/* Select a format which supports every requested usage and the optimal two-plane image model. */
 	for (index = 0U; index < count; index++) {
 		if (formats[index].format != VK_FORMAT_G8_B8R8_2PLANE_420_UNORM)
 			continue;
@@ -1218,7 +1396,7 @@ vkvideo_formats(
 	}
 
 	/* No standard NV12 allocation supports this complete usage combination. */
-	return MEDIA_PROBLEM_PROFILE;
+	return ENOTSUP;
 }
 
 /* Query sequence limits and support both coincident and distinct output/reference image models. */
@@ -1230,6 +1408,9 @@ vkvideo_capabilities(
 	VkExtent2D granularity;
 	int error;
 
+	/* Each candidate begins with an independent image-model choice. */
+	video->distinct = 0;
+
 	/* The profile query provides bitstream alignment, extent, reference capacity and image-model flags. */
 	video->h264_caps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_H264_CAPABILITIES_KHR;
 	video->decode_caps.sType = VK_STRUCTURE_TYPE_VIDEO_DECODE_CAPABILITIES_KHR;
@@ -1237,25 +1418,35 @@ vkvideo_capabilities(
 	video->capabilities.sType = VK_STRUCTURE_TYPE_VIDEO_CAPABILITIES_KHR;
 	video->capabilities.pNext = &video->decode_caps;
 	result = video->fn.vkGetPhysicalDeviceVideoCapabilitiesKHR(video->physical, &video->profile, &video->capabilities);
-	if (result != VK_SUCCESS)
-		return MEDIA_PROBLEM_PROFILE;
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkGetPhysicalDeviceVideoCapabilitiesKHR");
+		return error;
+	}
+
+	/* The sequence must fit both coded-extent limits and the advertised profile level. */
 	if (video->extent.width > video->capabilities.maxCodedExtent.width || video->extent.height > video->capabilities.maxCodedExtent.height)
-		return MEDIA_PROBLEM_PROFILE;
+		return ENOTSUP;
 	if (video->extent.width < video->capabilities.minCodedExtent.width || video->extent.height < video->capabilities.minCodedExtent.height)
-		return MEDIA_PROBLEM_PROFILE;
+		return ENOTSUP;
+	if (video->level > video->h264_caps.maxLevelIdc)
+		return ENOTSUP;
 	if (video->slots > video->capabilities.maxDpbSlots || video->max_references > video->capabilities.maxActiveReferencePictures)
-		return MEDIA_PROBLEM_PROFILE;
+		return ENOTSUP;
 	if (video->capabilities.minBitstreamBufferSizeAlignment == 0U || video->capabilities.minBitstreamBufferSizeAlignment > VKVIDEO_SOURCE_MAX)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 	video->reference_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
-	error = MEDIA_PROBLEM_PROFILE;
+	error = ENOTSUP;
 	if ((video->decode_caps.flags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR) != 0U) {
 		video->reference_usage |= VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 		error = vkvideo_formats(video, video->reference_usage);
 	}
+
+	/* Try distinct output only when coincident allocation was unavailable. */
 	if (error != 0) {
+		if (error != ENOTSUP)
+			return error;
 		if ((video->decode_caps.flags & VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR) == 0U)
-			return MEDIA_PROBLEM_PROFILE;
+			return ENOTSUP;
 		video->distinct = 1;
 		video->reference_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
 		error = vkvideo_formats(video, video->reference_usage);
@@ -1269,11 +1460,11 @@ vkvideo_capabilities(
 	/* Image allocation extent follows picture-access granularity, while coded extent remains the actual sequence size. */
 	granularity = video->capabilities.pictureAccessGranularity;
 	if (granularity.width == 0U || granularity.height == 0U)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 	video->image_extent.width = ((video->extent.width + granularity.width - 1U) / granularity.width) * granularity.width;
 	video->image_extent.height = ((video->extent.height + granularity.height - 1U) / granularity.height) * granularity.height;
 	if ((uint64_t)video->image_extent.width * video->image_extent.height * (video->slots + video->distinct) * 3U / 2U > 256U * 1024U * 1024U)
-		return MEDIA_PROBLEM_PROFILE;
+		return ENOTSUP;
 
 	/* Succeeded: all standard capability and format requirements are admitted. */
 	return 0;
@@ -1306,11 +1497,21 @@ vkvideo_device(
 	/* Bound enumeration before filling storage with driver-reported device handles. */
 	count = 0U;
 	result = video->fn.vkEnumeratePhysicalDevices(video->instance, &count, NULL);
-	if (result != VK_SUCCESS || count == 0U || count > 32U)
-		return MEDIA_PROBLEM_DEVICE;
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkEnumeratePhysicalDevices count");
+		return error;
+	}
+
+	/* Empty or excessive enumeration cannot supply this runtime's bounded device selection. */
+	if (count == 0U || count > 32U)
+		return ENODEV;
 	result = video->fn.vkEnumeratePhysicalDevices(video->instance, &count, devices);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkEnumeratePhysicalDevices");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkEnumeratePhysicalDevices");
+		return error;
+	}
+
+	/* Probe every enumerated physical device independently. */
 	for (index = 0U; index < count; index++) {
 		video->physical = devices[index];
 		error = vkvideo_family(video);
@@ -1318,12 +1519,25 @@ vkvideo_device(
 			continue;
 		extension_count = 0U;
 		result = video->fn.vkEnumerateDeviceExtensionProperties(video->physical, NULL, &extension_count, NULL);
-		if (result != VK_SUCCESS || extension_count > 1024U)
+		if (result != VK_SUCCESS) {
+			error = vkvideo_failed(result, "vkEnumerateDeviceExtensionProperties count");
+			return error;
+		}
+
+		/* Reject excessive extension enumeration before allocating its temporary list. */
+		if (extension_count > 1024U)
 			continue;
 		available = calloc(extension_count + 1U, sizeof(*available));
 		if (available == NULL)
 			return ENOMEM;
 		result = video->fn.vkEnumerateDeviceExtensionProperties(video->physical, NULL, &extension_count, available);
+		if (result != VK_SUCCESS) {
+			free(available);
+			error = vkvideo_failed(result, "vkEnumerateDeviceExtensionProperties");
+			return error;
+		}
+
+		/* Match every required extension before creating a device. */
 		matched = 0U;
 		if (result == VK_SUCCESS) {
 			for (extension = 0U; extension < 4U; extension++) {
@@ -1336,12 +1550,16 @@ vkvideo_device(
 				}
 			}
 		}
+
+		/* Release temporary extension enumeration before deciding whether this device is admitted. */
 		free(available);
 		if (matched != 4U)
 			continue;
 		error = vkvideo_capabilities(video);
-		if (error != 0)
+		if (error == ENOTSUP || error == ENODEV)
 			continue;
+		if (error != 0)
+			return error;
 		memset(&features, 0, sizeof(features));
 		memset(&synchronization, 0, sizeof(synchronization));
 		features.sType = VK_STRUCTURE_TYPE_PHYSICAL_DEVICE_FEATURES_2;
@@ -1382,7 +1600,7 @@ vkvideo_device(
 	}
 
 	/* No device exposes the queried profile, extensions and transfer-capable decode queue. */
-	return MEDIA_PROBLEM_DEVICE;
+	return ENODEV;
 }
 
 /* Allocate host-visible or device-local memory according to its actual usage and coherent properties. */
@@ -1401,6 +1619,7 @@ vkvideo_allocate(
 	unsigned score;
 	unsigned best;
 	VkMemoryPropertyFlags flags;
+	int error;
 
 	/* Coherent host allocations avoid cache calls; device images never require host visibility. */
 	chosen = -1;
@@ -1421,15 +1640,21 @@ vkvideo_allocate(
 			chosen = (int)index;
 		}
 	}
+
+	/* Reject memory requirements with no compatible permitted memory type. */
 	if (chosen < 0)
-		return MEDIA_PROBLEM_DEVICE;
+		return ENODEV;
 	memset(&info, 0, sizeof(info));
 	info.sType = VK_STRUCTURE_TYPE_MEMORY_ALLOCATE_INFO;
 	info.allocationSize = requirements->size;
 	info.memoryTypeIndex = (uint32_t)chosen;
 	result = video->fn.vkAllocateMemory(video->device, &info, NULL, memory);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkAllocateMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkAllocateMemory");
+		return error;
+	}
+
+	/* Report coherence from the selected memory type to the buffer owner. */
 	if (coherent != NULL) {
 		*coherent = 0;
 		if ((video->memory.memoryTypes[chosen].propertyFlags & VK_MEMORY_PROPERTY_HOST_COHERENT_BIT) != 0U)
@@ -1458,18 +1683,30 @@ vkvideo_readback(
 	info.usage = VK_BUFFER_USAGE_TRANSFER_DST_BIT;
 	info.sharingMode = VK_SHARING_MODE_EXCLUSIVE;
 	result = video->fn.vkCreateBuffer(video->device, &info, NULL, &video->readback);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkCreateBuffer");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkCreateBuffer");
+		return error;
+	}
+
+	/* Query staging-buffer memory before allocating its host-visible storage. */
 	video->fn.vkGetBufferMemoryRequirements(video->device, video->readback, &requirements);
 	error = vkvideo_allocate(video, &requirements, 1, &video->readback_memory, &video->readback_coherent);
 	if (error != 0)
 		return error;
 	result = video->fn.vkBindBufferMemory(video->device, video->readback, video->readback_memory, 0U);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkBindBufferMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkBindBufferMemory");
+		return error;
+	}
+
+	/* Map the newly bound staging allocation for host reads. */
 	result = video->fn.vkMapMemory(video->device, video->readback_memory, 0U, VK_WHOLE_SIZE, 0U, &map);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "vkMapMemory");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "vkMapMemory");
+		return error;
+	}
+
+	/* Publish the readback mapping only after mapping succeeded. */
 	video->readback_map = map;
 
 	/* Succeeded: the CPU can inspect the transfer result after its fence and cache invalidation. */
@@ -1485,6 +1722,7 @@ vkvideo_mapped_range(
 {
 	VkMappedMemoryRange range;
 	VkResult result;
+	int error;
 
 	/* Whole-allocation ranges satisfy noncoherent atom alignment without a physical-device-specific stride. */
 	memset(&range, 0, sizeof(range));
@@ -1495,8 +1733,10 @@ vkvideo_mapped_range(
 		result = video->fn.vkInvalidateMappedMemoryRanges(video->device, 1U, &range);
 	else
 		result = video->fn.vkFlushMappedMemoryRanges(video->device, 1U, &range);
-	if (result != VK_SUCCESS)
-		return vkvideo_failed(result, "mapped memory visibility");
+	if (result != VK_SUCCESS) {
+		error = vkvideo_failed(result, "mapped memory visibility");
+		return error;
+	}
 
 	/* Succeeded: the mapped allocation is visible in the direction required by its owner. */
 	return 0;
@@ -1576,7 +1816,13 @@ vkvideo_failed(
 		return ENOMEM;
 	if (result == VK_ERROR_TOO_MANY_OBJECTS)
 		return EBUSY;
-	if (result == VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR || result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR)
+	if (
+		result == VK_ERROR_VIDEO_PROFILE_OPERATION_NOT_SUPPORTED_KHR ||
+		result == VK_ERROR_VIDEO_PROFILE_FORMAT_NOT_SUPPORTED_KHR ||
+		result == VK_ERROR_VIDEO_PROFILE_CODEC_NOT_SUPPORTED_KHR ||
+		result == VK_ERROR_VIDEO_PICTURE_LAYOUT_NOT_SUPPORTED_KHR ||
+		result == VK_ERROR_VIDEO_STD_VERSION_NOT_SUPPORTED_KHR ||
+		result == VK_ERROR_FORMAT_NOT_SUPPORTED)
 		return ENOTSUP;
 	if (result == VK_ERROR_DEVICE_LOST)
 		return EIO;

@@ -25,15 +25,15 @@
 #include <string.h>
 
 /* The bytes of a NAL unit's payload the reader looks at: every header the probe reads fits. */
-#define H264_RBSP_BYTES		4096U
+#define H264_RBSP_BYTES 4096U
 
 /* The NAL unit types the reader knows. */
-#define H264_NAL_SLICE		1U
-#define H264_NAL_IDR		5U
-#define H264_NAL_SEI		6U
-#define H264_NAL_SPS		7U
-#define H264_NAL_PPS		8U
-#define H264_NAL_DELIMITER	9U
+#define H264_NAL_SLICE 1U
+#define H264_NAL_IDR 5U
+#define H264_NAL_SEI 6U
+#define H264_NAL_SPS 7U
+#define H264_NAL_PPS 8U
+#define H264_NAL_DELIMITER 9U
 
 /*
  * The raw bytes of one NAL unit's payload (emulation prevention removed,
@@ -99,6 +99,8 @@ h264_open(
 			stream->error = EINVAL;
 			return -1;
 		}
+
+		/* Stop extradata scanning before any coded picture is consumed. */
 		if (nal.type == H264_NAL_SLICE || nal.type == H264_NAL_IDR)
 			break;
 		error = 0;
@@ -138,19 +140,29 @@ h264_nal_next(
 	for (;;) {
 		start = *cursor;
 		while (start + 3U <= size) {
-			if (data[start] == 0U && data[start + 1U] == 0U && data[start + 2U] == 1U)
+			if (
+				data[start] == 0U &&
+				data[start + 1U] == 0U &&
+				data[start + 2U] == 1U)
 				break;
 			start++;
 		}
+
+		/* Return no unit when the remaining bytes cannot contain a start code. */
 		if (start + 3U > size)
 			return 0;
 		start += 3U;
 		end = start;
 		while (end + 3U <= size) {
-			if (data[end] == 0U && data[end + 1U] == 0U && data[end + 2U] == 1U)
+			if (
+				data[end] == 0U &&
+				data[end + 1U] == 0U &&
+				data[end + 2U] == 1U)
 				break;
 			end++;
 		}
+
+		/* Include the remaining bytes when no subsequent start code was found. */
 		if (end + 3U > size)
 			end = size;
 		*cursor = end;
@@ -159,6 +171,8 @@ h264_nal_next(
 		if (end != start)
 			break;
 	}
+
+	/* Reject the forbidden NAL header bit before publishing its payload. */
 	if ((data[start] & 0x80U) != 0U)
 		return -1;
 
@@ -188,6 +202,7 @@ h264_next_picture(
 	uint32_t first_mb;
 	uint32_t slice_type;
 	int found;
+	int comparison;
 	int error;
 	struct h264_picture *next;
 	unsigned index;
@@ -222,6 +237,8 @@ h264_next_picture(
 				stream->cursor = before;
 				break;
 			}
+
+			/* Apply this parameter set at its original position in the access-unit stream. */
 			error = 0;
 			if (nal.type == H264_NAL_SPS)
 				error = h264_parse_sps(stream, stream->data + nal.offset, nal.size);
@@ -235,6 +252,7 @@ h264_next_picture(
 				*reason = "unsupported or invalid parameter set";
 				return -1;
 			}
+
 			continue;
 		}
 
@@ -244,6 +262,8 @@ h264_next_picture(
 			*reason = "unreadable slice header";
 			return -1;
 		}
+
+		/* Revisit the first slice of the next picture on the following call. */
 		if (first_mb == 0U && picture->slice_count != 0U) {
 			stream->cursor = before;
 			break;
@@ -255,12 +275,16 @@ h264_next_picture(
 			*reason = "more than 256 slices";
 			return -1;
 		}
+
+		/* Parse the first slice into the access unit's persistent metadata. */
 		if (picture->slice_count == 0U) {
 			if (first_mb != 0U) {
 				stream->error = ENOTSUP;
 				*reason = "slice order starts after macroblock zero";
 				return -1;
 			}
+
+			/* Read the picture identity and reference marking from this first slice. */
 			*reason = h264_slice_header(stream, &nal, picture);
 		} else {
 			next = calloc(1U, sizeof(*next));
@@ -269,26 +293,42 @@ h264_next_picture(
 				*reason = "slice metadata allocation failed";
 				return -1;
 			}
+
+			/* Parse later slice metadata independently before checking picture-wide agreement. */
 			*reason = h264_slice_header(stream, &nal, next);
 			if (*reason == NULL) {
-				if (first_mb <= picture->slices[picture->slice_count - 1U].first_mb)
+				if (first_mb <= picture->slices[picture->slice_count - 1U].first_mb) {
+					stream->error = ENOTSUP;
 					*reason = "arbitrary or overlapping slice order";
-				if (memcmp(&picture->info, &next->info, sizeof(next->info)) != 0)
+				}
+
+				/* Slice type is not part of picture identity; the complete picture accumulates intra status below. */
+				next->info.flags.is_intra = picture->info.flags.is_intra;
+				comparison = memcmp(&picture->info, &next->info, sizeof(next->info));
+				if (comparison != 0)
 					*reason = "inconsistent picture identity across slices";
-				if (picture->poc_lsb != next->poc_lsb || memcmp(picture->poc_delta, next->poc_delta, sizeof(next->poc_delta)) != 0)
+				comparison = memcmp(picture->poc_delta, next->poc_delta, sizeof(next->poc_delta));
+				if (picture->poc_lsb != next->poc_lsb || comparison != 0)
 					*reason = "inconsistent picture order across slices";
 				if (picture->mmco_count != next->mmco_count || picture->adaptive_marking != next->adaptive_marking)
 					*reason = "inconsistent reference marking across slices";
 				if (picture->long_term_reference != next->long_term_reference || picture->no_output_prior != next->no_output_prior)
 					*reason = "inconsistent IDR marking across slices";
 				for (index = 0U; index < picture->mmco_count; index++) {
-					if (memcmp(&picture->mmco[index], &next->mmco[index], sizeof(next->mmco[index])) != 0)
+					comparison = memcmp(&picture->mmco[index], &next->mmco[index], sizeof(next->mmco[index]));
+					if (comparison != 0)
 						*reason = "inconsistent memory management across slices";
 				}
+
+				/* Retain the later slice's complete reference requirements. */
 				picture->slices[picture->slice_count] = next->slices[0];
 			}
+
+			/* Release temporary metadata after copying its admitted slice. */
 			free(next);
 		}
+
+		/* Preserve a specific parser error or classify inconsistent syntax as invalid input. */
 		if (*reason != NULL) {
 			if (stream->error == 0)
 				stream->error = EINVAL;
@@ -300,6 +340,8 @@ h264_next_picture(
 			*reason = "more than 256 slices";
 			return -1;
 		}
+
+		/* Retain each complete NAL range for the standard decode buffer. */
 		picture->slice_offsets[picture->slice_count] = nal.offset;
 		picture->slice_sizes[picture->slice_count] = nal.size;
 		picture->slice_count++;
@@ -386,6 +428,8 @@ h264_picture_order(
 		stream->previous_frame_num = 0U;
 		stream->previous_frame_offset = 0U;
 	}
+
+	/* Unwrap the current frame number against the previous picture. */
 	frame_maximum = 1U << (sps->log2_max_frame_num_minus4 + 4U);
 	frame_offset = stream->previous_frame_offset;
 	if (stream->previous_frame_num > picture->info.frame_num)
@@ -424,6 +468,8 @@ h264_picture_order(
 				if (cycle_delta > INT64_MAX / (int64_t)cycles || cycle_delta < INT64_MIN / (int64_t)cycles)
 					return EINVAL;
 			}
+
+			/* Account for all complete reference-order cycles before the partial cycle. */
 			expected = cycle_delta * (int64_t)cycles;
 			/* Bound the intermediate cycle result before adding at most 255 signed offsets. */
 			if (expected < -1099511627776LL || expected > 1099511627776LL)
@@ -431,6 +477,8 @@ h264_picture_order(
 			for (index = 0U; index <= remainder; index++)
 				expected += sps->pOffsetForRefFrame[index];
 		}
+
+		/* Add the non-reference offset after the reference cycle has been evaluated. */
 		if (!picture->info.flags.is_reference)
 			expected += sps->offset_for_non_ref_pic;
 		top = expected + picture->poc_delta[0];
@@ -442,8 +490,12 @@ h264_picture_order(
 			if (!picture->info.flags.is_reference)
 				top--;
 		}
+
+		/* Progressive type-two pictures give both fields the same order. */
 		bottom = top;
 	}
+
+	/* Reject order counts that cannot be represented by the standard descriptors. */
 	if (top < INT32_MIN || top > INT32_MAX)
 		return EINVAL;
 	if (bottom < INT32_MIN || bottom > INT32_MAX)
@@ -458,6 +510,8 @@ h264_picture_order(
 		stream->previous_frame_num = 0U;
 		stream->previous_frame_offset = 0U;
 	}
+
+	/* Update reference-only type-zero history independently of frame-number history. */
 	if (picture->info.flags.is_reference) {
 		stream->previous_msb = (int32_t)msb;
 		stream->previous_lsb = (int32_t)picture->poc_lsb;
@@ -503,6 +557,9 @@ h264_reorder_depth(
 	if (sps->flags.vui_parameters_present_flag && stream->vui[sps_id].flags.bitstream_restriction_flag)
 		return stream->vui[sps_id].max_num_reorder_frames;
 	if (sps->profile_idc == STD_VIDEO_H264_PROFILE_IDC_BASELINE)
+		return 0U;
+	/* The supported High intra profile carries the explicit zero-reorder inference of E.2.1. */
+	if (sps->profile_idc == STD_VIDEO_H264_PROFILE_IDC_HIGH && sps->flags.constraint_set3_flag)
 		return 0U;
 	level = (unsigned)sps->level_idc;
 	if (level >= sizeof(maximum_mbs) / sizeof(maximum_mbs[0]))
@@ -569,10 +626,14 @@ h264_bits_load(
 				bits->error = EINVAL;
 				return;
 			}
+
+			/* Reject an illegal byte after an emulation-prevention escape. */
 			if (nal[index + 1U] > 3U) {
 				bits->error = EINVAL;
 				return;
 			}
+
+			/* Resume zero tracking after dropping an escape byte. */
 			zeros = 0U;
 			continue;
 		}
@@ -582,14 +643,20 @@ h264_bits_load(
 			bits->error = EINVAL;
 			return;
 		}
+
+		/* Track only consecutive zero bytes when copying the unescaped header. */
 		if (nal[index] == 0U) {
 			zeros++;
 		} else {
 			zeros = 0U;
 		}
+
+		/* Append one payload byte after escape handling. */
 		bits->bytes[bits->size] = nal[index];
 		bits->size++;
 	}
+
+	/* Leave a sticky cursor error available to every subsequent syntax read. */
 	return;
 }
 
@@ -706,10 +773,14 @@ h264_scaling_list(
 				bits->error = EINVAL;
 				return;
 			}
+
+			/* Wrap the validated scaling delta modulo the eight-bit scale range. */
 			next_scale = (last_scale + delta + 256) % 256;
 			if (index == 0U && next_scale == 0)
 				*use_default = 1;
 		}
+
+		/* Retain the prior scale when the transmitted next scale is zero. */
 		if (next_scale != 0)
 			last_scale = next_scale;
 		list[index] = (uint8_t)last_scale;
@@ -783,10 +854,15 @@ h264_parse_sps(
 	id = h264_ue(&bits);
 	if (id >= H264_SPS_IDS)
 		return -1;
-	if (profile_idc != 66U && profile_idc != 77U && profile_idc != 100U) {
+	if (
+		profile_idc != 66U &&
+		profile_idc != 77U &&
+		profile_idc != 100U) {
 		stream->error = ENOTSUP;
 		return -1;
 	}
+
+	/* Reject nonzero reserved constraint bits. */
 	if ((constraints & 3U) != 0U)
 		return -1;
 	sps.profile_idc = (StdVideoH264ProfileIdc)profile_idc;
@@ -812,16 +888,22 @@ h264_parse_sps(
 			stream->error = ENOTSUP;
 			return -1;
 		}
+
+		/* Read and bound chroma depth separately from luma depth. */
 		value = h264_ue(&bits);
 		if (value != 0U) {
 			stream->error = ENOTSUP;
 			return -1;
 		}
+
+		/* Choose the scaling-list count from the admitted chroma format. */
 		value = (uint32_t)sps.chroma_format_idc;
 		if (value != 1U) {
 			stream->error = ENOTSUP;
 			return -1;
 		}
+
+		/* Read transform bypass and optional scaling matrices before frame-number syntax. */
 		sps.flags.qpprime_y_zero_transform_bypass_flag = h264_u(&bits, 1U);
 		sps.flags.seq_scaling_matrix_present_flag = h264_u(&bits, 1U);
 		if (sps.flags.seq_scaling_matrix_present_flag) {
@@ -873,6 +955,8 @@ h264_parse_sps(
 		stream->error = ENOTSUP;
 		return -1;
 	}
+
+	/* Bound both coded dimensions before computing crop and allocation sizes. */
 	if (sps.pic_width_in_mbs_minus1 >= 512U || sps.pic_height_in_map_units_minus1 >= 512U)
 		return -1;
 	sps.flags.direct_8x8_inference_flag = h264_u(&bits, 1U);
@@ -897,6 +981,8 @@ h264_parse_sps(
 			bits.error = 0;
 		}
 	}
+
+	/* Require at least one visible luma sample in each cropped dimension. */
 	if (sps.frame_crop_left_offset + (uint64_t)sps.frame_crop_right_offset >= (sps.pic_width_in_mbs_minus1 + 1U) * 8U)
 		return -1;
 	if (sps.frame_crop_top_offset + (uint64_t)sps.frame_crop_bottom_offset >= (sps.pic_height_in_map_units_minus1 + 1U) * 8U)
@@ -951,7 +1037,10 @@ h264_parse_pps(
 	/* The ids. */
 	id = h264_ue(&bits);
 	sps_id = h264_ue(&bits);
-	if (id >= H264_PPS_IDS || sps_id >= H264_SPS_IDS || !stream->has_sps[sps_id])
+	if (
+		id >= H264_PPS_IDS ||
+		sps_id >= H264_SPS_IDS ||
+		!stream->has_sps[sps_id])
 		return -1;
 	pps.pic_parameter_set_id = (uint8_t)id;
 	pps.seq_parameter_set_id = (uint8_t)sps_id;
@@ -1008,13 +1097,19 @@ h264_parse_pps(
 				if (stream->sps[sps_id].chroma_format_idc == STD_VIDEO_H264_CHROMA_FORMAT_IDC_444)
 					count += 4U;
 			}
+
+			/* Read the optional PPS scaling lists after checking their transform-dependent count. */
 			h264_scaling_lists(&bits, count, &lists);
 		}
+
+		/* Read and validate the second chroma QP offset independently. */
 		signed_value = h264_se(&bits);
-	if (signed_value < -12 || signed_value > 12)
-		return -1;
-	pps.second_chroma_qp_index_offset = (int8_t)signed_value;
+		if (signed_value < -12 || signed_value > 12)
+			return -1;
+		pps.second_chroma_qp_index_offset = (int8_t)signed_value;
 	}
+
+	/* Do not publish a truncated or otherwise invalid parameter set. */
 	if (bits.error != 0)
 		return -1;
 
@@ -1035,8 +1130,7 @@ h264_level(
 	uint32_t level_idc)
 {
 	static const uint8_t levels[] = {
-		10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62
-	};
+	    10, 11, 12, 13, 20, 21, 22, 30, 31, 32, 40, 41, 42, 50, 51, 52, 60, 61, 62};
 	unsigned index;
 
 	/* The enumerants are the levels in order. */
@@ -1132,6 +1226,8 @@ h264_slice_header(
 		stream->error = ENOTSUP;
 		return "switching slices are unsupported";
 	}
+
+	/* Publish the actual slice type for independent reference-list construction. */
 	picture->slices[0].type = slice_type;
 	pps_id = h264_ue(&bits);
 	if (pps_id >= H264_PPS_IDS || !stream->has_pps[pps_id])
@@ -1147,8 +1243,7 @@ h264_slice_header(
 
 	/* The frame number and the IDR picture's id. */
 	picture->info.frame_num = (uint16_t)h264_u(&bits, sps->log2_max_frame_num_minus4 + 4U);
-	if (nal->type == H264_NAL_IDR)
-		{
+	if (nal->type == H264_NAL_IDR) {
 		value = h264_ue(&bits);
 		if (value > 65535U)
 			return "invalid IDR picture identifier";
@@ -1167,12 +1262,16 @@ h264_slice_header(
 		if (pps->flags.bottom_field_pic_order_in_frame_present_flag)
 			picture->poc_delta[1] = h264_se(&bits);
 	}
+
+	/* Retain the transmitted order syntax until gap inference has completed. */
 	picture->poc_lsb = lsb;
 	if (sps->pic_order_cnt_type == STD_VIDEO_H264_POC_TYPE_0)
 		picture->poc_delta[1] = bottom_delta;
 
 	/* The rest of the header up to the reference marking. */
 	reason = h264_slice_rest(&bits, pps, nal, slice_type, picture);
+	if (bits.error != 0)
+		stream->error = bits.error;
 	if (reason != NULL)
 		return reason;
 	if (bits.error != 0)
@@ -1217,18 +1316,27 @@ h264_slice_rest(
 	uint32_t l0;
 	uint32_t l1;
 	uint32_t override;
+	uint32_t redundant;
 	int predicted;
 	int bi;
 	int weighted;
 	const char *reason;
 
 	/* The redundant picture count. */
-	if (pps->flags.redundant_pic_cnt_present_flag)
-		(void)h264_ue(bits);
+	if (pps->flags.redundant_pic_cnt_present_flag) {
+		redundant = h264_ue(bits);
+		if (redundant != 0U) {
+			bits->error = ENOTSUP;
+			return "redundant coded picture unsupported";
+		}
+	}
 
 	/* A P, SP or B slice reads references; a B slice from two lists, after its direct mode flag. */
 	predicted = 0;
-	if (slice_type == H264_SLICE_P || slice_type == H264_SLICE_SP || slice_type == H264_SLICE_B)
+	if (
+		slice_type == H264_SLICE_P ||
+		slice_type == H264_SLICE_SP ||
+		slice_type == H264_SLICE_B)
 		predicted = 1;
 	bi = 0;
 	if (slice_type == H264_SLICE_B) {
@@ -1254,6 +1362,8 @@ h264_slice_rest(
 			}
 		}
 	}
+
+	/* Reject active reference counts beyond the standard list limit. */
 	if (l0 > 32U || l1 > 32U)
 		return "more than 32 active references";
 
@@ -1263,6 +1373,7 @@ h264_slice_rest(
 	if (bi)
 		h264_list_modification(bits, &picture->slices[0].list[1]);
 
+	/* Retain active counts only for lists used by this slice type. */
 	if (predicted)
 		picture->slices[0].list[0].active = l0;
 	if (bi)
@@ -1270,7 +1381,10 @@ h264_slice_rest(
 
 	/* The weight table of an explicitly weighted slice. */
 	weighted = 0;
-	if (pps->flags.weighted_pred_flag && (slice_type == H264_SLICE_P || slice_type == H264_SLICE_SP))
+	if (
+		pps->flags.weighted_pred_flag &&
+		(slice_type == H264_SLICE_P ||
+		slice_type == H264_SLICE_SP))
 		weighted = 1;
 	if (pps->weighted_bipred_idc == STD_VIDEO_H264_WEIGHTED_BIPRED_IDC_EXPLICIT && bi)
 		weighted = 1;
@@ -1315,6 +1429,8 @@ h264_list_modification(
 			bits->error = EINVAL;
 			break;
 		}
+
+		/* Read the argument associated with the admitted modification operation. */
 		argument = h264_ue(bits);
 		list->operation[list->count] = operation;
 		list->argument[list->count] = argument;
@@ -1432,6 +1548,8 @@ h264_hrd(
 		bits->error = EINVAL;
 		return;
 	}
+
+	/* Retain the bounded CPB count before reading its paired entries. */
 	hrd->cpb_cnt_minus1 = (uint8_t)count;
 	hrd->bit_rate_scale = (uint8_t)h264_u(bits, 4U);
 	hrd->cpb_size_scale = (uint8_t)h264_u(bits, 4U);
@@ -1466,6 +1584,8 @@ h264_vui(
 			vui->sar_height = (uint16_t)h264_u(bits, 16U);
 		}
 	}
+
+	/* Read optional overscan metadata after sample aspect ratio. */
 	vui->flags.overscan_info_present_flag = h264_u(bits, 1U);
 	if (vui->flags.overscan_info_present_flag)
 		vui->flags.overscan_appropriate_flag = h264_u(bits, 1U);
@@ -1493,6 +1613,8 @@ h264_vui(
 			bits->error = EINVAL;
 		vui->chroma_sample_loc_type_bottom_field = (uint8_t)syntax;
 	}
+
+	/* Read optional timing metadata after chroma location syntax. */
 	vui->flags.timing_info_present_flag = h264_u(bits, 1U);
 	if (vui->flags.timing_info_present_flag) {
 		vui->num_units_in_tick = h264_u(bits, 32U);

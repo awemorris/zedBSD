@@ -10,8 +10,8 @@
  * the decoding back ends.  A track's decoder is opened by the first back
  * end of the table that takes its codec; the decoder, its pictures and
  * their scaler keep the back end that made them, and every call goes to
- * it.  Today the table holds the add-in that opens FFmpeg's libavcodec
- * (avcodec.c); a GPU decoder (WS083's Vulkan Video) goes before it.
+ * it. The native table contains standard Vulkan Video H.264 and original
+ * AAC-LC reconstruction. Optional software fallback belongs to applications.
  */
 
 #include "media-private.h"
@@ -26,15 +26,6 @@
 struct media_decoder {
 	const struct media_decoder_ops *ops;
 	void *state;
-};
-
-/*
- * A picture taken from a decoder: the back end's own object, freed and
- * scaled by that back end.
- */
-struct media_frame {
-	const struct media_decoder_ops *ops;
-	void *picture;
 };
 
 /*
@@ -56,22 +47,23 @@ static const struct media_decoder_ops *const decoder_backends[] = {
 };
 
 /*
- * Loads the software decoding add-in once.  Returns 0 when it can decode,
- * MEDIA_PROBLEM_MISSING when libavcodec is not installed, or
- * MEDIA_PROBLEM_VERSION for a version it does not know.
+ * Reports built-in decoder availability without loading any optional software codec.
+ * Track-specific GPU and profile capabilities are checked by media_decoder_open.
  */
 int
-media_codec_load(void)
+media_codec_load(
+	void)
 {
 	/* Succeeded: built-in codecs have no optional software-library prerequisite. */
 	return 0;
 }
 
 /*
- * Reports why the add-in could not load ("" when it loaded).
+ * Reports no process-wide failure; native admission errors are returned for each track.
  */
 const char *
-media_codec_reason(void)
+media_codec_reason(
+	void)
 {
 	/* Native capability problems belong to the selected track, not process startup. */
 	return "";
@@ -80,7 +72,7 @@ media_codec_reason(void)
 /*
  * Opens a decoder for a track: the first back end that takes its codec.
  * Returns 0, the first back end's problem when none takes it
- * (MEDIA_PROBLEM_MISSING, _VERSION or _FORMAT), or ENOMEM.
+ * (MEDIA_PROBLEM_FORMAT, _DEVICE, _PROFILE or _BUSY), or an allocation errno.
  */
 int
 media_decoder_open(

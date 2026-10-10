@@ -31,6 +31,7 @@ struct media_pcm {
 	int started;
 	int active;
 	int drained;
+	int error;	/* Conversion failures are consumed by the owning decoder on its next receive. */
 };
 
 int media_pcm_init(struct media_pcm *sound, uint32_t rate, int64_t end_us);

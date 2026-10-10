@@ -757,6 +757,9 @@ read_track(
 
 	/* The samples the tables describe. */
 	if (error == 0) {
+		/* Unfragmented video without composition offsets supplies a display clock sequence, not picture-specific PTS. */
+		if (info->kind == MEDIA_TRACK_VIDEO && !tables.has_ctts && !state->fragmented)
+			info->decode_order_times = 1;
 		error = build_samples(&tables, track);
 		if (error != 0)
 			return error;
@@ -924,8 +927,11 @@ read_visual_entry(
 				info->aspect_num = 0U;
 				info->aspect_den = 0U;
 			}
+
 			continue;
 		}
+
+		/* Read standard colour metadata independently of sample aspect ratio. */
 		compared = memcmp(child.type, "colr", 4U);
 		if (compared == 0 && child.size >= 10U) {
 			compared = memcmp(child.payload, "nclx", 4U);
@@ -940,6 +946,7 @@ read_visual_entry(
 					info->colour_matrix = mf_be16(child.payload + 8U);
 				}
 			}
+
 			continue;
 		}
 

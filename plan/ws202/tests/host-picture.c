@@ -41,6 +41,8 @@ main(
 		if (pictures[index] == NULL)
 			return 1;
 	}
+
+	/* Retain one extra reference before closing the owning decoder pool. */
 	media_picture_ref(pictures[0]);
 	media_picture_unref(pictures[0]);
 	media_picture_pool_close(pool);
@@ -55,6 +57,8 @@ main(
 			kr = 0.2627;
 			kb = 0.0593;
 		}
+
+		/* Compute independent floating colour coefficients for comparison with production integer tables. */
 		kg = 1.0 - kr - kb;
 		for (full = 0U; full < 2U; full++) {
 			for (value = 0U; value < 256U; value++) {
@@ -75,6 +79,8 @@ main(
 					u *= 255.0 / 224.0;
 					v *= 255.0 / 224.0;
 				}
+
+				/* Convert the independent colour components before clamping and pixel comparison. */
 				channels[0] = y + 2.0 * (1.0 - kr) * v;
 				channels[1] = y - 2.0 * kb * (1.0 - kb) / kg * u - 2.0 * kr * (1.0 - kr) / kg * v;
 				channels[2] = y + 2.0 * (1.0 - kb) * u;
@@ -92,6 +98,8 @@ main(
 			}
 		}
 	}
+
+	/* Check non-square sample aspect metadata on an exported retained picture. */
 	pictures[0]->aspect_num = 16U;
 	pictures[0]->aspect_den = 15U;
 	media_picture_aspect(pictures[0], &num, &den);

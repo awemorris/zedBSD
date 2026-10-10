@@ -9,8 +9,7 @@
  * libmedia's decoding (ws177-p031): a track's packets (mediafile.h) made
  * into pictures and sound.  A decoder is opened by the first of libmedia's
  * decoding back ends that takes the track's codec (the table in
- * decoder.c: today the add-in that opens FFmpeg's libavcodec with dlopen,
- * avcodec.c; a GPU decoder goes before it later).  A picture is the back
+ * decoder.c: standard Vulkan Video H.264 followed by original AAC-LC).  A picture is the back
  * end's own, scaled into the caller's pixels through a scaler kept
  * between calls.
  *
@@ -38,7 +37,7 @@ struct media_decoder;
 struct media_frame;
 struct media_scaler;
 
-/* The software decoding add-in, loaded once (0, or MEDIA_PROBLEM_MISSING or _VERSION, with a reason). */
+/* Native availability is unconditional; per-track open reports device and profile admission. */
 int media_codec_load(void);
 const char *media_codec_reason(void);
 

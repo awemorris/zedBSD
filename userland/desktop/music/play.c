@@ -386,6 +386,10 @@ play_reader_open(
 	const char *path)
 {
 	const struct media_track *track;
+	const char *codec;
+	const char *backend;
+	const char *container;
+	int64_t duration_ms;
 	unsigned count;
 	unsigned index;
 	int status;
@@ -425,8 +429,15 @@ play_reader_open(
 	}
 
 	/* Succeeded: the log line the tests read. */
-	mu_log("PLAY open codec=%s container=%s duration_ms=%lld", app_decoder_name(reader->decoder),
-	    media_file_format_name(reader->file), (long long)(media_file_duration_us(reader->file) / 1000));
+	codec = app_decoder_name(reader->decoder);
+	backend = app_decoder_backend(reader->decoder);
+	container = media_file_format_name(reader->file);
+	duration_ms = media_file_duration_us(reader->file) / 1000;
+	mu_log("PLAY open codec=%s backend=%s container=%s duration_ms=%lld",
+	    codec,
+	    backend,
+	    container,
+	    (long long)duration_ms);
 	return 0;
 }
 
@@ -471,12 +482,20 @@ play_feed(
 				play_fail(reader, MU_FAIL_DECODE);
 				return 1;
 			}
+
+			/* Request another compressed packet only after all available sound was handled. */
 			if (received == 0)
 				break;
 			status = play_sound(reader, (double)time_us / 1000000.0);
 			if (status != 0)
 				return status;
 		}
+	}
+
+	/* A failed drain cannot be treated as a successfully played end. */
+	if (packet == NULL && status != 0) {
+		play_fail(reader, MU_FAIL_DECODE);
+		return 1;
 	}
 
 	/* A packet that does not decode; too many in a row stop the song. */
@@ -499,6 +518,8 @@ play_feed(
 			play_fail(reader, MU_FAIL_DECODE);
 			return 1;
 		}
+
+		/* Finish feeding when the decoder has no further sound available. */
 		if (received == 0)
 			return 0;
 		status = play_sound(reader, (double)time_us / 1000000.0);
@@ -585,7 +606,13 @@ play_seek(
 	start = target - preroll;
 	if (start < 0)
 		start = 0;
-	(void)media_file_seek(reader->file, start);
+	error = media_file_seek(reader->file, start);
+	if (error != 0) {
+		play_fail(reader, MU_FAIL_READ);
+		return 1;
+	}
+
+	/* Reset overlap and output trimming only after the file seek succeeded. */
 	app_decoder_flush(reader->decoder);
 	reader->sound_trimmed = 0;
 	error = app_decoder_trim(reader->decoder, target);

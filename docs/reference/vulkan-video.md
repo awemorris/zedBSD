@@ -117,6 +117,8 @@ before the next full GPU reset. Drawing on family 0 continues either way.
 
 ## Example program
 
+The native media library uses this standard API for H.264 playback in Video Player; `media-probe` verifies its container and presentation path.
+
 `vkvideo-probe` (in the test images) lists what a device offers and decodes an
 H.264 elementary stream (Annex B), printing the SHA-256 of each frame in display
 order:

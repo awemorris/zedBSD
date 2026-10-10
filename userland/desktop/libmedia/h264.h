@@ -29,22 +29,31 @@
 #include <vulkan/vulkan.h>
 
 /* The parameter set id ranges of H.264. */
-#define H264_SPS_IDS		32U
-#define H264_PPS_IDS		256U
+#define H264_SPS_IDS 32U
+#define H264_PPS_IDS 256U
 
 /* The most slices of a picture the decoder hands the decoder. */
-#define H264_MAX_SLICES		256U
+#define H264_MAX_SLICES 256U
 
 /* The slice types of a picture the decoder decodes: progressive I, P and B. */
-#define H264_SLICE_P		0U
-#define H264_SLICE_B		1U
-#define H264_SLICE_I		2U
-#define H264_SLICE_SP		3U
-#define H264_SLICE_SI		4U
+#define H264_SLICE_P 0U
+#define H264_SLICE_B 1U
+#define H264_SLICE_I 2U
+#define H264_SLICE_SP 3U
+#define H264_SLICE_SI 4U
 
 /* The most memory management operations one slice header carries that the reader keeps. */
-#define H264_MAX_MMCO		32U
-#define H264_MAX_MODIFICATIONS	32U
+#define H264_MAX_MMCO 32U
+#define H264_MAX_MODIFICATIONS 32U
+
+/* The memory management control operations (7.4.3.3). */
+#define H264_MMCO_END 0U
+#define H264_MMCO_SHORT_UNUSED 1U
+#define H264_MMCO_LONG_UNUSED 2U
+#define H264_MMCO_SHORT_TO_LONG 3U
+#define H264_MMCO_MAX_LONG_INDEX 4U
+#define H264_MMCO_ALL_UNUSED 5U
+#define H264_MMCO_CURRENT_TO_LONG 6U
 
 /* One slice list's transmitted modifications, retained for independent missing-reference admission. */
 struct h264_list {
@@ -60,15 +69,6 @@ struct h264_slice {
 	uint32_t type;
 	struct h264_list list[2];
 };
-
-/* The memory management control operations (7.4.3.3). */
-#define H264_MMCO_END			0U
-#define H264_MMCO_SHORT_UNUSED		1U
-#define H264_MMCO_LONG_UNUSED		2U
-#define H264_MMCO_SHORT_TO_LONG		3U
-#define H264_MMCO_MAX_LONG_INDEX	4U
-#define H264_MMCO_ALL_UNUSED		5U
-#define H264_MMCO_CURRENT_TO_LONG	6U
 
 /* One NAL unit of the stream: its type, its nal_ref_idc and its bytes after the start code. */
 struct h264_nal {

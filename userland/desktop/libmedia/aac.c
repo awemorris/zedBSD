@@ -296,6 +296,10 @@ aac_sound(
 	/* Convert using this decoder's source queue and retained fractional clock. */
 	decoder = state;
 	frames = media_pcm_read(&decoder->sound, samples, capacity, rate);
+	if (decoder->sound.error != 0)
+		decoder->failed = decoder->sound.error;
+
+	/* Conversion remains size-returning; its failure is published by the next ordinary decoder receive. */
 	return frames;
 }
 

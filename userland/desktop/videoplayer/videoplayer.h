@@ -94,6 +94,7 @@ struct vp_media {
 	double picture_times[VP_PICTURES];
 	unsigned picture_first;
 	unsigned picture_count;
+	unsigned late;	/* Due pictures superseded before presentation; the window owns this count. */
 
 	/* The clock: the time at an anchor, and the anchor (the stream's position heard, or the monotonic time). */
 	double clock_time;

@@ -254,6 +254,9 @@ main(
 		vp_open(&player, file);
 	status = vp_loop(&player, timeout);
 
+	/* Record the final presentation state before closing the reader and its audio clock. */
+	vp_log("FRAMES shown=%u time_ms=%lld late=%u", player.shown, (long long)(vp_media_clock(&player.media) * 1000.0), player.media.late);
+
 	/* Everything goes. */
 	vp_media_close(&player.media);
 	vp_audio_close(&player.audio);
@@ -628,7 +631,7 @@ vp_toggle(
 	/* The other. */
 	if (state == VP_PLAYING) {
 		vp_media_pause(&player->media);
-		vp_log("PAUSE shown=%u time_ms=%lld", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0));
+		vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0), player->media.late);
 	} else if (state != VP_EMPTY) {
 		vp_log("PLAY shown=%u time_ms=%lld", player->shown, (long long)(vp_media_clock(&player->media) * 1000.0));
 		vp_media_play(&player->media);
@@ -755,6 +758,9 @@ vp_draw(
 	double next;
 	int status;
 	int failure;
+	int played_out;
+	uint64_t read_frames;
+	uint64_t written_frames;
 
 	/* A decoder failure is a user-visible playback state, rather than an apparent end of the file. */
 	(void)pthread_mutex_lock(&player->media.lock);
@@ -779,13 +785,30 @@ vp_draw(
 		player->shown++;
 		player->dirty = 1;
 		if (player->shown == 1U || player->shown % 100U == 0U)
-			vp_log("FRAMES shown=%u time_ms=%lld", player->shown, (long long)(time * 1000.0));
+			vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(time * 1000.0), player->media.late);
 	}
 
 	/* The end of the file: the last picture shown and nothing left. */
 	(void)pthread_mutex_lock(&player->media.lock);
-	if (player->media.state == VP_PLAYING && player->media.eof && player->media.picture_count == 0U && clock >= player->picture_time) {
+	played_out = 0;
+	if (player->media.has_audio) {
+		read_frames = vp_audio_read_position(&player->audio);
+		written_frames = vp_audio_write_position(&player->audio);
+		if (read_frames >= written_frames)
+			played_out = 1;
+	} else if (player->media.duration <= 0.0 || clock >= player->media.duration) {
+		played_out = 1;
+	}
+
+	/* Publish end only after both due pictures and sound have been presented. */
+	if (
+		player->media.state == VP_PLAYING &&
+		player->media.eof &&
+		player->media.picture_count == 0U &&
+		clock >= player->picture_time &&
+		played_out) {
 		player->media.state = VP_ENDED;
+		vp_log("FRAMES shown=%u time_ms=%lld late=%u", player->shown, (long long)(clock * 1000.0), player->media.late);
 		vp_log("ENDED shown=%u", player->shown);
 		player->dirty = 1;
 	}

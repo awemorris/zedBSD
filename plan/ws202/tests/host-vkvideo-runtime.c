@@ -19,6 +19,14 @@ static unsigned video_waits;
 static unsigned transfer_waits;
 static int wait_failure;
 
+static void host_admission(void);
+static VkResult host_capabilities(VkPhysicalDevice physical, const VkVideoProfileInfoKHR *profile, VkVideoCapabilitiesKHR *capabilities);
+static VkResult host_formats(VkPhysicalDevice physical, const VkPhysicalDeviceVideoFormatInfoKHR *info, uint32_t *count, VkVideoFormatPropertiesKHR *formats);
+
+/* Capability masks belong only to the bounded host query fixture. */
+static VkVideoDecodeCapabilityFlagsKHR available_models;
+static VkImageUsageFlags refused_usage;
+
 static VkResult host_begin(VkCommandBuffer command, const VkCommandBufferBeginInfo *info);
 static VkResult host_end(VkCommandBuffer command);
 static VkResult host_reset_command(VkCommandBuffer command, VkCommandBufferResetFlags flags);
@@ -36,7 +44,8 @@ static void host_copy(VkCommandBuffer command, VkImage image, VkImageLayout layo
  * Exercises coincident and distinct output recording with separate video and transfer queues.
  */
 int
-main(void)
+main(
+	void)
 {
 	struct vkvideo_runtime video;
 	struct h264_stream *stream;
@@ -48,6 +57,9 @@ main(void)
 	unsigned mode;
 	unsigned frame;
 	int error;
+
+	/* Query-driven allocation must admit complete usages and honor profile limits. */
+	host_admission();
 
 	/* Production parsing and driver pixel decoding are tested elsewhere; this fixture observes API contracts. */
 	stream = calloc(1U, sizeof(*stream));
@@ -122,6 +134,8 @@ main(void)
 			assert(output->chroma[0] == 100U);
 			assert(output->chroma[1] == 150U);
 		}
+
+		/* A fence timeout must leave the submitted runtime resources owned and in flight. */
 		wait_failure = 1;
 		error = media_vkvideo_runtime_decode(&video, stream, picture, &plan, output);
 		assert(error == ETIMEDOUT);
@@ -144,7 +158,9 @@ main(void)
 	return 0;
 }
 
-/* The host harness consumes library diagnostics without requiring a desktop engine. */
+/*
+ * The host harness consumes library diagnostics without requiring a desktop engine.
+ */
 void
 media_log(
 	const char *format,
@@ -246,6 +262,8 @@ host_submit(
 		assert(submit->pWaitDstStageMask[0] == VK_PIPELINE_STAGE_TRANSFER_BIT);
 		transfer_waits++;
 	}
+
+	/* Count each observed standard queue submission. */
 	submissions++;
 	return VK_SUCCESS;
 }
@@ -309,6 +327,8 @@ host_barrier(
 			assert((info->pImageMemoryBarriers[index].dstStageMask & VK_PIPELINE_STAGE_2_VIDEO_DECODE_BIT_KHR) == 0U);
 		}
 	}
+
+	/* Require buffer host-visibility barriers to be recorded on the transfer command. */
 	if (info->bufferMemoryBarrierCount != 0U) {
 		assert(command == observed->transfer_command);
 		assert(info->pBufferMemoryBarriers[0].dstAccessMask == VK_ACCESS_2_HOST_READ_BIT);
@@ -327,6 +347,7 @@ host_copy(
 {
 	unsigned index;
 
+	/* Inspect exact plane-copy geometry before writing only host stand-in output. */
 	(void)image;
 	(void)buffer;
 	assert(command == observed->transfer_command);
@@ -345,5 +366,100 @@ host_copy(
 		observed->readback_map[index] = 100U;
 		observed->readback_map[index + 1U] = 150U;
 	}
+
+	/* Count completed copy recordings independently of submission retirement. */
 	copies_seen++;
+}
+
+/* Check the actual production capability/format path with standard API responses. */
+static void
+host_admission(
+	void)
+{
+	struct vkvideo_runtime video;
+	int error;
+
+	/* A coincident image requires all three usages in one query. */
+	memset(&video, 0, sizeof(video));
+	video.fn.vkGetPhysicalDeviceVideoCapabilitiesKHR = host_capabilities;
+	video.fn.vkGetPhysicalDeviceVideoFormatPropertiesKHR = host_formats;
+	video.extent.width = 320U;
+	video.extent.height = 192U;
+	video.slots = 4U;
+	video.max_references = 3U;
+	video.level = STD_VIDEO_H264_LEVEL_IDC_4_1;
+	available_models = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_COINCIDE_BIT_KHR;
+	refused_usage = 0U;
+	error = vkvideo_capabilities(&video);
+	assert(error == 0 && video.distinct == 0);
+	assert((video.reference_usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) != 0U);
+
+	/* Reject the combined allocation, then admit distinct reference and transferable output images. */
+	available_models |= VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+	refused_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	error = vkvideo_capabilities(&video);
+	assert(error == 0 && video.distinct == 1);
+	assert(video.reference_usage == VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR);
+
+	/* A missing transferable output and a level beyond the device's maximum are profile errors, not GPU-specific fallbacks. */
+	available_models = VK_VIDEO_DECODE_CAPABILITY_DPB_AND_OUTPUT_DISTINCT_BIT_KHR;
+	refused_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
+	error = vkvideo_capabilities(&video);
+	assert(error == ENOTSUP);
+	refused_usage = 0U;
+	video.level = STD_VIDEO_H264_LEVEL_IDC_5_1;
+	error = vkvideo_capabilities(&video);
+	assert(error == ENOTSUP);
+}
+
+/* Publish one progressive eight-bit profile's standard extent, DPB and level limits. */
+static VkResult
+host_capabilities(
+	VkPhysicalDevice physical,
+	const VkVideoProfileInfoKHR *profile,
+	VkVideoCapabilitiesKHR *capabilities)
+{
+	VkVideoDecodeCapabilitiesKHR *decode;
+	VkVideoDecodeH264CapabilitiesKHR *h264;
+
+	/* The chain is caller-owned and retains its declared structure identities. */
+	(void)physical;
+	(void)profile;
+	decode = (VkVideoDecodeCapabilitiesKHR *)capabilities->pNext;
+	h264 = (VkVideoDecodeH264CapabilitiesKHR *)decode->pNext;
+	decode->flags = available_models;
+	h264->maxLevelIdc = STD_VIDEO_H264_LEVEL_IDC_4_1;
+	capabilities->minCodedExtent.width = 16U;
+	capabilities->minCodedExtent.height = 16U;
+	capabilities->maxCodedExtent.width = 4096U;
+	capabilities->maxCodedExtent.height = 4096U;
+	capabilities->maxDpbSlots = 17U;
+	capabilities->maxActiveReferencePictures = 16U;
+	capabilities->minBitstreamBufferSizeAlignment = 64U;
+	capabilities->pictureAccessGranularity.width = 16U;
+	capabilities->pictureAccessGranularity.height = 16U;
+	return VK_SUCCESS;
+}
+
+/* Return a format only for the complete image usage requested by production code. */
+static VkResult
+host_formats(
+	VkPhysicalDevice physical,
+	const VkPhysicalDeviceVideoFormatInfoKHR *info,
+	uint32_t *count,
+	VkVideoFormatPropertiesKHR *formats)
+{
+	/* Counting and filling have identical admission semantics. */
+	(void)physical;
+	*count = 0U;
+	if (info->imageUsage == refused_usage)
+		return VK_SUCCESS;
+	*count = 1U;
+	if (formats == NULL)
+		return VK_SUCCESS;
+	formats->format = VK_FORMAT_G8_B8R8_2PLANE_420_UNORM;
+	formats->imageType = VK_IMAGE_TYPE_2D;
+	formats->imageTiling = VK_IMAGE_TILING_OPTIMAL;
+	formats->imageUsageFlags = info->imageUsage;
+	return VK_SUCCESS;
 }
