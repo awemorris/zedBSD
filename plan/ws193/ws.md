@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: [Codex runtime](codex-rpi4-sshd-queue.md) finished。旧build/arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p010の具体的source commit統合、RPi4 host key/SSH確認とWS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p010 source 1b3d6cd03 main統合済み、RPi4 host key/SSH確認とWS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -127,3 +127,7 @@ User explicitly instructed「mainにマージしてください。」for source 
 RPi4実機写真でld.soが依存を開けずhost keyを生成できないことを確認。libutilはbuild/link用sysrootにあったがrootfsへのarm64配置が無い。p008のbuild成功履歴は保持し、p010でruntime収録と全CPU共通の配置一覧を修正する。X68kの静的ABIは既存制約として保持。独立Queueの有限範囲と受入はp010。WS全体p003/実機受入は未完、共有投影/GitHubはQ1 pending。
 
 p010の共通rootfs定義/source/host/AArch64 build受入はcleared。amd64配置維持、RPi4 libutil追加、OpenSSH実依存の配置と古いcacheの再配置PASS。別CPUの既存libc build失敗とSPARC/X68k bootstrap disk formatの残存を証拠へ明記し、全CPUの実行/イメージ等価性は主張しない。WS全体の受入は未完、main具体的commitの承認と共有投影はpending。
+
+## Main integration follow-up / 2026-10-11
+
+User explicitly approved main integration of `1b3d6cd03` (answer「mainへ統合する」). Clean main at 3ba73d2c8 fast-forwarded to the exact verified source commit; read-back confirms all 16 integrated files match the tested worktree. Source integration complete; preceding approval-pending text is historical. Documentation follow-up records this integration within the same approved scope. RPi4 physical host-key/SSH execution and whole-WS acceptance remain pending. No push; shared Master/Queue/history/cache/GitHub reconciliation stays Q1 pending.
