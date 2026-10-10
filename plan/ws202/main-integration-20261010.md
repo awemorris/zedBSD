@@ -3,7 +3,7 @@
 Event: `ws202-main-integration-20261010`。
 承認者: current user、この会話の明示「mainへの統合はあなたがやってOKです。」。
 範囲: 検証済みWS202のsource/tests/docs/buildをmainへ統合、main第4版との記録の意味の統合、移管に必要な既存host回帰/AATの追従、対象buildと回帰確認。
-Status: source/記録反映・build/回帰済み、Git統合の確定を行う。
+Status: finished。i01 cleared（main統合/build/対象回帰の部分scope）。WS/whole Phaseの未達は保持。
 
 ## 統合する成果と設計の保存
 
@@ -67,3 +67,10 @@ Master/共有Queue/Guardrail/履歴/Tools/GitHubのprojectionは既存Q1所有�
 - `integration-build-current-headers.log`: `65422412f0e83428ad0e27a0d8be07bb5313073742dcfa7c347ce3644efddcd4`
 - `codec-regression.log`: `864992973356bebea0b37ec169e265de4643e54cba1564420b6a3b891fbe48fc`
 - `nv12-readback.log`: `fc9e3f2190161f03ea8116a5c8d08133d541f40c72801b765befd99f206c662f`
+
+
+## Git統合の確定
+
+source/記録/共有回帰の統合commit: `22f1d6480`（WIP）。source patchの全pathを独立branchと比較し、検証済みsourceがmainへ取り込まれたことを確認した。続いてbranch `codex/ws202-native-media`（`214df6677`）をmerge親として記録する。ソースを先に反映・検証して記録の競合を意味で解消済みのため、このmergeのtreeはmain側を採る（`-s ours`）。取り込み済みbranchの古い計画で第4版を上書きせず、後から同じbranchを再投入しないための履歴統合であり、sourceの代わりに空のmergeで済ませたものではない。
+
+承認された統合はfinished、named build/8 codec/container/61・63 ABI/NV12対象host/構文・diff確認PASS。残る共有未commit編集は`plan/beta2.md`だけで、このsessionの成果に含めない。master.mdは更新していない。未実施の実機と全acceptanceはT1/ユーザー/Q1の再開条件として保持。
