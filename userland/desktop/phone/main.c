@@ -67,10 +67,15 @@
 #define PH_PENDING_MAX		32U
 #define PH_STORE_FOLDER		"Documents/Phone"
 
-/* The paired phone's backend in kl_phone_link (the compositor's phone.backend 2), and its messages off and ready. */
+/* The backends in kl_phone_link (the compositor's phone.backend): none and the paired phone; and the paired phone's messages off and ready. */
+#define PH_BACKEND_NONE		0U
 #define PH_BACKEND_BLUETOOTH	2U
 #define PH_MESSAGES_OFF		0U
 #define PH_MESSAGES_READY	2U
+
+/* What the app says when no phone is set up, and when the paired phone is not connected (BUG-287). */
+#define PH_NOTICE_SET_UP	"No phone is set up: in Settings, Bluetooth, press Use as phone on your phone."
+#define PH_NOTICE_NOT_LINKED	"The phone is not connected: turn its Bluetooth on and keep it near. Settings, Bluetooth shows its state."
 
 /* The synchronisations (bits of what is wanted): over the mark, the five minutes', the last seven days'. */
 #define PH_SYNC_NORMAL		1U
@@ -1061,8 +1066,20 @@ ph_send(
 	if (contact < 0 || (size_t)contact >= count || phone->view.message.length == 0U)
 		return;
 
-	/* The paired phone that takes no text: nothing kept or sent. */
+	/* No phone set up: nothing kept or sent, and where to set one up (the text stays to send later, BUG-287). */
+	if (phone->system != NULL && phone->phone_sync && phone->link_known && phone->link.backend == PH_BACKEND_NONE) {
+		ph_view_notice(&phone->view, PH_NOTICE_SET_UP, kl_clock_us());
+		return;
+	}
+
+	/* The paired phone not connected: nothing kept or sent (the text stays). */
 	paired = ph_paired(phone);
+	if (paired && phone->link.messages != PH_MESSAGES_READY) {
+		ph_view_notice(&phone->view, PH_NOTICE_NOT_LINKED, kl_clock_us());
+		return;
+	}
+
+	/* The paired phone that takes no text: nothing kept or sent. */
 	if (paired && !phone->link.can_send) {
 		ph_view_notice(&phone->view, "The phone does not take texts to send.", kl_clock_us());
 		return;
@@ -1113,7 +1130,7 @@ ph_send(
 		if (error == EINVAL)
 			ph_view_notice(&phone->view, "The number or the message cannot be sent.", kl_clock_us());
 		else
-			ph_view_notice(&phone->view, "No phone: the compositor has none.", kl_clock_us());
+			ph_view_notice(&phone->view, PH_NOTICE_SET_UP, kl_clock_us());
 		return;
 	}
 
@@ -1267,8 +1284,8 @@ ph_result(
 		return;
 	ph_log("RESULT request=%u error=%d", request, error);
 	ph_status(phone, request, 0U, 1);
-	if (error == ENODEV)
-		ph_view_notice(&phone->view, "No phone backend: choose one in the desktop's settings (phone.backend).", kl_clock_us());
+	if (error == ENODEV || (phone->link_known && phone->link.backend == PH_BACKEND_NONE))
+		ph_view_notice(&phone->view, PH_NOTICE_SET_UP, kl_clock_us());
 }
 
 /* Takes every item of the paired phone that waits. */
@@ -1401,9 +1418,9 @@ ph_link(
 	phone->link_known = 1;
 	ph_log("LINK backend=%u messages=%u send=%u notify=%u owner=%u why=%s", link.backend, link.messages, link.can_send, link.notify, link.owner, link.why);
 
-	/* The send button. */
+	/* The send button: grey only for a connected phone that takes no texts (one not connected is told why on Send, BUG-287). */
 	phone->view.cannot_send = 0;
-	if (link.backend == PH_BACKEND_BLUETOOTH && !link.can_send)
+	if (link.backend == PH_BACKEND_BLUETOOTH && link.messages == PH_MESSAGES_READY && !link.can_send)
 		phone->view.cannot_send = 1;
 	phone->dirty = 1;
 

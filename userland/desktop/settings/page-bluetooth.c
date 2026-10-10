@@ -15,7 +15,9 @@
  *                  service, no adapter, its firmware missing).
  *   My Devices     the paired devices: name, kind, connected, battery, a
  *                  note on a pairing of the old way; Connect or Disconnect
- *                  (when the service can) and Remove.
+ *                  (when the service can, for a device the HID host
+ *                  connects: not a phone, a computer or a headset) and
+ *                  Remove.
  *   Other Devices  while the page shows and the controller is on, the
  *                  devices a scan finds, with Pair.  A pairing's question
  *                  is the desktop's own window's, not this page's.
@@ -73,6 +75,7 @@ static void bluetooth_ask(struct se_app *app, unsigned action, size_t drawn);
 static void bluetooth_asked(struct se_app *app, int error, const char *doing);
 static const char *bluetooth_state_words(const struct kl_bluetooth_state *state);
 static const char *bluetooth_kind_words(unsigned kind);
+static int bluetooth_hid_kind(const struct kl_bluetooth_device *device);
 static int bluetooth_phone_available(const struct se_app *app);
 static int bluetooth_phone_used(const struct se_app *app, const struct kl_bluetooth_device *device);
 static void bluetooth_phone_press(struct se_app *app, size_t drawn);
@@ -308,6 +311,8 @@ se_bluetooth_result(
 		{ EACCES, "The pairing was refused." },
 		{ ENODEV, "Bluetooth is off or not available." },
 		{ EPERM, "This account may not change Bluetooth." },
+		{ ECONNREFUSED, "The device did not take the pairing. Try again, and confirm on both." },
+		{ ETIMEDOUT, "The device did not answer in time." },
 		{ ENOTSUP, "Bluetooth cannot do that here yet." },
 		{ EINVAL, "That device is not known." }
 	};
@@ -361,6 +366,13 @@ se_bluetooth_result(
 	for (index = 0; index < sizeof(failed) / sizeof(failed[0]); index++) {
 		if (failed[index].error == error)
 			(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s", failed[index].words);
+	}
+
+	/* A phone that did not take the pairing may keep an old one of this computer (BUG-287). */
+	same = strcmp(bluetooth->doing, "pair-phone");
+	if (same == 0 && (error == ECONNREFUSED || error == ETIMEDOUT)) {
+		(void)snprintf(bluetooth->message, sizeof(bluetooth->message), "%s",
+		    "The phone did not take the pairing. On the phone, remove this computer from its Bluetooth devices, then press Use as phone again.");
 	}
 
 	/* Succeeded: the answer was the page's. */
@@ -459,6 +471,7 @@ bluetooth_list(
 	size_t drawn;
 	int phone_offered;
 	int connectable;
+	int hid_kind;
 	int enabled;
 	int button;
 	int used;
@@ -556,7 +569,8 @@ bluetooth_list(
 			label = "Connect";
 			if ((device->flags & KL_BLUETOOTH_CONNECTED) != 0U)
 				label = "Disconnect";
-			if (connectable) {
+			hid_kind = bluetooth_hid_kind(device);
+			if (connectable && hid_kind) {
 				button = se_button_width(app, label);
 				(void)se_button_draw(app, canvas, right - button, y + 10, label, 0, enabled, BLUETOOTH_CONNECT_FIRST + (int)drawn);
 				right -= button + 10;
@@ -717,6 +731,24 @@ bluetooth_kind_words(
 	if (kind < sizeof(words) / sizeof(words[0]))
 		return words[kind];
 	return "Device";
+}
+
+/*
+ * Tells whether Connect may be offered for a device: Connect and
+ * Disconnect are the HID host's (ws143-p005), so a phone, a computer or a
+ * headset is not offered them (BUG-287: a phone's Connect tried HID and
+ * timed out); a device of no known kind may be a HID device.
+ */
+static int
+bluetooth_hid_kind(
+	const struct kl_bluetooth_device *device)
+{
+	/* The kinds the HID host never connects. */
+	if (device->kind == KL_BLUETOOTH_KIND_PHONE || device->kind == KL_BLUETOOTH_KIND_COMPUTER || device->kind == KL_BLUETOOTH_KIND_AUDIO)
+		return 0;
+
+	/* Succeeded: a keyboard, a mouse or another device. */
+	return 1;
 }
 
 /* Tells whether the desktop offers the phone's switch (KL_SYSTEM_HAS_PHONE_SYNC, ws197-p004c). */

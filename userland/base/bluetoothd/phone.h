@@ -104,11 +104,14 @@
 /*
  * What the phone link asks of the daemon (ws197-p003): the name of a
  * uid's account, which tells whether the owner of a record is still the
- * account that made it.
+ * account that made it; and a line of its progress to log (BUG-287:
+ * wanted, page, link, securing, ready, SDP, RFCOMM and the end; NULL:
+ * none).
  */
 struct btd_phone_hooks {
 	void *context;
 	btd_phonerec_account_fn account;
+	void (*log)(void *context, const char *line);
 };
 
 /*
