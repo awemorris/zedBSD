@@ -232,6 +232,7 @@ drv_dma_alloc_coherent(
 	struct dma_allocation *allocation;
 	unsigned long irq;
 	size_t allocation_bytes;
+	size_t page_size;
 	uint64_t maximum;
 	uint64_t boundary;
 	int error;
@@ -265,9 +266,31 @@ drv_dma_alloc_coherent(
 
 	kern_memset(allocation, 0, sizeof(*allocation));
 
-	/* Checks the hal page get page size result. */
-	if (alignment < kern_page_size(1))
-		alignment = kern_page_size(1);
+	/* Uses the architecture's smallest page for physical alignment. */
+	page_size = kern_page_size(1);
+	if (page_size == 0) {
+		kern_free(allocation);
+		device_operation_end(device);
+		return EINVAL;
+	}
+
+	/* Gives uncached mappings whole pages while preserving coherent-device sizes. */
+	allocation_bytes = size;
+	if (!device->constraints.coherent) {
+		/* Refuses a payload whose backing length cannot be rounded safely. */
+		if (size > SIZE_MAX - (page_size - 1U)) {
+			kern_free(allocation);
+			device_operation_end(device);
+			return EOVERFLOW;
+		}
+
+		/* Keeps the caller's payload size separate from the uncached backing. */
+		allocation_bytes = ((size + page_size - 1U) / page_size) * page_size;
+	}
+
+	/* Aligns the physical run for the page mapping and the device's requirement. */
+	if (alignment < page_size)
+		alignment = page_size;
 	maximum = device->constraints.address_bits == 64U
 			  ? UINT64_MAX
 			  : ((UINT64_C(1) << device->constraints.address_bits) -
@@ -278,11 +301,11 @@ drv_dma_alloc_coherent(
 	 * A sub-page segment constrains the exposed payload, not unused
 	 * backing.
 	 */
-	if (boundary < kern_page_size(1))
+	if (boundary < page_size)
 		boundary = 0;
 
 	/* Checks the operation status. */
-	error = kern_pmem_alloc_limited(size, alignment, maximum,
+	error = kern_pmem_alloc_limited(allocation_bytes, alignment, maximum,
 					(size_t)boundary,
 					&allocation->memory);
 	if (error != 0 ||

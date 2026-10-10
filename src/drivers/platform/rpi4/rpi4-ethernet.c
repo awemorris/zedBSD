@@ -314,6 +314,7 @@ attach_controller(
 	const struct rpi4_ethernet_config *config)
 {
 	struct genet_device *device;
+	const char *stage;
 	uint32_t revision;
 	uint32_t phy_identity;
 	int error;
@@ -345,6 +346,7 @@ attach_controller(
 		return error;
 
 	/* Verifies the silicon's v5 revision before resetting anything. */
+	stage = "silicon revision";
 	revision = read_register(device, GENET_REVISION);
 	kern_logf(
 		"genet: at %llx revision %08x irq %u\n",
@@ -357,6 +359,7 @@ attach_controller(
 	}
 
 	/* Saves a valid firmware or pre-reset hardware Ethernet address. */
+	stage = "MAC address";
 	error = select_mac(device);
 	if (error != 0)
 		goto fail;
@@ -366,11 +369,13 @@ attach_controller(
 	write_register(device, GENET_IRQ1_MASK_SET, UINT32_MAX);
 	write_register(device, GENET_RX_DMA, 0);
 	write_register(device, GENET_TX_DMA, 0);
+	stage = "MAC reset";
 	error = reset_mac(device);
 	if (error != 0)
 		goto fail;
 
 	/* Sets the external gigabit PHY port before issuing clause-22 transactions. */
+	stage = "PHY initialization";
 	write_register(device, GENET_PORT, 3U);
 	device->phy.context = device;
 	device->phy.read = mdio_read;
@@ -388,11 +393,13 @@ attach_controller(
 		phy_identity);
 
 	/* Allocates uncached packet slots before publishing a network interface. */
+	stage = "DMA buffers";
 	error = allocate_buffers(device);
 	if (error != 0)
 		goto fail;
 
 	/* Configures the primary SPI while both controller interrupt banks are masked. */
+	stage = "IRQ trigger";
 	kern_irq_mask((int)device->config.irq);
 	error = kern_irq_set_mode(
 		(int)device->config.irq,
@@ -402,6 +409,7 @@ attach_controller(
 		goto fail;
 
 	/* Binds DMA completion to the existing network worker. */
+	stage = "IRQ registration";
 	error = kern_irq_register(
 		(int)device->config.irq,
 		genet_interrupt,
@@ -411,6 +419,7 @@ attach_controller(
 	device->irq_registered = 1;
 
 	/* Obtains a registry slot only after all hardware resources are ready. */
+	stage = "network allocation";
 	device->net = net_device_alloc();
 	if (device->net == NULL) {
 		error = ENOMEM;
@@ -425,6 +434,7 @@ attach_controller(
 	device->net->flags = NET_DEVICE_BROADCAST | NET_DEVICE_MULTICAST;
 	device->net->ops = &genet_operations;
 	device->net->driver_data = device;
+	stage = "network registration";
 	error = net_device_create(device->net);
 	if (error != 0)
 		goto fail;
@@ -444,7 +454,7 @@ attach_controller(
 
 fail:
 	/* Removes only unpublished resources; no hardware has seen these buffers. */
-	kern_logf("genet: initialization failed (%d)\n", error);
+	kern_logf("genet: initialization failed at %s (%d)\n", stage, error);
 	release_unpublished(device);
 
 	/* Reports the initialization failure to the platform's nonfatal caller. */

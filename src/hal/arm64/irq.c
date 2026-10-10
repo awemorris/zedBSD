@@ -89,8 +89,9 @@ hal_irq_set_affinity(int irq, const struct hal_cpu_mask *requested)
 }
 
 /*
- * Sets the trigger mode and polarity of one IRQ: the Raspberry Pi 4's interrupt lines keep the configuration
- * their controller gives them, so a change is not supported.
+ * Sets the trigger mode of one masked Raspberry Pi 4 interrupt.
+ *
+ * GIC inputs use active-high polarity; inversion belongs to the source.
  */
 int
 hal_irq_set_mode(
@@ -98,16 +99,31 @@ hal_irq_set_mode(
 	int trigger,
 	int polarity)
 {
-	/* A valid IRQ, trigger mode and polarity. */
+	int error;
+
+	/* Requires a numbered line within the HAL interrupt table. */
 	if (irq < 0 || irq >= IRQ_MAX)
 		return HAL_ERR_INVALID;
+
+	/* Accepts only the two trigger encodings of the HAL contract. */
 	if (trigger != HAL_IRQ_TRIGGER_EDGE && trigger != HAL_IRQ_TRIGGER_LEVEL)
 		return HAL_ERR_INVALID;
+
+	/* Distinguishes an invalid polarity from a supported encoding. */
 	if (polarity != HAL_IRQ_POLARITY_HIGH && polarity != HAL_IRQ_POLARITY_LOW)
 		return HAL_ERR_INVALID;
 
-	/* The controller's configuration is fixed. */
-	return HAL_ERR_UNSUPPORTED;
+	/* Refuses polarity inversion that the GIC cannot represent. */
+	if (polarity != HAL_IRQ_POLARITY_HIGH)
+		return HAL_ERR_UNSUPPORTED;
+
+	/* Programs the masked line and checks the controller's readback. */
+	error = rpi4_gic_set_trigger((uint32_t)irq, trigger);
+	if (error != HAL_OK)
+		return error;
+
+	/* Succeeded: enabling the line uses the requested trigger mode. */
+	return HAL_OK;
 }
 
 /*

@@ -213,7 +213,8 @@ kern_pmem_alloc_limited(
 		for (i = 0; i < pages; i++)
 			page_used[first + i] = true;
 		run->paddr = PHYSICAL_BASE + (uint64_t)first * PAGE;
-		run->size = (size_t)pages * PAGE;
+		/* Matches kern_pmem: the run records the size its caller requested. */
+		run->size = size;
 		pmem_outstanding++;
 		return 0;
 	}
@@ -228,7 +229,7 @@ kern_pmem_free(
 	unsigned i;
 
 	first = (unsigned)((run->paddr - PHYSICAL_BASE) / PAGE);
-	for (i = 0; i < run->size / PAGE; i++) {
+	for (i = 0; i < (run->size + PAGE - 1U) / PAGE; i++) {
 		CHECK(page_used[first + i]);
 		page_used[first + i] = false;
 	}

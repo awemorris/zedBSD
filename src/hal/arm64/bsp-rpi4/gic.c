@@ -73,3 +73,70 @@ void rpi4_gic_unmask(uint32_t id)
 		dist[GICD_ISENABLER/4+id/32]=1U<<(id&31);
 	}
 }
+
+/*
+ * Configures the trigger mode of one disabled interrupt.
+ */
+int
+rpi4_gic_set_trigger(
+	uint32_t id,
+	int trigger)
+{
+	uint32_t offset;
+	uint32_t mask;
+	uint32_t configuration;
+	uint32_t requested;
+	uint32_t observed;
+	bool enabled;
+
+	/* Requires an implemented interrupt and a defined trigger mode. */
+	if (dist == NULL || id >= irq_count)
+		return HAL_ERR_INVALID;
+
+	/* Refuses an encoding outside the HAL's two trigger modes. */
+	if (trigger != HAL_IRQ_TRIGGER_EDGE && trigger != HAL_IRQ_TRIGGER_LEVEL)
+		return HAL_ERR_INVALID;
+
+	/* Changes only the trigger bit, preserving the neighboring interrupts. */
+	offset = GICD_ICFGR / 4U + id / 16U;
+	mask = 1U << ((id % 16U) * 2U + 1U);
+	requested = 0;
+	if (trigger == HAL_IRQ_TRIGGER_EDGE)
+		requested = mask;
+
+	/* Serializes distributor updates while the requested line stays disabled. */
+	enabled = hal_irq_disable();
+	configuration = dist[offset];
+	if ((dist[GICD_ISENABLER / 4U + id / 32U] & (1U << (id % 32U))) != 0) {
+		if (enabled)
+			hal_irq_enable();
+		return HAL_ERR_BUSY;
+	}
+
+	/* Preserves fixed SGI/PPI configuration unless it already matches. */
+	if (id < 32U) {
+		if (enabled)
+			hal_irq_enable();
+
+		/* Refuses a private line that would need reprogramming. */
+		if ((configuration & mask) != requested)
+			return HAL_ERR_UNSUPPORTED;
+
+		/* Succeeded: the private line already has the requested mode. */
+		return HAL_OK;
+	}
+
+	/* Publishes the SPI trigger and detects a read-only distributor field. */
+	dist[offset] = (configuration & ~mask) | requested;
+	hal_io_mb();
+	observed = dist[offset] & mask;
+	if (enabled)
+		hal_irq_enable();
+
+	/* Refuses a controller that did not accept the requested trigger. */
+	if (observed != requested)
+		return HAL_ERR_UNSUPPORTED;
+
+	/* Succeeded: the masked SPI is configured for the next unmask. */
+	return HAL_OK;
+}

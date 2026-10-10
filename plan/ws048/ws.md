@@ -51,6 +51,7 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 | [ws048-p006](phase006/phase.md) | USB の hub と HID キーボードで console に入力 | planned | p005 | 不要 |
 | [ws048-p008](phase008/phase.md) | ユーザー報告のPCIe最初のMMIO読み出し例外を修正 | cleared（ユーザー実機でlogin到達、2026-10-11） | 現在main/config | API変更なし |
 | [ws048-p009](phase009/phase.md) | USB入力のactivationと選択済みclass driverの接続 | uncleared（source/build済み、実機入力待ち） | 現在main/config | API変更なし |
+| [ws048-p010](phase010/phase.md) | VL805起動時の非coherent DMA size契約と最終規約/build | cleared（source/buildのみ、実機未実施） | 現在main/configと実機写真 | API変更なし |
 | [ws048-p007](phase007/phase.md) | 規約の全文の確認と回帰、実機の結果の取りまとめ | planned | p002〜p006 | 不要 |
 
 注: QEMU の raspi4b は PCIe を持たない（DTB の PCIe の node を disabled にする）。p002〜p006 の動作の確認は実機だけで、
@@ -95,3 +96,11 @@ p009 terminal: HID pending activationと選択classの不足を補完、現在co
 ## Main integration follow-up / 2026-10-11
 
 User explicitly instructed「mainにマージしてください。」for source commit `8c93ba8e026c3d3e8e2bfe3f22c5ffe430e9dd62`. Main was clean at `fbcb2b543` and fast-forwarded to that exact commit without conflict. Read-back confirmed all 15 integrated files byte-identical to the verified worktree. Owned-worktree `make -j16 build/arm64/vmunix` succeeds with no further source changes; prior full image/option checks remain applicable. Integration is complete; earlier integration-pending text is historical. USB input and greeter physical checks remain pending, with no acceptance-state promotion from merge alone. Shared Master/Queue/history/cache/GitHub reconciliation remains Q1 pending; no push.
+
+## 2026-10-11 実機初期化失敗の修正開始
+
+[ws048-p010](phase010/phase.md)を追加、VL805 DMA size契約を修正する。先行のsource/build clearanceと未達の実機受入を区別し保持。[限定Queue](../ws203/codex-repair-20261011.md)。既存HAL APIの補完のみ、共有投影はQ1 pending。
+
+### 修正source/build結果
+
+[ws048-p010](phase010/phase.md)の限定source/build criteria cleared。GIC trigger/MMIO共有alias、非coherent DMAのpage backingを修正し、現在config warning0 kernel buildと限定host checks PASS。[証拠](../ws203/tests/initialization-repair-20261011.md)。実機DHCP/SSH・USB入力は未確認なのでWSはincomplete、次は新imageでuser受入。main統合と共有投影はpending。

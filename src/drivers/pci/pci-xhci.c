@@ -5223,42 +5223,47 @@ static int
 xhci_start(
 	struct drv_usb_hcd *h)
 {
-	struct xhci_controller *c = hcd_controller(h);
+	struct xhci_controller *c;
 	struct xhci_erst *erst;
+	const char *stage;
 	unsigned long irq;
+	uint32_t page_sizes;
 	int e, stop_error;
 
-	/* Checks the wait bits result. */
-	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0)) != 0)
+	/* Waits until controller registers can accept the reset sequence. */
+	c = hcd_controller(h);
+	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0);
+	if (e != 0)
 		return e;
 	wr32(c->operational, XHCI_USBCMD,
 	     rd32(c->operational, XHCI_USBCMD) & ~XHCI_CMD_RUN);
 
-	/* Checks the wait bits result. */
-	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED,
-			   XHCI_STS_HALTED)) != 0) {
-		/* Returns the computed result. */
+	/* Requires stopped DMA before asserting controller reset. */
+	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED,
+		      XHCI_STS_HALTED);
+	if (e != 0)
 		return e;
-	}
 	wr32(c->operational, XHCI_USBCMD, XHCI_CMD_RESET);
 
-	/* Checks the wait bits result. */
-	if ((e = wait_bits(c->operational, XHCI_USBCMD, XHCI_CMD_RESET, 0)) !=
-	    0) {
-		/* Returns the computed result. */
-		return e;
-	}
-
-	/* Checks the wait bits result. */
-	if ((e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0)) != 0)
+	/* Waits for reset completion before checking readiness again. */
+	e = wait_bits(c->operational, XHCI_USBCMD, XHCI_CMD_RESET, 0);
+	if (e != 0)
 		return e;
 
-	/* Checks the rd32 result. */
-	if ((rd32(c->operational, XHCI_PAGESIZE) & 1U) == 0)
+	/* Requires ready registers after reset. */
+	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_CNR, 0);
+	if (e != 0)
+		return e;
+
+	/* Requires the 4 KiB page size used by the controller backing. */
+	page_sizes = rd32(c->operational, XHCI_PAGESIZE);
+	if ((page_sizes & 1U) == 0)
 		return ENOTSUP;
+
+	/* Starts only after all previous requests and completions are retired. */
 	irq = spin_lock_irqsave(&c->active_lock);
 
-	/* Checks the atomic raw load acquire result. */
+	/* Refuses a restart while any software owner can still touch DMA. */
 	if (c->active_count != 0 || c->transfer_reserve_busy ||
 	    c->operations_busy || c->submissions_busy ||
 	    c->endpoint_recoveries_busy || c->completion_dispatch_busy ||
@@ -5280,34 +5285,46 @@ xhci_start(
 	c->command_failed = 0;
 	c->default_slot = 0;
 
-	/* Checks the drv dma alloc coherent result. */
-	if ((e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->dcbaa)) != 0)
+	/* Allocates the device-context base address page. */
+	stage = "DCBAA DMA";
+	e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->dcbaa);
+	if (e != 0)
 		goto fail;
 	kern_memset(c->dcbaa.address, 0, 4096U);
 
-	/* Checks the xhci scratchpads alloc result. */
-	if ((e = xhci_scratchpads_alloc(c)) != 0)
+	/* Allocates the scratchpad pointer array and its backing pages. */
+	stage = "scratchpad DMA";
+	e = xhci_scratchpads_alloc(c);
+	if (e != 0)
 		goto fail;
 
-	/* Checks the ring alloc result. */
-	if ((e = ring_alloc(c, &c->command)) != 0)
+	/* Allocates the command ring before programming its device address. */
+	stage = "command ring DMA";
+	e = ring_alloc(c, &c->command);
+	if (e != 0)
 		goto fail;
 	c->command_memory = c->command.dma;
 
-	/* Checks the drv dma alloc coherent result. */
-	if ((e = drv_dma_alloc_coherent(h->dma, 4096U, 64U,
-					&c->event_memory)) != 0)
+	/* Allocates the event ring shared with the controller. */
+	stage = "event ring DMA";
+	e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->event_memory);
+	if (e != 0)
 		goto fail;
 
-	/* Checks the drv dma alloc coherent result. */
-	if ((e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->erst_memory)) !=
-	    0)
+	/* Allocates the event-ring segment table. */
+	stage = "ERST DMA";
+	e = drv_dma_alloc_coherent(h->dma, 4096U, 64U, &c->erst_memory);
+	if (e != 0)
 		goto fail;
 
-	/* Checks the drv dma alloc coherent result. */
-	if ((e = drv_dma_alloc_coherent(h->dma, XHCI_TRANSFER_RESERVE_SIZE,
-					XHCI_TRANSFER_RESERVE_SIZE,
-					&c->transfer_reserve)) != 0)
+	/* Reserves transfer storage before accepting USB requests. */
+	stage = "transfer reserve DMA";
+	e = drv_dma_alloc_coherent(
+		h->dma,
+		XHCI_TRANSFER_RESERVE_SIZE,
+		XHCI_TRANSFER_RESERVE_SIZE,
+		&c->transfer_reserve);
+	if (e != 0)
 		goto fail;
 	kern_memset(c->event_memory.address, 0, 4096U);
 	kern_memset(c->erst_memory.address, 0, 4096U);
@@ -5330,18 +5347,21 @@ xhci_start(
 	wr32(c->operational, XHCI_USBSTS, 0xffffffffU);
 	wr32(c->operational, XHCI_USBCMD, XHCI_CMD_RUN | XHCI_CMD_INTE);
 
-	/* Handles the e condition. */
+	/* Waits for the controller to leave its halted state. */
+	stage = "RUN transition";
 	e = wait_bits(c->operational, XHCI_USBSTS, XHCI_STS_HALTED, 0);
 	if (!e)
 		return 0;
 fail:
+	/* Identifies the failing allocation or hardware transition before cleanup. */
+	kern_logf("xhci: controller start failed at %s (%d)\n", stage, e);
 
-	/* Checks the operation status. */
+	/* Stops hardware before freeing any backing allocated by this attempt. */
 	stop_error = xhci_stop_checked(h);
 	if (stop_error != 0)
 		return stop_error;
 
-	/* Returns the computed result. */
+	/* Reports the original start failure after confirmed DMA quiescence. */
 	return e;
 }
 

@@ -1,0 +1,8 @@
+a4a328093c6331a13f2ccd400433612b2833972b04fe6ecef0318ad691b9a57b  src/drivers/generic/dma.c
+f9559e9eecd17e5d25f658cc93f4dbf5fe1130ad8e4330d8fb99223721a5959d  src/drivers/pci/pci-xhci.c
+badb69378889730bb74d34accb1a233e7a0f47132f7f6bfbfee4aae7bcfa6293  src/drivers/platform/rpi4/rpi4-ethernet.c
+b08b1a792a0e630b925517607851e1ca4189f43eee93be834a51be1361f577e3  src/hal/arm64/bsp-rpi4/gic.c
+f5dfacfc34fcd321cca9408c2aa7c1118a2d78f9e725a58676621664664e42c3  src/hal/arm64/bsp-rpi4/gic.h
+b39018d071d4d6d0cbd6adbd89060ae649643efefad67220e6c3b72a122f974f  src/hal/arm64/irq.c
+2f036220fb9c52001d57db362215f9b92fdb27b2e8159ef98aaae507d98a61ce  src/hal/arm64/space.c
+2081649a2c289a0d14bbd34acf52fb5e989b72b57bdf51961baad20f428f3a1e  plan/ws048/tests/dma-host-test.c

@@ -8,5 +8,6 @@ uint32_t rpi4_gic_ack(void);
 void rpi4_gic_eoi(uint32_t value);
 void rpi4_gic_mask(uint32_t intid);
 void rpi4_gic_unmask(uint32_t intid);
+int rpi4_gic_set_trigger(uint32_t intid, int trigger);
 
 #endif

@@ -577,15 +577,35 @@ hal_pmem_unmap_uncached(
 }
 
 /*
- * Removes one device mapping.
+ * Releases a caller's use of the shared direct device mapping.
+ *
+ * Device blocks are permanent kernel aliases shared by boot code and drivers.
+ * Removing a whole block for one caller would revoke other live peripherals.
  */
 int
 hal_space_unmap_device(
 	void *vaddr,
 	size_t size)
 {
-	/* Releases the system-space window. */
-	return hal_space_unmap(HAL_SPACE_SYS, vaddr, size);
+	uint64_t address;
+	uint64_t physical;
+
+	/* Requires a nonempty range in the device mapping's direct window. */
+	address = (uint64_t)(uintptr_t)vaddr;
+	if (size == 0 || address < ARM64_DIRECT_BASE)
+		return HAL_ERR_INVALID;
+
+	/* Excludes uncached RAM views and ranges extending beyond the direct map. */
+	physical = address - ARM64_DIRECT_BASE;
+	if (physical >= ARM64_DIRECT_LIMIT)
+		return HAL_ERR_INVALID;
+
+	/* Checks the length without wrapping the address at the window's end. */
+	if ((uint64_t)size > ARM64_DIRECT_LIMIT - physical)
+		return HAL_ERR_INVALID;
+
+	/* Succeeded: this caller has released its handle; shared aliases remain. */
+	return HAL_OK;
 }
 
 /* Reports whether a physical range overlaps any RAM the firmware described. */

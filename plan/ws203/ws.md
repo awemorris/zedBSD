@@ -24,9 +24,10 @@ Queue: [scoped Queue](codex-queue.md)
 | --- | --- | --- | --- |
 | [ws203-p001](phase001/phase.md) | FDT/PHY/DMA/ring/net_device driverとbuild/menu配線 | cleared | main a094b953c の既存API |
 | [ws203-p002](phase002/phase.md) | 最終ソースのC全文適合、warning0 build、送受信/異常系の限定host model | cleared | p001のソース成果 |
-| [ws203-p003](phase003/phase.md) | 実機有線LAN/DHCP/SSH受入 | planned | p001,p002とユーザー実機 |
+| [ws203-p003](phase003/phase.md) | 実機有線LAN/DHCP/SSH受入 | uncleared | p001,p002とユーザー実機 |
+| [ws203-p004](phase004/phase.md) | 実機初期化失敗のGIC/MMIO補完と最終規約/build | cleared | 現mainと実機写真 |
 
-Resume: p001/p002 cleared、main統合済み。新SDイメージからp003実機確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
+Resume: p003実機初期化失敗、p004の限定source/build修正はcleared。具体的commitをmainへ統合後、新SDイメージからp003 DHCP/SSH再確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
 
 ## 2026-10-11 分割の指示
 
@@ -51,3 +52,11 @@ Submission: `e9ddb4540` (`WIP`), merge request `ws203-genet-20261011`. Integrati
 ## 2026-10-11 network startup UAT investigation
 
 User reports sshd process startup and apparent link, with DHCP address missing. p003 retains actual lease/SSH/traffic criteria; [source/image inspection](tests/network-startup-20261011.md) confirms configs match amd64 and automatic LAN management exists. Await actual service/network observations; no source changes or acceptance promotion. Shared projection/GitHub pending Q1.
+
+## 2026-10-11 実機初期化失敗の修正開始
+
+[ws203-p004](phase004/phase.md)を追加、GIC trigger/MMIO releaseを修正する。先行のsource/build clearanceと未達の実機受入を区別し保持。[限定Queue](../ws203/codex-repair-20261011.md)。既存HAL APIの補完のみ、共有投影はQ1 pending。
+
+### 修正source/build結果
+
+[ws203-p004](phase004/phase.md)の限定source/build criteria cleared。GIC trigger/MMIO共有alias、非coherent DMAのpage backingを修正し、現在config warning0 kernel buildと限定host checks PASS。[証拠](../ws203/tests/initialization-repair-20261011.md)。実機DHCP/SSH・USB入力は未確認なのでWSはincomplete、次は新imageでuser受入。main統合と共有投影はpending。
