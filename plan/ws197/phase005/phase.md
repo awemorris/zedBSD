@@ -245,6 +245,12 @@ i01 1.5、i02 1、i03 1.5、i04 1.5、i05 1、i06 2、i07 0.5、計 **9 LW**（w
 - 2026-10-11: design-reviewer（agent ad782c2d4ddaad97c）→ [review-1.md](review-1.md)。blocker B1（スマホの連絡先を store の配列に混ぜる形）、major 13、minor 14、追加の判断 Pc3〜Pc6。i01 は GO。
 - 2026-10-11: M1（backend の `phone_field` が引用の中の ` length=` を欄と読む、今の `PHONE MESSAGE` にもある既存の欠陥）を直した（eee2a5d12、phone-backend-host-test に偽の欄の例、PASS、zedBSD の libkeiland.so の build rc 0）。
 
+## 実装の進み
+
+| i | commit | 内容 | 確かめ |
+| --- | --- | --- | --- |
+| i01 vcard.c（§4、review-1 で GO） | この commit | 新 `vcard.c`・`.h`: `btd_vcard_next`（Body から 1 件ずつ、前の行・間の行を飛ばす、入れ子の AGENT を数える、途中で切れた件は EINVAL）、`btd_vcard_contact_read`（§4.1 の読み: CRLF・LF、3.0 の折り返しは 1 字を除き 2.1 は空白を残す（VERSION の行を先に探す、不明は 3.0 の扱い）、QP の soft line break（行の head が QP の時だけ）、group、名前・parameter の大文字・小文字、2.1 の裸の parameter、引用の TYPE、CHARSET は UTF-8 か無しだけ、BASE64・B・知らない ENCODING は捨てる、3.0 の escape、FN が先・無ければ N を「名 姓」・無ければ最初の番号、TEL 8 個（空・数字無し・33 桁以上も dropped に数える）、`tel:` の URI、UID、不正な UTF-8 と制御文字は U+FFFD・改行と TAB は空白・前後の空白を除く・256 byte で文字の途中で切らない）、`btd_vcard_reduce`（§4.2 の縮めた vCard 3.0、NUL 付き、`BTD_VCARD_REDUCED_MAX` 6144）、`btd_vcard_call_read`（kind は datetime の parameter、無ければ folder、datetime は `[0-9TZ+-]` の 23 byte まで）、`btd_vcard_call_time`（`btd_mapxml_time_unix` で Z・offset は `ZONE_PHONE`、無ければ zedBSD の offset で `ZONE_LOCAL`、無い・読めない時は `ZONE_NONE` と 0）。**設計の補い**: (1) 連絡先の key の無 UID の形は「`n|` + 表示の名前（番号で代えた時はその番号）+ `|` + 並べた番号」（縮めた vCard を読み直しても同じ key になる）。(2) datetime の無い通話は kind と番号が同じなら key が同じ（区別する物が無い、review-1 minor 5 の記録）。(3) 名前も番号も無い件は ENOENT（pbap は skipped に数える）。(4) 4 KB を越える行は head だけ読み、値を使わない（TEL なら dropped）。(5) 入れ子は 8 段まで（9 段は EINVAL）。Makefile に vcard.c。試験: 新 `bt-vcard-host-test`（170 checks: Body の切り出し、2.1（QP の UTF-8、文字の途中の soft break、裸の parameter、BASE64 の PHOTO、2.1 の折り返し）、3.0（escape、group、引用の TYPE、`tel:`、折り返し、TAB）、charset、U+FFFD、256 byte の切り、TEL 9 個・33 桁、番号だけ、名前も番号も無い、16 KB・4 KB・9 段・開かない・閉じない、縮めた vCard の手の byte 列と全部の短い room と読み直し、試験の側の FNV-1a（既知の値で確かめた）での key、通話（2.1 MISSED、3.0 DIALED の UTC 1704110400、+9 時間の local 1704078000、folder の kind、datetime 無し・読めない・変な byte、範囲外の folder）、fuzz 20 万回で「読めた件は約束を守り、縮めた vCard から同じ名前・key・番号の数に読み直せる」） | `bt-phone-host-test.sh` PASS（16 本）、WS143 `bt-daemon-host-test.sh` PASS（FAIL 0）、target の bluetoothd（`ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat`）rc 0・warning 0、style-check（vcard.c・.h・試験）0、`git diff --check` |
+
 ## 再開の手順（2026-10-11 P1 のラップアップ、context の上限）
 
 1. Q1 からユーザーの判断 Pc1〜Pc6 の答えを受ける（Pc1・Pc2 は §7.4、Pc3〜Pc6 は review-1）。
