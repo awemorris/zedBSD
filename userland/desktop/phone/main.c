@@ -46,6 +46,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <strings.h>
 #include <sys/stat.h>
 #include <time.h>
 
@@ -81,6 +82,8 @@
 #define PH_SYNC_NORMAL		1U
 #define PH_SYNC_QUICK		2U
 #define PH_SYNC_DEEP		4U
+#define PH_SYNC_CALLS 8U
+#define PH_SYNC_CONTACTS 16U
 
 /* A page's items, a first synchronisation's days and limit, the overlaps (seconds) and the waits. */
 #define PH_SYNC_COUNT		32U
@@ -113,6 +116,10 @@
 struct ph_sync {
 	unsigned wanted;
 	unsigned running;
+	unsigned what;
+	int force_contacts;
+	int store_failed;
+	char address[KL_BLUETOOTH_ADDRESS_MAX];
 	uint32_t request;
 	uint64_t asked_us;
 	int64_t started;
@@ -207,13 +214,13 @@ struct ph_window {
 
 /* The window's menu. */
 static const struct kl_menu_entry ph_menu[] = {
-	{ 1U, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "File", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
-	{ 2U, 1U, KL_MENU_ITEM_NORMAL, "Quit Phone", PH_ACTION_QUIT, KL_MENU_ROLE_QUIT, KL_MENU_CTRL, 'q' },
-	{ 3U, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Conversation", 0U, KL_MENU_ROLE_NONE, 0U, 0U },
-	{ 4U, 3U, KL_MENU_ITEM_NORMAL, "Call", PH_ACTION_CALL, KL_MENU_ROLE_NONE, 0U, 0U },
-	{ 5U, 3U, KL_MENU_ITEM_NORMAL, "Send Message", PH_ACTION_SEND, KL_MENU_ROLE_NONE, 0U, 0U },
-	{ 6U, 3U, KL_MENU_ITEM_NORMAL, "Attach File...", PH_ACTION_ATTACH, KL_MENU_ROLE_NONE, 0U, 0U }
-};
+    {1U, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "File", 0U, KL_MENU_ROLE_NONE, 0U, 0U},
+    {2U, 1U, KL_MENU_ITEM_NORMAL, "Quit Phone", PH_ACTION_QUIT, KL_MENU_ROLE_QUIT, KL_MENU_CTRL, 'q'},
+    {3U, KL_MENU_ROOT, KL_MENU_ITEM_SUBMENU, "Conversation", 0U, KL_MENU_ROLE_NONE, 0U, 0U},
+    {4U, 3U, KL_MENU_ITEM_NORMAL, "Call", PH_ACTION_CALL, KL_MENU_ROLE_NONE, 0U, 0U},
+    {5U, 3U, KL_MENU_ITEM_NORMAL, "Send Message", PH_ACTION_SEND, KL_MENU_ROLE_NONE, 0U, 0U},
+    {6U, 3U, KL_MENU_ITEM_NORMAL, "Attach File...", PH_ACTION_ATTACH, KL_MENU_ROLE_NONE, 0U, 0U},
+    {7U, 3U, KL_MENU_ITEM_NORMAL, "Sync Now", PH_ACTION_SYNC, KL_MENU_ROLE_NONE, 0U, 0U}};
 
 int main(int argc, char **argv);
 static int ph_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **peer);
@@ -1032,6 +1039,11 @@ ph_requests(
 		case PH_ACTION_READ:
 			ph_read_conversation(phone, request.contact);
 			break;
+		case PH_ACTION_SYNC:
+			/* A manual reading includes contacts regardless of the daily mark. */
+			phone->sync.force_contacts = 1;
+			ph_sync_want(phone, PH_SYNC_NORMAL | PH_SYNC_CALLS | PH_SYNC_CONTACTS);
+			break;
 		case PH_ACTION_SAVE:
 			ph_save_contact(phone);
 			break;
@@ -1303,7 +1315,7 @@ ph_items(
 	/* Each item, until none waits. */
 	for (;;) {
 		taken = kl_system_take_phone_item(phone->system, &item, sizeof(item));
-		if (!taken)
+		if (taken <= 0)
 			break;
 		ph_item(phone, &item);
 	}
@@ -1331,12 +1343,38 @@ ph_item(
 	int merge;
 	int error;
 
+	/* Discards late pages after cancellation or a change of phone. */
+	if (item->request != 0U && (!phone->sync.running || item->request != phone->sync.request))
+		return;
+
 	/* Counted for the page asked. */
 	if (item->request != 0U && item->request == phone->sync.request)
 		phone->sync.items++;
 
+	/* Imports PBAP items through their own storage paths, without SMS notifications. */
+	if (item->what != KL_PHONE_MESSAGES) {
+		error = EINVAL;
+		if (item->request == phone->sync.request && item->what == phone->sync.what) {
+			if (item->what == KL_PHONE_CONTACTS) {
+				error = ph_phonebook_put(phone->sync.address, item);
+			} else if (item->what == KL_PHONE_CALLS) {
+				error = ph_store_phone_call(phone->sync.address, item);
+			}
+		}
+
+		/* Any failed import prevents the pass from advancing or deleting contacts. */
+		if (error != 0)
+			phone->sync.store_failed = 1;
+		phone->dirty = 1;
+		ph_log("ITEM what=%u request=%u error=%d", item->what, item->request, error);
+		return;
+	}
+
 	/* The message as the store takes it. */
 	memset(&message, 0, sizeof(message));
+	message.channel = PH_SMS;
+	if ((item->folder & KL_PHONE_FOLDER_MMS) != 0U)
+		message.channel = PH_MMS;
 	message.address = "-";
 	if (phone->link_known && phone->link.address[0] != '\0')
 		message.address = phone->link.address;
@@ -1357,10 +1395,16 @@ ph_item(
 		message.truncated = 1;
 
 	/* Kept. */
+	merge = PH_MERGE_KNOWN;
 	error = ph_store_phone_message(&message, &contact, &at, &merge);
 	ph_log("ITEM request=%u dir=%u length=%lu merge=%d error=%d", item->request, item->direction, (unsigned long)item->length, merge, error);
-	if (error != 0)
+	if (error != 0) {
+		if (item->request == phone->sync.request)
+			phone->sync.store_failed = 1;
 		return;
+	}
+
+	/* Requests a repaint after the message has been persisted. */
 	phone->dirty = 1;
 
 	/* Its handle on the phone, for marking it read. */
@@ -1401,6 +1445,7 @@ ph_link(
 {
 	struct kl_phone_link link;
 	unsigned was;
+	unsigned contacts_were;
 	int permission;
 	int no_mas;
 	int error;
@@ -1411,8 +1456,20 @@ ph_link(
 	if (error != 0)
 		return;
 	was = PH_MESSAGES_OFF;
-	if (phone->link_known)
+	contacts_were = 0U;
+	if (phone->link_known) {
 		was = phone->link.messages;
+		contacts_were = phone->link.contacts;
+	}
+
+	/* A different phone or stopped link invalidates any outstanding pass's address. */
+	if (phone->sync.running != 0U) {
+		same = strcasecmp(link.address, phone->sync.address);
+		if (same != 0 || !link.enabled || !link.owner)
+			ph_sync_end(phone, 0);
+	}
+
+	/* Publishes the new link after invalidating any pass from the old phone. */
 	same = strcmp(link.why, phone->link.why);
 	phone->link = link;
 	phone->link_known = 1;
@@ -1423,6 +1480,15 @@ ph_link(
 	if (link.backend == PH_BACKEND_BLUETOOTH && link.messages == PH_MESSAGES_READY && !link.can_send)
 		phone->view.cannot_send = 1;
 	phone->dirty = 1;
+
+	/* A known stop, unpair or phone change removes only imported phonebook copies. */
+	error = ph_phonebook_link(&link);
+	if (error != 0)
+		ph_log("PHONEBOOK forget error=%d", error);
+
+	/* A new contacts connection queues history before the daily whole phonebook. */
+	if (link.contacts == PH_MESSAGES_READY && contacts_were != PH_MESSAGES_READY)
+		ph_sync_want(phone, PH_SYNC_CALLS | PH_SYNC_CONTACTS);
 
 	/* Why the phone's messages do not work, once for each change. */
 	permission = strcmp(link.why, "permission");
@@ -1484,64 +1550,107 @@ ph_sync_start(
 {
 	struct ph_sync *sync;
 	struct ph_sync_marks marks;
-	int64_t since;
+	unsigned message_kinds;
+	unsigned capabilities;
 	time_t now;
 	int error;
 
-	/* One at a time, when wanted, the phone's messages ready, and not waiting to try again. */
+	/* Serializes all profile pages and observes the retry delay. */
 	sync = &phone->sync;
 	now = time(NULL);
 	if (!phone->phone_sync || sync->running != 0U || sync->wanted == 0U)
 		return;
-	if (!phone->link_known || phone->link.messages != PH_MESSAGES_READY || phone->link.backend == 0U)
+	if (!phone->link_known || !phone->link.owner || phone->link.backend == 0U)
 		return;
 	if (sync->retry_at != 0 && now < sync->retry_at)
 		return;
 	sync->retry_at = 0;
+	capabilities = kl_system_capabilities(phone->system);
+	message_kinds = PH_SYNC_NORMAL | PH_SYNC_QUICK | PH_SYNC_DEEP;
 
-	/* The mark (none: the first). */
+	/* Reads marks from the phone that will own every page of this pass. */
 	memset(&marks, 0, sizeof(marks));
+	(void)snprintf(sync->address, sizeof(sync->address), "%s", phone->link.address);
 	error = ENOENT;
-	if (phone->link.address[0] != '\0')
-		error = ph_store_sync_load(phone->link.address, &marks);
-	since = marks.messages_since;
+	if (sync->address[0] != '\0')
+		error = ph_store_sync_load(sync->address, &marks);
+	if (error != 0 && error != ENOENT) {
+		ph_log("SYNC marks error=%d", error);
+		sync->retry_at = now + PH_SYNC_RETRY_SECONDS;
+		return;
+	}
 
-	/* The kind: over the mark first, then the deep one, then the five minutes'. */
+	/* Initializes pass state, preserving the user's manual contacts request. */
 	memset(sync->cursor, 0, sizeof(sync->cursor));
 	sync->first = 0;
 	sync->capped = 0;
 	sync->again = 0;
+	sync->store_failed = 0;
 	sync->limit = 0U;
-	if ((sync->wanted & PH_SYNC_NORMAL) != 0U || error != 0) {
-		sync->running = PH_SYNC_NORMAL;
-		sync->since = since;
-		if (error != 0) {
-			sync->first = 1;
-			sync->since = (int64_t)now - (int64_t)PH_SYNC_FIRST_DAYS * PH_DAY_SECONDS;
-			sync->limit = PH_SYNC_FIRST_LIMIT;
-		}
+	sync->what = KL_PHONE_MESSAGES;
 
-		/* The kinds it covers are done. */
-		sync->wanted &= ~(PH_SYNC_NORMAL | PH_SYNC_QUICK);
-	} else if ((sync->wanted & PH_SYNC_DEEP) != 0U) {
-		sync->running = PH_SYNC_DEEP;
-		sync->since = (int64_t)now - (int64_t)PH_DEEP_DAYS * PH_DAY_SECONDS;
-		sync->wanted &= ~PH_SYNC_DEEP;
+	/* Messages have priority whenever ready; PBAP does not depend on MAP permission. */
+	if ((sync->wanted & message_kinds) != 0U && phone->link.messages == PH_MESSAGES_READY) {
+		sync->since = marks.messages_since;
+		if ((sync->wanted & PH_SYNC_NORMAL) != 0U || marks.messages_since == 0) {
+			sync->running = PH_SYNC_NORMAL;
+			if (marks.messages_since == 0) {
+				sync->first = 1;
+				sync->since = (int64_t)now - PH_SYNC_FIRST_DAYS * PH_DAY_SECONDS;
+				sync->limit = PH_SYNC_FIRST_LIMIT;
+			}
+
+			/* Consumes the message work covered by this pass. */
+			sync->wanted &= ~(PH_SYNC_NORMAL | PH_SYNC_QUICK);
+		} else if ((sync->wanted & PH_SYNC_DEEP) != 0U) {
+			sync->running = PH_SYNC_DEEP;
+			sync->since = (int64_t)now - PH_DEEP_DAYS * PH_DAY_SECONDS;
+			sync->wanted &= ~PH_SYNC_DEEP;
+		} else {
+			sync->running = PH_SYNC_QUICK;
+			if (sync->last_start != 0)
+				sync->since = sync->last_start - PH_QUICK_OVERLAP;
+			sync->wanted &= ~PH_SYNC_QUICK;
+		}
+	} else if ((capabilities & KL_SYSTEM_HAS_PHONE_CONTACTS) != 0U && phone->link.contacts == PH_MESSAGES_READY) {
+		/* Calls precede the larger phonebook reading. */
+		if ((sync->wanted & PH_SYNC_CALLS) != 0U) {
+			sync->running = PH_SYNC_CALLS;
+			sync->what = KL_PHONE_CALLS;
+			sync->since = marks.calls_since;
+			if (sync->since == 0)
+				sync->since = (int64_t)now - PH_SYNC_FIRST_DAYS * PH_DAY_SECONDS;
+			sync->wanted &= ~PH_SYNC_CALLS;
+		} else if ((sync->wanted & PH_SYNC_CONTACTS) != 0U) {
+			/* Daily automatic syncs skip a recent successful complete pass. */
+			sync->wanted &= ~PH_SYNC_CONTACTS;
+			if (!sync->force_contacts && marks.contacts_at != 0 && (int64_t)now - marks.contacts_at < PH_DAY_SECONDS)
+				return;
+			error = ph_phonebook_begin();
+			if (error != 0) {
+				sync->wanted |= PH_SYNC_CONTACTS;
+				sync->retry_at = now + PH_SYNC_RETRY_SECONDS;
+				return;
+			}
+
+			/* Consumes the manual request only after a phonebook pass can begin. */
+			sync->force_contacts = 0;
+			sync->running = PH_SYNC_CONTACTS;
+			sync->what = KL_PHONE_CONTACTS;
+			sync->since = 0;
+		} else {
+			return;
+		}
 	} else {
-		sync->running = PH_SYNC_QUICK;
-		sync->since = since;
-		if (sync->last_start != 0)
-			sync->since = sync->last_start - PH_QUICK_OVERLAP;
-		sync->wanted &= ~PH_SYNC_QUICK;
+		return;
 	}
 
-	/* Not before the epoch. */
+	/* Starts the first page and preserves the message quick-sync reference time. */
 	if (sync->since < 0)
 		sync->since = 0;
-
-	/* Its first page. */
 	sync->started = (int64_t)now;
-	sync->last_start = sync->started;
+	if (sync->what == KL_PHONE_MESSAGES)
+		sync->last_start = sync->started;
 	ph_log("SYNC start kind=%u first=%d limit=%u", sync->running, sync->first, sync->limit);
 	ph_sync_page(phone);
 }
@@ -1557,7 +1666,7 @@ ph_sync_page(
 
 	/* The page from the cursor. */
 	sync = &phone->sync;
-	error = kl_system_phone_sync(phone->system, KL_PHONE_MESSAGES, sync->since, sync->limit, sync->cursor, PH_SYNC_COUNT, &request);
+	error = kl_system_phone_sync(phone->system, sync->what, sync->since, sync->limit, sync->cursor, PH_SYNC_COUNT, &request);
 	if (error == EBUSY) {
 		sync->request = 0U;
 		return;
@@ -1624,6 +1733,7 @@ ph_sync_answer(
 		kind = sync->running;
 		ph_sync_end(phone, 0);
 		ph_sync_want(phone, kind);
+		sync->retry_at = 0;
 		if (sync->short_pages >= PH_SYNC_TRIES) {
 			sync->short_pages = 0U;
 			sync->retry_at = time(NULL) + PH_SYNC_RETRY_SECONDS;
@@ -1634,8 +1744,7 @@ ph_sync_answer(
 	}
 
 	/* The next page. */
-	if (capped)
-		sync->capped = 1;
+	sync->capped |= capped;
 	if (more) {
 		(void)snprintf(sync->cursor, sizeof(sync->cursor), "%s", cursor);
 		ph_sync_page(phone);
@@ -1660,43 +1769,79 @@ ph_sync_end(
 	struct ph_sync *sync;
 	struct ph_sync_marks marks;
 	unsigned kind;
-	int again;
 	int error;
 
-	/* Not running any more. */
+	/* Ends ownership before scheduling another profile or a delayed retry. */
 	sync = &phone->sync;
 	kind = sync->running;
-	again = sync->again;
+	if (sync->store_failed || sync->again)
+		succeeded = 0;
 	sync->running = 0U;
 	sync->request = 0U;
 	sync->again = 0;
-	ph_log("SYNC end kind=%u succeeded=%d capped=%d", kind, succeeded, sync->capped);
-	if (!succeeded)
-		return;
 
-	/* The mark of the phone (its other marks as they were). */
-	if (phone->link.address[0] != '\0') {
-		(void)ph_store_sync_load(phone->link.address, &marks);
-		if (kind == PH_SYNC_DEEP)
-			marks.deep_at = (int64_t)time(NULL);
-		else
-			marks.messages_since = sync->started - PH_DAY_SECONDS;
-		error = ph_store_sync_save(phone->link.address, &marks);
-		if (error != 0)
-			ph_log("SYNC save error=%d", error);
+	/* Phonebook pruning and index refresh complete before its durable mark. */
+	if (kind == PH_SYNC_CONTACTS) {
+		error = ph_phonebook_end(sync->address, succeeded, (unsigned)sync->capped);
+		if (error != 0) {
+			ph_log("PHONEBOOK end error=%d", error);
+			succeeded = 0;
+		}
+
+		/* A capped book cannot establish a complete-reading timestamp. */
+		if (sync->capped != 0)
+			succeeded = 0;
+		phone->dirty = 1;
 	}
 
-	/* Ended well: the texts not sent are looked at again. */
-	sync->last_done = time(NULL);
-	phone->stale_check_at = 0;
+	/* Records the outcome and retains failed work for a bounded delayed retry. */
+	ph_log("SYNC end kind=%u succeeded=%d capped=%d", kind, succeeded, sync->capped);
+	if (!succeeded) {
+		sync->wanted |= kind;
+		sync->retry_at = time(NULL) + PH_SYNC_RETRY_SECONDS;
+		return;
+	}
 
-	/* A first one cut by the limit. */
-	if (sync->first && sync->capped)
-		ph_view_notice(&phone->view, "Some older messages were not brought in.", kl_clock_us());
+	/* Advances only this profile's mark, preserving the others and unknown lines. */
+	memset(&marks, 0, sizeof(marks));
+	error = ENOENT;
+	if (sync->address[0] != '\0')
+		error = ph_store_sync_load(sync->address, &marks);
+	if (error != 0 && error != ENOENT) {
+		sync->wanted |= kind;
+		sync->retry_at = time(NULL) + PH_SYNC_RETRY_SECONDS;
+		return;
+	}
 
-	/* A drop meanwhile: once more. */
-	if (again)
-		ph_sync_want(phone, PH_SYNC_NORMAL);
+	/* Updates only the timestamp belonging to the completed profile. */
+	if (kind == PH_SYNC_CONTACTS) {
+		marks.contacts_at = sync->started;
+	} else if (kind == PH_SYNC_CALLS) {
+		marks.calls_since = sync->started - PH_DAY_SECONDS;
+	} else if (kind == PH_SYNC_DEEP) {
+		marks.deep_at = sync->started;
+	} else {
+		marks.messages_since = sync->started - PH_DAY_SECONDS;
+	}
+
+	/* Persists the completed profile mark before reporting settled work. */
+	error = 0;
+	if (sync->address[0] != '\0')
+		error = ph_store_sync_save(sync->address, &marks);
+	if (error != 0) {
+		ph_log("SYNC save error=%d", error);
+		sync->wanted |= kind;
+		sync->retry_at = time(NULL) + PH_SYNC_RETRY_SECONDS;
+		return;
+	}
+
+	/* Only completed message syncs settle pending sent texts. */
+	if (sync->what == KL_PHONE_MESSAGES) {
+		sync->last_done = time(NULL);
+		phone->stale_check_at = 0;
+		if (sync->first && sync->capped)
+			ph_view_notice(&phone->view, "Some older messages were not brought in.", kl_clock_us());
+	}
 }
 
 /*

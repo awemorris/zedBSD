@@ -64,6 +64,7 @@ static void test_field(const char *name, const struct kl_field *field, const cha
 static void test_check(const char *name, const char *expected);
 static int test_save(const struct kl_canvas *canvas, const char *prefix, const char *name);
 static int test_save_glass(struct ph_view *view, const struct kl_canvas *canvas, const char *prefix, const char *name);
+static void test_newlines(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, struct kl_canvas *canvas);
 static void test_hover_part(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, struct kl_canvas *canvas, int glass);
 
 /*
@@ -135,6 +136,8 @@ main(
 		fprintf(stderr, "host-phone: store error=%d\n", error);
 		return 2;
 	}
+
+	/* Opens the timeline only after fixture storage is ready. */
 	error = ph_view_init(&view);
 	if (error != 0)
 		return 2;
@@ -209,6 +212,8 @@ main(
 		printf("FAIL ime-unwanted wanted=%d\n", wanted);
 		test_failures++;
 	}
+
+	/* Clears the composition before testing contact search. */
 	kl_field_set(&view.message, "");
 
 	/* The search: "len" leaves Lena alone, and her row shows her. */
@@ -277,6 +282,9 @@ main(
 	(void)test_save_glass(&view, &canvas, argv[3], "glass-add");
 	test_click(&view, ui, &style, TEST_WIDTH, TEST_HEIGHT, 333 + 8 + (980 - 333 - 8 - 420) / 2 + 420 - 45, 70 + 24 + 42 + 52 + 17);
 	test_check("add-save", "REQUEST action=save name=7 number=16");
+
+	/* Checks logical line separators on the actual text renderer. */
+	test_newlines(&view, ui, &style, &canvas);
 
 	/* Everything goes. */
 	ph_view_release(&view);
@@ -655,4 +663,101 @@ test_save_glass(
 	/* Succeeded: both are written. */
 	fclose(file);
 	return 0;
+}
+
+/* Compares actual rendering of CRLF and LF text, including empty logical lines. */
+static void
+test_newlines(
+	struct ph_view *view,
+	struct kl_ui *ui,
+	const struct kl_style *style,
+	struct kl_canvas *canvas)
+{
+	struct ph_contact *contacts;
+	struct ph_item *item;
+	struct kl_style plain;
+	uint32_t *kept;
+	char *original;
+	char *crlf;
+	char *lf;
+	size_t count;
+	size_t index;
+	size_t bytes;
+	int same;
+
+	/* Finds one existing text item without changing production storage. */
+	contacts = (struct ph_contact *)ph_contacts(&count);
+	view->selected = 0;
+	view->adding = 0;
+	item = NULL;
+	for (index = 0U; index < contacts[0].item_count; index++) {
+		if (contacts[0].items[index].kind == PH_TEXT) {
+			item = &contacts[0].items[index];
+		}
+	}
+
+	/* Requires the fixture to contain a visible text item. */
+	if (item == NULL) {
+		test_failures++;
+		return;
+	}
+
+	/* Allocates each independently owned representation and the captured frame. */
+	crlf = strdup("\r\nFirst\r\n\r\nSecond\r\n");
+	if (crlf == NULL) {
+		test_failures++;
+		return;
+	}
+
+	/* The LF representation denotes the same logical lines. */
+	lf = strdup("\nFirst\n\nSecond\n");
+	if (lf == NULL) {
+		free(crlf);
+		test_failures++;
+		return;
+	}
+
+	/* Captures the entire actual canvas, rather than inferring glyph widths. */
+	bytes = (size_t)canvas->stride * (size_t)canvas->height * sizeof(uint32_t);
+	kept = malloc(bytes);
+	if (kept == NULL) {
+		free(crlf);
+		free(lf);
+		test_failures++;
+		return;
+	}
+
+	/* Stabilizes the view before recording its CRLF rendering. */
+	plain = *style;
+	plain.glass = 0;
+	original = item->text;
+	item->text = crlf;
+	view->to_end = 1;
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	memcpy(kept, canvas->pixels, bytes);
+
+	/* LF text must produce the same pixels without visible separator glyphs. */
+	item->text = lf;
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	same = memcmp(kept, canvas->pixels, bytes);
+	if (same != 0)
+		test_failures++;
+	printf("newline rendering: pixel-difference=%d\n", same);
+
+	/* Proves the selected text was visible in the captured comparison. */
+	item->text = "Different visible text";
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	test_frame(view, ui, &plain, canvas->width, canvas->height);
+	same = memcmp(kept, canvas->pixels, bytes);
+	if (same == 0)
+		test_failures++;
+	printf("newline rendering: visible-text=%d\n", same != 0);
+
+	/* Restores fixture ownership before the store closes. */
+	item->text = original;
+	free(crlf);
+	free(lf);
+	free(kept);
 }

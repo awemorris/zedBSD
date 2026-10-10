@@ -4,14 +4,14 @@
 
 Phase ID: `ws197-p005`
 Parent: [WS197](../ws.md)
-Status: planning（2026-10-11 P1: 第 1 版の review-1 は blocker 1・major 13・minor 14、i01 vcard.c だけ GO → **i01 は実装済み（da5dbf9ac）**。第 2 版の review-2（[review-2.md](review-2.md)）は blocker 0・major 9・minor 15 で i02〜i07 は直してから。第 3 版の review-3（[review-3.md](review-3.md)）は blocker 0・major 3・minor 8 で、i02 は条件付き GO、i03・i04・i07 は GO、i05・i06 は R1・R2 を書いてから（再 review 不要）。第 3.1 版（この版）で R1〜R3 と minor 1〜8 を書いた。ユーザーの判断 Pc1〜Pc6 は答え待ちで、推しを**仮**として書いた（§12）。i01〜i05 は実装済み（i05 は KL_VERSION 80・manager 28、Q1 の割り当て）。再開点は下の「再開の手順」）
+Status: cleared（2026-10-10 Codex。i06/i07、host回帰・全文規約・named build完了。実機PBAP UATはp008）
 Phase disposition: normal
-Queue: Q1 の投入（2026-10-11「次は WS197 p005（PBAP、plan/ws197/ws.md の Phase の表どおり）に進んで」、ユーザー 2026-10-09 の順「OBEX, MAP, Integration, PBAP, HFP」）
-Branch: `agent/p1-ws197`（区切りごとに main へ merge、ベータ2 に入れる、2026-10-10 ユーザー）
+Queue: [Codex承認済み実行記録](../codex-queue.md)（ユーザーのp005完了依頼、Pc1〜Pc6承認）。共有Queueの投影はQ1。
+Branch: `codex/ws197-pbap-sms`（i01〜i05はmain既存。今回i06/i07と受信修正をmainへ統合）
 依存: p002（RFCOMM・OBEX・SDP、cleared）、p003（phone link・MAP・socket の PHONE、cleared）、p004a〜c（SMS の層、cleared 候補・UAT 待ち）、BUG-287（usb-bt の data pipe、UAT 待ち。実機の PBAP は ACL の受けが要る）
 所有 path: `userland/base/bluetoothd/`、`userland/desktop/libkeiland-backend*/`（phone の分）、`userland/desktop/wayland/phone-shell.c`・`kl-system-protocol.h`（phone の分）、`userland/desktop/libkeiland/`（phone の分）、`userland/desktop/include/keiland/keiland.h`（phone の分）、`userland/desktop/phone/`、`userland/desktop/settings/page-bluetooth.c`、`plan/ws197/`
 
-版: 2026-10-11 第 1 版（P1）。2026-10-11 第 2 版（P1、review-1 の B1・M2〜M13・minor 1〜14 を直した。直した所は `[B1]`・`[M2]`・`[m3]`（minor 3）の印）。2026-10-11 **第 3 版**（P1、review-2 の N1〜N9 と minor 1〜15 を直した。印は `[N1]`・`[r2m4]`（review-2 の minor 4））。2026-10-11 **第 3.1 版**（P1、review-3 の R1〜R3 と minor 1〜8、印は `[R1]`・`[r3m1]`）。ユーザーの判断の仮の所は「**仮（ユーザーの答え待ち）**」の印（Pc1〜Pc6 の選択肢はユーザーに出した物と一致、Q1 2026-10-11）。
+版: 2026-10-11 第 1 版（P1）。2026-10-11 第 2 版（P1、review-1 の B1・M2〜M13・minor 1〜14 を直した。直した所は `[B1]`・`[M2]`・`[m3]`（minor 3）の印）。2026-10-11 **第 3 版**（P1、review-2 の N1〜N9 と minor 1〜15 を直した。印は `[N1]`・`[r2m4]`（review-2 の minor 4））。2026-10-11 **第 3.1 版**（P1、review-3 の R1〜R3 と minor 1〜8、印は `[R1]`・`[r3m1]`）。ユーザーの判断の仮の所は「**採用（2026-10-10ユーザー承認）**」の印（Pc1〜Pc6 の選択肢はユーザーに出した物と一致、Q1 2026-10-11）。
 
 前提のユーザーの決定（p001 §11、2026-10-09「全部推しどおり」）:
 
@@ -254,9 +254,9 @@ main.c は host で build しないので、配線は i04 の target の build �
 ### 7.3 表示と重ね
 
 - **名前の引き**（`ph_store_phone_name(number)`）: 番号の鍵で、**手元の連絡先（`conversation == 0` の行だけ）** にあれば NULL（手元の名前が出る）、無ければ電話帳の索引の名前。[N7] 今の `ph_store_find_number` は `ph_store_conversation` を通して番号の会話の行（`conversation` 1）も返すので使わない（使うと会話のある番号はどれも「手元にある」になり、電話帳の名前が番号の会話に付かない）。新しい static の `store_find_local_number` を足す。
-- **[r2m8] 索引の作り直し**: 番号の鍵は `ph_number_key`（`store_country` を使う）で作るので、`ph_store_set_country` の後に索引を作り直し、`store_apply_phone_names` を呼ぶ。**番号ごとに引く**（Pc6 (a) **仮（ユーザーの答え待ち）**: 手元とスマホの連絡先で番号が一部だけ重なる時、重なった番号は手元の名前、残りの番号の会話はスマホの連絡先の名前）。
+- **[r2m8] 索引の作り直し**: 番号の鍵は `ph_number_key`（`store_country` を使う）で作るので、`ph_store_set_country` の後に索引を作り直し、`store_apply_phone_names` を呼ぶ。**番号ごとに引く**（Pc6 (a) **採用（2026-10-10ユーザー承認）**: 手元とスマホの連絡先で番号が一部だけ重なる時、重なった番号は手元の名前、残りの番号の会話はスマホの連絡先の名前）。
 - 番号の会話（`conversation` 1、id `n<数字>`）の `name` は、store を開いた時と電話帳の同期の後に `store_apply_phone_names` で引き直す（MAP の item の名前より電話帳の名前が先、電話帳に無ければ今のまま）。`struct ph_contact` に `phone_named`（名前が電話帳の物、view が名前の横に小さく「Phone」）を足す。
-- **一覧**（Pc1 (a) **仮（ユーザーの答え待ち）**）: スマホの連絡先そのものの行は作らない。会話か通話のある番号は番号の会話の行として今の一覧に出て、名前が電話帳の物になる。同じ人の 2 つの番号に会話があれば、同じ名前の行が 2 つ（記録の限界）。
+- **一覧**（Pc1 (a) **採用（2026-10-10ユーザー承認）**）: スマホの連絡先そのものの行は作らない。会話か通話のある番号は番号の会話の行として今の一覧に出て、名前が電話帳の物になる。同じ人の 2 つの番号に会話があれば、同じ名前の行が 2 つ（記録の限界）。
 - **[B1] 行の index**: 電話帳の同期は `ph_contacts` の行を足さない・消さない・並べ替えない（名前を変えるだけ）ので、view の request（行の index）は同期で別の人を指さない。通話の item を足す時の並べ替えは今の MAP の item と同じ（新しい危険を足さない）。
 - 送り先: 番号の会話の送り先はその番号（今のまま）。スマホの連絡先の複数の番号から選ぶ UI は作らない。
 
@@ -266,16 +266,16 @@ main.c は host で build しないので、配線は i04 の target の build �
 
 - handoff（`PAIR … phone=1` の後、phone.c の `phone_take_record`）の新しい記録の profiles の既定を `BTD_PHONEREC_PROFILES`（m,c,h）から `BTD_PHONEREC_MESSAGES` に。同じ持ち主の pairing のやり直しは今の profiles を残す（今のまま）。PAIR から LINK の間や CLI の pairing で PBAP が勝手に始まり、許可の画面が出ることは無くなる。
 - 記録に `asked <m,c,h の組>` の行を足す（LINK の profiles か handoff で明示に頼まれた profile。書く時はいつも今の profiles と同じ値）。`asked` は無くてもよい行（`PHONEREC_KEYS_ALL` の要る行の組に入れない）。
-- **既存の記録の扱い**（Pc4 (a) **仮（ユーザーの答え待ち）**）: p005 の bluetoothd が `asked` の行の無い（p005 より前の）**有効な**記録を読んだら（`btd_phone_load`）、profiles を `profiles & m` にし、`asked` をその値で書き直す（1 回だけ。profiles に m が無い記録は profiles 0・`asked -`）。p003 の handoff が書いた 0x07 も、CLI の `PHONE LINK … profiles=m,c,h` で作った物も同じに扱う（区別できない）。CLI の人は p005 の後にもう 1 度 LINK する。無効な記録は書き直さない（持ち主が無い）。
+- **既存の記録の扱い**（Pc4 (a) **採用（2026-10-10ユーザー承認）**）: p005 の bluetoothd が `asked` の行の無い（p005 より前の）**有効な**記録を読んだら（`btd_phone_load`）、profiles を `profiles & m` にし、`asked` をその値で書き直す（1 回だけ。profiles に m が無い記録は profiles 0・`asked -`）。p003 の handoff が書いた 0x07 も、CLI の `PHONE LINK … profiles=m,c,h` で作った物も同じに扱う（区別できない）。CLI の人は p005 の後にもう 1 度 LINK する。無効な記録は書き直さない（持ち主が無い）。
 - **[r2m1] downgrade**: 古い bluetoothd は知らない行を読み飛ばす（phonerec.c:579-581）ので記録を拒まないが、書き直す時（`btd_phonerec_format`）に `asked` を落とす。その後に p005 に戻すと移行がもう 1 度走り、利用者が入れた contacts が外れる（「Also use contacts」をもう 1 度押す）。記録の限界。
 
 ### 8.2 Settings（page-bluetooth.c）[M7・m13]
 
-- 「Use as phone」の `kl_system_phone_link_set(address, 1, KL_PHONE_PROFILE_MESSAGES | KL_PHONE_PROFILE_CONTACTS)`（Pc2 (a) **仮（ユーザーの答え待ち）**: contacts の 1 つの switch で電話帳と通話の履歴）。profile ごとの switch は作らない（1 つの「Use as phone」、p004c のまま）。
+- 「Use as phone」の `kl_system_phone_link_set(address, 1, KL_PHONE_PROFILE_MESSAGES | KL_PHONE_PROFILE_CONTACTS)`（Pc2 (a) **採用（2026-10-10ユーザー承認）**: contacts の 1 つの switch で電話帳と通話の履歴）。profile ごとの switch は作らない（1 つの「Use as phone」、p004c のまま）。
 - 行の文に contacts の状態を足す: connecting は「Contacts connecting...」、ready は「Contacts connected」、`contacts_why` が `permission` は「Allow access to contacts on the phone」、他の failed は「Contacts not available」。
 - 既に使っているスマホで profiles に contacts が無い時（p004c で「Use as phone」を押した人、§8.1 の移行の後の人）: 行に「**Also use contacts**」の button。押すと `link_set(address, 1, MESSAGES | CONTACTS)`（スマホが許可を聞く）。Settings を開いただけでは profiles を変えない（利用者の操作なしに許可の画面をスマホに出さない）。
 - **[r2m2・r3m7]「Stop using as phone」**: 今の code（page-bluetooth.c:844）は on・off とも `KL_PHONE_PROFILE_MESSAGES` を渡し、off で contacts の bit を消す。直し: off は profiles を変えない。backend は off の `PHONE LINK` に `profiles=` を書かない（bluetoothd は `profiles=` の無い LINK で記録の bit を残す、main.c:2278。空の `profiles=` は bit を消すので書かない）。on（「Use as phone」）は `MESSAGES | CONTACTS`、「Also use contacts」は `MESSAGES | CONTACTS`。off の時も profiles の bit は記録に残る。
-- **[N9] 電話帳の写しを消す時**（Pc3 (b) **仮（ユーザーの答え待ち）**）: Phone の app は link の状態を見るたびに、純粋な関数 `ph_phonebook_forget(copy_address, link)` で、持っている写しを消すかを決める。消すのは次の明示の場合だけ:
+- **[N9] 電話帳の写しを消す時**（Pc3 (b) **採用（2026-10-10ユーザー承認）**）: Phone の app は link の状態を見るたびに、純粋な関数 `ph_phonebook_forget(copy_address, link)` で、持っている写しを消すかを決める。消すのは次の明示の場合だけ:
   1. Stop: `record` 2、`owner` 1、`address` が写しのスマホ、`enabled` 0。
   2. 別のスマホ: `record` 2、`owner` 1、`address` が写しのスマホと違う（空でない）。
   3. 記録が消えた（ペアの解除・FORGET）: `record` 1（bluetoothd が答えて、記録の有無を読んで、無い）。
@@ -327,7 +327,7 @@ Android で: 「Use as phone」→ スマホの「連絡先と通話履歴への
 - §9.1 の host の試験と fuzz が全部 PASS、WS143 の host の試験が PASS、zedBSD（bluetoothd・wayland・libkeiland・phone・settings）と keiland-linux の build が warning 0、style-check の変更箇所 0。
 - 実機（§9.3）は p008 とユーザーの UAT。この Phase では未実施と書く（p003 §12 と同じ）。
 
-## 12. 判断の要る点（ユーザー、推し付き）
+## 12. ユーザーの判断（2026-10-10に6項目とも推奨どおり確定）
 
 Pc1・Pc2 は第 1 版 §7.4、Pc3〜Pc6 は review-1 の問い。選択肢はこの版で書いた（Q1 がユーザーに出した形と食い違う時は Q1 の物を正にして直す）。**答えが来るまで推しを仮として設計に入れた**。
 
@@ -417,3 +417,47 @@ i01 1.5（済み）、i02 2（mux に rfcomm の DLC の期限・map の穴・PC
 5. 試験: `plan/ws197/tests/phone-backend-host-test.c`（**既存の style の 35 か所も直す**）・`phone-shell-host-test.c` に §9.1 の行（N5・N6・N9・R1・R2・r2m7・r3m7・r3m8）。zedBSD の wayland・libkeiland.so と keiland-linux の build（p004a の記録の `keiland-linux.mk` の all）warning 0。
 6. その後 i06（Phone の app、§7、Pc1・Pc3・Pc6 の答えで直す）、i07（Settings、§8.2、Pc2・Pc4）。
 7. 各 i の後: `plan/ws197/tests/bt-phone-host-test.sh`、WS143 の `plan/ws143/tests/bt-daemon-host-test.sh`、target の bluetoothd（`make ZEDBSD_CONFIG=config/current-uat.mk BUILD=build/p1-uat build/p1-uat/bin/bluetoothd`）warning 0、style-check、WIP commit、SHA を Q1 へ。desktop の試験は `phone-backend-host-test.sh`・`phone-shell-host-test.sh`・`phone-store-host-test.sh`。
+
+## 2026-10-10 Codex の実行・決定
+
+- 承認: ユーザー「次は、WS197のp005を完了させてほしい」「新規受信が表示されなかった」「ssh kei@10.0.30.3でも確認できます」。Pc1〜Pc6 は「6項目とも計画の推奨どおり」で確定。本文の仮案はこの決定で確定し、追加の仕様変更は無い。
+- 自分の作業 tree: `.claude/worktrees/ws197-codex`、branch `codex/ws197-pbap-sms`、base `c5af76952`。P1 の tree を書かず、master・共有 Queue は Q1 の所有のまま。共有 projection の反映は Q1 に引き継ぐ。
+- 有限な実行範囲: p005 第3.1版 i06/i07 の残りと必要な最終全文規約・host・named build、新規SMSの受信経路の診断と修正。実機 PBAP 全項目は p008 のユーザー UAT、QEMU は不要。source/toolchain は既存ルールのまま。
+- SSH の接続先鍵変更はユーザー承認済み。新しい image で鍵が変わる運用。ユーザー提供の認証で接続成功、実機 image `1.0.0-beta2+ge8adcdf`。送信や pairing の操作は実施していない。SMS本文・番号は証拠に保存しない。
+- 実機観察: MAP ready、Phone `notify=1`。過去21件＋送信folder1件の同期が成功。ユーザーの送信は成功。ログに新規受信 request=0 の ITEM は無い。再起動後の同期は送信分1件だけ。原因の診断を継続。
+
+## 2026-10-10 新規受信の診断とMMSテキスト承認
+
+実機 beta2+ge8adcdf の17:41 JSTのMNS通知は `type=1 message-type=3 handle-present=1`（NewMessage / MMS）。通知自体は到達し、MAPのSMS限定条件とlisting filterで除外されていた。本文・番号・handleは記録しない。ユーザー回答「MMSのテキスト受信も含める」により、SMS受信修正へMMSのテキスト本文の抽出・履歴取り込み・通知・保存・表示を追加する。添付画像・動画は対象外、MIME生データを本文として表示しない。MIME parserは独自Zlib実装、RFC2045/2046のtransfer encodingとmultipartを参照。共有master/queueへの投影はQ1に保留。
+
+## 2026-10-10 Codex 結果: i06/i07 cleared
+
+- Pc1〜Pc6は6項目とも計画の推奨を採用。会話/通話のある番号だけ一覧に表示、contacts許可で電話帳と通話履歴を取得、利用停止/切替で写しを消し履歴は保持、既存記録へcontactsを自動追加しない、不在着信も取得、手元の名前を番号ごとに優先する。
+- i06: 独立した最大5000件のphonebook保存と番号索引、変更カードだけ置換、信用できる完全passで2回連続欠落時だけ削除、国番号変更後の再索引、名前ラベル、3種の通話履歴と再開時の重複防止を実装。番号無しと上限超過の履歴も予約行へ保存する。同期はmessages→calls→contactsの順に直列化し、手動Sync Nowは電話帳も取得、失敗/capped/stale itemでは完全同期の目印を進めない。
+- i07: SettingsのUse as phone/Also use contactsをcontacts能力と許可に接続し、利用停止/スマホ切替では輸入電話帳だけ削除する。Phone/store/Settingsは既存compositor抽象APIを使用。
+- 検証: `sh plan/ws197/tests/bt-phone-host-test.sh`の19本（ASan/UBSan/LSan、bMessage/vCardの有界fuzzを含む）、`phone-backend-host-test.sh`、`phone-shell-host-test.sh`、`phone-store-host-test.sh`、`phone-pbap-store-host-test.sh`、WS143の`bt-daemon-host-test.sh`/`bt-desktop-host-test.sh`、WS170の`run-host-phone.sh`/`run-host-phone-store.sh`/`run-host-phone-shell.sh`をPASS確認。最大5000件の保存と再open、同一カードmtime保持、2回欠落削除、capped保持、番号ごとのlocal優先、phone切替/停止、通話再open/重複、上限の履歴、SMS/MMSのchannel保持を確認。5000件再openはASanで1259ms（性能保証の数値ではない）。
+- 最終sourceを[C全文規約](../../coding-style.md)とGuardrailでreview、clang-format 19.1.7（InheritParentConfig/ColumnLimit 0、無関係なformat差分は除外）＋style-check。変更箇所の指摘0、keiland.hの既存24件をbaselineと照合、所有/解放・失敗時の目印・ライセンス/API境界を手動確認。`git diff --check` PASS。
+- zedBSD named build: `make -j8 BUILD=build/ws197 ZEDBSD_CONFIG=config/current-uat.mk`に既存amd64 sysroot/LLVM stampの`-o`とDYNAMIC_CPPFLAGSを指定し、`build/ws197/bin/{bluetoothd,phone,settings,wayland}`・`build/ws197/dynamic/libkeiland.so`を構築、rc0・warning0。sysroot/LLVMはread-only既存資産で再構築しない。`make -f userland/desktop/keiland-linux.mk -j8 KEILAND_LINUX_BUILD=build/ws197-linux all`もrc0・warning0（Linux buildにPhoneは含まれない）。初回の既存sysroot指定不足/emojiキャッシュ不足は適正な指定と既存pinnedキャッシュで解消し、未完のbuildを成功とは記録しない。
+- 証拠logはprivate treeのbuild/ws197-{bt-host,backend-host,shell-host,sms-final,pbap-final,phone-view,phone-old-store,daemon-host,desktop-host,build,linux}.log。本文/番号/認証情報は保存しない。試験fixtureとrunnerは本Phaseに保存。
+- 制限: 実機PBAPの全項目はp008に残す。実機の新規MMSテキスト受信は別途下記/p004に記録。QEMU・追加のHID実機回帰は実施しない。WS全体はHFP/p008/p009が残るためincomplete。今回の承認範囲はここで終了、次Phaseは自動開始しない。
+
+## 2026-10-10 新規受信修正: cleared / 実機表示確認
+
+- 原因: 17:41 JSTのNewMessage通知はMMS。SMS限定のlisting filter/通知条件で落としており、MNS接続そのものは成功していた。承認どおりMMSのtext/plainを独自Zlib MIME readerで抽出（[RFC2045](https://www.rfc-editor.org/rfc/rfc2045)、[RFC2046](https://www.rfc-editor.org/rfc/rfc2046)）。base64/quoted-printable/8bit、UTF-8/ASCII/Latin-1、multipartに対応。添付/HTML/SMIL/動画は表示せず、未対応charset/壊れたMIMEも生データへfallbackしない。
+- MAPのSMS/MMS選択、MMS別key、`type=mms` metadata、既存folderフィールドのMMS flagでPhoneのPH_MMSまで引き継ぐ。既存SMS keyとABI struct layoutを維持。受信したMMSは履歴同期にも入る。
+- 最初の実機修正版で受信/表示は成功し、ユーザーが末尾のゴミを指摘。保存本文の長さと末尾CRのみを確認しCRLF残存と判定。MMS本文のCRLF/CR→LF・末尾LF除去、Phone本文の論理行分割と一覧previewの先頭行表示を修正した。既存の複数行SMSにも改行描画修正が適用される。
+- 承認済み手順で元の実機daemonを`/tmp/bluetoothd-ws197-original`へ保存し、修正したbluetoothdを転送、stop/copy/start。09:08:44 UTCにMAP ready/MNS接続を確認。ユーザー最終回答「ゴミは消え、日本語も受信できました」を実機受信表示の合格として記録。本文/番号は証拠へ保存していない。
+- 最終host: MMS/bMessage抽出、MAP live notificationとlisting、backendのMMS flag、保存/reopen時のchannelを検証。CRLF/LFの実描画canvasを比較して差分0、別の本文では画素が変わることも確認。各PASS。named build warning0、最終変更source全文規約/format/style-check/diff-checkもPASS（[p005検証詳細](../phase005/phase.md)）。
+- 実機は旧beta2+ge8adcdfのcompositor/libkeiland/Phoneでdaemonだけ更新。日本語本文と末尾修正は実機確認済み、PH_MMS channelとPBAP/改行の新Phone描画はhostとbuild確認。新desktop全体の実機UATはp008に残す。原本バックアップは残し、Phoneの既存履歴は書き換えない。
+
+### 今回のnamed buildの再現コマンド
+
+```sh
+make -j8 BUILD=build/ws197 ZEDBSD_CONFIG=config/current-uat.mk \
+ ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot \
+ -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete \
+ -o /home/awe/zedBSD-claude1/.claude/worktrees/ws197-codex/build/llvm/.zedbsd-install-23.1.0-zedbsd8 \
+ 'DYNAMIC_CPPFLAGS=-nostdinc -I. -Iinclude -Iuserland/desktop/include -isystem /home/awe/zedBSD-claude1/build/amd64/sysroot/usr/include -DHAL_ARCH_AMD64 -DKERN_USER_ABI_LP64 -DKERN_DYNAMIC_LIBC' \
+ build/ws197/bin/bluetoothd build/ws197/bin/phone build/ws197/bin/settings \
+ build/ws197/dynamic/libkeiland.so build/ws197/bin/wayland
+```

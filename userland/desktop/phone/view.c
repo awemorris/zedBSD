@@ -276,6 +276,10 @@ ph_view_action(
 		view->adding = 0;
 		ph_log("ADD cancel");
 		break;
+	case PH_ACTION_SYNC:
+		/* Requests a complete sync without changing the selected conversation. */
+		view_request(view, PH_ACTION_SYNC, -1);
+		break;
 	case PH_ACTION_QUIT:
 		view->quit = 1;
 		break;
@@ -830,9 +834,12 @@ view_row(
 	const struct ph_item *last;
 	const char *when;
 	const char *line;
+	char preview[1024];
+	size_t preview_length;
 	kl_color ink;
 	kl_color soft;
 	int time_width;
+	int preview_width;
 	int left;
 	int today;
 
@@ -871,9 +878,33 @@ view_row(
 		(void)kl_text_draw(style->text, style->canvas, row->x + row->width - 12 - time_width, row->y + 26, when, strlen(when), PH_VIEW_TEXT_SMALL, 0, soft);
 	}
 
+	/* Identifies a read-only name imported from the paired phone. */
+	if (contact->phone_named) {
+		(void)kl_text_draw(style->text, style->canvas, row->x + row->width - 45, row->y + 47, "Phone", 5U, PH_VIEW_TEXT_SMALL, 0, soft);
+	}
+
+	/* Reserves space for the imported-name label in the preview line. */
+	preview_width = row->width - 82;
+	if (contact->phone_named)
+		preview_width -= 45;
+
+	/* Shows only the first logical line, with a complete UTF-8 prefix. */
+	if (line == NULL)
+		line = "";
+	preview_length = strcspn(line, "\r\n");
+	if (preview_length >= sizeof(preview)) {
+		preview_length = sizeof(preview) - 1U;
+		while (preview_length > 0U && ((unsigned char)line[preview_length] & 0xc0U) == 0x80U)
+			preview_length--;
+	}
+
+	/* Copies the bounded first line into the fitting renderer. */
+	memcpy(preview, line, preview_length);
+	preview[preview_length] = '\0';
+
 	/* The name, and the line under it. */
 	(void)kl_text_draw_fit(style->text, style->canvas, left, row->y + 26, contact->name, PH_VIEW_TEXT_NAME, 1, row->width - 70 - time_width - 20, ink);
-	(void)kl_text_draw_fit(style->text, style->canvas, left, row->y + 47, line, PH_VIEW_TEXT_BODY - 1U, 0, row->width - 82, soft);
+	(void)kl_text_draw_fit(style->text, style->canvas, left, row->y + 47, preview, PH_VIEW_TEXT_BODY - 1U, 0, preview_width, soft);
 }
 
 /*
@@ -1181,6 +1212,7 @@ view_text(
 	size_t at;
 	size_t length;
 	size_t shown;
+	size_t line_length;
 	size_t i;
 	int widest;
 	int line_width;
@@ -1202,20 +1234,28 @@ view_text(
 
 	/* The lines, and the widest of them (a line's last space not counted). */
 	text = item->text;
+	if (text == NULL)
+		text = "";
 	length = strlen(text);
 	count = 0;
 	at = 0;
 	bubble_width = 0;
 	while (at < length && count < PH_VIEW_LINES_MAX) {
-		/* One line's bytes (one at least, so that a long word still moves on). */
-		shown = kl_text_break(style->text, text + at, PH_VIEW_TEXT_BODY, 0, widest);
-		if (shown == 0U)
+		/* Measures one logical line before asking the generic word wrapper. */
+		line_length = strcspn(text + at, "\r\n");
+		line_width = kl_text_width(style->text, text + at, line_length, PH_VIEW_TEXT_BODY, 0);
+		shown = line_length;
+		if (line_width > widest)
+			shown = kl_text_break(style->text, text + at, PH_VIEW_TEXT_BODY, 0, widest);
+
+		/* A nonempty oversized word still advances at least one character. */
+		if (shown == 0U && line_length != 0U)
 			shown = 1;
 
 		/* Where it starts, and its length without the space it breaks at. */
 		starts[count] = at;
 		lengths[count] = shown;
-		if (text[at + shown - 1U] == ' ')
+		if (shown > 0U && text[at + shown - 1U] == ' ')
 			lengths[count] = shown - 1U;
 
 		/* Its width, the widest so far making the bubble's. */
@@ -1226,6 +1266,14 @@ view_text(
 		/* The next line. */
 		count++;
 		at += shown;
+
+		/* Consumes the line separator without drawing either CR or LF. */
+		if (shown == line_length) {
+			if (at < length && text[at] == '\r')
+				at++;
+			if (at < length && text[at] == '\n')
+				at++;
+		}
 	}
 
 	/* The bubble's size: its lines in its margins, one line's height at least. */

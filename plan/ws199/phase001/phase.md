@@ -4,7 +4,7 @@
 
 Phase ID: `ws199-p001`
 Parent: [WS199](../ws.md)
-Status: planning（2026-10-10 P1: 第 4 版。ユーザーの答え（ws.md「設計の review の後の決定」）、[review-2.md](review-2.md) の N1〜N15、BUG-286（NFC）を入れた。短い再確認の後に i01 から実装）
+Status: cleared（2026-10-10、実装・p004検証とユーザーのWS199完了受け入れ）
 Phase disposition: normal
 Queue: q921（P1、2026-10-10）
 依存: ws172-p002・p003（PIN と鍵の今の経路）、ws161-p005（libpasskey の transport-nfc、usb-ccid、smartcard）、ws187-p002・p003（lock の画面の swipe と方式の pill）、docs/architecture/security.md「Login authentication」
@@ -281,3 +281,7 @@ Queue: q921（P1、2026-10-10）
 - 2026-10-10: design-reviewer の再確認 → [review-2.md](review-2.md)（i01 GO、i02 は N1〜N5 を直してから）。
 - 2026-10-10: ユーザーの答え（タッチ不要は unlock だけ、login は常にタッチ、keypad、全部ベータ2、他は推し）と BUG-286（NFC）。fidoctl の `-s` と list の直し（aead021aa）。
 - 2026-10-10: 第 4 版（P1、この文書）。
+
+## 2026-10-10 終了
+
+ユーザーのWS199 complete・close 指示で受け入れ。詳細は [WS完了記録](../ws.md#完了close2026-10-10ユーザー受け入れ)。今回追加実施した全UATとは扱わない。remote issue無し、local cleared。Q1資材整理待ち。

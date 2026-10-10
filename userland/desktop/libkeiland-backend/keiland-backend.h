@@ -914,6 +914,9 @@ struct kl_backend_phone;
 /* An item's folder, direction and where its time came from. */
 #define KL_BACKEND_PHONE_FOLDER_INBOX		0U
 #define KL_BACKEND_PHONE_FOLDER_SENT		1U
+
+/* A messages-only folder flag: the payload is decoded MMS plain text. */
+#define KL_BACKEND_PHONE_FOLDER_MMS		0x100U
 #define KL_BACKEND_PHONE_DIRECTION_IN		0U
 #define KL_BACKEND_PHONE_DIRECTION_OUT		1U
 #define KL_BACKEND_PHONE_ZONE_PHONE		0U

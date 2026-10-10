@@ -109,6 +109,7 @@ struct ph_item {
  */
 struct ph_contact {
 	int conversation;
+	int phone_named;
 	char *id;
 	char *name;
 	char *number;
@@ -129,6 +130,7 @@ struct ph_contact {
 #define PH_ACTION_SAVE		6U	/* the new contact saved */
 #define PH_ACTION_READ		7U	/* a contact's messages read */
 #define PH_ACTION_CANCEL	8U
+#define PH_ACTION_SYNC		9U
 
 /* The most requests the view queues for the window between two frames. */
 #define PH_REQUESTS_MAX		8U
@@ -147,6 +149,7 @@ struct ph_request {
  * it, and its words.
  */
 struct ph_phone_message {
+	enum ph_channel channel;
 	const char *address;
 	const char *key;
 	int outgoing;
@@ -236,6 +239,20 @@ int ph_store_sync_save(const char *address, const struct ph_sync_marks *marks);
 int ph_phonebook_prune_plan(const char *const *current, size_t current_count, const char *const *received, size_t received_count, const char *const *missing, size_t missing_count, int complete, unsigned capped, unsigned char *remove, unsigned char *missing_next);
 void ph_phonebook_sort_keys(const char **keys, size_t count);
 int ph_phonebook_forget(const char *copy_address, const struct kl_phone_link *link);
+
+/* The isolated imported phonebook and its UI-thread number index. */
+int ph_phonebook_open(const char *root);
+void ph_phonebook_close(void);
+int ph_phonebook_reindex(void);
+const char *ph_phonebook_name(const char *number);
+int ph_phonebook_begin(void);
+int ph_phonebook_put(const char *address, const struct kl_phone_item *item);
+int ph_phonebook_end(const char *address, int complete, unsigned capped);
+int ph_phonebook_link(const struct kl_phone_link *link);
+const char *ph_store_phone_name(const char *number);
+void ph_store_apply_phone_names(void);
+long ph_store_withheld_conversation(int create);
+int ph_store_phone_call(const char *address, const struct kl_phone_item *call);
 
 /* The view (view.c). */
 int ph_view_init(struct ph_view *view);

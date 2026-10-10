@@ -10,6 +10,7 @@
  */
 
 #include "userland/base/bluetoothd/bmsg.h"
+#include "userland/base/bluetoothd/mms.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -127,7 +128,7 @@ static int bmsg_text_by_length(struct bmsg_reader *reader, size_t begin, size_t 
 static int bmsg_text_by_scan(struct bmsg_reader *reader, size_t body_start, size_t *end_line);
 static int bmsg_end_line(const struct bmsg_reader *reader, size_t line_start, size_t body_start);
 static size_t bmsg_line_start_before(const struct bmsg_reader *reader, size_t at);
-static void bmsg_take_text(struct bmsg_reader *reader, size_t body_start, size_t end_line);
+static int bmsg_take_text(struct bmsg_reader *reader, size_t body_start, size_t end_line);
 static int bmsg_put_text(struct btd_bmsg *message, const uint8_t *bytes, size_t length);
 static size_t bmsg_utf8_length(const uint8_t *bytes, size_t available);
 static void bmsg_copy(char *text, size_t size, const uint8_t *bytes, size_t start, size_t end);
@@ -799,9 +800,9 @@ bmsg_text(
 	int error;
 
 	/* Only a text in UTF-8: said so, or not said and not in the network's own form. */
-	if (reader->has_charset && !reader->charset_utf8)
+	if (reader->message->type != BTD_MAP_TYPE_MMS && reader->has_charset && !reader->charset_utf8)
 		return EINVAL;
-	if (!reader->has_charset && reader->has_encoding)
+	if (reader->message->type != BTD_MAP_TYPE_MMS && !reader->has_charset && reader->has_encoding)
 		return EINVAL;
 
 	/* Where BEGIN:MSG starts (its B) and where the text after its line starts. */
@@ -826,7 +827,9 @@ bmsg_text(
 	/* The first text of the message is kept; another part is passed over. */
 	if (!reader->text_found) {
 		reader->message->form = form;
-		bmsg_take_text(reader, body_start, end_line);
+		error = bmsg_take_text(reader, body_start, end_line);
+		if (error != 0)
+			return error;
 		reader->text_found = 1;
 	}
 
@@ -1053,7 +1056,7 @@ bmsg_line_start_before(
  * END:MSG, each malformed sequence or NUL made U+FFFD, the whole cut at
  * BTD_BMSG_TEXT_MAX without splitting a character.
  */
-static void
+static int
 bmsg_take_text(
 	struct bmsg_reader *reader,
 	size_t body_start,
@@ -1076,41 +1079,51 @@ bmsg_take_text(
 			body_end--;
 	}
 
-	/* Each character of the text. */
-	at = body_start;
-	line_start = 1;
-	while (at < body_end) {
-		/* A line that is slashes and END:MSG loses its first slash. */
-		if (line_start && reader->bytes[at] == '/') {
-			escaped = bmsg_escaped_line(reader->bytes + body_start, body_end - body_start, at - body_start);
-			if (escaped)
-				at++;
+	/* MMS selects decoded plain text before the SMS text limit can hide a later part. */
+	if (message->type == BTD_MAP_TYPE_MMS) {
+		error = btd_mms_text(reader->bytes + body_start, body_end - body_start, message->text, sizeof(message->text), &message->text_length, &message->truncated);
+		if (error != 0)
+			return error;
+	} else {
+		/* Each character of the text. */
+		at = body_start;
+		line_start = 1;
+		while (at < body_end) {
+			/* A line that is slashes and END:MSG loses its first slash. */
+			if (line_start && reader->bytes[at] == '/') {
+				escaped = bmsg_escaped_line(reader->bytes + body_start, body_end - body_start, at - body_start);
+				if (escaped)
+					at++;
+			}
+
+			/* A character, or U+FFFD for a NUL or a malformed sequence. */
+			character = bmsg_utf8_length(reader->bytes + at, body_end - at);
+			if (character == 0U || reader->bytes[at] == 0U) {
+				error = bmsg_put_text(message, (const uint8_t *)BMSG_REPLACEMENT, BMSG_REPLACEMENT_BYTES);
+				character = 1U;
+			} else {
+				error = bmsg_put_text(message, reader->bytes + at, character);
+			}
+
+			/* A text past the room is cut here. */
+			if (error != 0) {
+				message->truncated = 1;
+				break;
+			}
+
+			/* The next character, a line feed starting a line. */
+			line_start = 0;
+			if (reader->bytes[at] == '\n')
+				line_start = 1;
+			at += character;
 		}
 
-		/* A character, or U+FFFD for a NUL or a malformed sequence. */
-		character = bmsg_utf8_length(reader->bytes + at, body_end - at);
-		if (character == 0U || reader->bytes[at] == 0U) {
-			error = bmsg_put_text(message, (const uint8_t *)BMSG_REPLACEMENT, BMSG_REPLACEMENT_BYTES);
-			character = 1U;
-		} else {
-			error = bmsg_put_text(message, reader->bytes + at, character);
-		}
-
-		/* A text past the room is cut here. */
-		if (error != 0) {
-			message->truncated = 1;
-			break;
-		}
-
-		/* The next character, a line feed starting a line. */
-		line_start = 0;
-		if (reader->bytes[at] == '\n')
-			line_start = 1;
-		at += character;
+		/* The text ends with a NUL. */
+		message->text[message->text_length] = '\0';
 	}
 
-	/* The text ends with a NUL. */
-	message->text[message->text_length] = '\0';
+	/* Succeeded: the selected text body is UTF-8. */
+	return 0;
 }
 
 /* Adds a character to the message's text.  Returns 0, or ENOBUFS when it would pass the room. */

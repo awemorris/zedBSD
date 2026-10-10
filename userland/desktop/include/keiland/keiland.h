@@ -1735,6 +1735,9 @@ int kl_system_take_phone_event(struct kl_system *system, struct kl_phone_event *
  * so that a later version adds fields at their end.
  */
 #define KL_PHONE_MESSAGES		0U
+
+/* A message folder flag, combined with 0 inbox or 1 sent, for MMS text. */
+#define KL_PHONE_FOLDER_MMS		0x100U
 #define KL_PHONE_CONTACTS		1U
 #define KL_PHONE_CALLS			2U
 #define KL_PHONE_ITEMS			10U
@@ -1757,7 +1760,7 @@ int kl_system_take_phone_event(struct kl_system *system, struct kl_phone_event *
  * One message: the sync's request (0 for one that came by itself), what
  * (KL_PHONE_MESSAGES), its handle for kl_system_phone_mark_read (good for
  * the phone's session only: not to be kept), its key (16 hexadecimal
- * digits, the same across sessions, or "-"), its folder (0 inbox, 1 sent)
+ * digits, the same across sessions, or "-"), its folder (0 inbox, 1 sent, with KL_PHONE_FOLDER_MMS for MMS text)
  * and direction (0 in, 1 out), its time in UNIX seconds and where that
  * came from (0 the phone, 1 the phone's zone, 2 this computer's zone, 3
  * when it came), the phone's datetime as written, the other side's number

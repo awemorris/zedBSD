@@ -1473,6 +1473,14 @@ phone_message_fields(
 	item->folder = KL_BACKEND_PHONE_FOLDER_INBOX;
 	if (same == 0)
 		item->folder = KL_BACKEND_PHONE_FOLDER_SENT;
+
+	/* Carries the MMS text type through the existing message-only folder flag. */
+	(void)phone_field(line, "type=", value, sizeof(value));
+	same = strcmp(value, "mms");
+	if (same == 0)
+		item->folder |= KL_BACKEND_PHONE_FOLDER_MMS;
+
+	/* Reads the direction independently from the message type. */
 	(void)phone_field(line, "dir=", value, sizeof(value));
 	same = strcmp(value, "out");
 	item->direction = KL_BACKEND_PHONE_DIRECTION_IN;

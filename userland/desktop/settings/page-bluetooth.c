@@ -47,6 +47,7 @@
 #define BLUETOOTH_FORGET_FIRST	200
 #define BLUETOOTH_CONNECT_FIRST	300
 #define BLUETOOTH_PHONE_FIRST	400
+#define BLUETOOTH_CONTACTS_FIRST 500
 
 /* The desktop's setting of the phone's backend: none, and the paired phone (ws197-p004c). */
 #define BLUETOOTH_PHONE_SETTING		"phone.backend"
@@ -171,6 +172,17 @@ se_bluetooth_press(
 		/* Asked of the desktop. */
 		error = kl_system_bluetooth_power(app->system, on, &bluetooth->request);
 		bluetooth_asked(app, error, doing);
+		return;
+	}
+
+	/* Adds contacts explicitly for an existing messages-only phone. */
+	if (index >= BLUETOOTH_CONTACTS_FIRST) {
+		drawn = (size_t)(index - BLUETOOTH_CONTACTS_FIRST);
+		if (drawn >= bluetooth->drawn_count || bluetooth->phone_step != SE_PHONE_STEP_NONE)
+			return;
+		(void)snprintf(bluetooth->phone_address, sizeof(bluetooth->phone_address), "%s", bluetooth->drawn[drawn].address);
+		bluetooth->phone_on = 1;
+		bluetooth_phone_link(app);
 		return;
 	}
 
@@ -470,6 +482,7 @@ bluetooth_list(
 	size_t rows;
 	size_t drawn;
 	int phone_offered;
+	unsigned capabilities;
 	int connectable;
 	int hid_kind;
 	int enabled;
@@ -513,6 +526,7 @@ bluetooth_list(
 	/* Each device: its name, what it is and how it is, and its buttons. */
 	enabled = bluetooth->request == 0U && (state.flags & KL_BLUETOOTH_PAIRING) == 0U;
 	phone_offered = bluetooth_phone_available(app);
+	capabilities = kl_system_capabilities(app->system);
 	connectable = (state.features & KL_BLUETOOTH_CAN_CONNECT) != 0U && state.state == KL_BLUETOOTH_ON;
 	for (index = 0; index < count; index++) {
 		device = &devices[index];
@@ -561,6 +575,7 @@ bluetooth_list(
 			if (phone_offered && device->kind == KL_BLUETOOTH_KIND_PHONE && device->type == KL_BLUETOOTH_BREDR) {
 				button = se_button_width(app, "Use as phone");
 				(void)se_button_draw(app, canvas, right - button, y + 10, "Use as phone", 0, enabled, BLUETOOTH_PHONE_FIRST + (int)drawn);
+				right -= button + 10;
 			}
 		} else {
 			button = se_button_width(app, "Remove");
@@ -583,7 +598,13 @@ bluetooth_list(
 			if (phone_offered && (used || device->kind == KL_BLUETOOTH_KIND_PHONE) && device->type == KL_BLUETOOTH_BREDR) {
 				button = se_button_width(app, label);
 				(void)se_button_draw(app, canvas, right - button, y + 10, label, 0, enabled && bluetooth->phone_step == SE_PHONE_STEP_NONE,
-				    BLUETOOTH_PHONE_FIRST + (int)drawn);
+						     BLUETOOTH_PHONE_FIRST + (int)drawn);
+				right -= button + 10;
+				/* Existing phones acquire contacts only through this explicit action. */
+				if ((capabilities & KL_SYSTEM_HAS_PHONE_CONTACTS) != 0U && used && bluetooth->phone_link.enabled && (bluetooth->phone_link.profiles & KL_PHONE_PROFILE_CONTACTS) == 0U) {
+					button = se_button_width(app, "Also use contacts");
+					(void)se_button_draw(app, canvas, right - button, y + 10, "Also use contacts", 0, enabled && bluetooth->phone_step == SE_PHONE_STEP_NONE, BLUETOOTH_CONTACTS_FIRST + (int)drawn);
+				}
 			}
 		}
 
@@ -836,13 +857,24 @@ bluetooth_phone_link(
 	struct se_app *app)
 {
 	struct se_bluetooth *bluetooth;
+	unsigned profiles;
+	unsigned capabilities;
 	int error;
 
 	/* Asked of the desktop. */
 	bluetooth = &app->bluetooth;
 	bluetooth->phone_step = SE_PHONE_STEP_LINK;
-	error = kl_system_phone_link_set(app->system, bluetooth->phone_address, (unsigned)bluetooth->phone_on, KL_PHONE_PROFILE_MESSAGES,
-	    &bluetooth->phone_request);
+	profiles = bluetooth->phone_link.profiles;
+	capabilities = kl_system_capabilities(app->system);
+	if (bluetooth->phone_on) {
+		profiles |= KL_PHONE_PROFILE_MESSAGES;
+		if ((capabilities & KL_SYSTEM_HAS_PHONE_CONTACTS) != 0U)
+			profiles |= KL_PHONE_PROFILE_CONTACTS;
+	}
+
+	/* Sends the requested profiles through the compositor interface. */
+	error = kl_system_phone_link_set(app->system, bluetooth->phone_address, (unsigned)bluetooth->phone_on, profiles,
+					 &bluetooth->phone_request);
 	se_log("BLUETOOTH phone-switch on=%d error=%d", bluetooth->phone_on, error);
 	app->dirty = 1;
 	if (error == 0)
@@ -924,6 +956,19 @@ bluetooth_phone_words(
 	same = strcmp(link->why, "not-owner");
 	if (same == 0)
 		return "Another account's phone";
+
+	/* Contacts permission and connection status belong to the same phone row. */
+	if ((link->profiles & KL_PHONE_PROFILE_CONTACTS) != 0U) {
+		same = strcmp(link->contacts_why, "permission");
+		if (same == 0)
+			return "Allow access to contacts on the phone";
+		if (link->contacts == BLUETOOTH_MESSAGES_CONNECTING)
+			return "Contacts connecting...";
+		if (link->contacts == BLUETOOTH_MESSAGES_READY)
+			return "Contacts connected";
+		if (link->contacts == BLUETOOTH_MESSAGES_FAILED)
+			return "Contacts not available";
+	}
 
 	/* Each state of its messages. */
 	switch (link->messages) {

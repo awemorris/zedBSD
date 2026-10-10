@@ -17,11 +17,12 @@ for test in "bt-phone-host-test userland/base/bluetoothd/rfcomm.c" \
 	"bt-outq-host-test userland/base/bluetoothd/outq.c" \
 	"bt-phoneio-host-test userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/mapxml.c" \
 	"bt-mapxml-host-test userland/base/bluetoothd/mapxml.c" \
-	"bt-bmsg-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mapxml.c" \
+	"bt-mms-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/mapxml.c" \
+	"bt-bmsg-host-test userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/mapxml.c" \
 	"bt-vcard-host-test userland/base/bluetoothd/vcard.c userland/base/bluetoothd/mapxml.c" \
 	"bt-phonemux-host-test userland/base/bluetoothd/phonemux.c" \
 	"bt-pbap-host-test userland/base/bluetoothd/pbap.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/vcard.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
-	"bt-map-host-test userland/base/bluetoothd/map.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
+	"bt-map-host-test userland/base/bluetoothd/map.c userland/base/bluetoothd/obex.c userland/base/bluetoothd/mapxml.c userland/base/bluetoothd/bmsg.c userland/base/bluetoothd/mms.c userland/base/bluetoothd/phoneio.c userland/base/bluetoothd/sdp.c" \
 	"bt-obex-host-test userland/base/bluetoothd/obex.c" \
 	"bt-sdp-host-test userland/base/bluetoothd/sdps.c userland/base/bluetoothd/sdp.c" \
 	"bt-l2cap-move-host-test userland/base/bluetoothd/l2cap.c" \
