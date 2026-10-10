@@ -2,7 +2,7 @@
 
 # ws202-p015: H.264 の frame_num の gap・MMCO 5・seek の後の DPB
 
-Status: in-progress
+Status: uncleared（software実装/対象host・buildの証拠あり、whole条件は未達）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 4 LW
@@ -52,4 +52,12 @@ gap/MMCO5のscopeは維持。conformanceの取得/利用条件は未確認のた
 
 ## H.264規格照合の設計補正（2026-10-10）
 
-Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](../h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p015`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+全sliceのP/B initial/modified active-prefix refsを計算、inferred/non-existing entryをGPUに渡さずmissingをdrop、MMCO5前後POC/historyとseek epochを分離。手計算/ref admissionのhostはPASS。本物のmissing-packet/conformance pixelsは未確認、ASO/redundantは明示拒否の未対応。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。

@@ -2,7 +2,7 @@
 
 # ws202-p010: Vulkan Video の back end (2) 表示順・seek・失敗・表、media-probe の video、5330 の小さい確認
 
-Status: in-progress
+Status: uncleared（software実装/対象host・buildの証拠あり、whole条件は未達）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
@@ -53,3 +53,11 @@ p009 の back end を再生に使える形に仕上げて表の先頭に入れ�
 ## 構造改訂と部分結果（2026-10-10）
 
 POC/seekを維持し、表はnative backendだけ。app fallbackはここへ入れない。device不在はエラー。media-probeはapp fallbackなしで自前経路の証拠にし、標準readback未実装ならclearしない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p010`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+native H.264 backend/reorder/cttsなしclock消費・空entry、in-band configuration/seek reset、native-only media-probeを実装。2session/seek/probeのEOF参照消費はhost stand-in確認。image config/build/実機入力は準備済み。actual hardware decodeはT1待ち。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。

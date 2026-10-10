@@ -43,3 +43,7 @@ Outcome: cleared（部分scope）。whole Phaseはuncleared、実機のdecode/re
 - `git diff --check`: PASS。compiler: clang23.1.0（project）、GCC14.2.0（host）。libvulkan.so SHA-256 `ad3124f928dd240495687eeae7490a0f1c8fef77c1a2011b87ce03c7c7ac6cec`。
 
 残件: Q1の統合、p009 native Vulkan runtimeから標準copyを呼ぶ実装、5330実decode後のlinear NV12 hash照合。physical acceptanceが届いた時に同Phaseのwholeを再評価。QEMU/実機は実装sessionで起動しない。Master/共有Queue/Guardrail/他WS/GitHubはQ1の投影待ち。
+
+## Native再生softwareへ接続（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-readback`。p009/p010のproduction Vulkan backendが標準NV12 plane readbackを使うようになり、libmedia/probe/appとkernel全体のnamed build/link/post-link checksがPASS。[最終software結果](../playback-result-20261010.md)、[source commit/patch](../handoff-20261010.md)、[実機hash依頼](../t1-playback-request-20261010.md)。i03の部分clearedとwhole uncleared（実機pixel未確認）を保持。main第4版p016のref-listとown p016のreadbackは別の記録であり、Q1のmapping解消まで片方を上書きしない。

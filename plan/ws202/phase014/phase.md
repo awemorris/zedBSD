@@ -43,3 +43,7 @@ WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文�
 ## 構造改訂と部分結果（2026-10-10）
 
 native-only library、app共有adapter/FFmpeg移管、必要なdriver/readback補完と新table生成器を全文レビュー対象に追加。規格数値と外部codeを区別する。共有Tool/Guardrail投影はQ1へ。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## i11のsoftware source確認（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p014`。最新の自走承認に含まれるi11で、現在のnative/app/probe/driver差分の全文規約review、対象host/sanitizer、named build/ELF/diff確認を実施した。[対象とbaseline・実command・残件](../playback-result-20261010.md)。無関係な旧codeの一括整形やUAT後の全WS整理を先行していない。whole p014はplanned（beta3）を保持。最終UAT後の再validationと共有Tool/Master登録、既存runner移管追従はQ1へpending。新runner/sourceは未完WSから参照し、不要な開発資材の削除はQ1へ。

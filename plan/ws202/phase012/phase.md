@@ -59,3 +59,7 @@ A・B・C の全項目が PASS（または Q1 がユーザーと決めた例外�
 ## 構造改訂と部分結果（2026-10-10）
 
 native-only media-probe、app fallback有り/無し、HE-AAC拒否、未対応GPU拒否を分ける。5330は今回の確認環境であってlibmediaの機種制限ではない。p016の実機readback証拠も必要。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## 2026-10-10: 最初のnative再生確認依頼を準備
+
+[Q1/T1依頼](../t1-playback-request-20261010.md)にsource-owned固定素材・image構成/コピー・実probeのvideo/audio CLI・window操作・未達whole matrixを保存。先頭の旧手順にあるaudioの`--expect`/2段native/過去build入力は採らず、最新依頼を使う。未投入・未実施のためplannedを保持する。Q1のmain source統合後にT1が実行、実機結果を実装へ戻す。

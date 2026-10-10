@@ -2,7 +2,7 @@
 
 # ws202-p005: AAC の構文と表
 
-Status: in-progress（i05 入力metadata/Huffman部分はcleared、wholeは未完）
+Status: uncleared（software実装/対象host・buildの証拠あり、whole条件は未達）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
@@ -73,3 +73,11 @@ i05の具体partial scopeをclearedとして終了。[source/設計の具体化�
 ## 2026-10-10 自走実装の進捗
 
 ユーザーの動画プレイヤで再生可能になるまで自走する指示により、[codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)を継続中。旧degraded/LC-core-only/FFmpeg-library-backendの手順は適用しない。[AACの実PCM・共通音声の途中証拠](../aac-native-progress-20261010.md)を保存。whole Phaseのclearanceではなく、app/H.264/end_us/seek等の未完criteriaを保持する。独立sourceのみ変更、Master/共有Queue/他担当投影はQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p005`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+raw_data_block/ICS/tool構文、band/TNS数値表、atomic FIL SBR拒否を実装。旧i05未実装残件のうちraw parser/暗黙SBRは解消。CCE/gain controlは明示拒否。PCE全metadataは既存入力試験、全multichannel PCM/TSan/CRC検算matrixは未達。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。

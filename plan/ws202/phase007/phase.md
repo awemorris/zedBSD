@@ -2,7 +2,7 @@
 
 # ws202-p007: Music を libavcodec なしで
 
-Status: in-progress
+Status: uncleared（software実装/対象host・buildの証拠あり、whole条件は未達）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 3 LW
@@ -43,3 +43,11 @@ QEMU の確認は p012（T1）。
 ## 構造改訂と部分結果（2026-10-10）
 
 Musicはnative-firstをappの共通adapterで行い、非対応の場合だけapp所有のFFmpeg adapterをdlopenする。libraryのmedia_codec_loadへの起動依存を除く。曲ごとのbackend/notice/seek/寿命を区別する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p007`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+Musicをapp native-first adapterへ変更、native codec/backend log・notice・seek preroll/trim・read/drain failureを実装。buildとadapterの実host混在再生を確認。共有AAT追従はproposal、QEMU Music/耳でのUATは未実施。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。

@@ -1,0 +1,87 @@
+--- a/plan/tools/aat/scenarios/helpers_music.py
++++ b/plan/tools/aat/scenarios/helpers_music.py
+@@ -76,15 +76,13 @@
+ 		window = run.launch(item, "Music")
+ 		library = run.wait(r"MUSIC LIBRARY songs=\d+ error=\d+", mark, 10)
+ 		audio = run.wait(r"MUSIC AUDIO error=\d+", mark, 5)
+-		codec = run.wait(r"MUSIC CODEC load error=\d+", mark, 5)
+ 		glass = run.wait(r"MUSIC GLASS see_through=\d", mark, 5)
+ 		cover = run.wait(r"MUSIC COVER album=0 error=-?\d+", mark, 5)
+-		item.step("opened", f"{library}; {audio}; {codec}; {glass}; {cover}")
++		item.step("opened", f"{library}; {audio}; {glass}; {cover}")
+ 		run.shot(item, "library")
+ 		item.check(library and library.endswith("songs=2 error=0"), "the two songs are not in the list")
+ 		item.check(audio and audio.endswith("error=0"), "no sound (audiod): on QEMU the guest needs a sound device, "
+ 			"--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'")
+-		item.check(codec and "error=0" in codec, "libavcodec did not load")
+ 		item.check(cover and cover.endswith("error=0"), "the album's cover was not read from its file and made (ws177-p020)")
+ 		gap = 8 if glass and glass.endswith("=1") else 0
+ 		share = min(max(int(window.width * 0.28), 220), 300)
+@@ -93,6 +91,7 @@
+ 		run.click(window.x + share + gap + 216, window.y + 135)
+ 		played = run.wait(r"MUSIC PLAY song=0 error=0", mark, 10)
+ 		opened = run.wait(r"MUSIC PLAY open codec=\S+", mark, 5)
++		item.check(opened and "backend=libmedia" in opened, "AAC-LC did not use the native media decoder")
+ 		time.sleep(3.5)
+ 		positions = run.lines(r"MUSIC POSITION song=0 ms=\d+", mark)
+ 		furthest = max((int(re.search(r"ms=(\d+)", line).group(1)) for line in positions), default=0)
+--- a/tests/scenarios/apps/music/play.md
++++ b/tests/scenarios/apps/music/play.md
+@@ -3,23 +3,23 @@
+ title: Music で ~/Music の m4a を再生し、次の曲・一時停止・曲の終わりを確かめる
+ status: active
+ areas: [music, audio]
+-paths: [userland/desktop/music/, userland/desktop/libmedia/avcodec.c, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
++paths: [userland/desktop/music/, userland/desktop/libmedia/aac.c, userland/desktop/media-app/, userland/desktop/videoplayer/audio.c, userland/desktop/mediafile/]
+ machine: either
+ human: look
+ since: ws120
+ ---
+ 
+ ## 目的
+-`~/Music` の m4a（AAC）が album ごとに一覧に出て、libavcodec の add-in で decode され libkeiland の音の stream（compositor から audiod、WS191）で鳴り（再生の位置が進む）、次の曲・一時停止・再開・曲の終わり（最後の曲の後で止まる）が動くことを確かめる（WS120 p008・p009）。音そのものは耳で聞かない（QEMU）。
++`~/Music` の m4a（AAC）が album ごとに一覧に出て、libmedia の自前 AAC-LC で decode され libkeiland の音の stream（compositor から audiod、WS191）で鳴り（再生の位置が進む）、次の曲・一時停止・再開・曲の終わり（最後の曲の後で止まる）が動くことを確かめる（WS120 p008・p009）。音そのものは耳で聞かない（QEMU）。
+ 
+ ## 準備
+-host の ffmpeg で 8 秒の正弦波の m4a を 2 つ作る（440 Hz と 660 Hz、AAC、題 Tone A・Tone B、artist AAT、album AAT Tones、番号 1・2、Tone A に PNG の cover）。kei の `~/Music/AAT/` に置く。image に libavcodec の package と audiod。QEMU では音の device が要る（無いと stream が `ENODEV` で開かず、`MUSIC AUDIO error=` が 0 でない。T1-301 の頃は audiod の直の client だった）: `plan/tools/guest/guest.sh start` に `--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'`。
++host の ffmpeg で 8 秒の正弦波の m4a を 2 つ作る（440 Hz と 660 Hz、AAC、題 Tone A・Tone B、artist AAT、album AAT Tones、番号 1・2、Tone A に PNG の cover）。kei の `~/Music/AAT/` に置く。image に libmedia と audiod。AAC-LC では libavcodec の package は不要。QEMU では音の device が要る（無いと stream が `ENODEV` で開かず、`MUSIC AUDIO error=` が 0 でない。T1-301 の頃は audiod の直の client だった）: `plan/tools/guest/guest.sh start` に `--qemu-extra '-audiodev none,id=snd0 -device intel-hda -device hda-duplex,audiodev=snd0'`。
+ 
+ ## 操作と確認
+ 1. 操作: App Home から Music を開く。
+-   確認事項: 一覧。正解: `MUSIC LIBRARY songs=2 error=0`、`MUSIC AUDIO error=0`、`MUSIC CODEC load error=0`、`MUSIC COVER album=0 error=0`（cover は初めて描く時に file から読む、ws177-p020）、左に All Songs と AAT Tones（cover）。確認方法: log、撮影。
++   確認事項: 一覧。正解: `MUSIC LIBRARY songs=2 error=0`、`MUSIC AUDIO error=0`、`MUSIC COVER album=0 error=0`（cover は初めて描く時に file から読む、ws177-p020）、左に All Songs と AAT Tones（cover）。確認方法: log、撮影。
+ 2. 操作: 右の上の Play。
+-   確認事項: 再生。正解: `MUSIC PLAY song=0 error=0`、`MUSIC PLAY open codec=aac`、3 秒ほどで `MUSIC POSITION song=0 ms=` が 2000 以上、下の bar に Tone A と cover・位置。確認方法: log、撮影。
++   確認事項: 再生。正解: `MUSIC PLAY song=0 error=0`、`MUSIC PLAY open codec=aac-lc backend=libmedia`、3 秒ほどで `MUSIC POSITION song=0 ms=` が 2000 以上、下の bar に Tone A と cover・位置。確認方法: log、撮影。
+ 3. 操作: 下の bar の次（▶▶|）。
+    確認事項: 次の曲。正解: `MUSIC PLAY song=1 error=0`。確認方法: log。
+ 4. 操作: Space、続けてもう一度 Space。
+--- a/tests/scenarios/apps/videoplayer/play.md
++++ b/tests/scenarios/apps/videoplayer/play.md
+@@ -2,22 +2,22 @@
+ id: apps.videoplayer.play
+ title: Video Player で MP4 を再生・一時停止・送り・終わりまで
+ status: active
+-areas: [videoplayer, libavcodec, audiod]
+-paths: [userland/desktop/videoplayer/, userland/desktop/mediafile/, userland/packages/multimedia/libavcodec/]
++areas: [videoplayer, libmedia, libavcodec, audiod]
++paths: [userland/desktop/videoplayer/, userland/desktop/mediafile/, userland/desktop/libmedia/, userland/desktop/media-app/, userland/packages/multimedia/libavcodec/]
+ machine: either
+ human: look
+ since: ws122
+ ---
+ 
+ ## 目的
+-FFmpeg の libavcodec を使う video player が MP4（MPEG-4 の映像と AAC の音）を開いて再生し、操作が効くことを確かめる。
++Video Player が app の任意 libavcodec による MPEG-4 Part 2 の映像と、libmedia 自前 AAC-LC の音の MP4を開いて再生し、操作が効くことを確かめる。
+ 
+ ## 準備
+ host で作った 12 秒・640x360・音つきの `sample.mp4` を target の `/tmp/aat-samples/` に置く（`plan/tools/aat/scenarios/samples.py`）。kei で `videoplayer /tmp/aat-samples/sample.mp4` を開く。
+ 
+ ## 操作と確認
+ 1. 操作: 開くのを待つ。
+-   確認事項: 開き。正解: `VIDEOPLAYER OPEN path=/tmp/aat-samples/sample.mp4 width=640 height=360 duration_ms=約12000 video=… audio=…`、`VIDEOPLAYER PLAY`。確認方法: log。
++   確認事項: 開き。正解: `VIDEOPLAYER OPEN path=/tmp/aat-samples/sample.mp4 width=640 height=360 duration_ms=約12000 video=mpeg4/libavcodec audio=aac-lc/libmedia`、`VIDEOPLAYER PLAY`。確認方法: log。
+ 2. 操作: 1 秒後に撮る。
+    確認事項: 再生。正解: `VIDEOPLAYER FRAMES shown=N` の N が増える、絵が動く。確認方法: log、撮影 2 枚（人が見る）。
+ 3. 操作: Space、Space。

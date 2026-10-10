@@ -2,7 +2,7 @@
 
 # ws202-p009: Vulkan Video の back end (1) device・session・decode・読み出し
 
-Status: in-progress
+Status: uncleared（software実装/対象host・buildの証拠あり、whole条件は未達）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 7 LW
@@ -66,4 +66,12 @@ Vulkan queryで選び、機種名/i915の固定判定をしない。Tile Yをlib
 
 ## H.264規格照合の設計補正（2026-10-10）
 
-Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](../h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。
+
+## Native再生software結果（2026-10-10）
+
+Event: `ws202-native-playback-software-20261010-p009`。Queue: [codex-ws202-playback](../policy-20261010.md#自走の実行承認-codex-ws202-playback)。
+
+標準能力/level/complete usage照会、COINCIDE/DISTINCT resources、2queue semaphore/barrier/fence、HOST_VISIBLE readback、retirement-aware cleanupを実装。標準command stand-inの契約を確認しallocation/query errno伝播を改善。実機GPU pixels/loader経路/退役は未確認。
+
+[最終source/command/結果・限界](../playback-result-20261010.md)、[Q1統合](../handoff-20261010.md)、[T1の準備済み依頼](../t1-playback-request-20261010.md)。旧第2版の手順・昔のpartial outcomeを保存し、最新記録が未実装記述の現在状態を置換する。whole criteriaを満たしたとは扱わず、Q1の意味の統合と未実施matrix/実機結果が再開条件。main/共有投影/GitHubの更新はQ1 pending。
