@@ -3,14 +3,14 @@
 # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（p004〜p007 sourceはmain統合済み、p008のRPi4選択config buildはcleared）
+Status: incomplete（p004〜p008 sourceはmain統合済み、p009 Graphical loginの限定source/image criteriaはcleared）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex RPi4 build](codex-rpi4-build-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+Queue: [Codex USB/sessiond](../ws048/codex-usb-session-queue.md) finished。旧build/arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p008の具体的成果のmain統合承認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p009の具体的成果のmain統合承認と実機desktop確認、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -77,7 +77,8 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 | [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
 | [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、c2b97e953 main統合済み） | p005 source |
 | [p007](phase007/phase.md) | Driversを指定位置へ追加、機能別階層と全CPU共通bool選択/保存 | cleared（限定source/host、a1c65db6a main統合済み） | p006 source |
-| [p008](phase008/phase.md) | 選択したRPi4 configのrootfs/desktopビルドルール補完 | cleared（選択config/image build、main統合待ち） | p005〜p007 main source |
+| [p009](phase009/phase.md) | RPi4 Graphical loginをfirmware command lineへ渡す | cleared（source/option/image、実機desktop未確認） | 現在main/config |
+| [p008](phase008/phase.md) | 選択したRPi4 configのrootfs/desktopビルドルール補完 | cleared（df1d2be26 main統合済み） | p005〜p007 main source |
 
 ## 2026-10-10 RPi4 UAT前のarm64選択修正
 
@@ -109,3 +110,9 @@ userがBoot OptionとDevelopmentの間へのDrivers追加、全CPU共通選択�
 userが現在config.mkでmake -j16時のlibbrowser.soルール不足を報告し修正を依頼。p008と独立有限Queueを追加。共通の選択registryに対して不足したarm64 link/配置ルールを補う。main ad9d2f6d3でp007 source a1c65db6aの統合を再確認。shared投影/GitHubはQ1へ保留。
 
 p008 cleared: 保存した現在configの通常make -j16がライブラリ/全選択app/static preview/Noct/kernel/外部package/rootfs/SD imageまで完了、check-disk-image PASS。amd64のportable source/link/check recipeは共通化前と逆置換で全文一致、変更の最終規則review PASS。[証拠](tests/rpi4-build-20261011.md)。外部package既存warningと共有toolchain固定は明記、実機/boot未実施。p008の具体的commit統合承認を確認し、WS全体p003/受入は未完のまま。共有Master/Queue/Past LogとGitHub投影はQ1 pending、pushなし。
+
+## 2026-10-11 USB / Graphical login限定修正
+
+ユーザーの指示で[p009](phase009/phase.md)と[独立Queue](../ws048/codex-usb-session-queue.md)を追加。USB入力と選択済みclassのglue、Graphical loginのfirmware command lineを補う。ロゴ/kernel animationは明示延期。過去の実機未確認・WS全体の受入は保持。共有投影/GitHubはQ1 pending。
+
+p009 cleared: login=graphical/consoleをSD FATへ収録し、設定y→n→y時のimage再生成/readbackと不変時mtimeを確認。full selected-config build/check-disk-image、sessiond/greeter/account収録、最終差分規則review PASS。[証拠](../ws048/tests/rpi4-usb-session-20261011.md)。実機greeter/desktopは未実施でWS全体はincomplete。共有投影/GitHubはQ1 pending。

@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws048-p008 -->
 # WS048 p008: RPi4起動時PCIe register readの同期例外
 
-Status: uncleared（source/host/build完了、実機の再起動結果待ち）
+Status: cleared（2026-10-11ユーザー実機: VC4初期化・login到達）
 Disposition: normal
 Parent: [WS048](../ws.md)
 Queue: [Codex RPi4 boot](../codex-pcie-boot-queue.md)
@@ -50,3 +50,8 @@ Specific source commit main integration also awaits user approval. Resume: integ
 build user's image, user boots RPi4 and confirms boot progresses beyond PCIe/USB; if it fails, retain new
 photo/ELF/config and diagnose that evidence. No further source scope/Queue auto-started.
 Shared Master/Queue/history/bug projection and GitHub publication remain Q1 pending; no push.
+
+## Physical follow-up / 2026-10-11
+
+User first reported「v4cは初期化されたよ」and then「停止していないです。USBのカーネルメッセージは出ず、ログインまで行きました。」after approved main integration fbcb2b543. This satisfies p008's narrowly scoped boot-progress criterion: the former first PCIe register exception no longer prevents login. p008 is cleared by this user observation; the historical original attempt remains uncleared at its end time.
+This does not prove USB input or desktop function. The new USB/Graphical login request is recorded in [p009](../phase009/phase.md), with source/build/physical acceptance kept distinct. Shared projections/publication pending Q1.

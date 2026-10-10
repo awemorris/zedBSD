@@ -23,6 +23,13 @@
 #include <drivers/usb/usb.h>
 #include <drivers/usb/usb-hid.h>
 #include <drivers/usb/usb-hub.h>
+#include <drivers/usb/usb-storage.h>
+#include <drivers/usb/usb-uas.h>
+#include <drivers/usb/usb-cdc-ncm.h>
+#include <drivers/usb/usb-cdc-ecm.h>
+#include <drivers/usb/usb-ccid.h>
+#include <drivers/usb/usb-bt.h>
+#include <drivers/usb/usb-rtl8822bu.h>
 #include <kern/clock.h>
 #include <kern/kcrt.h>
 #include <kern/klog.h>
@@ -203,6 +210,55 @@ register_usb_drivers(
 		kern_logf("usb: core initialization failed (%d)\n", error);
 		return;
 	}
+
+	/* Registers bulk-only USB disks. */
+#if CONFIG_DRIVER_USB_STORAGE
+	error = drv_usb_storage_driver_register();
+	if (error != 0)
+		kern_logf("usb: storage registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB Attached SCSI disks. */
+#if CONFIG_DRIVER_USB_STORAGE
+	error = drv_usb_uas_driver_register();
+	if (error != 0)
+		kern_logf("usb: UAS registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB NCM network interfaces. */
+#if CONFIG_DRIVER_USB_CDC_NCM
+	error = drv_usb_cdc_ncm_driver_register();
+	if (error != 0)
+		kern_logf("usb: CDC NCM registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB ECM network interfaces. */
+#if CONFIG_DRIVER_USB_CDC_ECM
+	error = drv_usb_cdc_ecm_driver_register();
+	if (error != 0)
+		kern_logf("usb: CDC ECM registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB smart card readers. */
+#if CONFIG_DRIVER_USB_CCID
+	error = drv_usb_ccid_driver_register();
+	if (error != 0)
+		kern_logf("usb: CCID registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB Bluetooth controllers. */
+#if CONFIG_DRIVER_USB_BT
+	error = drv_usb_bt_driver_register();
+	if (error != 0)
+		kern_logf("usb: Bluetooth registration failed (%d)\n", error);
+#endif
+
+	/* Registers USB wireless network adapters. */
+#if CONFIG_DRIVER_USB_RTL8822BU
+	error = drv_usb_rtl8822bu_driver_register();
+	if (error != 0)
+		kern_logf("usb: RTL8822BU registration failed (%d)\n", error);
+#endif
 
 	/* Registers the keyboard and mouse driver. */
 #if CONFIG_DRIVER_USB_HID

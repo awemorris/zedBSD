@@ -85,6 +85,8 @@ def check(args: argparse.Namespace) -> None:
     same_file(args.image, "data.img", args.data_image)
     same_file(args.image, "swapfile", args.swapfile)
     same_file(args.image, "config.txt", args.config)
+    if args.cmdline is not None:
+        same_file(args.image, "cmdline.txt", args.cmdline)
     for name in ("start4.elf", "fixup4.dat", "bcm2711-rpi-4-b.dtb",
                  "overlays/disable-bt.dtbo", "LICENCE.broadcom"):
         if not extract(args.image, name):
@@ -112,6 +114,7 @@ def main() -> None:
     parser.add_argument("--data-image", type=Path, required=True)
     parser.add_argument("--swapfile", type=Path, required=True)
     parser.add_argument("--config", type=Path, required=True)
+    parser.add_argument("--cmdline", type=Path)
     parser.add_argument("image", type=Path)
     check(parser.parse_args())
 

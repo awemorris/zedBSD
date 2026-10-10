@@ -85,7 +85,7 @@ ARM64_KERNEL_SOURCES := \
 	src/kern/init.c
 # USB behind the Pi 4's PCIe (ws048): the core comes with any USB driver.
 ARM64_USB_SOURCES :=
-ifneq ($(filter y,$(CONFIG_DRIVER_PCI_XHCI) $(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_USB_HUB)),)
+ifneq ($(filter y,$(CONFIG_DRIVER_PCI_XHCI) $(CONFIG_DRIVER_USB_HID) $(CONFIG_DRIVER_USB_HUB) $(CONFIG_DRIVER_USB_STORAGE) $(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM) $(CONFIG_DRIVER_USB_CCID) $(CONFIG_DRIVER_USB_BT) $(CONFIG_DRIVER_USB_RTL8822BU)),)
 ARM64_USB_SOURCES += src/drivers/usb/usb.c
 endif
 ifeq ($(CONFIG_DRIVER_PCI_XHCI),y)
@@ -97,6 +97,31 @@ ARM64_USB_SOURCES += src/drivers/usb/usb-hid.c src/drivers/generic/hidraw.c src/
 endif
 ifeq ($(CONFIG_DRIVER_USB_HUB),y)
 ARM64_USB_SOURCES += src/drivers/usb/usb-hub.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_STORAGE),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-storage.c src/drivers/usb/usb-uas.c \
+	src/drivers/usb/usb-uas-transport.c src/drivers/usb/usb-uas-disk.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_NCM),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-cdc-ncm.c src/drivers/usb/usb-cdc-ncm-net.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_CDC_ECM),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-cdc-ecm.c
+endif
+ifneq ($(filter y,$(CONFIG_DRIVER_USB_CDC_NCM) $(CONFIG_DRIVER_USB_CDC_ECM)),)
+ARM64_USB_SOURCES += src/drivers/usb/usb-cdc-notification.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_CCID),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-ccid.c src/drivers/usb/usb-ccid-proto.c \
+	src/drivers/generic/smartcard.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_BT),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-bt.c src/drivers/generic/bt-hci.c \
+	src/drivers/generic/bt-hci-proto.c
+endif
+ifeq ($(CONFIG_DRIVER_USB_RTL8822BU),y)
+ARM64_USB_SOURCES += src/drivers/usb/usb-rtl8822bu.c \
+	src/drivers/wifi/rtl8822b/rtl8822b.c src/drivers/wifi/rtl8822b/rtl8822b-security.c
 endif
 ARM64_KERNEL_SOURCES += $(ARM64_USB_SOURCES)
 # The BCM2711 graphics driver (ws141): the display path and V3D.
@@ -564,17 +589,29 @@ $(BUILD)/ufs-root.img: $(AARCH64_ARCH_UFS_IMAGE) \
 	$(PYTHON) tools/build/make-ufs-root-image.py --force \
  --arch-profile aarch64 --arch-image $(AARCH64_ARCH_UFS_IMAGE) $@
 
+# Firmware forwards this one-line file through /chosen/bootargs.  sessiond
+# reads login= through kern.boot.login, independently of splash/quiet boot.
+# Recheck the value on every invocation; retain the mtime when unchanged so
+# toggling the option in either direction rebuilds only the necessary image.
+.PHONY: rpi4-boot-command-line
+rpi4-boot-command-line:
+
+$(BUILD)/cmdline.txt: rpi4-boot-command-line
+	@mkdir -p $(dir $@)
+	@printf '%s\n' login=$(if $(filter y,$(ZEDBSD_GRAPHICAL_LOGIN)),graphical,console) > $@.tmp
+	@if cmp -s $@.tmp $@; then rm -f $@.tmp; else mv -f $@.tmp $@; fi
+
 # The SD card: a FAT boot partition with the firmware and the kernel, and
 # the UFS root that the kernel's legacy autoroot finds beside it.
 $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/ufs-root.img \
-	$(DATA_IMAGE) $(SWAP_IMAGE) $(ARM64_PLATFORM)/config.txt \
+	$(DATA_IMAGE) $(SWAP_IMAGE) $(ARM64_PLATFORM)/config.txt $(BUILD)/cmdline.txt \
 	platform/arm64/tools/make-rpi4-ufs-root-hdd-image.py \
 	platform/arm64/tools/make-rpi4-hdd-image.py \
 	platform/arm64/tools/check-rpi4-hdd-image.py tools/build/check-ufs-image.py
 	$(PYTHON) platform/arm64/tools/make-rpi4-ufs-root-hdd-image.py --force \
  --kernel $(BUILD)/vmunix --ufs-root $(BUILD)/ufs-root.img \
  --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) \
- --config $(ARM64_PLATFORM)/config.txt \
+ --config $(ARM64_PLATFORM)/config.txt --cmdline $(BUILD)/cmdline.txt \
  --firmware-dir vendor/raspberrypi-firmware/boot $@
 
 $(BUILD)/kernel.elf: $(ARM64_VMUNIX_OBJS) $(ARM64_PLATFORM)/vmunix.ld \

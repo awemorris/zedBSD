@@ -19,6 +19,9 @@
 #include <kern/partition.h>
 #include <kern/platform.h>
 #include <kern/boot.h>
+#if CONFIG_DRIVER_USB_HID
+#include <drivers/usb/usb-hid.h>
+#endif
 #include "drivers/platform/rpi4/rpi4-console.h"
 #include "drivers/platform/rpi4/rpi4-pcie.h"
 #include "drivers/platform/rpi4/rpi4-sdhci.h"
@@ -139,19 +142,26 @@ kern_platform_refresh_devices(
 }
 
 /*
- * Initializes platform input: the serial port feeds the console.
+ * Enables USB input and the serial console after the input core is ready.
  */
 int
 kern_platform_input_init(
 	void)
 {
-	int function_result;
+	int error;
 
-	/* Starts reading the serial port. */
-	function_result = drv_rpi4_console_start_input();
+#if CONFIG_DRIVER_USB_HID
+	/* Activates pending HID devices after the console claims event0. */
+	drv_usb_hid_input_ready();
+#endif
 
-	/* Returns the computed result. */
-	return function_result;
+	/* Starts the serial reader alongside USB keyboards and mice. */
+	error = drv_rpi4_console_start_input();
+	if (error != 0)
+		return error;
+
+	/* Succeeded: platform input is available to the console and desktop. */
+	return 0;
 }
 
 /*

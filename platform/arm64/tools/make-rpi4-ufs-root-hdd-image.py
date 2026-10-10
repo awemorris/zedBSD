@@ -31,8 +31,9 @@ def build(args: argparse.Namespace) -> None:
         temporary.unlink()
         base=Path(__file__).with_name('make-rpi4-hdd-image.py')
         arch=[] if args.arch_image is None else ['--arch-image',str(args.arch_image)]
+        cmdline=[] if args.cmdline is None else ['--cmdline',str(args.cmdline)]
         run('python3',str(base),'--force','--kernel',str(args.kernel),
-            *arch,'--data-image',str(args.data_image),
+            *arch,*cmdline,'--data-image',str(args.data_image),
             '--swapfile',str(args.swapfile),'--config',str(args.config),
             '--firmware-dir',str(args.firmware_dir),str(temporary))
         blocks=args.ufs_root.stat().st_size//SECTOR
@@ -60,6 +61,7 @@ def main() -> None:
     parser.add_argument('--swapfile',type=Path,required=True)
     parser.add_argument('--ufs-root',type=Path,required=True)
     parser.add_argument('--config',type=Path,required=True)
+    parser.add_argument('--cmdline',type=Path)
     parser.add_argument('--firmware-dir',type=Path,required=True)
     parser.add_argument('--force',action='store_true')
     parser.add_argument('output',type=Path)
