@@ -21,3 +21,7 @@ Scope: [p005](phase005/phase.md) 第3.1版の i06/i07 残り、最終全文規�
 p005 i06/i07はhost・named build warning0・最終変更source全文規約でcleared。新規受信はMMS除外と末尾CRLFの2点を修正、ユーザーが「ゴミは消え、日本語も受信できました」と実機確認してcleared。結果は[p005](phase005/phase.md)・[p004](phase004/phase.md)・[WS197](ws.md)へ記録。WS197全体はincomplete、次Phaseの自動開始はしない。
 
 WS199はユーザー受け入れでcompleted/local closed、[完了証拠](../ws199/ws.md)に記録。remote issueが存在せずGitHub closeは行わない。Q1への未反映事項: master/共有Queue/Past Logの結果投影、WS197旧p003/current headerの履歴整理、WS199 completed投影とPhase/固有testの整理。共有記録と外部sessionの削除境界を守り、master/Queueは変更しない。既存方針によりGitHub公開は保留。
+
+## main統合確認（2026-10-10）
+
+実装/検証/完了記録のsource commit `6bca6f2a2`をmainへmerge `bee41dded`で統合した。merge前のmain `5e178dd17`のbeta2.md更新を保持。master/共有Queueは未変更、push/公開は行わない。変更sourceは検証したprivate treeと同一。Q1向けの残り投影/整理は既述どおり。

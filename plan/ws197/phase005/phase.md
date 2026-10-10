@@ -461,3 +461,7 @@ make -j8 BUILD=build/ws197 ZEDBSD_CONFIG=config/current-uat.mk \
  build/ws197/bin/bluetoothd build/ws197/bin/phone build/ws197/bin/settings \
  build/ws197/dynamic/libkeiland.so build/ws197/bin/wayland
 ```
+
+## main統合確認（2026-10-10）
+
+実装/検証/完了記録のsource commit `6bca6f2a2`をmainへmerge `bee41dded`で統合した。merge前のmain `5e178dd17`のbeta2.md更新を保持。master/共有Queueは未変更、push/公開は行わない。変更sourceは検証したprivate treeと同一。Q1向けの残り投影/整理は既述どおり。

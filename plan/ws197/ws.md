@@ -93,3 +93,7 @@ bt-loopback-p002・bt-daemon-p003（SHOW・BONDS）・bt-pair-p004 は PASS。**
 ## 2026-10-10 Codex 完了報告
 
 p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/Linux named buildを検証、p005をclearedとする（詳細/コマンド/限界は[p005結果](phase005/phase.md)）。新規受信はスマホがMMSとして通知していたためSMSフィルタで落ちていた。ユーザー承認のMMSテキスト抽出・履歴/通知/保存/表示を追加し、さらにCRLFを正規化、Phoneの本文と一覧previewでは改行コードを描画しない。修正版bluetoothdを実機へ更新後、ユーザーが「ゴミは消え、日本語も受信できました」と確認。p004のMMSテキスト追加と受信修正はcleared、添付画像/動画は対象外。WS全体はHFP・実機PBAP UAT・最終WS conformanceが残るためincomplete。master/共有Queueの投影とWS199のcompleted整理はQ1に引き継ぐ。
+
+## main統合確認（2026-10-10）
+
+実装/検証/完了記録のsource commit `6bca6f2a2`をmainへmerge `bee41dded`で統合した。merge前のmain `5e178dd17`のbeta2.md更新を保持。master/共有Queueは未変更、push/公開は行わない。変更sourceは検証したprivate treeと同一。Q1向けの残り投影/整理は既述どおり。
