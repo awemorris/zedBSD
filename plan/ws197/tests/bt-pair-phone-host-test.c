@@ -29,7 +29,9 @@
  *              no phone=
  *   keys       a phone's pairing refuses a stored key, Just Works or
  *              authenticated (Negative Reply, ws197-p003 N2); an ordinary
- *              pairing takes the stored key as before
+ *              pairing takes the stored key as before; the same uid's
+ *              bond of this run (BTD_PAIR_PHONE_OWN, BUG-287) gives its
+ *              authenticated key but not a Just Works one
  *   le         a phone's pairing of an LE address is refused (EINVAL)
  *
  *   plan/ws197/tests/bt-phone-host-test.sh KEYS_FOLDER
@@ -1038,6 +1040,24 @@ test_keys(void)
 	run_to_key(&world, 1);
 	check(commands_of(&world, TEST_KEY_NEGATIVE) == 1U, "keys: a phone's pairing refuses a stored authenticated key too");
 	check(commands_of(&world, TEST_KEY_REPLY) == 0U, "keys: the authenticated key not given");
+	btd_pair_stop(&world.pair, "test");
+	close_world(&world);
+
+	/* The same uid's bond of this run (BTD_PAIR_PHONE_OWN, BUG-287): its authenticated key is given, the phone is not asked to pair again. */
+	open_world(&world);
+	run_to_key(&world, BTD_PAIR_PHONE_OWN);
+	check(commands_of(&world, TEST_KEY_REPLY) == 1U, "keys: the own bond's authenticated key is given");
+	check(commands_of(&world, TEST_KEY_NEGATIVE) == 0U, "keys: no Negative Reply for the own bond");
+	check(world.pair.phone == 1 && world.pair.phone_own == 1, "keys: the pairing is a phone's, of the own bond");
+	btd_pair_stop(&world.pair, "test");
+	close_world(&world);
+
+	/* The own bond's Just Works key is still not taken. */
+	store_key(TEST_KEY_JUST_WORKS);
+	open_world(&world);
+	run_to_key(&world, BTD_PAIR_PHONE_OWN);
+	check(commands_of(&world, TEST_KEY_NEGATIVE) == 1U, "keys: the own bond's Just Works key is refused");
+	check(commands_of(&world, TEST_KEY_REPLY) == 0U, "keys: the own bond's Just Works key not given");
 	btd_pair_stop(&world.pair, "test");
 	close_world(&world);
 	forget_key();

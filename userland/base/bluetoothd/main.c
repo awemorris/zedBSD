@@ -119,6 +119,9 @@
 
 /* How often the seat's user is looked at again for the phone link (ws197-p003 section 3.3). */
 #define BTD_SEAT_CHECK_MS	5000U
+
+/* How many bonds of this run the daemon remembers the maker of (BUG-287). */
+#define BTD_OWN_BONDS		8U
 #define BTD_ADMIN_GROUP		"wheel"
 #define BTD_GROUPS_MAX		64
 
@@ -150,6 +153,13 @@ struct btd_client {
 	int subscribed;
 	int sub_dropped;
 	uint8_t connect_address[BTD_ADDRESS_BYTES];
+};
+
+/* A BR/EDR bond made in this run with an authenticated key: the slot in use, its address, the uid whose PAIR made it. */
+struct btd_own_bond {
+	int used;
+	uint8_t address[BTD_ADDRESS_BYTES];
+	uid_t uid;
 };
 
 static void btd_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
@@ -198,6 +208,9 @@ static int btd_arguments(int argc, char **argv);
 static void btd_system_open(void);
 static void btd_system_events(void);
 static void btd_seat_check(uint64_t now);
+static void btd_own_bond_keep(const uint8_t *address, uid_t uid);
+static int btd_own_bond_find(const uint8_t *address, uid_t uid);
+static void btd_own_bond_forget(const uint8_t *address);
 static int btd_parse_device(const char *text, uint8_t *address, unsigned *type);
 static int btd_parse_pair(const char *text, uint8_t *address, unsigned *type, int *phone);
 static void btd_write(struct btd_client *client, const char *format, ...) __attribute__((format(printf, 2, 3)));
@@ -357,6 +370,16 @@ static uint64_t btd_reappear_ms;
  * daemon's life.
  */
 static uint64_t btd_seat_check_at;
+
+/*
+ * The BR/EDR bonds made with an authenticated key in this run, and the uid
+ * whose PAIR made each (BUG-287): a phone's pairing of such a bond by the
+ * same uid uses its stored key instead of asking the phone to pair again.
+ * Forgotten with the bond; the oldest makes room.  Kept for the daemon's
+ * life only.
+ */
+static struct btd_own_bond btd_own_bonds[BTD_OWN_BONDS];
+static unsigned btd_own_next;
 
 /*
  * Whether the user turned Bluetooth off (POWER off, ws143-p006): the
@@ -1709,6 +1732,7 @@ btd_pair(
 	int seated;
 	int phone;
 	int busy;
+	int own;
 	int error;
 
 	/* Only those D8 permits. */
@@ -1768,6 +1792,14 @@ btd_pair(
 
 	/* A HID device of that address (open or waiting) lets go first: the pairing makes it anew (review B7). */
 	btd_hid_release(&btd_hid_host, address, type);
+
+	/* A phone whose bond the same uid made in this run keeps its key (BUG-287). */
+	if (phone) {
+		phone = BTD_PAIR_PHONE;
+		own = btd_own_bond_find(address, client->uid);
+		if (own)
+			phone = BTD_PAIR_PHONE_OWN;
+	}
 
 	/* The client waits for the end (which may come at once). */
 	btd_pair_client = index;
@@ -1907,6 +1939,10 @@ btd_forget(
 	/* A HID device's record goes too; a connected one hears the unplug (BR/EDR) and is disconnected (design section 6.3). */
 	btd_hid_forget(&btd_hid_host, address, type);
 
+	/* The bond is nobody's any more (BUG-287). */
+	if (type == BTD_ADDRESS_BREDR)
+		btd_own_bond_forget(address);
+
 	/* Succeeded: forgotten. */
 	btd_log("bluetoothd: forgot %s\n", argument);
 	btd_write(client, "DONE\n");
@@ -2029,12 +2065,24 @@ btd_paired(
 	const char *answer)
 {
 	const char *taken;
+	int failed;
+	int paired;
 	int index;
 
 	UNUSED_PARAMETER(context);
 
-	/* Logged; a phone taken without a known Class of Device says so (ws197-p002 section 7.4). */
-	btd_log("bluetoothd: pairing: %s\n", answer);
+	/* Logged, a failure with what failed it (BUG-287); a phone taken without a known Class of Device says so (ws197-p002 section 7.4). */
+	failed = strncmp(answer, "ERROR", 5U);
+	if (failed == 0 && btd_pairing.fail_event != NULL) {
+		btd_log("bluetoothd: pairing: %s (%s, status 0x%02x)\n", answer, btd_pairing.fail_event, btd_pairing.fail_status);
+	} else {
+		btd_log("bluetoothd: pairing: %s\n", answer);
+	}
+
+	/* A new authenticated BR/EDR bond is its uid's for a phone's pairing later in this run (BUG-287). */
+	paired = strncmp(answer, "PAIRED", 6U);
+	if (paired == 0 && btd_pairing.type == BTD_ADDRESS_BREDR && btd_pairing.new_authenticated)
+		btd_own_bond_keep(btd_pairing.address, btd_pairing.uid);
 	taken = strstr(answer, " phone=1");
 	if (taken != NULL && btd_phone_link.class_unknown)
 		btd_log("bluetoothd: phone: cod=unknown\n");
@@ -3040,6 +3088,79 @@ btd_seat_check(
 
 	/* Succeeded: the seat's user. */
 	btd_phone_set_seat(&btd_phone_link, 1, status.st_uid, now);
+}
+
+/* Keeps that a uid's PAIR made the BR/EDR bond of an address with an authenticated key (BUG-287); the oldest makes room. */
+static void
+btd_own_bond_keep(
+	const uint8_t *address,
+	uid_t uid)
+{
+	unsigned index;
+	unsigned look;
+	int found;
+	int same;
+
+	/* The address's entry there already. */
+	found = 0;
+	index = 0U;
+	for (look = 0U; look < BTD_OWN_BONDS; look++) {
+		same = memcmp(btd_own_bonds[look].address, address, BTD_ADDRESS_BYTES);
+		if (btd_own_bonds[look].used && same == 0) {
+			index = look;
+			found = 1;
+			break;
+		}
+	}
+
+	/* Else the next one, the oldest. */
+	if (!found) {
+		index = btd_own_next;
+		btd_own_next = (btd_own_next + 1U) % BTD_OWN_BONDS;
+	}
+
+	/* Succeeded: kept. */
+	btd_own_bonds[index].used = 1;
+	memcpy(btd_own_bonds[index].address, address, BTD_ADDRESS_BYTES);
+	btd_own_bonds[index].uid = uid;
+}
+
+/* Tells whether the uid's PAIR made the address's BR/EDR bond in this run (BUG-287). */
+static int
+btd_own_bond_find(
+	const uint8_t *address,
+	uid_t uid)
+{
+	unsigned index;
+	int same;
+
+	/* Each entry. */
+	for (index = 0U; index < BTD_OWN_BONDS; index++) {
+		if (!btd_own_bonds[index].used || btd_own_bonds[index].uid != uid)
+			continue;
+		same = memcmp(btd_own_bonds[index].address, address, BTD_ADDRESS_BYTES);
+		if (same == 0)
+			return 1;
+	}
+
+	/* None. */
+	return 0;
+}
+
+/* Forgets who made the address's BR/EDR bond (the bond is forgotten, BUG-287). */
+static void
+btd_own_bond_forget(
+	const uint8_t *address)
+{
+	unsigned index;
+	int same;
+
+	/* Each entry of the address. */
+	for (index = 0U; index < BTD_OWN_BONDS; index++) {
+		same = memcmp(btd_own_bonds[index].address, address, BTD_ADDRESS_BYTES);
+		if (same == 0)
+			memset(&btd_own_bonds[index], 0, sizeof(btd_own_bonds[index]));
+	}
 }
 
 /*

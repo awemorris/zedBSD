@@ -24,7 +24,10 @@
  * transfer is not submitted again until the packet and the rest of the
  * bytes are taken: the controller then holds what it has (the endpoint
  * NAKs), and nothing is dropped.  A read makes room and the class's room
- * call wakes the worker to try again.
+ * call wakes the worker to try again.  A transfer that stalls or fails on
+ * the bus leaves its endpoint halted: the halt is cleared (on the device
+ * and in the host controller) and the transfer submitted again, until the
+ * same pipe fails USB_BT_ERRORS_MAX times in a row.
  *
  * The reset (BT_IOC_RESET) pauses the worker, cancels and drains the
  * transfers, resets the USB device in place, and starts the transfers
@@ -786,6 +789,29 @@ usb_bt_finish(
 	case DRV_USB_URB_DISCONNECTED:
 		/* The controller is gone; the detach follows. */
 		usb_bt_give_up(bt, pipe, "transfer", (int)status);
+		break;
+	case DRV_USB_URB_IO_ERROR:
+		/*
+		 * A transaction error halts the endpoint in the host controller,
+		 * which takes no transfer until the endpoint is reset (BUG-287:
+		 * one error stopped every ACL packet).  It is cleared as a stall
+		 * is, up to the same limit.
+		 */
+		pipe->errors++;
+		if (pipe->errors >= USB_BT_ERRORS_MAX) {
+			usb_bt_give_up(bt, pipe, "transfer", (int)status);
+			break;
+		}
+
+		/* The endpoint cleared on both sides, and submitted again. */
+		error = drv_usb_endpoint_clear_halt(pipe->endpoint);
+		if (error != 0) {
+			usb_bt_give_up(bt, pipe, "clear halt", error);
+			break;
+		}
+
+		/* Logged: the pipe goes on. */
+		kern_logf("usb-bt: %s: the %s pipe went on after a transfer error (%u in a row)\n", bt->name, pipe->name, pipe->errors);
 		break;
 	default:
 		/* A failed transfer is tried again, up to a limit. */
