@@ -44,6 +44,13 @@
  * too little to take one (kwl_emit's ENOBUFS), it is owed, in order, and
  * sent again once there is room; meanwhile the items for that client are
  * dropped (a page's done then says NO_ROOM, a dropped is owed).
+ *
+ * Since version 28 (ws197-p005, plan/ws197/phase005/phase.md section 6.3)
+ * a sync also reads the phone's contacts and its calls (the paired
+ * phone's PBAP; the loopback has none), each item says what it is, and
+ * each link is preceded by link_contacts: the contacts' state and whether
+ * the phone's record is known, which tells the phone program when to
+ * forget its copy of the phone's contacts.
  */
 
 #include "kwl.h"
@@ -74,7 +81,7 @@
 /* The longest item event: nine words, five strings with their lengths, and the text's array with its length. */
 #define PHONE_ITEM_MAX		(9U * 4U + 5U * 4U + KL_SYSTEM_PHONE_HANDLE_MAX + KL_SYSTEM_PHONE_KEY_MAX + KL_SYSTEM_PHONE_DATETIME_MAX + 2U * KL_SYSTEM_PHONE_PEER_MAX + 4U + KL_SYSTEM_PHONE_ITEM_TEXT_MAX + 16U)
 
-/* The longest event owed: the link's nine words and two strings with their lengths. */
+/* The longest event owed: the link's nine words and two strings with their lengths (link_contacts, sent with it, is shorter). */
 #define PHONE_OWED_BYTES	(9U * 4U + 4U + KL_SYSTEM_PHONE_ADDRESS_MAX + 4U + KL_SYSTEM_PHONE_WHY_MAX + 8U)
 
 /* The program the messages go to (its window's app_id), its name on a notification, the setting that lets it notify, and how it is started at a conversation. */
@@ -137,7 +144,12 @@ struct phone_backend {
 	void (*mark_read)(struct kwl_object *object, uint32_t request, const char *handle);
 };
 
-/* The link's state as the link event carries it. */
+/*
+ * The link's state as the link event carries it, and the contacts' part
+ * that link_contacts carries before it (ws197-p005): the contacts' state,
+ * whether the phone's record is known (0 not known, 1 none, 2 one), and
+ * why the contacts stopped.
+ */
 struct phone_link_event {
 	uint32_t backend;
 	uint32_t linked;
@@ -150,6 +162,9 @@ struct phone_link_event {
 	uint32_t present;
 	char address[KL_SYSTEM_PHONE_ADDRESS_MAX];
 	char why[KL_SYSTEM_PHONE_WHY_MAX];
+	uint32_t contacts;
+	uint32_t record;
+	char contacts_why[KL_SYSTEM_PHONE_WHY_MAX];
 };
 
 /* One event owed to a client: its kind, the request and its code (a done), the page's end, or the link. */
@@ -450,8 +465,8 @@ kwl_phone_tick(
 		if (state.reachable && !phone_state.state.reachable)
 			phone_forget_texts();
 		phone_state.state = state;
-		printf("KWL PHONE state reachable=%u subscribed=%u linked=%u messages=%u why=%s\n", state.reachable, state.subscribed, state.linked, state.messages,
-		    state.why);
+		printf("KWL PHONE state reachable=%u subscribed=%u linked=%u messages=%u why=%s contacts=%u contacts_why=%s record=%u/%u\n", state.reachable,
+		    state.subscribed, state.linked, state.messages, state.why, state.contacts, state.contacts_why, state.record_known, state.have_record);
 		phone_links();
 	}
 
@@ -731,11 +746,17 @@ phone_sync(
 	}
 
 	/* A page the backend takes. */
-	if (page.what != KL_SYSTEM_PHONE_MESSAGES ||
+	if (page.what > KL_SYSTEM_PHONE_CALLS ||
 	    page.since < 0 ||
 	    page.limit > 500U ||
 	    page.count == 0U ||
 	    page.count > 32U) {
+		phone_done(object, request, KL_SYSTEM_RESULT_INVALID);
+		return 0;
+	}
+
+	/* The contacts and the calls are asked of objects of version 28. */
+	if (page.what != KL_SYSTEM_PHONE_MESSAGES && object->version < KL_SYSTEM_SINCE_PHONE_CONTACTS) {
 		phone_done(object, request, KL_SYSTEM_RESULT_INVALID);
 		return 0;
 	}
@@ -977,7 +998,7 @@ phone_loopback_call(
 	phone_status(object, request, KL_SYSTEM_PHONE_NO_ANSWER);
 }
 
-/* The loopback backend's page: two messages of the tests (one received, one sent back), and no more. */
+/* The loopback backend's page: two messages of the tests (one received, one sent back), and no more; no contacts and no calls. */
 static void
 phone_loopback_sync(
 	struct kwl_object *object,
@@ -988,7 +1009,13 @@ phone_loopback_sync(
 	struct kl_backend_phone_result end;
 	int64_t now;
 
-	UNUSED_PARAMETER(page);
+	/* No contacts and no calls: an empty page. */
+	memset(&end, 0, sizeof(end));
+	if (page->what != KL_SYSTEM_PHONE_MESSAGES) {
+		phone_page_end(object, request, &end);
+		phone_done(object, request, KL_SYSTEM_RESULT_OK);
+		return;
+	}
 
 	/* The message received a minute ago. */
 	now = (int64_t)time(NULL);
@@ -1017,7 +1044,6 @@ phone_loopback_sync(
 	(void)phone_item(object, request, &item);
 
 	/* The page's end and the answer. */
-	memset(&end, 0, sizeof(end));
 	end.count = 2U;
 	phone_page_end(object, request, &end);
 	phone_done(object, request, KL_SYSTEM_RESULT_OK);
@@ -1646,6 +1672,17 @@ phone_emit_owed(
 		error = kwl_emit(object->client, object->id, KL_SYSTEM_PHONE_EVENT_PAGE_END, payload, length);
 		break;
 	case PHONE_OWED_LINK:
+		/* The contacts' part first, to an object of version 28 (a link is sent again whole with it). */
+		if (object->version >= KL_SYSTEM_SINCE_PHONE_CONTACTS) {
+			length = phone_put_word(payload, 0U, owed->link.contacts);
+			length = phone_put_word(payload, length, owed->link.record);
+			length = phone_put_string(payload, length, owed->link.contacts_why);
+			error = kwl_emit(object->client, object->id, KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS, payload, length);
+			if (error != 0)
+				break;
+		}
+
+		/* The link. */
 		length = phone_put_word(payload, 0U, owed->link.backend);
 		length = phone_put_word(payload, length, owed->link.linked);
 		length = phone_put_word(payload, length, owed->link.messages);
@@ -1676,9 +1713,9 @@ phone_emit_owed(
 
 /*
  * Fills the link's state as an object hears it: the setting's backend,
- * the paired phone's state (the loopback's is always ready), or why it
- * does not work; refused is 1 for a program that is not the phone program
- * (why "not-phone").
+ * the paired phone's state (the loopback's is always ready, with no
+ * contacts and no record known), or why it does not work; refused is 1
+ * for a program that is not the phone program (why "not-phone").
  */
 static void
 phone_link_fill(
@@ -1722,6 +1759,25 @@ phone_link_fill(
 	link->present = state->present;
 	(void)snprintf(link->address, sizeof(link->address), "%s", state->address);
 	(void)snprintf(link->why, sizeof(link->why), "%s", state->why);
+
+	/* The contacts. */
+	link->contacts = state->contacts;
+	(void)snprintf(link->contacts_why, sizeof(link->contacts_why), "%s", state->contacts_why);
+
+	/*
+	 * Whether the phone's record is known, whatever the setting (Stop
+	 * using as phone sets it to none, and the phone program must still
+	 * see that the record is off, ws197-p005 review-3 R1): not known while
+	 * bluetoothd does not answer or before it said (R2), then none or one.
+	 */
+	link->record = 2U;
+	if (!state->reachable) {
+		link->record = 0U;
+	} else if (!state->record_known) {
+		link->record = 0U;
+	} else if (!state->have_record) {
+		link->record = 1U;
+	}
 
 	/* No backend chosen, and nothing else to say. */
 	if (link->why[0] == '\0' && phone_state.setting == KL_SYSTEM_PHONE_BACKEND_NONE)
@@ -1814,7 +1870,7 @@ phone_item(
 
 	/* The words and the strings in their order. */
 	length = phone_put_word(payload, 0U, request);
-	length = phone_put_word(payload, length, KL_SYSTEM_PHONE_MESSAGES);
+	length = phone_put_word(payload, length, item->what);
 	length = phone_put_string(payload, length, item->handle);
 	length = phone_put_string(payload, length, item->key);
 	length = phone_put_word(payload, length, item->folder);

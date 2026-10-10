@@ -901,8 +901,15 @@ struct kl_backend_phone;
 #define KL_BACKEND_PHONE_PROFILE_CONTACTS	2U
 #define KL_BACKEND_PHONE_PROFILE_CALLS		4U
 
-/* What a page asks for (the contacts and the calls come with PBAP and HFP). */
+/* What a page asks for: the messages (MAP), the phone's contacts and its calls' history (PBAP, ws197-p005). */
 #define KL_BACKEND_PHONE_WHAT_MESSAGES		0U
+#define KL_BACKEND_PHONE_WHAT_CONTACTS		1U
+#define KL_BACKEND_PHONE_WHAT_CALLS		2U
+
+/* A call's kind, in a call's item's folder. */
+#define KL_BACKEND_PHONE_CALL_RECEIVED		0U
+#define KL_BACKEND_PHONE_CALL_DIALED		1U
+#define KL_BACKEND_PHONE_CALL_MISSED		2U
 
 /* An item's folder, direction and where its time came from. */
 #define KL_BACKEND_PHONE_FOLDER_INBOX		0U
@@ -936,6 +943,12 @@ struct kl_backend_phone;
  * messages are told, whether the owner is at the seat, the phone's switch
  * and its profiles (KL_BACKEND_PHONE_PROFILE_*), the phone's address, and
  * why the link or the messages stopped (a word of section 3.5, or empty).
+ *
+ * ws197-p005: the contacts' state (PBAP, the values of the messages'),
+ * why they stopped (a word, or empty), and whether have_record is known:
+ * record_known is 0 while bluetoothd does not answer and from the moment
+ * it answers again until SHOW or the events have said whether there is a
+ * record (have_record 0 then means no more than "not read yet").
  */
 struct kl_backend_phone_state {
 	unsigned reachable;
@@ -950,18 +963,32 @@ struct kl_backend_phone_state {
 	unsigned profiles;
 	char address[KL_BACKEND_BT_ADDRESS_MAX];
 	char why[KL_BACKEND_BT_REASON_MAX];
+	unsigned contacts;
+	unsigned record_known;
+	char contacts_why[KL_BACKEND_BT_REASON_MAX];
 };
 
 /*
- * One message: the page's id (0 for one that came by itself), its handle
- * for kl_backend_phone_read (good for the phone's session only), its key
- * (16 hexadecimal digits, the same across sessions, or "-" when it has
- * none), folder, direction, time (UNIX seconds) and where that came from,
- * the phone's datetime as written, the other side's number and name,
- * whether it is read, has no key, or was cut, and its text (UTF-8 ended
- * by a NUL, in the backend's buffer until the next take).
+ * One item of what a page asks for (KL_BACKEND_PHONE_WHAT_*), and the
+ * page's id (0 for a message that came by itself).
+ *
+ * A message: its handle for kl_backend_phone_read (good for the phone's
+ * session only), its key (16 hexadecimal digits, the same across
+ * sessions, or "-" when it has none), folder, direction, time (UNIX
+ * seconds) and where that came from, the phone's datetime as written, the
+ * other side's number and name, whether it is read, has no key, or was
+ * cut, and its text (UTF-8 ended by a NUL, in the backend's buffer until
+ * the next take).
+ *
+ * A contact (ws197-p005): its key, how many numbers it has (folder), its
+ * first number (peer), its name, and its reduced vCard 3.0 as the text.
+ * A call: its key, its kind (folder, KL_BACKEND_PHONE_CALL_*), out for a
+ * call dialed (direction), its time and where that came from (phone,
+ * local, or received when the phone gave none: partial), the phone's
+ * datetime, the number and the name, and no text.
  */
 struct kl_backend_phone_item {
+	unsigned what;
 	uint32_t id;
 	char handle[KL_BACKEND_PHONE_HANDLE_MAX];
 	char key[KL_BACKEND_PHONE_KEY_MAX];
@@ -982,8 +1009,10 @@ struct kl_backend_phone_item {
 /*
  * A request's result: its id, its errno value (section 3.5), and for a
  * page where the next starts, whether more follow, how many items came,
- * how many were skipped and whether a folder's limit stopped it; for a
- * text sent, bluetoothd's number for its later states.
+ * how many were skipped and capped's bits (1 a limit stopped it; for the
+ * contacts, ws197-p005: 2 the phone's count changed while it was read, 4
+ * a card did not end, so the count is not to be trusted); for a text
+ * sent, bluetoothd's number for its later states.
  */
 struct kl_backend_phone_result {
 	uint32_t id;
@@ -1010,10 +1039,11 @@ void kl_backend_phone_get_state(const struct kl_backend_phone *phone, struct kl_
 
 /*
  * Asks a page of the synchronisation: what (KL_BACKEND_PHONE_WHAT_*), the
- * messages since a time, at most limit a folder (0: all), from a cursor
- * (empty: the start), count items (1 to KL_BACKEND_PHONE_PAGE_MAX).  The
- * items come numbered *id, then the result.  Returns 0, ENOTCONN without
- * bluetoothd, ENOTSUP, EINVAL, or EBUSY when too many wait.
+ * messages or calls since a time (not for the contacts), at most limit a
+ * folder (the messages only, 0: all), from a cursor (empty: the start),
+ * count items (1 to KL_BACKEND_PHONE_PAGE_MAX).  The items come numbered
+ * *id, then the result.  Returns 0, ENOTCONN without bluetoothd, ENOTSUP,
+ * EINVAL, or EBUSY when too many wait.
  */
 int kl_backend_phone_page(struct kl_backend_phone *phone, unsigned what, int64_t since, unsigned limit, const char *cursor, unsigned count, uint32_t *id);
 
@@ -1023,7 +1053,7 @@ int kl_backend_phone_read(struct kl_backend_phone *phone, const char *handle, ui
 /* Sends a text (1 to KL_BACKEND_PHONE_SEND_MAX bytes, no NUL) to a number ([0-9+*#], 1 to 32).  Returns as kl_backend_phone_page. */
 int kl_backend_phone_send(struct kl_backend_phone *phone, const char *to, const uint8_t *text, size_t length, uint32_t *id);
 
-/* Turns the phone's switch and its profiles (KL_BACKEND_PHONE_PROFILE_*) on or off.  Returns as kl_backend_phone_page. */
+/* Turns the phone's switch on with its profiles (KL_BACKEND_PHONE_PROFILE_*), or off keeping them.  Returns as kl_backend_phone_page. */
 int kl_backend_phone_link_set(struct kl_backend_phone *phone, const char *address, unsigned on, unsigned profiles, uint32_t *id);
 
 /* Takes the oldest item.  Returns 1 with one, 0 when none waits. */

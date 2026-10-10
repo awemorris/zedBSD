@@ -7,7 +7,10 @@
 
 /*
  * The phone on zedBSD (ws197-p004a, plan/ws197/phase004/phase.md section
- * 5): bluetoothd's PHONE lines on /run/bluetoothd.sock.
+ * 5): bluetoothd's PHONE lines on /run/bluetoothd.sock.  ws197-p005
+ * (plan/ws197/phase005/phase.md section 6.2) adds the pages of the
+ * phone's contacts and calls (PHONE CONTACT with its reduced vCard, PHONE
+ * CALL-LOG with no text) and the contacts' state.
  *
  * Three connections, none waited for:
  *
@@ -213,12 +216,18 @@ static void phone_line(struct kl_backend_phone *phone, struct phone_connection *
 static void phone_events_line(struct kl_backend_phone *phone, char *line);
 static void phone_answer_line(struct kl_backend_phone *phone, struct phone_connection *connection, char *line);
 static void phone_answer_done(struct kl_backend_phone *phone, struct phone_connection *connection);
-static int phone_message_line(struct kl_backend_phone *phone, struct phone_connection *connection, const char *line, uint32_t id);
+static int phone_item_line(struct kl_backend_phone *phone, struct phone_connection *connection, const char *line, uint32_t id, unsigned what);
+static void phone_message_fields(struct kl_backend_phone_item *item, const char *line);
+static void phone_contact_fields(struct kl_backend_phone_item *item, const char *line);
+static void phone_call_fields(struct kl_backend_phone_item *item, const char *line);
+static unsigned phone_zone(const char *line);
 static void phone_item_push(struct kl_backend_phone *phone, struct phone_connection *connection);
 static void phone_result_push(struct kl_backend_phone *phone, const struct kl_backend_phone_result *result);
 static void phone_sent_line(struct kl_backend_phone *phone, const char *line);
 static void phone_state_line(struct kl_backend_phone *phone, const char *line, unsigned whole);
 static void phone_state_why(struct kl_backend_phone *phone, const char *why);
+static void phone_contacts_line(struct kl_backend_phone *phone, const char *line);
+static void phone_contacts_clear(struct kl_backend_phone *phone);
 static void phone_events_start(struct kl_backend_phone *phone, uint64_t now);
 static void phone_show_due(struct kl_backend_phone *phone, uint64_t now);
 static int phone_field(const char *line, const char *name, char *value, size_t size);
@@ -379,8 +388,8 @@ kl_backend_phone_page(
 	if (phone == NULL || id == NULL || cursor == NULL)
 		return EINVAL;
 
-	/* The messages only (the contacts and the calls come later). */
-	if (what != KL_BACKEND_PHONE_WHAT_MESSAGES)
+	/* The messages, the contacts or the calls. */
+	if (what > KL_BACKEND_PHONE_WHAT_CALLS)
 		return EINVAL;
 
 	/* A time, a limit a folder and a count bluetoothd takes. */
@@ -398,8 +407,20 @@ kl_backend_phone_page(
 	if (!phone->state.reachable)
 		return ENOTCONN;
 
-	/* The line: the cursor only when there is one. */
-	if (cursor[0] != '\0') {
+	/*
+	 * The line: since for the messages and the calls, a limit for the
+	 * messages alone (bluetoothd refuses the others'), the cursor only
+	 * when there is one.
+	 */
+	if (what == KL_BACKEND_PHONE_WHAT_CONTACTS && cursor[0] != '\0') {
+		(void)snprintf(line, sizeof(line), "PHONE PAGE contacts cursor=%s count=%u\n", cursor, count);
+	} else if (what == KL_BACKEND_PHONE_WHAT_CONTACTS) {
+		(void)snprintf(line, sizeof(line), "PHONE PAGE contacts count=%u\n", count);
+	} else if (what == KL_BACKEND_PHONE_WHAT_CALLS && cursor[0] != '\0') {
+		(void)snprintf(line, sizeof(line), "PHONE PAGE calls since=%lld cursor=%s count=%u\n", (long long)since, cursor, count);
+	} else if (what == KL_BACKEND_PHONE_WHAT_CALLS) {
+		(void)snprintf(line, sizeof(line), "PHONE PAGE calls since=%lld count=%u\n", (long long)since, count);
+	} else if (cursor[0] != '\0') {
 		(void)snprintf(line, sizeof(line), "PHONE PAGE messages since=%lld limit=%u cursor=%s count=%u\n", (long long)since, limit, cursor, count);
 	} else {
 		(void)snprintf(line, sizeof(line), "PHONE PAGE messages since=%lld limit=%u count=%u\n", (long long)since, limit, count);
@@ -493,8 +514,9 @@ kl_backend_phone_send(
 }
 
 /*
- * Turns the phone's switch and its profiles on or off (bluetoothd's PHONE
- * LINK); the record is read again once it is answered.
+ * Turns the phone's switch on with its profiles, or off keeping them
+ * (bluetoothd's PHONE LINK); the record is read again once it is
+ * answered.
  */
 int
 kl_backend_phone_link_set(
@@ -539,11 +561,15 @@ kl_backend_phone_link_set(
 	if (used > 0U)
 		letters[used - 1U] = '\0';
 
-	/* Waits its turn on the requests' connection. */
+	/*
+	 * The line.  Off names no profiles: bluetoothd keeps the record's as
+	 * they are, where an empty profiles= would clear them (ws197-p005
+	 * review-3 minor 7).
+	 */
 	if (on) {
 		(void)snprintf(line, sizeof(line), "PHONE LINK %s on profiles=%s\n", address, letters);
 	} else {
-		(void)snprintf(line, sizeof(line), "PHONE LINK %s off profiles=%s\n", address, letters);
+		(void)snprintf(line, sizeof(line), "PHONE LINK %s off\n", address);
 	}
 
 	/* The line waits on the requests' connection. */
@@ -1197,7 +1223,7 @@ phone_events_line(
 	/* A message that came by itself (its text follows). */
 	same = strncmp(line, "PHONE MESSAGE ", 14U);
 	if (same == 0) {
-		(void)phone_message_line(phone, &phone->events, line, 0U);
+		(void)phone_item_line(phone, &phone->events, line, 0U, KL_BACKEND_PHONE_WHAT_MESSAGES);
 		return;
 	}
 
@@ -1219,8 +1245,9 @@ phone_events_line(
 }
 
 /*
- * Takes a line of an answer to a page or a request: the items, the page's
- * end, the text's number, the record (SHOW), the failure and the DONE.
+ * Takes a line of an answer to a page or a request: the items (messages,
+ * contacts and calls), the page's end, the text's number, the record
+ * (SHOW), the failure and the DONE.
  */
 static void
 phone_answer_line(
@@ -1254,7 +1281,21 @@ phone_answer_line(
 	/* One message of a page (its text follows). */
 	same = strncmp(line, "PHONE MESSAGE ", 14U);
 	if (same == 0) {
-		(void)phone_message_line(phone, connection, line, answer->id);
+		(void)phone_item_line(phone, connection, line, answer->id, KL_BACKEND_PHONE_WHAT_MESSAGES);
+		return;
+	}
+
+	/* One contact of a page (its reduced vCard follows). */
+	same = strncmp(line, "PHONE CONTACT ", 14U);
+	if (same == 0) {
+		(void)phone_item_line(phone, connection, line, answer->id, KL_BACKEND_PHONE_WHAT_CONTACTS);
+		return;
+	}
+
+	/* One call of a page (length=0: nothing follows). */
+	same = strncmp(line, "PHONE CALL-LOG ", 15U);
+	if (same == 0) {
+		(void)phone_item_line(phone, connection, line, answer->id, KL_BACKEND_PHONE_WHAT_CALLS);
 		return;
 	}
 
@@ -1309,8 +1350,17 @@ phone_answer_done(
 			phone->state.linked = 0U;
 			phone->state.messages = KL_BACKEND_PHONE_MESSAGES_OFF;
 			phone->state.address[0] = '\0';
+			phone_contacts_clear(phone);
 			phone_state_why(phone, "no-record");
 		}
+
+		/*
+		 * Whether there is a record is known once SHOW answered without
+		 * a failure (ws197-p005 review-3 R2): until then a record not
+		 * seen is not read as none, which would forget the phone's copy.
+		 */
+		if (connection->answer.error == 0)
+			phone->state.record_known = 1U;
 
 		/* Answered: the next may be written. */
 		phone_request_drop(connection);
@@ -1329,72 +1379,39 @@ phone_answer_done(
 }
 
 /*
- * Takes a PHONE MESSAGE line: the item's fields, then its text of length
- * bytes is read before the next line.  Returns 0, or EPROTO (no length,
- * or a text longer than bluetoothd sends) or ENOMEM, the connection then
- * being made again.
+ * Takes a PHONE MESSAGE, PHONE CONTACT or PHONE CALL-LOG line (what says
+ * which): the item's fields, then its text of length bytes is read before
+ * the next line.  Returns 0, or EPROTO (no length, or a text longer than
+ * bluetoothd sends) or ENOMEM, the connection then being made again.
  */
 static int
-phone_message_line(
+phone_item_line(
 	struct kl_backend_phone *phone,
 	struct phone_connection *connection,
 	const char *line,
-	uint32_t id)
+	uint32_t id,
+	unsigned what)
 {
 	struct kl_backend_phone_item *item;
 	char value[KL_BACKEND_PHONE_PEER_MAX];
 	unsigned long length;
 	char *end;
-	int same;
 	int found;
 
 	/* The item, numbered by its page (0 for one that came by itself). */
 	item = &connection->text_item;
 	memset(item, 0, sizeof(*item));
+	item->what = what;
 	item->id = id;
 
-	/* Its handle and key. */
-	(void)phone_field(line, "handle=", item->handle, sizeof(item->handle));
-	(void)phone_field(line, "key=", item->key, sizeof(item->key));
-
-	/* The folder and the direction. */
-	(void)phone_field(line, "folder=", value, sizeof(value));
-	same = strcmp(value, "sent");
-	item->folder = KL_BACKEND_PHONE_FOLDER_INBOX;
-	if (same == 0)
-		item->folder = KL_BACKEND_PHONE_FOLDER_SENT;
-	(void)phone_field(line, "dir=", value, sizeof(value));
-	same = strcmp(value, "out");
-	item->direction = KL_BACKEND_PHONE_DIRECTION_IN;
-	if (same == 0)
-		item->direction = KL_BACKEND_PHONE_DIRECTION_OUT;
-
-	/* The time in UNIX seconds. */
-	(void)phone_field(line, "time=", value, sizeof(value));
-	item->time = (int64_t)strtoll(value, NULL, 10);
-
-	/* Where the time came from. */
-	(void)phone_field(line, "zone=", value, sizeof(value));
-	item->zone = KL_BACKEND_PHONE_ZONE_RECEIVED;
-	same = strcmp(value, "phone");
-	if (same == 0)
-		item->zone = KL_BACKEND_PHONE_ZONE_PHONE;
-	same = strcmp(value, "mse");
-	if (same == 0)
-		item->zone = KL_BACKEND_PHONE_ZONE_MSE;
-	same = strcmp(value, "local");
-	if (same == 0)
-		item->zone = KL_BACKEND_PHONE_ZONE_LOCAL;
-
-	/* The phone's datetime, the other side's number and name. */
-	(void)phone_field(line, "datetime=", item->datetime, sizeof(item->datetime));
-	(void)phone_field(line, "peer=", item->peer, sizeof(item->peer));
-	(void)phone_field(line, "name=", item->name, sizeof(item->name));
-
-	/* The flags. */
-	item->read = phone_field_number(line, "read=");
-	item->partial = phone_field_number(line, "partial=");
-	item->truncated = phone_field_number(line, "truncated=");
+	/* The fields of its kind. */
+	if (what == KL_BACKEND_PHONE_WHAT_CONTACTS) {
+		phone_contact_fields(item, line);
+	} else if (what == KL_BACKEND_PHONE_WHAT_CALLS) {
+		phone_call_fields(item, line);
+	} else {
+		phone_message_fields(item, line);
+	}
 
 	/* The text's length. */
 	found = phone_field(line, "length=", value, sizeof(value));
@@ -1435,6 +1452,143 @@ phone_message_line(
 	/* Succeeded: the text is read before the next line. */
 	connection->reading_text = 1U;
 	return 0;
+}
+
+/* Reads a PHONE MESSAGE line's fields into its item. */
+static void
+phone_message_fields(
+	struct kl_backend_phone_item *item,
+	const char *line)
+{
+	char value[KL_BACKEND_PHONE_PEER_MAX];
+	int same;
+
+	/* Its handle and key. */
+	(void)phone_field(line, "handle=", item->handle, sizeof(item->handle));
+	(void)phone_field(line, "key=", item->key, sizeof(item->key));
+
+	/* The folder and the direction. */
+	(void)phone_field(line, "folder=", value, sizeof(value));
+	same = strcmp(value, "sent");
+	item->folder = KL_BACKEND_PHONE_FOLDER_INBOX;
+	if (same == 0)
+		item->folder = KL_BACKEND_PHONE_FOLDER_SENT;
+	(void)phone_field(line, "dir=", value, sizeof(value));
+	same = strcmp(value, "out");
+	item->direction = KL_BACKEND_PHONE_DIRECTION_IN;
+	if (same == 0)
+		item->direction = KL_BACKEND_PHONE_DIRECTION_OUT;
+
+	/* The time in UNIX seconds, and where it came from. */
+	(void)phone_field(line, "time=", value, sizeof(value));
+	item->time = (int64_t)strtoll(value, NULL, 10);
+	item->zone = phone_zone(line);
+
+	/* The phone's datetime, the other side's number and name. */
+	(void)phone_field(line, "datetime=", item->datetime, sizeof(item->datetime));
+	(void)phone_field(line, "peer=", item->peer, sizeof(item->peer));
+	(void)phone_field(line, "name=", item->name, sizeof(item->name));
+
+	/* The flags. */
+	item->read = phone_field_number(line, "read=");
+	item->partial = phone_field_number(line, "partial=");
+	item->truncated = phone_field_number(line, "truncated=");
+}
+
+/* Reads a PHONE CONTACT line's fields into its item: the key, how many numbers (folder), the first number and the name. */
+static void
+phone_contact_fields(
+	struct kl_backend_phone_item *item,
+	const char *line)
+{
+	/* Its key and how many numbers it has. */
+	(void)phone_field(line, "key=", item->key, sizeof(item->key));
+	item->folder = phone_field_number(line, "tels=");
+
+	/* Its first number and its name. */
+	(void)phone_field(line, "peer=", item->peer, sizeof(item->peer));
+	(void)phone_field(line, "name=", item->name, sizeof(item->name));
+}
+
+/*
+ * Reads a PHONE CALL-LOG line's fields into its item: the key, the kind
+ * (folder) and whether it was dialed (direction), the time and where it
+ * came from (none: the time the line was made, partial), the phone's
+ * datetime, the number and the name.
+ */
+static void
+phone_call_fields(
+	struct kl_backend_phone_item *item,
+	const char *line)
+{
+	char value[KL_BACKEND_PHONE_PEER_MAX];
+	int same;
+
+	/* Its key. */
+	(void)phone_field(line, "key=", item->key, sizeof(item->key));
+
+	/* The kind: a call received unless the phone said dialed or missed. */
+	(void)phone_field(line, "kind=", value, sizeof(value));
+	item->folder = KL_BACKEND_PHONE_CALL_RECEIVED;
+	item->direction = KL_BACKEND_PHONE_DIRECTION_IN;
+	same = strcmp(value, "dialed");
+	if (same == 0) {
+		item->folder = KL_BACKEND_PHONE_CALL_DIALED;
+		item->direction = KL_BACKEND_PHONE_DIRECTION_OUT;
+	}
+
+	/* A call missed is one received that nobody answered. */
+	same = strcmp(value, "missed");
+	if (same == 0)
+		item->folder = KL_BACKEND_PHONE_CALL_MISSED;
+
+	/* The time in UNIX seconds, and where it came from. */
+	(void)phone_field(line, "time=", value, sizeof(value));
+	item->time = (int64_t)strtoll(value, NULL, 10);
+	item->zone = phone_zone(line);
+
+	/* A time the phone did not give is the time the line was made. */
+	item->partial = phone_field_number(line, "partial=");
+	if (item->zone == KL_BACKEND_PHONE_ZONE_RECEIVED)
+		item->partial = 1U;
+
+	/* The phone's datetime, the number and the name. */
+	(void)phone_field(line, "datetime=", item->datetime, sizeof(item->datetime));
+	(void)phone_field(line, "peer=", item->peer, sizeof(item->peer));
+	(void)phone_field(line, "name=", item->name, sizeof(item->name));
+}
+
+/*
+ * Reads where a line's time came from: zone=phone, mse or local; any
+ * other word (received, a call's none) or none is the time it came.
+ */
+static unsigned
+phone_zone(
+	const char *line)
+{
+	char value[16];
+	int same;
+
+	/* The word. */
+	(void)phone_field(line, "zone=", value, sizeof(value));
+
+	/* The phone's own time. */
+	same = strcmp(value, "phone");
+	if (same == 0)
+		return KL_BACKEND_PHONE_ZONE_PHONE;
+
+	/* The phone's zone (MAP's MSE). */
+	same = strcmp(value, "mse");
+	if (same == 0)
+		return KL_BACKEND_PHONE_ZONE_MSE;
+
+	/* This computer's zone. */
+	same = strcmp(value, "local");
+	if (same == 0)
+		return KL_BACKEND_PHONE_ZONE_LOCAL;
+
+	/* Succeeded: when it came. */
+	return KL_BACKEND_PHONE_ZONE_RECEIVED;
 }
 
 /* Keeps a connection's whole message for the caller; with no room the oldest goes and a drop is told. */
@@ -1550,9 +1704,10 @@ phone_state_line(
 	int same;
 	int found;
 
-	/* A record, at its address. */
+	/* A record, at its address; whether there is one is known now. */
 	state = &phone->state;
 	state->have_record = 1U;
+	state->record_known = 1U;
 	(void)phone_field(line, "address=", state->address, sizeof(state->address));
 	state->enabled = phone_field_number(line, "enabled=");
 
@@ -1565,6 +1720,7 @@ phone_state_line(
 		state->notify = 0U;
 		state->present = 0U;
 		state->profiles = 0U;
+		phone_contacts_clear(phone);
 		phone_state_why(phone, "not-owner");
 		return;
 	}
@@ -1596,6 +1752,9 @@ phone_state_line(
 	state->can_send = phone_field_number(line, "send=");
 	state->notify = phone_field_number(line, "notify=");
 
+	/* The contacts (ws197-p005). */
+	phone_contacts_line(phone, line);
+
 	/* Why the link or the messages stopped, or nothing. */
 	found = phone_field(line, "why=", value, sizeof(value));
 	if (!found)
@@ -1618,6 +1777,48 @@ phone_state_why(
 	phone->changed |= KL_BACKEND_PHONE_CHANGED_STATE;
 }
 
+/* Reads the contacts' state and why they stopped from a line ("contacts=off|connecting|ready|failed", "contacts_why=..."). */
+static void
+phone_contacts_line(
+	struct kl_backend_phone *phone,
+	const char *line)
+{
+	struct kl_backend_phone_state *state;
+	char value[KL_BACKEND_BT_REASON_MAX];
+	int same;
+	int found;
+
+	/* The state: off unless the line says otherwise (a bluetoothd before ws197-p005 says nothing). */
+	state = &phone->state;
+	(void)phone_field(line, "contacts=", value, sizeof(value));
+	state->contacts = KL_BACKEND_PHONE_MESSAGES_OFF;
+	same = strcmp(value, "connecting");
+	if (same == 0)
+		state->contacts = KL_BACKEND_PHONE_MESSAGES_CONNECTING;
+	same = strcmp(value, "ready");
+	if (same == 0)
+		state->contacts = KL_BACKEND_PHONE_MESSAGES_READY;
+	same = strcmp(value, "failed");
+	if (same == 0)
+		state->contacts = KL_BACKEND_PHONE_MESSAGES_FAILED;
+
+	/* Why they stopped, or nothing. */
+	found = phone_field(line, "contacts_why=", value, sizeof(value));
+	if (!found)
+		value[0] = '\0';
+	(void)snprintf(state->contacts_why, sizeof(state->contacts_why), "%s", value);
+}
+
+/* Forgets the contacts' state (no record, not the owner's). */
+static void
+phone_contacts_clear(
+	struct kl_backend_phone *phone)
+{
+	/* Off, and no why. */
+	phone->state.contacts = KL_BACKEND_PHONE_MESSAGES_OFF;
+	phone->state.contacts_why[0] = '\0';
+}
+
 /* Asks bluetoothd for the events; without it the state is unreachable and asked again in a second. */
 static void
 phone_events_start(
@@ -1629,6 +1830,7 @@ phone_events_start(
 	/* The connection; bluetoothd not there is unreachable. */
 	error = phone_connect(&phone->events);
 	if (error != 0) {
+		/* Everything forgotten, the contacts and whether there is a record too. */
 		if (phone->state.reachable) {
 			memset(&phone->state, 0, sizeof(phone->state));
 			phone_state_why(phone, "unreachable");

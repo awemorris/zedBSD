@@ -42,6 +42,14 @@
 /* How long a program's sync keeps the next one waiting when its answer does not come (milliseconds, ws197-p004a). */
 #define SYSTEM_VIEW_PHONE_SYNC_MS	180000U
 
+/*
+ * The sizes of KL_VERSION 79's kl_phone_link and kl_phone_item (ws197-p005
+ * review-1 M6): a program built then passes them and gets the fields it
+ * knows.  The link grew at its end with KL_VERSION 80; the item has not.
+ */
+#define SYSTEM_VIEW_PHONE_LINK_SIZE_79	offsetof(struct kl_phone_link, contacts)
+#define SYSTEM_VIEW_PHONE_ITEM_SIZE_79	sizeof(struct kl_phone_item)
+
 /* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language, the mounts (ws188-p004). */
 #define SYSTEM_VIEW_MACHINE_PARTS	5U
 
@@ -181,6 +189,11 @@ struct system_view {
 	 * phone_end_next), the link as last told (phone_link_known 0 until
 	 * then), and the program's sync under way (its request, 0 for none,
 	 * and when it started on the monotonic clock in milliseconds).
+	 *
+	 * ws197-p005: the contacts' part of the link that link_contacts told
+	 * just before the link it belongs to (phone_contacts_told 1 from
+	 * link_contacts until that link takes it; a link without one has
+	 * none).
 	 */
 	unsigned phone_lost;
 	struct system_view_phone_item phone_items[SYSTEM_VIEW_PHONE_ITEMS];
@@ -191,6 +204,10 @@ struct system_view {
 	unsigned phone_end_next;
 	struct kl_phone_link phone_link;
 	unsigned phone_link_known;
+	unsigned phone_contacts_told;
+	unsigned phone_contacts;
+	unsigned phone_record;
+	char phone_contacts_why[KL_PHONE_WHY_MAX];
 	uint32_t phone_sync_request;
 	uint64_t phone_sync_started_ms;
 	struct kl_printer printers[KL_PRINTERS_MAX];
@@ -367,6 +384,7 @@ int system_view_take_phone_item(struct system_view *view, struct kl_phone_item *
 void system_view_phone_page_end(struct system_view *view, const struct system_view_page_end *end);
 int system_view_phone_page_end_of(const struct system_view *view, uint32_t request, struct system_view_page_end *end);
 void system_view_phone_link(struct system_view *view, const struct kl_phone_link *link);
+void system_view_phone_link_contacts(struct system_view *view, unsigned contacts, unsigned record, const char *why);
 int system_view_phone_link_get(const struct system_view *view, struct kl_phone_link *link, size_t size);
 void system_view_phone_dropped(struct system_view *view);
 int system_view_phone_sync_start(struct system_view *view, uint32_t request, uint64_t now_ms);

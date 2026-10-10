@@ -31,6 +31,18 @@
  *    ring, a full queue's KL_PHONE_DROPPED, the pages' ends by request,
  *    a sync's EBUSY ended by its done or by 180 seconds, the new result
  *    codes' errno values, the link's size checks.
+ * 3. ws197-p005 (plan/ws197/phase005/phase.md section 9.1): objects of
+ *    version 28 hear link_contacts before each link (one of 27 does
+ *    not), with the contacts' state and the record (0 for the loopback
+ *    and while not known, also through bluetoothd going and coming back,
+ *    never 1 on the way; from the paired phone's state whatever the
+ *    setting); a link owed is sent again whole, link_contacts first, and
+ *    a newer one replaces it; syncs of the contacts and the calls reach
+ *    the backend and their items keep the backend's what; what 3 and the
+ *    contacts of an object of 27 are INVALID; the loopback has no
+ *    contacts.  libkeiland's view: the link of KL_VERSION 79's size (88
+ *    bytes) is copied, a smaller one refused; link_contacts goes into
+ *    the link that follows it alone.
  *
  * Prints "PASS name" or "FAIL name" for each check; the last line is
  * "phone-shell-host-test: PASS" or "... FAIL".
@@ -65,6 +77,7 @@ struct test_event {
 struct kl_backend_phone {
 	struct kl_backend_phone_state state;
 	uint32_t next_id;
+	unsigned last_what;
 	uint32_t last_page_id;
 	uint32_t last_send_id;
 	uint32_t last_link_id;
@@ -84,8 +97,9 @@ struct kl_backend_phone {
 static struct test_event test_events[TEST_EVENTS_MAX];
 static unsigned test_event_count;
 
-/* The client that reads too little (its number, 0 for none). */
+/* The client that reads too little (its number, 0 for none), and the one event it refuses (UINT32_MAX: every one). */
 static uint64_t test_full_client;
+static uint32_t test_full_opcode = UINT32_MAX;
 
 /* The fake desktop's phone.backend, notify.allow.phone and clock. */
 static int test_backend = 2;
@@ -98,8 +112,9 @@ static char test_notify_title[160];
 static char test_notify_lock[160];
 static char test_notify_command[256];
 
-/* The one fake backend. */
+/* The one fake backend, and the server its ticks run for (test_shell's). */
 static struct kl_backend_phone test_phone;
+static struct kwl_server *test_phone_server;
 
 /* The checks that failed. */
 static int test_failures;
@@ -107,6 +122,11 @@ static int test_failures;
 int main(void);
 static void test_shell(void);
 static void test_view(void);
+static void test_contacts(void);
+static void test_contacts_view(void);
+static int test_sync_what(struct kwl_object *object, uint32_t request, uint32_t what, uint32_t since);
+static int test_link_record(unsigned from, uint32_t *contacts, uint32_t *record);
+static void test_state(void);
 static void test_check(const char *name, int passed);
 static size_t test_put_string(unsigned char *bytes, size_t offset, const char *text);
 static size_t test_put_word(unsigned char *bytes, size_t offset, uint32_t word);
@@ -131,8 +151,8 @@ kwl_emit(
 {
 	(void)object;
 
-	/* A client that reads too little. */
-	if (client->number == test_full_client)
+	/* A client that reads too little (every event, or the one asked). */
+	if (client->number == test_full_client && (test_full_opcode == UINT32_MAX || opcode == test_full_opcode))
 		return ENOBUFS;
 
 	/* Kept while there is room. */
@@ -323,7 +343,6 @@ kl_backend_phone_page(
 	unsigned count,
 	uint32_t *id)
 {
-	(void)what;
 	(void)since;
 	(void)limit;
 	(void)cursor;
@@ -331,6 +350,7 @@ kl_backend_phone_page(
 	if (phone->refuse != 0)
 		return phone->refuse;
 	*id = phone->next_id++;
+	phone->last_what = what;
 	phone->last_page_id = *id;
 	phone->pages++;
 	return 0;
@@ -449,6 +469,8 @@ main(void)
 {
 	test_shell();
 	test_view();
+	test_contacts();
+	test_contacts_view();
 	if (test_failures != 0) {
 		printf("phone-shell-host-test: FAIL (%d)\n", test_failures);
 		return 1;
@@ -495,6 +517,7 @@ test_shell(void)
 	app.next = &other;
 	other.next = &second;
 	server.clients = &app;
+	test_phone_server = &server;
 	test_surface(&app, 100U, "phone");
 	test_surface(&other, 100U, "mailer");
 	test_surface(&second, 100U, "phone");
@@ -1078,4 +1101,329 @@ test_surface(
 	surface = kwl_create(client, id, KWL_SURFACE, 1U);
 	if (surface != NULL)
 		(void)snprintf(surface->app_id, sizeof(surface->app_id), "%s", app_id);
+}
+
+/* The compositor's part of ws197-p005: link_contacts, the record, the syncs of the contacts and the calls. */
+static void
+test_contacts(void)
+{
+	static const char card[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Kei\r\nTEL:+819011112222\r\nEND:VCARD\r\n";
+	static struct kwl_client app;
+	static struct kwl_client settings;
+	struct kwl_server *server;
+	struct kwl_object manager;
+	struct kwl_object *phone;
+	struct kwl_object *old;
+	struct kwl_object *watcher;
+	unsigned char bytes[16];
+	const char *why;
+	uint32_t contacts;
+	uint32_t record;
+	uint32_t first_id;
+	size_t offset;
+	unsigned at;
+	unsigned seen_one;
+	int found;
+	int error;
+
+	/* Two more clients of the user: a phone program (objects of 28 and 27) and Settings (28), at the head of the list. */
+	server = test_phone_server;
+	app.server = server;
+	app.number = 4U;
+	app.fd = -1;
+	settings.server = server;
+	settings.number = 5U;
+	settings.fd = -1;
+	app.next = &settings;
+	settings.next = server->clients;
+	server->clients = &app;
+	test_surface(&app, 100U, "phone");
+	test_surface(&settings, 100U, "settings");
+	test_backend = 2;
+	memset(&manager, 0, sizeof(manager));
+	manager.version = KL_SYSTEM_SINCE_PHONE_CONTACTS;
+	manager.client = &app;
+	(void)test_put_word(bytes, 0U, 20U);
+	error = kwl_phone_create(&manager, bytes, 4U);
+	manager.client = &settings;
+	error |= kwl_phone_create(&manager, bytes, 4U);
+	manager.version = KL_SYSTEM_SINCE_PHONE_SYNC;
+	manager.client = &app;
+	(void)test_put_word(bytes, 0U, 21U);
+	error |= kwl_phone_create(&manager, bytes, 4U);
+	phone = kwl_find(&app, 20U);
+	watcher = kwl_find(&settings, 20U);
+	old = kwl_find(&app, 21U);
+	test_check("c-create", error == 0 && phone != NULL && watcher != NULL && old != NULL);
+	if (phone == NULL || watcher == NULL || old == NULL)
+		return;
+
+	/* The paired phone's state: reachable, its record not known yet, the contacts connecting. */
+	memset(&test_phone.state, 0, sizeof(test_phone.state));
+	test_phone.state.reachable = 1U;
+	test_phone.state.subscribed = 1U;
+	test_phone.state.contacts = KL_BACKEND_PHONE_MESSAGES_CONNECTING;
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
+	kwl_phone_tick(server);
+
+	/* A listener of 28 hears link_contacts, then the link; the record is not known. */
+	test_event_count = 0U;
+	(void)test_word_request(phone, KL_SYSTEM_PHONE_LISTEN, 1U);
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-listen", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS &&
+	    test_events[1].opcode == KL_SYSTEM_PHONE_EVENT_LINK && found && contacts == 1U && record == 0U);
+
+	/* A listener of 27 hears the link alone. */
+	test_event_count = 0U;
+	(void)test_word_request(old, KL_SYSTEM_PHONE_LISTEN, 1U);
+	test_check("c-old", test_event_count == 1U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_LINK);
+	(void)test_word_request(old, KL_SYSTEM_PHONE_LISTEN, 0U);
+
+	/* Settings' watcher of 28: the contacts failed, their why. */
+	test_phone.state.contacts = KL_BACKEND_PHONE_MESSAGES_FAILED;
+	(void)snprintf(test_phone.state.contacts_why, sizeof(test_phone.state.contacts_why), "%s", "permission");
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
+	kwl_phone_tick(server);
+	test_event_count = 0U;
+	(void)test_word_request(watcher, KL_SYSTEM_PHONE_WATCH_LINK, 1U);
+	why = NULL;
+	if (test_event_count == 2U)
+		why = test_get_string(&test_events[0], 8U, &offset);
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-watch", test_event_count == 2U && found && contacts == 3U && why != NULL && strcmp(why, "permission") == 0);
+
+	/* The record: known, one (2); known, none (1); the setting none does not hide it (review-3 R1). */
+	test_phone.state.record_known = 1U;
+	test_phone.state.have_record = 1U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-record-2", found && record == 2U);
+	test_backend = 0;
+	test_phone.state.enabled = 0U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-record-none-setting", found && record == 2U && test_get_word(&test_events[1], 0U) == 0U);
+	test_phone.state.have_record = 0U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-record-1", found && record == 1U);
+
+	/* The loopback: no contacts, no record known. */
+	test_backend = 1;
+	test_phone.state.have_record = 1U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-loopback", found && record == 0U && contacts == 0U);
+	test_event_count = 0U;
+	(void)test_sync_what(phone, 30U, KL_SYSTEM_PHONE_CONTACTS, 0U);
+	found = test_find(4U, KL_SYSTEM_PHONE_EVENT_PAGE_END, 0U, &at);
+	test_check("c-loopback-sync", found && !test_find(4U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at) && test_get_word(&test_events[test_event_count - 1U], 4U) ==
+	    KL_SYSTEM_RESULT_OK);
+	test_backend = 2;
+	kwl_phone_tick(server);
+
+	/* bluetoothd goes and comes back: not known, not known before it says, then one; never 1 on the way (review-3 R2). */
+	seen_one = 0U;
+	test_phone.state.reachable = 0U;
+	test_phone.state.record_known = 0U;
+	test_phone.state.have_record = 0U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	if (record == 1U)
+		seen_one = 1U;
+	test_check("c-gone", found && record == 0U);
+	test_phone.state.reachable = 1U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	if (record == 1U)
+		seen_one = 1U;
+	test_check("c-back", found && record == 0U);
+	test_phone.state.record_known = 1U;
+	test_phone.state.have_record = 1U;
+	test_state();
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-said", found && record == 2U && seen_one == 0U);
+
+	/* link_contacts refused: the link is not sent without it, but owed whole and sent with it later. */
+	test_full_client = 4U;
+	test_full_opcode = KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS;
+	test_state();
+	test_check("c-owed-lc", !test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK, 0U, &at) && !test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS, 0U, &at));
+	test_full_client = 0U;
+	test_full_opcode = UINT32_MAX;
+	test_event_count = 0U;
+	kwl_phone_tick(server);
+	test_check("c-owed-lc-sent", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS &&
+	    test_events[1].opcode == KL_SYSTEM_PHONE_EVENT_LINK);
+
+	/* A link owed whole: link_contacts goes, the link does not; a newer state replaces it; both sent again in order. */
+	test_full_client = 4U;
+	test_full_opcode = KL_SYSTEM_PHONE_EVENT_LINK;
+	test_phone.state.contacts = KL_BACKEND_PHONE_MESSAGES_CONNECTING;
+	test_state();
+	test_check("c-owed-half", test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS, 0U, &at) && !test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK, 0U, &at));
+	test_full_opcode = UINT32_MAX;
+	test_phone.state.contacts = KL_BACKEND_PHONE_MESSAGES_READY;
+	test_state();
+	test_check("c-owed", !test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS, 0U, &at) && !test_find(4U, KL_SYSTEM_PHONE_EVENT_LINK, 0U, &at));
+	test_full_client = 0U;
+	test_event_count = 0U;
+	kwl_phone_tick(server);
+	found = test_link_record(0U, &contacts, &record);
+	test_check("c-owed-sent", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS &&
+	    test_events[1].opcode == KL_SYSTEM_PHONE_EVENT_LINK && found && contacts == 2U && record == 2U);
+
+	/* A sync of the contacts reaches the backend; its item keeps the backend's what and its card. */
+	test_event_count = 0U;
+	(void)test_sync_what(phone, 31U, KL_SYSTEM_PHONE_CONTACTS, 0U);
+	first_id = test_phone.last_page_id;
+	test_check("c-sync-contacts", test_phone.last_what == KL_SYSTEM_PHONE_CONTACTS);
+	test_item(first_id, "00000000000000a1");
+	test_phone.items[0].what = KL_BACKEND_PHONE_WHAT_CONTACTS;
+	test_phone.items[0].folder = 1U;
+	test_phone.items[0].text = card;
+	test_phone.items[0].length = strlen(card);
+	test_result(first_id, 0, 0U);
+	test_phone.results[0].capped = 6U;
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM | KL_BACKEND_PHONE_CHANGED_RESULT;
+	kwl_phone_tick(server);
+	found = test_find(4U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at);
+	test_check("c-item-contacts", found && test_get_word(&test_events[at], 0U) == 31U && test_get_word(&test_events[at], 4U) == KL_SYSTEM_PHONE_CONTACTS);
+	found = test_find(4U, KL_SYSTEM_PHONE_EVENT_PAGE_END, 0U, &at);
+	test_check("c-capped", found && test_get_word(&test_events[at], test_events[at].size - 4U) == 6U);
+
+	/* A sync of the calls since a time. */
+	test_event_count = 0U;
+	(void)test_sync_what(phone, 32U, KL_SYSTEM_PHONE_CALLS, 1700000000U);
+	first_id = test_phone.last_page_id;
+	test_check("c-sync-calls", test_phone.last_what == KL_SYSTEM_PHONE_CALLS);
+	test_item(first_id, "00000000000000b1");
+	test_phone.items[0].what = KL_BACKEND_PHONE_WHAT_CALLS;
+	test_phone.items[0].folder = KL_BACKEND_PHONE_CALL_MISSED;
+	test_phone.items[0].text = "";
+	test_phone.items[0].length = 0U;
+	test_result(first_id, 0, 0U);
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM | KL_BACKEND_PHONE_CHANGED_RESULT;
+	kwl_phone_tick(server);
+	found = test_find(4U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at);
+	test_check("c-item-calls", found && test_get_word(&test_events[at], 4U) == KL_SYSTEM_PHONE_CALLS);
+
+	/* what 3, and the contacts of an object of 27: INVALID, nothing asked of the backend. */
+	test_event_count = 0U;
+	first_id = test_phone.last_page_id;
+	(void)test_sync_what(phone, 33U, 3U, 0U);
+	(void)test_sync_what(old, 34U, KL_SYSTEM_PHONE_CONTACTS, 0U);
+	test_check("c-invalid", test_event_count == 2U && test_get_word(&test_events[0], 4U) == KL_SYSTEM_RESULT_INVALID &&
+	    test_get_word(&test_events[1], 4U) == KL_SYSTEM_RESULT_INVALID && test_phone.last_page_id == first_id);
+}
+
+/* libkeiland's part of ws197-p005: the link's sizes and link_contacts. */
+static void
+test_contacts_view(void)
+{
+	static struct system_view view;
+	struct {
+		struct kl_phone_link link;
+		unsigned char beyond[16];
+	} room;
+	struct kl_phone_link link;
+	unsigned char *bytes;
+	unsigned index;
+	int untouched;
+	int error;
+
+	/* KL_VERSION 79's size is the new fields' offset, 88 bytes (review-3 minor 8). */
+	test_check("v-size-79", SYSTEM_VIEW_PHONE_LINK_SIZE_79 == 88U && sizeof(struct kl_phone_link) > 88U);
+
+	/* link_contacts, then the link it belongs to. */
+	memset(&link, 0, sizeof(link));
+	link.messages = 2U;
+	system_view_phone_link_contacts(&view, 2U, 1U, "permission");
+	system_view_phone_link(&view, &link);
+	memset(&link, 0, sizeof(link));
+	error = system_view_phone_link_get(&view, &link, sizeof(link));
+	test_check("v-contacts", error == 0 && link.messages == 2U && link.contacts == 2U && link.record == 1U && strcmp(link.contacts_why, "permission") == 0);
+
+	/* A program of KL_VERSION 79: its 88 bytes copied, nothing written beyond. */
+	memset(&room, 0xaa, sizeof(room));
+	error = system_view_phone_link_get(&view, &room.link, SYSTEM_VIEW_PHONE_LINK_SIZE_79);
+	bytes = (unsigned char *)&room;
+	untouched = 1;
+	for (index = (unsigned)SYSTEM_VIEW_PHONE_LINK_SIZE_79; index < sizeof(room); index++) {
+		if (bytes[index] != 0xaaU)
+			untouched = 0;
+	}
+
+	/* Copied as far as it holds. */
+	test_check("v-short", error == 0 && room.link.messages == 2U && untouched);
+	error = system_view_phone_link_get(&view, &link, SYSTEM_VIEW_PHONE_LINK_SIZE_79 - 4U);
+	test_check("v-shorter", error == EINVAL);
+
+	/* A larger structure: the rest zero. */
+	memset(&room, 0xaa, sizeof(room));
+	error = system_view_phone_link_get(&view, &room.link, sizeof(room));
+	test_check("v-larger", error == 0 && room.link.contacts == 2U && room.beyond[0] == 0U && room.beyond[15] == 0U);
+
+	/* A link without link_contacts (an older compositor): no contacts. */
+	memset(&link, 0, sizeof(link));
+	system_view_phone_link(&view, &link);
+	error = system_view_phone_link_get(&view, &link, sizeof(link));
+	test_check("v-no-contacts", error == 0 && link.contacts == 0U && link.record == 0U && link.contacts_why[0] == '\0');
+	system_view_phone_release(&view);
+}
+
+/* Sends sync(request, what, since, 0, "", 32). */
+static int
+test_sync_what(
+	struct kwl_object *object,
+	uint32_t request,
+	uint32_t what,
+	uint32_t since)
+{
+	unsigned char bytes[64];
+	size_t offset;
+
+	/* No limit, from the start, 32 items. */
+	offset = test_put_word(bytes, 0U, request);
+	offset = test_put_word(bytes, offset, what);
+	offset = test_put_word(bytes, offset, 0U);
+	offset = test_put_word(bytes, offset, since);
+	offset = test_put_word(bytes, offset, 0U);
+	offset = test_put_string(bytes, offset, "");
+	offset = test_put_word(bytes, offset, 32U);
+	return kwl_phone_request(object, KL_SYSTEM_PHONE_SYNC, bytes, offset);
+}
+
+/* Finds the first link_contacts from an index: 1 with its contacts and record. */
+static int
+test_link_record(
+	unsigned from,
+	uint32_t *contacts,
+	uint32_t *record)
+{
+	unsigned index;
+
+	/* Each event from there. */
+	*contacts = UINT32_MAX;
+	*record = UINT32_MAX;
+	for (index = from; index < test_event_count; index++) {
+		if (test_events[index].opcode != KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS)
+			continue;
+		*contacts = test_get_word(&test_events[index], 0U);
+		*record = test_get_word(&test_events[index], 4U);
+		return 1;
+	}
+
+	/* None. */
+	return 0;
+}
+
+/* Tells the compositor the fake backend's state changed, the events emptied first. */
+static void
+test_state(void)
+{
+	/* A new state at the next update. */
+	test_event_count = 0U;
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_STATE;
+	kwl_phone_tick(test_phone_server);
 }
