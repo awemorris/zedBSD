@@ -62,6 +62,7 @@ static void write_bond(uint8_t key_type);
 static void write_file(const char *name, const char *text);
 static void test_text(void);
 static void test_names(void);
+static void test_migrate(void);
 static void test_files(void);
 
 /*
@@ -92,6 +93,7 @@ main(
 	/* Each part. */
 	test_text();
 	test_names();
+	test_migrate();
 	test_files();
 
 	/* The count of what failed. */
@@ -214,7 +216,7 @@ static void
 test_text(void)
 {
 	static const char expected[] =
-		"version 1\nuid 1001\nuser alice\nmessages 1\ncontacts 0\ncalls 1\nenabled 0\n";
+		"version 1\nuid 1001\nuser alice\nmessages 1\ncontacts 0\ncalls 1\nenabled 0\nasked m,h\n";
 	struct btd_phonerec record;
 	char text[BTD_PHONEREC_TEXT_MAX];
 	int same;
@@ -225,6 +227,7 @@ test_text(void)
 	check(error == 0, "text: read");
 	check(record.uid == TEST_UID && strcmp(record.user, "alice") == 0, "text: the owner");
 	check(record.profiles == (BTD_PHONEREC_MESSAGES | BTD_PHONEREC_CALLS) && record.enabled == 0, "text: the profiles and the switch");
+	check(record.have_asked && record.asked == (BTD_PHONEREC_MESSAGES | BTD_PHONEREC_CALLS), "text: the profiles asked for");
 
 	/* The writer's text, byte for byte. */
 	error = btd_phonerec_format(&record, text, sizeof(text));
@@ -243,6 +246,57 @@ test_text(void)
 	check(!parses("version 1\nuid 7\nuser b/b\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\n"), "text: a name with a slash");
 	check(!parses("version 1\nuid 7\nuser bob\nmessages 2\ncontacts 1\ncalls 1\nenabled 1\n"), "text: a switch of 2");
 	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled\n"), "text: a line without its value");
+
+	/* The "asked" line (ws197-p005 section 8.1): optional, and its malformed values. */
+	check(parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\n"), "text: a record without asked (before ws197-p005)");
+	check(parses("version 1\nuid 7\nuser bob\nmessages 0\ncontacts 0\ncalls 0\nenabled 1\nasked -\n"), "text: asked none");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked m,m\n"), "text: asked a letter twice");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked m,x\n"), "text: asked a letter not known");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked mc\n"), "text: asked without its comma");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked m,\n"), "text: asked ending in a comma");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked \n"), "text: asked empty");
+	check(!parses("version 1\nuid 7\nuser bob\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\nasked m\nasked m\n"), "text: asked twice");
+}
+
+/*
+ * A record before ws197-p005 brought up to date: contacts and calls off,
+ * messages kept, the "asked" line written; a record up to date unchanged.
+ */
+static void
+test_migrate(void)
+{
+	static const char old_all[] =
+		"version 1\nuid 1001\nuser alice\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\n";
+	static const char old_none[] =
+		"version 1\nuid 1001\nuser alice\nmessages 0\ncontacts 1\ncalls 0\nenabled 1\n";
+	static const char migrated[] =
+		"version 1\nuid 1001\nuser alice\nmessages 1\ncontacts 0\ncalls 0\nenabled 1\nasked m\n";
+	struct btd_phonerec record;
+	char text[BTD_PHONEREC_TEXT_MAX];
+	int changed;
+	int error;
+	int same;
+
+	/* m,c,h from the pairing of p003: messages alone stays. */
+	error = btd_phonerec_parse(old_all, sizeof(old_all) - 1U, &record);
+	check(error == 0 && !record.have_asked, "migrate: an old record reads");
+	changed = btd_phonerec_migrate(&record);
+	check(changed == 1 && record.profiles == BTD_PHONEREC_MESSAGES, "migrate: contacts and calls off");
+	error = btd_phonerec_format(&record, text, sizeof(text));
+	same = strcmp(text, migrated);
+	check(error == 0 && same == 0, "migrate: written with asked m");
+
+	/* Up to date: unchanged. */
+	error = btd_phonerec_parse(migrated, sizeof(migrated) - 1U, &record);
+	changed = btd_phonerec_migrate(&record);
+	check(error == 0 && changed == 0 && record.profiles == BTD_PHONEREC_MESSAGES, "migrate: an up to date record unchanged");
+
+	/* Without messages: nothing stays on, asked "-". */
+	error = btd_phonerec_parse(old_none, sizeof(old_none) - 1U, &record);
+	changed = btd_phonerec_migrate(&record);
+	check(error == 0 && changed == 1 && record.profiles == 0U && record.asked == 0U, "migrate: contacts alone goes off");
+	error = btd_phonerec_format(&record, text, sizeof(text));
+	check(error == 0 && strstr(text, "asked -\n") != NULL, "migrate: written with asked -");
 }
 
 /* The account names a record keeps. */

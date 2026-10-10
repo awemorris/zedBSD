@@ -37,6 +37,7 @@
 #include "userland/base/bluetoothd/keys.h"
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/phone.h"
+#include "userland/base/bluetoothd/phonemux.h"
 #include "userland/base/bluetoothd/privsep.h"
 #include "userland/base/bluetoothd/protocol.h"
 #include "userland/base/bluetoothd/linkmgr.h"
@@ -238,6 +239,9 @@ static int32_t btd_messages_offset(void *context, int64_t seconds);
 static int btd_messages_wanted(void *context);
 static int btd_messages_sdp(void *context, uint16_t uuid);
 static int btd_messages_open(void *context, unsigned server_channel);
+static int btd_profiles_sdp(void *context, uint16_t uuid);
+static int btd_profiles_open(void *context, unsigned server_channel);
+static void btd_profiles_close(void *context, unsigned dlci);
 static int btd_messages_write(void *context, unsigned dlci, const uint8_t *data, size_t length, size_t *written);
 static void btd_messages_close(void *context, unsigned dlci);
 static void btd_messages_answer(void *context, uint64_t token, const char *line, const uint8_t *bytes, size_t length);
@@ -305,6 +309,15 @@ static struct btd_sdps_db btd_records;
  * clients through main's hooks.  It lives as long as the daemon.
  */
 static struct btd_map btd_messages;
+
+/*
+ * The profiles' share of the phone link (ws197-p005 section 3.1): the
+ * phone link's one profile, handing each child (MAP, later PBAP and HFP)
+ * its SDP answers and DLCs; and MAP's index among the children.  Both
+ * live as long as the daemon and are set up before the controller opens.
+ */
+static struct btd_phonemux btd_profiles;
+static unsigned btd_messages_child;
 
 /*
  * What the phone's subscribers were told last (the line of PHONE STATE,
@@ -411,6 +424,7 @@ main(
 	struct btd_router_phone router_phone;
 	struct btd_phone_hooks phone_hooks;
 	struct btd_phone_profile phone_profile;
+	struct btd_phonemux_hooks mux_hooks;
 	struct btd_map_hooks map_hooks;
 	uint32_t first_session;
 	char expired_text[24];
@@ -527,7 +541,15 @@ main(
 	btd_random(NULL, (uint8_t *)&first_session, sizeof(first_session));
 	btd_map_init(&btd_messages, &map_hooks, first_session);
 
-	/* The MAP client as the phone link's profile. */
+	/* The profiles' mux, the phone link's one profile. */
+	memset(&mux_hooks, 0, sizeof(mux_hooks));
+	mux_hooks.sdp_query = btd_profiles_sdp;
+	mux_hooks.dlc_open = btd_profiles_open;
+	mux_hooks.dlc_close = btd_profiles_close;
+	mux_hooks.log = btd_messages_log;
+	btd_phonemux_init(&btd_profiles, &mux_hooks);
+
+	/* The MAP client as the mux's first child. */
 	memset(&phone_profile, 0, sizeof(phone_profile));
 	phone_profile.context = &btd_messages;
 	phone_profile.ready = btd_map_ready;
@@ -539,6 +561,10 @@ main(
 	phone_profile.writable = btd_map_writable;
 	phone_profile.closed = btd_map_closed;
 	phone_profile.open_failed = btd_map_open_failed;
+	(void)btd_phonemux_add(&btd_profiles, &phone_profile, &btd_messages_child);
+
+	/* The mux as the phone link's profile. */
+	btd_phonemux_profile(&btd_profiles, &phone_profile);
 	btd_phone_set_profile(&btd_phone_link, &phone_profile);
 
 	/* The controller there is now. */
@@ -3735,8 +3761,8 @@ btd_messages_sdp(
 
 	UNUSED_PARAMETER(context);
 
-	/* The phone link's query. */
-	error = btd_phone_sdp_query(&btd_phone_link, uuid);
+	/* The mux's query for MAP. */
+	error = btd_phonemux_sdp_query(&btd_profiles, btd_messages_child, uuid);
 	return error;
 }
 
@@ -3750,9 +3776,51 @@ btd_messages_open(
 
 	UNUSED_PARAMETER(context);
 
+	/* The mux's DLC for MAP. */
+	error = btd_phonemux_dlc_open(&btd_profiles, btd_messages_child, server_channel);
+	return error;
+}
+
+/* The mux's SDP query, on the phone link. */
+static int
+btd_profiles_sdp(
+	void *context,
+	uint16_t uuid)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's query. */
+	error = btd_phone_sdp_query(&btd_phone_link, uuid);
+	return error;
+}
+
+/* The mux's DLC asked for, on the phone link. */
+static int
+btd_profiles_open(
+	void *context,
+	unsigned server_channel)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
 	/* The phone link's DLC. */
 	error = btd_phone_dlc_open(&btd_phone_link, server_channel, btd_now_ms());
 	return error;
+}
+
+/* The mux's close of a DLC no profile owns, on the phone link. */
+static void
+btd_profiles_close(
+	void *context,
+	unsigned dlci)
+{
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's DLC. */
+	(void)btd_phone_dlc_close(&btd_phone_link, dlci, btd_now_ms());
 }
 
 /* MAP's bytes on a DLC, as far as its credits take them. */

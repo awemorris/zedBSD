@@ -30,11 +30,16 @@
  *   failures   the MAS's DLC closing (requests lost, the waits growing),
  *              a refusal (600 s, and at once on a check), no MAS, no
  *              answer to Connect, the MNS going alone
+ *   opening    the MAS's DLC closed before it opened (the phone's DM,
+ *              RFCOMM giving up) fails MAP by its reason; a DLC that opens
+ *              35 s later is taken; a busy channel starts again from SDP
+ *              (ws197-p005 section 3.2)
  *
  *   plan/ws197/tests/bt-phone-host-test.sh
  */
 
 #include "userland/base/bluetoothd/map.h"
+#include "userland/base/bluetoothd/rfcomm.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -78,6 +83,7 @@ struct world {
 	int sdp_error;
 	unsigned dlc_opens;
 	unsigned dlc_channel;
+	int open_error;
 	unsigned closed_count;
 	unsigned closed[TEST_CLOSED_MAX];
 	size_t mas_length;
@@ -142,6 +148,7 @@ static void test_live(void);
 static void test_send(void);
 static void test_read(void);
 static void test_failures(void);
+static void test_opening(void);
 
 /*
  * Runs every part and reports the checks.
@@ -157,6 +164,7 @@ main(void)
 	test_send();
 	test_read();
 	test_failures();
+	test_opening();
 
 	/* The count of what failed. */
 	printf("bt-map-host-test: %u checks, %u failed\n", checks, failures);
@@ -253,10 +261,12 @@ hook_open(
 {
 	UNUSED_PARAMETER(context);
 
-	/* Succeeded: noted. */
+	/* Noted. */
 	world.dlc_opens++;
 	world.dlc_channel = server_channel;
-	return 0;
+
+	/* Answered as the scenario asks. */
+	return world.open_error;
 }
 
 /* Keeps what map.c writes on a DLC. */
@@ -1391,4 +1401,56 @@ test_failures(void)
 	(void)btd_map_read(&map, 3U, TEST_SESSION_TEXT ".10");
 	btd_map_ended(&map);
 	check(state_is("messages=off send=0 notify=0") && has_answer("3: ERROR lost"), "failures: the link's end");
+}
+
+/* The MAS's DLC before it opens (ws197-p005 section 3.2). */
+static void
+test_opening(void)
+{
+	uint8_t packet[1024];
+	size_t length;
+
+	/* Refused by the phone (DM): failed as refused, again in 30 s. */
+	start();
+	btd_map_ready(&map);
+	sdp_answer(0x0eU, 1, 0x0000001fU);
+	btd_map_closed(&map, TEST_MAS_DLCI, BTD_RFCOMM_CLOSED_REFUSED);
+	check(state_is("messages=failed send=0 notify=0 why=refused"), "opening: the phone's DM fails it as refused");
+	btd_map_tick(&map, world.now);
+	check(btd_map_deadline(&map) == world.now + 30000U, "opening: again in 30 s");
+
+	/* Given up by RFCOMM: failed as timed out. */
+	start();
+	btd_map_ready(&map);
+	sdp_answer(0x0eU, 1, 0x0000001fU);
+	btd_map_closed(&map, TEST_MAS_DLCI, BTD_RFCOMM_CLOSED_TIMEOUT);
+	check(state_is("messages=failed send=0 notify=0 why=timeout"), "opening: RFCOMM giving up fails it as timed out");
+
+	/* Another channel's close while opening is not the MAS's. */
+	start();
+	btd_map_ready(&map);
+	sdp_answer(0x0eU, 1, 0x0000001fU);
+	btd_map_closed(&map, 12U, BTD_RFCOMM_CLOSED_REFUSED);
+	check(state_is("messages=connecting send=0 notify=0"), "opening: another channel's close passed over");
+
+	/* No deadline of its own: a DLC that opens 35 s later is taken and carries Connect. */
+	world.now += 35000U;
+	btd_map_tick(&map, world.now);
+	check(state_is("messages=connecting send=0 notify=0"), "opening: still opening after 35 s");
+	btd_map_opened(&map, TEST_MAS_DLCI, TEST_MAS_CHANNEL, 1);
+	length = take(packet, sizeof(packet));
+	check(length == 26U && packet[0] == 0x80U, "opening: the late DLC carries Connect");
+
+	/* A busy channel: not failed, the setting up starts again from SDP shortly. */
+	start();
+	world.open_error = EBUSY;
+	btd_map_ready(&map);
+	sdp_answer(0x0eU, 1, 0x0000001fU);
+	check(state_is("messages=connecting send=0 notify=0"), "opening: a busy channel does not fail it");
+	world.open_error = 0;
+	world.now += 2000U;
+	btd_map_tick(&map, world.now);
+	check(world.sdp_queries == 2U, "opening: SDP asked again after 2 s");
+	sdp_answer(0x0eU, 1, 0x0000001fU);
+	check(world.dlc_opens == 2U, "opening: the DLC asked for again");
 }

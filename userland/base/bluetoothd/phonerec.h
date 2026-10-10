@@ -52,6 +52,13 @@ typedef int (*btd_phonerec_account_fn)(void *context, uid_t uid, char *name, siz
  * The record of the phone: its address, its owner's uid and account
  * name, the profiles on, and whether the phone link is wanted.  A record
  * is filled by a read, a parse, or the phone link before a write.
+ *
+ * have_asked says the record was written by a daemon that keeps the
+ * profiles only as they were asked for (ws197-p005 section 8.1: the
+ * pairing turns on messages alone, LINK or Settings the rest), and asked
+ * holds the profiles of its "asked" line.  A record without the line is
+ * older: btd_phonerec_migrate turns off what it may have turned on by
+ * itself.
  */
 struct btd_phonerec {
 	uint8_t address[BTD_ADDRESS_BYTES];
@@ -59,6 +66,8 @@ struct btd_phonerec {
 	char user[BTD_PHONEREC_USER_MAX];
 	unsigned profiles;
 	int enabled;
+	int have_asked;
+	unsigned asked;
 };
 
 int btd_phonerec_path(const char *folder, const uint8_t *controller, const uint8_t *address, char *path, size_t size);
@@ -71,5 +80,6 @@ int btd_phonerec_forget(const char *folder, const uint8_t *controller, const uin
 int btd_phonerec_list(const char *folder, const uint8_t *controller, struct btd_phonerec *records, unsigned max, unsigned *count);
 int btd_phonerec_valid(const char *folder, const uint8_t *controller, const struct btd_phonerec *record, btd_phonerec_account_fn account, void *context);
 int btd_phonerec_prune(const char *folder, const uint8_t *controller);
+int btd_phonerec_migrate(struct btd_phonerec *record);
 
 #endif

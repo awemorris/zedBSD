@@ -89,6 +89,7 @@ static void test_initiator(void);
 static void test_refusals(void);
 static void test_room(void);
 static void test_broken(void);
+static void test_dlc_timeouts(void);
 static void test_fuzz(void);
 
 /*
@@ -104,6 +105,7 @@ main(void)
 	test_refusals();
 	test_room();
 	test_broken();
+	test_dlc_timeouts();
 	test_fuzz();
 
 	/* The count of what failed. */
@@ -790,7 +792,7 @@ test_refusals(void)
 	index = owner.sent_count;
 	peer_mux(&rf, 0x01U, 0x81U, pn, sizeof(pn), 1003U);
 	check(sent_is(&owner, index, 0x29U, 0x1fU, NULL, 0U), "refusals: DM to a PN response without credits (a response of the initiator, C/R 0)");
-	check(owner.closed_count == 1U && owner.closed_reason == BTD_RFCOMM_CLOSED_REFUSED, "refusals: DLC refused");
+	check(owner.closed_count == 1U && owner.closed_reason == BTD_RFCOMM_CLOSED_ERROR, "refusals: DLC refused here, an error (ws197-p005)");
 
 	/* An initiator whose SABM on DLCI 0 is answered with DM: ended, refused. */
 	owner_init(&owner, &rf, 0);
@@ -990,4 +992,119 @@ test_fuzz(void)
 
 	/* No credit count ever left its octet. */
 	check(sane, "fuzz: credits within an octet");
+}
+
+/*
+ * A DLC's own timer that runs out ends that DLC alone (ws197-p005 section
+ * 3.2): this side's PN unanswered (no frame), its SABM unanswered (DISC,
+ * then closed as timed out on the UA, the DM, or the DISC's own timer, and
+ * a late UA opens nothing), a modem status unanswered; the phone's DLC
+ * and the session stay.  A PN answer this side refuses closes as an
+ * error, not as the phone's refusal.
+ */
+static void
+test_dlc_timeouts(void)
+{
+	static struct btd_rfcomm rf;
+	static struct owner owner;
+	uint8_t pn[8];
+	uint8_t msc[2];
+	const struct btd_rfcomm_dlc *dlc;
+	unsigned dlci;
+	unsigned index;
+	uint64_t now;
+	int error;
+
+	/* An open session, and the phone's DLC 33 connected on server channel 16. */
+	owner_init(&owner, &rf, 0);
+	error = btd_rfcomm_start(&rf, 1000U);
+	check(error == 0, "timeouts: start");
+	peer_send(&rf, 0x03U, 0x73U, NULL, 0U, 1010U);
+	pn[0] = 33U;
+	pn[1] = 0xf0U;
+	pn[2] = 0x00U;
+	pn[3] = 0x00U;
+	pn[4] = 0x00U;
+	pn[5] = 0x01U;
+	pn[6] = 0x00U;
+	pn[7] = 0x07U;
+	peer_mux(&rf, 0x01U, 0x83U, pn, sizeof(pn), 1015U);
+	peer_send(&rf, 0x85U, 0x3fU, NULL, 0U, 1020U);
+	msc[0] = 0x87U;
+	msc[1] = 0x8dU;
+	peer_mux(&rf, 0x01U, 0xe3U, msc, sizeof(msc), 1030U);
+	peer_mux(&rf, 0x01U, 0xe1U, msc, sizeof(msc), 1040U);
+	check(owner.opened_count == 1U && owner.opened_dlci == 33U, "timeouts: the phone's DLC 33 connected");
+
+	/* Channel 5's PN unanswered: DLC 10 closes as timed out, without a frame. */
+	now = 2000U;
+	error = btd_rfcomm_connect(&rf, 5U, now, &dlci);
+	check(error == 0 && dlci == 10U, "timeouts: DLC 10 asked");
+	index = owner.sent_count;
+	btd_rfcomm_tick(&rf, now + BTD_RFCOMM_T2_MS);
+	check(owner.closed_count == 1U && owner.closed_dlci == 10U && owner.closed_reason == BTD_RFCOMM_CLOSED_TIMEOUT, "timeouts: PN unanswered closes DLC 10 as timed out");
+	check(owner.sent_count == index, "timeouts: no frame for an unanswered PN");
+	check(btd_rfcomm_dlc(&rf, 10U) == NULL, "timeouts: DLC 10 gone");
+
+	/* Channel 6: PN answered, SABM unanswered: DISC on DLCI 12 (address 33, control 53), the UA tells it timed out. */
+	now = 30000U;
+	error = btd_rfcomm_connect(&rf, 6U, now, &dlci);
+	check(error == 0 && dlci == 12U, "timeouts: DLC 12 asked");
+	pn[0] = 12U;
+	pn[1] = 0xe0U;
+	pn[2] = 0x00U;
+	pn[3] = 0x00U;
+	pn[4] = 0x00U;
+	pn[5] = 0x01U;
+	pn[6] = 0x00U;
+	pn[7] = 0x03U;
+	peer_mux(&rf, 0x01U, 0x81U, pn, sizeof(pn), now + 10U);
+	index = owner.sent_count;
+	btd_rfcomm_tick(&rf, now + 10U + BTD_RFCOMM_T1_DLC_MS);
+	check(sent_is(&owner, index, 0x33U, 0x53U, NULL, 0U), "timeouts: SABM unanswered sends DISC on DLCI 12");
+	check(owner.closed_count == 1U, "timeouts: not closed until the DISC is answered");
+	peer_send(&rf, 0x33U, 0x73U, NULL, 0U, now + 20U + BTD_RFCOMM_T1_DLC_MS);
+	check(owner.closed_count == 2U && owner.closed_dlci == 12U && owner.closed_reason == BTD_RFCOMM_CLOSED_TIMEOUT, "timeouts: the UA to the DISC tells DLC 12 timed out");
+	check(owner.opened_count == 1U, "timeouts: DLC 12 never opened");
+
+	/* Channel 7: SABM unanswered, then the DISC unanswered too: timed out on the DISC's timer; a late UA opens nothing. */
+	now = 200000U;
+	error = btd_rfcomm_connect(&rf, 7U, now, &dlci);
+	check(error == 0 && dlci == 14U, "timeouts: DLC 14 asked");
+	pn[0] = 14U;
+	peer_mux(&rf, 0x01U, 0x81U, pn, sizeof(pn), now + 10U);
+	btd_rfcomm_tick(&rf, now + 10U + BTD_RFCOMM_T1_DLC_MS);
+	btd_rfcomm_tick(&rf, now + 10U + BTD_RFCOMM_T1_DLC_MS + BTD_RFCOMM_T1_MS);
+	check(owner.closed_count == 3U && owner.closed_dlci == 14U && owner.closed_reason == BTD_RFCOMM_CLOSED_TIMEOUT, "timeouts: the DISC's timer tells DLC 14 timed out");
+	peer_send(&rf, 0x3bU, 0x73U, NULL, 0U, now + 20U + BTD_RFCOMM_T1_DLC_MS + BTD_RFCOMM_T1_MS);
+	check(owner.opened_count == 1U && btd_rfcomm_dlc(&rf, 14U) == NULL, "timeouts: a late UA opens nothing");
+
+	/* Channel 8: SABM answered, the phone's modem status never comes: DISC on DLCI 16 (address 43), the DM tells it timed out. */
+	now = 400000U;
+	error = btd_rfcomm_connect(&rf, 8U, now, &dlci);
+	check(error == 0 && dlci == 16U, "timeouts: DLC 16 asked");
+	pn[0] = 16U;
+	peer_mux(&rf, 0x01U, 0x81U, pn, sizeof(pn), now + 10U);
+	peer_send(&rf, 0x43U, 0x73U, NULL, 0U, now + 20U);
+	dlc = btd_rfcomm_dlc(&rf, 16U);
+	check(dlc != NULL && dlc->state == BTD_RFCOMM_DLC_OPEN, "timeouts: DLC 16 waits for the modem status");
+	index = owner.sent_count;
+	btd_rfcomm_tick(&rf, now + 20U + BTD_RFCOMM_T2_MS);
+	check(sent_is(&owner, index, 0x43U, 0x53U, NULL, 0U), "timeouts: modem status unanswered sends DISC on DLCI 16");
+	peer_send(&rf, 0x43U, 0x1fU, NULL, 0U, now + 30U + BTD_RFCOMM_T2_MS);
+	check(owner.closed_count == 4U && owner.closed_dlci == 16U && owner.closed_reason == BTD_RFCOMM_CLOSED_TIMEOUT, "timeouts: the DM to the DISC tells DLC 16 timed out");
+
+	/* Channel 9: a PN answer without credits is refused by this side, an error and not the phone's refusal. */
+	now = 600000U;
+	error = btd_rfcomm_connect(&rf, 9U, now, &dlci);
+	check(error == 0 && dlci == 18U, "timeouts: DLC 18 asked");
+	pn[0] = 18U;
+	pn[1] = 0x00U;
+	peer_mux(&rf, 0x01U, 0x81U, pn, sizeof(pn), now + 10U);
+	check(owner.closed_count == 5U && owner.closed_dlci == 18U && owner.closed_reason == BTD_RFCOMM_CLOSED_ERROR, "timeouts: a PN answer refused here closes as an error");
+
+	/* Through it all the session and the phone's DLC 33 stayed. */
+	check(owner.ended_count == 0U, "timeouts: the session never ended");
+	dlc = btd_rfcomm_dlc(&rf, 33U);
+	check(dlc != NULL && dlc->state == BTD_RFCOMM_DLC_CONNECTED, "timeouts: the phone's DLC 33 still connected");
 }

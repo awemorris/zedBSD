@@ -183,7 +183,10 @@ static int phone_take_record(struct btd_phone *phone, const struct btd_pair_hand
 static void phone_limit(struct btd_phone *phone);
 static const char *phone_link_name(const struct btd_phone *phone);
 static void phone_profiles_text(unsigned profiles, char *text, size_t size);
+static void phone_records_update(struct btd_phone *phone);
 static void phone_mns_update(struct btd_phone *phone);
+static void phone_pce_update(struct btd_phone *phone);
+static size_t phone_pce_record(uint8_t *bytes, size_t size);
 static size_t phone_mns_record(uint8_t *bytes, size_t size);
 
 /*
@@ -845,6 +848,7 @@ btd_phone_load(
 	unsigned first_valid;
 	unsigned index;
 	int valid;
+	int migrated;
 	int error;
 
 	/* No record until one is read. */
@@ -885,11 +889,18 @@ btd_phone_load(
 		return EEXIST;
 	}
 
-	/* The valid record, or the first invalid one, kept. */
+	/*
+	 * The valid record, or the first invalid one, kept.  A valid record
+	 * written before ws197-p005 is brought up to date and written back
+	 * (section 8.1; a failure to write leaves it to the next load).
+	 */
 	if (valid_count == 1U) {
 		phone->record = records[first_valid];
 		phone->have_record = 1;
 		phone->record_valid = 1;
+		migrated = btd_phonerec_migrate(&phone->record);
+		if (migrated)
+			(void)btd_phonerec_write(phone->keys_folder, phone->session->address, &phone->record);
 	} else if (count != 0U) {
 		phone->record = records[0];
 		phone->have_record = 1;
@@ -1272,7 +1283,7 @@ phone_presence(
 	int present;
 
 	/* bluetoothd's MNS record follows the record's messages. */
-	phone_mns_update(phone);
+	phone_records_update(phone);
 
 	/* Wanted: a valid record that is on, its owner at the seat. */
 	present = 0;
@@ -2018,7 +2029,7 @@ phone_ready(
 		(void)phone_send(phone, BTD_CID_SIGNALLING, answer, length);
 
 	/* bluetoothd's MNS record offered, for a phone that reads the records at once. */
-	phone_mns_update(phone);
+	phone_records_update(phone);
 
 	/* Succeeded: the profile, when the owner is there. */
 	phone_profile_ready(phone);
@@ -2668,7 +2679,7 @@ phone_ended(
 	phone->state = BTD_PHONE_NONE;
 
 	/* Succeeded: bluetoothd's MNS record withdrawn with the link. */
-	phone_mns_update(phone);
+	phone_records_update(phone);
 }
 
 /*
@@ -3073,8 +3084,14 @@ phone_take_record(
 		return error;
 	}
 
-	/* Each valid one: another phone's, or this phone's of another owner, refuses; the same owner's profiles are kept. */
-	profiles = BTD_PHONEREC_PROFILES;
+	/*
+	 * Each valid one: another phone's, or this phone's of another owner,
+	 * refuses; the same owner's profiles are kept.  A new record has
+	 * messages alone (ws197-p005 section 8.1): contacts and calls start
+	 * only when the user asks, so the phone shows no access prompt nobody
+	 * asked for.
+	 */
+	profiles = BTD_PHONEREC_MESSAGES;
 	for (index = 0U; index < count; index++) {
 		valids[index] = btd_phonerec_valid(phone->keys_folder, phone->session->address, &records[index], phone->hooks.account, phone->hooks.context);
 		if (!valids[index])
@@ -3093,7 +3110,8 @@ phone_take_record(
 			return EPERM;
 		}
 
-		/* The same owner paired it again: its profiles stay. */
+		/* The same owner paired it again: its profiles stay (a record before ws197-p005 brought up to date first). */
+		(void)btd_phonerec_migrate(&records[index]);
 		profiles = records[index].profiles;
 	}
 
@@ -3195,6 +3213,16 @@ phone_profiles_text(
 
 	/* The last comma goes. */
 	text[used - 1U] = '\0';
+}
+
+/* Offers or withdraws bluetoothd's records for the phone: MAP's MNS and PBAP's PCE (ws197-p005 section 3.3). */
+static void
+phone_records_update(
+	struct btd_phone *phone)
+{
+	/* Each record by its own profile. */
+	phone_mns_update(phone);
+	phone_pce_update(phone);
 }
 
 /*
@@ -3302,6 +3330,103 @@ phone_mns_record(
 	/* ServiceName. */
 	btd_sdp_put_uint16(&writer, 0x0100U);
 	btd_sdp_put_text(&writer, "Keiland MNS");
+
+	/* Succeeded: the pairs' length (0 when they did not fit, which register refuses). */
+	if (writer.overflow)
+		return 0U;
+	return writer.used;
+}
+
+/*
+ * Offers or withdraws bluetoothd's PCE record (ws197-p005 section 3.3,
+ * PBAP section 7.1.1): offered while the link is ready and the valid
+ * record's contacts are on and enabled, withdrawn otherwise.  A record
+ * that cannot be offered is logged by its absence only.
+ */
+static void
+phone_pce_update(
+	struct btd_phone *phone)
+{
+	uint8_t pairs[BTD_SDPS_RECORD_MAX];
+	size_t length;
+	int wanted;
+	int error;
+
+	/* Wanted: a ready link, a valid record with contacts, enabled. */
+	wanted = 0;
+	if (phone->state == BTD_PHONE_READY &&
+	    phone->have_record &&
+	    phone->record_valid &&
+	    phone->record.enabled &&
+	    (phone->record.profiles & BTD_PHONEREC_CONTACTS) != 0U)
+		wanted = 1;
+
+	/* No database to offer it in. */
+	if (phone->db == NULL)
+		return;
+
+	/* Withdrawn. */
+	if (!wanted) {
+		if (phone->pce_registered)
+			(void)btd_sdps_unregister(phone->db, phone->pce_handle);
+		phone->pce_registered = 0;
+		return;
+	}
+
+	/* Offered already. */
+	if (phone->pce_registered)
+		return;
+
+	/* Offered. */
+	length = phone_pce_record(pairs, sizeof(pairs));
+	error = btd_sdps_register(phone->db, pairs, length, &phone->pce_handle);
+	if (error != 0)
+		return;
+
+	/* Succeeded: offered. */
+	phone->pce_registered = 1;
+}
+
+/*
+ * Writes the attribute pairs of bluetoothd's PCE record (PBAP section
+ * 7.1.1, Q16 (a)): the class 0x112E, the language base (English, UTF-8,
+ * 0x0100), PBAP 1.1, the name.  A PCE is a client and offers no protocol.
+ * The handle and the browse group are the SDP server's.  Gives the length.
+ */
+static size_t
+phone_pce_record(
+	uint8_t *bytes,
+	size_t size)
+{
+	struct btd_sdp_writer writer;
+
+	/* ServiceClassIDList: the PCE. */
+	btd_sdp_writer_init(&writer, bytes, size);
+	btd_sdp_put_uint16(&writer, 0x0001U);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x112eU);
+	btd_sdp_end(&writer);
+
+	/* LanguageBaseAttributeIDList: "en", UTF-8 (MIBenum 106), the base 0x0100. */
+	btd_sdp_put_uint16(&writer, 0x0006U);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uint16(&writer, 0x656eU);
+	btd_sdp_put_uint16(&writer, 0x006aU);
+	btd_sdp_put_uint16(&writer, 0x0100U);
+	btd_sdp_end(&writer);
+
+	/* BluetoothProfileDescriptorList: PBAP 1.1. */
+	btd_sdp_put_uint16(&writer, 0x0009U);
+	btd_sdp_begin(&writer);
+	btd_sdp_begin(&writer);
+	btd_sdp_put_uuid16(&writer, 0x1130U);
+	btd_sdp_put_uint16(&writer, 0x0101U);
+	btd_sdp_end(&writer);
+	btd_sdp_end(&writer);
+
+	/* ServiceName. */
+	btd_sdp_put_uint16(&writer, 0x0100U);
+	btd_sdp_put_text(&writer, "Keiland Phonebook");
 
 	/* Succeeded: the pairs' length (0 when they did not fit, which register refuses). */
 	if (writer.overflow)

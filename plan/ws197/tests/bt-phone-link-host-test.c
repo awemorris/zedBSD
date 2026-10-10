@@ -53,6 +53,13 @@
  *              phone-seat, root), PHONE LINK, PHONE SHOW, FORGET, and the
  *              load (a record without its bond goes, two valid ones are
  *              neither used); the HID host's limit follows the record
+ *   pbap       ws197-p005 sections 3.3 and 8.1: a pairing's record has
+ *              messages alone; bluetoothd's PCE record offered while
+ *              contacts are on and the link ready, byte for byte; a record
+ *              before ws197-p005 brought up to date on load; the profiles'
+ *              mux on the real phone link and RFCOMM: one child's DLC
+ *              refused by the phone (DM) told to that child alone, the
+ *              other child's DLC still open
  *
  * Each world has a new folder of bonds and records under the folder the
  * script gives.
@@ -66,6 +73,7 @@
 #include "userland/base/bluetoothd/obex.h"
 #include "userland/base/bluetoothd/pair.h"
 #include "userland/base/bluetoothd/phone.h"
+#include "userland/base/bluetoothd/phonemux.h"
 #include "userland/base/bluetoothd/phonerec.h"
 #include "userland/base/bluetoothd/rfcomm.h"
 #include "userland/base/bluetoothd/router.h"
@@ -283,6 +291,13 @@ static void test_absent(void);
 static void test_notices(void);
 static void test_snoop(void);
 static void test_records(void);
+static void test_pbap(void);
+static int pce_record_offered(void);
+static int mux_sdp(void *context, uint16_t uuid);
+static int mux_open(void *context, unsigned server_channel);
+static void mux_close(void *context, unsigned dlci);
+static void other_opened(void *context, unsigned dlci, unsigned server_channel, int ours);
+static void other_closed(void *context, unsigned dlci, int reason);
 static int hook_account(void *context, uid_t uid, char *name, size_t size);
 static void write_bond(uint8_t last, uint8_t key_type);
 static void write_record(uint8_t last, uid_t uid, const char *user, int enabled);
@@ -317,6 +332,7 @@ main(
 	test_notices();
 	test_snoop();
 	test_records();
+	test_pbap();
 
 	/* The count of what failed. */
 	printf("bt-phone-link-host-test: %u checks, %u failed\n", checks, failures);
@@ -509,6 +525,8 @@ controller_run(
 				controller->opcodes[controller->command_count] = opcode;
 				controller->command_count++;
 			}
+
+			/* The key size the test set, for Read Encryption Key Size's answer. */
 			key_size = controller->key_size;
 			cancel_status = controller->cancel_status;
 			auth_status = controller->auth_status;
@@ -538,6 +556,8 @@ controller_run(
 				answer[9] = key_size;
 				answer_length = 10U;
 			}
+
+			/* A cancel is answered at once by Command Complete. */
 			if (opcode == TEST_CANCEL && got >= 10) {
 				/* Create Connection Cancel: the status, the address. */
 				answer[1] = 0x0eU;
@@ -1340,6 +1360,8 @@ test_page(void)
 		world.hid.devices[now].used = 1;
 		world.hid.devices[now].state = BTD_HID_OPEN;
 	}
+
+	/* The clock from here. */
 	now = btd_now_ms();
 	btd_phone_tick(&world.phone, now);
 	check(world.phone.state == BTD_PHONE_NONE && commands_of(TEST_CREATE) == 0U && strcmp(world.phone.why, "busy-links") == 0, "page: held while the HID host uses six links");
@@ -1505,6 +1527,8 @@ test_reasons(void)
 		if (round + 1U < BTD_PHONE_PEER_CLOSED_MAX)
 			check(!world.phone.stopped, "reasons: a short 0x13 pages again");
 	}
+
+	/* The third stopped them. */
 	check(world.phone.stopped && strcmp(world.phone.why, "peer-closed") == 0, "reasons: three short 0x13 stop the pages");
 
 	/* PHONE LINK on starts them again. */
@@ -1847,7 +1871,7 @@ test_records(void)
 	check(error == ENOENT, "records: the invalid record of another phone goes");
 	error = btd_phonerec_read(folder, world.session.address, address, &record);
 	check(error == 0 && record.uid == TEST_UID && strcmp(record.user, "renamed") == 0, "records: the handoff writes the owner's record");
-	check(error == 0 && record.enabled == 1 && record.profiles == BTD_PHONEREC_PROFILES, "records: wanted, every profile on");
+	check(error == 0 && record.enabled == 1 && record.profiles == BTD_PHONEREC_MESSAGES, "records: wanted, messages alone (ws197-p005)");
 	check(world.phone.have_record && world.phone.record_valid && world.hid.limit == BTD_PHONE_HID_LIMIT, "records: kept, the HID host's limit five");
 	close_world();
 
@@ -2052,6 +2076,240 @@ mns_record_offered(void)
 		if (world.records.records[index].length != sizeof(expected))
 			continue;
 		same = memcmp(world.records.records[index].attributes, expected, sizeof(expected));
+		if (same == 0)
+			return 1;
+	}
+
+	/* Not offered. */
+	return 0;
+}
+
+/* What the second child of the mux heard: its DLC opened or closed, and why. */
+static struct {
+	unsigned opened;
+	unsigned opened_dlci;
+	unsigned closed;
+	unsigned closed_dlci;
+	int closed_reason;
+} other;
+
+/*
+ * ws197-p005: a pairing's record has messages alone, bluetoothd's PCE
+ * record follows contacts, an old record is brought up to date on load,
+ * and the profiles' mux runs on the real phone link and RFCOMM.
+ */
+static void
+test_pbap(void)
+{
+	static const char old_record[] =
+		"version 1\nuid 1001\nuser tester\nmessages 1\ncontacts 1\ncalls 1\nenabled 1\n";
+	static struct btd_phonemux mux;
+	struct btd_phonemux_hooks mux_hooks;
+	struct btd_phone_profile child;
+	struct btd_phone_profile mux_profile;
+	struct btd_phonerec record;
+	const struct btd_rfcomm_dlc *dlc;
+	uint8_t address[BTD_ADDRESS_BYTES];
+	char path[1024];
+	const char *why;
+	unsigned map_child;
+	unsigned pbap_child;
+	FILE *file;
+	int error;
+
+	/* The pairing's link: messages alone, the MNS record offered, no PCE record. */
+	open_world();
+	make_address(address, TEST_PHONE);
+	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	exchange();
+	check(world.phone.state == BTD_PHONE_READY && world.phone.record.profiles == BTD_PHONEREC_MESSAGES, "pbap: the pairing's record has messages alone");
+	check(mns_record_offered() && !pce_record_offered(), "pbap: the MNS record without the PCE record");
+
+	/* Contacts on: the PCE record offered byte for byte; off again: withdrawn. */
+	error = btd_phone_link_set(&world.phone, address, TEST_UID, 1, (int)(BTD_PHONEREC_MESSAGES | BTD_PHONEREC_CONTACTS));
+	check(error == 0 && pce_record_offered() && world.phone.pce_registered, "pbap: contacts on, the PCE record offered");
+	error = btd_phone_link_set(&world.phone, address, TEST_UID, 1, (int)BTD_PHONEREC_MESSAGES);
+	check(error == 0 && !pce_record_offered() && !world.phone.pce_registered, "pbap: contacts off, the PCE record withdrawn");
+	close_world();
+
+	/* A record written before ws197-p005 (every profile, no asked line): brought up to date on load and written back. */
+	open_world();
+	make_address(address, TEST_PHONE);
+	write_bond(TEST_PHONE, TEST_KEY_MITM);
+	error = btd_phonerec_path(folder, world.session.address, address, path, sizeof(path));
+	check(error == 0, "pbap: the record's path");
+	file = fopen(path, "w");
+	if (file == NULL) {
+		perror(path);
+		exit(2);
+	}
+
+	/* The old record's text, then the load. */
+	(void)fputs(old_record, file);
+	(void)fclose(file);
+	error = btd_phone_load(&world.phone);
+	check(error == 0 && world.phone.record_valid && world.phone.record.profiles == BTD_PHONEREC_MESSAGES, "pbap: an old record loads with messages alone");
+	error = btd_phonerec_read(folder, world.session.address, address, &record);
+	check(error == 0 && record.have_asked && record.asked == BTD_PHONEREC_MESSAGES && record.profiles == BTD_PHONEREC_MESSAGES, "pbap: written back with asked m");
+	close_world();
+
+	/* The mux on the real phone link: a MAP-like child and a PBAP-like child. */
+	open_world();
+	memset(&mux_hooks, 0, sizeof(mux_hooks));
+	mux_hooks.sdp_query = mux_sdp;
+	mux_hooks.dlc_open = mux_open;
+	mux_hooks.dlc_close = mux_close;
+	btd_phonemux_init(&mux, &mux_hooks);
+	memset(&child, 0, sizeof(child));
+	child.ready = heard_ready;
+	child.ended = heard_ended;
+	child.opened = heard_opened;
+	child.closed = heard_closed;
+	child.open_failed = heard_failed;
+	error = btd_phonemux_add(&mux, &child, &map_child);
+	check(error == 0, "pbap: the MAP-like child");
+	memset(&child, 0, sizeof(child));
+	child.opened = other_opened;
+	child.closed = other_closed;
+	error = btd_phonemux_add(&mux, &child, &pbap_child);
+	check(error == 0, "pbap: the PBAP-like child");
+	btd_phonemux_profile(&mux, &mux_profile);
+	btd_phone_set_profile(&world.phone, &mux_profile);
+	memset(&other, 0, sizeof(other));
+	(void)hand_over(TEST_KEY_MITM, 16U, 1, 0x5a020cU, &why);
+	exchange();
+	check(world.phone.state == BTD_PHONE_READY && world.heard.ready == 1U, "pbap: the mux told the first child the link is ready");
+
+	/* The MAP-like child's DLC to the phone's MAS channel opens, to it. */
+	error = btd_phonemux_dlc_open(&mux, map_child, TEST_MAS_CHANNEL);
+	check(error == 0, "pbap: the first child's DLC asked for");
+	exchange();
+	check(world.heard.opened == 1U && world.heard.dlci == 2U * TEST_MAS_CHANNEL && other.opened == 0U, "pbap: opened to the first child alone");
+
+	/* The PBAP-like child's DLC to a channel the phone does not serve: the phone's DM, to that child alone. */
+	error = btd_phonemux_dlc_open(&mux, pbap_child, TEST_MAS_CHANNEL + 1U);
+	check(error == 0, "pbap: the second child's DLC asked for");
+	exchange();
+	check(other.closed == 1U && other.closed_dlci == 2U * (TEST_MAS_CHANNEL + 1U) && other.closed_reason == BTD_RFCOMM_CLOSED_REFUSED, "pbap: refused, told to the second child");
+	check(world.heard.closed == 0U && other.opened == 0U, "pbap: nothing to the first child, nothing opened");
+	dlc = btd_rfcomm_dlc(&world.phone.rfcomm, 2U * TEST_MAS_CHANNEL);
+	check(dlc != NULL && dlc->state == BTD_RFCOMM_DLC_CONNECTED, "pbap: the first child's DLC still open");
+
+	/* The channel free again: the second child asks again (refused again), no busy left behind. */
+	error = btd_phonemux_dlc_open(&mux, pbap_child, TEST_MAS_CHANNEL + 1U);
+	check(error == 0, "pbap: the channel free after the refusal");
+	exchange();
+	check(other.closed == 2U, "pbap: refused again");
+	close_world();
+}
+
+/* The mux's SDP query on the world's phone link. */
+static int
+mux_sdp(
+	void *context,
+	uint16_t uuid)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's query. */
+	error = btd_phone_sdp_query(&world.phone, uuid);
+	return error;
+}
+
+/* The mux's DLC on the world's phone link. */
+static int
+mux_open(
+	void *context,
+	unsigned server_channel)
+{
+	int error;
+
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's DLC. */
+	error = btd_phone_dlc_open(&world.phone, server_channel, btd_now_ms());
+	return error;
+}
+
+/* The mux's close of a DLC nobody owns, on the world's phone link. */
+static void
+mux_close(
+	void *context,
+	unsigned dlci)
+{
+	UNUSED_PARAMETER(context);
+
+	/* The phone link's close. */
+	(void)btd_phone_dlc_close(&world.phone, dlci, btd_now_ms());
+}
+
+/* The second child heard its DLC open. */
+static void
+other_opened(
+	void *context,
+	unsigned dlci,
+	unsigned server_channel,
+	int ours)
+{
+	UNUSED_PARAMETER(context);
+	UNUSED_PARAMETER(server_channel);
+	UNUSED_PARAMETER(ours);
+
+	/* Counted. */
+	other.opened++;
+	other.opened_dlci = dlci;
+}
+
+/* The second child heard its DLC close. */
+static void
+other_closed(
+	void *context,
+	unsigned dlci,
+	int reason)
+{
+	UNUSED_PARAMETER(context);
+
+	/* Counted, with its DLCI and why. */
+	other.closed++;
+	other.closed_dlci = dlci;
+	other.closed_reason = reason;
+}
+
+/*
+ * Tells whether the SDP server offers bluetoothd's PCE record, its
+ * attributes byte for byte as written by hand from PBAP section 7.1.1 and
+ * Core Vol 3 Part B (the handle, whatever its value, first; the public
+ * browse group before 0x0006).
+ */
+static int
+pce_record_offered(void)
+{
+	static const uint8_t expected[] = {
+		0x09U, 0x00U, 0x00U, 0x0aU, 0x00U, 0x00U, 0x00U, 0x00U,
+		0x09U, 0x00U, 0x01U, 0x36U, 0x00U, 0x03U, 0x19U, 0x11U, 0x2eU,
+		0x09U, 0x00U, 0x05U, 0x36U, 0x00U, 0x03U, 0x19U, 0x10U, 0x02U,
+		0x09U, 0x00U, 0x06U, 0x36U, 0x00U, 0x09U, 0x09U, 0x65U, 0x6eU, 0x09U, 0x00U, 0x6aU, 0x09U, 0x01U, 0x00U,
+		0x09U, 0x00U, 0x09U, 0x36U, 0x00U, 0x09U, 0x36U, 0x00U, 0x06U, 0x19U, 0x11U, 0x30U, 0x09U, 0x01U, 0x01U,
+		0x09U, 0x01U, 0x00U, 0x25U, 0x11U, 'K', 'e', 'i', 'l', 'a', 'n', 'd', ' ', 'P', 'h', 'o', 'n', 'e', 'b', 'o', 'o', 'k'
+	};
+	unsigned index;
+	int same;
+
+	/* Each record offered: the PCE's, byte for byte after its handle. */
+	for (index = 0U; index < BTD_SDPS_RECORDS_MAX; index++) {
+		/* A free slot, or a record of another length. */
+		if (!world.records.records[index].used)
+			continue;
+		if (world.records.records[index].length != sizeof(expected))
+			continue;
+
+		/* The handle's attribute, then everything after its value. */
+		same = memcmp(world.records.records[index].attributes, expected, 4U);
+		if (same != 0)
+			continue;
+		same = memcmp(world.records.records[index].attributes + 8, expected + 8, sizeof(expected) - 8U);
 		if (same == 0)
 			return 1;
 	}
