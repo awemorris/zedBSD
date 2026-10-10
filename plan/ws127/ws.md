@@ -9,7 +9,9 @@ Objectives: O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1、2026-10-17）
 Queue: none
-Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し・候補の一覧、source は変えない）を最初の Queue に**。p001 の最後にユーザーが候補を選び、p002 以降の採否と順が決まる。p002〜p007 は p001 の結果で planned にする。
+Resume point: p013のdouble-tap drag修正はmain e654733f1でcleared。実機trackpadのGUI UATはユーザー、既存p007/WS全体条件を維持。
+
+以前のResume point（2026-10-02 計画、履歴）: **p001（棚卸し・回帰の取り直し・候補の一覧、source は変えない）を最初の Queue に**。p001 の最後にユーザーが候補を選び、p002 以降の採否と順が決まる。p002〜p007 は p001 の結果で planned にする。
 2026-10-02 user のベータ1 の採否（[requirements](requirements.md) §5 への回答）:
 - 推奨の 5 つ（BUG-140/141 と試験の直し、BUG-142 の調査、PDF の thumbnail と disk cache（F-035）、DnD の自動 scroll と spring-loaded（F-039）、「Move To」「Open in New Window」）を入れる。
 - 日本語 UI は入れない:「ローカライズの仕組みをあとで実装して、複数の言語で一斉に対応したいです。ベータ2以降です。」
@@ -57,7 +59,7 @@ Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し�
 | [ws127-p010](phase010/phase.md) | directory の名前（breadcrumb）のタップ・クリックで path を入力、約 1 秒後に path の候補の dropdown（2026-10-04 ユーザーの要望） | cleared（2026-10-05 Q1） | BUG-177・BUG-190 と揃える |
 | [ws127-p011](phase011/phase.md) | 左の pane の Home は ~/ の一覧に、今の dashboard は「Today」という別の頁に（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | — |
 | [ws127-p012](phase012/phase.md) | Files の Tags の機能を削除（macOS の模倣を避ける）（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | Guardrail の D14・checker の許可の表の見直しは Q1 |
-| [ws127-p013](phase013/phase.md) | double-tap dragの誤open修正 | in-progress | 現main DnD | 本Codex有限UAT Queue |
+| [ws127-p013](phase013/phase.md) | double-tap dragの誤open修正 | cleared | 現main DnD | 本Codex有限UAT Queue |
 
 候補のうち Phase にしていない物（p001 で選ばれたら Phase を足す）: F-033（カラム・ギャラリーの表示、4h 以上）、F-036（装置の unmount・eject、USB の storage の hotplug の通知が要る）、
 F-032・F-034・F-040（ベータ1 の外の見込み）。
@@ -93,3 +95,7 @@ F-032・F-034・F-040（ベータ1 の外の見込み）。
 ## 2026-10-10 double-tap drag UAT修正
 
 ユーザーの誤open報告を受けp013を追加。[ws197媒体UAT Queue](../ws197/codex-queue.md)で、2回目のpressをreleaseまで保留し、drag/閾値超過でopenとclick系列を取り消す。通常double-click、single selection、既存DnDを維持。検証は[ws157-p009](../ws157/phase009/phase.md)が今回全sourceを担当。実機trackpad操作のユーザーUATは別。
+
+## 2026-10-10 UAT修正の統合とscoped clearance
+
+ws127-p013 cleared。source `e654733f1eb6e1296eacf34b5dff6002a5dd17e1` をmainへ統合しclean HEADを確認。[証拠](../ws157/tests/media-uat-verification-20261010.md)。Phone起動NULL参照修正、提供JPEGの表示、短いhost/全文規約/buildが今回の有限条件を満たす。今回全変更の最終確認はws157-p009もcleared。実機GUI UATと各WS全体の既存未完条件は維持、WS statusはincompleteのまま。共有master/Queue/cacheの投影はQ1、GitHub未公開。

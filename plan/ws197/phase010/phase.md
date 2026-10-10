@@ -62,3 +62,5 @@ mainへ受信source/evidence `035d1d25b` をfast-forward統合済み。source同
 ## 2026-10-10 viewer起動の補完
 
 最新ユーザーの5項目を扱う[ws197-p012](../phase012/phase.md)が受信媒体をdouble-clickでImage Viewer/Video Playerへ開くsourceを実装する。保存pathをview requestへcopyして後続syncの並べ替えから切り離す。p010のplayer起動の出力はこのPhaseの成果を参照する。送信の未完条件とin-progress状態は保持。
+
+2026-10-10結果: p012の添付viewer起動/thumbnail/起動NULL参照修正はmain `e654733f1eb6e1296eacf34b5dff6002a5dd17e1`、scoped cleared。p010の送信残件とin-progress statusは維持。

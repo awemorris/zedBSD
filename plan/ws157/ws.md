@@ -7,8 +7,8 @@ Status: incomplete（2026-10-08 q902 P1 の照合: p001・p004・p005 cleared（
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
-Queue: [Codexメディア管理実行記録](../ws197/codex-queue.md) active（media-uat-20261010）。共有Queue投影はQ1。
-Resume point: 2026-10-10 p006/p007 cleared。Media JSON CLI/compositor/PhotosとPhone＋DnDをmain 874e12d3bへ統合。実機GUI UATは未実施。WS全体はベータ3の残る受入を含みincomplete。
+Queue: [Codexメディア管理実行記録](../ws197/codex-queue.md) finished（media-uat-20261010）。共有Queue投影はQ1。
+Resume point: 2026-10-10 p006/p007/p008/p009 cleared。folder/背景import/JPEGのUAT修正をmain e654733f1へ統合、GUI操作はユーザー確認。Media JSON CLI/compositor/PhotosとPhone＋DnDをmain 874e12d3bへ統合。実機GUI UATは未実施。WS全体はベータ3の残る受入を含みincomplete。
 Target: **ベータ3**（続き）（2026-10-07 ユーザー「下記をベータ3に移動します。・左手デバイスOSK、ゲームパッドOSK, 写真の続き, カレンダーの続き, IMEの続き、POSIX, NVMe, make, RTL8822C, Sleep」）
 <!-- awesome-plan-current:end -->
 
@@ -31,8 +31,8 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 | [ws157-p005](phase005/phase.md) | app（取り込み・album の card・縮小画像の cache、AAT） | cleared（2026-10-07 Q1、T1-331） | p004 |
 | [ws157-p006](phase006/phase.md) | メディアCLI・compositor API・Photos移行 | cleared | p004 source |
 | [ws157-p007](phase007/phase.md) | 最終全文規約・build・回帰 | cleared | p006、ws197-p011 |
-| [ws157-p008](phase008/phase.md) | folder選択・背景import/list・大きなJPEGの表示修正 | in-progress | p006 source、ユーザーJPEG |
-| [ws157-p009](phase009/phase.md) | 今回UAT全sourceの全文規約/host/build/main統合 | in-progress | ws197-p012、ws127-p013、p008 |
+| [ws157-p008](phase008/phase.md) | folder選択・背景import/list・大きなJPEGの表示修正 | cleared | p006 source、ユーザーJPEG |
+| [ws157-p009](phase009/phase.md) | 今回UAT全sourceの全文規約/host/build/main統合 | cleared | ws197-p012、ws127-p013、p008 |
 
 ## p001 の観点（要件の検討）
 
@@ -62,3 +62,7 @@ p006・p007をcleared。main `874e12d3b`、[最終検証](tests/verification-202
 ## 2026-10-10 Photos UAT修正の追加
 
 ユーザー指定でp008/p009を追加。共通chooserにdirectory選択を追加し、Photos import/listをprivate Wayland clientを持つworkerへ移す。metadataのUI所有/FD handoff/通知coalesce/close/dirty marksを維持。実機JPEGはdecode成功後の16MiB GPU resource上限が原因で、Image ViewerのCPU sampling fallbackへ修正。[ws197-p012](../ws197/phase012/phase.md)/[ws127-p013](../ws127/phase013/phase.md)の変更もp009で検証する。ベータ3のWS全体scopeは維持。
+
+## 2026-10-10 UAT修正の統合とscoped clearance
+
+ws157-p008, ws157-p009 cleared。source `e654733f1eb6e1296eacf34b5dff6002a5dd17e1` をmainへ統合しclean HEADを確認。[証拠](../ws157/tests/media-uat-verification-20261010.md)。Phone起動NULL参照修正、提供JPEGの表示、短いhost/全文規約/buildが今回の有限条件を満たす。今回全変更の最終確認はws157-p009もcleared。実機GUI UATと各WS全体の既存未完条件は維持、WS statusはincompleteのまま。共有master/Queue/cacheの投影はQ1、GitHub未公開。

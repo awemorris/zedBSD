@@ -2,7 +2,7 @@
 
 Scope: [media-uat-20261010](../../ws197/codex-queue.md)、ws197-p012 / ws127-p013 / ws157-p008 / p009。
 Worktree: `.claude/worktrees/ws197-media-uat`、branch `codex/ws197-media-uat`、base `624a7301c`。
-Source commit / main read-back: 統合待ち。共有master/Queue/cacheの更新とGitHub公開はQ1へ保留。
+Source commit / main read-back: `e654733f1eb6e1296eacf34b5dff6002a5dd17e1`。mainへのfast-forward後、HEAD一致/cleanを確認。共有master/Queue/cacheの更新とGitHub公開はQ1へ保留。
 
 ## 原因と変更
 
@@ -64,4 +64,4 @@ Source範囲: desktop/files (files.h/ui-input/ui-drag)、imageview (canvas/draw/
 | /bin/imageview | 1636952486 | 126736 |
 | /lib/libkeiland.so | 42534013 | 437880 |
 
-実機交換後のcksumは5fileともlocalと一致。Photosは6秒起動でREADY、private workerのMEDIA error0/snapshot0、DONE timeout/exit0を確認。既存media番号0/1 (mp4) のサムネイルEINVALは旧版でも再現。新実行で番号2/3 (JPEG) もEINVALとなったが、旧版での同条件比較は未確認であり、原因や退行の有無は未判定。今回の添付JPEGのGPU allocation failureと同一原因とは判断しない。対象mediaのdecode調査は残件として保持。フォルダchooserの実操作、背景import中のGUI操作、draftthumbnailとtrackpadの実機操作、受信動画のplayer起動はユーザーUAT。MMS送信/HFP/PBAP、各WS全体の残件はこのQueueでclearしない。
+実機交換後のcksumは5fileともlocalと一致。Photosは最終snapshot片付け修正前の6秒起動でREADY、private workerのMEDIA error0/snapshot0、DONE timeout/exit0を確認。片付け修正後はnamed build/style-checkを再実施し、実機へ交換してCRC一致を確認、追加GUI起動は未実施。既存media番号0/1 (mp4) のサムネイルEINVALは旧版でも再現。新実行で番号2/3 (JPEG) もEINVALとなったが、旧版での同条件比較は未確認であり、原因や退行の有無は未判定。今回の添付JPEGのGPU allocation failureと同一原因とは判断しない。対象mediaのdecode調査は残件として保持。フォルダchooserの実操作、背景import中のGUI操作、draftthumbnailとtrackpadの実機操作、受信動画のplayer起動はユーザーUAT。MMS送信/HFP/PBAP、各WS全体の残件はこのQueueでclearしない。

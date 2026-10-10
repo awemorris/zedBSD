@@ -8,9 +8,9 @@ Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex承認済み実行記録](codex-queue.md)、media-uat-20261010 active。共有QueueはQ1が反映。
+Queue: [Codex承認済み実行記録](codex-queue.md)、media-uat-20261010 finished。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
+Resume point: p005/p011/p012 cleared。媒体UAT修正をmain e654733f1へ統合、Phone起動SIGSEGVは実機修正版exit0。添付操作GUI UATは次回起動。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -50,7 +50,7 @@ Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/bui
 | p009 | 規約の全文の見直し | 2 | planned |
 | [p010](phase010/phase.md) | MMS写真/動画送受信（受信統合済み、送信は未完。p012がviewer起動を補完） | — | in-progress |
 | [ws197-p011](phase011/phase.md) | Phoneの＋によるメディア選択とDnD・仮添付（ws157-p006 API出力に依存） | — | cleared |
-| [ws197-p012](phase012/phase.md) | 添付のdouble-click起動・draftサムネイル・captionなし写真の起動SIGSEGV修正 | — | in-progress |
+| [ws197-p012](phase012/phase.md) | 添付のdouble-click起動・draftサムネイル・captionなし写真の起動SIGSEGV修正 | — | cleared |
 
 関連の Bug: [BUG-282](../bugs/BUG-282.md)（WS143 の hid.c の page の途中の Connection Request の取り違え、p003 i03 と同じ形で直す）。Future Work: fw-bt-goep2（ERTM・GOEP 2.0、MAP 1.4・PBAP 1.2）、F-086（SUBSCRIBE の phone の分は p003）。
 
@@ -139,3 +139,7 @@ main統合checkpoint: `035d1d25b` (WIP) fast-forward済み、c43a01797の既存�
 ## 2026-10-10 メディアUAT修正の追加
 
 ユーザーの5項目とPhone起動待ちの追加報告を有限[Queue](codex-queue.md)へ記録。p012を追加し、写真/動画を各viewerへ開く操作、draft写真のサムネイル、再読込したcaptionなしmediaのNULL参照を修正する。関連の[ws127-p013](../ws127/phase013/phase.md)、[ws157-p008/p009](../ws157/ws.md)と並行して本セッションが実装・検証・main統合する。p010の送信、HFP/PBAP、WS全体p009の義務は維持。共有master/Queue/cacheへの投影はQ1。
+
+## 2026-10-10 UAT修正の統合とscoped clearance
+
+ws197-p012 cleared。source `e654733f1eb6e1296eacf34b5dff6002a5dd17e1` をmainへ統合しclean HEADを確認。[証拠](../ws157/tests/media-uat-verification-20261010.md)。Phone起動NULL参照修正、提供JPEGの表示、短いhost/全文規約/buildが今回の有限条件を満たす。今回全変更の最終確認はws157-p009もcleared。実機GUI UATと各WS全体の既存未完条件は維持、WS statusはincompleteのまま。共有master/Queue/cacheの投影はQ1、GitHub未公開。
