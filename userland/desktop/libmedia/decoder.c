@@ -51,7 +51,8 @@ struct media_scaler {
  * that cannot work, or does not take the codec, passes it on).
  */
 static const struct media_decoder_ops *const decoder_backends[] = {
-	&media_avcodec_ops,
+	&media_vkvideo_ops,
+	&media_aac_ops,
 };
 
 /*
@@ -62,14 +63,7 @@ static const struct media_decoder_ops *const decoder_backends[] = {
 int
 media_codec_load(void)
 {
-	int status;
-
-	/* The add-in's own load. */
-	status = media_avcodec_ops.load();
-	if (status != 0)
-		return status;
-
-	/* Succeeded: the add-in decodes. */
+	/* Succeeded: built-in codecs have no optional software-library prerequisite. */
 	return 0;
 }
 
@@ -79,11 +73,8 @@ media_codec_load(void)
 const char *
 media_codec_reason(void)
 {
-	const char *reason;
-
-	/* The add-in's text. */
-	reason = media_avcodec_ops.reason();
-	return reason;
+	/* Native capability problems belong to the selected track, not process startup. */
+	return "";
 }
 
 /*
@@ -110,11 +101,10 @@ media_decoder_open(
 		status = decoder_backends[index]->open(track, &state);
 		if (status == ENOMEM)
 			return ENOMEM;
-		if (status != 0) {
-			if (index == 0)
-				first = status;
+		if (status == MEDIA_PROBLEM_FORMAT)
 			continue;
-		}
+		if (status != 0)
+			return status;
 
 		/* The decoder, keeping its back end. */
 		opened = malloc(sizeof(*opened));
@@ -355,4 +345,74 @@ media_scaler_free(
 	if (scaler->state != NULL)
 		scaler->ops->scaler_free(scaler->state);
 	free(scaler);
+}
+
+/*
+ * Reports the selected native execution backend separately from the codec.
+ */
+const char *
+media_decoder_backend(
+	const struct media_decoder *decoder)
+{
+	/* A missing decoder has no selected backend. */
+	if (decoder == NULL)
+		return "none";
+
+	/* Succeeded: the backend identity stays stable for this decoder's lifetime. */
+	return decoder->ops->name;
+}
+
+/*
+ * Trims native audio at the source-sample boundary following a seek.
+ */
+int
+media_decoder_trim(
+	struct media_decoder *decoder,
+	int64_t before_us)
+{
+	int error;
+
+	/* Only native audio backends with an exact trimming contract implement this operation. */
+	if (decoder->ops->trim == NULL)
+		return ENOTSUP;
+	error = decoder->ops->trim(decoder->state, before_us);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: subsequent output will begin at the requested sample boundary. */
+	return 0;
+}
+
+/*
+ * Reports the native codec frame duration needed to reconstruct overlap before a seek target.
+ */
+int64_t
+media_decoder_frame_us(
+	const struct media_decoder *decoder)
+{
+	int64_t duration;
+
+	/* Backends without overlap preroll report no required preceding frame. */
+	if (decoder->ops->frame_us == NULL)
+		return 0;
+	duration = decoder->ops->frame_us(decoder->state);
+
+	/* Succeeded: callers may seek this far before their desired trimmed position. */
+	return duration;
+}
+
+/*
+ * Reports a retained picture's sample aspect ratio for presentation geometry.
+ */
+void
+media_frame_aspect(
+	const struct media_frame *frame,
+	int *num,
+	int *den)
+{
+	/* Unspecified picture metadata uses square samples. */
+	*num = 1;
+	*den = 1;
+	if (frame->ops->picture_aspect != NULL)
+		frame->ops->picture_aspect(frame->picture, num, den);
 }

@@ -2,7 +2,7 @@
 
 # ws202-p007: Music を libavcodec なしで
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 3 LW

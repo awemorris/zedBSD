@@ -546,9 +546,16 @@ engine_run(
 
 		/* Its decoder. */
 		if (engine->video != NULL && packet.track == engine->video_track)
-			(void)engine_feed(engine, engine->video, &packet);
+			status = engine_feed(engine, engine->video, &packet);
 		else if (engine->sound != NULL && packet.track == engine->sound_track)
-			(void)engine_feed(engine, engine->sound, &packet);
+			status = engine_feed(engine, engine->sound, &packet);
+		if (status < 0) {
+			(void)pthread_mutex_lock(&engine->lock);
+			engine->state = MEDIA_FAILED;
+			engine->problem = 0;
+			(void)pthread_mutex_unlock(&engine->lock);
+			engine_wake(engine);
+		}
 	}
 
 	/* What the thread opened goes with it. */
@@ -708,6 +715,9 @@ engine_feed(
 			return status;
 	}
 
+	if (status != 0)
+		return -status;
+
 	/* What comes out of it. */
 	status = engine_drain(engine, decoder);
 	return status;
@@ -727,7 +737,9 @@ engine_drain(
 	/* Each one. */
 	for (;;) {
 		received = media_decoder_receive(decoder, &time_us);
-		if (!received)
+		if (received < 0)
+			return received;
+		if (received == 0)
 			return 0;
 		if (decoder != engine->video)
 			continue;
@@ -735,7 +747,7 @@ engine_drain(
 		/* A picture, queued at its time. */
 		picture = media_decoder_picture(decoder);
 		if (picture == NULL)
-			continue;
+			return -ENOMEM;
 		status = engine_picture(engine, picture, (double)time_us / 1000000.0);
 
 		/* A seek or the end stops the drain. */

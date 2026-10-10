@@ -2,7 +2,7 @@
 
 # ws202-p010: Vulkan Video の back end (2) 表示順・seek・失敗・表、media-probe の video、5330 の小さい確認
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW

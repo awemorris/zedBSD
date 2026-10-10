@@ -35,7 +35,7 @@
  * read.  The sound is turned into 16-bit stereo at the stream's rate here.
  */
 
-#include "media-private.h"
+#include "private.h"
 #include "avcodec-layout.h"
 
 #include <dlfcn.h>
@@ -130,7 +130,7 @@ struct addin_decoder {
 	void *context;
 	void *packet;
 	void *frame;
-	struct media_bitstream bitstream;
+	struct app_bitstream bitstream;
 	const char *name;
 	unsigned kind;
 	int64_t pending[CODEC_PENDING_MAX];
@@ -213,7 +213,7 @@ static int addin_picture_scale(const void *frame, void **scaler, uint32_t *pixel
 static void addin_scaler_free(void *scaler);
 
 /* The add-in as libmedia's decoder.c calls it: the software decoding back end. */
-const struct media_decoder_ops media_avcodec_ops = {
+const struct app_decoder_ops app_avcodec_ops = {
 	"libavcodec",
 	addin_load,
 	addin_reason,
@@ -229,6 +229,7 @@ const struct media_decoder_ops media_avcodec_ops = {
 	addin_picture_size,
 	addin_picture_scale,
 	addin_scaler_free,
+	NULL,
 	NULL,
 	NULL,
 };
@@ -313,7 +314,7 @@ addin_open(
 	}
 
 	/* The stream's conversion (the configuration in the stream instead of extradata). */
-	status = media_bitstream_open(&decoder->bitstream, track->codec, track->private_data, track->private_size);
+	status = app_bitstream_open(&decoder->bitstream, track->codec, track->private_data, track->private_size);
 	if (status != 0) {
 		free(decoder);
 		return MEDIA_PROBLEM_FORMAT;
@@ -424,7 +425,7 @@ addin_send(
 	}
 
 	/* The bytes as the decoder reads them. */
-	status = media_bitstream_convert(&decoder->bitstream, packet->data, packet->size, packet->keyframe, &bytes, &size);
+	status = app_bitstream_convert(&decoder->bitstream, packet->data, packet->size, packet->keyframe, &bytes, &size);
 	if (status != 0)
 		return EINVAL;
 	if (size == 0U || size > (size_t)0x7fffffff)
@@ -660,7 +661,7 @@ addin_close(
 		codec.av_packet_free(&decoder->packet);
 	if (decoder->context != NULL)
 		codec.avcodec_free_context(&decoder->context);
-	media_bitstream_close(&decoder->bitstream);
+	app_bitstream_close(&decoder->bitstream);
 	free(decoder);
 }
 
@@ -767,7 +768,7 @@ codec_load(void)
 	/* The pixel format the window takes, by name. */
 	if (codec.error == 0)
 		codec.bgra = codec.av_get_pix_fmt("bgra");
-	media_log("CODEC load error=%d major=%u reason=%s", codec.error, codec.major, codec.reason);
+	app_codec_log("CODEC load error=%d major=%u reason=%s", codec.error, codec.major, codec.reason);
 }
 
 /*

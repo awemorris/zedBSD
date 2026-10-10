@@ -2,7 +2,7 @@
 
 # ws202-p011: Video Player、media-probe の音、利用者の文書
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 3 LW

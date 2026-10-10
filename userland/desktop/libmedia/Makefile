@@ -9,7 +9,9 @@ include $(dir $(lastword $(MAKEFILE_LIST)))../package.mk
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 # WS202 private bit/AAC input helpers are linked normally; the native decoder and app adapter migration follow.
 LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia/decoder.c \
-	userland/desktop/libmedia/avcodec.c userland/desktop/libmedia/bitstream.c \
+	userland/desktop/libmedia/bitstream.c userland/desktop/libmedia/picture.c \
+	userland/desktop/libmedia/h264.c userland/desktop/libmedia/h264-dpb.c \
+	userland/desktop/libmedia/vkvideo.c userland/desktop/libmedia/vkvideo-runtime.c \
 	userland/desktop/libmedia/bits.c userland/desktop/libmedia/aac-input.c \
 	userland/desktop/libmedia/aac-huffman.c userland/desktop/libmedia/aac-codec.c \
 	userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \

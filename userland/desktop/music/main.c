@@ -188,7 +188,7 @@ main(
 	mu_log("AUDIO error=%d", error);
 	if (error != 0)
 		(void)snprintf(music.view.problem, sizeof(music.view.problem), "No sound: the sound service is not running.");
-	error = media_codec_load();
+	error = app_codec_load();
 	if (error != 0)
 		(void)snprintf(music.view.problem, sizeof(music.view.problem), "Playing needs libavcodec (the libavcodec package).");
 

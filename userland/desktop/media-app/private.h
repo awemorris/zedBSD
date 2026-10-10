@@ -12,10 +12,10 @@
  * private data (bitstream.c), and the library's log.
  */
 
-#ifndef LIBMEDIA_MEDIA_PRIVATE_H
-#define LIBMEDIA_MEDIA_PRIVATE_H
+#ifndef MEDIA_APP_PRIVATE_H
+#define MEDIA_APP_PRIVATE_H
 
-#include "media-decoder.h"
+#include "decoder.h"
 
 #include <stddef.h>
 #include <stdint.h>
@@ -31,7 +31,7 @@
  * the back ends in its table's order; the first that opens a track
  * decodes it.  The operations follow media-decoder.h's.
  */
-struct media_decoder_ops {
+struct app_decoder_ops {
 	const char *name;
 	int (*load)(void);
 	const char *(*reason)(void);
@@ -59,7 +59,7 @@ struct media_decoder_ops {
  * (parameter sets or headers), the ADTS header's fields, and the output
  * being built.
  */
-struct media_bitstream {
+struct app_bitstream {
 	unsigned codec;
 	unsigned length_size;
 	unsigned char *prefix;
@@ -73,18 +73,19 @@ struct media_bitstream {
 	size_t output_room;
 };
 
-
+/* The add-in that opens FFmpeg's libavcodec (avcodec.c). */
+extern const struct app_decoder_ops app_avcodec_ops;
 
 /* Original LC reconstruction, with optional GPU video kept in a separate native backend. */
-extern const struct media_decoder_ops media_aac_ops;
-extern const struct media_decoder_ops media_vkvideo_ops;
+
+
 
 /* The bitstream conversion (bitstream.c). */
-int media_bitstream_open(struct media_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);
-int media_bitstream_convert(struct media_bitstream *stream, const unsigned char *data, size_t size, int keyframe, const unsigned char **result, size_t *result_size);
-void media_bitstream_close(struct media_bitstream *stream);
+int app_bitstream_open(struct app_bitstream *stream, unsigned codec, const unsigned char *private_data, size_t private_size);
+int app_bitstream_convert(struct app_bitstream *stream, const unsigned char *data, size_t size, int keyframe, const unsigned char **result, size_t *result_size);
+void app_bitstream_close(struct app_bitstream *stream);
 
 /* A line of the library's log, to the caller's function (media_set_log). */
-void media_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
+void app_codec_log(const char *format, ...) __attribute__((format(printf, 1, 2)));
 
 #endif

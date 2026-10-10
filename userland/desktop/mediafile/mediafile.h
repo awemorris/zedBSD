@@ -72,6 +72,14 @@ struct media_track {
 	int64_t duration_us;
 	uint64_t packet_count;
 	uint64_t dropped_count;
+
+	/* Presentation metadata is optional; zero means unknown and decoder metadata takes precedence. */
+	int64_t end_us;
+	uint32_t aspect_num;
+	uint32_t aspect_den;
+	unsigned colour_matrix;
+	int colour_present;
+	int full_range;
 };
 
 /*

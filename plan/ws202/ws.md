@@ -153,3 +153,7 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 ## 2026-10-10 AAC入力の部分結果
 
 [bits/AAC入力の証拠](aac-input-result-20261010.md)。p003 i04とp005 i05の有限partial scopeをclearedとして終了、wholeはuncleared。private sourceはlibmediaへ通常build登録し、host plain/ASan/UBSan・warning0 build・exports/C全文reviewを確認。PCM/暗黙FIL SBR/CRC/全parser/backend/app移管/H.264の残件は保存。現役host試験は[run-host-aac-input.sh](tests/run-host-aac-input.sh)と[host-aac-input.c](tests/host-aac-input.c)。main `ee7df65dc`の第3版WS/designとの意味の統合、Master/共有Queue/Guardrail/GitHubはQ1へpending。
+
+## H.264規格照合の設計補正（2026-10-10）
+
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。

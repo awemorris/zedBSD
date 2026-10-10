@@ -49,11 +49,15 @@ int media_decoder_send(struct media_decoder *decoder, const struct media_packet 
 int media_decoder_receive(struct media_decoder *decoder, int64_t *time_us);
 struct media_frame *media_decoder_picture(struct media_decoder *decoder);
 size_t media_decoder_sound(struct media_decoder *decoder, int16_t *samples, size_t capacity, uint32_t rate);
+const char *media_decoder_backend(const struct media_decoder *decoder);
+int media_decoder_trim(struct media_decoder *decoder, int64_t before_us);
+int64_t media_decoder_frame_us(const struct media_decoder *decoder);
 void media_decoder_flush(struct media_decoder *decoder);
 void media_decoder_close(struct media_decoder *decoder);
 
 /* A picture taken from a decoder, and the scaler that draws it. */
 void media_frame_free(struct media_frame **frame);
+void media_frame_aspect(const struct media_frame *frame, int *num, int *den);
 void media_frame_size(const struct media_frame *frame, int *width, int *height);
 int media_frame_scale(const struct media_frame *frame, struct media_scaler **scaler, uint32_t *pixels, size_t stride, int width, int height);
 void media_scaler_free(struct media_scaler *scaler);

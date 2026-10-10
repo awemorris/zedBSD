@@ -2,7 +2,7 @@
 
 # ws202-p015: H.264 の frame_num の gap・MMCO 5・seek の後の DPB
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 4 LW
@@ -49,3 +49,7 @@ vkvideo-probe に無い参照の管理（design §5.3・§5.7）を足し、open
 ## 構造改訂と部分結果（2026-10-10）
 
 gap/MMCO5のscopeは維持。conformanceの取得/利用条件は未確認のため未実施として保持し、標準readbackとの実hashをp016/p012で確認する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
+
+## H.264規格照合の設計補正（2026-10-10）
+
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。

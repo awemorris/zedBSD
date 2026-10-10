@@ -2,7 +2,7 @@
 
 # ws202-p009: Vulkan Video の back end (1) device・session・decode・読み出し
 
-Status: planned
+Status: in-progress
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 7 LW
@@ -63,3 +63,7 @@ Vulkan queryで選び、機種名/i915の固定判定をしない。Tile Yをlib
 標準Vulkan Video queryでNV12のDECODE_DST/必要なDPBとTRANSFER_SRCを要求する。decode queueとは別にgraphics/transfer queueを選ぶ場合、共有する出力imageは標準CONCURRENT sharing（両familyを列挙）または正しいownership transferとする。decode fence/status成功後、PLANE_0のextentはwidth/height、PLANE_1はceil(width/2)/ceil(height/2)、format compatible texelは1/2 byte。両planeのVkBufferImageCopyをHOST_VISIBLE staging bufferへ記録し、transfer fenceと必要なinvalidate後にlinear NV12だけをpictureへ渡す。offset/rowLengthをsample単位で計算し、容量/overflowを確認。libmedia内Tile Yとprivate subresourceLayoutの読取りは廃止。対応がないdeviceは明示DEVICE/PROFILE、app側adapterがfallbackする。
 
 ユーザー承認のdriver/libvulkan補完はp016でsoftware確認済み、実機画素は未確認。p009自体は未実装/未実行。H.264のreorder/seek/timeout結果、DPB再利用前copy退役はp010を含めて確認する。
+
+## H.264規格照合の設計補正（2026-10-10）
+
+Event: h264-reference-admission-20261010。i08を実行開始。[規格照合と影響](h264-progress-20261010.md)（Phaseからは [../h264-progress-20261010.md](../h264-progress-20261010.md)）。POC type0のgap推定non-existing frameはB slice初期参照listから除外する。p008はgap/POC metadata、p015は全sliceのlogical/real参照list照合、p009はその判定に基づくdecode admissionを補正する。第4版referenceは保存。software/実機clearanceはまだない、Q1共有projection pending。

@@ -87,7 +87,7 @@ const struct media_decoder_ops media_aac_ops = {
     NULL,
     NULL,
     aac_trim,
-    aac_frame_us};
+    aac_frame_us, NULL};
 
 /* Built-in AAC has no runtime library-loading prerequisite. */
 static int
@@ -123,6 +123,8 @@ aac_open(
 		return ENOMEM;
 	decoder->random = 1U;
 	decoder->end_us = track->duration_us;
+	if (track->end_us > 0)
+		decoder->end_us = track->end_us;
 
 	/* ASC signalling is authoritative, including explicit and backwards-compatible SBR. */
 	if (track->private_size != 0U) {
