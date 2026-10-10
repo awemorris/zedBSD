@@ -43,7 +43,7 @@ Resume point: 下の「再開の手順」。p003 の i03 の途中（branch の 
 | p004a | libkeiland-backend の phone-zedbsd.c（bluetoothd の socket）・compositor の phone-shell.c の bluetooth の backend・libkeiland の追加（phase004 §3〜§5・§11.2〜§11.4） | 6.5 | cleared 候補（2026-10-10、main に merge 4faf17473、KL_VERSION 79・manager 27、host 試験 PASS。実機は下の UAT。詳細は [phase004](phase004/phase.md) の「実装の進み」） |
 | p004b | Phone の app の保存と同期（目印・merge・E.164 の key・送信の状態） | 3.5 | cleared 候補（2026-10-10、main に merge 778c1e377、host 試験 PASS。region の設定が無いので国番号は既定 81（P8）） |
 | p004c | Settings の「Use as phone」と通知（WS156 の lock_text の変更は P1 が同じ Phase で行う、Q1） | 1.5 | cleared 候補（2026-10-10 P1、e7a478d33、host 試験 PASS、merge 待ち。実機は下の UAT） |
-| p005 | PBAP（電話帳、vCard 2.1/3.0、連絡先の store） | 8 | planned |
+| [p005](phase005/phase.md) | PBAP（電話帳、vCard 2.1/3.0、電話帳の写しと名前の引き、通話の履歴）。詳細設計 第 3 版（review 2 回）、i01〜i07 | 11.5 | **planning**（2026-10-11: i01 vcard.c 実装済み da5dbf9ac、第 3 版を review-3 へ。ユーザーの判断 Pc1〜Pc6 待ち、推しを仮に入れた） |
 | p006 | HFP の制御（AT の SLC、indicator、応答・終話・発信、発信者、割り込み、codec の交渉） | 12 | planned |
 | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
 | p008 | 実機（Android が先、iPhone は HFP の後、Q13）。PHONE PROBE は p003 で消すので MAP の操作で確かめる | 20 | planned |
