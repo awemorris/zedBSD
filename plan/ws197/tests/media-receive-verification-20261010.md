@@ -124,3 +124,5 @@ bluetoothd restartはOK、MAP/PBAP ready。greeter restartで旧sessionとSSHが
 新規テキスト/写真MMSの時刻・MIMEヘッダ消失・実画像表示をユーザーへasync確認中。再同期で履歴画像保存が成功した事実と新規受信の画面UATは分ける。raw MIMEを入力とする既存MMS keyはboundaryの変化で再同期時に別keyとなりうるため、Media CLIの原本重複排除とmessage identityの安定性を同一の証拠とはしない。p010全体の送信/動画player起動、WSのHFP/PBAP UAT/p009、Q1への共有投影は未完を保持。
 
 ユーザー実機結果: テキストMMSと写真MMSを各1通受信し、header消失/写真表示を確認する依頼に「受信し、表示されました。」と回答。個別時刻の回答はなし。SSHでMNS NewMessage/MMSとMedia/Files 10件、Media-Photo付きmessage 12件までの増加を確認。Phoneは応答し続け、受信部分checkをclearedとした。source commit `89d487814` (WIP)、main統合承認保持、記録更新後にfast-forwardしread-backする。今回の有限Queueはfinished、p010全体未完は維持。
+
+統合read-back: main `50feed387`→`ca4a71903`へfast-forward成功。main clean、private branchとの差分なし、diff check PASS。source fixは89d487814、ca4a71903はユーザー実機結果記録。共有master/Queue/Guardrail/cacheを変更せず、pushなし。
