@@ -303,7 +303,6 @@ drv_pci_brcmstb_start(
 {
 	struct drv_pci_brcmstb *host;
 	void *registers;
-	uint32_t revision;
 	int error;
 
 	/* Refuses missing arguments. */
@@ -333,10 +332,9 @@ drv_pci_brcmstb_start(
 		return error;
 	}
 
-	/* Records the controller's revision. */
+	/* Names the mapped controller without reading its reset-gated registers. */
 	host->registers = registers;
-	revision = register_read(host, BRCMSTB_REVISION);
-	kern_logf("pcie: brcmstb at %llx revision %x\n", (unsigned long long)config->register_base, revision);
+	kern_logf("pcie: brcmstb resetting at %llx\n", (unsigned long long)config->register_base);
 
 	/* Runs the start sequence; a failure leaves the endpoint in reset. */
 	error = bring_up(host);
@@ -719,10 +717,15 @@ static int
 bring_up(
 	struct drv_pci_brcmstb *host)
 {
+	uint32_t revision;
 	int error;
 
 	/* Puts the bridge and the endpoint into reset and powers the SerDes. */
 	reset_controller(host);
+
+	/* Reads the revision only after the bridge and SerDes are awake. */
+	revision = register_read(host, BRCMSTB_REVISION);
+	kern_logf("pcie: brcmstb at %llx revision %x\n", (unsigned long long)host->config.register_base, revision);
 
 	/* Opens the inbound window and quiets the controller's own interrupts. */
 	error = set_inbound_window(host);

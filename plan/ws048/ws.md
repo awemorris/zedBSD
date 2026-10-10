@@ -3,13 +3,13 @@
 # WS048: Raspberry Pi 4 の USB（PCIe・VL805 の xHCI・USB キーボード）
 
 <!-- awesome-plan-current:start -->
-Status: planning（要検討・ブロック、2026-10-05 ユーザー「要検討状態にしてブロックする」）。以前: incomplete
+Status: incomplete（2026-10-11 userが報告した起動例外の限定修正p008を再開。従来の全USB受入計画は要検討のまま）
 Primary Milestone: MG008
 Related Milestones: MG003, MG006
 Objectives: O2, O4
 Parent: [Master](../master.md)
-Queue: なし（2026-09-27 ユーザー指示でサブエージェントが worktree の branch で実行。main session が merge する）
-Resume point: p004 cleared（2026-09-27、承認済みの hal.h の差分 `hal_pmem_map_uncached` を適用、rpi4・amd64 の boot test PASS）。次は p005 の config を有効に → p006 → 実機（ユーザー）→ p007
+Queue: [Codex PCIe boot](codex-pcie-boot-queue.md) finished（限定p008、実機再起動待ち）。旧2026-09-27の実行記録は保持。
+Resume point: p008の具体的commit統合承認とRPi4実機の再起動結果。従来のp004 cleared/p005〜p007未完の状態は保持し、全USBの再開範囲は別判断。
 Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS112, WS118, WS124, WS125, WS126, WS119, WS096, WS097, WS039, WS038, WS144, WS143, WS146,WS147, WS152,  WS119, WS080, は、ベータ4以降としてください。…WS027, WS015, WS047, WS028, WS017,  WS077, はキャンセルします。」）
 <!-- awesome-plan-current:end -->
 
@@ -49,6 +49,7 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 | [ws048-p004](phase004/phase.md) | 非 coherent な DMA（`hal_pmem_map_uncached` と `dma.c`） | cleared（2026-09-27。承認済みの hal.h の差分を適用、host 試験・rpi4 と amd64 の boot test PASS。実機は未実施） | p001 | 済み（Guardrail の表） |
 | [ws048-p005](phase005/phase.md) | xHCI を rpi4 で | uncleared（build と glue の準備は済み。有効にするのは p004 の後） | p002・p003・p004 | 不要 |
 | [ws048-p006](phase006/phase.md) | USB の hub と HID キーボードで console に入力 | planned | p005 | 不要 |
+| [ws048-p008](phase008/phase.md) | ユーザー報告のPCIe最初のMMIO読み出し例外を修正 | uncleared（source/host/build済み、実機再起動待ち） | 現在main/config | API変更なし |
 | [ws048-p007](phase007/phase.md) | 規約の全文の確認と回帰、実機の結果の取りまとめ | planned | p002〜p006 | 不要 |
 
 注: QEMU の raspi4b は PCIe を持たない（DTB の PCIe の node を disabled にする）。p002〜p006 の動作の確認は実機だけで、
@@ -75,3 +76,9 @@ Target: **ベータ4 以降**（2026-10-05 user「WS037, WS044,WS048,WS141, WS11
 ## 要検討・ブロック（2026-10-05）
 
 ユーザーの指示で要検討の状態にしてブロックする。ユーザーと方針を決めるまで Queue に入れない。
+
+## 2026-10-11 起動例外の限定再開
+
+ユーザーの最新の写真と修正指示でp008/独立Queueを追加。全USB計画を自動で再開せず、このboot例外と関連MMIO mappingのみを修正/build確認する。旧p002〜p004の実機未確認は保持。実機の受入はユーザー確認、共有投影/GitHubはQ1 pending。
+
+p008のsource/host/buildは完了、実機再起動結果がないためuncleared。RAM判定のunsigned減算のunderflowを除きMMIOをDeviceでmapし、PCIe revision読出しをreset/SerDes起床後へ移した。警告0 kernel buildとbefore/afterのhost確認PASS。[証拠](tests/rpi4-pcie-boot-20261011.md)。旧WSのUSB実機acceptanceは未達のまま、具体的commitのmain統合承認とユーザー実機確認を待つ。共有投影/GitHubはQ1 pending。

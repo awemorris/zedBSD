@@ -645,6 +645,13 @@ model_read(
 	uint32_t value;
 	unsigned function;
 
+	/* Rejects the revision access that aborts while the bridge is asleep. */
+	if (offset == REG_REVISION) {
+		CHECK((registers[REG_SW_INIT / 4U] & SW_INIT_BRIDGE) == 0);
+		CHECK((registers[REG_HARD_DEBUG / 4U] & HARD_DEBUG_IDDQ) == 0);
+		CHECK(now_us >= 200U);
+	}
+
 	/* The root complex's own configuration space; its class comes from ID_VAL3. */
 	if (offset < 0x1000U) {
 		value = bytes_read(rc_config, REG_ID_VAL3, 4U);

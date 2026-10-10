@@ -637,8 +637,12 @@ range_is_ram(
 		if (info->memory[i].base > physical)
 			continue;
 
-		/* Skips a memory range that ends before the range does. */
+		/* Skips a bank below this address before subtracting its end. */
 		ram_end = info->memory[i].base + info->memory[i].size;
+		if (physical >= ram_end)
+			continue;
+
+		/* Skips a bank that contains the start but not the entire range. */
 		if (ram_end - physical < size)
 			continue;
 
