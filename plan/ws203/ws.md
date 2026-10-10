@@ -27,7 +27,7 @@ Queue: [scoped Queue](codex-queue.md)
 | [ws203-p003](phase003/phase.md) | 実機有線LAN/DHCP/SSH受入 | uncleared | p001,p002とユーザー実機 |
 | [ws203-p004](phase004/phase.md) | 実機初期化失敗のGIC/MMIO補完と最終規約/build | cleared | 現mainと実機写真 |
 
-Resume: p003実機初期化失敗、p004の限定source/build修正はcleared。具体的commitをmainへ統合後、新SDイメージからp003 DHCP/SSH再確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
+Resume: p003実機初期化失敗、p004の限定source/build修正はcleared、main7b16e364cへ統合済み。新SDイメージからp003 DHCP/SSH再確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
 
 ## 2026-10-11 分割の指示
 
@@ -60,3 +60,7 @@ User reports sshd process startup and apparent link, with DHCP address missing. 
 ### 修正source/build結果
 
 [ws203-p004](phase004/phase.md)の限定source/build criteria cleared。GIC trigger/MMIO共有alias、非coherent DMAのpage backingを修正し、現在config warning0 kernel buildと限定host checks PASS。[証拠](../ws203/tests/initialization-repair-20261011.md)。実機DHCP/SSH・USB入力は未確認なのでWSはincomplete、次は新imageでuser受入。main統合と共有投影はpending。
+
+## Main integration / 2026-10-11
+
+Current user「main仁藤剛してください。」を直前の7b16e364c統合承認への回答（mainに統合してください）として受領。clean main6b722f47eから修正7b16e364c53761f96a982797f88793f7f520dbb6へfast-forward統合、競合なし。先行read-only調査記録08e919a08も含む。main上で全8 source/test SHA256一致、source diffなし、現在config.mkが検証済みworktreeとbyte-identicalであることをread-back確認。前turnのwarning0 kernel buildと限定host checksが統合sourceに適用されるため追加のbuild/試験は行わない。sourceのmain統合は完了、先行の承認待ち表記は当時の履歴。新imageでの実機DHCP/SSH・USB入力受入は未達のまま、WS203/WS048はincomplete。pushなし。共有Master/Queue/history/FutureWork/GitHubはQ1投影保留。

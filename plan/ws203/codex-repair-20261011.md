@@ -15,3 +15,7 @@ Graph: main (context) → i01; main (context) → i02; 両者 → 現config kern
 ## Terminal result
 
 両itemの限定source/build criteria cleared。[証拠](tests/initialization-repair-20261011.md)。現在config kernel warning/error0、旧DMA対照失敗・新DMA成功、GIC/GENET/MMIO host checks PASS。物理受入は未達。main承認・Q1投影待ち、次Queueは自動開始しない。
+
+## Main integration / 2026-10-11
+
+Current user「main仁藤剛してください。」を直前の7b16e364c統合承認への回答（mainに統合してください）として受領。clean main6b722f47eから修正7b16e364c53761f96a982797f88793f7f520dbb6へfast-forward統合、競合なし。先行read-only調査記録08e919a08も含む。main上で全8 source/test SHA256一致、source diffなし、現在config.mkが検証済みworktreeとbyte-identicalであることをread-back確認。前turnのwarning0 kernel buildと限定host checksが統合sourceに適用されるため追加のbuild/試験は行わない。sourceのmain統合は完了、先行の承認待ち表記は当時の履歴。新imageでの実機DHCP/SSH・USB入力受入は未達のまま、WS203/WS048はincomplete。pushなし。共有Master/Queue/history/FutureWork/GitHubはQ1投影保留。

@@ -41,3 +41,7 @@ Hardware facts reference: [Arm GICv2 IHI0048B Table4-18](https://documentation-s
 ## Outcome / handoff
 
 ws203-p004、ws048-p010の限定source/build criteriaはcleared。RPi4のDHCP/SSH、USB keyboard/mouse/LANと実機再起動は未実施、WS203/WS048はincompleteのまま。新kernelを含むimageを再buildしてuser確認へ。症状が続く場合はgenet: initialization failed at ... / xhci: controller start failed at ...の行で再調査。QEMU/full image/pushは未実施。共有Master/Queue/history/FutureWorkとGitHub publicationはQ1 pending。main統合は具体的commitの承認待ち。
+
+## Main integration / 2026-10-11
+
+Current user「main仁藤剛してください。」を直前の7b16e364c統合承認への回答（mainに統合してください）として受領。clean main6b722f47eから修正7b16e364c53761f96a982797f88793f7f520dbb6へfast-forward統合、競合なし。先行read-only調査記録08e919a08も含む。main上で全8 source/test SHA256一致、source diffなし、現在config.mkが検証済みworktreeとbyte-identicalであることをread-back確認。前turnのwarning0 kernel buildと限定host checksが統合sourceに適用されるため追加のbuild/試験は行わない。sourceのmain統合は完了、先行の承認待ち表記は当時の履歴。新imageでの実機DHCP/SSH・USB入力受入は未達のまま、WS203/WS048はincomplete。pushなし。共有Master/Queue/history/FutureWork/GitHubはQ1投影保留。
