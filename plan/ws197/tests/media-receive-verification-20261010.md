@@ -88,3 +88,9 @@ Logs: private buildの `ws197-media-receive-{build,linux-final,tests,map,mms-tex
 ## main統合の確認
 
 source/evidence commit `035d1d25ba6f9e7fb20ad97544e6c38f3f258f03` (WIP) をmain c43a01797からfast-forward統合した。main/private worktreeともclean、変更sourceは検証したものと同一。READMEの既存変更c43a01797を保持し、共有master/Queue/Guardrail/cacheは未変更。pushなし。SSH受信UATと最終Phone更新は未完のまま保持する。
+
+## 2026-10-10 イメージ再作成前のconfig確認
+
+ユーザー報告: Phone起動に数十秒、Bluetoothとの不整合を感じるためイメージを作り直す。トップレベルconfig.mkを確認。Phone/bluetoothd/wayland/libkeiland、USB BT driver、PNG/JPEG/GIF/zは選択済み。mediastorageは明示一覧になかったが、Photos/waylandのpackage依存によりMakefileが自動で選択し、AMD64_ARCH_FILESへ `/bin/mediastorage=` が入ることを実Make評価で確認した。従って一覧からの欠落が保存不能の原因とは判断しない。
+
+ユーザーのイメージ再作成指示に合わせ、mainのgitignore対象config.mkへ `ZEDBSD_USER_PROGRAMS += mediastorage` を明示追加した。他の設定 (WS083 video probe/streams/libavcodec除外等) は保持。main最新sourceとこのconfigでPhone・compositor・libkeiland・bluetoothd・mediastorageを同じイメージへ組み込む。イメージ自体のbuild/書込はユーザーが行う。起動の遅れの原因は未確定で、前回のBluetooth再接続停止やWayland初期状態の待ちとの関係を再作成後に確認する。
