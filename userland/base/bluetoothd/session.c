@@ -751,6 +751,21 @@ session_read(
 	if (ready == 0)
 		return ETIMEDOUT;
 
+	/* An invalid node is not a readable packet; never enter a blocking read for it. */
+	if ((descriptor.revents & POLLNVAL) != 0)
+		return EBADF;
+
+	/* A hung-up node may still contain its final packet, which is read first. */
+	if ((descriptor.revents & POLLIN) == 0) {
+		if ((descriptor.revents & (POLLHUP | POLLERR)) != 0) {
+			session_set(session, BTD_STATE_LOST, "%s", "the node went");
+			return ENODEV;
+		}
+
+		/* A wake without a readable packet leaves this operation timed out. */
+		return ETIMEDOUT;
+	}
+
 	/* One read is one packet. */
 	got = read(session->descriptor, session->packet, sizeof(session->packet));
 	if (got < 0) {
@@ -908,6 +923,8 @@ session_command(
 	for (;;) {
 		/* The next packet, within what is left of the time. */
 		remaining = session_remaining(deadline);
+		if (remaining == 0)
+			return ETIMEDOUT;
 		error = session_read(session, (unsigned)remaining);
 		if (error != 0)
 			return error;
@@ -969,6 +986,8 @@ session_wait_vendor(
 	for (;;) {
 		/* The next packet. */
 		remaining = session_remaining(deadline);
+		if (remaining == 0)
+			return ETIMEDOUT;
 		error = session_read(session, (unsigned)remaining);
 		if (error != 0)
 			return error;

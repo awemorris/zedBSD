@@ -170,6 +170,7 @@ static void btd_random(void *context, uint8_t *bytes, size_t length);
 static void btd_key(const struct bt_info *info, char *key, size_t size);
 static int btd_loaded(const char *key);
 static void btd_remember_load(const char *key);
+static void btd_forget_load(const char *key);
 static int btd_listen(void);
 static void btd_open(void);
 static void btd_close(void);
@@ -179,6 +180,8 @@ static void btd_accept(int listener);
 static void btd_read(int index);
 static void btd_line(int index, char *line);
 static void btd_show(struct btd_client *client);
+static void btd_check(struct btd_client *client);
+static void btd_recover(struct btd_client *client, int reset);
 static void btd_devices(struct btd_client *client);
 static void btd_scan(struct btd_client *client, const char *argument);
 static void btd_scan_end(void);
@@ -622,6 +625,13 @@ main(
 
 	/* Clients, the controller's packets, the deadlines and the look for nodes. */
 	for (;;) {
+		/* Only the processing loop feeds the privileged parent's stall detector. */
+		error = btd_privsep_progress(&btd_separation, 0);
+		if (error != 0 && error != EAGAIN) {
+			btd_log("bluetoothd: supervisor channel failed: %s\n", strerror(error));
+			return 1;
+		}
+
 		/* The listener, the controller's node, the parent's liveness and every client. */
 		count = 0U;
 		descriptors[count].fd = listener;
@@ -653,6 +663,8 @@ main(
 
 		/* The wait, as long as the earliest deadline allows. */
 		timeout = btd_timeout();
+		if (timeout < 0 || timeout > 1000)
+			timeout = 1000;
 		for (index = 0U; index < count; index++)
 			descriptors[index].revents = 0;
 		ready = poll(descriptors, count, timeout);
@@ -875,7 +887,9 @@ btd_open(
 		btd_session.load_allowed = 0;
 
 	/* The start, logged with the first Secure Send answers when a load was sent. */
+	(void)btd_privsep_progress(&btd_separation, 1);
 	error = btd_session_start(&btd_session);
+	(void)btd_privsep_progress(&btd_separation, 0);
 	trace_label = "";
 	if (btd_session.trace[0] != '\0')
 		trace_label = ", secure send answers ";
@@ -1366,6 +1380,27 @@ btd_line(
 		return;
 	}
 
+	/* CHECK verifies the controller instead of reporting only cached state. */
+	same = strcmp(line, "CHECK");
+	if (same == 0) {
+		btd_check(client);
+		return;
+	}
+
+	/* REOPEN replaces the current controller session without a USB reset. */
+	same = strcmp(line, "REOPEN");
+	if (same == 0) {
+		btd_recover(client, 0);
+		return;
+	}
+
+	/* RESET resets the USB controller before rebuilding the session. */
+	same = strcmp(line, "RESET");
+	if (same == 0) {
+		btd_recover(client, 1);
+		return;
+	}
+
 	/* DEVICES. */
 	same = strcmp(line, "DEVICES");
 	if (same == 0) {
@@ -1655,6 +1690,105 @@ btd_show(
 
 	/* The end. */
 	btd_write(client, "DONE\n");
+}
+
+/* Queries the live controller without disturbing its links or trusting cached READY. */
+static void
+btd_check(
+	struct btd_client *client)
+{
+	int permitted;
+	int error;
+
+	/* A controller command uses the same permission as the other active operations. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* An absent or incompletely initialized controller cannot answer this check. */
+	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
+		btd_write(client, "ERROR not-ready\nDONE\n");
+		return;
+	}
+
+	/* Read Local Version Information is available without changing active connections. */
+	error = btd_session_command(&btd_session, 0x1001U, NULL, 0U);
+	if (error == 0 && btd_session.returned_length < 8U)
+		error = EPROTO;
+
+	/* The answer distinguishes a responsive daemon from an unresponsive controller. */
+	if (error != 0) {
+		btd_write(client, "ERROR controller code=%d\nDONE\n", error);
+		return;
+	}
+
+	/* Succeeded: the controller answered a fresh command. */
+	btd_write(client, "CHECK controller=ready\nDONE\n");
+	return;
+}
+
+/* Rebuilds the controller session, optionally after the kernel's USB device reset. */
+static void
+btd_recover(
+	struct btd_client *client,
+	int reset)
+{
+	char key[BTD_KEY_MAX];
+	const char *operation;
+	int permitted;
+	int error;
+
+	/* Recovery changes connections and is restricted like scan, pairing and power. */
+	permitted = btd_permitted(client->uid);
+	if (!permitted) {
+		btd_write(client, "ERROR permission\nDONE\n");
+		return;
+	}
+
+	/* A reopen can retry a stopped or absent session; a USB reset requires an open node. */
+	operation = "reopen";
+	if (reset) {
+		operation = "reset";
+		if (!btd_session_open) {
+			btd_write(client, "ERROR no-controller\nDONE\n");
+			return;
+		}
+
+		/* Keep the physical identity before a reset can change firmware or enumeration. */
+		btd_key(&btd_session.info, key, sizeof(key));
+		error = btd_node_control(&btd_session, BT_IOC_RESET, NULL);
+		if (error != 0) {
+			btd_log("BLUETOOTHD RECOVER operation=reset error=%d\n", error);
+			btd_write(client, "ERROR reset code=%d\nDONE\n", error);
+			return;
+		}
+
+		/* A controller returned to its bootloader may load its firmware again. */
+		btd_forget_load(key);
+	}
+
+	/* End scans, pairing, HID and phone routes before replacing their session. */
+	btd_close();
+	btd_stopped = 0;
+	btd_failures = 0U;
+	btd_reappear_ms = 0U;
+	btd_open();
+	btd_log("BLUETOOTHD RECOVER operation=%s state=%s uid=%u\n",
+		operation,
+		btd_state_name(btd_session.state),
+		(unsigned)client->uid);
+
+	/* Do not claim success when firmware or a missing node still prevents startup. */
+	if (!btd_session_open || btd_session.state != BTD_STATE_READY) {
+		btd_write(client, "ERROR not-ready state=%s\nDONE\n", btd_state_name(btd_session.state));
+		return;
+	}
+
+	/* Succeeded: saved bonds and the power setting survive the replacement. */
+	btd_write(client, "RECOVER operation=%s state=ready\nDONE\n", operation);
+	return;
 }
 
 /* Answers DEVICES: the last scan's devices. */
@@ -2823,6 +2957,34 @@ btd_remember_load(
 	/* At the end. */
 	(void)snprintf(btd_loads[btd_load_count], sizeof(btd_loads[0]), "%s", key);
 	btd_load_count++;
+}
+
+/* Allows only the explicitly reset controller to load firmware again. */
+static void
+btd_forget_load(
+	const char *key)
+{
+	unsigned index;
+	int same;
+
+	/* Remove the matching physical identity and retain all other load records. */
+	for (index = 0U; index < btd_load_count; index++) {
+		same = strcmp(btd_loads[index], key);
+		if (same != 0)
+			continue;
+		btd_load_count--;
+		if (index < btd_load_count) {
+			memmove(btd_loads[index],
+				btd_loads[index + 1U],
+				sizeof(btd_loads[0]) * (btd_load_count - index));
+		}
+
+		/* Succeeded: this controller's remembered load was removed. */
+		return;
+	}
+
+	/* Succeeded: an identity not remembered already permits a load. */
+	return;
 }
 
 /*

@@ -12,6 +12,10 @@
  * A client writes one request a line:
  *
  *   SHOW               the state and the controller
+ *   CHECK              a fresh HCI version query, answered CHECK controller=ready
+ *   REOPEN             close and reinitialize the controller, keeping bonds and power
+ *   RESET              USB device reset, then close and reinitialize the controller
+ *                      (active operations use the same permission as POWER)
  *   DEVICES            the devices of the last scan
  *   SCAN SECONDS       a scan of 1 to 30 seconds (root only in this Phase),
  *                      answered when it ends with the devices found

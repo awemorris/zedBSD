@@ -15,6 +15,11 @@
  * passes SIGTERM and SIGINT on to the child before it ends (the service
  * manager signals the parent alone).  The child sees the parent go as the
  * end of the liveness stream.
+ *
+ * The child's loop reports ALIVE once a round. Firmware startup reports
+ * STARTING for its longer finite deadline. When progress stops, this
+ * parent terminates and reaps its own child, then exits with failure to
+ * request the service manager's existing on-failure restart.
  */
 
 #include "userland/base/bluetoothd/privsep.h"
@@ -25,6 +30,7 @@
 #include <poll.h>
 #include <pwd.h>
 #include <signal.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -32,6 +38,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <syslog.h>
+#include <time.h>
 #include <unistd.h>
 
 /* How many nodes there can be, and the longest request or answer on the channel. */
@@ -40,10 +47,14 @@
 
 /* How often the parent looks at its child, and how long a child told to end may take. */
 #define PRIVSEP_LOOK_MS		1000
-#define PRIVSEP_END_SECONDS	5U
+#define PRIVSEP_END_SECONDS 3U
 
 /* How long the child waits for the parent's answer. */
 #define PRIVSEP_ANSWER_MS	2000
+
+/* A stalled loop is restarted; firmware initialization gets a separate finite budget. */
+#define PRIVSEP_STALL_MS 15000U
+#define PRIVSEP_START_MS 90000U
 
 /*
  * The signal the parent was asked to end with (0: none).  Set by the
@@ -55,7 +66,8 @@ static void privsep_no_account(void);
 static int privsep_folders(const char *keys_folder, uid_t uid, gid_t gid);
 static void privsep_parent(pid_t child, int channel, const char *node);
 static void privsep_end(int signal_number);
-static void privsep_answer(int channel, const char *node);
+static unsigned privsep_answer(int channel, const char *node);
+static int privsep_clock(uint64_t *now);
 static int privsep_open_node(const char *node, char *path, size_t size, int *descriptor);
 static void privsep_send(int channel, const char *text, int descriptor);
 static void privsep_wait_child(pid_t child);
@@ -198,6 +210,33 @@ btd_privsep_open_bridge(
 		return error;
 
 	/* Succeeded: the open. */
+	return 0;
+}
+
+/*
+ * Reports progress to the supervisor without waiting for a reply.
+ */
+int
+btd_privsep_progress(
+	const struct btd_privsep *privsep,
+	int starting)
+{
+	const char *message;
+	size_t length;
+	ssize_t sent;
+
+	/* Firmware startup is bounded separately from the normal event loop. */
+	message = "ALIVE";
+	if (starting)
+		message = "STARTING";
+	length = strlen(message);
+	sent = send(privsep->channel, message, length, MSG_DONTWAIT);
+	if (sent < 0)
+		return errno;
+	if ((size_t)sent != length)
+		return EIO;
+
+	/* Succeeded: the parent can observe this loop's progress. */
 	return 0;
 }
 
@@ -371,10 +410,14 @@ privsep_parent(
 {
 	struct sigaction action;
 	struct pollfd request;
+	uint64_t now;
+	uint64_t deadline;
 	pid_t ended;
+	unsigned budget;
 	int exited;
 	int status;
 	int ready;
+	int error;
 
 	/* SIGTERM and SIGINT end the child too; they interrupt the wait (no restart). */
 	memset(&action, 0, sizeof(action));
@@ -383,6 +426,17 @@ privsep_parent(
 	action.sa_flags = 0;
 	(void)sigaction(SIGTERM, &action, NULL);
 	(void)sigaction(SIGINT, &action, NULL);
+
+	/* The first firmware load must finish before normal loop supervision begins. */
+	error = privsep_clock(&now);
+	if (error != 0) {
+		(void)kill(child, SIGTERM);
+		privsep_wait_child(child);
+		_exit(1);
+	}
+
+	/* Arms the first initialization deadline after obtaining a valid clock. */
+	deadline = now + PRIVSEP_START_MS;
 
 	/* Each round: the child's end, a request to end, a request of the child's. */
 	for (;;) {
@@ -402,14 +456,49 @@ privsep_parent(
 			_exit(0);
 		}
 
+		/* A child blocked away from its loop cannot feed the supervisor. */
+		error = privsep_clock(&now);
+		if (error != 0 || now >= deadline) {
+			syslog(LOG_ERR, "WATCHDOG child-unresponsive; restarting bluetoothd");
+			(void)kill(child, SIGTERM);
+			privsep_wait_child(child);
+			_exit(1);
+		}
+
 		/* A request, or the next look. */
 		request.fd = channel;
 		request.events = POLLIN;
 		request.revents = 0;
 		ready = poll(&request, 1U, PRIVSEP_LOOK_MS);
-		if (ready > 0 && (request.revents & POLLIN) != 0)
-			privsep_answer(channel, node);
+		if (ready > 0 && (request.revents & POLLIN) != 0) {
+			budget = privsep_answer(channel, node);
+			if (budget == 0U)
+				continue;
+
+			/* Only explicit progress changes the deadline; OPEN replies do not extend it. */
+			error = privsep_clock(&now);
+			if (error == 0)
+				deadline = now + budget;
+		}
 	}
+}
+
+/* Reads the monotonic clock used for process supervision. */
+static int
+privsep_clock(
+	uint64_t *now)
+{
+	struct timespec clock;
+	int status;
+
+	/* Wall-clock changes cannot extend or shorten the child's progress budget. */
+	status = clock_gettime(CLOCK_MONOTONIC, &clock);
+	if (status != 0)
+		return errno;
+	*now = (uint64_t)clock.tv_sec * 1000U + (uint64_t)clock.tv_nsec / 1000000U;
+
+	/* Succeeded: an elapsed-time value for the supervisor. */
+	return 0;
 }
 
 /* Notes a request to end (the signal handler). */
@@ -425,7 +514,7 @@ privsep_end(
  * Answers one request of the child's: "OPEN" gets the node's descriptor,
  * "OPEN-HID" an open of /dev/input/bridge (ws143-p005), or why not.
  */
-static void
+static unsigned
 privsep_answer(
 	int channel,
 	const char *node)
@@ -445,8 +534,16 @@ privsep_answer(
 	 */
 	length = recv(channel, request, sizeof(request) - 1U, MSG_DONTWAIT);
 	if (length <= 0)
-		return;
+		return 0U;
 	request[length] = '\0';
+
+	/* Progress has no reply, so it cannot be mistaken for an OPEN descriptor. */
+	same = strcmp(request, "ALIVE");
+	if (same == 0)
+		return PRIVSEP_STALL_MS;
+	same = strcmp(request, "STARTING");
+	if (same == 0)
+		return PRIVSEP_START_MS;
 
 	/* OPEN-HID: the bridge, opened here as root (only root may), sent, and the parent's copy closed. */
 	same = strcmp(request, "OPEN-HID");
@@ -455,20 +552,20 @@ privsep_answer(
 		if (descriptor < 0) {
 			(void)snprintf(answer, sizeof(answer), "ERR %d", errno);
 			privsep_send(channel, answer, -1);
-			return;
+			return 0U;
 		}
 
 		/* Sent with its path. */
 		privsep_send(channel, "OK " BTD_BRIDGE_PATH, descriptor);
 		(void)close(descriptor);
-		return;
+		return 0U;
 	}
 
 	/* Otherwise only OPEN is known. */
 	same = strcmp(request, "OPEN");
 	if (same != 0) {
 		privsep_send(channel, "ERR 22", -1);
-		return;
+		return 0U;
 	}
 
 	/* The node, opened here, as root. */
@@ -476,13 +573,16 @@ privsep_answer(
 	if (error != 0) {
 		(void)snprintf(answer, sizeof(answer), "ERR %d", error);
 		privsep_send(channel, answer, -1);
-		return;
+		return 0U;
 	}
 
 	/* Sent with its path; the parent's copy is closed, so the node is the child's alone. */
 	(void)snprintf(answer, sizeof(answer), "OK %s", path);
 	privsep_send(channel, answer, descriptor);
 	(void)close(descriptor);
+
+	/* Succeeded: the descriptor reply did not change the progress budget. */
+	return 0U;
 }
 
 /*
@@ -503,7 +603,7 @@ privsep_open_node(
 	/* The node given. */
 	if (node != NULL) {
 		(void)snprintf(path, size, "%s", node);
-		*descriptor = open(path, O_RDWR | O_CLOEXEC);
+		*descriptor = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		if (*descriptor < 0)
 			return errno;
 		return 0;
@@ -513,7 +613,7 @@ privsep_open_node(
 	error = ENOENT;
 	for (index = 0U; index < PRIVSEP_NODES; index++) {
 		(void)snprintf(path, size, "/dev/bluetooth%u", index);
-		*descriptor = open(path, O_RDWR | O_CLOEXEC);
+		*descriptor = open(path, O_RDWR | O_NONBLOCK | O_CLOEXEC);
 		if (*descriptor >= 0)
 			return 0;
 		if (errno == EBUSY)

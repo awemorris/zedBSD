@@ -10,6 +10,9 @@
  * socket.
  *
  *   bt show                     the state and the controller
+ *   bt check                    a fresh controller command, within 5 seconds
+ *   bt reopen                   close and initialize the controller again
+ *   bt reset                    USB reset, then initialize the controller again
  *   bt scan [SECONDS]           a scan (8 seconds unless given), and the
  *                               devices found
  *   bt devices                  the devices of the last scan
@@ -42,24 +45,45 @@
 #include "userland/base/bluetoothd/protocol.h"
 
 #include <errno.h>
+#include <limits.h>
+#include <poll.h>
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
 #include <sys/un.h>
+#include <time.h>
 #include <unistd.h>
 
 /* The scan's length when none is given. */
-#define BT_SCAN_SECONDS		8UL
+#define BT_SCAN_SECONDS 8UL
 
 /* How a run ended: the daemon answered, it answered ERROR, there is no daemon (or it went), the command was misused. */
-#define BT_EXIT_OK		0
-#define BT_EXIT_ERROR		1
-#define BT_EXIT_NO_DAEMON	2
-#define BT_EXIT_USAGE		64
+#define BT_EXIT_OK 0
+#define BT_EXIT_ERROR 1
+#define BT_EXIT_NO_DAEMON 2
+#define BT_EXIT_USAGE 64
+
+/* One request owns this buffered response until its socket is closed. */
+struct bt_reader {
+	char bytes[4096];
+	size_t used;
+	size_t next;
+};
+
+/* The current request's monotonic deadline; zero leaves human interaction untimed. */
+static uint64_t bt_deadline;
+
+/* The current request reports expiration after closing its socket. */
+static int bt_expired;
 
 static int bt_connect(void);
 static int bt_ask(const char *request, const char *summary);
+static int bt_exchange(const char *request, const char *summary);
+static int bt_wait(int descriptor, short events);
+static int bt_remaining(void);
+static char *bt_line(int descriptor, struct bt_reader *reader, char *line, size_t size);
 static void bt_question(int descriptor, const char *line);
 static int bt_device_request(const char *verb, int argc, char **argv, char *request, size_t size);
 static void bt_usage(void);
@@ -69,8 +93,8 @@ static void bt_usage(void);
  */
 int
 main(
-	int argc,
-	char **argv)
+    int argc,
+    char **argv)
 {
 	char request[96];
 	unsigned long seconds;
@@ -88,6 +112,27 @@ main(
 	same = strcmp(argv[1], "show");
 	if (same == 0 && argc == 2) {
 		status = bt_ask("SHOW", "SHOW");
+		return status;
+	}
+
+	/* bt check tests fresh HCI responsiveness rather than cached state. */
+	same = strcmp(argv[1], "check");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("CHECK", "CHECK");
+		return status;
+	}
+
+	/* bt reopen retries initialization without resetting the USB device. */
+	same = strcmp(argv[1], "reopen");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("REOPEN", "REOPEN");
+		return status;
+	}
+
+	/* bt reset invokes the transport's explicit USB reset. */
+	same = strcmp(argv[1], "reset");
+	if (same == 0 && argc == 2) {
+		status = bt_ask("RESET", "RESET");
 		return status;
 	}
 
@@ -279,7 +324,7 @@ bt_connect(
 	int status;
 
 	/* The socket. */
-	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_CLOEXEC, 0);
+	descriptor = socket(AF_UNIX, SOCK_STREAM | SOCK_NONBLOCK | SOCK_CLOEXEC, 0);
 	if (descriptor < 0)
 		return -1;
 
@@ -302,7 +347,7 @@ bt_connect(
  * line; returns the exit status.
  */
 static int
-bt_ask(
+bt_exchange(
 	const char *request,
 	const char *summary)
 {
@@ -311,7 +356,7 @@ bt_ask(
 	char input[64];
 	const char *word;
 	const char *found;
-	FILE *answer;
+	struct bt_reader reader;
 	ssize_t written;
 	char *got;
 	unsigned devices;
@@ -330,12 +375,14 @@ bt_ask(
 	/* The daemon. */
 	descriptor = bt_connect();
 	if (descriptor < 0) {
+		if (bt_expired)
+			return BT_EXIT_NO_DAEMON;
 		(void)fprintf(stderr, "bt: bluetoothd is not running (%s)\n", strerror(errno));
 		(void)printf("BT %s state=none\n", summary);
 		return BT_EXIT_NO_DAEMON;
 	}
 
-	/* The request. */
+	/* The request is small; a nonblocking write cannot hang behind a stopped daemon. */
 	(void)snprintf(line, sizeof(line), "%s\n", request);
 	length = strlen(line);
 	written = write(descriptor, line, length);
@@ -345,12 +392,8 @@ bt_ask(
 		return BT_EXIT_NO_DAEMON;
 	}
 
-	/* The answer's lines, read as a stream. */
-	answer = fdopen(descriptor, "r");
-	if (answer == NULL) {
-		(void)close(descriptor);
-		return BT_EXIT_NO_DAEMON;
-	}
+	/* Owns buffered bytes until the request's descriptor is closed. */
+	memset(&reader, 0, sizeof(reader));
 
 	/* Each line up to DONE: printed, the state and the devices counted. */
 	(void)snprintf(state, sizeof(state), "%s", "unknown");
@@ -364,8 +407,12 @@ bt_ask(
 	failed = 0;
 	done = 0;
 	for (;;) {
+		/* An expired request stops even when the daemon keeps sending incomplete replies. */
+		if (bt_expired)
+			break;
+
 		/* The next line; the stream's end before DONE is the daemon gone. */
-		got = fgets(line, (int)sizeof(line), answer);
+		got = bt_line(descriptor, &reader, line, sizeof(line));
 		if (got == NULL)
 			break;
 
@@ -451,7 +498,7 @@ bt_ask(
 		(void)fflush(stdout);
 		for (;;) {
 			/* The next question. */
-			got = fgets(line, (int)sizeof(line), answer);
+			got = bt_line(descriptor, &reader, line, sizeof(line));
 			if (got == NULL)
 				break;
 			(void)fputs(line, stdout);
@@ -466,10 +513,12 @@ bt_ask(
 	}
 
 	/* The answer is read. */
-	(void)fclose(answer);
+	(void)close(descriptor);
 
 	/* A daemon that went before DONE. */
 	if (!done) {
+		if (bt_expired)
+			return BT_EXIT_NO_DAEMON;
 		(void)fprintf(stderr, "bt: bluetoothd went before it answered\n");
 		return BT_EXIT_NO_DAEMON;
 	}
@@ -519,12 +568,238 @@ bt_ask(
 		(void)printf("BT POWER result=%s\n", word);
 	}
 
+	/* Recovery summaries distinguish daemon response from a successful controller restart. */
+	same = strcmp(summary, "CHECK");
+	if (same == 0 && !failed)
+		(void)printf("BT CHECK controller=ready\n");
+	if (same == 0 && failed)
+		(void)printf("BT CHECK controller=error\n");
+	same = strcmp(summary, "REOPEN");
+	if (same == 0 && !failed)
+		(void)printf("BT REOPEN result=ready\n");
+	if (same == 0 && failed)
+		(void)printf("BT REOPEN result=error\n");
+	same = strcmp(summary, "RESET");
+	if (same == 0 && !failed)
+		(void)printf("BT RESET result=ready\n");
+	if (same == 0 && failed)
+		(void)printf("BT RESET result=error\n");
+
 	/* An ERROR answer. */
 	if (failed)
 		return BT_EXIT_ERROR;
 
 	/* Succeeded: answered. */
 	return BT_EXIT_OK;
+}
+
+/* Bounds daemon requests while leaving interactive pairing and the persistent agent untimed. */
+static int
+bt_ask(
+	const char *request,
+	const char *summary)
+{
+	struct timespec now;
+	unsigned seconds;
+	unsigned scan;
+	int same;
+	int parsed;
+	int status;
+
+	/* Ordinary requests cannot wait forever; scans include their configured duration. */
+	seconds = 30U;
+	bt_expired = 0;
+	bt_deadline = 0U;
+	same = strcmp(summary, "SCAN");
+	if (same == 0) {
+		parsed = sscanf(request, "SCAN %u", &scan);
+		if (parsed == 1 && scan <= 30U)
+			seconds = scan + 15U;
+	}
+
+	/* Status probes finish quickly, while firmware startup is given a longer budget. */
+	same = strcmp(summary, "SHOW");
+	if (same == 0)
+		seconds = 5U;
+	same = strcmp(summary, "CHECK");
+	if (same == 0)
+		seconds = 5U;
+	same = strcmp(summary, "REOPEN");
+	if (same == 0)
+		seconds = 60U;
+	same = strcmp(summary, "RESET");
+	if (same == 0)
+		seconds = 60U;
+
+	/* A human's pairing answer and an agent's lifetime retain their existing behavior. */
+	same = strcmp(summary, "PAIR");
+	if (same == 0)
+		seconds = 0U;
+	same = strcmp(summary, "AGENT");
+	if (same == 0)
+		seconds = 0U;
+	if (seconds == 0U) {
+		status = bt_exchange(request, summary);
+		return status;
+	}
+
+	/* Uses elapsed time rather than signal delivery to bound socket reads. */
+	status = clock_gettime(CLOCK_MONOTONIC, &now);
+	if (status != 0) {
+		(void)fprintf(stderr, "bt: could not limit the response wait (%s)\n", strerror(errno));
+		return BT_EXIT_NO_DAEMON;
+	}
+
+	/* A partial reply or unrelated signal never starts a new budget. */
+	bt_deadline = (uint64_t)now.tv_sec * 1000U + (uint64_t)now.tv_nsec / 1000000U + (uint64_t)seconds * 1000U;
+	status = bt_exchange(request, summary);
+	bt_deadline = 0U;
+	if (bt_expired) {
+		(void)fprintf(stderr,
+			      "bt: bluetoothd did not answer within %u seconds; use sudo service restart bluetoothd\n",
+			      seconds);
+		(void)printf("BT %s state=timeout\n", summary);
+		return BT_EXIT_NO_DAEMON;
+	}
+
+	/* Propagates refusal or a disconnected daemon. */
+	if (status != BT_EXIT_OK)
+		return status;
+
+	/* Succeeded: the daemon answered within its operation's budget. */
+	return BT_EXIT_OK;
+}
+
+/* Waits for socket readiness without extending the current request's deadline. */
+static int
+bt_wait(
+	int descriptor,
+	short events)
+{
+	struct pollfd waiting;
+	int milliseconds;
+	int status;
+
+	/* Rechecks the deadline after every signal and spurious readiness wake. */
+	for (;;) {
+		/* Human interaction has no automatic expiration. */
+		milliseconds = bt_remaining();
+		if (milliseconds == -2)
+			return -1;
+
+		/* Readable bytes take precedence over a simultaneous peer shutdown. */
+		waiting.fd = descriptor;
+		waiting.events = events;
+		waiting.revents = 0;
+		status = poll(&waiting, 1U, milliseconds);
+		if (status < 0 && errno == EINTR)
+			continue;
+		if (status < 0)
+			return -1;
+		if (status == 0)
+			continue;
+		if ((waiting.revents & events) != 0)
+			break;
+
+		/* An invalid or closed socket cannot supply another response. */
+		errno = ECONNRESET;
+		if ((waiting.revents & POLLNVAL) != 0)
+			errno = EBADF;
+		return -1;
+	}
+
+	/* Succeeded: a nonblocking socket operation may be attempted. */
+	return 0;
+}
+
+/* Reports the remaining budget, -1 for human interaction, or -2 for refusal. */
+static int
+bt_remaining(
+	void)
+{
+	struct timespec clock;
+	uint64_t now;
+	uint64_t remaining;
+	int status;
+
+	/* Interactive pairing and the agent retain their unbounded lifetime. */
+	if (bt_deadline == 0U)
+		return -1;
+
+	/* Reads elapsed time without relying on signal interruption of a socket. */
+	status = clock_gettime(CLOCK_MONOTONIC, &clock);
+	if (status != 0)
+		return -2;
+	now = (uint64_t)clock.tv_sec * 1000U + (uint64_t)clock.tv_nsec / 1000000U;
+
+	/* Even a stream of buffered partial answers cannot extend the operation. */
+	if (now >= bt_deadline) {
+		bt_expired = 1;
+		errno = ETIMEDOUT;
+		return -2;
+	}
+
+	/* Fits the wait into poll's signed millisecond argument. */
+	remaining = bt_deadline - now;
+	if (remaining > (uint64_t)INT_MAX)
+		return INT_MAX;
+
+	/* Succeeded: the bounded wait may use this many milliseconds. */
+	return (int)remaining;
+}
+
+/* Reads one response line while retaining bytes belonging to following lines. */
+static char *
+bt_line(
+	int descriptor,
+	struct bt_reader *reader,
+	char *line,
+	size_t size)
+{
+	ssize_t received;
+	size_t length;
+	char byte;
+	int status;
+
+	/* Partial lines obey the same deadline as an entirely silent daemon. */
+	length = 0U;
+	while (length + 1U < size) {
+		/* Consults the deadline even with buffered input, so endless replies stay bounded. */
+		status = bt_remaining();
+		if (status == -2)
+			return NULL;
+
+		/* Refills only after the preceding response bytes have been consumed. */
+		if (reader->next == reader->used) {
+			/* Refuses a closed or expired socket before its next read. */
+			status = bt_wait(descriptor, POLLIN);
+			if (status != 0)
+				return NULL;
+
+			/* Nonblocking reads cannot sleep after a readiness race. */
+			received = read(descriptor, reader->bytes, sizeof(reader->bytes));
+			if (received < 0 && (errno == EAGAIN || errno == EINTR))
+				continue;
+			if (received <= 0)
+				return NULL;
+			reader->used = (size_t)received;
+			reader->next = 0U;
+		}
+
+		/* Consumes buffered bytes without waiting for subsequent socket traffic. */
+		byte = reader->bytes[reader->next];
+		reader->next++;
+		line[length] = byte;
+		length++;
+
+		/* The command protocol consists of newline-terminated records. */
+		if (byte == '\n')
+			break;
+	}
+
+	/* Succeeded: a terminated line, with any subsequent records still buffered. */
+	line[length] = '\0';
+	return line;
 }
 
 /* Prints how the command is used. */
@@ -536,5 +811,6 @@ bt_usage(
 	(void)fprintf(stderr,
 		      "usage: bt show | bt scan [SECONDS] | bt devices | bt pair ADDRESS [bredr|le-public|le-random] |\n"
 		      "       bt forget ADDRESS [TYPE] | bt bonds | bt agent | bt power on|off |\n"
-		      "       bt connect ADDRESS [TYPE] | bt disconnect ADDRESS [TYPE] | bt status\n");
+		      "       bt connect ADDRESS [TYPE] | bt disconnect ADDRESS [TYPE] | bt status |\n"
+		      "       bt check | bt reopen | bt reset\n");
 }
