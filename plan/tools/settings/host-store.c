@@ -205,11 +205,31 @@ test_set(void)
 {
 	struct kwl_settings_store store;
 	struct kwl_settings_entry *entry;
+	const struct kl_settings_key *key;
+	size_t count;
+	size_t index;
+	size_t missing;
 	int error;
 
 	put_file("");
 	(void)kwl_settings_store_open(&store, test_home);
 	(void)kwl_settings_store_load(&store);
+
+	/* Every compositor row of the table is held (BUG-287: phone.backend was not). */
+	missing = 0;
+	count = kl_settings_key_count();
+	for (index = 0; index < count; index++) {
+		key = kl_settings_key_at(index);
+		if (key->resolver != KL_SETTINGS_RESOLVER_COMPOSITOR || (key->flags & KL_SETTINGS_KEY_PREFIX) != 0U)
+			continue;
+		if (kwl_settings_store_find(&store, key->name) == NULL) {
+			printf("     not held: %s\n", key->name);
+			missing++;
+		}
+	}
+	check(missing == 0U, "set: every compositor row of the table is held (%zu missing)", missing);
+	check(kwl_settings_store_choose(&store, "phone.backend", "2") == 0, "set: phone.backend 2");
+	check(kwl_settings_store_choose(&store, "power.sleep.battery", "10") == 0, "set: power.sleep.battery 10");
 	check(kwl_settings_store_choose(&store, "mouse.speed", "26") == 0, "set: mouse.speed 26");
 	check(kwl_settings_store_choose(&store, "mouse.speed", "301") == EINVAL, "set: 301 is refused");
 	check(kwl_settings_store_choose(&store, "no.key", "1") == ENOENT, "set: an unknown key is ENOENT");

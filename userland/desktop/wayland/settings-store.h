@@ -23,8 +23,12 @@
 #include <pthread.h>
 #include <stdint.h>
 
-/* The most compositor settings the store holds (the table's compositor rows). */
-#define KWL_SETTINGS_ENTRIES	24U
+/*
+ * The most compositor settings the store holds: room for every compositor
+ * row of the table (29 in 2026-10, BUG-287: at 24 the rows past the 24th,
+ * phone.backend among them, were never held and their sets refused).
+ */
+#define KWL_SETTINGS_ENTRIES	64U
 
 /* The longest path of the file, with its NUL. */
 #define KWL_SETTINGS_PATH_MAX	1024U
