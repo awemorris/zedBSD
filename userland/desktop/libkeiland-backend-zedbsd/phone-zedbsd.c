@@ -1704,21 +1704,55 @@ phone_field(
 {
 	const char *at;
 	unsigned long byte;
+	size_t length;
 	size_t used;
 	char digits[3];
 	char *end;
+	int quoted;
+	int start;
+	int same;
 
-	/* The field, at the start of the line or after a space. */
+	/*
+	 * The field, at the start of the line or after a space, never inside
+	 * a quoted value: a name or a text of the phone's could otherwise pose
+	 * as a field (" length=5" in a contact's name, ws197-p005 review M1).
+	 */
 	value[0] = '\0';
+	length = strlen(name);
 	at = line;
-	for (;;) {
-		at = strstr(at, name);
-		if (at == NULL)
-			return 0;
-		if (at == line || at[-1] == ' ')
-			break;
+	quoted = 0;
+	start = 1;
+	while (*at != '\0') {
+		/* A field's start outside the quotes: the one asked for. */
+		if (!quoted && start) {
+			same = strncmp(at, name, length);
+			if (same == 0)
+				break;
+		}
+
+		/* Inside a field from here on. */
+		start = 0;
+
+		/* An escape inside the quotes takes its next character along. */
+		if (quoted && *at == '\\' && at[1] != '\0') {
+			at += 2;
+			continue;
+		}
+
+		/* The quotes open and close; a space outside them starts a field. */
+		if (*at == '"') {
+			quoted = !quoted;
+		} else if (!quoted && *at == ' ') {
+			start = 1;
+		}
+
+		/* The next character. */
 		at++;
 	}
+
+	/* None. */
+	if (*at == '\0')
+		return 0;
 
 	/* The value, after the name. */
 	at += strlen(name);
