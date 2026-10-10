@@ -3,15 +3,19 @@
 # WS202: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（libmedia の自前の decoder、Video Player・Music）
 
 <!-- awesome-plan-current:start -->
-Status: planning（2026-10-10 設計の第 2 版（[review-001](review-001.md) を反映）。人の判断 H1〜H6・J1〜J6 の回答の後に planned）
+Status: incomplete（実装方針をユーザーが変更。p005のHuffman数値部分は抽出/検証済み、native decoder/app fallback/標準GPU読戻しは未実装）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Target: **ベータ3**（判断の点 H4「ベータ2 に入れるか」）
-Queue: —
-Resume point: [design.md](design.md) 第 2 版 → H1〜H6・J1〜J6 の回答（必要なら 2 回目の review）→ p002 から。実装は別のセッション（2026-10-11 ユーザー）。
+Queue: [Huffman部分結果](policy-20261010.md#今回の有限実行-codex-ws202-20261010-aac-tables)と[readback部分結果](policy-20261010.md#有限実行-codex-ws202-20261010-readback)（両finite runはfinished、WSはincomplete）
+Resume point: [2026-10-10ユーザー決定と実装境界](policy-20261010.md)を正本とし、p001再review/各Phase具体手順を改訂する。新p016のi915/必要なlibvulkan補完はユーザー承認済み、software実装・対象host/buildはPASS、Q1統合と実機hash待ち。Huffman数値出力のみcleared。実機/WS完了は未達。
 <!-- awesome-plan-current:end -->
+
+## 現在の設計境界
+
+[2026-10-10ユーザー決定と実装境界](policy-20261010.md)が以下の旧第2版の矛盾する記述に優先する。libmediaは自前AAC-LC/Vulkan Video H.264だけを持ち、動画・音楽appが外部libavcodecをdlopenしてfallbackする。HE-AAC coreの縮退再生とlibraryの2段backend選択は廃止。機種名/Intel tilingで判定せず、Vulkanの能力と標準読み戻しに依存する。今回の確認目標はWS083のi915。
 
 ## 由来（2026-10-11 ユーザー）
 
@@ -70,11 +74,11 @@ GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvu
 
 | Phase | 目的 | 見積もり | Status | 依存 |
 | --- | --- | --- | --- | --- |
-| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 4 | in-progress（第 2 版、判断の回答待ち） | — |
+| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 4 | in-progress（第3版への方針改訂） | — |
 | [ws202-p002](phase002/phase.md) | 試験の stream と参照（`make-streams.sh`、x264 で直に mp4、ADTS・mkv・TS・AVI・ctts 無し、合成の 1080p）、host 試験の枠 | 4 | planned | p001、J5 |
 | [ws202-p003](phase003/phase.md) | 共通の部品: bits、picture と pool と scaler、sound（64 tap の resampler、音の約束、trim）、back end の表・問題・2 段の試し・新しい口 | 7 | planned | p001、H2、J1 |
 | [ws202-p004](phase004/phase.md) | mediafile: pasp・colr（nclx・nclc）・`end_us` | 2 | planned | p001 |
-| [ws202-p005](phase005/phase.md) | AAC の構文（ASC・ADTS・要素・ICS・Huffman）、表の生成、HE-AAC の signalling の試験 | 8 | planned | p002、p003、H3、H5 |
+| [ws202-p005](phase005/phase.md) | AAC-LC構文/規格数値、HE-AAC拒否。Huffman部分だけ実装済み | 8 | uncleared（部分出力のみcleared） | p002、p003、H3、H5 |
 | [ws202-p006](phase006/phase.md) | AAC の信号処理と back end（M/S の除外、切り詰め、trim、ADTS の入力）、精度の試験 | 9 | planned | p004、p005 |
 | [ws202-p007](phase007/phase.md) | Music（起動の門、notice、log、trim、AAT の helper と scenario） | 3 | planned | p006 |
 | [ws202-p008](phase008/phase.md) | H.264 の parser と DPB の写し（AU 単位、VUI、POC type 1、表示順の深さ）、probe との一致の試験 | 7 | planned | p002、p003 |
@@ -85,6 +89,7 @@ GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvu
 | [ws202-p012](phase012/phase.md) | T1: QEMU（libavcodec 無し・有り）と 5330 の実機を 1 回で | 3 | planned | p011 |
 | [ws202-p013](phase013/phase.md) | 5330 の UAT（ユーザー） | 2 | planned | p012 |
 | [ws202-p014](phase014/phase.md) | 全文規約の見直しと、残す試験の登録（master.md の Tools）・開発だけの試験の削除の依頼 | 4 | planned | p013 |
+| [ws202-p016](phase016/phase.md) | 標準Vulkan NV12 readbackのdriver側補完またはWS083依存 | 未見積 | uncleared（software部分PASS、実機hash待ち） | WS083の実装出力 |
 
 ### 並べて進める時の merge の順（L-13）
 
@@ -125,3 +130,16 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 - 途中で解像度・codec が変わる mp4、`iTunSMPB` だけの priming は扱わない。in-band だけの H.264（TS・AVI・avc3）は libavcodec の無い時だけ自前が受け、範囲の外の
   profile は open の後に分かる（notice にならず再生の失敗）。
 - kernel の video の context は 8 個で、9 個目の process は BUSY。
+
+
+## ユーザー決定・部分出力の結果（2026-10-10）
+
+[2026-10-10ユーザー決定と実装境界](policy-20261010.md)に回答原意、全affected Phaseへの改訂、独立worktree/基点、12 Huffman book生成器/C表・実commandとPASS、未実装/実機/共有投影を保存。p005の数値部分を実行したためWSはincomplete。旧第2版の方針/判断表は履歴であり今回の実行権限に使わない。Master/共有Queue/Guardrail/他WS/GitHubの投影はQ1へpending。
+
+### 2026-10-10 p016担当境界の承認
+
+ユーザー回答「i915／必要なlibvulkanの補完も含める（推奨）」を[有限実行i03](policy-20261010.md#有限実行-codex-ws202-20261010-readback)に記録してp016 software部分を開始。実機hash、AAC decoder/app移管、WS完了は未達。Q1共有投影はpending。
+
+### 2026-10-10 p016 software部分の確認
+
+[p016 i03結果](phase016/phase.md#i03-software部分の結果2026-10-10): 標準NV12 plane readback、i915/libvulkan usage/feature補完、通常+ASan/UBSan hostとnamed build/link/ELF確認PASS。i03部分scopeはcleared、whole p016はuncleared（実機hash未確認）。native AAC/H.264 runtimeとapp移管はまだ未実装。Q1統合・共有投影pending。

@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 2 LW
 依存: p001
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 mp4 の reader（既存）に、縦横比・色・表示の終わりを足す（design §4）。
@@ -29,3 +33,8 @@ mp4 の reader（既存）に、縦横比・色・表示の終わりを足す（
 | --- | --- |
 | `sh plan/tools/media/run-host-mediafile.sh` | 既存と新しい期待が PASS |
 | libmedia・videoplayer・music・libbrowser の build | warning 0 |
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+containerのmetadata追加は維持。library/appの双方に同じ公開trackを渡し、FFmpeg依存をreaderに入れない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 2 LW（UAT の一覧の用意と結果の記録。ユーザーの時間は含まない）
 依存: p012
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 ユーザーが 5330 で、libavcodec の無い image の Video Player と Music を使い、再生の質を確かめる。
@@ -35,3 +39,8 @@ UAT の試料は `/home/awe/zedbsd-media/` の sample（`sample-h264-high-aac.mp
 
 - ユーザーの回答を ws.md の「5330 の UAT」の節（この Phase で足す）に原文で。問題は Bug Board か、担当の Phase を uncleared に戻すかを Q1 が決める。
 - UAT の後、docs（p011）に実機で確かめた範囲を反映する。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+自前AAC-LC/H.264とapp fallback/no-libraryを区別してUATする。HE-AAC core縮退再生を成功条件にしない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

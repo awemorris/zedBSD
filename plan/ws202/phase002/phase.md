@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 4 LW
 依存: p001、J5（1080p の試料）
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 AAC と H.264 の Phase が使う試験の stream と参照を、host の ffmpeg で合成の素材から再現できる形で作る（design §10.1）。
@@ -46,3 +50,8 @@ AAC と H.264 の Phase が使う試験の stream と参照を、host の ffmpeg
 
 - tree の外の 1080p の sample（`/home/awe/zedbsd-media/`）は UAT だけに使う。
 - 試験の image の入力は tree の中の file だけ。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+AAC-LC成功、HE-AAC拒否、app fallbackと未導入、未対応Vulkan GPUのエラーを独立に確認する。参照にLC coreの縮退再生を採らない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

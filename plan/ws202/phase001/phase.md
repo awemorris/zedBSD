@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 4 LW（第 1 版 3、第 2 版 1）
 依存: —
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。
+
 ## 範囲
 
 [design.md](../design.md) を書く。実装・build はしない（2026-10-11 ユーザー「設計だけ書いてください。実装は別なセッションで行います。」）。
@@ -26,3 +30,8 @@ Parent: [WS202](../ws.md)
    container を絞るなら §3.1 と p010 の試験を縮める）。
 2. 変更が大きければ 2 回目の review（Q1 の判断）。
 3. WS を planned に、この Phase を cleared に（Q1 の判定）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+p001は設計だけの旧制限を今回ユーザーの実装依頼で置換。native-only library/app fallback/API readbackへ構造改訂し再reviewが必要。旧clearance条件はそのまま実装承認に使わない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

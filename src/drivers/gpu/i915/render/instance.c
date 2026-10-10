@@ -628,10 +628,11 @@ i915_instance_format_features(
 	 */
 	switch (format) {
 	case VK_FORMAT_G8_B8R8_2PLANE_420_UNORM:
-		/* The video decoder's output and reference pictures, in Y tiles only. */
+		/* Decode pictures in Y tiles, copied to linear buffers by the transfer path. */
 		if (video) {
 			properties->optimalTilingFeatures = VK_FORMAT_FEATURE_VIDEO_DECODE_OUTPUT_BIT_KHR |
-				VK_FORMAT_FEATURE_VIDEO_DECODE_DPB_BIT_KHR;
+				VK_FORMAT_FEATURE_VIDEO_DECODE_DPB_BIT_KHR |
+				VK_FORMAT_FEATURE_TRANSFER_SRC_BIT;
 		}
 		break;
 	case VK_FORMAT_R8G8B8A8_UNORM:
@@ -914,8 +915,7 @@ i915_instance_image_format_properties(
 
 /*
  * Replies the properties of an NV12 image: a 2D picture in Y tiles used only
- * as the video decoder's output and reference pictures (libvulkan answers
- * another usage with the video profile's own result), of one level, one
+ * as decode output, reference pictures and transfer source, of one level, one
  * layer and one sample, at most 4096 a side (design §3.4).
  */
 static void
@@ -931,7 +931,7 @@ i915_instance_video_image_properties(
 
 	/* Refuses a device without video decode, another type or tiling, and another usage. */
 	kern_memset(&image, 0, sizeof(image));
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	if (features == 0U ||
 	    type != VK_IMAGE_TYPE_2D ||
 	    tiling != VK_IMAGE_TILING_OPTIMAL ||

@@ -2,11 +2,15 @@
 
 # ws202-p005: AAC の構文と表
 
-Status: planned
+Status: uncleared（Huffman数値部分はcleared、全AAC parserは未実装）
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
 依存: p002（stream）、p003（`bits.c`）、H3（HE-AAC）、H5（表の出典）
+
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
 
 ## 目的
 
@@ -52,3 +56,8 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
 - H5 の回答の前に始めない。この Phase では back end を表に入れない。
 - ISO/IEC 14496-3 の表の番号は未確認（design U6）。生成の file の comment は「ISO/IEC 14496-3 の Huffman の codebook と scalefactor band の表」とし、番号を書くのは
   規格で確かめてから。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+12 Huffman数値の生成器/aac-huffman.[ch]を実装・構造/生成一致/C89確認PASS。p005全体は未完としてuncleared。H5はユーザー承認済み。AOT5/29/SBR/PSは拒否し、degraded=1でcoreを受ける旧手順は失効。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

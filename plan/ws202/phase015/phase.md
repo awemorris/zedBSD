@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 4 LW
 依存: p008、J4（試験の stream の出典）
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 vkvideo-probe に無い参照の管理（design §5.3・§5.7）を足し、open GOP の seek の後も DPB が保たれ、空の slot を参照しないことを確かめる（review-001 H-02）。
@@ -40,3 +44,8 @@ vkvideo-probe に無い参照の管理（design §5.3・§5.7）を足し、open
 ## 注意
 
 - conformance の stream は tree に入れない。5330 の hash の確かめに使うなら p012 の依頼に（T1 が host から scp）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+gap/MMCO5のscopeは維持。conformanceの取得/利用条件は未確認のため未実施として保持し、標準readbackとの実hashをp016/p012で確認する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

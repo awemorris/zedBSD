@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 4 LW
 依存: p013（WS の全 code の変更の後）
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文（§14 の checklist を含む）と照らし、書き方だけを直す（動作は変えない）。残す試験を master.md に登録し、
@@ -34,3 +38,8 @@ WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文�
 ## 記録
 
 範囲の file、直した規則の種類と数、確認の結果、Q1 に送った試験の整理の一覧。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+native-only library、app共有adapter/FFmpeg移管、必要なdriver/readback補完と新table生成器を全文レビュー対象に追加。規格数値と外部codeを区別する。共有Tool/Guardrail投影はQ1へ。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

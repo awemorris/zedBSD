@@ -1,11 +1,15 @@
 # WS202 の設計: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（ws202-p001）
 
-**第 2 版**（2026-10-10、設計の担当）。第 1 版（同日）に design-reviewer の [review-001](review-001.md) の H-01〜H-07・M-01〜M-13・
+**第 3 版への改訂中**（2026-10-10、設計の担当）。第 1 版（同日）に design-reviewer の [review-001](review-001.md) の H-01〜H-07・M-01〜M-13・
 L-01〜L-11・L-13 を織り込んだ（L-12 は Q1 が WS083 の側で直した）。指摘と直した節の対応は §16。範囲は [ws.md](ws.md) とユーザーの
 2026-10-11 の指示。実装は別のセッションが行う。
 
 この文書の「事実」は main `e8adcdf89` の file を読んだ物で、file を添える。「確かめた」は第 2 版で host（scratchpad の中、tree に何も
 書かない）で走らせて確かめた物（§15 に command と結果）。「決定」は D 番号、「人の判断」は H・J 番号（§13）、確かめていない物は U 番号（§14）。
+
+## 最新の実装方針（2026-10-10、ユーザー決定）
+
+[2026-10-10ユーザー決定と実装境界](policy-20261010.md)が正本。本書の第2版本文に残るlibmediaのavcodec backend・degraded/HE-AAC core再生・Intel Tile Y読戻し・i915固定機種の記述は失効した設計の履歴であり、実装指示として使わない。libmediaはZlibの自前decoderだけ、appがdlopen fallbackを所有し、GPUの可否と読戻しはVulkan API経由。p001の再reviewと各Phaseの具体手順更新は未了。
 
 ## 0. 読んだ物と前提
 
@@ -659,3 +663,8 @@ host・QEMU・5330 の結果を別の行に書く。やっていない確認は�
 - H.264 の CPU の decoder、HE-AAC の SBR・PS、GPU の image の共有の表示、TRANSFER_SRC の経路。
 - vkvideo-probe と libmedia の parser の重複の解消（probe が MMCO 5・gap を扱えるようにもなる）。
 - stsd の複数の entry、`iTunSMPB`、decode の非同期化（M-07 を満たさない時）、再生の途中の libavcodec への切り替え（J6 (b)）。
+
+
+## 第3版の構造変更（2026-10-10）
+
+[2026-10-10ユーザー決定と実装境界](policy-20261010.md)。H1/H2/H3/H5/J1/J2とD1/D8/D10/2段backend選択を改訂。p003はnative-only decoder表、p005/p006はHE-AAC拒否、p007/p011はapp側fallback所有、p009/p010は標準readbackへ変更。新p016でdriver側の欠落を具体化し、担当範囲は回答待ち。p002/p008/p012〜p014の試験・期待・規約scopeもこの境界で改訂する。旧review結果を消さず、適用変更を各Phaseに記録した。

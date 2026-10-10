@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 3 LW
 依存: p007、p010
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 Video Player を自前の decoder に合わせ、p012 に要る音の道具と scenario を揃える（design §9.3・§10.3）。
@@ -42,3 +46,8 @@ Video Player を自前の decoder に合わせ、p012 に要る音の道具と s
 | image の package の一覧（`config-media.mk`） | libmedia・videoplayer・music・openssh・audiod・media-probe があり、libavcodec が無い（H-07） |
 
 QEMU・実機は p012。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+Video Playerはapp共通adapterでtrackごとにnativeを試し、非対応ならapp所有のdlopen fallback。libmedia backend表にavcodecを入れない。native/fallback双方のframe/scaler寿命とno-FFmpeg noticeを確認する。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

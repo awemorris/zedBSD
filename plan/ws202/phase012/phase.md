@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 3 LW（依頼を書く・結果を記録する時間。T1 の実行の時間は含まない）
 依存: p011
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 WS202 の QEMU と実機の確認を T1 に 1 回の依頼でまとめる（design §10.4）。実装の担当は QEMU・実機を起動しない。
@@ -50,3 +54,8 @@ image は `ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk`（libavcodec 無し�
 ## 受け入れ
 
 A・B・C の全項目が PASS（または Q1 がユーザーと決めた例外）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+native-only media-probe、app fallback有り/無し、HE-AAC拒否、未対応GPU拒否を分ける。5330は今回の確認環境であってlibmediaの機種制限ではない。p016の実機readback証拠も必要。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

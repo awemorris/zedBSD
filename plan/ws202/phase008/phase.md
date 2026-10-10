@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 7 LW
 依存: p002（stream）、p003（`bits.c`）
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 mp4 の packet（1 AU）から Vulkan Video に渡す `StdVideo*` と slice の位置、DPB の計画、表示順（POC の bumping）を作る。vkvideo-probe が扱う範囲で同じ結果を出すことを
@@ -48,3 +52,8 @@ host で確かめる（design §5.2・§5.3・§5.6）。probe に無い gap・M
 
 - 「probe と一致」は probe が扱う範囲だけの確かめ（probe は MMCO 5・gap で止まる）。それらは p015。
 - vkvideo-probe は変えない。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+parser/DPBの改善は維持。Vulkanへの情報を作るだけで機種名/Intel tilingを持たない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 8 LW
 依存: p009
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 p009 の back end を再生に使える形に仕上げて表の先頭に入れ、本物の GPU での最初の確かめを早く行う（review-001 M-09）。
@@ -44,3 +48,8 @@ p009 の back end を再生に使える形に仕上げて表の先頭に入れ�
 | `sh plan/tools/media/run-host-codec.sh` | PASS |
 | `make … ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk ZEDBSD_USER_PROGRAMS="libmedia videoplayer music libbrowser media-probe" …` | warning 0 |
 | 5330（T1） | 7 本の全 frame が一致、seek の後の frame が一致、1 行目 `video=h264/vulkan-video` |
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+POC/seekを維持し、表はnative backendだけ。app fallbackはここへ入れない。device不在はエラー。media-probeはapp fallbackなしで自前経路の証拠にし、標準readback未実装ならclearしない。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

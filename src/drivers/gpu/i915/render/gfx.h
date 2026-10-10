@@ -226,8 +226,8 @@ struct i915_gfx_image {
 	 * A two-plane NV12 picture of the video decoder (ws083): nonzero, laid
 	 * out in Y tiles, the interleaved CbCr plane chroma_offset bytes in,
 	 * below chroma_rows rows of the Y plane, both at the image's pitch.
-	 * Only the video decoder reads or writes one; drv_i915_gfx_image_slice()
-	 * refuses it to every other use.
+	 * The decoder writes it; a standard plane readback copies its R8 or
+	 * R8G8 texels.  drv_i915_gfx_image_slice() refuses generic image uses.
 	 */
 	uint32_t planar;
 	uint64_t chroma_offset;

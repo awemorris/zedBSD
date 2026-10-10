@@ -201,6 +201,7 @@ static int i915_record_command(struct i915_render_session *session, uint32_t opc
 static int i915_image_surface(const struct i915_gfx_image *image, uint32_t level, uint32_t slice, struct i915_gfx_surface *surface);
 static uint32_t i915_image_planes(const struct i915_gfx_image *image, uint32_t aspects);
 static int i915_image_plane_surface(const struct i915_gfx_image *image, uint32_t plane, uint32_t level, uint32_t slice, struct i915_gfx_surface *surface);
+static int i915_nv12_copy_surface(const struct i915_gfx_op *op, struct i915_gfx_surface *surface, uint32_t *texel_bytes);
 static int i915_image_copy_plane(struct i915_render_session *session, const struct i915_gfx_op *op, uint32_t plane);
 static int i915_image_blit_plane(struct i915_render_session *session, const struct i915_gfx_op *op, uint32_t plane, const struct i915_gfx_rect *src_rect, const struct i915_gfx_rect *dst_rect, int linear);
 static int i915_blit_order(int32_t *first, int32_t *second, int mirror);
@@ -2705,6 +2706,94 @@ i915_execute_clear_rect(
 }
 
 /*
+ * Describes one NV12 plane for a standard image-to-buffer copy.  Plane 1
+ * coordinates are CbCr pairs, whose extent is half the luma extent rounded
+ * up.  The existing GPU rectangle copies R8 or R8G8 texels from Y tiles;
+ * callers never need to interpret the decoder's storage themselves.
+ */
+static int
+i915_nv12_copy_surface(
+	const struct i915_gfx_op *op,
+	struct i915_gfx_surface *surface,
+	uint32_t *texel_bytes)
+{
+	const struct i915_gfx_image *image;
+	const VkBufferImageCopy *region;
+	uint64_t offset;
+	uint32_t width;
+	uint32_t height;
+	uint32_t format;
+	uint32_t bytes;
+	uint32_t x;
+	uint32_t y;
+
+	/* Only readback was admitted by the NV12 image usage queries. */
+	image = op->u.copy.image;
+	region = &op->u.copy.region;
+	if (op->kind != I915_GFX_OP_COPY_IMAGE_TO_BUFFER)
+		return EINVAL;
+
+	/* The resources must have been created for this transfer direction. */
+	if ((image->usage & VK_IMAGE_USAGE_TRANSFER_SRC_BIT) == 0U)
+		return EINVAL;
+	if ((op->u.copy.buffer->usage & VK_BUFFER_USAGE_TRANSFER_DST_BIT) == 0U)
+		return EINVAL;
+
+	/* NV12 has one level, one layer and one depth sample per plane. */
+	if (region->imageSubresource.mipLevel != 0U || region->imageSubresource.baseArrayLayer != 0U)
+		return EINVAL;
+	if (region->imageSubresource.layerCount != 1U || region->imageExtent.depth != 1U)
+		return EINVAL;
+	if (region->imageOffset.x < 0 || region->imageOffset.y < 0 || region->imageOffset.z != 0)
+		return EINVAL;
+
+	/* The selected plane's compatible format defines its sample size. */
+	offset = 0U;
+	width = image->width;
+	height = image->height;
+	format = VK_FORMAT_R8_UNORM;
+	bytes = 1U;
+	if (region->imageSubresource.aspectMask == VK_IMAGE_ASPECT_PLANE_1_BIT) {
+		offset = image->chroma_offset;
+		width = (width + 1U) / 2U;
+		height = (height + 1U) / 2U;
+		format = VK_FORMAT_R8G8_UNORM;
+		bytes = 2U;
+	} else if (region->imageSubresource.aspectMask != VK_IMAGE_ASPECT_PLANE_0_BIT) {
+		/* Colour, combined planes and nonexistent planes are not plane copies. */
+		return EINVAL;
+	}
+
+	/* Reject a rectangle outside the selected plane, before building GPU state. */
+	x = (uint32_t)region->imageOffset.x;
+	y = (uint32_t)region->imageOffset.y;
+	if (x >= width || y >= height)
+		return EINVAL;
+	if (region->imageExtent.width > width - x || region->imageExtent.height > height - y)
+		return EINVAL;
+
+	/* The destination pitch fits the surface field and its texels are aligned. */
+	if (region->bufferRowLength > UINT32_MAX / bytes)
+		return EINVAL;
+	if ((region->bufferOffset % bytes) != 0U)
+		return EINVAL;
+
+	/* The bound plane is a Y-tiled surface of the compatible format. */
+	surface->va = drv_i915_gfx_memory_va(image->memory, image->offset + offset);
+	if (surface->va == 0U)
+		return EINVAL;
+	surface->width = width;
+	surface->height = height;
+	surface->pitch = image->pitch;
+	surface->format = format;
+	surface->tiled = 1U;
+	*texel_bytes = bytes;
+
+	/* Succeeded: the rectangle path can read this plane as ordinary texels. */
+	return 0;
+}
+
+/*
  * Runs a vkCmdCopyBufferToImage or vkCmdCopyImageToBuffer region as one GPU
  * copy.
  *
@@ -2762,7 +2851,14 @@ i915_execute_buffer_image_copy(
 		plane = I915_IMAGE_PLANE_MAIN;
 
 	/* Describes the level of the plane the region names, in its first slice. */
-	error = i915_image_plane_surface(image, plane, region->imageSubresource.mipLevel, first_slice, &image_surface);
+	texel_bytes = drv_i915_gfx_format_bytes(image->format);
+	if (image->planar != 0U) {
+		error = i915_nv12_copy_surface(op, &image_surface, &texel_bytes);
+	} else {
+		error = i915_image_plane_surface(image, plane, region->imageSubresource.mipLevel, first_slice, &image_surface);
+	}
+
+	/* A plane that cannot be represented has no GPU copy. */
 	if (error != 0)
 		return EINVAL;
 
@@ -2772,8 +2868,7 @@ i915_execute_buffer_image_copy(
 	 * R8_UNORM, which the copy moves between the linear buffer and the
 	 * Y-tiled image.
 	 */
-	buffer_format = image->format;
-	texel_bytes = drv_i915_gfx_format_bytes(image->format);
+	buffer_format = image_surface.format;
 	if (plane == I915_IMAGE_PLANE_STENCIL) {
 		buffer_format = VK_FORMAT_R8_UNORM;
 		texel_bytes = 1U;
@@ -2807,9 +2902,11 @@ i915_execute_buffer_image_copy(
 
 	/* Refuses a region that runs past the end of the buffer. */
 	slice_bytes = image_rows * row_pixels * texel_bytes;
-	needed = region->bufferOffset + (uint64_t)(slice_count - 1U) * slice_bytes +
+	needed = (uint64_t)(slice_count - 1U) * slice_bytes +
 	    ((uint64_t)(region->imageExtent.height - 1U) * row_pixels + region->imageExtent.width) * texel_bytes;
-	if (needed > buffer->size)
+	if (region->bufferOffset > buffer->size)
+		return EINVAL;
+	if (needed > buffer->size - region->bufferOffset)
 		return EINVAL;
 
 	/* Describes the buffer region as a linear surface of the image's format. */

@@ -662,7 +662,7 @@ drv_i915_gfx_image_slice(
 	uint32_t slices;
 	uint64_t offset;
 
-	/* Refuses an NV12 picture: only the video decoder reads and writes one. */
+	/* Refuses NV12 in generic image operations; command.c describes readback planes separately. */
 	if (image->planar != 0U)
 		return EINVAL;
 
@@ -951,8 +951,7 @@ i915_gfx_image_supported(
  * Decides whether an NV12 image is a picture the video decoder takes: only
  * on a device that offers video decode, 2D, one level, one layer, one
  * sample, optimal tiling (Y tiles), no create flags, at most 4096 a side,
- * and used only as the decoder's output and reference pictures (design
- * §3.4).
+ * and used as decode output, reference pictures or transfer source.
  */
 static int
 i915_gfx_video_image_supported(
@@ -979,8 +978,8 @@ i915_gfx_video_image_supported(
 	if (info->extent.width > I915_GFX_VIDEO_MAX_EXTENT || info->extent.height > I915_GFX_VIDEO_MAX_EXTENT)
 		return 0;
 
-	/* Used as the decoder's output, its reference pictures or both, and nothing else. */
-	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR;
+	/* Used for decode pictures and standard readback; uploads and sampling remain unsupported. */
+	video_usage = VK_IMAGE_USAGE_VIDEO_DECODE_DST_BIT_KHR | VK_IMAGE_USAGE_VIDEO_DECODE_DPB_BIT_KHR | VK_IMAGE_USAGE_TRANSFER_SRC_BIT;
 	if (info->usage == 0U || (info->usage & ~video_usage) != 0U)
 		return 0;
 

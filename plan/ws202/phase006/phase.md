@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 9 LW
 依存: p004（`end_us`）、p005
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 p005 の構文の結果から PCM を作り、`media_aac_ops` として decoder の表に入れる。host の ffmpeg の decoder と精度の基準で一致させ、他の container の AAC を回帰させない。
@@ -46,3 +50,8 @@ p005 の構文の結果から PCM を作り、`media_aac_ops` として decoder 
 
 - 基準を満たさない時は、どの道具で外れるかを stream ごとに切り分けて直す。基準を緩めない。
 - ffmpeg の decoder の内部の値を読まない（出力の PCM だけ）。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+AAC-LCだけを実装。HE-AAC/非対応toolはPROFILEを返す。avcodec opsをlibraryの表へ入れず、音のfallbackはapp側。Huffman数値部分以外のparser/filterbankは未実装。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。

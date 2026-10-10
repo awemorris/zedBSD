@@ -8,6 +8,10 @@ Parent: [WS202](../ws.md)
 見積もり: 7 LW
 依存: p001、H2（back end の順）、J1（container を絞るか）
 
+## 現在の適用方針
+
+[最新ユーザー決定](../policy-20261010.md)が以下の旧第2版手順に優先する。具体的手順の改訂/reviewは未了。
+
 ## 目的
 
 AAC と H.264 の back end が共有する部品を作り、decoder.c と `media-decoder.h` を design §9.1 の形にする。この Phase を先に merge する（ws.md の merge の順）。
@@ -57,3 +61,8 @@ AAC と H.264 の back end が共有する部品を作り、decoder.c と `media
 
 - 試験だけの環境変数で動作を切り替えない（coding-style §12）。
 - この Phase では app の振る舞いは変わらない。
+
+
+## 構造改訂と部分結果（2026-10-10）
+
+libraryのops表はnativeだけ。avcodec opsの導入/外部ops注入/degraded引数/2段選択を廃止し、FFmpeg固有load/reason/bitstream責務をapp側へ移す。具体的移管手順はpolicyのlibraryとapp境界を正とする。 [変更理由・依存・結果](../policy-20261010.md)。旧記録は保持し、対象外の未実施条件をclearedとしない。共有投影/他担当/GitHubはQ1へpending。
