@@ -8,19 +8,10 @@ VA-API.
 
 ## Availability
 
-Video decode is offered only when all of these hold:
-
-- the GPU is driven by zedBSD's native i915 driver (not the Venus path of a
-  virtual machine), and the GT has the video engine VCS0;
-- the kernel was booted with `i915.debug=video` (or `i915.debug=display,video`).
-  Without it the device looks exactly as before: no video queue family, no
-  video extension, no `VK_KHR_synchronization2`.
-
-The boot word is off by default, also in the release image. To turn it on, put
-the line `i915.debug=video` in `zedbsd.cfg` on the boot drive's EFI partition
-(FAT); if the file already has an `i915.debug=` line, add `video` to its words
-(`i915.debug=display,video`) instead of adding a second line. The gate stays
-while the video engine's recovery from a hang is being verified on hardware.
+Video decode is offered when the GPU is driven by zedBSD's native i915 driver
+(not the Venus path of a virtual machine) and the GT has the video engine VCS0.
+It is on by default, also in the release image. The older boot word
+`i915.debug=video` is still accepted and changes nothing.
 
 A program checks for video decode as on any Vulkan implementation: a queue
 family whose `queueFlags` has `VK_QUEUE_VIDEO_DECODE_BIT_KHR`, and the device

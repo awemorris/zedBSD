@@ -49,11 +49,11 @@
 #define I915_CAPSET_NATIVE_VIDEO_H264	1U
 
 /*
- * Whether the boot asked for Vulkan video decode (i915.debug=video).
+ * Whether Vulkan video decode is offered.
  *
  * It is written once by the boot path before any device attaches and only
- * read afterwards, so it needs no lock.  Zero, the default, keeps every
- * device without video decode.
+ * read afterwards, so it needs no lock.  The boot path sets it, so video
+ * decode is on by default on a GT with VCS0.
  */
 static int i915_render_video_requested;
 
@@ -346,6 +346,6 @@ i915_render_capset_fill(
 		vk->capset[168U / 4U] = I915_CAPSET_NATIVE_TAG;
 		vk->capset[172U / 4U] = I915_CAPSET_NATIVE_VIDEO_H264;
 		vk->capset_bytes = 176U;
-		kern_logf("i915: vk: capset declares H.264 video decode (i915.debug=video)\n");
+		kern_logf("i915: vk: capset declares H.264 video decode\n");
 	}
 }

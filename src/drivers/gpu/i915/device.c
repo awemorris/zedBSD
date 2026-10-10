@@ -216,23 +216,22 @@ drv_i915_runtime_ready(void)
 	unsigned held;
 	int manual;
 	int debug;
-	int video;
 	unsigned long enabled;
 
 	/* Makes sure the registry lock exists before it is taken. */
 	i915_start_registry_init();
 
 	/*
-	 * Reads whether root starts the devices (i915.start=manual), whether the
-	 * display path is logged in detail (i915.debug=display), and whether the
-	 * video decode engine, not yet confirmed on hardware, is offered to
-	 * Vulkan (i915.debug=video).  i915.debug= lists its words with commas.
+	 * Reads whether root starts the devices (i915.start=manual) and whether
+	 * the display path is logged in detail (i915.debug=display).
+	 * i915.debug= lists its words with commas.  The video decode engine is
+	 * offered to Vulkan by default; i915.debug=video is still accepted and
+	 * changes nothing.
 	 */
 	manual = i915_boot_word(KERN_BOOT_PARAMETER_I915_START, "manual");
 	debug = i915_boot_word_listed(KERN_BOOT_PARAMETER_I915_DEBUG, "display");
 	drv_i915_lcd_debug_set(debug);
-	video = i915_boot_word_listed(KERN_BOOT_PARAMETER_I915_DEBUG, "video");
-	drv_i915_render_video_request(video);
+	drv_i915_render_video_request(1);
 
 	/* Marks the kernel ready for every current and later device. */
 	enabled = spin_lock_irqsave(&i915_start_registry.lock);
@@ -267,10 +266,6 @@ drv_i915_runtime_ready(void)
 	/* Notes the detailed display log. */
 	if (debug)
 		kern_logf("i915: i915.debug=display: the display path is logged in detail\n");
-
-	/* Notes the video decode engine offered before its hardware confirmation. */
-	if (video)
-		kern_logf("i915: i915.debug=video: Vulkan video decode is offered on a GT with VCS0\n");
 
 	/* Starts the devices that attached before readiness, unless they are held. */
 	i915_start_launch();
