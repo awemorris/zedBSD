@@ -14,6 +14,7 @@
 #include "userland/base/bluetoothd/mapxml.h"
 
 #include <errno.h>
+#include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
 
@@ -23,6 +24,8 @@
 #define PHONEIO_DIGITS_MAX	5U
 
 static int phoneio_hex(char letter);
+static int phoneio_put(char *line, size_t size, size_t *used, const char *text);
+static int phoneio_put_field(char *line, size_t size, size_t *used, const char *key, const char *text);
 static int phoneio_lines(struct btd_phoneio_input *input, const struct btd_phoneio_events *events);
 static int phoneio_text_begin(struct btd_phoneio_input *input, size_t line_length, size_t text_length, const struct btd_phoneio_events *events);
 static void phoneio_text_done(struct btd_phoneio_input *input, const struct btd_phoneio_events *events);
@@ -615,6 +618,103 @@ phoneio_text_done(
 	free(text);
 }
 
+/*
+ * Writes a PHONE CONTACT line (ws197-p005 section 5.2): the contact's
+ * key, how many numbers it has, the length of the reduced vCard that
+ * follows the line, then its first number and its name as strings (the
+ * phone's texts last, after every field the daemon writes).  Returns 0, or
+ * ENOSPC when size has no room.
+ */
+int
+btd_phoneio_contact_line(
+	char *line,
+	size_t size,
+	const char *key,
+	unsigned tels,
+	size_t length,
+	const char *peer,
+	const char *name)
+{
+	size_t used;
+	int written;
+	int error;
+
+	/* The fields the daemon writes. */
+	written = snprintf(line, size, "PHONE CONTACT key=%s tels=%u length=%lu", key, tels, (unsigned long)length);
+	if (written < 0 || (size_t)written >= size)
+		return ENOSPC;
+	used = (size_t)written;
+
+	/* The first number. */
+	error = phoneio_put_field(line, size, &used, " peer=", peer);
+	if (error != 0)
+		return ENOSPC;
+
+	/* The name. */
+	error = phoneio_put_field(line, size, &used, " name=", name);
+	if (error != 0)
+		return ENOSPC;
+
+	/* Succeeded: the line. */
+	return 0;
+}
+
+/*
+ * Writes a PHONE CALL-LOG line (ws197-p005 section 5.2): the call's key,
+ * its kind, its time in UNIX seconds and the zone it was read in
+ * (phone, local or none), whether that time is the one the line was made
+ * at (partial), length=0 (no text follows), then the phone's datetime,
+ * the number and the name as strings.  Returns 0, or ENOSPC.
+ */
+int
+btd_phoneio_call_line(
+	char *line,
+	size_t size,
+	const char *key,
+	const char *kind,
+	int64_t time,
+	const char *zone,
+	int partial,
+	const char *datetime,
+	const char *peer,
+	const char *name)
+{
+	size_t used;
+	int written;
+	int error;
+
+	/* The fields the daemon writes. */
+	written = snprintf(line,
+			   size,
+			   "PHONE CALL-LOG key=%s kind=%s time=%lld zone=%s partial=%d length=0",
+			   key,
+			   kind,
+			   (long long)time,
+			   zone,
+			   partial);
+	if (written < 0 || (size_t)written >= size)
+		return ENOSPC;
+	used = (size_t)written;
+
+	/* The phone's datetime. */
+	error = phoneio_put_field(line, size, &used, " datetime=", datetime);
+	if (error != 0)
+		return ENOSPC;
+
+	/* The number. */
+	error = phoneio_put_field(line, size, &used, " peer=", peer);
+	if (error != 0)
+		return ENOSPC;
+
+	/* The name. */
+	error = phoneio_put_field(line, size, &used, " name=", name);
+	if (error != 0)
+		return ENOSPC;
+
+	/* Succeeded: the line. */
+	return 0;
+}
+
 /* Gives a hex digit's value, or -1 for another character. */
 static int
 phoneio_hex(
@@ -634,4 +734,50 @@ phoneio_hex(
 
 	/* Not a hex digit. */
 	return -1;
+}
+
+/* Adds a text to a line.  Returns 0, or ENOSPC. */
+static int
+phoneio_put(
+	char *line,
+	size_t size,
+	size_t *used,
+	const char *text)
+{
+	size_t length;
+
+	/* No room for it and the NUL. */
+	length = strlen(text);
+	if (length >= size - *used)
+		return ENOSPC;
+
+	/* Succeeded: added. */
+	memcpy(line + *used, text, length + 1U);
+	*used += length;
+	return 0;
+}
+
+/* Adds " key=" and a quoted string (cut at BTD_PHONEIO_TEXT_MAX) to a line.  Returns 0, or ENOSPC. */
+static int
+phoneio_put_field(
+	char *line,
+	size_t size,
+	size_t *used,
+	const char *key,
+	const char *text)
+{
+	int error;
+
+	/* The key. */
+	error = phoneio_put(line, size, used, key);
+	if (error != 0)
+		return ENOSPC;
+
+	/* The string. */
+	error = btd_phoneio_quote(line, size, used, text, BTD_PHONEIO_TEXT_MAX);
+	if (error != 0)
+		return ENOSPC;
+
+	/* Succeeded: added. */
+	return 0;
 }

@@ -267,6 +267,52 @@ btd_vcard_next(
 }
 
 /*
+ * Counts the cards of a body at its own level, as btd_vcard_next cuts
+ * them: each BEGIN:VCARD line outside a card starts one (a card the body
+ * ends inside is counted too), the cards nested in it are not counted.
+ * The phone book's offsets count cards this way (ws197-p005 section 5.3).
+ */
+unsigned
+btd_vcard_count(
+	const uint8_t *body,
+	size_t length)
+{
+	struct vcard_line line;
+	size_t at;
+	unsigned count;
+	unsigned depth;
+	int begin;
+	int end;
+	int error;
+
+	/* Each line of the body. */
+	count = 0U;
+	depth = 0U;
+	at = 0U;
+	for (;;) {
+		/* No line left. */
+		error = vcard_physical_line(body, length, at, &line);
+		if (error != 0)
+			break;
+		at = line.next;
+
+		/* A card opens: one more at the body's level; a card closes. */
+		begin = vcard_same(body, line.start, line.end, "BEGIN:VCARD");
+		end = vcard_same(body, line.start, line.end, "END:VCARD");
+		if (begin) {
+			if (depth == 0U)
+				count++;
+			depth++;
+		} else if (end && depth > 0U) {
+			depth--;
+		}
+	}
+
+	/* The cards counted. */
+	return count;
+}
+
+/*
  * Reads one card of the phone book into contact.  Returns 0; ENOENT for
  * a card with neither a name nor a number (contact holds what was read);
  * EINVAL for one malformed (not opened by BEGIN:VCARD, never closed, or

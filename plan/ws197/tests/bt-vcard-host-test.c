@@ -13,7 +13,8 @@
  * the design says the key is made of.
  *
  *   next       cards cut out of a body: lines before and between them,
- *              a nested AGENT card, LF-only lines, a body cut inside a card
+ *              a nested AGENT card, LF-only lines, a body cut inside a card;
+ *              the cards counted at the body's level
  *   v21        a card of 2.1 as phones write it: quoted-printable names in
  *              UTF-8 with a soft line break inside a character, bare
  *              parameters, a fold that keeps its space, a BASE64 photo
@@ -383,6 +384,7 @@ test_next(void)
 	size_t at;
 	size_t start;
 	size_t length;
+	unsigned count;
 	int error;
 
 	/* The first card, after the line before it. */
@@ -415,6 +417,12 @@ test_next(void)
 	at = 0U;
 	error = btd_vcard_next((const uint8_t *)"", 0U, &at, &start, &length);
 	check(error == ENOENT, "next: an empty body");
+
+	/* The cards counted at the body's level: the nested one not, the cut one too (ws197-p005 section 5.3). */
+	count = btd_vcard_count((const uint8_t *)body, strlen(body));
+	check(count == 3U, "next: three cards counted");
+	count = btd_vcard_count((const uint8_t *)"END:VCARD\r\nx\r\n", 14U);
+	check(count == 0U, "next: no card counted");
 }
 
 /* A card of 2.1 as phones write it. */

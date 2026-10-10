@@ -106,6 +106,8 @@ int btd_phoneio_accept(uid_t uid, int seated, unsigned free_slots, unsigned rese
 int btd_phoneio_next(const char **cursor, char *key, size_t key_size, char *value, size_t value_size);
 int btd_phoneio_send_length(const char *line, size_t *length);
 int btd_phoneio_quote(char *line, size_t size, size_t *used, const char *text, size_t limit);
+int btd_phoneio_contact_line(char *line, size_t size, const char *key, unsigned tels, size_t length, const char *peer, const char *name);
+int btd_phoneio_call_line(char *line, size_t size, const char *key, const char *kind, int64_t time, const char *zone, int partial, const char *datetime, const char *peer, const char *name);
 void btd_phoneio_input_init(struct btd_phoneio_input *input);
 void btd_phoneio_input_room(struct btd_phoneio_input *input, uint8_t **room, size_t *size);
 int btd_phoneio_input_got(struct btd_phoneio_input *input, size_t count, const struct btd_phoneio_events *events);
