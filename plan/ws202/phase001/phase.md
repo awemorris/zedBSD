@@ -2,25 +2,27 @@
 
 # ws202-p001: 設計（design.md）と review
 
-Status: in-progress（2026-10-10 第 1 版を書いた。design-reviewer の review と H1〜H6 の回答の後に cleared）
+Status: in-progress（2026-10-10 第 2 版。H1〜H6・J1〜J6 の回答の後に cleared）
 Disposition: normal
 Parent: [WS202](../ws.md)
-見積もり: 3 LW
+見積もり: 4 LW（第 1 版 3、第 2 版 1）
 依存: —
 
 ## 範囲
 
 [design.md](../design.md) を書く。実装・build はしない（2026-10-11 ユーザー「設計だけ書いてください。実装は別なセッションで行います。」）。
 
-## 成果
+## 経過
 
-- `plan/ws202/design.md` 第 1 版（2026-10-10）: 今の形の事実（§1）、mp4 の demuxer（§4、既存の `mediafile/mp4.c` を使う）、Vulkan Video の
-  H.264 の back end（§5）、AAC-LC の自前の decoder（§6）、共通の部品（§7）、A/V（§8）、API と app（§9）、試験（§10）、license（§11）、
-  人の判断 H1〜H6（§13）、未確認 U1〜U8（§14）。
-- `plan/ws202/ws.md` と p002〜p014 の phase.md。
+- 2026-10-10 第 1 版: 今の形の事実、mp4（既存の `mediafile/mp4.c`）、Vulkan Video の H.264、AAC-LC、共通の部品、A/V、API、試験、license、判断の点 H1〜H6。
+- 2026-10-10 design-reviewer の [review-001](../review-001.md)（e8adcdf89）: H 7・M 13・L 13 と判断の点 J1〜J6。
+- 2026-10-10 第 2 版: H-01〜H-07・M-01〜M-13・L-01〜L-11・L-13 を反映（L-12 は Q1 が WS083 の側で直した）。対応は design §16。review の
+  「確かめていないこと」のうち host で確かめられた物は design §15（E1〜E9）、確かめられない物は design §14（U1〜U15）。Phase を p015 で 1 つ足し、
+  見積もりは 62 → 75 LW。
 
 ## 残り
 
-1. design-reviewer の review（設計ごとに必ず）。指摘は design.md の改版（§ 末尾に review と反映先の節を足す、WS083 の design の形）。
-2. H1〜H6 のユーザーの回答を ws.md と design.md に記録し、選ばれなかった選択肢の Phase の変更（例 H1 の (b) なら CPU の decoder の Phase を足す）。
-3. 回答の後、WS を planned に、この Phase を cleared に（Q1 の判定）。
+1. H1〜H6・J1〜J6 のユーザーの回答を ws.md と design.md に記録し、推しと違う回答の Phase の変更（例 H1 (b) なら CPU の decoder の Phase を足す、J1 で
+   container を絞るなら §3.1 と p010 の試験を縮める）。
+2. 変更が大きければ 2 回目の review（Q1 の判断）。
+3. WS を planned に、この Phase を cleared に（Q1 の判定）。

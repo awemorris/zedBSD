@@ -6,51 +6,45 @@ Status: planned
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 7 LW
-依存: p008、H1（Vulkan Video の無い機械の扱い）
+依存: p015、H1、J6
 
 ## 目的
 
-p008 の picture を Vulkan Video で decode し、出力を linear の NV12 の picture にする back end の中身を作る（design §5.1・§5.4・§5.5）。
-表示順・seek・失敗の扱いの仕上げは p010。
+H.264 の picture を Vulkan Video で decode し、出力を linear の NV12 の picture にする back end の中身を作る（design §5.1・§5.4・§5.5）。表示順・seek・作り直し・表は p010。
 
 ## 成果（`userland/desktop/libmedia/`）
 
-1. `vkvideo-device.c`（design D8・D9）:
-   - libvulkan の dlopen（名は image の `/lib` の物を確かめる: U7）、`vkGetInstanceProcAddr` から instance の関数、`vkGetDeviceProcAddr` から device の
-     関数（`vkCreateVideoSessionKHR` 等の拡張の関数を含む）を `struct vkvideo_functions` に埋める。
-   - 共有の device: `pthread_once` で作る instance（apiVersion 1.1 を要求、probe と同じ）、video の family のある physical device、4 つの拡張を
-     有効にした device、video の queue、`VkPhysicalDeviceMemoryProperties`。参照の数、queue の mutex、「video が無い」「壊れた」の印。
-     probe の `probe_instance`・`probe_video_family`・`probe_device` の流れを手本にする。
+1. `vkvideo-device.c`（D8・D9）:
+   - libvulkan の dlopen（名は image の `/lib` の物、U7）、dlclose しない。`vkGetInstanceProcAddr`・`vkGetDeviceProcAddr` から `struct vkvideo_functions`。
+   - 共有の device を **mutex と参照の数**で遅延に作る（`pthread_once` を使わない）。instance は **apiVersion `VK_API_VERSION_1_0`** と instance の拡張
+     `VK_KHR_get_physical_device_properties2`（`vkvideo-probe/main.c` の `probe_instance`）。queue family は `vkGetPhysicalDeviceQueueFamilyProperties2KHR`（KHR の名で引く）と
+     `VkQueueFamilyVideoPropertiesKHR`（`probe_video_family`）。device は 4 つの拡張（`probe_device`）。
+   - 「video が無い」を覚える。「壊れた」の印（p010 で使う）。queue の mutex。
 2. `vkvideo.c` の decoder の state と decode:
-   - open の時: SPS（avcC）から profile（`VkVideoDecodeH264ProfileInfoKHR`、PROGRESSIVE）、capability の問い（`probe_capabilities` を手本）と
-     SPS との比べ（design §5.4、外れは PROFILE）、session と memory の bind（`probe_session`）、parameters（`probe_parameters`、全 SPS・PPS から）、
-     slot の image（NV12・OPTIMAL・DST|DPB・HOST_VISIBLE、map、view、`probe_picture`）、bitstream の buffer（1 MiB から 2 倍ずつ、`probe_bitstream`）、
-     command pool・buffer・fence、result status の query pool（`probe_status_pool`）。
-   - 1 picture の decode（`probe_decode` を手本）: slice を start code 付きで buffer に（offset を 32 に揃える）、記録（reset の query、最初の decode の
-     image の layout の barrier、begin coding（参照と setup の slot）、RESET の control（session の最初・flush の後）、begin query・decode・end query、
-     end coding）、queue の mutex の中で submit、fence を待つ（5 秒で ETIMEDOUT）、result status を読む。
-   - 読み出し（design §5.5）: `vkGetImageSubresourceLayout`（PLANE_0・PLANE_1）の offset・rowPitch で Tile Y を de-tile し、crop の窓だけを
-     picture の pool（p003）の buffer に linear の NV12 で写す。de-tile の式は `vkvideo-probe/frame.c` の `frame_tile_y_offset` と同じ（16 byte の
-     column の単位の memcpy）。SAR（VUI → pasp）・色（VUI → colr → 既定）を picture に入れる。
-   - D6: parameters の作り直し（p008 の `parameters_changed`）、SPS の大きさ・profile・参照の数の変化での session・image の作り直し（queue を idle に）。
-3. ops（`media_vkvideo_ops`、backend 名 "vulkan-video"、codec 名 "h264"）: open・send・receive・picture（pool の参照を返す）・flush・close と
-   picture 系（p003 の `media_picture_ops_*`）。この Phase の receive は decode の順に出す（並べ替えは p010）。表にはまだ入れない（p010 で入れる）。
-4. host 試験の枠 `plan/ws202/tests/host-vkvideo.c`・`run-host-vkvideo.sh`（design §10.2）: 偽の Vulkan の関数の表（`vkvideo_functions` を試験が埋める）。
-   偽の decode は出力の slot の image の memory に、picture の番号から決まる Tile Y の模様を書く。試験は: 作る object の順と主な引数（profile・
-   extent・slot の数・format）、decode ごとの setup・参照の slot（p008 の計画と同じ）、bitstream の buffer の offset の揃え、de-tile・crop の結果が
-   模様と一致、parameters の作り直し、video の無い device（family 無し）で DEVICE。
+   - open（window の thread）: parser の用意、avcC の SPS があれば `h264_check_sps`、共有の device の参照。session・image は作らない（L-01）。
+   - 最初の decode の前（media の thread）: capability（`probe_capabilities`）と D20（大きさ・MB の数・参照の数・slot の数。level では断らず、Vulkan に渡す level_idc は
+     design §5.4 の表で列挙へ写し `maxLevelIdc` に丸める）、D21（slot の image の合計 256 MiB）。session と memory（`probe_session`）、parameters（`probe_parameters`）、
+     slot の image（`probe_picture`）、bitstream の buffer（`probe_bitstream`）、command・fence、status の query pool（`probe_status_pool`）。
+   - 1 picture の decode（`probe_decode` を手本）: D18 の検べ（p015 の結果）、slice の写し（32 byte 揃え）、記録、queue の mutex の中で submit、fence（5 秒）、status。
+   - 読み出し（D10）: PLANE_0・PLANE_1 の subresource layout で Tile Y を de-tile し、crop の窓を pool の buffer へ。SAR（VUI → pasp）・色（VUI → colr → 既定）。
+   - D6: parameters の作り直し。SPS の変化で session・image の作り直し。
+   - session の作成の失敗の分け方（U10）: `src/drivers/gpu/i915/render/video.c`・`worker.c` を読み、video の context が尽きた時（8 個）の結果を確かめ、BUSY を返す。
+     分けられなければ DEVICE とし、phase.md に記録する。
+3. ops（`media_vkvideo_ops`、backend "vulkan-video"、codec "h264"）: open・send・receive（この Phase は decode の順）・picture・flush・close、picture 系は p003 の関数。
+   表にはまだ入れない。
+4. U11: level_idc の丸めが Vulkan の仕様の VUID に触れないかを仕様で確かめ、phase.md に記録（触れるなら丸めずに断るか、SPS の level を変えずに渡すかを Q1 に報告）。
+5. host 試験 `plan/ws202/tests/run-host-vkvideo.sh`: 偽の Vulkan の関数の表。instance の apiVersion が 1.0 で properties2 の拡張が有効、properties2 の KHR の関数で family を問う、
+   作る object の順と引数、setup・参照の slot（D18 で空の slot を積まない）、32 byte 揃え、de-tile・crop が模様と一致、parameters の作り直し、video の無い device で DEVICE。
 
 ## 確認
 
 | コマンド | 期待 |
 | --- | --- |
-| `sh plan/ws202/tests/run-host-vkvideo.sh` | 上の項目が PASS（ASan/UBSan） |
+| `sh plan/ws202/tests/run-host-vkvideo.sh` | PASS（ASan/UBSan） |
 | `sh plan/ws202/tests/run-host-h264.sh` | PASS |
 | libmedia・videoplayer の build | warning 0 |
 
 ## 注意
 
-- 本当の decode は host でできない（host の Vulkan は llvmpipe）。正しさの最後の確かめは p012 の 5330。
-- 実装の担当は QEMU・実機を起動しない（T1 に頼む）。
-- libvulkan・i915（WS083 の範囲）を変えない。Vulkan の振る舞いに疑いがあれば `docs/reference/vulkan-video.md` と WS083 の design を読み、
-  Q1 に報告する。
+- 偽の Vulkan は本番の dlopen の道を通らない。本物は p010 の終わりの 5330 の小さい確認で。実装の担当は QEMU・実機を起動しない。
+- libvulkan・i915 を変えない。疑いは Q1 に報告。
