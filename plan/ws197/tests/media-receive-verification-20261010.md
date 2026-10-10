@@ -94,3 +94,31 @@ source/evidence commit `035d1d25ba6f9e7fb20ad97544e6c38f3f258f03` (WIP) をmain 
 ユーザー報告: Phone起動に数十秒、Bluetoothとの不整合を感じるためイメージを作り直す。トップレベルconfig.mkを確認。Phone/bluetoothd/wayland/libkeiland、USB BT driver、PNG/JPEG/GIF/zは選択済み。mediastorageは明示一覧になかったが、Photos/waylandのpackage依存によりMakefileが自動で選択し、AMD64_ARCH_FILESへ `/bin/mediastorage=` が入ることを実Make評価で確認した。従って一覧からの欠落が保存不能の原因とは判断しない。
 
 ユーザーのイメージ再作成指示に合わせ、mainのgitignore対象config.mkへ `ZEDBSD_USER_PROGRAMS += mediastorage` を明示追加した。他の設定 (WS083 video probe/streams/libavcodec除外等) は保持。main最新sourceとこのconfigでPhone・compositor・libkeiland・bluetoothd・mediastorageを同じイメージへ組み込む。イメージ自体のbuild/書込はユーザーが行う。起動の遅れの原因は未確定で、前回のBluetooth再接続停止やWayland初期状態の待ちとの関係を再作成後に確認する。
+
+## 2026-10-10 再作成後のMIME回帰 (media-rx-i02)
+
+最新指示は「テキストは受信できましたが、なんとMIMEヘッダも見えてしまってます。画像のMMSは、今度は通知が来ませんでした。SSHで見てみてください。」。実機beta2+g50feed3の4ファイルCRCは統合sourceと一致し、mediastorageと空のversion1 DBも存在。MNS NewMessage/MMSは届いていた。MAPにENODATA(62)、Phone media保存にEOPNOTSUPP(21)。保存本文を内容を出力せず構造だけ確認するとboundary行、text/plain/8BITのpart headersが残っていた。従って通知transportの欠落ではなくMIME解析/保存失敗。
+
+Android MAPはrootのleaf Content-Typeにもboundaryを追加してpartを送る。[Android公式source](https://android.googlesource.com/platform/packages/apps/Bluetooth/+/4a9f9b0/src/com/android/bluetooth/map/BluetoothMapbMessageMime.java)のencodeHeaders/part writer/parserの境界規約を参照し、コードは独自C実装のまま修正。`mms_part`はtype分類前に明示boundaryを評価し、text/plain、image/jpeg、application/vnd.wap.multipart.relatedを同じpart traversalへ通す。空/不正boundaryと標準multipartのboundary欠落はエラー、既存上限とAPIを維持。
+
+確認:
+
+- `mms-media-host-test`: ASan/UBSan PASS。上記3外側typeのsynthetic phone-shaped MIMEで、本文にheadersを含めずdecoded image byteを保持。
+- `bt-mms-host-test`: ASan/UBSan PASS。
+- `sh plan/ws157/tests/run-host-mediastorage.sh build/ws197-media-receive-host build/ws197-media-receive-linux`: PASS。production Phone fixtureもleaf root+boundaryへ変更し、実Wayland/compositor/CLIを通すPNG原本byte/decode2×3/重複/保存message再openを確認。既存runnerのCLI failure表示は期待された失敗ケース。
+- 前節のnamed buildと同じsysroot/CPPFLAGSでbluetoothd、wayland、phoneの3targetを再build: exit0、warning/error0。libkeiland ABI/sourceは今回変更なし。
+- `python3 plan/tools/style-check.py userland/desktop/libmms/mms.c plan/ws197/tests/mms-media-host-test.c plan/ws197/tests/host-media-receive.c --summary`: total0。C全文/manual review、edited hunk format、`git diff --check` PASS。
+
+ログ: private buildの `ws197-media-receive-followup-{build,host}.log` と `ws197-media-receive-mms-followup.log`。初回codec test compileはmapxml依存の指定不足でlink失敗、mapxml.cを追加した上記最終実行はPASS。QEMU/aggregate make check/toolchain変更は無し。
+
+以前の更新・Bluetooth/desktop restart承認を保持し、実機 `/tmp/ws197-mime-fix.9Llg4N/original/` へ3実行ファイルを保存後、new名へのcopy/chmod/renameで交換。machine/localのCRC一致:
+
+| File | CRC | Bytes |
+| --- | --- | --- |
+| /sbin/bluetoothd | 2702255473 | 293896 |
+| /bin/wayland | 1532947064 | 1041944 |
+| /bin/phone | 311283164 | 121120 |
+
+bluetoothd restartはOK、MAP/PBAP ready。greeter restartで旧sessionとSSHが終了し、password再接続でwayland PID188とPhone PID210を確認。履歴再同期はmedia error0、Media/Filesは0→2→7件、Media-Photo付きmessageは5→10件。元ファイルを保存したまま変更し、既存メッセージの削除/一括書換えは行わない。実機raw logの12:31/12:32等はremote clockのまま扱い、JSTと断定しない。
+
+新規テキスト/写真MMSの時刻・MIMEヘッダ消失・実画像表示をユーザーへasync確認中。再同期で履歴画像保存が成功した事実と新規受信の画面UATは分ける。raw MIMEを入力とする既存MMS keyはboundaryの変化で再同期時に別keyとなりうるため、Media CLIの原本重複排除とmessage identityの安定性を同一の証拠とはしない。p010全体の送信/動画player起動、WSのHFP/PBAP UAT/p009、Q1への共有投影は未完を保持。

@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: [Codex承認済み実行記録](codex-queue.md)、メディア管理先行scopeまで終了。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005/p011 cleared、main 874e12d3b。p010の受信部分を最新ユーザー指示でcodex/ws197-media-receiveにて実装中。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
+Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/buildとSSHでの履歴写真保存を確認、新規テキスト/写真MMSの通知・実表示はユーザー確認待ち。codex/ws197-media-receiveで記録。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -124,6 +124,10 @@ ws197-p011 cleared、前提のws157-p006/p007もcleared。main `874e12d3b`、[�
 ## 2026-10-10 受信メディアのcheckpoint
 
 p010受信部分でAttachment=1とMIME/FD→mediastorage保存→Phone実画像表示/再openを実装し、host/build/変更source全文規約/OS境界を確認。[証拠](tests/media-receive-verification-20261010.md)。承認済みの実機4ファイル交換・desktop restartは新sessionの起動まで確認したが、Bluetooth再接続が停止し、その再restart後はSSH timeout。ユーザーへ画面応答と必要なら実機restartを依頼。接続回復後に最終Phone更新と新写真受信を確認する。WSはincomplete、p010全体の送信/動画player起動、HFP/PBAP UAT/p009を保持。共有master/Queue投影はQ1担当に保留。
+
+## 2026-10-10 再作成後のMIME回帰の修正
+
+p010の[部分Queue i02](codex-queue.md)で、スマホがleaf/WAP Content-Typeにboundaryを付けるMMSを正しくpart解析するよう修正。本文header露出、画像のENODATA/EOPNOTSUPPは同じroot分類の問題。host codec/実Phone→CLI原本保存/decode/再open、3target build warning0、変更source全文規約を通過し、実機の3実行ファイル更新・Bluetooth/desktop restart後に履歴画像保存を確認。新規テキスト/写真MMSの通知・画面表示はユーザー確認待ち。WSはincomplete、p010全体未完とQ1への共有投影保留を保持。詳細は[検証記録](tests/media-receive-verification-20261010.md)。
 
 main統合checkpoint: `035d1d25b` (WIP) fast-forward済み、c43a01797の既存変更を保持。hostで確認した受信経路をmainへ反映、pushなし。SSH/UAT待ちを解消した記録とはしない。
 

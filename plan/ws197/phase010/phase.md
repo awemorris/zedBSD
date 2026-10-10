@@ -50,3 +50,9 @@ p004のMMS text-only判断から、ユーザー指示で写真/動画の双方�
 4ファイル交換とdesktop/Bluetooth restartはユーザーが明示承認。新desktop自動loginとPhone起動まで実機確認したが、Bluetoothはunreachable、再restart後SSHもtimeout。受信実機UATと最終Phone更新は接続回復待ち。部分実装はmain統合可能な状態だが、Phase全体はin-progress、4機能の完了を主張しない。原本バックアップ/CRC/再開手順は上記証拠へ保存。
 
 mainへ受信source/evidence `035d1d25b` をfast-forward統合済み。source同一/clean、pushなし。実機受信UAT未確認・全p010未完は維持。
+
+## 2026-10-10 イメージ再作成後のMIME相互運用修正
+
+ユーザーがテキストのMIMEヘッダ露出と画像MMSの通知欠落を報告。[Queue i02](../codex-queue.md)として修正を再開。実機50feed3は4ファイルCRC一致・mediastorage導入済みで、mixed binaryを原因としない。MNS NewMessage/MMSは届いていたがMAP本文解析はENODATA、別画像は保存EOPNOTSUPP、既存本文にはboundaryとpart headerが残っていた。
+
+`mms_part`がmultipart/*だけで区切りを解析していたことが原因。明示boundaryを先に評価してleaf/WAP型でもpartを取り出す。標準multipartのboundary欠落は従来どおりエラー。公開API・上限・SMS動作は変更しない。独自codec/Phone実fixtureで本文と画像byteの分離・原本保存/decode/再openを確認し、3target build warning0、全文規約/変更3C style-check0。既存承認の3ファイル交換とBluetooth/desktop restartを実施し、MAP/PBAP ready、履歴画像の保存成功をSSH確認。i02部分scopeはcleared、新規受信の通知/実表示はユーザー確認待ち、Phase全体はin-progress。詳細/CRC/復旧用backupは[証拠](../tests/media-receive-verification-20261010.md)。旧試行の実機失敗は履歴として保持する。

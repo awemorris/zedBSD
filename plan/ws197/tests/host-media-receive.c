@@ -43,6 +43,10 @@ phone_media_regression(
 	const struct ph_contact *contacts;
 	FILE *mime;
 	FILE *saved;
+	FILE *standard;
+	char line[512];
+	char *got_line;
+	int written;
 	char store[2048];
 	uint8_t bytes[sizeof(png)];
 	size_t count;
@@ -56,8 +60,29 @@ phone_media_regression(
 	/* This image-like binary has embedded NULs, and no name suffix. */
 	mime = tmpfile();
 	assert(mime != NULL);
-	error = mms_write(mime, "image/png", "phone-picture", png, sizeof(png), "日本語の写真");
+	standard = tmpfile();
+	assert(standard != NULL);
+	error = mms_write(standard, "image/png", "phone-picture", png, sizeof(png), "日本語の写真");
 	assert(error == 0);
+	rewind(standard);
+
+	/* A phone advertises the leaf type but still encloses its data in MIME parts. */
+	for (;;) {
+		got_line = fgets(line, sizeof(line), standard);
+		if (got_line == NULL)
+			break;
+		same = strncmp(line, "Content-Type: multipart/mixed;", 29U);
+		if (same == 0) {
+			written = fprintf(mime, "Content-Type: image/png; boundary=\"=_Keiland_MMS_1\"\r\n");
+		} else {
+			written = fputs(line, mime);
+		}
+
+		assert(written >= 0);
+	}
+
+	/* The rewritten MIME file now owns the complete fixture. */
+	fclose(standard);
 	error = fflush(mime);
 	assert(error == 0);
 	error = ph_receive_media(system, fileno(mime), &received);

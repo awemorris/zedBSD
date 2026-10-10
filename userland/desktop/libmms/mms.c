@@ -769,6 +769,35 @@ mms_part(
 	if (error != 0)
 		return error;
 
+	/*
+	 * MAP phones also wrap leaf and WAP content types in boundary-delimited
+	 * MIME. Honor the explicit boundary before classifying a leaf, otherwise
+	 * text exposes part headers and images retain encoded MIME instead of pixels.
+	 */
+	error = mms_parameter(headers.type, "boundary", boundary, sizeof(boundary));
+	if (error == 0) {
+		/* An empty delimiter cannot identify complete parts. */
+		if (boundary[0] == '\0')
+			return EINVAL;
+
+		/* Traverses the framed leaves independently of the outer media type. */
+		error = mms_multipart(reader, input + headers.body, length - headers.body, boundary, depth);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: only the selected decoded leaves have been retained. */
+		return 0;
+	}
+
+	/* Malformed boundary parameters cannot be treated as displayable text. */
+	if (error != ENOENT)
+		return error;
+
+	/* Standard multipart types require an explicit delimiter. */
+	selected = strncasecmp(headers.type, "multipart/", 10U);
+	if (selected == 0)
+		return EINVAL;
+
 	/* Retains image and video parts independently of their attachment disposition. */
 	selected = strncasecmp(headers.type, "image/", 6U);
 	if (selected != 0)
@@ -784,20 +813,6 @@ mms_part(
 	selected = mms_token(headers.disposition, "attachment");
 	if (selected)
 		return 0;
-
-	/* Multipart entities preserve delimiters before leaf transfer decoding. */
-	selected = strncasecmp(headers.type, "multipart/", 10U);
-	if (selected == 0) {
-		error = mms_parameter(headers.type, "boundary", boundary, sizeof(boundary));
-		if (error != 0 || boundary[0] == '\0')
-			return EINVAL;
-		error = mms_multipart(reader, input + headers.body, length - headers.body, boundary, depth);
-		if (error != 0)
-			return error;
-
-		/* Succeeded: the multipart's selected leaves have been inspected. */
-		return 0;
-	}
 
 	/* Never exposes HTML, SMIL or multimedia as raw text. */
 	selected = mms_token(headers.type, "text/plain");
