@@ -16,3 +16,7 @@ p001/p002の成果は[results](../tests/results.md)。このPhaseは未実行・
 ## 2026-10-11 prerequisite確認
 
 mainへの実装統合は `d1def8aef` で確認済み。現在のRPi4 configはGENET既定ON。新しいSDイメージの作成とユーザー実機結果は未実施。このPhaseの実行状態・実機受入はplannedのまま。
+
+## User UAT / startup investigation, 2026-10-11
+
+User reports sshd now starts after the independent WS193 libutil fix, but DHCP address appears absent; later says link appears established and suspects LAN enable was not invoked. This is not yet an SSH-connectivity or DHCP acceptance result. [Read-only source/image comparison](../tests/network-startup-20261011.md) confirms equal amd64/RPi4 configs, enabled boot services and the existing automatic LAN_ENABLE → UP → DHCP path. Physical service state/output requested; no speculative config or driver changes. Phase remains planned for full hardware acceptance; no runtime success/clearance inferred from source inspection.

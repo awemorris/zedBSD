@@ -47,3 +47,7 @@ Submission: `e9ddb4540` (`WIP`), merge request `ws203-genet-20261011`. Integrati
 ## 2026-10-11 main統合ACK
 
 ユーザー「mainに統合をお願いします。」に従い、実装 `e9ddb4540` と記録 `d1def8aef` をmainへfast-forward統合。source hashes一致、mainの共通Ethernet menu・現在のRPi4 configでGENET=y・arm64への2 driver source登録をread-back確認。main統合の前提は満たした。p003は新イメージと実機DHCP/SSH結果待ち。WSはincompleteのまま。pushなし。共有Master/Queue/history/F-029/GitHubは別途Q1が投影する。
+
+## 2026-10-11 network startup UAT investigation
+
+User reports sshd process startup and apparent link, with DHCP address missing. p003 retains actual lease/SSH/traffic criteria; [source/image inspection](tests/network-startup-20261011.md) confirms configs match amd64 and automatic LAN management exists. Await actual service/network observations; no source changes or acceptance promotion. Shared projection/GitHub pending Q1.
