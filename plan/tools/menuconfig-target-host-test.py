@@ -180,7 +180,7 @@ def check_menu_layout() -> None:
         menu.tui(_FakeScreen(), menu.defaults(), Path("/nonexistent"))
     finally:
         menu.choose, menu.save, menu.curses.curs_set = real_choose, real_save, real_cursor
-    expected = ["CPU / Board", "Boot Option", "Development", "Base", "Desktop",
+    expected = ["CPU / Board", "Boot Option", "Drivers", "Development", "Base", "Desktop",
                 "Packages", "Firmware", "", "Build boot image", "", "Exit"]
     if not shown or shown[0][1] != expected:
         fail(f"the main menu is {shown[0][1] if shown else 'not shown'}, not {expected}")

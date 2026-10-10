@@ -74,7 +74,7 @@ MENU_CPUS = [
 
 # The user programs' groups the Base, Desktop and Firmware menus select
 # from.  The X11 and test programs, the disk layout (Variant), the kernel's
-# options, the drivers, the test hooks and Noct's GPU accelerator are not in
+# options, the test hooks and Noct's GPU accelerator are not in
 # the menu (2026-10-09 user: "menu から外す", "X11とTestsはメニューから削除し、
 # 直接記述のみにする"): they are set in config.mk by hand, and the values a
 # config.mk holds are read and written back as they are.
@@ -124,13 +124,6 @@ def read_rows(path: Path, fields: int) -> list[list[str]]:
     return result
 
 
-def architecture_driver_path(platform: str) -> Path:
-    architecture = platform_record(platform)[1]
-    directory = CONFIG_DIR / "drivers" / "architecture"
-    platform_path = directory / f"{platform}.drivers"
-    return platform_path if platform_path.exists() else directory / f"{architecture}.drivers"
-
-
 def all_option_files() -> list[Path]:
     result = [CONFIG_DIR / "kernel-options.list",
               CONFIG_DIR / "rootfs-options.list",
@@ -140,6 +133,42 @@ def all_option_files() -> list[Path]:
               CONFIG_DIR / "drivers" / "generic.drivers"]
     result.extend(sorted((CONFIG_DIR / "drivers" / "architecture").glob("*.drivers")))
     return result
+
+
+def driver_rows() -> list[list[str]]:
+    """One row per configurable driver, independent of the selected CPU."""
+    rows = {}
+    for path in all_option_files():
+        for row in read_rows(path, 6):
+            if row[0].startswith("CONFIG_DRIVER_") and row[1] == "bool":
+                rows.setdefault(row[0], row)
+    return list(rows.values())
+
+
+def driver_defaults(platform: str) -> dict[str, str]:
+    """Platform defaults apply only to options a configuration has not set."""
+    values = {row[0]: "n" for row in driver_rows()}
+    for path in all_option_files():
+        for key, kind, _label, targets, default, _choices in read_rows(path, 6):
+            if key in values and kind == "bool" and applies(targets, platform):
+                values[key] = default
+    return values
+
+
+def driver_groups() -> list[tuple[str, list[list[str]]]]:
+    """The shared functional categories, each containing its driver rows."""
+    groups = {}
+    assigned = {}
+    for title, keys in read_rows(CONFIG_DIR / "drivers" / "menu.list", 2):
+        groups.setdefault(title, [])
+        for key in keys.split():
+            if key in assigned:
+                raise SystemExit(f"driver {key} is assigned to more than one category")
+            assigned[key] = title
+    for row in driver_rows():
+        title = assigned.get(row[0], "Platform")
+        groups.setdefault(title, []).append(row)
+    return [(title, rows) for title, rows in groups.items() if rows]
 
 
 def defaults() -> dict[str, object]:
@@ -153,6 +182,7 @@ def defaults() -> dict[str, object]:
         for key, kind, _label, _targets, default, _choices in read_rows(path, 6):
             if key != "-" and kind != "fixed" and key not in values:
                 values[key] = default
+    values.update(driver_defaults(str(values["ZEDBSD_PLATFORM"])))
     programs = user_program_rows()
     values["ZEDBSD_USER_PROGRAMS"] = {
         row[0] for row in programs if row[3] == "y"
@@ -164,12 +194,14 @@ def load(path: Path) -> dict[str, object]:
     values = defaults()
     if not path.exists():
         return values
+    configured = set()
     pattern = re.compile(r"^([A-Z][A-Z0-9_]*)\s*(?::=|=)\s*(.*?)\s*$")
     for line in path.read_text(encoding="utf-8").splitlines():
         match = pattern.match(line)
         if not match:
             continue
         key, value = match.groups()
+        configured.add(key)
         if key == "ZEDBSD_USER_PROGRAMS":
             values[key] = set(value.split())
         else:
@@ -181,6 +213,9 @@ def load(path: Path) -> dict[str, object]:
                 selected.add(row[0])
     if str(values.get("ZEDBSD_PLATFORM")) not in {item[0] for item in PLATFORMS}:
         values["ZEDBSD_PLATFORM"] = "amd64"
+    for key, value in driver_defaults(str(values["ZEDBSD_PLATFORM"])).items():
+        if key not in configured:
+            values[key] = value
     normalize_target(values)
     return values
 
@@ -198,25 +233,7 @@ def normalize_target(values: dict[str, object]) -> None:
 def normalize(values: dict[str, object]) -> None:
     normalize_target(values)
     platform = str(values["ZEDBSD_PLATFORM"])
-    supported = set()
-    platform_option_files = [CONFIG_DIR / "kernel-options.list",
-                             architecture_driver_path(platform)]
-    common_option_files = [CONFIG_DIR / "drivers" / "isa.drivers",
-                           CONFIG_DIR / "drivers" / "pci.drivers",
-                           CONFIG_DIR / "drivers" / "usb.drivers",
-                           CONFIG_DIR / "drivers" / "generic.drivers"]
-    for path in platform_option_files:
-        for key, kind, _label, targets, _default, _choices in read_rows(path, 6):
-            if key != "-" and kind != "fixed" and applies(targets, platform):
-                supported.add(key)
-    for path in common_option_files:
-        for key, kind, _label, targets, _default, _choices in read_rows(path, 6):
-            if (key != "-" and kind != "fixed" and
-                    applies(targets, platform)):
-                supported.add(key)
-    for key in list(values):
-        if key.startswith("CONFIG_DRIVER_") and key not in supported:
-            values[key] = "n"
+    # Driver choices survive saving and CPU changes, including foreign drivers.
     if platform != "amd64":
         values["CONFIG_KERNEL_TEST_CHECKPOINTS"] = "n"
     available_programs = {row[0] for row in user_program_rows()}
@@ -462,6 +479,36 @@ def program_section(screen, values: dict[str, object], title: str,
             edit_program_group(screen, values, groups, title)
 
 
+def driver_options(screen, values: dict[str, object], rows: list[list[str]],
+                   title: str) -> None:
+    """Toggles existing driver build options from the shared catalog."""
+    selected = 0
+    while True:
+        labels = [("[*]" if values.get(row[0]) == "y" else "[ ]") + " " + row[2]
+                  for row in rows]
+        choice = choose(screen, title, labels + ["Back"],
+                        target_label(values), selected)
+        if choice is None or choice == len(rows):
+            return
+        selected = choice
+        key = rows[choice][0]
+        values[key] = "n" if values.get(key) == "y" else "y"
+
+
+def drivers_menu(screen, values: dict[str, object]) -> None:
+    """Drivers: Disk, Input, GPU, Audio, Ethernet, WiFi, USB and Platform."""
+    groups = driver_groups()
+    selected = 0
+    while True:
+        choice = choose(screen, "Drivers", [title for title, _rows in groups] + ["Back"],
+                        target_label(values), selected)
+        if choice is None or choice == len(groups):
+            return
+        selected = choice
+        title, rows = groups[choice]
+        driver_options(screen, values, rows, title)
+
+
 def select_cpu_board(screen, values: dict[str, object]) -> None:
     """CPU / Board: the CPU, and the board it boots on."""
     while True:
@@ -634,6 +681,7 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
     entries = [
         ("CPU / Board", "cpu-board"),
         ("Boot Option", "boot"),
+        ("Drivers", "drivers"),
         ("Development", "development"),
         ("Base", "base"),
         ("Desktop", "desktop"),
@@ -660,6 +708,8 @@ def tui(screen, values: dict[str, object], output: Path) -> None:
             select_cpu_board(screen, values)
         elif action == "boot":
             boot_options(screen, values)
+        elif action == "drivers":
+            drivers_menu(screen, values)
         elif action == "development":
             development(screen, values)
         elif action == "base":

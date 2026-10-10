@@ -49,3 +49,7 @@ Parent: [WS193](../ws.md)
 - 直し: noct の登録の menu の引数を `packages/lang` → `base`（build の規則・既定値・platform は変えない。toolchain の規則に触れない、Q1 の範囲）。`USERLAND_*_MENU` は list-user-programs の表示だけに使われ、build の選択には効かない（Makefile 443 行だけ）。program の名前 `noct` は変わらないので、既存の config.mk の `noct` の選択はそのまま読める。
 - 確かめ: `make menuconfig-host-test` PASS（試験を追従: noct の分類を base に、Packages のどの分類にも noct（名前か base/noct）が無い、amd64 の Base → Select に noct と emacs、emacs を選ぶと noct も選ばれ、emacs が選ばれている間は noct を外すと警告）。screen の pty で実の curses の menu を開き、Base → Select の 43 番目「[ ] Emacs editor」、109 番目「[ ] Noct language」の行が出ることを hardcopy で確かめた。`config/release/config-amd64-beta2.mk` と `config/current-uat.mk` の展開後の `ZEDBSD_USER_PROGRAMS` に noct・emacs が両方あり（変わらない）。
 - 未実施: image の build（選択は変わらないので不要と判断）。
+
+## 2026-10-10 Driversの再追加（2026-10-11記録）
+
+userがBoot OptionとDevelopmentの間へのDrivers追加、全CPU共通の既存bool選択を指示。本Phaseの当時の「driversをmenuから外す」は[p007](../phase007/phase.md)の新方針で置換する。既存のscope/cleared結果は歴史として保持し、追加UI/保存/CPU切替の変更と証拠はp007が所有する。[WS投影](../ws.md)。
