@@ -8,9 +8,9 @@ Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex承認済み実行記録](codex-queue.md)、p005と新規受信修正は終了。共有QueueはQ1が反映。
+Queue: [Codex承認済み実行記録](codex-queue.md)、メディア管理先行scopeまで終了。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005 i01〜i07 cleared。次はp006 HFPの選択/承認、p008で実機PBAP UAT。旧P1再開情報は履歴として保持。
+Resume point: p005とp011 cleared。Phone＋/DnD draftをmain 874e12d3bへ統合。p010 MMS添付接続は未完/別tree、次回Queue選択へ。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -49,7 +49,7 @@ Resume point: p005 i01〜i07 cleared。次はp006 HFPの選択/承認、p008で�
 | p008 | 実機（Android が先、iPhone は HFP の後、Q13）。PHONE PROBE は p003 で消すので MAP の操作で確かめる | 20 | planned |
 | p009 | 規約の全文の見直し | 2 | planned |
 | [p010](phase010/phase.md) | MMS写真/動画送受信（別tree試作、基盤完成後に再開） | — | uncleared |
-| [ws197-p011](phase011/phase.md) | Phoneの＋によるメディア選択とDnD・仮添付（ws157-p006 API出力に依存） | — | in-progress |
+| [ws197-p011](phase011/phase.md) | Phoneの＋によるメディア選択とDnD・仮添付（ws157-p006 API出力に依存） | — | cleared |
 
 関連の Bug: [BUG-282](../bugs/BUG-282.md)（WS143 の hid.c の page の途中の Connection Request の取り違え、p003 i03 と同じ形で直す）。Future Work: fw-bt-goep2（ERTM・GOEP 2.0、MAP 1.4・PBAP 1.2）、F-086（SUBSCRIBE の phone の分は p003）。
 
@@ -116,3 +116,7 @@ p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/
 ## 2026-10-10 保存形式の変更承認
 
 ユーザー指定を優先し、従来の `~/Pictures/Library` 月別TSV保存を現scopeで置き換える。`~/Pictures/Media/metadata.db` はversion付きJSON、原本copyは `Media/Files/YYYY/MM/dd/名前`。JPEG EXIF撮影日時がなければPNG/JPEG/動画等は取り込み日で整理する（元ファイルmtimeは使わない）。日付・バイト数・画像寸法・hash・原名・favorite・rotation・albumを保持し、未知のJSON fieldを更新時にも保存することで撮影地等へ拡張可能にする。既存Libraryの自動移動/削除はしない。旧ファイルはそのまま、必要な原本はmediastorage addで再取り込みできる。p006設計・p007検証・p011の選択元へ同じ承認を反映。以前のcleared履歴は旧形式の履歴として維持する。
+
+## 2026-10-10 scoped clearance
+
+ws197-p011 cleared、前提のws157-p006/p007もcleared。main `874e12d3b`、[最終検証](../ws157/tests/verification-20261010.md)。写真/動画の未送信draftとtext appendを実装、MMS送受信接続の完了とはしない。p010はuncleared、旧試作treeを維持。HFP/PBAP UAT/最終WS conformanceが残るためWSはincomplete。共有記録の投影はQ1に保留。

@@ -89,3 +89,7 @@ userland/desktop/wayland/objects.c
 userland/desktop/wayland/protocol.c
 userland/desktop/wayland/system.c
 ```
+
+## 統合結果
+
+source `874e12d3b` をmainへfast-forwardしread-back確認。最終build/hostレビュー後のsource変更はなし。結果記録の追記だけを別WIP commitに保存する。

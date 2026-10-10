@@ -36,3 +36,5 @@ p004のMMS text-only判断から、ユーザー指示で写真/動画の双方�
 ユーザーがCLI所有のメディアDB、compositor経由の取得・追加・監視、Photos再読込、Phoneの＋とDnDを先行指定。MMS送受信接続はその後（確認質問の前提と回答）。従来のPhone独自メディア保存の設計を置き換える。現在のMIME/Get/Push/backend変更は未統合・未完了の途中資料としてこのworktreeに保存。共有codecの画像/動画各262147 bytes roundtripとbMessageはhost PASS、bt-bmsg 90 checks PASS、MAP回帰は旧仕様assertを修正中。新メディアAPIの完成後、FD運搬と送受信を新基盤へ接続して再検証する。Phaseはclearedにしない。
 
 2026-10-10再設計の反映: メディアCLI/compositorの[ws157-p006](../../ws157/phase006/phase.md)とPhoneの[ws197-p011](../phase011/phase.md)の出力を次回の前提にする。取得/保存はパスとメタデータのAPI、draft選択は共通media chooserに接続する。元の写真/動画4機能の義務は保持するが、ユーザーの最新限定により今回Queueで実装再開しない。旧MIME試作のscope/evidenceは[履歴](../history/mms-prototype-20261010.md)へ保存。
+
+2026-10-10前提の更新: ws157-p006/p007とws197-p011はhost/build scope cleared、main `874e12d3b`。後続MMSはmediastorageのMedia JSON/Filesとlibkeiland path-list APIへ接続する。p010自体はunclearedを維持し、今回finite Queueは終了。新しい試行にはQueue選択/承認を記録する。

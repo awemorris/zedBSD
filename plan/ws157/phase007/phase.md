@@ -3,7 +3,7 @@
 # ws157-p007: メディア管理の全文規約と最終検証
 
 Parent: [WS](../ws.md)
-Status: in-progress
+Status: cleared
 Phase disposition: normal
 Queue: [Codex実行記録](../../ws197/codex-queue.md)
 
@@ -13,7 +13,7 @@ Standards: [Guardrail](../../guardrail.md)、[C全文](../../coding-style.md)、
 
 Criteria: CLI画像/動画import、dedup/再読込/metadata/CLI通知、backend非同期CLI実行と失敗/FD所有、Wayland取得/追加/watch、Photos反映、Phone選択/DnD仮添付を意味のあるhost回帰で確認。最終source全文規約、diff-check、mediastorage/wayland/libkeiland/photos/phone named build warning0、共通Linuxbuild。実機UATは未実施と明記し手順提示。
 
-Resume: 最終sourceの実装・host検証・named buildは完了。承認済みmain統合とoutcome記録を行う。
+Resume: 今回の有限実装/host/build scopeはcleared。実機GUI UATは記載手順から確認し、新規source変更時は該当全文規約を再検証する。
 
 ## 2026-10-10 通信境界の明確化
 
@@ -26,3 +26,7 @@ Resume: 最終sourceの実装・host検証・named buildは完了。承認済み
 ## 2026-10-10 最終検証
 
 [コマンド・source範囲・結果・限界](../tests/verification-20261010.md)。実装/host/build criteriaはPASS、例外なし。main統合を行い、統合後にscoped clearanceを記録する。実機GUI UATとMMS転送は成功扱いにしない。
+
+## 2026-10-10 outcome / main統合
+
+実装source commit `874e12d3b` をmainへfast-forward統合しread-backで確認。今回承認されたhost/buildまでのcriteriaを満たし **cleared**。実機UATは未実施、MMS添付転送はws197-p010へ残る。WS全体のcompletedとは扱わない。local-onlyの記録、共有master/Queue/Guardrail/cacheへの投影はQ1に保留。今回scopeのsourceに未コミット変更はない。
