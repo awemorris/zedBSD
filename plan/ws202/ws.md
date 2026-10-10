@@ -143,3 +143,5 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 ### 2026-10-10 p016 software部分の確認
 
 [p016 i03結果](phase016/phase.md#i03-software部分の結果2026-10-10): 標準NV12 plane readback、i915/libvulkan usage/feature補完、通常+ASan/UBSan hostとnamed build/link/ELF確認PASS。i03部分scopeはcleared、whole p016はuncleared（実機hash未確認）。native AAC/H.264 runtimeとapp移管はまだ未実装。Q1統合・共有投影pending。
+
+[Q1向け統合記録](handoff-20261010.md): 実装commit eb14468e3、mainの別sessionによるdesign第3版との競合を保存。design以外のpatchのapply --checkはPASS、未適用。
