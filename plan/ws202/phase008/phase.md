@@ -17,7 +17,9 @@ host で確かめる（design §5.2・§5.3・§5.6）。probe に無い gap・M
 
 1. `h264.h`・`h264.c`: `userland/tests/vkvideo-probe/h264.[ch]` を写して直す（file の頭に元の file）。
    - `struct h264_parser`、`h264_parser_init`、`h264_parser_config`（avcC を `media_bitstream_open` の Annex B の prefix として NAL で読む）、
-     `h264_parser_access_unit(parser, data, size, picture, &reason)`。
+     `h264_parser_access_unit(parser, data, size, picture, &reason)`。`struct h264_picture` は slice ごとに slice type・override を当てた `num_ref_idx_l0/l1_active_minus1`・
+     ref_pic_list_modification の命令の列を持つ（p016 の D25 が使う。probe は持たない）。
+   - emulation prevention は slice の data を除く全ての NAL の RBSP で除く（SPS・PPS・SEI・slice header、`media_rbsp_unescape`、L2-04）。
    - VUI（SAR、video_full_range_flag、matrix_coefficients、max_num_reorder_frames・max_dec_frame_buffering、hrd は読んで捨てる）。D19: VUI の中の読み誤りは VUI だけを
      捨て SPS は使う。
    - POC type 1（8.2.1.2）。
@@ -42,9 +44,10 @@ host で確かめる（design §5.2・§5.3・§5.6）。probe に無い gap・M
 | --- | --- |
 | `sh plan/ws202/tests/run-host-h264.sh` | 全項目 PASS（ASan/UBSan） |
 | `sh plan/ws083/tests/run-host-vkvideo-probe.sh` | PASS（probe を変えていない） |
-| libmedia の build | warning 0 |
+| design §10.6 の build（`ZEDBSD_CONFIG=config/ci/config-amd64.mk`、libmedia・libbrowser・videoplayer・music） | exit 0、`grep -c 'warning:'` が 0 |
 
 ## 注意
 
-- 「probe と一致」は probe が扱う範囲だけの確かめ（probe は MMCO 5・gap で止まる）。それらは p015。
+- 「probe と一致」は probe が扱う範囲だけの確かめ（probe は MMCO 5・gap で止まる）。それらは p015、参照の list は p016。
+- 時刻（pts の列と D29）は p010。この Phase は POC の順だけ。
 - vkvideo-probe は変えない。

@@ -19,8 +19,9 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
 2. `aac.c`（構文）:
    - `aac_config_parse`（ASC: AOT の escape、rate の 24 bit の明示、GASpecificConfig、PCE、AOT 5・29、0x2b7 と sbrPresentFlag と 0x548）。用語は design §6.1 の通り
      （0x2b7 は**後方互換の明示**、暗黙は ASC に何も無く FIL だけ）。
-   - `aac_adts_parse`（syncword、profile、rate の index、channel、protection_absent と CRC、number_of_raw_data_blocks_in_frame、frame の長さ）。最初の packet で config を
-     作り、以後は形の一致を検べる。
+   - `aac_adts_parse`（syncword、profile、rate の index、channel、protection_absent と CRC、number_of_raw_data_blocks_in_frame（最大 4 block、L2-08）、frame の長さ）。
+     最初の packet で config を作り、以後は形の一致を検べる。profile が LC でなければ EINVAL（open の後なので libavcodec へは回らない、制限、L2-09）。
+   - D26（仮、J7 (a)）の判定の関数: ADTS の track と、ASC が LC で core の rate が 24 kHz 以下の track は degraded 0 で FORMAT（p006 の open が使う）。
    - `aac_frame_parse`（raw_data_block、design §6.2）。ADTS の複数の block は block の前の CRC を読み飛ばす。
    - ICS・section・scalefactor（global_gain から DPCM、intensity と PNS の別の DPCM、PNS の最初の 9 bit）・pulse・tns・spectral（ESC）、short の group の並べ替え。
 3. `aac-tables.c`（H5 の回答に従う）:
@@ -32,7 +33,8 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
    - (b)・(c) の時: その出典から同じ形で。
    - Huffman の復号の 2 段の表は init で `pthread_once` で作る（design §6.9）。
 4. host 試験 `plan/ws202/tests/run-host-aac-parse.sh`:
-   - 全 AAC の stream（`aac-adts.ts` を含む）の全 frame で失敗 0、読み終わりの bit が packet と一致、要素と道具の数え（`aac-short` に EIGHT_SHORT、`aac-is-pns` に
+   - 全 AAC の stream（`aac-adts.ts` を含む）の全 frame で失敗 0、読み終わりの bit が packet と一致、複数の block の ADTS（手で 2〜4 block を連ねた試料）、D26 の判定
+     （ADTS・22.05 kHz の LC は degraded 0 で FORMAT、44.1・48 kHz の LC は受ける）、要素と道具の数え（`aac-short` に EIGHT_SHORT、`aac-is-pns` に
      PNS・intensity、`aac-ms-tns` に ms_used・TNS）。
    - Huffman の表の自己の検査（prefix 符号、Kraft の和）。
    - HE-AAC の signalling（M-11）: `gen-asc.py`（`python3 -I`）が `aac-lc-stereo-44k.m4a` の esds の ASC を (1) AOT 5 の階層の明示、(2) AOT 2＋0x2b7＋sbrPresentFlag 1 に
@@ -45,7 +47,7 @@ AAC-LC の frame（ASC か ADTS の入力）を全部の field まで読み、ch
 | --- | --- |
 | `python3 -I plan/ws202/tests/gen-aac-tables.py --check`（H5 (a)） | 一致 |
 | `sh plan/ws202/tests/run-host-aac-parse.sh` | 全部 PASS（ASan/UBSan、TSan の回） |
-| libmedia の build | warning 0 |
+| design §10.6 の build（`ZEDBSD_CONFIG=config/ci/config-amd64.mk`、libmedia・libbrowser・videoplayer・music） | exit 0、`grep -c 'warning:'` が 0 |
 
 ## 注意
 

@@ -2,10 +2,10 @@
 
 # ws202-p001: 設計（design.md）と review
 
-Status: in-progress（2026-10-10 第 2 版。H1〜H6・J1〜J6 の回答の後に cleared）
+Status: in-progress（2026-10-10 第 3 版。3 回目の review と H1〜H6・J1〜J10 の回答の後に cleared）
 Disposition: normal
 Parent: [WS202](../ws.md)
-見積もり: 4 LW（第 1 版 3、第 2 版 1）
+見積もり: 5 LW（第 1 版 3、第 2 版 1、第 3 版 1）
 依存: —
 
 ## 範囲
@@ -19,10 +19,13 @@ Parent: [WS202](../ws.md)
 - 2026-10-10 第 2 版: H-01〜H-07・M-01〜M-13・L-01〜L-11・L-13 を反映（L-12 は Q1 が WS083 の側で直した）。対応は design §16。review の
   「確かめていないこと」のうち host で確かめられた物は design §15（E1〜E9）、確かめられない物は design §14（U1〜U15）。Phase を p015 で 1 つ足し、
   見積もりは 62 → 75 LW。
+- 2026-10-10 design-reviewer の [review-002](../review-002.md)（5e6dcce0e）: 新しい H 1・M 10・L 20、p015・p009 は NO-GO。
+- 2026-10-10 第 3 版: H2-01（方式は推しの (a) を仮に採り D25・新 p016）、M2-01・M2-02・M2-04・M2-06・M2-08・M2-09・M2-10、L2-01〜L2-20 を反映。M2-03・M2-05・M2-07 と
+  H2-01 の方式は判断の点 J7〜J10 にし、推しを「仮」として設計に入れた。対応は design §16.2。host で確かめた事実は design §15 E10〜E14。見積もりは 75 → 85 LW。
 
 ## 残り
 
-1. H1〜H6・J1〜J6 のユーザーの回答を ws.md と design.md に記録し、推しと違う回答の Phase の変更（例 H1 (b) なら CPU の decoder の Phase を足す、J1 で
-   container を絞るなら §3.1 と p010 の試験を縮める）。
-2. 変更が大きければ 2 回目の review（Q1 の判断）。
+1. 3 回目の review（review-002 の推し: H2-01・M2-01・M2-02 の部分、design §5.1・§5.3・§5.3.1・§5.6）。
+2. H1〜H6・J1〜J10 のユーザーの回答を ws.md と design.md に記録し、推し（J7〜J10 は「仮」）と違う回答の Phase の変更（例 H1 (b) なら CPU の decoder の Phase、J8 (b)・(c)
+   なら p016 の取り消しと p009 の参照の渡し方、J1 で container を絞るなら §3.1 と p010 の試験を縮める）。
 3. WS を planned に、この Phase を cleared に（Q1 の判定）。

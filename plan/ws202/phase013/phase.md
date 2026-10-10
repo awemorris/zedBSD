@@ -14,7 +14,8 @@ Parent: [WS202](../ws.md)
 
 ## image
 
-`plan/ws202/tests/config-media.mk`（CI の構成から libavcodec を外した物。graphical login・Video Player・Music・audiod を含む）。Q1 が build し、ユーザーが USB に書く。
+`plan/ws202/tests/config-media.mk`（CI の構成から libavcodec を外した物。graphical login・Video Player・Music・audiod を含む）。Q1 が build し、ユーザーが USB に書いて起動する。
+p012 の C（T1 の SSH の試験）と同じ起動で続けて行う（J10 の仮の推し）。
 UAT の試料は `/home/awe/zedbsd-media/` の sample（`sample-h264-high-aac.mp4` 等）と手元の動画・.m4a を、ユーザーか Q1 が SSH で kei の home に送る。
 
 ## UAT の一覧

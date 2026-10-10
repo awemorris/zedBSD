@@ -23,10 +23,11 @@ WS202 が足した・変えた C の全部を `plan/coding-style.md` の全文�
 ## 手順
 
 1. WS202 の commit を列挙（`git log --format=%H -- <上の path>`）し、差分を全文と照らして直す。評価の順・所有・寿命・誤りの報告・振る舞いを変えない。
-2. `git diff --check`、build（warning 0）、host 試験の全部が PASS。動作を変えていないので QEMU・実機は回さない。
+2. `git diff --check`、design §10.6 の build（`config-media.mk`、`warning:` の行が 0）、host 試験の全部が PASS。動作を変えていないので QEMU・実機は回さない。
 3. 試験の整理（Q1 へ依頼。master.md・`plan/tools/` は WS の外）:
-   - 回帰に残す物: `make-streams.sh`（と `streams/`）、`run-host-aac.sh`・`run-host-aac-parse.sh`・`run-host-h264.sh`・`run-host-vkvideo.sh`・`run-host-picture.sh`・
-     `run-host-sound.sh`、`gen-aac-tables.py`、`host-media-rms.c`、`media-probe`。`plan/tools/media/` へ移し、master.md の Tools・試験の一覧に登録する差分を Q1 に送る。
+   - 回帰に残す物: `make-streams.sh`（と `streams/`、`gen-gap.py`）、`run-host-aac.sh`・`run-host-aac-parse.sh`・`run-host-h264.sh`・`run-host-vkvideo.sh`・`run-host-picture.sh`・
+     `run-host-sound.sh`、`gen-aac-tables.py`、`host-media-rms.c`。`plan/tools/media/` へ移し、master.md の Tools・試験の一覧に登録する差分を Q1 に送る。`media-probe` は
+     `userland/tests/` の package なので**移さず**、master.md の一覧に載せるだけ（L2-14）。
      scenario（`h264-native.md`・`no-video-decode.md`）は `tests/` にあるので suite（`tests/suites/`）への登録を Q1 に。
    - 開発の途中だけの物（例 `gen-asc.py` の一時の file、`fetch-conformance.sh` を残さないと決めた時）: path を Q1 に送る（rm は Q1）。文書からの参照も外す。
 4. WS の完了の形（ws.md を書き直し、Phase の directory の削除は Q1）は Q1 の判定の後。

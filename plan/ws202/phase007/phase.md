@@ -16,8 +16,9 @@ Music が libavcodec の無い image で .m4a を再生できるようにし、A
 
 - `userland/desktop/music/main.c`: 起動の時の `media_codec_load()` の門と「Playing needs libavcodec (the libavcodec package).」の 2 か所を外す。曲を開けない時に問題から文:
   MISSING「This song's format needs FFmpeg's libavcodec, which is not installed.」、PROFILE「This song's format is not supported.」、他は今の文。
-- `userland/desktop/music/play.c`: open の log を `MUSIC PLAY open codec=%s backend=%s container=%s duration_ms=%lld` に。seek の後（`play_seek` の flush の後）に
-  `media_decoder_trim` を呼び、0 なら frame の単位の `skip_before` の捨てを使わない（ENOTSUP なら今のまま）。
+- `userland/desktop/music/play.c`: open の log を `MUSIC PLAY open codec=%s backend=%s container=%s duration_ms=%lld` に。seek（`play_seek`）は pre-roll（D30、M2-10）:
+  `media_decoder_frame_us` が 0 でなければ `media_file_seek(目標 − 1 frame)`（0 で止める）で読み、flush の後に `media_decoder_trim(目標)` を呼び、0 なら frame の単位の
+  `skip_before` の捨てを使わない。frame_us が 0 か trim が ENOTSUP（libavcodec）なら今のまま。
 - `play.h`・`Makefile`・`play.c` の頭の comment の古い記述を直す。
 - WS の外の file（差分を Q1 へ、または許可を受けて直す）:
   - `plan/tools/aat/scenarios/helpers_music.py`（M-08）: `MUSIC CODEC load error=` の待ちと「libavcodec did not load」の判定（78・87 行付近）を外し、`MUSIC PLAY open codec=aac
@@ -29,7 +30,7 @@ Music が libavcodec の無い image で .m4a を再生できるようにし、A
 
 | コマンド | 期待 |
 | --- | --- |
-| music の build | warning 0 |
+| design §10.6 の build（`ZEDBSD_CONFIG=config/ci/config-amd64.mk`、libmedia・libbrowser・videoplayer・music） | exit 0、`grep -c 'warning:'` が 0 |
 | `sh plan/tools/media/run-host-codec.sh` | PASS |
 | `python3 -I -m py_compile plan/tools/aat/scenarios/helpers_music.py`（直した時） | 成功 |
 
