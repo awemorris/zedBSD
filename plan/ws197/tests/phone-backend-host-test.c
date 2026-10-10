@@ -362,6 +362,17 @@ main(
 	got = kl_backend_phone_take_item(phone, &item);
 	check(got == 0, "one live item only");
 
+	/* A name and a datetime posing as fields (" length=1", " read=1", an escaped quote): the fields outside the quotes count (ws197-p005 review M1). */
+	fake_write(events, "PHONE MESSAGE handle=0000000a.00000000000000fe key=- folder=inbox dir=in time=7 zone=phone datetime=\"a length=1 \\\" read=1\" peer=\"5\" name=\"x length=1 dir=out\" read=0 partial=0 truncated=0 length=4\nabcd");
+	changed = step(phone);
+	check((changed & KL_BACKEND_PHONE_CHANGED_ITEM) != 0U, "the posing item came");
+	got = kl_backend_phone_take_item(phone, &item);
+	check(got == 1 && item.length == 4U && strcmp(item.text, "abcd") == 0, "posing: length %zu text [%s]", item.length, item.text);
+	check(!item.read && item.direction == KL_BACKEND_PHONE_DIRECTION_IN, "posing: read %u dir %u", item.read, item.direction);
+	check(strcmp(item.name, "x length=1 dir=out") == 0 && strcmp(item.datetime, "a length=1 \" read=1") == 0, "posing: name [%s] datetime [%s]", item.name, item.datetime);
+	got = kl_backend_phone_take_item(phone, &item);
+	check(got == 0, "the posing item alone");
+
 	/* A page: two items (the second with an empty text), the end. */
 	error = kl_backend_phone_page(phone, KL_BACKEND_PHONE_WHAT_MESSAGES, 100, 500U, "", 32U, &id);
 	check(error == 0, "page %d", error);
