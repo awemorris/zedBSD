@@ -50,3 +50,5 @@ No WS141 GPL exception was used. No HAL API or responsibility changed.
 ## Limits and handoff
 
 No RPi4 execution, electrical timing, actual DMA/IRQ delivery, DHCP or SSH verified. Host model is single-threaded; it checks callback lock boundaries and lifecycle paths, not arbitrary concurrent scheduling. Actual `rgmii-rxid` binding only; 10/100/1000 full-duplex advertisement, no half-duplex or forced parallel-detect link. No offload/jumbo/WOL/suspend/multiqueue support. Main integration, full SD image and physical acceptance remain for handoff/p003. No QEMU, toolchain build, full-image build, push or shared-plan writes.
+
+Implementation/evidence commit: `e9ddb4540` (`WIP`). Subsequent handoff-record commit changes documentation only. No integration SHA or ACK yet.

@@ -41,3 +41,5 @@ Resume: p001/p002 cleared、main統合と新SDイメージからp003実機確認
 p001/p002はclear。最終実装はGENET MAC/DMA/ring/net_device/FDTをrpi4-ethernet.c、外付けPHYをbcm54213pe.cに所有させる。両者をMDIO callbackで接続。全CPU共通Ethernet menuでGENETをON/OFF可能、RPi4で既定ON。USB/PCIeの動作に依存せずen0を登録する。既存networkdのup/DHCP経路はsourceで確認。
 
 [結果・手順・規約適合・制約](tests/results.md)。WSの実機受入は未達なのでincompleteを維持。p003はユーザー実機でリンク/DHCP/SSHを確認するhandoff、今Queueはfinished。main merge ACK、共有Master/focus/priority/Queue/history/F-029投影とGitHub publicationはQ1保留。
+
+Submission: `e9ddb4540` (`WIP`), merge request `ws203-genet-20261011`. Integration SHA/ACK pending.

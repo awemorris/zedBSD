@@ -16,4 +16,4 @@ Graph: main a094b953c (context) → i01 → i02. p003 is outlook (physical hando
 
 Both scoped attempts cleared: i01 implemented the user-corrected PHY/MAC split; i02 reviewed final source against the full C standard and passed warning0 ON/OFF arm64 builds, focused host model and common-menu checks. Evidence: [results](tests/results.md), [source hashes](tests/source.sha256). No main merge or hardware-success claim. WS remains incomplete pending p003. Next queue is not started automatically.
 
-Merge request ID: ws203-genet-20261011. Submission SHA: provided by this branch's WIP commit; integration SHA / ACK pending Q1 or explicit user approval. Shared Master/focus/priority, Queue/history, F-029 promotion and publication are pending Q1. Local records have not been published to GitHub (plan/config.md publication state).
+Merge request ID: ws203-genet-20261011. Submission SHA: `e9ddb4540` (implementation + initial evidence); integration SHA / ACK pending Q1 or explicit user approval. Shared Master/focus/priority, Queue/history, F-029 promotion and publication are pending Q1. Local records have not been published to GitHub (plan/config.md publication state).
