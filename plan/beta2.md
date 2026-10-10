@@ -17,12 +17,11 @@
 
 ## 今の状況
 
-- 2026-10-10 夜の UAT: BUG-283・284・285・286 close、WS199 の頁とログイン画面のキー（PIN あり、NFC）OK、BUG-222 は 4.9 MB/s。PIN 不要・タッチ不要の card は image が古く未確認。WS200 は未実装。WS197 を必須に（ユーザー）。
-- 2026-10-10 の UAT は一通り済んだ。残る既知の Bug は USB LAN の遅さ（BUG-222、最悪ベータ2 では遅くてよい）。
-- 順（ユーザー）: 走っている Bug の直しと試験を全部終える → WS199（Vulkan Video より優先）→ WS200。
-- P1: WS199 の設計を新しい仕様で書き直し design-reviewer に通している（code は試験が片付いてから）。
-- T1: T1-521（ロック画面・Ethernet の頁）・T1-522（PIN の登録の後の解除）は PASS（BUG-283・284・285 は QEMU で確認、実機は次の UAT）。今 T1-435（Vulkan Video の 5330、5330 は使えない）。
-- WS197（Bluetooth のスマホ連携）はベータ3、10/17 まで main に入れない branch で止めてある。
+- 2026-10-11: [BUG-287](bugs/BUG-287.md)（WS197 のスマホ連携が「Use as phone」の後に「Phone messages connecting...」のまま）を P1 が調べている。5330 で btsnoop を取った（pairing は 2 回目で PAIRED だが `l2cap=0`、その後 MAP の接続が進まない）。P1 の直しが来たら merge し、次の UAT の #11 で確かめる。
+- WS199・WS200 は実装と QEMU の試験が済み、残りは次の UAT（#4〜#8）。
+- WS083（Vulkan Video）は p007 の hang の実機の確かめだけ残る（ユーザーの判断）。Video Player は libavcodec を使い、Vulkan Video は使わない（今は vkvideo-probe だけ）。
+- T1 の WS143 の HID の回帰はもう流さない（ユーザー）。P2 は WS083 を終えて退いた。
+- 残る既知の Bug は USB LAN の遅さ（BUG-222、4.9 MB/s）。
 
 ## 必須
 
