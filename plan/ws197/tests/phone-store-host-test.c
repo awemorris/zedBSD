@@ -22,6 +22,14 @@
  * source and by the file's name), the conversation named, the contact
  * made later reading the number's folder; the synchronisation's marks.
  *
+ * ws197-p005 (plan/ws197/phase005/phase.md sections 7.1, 7.2 and 8.2):
+ * the four marks and a line not known kept; ph_phonebook_prune_plan (a
+ * key missed once is missing, twice removed, one back is neither, and a
+ * reading that did not end, was capped (each bit), brought nothing or
+ * less than half removes nothing); ph_phonebook_forget (Stop, another
+ * phone, no record let the copy go; the record not known, another user's,
+ * the switch still on, no copy keep it).
+ *
  * Prints "PASS name" or "FAIL name" for each check; the last line is
  * "phone-store-host-test: PASS" or "... FAIL".
  */
@@ -47,6 +55,8 @@ static int test_key_is(const char *number, const char *expected);
 static int test_message(const char *key, int outgoing, time_t date, const char *peer, const char *name, int read, const char *text, long *contact, size_t *item);
 static int test_file_has(const char *path, const char *line);
 static int test_exists(const char *path);
+static void test_prune(void);
+static void test_forget(void);
 
 /* The log of the store (phone.h's ph_log), not shown. */
 void
@@ -79,8 +89,7 @@ main(
 	long mother;
 	long amazon;
 	long found_contact;
-	int64_t since;
-	int64_t deep_at;
+	struct ph_sync_marks marks;
 	int error;
 	FILE *file;
 
@@ -249,16 +258,39 @@ main(
 	test_check("serial", error == 0 && contact == found_contact && own == item && ph_store_find_serial(999999UL, &contact, &own) == ENOENT);
 
 	/* The synchronisation's marks. */
-	error = ph_store_sync_load(TEST_ADDRESS, &since, &deep_at);
+	error = ph_store_sync_load(TEST_ADDRESS, &marks);
 	test_check("sync-none", error == ENOENT);
-	error = ph_store_sync_save(TEST_ADDRESS, 1790000000, 1790100000);
-	error |= ph_store_sync_load(TEST_ADDRESS, &since, &deep_at);
-	test_check("sync-kept", error == 0 && since == 1790000000 && deep_at == 1790100000);
-	test_check("sync-bad", ph_store_sync_save("../../x", 1, 1) == EINVAL);
+	marks.messages_since = 1790000000;
+	marks.deep_at = 1790100000;
+	marks.contacts_at = 1790200000;
+	marks.calls_since = 1790300000;
+	error = ph_store_sync_save(TEST_ADDRESS, &marks);
+	memset(&marks, 0, sizeof(marks));
+	error |= ph_store_sync_load(TEST_ADDRESS, &marks);
+	test_check("sync-kept", error == 0 && marks.messages_since == 1790000000 && marks.deep_at == 1790100000 && marks.contacts_at == 1790200000 &&
+	    marks.calls_since == 1790300000);
+	test_check("sync-bad", ph_store_sync_save("../../x", &marks) == EINVAL);
 	(void)snprintf(path, sizeof(path), "%s/sync/bt-" TEST_ADDRESS ".state", root);
 	(void)snprintf(line, sizeof(line), "messages_since %d", 1790000000);
 	test_check("sync-file", test_file_has(path, line));
+
+	/* A line of a later program is kept when the marks are written again (ws197-p005 review-1 minor 6). */
+	file = fopen(path, "a");
+	if (file != NULL) {
+		fputs("future_mark 7\n", file);
+		fclose(file);
+	}
+
+	/* Written again with a new mark. */
+	marks.calls_since = 1790400000;
+	error = ph_store_sync_save(TEST_ADDRESS, &marks);
+	test_check("sync-unknown", error == 0 && test_file_has(path, "future_mark 7") && test_file_has(path, "calls_since 1790400000") &&
+	    !test_file_has(path, "calls_since 1790300000") && test_file_has(path, "contacts_at 1790200000"));
 	ph_store_close();
+
+	/* The pure parts of the copy of the phone's contacts. */
+	test_prune();
+	test_forget();
 
 	/* The outcome. */
 	if (test_failures != 0) {
@@ -399,4 +431,106 @@ test_exists(
 
 	/* Succeeded: there. */
 	return 1;
+}
+
+/* ws197-p005: what a whole reading of the phone's contacts lets go of. */
+static void
+test_prune(void)
+{
+	const char *current[4] = { "a1", "b2", "c3", "d4" };
+	const char *received[3] = { "c3", "a1", "z9" };
+	const char *missing[2] = { "d4", "b2" };
+	const char *few[1] = { "a1" };
+	unsigned char remove[4];
+	unsigned char missing_next[4];
+	int counts;
+
+	/* Sorted as the plan wants them. */
+	ph_phonebook_sort_keys(received, 3U);
+	ph_phonebook_sort_keys(missing, 2U);
+	test_check("prune-sorted", strcmp(received[0], "a1") == 0 && strcmp(received[2], "z9") == 0 && strcmp(missing[0], "b2") == 0);
+
+	/* Missed twice: removed (b2, d4 when missing had them); the others kept. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, missing, 2U, 1, 0U, remove, missing_next);
+	test_check("prune-twice", counts == 1 && remove[0] == 0U && remove[1] == 1U && remove[2] == 0U && remove[3] == 1U && missing_next[1] == 0U &&
+	    missing_next[3] == 0U);
+
+	/* Missed once: missing, not removed. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, NULL, 0U, 1, 0U, remove, missing_next);
+	test_check("prune-once", counts == 1 && remove[1] == 0U && remove[3] == 0U && missing_next[1] == 1U && missing_next[3] == 1U && missing_next[0] == 0U &&
+	    missing_next[2] == 0U);
+
+	/* Back again (a1 was missing and came): neither. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, few, 1U, 1, 0U, remove, missing_next);
+	test_check("prune-back", counts == 1 && remove[0] == 0U && missing_next[0] == 0U);
+
+	/* A reading that did not end, or was capped by any bit: nothing. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, missing, 2U, 0, 0U, remove, missing_next);
+	test_check("prune-incomplete", counts == 0 && remove[1] == 0U && missing_next[1] == 0U);
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, missing, 2U, 1, 1U, remove, missing_next);
+	test_check("prune-capped-1", counts == 0 && remove[1] == 0U);
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, missing, 2U, 1, 2U, remove, missing_next);
+	test_check("prune-capped-2", counts == 0 && remove[3] == 0U);
+	counts = ph_phonebook_prune_plan(current, 4U, received, 3U, missing, 2U, 1, 4U, remove, missing_next);
+	test_check("prune-capped-4", counts == 0 && remove[3] == 0U);
+
+	/* Nothing brought, or less than half of the copy: nothing. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 0U, missing, 2U, 1, 0U, remove, missing_next);
+	test_check("prune-empty", counts == 0 && remove[1] == 0U);
+	counts = ph_phonebook_prune_plan(current, 4U, few, 1U, missing, 2U, 1, 0U, remove, missing_next);
+	test_check("prune-few", counts == 0 && remove[1] == 0U && remove[3] == 0U);
+
+	/* Exactly half counts. */
+	counts = ph_phonebook_prune_plan(current, 4U, received, 2U, missing, 2U, 1, 0U, remove, missing_next);
+	test_check("prune-half", counts == 1);
+}
+
+/* ws197-p005: when the copy of the phone's contacts is let go of (Pc3 (b), provisional). */
+static void
+test_forget(void)
+{
+	struct kl_phone_link link;
+	int forget;
+
+	/* Stop using as phone: this user's record of the same phone, its switch off (the setting none does not matter). */
+	memset(&link, 0, sizeof(link));
+	link.backend = 0U;
+	link.owner = 1U;
+	link.record = 2U;
+	link.enabled = 0U;
+	(void)snprintf(link.address, sizeof(link.address), "%s", "aa:bb:cc:dd:ee:01");
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-stop", forget == 1);
+
+	/* The switch on: kept. */
+	link.enabled = 1U;
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-on", forget == 0);
+
+	/* Another phone: let go. */
+	(void)snprintf(link.address, sizeof(link.address), "%s", "AA:BB:CC:DD:EE:02");
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-other", forget == 1);
+
+	/* Another user's record: kept. */
+	link.owner = 0U;
+	link.enabled = 0U;
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-not-owner", forget == 0);
+
+	/* No record (unpaired, forgotten): let go. */
+	memset(&link, 0, sizeof(link));
+	link.record = 1U;
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-no-record", forget == 1);
+
+	/* The record not known (bluetoothd not answering, or not read yet): kept. */
+	link.record = 0U;
+	forget = ph_phonebook_forget(TEST_ADDRESS, &link);
+	test_check("forget-unknown", forget == 0);
+
+	/* No copy: nothing to let go of. */
+	link.record = 1U;
+	forget = ph_phonebook_forget("", &link);
+	test_check("forget-no-copy", forget == 0);
 }

@@ -167,6 +167,19 @@ struct ph_phone_message {
 #define PH_NUMBER_KEY_MAX	264U
 #define PH_COUNTRY_DEFAULT	"81"
 
+/*
+ * How far a paired phone was brought in (sync/bt-<address>.state,
+ * ws197-p004 section 6.2 and ws197-p005 section 7.1): the messages since
+ * a time and the last deep synchronisation, the last whole reading of the
+ * phone's contacts, and the calls since a time (UNIX seconds, 0 for none).
+ */
+struct ph_sync_marks {
+	int64_t messages_since;
+	int64_t deep_at;
+	int64_t contacts_at;
+	int64_t calls_since;
+};
+
 /* The longest the contacts' filter keeps, with its NUL. */
 #define PH_FILTER_MAX		64U
 
@@ -218,8 +231,11 @@ int ph_number_key(const char *number, char *key, size_t size);
 long ph_store_conversation(const char *number, const char *name, int create);
 int ph_store_phone_message(const struct ph_phone_message *message, long *contact, size_t *item, int *merge);
 int ph_store_find_serial(unsigned long serial, long *contact, size_t *item);
-int ph_store_sync_load(const char *address, int64_t *since, int64_t *deep_at);
-int ph_store_sync_save(const char *address, int64_t since, int64_t deep_at);
+int ph_store_sync_load(const char *address, struct ph_sync_marks *marks);
+int ph_store_sync_save(const char *address, const struct ph_sync_marks *marks);
+int ph_phonebook_prune_plan(const char *const *current, size_t current_count, const char *const *received, size_t received_count, const char *const *missing, size_t missing_count, int complete, unsigned capped, unsigned char *remove, unsigned char *missing_next);
+void ph_phonebook_sort_keys(const char **keys, size_t count);
+int ph_phonebook_forget(const char *copy_address, const struct kl_phone_link *link);
 
 /* The view (view.c). */
 int ph_view_init(struct ph_view *view);
