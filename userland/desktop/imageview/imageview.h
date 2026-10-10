@@ -314,6 +314,8 @@ struct iv_app {
 	struct iv_image *next;
 	struct iv_folder folder;
 	int has_image;
+	/* The presenter requested CPU image drawing after a texture allocation failed. */
+	int cpu_image;
 	unsigned image_serial;
 	unsigned frame_serial;
 	size_t frame;
@@ -452,6 +454,7 @@ int iv_share_open_with(const char *path, const char *format, int index);
 void iv_draw(struct iv_app *app, struct iv_canvas *canvas);
 
 /* The canvas (canvas.c). */
+void iv_canvas_image(struct iv_canvas *canvas, const struct iv_level *image, const struct iv_quad *quad);
 void iv_canvas_fill(struct iv_canvas *canvas, int x, int y, int width, int height, uint32_t color);
 void iv_canvas_blend(struct iv_canvas *canvas, int x, int y, int width, int height, uint32_t color);
 void iv_canvas_round(struct iv_canvas *canvas, int x, int y, int width, int height, int radius, uint32_t color);

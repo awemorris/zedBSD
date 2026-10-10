@@ -44,6 +44,8 @@
 #include <errno.h>
 #include <fcntl.h>
 #include <stdarg.h>
+#include <spawn.h>
+#include <sys/wait.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -179,6 +181,9 @@ struct ph_window {
 	int moving;
 	int glass_decided;
 
+	/* Viewer children are reaped without waiting for their windows to close. */
+	pid_t viewers[16];
+
 	/*
 	 * The compositor's phone (NULL when the compositor has none), and the
 	 * requests sent that wait for their states: the request's number, the
@@ -242,6 +247,8 @@ static void ph_media_chosen(void *data, struct kl_file_chooser *chooser, unsigne
 static void ph_media_drop(struct ph_window *phone);
 static int ph_media_image(struct ph_view *view, const char *bytes, size_t length, const char *contact);
 static void ph_requests(struct ph_window *phone);
+static void ph_open_media(struct ph_window *phone, const struct ph_request *request);
+static void ph_reap_viewers(struct ph_window *phone);
 static void ph_send(struct ph_window *phone, long contact);
 static void ph_call(struct ph_window *phone, long contact);
 static void ph_save_contact(struct ph_window *phone);
@@ -499,6 +506,7 @@ ph_loop(
 		/* Waits for the compositor, or for the time something moves. */
 		now = kl_clock_us();
 		wait = ph_wait(phone, now);
+		ph_reap_viewers(phone);
 		status = kl_app_dispatch(phone->app, wait);
 		if (status != 0) {
 			ph_log("DONE reason=disconnected");
@@ -1225,6 +1233,9 @@ ph_requests(
 
 		/* Each kind. */
 		switch (request.action) {
+		case PH_ACTION_OPEN_MEDIA:
+			ph_open_media(phone, &request);
+			break;
 		case PH_ACTION_ATTACH:
 			ph_media_choose(phone, request.contact);
 			break;
@@ -1248,6 +1259,79 @@ ph_requests(
 		default:
 			break;
 		}
+	}
+}
+
+/* Starts the viewer for the exact saved attachment, without passing paths through a shell. */
+static void
+ph_open_media(
+	struct ph_window *phone,
+	const struct ph_request *request)
+{
+	char *arguments[3];
+	size_t slot;
+	int error;
+	extern char **environ;
+
+	/* Only a saved original's absolute path can be opened. */
+	if (request->path[0] != '/')
+		return;
+
+	/* Finds a child slot after collecting viewers which have already closed. */
+	ph_reap_viewers(phone);
+	for (slot = 0U; slot < 16U; slot++) {
+		if (phone->viewers[slot] == 0)
+			break;
+	}
+
+	/* Opening many viewers cannot consume the rest of Phone's pending operations. */
+	if (slot == 16U) {
+		ph_view_notice(
+		    &phone->view,
+		    "Close a viewer before opening another attachment.",
+		    kl_clock_us());
+		return;
+	}
+
+	/* Photos and videos retain their original bytes and use their dedicated applications. */
+	arguments[0] = KEILAND_BINDIR "/imageview";
+	if (request->video)
+		arguments[0] = KEILAND_BINDIR "/videoplayer";
+	arguments[1] = (char *)request->path;
+	arguments[2] = NULL;
+	error = posix_spawn(&phone->viewers[slot],
+			    arguments[0],
+			    NULL,
+			    NULL,
+			    arguments,
+			    environ);
+	if (error != 0) {
+		phone->viewers[slot] = 0;
+		ph_view_notice(&phone->view,
+			       "The attachment viewer could not be started.",
+			       kl_clock_us());
+	}
+
+	/* Logs only launch status, without the sender or attachment path. */
+	ph_log("VIEWER error=%d", error);
+}
+
+/* Collects only viewer children, keeping every UI dispatch nonblocking. */
+static void
+ph_reap_viewers(
+	struct ph_window *phone)
+{
+	size_t slot;
+	pid_t collected;
+	int status;
+
+	/* Live viewers stay independent until their own close action. */
+	for (slot = 0U; slot < 16U; slot++) {
+		if (phone->viewers[slot] <= 0)
+			continue;
+		collected = waitpid(phone->viewers[slot], &status, WNOHANG);
+		if (collected > 0 || (collected < 0 && errno == ECHILD))
+			phone->viewers[slot] = 0;
 	}
 }
 

@@ -57,6 +57,7 @@ Resume point（2026-10-02 計画）: **p001（棚卸し・回帰の取り直し�
 | [ws127-p010](phase010/phase.md) | directory の名前（breadcrumb）のタップ・クリックで path を入力、約 1 秒後に path の候補の dropdown（2026-10-04 ユーザーの要望） | cleared（2026-10-05 Q1） | BUG-177・BUG-190 と揃える |
 | [ws127-p011](phase011/phase.md) | 左の pane の Home は ~/ の一覧に、今の dashboard は「Today」という別の頁に（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | — |
 | [ws127-p012](phase012/phase.md) | Files の Tags の機能を削除（macOS の模倣を避ける）（2026-10-04 ユーザー） | cleared（2026-10-05 Q1） | Guardrail の D14・checker の許可の表の見直しは Q1 |
+| [ws127-p013](phase013/phase.md) | double-tap dragの誤open修正 | in-progress | 現main DnD | 本Codex有限UAT Queue |
 
 候補のうち Phase にしていない物（p001 で選ばれたら Phase を足す）: F-033（カラム・ギャラリーの表示、4h 以上）、F-036（装置の unmount・eject、USB の storage の hotplug の通知が要る）、
 F-032・F-034・F-040（ベータ1 の外の見込み）。
@@ -88,3 +89,7 @@ F-032・F-034・F-040（ベータ1 の外の見込み）。
 ## 2026-10-06 UAT のフィードバック
 
 - BUG-220 詳細の list の列の幅の drag、BUG-221 範囲選択の追従、BUG-233 動画の file が Terminal で開く・BUG-234 /bin の file の開き方（GUI は Terminal なし、CLI は Terminal に残す）→ **関連付けと開き方の Phase**
+
+## 2026-10-10 double-tap drag UAT修正
+
+ユーザーの誤open報告を受けp013を追加。[ws197媒体UAT Queue](../ws197/codex-queue.md)で、2回目のpressをreleaseまで保留し、drag/閾値超過でopenとclick系列を取り消す。通常double-click、single selection、既存DnDを維持。検証は[ws157-p009](../ws157/phase009/phase.md)が今回全sourceを担当。実機trackpad操作のユーザーUATは別。

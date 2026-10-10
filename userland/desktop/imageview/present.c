@@ -395,7 +395,8 @@ iv_present_set_image(
 	VkResult error;
 
 	/* The same image is already there. */
-	if (present->image_serial == serial && present->level_count != 0U)
+	if (present->image_serial == serial &&
+	    (present->level_count != 0U || present->cpu_image))
 		return VK_SUCCESS;
 
 	/* Nothing may still read the old textures. */
@@ -420,6 +421,17 @@ iv_present_set_image(
 		error = present_level(present, &present->levels[index], &image->levels[index]);
 		if (error != VK_SUCCESS) {
 			present_levels_free(present);
+
+			/* Resource limits must not prevent viewing a correctly decoded original. */
+			if (error == VK_ERROR_OUT_OF_DEVICE_MEMORY ||
+			    error == VK_ERROR_OUT_OF_HOST_MEMORY) {
+				present->cpu_image = 1;
+				iv_log(
+				    "IMAGE sampling=cpu reason=texture-memory");
+				return VK_SUCCESS;
+			}
+
+			/* Device loss and incompatible formats retain their original failure. */
 			return error;
 		}
 
@@ -1619,6 +1631,7 @@ present_levels_free(
 
 	/* No image is drawn. */
 	present->level_count = 0;
+	present->cpu_image = 0;
 	present->has_image = 0;
 }
 

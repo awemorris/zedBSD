@@ -133,6 +133,10 @@ fm_drag_motion(
 	if (dx * dx + dy * dy <= DRAG_START * DRAG_START)
 		return 0;
 
+	/* Movement consumes a possible double click even if the drag cannot start. */
+	app->press_open = 0;
+	app->click_time = 0;
+
 	/* A favorite is dragged within the sidebar from here on. */
 	if (app->press_kind == FM_HIT_PLACE) {
 		drag_start_place(app);

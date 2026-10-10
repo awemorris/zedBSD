@@ -21,6 +21,146 @@ static void clip_span(const struct iv_canvas *canvas, int *x, int *y, int *width
 static uint32_t over(uint32_t pixel, uint32_t color, unsigned coverage);
 
 /*
+ * Samples an opaque image into its clipped, possibly quarter-turned quad.
+ *
+ * Only window pixels are written; the original remains available for 1:1 zoom.
+ */
+void
+iv_canvas_image(
+	struct iv_canvas *canvas,
+	const struct iv_level *image,
+	const struct iv_quad *quad)
+{
+	double across_x;
+	double across_y;
+	double down_x;
+	double down_y;
+	double determinant;
+	double offset_x;
+	double offset_y;
+	double u;
+	double v;
+	double source_x;
+	double source_y;
+	double fraction_x;
+	double fraction_y;
+	double top;
+	double bottom;
+	uint32_t *row;
+	uint32_t samples[4];
+	uint32_t pixel;
+	unsigned component;
+	unsigned shift;
+	int x;
+	int y;
+	int width;
+	int height;
+	int column;
+	int line;
+	int first_x;
+	int first_y;
+	int next_x;
+	int next_y;
+
+	/* The quad's edge vectors invert zoom, pan and all four quarter turns. */
+	if (!quad->visible || image->pixels == NULL)
+		return;
+	across_x = (double)quad->x[1] - quad->x[0];
+	across_y = (double)quad->y[1] - quad->y[0];
+	down_x = (double)quad->x[2] - quad->x[0];
+	down_y = (double)quad->y[2] - quad->y[0];
+	determinant = across_x * down_y - across_y * down_x;
+	if (determinant == 0.0)
+		return;
+
+	/* Work is bounded by the viewport rather than the original's dimensions. */
+	x = quad->clip_x;
+	y = quad->clip_y;
+	width = quad->clip_width;
+	height = quad->clip_height;
+	clip_span(canvas, &x, &y, &width, &height);
+	for (line = 0; line < height; line++) {
+		/* Destination centres correspond to Vulkan's texture coordinates. */
+		row = canvas->pixels + (size_t)(y + line) * canvas->stride +
+		      (size_t)x;
+		offset_y = (double)(y + line) + 0.5 - quad->y[0];
+		for (column = 0; column < width; column++) {
+			/* Points outside the quad leave the transparent background untouched. */
+			offset_x = (double)(x + column) + 0.5 - quad->x[0];
+			u = (offset_x * down_y - offset_y * down_x) /
+			    determinant;
+			v = (across_x * offset_y - across_y * offset_x) /
+			    determinant;
+			if (u < 0.0 || u >= 1.0 || v < 0.0 || v >= 1.0)
+				continue;
+
+			/* A large enlargement preserves sharp original pixels. */
+			if (quad->nearest) {
+				first_x = (int)(u * image->width);
+				first_y = (int)(v * image->height);
+				row[column] = image->pixels[(size_t)first_y *
+								image->width +
+							    (size_t)first_x];
+				continue;
+			}
+
+			/* Bilinear sampling clamps edge neighbours to the original's edge texels. */
+			source_x = u * image->width - 0.5;
+			source_y = v * image->height - 0.5;
+			if (source_x < 0.0)
+				source_x = 0.0;
+			if (source_y < 0.0)
+				source_y = 0.0;
+			first_x = (int)source_x;
+			first_y = (int)source_y;
+			next_x = first_x + 1;
+			next_y = first_y + 1;
+			if (next_x >= image->width)
+				next_x = image->width - 1;
+			if (next_y >= image->height)
+				next_y = image->height - 1;
+			fraction_x = source_x - first_x;
+			fraction_y = source_y - first_y;
+
+			/* Decoded images are already opaque premultiplied words. */
+			samples[0] =
+			    image->pixels[(size_t)first_y * image->width +
+					  (size_t)first_x];
+			samples[1] =
+			    image->pixels[(size_t)first_y * image->width +
+					  (size_t)next_x];
+			samples[2] =
+			    image->pixels[(size_t)next_y * image->width +
+					  (size_t)first_x];
+			samples[3] =
+			    image->pixels[(size_t)next_y * image->width +
+					  (size_t)next_x];
+			pixel = 0U;
+			for (shift = 0U; shift < 32U; shift += 8U) {
+				/* Each channel uses the same linear weights as the texture sampler. */
+				top = (double)((samples[0] >> shift) & 255U) *
+				      (1.0 - fraction_x);
+				top += (double)((samples[1] >> shift) & 255U) *
+				       fraction_x;
+				bottom =
+				    (double)((samples[2] >> shift) & 255U) *
+				    (1.0 - fraction_x);
+				bottom +=
+				    (double)((samples[3] >> shift) & 255U) *
+				    fraction_x;
+				component =
+				    (unsigned)(top * (1.0 - fraction_y) +
+					       bottom * fraction_y + 0.5);
+				pixel |= component << shift;
+			}
+
+			/* The next destination centre samples the same immutable source. */
+			row[column] = pixel;
+		}
+	}
+}
+
+/*
  * Fills a rectangle with a colour, replacing what was there.
  */
 void

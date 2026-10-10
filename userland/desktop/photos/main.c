@@ -10,7 +10,7 @@
  * with one window that shows the view (view.c), its menu (File: Import
  * Photo..., Import Folder..., Refresh, Quit; Photo: Favorite, Rotate Left,
  * Rotate Right, Add to Album..., Slideshow, Back to Photos), and the
- * view's input.  The photos are the library's in ~/Pictures/Library (its
+ * view's input.  The photos are the library's in ~/Pictures/Media (its
  * database, db.c); an import (import.c) takes a photo, or the folder of a
  * photo, chosen in libkeiland's file chooser, or the path given with
  * --import before the window opens.  What the view changes (marks,
@@ -24,6 +24,7 @@
  */
 
 #include "app.h"
+#include "media-worker.h"
 #include "../picture/png-write.h"
 
 #include "userland/desktop/paths.h"
@@ -82,6 +83,9 @@ struct ph_window {
 	char root[PH_PATH_MAX];
 	int root_known;
 	int marks_failed;
+
+	/* Coalesces media notifications while a background import or refresh is running. */
+	int media_again;
 	struct kl_file_chooser *chooser;
 	unsigned chooser_for;
 	int answered;
@@ -111,6 +115,7 @@ static const struct kl_menu_entry ph_menu[] = {
 int main(int argc, char **argv);
 static int ph_parse(int argc, char **argv, unsigned *width, unsigned *height, unsigned *timeout, const char **source);
 static void ph_library_start(struct ph_window *photos);
+static void ph_media_results(struct ph_window *photos);
 static void ph_import_path(struct ph_window *photos, const char *source, int notice);
 static void ph_refresh(struct ph_window *photos);
 static void ph_choose(struct ph_window *photos, unsigned purpose);
@@ -189,9 +194,16 @@ main(
 
 	/* Obtains metadata through the compositor before creating the initial view. */
 	photos.system = kl_system_open(kl_app_display(photos.app));
-	ph_library_start(&photos);
-	if (source != NULL)
+	error = ph_media_worker_start();
+	if (error != 0)
+		ph_log("FAILED operation=media-thread error=%d", error);
+	if (source != NULL) {
 		ph_import_path(&photos, source, 0);
+	} else {
+		ph_library_start(&photos);
+	}
+
+	/* The initial empty view remains usable until metadata arrives. */
 	(void)ph_view_reset(&photos.view);
 	if (photos.system != NULL)
 		(void)kl_system_media_watch(photos.system, 1U);
@@ -205,6 +217,7 @@ main(
 	photos.window = kl_app_window_create(photos.app, &window_options);
 	if (photos.window == NULL) {
 		ph_log("FAILED operation=window error=%d", errno);
+		ph_media_worker_stop();
 		kl_system_close(photos.system);
 		kl_app_close(photos.app);
 		ph_worker_stop();
@@ -216,6 +229,7 @@ main(
 	photos.ui = kl_ui_create();
 	if (photos.ui == NULL) {
 		ph_log("FAILED operation=ui error=%d", errno);
+		ph_media_worker_stop();
 		kl_system_close(photos.system);
 		kl_app_close(photos.app);
 		ph_worker_stop();
@@ -235,6 +249,14 @@ main(
 
 	/* Everything goes. */
 	kl_file_chooser_destroy(photos.chooser);
+	ph_media_worker_stop();
+
+	/* Commit edits deferred during import before releasing the UI-owned library. */
+	if (photos.marks_failed)
+		photos.view.save = 1;
+	ph_marks(&photos);
+
+	/* Thumbnail jobs no longer refer to the library after this join. */
 	ph_worker_stop();
 	kl_ui_destroy(photos.ui);
 	if (photos.canvas_made)
@@ -331,83 +353,59 @@ ph_parse(
 	return 0;
 }
 
-/* Reads the library's database (none when there is no home: nothing is kept). */
+/* Schedules a snapshot without disturbing the currently browsed library. */
 static void
 ph_library_start(
 	struct ph_window *photos)
 {
-	FILE *snapshot;
-	int descriptor;
 	int error;
 
-	/* Queries the CLI via the compositor; no GUI code reads database files. */
-	photos->root_known = 0;
-	error = kl_system_media_list(photos->system, &descriptor);
-	if (error == 0) {
-		snapshot = fdopen(descriptor, "r");
-		if (snapshot == NULL) {
-			error = errno;
-			close(descriptor);
-		} else {
-			error = ph_snapshot_read(snapshot, photos->root, sizeof(photos->root));
-			fclose(snapshot);
-		}
-	}
-
-	/* A failed snapshot never leaves a partially filled library on screen. */
-	if (error != 0) {
-		ph_library_release();
+	/* A running import will be followed by one coalesced refresh if notifications arrive. */
+	error = ph_media_worker_queue(NULL, 0);
+	if (error == EBUSY) {
+		photos->media_again = 1;
+	} else if (error != 0) {
 		ph_view_notice(&photos->view, "The media library is unavailable.", kl_clock_us());
-	} else {
-		photos->root_known = 1;
+		photos->dirty = 1;
 	}
-
-	/* Logs the outcome without filenames or personal metadata. */
-	ph_log("LIBRARY error=%d", error);
 }
 
-/*
- * Imports a file or a folder into the library and writes the database;
- * with notice, the view starts again on the library and says what came
- * of it.
- */
+/* Enqueues a file or folder import while leaving the current view usable. */
 static void
 ph_import_path(
 	struct ph_window *photos,
 	const char *source,
 	int notice)
 {
-	const char *paths[1];
-	int descriptor;
 	int error;
 
-	/* Supplies only original file paths; the CLI owns copying and metadata updates. */
-	paths[0] = source;
-	error = kl_system_media_add_paths(photos->system, paths, 1U, &descriptor);
-	if (error == 0)
-		close(descriptor);
-
-	/* Requeries even after a partial import so saved successes become visible. */
-	ph_refresh(photos);
-	if (notice) {
-		if (error != 0)
-			ph_view_notice(&photos->view, "Some media could not be imported.", kl_clock_us());
-		else
-			ph_view_notice(&photos->view, "Media imported into the library.", kl_clock_us());
+	/* Copying, hashing, metadata IO and synchronous API waits all belong to the worker. */
+	error = ph_media_worker_queue(source, notice);
+	if (error == EBUSY) {
+		ph_view_notice(&photos->view,
+			       "A media operation is already running. Try "
+			       "again when it finishes.",
+			       kl_clock_us());
+	} else if (error != 0) {
+		ph_view_notice(&photos->view,
+			       "The media import could not be started.",
+			       kl_clock_us());
+	} else if (notice) {
+		ph_view_notice(&photos->view,
+			       "Importing media in the background...",
+			       kl_clock_us());
 	}
 
-	/* The current model and thumbnails have been reset through the compositor. */
+	/* A notice is drawn without waiting for the compositor's helper. */
 	photos->dirty = 1;
 }
 
-/* Reads the library again, and starts the view on it. */
+/* Requests a fresh snapshot after preserving local metadata changes. */
 static void
 ph_refresh(
 	struct ph_window *photos)
 {
-	int error;
-
-	/* A failed metadata update must not be discarded by an unrelated library notification. */
+	/* A failed metadata update must not be discarded by a library notification. */
 	if (photos->marks_failed) {
 		photos->view.save = 1;
 		ph_marks(photos);
@@ -415,20 +413,101 @@ ph_refresh(
 			return;
 	}
 
-	/* The library again. */
-	ph_worker_drop_thumbs();
-	ph_library_release();
+	/* The view and its thumbnail cache remain usable while the request runs. */
 	ph_library_start(photos);
+}
 
-	/* The view from the timeline's top. */
-	error = ph_view_reset(&photos->view);
-	ph_log("REFRESH error=%d", error);
-	ph_view_notice(&photos->view, "The library was read again.", kl_clock_us());
+/* Installs completed metadata only on the UI thread, after import IO has finished. */
+static void
+ph_media_results(
+	struct ph_window *photos)
+{
+	struct ph_media_result result;
+	FILE *snapshot;
+	int taken;
+	int error;
+	int view_error;
+
+	/* Taking a result never waits on the compositor or the import job. */
+	taken = ph_media_worker_take(&result);
+	if (!taken)
+		return;
+
+	/* Unsaved marks are retained; a later snapshot will include their committed values. */
+	if (photos->view.save || photos->marks_failed) {
+		if (photos->marks_failed)
+			photos->view.save = 1;
+		ph_marks(photos);
+		if (result.descriptor >= 0)
+			close(result.descriptor);
+		if (photos->marks_failed) {
+			photos->media_again = 1;
+			return;
+		}
+
+		/* Replace the stale snapshot with one including the saved metadata changes. */
+		ph_library_start(photos);
+		return;
+	}
+
+	/* A failed import can still have a valid snapshot containing partial successes. */
+	error = result.error;
+	if (result.descriptor >= 0) {
+		snapshot = fdopen(result.descriptor, "r");
+		if (snapshot == NULL) {
+			error = errno;
+			close(result.descriptor);
+		} else {
+			ph_worker_drop_thumbs();
+			ph_library_release();
+			photos->root_known = 0;
+			error = ph_snapshot_read(
+			    snapshot, photos->root, sizeof(photos->root));
+			fclose(snapshot);
+			if (error == 0)
+				photos->root_known = 1;
+			else
+				ph_library_release();
+
+			/* A failed snapshot also invalidates the old view's indices and jobs. */
+			view_error = ph_view_reset(&photos->view);
+			if (view_error != 0) {
+				ph_library_release();
+				photos->root_known = 0;
+				(void)ph_view_reset(&photos->view);
+				if (error == 0)
+					error = view_error;
+			}
+		}
+	}
+
+	/* Completion gives a useful status while the metadata and view remain UI-owned. */
+	if (error != 0 || result.error != 0) {
+		ph_view_notice(&photos->view,
+			       "Some media could not be imported or refreshed.",
+			       kl_clock_us());
+	} else if (result.imported && result.notice) {
+		ph_view_notice(&photos->view,
+			       "Media imported into the library.",
+			       kl_clock_us());
+	}
+
+	/* Completion invalidates the visible metadata, without changing it from the worker. */
 	photos->dirty = 1;
+	ph_log("MEDIA done imported=%d error=%d snapshot=%d",
+	       result.imported,
+	       result.error,
+	       error);
+
+	/* External additions during the job are included by a single follow-up request. */
+	if (photos->media_again) {
+		photos->media_again = 0;
+		ph_library_start(photos);
+	}
 }
 
 /*
- * Shows libkeiland's file chooser for an import: a photo, or a photo in
+ * Shows libkeiland's file chooser for an import: a photo, or
  * the folder to import (PH_ACTION_IMPORT or _FOLDER), the pictures shown
  * first.  One shown already answers in its time.
  */
@@ -460,12 +539,23 @@ ph_choose(
 	memset(&options, 0, sizeof(options));
 	options.mode = KL_FILE_CHOOSER_OPEN;
 	options.title = "Import Photo";
-	if (purpose == PH_ACTION_IMPORT_FOLDER)
-		options.title = "Import the Folder of a Photo";
+	if (purpose == PH_ACTION_IMPORT_FOLDER) {
+		options.mode = KL_FILE_CHOOSER_FOLDER;
+		options.title = "Import Folder";
+	}
+
+	/* The chooser belongs to this Photos window. */
 	options.application = PH_APPLICATION;
 	options.folder = folder;
 	options.filters = filters;
 	options.filter_count = sizeof(filters) / sizeof(filters[0]);
+	/* Folder selection does not offer file extension filters. */
+	if (purpose == PH_ACTION_IMPORT_FOLDER) {
+		options.filters = NULL;
+		options.filter_count = 0U;
+	}
+
+	/* Use the same fonts as the application for either selection mode. */
 	options.font = PH_FONT;
 	photos->chooser = kl_file_chooser_open(kl_app_display(photos->app), kl_window_toplevel(photos->window), &options, &listener, photos);
 	ph_log("CHOOSER open for=%u ok=%d", purpose, photos->chooser != NULL);
@@ -483,19 +573,15 @@ ph_chooser_done(
 	size_t filter)
 {
 	struct ph_window *photos;
-	char *slash;
 
-	/* A path chosen: the photo, or its folder. */
+	/* A path chosen: the photo or the directory itself. */
 	(void)chooser;
 	(void)filter;
 	photos = data;
 	photos->chosen[0] = '\0';
-	if (result == KL_FILE_CHOOSER_CHOSEN && path != NULL)
-		(void)snprintf(photos->chosen, sizeof(photos->chosen), "%s", path);
-	if (photos->chooser_for == PH_ACTION_IMPORT_FOLDER) {
-		slash = strrchr(photos->chosen, '/');
-		if (slash != NULL && slash != photos->chosen)
-			*slash = '\0';
+	if (result == KL_FILE_CHOOSER_CHOSEN && path != NULL) {
+		(void)snprintf(
+		    photos->chosen, sizeof(photos->chosen), "%s", path);
 	}
 
 	/* Taken by the loop; the log line the tests read. */
@@ -580,6 +666,9 @@ ph_loop(
 			ph_log("DONE reason=disconnected");
 			return 0;
 		}
+
+		/* Installs ready snapshots without blocking the next input dispatch. */
+		ph_media_results(photos);
 
 		/* A direct CLI import wakes every watching Photos instance. */
 		changed = 0U;
@@ -989,6 +1078,11 @@ ph_marks(
 	size_t count;
 	size_t index;
 
+	/* Metadata edits remain local while import IO owns the helper; the UI stays usable. */
+	error = ph_media_worker_busy();
+	if (error)
+		return;
+
 	/* A read-only frame produces no CLI mutation. */
 	if (!photos->view.save)
 		return;
@@ -1185,7 +1279,9 @@ ph_wait(
 		return PH_MOVING_MS;
 
 	/* The thread at work: its results are looked for soon. */
-	busy = ph_worker_busy();
+	busy = ph_media_worker_busy();
+	if (!busy)
+		busy = ph_worker_busy();
 	if (busy)
 		return PH_WORKING_MS;
 

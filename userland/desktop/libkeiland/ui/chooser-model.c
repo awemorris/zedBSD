@@ -73,7 +73,8 @@ keiui_chooser_init(
 		return EINVAL;
 	if (options->mode != KL_FILE_CHOOSER_OPEN &&
 	    options->mode != KL_FILE_CHOOSER_SAVE &&
-	    options->mode != KL_FILE_CHOOSER_MEDIA)
+	    options->mode != KL_FILE_CHOOSER_MEDIA &&
+	    options->mode != KL_FILE_CHOOSER_FOLDER)
 		return EINVAL;
 	if (options->mode == KL_FILE_CHOOSER_MEDIA && options->filter_count != 0U)
 		return EINVAL;
@@ -224,7 +225,8 @@ keiui_chooser_go_recent(
 	int error;
 
 	/* Media entries come only from the compositor snapshot. */
-	if (chooser->mode == KL_FILE_CHOOSER_MEDIA)
+	if (chooser->mode == KL_FILE_CHOOSER_MEDIA ||
+	    chooser->mode == KL_FILE_CHOOSER_FOLDER)
 		return;
 
 	/* The folder's items go; Recent is shown even when it cannot be read. */
@@ -400,8 +402,24 @@ keiui_chooser_accept(
 	char path[KEIUI_CHOOSER_PATH_MAX];
 	long selected;
 
-	/* A folder selected is gone into. */
+	/* Folder selection accepts the highlighted directory, or the directory being browsed. */
 	selected = chooser->list.selected;
+	if (chooser->mode == KL_FILE_CHOOSER_FOLDER) {
+		if (chooser->recent || chooser->list_error != 0)
+			return;
+		if (selected >= 0L && selected < (long)chooser->count) {
+			if (!chooser->entries[selected].folder)
+				return;
+			model_answer(chooser, chooser->entries[selected].path);
+		} else {
+			model_answer(chooser, chooser->folder);
+		}
+
+		/* Succeeded: the chosen directory is passed as a path, not a file's parent. */
+		return;
+	}
+
+	/* A folder selected is gone into. */
 	if (selected >= 0L && selected < (long)chooser->count) {
 		entry = &chooser->entries[selected];
 		if (entry->folder) {
@@ -467,6 +485,19 @@ keiui_chooser_accept_path(
 		regular = S_ISREG(status.st_mode);
 	}
 
+	/* A directory typed is a valid folder answer; files cannot be imported as folders. */
+	if (chooser->mode == KL_FILE_CHOOSER_FOLDER) {
+		if (!folder_named) {
+			model_message(
+			    chooser, "There is no folder \"%s\".", path);
+			return;
+		}
+
+		/* A typed directory is returned directly rather than opened as a file. */
+		model_answer(chooser, path);
+		return;
+	}
+
 	/* A folder is shown, and the keyboard goes back. */
 	if (folder_named) {
 		(void)keiui_chooser_go(chooser, path);
@@ -482,6 +513,7 @@ keiui_chooser_accept_path(
 		}
 
 		/* Succeeded: the file typed is the answer. */
+		/* A typed directory is returned directly rather than opened as a file. */
 		model_answer(chooser, path);
 		return;
 	}
@@ -672,8 +704,21 @@ keiui_chooser_can_accept(
 {
 	long selected;
 
-	/* A selected folder can always be gone into. */
+	/* A folder chooser can accept the current directory even with no highlighted child. */
 	selected = chooser->list.selected;
+	if (chooser->mode == KL_FILE_CHOOSER_FOLDER) {
+		if (chooser->recent || chooser->list_error != 0)
+			return 0;
+		if (selected >= 0L && selected < (long)chooser->count) {
+			if (!chooser->entries[selected].folder)
+				return 0;
+		}
+
+		/* Succeeded: a directory is available without requiring a file. */
+		return 1;
+	}
+
+	/* A selected folder can always be gone into. */
 	if (selected >= 0L && selected < (long)chooser->count && chooser->entries[selected].folder)
 		return 1;
 
@@ -987,6 +1032,11 @@ model_read(
 		/* A file shows only when it passes the filter. */
 		directory_item = S_ISDIR(status.st_mode);
 		if (!directory_item) {
+			/* Directory mode never offers a regular file as a selectable folder. */
+			if (chooser->mode == KL_FILE_CHOOSER_FOLDER)
+				continue;
+
+			/* File filtering applies only after folder-only mode has excluded files. */
 			matches = model_matches(chooser, item->d_name);
 			if (!matches)
 				continue;

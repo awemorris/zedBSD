@@ -8,7 +8,7 @@ Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codex承認済み実行記録](codex-queue.md)、メディア管理先行scopeまで終了。共有QueueはQ1が反映。
+Queue: [Codex承認済み実行記録](codex-queue.md)、media-uat-20261010 active。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
 Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/buildとSSHでの写真保存を確認、ユーザーがテキスト/写真MMSの受信・表示を確認。受信部分Queue finished、source 89d487814。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
@@ -48,8 +48,9 @@ Resume point: p005/p011 cleared。p010受信のMIME相互運用修正はhost/bui
 | p007 | HFP の音: p007a xHCI の isochronous・usb-bt の interface 1・SCO の口、p007b SCO・audiod・CVSD の後に mSBC（Q9 の SCO の UAPI は p007a の設計の後にユーザーに聞く） | 25 | planned |
 | p008 | 実機（Android が先、iPhone は HFP の後、Q13）。PHONE PROBE は p003 で消すので MAP の操作で確かめる | 20 | planned |
 | p009 | 規約の全文の見直し | 2 | planned |
-| [p010](phase010/phase.md) | MMS写真/動画送受信（別tree試作、基盤完成後に再開） | — | uncleared |
+| [p010](phase010/phase.md) | MMS写真/動画送受信（受信統合済み、送信は未完。p012がviewer起動を補完） | — | in-progress |
 | [ws197-p011](phase011/phase.md) | Phoneの＋によるメディア選択とDnD・仮添付（ws157-p006 API出力に依存） | — | cleared |
+| [ws197-p012](phase012/phase.md) | 添付のdouble-click起動・draftサムネイル・captionなし写真の起動SIGSEGV修正 | — | in-progress |
 
 関連の Bug: [BUG-282](../bugs/BUG-282.md)（WS143 の hid.c の page の途中の Connection Request の取り違え、p003 i03 と同じ形で直す）。Future Work: fw-bt-goep2（ERTM・GOEP 2.0、MAP 1.4・PBAP 1.2）、F-086（SUBSCRIBE の phone の分は p003）。
 
@@ -134,3 +135,7 @@ p010の[部分Queue i02](codex-queue.md)で、スマホがleaf/WAP Content-Type�
 main統合checkpoint: `035d1d25b` (WIP) fast-forward済み、c43a01797の既存変更を保持。hostで確認した受信経路をmainへ反映、pushなし。SSH/UAT待ちを解消した記録とはしない。
 
 2026-10-10再開条件更新: ユーザーがPhone起動の遅れを報告し、実機イメージを再作成する。トップレベルconfig.mkとMakeの依存展開/AMD64 image file listを確認、必要5componentと画像libraryは含まれる。mediastorageの明示選択もgitignore対象config.mkに追加。他設定は保持。実機再作成後の起動時間・MAP再接続・写真保存/表示を確認する（現時点で原因や実機成功を断定しない）。
+
+## 2026-10-10 メディアUAT修正の追加
+
+ユーザーの5項目とPhone起動待ちの追加報告を有限[Queue](codex-queue.md)へ記録。p012を追加し、写真/動画を各viewerへ開く操作、draft写真のサムネイル、再読込したcaptionなしmediaのNULL参照を修正する。関連の[ws127-p013](../ws127/phase013/phase.md)、[ws157-p008/p009](../ws157/ws.md)と並行して本セッションが実装・検証・main統合する。p010の送信、HFP/PBAP、WS全体p009の義務は維持。共有master/Queue/cacheへの投影はQ1。

@@ -106,7 +106,7 @@
 
 /* Small decoded previews are bounded independently of the saved original files. */
 struct view_media_picture {
-	char path[1024];
+	char path[4096];
 	struct kl_image image;
 };
 
@@ -131,7 +131,7 @@ static struct view_media_picture view_media_pictures[16];
 static size_t view_media_next;
 
 static const struct kl_image *view_media_picture(const char *path);
-static int view_media(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw);
+static int view_media(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw, struct ph_view *view, struct kl_ui *ui, size_t slot, const struct kl_rect *viewport);
 
 static void view_layout(const struct ph_view *view, int width, int height, struct kl_rect *sidebar, struct kl_rect *conversation);
 static size_t view_filtered(const struct ph_view *view, size_t *indices, size_t size);
@@ -145,7 +145,7 @@ static void view_avatar(const struct kl_style *style, const struct ph_contact *c
 static void view_conversation(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, const struct kl_rect *area, uint64_t now_us);
 static void view_header(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, const struct ph_contact *contact, const struct kl_rect *area, uint64_t now_us);
 static void view_timeline(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, const struct ph_contact *contact, const struct kl_rect *area, uint64_t now_us);
-static int view_item(const struct kl_style *style, const struct ph_item *item, const struct ph_item *previous, int x, int y, int width, int draw);
+static int view_item(const struct kl_style *style, const struct ph_item *item, const struct ph_item *previous, int x, int y, int width, int draw, struct ph_view *view, struct kl_ui *ui, size_t slot, const struct kl_rect *viewport);
 static int view_text(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw);
 static int view_call(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw);
 static int view_photo(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw);
@@ -673,7 +673,9 @@ view_request(
 	if (view->request_count == PH_REQUESTS_MAX)
 		return;
 
-	/* At the end. */
+	/* At the end, without stale attachment indexes from an earlier request. */
+	memset(
+	    &view->requests[view->request_count], 0, sizeof(view->requests[0]));
 	view->requests[view->request_count].action = action;
 	view->requests[view->request_count].contact = contact;
 	view->request_count++;
@@ -1125,7 +1127,17 @@ view_timeline(
 	previous = NULL;
 	for (i = 0; i < contact->item_count; i++) {
 		/* One item, below the one before. */
-		content += view_item(style, &contact->items[i], previous, area->x, 0, area->width, 0);
+		content += view_item(style,
+				     &contact->items[i],
+				     previous,
+				     area->x,
+				     0,
+				     area->width,
+				     0,
+				     view,
+				     ui,
+				     i,
+				     area);
 		previous = &contact->items[i];
 	}
 
@@ -1147,9 +1159,32 @@ view_timeline(
 	previous = NULL;
 	for (i = 0; i < contact->item_count; i++) {
 		/* One item; those out of the band are only measured. */
-		height = view_item(style, &contact->items[i], previous, area->x, y, area->width, 0);
-		if (y + height >= area->y && y <= area->y + area->height)
-			(void)view_item(style, &contact->items[i], previous, area->x, y, area->width, 1);
+		height = view_item(style,
+				   &contact->items[i],
+				   previous,
+				   area->x,
+				   y,
+				   area->width,
+				   0,
+				   view,
+				   ui,
+				   i,
+				   area);
+		if (y + height >= area->y && y <= area->y + area->height) {
+			(void)view_item(style,
+					&contact->items[i],
+					previous,
+					area->x,
+					y,
+					area->width,
+					1,
+					view,
+					ui,
+					i,
+					area);
+		}
+
+		/* Position the following item below this completed row. */
 		y += height;
 		previous = &contact->items[i];
 	}
@@ -1172,7 +1207,11 @@ view_item(
 	int x,
 	int y,
 	int width,
-	int draw)
+	int draw,
+	struct ph_view *view,
+	struct kl_ui *ui,
+	size_t slot,
+	const struct kl_rect *viewport)
 {
 	char line[96];
 	int height;
@@ -1205,7 +1244,8 @@ view_item(
 	switch (item->kind) {
 	case PH_TEXT:
 		/* Media-only messages need no empty caption bubble. */
-		if (item->media_count > 0U && item->text[0] == '\0')
+		if (item->media_count > 0U &&
+		    (item->text == NULL || item->text[0] == '\0'))
 			break;
 		height += view_text(style, item, x, y + height, width, draw);
 		break;
@@ -1223,8 +1263,18 @@ view_item(
 	}
 
 	/* Received media appears under its caption in the same timeline item. */
-	if (item->media_count > 0U)
-		height += view_media(style, item, x, y + height, width, draw);
+	if (item->media_count > 0U) {
+		height += view_media(style,
+				     item,
+				     x,
+				     y + height,
+				     width,
+				     draw,
+				     view,
+				     ui,
+				     slot,
+				     viewport);
+	}
 
 	/* The height of the space and the item. */
 	return height;
@@ -1575,7 +1625,11 @@ view_media(
 	int x,
 	int y,
 	int width,
-	int draw)
+	int draw,
+	struct ph_view *view,
+	struct kl_ui *ui,
+	size_t slot,
+	const struct kl_rect *viewport)
 {
 	const struct kl_image *image;
 	const char *label;
@@ -1588,6 +1642,9 @@ view_media(
 	int box_width;
 	int top;
 	int height;
+	struct kl_rect hit_box;
+	unsigned hit;
+	struct ph_request *request;
 
 	/* Uses the same fixed layout while measuring and drawing. */
 	box_width = width - 2 * PH_VIEW_SIDE;
@@ -1603,6 +1660,49 @@ view_media(
 	/* The path label refers to the saved original even if its decoder is unsupported. */
 	for (index = 0U; index < item->media_count; index++) {
 		top = y + (int)index * 188 + 8;
+
+		/* The attachment card opens its saved original only after a complete double click. */
+		hit_box.x = left;
+		hit_box.y = top;
+		hit_box.width = box_width;
+		hit_box.height = 180;
+		if (hit_box.y < viewport->y) {
+			hit_box.height -= viewport->y - hit_box.y;
+			hit_box.y = viewport->y;
+		}
+
+		/* Cards outside the visible timeline never claim composer input. */
+		if (hit_box.y + hit_box.height > viewport->y + viewport->height) {
+			hit_box.height =
+			    viewport->y + viewport->height - hit_box.y;
+		}
+
+		/* Only a visible card registers an attachment input target. */
+		hit = 0U;
+		if (hit_box.height > 0) {
+			hit = kl_ui_hit(ui,
+					10000U + (uint32_t)slot * PH_MEDIA_MAX +
+					    (uint32_t)index,
+					0U,
+					&hit_box);
+		}
+
+		/* Copy the target path before a later sync can reorder the timeline. */
+		if ((hit & KL_HIT_DOUBLE) != 0U &&
+		    view->request_count < PH_REQUESTS_MAX) {
+			request = &view->requests[view->request_count];
+			memset(request, 0, sizeof(*request));
+			request->action = PH_ACTION_OPEN_MEDIA;
+			request->contact = view->selected;
+			(void)snprintf(request->path,
+				       sizeof(request->path),
+				       "%s",
+				       item->media[index]);
+			request->video = item->media_video[index];
+			view->request_count++;
+		}
+
+		/* The preview keeps the same rectangle as its input target. */
 		kl_canvas_round(style->canvas, (float)left, (float)top, (float)box_width, 160.0f, PH_VIEW_RADIUS, PH_COLOR_SURFACE);
 		label = "Photo unavailable";
 		if (item->media_video[index]) {
@@ -1715,6 +1815,10 @@ view_composer(
 
 	struct kl_rect input;
 	const char *name;
+	const struct kl_image *preview;
+	float scale;
+	float preview_width;
+	float preview_height;
 	size_t index;
 	size_t shown;
 	int same;
@@ -1756,16 +1860,55 @@ view_composer(
 		if (button.x + button.width > area->x + area->width - 58)
 			break;
 		kl_canvas_round(style->canvas, (float)button.x, (float)button.y, (float)button.width, (float)button.height, 8.0f, style->theme->track);
-		if (view->attachments[index].video)
+		if (view->attachments[index].video) {
 			kl_icon_draw(style->canvas, KL_ICON_MOVIES, (float)button.x + 6.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
-		else
-			kl_icon_draw(style->canvas, KL_ICON_PICTURES, (float)button.x + 6.0f, (float)button.y + 10.0f, 20.0f, style->theme->icon);
+		} else {
+			/* The same bounded cache serves received cards and unsent photo drafts. */
+			preview =
+			    view_media_picture(view->attachments[index].path);
+			if (preview->pixels != NULL && preview->width > 0 &&
+			    preview->height > 0) {
+				scale = 32.0f / (float)preview->width;
+				if ((float)preview->height * scale > 32.0f)
+					scale = 32.0f / (float)preview->height;
+				preview_width = (float)preview->width * scale;
+				preview_height = (float)preview->height * scale;
+				kl_canvas_image(
+				    style->canvas,
+				    preview,
+				    (float)button.x + 6.0f +
+					(32.0f - preview_width) / 2.0f,
+				    (float)button.y + 4.0f +
+					(32.0f - preview_height) / 2.0f,
+				    preview_width,
+				    preview_height,
+				    3.0f,
+				    1.0f);
+			} else {
+				kl_icon_draw(style->canvas,
+					     KL_ICON_PICTURES,
+					     (float)button.x + 6.0f,
+					     (float)button.y + 10.0f,
+					     20.0f,
+					     style->theme->icon);
+			}
+		}
+
+		/* The name and remove action remain beside the thumbnail. */
 		name = strrchr(view->attachments[index].path, '/');
 		if (name != NULL)
 			name++;
 		else
 			name = view->attachments[index].path;
-		(void)kl_text_draw_fit(style->text, style->canvas, button.x + 30, button.y + 25, name, PH_VIEW_TEXT_SMALL, 0, 84, style->theme->text);
+		(void)kl_text_draw_fit(style->text,
+				       style->canvas,
+				       button.x + 42,
+				       button.y + 25,
+				       name,
+				       PH_VIEW_TEXT_SMALL,
+				       0,
+				       72,
+				       style->theme->text);
 		button.x += 118;
 		button.width = 28;
 		hit = kl_ui_hit(ui, 900U + (uint32_t)index, 0U, &button);
@@ -1946,7 +2089,8 @@ view_preview(
 	switch (item->kind) {
 	case PH_TEXT:
 		/* Identifies a media-only conversation without inventing caption text. */
-		if (item->media_count > 0U && item->text[0] == '\0') {
+		if (item->media_count > 0U &&
+		    (item->text == NULL || item->text[0] == '\0')) {
 			if (item->media_video[0])
 				return "Video";
 			return "Photo";

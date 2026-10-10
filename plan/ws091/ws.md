@@ -66,3 +66,7 @@ Resume point: —（完了の処理: Phase の directory の削除と試験の `
 | `tests/imageview-guest.sh`・`tests/make-images.py` | Venus の guest の操作と画面 | 同上 |
 | `tests/touch-guest.sh` | pen の image での touch の注入の試験 | 同上 |
 | `tests/style-extra.py` | style-check.py が見ない規則の発見的な走査 | `plan/tools/style-check.py` に取り込むか削除（main の判断） |
+
+## 2026-10-10 大きなJPEGのUAT修正
+
+ユーザー提供4080×3072 JPEGが実機でdecode成功後にvkAllocateMemory=-2となった。[ws157-p008](../ws157/phase008/phase.md)でGPU resource上限16MiBを超える画像のCPU sampling fallbackを補完し、原本/1:1 zoom/四方向rotation/clip/mipを維持する。[ws157-p009](../ws157/phase009/phase.md)がこの有限scopeの最終規約/短いhost/build/main統合を扱う。旧WS完了の履歴を置き換えず、修正と実機の証拠は追加Phaseへ記録。

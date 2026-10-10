@@ -619,12 +619,18 @@ input_press(
 	app->press_x = event->x;
 	app->press_y = event->y;
 	app->press_deferred = 0;
+	app->press_open = 0;
 	app->dirty = 1;
 
 	/* A second press soon on the same region is a double click (a third starts again). */
 	double_click = 0;
-	if (kind == app->click_kind && index == app->click_index && event->time - app->click_time < INPUT_DOUBLE_CLICK_MS)
-		double_click = 1;
+	if (app->click_time != 0U && kind == app->click_kind &&
+	    index == app->click_index) {
+		if (event->time - app->click_time < INPUT_DOUBLE_CLICK_MS)
+			double_click = 1;
+	}
+
+	/* A completed pair consumes its timestamp so a third tap starts a new sequence. */
 	app->click_kind = kind;
 	app->click_index = index;
 	app->click_time = event->time;
@@ -832,10 +838,10 @@ input_press_item(
 	if (index < 0 || (size_t)index >= tab->listing.count)
 		return;
 
-	/* A double click opens it. */
+	/* A second press can still become a tap-drag, so opening waits for release. */
 	if (double_click != 0 && modifiers == 0U) {
 		fm_select_only(tab, index);
-		fm_ui_open(app, index);
+		app->press_open = 1;
 		return;
 	}
 
@@ -879,6 +885,7 @@ input_release(
 	struct fm_tab *tab;
 	int dropped;
 	int edged;
+	int open;
 
 	/* A drag of a list column's edge ends where it is (BUG-220). */
 	edged = fm_list_edge_release(app);
@@ -890,6 +897,22 @@ input_release(
 
 	/* A drag ends with its drop. */
 	dropped = fm_drag_release(app);
+
+	/* Resolve the listing after the drag has completed. */
+	tab = fm_ui_tab(app);
+
+	/* Only a completed double click opens; a drag owns the second press instead. */
+	open = app->press_open;
+	if (dropped != 0)
+		open = 0;
+	if (!app->pressing || app->press_kind != FM_HIT_ITEM)
+		open = 0;
+	if (open) {
+		/* The clicked item must still belong to the current listing. */
+		if (app->press_index >= 0 &&
+		    (size_t)app->press_index < tab->listing.count)
+			fm_ui_open(app, app->press_index);
+	}
 
 	/* Without a drag, the selection change the press left. */
 	tab = fm_ui_tab(app);
@@ -910,7 +933,12 @@ input_release(
 	if (app->band != 0)
 		input_report(app);
 
+	/* A completed drag breaks the click sequence; neither its release nor a third tap opens. */
+	if (dropped != 0)
+		app->click_time = 0;
+
 	/* The press is over. */
+	app->press_open = 0;
 	app->press_deferred = 0;
 	app->pressing = 0;
 	app->band = 0;

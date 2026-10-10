@@ -543,7 +543,8 @@ main_loop(
 
 /* Draws and shows a frame, remaking the swapchain when it is out of date; nonzero when it cannot be shown. */
 static int
-main_frame(void)
+main_frame(
+	void)
 {
 	struct iv_quad quad;
 	uint32_t ground;
@@ -561,7 +562,7 @@ main_frame(void)
 
 		/* The canvas, when its words or cards changed; the glass's panels follow it. */
 		canvas_changed = 0;
-		if (main_app.ui_dirty) {
+		if (main_app.ui_dirty || main_present.cpu_image) {
 			iv_draw(&main_app, &main_canvas);
 			canvas_changed = 1;
 		}
@@ -721,7 +722,8 @@ main_event(
  * be made.
  */
 static int
-main_image(void)
+main_image(
+	void)
 {
 	const struct iv_image *image;
 	VkResult result;
@@ -737,6 +739,9 @@ main_image(void)
 		fprintf(stderr, "IMAGEVIEW FAILED operation=%s result=%d\n", main_present.operation, (int)result);
 		return -1;
 	}
+
+	/* CPU sampling keeps original pixels while uploading only the window-sized canvas. */
+	main_app.cpu_image = main_present.cpu_image;
 
 	/* An animated image's frame, when it moved on. */
 	if (image != NULL &&

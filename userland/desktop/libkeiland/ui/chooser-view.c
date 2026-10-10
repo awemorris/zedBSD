@@ -218,6 +218,7 @@ view_layout(
 	struct view_layout *layout)
 {
 	struct kl_rect cards[2];
+	int accept_width;
 	int middle;
 	int right;
 	int left;
@@ -240,7 +241,14 @@ view_layout(
 	/* The buttons from the right of the bar, in the middle of its height. */
 	middle = layout->bar.y + (VIEW_BAR - VIEW_BUTTON) / 2 + 2;
 	right = layout->bar.x + layout->bar.width;
-	view_set(&layout->accept, right - VIEW_ACCEPT_WIDTH, middle, VIEW_ACCEPT_WIDTH, VIEW_BUTTON);
+	accept_width = VIEW_ACCEPT_WIDTH;
+	if (chooser->mode == KL_FILE_CHOOSER_FOLDER)
+		accept_width = 136;
+	view_set(&layout->accept,
+		 right - accept_width,
+		 middle,
+		 accept_width,
+		 VIEW_BUTTON);
 	view_set(&layout->cancel, layout->accept.x - 8 - VIEW_CANCEL_WIDTH, middle, VIEW_CANCEL_WIDTH, VIEW_BUTTON);
 
 	/* Open: the filter on the left, no name. */
@@ -752,6 +760,10 @@ view_bar(
 	accept = "Open";
 	if (chooser->mode == KL_FILE_CHOOSER_SAVE)
 		accept = "Save";
+
+	/* Folder mode chooses a directory without navigating through the accept button. */
+	if (chooser->mode == KL_FILE_CHOOSER_FOLDER)
+		accept = "Select Folder";
 	flags = KL_BUTTON_PRIMARY;
 	can = keiui_chooser_can_accept(chooser);
 	if (!can)

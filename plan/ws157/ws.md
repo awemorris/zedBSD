@@ -7,7 +7,7 @@ Status: incomplete（2026-10-08 q902 P1 の照合: p001・p004・p005 cleared（
 Primary Milestone: MG006
 Related Milestones: —
 Parent: [Master](../master.md)
-Queue: [Codexメディア管理実行記録](../ws197/codex-queue.md) finished。共有Queue投影はQ1。
+Queue: [Codexメディア管理実行記録](../ws197/codex-queue.md) active（media-uat-20261010）。共有Queue投影はQ1。
 Resume point: 2026-10-10 p006/p007 cleared。Media JSON CLI/compositor/PhotosとPhone＋DnDをmain 874e12d3bへ統合。実機GUI UATは未実施。WS全体はベータ3の残る受入を含みincomplete。
 Target: **ベータ3**（続き）（2026-10-07 ユーザー「下記をベータ3に移動します。・左手デバイスOSK、ゲームパッドOSK, 写真の続き, カレンダーの続き, IMEの続き、POSIX, NVMe, make, RTL8822C, Sleep」）
 <!-- awesome-plan-current:end -->
@@ -31,6 +31,8 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 | [ws157-p005](phase005/phase.md) | app（取り込み・album の card・縮小画像の cache、AAT） | cleared（2026-10-07 Q1、T1-331） | p004 |
 | [ws157-p006](phase006/phase.md) | メディアCLI・compositor API・Photos移行 | cleared | p004 source |
 | [ws157-p007](phase007/phase.md) | 最終全文規約・build・回帰 | cleared | p006、ws197-p011 |
+| [ws157-p008](phase008/phase.md) | folder選択・背景import/list・大きなJPEGの表示修正 | in-progress | p006 source、ユーザーJPEG |
+| [ws157-p009](phase009/phase.md) | 今回UAT全sourceの全文規約/host/build/main統合 | in-progress | ws197-p012、ws127-p013、p008 |
 
 ## p001 の観点（要件の検討）
 
@@ -56,3 +58,7 @@ Keiland の標準 app として、写真を集めて整理し、見る app を�
 ## 2026-10-10 scoped clearance
 
 p006・p007をcleared。main `874e12d3b`、[最終検証](tests/verification-20261010.md)。JSON保存・metadata/path-only・spawn/pipe・Wayland通知の現仕様を満たす。WS157全体はincomplete、実機UIの[確認手順](tests/mediastorage-usage.md)を残す。関連Phoneはws197-p011 cleared、MMS接続はws197-p010の未完了を維持。
+
+## 2026-10-10 Photos UAT修正の追加
+
+ユーザー指定でp008/p009を追加。共通chooserにdirectory選択を追加し、Photos import/listをprivate Wayland clientを持つworkerへ移す。metadataのUI所有/FD handoff/通知coalesce/close/dirty marksを維持。実機JPEGはdecode成功後の16MiB GPU resource上限が原因で、Image ViewerのCPU sampling fallbackへ修正。[ws197-p012](../ws197/phase012/phase.md)/[ws127-p013](../ws127/phase013/phase.md)の変更もp009で検証する。ベータ3のWS全体scopeは維持。

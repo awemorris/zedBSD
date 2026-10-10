@@ -108,6 +108,8 @@ struct iv_present {
 	/* The image's levels, the image they are of (image_serial), and whether they can be sampled smoothly and how large one may be. */
 	struct iv_present_level levels[IV_LEVELS_MAX];
 	size_t level_count;
+	/* Oversized textures use CPU sampling into the window-sized canvas. */
+	int cpu_image;
 	unsigned image_serial;
 	int has_image;
 	int smooth;

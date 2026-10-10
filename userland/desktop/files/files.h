@@ -400,6 +400,9 @@ struct fm_desktop {
 	int pointer_x;
 	int pointer_y;
 	int click_index;
+
+	/* The second press opens only on release; movement spends it as a drag. */
+	int press_open;
 	uint64_t click_ms;
 	int logged;
 	/* Selection press time for the next successful frame log; zero means no sample pending. */
@@ -1260,6 +1263,9 @@ struct fm_app {
 	uint64_t click_time;
 	unsigned click_kind;
 	int click_index;
+
+	/* The second press opens only on release; movement spends it as a drag. */
+	int press_open;
 
 	/* The modifiers held. */
 	uint32_t modifiers;

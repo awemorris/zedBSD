@@ -143,6 +143,7 @@ struct ph_contact {
 #define PH_ACTION_READ		7U	/* a contact's messages read */
 #define PH_ACTION_CANCEL	8U
 #define PH_ACTION_SYNC		9U
+#define PH_ACTION_OPEN_MEDIA 10U
 
 /* The most requests the view queues for the window between two frames. */
 #define PH_REQUESTS_MAX		8U
@@ -151,6 +152,9 @@ struct ph_contact {
 struct ph_request {
 	unsigned action;
 	long contact;
+	/* A copied original path survives timeline updates before the action is serviced. */
+	char path[4096];
+	int video;
 };
 
 /*

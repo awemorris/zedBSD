@@ -71,10 +71,28 @@ iv_draw(
 	struct iv_app *app,
 	struct iv_canvas *canvas)
 {
+	struct iv_quad quad;
+	struct iv_level source;
+
 	/* Clear, so that the image and the glass show. */
 	iv_canvas_fill(canvas, 0, 0, canvas->width, canvas->height, 0x00000000U);
 	app->chip_width = 0;
 	app->chip_height = 0;
+
+	/* Large originals are sampled at the same zoom, rotation and mip level as the GPU path. */
+	if (app->cpu_image && app->has_image) {
+		iv_app_quad(app, &quad);
+		if (quad.visible && quad.level < app->current->level_count) {
+			source = app->current->levels[quad.level];
+			if (app->current->frame_count > 0U) {
+				source.pixels =
+				    app->current->frames[app->frame];
+			}
+
+			/* Paint the source under the normal chip and status overlays. */
+			iv_canvas_image(canvas, &source, &quad);
+		}
+	}
 
 	/* The empty window, or the card of an image that cannot be shown. */
 	if (!app->has_image)
