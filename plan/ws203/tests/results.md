@@ -52,3 +52,7 @@ No WS141 GPL exception was used. No HAL API or responsibility changed.
 No RPi4 execution, electrical timing, actual DMA/IRQ delivery, DHCP or SSH verified. Host model is single-threaded; it checks callback lock boundaries and lifecycle paths, not arbitrary concurrent scheduling. Actual `rgmii-rxid` binding only; 10/100/1000 full-duplex advertisement, no half-duplex or forced parallel-detect link. No offload/jumbo/WOL/suspend/multiqueue support. Main integration, full SD image and physical acceptance remain for handoff/p003. No QEMU, toolchain build, full-image build, push or shared-plan writes.
 
 Implementation/evidence commit: `e9ddb4540` (`WIP`). Subsequent handoff-record commit changes documentation only. No integration SHA or ACK yet.
+
+## Integration read-back — 2026-10-11
+
+User explicitly requested main integration. `git merge --ff-only codex/rpi4-genet` advanced main from `a094b953c` to `d1def8aef` without conflict. `sha256sum -c plan/ws203/tests/source.sha256` passed all 13 entries on main. Main `menuconfig.load(config.mk)` confirms RPi4/GENET=`y`; `driver_groups()` contains the GENET row in Ethernet. `make -pn build/arm64/vmunix` exit 0 confirms both new driver sources are selected by the current main config. No source changed during integration, so existing ON/OFF builds and host results remain applicable. No shared main build/image generation or push performed. Newly observed editor temporary files in `.github/workflows/` were preserved.

@@ -16,4 +16,8 @@ Graph: main a094b953c (context) → i01 → i02. p003 is outlook (physical hando
 
 Both scoped attempts cleared: i01 implemented the user-corrected PHY/MAC split; i02 reviewed final source against the full C standard and passed warning0 ON/OFF arm64 builds, focused host model and common-menu checks. Evidence: [results](tests/results.md), [source hashes](tests/source.sha256). No main merge or hardware-success claim. WS remains incomplete pending p003. Next queue is not started automatically.
 
-Merge request ID: ws203-genet-20261011. Submission SHA: `e9ddb4540` (implementation + initial evidence); integration SHA / ACK pending Q1 or explicit user approval. Shared Master/focus/priority, Queue/history, F-029 promotion and publication are pending Q1. Local records have not been published to GitHub (plan/config.md publication state).
+Merge request ID: ws203-genet-20261011. Submission SHA: `e9ddb4540` (implementation + initial evidence); integration SHA: `d1def8aef` (fast-forward main); ACK: current user approval and main read-back, 2026-10-11. Shared Master/focus/priority, Queue/history, F-029 promotion and publication are pending Q1. Local records have not been published to GitHub (plan/config.md publication state).
+
+## Main integration / 2026-10-11
+
+User「mainに統合をお願いします。」を承認として `git merge --ff-only codex/rpi4-genet` をmainで実行、`a094b953c` → `d1def8aef`。競合なし。全13 source/config hashes一致、mainのmenuconfigでEthernet分類とGENET選択を確認、現在のconfig.mkはRPi4既定 `y`、make dry-runのarm64 source selectionにPHY/MAC両ファイルあり。pushなし、共有Master等の投影保留は継続。実機成功は未確認。

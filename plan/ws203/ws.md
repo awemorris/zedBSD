@@ -26,7 +26,7 @@ Queue: [scoped Queue](codex-queue.md)
 | [ws203-p002](phase002/phase.md) | 最終ソースのC全文適合、warning0 build、送受信/異常系の限定host model | cleared | p001のソース成果 |
 | [ws203-p003](phase003/phase.md) | 実機有線LAN/DHCP/SSH受入 | planned | p001,p002とユーザー実機 |
 
-Resume: p001/p002 cleared、main統合と新SDイメージからp003実機確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
+Resume: p001/p002 cleared、main統合済み。新SDイメージからp003実機確認へ。F-029のpromotion、Master登録/focus/priority、共有Queue/history/cache/GitHub投影はQ1保留（共有記録を編集しない）。USBのws048-p009実機失敗調査は別件として残る。
 
 ## 2026-10-11 分割の指示
 
@@ -43,3 +43,7 @@ p001/p002はclear。最終実装はGENET MAC/DMA/ring/net_device/FDTをrpi4-ethe
 [結果・手順・規約適合・制約](tests/results.md)。WSの実機受入は未達なのでincompleteを維持。p003はユーザー実機でリンク/DHCP/SSHを確認するhandoff、今Queueはfinished。main merge ACK、共有Master/focus/priority/Queue/history/F-029投影とGitHub publicationはQ1保留。
 
 Submission: `e9ddb4540` (`WIP`), merge request `ws203-genet-20261011`. Integration SHA/ACK pending.
+
+## 2026-10-11 main統合ACK
+
+ユーザー「mainに統合をお願いします。」に従い、実装 `e9ddb4540` と記録 `d1def8aef` をmainへfast-forward統合。source hashes一致、mainの共通Ethernet menu・現在のRPi4 configでGENET=y・arm64への2 driver source登録をread-back確認。main統合の前提は満たした。p003は新イメージと実機DHCP/SSH結果待ち。WSはincompleteのまま。pushなし。共有Master/Queue/history/F-029/GitHubは別途Q1が投影する。
