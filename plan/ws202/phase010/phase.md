@@ -6,7 +6,7 @@ Status: planned
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 9 LW
-依存: p009、J10（5330 の道、仮: scp）
+依存: p009、p016、J10（5330 の道、仮: scp）
 
 ## 目的
 
@@ -16,8 +16,10 @@ p009 の back end を再生に使える形に仕上げて表の先頭に入れ�
 
 1. `vkvideo.c`:
    - 表示順と時刻（D22）: p008 の bumping で出る picture に、送った packet の pts を整列した列の最小を当てる（add-in と同じ）。待ち行列が満ちたら send は EAGAIN。drain。
-   - **D29（M2-01）**: 出ない AU の pts を列から値で外す: send が捨てる AU（最初の I の前、leading の B、p016 の D25 で捨てる picture、冗長 slice だけの AU、parse の誤り）と、
-     decode したが出さない picture（result status ERROR）。
+   - p009 の D25 の stub を p016 の判定に置き換える。
+   - **D29（M2-01、第 4 版で直した M3-02・L3-04、design §5.6）**: POC の分かる出ない picture（leading の picture、D25 で捨てた picture、result status ERROR の picture）は
+     POC を持つ**空の entry** として表示順の待ち行列に入れ、bumping で出る時に整列の列の最小の pts を 1 つ消費して捨てる（receive は返さない）。POC の分からない AU（最初の
+     I の前、parse の誤り、冗長 slice だけの AU）だけ pts を値で外す。pts は send が packet を受けた時だけ列に足す（EAGAIN の送り直しで二重に足さない）。
    - in-band だけの track（D16）: avcC に SPS が無い track は degraded 0 で FORMAT、degraded 1 で受け、最初の in-band の SPS・PPS と I まで session を作らず AU を捨てる。
      範囲の外の SPS は send が EINVAL（log 1 回）。session・image はその時に作る（D28 の例外）。
    - flush（design §5.7）: 待ち行列と pts を捨て、`h264_dpb_restart`、RESET、最初の I まで捨てる。
@@ -32,7 +34,9 @@ p009 の back end を再生に使える形に仕上げて表の先頭に入れ�
 4. `plan/ws202/tests/config-media.mk`（design §10.4）: `include config/ci/config-amd64.mk` と `ZEDBSD_USER_PROGRAMS := $(filter-out libavcodec,$(ZEDBSD_USER_PROGRAMS)) media-probe`。
    stream は config に書かない（`test-image.sh` が `ZEDBSD_TEST_EXTRA_FILES` を command line で渡し config の `+=` が消える、design §15 E7）。
 5. host 試験 `run-host-vkvideo.sh` に足す: 表示順と時刻（`h264-high-b-aac.mp4`・`h264-nocts.mp4` で時刻が単調、数が AU の数と同じ）、**D29: 各 sync sample から seek した後の
-   各 picture の時刻が参照（`.sha256` の pts）と一致、`h264-gap.mp4` で捨てた picture の pts が外れ出た picture の時刻が元の stream と一致**、EAGAIN、drain、flush の後の捨て方、
+   各 picture の時刻が参照（`.sha256` の pts）と一致、`h264-gap.mp4` で捨てた picture の時刻が消費され出た picture の時刻が元の stream と一致、`h264-nocts.mp4` の各 sync
+   sample から seek した後の時刻が、通しの decode で同じ picture（hash で合わせる）が受けた時刻と一致（ffmpeg の参照を使わない、M3-02）、EAGAIN の送り直しで pts が二重に
+   ならない**、EAGAIN、drain、flush の後の捨て方、
    in-band だけの track（`h264.ts` の packet で degraded 0 は FORMAT、1 は受けて最初の SPS まで捨てる）、status ERROR の数え、DEVICE_LOST の後の open が新しい instance を作る、
    close の後も picture が使える。
 6. `plan/tools/media/run-host-codec.sh`（WS の外: 差分を Q1 へ）: `h264.{mkv,ts,avi}`・`h264-nocts.mp4` を足す。host では H.264 は vkvideo が DEVICE（`/lib/libvulkan.so` が

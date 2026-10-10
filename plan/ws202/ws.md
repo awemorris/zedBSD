@@ -3,14 +3,14 @@
 # WS202: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（libmedia の自前の decoder、Video Player・Music）
 
 <!-- awesome-plan-current:start -->
-Status: planning（2026-10-10 設計の第 3 版（[review-001](review-001.md)・[review-002](review-002.md) を反映、J7〜J10 は推しを仮に採った）。人の判断 H1〜H6・J1〜J10 の回答の後に planned）
+Status: planning（2026-10-10 設計の第 4 版＝最後の版（[review-001](review-001.md)・[review-002](review-002.md)・[review-003](review-003.md) を反映、J7〜J10 は推しを仮に採った）。ユーザーの判断 H1〜H6・J1〜J10 の答え待ち）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
 Target: **ベータ3**（判断の点 H4「ベータ2 に入れるか」）
 Queue: —
-Resume point: [design.md](design.md) 第 3 版 → 3 回目の review（review-002 の推し: H2-01・M2-01・M2-02 の部分）と H1〜H6・J1〜J10 の回答 → p002 から。実装は別のセッション（2026-10-11 ユーザー）。
+Resume point: ユーザーの判断 H1〜H6・J1〜J10 の答え → 答えを design・ws.md に記録（推しと違えば該当の Phase を直す）→ planned → p002 から。4 回目の review は要らない（review-003 の推し、直しの差分は Q1 が照らす）。実装は別のセッション（2026-10-11 ユーザー）。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-11 ユーザー）
@@ -74,12 +74,12 @@ GPU の image の共有の表示（H6）、browser の `<video>` の UAT、libvu
 
 ## Phase
 
-見積もりの LW は 1 LW ≈ エージェントの実時間 20 分。合計 **85 LW**（約 28 時間。第 2 版 75 から review-002 の直しで +10）。p003 の後、AAC の列（p005→p006→p007）と
-H.264 の列（p008→p015→p016→p009→p010）は独立で、2 人の担当で並べられる。
+見積もりの LW は 1 LW ≈ エージェントの実時間 20 分。合計 **87 LW**（約 29 時間。第 2 版 75 から review-002 の直しで +10、review-003 の直しで +2）。p003 の後、AAC の列
+（p005→p006→p007）と H.264 の列（p008→p015→（p016 と p009 を並べて）→p010）は独立で、2 人の担当で並べられる（H.264 の列の中も p016 と p009 は並べられる、L3-06）。
 
 | Phase | 目的 | 見積もり | Status | 依存 |
 | --- | --- | --- | --- | --- |
-| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 5 | in-progress（第 3 版、3 回目の review と判断の回答待ち） | — |
+| [ws202-p001](phase001/phase.md) | 設計（[design.md](design.md)）と review | 5 | in-progress（第 4 版＝最後の版。ユーザーの判断 H1〜H6・J1〜J10 の答え待ち） | — |
 | [ws202-p002](phase002/phase.md) | 試験の stream と参照（x264 で直に mp4、pts 付きの参照、ADTS・mkv・TS・Annex B の AVI・ctts 無し、合成の gap、合成の 1080p）、host 試験の枠 | 5 | planned | p001、J5 |
 | [ws202-p003](phase003/phase.md) | 共通の部品: bits、picture と pool と scaler、sound（resample の up・down、音の約束、trim）、back end の表・問題・2 段の試し・新しい口 | 8 | planned | p001、H2、J1、J7 |
 | [ws202-p004](phase004/phase.md) | mediafile: pasp・colr（nclx・nclc）・`end_us`（と J1 で絞る時の `container`） | 2 | planned | p001 |
@@ -87,10 +87,10 @@ H.264 の列（p008→p015→p016→p009→p010）は独立で、2 人の担当�
 | [ws202-p006](phase006/phase.md) | AAC の信号処理と back end（M/S の除外、切り詰め、trim、pre-roll、ADTS の入力、D26）、精度の試験 | 10 | planned | p004、p005 |
 | [ws202-p007](phase007/phase.md) | Music（起動の門、notice、log、trim と pre-roll の seek、AAT の helper と scenario） | 3 | planned | p006 |
 | [ws202-p008](phase008/phase.md) | H.264 の parser と DPB の写し（AU 単位、VUI、POC type 1、全 NAL の emulation prevention、slice ごとの list の情報、表示順）、probe との一致の試験 | 7 | planned | p002、p003 |
-| [ws202-p015](phase015/phase.md) | H.264 の欠けた参照の entry・frame_num の gap・MMCO 5・seek の後の DPB（MMCO の対象が無い時）、seek の後の試験 | 4 | planned | p008、J4 |
-| [ws202-p016](phase016/phase.md) | 参照の list の計算（8.2.4）と欠けた参照の判定（D25）、合成の gap の stream の試験 | 3 | planned | p015、J8 |
-| [ws202-p009](phase009/phase.md) | Vulkan Video の back end (1): `/lib/libvulkan.so` の dlopen、共有の device（1.0・properties2、参照の数 0 で instance を壊す）、**open で** capability・level・session・image（D28）、decode、de-tile | 8 | planned | p016、H1、J6 |
-| [ws202-p010](phase010/phase.md) | Vulkan Video の back end (2): POC の表示順と時刻（D29 の pts の外し）、in-band だけの track、flush・seek、失敗と作り直し、表の先頭へ、media-probe の video、`config-media.mk`、5330 の小さい確認（scp、J10） | 9 | planned | p009、J10 |
+| [ws202-p015](phase015/phase.md) | H.264 の欠けた参照の entry・frame_num の gap（non-existing の POC と POC の状態）・MMCO 5・seek の後の DPB（leading の参照の marking、MMCO の対象が無い時）、seek の後の試験 | 5 | planned | p008、J4 |
+| [ws202-p016](phase016/phase.md) | 参照の list の計算（8.2.4）と欠けた参照の判定（D25、POC の不明な non-existing の B の保守的な判定）、`h264-gap-orig.mp4` を正解とする試験 | 4 | planned | p015、J8 |
+| [ws202-p009](phase009/phase.md) | Vulkan Video の back end (1): `/lib/libvulkan.so` の dlopen、共有の device（1.0・properties2、参照の数 0 で instance を壊す）、**open で** capability・level・session・image（D28）、decode、de-tile | 8 | planned | p015、H1、J6（p016 と並べる） |
+| [ws202-p010](phase010/phase.md) | Vulkan Video の back end (2): POC の表示順と時刻（D29: 出ない picture は空の entry で時刻を消費）、in-band だけの track、flush・seek、失敗と作り直し、表の先頭へ、media-probe の video、`config-media.mk`、5330 の小さい確認（scp、J10） | 9 | planned | p009、p016、J10 |
 | [ws202-p011](phase011/phase.md) | Video Player（notice・縦横比・log・trim）、media-probe の音、利用者の文書 | 3 | planned | p007、p010 |
 | [ws202-p012](phase012/phase.md) | T1: QEMU（libavcodec 無し・有り）と 5330 の実機（USB の 1 回の起動、J10）、zgears の fps（J9） | 4 | planned | p011、J9 |
 | [ws202-p013](phase013/phase.md) | 5330 の UAT（ユーザー、p012 と同じ起動） | 2 | planned | p012 |
@@ -128,7 +128,7 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 | J5 | 完了の条件の 1080p の試料と参照 | 合成の 1080p を make-streams.sh が `build/` に作り T1 が scp／tree の外の sample と T1 がその場で作る参照 | **合成** | 完了の条件を tree の外の物と記録の無い参照に頼らない。sample は UAT に使う |
 | J6 | 再生の途中の DEVICE_LOST | その file の再生を失敗にする／次の IDR から libavcodec へ切り替え（+2 LW） | **失敗にする** | 切り替えは時計の合わせが要り、hang は稀 |
 | J7（review-002 M2-03） | 自前の AAC が release の image でも暗黙の HE-AAC（ADTS・24 kHz の core）を取り、SBR 無し・v2 は mono で鳴る回帰 | (a) 1 段目で ADTS と core の rate 24 kHz 以下の LC を libavcodec に譲る／(b) 受けたまま制限にする | **仮 (a)** | ADTS と低い rate の LC では暗黙の HE-AAC を区別できない。.m4a の大半（44.1・48 kHz）は自前が取るので目標 B は変わらない |
-| J8（review-002 H2-01） | frame_num の gap・欠けた参照の方式 | (a) 8.2.4 の参照の list を libmedia で計算し、欠けた参照が list の有効な範囲に入る picture だけ捨てる（+3 LW、p016）／(b) active な slot に載せ `is_non_existing` で渡す（i915 の規則の抜け道、WS083 と照合）／(c) 次の IDR まで全部捨てる | **仮 (a)** | i915 を変えない。(b) は WS083 の範囲に及びうる。(c) は IDR が先頭にしか無い stream で残り全部が出ない |
+| J8（review-002 H2-01） | frame_num の gap・欠けた参照の方式 | (a) 8.2.4 の参照の list を libmedia で計算し、欠けた参照が list の有効な範囲に入る picture だけ捨てる（p016、p015・p016 で +7 LW）／(b) active な slot に載せ `is_non_existing` で渡す（i915 の規則の抜け道、WS083 と照合）／(c) 次の IDR まで全部捨てる | **仮 (a)** | i915 を変えない。(b) は WS083 の範囲に及びうる。(c) は IDR が先頭にしか無い stream で残り全部が出ない。代価（review-003）: 保守的な判定で、gap の後は最大 `max_num_ref_frames` 枚の参照の picture の間 B が出ない（type 0 の stream） |
 | J9（review-002 M2-05） | 完了の条件 4 の測り方と閾値 | zgears の fps を再生なし・ありの 10 秒ずつ比べる、閾値 90%／他の負荷・閾値 | **仮: zgears・90%** | compositor は damage の時だけ描き、何も動かない時の fps は測れない。zgears は CI の image にあり fps を出す |
 | J10（review-002 M2-07） | 5330 の実行の道 | (a) `config-media.mk` の image をユーザーが USB で起動／(b) 今の image に scp で入れる | **仮: p010 は (b)、p012 と p013 は (a) を 1 回の起動に** | T1 は ESP に書けない（安全の判定、回避しない）。(b) はユーザーの手が要らない。2 段目の試しと DEVICE の notice は (a) で |
 
@@ -139,6 +139,8 @@ p014 で: 今後も回帰に使う試験（`make-streams.sh`、`run-host-aac.sh`
 - mp4 の stsd の複数の entry（container の段の codec・解像度の切り替え）、`iTunSMPB` だけの priming は扱わない。同じ track の中の in-band の SPS の変化（IDR での
   解像度の変化）は扱う（L2-10）。
 - ffmpeg の AVI の muxer が書く長さ付きの NAL の H.264 は、自前も libavcodec の add-in も読めない（今と同じ）。
-- 欠けた参照（gap、seek の前の参照）を使う picture は出ない（D25、仮）。in-band だけの H.264（TS・AVI・avc3）は libavcodec の無い時だけ自前が受け、範囲の外の
+- 欠けた参照（gap、decode しなかった参照）を使う picture は出ない（D25、仮）。POC の分からない non-existing（type 0 の stream）がある間は、modification で list を決めきらない
+  B を保守的に捨てるので、gap の後は最大 `max_num_ref_frames` 枚の参照の picture の間 B が出ない（review-003、J8 の材料）。
+- seek の前の picture（parse していない）を参照する trailing の picture は検出できない（x264 は modification と MMCO 1 で避ける、review-003 M3-04）。in-band だけの H.264（TS・AVI・avc3）は libavcodec の無い時だけ自前が受け、範囲の外の
   profile は open の後に分かる（notice にならず再生の失敗）。
 - kernel の video の context は 8 個で、9 個目の process は BUSY。

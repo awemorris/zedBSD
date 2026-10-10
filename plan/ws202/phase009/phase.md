@@ -6,7 +6,7 @@ Status: planned
 Disposition: normal
 Parent: [WS202](../ws.md)
 見積もり: 8 LW
-依存: p016、H1、J6
+依存: p015（slot を持つ entry だけを積む計画の形）、H1、J6。D25 の判定の口は p016 と並べて作り、p010 で両方を合わせる（L3-06）
 
 ## 目的
 
@@ -27,12 +27,15 @@ H.264 の picture を Vulkan Video で decode し、出力を linear の NV12 �
      memory（`probe_session`）、parameters（`probe_parameters`）、slot の image（`probe_picture`）、bitstream の buffer（`probe_bitstream`）、command・fence、status の query pool
      （`probe_status_pool`）まで作る。BUSY・PROFILE・ENOMEM は open の問題になり、libavcodec があれば表の次へ回る。open は window の thread で走る（L-01: 時間は p010 で測る）。
      avcC に SPS の無い track（D16）は session 以下を最初の in-band の SPS の時に作る（p010）。
-   - 1 picture の decode（`probe_decode` を手本）: p016 の D25 で「decode」の picture だけ。参照に積むのは slot を持つ entry だけ。slice の写し（32 byte 揃え）、記録、queue の
+   - 1 picture の decode（`probe_decode` を手本）: D25 の判定の口（p016、並べて作る間は「いつも decode」の stub）で「decode」の picture だけ。参照に積むのは slot を持つ entry だけ。slice の写し（32 byte 揃え）、記録、queue の
      mutex の中で submit、fence（5 秒）、status。
    - 読み出し（D10）: memory type が HOST_COHERENT でなければ先に `vkInvalidateMappedMemoryRanges`（D24、L2-18。zedBSD は COHERENT）。PLANE_0・PLANE_1 の subresource layout で Tile Y を de-tile し、crop の窓を pool の buffer へ。SAR（VUI → pasp）・色（VUI → colr → 既定）。
    - D6: parameters の作り直し。同じ track の中の in-band の SPS の変化（IDR での大きさ・profile・参照の数）で session・image の作り直し（L2-10）。
-   - session の作成の失敗の分け方（U10）: `src/drivers/gpu/i915/render/video.c`・`worker.c` を読み、video の context が尽きた時（8 個）の結果を確かめ、BUSY を返す。
-     分けられなければ DEVICE とし、phase.md に記録する。session は open で作るので BUSY は open の問題。
+   - session の作成の失敗の分け方（U10 は閉じた、L3-01・L3-07、design §5.4）: **`vkCreateVideoSessionKHR` の `VK_ERROR_OUT_OF_DEVICE_MEMORY` だけ**を BUSY に写す
+     （`render/video.c` 1077・1082〜1088。`vkAllocateMemory` の同じ結果は本物の memory 不足で ENOMEM）。`vkCreateVideoSessionKHR` の `VK_ERROR_INITIALIZATION_FAILED`
+     （hang・quarantine、1044〜1049）は DEVICE にするが「video の無い機械」の覚えを立てない。libvulkan が renderer の結果を変えずに返すことを `objects.c` で確かめる（U21）。
+     session は open で作るので、これらは open の問題。
+   - 2 段目（degraded 1）では avcC に SPS のある track を試さず FORMAT を返す（1 段目の BUSY・PROFILE を繰り返さない。decoder.c は D27 で FORMAT でない方を返す）。
 3. ops（`media_vkvideo_ops`、backend "vulkan-video"、codec "h264"）: open・send・receive（この Phase は decode の順）・picture・flush・close、picture 系は p003 の関数。
    表にはまだ入れない。
 4. U11: level_idc の丸めが Vulkan の仕様の VUID に触れないかを仕様で確かめ、phase.md に記録（触れるなら丸めずに断るか、SPS の level を変えずに渡すかを Q1 に報告）。

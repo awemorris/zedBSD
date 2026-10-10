@@ -500,7 +500,7 @@ Milestone の達成は所属 WS の完了数ではなく、到達点の証拠で
 | [WS199](ws199/ws.md) | MG006 | Settings のセキュリティキーの独立の頁とウィザード（2026-10-10 ユーザーの UAT、ベータ2） | planned | p001 |
 | [WS200](ws200/ws.md) | MG006 | Settings の Users のパスワード変更のウィザードと認証方式の選択（2026-10-10 ユーザーの UAT、ベータ2） | planned | p001 |
 | [WS201](ws201/ws.md) | MG002 | /home の暗号化（UFS の先頭の key slot、FIDO2 の hmac-secret／PRF と回復のパスワード、master key は初回に /dev/random）（2026-10-10 ユーザー、ベータ3、今は検討しない） | planning | p001 設計 |
-| [WS202](ws202/ws.md) | MG006 | libavcodec なしで libmedia だけで mp4（H.264 は Vulkan Video・AAC-LC は自前）と .m4a を再生（Video Player・Music）（2026-10-11 ユーザー、設計だけ、実装は別のセッション） | planning | p001 設計の review |
+| [WS202](ws202/ws.md) | MG006 | libavcodec なしで libmedia だけで mp4（H.264 は Vulkan Video・AAC-LC は自前）と .m4a を再生（Video Player・Music）（2026-10-11 ユーザー、設計だけ、実装は別のセッション） | planning | 設計の第 4 版（review 3 回）、87 LW、ユーザーの判断 H1〜H6・J1〜J10 待ち |
 
 完了した WS の Phase の記録は 2026-09-24 に plan から削除した（git の履歴に残る）。
 

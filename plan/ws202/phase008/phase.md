@@ -32,7 +32,8 @@ host で確かめる（design §5.2・§5.3・§5.6）。probe に無い gap・M
 3. host 試験 `plan/ws202/tests/run-host-h264.sh`:
    - p002 の `h264-<名>.mp4`（WS083 と同じ素材の 6 本）を mediafile で読み、`media_bitstream_convert` で Annex B にして libmedia の parser と DPB に通す。**同じ mp4 から
      取り出した** `streams/h264-<名>.h264` を probe の `h264.c`・`dpb.c` に通し、picture ごとに `StdVideoDecodeH264PictureInfo`・slice・DPB の計画を比べる。
-   - 表示順: `h264-high-b-aac.mp4`・`h264-nocts.mp4` で、bumping で出る POC の順が ffmpeg の表示順（`ffprobe -show_frames` の順）と一致し、当てた時刻が単調に増える。
+   - 表示順: `h264-high-b-aac.mp4` で bumping で出る POC の順が ffmpeg の表示順（`ffprobe -show_frames` の順）と一致し、当てた時刻が単調に増える。`h264-nocts.mp4` は
+     ffmpeg が frame を出さないことがある（review-003 R3-1）ので、`h264-high-b-aac.mp4` の POC の順と比べる（M3-05）。
    - VUI（`h264-main-crop-sar.mp4` の SAR 4:3、matrix 1、full range、crop）、深さ（`h264-baseline-small.mp4` は 0）。
    - POC type 1: 手で作った SPS・slice header の bit 列。
    - VUI の途中で切れた SPS で SPS が使える。

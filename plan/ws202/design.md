@@ -1,6 +1,7 @@
 # WS202 の設計: libavcodec なしの H.264＋AAC の mp4 と .m4a の再生（ws202-p001）
 
-**第 3 版**（2026-10-10、設計の担当）。第 1 版に [review-001](review-001.md) の H-01〜H-07・M-01〜M-13・L-01〜L-11・L-13 を織り込んだのが
+**第 4 版**（2026-10-10、設計の担当、最後の版）。第 3 版への [review-003](review-003.md) の H3-01・M3-02〜M3-05・L3-01〜L3-07 を織り込んだ（対応は §16.3。
+方式の選び直しは無い）。以下は第 3 版までの経過: **第 3 版**（2026-10-10、設計の担当）。第 1 版に [review-001](review-001.md) の H-01〜H-07・M-01〜M-13・L-01〜L-11・L-13 を織り込んだのが
 第 2 版（L-12 は Q1 が WS083 の側で直した）、第 2 版への [review-002](review-002.md) の H2-01・M2-01・M2-02・M2-04・M2-06・M2-08・M2-09・M2-10・
 L2-01〜L2-20 を織り込み、M2-03・M2-05・M2-07 と H2-01 の方式を人の判断（J7〜J10）にして推しを**仮**に採ったのが第 3 版。指摘と直した節の対応は §16。
 範囲は [ws.md](ws.md) とユーザーの 2026-10-11 の指示。実装は別のセッションが行う。ユーザーの答えはまだ無い: 「仮」と書いた決定は答えで変わりうる。
@@ -152,8 +153,10 @@ D2: vkvideo-probe の `h264.c`・`dpb.c`・`frame.c` は同じ project の Zlib 
   暗黙の signalling を区別できない）、(2) ASC が LC で core の rate が 24 kHz 以下の track（暗黙の signalling の HE-AAC の core の rate）。2 段目（libavcodec が無い・
   受けない時）では受けて core を鳴らす。48 kHz・44.1 kHz の LC の ASC（.m4a の大半）は 1 段目で受ける。
 - ADTS の profile が LC でない（Main 等）ことは最初の send で分かり EINVAL になる（open の後なので libavcodec へ回らない。制限、L2-09）。
-- D27（L2-11、2 段の試しの問題の選び方）: 1 段目と 2 段目で問題が違う時は**2 段目の問題**を返す（例: libavcodec の無い QEMU の `h264.ts` は 1 段目 FORMAT、2 段目 DEVICE →
-  DEVICE）。その上で §9.1 の自前と libavcodec の問題の選び方を当てる。
+- D27（L2-11、第 4 版で直した L3-01）: 1 段目と 2 段目で問題が違う時は、**FORMAT でない方**を返す。両方とも FORMAT でなければ 2 段目の問題（例: libavcodec の無い QEMU の
+  `h264.ts` は 1 段目 FORMAT、2 段目 DEVICE → DEVICE。avc1 の track が 1 段目で BUSY なら、2 段目の FORMAT ではなく BUSY）。その上で §9.1 の自前と libavcodec の問題の選び方を当てる。
+- 2 段目の vkvideo（L3-01）: 2 段目で受けるのは avcC に SPS の無い track（D16）だけ。avcC に SPS のある track は 2 段目では試さず FORMAT を返す（1 段目の BUSY・PROFILE を
+  繰り返さない。instance を壊して作り直して同じ失敗をしない）。
 - J1 で container を絞る時（L2-15）: `struct media_track` に container の名が無い（`mediafile.h` 58〜71）ので、`media_track.container`（`media_file_format_name` と同じ文字列）を
   mediafile.c が入れる（p004）。
 
@@ -222,11 +225,21 @@ vkvideo-probe の `h264.c` を元に、次を変える・足す。
 ### 5.3 DPB（`h264-dpb.c`）
 
 - vkvideo-probe の `dpb.c`（slot の割り当て、短期・長期、sliding window、MMCO 1〜4・6）を写し、次を**足す**（probe に無い）。
-- **欠けた参照**（第 3 版、H2-01）: DPB の entry に「picture を持たない参照」を持てるようにする。entry は slot と別の表（最大 16）にし、slot を持つ entry と
-  持たない entry がある。持たない entry は 2 種:
+- **欠けた参照**（第 3 版、H2-01。第 4 版で直した M3-04・L3-03）: DPB の entry に「picture を持たない参照」を持てるようにする。entry は slot と別の表（最大 16）にし、
+  slot を持つ entry と持たない entry がある。probe の slot ごとの `device_active` と begin での deactivate（`dpb.c` 126〜133・160〜171）は slot の側に残す。持たない entry は 2 種:
   - non-existing の frame（8.2.5.2 の frame_num の gap）: 欠けた frame_num ごとに短期の参照として sliding window に入れる。表示しない。
-  - 捨てた参照の picture（D25 で decode しなかった参照の picture、seek の後の先頭の前の参照）: marking は普通の参照と同じ（frame_num・POC・長期の印）で、slot を持たない。
-  どちらも sliding window と MMCO で普通に数え、押し出されて消える。
+  - decode しなかった参照の picture: D25 で捨てた参照の picture、seek の後の leading の参照の picture（M3-04）、result status ERROR の参照の picture。marking は普通の参照と同じ
+    （frame_num・POC・MMCO・長期の印）で、slot を持たない（ERROR の picture は i915 の側では slot が active だが、libmedia は slot 無しの entry として扱う）。
+  どちらも sliding window と MMCO で普通に数え、押し出されて消える。seek の前の picture は parse していないので entry にならない（第 3 版の「seek の後の先頭の前の参照」は
+  作れない entry なので消した）。
+- **non-existing の frame の POC と POC の状態**（第 4 版、H3-01）:
+  - pic_order_cnt_type 1・2: non-existing の frame ごとに 8.2.1.2・8.2.1.3 の式を nal_ref_idc ≠ 0 として当てて POC を持つ。prevFrameNum・prevFrameNumOffset を
+    non-existing の frame ごとに進める。
+  - pic_order_cnt_type 0: slice header が無いので POC は**不明**の印を持つ。prevPicOrderCntMsb・prevPicOrderCntLsb は non-existing の frame で変えない。
+  - 規格の 8.2.1・8.2.5.2 の文は手元に無く、JM・ffmpeg の扱いの記憶による（U20）。p015 で規格を読めれば照らす。
+  - 規格は non-existing の frame を inter 予測で参照してはならないとする（8.2.5.2、推測）。D25 はその frame を list の有効な範囲に入れる picture を捨てる。
+- frame_num の gap が `max_num_ref_frames` より大きい時（L3-05）は、短期の参照を全部外し、最後の `max_num_ref_frames −（長期の数）` 個の non-existing だけを入れる
+  （同じ結果。MaxFrameNum 65536 の飛びを 1 つずつ回さない）。
 - MMCO 5（8.2.5.4.6）: 全部の参照を unused に、表示順の待ち行列を全部出す（§5.6）。
 - MMCO の対象が DPB に無い時（seek の後の P の MMCO 1 が前の GOP の参照を外す: review-002 R2）は何もしない（誤りにしない。probe は止まる所）。
 - slot の数 = `max_num_ref_frames + 1`（≦ 17）。D7: 出力は decode の直後に CPU の NV12 へ写す（§5.5）ので、slot は参照の有無だけで再利用できる。
@@ -244,9 +257,13 @@ vkvideo-probe の `h264.c` を元に、次を変える・足す。
     なるので、その slice は不一致と見る。
   - 全 slice・全 list の先頭 `num_ref_idx_active` 個が一致し、規格の list に欠けた参照が無い時だけ decode する。それ以外はその picture を decode せず、欠けた参照の
     picture にする（参照なら DPB に slot 無しで入る）。
+  - **POC の不明な non-existing の frame がある時の B の slice**（第 4 版、H3-01）: B の初期の順は POC で決まるので、規格の list が作れない。この時は保守的に、
+    各 list（L0・L1）の先頭 `num_ref_idx_active` 個が**modification の命令で全部決まり**（N 個の命令がそれぞれ slot を持つ別々の picture を指す）時だけ decode し、
+    他は捨てる。P・SP の slice の list は PicNum で決まり POC を使わないので、今の判定のまま。type 1・2 の non-existing は POC を持つので普通の判定。
 - 欠けた参照が無い時（普通の stream の全 picture）は計算を省き、そのまま decode する（試験は list の計算も通す、§10.2）。
 - 結果: gap の後でも、欠けた参照を使わない picture は decode でき、使う picture だけが捨てられる（捨てた参照の picture を参照する picture も連鎖で捨てられ、次の IDR か、
-  欠けた参照を使わない I・P で止まる）。i915 を変えない。
+  欠けた参照を使わない I・P で止まる）。i915 を変えない。**保守的な判定の代価（J8 の材料）**: type 0 の stream（x264 を含む大半）では、gap の後は non-existing の frame が
+  sliding window で消えるまで（最大 `max_num_ref_frames` 枚の参照の picture の間）、modification で list を決めきらない B の picture が出ない（絵が数 frame 止まる）。
 - 他の選択肢（J8）: (b) non-existing を、参照から外れたがまだ active な slot に載せて `is_non_existing` で渡す（i915 の規則の抜け道に頼る、WS083 と照らし 5330 で確かめる。
   i915 の変更が要れば WS083 の範囲で Q1 へ）。(c) gap・欠けを見たら次の IDR か recovery point SEI の付いた I まで全部捨てる（制限）。
 
@@ -268,8 +285,13 @@ D9（第 2 版で直し、第 3 版で close の扱いを足した: H-01・M-01�
   作り直す（数 ms の見込み、open の時間に入る）。
 - 「壊れた」（DEVICE_LOST・ETIMEDOUT）時: 印を立て、新しい open には DEVICE を返す。参照の数 0 で device と instance を壊し、印を消す。kernel の video の engine が
   止まったままなら（WS083 p007 の回復が実機で動かない時）新しい session の video の作成が失敗し、DEVICE になる。
-- BUSY（L-06）: video の context が尽きると最初の video session の作成が失敗する（kernel は ENOMEM、`worker.c` の attach）。Vulkan の結果がどれになるか（U10）を p009 で
-  `render/video.c` から確かめ、`MEDIA_PROBLEM_BUSY` に写す。分けられなければ DEVICE。session は open で作る（D28）ので open の問題になる。
+- BUSY（L-06、第 4 版で U10 を閉じた L3-01）: video の context が尽きると、`vkCreateVideoSessionKHR` の中の `drv_i915_worker_context_attach`（`render/video.c` 1077）が
+  失敗し、`VK_ERROR_OUT_OF_DEVICE_MEMORY` が返る（同 1082〜1088。libvulkan は renderer の結果をそのまま返す: `objects.c` 474〜477、review-003）。
+  - **`vkCreateVideoSessionKHR` の `VK_ERROR_OUT_OF_DEVICE_MEMORY` だけ**を `MEDIA_PROBLEM_BUSY` に写す（`vkAllocateMemory` の同じ結果は本物の memory 不足で、open は
+    ENOMEM を返す。decoder.c は ENOMEM で表の試しを止め、player は「The file could not be opened (error 12).」）。
+  - `vkCreateVideoSessionKHR` の `VK_ERROR_INITIALIZATION_FAILED`（engine の hang・quarantine、`render/video.c` 1044〜1049）は DEVICE にするが、「video の無い機械」の覚えを
+    立てない（一時的なので、次の open で試し直す）。
+  - session は open で作る（D28）ので、これらは open の問題になる。
 - capability: `vkGetPhysicalDeviceVideoCapabilitiesKHR` を SPS の profile（stdProfileIdc、PROGRESSIVE）で問う。
 - D20（M-03、level）: level では断らない。実際の制約で判断する: coded の大きさ ≦ maxCodedExtent、MB の数 ≦ 36864、`max_num_ref_frames` ≦
   maxActiveReferencePictures、slot の数 ≦ maxDpbSlots。Vulkan に渡す SPS の `level_idc` は列挙に写し（10→1_0(0)、11→1_1(1)、12→1_2、13→1_3、20→2_0(4)、21、22、
@@ -298,9 +320,14 @@ D9（第 2 版で直し、第 3 版で close の扱いを足した: H-01・M-01�
   IDR・MMCO 5 の picture の前に、待ち行列を全部出す。drain（packet NULL）で全部出す。
 - 時刻は今の add-in と同じ: 送った packet の `pts_us` を整列した列に入れ、出る picture に小さい順に当てる。decode の順の時刻しか持たない container（AVI、ctts の無い mp4）
   でも正しく付く。
-- D29（M2-01）: **出ない AU の pts は列から値で外す**。send が AU を捨てると決めた時（最初の I の前、leading の B、D25 で捨てた picture、冗長 slice だけの AU、parse の誤り）と、
-  decode したが出さない picture（result status ERROR）の時、その packet の pts を整列の列から外す。外さないと、以後の全ての picture が 1 つ前の時刻で出る
-  （seek の後に絵が音より 1 frame 早いまま）。
+- D29（M2-01、第 4 版で直した M3-02・L3-04）: 出ない picture の時刻の扱い。外さないと、以後の全ての picture が 1 つ前の時刻で出る（seek の後に絵が音より 1 frame 早いまま）。
+  - **POC が分かる出ない picture**（leading の B、D25 で捨てた picture、result status ERROR の picture）は、**POC を持つ空の entry として表示順の待ち行列に入れる**。bumping で
+    その entry が出る時に、整列の列の最小の pts を 1 つ消費して捨てる（receive は返さない）。捨てた picture が表示の順で占める位置の時刻が消えるので、ctts 有りの container
+    では「その packet の pts を値で外す」と同じ結果、decode の順の時刻しか持たない container（ctts 無しの mp4、AVI）でも通しの decode と同じ時刻になる。bumping の数え方も
+    通しの decode と同じになる。
+  - **POC の分からない AU**（最初の I の前、parse の誤り、冗長 slice だけの AU）だけ、その packet の pts を値で外す。
+  - pts は send が packet を受けた時だけ列に足す（EAGAIN で送り直す packet を二重に足さない。今の add-in も受けた後に足す: `avcodec.c` 443〜452）。
+  - 第 3 版の「値で外す」だけの形は ctts 無しの mp4 で誤る（review-003 R3-2: sync sample 30 へ seek すると I が leading の B の時刻を受け、全 picture が 40 ms 早い）。
 - 待ち行列の上限は 17。満ちた時の send は EAGAIN。
 
 ### 5.7 seek と先頭の picture（第 2 版で直し、第 3 版で事実を直した: H-02・M2-09・L2-16）
@@ -309,12 +336,17 @@ D9（第 2 版で直し、第 3 版で close の扱いを足した: H-01・M-01�
 - **x264 の open GOP の事実**（§15 E3、review-002 R2）: stss の I は非 IDR（nal_unit_type 1）。その後の leading の picture は**非参照の B 1 枚**（POC が I より小さい）で、
   続く P は modification で I だけを参照し、MMCO 1 で前の GOP の参照を外す。**seek の後に frame_num の gap は起きない**（第 2 版の「捨てた参照の B の分の欠けを gap の処理で
   埋める」は x264 では起きない）。leading の B を捨て、P の MMCO 1 の対象が DPB に無いのを無視すれば（§5.3）、続く全部が decode できる。
+- **leading の参照の picture**（第 4 版、M3-04）: nal_ref_idc ≠ 0 の leading の picture（Blu-ray 等の open GOP、推測）は decode しないが、D25 で捨てた参照と同じく
+  slot 無しの entry として marking（frame_num・POC・MMCO・sliding window）に通す。通さないと次の picture の frame_num が飛んで gap と見なされ、POC の不明な non-existing の
+  frame が代わりに入り、保守的な判定（§5.3.1）で B が長く捨てられる。leading の picture の POC は slice header から分かる（type 0 でも）。
+- 制限（M3-04）: seek の前の picture（parse していない）を参照する trailing の picture は検出できない（list が短くなり、hardware は別の picture を参照しうる）。x264 は
+  P の modification と MMCO 1 で避ける（review-002 R2）。
 - gap・欠けた参照が起きる stream: `gaps_in_frame_num_value_allowed_flag` 1 の stream（参照の frame を落とす時間の scalability、一部の放送・会議の encoder）、参照の leading
   の picture を持つ open GOP（Blu-ray の rip 等、推測）で seek した時、壊れた・切れた file。これらは §5.3・D25 で扱い、合成の gap の stream（§10.1）と J4 の
   conformance で確かめる。
 - 非 IDR の I から始めた時: DPB は空から始め、`prevRefFrameNum` をその I の frame_num に。POC の状態（L2-16）: type 0 は prevPicOrderCntMsb = 0・prevPicOrderCntLsb = 0
   として I の POC を作る。type 1・2 は prevFrameNumOffset = 0、prevFrameNum = その I の frame_num として FrameNumOffset = 0 から始める（I の POC は 8.2.1.2・8.2.1.3 の式で
-  FrameNumOffset 0 の値）。leading の B（I より POC が小さい）と、D25 で捨てる P・B は decode しない（D29 で pts を外す）。
+  FrameNumOffset 0 の値）。leading の picture（I より POC が小さい）と、D25 で捨てる P・B は decode しない（D29 の空の entry、参照なら slot 無しの entry）。
 - 表示の側の `skip_before` は今の player・engine のまま。
 
 ### 5.8 扱う範囲
@@ -561,7 +593,7 @@ host の ffmpeg 7.1.5・libx264 で合成の素材から作る。tree に入れ�
 | `h264-main-crop-sar.mp4` | 1920x1088 → crop で 1080、`setsar=4/3`、VUI の colour 709・full range | crop、SAR、色 |
 | `h264-baseline-small.mp4` | 176x144、Constrained Baseline、POC type 2 | 深さ 0 |
 | `h264-nocts.mp4` | `h264-high-b-aac` の video を ctts 無しにした物（raw の Annex B から `-r 25 -c copy`、§15 E1） | H-04 の回帰（POC の表示順） |
-| `h264-gap.mp4`（第 3 版、M2-09） | x264 の `ref=3:bframes=3:b-pyramid=strict:keyint=60` の 3 s の stream から、`gen-gap.py`（`python3 -I`）が 1 つの参照の picture（nal_ref_idc ≠ 0 の B-ref か P、2 つ目の GOP の中）の AU を抜き、SPS の `gaps_in_frame_num_value_allowed_flag` を 1 に書き換えた物（ue(v) の field を読み直して bit を立てる。emulation prevention を保つ）。元の stream（`h264-gap-orig.mp4`）も置く | frame_num の gap、欠けた参照、D25（使わない picture は decode、使う picture は捨てる）、次の I からの回復 |
+| `h264-gap.mp4`（第 3 版、第 4 版で直した M2-09・M3-03） | 素の `h264-gap-orig.mp4` は x264 の `ref=3:bframes=3:b-pyramid=strict:open-gop=1:keyint=25:min-keyint=25:scenecut=0` の 5 s（非 IDR の I が 25・50・75・100 frame）。1 つ目か 2 つ目の GOP の中の参照の picture（nal_ref_idc ≠ 0）の packet を `ffmpeg -i h264-gap-orig.mp4 -c copy -bsf:v "noise=drop=eq(n\,K)"` で抜く（残りの packet の pts・dts・ctts は保たれる: review-003 R3-3）。`gen-gap.py`（`python3 -I`）は avcC（と in-band）の SPS の `gaps_in_frame_num_value_allowed_flag` を 1 に立てるだけ（RBSP を unescape して field を順に読み、bit を立て、escape し直す）。SPS の長さが変わる時は avcC・stsd・trak・moov の box の大きさを直す（moov が mdat の後なら stco は変わらない） | frame_num の gap、欠けた参照、D25（POC の不明な non-existing の B の保守的な判定を含む）、後の非 IDR の I からの回復 |
 | `h264.mkv`・`h264.ts` | `h264-high-b-aac` を `-c copy` で各 container に（TS は muxer が Annex B を書く、§15 E10） | §3.1 の回帰 |
 | `h264.avi`（第 3 版で直した、M2-08） | `h264-high-b-aac` を `-c copy -bsf:v h264_mp4toannexb` で AVI に（`-c copy` だけでは ffmpeg の AVI は長さ付きの NAL と `strf` の avcC になり、どちらの back end も読めない） | §3.1 の回帰（Annex B の AVI） |
 
@@ -571,11 +603,16 @@ host の ffmpeg 7.1.5・libx264 で合成の素材から作る。tree に入れ�
   - video: mp4 から `ffmpeg -i X.mp4 -fps_mode passthrough -pix_fmt nv12 -f framehash -hash sha256 -`（WS083 の計算と同じ hash）→ `X.sha256`。WS202 の参照は **1 行に
     pts（µs、framehash の pts を stream の time base から変換）と hash** を持つ（WS083 の hash だけの形と違う。seek の後の位置合わせと時刻の確かめに使う、L2-01・M2-01）。
     frame の数を `ffprobe -count_frames` の `nb_read_frames` と照らす。full range の stream も `-pix_fmt nv12` で bytes が変わらない（§15 E11、L2-17）。
-  - `h264-gap.mp4` の参照は `h264-gap-orig.mp4` の参照（pts と hash）。自前が出した frame は、元の stream の同じ pts の frame と一致しなければならない。
+  - `h264-gap.mp4` の参照は `h264-gap-orig.mp4` の参照（pts と hash）。自前が出した frame は、元の stream の同じ pts の frame と一致しなければならない（pts は noise の bsf で
+    保たれる）。
+  - **`h264-nocts.mp4` の参照**（第 4 版、M3-05）: ffmpeg は ctts の無い B のある mp4 で frame を出さないことがある（review-003 R3-1: 100 枚のうち 98 枚、`nb_read_frames` も 98）
+    ので、ffmpeg から作らない。hash は `h264-high-b-aac.mp4` の参照の hash（同じ bitstream、同じ表示の順）を使い、pts は試験の script が `h264-nocts.mp4` の packet の時刻を
+    整列して表示の順に当てた値にする（mediafile の時刻から）。
   - audio の float の参照は tree に入れず、host 試験が実行の時に `ffmpeg -c:a aac -i X -c:a pcm_f32le -f f32le -`（decoder の指定は `-i` の前）で `build/` に作る。
   - audio の target の参照（`X.rms`）は p011 で、**自前の decoder を host で走らせた** 16 bit・48 kHz・stereo の出力から作る（§10.3）。
 - p002 の確認: B のある全 mp4（`h264-nocts.mp4` を除く）の video の track に ctts がある、open GOP の stream の stss に非 IDR の I がある、`h264.ts`・`h264.avi` の最初の video の
-  packet が start code（`00 00 00 01` か `00 00 01`）で始まる、`h264-gap.mp4` の SPS の gap の flag が 1 で frame_num が 1 つ飛ぶ（`trace_headers`）。
+  packet が start code（`00 00 00 01` か `00 00 01`）で始まる、`h264-gap.mp4` の SPS の gap の flag が 1 で frame_num が 1 つ飛ぶ（`trace_headers`）、抜いた後に非 IDR の I が
+  2 つ以上ある、avcC の長さが元と同じか box の大きさを直した（M3-03）、`h264-nocts.mp4` の参照の行の数 = packet の数（M3-05）。
 - `--large`（J5 の推し）: 合成の 1080p（testsrc2・mandelbrot、x264 の Baseline・Main・High、10 s、AAC 付き）と参照を**走らせた者の** worktree の `build/ws202-large/` に作る。
   bitexact なので、T1 が自分の worktree で走らせれば同じ bytes になる（L2-13）。
 
@@ -589,8 +626,8 @@ host の ffmpeg 7.1.5・libx264 で合成の素材から作る。tree に入れ�
 | `run-host-mediafile.sh`（`plan/tools/media/`） | pasp・colr（nclx・nclc）・end_us、`media_track.container`（J1 で絞る時） | 期待 |
 | `run-host-aac-parse.sh` | 全 AAC の stream の全 frame の parse、bit の数え、道具の数え、HE-AAC の書き換えの ASC（§6.6）、ADTS（複数の block を含む手の試料）、D26 の 1 段目の譲り（ADTS・22.05 kHz の LC は degraded 0 で FORMAT、1 で受ける） | 0 failures |
 | `run-host-aac.sh` | 自前の decoder の float（core の rate、channel ごと、**切り詰めの後** — ffmpeg の mov の reader と同じく先頭だけ切り、末尾の切り詰めは比べる時に外す）を host の ffmpeg と比べる。5.1 は ffmpeg の出力の順（FL FR FC LFE BL BR）と自前の（C、L、R、Ls、Rs、LFE）を対応させる。**pre-roll（D30）**: 各 stream の 5 つの時刻で flush と seek（目標 − 1 frame から読み、trim は目標）をし、出た最初の 1024 sample を通しの decode の同じ sample と比べる | PNS・intensity の無い stream: 各 channel で max \|差\| ≦ 2^-14、RMS(差) ≦ 2^-17（U6）、sample の数が一致。`aac-is-pns`: 両方の出力を同じ MDCT（frame の格子に揃えた自前の解析）で scalefactor band に分け、PNS の band は energy の比が ±1 dB、それ以外の band（intensity を含む）は差の energy が band の energy の −80 dB 以下（無音の band は絶対の下限）。EIGHT_SHORT を含む frame は frame の energy の比 ±1 dB だけ。**seek の後の最初の 1024 sample: max \|差\| ≦ 2^-14**。乱れの 1000 通りで無事。2 thread の同時の open（TSan、§6.9） |
-| `run-host-h264.sh` | (1) **probe の範囲**: `h264.c`・`h264-dpb.c` を mp4 の stream に通し、picture ごとの `StdVideoDecodeH264PictureInfo`・slice・DPB の計画を、同じ mp4 から取り出した Annex B を probe の `h264.c`・`dpb.c` に通した結果と比べる。(2) **seek の後**（R2）: `h264-high-b-aac` の各 sync sample（非 IDR の I）から始め、捨てるのが leading の非参照の B 1 枚だけ、P の MMCO 1 の対象が無いのを無視する、以後の計画が通しの decode の計画と同じ（slot の番号を除く）。(3) **参照の list（D25）**: 手で作った DPB と slice header の列で、8.2.4 の初期の順（P・B、短期・長期）・modification・`num_ref_idx_active` の list を 8.2.4 の式から手で計算した期待と比べる。欠けた参照が active の範囲の外（decode する）・中（捨てる）・modification が欠けた参照を指す（捨てる）の 3 通り。(4) **gap**: `h264-gap.mp4` で non-existing の frame が sliding window に入り押し出される、D25 の判定（decode・捨てる）の列を記録。(5) POC type 1（手の bit 列）、MMCO 5（J4 の stream か手の列）、VUI、表示順（POC の bumping の順が ffmpeg の表示順と一致、`h264-nocts` を含む） | (1)(2)(3)(5) は一致。(4) は失敗 0、次の I の後は全部 decode |
-| `run-host-vkvideo.sh` | 偽の Vulkan の関数の表で: instance の apiVersion が 1.0・properties2 の拡張が有効、**open で** session・image まで作る（D28）、open の BUSY（session の作成の失敗）・PROFILE（D20・D21）、作る object の順と引数、RESET、parameters の作り直し、参照に積むのは picture を持つ slot だけ（D25）、seek の後の捨て方、表示順と時刻、**D29: 捨てた AU・ERROR の picture の pts が列から外れ、seek の後の各 picture の時刻が参照の pts と一致**、de-tile と crop、skip の扱い、DEVICE_LOST の後の作り直し（instance も新しい）、**通常の close で参照の数 0 なら device と instance を壊す**（M2-06）、`/lib/libvulkan.so` の dlopen が host で失敗して DEVICE（本番の道の一部、L2-07） | 期待の呼び出しの列と一致、ASan |
+| `run-host-h264.sh` | (1) **probe の範囲**: `h264.c`・`h264-dpb.c` を mp4 の stream に通し、picture ごとの `StdVideoDecodeH264PictureInfo`・slice・DPB の計画を、同じ mp4 から取り出した Annex B を probe の `h264.c`・`dpb.c` に通した結果と比べる。(2) **seek の後**（R2）: `h264-high-b-aac` と `h264-nocts` の各 sync sample（非 IDR の I）から始め、捨てるのが leading の非参照の B 1 枚だけ、P の MMCO 1 の対象が無いのを無視する、以後の計画が通しの decode の計画と同じ（slot の番号を除く）。(3) **参照の list（D25）**: 手で作った DPB と slice header の列で、8.2.4 の初期の順（P・B、短期・長期）・modification・`num_ref_idx_active` の list を 8.2.4 の式から手で計算した期待と比べる。欠けた参照が active の範囲の外（decode する）・中（捨てる）・modification が欠けた参照を指す（捨てる）の 3 通り。(4) **gap の正解との比べ**（第 4 版、M3-03・H3-01）: `h264-gap.mp4` で non-existing の frame が sliding window に入り押し出される（POC は type 0 で不明の印）。D25 が「decode」とした各 picture について、gap の stream の hardware の list（欠けを除いた DPB）の先頭 N 個が、**`h264-gap-orig.mp4` の同じ picture（pts で合わせる）の規格の list の先頭 N 個**と同じ picture（POC で同定）を指す。(5) POC type 1（手の bit 列、non-existing の POC と prevFrameNum・prevFrameNumOffset の進め方を含む）、MMCO 5（J4 の stream か手の列）、VUI、表示順（POC の bumping の順が ffmpeg の表示順と一致。`h264-nocts` は `h264-high-b-aac` の POC の順と比べる、M3-05） | (1)(2)(3)(5) は一致。(4) は全部の「decode」が正解と一致、失敗 0、後の非 IDR の I の後は全部 decode（第 3 版の「判定の列の記録」と「欠けの無い時に (1)(2) が一致」は何も確かめないので置き換えた、L3-02） |
+| `run-host-vkvideo.sh` | 偽の Vulkan の関数の表で: instance の apiVersion が 1.0・properties2 の拡張が有効、**open で** session・image まで作る（D28）、open の BUSY（session の作成の失敗）・PROFILE（D20・D21）、作る object の順と引数、RESET、parameters の作り直し、参照に積むのは picture を持つ slot だけ（D25）、seek の後の捨て方、表示順と時刻、**D29: 捨てた picture が空の entry として bumping で時刻を消費し、seek の後の各 picture の時刻が参照の pts と一致。`h264-nocts.mp4` の各 sync sample から seek した後の時刻が、通しの decode で同じ picture（hash で合わせる）が受けた時刻と一致（ffmpeg の参照を使わない、M3-02）。EAGAIN で送り直した packet の pts が二重に入らない（L3-04）**、de-tile と crop、skip の扱い、DEVICE_LOST の後の作り直し（instance も新しい）、**通常の close で参照の数 0 なら device と instance を壊す**（M2-06）、`/lib/libvulkan.so` の dlopen が host で失敗して DEVICE（本番の道の一部、L2-07） | 期待の呼び出しの列と一致、ASan |
 | `run-host-codec.sh`（`plan/tools/media/`） | 既存の全 file ＋ `aac-adts.ts`・`h264.{mkv,ts,avi}`・`h264-nocts.mp4`: host では H.264 は DEVICE → add-in（D27・D16 で TS・AVI の H.264 は 1 段目で add-in）、AAC の mp4・mkv の 44.1・48 kHz は自前、TS の AAC と 22.05 kHz の LC は 1 段目で add-in（D26） | 既存の PASS を保つ、新しい試料も PASS |
 
 偽の Vulkan は本番の dlopen・`vkGetInstanceProcAddr` の道を全部は通らない（coding-style §12 の限界）。この道と本当の decode は p010 の終わりの 5330 の小さい確認で確かめる。
@@ -657,7 +694,7 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 
 ## 12. Phase の分け方
 
-[ws.md](ws.md) の表。AAC の列（p005→p006→p007）と H.264 の列（p008→p015→p016→p009→p010）は p003 の後は独立。共有の file の merge の順は ws.md（L-13）。
+[ws.md](ws.md) の表。AAC の列（p005→p006→p007）と H.264 の列（p008→p015→（p016 と p009 を並べて）→p010）は p003 の後は独立（L3-06）。共有の file の merge の順は ws.md（L-13）。
 
 ## 13. 人の判断の点（推し付き）
 
@@ -676,7 +713,7 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 | J5 | 1080p の試料と参照 | make-streams.sh が合成の 1080p を `build/` に作り、T1 が scp。参照も同じ script | tree の外の sample と記録の無い参照に完了の条件を頼らない。sample は UAT に |
 | J6 | 再生の途中の DEVICE_LOST | その file の再生を失敗にする（notice）。libavcodec への切り替えはしない | 切り替えは次の IDR からの再開と時計の合わせが要り（+2 LW）、hang は稀 |
 | J7（review-002 M2-03） | 自前の AAC が、libavcodec の入った image でも暗黙の signalling の HE-AAC（HLS の .ts 等の ADTS、24 kHz の core の mp4）を取り、SBR 無し・v2 は mono で鳴る回帰をどうするか | **仮: (a)** 1 段目で ADTS と core の rate 24 kHz 以下の LC を libavcodec に譲る（D26）。libavcodec の無い image では 2 段目で自前が core を鳴らす | ADTS と低い rate の LC は暗黙の HE-AAC を区別できない。.m4a の大半（44.1・48 kHz の LC）は 1 段目で自前が取るので目標 B は変わらない。(b) 受けたまま制限にする、は release の回帰を残す |
-| J8（review-002 H2-01） | frame_num の gap・欠けた参照の扱いの方式 | **仮: (a)** libmedia が 8.2.4 の参照の list を計算し、欠けた参照が list の有効な範囲に入らない picture だけ decode、入る picture は捨てる（D25、+3 LW、新 p016）。i915 を変えない | (b) active な slot に載せて `is_non_existing` で渡すのは i915 の規則の抜け道に頼り、WS083 との照合と実機の確かめが要り、i915 の変更が要れば WS083 の範囲になる。(c) 次の IDR まで全部捨てるのは、IDR が先頭にしか無い stream（x264 の open GOP）で残り全部が出ない |
+| J8（review-002 H2-01） | frame_num の gap・欠けた参照の扱いの方式 | **仮: (a)** libmedia が 8.2.4 の参照の list を計算し、欠けた参照が list の有効な範囲に入らない picture だけ decode、入る picture は捨てる（D25、新 p016、p015・p016 で +7 LW）。i915 を変えない | (b) active な slot に載せて `is_non_existing` で渡すのは i915 の規則の抜け道に頼り、WS083 との照合と実機の確かめが要り、i915 の変更が要れば WS083 の範囲になる。(c) 次の IDR まで全部捨てるのは、IDR が先頭にしか無い stream（x264 の open GOP）で残り全部が出ない。**(a) の代価（review-003）**: POC が分からない non-existing の frame（type 0、x264 を含む大半）がある間は B を保守的に捨てるので、gap の後は最大 `max_num_ref_frames` 枚の参照の picture の間、B の picture が出ない（絵が数 frame 止まる）。(a) の利点（i915 を変えない、IDR が先頭だけの stream でも続きが出る）は変わらない |
 | J9（review-002 M2-05） | 完了の条件 4（描画の fps）の測り方と閾値 | **仮**: zgears を出し続け、動画の再生なし・ありの 10 秒ずつの zgears の fps の平均を比べ、ありが なしの 90% 以上 | compositor は damage の時だけ描くので、何も動かない時の fps は測れない。zgears は CI の image にあり、100 frame ごとに fps を出す。閾値はユーザーの判断 |
 | J10（review-002 M2-07） | 5330 の実行の道 | **仮**: p010 の小さい確認は (b) 今の 5330 の image に `libmedia.so`・`media-probe`・stream を scp して流す。p012 の C と p013 の UAT は (a) Q1 が `config-media.mk` の image を build し、ユーザーが USB で 1 回起動する | T1 は ESP に書けない（安全の判定、回避しない）。(b) はユーザーの手が要らず早い。2 段目の試しと DEVICE の notice は (b) では確かめられないので (a) に残す |
 
@@ -693,7 +730,7 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 | U7 | （第 3 版で閉じた）libvulkan の image の path は `/lib/libvulkan.so`（§1.4、§15 E12） | — |
 | U8 | decode と desktop の描画の同時の fps | p012 の 5330（zgears、J9） |
 | U9 | ASO（slice の順の入れ替え）を i915 の MFX が扱うか | 扱えなければ result status が ERROR。stream があれば p015 |
-| U10 | 9 個目の process の video session の作成が何の Vulkan の結果を返すか | p009（i915 の `render/video.c`・`worker.c` を読む） |
+| U10 | （第 4 版で閉じた）9 個目の process の video session の作成は `vkCreateVideoSessionKHR` の `VK_ERROR_OUT_OF_DEVICE_MEMORY`（§5.4、review-003） | — |
 | U11 | SPS の level_idc を `maxLevelIdc` に丸めることが規格の VUID に触れないか | p009（Vulkan の仕様を読む） |
 | U12 | `/usr/share/zedbsd-tests/ws202/` の directory が kei に読めるか（file は `--mode 0644` で読める） | p012 の最初（`ls -ld`）。p010 は scp なので関わらない |
 | U13 | ITU-T H.264.1 の conformance の bitstream の入手先と利用の条件 | p015 |
@@ -703,6 +740,8 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 | U17 | `h264-gap.mp4` で D25 が「decode する」側（欠けた参照が list の範囲の外）を実際に通るか | x264 の list の使い方次第（p002 で `gen-gap.py` が抜く picture を選び、p015 で判定の列を記録）。通らなければ (3) の手の列だけが確かめる、と記録する |
 | U18 | Blu-ray 等の open GOP の leading の picture が参照になるか、HE-AAC の ADTS の普及の度合い | 推測のまま（J7・J8 の判断の材料） |
 | U19 | `avi.c` の LATM の tag の codec 名 | p006 で `avi.c` 710 付近を読む |
+| U20 | 規格 8.2.1・8.2.5.2 の non-existing の frame の POC と POC の状態の扱い、8.2.4.2.3 の B の L1 の入れ替えが切り詰めの前か後か | 規格の本文が手元に無い（ITU-T H.264 は無料で読める）。p015・p016 の担当が規格を取得して照らし、違えば §5.3・§5.3.1 を直して Q1 へ |
+| U21 | libvulkan が renderer の `VK_ERROR_OUT_OF_DEVICE_MEMORY` を変えずに返すこと | p009 で `objects.c` を読み、偽の Vulkan の試験に入れる |
 
 ## 15. host で確かめたこと（scratchpad の中、tree には書いていない）
 
@@ -808,6 +847,23 @@ make -j16 BUILD=build/<担当> ZEDBSD_CONFIG=plan/ws202/tests/config-media.mk \
 | L2-18 invalidate | §1.4 D24、§5.5 |
 | L2-19 media-probe の依存 | §10.3、p010 |
 | L2-20 render の context | §1.4、§5.4 D9（M2-06 と同じ直し） |
+
+### 16.3 review-003（第 4 版で直した）
+
+| 指摘 | 直した場所 |
+| --- | --- |
+| H3-01 non-existing の frame の POC と POC の状態、B の判定 | §5.3（type 1・2 は式で POC、type 0 は不明の印、prev の更新の規則）、§5.3.1（POC の不明な non-existing がある B は modification で list が決まる時だけ decode、代価）、§10.2 `run-host-h264.sh` の (4)(5)、§13 J8 の材料、§14 U20、p015 成果 2、p016 成果 2 |
+| M3-02 D29 と decode の順の時刻 | §5.6 D29（POC の分かる出ない picture は空の entry として bumping で時刻を消費、値で外すのは POC の分からない AU だけ）、§10.2 `run-host-vkvideo.sh`（nocts の seek を通しの decode と比べる）、p010 成果 1・5 |
+| M3-03 `h264-gap.mp4` の形と正解の試験 | §10.1（open-gop・keyint 25・5 s、`noise=drop` の bsf で抜く、gen-gap.py は SPS の flag だけ、box の大きさ）、p002 の確認、§10.2 の (4)（`h264-gap-orig.mp4` の規格の list と比べる）、p002・p016 成果 4 |
+| M3-04 leading の参照の picture の marking | §5.3（entry の種類から「seek の前の参照」を消し leading の参照を足す）、§5.7（marking に通す、seek の前を参照する trailing は検出できない制限）、ws.md の制限、p015 成果 5 |
+| M3-05 `h264-nocts.mp4` の参照 | §10.1（hash は high-b-aac の参照、pts は packet の時刻を整列して当てる）、p002 の確認（行の数 = packet の数）、§10.2 の (5)、p002・p008・p010 |
+| L3-01 BUSY・INITIALIZATION_FAILED・ENOMEM・2 段目 | §3.1 D27（FORMAT でない方を返す）と 2 段目の vkvideo、§5.4 の BUSY の写し方、§14 U10・U21、p009 成果 2 |
+| L3-02 何も確かめない試験の項 | §10.2 の (4)、p016 成果 4（M3-03 の比べに置き換えた） |
+| L3-03 slot の `device_active` | §5.3、p015 成果 1 |
+| L3-04 EAGAIN の pts の二重 | §5.6 D29、§10.2、p010 成果 1 |
+| L3-05 大きな gap | §5.3、p015 成果 2 |
+| L3-06 p009 の依存 | ws.md の表（p009 は p015 の後、p016 と並べる。p010 が p009・p016 の両方に依存）、p009 |
+| L3-07 U10 を閉じる | §14 U10、§5.4、p009 成果 2 |
 
 ## 17. Future（WS202 の外）
 
