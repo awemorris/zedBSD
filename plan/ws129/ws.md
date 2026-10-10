@@ -3,13 +3,13 @@
 # WS129: ベータ1 のリリース作業
 
 <!-- awesome-plan-current:start -->
-Status: planning
+Status: incomplete（p014の限定CI修正を実行。WS全体のrelease受入は未完）
 Primary Milestone: MG007
 Related Milestones: MG003, MG006
 Objectives: O1, O2
 Parent: [Master](../master.md)
 Focused goal: fg019（ベータ1、2026-10-17）
-Queue: none
+Queue: [Codex CI修正](codex-ci-queue.md) finished、main/push承認待ち。
 Resume point: [p001](phase001/phase.md)（release の定義: 版の付け方、配布物、CI の release、release notes・既知の問題・license の一覧の作り方、凍結と最終回帰・実機の確認の日程、planned）。版の名前はユーザーの判断。
 凍結は無し（2026-10-02 user（作業開始の指示）「凍結はしません。できたところまででベータ1にします。安定化はベータの最後の方のバージョンで行います。」）。p001 の日程案（10/13 凍結）を置き換える。デモの image は CI の設定を土台に変える（同日 user）。
 2026-10-02 user（リリースの流れ）:「CIはPrereleaseを生成、それをダウンロードして動作確認した私が、PrereleaseからLatest Releaseに手動昇格します。」→ CI の release の job はベータ1 の版の Prerelease を作る（nightly とは別の tag）。ユーザーが download して動作確認し、手で Latest Release に昇格する。エージェントは昇格・公開をしない。版の名前・tag の形・配布物（Windows の zip を載せるか）は未決。
@@ -58,5 +58,12 @@ push・GitHub release の公開はユーザーの指示で行う。
 | [p008](phase008/phase.md) | 公開（tag、CI の実行、配布物の確認）。ユーザーの指示でだけ | planning | p007、ユーザーの公開の指示 | 1h |
 | [p011](phase011/phase.md) | 試験の QEMU を KVM に統一（`plan/tools/guest/qemu-accel.sh`）、image の build の並列の数を 16 に（`plan/tools/guest/jobs.sh`） | cleared（q646、T1-038 PASS） | — | 2h |
 | [p012](phase012/phase.md) | REmacs のコマンド名を `/bin/emacs` に（package 名も emacs、`/usr/bin/noct` の link、CI config・license の生成物・remacs-guest.sh）。2026-10-04 user | cleared（T1-082、試験の誤りは 3876079 で修正） | — | 1h |
+| [p014](phase014/phase.md) | nightly CIのlibavcodec configure失敗: nasm依存を補完 | cleared（workflow/host、main/push待ち） | 実CIログ・p004 workflow | 短い限定修正 |
+
+## 2026-10-10 nightly CI修正の追加
+
+最新ユーザーがGitHub CIビルドエラー修正を依頼。p014と[独立Queue](codex-ci-queue.md)を追加し、直近2失敗のnasm不足をnightly依存追加で直す。p004のcleared履歴とrelease scopeを変えない。main/push前の具体的commitまで本sessionで準備し、共有master/Queue/cacheの投影はQ1。remote CI成功/公開を未確認のまま主張しない。
+
+p014 cleared、[証拠](tests/ci-nasm-20261010.md)。nightly apt listのnasm追加1行と限定host確認を完了。WS全体はincomplete、main/pushと修正SHAのCI確認は明示承認を待つ。共有投影・GitHub計画公開は保留。
 
 日程の案（p001 で確定）: 10/13 機能の凍結の候補 → 10/14 RC → 10/14〜15 最終回帰 → 10/15〜16 実機の確認 → 10/17 公開。
