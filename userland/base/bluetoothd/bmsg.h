@@ -33,7 +33,7 @@
 #include <stdint.h>
 
 /* The most one bMessage is, in bytes. */
-#define BTD_BMSG_INPUT_MAX		65536U
+#define BTD_BMSG_INPUT_MAX (16U * 1024U * 1024U + 1024U)
 
 /* The longest text kept of a message read; a longer one is cut. */
 #define BTD_BMSG_TEXT_MAX		16384U
@@ -83,6 +83,9 @@ struct btd_bmsg {
 	int truncated;
 	size_t text_length;
 	char text[BTD_BMSG_TEXT_MAX + 1U];
+	/* Borrows the complete MMS MIME span from the input until its next reuse. */
+	const uint8_t *mime;
+	size_t mime_length;
 };
 
 int btd_bmsg_parse(const uint8_t *input, size_t length, struct btd_bmsg *message);

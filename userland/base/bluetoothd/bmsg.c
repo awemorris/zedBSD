@@ -11,6 +11,7 @@
 
 #include "userland/base/bluetoothd/bmsg.h"
 #include "userland/base/bluetoothd/mms.h"
+#include "userland/desktop/libmms/mms.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -299,6 +300,7 @@ btd_bmsg_build(
 	size_t body;
 	int number_ok;
 	int text_ok;
+	struct mms_document document;
 	int written;
 	int error;
 
@@ -308,17 +310,28 @@ btd_bmsg_build(
 		return EINVAL;
 
 	/* A text of 1 to 8192 bytes of UTF-8 without a NUL. */
-	if (length == 0U || length > BTD_BMSG_SEND_MAX)
+	if (text == NULL || length == 0U)
 		return EINVAL;
-	text_ok = btd_bmsg_utf8_ok(text, length);
-	if (!text_ok)
-		return EINVAL;
+	if (type == BTD_MAP_TYPE_MMS) {
+		error = mms_parse(text, length, &document);
+		if (error != 0)
+			return error;
+		mms_release(&document);
+	} else {
+		if (length > BTD_BMSG_SEND_MAX)
+			return EINVAL;
+		text_ok = btd_bmsg_utf8_ok(text, length);
+		if (!text_ok)
+			return EINVAL;
+	}
 
 	/* The type's name. */
 	if (type == BTD_MAP_TYPE_SMS_GSM) {
 		type_name = "SMS_GSM";
 	} else if (type == BTD_MAP_TYPE_SMS_CDMA) {
 		type_name = "SMS_CDMA";
+	} else if (type == BTD_MAP_TYPE_MMS) {
+		type_name = "MMS";
 	} else {
 		return EINVAL;
 	}
@@ -1069,6 +1082,7 @@ bmsg_take_text(
 	int line_start;
 	int escaped;
 	int error;
+	struct mms_document document;
 
 	/* The text ends before the END:MSG line's break (CRLF or LF); an empty text has none. */
 	message = reader->message;
@@ -1081,9 +1095,17 @@ bmsg_take_text(
 
 	/* MMS selects decoded plain text before the SMS text limit can hide a later part. */
 	if (message->type == BTD_MAP_TYPE_MMS) {
-		error = btd_mms_text(reader->bytes + body_start, body_end - body_start, message->text, sizeof(message->text), &message->text_length, &message->truncated);
+		error = mms_parse(reader->bytes + body_start, body_end - body_start, &document);
 		if (error != 0)
 			return error;
+
+		/* Keeps the caption and borrows the complete media body for transport. */
+		memcpy(message->text, document.text, document.text_length + 1U);
+		message->text_length = document.text_length;
+		message->truncated = document.truncated;
+		message->mime = reader->bytes + body_start;
+		message->mime_length = body_end - body_start;
+		mms_release(&document);
 	} else {
 		/* Each character of the text. */
 		at = body_start;

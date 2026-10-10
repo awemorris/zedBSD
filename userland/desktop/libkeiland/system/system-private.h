@@ -48,7 +48,7 @@
  * knows.  The link grew at its end with KL_VERSION 80; the item has not.
  */
 #define SYSTEM_VIEW_PHONE_LINK_SIZE_79	offsetof(struct kl_phone_link, contacts)
-#define SYSTEM_VIEW_PHONE_ITEM_SIZE_79	sizeof(struct kl_phone_item)
+#define SYSTEM_VIEW_PHONE_ITEM_SIZE_79 offsetof(struct kl_phone_item, has_mime)
 
 /* The parts of the computer's answer (ws188-p002): about, the file systems, the users, the login language, the mounts (ws188-p004). */
 #define SYSTEM_VIEW_MACHINE_PARTS	5U

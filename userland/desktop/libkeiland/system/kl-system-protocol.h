@@ -321,7 +321,7 @@
 
 /* The interfaces' names and versions. */
 #define KL_SYSTEM_MANAGER_NAME			"kl_system_manager_v1"
-#define KL_SYSTEM_MANAGER_VERSION 29U
+#define KL_SYSTEM_MANAGER_VERSION 30U
 #define KL_SYSTEM_SETTINGS_NAME			"kl_system_settings_v1"
 
 /* kl_system_manager_v1's requests and event. */
@@ -682,6 +682,8 @@
 #define KL_SYSTEM_PHONE_EVENT_DROPPED		6U
 #define KL_SYSTEM_PHONE_EVENT_DONE		7U
 #define KL_SYSTEM_PHONE_EVENT_LINK_CONTACTS	8U
+#define KL_SYSTEM_PHONE_EVENT_ITEM_MIME 9U
+#define KL_SYSTEM_SINCE_PHONE_MIME 30U
 
 /* The channel of SMS (keiland.h's KL_PHONE_SMS) and what a sync asks for (KL_PHONE_MESSAGES, _CONTACTS and _CALLS). */
 #define KL_SYSTEM_PHONE_SMS			0U

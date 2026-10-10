@@ -10,5 +10,5 @@ OUT=${OUT:-build/ws197-phone-backend-host}
 mkdir -p "$OUT"
 run=$(mktemp -d "$OUT/run.XXXXXX")
 flags="-std=gnu11 -D_GNU_SOURCE -Wall -Wextra -Werror -Wno-format-truncation -O1 -g -fsanitize=address,undefined -fno-sanitize-recover=all -Iinclude -I."
-cc $flags -o "$OUT/phone-backend-host-test" plan/ws197/tests/phone-backend-host-test.c
+cc $flags -o "$OUT/phone-backend-host-test" plan/ws197/tests/phone-backend-host-test.c userland/desktop/libmms/mms.c
 timeout 120 "$OUT/phone-backend-host-test" "$run"

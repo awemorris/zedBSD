@@ -10,7 +10,7 @@ Objectives: O2
 Parent: [Master](../master.md)
 Queue: [Codex承認済み実行記録](codex-queue.md)、メディア管理先行scopeまで終了。共有QueueはQ1が反映。
 Target: **ベータ2**（2026-10-10 ユーザー「WS197はbeta2.mdで必須に入れておいてください。」）
-Resume point: p005とp011 cleared。Phone＋/DnD draftをmain 874e12d3bへ統合。p010 MMS添付接続は未完/別tree、次回Queue選択へ。HFP・実機PBAP UAT・WS最終規約は未完。
+Resume point: p005/p011 cleared、main 874e12d3b。p010の受信部分を最新ユーザー指示でcodex/ws197-media-receiveにて実装中。送信は未完。HFP・実機PBAP UAT・WS最終規約は未完。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー）
@@ -120,3 +120,7 @@ p005 i06/i07を実装し、host回帰・最終変更source全文規約・zedBSD/
 ## 2026-10-10 scoped clearance
 
 ws197-p011 cleared、前提のws157-p006/p007もcleared。main `874e12d3b`、[最終検証](../ws157/tests/verification-20261010.md)。写真/動画の未送信draftとtext appendを実装、MMS送受信接続の完了とはしない。p010はuncleared、旧試作treeを維持。HFP/PBAP UAT/最終WS conformanceが残るためWSはincomplete。共有記録の投影はQ1に保留。
+
+## 2026-10-10 受信メディアのcheckpoint
+
+p010受信部分でAttachment=1とMIME/FD→mediastorage保存→Phone実画像表示/再openを実装し、host/build/変更source全文規約/OS境界を確認。[証拠](tests/media-receive-verification-20261010.md)。承認済みの実機4ファイル交換・desktop restartは新sessionの起動まで確認したが、Bluetooth再接続が停止し、その再restart後はSSH timeout。ユーザーへ画面応答と必要なら実機restartを依頼。接続回復後に最終Phone更新と新写真受信を確認する。WSはincomplete、p010全体の送信/動画player起動、HFP/PBAP UAT/p009を保持。共有master/Queue投影はQ1担当に保留。

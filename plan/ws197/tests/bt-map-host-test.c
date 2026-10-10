@@ -154,7 +154,8 @@ static void test_opening(void);
  * Runs every part and reports the checks.
  */
 int
-main(void)
+main(
+	void)
 {
 	/* Each part. */
 	test_setup();
@@ -390,7 +391,8 @@ hook_up(
 
 /* A new world and a new client: messages wanted, plenty of room, the clocks at a set time. */
 static void
-start(void)
+start(
+	void)
 {
 	struct btd_map_hooks hooks;
 
@@ -537,7 +539,8 @@ respond_body(
 
 /* Answers Connect: Success, OBEX 1.0, packets of 8192 bytes, Connection ID 1. */
 static void
-respond_connect(void)
+respond_connect(
+	void)
 {
 	static const uint8_t answer[] = {
 		0xa0U, 0x00U, 0x0cU, 0x10U, 0x00U, 0x20U, 0x00U, 0xcbU, 0x00U, 0x00U, 0x00U, 0x01U
@@ -649,7 +652,8 @@ state_is(
 
 /* Sets MAP up to ready with the phone's MNS connected (the checks are test_setup's). */
 static void
-setup(void)
+setup(
+	void)
 {
 	uint8_t packet[1024];
 
@@ -679,7 +683,8 @@ setup(void)
 
 /* The phone's MNS DLC opens and its OBEX connects with the MNS's Target. */
 static void
-mns_connect(void)
+mns_connect(
+	void)
 {
 	uint8_t request[32];
 
@@ -810,7 +815,8 @@ page_count(
 
 /* Setting up: SDP, Connect, SetPath twice, the registration, ready, the MNS. */
 static void
-test_setup(void)
+test_setup(
+	void)
 {
 	static const uint8_t telecom[] = {
 		0x85U, 0x00U, 0x1dU, 0x02U, 0x00U, 0xcbU, 0x00U, 0x00U, 0x00U, 0x01U, 0x01U, 0x00U, 0x13U,
@@ -884,7 +890,8 @@ test_setup(void)
 
 /* A page of the inbox, the next ones, and the end. */
 static void
-test_page(void)
+test_page(
+	void)
 {
 	static const char list_parameters[] =
 	    "\x01\x02\x00\x02\x02\x02\x00\x00\x03\x01\x04\x04\x0f"
@@ -927,7 +934,7 @@ test_page(void)
 	check(found && header.length == 34U && memcmp(header.data, list_parameters, 34U) == 0, "page: the listing's parameters");
 	respond_body(0xa0U, listing);
 
-	/* GET of the SMS: its handle in 16 digits, no attachment, UTF-8. */
+	/* GET of the SMS: its handle in 16 digits, attachments requested, UTF-8. */
 	length = take(packet, sizeof(packet));
 	check(length != 0U && packet[0] == 0x83U, "page: the message's Get");
 	found = find_header(packet, length, 3U, 0x42U, &header);
@@ -935,7 +942,7 @@ test_page(void)
 	found = find_header(packet, length, 3U, 0x01U, &header);
 	check(found && is_text(&header, "0000000000000010"), "page: Name the handle");
 	found = find_header(packet, length, 3U, 0x4cU, &header);
-	check(found && header.length == 6U && memcmp(header.data, "\x0a\x01\x00\x14\x01\x01", 6U) == 0, "page: Attachment 0, Charset 1");
+	check(found && header.length == 6U && memcmp(header.data, "\x0a\x01\x01\x14\x01\x01", 6U) == 0, "page: Attachment 1, Charset 1");
 
 	/* Answered in two packets: Continue with a Body, the next Get, then Success with End of Body. */
 	half = strlen(message) / 2U;
@@ -1012,7 +1019,8 @@ test_page(void)
 
 /* What a page refuses, a listing too large, a slow client, a client that went. */
 static void
-test_page_errors(void)
+test_page_errors(
+	void)
 {
 	struct btd_obex_header header;
 	uint8_t packet[TEST_OUT_MAX];
@@ -1106,7 +1114,8 @@ test_page_errors(void)
 
 /* Announced messages. */
 static void
-test_live(void)
+test_live(
+	void)
 {
 	static const char event_20[] =
 	    "<MAP-event-report version=\"1.0\"><event type=\"NewMessage\" handle=\"20\" folder=\"TELECOM/MSG/INBOX\" msg_type=\"SMS_GSM\"/></MAP-event-report>";
@@ -1202,7 +1211,7 @@ test_live(void)
 	/* A deleted message told. */
 	mns_event(0U, "x-bt/MAP-event-report", "<MAP-event-report><event type=\"MessageDeleted\" handle=\"20\" folder=\"telecom/msg/inbox\" msg_type=\"SMS_GSM\"/></MAP-event-report>", &code);
 	check(has_emit("PHONE MESSAGE-GONE handle=" TEST_SESSION_TEXT ".0000000000000020"), "live: MESSAGE-GONE");
-	/* An MMS NewMessage follows the same live fetch path and emits decoded text. */
+	/* An MMS NewMessage follows the live fetch path and preserves the original MIME. */
 	setup();
 	mns_event(0U, "x-bt/MAP-event-report", "<MAP-event-report><event type=\"NewMessage\" handle=\"22\" folder=\"telecom/msg/inbox\" msg_type=\"MMS\"/></MAP-event-report>", &code);
 	length = take(packet, sizeof(packet));
@@ -1214,15 +1223,16 @@ test_live(void)
 	respond_body(0xa0U, "BEGIN:BMSG\r\nVERSION:1.0\r\nSTATUS:UNREAD\r\nTYPE:MMS\r\nBEGIN:BENV\r\nBEGIN:BBODY\r\nCHARSET:UTF-8\r\nBEGIN:MSG\r\nContent-Type: text/plain; charset=utf-8\r\nContent-Transfer-Encoding: base64\r\n\r\nTGl2ZSBNTVM=\r\nEND:MSG\r\nEND:BBODY\r\nEND:BENV\r\nEND:BMSG\r\n");
 	found = has_emit("type=mms");
 	check(found, "MMS: type metadata preserved");
-	found = has_emit("length=8\nLive MMS");
-	check(found, "MMS: only decoded body emitted");
+	found = has_emit("format=mime");
+	check(found && has_emit("Content-Transfer-Encoding: base64") && has_emit("TGl2ZSBNTVM="), "MMS: complete MIME body emitted for media clients");
 	(void)take(packet, sizeof(packet));
 	respond(0xa0U, NULL, 0U);
 }
 
 /* Sending, its events, once each. */
 static void
-test_send(void)
+test_send(
+	void)
 {
 	/* "Hi" (2): LENGTH 11 + 2 + 11 = 24. */
 	static const char sent[] =
@@ -1295,7 +1305,8 @@ test_send(void)
 
 /* PHONE READ, its errors, a stale handle, a full queue. */
 static void
-test_read(void)
+test_read(
+	void)
 {
 	struct btd_obex_header header;
 	uint8_t packet[1024];
@@ -1351,7 +1362,8 @@ test_read(void)
 
 /* Failures and the attempts after them. */
 static void
-test_failures(void)
+test_failures(
+	void)
 {
 	uint8_t packet[1024];
 	static const uint8_t forbidden[] = { 0xc3U, 0x00U, 0x07U, 0x10U, 0x00U, 0x20U, 0x00U };
@@ -1423,7 +1435,8 @@ test_failures(void)
 
 /* The MAS's DLC before it opens (ws197-p005 section 3.2). */
 static void
-test_opening(void)
+test_opening(
+	void)
 {
 	uint8_t packet[1024];
 	size_t length;

@@ -172,6 +172,7 @@ struct system_phone_listener {
 	void (*dropped)(void *data, struct wl_proxy *proxy);
 	void (*done)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t code);
 	void (*link_contacts)(void *data, struct wl_proxy *proxy, uint32_t contacts, uint32_t record, const char *contacts_why);
+	void (*item_mime)(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text, int32_t descriptor);
 };
 
 /* The listener of kl_system_printers_v1's events (ws145-p003), in their order. */
@@ -234,6 +235,8 @@ static void system_mail_allowed(void *data, struct wl_proxy *proxy, uint32_t on)
 static void system_phone_received(void *data, struct wl_proxy *proxy, uint32_t channel, const char *from, const char *text, uint32_t time_high, uint32_t time_low);
 static void system_phone_status(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t state);
 static void system_phone_item(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text);
+static void system_phone_item_mime(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text, int32_t descriptor);
+static void system_phone_item_keep(void *data, struct wl_proxy *proxy, uint32_t request, uint32_t what, const char *handle, const char *key, uint32_t folder, uint32_t direction, int32_t time_high, uint32_t time_low, uint32_t zone, const char *datetime, const char *peer, const char *name, uint32_t flags, struct wl_array *text, int32_t descriptor);
 static void system_phone_page_end(void *data, struct wl_proxy *proxy, uint32_t request, const char *cursor, uint32_t more, uint32_t count, uint32_t skipped, uint32_t capped);
 static void system_phone_link(void *data, struct wl_proxy *proxy, uint32_t backend, uint32_t linked, uint32_t messages, uint32_t can_send, uint32_t notify, uint32_t owner, uint32_t enabled, uint32_t profiles, uint32_t present, const char *address, const char *why);
 static void system_phone_dropped(void *data, struct wl_proxy *proxy);
@@ -388,7 +391,8 @@ static const struct system_phone_listener system_phone_listener = {
 	system_phone_link,
 	system_phone_dropped,
 	system_phone_done,
-	system_phone_link_contacts
+	system_phone_link_contacts,
+	system_phone_item_mime
 };
 
 /* The printers object's callbacks (ws145-p003). */
@@ -4269,6 +4273,7 @@ system_phone_status(
 }
 
 /* One of the phone's messages, of a sync's page or one that came (ws197-p004a). */
+/* Receives the original caption event from older compositors. */
 static void
 system_phone_item(
 	void *data,
@@ -4288,6 +4293,55 @@ system_phone_item(
 	uint32_t flags,
 	struct wl_array *text)
 {
+	/* Shares the queue path without attaching a descriptor. */
+	system_phone_item_keep(data, proxy, request, what, handle, key, folder, direction, time_high, time_low, zone, datetime, peer, name, flags, text, -1);
+}
+
+/* Receives a complete caption and MIME descriptor atomically. */
+static void
+system_phone_item_mime(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t what,
+	const char *handle,
+	const char *key,
+	uint32_t folder,
+	uint32_t direction,
+	int32_t time_high,
+	uint32_t time_low,
+	uint32_t zone,
+	const char *datetime,
+	const char *peer,
+	const char *name,
+	uint32_t flags,
+	struct wl_array *text,
+	int32_t descriptor)
+{
+	/* The queue assumes ownership, including failed allocation. */
+	system_phone_item_keep(data, proxy, request, what, handle, key, folder, direction, time_high, time_low, zone, datetime, peer, name, flags, text, descriptor);
+}
+
+static void
+system_phone_item_keep(
+	void *data,
+	struct wl_proxy *proxy,
+	uint32_t request,
+	uint32_t what,
+	const char *handle,
+	const char *key,
+	uint32_t folder,
+	uint32_t direction,
+	int32_t time_high,
+	uint32_t time_low,
+	uint32_t zone,
+	const char *datetime,
+	const char *peer,
+	const char *name,
+	uint32_t flags,
+	struct wl_array *text,
+	int32_t descriptor)
+{
 	struct kl_system *system;
 	struct kl_phone_item item;
 	size_t length;
@@ -4299,6 +4353,9 @@ system_phone_item(
 	memset(&item, 0, sizeof(item));
 	item.request = request;
 	item.what = what;
+	if (descriptor >= 0)
+		item.has_mime = 1U;
+	item.mime_descriptor = descriptor;
 	system_mail_cut(item.handle, sizeof(item.handle), handle);
 	system_mail_cut(item.key, sizeof(item.key), key);
 	item.folder = folder;

@@ -64,6 +64,7 @@
 #include <stdio.h>
 #include <string.h>
 #include <time.h>
+#include <unistd.h>
 
 /* Marks a parameter a function has to take but does not use (a backend's that ignores the number). */
 #define UNUSED_PARAMETER(name)	((void)(name))
@@ -1847,6 +1848,7 @@ phone_item(
 	size_t length;
 	size_t text_length;
 	int error;
+	int descriptor;
 
 	/* The new events go to objects of version 27 only, and none to a client being ended. */
 	if (object->dead || object->client->fatal)
@@ -1885,7 +1887,16 @@ phone_item(
 	length = phone_put_array(payload, length, item->text, text_length);
 
 	/* Sent, or refused as kwl_emit said. */
-	error = kwl_emit(object->client, object->id, KL_SYSTEM_PHONE_EVENT_ITEM, payload, length);
+	if (item->has_mime && object->version >= KL_SYSTEM_SINCE_PHONE_MIME) {
+		descriptor = dup(item->mime_descriptor);
+		if (descriptor < 0)
+			return errno;
+		error = kwl_emit_fd(object->client, object->id, KL_SYSTEM_PHONE_EVENT_ITEM_MIME, payload, length, descriptor);
+	} else {
+		error = kwl_emit(object->client, object->id, KL_SYSTEM_PHONE_EVENT_ITEM, payload, length);
+	}
+
+	/* A refused event carries no transfer of the original backend descriptor. */
 	if (error != 0)
 		return error;
 

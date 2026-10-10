@@ -35,8 +35,9 @@
  * no number, name or text is logged.
  */
 
-#include "userland/desktop/libkeiland-backend/keiland-backend.h"
 #include "userland/base/bluetoothd/protocol.h"
+#include "userland/desktop/libmms/mms.h"
+#include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -121,6 +122,7 @@ struct phone_connection {
 
 	/* The text of a message being read. */
 	unsigned reading_text;
+	unsigned reading_mime;
 	struct kl_backend_phone_item text_item;
 	char *text;
 	size_t text_used;
@@ -188,6 +190,7 @@ struct kl_backend_phone {
 	size_t item_head;
 	size_t item_count;
 	char *taken_text;
+	int taken_mime;
 	struct kl_backend_phone_result results[PHONE_RESULTS_MAX];
 	size_t result_head;
 	size_t result_count;
@@ -221,6 +224,7 @@ static void phone_message_fields(struct kl_backend_phone_item *item, const char 
 static void phone_contact_fields(struct kl_backend_phone_item *item, const char *line);
 static void phone_call_fields(struct kl_backend_phone_item *item, const char *line);
 static unsigned phone_zone(const char *line);
+static int phone_mime_take(struct phone_connection *connection);
 static void phone_item_push(struct kl_backend_phone *phone, struct phone_connection *connection);
 static void phone_result_push(struct kl_backend_phone *phone, const struct kl_backend_phone_result *result);
 static void phone_sent_line(struct kl_backend_phone *phone, const char *line);
@@ -261,6 +265,7 @@ kl_backend_phone_open(
 	/* Unreachable until the events are asked for, which the first update does; ids start at 1 (0 is a message that came by itself). */
 	(void)snprintf(phone->state.why, sizeof(phone->state.why), "%s", "unreachable");
 	phone->next_id = 1U;
+	phone->taken_mime = -1;
 
 	/* Succeeded: the first update asks for the events. */
 	return phone;
@@ -292,8 +297,15 @@ kl_backend_phone_close(
 		phone_request_drop(&phone->requests);
 
 	/* The texts of the items not taken, and of the one taken last. */
-	for (index = 0U; index < phone->item_count; index++)
+	for (index = 0U; index < phone->item_count; index++) {
 		free(phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].text);
+		if (phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].item.has_mime)
+			close(phone->items[(phone->item_head + index) % PHONE_ITEMS_MAX].item.mime_descriptor);
+	}
+
+	/* Closes the descriptor whose previous take still borrowed it. */
+	if (phone->taken_mime >= 0)
+		close(phone->taken_mime);
 	free(phone->taken_text);
 
 	/* The record. */
@@ -598,6 +610,9 @@ kl_backend_phone_take_item(
 	/* The text of the item taken last goes now. */
 	free(phone->taken_text);
 	phone->taken_text = NULL;
+	if (phone->taken_mime >= 0)
+		close(phone->taken_mime);
+	phone->taken_mime = -1;
 
 	/* None waits. */
 	if (phone->item_count == 0U)
@@ -609,6 +624,9 @@ kl_backend_phone_take_item(
 	item->text = kept->text;
 	phone->taken_text = kept->text;
 	kept->text = NULL;
+	if (kept->item.has_mime)
+		phone->taken_mime = kept->item.mime_descriptor;
+	kept->item.has_mime = 0U;
 	phone->item_head = (phone->item_head + 1U) % PHONE_ITEMS_MAX;
 	phone->item_count--;
 
@@ -1395,8 +1413,10 @@ phone_item_line(
 	struct kl_backend_phone_item *item;
 	char value[KL_BACKEND_PHONE_PEER_MAX];
 	unsigned long length;
+	unsigned long maximum;
 	char *end;
 	int found;
+	int same;
 
 	/* The item, numbered by its page (0 for one that came by itself). */
 	item = &connection->text_item;
@@ -1413,6 +1433,20 @@ phone_item_line(
 		phone_message_fields(item, line);
 	}
 
+	/* Distinguishes raw MIME from the ordinary UTF-8 body before selecting its bound. */
+	connection->reading_mime = 0U;
+	found = phone_field(line, "format=", value, sizeof(value));
+	if (found && what == KL_BACKEND_PHONE_WHAT_MESSAGES) {
+		same = strcmp(value, "mime");
+		if (same != 0) {
+			connection->broken = 1U;
+			return EPROTO;
+		}
+
+		/* The complete body is MIME rather than a displayable UTF-8 string. */
+		connection->reading_mime = 1U;
+	}
+
 	/* The text's length. */
 	found = phone_field(line, "length=", value, sizeof(value));
 	if (!found) {
@@ -1423,10 +1457,15 @@ phone_item_line(
 	/* Its number. */
 	length = strtoul(value, &end, 10);
 
+	/* Chooses the MIME bound only after its explicit format was validated. */
+	maximum = KL_BACKEND_PHONE_TEXT_MAX;
+	if (connection->reading_mime)
+		maximum = KL_BACKEND_PHONE_MIME_MAX;
+
 	/* A whole number, within what bluetoothd sends. */
 	if (end == value ||
 	    *end != '\0' ||
-	    length > KL_BACKEND_PHONE_TEXT_MAX) {
+	    length > maximum) {
 		connection->broken = 1U;
 		return EPROTO;
 	}
@@ -1599,6 +1638,92 @@ phone_zone(
 	return KL_BACKEND_PHONE_ZONE_RECEIVED;
 }
 
+/* Converts an input MIME body to its caption and an independently readable anonymous file. */
+static int
+phone_mime_take(
+	struct phone_connection *connection)
+{
+	struct mms_document document;
+	FILE *stream;
+	char *caption;
+	size_t written;
+	int descriptor;
+	int error;
+	int closed;
+
+	/* Validates media and text before exporting any partial MIME. */
+	error = mms_parse((const uint8_t *)connection->text, connection->text_item.length, &document);
+	if (error != 0)
+		return error;
+
+	/* Reserves the ordinary item caption independently of its large body. */
+	caption = malloc(document.text_length + 1U);
+	if (caption == NULL) {
+		mms_release(&document);
+		return ENOMEM;
+	}
+
+	/* Creates an unlinked stream that survives only while an owner holds its descriptor. */
+	stream = tmpfile();
+	if (stream == NULL) {
+		error = errno;
+		free(caption);
+		mms_release(&document);
+		return error;
+	}
+
+	/* Completes the file before publishing the descriptor. */
+	written = fwrite(connection->text, 1U, connection->text_item.length, stream);
+	error = 0;
+	if (written != connection->text_item.length)
+		error = EIO;
+	if (error == 0) {
+		error = fflush(stream);
+		if (error != 0)
+			error = EIO;
+	}
+
+	/* Rewinds the shared file description before duplicating it for the backend. */
+	descriptor = -1;
+	if (error == 0) {
+		error = fseek(stream, 0L, SEEK_SET);
+		if (error != 0)
+			error = EIO;
+	}
+
+	/* Transfers a descriptor whose lifetime is independent of stdio. */
+	if (error == 0) {
+		descriptor = dup(fileno(stream));
+		if (descriptor < 0)
+			error = errno;
+	}
+
+	/* Keeps every failure path free of both temporary bytes and descriptors. */
+	closed = fclose(stream);
+	if (closed != 0 && error == 0)
+		error = EIO;
+	if (error != 0) {
+		if (descriptor >= 0)
+			close(descriptor);
+		free(caption);
+		mms_release(&document);
+		return error;
+	}
+
+	/* Exposes the ordinary caption with its original MIME body beside it. */
+	memcpy(caption, document.text, document.text_length + 1U);
+	free(connection->text);
+	connection->text = caption;
+	connection->text_item.length = document.text_length;
+	connection->text_item.truncated = (unsigned)document.truncated;
+	connection->text_item.has_mime = 1U;
+	connection->text_item.mime_descriptor = descriptor;
+	mms_release(&document);
+
+	/* Succeeded: the next item can transport media without a large wire array. */
+	return 0;
+}
+
 /* Keeps a connection's whole message for the caller; with no room the oldest goes and a drop is told. */
 static void
 phone_item_push(
@@ -1607,9 +1732,21 @@ phone_item_push(
 {
 	struct phone_kept_item *kept;
 	size_t slot;
+	int error;
+
+	/* Converts MIME to a caption plus an anonymous descriptor before publishing it. */
+	if (connection->reading_mime) {
+		error = phone_mime_take(connection);
+		if (error != 0) {
+			connection->broken = 1U;
+			return;
+		}
+	}
 
 	/* No room: the oldest goes, and the caller synchronises again. */
 	if (phone->item_count == PHONE_ITEMS_MAX) {
+		if (phone->items[phone->item_head].item.has_mime)
+			close(phone->items[phone->item_head].item.mime_descriptor);
 		free(phone->items[phone->item_head].text);
 		phone->items[phone->item_head].text = NULL;
 		phone->item_head = (phone->item_head + 1U) % PHONE_ITEMS_MAX;
@@ -1630,6 +1767,8 @@ phone_item_push(
 	connection->text = NULL;
 	connection->text_used = 0U;
 	connection->reading_text = 0U;
+	connection->reading_mime = 0U;
+	connection->text_item.has_mime = 0U;
 }
 
 /* Keeps a result for the caller; with no room the oldest goes (the caller's own watch ends its wait). */

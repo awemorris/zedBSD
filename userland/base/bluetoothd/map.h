@@ -56,7 +56,7 @@
 #define BTD_MAP_LOCATE_COUNT		32U
 
 /* The longest body of a listing or a message taken. */
-#define BTD_MAP_BODY_MAX		65536U
+#define BTD_MAP_BODY_MAX BTD_BMSG_INPUT_MAX
 
 /*
  * The times (milliseconds): the wait for Connect's answer while the phone
@@ -331,7 +331,8 @@ struct btd_map {
 
 	/* The body being received, and the room a bMessage or a search's listing is read into. */
 	size_t body_length;
-	uint8_t body[BTD_MAP_BODY_MAX];
+	uint8_t *body;
+	size_t body_capacity;
 	struct btd_bmsg message;
 	struct btd_map_entry located[BTD_MAP_LOCATE_COUNT];
 

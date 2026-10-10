@@ -26,7 +26,7 @@
 #include <sys/types.h>
 
 /* The most a client's queue holds. */
-#define BTD_OUTQ_MAX		262144U
+#define BTD_OUTQ_MAX (2U * 16U * 1024U * 1024U)
 
 /*
  * Sends bytes to the client: how many went (0 or more), or -1 with errno

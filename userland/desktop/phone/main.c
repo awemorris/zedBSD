@@ -841,7 +841,8 @@ ph_wait(
 
 /* Opens the store under the home's Documents (an empty one when it cannot). */
 static void
-ph_store_start(void)
+ph_store_start(
+	void)
 {
 	char root[1024];
 	const char *home;
@@ -1527,6 +1528,8 @@ ph_items(
 		if (taken <= 0)
 			break;
 		ph_item(phone, &item);
+		if (item.has_mime)
+			close(item.mime_descriptor);
 	}
 }
 
@@ -1541,6 +1544,7 @@ ph_item(
 	const struct kl_phone_item *item)
 {
 	struct ph_phone_message message;
+	struct ph_received received;
 	const struct ph_contact *contacts;
 	const struct ph_item *kept;
 	char title[160];
@@ -1613,6 +1617,19 @@ ph_item(
 		return;
 	}
 
+	/* Imports originals through the compositor and persists their permanent paths. */
+	if (item->has_mime) {
+		error = ph_receive_media(phone->system, item->mime_descriptor, &received);
+		if (error == 0 && received.count > 0U)
+			error = ph_store_media(contact, at, &received);
+		ph_received_release(&received);
+		ph_log("MEDIA request=%u error=%d", item->request, error);
+		if (error != 0) {
+			phone->sync.store_failed = 1;
+			ph_view_notice(&phone->view, "Media could not be saved; sync to retry", kl_clock_us());
+		}
+	}
+
 	/* Requests a repaint after the message has been persisted. */
 	phone->dirty = 1;
 
@@ -1639,6 +1656,15 @@ ph_item(
 	/* Told: the other side's name and the first line; the lock screen shows the name alone (ws197-p004c). */
 	(void)snprintf(title, sizeof(title), "Message from %s", contacts[contact].name);
 	(void)snprintf(body, sizeof(body), "%.*s", (int)strcspn(item->text, "\n"), item->text);
+	if (body[0] == '\0' && kept->media_count > 0U) {
+		if (kept->media_video[0]) {
+			(void)snprintf(body, sizeof(body), "%s", "Video");
+		} else {
+			(void)snprintf(body, sizeof(body), "%s", "Photo");
+		}
+	}
+
+	/* The lock screen retains the sender-only preview. */
 	(void)snprintf(lock_text, sizeof(lock_text), "New message from %s", contacts[contact].name);
 	(void)kl_app_notify_lock(phone->app, title, body, lock_text);
 }

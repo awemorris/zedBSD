@@ -24,6 +24,8 @@
 #include <sys/wait.h>
 #include <unistd.h>
 
+void phone_media_regression(struct kl_system *system, const char *root);
+
 /* Test objects associate production compositor state with host protocol resources. */
 struct wire_object {
 	struct kwl_object object;
@@ -297,6 +299,10 @@ main(
 	}
 
 	assert((changed & KL_SYSTEM_CHANGED_MEDIA) != 0U);
+	/* Tests the Phone receiver against this production media relay and CLI. */
+	phone_media_regression(system, argv[1]);
+
+	/* Ends the client after all receive operations have completed. */
 	kl_system_close(system);
 	wl_display_disconnect(display);
 	write(stopping[1], "x", 1U);

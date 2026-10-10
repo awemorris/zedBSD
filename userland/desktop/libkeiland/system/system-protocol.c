@@ -428,15 +428,16 @@ static const struct wl_message system_phone_events[] = {
 	{ "dropped", "27", system_plain_types },
 	{ "done", "27uu", system_plain_types },
 	{ "link_contacts", "28uus", system_plain_types },
+	{ "item_mime", "30uussuuiuusssuah", system_plain_types },
 };
 
-/* kl_system_phone_v1, made at the manager's version (16, its messages' syncs since 27, the contacts and calls since 28): nine requests and nine events.  It lives for the program. */
+/* kl_system_phone_v1, made at the manager's version (16, its messages' syncs since 27, the contacts and calls since 28): nine requests and ten events.  It lives for the program. */
 const struct wl_interface kl_system_phone_v1_interface = {
 	KL_SYSTEM_PHONE_NAME,
-	KL_SYSTEM_SINCE_PHONE_CONTACTS,
+	KL_SYSTEM_SINCE_PHONE_MIME,
 	9,
 	system_phone_requests,
-	9,
+	10,
 	system_phone_events
 };
 

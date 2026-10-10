@@ -89,7 +89,7 @@ test_mime(void)
 	    "Date: Sat, 10 Oct 2026 17:41:00 +0900\r\n"
 	    "Content-Type: Multipart/Related;\r\n boundary=\"part;one\"\r\n\r\n"
 	    "preamble\r\n--part;one\r\nContent-Type: application/smil\r\n\r\n<smil/>\r\n"
-	    "--part;one\r\nContent-Type: image/jpeg\r\nContent-Transfer-Encoding: base64\r\n\r\nnot decoded media\r\n"
+	    "--part;one\r\nContent-Type: image/jpeg\r\nContent-Transfer-Encoding: base64\r\n\r\nAQIDBA==\r\n"
 	    "--part;one\r\nContent-Type: text/plain; charset=\"UTF-8\"\r\nContent-Transfer-Encoding: base64\r\n\r\n44GT44KT44Gr44Gh44Gv\r\n"
 	    "--part;one--\r\nepilogue";
 	static const char nested[] =
@@ -136,7 +136,7 @@ test_mime(void)
 	error = parse("Content-Type: text/html\n\n<b>not a message</b>");
 	check(error == ENODATA && message.text[0] == '\0', "HTML-only: no raw MIME");
 	error = parse("Content-Type: image/jpeg\n\nopaque");
-	check(error == ENODATA, "attachment-only: no text");
+	check(error == 0 && message.text_length == 0U && message.mime != NULL, "attachment-only: MIME retained without invented text");
 	error = parse("Content-Type: text/plain; charset=shift_jis\n\nopaque");
 	check(error == ENOTSUP, "unsupported charset: explicit error");
 

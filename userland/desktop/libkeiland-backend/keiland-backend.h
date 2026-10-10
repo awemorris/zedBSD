@@ -932,6 +932,7 @@ struct kl_backend_phone;
 #define KL_BACKEND_PHONE_CURSOR_MAX	64U
 #define KL_BACKEND_PHONE_NUMBER_MAX	33U
 #define KL_BACKEND_PHONE_TEXT_MAX	16384U
+#define KL_BACKEND_PHONE_MIME_MAX (16U * 1024U * 1024U)
 #define KL_BACKEND_PHONE_SEND_MAX	8192U
 
 /* The most items a page has, and the most a synchronisation takes from a folder (0: no limit). */
@@ -1007,6 +1008,9 @@ struct kl_backend_phone_item {
 	unsigned truncated;
 	const char *text;
 	size_t length;
+	/* The backend owns this MIME descriptor until the next take or close. */
+	unsigned has_mime;
+	int mime_descriptor;
 };
 
 /*

@@ -377,6 +377,10 @@ main(
 	struct kl_backend_phone *phone;
 	char line[4096];
 	char body[64];
+	static const char mime[] = "Content-Type: image/png; name=photo.png\r\nContent-Transfer-Encoding: base64\r\n\r\niVBORw0KGgo=\r\n";
+	char mime_copy[sizeof(mime)];
+	int mime_descriptor;
+	ssize_t mime_bytes;
 	char *big;
 	unsigned changed;
 	uint32_t ids[6];
@@ -458,6 +462,22 @@ main(
 	check((changed & KL_BACKEND_PHONE_CHANGED_ITEM) != 0U, "MMS item delivered");
 	got = kl_backend_phone_take_item(phone, &item);
 	check(got == 1 && item.folder == (KL_BACKEND_PHONE_FOLDER_SENT | KL_BACKEND_PHONE_FOLDER_MMS), "MMS folder/type preserved");
+
+	/* Fragmented raw MIME becomes an independently readable, borrowed descriptor plus a caption. */
+	fake_write(events, "PHONE MESSAGE handle=0000000a.00000000000000fc key=- folder=inbox dir=in time=7 zone=phone type=mms format=mime datetime=\"\" peer=\"5\" name=\"\" read=0 partial=1 truncated=0 length=%lu\n", (unsigned long)sizeof(mime) - 1U);
+	fake_write(events, "%.*s", 20, mime);
+	changed = step(phone);
+	check((changed & KL_BACKEND_PHONE_CHANGED_ITEM) == 0U, "MIME fragment not published");
+	fake_write(events, "%s", mime + 20U);
+	changed = step(phone);
+	got = kl_backend_phone_take_item(phone, &item);
+	check(got == 1 && item.has_mime && item.length == 0U, "media-only item and MIME descriptor");
+	mime_descriptor = item.mime_descriptor;
+	mime_bytes = pread(mime_descriptor, mime_copy, sizeof(mime) - 1U, 0);
+	check(mime_bytes == (ssize_t)sizeof(mime) - 1 && memcmp(mime_copy, mime, sizeof(mime) - 1U) == 0, "MIME spool retains original bytes");
+	got = kl_backend_phone_take_item(phone, &item);
+	error = fcntl(mime_descriptor, F_GETFD);
+	check(got == 0 && error == -1, "next take releases borrowed MIME descriptor");
 
 	/* A name and a datetime posing as fields (" length=1", " read=1", an escaped quote): the fields outside the quotes count (ws197-p005 review M1). */
 	fake_write(events, "PHONE MESSAGE handle=0000000a.00000000000000fe key=- folder=inbox dir=in time=7 zone=phone datetime=\"a length=1 \\\" read=1\" peer=\"5\" name=\"x length=1 dir=out\" read=0 partial=0 truncated=0 length=4\nabcd");

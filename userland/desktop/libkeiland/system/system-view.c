@@ -21,6 +21,7 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 static void system_view_phone_mark(struct system_view *view, unsigned kind);
 
@@ -704,6 +705,8 @@ system_view_phone_item(
 	/* The text's copy; without memory the item is lost as a drop. */
 	copy = malloc(length + 1U);
 	if (copy == NULL) {
+		if (item->has_mime)
+			close(item->mime_descriptor);
 		system_view_phone_mark(view, KL_PHONE_DROPPED);
 		return;
 	}
@@ -715,6 +718,8 @@ system_view_phone_item(
 
 	/* A full queue drops its oldest, and the program synchronises again. */
 	if (view->phone_item_count == SYSTEM_VIEW_PHONE_ITEMS) {
+		if (view->phone_items[view->phone_item_head].item.has_mime)
+			close(view->phone_items[view->phone_item_head].item.mime_descriptor);
 		free(view->phone_items[view->phone_item_head].text);
 		view->phone_items[view->phone_item_head].text = NULL;
 		view->phone_item_head = (view->phone_item_head + 1U) % SYSTEM_VIEW_PHONE_ITEMS;
@@ -757,7 +762,7 @@ system_view_take_phone_item(
 	free(view->phone_taken_text);
 	view->phone_taken_text = NULL;
 
-	/* A structure of KL_VERSION 79 at least (an item has not grown since), and an item waiting. */
+	/* A structure of KL_VERSION 79 at least, and an item waiting. */
 	if (size < SYSTEM_VIEW_PHONE_ITEM_SIZE_79)
 		return 0;
 	if (view->phone_item_count == 0U)
@@ -767,6 +772,16 @@ system_view_take_phone_item(
 	kept = &view->phone_items[view->phone_item_head];
 	copy = kept->item;
 	copy.text = kept->text;
+
+	/* Older callers receive the caption and release descriptors they cannot represent. */
+	if (copy.has_mime && size < sizeof(copy)) {
+		close(copy.mime_descriptor);
+		copy.has_mime = 0U;
+		copy.mime_descriptor = -1;
+	}
+
+	/* Removes the queue's ownership after transfer or legacy cleanup. */
+	kept->item.has_mime = 0U;
 
 	/* As much as the caller's structure holds, the rest of it zero. */
 	copied = sizeof(copy);
@@ -977,6 +992,8 @@ system_view_phone_release(
 	/* The texts of the items waiting. */
 	for (index = 0U; index < view->phone_item_count; index++) {
 		slot = (view->phone_item_head + index) % SYSTEM_VIEW_PHONE_ITEMS;
+		if (view->phone_items[slot].item.has_mime)
+			close(view->phone_items[slot].item.mime_descriptor);
 		free(view->phone_items[slot].text);
 		view->phone_items[slot].text = NULL;
 	}

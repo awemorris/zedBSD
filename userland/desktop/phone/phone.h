@@ -79,6 +79,15 @@ enum ph_state {
  *
  * The strings are the store's (store.c), allocated for each item.
  */
+#define PH_MEDIA_MAX 16U
+
+/* A receive operation owns these permanent paths until released. */
+struct ph_received {
+	char *paths[PH_MEDIA_MAX];
+	unsigned video[PH_MEDIA_MAX];
+	size_t count;
+};
+
 struct ph_item {
 	enum ph_kind kind;
 	enum ph_channel channel;
@@ -96,6 +105,9 @@ struct ph_item {
 	int partial;
 	int truncated;
 	unsigned long serial;
+	char *media[PH_MEDIA_MAX];
+	unsigned media_video[PH_MEDIA_MAX];
+	size_t media_count;
 };
 
 /*
@@ -233,6 +245,12 @@ struct ph_view {
 
 /* The contacts and their timelines (store.c). */
 const struct ph_contact *ph_contacts(size_t *count);
+int ph_receive_media(struct kl_system *system, int descriptor, struct ph_received *received);
+void ph_received_release(struct ph_received *received);
+int ph_store_media(long contact, size_t item, const struct ph_received *received);
+int ph_decode(const char *path, struct kl_image *image);
+int ph_fit(const struct kl_image *picture, int side, struct kl_image *fitted);
+
 int ph_store_open(const char *root);
 void ph_store_close(void);
 int ph_store_add_contact(const char *name, const char *number, long *index);

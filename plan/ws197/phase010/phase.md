@@ -4,7 +4,7 @@
 
 Phase ID: ws197-p010
 Parent: [WS197](../ws.md)
-Status: uncleared
+Status: in-progress
 Phase disposition: normal
 Queue: [Codex承認済み実行記録](../codex-queue.md)、2026-10-10ユーザーの4機能実装指示。
 Branch: codex/ws197-mms-media、base main 9dfebc99b。
@@ -17,7 +17,7 @@ Standards: [Guardrail](../../guardrail.md)、[C全文](../../coding-style.md)、
 
 ## 設計・手順
 
-1. OSに依存しない独自Zlib MIME codecを `userland/base/libmms/` に置く。既存bluetoothdのMMS text readerをwrapperで維持し、PhoneとzedBSD phone backendが同じcodecを使用。base64/quoted-printable/identity、既存charset/階層上限を維持。text/plainとimage/*/video/* partを取得し、decoded媒体は計8MiB、MIME bodyは16MiB、media最大16個。上限超過/読めない媒体は明示エラー、内容を文字として表示しない。
+1. OSに依存しない独自Zlib MIME codecを `userland/desktop/libmms/` に置く。既存bluetoothdのMMS text readerをwrapperで維持し、PhoneとzedBSD phone backendが同じcodecを使用。base64/quoted-printable/identity、既存charset/階層上限を維持。text/plainとimage/*/video/* partを取得し、decoded媒体は計8MiB、MIME bodyは16MiB、media最大16個。上限超過/読めない媒体は明示エラー、内容を文字として表示しない。
 2. MAP GetMessageで添付を要求し、MMSのMIME bodyをblobとして中継、写真/動画だけのメッセージも取り込む。送信はPhoneが標準MIMEを作り、libkeilandのFD request→compositor→zedBSD backend→bluetoothd→TYPE:MMS PushMessageへ運ぶ。送信成功/失敗/切断は既存request状態へ接続。daemonは永続保存しない。
 3. Wayland phone interfaceをversion 29、libkeilandを81へ拡張。MIMEを匿名FDで渡し、public item末尾に有無付きdescriptorを追加。旧callerには旧サイズのfieldsのみを渡しFDを解放、新callerはdescriptorをcloseする。backend itemは次takeまで所有、public itemはcallerに所有移譲。本文は従来のUTF-8、写真データはwireの文字列に入れない。OS別unsupported backendはENOTSUP。
 4. Phoneのstoreが画像/動画を `~/Documents/Phone/` の管理下へ保存し、再open・同期重複/同一画像複数partを扱う。番号/本文をlogに保存しない。写真は既存PNG/JPEG/GIF decoderで実画像を描く。動画はtimelineに実媒体の項目を表示し、クリックでVideo Playerを開く（codec対応/fallbackは既存appの責任）。Attach File chooserで写真/動画を選び、既存送信操作で送る。自動変換/圧縮は今回追加しない。
@@ -38,3 +38,13 @@ p004のMMS text-only判断から、ユーザー指示で写真/動画の双方�
 2026-10-10再設計の反映: メディアCLI/compositorの[ws157-p006](../../ws157/phase006/phase.md)とPhoneの[ws197-p011](../phase011/phase.md)の出力を次回の前提にする。取得/保存はパスとメタデータのAPI、draft選択は共通media chooserに接続する。元の写真/動画4機能の義務は保持するが、ユーザーの最新限定により今回Queueで実装再開しない。旧MIME試作のscope/evidenceは[履歴](../history/mms-prototype-20261010.md)へ保存。
 
 2026-10-10前提の更新: ws157-p006/p007とws197-p011はhost/build scope cleared、main `874e12d3b`。後続MMSはmediastorageのMedia JSON/Filesとlibkeiland path-list APIへ接続する。p010自体はunclearedを維持し、今回finite Queueは終了。新しい試行にはQueue選択/承認を記録する。
+
+## 2026-10-10 受信修正の再開
+
+最新ユーザーの写真受信不具合とSSH確認指示により、[受信部分Queue](../codex-queue.md)を開始。実機c43a01797のMNS通知を確認、Media/Filesなし、MAP Attachment=0とPhone media未接続が実sourceの原因。host鍵削除・更新もユーザー承認済み。manager29/lib81はメディア基盤で使用済みなのでMIME受信eventはmanager30/lib82へ追加し、旧item eventを維持。保存はmediastorageのパスAPIでのみ行い、Phoneのmessageに保存後の絶対パスを永続化する。写真は既存Photos decoderを共有し、動画は保存とtimeline項目（外部再生は既存Video app）。送信は未完でPhase全体のcleared条件を満たさない。
+
+## 2026-10-10 受信部分の実装・最終reviewと実機更新
+
+受信部分のsourceはcodex/ws197-media-receive (base c43a01797)、[検証記録](../tests/media-receive-verification-20261010.md)。写真/動画Get、MIME匿名FD v30/lib82、mediastorage original/path、message再open、実Photo decoderをhostで確認し、named buildと変更source全文規約を実施した。旧prototypeの送信APIは今回sourceへ導入しない。shared codecはOS非依存のdesktop/libmmsに置き、A5を含むOS境界checkerを通した。
+
+4ファイル交換とdesktop/Bluetooth restartはユーザーが明示承認。新desktop自動loginとPhone起動まで実機確認したが、Bluetoothはunreachable、再restart後SSHもtimeout。受信実機UATと最終Phone更新は接続回復待ち。部分実装はmain統合可能な状態だが、Phase全体はin-progress、4機能の完了を主張しない。原本バックアップ/CRC/再開手順は上記証拠へ保存。

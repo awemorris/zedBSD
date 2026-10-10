@@ -54,9 +54,11 @@
 #include "userland/desktop/libkeiland-backend/keiland-backend.h"
 
 #include <errno.h>
+#include <fcntl.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
+#include <unistd.h>
 
 /* The most events the capture clients keep, and the largest one. */
 #define TEST_EVENTS_MAX		64U
@@ -165,6 +167,24 @@ kwl_emit(
 	test_events[test_event_count].size = size;
 	test_event_count++;
 	return 0;
+}
+
+/* Captures the new event and consumes the duplicate just as the real wire queue does. */
+int
+kwl_emit_fd(
+	struct kwl_client *client,
+	uint32_t object,
+	uint32_t opcode,
+	const void *payload,
+	size_t size,
+	int descriptor)
+{
+	int error;
+
+	/* Ownership applies to refused output too. */
+	error = kwl_emit(client, object, opcode, payload, size);
+	close(descriptor);
+	return error;
 }
 
 /* Finds a live object of a client. */
@@ -465,7 +485,8 @@ kl_backend_phone_refresh(
  * Runs both parts and prints the outcome.
  */
 int
-main(void)
+main(
+	void)
 {
 	test_shell();
 	test_view();
@@ -483,7 +504,8 @@ main(void)
 
 /* The compositor's part. */
 static void
-test_shell(void)
+test_shell(
+	void)
 {
 	static struct kwl_server server;
 	static struct kwl_client app;
@@ -503,6 +525,7 @@ test_shell(void)
 	uint32_t first_id;
 	int found;
 	int error;
+	FILE *mime;
 
 	/* Three clients of the user: the phone program, another program, a second phone program. */
 	app.server = &server;
@@ -684,6 +707,23 @@ test_shell(void)
 	test_check("live", test_event_count == 2U && test_events[0].opcode == KL_SYSTEM_PHONE_EVENT_ITEM &&
 	    test_get_word(&test_events[0], 0U) == 0U && !test_find(2U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at));
 
+	/* A v30 listener receives a MIME FD; the v27 listener keeps its original caption event. */
+	mime = tmpfile();
+	test_check("live-mime-spool", mime != NULL);
+	phone->version = KL_SYSTEM_SINCE_PHONE_MIME;
+	test_event_count = 0U;
+	test_item(0U, "0000000000000009");
+	test_phone.items[0].has_mime = 1U;
+	test_phone.items[0].mime_descriptor = fileno(mime);
+	test_phone.changed = KL_BACKEND_PHONE_CHANGED_ITEM;
+	kwl_phone_tick(&server);
+	found = test_find(1U, KL_SYSTEM_PHONE_EVENT_ITEM_MIME, 0U, &at);
+	test_check("live-mime-new-event", found && test_event_count == 2U);
+	found = test_find(3U, KL_SYSTEM_PHONE_EVENT_ITEM, 0U, &at);
+	test_check("live-mime-old-event", found);
+	phone->version = KL_SYSTEM_SINCE_PHONE_SYNC;
+	fclose(mime);
+
 	/* bluetoothd dropped an event: the phone programs hear dropped. */
 	test_event_count = 0U;
 	test_phone.changed = KL_BACKEND_PHONE_CHANGED_DROPPED;
@@ -779,7 +819,8 @@ test_shell(void)
 
 /* libkeiland's part. */
 static void
-test_view(void)
+test_view(
+	void)
 {
 	static struct system_view view;
 	struct system_view_page_end end;
@@ -791,6 +832,31 @@ test_view(void)
 	unsigned items;
 	int error;
 	int got;
+	FILE *mime;
+	int descriptor;
+	int valid;
+
+	/* A MIME descriptor belongs to a new caller and is released for an old caller. */
+	mime = tmpfile();
+	test_check("mime-stream", mime != NULL);
+	memset(&item, 0, sizeof(item));
+	descriptor = dup(fileno(mime));
+	item.has_mime = 1U;
+	item.mime_descriptor = descriptor;
+	system_view_phone_item(&view, &item, "photo", 5U);
+	got = system_view_take_phone_item(&view, &item, sizeof(item));
+	valid = fcntl(descriptor, F_GETFD);
+	test_check("mime-new-caller-owns", got == 1 && item.has_mime == 1U && valid >= 0);
+	close(descriptor);
+	descriptor = dup(fileno(mime));
+	item.mime_descriptor = descriptor;
+	system_view_phone_item(&view, &item, "photo", 5U);
+	got = system_view_take_phone_item(&view, &item, SYSTEM_VIEW_PHONE_ITEM_SIZE_79);
+	valid = fcntl(descriptor, F_GETFD);
+	test_check("mime-old-caller-release", got == 1 && valid == -1);
+	fclose(mime);
+	system_view_phone_release(&view);
+	memset(&view, 0, sizeof(view));
 
 	/* Items: one KL_PHONE_ITEMS for the first of an empty queue, the texts owned. */
 	memset(&item, 0, sizeof(item));
@@ -803,7 +869,7 @@ test_view(void)
 	test_check("item-take", got == 1 && item.length == 3U && strcmp(item.text, "abc") == 0 && item.request == 3U);
 	got = system_view_take_phone_item(&view, &item, sizeof(item));
 	test_check("item-take2", got == 1 && strcmp(item.text, "de") == 0 && system_view_take_phone_item(&view, &item, sizeof(item)) == 0);
-	got = system_view_take_phone_item(&view, &item, sizeof(item) - 4U);
+	got = system_view_take_phone_item(&view, &item, SYSTEM_VIEW_PHONE_ITEM_SIZE_79 - 4U);
 	test_check("item-size", got == 0);
 
 	/* The mark fell out of the event ring: the items are still there, the loss told. */
@@ -1105,7 +1171,8 @@ test_surface(
 
 /* The compositor's part of ws197-p005: link_contacts, the record, the syncs of the contacts and the calls. */
 static void
-test_contacts(void)
+test_contacts(
+	void)
 {
 	static const char card[] = "BEGIN:VCARD\r\nVERSION:3.0\r\nFN:Kei\r\nTEL:+819011112222\r\nEND:VCARD\r\n";
 	static struct kwl_client app;
@@ -1319,7 +1386,8 @@ test_contacts(void)
 
 /* libkeiland's part of ws197-p005: the link's sizes and link_contacts. */
 static void
-test_contacts_view(void)
+test_contacts_view(
+	void)
 {
 	static struct system_view view;
 	struct {
@@ -1420,7 +1488,8 @@ test_link_record(
 
 /* Tells the compositor the fake backend's state changed, the events emptied first. */
 static void
-test_state(void)
+test_state(
+	void)
 {
 	/* A new state at the next update. */
 	test_event_count = 0U;

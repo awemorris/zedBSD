@@ -104,6 +104,12 @@
 #define PH_COLOR_WHITE		KL_RGB(0xffffff)
 #define PH_COLOR_SURFACE	kl_theme_choose(KL_RGB(0xffffff), KL_RGB(0x23272f))
 
+/* Small decoded previews are bounded independently of the saved original files. */
+struct view_media_picture {
+	char path[1024];
+	struct kl_image image;
+};
+
 /* The handset's outline in an 18-pixel box (Material's "call"). */
 static const float ph_view_handset[] = {
 	17.01f, 12.38f, 16.40f, 12.36f, 15.79f, 12.31f, 15.20f, 12.23f, 14.62f, 12.13f, 14.04f, 11.99f,
@@ -117,6 +123,15 @@ static const float ph_view_handset[] = {
 	17.58f, 17.82f, 17.77f, 17.62f, 17.90f, 17.37f, 17.98f, 17.10f, 18.00f, 16.82f, 18.00f, 13.37f,
 	17.96f, 13.11f, 17.86f, 12.87f, 17.71f, 12.67f, 17.51f, 12.52f, 17.27f, 12.42f
 };
+
+/* Phone's single UI thread owns previews until eviction or view release. */
+static struct view_media_picture view_media_pictures[16];
+
+/* The next bounded preview slot to replace; advanced only on a cache miss. */
+static size_t view_media_next;
+
+static const struct kl_image *view_media_picture(const char *path);
+static int view_media(const struct kl_style *style, const struct ph_item *item, int x, int y, int width, int draw);
 
 static void view_layout(const struct ph_view *view, int width, int height, struct kl_rect *sidebar, struct kl_rect *conversation);
 static size_t view_filtered(const struct ph_view *view, size_t *indices, size_t size);
@@ -181,6 +196,14 @@ void
 ph_view_release(
 	struct ph_view *view)
 {
+	size_t index;
+
+	/* Cached previews belong to this Phone view, not the media library. */
+	for (index = 0U; index < 16U; index++) {
+		kl_image_release(&view_media_pictures[index].image);
+		view_media_pictures[index].path[0] = '\0';
+	}
+
 	/* Unsent temporary pictures and retained paths belong to the view. */
 	ph_draft_release(view);
 
@@ -1181,6 +1204,9 @@ view_item(
 	/* The item itself. */
 	switch (item->kind) {
 	case PH_TEXT:
+		/* Media-only messages need no empty caption bubble. */
+		if (item->media_count > 0U && item->text[0] == '\0')
+			break;
 		height += view_text(style, item, x, y + height, width, draw);
 		break;
 	case PH_CALL:
@@ -1195,6 +1221,10 @@ view_item(
 	default:
 		break;
 	}
+
+	/* Received media appears under its caption in the same timeline item. */
+	if (item->media_count > 0U)
+		height += view_media(style, item, x, y + height, width, draw);
 
 	/* The height of the space and the item. */
 	return height;
@@ -1501,6 +1531,107 @@ view_photo(
 	}
 
 	/* The picture's height, with the caption. */
+	return height;
+}
+
+/* Decodes each visible original once and retains only a fitted preview. */
+static const struct kl_image *
+view_media_picture(
+	const char *path)
+{
+	struct view_media_picture *kept;
+	struct kl_image decoded;
+	size_t index;
+	int same;
+	int error;
+
+	/* Already decoded or previously refused. */
+	for (index = 0U; index < 16U; index++) {
+		same = strcmp(path, view_media_pictures[index].path);
+		if (same == 0)
+			return &view_media_pictures[index].image;
+	}
+
+	/* Replaces the next bounded cache entry. */
+	kept = &view_media_pictures[view_media_next];
+	view_media_next = (view_media_next + 1U) % 16U;
+	kl_image_release(&kept->image);
+	(void)snprintf(kept->path, sizeof(kept->path), "%s", path);
+	error = ph_decode(path, &decoded);
+	if (error == 0) {
+		error = ph_fit(&decoded, 480U, &kept->image);
+		kl_image_release(&decoded);
+	}
+
+	/* The cache entry records success or a failed decoder until it is replaced. */
+	return &kept->image;
+}
+
+/* Draws real photos and explicit video entries from completed Media imports. */
+static int
+view_media(
+	const struct kl_style *style,
+	const struct ph_item *item,
+	int x,
+	int y,
+	int width,
+	int draw)
+{
+	const struct kl_image *image;
+	const char *label;
+	const char *name;
+	size_t index;
+	float scale;
+	float fitted_width;
+	float fitted_height;
+	int left;
+	int box_width;
+	int top;
+	int height;
+
+	/* Uses the same fixed layout while measuring and drawing. */
+	box_width = width - 2 * PH_VIEW_SIDE;
+	if (box_width > 240)
+		box_width = 240;
+	left = x + PH_VIEW_SIDE;
+	if (item->outgoing)
+		left = x + width - PH_VIEW_SIDE - box_width;
+	height = (int)item->media_count * 188;
+	if (!draw)
+		return height;
+
+	/* The path label refers to the saved original even if its decoder is unsupported. */
+	for (index = 0U; index < item->media_count; index++) {
+		top = y + (int)index * 188 + 8;
+		kl_canvas_round(style->canvas, (float)left, (float)top, (float)box_width, 160.0f, PH_VIEW_RADIUS, PH_COLOR_SURFACE);
+		label = "Photo unavailable";
+		if (item->media_video[index]) {
+			label = "Video saved in Photos";
+		} else {
+			image = view_media_picture(item->media[index]);
+			if (image->pixels != NULL && image->width > 0 && image->height > 0) {
+				scale = (float)box_width / (float)image->width;
+				if ((float)image->height * scale > 160.0f)
+					scale = 160.0f / (float)image->height;
+				fitted_width = (float)image->width * scale;
+				fitted_height = (float)image->height * scale;
+				kl_canvas_image(style->canvas, image, (float)left + ((float)box_width - fitted_width) / 2.0f, (float)top + (160.0f - fitted_height) / 2.0f, fitted_width, fitted_height, PH_VIEW_RADIUS, 1.0f);
+				label = NULL;
+			}
+		}
+
+		/* A saved video or unreadable picture still has a visible explanation. */
+		if (label != NULL)
+			view_centred(style, left + box_width / 2, top + 82, label, PH_VIEW_TEXT_SMALL, 0, style->theme->text_secondary);
+		name = strrchr(item->media[index], '/');
+		if (name != NULL)
+			name++;
+		if (name == NULL)
+			name = item->media[index];
+		(void)kl_text_draw(style->text, style->canvas, left + 4, top + 176, name, strlen(name), PH_VIEW_TEXT_SMALL, 0, style->theme->text_secondary);
+	}
+
+	/* Succeeded: the same height is used for measurement and drawing. */
 	return height;
 }
 
@@ -1814,6 +1945,14 @@ view_preview(
 	/* A message's own words, or what the item was. */
 	switch (item->kind) {
 	case PH_TEXT:
+		/* Identifies a media-only conversation without inventing caption text. */
+		if (item->media_count > 0U && item->text[0] == '\0') {
+			if (item->media_video[0])
+				return "Video";
+			return "Photo";
+		}
+
+		/* A caption remains the contact row's preview when present. */
 		return item->text;
 	case PH_CALL:
 		/* A call: one's own not answered or made, the person's missed or answered. */
@@ -1826,6 +1965,7 @@ view_preview(
 		} else {
 			return "Incoming call";
 		}
+
 	case PH_PHOTO:
 		return "Photo";
 	case PH_FILE:

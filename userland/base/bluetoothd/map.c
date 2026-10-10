@@ -179,6 +179,7 @@ static void map_sent_tell(struct btd_map *map, struct btd_map_sent *sent, unsign
 static struct btd_map_sent *map_sent_find(struct btd_map *map, uint64_t handle);
 static void map_dropped(struct btd_map *map);
 static int map_folder_of(const char *folder, unsigned *number);
+static const uint8_t *map_message_body(const struct btd_bmsg *message, size_t *length);
 static int map_item(struct btd_map *map, char *line, size_t size, uint64_t handle, unsigned folder, const struct btd_map_entry *entry);
 static uint64_t map_key(unsigned folder, const char *datetime, const char *peer, const uint8_t *text, size_t length);
 static uint64_t map_hash(uint64_t hash, const uint8_t *bytes, size_t length);
@@ -1313,6 +1314,12 @@ map_end_requests(
 		map_page_free(map, index);
 	}
 
+	/* Releases the operation input when all outstanding requests have ended. */
+	free(map->body);
+	map->body = NULL;
+	map->body_capacity = 0U;
+	map->body_length = 0U;
+
 	/* Succeeded: the announced messages, the sent ones and the held events forgotten. */
 	memset(map->lives, 0, sizeof(map->lives));
 	memset(map->sents, 0, sizeof(map->sents));
@@ -1749,7 +1756,7 @@ map_run_listing(
 		return EMSGSIZE;
 
 	/* Sent. */
-	error = btd_obex_get(&map->mas, headers, writer.used, BTD_MAP_BODY_MAX, map_now(map));
+	error = btd_obex_get(&map->mas, headers, writer.used, 65536U, map_now(map));
 	if (error != 0)
 		return error;
 
@@ -1773,7 +1780,7 @@ map_run_get(
 
 	/* The parameters. */
 	used = 0U;
-	map_parameter8(parameters, &used, MAP_TAG_ATTACHMENT, 0U);
+	map_parameter8(parameters, &used, MAP_TAG_ATTACHMENT, 1U);
 	map_parameter8(parameters, &used, MAP_TAG_CHARSET, MAP_CHARSET_UTF8);
 
 	/* The headers: Type, Name of the handle in 16 hex digits, the parameters. */
@@ -2165,6 +2172,8 @@ map_page_get_done(
 	struct btd_map_op next;
 	const char *word;
 	int error;
+	const uint8_t *payload;
+	size_t payload_length;
 
 	/* The page, unless its client went. */
 	page = &map->pages[op->page];
@@ -2200,10 +2209,13 @@ map_page_get_done(
 	/* The way its text was found, counted for the log. */
 	map->form_counts[map->message.form]++;
 
+	/* Selects MIME bytes for MMS and UTF-8 for ordinary messages. */
+	payload = map_message_body(&map->message, &payload_length);
+
 	/* Its line and text to the page's client. */
 	error = map_item(map, line, sizeof(line), entry->handle, page->folder, entry);
 	if (error == 0) {
-		map->hooks.answer(map->hooks.context, page->token, line, (const uint8_t *)map->message.text, map->message.text_length);
+		map->hooks.answer(map->hooks.context, page->token, line, payload, payload_length);
 		page->given++;
 	}
 
@@ -2291,6 +2303,8 @@ map_live_get_done(
 	const struct btd_map_entry *entry;
 	int unread;
 	int error;
+	const uint8_t *payload;
+	size_t payload_length;
 
 	/* The announced message, unless MAP forgot it. */
 	live = &map->lives[op->live];
@@ -2315,13 +2329,16 @@ map_live_get_done(
 	/* The way its text was found, counted for the log. */
 	map->form_counts[map->message.form]++;
 
+	/* Selects MIME bytes for MMS and UTF-8 for ordinary messages. */
+	payload = map_message_body(&map->message, &payload_length);
+
 	/* Its line and text to the subscribers. */
 	entry = NULL;
 	if (live->found)
 		entry = &live->entry;
 	error = map_item(map, line, sizeof(line), live->handle, live->folder, entry);
 	if (error == 0)
-		map->hooks.emit(map->hooks.context, line, (const uint8_t *)map->message.text, map->message.text_length);
+		map->hooks.emit(map->hooks.context, line, payload, payload_length);
 
 	/* Unread in the inbox (or not known): unread again. */
 	unread = 0;
@@ -2976,6 +2993,23 @@ map_folder_of(
 	return 0;
 }
 
+/* Selects the bytes whose complete length appears in the daemon protocol. */
+static const uint8_t *
+map_message_body(
+	const struct btd_bmsg *message,
+	size_t *length)
+{
+	/* MMS carries binary attachments separately from its extracted caption. */
+	if (message->mime != NULL) {
+		*length = message->mime_length;
+		return message->mime;
+	}
+
+	/* Ordinary messages retain their original UTF-8 transport. */
+	*length = message->text_length;
+	return (const uint8_t *)message->text;
+}
+
 /*
  * Writes the line of a message (section 9.3) for the bMessage just read:
  * its handle, key, folder, direction, time and zone, the phone's datetime,
@@ -3011,9 +3045,12 @@ map_item(
 	int read;
 	int from;
 	int error;
+	const uint8_t *payload;
+	size_t payload_length;
 
 	/* The peer: the sender of a message received, the recipient of one sent; the listing's first, else the bMessage's. */
 	message = &map->message;
+	payload = map_message_body(message, &payload_length);
 	datetime = "";
 	if (folder == BTD_MAP_FOLDER_INBOX) {
 		peer = message->originator_number;
@@ -3051,7 +3088,7 @@ map_item(
 		if (from == BTD_MAP_FROM_MSE)
 			zone = "mse";
 		partial = 0;
-		key_value = map_key(key_folder, datetime, peer, (const uint8_t *)message->text, message->text_length);
+		key_value = map_key(key_folder, datetime, peer, payload, payload_length);
 		(void)snprintf(key,
 			       sizeof(key),
 			       "%016llx",
@@ -3084,7 +3121,7 @@ map_item(
 	/* Existing SMS metadata stays compatible; MMS carries an explicit type. */
 	type_field = "";
 	if (message->type == BTD_MAP_TYPE_MMS)
-		type_field = " type=mms";
+		type_field = " type=mms format=mime";
 
 	/* The fields before the strings. */
 	written = snprintf(line,
@@ -3128,7 +3165,7 @@ map_item(
 			   read,
 			   partial,
 			   message->truncated,
-			   (unsigned long)message->text_length);
+			   (unsigned long)payload_length);
 	if (written < 0 || (size_t)written >= size - used)
 		return ENOSPC;
 
@@ -3584,11 +3621,31 @@ map_mas_body(
 	size_t length)
 {
 	struct btd_map *map;
+	uint8_t *body;
+	size_t wanted;
+	size_t capacity;
 
-	/* Past the room. */
+	/* Bounds the complete operation before growing its reusable input buffer. */
 	map = context;
-	if (length > sizeof(map->body) - map->body_length)
+	if (length > BTD_MAP_BODY_MAX - map->body_length)
 		return 1;
+	wanted = map->body_length + length;
+	if (wanted > map->body_capacity) {
+		capacity = map->body_capacity;
+		if (capacity == 0U)
+			capacity = 65536U;
+
+		/* Doubles the retained buffer up to the bounded MMS operation size. */
+		while (capacity < wanted && capacity < BTD_MAP_BODY_MAX / 2U)
+			capacity *= 2U;
+		if (capacity < wanted)
+			capacity = BTD_MAP_BODY_MAX;
+		body = realloc(map->body, capacity);
+		if (body == NULL)
+			return 1;
+		map->body = body;
+		map->body_capacity = capacity;
+	}
 
 	/* Succeeded: gathered. */
 	memcpy(map->body + map->body_length, data, length);

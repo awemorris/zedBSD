@@ -191,7 +191,8 @@ ph_store_open(
  * Frees everything the store holds.
  */
 void
-ph_store_close(void)
+ph_store_close(
+	void)
 {
 	size_t contact;
 	size_t item;
@@ -1108,7 +1109,8 @@ ph_store_phone_name(
  * Applies imported names without adding, removing or reordering rows.
  */
 void
-ph_store_apply_phone_names(void)
+ph_store_apply_phone_names(
+	void)
 {
 	struct ph_contact *contact;
 	const char *name;
@@ -1231,9 +1233,78 @@ ph_store_phone_call(
 	return 0;
 }
 
+/*
+ * Persists permanent media paths beside the message, preserving its key and caption.
+ */
+int
+ph_store_media(
+	long contact,
+	size_t item,
+	const struct ph_received *received)
+{
+	struct ph_item *kept;
+	struct ph_item updated;
+	size_t index;
+	int error;
+
+	/* All paths are completed imports, never temporary receive files. */
+	if (received == NULL)
+		return EINVAL;
+	if (contact < 0 || (size_t)contact >= store_contact_count || item >= store_contacts[contact].item_count || received->count > PH_MEDIA_MAX)
+		return EINVAL;
+
+	/* Builds a replacement without taking ownership of the current paths. */
+	kept = &store_contacts[contact].items[item];
+	updated = *kept;
+	memset(updated.media, 0, sizeof(updated.media));
+	updated.media_count = 0U;
+	error = 0;
+
+	/* Copies each validated path before publishing any replacement. */
+	for (index = 0U; index < received->count; index++) {
+		/* Refuses an incomplete or temporary-relative attachment reference. */
+		if (received->paths[index] == NULL || received->paths[index][0] != '/') {
+			error = EINVAL;
+			break;
+		}
+
+		/* Owns one path independently of the receiver and the old message. */
+		updated.media[index] = strdup(received->paths[index]);
+		if (updated.media[index] == NULL) {
+			error = ENOMEM;
+			break;
+		}
+
+		/* Counts only independently owned paths for failure cleanup. */
+		updated.media_video[index] = received->video[index];
+		updated.media_count++;
+	}
+
+	/* Commits only after every path copy succeeded. */
+	if (error == 0)
+		error = store_write_item(&updated, kept->path);
+
+	/* A failed replacement leaves both the old file and its paths intact. */
+	if (error != 0) {
+		/* Releases only the newly copied prefix. */
+		for (index = 0U; index < updated.media_count; index++)
+			free(updated.media[index]);
+		return error;
+	}
+
+	/* The atomic message write succeeded; replace the in-memory paths. */
+	for (index = 0U; index < kept->media_count; index++)
+		free(kept->media[index]);
+	*kept = updated;
+
+	/* Succeeded: the message file and in-memory attachment paths agree. */
+	return 0;
+}
+
 /* Reads every editable local contact file. */
 static int
-store_load_contacts(void)
+store_load_contacts(
+	void)
 {
 	char path[STORE_PATH_MAX];
 	char id[256];
@@ -1363,7 +1434,8 @@ store_load_contact(
  * of that number, or else as a conversation of its own.
  */
 static int
-store_load_conversations(void)
+store_load_conversations(
+	void)
 {
 	char path[STORE_PATH_MAX];
 	char key[PH_NUMBER_KEY_MAX];
@@ -1740,6 +1812,7 @@ store_append_item(
 	struct ph_item *grown;
 	struct ph_item *added;
 	size_t capacity;
+	size_t i;
 	int failed;
 
 	/* Room for one more. */
@@ -1767,6 +1840,16 @@ store_append_item(
 	added->source = store_copy(item->source, &failed);
 	added->name = store_copy(item->name, &failed);
 	added->extra = store_copy(item->extra, &failed);
+
+	/* Clears borrowed media pointers before any owned copy can fail. */
+	for (i = 0U; i < PH_MEDIA_MAX; i++)
+		added->media[i] = NULL;
+
+	/* Copies attachments only while earlier allocations have succeeded. */
+	for (i = 0U; i < item->media_count && !failed; i++)
+		added->media[i] = store_copy(item->media[i], &failed);
+
+	/* Failed copies must never leave borrowed paths in the retained item. */
 	if (failed) {
 		store_free_item(added);
 		return ENOMEM;
@@ -1793,6 +1876,7 @@ store_write_item(
 	char clean[STORE_LINE_MAX];
 	const char *words;
 	size_t used;
+	size_t index;
 	char *text;
 	int error;
 
@@ -1818,6 +1902,16 @@ store_write_item(
 	if (error == 0 && item->name != NULL) {
 		store_clean_line(item->name, clean, sizeof(clean));
 		error = store_put(text, &used, "Name: %s\n", clean);
+	}
+
+	/* Originals belong to the library, independent of this message file. */
+	for (index = 0U; index < item->media_count && error == 0; index++) {
+		store_clean_line(item->media[index], clean, sizeof(clean));
+		if (item->media_video[index]) {
+			error = store_put(text, &used, "Media-Video: %s\n", clean);
+		} else {
+			error = store_put(text, &used, "Media-Photo: %s\n", clean);
+		}
 	}
 
 	/* The lines a later program wrote, as they were. */
@@ -1915,6 +2009,7 @@ store_item_field(
 	char *value)
 {
 	int found;
+	int video;
 	int same;
 
 	/* Kind. */
@@ -1999,6 +2094,18 @@ store_item_field(
 	same = strcmp(key, "Name");
 	if (same == 0) {
 		item->name = value;
+		return 1;
+	}
+
+	/* Repeated paths remain borrowed until store_append_item copies them. */
+	video = strcmp(key, "Media-Video");
+	same = strcmp(key, "Media-Photo");
+	if ((same == 0 || video == 0) && item->media_count < PH_MEDIA_MAX && value[0] == '/') {
+		item->media[item->media_count] = value;
+		item->media_video[item->media_count] = 0U;
+		if (video == 0)
+			item->media_video[item->media_count] = 1U;
+		item->media_count++;
 		return 1;
 	}
 
@@ -2144,7 +2251,8 @@ store_color(
 
 /* Sorts the contacts by their latest item, the latest first (those without items last). */
 static void
-store_sort_contacts(void)
+store_sort_contacts(
+	void)
 {
 	struct ph_contact moved;
 	time_t moved_latest;
@@ -2189,6 +2297,12 @@ static void
 store_free_item(
 	struct ph_item *item)
 {
+	size_t index;
+
+	/* Free paths only; originals remain in mediastorage. */
+	for (index = 0U; index < item->media_count; index++)
+		free(item->media[index]);
+
 	/* Each string (free takes NULL). */
 	free(item->day);
 	free(item->time);
