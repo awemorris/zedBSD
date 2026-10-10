@@ -9,6 +9,11 @@ explicitly selected, verifies all declared bytes before publishing its cache,
 and installs the firmware below `/lib/firmware` together with its applicable
 license, WHENCE record when required, and provenance manifest.
 
+Every Firmware menu entry is selectable on every CPU architecture. The build
+registry supplies the same catalog to the menu, configuration saving and image
+packaging; selection follows the attached device rather than the CPU. Selecting
+a firmware package installs its data without enabling a hardware driver.
+
 The entries are `rtl8822b/`, `intelax211/`, `intelbt/`, and `i915/`; future
 RTL8822C support owns a separate `rtl8822c/` entry. RTL8822B uses its frozen GitHub
 acquisition mirror. AX211 uses the official `linux-firmware` tag `20260410`

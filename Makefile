@@ -262,9 +262,9 @@ ZEDBSD_USERLAND_PATCH_TARGETS :=
 define ZEDBSD_USERLAND_PACKAGE
 USERLAND_PACKAGES += $(1)
 USERLAND_$(1)_LABEL := $(2)
-# Base, Desktop and Packages share one CPU-independent selection catalog.
-# Device firmware and the direct-config-only test/X11 groups keep their limits.
-USERLAND_$(1)_PLATFORMS := $(if $(filter base comp desktop packages/%,$(8)),*,$(3))
+# Base, Desktop, Packages and Firmware share one CPU-independent catalog.
+# Only the direct-config-only test/X11 groups keep their platform limits.
+USERLAND_$(1)_PLATFORMS := $(if $(filter base comp desktop firmware packages/%,$(8)),*,$(3))
 USERLAND_$(1)_DEFAULT := $(4)
 USERLAND_$(1)_CLASS := $(5)
 USERLAND_$(1)_SOURCES := $(6)
@@ -357,7 +357,7 @@ endif
 override ZEDBSD_USER_PROGRAMS := $(sort \
 	$(ZEDBSD_USER_PROGRAMS) zedbsd-license)
 # Preserve CPU-independent userland selections when changing targets. Only
-# platform-bound groups (firmware, tests and X11) discard incompatible entries.
+# platform-bound groups (tests and X11) discard incompatible entries.
 ZEDBSD_USER_PLATFORM := $(ZEDBSD_PLATFORM)
 override ZEDBSD_USER_PROGRAMS := $(foreach program,$(ZEDBSD_USER_PROGRAMS),\
 	$(if $(filter * $(ZEDBSD_USER_PLATFORM),\

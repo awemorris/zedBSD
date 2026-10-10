@@ -32,3 +32,7 @@ cleared（今回の限定範囲）。全6platformの255共通項目で表示・�
 [コマンド・環境・失敗と修正・警告/未実施範囲](../tests/userland-selection-20261010.md)。外部FFmpegの12 compiler警告は未変更upstreamのものとして記録し、warning 0とは報告しない。全optional packageの全CPU移植は今回の受入に含めない。
 
 main統合は具体的成果commitについて確認する。WS全体のp003/受入と共有Master/Queue/GitHub公開は未完のまま。push無し。次Queueを開始しない。
+
+## 2026-10-10 Firmwareの追加訂正
+
+source fe4300313はユーザー「mainにマージしてください。」によりmainへ統合済み。本Phaseで当時保持したFirmware platform条件は、後続ユーザー「Firmwareもアーキテクチャに関係なくすべて選べるようにしてください。」で[p006](../phase006/phase.md)へ追加訂正した。p005の過去のscope/結果とclearedは維持し、Firmwareの新しい出力/検証はp006が所有する。

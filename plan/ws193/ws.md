@@ -3,14 +3,14 @@
 # WS193: make menuconfig のメニュー階層の作り直しと Build boot image（進捗表示）
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（p004はmain統合済み、p005のCPU共通選択/FFmpeg build確認済み）
+Status: incomplete（p004/p005 sourceはmain統合済み、p006のFirmware共通選択を追加訂正）
 Primary Milestone: MG006
 Related Milestones: —
 Objectives: O2
 Parent: [Master](../master.md)
-Queue: [Codexユーザーランド選択](codex-userland-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
+Queue: [Codex Firmware選択](codex-firmware-queue.md) finished。旧arm64選択修正とq918（P1）の履歴は保持。
 Target: **ベータ2**（2026-10-09 ユーザー、クリック「両方ベータ2」）
-Resume point: p005の検証済みWIP成果のmain統合承認。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
+Resume point: p006のsource統合/read-back、WS全体のp003/受入照合。p001/p002は既存のcleared出力を保持、全WSの受入は再確認前。
 <!-- awesome-plan-current:end -->
 
 ## 由来（2026-10-09 ユーザー、原文）
@@ -74,7 +74,8 @@ Build boot imageはプログレスバーを表示して、何をビルド中な�
 | p002 | T1 の image の build と boot-test、ユーザーの確認 | cleared（2026-10-10 Q1: T1-497 PASS、ユーザー「menuconfigはOK」） | p001 |
 | p003 | 規約の全文の見直し | planning | p001 |
 | [p004](phase004/phase.md) | CPU arm64のplatform値取り違え修正 | cleared（限定source/host、93914124c main統合済み） | p001 source |
-| [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、main統合待ち） | p004 source |
+| [p005](phase005/phase.md) | CPU共通のユーザーランド選択、FFmpeg arm64設定/build | cleared（限定source/host/package build、fe4300313 main統合済み） | p004 source |
+| [p006](phase006/phase.md) | Firmwareも全CPUで選択/保存/packaging可能にする | cleared（source/host、統合read-back待ち） | p005 source |
 
 ## 2026-10-10 RPi4 UAT前のarm64選択修正
 
@@ -89,3 +90,7 @@ p004 cleared。3行のplatform field統一、実関数/PTYでCPU/Board/Headerと
 p004のsource 93914124cはユーザーの個別承認でmain統合済み（このQueue開始時のmain HEADから確認）。前Queueの統合待ちの記録は当時の状態として保持し、現在の投影を上で訂正した。後続docs commit 308800bc2/2e48f7341は別branchに残り、この修正へ取り込んでいない。
 
 p005 cleared: 共通registryをrootに一箇所で適用し、全6platformの255項目の選択/保存/Make実効値PASS、RPi4実メニューのFFmpeg表示PASS、FFmpeg arm64 package buildと全5 ELF検証PASS。[証拠](tests/userland-selection-20261010.md)。外部sourceの警告、全optional package/実機の未確認は証拠に明記。WS全体の受入は維持し完了扱いにはしない。mainへ具体的成果の承認を確認する。
+
+## 2026-10-10 Firmwareの選択方針の追加訂正
+
+current user「Firmwareもアーキテクチャに関係なくすべて選べるようにしてください。」でp006を追加。p005のFirmware条件保持という当時の方針を置換。前のp005のsource fe4300313はユーザーのmain統合指示で統合済み（このQueueの基点HEADで確認）。p005の既存結果は保持、追加訂正のscopeと結果はp006へ。全6platformでFirmware全4件の表示・選択・保存・Make実効値/配置入力とRPi4 real PTY PASS。限定規則全文review PASS。WS全体のp003/受入は未完のまま。共有Guardrail/Master/Queue投影とGitHub公開はQ1へ保留、pushなし。

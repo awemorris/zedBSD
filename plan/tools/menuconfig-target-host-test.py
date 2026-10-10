@@ -71,10 +71,10 @@ def check_packages() -> None:
         if row[4] != group:
             fail(f"{name} is filed under {row[4]} rather than {group}")
 
-    # 2026-10-10 user: all Base, Desktop and Packages entries are selectable
-    # on every CPU. Firmware and the direct-config-only groups stay separate.
+    # 2026-10-10 user: Base, Desktop, Packages and Firmware entries are
+    # selectable on every CPU. The direct-config-only groups stay separate.
     for row in rows:
-        if row[4].startswith("packages/") or row[4] in ("base", "comp", "desktop"):
+        if row[4].startswith("packages/") or row[4] in ("base", "comp", "desktop", "firmware"):
             if row[2] != "*":
                 fail(f"{row[0]} is offered only on {row[2]}")
 
