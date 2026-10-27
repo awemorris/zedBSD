@@ -45,6 +45,8 @@ static const struct bind_attribute cssom_sheet_attributes[] = {
 /* The source model owns its SameObject rule-count view independently of later DOM source changes. */
 static const struct bind_attribute cssom_css_attributes[] = {
 	{ "cssRules", bind_cssom_rules, NULL },
+	/* The legacy name of the same list. */
+	{ "rules", bind_cssom_rules, NULL },
 	{ NULL, NULL, NULL }
 };
 
