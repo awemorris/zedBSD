@@ -24,6 +24,19 @@
 /* The widest supported shorthand expands border's four sides into twelve longhands. */
 #define VALUES_EXPANSION_MAX	16
 
+/*
+ * Where the areas form of grid-template is in a row: before it, after its
+ * leading line names, after its string, after its size, or after its
+ * trailing line names (the next row may still have leading ones).
+ */
+enum values_row_state {
+	VALUES_ROW_START,
+	VALUES_ROW_LEADING_NAMES,
+	VALUES_ROW_STRING,
+	VALUES_ROW_SIZE,
+	VALUES_ROW_TRAILING_NAMES
+};
+
 /* The shorthands this pass expands (numbered after the longhands). */
 enum values_shorthand {
 	SHORT_MARGIN = CSS_PROP_COUNT,
@@ -6409,7 +6422,7 @@ values_grid_template_areas(
 	size_t index;
 	size_t end;
 	size_t column_start;
-	int sized;
+	int state;
 	int columns_found;
 	int error;
 
@@ -6423,7 +6436,7 @@ values_grid_template_areas(
 
 	/* Each part of the rows before the slash. */
 	slash = values_split_at(tokens, count, CSS_TOKEN_DELIM, '/');
-	sized = 1;
+	state = VALUES_ROW_START;
 	index = 0;
 	while (index < slash) {
 		/* Whitespace between the parts. */
@@ -6432,8 +6445,15 @@ values_grid_template_areas(
 			continue;
 		}
 
-		/* Line names go on the line after the rows so far. */
+		/* Line names go on the line after the rows so far: one group before a row, one after it. */
 		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			if (state == VALUES_ROW_LEADING_NAMES)
+				return EINVAL;
+			if (state == VALUES_ROW_STRING || state == VALUES_ROW_SIZE) {
+				state = VALUES_ROW_TRAILING_NAMES;
+			} else {
+				state = VALUES_ROW_LEADING_NAMES;
+			}
 			index++;
 			while (index < slash && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE) {
 				if (tokens[index].type != CSS_TOKEN_WHITESPACE) {
@@ -6461,13 +6481,13 @@ values_grid_template_areas(
 			list->tracks[list->count].kind = CSS_TRACK_AUTO;
 			list->tracks[list->count].minimum_kind = CSS_TRACK_AUTO;
 			list->count++;
-			sized = 0;
+			state = VALUES_ROW_STRING;
 			index++;
 			continue;
 		}
 
 		/* A size belongs to the row just before it, and to no other. */
-		if (sized || list->count == 0)
+		if (state != VALUES_ROW_STRING)
 			return EINVAL;
 		end = index + 1U;
 		if (tokens[index].type == CSS_TOKEN_FUNCTION)
@@ -6477,11 +6497,13 @@ values_grid_template_areas(
 		error = values_one_track(parse, tokens + index, end - index, &list->tracks[list->count - 1U]);
 		if (error != 0)
 			return error;
-		sized = 1;
+		state = VALUES_ROW_SIZE;
 		index = end;
 	}
 
-	/* Each name's cells make one rectangle. */
+	/* The rows end after a row (its size or its names), and each name's cells make one rectangle. */
+	if (state == VALUES_ROW_START || state == VALUES_ROW_LEADING_NAMES)
+		return EINVAL;
 	if (cells->rows == 0)
 		return EINVAL;
 	error = values_areas_check(cells);
