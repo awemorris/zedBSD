@@ -12,12 +12,12 @@
  * align-items and align-self.  Each item is laid out as a block at the
  * main size the flexing gives it.  Not in this pass: align-content other
  * than start, wrap-reverse's order of lines, baselines (as start),
- * percentages of an indefinite height, and a column's automatic minimum
- * size (its items shrink to zero at most).  A row's item whose min-width
- * is auto (the initial value) and whose content does not scroll shrinks
- * no narrower than its content's min-content width, or its width when
- * that is given in pixels and narrower (the automatic minimum size,
- * ws074-p084), measured only for a line that has to shrink. Non-replaced
+ * and percentages of an indefinite height.  An item whose main-axis
+ * minimum is auto (the initial value) and whose content does not scroll
+ * shrinks no smaller than its content (a row's min-content width, a
+ * column's content height), or its main size when that is given in pixels
+ * and smaller (the automatic minimum size), measured only for a line that
+ * has to shrink. Non-replaced
  * preferred-ratio items instead establish their content-based minimum in
  * either axis before line collection, even with a zero flex basis.
  */
@@ -73,7 +73,8 @@ static layout_unit flex_ratio_definite_length(const struct css_length *length, l
 static layout_unit flex_ratio_cross_size(struct layout_tree *tree, const struct layout_box *container, const struct layout_box *child, int row);
 static layout_unit flex_ratio_main_size(const struct layout_box *box, int row, layout_unit cross);
 static int flex_ratio_minimum(struct layout_tree *tree, struct layout_box *container, struct flex_item *item, int row, layout_unit available);
-static int flex_auto_minimums(struct layout_tree *tree, struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
+static int flex_auto_minimums(struct layout_tree *tree, struct layout_box *box, int row, struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
+static int flex_content_height(struct layout_tree *tree, struct layout_box *box, struct layout_box *child, layout_unit *height);
 static int flex_min_content(struct layout_tree *tree, struct layout_box *box, layout_unit *width);
 static void flex_grow(struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
 static void flex_shrink(struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
@@ -246,7 +247,7 @@ layout_flex(
 		}
 
 		/* The automatic minimums of a line that has to shrink. */
-		error = flex_auto_minimums(tree, items + start, end - start, available, gap_main);
+		error = flex_auto_minimums(tree, box, row, items + start, end - start, available, gap_main);
 		if (error != 0) {
 			free(lines);
 			free(items);
@@ -924,6 +925,10 @@ flex_base_size(
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
+	if (!row && !child->replaced && child->style.aspect_ratio <= 0.0f &&
+	    child->style.min_height.unit == CSS_UNIT_AUTO &&
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
+		item->auto_minimum = 1;
 
 	/* Resolves the main-axis limits after the unconstrained base is measured. */
 	if (row) {
@@ -1517,12 +1522,15 @@ flex_ratio_minimum(
 static int
 flex_auto_minimums(
 	struct layout_tree *tree,
+	struct layout_box *box,
+	int row,
 	struct flex_item *items,
 	size_t count,
 	layout_unit available,
 	layout_unit gap)
 {
 	struct layout_box *child;
+	const struct css_length *size;
 	layout_unit used;
 	layout_unit least;
 	layout_unit given;
@@ -1546,24 +1554,28 @@ flex_auto_minimums(
 			continue;
 		child = items[index].box;
 
-		/* The content's narrowest width. */
-		error = flex_min_content(tree, child, &least);
+		/* The content's narrowest width, or a column item's content height at the container's width. */
+		if (row)
+			error = flex_min_content(tree, child, &least);
+		else
+			error = flex_content_height(tree, box, child, &least);
 		if (error != 0)
 			return error;
 
-		/* A width in pixels that is narrower is the minimum instead. */
-		if (child->style.width.unit == CSS_UNIT_PX) {
-			given = layout_from_px(child->style.width.value);
+		/* A size in pixels that is smaller is the minimum instead. */
+		size = row ? &child->style.width : &child->style.height;
+		if (size->unit == CSS_UNIT_PX) {
+			given = layout_from_px(size->value);
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				given -= items[index].frame;
 			if (given < least)
 				least = given;
 		}
 
-		/* Within max-width, and never above the base the item would shrink from. */
+		/* Within the maximum, and in a row never above the base the item would shrink from. */
 		if (items[index].maximum >= 0 && least > items[index].maximum)
 			least = items[index].maximum;
-		if (least > items[index].base)
+		if (row && least > items[index].base)
 			least = items[index].base;
 		if (least > items[index].minimum)
 			items[index].minimum = least;
@@ -1571,6 +1583,38 @@ flex_auto_minimums(
 
 	/* Succeeded: the minimums are known. */
 	return 0;
+}
+
+/*
+ * Measures a column item's content height: the item laid out at the
+ * container's width with its height, minimum and maximum auto (its
+ * content-based minimum height), and its style put back.
+ */
+static int
+flex_content_height(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	struct layout_box *child,
+	layout_unit *height)
+{
+	struct css_length saved_height;
+	struct css_length saved_minimum;
+	struct css_length saved_maximum;
+	int error;
+
+	/* The height left to the content. */
+	saved_height = child->style.height;
+	saved_minimum = child->style.min_height;
+	saved_maximum = child->style.max_height;
+	child->style.height.unit = CSS_UNIT_AUTO;
+	child->style.min_height.unit = CSS_UNIT_AUTO;
+	child->style.max_height.unit = CSS_UNIT_NONE;
+	error = layout_block(tree, child, box->width);
+	*height = child->height;
+	child->style.height = saved_height;
+	child->style.min_height = saved_minimum;
+	child->style.max_height = saved_maximum;
+	return error;
 }
 
 /*
