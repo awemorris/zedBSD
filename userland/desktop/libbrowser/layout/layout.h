@@ -241,6 +241,9 @@ struct layout_box {
 	int grid_used_column_count;
 	int grid_used_row_count;
 	int grid_used_valid;
+	/* The implicit tracks a Grid put before its explicit ones (grid-names.c). */
+	int grid_leading_columns;
+	int grid_leading_rows;
 
 	/*
 	 * The width the box's content takes laid out without a limit (its

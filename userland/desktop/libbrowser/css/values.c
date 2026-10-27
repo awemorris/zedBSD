@@ -4648,10 +4648,12 @@ values_flex(
 	size_t index;
 	size_t last_number;
 	int numbers;
+	int basis_set;
 	int is_word;
 	int error;
 
 	/* The defaults of a flex value that names some parts: 1 1 0%. */
+	basis_set = 0;
 	memset(&grow, 0, sizeof(grow));
 	grow.kind = CSS_VALUE_NUMBER;
 	grow.number = 1;
@@ -4716,11 +4718,14 @@ values_flex(
 			continue;
 		}
 
-		/* The basis. */
+		/* The basis, once. */
+		if (basis_set)
+			return EINVAL;
 		error = values_single(parse, CSS_PROP_FLEX_BASIS, tokens + starts[index], lengths[index], &candidate);
 		if (error != 0)
 			return error;
 		basis = candidate;
+		basis_set = 1;
 	}
 
 	/* The three longhands. */

@@ -308,6 +308,7 @@ logical_convert(
 	struct css_style *kept;
 	int error;
 	int own;
+	int column;
 
 	/* The physical style, kept. */
 	kept = wb_arena_alloc(&tree->arena, sizeof(*kept));
@@ -319,6 +320,21 @@ logical_convert(
 	/* The logical one in its place (a max-content width measured in physical coordinates no longer holds). */
 	logical_style(&box->style, mode);
 	box->max_content_known = 0;
+
+	/*
+	 * A box of the other vertical mode has its own block start at its
+	 * parent's block end, which align-self names in a grid and across a row
+	 * flex container (a column one aligns it along the inline axis).
+	 */
+	column = box->parent != NULL &&
+	    (box->parent->style.display == CSS_DISPLAY_FLEX || box->parent->style.display == CSS_DISPLAY_INLINE_FLEX) &&
+	    (box->parent->style.flex_direction == CSS_FLEX_COLUMN || box->parent->style.flex_direction == CSS_FLEX_COLUMN_REVERSE);
+	if (kept->writing_mode != mode && !column) {
+		if (box->style.align_self == CSS_ALIGN_SELF_START)
+			box->style.align_self = CSS_ALIGN_SELF_END;
+		else if (box->style.align_self == CSS_ALIGN_SELF_END)
+			box->style.align_self = CSS_ALIGN_SELF_START;
+	}
 
 	/*
 	 * The children of the box's own writing mode or the other vertical one

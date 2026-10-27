@@ -110,6 +110,14 @@ static int style_canonical_grid_auto_flow(struct vm_realm *realm, const struct v
 static int style_canonical_grid_placement(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_decoration_parts(const struct vm_string *value, struct wb_units parts[5]);
 static int style_decoration_longhand(const struct vm_string *name);
+static int style_grid_covers(const struct vm_string *shorthand, const struct vm_string *name);
+static const char *const *style_shorthand_longhands(const struct vm_string *name);
+static int style_flex_part(struct vm_realm *realm, const struct vm_string *shorthand, struct vm_string *value, const char *longhand, struct vm_string **part);
+static int style_canonical_flex(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
+static int style_wide_keyword(const struct vm_string *value);
+static int style_grid_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
+static int style_grid_expand(struct vm_realm *realm, struct style_list *list, const struct vm_string *name);
+static int style_grid_remove_covered(struct vm_realm *realm, struct style_list *list, const struct vm_string *name, int *removed);
 static int style_decoration_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
 static int style_decoration_expand(struct vm_realm *realm, struct style_list *list);
 static int style_property_name(struct vm_realm *realm, vm_value value, struct vm_string **name);
@@ -878,6 +886,10 @@ style_set(
 	if (status != 0)
 		goto roots_cleanup;
 	roots[1] = &value->cell;
+	status = style_canonical_flex(realm, name, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
 
 	/* The declarations as they are. */
 	status = style_read(realm, element, &list);
@@ -904,6 +916,13 @@ style_set(
 		if (status != 0)
 			goto cleanup;
 	}
+
+	/* A grid shorthand replaces its earlier longhands; a longhand splits a grid shorthand that sets it. */
+	status = style_grid_remove_covered(realm, &list, name, &present);
+	if (status == 0)
+		status = style_grid_expand(realm, &list, name);
+	if (status != 0)
+		goto cleanup;
 
 	/* A property not there is appended. */
 	present = style_find(&list, name, &index);
@@ -1003,8 +1022,16 @@ style_remove(
 			goto cleanup;
 	}
 
-	/* Each declaration of the property, the last one's value reported. */
+	/* A grid longhand comes out of a shorthand that sets it; a grid shorthand takes its longhands with it. */
 	removed = 0;
+	status = style_grid_expand(realm, &list, name);
+	if (status != 0)
+		goto cleanup;
+	status = style_grid_remove_covered(realm, &list, name, &removed);
+	if (status != 0)
+		goto cleanup;
+
+	/* Each declaration of the property, the last one's value reported. */
 	for (;;) {
 		present = style_find(&list, name, &index);
 		if (!present)
@@ -1710,6 +1737,343 @@ cleanup:
 	return status;
 }
 
+/*
+ * Tells whether a grid shorthand sets a property: one of its longhands, or
+ * a smaller grid shorthand all of whose longhands it sets.
+ */
+static int
+style_grid_covers(
+	const struct vm_string *shorthand,
+	const struct vm_string *name)
+{
+	const char *const *longhands;
+	const char *const *inner;
+	size_t index;
+	size_t at;
+	int found;
+
+	/* The shorthand's longhands. */
+	longhands = style_shorthand_longhands(shorthand);
+	if (longhands == NULL || vm_string_equal(shorthand, name))
+		return 0;
+
+	/* One of them. */
+	for (index = 0; longhands[index] != NULL; index++) {
+		if (vm_string_equal_ascii(name, longhands[index]))
+			return 1;
+	}
+
+	/* A shorthand inside it. */
+	inner = style_shorthand_longhands(name);
+	if (inner == NULL)
+		return 0;
+	for (index = 0; inner[index] != NULL; index++) {
+		found = 0;
+		for (at = 0; longhands[at] != NULL; at++) {
+			if (strcmp(inner[index], longhands[at]) == 0)
+				found = 1;
+		}
+		if (!found)
+			return 0;
+	}
+
+	/* Succeeded: every longhand of it is the shorthand's. */
+	return 1;
+}
+
+/* The longhands of a grid or flex shorthand (NULL for another property). */
+static const char *const *
+style_shorthand_longhands(
+	const struct vm_string *name)
+{
+	const char *const *longhands;
+
+	/* A grid shorthand, else a flex one. */
+	longhands = css_grid_shorthand_longhands(name);
+	if (longhands == NULL)
+		longhands = css_flex_shorthand_longhands(name);
+	return longhands;
+}
+
+/* Writes the value a flex or flex-flow declaration gives one of its longhands. */
+static int
+style_flex_part(
+	struct vm_realm *realm,
+	const struct vm_string *shorthand,
+	struct vm_string *value,
+	const char *longhand,
+	struct vm_string **part)
+{
+	const char *const *longhands;
+	struct wb_units canonical;
+	struct wb_units parts[3];
+	size_t index;
+	int found;
+	int status;
+
+	/* The parts. */
+	wb_units_init(&canonical);
+	for (index = 0; index < 3U; index++)
+		wb_units_init(&parts[index]);
+	status = css_flex_shorthand_parts(shorthand, value, &canonical, parts, &found);
+
+	/* The longhand's. */
+	longhands = css_flex_shorthand_longhands(shorthand);
+	for (index = 0; status == 0 && found && longhands[index] != NULL; index++) {
+		if (strcmp(longhands[index], longhand) != 0)
+			continue;
+		*part = vm_string_from_units(realm->heap, parts[index].data, parts[index].length);
+		if (*part == NULL)
+			status = ENOMEM;
+		break;
+	}
+	wb_units_release(&canonical);
+	for (index = 0; index < 3U; index++)
+		wb_units_release(&parts[index]);
+	return status;
+}
+
+/* Puts a flex or flex-flow value in its canonical form (another property's as it is). */
+static int
+style_canonical_flex(
+	struct vm_realm *realm,
+	const struct vm_string *name,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	struct wb_units canonical;
+	struct wb_units parts[3];
+	size_t index;
+	int found;
+	int status;
+
+	/* Only the flex shorthands, and not a CSS-wide keyword. */
+	*out = value;
+	if (css_flex_shorthand_longhands(name) == NULL || style_wide_keyword(value))
+		return 0;
+
+	/* The canonical text. */
+	wb_units_init(&canonical);
+	for (index = 0; index < 3U; index++)
+		wb_units_init(&parts[index]);
+	status = css_flex_shorthand_parts(name, value, &canonical, parts, &found);
+	if (status == 0 && found) {
+		*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
+		if (*out == NULL)
+			status = ENOMEM;
+	}
+	wb_units_release(&canonical);
+	for (index = 0; index < 3U; index++)
+		wb_units_release(&parts[index]);
+	return status;
+}
+
+/* Tells whether a value is a CSS-wide keyword, which every longhand of a shorthand takes. */
+static int
+style_wide_keyword(
+	const struct vm_string *value)
+{
+	/* The keywords. */
+	return vm_string_equal_ascii(value, "inherit") || vm_string_equal_ascii(value, "initial") ||
+	    vm_string_equal_ascii(value, "unset") || vm_string_equal_ascii(value, "revert") ||
+	    vm_string_equal_ascii(value, "revert-layer");
+}
+
+/* Writes the value a grid shorthand's declaration gives one of its longhands. */
+static int
+style_grid_part(
+	struct vm_realm *realm,
+	const struct vm_string *shorthand,
+	struct vm_string *value,
+	const char *longhand,
+	struct vm_string **part)
+{
+	struct wb_units out;
+	int found;
+	int status;
+
+	/* A CSS-wide keyword is every longhand's. */
+	*part = NULL;
+	if (style_wide_keyword(value)) {
+		*part = value;
+		return 0;
+	}
+
+	/* A flex shorthand's part. */
+	if (css_flex_shorthand_longhands(shorthand) != NULL)
+		return style_flex_part(realm, shorthand, value, longhand, part);
+
+	/* Otherwise the grid shorthand's part. */
+	wb_units_init(&out);
+	status = css_grid_shorthand_part(realm->heap, shorthand, value, longhand, &out, &found);
+	if (status == 0 && found) {
+		*part = vm_string_from_units(realm->heap, out.data, out.length);
+		if (*part == NULL)
+			status = ENOMEM;
+	}
+	wb_units_release(&out);
+	return status;
+}
+
+/* Reads a grid longhand from the last grid shorthand that sets it. */
+static int
+style_grid_get(
+	struct vm_realm *realm,
+	const struct style_list *list,
+	const struct vm_string *name,
+	vm_value *result,
+	int *present)
+{
+	struct vm_string *shorthand;
+	struct vm_string *part;
+	char longhand[STYLE_NAME_MAX];
+	size_t index;
+	size_t found;
+	int status;
+
+	/* The last shorthand that sets the longhand. */
+	*present = 0;
+	if (name->length >= sizeof(longhand) || name->length < 5U)
+		return 0;
+	for (index = 0; index < name->length; index++)
+		longhand[index] = (char)vm_string_at(name, index);
+	longhand[name->length] = '\0';
+	if (strncmp(longhand, "grid-", 5U) != 0 && strncmp(longhand, "flex-", 5U) != 0)
+		return 0;
+	found = list->names->length;
+	for (index = 0; index < list->names->length; index++) {
+		shorthand = (struct vm_string *)vm_value_as_cell(list->names->elements[index]);
+		if (style_grid_covers(shorthand, name))
+			found = index;
+	}
+	if (found == list->names->length)
+		return 0;
+
+	/* Its part. */
+	shorthand = (struct vm_string *)vm_value_as_cell(list->names->elements[found]);
+	status = style_grid_part(realm, shorthand, (struct vm_string *)vm_value_as_cell(list->values->elements[found]),
+	    longhand, &part);
+	if (status != 0 || part == NULL)
+		return status;
+
+	/* Succeeded: the longhand's value. */
+	*result = vm_value_cell(part);
+	*present = 1;
+	return 0;
+}
+
+/*
+ * Replaces the grid shorthands that set a longhand with their longhands
+ * before the longhand changes (one that cannot be split stays as it is).
+ */
+static int
+style_grid_expand(
+	struct vm_realm *realm,
+	struct style_list *list,
+	const struct vm_string *name)
+{
+	const char *const *longhands;
+	struct vm_string *shorthand;
+	struct vm_string *value;
+	struct vm_string *parts[8];
+	struct vm_string *atom;
+	struct vm_cell *roots[10];
+	size_t index;
+	size_t count;
+	size_t rooted;
+	size_t part;
+	int important;
+	int status;
+
+	/* A grid longhand (or smaller shorthand) only. */
+	if (vm_string_equal_ascii(name, "grid") || name->length < 5U)
+		return 0;
+	index = 0;
+	status = 0;
+	while (index < list->names->length && status == 0) {
+		shorthand = (struct vm_string *)vm_value_as_cell(list->names->elements[index]);
+		if (!style_grid_covers(shorthand, name)) {
+			index++;
+			continue;
+		}
+
+		/* Every part, kept alive while the list changes. */
+		longhands = style_shorthand_longhands(shorthand);
+		value = (struct vm_string *)vm_value_as_cell(list->values->elements[index]);
+		important = vm_to_boolean(list->priorities->elements[index]);
+		rooted = 0;
+		for (count = 0; longhands[count] != NULL && status == 0; count++) {
+			status = style_grid_part(realm, shorthand, value, longhands[count], &parts[count]);
+			if (status == 0 && parts[count] == NULL)
+				status = EINVAL;
+			if (status == 0) {
+				roots[rooted] = &parts[count]->cell;
+				status = vm_heap_add_root(realm->heap, &roots[rooted]);
+				if (status == 0)
+					rooted++;
+			}
+		}
+
+		/* The shorthand goes and its longhands come in its place at the end. */
+		if (status == 0)
+			status = style_list_remove_at(realm, list, (uint32_t)index);
+		for (part = 0; part < count && status == 0; part++) {
+			atom = vm_atom_from_ascii(realm->heap, longhands[part]);
+			if (atom == NULL) {
+				status = ENOMEM;
+				break;
+			}
+			roots[rooted] = &atom->cell;
+			status = vm_heap_add_root(realm->heap, &roots[rooted]);
+			if (status != 0)
+				break;
+			status = style_list_append(realm, list, atom, parts[part], important);
+			vm_heap_remove_root(realm->heap, &roots[rooted]);
+		}
+		while (rooted > 0) {
+			rooted--;
+			vm_heap_remove_root(realm->heap, &roots[rooted]);
+		}
+
+		/* A shorthand that cannot be split stays. */
+		if (status == EINVAL) {
+			status = 0;
+			index++;
+		}
+	}
+	return status;
+}
+
+/* Removes the declarations a grid shorthand sets (its longhands and smaller shorthands). */
+static int
+style_grid_remove_covered(
+	struct vm_realm *realm,
+	struct style_list *list,
+	const struct vm_string *name,
+	int *removed)
+{
+	struct vm_string *earlier;
+	uint32_t index;
+	int status;
+
+	/* Each covered declaration. */
+	index = 0;
+	while (index < list->names->length) {
+		earlier = (struct vm_string *)vm_value_as_cell(list->names->elements[index]);
+		if (!style_grid_covers(name, earlier)) {
+			index++;
+			continue;
+		}
+		status = style_list_remove_at(realm, list, index);
+		if (status != 0)
+			return status;
+		*removed = 1;
+	}
+
+	/* Succeeded: none of them is left. */
+	return 0;
+}
+
 /* Reads a property name argument: lower case, but a custom property's as it is. */
 static int
 style_property_name(
@@ -2190,6 +2554,8 @@ style_get_property_value(
 	present = style_find(&list, name, &index);
 	if (!present) {
 		status = style_decoration_get(realm, &list, name, result, &present);
+		if (status == 0 && !present)
+			status = style_grid_get(realm, &list, name, result, &present);
 		if (status != 0) {
 			style_list_release(realm, &list);
 			vm_heap_remove_root(realm->heap, &name_root);
@@ -2461,6 +2827,8 @@ style_member_get(
 	present = style_find(&list, name, &index);
 	if (!present) {
 		status = style_decoration_get(realm, &list, name, result, &present);
+		if (status == 0 && !present)
+			status = style_grid_get(realm, &list, name, result, &present);
 		if (status != 0) {
 			style_list_release(realm, &list);
 			return status;

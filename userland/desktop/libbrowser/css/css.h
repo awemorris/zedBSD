@@ -833,6 +833,10 @@ int css_grid_lines_serialize(const struct css_grid_place *place, struct wb_units
 int css_grid_area_serialize(const struct css_grid_place *row, const struct css_grid_place *column, struct wb_units *out);
 int css_grid_areas_serialize(const struct css_grid_areas *areas, struct wb_units *out);
 int css_grid_declaration_serialize(struct vm_heap *heap, const uint16_t *units, size_t length, struct wb_units *out, int *handled);
+const char *const *css_grid_shorthand_longhands(const struct vm_string *name);
+const char *const *css_flex_shorthand_longhands(const struct vm_string *name);
+int css_flex_shorthand_parts(const struct vm_string *shorthand, const struct vm_string *value, struct wb_units *canonical, struct wb_units parts[3], int *found);
+int css_grid_shorthand_part(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);
 

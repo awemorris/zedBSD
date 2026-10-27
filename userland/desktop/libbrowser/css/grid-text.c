@@ -24,6 +24,21 @@
 #include <stdio.h>
 #include <string.h>
 
+/*
+ * A shorthand's canonical value cut at its top-level slashes: its text,
+ * its tokens, and the tokens [first, last) of each part (count 0 when it
+ * cannot be cut).
+ */
+struct grid_text_split {
+	struct wb_units canonical;
+	struct wb_arena arena;
+	struct css_token *tokens;
+	size_t token_count;
+	size_t first[4];
+	size_t last[4];
+	int count;
+};
+
 static int grid_text_ascii(const char *ascii, struct wb_units *out);
 static int grid_text_is_name(const struct css_grid_place *place, int end);
 static int grid_text_left_out(const struct css_grid_place *place, int end, const struct css_grid_place *other, int other_end);
@@ -33,6 +48,14 @@ static int grid_text_template(const uint16_t *units, size_t length, struct wb_un
 static int grid_text_piece(const uint16_t *units, const struct css_token *tokens, size_t first, size_t last, struct wb_units *out);
 static int grid_text_string(const struct css_token *token, struct wb_units *out);
 static size_t grid_text_component(const struct css_token *tokens, size_t count, size_t index);
+static int grid_text_split(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, struct grid_text_split *split);
+static void grid_text_split_release(struct grid_text_split *split);
+static int grid_text_split_is_name(const struct grid_text_split *split, int part);
+static int grid_text_split_write(const struct grid_text_split *split, size_t first, size_t last, struct wb_units *out);
+static int grid_text_line_part(struct vm_heap *heap, const struct grid_text_split *split, int row, int part, const char *longhand, struct wb_units *out, int *found);
+static int grid_text_template_part(const struct grid_text_split *split, int grid, int part, struct wb_units *out, int *found);
+static int grid_text_flow_sizes(const struct grid_text_split *split, int side, struct wb_units *out);
+static int grid_text_template_side(const struct grid_text_split *split, int part, struct wb_units *out, int *found);
 
 /*
  * Writes an identifier as CSSOM serializes one.
@@ -949,5 +972,478 @@ grid_text_ascii(
 	}
 
 	/* Succeeded: the characters are appended. */
+	return 0;
+}
+
+/*
+ * The grid shorthands and their longhands, in the order of the parts the
+ * shorthands give them.
+ */
+static const char *const grid_text_shorthands[5][8] = {
+	{ "grid-row", "grid-row-start", "grid-row-end", NULL },
+	{ "grid-column", "grid-column-start", "grid-column-end", NULL },
+	{ "grid-area", "grid-row-start", "grid-column-start", "grid-row-end", "grid-column-end", NULL },
+	{ "grid-template", "grid-template-rows", "grid-template-columns", "grid-template-areas", NULL },
+	{ "grid", "grid-template-rows", "grid-template-columns", "grid-template-areas",
+	  "grid-auto-rows", "grid-auto-columns", "grid-auto-flow", NULL },
+};
+
+/*
+ * The longhands of a grid shorthand (a list that ends with NULL), or NULL
+ * when the name is not a grid shorthand.
+ */
+const char *const *
+css_grid_shorthand_longhands(
+	const struct vm_string *name)
+{
+	size_t row;
+
+	/* The shorthand's row. */
+	for (row = 0; row < 5U; row++) {
+		if (vm_string_equal_ascii(name, grid_text_shorthands[row][0]))
+			return &grid_text_shorthands[row][1];
+	}
+
+	/* Not a grid shorthand. */
+	return NULL;
+}
+
+/*
+ * Writes the value a grid shorthand's value gives one of its longhands
+ * (found is 0 when the name is not one of them or the value cannot be
+ * split).  The shorthand's canonical text is cut at its slashes, and each
+ * part follows the shorthand's grammar: an omitted grid line is the name
+ * of the line it mirrors or auto, the strings of grid-template's rows make
+ * the areas (their rows auto unless sized), and auto-flow on one side of
+ * grid gives that side's auto tracks and the flow.
+ * https://drafts.csswg.org/css-grid-2/#grid-template
+ * https://drafts.csswg.org/css-grid-2/#grid-shorthand
+ */
+int
+css_grid_shorthand_part(
+	struct vm_heap *heap,
+	const struct vm_string *shorthand,
+	const struct vm_string *value,
+	const char *longhand,
+	struct wb_units *out,
+	int *found)
+{
+	struct grid_text_split split;
+	const char *const *longhands;
+	size_t row;
+	int part;
+	int error;
+
+	/* The shorthand and the longhand's part. */
+	*found = 0;
+	longhands = css_grid_shorthand_longhands(shorthand);
+	if (longhands == NULL)
+		return 0;
+	for (part = 0; longhands[part] != NULL; part++) {
+		if (strcmp(longhands[part], longhand) == 0)
+			break;
+	}
+	if (longhands[part] == NULL)
+		return 0;
+	for (row = 0; row < 5U; row++) {
+		if (&grid_text_shorthands[row][1] == longhands)
+			break;
+	}
+
+	/* The canonical value, cut at its slashes. */
+	error = grid_text_split(heap, shorthand, value, &split);
+	if (error != 0 || split.count == 0) {
+		grid_text_split_release(&split);
+		return error;
+	}
+
+	/* The part by the shorthand's grammar. */
+	if (row <= 2U)
+		error = grid_text_line_part(heap, &split, (int)row, part, longhand, out, found);
+	else
+		error = grid_text_template_part(&split, row == 4U, part, out, found);
+	grid_text_split_release(&split);
+	return error;
+}
+
+/* Cuts a shorthand's canonical value into its tokens and the parts between its top-level slashes. */
+static int
+grid_text_split(
+	struct vm_heap *heap,
+	const struct vm_string *shorthand,
+	const struct vm_string *value,
+	struct grid_text_split *split)
+{
+	struct wb_units text;
+	size_t index;
+	int handled;
+	int depth;
+	int error;
+
+	/* The declaration's canonical value (or the value as it is). */
+	memset(split, 0, sizeof(*split));
+	wb_units_init(&split->canonical);
+	wb_arena_init(&split->arena, 0);
+	wb_units_init(&text);
+	error = vm_string_append_units(shorthand, &text);
+	if (error == 0)
+		error = grid_text_ascii(": ", &text);
+	if (error == 0)
+		error = vm_string_append_units(value, &text);
+	handled = 0;
+	if (error == 0)
+		error = css_grid_declaration_serialize(heap, text.data, text.length, &split->canonical, &handled);
+	wb_units_release(&text);
+	if (error == 0 && !handled) {
+		split->canonical.length = 0;
+		error = vm_string_append_units(value, &split->canonical);
+	}
+	if (error != 0)
+		return error;
+
+	/* Its tokens, without the trailing whitespace. */
+	error = css_tokenize(&split->arena, split->canonical.data, split->canonical.length, &split->tokens, &split->token_count);
+	if (error != 0)
+		return error;
+	while (split->token_count > 0 && (split->tokens[split->token_count - 1U].type == CSS_TOKEN_EOF ||
+	    split->tokens[split->token_count - 1U].type == CSS_TOKEN_WHITESPACE))
+		split->token_count--;
+
+	/* The parts between the slashes outside parentheses. */
+	depth = 0;
+	split->first[0] = 0;
+	split->count = 1;
+	for (index = 0; index < split->token_count; index++) {
+		if (split->tokens[index].type == CSS_TOKEN_FUNCTION || split->tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		else if (split->tokens[index].type == CSS_TOKEN_CLOSE_PAREN && depth > 0)
+			depth--;
+		if (depth != 0 || split->tokens[index].type != CSS_TOKEN_DELIM || split->tokens[index].delim != '/')
+			continue;
+		if (split->count == 4) {
+			split->count = 0;
+			return 0;
+		}
+		split->last[split->count - 1] = index;
+		split->first[split->count] = index + 1U;
+		split->count++;
+	}
+	split->last[split->count - 1] = split->token_count;
+
+	/* Each part without its surrounding whitespace (an empty part splits nothing). */
+	for (index = 0; index < (size_t)split->count; index++) {
+		while (split->first[index] < split->last[index] && split->tokens[split->first[index]].type == CSS_TOKEN_WHITESPACE)
+			split->first[index]++;
+		while (split->last[index] > split->first[index] && split->tokens[split->last[index] - 1U].type == CSS_TOKEN_WHITESPACE)
+			split->last[index]--;
+		if (split->first[index] == split->last[index])
+			split->count = 0;
+	}
+
+	/* Succeeded: the value is cut. */
+	return 0;
+}
+
+/* Releases a cut value. */
+static void
+grid_text_split_release(
+	struct grid_text_split *split)
+{
+	/* The tokens and the text. */
+	wb_arena_release(&split->arena);
+	wb_units_release(&split->canonical);
+}
+
+/* Tells whether a part is one custom identifier (the name an omitted line mirrors). */
+static int
+grid_text_split_is_name(
+	const struct grid_text_split *split,
+	int part)
+{
+	const struct css_token *token;
+
+	/* One identifier that is not a keyword of the grammar. */
+	if (split->last[part] != split->first[part] + 1U)
+		return 0;
+	token = &split->tokens[split->first[part]];
+	if (token->type != CSS_TOKEN_IDENT)
+		return 0;
+	if (css_ident_equal(token, "auto") || css_ident_equal(token, "span"))
+		return 0;
+
+	/* Succeeded: the part is a name. */
+	return 1;
+}
+
+/* Writes the tokens first to last of the canonical text as they are. */
+static int
+grid_text_split_write(
+	const struct grid_text_split *split,
+	size_t first,
+	size_t last,
+	struct wb_units *out)
+{
+	/* Nothing for no tokens. */
+	if (last <= first)
+		return 0;
+
+	/* The source text they cover. */
+	return wb_units_append(out, split->canonical.data + split->tokens[first].source_start,
+	    split->tokens[last - 1U].source_end - split->tokens[first].source_start);
+}
+
+/*
+ * Writes a grid line of grid-row, grid-column (row 0 or 1: start, end) or
+ * grid-area (row 2: row start, column start, row end, column end).
+ */
+static int
+grid_text_line_part(
+	struct vm_heap *heap,
+	const struct grid_text_split *split,
+	int row,
+	int part,
+	const char *longhand,
+	struct wb_units *out,
+	int *found)
+{
+	struct wb_units text;
+	int source;
+	int handled;
+	int error;
+
+	/* The part that gives the line, or the one an omitted line mirrors. */
+	source = part;
+	if (part >= split->count) {
+		source = -1;
+		if (row <= 1 || part == 1 || part == 2)
+			source = 0;
+		else if (part == 3)
+			source = split->count >= 2 ? 1 : 0;
+		if (source >= 0 && !grid_text_split_is_name(split, source))
+			source = -1;
+	}
+
+	/* An omitted line that mirrors nothing is auto. */
+	*found = 1;
+	if (source < 0)
+		return grid_text_ascii("auto", out);
+
+	/* The line in its own canonical form. */
+	wb_units_init(&text);
+	error = grid_text_ascii(longhand, &text);
+	if (error == 0)
+		error = grid_text_ascii(": ", &text);
+	if (error == 0)
+		error = grid_text_split_write(split, split->first[source], split->last[source], &text);
+	handled = 0;
+	if (error == 0)
+		error = css_grid_declaration_serialize(heap, text.data, text.length, out, &handled);
+	if (error == 0 && !handled)
+		error = grid_text_split_write(split, split->first[source], split->last[source], out);
+	wb_units_release(&text);
+	return error;
+}
+
+/*
+ * Writes a part of grid-template (rows, columns, areas) or grid (those,
+ * then auto rows, auto columns and the flow).
+ */
+static int
+grid_text_template_part(
+	const struct grid_text_split *split,
+	int grid,
+	int part,
+	struct wb_units *out,
+	int *found)
+{
+	size_t index;
+	int flow_side;
+	int dense;
+
+	/* Which side of grid has auto-flow, if either. */
+	flow_side = -1;
+	dense = 0;
+	for (index = 0; grid && index < split->token_count; index++) {
+		if (split->tokens[index].type != CSS_TOKEN_IDENT)
+			continue;
+		if (css_ident_equal(&split->tokens[index], "auto-flow"))
+			flow_side = split->count >= 2 && index >= split->first[1] ? 1 : 0;
+		if (css_ident_equal(&split->tokens[index], "dense"))
+			dense = 1;
+	}
+	*found = 1;
+
+	/* The auto tracks and the flow. */
+	if (part == 3 || part == 4) {
+		if (flow_side == part - 3)
+			return grid_text_flow_sizes(split, flow_side, out);
+		return grid_text_ascii("auto", out);
+	}
+	if (part == 5) {
+		if (flow_side == 1)
+			return grid_text_ascii(dense ? "column dense" : "column", out);
+		return grid_text_ascii(dense ? "dense" : "row", out);
+	}
+
+	/* The template beside auto-flow: the other side's tracks, none on auto-flow's. */
+	if (flow_side >= 0) {
+		if (part == 2 || part == flow_side || split->count != 2)
+			return grid_text_ascii("none", out);
+		return grid_text_split_write(split, split->first[part], split->last[part], out);
+	}
+
+	/* The template's own forms. */
+	return grid_text_template_side(split, part, out, found);
+}
+
+/* Writes the auto track sizes on auto-flow's side of grid (auto when there are none). */
+static int
+grid_text_flow_sizes(
+	const struct grid_text_split *split,
+	int side,
+	struct wb_units *out)
+{
+	size_t index;
+	size_t next;
+	int written;
+	int error;
+
+	/* The components other than auto-flow and dense. */
+	written = 0;
+	index = split->first[side];
+	while (index < split->last[side]) {
+		next = grid_text_component(split->tokens, split->last[side], index);
+		if (split->tokens[index].type == CSS_TOKEN_WHITESPACE ||
+		    (split->tokens[index].type == CSS_TOKEN_IDENT &&
+		    (css_ident_equal(&split->tokens[index], "auto-flow") || css_ident_equal(&split->tokens[index], "dense")))) {
+			index = next;
+			continue;
+		}
+		if (written > 0) {
+			error = grid_text_ascii(" ", out);
+			if (error != 0)
+				return error;
+		}
+		error = grid_text_split_write(split, index, next, out);
+		if (error != 0)
+			return error;
+		written++;
+		index = next;
+	}
+
+	/* None is auto. */
+	if (written == 0)
+		return grid_text_ascii("auto", out);
+
+	/* Succeeded: the sizes are written. */
+	return 0;
+}
+
+/*
+ * Writes the rows (0), columns (1) or areas (2) of a grid-template value:
+ * none, rows / columns, or the areas form with its strings.
+ */
+static int
+grid_text_template_side(
+	const struct grid_text_split *split,
+	int part,
+	struct wb_units *out,
+	int *found)
+{
+	size_t index;
+	size_t next;
+	int strings;
+	int pending;
+	int written;
+	int error;
+
+	/* Whether the rows have strings. */
+	strings = 0;
+	for (index = split->first[0]; index < split->last[0]; index++) {
+		if (split->tokens[index].type == CSS_TOKEN_STRING)
+			strings = 1;
+	}
+
+	/* none (one part) is none everywhere. */
+	if (split->count == 1 && !strings) {
+		if (split->last[0] != split->first[0] + 1U || split->tokens[split->first[0]].type != CSS_TOKEN_IDENT ||
+		    !css_ident_equal(&split->tokens[split->first[0]], "none")) {
+			*found = 0;
+			return 0;
+		}
+		return grid_text_ascii("none", out);
+	}
+
+	/* rows / columns. */
+	if (!strings) {
+		if (split->count != 2 || part == 2)
+			return grid_text_ascii("none", out);
+		return grid_text_split_write(split, split->first[part], split->last[part], out);
+	}
+
+	/* The areas form's columns. */
+	if (part == 1) {
+		if (split->count < 2)
+			return grid_text_ascii("none", out);
+		return grid_text_split_write(split, split->first[1], split->last[1], out);
+	}
+
+	/* Its rows (an unsized string's row is auto) or its strings. */
+	written = 0;
+	pending = 0;
+	index = split->first[0];
+	while (index <= split->last[0]) {
+		if (index < split->last[0] && split->tokens[index].type == CSS_TOKEN_WHITESPACE) {
+			index++;
+			continue;
+		}
+
+		/* A string's row that no size follows is auto. */
+		if (part == 0 && pending && (index == split->last[0] || split->tokens[index].type == CSS_TOKEN_STRING ||
+		    split->tokens[index].type == CSS_TOKEN_OPEN_SQUARE)) {
+			error = grid_text_ascii(written > 0 ? " auto" : "auto", out);
+			if (error != 0)
+				return error;
+			written++;
+			pending = 0;
+		}
+		if (index == split->last[0])
+			break;
+
+		/* The next component: line names, a string or a size. */
+		next = grid_text_component(split->tokens, split->last[0], index);
+		if (split->tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			while (next < split->last[0] && split->tokens[next - 1U].type != CSS_TOKEN_CLOSE_SQUARE)
+				next++;
+		}
+		if (split->tokens[index].type == CSS_TOKEN_STRING) {
+			pending = 1;
+			if (part == 0) {
+				index = next;
+				continue;
+			}
+		} else {
+			pending = 0;
+			if (part == 2) {
+				index = next;
+				continue;
+			}
+		}
+		if (written > 0) {
+			error = grid_text_ascii(" ", out);
+			if (error != 0)
+				return error;
+		}
+		if (split->tokens[index].type == CSS_TOKEN_STRING)
+			error = grid_text_string(&split->tokens[index], out);
+		else
+			error = grid_text_split_write(split, index, next, out);
+		if (error != 0)
+			return error;
+		written++;
+		index = next;
+	}
+
+	/* Succeeded: the part is written. */
 	return 0;
 }

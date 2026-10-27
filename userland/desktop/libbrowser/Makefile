@@ -95,6 +95,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/css/rule-model.c \
 	$(LIBBROWSER_DIR)/css/values.c \
 	$(LIBBROWSER_DIR)/css/grid-text.c \
+	$(LIBBROWSER_DIR)/css/flex-text.c \
 	$(LIBBROWSER_DIR)/css/cascade.c \
 	$(LIBBROWSER_DIR)/css/index.c \
 	$(LIBBROWSER_DIR)/css/media.c \

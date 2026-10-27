@@ -64,3 +64,15 @@ Origin: 2026-10-27 ユーザーの指示。
 - grid の名前付きの線・area・grid-template/grid の shorthand（3d0dfc2bc ほか）: harness +12 / -0（共通の 1,072 ID で比較、後退の 2 件は直した）。
 - @scope（56f0203cd ほか）: css-cascade の @scope の 22 件のうち 10 件が PASS。
 - 縦書き（p262）: css-writing-modes の static reftest 11 → 25（2 件の後退を調査中）。
+- 全件の測定（2026-10-27）:
+
+  | 測定 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- |
+  | ours-base（基準） | 496 | 841 | 103 | 39 | 1,479（42.60%） |
+  | ours-dev3（Navigation API の merge の後） | 680 | 881 | 104 | 39 | 1,704（49.08%） |
+  | ours-dev6（69502eb73） | 725 | 894 | 104 | 39 | 1,762（50.75%） |
+
+  dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
+  直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
+  縦書きの root を viewport の右へ、匿名 box が writing-mode を継承、UA の margin を logical に、
+  vertical-lr と vertical-rl の入れ子を同じ domain で、vertical-rl の safe の戻り先。

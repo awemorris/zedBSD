@@ -1241,4 +1241,23 @@
     Object.defineProperty(document, 'activeElement', { get: function () { return document.body; }, configurable: true });
     def(document, 'hasFocus', function hasFocus() { return true; });
   }
+  // Interfaces with an indexed getter and a length iterate as arrays do; NodeList and DOMTokenList are also iterable<>,
+  // with the array's entries, keys, values and forEach.
+  (function () {
+    var AP = Array.prototype;
+    ['NodeList', 'HTMLCollection', 'DOMTokenList', 'HTMLAllCollection', 'HTMLFormControlsCollection', 'HTMLOptionsCollection',
+      'DOMStringList', 'FileList', 'StyleSheetList', 'CSSRuleList', 'MediaList', 'DOMRectList', 'CSSStyleDeclaration',
+      'NamedNodeMap', 'TouchList', 'SVGNumberList', 'SVGLengthList', 'SVGStringList', 'SVGTransformList'].forEach(function (name) {
+      var C = g[name];
+      if (typeof C !== 'function' || !C.prototype || Object.prototype.hasOwnProperty.call(C.prototype, Symbol.iterator)) return;
+      def(C.prototype, Symbol.iterator, AP.values);
+    });
+    ['NodeList', 'DOMTokenList'].forEach(function (name) {
+      var C = g[name];
+      if (typeof C !== 'function' || !C.prototype) return;
+      ['entries', 'keys', 'values', 'forEach'].forEach(function (m) {
+        if (!Object.prototype.hasOwnProperty.call(C.prototype, m)) Object.defineProperty(C.prototype, m, { value: AP[m], writable: true, configurable: true, enumerable: true });
+      });
+    });
+  })();
 })

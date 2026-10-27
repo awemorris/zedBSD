@@ -144,6 +144,8 @@ page_grid_tracks(
 	struct dom_node *node,
 	int columns,
 	struct wb_vector *sizes,
+	int *leading,
+	int *repeats,
 	int *found)
 {
 	struct page *page;
@@ -157,6 +159,8 @@ page_grid_tracks(
 	/* Child Documents use transient geometry trees and need a separate owned-copy path. */
 	page = context;
 	*found = 0;
+	*leading = 0;
+	*repeats = 0;
 	if (node->document != page->document)
 		return 0;
 
@@ -177,9 +181,13 @@ page_grid_tracks(
 	/* Columns and rows are independent logical track sequences. */
 	tracks = box->grid_used_rows;
 	count = box->grid_used_row_count;
+	*leading = box->grid_leading_rows;
+	*repeats = box->style.row_repeat.count;
 	if (columns) {
 		tracks = box->grid_used_columns;
 		count = box->grid_used_column_count;
+		*leading = box->grid_leading_columns;
+		*repeats = box->style.column_repeat.count;
 	}
 
 	/* Copy every value while the current arena is still alive and unchanged. */

@@ -60,6 +60,8 @@ layout_grid_names(
 	int first;
 
 	/* Each child's lines, and the first line any item in the flow reaches. */
+	box->grid_leading_columns = 0;
+	box->grid_leading_rows = 0;
 	column_first = 1;
 	row_first = 1;
 	for (child = box->first_child; child != NULL; child = child->next) {
@@ -242,6 +244,10 @@ grid_names_prepend(
 	*track_count += count;
 	if (repeat->length > 0)
 		repeat->at += count;
+	if (columns)
+		box->grid_leading_columns += count;
+	else
+		box->grid_leading_rows += count;
 
 	/* Every definite line moves on as far. */
 	for (child = box->first_child; child != NULL; child = child->next) {

@@ -174,6 +174,13 @@ layout_shrink_to_fit(
 	int indefinite_percentage;
 	int error;
 
+	/* A box of the other orientation fits its content along its own inline axis when it is laid out. */
+	if (layout_logical_wanted(tree, box) &&
+	    (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) != (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB)) {
+		error = layout_block(tree, box, room);
+		return error;
+	}
+
 	/* A percentage is indefinite while an ancestor's intrinsic width is being measured. */
 	width = box->style.width;
 	indefinite_percentage = tree->measuring != 0 && width.unit == CSS_UNIT_PERCENT;

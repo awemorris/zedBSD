@@ -315,7 +315,7 @@ void page_set_scroll(struct page *page, double x, double y);
 
 /* The geometry and the selectors of scripts (geometry.c, ws074-p031). */
 struct css_engine *page_selector_engine(void *context);
-int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *found);
+int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
 void page_document_size(void *context, double *width, double *height);
 void page_scroll(void *context, double *x, double *y);

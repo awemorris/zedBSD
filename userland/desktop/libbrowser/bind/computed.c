@@ -133,7 +133,9 @@ enum computed_property {
 	COMPUTED_GRID_COLUMN_END,
 	COMPUTED_GRID_ROW,
 	COMPUTED_GRID_COLUMN,
-	COMPUTED_GRID_AREA
+	COMPUTED_GRID_AREA,
+	COMPUTED_FLEX,
+	COMPUTED_FLEX_FLOW
 };
 
 /*
@@ -166,6 +168,8 @@ static int computed_write_url_quoted(const struct vm_string *text, struct wb_uni
 static int computed_write_offset(const struct css_style *style, int side, struct wb_units *out);
 static int computed_write_font_family(const struct css_style *style, struct wb_units *out);
 static int computed_write_tracks(const struct css_track *tracks, int count, const struct css_line_names *names, struct wb_units *out);
+static void computed_line_names(const struct css_line_names *names, const struct css_track_repeat *repeat, int repeats, int line, struct css_line_names *out);
+static void computed_names_add(struct css_line_names *out, const struct css_line_names *from, int first, int end);
 
 static int computed_track_minimum(const struct css_track *track, struct wb_units *out);
 static int computed_track_breadth(const struct css_track *track, struct wb_units *out);
@@ -281,6 +285,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "grid-row", COMPUTED_GRID_ROW },
 	{ "grid-column", COMPUTED_GRID_COLUMN },
 	{ "grid-area", COMPUTED_GRID_AREA },
+	{ "flex", COMPUTED_FLEX },
+	{ "flex-flow", COMPUTED_FLEX_FLOW },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -752,6 +758,11 @@ computed_write_grid(
 	size_t index;
 	int explicit_count;
 	int columns;
+	const struct css_track_repeat *repeat;
+	struct css_line_names named;
+	int leading;
+	int repeats;
+	int line;
 	int found;
 	int error;
 
@@ -772,7 +783,7 @@ computed_write_grid(
 
 	/* Copy one axis from the current final layout. */
 	found = 0;
-	error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &found);
+	error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &leading, &repeats, &found);
 	if (error != 0)
 		goto cleanup;
 
@@ -787,34 +798,42 @@ computed_write_grid(
 		goto cleanup;
 	}
 
-	/* The explicit lines' names go around the explicit tracks (not when a repeat moved them). */
+	/* The explicit lines' names go around the explicit tracks (an automatic repeat's as many times as it was put in). */
 	names = style->row_names;
+	repeat = &style->row_repeat;
 	explicit_count = style->row_count;
 	if (columns) {
 		names = style->column_names;
+		repeat = &style->column_repeat;
 		explicit_count = style->column_count;
 	}
-	if (style->column_repeat.length != 0 && columns)
-		names = NULL;
-	if (style->row_repeat.length != 0 && !columns)
-		names = NULL;
+	if (repeat->length > 0 && repeats > 1)
+		explicit_count += (repeats - 1) * repeat->length;
 
 	/* Every explicit and implicit track is serialized independently in logical order. */
 	tracks = sizes.items;
-	for (index = 0; index < sizes.count; index++) {
-		/* The names of the line before an explicit track. */
-		if (names != NULL && (int)index <= explicit_count && names[index].count > 0) {
+	for (index = 0; index <= sizes.count; index++) {
+		/* The names of the line before the track (or after the last one). */
+		line = (int)index - leading;
+		named.count = 0;
+		if (names != NULL && line >= 0 && line <= explicit_count)
+			computed_line_names(names, repeat, repeats, line, &named);
+		if (named.count > 0) {
 			if (index != 0) {
 				error = computed_ascii(" ", out);
 				if (error != 0)
 					goto cleanup;
 			}
-			error = css_line_names_serialize(&names[index], out);
+			error = css_line_names_serialize(&named, out);
 			if (error != 0)
 				goto cleanup;
+			if (index == sizes.count)
+				break;
 			error = computed_ascii(" ", out);
 			if (error != 0)
 				goto cleanup;
+		} else if (index == sizes.count) {
+			break;
 		} else if (index != 0) {
 			/* Separate adjacent tracks without inventing any extra gap track. */
 			error = computed_ascii(" ", out);
@@ -824,16 +843,6 @@ computed_write_grid(
 
 		/* Pixel serialization uses the actual solver output, including fractional lengths. */
 		error = computed_pixels(tracks[index], out);
-		if (error != 0)
-			goto cleanup;
-	}
-
-	/* The names of the line after the last explicit track, when the grid ends there. */
-	if (names != NULL && (int)sizes.count == explicit_count && names[explicit_count].count > 0) {
-		error = computed_ascii(" ", out);
-		if (error != 0)
-			goto cleanup;
-		error = css_line_names_serialize(&names[explicit_count], out);
 		if (error != 0)
 			goto cleanup;
 	}
@@ -1188,6 +1197,24 @@ computed_write_keyword(
 	case COMPUTED_FLEX_BASIS:
 		error = computed_length(&style->flex_basis, out);
 		break;
+	case COMPUTED_FLEX:
+		error = computed_number(style->flex_grow, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_number(style->flex_shrink, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_length(&style->flex_basis, out);
+		break;
+	case COMPUTED_FLEX_FLOW:
+		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_name(computed_flex_wraps, 3, style->flex_wrap, out);
+		break;
 	case COMPUTED_JUSTIFY_CONTENT:
 		error = computed_align(style->justify_content == CSS_ALIGN_STRETCH ? CSS_ALIGN_NORMAL : style->justify_content, (style->flex_keywords & 1u) != 0, out);
 		break;
@@ -1368,6 +1395,72 @@ computed_write_font_family(
 
 	/* Succeeded: the families are written. */
 	return 0;
+}
+
+/*
+ * Finds the names of a line of an explicit grid whose automatic repeat
+ * was put in repeats times: the template's own names, with the repeat's
+ * first and last lines' own names meeting at each line between two
+ * repetitions.
+ */
+static void
+computed_line_names(
+	const struct css_line_names *names,
+	const struct css_track_repeat *repeat,
+	int repeats,
+	int line,
+	struct css_line_names *out)
+{
+	int at;
+	int length;
+	int offset;
+
+	/* Without a repeat the template's line is the line. */
+	out->count = 0;
+	at = repeat->at;
+	length = repeat->length;
+	if (length <= 0 || repeats <= 1) {
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+
+	/* Before the repeat, at its first line, and after it. */
+	if (line <= at) {
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+	offset = line - at;
+	if (offset >= repeats * length) {
+		line -= (repeats - 1) * length;
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+
+	/* Between two repetitions: the last line's own names, then the first line's own ones. */
+	if (offset % length == 0) {
+		computed_names_add(out, &names[at + length], 0, repeat->name_end);
+		computed_names_add(out, &names[at], repeat->name_prefix, names[at].count);
+		return;
+	}
+
+	/* A line inside a repetition. */
+	line = at + offset % length;
+	computed_names_add(out, &names[line], 0, names[line].count);
+}
+
+/* Adds the names first to end of a line to a list (as many as it holds). */
+static void
+computed_names_add(
+	struct css_line_names *out,
+	const struct css_line_names *from,
+	int first,
+	int end)
+{
+	int index;
+
+	/* Each name in turn. */
+	for (index = first; index < end && out->count < CSS_LINE_NAMES; index++)
+		out->names[out->count++] = from->names[index];
 }
 
 /* Writes computed track breadths when actual used tracks are not requested or available. */

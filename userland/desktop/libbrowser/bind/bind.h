@@ -213,8 +213,13 @@ struct bind_host {
 	struct css_engine *(*selector_engine)(void *context);
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
-	/* Appends used CSS-pixel Grid tracks to a caller-owned double vector; found=0 requests computed fallback. */
-	int (*grid_tracks)(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *found);
+	/*
+	 * Appends used CSS-pixel Grid tracks to a caller-owned double vector and
+	 * reports how many implicit ones come before the explicit grid and how
+	 * many times an automatic repeat was put in it; found=0 requests
+	 * computed fallback.
+	 */
+	int (*grid_tracks)(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 	void (*document_size)(void *context, double *width, double *height);
 	void (*scroll)(void *context, double *x, double *y);
 	const struct bind_storage_calls *storage;

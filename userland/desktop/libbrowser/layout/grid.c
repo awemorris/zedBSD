@@ -81,6 +81,7 @@ struct grid_sizes {
 
 static int grid_span_has_fixed_rows(const struct css_style *style, const struct grid_item *item, const struct grid_state *grid, layout_unit gap, layout_unit available);
 static int grid_fixed_span_minimum(const struct layout_box *box, int64_t *minimum);
+static int grid_column_auto_minimum(struct layout_box *box, layout_unit containing_width, layout_unit *minimum);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
 static int grid_copy_used_axis(struct layout_tree *tree, const layout_unit *sizes, int count, double **copy);
 static int grid_collect(struct layout_box *box, struct grid_state *grid);
@@ -2430,6 +2431,18 @@ grid_size_columns(
 		}
 	}
 
+	/* A fixed track with an automatic minimum holds its one-column items' minimum contributions. */
+	for (index = 0; index < grid->item_count; index++) {
+		item = &grid->items[index];
+		if (item->column_span != 1)
+			continue;
+		track = grid_column_track(&box->style, item->column);
+		if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
+			continue;
+		if (grid_column_auto_minimum(item->box, box->width, &width) && width > grid->columns[item->column])
+			grid->columns[item->column] = width;
+	}
+
 	/* The auto tracks (and the fr ones while measuring): their one-column items' widths. */
 	for (index = 0; index < grid->item_count; index++) {
 		/* Only one-column items set this first contribution bound. */
@@ -3020,6 +3033,44 @@ grid_fixed_span_minimum(
 }
 
 /*
+ * Finds the minimum contribution of an item to a column whose minimum is
+ * auto: its outer width at its preferred width, or at its minimum width
+ * when the preferred one is auto.  An item with neither has a content
+ * minimum that a fixed maximum clamps, so it adds nothing (0 is returned).
+ * https://drafts.csswg.org/css-grid-2/#min-size-auto
+ */
+static int
+grid_column_auto_minimum(
+	struct layout_box *box,
+	layout_unit containing_width,
+	layout_unit *minimum)
+{
+	const struct css_length *given;
+	layout_unit frame;
+	layout_unit content;
+
+	/* The preferred width when it is a length, else the minimum width. */
+	given = &box->style.width;
+	if (given->unit == CSS_UNIT_AUTO)
+		given = &box->style.min_width;
+	if (given->unit != CSS_UNIT_PX)
+		return 0;
+
+	/* The margins, borders and padding around it. */
+	layout_box_model(box, containing_width);
+	frame = box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->padding[CSS_RIGHT] + box->border[CSS_RIGHT];
+	content = layout_from_px(given->value);
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		content -= frame;
+	if (content < 0)
+		content = 0;
+
+	/* Succeeded: the outer width. */
+	*minimum = content + frame + box->margin[CSS_LEFT] + box->margin[CSS_RIGHT];
+	return 1;
+}
+
+/*
  * Sizes the rows: a fixed track at its length, the others as tall as
  * their one-row items' margin boxes; an item spanning rows makes the last
  * of them taller when they do not hold it.
@@ -3037,6 +3088,7 @@ grid_size_rows(
 	layout_unit minimum;
 	layout_unit spanned;
 	layout_unit used;
+	int64_t contribution;
 	float fr_total;
 	size_t index;
 	int row;
@@ -3075,6 +3127,18 @@ grid_size_rows(
 			fr_total += track->fr;
 			grid->rows[row] = grid_track_length(&track->minimum, available, 0);
 		}
+	}
+
+	/* A fixed row with an automatic minimum holds its one-row items' minimum contributions. */
+	for (index = 0; index < grid->item_count; index++) {
+		item = &grid->items[index];
+		if (item->row_span != 1 || item->row >= grid->row_count)
+			continue;
+		track = grid_row_track(&box->style, item->row);
+		if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
+			continue;
+		if (grid_fixed_span_minimum(item->box, &contribution) && contribution > grid->rows[item->row])
+			grid->rows[item->row] = (layout_unit)contribution;
 	}
 
 	/* The auto rows, and fractional rows without a definite height: their one-row items. */
