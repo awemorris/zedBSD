@@ -448,9 +448,6 @@ layout_grid(
 		box->grid_used_row_count = 0;
 	}
 
-	/* Named lines and spans become line numbers before anything places the children. */
-	layout_grid_names(box);
-
 	/* The children out of the flow have their static place at the content box's corner. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (!child->out_of_flow)
@@ -485,6 +482,9 @@ layout_grid(
 
 	/* Automatic repeats take their track counts from the definite size. */
 	grid_expand_repeats(tree, box);
+
+	/* Named lines and spans become line numbers once the repeats have their counts. */
+	layout_grid_names(box);
 
 	/* The items, placed in their cells. */
 	memset(&grid, 0, sizeof(grid));

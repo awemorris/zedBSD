@@ -508,6 +508,9 @@ struct css_track_list {
 	int repeat_at;
 	int repeat_length;
 	int repeat_fit;
+	/* How many names the repeat's first line has before its own, and how many of its last line's are its own. */
+	int repeat_name_prefix;
+	int repeat_name_end;
 	/* The names of the count + 1 lines around the tracks, and whether any line has one. */
 	struct css_line_names names[CSS_TRACKS + 1];
 	int named;

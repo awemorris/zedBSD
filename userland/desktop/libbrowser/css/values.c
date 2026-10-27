@@ -5468,12 +5468,21 @@ values_track_list(
 				if (comma >= end)
 					return EINVAL;
 				first = list->count;
+				prefix = 0;
+				if (first <= CSS_TRACKS)
+					prefix = list->names[first].count;
 				error = values_track_list(parse, tokens + comma + 1U, end - comma - 2U, list, depth + 1);
 				if (error != 0)
 					return error;
 				added = list->count - first;
 				if (added == 0)
 					return EINVAL;
+
+				/* Which names of the repeat's first and last lines are its own (the ones around it follow later). */
+				list->repeat_name_prefix = prefix;
+				list->repeat_name_end = 0;
+				if (list->count <= CSS_TRACKS)
+					list->repeat_name_end = list->names[list->count].count;
 
 				/* Every repeated track needs a definite size for layout to count the repeats. */
 				for (inner = first; inner < list->count; inner++) {

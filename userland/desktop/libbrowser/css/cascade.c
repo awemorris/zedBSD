@@ -4737,6 +4737,8 @@ cascade_tracks(
 		repeat->length = value->tracks->repeat_length;
 		repeat->at = value->tracks->repeat_at;
 		repeat->fit = value->tracks->repeat_fit;
+		repeat->name_prefix = value->tracks->repeat_name_prefix;
+		repeat->name_end = value->tracks->repeat_name_end;
 	}
 
 	/* Each track. */

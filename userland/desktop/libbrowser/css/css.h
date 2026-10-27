@@ -490,6 +490,13 @@ struct css_track_repeat {
 	int fit;
 	/* The times layout has put the tracks in the template (zero before). */
 	int count;
+	/*
+	 * The names of the template's line at the repeat's start that come
+	 * before the repeat's own, and how many of the line after it are the
+	 * repeat's own (the others come after the repeat).
+	 */
+	int name_prefix;
+	int name_end;
 };
 
 /* Auto-placement direction and optional dense packing (row is zero). */
