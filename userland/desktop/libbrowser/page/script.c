@@ -1170,7 +1170,7 @@ script_release(
 
 /*
  * Tells the scripts the document is parsed: DOMContentLoaded at the
- * document, then load at the window.
+ * document, then load and pageshow at the window.
  */
 int
 page_fire_load(
@@ -1188,6 +1188,11 @@ page_fire_load(
 	/* Then it is complete, and the window's load fires. */
 	bind_window_set_ready_state(page->window, "complete");
 	error = bind_fire_event(page->window, NULL, "load", BIND_EVENT_DOCUMENT, &canceled);
+	if (error != 0)
+		return error;
+
+	/* The document is shown: pageshow, last of the loading's events. */
+	error = bind_fire_event(page->window, NULL, "pageshow", BIND_EVENT_DOCUMENT, &canceled);
 	if (error != 0)
 		return error;
 

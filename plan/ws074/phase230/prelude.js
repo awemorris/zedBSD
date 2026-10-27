@@ -1,6 +1,6 @@
 // The web platform pieces that are written in the page's own language (ws074-p230).
 // bind/prelude.c holds this text as a C string; this file is the readable source it is made from.
-// It is a function of the natives (parseURL, setURL, scrollToFragment) and the global object.
+// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower) and the global object.
 (function (native, g) {
   'use strict';
   var parseURL = native.parseURL;
@@ -374,7 +374,9 @@
     function docURL() { return hrefGetter.call(g.location); }
     function noFrag(u) { var i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); }
     function frag(u) { var i = u.indexOf('#'); return i < 0 ? null : u.slice(i + 1); }
-    function domError(name, message) { return new DOMException(message, name); }
+    // The errors the browser makes (not a script's) are told apart for navigateerror's filename.
+    var browserErrors = new WeakSet();
+    function domError(name, message) { var e = new DOMException(message, name); browserErrors.add(e); return e; }
     function abortError() { return domError('AbortError', 'The navigation was aborted.'); }
     // A serialized state is { v: copy } (null is no state); each read is a fresh copy.
     function serialize(v) { return { v: structuredClone(v) }; }
@@ -452,8 +454,12 @@
         scrollMode: from ? from.scrollMode : 'auto', nhe: null };
     }
     // The first entry follows the document's URL until it is left (the URL is set after this runs).
+    var loadedURL = null;
     function urlOf(entry) { return entry.url === null ? docURL() : entry.url; }
-    function leave(entry) { if (entry.url === null) entry.url = docURL(); saveScroll(entry); }
+    function leave(entry) {
+      if (entry.url === null) { entry.url = docURL(); loadedURL = entry.url; }
+      saveScroll(entry);
+    }
     function findEntry(key) {
       for (var i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
       return null;
@@ -633,8 +639,12 @@
       try { if (e instanceof Error) return 'Uncaught ' + String(e); } catch (x) { /* none */ }
       return '';
     }
+    // The events the browser fires are trusted.  A browser error is the document's; a script error's script is not
+    // known, so the document as it was loaded stands for it.
+    function fire(target, event) { return native.fire(target, event); }
     function fireError(e) {
-      navigation.dispatchEvent(new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: '', lineno: 0, colno: 0 }));
+      var filename = browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
+      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 0, colno: 0 }));
     }
 
     // Aborts the navigate event under way (a new navigation, window.stop(), a canceled event).
@@ -717,11 +727,11 @@
       var i;
       if (ongoingTracker) notifyCommitted(ongoingTracker, nhe(entries[current]));
       if (transition) transition._c.resolve();
-      navigation.dispatchEvent(new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
-      for (i = 0; i < disposed.length; i++) disposed[i].dispatchEvent(new Event('dispose'));
+      fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
+      for (i = 0; i < disposed.length; i++) fire(disposed[i], new Event('dispose'));
     }
     function queueHashChange(oldURL, newURL) {
-      setTimeout(function () { g.dispatchEvent(new HashChangeEvent('hashchange', { oldURL: oldURL, newURL: newURL })); }, 0);
+      setTimeout(function () { fire(g, new HashChangeEvent('hashchange', { oldURL: oldURL, newURL: newURL })); }, 0);
     }
     // The URL and history update steps: pushState(), replaceState() and intercepted navigations.
     function updateURLAndHistory(url, classic, handling) {
@@ -755,7 +765,7 @@
       native.setURL(entry.url);
       classicState = entry.classic ? deserialize(entry.classic) : null;
       entriesChanged(from, 'traverse', []);
-      g.dispatchEvent(new PopStateEvent('popstate', { state: classicState, hasUAVisualTransition: false }));
+      fire(g, new PopStateEvent('popstate', { state: classicState, hasUAVisualTransition: false }));
       if (entry.scrollMode === 'auto' && !suppressScroll) restoreScroll(entry);
       if (frag(oldURL) !== frag(entry.url)) queueHashChange(oldURL, entry.url);
     }
@@ -801,7 +811,7 @@
       ongoingEvent = event;
       focusChanged = false;
       suppressScroll = false;
-      try { dispatched = navigation.dispatchEvent(event); } finally { n.dispatching = false; }
+      try { dispatched = fire(navigation, event); } finally { n.dispatching = false; }
       if (!dispatched || n.canceled) {
         if (!controller.signal.aborted) abortOngoing();
         return;
@@ -832,7 +842,7 @@
         if (controller.signal.aborted) return;
         if (ongoingEvent === event) ongoingEvent = null;
         finish(event, true);
-        navigation.dispatchEvent(new Event('navigatesuccess'));
+        fire(navigation, new Event('navigatesuccess'));
         if (t) resolveFinished(t);
         if (transition) { transition._f.resolve(); transition = null; }
       }, function (reason) {
@@ -916,7 +926,7 @@
         if (options.state === undefined) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': required member state is undefined.");
         state = serialize(options.state);
         entries[current].navState = state;
-        this.dispatchEvent(new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: null, from: nhe(entries[current]) }));
+        fire(this, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: null, from: nhe(entries[current]) }));
       }
       get transition() { return transition; }
       get activation() { return activation; }
@@ -1062,6 +1072,24 @@
           configurable: true, enumerable: dd.enumerable });
       }
     })();
+
+    // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
+    native.setHyperlinkFollower(function (link) {
+      var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;
+      href = link.getAttribute('href');
+      if (href === null && svg) href = link.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+      if (href === null || !link.isConnected) return;
+      target = link.getAttribute('target');
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
+      u = resolveURL(href);
+      if (u === null) return;
+      download = !svg && link.hasAttribute('download') ? link.getAttribute('download') : null;
+      if (download !== null) {
+        fireNavigate({ type: 'push', url: u, navState: null, sameDocument: false, sourceElement: link, downloadRequest: download });
+        return;
+      }
+      navigateTo(u, { history: 'auto', navState: null, sourceElement: link });
+    });
 
     // window.stop() aborts the navigation under way (loading the document is not stopped).
     def(g, 'stop', function stop() { if (ongoingEvent) abortOngoing(); });

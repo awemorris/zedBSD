@@ -32,6 +32,8 @@
 
 static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
 
 /* parseURL(input, base): the parts of the URL as an array of strings, or null when it does not parse. */
@@ -185,6 +187,77 @@ prelude_scroll_fragment(
 
 	/* Succeeded: whether the fragment named an element. */
 	*result = vm_value_boolean(found);
+	return 0;
+}
+
+/* fire(target, event): dispatches an event the browser fires (it is trusted); whether no listener canceled it. */
+static int
+prelude_fire(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct bind_listeners *listeners;
+	struct bind_event *event;
+	vm_value target;
+	int canceled;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+	window = bind_window_of(realm);
+
+	/* The target must be able to have listeners. */
+	target = js_argument(args, count, 0);
+	status = bind_listeners_of(window, target, 0, &listeners);
+	if (status == EINVAL)
+		return bind_throw_illegal(realm);
+	if (status != 0)
+		return status;
+
+	/* The event, which must not be in a dispatch already. */
+	event = bind_event_of(js_argument(args, count, 1));
+	if (event == NULL)
+		return vm_throw_type_error(realm, "fire: parameter 2 is not of type 'Event'.");
+	if (event->dispatching || !event->initialized)
+		return bind_throw_dom(realm, "InvalidStateError", "The event is uninitialized or already being dispatched.");
+
+	/* The browser's event is trusted. */
+	event->trusted = 1;
+	status = bind_dispatch(window, target, js_argument(args, count, 1), &canceled);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: true unless a listener canceled it. */
+	*result = vm_value_boolean(!canceled);
+	return 0;
+}
+
+/* setHyperlinkFollower(function): the function bind_follow_hyperlink calls with a clicked link. */
+static int
+prelude_set_follower(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	vm_value follower;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+
+	/* Only a function can follow links. */
+	follower = js_argument(args, count, 0);
+	if (!vm_value_is_callable(follower))
+		return vm_throw_type_error(realm, "setHyperlinkFollower: parameter 1 is not a function.");
+
+	/* Succeeded: the window keeps it (its trace marks it). */
+	window = bind_window_of(realm);
+	window->follow_hyperlink = vm_value_as_cell(follower);
 	return 0;
 }
 
@@ -443,6 +516,46 @@ prelude_sync_get(
 	return status;
 }
 
+/*
+ * Follows a hyperlink a script clicked (an a or area element).
+ *
+ * The prelude's function navigates to the link's URL; an exception it throws
+ * is reported like a listener's.
+ */
+int
+bind_follow_hyperlink(
+	struct bind_window *window,
+	struct dom_element *element)
+{
+	struct vm_realm *realm;
+	vm_value argument;
+	vm_value returned;
+	int status;
+
+	/* Nothing follows links before the prelude sets its function. */
+	realm = window->realm;
+	if (window->follow_hyperlink == NULL)
+		return 0;
+
+	/* The element's object. */
+	status = bind_wrap(window, &element->node, &argument);
+	if (status != 0)
+		return status;
+
+	/* The function navigates. */
+	status = vm_call(realm, vm_value_cell(window->follow_hyperlink), VM_VALUE_UNDEFINED, &argument, 1, &returned);
+	if (status == VM_THROWN) {
+		bind_report_exception(window, realm->exception);
+		realm->exception = VM_VALUE_UNDEFINED;
+		return 0;
+	}
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the link is followed. */
+	return 0;
+}
+
 /* Forgets the window's pending script requests (the page cancelled their host requests). */
 void
 bind_requests_release(
@@ -510,7 +623,7 @@ bind_install_prelude(
 	struct vm_object *natives;
 	int status;
 
-	/* The page's own objects over the URL parser and the document's URL and scrolling. */
+	/* The page's own objects over the URL parser, the document's URL and scrolling, trusted dispatch and links. */
 	realm = window->realm;
 	natives = vm_object_create(realm->heap, realm->object_prototype);
 	if (natives == NULL)
@@ -526,6 +639,14 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "scrollToFragment", 1, prelude_scroll_fragment, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "scrollToFragment", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "fire", 2, prelude_fire, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "fire", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setHyperlinkFollower", 1, prelude_set_follower, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setHyperlinkFollower", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status != 0)
 		return status;
 	status = prelude_run(window, prelude_source, sizeof(prelude_source) - 1U, vm_value_cell(natives));

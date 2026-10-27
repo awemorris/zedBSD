@@ -18,6 +18,7 @@ static int click_event(struct bind_window *window, struct dom_element *element, 
 static int click_finish(struct bind_window *window, struct dom_element *element, struct vm_cell **roots, unsigned count, int status);
 static int click_restore(struct dom_element *element, struct dom_element *previous, int checked, int indeterminate);
 static int click_submit(struct bind_window *window, struct dom_element *element);
+static int click_link(struct dom_element *element);
 static int click_notify(struct bind_window *window, struct dom_element *element, int old_checked, struct vm_cell **root);
 
 /*
@@ -142,12 +143,78 @@ bind_click(
 		return status;
 	}
 
+	/* A link the click landed in is followed. */
+	status = bind_click_follow(window, element);
+	if (status != 0) {
+		status = click_finish(window, element, roots, 3U, status);
+		return status;
+	}
+
 	/* Succeeded: releases the recursion protocol and all temporary graph roots. */
 	status = click_finish(window, element, roots, 3U, 0);
 	if (status != 0)
 		return status;
 
 	/* Succeeded: all activation callbacks finished and released their temporary roots. */
+	return 0;
+}
+
+/*
+ * Follows the link that is a clicked element or its nearest ancestor.
+ *
+ * A click's activation behavior; an input's own activation is the only one
+ * it has.
+ */
+int
+bind_click_follow(
+	struct bind_window *window,
+	struct dom_element *element)
+{
+	struct dom_node *walk;
+	int status;
+
+	/* An input has its own activation. */
+	if (click_html(element, DOM_TAG_INPUT))
+		return 0;
+
+	/* The nearest inclusive ancestor that is a link. */
+	for (walk = &element->node; walk != NULL; walk = walk->parent) {
+		if (walk->type == DOM_ELEMENT && click_link((struct dom_element *)walk))
+			break;
+	}
+
+	/* No link: nothing to follow. */
+	if (walk == NULL)
+		return 0;
+
+	/* The session history navigates. */
+	status = bind_follow_hyperlink(window, (struct dom_element *)walk);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the link is followed. */
+	return 0;
+}
+
+/* Tells whether an element is a hyperlink: an HTML a or area, or an SVG a. */
+static int
+click_link(
+	struct dom_element *element)
+{
+	int html;
+	int svg;
+
+	/* The HTML links. */
+	html = click_html(element, DOM_TAG_A) || click_html(element, DOM_TAG_AREA);
+	if (html)
+		return 1;
+
+	/* SVG's a element. */
+	svg = element->ns == DOM_NS_SVG && vm_string_equal_ascii(element->local_name, "a");
+	if (svg)
+		return 1;
+
+	/* Anything else is not a link. */
 	return 0;
 }
 
