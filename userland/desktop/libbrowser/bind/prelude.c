@@ -122,10 +122,10 @@ prelude_set_url(
 	int status;
 
 	UNUSED_PARAMETER(this_value);
-	window = bind_window_of(realm);
-	*result = vm_value_boolean(0);
 
 	/* A frame's URL belongs to its frame, not to the page's host. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
 	if (window->owned || window->host.url_set == NULL)
 		return 0;
 
@@ -166,10 +166,10 @@ prelude_scroll_fragment(
 	int status;
 
 	UNUSED_PARAMETER(this_value);
-	window = bind_window_of(realm);
-	*result = vm_value_boolean(0);
 
 	/* The fragment as UTF-8. */
+	window = bind_window_of(realm);
+	*result = vm_value_boolean(0);
 	wb_buffer_init(&fragment);
 	status = prelude_utf8_argument(args, count, 0, &fragment, &present);
 	if (status != 0 || !present) {
@@ -207,9 +207,9 @@ prelude_fire(
 	int status;
 
 	UNUSED_PARAMETER(this_value);
-	window = bind_window_of(realm);
 
 	/* The target must be able to have listeners. */
+	window = bind_window_of(realm);
 	target = js_argument(args, count, 0);
 	status = bind_listeners_of(window, target, 0, &listeners);
 	if (status == EINVAL)
@@ -248,9 +248,9 @@ prelude_set_follower(
 	vm_value follower;
 
 	UNUSED_PARAMETER(this_value);
-	*result = VM_VALUE_UNDEFINED;
 
 	/* Only a function can follow links. */
+	*result = VM_VALUE_UNDEFINED;
 	follower = js_argument(args, count, 0);
 	if (!vm_value_is_callable(follower))
 		return vm_throw_type_error(realm, "setHyperlinkFollower: parameter 1 is not a function.");
@@ -517,7 +517,7 @@ prelude_sync_get(
 }
 
 /*
- * Follows a hyperlink a script clicked (an a or area element).
+ * Follows a hyperlink a script clicked (an a or area element, or SVG's a).
  *
  * The prelude's function navigates to the link's URL; an exception it throws
  * is reported like a listener's.
