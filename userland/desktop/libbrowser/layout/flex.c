@@ -925,7 +925,7 @@ flex_base_size(
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
-	if (!row && !child->replaced && child->style.aspect_ratio <= 0.0f &&
+	if (!row && child->style.aspect_ratio <= 0.0f &&
 	    child->style.min_height.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
@@ -1537,15 +1537,15 @@ flex_auto_minimums(
 	size_t index;
 	int error;
 
-	/* A line without a definite size, or that fits, does not shrink. */
-	if (available < 0)
+	/* A row line without a definite size, or that fits, does not shrink (a column's minimums always hold). */
+	if (row && available < 0)
 		return 0;
 	used = 0;
 	for (index = 0; index < count; index++)
 		used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
 	if (count > 1)
 		used += gap * (layout_unit)(count - 1U);
-	if (used <= available)
+	if (row && used <= available)
 		return 0;
 
 	/* Each item whose minimum is automatic. */
