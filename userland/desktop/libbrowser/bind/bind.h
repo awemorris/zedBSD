@@ -206,8 +206,8 @@ struct bind_host {
 	void (*console)(void *context, int level, const char *text, size_t length);
 	const char *user_agent;
 	int (*location)(void *context, int part, struct wb_buffer *out);
-	/* Updates this document's fragment without loading another document. */
-	int (*fragment)(void *context, const char *hash, size_t length);
+	/* Changes this document's URL (resolved against it) without loading another document. */
+	int (*url_set)(void *context, const char *href, size_t length);
 	int (*cookie_get)(void *context, struct wb_buffer *out);
 	int (*cookie_set)(void *context, const char *text, size_t length);
 	struct css_engine *(*selector_engine)(void *context);

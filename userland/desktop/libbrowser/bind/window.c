@@ -2022,11 +2022,13 @@ window_trace(
 			vm_heap_mark(heap, &window->prototypes[index]->cell);
 	}
 
-	/* The console, the location, the listeners and the timers. */
+	/* The console, the location, the hyperlink follower, the listeners and the timers. */
 	if (window->console != NULL)
 		vm_heap_mark(heap, &window->console->cell);
 	if (window->location != NULL)
 		vm_heap_mark(heap, &window->location->cell);
+	if (window->follow_hyperlink != NULL)
+		vm_heap_mark(heap, window->follow_hyperlink);
 	if (window->listeners != NULL)
 		vm_heap_mark(heap, window->listeners);
 	bind_timers_trace(heap, window);
