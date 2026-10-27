@@ -451,6 +451,9 @@
       return { url: url, key: uuid(), id: uuid(), navState: navState, classic: classic, scroll: null,
         scrollMode: from ? from.scrollMode : 'auto', nhe: null };
     }
+    // The first entry follows the document's URL until it is left (the URL is set after this runs).
+    function urlOf(entry) { return entry.url === null ? docURL() : entry.url; }
+    function leave(entry) { if (entry.url === null) entry.url = docURL(); saveScroll(entry); }
     function findEntry(key) {
       for (var i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
       return null;
@@ -462,7 +465,7 @@
         super();
         hidden(this, '_e', entry);
       }
-      get url() { return this._e.url; }
+      get url() { return urlOf(this._e); }
       get key() { return this._e.key; }
       get id() { return this._e.id; }
       get index() { return entries.indexOf(this._e); }
@@ -627,7 +630,7 @@
     function resolveFinished(t) { t.committed.resolve(t.entry); t.finished.resolve(t.entry); cleanUp(t); }
     function rejectFinished(t, e) { t.committed.reject(e); t.finished.reject(e); cleanUp(t); }
     function errorMessage(e) {
-      try { if (e !== null && typeof e === 'object' && 'message' in e) return String(e.message); } catch (x) { /* none */ }
+      try { if (e instanceof Error) return 'Uncaught ' + String(e); } catch (x) { /* none */ }
       return '';
     }
     function fireError(e) {
@@ -723,7 +726,7 @@
     // The URL and history update steps: pushState(), replaceState() and intercepted navigations.
     function updateURLAndHistory(url, classic, handling) {
       var old = entries[current], from = nhe(old), entry, disposed;
-      saveScroll(old);
+      leave(old);
       entry = makeEntry(url, null, classic !== null ? classic : old.classic, old);
       disposed = putEntry(entry, handling);
       nhe(entry);
@@ -734,7 +737,7 @@
     // A navigation to a fragment of this document.
     function navigateToFragment(url, handling, navState) {
       var old = entries[current], from = nhe(old), oldURL = docURL(), entry, disposed;
-      saveScroll(old);
+      leave(old);
       entry = makeEntry(url, navState !== null ? navState : old.navState, null, old);
       disposed = putEntry(entry, handling);
       nhe(entry);
@@ -747,7 +750,7 @@
     // A traversal to another entry of this document.
     function commitTraverse(entry) {
       var old = entries[current], from = nhe(old), oldURL = docURL();
-      saveScroll(old);
+      leave(old);
       current = entries.indexOf(entry);
       native.setURL(entry.url);
       classicState = entry.classic ? deserialize(entry.classic) : null;
@@ -813,7 +816,7 @@
         from = nhe(entries[current]);
         transition = new NavigationTransition(KEY, o.type, from);
         if (o.type === 'traverse') suppressScroll = true;
-        if (o.type === 'push' || o.type === 'replace') updateURLAndHistory(o.url, o.classic || null, o.type);
+        if (o.type === 'push' || o.type === 'replace') updateURLAndHistory(o.url, o.classic || serialize(null), o.type);
         else if (o.type === 'reload') entriesChanged(from, 'reload', []);
         else o.commit();
         n.state = 'committed';
@@ -830,16 +833,16 @@
         if (ongoingEvent === event) ongoingEvent = null;
         finish(event, true);
         navigation.dispatchEvent(new Event('navigatesuccess'));
-        if (transition) { transition._f.resolve(); transition = null; }
         if (t) resolveFinished(t);
+        if (transition) { transition._f.resolve(); transition = null; }
       }, function (reason) {
         if (controller.signal.aborted) return;
         if (ongoingEvent === event) ongoingEvent = null;
         controller.abort(reason);
         finish(event, false);
         fireError(reason);
-        if (transition) { transition._f.reject(reason); transition = null; }
         if (t) rejectFinished(t, reason);
+        if (transition) { transition._f.reject(reason); transition = null; }
       });
     }
 
@@ -1047,11 +1050,23 @@
       locationNavigate(u, 'replace');
     });
     def(LocationProto, 'reload', function reload() { locationReload(); });
+    (function () {
+      var loc = g.location, d = Object.getOwnPropertyDescriptor(g, 'location'), proto, dd;
+      if (d && d.configurable) {
+        Object.defineProperty(g, 'location', { get: function () { return loc; }, set: function (v) { loc.href = v; }, configurable: true, enumerable: true });
+      }
+      for (proto = document; proto && !Object.prototype.hasOwnProperty.call(proto, 'location'); proto = Object.getPrototypeOf(proto));
+      dd = proto ? Object.getOwnPropertyDescriptor(proto, 'location') : null;
+      if (dd && dd.get && dd.configurable) {
+        Object.defineProperty(proto, 'location', { get: dd.get, set: function (v) { var l = dd.get.call(this); if (l) l.href = v; },
+          configurable: true, enumerable: dd.enumerable });
+      }
+    })();
 
     // window.stop() aborts the navigation under way (loading the document is not stopped).
     def(g, 'stop', function stop() { if (ongoingEvent) abortOngoing(); });
 
-    entries.push(makeEntry(docURL(), null, null, null));
+    entries.push(makeEntry(null, null, null, null));
     var navigation = new Navigation(KEY);
     var activation = new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
     def(g, 'navigation', navigation);
