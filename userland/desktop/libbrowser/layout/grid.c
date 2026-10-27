@@ -117,6 +117,8 @@ static void grid_expand_repeats(struct layout_tree *tree, struct layout_box *box
 static int grid_collapse_tracks(struct layout_box *box, struct grid_state *grid);
 static void grid_distribute(int value, int reversed, layout_unit free_space, int tracks, layout_unit *offset, layout_unit *extra);
 static int grid_live_tracks(const unsigned char *collapsed, int count);
+static layout_unit grid_fixed_row_gap(const struct layout_box *box);
+static int grid_ratio_width(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *width);
 static int grid_content_stretches(int value);
 
 /* The size one track of a repeat is counted at: its definite maximum, else its minimum. */
@@ -2529,7 +2531,9 @@ grid_size_columns(
 			intrinsic_minimum = 1;
 
 		/* Other breadths retain their existing maximum-content contribution. */
-		if (intrinsic_minimum) {
+		if (grid_ratio_width(box, item, grid_fixed_row_gap(box), &width)) {
+			/* A ratio and a height the fixed rows resolve give the width. */
+		} else if (intrinsic_minimum) {
 			error = grid_item_minimum_width(tree, item->box, &width);
 			if (error != 0)
 				return error;
@@ -2823,6 +2827,74 @@ grid_item_width(
 	layout_box_model(item, 0);
 	*width = content + outside;
 	return 0;
+}
+
+/* The row gap when it is a length (zero otherwise). */
+static layout_unit
+grid_fixed_row_gap(
+	const struct layout_box *box)
+{
+	/* A pixel gap. */
+	if (box->style.row_gap.unit == CSS_UNIT_PX)
+		return layout_from_px(box->style.row_gap.value);
+	return 0;
+}
+
+/*
+ * Finds the width an item with an aspect-ratio and an auto width
+ * contributes when its height is a length, or a percentage of rows that
+ * all have fixed sizes: the height through the ratio, with the margins,
+ * borders and paddings.
+ */
+static int
+grid_ratio_width(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit gap,
+	layout_unit *width)
+{
+	const struct css_track *track;
+	struct layout_box *child;
+	layout_unit rows;
+	layout_unit height;
+	layout_unit frame_x;
+	layout_unit frame_y;
+	int row;
+
+	/* An auto width, a ratio of its own and not a replaced box. */
+	child = item->box;
+	if (child->style.width.unit != CSS_UNIT_AUTO || child->style.aspect_ratio <= 0.0f || child->replaced)
+		return 0;
+
+	/* The height: a length, or a percentage of the fixed rows the item spans. */
+	if (child->style.height.unit == CSS_UNIT_PX) {
+		height = layout_from_px(child->style.height.value);
+	} else if (child->style.height.unit == CSS_UNIT_PERCENT) {
+		rows = gap * (layout_unit)(item->row_span - 1);
+		for (row = item->row; row < item->row + item->row_span; row++) {
+			track = grid_row_track(&box->style, row);
+			if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX)
+				return 0;
+			rows += layout_from_px(track->size.value);
+		}
+		height = (layout_unit)((float)rows * child->style.height.value / 100.0f) + layout_from_px(child->style.height.offset);
+	} else {
+		return 0;
+	}
+
+	/* Through the ratio (which relates the border boxes under border-box). */
+	layout_box_model(child, 0);
+	frame_x = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+	frame_y = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
+	if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		*width = (layout_unit)((float)height * child->style.aspect_ratio);
+	else
+		*width = (layout_unit)((float)height * child->style.aspect_ratio) + frame_x;
+	(void)frame_y;
+	*width += child->margin[CSS_LEFT] + child->margin[CSS_RIGHT];
+
+	/* Succeeded: the width is known. */
+	return 1;
 }
 
 /*
