@@ -189,6 +189,9 @@ static const struct values_name values_names[] = {
 	{ "bottom", CSS_PROP_BOTTOM },
 	{ "left", CSS_PROP_LEFT },
 	{ "z-index", CSS_PROP_Z_INDEX },
+	{ "anchor-name", CSS_PROP_ANCHOR_NAME },
+	{ "position-anchor", CSS_PROP_POSITION_ANCHOR },
+	{ "anchor-scope", CSS_PROP_ANCHOR_SCOPE },
 	{ "clear", CSS_PROP_CLEAR },
 	{ "overflow", SHORT_OVERFLOW },
 	{ "transform", SHORT_TRANSFORM },
@@ -1936,6 +1939,55 @@ values_single(
 	if (count == 0)
 		return EINVAL;
 	memset(value, 0, sizeof(*value));
+
+	/* An inset or a size with anchor functions is kept as a sum the layout finishes. */
+	if (((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT)) && css_anchor_mentioned(tokens, count)) {
+		error = css_anchor_parse(parse, tokens, count, property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT,
+		    &value->anchor);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_ANCHOR;
+		return 0;
+	}
+
+	/* anchor-name and anchor-scope: none (anchor-scope also all) or names. */
+	if (property == CSS_PROP_ANCHOR_NAME || property == CSS_PROP_ANCHOR_SCOPE) {
+		if (count == 1 && css_ident_equal(&tokens[0], "none")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 0;
+			return 0;
+		}
+		if (property == CSS_PROP_ANCHOR_SCOPE && count == 1 && css_ident_equal(&tokens[0], "all")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 1;
+			return 0;
+		}
+		error = css_anchor_names_parse(parse, tokens, count, &value->anchor_names);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_ANCHOR_NAMES;
+		return 0;
+	}
+
+	/* position-anchor: auto or a name. */
+	if (property == CSS_PROP_POSITION_ANCHOR) {
+		if (count != 1)
+			return EINVAL;
+		if (css_ident_equal(&tokens[0], "auto")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 0;
+			return 0;
+		}
+		if (tokens[0].type != CSS_TOKEN_IDENT || tokens[0].length < 3 || tokens[0].text[0] != '-' || tokens[0].text[1] != '-')
+			return EINVAL;
+		value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
+		if (value->ident == NULL)
+			return ENOMEM;
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 1;
+		return 0;
+	}
 
 	/* Decoration lines form an unordered list of distinct keywords. */
 	if (property == CSS_PROP_TEXT_DECORATION_LINE) {

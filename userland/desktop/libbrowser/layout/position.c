@@ -570,6 +570,10 @@ position_place(
 	int has_bottom;
 	int error;
 
+	/* Insets and sizes with anchor functions are finished against the containing block. */
+	if (layout_anchor_wanted(box))
+		layout_anchor_resolve(tree, box, containing->x, containing->y, containing->width, containing->height);
+
 	/* A definite Grid area, when supplied, is the inset containing block. */
 	area_left = containing->x;
 	area_top = containing->y;

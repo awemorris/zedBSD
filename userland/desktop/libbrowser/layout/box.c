@@ -782,6 +782,11 @@ box_new(
 	box->node = node;
 	box->style = *style;
 
+	/* Anchor functions are only for boxes out of the flow; the others' are invalid. */
+	if (box->style.position != CSS_POSITION_ABSOLUTE && box->style.position != CSS_POSITION_FIXED &&
+	    layout_anchor_wanted(box))
+		layout_anchor_resolve(tree, box, 0, 0, 0, 0);
+
 	/* An element's box finds the background image its style names (text shares its element's style, not its box). */
 	if (kind != LAYOUT_TEXT && style->background_image != NULL && tree->url_lookup != NULL)
 		box->background = tree->url_lookup(tree->image_context, style->background_image);

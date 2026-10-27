@@ -170,7 +170,9 @@ enum css_value_kind {
 	CSS_VALUE_INSET,
 	CSS_VALUE_TRACKS,
 	CSS_VALUE_GRID_LINE,
-	CSS_VALUE_AREAS
+	CSS_VALUE_AREAS,
+	CSS_VALUE_ANCHOR,
+	CSS_VALUE_ANCHOR_NAMES
 };
 
 /* The units a declared length can have (converted to pixels by the cascade). */
@@ -364,6 +366,9 @@ enum css_property {
 	CSS_PROP_MAX_INLINE_SIZE,
 	CSS_PROP_MIN_BLOCK_SIZE,
 	CSS_PROP_MAX_BLOCK_SIZE,
+	CSS_PROP_ANCHOR_NAME,
+	CSS_PROP_POSITION_ANCHOR,
+	CSS_PROP_ANCHOR_SCOPE,
 	CSS_PROP_COUNT
 };
 
@@ -486,6 +491,9 @@ struct css_value {
 	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
 	struct vm_string *ident;
 	const struct css_grid_areas *areas;
+	/* A sum with anchor functions, and the names of anchor-name or anchor-scope (in the parse's arena). */
+	const struct css_anchor_expr *anchor;
+	const struct css_anchor_names *anchor_names;
 };
 
 /* One declared grid track: its kind, its size (a length, or the fr share) and minmax()'s minimum. */
@@ -714,6 +722,11 @@ int css_parse_sheet(struct vm_heap *heap, const uint16_t *units, size_t length, 
 int css_parse_declarations(struct vm_heap *heap, struct wb_arena *arena, const uint16_t *units, size_t length, struct css_declaration **declarations, size_t *count);
 void css_sheet_release(struct css_sheet *sheet);
 int css_ident_equal(const struct css_token *token, const char *ascii);
+
+/* Anchor positioning's values (anchor.c). */
+int css_anchor_mentioned(const struct css_token *tokens, size_t count);
+int css_anchor_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, int sizes, const struct css_anchor_expr **expr);
+int css_anchor_names_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_anchor_names **names);
 int css_units_equal_ascii(const uint16_t *units, size_t length, const char *ascii);
 
 /* The rule index (index.c). */

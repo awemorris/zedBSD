@@ -78,7 +78,91 @@ enum css_unit {
 	CSS_UNIT_MAX_CONTENT,
 	CSS_UNIT_MIN_CONTENT,
 	CSS_UNIT_FIT_CONTENT,
-	CSS_UNIT_CONTENT
+	CSS_UNIT_CONTENT,
+	/* A sum with anchor functions, in the style's anchor slot of the property (css_style.anchor). */
+	CSS_UNIT_ANCHOR
+};
+
+/* The most anchor functions in one value, and names in one anchor-name or anchor-scope. */
+#define CSS_ANCHOR_TERMS	4
+#define CSS_ANCHOR_NAMES	8
+
+/*
+ * What an anchor() asks for (a side, a percentage along the axis, or the
+ * side across or along the inset's own) and what an anchor-size() asks
+ * for (from CSS_ANCHOR_WIDTH; CSS_ANCHOR_SIZE_DEFAULT is the property's
+ * own axis).
+ */
+enum css_anchor_side {
+	CSS_ANCHOR_TOP,
+	CSS_ANCHOR_RIGHT,
+	CSS_ANCHOR_BOTTOM,
+	CSS_ANCHOR_LEFT,
+	CSS_ANCHOR_START,
+	CSS_ANCHOR_END,
+	CSS_ANCHOR_SELF_START,
+	CSS_ANCHOR_SELF_END,
+	CSS_ANCHOR_CENTER,
+	CSS_ANCHOR_PERCENT,
+	CSS_ANCHOR_INSIDE,
+	CSS_ANCHOR_OUTSIDE,
+	CSS_ANCHOR_WIDTH,
+	CSS_ANCHOR_HEIGHT,
+	CSS_ANCHOR_BLOCK,
+	CSS_ANCHOR_INLINE,
+	CSS_ANCHOR_SELF_BLOCK,
+	CSS_ANCHOR_SELF_INLINE,
+	CSS_ANCHOR_SIZE_DEFAULT
+};
+
+/*
+ * One anchor() or anchor-size(): the anchor's name (an atom; NULL for the
+ * box's default anchor), what it asks for, the factor the sum gives it,
+ * and its fallback (a length and a percentage) when it has one.
+ */
+struct css_anchor_query {
+	struct vm_string *name;
+	int side;
+	float percent;
+	float coef;
+	int has_fallback;
+	float fallback_px;
+	float fallback_em;
+	float fallback_rem;
+	float fallback_percent;
+	int fallback_has_percent;
+};
+
+/* A value with anchor functions: pixels (ems and rems before the cascade), a percentage, and the functions times their factors. */
+struct css_anchor_expr {
+	float px;
+	float em;
+	float rem;
+	float percent;
+	int has_percent;
+	int count;
+	struct css_anchor_query terms[CSS_ANCHOR_TERMS];
+};
+
+/* The anchor names of anchor-name or anchor-scope (atoms). */
+struct css_anchor_names {
+	int count;
+	struct vm_string *names[CSS_ANCHOR_NAMES];
+};
+
+/* The properties that can hold anchor functions: the slots of css_style.anchor. */
+enum css_anchor_slot {
+	CSS_ANCHOR_SLOT_TOP,
+	CSS_ANCHOR_SLOT_RIGHT,
+	CSS_ANCHOR_SLOT_BOTTOM,
+	CSS_ANCHOR_SLOT_LEFT,
+	CSS_ANCHOR_SLOT_WIDTH,
+	CSS_ANCHOR_SLOT_HEIGHT,
+	CSS_ANCHOR_SLOT_MIN_WIDTH,
+	CSS_ANCHOR_SLOT_MIN_HEIGHT,
+	CSS_ANCHOR_SLOT_MAX_WIDTH,
+	CSS_ANCHOR_SLOT_MAX_HEIGHT,
+	CSS_ANCHOR_SLOTS
 };
 
 /* The values of display. */
@@ -582,6 +666,19 @@ struct css_style {
 	struct css_length padding[4];
 	struct css_length offset[4];
 	int box_sizing;
+
+	/*
+	 * Anchor positioning: the sums of the insets and sizes whose unit is
+	 * CSS_UNIT_ANCHOR (in the engine's arena), the box's anchor names, its
+	 * default anchor (position-anchor; NULL for auto), and the names
+	 * anchor-scope limits to its subtree (all of them when
+	 * anchor_scope_all).
+	 */
+	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
+	const struct css_anchor_names *anchor_names;
+	struct vm_string *position_anchor;
+	const struct css_anchor_names *anchor_scope;
+	int anchor_scope_all;
 
 	/*
 	 * The box's decoration: each corner's radius, horizontal

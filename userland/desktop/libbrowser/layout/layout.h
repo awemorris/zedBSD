@@ -333,6 +333,10 @@ void layout_replaced_size(struct layout_box *box, layout_unit containing_width, 
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
 int layout_is_layered(const struct layout_box *box);
+
+/* Anchor positioning (anchor.c). */
+int layout_anchor_wanted(const struct layout_box *box);
+void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);

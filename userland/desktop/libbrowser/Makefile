@@ -96,6 +96,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/css/values.c \
 	$(LIBBROWSER_DIR)/css/grid-text.c \
 	$(LIBBROWSER_DIR)/css/flex-text.c \
+	$(LIBBROWSER_DIR)/css/anchor.c \
 	$(LIBBROWSER_DIR)/css/cascade.c \
 	$(LIBBROWSER_DIR)/css/index.c \
 	$(LIBBROWSER_DIR)/css/media.c \
@@ -181,6 +182,7 @@ LIBBROWSER_SOURCES := $(LIBBROWSER_DIR)/base/arena.c \
 	$(LIBBROWSER_DIR)/layout/grid.c \
 	$(LIBBROWSER_DIR)/layout/grid-names.c \
 	$(LIBBROWSER_DIR)/layout/logical.c \
+	$(LIBBROWSER_DIR)/layout/anchor.c \
 	$(LIBBROWSER_DIR)/layout/table.c \
 	$(LIBBROWSER_DIR)/layout/inline.c \
 	$(LIBBROWSER_DIR)/layout/float.c \

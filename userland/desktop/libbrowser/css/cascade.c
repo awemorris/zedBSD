@@ -81,6 +81,12 @@ struct cascade_sheet {
 	struct dom_element *owner;
 };
 
+/* A value copied into the engine's arena: where it is and how many bytes it has. */
+struct cascade_kept {
+	const void *data;
+	size_t size;
+};
+
 /*
  * The style sheets of a document, the atoms the matching looks up, and
  * the buffers the matching of one element reuses: the atoms of its
@@ -112,6 +118,8 @@ struct css_engine {
 	 * each distinct value.
 	 */
 	struct wb_vector kept_areas;
+	/* Anchor sums and names copied into the arena (struct cascade_kept), each kept once. */
+	struct wb_vector kept_anchors;
 	struct wb_vector kept_names;
 	int pseudo_wanted;
 	int pseudo_seen;
@@ -290,6 +298,8 @@ static void cascade_text_shadow(struct css_engine *engine, struct css_style *sty
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
+static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
 static int cascade_font_size_keyword(const struct css_value *value, int parent_keyword);
@@ -324,6 +334,7 @@ css_engine_create(
 	wb_vector_init(&created->class_atoms, sizeof(struct vm_string *));
 	wb_vector_init(&created->container_uses, sizeof(struct cascade_container_use));
 	wb_vector_init(&created->kept_areas, sizeof(const struct css_grid_areas *));
+	wb_vector_init(&created->kept_anchors, sizeof(struct cascade_kept));
 	wb_vector_init(&created->kept_names, sizeof(const struct css_line_names *));
 	wb_arena_init(&created->arena, 0);
 	created->atom_id = vm_atom_from_ascii(heap, "id");
@@ -381,6 +392,7 @@ css_engine_destroy(
 	free(engine->style_table);
 	wb_vector_release(&engine->container_uses);
 	wb_vector_release(&engine->kept_areas);
+	wb_vector_release(&engine->kept_anchors);
 	wb_vector_release(&engine->kept_names);
 	free(engine->scope_memo);
 	wb_arena_release(&engine->arena);
@@ -3886,8 +3898,28 @@ cascade_apply(
 		return;
 	}
 
+	/* A sum with anchor functions goes to the property's anchor slot. */
+	if (value->kind == CSS_VALUE_ANCHOR) {
+		cascade_anchor(engine, style, property, value->anchor);
+		return;
+	}
+
 	/* The property's value. */
 	switch (property) {
+	case CSS_PROP_ANCHOR_NAME:
+		style->anchor_names = NULL;
+		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
+			style->anchor_names = cascade_keep(engine, value->anchor_names, sizeof(*value->anchor_names));
+		break;
+	case CSS_PROP_ANCHOR_SCOPE:
+		style->anchor_scope = NULL;
+		style->anchor_scope_all = value->kind == CSS_VALUE_KEYWORD && value->keyword == 1;
+		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
+			style->anchor_scope = cascade_keep(engine, value->anchor_names, sizeof(*value->anchor_names));
+		break;
+	case CSS_PROP_POSITION_ANCHOR:
+		style->position_anchor = value->keyword == 1 ? value->ident : NULL;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -4462,21 +4494,27 @@ cascade_inherit(
 		break;
 	case CSS_PROP_WIDTH:
 		style->width = parent->width;
+		style->anchor[CSS_ANCHOR_SLOT_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_WIDTH];
 		break;
 	case CSS_PROP_HEIGHT:
 		style->height = parent->height;
+		style->anchor[CSS_ANCHOR_SLOT_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_HEIGHT];
 		break;
 	case CSS_PROP_MIN_WIDTH:
 		style->min_width = parent->min_width;
+		style->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH];
 		break;
 	case CSS_PROP_MAX_WIDTH:
 		style->max_width = parent->max_width;
+		style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH];
 		break;
 	case CSS_PROP_MIN_HEIGHT:
 		style->min_height = parent->min_height;
+		style->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT];
 		break;
 	case CSS_PROP_MAX_HEIGHT:
 		style->max_height = parent->max_height;
+		style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT];
 		break;
 	case CSS_PROP_MARGIN_TOP:
 	case CSS_PROP_MARGIN_RIGHT:
@@ -4495,6 +4533,17 @@ cascade_inherit(
 	case CSS_PROP_BOTTOM:
 	case CSS_PROP_LEFT:
 		style->offset[property - CSS_PROP_TOP] = parent->offset[property - CSS_PROP_TOP];
+		style->anchor[property - CSS_PROP_TOP] = parent->anchor[property - CSS_PROP_TOP];
+		break;
+	case CSS_PROP_ANCHOR_NAME:
+		style->anchor_names = parent->anchor_names;
+		break;
+	case CSS_PROP_ANCHOR_SCOPE:
+		style->anchor_scope = parent->anchor_scope;
+		style->anchor_scope_all = parent->anchor_scope_all;
+		break;
+	case CSS_PROP_POSITION_ANCHOR:
+		style->position_anchor = parent->position_anchor;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
@@ -4836,6 +4885,118 @@ cascade_line_names(
 
 	/* Succeeded: the names live as long as the engine. */
 	return copy;
+}
+
+/* Copies a value into the engine's arena, once for each different value. */
+static const void *
+cascade_keep(
+	struct css_engine *engine,
+	const void *data,
+	size_t size)
+{
+	const struct cascade_kept *kept;
+	struct cascade_kept made;
+	void *copy;
+	size_t index;
+	int error;
+
+	/* A copy kept before with the same bytes. */
+	for (index = 0; index < engine->kept_anchors.count; index++) {
+		kept = wb_vector_at(&engine->kept_anchors, index);
+		if (kept->size == size && memcmp(kept->data, data, size) == 0)
+			return kept->data;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, size);
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, data, size);
+	made.data = copy;
+	made.size = size;
+	error = wb_vector_push(&engine->kept_anchors, &made);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the copy lives as long as the engine. */
+	return copy;
+}
+
+/*
+ * Puts a sum with anchor functions in an inset's or a size's anchor slot
+ * (ems and rems in pixels) and marks the property's length as anchored.
+ */
+static void
+cascade_anchor(
+	struct css_engine *engine,
+	struct css_style *style,
+	int property,
+	const struct css_anchor_expr *expr)
+{
+	struct css_anchor_expr resolved;
+	struct css_anchor_query *query;
+	struct css_length *length;
+	int slot;
+	int index;
+
+	/* The slot and the length of the property. */
+	switch (property) {
+	case CSS_PROP_TOP:
+	case CSS_PROP_RIGHT:
+	case CSS_PROP_BOTTOM:
+	case CSS_PROP_LEFT:
+		slot = property - CSS_PROP_TOP;
+		length = &style->offset[slot];
+		break;
+	case CSS_PROP_WIDTH:
+		slot = CSS_ANCHOR_SLOT_WIDTH;
+		length = &style->width;
+		break;
+	case CSS_PROP_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_HEIGHT;
+		length = &style->height;
+		break;
+	case CSS_PROP_MIN_WIDTH:
+		slot = CSS_ANCHOR_SLOT_MIN_WIDTH;
+		length = &style->min_width;
+		break;
+	case CSS_PROP_MIN_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_MIN_HEIGHT;
+		length = &style->min_height;
+		break;
+	case CSS_PROP_MAX_WIDTH:
+		slot = CSS_ANCHOR_SLOT_MAX_WIDTH;
+		length = &style->max_width;
+		break;
+	case CSS_PROP_MAX_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_MAX_HEIGHT;
+		length = &style->max_height;
+		break;
+	default:
+		return;
+	}
+
+	/* The sum in pixels. */
+	memset(&resolved, 0, sizeof(resolved));
+	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
+	resolved.percent = expr->percent;
+	resolved.has_percent = expr->has_percent;
+	resolved.count = expr->count;
+	for (index = 0; index < expr->count; index++) {
+		query = &resolved.terms[index];
+		*query = expr->terms[index];
+		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
+		query->fallback_em = 0;
+		query->fallback_rem = 0;
+	}
+
+	/* Kept, and the length marked. */
+	style->anchor[slot] = cascade_keep(engine, &resolved, sizeof(resolved));
+	length->unit = CSS_UNIT_ANCHOR;
+	length->value = 0;
+	length->offset = 0;
+	if (style->anchor[slot] == NULL)
+		length->unit = CSS_UNIT_AUTO;
 }
 
 /* Keeps a grid-template-areas value in the engine's arena (one copy of each distinct value); NULL when there is no memory. */
