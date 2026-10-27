@@ -24,6 +24,7 @@
 #define BOX_BULLET_CIRCLE	0x25e6U
 #define BOX_BULLET_SQUARE	0x25aaU
 
+static void box_root_flow(struct layout_box *root);
 static int box_build_element(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, const struct css_style *parent_style, struct layout_box *parent, int depth);
 static int box_build_pseudo(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box, int pseudo);
 static int box_build_children(struct layout_tree *tree, struct css_engine *css, struct dom_node *node, const struct css_style *style, struct layout_box *box, int depth);
@@ -96,6 +97,9 @@ layout_build(
 	root = tree->root;
 	if (root == NULL)
 		return 0;
+
+	/* An HTML root uses its body's writing mode and direction (its own computed ones still pass to its children). */
+	box_root_flow(root);
 
 	/* Lays the root out in the viewport and makes every position absolute. */
 	error = layout_block(tree, root, tree->viewport_width);
@@ -319,6 +323,36 @@ layout_font_of(
 		found = text_select_family(tree->text, style->families[index], style->font_weight, style->font_italic, font);
 		if (found)
 			return;
+	}
+}
+
+/*
+ * Gives the root element's box the writing mode and direction of its first
+ * body child, as HTML documents use them.
+ * https://drafts.csswg.org/css-writing-modes-4/#principal-flow
+ */
+static void
+box_root_flow(
+	struct layout_box *root)
+{
+	const struct dom_element *element;
+	struct layout_box *child;
+	int is_body;
+
+	/* The first child box of a body element. */
+	for (child = root->first_child; child != NULL; child = child->next) {
+		if (child->node == NULL || child->node->type != DOM_ELEMENT)
+			continue;
+		element = (const struct dom_element *)child->node;
+		is_body = vm_string_equal_ascii(element->local_name, "body");
+		if (!is_body)
+			continue;
+
+		/* Its flow is the root's. */
+		root->style.writing_mode = child->style.writing_mode;
+		root->style.writing_sideways = child->style.writing_sideways;
+		root->style.direction = child->style.direction;
+		return;
 	}
 }
 

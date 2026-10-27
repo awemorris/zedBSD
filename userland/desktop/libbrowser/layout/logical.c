@@ -32,6 +32,7 @@
 #include <string.h>
 
 static int logical_vertical(int mode);
+static int logical_fits_content(const struct layout_box *box);
 static void logical_sides_to_logical(struct css_length *sides, int mode);
 static void logical_floats_to_logical(float *sides, int mode);
 static void logical_ints_to_logical(int *sides, int mode);
@@ -102,6 +103,7 @@ layout_logical(
 	int saved_mode;
 	int outer;
 	int own;
+	int fit;
 	int error;
 
 	/* The two systems: the parent's and the box's. */
@@ -141,9 +143,21 @@ layout_logical(
 	}
 	tree->logical_mode = own;
 
-	/* The layout in the box's own coordinates (as the root of a domain it owns a formatting context). */
+	/*
+	 * The layout in the box's own coordinates (as the root of a domain it
+	 * owns a formatting context).  An orthogonal block in a block container
+	 * is as wide as its content (fit-content in the room) rather than the
+	 * whole room.
+	 */
 	box->logical_root = 1;
-	error = layout_block(tree, box, available);
+	fit = 0;
+	if (logical_vertical(own) != logical_vertical(outer) && box->parent != NULL)
+		fit = logical_fits_content(box);
+	if (fit) {
+		error = layout_shrink_to_fit(tree, box, available);
+	} else {
+		error = layout_block(tree, box, available);
+	}
 	box->logical_root = 0;
 	tree->logical_mode = saved_mode;
 	tree->containing_height = saved_containing_height;
@@ -167,6 +181,36 @@ layout_logical(
 
 	/* Succeeded: the box is laid out. */
 	return 0;
+}
+
+/*
+ * Tells whether an orthogonal box's auto inline size fits its content: a
+ * block-level box of a block container (a flex or grid item is sized by
+ * its container, and floats and the like shrink to fit already).
+ */
+static int
+logical_fits_content(
+	const struct layout_box *box)
+{
+	int display;
+
+	/* An inline size of its own is kept. */
+	if (box->style.width.unit != CSS_UNIT_AUTO)
+		return 0;
+
+	/* Flex and grid items are sized by their containers. */
+	display = box->parent->style.display;
+	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
+		return 0;
+	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+		return 0;
+
+	/* Boxes that shrink to fit anyway, and replaced ones, are left alone. */
+	if (box->floating != CSS_FLOAT_NONE || box->out_of_flow || box->atomic || box->replaced)
+		return 0;
+
+	/* Succeeded: the box fits its content. */
+	return 1;
 }
 
 /* Tells whether a writing mode lays lines out vertically. */
