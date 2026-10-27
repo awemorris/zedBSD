@@ -482,7 +482,7 @@ layout_grid(
 		child->static_y_align = CSS_ALIGN_AUTO;
 		child->static_grid_area = 0;
 		child->cb_set = 0;
-		child->static_unsafe = 0;
+		child->static_unsafe = 1;
 		child->static_x_safe = 0;
 		child->static_y_safe = 0;
 	}
@@ -522,7 +522,9 @@ layout_grid(
 	column_gap = 0;
 	if (box->style.column_gap.unit == CSS_UNIT_PX)
 		column_gap = layout_from_px(box->style.column_gap.value);
-	if (box->style.column_gap.unit == CSS_UNIT_PERCENT)
+	if (box->style.column_gap.unit == CSS_UNIT_PERCENT && tree->measuring)
+		column_gap = layout_from_px(box->style.column_gap.offset);
+	else if (box->style.column_gap.unit == CSS_UNIT_PERCENT)
 		column_gap = (layout_unit)((float)box->width * box->style.column_gap.value / 100.0f) +
 		    layout_from_px(box->style.column_gap.offset);
 	row_gap = 0;
@@ -650,6 +652,20 @@ layout_grid(
 			if (grid.row_collapsed[position])
 				grid.rows[position] = -row_gap;
 		}
+	}
+
+	/*
+	 * A percentage row gap of an indefinite height sized the rows as zero;
+	 * the items are placed with it resolved against the height that gave.
+	 */
+	if (box->style.row_gap.unit == CSS_UNIT_PERCENT && box->style.height.unit != CSS_UNIT_PX && grid.row_count > 1) {
+		used = 0;
+		for (position = 0; position < grid.row_count; position++)
+			used += grid.rows[position];
+		row_gap = (layout_unit)((float)used * box->style.row_gap.value / 100.0f) +
+		    layout_from_px(box->style.row_gap.offset);
+		if (row_gap < 0)
+			row_gap = 0;
 	}
 
 	/* Absolute children use valid definite grid areas without sizing the tracks. */
@@ -1395,6 +1411,7 @@ grid_collect(
 	struct layout_box *child;
 	struct grid_item *item;
 	size_t count;
+	size_t index;
 
 	/* Counts the in-flow children. */
 	count = 0;
@@ -1421,6 +1438,20 @@ grid_collect(
 		grid_resolve(&child->style.grid_column, box->style.column_count, &item->column, &item->column_span);
 		grid_resolve(&child->style.grid_row, box->style.row_count, &item->row, &item->row_span);
 		grid->item_count++;
+	}
+
+	/* The items in order-modified document order (a stable sort by order). */
+	for (index = 1; index < grid->item_count; index++) {
+		struct grid_item moving;
+		size_t place;
+
+		moving = grid->items[index];
+		place = index;
+		while (place > 0 && grid->items[place - 1U].box->style.order > moving.box->style.order) {
+			grid->items[place] = grid->items[place - 1U];
+			place--;
+		}
+		grid->items[place] = moving;
 	}
 
 	/* Succeeded: the items are gathered. */

@@ -266,6 +266,35 @@ layout_is_positioned(
 }
 
 /*
+ * Tells whether a box is painted in its own turn of its stacking context:
+ * a positioned box, or a flex or grid item with a z-index (which stacks as
+ * a positioned box does without being positioned).
+ * https://drafts.csswg.org/css-flexbox-1/#painting
+ * https://drafts.csswg.org/css-grid-2/#z-order
+ */
+int
+layout_is_layered(
+	const struct layout_box *box)
+{
+	int display;
+
+	/* Positioned boxes. */
+	if (layout_is_positioned(box))
+		return 1;
+
+	/* An in-flow flex or grid item with an integer z-index. */
+	if (box->kind != LAYOUT_BLOCK || box->style.z_index_auto || box->out_of_flow || box->parent == NULL)
+		return 0;
+	display = box->parent->style.display;
+	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX ||
+	    display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+		return 1;
+
+	/* Other boxes. */
+	return 0;
+}
+
+/*
  * Tells whether a box clips its content to its padding box: its overflow
  * is not visible, and is not the viewport's (the root's overflow, or the
  * body's when the root's is visible, goes to the viewport).

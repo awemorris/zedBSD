@@ -332,6 +332,7 @@ void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
+int layout_is_layered(const struct layout_box *box);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);

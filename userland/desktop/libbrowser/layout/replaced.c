@@ -25,6 +25,7 @@ static int replaced_length(const struct css_length *length, layout_unit containi
 static layout_unit replaced_content_size(const struct layout_box *box, layout_unit size, int first, int second);
 static int replaced_is_video(const struct layout_box *box);
 static int replaced_is_bare_svg(const struct layout_box *box);
+static int replaced_flex_main(const struct layout_box *box);
 static void replaced_limit_ratio(layout_unit *width, layout_unit *height, layout_unit min_width, layout_unit max_width, layout_unit min_height, layout_unit max_height);
 
 /*
@@ -54,6 +55,7 @@ layout_replaced_size(
 	int width_given;
 	int height_given;
 	int video;
+	int flex;
 
 	/* The image's own size, which gives the ratio too. */
 	natural_width = 0;
@@ -179,8 +181,20 @@ layout_replaced_size(
 	if (max_height >= 0 && max_height < min_height)
 		max_height = min_height;
 
-	/* Both sides auto with a ratio: the limits keep the ratio where they can. */
+	/*
+	 * Both sides auto with a ratio: the limits keep the ratio where they can
+	 * (a flex item's limits along the main axis come later, from the flex
+	 * layout, and do not size it here).
+	 */
 	if (!width_given && !height_given && (has_ratio || ratio_override) && width > 0 && height > 0) {
+		flex = replaced_flex_main(box);
+		if (flex == 1) {
+			min_width = 0;
+			max_width = -1;
+		} else if (flex == 2) {
+			min_height = 0;
+			max_height = -1;
+		}
 		replaced_limit_ratio(&width, &height, min_width, max_width, min_height, max_height);
 	} else {
 		/* max-width shrinks a wider box, and its height with it when that was not given. */
@@ -465,4 +479,25 @@ replaced_limit_ratio(
 	/* The used size. */
 	*width = (layout_unit)used_w;
 	*height = (layout_unit)used_h;
+}
+
+/* The main axis of a flex item: 1 for a row (its width), 2 for a column (its height), 0 for another box. */
+static int
+replaced_flex_main(
+	const struct layout_box *box)
+{
+	const struct layout_box *parent;
+	int column;
+
+	/* A child of a flex container. */
+	parent = box->parent;
+	if (parent == NULL || box->out_of_flow ||
+	    (parent->style.display != CSS_DISPLAY_FLEX && parent->style.display != CSS_DISPLAY_INLINE_FLEX))
+		return 0;
+
+	/* Its direction against the writing mode. */
+	column = parent->style.flex_direction == CSS_FLEX_COLUMN || parent->style.flex_direction == CSS_FLEX_COLUMN_REVERSE;
+	if (parent->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		column = !column;
+	return column ? 2 : 1;
 }

@@ -823,7 +823,7 @@ position_collect(
 
 	/* Each child: a positioned one is listed at its outer stacking level, then searched. */
 	for (child = box->first_child; child != NULL; child = child->next) {
-		positioned = layout_is_positioned(child);
+		positioned = layout_is_layered(child);
 		child_z = child->style.z_index;
 		if (child->style.z_index_auto)
 			child_z = 0;

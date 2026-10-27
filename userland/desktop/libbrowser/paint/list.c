@@ -40,6 +40,7 @@
 
 #include <errno.h>
 #include <math.h>
+#include <stdlib.h>
 #include <string.h>
 
 /* The canvas color when neither the root nor the body has a background: white. */
@@ -135,6 +136,8 @@ static const struct layout_box *list_canvas(const struct layout_tree *tree, uint
 static void list_box(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth);
 static void list_box_part(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth, int part);
 static void list_box_own(struct list_walk *walk, const struct layout_box *box, const struct layout_box *layer, int depth, int part);
+static const struct layout_box **list_children_ordered(const struct layout_box *box);
+static const struct layout_box *list_child(const struct layout_box *from, const struct layout_box **ordered, size_t index);
 static void list_fade(struct list_walk *walk, size_t first, float opacity);
 static void list_scale(struct list_walk *walk, size_t first, const struct layout_box *box);
 static int list_border_shape(const struct layout_box *box, struct list_shape *shape);
@@ -623,7 +626,7 @@ list_box_part(
 		return;
 
 	/* A positioned box (not the root) is painted in its own turn. */
-	positioned = layout_is_positioned(box);
+	positioned = layout_is_layered(box);
 	if (positioned && box != layer && box->parent != NULL)
 		return;
 
@@ -737,6 +740,8 @@ list_box_own(
 	layout_unit height;
 	int rounded;
 	int visible;
+	const struct layout_box **ordered;
+	size_t index;
 	int clips;
 	int positioned;
 
@@ -798,11 +803,14 @@ list_box_own(
 		list_inline_floats(walk, box, layer, depth + 1);
 		list_lines(walk, box, layer, depth + 1);
 	} else {
+		/* The children in painting order: a flex or grid container's in order-modified document order. */
+		ordered = list_children_ordered(box);
+
 		/* Block decorations precede floats; their inline contents follow the floats. */
-		for (child = box->first_child; child != NULL; child = child->next) {
+		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
 			if (child->floating != CSS_FLOAT_NONE)
 				continue;
-			positioned = layout_is_positioned(child);
+			positioned = layout_is_layered(child);
 			if (child->children_inline && !positioned && child->style.opacity >= 1.0f) {
 				list_box_part(walk, child, layer, depth + 1, LIST_BOX_DECORATION);
 			} else {
@@ -811,22 +819,98 @@ list_box_own(
 		}
 
 		/* Then the floats, over the backgrounds of the blocks beside them. */
-		for (child = box->first_child; child != NULL; child = child->next) {
+		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
 			if (child->floating != CSS_FLOAT_NONE)
 				list_box(walk, child, layer, depth + 1);
 		}
 
 		/* Inline contents of the in-flow blocks paint over those floats. */
-		for (child = box->first_child; child != NULL; child = child->next) {
-			positioned = layout_is_positioned(child);
+		for (index = 0, child = list_child(box, ordered, 0); child != NULL; child = list_child(child, ordered, ++index)) {
+			positioned = layout_is_layered(child);
 			if (child->floating == CSS_FLOAT_NONE && child->children_inline && !positioned && child->style.opacity >= 1.0f)
 				list_box_part(walk, child, layer, depth + 1, LIST_BOX_INLINE);
 		}
+		free(ordered);
 	}
 
 	/* The clip ends with the content. */
 	if (clips)
 		list_unclip(walk);
+}
+
+/*
+ * Lists a flex or grid container's children in order-modified document
+ * order (a stable sort by order), ending with NULL; NULL when they are
+ * painted in tree order (or the list cannot be made).
+ * https://drafts.csswg.org/css-flexbox-1/#order-property
+ */
+static const struct layout_box **
+list_children_ordered(
+	const struct layout_box *box)
+{
+	const struct layout_box **ordered;
+	const struct layout_box *child;
+	const struct layout_box *moving;
+	size_t count;
+	size_t index;
+	size_t place;
+	int display;
+	int reordered;
+
+	/* Only a flex or grid container whose children change places. */
+	display = box->style.display;
+	if (display != CSS_DISPLAY_FLEX && display != CSS_DISPLAY_INLINE_FLEX &&
+	    display != CSS_DISPLAY_GRID && display != CSS_DISPLAY_INLINE_GRID)
+		return NULL;
+	count = 0;
+	reordered = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->style.order != 0)
+			reordered = 1;
+		count++;
+	}
+	if (!reordered)
+		return NULL;
+
+	/* The children, sorted. */
+	ordered = calloc(count + 1U, sizeof(*ordered));
+	if (ordered == NULL)
+		return NULL;
+	index = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		moving = child;
+		place = index;
+		while (place > 0 && ordered[place - 1U]->style.order > moving->style.order) {
+			ordered[place] = ordered[place - 1U];
+			place--;
+		}
+		ordered[place] = moving;
+		index++;
+	}
+
+	/* Succeeded: the list ends with NULL. */
+	return ordered;
+}
+
+/*
+ * The index-th child in painting order: from the ordered list when there
+ * is one, else the first child of the box (index 0) or the next sibling of
+ * the previous child.
+ */
+static const struct layout_box *
+list_child(
+	const struct layout_box *from,
+	const struct layout_box **ordered,
+	size_t index)
+{
+	/* The ordered list. */
+	if (ordered != NULL)
+		return ordered[index];
+
+	/* Tree order. */
+	if (index == 0)
+		return from->first_child;
+	return from->next;
 }
 
 /* Paints the floats among a block's inline content (inline boxes are searched through). */
