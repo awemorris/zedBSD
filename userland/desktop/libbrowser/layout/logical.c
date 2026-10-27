@@ -307,6 +307,7 @@ logical_convert(
 	struct layout_box *child;
 	struct css_style *kept;
 	int error;
+	int own;
 
 	/* The physical style, kept. */
 	kept = wb_arena_alloc(&tree->arena, sizeof(*kept));
@@ -319,13 +320,19 @@ logical_convert(
 	logical_style(&box->style, mode);
 	box->max_content_known = 0;
 
-	/* The children of the same writing mode; another one starts a domain of its own. */
+	/*
+	 * The children of the box's own writing mode or the other vertical one
+	 * (whose box the box's mode places, and whose contents run their own
+	 * way); an orthogonal one starts a domain of its own.
+	 */
+	own = kept->writing_mode;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->physical_style != NULL)
 			continue;
-		if (child->style.writing_mode != mode)
+		if (child->style.writing_mode != own &&
+		    (!logical_vertical(child->style.writing_mode) || !logical_vertical(own)))
 			continue;
-		error = logical_convert(tree, child, mode);
+		error = logical_convert(tree, child, own);
 		if (error != 0)
 			return error;
 	}
@@ -523,17 +530,19 @@ logical_unflip(
 	struct layout_box *child;
 	layout_unit logical_height;
 	size_t index;
+	int own;
 
 	/* The block size the lines and the children are laid out in, before it becomes the width. */
 	logical_height = box->height;
 
-	/* The box itself. */
+	/* The box itself, placed by its parent's mode; its contents run by its own. */
 	logical_box_to_physical(box, mode, parent_width, !root);
+	own = box->physical_style->writing_mode;
 
 	/* Its lines are drawn down the page; vertical-rl stacks them from the right. */
 	if (box->children_inline && box->line_count > 0) {
 		box->vertical_inline = 1;
-		if (mode == CSS_WRITING_VERTICAL_RL) {
+		if (own == CSS_WRITING_VERTICAL_RL) {
 			for (index = 0; index < box->line_count; index++)
 				box->lines[index].y = logical_height - box->lines[index].y - box->lines[index].height;
 		}
@@ -542,14 +551,14 @@ logical_unflip(
 	/* Each child: one of the domain wholly, another domain's root (already physical inside) as one box. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->physical_style != NULL) {
-			logical_unflip(child, mode, box->width, 0);
+			logical_unflip(child, own, box->width, 0);
 		} else if (!child->out_of_flow) {
-			logical_box_to_physical(child, mode, box->width, 1);
+			logical_box_to_physical(child, own, box->width, 1);
 		}
 
 		/* A child out of the flow keeps its static place and the area its parent gave it. */
 		if (child->out_of_flow)
-			logical_static_to_physical(child, mode, box->width);
+			logical_static_to_physical(child, own, box->width);
 	}
 }
 
@@ -615,6 +624,10 @@ logical_static_to_physical(
 	safe = child->static_x_safe;
 	child->static_x_safe = child->static_y_safe;
 	child->static_y_safe = safe;
+
+	/* A safe overflow falls back to the block start: the right edge in vertical-rl. */
+	if (mode == CSS_WRITING_VERTICAL_RL && child->static_x_safe != 0)
+		child->static_x_safe = child->static_x_safe == 1 ? 2 : 1;
 
 	/* The containing block from the grid's lines. */
 	if (!child->cb_set)

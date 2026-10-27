@@ -107,6 +107,11 @@ layout_build(
 		return error;
 	root->x = root->margin[CSS_LEFT];
 	root->y = root->margin[CSS_TOP];
+
+	/* A vertical-rl root starts its blocks at the viewport's right edge. */
+	if (root->style.writing_mode == CSS_WRITING_VERTICAL_RL)
+		root->x = tree->viewport_width - root->margin[CSS_RIGHT] - root->border[CSS_RIGHT] -
+		    root->padding[CSS_RIGHT] - root->width - root->padding[CSS_LEFT] - root->border[CSS_LEFT];
 	layout_absolute(root, 0, 0);
 
 	/* The document is as tall as the root's margin box. */
@@ -1305,6 +1310,9 @@ box_anonymous_style(
 	style->text_align = parent->text_align;
 	style->text_indent = parent->text_indent;
 	style->direction = parent->direction;
+	style->writing_mode = parent->writing_mode;
+	style->writing_sideways = parent->writing_sideways;
+	style->text_orientation = parent->text_orientation;
 	style->white_space = parent->white_space;
 	style->visibility = parent->visibility;
 	style->underline = parent->underline;
