@@ -54,7 +54,15 @@ layout_block(
 	int intrinsic;
 	int height_definite;
 	int saved_height_definite;
+	int wanted;
 	int error;
+
+	/* A box of another writing mode than the system it is laid out in has coordinates of its own. */
+	wanted = layout_logical_wanted(tree, box);
+	if (wanted) {
+		error = layout_logical(tree, box, containing_width);
+		return error;
+	}
 
 	/* A width of max-content, min-content or fit-content is measured first (ws074-p074). */
 	intrinsic = block_is_intrinsic(&box->style.width);
@@ -499,8 +507,12 @@ block_owns_context(
 {
 	int clips;
 
-	/* The root, a float, a box out of the flow. */
+	/* The root, the root of a writing mode's domain, a float, a box out of the flow. */
 	if (box->parent == NULL)
+		return 1;
+	if (box->logical_root)
+		return 1;
+	if (layout_physical_mode(box) != layout_physical_mode(box->parent))
 		return 1;
 	if (box->floating != CSS_FLOAT_NONE)
 		return 1;

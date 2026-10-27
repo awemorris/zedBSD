@@ -253,6 +253,15 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+
+	/*
+	 * While a vertical writing mode's domain is laid out in logical
+	 * coordinates (logical.c): the box's physical style, kept in the tree's
+	 * arena while its style is the logical one (NULL otherwise), and whether
+	 * the box is the root being laid out in coordinates of its own.
+	 */
+	struct css_style *physical_style;
+	int logical_root;
 };
 
 /*
@@ -299,6 +308,8 @@ struct layout_tree {
 	struct layout_box **sticky;
 	size_t sticky_count;
 	layout_unit sticky_scroll;
+	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
+	int logical_mode;
 };
 
 /*
@@ -343,6 +354,9 @@ int layout_inline(struct layout_tree *tree, struct layout_box *box);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);
+int layout_physical_mode(const struct layout_box *box);
+int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);
+int layout_logical(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_table(struct layout_tree *tree, struct layout_box *box);
 layout_unit layout_flex_content_width(const struct layout_box *box);
 void layout_font_of(struct layout_tree *tree, const struct css_style *style, struct text_font *font);
