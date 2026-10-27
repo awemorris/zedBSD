@@ -25,6 +25,7 @@ static int replaced_length(const struct css_length *length, layout_unit containi
 static layout_unit replaced_content_size(const struct layout_box *box, layout_unit size, int first, int second);
 static int replaced_is_video(const struct layout_box *box);
 static int replaced_is_bare_svg(const struct layout_box *box);
+static void replaced_limit_ratio(layout_unit *width, layout_unit *height, layout_unit min_width, layout_unit max_width, layout_unit min_height, layout_unit max_height);
 
 /*
  * Sets a replaced box's content width and height within its containing block.
@@ -42,14 +43,16 @@ layout_replaced_size(
 	layout_unit natural_height;
 	layout_unit width;
 	layout_unit height;
-	layout_unit limit;
+	layout_unit min_width;
+	layout_unit max_width;
+	layout_unit min_height;
+	layout_unit max_height;
 	layout_unit frame_x;
 	layout_unit frame_y;
 	int ratio_override;
 	int has_ratio;
 	int width_given;
 	int height_given;
-	int limited;
 	int video;
 
 	/* The image's own size, which gives the ratio too. */
@@ -152,23 +155,53 @@ layout_replaced_size(
 		}
 	}
 
-	/* max-width shrinks a wider box, and its height with it when that was not given. */
-	limited = replaced_length(&box->style.max_width, containing_width, &limit);
-	if (limited && width > limit) {
-		if (!height_given && width > 0)
-			height = (layout_unit)((int64_t)height * limit / width);
-		width = limit;
+	/* The limits (a percentage height limit only with a definite containing height). */
+	min_width = 0;
+	max_width = -1;
+	min_height = 0;
+	max_height = -1;
+	if (!replaced_length(&box->style.min_width, containing_width, &min_width))
+		min_width = 0;
+	if (!replaced_length(&box->style.max_width, containing_width, &max_width))
+		max_width = -1;
+	if (box->style.min_height.unit == CSS_UNIT_PX ||
+	    (box->style.min_height.unit == CSS_UNIT_PERCENT && height_definite)) {
+		if (!replaced_length(&box->style.min_height, containing_height, &min_height))
+			min_height = 0;
 	}
-
-	/* max-height shrinks a taller box, and its width with it when that was not given. */
-	limited = 0;
 	if (box->style.max_height.unit == CSS_UNIT_PX ||
-	    (box->style.max_height.unit == CSS_UNIT_PERCENT && height_definite))
-		limited = replaced_length(&box->style.max_height, containing_height, &limit);
-	if (limited && height > limit) {
-		if (!width_given && height > 0)
-			width = (layout_unit)((int64_t)width * limit / height);
-		height = limit;
+	    (box->style.max_height.unit == CSS_UNIT_PERCENT && height_definite)) {
+		if (!replaced_length(&box->style.max_height, containing_height, &max_height))
+			max_height = -1;
+	}
+	if (max_width >= 0 && max_width < min_width)
+		max_width = min_width;
+	if (max_height >= 0 && max_height < min_height)
+		max_height = min_height;
+
+	/* Both sides auto with a ratio: the limits keep the ratio where they can. */
+	if (!width_given && !height_given && (has_ratio || ratio_override) && width > 0 && height > 0) {
+		replaced_limit_ratio(&width, &height, min_width, max_width, min_height, max_height);
+	} else {
+		/* max-width shrinks a wider box, and its height with it when that was not given. */
+		if (max_width >= 0 && width > max_width) {
+			if (!height_given && width > 0)
+				height = (layout_unit)((int64_t)height * max_width / width);
+			width = max_width;
+		}
+
+		/* max-height shrinks a taller box, and its width with it when that was not given. */
+		if (max_height >= 0 && height > max_height) {
+			if (!width_given && height > 0)
+				width = (layout_unit)((int64_t)width * max_height / height);
+			height = max_height;
+		}
+
+		/* The minimums hold each side. */
+		if (width < min_width)
+			width = min_width;
+		if (height < min_height)
+			height = min_height;
 	}
 
 	/* No side is negative. */
@@ -340,4 +373,96 @@ replaced_is_bare_svg(
 	if (replaced_attribute(box, "height", &ignored))
 		return 0;
 	return 1;
+}
+
+/*
+ * Applies the minimum and maximum widths and heights (a maximum below 0 is
+ * none) to a replaced box with a ratio whose width and height are both
+ * auto, keeping the ratio unless two limits disagree.
+ * https://www.w3.org/TR/CSS2/visudet.html#min-max-widths
+ */
+static void
+replaced_limit_ratio(
+	layout_unit *width,
+	layout_unit *height,
+	layout_unit min_width,
+	layout_unit max_width,
+	layout_unit min_height,
+	layout_unit max_height)
+{
+	int64_t w;
+	int64_t h;
+	int64_t used_w;
+	int64_t used_h;
+	int wide;
+	int tall;
+	int narrow;
+	int short_;
+
+	/* Where the size breaks the limits. */
+	w = *width;
+	h = *height;
+	wide = max_width >= 0 && w > max_width;
+	narrow = w < min_width;
+	tall = max_height >= 0 && h > max_height;
+	short_ = h < min_height;
+	used_w = w;
+	used_h = h;
+
+	/* The cases of the table. */
+	if (wide && tall) {
+		if ((int64_t)max_width * h <= (int64_t)max_height * w) {
+			used_w = max_width;
+			used_h = max_width * h / w;
+			if (used_h < min_height)
+				used_h = min_height;
+		} else {
+			used_h = max_height;
+			used_w = max_height * w / h;
+			if (used_w < min_width)
+				used_w = min_width;
+		}
+	} else if (narrow && short_) {
+		if ((int64_t)min_width * h <= (int64_t)min_height * w) {
+			used_h = min_height;
+			used_w = min_height * w / h;
+			if (max_width >= 0 && used_w > max_width)
+				used_w = max_width;
+		} else {
+			used_w = min_width;
+			used_h = min_width * h / w;
+			if (max_height >= 0 && used_h > max_height)
+				used_h = max_height;
+		}
+	} else if (narrow && tall) {
+		used_w = min_width;
+		used_h = max_height;
+	} else if (wide && short_) {
+		used_w = max_width;
+		used_h = min_height;
+	} else if (wide) {
+		used_w = max_width;
+		used_h = max_width * h / w;
+		if (used_h < min_height)
+			used_h = min_height;
+	} else if (narrow) {
+		used_w = min_width;
+		used_h = min_width * h / w;
+		if (max_height >= 0 && used_h > max_height)
+			used_h = max_height;
+	} else if (tall) {
+		used_h = max_height;
+		used_w = max_height * w / h;
+		if (used_w < min_width)
+			used_w = min_width;
+	} else if (short_) {
+		used_h = min_height;
+		used_w = min_height * w / h;
+		if (max_width >= 0 && used_w > max_width)
+			used_w = max_width;
+	}
+
+	/* The used size. */
+	*width = (layout_unit)used_w;
+	*height = (layout_unit)used_h;
 }

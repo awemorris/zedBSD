@@ -102,11 +102,10 @@ layout_logical_wanted(
 	}
 
 	/*
-	 * The items of a horizontal flex or grid container, and the boxes out of
-	 * the flow it places, keep the container's own handling of their writing
-	 * modes.
+	 * The items of a horizontal flex or grid container keep the container's
+	 * own handling of their writing modes.
 	 */
-	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL) {
+	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL && !box->out_of_flow) {
 		display = box->parent->style.display;
 		if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
 			return 0;
@@ -253,8 +252,8 @@ logical_fits_content(
 
 /*
  * The size along an orthogonal box's inline axis of the containing block a
- * box out of the flow is placed in: the padding box of its nearest
- * positioned ancestor, or the viewport's.
+ * box out of the flow is placed in: its grid area, the padding box of its
+ * nearest positioned ancestor, or the viewport's.
  */
 static layout_unit
 logical_containing_extent(
@@ -264,6 +263,12 @@ logical_containing_extent(
 {
 	const struct layout_box *ancestor;
 	int positioned;
+
+	/* A grid area that gives the box its containing block. */
+	if (box->cb_set && logical_vertical(own) && !box->cb_top_auto && !box->cb_bottom_auto)
+		return box->cb_bottom - box->cb_top;
+	if (box->cb_set && !logical_vertical(own) && !box->cb_left_auto && !box->cb_right_auto)
+		return box->cb_right - box->cb_left;
 
 	/* The nearest positioned ancestor's padding box. */
 	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {

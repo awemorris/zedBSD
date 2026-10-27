@@ -978,6 +978,7 @@ static int values_background_position(const struct css_token *tokens, size_t cou
 static int values_background_size(const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_unitless_function(const struct css_token *tokens, size_t count);
 static int values_flex_flow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_content(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_pair(struct css_parse *parse, int first, int second, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
@@ -4672,17 +4673,17 @@ values_flex(
 			shrink.number = 0;
 		} else {
 			is_word = css_ident_equal(&tokens[starts[0]], "auto");
-			if (!is_word)
-				return EINVAL;
 		}
 
-		/* Both keep an auto basis. */
-		basis.kind = CSS_VALUE_KEYWORD;
-		basis.keyword = CSS_UNIT_AUTO;
-		values_add(out, made, CSS_PROP_FLEX_GROW, &grow);
-		values_add(out, made, CSS_PROP_FLEX_SHRINK, &shrink);
-		values_add(out, made, CSS_PROP_FLEX_BASIS, &basis);
-		return 0;
+		/* Both keep an auto basis (another word is a basis alone). */
+		if (is_word) {
+			basis.kind = CSS_VALUE_KEYWORD;
+			basis.keyword = CSS_UNIT_AUTO;
+			values_add(out, made, CSS_PROP_FLEX_GROW, &grow);
+			values_add(out, made, CSS_PROP_FLEX_SHRINK, &shrink);
+			values_add(out, made, CSS_PROP_FLEX_BASIS, &basis);
+			return 0;
+		}
 	}
 
 	/* One to three parts: numbers are the factors in order, anything else the basis. */
@@ -4718,8 +4719,8 @@ values_flex(
 			continue;
 		}
 
-		/* The basis, once. */
-		if (basis_set)
+		/* The basis, once (a calculation without units is not one). */
+		if (basis_set || values_unitless_function(tokens + starts[index], lengths[index]))
 			return EINVAL;
 		error = values_single(parse, CSS_PROP_FLEX_BASIS, tokens + starts[index], lengths[index], &candidate);
 		if (error != 0)
@@ -4735,6 +4736,28 @@ values_flex(
 
 	/* Succeeded: the flex longhands are declared. */
 	return 0;
+}
+
+/* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
+static int
+values_unitless_function(
+	const struct css_token *tokens,
+	size_t count)
+{
+	size_t index;
+
+	/* A function. */
+	if (count < 2U || tokens[0].type != CSS_TOKEN_FUNCTION)
+		return 0;
+
+	/* Without units. */
+	for (index = 1; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_DIMENSION || tokens[index].type == CSS_TOKEN_PERCENTAGE)
+			return 0;
+	}
+
+	/* Succeeded: the function gives a number. */
+	return 1;
 }
 
 /* Parses flex-flow: a direction and a wrap, in either order, each optional. */

@@ -116,6 +116,7 @@ static void grid_release(struct grid_state *grid);
 static void grid_expand_repeats(struct layout_tree *tree, struct layout_box *box);
 static int grid_collapse_tracks(struct layout_box *box, struct grid_state *grid);
 static void grid_distribute(int value, int reversed, layout_unit free_space, int tracks, layout_unit *offset, layout_unit *extra);
+static int grid_live_tracks(const unsigned char *collapsed, int count);
 static int grid_content_stretches(int value);
 
 /* The size one track of a repeat is counted at: its definite maximum, else its minimum. */
@@ -311,6 +312,24 @@ grid_collapse_tracks(
 		}
 	}
 	return 0;
+}
+
+/* Counts the tracks an auto-fit repeat did not collapse (the ones content distribution spaces). */
+static int
+grid_live_tracks(
+	const unsigned char *collapsed,
+	int count)
+{
+	int live;
+	int index;
+
+	/* Every track without a collapsed mark. */
+	live = 0;
+	for (index = 0; index < count; index++) {
+		if (collapsed == NULL || !collapsed[index])
+			live++;
+	}
+	return live;
 }
 
 /* Normal content distribution stretches the auto tracks. */
@@ -562,8 +581,14 @@ layout_grid(
 	grid_distribute(box->style.justify_content,
 	    box->style.direction == CSS_DIRECTION_RTL &&
 	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB,
-	    room, grid.column_count, &shift, &distribution);
+	    room, grid_live_tracks(grid.column_collapsed, grid.column_count), &shift, &distribution);
 	column_gap += distribution;
+
+	/* A collapsed track still takes its widened gap with it. */
+	for (position = 0; grid.column_collapsed != NULL && position < grid.column_count; position++) {
+		if (grid.column_collapsed[position])
+			grid.columns[position] = -column_gap;
+	}
 
 	/* Each item laid out in its area's width. */
 	for (index = 0; index < grid.item_count; index++) {
@@ -619,8 +644,12 @@ layout_grid(
 		if (available_height < 0)
 			available_height = 0;
 		grid_distribute(box->style.align_content, 0, available_height - used,
-		    grid.row_count, &row_shift, &distribution);
+		    grid_live_tracks(grid.row_collapsed, grid.row_count), &row_shift, &distribution);
 		row_gap += distribution;
+		for (position = 0; grid.row_collapsed != NULL && position < grid.row_count; position++) {
+			if (grid.row_collapsed[position])
+				grid.rows[position] = -row_gap;
+		}
 	}
 
 	/* Absolute children use valid definite grid areas without sizing the tracks. */
