@@ -28,6 +28,11 @@ static int grid_text_ascii(const char *ascii, struct wb_units *out);
 static int grid_text_is_name(const struct css_grid_place *place, int end);
 static int grid_text_left_out(const struct css_grid_place *place, int end, const struct css_grid_place *other, int other_end);
 static int grid_text_place(const struct css_value *value, struct css_grid_place *place, int end);
+static int grid_text_name_is(const uint16_t *units, size_t length, const char *name);
+static int grid_text_template(const uint16_t *units, size_t length, struct wb_units *out);
+static int grid_text_piece(const uint16_t *units, const struct css_token *tokens, size_t first, size_t last, struct wb_units *out);
+static int grid_text_string(const struct css_token *token, struct wb_units *out);
+static size_t grid_text_component(const struct css_token *tokens, size_t count, size_t index);
 
 /*
  * Writes an identifier as CSSOM serializes one.
@@ -418,6 +423,7 @@ css_grid_declaration_serialize(
 	size_t index;
 	int property;
 	int kind;
+	int is_template;
 	int error;
 
 	/* The declarations the value makes, in an arena of their own. */
@@ -429,9 +435,29 @@ css_grid_declaration_serialize(
 		return error;
 	}
 
-	/* Only a value that parsed into grid declarations is written here. */
+	/* Only a value that parsed is written here (and not a CSS-wide keyword). */
 	if (error != 0 || count == 0) {
 		wb_arena_release(&arena);
+		return 0;
+	}
+	kind = declarations[0].value.kind;
+	if (kind == CSS_VALUE_INHERIT || kind == CSS_VALUE_INITIAL || kind == CSS_VALUE_UNSET) {
+		wb_arena_release(&arena);
+		return 0;
+	}
+
+	/* grid-template and grid are written from their text. */
+	is_template = grid_text_name_is(units, length, "grid-template");
+	if (!is_template)
+		is_template = grid_text_name_is(units, length, "grid");
+	if (is_template) {
+		wb_arena_release(&arena);
+		error = grid_text_template(units, length, out);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the shorthand's canonical text is written. */
+		*handled = 1;
 		return 0;
 	}
 
@@ -487,6 +513,335 @@ css_grid_declaration_serialize(
 
 	/* Succeeded: the placement is written. */
 	*handled = 1;
+	return 0;
+}
+
+/* Tells whether a declaration's text ("name: value") is of the named property (ASCII, any case). */
+static int
+grid_text_name_is(
+	const uint16_t *units,
+	size_t length,
+	const char *name)
+{
+	size_t index;
+	size_t at;
+	uint16_t unit;
+
+	/* Leading whitespace. */
+	at = 0;
+	while (at < length && (units[at] == ' ' || units[at] == '\t' || units[at] == '\n'))
+		at++;
+
+	/* The name's characters. */
+	for (index = 0; name[index] != '\0'; index++) {
+		if (at >= length)
+			return 0;
+		unit = units[at];
+		if (unit >= 'A' && unit <= 'Z')
+			unit = (uint16_t)(unit - 'A' + 'a');
+		if (unit != (uint16_t)(unsigned char)name[index])
+			return 0;
+		at++;
+	}
+
+	/* Then whitespace and the colon. */
+	while (at < length && (units[at] == ' ' || units[at] == '\t' || units[at] == '\n'))
+		at++;
+	if (at >= length || units[at] != ':')
+		return 0;
+
+	/* Succeeded: the declaration is of the property. */
+	return 1;
+}
+
+/*
+ * Writes a grid-template or grid value in canonical form from its text:
+ * the components a space apart, adjacent line-name groups merged and empty
+ * ones dropped, an auto row size after a string dropped, area strings
+ * written as their cells, a unitless zero as 0px, dense after auto-flow,
+ * and none / none as none.
+ */
+static int
+grid_text_template(
+	const uint16_t *units,
+	size_t length,
+	struct wb_units *out)
+{
+	struct css_token *tokens;
+	struct wb_arena arena;
+	size_t count;
+	size_t start;
+	size_t index;
+	size_t next;
+	size_t names[64];
+	size_t name_count;
+	size_t name;
+	size_t slash;
+	size_t written;
+	int previous_string;
+	int has_string;
+	int is_word;
+	int error;
+
+	/* The value after the colon, as tokens. */
+	start = 0;
+	while (start < length && units[start] != ':')
+		start++;
+	start++;
+	wb_arena_init(&arena, 0);
+	error = css_tokenize(&arena, units + start, length - start, &tokens, &count);
+	if (error != 0) {
+		wb_arena_release(&arena);
+		return error;
+	}
+	while (count > 0 && (tokens[count - 1U].type == CSS_TOKEN_EOF || tokens[count - 1U].type == CSS_TOKEN_WHITESPACE))
+		count--;
+
+	/* Where the slash is, and whether the rows have strings. */
+	slash = count;
+	has_string = 0;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_DELIM && tokens[index].delim == '/') {
+			slash = index;
+			break;
+		}
+		if (tokens[index].type == CSS_TOKEN_STRING)
+			has_string = 1;
+	}
+
+	/* none / none is none. */
+	index = 0;
+	next = 0;
+	while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index < slash && slash < count && tokens[index].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[index], "none")) {
+		next = slash + 1U;
+		while (next < count && tokens[next].type == CSS_TOKEN_WHITESPACE)
+			next++;
+		if (next + 1U == count && tokens[next].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[next], "none")) {
+			error = grid_text_ascii("none", out);
+			wb_arena_release(&arena);
+			return error;
+		}
+	}
+
+	/* The components in order. */
+	written = 0;
+	name_count = 0;
+	previous_string = 0;
+	index = 0;
+	while (index <= count) {
+		/* Whitespace separates components. */
+		if (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE) {
+			index++;
+			continue;
+		}
+
+		/* A group of names joins the ones just before it. */
+		if (index < count && tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			for (index++; index < count && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE; index++) {
+				if (tokens[index].type == CSS_TOKEN_IDENT && name_count < 64U) {
+					names[name_count] = index;
+					name_count++;
+				}
+			}
+			index++;
+			continue;
+		}
+
+		/* Names gathered before this component are written first, merged. */
+		if (name_count > 0) {
+			if (written > 0) {
+				error = grid_text_ascii(" ", out);
+				if (error != 0)
+					break;
+			}
+			error = grid_text_ascii("[", out);
+			for (name = 0; name < name_count && error == 0; name++) {
+				if (name > 0)
+					error = grid_text_ascii(" ", out);
+				if (error == 0)
+					error = wb_units_append(out, units + start + tokens[names[name]].source_start,
+					    tokens[names[name]].source_end - tokens[names[name]].source_start);
+			}
+			if (error == 0)
+				error = grid_text_ascii("]", out);
+			if (error != 0)
+				break;
+			written++;
+			name_count = 0;
+			previous_string = 0;
+		}
+		if (index >= count)
+			break;
+
+		/* An auto size after a row's string is the default and goes. */
+		is_word = tokens[index].type == CSS_TOKEN_IDENT;
+		if (is_word && has_string && index < slash && previous_string && css_ident_equal(&tokens[index], "auto")) {
+			previous_string = 0;
+			index++;
+			continue;
+		}
+
+		/* dense before auto-flow is written after it. */
+		next = index + 1U;
+		while (next < count && tokens[next].type == CSS_TOKEN_WHITESPACE)
+			next++;
+		if (is_word && next < count && css_ident_equal(&tokens[index], "dense") &&
+		    tokens[next].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[next], "auto-flow")) {
+			if (written > 0) {
+				error = grid_text_ascii(" ", out);
+				if (error != 0)
+					break;
+			}
+			error = grid_text_ascii("auto-flow dense", out);
+			if (error != 0)
+				break;
+			written++;
+			index = next + 1U;
+			continue;
+		}
+
+		/* Any other component as written (a string as its cells). */
+		next = grid_text_component(tokens, count, index);
+		if (written > 0) {
+			error = grid_text_ascii(" ", out);
+			if (error != 0)
+				break;
+		}
+		error = grid_text_piece(units + start, tokens, index, next, out);
+		if (error != 0)
+			break;
+		written++;
+		previous_string = tokens[index].type == CSS_TOKEN_STRING;
+		index = next;
+	}
+
+	/* The tokens are no longer needed. */
+	wb_arena_release(&arena);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the value is written. */
+	return 0;
+}
+
+/* The index after one component: a function and its arguments, or one token. */
+static size_t
+grid_text_component(
+	const struct css_token *tokens,
+	size_t count,
+	size_t index)
+{
+	int depth;
+
+	/* One token unless it opens a function. */
+	if (tokens[index].type != CSS_TOKEN_FUNCTION)
+		return index + 1U;
+
+	/* A function runs to its closing parenthesis. */
+	depth = 0;
+	for (; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_FUNCTION || tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		if (tokens[index].type == CSS_TOKEN_CLOSE_PAREN) {
+			depth--;
+			if (depth == 0)
+				return index + 1U;
+		}
+	}
+
+	/* An unclosed function runs to the end. */
+	return count;
+}
+
+/* Writes one component: a string as its cells, a unitless zero as 0px, anything else as written. */
+static int
+grid_text_piece(
+	const uint16_t *units,
+	const struct css_token *tokens,
+	size_t first,
+	size_t last,
+	struct wb_units *out)
+{
+	int error;
+
+	/* A string. */
+	if (tokens[first].type == CSS_TOKEN_STRING) {
+		error = grid_text_string(&tokens[first], out);
+		return error;
+	}
+
+	/* A unitless zero. */
+	if (last == first + 1U && tokens[first].type == CSS_TOKEN_NUMBER && tokens[first].number == 0) {
+		error = grid_text_ascii("0px", out);
+		return error;
+	}
+
+	/* The source text. */
+	error = wb_units_append(out, units + tokens[first].source_start, tokens[last - 1U].source_end - tokens[first].source_start);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the component is written. */
+	return 0;
+}
+
+/* Writes an area string in quotes: its cell tokens a space apart, a run of full stops as one. */
+static int
+grid_text_string(
+	const struct css_token *token,
+	struct wb_units *out)
+{
+	static const uint16_t space = ' ';
+	static const uint16_t stop = '.';
+	size_t at;
+	size_t begin;
+	uint16_t unit;
+	int cells;
+	int error;
+
+	/* The opening quote. */
+	error = grid_text_ascii("\"", out);
+	if (error != 0)
+		return error;
+
+	/* Each cell token. */
+	cells = 0;
+	at = 0;
+	while (at < token->length) {
+		unit = token->text[at];
+		if (unit == ' ' || unit == '\t' || unit == '\n' || unit == '\r' || unit == '\f') {
+			at++;
+			continue;
+		}
+		if (cells > 0) {
+			error = wb_units_append(out, &space, 1);
+			if (error != 0)
+				return error;
+		}
+		begin = at;
+		if (unit == '.') {
+			while (at < token->length && token->text[at] == '.')
+				at++;
+			error = wb_units_append(out, &stop, 1);
+		} else {
+			while (at < token->length && token->text[at] != ' ' && token->text[at] != '\t' &&
+			    token->text[at] != '\n' && token->text[at] != '\r' && token->text[at] != '\f' && token->text[at] != '.')
+				at++;
+			error = wb_units_append(out, token->text + begin, at - begin);
+		}
+		if (error != 0)
+			return error;
+		cells++;
+	}
+
+	/* The closing quote. */
+	error = grid_text_ascii("\"", out);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the string is written. */
 	return 0;
 }
 
