@@ -32,6 +32,7 @@
 #include <string.h>
 
 static int logical_vertical(int mode);
+static layout_unit logical_containing_extent(const struct layout_tree *tree, const struct layout_box *box, int own);
 static int logical_fits_content(const struct layout_box *box);
 static void logical_sides_to_logical(struct css_length *sides, int mode);
 static void logical_floats_to_logical(float *sides, int mode);
@@ -44,6 +45,7 @@ static int logical_convert(struct layout_tree *tree, struct layout_box *box, int
 static void logical_unflip(struct layout_box *box, int mode, layout_unit parent_width, int root);
 static void logical_box_to_physical(struct layout_box *box, int mode, layout_unit parent_width, int place);
 static void logical_box_to_logical(struct layout_box *box, int mode);
+static void logical_static_to_physical(struct layout_box *child, int mode, layout_unit width);
 static void logical_restore(struct layout_box *box);
 
 /*
@@ -71,6 +73,7 @@ layout_logical_wanted(
 	const struct layout_tree *tree,
 	const struct layout_box *box)
 {
+	int display;
 	int mode;
 
 	/* A box of the domain being laid out uses the domain's coordinates. */
@@ -81,6 +84,19 @@ layout_logical_wanted(
 	mode = box->style.writing_mode;
 	if (mode == tree->logical_mode)
 		return 0;
+
+	/*
+	 * The items of a horizontal flex or grid container, and the boxes out of
+	 * the flow it places, keep the container's own handling of their writing
+	 * modes.
+	 */
+	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB && box->parent != NULL) {
+		display = box->parent->style.display;
+		if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
+			return 0;
+		if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+			return 0;
+	}
 
 	/* Succeeded: the box needs its own coordinates. */
 	return 1;
@@ -124,7 +140,9 @@ layout_logical(
 	 */
 	available = containing_width;
 	if (logical_vertical(own) != logical_vertical(outer)) {
-		if (tree->containing_height_definite) {
+		if (box->out_of_flow) {
+			available = logical_containing_extent(tree, box, own);
+		} else if (tree->containing_height_definite) {
 			available = tree->containing_height;
 		} else if (logical_vertical(own)) {
 			available = tree->viewport_height;
@@ -185,8 +203,8 @@ layout_logical(
 
 /*
  * Tells whether an orthogonal box's auto inline size fits its content: a
- * block-level box of a block container (a flex or grid item is sized by
- * its container, and floats and the like shrink to fit already).
+ * float, an inline block, a box out of the flow, or a block-level box of a
+ * block container (a flex or grid item is sized by its container).
  */
 static int
 logical_fits_content(
@@ -198,6 +216,14 @@ logical_fits_content(
 	if (box->style.width.unit != CSS_UNIT_AUTO)
 		return 0;
 
+	/* A replaced box has its own size. */
+	if (box->replaced)
+		return 0;
+
+	/* Floats, inline blocks and boxes out of the flow shrink to fit their content. */
+	if (box->floating != CSS_FLOAT_NONE || box->out_of_flow || box->atomic)
+		return 1;
+
 	/* Flex and grid items are sized by their containers. */
 	display = box->parent->style.display;
 	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)
@@ -205,12 +231,38 @@ logical_fits_content(
 	if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
 		return 0;
 
-	/* Boxes that shrink to fit anyway, and replaced ones, are left alone. */
-	if (box->floating != CSS_FLOAT_NONE || box->out_of_flow || box->atomic || box->replaced)
-		return 0;
-
 	/* Succeeded: the box fits its content. */
 	return 1;
+}
+
+/*
+ * The size along an orthogonal box's inline axis of the containing block a
+ * box out of the flow is placed in: the padding box of its nearest
+ * positioned ancestor, or the viewport's.
+ */
+static layout_unit
+logical_containing_extent(
+	const struct layout_tree *tree,
+	const struct layout_box *box,
+	int own)
+{
+	const struct layout_box *ancestor;
+	int positioned;
+
+	/* The nearest positioned ancestor's padding box. */
+	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {
+		positioned = layout_is_positioned(ancestor);
+		if (!positioned)
+			continue;
+		if (logical_vertical(own))
+			return ancestor->padding[CSS_TOP] + ancestor->height + ancestor->padding[CSS_BOTTOM];
+		return ancestor->padding[CSS_LEFT] + ancestor->width + ancestor->padding[CSS_RIGHT];
+	}
+
+	/* Otherwise the viewport. */
+	if (logical_vertical(own))
+		return tree->viewport_height;
+	return tree->viewport_width;
 }
 
 /* Tells whether a writing mode lays lines out vertically. */
@@ -247,8 +299,9 @@ logical_convert(
 	memcpy(kept, &box->style, sizeof(*kept));
 	box->physical_style = kept;
 
-	/* The logical one in its place. */
+	/* The logical one in its place (a max-content width measured in physical coordinates no longer holds). */
 	logical_style(&box->style, mode);
+	box->max_content_known = 0;
 
 	/* The children of the same writing mode; another one starts a domain of its own. */
 	for (child = box->first_child; child != NULL; child = child->next) {
@@ -478,16 +531,94 @@ logical_unflip(
 			logical_box_to_physical(child, mode, box->width, 1);
 		}
 
-		/* A child out of the flow keeps its static place, a point. */
-		if (child->out_of_flow) {
-			layout_unit x;
+		/* A child out of the flow keeps its static place and the area its parent gave it. */
+		if (child->out_of_flow)
+			logical_static_to_physical(child, mode, box->width);
+	}
+}
 
-			x = child->static_y;
-			if (mode == CSS_WRITING_VERTICAL_RL)
-				x = box->width - child->static_y;
-			child->static_y = child->static_x;
-			child->static_x = x;
-		}
+/*
+ * Turns the static place a child out of the flow got in a vertical
+ * domain into physical coordinates in its parent's content box (width
+ * wide): the point or the area a grid gave it, the area's alignment, and
+ * the containing block a grid's lines give it.
+ */
+static void
+logical_static_to_physical(
+	struct layout_box *child,
+	int mode,
+	layout_unit width)
+{
+	layout_unit left;
+	layout_unit top;
+	layout_unit area_width;
+	layout_unit area_height;
+	layout_unit edge;
+	int flag;
+	int align;
+	int safe;
+
+	/* The static area (a point when it has no size): from the logical one, across then down. */
+	area_width = child->static_x_area_width;
+	area_height = child->static_y_area_height;
+	left = child->static_x;
+	if (child->static_x_from_right)
+		left -= area_width;
+
+	/* A grid's lines give the area's block size when the static area does not. */
+	if (area_height == 0 && child->cb_set && !child->cb_top_auto && !child->cb_bottom_auto)
+		area_height = child->cb_bottom - child->cb_top;
+	top = child->static_y;
+	child->static_x = top;
+	child->static_x_from_right = 0;
+	if (mode == CSS_WRITING_VERTICAL_RL) {
+		/* Vertical-rl starts its blocks at the right: the place names the area's right edge. */
+		child->static_x = width - top;
+		child->static_x_from_right = 1;
+	}
+	child->static_y = left;
+	child->static_x_area_width = area_height;
+	child->static_y_area_height = area_width;
+
+	/*
+	 * The alignments change axes.  A block-end alignment goes to the right
+	 * in vertical-lr (aligned from the right edge); in vertical-rl the place
+	 * already names the right edge, where a start goes.
+	 */
+	align = child->static_x_align;
+	child->static_x_align = child->static_y_align;
+	child->static_y_align = align;
+	child->static_x_align_from_right = 0;
+	if (mode == CSS_WRITING_VERTICAL_LR &&
+	    (child->static_x_align == CSS_ALIGN_END || child->static_x_align == CSS_ALIGN_SELF_END))
+		child->static_x_align_from_right = 1;
+	safe = child->static_x_safe;
+	child->static_x_safe = child->static_y_safe;
+	child->static_y_safe = safe;
+
+	/* The containing block from the grid's lines. */
+	if (!child->cb_set)
+		return;
+	left = child->cb_left;
+	top = child->cb_top;
+	edge = child->cb_right;
+	child->cb_left = top;
+	child->cb_right = child->cb_bottom;
+	child->cb_top = left;
+	child->cb_bottom = edge;
+	flag = child->cb_left_auto;
+	child->cb_left_auto = child->cb_top_auto;
+	child->cb_top_auto = flag;
+	flag = child->cb_right_auto;
+	child->cb_right_auto = child->cb_bottom_auto;
+	child->cb_bottom_auto = flag;
+	if (mode == CSS_WRITING_VERTICAL_RL) {
+		edge = child->cb_left;
+		child->cb_left = width - child->cb_right;
+		child->cb_right = width - edge;
+		flag = child->cb_left_auto;
+		child->cb_left_auto = child->cb_right_auto;
+		child->cb_right_auto = flag;
 	}
 }
 
@@ -567,6 +698,7 @@ logical_restore(
 		return;
 	memcpy(&box->style, box->physical_style, sizeof(box->style));
 	box->physical_style = NULL;
+	box->max_content_known = 0;
 
 	/* The children of the domain. */
 	for (child = box->first_child; child != NULL; child = child->next)
