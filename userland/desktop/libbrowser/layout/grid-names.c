@@ -26,47 +26,100 @@
 
 #include <string.h>
 
+/* A line left auto while lines are worked out (a real line can be 0 or negative: before the grid). */
+#define GRID_NAMES_AUTO	(-1000000)
+
 static int grid_names_explicit(const struct css_style *style, int columns);
 static int grid_names_has(const struct css_style *style, int columns, int line, const struct vm_string *name, const char *suffix);
+static int grid_names_template_has(const struct css_line_names *names, int tracks, const struct css_track_repeat *repeat, int line, const struct vm_string *name, const char *suffix);
+static int grid_names_range(const struct css_line_names *names, int first, int last, const struct vm_string *name, const char *suffix);
 static int grid_names_area_edge(const struct css_style *style, int columns, int line, const struct vm_string *name, const char *suffix);
 static int grid_names_equal(const struct vm_string *atom, const struct vm_string *base, const char *suffix);
 static int grid_names_edge(const struct vm_string *name, const char *suffix, const struct vm_string *area, const char *edge);
 static int grid_names_find(const struct css_style *style, int columns, const struct vm_string *name, const char *suffix, int count);
 static int grid_names_count_from(const struct css_style *style, int columns, const struct vm_string *name, int from, int count, int forward);
-static void grid_names_axis(const struct css_style *style, int columns, struct css_grid_place *place);
+static int grid_names_axis(const struct css_style *style, int columns, struct css_grid_place *place);
+static void grid_names_prepend(struct layout_box *box, int columns, int count);
+static void grid_names_settle(struct css_grid_place *place);
 
 /*
- * Resolves the named lines and spans of a grid container's children to
- * line numbers on both axes (their boxes' styles are the layout's own).
+ * Resolves the lines of a grid container's children to positive line
+ * numbers on both axes: named lines and spans, and line numbers counted
+ * from the end.  A line before the explicit grid makes implicit tracks
+ * before it: the template gets them in front (sized like implicit tracks)
+ * and every line moves on by as many.  The children's styles are the
+ * layout's own.
  */
 void
 layout_grid_names(
 	struct layout_box *box)
 {
 	struct layout_box *child;
+	int column_first;
+	int row_first;
+	int first;
 
-	/* Each child, in the flow or out of it. */
+	/* Each child's lines, and the first line any item in the flow reaches. */
+	column_first = 1;
+	row_first = 1;
 	for (child = box->first_child; child != NULL; child = child->next) {
-		grid_names_axis(&box->style, 1, &child->style.grid_column);
-		grid_names_axis(&box->style, 0, &child->style.grid_row);
+		first = grid_names_axis(&box->style, 1, &child->style.grid_column);
+		if (!child->out_of_flow && first < column_first)
+			column_first = first;
+		first = grid_names_axis(&box->style, 0, &child->style.grid_row);
+		if (!child->out_of_flow && first < row_first)
+			row_first = first;
+	}
+
+	/* Implicit tracks before the explicit grid, and every line moved past them. */
+	if (column_first < 1)
+		grid_names_prepend(box, 1, 1 - column_first);
+	if (row_first < 1)
+		grid_names_prepend(box, 0, 1 - row_first);
+
+	/* What is still at or before line 0 is out of the grid: auto. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		grid_names_settle(&child->style.grid_column);
+		grid_names_settle(&child->style.grid_row);
 	}
 }
 
-/* Resolves one axis of a place: its definite named lines first, then its named spans. */
-static void
+/*
+ * Resolves one axis of a place to line numbers (definite lines may be 0 or
+ * negative: before the explicit grid; auto is GRID_NAMES_AUTO) and reports
+ * the first line the place reaches (1 when it reaches none before the grid).
+ */
+static int
 grid_names_axis(
 	const struct css_style *style,
 	int columns,
 	struct css_grid_place *place)
 {
+	int explicit_lines;
 	int count;
+	int first;
+
+	/* Numbered lines counted from the end are counted from the start. */
+	explicit_lines = grid_names_explicit(style, columns) + 1;
+	if (place->start_name == NULL && place->start_span == 0) {
+		if (place->start < 0)
+			place->start = explicit_lines + 1 + place->start;
+		else if (place->start == 0)
+			place->start = GRID_NAMES_AUTO;
+	}
+	if (place->end_name == NULL && place->end_span == 0) {
+		if (place->end < 0)
+			place->end = explicit_lines + 1 + place->end;
+		else if (place->end == 0)
+			place->end = GRID_NAMES_AUTO;
+	}
 
 	/* A named start line: NAME-start for a name alone, else the count-th line of the name. */
 	if (place->start_name != NULL && place->start_span == 0) {
 		count = place->start;
 		if (count == 0) {
 			count = grid_names_find(style, columns, place->start_name, "-start", 1);
-			if (count == 0)
+			if (count == GRID_NAMES_AUTO)
 				count = grid_names_find(style, columns, place->start_name, NULL, 1);
 		} else {
 			count = grid_names_find(style, columns, place->start_name, NULL, count);
@@ -80,7 +133,7 @@ grid_names_axis(
 		count = place->end;
 		if (count == 0) {
 			count = grid_names_find(style, columns, place->end_name, "-end", 1);
-			if (count == 0)
+			if (count == GRID_NAMES_AUTO)
 				count = grid_names_find(style, columns, place->end_name, NULL, 1);
 		} else {
 			count = grid_names_find(style, columns, place->end_name, NULL, count);
@@ -89,9 +142,16 @@ grid_names_axis(
 		place->end_name = NULL;
 	}
 
+	/* A span on an auto side keeps it auto. */
+	if (place->start_span != 0 && place->start_name == NULL)
+		place->start = GRID_NAMES_AUTO;
+	if (place->end_span != 0 && place->end_name == NULL)
+		place->end = GRID_NAMES_AUTO;
+
 	/* A named start span counts back from a definite end. */
 	if (place->start_name != NULL) {
-		if (place->end > 0 && place->end_span == 0) {
+		place->start = GRID_NAMES_AUTO;
+		if (place->end != GRID_NAMES_AUTO) {
 			place->start = grid_names_count_from(style, columns, place->start_name, place->end, place->start_span, 0);
 			place->start_span = 0;
 		} else {
@@ -102,7 +162,8 @@ grid_names_axis(
 
 	/* A named end span counts on from a definite start. */
 	if (place->end_name != NULL) {
-		if (place->start > 0 && place->start_span == 0) {
+		place->end = GRID_NAMES_AUTO;
+		if (place->start != GRID_NAMES_AUTO) {
 			place->end = grid_names_count_from(style, columns, place->end_name, place->start, place->end_span, 1);
 			place->end_span = 0;
 		} else {
@@ -110,6 +171,102 @@ grid_names_axis(
 		}
 		place->end_name = NULL;
 	}
+
+	/* The first line reached: the definite lines, and a span back from a definite end. */
+	first = 1;
+	if (place->start != GRID_NAMES_AUTO && place->start < first)
+		first = place->start;
+	if (place->end != GRID_NAMES_AUTO && place->end < first)
+		first = place->end;
+	if (place->start == GRID_NAMES_AUTO && place->end != GRID_NAMES_AUTO && place->start_span > 0 &&
+	    place->end - place->start_span < first)
+		first = place->end - place->start_span;
+	if (place->start == GRID_NAMES_AUTO && place->end != GRID_NAMES_AUTO && place->start_span == 0 &&
+	    place->end_span == 0 && place->end - 1 < first)
+		first = place->end - 1;
+
+	/* The first line. */
+	return first;
+}
+
+/*
+ * Puts count implicit tracks before an axis's template (the implicit track
+ * sizes, from the last backwards) and moves every child's lines past them.
+ */
+static void
+grid_names_prepend(
+	struct layout_box *box,
+	int columns,
+	int count)
+{
+	struct css_style *style;
+	struct layout_box *child;
+	struct css_grid_place *place;
+	struct css_track *tracks;
+	struct css_track_repeat *repeat;
+	const struct css_track *pattern;
+	int *track_count;
+	int pattern_count;
+	int index;
+
+	/* The axis. */
+	style = &box->style;
+	tracks = style->rows;
+	track_count = &style->row_count;
+	repeat = &style->row_repeat;
+	pattern = style->auto_rows;
+	pattern_count = style->auto_row_count;
+	if (columns) {
+		tracks = style->columns;
+		track_count = &style->column_count;
+		repeat = &style->column_repeat;
+		pattern = style->auto_columns;
+		pattern_count = style->auto_column_count;
+	}
+
+	/* No more tracks than the template keeps. */
+	if (count > CSS_TRACKS - *track_count)
+		count = CSS_TRACKS - *track_count;
+	if (count <= 0)
+		return;
+
+	/* The template moves on; the tracks in front cycle the implicit sizes backwards. */
+	memmove(tracks + count, tracks, (size_t)*track_count * sizeof(*tracks));
+	for (index = 0; index < count; index++) {
+		memset(&tracks[index], 0, sizeof(tracks[index]));
+		tracks[index].kind = CSS_TRACK_AUTO;
+		tracks[index].minimum.unit = CSS_UNIT_AUTO;
+		if (pattern_count > 0)
+			tracks[index] = pattern[(pattern_count - (count - index) % pattern_count) % pattern_count];
+	}
+	*track_count += count;
+	if (repeat->length > 0)
+		repeat->at += count;
+
+	/* Every definite line moves on as far. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		place = &child->style.grid_row;
+		if (columns)
+			place = &child->style.grid_column;
+		if (place->start != GRID_NAMES_AUTO)
+			place->start += count;
+		if (place->end != GRID_NAMES_AUTO)
+			place->end += count;
+	}
+}
+
+/* Leaves a place in the grid layout's terms: lines from 1, 0 for auto (a line still before the grid is auto). */
+static void
+grid_names_settle(
+	struct css_grid_place *place)
+{
+	/* The start. */
+	if (place->start == GRID_NAMES_AUTO || place->start < 1)
+		place->start = 0;
+
+	/* The end. */
+	if (place->end == GRID_NAMES_AUTO || place->end < 1)
+		place->end = 0;
 }
 
 /* The number of explicit tracks on an axis: the template's, or more when the named areas need them. */
@@ -141,8 +298,9 @@ grid_names_explicit(
  * Finds the line of a name (with a suffix, NULL for none) that a count
  * picks: the count-th from the first line, or from the last when it is
  * negative.  Implicit lines after the explicit grid all have the name
- * when the explicit ones run out (a suffixed name looked up for an area
- * does not; 0 then means none).
+ * when the explicit ones run out, and so do those before it counting
+ * back (a suffixed name looked up for an area does not; GRID_NAMES_AUTO
+ * then means none).
  */
 static int
 grid_names_find(
@@ -174,7 +332,7 @@ grid_names_find(
 
 		/* An area's edge that is not there; otherwise the implicit lines carry on the count. */
 		if (suffix != NULL)
-			return 0;
+			return GRID_NAMES_AUTO;
 		return last + (count - found);
 	}
 
@@ -189,14 +347,15 @@ grid_names_find(
 			return line;
 	}
 
-	/* Lines before the grid are not made: the first line. */
-	return 1;
+	/* The implicit lines before the grid carry on the count. */
+	if (suffix != NULL)
+		return GRID_NAMES_AUTO;
+	return 1 + (count - found);
 }
 
 /*
  * Counts count lines of a name from a definite line, on (forward) or
- * back; implicit lines after the grid all have the name, and a count
- * back that runs out stops at the first line.
+ * back; the implicit lines before and after the grid all have the name.
  */
 static int
 grid_names_count_from(
@@ -241,8 +400,10 @@ grid_names_count_from(
 			return line;
 	}
 
-	/* Lines before the grid are not made: the first line. */
-	return 1;
+	/* The implicit lines before the grid carry on the count. */
+	if (from < 1)
+		return from - count;
+	return 1 - (count - found);
 }
 
 /* Tells whether an explicit line has a name (with a suffix, NULL for none). */
@@ -255,23 +416,23 @@ grid_names_has(
 	const char *suffix)
 {
 	const struct css_line_names *names;
+	const struct css_track_repeat *repeat;
 	int tracks;
-	int index;
 	int same;
 
-	/* The template's names of the line. */
+	/* The template's names of the line (in the template as written, before the repeats were counted). */
 	names = style->row_names;
 	tracks = style->row_count;
+	repeat = &style->row_repeat;
 	if (columns) {
 		names = style->column_names;
 		tracks = style->column_count;
+		repeat = &style->column_repeat;
 	}
-	if (names != NULL && line - 1 <= tracks) {
-		for (index = 0; index < names[line - 1].count; index++) {
-			same = grid_names_equal(names[line - 1].names[index], name, suffix);
-			if (same)
-				return 1;
-		}
+	if (names != NULL) {
+		same = grid_names_template_has(names, tracks, repeat, line - 1, name, suffix);
+		if (same)
+			return 1;
 	}
 
 	/* The implicit NAME-start and NAME-end of the named areas. */
@@ -280,6 +441,84 @@ grid_names_has(
 		return 1;
 
 	/* The line does not have the name. */
+	return 0;
+}
+
+/*
+ * Tells whether a line of a template (index from 0, after layout put an
+ * automatic repeat's tracks in count times) has a name: a line inside the
+ * repeat has the names of its line in the repeat as written, and a line
+ * between two repetitions the repeat's own last-line and first-line names.
+ */
+static int
+grid_names_template_has(
+	const struct css_line_names *names,
+	int tracks,
+	const struct css_track_repeat *repeat,
+	int line,
+	const struct vm_string *name,
+	const char *suffix)
+{
+	int original;
+	int written;
+	int offset;
+	int end;
+	int same;
+
+	/* The line in the template as written. */
+	original = line;
+	if (repeat->length > 0 && repeat->count > 1) {
+		end = repeat->at + repeat->length * repeat->count;
+		if (line > repeat->at && line < end) {
+			offset = (line - repeat->at) % repeat->length;
+			if (offset == 0) {
+				/* Between two repetitions: the last line's own names, then the first line's. */
+				same = grid_names_range(&names[repeat->at + repeat->length], 0, repeat->name_end, name, suffix);
+				if (same)
+					return 1;
+				same = grid_names_range(&names[repeat->at], repeat->name_prefix, names[repeat->at].count, name, suffix);
+				return same;
+			}
+			original = repeat->at + offset;
+		} else if (line >= end) {
+			original = line - repeat->length * (repeat->count - 1);
+		}
+	}
+
+	/* Lines past the template as written have no names. */
+	written = tracks;
+	if (repeat->length > 0 && repeat->count > 1)
+		written = tracks - repeat->length * (repeat->count - 1);
+	if (original < 0 || original > written || original > CSS_TRACKS)
+		return 0;
+
+	/* Succeeded: whether the written line has the name. */
+	same = grid_names_range(&names[original], 0, names[original].count, name, suffix);
+	return same;
+}
+
+/* Tells whether one of a line's names, from first up to last, is the name looked for (with its suffix). */
+static int
+grid_names_range(
+	const struct css_line_names *names,
+	int first,
+	int last,
+	const struct vm_string *name,
+	const char *suffix)
+{
+	int index;
+	int same;
+
+	/* Each name in the range. */
+	if (last > names->count)
+		last = names->count;
+	for (index = first; index < last; index++) {
+		same = grid_names_equal(names->names[index], name, suffix);
+		if (same)
+			return 1;
+	}
+
+	/* None of them. */
 	return 0;
 }
 
