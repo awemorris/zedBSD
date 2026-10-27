@@ -40,6 +40,9 @@
 /* The most declarations one pending declaration expands into (a shorthand's longhands). */
 #define CASCADE_EXPANSION_MAX	16U
 
+/* The proximity of a declaration outside @scope: farther than any scope root. */
+#define CASCADE_UNSCOPED	0xffffffffU
+
 /* The precedence of a declaration by its origin and importance (higher wins). */
 #define RANK_USER_AGENT		0
 #define RANK_AUTHOR		1
@@ -59,6 +62,8 @@ struct cascade_sheet {
 	struct css_sheet *owned;
 	const struct css_media *media[CSS_MEDIA_CHAIN_MAX];
 	size_t media_count;
+	/* The element whose sheet it is (a <style>; NULL for none), whose parent an implicit @scope's root is. */
+	struct dom_element *owner;
 };
 
 /*
@@ -105,6 +110,10 @@ struct css_engine {
 	css_container_lookup container_lookup;
 	void *container_context;
 	struct dom_element *current;
+	/* The @scope root :scope and & stand for while a scoped selector is matched (NULL: the root element). */
+	struct dom_element *scope_root;
+	/* The owner of the sheet whose rules are being matched (NULL for none). */
+	struct dom_element *sheet_owner;
 	int container_missed;
 	struct wb_vector container_uses;
 	int (*visited_lookup)(void *, struct dom_element *);
@@ -161,6 +170,8 @@ struct cascade_match {
 	const struct css_declaration *declaration;
 	int rank;
 	uint32_t specificity;
+	/* How many generations the element is below its @scope root (CASCADE_UNSCOPED outside @scope); nearer wins. */
+	uint32_t proximity;
 	uint64_t order;
 };
 
@@ -205,7 +216,10 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
+static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
+static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
+static int cascade_in_scope(struct css_engine *engine, struct dom_element *element, struct dom_element *root, const struct css_scope *scope);
 static int cascade_compare(const void *left, const void *right);
 static int cascade_customs(struct css_engine *engine, struct css_style *style, const struct cascade_match *matches, size_t count);
 static int cascade_substitute(const struct css_custom *list, const struct css_token *tokens, size_t count, int depth, struct wb_vector *out);
@@ -444,6 +458,24 @@ css_engine_add_parsed(
 
 	/* Succeeded: the sheet takes part in the cascade. */
 	return 0;
+}
+
+/*
+ * Records the element whose sheet the engine's most recently added sheet
+ * is (a <style>), whose parent is the root of the sheet's implicit @scope.
+ */
+void
+css_engine_set_owner(
+	struct css_engine *engine,
+	struct dom_element *owner)
+{
+	struct cascade_sheet *sheets;
+
+	/* The last sheet, if there is one. */
+	if (engine->sheets.count == 0)
+		return;
+	sheets = engine->sheets.items;
+	sheets[engine->sheets.count - 1U].owner = owner;
 }
 
 /*
@@ -1059,7 +1091,9 @@ cascade_collect(
 			continue;
 
 		/* The sheet's matching rules. */
+		engine->sheet_owner = sheets[sheet].owner;
 		error = cascade_collect_sheet(engine, element, sheets[sheet].sheet, (uint64_t)sheet, id, matches);
+		engine->sheet_owner = NULL;
 		if (error != 0)
 			return error;
 	}
@@ -1089,7 +1123,7 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, (uint64_t)engine->sheets.count << 44);
 	if (error != 0)
 		return error;
 
@@ -1207,7 +1241,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1536,6 +1570,8 @@ cascade_collect_sheet(
 	struct css_index_bucket universal;
 	struct vm_string **class_keys;
 	uint32_t best;
+	uint32_t proximity;
+	uint32_t scoped;
 	uint64_t order;
 	size_t position;
 	size_t group;
@@ -1596,10 +1632,17 @@ cascade_collect_sheet(
 		if (rule->media != NULL)
 			holds = css_media_matches(rule->media, engine->viewport_width, engine->viewport_height);
 
-		/* Every candidate selector of the rule. */
+		/* Every candidate selector of the rule (in @scope, from the nearest root that it matches from). */
+		proximity = CASCADE_UNSCOPED;
 		for (item = position; item < group && holds; item++) {
 			selector = &rule->selectors[candidates[item].selector];
-			selector_matched = cascade_candidate_matches(engine, element, selector);
+			if (rule->scope != NULL) {
+				selector_matched = cascade_scoped_matches(engine, element, rule->scope, selector, &scoped);
+				if (selector_matched && scoped < proximity)
+					proximity = scoped;
+			} else {
+				selector_matched = cascade_candidate_matches(engine, element, selector);
+			}
 			if (selector_matched) {
 				if (!matched || selector->specificity > best)
 					best = selector->specificity;
@@ -1610,7 +1653,7 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, order);
 			if (error != 0)
 				return error;
 		}
@@ -1621,6 +1664,166 @@ cascade_collect_sheet(
 
 	/* Succeeded: the sheet's applying declarations are gathered. */
 	return 0;
+}
+
+/*
+ * Tells whether an element matches a selector of an @scope rule from some
+ * root of the scope it is in, and how many generations it is below the
+ * nearest such root.
+ */
+static int
+cascade_scoped_matches(
+	struct css_engine *engine,
+	struct dom_element *element,
+	const struct css_scope *scope,
+	const struct css_selector *selector,
+	uint32_t *proximity)
+{
+	struct dom_element *root;
+	struct dom_element *saved;
+	uint32_t generations;
+	int is_root;
+	int inside;
+	int matches;
+
+	/* Each ancestor (and the element itself), nearest first, as a possible root. */
+	saved = engine->scope_root;
+	generations = 0;
+	for (root = element; root != NULL; root = cascade_parent_element(root)) {
+		is_root = cascade_scope_root(engine, root, scope);
+		if (is_root) {
+			inside = cascade_in_scope(engine, element, root, scope);
+			if (inside) {
+				engine->scope_root = root;
+				matches = cascade_candidate_matches(engine, element, selector);
+				engine->scope_root = saved;
+				if (matches) {
+					*proximity = generations;
+					return 1;
+				}
+			}
+		}
+		generations++;
+	}
+
+	/* No root of the scope gives a match. */
+	return 0;
+}
+
+/*
+ * Tells whether an element is a root of a scope: it matches the scope's
+ * root selectors (relative to a root of the scope it is nested in, which
+ * it must be in), or for an implicit scope it is the root element.
+ */
+static int
+cascade_scope_root(
+	struct css_engine *engine,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct dom_element *outer;
+	struct dom_element *owner;
+	struct dom_element *saved;
+	size_t index;
+	int is_root;
+	int inside;
+	int matches;
+
+	/* An implicit scope's root is its sheet owner's parent element (the root element without one). */
+	if (scope->roots == NULL) {
+		owner = NULL;
+		if (engine->sheet_owner != NULL)
+			owner = cascade_parent_element(engine->sheet_owner);
+		if (owner == NULL) {
+			if (root->node.parent == NULL || root->node.parent->type != DOM_DOCUMENT)
+				return 0;
+		} else if (root != owner) {
+			return 0;
+		}
+
+		/* Nested in another scope, it must be in that one too. */
+		if (scope->parent == NULL)
+			return 1;
+		for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+			is_root = cascade_scope_root(engine, outer, scope->parent);
+			if (!is_root)
+				continue;
+			inside = cascade_in_scope(engine, root, outer, scope->parent);
+			if (inside)
+				return 1;
+		}
+		return 0;
+	}
+
+	/* Each outer root the element is in (or none at the top). */
+	saved = engine->scope_root;
+	for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+		if (scope->parent != NULL) {
+			is_root = cascade_scope_root(engine, outer, scope->parent);
+			if (!is_root)
+				continue;
+			inside = cascade_in_scope(engine, root, outer, scope->parent);
+			if (!inside)
+				continue;
+			engine->scope_root = outer;
+		}
+
+		/* The root selectors, relative to that outer root. */
+		for (index = 0; index < scope->root_count; index++) {
+			matches = cascade_candidate_matches(engine, root, &scope->roots[index]);
+			if (matches) {
+				engine->scope_root = saved;
+				return 1;
+			}
+		}
+		engine->scope_root = saved;
+
+		/* At the top there is no outer root to try. */
+		if (scope->parent == NULL)
+			break;
+	}
+
+	/* The element is no root of the scope. */
+	return 0;
+}
+
+/*
+ * Tells whether an element under (or at) a root is in the scope: neither
+ * it nor any element between it and the root matches a limit (relative to
+ * the root).
+ */
+static int
+cascade_in_scope(
+	struct css_engine *engine,
+	struct dom_element *element,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct dom_element *between;
+	struct dom_element *saved;
+	size_t index;
+	int matches;
+
+	/* No limits, nothing is excluded. */
+	if (scope->limit_count == 0)
+		return 1;
+
+	/* The element and its ancestors below the root. */
+	saved = engine->scope_root;
+	engine->scope_root = root;
+	for (between = element; between != NULL && between != root; between = cascade_parent_element(between)) {
+		for (index = 0; index < scope->limit_count; index++) {
+			matches = cascade_candidate_matches(engine, between, &scope->limits[index]);
+			if (matches) {
+				engine->scope_root = saved;
+				return 0;
+			}
+		}
+	}
+	engine->scope_root = saved;
+
+	/* No limit cuts the element off. */
+	return 1;
 }
 
 /* Orders two index entries by rule, then selector. */
@@ -1656,6 +1859,7 @@ cascade_add_declarations(
 	size_t count,
 	int origin,
 	uint32_t specificity,
+	uint32_t proximity,
 	uint64_t order)
 {
 	struct cascade_match match;
@@ -1666,6 +1870,7 @@ cascade_add_declarations(
 	for (index = 0; index < count; index++) {
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
+		match.proximity = proximity;
 		match.order = order + (uint64_t)index;
 		if (origin == CSS_ORIGIN_USER_AGENT) {
 			match.rank = RANK_USER_AGENT;
@@ -2271,6 +2476,10 @@ cascade_compare(
 		return -1;
 	if (a->specificity > b->specificity)
 		return 1;
+	if (a->proximity > b->proximity)
+		return -1;
+	if (a->proximity < b->proximity)
+		return 1;
 	if (a->order < b->order)
 		return -1;
 	if (a->order > b->order)
@@ -2629,6 +2838,12 @@ cascade_pseudo_class(
 	/* The pseudo-class. */
 	switch (simple->pseudo) {
 	case CSS_PSEUDO_ROOT:
+		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_SCOPE:
+	case CSS_PSEUDO_SCOPE_NEST:
+		/* The scope's root inside @scope, the root element elsewhere. */
+		if (engine->scope_root != NULL)
+			return element == engine->scope_root;
 		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
 	case CSS_PSEUDO_FIRST_CHILD:
 		return cascade_previous_element(element) == NULL && cascade_parent_element(element) != NULL;

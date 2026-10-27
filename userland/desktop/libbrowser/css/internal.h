@@ -130,7 +130,9 @@ enum css_pseudo_class {
 	CSS_PSEUDO_REQUIRED,
 	CSS_PSEUDO_OPTIONAL,
 	CSS_PSEUDO_ALWAYS,
-	CSS_PSEUDO_LANG
+	CSS_PSEUDO_LANG,
+	CSS_PSEUDO_SCOPE,
+	CSS_PSEUDO_SCOPE_NEST
 };
 
 /*
@@ -576,6 +578,24 @@ struct css_rule {
 	struct css_declaration *declarations;
 	size_t declaration_count;
 	const struct css_media *media;
+	/* The @scope the rule is in (NULL for none). */
+	const struct css_scope *scope;
+};
+
+/*
+ * An @scope rule's scope: the selectors of its roots (none for an implicit
+ * scope, whose root is the parent of the sheet's owner, or the root element)
+ * and of its limits (none for no limit), and the @scope it is nested in
+ * (NULL for none), in the sheet's arena.  An element is in the scope when
+ * it is a root or below one, and neither it nor an element between it and
+ * the root matches a limit.
+ */
+struct css_scope {
+	const struct css_selector *roots;
+	size_t root_count;
+	const struct css_selector *limits;
+	size_t limit_count;
+	const struct css_scope *parent;
 };
 
 /*

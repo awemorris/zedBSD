@@ -301,6 +301,9 @@ sheets_add_style(
 	if (error != 0)
 		return error;
 
+	/* The sheet's implicit @scope is under the element's parent. */
+	css_engine_set_owner(page->css, element);
+
 	/* Succeeded: the element's sheet is in the engine. */
 	return 0;
 }
