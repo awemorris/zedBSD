@@ -475,6 +475,9 @@ flex_static_positions(
 	int safe_cross;
 	int child_inline_start;
 	int child_block_start;
+	int physical;
+	int physical_vertical;
+	int physical_rl;
 
 	if ((box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
 		return;
@@ -493,6 +496,15 @@ flex_static_positions(
 	cross_axis_start = row ? block_start : inline_start;
 	main_horizontal = row ? inline_horizontal : !inline_horizontal;
 	main_start = reverse ? flex_side_flip(main_axis_start) : main_axis_start;
+
+	/*
+	 * A vertical container laid out in its logical coordinates: left and
+	 * right still name the physical sides, which its block axis (vertical
+	 * here) runs between, from the right in vertical-rl.
+	 */
+	physical = layout_physical_mode(box);
+	physical_vertical = physical != box->style.writing_mode;
+	physical_rl = physical == CSS_WRITING_VERTICAL_RL;
 	cross_start = wrap_reverse ? flex_side_flip(cross_axis_start) : cross_axis_start;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (!child->out_of_flow || child->style.position != CSS_POSITION_ABSOLUTE)
@@ -516,9 +528,13 @@ flex_static_positions(
 			break;
 		case CSS_ALIGN_LEFT:
 			main_side = (main_horizontal || !inline_horizontal) ? FLEX_SIDE_START : main_axis_start;
+			if (physical_vertical && !main_horizontal)
+				main_side = physical_rl ? FLEX_SIDE_END : FLEX_SIDE_START;
 			break;
 		case CSS_ALIGN_RIGHT:
 			main_side = (main_horizontal || !inline_horizontal) ? FLEX_SIDE_END : main_axis_start;
+			if (physical_vertical && !main_horizontal)
+				main_side = physical_rl ? FLEX_SIDE_START : FLEX_SIDE_END;
 			break;
 		default:
 			main_side = main_start;

@@ -87,12 +87,14 @@ layout_logical_wanted(
 		return 0;
 
 	/*
-	 * A vertical grid container in horizontal coordinates with horizontal
-	 * (orthogonal) items places its items in physical coordinates.
+	 * A vertical flex or grid container in horizontal coordinates with
+	 * horizontal (orthogonal) items places its items in physical
+	 * coordinates.
 	 */
 	display = box->style.display;
 	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB &&
-	    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)) {
+	    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID ||
+	    display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX)) {
 		for (child = box->first_child; child != NULL; child = child->next) {
 			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
 				return 0;
@@ -600,6 +602,10 @@ logical_static_to_physical(
 	 * already names the right edge, where a start goes.
 	 */
 	align = child->static_x_align;
+	if (align == CSS_ALIGN_RIGHT)
+		align = CSS_ALIGN_END;
+	else if (align == CSS_ALIGN_LEFT)
+		align = CSS_ALIGN_START;
 	child->static_x_align = child->static_y_align;
 	child->static_y_align = align;
 	child->static_x_align_from_right = 0;
