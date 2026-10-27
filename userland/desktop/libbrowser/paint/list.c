@@ -159,6 +159,7 @@ static void list_inline_decoration(struct list_walk *walk, const struct layout_d
 static void list_fragment(struct list_walk *walk, const struct layout_fragment *fragment, layout_unit x, layout_unit baseline, int vertical);
 static void list_rect(struct list_walk *walk, layout_unit x, layout_unit y, layout_unit width, layout_unit height, uint32_t color);
 static void list_replaced(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
+static void list_replaced_vertical(struct list_walk *walk, const struct layout_fragment *fragment, layout_unit baseline_x, layout_unit top);
 static void list_image(struct list_walk *walk, const struct layout_box *box, layout_unit x, layout_unit y);
 static void list_control(struct list_walk *walk, const struct layout_box *box);
 static int list_control_native(const struct layout_box *box);
@@ -1197,7 +1198,11 @@ list_fragment(
 	if (fragment->box->style.visibility == LIST_VISIBILITY_HIDDEN)
 		return;
 
-	/* An inline replaced box's margin box stands on the baseline. */
+	/* An inline replaced box's margin box stands on the baseline (in a vertical line, its block-start side to the right). */
+	if (fragment->box->kind == LAYOUT_REPLACED && vertical) {
+		list_replaced_vertical(walk, fragment, x, baseline);
+		return;
+	}
 	if (fragment->box->kind == LAYOUT_REPLACED) {
 		list_replaced(walk, fragment->box, x, baseline - fragment->ascent);
 		return;
@@ -1294,6 +1299,28 @@ list_fragment(
 			thickness = LAYOUT_UNIT;
 		list_rect(walk, x, baseline + offset, fragment->width, thickness, item.color);
 	}
+}
+
+/*
+ * Paints an inline replaced box of a vertical line (its box already in
+ * physical coordinates): its margin box with its block-start side at the
+ * baseline's ascent to the right, its inline start at top.
+ */
+static void
+list_replaced_vertical(
+	struct list_walk *walk,
+	const struct layout_fragment *fragment,
+	layout_unit baseline_x,
+	layout_unit top)
+{
+	const struct layout_box *box;
+	layout_unit outer;
+
+	/* The margin box's right edge at the ascent beyond the baseline. */
+	box = fragment->box;
+	outer = box->margin[CSS_LEFT] + box->border[CSS_LEFT] + box->padding[CSS_LEFT] + box->width +
+	    box->padding[CSS_RIGHT] + box->border[CSS_RIGHT] + box->margin[CSS_RIGHT];
+	list_replaced(walk, box, baseline_x + fragment->ascent - outer, top);
 }
 
 /*

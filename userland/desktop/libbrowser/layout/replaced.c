@@ -56,6 +56,8 @@ layout_replaced_size(
 	int height_given;
 	int video;
 	int flex;
+	int sideways;
+	layout_unit limit;
 
 	/* The image's own size, which gives the ratio too. */
 	natural_width = 0;
@@ -80,6 +82,14 @@ layout_replaced_size(
 		natural_height = box->natural_height;
 	}
 
+	/* In a vertical domain's logical coordinates the picture's width is the block size. */
+	sideways = box->physical_style != NULL && box->physical_style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
+	if (sideways) {
+		limit = natural_width;
+		natural_width = natural_height;
+		natural_height = limit;
+	}
+
 	/* The width: the style's (less the frame when it sizes the border box), or the attribute's. */
 	width = 0;
 	width_given = replaced_length(&box->style.width, containing_width, &width);
@@ -88,7 +98,7 @@ layout_replaced_size(
 
 	/* Only an unresolved non-control width falls back to the real content attribute. */
 	if (!width_given && box->control == DOM_CONTROL_NONE)
-		width_given = replaced_attribute(box, "width", &width);
+		width_given = replaced_attribute(box, sideways ? "height" : "width", &width);
 
 	/* The height: the style's (a percentage only with a definite containing height), or the attribute's. */
 	height = 0;
@@ -101,7 +111,7 @@ layout_replaced_size(
 
 	/* Only an unresolved non-control height falls back to the real content attribute. */
 	if (!height_given && box->control == DOM_CONTROL_NONE)
-		height_given = replaced_attribute(box, "height", &height);
+		height_given = replaced_attribute(box, sideways ? "width" : "height", &height);
 
 	/*
 	 * An aspect-ratio replaces the image's own ratio (auto keeps the image's
