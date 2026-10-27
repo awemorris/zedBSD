@@ -86,6 +86,13 @@ struct css_engine {
 	struct wb_vector candidates;
 	struct wb_units word;
 	struct wb_arena arena;
+	/*
+	 * The grid areas and template line names styles point to, copied into
+	 * the arena (a declaration's own arena may end sooner); one copy of
+	 * each distinct value.
+	 */
+	struct wb_vector kept_areas;
+	struct wb_vector kept_names;
 	int pseudo_wanted;
 	int pseudo_seen;
 	struct cascade_classes *class_table;
@@ -245,7 +252,8 @@ static void cascade_shadows(struct css_engine *engine, struct css_style *style, 
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
-static const struct css_line_names *cascade_line_names(const struct css_value *value);
+static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
+static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
 static int cascade_font_size_keyword(const struct css_value *value, int parent_keyword);
 static void cascade_families(struct css_style *style, const struct css_value *value);
@@ -278,6 +286,8 @@ css_engine_create(
 	wb_units_init(&created->word);
 	wb_vector_init(&created->class_atoms, sizeof(struct vm_string *));
 	wb_vector_init(&created->container_uses, sizeof(struct cascade_container_use));
+	wb_vector_init(&created->kept_areas, sizeof(const struct css_grid_areas *));
+	wb_vector_init(&created->kept_names, sizeof(const struct css_line_names *));
 	wb_arena_init(&created->arena, 0);
 	created->atom_id = vm_atom_from_ascii(heap, "id");
 	created->atom_class = vm_atom_from_ascii(heap, "class");
@@ -333,6 +343,8 @@ css_engine_destroy(
 	cascade_style_forget(engine);
 	free(engine->style_table);
 	wb_vector_release(&engine->container_uses);
+	wb_vector_release(&engine->kept_areas);
+	wb_vector_release(&engine->kept_names);
 	wb_arena_release(&engine->arena);
 	free(engine);
 }
@@ -3754,17 +3766,17 @@ cascade_apply(
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
-		style->column_names = cascade_line_names(value);
+		style->column_names = cascade_line_names(engine, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
-		style->row_names = cascade_line_names(value);
+		style->row_names = cascade_line_names(engine, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
-		/* The areas stay in the declaring sheet's arena. */
+		/* The areas, in the engine's arena. */
 		style->areas = NULL;
-		if (value->kind == CSS_VALUE_AREAS)
-			style->areas = value->areas;
+		if (value->kind == CSS_VALUE_AREAS && value->areas != NULL)
+			style->areas = cascade_keep_areas(engine, value->areas);
 		break;
 	case CSS_PROP_GRID_AUTO_FLOW:
 		style->grid_auto_flow = value->keyword;
@@ -4434,19 +4446,77 @@ cascade_tracks(
 	*count = (int)index;
 }
 
-/* The line names a declared grid template gives its lines (in the sheet's arena), or NULL when it names none. */
+/*
+ * The line names a declared grid template gives its lines, kept in the
+ * engine's arena, or NULL when it names none (or there is no memory).
+ */
 static const struct css_line_names *
 cascade_line_names(
+	struct css_engine *engine,
 	const struct css_value *value)
 {
+	const struct css_line_names *const *kept;
+	struct css_line_names *copy;
+	size_t lines;
+	size_t index;
+	int error;
+
 	/* Only a parsed track list with a name has names. */
 	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL)
 		return NULL;
 	if (!value->tracks->named)
 		return NULL;
 
-	/* Succeeded: the list's lines. */
-	return value->tracks->names;
+	/* A copy kept before with the same names. */
+	lines = CSS_TRACKS + 1U;
+	for (index = 0; index < engine->kept_names.count; index++) {
+		kept = wb_vector_at(&engine->kept_names, index);
+		if (memcmp(*kept, value->tracks->names, lines * sizeof(**kept)) == 0)
+			return *kept;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, lines * sizeof(*copy));
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, value->tracks->names, lines * sizeof(*copy));
+	error = wb_vector_push(&engine->kept_names, &copy);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the names live as long as the engine. */
+	return copy;
+}
+
+/* Keeps a grid-template-areas value in the engine's arena (one copy of each distinct value); NULL when there is no memory. */
+static const struct css_grid_areas *
+cascade_keep_areas(
+	struct css_engine *engine,
+	const struct css_grid_areas *areas)
+{
+	const struct css_grid_areas *const *kept;
+	struct css_grid_areas *copy;
+	size_t index;
+	int error;
+
+	/* A copy kept before with the same cells. */
+	for (index = 0; index < engine->kept_areas.count; index++) {
+		kept = wb_vector_at(&engine->kept_areas, index);
+		if (memcmp(*kept, areas, sizeof(*areas)) == 0)
+			return *kept;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, sizeof(*copy));
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, areas, sizeof(*copy));
+	error = wb_vector_push(&engine->kept_areas, &copy);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the areas live as long as the engine. */
+	return copy;
 }
 
 /*
