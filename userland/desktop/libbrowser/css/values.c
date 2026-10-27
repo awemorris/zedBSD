@@ -84,6 +84,8 @@ enum values_shorthand {
 	SHORT_GRID_TEMPLATE,
 	SHORT_GRID,
 	SHORT_PLACE_ITEMS,
+	SHORT_PLACE_SELF,
+	SHORT_PLACE_CONTENT,
 	SHORT_CONTAINER,
 	SHORT_BORDER_SPACING,
 	SHORT_OVERFLOW,
@@ -282,6 +284,8 @@ static const struct values_name values_names[] = {
 	{ "grid-template", SHORT_GRID_TEMPLATE },
 	{ "grid", SHORT_GRID },
 	{ "place-items", SHORT_PLACE_ITEMS },
+	{ "place-self", SHORT_PLACE_SELF },
+	{ "place-content", SHORT_PLACE_CONTENT },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -979,6 +983,8 @@ static int values_background_size(const struct css_token *tokens, size_t count, 
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_unitless_function(const struct css_token *tokens, size_t count);
+static int values_place(struct css_parse *parse, const struct css_token *tokens, size_t count, int align, int justify, struct css_declaration *out, size_t *made);
+static size_t values_place_value(const struct css_token *tokens, const size_t *starts, size_t components, size_t first);
 static int values_flex_flow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_content(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_pair(struct css_parse *parse, int first, int second, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
@@ -1130,9 +1136,6 @@ css_parse_property(
 	size_t *out_count)
 {
 	struct css_value value;
-	size_t starts[3];
-	size_t lengths[3];
-	size_t components;
 	int error;
 	int first;
 	int wide;
@@ -1272,11 +1275,11 @@ css_parse_property(
 		/* A name alone makes a container of no type. */
 		return 0;
 	case SHORT_PLACE_ITEMS:
-		/* align-items (the justify-items after it is not kept in this pass). */
-		components = values_components(tokens, count, starts, lengths, 3);
-		if (components == 0)
-			return EINVAL;
-		return css_parse_value_as(parse, CSS_PROP_ALIGN_ITEMS, tokens + starts[0], lengths[0], out, out_count);
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_ITEMS, CSS_PROP_JUSTIFY_ITEMS, out, out_count);
+	case SHORT_PLACE_SELF:
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_SELF, CSS_PROP_JUSTIFY_SELF, out, out_count);
+	case SHORT_PLACE_CONTENT:
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_CONTENT, CSS_PROP_JUSTIFY_CONTENT, out, out_count);
 	default:
 		break;
 	}
@@ -4736,6 +4739,82 @@ values_flex(
 
 	/* Succeeded: the flex longhands are declared. */
 	return 0;
+}
+
+/*
+ * Parses place-items, place-self or place-content: the align value, then
+ * the justify value (the align value again when there is none; nothing
+ * for place-content's baseline, which leaves justify-content initial).  A value may be two words (last baseline,
+ * safe center).
+ * https://drafts.csswg.org/css-align-3/#place-items-property
+ */
+static int
+values_place(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	int align,
+	int justify,
+	struct css_declaration *out,
+	size_t *made)
+{
+	size_t starts[4];
+	size_t lengths[4];
+	size_t components;
+	size_t first_end;
+	size_t second_end;
+	size_t end;
+	int error;
+
+	/* The components, cut into the two values. */
+	components = values_components(tokens, count, starts, lengths, 4);
+	if (components == 0 || components > 4)
+		return EINVAL;
+	first_end = values_place_value(tokens, starts, components, 0);
+	second_end = first_end;
+	if (first_end < components)
+		second_end = values_place_value(tokens, starts, components, first_end);
+	if (second_end != components)
+		return EINVAL;
+
+	/* The align value. */
+	end = starts[first_end - 1U] + lengths[first_end - 1U];
+	error = css_parse_value_as(parse, align, tokens + starts[0], end - starts[0], out, made);
+	if (error != 0)
+		return error;
+
+	/* The justify value: its own, or the align value's. */
+	if (first_end < components) {
+		end = starts[second_end - 1U] + lengths[second_end - 1U];
+		error = css_parse_value_as(parse, justify, tokens + starts[first_end], end - starts[first_end], out, made);
+	} else if (align == CSS_PROP_ALIGN_CONTENT && css_ident_equal(&tokens[starts[first_end - 1U]], "baseline")) {
+		/* A baseline has no justify meaning: justify-content stays at its initial value. */
+		error = 0;
+	} else {
+		error = css_parse_value_as(parse, justify, tokens + starts[0], end - starts[0], out, made);
+	}
+	return error;
+}
+
+/* The component after one value of a place shorthand that starts at first (a value is one or two words). */
+static size_t
+values_place_value(
+	const struct css_token *tokens,
+	const size_t *starts,
+	size_t components,
+	size_t first)
+{
+	const struct css_token *token;
+
+	/* A prefix word takes the word after it. */
+	token = &tokens[starts[first]];
+	if (first + 1U < components && token->type == CSS_TOKEN_IDENT &&
+	    (css_ident_equal(token, "first") || css_ident_equal(token, "last") ||
+	    css_ident_equal(token, "safe") || css_ident_equal(token, "unsafe")))
+		return first + 2U;
+
+	/* One word. */
+	return first + 1U;
 }
 
 /* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
