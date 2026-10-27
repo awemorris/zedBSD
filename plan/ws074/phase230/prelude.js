@@ -861,6 +861,8 @@
     function navigateTo(url, o) {
       var handling = o.history, now = docURL(), f;
       if (/^javascript:/i.test(url)) return;
+      // A page that is not a local file cannot navigate to one.
+      if (/^file:/i.test(url) && !/^file:/i.test(now)) return;
       if (handling === 'auto') handling = url === now ? 'replace' : 'push';
       if (handling === 'reload') {
         fireNavigate({ type: 'reload', url: url, navState: o.navState, sameDocument: false, sourceElement: o.sourceElement });

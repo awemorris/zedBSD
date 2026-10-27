@@ -863,6 +863,8 @@ static const char prelude_source[] =
 	"    function navigateTo(url, o) {\n"
 	"      var handling = o.history, now = docURL(), f;\n"
 	"      if (/^javascript:/i.test(url)) return;\n"
+	"      // A page that is not a local file cannot navigate to one.\n"
+	"      if (/^file:/i.test(url) && !/^file:/i.test(now)) return;\n"
 	"      if (handling === 'auto') handling = url === now ? 'replace' : 'push';\n"
 	"      if (handling === 'reload') {\n"
 	"        fireNavigate({ type: 'reload', url: url, navState: o.navState, sameDocument: false, sourceElement: o.sourceElement });\n"
