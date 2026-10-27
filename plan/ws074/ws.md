@@ -11,6 +11,8 @@ Parent: [Master](../master.md)
 Owner: Q1（プロジェクト全体）。この Codex セッションがユーザーの指示で WS074 の Queue を単独管理し、WPT 2025 に進む。`master.md` は変更しない。
 Queue: [ws074-q20261019-55](queue.md) active（2026-10-18、Codex単独）。ユーザーが100%までの自走を指示。[契約](autonomy.md)。
 
+Event ws074-p260-start-20261027: ユーザー「WPT Interop 2025で、chromeが成功している項目に限り、100%を目指しましょう。」により [p260](phase260/phase.md) を立てた。分母は同じ runner で Chromium が PASS する ID。WPT を全体の checkout に直し（sparse で harness 1,072/static 1,536 に欠けていた）、Chromium の adapter と比較の道具を足した。基準の測定は実行中。
+
 Event ws074-cloud-setup-20261027: ユーザーの指示で、Claude Code on the web の container に host の build と Chromium（Chrome for Testing 153 の headless shell）との描画の比較を立てた。手順・結果・制限は「[クラウド環境での構築と Chromium との比較](#クラウド環境での構築と-chromium-との比較2026-10-27)」。ライブのサイトとの比較は network の方針で未達。
 
 Latest verified（q54）: actual global Proxy/revocable公開partial clear。public42 native/genuine一致・private866/Chrome864既知huge2、direct installer/revoker実GC/graph回収。全eligible3530 current pair・1482/3805・held0/未attempt275、harness whole494維持/旧PASS loss0・original IDL setup2修復/新14PASS28FAIL（net+16PASS）。source6b6be56e0 main統合・master編集無し。Reflect/whole/p100/full target/100%未達。[証拠](phase258/evidence/20261019-q54/README.md)。共有投影pending。
@@ -358,7 +360,17 @@ CC=clang sh plan/ws074/tests/host-build.sh plain   # build/ws074-host/plain/brow
 python3 plan/ws074/tests/render-compare.py plan/ws074/tests/pages/blocks.html   # 1 頁を比べる
 sh plan/ws074/tests/fetch-suites.sh wpt            # WPT の固定 commit を build/ws074-suites/wpt へ（約 30 秒、425 MB）
 python3 -I plan/ws074/tests/run-acid-tests.py      # Acid2・Acid3（結果は build/ws074-acid/report.json）
+# scripted reftest の client（libbrowser.so を公開 API で使う）
+clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -Ibuild/ws074-host/include -Iuserland/desktop/include \
+    plan/ws074/tests/wpt-ready-render.c -Lbuild/ws074-host/plain -lbrowser -Wl,-rpath,'$ORIGIN' \
+    -o build/ws074-host/plain/wpt-ready-render
+# Interop 2025 を Chromium と browser で測って比べる（p260）
+python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind chrome --out build/ws074-cmp/chrome
+python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind ours --out build/ws074-cmp/ours
+python3 plan/ws074/tests/interop2025-chrome-gap.py compare --chrome build/ws074-cmp/chrome --ours build/ws074-cmp/ours
 ```
+
+- WPT は全体を取る（2026-10-27 に fetch-suites.sh の sparse を外した。sparse では Interop の html/ などが欠けた）。
 
 - `cloud-setup.sh` が入れる物: `clang`・`libvulkan-dev`・`mesa-vulkan-drivers`（lavapipe）・`fontconfig`・`python3-pil`。
 - **Chrome**: dl.google.com は network の方針で 403、Ubuntu の `chromium` は snap で使えない。container に Playwright が入れた
@@ -757,6 +769,7 @@ p009 → p018 → p027 → p028 → p029 → p047 → p031 → p032 → p033 →
 | [ws074-p257](phase257/phase.md) | synchronous generator yield* delegation | cleared / q29 sync own criteria・Chrome38/native GC10 | q28 VM/GC・p189 pinned WebIDL2 |
 | [ws074-p258](phase258/phase.md) | native Proxy internal methods・GC/revocation | uncleared / q54 global Proxy/revocable partial cleared・whole残り | q29 VM/GC・p189 actual Proxy blocker |
 | [ws074-p259](phase259/phase.md) | inline specified numeric stateとflex-factor canonical serialization | in-progress / q55 | p191 CSSOM/p253 attribute commit/q54 full3530 baseline |
+| [ws074-p260](phase260/phase.md) | Interop 2025 の Chromium が通る試験を全部通す（2026-10-27 ユーザー） | in-progress / Queue なし（web のセッション） | クラウド環境の構築、chrome-run.js・interop2025-chrome-gap.py |
 
 2026-10-13 / q1000-terminal-and-p179-addition: p178 の1領域試行は、参照の背景画像が欠ける全画面差のため uncleared。固定 WPT と host build warning0、Acid3 score100/100・差302056/480000、Acid2差1865/120000 の証拠は[p178](phase178/phase.md)と[q1000履歴](../history/queue-q1000.md)。原因の切り分けと修正を[p179](phase179/phase.md)として追加し、verified 出力後に p178 を再試行する。p100/WS074 の受け入れは未達。メインの共有 Queue/Project/GitHub への投影は未実施。
 

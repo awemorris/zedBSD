@@ -29,6 +29,8 @@ fetch_git() {
 		# The sparse paths may have grown since the suite was fetched (the whole commit is there already).
 		if [ $# -gt 0 ]; then
 			git -C "$dir" sparse-checkout set --no-cone "/$license" "$@"
+		else
+			git -C "$dir" sparse-checkout disable
 		fi
 	else
 		if [ -e "$dir" ]; then
@@ -85,10 +87,11 @@ for suite in "$@"; do
 			224991ec10db04f056a89eed8b0bd8695fd2950e LICENSE "Permission is hereby granted"
 		;;
 	wpt)
-		# The 3-Clause BSD licence (LICENSE.md).
+		# The 3-Clause BSD licence (LICENSE.md).  The whole tree: the fixed Interop 2025 selection
+		# spans html/, event-timing/, pointerevents/, navigation-api/ and others, and its tests
+		# load support files from across the tree.
 		fetch_git wpt https://github.com/web-platform-tests/wpt \
-			2d66b9b7998bb58c336138c178323ddee857b586 LICENSE.md "BSD" \
-			/acid/ /css/ /url/ /dom/ /html/syntax/ /encoding/ /resources/ /fonts/ /common/ /fetch/data-urls/
+			2d66b9b7998bb58c336138c178323ddee857b586 LICENSE.md "BSD"
 		;;
 	test262)
 		# The 3-Clause BSD licence (Ecma International).

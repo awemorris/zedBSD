@@ -454,6 +454,14 @@ def apply_environment(record, root, resources, header_records, instrumented):
     return limits
 
 
+def library_digest(program):
+    """The engine next to the program, or None for a program without one (the Chromium adapter)."""
+    library = program.parent / "libbrowser.so"
+    if not library.is_file():
+        return None
+    return hashlib.sha256(library.read_bytes()).hexdigest()
+
+
 def run(args):
     import time
     from urllib.parse import urlunsplit
@@ -577,7 +585,7 @@ def run(args):
                   wpt_commit=revision, metadata_commit=manifest["metadata_commit"],
                   viewport=[800, 600], deadline_ms=args.deadline_ms, process_timeout=args.process_timeout,
                   program_sha256=hashlib.sha256(args.program.read_bytes()).hexdigest(),
-                  engine_library_sha256=hashlib.sha256((args.program.parent / "libbrowser.so").read_bytes()).hexdigest(),
+                  engine_library_sha256=library_digest(args.program),
                   partition=dict(scripted=413, static=1561, union=1974),
                   manifest_sha256=hashlib.sha256(args.manifest.read_bytes()).hexdigest(),
                   runner_sha256=runner_digest,
