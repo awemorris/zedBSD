@@ -71,8 +71,12 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-base（基準） | 496 | 841 | 103 | 39 | 1,479（42.60%） |
   | ours-dev3（Navigation API の merge の後） | 680 | 881 | 104 | 39 | 1,704（49.08%） |
   | ours-dev6（69502eb73） | 725 | 894 | 104 | 39 | 1,762（50.75%） |
+  | ours-dev11（276c2ff10） | 767 | 1,021 | 107 | 39 | 1,934（55.70%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
   縦書きの root を viewport の右へ、匿名 box が writing-mode を継承、UA の margin を logical に、
   vertical-lr と vertical-rl の入れ子を同じ domain で、vertical-rl の safe の戻り先。
+  dev6 → dev11: HTMLCollection などの反復、grid の auto の最小の track、grid・flex の shorthand の longhand の読み書き、
+  place-items・place-self・place-content、grid の order と z-index の描画順、auto-fit で畳まれた track と content の分配、
+  置換要素の min/max と比、column の flex の自動の最小、縦書きの行の中の置換要素。
