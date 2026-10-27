@@ -3742,46 +3742,84 @@ cascade_next_element(
 	return NULL;
 }
 
-/* Resolves the four logical margin names after the element's flow is computed. */
+/*
+ * Gives a logical property its physical one in a writing mode and a
+ * direction: the logical sides of margins, paddings, insets and borders,
+ * the logical sizes, and overflow-inline and overflow-block.  Block-start
+ * is the top, the left (vertical-lr) or the right (vertical-rl); the
+ * inline start is the left or the top, the right or the bottom for rtl.
+ */
 static int
 cascade_margin_property(
 	int property,
 	int writing_mode,
 	int direction)
 {
+	static const int groups[][2] = {
+		{ CSS_PROP_MARGIN_INLINE_START, CSS_PROP_MARGIN_TOP },
+		{ CSS_PROP_PADDING_INLINE_START, CSS_PROP_PADDING_TOP },
+		{ CSS_PROP_INSET_INLINE_START, CSS_PROP_TOP },
+		{ CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_TOP_WIDTH },
+		{ CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_TOP_STYLE },
+		{ CSS_PROP_BORDER_INLINE_START_COLOR, CSS_PROP_BORDER_TOP_COLOR }
+	};
+	size_t group;
+	int vertical;
+	int logical;
+	int side;
+
+	/* The axes. */
+	vertical = writing_mode != CSS_WRITING_HORIZONTAL_TB;
+
 	/* overflow-inline and overflow-block name the horizontal and vertical axes by the writing mode. */
 	if (property == CSS_PROP_OVERFLOW_INLINE)
-		return writing_mode == CSS_WRITING_HORIZONTAL_TB ? CSS_PROP_OVERFLOW_X : CSS_PROP_OVERFLOW_Y;
+		return vertical ? CSS_PROP_OVERFLOW_Y : CSS_PROP_OVERFLOW_X;
 	if (property == CSS_PROP_OVERFLOW_BLOCK)
-		return writing_mode == CSS_WRITING_HORIZONTAL_TB ? CSS_PROP_OVERFLOW_Y : CSS_PROP_OVERFLOW_X;
-	if (writing_mode == CSS_WRITING_VERTICAL_LR) {
-		switch (property) {
-		case CSS_PROP_MARGIN_INLINE_START:
-			return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_BOTTOM : CSS_PROP_MARGIN_TOP;
-		case CSS_PROP_MARGIN_INLINE_END:
-			return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_TOP : CSS_PROP_MARGIN_BOTTOM;
-		case CSS_PROP_MARGIN_BLOCK_START:
-			return CSS_PROP_MARGIN_LEFT;
-		case CSS_PROP_MARGIN_BLOCK_END:
-			return CSS_PROP_MARGIN_RIGHT;
-		default:
-			return property;
+		return vertical ? CSS_PROP_OVERFLOW_X : CSS_PROP_OVERFLOW_Y;
+
+	/* The sizes: the inline size is the width when the lines are horizontal. */
+	if (property == CSS_PROP_INLINE_SIZE)
+		return vertical ? CSS_PROP_HEIGHT : CSS_PROP_WIDTH;
+	if (property == CSS_PROP_BLOCK_SIZE)
+		return vertical ? CSS_PROP_WIDTH : CSS_PROP_HEIGHT;
+	if (property == CSS_PROP_MIN_INLINE_SIZE)
+		return vertical ? CSS_PROP_MIN_HEIGHT : CSS_PROP_MIN_WIDTH;
+	if (property == CSS_PROP_MAX_INLINE_SIZE)
+		return vertical ? CSS_PROP_MAX_HEIGHT : CSS_PROP_MAX_WIDTH;
+	if (property == CSS_PROP_MIN_BLOCK_SIZE)
+		return vertical ? CSS_PROP_MIN_WIDTH : CSS_PROP_MIN_HEIGHT;
+	if (property == CSS_PROP_MAX_BLOCK_SIZE)
+		return vertical ? CSS_PROP_MAX_WIDTH : CSS_PROP_MAX_HEIGHT;
+
+	/* The logical sides: the group, then the physical side. */
+	for (group = 0; group < sizeof(groups) / sizeof(groups[0]); group++) {
+		if (property < groups[group][0] || property > groups[group][0] + 3)
+			continue;
+		logical = property - groups[group][0];
+
+		/* Inline-start and inline-end. */
+		if (logical == 0 || logical == 1) {
+			side = vertical ? CSS_TOP : CSS_LEFT;
+			if (direction == CSS_DIRECTION_RTL)
+				side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+			if (logical == 1)
+				side = (side + 2) % 4;
+			return groups[group][1] + side;
 		}
+
+		/* Block-start and block-end. */
+		side = CSS_TOP;
+		if (writing_mode == CSS_WRITING_VERTICAL_LR)
+			side = CSS_LEFT;
+		if (writing_mode == CSS_WRITING_VERTICAL_RL)
+			side = CSS_RIGHT;
+		if (logical == 3)
+			side = (side + 2) % 4;
+		return groups[group][1] + side;
 	}
 
-	/* Horizontal block flow has top/bottom block edges and direction-dependent inline edges. */
-	switch (property) {
-	case CSS_PROP_MARGIN_INLINE_START:
-		return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_RIGHT : CSS_PROP_MARGIN_LEFT;
-	case CSS_PROP_MARGIN_INLINE_END:
-		return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_LEFT : CSS_PROP_MARGIN_RIGHT;
-	case CSS_PROP_MARGIN_BLOCK_START:
-		return CSS_PROP_MARGIN_TOP;
-	case CSS_PROP_MARGIN_BLOCK_END:
-		return CSS_PROP_MARGIN_BOTTOM;
-	default:
-		return property;
-	}
+	/* A physical property is itself. */
+	return property;
 }
 
 /* Applies one declaration to the style being computed. */
@@ -4029,8 +4067,11 @@ cascade_apply(
 		style->writing_sideways = 0;
 		style->writing_mode = value->keyword;
 		if (value->keyword > CSS_WRITING_VERTICAL_RL) {
+			/* sideways-lr flows its blocks like vertical-lr, sideways-rl like vertical-rl. */
 			style->writing_sideways = value->keyword - CSS_WRITING_VERTICAL_RL;
-			style->writing_mode = CSS_WRITING_HORIZONTAL_TB;
+			style->writing_mode = CSS_WRITING_VERTICAL_LR;
+			if (style->writing_sideways == 2)
+				style->writing_mode = CSS_WRITING_VERTICAL_RL;
 		}
 		break;
 	case CSS_PROP_TEXT_ORIENTATION:

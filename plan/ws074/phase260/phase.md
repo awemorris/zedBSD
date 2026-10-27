@@ -38,4 +38,29 @@ Origin: 2026-10-27 ユーザーの指示。
 
 ## 状態
 
-- 2026-10-27: 道具を揃えた。全件の基準の測定（Chromium と browser）を実行中。
+### 基準（2026-10-27、main の 0500e8c8 の source を build/ws074-host/plain に build）
+
+`interop2025-chrome-gap.py compare --chrome build/ws074-cmp/chrome --ours build/ws074-cmp/ours-base`:
+
+| runner | 測った ID | Chromium PASS | browser PASS | gap |
+| --- | --- | --- | --- | --- |
+| harness | 1,508 | 1,477 | 496 | 981 |
+| static reftest | 1,561 | 1,552 | 841 | 711 |
+| scripted reftest | 413 | 396 | 103 | 293 |
+| crash | 48 | 47 | 39 | 8 |
+| 計 | 3,530 | 3,472 | 1,479（42.60%） | 1,993 |
+
+どの runner の対象でもない ID は 275（https・testdriver・worker など）。Chromium の結果が無いので分母の外（未測定）。
+
+### gap の内訳と順（大きい物から）
+
+- grid・flexbox・writing-modes（harness と reftest で約 960 件）。うち約 390 件が縦書き、約 230 件が baseline。→ [p262](../phase262/phase.md)（縦書きを logical の座標で layout）、
+  次に baseline の model、grid の個別の不足。
+- Navigation API（harness 約 330 件、`window.navigation` が無い）→ [p261](../phase261/phase.md)（別の agent、同じ文書の中から）。
+- anchor positioning（約 157 件）、View Transitions（約 41 件）、@scope（22 件）、CSSOM の rule の object（CSSScopeRule など）、CSS nesting、@layer の順。
+
+### 進み
+
+- grid の名前付きの線・area・grid-template/grid の shorthand（3d0dfc2bc ほか）: harness +12 / -0（共通の 1,072 ID で比較、後退の 2 件は直した）。
+- @scope（56f0203cd ほか）: css-cascade の @scope の 22 件のうち 10 件が PASS。
+- 縦書き（p262）: css-writing-modes の static reftest 11 → 25（2 件の後退を調査中）。

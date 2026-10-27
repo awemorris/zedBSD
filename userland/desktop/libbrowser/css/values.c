@@ -24,6 +24,9 @@
 /* The widest supported shorthand expands border's four sides into twelve longhands. */
 #define VALUES_EXPANSION_MAX	16
 
+/* values_border's side for a logical side: this plus 0 to 3 (inline-start, inline-end, block-start, block-end). */
+#define VALUES_LOGICAL_SIDE	4
+
 /*
  * Where the areas form of grid-template is in a row: before it, after its
  * leading line names, after its string, after its size, or after its
@@ -46,6 +49,10 @@ enum values_shorthand {
 	SHORT_BORDER_RIGHT,
 	SHORT_BORDER_BOTTOM,
 	SHORT_BORDER_LEFT,
+	SHORT_BORDER_INLINE_START,
+	SHORT_BORDER_INLINE_END,
+	SHORT_BORDER_BLOCK_START,
+	SHORT_BORDER_BLOCK_END,
 	SHORT_BORDER_WIDTH,
 	SHORT_BORDER_STYLE,
 	SHORT_BORDER_COLOR,
@@ -299,36 +306,36 @@ static const struct values_name values_names[] = {
 	{ "margin-inline-end", CSS_PROP_MARGIN_INLINE_END },
 	{ "margin-block-start", CSS_PROP_MARGIN_BLOCK_START },
 	{ "margin-block-end", CSS_PROP_MARGIN_BLOCK_END },
-	{ "padding-inline-start", CSS_PROP_PADDING_LEFT },
-	{ "padding-inline-end", CSS_PROP_PADDING_RIGHT },
-	{ "padding-block-start", CSS_PROP_PADDING_TOP },
-	{ "padding-block-end", CSS_PROP_PADDING_BOTTOM },
-	{ "inset-inline-start", CSS_PROP_LEFT },
-	{ "inset-inline-end", CSS_PROP_RIGHT },
-	{ "inset-block-start", CSS_PROP_TOP },
-	{ "inset-block-end", CSS_PROP_BOTTOM },
-	{ "inline-size", CSS_PROP_WIDTH },
-	{ "block-size", CSS_PROP_HEIGHT },
-	{ "min-inline-size", CSS_PROP_MIN_WIDTH },
-	{ "max-inline-size", CSS_PROP_MAX_WIDTH },
-	{ "min-block-size", CSS_PROP_MIN_HEIGHT },
-	{ "max-block-size", CSS_PROP_MAX_HEIGHT },
-	{ "border-inline-start-width", CSS_PROP_BORDER_LEFT_WIDTH },
-	{ "border-inline-end-width", CSS_PROP_BORDER_RIGHT_WIDTH },
-	{ "border-block-start-width", CSS_PROP_BORDER_TOP_WIDTH },
-	{ "border-block-end-width", CSS_PROP_BORDER_BOTTOM_WIDTH },
-	{ "border-inline-start-style", CSS_PROP_BORDER_LEFT_STYLE },
-	{ "border-inline-end-style", CSS_PROP_BORDER_RIGHT_STYLE },
-	{ "border-block-start-style", CSS_PROP_BORDER_TOP_STYLE },
-	{ "border-block-end-style", CSS_PROP_BORDER_BOTTOM_STYLE },
-	{ "border-inline-start-color", CSS_PROP_BORDER_LEFT_COLOR },
-	{ "border-inline-end-color", CSS_PROP_BORDER_RIGHT_COLOR },
-	{ "border-block-start-color", CSS_PROP_BORDER_TOP_COLOR },
-	{ "border-block-end-color", CSS_PROP_BORDER_BOTTOM_COLOR },
-	{ "border-inline-start", SHORT_BORDER_LEFT },
-	{ "border-inline-end", SHORT_BORDER_RIGHT },
-	{ "border-block-start", SHORT_BORDER_TOP },
-	{ "border-block-end", SHORT_BORDER_BOTTOM },
+	{ "padding-inline-start", CSS_PROP_PADDING_INLINE_START },
+	{ "padding-inline-end", CSS_PROP_PADDING_INLINE_END },
+	{ "padding-block-start", CSS_PROP_PADDING_BLOCK_START },
+	{ "padding-block-end", CSS_PROP_PADDING_BLOCK_END },
+	{ "inset-inline-start", CSS_PROP_INSET_INLINE_START },
+	{ "inset-inline-end", CSS_PROP_INSET_INLINE_END },
+	{ "inset-block-start", CSS_PROP_INSET_BLOCK_START },
+	{ "inset-block-end", CSS_PROP_INSET_BLOCK_END },
+	{ "inline-size", CSS_PROP_INLINE_SIZE },
+	{ "block-size", CSS_PROP_BLOCK_SIZE },
+	{ "min-inline-size", CSS_PROP_MIN_INLINE_SIZE },
+	{ "max-inline-size", CSS_PROP_MAX_INLINE_SIZE },
+	{ "min-block-size", CSS_PROP_MIN_BLOCK_SIZE },
+	{ "max-block-size", CSS_PROP_MAX_BLOCK_SIZE },
+	{ "border-inline-start-width", CSS_PROP_BORDER_INLINE_START_WIDTH },
+	{ "border-inline-end-width", CSS_PROP_BORDER_INLINE_END_WIDTH },
+	{ "border-block-start-width", CSS_PROP_BORDER_BLOCK_START_WIDTH },
+	{ "border-block-end-width", CSS_PROP_BORDER_BLOCK_END_WIDTH },
+	{ "border-inline-start-style", CSS_PROP_BORDER_INLINE_START_STYLE },
+	{ "border-inline-end-style", CSS_PROP_BORDER_INLINE_END_STYLE },
+	{ "border-block-start-style", CSS_PROP_BORDER_BLOCK_START_STYLE },
+	{ "border-block-end-style", CSS_PROP_BORDER_BLOCK_END_STYLE },
+	{ "border-inline-start-color", CSS_PROP_BORDER_INLINE_START_COLOR },
+	{ "border-inline-end-color", CSS_PROP_BORDER_INLINE_END_COLOR },
+	{ "border-block-start-color", CSS_PROP_BORDER_BLOCK_START_COLOR },
+	{ "border-block-end-color", CSS_PROP_BORDER_BLOCK_END_COLOR },
+	{ "border-inline-start", SHORT_BORDER_INLINE_START },
+	{ "border-inline-end", SHORT_BORDER_INLINE_END },
+	{ "border-block-start", SHORT_BORDER_BLOCK_START },
+	{ "border-block-end", SHORT_BORDER_BLOCK_END },
 	{ "margin-inline", SHORT_MARGIN_INLINE },
 	{ "margin-block", SHORT_MARGIN_BLOCK },
 	{ "padding-inline", SHORT_PADDING_INLINE },
@@ -1008,6 +1015,7 @@ static int values_track_maximum_rule(const struct css_token *token, int kind);
 static int values_one_track(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declared_track *track);
 static int values_track_size(struct css_parse *parse, const struct css_token *tokens, size_t count, int *kind, struct css_value *size);
 static size_t values_split_at(const struct css_token *tokens, size_t count, int type, uint32_t delim);
+static int values_physical_grammar(int property);
 static int values_grid_line(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_custom_ident(struct css_parse *parse, const struct css_token *token, struct vm_string **name);
 static int values_grid_line_is_name(const struct css_value *line);
@@ -1169,6 +1177,12 @@ css_parse_property(
 		return values_border(parse, CSS_BOTTOM, tokens, count, out, out_count);
 	case SHORT_BORDER_LEFT:
 		return values_border(parse, CSS_LEFT, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_START:
+	case SHORT_BORDER_INLINE_END:
+	case SHORT_BORDER_BLOCK_START:
+	case SHORT_BORDER_BLOCK_END:
+		/* A logical side: the cascade finds its physical side. */
+		return values_border(parse, VALUES_LOGICAL_SIDE + property - SHORT_BORDER_INLINE_START, tokens, count, out, out_count);
 	case SHORT_BACKGROUND:
 		return values_background(parse, tokens, count, out, out_count);
 	case SHORT_BACKGROUND_POSITION:
@@ -1195,15 +1209,15 @@ css_parse_property(
 	case SHORT_MARGIN_BLOCK:
 		return values_pair(parse, CSS_PROP_MARGIN_BLOCK_START, CSS_PROP_MARGIN_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_PADDING_INLINE:
-		return values_pair(parse, CSS_PROP_PADDING_LEFT, CSS_PROP_PADDING_RIGHT, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_PADDING_INLINE_START, CSS_PROP_PADDING_INLINE_END, tokens, count, out, out_count);
 	case SHORT_PADDING_BLOCK:
-		return values_pair(parse, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_BOTTOM, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_PADDING_BLOCK_START, CSS_PROP_PADDING_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_INSET:
 		return values_four(parse, CSS_PROP_TOP, tokens, count, out, out_count);
 	case SHORT_INSET_INLINE:
-		return values_pair(parse, CSS_PROP_LEFT, CSS_PROP_RIGHT, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_INSET_INLINE_START, CSS_PROP_INSET_INLINE_END, tokens, count, out, out_count);
 	case SHORT_INSET_BLOCK:
-		return values_pair(parse, CSS_PROP_TOP, CSS_PROP_BOTTOM, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_INSET_BLOCK_START, CSS_PROP_INSET_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_FLEX:
 		return values_flex(parse, tokens, count, out, out_count);
 	case SHORT_FLEX_FLOW:
@@ -1714,6 +1728,33 @@ css_decoration_line_serialize(
 	return 0;
 }
 
+/* The physical property whose grammar a logical side or size takes (other properties their own). */
+static int
+values_physical_grammar(
+	int property)
+{
+	/* Each logical group, by its first physical property. */
+	if (property >= CSS_PROP_PADDING_INLINE_START && property <= CSS_PROP_PADDING_BLOCK_END)
+		return CSS_PROP_PADDING_TOP;
+	if (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_INSET_BLOCK_END)
+		return CSS_PROP_TOP;
+	if (property >= CSS_PROP_BORDER_INLINE_START_WIDTH && property <= CSS_PROP_BORDER_BLOCK_END_WIDTH)
+		return CSS_PROP_BORDER_TOP_WIDTH;
+	if (property >= CSS_PROP_BORDER_INLINE_START_STYLE && property <= CSS_PROP_BORDER_BLOCK_END_STYLE)
+		return CSS_PROP_BORDER_TOP_STYLE;
+	if (property >= CSS_PROP_BORDER_INLINE_START_COLOR && property <= CSS_PROP_BORDER_BLOCK_END_COLOR)
+		return CSS_PROP_BORDER_TOP_COLOR;
+	if (property == CSS_PROP_INLINE_SIZE || property == CSS_PROP_BLOCK_SIZE)
+		return CSS_PROP_WIDTH;
+	if (property == CSS_PROP_MIN_INLINE_SIZE || property == CSS_PROP_MIN_BLOCK_SIZE)
+		return CSS_PROP_MIN_WIDTH;
+	if (property == CSS_PROP_MAX_INLINE_SIZE || property == CSS_PROP_MAX_BLOCK_SIZE)
+		return CSS_PROP_MAX_WIDTH;
+
+	/* Any other property is its own grammar. */
+	return property;
+}
+
 /* Looks a keyword up in a table; returns 1 and its value when it is there. */
 static int
 values_keyword(
@@ -1873,6 +1914,9 @@ values_single(
 	int is_last;
 	int is_safe;
 	int is_unsafe;
+
+	/* A logical side or size takes the grammar of a physical one. */
+	property = values_physical_grammar(property);
 
 	/* Skips surrounding whitespace. */
 	while (count > 0 &&
@@ -2823,6 +2867,14 @@ values_border(
 		return EINVAL;
 	}
 
+	/* A logical side declares its logical longhands. */
+	if (side >= VALUES_LOGICAL_SIDE) {
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + side - VALUES_LOGICAL_SIDE, &width);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + side - VALUES_LOGICAL_SIDE, &style);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + side - VALUES_LOGICAL_SIDE, &color);
+		return 0;
+	}
+
 	/* Declares the three longhands on the side or sides. */
 	first = side;
 	last = side;
@@ -3103,6 +3155,30 @@ values_wide_keyword(
 	case SHORT_MARGIN_BLOCK:
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_START, value);
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_END, value);
+		return;
+	case SHORT_PADDING_INLINE:
+		values_add(out, made, CSS_PROP_PADDING_INLINE_START, value);
+		values_add(out, made, CSS_PROP_PADDING_INLINE_END, value);
+		return;
+	case SHORT_PADDING_BLOCK:
+		values_add(out, made, CSS_PROP_PADDING_BLOCK_START, value);
+		values_add(out, made, CSS_PROP_PADDING_BLOCK_END, value);
+		return;
+	case SHORT_INSET_INLINE:
+		values_add(out, made, CSS_PROP_INSET_INLINE_START, value);
+		values_add(out, made, CSS_PROP_INSET_INLINE_END, value);
+		return;
+	case SHORT_INSET_BLOCK:
+		values_add(out, made, CSS_PROP_INSET_BLOCK_START, value);
+		values_add(out, made, CSS_PROP_INSET_BLOCK_END, value);
+		return;
+	case SHORT_BORDER_INLINE_START:
+	case SHORT_BORDER_INLINE_END:
+	case SHORT_BORDER_BLOCK_START:
+	case SHORT_BORDER_BLOCK_END:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + property - SHORT_BORDER_INLINE_START, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + property - SHORT_BORDER_INLINE_START, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + property - SHORT_BORDER_INLINE_START, value);
 		return;
 	case SHORT_PADDING:
 		first = CSS_PROP_PADDING_TOP;

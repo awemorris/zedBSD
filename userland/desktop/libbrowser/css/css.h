@@ -671,7 +671,7 @@ struct css_style {
 	struct css_length text_indent;
 	int direction;
 	int writing_mode;
-	/* sideways-lr (1) or sideways-rl (2), reported as written while the text is laid out horizontally. */
+	/* sideways-lr (1) or sideways-rl (2), reported as written; writing_mode is then vertical-lr or vertical-rl. */
 	int writing_sideways;
 	int text_orientation;
 	int container_type;
