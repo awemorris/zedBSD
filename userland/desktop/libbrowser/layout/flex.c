@@ -925,7 +925,7 @@ flex_base_size(
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
-	if (!row && child->style.aspect_ratio <= 0.0f &&
+	if (!row && child->style.aspect_ratio <= 0.0f && child->style.writing_mode == box->style.writing_mode &&
 	    child->style.min_height.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
@@ -940,13 +940,15 @@ flex_base_size(
 		if (child->style.max_width.unit == CSS_UNIT_PX || child->style.max_width.unit == CSS_UNIT_PERCENT)
 			item->maximum = flex_length(&child->style.max_width, box->width) - sizing;
 	} else {
-		/* Explicit height limits apply on a column main axis. */
-		if (child->style.min_height.unit == CSS_UNIT_PX)
-			item->minimum = layout_from_px(child->style.min_height.value) - sizing;
+		/* Explicit height limits apply on a column main axis (percentages of a definite height). */
+		if (child->style.min_height.unit == CSS_UNIT_PX ||
+		    (child->style.min_height.unit == CSS_UNIT_PERCENT && available >= 0))
+			item->minimum = flex_length(&child->style.min_height, available) - sizing;
 
 		/* A finite height maximum is independent of the measured base. */
-		if (child->style.max_height.unit == CSS_UNIT_PX)
-			item->maximum = layout_from_px(child->style.max_height.value) - sizing;
+		if (child->style.max_height.unit == CSS_UNIT_PX ||
+		    (child->style.max_height.unit == CSS_UNIT_PERCENT && available >= 0))
+			item->maximum = flex_length(&child->style.max_height, available) - sizing;
 	}
 
 	/* Ratio items need their content floor before line breaking or flex growth. */
@@ -1564,8 +1566,10 @@ flex_auto_minimums(
 
 		/* A size in pixels that is smaller is the minimum instead. */
 		size = row ? &child->style.width : &child->style.height;
-		if (size->unit == CSS_UNIT_PX) {
+		if (size->unit == CSS_UNIT_PX || (!row && size->unit == CSS_UNIT_PERCENT && available >= 0)) {
 			given = layout_from_px(size->value);
+			if (size->unit == CSS_UNIT_PERCENT)
+				given = (layout_unit)((float)available * size->value / 100.0f) + layout_from_px(size->offset);
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				given -= items[index].frame;
 			if (given < least)
@@ -1579,6 +1583,10 @@ flex_auto_minimums(
 			least = items[index].base;
 		if (least > items[index].minimum)
 			items[index].minimum = least;
+
+		/* The hypothetical size holds the minimum. */
+		if (items[index].size < items[index].minimum)
+			items[index].size = items[index].minimum;
 	}
 
 	/* Succeeded: the minimums are known. */
