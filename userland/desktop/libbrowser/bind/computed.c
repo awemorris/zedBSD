@@ -125,7 +125,15 @@ enum computed_property {
 	COMPUTED_GRID_TEMPLATE_ROWS,
 	COMPUTED_GRID_AUTO_FLOW,
 	COMPUTED_GRID_AUTO_COLUMNS,
-	COMPUTED_GRID_AUTO_ROWS
+	COMPUTED_GRID_AUTO_ROWS,
+	COMPUTED_GRID_TEMPLATE_AREAS,
+	COMPUTED_GRID_ROW_START,
+	COMPUTED_GRID_ROW_END,
+	COMPUTED_GRID_COLUMN_START,
+	COMPUTED_GRID_COLUMN_END,
+	COMPUTED_GRID_ROW,
+	COMPUTED_GRID_COLUMN,
+	COMPUTED_GRID_AREA
 };
 
 /*
@@ -146,7 +154,7 @@ struct computed_ref {
 
 static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int computed_find(const struct vm_string *name, int *property);
-static int computed_write_grid(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out, int *handled);
+static int computed_write_grid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int property, struct wb_units *out, int *handled);
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
@@ -157,7 +165,8 @@ static int computed_write_percent(const struct css_length *length, struct wb_uni
 static int computed_write_url_quoted(const struct vm_string *text, struct wb_units *out);
 static int computed_write_offset(const struct css_style *style, int side, struct wb_units *out);
 static int computed_write_font_family(const struct css_style *style, struct wb_units *out);
-static int computed_write_tracks(const struct css_track *tracks, int count, struct wb_units *out);
+static int computed_write_tracks(const struct css_track *tracks, int count, const struct css_line_names *names, struct wb_units *out);
+
 static int computed_track_minimum(const struct css_track *track, struct wb_units *out);
 static int computed_track_breadth(const struct css_track *track, struct wb_units *out);
 static int computed_name(const char *const *names, size_t count, int value, struct wb_units *out);
@@ -264,6 +273,14 @@ static const struct computed_entry computed_entries[] = {
 	{ "grid-auto-flow", COMPUTED_GRID_AUTO_FLOW },
 	{ "grid-auto-columns", COMPUTED_GRID_AUTO_COLUMNS },
 	{ "grid-auto-rows", COMPUTED_GRID_AUTO_ROWS },
+	{ "grid-template-areas", COMPUTED_GRID_TEMPLATE_AREAS },
+	{ "grid-row-start", COMPUTED_GRID_ROW_START },
+	{ "grid-row-end", COMPUTED_GRID_ROW_END },
+	{ "grid-column-start", COMPUTED_GRID_COLUMN_START },
+	{ "grid-column-end", COMPUTED_GRID_COLUMN_END },
+	{ "grid-row", COMPUTED_GRID_ROW },
+	{ "grid-column", COMPUTED_GRID_COLUMN },
+	{ "grid-area", COMPUTED_GRID_AREA },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -690,7 +707,7 @@ computed_write(
 		computed_blockify(window, element, style);
 
 	/* Grid template axes resolve from actual track sizing when the host can copy them. */
-	error = computed_write_grid(window, element, property, out, &handled);
+	error = computed_write_grid(window, element, style, property, out, &handled);
 	if (error != 0) {
 		free(style);
 		return error;
@@ -724,13 +741,16 @@ static int
 computed_write_grid(
 	struct bind_window *window,
 	struct dom_element *element,
+	const struct css_style *style,
 	int property,
 	struct wb_units *out,
 	int *handled)
 {
 	struct wb_vector sizes;
+	const struct css_line_names *names;
 	const double *tracks;
 	size_t index;
+	int explicit_count;
 	int columns;
 	int found;
 	int error;
@@ -767,11 +787,36 @@ computed_write_grid(
 		goto cleanup;
 	}
 
+	/* The explicit lines' names go around the explicit tracks (not when a repeat moved them). */
+	names = style->row_names;
+	explicit_count = style->row_count;
+	if (columns) {
+		names = style->column_names;
+		explicit_count = style->column_count;
+	}
+	if (style->column_repeat.length != 0 && columns)
+		names = NULL;
+	if (style->row_repeat.length != 0 && !columns)
+		names = NULL;
+
 	/* Every explicit and implicit track is serialized independently in logical order. */
 	tracks = sizes.items;
 	for (index = 0; index < sizes.count; index++) {
-		/* Separate adjacent tracks without inventing any extra gap track. */
-		if (index != 0) {
+		/* The names of the line before an explicit track. */
+		if (names != NULL && (int)index <= explicit_count && names[index].count > 0) {
+			if (index != 0) {
+				error = computed_ascii(" ", out);
+				if (error != 0)
+					goto cleanup;
+			}
+			error = css_line_names_serialize(&names[index], out);
+			if (error != 0)
+				goto cleanup;
+			error = computed_ascii(" ", out);
+			if (error != 0)
+				goto cleanup;
+		} else if (index != 0) {
+			/* Separate adjacent tracks without inventing any extra gap track. */
 			error = computed_ascii(" ", out);
 			if (error != 0)
 				goto cleanup;
@@ -779,6 +824,16 @@ computed_write_grid(
 
 		/* Pixel serialization uses the actual solver output, including fractional lengths. */
 		error = computed_pixels(tracks[index], out);
+		if (error != 0)
+			goto cleanup;
+	}
+
+	/* The names of the line after the last explicit track, when the grid ends there. */
+	if (names != NULL && (int)sizes.count == explicit_count && names[explicit_count].count > 0) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			goto cleanup;
+		error = css_line_names_serialize(&names[explicit_count], out);
 		if (error != 0)
 			goto cleanup;
 	}
@@ -1175,10 +1230,10 @@ computed_write_keyword(
 		error = computed_color(style->outline_color, out);
 		break;
 	case COMPUTED_GRID_TEMPLATE_COLUMNS:
-		error = computed_write_tracks(style->columns, style->column_count, out);
+		error = computed_write_tracks(style->columns, style->column_count, style->column_names, out);
 		break;
 	case COMPUTED_GRID_TEMPLATE_ROWS:
-		error = computed_write_tracks(style->rows, style->row_count, out);
+		error = computed_write_tracks(style->rows, style->row_count, style->row_names, out);
 		break;
 	case COMPUTED_GRID_AUTO_FLOW:
 		if (style->grid_auto_flow & CSS_GRID_FLOW_COLUMN) {
@@ -1193,10 +1248,34 @@ computed_write_keyword(
 		}
 		break;
 	case COMPUTED_GRID_AUTO_COLUMNS:
-		error = computed_write_tracks(style->auto_columns, style->auto_column_count, out);
+		error = computed_write_tracks(style->auto_columns, style->auto_column_count, NULL, out);
 		break;
 	case COMPUTED_GRID_AUTO_ROWS:
-		error = computed_write_tracks(style->auto_rows, style->auto_row_count, out);
+		error = computed_write_tracks(style->auto_rows, style->auto_row_count, NULL, out);
+		break;
+	case COMPUTED_GRID_TEMPLATE_AREAS:
+		error = css_grid_areas_serialize(style->areas, out);
+		break;
+	case COMPUTED_GRID_ROW_START:
+		error = css_grid_line_serialize(&style->grid_row, 0, out);
+		break;
+	case COMPUTED_GRID_ROW_END:
+		error = css_grid_line_serialize(&style->grid_row, 1, out);
+		break;
+	case COMPUTED_GRID_COLUMN_START:
+		error = css_grid_line_serialize(&style->grid_column, 0, out);
+		break;
+	case COMPUTED_GRID_COLUMN_END:
+		error = css_grid_line_serialize(&style->grid_column, 1, out);
+		break;
+	case COMPUTED_GRID_ROW:
+		error = css_grid_lines_serialize(&style->grid_row, out);
+		break;
+	case COMPUTED_GRID_COLUMN:
+		error = css_grid_lines_serialize(&style->grid_column, out);
+		break;
+	case COMPUTED_GRID_AREA:
+		error = css_grid_area_serialize(&style->grid_row, &style->grid_column, out);
 		break;
 	default:
 		/* transform: the engine has none. */
@@ -1296,6 +1375,7 @@ static int
 computed_write_tracks(
 	const struct css_track *tracks,
 	int count,
+	const struct css_line_names *names,
 	struct wb_units *out)
 {
 	const struct css_track *track;
@@ -1318,6 +1398,16 @@ computed_write_tracks(
 		/* Resolves the current scalar track before appending its separator. */
 		track = &tracks[index];
 		if (index > 0) {
+			error = computed_ascii(" ", out);
+			if (error != 0)
+				return error;
+		}
+
+		/* The names of the line before the track. */
+		if (names != NULL && names[index].count > 0) {
+			error = css_line_names_serialize(&names[index], out);
+			if (error != 0)
+				return error;
 			error = computed_ascii(" ", out);
 			if (error != 0)
 				return error;
@@ -1360,6 +1450,16 @@ computed_write_tracks(
 			if (error != 0)
 				return error;
 		}
+	}
+
+	/* The names of the line after the last track. */
+	if (names != NULL && names[count].count > 0) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+		error = css_line_names_serialize(&names[count], out);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: all computed track functions and keywords are complete. */

@@ -342,6 +342,7 @@ int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit c
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
+void layout_grid_names(struct layout_box *box);
 int layout_table(struct layout_tree *tree, struct layout_box *box);
 layout_unit layout_flex_content_width(const struct layout_box *box);
 void layout_font_of(struct layout_tree *tree, const struct css_style *style, struct text_font *font);

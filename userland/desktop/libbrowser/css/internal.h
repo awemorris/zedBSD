@@ -167,7 +167,8 @@ enum css_value_kind {
 	CSS_VALUE_SHADOWS,
 	CSS_VALUE_INSET,
 	CSS_VALUE_TRACKS,
-	CSS_VALUE_GRID_LINE
+	CSS_VALUE_GRID_LINE,
+	CSS_VALUE_AREAS
 };
 
 /* The units a declared length can have (converted to pixels by the cascade). */
@@ -328,6 +329,7 @@ enum css_property {
 	CSS_PROP_OBJECT_FIT,
 	CSS_PROP_OBJECT_POSITION_X,
 	CSS_PROP_OBJECT_POSITION_Y,
+	CSS_PROP_GRID_TEMPLATE_AREAS,
 	CSS_PROP_COUNT
 };
 
@@ -447,6 +449,9 @@ struct css_value {
 	const struct css_shadow_list *shadows;
 	const struct css_declared_inset *inset;
 	const struct css_track_list *tracks;
+	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
+	struct vm_string *ident;
+	const struct css_grid_areas *areas;
 };
 
 /* One declared grid track: its kind, its size (a length, or the fr share) and minmax()'s minimum. */
@@ -469,6 +474,9 @@ struct css_track_list {
 	int repeat_at;
 	int repeat_length;
 	int repeat_fit;
+	/* The names of the count + 1 lines around the tracks, and whether any line has one. */
+	struct css_line_names names[CSS_TRACKS + 1];
+	int named;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */

@@ -107,6 +107,7 @@ static int style_valid(struct vm_realm *realm, const struct vm_string *name, con
 static int style_canonical_decoration_line(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_grid_empty_lines(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_canonical_grid_auto_flow(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
+static int style_canonical_grid_placement(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_decoration_parts(const struct vm_string *value, struct wb_units parts[5]);
 static int style_decoration_longhand(const struct vm_string *name);
 static int style_decoration_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
@@ -873,6 +874,10 @@ style_set(
 	if (status != 0)
 		goto roots_cleanup;
 	roots[1] = &value->cell;
+	status = style_canonical_grid_placement(realm, name, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
 
 	/* The declarations as they are. */
 	status = style_read(realm, element, &list);
@@ -1452,6 +1457,58 @@ cleanup:
 	wb_units_release(&canonical);
 	wb_units_release(&source);
 	return status;
+}
+
+/* Canonicalizes grid placement and grid-template-areas values from their parsed form (the engine writes them). */
+static int
+style_canonical_grid_placement(
+	struct vm_realm *realm,
+	const struct vm_string *name,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	static const uint16_t colon = ':';
+	struct wb_units text;
+	struct wb_units canonical;
+	int handled;
+	int status;
+
+	/* The value as it is unless the engine writes it. */
+	*out = value;
+
+	/* The declaration's text. */
+	wb_units_init(&text);
+	status = vm_string_append_units(name, &text);
+	if (status == 0)
+		status = wb_units_append(&text, &colon, 1);
+	if (status == 0)
+		status = vm_string_append_units(value, &text);
+	if (status != 0) {
+		wb_units_release(&text);
+		return status;
+	}
+
+	/* The engine's canonical text, for the properties it writes. */
+	wb_units_init(&canonical);
+	status = css_grid_declaration_serialize(realm->heap, text.data, text.length, &canonical, &handled);
+	wb_units_release(&text);
+	if (status != 0) {
+		wb_units_release(&canonical);
+		return status;
+	}
+
+	/* The canonical value as a string. */
+	if (handled) {
+		*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
+		if (*out == NULL) {
+			wb_units_release(&canonical);
+			return ENOMEM;
+		}
+	}
+	wb_units_release(&canonical);
+
+	/* Succeeded: *out is the value to keep. */
+	return 0;
 }
 
 /* Canonicalizes parsed decoration keywords and the complete shorthand. */

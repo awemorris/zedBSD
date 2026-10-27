@@ -49,6 +49,12 @@
 /* The most tracks a grid template keeps (the ones after are dropped). */
 #define CSS_TRACKS 24
 
+/* The most names one grid line keeps (the ones after are dropped). */
+#define CSS_LINE_NAMES 8
+
+/* The most rows and columns grid-template-areas takes (a larger one is invalid). */
+#define CSS_AREA_TRACKS 32
+
 /*
  * The pseudo-elements that make boxes, as numbers of the
  * cascade and as bits of a style's pseudo_elements.
@@ -496,13 +502,35 @@ enum css_grid_auto_flow {
 /*
  * Where a grid item goes on one axis: its start and end,
  * each a line (0 for auto; a negative line counts from the end) or a span
- * (0 for none).
+ * (0 for none).  A named line or span keeps its name (an atom; NULL for
+ * none): the line is then the start-th (or end-th) line of that name, or
+ * the area of that name's line when the count is 0, and the span counts
+ * lines of that name.
  */
 struct css_grid_place {
 	int start;
 	int start_span;
 	int end;
 	int end_span;
+	struct vm_string *start_name;
+	struct vm_string *end_name;
+};
+
+/* The names of one grid line, as written in a template's brackets (atoms). */
+struct css_line_names {
+	struct vm_string *names[CSS_LINE_NAMES];
+	int count;
+};
+
+/*
+ * A grid-template-areas value: its rows and columns, and the name of each
+ * cell, row after row (atoms; NULL for a null cell token).  The named
+ * areas are the rectangles the cells of one name make.
+ */
+struct css_grid_areas {
+	int rows;
+	int columns;
+	struct vm_string *cells[CSS_AREA_TRACKS * CSS_AREA_TRACKS];
 };
 
 /*
@@ -692,6 +720,14 @@ struct css_style {
 	int row_count;
 	struct css_track_repeat column_repeat;
 	struct css_track_repeat row_repeat;
+	/*
+	 * The line names of the templates, column_count + 1 (and row_count + 1)
+	 * lines from the first, and the named areas; all in the declaring
+	 * sheet's arena, NULL for none.
+	 */
+	const struct css_line_names *column_names;
+	const struct css_line_names *row_names;
+	const struct css_grid_areas *areas;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;
 	struct css_track auto_rows[CSS_TRACKS];
@@ -783,6 +819,13 @@ int css_declaration_valid(struct vm_heap *heap, const uint16_t *units, size_t le
 const char *css_property_name(size_t index);
 int css_number_serialize(const uint16_t *units, size_t length, struct wb_units *out, int *handled);
 int css_decoration_line_parse(const uint16_t *units, size_t length, int *lines);
+int css_serialize_ident(const struct vm_string *name, struct wb_units *out);
+int css_line_names_serialize(const struct css_line_names *names, struct wb_units *out);
+int css_grid_line_serialize(const struct css_grid_place *place, int end, struct wb_units *out);
+int css_grid_lines_serialize(const struct css_grid_place *place, struct wb_units *out);
+int css_grid_area_serialize(const struct css_grid_place *row, const struct css_grid_place *column, struct wb_units *out);
+int css_grid_areas_serialize(const struct css_grid_areas *areas, struct wb_units *out);
+int css_grid_declaration_serialize(struct vm_heap *heap, const uint16_t *units, size_t length, struct wb_units *out, int *handled);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);
 

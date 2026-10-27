@@ -448,6 +448,9 @@ layout_grid(
 		box->grid_used_row_count = 0;
 	}
 
+	/* Named lines and spans become line numbers before anything places the children. */
+	layout_grid_names(box);
+
 	/* The children out of the flow have their static place at the content box's corner. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (!child->out_of_flow)

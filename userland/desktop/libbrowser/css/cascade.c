@@ -245,6 +245,7 @@ static void cascade_shadows(struct css_engine *engine, struct css_style *style, 
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
+static const struct css_line_names *cascade_line_names(const struct css_value *value);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
 static int cascade_font_size_keyword(const struct css_value *value, int parent_keyword);
 static void cascade_families(struct css_style *style, const struct css_value *value);
@@ -3480,6 +3481,7 @@ cascade_apply(
 	int side;
 	int line;
 	int span;
+	struct vm_string *name;
 	int parent_keyword;
 	float parent_size;
 
@@ -3752,9 +3754,17 @@ cascade_apply(
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
+		style->column_names = cascade_line_names(value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
+		style->row_names = cascade_line_names(value);
+		break;
+	case CSS_PROP_GRID_TEMPLATE_AREAS:
+		/* The areas stay in the declaring sheet's arena. */
+		style->areas = NULL;
+		if (value->kind == CSS_VALUE_AREAS)
+			style->areas = value->areas;
 		break;
 	case CSS_PROP_GRID_AUTO_FLOW:
 		style->grid_auto_flow = value->keyword;
@@ -3775,18 +3785,22 @@ cascade_apply(
 			place = &style->grid_row;
 		line = 0;
 		span = 0;
+		name = NULL;
 		if (value->kind == CSS_VALUE_GRID_LINE) {
 			line = (int)value->number;
 			span = value->keyword;
+			name = value->ident;
 		}
 
-		/* The start's line and span, or the end's. */
+		/* The start's line, span and name, or the end's. */
 		if (property == CSS_PROP_GRID_COLUMN_START || property == CSS_PROP_GRID_ROW_START) {
 			place->start = line;
 			place->start_span = span;
+			place->start_name = name;
 		} else {
 			place->end = line;
 			place->end_span = span;
+			place->end_name = name;
 		}
 
 		/* The place is set. */
@@ -4243,11 +4257,16 @@ cascade_inherit(
 		memcpy(style->columns, parent->columns, sizeof(style->columns));
 		style->column_count = parent->column_count;
 		style->column_repeat = parent->column_repeat;
+		style->column_names = parent->column_names;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
 		style->row_count = parent->row_count;
 		style->row_repeat = parent->row_repeat;
+		style->row_names = parent->row_names;
+		break;
+	case CSS_PROP_GRID_TEMPLATE_AREAS:
+		style->areas = parent->areas;
 		break;
 	case CSS_PROP_GRID_AUTO_FLOW:
 		style->grid_auto_flow = parent->grid_auto_flow;
@@ -4413,6 +4432,21 @@ cascade_tracks(
 
 	/* The number of tracks. */
 	*count = (int)index;
+}
+
+/* The line names a declared grid template gives its lines (in the sheet's arena), or NULL when it names none. */
+static const struct css_line_names *
+cascade_line_names(
+	const struct css_value *value)
+{
+	/* Only a parsed track list with a name has names. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL)
+		return NULL;
+	if (!value->tracks->named)
+		return NULL;
+
+	/* Succeeded: the list's lines. */
+	return value->tracks->names;
 }
 
 /*
