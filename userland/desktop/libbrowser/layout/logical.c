@@ -73,6 +73,7 @@ layout_logical_wanted(
 	const struct layout_tree *tree,
 	const struct layout_box *box)
 {
+	const struct layout_box *child;
 	int display;
 	int mode;
 
@@ -84,6 +85,19 @@ layout_logical_wanted(
 	mode = box->style.writing_mode;
 	if (mode == tree->logical_mode)
 		return 0;
+
+	/*
+	 * A vertical grid container in horizontal coordinates with horizontal
+	 * (orthogonal) items places its items in physical coordinates.
+	 */
+	display = box->style.display;
+	if (tree->logical_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+				return 0;
+		}
+	}
 
 	/*
 	 * The items of a horizontal flex or grid container, and the boxes out of
