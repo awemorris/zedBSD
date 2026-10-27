@@ -106,7 +106,7 @@ static const char *const script_types[] = {
 static int script_settle_network(struct page *page, double wait, double *elapsed);
 static void script_console(void *context, int level, const char *text, size_t length);
 static int script_location(void *context, int part, struct wb_buffer *out);
-static int script_fragment(void *context, const char *hash, size_t length);
+static int script_url_set(void *context, const char *href, size_t length);
 static int script_cookie_get(void *context, struct wb_buffer *out);
 static int script_cookie_set(void *context, const char *text, size_t length);
 static int script_type_runs(const struct dom_element *script);
@@ -397,7 +397,7 @@ page_start_scripts(
 	host.console = script_console;
 	host.user_agent = NET_USER_AGENT;
 	host.location = script_location;
-	host.fragment = script_fragment;
+	host.url_set = script_url_set;
 	host.cookie_get = script_cookie_get;
 	host.cookie_set = script_cookie_set;
 	host.selector_engine = page_selector_engine;
@@ -1413,53 +1413,52 @@ script_location(
 	return 0;
 }
 
-/* Changes only this page's fragment; the binding reveals and scrolls the target. */
+/*
+ * Changes this page's URL to another of the same document (a fragment, a
+ * history entry a script pushed); the href is resolved against the URL.
+ */
 static int
-script_fragment(
+script_url_set(
 	void *context,
-	const char *hash,
+	const char *href,
 	size_t length)
 {
 	struct page *page;
 	struct net_url current;
 	struct net_url next;
-	struct wb_buffer reference;
 	struct wb_buffer serialized;
 	char *copy;
 	int error;
 
+	/* The new URL, resolved against the page's. */
 	page = context;
 	error = page_url(page, &current);
 	if (error != 0)
 		return error;
-	wb_buffer_init(&reference);
-	wb_buffer_init(&serialized);
-	if (length != 0U && hash[0] != '#')
-		error = wb_buffer_append_byte(&reference, '#');
-	if (error == 0)
-		error = wb_buffer_append(&reference, hash, length);
-	if (error == 0 && reference.length != 0U) {
-		error = net_url_parse(wb_buffer_string(&reference), reference.length, &current, &next);
-		if (error == 0) {
-			error = net_url_serialize(&next, 0, &serialized);
-			net_url_release(&next);
-		}
-	} else if (error == 0) {
-		error = net_url_serialize(&current, 1, &serialized);
-	}
-	if (error == 0) {
-		copy = strdup(wb_buffer_string(&serialized));
-		if (copy == NULL)
-			error = ENOMEM;
-		else {
-			free(page->base);
-			page->base = copy;
-		}
-	}
-	wb_buffer_release(&serialized);
-	wb_buffer_release(&reference);
+	error = net_url_parse(href, length, &current, &next);
 	net_url_release(&current);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Its text. */
+	wb_buffer_init(&serialized);
+	error = net_url_serialize(&next, 0, &serialized);
+	net_url_release(&next);
+	if (error != 0) {
+		wb_buffer_release(&serialized);
+		return error;
+	}
+
+	/* The page keeps the text as its URL. */
+	copy = strdup(wb_buffer_string(&serialized));
+	wb_buffer_release(&serialized);
+	if (copy == NULL)
+		return ENOMEM;
+	free(page->base);
+	page->base = copy;
+
+	/* Succeeded: the page has the new URL. */
+	return 0;
 }
 
 /* Writes the cookies a script may see for the page's URL (the window's host callback). */

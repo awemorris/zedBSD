@@ -583,6 +583,7 @@ int bind_environment_install(struct bind_window *window);
 double bind_epoch_milliseconds(void);
 int bind_document_create_event(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_location_part(struct bind_window *window, int part, vm_value *value);
+int bind_scroll_to_fragment(struct bind_window *window, const struct wb_buffer *fragment, int *found);
 
 /* The window and the shared helpers (window.c). */
 struct bind_window *bind_window_of(struct vm_realm *realm);
