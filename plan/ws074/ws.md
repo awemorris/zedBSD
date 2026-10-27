@@ -771,6 +771,7 @@ p009 → p018 → p027 → p028 → p029 → p047 → p031 → p032 → p033 →
 | [ws074-p259](phase259/phase.md) | inline specified numeric stateとflex-factor canonical serialization | in-progress / q55 | p191 CSSOM/p253 attribute commit/q54 full3530 baseline |
 | [ws074-p260](phase260/phase.md) | Interop 2025 の Chromium が通る試験を全部通す（2026-10-27 ユーザー） | in-progress / Queue なし（web のセッション） | クラウド環境の構築、chrome-run.js・interop2025-chrome-gap.py |
 | [ws074-p261](phase261/phase.md) | History と Navigation API（同じ文書の中）、p260 の一部 | in-progress | p260 の gap の測定 |
+| [ws074-p262](phase262/phase.md) | 縦書きの writing-mode を logical の座標で layout する、p260 の一部 | in-progress | p260 の gap の測定 |
 
 2026-10-13 / q1000-terminal-and-p179-addition: p178 の1領域試行は、参照の背景画像が欠ける全画面差のため uncleared。固定 WPT と host build warning0、Acid3 score100/100・差302056/480000、Acid2差1865/120000 の証拠は[p178](phase178/phase.md)と[q1000履歴](../history/queue-q1000.md)。原因の切り分けと修正を[p179](phase179/phase.md)として追加し、verified 出力後に p178 を再試行する。p100/WS074 の受け入れは未達。メインの共有 Queue/Project/GitHub への投影は未実施。
 
