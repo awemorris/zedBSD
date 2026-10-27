@@ -43,6 +43,21 @@
 /* The proximity of a declaration outside @scope: farther than any scope root. */
 #define CASCADE_UNSCOPED	0xffffffffU
 
+/* The slots of the table that remembers which elements are roots of which @scope, and the most it probes. */
+#define CASCADE_SCOPE_MEMO	65536U
+#define CASCADE_SCOPE_PROBES	32U
+
+/*
+ * One remembered answer: whether an element is a root of a scope, valid
+ * while generation is the engine's (one sheet of one element's cascade).
+ */
+struct cascade_scope_memo {
+	const struct css_scope *scope;
+	const struct dom_element *element;
+	uint32_t generation;
+	int result;
+};
+
 /* The precedence of a declaration by its origin and importance (higher wins). */
 #define RANK_USER_AGENT		0
 #define RANK_AUTHOR		1
@@ -114,6 +129,13 @@ struct css_engine {
 	struct dom_element *scope_root;
 	/* The owner of the sheet whose rules are being matched (NULL for none). */
 	struct dom_element *sheet_owner;
+	/*
+	 * Which elements are roots of which @scope (allocated when first used;
+	 * NULL before), and the generation that makes its entries current:
+	 * it moves on for each sheet of each cascade, so nothing is cleared.
+	 */
+	struct cascade_scope_memo *scope_memo;
+	uint32_t scope_generation;
 	int container_missed;
 	struct wb_vector container_uses;
 	int (*visited_lookup)(void *, struct dom_element *);
@@ -219,6 +241,7 @@ static int cascade_entry_compare(const void *left, const void *right);
 static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
+static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_in_scope(struct css_engine *engine, struct dom_element *element, struct dom_element *root, const struct css_scope *scope);
 static int cascade_compare(const void *left, const void *right);
 static int cascade_customs(struct css_engine *engine, struct css_style *style, const struct cascade_match *matches, size_t count);
@@ -359,6 +382,7 @@ css_engine_destroy(
 	wb_vector_release(&engine->container_uses);
 	wb_vector_release(&engine->kept_areas);
 	wb_vector_release(&engine->kept_names);
+	free(engine->scope_memo);
 	wb_arena_release(&engine->arena);
 	free(engine);
 }
@@ -1092,6 +1116,7 @@ cascade_collect(
 
 		/* The sheet's matching rules. */
 		engine->sheet_owner = sheets[sheet].owner;
+		engine->scope_generation++;
 		error = cascade_collect_sheet(engine, element, sheets[sheet].sheet, (uint64_t)sheet, id, matches);
 		engine->sheet_owner = NULL;
 		if (error != 0)
@@ -1710,13 +1735,61 @@ cascade_scoped_matches(
 	return 0;
 }
 
+/* Tells whether an element is a root of a scope, remembering the answer for the rest of the sheet's cascade. */
+static int
+cascade_scope_root(
+	struct css_engine *engine,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct cascade_scope_memo *slot;
+	uintptr_t hash;
+	size_t probe;
+	int result;
+
+	/* The table, made the first time it is needed (without one, every answer is worked out). */
+	if (engine->scope_memo == NULL) {
+		engine->scope_memo = calloc(CASCADE_SCOPE_MEMO, sizeof(*engine->scope_memo));
+		if (engine->scope_memo == NULL) {
+			result = cascade_scope_root_compute(engine, root, scope);
+			return result;
+		}
+	}
+
+	/* A current answer in one of the slots the pair hashes to. */
+	hash = ((uintptr_t)root >> 4) * 31U + ((uintptr_t)scope >> 4);
+	for (probe = 0; probe < CASCADE_SCOPE_PROBES; probe++) {
+		slot = &engine->scope_memo[(hash + probe) % CASCADE_SCOPE_MEMO];
+		if (slot->generation != engine->scope_generation)
+			break;
+		if (slot->scope == scope && slot->element == root)
+			return slot->result;
+	}
+
+	/* Otherwise the answer, kept in a free slot when there is one. */
+	result = cascade_scope_root_compute(engine, root, scope);
+	for (probe = 0; probe < CASCADE_SCOPE_PROBES; probe++) {
+		slot = &engine->scope_memo[(hash + probe) % CASCADE_SCOPE_MEMO];
+		if (slot->generation == engine->scope_generation)
+			continue;
+		slot->scope = scope;
+		slot->element = root;
+		slot->generation = engine->scope_generation;
+		slot->result = result;
+		break;
+	}
+
+	/* Succeeded: the answer. */
+	return result;
+}
+
 /*
  * Tells whether an element is a root of a scope: it matches the scope's
  * root selectors (relative to a root of the scope it is nested in, which
  * it must be in), or for an implicit scope it is the root element.
  */
 static int
-cascade_scope_root(
+cascade_scope_root_compute(
 	struct css_engine *engine,
 	struct dom_element *root,
 	const struct css_scope *scope)
