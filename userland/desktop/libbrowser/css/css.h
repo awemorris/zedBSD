@@ -848,6 +848,7 @@ int css_engine_compute(struct css_engine *engine, struct dom_element *element, c
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);
+void css_engine_query_scope(struct css_engine *engine, struct dom_element *element);
 int css_engine_query_matches(struct css_engine *engine, struct dom_element *element, const struct css_query *query);
 
 #endif

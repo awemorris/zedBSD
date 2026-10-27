@@ -193,10 +193,13 @@ bind_matches(
 		return status;
 	}
 
-	/* The element itself; without an engine nothing matches. */
+	/* The element itself (and :scope); without an engine nothing matches. */
 	matches = 0;
-	if (engine != NULL)
+	if (engine != NULL) {
+		css_engine_query_scope(engine, element);
 		matches = css_engine_query_matches(engine, element, query);
+		css_engine_query_scope(engine, NULL);
+	}
 	css_query_destroy(query);
 
 	/* Succeeded: whether it matches. */
@@ -246,9 +249,11 @@ bind_closest(
 		return status;
 	}
 
-	/* The element, then each ancestor element, until one matches. */
+	/* The element, then each ancestor element, until one matches (:scope is the element). */
 	matches = 0;
 	walk = &element->node;
+	if (engine != NULL)
+		css_engine_query_scope(engine, element);
 	while (engine != NULL && walk != NULL) {
 		if (walk->type == DOM_ELEMENT) {
 			matches = css_engine_query_matches(engine, (struct dom_element *)walk, query);
@@ -262,6 +267,8 @@ bind_closest(
 
 	/* The list is done with. */
 	css_query_destroy(query);
+	if (engine != NULL)
+		css_engine_query_scope(engine, NULL);
 
 	/* None matches. */
 	if (!matches) {
@@ -429,6 +436,10 @@ query_find(
 		css_query_destroy(query);
 		return status;
 	}
+
+	/* An element's query has the element as :scope. */
+	if (engine != NULL && root->type == DOM_ELEMENT)
+		css_engine_query_scope(engine, (struct dom_element *)root);
 
 	/* The list querySelectorAll fills. */
 	array = NULL;

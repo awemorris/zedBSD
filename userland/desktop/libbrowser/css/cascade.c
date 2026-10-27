@@ -946,11 +946,25 @@ void
 css_engine_query_begin(
 	struct css_engine *engine)
 {
-	/* No class attribute is split any more. */
+	/* No class attribute is split any more, and :scope is the root element until a query names its element. */
 	if (engine->class_table != NULL)
 		memset(engine->class_table, 0, engine->class_capacity * sizeof(*engine->class_table));
 	engine->class_count = 0;
 	engine->class_atoms.count = 0;
+	engine->scope_root = NULL;
+}
+
+/*
+ * Makes :scope stand for the element a query is made on (matches(),
+ * closest(), an element's querySelector()), NULL for the root element.
+ */
+void
+css_engine_query_scope(
+	struct css_engine *engine,
+	struct dom_element *element)
+{
+	/* The scoping element of the following matches. */
+	engine->scope_root = element;
 }
 
 /*
@@ -1104,6 +1118,9 @@ cascade_collect(
 	error = cascade_element_keys(engine, element, &id);
 	if (error != 0)
 		return error;
+
+	/* Outside @scope, :scope is the root element (a query's scoping element does not reach the cascade). */
+	engine->scope_root = NULL;
 
 	/* The rules of every sheet whose media hold and whose selectors match, in the order of the sheets. */
 	sheets = engine->sheets.items;
@@ -1862,7 +1879,7 @@ cascade_scope_root_compute(
 
 /*
  * Tells whether an element under (or at) a root is in the scope: neither
- * it nor any element between it and the root matches a limit (relative to
+ * it nor any element from it up to the root matches a limit (relative to
  * the root).
  */
 static int
@@ -1881,10 +1898,10 @@ cascade_in_scope(
 	if (scope->limit_count == 0)
 		return 1;
 
-	/* The element and its ancestors below the root. */
+	/* The element and its ancestors up to the root itself (a limit of :scope excludes everything). */
 	saved = engine->scope_root;
 	engine->scope_root = root;
-	for (between = element; between != NULL && between != root; between = cascade_parent_element(between)) {
+	for (between = element; between != NULL; between = cascade_parent_element(between)) {
 		for (index = 0; index < scope->limit_count; index++) {
 			matches = cascade_candidate_matches(engine, between, &scope->limits[index]);
 			if (matches) {
@@ -1892,6 +1909,8 @@ cascade_in_scope(
 				return 0;
 			}
 		}
+		if (between == root)
+			break;
 	}
 	engine->scope_root = saved;
 
