@@ -62,6 +62,8 @@ struct grid_state {
 	/* Tracks of an auto-fit repeat that no item uses: they take no room (NULL when none). */
 	unsigned char *column_collapsed;
 	unsigned char *row_collapsed;
+	/* What a fit-content() column may grow to with free space (0 for other columns; NULL when none). */
+	layout_unit *column_fit;
 };
 
 /*
@@ -83,6 +85,7 @@ static int grid_span_has_fixed_rows(const struct css_style *style, const struct 
 static int grid_fixed_span_minimum(const struct layout_box *box, int64_t *minimum);
 static int grid_column_auto_minimum(struct layout_box *box, layout_unit containing_width, layout_unit *minimum);
 static int grid_track_floor(const struct css_track *track, layout_unit whole, layout_unit *floor);
+static int grid_row_stretches(const struct css_track *track);
 static int grid_fixed_area_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
 static void grid_maximize(const struct css_style *style, int columns, layout_unit *sizes, int count, const unsigned char *collapsed, layout_unit whole, layout_unit free_space);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
@@ -598,7 +601,8 @@ layout_grid(
 		used += grid.columns[position];
 	box->grid_content = used;
 	room = box->width - used;
-	grid_distribute(box->style.justify_content,
+	/* A safe alignment that would overflow falls back to the start. */
+	grid_distribute((box->style.flex_keywords & 16u) != 0 && room < 0 ? CSS_ALIGN_START : box->style.justify_content,
 	    box->style.direction == CSS_DIRECTION_RTL &&
 	    box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB,
 	    room, grid_live_tracks(grid.column_collapsed, grid.column_count), &shift, &distribution);
@@ -627,11 +631,7 @@ layout_grid(
 		    item->box->style.min_width.unit != CSS_UNIT_AUTO ||
 		    item->box->style.max_width.unit != CSS_UNIT_NONE)
 			justify = CSS_ALIGN_STRETCH;
-		if (item->box->replaced &&
-		    (item->box->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO ||
-		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO))
-			justify = CSS_ALIGN_STRETCH;
-		else if (item->box->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO ||
+		if (item->box->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO ||
 		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			justify = CSS_ALIGN_START;
 
@@ -674,7 +674,8 @@ layout_grid(
 			used += grid.rows[position];
 		if (available_height < 0)
 			available_height = 0;
-		grid_distribute(box->style.align_content, 0, available_height - used,
+		grid_distribute((box->style.flex_keywords & 32u) != 0 && available_height < used ? CSS_ALIGN_START :
+		    box->style.align_content, 0, available_height - used,
 		    grid_live_tracks(grid.row_collapsed, grid.row_count), &row_shift, &distribution);
 		row_gap += distribution;
 		for (position = 0; grid.row_collapsed != NULL && position < grid.row_count; position++) {
@@ -778,6 +779,7 @@ layout_grid(
 			child->height = area_height - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM] - frame;
 			if (child->height < 0)
 				child->height = 0;
+			child->height = grid_clamp_height(child, child->height, area_height, frame);
 		}
 
 		/* Its place, moved down by the room it leaves when it is at the end or the center. */
@@ -2590,6 +2592,43 @@ grid_size_columns(
 			grid->columns[column] = width;
 	}
 
+	/*
+	 * A fit-content() column starts at its items' minimum contributions (a
+	 * pixel min-width, else min-content) and may grow with free space to its
+	 * content, no wider than its limit.
+	 */
+	for (column = 0; column < grid->column_count; column++) {
+		track = grid_column_track(&box->style, column);
+		if (track->kind != CSS_TRACK_AUTO || track->maximum_rule != CSS_TRACK_MAXIMUM_FIT_CONTENT ||
+		    (track->size.unit != CSS_UNIT_PX && (track->size.unit != CSS_UNIT_PERCENT || tree->measuring != 0)))
+			continue;
+		used = grid_track_length(&track->size, box->width, tree->measuring);
+		share = 0;
+		for (index = 0; index < grid->item_count; index++) {
+			item = &grid->items[index];
+			if (item->column != column || item->column_span != 1)
+				continue;
+			if (item->box->style.min_width.unit == CSS_UNIT_PX) {
+				width = layout_from_px(item->box->style.min_width.value);
+			} else {
+				error = grid_item_minimum_width(tree, item->box, &width);
+				if (error != 0)
+					return error;
+			}
+			if (width > share)
+				share = width;
+		}
+		if (grid->column_fit == NULL) {
+			grid->column_fit = calloc((size_t)grid->column_count, sizeof(*grid->column_fit));
+			if (grid->column_fit == NULL)
+				return ENOMEM;
+		}
+		if (used > grid->columns[column])
+			used = grid->columns[column];
+		grid->column_fit[column] = used > share ? used : share;
+		grid->columns[column] = share;
+	}
+
 	/* An intrinsic track's fixed minmax() minimum is its floor. */
 	for (column = 0; column < grid->column_count; column++) {
 		track = grid_column_track(&box->style, column);
@@ -2661,6 +2700,19 @@ grid_size_columns(
 
 		/* Non-flexible columns occupy this part of the available axis. */
 		used += grid->columns[column];
+	}
+
+	/* fit-content() columns grow toward their content by the free space, in order. */
+	for (column = 0; grid->column_fit != NULL && column < grid->column_count; column++) {
+		if (grid->column_fit[column] <= grid->columns[column])
+			continue;
+		width = grid->column_fit[column] - grid->columns[column];
+		if (tree->measuring == 0 && width > available - used)
+			width = available - used;
+		if (width <= 0)
+			continue;
+		grid->columns[column] += width;
+		used += width;
 	}
 
 	/* Fixed minmax() tracks grow toward their maxima by the free space before the fr tracks take what is left. */
@@ -2771,11 +2823,23 @@ grid_column_stretches(
 	/* Horizontal intrinsic maxima have their own growth limit instead of auto stretch. */
 	if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
 	    (track->maximum_rule == CSS_TRACK_MAXIMUM_MIN_CONTENT ||
-	     track->maximum_rule == CSS_TRACK_MAXIMUM_MAX_CONTENT))
+	     track->maximum_rule == CSS_TRACK_MAXIMUM_MAX_CONTENT ||
+	     track->maximum_rule == CSS_TRACK_MAXIMUM_FIT_CONTENT))
 		return 0;
 
 	/* Succeeded: this column retains the ordinary automatic stretch path. */
 	return 1;
+}
+
+/* Tells whether a row takes a share of the stretch: an auto maximum, not a content-sized one. */
+static int
+grid_row_stretches(
+	const struct css_track *track)
+{
+	return track->kind == CSS_TRACK_AUTO &&
+	    track->maximum_rule != CSS_TRACK_MAXIMUM_MIN_CONTENT &&
+	    track->maximum_rule != CSS_TRACK_MAXIMUM_MAX_CONTENT &&
+	    track->maximum_rule != CSS_TRACK_MAXIMUM_FIT_CONTENT;
 }
 
 /* Measures a non-replaced single-column item's constrained min-content margin box. */
@@ -2979,6 +3043,8 @@ grid_lay_item(
 	layout_unit intrinsic;
 	layout_unit minimum;
 	layout_unit remaining;
+	layout_unit frame;
+	layout_unit sizing;
 	int left_auto;
 	int right_auto;
 	int side;
@@ -3025,6 +3091,18 @@ grid_lay_item(
 	    item->padding[CSS_RIGHT] - item->border[CSS_RIGHT];
 	if (content < 0)
 		content = 0;
+
+	/* A stretched width stays within the item's pixel maximum and minimum. */
+	if (justify == CSS_ALIGN_STRETCH) {
+		frame = item->border[CSS_LEFT] + item->padding[CSS_LEFT] + item->padding[CSS_RIGHT] + item->border[CSS_RIGHT];
+		sizing = saved.box_sizing == CSS_BOX_SIZING_BORDER ? frame : 0;
+		if (saved.max_width.unit == CSS_UNIT_PX && content > layout_from_px(saved.max_width.value) - sizing)
+			content = layout_from_px(saved.max_width.value) - sizing;
+		if (saved.min_width.unit == CSS_UNIT_PX && content < layout_from_px(saved.min_width.value) - sizing)
+			content = layout_from_px(saved.min_width.value) - sizing;
+		if (content < 0)
+			content = 0;
+	}
 	if (justify != CSS_ALIGN_STRETCH && content > intrinsic)
 		content = intrinsic;
 	if (justify != CSS_ALIGN_STRETCH && content < intrinsic) {
@@ -3449,7 +3527,7 @@ grid_size_rows(
 			continue;
 		}
 		used += grid->rows[row];
-		if (track->kind == CSS_TRACK_AUTO)
+		if (grid_row_stretches(track))
 			height++;
 	}
 	if (height == 0 || available <= used)
@@ -3458,7 +3536,7 @@ grid_size_rows(
 	spanned = available - used - minimum * height;
 	for (row = 0; row < grid->row_count; row++) {
 		track = grid_row_track(&box->style, row);
-		if (track->kind != CSS_TRACK_AUTO ||
+		if (!grid_row_stretches(track) ||
 		    (grid->row_collapsed != NULL && grid->row_collapsed[row]))
 			continue;
 		grid->rows[row] += minimum;
@@ -3890,4 +3968,5 @@ grid_release(
 	free(grid->taken);
 	free(grid->column_collapsed);
 	free(grid->row_collapsed);
+	free(grid->column_fit);
 }

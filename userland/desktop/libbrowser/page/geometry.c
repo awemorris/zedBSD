@@ -546,7 +546,6 @@ geometry_scroll_size(
 	layout_unit top;
 	layout_unit right;
 	layout_unit bottom;
-	int items;
 	int flex;
 	int rtl;
 	int wrap_reverse;
@@ -575,14 +574,13 @@ geometry_scroll_size(
 	}
 
 	/*
-	 * A container scrolls only toward its end sides: a block's follow its
-	 * writing mode and direction, a horizontal flex container's its main
-	 * and cross axes (reversed ones scroll toward their starts instead);
-	 * a vertical flex container's or a grid's overflow all counts.
+	 * A container scrolls only toward its end sides: a block's or a grid's
+	 * follow its writing mode and direction, a horizontal flex container's
+	 * its main and cross axes (reversed ones scroll toward their starts
+	 * instead); a vertical flex container's overflow all counts.
 	 */
 	flex = first->style.display == CSS_DISPLAY_FLEX || first->style.display == CSS_DISPLAY_INLINE_FLEX;
-	items = flex || first->style.display == CSS_DISPLAY_GRID || first->style.display == CSS_DISPLAY_INLINE_GRID;
-	if (!items) {
+	if (!flex) {
 		if (first->style.direction == CSS_DIRECTION_RTL || first->style.writing_mode == CSS_WRITING_VERTICAL_RL)
 			right = pad_right;
 		else

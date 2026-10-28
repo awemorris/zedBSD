@@ -904,8 +904,9 @@ flex_base_size(
 		}
 	}
 
-	/* An image's natural ratio transfers a definite cross size too. */
+	/* An image's natural ratio transfers a stretched cross size too (a size of its own goes through its layout). */
 	if (item->base < 0 && child->replaced && child->style.aspect_ratio <= 0.0f &&
+	    (row ? child->style.height.unit : child->style.width.unit) == CSS_UNIT_AUTO &&
 	    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
 		cross = flex_ratio_cross_size(tree, box, child, row);
 		if (cross >= 0) {

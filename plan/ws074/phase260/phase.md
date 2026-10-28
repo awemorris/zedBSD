@@ -76,6 +76,7 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev16（2026-10-28） | 841 | 1,035 | 113 | 39 | 2,028（58.41%） |
   | ours-dev17（864752041、2026-10-28） | 862 | 1,038 | 113 | 39 | 2,052（59.10%） |
   | ours-dev18（2026-10-28） | 869 | 1,056 | 112 | 39 | 2,076（59.79%） |
+  | ours-dev19（ce9775f01、2026-10-28） | 876 | 1,067 | 114 | 39 | 2,096（60.37%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -92,10 +93,10 @@ Origin: 2026-10-27 ユーザーの指示。
   dev17 → dev18: flex の baseline・last baseline と交差軸の auto margin、grid の行の baseline 群（内在の行は baseline で伸びる）、
   flex・grid の container の baseline、br の clear、subgrid の構文、要素の scrollWidth・scrollHeight。
   後退は subgrid の偶然の合格 5 件（subgrid の配置は未実装）と grid-baseline-001（直交の item、dev19 で修正）。
-- 再開点（2026-10-28 のラップアップ）:
-  - 最後の全件の測定は ours-dev18（2,076）。その後の commit（直交の item の baseline、scrollWidth の flex の向きと abspos、
-    flex の画像の比の転写と column の stretch、block の button の fit-content、abspos の flex・grid の top/bottom の高さ、
-    相対位置の縦の % と inline box の相対位置）は対象の試験だけで確認し、全件の測定は未実施。次は全件の測定（dev19）から。
+  dev18 → dev19: 直交の item の baseline、scrollWidth の flex の向きと abspos、flex の画像の比の転写と column の stretch、
+  block の button の fit-content、abspos の flex・grid の top/bottom の高さ、相対位置の縦の % と inline box の相対位置。
+  後退 5 件（flex の画像の最小幅、自身の高さを持つ画像の比の転写が原因）は dev19 の後に修正。
+- 再開点:
   - 残りの大きな塊: grid の column 軸（justify）の baseline と縦書きの baseline、grid の track sizing の仕様どおりの書き直し、
     subgrid の配置、View Transitions、Navigation API の文書をまたぐ遷移・iframe、grid・grid-template の shorthand の
     longhand からの直列化、Error の生成位置（navigateerror の lineno）。

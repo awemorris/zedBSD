@@ -2497,7 +2497,9 @@ values_single(
 		     property == CSS_PROP_ALIGN_SELF) &&
 		    (keyword == CSS_ALIGN_LEFT || keyword == CSS_ALIGN_RIGHT))
 			return EINVAL;
-		if (property == CSS_PROP_JUSTIFY_ITEMS &&
+		/* auto is a self-alignment only. */
+		if ((property == CSS_PROP_JUSTIFY_ITEMS || property == CSS_PROP_ALIGN_ITEMS ||
+		     property == CSS_PROP_JUSTIFY_CONTENT || property == CSS_PROP_ALIGN_CONTENT) &&
 		    keyword == CSS_ALIGN_AUTO)
 			return EINVAL;
 		/* anchor-center is a self-alignment. */
