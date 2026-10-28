@@ -86,6 +86,7 @@ enum values_shorthand {
 	SHORT_PLACE_ITEMS,
 	SHORT_PLACE_SELF,
 	SHORT_PLACE_CONTENT,
+	SHORT_POSITION_TRY,
 	SHORT_CONTAINER,
 	SHORT_BORDER_SPACING,
 	SHORT_OVERFLOW,
@@ -192,6 +193,7 @@ static const struct values_name values_names[] = {
 	{ "anchor-name", CSS_PROP_ANCHOR_NAME },
 	{ "position-anchor", CSS_PROP_POSITION_ANCHOR },
 	{ "anchor-scope", CSS_PROP_ANCHOR_SCOPE },
+	{ "position-area", CSS_PROP_POSITION_AREA },
 	{ "clear", CSS_PROP_CLEAR },
 	{ "overflow", SHORT_OVERFLOW },
 	{ "transform", SHORT_TRANSFORM },
@@ -289,6 +291,10 @@ static const struct values_name values_names[] = {
 	{ "place-items", SHORT_PLACE_ITEMS },
 	{ "place-self", SHORT_PLACE_SELF },
 	{ "place-content", SHORT_PLACE_CONTENT },
+	{ "position-try", SHORT_POSITION_TRY },
+	{ "position-try-fallbacks", CSS_PROP_POSITION_TRY_FALLBACKS },
+	{ "position-try-order", CSS_PROP_POSITION_TRY_ORDER },
+	{ "position-visibility", CSS_PROP_POSITION_VISIBILITY },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -986,6 +992,7 @@ static int values_background_size(const struct css_token *tokens, size_t count, 
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_unitless_function(const struct css_token *tokens, size_t count);
+static int values_position_try(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_place(struct css_parse *parse, const struct css_token *tokens, size_t count, int align, int justify, struct css_declaration *out, size_t *made);
 static size_t values_place_value(const struct css_token *tokens, const size_t *starts, size_t components, size_t first);
 static int values_flex_flow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
@@ -1283,6 +1290,8 @@ css_parse_property(
 		return values_place(parse, tokens, count, CSS_PROP_ALIGN_SELF, CSS_PROP_JUSTIFY_SELF, out, out_count);
 	case SHORT_PLACE_CONTENT:
 		return values_place(parse, tokens, count, CSS_PROP_ALIGN_CONTENT, CSS_PROP_JUSTIFY_CONTENT, out, out_count);
+	case SHORT_POSITION_TRY:
+		return values_position_try(parse, tokens, count, out, out_count);
 	default:
 		break;
 	}
@@ -1967,6 +1976,36 @@ values_single(
 		if (error != 0)
 			return error;
 		value->kind = CSS_VALUE_ANCHOR_NAMES;
+		return 0;
+	}
+
+	/* position-area: none or its keywords. */
+	if (property == CSS_PROP_POSITION_AREA) {
+		error = css_position_area_parse(tokens, count, &keyword);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)keyword;
+		return 0;
+	}
+
+	/* position-try-fallbacks, position-try-order and position-visibility. */
+	if (property == CSS_PROP_POSITION_TRY_FALLBACKS) {
+		error = css_try_fallbacks_parse(parse, tokens, count, &value->try_list);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_TRY;
+		return 0;
+	}
+	if (property == CSS_PROP_POSITION_TRY_ORDER || property == CSS_PROP_POSITION_VISIBILITY) {
+		if (property == CSS_PROP_POSITION_TRY_ORDER)
+			error = css_try_order_parse(tokens, count, &keyword);
+		else
+			error = css_position_visibility_parse(tokens, count, &keyword);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)keyword;
 		return 0;
 	}
 
@@ -3248,7 +3287,12 @@ values_wide_keyword(
 	case SHORT_BORDER_COLOR:
 		first = CSS_PROP_BORDER_TOP_COLOR;
 		break;
+	case SHORT_POSITION_TRY:
+		values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, value);
+		values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, value);
+		return;
 	case SHORT_TRANSFORM:
+		values_add(out, made, CSS_PROP_TRANSFORM_SET, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_X, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_Y, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_SCALE_X, value);
@@ -4867,6 +4911,45 @@ values_place_value(
 
 	/* One word. */
 	return first + 1U;
+}
+
+/* Parses position-try: an optional position-try-order, then position-try-fallbacks. */
+static int
+values_position_try(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value order;
+	struct css_value fallbacks;
+	size_t first;
+	int keyword;
+	int error;
+
+	/* The order, when the first word is one. */
+	memset(&order, 0, sizeof(order));
+	order.kind = CSS_VALUE_NUMBER;
+	first = 0;
+	while (first < count && tokens[first].type == CSS_TOKEN_WHITESPACE)
+		first++;
+	if (first < count && css_try_order_parse(tokens + first, 1, &keyword) == 0) {
+		order.number = (float)keyword;
+		first++;
+	}
+
+	/* The fallbacks. */
+	memset(&fallbacks, 0, sizeof(fallbacks));
+	error = css_try_fallbacks_parse(parse, tokens + first, count - first, &fallbacks.try_list);
+	if (error != 0)
+		return error;
+	fallbacks.kind = CSS_VALUE_TRY;
+
+	/* Succeeded: both longhands. */
+	values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, &order);
+	values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, &fallbacks);
+	return 0;
 }
 
 /* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
@@ -7307,6 +7390,8 @@ values_transform(
 	struct css_declaration *out,
 	size_t *made)
 {
+	struct css_value set;
+	int functions;
 	struct css_value axis[2];
 	struct css_value scale[2];
 	struct css_value value;
@@ -7331,6 +7416,7 @@ values_transform(
 	scale[1] = scale[0];
 	seen = 0;
 	index = 0;
+	functions = 0;
 	while (index < count) {
 		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
 			index++;
@@ -7345,6 +7431,7 @@ values_transform(
 		}
 		if (tokens[index].type != CSS_TOKEN_FUNCTION)
 			return EINVAL;
+		functions++;
 
 		/* The function's extent: up to its closing parenthesis. */
 		depth = 1;
@@ -7442,7 +7529,11 @@ values_transform(
 	if (!seen)
 		return EINVAL;
 
-	/* Succeeded: the two translations. */
+	/* Succeeded: the two translations, and whether there is a transform. */
+	memset(&set, 0, sizeof(set));
+	set.kind = CSS_VALUE_NUMBER;
+	set.number = functions > 0 ? 1.0f : 0.0f;
+	values_add(out, made, CSS_PROP_TRANSFORM_SET, &set);
 	values_add(out, made, CSS_PROP_TRANSFORM_X, &axis[0]);
 	values_add(out, made, CSS_PROP_TRANSFORM_Y, &axis[1]);
 	values_add(out, made, CSS_PROP_TRANSFORM_SCALE_X, &scale[0]);

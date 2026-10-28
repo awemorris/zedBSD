@@ -135,7 +135,15 @@ enum computed_property {
 	COMPUTED_GRID_COLUMN,
 	COMPUTED_GRID_AREA,
 	COMPUTED_FLEX,
-	COMPUTED_FLEX_FLOW
+	COMPUTED_FLEX_FLOW,
+	COMPUTED_ANCHOR_NAME,
+	COMPUTED_POSITION_ANCHOR,
+	COMPUTED_ANCHOR_SCOPE,
+	COMPUTED_POSITION_AREA,
+	COMPUTED_POSITION_TRY_FALLBACKS,
+	COMPUTED_POSITION_TRY_ORDER,
+	COMPUTED_POSITION_TRY,
+	COMPUTED_POSITION_VISIBILITY
 };
 
 /*
@@ -168,6 +176,7 @@ static int computed_write_url_quoted(const struct vm_string *text, struct wb_uni
 static int computed_write_offset(const struct css_style *style, int side, struct wb_units *out);
 static int computed_write_font_family(const struct css_style *style, struct wb_units *out);
 static int computed_write_tracks(const struct css_track *tracks, int count, const struct css_line_names *names, struct wb_units *out);
+static int computed_anchor_names(const struct css_anchor_names *names, const char *none, struct wb_units *out);
 static void computed_line_names(const struct css_line_names *names, const struct css_track_repeat *repeat, int repeats, int line, struct css_line_names *out);
 static void computed_names_add(struct css_line_names *out, const struct css_line_names *from, int first, int end);
 
@@ -287,6 +296,14 @@ static const struct computed_entry computed_entries[] = {
 	{ "grid-area", COMPUTED_GRID_AREA },
 	{ "flex", COMPUTED_FLEX },
 	{ "flex-flow", COMPUTED_FLEX_FLOW },
+	{ "anchor-name", COMPUTED_ANCHOR_NAME },
+	{ "position-anchor", COMPUTED_POSITION_ANCHOR },
+	{ "anchor-scope", COMPUTED_ANCHOR_SCOPE },
+	{ "position-area", COMPUTED_POSITION_AREA },
+	{ "position-try-fallbacks", COMPUTED_POSITION_TRY_FALLBACKS },
+	{ "position-try-order", COMPUTED_POSITION_TRY_ORDER },
+	{ "position-try", COMPUTED_POSITION_TRY },
+	{ "position-visibility", COMPUTED_POSITION_VISIBILITY },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -914,6 +931,15 @@ computed_write_used(
 		if (box->no_generated_box && style->min_height.unit == CSS_UNIT_AUTO)
 			has_used = 1;
 		break;
+	case COMPUTED_TOP:
+	case COMPUTED_RIGHT:
+	case COMPUTED_BOTTOM:
+	case COMPUTED_LEFT:
+		/* A box out of the flow's insets are its used ones. */
+		has_used = found && box->inset_known &&
+		    (style->position == CSS_POSITION_ABSOLUTE || style->position == CSS_POSITION_FIXED);
+		value = box->inset[property - COMPUTED_TOP];
+		break;
 	case COMPUTED_MARGIN_TOP:
 		has_used = found;
 		value = box->margin_top;
@@ -1208,6 +1234,43 @@ computed_write_keyword(
 		if (error == 0)
 			error = computed_length(&style->flex_basis, out);
 		break;
+	case COMPUTED_ANCHOR_NAME:
+		error = computed_anchor_names(style->anchor_names, "none", out);
+		break;
+	case COMPUTED_ANCHOR_SCOPE:
+		if (style->anchor_scope_all)
+			error = computed_ascii("all", out);
+		else
+			error = computed_anchor_names(style->anchor_scope, "none", out);
+		break;
+	case COMPUTED_POSITION_ANCHOR:
+		if (style->position_anchor == NULL)
+			error = computed_ascii("auto", out);
+		else
+			error = css_serialize_ident(style->position_anchor, out);
+		break;
+	case COMPUTED_POSITION_AREA:
+		error = css_position_area_serialize(style->position_area, out);
+		break;
+	case COMPUTED_POSITION_TRY_FALLBACKS:
+		error = css_try_fallbacks_serialize(style->position_try, out);
+		break;
+	case COMPUTED_POSITION_TRY_ORDER:
+		error = css_try_order_serialize(style->position_try_order, out);
+		break;
+	case COMPUTED_POSITION_TRY:
+		error = 0;
+		if (style->position_try_order != 0) {
+			error = css_try_order_serialize(style->position_try_order, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+		}
+		if (error == 0)
+			error = css_try_fallbacks_serialize(style->position_try, out);
+		break;
+	case COMPUTED_POSITION_VISIBILITY:
+		error = css_position_visibility_serialize(style->position_visibility, out);
+		break;
 	case COMPUTED_FLEX_FLOW:
 		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
 		if (error == 0)
@@ -1394,6 +1457,34 @@ computed_write_font_family(
 	}
 
 	/* Succeeded: the families are written. */
+	return 0;
+}
+
+/* Writes anchor names a comma apart (none when there are none). */
+static int
+computed_anchor_names(
+	const struct css_anchor_names *names,
+	const char *none,
+	struct wb_units *out)
+{
+	int index;
+	int error;
+
+	/* None. */
+	if (names == NULL || names->count == 0)
+		return computed_ascii(none, out);
+
+	/* Each name. */
+	for (index = 0; index < names->count; index++) {
+		if (index > 0) {
+			error = computed_ascii(", ", out);
+			if (error != 0)
+				return error;
+		}
+		error = css_serialize_ident(names->names[index], out);
+		if (error != 0)
+			return error;
+	}
 	return 0;
 }
 

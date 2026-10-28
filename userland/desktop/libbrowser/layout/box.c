@@ -265,6 +265,24 @@ layout_is_positioned(
 	return 0;
 }
 
+/* Tells whether a box is the containing block of the boxes out of the flow inside it: a positioned box or one with a transform. */
+int
+layout_contains_absolute(
+	const struct layout_box *box)
+{
+	/* Positioned, or transformed. */
+	return layout_is_positioned(box) || layout_contains_fixed(box);
+}
+
+/* Tells whether a box is the containing block of the fixed boxes inside it: one with a transform. */
+int
+layout_contains_fixed(
+	const struct layout_box *box)
+{
+	/* A transformed block. */
+	return box->kind == LAYOUT_BLOCK && box->style.transform_set;
+}
+
 /*
  * Tells whether a box is painted in its own turn of its stacking context:
  * a positioned box, or a flex or grid item with a z-index (which stacks as

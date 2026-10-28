@@ -115,6 +115,7 @@ static const char *const *style_shorthand_longhands(const struct vm_string *name
 static int style_flex_part(struct vm_realm *realm, const struct vm_string *shorthand, struct vm_string *value, const char *longhand, struct vm_string **part);
 static int style_canonical_flex(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_wide_keyword(const struct vm_string *value);
+static int style_canonical_anchor(struct vm_realm *realm, const struct vm_string *name, struct vm_string *value, struct vm_string **out);
 static int style_grid_get(struct vm_realm *realm, const struct style_list *list, const struct vm_string *name, vm_value *result, int *present);
 static int style_grid_expand(struct vm_realm *realm, struct style_list *list, const struct vm_string *name);
 static int style_grid_remove_covered(struct vm_realm *realm, struct style_list *list, const struct vm_string *name, int *removed);
@@ -887,6 +888,10 @@ style_set(
 		goto roots_cleanup;
 	roots[1] = &value->cell;
 	status = style_canonical_flex(realm, name, value, &value);
+	if (status != 0)
+		goto roots_cleanup;
+	roots[1] = &value->cell;
+	status = style_canonical_anchor(realm, name, value, &value);
 	if (status != 0)
 		goto roots_cleanup;
 	roots[1] = &value->cell;
@@ -1788,10 +1793,12 @@ style_shorthand_longhands(
 {
 	const char *const *longhands;
 
-	/* A grid shorthand, else a flex one. */
+	/* A grid shorthand, else a flex one, else position-try. */
 	longhands = css_grid_shorthand_longhands(name);
 	if (longhands == NULL)
 		longhands = css_flex_shorthand_longhands(name);
+	if (longhands == NULL)
+		longhands = css_anchor_shorthand_longhands(name);
 	return longhands;
 }
 
@@ -1868,6 +1875,35 @@ style_canonical_flex(
 	return status;
 }
 
+/* Puts a value of the anchor positioning properties in its canonical form (another property's as it is). */
+static int
+style_canonical_anchor(
+	struct vm_realm *realm,
+	const struct vm_string *name,
+	struct vm_string *value,
+	struct vm_string **out)
+{
+	struct wb_units canonical;
+	int handled;
+	int status;
+
+	/* Not a CSS-wide keyword. */
+	*out = value;
+	if (style_wide_keyword(value))
+		return 0;
+
+	/* The canonical text. */
+	wb_units_init(&canonical);
+	status = css_anchor_canonical(realm->heap, name, value, &canonical, &handled);
+	if (status == 0 && handled) {
+		*out = vm_string_from_units(realm->heap, canonical.data, canonical.length);
+		if (*out == NULL)
+			status = ENOMEM;
+	}
+	wb_units_release(&canonical);
+	return status;
+}
+
 /* Tells whether a value is a CSS-wide keyword, which every longhand of a shorthand takes. */
 static int
 style_wide_keyword(
@@ -1902,6 +1938,19 @@ style_grid_part(
 	/* A flex shorthand's part. */
 	if (css_flex_shorthand_longhands(shorthand) != NULL)
 		return style_flex_part(realm, shorthand, value, longhand, part);
+
+	/* position-try's part. */
+	if (css_anchor_shorthand_longhands(shorthand) != NULL) {
+		wb_units_init(&out);
+		status = css_anchor_shorthand_part(realm->heap, value, longhand, &out, &found);
+		if (status == 0 && found) {
+			*part = vm_string_from_units(realm->heap, out.data, out.length);
+			if (*part == NULL)
+				status = ENOMEM;
+		}
+		wb_units_release(&out);
+		return status;
+	}
 
 	/* Otherwise the grid shorthand's part. */
 	wb_units_init(&out);
@@ -1938,7 +1987,8 @@ style_grid_get(
 	for (index = 0; index < name->length; index++)
 		longhand[index] = (char)vm_string_at(name, index);
 	longhand[name->length] = '\0';
-	if (strncmp(longhand, "grid-", 5U) != 0 && strncmp(longhand, "flex-", 5U) != 0)
+	if (strncmp(longhand, "grid-", 5U) != 0 && strncmp(longhand, "flex-", 5U) != 0 &&
+	    strncmp(longhand, "position-try-", 13U) != 0)
 		return 0;
 	found = list->names->length;
 	for (index = 0; index < list->names->length; index++) {

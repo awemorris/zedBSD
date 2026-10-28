@@ -507,13 +507,15 @@ position_walk(
 	if (depth > LAYOUT_DEPTH_MAX)
 		return 0;
 
-	/* A positioned block is the containing block of the boxes out of the flow inside it. */
+	/* A positioned (or transformed) block is the containing block of the boxes out of the flow inside it (a transformed one of the fixed ones too). */
 	inner = containing;
-	positioned = layout_is_positioned(box);
+	positioned = layout_contains_absolute(box);
 	if (positioned) {
 		position_padding_box(box, &own);
 		inner = &own;
 	}
+	if (layout_contains_fixed(box))
+		viewport = &own;
 
 	/* Each child: one out of the flow is placed first (a fixed one against the viewport), then searched. */
 	for (child = box->first_child; child != NULL; child = child->next) {
@@ -573,6 +575,10 @@ position_place(
 	/* Insets and sizes with anchor functions are finished against the containing block. */
 	if (layout_anchor_wanted(box))
 		layout_anchor_resolve(tree, box, containing->x, containing->y, containing->width, containing->height);
+
+	/* A position-area makes an area of the grid around the anchor the containing block. */
+	if (box->style.position_area >= 0)
+		layout_anchor_area(tree, box, containing->x, containing->y, containing->width, containing->height);
 
 	/* A definite Grid area, when supplied, is the inset containing block. */
 	area_left = containing->x;
@@ -733,6 +739,13 @@ placed_x:
 	box->x = 0;
 	box->y = 0;
 	layout_absolute(box, x, y);
+
+	/* Its used insets from the area it was placed in. */
+	box->used_inset[CSS_LEFT] = x - box->margin[CSS_LEFT] - area_left;
+	box->used_inset[CSS_TOP] = y - box->margin[CSS_TOP] - area_top;
+	box->used_inset[CSS_RIGHT] = area_left + area_width - (x + box->width + frame + box->margin[CSS_RIGHT]);
+	box->used_inset[CSS_BOTTOM] = area_top + area_height - (y + position_outer_height(box) + box->margin[CSS_BOTTOM]);
+	box->used_inset_known = 1;
 
 	/* A box that scrolls with the document makes it tall enough to hold it. */
 	bottom_edge = box->y + position_outer_height(box) + box->margin[CSS_BOTTOM];

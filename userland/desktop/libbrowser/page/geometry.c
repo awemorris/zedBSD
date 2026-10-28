@@ -452,6 +452,11 @@ geometry_tree_box(
 		box->padding_right = layout_to_px(first->padding[1]);
 		box->padding_bottom = layout_to_px(first->padding[2]);
 		box->padding_left = layout_to_px(first->padding[3]);
+		box->inset_known = first->used_inset_known;
+		box->inset[0] = layout_to_px(first->used_inset[0]);
+		box->inset[1] = layout_to_px(first->used_inset[1]);
+		box->inset[2] = layout_to_px(first->used_inset[2]);
+		box->inset[3] = layout_to_px(first->used_inset[3]);
 	}
 
 	/* Succeeded: the node has a box. */

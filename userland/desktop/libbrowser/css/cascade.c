@@ -1047,6 +1047,8 @@ css_initial_style(
 	style->transform_scale[0].value = 1.0f;
 	style->transform_scale[0].offset = 0;
 	style->transform_scale[1] = style->transform_scale[0];
+	style->position_area = -1;
+	style->position_visibility = 2;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
 	style->transform_origin[0].offset = 0;
@@ -3906,6 +3908,23 @@ cascade_apply(
 
 	/* The property's value. */
 	switch (property) {
+	case CSS_PROP_TRANSFORM_SET:
+		style->transform_set = value->kind == CSS_VALUE_NUMBER && value->number != 0.0f;
+		break;
+	case CSS_PROP_POSITION_AREA:
+		style->position_area = value->kind == CSS_VALUE_NUMBER ? (int)value->number : -1;
+		break;
+	case CSS_PROP_POSITION_TRY_FALLBACKS:
+		style->position_try = NULL;
+		if (value->kind == CSS_VALUE_TRY && value->try_list != NULL)
+			style->position_try = cascade_keep(engine, value->try_list, sizeof(*value->try_list));
+		break;
+	case CSS_PROP_POSITION_TRY_ORDER:
+		style->position_try_order = (int)value->number;
+		break;
+	case CSS_PROP_POSITION_VISIBILITY:
+		style->position_visibility = (int)value->number;
+		break;
 	case CSS_PROP_ANCHOR_NAME:
 		style->anchor_names = NULL;
 		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
@@ -4537,6 +4556,21 @@ cascade_inherit(
 		break;
 	case CSS_PROP_ANCHOR_NAME:
 		style->anchor_names = parent->anchor_names;
+		break;
+	case CSS_PROP_TRANSFORM_SET:
+		style->transform_set = parent->transform_set;
+		break;
+	case CSS_PROP_POSITION_AREA:
+		style->position_area = parent->position_area;
+		break;
+	case CSS_PROP_POSITION_TRY_FALLBACKS:
+		style->position_try = parent->position_try;
+		break;
+	case CSS_PROP_POSITION_TRY_ORDER:
+		style->position_try_order = parent->position_try_order;
+		break;
+	case CSS_PROP_POSITION_VISIBILITY:
+		style->position_visibility = parent->position_visibility;
 		break;
 	case CSS_PROP_ANCHOR_SCOPE:
 		style->anchor_scope = parent->anchor_scope;

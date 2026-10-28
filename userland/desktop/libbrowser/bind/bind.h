@@ -110,6 +110,9 @@ struct bind_box {
 	double padding_left;
 	/* Successful layout proved this node generates no box; zero also covers unavailable geometry. */
 	int no_generated_box;
+	/* A box out of the flow's used insets (top, right, bottom, left) from its containing block, when inset_known. */
+	int inset_known;
+	double inset[4];
 };
 
 /*

@@ -150,6 +150,24 @@ struct css_anchor_names {
 	struct vm_string *names[CSS_ANCHOR_NAMES];
 };
 
+/* The most entries of position-try-fallbacks, and try-tactics (flip-block, flip-inline, flip-start, flip-x, flip-y) in one. */
+#define CSS_TRY_ENTRIES	8
+#define CSS_TRY_TACTICS	5
+
+/* One entry of position-try-fallbacks: a position-area (area, -2 for none), or a @position-try name (an atom) and try-tactics in order. */
+struct css_try_entry {
+	struct vm_string *name;
+	int tactics[CSS_TRY_TACTICS];
+	int tactic_count;
+	int area;
+};
+
+/* position-try-fallbacks' entries. */
+struct css_try_list {
+	int count;
+	struct css_try_entry entries[CSS_TRY_ENTRIES];
+};
+
 /* The properties that can hold anchor functions: the slots of css_style.anchor. */
 enum css_anchor_slot {
 	CSS_ANCHOR_SLOT_TOP,
@@ -679,6 +697,12 @@ struct css_style {
 	struct vm_string *position_anchor;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
+	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */
+	int position_area;
+	/* position-try-fallbacks (NULL for none), position-try-order, and position-visibility's bits (css_position_visibility_parse). */
+	const struct css_try_list *position_try;
+	int position_try_order;
+	int position_visibility;
 
 	/*
 	 * The box's decoration: each corner's radius, horizontal
@@ -745,6 +769,9 @@ struct css_style {
 	/* The scale of transform (its value, one is no scale) and transform-origin (pixels or a percentage of the border box); a box with no children and no lines is scaled about it. */
 	struct css_length transform_scale[2];
 	struct css_length transform_origin[2];
+
+	/* Whether transform is anything but none (the box then contains its descendants out of the flow). */
+	int transform_set;
 
 	/* aspect-ratio: the ratio as width over height (zero for none), and whether auto came with it (the initial value is auto alone). */
 	float aspect_ratio;
@@ -933,6 +960,14 @@ int css_grid_declaration_serialize(struct vm_heap *heap, const uint16_t *units, 
 const char *const *css_grid_shorthand_longhands(const struct vm_string *name);
 const char *const *css_flex_shorthand_longhands(const struct vm_string *name);
 int css_flex_shorthand_parts(const struct vm_string *shorthand, const struct vm_string *value, struct wb_units *canonical, struct wb_units parts[3], int *found);
+int css_position_area_serialize(int packed, struct wb_units *out);
+int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units *out);
+int css_try_order_serialize(int order, struct wb_units *out);
+const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
+int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
+int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
+int css_position_visibility_serialize(int bits, struct wb_units *out);
+int css_position_area_regions(int packed, int writing_mode, int direction, int *x0, int *x1, int *y0, int *y1);
 int css_grid_shorthand_part(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);

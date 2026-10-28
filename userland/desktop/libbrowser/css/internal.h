@@ -172,7 +172,8 @@ enum css_value_kind {
 	CSS_VALUE_GRID_LINE,
 	CSS_VALUE_AREAS,
 	CSS_VALUE_ANCHOR,
-	CSS_VALUE_ANCHOR_NAMES
+	CSS_VALUE_ANCHOR_NAMES,
+	CSS_VALUE_TRY
 };
 
 /* The units a declared length can have (converted to pixels by the cascade). */
@@ -369,6 +370,11 @@ enum css_property {
 	CSS_PROP_ANCHOR_NAME,
 	CSS_PROP_POSITION_ANCHOR,
 	CSS_PROP_ANCHOR_SCOPE,
+	CSS_PROP_TRANSFORM_SET,
+	CSS_PROP_POSITION_AREA,
+	CSS_PROP_POSITION_TRY_FALLBACKS,
+	CSS_PROP_POSITION_TRY_ORDER,
+	CSS_PROP_POSITION_VISIBILITY,
 	CSS_PROP_COUNT
 };
 
@@ -494,6 +500,8 @@ struct css_value {
 	/* A sum with anchor functions, and the names of anchor-name or anchor-scope (in the parse's arena). */
 	const struct css_anchor_expr *anchor;
 	const struct css_anchor_names *anchor_names;
+	/* position-try-fallbacks' entries (in the parse's arena). */
+	const struct css_try_list *try_list;
 };
 
 /* One declared grid track: its kind, its size (a length, or the fr share) and minmax()'s minimum. */
@@ -726,6 +734,10 @@ int css_ident_equal(const struct css_token *token, const char *ascii);
 /* Anchor positioning's values (anchor.c). */
 int css_anchor_mentioned(const struct css_token *tokens, size_t count);
 int css_anchor_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, int sizes, const struct css_anchor_expr **expr);
+int css_position_area_parse(const struct css_token *tokens, size_t count, int *packed);
+int css_try_fallbacks_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_try_list **list);
+int css_try_order_parse(const struct css_token *tokens, size_t count, int *order);
+int css_position_visibility_parse(const struct css_token *tokens, size_t count, int *bits);
 int css_anchor_names_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_anchor_names **names);
 int css_units_equal_ascii(const uint16_t *units, size_t length, const char *ascii);
 

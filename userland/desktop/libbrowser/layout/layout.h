@@ -241,6 +241,10 @@ struct layout_box {
 	int grid_used_column_count;
 	int grid_used_row_count;
 	int grid_used_valid;
+	/* A box out of the flow's insets from the area it was placed in (top, right, bottom, left), when used_inset_known. */
+	layout_unit used_inset[4];
+	int used_inset_known;
+
 	/* The implicit tracks a Grid put before its explicit ones (grid-names.c). */
 	int grid_leading_columns;
 	int grid_leading_rows;
@@ -333,9 +337,12 @@ void layout_replaced_size(struct layout_box *box, layout_unit containing_width, 
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
 int layout_is_layered(const struct layout_box *box);
+int layout_contains_absolute(const struct layout_box *box);
+int layout_contains_fixed(const struct layout_box *box);
 
 /* Anchor positioning (anchor.c). */
 int layout_anchor_wanted(const struct layout_box *box);
+void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
