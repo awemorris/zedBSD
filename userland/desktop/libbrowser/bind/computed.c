@@ -81,6 +81,7 @@ enum computed_property {
 	COMPUTED_BACKGROUND_COLOR,
 	COMPUTED_BACKGROUND_IMAGE,
 	COMPUTED_OPACITY,
+	COMPUTED_TEXT_SHADOW,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -192,6 +193,7 @@ static int computed_color(uint32_t color, struct wb_units *out);
 static int computed_ascii(const char *ascii, struct wb_units *out);
 static int computed_decoration_append(struct wb_units *out, const struct wb_units *part);
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
+static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -246,6 +248,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "background-color", COMPUTED_BACKGROUND_COLOR },
 	{ "background-image", COMPUTED_BACKGROUND_IMAGE },
 	{ "opacity", COMPUTED_OPACITY },
+	{ "text-shadow", COMPUTED_TEXT_SHADOW },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -1113,6 +1116,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_OPACITY:
 		error = computed_number(style->opacity, out);
+		break;
+	case COMPUTED_TEXT_SHADOW:
+		error = computed_text_shadow(style, out);
 		break;
 	case COMPUTED_Z_INDEX:
 		/* Auto, or the level. */
@@ -2002,6 +2008,37 @@ computed_decoration_append(struct wb_units *out, const struct wb_units *part)
 			return error;
 	}
 	return wb_units_append(out, part->data, part->length);
+}
+
+/* Serializes the text shadow as its color and its offsets and blur in pixels, or none. */
+static int
+computed_text_shadow(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	const struct css_shadow *shadow;
+	int error;
+
+	/* No shadow. */
+	if (!style->text_shadow_set)
+		return computed_ascii("none", out);
+
+	/* The color, then the three lengths. */
+	shadow = &style->text_shadow;
+	error = computed_color(shadow->color, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->x, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->y, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->blur, out);
+	return error;
 }
 
 /* Serializes the four cascaded decoration longhands as a computed shorthand. */

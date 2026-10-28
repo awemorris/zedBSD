@@ -3070,6 +3070,9 @@ cascade_pseudo_class(
 		return attribute == NULL;
 	case CSS_PSEUDO_ALWAYS:
 		return 1;
+	case CSS_PSEUDO_TARGET:
+		/* The element the document's URL fragment names. */
+		return element->node.document->target == &element->node;
 	default:
 		return 0;
 	}
@@ -5227,6 +5230,8 @@ cascade_text_shadow(
 	style->text_shadow.x = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
 	length = cascade_length(engine, &declared->lengths[1], style->font_size);
 	style->text_shadow.y = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+	length = cascade_length(engine, &declared->lengths[2], style->font_size);
+	style->text_shadow.blur = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
 	style->text_shadow.color = declared->color;
 	style->text_shadow_set = 1;
 }

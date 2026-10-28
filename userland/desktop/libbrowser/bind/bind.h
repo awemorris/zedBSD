@@ -157,6 +157,18 @@ struct bind_media {
 #define BIND_MEDIA_PAUSE	2
 #define BIND_MEDIA_SEEK		3
 
+/* An image element's state for scripts (bind_host.image): no source, loading, decoded at a natural size, or broken. */
+#define BIND_IMAGE_NONE		0
+#define BIND_IMAGE_LOADING	1
+#define BIND_IMAGE_LOADED	2
+#define BIND_IMAGE_BROKEN	3
+
+struct bind_image {
+	int state;
+	int width;
+	int height;
+};
+
 /*
  * A request a script makes (fetch and XMLHttpRequest): the
  * method, the URL (resolved by the host against the page), the header lines
@@ -239,6 +251,8 @@ struct bind_host {
 	int (*document_write)(void *context, const uint16_t *units, size_t length);
 	/* A media element's state, play, pause or seek to a time (BIND_MEDIA_*, ws121-p005); fills state. */
 	int (*media)(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
+	/* An <img>'s state (BIND_IMAGE_*); restart loads its source again, a load or error event to follow. */
+	int (*image)(void *context, struct dom_element *element, int restart, struct bind_image *state);
 };
 
 /*

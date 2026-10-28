@@ -963,6 +963,8 @@ node_trace(
 			vm_heap_mark(heap, &node->document->resource_url->cell);
 		if (node->document->resource_mime != NULL)
 			vm_heap_mark(heap, &node->document->resource_mime->cell);
+		if (node->document->target != NULL)
+			vm_heap_mark(heap, &node->document->target->cell);
 
 		/* Both fields are cells whose traces preserve prototype and implementation graphs. */
 		if (node->document->binding_prototypes != NULL)

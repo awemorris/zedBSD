@@ -651,6 +651,16 @@ bind_environment_attribute_mutation(
 	if (window == NULL || window->detached)
 		return 0;
 
+	/* An image whose source changed loads it again, its load or error event to follow. */
+	if (element->ns == DOM_NS_HTML &&
+	    element->tag == DOM_TAG_IMG &&
+	    window->host.image != NULL &&
+	    vm_string_equal_ascii(name, "src")) {
+		status = window->host.image(window->host.context, element, 1, NULL);
+		if (status != 0)
+			return status;
+	}
+
 	/* The DOM commit lent these retired strings without any intervening VM allocation. */
 	heap = window->realm->heap;
 	roots[0] = &element->node.cell;
@@ -843,10 +853,16 @@ bind_scroll_to_fragment(
 
 	*found = 0;
 
-	/* The element the fragment names. */
+	/* The element the fragment names, which becomes the document's target (none when it names nothing). */
 	error = environment_fragment_target(window, fragment, &target);
-	if (error != 0 || target == NULL)
+	if (error != 0)
 		return error;
+	if (window->document->target != target) {
+		window->document->target = target;
+		window->document->generation++;
+	}
+	if (target == NULL)
+		return 0;
 
 	/* The target stays alive while revealing runs scripts' toggle handlers. */
 	*found = 1;

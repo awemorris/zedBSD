@@ -416,6 +416,7 @@ page_start_scripts(
 	host.element_at = page_element_at;
 	host.document_write = script_document_write;
 	host.media = page_media_host;
+	host.image = page_image_host;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);
 	if (error != 0)
 		return error;
@@ -1262,6 +1263,7 @@ page_settle(
 	double next;
 	int rounds;
 	int found;
+	int images;
 	int error;
 
 	/* Only actual child work slows virtual jumps; ordinary timer-only settling stays fast. */
@@ -1271,10 +1273,18 @@ page_settle(
 		error = page_frames_checkpoint(page);
 		if (error != 0)
 			return error;
+
+		/* The images that came by now fire their elements' events. */
+		error = page_images_checkpoint(page);
+		if (error != 0)
+			return error;
 		found = page_next_timer(page, &due);
 
+		/* An image on its way is waited for within the bound, but does not keep the page unsettled past it. */
+		images = page_images_waiting(page) && page->now < budget && network_waited < 30000 && page->loader != NULL;
+
 		/* Pending real responses need descriptor progress before the virtual clock can leap ahead. */
-		if (page->frame_loads.count != 0) {
+		if (page->frame_loads.count != 0 || images) {
 			/* Unfinished real work cannot be reported as settled at an exhausted bound. */
 			if (page->now >= budget || network_waited >= 30000)
 				return ETIMEDOUT;

@@ -127,6 +127,8 @@ struct page {
 	uint32_t styled_visits;
 	uint32_t laid_out_visits;
 	struct wb_vector images;
+	/* The <img> elements (heap roots) whose load or error event is still to be fired (struct page_image_watch *). */
+	struct wb_vector image_watches;
 	struct net_loader *loader;
 	uint32_t images_generation;
 	uint32_t laid_out_images;
@@ -333,6 +335,10 @@ int page_svg_render(const struct dom_element *svg, struct img_bitmap *bitmap);
 int page_svg_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
 const struct img_bitmap *page_image_by_url(void *context, const struct vm_string *url);
 void page_images_release(struct page *page);
+int page_image_host(void *context, struct dom_element *element, int restart, struct bind_image *state);
+int page_images_checkpoint(struct page *page);
+int page_images_waiting(const struct page *page);
+int page_images_ready(const struct page *page);
 
 /* The media of <video> and <audio> (media.c, ws121-p004). */
 struct media_status;

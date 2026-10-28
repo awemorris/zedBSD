@@ -15,7 +15,9 @@
  * loader's callback decodes it and counts it in the page's
  * images_generation, which lays the page out again.  Other locations (a
  * file, a data: URL), and every location without a loader, are read at
- * once.
+ * once.  An <img> whose source a script set, or that the layout first
+ * found, is watched until its image is decoded or failed, when its load
+ * or error event is fired.
  */
 
 #include "page/page.h"
@@ -44,6 +46,12 @@ struct page_image {
 	struct net_request *request;
 };
 
+/* An <img> (a root of the page's heap while it is watched) and the location whose event it waits for. */
+struct page_image_watch {
+	struct dom_element *element;
+	char *location;
+};
+
 static int images_walk(struct page *page, const struct dom_node *node, const struct vm_string *src, const struct vm_string *data, int depth);
 static int images_source(struct page *page, const struct dom_element *element, const struct vm_string *src, struct wb_buffer *location, int *found);
 static struct page_image *images_find(const struct page *page, const char *location);
@@ -52,6 +60,8 @@ static const struct img_bitmap *images_svg(struct page *page, const struct dom_e
 static int images_fetch(struct page *page, const char *location, struct page_image **loaded);
 static void images_arrived(void *context, struct net_request *request);
 static int images_decode(struct page *page, const unsigned char *bytes, size_t length, struct img_bitmap *bitmap);
+static int images_watch(struct page *page, struct dom_element *element, const char *location);
+static void images_unwatch(struct page *page, struct page_image_watch *watch);
 
 /*
  * Starts a page's table of images empty.
@@ -60,8 +70,9 @@ void
 page_images_init(
 	struct page *page)
 {
-	/* No image yet. */
+	/* No image yet, and no element waiting for one. */
 	wb_vector_init(&page->images, sizeof(struct page_image *));
+	wb_vector_init(&page->image_watches, sizeof(struct page_image_watch *));
 }
 
 /*
@@ -199,6 +210,11 @@ page_images_release(
 	struct page_image *image;
 	size_t index;
 
+	/* The elements still waiting, given back to the heap. */
+	while (page->image_watches.count != 0)
+		images_unwatch(page, *(struct page_image_watch **)wb_vector_at(&page->image_watches, 0));
+	wb_vector_release(&page->image_watches);
+
 	/* Each image's location and pixels, then the table. */
 	for (index = 0; index < page->images.count; index++) {
 		image = *(struct page_image **)wb_vector_at(&page->images, index);
@@ -236,6 +252,13 @@ images_walk(
 			error = images_load(page, element, src);
 			if (error != 0)
 				return error;
+
+			/* An image the scripts have not seen yet gets its event. */
+			if (!element->image_watched) {
+				error = page_image_host(page, (struct dom_element *)element, 0, NULL);
+				if (error != 0)
+					return error;
+			}
 		}
 
 		/* An object tries its data as an image independently of an image before it. */
@@ -522,4 +545,229 @@ images_svg(
 	if (image->failed)
 		return NULL;
 	return &image->bitmap;
+}
+
+/*
+ * Reports an <img>'s state for the scripts (bind_host.image; its context is
+ * the page), starting the load of its source.  The first time (or with
+ * restart, after a script set its source) the element is watched until its
+ * image is decoded or failed, for its load or error event.  state may be NULL.
+ */
+int
+page_image_host(
+	void *context,
+	struct dom_element *element,
+	int restart,
+	struct bind_image *state)
+{
+	struct page *page;
+	struct page_image *image;
+	struct vm_string *src;
+	struct wb_buffer location;
+	int found;
+	int error;
+
+	/* Nothing is known of an element of another document. */
+	page = context;
+	if (state != NULL)
+		memset(state, 0, sizeof(*state));
+	if (element->node.document != page->document)
+		return 0;
+
+	/* The source's location; an image without one has nothing to load. */
+	src = vm_atom_from_ascii(page->heap, "src");
+	if (src == NULL)
+		return ENOMEM;
+	wb_buffer_init(&location);
+	error = images_source(page, element, src, &location, &found);
+	if (error != 0 || !found) {
+		wb_buffer_release(&location);
+		return error;
+	}
+
+	/* Its image, fetched when it is new. */
+	error = images_fetch(page, wb_buffer_string(&location), &image);
+	if (error == 0 && (restart || !element->image_watched))
+		error = images_watch(page, element, wb_buffer_string(&location));
+	wb_buffer_release(&location);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the state of the image. */
+	if (state != NULL) {
+		if (image->request != NULL) {
+			state->state = BIND_IMAGE_LOADING;
+		} else if (image->failed) {
+			state->state = BIND_IMAGE_BROKEN;
+		} else {
+			state->state = BIND_IMAGE_LOADED;
+			state->width = image->bitmap.width;
+			state->height = image->bitmap.height;
+		}
+	}
+	return 0;
+}
+
+/*
+ * Fires the load or error event of each watched <img> whose image is
+ * decoded or failed by now, in the order they were watched.
+ */
+int
+page_images_checkpoint(
+	struct page *page)
+{
+	struct page_image_watch *watch;
+	struct page_image *image;
+	struct dom_element *element;
+	struct vm_cell *root;
+	const char *type;
+	size_t index;
+	int canceled;
+	int error;
+
+	/* Each watched element whose image is done, taken off the list before its listeners run. */
+	index = 0;
+	while (index < page->image_watches.count) {
+		watch = *(struct page_image_watch **)wb_vector_at(&page->image_watches, index);
+		image = images_find(page, watch->location);
+		if (image != NULL && image->request != NULL) {
+			index++;
+			continue;
+		}
+		type = "load";
+		if (image == NULL || image->failed)
+			type = "error";
+
+		/* The element stays alive while its listeners run. */
+		element = watch->element;
+		root = &element->node.cell;
+		error = vm_heap_add_root(page->heap, &root);
+		if (error != 0)
+			return error;
+		images_unwatch(page, watch);
+		error = 0;
+		if (page->window != NULL)
+			error = bind_fire_event(page->window, &element->node, type, 0U, &canceled);
+		vm_heap_remove_root(page->heap, &root);
+		if (error == ENOMEM)
+			return error;
+	}
+
+	/* Succeeded: only images still on their way are watched. */
+	return 0;
+}
+
+/* Tells whether a watched <img> waits for an image still on its way. */
+int
+page_images_waiting(
+	const struct page *page)
+{
+	struct page_image_watch *watch;
+	struct page_image *image;
+	size_t index;
+
+	/* Any watched element whose image is fetched. */
+	for (index = 0; index < page->image_watches.count; index++) {
+		watch = *(struct page_image_watch **)wb_vector_at(&page->image_watches, index);
+		image = images_find(page, watch->location);
+		if (image != NULL && image->request != NULL)
+			return 1;
+	}
+	return 0;
+}
+
+/* Tells whether a watched <img> has its event to fire now. */
+int
+page_images_ready(
+	const struct page *page)
+{
+	struct page_image_watch *watch;
+	struct page_image *image;
+	size_t index;
+
+	/* Any watched element whose image is decoded or failed. */
+	for (index = 0; index < page->image_watches.count; index++) {
+		watch = *(struct page_image_watch **)wb_vector_at(&page->image_watches, index);
+		image = images_find(page, watch->location);
+		if (image == NULL || image->request == NULL)
+			return 1;
+	}
+	return 0;
+}
+
+/* Watches an <img> for the image of a location, in place of what it waited for before. */
+static int
+images_watch(
+	struct page *page,
+	struct dom_element *element,
+	const char *location)
+{
+	struct page_image_watch *watch;
+	char *copy;
+	size_t index;
+	int error;
+
+	/* The location the event is for. */
+	copy = strdup(location);
+	if (copy == NULL)
+		return ENOMEM;
+	element->image_watched = 1;
+
+	/* An element watched already waits for the new location instead. */
+	for (index = 0; index < page->image_watches.count; index++) {
+		watch = *(struct page_image_watch **)wb_vector_at(&page->image_watches, index);
+		if (watch->element == element) {
+			free(watch->location);
+			watch->location = copy;
+			return 0;
+		}
+	}
+
+	/* A new watch, which keeps the element alive. */
+	watch = calloc(1, sizeof(*watch));
+	if (watch == NULL) {
+		free(copy);
+		return ENOMEM;
+	}
+	watch->element = element;
+	watch->location = copy;
+	error = vm_heap_add_root(page->heap, (struct vm_cell **)&watch->element);
+	if (error == 0) {
+		error = wb_vector_push(&page->image_watches, &watch);
+		if (error != 0)
+			vm_heap_remove_root(page->heap, (struct vm_cell **)&watch->element);
+	}
+	if (error != 0) {
+		free(watch->location);
+		free(watch);
+		return error;
+	}
+
+	/* Succeeded: the element waits for its event. */
+	return 0;
+}
+
+/* Ends a watch: off the list, its element given back to the heap. */
+static void
+images_unwatch(
+	struct page *page,
+	struct page_image_watch *watch)
+{
+	size_t index;
+
+	/* Found by pointer, the later ones moved down in order. */
+	for (index = 0; index < page->image_watches.count; index++) {
+		if (*(struct page_image_watch **)wb_vector_at(&page->image_watches, index) == watch)
+			break;
+	}
+	for (; index + 1 < page->image_watches.count; index++)
+		*(struct page_image_watch **)wb_vector_at(&page->image_watches, index) =
+			*(struct page_image_watch **)wb_vector_at(&page->image_watches, index + 1);
+	if (index < page->image_watches.count)
+		page->image_watches.count--;
+
+	/* The element's root, the location and the watch. */
+	vm_heap_remove_root(page->heap, (struct vm_cell **)&watch->element);
+	free(watch->location);
+	free(watch);
 }

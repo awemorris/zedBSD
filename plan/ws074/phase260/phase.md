@@ -72,6 +72,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev3（Navigation API の merge の後） | 680 | 881 | 104 | 39 | 1,704（49.08%） |
   | ours-dev6（69502eb73） | 725 | 894 | 104 | 39 | 1,762（50.75%） |
   | ours-dev11（276c2ff10） | 767 | 1,021 | 107 | 39 | 1,934（55.70%） |
+  | ours-dev15（5bb9f3310、2026-10-28） | 812 | 1,035 | 113 | 39 | 1,999（57.57%） |
+  | ours-dev16（2026-10-28） | 841 | 1,035 | 113 | 39 | 2,028（58.41%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -80,3 +82,6 @@ Origin: 2026-10-27 ユーザーの指示。
   dev6 → dev11: HTMLCollection などの反復、grid の auto の最小の track、grid・flex の shorthand の longhand の読み書き、
   place-items・place-self・place-content、grid の order と z-index の描画順、auto-fit で畳まれた track と content の分配、
   置換要素の min/max と比、column の flex の自動の最小、縦書きの行の中の置換要素。
+  dev11 → dev15: anchor positioning（anchor()・anchor-size()・position-area・position-try・anchor-center・anchor-scope）。
+  dev15 → dev16: script から見える画像の読み込み（img の load・error、complete、naturalWidth/Height）、LargestContentfulPaint、
+  Node.baseURI。後退 0。

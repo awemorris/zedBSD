@@ -80,6 +80,7 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "optional", CSS_PSEUDO_OPTIONAL },
 	{ "defined", CSS_PSEUDO_ALWAYS },
 	{ "scope", CSS_PSEUDO_SCOPE },
+	{ "target", CSS_PSEUDO_TARGET },
 	{ NULL, 0 }
 };
 

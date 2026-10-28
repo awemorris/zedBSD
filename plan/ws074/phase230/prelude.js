@@ -1,6 +1,6 @@
 // The web platform pieces that are written in the page's own language (ws074-p230).
 // bind/prelude.c holds this text as a C string; this file is the readable source it is made from.
-// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower) and the global object.
+// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect) and the global object.
 (function (native, g) {
   'use strict';
   var parseURL = native.parseURL;
@@ -1112,6 +1112,17 @@
   if (!g.open) def(g, 'open', function open() { return null; });
   if (!g.close) def(g, 'close', function close() {});
   if (!g.focus) { def(g, 'focus', function focus() {}); def(g, 'blur', function blur() {}); }
+  // Node.baseURI: the document's first <base href> resolved against its URL, or the URL.
+  if (g.Node && !('baseURI' in g.Node.prototype)) {
+    Object.defineProperty(g.Node.prototype, 'baseURI', {
+      get: function () {
+        var d = this.ownerDocument || this, url = d.URL || location.href;
+        var base = d.querySelector ? d.querySelector('base[href]') : null;
+        try { return base ? new URL(base.getAttribute('href'), url).href : url; } catch (e) { return url; }
+      },
+      configurable: true, enumerable: true
+    });
+  }
   if (!g.getSelection) {
     def(g, 'getSelection', function getSelection() {
       return { rangeCount: 0, isCollapsed: true, type: 'None', anchorNode: null, focusNode: null,
@@ -1128,6 +1139,234 @@
     PerformanceObserver.supportedEntryTypes = [];
     def(g, 'PerformanceObserver', PerformanceObserver);
   }
+  // ---- Largest Contentful Paint: after each frame that follows a change, the largest text or image painted so far
+  // (its visible area, an image's scaled down to its natural one) becomes an entry for the observers of the type.
+  (function () {
+    var Native = g.PerformanceObserver, Entry = g.PerformanceEntry;
+    if (typeof Native !== 'function' || g.LargestContentfulPaint) return;
+    var TYPE = 'largest-contentful-paint';
+    var buffer = [], observers = new Set(), largest = 0, active = false, scheduled = false;
+    var reported = new WeakMap(), loads = new WeakMap(), pictures = new Map();
+    class LargestContentfulPaint {
+      constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
+      get name() { return ''; }
+      get entryType() { return TYPE; }
+      get startTime() { return this._t; }
+      get duration() { return 0; }
+      get renderTime() { return this._t; }
+      get paintTime() { return this._t; }
+      get loadTime() { return this._l; }
+      get size() { return this._s; }
+      get id() { return this._i; }
+      get url() { return this._u; }
+      get element() { var e = this._e; return e && e.isConnected && e.ownerDocument === document ? e : null; }
+      toJSON() {
+        return { name: this.name, entryType: this.entryType, startTime: this.startTime, duration: this.duration,
+          renderTime: this.renderTime, loadTime: this.loadTime, size: this.size, id: this.id, url: this.url };
+      }
+    }
+    if (Entry) Object.setPrototypeOf(LargestContentfulPaint.prototype, Entry.prototype);
+    tag(LargestContentfulPaint, 'LargestContentfulPaint');
+    function list(entries) {
+      var l = Object.create(g.PerformanceObserverEntryList ? g.PerformanceObserverEntryList.prototype : Object.prototype);
+      hidden(l, 'getEntries', function getEntries() { return entries.slice(); });
+      hidden(l, 'getEntriesByType', function getEntriesByType(t) { return entries.filter(function (e) { return e.entryType === String(t); }); });
+      hidden(l, 'getEntriesByName', function getEntriesByName(n, t) {
+        return entries.filter(function (e) { return e.name === String(n) && (t === undefined || e.entryType === String(t)); });
+      });
+      return l;
+    }
+    function deliver(o) {
+      if (o._lcpQueued) return;
+      o._lcpQueued = true;
+      setTimeout(function () {
+        o._lcpQueued = false;
+        var entries = o._lcpPending;
+        o._lcpPending = [];
+        if (!entries.length || !observers.has(o)) return;
+        o._lcpCallback.call(o, list(entries), o);
+      }, 0);
+    }
+    // The rectangle a node paints in the viewport, clipped to it, or null.
+    function visible(node) { return clip(native.nodeRect(node)); }
+    function shown(element) {
+      for (var e = element; e && e.nodeType === 1; e = e.parentElement) {
+        var s = getComputedStyle(e);
+        if (s.display === 'none' || Number(s.opacity) === 0) return false;
+        if (e === element && s.visibility !== 'visible') return false;
+      }
+      return true;
+    }
+    function transparent(s) {
+      var c = s.color.replace(/\s/g, '');
+      if (c !== 'transparent' && !/^rgba\(\d+,\d+,\d+,0\)$/.test(c)) return false;
+      if (s.textShadow && s.textShadow !== 'none') return false;
+      if (s.webkitTextStrokeWidth && parseFloat(s.webkitTextStrokeWidth) > 0) return false;
+      return true;
+    }
+    // The element a text node's paint counts for: its nearest ancestor that is not inline (a MathML element is its own).
+    function holder(element) {
+      if (element.namespaceURI === 'http://www.w3.org/1998/Math/MathML') return element;
+      for (var e = element; e; e = e.parentElement) {
+        var d = getComputedStyle(e).display;
+        if (d !== 'inline' && d !== 'contents') return e;
+      }
+      return element;
+    }
+    function picture(url) {
+      var p = pictures.get(url);
+      if (!p) {
+        p = new Image();
+        p.onload = p.onerror = schedule;
+        p.src = url;
+        pictures.set(url, p);
+      }
+      return p.complete && p.naturalWidth > 0 ? p : null;
+    }
+    function consider(candidates, element, url, area) {
+      if (area <= 0) return;
+      var key = url || '#text', done = reported.get(element);
+      if (done && done.indexOf(key) >= 0) return;
+      candidates.push({ element: element, url: url, size: Math.floor(area), key: key });
+    }
+    function area(rect) { return rect ? (rect[2] - rect[0]) * (rect[3] - rect[1]) : 0; }
+    function scan() {
+      scheduled = false;
+      if (!document.body) return schedule();
+      var candidates = [], texts = new Map(), walker = document.createTreeWalker(document.body, 5), node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 3) {
+          if (!/\S/.test(node.data) || !node.parentElement) continue;
+          var parent = node.parentElement, h = holder(parent);
+          if (!shown(parent) || transparent(getComputedStyle(parent))) continue;
+          var r = visible(node);
+          if (!r) continue;
+          var u = texts.get(h);
+          texts.set(h, u ? [Math.min(u[0], r[0]), Math.min(u[1], r[1]), Math.max(u[2], r[2]), Math.max(u[3], r[3])] : r);
+          continue;
+        }
+        var name = node.localName, element = node;
+        if (name === 'script' || name === 'style' || name === 'iframe') continue;
+        var s = getComputedStyle(element);
+        if (s.display === 'none') continue;
+        if (name === 'img' && element.complete && element.naturalWidth > 0 && element.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+          if (shown(element)) image(candidates, element, element.currentSrc || element.src, element);
+        } else if (name === 'video' && element.getAttribute('poster')) {
+          var poster = picture(new URL(element.getAttribute('poster'), (document.baseURI || location.href)).href);
+          if (poster && shown(element)) image(candidates, element, poster.src, poster);
+        } else if (name === 'image' && element.namespaceURI === 'http://www.w3.org/2000/svg') {
+          var href = element.getAttribute('href') || element.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+          var p = href && picture(new URL(href, (document.baseURI || location.href)).href);
+          if (p && shown(element)) image(candidates, element, p.src, p);
+        }
+        var bg = /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(s.backgroundImage || '');
+        if (bg && element !== document.body && element !== document.documentElement) {
+          var b = picture(new URL(bg[1], (document.baseURI || location.href)).href);
+          if (b && shown(element)) image(candidates, element, b.src, b);
+        }
+        var before = getComputedStyle(element, '::before').content;
+        if (before && before !== 'none' && before !== 'normal' && /^["']|attr\(/.test(before) && shown(element)) {
+          var rb = visible(element);
+          if (rb && !texts.has(holder(element))) texts.set(holder(element), rb);
+        }
+      }
+      texts.forEach(function (rect, element) { consider(candidates, element, '', area(rect)); });
+      var now = performance.now(), best = null;
+      candidates.forEach(function (c) {
+        var done = reported.get(c.element) || [];
+        done.push(c.key);
+        reported.set(c.element, done);
+        if (c.size > largest && (!best || c.size > best.size)) best = c;
+      });
+      if (best) {
+        largest = best.size;
+        var e = new LargestContentfulPaint(KEY);
+        hidden(e, '_t', now); hidden(e, '_s', best.size); hidden(e, '_i', best.element.id || '');
+        hidden(e, '_u', best.url); hidden(e, '_e', best.element);
+        hidden(e, '_l', best.url ? Math.min(loads.get(best.element) || now, now) : 0);
+        if (buffer.length < 150) buffer.push(e);
+        observers.forEach(function (o) { o._lcpPending.push(e); deliver(o); });
+      }
+    }
+    // An SVG <image> has no box of its own: its place is its x, y, width and height (its natural size by default)
+    // from the top left of its <svg>, clipped to the <svg>.
+    function svgRect(element, source) {
+      var svg = element.ownerSVGElement || element.closest('svg'), box = svg && native.nodeRect(svg);
+      if (!box) return null;
+      function length(name, fallback) { var v = parseFloat(element.getAttribute(name)); return isFinite(v) ? v : fallback; }
+      var x = box[0] + length('x', 0), y = box[1] + length('y', 0);
+      var w = length('width', source.naturalWidth), h = length('height', source.naturalHeight);
+      var x1 = Math.min(x + w, box[0] + box[2]), y1 = Math.min(y + h, box[1] + box[3]);
+      x = Math.max(x, box[0]); y = Math.max(y, box[1]);
+      return x1 > x && y1 > y ? [x, y, x1 - x, y1 - y] : null;
+    }
+    function clip(r) {
+      if (!r) return null;
+      var x0 = Math.max(r[0], 0), y0 = Math.max(r[1], 0);
+      var x1 = Math.min(r[0] + r[2], innerWidth), y1 = Math.min(r[1] + r[3], innerHeight);
+      return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+    }
+    function image(candidates, element, url, source) {
+      var r = element.namespaceURI === 'http://www.w3.org/2000/svg' ? svgRect(element, source) : native.nodeRect(element);
+      var v = clip(r);
+      if (!r || !v) return;
+      // An image that covers the whole viewport is a background, not content.
+      if (r[0] <= 0 && r[1] <= 0 && r[0] + r[2] >= innerWidth && r[1] + r[3] >= innerHeight) return;
+      var shownArea = r[2] * r[3], natural = source.naturalWidth * source.naturalHeight, a = area(v);
+      if (shownArea > natural && shownArea > 0) a = a * natural / shownArea;
+      if (!loads.has(element)) loads.set(element, performance.now());
+      var key = url, done = reported.get(element);
+      if (done && done.indexOf(key) >= 0) return;
+      candidates.push({ element: element, url: url, size: Math.floor(a + 1e-6), key: key });
+    }
+    function schedule() {
+      if (scheduled || !active) return;
+      scheduled = true;
+      requestAnimationFrame(function () { setTimeout(scan, 0); });
+    }
+    function start() {
+      if (active) return;
+      active = true;
+      new MutationObserver(schedule).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
+      document.addEventListener('load', function (event) {
+        if (event.target && event.target.nodeType === 1) loads.set(event.target, performance.now());
+        schedule();
+      }, true);
+      schedule();
+    }
+    function wanted(options) {
+      if (!options) return false;
+      if (options.type !== undefined) return String(options.type) === TYPE;
+      return Array.isArray(options.entryTypes) && options.entryTypes.indexOf(TYPE) >= 0;
+    }
+    class PerformanceObserver extends Native {
+      constructor(callback) {
+        super(callback);
+        hidden(this, '_lcpCallback', callback);
+        hidden(this, '_lcpPending', []);
+        hidden(this, '_lcpQueued', false);
+      }
+      observe(options) {
+        if (!wanted(options)) return super.observe(options);
+        if (options.type === undefined) {
+          var rest = options.entryTypes.filter(function (t) { return t !== TYPE; });
+          if (rest.length) super.observe(Object.assign({}, options, { entryTypes: rest }));
+        }
+        var fresh = !observers.has(this);
+        observers.add(this);
+        if (fresh && options.buffered && buffer.length) {
+          this._lcpPending.push.apply(this._lcpPending, buffer);
+          deliver(this);
+        }
+        start();
+      }
+      disconnect() { observers.delete(this); this._lcpPending = []; return super.disconnect(); }
+      takeRecords() { var mine = this._lcpPending; this._lcpPending = []; return super.takeRecords().concat(mine); }
+      static get supportedEntryTypes() { return Object.freeze(Native.supportedEntryTypes.concat([TYPE]).sort()); }
+    }
+    def(g, 'PerformanceObserver', PerformanceObserver);
+    def(g, 'LargestContentfulPaint', LargestContentfulPaint);
+  })();
   if (!g.customElements) {
     var registry = new Map();
     def(g, 'customElements', {

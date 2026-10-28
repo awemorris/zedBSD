@@ -34,6 +34,7 @@ static int prelude_set_url(struct vm_realm *realm, vm_value this_value, const vm
 static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_utf8_argument(const vm_value *args, unsigned count, unsigned index, struct wb_buffer *out, int *present);
 
 /* parseURL(input, base): the parts of the URL as an array of strings, or null when it does not parse. */
@@ -258,6 +259,60 @@ prelude_set_follower(
 	/* Succeeded: the window keeps it (its trace marks it). */
 	window = bind_window_of(realm);
 	window->follow_hyperlink = vm_value_as_cell(follower);
+	return 0;
+}
+
+/* nodeRect(node): where a node's boxes are in the viewport as [x, y, width, height], or null without a box. */
+static int
+prelude_node_rect(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct bind_window *window;
+	struct dom_node *node;
+	struct vm_object *array;
+	struct bind_box box;
+	double scroll_x;
+	double scroll_y;
+	double part[4];
+	int index;
+	int status;
+
+	UNUSED_PARAMETER(this_value);
+
+	/* Only a node of this window's document laid out by the host has a place. */
+	window = bind_window_of(realm);
+	*result = VM_VALUE_NULL;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node == NULL || window->host.node_box == NULL)
+		return 0;
+	memset(&box, 0, sizeof(box));
+	if (!window->host.node_box(window->host.context, node, &box))
+		return 0;
+
+	/* The page's place less the scroll. */
+	scroll_x = 0.0;
+	scroll_y = 0.0;
+	if (window->host.scroll != NULL)
+		window->host.scroll(window->host.context, &scroll_x, &scroll_y);
+	part[0] = box.x - scroll_x;
+	part[1] = box.y - scroll_y;
+	part[2] = box.width;
+	part[3] = box.height;
+
+	/* Succeeded: the four numbers. */
+	status = bind_array_create(realm, &array);
+	if (status != 0)
+		return status;
+	for (index = 0; index < 4; index++) {
+		status = vm_object_define(realm->heap, array, vm_value_int32(index), vm_value_number(part[index]), VM_PROPERTY_DEFAULT);
+		if (status != 0)
+			return status;
+	}
+	*result = vm_value_cell(array);
 	return 0;
 }
 
@@ -623,7 +678,7 @@ bind_install_prelude(
 	struct vm_object *natives;
 	int status;
 
-	/* The page's own objects over the URL parser, the document's URL and scrolling, trusted dispatch and links. */
+	/* The page's own objects over the URL parser, the document's URL and scrolling, trusted dispatch, links and node places. */
 	realm = window->realm;
 	natives = vm_object_create(realm->heap, realm->object_prototype);
 	if (natives == NULL)
@@ -647,6 +702,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "setHyperlinkFollower", 1, prelude_set_follower, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "setHyperlinkFollower", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "nodeRect", 1, prelude_node_rect, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "nodeRect", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status != 0)
 		return status;
 	status = prelude_run(window, prelude_source, sizeof(prelude_source) - 1U, vm_value_cell(natives));
