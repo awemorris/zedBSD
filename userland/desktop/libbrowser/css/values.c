@@ -2500,7 +2500,8 @@ values_single(
 		    keyword == CSS_ALIGN_AUTO)
 			return EINVAL;
 		/* anchor-center is a self-alignment. */
-		if (keyword == CSS_ALIGN_ANCHOR_CENTER && property != CSS_PROP_ALIGN_SELF && property != CSS_PROP_JUSTIFY_SELF)
+		if (table == values_align && keyword == CSS_ALIGN_ANCHOR_CENTER &&
+		    property != CSS_PROP_ALIGN_SELF && property != CSS_PROP_JUSTIFY_SELF)
 			return EINVAL;
 		if (property == CSS_PROP_JUSTIFY_CONTENT ||
 		    property == CSS_PROP_ALIGN_ITEMS ||

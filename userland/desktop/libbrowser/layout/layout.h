@@ -325,9 +325,9 @@ struct layout_tree {
 	struct layout_box **sticky;
 	size_t sticky_count;
 	layout_unit sticky_scroll;
-	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
 	/* The placing of the boxes out of the flow: which pass it is (layout_box.placed_pass names the pass that placed a box). */
 	int position_pass;
+	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
 	int logical_mode;
 };
 
