@@ -531,6 +531,8 @@ struct css_track_list {
 	/* The names of the count + 1 lines around the tracks, and whether any line has one. */
 	struct css_line_names names[CSS_TRACKS + 1];
 	int named;
+	/* A subgrid's value as it serializes ("subgrid" and its line-name lists), NUL-terminated in the arena; NULL otherwise. */
+	const char *subgrid;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */

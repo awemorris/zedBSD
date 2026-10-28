@@ -1448,6 +1448,13 @@ style_canonical_grid_empty_lines(
 		wb_units_release(&source);
 		return status;
 	}
+
+	/* A subgrid's empty groups are lines of their own. */
+	if (source.length >= 7U && source.data[0] == 's' && source.data[1] == 'u' && source.data[2] == 'b' &&
+	    source.data[3] == 'g' && source.data[4] == 'r' && source.data[5] == 'i' && source.data[6] == 'd') {
+		wb_units_release(&source);
+		return 0;
+	}
 	wb_units_init(&canonical);
 	space = ' ';
 	changed = 0;

@@ -883,6 +883,9 @@ struct css_style {
 	 */
 	const struct css_line_names *column_names;
 	const struct css_line_names *row_names;
+	/* A subgrid axis's value as it serializes (in the engine's arena), or NULL. */
+	const char *column_subgrid;
+	const char *row_subgrid;
 	const struct css_grid_areas *areas;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;

@@ -294,6 +294,7 @@ static void cascade_inherit(struct css_style *style, const struct css_style *par
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
+static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
@@ -4174,10 +4175,12 @@ cascade_apply(
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
 		style->column_names = cascade_line_names(engine, value);
+		style->column_subgrid = cascade_subgrid(engine, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
 		style->row_names = cascade_line_names(engine, value);
+		style->row_subgrid = cascade_subgrid(engine, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		/* The areas, in the engine's arena. */
@@ -4709,12 +4712,14 @@ cascade_inherit(
 		style->column_count = parent->column_count;
 		style->column_repeat = parent->column_repeat;
 		style->column_names = parent->column_names;
+		style->column_subgrid = parent->column_subgrid;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
 		style->row_count = parent->row_count;
 		style->row_repeat = parent->row_repeat;
 		style->row_names = parent->row_names;
+		style->row_subgrid = parent->row_subgrid;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_AREAS:
 		style->areas = parent->areas;
@@ -5023,6 +5028,18 @@ cascade_try_rule(
 		}
 	}
 	return found;
+}
+
+/* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */
+static const char *
+cascade_subgrid(
+	struct css_engine *engine,
+	const struct css_value *value)
+{
+	/* Only a parsed subgrid list has one. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid == NULL)
+		return NULL;
+	return cascade_keep(engine, value->tracks->subgrid, strlen(value->tracks->subgrid) + 1U);
 }
 
 /* Copies a value into the engine's arena, once for each different value. */

@@ -791,6 +791,12 @@ computed_write_grid(
 	if (property != COMPUTED_GRID_TEMPLATE_COLUMNS && property != COMPUTED_GRID_TEMPLATE_ROWS)
 		return 0;
 
+	/* A subgrid axis is its line-name lists. */
+	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
+		*handled = 1;
+		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid : style->row_subgrid, out);
+	}
+
 	/* Hosts without this private query retain the established computed-value behavior. */
 	if (window->host.grid_tracks == NULL)
 		return 0;

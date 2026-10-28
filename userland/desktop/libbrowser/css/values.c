@@ -984,6 +984,7 @@ static int values_background(struct css_parse *parse, const struct css_token *to
 static size_t values_function_length(const struct css_token *tokens, size_t count);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
+static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
 static int values_position_part(const struct css_token *token, struct css_value *value);
 static int values_position_axis(const struct css_token *token);
@@ -5543,6 +5544,7 @@ values_tracks(
 	struct css_value *value)
 {
 	struct css_track_list *list;
+	size_t index;
 	int is_none;
 	int error;
 
@@ -5560,6 +5562,11 @@ values_tracks(
 			return 0;
 	}
 
+	/* subgrid and its line names. */
+	index = values_skip_space(tokens, count, 0);
+	if (index < count && tokens[index].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[index], "subgrid"))
+		return values_subgrid(parse, tokens + index + 1U, count - index - 1U, list);
+
 	/* The tracks. */
 	error = values_track_list(parse, tokens, count, list, 0);
 	if (error != 0)
@@ -5571,6 +5578,166 @@ values_tracks(
 
 	/* Succeeded: the template is parsed. */
 	return 0;
+}
+
+/* Appends a token's text to a buffer as UTF-8. */
+static int
+values_token_utf8(
+	const struct css_token *token,
+	struct wb_buffer *out)
+{
+	size_t index;
+	int error;
+
+	/* Each unit (the identifiers of line names are not split across surrogates here). */
+	for (index = 0; index < token->length; index++) {
+		error = wb_buffer_append_utf8(out, token->text[index]);
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/* Parses one bracketed group of line names into its serialization ("[a b]"); *end is past it. */
+static int
+values_subgrid_names(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	size_t index,
+	struct wb_buffer *out,
+	size_t *end)
+{
+	struct vm_string *name;
+	int first;
+	int error;
+
+	/* The group's names, each a custom identifier. */
+	error = wb_buffer_append_byte(out, '[');
+	first = 1;
+	for (index++; error == 0 && index < count && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		error = values_custom_ident(parse, &tokens[index], &name);
+		if (error == 0 && !first)
+			error = wb_buffer_append_byte(out, ' ');
+		if (error == 0)
+			error = values_token_utf8(&tokens[index], out);
+		first = 0;
+	}
+	if (error != 0)
+		return error;
+	if (index == count)
+		return EINVAL;
+
+	/* Succeeded: the group is closed. */
+	*end = index + 1U;
+	return wb_buffer_append_byte(out, ']');
+}
+
+/*
+ * Parses what follows subgrid in a grid template: line-name groups, and
+ * repeat() of groups with a count or auto-fill (one at most), into the
+ * value's serialization kept in the arena.  The subgrid has no tracks of
+ * its own here.
+ */
+static int
+values_subgrid(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_track_list *list)
+{
+	struct wb_buffer text;
+	char *kept;
+	size_t index;
+	size_t end;
+	size_t inner;
+	size_t comma;
+	int automatic;
+	int groups;
+	int error;
+
+	/* subgrid, then each component after a space. */
+	wb_buffer_init(&text);
+	error = wb_buffer_append_string(&text, "subgrid");
+	automatic = 0;
+	index = 0;
+	while (error == 0 && index < count) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
+			index++;
+			continue;
+		}
+		error = wb_buffer_append_byte(&text, ' ');
+		if (error != 0)
+			break;
+
+		/* A group of names. */
+		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			error = values_subgrid_names(parse, tokens, count, index, &text, &index);
+			continue;
+		}
+
+		/* repeat() of groups: a positive count or auto-fill, a comma, then groups only. */
+		if (tokens[index].type != CSS_TOKEN_FUNCTION || !css_ident_equal(&tokens[index], "repeat")) {
+			error = EINVAL;
+			break;
+		}
+		end = index + values_function_length(tokens + index, count - index);
+		inner = values_skip_space(tokens, end, index + 1U);
+		error = wb_buffer_append_string(&text, "repeat(");
+		if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[inner], "auto-fill")) {
+			if (automatic)
+				error = EINVAL;
+			automatic = 1;
+			if (error == 0)
+				error = wb_buffer_append_string(&text, "auto-fill");
+		} else if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_NUMBER && tokens[inner].integer &&
+		    tokens[inner].number >= 1 && tokens[inner].number <= 10000) {
+			error = wb_buffer_printf(&text, "%d", (int)tokens[inner].number);
+		} else if (error == 0) {
+			error = EINVAL;
+		}
+		comma = values_skip_space(tokens, end, inner + 1U);
+		if (error == 0 && (comma >= end || tokens[comma].type != CSS_TOKEN_COMMA))
+			error = EINVAL;
+		if (error == 0)
+			error = wb_buffer_append_byte(&text, ',');
+		groups = 0;
+		for (inner = comma + 1U; error == 0 && inner + 1U < end;) {
+			if (tokens[inner].type == CSS_TOKEN_WHITESPACE) {
+				inner++;
+				continue;
+			}
+			if (tokens[inner].type != CSS_TOKEN_OPEN_SQUARE) {
+				error = EINVAL;
+				break;
+			}
+			error = wb_buffer_append_byte(&text, ' ');
+			if (error == 0)
+				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, &inner);
+			groups++;
+		}
+		if (error == 0 && groups == 0)
+			error = EINVAL;
+		if (error == 0)
+			error = wb_buffer_append_byte(&text, ')');
+		index = end;
+	}
+
+	/* The serialization, kept in the arena. */
+	if (error == 0) {
+		kept = wb_arena_alloc(parse->arena, text.length + 1U);
+		if (kept == NULL) {
+			error = ENOMEM;
+		} else {
+			memcpy(kept, text.data, text.length);
+			kept[text.length] = '\0';
+			list->subgrid = kept;
+		}
+	}
+	wb_buffer_release(&text);
+	return error;
 }
 
 /* Parses an implicit track cycle through the same single-breadth grammar as explicit tracks. */
