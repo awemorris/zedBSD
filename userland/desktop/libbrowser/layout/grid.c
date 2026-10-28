@@ -83,6 +83,7 @@ static int grid_span_has_fixed_rows(const struct css_style *style, const struct 
 static int grid_fixed_span_minimum(const struct layout_box *box, int64_t *minimum);
 static int grid_column_auto_minimum(struct layout_box *box, layout_unit containing_width, layout_unit *minimum);
 static int grid_track_floor(const struct css_track *track, layout_unit whole, layout_unit *floor);
+static int grid_fixed_area_height(const struct layout_box *box, const struct grid_item *item, layout_unit gap, layout_unit *height);
 static void grid_maximize(const struct css_style *style, int columns, layout_unit *sizes, int count, const unsigned char *collapsed, layout_unit whole, layout_unit free_space);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
 static int grid_copy_used_axis(struct layout_tree *tree, const layout_unit *sizes, int count, double **copy);
@@ -222,6 +223,7 @@ grid_expand_repeats(
 
 	layout_unit available;
 	layout_unit gap;
+	layout_unit frame;
 	int definite;
 
 	measuring = tree->measuring;
@@ -253,11 +255,17 @@ grid_expand_repeats(
 	available = -1;
 	if (box->style.row_gap.unit == CSS_UNIT_PX)
 		gap = layout_from_px(box->style.row_gap.value);
+	frame = 0;
+	if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
+		frame = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 	if (box->style.height.unit == CSS_UNIT_PX) {
+		/* A pixel height, within its pixel minimum and maximum. */
 		available = layout_from_px(box->style.height.value);
-		if (box->style.box_sizing == CSS_BOX_SIZING_BORDER)
-			available -= box->border[CSS_TOP] + box->padding[CSS_TOP] +
-			    box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
+		if (box->style.max_height.unit == CSS_UNIT_PX && available > layout_from_px(box->style.max_height.value))
+			available = layout_from_px(box->style.max_height.value);
+		if (box->style.min_height.unit == CSS_UNIT_PX && available < layout_from_px(box->style.min_height.value))
+			available = layout_from_px(box->style.min_height.value);
+		available -= frame;
 		if (available < 0)
 			available = 0;
 	} else if (box->style.max_height.unit == CSS_UNIT_PX) {
@@ -450,6 +458,7 @@ layout_grid(
 	layout_unit right_extent;
 	layout_unit shared_right_extent;
 	layout_unit free_height;
+	layout_unit saved_height;
 	size_t index;
 	size_t peer;
 	int position;
@@ -460,6 +469,7 @@ layout_grid(
 	int auto_top;
 	int auto_bottom;
 	int auto_block_margin;
+	int saved_definite;
 	int handled;
 	int error;
 
@@ -620,7 +630,18 @@ layout_grid(
 		else if (item->box->style.margin[CSS_LEFT].unit == CSS_UNIT_AUTO ||
 		    item->box->style.margin[CSS_RIGHT].unit == CSS_UNIT_AUTO)
 			justify = CSS_ALIGN_START;
+
+		/* Percentage heights are of the grid area: its fixed rows' height, or indefinite while the rows are sized. */
+		saved_height = tree->containing_height;
+		saved_definite = tree->containing_height_definite;
+		if (box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+			tree->containing_height_definite = grid_fixed_area_height(box, item, row_gap, &tree->containing_height);
+			if (!tree->containing_height_definite)
+				tree->containing_height = 0;
+		}
 		error = grid_lay_item(tree, item->box, area_width, justify);
+		tree->containing_height = saved_height;
+		tree->containing_height_definite = saved_definite;
 		if (error != 0) {
 			grid_release(&grid);
 			return error;
@@ -1429,18 +1450,22 @@ grid_collect(
 	if (grid->items == NULL)
 		return ENOMEM;
 
-	/* The columns and rows the templates make. */
+	/* The columns and rows of the explicit grid: the templates', or the areas' when they have more. */
 	grid->column_count = box->style.column_count;
 	grid->row_count = box->style.row_count;
+	if (box->style.areas != NULL && box->style.areas->columns > grid->column_count)
+		grid->column_count = box->style.areas->columns;
+	if (box->style.areas != NULL && box->style.areas->rows > grid->row_count)
+		grid->row_count = box->style.areas->rows;
 
-	/* Each child, its places resolved against the templates. */
+	/* Each child, its places resolved against the explicit grid. */
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow)
 			continue;
 		item = &grid->items[grid->item_count];
 		item->box = child;
-		grid_resolve(&child->style.grid_column, box->style.column_count, &item->column, &item->column_span);
-		grid_resolve(&child->style.grid_row, box->style.row_count, &item->row, &item->row_span);
+		grid_resolve(&child->style.grid_column, grid->column_count, &item->column, &item->column_span);
+		grid_resolve(&child->style.grid_row, grid->row_count, &item->row, &item->row_span);
 		grid->item_count++;
 	}
 
@@ -2498,13 +2523,26 @@ grid_size_columns(
 		}
 	}
 
-	/* A fixed track with an automatic minimum holds its one-column items' minimum contributions. */
+	/* A fixed track with an automatic or intrinsic minimum holds its one-column items' minimum contributions. */
 	for (index = 0; index < grid->item_count; index++) {
 		item = &grid->items[index];
 		if (item->column_span != 1)
 			continue;
 		track = grid_column_track(&box->style, item->column);
-		if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
+		if (track->kind != CSS_TRACK_LENGTH)
+			continue;
+		if (track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT || track->minimum_rule == CSS_TRACK_MINIMUM_MIN_CONTENT) {
+			if (track->minimum_rule == CSS_TRACK_MINIMUM_MAX_CONTENT)
+				error = grid_item_width(tree, item->box, &width);
+			else
+				error = grid_item_minimum_width(tree, item->box, &width);
+			if (error != 0)
+				return error;
+			if (width > grid->columns[item->column])
+				grid->columns[item->column] = width;
+			continue;
+		}
+		if (track->minimum_rule != CSS_TRACK_MINIMUM_AUTO)
 			continue;
 		if (grid_column_auto_minimum(item->box, box->width, &width) && width > grid->columns[item->column])
 			grid->columns[item->column] = width;
@@ -2549,6 +2587,17 @@ grid_size_columns(
 		}
 
 		/* Keeps the largest contribution occupying this column. */
+		if (width > grid->columns[column])
+			grid->columns[column] = width;
+	}
+
+	/* An intrinsic track's fixed minmax() minimum is its floor. */
+	for (column = 0; column < grid->column_count; column++) {
+		track = grid_column_track(&box->style, column);
+		if (track->kind != CSS_TRACK_AUTO || track->minimum_rule != CSS_TRACK_MINIMUM_LENGTH ||
+		    (track->minimum.unit != CSS_UNIT_PX && (track->minimum.unit != CSS_UNIT_PERCENT || tree->measuring != 0)))
+			continue;
+		width = grid_track_length(&track->minimum, box->width, tree->measuring);
 		if (width > grid->columns[column])
 			grid->columns[column] = width;
 	}
@@ -3639,6 +3688,31 @@ grid_fixed_column_baseline(
 	*right_extent = child->border[CSS_LEFT] + child->padding[CSS_LEFT] +
 	    child->width + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT] +
 	    child->margin[CSS_RIGHT];
+	return 1;
+}
+
+/* Finds the height of an item's rows when every one is a fixed pixel track (gaps included). */
+static int
+grid_fixed_area_height(
+	const struct layout_box *box,
+	const struct grid_item *item,
+	layout_unit gap,
+	layout_unit *height)
+{
+	const struct css_track *track;
+	int row;
+
+	/* Each row the item spans. */
+	*height = gap * (layout_unit)(item->row_span - 1);
+	for (row = item->row; row < item->row + item->row_span; row++) {
+		track = grid_row_track(&box->style, row);
+		if (track->kind != CSS_TRACK_LENGTH || track->size.unit != CSS_UNIT_PX ||
+		    track->minimum_rule != CSS_TRACK_MINIMUM_NONE)
+			return 0;
+		*height += layout_from_px(track->size.value);
+	}
+
+	/* Succeeded: the area's height is definite. */
 	return 1;
 }
 
