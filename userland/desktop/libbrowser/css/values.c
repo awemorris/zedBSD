@@ -1027,7 +1027,7 @@ static int values_area_row(struct css_parse *parse, const struct css_token *toke
 static int values_area_name_unit(uint16_t unit);
 static int values_areas_check(const struct css_grid_areas *areas);
 static int values_area_seen(const struct css_grid_areas *areas, struct vm_string *name, int row, int column);
-static void values_copy_line_names(struct css_track_list *list, size_t from, size_t to, int skip);
+static void values_copy_line_names(struct css_track_list *list, size_t from, size_t to, int skip, int end);
 static int values_track_minimum_rule(const struct css_token *token, int kind);
 static int values_track_maximum_rule(const struct css_token *token, int kind);
 static int values_one_track(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declared_track *track);
@@ -5656,6 +5656,7 @@ values_track_list(
 	int is_repeat;
 	int last_was_names;
 	int prefix;
+	int body_end;
 	int error;
 
 	/* Walks the list: whitespace, bracketed names, repeat() and tracks. */
@@ -5760,14 +5761,23 @@ values_track_list(
 			if (error != 0)
 				return error;
 			added = list->count - first;
+			if (added == 0)
+				return EINVAL;
+			body_end = 0;
+			if (first + added <= CSS_TRACKS)
+				body_end = list->names[first + added].count;
 			for (time = 1; time < times && added != 0; time++) {
 				for (inner = 0; inner < added && list->count < CSS_TRACKS; inner++) {
 					list->tracks[list->count] = list->tracks[first + inner];
 
-					/* The repeated lines' names: the body's own at its first line, all at the others. */
+					/*
+					 * The repeated lines' names: the body's own at its first line, all at the inner
+					 * ones, and at its last only the body's own (not the next repetition's first ones).
+					 */
 					if (inner == 0)
-						values_copy_line_names(list, first, list->count, prefix);
-					values_copy_line_names(list, first + inner + 1U, list->count + 1U, 0);
+						values_copy_line_names(list, first, list->count, prefix, CSS_LINE_NAMES);
+					values_copy_line_names(list, first + inner + 1U, list->count + 1U, 0,
+					    inner + 1U == added ? body_end : CSS_LINE_NAMES);
 					list->count++;
 				}
 			}
@@ -5818,13 +5828,14 @@ values_line_name(
 	list->named = 1;
 }
 
-/* Appends the names of one line of a track list, from its skip-th, to another (a repeated track's lines). */
+/* Appends the names of one line of a track list, from its skip-th to before its end-th, to another (a repeated track's lines). */
 static void
 values_copy_line_names(
 	struct css_track_list *list,
 	size_t from,
 	size_t to,
-	int skip)
+	int skip,
+	int end)
 {
 	int index;
 	int count;
@@ -5833,6 +5844,8 @@ values_copy_line_names(
 	if (from > CSS_TRACKS || to > CSS_TRACKS)
 		return;
 	count = list->names[from].count;
+	if (count > end)
+		count = end;
 	for (index = skip; index < count; index++)
 		values_line_name(list, to, list->names[from].names[index]);
 }

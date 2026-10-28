@@ -82,6 +82,8 @@ struct grid_sizes {
 static int grid_span_has_fixed_rows(const struct css_style *style, const struct grid_item *item, const struct grid_state *grid, layout_unit gap, layout_unit available);
 static int grid_fixed_span_minimum(const struct layout_box *box, int64_t *minimum);
 static int grid_column_auto_minimum(struct layout_box *box, layout_unit containing_width, layout_unit *minimum);
+static int grid_track_floor(const struct css_track *track, layout_unit whole, layout_unit *floor);
+static void grid_maximize(const struct css_style *style, int columns, layout_unit *sizes, int count, const unsigned char *collapsed, layout_unit whole, layout_unit free_space);
 static int grid_save_used_tracks(struct layout_tree *tree, struct layout_box *box, const struct grid_state *grid);
 static int grid_copy_used_axis(struct layout_tree *tree, const layout_unit *sizes, int count, double **copy);
 static int grid_collect(struct layout_box *box, struct grid_state *grid);
@@ -2482,9 +2484,12 @@ grid_size_columns(
 		if (grid->column_collapsed != NULL && grid->column_collapsed[column])
 			continue;
 
-		/* Fixed tracks resolve their existing absolute lower floor here. */
-		if (track->kind == CSS_TRACK_LENGTH)
+		/* Fixed tracks resolve their existing absolute lower floor here (a smaller minmax() minimum when it can grow later). */
+		if (track->kind == CSS_TRACK_LENGTH) {
 			grid->columns[column] = grid_track_length(&track->size, box->width, tree->measuring);
+			if (tree->measuring == 0 && grid_track_floor(track, box->width, &width) && width < grid->columns[column])
+				grid->columns[column] = width;
+		}
 
 		/* Definite flexible tracks start from their lower breadth. */
 		if (track->kind == CSS_TRACK_FR && tree->measuring == 0) {
@@ -2608,6 +2613,18 @@ grid_size_columns(
 
 		/* Non-flexible columns occupy this part of the available axis. */
 		used += grid->columns[column];
+	}
+
+	/* Fixed minmax() tracks grow toward their maxima by the free space before the fr tracks take what is left. */
+	if (tree->measuring == 0 && available > used) {
+		grid_maximize(&box->style, 1, grid->columns, grid->column_count, grid->column_collapsed, box->width, available - used);
+		used = 0;
+		for (column = 0; column < grid->column_count; column++) {
+			track = grid_column_track(&box->style, column);
+			if ((grid->column_collapsed != NULL && grid->column_collapsed[column]) || track->kind == CSS_TRACK_FR)
+				continue;
+			used += grid->columns[column];
+		}
 	}
 
 	/* The fr tracks share it by their factors (a sum under one shares only that much of it), each at least its minimum. */
@@ -3253,8 +3270,11 @@ grid_size_rows(
 		track = grid_row_track(&box->style, row);
 		if (grid->row_collapsed != NULL && grid->row_collapsed[row])
 			continue;
-		if (track->kind == CSS_TRACK_LENGTH)
+		if (track->kind == CSS_TRACK_LENGTH) {
 			grid->rows[row] = grid_track_length(&track->size, available, available < 0);
+			if (available >= 0 && grid_track_floor(track, available, &minimum) && minimum < grid->rows[row])
+				grid->rows[row] = minimum;
+		}
 		if (track->kind == CSS_TRACK_FR && available >= 0) {
 			fr_total += track->fr;
 			grid->rows[row] = grid_track_length(&track->minimum, available, 0);
@@ -3307,6 +3327,22 @@ grid_size_rows(
 		row = item->row + item->row_span - 1;
 		if (height > spanned && row < grid->row_count)
 			grid->rows[row] += height - spanned;
+	}
+
+	/* Fixed minmax() rows grow toward their maxima by the definite free space. */
+	if (available >= 0) {
+		used = gap * (layout_unit)(grid->row_count - 1);
+		for (row = 0; row < grid->row_count; row++) {
+			track = grid_row_track(&box->style, row);
+			if (grid->row_collapsed != NULL && grid->row_collapsed[row]) {
+				used -= gap;
+				continue;
+			}
+			if (track->kind != CSS_TRACK_FR)
+				used += grid->rows[row];
+		}
+		if (available > used)
+			grid_maximize(&box->style, 0, grid->rows, grid->row_count, grid->row_collapsed, available, available - used);
 	}
 
 	/* Fractional rows share the definite room left after fixed and auto rows and the gaps. */
@@ -3604,6 +3640,79 @@ grid_fixed_column_baseline(
 	    child->width + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT] +
 	    child->margin[CSS_RIGHT];
 	return 1;
+}
+
+/* Finds a fixed track's minmax() minimum when it is a length of its own (its floor while it grows). */
+static int
+grid_track_floor(
+	const struct css_track *track,
+	layout_unit whole,
+	layout_unit *floor)
+{
+	/* Only a fixed maximum with a fixed minimum. */
+	if (track->kind != CSS_TRACK_LENGTH || track->minimum_rule != CSS_TRACK_MINIMUM_LENGTH)
+		return 0;
+	if (track->minimum.unit != CSS_UNIT_PX && track->minimum.unit != CSS_UNIT_PERCENT)
+		return 0;
+
+	/* Succeeded: the minimum. */
+	*floor = grid_track_length(&track->minimum, whole, 0);
+	return 1;
+}
+
+/*
+ * Grows the fixed minmax() tracks of an axis from their minima toward their
+ * maxima, equally, by at most the free space (the maximize step).
+ */
+static void
+grid_maximize(
+	const struct css_style *style,
+	int columns,
+	layout_unit *sizes,
+	int count,
+	const unsigned char *collapsed,
+	layout_unit whole,
+	layout_unit free_space)
+{
+	const struct css_track *track;
+	layout_unit floor;
+	layout_unit limit;
+	layout_unit share;
+	layout_unit grow;
+	int growing;
+	int index;
+
+	/* Rounds of equal shares until the space or the room to grow runs out. */
+	while (free_space > 0) {
+		growing = 0;
+		for (index = 0; index < count; index++) {
+			track = columns ? grid_column_track(style, index) : grid_row_track(style, index);
+			if ((collapsed != NULL && collapsed[index]) || !grid_track_floor(track, whole, &floor))
+				continue;
+			if (sizes[index] < grid_track_length(&track->size, whole, 0))
+				growing++;
+		}
+		if (growing == 0)
+			return;
+		share = free_space / growing;
+		if (share == 0)
+			share = free_space;
+		for (index = 0; index < count && free_space > 0; index++) {
+			track = columns ? grid_column_track(style, index) : grid_row_track(style, index);
+			if ((collapsed != NULL && collapsed[index]) || !grid_track_floor(track, whole, &floor))
+				continue;
+			limit = grid_track_length(&track->size, whole, 0);
+			if (sizes[index] >= limit)
+				continue;
+			grow = limit - sizes[index];
+			if (grow > share)
+				grow = share;
+			if (grow > free_space)
+				grow = free_space;
+			sizes[index] += grow;
+			free_space -= grow;
+		}
+	}
 }
 
 /* Resolves a track's nonnegative length: pixels or a percentage of the definite whole. */
