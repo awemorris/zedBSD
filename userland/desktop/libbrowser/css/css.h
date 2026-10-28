@@ -900,6 +900,8 @@ struct css_style {
 	int align_self;
 	/* Which of justify-content, align-content, align-items and align-self was written flex-start or flex-end. */
 	unsigned flex_keywords;
+	/* Which of align-items (4), align-self (8) and justify-self (0x100) is last baseline (stored as end). */
+	unsigned last_baselines;
 	int justify_self;
 	int order;
 

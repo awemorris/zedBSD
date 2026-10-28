@@ -1297,10 +1297,15 @@ computed_write_keyword(
 		error = computed_name(computed_justifies, 14, style->justify_items, out);
 		break;
 	case COMPUTED_ALIGN_ITEMS:
-		error = computed_align(style->align_items, (style->flex_keywords & 4u) != 0, out);
+		if (style->last_baselines & 4u)
+			error = computed_ascii("last baseline", out);
+		else
+			error = computed_align(style->align_items, (style->flex_keywords & 4u) != 0, out);
 		break;
 	case COMPUTED_ALIGN_SELF:
-		if (style->align_self == CSS_ALIGN_SELF_START)
+		if (style->last_baselines & 8u)
+			error = computed_ascii("last baseline", out);
+		else if (style->align_self == CSS_ALIGN_SELF_START)
 			error = computed_ascii("self-start", out);
 		else if (style->align_self == CSS_ALIGN_SELF_END)
 			error = computed_ascii("self-end", out);
@@ -1308,7 +1313,9 @@ computed_write_keyword(
 			error = computed_align(style->align_self, (style->flex_keywords & 8u) != 0, out);
 		break;
 	case COMPUTED_JUSTIFY_SELF:
-		if (style->justify_self == CSS_ALIGN_ANCHOR_CENTER)
+		if (style->last_baselines & 0x100u)
+			error = computed_ascii("last baseline", out);
+		else if (style->justify_self == CSS_ALIGN_ANCHOR_CENTER)
 			error = computed_ascii("anchor-center", out);
 		else
 			error = computed_name(computed_justifies, 14, style->justify_self, out);

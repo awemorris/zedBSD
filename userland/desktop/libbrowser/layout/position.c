@@ -674,6 +674,8 @@ position_place_once(
 	layout_unit area_width;
 	layout_unit area_height;
 	layout_unit saved_height;
+	struct css_length saved_style_height;
+	int saved_sizing;
 	int saved_definite;
 	int has_left;
 	int has_right;
@@ -748,6 +750,23 @@ position_place_once(
 	tree->containing_height = area_height;
 	tree->containing_height_definite = 1;
 
+	/* A flex or grid container of an auto height between a top and a bottom lays its items out in that definite height. */
+	saved_style_height = box->style.height;
+	saved_sizing = box->style.box_sizing;
+	if (box->style.height.unit == CSS_UNIT_AUTO && has_top && has_bottom &&
+	    (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID)) {
+		layout_box_model(box, area_width);
+		height = area_height - top - bottom - box->margin[CSS_TOP] - box->margin[CSS_BOTTOM] -
+		    box->border[CSS_TOP] - box->padding[CSS_TOP] - box->padding[CSS_BOTTOM] - box->border[CSS_BOTTOM];
+		if (height < 0)
+			height = 0;
+		box->style.height.unit = CSS_UNIT_PX;
+		box->style.height.value = layout_to_px(height);
+		box->style.height.offset = 0;
+		box->style.box_sizing = CSS_BOX_SIZING_CONTENT;
+	}
+
 	/* A width set, or both sides set, lays the box out in that room; otherwise it shrinks to fit. */
 	if (box->style.width.unit != CSS_UNIT_AUTO || (has_left && has_right)) {
 		/* A percentage width is of the containing block, not of the room between the offsets. */
@@ -756,6 +775,8 @@ position_place_once(
 	} else {
 		error = layout_shrink_to_fit(tree, box, room);
 	}
+	box->style.height = saved_style_height;
+	box->style.box_sizing = saved_sizing;
 	tree->containing_height = saved_height;
 	tree->containing_height_definite = saved_definite;
 

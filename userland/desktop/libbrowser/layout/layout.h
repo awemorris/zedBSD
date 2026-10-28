@@ -201,6 +201,13 @@ struct layout_box {
 	/* An in-flow item of a horizontal grid whose writing mode is vertical; its inline room is the row's height (negative: unbounded). */
 	int grid_orthogonal;
 	layout_unit grid_room;
+	/*
+	 * Where a grid or flex item was put: 1 + its grid row and column, or
+	 * 1 + its flex line and its place in the line (0 when not known); the
+	 * container's own baseline comes from its first row or line.
+	 */
+	int item_row;
+	int item_column;
 
 	/* The text of a text box, whitespace kept as it came (the lines collapse it). */
 	const uint16_t *text;
@@ -381,6 +388,8 @@ int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxe
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
+int layout_first_baseline(const struct layout_box *box, layout_unit *baseline);
+int layout_last_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
 void layout_grid_names(struct layout_box *box);

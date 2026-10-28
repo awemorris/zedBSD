@@ -2341,7 +2341,7 @@ values_single(
 				is_last = css_ident_equal(parts[0], "last");
 		}
 
-		/* The last baseline falls back to the end edge; the first one remains a baseline. */
+		/* The last baseline is the end edge marked as a last baseline; the first one remains a baseline. */
 		if (is_baseline &&
 		    (is_first ||
 		     is_last)) {
@@ -2349,7 +2349,7 @@ values_single(
 			is_last = css_ident_equal(parts[0], "last");
 			value->keyword = CSS_ALIGN_BASELINE;
 			if (is_last)
-				value->keyword = CSS_ALIGN_END;
+				value->keyword = CSS_ALIGN_END | 0x2000;
 
 			/* Succeeded: the two-word baseline position is represented. */
 			return 0;

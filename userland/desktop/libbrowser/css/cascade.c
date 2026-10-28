@@ -235,6 +235,15 @@ static const struct cascade_hint_keyword cascade_vertical_align[] = {
 	{ NULL, NULL }
 };
 
+/* A <br>'s clear attribute (all and both clear both sides). */
+static const struct cascade_hint_keyword cascade_clear[] = {
+	{ "left", "clear:left;" },
+	{ "right", "clear:right;" },
+	{ "all", "clear:both;" },
+	{ "both", "clear:both;" },
+	{ NULL, NULL }
+};
+
 static int cascade_collect(struct css_engine *engine, struct dom_element *element, struct wb_vector *matches, struct wb_arena *scratch);
 static int cascade_presentational(struct css_engine *engine, struct dom_element *element, struct wb_vector *matches, struct wb_arena *scratch);
 static int cascade_hint_ascii(struct wb_units *units, const char *text);
@@ -1278,6 +1287,11 @@ cascade_presentational(
 	value = dom_attribute_ascii(element, "color");
 	if (error == 0 && font && value != NULL)
 		error = cascade_hint_color(&units, "color", value);
+
+	/* A line break's clear attribute clears the floats beside it. */
+	value = dom_attribute_ascii(element, "clear");
+	if (error == 0 && value != NULL && dom_element_is(&element->node, DOM_NS_HTML, DOM_TAG_BR))
+		error = cascade_hint_keywords(&units, value, cascade_clear);
 
 	/* A cell's bare nowrap attribute preserves its spaces and lines. */
 	value = dom_attribute_ascii(element, "nowrap");
@@ -4445,6 +4459,7 @@ cascade_inherit(
 	case CSS_PROP_ALIGN_ITEMS:
 		style->align_items = parent->align_items;
 		style->flex_keywords = (style->flex_keywords & ~4u) | (parent->flex_keywords & 4u);
+		style->last_baselines = (style->last_baselines & ~4u) | (parent->last_baselines & 4u);
 		break;
 	case CSS_PROP_ALIGN_CONTENT:
 		style->align_content = parent->align_content;
@@ -4453,10 +4468,12 @@ cascade_inherit(
 	case CSS_PROP_ALIGN_SELF:
 		style->align_self = parent->align_self;
 		style->flex_keywords = (style->flex_keywords & ~8u) | (parent->flex_keywords & 8u);
+		style->last_baselines = (style->last_baselines & ~8u) | (parent->last_baselines & 8u);
 		break;
 	case CSS_PROP_JUSTIFY_SELF:
 		style->justify_self = parent->justify_self;
 		style->flex_keywords = (style->flex_keywords & ~0u) | (parent->flex_keywords & 0u);
+		style->last_baselines = (style->last_baselines & ~0x100u) | (parent->last_baselines & 0x100u);
 		break;
 	case CSS_PROP_ROW_GAP:
 		style->row_gap = parent->row_gap;
@@ -4788,9 +4805,14 @@ cascade_align(
 	int keyword)
 {
 	style->flex_keywords &= ~(bit | (bit << 4));
+	style->last_baselines &= ~bit;
 	if ((keyword & 0x1000) != 0) {
 		keyword &= ~0x1000;
 		style->flex_keywords |= bit << 4;
+	}
+	if ((keyword & 0x2000) != 0) {
+		keyword &= ~0x2000;
+		style->last_baselines |= bit;
 	}
 	if (keyword == CSS_ALIGN_FLEX_START) {
 		keyword = CSS_ALIGN_START;

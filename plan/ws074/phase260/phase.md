@@ -74,6 +74,8 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev11（276c2ff10） | 767 | 1,021 | 107 | 39 | 1,934（55.70%） |
   | ours-dev15（5bb9f3310、2026-10-28） | 812 | 1,035 | 113 | 39 | 1,999（57.57%） |
   | ours-dev16（2026-10-28） | 841 | 1,035 | 113 | 39 | 2,028（58.41%） |
+  | ours-dev17（864752041、2026-10-28） | 862 | 1,038 | 113 | 39 | 2,052（59.10%） |
+  | ours-dev18（2026-10-28） | 869 | 1,056 | 112 | 39 | 2,076（59.79%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -85,3 +87,8 @@ Origin: 2026-10-27 ユーザーの指示。
   dev11 → dev15: anchor positioning（anchor()・anchor-size()・position-area・position-try・anchor-center・anchor-scope）。
   dev15 → dev16: script から見える画像の読み込み（img の load・error、complete、naturalWidth/Height）、LargestContentfulPaint、
   Node.baseURI。後退 0。
+  dev16 → dev17: form の submit()・requestSubmit()、:target、button.form、grid の minmax() の maximize、repeat() の線名の重複、
+  areas による明示の grid の大きさ、min-height を含む auto-fill の行、grid item の % の高さ（内在の行では不定）。後退 0。
+  dev17 → dev18: flex の baseline・last baseline と交差軸の auto margin、grid の行の baseline 群（内在の行は baseline で伸びる）、
+  flex・grid の container の baseline、br の clear、subgrid の構文、要素の scrollWidth・scrollHeight。
+  後退は subgrid の偶然の合格 5 件（subgrid の配置は未実装）と grid-baseline-001（直交の item、dev19 で修正）。

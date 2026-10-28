@@ -91,6 +91,8 @@ static int inline_decorations(struct layout_tree *tree, struct layout_line *line
 static void inline_cut_text(struct inline_cutter *cutter, struct layout_box *box);
 static void inline_add_replaced(struct inline_cutter *cutter, struct layout_box *box);
 static void inline_add_atomic(struct inline_cutter *cutter, struct layout_box *box);
+static int inline_first_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
+static int inline_items_baseline(const struct layout_box *box, layout_unit *baseline);
 static int inline_last_baseline(const struct layout_box *box, layout_unit *baseline, int depth);
 static void inline_align(struct layout_tree *tree, struct layout_box *box, struct layout_line *line, struct inline_reach *reach, size_t count, layout_unit *above, layout_unit *below);
 static layout_unit inline_shift(struct layout_tree *tree, const struct layout_box *box, const struct css_style *style, const struct inline_reach *reach);
@@ -104,7 +106,7 @@ static void inline_add_piece(struct inline_cutter *cutter, const uint16_t *text,
 static layout_unit inline_advance(struct inline_cutter *cutter, uint32_t code_point);
 static int inline_build_lines(struct layout_tree *tree, struct layout_box *box, const struct inline_piece *pieces, size_t count);
 static int inline_finish_line(struct layout_tree *tree, struct layout_box *box, const struct inline_piece *pieces, size_t start, size_t end, layout_unit *cursor, struct wb_vector *lines, int first_line, layout_unit line_left, layout_unit line_width);
-static int inline_place_floats(struct layout_tree *tree, struct layout_box *content, struct layout_box *box, int depth);
+static int inline_place_floats(struct layout_tree *tree, struct layout_box *content, struct layout_box *box, int depth, layout_unit *floor);
 static void inline_room(struct layout_tree *tree, struct layout_box *box, layout_unit cursor, layout_unit *left, layout_unit *width);
 static int inline_wraps(const struct layout_box *box);
 static void inline_line_height(struct layout_tree *tree, const struct css_style *style, layout_unit *above, layout_unit *below);
@@ -128,6 +130,7 @@ layout_inline(
 	const struct inline_piece *pieces;
 	layout_unit room;
 	layout_unit advance;
+	layout_unit floor;
 	size_t index;
 	int rl_non_grid;
 	int rl_fixed_grid;
@@ -170,7 +173,8 @@ layout_inline(
 	    inline_vertical_simple(box, 0, box->style.writing_mode, box->style.direction);
 
 	/* The floats among the content go to their sides first. */
-	error = inline_place_floats(tree, box, box, 0);
+	floor = 0;
+	error = inline_place_floats(tree, box, box, 0, &floor);
 	if (error != 0)
 		return error;
 
@@ -736,7 +740,11 @@ inline_add_atomic(
 	box->control_baseline = 0;
 	clips = layout_clips(box);
 	if (!clips) {
-		found = inline_last_baseline(box, &baseline, 0);
+		/* An inline flex or grid container stands on its first baseline instead. */
+		if (box->style.display == CSS_DISPLAY_INLINE_FLEX || box->style.display == CSS_DISPLAY_INLINE_GRID)
+			found = inline_first_baseline(box, &baseline, 0);
+		else
+			found = inline_last_baseline(box, &baseline, 0);
 		if (found) {
 			box->has_baseline = 1;
 			box->control_baseline = baseline;
@@ -998,6 +1006,14 @@ inline_build_lines(
 			if (error != 0) {
 				wb_vector_release(&lines);
 				return error;
+			}
+
+			/* A break that clears floats starts the next line below them. */
+			if (pieces[index].box != NULL && pieces[index].box->kind == LAYOUT_LINE_BREAK &&
+			    pieces[index].box->style.clear != CSS_FLOAT_NONE) {
+				below = layout_clearance(tree, pieces[index].box->style.clear);
+				if (below > cursor)
+					cursor = below;
 			}
 
 			/* The next line starts after the break. */
@@ -1626,14 +1642,21 @@ inline_font_extent(
 	*below = height - *above;
 }
 
-/* Lays out and places the floats among a block's inline content (not inside boxes out of the flow, inline blocks or other floats). */
+/*
+ * Lays out and places the floats among a block's inline content (not inside
+ * boxes out of the flow, inline blocks or other floats); a line break that
+ * clears floats keeps the floats after it below them (floor).
+ */
 static int
 inline_place_floats(
 	struct layout_tree *tree,
 	struct layout_box *content,
 	struct layout_box *box,
-	int depth)
+	int depth,
+	layout_unit *floor)
 {
+	layout_unit clearance;
+
 	struct layout_box *child;
 	layout_unit origin_x;
 	layout_unit origin_y;
@@ -1649,8 +1672,14 @@ inline_place_floats(
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->atomic)
 			continue;
+		if (child->kind == LAYOUT_LINE_BREAK && child->style.clear != CSS_FLOAT_NONE) {
+			clearance = layout_clearance(tree, child->style.clear);
+			if (clearance > *floor)
+				*floor = clearance;
+			continue;
+		}
 		if (child->floating == CSS_FLOAT_NONE) {
-			error = inline_place_floats(tree, content, child, depth + 1);
+			error = inline_place_floats(tree, content, child, depth + 1, floor);
 			if (error != 0)
 				return error;
 			continue;
@@ -1661,7 +1690,7 @@ inline_place_floats(
 		tree->origin_x = origin_x;
 		tree->origin_y = origin_y;
 		if (error == 0)
-			error = layout_place_float(tree, child, 0, content->width);
+			error = layout_place_float(tree, child, *floor, content->width);
 		if (error != 0)
 			return error;
 	}
@@ -1837,4 +1866,163 @@ inline_decorations(
 	}
 	free(list);
 	return 0;
+}
+
+/*
+ * Finds a flex or grid container's first baseline below its content box's
+ * top: the baseline its first row's (or line's) baseline-aligned items
+ * share (the first row that holds an item), else the first item's of that row (synthesized from its border
+ * box's bottom when it has none).  Reports 1 when found, 0 when the
+ * container has no item, and -1 when its items do not know their rows.
+ */
+static int
+inline_items_baseline(
+	const struct layout_box *box,
+	layout_unit *baseline)
+{
+	const struct layout_box *child;
+	const struct layout_box *best;
+	layout_unit inner;
+	int aligned;
+	int best_aligned;
+	int first_row;
+	int any;
+	int align;
+
+	/* The first row that holds an item. */
+	first_row = 0;
+	any = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow)
+			continue;
+		any = 1;
+		if (child->item_row > 0 && (first_row == 0 || child->item_row < first_row))
+			first_row = child->item_row;
+	}
+
+	/* Its items, a baseline-aligned one before the others, then the first by column. */
+	best = NULL;
+	best_aligned = 0;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || first_row == 0 || child->item_row != first_row)
+			continue;
+		align = child->style.align_self;
+		if (align == CSS_ALIGN_AUTO)
+			align = box->style.align_items;
+		aligned = align == CSS_ALIGN_BASELINE;
+		if (best == NULL || (aligned && !best_aligned) ||
+		    (aligned == best_aligned && child->item_column < best->item_column)) {
+			best = child;
+			best_aligned = aligned;
+		}
+	}
+	if (best == NULL)
+		return any ? -1 : 0;
+
+	/* Its baseline, or its border box's bottom (an orthogonal item's always), below the container's content box's top. */
+	if (best->style.writing_mode != box->style.writing_mode || !layout_first_baseline(best, &inner))
+		inner = best->border[CSS_TOP] + best->padding[CSS_TOP] + best->height + best->padding[CSS_BOTTOM] +
+		    best->border[CSS_BOTTOM];
+	*baseline = best->y + inner;
+	return 1;
+}
+
+/* Finds a laid out box's first baseline below its content box's top (a control's text, or its first line in the flow). */
+static int
+inline_first_baseline(
+	const struct layout_box *box,
+	layout_unit *baseline,
+	int depth)
+{
+	const struct layout_box *child;
+	layout_unit inner;
+	int found;
+
+	/* Stops at the depth the layout stops at. */
+	if (depth > LAYOUT_DEPTH_MAX)
+		return 0;
+
+	/* A form control's text. */
+	if (box->control != DOM_CONTROL_NONE) {
+		if (!box->has_baseline)
+			return 0;
+		*baseline = box->control_baseline;
+		return 1;
+	}
+
+	/* A flex or grid container's: its first row's or line's (when its items know where they were put). */
+	if (box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID) {
+		found = inline_items_baseline(box, baseline);
+		if (found >= 0)
+			return found;
+	}
+
+	/* A block of lines: its first line's baseline. */
+	if (box->children_inline) {
+		if (box->line_count == 0)
+			return 0;
+		*baseline = box->lines[0].y + box->lines[0].baseline;
+		return 1;
+	}
+
+	/* A block of blocks: the first child in the flow that has one, below where that child's content starts. */
+	for (child = box->first_child; child != NULL; child = child->next) {
+		if (child->out_of_flow || child->floating != CSS_FLOAT_NONE || child->replaced)
+			continue;
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK)
+			continue;
+		if (inline_first_baseline(child, &inner, depth + 1)) {
+			*baseline = child->y + child->border[CSS_TOP] + child->padding[CSS_TOP] + inner;
+			return 1;
+		}
+	}
+
+	/* None. */
+	return 0;
+}
+
+/*
+ * Finds a laid out box's first baseline as a distance below the top of its
+ * border box.  Reports whether it has one (a replaced box or a box without
+ * lines has none).
+ */
+int
+layout_first_baseline(
+	const struct layout_box *box,
+	layout_unit *baseline)
+{
+	layout_unit inner;
+
+	/* A replaced box has no baseline of its own. */
+	if (box->replaced)
+		return 0;
+	if (!inline_first_baseline(box, &inner, 0))
+		return 0;
+
+	/* Succeeded: below the border and the padding. */
+	*baseline = box->border[CSS_TOP] + box->padding[CSS_TOP] + inner;
+	return 1;
+}
+
+/*
+ * Finds a laid out box's last baseline as a distance below the top of its
+ * border box.  Reports whether it has one.
+ */
+int
+layout_last_baseline(
+	const struct layout_box *box,
+	layout_unit *baseline)
+{
+	layout_unit inner;
+
+	/* A replaced box has no baseline of its own. */
+	if (box->replaced)
+		return 0;
+	if (!inline_last_baseline(box, &inner, 0))
+		return 0;
+
+	/* Succeeded: below the border and the padding. */
+	*baseline = box->border[CSS_TOP] + box->padding[CSS_TOP] + inner;
+	return 1;
 }

@@ -112,7 +112,8 @@ static int grid_relay_item(struct layout_tree *tree, struct layout_box *item, la
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
 static layout_unit grid_clamp_height(const struct layout_box *item, layout_unit content, layout_unit area, layout_unit frame);
 static layout_unit grid_outer_height(const struct layout_box *item);
-static int grid_fixed_row_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *baseline);
+static int grid_row_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *above);
+static void grid_row_baselines(const struct layout_box *box, const struct grid_state *grid, int row, layout_unit *first_above, layout_unit *first_below, layout_unit *last_above, layout_unit *last_below);
 static int grid_fixed_column_baseline(const struct layout_box *box, const struct grid_item *item, layout_unit *right_extent);
 static layout_unit grid_track_length(const struct css_length *length, layout_unit whole, int measuring);
 static void grid_release(struct grid_state *grid);
@@ -453,8 +454,10 @@ layout_grid(
 	layout_unit row_shift;
 	layout_unit distribution;
 	layout_unit baseline;
-	layout_unit peer_baseline;
-	layout_unit shared_baseline;
+	layout_unit first_above;
+	layout_unit first_below;
+	layout_unit last_above;
+	layout_unit last_below;
 	layout_unit right_extent;
 	layout_unit shared_right_extent;
 	layout_unit free_height;
@@ -464,8 +467,7 @@ layout_grid(
 	int position;
 	int justify;
 	int align;
-	int baseline_eligible;
-	int peer_baseline_eligible;
+	int baseline_group;
 	int auto_top;
 	int auto_bottom;
 	int auto_block_margin;
@@ -560,6 +562,8 @@ layout_grid(
 	for (index = 0; index < grid.item_count; index++) {
 		item = &grid.items[index];
 		child = item->box;
+		child->item_row = item->row + 1;
+		child->item_column = item->column + 1;
 		child->grid_orthogonal = 0;
 		child->grid_room = -1;
 		if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
@@ -747,16 +751,18 @@ layout_grid(
 			    box->style.height.unit == CSS_UNIT_PX))
 				auto_block_margin = 1;
 		}
-		/* A flexible or minmax() row of a container with a definite height is as definite. */
+		/* Any other row of one item has its final height by now too. */
 		if ((auto_top || auto_bottom) && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
-		    item->row_span == 1 && item->row < box->style.row_count &&
-		    box->style.rows[item->row].kind != CSS_TRACK_LENGTH &&
-		    box->style.height.unit != CSS_UNIT_AUTO)
+		    child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && item->row_span == 1)
 			auto_block_margin = 1;
 		if (auto_block_margin)
 			align = CSS_ALIGN_START;
-		baseline_eligible = grid_fixed_row_baseline(box, item, &baseline);
-		if (align == CSS_ALIGN_BASELINE && !baseline_eligible)
+		baseline_group = 0;
+		if (!auto_block_margin)
+			baseline_group = grid_row_baseline(box, item, &baseline);
+		if (baseline_group != 0)
+			align = CSS_ALIGN_BASELINE;
+		else if (align == CSS_ALIGN_BASELINE)
 			align = CSS_ALIGN_START;
 
 		/* A definite grid area must reach percentage descendants of a stretched item. */
@@ -831,20 +837,13 @@ layout_grid(
 			if (free_height > 0 && auto_top)
 				child->y += auto_bottom ? free_height / 2 : free_height;
 		}
-		if (align == CSS_ALIGN_BASELINE) {
-			/* Members in this fixed row share their first or synthesized baseline. */
-			shared_baseline = 0;
-			/* Find the lowest baseline among participating siblings. */
-			for (peer = 0; peer < grid.item_count; peer++) {
-				if (grid.items[peer].row != item->row)
-					continue;
-				peer_baseline_eligible = grid_fixed_row_baseline(box, &grid.items[peer], &peer_baseline);
-				if (!peer_baseline_eligible)
-					continue;
-				if (peer_baseline > shared_baseline)
-					shared_baseline = peer_baseline;
-			}
-			child->y += shared_baseline - baseline;
+		if (baseline_group != 0) {
+			/* Members of the row share their group's baseline: the first group's below the row's top, the last's above its bottom. */
+			grid_row_baselines(box, &grid, item->row, &first_above, &first_below, &last_above, &last_below);
+			if (baseline_group == 1)
+				child->y += first_above - baseline;
+			else
+				child->y += area_height - last_below - baseline;
 		}
 		outer = grid_outer_height(child);
 		if (align == CSS_ALIGN_END && area_height > outer)
@@ -3286,6 +3285,10 @@ grid_size_rows(
 	layout_unit minimum;
 	layout_unit spanned;
 	layout_unit used;
+	layout_unit first_above;
+	layout_unit first_below;
+	layout_unit last_above;
+	layout_unit last_below;
 	int64_t contribution;
 	float fr_total;
 	size_t index;
@@ -3355,6 +3358,18 @@ grid_size_rows(
 		height = grid_outer_height(item->box);
 		if (height > grid->rows[item->row])
 			grid->rows[item->row] = height;
+	}
+
+	/* An intrinsic row holds its baseline groups, each member shifted to its group's baseline. */
+	for (row = 0; row < grid->row_count; row++) {
+		track = grid_row_track(&box->style, row);
+		if (track->kind == CSS_TRACK_LENGTH || (track->kind == CSS_TRACK_FR && available >= 0))
+			continue;
+		grid_row_baselines(box, grid, row, &first_above, &first_below, &last_above, &last_below);
+		if (first_above + first_below > grid->rows[row])
+			grid->rows[row] = first_above + first_below;
+		if (last_above + last_below > grid->rows[row])
+			grid->rows[row] = last_above + last_below;
 	}
 
 	/* The items spanning rows. */
@@ -3604,55 +3619,101 @@ grid_outer_height(
 	    item->padding[CSS_BOTTOM] + item->border[CSS_BOTTOM] + item->margin[CSS_BOTTOM];
 }
 
-/* Finds a fixed-row Grid item's first line or synthesized lower-border baseline. */
+/*
+ * Tells whether a Grid item of one row takes part in its row's first (1) or
+ * last (2) baseline alignment (align-self baseline or last baseline, without
+ * an auto margin across), and how far below its margin box's top that
+ * baseline is (its border box's bottom when it has none).
+ */
 static int
-grid_fixed_row_baseline(
+grid_row_baseline(
 	const struct layout_box *box,
 	const struct grid_item *item,
-	layout_unit *baseline)
+	layout_unit *above)
 {
 	const struct layout_box *child;
+	layout_unit baseline;
 	int align;
+	int last;
+	int found;
 
 	child = item->box;
-	/* The current group shares a horizontal block axis. */
+	/* The current group shares a horizontal block axis (a vertical grid's, in its logical layout). */
 	if (box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
 		return 0;
-	if (child->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
-		return 0;
 
-	/* The row's fixed pixel size leaves baseline alignment out of track sizing. */
-	if (item->row_span != 1 || item->row >= box->style.row_count)
-		return 0;
-	if (box->style.rows[item->row].kind != CSS_TRACK_LENGTH)
-		return 0;
-	if (box->style.rows[item->row].size.unit != CSS_UNIT_PX)
+	/* One row, without an auto margin across. */
+	if (item->row_span != 1)
 		return 0;
 	if (child->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO ||
 	    child->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
 		return 0;
 
+	/* A percentage height in an intrinsic row would depend on the row its alignment sizes. */
+	if ((child->style.height.unit == CSS_UNIT_PERCENT || child->style.min_height.unit == CSS_UNIT_PERCENT ||
+	    child->style.max_height.unit == CSS_UNIT_PERCENT) &&
+	    grid_row_track(&box->style, item->row)->kind != CSS_TRACK_LENGTH)
+		return 0;
+
 	/* Only members with a baseline preference join the row's group. */
 	align = grid_in_flow_align(child->style.align_self);
-	if (align == CSS_ALIGN_AUTO)
+	last = (child->style.last_baselines & 8u) != 0;
+	if (align == CSS_ALIGN_AUTO) {
 		align = box->style.align_items;
-	if (align != CSS_ALIGN_BASELINE)
-		return 0;
-
-	/* An inline content block exports its first formatted line. */
-	if (child->children_inline && child->line_count > 0) {
-		*baseline = child->margin[CSS_TOP] + child->border[CSS_TOP] +
-		    child->padding[CSS_TOP] + child->lines[0].y + child->lines[0].baseline;
-		return 1;
+		last = (box->style.last_baselines & 4u) != 0;
 	}
-
-	/* An empty definite-height block synthesizes at its lower border edge. */
-	if (child->first_child != NULL || child->style.height.unit != CSS_UNIT_PX)
+	if (align != CSS_ALIGN_BASELINE && !last)
 		return 0;
-	*baseline = grid_outer_height(child) - child->margin[CSS_BOTTOM];
 
-	/* This child has a baseline in the fixed row. */
-	return 1;
+	/* Its first (or last) line's baseline, or its lower border edge (always, for an orthogonal item). */
+	found = 0;
+	if (child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB)
+		found = last ? layout_last_baseline(child, &baseline) : layout_first_baseline(child, &baseline);
+	if (!found)
+		baseline = grid_outer_height(child) - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM];
+	*above = child->margin[CSS_TOP] + baseline;
+
+	/* Succeeded: the item's group. */
+	return last ? 2 : 1;
+}
+
+/* Finds a row's baseline groups: how far their baselines lie below the row's top (first) and above its bottom (last). */
+static void
+grid_row_baselines(
+	const struct layout_box *box,
+	const struct grid_state *grid,
+	int row,
+	layout_unit *first_above,
+	layout_unit *first_below,
+	layout_unit *last_above,
+	layout_unit *last_below)
+{
+	layout_unit above;
+	layout_unit outer;
+	size_t index;
+	int group;
+
+	/* Each member of the row. */
+	*first_above = *first_below = *last_above = *last_below = 0;
+	for (index = 0; index < grid->item_count; index++) {
+		if (grid->items[index].row != row)
+			continue;
+		group = grid_row_baseline(box, &grid->items[index], &above);
+		if (group == 0)
+			continue;
+		outer = grid_outer_height(grid->items[index].box);
+		if (group == 1) {
+			if (above > *first_above)
+				*first_above = above;
+			if (outer - above > *first_below)
+				*first_below = outer - above;
+		} else {
+			if (above > *last_above)
+				*last_above = above;
+			if (outer - above > *last_below)
+				*last_below = outer - above;
+		}
+	}
 }
 
 /* Finds an empty orthogonal item's extent right of its border-left baseline. */

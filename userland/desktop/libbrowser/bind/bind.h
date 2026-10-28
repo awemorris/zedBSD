@@ -113,6 +113,9 @@ struct bind_box {
 	/* A box out of the flow's used insets (top, right, bottom, left) from its containing block, when inset_known. */
 	int inset_known;
 	double inset[4];
+	/* What a block scrolls over: its padding box and the overflow of its content (0 when not known). */
+	double scroll_width;
+	double scroll_height;
 };
 
 /*

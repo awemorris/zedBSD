@@ -1039,9 +1039,11 @@ geometry_measure(
 			value = box.width - box.border_left - box.border_right;
 		}
 
-		/* The root scrolls over the document when it is wider. */
+		/* The root scrolls over the document when it is wider; another block over its content's overflow. */
 		if (part == GEOMETRY_SCROLL_WIDTH && root && document_width > value)
 			value = document_width;
+		if (part == GEOMETRY_SCROLL_WIDTH && !root && found && box.block && box.scroll_width > value)
+			value = box.scroll_width;
 		break;
 	case GEOMETRY_CLIENT_HEIGHT:
 	case GEOMETRY_SCROLL_HEIGHT:
@@ -1055,6 +1057,8 @@ geometry_measure(
 		/* The root scrolls over the document when it is taller. */
 		if (part == GEOMETRY_SCROLL_HEIGHT && root && document_height > value)
 			value = document_height;
+		if (part == GEOMETRY_SCROLL_HEIGHT && !root && found && box.block && box.scroll_height > value)
+			value = box.scroll_height;
 		break;
 	case GEOMETRY_CLIENT_TOP:
 		/* The top border of a block. */
