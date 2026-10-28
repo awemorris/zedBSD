@@ -56,6 +56,8 @@ struct position_entry {
 
 static int position_walk(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing, const struct position_block *viewport, int depth);
 static int position_place(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
+static int position_place_once(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
+static int position_fits(const struct layout_box *box, const struct position_block *containing);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
 static int position_offset(const struct css_length *length, layout_unit size, layout_unit *value);
 static layout_unit position_frame(const struct layout_box *box);
@@ -541,9 +543,73 @@ position_walk(
 	return 0;
 }
 
-/* Lays out and places one box out of the flow in its containing block. */
+/*
+ * Lays out and places one box out of the flow in its containing block,
+ * trying its position-try-fallbacks in order when it overflows: the first
+ * that fits is kept, else the box as it was.
+ * https://drafts.csswg.org/css-anchor-position-1/#fallback-apply
+ */
 static int
 position_place(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	const struct position_block *containing)
+{
+	struct layout_box *saved;
+	int entry;
+	int error;
+
+	/* The box as it is. */
+	box->anchor_flip = 0;
+	if (box->style.position_try == NULL)
+		return position_place_once(tree, box, containing);
+	saved = wb_arena_alloc(&tree->arena, sizeof(*saved));
+	if (saved == NULL)
+		return ENOMEM;
+	*saved = *box;
+	error = position_place_once(tree, box, containing);
+	if (error != 0 || position_fits(box, containing))
+		return error;
+
+	/* Each fallback, from the box as it was. */
+	for (entry = 0; entry < saved->style.position_try->count; entry++) {
+		*box = *saved;
+		if (!layout_anchor_try(tree, box, entry))
+			continue;
+		error = position_place_once(tree, box, containing);
+		if (error != 0 || position_fits(box, containing))
+			return error;
+	}
+
+	/* None fits: the box as it was. */
+	*box = *saved;
+	box->anchor_flip = 0;
+	return position_place_once(tree, box, containing);
+}
+
+/* Tells whether a placed box's margin box is inside its containing block. */
+static int
+position_fits(
+	const struct layout_box *box,
+	const struct position_block *containing)
+{
+	layout_unit left;
+	layout_unit top;
+	layout_unit right;
+	layout_unit bottom;
+
+	/* The margin box against the block. */
+	left = box->x - box->margin[CSS_LEFT];
+	top = box->y - box->margin[CSS_TOP];
+	right = box->x + position_frame(box) + box->width + box->margin[CSS_RIGHT];
+	bottom = box->y + position_outer_height(box) + box->margin[CSS_BOTTOM];
+	return left >= containing->x && top >= containing->y &&
+	    right <= containing->x + containing->width && bottom <= containing->y + containing->height;
+}
+
+/* Lays out and places one box out of the flow in its containing block. */
+static int
+position_place_once(
 	struct layout_tree *tree,
 	struct layout_box *box,
 	const struct position_block *containing)

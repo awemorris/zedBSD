@@ -33,6 +33,8 @@ static int anchor_find(const struct layout_tree *tree, const struct layout_box *
 static void anchor_search(const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
 static const struct layout_box *anchor_containing(const struct layout_box *box);
+static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
+static const struct css_anchor_expr *anchor_turn(struct layout_tree *tree, const struct css_anchor_expr *expr, int how);
 static void anchor_area_align(struct layout_box *box, int across, int align, int first, int last, layout_unit start, layout_unit end, layout_unit anchor_start, layout_unit anchor_size);
 
 /*
@@ -382,6 +384,7 @@ layout_anchor_area(
 	int x1;
 	int y0;
 	int y1;
+	int first;
 	int found;
 
 	/* The area's regions, and the anchor. */
@@ -390,6 +393,26 @@ layout_anchor_area(
 	found = anchor_find(tree, box, box->style.position_anchor, &rect);
 	if (!found)
 		return;
+
+	/* As a fallback turned it: over the diagonal, then down and across. */
+	if ((box->anchor_flip & 4) != 0) {
+		first = x0;
+		x0 = y0;
+		y0 = first;
+		first = x1;
+		x1 = y1;
+		y1 = first;
+	}
+	if ((box->anchor_flip & 1) != 0) {
+		first = y0;
+		y0 = 2 - y1;
+		y1 = 2 - first;
+	}
+	if ((box->anchor_flip & 2) != 0) {
+		first = x0;
+		x0 = 2 - x1;
+		x1 = 2 - first;
+	}
 
 	/* The grid's lines: the containing block's edges and the anchor's. */
 	across[0] = x;
@@ -498,4 +521,211 @@ anchor_area_align(
 		box->static_y_area_height = end - start;
 		box->static_y_align = side == CSS_ALIGN_START ? CSS_ALIGN_AUTO : side;
 	}
+}
+
+/*
+ * Gives a box the style of one of its position-try-fallbacks entries
+ * (its @position-try rule's properties, its position-area, then its
+ * try-tactics in order: flip-block and flip-y swap the box's top and
+ * bottom, flip-inline and flip-x its left and right, flip-start its top
+ * with its left and its width with its height).  Returns 0 when the entry
+ * has no style to try (a name no rule has).
+ */
+int
+layout_anchor_try(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	int entry)
+{
+	const struct css_try_entry *item;
+	const struct css_try_style *rule;
+	struct css_style *style;
+	int tactic;
+
+	/* The entry. */
+	style = &box->style;
+	item = &style->position_try->entries[entry];
+	if (item->name != NULL) {
+		rule = style->try_styles[entry];
+		if (rule == NULL)
+			return 0;
+		memcpy(style->offset, rule->offset, sizeof(style->offset));
+		memcpy(style->margin, rule->margin, sizeof(style->margin));
+		style->width = rule->width;
+		style->height = rule->height;
+		style->min_width = rule->min_width;
+		style->min_height = rule->min_height;
+		style->max_width = rule->max_width;
+		style->max_height = rule->max_height;
+		memcpy(style->anchor, rule->anchor, sizeof(style->anchor));
+		style->position_area = rule->position_area;
+		style->position_anchor = rule->position_anchor;
+		style->justify_self = rule->justify_self;
+		style->align_self = rule->align_self;
+	}
+	if (item->area >= 0)
+		style->position_area = item->area;
+
+	/* The tactics. */
+	box->anchor_flip = 0;
+	for (tactic = 0; tactic < item->tactic_count; tactic++) {
+		switch (item->tactics[tactic]) {
+		case 0:
+		case 4:
+			anchor_flip(tree, box, 0);
+			break;
+		case 1:
+		case 3:
+			anchor_flip(tree, box, 1);
+			break;
+		default:
+			anchor_flip(tree, box, 2);
+			break;
+		}
+	}
+
+	/* Succeeded: the box has the entry's style. */
+	return 1;
+}
+
+/* Flips a box's style down (0: top with bottom), across (1: left with right), or over the diagonal (2: top with left). */
+static void
+anchor_flip(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	int how)
+{
+	struct css_style *style;
+	struct css_length length;
+	const struct css_anchor_expr *expr;
+	int pairs[6][2];
+	int count;
+	int index;
+	int align;
+
+	/* The sides and sizes that change places. */
+	style = &box->style;
+	if (how == 0) {
+		pairs[0][0] = CSS_TOP;
+		pairs[0][1] = CSS_BOTTOM;
+		count = 1;
+	} else if (how == 1) {
+		pairs[0][0] = CSS_LEFT;
+		pairs[0][1] = CSS_RIGHT;
+		count = 1;
+	} else {
+		pairs[0][0] = CSS_TOP;
+		pairs[0][1] = CSS_LEFT;
+		pairs[1][0] = CSS_BOTTOM;
+		pairs[1][1] = CSS_RIGHT;
+		count = 2;
+	}
+
+	/* The insets (with their anchor functions turned) and the margins. */
+	for (index = 0; index < count; index++) {
+		length = style->offset[pairs[index][0]];
+		style->offset[pairs[index][0]] = style->offset[pairs[index][1]];
+		style->offset[pairs[index][1]] = length;
+		expr = style->anchor[pairs[index][0]];
+		style->anchor[pairs[index][0]] = anchor_turn(tree, style->anchor[pairs[index][1]], how);
+		style->anchor[pairs[index][1]] = anchor_turn(tree, expr, how);
+		length = style->margin[pairs[index][0]];
+		style->margin[pairs[index][0]] = style->margin[pairs[index][1]];
+		style->margin[pairs[index][1]] = length;
+	}
+
+	/* Over the diagonal the sizes change places too, and the two self-alignments. */
+	if (how == 2) {
+		length = style->width;
+		style->width = style->height;
+		style->height = length;
+		length = style->min_width;
+		style->min_width = style->min_height;
+		style->min_height = length;
+		length = style->max_width;
+		style->max_width = style->max_height;
+		style->max_height = length;
+		expr = style->anchor[CSS_ANCHOR_SLOT_WIDTH];
+		style->anchor[CSS_ANCHOR_SLOT_WIDTH] = anchor_turn(tree, style->anchor[CSS_ANCHOR_SLOT_HEIGHT], how);
+		style->anchor[CSS_ANCHOR_SLOT_HEIGHT] = anchor_turn(tree, expr, how);
+		expr = style->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH];
+		style->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH] = anchor_turn(tree, style->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT], how);
+		style->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT] = anchor_turn(tree, expr, how);
+		expr = style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH];
+		style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH] = anchor_turn(tree, style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT], how);
+		style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT] = anchor_turn(tree, expr, how);
+		align = style->align_self;
+		style->align_self = style->justify_self;
+		style->justify_self = align;
+	} else {
+		/* The self-alignment along the flipped axis turns round. */
+		align = how == 0 ? style->align_self : style->justify_self;
+		if (align == CSS_ALIGN_START)
+			align = CSS_ALIGN_END;
+		else if (align == CSS_ALIGN_END)
+			align = CSS_ALIGN_START;
+		else if (align == CSS_ALIGN_SELF_START)
+			align = CSS_ALIGN_SELF_END;
+		else if (align == CSS_ALIGN_SELF_END)
+			align = CSS_ALIGN_SELF_START;
+		if (how == 0)
+			style->align_self = align;
+		else
+			style->justify_self = align;
+	}
+
+	/* A position-area turns the same way. */
+	if (how == 2)
+		box->anchor_flip = ((box->anchor_flip & 1) << 1) | ((box->anchor_flip & 2) >> 1) | ((box->anchor_flip & 4) ^ 4);
+	else
+		box->anchor_flip ^= how == 0 ? 1 : 2;
+}
+
+/* Turns the anchor functions of a sum the way a flip turns the box (a copy in the tree's arena; NULL stays NULL). */
+static const struct css_anchor_expr *
+anchor_turn(
+	struct layout_tree *tree,
+	const struct css_anchor_expr *expr,
+	int how)
+{
+	static const int down[CSS_ANCHOR_SIZE_DEFAULT + 1] = {
+		CSS_ANCHOR_BOTTOM, CSS_ANCHOR_RIGHT, CSS_ANCHOR_TOP, CSS_ANCHOR_LEFT, CSS_ANCHOR_END, CSS_ANCHOR_START,
+		CSS_ANCHOR_SELF_END, CSS_ANCHOR_SELF_START, CSS_ANCHOR_CENTER, CSS_ANCHOR_PERCENT, CSS_ANCHOR_INSIDE,
+		CSS_ANCHOR_OUTSIDE, CSS_ANCHOR_WIDTH, CSS_ANCHOR_HEIGHT, CSS_ANCHOR_BLOCK, CSS_ANCHOR_INLINE,
+		CSS_ANCHOR_SELF_BLOCK, CSS_ANCHOR_SELF_INLINE, CSS_ANCHOR_SIZE_DEFAULT
+	};
+	static const int across[CSS_ANCHOR_SIZE_DEFAULT + 1] = {
+		CSS_ANCHOR_TOP, CSS_ANCHOR_LEFT, CSS_ANCHOR_BOTTOM, CSS_ANCHOR_RIGHT, CSS_ANCHOR_END, CSS_ANCHOR_START,
+		CSS_ANCHOR_SELF_END, CSS_ANCHOR_SELF_START, CSS_ANCHOR_CENTER, CSS_ANCHOR_PERCENT, CSS_ANCHOR_INSIDE,
+		CSS_ANCHOR_OUTSIDE, CSS_ANCHOR_WIDTH, CSS_ANCHOR_HEIGHT, CSS_ANCHOR_BLOCK, CSS_ANCHOR_INLINE,
+		CSS_ANCHOR_SELF_BLOCK, CSS_ANCHOR_SELF_INLINE, CSS_ANCHOR_SIZE_DEFAULT
+	};
+	static const int diagonal[CSS_ANCHOR_SIZE_DEFAULT + 1] = {
+		CSS_ANCHOR_LEFT, CSS_ANCHOR_BOTTOM, CSS_ANCHOR_RIGHT, CSS_ANCHOR_TOP, CSS_ANCHOR_START, CSS_ANCHOR_END,
+		CSS_ANCHOR_SELF_START, CSS_ANCHOR_SELF_END, CSS_ANCHOR_CENTER, CSS_ANCHOR_PERCENT, CSS_ANCHOR_INSIDE,
+		CSS_ANCHOR_OUTSIDE, CSS_ANCHOR_HEIGHT, CSS_ANCHOR_WIDTH, CSS_ANCHOR_INLINE, CSS_ANCHOR_BLOCK,
+		CSS_ANCHOR_SELF_INLINE, CSS_ANCHOR_SELF_BLOCK, CSS_ANCHOR_SIZE_DEFAULT
+	};
+	struct css_anchor_expr *turned;
+	const int *map;
+	int index;
+
+	/* Nothing to turn. */
+	if (expr == NULL)
+		return NULL;
+	turned = wb_arena_alloc(&tree->arena, sizeof(*turned));
+	if (turned == NULL)
+		return expr;
+	*turned = *expr;
+
+	/* Each function's side (a percentage from the other end when the axis turns round). */
+	map = how == 0 ? down : how == 1 ? across : diagonal;
+	for (index = 0; index < turned->count; index++) {
+		if (turned->terms[index].side < 0 || turned->terms[index].side > CSS_ANCHOR_SIZE_DEFAULT)
+			continue;
+		if (turned->terms[index].side == CSS_ANCHOR_PERCENT && how != 2)
+			turned->terms[index].percent = 100.0f - turned->terms[index].percent;
+		turned->terms[index].side = map[turned->terms[index].side];
+	}
+	return turned;
 }

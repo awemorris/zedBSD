@@ -323,6 +323,7 @@ anchor_function(
 {
 	struct css_anchor_query *query;
 	const struct css_token *token;
+	struct anchor_sum percent;
 	int found;
 	int error;
 
@@ -359,6 +360,20 @@ anchor_function(
 			query->side = CSS_ANCHOR_PERCENT;
 			query->percent = (float)token->number;
 			reader->at++;
+			continue;
+		}
+
+		/* A calculation of percentages is a percentage too. */
+		if (token->type == CSS_TOKEN_FUNCTION && css_ident_equal(token, "calc") && !size_function &&
+		    query->side == -1) {
+			error = anchor_atom(reader, &percent);
+			if (error != 0)
+				return error;
+			if (percent.is_number || percent.expr.count != 0 || percent.expr.px != 0.0f ||
+			    percent.expr.em != 0.0f || percent.expr.rem != 0.0f)
+				return EINVAL;
+			query->side = CSS_ANCHOR_PERCENT;
+			query->percent = percent.expr.percent;
 			continue;
 		}
 		found = anchor_side(token, size_function, &query->side);

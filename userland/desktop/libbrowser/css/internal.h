@@ -696,6 +696,13 @@ struct css_rule_index {
  * nested in), the URLs its @import rules name (atoms, in order) and their
  * media lists, its rule index and the arena all of them live in.
  */
+/* A @position-try rule: its name (an atom) and its declarations (in the sheet's arena). */
+struct css_try_rule {
+	struct vm_string *name;
+	struct css_declaration *declarations;
+	size_t declaration_count;
+};
+
 struct css_sheet {
 	struct wb_arena arena;
 	struct css_rule *rules;
@@ -705,6 +712,8 @@ struct css_sheet {
 	size_t import_count;
 	struct css_font_face *font_faces;
 	size_t font_face_count;
+	struct css_try_rule *try_rules;
+	size_t try_rule_count;
 	struct css_rule_index index;
 	int origin;
 };

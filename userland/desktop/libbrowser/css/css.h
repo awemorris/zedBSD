@@ -528,6 +528,27 @@ struct css_length {
 	float offset;
 };
 
+/*
+ * The properties a @position-try rule can set, as an element's style has
+ * them with the rule applied (the fallback the rule's name is in).
+ */
+struct css_try_style {
+	struct css_length offset[4];
+	struct css_length margin[4];
+	struct css_length width;
+	struct css_length height;
+	struct css_length min_width;
+	struct css_length min_height;
+	struct css_length max_width;
+	struct css_length max_height;
+	const struct css_anchor_expr *anchor[10];
+	int position_area;
+	struct vm_string *position_anchor;
+	int justify_self;
+	int align_self;
+};
+
+
 /* An element's custom properties (css/internal.h). */
 struct css_custom;
 
@@ -701,6 +722,8 @@ struct css_style {
 	int position_area;
 	/* position-try-fallbacks (NULL for none), position-try-order, and position-visibility's bits (css_position_visibility_parse). */
 	const struct css_try_list *position_try;
+	/* The style of each entry with a @position-try name (NULL for the others, or a name no rule has). */
+	const struct css_try_style *try_styles[CSS_TRY_ENTRIES];
 	int position_try_order;
 	int position_visibility;
 

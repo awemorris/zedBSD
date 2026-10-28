@@ -244,6 +244,8 @@ struct layout_box {
 	/* A box out of the flow's insets from the area it was placed in (top, right, bottom, left), when used_inset_known. */
 	layout_unit used_inset[4];
 	int used_inset_known;
+	/* How a position-try fallback turned the box's position-area: 4 over the diagonal (first), then 1 down and 2 across. */
+	int anchor_flip;
 
 	/* The implicit tracks a Grid put before its explicit ones (grid-names.c). */
 	int grid_leading_columns;
@@ -342,6 +344,7 @@ int layout_contains_fixed(const struct layout_box *box);
 
 /* Anchor positioning (anchor.c). */
 int layout_anchor_wanted(const struct layout_box *box);
+int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
 void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);

@@ -299,6 +299,8 @@ static void cascade_align(struct css_style *style, unsigned bit, int *field, int
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
 static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
+static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
@@ -936,6 +938,9 @@ cascade_compute(
 	}
 	if (style->text_shadow_set && style->text_shadow.color == CSS_CURRENT_COLOR)
 		style->text_shadow.color = style->color;
+
+	/* The fallbacks of anchor positioning with their @position-try rules applied. */
+	cascade_try_styles(engine, style, parent);
 
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
@@ -4919,6 +4924,102 @@ cascade_line_names(
 
 	/* Succeeded: the names live as long as the engine. */
 	return copy;
+}
+
+/*
+ * Works out the styles of a style's position-try-fallbacks entries that
+ * name a @position-try rule: the style with the rule's declarations of
+ * the properties such a rule can set applied.
+ */
+static void
+cascade_try_styles(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent)
+{
+	const struct css_try_rule *rule;
+	const struct css_declaration *declaration;
+	struct css_try_style result;
+	struct css_style *copy;
+	size_t index;
+	int entry;
+	int property;
+
+	/* Only a style with fallbacks. */
+	for (entry = 0; entry < CSS_TRY_ENTRIES; entry++)
+		style->try_styles[entry] = NULL;
+	if (style->position_try == NULL)
+		return;
+	copy = malloc(sizeof(*copy));
+	if (copy == NULL)
+		return;
+
+	/* Each named entry. */
+	for (entry = 0; entry < style->position_try->count; entry++) {
+		if (style->position_try->entries[entry].name == NULL)
+			continue;
+		rule = cascade_try_rule(engine, style->position_try->entries[entry].name);
+		if (rule == NULL)
+			continue;
+
+		/* The style with the rule's declarations that a fallback can set. */
+		*copy = *style;
+		for (index = 0; index < rule->declaration_count; index++) {
+			declaration = &rule->declarations[index];
+			property = declaration->property;
+			if (!((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
+			    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+			    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT) ||
+			    property == CSS_PROP_POSITION_AREA || property == CSS_PROP_POSITION_ANCHOR ||
+			    property == CSS_PROP_ALIGN_SELF || property == CSS_PROP_JUSTIFY_SELF ||
+			    (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_MAX_BLOCK_SIZE)))
+				continue;
+			cascade_apply(engine, copy, parent, declaration);
+		}
+
+		/* What it sets, kept. */
+		memset(&result, 0, sizeof(result));
+		memcpy(result.offset, copy->offset, sizeof(result.offset));
+		memcpy(result.margin, copy->margin, sizeof(result.margin));
+		result.width = copy->width;
+		result.height = copy->height;
+		result.min_width = copy->min_width;
+		result.min_height = copy->min_height;
+		result.max_width = copy->max_width;
+		result.max_height = copy->max_height;
+		memcpy(result.anchor, copy->anchor, sizeof(result.anchor));
+		result.position_area = copy->position_area;
+		result.position_anchor = copy->position_anchor;
+		result.justify_self = copy->justify_self;
+		result.align_self = copy->align_self;
+		style->try_styles[entry] = cascade_keep(engine, &result, sizeof(result));
+	}
+	free(copy);
+}
+
+/* Finds the @position-try rule of a name that comes last in the sheets (NULL when there is none). */
+static const struct css_try_rule *
+cascade_try_rule(
+	const struct css_engine *engine,
+	const struct vm_string *name)
+{
+	const struct cascade_sheet *sheets;
+	const struct css_try_rule *found;
+	size_t index;
+	size_t rule;
+
+	/* Each sheet's rules in order: the last of the name wins. */
+	found = NULL;
+	sheets = engine->sheets.items;
+	for (index = 0; index < engine->sheets.count; index++) {
+		if (sheets[index].sheet == NULL)
+			continue;
+		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
+			if (vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
+				found = &sheets[index].sheet->try_rules[rule];
+		}
+	}
+	return found;
 }
 
 /* Copies a value into the engine's arena, once for each different value. */

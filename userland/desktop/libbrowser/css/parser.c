@@ -46,6 +46,7 @@ struct parser_state {
 	struct wb_vector imports;
 	struct wb_vector import_media;
 	struct wb_vector font_faces;
+	struct wb_vector try_rules;
 	/* The @scope whose block is being read (NULL outside one). */
 	const struct css_scope *scope;
 };
@@ -111,6 +112,7 @@ static int parser_supports(struct parser_state *state, const struct css_token *t
 static int parser_supports_group(struct parser_state *state, const struct css_token *tokens, size_t count, int *status);
 static int parser_import(struct parser_state *state, const struct css_token *tokens, size_t count);
 static int parser_font_face(struct parser_state *state, const struct css_token *tokens, size_t count);
+static int parser_position_try(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count);
 static int parser_font_descriptor(struct parser_state *state, const struct css_token *name, const struct css_token *tokens, size_t count, struct css_font_face *face);
 static int parser_font_family(struct parser_state *state, const struct css_token *tokens, size_t count, struct vm_string **family);
 static int parser_font_sources(struct parser_state *state, const struct css_token *tokens, size_t count, struct css_font_face *face);
@@ -170,14 +172,24 @@ css_parse_sheet(
 	wb_vector_init(&state.imports, sizeof(struct vm_string *));
 	wb_vector_init(&state.import_media, sizeof(struct css_media *));
 	wb_vector_init(&state.font_faces, sizeof(struct css_font_face));
+	wb_vector_init(&state.try_rules, sizeof(struct css_try_rule));
 	error = parser_rules(&state, tokens, count, NULL);
 	if (error == 0)
 		error = parser_keep_imports(&state);
 	if (error == 0)
 		error = parser_keep_font_faces(&state);
+	if (error == 0 && state.try_rules.count != 0) {
+		sheet->try_rules = wb_arena_alloc(&sheet->arena, state.try_rules.count * sizeof(struct css_try_rule));
+		if (sheet->try_rules == NULL)
+			error = ENOMEM;
+		else
+			memcpy(sheet->try_rules, state.try_rules.items, state.try_rules.count * sizeof(struct css_try_rule));
+		sheet->try_rule_count = state.try_rules.count;
+	}
 	wb_vector_release(&state.imports);
 	wb_vector_release(&state.import_media);
 	wb_vector_release(&state.font_faces);
+	wb_vector_release(&state.try_rules);
 	if (error != 0) {
 		wb_vector_release(&state.rules);
 		return error;
@@ -753,6 +765,7 @@ parser_at_rule(
 	int is_import;
 	int is_font_face;
 	int is_scope;
+	int is_try;
 	int holds;
 	int error;
 
@@ -773,7 +786,8 @@ parser_at_rule(
 	is_layer = css_ident_equal(&tokens[0], "layer");
 	is_font_face = css_ident_equal(&tokens[0], "font-face");
 	is_scope = css_ident_equal(&tokens[0], "scope");
-	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope)
+	is_try = css_ident_equal(&tokens[0], "position-try");
+	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_try)
 		return 0;
 	open = 1;
 	while (open < count && tokens[open].type != CSS_TOKEN_OPEN_CURLY)
@@ -792,6 +806,12 @@ parser_at_rule(
 		if (error == ENOMEM)
 			return error;
 		return 0;
+	}
+
+	/* An @position-try block's declarations, kept under its name. */
+	if (is_try) {
+		error = parser_position_try(state, tokens + 1, open - 1U, tokens + open + 1U, body_count);
+		return error;
 	}
 
 	/* An @scope block's rules apply in its scope. */
@@ -828,6 +848,53 @@ parser_at_rule(
 
 	/* Succeeded: the at-rule is read. */
 	return 0;
+}
+
+/*
+ * Reads an @position-try rule: its name (a dashed identifier) and the
+ * declarations of its block, kept for the fallbacks that name it.
+ * https://drafts.csswg.org/css-anchor-position-1/#fallback-rule
+ */
+static int
+parser_position_try(
+	struct parser_state *state,
+	const struct css_token *prelude,
+	size_t prelude_count,
+	const struct css_token *body,
+	size_t body_count)
+{
+	struct css_try_rule rule;
+	struct token_range block;
+	size_t index;
+	size_t name;
+	int error;
+
+	/* The name, alone. */
+	name = prelude_count;
+	for (index = 0; index < prelude_count; index++) {
+		if (prelude[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (name != prelude_count || prelude[index].type != CSS_TOKEN_IDENT || prelude[index].length < 3 ||
+		    prelude[index].text[0] != '-' || prelude[index].text[1] != '-')
+			return 0;
+		name = index;
+	}
+	if (name == prelude_count)
+		return 0;
+	memset(&rule, 0, sizeof(rule));
+	rule.name = vm_atom_from_units(state->heap, prelude[name].text, prelude[name].length);
+	if (rule.name == NULL)
+		return ENOMEM;
+
+	/* The declarations. */
+	block.tokens = body;
+	block.count = body_count;
+	error = parser_declarations(state->heap, &state->sheet->arena, block, &rule.declarations, &rule.declaration_count);
+	if (error != 0)
+		return error == ENOMEM ? error : 0;
+
+	/* Succeeded: the rule is kept. */
+	return wb_vector_push(&state->try_rules, &rule);
 }
 
 /*
