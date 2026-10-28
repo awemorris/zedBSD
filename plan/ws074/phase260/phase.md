@@ -96,7 +96,12 @@ Origin: 2026-10-27 ユーザーの指示。
   dev18 → dev19: 直交の item の baseline、scrollWidth の flex の向きと abspos、flex の画像の比の転写と column の stretch、
   block の button の fit-content、abspos の flex・grid の top/bottom の高さ、相対位置の縦の % と inline box の相対位置。
   後退 5 件（flex の画像の最小幅、自身の高さを持つ画像の比の転写が原因）は dev19 の後に修正。
-- 再開点:
+- 再開点（2026-10-28 の停止）:
+  - 最後の全件の測定は ours-dev19（2,096）。その後の commit 7d096964d（flex の画像の比の転写の後退の修正、grid の stretch の
+    max-height・max-width、auto margin の画像、align-items: auto の拒否、safe の content の揃え、内容で決まる行の stretch の除外、
+    fit-content() の列、grid の scrollWidth）は flex・grid の部分の測定（後退 0）と対象の試験だけで確認し、全件の測定は未実施。
+    dev20 の測定は途中で止めて消した。次は全件の測定（dev20）から。
+  - 次の候補: grid-template-columns の要素が grid でない時の計算値（repeat() をそのまま直列化する。nogrid の試験 2 件）。
   - 残りの大きな塊: grid の column 軸（justify）の baseline と縦書きの baseline、grid の track sizing の仕様どおりの書き直し、
     subgrid の配置、View Transitions、Navigation API の文書をまたぐ遷移・iframe、grid・grid-template の shorthand の
     longhand からの直列化、Error の生成位置（navigateerror の lineno）。
