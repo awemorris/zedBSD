@@ -13,8 +13,8 @@
  * An anchor is the last box in tree order with the anchor name that is
  * not the box or inside it, that is inside the box's containing block
  * (unless that is the viewport's), and that, when it is out of the flow
- * itself, is placed already or has a containing block of its own (it is
- * placed first then).  An anchor() of an inset is the distance from
+ * itself, comes before the box in tree order or has a containing block
+ * of its own (it is placed first then).  An anchor() of an inset is the distance from
  * the containing block's edge on the inset's side to the anchor's side it
  * asks for; anchor-size() is the anchor's border box size.  A function
  * without an anchor, or whose side is not on the inset's axis, takes its
@@ -31,7 +31,7 @@
 static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_find(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect);
-static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, const struct layout_box **found, int depth);
+static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
 static const struct layout_box *anchor_containing(const struct layout_box *box);
 static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
@@ -269,6 +269,7 @@ anchor_find(
 {
 	const struct layout_box *containing;
 	const struct layout_box *found;
+	int passed;
 
 	/* A name, and the tree. */
 	if (name == NULL || tree->root == NULL)
@@ -277,7 +278,8 @@ anchor_find(
 	/* The last acceptable box with the name in tree order. */
 	containing = anchor_containing(box);
 	found = NULL;
-	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &found, 0);
+	passed = 0;
+	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &passed, &found, 0);
 	if (found == NULL || found->node == NULL)
 		return 0;
 
@@ -302,8 +304,8 @@ anchor_find(
 /*
  * Searches the boxes under walk for anchors of a name: inside the
  * containing block (inside tells whether walk is), never the box or what
- * is inside it, and a box out of the flow only when it is placed already
- * or has a containing block of its own (it is placed first then).
+ * is inside it, and a box out of the flow only before the box in tree
+ * order or with a containing block of its own (it is placed first then).
  */
 static void
 anchor_search(
@@ -313,6 +315,7 @@ anchor_search(
 	const struct layout_box *containing,
 	const struct vm_string *name,
 	int inside,
+	int *passed,
 	const struct layout_box **found,
 	int depth)
 {
@@ -325,14 +328,15 @@ anchor_search(
 
 	/* The box and what is inside it are passed, not searched. */
 	for (child = walk->first_child; child != NULL; child = child->next) {
-		if (child == box)
+		if (child == box) {
+			*passed = 1;
 			continue;
+		}
 		child_inside = inside || walk == containing;
 		if (child_inside && anchor_has_name(child, name) &&
-		    (!child->out_of_flow || child->placed_pass == tree->position_pass ||
-		    anchor_containing(child) != containing))
+		    (!child->out_of_flow || anchor_containing(child) != containing || !*passed))
 			*found = child;
-		anchor_search(tree, child, box, containing, name, child_inside, found, depth + 1);
+		anchor_search(tree, child, box, containing, name, child_inside, passed, found, depth + 1);
 	}
 }
 
@@ -345,9 +349,9 @@ anchor_has_name(
 	const struct css_anchor_names *names;
 	int index;
 
-	/* Each of its names. */
+	/* Each of its names (a text box shares its element's style, not its names). */
 	names = box->style.anchor_names;
-	if (names == NULL)
+	if (names == NULL || box->kind == LAYOUT_TEXT)
 		return 0;
 	for (index = 0; index < names->count; index++) {
 		if (names->names[index] == name || vm_string_equal(names->names[index], name))
@@ -366,6 +370,11 @@ anchor_containing(
 	/* The nearest ancestor that contains the box: transformed for a fixed box, positioned or transformed otherwise. */
 	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {
 		if (box->style.position == CSS_POSITION_FIXED ? layout_contains_fixed(ancestor) : layout_contains_absolute(ancestor))
+			return ancestor;
+
+		/* A positioned inline box contains the boxes out of the flow inside it too. */
+		if (box->style.position != CSS_POSITION_FIXED && ancestor->kind == LAYOUT_INLINE &&
+		    ancestor->style.position != CSS_POSITION_STATIC)
 			return ancestor;
 	}
 	return NULL;
