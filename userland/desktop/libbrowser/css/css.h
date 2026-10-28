@@ -507,7 +507,9 @@ enum css_align {
 	CSS_ALIGN_SELF_END,
 	/* Parsed keywords only: the cascade stores them as start and end with a flex bit. */
 	CSS_ALIGN_FLEX_START,
-	CSS_ALIGN_FLEX_END
+	CSS_ALIGN_FLEX_END,
+	/* A box out of the flow centered on its anchor (align-self and justify-self only). */
+	CSS_ALIGN_ANCHOR_CENTER
 };
 
 /* The generic font families. */

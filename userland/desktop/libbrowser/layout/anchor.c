@@ -12,8 +12,9 @@
  *
  * An anchor is the last box in tree order with the anchor name that is
  * not the box or inside it, that is inside the box's containing block
- * (unless that is the viewport's), and that is already placed when it is
- * out of the flow itself.  An anchor() of an inset is the distance from
+ * (unless that is the viewport's), and that, when it is out of the flow
+ * itself, is placed already or has a containing block of its own (it is
+ * placed first then).  An anchor() of an inset is the distance from
  * the containing block's edge on the inset's side to the anchor's side it
  * asks for; anchor-size() is the anchor's border box size.  A function
  * without an anchor, or whose side is not on the inset's axis, takes its
@@ -30,11 +31,12 @@
 static int anchor_value(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_expr *expr, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_query(const struct layout_tree *tree, const struct layout_box *box, const struct css_anchor_query *query, int slot, layout_unit cb_start, layout_unit cb_size, layout_unit *value);
 static int anchor_find(const struct layout_tree *tree, const struct layout_box *box, const struct vm_string *name, struct layout_rect *rect);
-static void anchor_search(const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
+static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, const struct layout_box **found, int depth);
 static int anchor_has_name(const struct layout_box *box, const struct vm_string *name);
 static const struct layout_box *anchor_containing(const struct layout_box *box);
 static void anchor_flip(struct layout_tree *tree, struct layout_box *box, int how);
 static const struct css_anchor_expr *anchor_turn(struct layout_tree *tree, const struct css_anchor_expr *expr, int how);
+static layout_unit anchor_inset(const struct css_length *length, layout_unit size);
 static void anchor_area_align(struct layout_box *box, int across, int align, int first, int last, layout_unit start, layout_unit end, layout_unit anchor_start, layout_unit anchor_size);
 
 /*
@@ -267,7 +269,6 @@ anchor_find(
 {
 	const struct layout_box *containing;
 	const struct layout_box *found;
-	int passed;
 
 	/* A name, and the tree. */
 	if (name == NULL || tree->root == NULL)
@@ -276,28 +277,42 @@ anchor_find(
 	/* The last acceptable box with the name in tree order. */
 	containing = anchor_containing(box);
 	found = NULL;
-	passed = 0;
-	anchor_search(tree->root, box, containing, name, containing == NULL, &passed, &found, 0);
+	anchor_search(tree, tree->root, box, containing, name, containing == NULL, &found, 0);
 	if (found == NULL || found->node == NULL)
 		return 0;
 
-	/* Its rectangle. */
+	/* An anchor out of the flow that is not placed yet is placed first. */
+	if (found->out_of_flow && found->placed_pass != tree->position_pass &&
+	    layout_position_box((struct layout_tree *)tree, (struct layout_box *)found) != 0)
+		return 0;
+
+	/* Its rectangle: a block's border box, an inline box's lines. */
+	if (found->kind == LAYOUT_BLOCK || found->kind == LAYOUT_REPLACED || found->atomic) {
+		rect->x = found->x;
+		rect->y = found->y;
+		rect->width = found->border[CSS_LEFT] + found->padding[CSS_LEFT] + found->width +
+		    found->padding[CSS_RIGHT] + found->border[CSS_RIGHT];
+		rect->height = found->border[CSS_TOP] + found->padding[CSS_TOP] + found->height +
+		    found->padding[CSS_BOTTOM] + found->border[CSS_BOTTOM];
+		return 1;
+	}
 	return layout_node_bounds(tree, found->node, rect);
 }
 
 /*
  * Searches the boxes under walk for anchors of a name: inside the
  * containing block (inside tells whether walk is), never the box or what
- * is inside it, and a box out of the flow only before the box.
+ * is inside it, and a box out of the flow only when it is placed already
+ * or has a containing block of its own (it is placed first then).
  */
 static void
 anchor_search(
+	const struct layout_tree *tree,
 	const struct layout_box *walk,
 	const struct layout_box *box,
 	const struct layout_box *containing,
 	const struct vm_string *name,
 	int inside,
-	int *passed,
 	const struct layout_box **found,
 	int depth)
 {
@@ -310,14 +325,14 @@ anchor_search(
 
 	/* The box and what is inside it are passed, not searched. */
 	for (child = walk->first_child; child != NULL; child = child->next) {
-		if (child == box) {
-			*passed = 1;
+		if (child == box)
 			continue;
-		}
 		child_inside = inside || walk == containing;
-		if (child_inside && anchor_has_name(child, name) && (!child->out_of_flow || !*passed))
+		if (child_inside && anchor_has_name(child, name) &&
+		    (!child->out_of_flow || child->placed_pass == tree->position_pass ||
+		    anchor_containing(child) != containing))
 			*found = child;
-		anchor_search(child, box, containing, name, child_inside, passed, found, depth + 1);
+		anchor_search(tree, child, box, containing, name, child_inside, found, depth + 1);
 	}
 }
 
@@ -728,4 +743,97 @@ anchor_turn(
 		turned->terms[index].side = map[turned->terms[index].side];
 	}
 	return turned;
+}
+
+/*
+ * Centers a box with anchor-center on its anchor along each axis: the
+ * containing block less the axis's insets (auto as zero) is where it is
+ * sized and kept, and its static place is centered on the anchor's center
+ * (x, y, width and height are the containing block's).
+ */
+void
+layout_anchor_center(
+	const struct layout_tree *tree,
+	struct layout_box *box,
+	layout_unit x,
+	layout_unit y,
+	layout_unit width,
+	layout_unit height)
+{
+	struct layout_rect rect;
+	layout_unit room;
+	layout_unit start;
+	layout_unit end;
+	int across;
+	int down;
+
+	/* The axes that center, and the anchor. */
+	box->anchor_clamp_x = 0;
+	box->anchor_clamp_y = 0;
+	across = box->style.justify_self == CSS_ALIGN_ANCHOR_CENTER;
+	down = box->style.align_self == CSS_ALIGN_ANCHOR_CENTER;
+	if ((!across && !down) || box->style.position_area >= 0)
+		return;
+	if (!anchor_find(tree, box, box->style.position_anchor, &rect))
+		return;
+	room = (width > height ? width : height) * 4 + LAYOUT_UNIT * 1024;
+	if (!box->cb_set) {
+		box->cb_set = 1;
+		box->cb_left_auto = 1;
+		box->cb_right_auto = 1;
+		box->cb_top_auto = 1;
+		box->cb_bottom_auto = 1;
+	}
+
+	/* Across: the room between the insets, and a wide area centered on the anchor. */
+	if (across) {
+		start = x + anchor_inset(&box->style.offset[CSS_LEFT], width);
+		end = x + width - anchor_inset(&box->style.offset[CSS_RIGHT], width);
+		box->cb_left = start;
+		box->cb_right = end;
+		box->cb_left_auto = 0;
+		box->cb_right_auto = 0;
+		box->style.offset[CSS_LEFT].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_RIGHT].unit = CSS_UNIT_AUTO;
+		box->static_x = rect.x + rect.width / 2 - room / 2;
+		box->static_x_area_width = room;
+		box->static_x_from_right = 0;
+		box->static_x_align = CSS_ALIGN_CENTER;
+		box->static_x_align_from_right = 0;
+		box->anchor_clamp_x = 1;
+		box->anchor_clamp[0] = start;
+		box->anchor_clamp[1] = end;
+	}
+
+	/* Down, the same. */
+	if (down) {
+		start = y + anchor_inset(&box->style.offset[CSS_TOP], height);
+		end = y + height - anchor_inset(&box->style.offset[CSS_BOTTOM], height);
+		box->cb_top = start;
+		box->cb_bottom = end;
+		box->cb_top_auto = 0;
+		box->cb_bottom_auto = 0;
+		box->style.offset[CSS_TOP].unit = CSS_UNIT_AUTO;
+		box->style.offset[CSS_BOTTOM].unit = CSS_UNIT_AUTO;
+		box->static_y = rect.y + rect.height / 2 - room / 2;
+		box->static_y_area_height = room;
+		box->static_y_align = CSS_ALIGN_CENTER;
+		box->anchor_clamp_y = 1;
+		box->anchor_clamp[2] = start;
+		box->anchor_clamp[3] = end;
+	}
+}
+
+/* An inset in layout units (a percentage of a size; auto is zero). */
+static layout_unit
+anchor_inset(
+	const struct css_length *length,
+	layout_unit size)
+{
+	/* Pixels, a percentage, or nothing. */
+	if (length->unit == CSS_UNIT_PX)
+		return layout_from_px(length->value);
+	if (length->unit == CSS_UNIT_PERCENT)
+		return (layout_unit)((float)size * length->value / 100.0f) + layout_from_px(length->offset);
+	return 0;
 }

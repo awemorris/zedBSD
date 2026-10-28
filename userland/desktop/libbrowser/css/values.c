@@ -478,6 +478,7 @@ static const struct values_keyword values_align[] = {
 	{ "space-between", CSS_ALIGN_SPACE_BETWEEN },
 	{ "space-around", CSS_ALIGN_SPACE_AROUND },
 	{ "space-evenly", CSS_ALIGN_SPACE_EVENLY },
+	{ "anchor-center", CSS_ALIGN_ANCHOR_CENTER },
 	{ NULL, 0 }
 };
 
@@ -2497,6 +2498,9 @@ values_single(
 			return EINVAL;
 		if (property == CSS_PROP_JUSTIFY_ITEMS &&
 		    keyword == CSS_ALIGN_AUTO)
+			return EINVAL;
+		/* anchor-center is a self-alignment. */
+		if (keyword == CSS_ALIGN_ANCHOR_CENTER && property != CSS_PROP_ALIGN_SELF && property != CSS_PROP_JUSTIFY_SELF)
 			return EINVAL;
 		if (property == CSS_PROP_JUSTIFY_CONTENT ||
 		    property == CSS_PROP_ALIGN_ITEMS ||

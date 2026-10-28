@@ -1296,7 +1296,10 @@ computed_write_keyword(
 			error = computed_align(style->align_self, (style->flex_keywords & 8u) != 0, out);
 		break;
 	case COMPUTED_JUSTIFY_SELF:
-		error = computed_name(computed_justifies, 14, style->justify_self, out);
+		if (style->justify_self == CSS_ALIGN_ANCHOR_CENTER)
+			error = computed_ascii("anchor-center", out);
+		else
+			error = computed_name(computed_justifies, 14, style->justify_self, out);
 		break;
 	case COMPUTED_ALIGN_CONTENT:
 		error = computed_align(style->align_content == CSS_ALIGN_STRETCH ? CSS_ALIGN_NORMAL : style->align_content, (style->flex_keywords & 2u) != 0, out);
@@ -1910,6 +1913,8 @@ computed_align(
 		error = computed_ascii(flex ? "flex-end" : "end", out);
 		return error;
 	}
+	if (value == CSS_ALIGN_ANCHOR_CENTER)
+		return computed_ascii("anchor-center", out);
 	error = computed_name(computed_aligns, 10, value, out);
 	return error;
 }

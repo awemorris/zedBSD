@@ -244,6 +244,14 @@ struct layout_box {
 	/* A box out of the flow's insets from the area it was placed in (top, right, bottom, left), when used_inset_known. */
 	layout_unit used_inset[4];
 	int used_inset_known;
+	/* The pass of layout_position that placed the box out of the flow. */
+	int placed_pass;
+
+	/* anchor-center keeps a box inside its containing block (the range across, then down, when anchor_clamp_x or _y). */
+	int anchor_clamp_x;
+	int anchor_clamp_y;
+	layout_unit anchor_clamp[4];
+
 	/* How a position-try fallback turned the box's position-area: 4 over the diagonal (first), then 1 down and 2 across. */
 	int anchor_flip;
 
@@ -318,6 +326,8 @@ struct layout_tree {
 	size_t sticky_count;
 	layout_unit sticky_scroll;
 	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
+	/* The placing of the boxes out of the flow: which pass it is (layout_box.placed_pass names the pass that placed a box). */
+	int position_pass;
 	int logical_mode;
 };
 
@@ -345,10 +355,12 @@ int layout_contains_fixed(const struct layout_box *box);
 /* Anchor positioning (anchor.c). */
 int layout_anchor_wanted(const struct layout_box *box);
 int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
+void layout_anchor_center(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
+int layout_position_box(struct layout_tree *tree, struct layout_box *box);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
 int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
 
