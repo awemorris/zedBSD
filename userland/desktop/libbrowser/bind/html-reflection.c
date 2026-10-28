@@ -18,6 +18,7 @@ static int button_type_get(struct vm_realm *realm, vm_value this_value, const vm
 static int button_type_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int button_value_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int button_value_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int button_form_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int label_for_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int label_for_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int meta_http_equiv_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -29,6 +30,7 @@ static int object_data_set(struct vm_realm *realm, vm_value this_value, const vm
 static const struct bind_attribute button_attributes[] = {
 	{ "type", button_type_get, button_type_set },
 	{ "value", button_value_get, button_value_set },
+	{ "form", button_form_get, NULL },
 	{ NULL, NULL, NULL }
 };
 
@@ -424,6 +426,38 @@ bind_reflection_base(
 
 	/* Succeeded: the caller owns either its document URL or its first usable base. */
 	return 0;
+}
+
+/* Reports the button's form owner, or null (form). */
+static int
+button_form_get(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_element *element;
+	struct dom_element *owner;
+	int error;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* Requires an actual HTML button even when the getter is borrowed. */
+	error = reflection_this(realm, this_value, DOM_TAG_BUTTON, &element);
+	if (error != 0)
+		return error;
+
+	/* No owner is null. */
+	owner = dom_form_owner(element);
+	if (owner == NULL) {
+		*result = VM_VALUE_NULL;
+		return 0;
+	}
+
+	/* Succeeded: the owner's wrapper. */
+	return bind_wrap(NULL, &owner->node, result);
 }
 
 /* Reports canonical button type, including the context-dependent Auto state. */

@@ -1093,6 +1093,46 @@
       navigateTo(u, { history: 'auto', navState: null, sourceElement: link });
     });
 
+    // A form's submission navigates to its action: GET with the entries as the query, POST with them as the
+    // navigate event's formData (before the load event finishes, in place of the current entry), as a task.  requestSubmit() fires the submit event first, which a listener may cancel.
+    function submitForm(form, submitter) {
+      function attr(name, own) {
+        return submitter && submitter.hasAttribute(name) ? submitter.getAttribute(name) : form.getAttribute(own);
+      }
+      var action = attr('formaction', 'action'), method = String(attr('formmethod', 'method') || 'get').toLowerCase();
+      var target = attr('formtarget', 'target'), u, data, query, source, handling;
+      if (!form.isConnected || method === 'dialog') return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
+      u = resolveURL(action === null || action === '' ? docURL() : action);
+      if (u === null) return;
+      data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
+      if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
+      source = submitter || form;
+      handling = loaded ? 'auto' : 'replace';
+      if (method !== 'post') {
+        query = data ? new URLSearchParams(data).toString() : '';
+        u = noFrag(u).replace(/\?.*$/, '') + '?' + query;
+        data = null;
+      }
+      setTimeout(function () { navigateTo(u, { history: handling, navState: null, sourceElement: source, formData: data }); }, 0);
+    }
+    if (g.HTMLFormElement && !g.HTMLFormElement.prototype.submit) {
+      def(g.HTMLFormElement.prototype, 'submit', function submit() { submitForm(this, null); });
+      def(g.HTMLFormElement.prototype, 'requestSubmit', function requestSubmit(submitter) {
+        var event;
+        if (submitter !== undefined && submitter !== null) {
+          if (!/^(submit|image)$/.test(submitter.type) || !/^(button|input)$/.test(submitter.localName))
+            throw new TypeError("Failed to execute 'requestSubmit' on 'HTMLFormElement': The specified element is not a submit button.");
+          if (submitter.form !== this)
+            throw new DOMException("Failed to execute 'requestSubmit' on 'HTMLFormElement': The specified element is not owned by this form element.", 'NotFoundError');
+        } else {
+          submitter = null;
+        }
+        event = new (g.SubmitEvent || Event)('submit', { bubbles: true, cancelable: true, submitter: submitter });
+        if (fire(this, event)) submitForm(this, submitter);
+      });
+    }
+
     // window.stop() aborts the navigation under way (loading the document is not stopped).
     def(g, 'stop', function stop() { if (ongoingEvent) abortOngoing(); });
 
