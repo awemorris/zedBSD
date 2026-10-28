@@ -42,6 +42,8 @@ static int box_flex_items(struct layout_tree *tree, struct layout_box *box);
 static void box_anonymous_style(const struct css_style *parent, struct css_style *style);
 static void box_marker(struct layout_box *box, int ordinal);
 static void box_relative_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
+static void box_relative_within(const struct layout_box *box, const struct layout_box *containing, layout_unit *dx, layout_unit *dy);
+static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_apply_scale(struct layout_box *box);
 static void box_static_inline(struct layout_box *box, layout_unit x, layout_unit y);
@@ -218,6 +220,7 @@ layout_absolute(
 
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
 	if (box->children_inline) {
+		box_inline_relative(box);
 		box_static_inline(box, content_x, content_y);
 		return;
 	}
@@ -1550,8 +1553,72 @@ box_relative_offset(
 	layout_unit *dx,
 	layout_unit *dy)
 {
+	/* Its containing block is its parent. */
+	box_relative_within(box, box->parent, dx, dy);
+}
+
+/* Moves the fragments and decorations of a block's lines by the offsets of their relatively positioned inline boxes. */
+static void
+box_inline_relative(
+	struct layout_box *block)
+{
+	struct layout_line *line;
+	const struct layout_box *walk;
+	layout_unit dx;
+	layout_unit dy;
+	layout_unit x;
+	layout_unit y;
+	size_t index;
+	size_t at;
+	int depth;
+
+	/* Each fragment and decoration: the sum of its inline ancestors' offsets. */
+	for (index = 0; index < block->line_count; index++) {
+		line = &block->lines[index];
+		for (at = 0; at < line->fragment_count; at++) {
+			dx = 0;
+			dy = 0;
+			for (walk = line->fragments[at].box, depth = 0; walk != NULL && walk != block && depth < 64;
+			    walk = walk->parent, depth++) {
+				if (walk->kind != LAYOUT_INLINE)
+					continue;
+				box_relative_within(walk, block, &x, &y);
+				dx += x;
+				dy += y;
+			}
+			line->fragments[at].x += dx;
+			line->fragments[at].shift += dy;
+		}
+		for (at = 0; at < line->decoration_count; at++) {
+			dx = 0;
+			dy = 0;
+			for (walk = line->decorations[at].box, depth = 0; walk != NULL && walk != block && depth < 64;
+			    walk = walk->parent, depth++) {
+				if (walk->kind != LAYOUT_INLINE)
+					continue;
+				box_relative_within(walk, block, &x, &y);
+				dx += x;
+				dy += y;
+			}
+			line->decorations[at].x += dx;
+			line->decorations[at].shift += dy;
+		}
+	}
+}
+
+/* Resolves a relatively positioned box's offsets against a containing block; zero for another box. */
+static void
+box_relative_within(
+	const struct layout_box *box,
+	const struct layout_box *containing,
+	layout_unit *dx,
+	layout_unit *dy)
+{
 	const struct css_length *offset;
+	const struct layout_box *parent;
 	layout_unit width;
+	layout_unit height;
+	int definite;
 
 	/* Only a relative box moves. */
 	*dx = 0;
@@ -1559,10 +1626,23 @@ box_relative_offset(
 	if (box->style.position != CSS_POSITION_RELATIVE)
 		return;
 
-	/* Percentages are of the containing block's width (and the height's are left at zero in this pass). */
+	/*
+	 * Percentages are of the containing block's width, and of its height when
+	 * that is definite (a height of its own, or a flex or grid item's).
+	 */
 	width = 0;
-	if (box->parent != NULL)
-		width = box->parent->width;
+	height = 0;
+	definite = 0;
+	parent = containing;
+	if (parent != NULL) {
+		width = parent->width;
+		height = parent->height;
+		definite = parent->style.height.unit == CSS_UNIT_PX || parent->style.height.unit == CSS_UNIT_PERCENT;
+		if (parent->parent != NULL && !parent->out_of_flow &&
+		    (parent->parent->style.display == CSS_DISPLAY_FLEX || parent->parent->style.display == CSS_DISPLAY_INLINE_FLEX ||
+		    parent->parent->style.display == CSS_DISPLAY_GRID || parent->parent->style.display == CSS_DISPLAY_INLINE_GRID))
+			definite = 1;
+	}
 	offset = box->style.offset;
 
 	/* Horizontally: left wins over right. */
@@ -1576,11 +1656,15 @@ box_relative_offset(
 		*dx = -((layout_unit)((float)width * offset[CSS_RIGHT].value / 100.0f) + layout_from_px(offset[CSS_RIGHT].offset));
 	}
 
-	/* Vertically: top wins over bottom. */
+	/* Vertically: top wins over bottom (an indefinite percentage is auto). */
 	if (offset[CSS_TOP].unit == CSS_UNIT_PX) {
 		*dy = layout_from_px(offset[CSS_TOP].value);
+	} else if (offset[CSS_TOP].unit == CSS_UNIT_PERCENT && definite) {
+		*dy = (layout_unit)((float)height * offset[CSS_TOP].value / 100.0f) + layout_from_px(offset[CSS_TOP].offset);
 	} else if (offset[CSS_BOTTOM].unit == CSS_UNIT_PX) {
 		*dy = -layout_from_px(offset[CSS_BOTTOM].value);
+	} else if (offset[CSS_BOTTOM].unit == CSS_UNIT_PERCENT && definite) {
+		*dy = -((layout_unit)((float)height * offset[CSS_BOTTOM].value / 100.0f) + layout_from_px(offset[CSS_BOTTOM].offset));
 	}
 }
 
