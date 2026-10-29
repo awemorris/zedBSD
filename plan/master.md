@@ -20,8 +20,8 @@
 | 担当 | Queue | WS と次の手 | 実機 |
 | --- | --- | --- | --- |
 | P1 | q1695-i01 in-progress | [ws326](ws326/ws.md) p001 H.264 の software の decoder の module の設計（WS309 は p015 の判断待ちで返却のまま） | — |
-| P2 | q1690-i02 返却 | [ws314](ws314/ws.md) 全 Phase cleared、p010 の後の QEMU（guest・browser）と FreeBSD の backend も PASS（main 89f86dd03）。completed はユーザーの判断 A〜D の後 | — |
-| P3 | q1694-i01 返却 | [ws315](ws315/ws.md) 全 Phase cleared: 5330 の RTL8156B を vendor mode で send 2372・recv 2338（同時 2347+1443、Linux 2346+2341）。RTL8157 は資料だけ（main 9cd5fb8fc） | — |
+| P2 | q1697-i01 in-progress | [ws327](ws327/ws.md) libkeiland の thread と socket の wrapper（p001 設計から） | — |
+| P3 | q1696-i01 in-progress | [ws315](ws315/ws.md) p006 TCP の受けの buffer（F-WS315-rcvbuf） | 5330・10.0.10.3 |
 | P4 | q1665-i10 返却 | [ws307](ws307/ws.md) p011 cleared（通し 25 STEP・日本語の画面、main adeab690a）。残りは p007（HAL の案の承認待ち）・p004・p014 規約 | — |
 | P5 | q1693-i01 返却 | [ws291](ws291/ws.md) RTX: big-1000 24→52 fps、subs-100 67→104、subs-1000 6.6→10.9（NVK 136・75）、scene 同等（main d71b2b446）。subs の残りは全画面の copy（WS309 p015 の (B)）、big は CPU（record・submit） | — |
 | P6 | q1667-i05 返却 | [ws282](ws282/ws.md)・[ws284](ws284/ws.md) は main に merge 済み、別のツリーのセッションは [ws282 handover](ws282/handover.md)・[ws284 handover](ws284/handover.md) の試験から続ける | — |
@@ -106,7 +106,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-363 · q1696 · WS329 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-363 · q1698 · WS329 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -185,7 +185,7 @@ BUG-363 · q1696 · WS329 · KL_VERSION 103。使う前に衝突を確かめる�
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS326](ws326/ws.md) | MG006 | libmedia の H.264 の software の decoder（独自、module の設計は Opus、実装は Sonnet 5.5 high）（2026-10-30 ユーザー） | incomplete（q1695 P1 が p001） | p001 module の設計 |
-| [WS327](ws327/ws.md) | MG006 | libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行、libbrowser は使わない（2026-10-30 ユーザー） | planning | p001 設計から |
+| [WS327](ws327/ws.md) | MG006 | libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行、libbrowser は使わない（2026-10-30 ユーザー） | incomplete（q1697 P2） | p001 設計から |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |
 | [WS295](ws295/ws.md) | MG006 | Intel の xe の driver（Meteor Lake 以降の iGPU と discrete の Arc、GuC の submission、i915 の使える所は写して重複） | planning | p001 調査（担当の起動はユーザーの指示の時） |
