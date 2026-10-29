@@ -65,7 +65,7 @@
   16x16 の V・H・DC の 4 通り・plane の 3 例（手で計算した点、上と下の clip、勾配の切り下げの点）。chroma の DC（4 block × 4 通り）・H・V・plane（64 値）。
   mode の導出（隣が無い・別の slice・inter と constrained_intra_pred・I_16x16 と I_PCM の隣・I_8x8 の隣・現在の macroblock の中の隣・prev_flag と rem の例・n が A は 1、B は 2）。
   edge（4x4 の block 3・5・7・11・13 の top-right、右端・左端・上端・角の macroblock、別の slice、inter の A・B・C・D と constrained_intra_pred、8x8、16x16、chroma の Cb・Cr、frame の外）。誤りの入力（NULL・範囲外の mode・size・block・plane・巨大な値）。
-  期待の値は仕様の式から手で計算した値で、他の decoder の出力や source は使っていない。実装の変異（rounding・index・順序の誤り）を 13 通り試験に入れて、観測できる物は FAIL になることを確かめた（下の「観測できない物」を除く）。
+  期待の値は仕様の式から手で計算した値で、他の decoder の出力や source は使っていない。実装に変異（rounding・index・順序の誤り）を 20 通りほど入れた別の複写（git には入れない）で、観測できる物は試験が FAIL になることを確かめた（下の「観測できない物」を除く）。
 - 判断（header が黙っている所）:
   - 端の sample と `available`: gatherer は edge を 0 で埋めてから集める（使われない entry も 0）。predictor は `available` の既知の 4 bit（TOP・LEFT・TOP_LEFT・TOP_RIGHT）以外の bit を見ない。
     top-right の bit が立っても TOP が無い時は、置き換えの元が無いので使わない（DDL・VL は EINVAL）。8x8 の filter は TOP がある時（置き換え後は p[ 0..15, -1 ] が全部ある）に top を filter する。
@@ -81,4 +81,3 @@
 - 観測できない物（実装はあるが試験で値を確かめられない）: 8x8 の p'[ -1, -1 ] の 8-82・8-83（top か left が無い時の corner。corner を使う mode は top・left・corner の 3 つを要るので、この時は使われない）。8x8 の「後の block」の検査（上）。
 - 未実施: QEMU・実機の試験（この Phase は host の単体試験まで）。recon との結合（p019）は後の Phase。規約の全文の見直しはこの WS の最後の Phase。
 - 注: 試験の中の `h264sw_mb_neighbours`・`h264sw_mb_locate` などは p008 の実装を使っている（run-unit.sh が全 module を link する）。
-
