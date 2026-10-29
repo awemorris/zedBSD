@@ -3,7 +3,7 @@
 # ws326-p010 CABAC の context の初期値の表
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30。cleared は Q1 が受け入れを見て決める）。
 - 依存: p001（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -53,3 +53,17 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+2026-10-30、worktree `/home/awe/zedBSD-worktrees/s-ws326-p010`（branch `agent/s-ws326-p010`）。
+
+- 実装: `h264sw-cabac-init.c` の `h264sw_cabac_init_mn`（460 x 4 x 2）に表 9-12〜9-24 の値を、表ごとの block（各 block の前に `Values referenced: ITU-T H.264 (08/2021) Table 9-NN` の comment）で入れた。header は変えていない。この module には関数が無いので「誤りの入力」の試験は対象が無い（表の形と値だけを確かめた）。
+- 値の取り方: 表 9-18〜9-24（行の表、386 件）は `pdftotext -bbox`（語の座標）から scratch の生成 script で取り、表 9-12・9-13・9-15・9-16・9-17 は PDF の画と文字を見て手で入れ、表 9-14 は画から手で入れた。生成 script は commit していない（`build/tmp/p010/gen/`）。
+- 独立の照合: `plan/ws326/tests/cabac-init-extract.py`（`pdftotext -layout -f 250 -l 258` を読む。生成と別の方法）。`test-cabac_init --dump`（1840 行）との比較: `cabac-init-extract: PASS (1840 pairs)`。値を 1 つ変えた dump（ctxIdx 5・30・75・399・459）は全て FAIL になることを確かめた。
+- 抜き出しの例外: 表 9-14（ctxIdx 24〜39）の m は桁が 2 行に割れた cell（例 30 の `−4` と `6` で -46）があり pdftotext が繋げないため、m は PDF 251 頁の画から手で読んだ値を script の中に理由とともに書いた（n の行は文字から読む）。したがって表 9-14 の m は文字からの独立の照合が無く、画の目視と test の抜き取り（ctxIdx 24・30・31・39）が支え。
+- 目で見た頁: PDF 251（表 9-14・9-15・9-16）、252（表 9-17・9-18 の全行）、258（表 9-24 の全行）。他の頁は文字の抜き出しと、各表の最初と最後の ctxIdx の手の抜き取りによる。
+- 試験: `timeout 600 sh plan/ws326/tests/run-unit.sh cabac_init` → `test-cabac_init: PASS (4159 checks)`、`run-unit: PASS`（ASan・UBSan 付き、報告 0）。`run-unit.sh all` → test-bitwriter PASS (14 checks)・test-cabac_init PASS・`run-unit: PASS`。
+- `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。`git diff --check` → 出力なし。
+- amd64 の `build/amd64/dynamic/libmedia.so`: make の exit 0、出力の warning 0（`-Wall -Wextra -Werror` 付き）。
+- 未実施: 実行時の QEMU・実機の試験（この Phase の範囲外）。表 9-14 の m の、文字からの独立の照合。
