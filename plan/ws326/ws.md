@@ -34,7 +34,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | --- | --- | --- | --- |
 | [ws326-p001](phase001/phase.md) | module の設計: file の骨格・header の interface と仕様の comment・単体と適合の試験の仕様・実装の Phase の割り振り（Opus） | in-progress（設計・骨格・review の反映済み、Q1 の受け入れ待ち） | — |
 | [ws326-p002](phase002/phase.md) | bit reader と NAL: h264sw-bits、h264sw-nal（試験 test-bits、test-nal） | cleared（2026-10-30 Q1、main 711b1ba4c。test-bits 169・test-nal 95 checks） | p001 |
-| [ws326-p003](phase003/phase.md) | 共有の表と parameter set: h264sw-tables、h264sw-ps（試験 test-tables、test-ps） | planned | p002 |
+| [ws326-p003](phase003/phase.md) | 共有の表と parameter set: h264sw-tables、h264sw-ps（試験 test-tables、test-ps） | 実装済み・試験 PASS（2026-10-30、cleared は Q1 が受け入れで決める） | p002 |
 | [ws326-p004](phase004/phase.md) | slice header: h264sw-slice（試験 test-slice） | planned | p003 |
 | [ws326-p005](phase005/phase.md) | frame と POC: h264sw-frame、h264sw-poc（試験 test-frame、test-poc） | planned | p003、p004 |
 | [ws326-p006](phase006/phase.md) | DPB（marking・gap・出力の順）: h264sw-dpb（試験 test-dpb） | planned | p005 |
