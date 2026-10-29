@@ -83,7 +83,7 @@ bitwriter_ue(
 	/* The prefix zeros, then the code itself. */
 	bitwriter_u(writer, 0U, length);
 	bitwriter_u(writer, 1U, 1U);
-	bitwriter_u(writer, (uint32_t)(code & ((1U << length) - 1U)), length);
+	bitwriter_u(writer, (uint32_t)(code & (((uint64_t)1U << length) - 1U)), length);
 }
 
 /* Writes se(v) (9.1.1, Table 9-3): positive k as 2k - 1, negative k as -2k. */
