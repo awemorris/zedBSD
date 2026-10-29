@@ -40,7 +40,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p006](phase006/phase.md) | DPB（marking・gap・出力の順）: h264sw-dpb（試験 test-dpb） | planned | p005 |
 | [ws326-p007](phase007/phase.md) | reference picture list: h264sw-reflist（試験 test-reflist） | planned | p006 |
 | [ws326-p008](phase008/phase.md) | macroblock の型と neighbour: h264sw-mb（試験 test-mb） | cleared（2026-10-30 Q1、main bc2cf3321。test-mb 1938 checks） | p001 |
-| [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | planned | p002、p008 |
+| [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | 実装済み・試験 PASS（2026-10-30、test-cavlc 87868 checks。cleared は Q1 の受け入れ待ち） | p002、p008 |
 | [ws326-p010](phase010/phase.md) | CABAC の context の初期値の表: h264sw-cabac-init（試験 test-cabac_init） | cleared（2026-10-30 Q1、main c294565dd。1840 対の値を仕様の PDF と独立の抜き出しで照合、4159 checks） | p001 |
 | [ws326-p011](phase011/phase.md) | CABAC の engine: h264sw-cabac（試験 test-cabac） | planned | p002、p010 |
 | [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | planned | p008、p011 |
