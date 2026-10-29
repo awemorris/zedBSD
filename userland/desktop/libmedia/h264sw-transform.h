@@ -15,10 +15,15 @@
  *
  * Every function here is pure: it reads its arguments and writes its
  * outputs, so each can be tested alone.  Coefficient levels and
- * intermediate values are int32_t; a stream whose values break the
- * ranges the clauses state still gives defined results (wrapping is not
- * allowed: compute in int32_t with values clamped where 8.5 says the
- * bitstream shall not exceed a range, so no signed overflow occurs).
+ * intermediate values are int32_t.  A stream whose values break the
+ * ranges the clauses state still gives defined results: a product of a
+ * level and a scale is computed in int64_t, the scaling's left shift is a
+ * multiplication (h264sw.h), and every value the clauses bound (cij,
+ * dij, eij, fij, gij, hij, dcYij, dcCij: -2^( 7 + bitDepth ) ..
+ * 2^( 7 + bitDepth ) - 1, that is -32768..32767) is clamped to its range
+ * as soon as it is computed, before it is stored in int32_t or used
+ * again.  A conforming stream never reaches a clamp, so the results are
+ * the clauses' own.
  *
  * The 4x4 and 8x8 arrays are in raster order: element (i, j), row i and
  * column j, is at index 4 * i + j (or 8 * i + j), as cij of the clauses.

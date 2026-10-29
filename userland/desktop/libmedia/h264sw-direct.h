@@ -39,8 +39,8 @@ struct h264sw_slice_ctx;
  * whole macroblock as 16x16, 8.4.1.2.2) are derived; they are kept in
  * spatial_ref and spatial_mv for the macroblock's other direct
  * sub-macroblocks; direct_zero is the macroblock's
- * directZeroPredictionFlag (8-190).  The decoder clears spatial_ready at
- * each macroblock.
+ * directZeroPredictionFlag (8-190).  h264sw_slice_data clears
+ * spatial_ready before each macroblock.
  */
 struct h264sw_direct {
 	const struct h264sw_frame *col;
@@ -105,7 +105,9 @@ void h264sw_direct_setup(struct h264sw_direct *direct, const struct h264sw_refli
  * co-located ref_id; 0 when refIdxCol is below 0; when the frame is in
  * no entry the stream is broken: refIdxL0 0 is used and the macroblock
  * counted as concealed), refIdxL1 = 0, mvL0 = ( DistScaleFactor * mvCol
- * + 128 ) >> 8, mvL1 = mvL0 - mvCol (8-191, 8-192, 8-199, 8-200).
+ * + 128 ) >> 8, mvL1 = mvL0 - mvCol (8-191, 8-192, 8-199, 8-200),
+ * computed in int32_t and clamped to -32768..32767 before they are
+ * stored (a conforming stream stays inside).
  *
  * Sets the quadrant's bit in ctx->n.current->direct.  Returns 0, or
  * EINVAL when the derivation cannot proceed (no co-located frame).

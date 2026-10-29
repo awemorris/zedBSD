@@ -16,6 +16,7 @@ LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia
 	userland/desktop/libmedia/h264sw-poc.c userland/desktop/libmedia/h264sw-dpb.c \
 	userland/desktop/libmedia/h264sw-reflist.c userland/desktop/libmedia/h264sw-mb.c \
 	userland/desktop/libmedia/h264sw-cavlc.c userland/desktop/libmedia/h264sw-cabac.c \
+	userland/desktop/libmedia/h264sw-cabac-init.c \
 	userland/desktop/libmedia/h264sw-cabac-se.c userland/desktop/libmedia/h264sw-macroblock.c \
 	userland/desktop/libmedia/h264sw-transform.c userland/desktop/libmedia/h264sw-intra.c \
 	userland/desktop/libmedia/h264sw-mvpred.c userland/desktop/libmedia/h264sw-direct.c \

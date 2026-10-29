@@ -37,22 +37,27 @@ struct h264sw_slice_ctx;
  * ctx is prepared by the decoder: picture, header, slice_num, lists,
  * weights, direct, bits at the start of slice_data(), cabac_mode, and
  * for CABAC the engine started (h264sw_cabac_start); qp is SliceQPY.
- * Starting at first_mb_in_slice, for each macroblock: sets mb_addr,
- * resets the entry (slice set to slice_num, everything else cleared),
- * finds its neighbours (h264sw_mb_neighbours), reads its skip
- * indication, parses it (h264sw_macroblock_parse) and reconstructs it
- * (h264sw_recon_mb), then moves to the next address (CurrMbAddr + 1:
- * there are no slice groups).  The loop ends when CAVLC has no more RBSP
- * data (more_rbsp_data(), after any mb_skip_run) or CABAC decodes
- * end_of_slice_flag 1.  picture->decoded_mbs counts each macroblock
- * decoded.
+ * Starting at first_mb_in_slice, for each macroblock: sets mb_addr;
+ * refuses (EINVAL) an address whose entry already belongs to a slice
+ * (overlapping or repeated slices); resets the entry with
+ * h264sw_mb_reset( entry, slice_num ); clears the per-macroblock state
+ * of the slice context (decoded_4x4 0, direct.spatial_ready 0); finds
+ * its neighbours (h264sw_mb_neighbours); reads its skip indication;
+ * parses it (h264sw_macroblock_parse) and reconstructs it
+ * (h264sw_recon_mb); records prev_mb_addr; then moves to the next
+ * address (CurrMbAddr + 1: there are no slice groups).  The loop ends
+ * when CAVLC has no more RBSP data (more_rbsp_data(), after any
+ * mb_skip_run) or CABAC decodes end_of_slice_flag 1.
+ * picture->decoded_mbs counts each macroblock decoded (once: an address
+ * is never decoded twice).
  *
  * Errors: a parse or reconstruction error ends the slice at that
  * macroblock and is returned (EINVAL, ENOTSUP); the macroblocks before
- * it stay decoded, the failing one keeps slice -1 so the decoder
- * conceals it with the rest.  A slice that runs past the last
- * macroblock of the picture returns EINVAL.  An mb_skip_run larger than
- * the macroblocks left returns EINVAL.
+ * it stay decoded, the failing one's entry is reset with slice -1
+ * (h264sw_mb_reset( entry, -1 )) so the decoder conceals it with the
+ * rest.  A slice that runs past the last macroblock of the picture
+ * returns EINVAL.  An mb_skip_run larger than the macroblocks left
+ * returns EINVAL.
  */
 int h264sw_slice_data(struct h264sw_slice_ctx *ctx);
 
@@ -73,7 +78,11 @@ int h264sw_slice_data(struct h264sw_slice_ctx *ctx);
  *
  * Value checks (EINVAL): mb_type and sub_mb_type in range; ref_idx not
  * above num_ref_idx_active - 1; intra_chroma_pred_mode at most 3;
- * mb_qp_delta in -26..25; transform_size_8x8_flag only where allowed.
+ * mb_qp_delta in -26..25; each mvd component in -32768..32767 (7.4.5.1:
+ * -8192 to 8191.75 luma samples; CAVLC's se(v) can say more, so it is
+ * checked before it is stored in int16_t); rem_intra pred modes at most
+ * 7; coded_block_pattern's codeNum at most 47; transform_size_8x8_flag
+ * only where allowed.
  * QPY is updated by 7-37: ( QPY,PREV + mb_qp_delta + 52 ) % 52 for
  * 8 bits, and stored in the entry and in ctx->qp.  For I_PCM the
  * entry's qp is 0 (what 8.7.2.2 uses for qPp of an I_PCM macroblock) and

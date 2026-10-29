@@ -24,10 +24,24 @@
 #include "h264sw.h"
 #include "h264sw-bits.h"
 
-/* The profile_idc values taken (A.2): Baseline (with Constrained Baseline), Main and High. */
+/*
+ * The profile_idc values the decoder knows (A.2, 7.4.2.1.1).
+ *
+ * Baseline (with Constrained Baseline), Main and High are taken.  Extended
+ * is taken only with constraint_set0_flag or constraint_set1_flag 1 (the
+ * stream then also conforms to Baseline or Main, A.2.1, A.2.2).  The High
+ * family (High 10, High 4:2:2, High 4:4:4 Predictive) is taken when the
+ * SPS's content stays within the decoder's range (4:2:0, 8 bits, no
+ * lossless): such a stream decodes as High.  Every other profile_idc is
+ * refused.
+ */
 #define H264SW_PROFILE_BASELINE 66U
 #define H264SW_PROFILE_MAIN 77U
+#define H264SW_PROFILE_EXTENDED 88U
 #define H264SW_PROFILE_HIGH 100U
+#define H264SW_PROFILE_HIGH10 110U
+#define H264SW_PROFILE_HIGH422 122U
+#define H264SW_PROFILE_HIGH444 244U
 
 /* The most offset_for_ref_frame values of one SPS (num_ref_frames_in_pic_order_cnt_cycle at most 255). */
 #define H264SW_MAX_POC_CYCLE 255U
@@ -64,8 +78,12 @@ struct h264sw_scaling {
  * An SPS is kept only when every value is in its range and the stream is
  * one this decoder takes: chroma_format_idc 1, bit depths 8,
  * frame_mbs_only_flag 1, qpprime_y_zero_transform_bypass_flag 0,
- * separate_colour_plane_flag absent or 0, and profile_idc one of the
- * H264SW_PROFILE_* values.
+ * separate_colour_plane_flag absent or 0, and profile_idc taken as the
+ * H264SW_PROFILE_* comment says.  The VUI is the exception: a VUI that
+ * does not read, or holds values out of their ranges, is dropped
+ * (vui_present 0 and its fields at their absent values) and the SPS kept,
+ * because a picture can be decoded without it and real streams often get
+ * it slightly wrong.
  */
 struct h264sw_sps {
 	/* profile_idc, the constraint_set0..5 flags as bits 0..5 (bit n is constraint_setn_flag), level_idc, seq_parameter_set_id. */
@@ -124,8 +142,14 @@ struct h264sw_sps {
 	unsigned sar_width;
 	unsigned sar_height;
 
-	/* video_full_range_flag, and with colour_description_present_flag its matrix_coefficients (2, unspecified, when absent). */
+	/*
+	 * video_signal_type_present_flag and video_full_range_flag (0 when
+	 * absent); colour_description_present_flag and matrix_coefficients (2,
+	 * unspecified, when absent).
+	 */
+	int signal_present;
 	int full_range;
+	int colour_present;
 	unsigned matrix_coefficients;
 
 	/* bitstream_restriction_flag, max_num_reorder_frames and max_dec_frame_buffering (meaningful only with the flag). */
@@ -137,9 +161,10 @@ struct h264sw_sps {
 	 * The size of the decoded picture buffer in frames: max_dec_frame_buffering
 	 * when the VUI sends it, else Min( MaxDpbMbs / PicSizeInMbs, 16 ) with
 	 * MaxDpbMbs of level_idc from Table A-1 (A.3.1 h), A.3.2 f)); never
-	 * below max_num_ref_frames and never below 1.  For level_idc 11 with
-	 * constraint_set3_flag 1 (level 1b of the Baseline and Main profiles)
-	 * the level 1b row is used.
+	 * below max_num_ref_frames, never below 1, never above 16.  Level 1b
+	 * is level_idc 9, or level_idc 11 with constraint_set3_flag 1 in the
+	 * Baseline, Constrained Baseline and Main profiles (A.3.1, A.3.2).  A
+	 * level_idc not in Table A-1 gives 16.
 	 */
 	unsigned dpb_frames;
 };
@@ -222,7 +247,8 @@ void h264sw_ps_init(struct h264sw_ps_store *store);
  * window and the VUI (E.1.1; the HRD parameters, E.1.2, are read to skip
  * them).  The fields after the VUI and the trailing bits are checked.
  *
- * Checks every value against its range in 7.4.2.1.1 and E.2.1 and the
+ * Checks every value against its range in 7.4.2.1.1 (the VUI's against
+ * E.2.1, dropping the VUI as struct h264sw_sps says) and the
  * limits of h264sw.h (width and height in macroblocks at most
  * H264SW_MAX_SIDE_MBS, size at most H264SW_MAX_FRAME_MBS), computes the
  * derived fields, and only then stores the set: a failed read leaves the
@@ -232,8 +258,8 @@ void h264sw_ps_init(struct h264sw_ps_store *store);
  * -128..127 is one; nextScale itself is taken modulo 256 as the syntax
  * of 7.3.2.1.1.1 says, so it never leaves 0..255); ENOTSUP for a valid SPS outside the
  * decoder's range (profile, chroma format, bit depth, interlace,
- * lossless).  An SPS for an unsupported profile_idc is refused before its
- * profile-specific fields are read.
+ * lossless, a size above the limits).  An SPS for an unsupported
+ * profile_idc is refused before its profile-specific fields are read.
  */
 int h264sw_ps_read_sps(struct h264sw_ps_store *store, struct h264sw_bits *bits);
 

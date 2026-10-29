@@ -52,9 +52,11 @@ struct h264sw_slice_params {
  *
  * frame: the frame the samples go to (one reference held by the decoder
  *   while the picture is decoded).
- * sps, pps: the active parameter sets (pointers into the decoder's store,
- *   valid for the picture: a parameter set NAL unit that would replace
- *   an active set within a picture is refused by the decoder).
+ * sps, pps: the active parameter sets.  sps points to the decoder's own
+ *   copy of the active SPS (struct h264sw_decoder's sps, which sized the
+ *   arrays here); pps points into the decoder's store, which no NAL unit
+ *   changes under a picture (a PPS NAL unit finishes the picture before
+ *   it is stored, 7.4.1.2.3).
  * levelscale: the scaling functions of the picture's scaling lists.
  * mbs: size_mbs entries, one per macroblock address; width_mbs and
  *   height_mbs the picture's size in macroblocks.
@@ -154,7 +156,8 @@ struct h264sw_mb_syntax {
  * mb_addr: CurrMbAddr.  n: the neighbours of the current macroblock
  * (h264sw_mb_neighbours), n.current is the entry being written.
  * decoded_4x4: the bits (luma4x4BlkIdx) of the current macroblock's 4x4
- * blocks whose motion is already derived, for h264sw_mvpred.
+ * blocks whose motion is already derived, for h264sw_mvpred; cleared by
+ * h264sw_slice_data before each macroblock, set by the reconstruction.
  * qp: QPY of the last macroblock (QPY,PREV of 7.4.5), first
  * SliceQPY.  prev_qp_delta_nonzero: whether the previous macroblock in
  * decoding order had a non-zero mb_qp_delta (the CABAC context of

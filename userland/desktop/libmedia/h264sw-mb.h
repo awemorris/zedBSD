@@ -95,9 +95,10 @@ struct h264sw_sub_mb_type {
  * after it, the deblocking filter and the pictures after it.
  *
  * The decoder keeps an array of these, one per macroblock address, for
- * the picture being decoded; it is reset at the start of each picture
- * (slice -1 for every entry) and read until the picture is deblocked and
- * its motion copied into its frame.
+ * the picture being decoded; every entry is reset with h264sw_mb_reset(
+ * entry, -1 ) at the start of each picture, and again with the slice's
+ * number when its macroblock is decoded; it is read until the picture is
+ * deblocked and its motion copied into its frame.
  *
  * slice: the number, within the picture, of the slice the macroblock
  *   belongs to (0, 1, ... in decoding order), or -1 while the macroblock
@@ -182,6 +183,19 @@ struct h264sw_neighbours {
 /* The position of each luma4x4BlkIdx in its macroblock, in luma samples (6.4.3): x and y. */
 extern const uint8_t h264sw_blk4x4_x[16];
 extern const uint8_t h264sw_blk4x4_y[16];
+
+/*
+ * Resets a macroblock's entry to the state before it is decoded.
+ *
+ * slice is the slice number (or -1).  Every field is set to the value
+ * that the rules of its comment give a macroblock that has written
+ * nothing yet: kind 0, cbp 0, transform_8x8 0, qp 0, chroma_pred_mode
+ * 0, direct 0, intra4x4_mode all 2, total_coeff all 0, coded_flags 0,
+ * nonzero 0, mvd all 0, and motion with mv all 0, ref_idx all -1,
+ * ref_id all 0 and intra 0.  (Zeroing the whole entry is not the same:
+ * intra4x4_mode 0 and ref_idx 0 would mean Vertical and a used list.)
+ */
+void h264sw_mb_reset(struct h264sw_mb *mb, int32_t slice);
 
 /*
  * Gives the meaning of an mb_type value of a slice type.

@@ -70,8 +70,11 @@ void h264sw_poc_init(struct h264sw_poc_state *state);
  * previous values are taken as 0 as each clause says.
  *
  * Does not change state: h264sw_poc_finish does, after the picture.
- * Arithmetic is done in 64 bits; a result outside int32_t (a stream
- * that breaks the range of 8.2.1) returns EINVAL.  Returns 0 and *poc.
+ * Arithmetic is done in int64_t, and each product and sum is checked
+ * before it could overflow it (type 1's picOrderCntCycleCnt *
+ * ExpectedDeltaPerPicOrderCntCycle grows with every wrap of frame_num);
+ * an overflow or a result outside int32_t (a stream that breaks the
+ * range of 8.2.1) returns EINVAL.  Returns 0 and *poc.
  */
 int h264sw_poc_compute(const struct h264sw_poc_state *state, const struct h264sw_sps *sps, const struct h264sw_slice_header *header, struct h264sw_poc *poc);
 

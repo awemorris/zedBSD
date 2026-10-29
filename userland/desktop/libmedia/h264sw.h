@@ -9,21 +9,26 @@
  * The limits and conventions shared by every part of libmedia's software
  * H.264 decoder.
  *
- * The decoder reads progressive frames of 8-bit 4:2:0 streams of the
- * Constrained Baseline, Baseline (without slice groups and redundant
- * pictures), Main and High profiles.  Field pictures, MBAFF frames, the
- * 4:2:2 and 4:4:4 formats, bit depths above 8, slice groups, data
- * partitioning and the SP and SI slices are refused.
- *
- * The specification every part follows is ITU-T H.264 (08/2021),
- * "Advanced video coding for generic audiovisual services", whose text is
- * common with ISO/IEC 14496-10.  A clause such as "8.4.2.2.1" or a table
- * such as "Table 9-5" named in a comment of these files is that edition's.
+ * The decoder reads progressive frames of 8-bit 4:2:0 streams: the
+ * Constrained Baseline, Baseline, Main and High profiles, and streams of
+ * other profiles whose sequence stays within what those use.  Field
+ * pictures, MBAFF frames, the 4:0:0, 4:2:2 and 4:4:4 formats, bit depths
+ * above 8, lossless coding, slice groups, data partitioning and the SP
+ * and SI slices are refused.  Redundant pictures are skipped.
  *
  * Every function that reads the bitstream treats it as untrusted: it never
  * reads outside its buffers, never indexes an array with a value it has
  * not checked against the array, and never loops without a bound that the
  * buffer sizes or these limits give.  A failure is returned, never asserted.
+ *
+ * Arithmetic never relies on undefined or implementation-defined
+ * behaviour, whatever the bitstream holds: no signed overflow (products
+ * of levels and scales, sums of picture order counts, scaled motion
+ * vectors are computed in int64_t where int32_t could overflow); no left
+ * shift of a negative value (a formula's "x << n" on a signed x is
+ * written as x * (1 << n)); and a value is clamped or wrapped by
+ * explicit arithmetic to the range of a narrower type before it is
+ * stored in it.
  *
  * The error values, used alike by every part:
  *
@@ -33,7 +38,7 @@
  *            of a NAL unit, a reference to an absent parameter set).
  *   ENOTSUP  The bitstream is valid but uses a tool or a format outside
  *            the range above.
- *   ENOMEM   An allocation failed.
+ *   ENOMEM   An allocation failed, or a frame pool reached its limit.
  *   ENOBUFS  A buffer or queue the caller sized is too small (a caller's
  *            mistake, or an output queue the caller has not emptied).
  *   EBUSY    The decoder holds output the caller must take first.
@@ -49,6 +54,10 @@
 #include <stdint.h>
 
 /*
+ * The clause, table and equation numbers in the comments of these files
+ * ("8.4.2.2.1", "Table 9-5", "8-223") are those of ITU-T H.264 (08/2021),
+ * whose text is common with ISO/IEC 14496-10.
+ *
  * The largest picture taken, from the highest level of Table A-1 (level
  * 6.2: MaxFS 139264 macroblocks) and A.3.1 f) and g) (each side at most
  * Sqrt( MaxFS * 8 ) macroblocks).

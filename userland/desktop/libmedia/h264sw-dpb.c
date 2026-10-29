@@ -183,12 +183,14 @@ h264sw_dpb_store(
 	struct h264sw_frame *current,
 	unsigned marking,
 	uint32_t long_idx,
+	int output,
 	struct h264sw_output_queue *queue)
 {
 	UNUSED_PARAMETER(dpb);
 	UNUSED_PARAMETER(current);
 	UNUSED_PARAMETER(marking);
 	UNUSED_PARAMETER(long_idx);
+	UNUSED_PARAMETER(output);
 	UNUSED_PARAMETER(queue);
 
 	/* Reports that the function is not implemented yet. */
@@ -207,6 +209,26 @@ h264sw_dpb_bump(
 	struct h264sw_output_queue *queue)
 {
 	UNUSED_PARAMETER(dpb);
+	UNUSED_PARAMETER(queue);
+
+	/* Reports that the function is not implemented yet. */
+	return ENOSYS;
+}
+
+/*
+ * Empties a frame buffer for a frame to be stored (C.4.2, C.4.5.1, C.4.5.2).
+ *
+ * Not implemented yet: the specification is the comment of the
+ * declaration in h264sw-dpb.h.
+ */
+int
+h264sw_dpb_make_room(
+	struct h264sw_dpb *dpb,
+	uint32_t frame_num,
+	struct h264sw_output_queue *queue)
+{
+	UNUSED_PARAMETER(dpb);
+	UNUSED_PARAMETER(frame_num);
 	UNUSED_PARAMETER(queue);
 
 	/* Reports that the function is not implemented yet. */

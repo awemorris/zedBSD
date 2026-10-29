@@ -30,6 +30,24 @@ const uint8_t h264sw_blk4x4_x[16] = { 0 };
 const uint8_t h264sw_blk4x4_y[16] = { 0 };
 
 /*
+ * Resets a macroblock's entry to the state before it is decoded.
+ *
+ * Not implemented yet: the specification is the comment of the
+ * declaration in h264sw-mb.h.
+ */
+void
+h264sw_mb_reset(
+	struct h264sw_mb *mb,
+	int32_t slice)
+{
+	UNUSED_PARAMETER(mb);
+	UNUSED_PARAMETER(slice);
+
+	/* Does nothing yet. */
+	return;
+}
+
+/*
  * Gives the meaning of an mb_type value of a slice type.
  *
  * Not implemented yet: the specification is the comment of the

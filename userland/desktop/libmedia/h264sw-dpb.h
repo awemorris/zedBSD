@@ -79,7 +79,8 @@ struct h264sw_output_queue {
  * max_num_ref_frames the SPS's; reorder the most frames that may wait
  * for output before one must be output (max_num_reorder_frames when the
  * VUI sends it, else size).  max_long_term_frame_idx is
- * MaxLongTermFrameIdx, -1 for "no long-term frame indices".  Owned by
+ * MaxLongTermFrameIdx, -1 for "no long-term frame indices".
+ * max_frame_num is the SPS's MaxFrameNum, for FrameNumWrap.  Owned by
  * the decoder, embedded in it.
  */
 struct h264sw_dpb {
@@ -87,6 +88,7 @@ struct h264sw_dpb {
 	unsigned max_num_ref_frames;
 	unsigned reorder;
 	int32_t max_long_term_frame_idx;
+	uint32_t max_frame_num;
 	struct h264sw_dpb_entry entry[H264SW_MAX_DPB_FRAMES];
 };
 
@@ -102,7 +104,8 @@ void h264sw_output_clear(struct h264sw_output_queue *queue);
 /*
  * Prepares an empty DPB for a sequence.
  *
- * sps gives dpb_frames, max_num_ref_frames and max_num_reorder_frames.
+ * sps gives dpb_frames, max_num_ref_frames, max_num_reorder_frames and
+ * max_frame_num.
  * Every entry is empty and max_long_term_frame_idx is -1.  The DPB must
  * be empty (h264sw_dpb_clear) when it is prepared again.
  */
@@ -132,16 +135,25 @@ int h264sw_dpb_flush(struct h264sw_dpb *dpb, struct h264sw_output_queue *queue);
  * IDR: with gaps_in_frame_num_value_allowed_flag 1, for each
  * UnusedShortTermFrameNum (7-24) a frame is taken from pool, filled grey,
  * marked non-existing, given that frame_num, marked short-term by the
- * sliding window (8.2.5.3) and stored as C.4.2 says (bumping when full).
+ * sliding window (8.2.5.3) and stored as C.4.2 says (bumping when full,
+ * with the room rule of h264sw_dpb_make_room).  Its order counts: for
+ * pic_order_cnt_type 1 and 2, h264sw_poc_compute with a header whose
+ * frame_num is UnusedShortTermFrameNum, nal_ref_idc 1, not IDR, no
+ * operation 5 and delta_pic_order_cnt[0] and [1] 0 (8.2.5.2, the
+ * paragraph after its constraints), then h264sw_poc_finish; for type 0,
+ * which defines none, the PicOrderCnt of the frame stored last (a
+ * conforming stream never predicts from these frames, 8.2.5.2 a) to d),
+ * so only the list order of 8.2.4.2.3 sees the value).
  * Only the last max_num_ref_frames of a longer gap are made: the sliding
  * window would remove the earlier ones at once, so the result is the
  * same.  With the flag 0 the gap is an error of the stream (lost
  * pictures, 8.2.5.2 informative): the same frames are made, for
  * concealment, and 0 is returned all the same.
  *
- * poc is the decoder's order count state (prev_ref_frame_num is taken
- * from it and moved past each frame made).  Returns 0, ENOMEM when the
- * pool gives no frame, ENOBUFS when the queue fills.
+ * poc is the decoder's order count state (prev_ref_frame_num and the
+ * type 1 and 2 state are taken from it and moved past each frame made).
+ * Returns 0, ENOMEM when the pool gives no frame, ENOBUFS when the queue
+ * fills.
  */
 int h264sw_dpb_gaps(struct h264sw_dpb *dpb, const struct h264sw_sps *sps, const struct h264sw_slice_header *header, struct h264sw_poc_state *poc, struct h264sw_frame_pool *pool, struct h264sw_output_queue *queue);
 
@@ -151,9 +163,14 @@ int h264sw_dpb_gaps(struct h264sw_dpb *dpb, const struct h264sw_sps *sps, const 
  * header is the current picture's first slice header, current the
  * decoded frame (its frame_num and poc set).  For an IDR picture: every
  * entry is marked unused (8.2.5.1); when no_output_of_prior_pics_flag is
- * 1, or inferred 1 because the size or dpb_frames changed from the
- * previous sequence (changed is 1 then), the DPB is cleared without
- * output.  For another picture: the marking process of 8.2.5.1 runs for
+ * 1 the DPB is cleared without output.  changed is 1 when the IDR
+ * picture starts a sequence whose PicWidthInMbs, FrameHeightInMbs or
+ * dpb_frames differ from the previous one's: C.4.4 lets the HRD infer
+ * no_output_of_prior_pics_flag 1 then, but NOTE 3 of C.4.4 asks decoders
+ * to handle it more gracefully, so this decoder still outputs the old
+ * frames (by bumping) unless the flag itself is 1; changed only makes
+ * the caller set up the new sequence's DPB after this call (the DPB is
+ * empty on return).  For another picture: the marking process of 8.2.5.1 runs for
  * the current picture when it is a reference picture: the sliding window
  * (8.2.5.3) or the adaptive operations 1 to 6 (8.2.5.4, with picNumX of
  * 8-39 and the long-term rules), in their order.  Then frames neither
@@ -183,17 +200,20 @@ int h264sw_dpb_remove(struct h264sw_dpb *dpb, const struct h264sw_sps *sps, cons
  * is stored needed for output; when none is and its PicOrderCnt is lower
  * than that of every frame needed for output, it is output at once
  * without being stored; otherwise bumping until a buffer is empty, then
- * stored.  The DPB takes its own reference to current.
+ * stored.  The DPB takes its own reference to current.  output is 0 for
+ * a picture that must not be output (a leading picture after a start at
+ * a non-IDR picture): a reference picture is then stored not needed for
+ * output, a non-reference picture is not stored at all.
+ *
+ * Each "bumping until a buffer is empty" is h264sw_dpb_make_room.
  *
  * Then, as the output order allows and to keep the latency low, frames
  * are output by bumping while more than reorder frames are needed for
- * output.  A reference picture that the DPB cannot hold (more references
- * than max_num_ref_frames after the marking: a broken stream) has its
- * oldest short-term reference marked unused first.
+ * output.
  *
  * Returns 0, ENOBUFS when the queue fills.
  */
-int h264sw_dpb_store(struct h264sw_dpb *dpb, struct h264sw_frame *current, unsigned marking, uint32_t long_idx, struct h264sw_output_queue *queue);
+int h264sw_dpb_store(struct h264sw_dpb *dpb, struct h264sw_frame *current, unsigned marking, uint32_t long_idx, int output, struct h264sw_output_queue *queue);
 
 /*
  * Runs the bumping process once (C.4.5.3).
@@ -205,6 +225,22 @@ int h264sw_dpb_store(struct h264sw_dpb *dpb, struct h264sw_frame *current, unsig
  * ENOBUFS (as a negative value: -ENOBUFS) when the queue is full.
  */
 int h264sw_dpb_bump(struct h264sw_dpb *dpb, struct h264sw_output_queue *queue);
+
+/*
+ * Empties a frame buffer for a frame to be stored (C.4.2, C.4.5.1, C.4.5.2).
+ *
+ * Runs h264sw_dpb_bump while no buffer is empty.  When no buffer is
+ * empty and bumping outputs nothing (every frame is a reference no longer
+ * needed for output: a stream that keeps more references than the DPB
+ * holds), the short-term reference with the smallest FrameNumWrap
+ * (computed against frame_num, the frame to be stored, and the DPB's
+ * max_frame_num, as 8.2.4.1) is
+ * marked unused and its buffer emptied; if there is none, the long-term
+ * reference with the smallest LongTermFrameIdx.  So the loop always
+ * ends: each pass outputs or frees a frame.  Returns 0, or ENOBUFS when
+ * the queue fills.
+ */
+int h264sw_dpb_make_room(struct h264sw_dpb *dpb, uint32_t frame_num, struct h264sw_output_queue *queue);
 
 /* Counts the entries marked as used for reference (short and long). */
 unsigned h264sw_dpb_references(const struct h264sw_dpb *dpb);

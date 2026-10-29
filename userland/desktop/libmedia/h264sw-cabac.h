@@ -50,10 +50,12 @@
  * read-ahead bits not yet consumed).  state[ctxIdx] is pStateIdx (bits
  * 0..5) and valMPS (bit 6) of each context variable.
  *
- * Reading past the end of data supplies zero bits and sets error (a
- * conforming slice ends with end_of_slice_flag before it): the bins read
- * then are garbage, and the macroblock layer stops at its next check of
- * error.
+ * When the 9-bit model of the clauses would read a bit beyond the end
+ * of data, zero bits are supplied and error is set (a conforming slice
+ * ends with end_of_slice_flag before that): the bins read then are
+ * garbage, and the macroblock layer stops at its next check of error.
+ * An engine that reads ahead of the model pads with zeros without
+ * setting error for bits the model has not consumed.
  */
 struct h264sw_cabac {
 	const uint8_t *data;
@@ -73,9 +75,10 @@ struct h264sw_cabac {
  * bits up to the byte boundary are read and checked to be 1 (EINVAL
  * otherwise).  slice_type is H264SW_SLICE_I, _P or _B; cabac_init_idc
  * 0..2 (ignored for I); qp is SliceQPY.  Each ctxIdx 0..459 except 276
- * that Table 9-11 lists for the slice type is initialized from (m, n) by
- * 9-5 (with Clip3( 0, 51, SliceQPY )); the others are set to pStateIdx 0
- * and valMPS 0 and are never read.  Then codIRange is 510 and codIOffset
+ * that Table 9-11 lists for the slice type is initialized from (m, n) of
+ * h264sw_cabac_init_mn (h264sw-cabac-init.h) by 9-5 (with Clip3( 0, 51,
+ * SliceQPY )); the others are set to pStateIdx 0 and valMPS 0 and are
+ * never read.  Then codIRange is 510 and codIOffset
  * the next 9 bits (9.3.1.2); codIOffset 510 or 511 returns EINVAL.
  *
  * The bytes from the boundary to the end of the RBSP are taken over;
@@ -99,10 +102,11 @@ unsigned h264sw_cabac_bypass(struct h264sw_cabac *cabac);
 /*
  * Decodes the bin of end_of_slice_flag or of mb_type I_PCM (DecodeTerminate, 9.3.3.2.4).
  *
- * Returns 1 when the bin is 1: the arithmetic decoding ends there (the
- * clause's last read of rbsp_stop_one_bit is left to the caller, or to
- * h264sw_cabac_pcm for I_PCM).  Returns 0 otherwise, after
- * renormalizing.
+ * Returns 1 when the bin is 1: the arithmetic decoding ends there, and
+ * the last bit read into codIOffset is the rbsp_stop_one_bit when the
+ * bin was end_of_slice_flag (9.3.3.2.4), so nothing more is read; for
+ * I_PCM, h264sw_cabac_pcm goes on from that position.  Returns 0
+ * otherwise, after renormalizing (9.3.3.2.2).
  */
 unsigned h264sw_cabac_terminate(struct h264sw_cabac *cabac);
 
