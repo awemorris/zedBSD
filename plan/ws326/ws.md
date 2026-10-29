@@ -18,6 +18,13 @@
 - p002 以降（実装、Sonnet 5.5 の high の subagent）: header を変えずに .c を実装し、単体試験を通す。header の不備は直さず Q1 に返す（Q1 か Opus が header を直す）。
 - 最後に組み込み（libmedia の backend）、適合の試験、速さ、規約の全文の見直し。
 
+## Q1 の判断（2026-10-30、p001 の問い）
+
+1. h264sw.h の「節の番号は ITU-T H.264 (08/2021)」の記述は定数の block の comment なら guardrail に合う（file の先頭でない）。
+2. 適合の bitstream の cache は main の共有の `/home/awe/zedBSD-claude1/build/sources/h264-conformance/`（git の外、消さない場所）。実装の担当は `H264SW_CONFORMANCE_DIR` にそこを渡す。p001 で取った 3 本は写し済み。
+3. profile の範囲: Extended（constraint_set0/1 が 1）や High 10・4:2:2・4:4:4 Predictive の profile_idc でも、中身が 8 bit 4:2:0 の frame なら受ける（A.2）は、ユーザーの「Constrained Baseline・Main・High」を狭めない技術の判断として採る（ユーザーに報告）。
+4. 実装の Phase は、依存の無い物から並べて Sonnet 5.5 high の subagent を別々の worktree で動かす（p002・p008・p010 から）。
+
 ## Phase
 
 設計は [design.md](design.md)（module・決定・所有・試験の道）、各 module の仕様は `userland/desktop/libmedia/h264sw*.h` の comment。p002〜p020 は Sonnet 5.5 high の 1 回の起動で 1 Phase（header 1〜2 個）、依存の Phase の実装が main に入ってから始める。
