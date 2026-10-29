@@ -42,7 +42,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p008](phase008/phase.md) | macroblock の型と neighbour: h264sw-mb（試験 test-mb） | planned | p001 |
 | [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | planned | p002、p008 |
 | [ws326-p010](phase010/phase.md) | CABAC の context の初期値の表: h264sw-cabac-init（試験 test-cabac_init） | cleared（2026-10-30 Q1、main c294565dd。1840 対の値を仕様の PDF と独立の抜き出しで照合、4159 checks） | p001 |
-| [ws326-p011](phase011/phase.md) | CABAC の engine: h264sw-cabac（試験 test-cabac） | planned | p002、p010 |
+| [ws326-p011](phase011/phase.md) | CABAC の engine: h264sw-cabac（試験 test-cabac） | 実装済み・試験 PASS（2026-10-30、test-cabac 195654 checks、cleared は Q1 が受け入れを見て決める） | p002、p010 |
 | [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | planned | p008、p011 |
 | [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | planned | p003 |
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | planned | p008 |
