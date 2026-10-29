@@ -10,6 +10,8 @@
 
 「libbrowserはCSS描画のためのベクトル描画を持っていると思います。持っていないなら、内部に実装するのがいいと思います。このベクトル描画機能を使って、libbrowser内にSVG描画を実装するのがいいと思います。WebP, AVIFは、あとでlibwebp-compatのような実装をしたいと思いますが、H.264デコーダが安いAIモデルで実装できるかの実験結果を待ちたいと思います。」
 
+- 2026-10-30 ユーザー「WS328は、Vulkanで描画する実装にします。」→ path の塗り・線・gradient などの描画は Vulkan（GPU）で行う（CPU の参照の描画との関係は設計で示す）。
+
 ## 今の状態（Q1 の調べ、2026-10-30）
 
 - 描画の display list（`paint/paint.h`）の種類は PAINT_RECT・PAINT_TEXT・PAINT_CLIP・PAINT_UNCLIP・PAINT_IMAGE だけ。path・曲線・gradient・角丸の描画は無い（comment は「Rounded corners, background images, opacity and shadows come later」）。CPU の参照の描画（software.c）と Vulkan の描画（vulkan.c）の 2 つが同じ display list を描く。
