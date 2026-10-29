@@ -54,6 +54,8 @@
 #include <keiland/keiland_instance.h>
 #include <keiland/keiland_appearance.h>
 #include <keiland/keiland_tr.h>
+#include <keiland/keiland_thread.h>
+#include <keiland/keiland_socket.h>
 
 /*
  * The desktop's shared widgets and controls: one library the desktop's

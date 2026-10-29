@@ -43,6 +43,8 @@ LIBKEILAND_SOURCES += \
 	userland/desktop/libkeiland/ui/app.c \
 	userland/desktop/libkeiland/platform/platform-posix.c \
 	userland/desktop/libkeiland/platform/process-posix.c \
+	userland/desktop/libkeiland/platform/thread-posix.c \
+	userland/desktop/libkeiland/platform/socket-posix.c \
 	userland/desktop/libkeiland/process.c \
 	userland/desktop/libkeiland/launch.c \
 	userland/desktop/libkeiland/ui/declare.c \
