@@ -219,3 +219,15 @@ make -j16 ZEDBSD_CONFIG=plan/ws282/tests/config-rpi5.mk BUILD=build/ws282/rpi5 b
 2. Q1 に 5330 と HDMI capture の割り当てを頼む。5330 の camera の image の config（config-5330.mk + camcap camcheck）を `plan/ws282/tests/` に作り、p003 → p004a → p004b の順に流す。xHCI の不具合が出たら BUG の ticket にして WS197 へ。
 3. ユーザーに webcam（D12）と pattern の PC（D11）の都合、login 画面の件を聞く（Q1 経由）。
 4. p006 → p005（WS197 の L2 の後）→ p007 → p008（Pi 5 の GPU）→ p009 → p010 → p011 の license の監査。
+
+## 5330 の webcam の最初の結果（2026-10-30、WS315 の P3 が試験の途中で取った）
+
+- 機械: 5330（Dell Latitude 5330）の内蔵の webcam「Integrated_Webcam_HD」（0c45:6d1d、UVC 1.00、isoch の endpoint 0x81、alternate 1:128x1 … 6:1024x3、host は 3072 まで）。uvc の attach は正常で cam0 ができた。
+- kernel: WS315 の tree（main の WS282 を含む）＋ RTL815x の TX queue の変更、userland は WS315 の img1 の image（camcap 入り）。
+- 結果: `sudo camcap -n 10 -t 5000 -o /tmp/ws315-cam.jpg` が rc=3、`CAM_DEQUEUE_BUFFER: Input/output error`。
+  - info: capabilities=0x0000004a max_buffers=8 format_count=2 clock_hz=15000000 host_payload_max=3072
+  - format: mjpeg 640x480 interval 333333、image 614989、payload 3072、buffers 4
+  - counters: frames=0、resubmit_failures=1、他は全部 0（dropped・invalid_header・missed_packets・sequence_gaps・halt_timeouts・no_signal）
+  - 2 回（kernel だけの差し替えと image）とも同じ。
+- 見立て（未解析）: isoch の最初の resubmit が失敗して stream が止まった。xHCI の isoch の送り直しの道（WS197 の isoch・WS221 p014 の xHCI の queue の変更との関係も）から調べる。
+- 証拠の file（P3 の worktree `/home/awe/zedBSD-worktrees/p3-ws315` の中、git の外）: `build/hw5330/logs/ws315-k5-dmesg.txt`・`ws315-img1-dmesg.txt`（uvc の行は 249〜279 付近）、`build/ws315-hw/k5/extra.txt`・`img1/extra.txt`。
