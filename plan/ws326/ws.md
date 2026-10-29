@@ -43,7 +43,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | cleared（2026-10-30 Q1、main 7a918c446。test-cavlc 87868 checks。Kraft の和は仕様の表どおり 1 未満の列がある（phase.md の記述の誤り、Q1 が Sonnet の値を採った）） | p002、p008 |
 | [ws326-p010](phase010/phase.md) | CABAC の context の初期値の表: h264sw-cabac-init（試験 test-cabac_init） | cleared（2026-10-30 Q1、main c294565dd。1840 対の値を仕様の PDF と独立の抜き出しで照合、4159 checks） | p001 |
 | [ws326-p011](phase011/phase.md) | CABAC の engine: h264sw-cabac（試験 test-cabac） | cleared（2026-10-30 Q1、main 8627fc588。test-cabac 195654 checks、突然変異 5 つで FAIL を確認） | p002、p010 |
-| [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | planned | p008、p011 |
+| [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | 実装済み・試験 PASS（2026-10-30、test-cabac_se 168241 checks、cleared は Q1 の受け入れ後） | p008、p011 |
 | [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | cleared（2026-10-30 Q1、main 4c2e27dd5。test-transform 33158 checks） | p003 |
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | cleared（2026-10-30 Q1、main dfd380ae5。test-intra 593 checks） | p008 |
 | [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
