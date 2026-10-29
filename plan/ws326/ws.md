@@ -47,7 +47,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | planned | p003 |
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | cleared（2026-10-30 Q1、main dfd380ae5。test-intra 593 checks） | p008 |
 | [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
-| [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | planned | p008 |
+| [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | 実装済み・試験 PASS（2026-10-30、担当。cleared は Q1 が決める） | p008 |
 | [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | planned | p002、p008、p009、p012 |
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
