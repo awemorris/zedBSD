@@ -194,9 +194,10 @@ struct nvrtx_vk_execute {
 
 /*
  * What a command buffer's records have bound so far, and the pass they
- * are in.
+ * are in; push_bytes are the command buffer's push constant bytes.
  */
 struct execute_state {
+	const uint8_t *push_bytes;
 	const struct nvrtx_vk_pipeline *pipeline;
 	uint32_t viewport[6];
 	bool viewport_set;
@@ -309,6 +310,7 @@ nvrtx_vk_execute(
 	state = kern_calloc(1U, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
+	state->push_bytes = command->push_bytes;
 
 	/* A push buffer begun before and never submitted (its command buffer failed) is begun again; else a slot is taken. */
 	error = 0;
@@ -852,7 +854,7 @@ execute_bind(
 		state->index_type = record->values[0];
 		break;
 	case GPU_OP_CMD_PUSH_CONSTANTS:
-		kern_memcpy(state->push + record->first, record->push, record->count);
+		kern_memcpy(state->push + record->first, state->push_bytes + record->push_at, record->count);
 		break;
 	default:
 		break;

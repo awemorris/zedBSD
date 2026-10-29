@@ -126,15 +126,14 @@ nvrtx_vk_command_reset(
 		if (video)
 			nvrtx_vk_video_drop(record);
 
-		/* The regions and the push buffer, when the record kept them. */
+		/* The regions, when the record kept them. */
 		if (record->regions != NULL)
 			kern_free(record->regions);
-		if (record->push != NULL)
-			kern_free(record->push);
 	}
 
-	/* The array stays for the next recording; the state and the error start over. */
+	/* The arrays stay for the next recording; the state and the error start over. */
 	command->record_count = 0U;
+	command->push_used = 0U;
 	command->state = NVRTX_VK_COMMAND_INITIAL;
 	command->error = 0;
 }
@@ -547,10 +546,12 @@ command_destroy(
 
 	command = payload;
 
-	/* The records, the array and the command buffer. */
+	/* The records, the arrays and the command buffer. */
 	nvrtx_vk_command_reset(command);
 	if (command->records != NULL)
 		kern_free(command->records);
+	if (command->push_bytes != NULL)
+		kern_free(command->push_bytes);
 	kern_free(command);
 
 	/* Succeeded: the command buffer is gone. */
