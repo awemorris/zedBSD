@@ -3,7 +3,7 @@
 # WS314 libkeiland の公開の API を component ごとの header に分け、プログラミングの解説を書き、fd と UNIX への依存を API から外す
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: completed の判定待ち（Q1）（2026-10-30 Q1 が作成、q1690 で P2 が p001 から実行。全 Phase が cleared）
+- Status: completed（2026-10-30 ユーザー「completeでOKです。」。全 Phase cleared、p010 の後の QEMU・FreeBSD の回帰も PASS）
 - 目標: (1) `userland/desktop/include/keiland/keiland.h` の定義を component ごとの `keiland_*.h` に分け、`keiland.h` はそれらを include する入口にする。
   (2) Keiland のプログラミングの解説（英語）を `docs/` に書く。(3) app・desktop の program が fd・pipe・socket・fork に触れない API に置き換え、
   `kl_app_watch_fd()` と `kl_instance_fd()` を公開の API から外す。その後に解説へ新しい API を足す。
@@ -25,6 +25,8 @@
 12. 「kl_appに、システムの言語の変更を通知するイベントを追加してほしいです。KeilandのリファクタのWSに追加しておいてください。」（2026-10-30）
 13. 「kl_appの言語変更イベントは、変更された言語名も通知するのがいいです。連続する変更が短時間にあると、kl_settingsの読みが最新とは限らないからです。」（2026-10-30、p015 に効く）
 
+14. （判断 A〜D への回答）「A. 権限を上げる起動を API に含めるか → コンポジタがユーザに確認して、OKなら起動する、という実装にすれば、そういったAPIは含めてOKです。」「B. 変更してOKです。でもこのAPIはユースケースがまだないかも？」「C. OKです。」「D. 現状の実装はapproveします。」「completeでOKです。」（2026-10-30）
+   - 解釈（Q1）: A は今の実装（含めない）のまま WS314 を閉じ、compositor が利用者に確かめてから起動する昇格の API は将来の候補（future-work）。B は今の形で確定（例 08-worker.c が進みの通知に使う）。C・D は今の形で確定。
 ## 承認された案（2026-10-30 Q1 の提案、上の 7 で承認）
 
 - **app・window への event の post**: thread から呼べる `kl_app_post`（と `kl_window_post`）。Mailer の pipe 2 本を外す。起こす仕組みは platform の層に閉じる。

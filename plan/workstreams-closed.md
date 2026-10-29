@@ -244,3 +244,5 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS312](ws312/ws.md) | MG005 | IPv6 の fragment の受け取りと再組立て（2026-10-29 ユーザー） | completed（2026-10-29） | QEMU で大きい UDP・ping6 の fragment を受け取る |
 | [WS235](ws235/ws.md) | MG006 | Realtek RTL8125 系の共通の Ethernet driver（PCIe の RTL8127 10GbE） | completed（2026-10-29） | 10.0.10.3 の RTL8127 で 10000Mbps・ssh・tcp-perf 両向き、driver は律速でない |
 | [WS311](ws311/ws.md) | MG005 | TCP の CUBIC と既定の切り替え（2026-10-29 ユーザー） | completed（2026-10-29） | 既定を CUBIC に（遅延の経路で 1.158 倍、LAN は同じ） |
+
+| [WS314](ws314/ws.md) | MG006 | libkeiland の API を component ごとの header に分け、プログラミングの解説（英語）を書き、fd と UNIX への依存を API から外す（2026-10-30 ユーザー） | completed（2026-10-30 ユーザー「completeでOKです。」） | header の分割・解説（docs/howto/keiland-programming.md）・kl_app_post・kl_process・kl_launch・kl_instance_bind・KL_APP_LANGUAGE・libbrowser の network の thread、fd の API を公開の API から外した。昇格の起動の API は F-WS314-elevate |
