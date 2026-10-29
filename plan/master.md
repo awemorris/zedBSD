@@ -106,7 +106,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-363 · q1696 · WS328 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-363 · q1696 · WS329 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -186,6 +186,7 @@ BUG-363 · q1696 · WS328 · KL_VERSION 103。使う前に衝突を確かめる�
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS326](ws326/ws.md) | MG006 | libmedia の H.264 の software の decoder（独自、module の設計は Opus、実装は Sonnet 5.5 high）（2026-10-30 ユーザー） | incomplete（q1695 P1 が p001） | p001 module の設計 |
 | [WS327](ws327/ws.md) | MG006 | libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行、libbrowser は使わない（2026-10-30 ユーザー） | planning | p001 設計から |
+| [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |
 | [WS295](ws295/ws.md) | MG006 | Intel の xe の driver（Meteor Lake 以降の iGPU と discrete の Arc、GuC の submission、i915 の使える所は写して重複） | planning | p001 調査（担当の起動はユーザーの指示の時） |
 | [WS296](ws296/ws.md) | MG001 | src/drivers（gpu/ を除く）の comment から開発の管理情報を消し、XXX の規約の当て直し（usb など 11 file） | planned | 18 LW、担当の起動はユーザーの指示の時 |
