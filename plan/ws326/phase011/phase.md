@@ -3,7 +3,7 @@
 # ws326-p011 CABAC の engine
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30、cleared は Q1 が受け入れを見て決める）。
 - 依存: p002、p010（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -55,3 +55,35 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+2026-10-30、worktree `/home/awe/zedBSD-worktrees/s-ws326-p011`（branch `agent/s-ws326-p011`）。
+
+- 実装: `h264sw-cabac.c` に `h264sw_cabac_start`・`_decision`・`_bypass`・`_terminate`・`_pcm` と表 9-44（rangeTabLPS）・表 9-45（transIdxLPS・transIdxMPS）を入れた。header は変えていない。
+  - engine は codIOffset を scaled に持つ: `offset` = 9 bit の codIOffset の下に `bits_left`（1 byte ずつ読み足す、8 未満で 1 byte）bit の先読み。比較は `offset >= range << bits_left`、renormalization は `bits_left` を減らすだけ。
+  - `position` は「次に読む byte」で、終わりを越えた zero の補い（padding）の byte も数える。model（9 bit の式）が読んだ bit は `8 * position - bits_left`。`error` は padding の byte の bit が `bits_left` を越えて consume された時（`8 * (position - size) > bits_left`）に EINVAL。先読みだけの padding では立てない。
+  - `h264sw_cabac_pcm` は terminate が 1 を返した後、model の読んだ bit の直後から byte 境界まで（pcm_alignment_zero_bit）を飛ばし、count byte を複写し、続く byte で engine を初期化し直す。context は保つ。
+  - 初期化の context の一覧は表 9-11 の列（I: 3..10・60..275・277..459、P: 11..23・40..275・277..459、B: 24..275・277..459）。一覧に無い ctxIdx は pStateIdx 0・valMPS 0。式 9-5 の `>> 4`（負の積の切り下げ）は、積に 8192 を足して割る方法で右 shift を避けた。
+- 判断（header が書いていない所）:
+  - `h264sw_cabac_start` は、alignment の後の data が 2 byte 未満（9 bit の codIOffset が読めない）の時も EINVAL（header は 510・511 だけを書く）。失敗の時は `memset` で全 field を 0 にし `error` を EINVAL にして返す（呼び手が戻り値を見なくても次の error の確認で止まる）。
+  - `h264sw_cabac_pcm` は `error` が立っている engine・data に収まらない count・NULL の samples（count > 0）を EINVAL とし、`error` を立てる。engine の再初期化に 2 byte 足りない時も EINVAL。
+  - 規約違反の stream（codIOffset が codIRange 以上のまま）は、header が決めていないので garbage の bin を返し続けるだけで、全て unsigned の演算・範囲内の table の添字（未定義の動作なし）。
+  - 表 9-44・9-45 は、表の形の試験が値に触れるよう、header に宣言の無い非 static の `h264sw_cabac_range_lps`・`h264sw_cabac_trans_lps`・`h264sw_cabac_trans_mps` として定義した（libmedia.so の exports.map の外には出ない）。試験側が extern で宣言する。
+  - 表 9-11 の SI の列は使わない（slice_type は I・P・B だけ、他は EINVAL）。cabac_init_idc は I では見ず、P・B で 3 以上は EINVAL。qp は 0..51 に clip。
+- 表 9-44・9-45 の照合: PDF 296・297 頁（印刷 274・275 頁）の頁の画を読んで形と行の値を目で確かめ、さらに `pdftotext -layout` の出力から scratch の script（`python3 -I`、commit していない）で 64 行の rangeTabLPS と 2 x 64 の transIdx を抜き出し、C の表と全 256 + 128 個が一致することを確かめた。試験側（`cabacwriter.h`）は別に同じ script の出力から作った自分の写しを持ち、decoder の表と全部の値を比べる。
+- 試験 `plan/ws326/tests/unit/test-cabac.c` と共有の符号化 engine `plan/ws326/tests/unit/cabacwriter.h`（9.3.4 の InitEncoder・EncodeDecision・EncodeBypass・EncodeTerminate と flush・PutBit・RenormE を図 9-8〜9-12 の画から書いた。decoder の code を使っていない）:
+  - 表の形（行は増え 63 行目は 2,2,2,2、列は増えない、transIdxMPS は Min(p+1, 62)、transIdxLPS は p 以下・0 は 0・単調）と頁から読んだ値の抜き取り。
+  - 初期化: 式 9-5 を手で計算した 40 個の (ctxIdx, 種類, idc, qp, 状態)（各表から。丸めが負になる場合・preCtxState の 1 と 126 の端・64 を含む）、全 slice 型・全 idc・qp -3〜54 で、一覧の ctxIdx が式 9-5 の別実装（cabacwriter）と一致し、他は 0、276 は 0。qp の範囲外は端と同じ。
+  - 往復: 28 本の stream（I・P の idc 3 通り・B の idc 3 通り、各 4 つの qp）の 24000 操作（decision 70%・bypass 26%・terminate 0 が 4%）、合計 672000 操作。slice header の 0〜7 bit の後の alignment、最後は end_of_slice_flag 1 で error 0。状態の網羅: LPS で出た pStateIdx 63 状態中 63、(pStateIdx, qCodIRangeIdx) の組 252 中 252。
+  - PCM: 400 本の短い stream（1〜40 操作、30% が I_PCM で連続も含む）で 384 byte が一致し、続く bin が一致（1000 回以上の I_PCM、終わりの bit 位置の全ての byte 内の位置を通る）。最初の操作が I_PCM の 1 本。
+  - 誤り: 2 byte の 0 で 7 回の bypass は error 0・8 回目で error、decision の renormalization での error、510・511 の開始で EINVAL（509 は 0）、data 不足、alignment の 0 bit、壊れた reader、slice 型・idc の範囲外、ctx 460・276・0xffffffff で 0 と error、PCM の count 超過・NULL・error 後。
+  - 乱数 3000 本（0〜39 byte、0 と 0xff の偏り含む）に 200 回ずつの乱数の呼び出し（PCM を含む）で ASan・UBSan の報告 0。
+  - mutation の確認: rangeTabLPS の 1 値の変更・PCM の byte 位置の 1 bit のずれ・`>> 4` の切り下げを切り捨てに変更・error の判定の 1 bit のずれ・初期化の範囲の 1 つのずれ、の 5 つの全てで test-cabac が FAIL になった（その後元に戻した）。
+- 確かめた command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh cabac` → `test-cabac: PASS (195654 checks)`、`run-unit: PASS`。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → test-bits PASS (169)・test-bitwriter PASS (14)・test-cabac PASS (195654)・test-cabac_init PASS (4159)・test-nal PASS (95)、`run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - amd64 の `build/amd64/dynamic/libmedia.so`（Phase の command どおり）→ exit 0、warning 0（`-Wall -Wextra -Werror`、h264sw-cabac.c は compile された）。
+  - `git diff --check` → 出力なし。clang でも test-cabac.c は `-std=c89 -Wall -Wextra -Werror -Wpedantic` で通る。
+- 未実施: 実行時の QEMU・実機の試験（この Phase の範囲外）、CABAC の syntax element との結合（p012 以降）、速さの測定（ここは 1 bit ずつ数える renormalization の loop と 1 byte ずつの先読みで、速さの Phase で見直す）。
