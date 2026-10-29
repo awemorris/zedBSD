@@ -249,6 +249,14 @@ nvrtx_vk_gpu_state_kept(void *owner)
 	return false;
 }
 
+uint64_t
+nvrtx_vk_gpu_quiet(void *owner, void *backing)
+{
+	(void)owner;
+	(void)backing;
+	return 0U;
+}
+
 void
 nvrtx_vk_gpu_copied(void *owner, uint64_t bytes)
 {

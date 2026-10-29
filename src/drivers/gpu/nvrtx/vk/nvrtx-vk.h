@@ -219,6 +219,15 @@ int nvrtx_vk_gpu_idle(void *owner);
 bool nvrtx_vk_gpu_state_kept(void *owner);
 
 /*
+ * Gives a token for a memory's backing (as nvrtx_vk_memory_attach() or
+ * nvrtx_vk_memory_import() gave it) while only the owner's own runs may
+ * have written it lately: equal nonzero tokens at two times mean nothing
+ * else (the CPU, another open, another engine, a stop or reset) wrote it
+ * in between; 0 means it is not known (provided by the node).
+ */
+uint64_t nvrtx_vk_gpu_quiet(void *owner, void *backing);
+
+/*
  * Counts a transfer the CPU did through the window instead of the GPU, for
  * the node's counts (provided by the node).
  */

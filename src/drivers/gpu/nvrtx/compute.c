@@ -340,6 +340,7 @@ nvrtx_compute_submit(
 
 	/* The doorbell: the graphics runlist and the channel. */
 	nvrtx_wr32(gpu, COMPUTE_REG_DOORBELL, (gpu->engine.pick.graphics_runlist << 16) | COMPUTE_CHID);
+	(void)nvrtx_gpu_submitted(gpu);
 
 	/* Succeeded: the GPU fetches the entry. */
 	return 0;

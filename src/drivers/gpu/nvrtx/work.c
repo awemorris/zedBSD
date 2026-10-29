@@ -602,8 +602,9 @@ nvrtx_work_channel_stop(
 	size_t length;
 	int error;
 
-	/* Nothing is submitted to it from now on. */
+	/* Nothing is submitted to it from now on; what any run left in memory is not to be relied on. */
 	channel->ready = 0;
+	(void)nvrtx_gpu_submitted(gpu);
 
 	/* The stop, at once. */
 	kern_memset(params, 0, sizeof(params));
@@ -636,7 +637,8 @@ nvrtx_work_channel_reset(
 	size_t length;
 	int error;
 
-	/* The reset of the graphics engine, the default reason. */
+	/* The reset of the graphics engine, the default reason (counted as a submission: what runs left is not relied on). */
+	(void)nvrtx_gpu_submitted(gpu);
 	length = nvrtx_recover_reset_params(params, NVRTX_ENGINE_GRAPHICS, reported);
 	error = nvrtx_rm_control(gpu, NVRTX_HANDLE_CLIENT, channel->handle_channel, NVRTX_CTL_RESET_CHANNEL, params, length, &reply, &reply_length);
 	if (error != 0)
@@ -1119,9 +1121,11 @@ nvrtx_work_channel_submit(
 			slot_length);
 	}
 
-	/* The doorbell, once every entry is on the ring. */
+	/* The doorbell, once every entry is on the ring; it counts as a submission. */
 	if (error == 0)
 		error = work_doorbell(gpu, channel);
+	if (error == 0)
+		(void)nvrtx_gpu_submitted(gpu);
 
 	/* Gives up the submission, with the lock released. */
 	if (error != 0) {

@@ -385,6 +385,14 @@ nvrtx_vk_gpu_state_kept(void *owner)
 	return false;
 }
 
+uint64_t
+nvrtx_vk_gpu_quiet(void *owner, void *backing)
+{
+	(void)owner;
+	(void)backing;
+	return 0U;
+}
+
 /* The node decodes no video here. */
 bool
 nvrtx_vk_video_available(

@@ -789,7 +789,21 @@ struct nvrtx_gpu {
 	/* Set just before FWSEC-FRTS runs: from then on the end of the boot tears the region down or reports it. */
 	int region_written;
 	volatile int worker_running;
+	/*
+	 * Counts the submissions to any of the GPU's engines (every one may
+	 * write a blob) and the channels' stops and resets, atomically;
+	 * nvrtx_gpu_submitted() adds one.
+	 */
+	uint64_t submissions;
 };
+
+/* Counts one more submission to an engine of the GPU and gives the count after it. */
+static inline uint64_t
+nvrtx_gpu_submitted(
+	struct nvrtx_gpu *gpu)
+{
+	return __atomic_add_fetch(&gpu->submissions, 1U, __ATOMIC_SEQ_CST);
+}
 
 uint32_t nvrtx_rd32(const struct nvrtx_gpu *gpu, uint32_t offset);
 void nvrtx_wr32(const struct nvrtx_gpu *gpu, uint32_t offset, uint32_t value);

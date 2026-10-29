@@ -811,6 +811,7 @@ nvdec_submit(
 
 	/* Rings the doorbell, so the engine reads the ring. */
 	nvrtx_wr32(gpu, NVDEC_REG_DOORBELL, (nvdec->runlist << 16) | NVDEC_CHID);
+	(void)nvrtx_gpu_submitted(gpu);
 
 	/* Succeeded: the semaphore reaches the value once the segment is done. */
 	nvdec->fence = value;

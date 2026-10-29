@@ -925,6 +925,7 @@ node_resource_write(
 	error = nvrtx_node_backing_cpu(node, resource->backing, &target);
 	if (error != 0)
 		return error;
+	resource->backing->cpu_written = 1;
 	target += offset;
 	for (at = 0U; at < bytes; at++)
 		target[at] = source[at];
@@ -962,10 +963,11 @@ node_resource_map(
 		return 0;
 	}
 
-	/* A blob: its place in the window, which it takes now if it has none. */
+	/* A blob: its place in the window, which it takes now if it has none; the application may write it from now on. */
 	error = nvrtx_node_backing_cpu(node, resource->backing, &cpu);
 	if (error != 0)
 		return error;
+	resource->backing->cpu_written = 1;
 	mapping->physical = nvrtx_bo_bus(node->gpu, &resource->backing->bo);
 	mapping->address = (void *)(uintptr_t)cpu;
 	mapping->bytes = resource->backing->bo.size;
