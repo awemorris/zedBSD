@@ -3,7 +3,7 @@
 # ws326-p005 frame と POC
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30。cleared は Q1 が受け入れを見て決める）。
 - 依存: p003、p004（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -53,3 +53,33 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-30（host の `date`）。
+- 実装: `userland/desktop/libmedia/h264sw-frame.c`、`userland/desktop/libmedia/h264sw-poc.c`（header は変えていない）。
+  試験: `plan/ws326/tests/unit/test-frame.c`（284 checks）、`plan/ws326/tests/unit/test-poc.c`（382 checks）。期待の値は 8.2.1 の式 8-3〜8-13 を紙で追った値
+  （type 0 は MaxPicOrderCntLsb 16 の wrap と半分ちょうどの境、type 1 は offset_for_ref_frame { 4, 2 }・offset_for_non_ref_pic -1・offset_for_top_to_bottom_field 1 の 8 枚、frame_num の wrap 2 回、cycle 0 と 1 と 255 個、type 2 は 2n と 2n - 1 と wrap、
+  mmco5 は type 0・1・2 の reset）。誤りは int64 の積と和の溢れ、int32 を越える結果、FrameNumOffset の範囲、巨大な poc_cycle_length・frame_num・poc_lsb・delta。固定の乱数 20000 組で EINVAL か成功だけを返すこと。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh frame poc` → `test-frame: PASS (284 checks)`、`test-poc: PASS (382 checks)`、`run-unit: PASS`（ASan・UBSan・leak の報告 0）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → 全 14 本 PASS、最後の行 `run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `build/amd64/dynamic/libmedia.so` の make → exit 0、出力に warning 0。
+  - `git diff --check` → 問題なし。
+  - 変異試験（git の外で実装を壊して戻した）: wrap の >= と >、type 0 の msb の符号、absFrameNum の -1、type 2 の -1、prevFrameNumOffset の mmco5 の 0、mmco5 後の prev_lsb、非参照で prev_ref_frame_num を動かす、int64 の積の検査の削除、mmco5 後の int32 検査の削除、
+    finish の clamp を cast に、id の増分、limit の境、灰の値、dead の pool の解放、二重 unref の保護、plane の配置、のどれも試験が FAIL した。捕まらなかった変異は motion の memset を 1 byte 短くする物だけ（最後の record の padding で、観測できない）。
+- 判断（header が黙っている所・読み方が二つある所）:
+  - frame pool: crop の幅・高さが 0 は EINVAL（SPS が空の window を拒む）。`pool` が NULL も EINVAL。id の counter は 0xFFFFFFFF の次を 1 にする（0 は使わない）。
+    get は dead の pool と NULL の pool で NULL。refs が 0 の frame への unref は無視（二重 unref で free list に二重に載せない）。get のたびに crop を pool から入れ直す。`fill_grey` は non_existing を触らない（呼び手が立てる）。
+    plane は 1 回の calloc（Y の後に Cb、Cr）、stride は幅と幅/2。
+  - poc compute: sps の poc_type が 3 以上、log2_max_poc_lsb が 4..16 の外、poc_lsb が MaxPicOrderCntLsb 以上、frame_num が max_frame_num 以上、poc_cycle_length が 255 より大きい、は EINVAL。引数が NULL も EINVAL。
+    EINVAL の時は `*poc` を書かない。PicOrderCntMsb・FrameNumOffset（0..2^31-1）・top・bottom が int32 の外は EINVAL（8.2.1）。
+    mmco5 の picture は、finish が int32 の中に収まるよう compute の時点で `top - min` と `bottom - min` が 2^31-1 を越えれば EINVAL にした（finish は void で誤りを返せないため。phase.md の「int32 を越える結果は EINVAL」はこの形で満たす）。finish は念のため clamp も持つ。
+    type 1 の ExpectedDeltaPerPicOrderCntCycle は SPS の `expected_delta_per_poc_cycle` をそのまま使い（offset から再計算しない）、cycleCnt * それ は検査付きの int64 の積。途中の値は int32 に収めず、最後の top・bottom だけを検査する。
+    prevFrameNumOffset は `prev_mmco5` が立てば 0（finish も prev_frame_num_offset を 0 にするので二重に守る）。
+  - poc finish: type 0 の PicOrderCntMsb は header の構造体に無いので `top - pic_order_cnt_lsb` から戻す（compute が msb を int32 に検査済みなので正確）。type 1・2 では prev_msb・prev_lsb に触らない。
+    mmco5 の picture は nal_ref_idc を見ずに reset する（mmco5 は参照 picture にだけ在る）。
+- 所見（直していない）: frame_num の gap で作る non-existing frame を decoder が `h264sw_poc_finish` に通すと、type 0 では prev_lsb・prev_msb が合成の header の poc_lsb（0）に変わってしまう（8.2.1.1 は non-existing frame を前の参照 picture にしない）。
+  gap の frame の処理（後の DPB の Phase）は type 1・2 の prev_frame_num と prev_frame_num_offset だけを進める（finish を type 0 では呼ばない、または呼ぶ前後で prev_msb・prev_lsb を保存して戻す）必要がある。header は変えていない。
+- 未実施: QEMU・実機の試験（この Phase の範囲外）、decoder 全体との結合、frame_num の gap の処理（DPB の Phase）。
