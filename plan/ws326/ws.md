@@ -20,11 +20,38 @@
 
 ## Phase
 
+設計は [design.md](design.md)（module・決定・所有・試験の道）、各 module の仕様は `userland/desktop/libmedia/h264sw*.h` の comment。p002〜p020 は Sonnet 5.5 high の 1 回の起動で 1 Phase（header 1〜2 個）、依存の Phase の実装が main に入ってから始める。
+p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は fd1d6f88c（実装の Phase は header を変えない、`BASE=fd1d6f88c sh plan/ws326/tests/check-skeleton.sh`）。
+
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| ws326-p001 | module の設計: file の骨格・header の interface と仕様の comment・単体と適合の試験の仕様・実装の Phase の割り振り（Opus） | in-progress | — |
-| ws326-p002〜 | module の実装（Sonnet 5.5 high、p001 の表どおり） | planning | p001 |
+| [ws326-p001](phase001/phase.md) | module の設計: file の骨格・header の interface と仕様の comment・単体と適合の試験の仕様・実装の Phase の割り振り（Opus） | in-progress（設計・骨格・review の反映済み、Q1 の受け入れ待ち） | — |
+| [ws326-p002](phase002/phase.md) | bit reader と NAL: h264sw-bits、h264sw-nal（試験 test-bits、test-nal） | planned | p001 |
+| [ws326-p003](phase003/phase.md) | 共有の表と parameter set: h264sw-tables、h264sw-ps（試験 test-tables、test-ps） | planned | p002 |
+| [ws326-p004](phase004/phase.md) | slice header: h264sw-slice（試験 test-slice） | planned | p003 |
+| [ws326-p005](phase005/phase.md) | frame と POC: h264sw-frame、h264sw-poc（試験 test-frame、test-poc） | planned | p003、p004 |
+| [ws326-p006](phase006/phase.md) | DPB（marking・gap・出力の順）: h264sw-dpb（試験 test-dpb） | planned | p005 |
+| [ws326-p007](phase007/phase.md) | reference picture list: h264sw-reflist（試験 test-reflist） | planned | p006 |
+| [ws326-p008](phase008/phase.md) | macroblock の型と neighbour: h264sw-mb（試験 test-mb） | planned | p001 |
+| [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | planned | p002、p008 |
+| [ws326-p010](phase010/phase.md) | CABAC の context の初期値の表: h264sw-cabac-init（試験 test-cabac_init） | planned | p001 |
+| [ws326-p011](phase011/phase.md) | CABAC の engine: h264sw-cabac（試験 test-cabac） | planned | p002、p010 |
+| [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | planned | p008、p011 |
+| [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | planned | p003 |
+| [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | planned | p008 |
+| [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
+| [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | planned | p008 |
+| [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
+| [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | planned | p002、p008、p009、p012 |
+| [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
+| [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | planned | p003、p008 |
+| [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | planned | p002〜p020 |
+| [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
+| [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | planned | p021（p022 を推す） |
+| [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | planned | p022、p023 |
+| [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | planned | p023（と速さの Phase） |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。P1 が q1695 で p001。
+- 2026-10-30 P1（q1695-i01）: p001 の成果を branch agent/p1-ws326 に（header と骨格 fd1d6f88c、plan は次の commit）。design-reviewer の 23 件を反映（design.md §9）。次: Q1 が受け入れて main に merge、p002 から（p008・p010 は p001 だけに依存、並べられる）。
