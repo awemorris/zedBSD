@@ -57,3 +57,7 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## p005 から引き継ぐ事（2026-10-30 Q1、p005 の実装の担当の報告）
+
+frame_num の gap で作る non-existing の frame を POC の type 0 で `h264sw_poc_finish` に通すと、`prev_msb`・`prev_lsb` が合成の header の `poc_lsb`（0）で上書きされる。8.2.1.1 は non-existing の frame を前の参照の picture にしない。type 0 では finish を飛ばすか、前後で `prev_msb`・`prev_lsb` を保存して戻す（type 1・2 は普通に finish を通す）。
