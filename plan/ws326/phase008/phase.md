@@ -3,7 +3,7 @@
 # ws326-p008 macroblock の型と neighbour
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-10-30。cleared は Q1 が受け入れを見て決める）。
+- 状態: cleared（2026-10-30 Q1 の判定。実装と試験は Sonnet 5.5 high、e1a70942e）。
 - 依存: p001（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
