@@ -273,6 +273,7 @@ drv_usb_rtl815x_parse_rx(
 			return error;
 		}
 
+		/* Counts the frame handed over. */
 		delivered++;
 
 		/* The next descriptor starts at the next aligned offset. */

@@ -215,6 +215,9 @@ kern_platform_init(
 	size_t count;
 	unsigned slot;
 	unsigned i;
+#if CONFIG_DRIVER_USB_RTL815X
+	int rtl815x_error;
+#endif
 #if CONFIG_DRIVER_NE2000
 	int network_error;
 #endif
@@ -292,7 +295,9 @@ kern_platform_init(
 		kern_logf("usb: CDC ECM driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_RTL815X
-	if (drv_usb_rtl815x_driver_register() != 0)
+	/* Registers the Realtek USB 2.5G/5G network driver with the USB core. */
+	rtl815x_error = drv_usb_rtl815x_driver_register();
+	if (rtl815x_error != 0)
 		kern_logf("usb: Realtek RTL815x driver registration failed\n");
 #endif
 #if CONFIG_DRIVER_USB_RTL8822BU

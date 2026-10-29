@@ -37,6 +37,18 @@ RTL8157（version 0x1030）を attach で拒まず、vendor mode で上げる。
 - PHY の表は Linux の RTL_VER_16 の枝から script で値を抜いた（99 手、手で写していない）。
 - 未実施: RTL8157 の実機（手元に無い。ユーザーの購入の後）。8156B の 5330 の回帰（p003 の image の試験と合わせて、5330 の SSH の承認の後）。
 
+## 出典の確かめ（guardrail「MIT・GPL の出典のデータの引用」、2026-10-30 Q1 の依頼）
+
+- PHY の表 `rtl_8157_phy_steps`（99 手）: 直前の複数行の comment に「Values referenced: Linux 7.3 drivers/net/usb/r8152.c (r8157_hw_phy_cfg, the RTL_VER_16 branch), as data.」。
+  値と順は Linux の RTL_VER_16 の枝から script で抜いた物と一致（p005 の後に再び diff で 99 行の一致を確かめた）。順は hardware の手順なので保つ。
+- 形は独自: Linux は関数の中の呼び出しの列（`sram_write_w0w1`・`sram2_write_w0w1`・`ocp_reg_*`）で、zedBSD は {種類, address, clear, set} の表と、それを順に当てる `rtl_phy_steps_apply`。
+  型・種類の名前（`struct rtl_phy_step`、`RTL_PHY_STEP_MODIFY`・`_WRITE`・`_SRAM_A`・`_SRAM_B`）は独自。Linux の各段の comment（"XG_INRX parameter"・"green mode"・"RFI_corr_thd 5g" など）は写さず、表の comment は自分の言葉で中身を要約した（p005 で書き直した）。
+- register・bit の名前: Linux に近かった物を独自の名前に直した（p005 の commit）: `PHY_PATCH_STATUS`・`_COMMAND`・`_READY`・`_REQUEST` → `PHY_CHANGE_STATUS`・`_CONTROL`・`_HELD`・`_ASK`、
+  `rtl_phy_patch_request` → `rtl_phy_hold_for_change`、`SRAM_GREEN`（Linux `SRAM_GREEN_CFG`）→ `SRAM_LOW_POWER`、`PHY_DOWN_SPEED`・`DOWN_SPEED_*`（Linux `OCP_DOWN_SPEED`・`EN_EEE_*`）→ `PHY_CLOCK_SLOWDOWN`・`SLOWDOWN_*`、
+  `PHY_SRAM_ADDRESS`・`_DATA`・`PHY_SRAM2_*`（Linux `OCP_SRAM_ADDR`・`OCP_SRAM2_*`）→ `PHY_SRAM_A_WINDOW`・`_PORT`・`PHY_SRAM_B_WINDOW`・`_PORT`。他の新しい名前（`UREG_INDIRECT_*`・`INDIRECT_*`・`IP_U2P3`・`BMU_RX_CONFIG`・`UREG_RX_AGG_COUNT` など）は Linux の名前（`USB_ADV_*`・`ADV_CMD_*`・`USB_U2P3_V2_CTRL`・`USB_RX_AGGR_NUM`）と違う。
+  Linux の名前は出典の comment の中で引用元として挙げるだけ。
+- p002 からある名前（`MAC_PWR_CTRL2_SPEED_DOWN` など、FreeBSD・Linux の `MAC_PWR_CTRL` に近い物）は p002 の判断のまま、この Phase では変えていない（Q1 の判断に残す）。
+
 ## 結果
 
 - 資料だけの実装・host 試験・build の受け入れを満たした。実機で動くかは未確認（ユーザーの購入の後の試験の一覧へ: Q1）。

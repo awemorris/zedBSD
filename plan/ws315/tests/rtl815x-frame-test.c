@@ -88,6 +88,7 @@ check(
 	if (condition)
 		return;
 
+	/* Counts the failed check, and names it. */
 	failures++;
 	printf("rtl815x-frame: check failed: %s\n", what);
 }
@@ -135,6 +136,8 @@ record(
 		seen->frames[seen->count].length = length;
 		seen->frames[seen->count].checksums = checksums;
 	}
+
+	/* Counts the frame, whether or not there was room to keep it. */
 	seen->count++;
 
 	/* Succeeded. */
@@ -210,6 +213,15 @@ test_rx_v1(void)
 {
 	struct drv_usb_rtl815x_format format;
 	static const size_t lengths[] = { 64, 1518, 61, 9018, 1000, 70 };
+	static const uint32_t status_bits[] = {
+		(1U << 19) | (1U << 22),
+		(1U << 19) | (1U << 22),
+		(1U << 20) | (1U << 23),
+		(1U << 19),
+		0,
+		0
+	};
+	static const uint32_t status_bits_2[] = { 0, (1U << 21), 0, 0, 0, 0 };
 	size_t offsets[6];
 	struct seen seen;
 	size_t offset;
@@ -219,15 +231,14 @@ test_rx_v1(void)
 
 	/* Builds a block of frames of uneven lengths, each with checksum bits. */
 	(void)drv_usb_rtl815x_format_for(DRV_USB_RTL815X_CHIP_RTL8156, &format);
+
+	/* Appends each frame, remembering where it starts. */
 	offset = 0;
 	for (index = 0; index < 6; index++) {
 		offsets[index] = offset;
 		offset = rx_append(&format, offset, lengths[index],
-				   index == 0 ? ((1U << 19) | (1U << 22)) :
-				   index == 1 ? ((1U << 19) | (1U << 22)) :
-				   index == 2 ? ((1U << 20) | (1U << 23)) :
-				   index == 3 ? (1U << 19) : 0,
-				   index == 1 ? (1U << 21) : 0,
+				   status_bits[index],
+				   status_bits_2[index],
 				   (uint8_t)(index + 1));
 	}
 
@@ -286,6 +297,7 @@ test_rx_v1_corrupt(void)
 	size_t count;
 	int error;
 
+	/* The first-generation layout. */
 	(void)drv_usb_rtl815x_format_for(DRV_USB_RTL815X_CHIP_RTL8156, &format);
 
 	/* A frame too short after a good one. */
@@ -356,6 +368,7 @@ test_tx(
 {
 	struct drv_usb_rtl815x_format format;
 	struct drv_usb_rtl815x_tx_frame frames[8];
+	enum drv_usb_rtl815x_chip chip;
 	static uint8_t payload[9100];
 	size_t length;
 	size_t taken;
@@ -365,15 +378,18 @@ test_tx(
 	int error;
 
 	/* Prepares frames of uneven lengths, the second asking for checksums. */
-	(void)drv_usb_rtl815x_format_for(
-		generation == 2 ? DRV_USB_RTL815X_CHIP_RTL8157 : DRV_USB_RTL815X_CHIP_RTL8156,
-		&format);
+	chip = DRV_USB_RTL815X_CHIP_RTL8156;
+	if (generation == 2)
+		chip = DRV_USB_RTL815X_CHIP_RTL8157;
+	(void)drv_usb_rtl815x_format_for(chip, &format);
 	memset(payload, 0x5a, sizeof(payload));
 	memset(frames, 0, sizeof(frames));
 	for (index = 0; index < 8; index++) {
 		frames[index].data = payload;
 		frames[index].length = 60 + index * 333;
 	}
+
+	/* Asks for the TCP and IPv4 checksums on the second frame. */
 	frames[1].checksums = DRV_USB_RTL815X_TX_CSUM_TCP | DRV_USB_RTL815X_TX_CSUM_IPV4;
 	frames[1].l4_offset = 34;
 
@@ -397,11 +413,15 @@ test_tx(
 			check(get_le32(block + offset + 8) == (uint32_t)frames[index].length << 4, "tx v2 length");
 			check(get_le32(block + offset + 12) == (0x15U << 27), "tx v2 signature");
 		}
+
+		/* The frame bytes follow the descriptor. */
 		check(block[offset + format.tx_desc_size] == 0x5a, "tx frame bytes");
 		offset += format.tx_desc_size + frames[index].length;
 		if (index + 1 < taken)
 			offset = (offset + format.tx_align - 1U) & ~(format.tx_align - 1U);
 	}
+
+	/* The block ends with the last frame. */
 	check(length == offset, "tx block length");
 
 	/* A small block takes the frames that fit and leaves the rest. */

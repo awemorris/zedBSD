@@ -32,6 +32,11 @@
 #include <kern/thread.h>
 #include <uapi/errno.h>
 
+/* Marks a parameter a function takes for its signature's sake. */
+#ifndef UNUSED_PARAMETER
+#define UNUSED_PARAMETER(parameter) ((void)(parameter))
+#endif
+
 /*
  * The boot parameter that leaves the adapters to CDC NCM, should the
  * vendor mode misbehave on one of them.
@@ -331,27 +336,27 @@
 #define PHY_POWER_MODE_PFM		0x0040U
 #define MAC_PWR_CTRL4_EEE_SPEED_DOWN	0x0001U
 #define ALDPS_STATUS_OFF		0x0100U
-#define PHY_SRAM_ADDRESS		0xa436U
-#define PHY_SRAM_DATA			0xa438U
-#define PHY_SRAM2_ADDRESS		0xb87cU
-#define PHY_SRAM2_DATA			0xb87eU
-#define PHY_DOWN_SPEED			0xa442U
+#define PHY_SRAM_A_WINDOW		0xa436U
+#define PHY_SRAM_A_PORT			0xa438U
+#define PHY_SRAM_B_WINDOW		0xb87cU
+#define PHY_SRAM_B_PORT			0xb87eU
+#define PHY_CLOCK_SLOWDOWN		0xa442U
 #define PHY_A428			0xa428U
 #define PHY_A44A			0xa44aU
 #define PHY_FORCE_MODE			0xa5b4U
 #define PHY_A5EA			0xa5eaU
-#define PHY_PATCH_STATUS		0xb800U
-#define PHY_PATCH_COMMAND		0xb820U
-#define SRAM_GREEN			0x8011U
+#define PHY_CHANGE_STATUS		0xb800U
+#define PHY_CHANGE_CONTROL		0xb820U
+#define SRAM_LOW_POWER			0x8011U
 #define PHY_POWER_SAVING_PARAMETERS	0x0003U
-#define PHY_POWER_EEE_CLOCK_DIVIDE	0x8000U
-#define DOWN_SPEED_10M_CLOCK_DIVIDE	0x0800U
-#define DOWN_SPEED_EEE_100		0x1000U
-#define DOWN_SPEED_EEE_1000		0x2000U
-#define PHY_PATCH_READY			0x0040U
-#define PHY_PATCH_REQUEST		0x0010U
+#define PHY_POWER_EEE_SLOW_CLOCK	0x8000U
+#define SLOWDOWN_10M_DIVIDE		0x0800U
+#define SLOWDOWN_EEE_100		0x1000U
+#define SLOWDOWN_EEE_1000		0x2000U
+#define PHY_CHANGE_HELD			0x0040U
+#define PHY_CHANGE_ASK			0x0010U
 #define FORCE_MODE_MMD			0x8000U
-#define SRAM_GREEN_ENABLE		0x8000U
+#define SRAM_LOW_POWER_ON		0x8000U
 
 /*
  * Polls of the indirect window's busy bit (Linux waits 20 ms at most)
@@ -359,7 +364,7 @@
  */
 #define RTL_INDIRECT_TRIES		10U
 #define RTL_INDIRECT_STEP_MS		2U
-#define RTL_PATCH_TRIES			5000U
+#define RTL_PHY_HOLD_TRIES		5000U
 
 /*
  * The adapter's driver state: the USB objects it uses, the chip and its
@@ -483,8 +488,8 @@ struct rtl_adapter {
 enum rtl_phy_step_kind {
 	RTL_PHY_STEP_MODIFY,
 	RTL_PHY_STEP_WRITE,
-	RTL_PHY_STEP_SRAM,
-	RTL_PHY_STEP_SRAM2
+	RTL_PHY_STEP_SRAM_A,
+	RTL_PHY_STEP_SRAM_B
 };
 
 /*
@@ -556,31 +561,31 @@ static const struct drv_usb_id rtl_ids[] = {
 };
 
 /*
- * The RTL8157's PHY parameters, applied in order at attach: the receive
- * path, green mode, the link partner recognition, the radio-frequency
- * interference thresholds and noise generator for 5 and 2.5 Gbit/s, the
- * thermal speed-down threshold and compatibility.  A write to a data
- * window right after another write goes to the next word.
+ * The RTL8157's PHY tuning, one step per entry, applied in this order at
+ * attach.  The entries tune the 5 and 2.5 Gbit/s receivers, the PHY's
+ * low-power behaviour, how it treats some link partners, its resistance
+ * to interference and its temperature limit.  Consecutive writes to an
+ * SRAM port fill consecutive words after the address in its window.
  *
  * Values referenced: Linux 7.3 drivers/net/usb/r8152.c
  * (r8157_hw_phy_cfg, the RTL_VER_16 branch), as data.
  */
 static const struct rtl_phy_step rtl_8157_phy_steps[] = {
-	{ RTL_PHY_STEP_SRAM, 0x8183U, 0xff00U, 0x5900U },
+	{ RTL_PHY_STEP_SRAM_A, 0x8183U, 0xff00U, 0x5900U },
 	{ RTL_PHY_STEP_MODIFY, 0xa654U, 0x0000U, 0x0800U },
 	{ RTL_PHY_STEP_MODIFY, 0xb648U, 0x0000U, 0x4000U },
 	{ RTL_PHY_STEP_MODIFY, 0xad2cU, 0x8000U, 0x0000U },
 	{ RTL_PHY_STEP_MODIFY, 0xad94U, 0x0000U, 0x0020U },
 	{ RTL_PHY_STEP_MODIFY, 0xada0U, 0x0000U, 0x0002U },
 	{ RTL_PHY_STEP_MODIFY, 0xae06U, 0xfc00U, 0x7c00U },
-	{ RTL_PHY_STEP_SRAM2, 0x8647U, 0xff00U, 0xe600U },
-	{ RTL_PHY_STEP_SRAM2, 0x8036U, 0xff00U, 0x3000U },
-	{ RTL_PHY_STEP_SRAM2, 0x8078U, 0xff00U, 0x3000U },
-	{ RTL_PHY_STEP_SRAM2, 0x89e9U, 0xff00U, 0x0000U },
-	{ RTL_PHY_STEP_SRAM2, 0x8ffdU, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x8ffeU, 0xff00U, 0x0200U },
-	{ RTL_PHY_STEP_SRAM2, 0x8fffU, 0xff00U, 0x0400U },
-	{ RTL_PHY_STEP_SRAM, 0x8018U, 0xff00U, 0x7700U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8647U, 0xff00U, 0xe600U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8036U, 0xff00U, 0x3000U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8078U, 0xff00U, 0x3000U },
+	{ RTL_PHY_STEP_SRAM_B, 0x89e9U, 0xff00U, 0x0000U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8ffdU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8ffeU, 0xff00U, 0x0200U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8fffU, 0xff00U, 0x0400U },
+	{ RTL_PHY_STEP_SRAM_A, 0x8018U, 0xff00U, 0x7700U },
 	{ RTL_PHY_STEP_WRITE, 0xa436U, 0x0000U, 0x8f9cU },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0005U },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
@@ -588,23 +593,23 @@ static const struct rtl_phy_step rtl_8157_phy_steps[] = {
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0502U },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0b00U },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0xd401U },
-	{ RTL_PHY_STEP_SRAM, 0x8fa8U, 0xff00U, 0x2900U },
-	{ RTL_PHY_STEP_SRAM2, 0x814bU, 0xff00U, 0x1100U },
-	{ RTL_PHY_STEP_SRAM2, 0x814dU, 0xff00U, 0x1100U },
-	{ RTL_PHY_STEP_SRAM2, 0x814fU, 0xff00U, 0x0b00U },
-	{ RTL_PHY_STEP_SRAM2, 0x8142U, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x8144U, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x8150U, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x8118U, 0xff00U, 0x0700U },
-	{ RTL_PHY_STEP_SRAM2, 0x811aU, 0xff00U, 0x0700U },
-	{ RTL_PHY_STEP_SRAM2, 0x811cU, 0xff00U, 0x0500U },
-	{ RTL_PHY_STEP_SRAM2, 0x810fU, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x8111U, 0xff00U, 0x0100U },
-	{ RTL_PHY_STEP_SRAM2, 0x811dU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_A, 0x8fa8U, 0xff00U, 0x2900U },
+	{ RTL_PHY_STEP_SRAM_B, 0x814bU, 0xff00U, 0x1100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x814dU, 0xff00U, 0x1100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x814fU, 0xff00U, 0x0b00U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8142U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8144U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8150U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8118U, 0xff00U, 0x0700U },
+	{ RTL_PHY_STEP_SRAM_B, 0x811aU, 0xff00U, 0x0700U },
+	{ RTL_PHY_STEP_SRAM_B, 0x811cU, 0xff00U, 0x0500U },
+	{ RTL_PHY_STEP_SRAM_B, 0x810fU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8111U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM_B, 0x811dU, 0xff00U, 0x0100U },
 	{ RTL_PHY_STEP_MODIFY, 0xad1cU, 0x0100U, 0x0000U },
 	{ RTL_PHY_STEP_MODIFY, 0xade8U, 0xffc0U, 0x1400U },
-	{ RTL_PHY_STEP_SRAM2, 0x864bU, 0xff00U, 0x9d00U },
-	{ RTL_PHY_STEP_SRAM2, 0x862cU, 0xff00U, 0x1200U },
+	{ RTL_PHY_STEP_SRAM_B, 0x864bU, 0xff00U, 0x9d00U },
+	{ RTL_PHY_STEP_SRAM_B, 0x862cU, 0xff00U, 0x1200U },
 	{ RTL_PHY_STEP_WRITE, 0xa436U, 0x0000U, 0x8566U },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x003fU },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x3f02U },
@@ -616,7 +621,7 @@ static const struct rtl_phy_step rtl_8157_phy_steps[] = {
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
 	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
 	{ RTL_PHY_STEP_MODIFY, 0xad9cU, 0x0000U, 0x0020U },
-	{ RTL_PHY_STEP_SRAM2, 0x8122U, 0xff00U, 0x0c00U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8122U, 0xff00U, 0x0c00U },
 	{ RTL_PHY_STEP_WRITE, 0xb87cU, 0x0000U, 0x82c8U },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03edU },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03ffU },
@@ -638,7 +643,7 @@ static const struct rtl_phy_step rtl_8157_phy_steps[] = {
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0009U },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03ffU },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03edU },
-	{ RTL_PHY_STEP_SRAM2, 0x80efU, 0xff00U, 0x0c00U },
+	{ RTL_PHY_STEP_SRAM_B, 0x80efU, 0xff00U, 0x0c00U },
 	{ RTL_PHY_STEP_WRITE, 0xb87cU, 0x0000U, 0x82a0U },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x000eU },
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03feU },
@@ -662,9 +667,9 @@ static const struct rtl_phy_step rtl_8157_phy_steps[] = {
 	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f1U },
 	{ RTL_PHY_STEP_MODIFY, 0xb54cU, 0xffc0U, 0x3700U },
 	{ RTL_PHY_STEP_MODIFY, 0xb648U, 0x0000U, 0x0040U },
-	{ RTL_PHY_STEP_SRAM2, 0x8082U, 0xff00U, 0x5d00U },
-	{ RTL_PHY_STEP_SRAM2, 0x807cU, 0xff00U, 0x5000U },
-	{ RTL_PHY_STEP_SRAM2, 0x809dU, 0xff00U, 0x5000U },
+	{ RTL_PHY_STEP_SRAM_B, 0x8082U, 0xff00U, 0x5d00U },
+	{ RTL_PHY_STEP_SRAM_B, 0x807cU, 0xff00U, 0x5000U },
+	{ RTL_PHY_STEP_SRAM_B, 0x809dU, 0xff00U, 0x5000U },
 };
 
 /*
@@ -694,7 +699,7 @@ static int rtl_indirect_write(struct rtl_adapter *adapter, uint16_t block, uint1
 static int rtl_indirect_modify(struct rtl_adapter *adapter, uint16_t block, uint16_t address, uint32_t clear, uint32_t set);
 static int rtl_sram_modify(struct rtl_adapter *adapter, uint16_t window, uint16_t data, uint16_t address, uint16_t clear, uint16_t set);
 static int rtl_phy_steps_apply(struct rtl_adapter *adapter, const struct rtl_phy_step *steps, size_t count);
-static int rtl_phy_patch_request(struct rtl_adapter *adapter, int request);
+static int rtl_phy_hold_for_change(struct rtl_adapter *adapter, int request);
 static int rtl_read_version(struct rtl_adapter *adapter);
 static int rtl_aldps(struct rtl_adapter *adapter, int enable);
 static int rtl_aldps_off_8157(struct rtl_adapter *adapter);
@@ -782,7 +787,7 @@ rtl_match(
 	int error;
 	int off;
 
-	(void)id;
+	UNUSED_PARAMETER(id);
 
 	/* The boot parameter leaves the adapter to CDC NCM. */
 	off = rtl_turned_off();
@@ -868,6 +873,7 @@ rtl_sleep_ms(
 	unsigned milliseconds)
 {
 	uint64_t ticks;
+	uint64_t now;
 
 	/* At least one tick. */
 	ticks = kern_ms_to_ticks(milliseconds);
@@ -875,7 +881,8 @@ rtl_sleep_ms(
 		ticks = 1U;
 
 	/* Until the tick count passes the deadline. */
-	sched_sleep(sched_ticks() + ticks);
+	now = sched_ticks();
+	sched_sleep(now + ticks);
 }
 
 /*
@@ -1326,11 +1333,11 @@ rtl_phy_steps_apply(
 		case RTL_PHY_STEP_WRITE:
 			error = rtl_ocp_write(adapter, step->address, step->set);
 			break;
-		case RTL_PHY_STEP_SRAM:
-			error = rtl_sram_modify(adapter, PHY_SRAM_ADDRESS, PHY_SRAM_DATA, step->address, step->clear, step->set);
+		case RTL_PHY_STEP_SRAM_A:
+			error = rtl_sram_modify(adapter, PHY_SRAM_A_WINDOW, PHY_SRAM_A_PORT, step->address, step->clear, step->set);
 			break;
-		case RTL_PHY_STEP_SRAM2:
-			error = rtl_sram_modify(adapter, PHY_SRAM2_ADDRESS, PHY_SRAM2_DATA, step->address, step->clear, step->set);
+		case RTL_PHY_STEP_SRAM_B:
+			error = rtl_sram_modify(adapter, PHY_SRAM_B_WINDOW, PHY_SRAM_B_PORT, step->address, step->clear, step->set);
 			break;
 		}
 
@@ -1348,11 +1355,11 @@ rtl_phy_steps_apply(
  * it go on, and waits for it to say so.
  *
  * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
- * (rtl_phy_patch_request): the request bit, then the ready bit set (or
+ * (rtl_phy_hold_for_change): the request bit, then the ready bit set (or
  * cleared) within five seconds; a request never granted is withdrawn.
  */
 static int
-rtl_phy_patch_request(
+rtl_phy_hold_for_change(
 	struct rtl_adapter *adapter,
 	int request)
 {
@@ -1363,28 +1370,30 @@ rtl_phy_patch_request(
 
 	/* Raises or lowers the request. */
 	if (request) {
-		error = rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, 0, PHY_PATCH_REQUEST);
-		wanted = PHY_PATCH_READY;
+		error = rtl_ocp_modify(adapter, PHY_CHANGE_CONTROL, 0, PHY_CHANGE_ASK);
+		wanted = PHY_CHANGE_HELD;
 	} else {
-		error = rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, PHY_PATCH_REQUEST, 0);
+		error = rtl_ocp_modify(adapter, PHY_CHANGE_CONTROL, PHY_CHANGE_ASK, 0);
 		wanted = 0;
 	}
+
+	/* Reports a patch request the PHY could not take. */
 	if (error != 0)
 		return error;
 
 	/* Waits for the ready bit to follow. */
-	for (tries = 0; tries < RTL_PATCH_TRIES; tries++) {
+	for (tries = 0; tries < RTL_PHY_HOLD_TRIES; tries++) {
 		rtl_sleep_ms(1U);
-		error = rtl_ocp_read(adapter, PHY_PATCH_STATUS, &status);
+		error = rtl_ocp_read(adapter, PHY_CHANGE_STATUS, &status);
 		if (error != 0)
 			return error;
-		if ((status & PHY_PATCH_READY) == wanted)
+		if ((status & PHY_CHANGE_HELD) == wanted)
 			return 0;
 	}
 
 	/* A request never granted is withdrawn. */
 	if (request)
-		(void)rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, PHY_PATCH_REQUEST, 0);
+		(void)rtl_ocp_modify(adapter, PHY_CHANGE_CONTROL, PHY_CHANGE_ASK, 0);
 
 	/* The PHY did not answer. */
 	return ETIMEDOUT;
@@ -1721,6 +1730,7 @@ rtl_chip_wake(
 			return error;
 	}
 
+	/* Waits for the PHY to reach its LAN-on state. */
 	error = rtl_phy_wait_state(adapter, PHY_STATE_LAN_ON, &state);
 	if (error == ETIMEDOUT)
 		kern_logf("usb-rtl815x: PHY state %u is not LAN-on, going on\n", state);
@@ -1813,6 +1823,8 @@ rtl_chip_init_power(
 		if (error != 0)
 			return error;
 	}
+
+	/* Clears the UPS and early-wake bits of the power cut. */
 	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_POWER_CUT, 1, POWER_CUT_UPS | POWER_CUT_PREWAKE, 0);
 	if (error != 0)
 		return error;
@@ -1860,12 +1872,14 @@ static int
 rtl_chip_init_finish(
 	struct rtl_adapter *adapter)
 {
+	enum drv_usb_speed speed;
 	uint32_t value;
 	uint32_t status;
 	int error;
 
 	/* U1 and U2 on a SuperSpeed link. */
-	if (drv_usb_device_speed(adapter->usb_device) >= DRV_USB_SPEED_SUPER) {
+	speed = drv_usb_device_speed(adapter->usb_device);
+	if (speed >= DRV_USB_SPEED_SUPER) {
 		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, 0, LPM_U1U2_ENABLE);
 		if (error != 0)
 			return error;
@@ -1890,6 +1904,8 @@ rtl_chip_init_finish(
 			if (error != 0)
 				return error;
 		}
+
+		/* Turns on the firmware's flow-control patch. */
 		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_FIRMWARE_TASK, 2, 0, FW_TASK_FC_PATCH);
 		if (error != 0)
 			return error;
@@ -1942,6 +1958,8 @@ rtl_chip_init_finish(
 				   USB_CTRL_RX_AGG_DISABLE | USB_CTRL_RX_ZERO,
 				   0);
 	}
+
+	/* Reports a failed change of the transfer control. */
 	if (error != 0)
 		return error;
 
@@ -2053,6 +2071,7 @@ rtl_phy_config_8157(
 			return error;
 	}
 
+	/* Turns the PHY's power saving off. */
 	error = rtl_aldps(adapter, 0);
 	if (error != 0)
 		return error;
@@ -2090,8 +2109,8 @@ rtl_phy_config_8157(
 /*
  * Finishes the RTL8157's PHY setup: with the PHY stopped for the change,
  * the MAC's and the PHY's clocks slow down under EEE and the 10 Mbit/s
- * clock is divided; then green mode on, two PHY settings off, and the
- * PHY's power saving back on.  A PHY that never stops for the change
+ * clock is divided; then the low-power mode on, two PHY settings off,
+ * and the PHY's power saving back on.  A PHY that never stops for the change
  * keeps its settings, as Linux leaves it.
  *
  * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
@@ -2106,11 +2125,13 @@ rtl_phy_config_8157_finish(
 	int error;
 
 	/* Stops the PHY for the change; one that does not stop keeps its settings. */
-	error = rtl_phy_patch_request(adapter, 1);
+	error = rtl_phy_hold_for_change(adapter, 1);
 	if (error == ETIMEDOUT) {
 		kern_logf("usb-rtl815x: PHY did not stop for its settings, going on\n");
 		return 0;
 	}
+
+	/* Reports a PHY that failed to stop for reasons other than a timeout. */
 	if (error != 0)
 		return error;
 
@@ -2119,24 +2140,24 @@ rtl_phy_config_8157_finish(
 	if (error != 0)
 		return error;
 	error = rtl_ocp_modify(adapter,
-			       PHY_DOWN_SPEED,
-			       DOWN_SPEED_EEE_100 | DOWN_SPEED_EEE_1000,
-			       DOWN_SPEED_10M_CLOCK_DIVIDE);
+			       PHY_CLOCK_SLOWDOWN,
+			       SLOWDOWN_EEE_100 | SLOWDOWN_EEE_1000,
+			       SLOWDOWN_10M_DIVIDE);
 	if (error != 0)
 		return error;
-	error = rtl_ocp_modify(adapter, PHY_POWER, 0, PHY_POWER_EEE_CLOCK_DIVIDE);
+	error = rtl_ocp_modify(adapter, PHY_POWER, 0, PHY_POWER_EEE_SLOW_CLOCK);
 	if (error != 0)
 		return error;
 
 	/* Lets the PHY go on. */
-	error = rtl_phy_patch_request(adapter, 0);
+	error = rtl_phy_hold_for_change(adapter, 0);
 	if (error == ETIMEDOUT)
 		kern_logf("usb-rtl815x: PHY did not resume after its settings, going on\n");
 	else if (error != 0)
 		return error;
 
-	/* Green mode on, and two settings off. */
-	error = rtl_sram_modify(adapter, PHY_SRAM_ADDRESS, PHY_SRAM_DATA, SRAM_GREEN, 0, SRAM_GREEN_ENABLE);
+	/* The low-power mode on, and two settings off. */
+	error = rtl_sram_modify(adapter, PHY_SRAM_A_WINDOW, PHY_SRAM_A_PORT, SRAM_LOW_POWER, 0, SRAM_LOW_POWER_ON);
 	if (error != 0)
 		return error;
 	error = rtl_ocp_modify(adapter, PHY_A428, 0x0200U, 0);
@@ -2356,6 +2377,7 @@ rtl_nic_fifo(
 	struct rtl_adapter *adapter,
 	unsigned mtu)
 {
+	enum drv_usb_speed speed;
 	uint32_t pause_on;
 	uint32_t pause_off;
 	int error;
@@ -2375,6 +2397,8 @@ rtl_nic_fifo(
 		pause_on = 0x0200U;
 		pause_off = 0x0400U;
 	}
+
+	/* Writes the pause thresholds. */
 	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_PAUSE_ON, 2, pause_on);
 	if (error != 0)
 		return error;
@@ -2421,7 +2445,8 @@ rtl_nic_fifo(
 		return error;
 
 	/* U1 and U2 on a SuperSpeed link. */
-	if (drv_usb_device_speed(adapter->usb_device) >= DRV_USB_SPEED_SUPER) {
+	speed = drv_usb_device_speed(adapter->usb_device);
+	if (speed >= DRV_USB_SPEED_SUPER) {
 		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, 0, LPM_U1U2_ENABLE);
 		if (error != 0)
 			return error;
@@ -2761,6 +2786,7 @@ rtl_link_update(
 	struct rtl_adapter *adapter)
 {
 	struct net_device *device;
+	const char *duplex;
 	unsigned long irq;
 	uint32_t status;
 	unsigned opened;
@@ -2813,10 +2839,18 @@ rtl_link_update(
 	if (was && !carrier) {
 		kern_logf("usb-rtl815x: %s link down\n", device->name);
 	} else if (!was && carrier) {
+		/* A 2.5 Gbit/s link is always full duplex. */
+		duplex = "half";
+		if ((status & DRV_USB_RTL815X_PHY_STATUS_FULL_DUPLEX) != 0)
+			duplex = "full";
+		else if (mbps >= 2500U)
+			duplex = "full";
+
+		/* Logs the link that came up. */
 		kern_logf("usb-rtl815x: %s link up %u Mbit/s %s-duplex\n",
 			  device->name,
 			  mbps,
-			  (status & DRV_USB_RTL815X_PHY_STATUS_FULL_DUPLEX) != 0 || mbps >= 2500U ? "full" : "half");
+			  duplex);
 	}
 }
 
@@ -3000,6 +3034,7 @@ rtl_worker_join(
 	if (error != 0)
 		return error;
 
+	/* Takes the worker out of the adapter once it has ended. */
 	irq = spin_lock_irqsave(&adapter->lock);
 
 	adapter->worker = NULL;
@@ -3044,6 +3079,7 @@ rtl_completion(
 		}
 	}
 
+	/* Marks the transmit transfers that finished. */
 	for (index = 0; index < adapter->tx_urb_count; index++) {
 		if (urb != adapter->tx_urbs[index])
 			continue;
@@ -3086,6 +3122,8 @@ rtl_start_urb(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		return ENETDOWN;
 	}
+
+	/* Counts this start as running, so a stop waits for it. */
 	adapter->starts_active++;
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
@@ -3154,6 +3192,7 @@ rtl_wait_activity(
 
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
+		/* Waits until no start or poll is running any more. */
 		if (active == 0)
 			return;
 		sched_yield();
@@ -3183,6 +3222,7 @@ rtl_stop(
 		sched_yield();
 	}
 
+	/* Marks the adapter as stopping and closing. */
 	adapter->stopping = 1;
 	adapter->closing = 1;
 	adapter->opened = 0;
@@ -3204,6 +3244,7 @@ rtl_stop(
 			error = candidate;
 	}
 
+	/* Cancels and drains every transmit transfer. */
 	for (index = 0; index < adapter->tx_urb_count; index++) {
 		candidate = rtl_cancel_and_drain(adapter->tx_urbs[index]);
 		if (error == 0)
@@ -3227,6 +3268,8 @@ rtl_stop(
 	} else {
 		adapter->quarantined = 1;
 	}
+
+	/* Lets a later open or poll go on. */
 	adapter->closing = 0;
 	adapter->stopping = 0;
 
@@ -3270,6 +3313,8 @@ rtl_open(
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		return error;
 	}
+
+	/* Marks the adapter as open. */
 	adapter->opened = 1;
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
@@ -3293,6 +3338,8 @@ rtl_open(
 		error = rtl_start_urb(adapter, adapter->interrupt_urb, adapter->interrupt_buffer,
 				      adapter->interrupt_length, 0, 0);
 	}
+
+	/* Starts the link interrupt and every receive transfer. */
 	if (error == 0) {
 		/* Holds the right to rearm while every receive transfer goes on. */
 		irq = spin_lock_irqsave(&adapter->lock);
@@ -3301,6 +3348,7 @@ rtl_open(
 
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
+		/* Starts every idle receive transfer. */
 		error = rtl_rx_start_idle(adapter);
 
 		/* Gives the right up; a rearm asked for meanwhile runs in a poll. */
@@ -3311,6 +3359,7 @@ rtl_open(
 
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
+		/* Schedules a poll for a rearm that was asked for while the right was held. */
 		if (error == 0 && rearm)
 			net_device_schedule_poll(device);
 	}
@@ -3517,6 +3566,7 @@ rtl_tx_pump(
 
 		spin_unlock_irqrestore(&adapter->lock, irq);
 
+		/* Counts the frame as dropped on the interface. */
 		if (adapter->net_device != NULL)
 			adapter->net_device->tx_dropped++;
 	}
@@ -3561,6 +3611,8 @@ rtl_tx_prepare(
 		packet_buf_checksum_finish(packet);
 		return 0;
 	}
+
+	/* Finds the IP header and the transport header after it. */
 	ip = packet->data + l3;
 	l4 = l3 + (size_t)(ip[0] & 0x0fU) * 4U;
 
@@ -3666,6 +3718,8 @@ rtl_tx_submit(
 					  block_length, DRV_USB_URB_ZERO_PACKET,
 					  RTL_TRANSFER_TIMEOUT_MS, rtl_completion, adapter);
 	}
+
+	/* Submits the transmit block. */
 	if (error == 0)
 		error = drv_usb_urb_submit(adapter->tx_urbs[index]);
 
@@ -3740,6 +3794,8 @@ rtl_rx_deliver(
 		adapter->net_device->rx_dropped++;
 		return 0;
 	}
+
+	/* Copies the frame into the packet. */
 	kern_memcpy(destination, frame, length);
 
 	/* Tells the stack the checksums it need not compute. */
@@ -3779,6 +3835,8 @@ rtl_rx_start_idle(
 			spin_unlock_irqrestore(&adapter->lock, irq);
 			break;
 		}
+
+		/* Takes the lowest idle receive transfer and queues it in completion order. */
 		index = rtl_lowest_bit(adapter->rx_idle);
 		adapter->rx_idle &= ~(1U << index);
 		tail = (adapter->rx_order_head + adapter->rx_order_count) % RTL_RX_URBS;
@@ -3916,6 +3974,8 @@ rtl_rearm(
 		adapter->opened = 0;
 		quarantine = 1;
 	}
+
+	/* Gives the right to rearm up. */
 	adapter->rx_rearm_active = 0;
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
@@ -4103,6 +4163,7 @@ rtl_poll_rx_completion(
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
+	/* Rearms the receive transfers when one was asked for. */
 	rearm = rtl_take_rx_rearm(adapter);
 	if (rearm)
 		(void)rtl_rearm(adapter);
@@ -4130,6 +4191,7 @@ rtl_has_poll_work(
 	struct rtl_adapter *adapter)
 {
 	unsigned long irq;
+	int head_done;
 	int pending;
 
 	/* Completions to take or a rearm to make, on a running adapter. */
@@ -4138,7 +4200,8 @@ rtl_has_poll_work(
 	pending = 0;
 	if (adapter->ready && adapter->opened && !adapter->closing &&
 	    !adapter->stopping && !adapter->quarantined) {
-		if (rtl_rx_head_done_locked(adapter) || adapter->tx_done != 0)
+		head_done = rtl_rx_head_done_locked(adapter);
+		if (head_done || adapter->tx_done != 0)
 			pending = 1;
 		else if (adapter->rx_rearm && !adapter->rx_rearm_active)
 			pending = 1;
@@ -4338,6 +4401,8 @@ rtl_buffers_free(
 		kern_free(adapter->rx_buffers[index]);
 		adapter->rx_buffers[index] = NULL;
 	}
+
+	/* Forgets the per-transfer receive buffer pointers and the spare. */
 	for (index = 0; index < RTL_RX_URBS; index++)
 		adapter->rx_urb_buffers[index] = NULL;
 	adapter->rx_spare = NULL;
@@ -4429,6 +4494,7 @@ rtl_net_device_create(
 		return error;
 	}
 
+	/* Publishes the interface to the adapter. */
 	adapter->net_device = device;
 
 	/* Succeeded: the interface exists. */
@@ -4448,10 +4514,11 @@ rtl_attach(
 	struct drv_usb_endpoint *bulk_out;
 	struct drv_usb_endpoint *interrupt_endpoint;
 	struct rtl_adapter *adapter;
+	const char *chip_name;
 	size_t packet_size;
 	int error;
 
-	(void)id;
+	UNUSED_PARAMETER(id);
 
 	/* The interface's endpoints. */
 	error = rtl_find_endpoints(interface, &bulk_in, &bulk_out, &interrupt_endpoint);
@@ -4469,7 +4536,9 @@ rtl_attach(
 	adapter->bulk_out = bulk_out;
 	adapter->interrupt_endpoint = interrupt_endpoint;
 	packet_size = drv_usb_endpoint_max_packet_size(interrupt_endpoint);
-	adapter->interrupt_length = packet_size < 2U ? 2U : packet_size;
+	adapter->interrupt_length = packet_size;
+	if (packet_size < 2U)
+		adapter->interrupt_length = 2U;
 	spin_init(&adapter->lock, LOCK_RANK_DEVICE, "usb-rtl815x");
 	(void)mutex_init(&adapter->register_lock, LOCK_RANK_DEVICE, "usb-rtl815x registers");
 
@@ -4486,7 +4555,10 @@ rtl_attach(
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "version", error);
 		return error;
 	}
-	kern_logf("usb-rtl815x: attaching %s version 0x%04x\n", drv_usb_rtl815x_chip_name(adapter->chip), adapter->version);
+
+	/* Logs the chip that is being attached. */
+	chip_name = drv_usb_rtl815x_chip_name(adapter->chip);
+	kern_logf("usb-rtl815x: attaching %s version 0x%04x\n", chip_name, adapter->version);
 	error = drv_usb_rtl815x_format_for(adapter->chip, &adapter->format);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: chip %s (version 0x%04x) is not driven in vendor mode; "
@@ -4507,6 +4579,8 @@ rtl_attach(
 		kern_logf("usb-rtl815x: chip setup failed (%d)\n", error);
 		return error;
 	}
+
+	/* Sets up the RTL8157's PHY. */
 	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
 		error = rtl_phy_config_8157(adapter);
 		if (error != 0) {
@@ -4514,11 +4588,15 @@ rtl_attach(
 			return error;
 		}
 	}
+
+	/* Reads the MAC address. */
 	error = rtl_read_mac(adapter);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "mac", error);
 		return error;
 	}
+
+	/* Sets the advertised link modes. */
 	error = rtl_advertise(adapter);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "advertise", error);
@@ -4539,11 +4617,15 @@ rtl_attach(
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "buffers", error);
 		return error;
 	}
+
+	/* Allocates the transfers. */
 	error = rtl_urbs_alloc(adapter);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "transfers", error);
 		return error;
 	}
+
+	/* Creates the network interface. */
 	error = rtl_net_device_create(adapter);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "interface", error);
@@ -4556,6 +4638,8 @@ rtl_attach(
 		kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "worker", error);
 		return error;
 	}
+
+	/* Starts the worker. */
 	thread_start(adapter->worker);
 
 	/* Ready for traffic. */
@@ -4580,7 +4664,7 @@ rtl_detach(
 	struct rtl_adapter *adapter;
 	int error;
 
-	(void)flags;
+	UNUSED_PARAMETER(flags);
 
 	/* No adapter was made. */
 	adapter = drv_usb_interface_driver_data(interface);
