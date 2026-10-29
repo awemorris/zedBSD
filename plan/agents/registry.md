@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner | ws309 (q1662-i10 返却) | `/home/awe/zedBSD-worktrees/p1-ws309i` / `agent/p1-ws309i` | returned（p015 の判断待ち） | 13c603132（merge b9c381154） |
+| P1 | phase-runner | ws326 p001 (q1695-i01) | `/home/awe/zedBSD-worktrees/p1-ws326` / `agent/p1-ws326` | running | 13c603132（merge b9c381154） |
 | P2 | phase-runner | ws314 (q1690-i02 返却) | `/home/awe/zedBSD-worktrees/p2-ws314` / `agent/p2-ws314` | returned（次は p009 から） | 19c19580f（merge d4b58dd84） |
 | P3 | phase-runner | ws315 (q1694-i01) | `/home/awe/zedBSD-worktrees/p3-ws315` / `agent/p3-ws315` | running（p003 の残り → p004 → p005） | 4559631d9（merge 145280b3e） |
 | P4 | phase-runner | ws307 (q1665-i10 cleared) | `/home/awe/zedBSD-worktrees/p4-ws307n` / `agent/p4-ws307n` | returned（試験待ちの branch: agent/p4-ws283 b7fd8d23e） | f82bd280f（merge adeab690a） |
