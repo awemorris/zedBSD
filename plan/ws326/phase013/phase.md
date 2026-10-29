@@ -3,7 +3,7 @@
 # ws326-p013 変換と逆量子化
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30。cleared は Q1 が受け入れを見て決める）。
 - 依存: p003（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -51,3 +51,25 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-30（host の `date`）。
+- 作った物: `userland/desktop/libmedia/h264sw-transform.c`（全関数）、単体試験 `plan/ws326/tests/unit/test-transform.c`。header は変えていない。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh transform` → `test-transform: PASS (33158 checks)`、`run-unit: PASS`（ASan・UBSan の報告 0）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → bits 169、bitwriter 14、cabac 195654、cabac_init 4159、mb 1938、nal 95、ps 41887、tables 846、transform 33158 の各 PASS、`run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so` → exit 0、出力の warning 0（`grep -ci warning` が 0）。
+  - `git diff --check` → 問題なし。
+  - 試験の感度の確認（一時的に実装を壊して FAIL するかを見た。壊した物は戻した）: Hadamard の符号、shift の補数計算、8x8 の normAdjust の場合分けは FAIL。8x8 の e3 の符号は最初の試験では PASS したため、8x8 の係数 1 つずつ（水平・垂直 各 8 通り）の試験を足し、その後 FAIL することを確認した。
+- 期待値: 4x4・8x8 の逆変換、Hadamard、chroma DC は式から手で計算した値（試験の comment に手順）。scale の式は、floor の除算で書いた素直な写しと qP 0..51 × 水平の level で比べる。手計算の値は別に python で式を解いて照合した（期待値の出所は手計算）。
+- header が決めていない点で担当が決めた物（Q1 の確認用）:
+  - header の関数は全て void で、返す誤りが無い。誤りの入力は、NULL の引数なら何もしない、範囲外の値なら端に丸める、で扱う。
+  - qP は 0..51 に丸める（8 bit の QP'Y・QP'C の範囲。範囲外は shift の回数が未定義になるため）。4:2:2 の qPDC は対象外。
+  - 入力の level・係数は、各関数の最初に -32768..32767 に丸める（header の「clause が縛る値」）。scale の引数（LevelScale）は任意の int32_t を受け、int64_t で積を取る。
+  - 右 shift は、負の値で処理系定義を避けるため、補数を使った floor の shift で書く（算術 shift と同じ結果）。
+  - `h264sw_unscan4x4`・`h264sw_unscan8x8` は入力と出力が同じ配列でもよい（一度複写する）。
+  - `h264sw_add_residual` の size が 4・8 以外なら出力を変えない。residual は size 列の raster（行 stride = size）。和は int64_t で取り、巨大な residual でも溢れない。
+  - 8x8 の `h264sw_scale8x8` に dc_done は無い（header どおり）。
+- 未実施: QEMU・実機の試験（この Phase の範囲外）。規約の全文の見直しの Phase（WS の最後）。
