@@ -289,6 +289,79 @@
 #define RTL_POLL_STEP_MS		10U
 
 /*
+ * The RTL8157's registers and bits beyond the RTL8156's: its own setup
+ * registers, the window onto the buffer manager's and the IP block's
+ * registers, the PHY's patch handshake, the PHY's two SRAM windows and
+ * the PHY settings its setup changes.
+ *
+ * Values referenced: Linux 7.3 drivers/net/usb/r8152.c (USB_ADV_ADDR,
+ * USB_ADV_DATA, USB_ADV_CMD, ADV_CMD_BMU, ADV_CMD_BUSY, ADV_CMD_WR,
+ * ADV_CMD_IP, USB_U2P3_V2_CTRL, U2P3_V2_ENABLE, USB_MISC_2,
+ * RX_DESC_16B, USB_RX_AGGR_NUM, RX_AGGR_NUM_MASK, PLA_PHY_PWR,
+ * PFM_PWM_SWITCH, EEE_SPDWN_EN, OCP_SRAM_ADDR, OCP_SRAM_DATA,
+ * OCP_SRAM2_ADDR, OCP_SRAM2_DATA, OCP_DOWN_SPEED, EN_EEE_100,
+ * EN_EEE_1000, EN_10M_CLKDIV, EEE_CLKDIV_EN,
+ * OCP_PHY_PATCH_STAT, OCP_PHY_PATCH_CMD, PATCH_READY, PATCH_REQUEST,
+ * SRAM_GREEN_CFG, GREEN_ETH_EN; r8156_init: 0xcffe, 0xd3ca, 0xd4ae and
+ * the buffer manager's 0x2300; rtl8156_up: PLA_RCR1 bit 3;
+ * r8157_hw_phy_cfg: 0xa430, 0xa44a, 0xa428, 0xa5ea;
+ * r8156_mdio_force_mode: 0xa5b4; r8153_aldps_en: PLA 0xe000).
+ */
+#define UREG_CFFE			0xcffeU
+#define UREG_D3CA			0xd3caU
+#define UREG_D4AE			0xd4aeU
+#define UREG_RX_AGG_COUNT		0xd4eeU
+#define UREG_INDIRECT_ADDRESS		0xd5d6U
+#define UREG_INDIRECT_DATA		0xd5d8U
+#define UREG_INDIRECT_COMMAND		0xd5dcU
+#define REG_PHY_POWER_MODE		0xe84cU
+#define REG_ALDPS_STATUS		0xe000U
+#define INDIRECT_BMU			0x0000U
+#define INDIRECT_BUSY			0x0001U
+#define INDIRECT_WRITE			0x0002U
+#define INDIRECT_IP			0x0004U
+#define IP_U2P3				0xc2c0U
+#define IP_U2P3_ENABLE			0x20000000U
+#define BMU_RX_CONFIG			0x2300U
+#define BMU_RX_ZERO			0x00000008U
+#define RX_AGG_COUNT_MASK		0x01ffU
+#define USB_CTRL_RX_DESC_16		0x0400U
+#define UPS_FLAGS_POWER_CUT_GEN2	0x02U
+#define RX_CONFIG_VLAN_GEN2		0x0008U
+#define PHY_POWER_MODE_PFM		0x0040U
+#define MAC_PWR_CTRL4_EEE_SPEED_DOWN	0x0001U
+#define ALDPS_STATUS_OFF		0x0100U
+#define PHY_SRAM_ADDRESS		0xa436U
+#define PHY_SRAM_DATA			0xa438U
+#define PHY_SRAM2_ADDRESS		0xb87cU
+#define PHY_SRAM2_DATA			0xb87eU
+#define PHY_DOWN_SPEED			0xa442U
+#define PHY_A428			0xa428U
+#define PHY_A44A			0xa44aU
+#define PHY_FORCE_MODE			0xa5b4U
+#define PHY_A5EA			0xa5eaU
+#define PHY_PATCH_STATUS		0xb800U
+#define PHY_PATCH_COMMAND		0xb820U
+#define SRAM_GREEN			0x8011U
+#define PHY_POWER_SAVING_PARAMETERS	0x0003U
+#define PHY_POWER_EEE_CLOCK_DIVIDE	0x8000U
+#define DOWN_SPEED_10M_CLOCK_DIVIDE	0x0800U
+#define DOWN_SPEED_EEE_100		0x1000U
+#define DOWN_SPEED_EEE_1000		0x2000U
+#define PHY_PATCH_READY			0x0040U
+#define PHY_PATCH_REQUEST		0x0010U
+#define FORCE_MODE_MMD			0x8000U
+#define SRAM_GREEN_ENABLE		0x8000U
+
+/*
+ * Polls of the indirect window's busy bit (Linux waits 20 ms at most)
+ * and of the PHY's patch handshake (five seconds at most).
+ */
+#define RTL_INDIRECT_TRIES		10U
+#define RTL_INDIRECT_STEP_MS		2U
+#define RTL_PATCH_TRIES			5000U
+
+/*
  * The adapter's driver state: the USB objects it uses, the chip and its
  * wire format, the transfers and their buffers, and the bookkeeping that
  * keeps the transfers, the polls, the worker thread and teardown apart.
@@ -403,6 +476,29 @@ struct rtl_adapter {
 };
 
 /*
+ * The kinds of step in a table of PHY settings: bits of a PHY register
+ * cleared and set, a PHY register written, or bits of a word in the
+ * PHY's first or second SRAM window cleared and set.
+ */
+enum rtl_phy_step_kind {
+	RTL_PHY_STEP_MODIFY,
+	RTL_PHY_STEP_WRITE,
+	RTL_PHY_STEP_SRAM,
+	RTL_PHY_STEP_SRAM2
+};
+
+/*
+ * One step of a table of PHY settings: its kind, the register or SRAM
+ * word, the bits cleared, and the bits set (the value, for a write).
+ */
+struct rtl_phy_step {
+	enum rtl_phy_step_kind kind;
+	uint16_t address;
+	uint16_t clear;
+	uint16_t set;
+};
+
+/*
  * Whether the boot parameters turn the driver off (rtl_boot_off), once
  * read (rtl_boot_checked).  The command line does not change after boot,
  * so the first match reads it and every later one uses the answer; the
@@ -460,6 +556,118 @@ static const struct drv_usb_id rtl_ids[] = {
 };
 
 /*
+ * The RTL8157's PHY parameters, applied in order at attach: the receive
+ * path, green mode, the link partner recognition, the radio-frequency
+ * interference thresholds and noise generator for 5 and 2.5 Gbit/s, the
+ * thermal speed-down threshold and compatibility.  A write to a data
+ * window right after another write goes to the next word.
+ *
+ * Values referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8157_hw_phy_cfg, the RTL_VER_16 branch), as data.
+ */
+static const struct rtl_phy_step rtl_8157_phy_steps[] = {
+	{ RTL_PHY_STEP_SRAM, 0x8183U, 0xff00U, 0x5900U },
+	{ RTL_PHY_STEP_MODIFY, 0xa654U, 0x0000U, 0x0800U },
+	{ RTL_PHY_STEP_MODIFY, 0xb648U, 0x0000U, 0x4000U },
+	{ RTL_PHY_STEP_MODIFY, 0xad2cU, 0x8000U, 0x0000U },
+	{ RTL_PHY_STEP_MODIFY, 0xad94U, 0x0000U, 0x0020U },
+	{ RTL_PHY_STEP_MODIFY, 0xada0U, 0x0000U, 0x0002U },
+	{ RTL_PHY_STEP_MODIFY, 0xae06U, 0xfc00U, 0x7c00U },
+	{ RTL_PHY_STEP_SRAM2, 0x8647U, 0xff00U, 0xe600U },
+	{ RTL_PHY_STEP_SRAM2, 0x8036U, 0xff00U, 0x3000U },
+	{ RTL_PHY_STEP_SRAM2, 0x8078U, 0xff00U, 0x3000U },
+	{ RTL_PHY_STEP_SRAM2, 0x89e9U, 0xff00U, 0x0000U },
+	{ RTL_PHY_STEP_SRAM2, 0x8ffdU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x8ffeU, 0xff00U, 0x0200U },
+	{ RTL_PHY_STEP_SRAM2, 0x8fffU, 0xff00U, 0x0400U },
+	{ RTL_PHY_STEP_SRAM, 0x8018U, 0xff00U, 0x7700U },
+	{ RTL_PHY_STEP_WRITE, 0xa436U, 0x0000U, 0x8f9cU },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0005U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x00edU },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0502U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0b00U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0xd401U },
+	{ RTL_PHY_STEP_SRAM, 0x8fa8U, 0xff00U, 0x2900U },
+	{ RTL_PHY_STEP_SRAM2, 0x814bU, 0xff00U, 0x1100U },
+	{ RTL_PHY_STEP_SRAM2, 0x814dU, 0xff00U, 0x1100U },
+	{ RTL_PHY_STEP_SRAM2, 0x814fU, 0xff00U, 0x0b00U },
+	{ RTL_PHY_STEP_SRAM2, 0x8142U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x8144U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x8150U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x8118U, 0xff00U, 0x0700U },
+	{ RTL_PHY_STEP_SRAM2, 0x811aU, 0xff00U, 0x0700U },
+	{ RTL_PHY_STEP_SRAM2, 0x811cU, 0xff00U, 0x0500U },
+	{ RTL_PHY_STEP_SRAM2, 0x810fU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x8111U, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_SRAM2, 0x811dU, 0xff00U, 0x0100U },
+	{ RTL_PHY_STEP_MODIFY, 0xad1cU, 0x0100U, 0x0000U },
+	{ RTL_PHY_STEP_MODIFY, 0xade8U, 0xffc0U, 0x1400U },
+	{ RTL_PHY_STEP_SRAM2, 0x864bU, 0xff00U, 0x9d00U },
+	{ RTL_PHY_STEP_SRAM2, 0x862cU, 0xff00U, 0x1200U },
+	{ RTL_PHY_STEP_WRITE, 0xa436U, 0x0000U, 0x8566U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x003fU },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x3f02U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x023cU },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x3b0aU },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x1c00U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
+	{ RTL_PHY_STEP_WRITE, 0xa438U, 0x0000U, 0x0000U },
+	{ RTL_PHY_STEP_MODIFY, 0xad9cU, 0x0000U, 0x0020U },
+	{ RTL_PHY_STEP_SRAM2, 0x8122U, 0xff00U, 0x0c00U },
+	{ RTL_PHY_STEP_WRITE, 0xb87cU, 0x0000U, 0x82c8U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03edU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03ffU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0009U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03feU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x000bU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0021U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f7U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03b8U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03e0U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0049U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0049U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03e0U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03b8U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f7U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0021U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x000bU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03feU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0009U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03ffU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03edU },
+	{ RTL_PHY_STEP_SRAM2, 0x80efU, 0xff00U, 0x0c00U },
+	{ RTL_PHY_STEP_WRITE, 0xb87cU, 0x0000U, 0x82a0U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x000eU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03feU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03edU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0006U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x001aU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f1U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03d8U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0023U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0054U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0322U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x00ddU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03abU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03dcU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0027U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x000eU },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03e5U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f9U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0012U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x0001U },
+	{ RTL_PHY_STEP_WRITE, 0xb87eU, 0x0000U, 0x03f1U },
+	{ RTL_PHY_STEP_MODIFY, 0xb54cU, 0xffc0U, 0x3700U },
+	{ RTL_PHY_STEP_MODIFY, 0xb648U, 0x0000U, 0x0040U },
+	{ RTL_PHY_STEP_SRAM2, 0x8082U, 0xff00U, 0x5d00U },
+	{ RTL_PHY_STEP_SRAM2, 0x807cU, 0xff00U, 0x5000U },
+	{ RTL_PHY_STEP_SRAM2, 0x809dU, 0xff00U, 0x5000U },
+};
+
+/*
  * The driver as the USB core registers it.
  */
 static struct drv_usb_driver rtl_driver = {
@@ -480,17 +688,34 @@ static int rtl_wait_bits(struct rtl_adapter *adapter, uint16_t space, uint16_t r
 static int rtl_ocp_read(struct rtl_adapter *adapter, uint16_t address, uint16_t *value);
 static int rtl_ocp_write(struct rtl_adapter *adapter, uint16_t address, uint16_t value);
 static int rtl_ocp_modify(struct rtl_adapter *adapter, uint16_t address, uint16_t clear, uint16_t set);
+static int rtl_indirect_wait(struct rtl_adapter *adapter);
+static int rtl_indirect_read(struct rtl_adapter *adapter, uint16_t block, uint16_t address, uint32_t *value);
+static int rtl_indirect_write(struct rtl_adapter *adapter, uint16_t block, uint16_t address, uint32_t value);
+static int rtl_indirect_modify(struct rtl_adapter *adapter, uint16_t block, uint16_t address, uint32_t clear, uint32_t set);
+static int rtl_sram_modify(struct rtl_adapter *adapter, uint16_t window, uint16_t data, uint16_t address, uint16_t clear, uint16_t set);
+static int rtl_phy_steps_apply(struct rtl_adapter *adapter, const struct rtl_phy_step *steps, size_t count);
+static int rtl_phy_patch_request(struct rtl_adapter *adapter, int request);
 static int rtl_read_version(struct rtl_adapter *adapter);
 static int rtl_aldps(struct rtl_adapter *adapter, int enable);
+static int rtl_aldps_off_8157(struct rtl_adapter *adapter);
 static int rtl_phy_wait_state(struct rtl_adapter *adapter, unsigned wanted, unsigned *state);
 static int rtl_chip_init(struct rtl_adapter *adapter);
+static int rtl_chip_init_first_8156(struct rtl_adapter *adapter);
+static int rtl_chip_init_first_8157(struct rtl_adapter *adapter);
+static int rtl_chip_wake(struct rtl_adapter *adapter);
+static int rtl_wait_flash(struct rtl_adapter *adapter);
 static int rtl_chip_init_power(struct rtl_adapter *adapter);
 static int rtl_chip_init_finish(struct rtl_adapter *adapter);
+static int rtl_chip_init_finish_8157(struct rtl_adapter *adapter);
+static int rtl_phy_config_8157(struct rtl_adapter *adapter);
+static int rtl_phy_config_8157_finish(struct rtl_adapter *adapter);
 static int rtl_read_mac(struct rtl_adapter *adapter);
 static int rtl_advertise(struct rtl_adapter *adapter);
 static int rtl_nic_reset(struct rtl_adapter *adapter, unsigned mtu);
+static int rtl_nic_reset_8157(struct rtl_adapter *adapter, unsigned mtu);
 static int rtl_nic_fifo(struct rtl_adapter *adapter, unsigned mtu);
 static int rtl_program_frame_size(struct rtl_adapter *adapter, unsigned mtu);
+static int rtl_program_frame_fifo_8157(struct rtl_adapter *adapter, uint32_t frame);
 static int rtl_nic_enable(struct rtl_adapter *adapter, unsigned mtu);
 static int rtl_nic_disable(struct rtl_adapter *adapter);
 static void rtl_link_update(struct rtl_adapter *adapter);
@@ -900,6 +1125,272 @@ rtl_ocp_modify(
 }
 
 /*
+ * Waits for the indirect window to finish its last command; ETIMEDOUT
+ * when it stays busy.
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (wait_cmd_ready): the busy bit of the command, 20 ms at most.
+ */
+static int
+rtl_indirect_wait(
+	struct rtl_adapter *adapter)
+{
+	uint32_t command;
+	unsigned tries;
+	int error;
+
+	/* Reads the command until its busy bit is clear. */
+	for (tries = 0; tries < RTL_INDIRECT_TRIES; tries++) {
+		error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_COMMAND, 2, &command);
+		if (error != 0)
+			return error;
+		if ((command & INDIRECT_BUSY) == 0)
+			return 0;
+		rtl_sleep_ms(RTL_INDIRECT_STEP_MS);
+	}
+
+	/* The window stayed busy. */
+	return ETIMEDOUT;
+}
+
+/*
+ * Reads a register of the RTL8157's buffer manager (INDIRECT_BMU) or IP
+ * block (INDIRECT_IP) through the indirect window.
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (ocp_adv_read): the address, then the command with the busy bit, a
+ * wait, and the data.
+ */
+static int
+rtl_indirect_read(
+	struct rtl_adapter *adapter,
+	uint16_t block,
+	uint16_t address,
+	uint32_t *value)
+{
+	int error;
+
+	/* The window takes no command while it runs one. */
+	error = rtl_indirect_wait(adapter);
+	if (error != 0)
+		return error;
+
+	/* Asks for the register. */
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_ADDRESS, 2, address);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_COMMAND, 2, (uint32_t)block | INDIRECT_BUSY);
+	if (error != 0)
+		return error;
+
+	/* Waits for the read and takes its value. */
+	error = rtl_indirect_wait(adapter);
+	if (error != 0)
+		return error;
+	error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_DATA, 4, value);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the register's value. */
+	return 0;
+}
+
+/*
+ * Writes a register of the RTL8157's buffer manager or IP block through
+ * the indirect window.  The write runs on in the chip; the next command
+ * waits for it.
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (ocp_adv_write): the data, the address, then the command with the
+ * write and busy bits.
+ */
+static int
+rtl_indirect_write(
+	struct rtl_adapter *adapter,
+	uint16_t block,
+	uint16_t address,
+	uint32_t value)
+{
+	int error;
+
+	/* The window takes no command while it runs one. */
+	error = rtl_indirect_wait(adapter);
+	if (error != 0)
+		return error;
+
+	/* Gives the value and the register, then starts the write. */
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_DATA, 4, value);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_INDIRECT_ADDRESS, 2, address);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter,
+			  DRV_USB_RTL815X_SPACE_USB,
+			  UREG_INDIRECT_COMMAND,
+			  2,
+			  (uint32_t)block | INDIRECT_WRITE | INDIRECT_BUSY);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the write is started. */
+	return 0;
+}
+
+/* Clears and then sets bits of a buffer manager or IP block register. */
+static int
+rtl_indirect_modify(
+	struct rtl_adapter *adapter,
+	uint16_t block,
+	uint16_t address,
+	uint32_t clear,
+	uint32_t set)
+{
+	uint32_t value;
+	int error;
+
+	/* Reads the register. */
+	error = rtl_indirect_read(adapter, block, address, &value);
+	if (error != 0)
+		return error;
+
+	/* Writes it back changed. */
+	value = (value & ~clear) | set;
+	error = rtl_indirect_write(adapter, block, address, value);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the bits are changed. */
+	return 0;
+}
+
+/*
+ * Clears and then sets bits of a word in one of the PHY's SRAM windows
+ * (an address register and the data register after it).
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (sram_write_w0w1, sram2_write_w0w1): the word's address, a read of the
+ * data, and the changed data written back without a new address.
+ */
+static int
+rtl_sram_modify(
+	struct rtl_adapter *adapter,
+	uint16_t window,
+	uint16_t data,
+	uint16_t address,
+	uint16_t clear,
+	uint16_t set)
+{
+	uint16_t value;
+	int error;
+
+	/* Points the window at the word and reads it. */
+	error = rtl_ocp_write(adapter, window, address);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_read(adapter, data, &value);
+	if (error != 0)
+		return error;
+
+	/* Writes it back changed. */
+	value = (uint16_t)((value & ~clear) | set);
+	error = rtl_ocp_write(adapter, data, value);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the bits are changed. */
+	return 0;
+}
+
+/* Applies a table of PHY settings in order, stopping at the first failure. */
+static int
+rtl_phy_steps_apply(
+	struct rtl_adapter *adapter,
+	const struct rtl_phy_step *steps,
+	size_t count)
+{
+	const struct rtl_phy_step *step;
+	size_t index;
+	int error;
+
+	/* Applies each step by its kind. */
+	for (index = 0; index < count; index++) {
+		step = &steps[index];
+		error = EINVAL;
+
+		/* Reaches the register or the SRAM word as the kind says. */
+		switch (step->kind) {
+		case RTL_PHY_STEP_MODIFY:
+			error = rtl_ocp_modify(adapter, step->address, step->clear, step->set);
+			break;
+		case RTL_PHY_STEP_WRITE:
+			error = rtl_ocp_write(adapter, step->address, step->set);
+			break;
+		case RTL_PHY_STEP_SRAM:
+			error = rtl_sram_modify(adapter, PHY_SRAM_ADDRESS, PHY_SRAM_DATA, step->address, step->clear, step->set);
+			break;
+		case RTL_PHY_STEP_SRAM2:
+			error = rtl_sram_modify(adapter, PHY_SRAM2_ADDRESS, PHY_SRAM2_DATA, step->address, step->clear, step->set);
+			break;
+		}
+
+		/* A step that failed ends the table. */
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: every step is applied. */
+	return 0;
+}
+
+/*
+ * Asks the PHY to stop for a change of its settings (request), or lets
+ * it go on, and waits for it to say so.
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (rtl_phy_patch_request): the request bit, then the ready bit set (or
+ * cleared) within five seconds; a request never granted is withdrawn.
+ */
+static int
+rtl_phy_patch_request(
+	struct rtl_adapter *adapter,
+	int request)
+{
+	uint16_t status;
+	uint16_t wanted;
+	unsigned tries;
+	int error;
+
+	/* Raises or lowers the request. */
+	if (request) {
+		error = rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, 0, PHY_PATCH_REQUEST);
+		wanted = PHY_PATCH_READY;
+	} else {
+		error = rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, PHY_PATCH_REQUEST, 0);
+		wanted = 0;
+	}
+	if (error != 0)
+		return error;
+
+	/* Waits for the ready bit to follow. */
+	for (tries = 0; tries < RTL_PATCH_TRIES; tries++) {
+		rtl_sleep_ms(1U);
+		error = rtl_ocp_read(adapter, PHY_PATCH_STATUS, &status);
+		if (error != 0)
+			return error;
+		if ((status & PHY_PATCH_READY) == wanted)
+			return 0;
+	}
+
+	/* A request never granted is withdrawn. */
+	if (request)
+		(void)rtl_ocp_modify(adapter, PHY_PATCH_COMMAND, PHY_PATCH_REQUEST, 0);
+
+	/* The PHY did not answer. */
+	return ETIMEDOUT;
+}
+
+/*
  * Reads the chip's version and tells the chip from it.
  *
  * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
@@ -948,6 +1439,14 @@ rtl_aldps(
 		return 0;
 	}
 
+	/* The RTL8157 turns it off its own way. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_aldps_off_8157(adapter);
+		if (error != 0)
+			return error;
+		return 0;
+	}
+
 	/* Disabling writes the configuration and waits for the PHY to leave the mode. */
 	error = rtl_ocp_write(adapter, PHY_LINK_DOWN_SAVING, LINK_DOWN_SAVING_OFF);
 	if (error != 0)
@@ -964,6 +1463,41 @@ rtl_aldps(
 	}
 
 	/* Succeeded: the power saving is off (or as off as the PHY says). */
+	return 0;
+}
+
+/*
+ * Turns the RTL8157 PHY's link-down power saving off and waits about
+ * 20 ms at most for the MAC to see the mode end.
+ *
+ * Procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8153_aldps_en): the bit of the power configuration, then PLA 0xe000
+ * bit 8.
+ */
+static int
+rtl_aldps_off_8157(
+	struct rtl_adapter *adapter)
+{
+	uint32_t value;
+	unsigned tries;
+	int error;
+
+	/* Clears the power saving's bit. */
+	error = rtl_ocp_modify(adapter, PHY_POWER, PHY_POWER_LINK_DOWN_SAVING, 0);
+	if (error != 0)
+		return error;
+
+	/* Waits for the MAC to report the mode off. */
+	for (tries = 0; tries < 20U; tries++) {
+		rtl_sleep_ms(1U);
+		error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_ALDPS_STATUS, 2, &value);
+		if (error != 0)
+			return error;
+		if ((value & ALDPS_STATUS_OFF) != 0)
+			break;
+	}
+
+	/* Succeeded: the power saving is off (or as off as the MAC says). */
 	return 0;
 }
 
@@ -1011,15 +1545,56 @@ rtl_phy_wait_state(
  * Brings the chip out of its power-on state, once at attach.
  *
  * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
- * (ure_rtl8153b_init, the RTL8156 and RTL8156B branches).
+ * (ure_rtl8153b_init, the RTL8156 and RTL8156B branches); the RTL8157's
+ * first settings from Linux 7.3 drivers/net/usb/r8152.c (r8156_init,
+ * the RTL_VER_16 branch).
  */
 static int
 rtl_chip_init(
 	struct rtl_adapter *adapter)
 {
-	uint32_t value;
-	uint16_t phy;
-	unsigned state;
+	int error;
+
+	/* The first settings, which differ by chip. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157)
+		error = rtl_chip_init_first_8157(adapter);
+	else
+		error = rtl_chip_init_first_8156(adapter);
+	if (error != 0)
+		return error;
+
+	/* The link power states stay off while the chip is set up. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, LPM_U1U2_ENABLE, 0);
+	if (error != 0)
+		return error;
+
+	/* The chip's own load, and the PHY on the LAN. */
+	error = rtl_chip_wake(adapter);
+	if (error != 0)
+		return error;
+
+	/* The power settings and the rest. */
+	error = rtl_chip_init_power(adapter);
+	if (error != 0)
+		return error;
+	error = rtl_chip_init_finish(adapter);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the chip is ready to be brought up. */
+	return 0;
+}
+
+/*
+ * The RTL8156 family's first settings, with the PHY's power saving off.
+ *
+ * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
+ * (ure_rtl8153b_init, the RTL8156 and RTL8156B branches).
+ */
+static int
+rtl_chip_init_first_8156(
+	struct rtl_adapter *adapter)
+{
 	int error;
 
 	/* The RTL8156 family's first settings. */
@@ -1040,30 +1615,75 @@ rtl_chip_init(
 			return error;
 	}
 
-	/* The PHY's power saving and the link power states stay off while it is set up. */
+	/* The PHY's power saving stays off while it is set up. */
 	error = rtl_aldps(adapter, 0);
 	if (error != 0)
 		return error;
-	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, LPM_U1U2_ENABLE, 0);
+
+	/* Succeeded: the first settings are made. */
+	return 0;
+}
+
+/*
+ * The RTL8157's first settings: two of its own, all-speed mode off and
+ * the MAC reset bypassed; the speed options are left alone.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8156_init: 0xcffe bit 3 set, 0xd3ca bit 0 cleared, USB_ECM_OP
+ * EN_ALL_SPEED cleared, USB_ECM_OPTION BYPASS_MAC_RESET set).
+ */
+static int
+rtl_chip_init_first_8157(
+	struct rtl_adapter *adapter)
+{
+	int error;
+
+	/* The RTL8157's own two. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_CFFE, 1, 0, 0x08U);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_D3CA, 1, 0x01U, 0);
 	if (error != 0)
 		return error;
 
-	/*
-	 * A version 0x7410 or 0x7420 that loads its PHY settings from flash
-	 * finishes the load first (0x7420 as Linux 7.3
-	 * drivers/net/usb/r8152.c r8156_init treats it).
-	 */
-	if (adapter->version == 0x7410U || adapter->version == 0x7420U) {
-		error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_FLASH_STATUS, 2, &value);
+	/* The ones it shares with the RTL8156. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_D26B, 1, 0x01U, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_CFEE, 2, 0, 0x0020U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the first settings are made. */
+	return 0;
+}
+
+/*
+ * Waits for the chip to load its PHY settings from flash and its
+ * defaults, lets a PHY in its external initialization go on, powers the
+ * PHY up and waits for it to be on the LAN.  A chip that never reports a
+ * step is set up anyway, as FreeBSD's is.
+ *
+ * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
+ * (ure_rtl8153b_init); the flash load of 0x7420 and the RTL8157 as
+ * Linux 7.3 drivers/net/usb/r8152.c (r8156_init,
+ * r8156b_wait_loading_flash) treats them.
+ */
+static int
+rtl_chip_wake(
+	struct rtl_adapter *adapter)
+{
+	uint16_t phy;
+	unsigned state;
+	int error;
+
+	/* A chip that loads its PHY settings from flash finishes the load first. */
+	if (adapter->version == 0x7410U ||
+	    adapter->version == 0x7420U ||
+	    adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_wait_flash(adapter);
 		if (error != 0)
 			return error;
-		if ((value & 0x0002U) != 0) {
-			error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_FLASH_LOAD, 2, &value);
-			if (error != 0)
-				return error;
-			if ((value & 0x0020U) == 0)
-				(void)rtl_wait_bits(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_FLASH_LOAD, 2, 0x0004U, 1);
-		}
 	}
 
 	/* Waits for the chip to have loaded its defaults; one that never says so is set up anyway. */
@@ -1084,7 +1704,7 @@ rtl_chip_init(
 		error = rtl_ocp_modify(adapter, PHY_A468, 0x000aU, 0);
 		if (error != 0)
 			return error;
-		if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8156B) {
+		if (adapter->chip != DRV_USB_RTL815X_CHIP_RTL8156) {
 			error = rtl_ocp_modify(adapter, PHY_A466, 0x0001U, 0);
 			if (error != 0)
 				return error;
@@ -1107,15 +1727,43 @@ rtl_chip_init(
 	else if (error != 0)
 		return error;
 
-	/* The power settings and the rest. */
-	error = rtl_chip_init_power(adapter);
-	if (error != 0)
-		return error;
-	error = rtl_chip_init_finish(adapter);
-	if (error != 0)
-		return error;
+	/* Succeeded: the PHY is up. */
+	return 0;
+}
 
-	/* Succeeded: the chip is ready to be brought up. */
+/*
+ * Waits for a chip that loads its PHY settings from flash to finish the
+ * load, unless the load is bypassed.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8156b_wait_loading_flash: PLA_GPHY_CTRL GPHY_FLASH, USB_GPHY_CTRL
+ * BYPASS_FLASH and GPHY_PATCH_DONE).
+ */
+static int
+rtl_wait_flash(
+	struct rtl_adapter *adapter)
+{
+	uint32_t value;
+	int error;
+
+	/* A chip without the flash has nothing to wait for. */
+	error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_FLASH_STATUS, 2, &value);
+	if (error != 0)
+		return error;
+	if ((value & 0x0002U) == 0)
+		return 0;
+
+	/* Nor has one told to bypass it. */
+	error = rtl_read(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_FLASH_LOAD, 2, &value);
+	if (error != 0)
+		return error;
+	if ((value & 0x0020U) != 0)
+		return 0;
+
+	/* Waits for the load to be done; one that never says so is set up anyway. */
+	(void)rtl_wait_bits(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_FLASH_LOAD, 2, 0x0004U, 1);
+
+	/* Succeeded: the flash is loaded (or as loaded as the chip says). */
 	return 0;
 }
 
@@ -1127,7 +1775,9 @@ rtl_chip_init(
  * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
  * (ure_rtl8153b_init).  The suspend and wake flags are PLA registers
  * (Linux 7.3 drivers/net/usb/r8152.c: r8153_queue_wake,
- * rtl_runtime_suspend_enable).
+ * rtl_runtime_suspend_enable).  The RTL8157's U2P3 and power cut as
+ * Linux 7.3 drivers/net/usb/r8152.c (r8157_u2p3en, r8157_power_cut_en)
+ * sets them.
  */
 static int
 rtl_chip_init_power(
@@ -1135,8 +1785,11 @@ rtl_chip_init_power(
 {
 	int error;
 
-	/* No U2P3 while setting up. */
-	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_U2P3, 2, U2P3_ENABLE, 0);
+	/* No U2P3 while setting up: the RTL8157 keeps the bit in its IP block. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157)
+		error = rtl_indirect_modify(adapter, INDIRECT_IP, IP_U2P3, IP_U2P3_ENABLE, 0);
+	else
+		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_U2P3, 2, U2P3_ENABLE, 0);
 	if (error != 0)
 		return error;
 
@@ -1155,6 +1808,11 @@ rtl_chip_init_power(
 	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_POWER_CUT_STATUS, 2, MISC_0_PCUT_STATUS, 0);
 	if (error != 0)
 		return error;
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_UPS_FLAGS, 1, UPS_FLAGS_POWER_CUT_GEN2, 0);
+		if (error != 0)
+			return error;
+	}
 	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_POWER_CUT, 1, POWER_CUT_UPS | POWER_CUT_PREWAKE, 0);
 	if (error != 0)
 		return error;
@@ -1191,10 +1849,12 @@ rtl_chip_init_power(
 /*
  * Finishes the attach-time setup: the link power states, the RTL8156B's
  * flow control, the link-change flags, the MAC clock, receive
- * aggregation and the counters.
+ * aggregation, the RTL8157's own settings and the counters.
  *
  * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c
- * (ure_rtl8153b_init).
+ * (ure_rtl8153b_init).  The RTL8157 keeps the MCU's clock setting and
+ * clears the 16-byte descriptor bit, not the empty-transfer one (Linux
+ * 7.3 drivers/net/usb/r8152.c r8156_init).
  */
 static int
 rtl_chip_init_finish(
@@ -1251,21 +1911,46 @@ rtl_chip_init_finish(
 	if (error != 0)
 		return error;
 
-	/* The MAC clock slows down when idle; the MCU's does not. */
+	/* The MAC clock slows down when idle. */
 	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER, 2, 0x0403U);
 	if (error != 0)
 		return error;
 	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER2, 2, 0x00ffU, MAC_PWR_CTRL2_SPEED_DOWN | 0x03U);
 	if (error != 0)
 		return error;
-	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER3, 2, MAC_PWR_CTRL3_MCU_SPEED_DOWN, 0);
+
+	/* The RTL8156 family's MCU clock does not; the RTL8157 keeps its own setting. */
+	if (adapter->chip != DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER3, 2, MAC_PWR_CTRL3_MCU_SPEED_DOWN, 0);
+		if (error != 0)
+			return error;
+	}
+
+	/* Receive aggregation: many frames to a transfer, in the RTL8157's 16-byte descriptors. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_modify(adapter,
+				   DRV_USB_RTL815X_SPACE_USB,
+				   UREG_TRANSFER_CONTROL,
+				   2,
+				   USB_CTRL_RX_AGG_DISABLE | USB_CTRL_RX_DESC_16,
+				   0);
+	} else {
+		error = rtl_modify(adapter,
+				   DRV_USB_RTL815X_SPACE_USB,
+				   UREG_TRANSFER_CONTROL,
+				   2,
+				   USB_CTRL_RX_AGG_DISABLE | USB_CTRL_RX_ZERO,
+				   0);
+	}
 	if (error != 0)
 		return error;
 
-	/* Receive aggregation: many frames to a transfer. */
-	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_TRANSFER_CONTROL, 2, USB_CTRL_RX_AGG_DISABLE | USB_CTRL_RX_ZERO, 0);
-	if (error != 0)
-		return error;
+	/* The RTL8157's own: no empty receive transfers, the transmit descriptors' signature, MII forcing. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_chip_init_finish_8157(adapter);
+		if (error != 0)
+			return error;
+	}
 
 	/* The first RTL8156's DMA setting. */
 	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8156) {
@@ -1280,6 +1965,193 @@ rtl_chip_init_finish(
 		return error;
 
 	/* Succeeded: the chip's setup is finished. */
+	return 0;
+}
+
+/*
+ * The RTL8157's last attach-time settings: no empty receive transfers
+ * (a buffer manager register), the transmit descriptors' signature
+ * checked, and the speed forcing through the MII registers.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8156_init, the RTL_VER_16 branch: the buffer manager's 0x2300 bit
+ * 3, 0xd4ae bit 1; r8156_mdio_force_mode: 0xa5b4 bit 15).
+ */
+static int
+rtl_chip_init_finish_8157(
+	struct rtl_adapter *adapter)
+{
+	int error;
+
+	/* No empty receive transfers. */
+	error = rtl_indirect_modify(adapter, INDIRECT_BMU, BMU_RX_CONFIG, BMU_RX_ZERO, 0);
+	if (error != 0)
+		return error;
+
+	/* The transmit descriptors' signature. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_D4AE, 1, 0x02U, 0);
+	if (error != 0)
+		return error;
+
+	/* Speeds are forced through the MII registers, not the MMD ones. */
+	error = rtl_ocp_modify(adapter, PHY_FORCE_MODE, FORCE_MODE_MMD, 0);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the RTL8157's settings are made. */
+	return 0;
+}
+
+/*
+ * Sets the RTL8157's PHY up, once at attach after the chip: the PHY
+ * powered and on the LAN, its power modes, and its parameter table.
+ * The PHY firmware Linux may load is not loaded, and EEE is left as the
+ * chip has it.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8157_hw_phy_cfg: USB_MISC_0 PCUT_STATUS, 0xa466 bit 0 and 0xa468
+ * bits 1 and 3 in the external initialization, PLA_PHY_PWR
+ * PFM_PWM_SWITCH, 0xa430 bits 0 and 1, 0xa44a bit 2).
+ */
+static int
+rtl_phy_config_8157(
+	struct rtl_adapter *adapter)
+{
+	uint16_t phy;
+	unsigned state;
+	int error;
+
+	/* The PHY settings from flash, and no power cut left reported. */
+	error = rtl_wait_flash(adapter);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_POWER_CUT_STATUS, 2, MISC_0_PCUT_STATUS, 0);
+	if (error != 0)
+		return error;
+
+	/* A PHY still in its external initialization is let go on. */
+	state = 0;
+	error = rtl_phy_wait_state(adapter, 0, &state);
+	if (error != 0 && error != ETIMEDOUT)
+		return error;
+	if (state == PHY_STATE_EXT_INIT) {
+		error = rtl_ocp_modify(adapter, PHY_A466, 0x0001U, 0);
+		if (error != 0)
+			return error;
+		error = rtl_ocp_modify(adapter, PHY_A468, 0x000aU, 0);
+		if (error != 0)
+			return error;
+	}
+
+	/* The PHY powered up, its power saving off, and on the LAN. */
+	error = rtl_ocp_read(adapter, PHY_MII_BASE + MII_BMCR * 2U, &phy);
+	if (error != 0)
+		return error;
+	if ((phy & BMCR_POWER_DOWN) != 0) {
+		error = rtl_ocp_write(adapter, PHY_MII_BASE + MII_BMCR * 2U, (uint16_t)(phy & ~BMCR_POWER_DOWN));
+		if (error != 0)
+			return error;
+	}
+
+	error = rtl_aldps(adapter, 0);
+	if (error != 0)
+		return error;
+	error = rtl_phy_wait_state(adapter, PHY_STATE_LAN_ON, &state);
+	if (error == ETIMEDOUT)
+		kern_logf("usb-rtl815x: PHY state %u is not LAN-on, going on\n", state);
+	else if (error != 0)
+		return error;
+
+	/* The PFM mode off, the power saving parameters on, the power saving's force mode off. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_PHY_POWER_MODE, 2, PHY_POWER_MODE_PFM, 0);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter, PHY_POWER, 0, PHY_POWER_SAVING_PARAMETERS);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter, PHY_A44A, 0x0004U, 0);
+	if (error != 0)
+		return error;
+
+	/* The parameter table. */
+	error = rtl_phy_steps_apply(adapter, rtl_8157_phy_steps, sizeof(rtl_8157_phy_steps) / sizeof(rtl_8157_phy_steps[0]));
+	if (error != 0)
+		return error;
+
+	/* The clocks under EEE and the rest. */
+	error = rtl_phy_config_8157_finish(adapter);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PHY is set up. */
+	return 0;
+}
+
+/*
+ * Finishes the RTL8157's PHY setup: with the PHY stopped for the change,
+ * the MAC's and the PHY's clocks slow down under EEE and the 10 Mbit/s
+ * clock is divided; then green mode on, two PHY settings off, and the
+ * PHY's power saving back on.  A PHY that never stops for the change
+ * keeps its settings, as Linux leaves it.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (r8157_hw_phy_cfg: PLA_MAC_PWR_CTRL4 EEE_SPDWN_EN, OCP_DOWN_SPEED,
+ * OCP_POWER_CFG EEE_CLKDIV_EN, rtl_green_en, 0xa428 bit 9, 0xa5ea bits
+ * 0 and 1).
+ */
+static int
+rtl_phy_config_8157_finish(
+	struct rtl_adapter *adapter)
+{
+	int error;
+
+	/* Stops the PHY for the change; one that does not stop keeps its settings. */
+	error = rtl_phy_patch_request(adapter, 1);
+	if (error == ETIMEDOUT) {
+		kern_logf("usb-rtl815x: PHY did not stop for its settings, going on\n");
+		return 0;
+	}
+	if (error != 0)
+		return error;
+
+	/* The clocks under EEE. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER4, 2, 0, MAC_PWR_CTRL4_EEE_SPEED_DOWN);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter,
+			       PHY_DOWN_SPEED,
+			       DOWN_SPEED_EEE_100 | DOWN_SPEED_EEE_1000,
+			       DOWN_SPEED_10M_CLOCK_DIVIDE);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter, PHY_POWER, 0, PHY_POWER_EEE_CLOCK_DIVIDE);
+	if (error != 0)
+		return error;
+
+	/* Lets the PHY go on. */
+	error = rtl_phy_patch_request(adapter, 0);
+	if (error == ETIMEDOUT)
+		kern_logf("usb-rtl815x: PHY did not resume after its settings, going on\n");
+	else if (error != 0)
+		return error;
+
+	/* Green mode on, and two settings off. */
+	error = rtl_sram_modify(adapter, PHY_SRAM_ADDRESS, PHY_SRAM_DATA, SRAM_GREEN, 0, SRAM_GREEN_ENABLE);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter, PHY_A428, 0x0200U, 0);
+	if (error != 0)
+		return error;
+	error = rtl_ocp_modify(adapter, PHY_A5EA, 0x0003U, 0);
+	if (error != 0)
+		return error;
+
+	/* The PHY's power saving back on. */
+	error = rtl_aldps(adapter, 1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PHY's setup is finished. */
 	return 0;
 }
 
@@ -1392,6 +2264,14 @@ rtl_nic_reset(
 	unsigned mtu)
 {
 	int error;
+
+	/* The RTL8157 is reset its own way. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_nic_reset_8157(adapter, mtu);
+		if (error != 0)
+			return error;
+		return 0;
+	}
 
 	/* The link power states and the PHY's power saving off. */
 	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, LPM_U1U2_ENABLE, 0);
@@ -1552,9 +2432,112 @@ rtl_nic_fifo(
 }
 
 /*
+ * Resets the RTL8157's MAC for an up: receive held and off, transmit and
+ * receive stopped (the RTL8157 has no MAC reset here), the buffer
+ * manager reset, and the frame size and FIFOs.  Its U2P3 stays off and
+ * its U1 and U2 are not turned back on.
+ *
+ * Values and procedure referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (rtl8156_up and rtl8152_nic_reset, the RTL_VER_16 branches: PLA_RCR1
+ * bit 3, PLA_TXFIFO_CTRL 512 / 64, PLA_RXFIFO_FULL, USB_RX_BUF_TH).
+ */
+static int
+rtl_nic_reset_8157(
+	struct rtl_adapter *adapter,
+	unsigned mtu)
+{
+	int error;
+
+	/* The link power states and the PHY's power saving off. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_LINK_POWER, 2, LPM_U1U2_ENABLE, 0);
+	if (error != 0)
+		return error;
+	error = rtl_aldps(adapter, 0);
+	if (error != 0)
+		return error;
+
+	/* Holds receive DMA, turns the wake-up offloads off and accepts nothing. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_RX_DMA_GATE, 2, 0, RX_DMA_HELD);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_WAKE_OFFLOAD, 1, TEREDO_ALL_OFF);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_WAKE_WATCHDOG, 2, WDT6_SET_MODE);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_WAKE_TIMER, 2, 0);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_WAKE_OFFLOAD_TIMER, 4, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_RX_CONFIG, 4, RX_ACCEPT_ANY, 0);
+	if (error != 0)
+		return error;
+
+	/* Stops transmit and receive, and resets the buffer manager of both endpoints. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_COMMAND, 1, COMMAND_RECEIVE | COMMAND_TRANSMIT, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_BUFFER_RESET, 1, BMU_RESET_IN_OUT, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_BUFFER_RESET, 1, 0, BMU_RESET_IN_OUT);
+	if (error != 0)
+		return error;
+
+	/* Leaves the out-of-band mode, one receive setting and the MCU's borrowing. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_OOB_CONTROL, 1, OOB_ACTIVE, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_RX_CONFIG_VLAN, 2, RX_CONFIG_VLAN_GEN2, 0);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MCU_STATUS, 2, MCU_BORROW, 0);
+	if (error != 0)
+		return error;
+
+	/* Keeps VLAN tags in the frames: the stack reads them there. */
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_RX_CONFIG_VLAN, 2, RX_VLAN_STRIP, 0);
+	if (error != 0)
+		return error;
+
+	/* The frame size, which also sets the pause thresholds and the transmit FIFO's full mark. */
+	error = rtl_program_frame_size(adapter, mtu);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_TX_FRAME_MAX, 1, MTPS_JUMBO);
+	if (error != 0)
+		return error;
+
+	/* The FIFOs' thresholds, and the MCU keeps its clock. */
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_TX_FIFO_THRESHOLD, 2, 512U / 64U);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_RX_FIFO_THRESHOLD, 2, 0x0fffU, 0x08U);
+	if (error != 0)
+		return error;
+	error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER3, 2, MAC_PWR_CTRL3_MCU_SPEED_DOWN, 0);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_RX_BUFFER_THRESHOLD, 4, 0x00600400U);
+	if (error != 0)
+		return error;
+
+	/* The PHY's power saving back on. */
+	error = rtl_aldps(adapter, 1);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the MAC is reset for the MTU. */
+	return 0;
+}
+
+/*
  * Writes the sizes that follow the MTU: the largest frame received, the
- * room a receive block keeps for its last frame, and the RTL8156B's
- * transmit FIFO threshold.
+ * room a receive block keeps for its last frame, and the RTL8156B's and
+ * the RTL8157's transmit FIFO thresholds.
  *
  * Values referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c (ure_init:
  * the RTL8156's early size; ure_rtl8153b_nic_reset: REG_RX_FRAME_MAX and 0xe61a);
@@ -1594,7 +2577,52 @@ rtl_program_frame_size(
 			return error;
 	}
 
+	/* The RTL8157's pause thresholds and transmit FIFO's full mark follow it too. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_program_frame_fifo_8157(adapter, frame);
+		if (error != 0)
+			return error;
+	}
+
 	/* Succeeded: the sizes follow the MTU. */
+	return 0;
+}
+
+/*
+ * Writes the RTL8157's sizes that follow its largest frame: the pause
+ * thresholds, 6 KB and 14 KB above the frame rounded up to 1 KB, and the
+ * transmit FIFO's full mark, the frame and its descriptor rounded up to
+ * 1 KB; all in 16-byte units.
+ *
+ * Values referenced: Linux 7.3 drivers/net/usb/r8152.c
+ * (fc_pause_on_auto, fc_pause_off_auto, r8156_fc_parameter,
+ * rtl8156_change_mtu).
+ */
+static int
+rtl_program_frame_fifo_8157(
+	struct rtl_adapter *adapter,
+	uint32_t frame)
+{
+	uint32_t rounded;
+	uint32_t transmit;
+	int error;
+
+	/* The pause thresholds. */
+	rounded = (frame + 1023U) & ~1023U;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_PAUSE_ON, 2, (rounded + 6U * 1024U) / 16U);
+	if (error != 0)
+		return error;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_PAUSE_OFF, 2, (rounded + 14U * 1024U) / 16U);
+	if (error != 0)
+		return error;
+
+	/* The transmit FIFO's full mark. */
+	transmit = (frame + (uint32_t)adapter->format.tx_desc_size + 1023U) & ~1023U;
+	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_TX_FIFO_FULL, 2, transmit / 16U);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the RTL8157's sizes follow the frame. */
 	return 0;
 }
 
@@ -1605,7 +2633,9 @@ rtl_program_frame_size(
  * Procedure referenced: FreeBSD 15.0 sys/dev/usb/net/if_ure.c (ure_init,
  * ure_rxfilter); the receive timers' values from Linux 7.3
  * drivers/net/usb/r8152.c (r8153_set_rx_early_timeout: 640 / 8, and a
- * coalesce of 15 us / 8 for the RTL8156).
+ * coalesce of 15 us / 8 for the RTL8156 and RTL8157; rtl8156_enable:
+ * USB_RX_AGGR_NUM's RX_AGGR_NUM_MASK cleared, which the driver does on
+ * the RTL8157 only).
  */
 static int
 rtl_nic_enable(
@@ -1632,6 +2662,13 @@ rtl_nic_enable(
 	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_CONFIG_WRITE, 1, CONFIG_WRITE_LOCKED);
 	if (error != 0)
 		return error;
+
+	/* The RTL8157 closes a block on its timers and room, not on a count of frames. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_modify(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_RX_AGG_COUNT, 2, RX_AGG_COUNT_MASK, 0);
+		if (error != 0)
+			return error;
+	}
 
 	/* The receive block closes after 640 ns of quiet, or 15 us at most. */
 	error = rtl_write(adapter, DRV_USB_RTL815X_SPACE_USB, UREG_RX_QUIET_TIME, 2, 640U / 8U);
@@ -1747,13 +2784,23 @@ rtl_link_update(
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
 
-	/* A link that came to an open interface: transmit and receive on, and the idle clock for its speed. */
+	/*
+	 * A link that came to an open interface: transmit and receive on,
+	 * and the RTL8156's idle clock for its speed.  The RTL8157 keeps its
+	 * idle clock as it is (Linux 7.3 drivers/net/usb/r8152.c
+	 * rtl8156_enable).
+	 */
 	if (carrier && opened) {
 		(void)rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_COMMAND, 1, 0, COMMAND_RECEIVE | COMMAND_TRANSMIT);
-		if (mbps >= 2500U)
+		if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+			/* The RTL8157's idle clock is left alone. */
+		} else if (mbps >= 2500U) {
+			/* A 2.5 Gbit/s link does not slow the idle clock. */
 			(void)rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER4, 2, MAC_PWR_CTRL4_IDLE_SPEED_DOWN, 0);
-		else
+		} else {
+			/* A slower one does. */
 			(void)rtl_modify(adapter, DRV_USB_RTL815X_SPACE_PLA, REG_MAC_POWER4, 2, 0, MAC_PWR_CTRL4_IDLE_SPEED_DOWN);
+		}
 	}
 
 	/* Publishes the link, and logs a change. */
@@ -3448,19 +4495,24 @@ rtl_attach(
 		return error;
 	}
 
-	/* The RTL8157 is set up differently, and that is not written yet. */
-	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
-		kern_logf("usb-rtl815x: RTL8157 (version 0x%04x) is not supported yet; boot with %s to use CDC NCM\n",
-			  adapter->version, RTL_OFF_TOKEN);
-		return ENODEV;
-	}
-	adapter->rx_block_size = RTL_RX_BLOCK_8156;
+	/* The receive block of the chip. */
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157)
+		adapter->rx_block_size = RTL_RX_BLOCK_8157;
+	else
+		adapter->rx_block_size = RTL_RX_BLOCK_8156;
 
 	/* Sets the chip up, reads its address and starts the negotiation. */
 	error = rtl_chip_init(adapter);
 	if (error != 0) {
 		kern_logf("usb-rtl815x: chip setup failed (%d)\n", error);
 		return error;
+	}
+	if (adapter->chip == DRV_USB_RTL815X_CHIP_RTL8157) {
+		error = rtl_phy_config_8157(adapter);
+		if (error != 0) {
+			kern_logf("usb-rtl815x: attach failed at %s (%d)\n", "PHY setup", error);
+			return error;
+		}
 	}
 	error = rtl_read_mac(adapter);
 	if (error != 0) {

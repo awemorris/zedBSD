@@ -29,8 +29,8 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
 | --- | --- | --- | --- |
 | [ws315-p001](phase001/phase.md) | 設計: Realtek の vendor mode（device の切り替え、RX の集約・TX の詰め・checksum と TSO の offload、PHY・link）、NCM との切り替え、出典と license（[design.md](design.md)） | cleared（2026-10-30 04:04 P3 q1694-i01、review を design.md §12 に反映） | WS221 p014 |
 | [ws315-p002](phase002/phase.md) | 実装: register の読み書き、RTL8156・8156B の初期化・up・down、RX・TX の block（記述子 v1）、checksum、link の worker、選び分け（match 120・CONFIG・boot の token）、host 試験、全 platform の build | cleared（2026-10-30 04:16 P3、16122571a） | p001 |
-| [ws315-p003](phase003/phase.md) | 5330 の実機: send・recv 30 s、NCM・Linux との比べ、USB の他の device の非退行、調整（design.md §5.4・§8） | in-progress（2026-10-30 05:27 k4: vendor mode send 2372.2・recv 2319.1、Linux 2353.4・2353.6。残りは未実施の項目） | p002 |
-| ws315-p004 | RTL8157（資料だけ）: 記述子 v2、version 16 の初期化、5000 の広告、host 試験、build。実機はユーザーの購入の後 | planned | p002 |
+| [ws315-p003](phase003/phase.md) | 5330 の実機: send・recv 30 s、NCM・Linux との比べ、USB の他の device の非退行、調整（design.md §5.4・§8） | in-progress（2026-10-30 05:27 k4: vendor mode send 2372.2・recv 2319.1、Linux 2353.4・2353.6。残りの camcap・送受信の同時は image を作ったが、5330 への SSH が security の判定で止まりユーザーの判断待ち） | p002 |
+| [ws315-p004](phase004/phase.md) | RTL8157（資料だけ）: 記述子 v2、version 16 の初期化、5000 の広告、host 試験、build。実機はユーザーの購入の後 | cleared（2026-10-30 05:43 P3、host 試験 PASS・amd64・pcat の build warning 0。実機は未実施） | p002 |
 | ws315-p005 | 規約の全文の見直し | planned | p002〜p004 |
 
 ## Resume point
@@ -41,3 +41,8 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
   未実施の項目（camcap・送受信の同時・port の上げ下げ・抜き差し・jumbo の相手・他の版の RTL8156）が残る。次: p003 の残り（image の試験で camcap と送受信の同時）、
   p004 RTL8157（Linux の r8156_init の version 16 の枝・r8157_hw_phy_cfg・ADV_CMD の BMU/IP の間接の読み書き・EARLY_SIZE /16・IDLE_SPDWN を飛ばす、design.md §11・§12 m2）、
   p005 規約の全文の見直し。merge は Q1 の判断（M4: 既定で vendor mode に切り替わる。5330 の k4 で動いた）。
+- 2026-10-30 P3（再開、q1694-i01）: p003 の残り: 5330-rtl.sh に送受信の同時（2 本目の peer、port 5312）、config-5330-rtl.mk に camcap（c3957e2bf）、image build/ws315-img/hdd-image.img を作った。
+  5330 の Debian への SSH（uname の確かめ）が auto mode の security の判定（Production Reads）で止まり、Q1 経由でユーザーの判断待ち（5330 には一切触れない）。
+  相手の port の上げ下げは centris が switch の先なので centris の down では 5330 の link が落ちない: 実施せず、switch 側の抜き差しとしてユーザーの拾える試験へ（Q1）。
+  p004 cleared（RTL8157 の初期化・PHY の表・up・MTU の値、host 試験と build）。次: p003 の image の試験（承認の後、`CAMERA=1 MODE=--nvme-image sh plan/ws315/tests/5330-rtl.sh build/ws315-img/hdd-image.img img1 30`、
+  image は p004 の前の tree なので p004 を含めるなら作り直す）、p005 規約の全文の見直し。

@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws315-p003 -->
 # ws315-p003: 5330 の実機（RTL8156 の vendor mode）
 
-Status: in-progress（2026-10-30 05:27 P3: k4 で vendor mode の受け入れの主な項目を満たした、残りは下の未実施。前の記録: 2026-10-30 04:16 P3 q1694-i01: k1 FAIL（SSH 無し）、5330 の電源の入れ直し待ち）
+Status: in-progress（2026-10-30 05:43 P3: 残りの camcap・送受信の同時は image を作り、5330 への SSH が security の判定で止まってユーザーの判断待ち。前の記録: 2026-10-30 05:27 P3: k4 で vendor mode の受け入れの主な項目を満たした、残りは下の未実施。前の記録: 2026-10-30 04:16 P3 q1694-i01: k1 FAIL（SSH 無し）、5330 の電源の入れ直し待ち）
 Parent: [WS315](../ws.md)
 Queue: q1694 / q1694-i01（P3）
 依存: p002
@@ -46,3 +46,15 @@ Queue: q1694 / q1694-i01（P3）
 - USB の他の device の非退行（k4 の kernel log）: webcam は uvc、Broadcom 58200 は usb-ccid、AX211 は usb-bt で k3-ncm と同じ。i915 の survey の diff は PASS（steady の register の差 0）。
 - 未実施: camcap（NVMe の userland に無い、image の試験が要る）、send と recv の同時、相手の port の上げ下げ、抜き差し（5330 は遠隔で抜けない、ユーザーの拾える試験の一覧へ: Q1）、
   9000 の相手との jumbo の ping（相手が無い）、RTL8156（A、0x7020/0x7030）と 0x7400・0x7420 の実機（手元は 0x7410 だけ）。
+
+## 残りの試験（2026-10-30 再開）
+
+- 試験の script（c3957e2bf、未試験）: `5330-rtl.sh` が send・recv の後に send と recv を同時に流す（2 本目の `perf-peer.py` を port 5312 に、`both` の行と TCP-PERF の 2 行）。
+  `config-5330-rtl.mk` に camcap を足した（`CAMERA=1` で 10 frame）。
+- image: `yes | make ... firmware-licenses`（2026-10-30 ユーザー「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」）の後に
+  `make ZEDBSD_CONFIG=plan/ws315/tests/config-5330-rtl.mk BUILD=build/ws315-img disk-image` → `build/ws315-img/hdd-image.img`（rc 0、check OK。warning は外部 package の openssh・perl などだけ）。
+  worktree に `build/amd64/sysroot` が無く、main の生成物（5 MB）を複写した（AGENTS §7 の複写）。
+- 5330 の Debian の uname の確かめ（`ssh solaris10-man uname -a`）が auto mode の security の判定（Production Reads）で止まった。回避せず Q1 へ返し、ユーザーの判断待ち。5330 には触れていない。
+  承認の後: `CAMERA=1 MODE=--nvme-image sh plan/ws315/tests/5330-rtl.sh build/ws315-img/hdd-image.img img1 30`（p004 を含めるなら image を作り直す）。
+- 相手の port の上げ下げ: centris（10.0.10.2）の enp94s0f0 は switch の先（同じ segment に 10 の neighbor）で、centris を down しても 5330 の RTL8156 の link は落ちない。
+  実施しない。switch 側の cable の抜き差しとしてユーザーの拾える試験の一覧へ（Q1 が master.md に入れた）。
