@@ -3,7 +3,7 @@
 # ws326-p002 bit reader と NAL
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30、cleared は Q1 が受け入れを見て決める）。
 - 依存: p001（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -58,3 +58,17 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-30（host の `date`）。
+- 実装: `h264sw-bits.c`、`h264sw-nal.c`（header は変えていない）。試験: `plan/ws326/tests/unit/test-bits.c`（169 checks）、`test-nal.c`（95 checks）。
+  どちらも仕様の表・手で計算した値・bitwriter での往復で期待を作り、固定の乱数列の入力（bits 2000 回、nal 3000 回）で境界を越えないことも確かめた。
+- `timeout 600 sh plan/ws326/tests/run-unit.sh bits nal` → `test-bits: PASS (169 checks)`、`test-nal: PASS (95 checks)`、`run-unit: PASS`。
+- `timeout 600 sh plan/ws326/tests/run-unit.sh all` → bits 169・bitwriter 14・nal 95、`run-unit: PASS`。
+- `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+- zedBSD amd64 の `build/amd64/dynamic/libmedia.so` の make → exit 0、warning 0。
+- `git diff --check` → 問題なし。
+- 判断: `h264sw_bits_peek` は error 後と count 33 以上で 0 を返す（header は error 後の peek を述べないので sticky に合わせた）。
+  `h264sw_bits_trailing` が EINVAL の時は position を動かさず error も立てない。`h264sw_bits_left` は size * 8 - position（error の有無に依らない）。
+- 未実施: QEMU・実機の試験（この Phase の範囲外）。
