@@ -54,3 +54,28 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-30（host の `date`）。状態: 実装済み・試験 PASS（cleared は Q1 が受け入れを見て決める）。
+- 作った物: `userland/desktop/libmedia/h264sw-mvpred.c`（header は変えていない）、`plan/ws326/tests/unit/test-mvpred.c`。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh mvpred` → `test-mvpred: PASS (83 checks)`、`run-unit: PASS`（ASan・UBSan 黙る）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → 全 10 試験 PASS、最後の行 `run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so` → exit 0、出力の `warning` は 0 件。
+  - `git diff --check` → 問題なし。
+- 試験の中身: median（3 例と、極値 32767・-32768）、refIdx が 1 つだけ一致（A・B・C の各々）・2 つ一致・0 一致、A だけ（B と C が無い、A の refIdx が不一致でも A の値）、
+  B が無く C が有る（A による置換が起きない）、C が無く D で代える（最後の列）、16x8 の上下・8x16 の左右（一致と不一致、D を使う右の 8x16）、
+  1 つの macroblock の中の 16 個の 4x4 block 全部の A・B・C/D（decoded_4x4 を block 番号の順で与え、各 block の vector がその block の id を持つので、返った値がどの block から来たか分かる。期待は表 6-2・6-3 から手で追った）、
+  8x8・8x4・4x8 の partition、decoded_4x4 の bit の有無での C の可否、intra の隣・list を使わない隣・list 1、
+  P_Skip（A か B が無い・A が ref 0 で mv 0・B が同じ・median・A が ref 1 で mv 0・A が intra・別 slice）、
+  誤りの入力（list>1・負の refIdx・空か macroblock を出る矩形・巨大な値・NULL）。
+- 判断（header が書かない所）:
+  - 誤りの入力（NULL の ctx・出力、`ctx->n.current` が NULL、list が 2 以上、ref_idx が負、width か height が 0、x か y が 16 以上、矩形が macroblock を出る）は、mvp（P_Skip は mv）に 0 と 0 を書いて戻る。ref_idx が負なのは「list を使わない」を表す -1 と区別が付かず、仕様は予測を求めない値なので拒む。
+  - 16x8 と 8x16 の向き付き予測は、矩形が 16x8（y が 0 か 8）または 8x16（x が 0 か 8）の時だけ。y・x がそれ以外の値なら median へ進む。
+  - 隣の partition が「利用可能」とは、macroblock が利用可能（slice が同じ）で、現在の macroblock の中なら decoded_4x4 の bit が立っていること。intra でも利用可能（median の手順 1 の A の判定に効く）。intra は ref_idx 範囲の外ではなく `motion.intra` で見る。
+  - 隣の refIdx は 8x8 quadrant の `ref_idx[list][blk / 4]`（blk は luma4x4BlkIdx。quadrant 内の 4 個が連続する番号）、vector は 4x4 block の `mv[list][blk]`。ref_idx が負なら vector が保存されていても 0 とする（8.4.1.3.2）。
+  - median は式 5-15（x + y + z - Min - Max）。frame の macroblock だけ（MBAFF の式 8-217〜8-220 は範囲外）。
+- 仕様と phase.md の食い違い: 無し。
+- 未実施: 実機・QEMU の試験は対象外（host の単体試験のみ）。突然変異による試験の検出力の確認は未実施。
