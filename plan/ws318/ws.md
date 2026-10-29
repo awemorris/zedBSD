@@ -26,7 +26,7 @@
 - カメラ（`media_camera_*` の類）: libmedia が共有の device に作った画像にカメラが直接書く（CAM_MEMORY_IMPORT、i915 などの coherent な memory に条件を広げる）。frame は decoder と同じ picture の型、encode と表示が同じ画像を使い、参照の数で返す。UVC の実機の動作は WS282 の再開が前提。
 - 起こしは callback（app は中で kl_app_post）、`media_engine_wake_fd` を外す。libmedia の仕事は名前の付いた thread（WS309 の方針）。
 - 基準の機械は i915（5330）。
-- H.265 について: WS236（2026-10-14）のユーザーの決定「HEVCはライセンスがないのでやらないです」と、今回の「H.264とH.265のデコーダとエンコーダ」の関係はユーザーに確認中（Q1、2026-10-30）。確認まで H.265 の Phase は planning のまま始めない。
+- H.265（2026-10-30 ユーザー「H.265のパテントプールへの支払いは行う方針です。H.265の実装を行っていいです。」）: WS236（2026-10-14）の「HEVCはライセンスがないのでやらないです」を置き換え、H.265 の decode・encode を実装する。
 
 ## Phase（案、設計で置き換える）
 
