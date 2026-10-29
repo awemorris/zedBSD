@@ -23,7 +23,7 @@
 | P2 | q1690-i02 返却 | [ws314](ws314/ws.md) 全 Phase cleared、p010 の後の QEMU（guest・browser）と FreeBSD の backend も PASS（main 89f86dd03）。completed はユーザーの判断 A〜D の後 | — |
 | P3 | q1694-i01 返却 | [ws315](ws315/ws.md) 全 Phase cleared: 5330 の RTL8156B を vendor mode で send 2372・recv 2338（同時 2347+1443、Linux 2346+2341）。RTL8157 は資料だけ（main 9cd5fb8fc） | — |
 | P4 | q1665-i10 返却 | [ws307](ws307/ws.md) p011 cleared（通し 25 STEP・日本語の画面、main adeab690a）。残りは p007（HAL の案の承認待ち）・p004・p014 規約 | — |
-| P5 | q1693-i01 返却 | [ws291](ws291/ws.md) p011 cleared（scene-5000 49.7、NVK と同等）、big-1000 1.3→24 fps（NVK 136）、subs-1000 6.7（NVK 75）。次は record の decode・subs の submit（main 9e1691e6b） | — |
+| P5 | q1693-i01 返却 | [ws291](ws291/ws.md) RTX: big-1000 24→52 fps、subs-100 67→104、subs-1000 6.6→10.9（NVK 136・75）、scene 同等（main d71b2b446）。subs の残りは全画面の copy（WS309 p015 の (B)）、big は CPU（record・submit） | — |
 | P6 | q1667-i05 返却 | [ws282](ws282/ws.md)・[ws284](ws284/ws.md) は main に merge 済み、別のツリーのセッションは [ws282 handover](ws282/handover.md)・[ws284 handover](ws284/handover.md) の試験から続ける | — |
 | P7 | q1687-i01 返却 | [ws313](ws313/ws.md) Mali の残りと Mesa との照合の直しを main に（b6649f09f）。実機未実施。C5 で描画がおかしい時の境目は c08176e6c・db080e110 | — |
 

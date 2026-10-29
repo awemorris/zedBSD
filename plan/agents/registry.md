@@ -9,7 +9,7 @@
 | P2 | phase-runner | ws314 (q1690-i02 返却) | `/home/awe/zedBSD-worktrees/p2-ws314` / `agent/p2-ws314` | returned（次は p009 から） | 19c19580f（merge d4b58dd84） |
 | P3 | phase-runner | ws315 (q1694-i01) | `/home/awe/zedBSD-worktrees/p3-ws315` / `agent/p3-ws315` | running（p003 の残り → p004 → p005） | 4559631d9（merge 145280b3e） |
 | P4 | phase-runner | ws307 (q1665-i10 cleared) | `/home/awe/zedBSD-worktrees/p4-ws307n` / `agent/p4-ws307n` | returned（試験待ちの branch: agent/p4-ws283 b7fd8d23e） | f82bd280f（merge adeab690a） |
-| P5 | phase-runner | ws291 NVIDIA (q1693-i01 返却) | `/home/awe/zedBSD-worktrees/p5-ws291` / `agent/p5-ws291` | returned（次は record の decode と subs の submit の内訳） | f198a732d（merge 9e1691e6b） |
+| P5 | phase-runner | ws291 NVIDIA (q1693-i01 返却) | `/home/awe/zedBSD-worktrees/p5-ws291` / `agent/p5-ws291` | returned | 52f3799b4（merge d71b2b446） |
 | P6 | phase-runner＋Sonnet | ws314 p011・p012 (q1691-i01 cleared) | `/home/awe/zedBSD-worktrees/p6-ws314doc` / `agent/p6-ws314doc` | returned | 64f09ca82（merge d4ba04b96） |
 | P7 | phase-runner | ws313 (q1687-i01 返却) | `/home/awe/zedBSD-worktrees/p7-ws313e` / `agent/p7-ws313e` | returned（実機の結果待ち） | b35b6240c（merge b6649f09f） |
 
