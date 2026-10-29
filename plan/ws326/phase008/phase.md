@@ -3,7 +3,7 @@
 # ws326-p008 macroblock の型と neighbour
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: 実装済み・試験 PASS（2026-10-30。cleared は Q1 が受け入れを見て決める）。
 - 依存: p001（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -54,3 +54,20 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果
+
+- 日付: 2026-10-30（host の `date`）。
+- 作った物: `userland/desktop/libmedia/h264sw-mb.c`（全関数と表。表 7-11・7-13・7-14・7-17・7-18 と 6.4.3 の block 位置を block ごとの `Values referenced:` の comment で出典付き）、単体試験 `plan/ws326/tests/unit/test-mb.c`。header は変えていない。
+- 実行した command と結果:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh mb` → `test-mb: PASS (1938 checks)`、`run-unit: PASS`（ASan・UBSan の報告 0）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → test-bitwriter PASS (14 checks)、test-mb PASS (1938 checks)、`run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so` → exit 0、出力の warning 0（`grep -ci warning` が 0）。
+  - `git diff --check` → 問題なし。
+- header が決めていない点で担当が決めた物（Q1 の確認用）:
+  - B_Direct_16x16 と B_Skip の `parts` は表が na なので 4（MbPartWidth・Height は表の 8、8x8 の kind と同じ扱い）。
+  - 範囲外の入力: `h264sw_blk4x4_at` は各座標を 16 で割った余りに、`h264sw_mb_locate` は (xN + maxW) % maxW を非負に正規化。返す物が NULL の時 `*xw`・`*yw`・`*blk_n` は 0。
+  - `h264sw_mb_neighbours` は current の slice が -1 の時、隣を全て NULL にする。`width_mbs` 0 や `mbs` NULL は current も NULL。
+  - `h264sw-mb.c` は `H264SW_SLICE_*` のために `h264sw-slice.h` を include する（`h264sw-mb.h` は include しない）。
+- 未実施: QEMU・実機の試験（この Phase の範囲外）。規約の全文の見直しの Phase（WS の最後）。
