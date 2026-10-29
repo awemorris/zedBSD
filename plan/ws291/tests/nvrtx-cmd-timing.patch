@@ -1,0 +1,119 @@
+diff --git a/src/drivers/gpu/nvrtx/node.c b/src/drivers/gpu/nvrtx/node.c
+index 2bb98a882..5d0091e03 100644
+--- a/src/drivers/gpu/nvrtx/node.c
++++ b/src/drivers/gpu/nvrtx/node.c
+@@ -1152,6 +1152,24 @@ node_perf_report(
+ 	taken.cursor_set_us = __atomic_exchange_n(&node->counts.cursor_set_us, 0U, __ATOMIC_RELAXED);
+ 	taken.cursor_moves = __atomic_exchange_n(&node->counts.cursor_moves, 0U, __ATOMIC_RELAXED);
+ 	taken.cursor_move_us = __atomic_exchange_n(&node->counts.cursor_move_us, 0U, __ATOMIC_RELAXED);
++	{
++		uint64_t c[6], t[6], counter, hz;
++		unsigned i;
++		(void)kern_rtc_read_counter(&counter, &hz);
++		if (hz == 0U)
++			hz = 1U;
++		for (i = 0U; i < 6U; i++) {
++			c[i] = __atomic_exchange_n(&node->counts.cmd_count[i], 0U, __ATOMIC_RELAXED);
++			t[i] = __atomic_exchange_n(&node->counts.cmd_ticks[i], 0U, __ATOMIC_RELAXED);
++			t[i] = (t[i] / hz) * 1000000U + (t[i] % hz) * 1000000U / hz;
++		}
++		nvrtx_stage_mark("perf: cmd draw %llu %lluus sets %llu %lluus push %llu %lluus",
++		    (unsigned long long)c[0], (unsigned long long)t[0], (unsigned long long)c[1], (unsigned long long)t[1],
++		    (unsigned long long)c[2], (unsigned long long)t[2]);
++		nvrtx_stage_mark("perf: cmd rec %llu %lluus submit %llu %lluus other %llu %lluus",
++		    (unsigned long long)c[3], (unsigned long long)t[3], (unsigned long long)c[4], (unsigned long long)t[4],
++		    (unsigned long long)c[5], (unsigned long long)t[5]);
++	}
+ 	node->perf_since_us = now;
+ 
+ 	/* The runs and the frames, each line within the log's 79 columns: the runs a wait saw end, from their submission. */
+diff --git a/src/drivers/gpu/nvrtx/nvrtx-node.h b/src/drivers/gpu/nvrtx/nvrtx-node.h
+index c3eabd0ad..4fa46d0f6 100644
+--- a/src/drivers/gpu/nvrtx/nvrtx-node.h
++++ b/src/drivers/gpu/nvrtx/nvrtx-node.h
+@@ -253,6 +253,8 @@ struct nvrtx_node_perf {
+ 	uint64_t cursor_set_us;
+ 	uint64_t cursor_moves;
+ 	uint64_t cursor_move_us;
++	uint64_t cmd_count[6];
++	uint64_t cmd_ticks[6];
+ };
+ 
+ /*
+diff --git a/src/drivers/gpu/nvrtx/runtime.c b/src/drivers/gpu/nvrtx/runtime.c
+index 49e3f79f3..bbf3dc66e 100644
+--- a/src/drivers/gpu/nvrtx/runtime.c
++++ b/src/drivers/gpu/nvrtx/runtime.c
+@@ -56,6 +56,7 @@
+ #include <uapi/errno.h>
+ #include <uapi/gpu.h>
+ #include <uapi/gpu-job.h>
++#include <uapi/gpu-op.h>
+ 
+ #include "drivers/gpu/nvrtx/nvrtx-node.h"
+ #include "drivers/gpu/nvrtx/vk/nvrtx-vk.h"
+@@ -151,6 +152,8 @@ static void runtime_wake_lanes(struct nvrtx_node *node);
+ static bool runtime_park(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
+ static void runtime_dequeued(struct nvrtx_node *node, struct nvrtx_session *owner);
+ static void runtime_retire(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
++static int runtime_dispatch_timed(struct nvrtx_vk_session *vk, uint32_t opcode, uint32_t requested, struct i915_wire_reader *reader, struct i915_wire_writer *reply);
++static struct nvrtx_node *runtime_timed_node;
+ static int runtime_execute(struct nvrtx_node *node, struct nvrtx_session *session, const void *wire, uint32_t bytes);
+ static void runtime_channel(struct nvrtx_node *node, struct nvrtx_session *session);
+ static void runtime_enqueue(struct nvrtx_node *node, struct nvrtx_node_entry *entry);
+@@ -1692,7 +1695,12 @@ runtime_execute(
+ 	taken = 0U;
+ 	if (node->perf != 0)
+ 		taken = nvrtx_now_us();
+-	error = nvrtx_vk_stream_execute(session->vk, wire, bytes, nvrtx_vk_dispatch);
++	if (node->perf != 0) {
++		runtime_timed_node = node;
++		error = nvrtx_vk_stream_execute(session->vk, wire, bytes, runtime_dispatch_timed);
++	} else {
++		error = nvrtx_vk_stream_execute(session->vk, wire, bytes, nvrtx_vk_dispatch);
++	}
+ 
+ 	mutex_unlock(&node->lock);
+ 	mutex_unlock(&session->exec_lock);
+@@ -1977,3 +1985,41 @@ runtime_timeline_owned(
+ 	/* Succeeded: the timeline is the session's. */
+ 	return true;
+ }
++
++/* Diagnostic: times each command by its kind (draw, sets, push, other record, submit, other). */
++static int
++runtime_dispatch_timed(
++	struct nvrtx_vk_session *vk,
++	uint32_t opcode,
++	uint32_t requested,
++	struct i915_wire_reader *reader,
++	struct i915_wire_writer *reply)
++{
++	struct nvrtx_node *node;
++	uint64_t start;
++	uint64_t end;
++	uint64_t hz;
++	uint32_t kind;
++	int error;
++
++	node = runtime_timed_node;
++	(void)kern_rtc_read_counter(&start, &hz);
++	error = nvrtx_vk_dispatch(vk, opcode, requested, reader, reply);
++	(void)kern_rtc_read_counter(&end, &hz);
++
++	if (opcode == GPU_OP_CMD_DRAW || opcode == GPU_OP_CMD_DRAW_INDEXED)
++		kind = 0U;
++	else if (opcode == GPU_OP_CMD_BIND_DESCRIPTOR_SETS)
++		kind = 1U;
++	else if (opcode == GPU_OP_CMD_PUSH_CONSTANTS)
++		kind = 2U;
++	else if (opcode >= GPU_OP_CMD_BIND_PIPELINE && opcode <= GPU_OP_CMD_END_RENDER_PASS)
++		kind = 3U;
++	else if (opcode == GPU_OP_QUEUE_SUBMIT)
++		kind = 4U;
++	else
++		kind = 5U;
++	nvrtx_node_count(node, &node->counts.cmd_count[kind], 1U);
++	nvrtx_node_count(node, &node->counts.cmd_ticks[kind], end - start);
++	return error;
++}

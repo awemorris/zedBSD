@@ -236,3 +236,9 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
   subs-1000 6.65 対 75.4）、host blob（e8f83ab8f、big-1000 → 20〜24 fps）、sync command（5a2c5f4ff）。dirty state（5ec449b99）と slot の続き（57f4c5a62）は効果なし。
   次は kernel の record の decode（1 MiB に 3.7 ms）と subs の 1 submit の kernel 66 µs の内訳。
 
+- 続き（2026-10-30 05:10〜 P5、同じ Queue）: [phase011](phase011/phase.md) の「q1693-i01 の続き」節。commit 118a97a14（record をその場に読む）・b94178d5f（class の初期 state を 1 回、
+  texture の handle と viewport の再利用）で big-1000 は 19.4 → 51.3 fps（perf 有りの診断の比較）。subs の GPU の主は swapchain の pitch-linear の image に depth 付きで描く時の
+  shadow の全画面 copy（1 pass に 2 回）。Q1 の判断（2026-10-30）で (A) LOAD の copy の省略（CPU が触れていない・export されていない blob、GPU 全体の submit の数で他の書き手を検出）を入れた（070da1b1c）。
+  perf 無しの A/B: big-1000 23.8 → 52.4 fps、subs-100 67 → 104、subs-1000 6.7 → 10.9、scene 不変。回帰（shot・hang・desktop・subs の still）は phase011。
+- WS309 p015 への候補（2026-10-30 Q1）: (B) WSI の image を block-linear にし scanout も block-linear にすれば、nvrtx の shadow の copy（pass の終わりの 1 回）も無くなる。
+  WS291 の範囲の外。WS309 p015（compositor が game mode の image を貸す時の image の形式と tiling の選び方）の候補として残す。
