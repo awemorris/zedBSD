@@ -54,3 +54,7 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## p020 から引き継ぐ事（2026-10-30 Q1）
+
+deblocking は chroma の QP に `picture->chroma_qp_offset[0]`・`[1]` を全 macroblock で使う（context に slice ごとの PPS の offset が無い）。1 つの picture の slice が chroma_qp_index_offset の違う PPS を指す stream があり得るか（7.4.1.2.1 などの制約）を統合で確かめ、あり得るなら macroblock ごとの値を持たせる直しを Q1 に返す。
