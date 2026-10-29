@@ -438,6 +438,8 @@ nvrtx_vk_gpu_submit(
 	struct nvrtx_session *session;
 	struct nvrtx_node *node;
 	uint64_t submitted;
+	uint64_t before;
+	uint64_t after;
 	uint32_t fence;
 	bool lost;
 	int error;
@@ -458,11 +460,22 @@ nvrtx_vk_gpu_submit(
 
 	/* Puts the push buffer on the session's channel's ring with the driver's fence after it. */
 	submitted = nvrtx_now_us();
+	before = __atomic_load_n(&node->gpu->submissions, __ATOMIC_SEQ_CST);
 	error = nvrtx_work_channel_submit(node->gpu, session->channel, va, bytes, &fence);
+	after = __atomic_load_n(&node->gpu->submissions, __ATOMIC_SEQ_CST);
 	if (error != 0) {
 		nvrtx_stage_mark("executor fail: a push buffer was not submitted (%d)", error);
 		return error;
 	}
+
+	/*
+	 * The GPU's submissions since the session's last one were the session's
+	 * alone while the count moved by this one only; any other ends the
+	 * quiet stretch (nvrtx_vk_gpu_quiet()).
+	 */
+	if (before != session->quiet_mark || after != before + 1U)
+		session->quiet_epoch++;
+	session->quiet_mark = after;
 
 	/* Counts the run and its push buffer's bytes. */
 	nvrtx_node_count(node, &node->counts.runs, 1U);
@@ -630,6 +643,65 @@ nvrtx_vk_gpu_retire(
 	/* Succeeded: the run is forgotten. */
 	ticket->fence = 0U;
 	ticket->submitted_us = 0U;
+}
+
+/*
+ * Reports whether the 3D state one of the session's runs leaves stays for
+ * its next run: the session has a channel of its own, which only its
+ * executor draws on (a lost channel takes no more runs).  The driver's
+ * work channel, shared with other sessions and the driver, keeps nothing.
+ */
+bool
+nvrtx_vk_gpu_state_kept(
+	void *owner)
+{
+	struct nvrtx_session *session;
+	struct nvrtx_work_channel *channel;
+
+	session = owner;
+
+	/* A channel of the session's own. */
+	channel = __atomic_load_n(&session->channel, __ATOMIC_ACQUIRE);
+	if (channel == NULL || channel == &session->node->gpu->work.driver)
+		return false;
+
+	/* Succeeded: its state is the executor's alone. */
+	return true;
+}
+
+/*
+ * Tells whether nothing but the session's own runs may have written a
+ * backing lately: a token naming the session's quiet stretch (no other
+ * submission, stop or reset reached any of the GPU's engines between its
+ * runs, and none since its last one), or 0 when the backing is unknown,
+ * the CPU may have written it, it was exported, or something else came.
+ * Two equal tokens mean nothing else wrote the backing in between.
+ */
+uint64_t
+nvrtx_vk_gpu_quiet(
+	void *owner,
+	void *backing)
+{
+	struct nvrtx_session *session;
+	struct nvrtx_backing *held;
+	uint64_t count;
+
+	session = owner;
+	held = backing;
+
+	/* A backing the CPU never wrote and no other open was given. */
+	if (held == NULL || held->cpu_written != 0 || held->exported != 0)
+		return 0U;
+
+	/* No submission but the session's own since its last one, and its runs not lost. */
+	count = __atomic_load_n(&session->node->gpu->submissions, __ATOMIC_SEQ_CST);
+	if (session->quiet_mark == 0U || count != session->quiet_mark)
+		return 0U;
+	if (vk_node_lost(session))
+		return 0U;
+
+	/* Succeeded: the stretch, never 0. */
+	return session->quiet_epoch + 1U;
 }
 
 /* Gives the session's newest run (no run before its first submission). */
@@ -993,10 +1065,11 @@ nvrtx_vk_memory_cpu(
 
 	session = owner;
 
-	/* The backing's place in the window. */
+	/* The backing's place in the window; the executor's CPU may write it from now on. */
 	error = nvrtx_node_backing_cpu(session->node, backing, &view);
 	if (error != 0)
 		return error;
+	((struct nvrtx_backing *)backing)->cpu_written = 1;
 
 	/* Succeeded: the storage's first byte. */
 	*cpu = (uint8_t *)(uintptr_t)view;

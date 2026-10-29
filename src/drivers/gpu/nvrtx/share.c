@@ -112,6 +112,7 @@ share_export(
 	mutex_lock(&node->lock);
 
 	resource->backing->refs++;
+	resource->backing->exported = 1;
 
 	mutex_unlock(&node->lock);
 

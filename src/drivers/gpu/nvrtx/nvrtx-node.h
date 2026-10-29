@@ -76,12 +76,17 @@ struct nvrtx_vk_session;
  * the last one gives the VRAM back.  bytes is the size the blob was asked
  * for.  kept is set when the display could not be moved off the VRAM: it
  * is then never given back (until power-off), though the record goes.
+ * cpu_written is set once the CPU may have written it (an application's
+ * view, a write of the core, an executor's copy by the CPU), exported once
+ * it was exported to another open; both stay.
  */
 struct nvrtx_backing {
 	struct nvrtx_bo bo;
 	uint64_t bytes;
 	uint32_t refs;
 	int kept;
+	int cpu_written;
+	int exported;
 };
 
 /*
@@ -123,7 +128,9 @@ struct nvrtx_resource {
  * the end a wait last saw for one of its runs (atomically, by whoever
  * waited), which the next wait expects; run_lost is set (atomically, by whoever waited)
  * once a run of the session did not end in time: the session puts nothing
- * more on the GPU and its waits fail at once.
+ * more on the GPU and its waits fail at once.  quiet_mark is the GPU's
+ * submission count after the session's last run and quiet_epoch counts
+ * the stretches between other submissions (both under the node's lock).
  *
  * channel is where the session's runs go, made by its first frame (under
  * the node's channel_lock, NULL before): a channel of its own, or the
@@ -149,6 +156,8 @@ struct nvrtx_session {
 	uint64_t run_us;
 	uint64_t run_took_us;
 	int run_lost;
+	uint64_t quiet_mark;
+	uint64_t quiet_epoch;
 	struct nvrtx_work_channel *channel;
 	int shared;
 	int quarantined;

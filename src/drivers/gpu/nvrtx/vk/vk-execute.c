@@ -154,11 +154,55 @@ struct execute_slot {
 };
 
 /*
+ * What the shadow holds after a pass drawn in it: a region (x0, y0 to x1,
+ * y1) equal to the same region of the target it was copied onto, a
+ * memory's image (backing), at the time the
+ * node's token says (nvrtx_vk_gpu_quiet()).  It holds while valid: any
+ * other pass, transfer or decode of the executor lets it go, and an equal
+ * token later says nothing else wrote the backing meanwhile.
+ */
+struct execute_kept {
+	bool valid;
+	uint64_t token;
+	void *backing;
+	struct nvrtx_exec_target target;
+	uint64_t shadow_va;
+	int32_t x0;
+	int32_t y0;
+	int32_t x1;
+	int32_t y1;
+};
+
+/* The words nvrtx_exec_viewport() writes. */
+#define EXECUTE_VIEWPORT_BYTES		48U
+
+/*
+ * What draws one after another reuse: the viewport's words the last draw's
+ * viewport (viewport_in, as recorded) made (valid once viewport_bytes is
+ * not 0), and the pool handles of the textures (view and sampler) the
+ * fragment program sampled, each made in the push buffer counted by pools
+ * (execute_begin() counts each new one; the pools start empty there).
+ */
+struct execute_reuse {
+	uint32_t viewport_in[6];
+	uint8_t viewport[EXECUTE_VIEWPORT_BYTES];
+	size_t viewport_bytes;
+	uint32_t pools;
+	uint32_t texture_pools[NVRTX_VK_TEXTURES_MAX];
+	const void *texture_view[NVRTX_VK_TEXTURES_MAX];
+	const void *texture_sampler[NVRTX_VK_TEXTURES_MAX];
+	uint32_t texture_handle[NVRTX_VK_TEXTURES_MAX];
+};
+
+/*
  * The executor's own programs (a textured quad placed by push constants,
  * the draw-test draw's) and the session's slots.
  *
  * slot is the slot the push buffer is written in, cpu and va its views;
- * started says a push buffer is begun there and not yet submitted.  at is
+ * started says a push buffer is begun there and not yet submitted;
+ * class_ready that a run on the session's channel set the 3D class's
+ * initial state and the channel keeps it; kept is what the shadow holds,
+ * reuse what one draw leaves the next.  at is
  * where the push buffer goes on, constants, headers and samplers how much
  * of their parts the push buffer uses, draws and quads how many
  * application draws and own quads it holds (for the node's counts).  The
@@ -176,6 +220,7 @@ struct nvrtx_vk_execute {
 	uint32_t draws;
 	uint32_t quads;
 	bool started;
+	bool class_ready;
 	void *program_token;
 	uint8_t *program_cpu;
 	uint64_t program_va;
@@ -187,6 +232,8 @@ struct nvrtx_vk_execute {
 	void *shadow_token;
 	uint64_t shadow_va;
 	uint64_t shadow_bytes;
+	struct execute_kept kept;
+	struct execute_reuse reuse;
 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
 	uint32_t shader_model;
 	uint32_t threed_class;
@@ -194,9 +241,13 @@ struct nvrtx_vk_execute {
 
 /*
  * What a command buffer's records have bound so far, and the pass they
- * are in.
+ * are in; push_bytes are the command buffer's push constant bytes.  A
+ * pass drawn in the shadow: backing is its target's memory's (NULL
+ * without one), and known says the shadow holds the target's
+ * pixels in the region known_x0, known_y0 to known_x1, known_y1 at its start.
  */
 struct execute_state {
+	const uint8_t *push_bytes;
 	const struct nvrtx_vk_pipeline *pipeline;
 	uint32_t viewport[6];
 	bool viewport_set;
@@ -215,6 +266,12 @@ struct execute_state {
 	VkRect2D area;
 	struct nvrtx_exec_target resolve;
 	bool shadowed;
+	void *backing;
+	bool known;
+	int32_t known_x0;
+	int32_t known_y0;
+	int32_t known_x1;
+	int32_t known_y1;
 };
 
 /* One quad an internal draw makes: the destination, the source texture (pitch linear or tiled) and its region in pixels. */
@@ -251,6 +308,7 @@ static int execute_record(struct nvrtx_vk_session *session, struct nvrtx_vk_exec
 static void execute_bind(struct execute_state *state, const struct nvrtx_vk_record *record);
 static int execute_begin_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state,
 			      const struct nvrtx_vk_record *record);
+static bool execute_kept_holds(struct nvrtx_vk_session *session, const struct nvrtx_vk_execute *execute, const struct execute_state *state);
 static int execute_shadow(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state,
 			  bool load);
 static int execute_end_pass(struct nvrtx_vk_session *session, struct nvrtx_vk_execute *execute, struct execute_state *state);
@@ -309,6 +367,7 @@ nvrtx_vk_execute(
 	state = kern_calloc(1U, sizeof(*state));
 	if (state == NULL)
 		return ENOMEM;
+	state->push_bytes = command->push_bytes;
 
 	/* A push buffer begun before and never submitted (its command buffer failed) is begun again; else a slot is taken. */
 	error = 0;
@@ -613,8 +672,10 @@ execute_start(
 
 /*
  * Begins a push buffer in the current slot: the 3D class's state a queue
- * starts with, the header and sampler pools, and the shader caches
- * emptied; nothing of the slot's parts is used yet.
+ * starts with (once on a channel that keeps it from one run to the next;
+ * its vertex stream substitute is the first slot's zero page, which lives
+ * as long as the session's runs), the header and sampler pools, and the
+ * shader caches emptied; nothing of the slot's parts is used yet.
  *
  * Procedure referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_queue.c
  * (nvk_queue_init_context_state) and src/nouveau/vulkan/nvk_cmd_draw.c
@@ -628,14 +689,17 @@ execute_begin(
 
 	/* The state and the pools. */
 	push = execute->cpu + EXECUTE_PUSH_AT;
-	execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
+	execute->at = 0U;
+	if (!execute->class_ready)
+		execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
 	execute->at = nvrtx_push_draw_textures(push, execute->at, execute->va + EXECUTE_HEADERS_AT, EXECUTE_POOL_ENTRIES,
 					       execute->va + EXECUTE_SAMPLERS_AT, EXECUTE_POOL_ENTRIES);
 
 	/* The programs and constants the CPU wrote since the last run are read anew, once for every draw of this push buffer. */
 	execute->at = nvrtx_push_draw_invalidate(push, execute->at);
 
-	/* Nothing of the parts is used. */
+	/* Nothing of the parts is used: no texture handle of an earlier push buffer is good here. */
+	execute->reuse.pools++;
 	execute->constants = 0U;
 	execute->headers = 0U;
 	execute->samplers = 0U;
@@ -663,8 +727,9 @@ execute_submit(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the GPU runs it. */
+	/* Succeeded: the GPU runs it; the class's state it set stays for the next run on a channel that keeps it. */
 	execute->started = false;
+	execute->class_ready = nvrtx_vk_gpu_state_kept(session->owner);
 	return 0;
 }
 
@@ -799,6 +864,7 @@ execute_record(
 	case GPU_OP_CMD_BEGIN_QUERY:
 	case GPU_OP_CMD_END_QUERY:
 	case GPU_OP_CMD_RESET_QUERY_POOL:
+		execute->kept.valid = false;
 		error = nvrtx_vk_video_run(session, record);
 		break;
 	default:
@@ -852,7 +918,7 @@ execute_bind(
 		state->index_type = record->values[0];
 		break;
 	case GPU_OP_CMD_PUSH_CONSTANTS:
-		kern_memcpy(state->push + record->first, record->push, record->count);
+		kern_memcpy(state->push + record->first, state->push_bytes + record->push_at, record->count);
 		break;
 	default:
 		break;
@@ -875,6 +941,8 @@ execute_begin_pass(
 	const struct nvrtx_vk_render_pass *pass;
 	const struct nvrtx_vk_framebuffer *framebuffer;
 	const struct nvrtx_vk_view *view;
+	const struct nvrtx_vk_image *image;
+	const struct nvrtx_vk_memory *memory;
 	bool clear_colour;
 	bool clear_depth;
 	bool clear_stencil;
@@ -890,15 +958,25 @@ execute_begin_pass(
 	state->target_written = false;
 	state->area = record->rect;
 	state->shadowed = false;
+	state->backing = NULL;
+	state->known = false;
 	kern_memset(&state->target, 0, sizeof(state->target));
-	if (pass->colour == 0U || pass->colour_attachment >= framebuffer->view_count)
+	if (pass->colour == 0U || pass->colour_attachment >= framebuffer->view_count) {
+		execute->kept.valid = false;
 		return 0;
+	}
 
-	/* The target: the colour view's image at its level, in the view's format. */
+	/* The target: the colour view's image at its level, in the view's format; its memory's backing. */
 	view = framebuffer->views[pass->colour_attachment]->payload;
 	error = execute_image_target(view->image->payload, view->base_level, view->format, &state->target);
 	if (error != 0)
 		return error;
+	image = view->image->payload;
+	if (image->memory != NULL) {
+		memory = image->memory->payload;
+		if (memory->attached)
+			state->backing = memory->backing;
+	}
 
 	/* The depth target: the depth view's image. */
 	if (pass->depth != 0U && pass->depth_attachment < framebuffer->view_count) {
@@ -908,12 +986,13 @@ execute_begin_pass(
 			return error;
 	}
 
-	/* A pitch-linear colour target with a depth target is drawn in a block-linear shadow. */
+	/* A pitch-linear colour target with a depth target is drawn in a block-linear shadow; any pass lets what the shadow held go. */
 	if (state->target.depth_address != 0U && state->target.block_linear == 0U) {
 		error = execute_shadow(session, execute, state, pass->load_op == VK_ATTACHMENT_LOAD_OP_LOAD);
 		if (error != 0)
 			return error;
 	}
+	execute->kept.valid = false;
 
 	/* A pass loading by clearing clears its area, within the framebuffer and the image. */
 	clear_colour = (pass->load_op == VK_ATTACHMENT_LOAD_OP_CLEAR);
@@ -994,6 +1073,7 @@ execute_shadow(
 		if (error != 0)
 			return error;
 		execute->shadow_bytes = bytes;
+		execute->kept.valid = false;
 	}
 
 	/* The pass draws into the shadow; the target gets it at the pass's end. */
@@ -1006,6 +1086,20 @@ execute_shadow(
 	if (!load)
 		return 0;
 
+	/*
+	 * A loading pass whose render area the shadow already holds as the
+	 * target has it (the last pass drawn in it copied it there, and nothing
+	 * else wrote the target since) starts without the copy.
+	 */
+	if (execute_kept_holds(session, execute, state)) {
+		state->known = true;
+		state->known_x0 = execute->kept.x0;
+		state->known_y0 = execute->kept.y0;
+		state->known_x1 = execute->kept.x1;
+		state->known_y1 = execute->kept.y1;
+		return 0;
+	}
+
 	/* A loading pass: the target's pixels into the shadow. */
 	execute_shadow_copy(&state->target, &state->resolve, 0, 0, (int32_t)state->target.width, (int32_t)state->target.height,
 			    &quad);
@@ -1015,9 +1109,57 @@ execute_shadow(
 	if (error != 0)
 		return error;
 	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
+	state->known = true;
+	state->known_x0 = 0;
+	state->known_y0 = 0;
+	state->known_x1 = (int32_t)state->target.width;
+	state->known_y1 = (int32_t)state->target.height;
 
 	/* Succeeded: the shadow holds the target's pixels. */
 	return 0;
+}
+
+/*
+ * Tells whether the shadow holds, as the target has them, the pixels of a
+ * loading pass's render area: the last pass drawn in this shadow was of the
+ * same memory's target, its region takes the area in, and the
+ * node's token is the one it had then (nothing else wrote the memory).
+ */
+static bool
+execute_kept_holds(
+	struct nvrtx_vk_session *session,
+	const struct nvrtx_vk_execute *execute,
+	const struct execute_state *state)
+{
+	const struct execute_kept *kept;
+	uint64_t token;
+	int32_t x1;
+	int32_t y1;
+
+	/* What the shadow held, for this target in this shadow. */
+	kept = &execute->kept;
+	if (!kept->valid || state->backing == NULL || kept->backing != state->backing)
+		return false;
+	if (kept->shadow_va != execute->shadow_va)
+		return false;
+	if (kept->target.address != state->resolve.address || kept->target.pitch != state->resolve.pitch ||
+	    kept->target.width != state->resolve.width || kept->target.height != state->resolve.height ||
+	    kept->target.format != state->resolve.format)
+		return false;
+
+	/* Its region takes the render area in. */
+	x1 = state->area.offset.x + (int32_t)state->area.extent.width;
+	y1 = state->area.offset.y + (int32_t)state->area.extent.height;
+	if (state->area.offset.x < kept->x0 || state->area.offset.y < kept->y0 || x1 > kept->x1 || y1 > kept->y1)
+		return false;
+
+	/* Nothing else wrote the memory since. */
+	token = nvrtx_vk_gpu_quiet(session->owner, state->backing);
+	if (token == 0U || token != kept->token)
+		return false;
+
+	/* Succeeded: the copy is not needed. */
+	return true;
 }
 
 /*
@@ -1030,6 +1172,7 @@ execute_end_pass(
 	struct nvrtx_vk_execute *execute,
 	struct execute_state *state)
 {
+	struct execute_kept *kept;
 	struct execute_quad quad;
 	int32_t x0;
 	int32_t y0;
@@ -1068,6 +1211,31 @@ execute_end_pass(
 		return error;
 	state->target_written = false;
 	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
+
+	/*
+	 * The shadow now holds what the target has in the area, and in what
+	 * it held at the pass's start (which takes the area in); kept for the
+	 * next loading pass of the image while nothing else writes it.
+	 */
+	kept = &execute->kept;
+	kept->valid = false;
+	if (state->backing != NULL) {
+		kept->token = nvrtx_vk_gpu_quiet(session->owner, state->backing);
+		kept->valid = (kept->token != 0U);
+	}
+	kept->backing = state->backing;
+	kept->target = state->resolve;
+	kept->shadow_va = execute->shadow_va;
+	kept->x0 = x0;
+	kept->y0 = y0;
+	kept->x1 = x1;
+	kept->y1 = y1;
+	if (state->known && state->known_x0 <= x0 && state->known_y0 <= y0 && state->known_x1 >= x1 && state->known_y1 >= y1) {
+		kept->x0 = state->known_x0;
+		kept->y0 = state->known_y0;
+		kept->x1 = state->known_x1;
+		kept->y1 = state->known_y1;
+	}
 
 	/* Succeeded: the target has the pass's pixels. */
 	return 0;
@@ -1120,6 +1288,7 @@ execute_draw(
 	const struct nvrtx_vk_record *record)
 {
 	const struct nvrtx_vk_pipeline *pipeline;
+	struct execute_reuse *reuse;
 	struct nvrtx_exec_vertex vertex;
 	struct nvrtx_exec_blend blend;
 	struct nvrtx_exec_depth depth;
@@ -1192,7 +1361,13 @@ execute_draw(
 		y1 = (int32_t)state->target.height;
 	if (x1 <= x0 || y1 <= y0)
 		return 0;
-	execute->at = nvrtx_exec_viewport(push, execute->at, viewport);
+	reuse = &execute->reuse;
+	if (reuse->viewport_bytes == 0U || kern_memcmp(reuse->viewport_in, viewport, sizeof(reuse->viewport_in)) != 0) {
+		kern_memcpy(reuse->viewport_in, viewport, sizeof(reuse->viewport_in));
+		reuse->viewport_bytes = nvrtx_exec_viewport(reuse->viewport, 0U, viewport);
+	}
+	kern_memcpy(push + execute->at, reuse->viewport, reuse->viewport_bytes);
+	execute->at += reuse->viewport_bytes;
 	execute->at = nvrtx_exec_scissor(push, execute->at, (uint32_t)x0, (uint32_t)y0, (uint32_t)x1, (uint32_t)y1);
 
 	/* The culling, the depth test when the pass has a depth target, and the stencil test when it has a stencil. */
@@ -1305,7 +1480,8 @@ execute_uniforms(
 /*
  * Writes the handles of the fragment program's sampled images into a
  * draw's constants: each one's header and sampler from the bound set's
- * binding.  A binding with nothing bound refuses the draw.
+ * binding, put in the pools once a push buffer for a view and a sampler.
+ * A binding with nothing bound refuses the draw.
  */
 static int
 execute_textures(
@@ -1316,6 +1492,7 @@ execute_textures(
 	const struct nvrtx_vk_program *program;
 	const struct nvrtx_vk_descriptor_set *set;
 	const struct nvrtx_vk_descriptor_slot *slot;
+	struct execute_reuse *reuse;
 	uint32_t handle;
 	uint32_t index;
 	int error;
@@ -1330,10 +1507,22 @@ execute_textures(
 		if (slot->view == NULL || slot->sampler == NULL)
 			return EINVAL;
 
-		/* Its handle at its slot. */
-		error = execute_texture(execute, slot->view->payload, slot->sampler->payload, &handle);
-		if (error != 0)
-			return error;
+		/* Its handle at its slot: the one an earlier draw of this push buffer made for the same view and sampler, or a new one. */
+		reuse = &execute->reuse;
+		if (index < NVRTX_VK_TEXTURES_MAX && reuse->texture_pools[index] == reuse->pools &&
+		    reuse->texture_view[index] == slot->view->payload && reuse->texture_sampler[index] == slot->sampler->payload) {
+			handle = reuse->texture_handle[index];
+		} else {
+			error = execute_texture(execute, slot->view->payload, slot->sampler->payload, &handle);
+			if (error != 0)
+				return error;
+			if (index < NVRTX_VK_TEXTURES_MAX) {
+				reuse->texture_pools[index] = reuse->pools;
+				reuse->texture_view[index] = slot->view->payload;
+				reuse->texture_sampler[index] = slot->sampler->payload;
+				reuse->texture_handle[index] = handle;
+			}
+		}
 		nvrtx_put32(constants, NVRTX_SM75_CB_TEXTURES + index * 4U, handle);
 	}
 
@@ -1523,8 +1712,9 @@ execute_transfer(
 {
 	int error;
 
-	/* What wrote the source has finished. */
+	/* What wrote the source has finished; the shadow's pixels may no longer be the target's. */
 	execute->at = nvrtx_exec_barrier(execute->cpu + EXECUTE_PUSH_AT, execute->at);
+	execute->kept.valid = false;
 
 	/* The transfer. */
 	if (record->opcode == GPU_OP_CMD_COPY_BUFFER) {
@@ -1562,7 +1752,8 @@ execute_decode(
 {
 	int error;
 
-	/* The graphics work before the decode. */
+	/* The graphics work before the decode, which may write a target the shadow holds. */
+	execute->kept.valid = false;
 	error = execute_drain(session, execute);
 	if (error != 0)
 		return error;

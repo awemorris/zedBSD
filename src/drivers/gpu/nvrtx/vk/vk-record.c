@@ -10,8 +10,10 @@
  * [opcode][0][command buffer] and its arguments, with no reply, and is kept as
  * a record of its command buffer until a submission runs it (vk-execute.c).
  *
- * Every record is read to its end first, holding the objects it names;
- * then it is appended to a command buffer that is recording, or let go.
+ * Every record is read to its end, holding the objects it names: a record
+ * of a command buffer that is recording straight into its place at the
+ * end of the command buffer's records (and kept there), another one aside
+ * and let go.
  * A record the executor cannot run (another bind point, an unknown object,
  * more regions than a record keeps) marks its command buffer failed, and
  * the End reports it.  An opcode the executor does not know cannot be
@@ -42,7 +44,7 @@
 #define RECORD_COLOUR_TAG		2U
 #define RECORD_COLOUR_WORDS		4U
 
-static int record_decode(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
+static int record_decode(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record, uint8_t *push);
 static int record_hold(struct nvrtx_vk_session *session, struct nvrtx_vk_record *record, enum i915_vk_object_kind kind, uint64_t identity);
 static int record_pipeline(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_viewport(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
@@ -56,10 +58,10 @@ static int record_copy(struct nvrtx_vk_session *session, uint32_t opcode, struct
 static int record_clear(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_colour(struct i915_wire_reader *reader, uint32_t *words);
 static int record_barrier(struct nvrtx_vk_session *session, struct i915_wire_reader *reader);
-static int record_push(struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
+static int record_push(struct i915_wire_reader *reader, struct nvrtx_vk_record *record, uint8_t *bytes);
 static int record_begin_pass(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
 static int record_line_width(struct i915_wire_reader *reader);
-static int record_append(struct nvrtx_vk_command_buffer *command, const struct nvrtx_vk_record *record);
+static int record_room(struct nvrtx_vk_command_buffer *command, uint32_t opcode);
 static void record_drop(struct nvrtx_vk_record *record);
 
 /*
@@ -76,11 +78,14 @@ nvrtx_vk_record_route(
 	int *handled)
 {
 	struct nvrtx_vk_command_buffer *command;
-	struct nvrtx_vk_record record;
+	struct nvrtx_vk_record *record;
+	struct nvrtx_vk_record aside;
+	uint8_t push[NVRTX_VK_PUSH_BYTES];
+	uint8_t *bytes;
 	uint64_t identity;
 	bool video;
 	int refused;
-	int error;
+	int room;
 
 	UNUSED_PARAMETER(requested);
 	UNUSED_PARAMETER(reply);
@@ -123,37 +128,55 @@ nvrtx_vk_record_route(
 	if (reader->error != 0)
 		return EINVAL;
 
+	/* A command buffer that is recording keeps the record; another one's records are read and let go. */
+	command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	if (command != NULL && command->state != NVRTX_VK_COMMAND_RECORDING)
+		command = NULL;
+
+	/*
+	 * A kept record is read straight into its place at the end of the
+	 * command buffer's array, a push constant record's bytes into theirs:
+	 * nothing is copied after it is read.  Without room it is read aside.
+	 */
+	record = &aside;
+	bytes = push;
+	room = 0;
+	if (command != NULL && opcode != GPU_OP_CMD_SET_LINE_WIDTH && opcode != GPU_OP_CMD_PIPELINE_BARRIER) {
+		room = record_room(command, opcode);
+		if (room == 0) {
+			record = &command->records[command->record_count];
+			if (opcode == GPU_OP_CMD_PUSH_CONSTANTS)
+				bytes = command->push_bytes + command->push_used;
+		}
+	}
+
 	/* Reads the record to its end; a record that does not decode leaves the stream unreadable. */
-	kern_memset(&record, 0, sizeof(record));
-	record.opcode = opcode;
+	kern_memset(record, 0, sizeof(*record));
+	record->opcode = opcode;
 
 	/* A video or query command keeps a structure of its own and takes its scope from the recording. */
 	video = nvrtx_vk_video_recorded(opcode);
-	if (video) {
-		command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
-		if (command != NULL && command->state != NVRTX_VK_COMMAND_RECORDING)
-			command = NULL;
-		refused = nvrtx_vk_video_record(session, command, opcode, reader, &record);
-	} else {
-		refused = record_decode(session, opcode, reader, &record);
-	}
+	if (video)
+		refused = nvrtx_vk_video_record(session, command, opcode, reader, record);
+	else
+		refused = record_decode(session, opcode, reader, record, bytes);
 
 	/* Drops a record that did not decode. */
 	if (refused == EINVAL || reader->error != 0) {
-		record_drop(&record);
+		record_drop(record);
 		return EINVAL;
 	}
 
-	/* A command buffer that is recording keeps it; a refused record fails the recording. */
-	command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
-	if (command == NULL || command->state != NVRTX_VK_COMMAND_RECORDING) {
-		record_drop(&record);
+	/* A record of no recording command buffer is let go. */
+	if (command == NULL) {
+		record_drop(record);
 		return 0;
 	}
 
+	/* A refused record fails the recording. */
 	if (refused != 0) {
 		kern_logf("nvrtx: vk: a recorded command %u is not run (%d)\n", (unsigned)opcode, refused);
-		record_drop(&record);
+		record_drop(record);
 		if (command->error == 0)
 			command->error = refused;
 		return 0;
@@ -163,29 +186,38 @@ nvrtx_vk_record_route(
 	if (opcode == GPU_OP_CMD_SET_LINE_WIDTH || opcode == GPU_OP_CMD_PIPELINE_BARRIER)
 		return 0;
 
-	/* Appends it; one that cannot be kept fails the recording. */
-	error = record_append(command, &record);
-	if (error != 0) {
-		record_drop(&record);
+	/* A record that had no room fails the recording. */
+	if (room != 0) {
+		record_drop(record);
 		if (command->error == 0)
-			command->error = error;
+			command->error = room;
+		return 0;
 	}
+
+	/* The record, read in its place, is the command buffer's now; a push constant record's bytes are too. */
+	if (opcode == GPU_OP_CMD_PUSH_CONSTANTS) {
+		record->push_at = command->push_used;
+		command->push_used += record->count;
+	}
+	command->record_count++;
 
 	/* Succeeded: the command is recorded, or its command buffer remembers why not. */
 	return 0;
 }
 
 /*
- * Decodes one record's arguments.  Returns EINVAL when they did not decode
- * (the stream is then unreadable), another error when they decoded but
- * cannot be run.
+ * Decodes one record's arguments (a push constant record's bytes into
+ * push, NVRTX_VK_PUSH_BYTES long).  Returns EINVAL when they did not
+ * decode (the stream is then unreadable), another error when they decoded
+ * but cannot be run.
  */
 static int
 record_decode(
 	struct nvrtx_vk_session *session,
 	uint32_t opcode,
 	struct i915_wire_reader *reader,
-	struct nvrtx_vk_record *record)
+	struct nvrtx_vk_record *record,
+	uint8_t *push)
 {
 	int error;
 
@@ -232,7 +264,7 @@ record_decode(
 		error = record_barrier(session, reader);
 		break;
 	case GPU_OP_CMD_PUSH_CONSTANTS:
-		error = record_push(reader, record);
+		error = record_push(reader, record, push);
 		break;
 	case GPU_OP_CMD_BEGIN_RENDER_PASS:
 		error = record_begin_pass(session, reader, record);
@@ -851,12 +883,14 @@ record_barrier(
 
 /*
  * vkCmdPushConstants: [layout][stages][offset][size][count]{bytes, padded
- * to words}; the bytes copied into a run of the record's own.
+ * to words}; the bytes read into bytes (NVRTX_VK_PUSH_BYTES long), which
+ * the record's command buffer keeps when it keeps the record.
  */
 static int
 record_push(
 	struct i915_wire_reader *reader,
-	struct nvrtx_vk_record *record)
+	struct nvrtx_vk_record *record,
+	uint8_t *bytes)
 {
 	uint32_t offset;
 	uint32_t size;
@@ -872,12 +906,7 @@ record_push(
 		return EINVAL;
 
 	/* The bytes. */
-	if (size != 0U) {
-		record->push = kern_malloc(size);
-		if (record->push == NULL)
-			return ENOMEM;
-	}
-	i915_vkc_read_bytes(reader, record->push, size);
+	i915_vkc_read_bytes(reader, bytes, size);
 	if (reader->error != 0)
 		return EINVAL;
 	record->first = offset;
@@ -976,16 +1005,22 @@ record_begin_pass(
 	return 0;
 }
 
-/* Appends a record to a command buffer's array, growing it when full. */
+/*
+ * Makes room at the end of a command buffer's records for one more, and
+ * for a push constant record NVRTX_VK_PUSH_BYTES more push bytes too,
+ * growing each run (twice as large, what it held moved over) when it
+ * lacks it.  Returns ENOMEM when a run cannot grow.
+ */
 static int
-record_append(
+record_room(
 	struct nvrtx_vk_command_buffer *command,
-	const struct nvrtx_vk_record *record)
+	uint32_t opcode)
 {
 	struct nvrtx_vk_record *grown;
+	uint8_t *grown_bytes;
 	uint32_t capacity;
 
-	/* Grows a full array: twice as large, the records moved over. */
+	/* Grows a full array. */
 	if (command->record_count == command->record_capacity) {
 		if (command->record_capacity >= RECORD_MAX)
 			return ENOMEM;
@@ -1003,15 +1038,33 @@ record_append(
 		command->record_capacity = capacity;
 	}
 
-	/* The record takes the next place; what it holds is the command buffer's now. */
-	command->records[command->record_count] = *record;
-	command->record_count++;
+	/* Only a push constant record takes push bytes. */
+	if (opcode != GPU_OP_CMD_PUSH_CONSTANTS)
+		return 0;
 
-	/* Succeeded: the record is kept. */
+	/* Grows a run without room for the most bytes one record has. */
+	if (NVRTX_VK_PUSH_BYTES > command->push_capacity - command->push_used) {
+		if (command->push_capacity >= RECORD_MAX * NVRTX_VK_PUSH_BYTES)
+			return ENOMEM;
+		capacity = RECORD_FIRST_CAPACITY * NVRTX_VK_PUSH_BYTES;
+		if (command->push_capacity != 0U)
+			capacity = command->push_capacity * 2U;
+		grown_bytes = kern_malloc(capacity);
+		if (grown_bytes == NULL)
+			return ENOMEM;
+		if (command->push_used != 0U)
+			kern_memcpy(grown_bytes, command->push_bytes, command->push_used);
+		if (command->push_bytes != NULL)
+			kern_free(command->push_bytes);
+		command->push_bytes = grown_bytes;
+		command->push_capacity = capacity;
+	}
+
+	/* Succeeded: the next record, and its push bytes, have their place. */
 	return 0;
 }
 
-/* Lets a record that is not kept go: its objects and its runs. */
+/* Lets a record that is not kept go: its objects and its run of regions. */
 static void
 record_drop(
 	struct nvrtx_vk_record *record)
@@ -1029,11 +1082,8 @@ record_drop(
 	if (video)
 		nvrtx_vk_video_drop(record);
 
-	/* Its runs. */
+	/* Its run of regions. */
 	if (record->regions != NULL)
 		kern_free(record->regions);
-	if (record->push != NULL)
-		kern_free(record->push);
 	record->regions = NULL;
-	record->push = NULL;
 }

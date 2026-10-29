@@ -1,0 +1,7 @@
+# ws291 (NVIDIA): the short bench of the A/B rounds (rtx-ab.sh), LABEL|OPTIONS as gpu-perf's bench list.
+big-100|--draws=each --copies=100
+big-1000|--draws=each --copies=1000
+subs-100|--draws=each --copies=100 --submits=100
+subs-1000|--draws=each --copies=1000 --submits=1000
+scene-1500|--copies=1500
+scene-5000|--copies=5000

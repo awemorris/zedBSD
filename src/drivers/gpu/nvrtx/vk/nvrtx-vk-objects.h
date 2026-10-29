@@ -379,8 +379,8 @@ struct nvrtx_vk_command_pool {
 /*
  * One recorded command: its opcode, the objects it names (each held while
  * the record lives), and its values.  regions points at its own run of
- * VkImageCopy, VkImageBlit or VkBufferImageCopy records, push at its push
- * constant bytes.
+ * VkImageCopy, VkImageBlit or VkBufferImageCopy records; a push constant
+ * record's count bytes are at push_at in its command buffer's push bytes.
  */
 struct nvrtx_vk_record {
 	uint32_t opcode;
@@ -393,13 +393,15 @@ struct nvrtx_vk_record {
 	VkRect2D rect;
 	void *regions;
 	uint32_t region_count;
-	uint8_t *push;
+	uint32_t push_at;
 };
 
 /*
  * A VkCommandBuffer: the pool it came from (only compared), its state, its
- * records in order (a growing array) and the first error its recording
- * met, which its End reports.
+ * records in order (a growing array), the bytes of its push constant
+ * records one after another (a growing run, push_used of push_capacity in
+ * use) and the first error its recording met, which its End reports.  Both
+ * runs stay for the next recording.
  */
 struct nvrtx_vk_command_buffer {
 	const void *pool;
@@ -407,6 +409,9 @@ struct nvrtx_vk_command_buffer {
 	struct nvrtx_vk_record *records;
 	uint32_t record_count;
 	uint32_t record_capacity;
+	uint8_t *push_bytes;
+	uint32_t push_used;
+	uint32_t push_capacity;
 	int error;
 };
 

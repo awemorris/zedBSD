@@ -218,3 +218,64 @@
 - 次の候補（効く順の見込み）: (1) kernel の record の decode（1 MiB に 3.7 ms。record_push の draw ごとの kern_malloc・free、wire の byte 単位の読み、
   record_append の写しを調べる）、(2) subs の kernel の 1 submit 66 µs の内訳（work channel の submit の USERD の書き込みが window_lock と PRAMIN を
   通るか、executor の 16 draw）、(3) reserve 24 µs・reap 21 µs。nvrtx.vk.perf と kernel の時間の印で内訳を取ってから直す。
+
+## q1693-i01 の続き（2026-10-30 05:10〜 P5、同じ worktree、main 3863c3f53 を取り込み）
+
+### 内訳（診断の kernel、perf 有り、`plan/ws291/tests/rtx-cmdprof.sh`、kernel の command の種類ごとの時間は `plan/ws291/tests/nvrtx-cmd-timing.patch`、executor の draw の部分ごとは `nvrtx-exec-timing.patch`。どちらも commit しない診断）
+
+- big-1000（1 frame 16000 draw、51 ms）: kernel が律速（transaction の held 平均 4.9 ms）。1 frame に push constants の record の decode 17 ms（1 個 1.08 µs、
+  draw・sets は 0.1 µs: draw ごとの kern_malloc・kern_free）、submit（executor）17.6 ms（うち slot の GPU 待ち 2.8 ms）、reset 2.3 ms、stream の copy 0.4 ms。
+- subs-100・subs-1000: GPU が 100 % 埋まる。1 run（16 draw、実の描画は約 4 µs）に GPU 140 µs。原因: swapchain の image は pitch-linear で depth 付きの pass なので
+  block-linear の shadow に描き、pass の始め（LOAD の時、target→shadow）と終わり（shadow→target）に全画面の quad を描く（perf の quads が 1 run に 2.0）。
+  subs は submit ごとに pass があるので 1 submit に全画面の copy 2 回。NVK は Linux の WSI の image を tiled にして copy が無い見込み。
+- executor の 1 draw（record の直しの後、1 draw 約 1.0 µs）: constants と texture の handle 0.47 µs、viewport〜blend 0.27 µs、vertex 0.12 µs、残り 0.07 µs（timer 込み）。
+
+### 直し
+
+| commit | 内容 | 診断の kernel（perf 有り）の big-1000・subs-100 fps |
+| --- | --- | --- |
+| （基点 main） | — | 19.4・66.2 |
+| 118a97a14 | record を command buffer の配列の末尾にその場で読み、push constants の bytes を command buffer の連続領域へ（RDNA の 8e4463127・c013da454 と同じ形）。draw ごとの kern_malloc・kern_free が消え、push の record 1 個 1.08 → 0.14 µs | 27.8・66.2 |
+| b94178d5f | (1) 3D class の初期 state を、session の channel が保つ間は最初の run の 1 回だけ（`nvrtx_vk_gpu_state_kept`: 自分の channel なら保つ。driver の work channel を共有する時は毎 run。channel を失った session は以後 run しない。submit が通った時だけ「送った」にする）。(2) texture の pool の handle を同じ push buffer・同じ view と sampler の間は再利用、viewport の words（固定小数の計算）を同じ viewport の間は再利用 | (1) 36.6・67.8、(1)+(2) 51.3・68.1 |
+| 070da1b1c | (A) shadow の LOAD の copy の省略（下） | 50.8・103.7 |
+
+- USERD の put を 1 submit に 1 回にする直しは効果が見えず（subs は GPU 律速）外した。
+- (A) の最初の形（Q1 の条件「swapchain の image（import の blob）に限る」）は一度も働かなかった（診断: 判定の 100 % が「memory が import でない」）。
+  mview の mailbox の swapchain の image は libvulkan が普通の vkAllocateMemory で取る自分の memory で、present は Wayland の buffer へ copy する。
+  Q1 の判断（2026-10-30）で条件を「CPU が触れていない blob」に広げた: (a) blob を CPU が見た印（app の map・core の write・executor の CPU copy）か export した印があれば
+  省かない、(b) GPU 全体の submit の数（全 engine の submit、channel の stop・reset）が自分の run 以外で動いたら無効、(c) executor の他の pass・transfer・decode でも無効、
+  (d) 前の pass の終わりの copy の範囲が今の render area を含む時だけ。pass の終わりの shadow→target の copy は毎回する（present の copy より前に target は完成している）。
+- (A) の実機（06:13〜06:19、perf 有り）: subs-100 の quads は 1 run に 2.0 → 1.0、GPU 1 run 140 → 89 µs、fps 67.2 → 103.7。subs-1000 6.98 → 8.61。
+
+### 回帰（kernel k5 = 070da1b1c と同じ source、cksum 2598231523、06:19〜06:30）
+
+- `rtx-async-check.sh … hang`: shot（copies 1、起動の直後）は Linux 参照と max 76・8 超え 2 画素（p010a と同じ）。scene-5000 49.75 fps。hang: vkhang は 2055 ms で
+  DEVICE_LOST（-4）、channel 20 を止めて reset（4030 ms）、vkhang --loops ok、mview after-hang 1312 fps、hang の後の desktop の shot に Settings の glass の窓と panel
+  （Keiland の窓の描画は崩れない）。vkhang --compute は従来どおり family -8。PNG: worktree の build/review/p011-k5-shot-1.png・p011-k5-desktop-after-hang.png。
+- `rtx-subs-shot.sh`: 100 copies の still を 1 submit と 100 submit（2 つ目からの pass は LOAD、省略が毎 pass で働く）で撮り、画素差 0（max 0）。
+  pass の終わりの shadow→target の copy は毎回するので、present（Wayland の buffer への copy）より前に image は完成している。PNG: build/review/p011-k5-subs-100.png。
+- host: nvrtx-vk-host-test 94/0、nvrtx-vk-d3-host-test 218/0（stub に `nvrtx_vk_gpu_state_kept`・`nvrtx_vk_gpu_quiet` を足した）、vmunix（plan/ws291/tests/config.mk）warning 0・
+  amd64 vmunix check PASS。
+
+### perf 無しの A/B（06:31〜06:54、`plan/ws291/tests/rtx-ab.sh`、k0 → c2 → k5 → k5 → c2 → k0、各 1 枠）
+
+| kernel | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 |
+| --- | --- | --- | --- | --- | --- | --- |
+| k0（main 3863c3f53） | 185.4・216.8 | 23.99・23.56 | 67.12・66.81 | 6.58・6.88 | 160.8・160.6 | 50.17・50.00 |
+| c2（b94178d5f） | 369.2・412.3 | 36.50・49.42 | 67.62・67.55 | 6.97・6.99 | 160.7・160.7 | 49.88・49.95 |
+| k5（070da1b1c） | 440.6・346.8 | 52.78・52.01 | 103.96・104.18 | 10.85・10.92 | 161.2・160.6 | 49.84・49.91 |
+| NVK（p010） | — | 136.2 | — | 75.4 | 165.6 | 50.1 |
+
+- big-1000 は 23.8 → 52.4 fps（2.2 倍、c2 の 1 回目 36.5 は外れ）。subs-100 67 → 104、subs-1000 6.7 → 10.9（1.6 倍）。scene は不変（GPU 律速、NVK と同等）。
+- 残り: subs は 1 run に GPU 89 µs（pass の終わりの全画面の copy）が律速で、submit 1000 回で約 89 ms → 約 11 fps が上限。これを消すのは (B) WSI の image と scanout の
+  block-linear（WS291 の範囲の外、WS309 p015 の候補、ws.md）。big-1000 は CPU（record 8 ms・submit 10.6 ms、NVK は 1 frame 7.3 ms）: decode 約 6 ms と executor の 1 draw 約 0.6 µs
+  （constants の 1280 byte の clear と push、vertex の全 32 stream の書き直し）。
+- 証拠: worktree p5-ws291 の build/ws291/measure/q1693-diag1〜diag8b・q1693-k5prof・q1693-k5check・q1693-k5subsshot・q1693-ab（summary.txt と各 log）。
+  06:01 に diag8 の deploy の後に機械が応答せず、lock を持つ担当として SwitchBot（AC276E42B252）で 1 回入れ直した（Debian で戻り、同じ kernel の再試行は通った）。
+  終わりに Debian、RTX は vfio-pci、NVMe の kernel は vmunix-va1（cksum 1463007375）。lock は 06:55 に返した。
+
+### 再開点（06:55 P5）
+
+- branch agent/p5-ws291: 118a97a14・b94178d5f・070da1b1c（と plan の記録）。main に入れてよい（各々効果あり、回帰は上）。
+- 次の候補（big-N の CPU）: (1) executor の constants の slot（1280 byte）の clear を使う範囲だけに、(2) vertex の入力の words を pipeline・buffer・offset が同じ間は再利用、
+  (3) decode（1 frame 約 6 ms: sets 0.11・push 0.14・draw 0.09 µs/record）。subs は (B) 待ち。
