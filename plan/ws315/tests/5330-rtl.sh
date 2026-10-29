@@ -37,7 +37,7 @@ peer=$!
 timeout 1800 python3 -I plan/ws221/tests/perf-peer.py "$server_ip" $((port + 1)) "$out/peer.log" 1 > /dev/null 2>&1 &
 peer2=$!
 
-extra="echo old-start; echo user | sudo -S grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|panic|trap' /var/log/kernel.log.old | tail -40; echo ---; lsusb -v; echo ---; dmesg | grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|usb: '; echo ---; ifconfig ue0; echo ---;"
+extra="echo old-start; echo user | sudo -S grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|panic|trap' /var/log/kernel.log.old | tail -40; echo; echo ---; lsusb -v; echo ---; dmesg | grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|usb: '; echo ---; ifconfig ue0; echo ---;"
 extra="$extra tcp-perf send $server_ip $port $seconds | tail -1; tcp-perf recv $server_ip $port $seconds | tail -1; echo ---;"
 extra="$extra echo both; tcp-perf send $server_ip $port $seconds > /tmp/ws315-both-send.txt 2>&1 &"
 extra="$extra tcp-perf recv $server_ip $((port + 1)) $seconds | tail -1; wait; tail -1 /tmp/ws315-both-send.txt; echo ---;"
@@ -48,7 +48,7 @@ extra="$extra echo user | sudo -S ifconfig ue0 mtu 1500; echo mtu1500-rc=\$?; ec
 extra="$extra echo user | sudo -S sh -c '(ifconfig ue0 down; echo down-rc=\$?; sleep 2; ifconfig ue0 up; echo up-rc=\$?) > /tmp/ws315-cycle.txt 2>&1 &';"
 extra="$extra sleep 15; cat /tmp/ws315-cycle.txt; echo ping-c; ping -c 3 -W 3 -s 1472 $server_ip; echo ---;"
 extra="$extra dmesg | grep -E 'usb-rtl815x' | tail -6; echo ---; sysctl net.tcpstats | head -1; ifconfig ue0"
-[ "${CAMERA:-0}" = 1 ] && extra="$extra; echo ---; echo user | sudo -S camcap -n 10 -t 5000 -o /tmp/ws315-cam.jpg 2>&1 | tail -6; echo camcap-rc=\$?"
+[ "${CAMERA:-0}" = 1 ] && extra="$extra; echo ---; echo user | sudo -S camcap -n 10 -t 5000 -o /tmp/ws315-cam.jpg > /tmp/ws315-cam.txt 2>&1; echo camcap-rc=\$?; tail -16 /tmp/ws315-cam.txt"
 T=$((seconds * 3 + 180)) EXTRA=$extra timeout 2700 sh plan/tools/hw5330/5330-run.sh "${MODE:---nvme-kernel}" "$image" "ws315-$name" \
 	> "$out/run.txt" 2>&1
 status=$?
@@ -62,6 +62,6 @@ grep -E '^TCP-PERF|^both' "$out/extra.txt" | sed 's/^/5330-rtl: /' | tee -a "$ou
 sed 's/^/5330-rtl: peer: /' "$out/peer.log" | tee -a "$out/summary.txt"
 grep -E 'ping-[abc]|-rc=|packets transmitted|sendto|ifconfig:|mtu ' "$out/extra.txt" | sed 's/^/5330-rtl: /' | tee -a "$out/summary.txt"
 grep -E 'RX packets|TX packets|errors' "$out/extra.txt" | tail -4 | sed 's/^/5330-rtl: after: /' | tee -a "$out/summary.txt"
-grep -E 'camcap|frame|fps|camcap-rc=' "$out/extra.txt" | sed 's/^/5330-rtl: camera: /' | tee -a "$out/summary.txt"
+sed -n '/^camcap-rc=/,$p' "$out/extra.txt" | sed 's/^/5330-rtl: camera: /' | tee -a "$out/summary.txt"
 say "5330-run exit $status"
 exit $status

@@ -82,12 +82,32 @@
 /*
  * Frames waiting for a transmit transfer: a 64-bit machine's larger pool
  * holds several blocks' worth, the 32-bit boards' small pool a burst.
+ * Beyond that, room is kept for small frames (a pure acknowledgement, an
+ * ARP or neighbour message): a connection that sends at the link's rate
+ * keeps the queue full, and the acknowledgements of one that receives at
+ * the same time would otherwise be refused and wait for the stack's retry.
  */
 #if PACKET_BUF_POOL_COUNT >= 256U
 #define RTL_TX_QUEUE_MAX		128U
+#define RTL_TX_QUEUE_SMALL_EXTRA	32U
 #else
 #define RTL_TX_QUEUE_MAX		16U
+#define RTL_TX_QUEUE_SMALL_EXTRA	4U
 #endif
+#define RTL_TX_SMALL_FRAME		128U
+
+/*
+ * The headers a pure TCP acknowledgement is told by: an Ethernet frame of
+ * IPv4 or IPv6 (no extension header) carrying TCP with no payload and
+ * none of SYN, FIN or RST.
+ */
+#define RTL_ETHER_HEADER		14U
+#define RTL_ETHERTYPE_IPV4		0x0800U
+#define RTL_ETHERTYPE_IPV6		0x86ddU
+#define RTL_IPV6_HEADER			40U
+#define RTL_IP_PROTOCOL_TCP		6U
+#define RTL_TCP_HEADER_MIN		20U
+#define RTL_TCP_FLAGS_OPEN_CLOSE	0x07U
 #define RTL_TX_BATCH_MAX		64U
 
 #define RTL_TRANSFER_TIMEOUT_MS		5000U
@@ -459,11 +479,14 @@ struct rtl_adapter {
 	/*
 	 * Under the lock: the transmit pump's flag (one thread builds and
 	 * submits blocks at a time, so frames go out in order) and the frames
-	 * waiting, linked through their next field.
+	 * waiting, linked through their next field.  Pure acknowledgements
+	 * wait at the head, ahead of the data, in their own order;
+	 * tx_queue_acks_last is the last of them, or NULL.
 	 */
 	unsigned tx_busy;
 	struct packet_buf *tx_queue_head;
 	struct packet_buf *tx_queue_tail;
+	struct packet_buf *tx_queue_acks_last;
 	unsigned tx_queue_count;
 
 	/*
@@ -735,6 +758,7 @@ static void rtl_wait_activity(struct rtl_adapter *adapter);
 static int rtl_stop(struct rtl_adapter *adapter);
 static void rtl_tx_queue_free(struct rtl_adapter *adapter);
 static void rtl_tx_pump(struct rtl_adapter *adapter);
+static int rtl_tx_is_pure_ack(const struct packet_buf *packet);
 static int rtl_tx_prepare(struct rtl_adapter *adapter, struct packet_buf *packet, struct drv_usb_rtl815x_tx_frame *frame);
 static int rtl_tx_submit(struct rtl_adapter *adapter, unsigned index, struct packet_buf *packets);
 static int rtl_rx_deliver(const void *frame, size_t length, unsigned checksums, void *argument);
@@ -3453,11 +3477,16 @@ rtl_transmit(
 {
 	struct rtl_adapter *adapter = device->driver_data;
 	unsigned long irq;
+	unsigned limit;
 	int pump;
+	int ack;
 
 	/* Refuses a missing frame. */
 	if (packet == NULL)
 		return EINVAL;
+
+	/* Tells a pure acknowledgement, outside the lock. */
+	ack = rtl_tx_is_pure_ack(packet);
 
 	/* Refuses a frame for an adapter that is not up. */
 	irq = spin_lock_irqsave(&adapter->lock);
@@ -3469,20 +3498,46 @@ rtl_transmit(
 		return ENETDOWN;
 	}
 
-	/* Only a full queue drops the frame; TCP keeps it and hands it over again. */
-	if (adapter->tx_queue_count >= RTL_TX_QUEUE_MAX) {
+	/*
+	 * Only a full queue drops the frame; TCP keeps it and hands it over
+	 * again.  A small frame may use the room kept beyond the limit.
+	 */
+	limit = RTL_TX_QUEUE_MAX;
+	if (packet->length <= RTL_TX_SMALL_FRAME)
+		limit += RTL_TX_QUEUE_SMALL_EXTRA;
+	if (adapter->tx_queue_count >= limit) {
 		spin_unlock_irqrestore(&adapter->lock, irq);
 		packet_buf_free(packet);
 		return ENOBUFS;
 	}
 
-	/* Queues the frame behind those waiting, so the frames go out in order. */
-	packet->next = NULL;
-	if (adapter->tx_queue_tail != NULL)
-		adapter->tx_queue_tail->next = packet;
-	else
-		adapter->tx_queue_head = packet;
-	adapter->tx_queue_tail = packet;
+	/*
+	 * Queues a pure acknowledgement behind the other acknowledgements,
+	 * ahead of the data: one waiting behind a full queue of another
+	 * connection's data delays what this end receives.  It may pass its
+	 * own connection's data, whose older acknowledgement and window the
+	 * peer then takes as old (RFC 9293 3.10.7.4).  Any other frame goes
+	 * behind those waiting, so a connection's segments go out in order.
+	 */
+	if (ack) {
+		if (adapter->tx_queue_acks_last != NULL) {
+			packet->next = adapter->tx_queue_acks_last->next;
+			adapter->tx_queue_acks_last->next = packet;
+		} else {
+			packet->next = adapter->tx_queue_head;
+			adapter->tx_queue_head = packet;
+		}
+		adapter->tx_queue_acks_last = packet;
+		if (packet->next == NULL)
+			adapter->tx_queue_tail = packet;
+	} else {
+		packet->next = NULL;
+		if (adapter->tx_queue_tail != NULL)
+			adapter->tx_queue_tail->next = packet;
+		else
+			adapter->tx_queue_head = packet;
+		adapter->tx_queue_tail = packet;
+	}
 	adapter->tx_queue_count++;
 
 	/* Becomes the sender when none sends and a transfer is free; starts_active holds off teardown. */
@@ -3504,6 +3559,72 @@ rtl_transmit(
 }
 
 /*
+ * Tells whether a frame is a pure TCP acknowledgement: IPv4 or IPv6 (no
+ * extension header) carrying TCP with no payload and none of SYN, FIN or
+ * RST.  Anything it cannot read is not one.
+ */
+static int
+rtl_tx_is_pure_ack(
+	const struct packet_buf *packet)
+{
+	const uint8_t *frame;
+	const uint8_t *tcp;
+	size_t length;
+	size_t ip_header;
+	size_t ip_length;
+	size_t tcp_header;
+	unsigned type;
+	unsigned protocol;
+
+	/* Only a small frame can be one. */
+	frame = packet->data;
+	length = packet->length;
+	if (length > RTL_TX_SMALL_FRAME || length < RTL_ETHER_HEADER + 20U + RTL_TCP_HEADER_MIN)
+		return 0;
+
+	/* The network header: its length, the transport's and the length it says it carries. */
+	type = ((unsigned)frame[12] << 8) | frame[13];
+	if (type == RTL_ETHERTYPE_IPV4) {
+		if ((frame[RTL_ETHER_HEADER] >> 4) != 4U)
+			return 0;
+		/* A fragment (more fragments, or an offset) carries no header to read. */
+		if ((frame[RTL_ETHER_HEADER + 6U] & 0x3fU) != 0 || frame[RTL_ETHER_HEADER + 7U] != 0)
+			return 0;
+		ip_header = (size_t)(frame[RTL_ETHER_HEADER] & 0x0fU) * 4U;
+		protocol = frame[RTL_ETHER_HEADER + 9U];
+		ip_length = ((size_t)frame[RTL_ETHER_HEADER + 2U] << 8) | frame[RTL_ETHER_HEADER + 3U];
+	} else if (type == RTL_ETHERTYPE_IPV6) {
+		if (length < RTL_ETHER_HEADER + RTL_IPV6_HEADER + RTL_TCP_HEADER_MIN ||
+		    (frame[RTL_ETHER_HEADER] >> 4) != 6U)
+			return 0;
+		ip_header = RTL_IPV6_HEADER;
+		protocol = frame[RTL_ETHER_HEADER + 6U];
+		ip_length = RTL_IPV6_HEADER +
+		    (((size_t)frame[RTL_ETHER_HEADER + 4U] << 8) | frame[RTL_ETHER_HEADER + 5U]);
+	} else {
+		return 0;
+	}
+
+	/* TCP, its whole header within the frame. */
+	if (protocol != RTL_IP_PROTOCOL_TCP || ip_header < 20U ||
+	    RTL_ETHER_HEADER + ip_header + RTL_TCP_HEADER_MIN > length)
+		return 0;
+	tcp = frame + RTL_ETHER_HEADER + ip_header;
+	tcp_header = (size_t)(tcp[12] >> 4) * 4U;
+	if (tcp_header < RTL_TCP_HEADER_MIN || RTL_ETHER_HEADER + ip_header + tcp_header > length)
+		return 0;
+
+	/* No payload, and neither opening, closing nor resetting. */
+	if (ip_length != ip_header + tcp_header)
+		return 0;
+	if ((tcp[13] & RTL_TCP_FLAGS_OPEN_CLOSE) != 0)
+		return 0;
+
+	/* Succeeded: a pure acknowledgement. */
+	return 1;
+}
+
+/*
  * Sends the queued frames, a block a free transmit transfer at a time,
  * until the queue is empty, no transfer is free, or the adapter goes down.
  *
@@ -3521,6 +3642,7 @@ rtl_tx_pump(
 	unsigned index;
 	unsigned taken;
 	int error;
+	int acks;
 
 	/* Sends block after block. */
 	for (;;) {
@@ -3544,8 +3666,14 @@ rtl_tx_pump(
 		/* Takes the waiting frames one block may carry off the queue as one list. */
 		packets = adapter->tx_queue_head;
 		last = packets;
-		for (taken = 1; taken < RTL_TX_BATCH_MAX && last->next != NULL; taken++)
+		acks = (last == adapter->tx_queue_acks_last);
+		for (taken = 1; taken < RTL_TX_BATCH_MAX && last->next != NULL; taken++) {
 			last = last->next;
+			if (last == adapter->tx_queue_acks_last)
+				acks = 1;
+		}
+		if (acks)
+			adapter->tx_queue_acks_last = NULL;
 		adapter->tx_queue_head = last->next;
 		if (adapter->tx_queue_head == NULL)
 			adapter->tx_queue_tail = NULL;
@@ -3746,6 +3874,7 @@ rtl_tx_queue_free(
 	packets = adapter->tx_queue_head;
 	adapter->tx_queue_head = NULL;
 	adapter->tx_queue_tail = NULL;
+	adapter->tx_queue_acks_last = NULL;
 	adapter->tx_queue_count = 0;
 
 	spin_unlock_irqrestore(&adapter->lock, irq);
