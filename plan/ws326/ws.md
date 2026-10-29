@@ -51,7 +51,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | planned | p002、p008、p009、p012 |
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
-| [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | planned | p003、p008 |
+| [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | 実装済み・試験 PASS（test-deblock 3313 checks、cleared は Q1 が判定） | p003、p008 |
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | planned | p002〜p020 |
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | planned | p021（p022 を推す） |
