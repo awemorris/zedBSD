@@ -55,3 +55,8 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## p012 から引き継ぐ事（2026-10-30 Q1、p012 の実装の担当の報告）
+
+CABAC の syntax element の文脈（ctxIdxInc）は今の macroblock の状態を読むので、macroblock の解析はそれぞれを、それを使う次の要素を読む前に書く:
+`kind`、`coded_flags`（16 = luma DC、17・18 = Cb・Cr の DC、`19 + 4*(component-1) + chroma4x4BlkIdx` = chroma AC）、`mvd`、`motion.ref_idx[list][quadrant]`、`direct`（ref_idx と mvd の前）、I_16X16 の `cbp`（mb_type から）。
