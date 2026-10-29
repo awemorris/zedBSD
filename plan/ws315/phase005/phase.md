@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws315-p005 -->
 # ws315-p005: 規約の全文の見直し
 
-Status: cleared（2026-10-30 05:59 P3 q1694-i01: conformance-reviewer の見直しを P3 が確かめた。host 試験 PASS、amd64・pcat（driver y）の build warning 0）
+Status: cleared（2026-10-30 05:53 P3 q1694-i01: conformance-reviewer の見直しを P3 が確かめた。host 試験 PASS、amd64・pcat（driver y）の build warning 0）
 Parent: [WS315](../ws.md)
 Queue: q1694 / q1694-i01（P3）
 依存: p002〜p004
