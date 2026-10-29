@@ -229,5 +229,6 @@ make -j16 ZEDBSD_CONFIG=plan/ws282/tests/config-rpi5.mk BUILD=build/ws282/rpi5 b
   - format: mjpeg 640x480 interval 333333、image 614989、payload 3072、buffers 4
   - counters: frames=0、resubmit_failures=1、他は全部 0（dropped・invalid_header・missed_packets・sequence_gaps・halt_timeouts・no_signal）
   - 2 回（kernel だけの差し替えと image）とも同じ。
+- ユーザー（2026-10-30）「webcamは、私の認識だと、まだ実機テストしたことがなくて、今回初めて行ったように思います。つまり、UVCのドライバが動いた実績がなかったので、根本的に、動くようにするところからスタートだと思います。」→ WS282 の再開は、UVC の driver を実機で動かすところから（どの段が動いていないかの切り分けから）。
 - 見立て（未解析）: isoch の最初の resubmit が失敗して stream が止まった。xHCI の isoch の送り直しの道（WS197 の isoch・WS221 p014 の xHCI の queue の変更との関係も）から調べる。
 - 証拠の file（P3 の worktree `/home/awe/zedBSD-worktrees/p3-ws315` の中、git の外）: `build/hw5330/logs/ws315-k5-dmesg.txt`・`ws315-img1-dmesg.txt`（uvc の行は 249〜279 付近）、`build/ws315-hw/k5/extra.txt`・`img1/extra.txt`。
