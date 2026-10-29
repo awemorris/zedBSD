@@ -12,11 +12,16 @@
 1. 「H.264デコーダのソフトウェア実装は、どれくらいの規模見積もりになりますか？LWでいうと。」（Q1 の見積もり: 正しく decode できるまで約 60〜80 LW、1080p を CPU で実用の速さにするまで含めて 80〜120 LW）
 2. 「libmediaへのH.264デコーダの実装について、Claudeの安いモデルに外注することを検討しています。全体の骨格を、モジュールをわけてファイルを作り、モジュールのインタフェース（定数、構造体、関数）をヘッダで定義しておき、中身はヘッダの関数のコメントで仕様を定義しておいて、モジュールの.cファイルの実装は、実装するLLMに任せる、という構成にしたいです。WSを立てて、phaseを作成し、最初のphaseでこのモジュール設計だけを実施して、実装のフェーズはSonnet 5.5 Highのサブエージェントで実行する、というストラテジにしたいです。」
 
+3. 「WS326ですが、共通部分はH.265でも使えるように、h264_のような名前でなく、汎用にするよう、記録しておいてください。」
+
 ## 進め方（上の原文の解釈、Q1）
 
 - p001（設計、Opus）: module に分け、各 module の header（定数・構造体・関数）を書き、各関数の comment に仕様（入力・出力・前提・誤りの扱い・ISO/IEC 14496-10 の節）を書く。.c は空の骨格だけ（関数は未実装の印）。module ごとの host の単体試験の仕様と、全体の適合の試験（JVT の conformance の bitstream と hash の照合）の道も決める。module の依存の順と、実装の Phase の割り振り（1 Phase = Sonnet の 1 回の起動で済む大きさ）を表にする。
 - p002 以降（実装、Sonnet 5.5 の high の subagent）: header を変えずに .c を実装し、単体試験を通す。header の不備は直さず Q1 に返す（Q1 か Opus が header を直す）。
 - 最後に組み込み（libmedia の backend）、適合の試験、速さ、規約の全文の見直し。
+- 決定 3 の解釈: H.265 でも使える部分（例: bit の読み、Exp-Golomb、NAL・RBSP（emulation prevention）、CABAC の算術の engine と状態の遷移の表、frame・plane の確保、DPB・出力の順の共通の部分、試験の道具）は `h264sw` の名前でなく codec に依らない名前の module にする。
+  今動いている実装の Phase（header は凍結）を乱さないため、名前の移しは p026（適合の試験 p022 の後、規約の見直し p025 の前）で行い、単体試験と適合の試験が前後で同じであることで確かめる。
+  どこまでを共通にするかと名前は p026 の設計（Opus）で決め、[WS329](../ws329/ws.md)（H.264 の encoder）・[WS330](../ws330/ws.md)（H.265 の decoder・encoder）の共通化の設計はその上に足す。
 
 ## Q1 の判断（2026-10-30、p001 の問い）
 
@@ -56,9 +61,11 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | planned | p021（p022 を推す） |
 | [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | planned | p022、p023 |
-| [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | planned | p023（と速さの Phase） |
+| ws326-p026 | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | planned | p022 |
+| [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | planned | p023・p026（と速さの Phase） |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。P1 が q1695 で p001。
 - 2026-10-30 P1（q1695-i01）: p001 の成果を branch agent/p1-ws326 に（header と骨格 fd1d6f88c、plan は次の commit）。design-reviewer の 23 件を反映（design.md §9）。次: Q1 が受け入れて main に merge、p002 から（p008・p010 は p001 だけに依存、並べられる）。
+- 2026-10-30 Q1: ユーザーの決定 3（共通部分を汎用の名前に）を記録し、p026 を足した。p020 cleared（main 9fa35fc76）。

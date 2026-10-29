@@ -11,11 +11,13 @@
 
 「標準廉価実装手順で、libmediaに、H.264エンコーダを追加するWSをそれぞれ作ります。H.264デコーダの実装のうち再利用できるところを洗い出して、デコード専用ではなく共通関数にするのを、Opus 5.5が設計段階で行います。そのあと、必要な追加実装を設計済みにしてSonnetに委譲します。H.264デコーダの実装が完了してから取り組みます。」
 
+2026-10-30（WS330 を立てた時）: 「H.265のエンコーダ、デコーダをlibmediaに追加するWSを1つ立てます。…H.264エンコーダと同様に、共通部分を洗い出してから、設計を行い、そのあとでSonnetに委譲する計画設計にしてくだしあ。」（Q1 の解釈: 先の「WSをそれぞれ作ります」は H.264 の encoder がこの WS329、H.265 は WS330）
+
 ## 進め方（上の原文の解釈、Q1）
 
 - p001（設計、Opus 5.5）:
   1. WS326 の decoder の module（h264sw-*）から、encoder でも使える物を洗い出す（例: bit の読み書き、NAL と RBSP の組み立て、SPS・PPS・slice header の構造体、表、変換と逆変換・量子化、intra の予測、動きの補間、deblocking、DPB と参照の list、CAVLC・CABAC の表と文脈）。
-  2. それらを decode 専用でない共通の関数・module にする設計（名前・header の分け方、decoder の既存の試験を壊さない移し方）。共通化の refactor 自体は p001 の設計に沿って Phase として行い、decoder の単体試験と適合の試験が前後で同じであることで確かめる。
+  2. それらを decode 専用でない共通の関数・module にする設計（H.265 でも使える物は codec に依らない名前にする。[WS326](../ws326/ws.md) の決定 3 と p026 の上に足す）（名前・header の分け方、decoder の既存の試験を壊さない移し方）。共通化の refactor 自体は p001 の設計に沿って Phase として行い、decoder の単体試験と適合の試験が前後で同じであることで確かめる。
   3. encoder に要る追加の module（bit の書き、CAVLC・CABAC の符号化、mode の選び（intra・inter）、動きの探索、rate control、frame の種類と参照の構造、出力の NAL）の header（interface と仕様の comment）と骨格、試験の道（decoder との往復、適合の確かめ）、実装の Phase の表と各 phase.md。
   4. design-reviewer。
 - p002 以降（実装、Sonnet 5.5 high）: 標準廉価実装手順のとおり。
