@@ -22,7 +22,7 @@
 | P1 | q1695-i01 in-progress | [ws326](ws326/ws.md) p001 H.264 の software の decoder の module の設計（WS309 は p015 の判断待ちで返却のまま） | — |
 | P2 | q1697-i01 in-progress | [ws327](ws327/ws.md) libkeiland の thread と socket の wrapper（p001 設計から） | — |
 | P3 | q1696-i01 in-progress | [ws315](ws315/ws.md) p006 TCP の受けの buffer（F-WS315-rcvbuf） | 5330・10.0.10.3 |
-| P4 | q1665-i10 返却 | [ws307](ws307/ws.md) p011 cleared（通し 25 STEP・日本語の画面、main adeab690a）。残りは p007（HAL の案の承認待ち）・p004・p014 規約 | — |
+| P4 | q1698-i01 in-progress | [ws307](ws307/ws.md) の残り（upload・sleep・p004・p008・p014）。p007 は回答待ち | QEMU |
 | P5 | q1693-i01 返却 | [ws291](ws291/ws.md) RTX: big-1000 24→52 fps、subs-100 67→104、subs-1000 6.6→10.9（NVK 136・75）、scene 同等（main d71b2b446）。subs の残りは全画面の copy（WS309 p015 の (B)）、big は CPU（record・submit） | — |
 | P6 | q1667-i05 返却 | [ws282](ws282/ws.md)・[ws284](ws284/ws.md) は main に merge 済み、別のツリーのセッションは [ws282 handover](ws282/handover.md)・[ws284 handover](ws284/handover.md) の試験から続ける | — |
 | P7 | q1687-i01 返却 | [ws313](ws313/ws.md) Mali の残りと Mesa との照合の直しを main に（b6649f09f）。実機未実施。C5 で描画がおかしい時の境目は c08176e6c・db080e110 | — |
@@ -106,7 +106,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-363 · q1698 · WS329 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-363 · q1699 · WS329 · KL_VERSION 103。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
