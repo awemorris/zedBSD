@@ -11,6 +11,7 @@
    担当は、渡された Queue の `phase.md` と親の `ws.md`、[plan/agents/protocol.md](plan/agents/protocol.md) を読む。
 4. 関係のある時だけ読む: [Guardrail](plan/guardrail.md)（範囲・HAL・出典・承認済みの差分）、C を書く前に [coding-style.md](plan/coding-style.md) の該当の規則、
    設計の前に [master-design-policy.md](plan/master-design-policy.md)、道具と実機は [plan/tools.md](plan/tools.md)。
+   外部の標準仕様に基づく物を module に分けて実装の担当（Sonnet 5.5 high）に委ねる時は [docs/agent/spec-module-delegation.md](docs/agent/spec-module-delegation.md)（2026-10-30 ユーザー「…我々の標準の方法として、docs/に記録してもらえますか？」）。
 5. 作業ツリーの未 commit の変更を確かめ、他人の変更は保つ。関係の無い計画・履歴は読まない。`plan/history/` は履歴であって指示ではない。
 
 **記録が食い違う時**: ユーザーの指示は一貫している。記録同士が食い違えば、それは壊れた記録である（複数のエージェントが書いたため）。
