@@ -5,7 +5,7 @@
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
 - Status: incomplete（2026-10-30 Q1 が作成、p001 から）
 - 目標: libmedia に、既存の library を使わない H.264 の software の decoder を作る。範囲は progressive の 8 bit 4:2:0、Constrained Baseline・Main・High（interlace（PAFF・MBAFF）・4:2:2・10 bit は範囲の外）。
-  Vulkan Video の hardware が無い機械（Pi 5 など）で libavcodec に頼らずに再生する道。libmedia の backend の表での位置は [WS318](../ws318/ws.md) の設計で決める（Q1 の案: Vulkan Video → この decoder → libavcodec）。
+  Vulkan Video の hardware が無い機械（Pi 5 など）で libavcodec に頼らずに再生する道。libmedia の backend の順は Vulkan Video → この独自の software の decoder → libavcodec（2026-10-30 ユーザー「libmedia の backend の順番は、Vulkan Video --> 独自ソフトウェアdecoder --> libavcodecです。」）。
 
 ## ユーザーの決定（2026-10-30、原文）
 

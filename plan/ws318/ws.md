@@ -19,7 +19,7 @@
 ## 設計の合意（Q1 のまとめ、2026-10-30。上の原文が正）
 
 - 入り口は libmedia だけ。今の `userland/desktop/media-app/`（app の中の libavcodec の fallback）は libmedia の中へ移し、Video Player・Music・Browser の `<video>` などは libmedia だけを呼ぶ。
-- backend: hardware は Vulkan Video の 1 本（VPU が別の機械も kernel の Vulkan の executor が Vulkan Video として見せる）→ 無ければ libavcodec を dlopen（無ければ MEDIA_PROBLEM_MISSING）。decode も encode も同じ。
+- backend: hardware は Vulkan Video の 1 本（VPU が別の機械も kernel の Vulkan の executor が Vulkan Video として見せる）→ 独自の software の codec（H.264 の decode は [WS326](../ws326/ws.md)、AAC-LC）→ libavcodec を dlopen（無ければ MEDIA_PROBLEM_MISSING）。2026-10-30 ユーザー「libmedia の backend の順番は、Vulkan Video --> 独自ソフトウェアdecoder --> libavcodecです。」
 - app の Vulkan の device を共有: `media_vulkan_requirements()` の類で要る拡張・feature・queue family を問い、app が作った instance・physical device・device・queue を渡す。結果は VkImage・形式・layout・semaphore。fd・HANDLE は API に出さない。Vulkan を使わない app には CPU の picture の道を残す。
 - 形式を前提にしない（NV12 を捨てる）: decoder・encoder・カメラの形式を実行の時に問い、合わなければ GPU で 1 回変換（compute）。MJPEG のカメラは decode の段を挟む。
 - encoder（`media_encoder_*` の類）: 対応する codec と profile・大きさ・rate control を問う口、codec を指定して開く口、picture を送り packet を受ける。codec は H.264・H.265・AAC-LC（AAC は既存の独自の encoder（WS205、短い窓・TNS・PNS 無し）を encoder の口に載せ、profile はデコーダと同じ AAC-LC、既存のライブラリは使わず独自に）。
