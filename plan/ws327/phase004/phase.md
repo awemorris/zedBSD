@@ -3,7 +3,7 @@
 # ws327-p004 app の移行（thread・socket を libkeiland の層へ）
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §1・§6。Queue: q1697 / q1697-i01（担当 P2、2026-10-30）。
-- Status: in-progress（2026-10-30 ラップアップ。Mailer の途中、build しない状態）
+- Status: canceled（2026-10-30 Q1: 標準廉価実装手順に組み直し、p008〜p012 に分けた。ここまでの Mailer の途中の移行（6bb8c3c8d）は p008 が引き継ぐ）
 - Disposition: normal
 
 ## 到達（2026-10-30）
