@@ -327,6 +327,8 @@ counter_input(
 		counter->resized = 1;
 		return;
 	}
+
+	/* The close button ends the program. */
 	if (input->kind == KL_WINDOW_CLOSE) {
 		counter->closed = 1;
 		return;

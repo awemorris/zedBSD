@@ -45,9 +45,8 @@
 
 /*
  * Everything the program keeps: its connection, window and widgets, the
- * desktop's settings it follows the language through, the file chooser
- * while it is open, the path chosen, how many files were opened, and
- * what the main loop has to do next.
+ * file chooser while it is open, the path chosen, how many files were
+ * opened, and what the main loop has to do next.
  */
 struct services {
 	struct kl_app *app;
@@ -56,7 +55,6 @@ struct services {
 	struct kl_text text;
 	struct kl_style style;
 	struct kl_canvas canvas;
-	struct kl_settings *settings;
 	struct kl_file_chooser *chooser;
 	uint32_t *pixels;
 	uint32_t width;
@@ -76,7 +74,7 @@ static int services_frame(struct services *services);
 static void services_input(struct services *services, const struct kl_window_event *input);
 static void services_open(struct services *services);
 static void services_chosen(void *data, struct kl_file_chooser *chooser, unsigned result, const char *path, size_t filter);
-static void services_language(void *data, const char *language);
+static void services_language(struct services *services, const char *language);
 
 /* What the file chooser calls when it has its answer. */
 static const struct kl_file_chooser_listener services_chooser_listener = {
@@ -104,11 +102,8 @@ main(void)
 		return 1;
 	}
 
-	/* Follows the language chosen in Settings: reads the catalogs now and whenever it changes. */
-	services.settings = kl_settings_open(kl_app_display(services.app), NULL);
-	if (services.settings == NULL)
-		return 1;
-	status = kl_tr_follow(services.settings, DOMAIN, services_language, &services);
+	/* Speaks the desktop's language: reads the catalogs of the language the application heard when it opened. */
+	status = kl_tr_open(DOMAIN, kl_app_language(services.app));
 	if (status != 0)
 		fprintf(stderr, "services: the texts stay in English (%s)\n", strerror(status));
 
@@ -133,6 +128,8 @@ main(void)
 		fprintf(stderr, "services: no font %s (%s)\n", FONT, strerror(status));
 		return 1;
 	}
+
+	/* Gives the widgets the font. */
 	services.style.text = &services.text;
 
 	/* Makes the first frame, and learns whether the window is see-through: then it stands on glass. */
@@ -154,9 +151,6 @@ main(void)
 		if (status != 0)
 			break;
 
-		/* Runs the settings' watches on what the dispatch read (a new language calls services_language). */
-		(void)kl_settings_dispatch(services.settings);
-
 		/* Takes every event queued, in order. */
 		for (;;) {
 			taken = kl_app_take(services.app, &event);
@@ -166,6 +160,10 @@ main(void)
 			/* The appearance changed: kl_theme_default's colours are new, the frame is drawn with them. */
 			if (event.kind == KL_APP_THEME)
 				services.dirty = 1;
+
+			/* The desktop's language changed: the event names the language it changed to. */
+			if (event.kind == KL_APP_LANGUAGE)
+				services_language(&services, event.language);
 
 			/* An input of the window; none of the chooser's window comes here. */
 			if (event.kind == KL_APP_WINDOW && event.window == services.window)
@@ -196,14 +194,14 @@ main(void)
 		}
 	}
 
-	/* Closes the chooser, the settings, the widgets' record, the frame, the font and the connection. */
+	/* Closes the chooser, the widgets' record, the frame, the font, the texts and the connection. */
 	if (services.chooser != NULL)
 		kl_file_chooser_destroy(services.chooser);
-	kl_settings_close(services.settings);
 	kl_ui_destroy(services.ui);
 	kl_canvas_release(&services.canvas);
 	free(services.pixels);
 	kl_text_close(&services.text);
+	kl_tr_close();
 	kl_app_close(services.app);
 
 	/* Succeeded: the window was closed. */
@@ -402,6 +400,8 @@ services_input(
 		services->resized = 1;
 		return;
 	}
+
+	/* The close button ends the program. */
 	if (input->kind == KL_WINDOW_CLOSE) {
 		services->closed = 1;
 		return;
@@ -454,6 +454,8 @@ services_chosen(
 {
 	struct services *services;
 
+
+	/* The chooser and the filter are not needed here. */
 	(void)chooser;
 	(void)filter;
 
@@ -470,21 +472,22 @@ services_chosen(
 }
 
 /*
- * Draws the window again in the language just chosen: kl_tr gives the new
- * language's texts from now on.
+ * Speaks the language the desktop changed to: reads its catalogs, so that
+ * kl_tr gives its texts from now on, and draws the window again.
  */
 static void
 services_language(
-	void *data,
+	struct services *services,
 	const char *language)
 {
-	struct services *services;
+	int status;
 
-	(void)language;
+	/* The new language's catalogs (English after a failure). */
+	status = kl_tr_open(DOMAIN, language);
+	if (status != 0)
+		fprintf(stderr, "services: the texts are in English (%s)\n", strerror(status));
 
 	/* The title and every text of the next frame in the new language. */
-	services = data;
-	if (services->window != NULL)
-		kl_window_set_title(services->window, kl_tr("Services"));
+	kl_window_set_title(services->window, kl_tr("Services"));
 	services->dirty = 1;
 }

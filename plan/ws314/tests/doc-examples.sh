@@ -4,18 +4,23 @@
 #   sh plan/ws314/tests/doc-examples.sh [LIBDIR]
 #
 # compiles every example against the tree's headers with clang and gcc (-Wall -Wextra -Werror), links each with a
-# Linux build of libkeiland, and checks that the guide shows each example whole (the ```c block after its
-# "<!-- example: keiland-examples/NAME.c -->" marker is the file, byte for byte).  LIBDIR: the lib/ of a Linux build
+# Linux build of libkeiland, checks that the guide shows each example whole (the ```c block after its
+# "<!-- example: keiland-examples/NAME.c -->" marker is the file, byte for byte; a catalog's ```text block after
+# "<!-- example: keiland-examples/locale/ja/NAME.tr -->" likewise), and that each Japanese catalog gives a
+# translation for every key it holds (read with kl_tr_open_directory).  LIBDIR: the lib/ of a Linux build
 # (make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=DIR DIR/lib/libkeiland.so); default
-# build/p011-linux/lib.  Without libkeiland.so there, the link is reported as not done.
+# build/p009-linux/lib.  Without libkeiland.so there, the link is reported as not done.
 #
-#   sh plan/ws314/tests/doc-examples.sh guest [BUILD]
+#   sh plan/ws314/tests/doc-examples.sh guest [BUILD [NAME...]]
 #
 # runs every example on the zedBSD Venus guest and photographs it: builds the lean desktop image
 # (plan/tools/titlebar/build-menu-image.sh BUILD, default build/amd64), compiles the examples against that build's
-# sysroot and libkeiland, boots the image (plan/ws035/tests/zdesktop-guest.sh, runtime build/p011-run, its disk with
-# cache=unsafe through a wrapper of qemu-system-x86_64 on PATH), starts the compositor with glass, and for each example
-# starts it, gives it a few keys or a click, and takes the compositor's picture into build/review/ws314-doc-NAME.png.
+# sysroot and libkeiland, boots the image (plan/ws035/tests/zdesktop-guest.sh, runtime build/p009-run, its disk with
+# cache=unsafe through a wrapper of qemu-system-x86_64 on PATH), puts the examples' Japanese catalogs where the
+# desktop's are, starts the compositor with glass, and for each example starts it, gives it a few keys or a click, and
+# takes the compositor's picture into build/review/ws314-doc-NAME.png.  07-services runs twice: first, and last after
+# 08-language left the desktop in Japanese (the picture 07-services-ja).
+# NAMEs (pictures' names, such as 09-shell) run only those.
 # The judgement is the pictures and the programs' exit status read over SSH; no console log is read.  Needs the Venus
 # renderer in build/ws035-sq-venus and /dev/dri/renderD128 (plan/tools.md).
 #
@@ -30,8 +35,9 @@ examples=docs/howto/keiland-examples
 guide=docs/howto/keiland-programming.md
 flags="-std=gnu17 -Wall -Wextra -Werror -Iuserland/desktop/include"
 
+# The run's own directory, not the link to the latest run: a run started meanwhile moves the link.
 fresh_out build/tmp/doc-examples
-out=build/tmp/doc-examples
+out=build/tmp/$(basename "$fresh_dir")
 pass=0
 fail=0
 skipped=0
@@ -53,7 +59,10 @@ summary() {
 # The guest's run: image, programs, boot, one picture per example.
 if [ "${1:-}" = guest ]; then
 	build=${2:-build/amd64}
-	runtime=$PWD/build/p011-run
+	shift
+	[ $# -gt 0 ] && shift
+	only=" $* "
+	runtime=$PWD/build/p009-run
 	sysroot=$build/sysroot
 	clang=build/llvm/bin/clang
 	export GUEST_RUNTIME="$runtime"
@@ -140,6 +149,12 @@ EOF
 		exit 1
 	fi
 
+	# The examples' catalogs where the desktop's are (KEILAND_DATADIR/keiland/locale).
+	for catalog in "$examples"/locale/ja/*.tr; do
+		timeout 120 python3 plan/tools/guest/guest.py put "$catalog" "/usr/share/keiland/locale/ja/$(basename "$catalog")" \
+			>/dev/null 2>&1 </dev/null
+	done
+
 	# The programs in, and the compositor started with glass and the wallpaper.
 	for program in "$out"/zedbsd/*; do
 		case $program in
@@ -150,17 +165,28 @@ EOF
 	guest 'export XDG_RUNTIME_DIR=/tmp; picture=; [ -f /usr/share/keiland/wallpaper.png ] && picture=--wallpaper=/usr/share/keiland/wallpaper.png
 /bin/wayland --testing --timeout=3600 --width=1280 --height=800 --glass $picture > /tmp/zdesktop.log 2>&1 </dev/null & sleep 15; echo started' > "$out/compositor.txt"
 
-	# Each example: started, given its input, photographed, and ended.
+	# Each example: started, given its input, photographed, and ended.  A picture's name and its program, in order:
+	# 08-language leaves the desktop in Japanese, and 07-services-ja is 07-services started after it.
 	mkdir -p build/review "$out/shots"
-	for program in "$out"/zedbsd/*; do
-		case $program in
-		*.o|*.log) continue ;;
+	for run in 01-app 02-window 03-titlebar 04-counter 04-counter-parts 05-widgets 06-menu 07-services 08-worker \
+		09-sort 09-shell 10-instance 08-language 07-services-ja:07-services; do
+		name=${run%%:*}
+		program=${run#*:}
+		case $only in
+		"  ") ;;
+		*" $name "*) ;;
+		*) continue ;;
 		esac
-		name=$(basename "$program")
 		# The notification of 01-app goes after a few seconds; the windows are waited for longer.
 		wait_start=8
 		[ "$name" = 01-app ] && wait_start=2
-		guest "chmod 0755 /tmp/$name; export XDG_RUNTIME_DIR=/tmp HOME=/tmp; cd /tmp; /tmp/$name > /tmp/$name.out 2>&1 </dev/null & echo \$! > /tmp/$name.pid; sleep $wait_start; echo started" > "$out/$name.start.txt"
+		# 10-instance's copies find each other in a runtime directory that is the user's alone, beside the compositor's socket.
+		runtime_dir=/tmp
+		if [ "$name" = 10-instance ]; then
+			runtime_dir=/tmp/run10
+			guest "mkdir -m 0700 -p $runtime_dir; for s in /tmp/wayland-*; do case \$s in *.lock) ;; *) ln -sf \$s $runtime_dir/ ;; esac; done; ls $runtime_dir" > "$out/$name.runtime.txt"
+		fi
+		guest "chmod 0755 /tmp/$program; export XDG_RUNTIME_DIR=$runtime_dir HOME=/tmp; cd /tmp; /tmp/$program > /tmp/$name.out 2>&1 </dev/null & echo \$! > /tmp/$name.pid; sleep $wait_start; echo started" > "$out/$name.start.txt"
 		# The input of each, at the places of the windows the compositor centres on its 1280x800 output.
 		case $name in
 		02-window) pointer move 640 400 sleep 300 move 660 410 sleep 600 ;;
@@ -172,6 +198,16 @@ EOF
 				move 713 369 sleep 300 down sleep 60 up sleep 100 down sleep 60 up sleep 1500 ;;
 		06-menu) keys '<ctrl-equal>' '<ctrl-equal>'; sleep 2; pointer move 640 400 sleep 300 right-down sleep 80 right-up sleep 1200 ;;
 		07-services) pointer move 670 542 sleep 300 down sleep 80 up sleep 1000 move 476 542 sleep 300 down sleep 80 up sleep 6000 ;;
+		08-worker) pointer move 492 528 sleep 300 down sleep 80 up sleep 2500 ;;
+		09-sort) pointer move 492 558 sleep 300 down sleep 80 up sleep 2000 ;;
+		# 09-shell: a command, then a password read (zedBSD's sh edits its own prompt without the terminal's echo and
+		# line mode; a read waits with the modes stty set).
+		09-shell) keys 'echo hello from sh' '<ret>'; sleep 1; keys 'stty -echo; printf "Password: "; read word' '<ret>'
+			sleep 1; keys 'secret'; sleep 1 ;;
+		10-instance) pointer move 514 558 sleep 300 down sleep 80 up sleep 1500 down sleep 80 up sleep 1500
+			guest "export XDG_RUNTIME_DIR=$runtime_dir HOME=/tmp; cd /tmp; /tmp/10-instance From-the-shell; echo handed=\$?" \
+				> "$out/$name.second.txt"; sleep 2 ;;
+		08-language) pointer move 534 518 sleep 300 down sleep 80 up sleep 200 down sleep 80 up sleep 200 down sleep 80 up sleep 3000 ;;
 		*) sleep 1 ;;
 		esac
 		if shot "$out/shots/$name.png" "$out/$name.shot.txt"; then
@@ -190,7 +226,7 @@ EOF
 	exit $?
 fi
 
-libdir=${1:-build/p011-linux/lib}
+libdir=${1:-build/p009-linux/lib}
 
 # Each example: compiled by both compilers, then linked with libkeiland.
 for source in "$examples"/*.c; do
@@ -214,19 +250,88 @@ for source in "$examples"/*.c; do
 	fi
 done
 
-# Each example shown whole in the guide, and each marker naming an example that exists.
-for source in "$examples"/*.c; do
-	name=$(basename "$source")
-	awk -v marker="<!-- example: keiland-examples/$name -->" '
+# Each Japanese catalog read as the examples read theirs: every msg and plural entry gives its translation.
+cat > "$out/catalog-check.c" <<'CHECK'
+#include <keiland/keiland.h>
+#include <stdio.h>
+#include <string.h>
+
+/* catalog-check DIRECTORY DOMAIN (msg ENGLISH TEXT | plural SINGULAR PLURAL FORM)...: 0 when every entry translates. */
+int
+main(int argc, char *argv[])
+{
+	const char *text;
+	int index;
+	int status;
+	int failed;
+
+	status = kl_tr_open_directory(argv[1], argv[2], "ja");
+	if (status != 0) {
+		printf("open %s: %d\n", argv[2], status);
+		return 1;
+	}
+	failed = 0;
+	index = 3;
+	while (index + 2 < argc) {
+		if (strcmp(argv[index], "plural") == 0 && index + 3 < argc) {
+			text = kl_trn(argv[index + 1], argv[index + 2], 2UL);
+			if (strcmp(text, argv[index + 3]) != 0) {
+				printf("plural %s: %s\n", argv[index + 1], text);
+				failed = 1;
+			}
+			index += 4;
+			continue;
+		}
+		text = kl_tr(argv[index + 1]);
+		if (strcmp(text, argv[index + 2]) != 0) {
+			printf("msg %s: %s\n", argv[index + 1], text);
+			failed = 1;
+		}
+		index += 3;
+	}
+	return failed;
+}
+CHECK
+for catalog in "$examples"/locale/ja/*.tr; do
+	domain=$(basename "$catalog" .tr)
+	if [ ! -f "$libdir/libkeiland.so" ]; then
+		report NOT-DONE "catalog $domain (no $libdir/libkeiland.so)"
+		continue
+	fi
+	if ! timeout 120 clang $flags "$out/catalog-check.c" -L"$libdir" -Wl,-rpath-link,"$libdir" -lkeiland \
+		-o "$out/catalog-check" > "$out/catalog-check.log" 2>&1; then
+		report FAIL "catalog $domain (see $out/catalog-check.log)"
+		continue
+	fi
+	# The entries as arguments: each field of a msg or plural line, tab-separated, one argument.
+	awk -F '\t' '$1 == "msg" || $1 == "plural" { for (i = 1; i <= NF; i++) printf "%s%c", $i, 0 }' "$catalog" \
+		> "$out/$domain.entries"
+	if xargs -0 env LD_LIBRARY_PATH="$libdir" timeout 60 "$out/catalog-check" "$examples/locale" "$domain" \
+		< "$out/$domain.entries" > "$out/$domain.check.txt" 2>&1; then
+		report PASS "catalog $domain"
+	else
+		report FAIL "catalog $domain (see $out/$domain.check.txt)"
+	fi
+done
+
+# Each example shown whole in the guide (a program in a ```c block, a catalog in a ```text one), and each marker
+# naming an example that exists.
+for source in "$examples"/*.c "$examples"/locale/ja/*.tr; do
+	name=${source#"$examples"/}
+	fence='```c'
+	case $name in
+	*.tr) fence='```text' ;;
+	esac
+	awk -v marker="<!-- example: keiland-examples/$name -->" -v fence="$fence" '
 		$0 == marker { found = 1; next }
-		found == 1 && /^```c$/ { inside = 1; found = 2; next }
+		found == 1 && $0 == fence { inside = 1; found = 2; next }
 		inside && /^```$/ { exit }
 		inside { print }
-	' "$guide" > "$out/$name.shown"
-	if cmp -s "$source" "$out/$name.shown"; then
+	' "$guide" > "$out/$(basename "$name").shown"
+	if cmp -s "$source" "$out/$(basename "$name").shown"; then
 		report PASS "shown $name"
 	else
-		report FAIL "shown $name (the guide's block differs: diff $source $out/$name.shown)"
+		report FAIL "shown $name (the guide's block differs: diff $source $out/$(basename "$name").shown)"
 	fi
 done
 for name in $(sed -n 's/^<!-- example: keiland-examples\/\([^ ]*\) -->$/\1/p' "$guide"); do

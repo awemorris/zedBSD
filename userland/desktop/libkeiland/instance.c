@@ -6,7 +6,7 @@
  */
 
 /*
- * One copy of a program, and the activation (ws089-p016).
+ * One copy of a program, and the activation.
  *
  * The copy that runs listens on $XDG_RUNTIME_DIR/keiland-NAME.instance.  A
  * later start connects, writes its request and its activation token, a
@@ -284,6 +284,8 @@ kl_instance_take(
 			snprintf(token, token_size, "%s", instance->tokens[instance->first]);
 			taken = 1;
 		}
+
+		/* Drops the request from the queue, taken or too long for where it goes. */
 		instance->first = (instance->first + 1U) % INSTANCE_PENDING;
 		instance->count--;
 	}
@@ -914,6 +916,7 @@ instance_run(
 			if (!received)
 				break;
 
+			/* Keeps the request, when the queue has room. */
 			keiui_lock_take(&instance->lock);
 
 			if (instance->count < INSTANCE_PENDING) {
@@ -960,6 +963,8 @@ instance_unbind(
 			break;
 		}
 	}
+
+	/* Takes the copy's events out of the application's queue. */
 	keiui_app_forget_instance(app, instance);
 
 	/* The pipe and the lock; the copy is no application's any more. */

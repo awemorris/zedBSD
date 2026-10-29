@@ -10,7 +10,7 @@
  * makes a loader, gives it to its pages, runs its callbacks when the
  * loader tells it of news (or waits for the news, headless), and fetches
  * documents with it.  These calls keep the embedder off the network module
- * itself (plan/ws074/design.md §19, ws074-p053's fourth step).
+ * itself.
  */
 
 #include "page/page.h"

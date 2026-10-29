@@ -50,8 +50,8 @@ DECLARATION = re.compile(
 # right after the statement that takes a lock, and the one right before the
 # statement that lets it go, bound the section's body and are not paragraph
 # boundaries that need a comment.
-CRITICAL_ACQUIRE = re.compile(r"^(?!.*unlock)(\w+\s*=\s*)?(\(void\)\s*)?\w*lock(_irqsave|_irq|_read|_write|_shared|_exclusive)?\s*\(.*\);$")
-CRITICAL_RELEASE = re.compile(r"^(\(void\)\s*)?\w*unlock\w*\s*\(.*\);$")
+CRITICAL_ACQUIRE = re.compile(r"^(?!.*unlock)(\w+\s*=\s*)?(\(void\)\s*)?\w*lock(_irqsave|_irq|_read|_write|_shared|_exclusive|_take)?\s*\(.*\);$")
+CRITICAL_RELEASE = re.compile(r"^(\(void\)\s*)?(\w*unlock\w*|\w*lock_give)\s*\(.*\);$")
 
 
 def strip_line(line: str, in_comment: bool) -> tuple[str, bool]:

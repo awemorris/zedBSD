@@ -20,7 +20,7 @@
 | 担当 | Queue | WS と次の手 | 実機 |
 | --- | --- | --- | --- |
 | P1 | q1662-i10 返却 | [ws309](ws309/ws.md) p016〜p018 cleared（main b9c381154）。残りは p015（ユーザーの判断 2 つ待ち） | — |
-| P2 | q1690-i02 返却 | [ws314](ws314/ws.md) p001〜p008・p011〜p015 cleared（main d4b58dd84）、残りは p009（解説の追記）・p010（規約） | — |
+| P2 | q1690-i02 返却 | [ws314](ws314/ws.md) 全 Phase cleared（main 122c7620a）。completed の判定は p005・p013 の process・launch の QEMU の回帰（p010 で制御の流れを直した）とユーザーの判断 A〜D の後 | — |
 | P3 | q1694-i01 in-progress | [ws315](ws315/ws.md) 5330 の RTL8156B を vendor mode で send 2372・recv 2319 Mbit/s（Linux と同等、main 145280b3e）。残りは p003（camcap・同時）・p004 RTL8157・p005 | 5330 |
 | P4 | q1665-i10 返却 | [ws307](ws307/ws.md) p011 cleared（通し 25 STEP・日本語の画面、main adeab690a）。残りは p007（HAL の案の承認待ち）・p004・p014 規約 | — |
 | P5 | q1693-i01 返却 | [ws291](ws291/ws.md) p011 cleared（scene-5000 49.7、NVK と同等）、big-1000 1.3→24 fps（NVK 136）、subs-1000 6.7（NVK 75）。次は record の decode・subs の submit（main 9e1691e6b） | — |
@@ -43,6 +43,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 統合の注意
 
 <!-- master:merge:start -->
+- 5330 への SSH（2026-10-30 ユーザー「5330へのSSHは許可します。」）: 権限の判定に止められた 5330（ssh の別名 solaris10-man、10.0.30.3）への SSH を許可。担当は試験の前に uname で 5330 の Debian か zedBSD かを確かめる。身元の分からない host には login しない。
 - firmware の license（2026-10-30 ユーザー「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」）: 試験の image の build で firmware の license の確認が出たら、担当は `yes | make firmware-licenses`（自分の worktree）で同意して続けてよい。
 - web の取得（2026-10-29）: 一度禁止（Fable の配下が bot の確認の回避で権限の判定に 3 回止められた件）、その後ユーザー「Webから取得してOKです。サブエージェントにWebの取得(GET)を許可して下さい。GETはパラメータなしなら安全と見なしていいです。」→ 担当と配下に web の GET を許す。条件: WebFetch・WebSearch の tool と、パラメータの無い GET の取得（BSD の source の tarball など）。bot の確認・拒否に当たったら即やめて Q1 に報告、User-Agent の変更・別の取り方の再試行はしない。
 - サブエージェントの起動は番号の小さい担当を優先（2026-10-29 ユーザー「P1,P2,..というふうに、数字の小さなエージェントに優先してサブエージェントを起動させてください。必要なら優先度の低いものを停止してください。」）。上限に当たったら Q1 が番号の大きい担当の配下を止める。今の枠: P5 の配下は同時 2 本、P6 は 1 本、P7 は 2 本（2026-10-29 ユーザー「WS313は調査、コード作成などで、2つまでサブエージェントを作って並列化し、効率化してください。」）。
@@ -95,7 +96,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 
 <!-- master:blocked:start -->
 - WS290 の実機の試験: VF2＋KC705（GHCI の bitstream はユーザーが書く）、VF2 の電源は SwitchBot のプラグミニ 2（14C19FA80F86）。WS290 自体が保留。
-- ユーザーが拾える試験（頼まない）: 5330 の USB 2.5G（RTL8156）を vendor mode の driver（WS315）で使っている間に抜き差しし、ue0 が戻って ping が通るか（P3 は遠隔で抜けない）、RDNA の desktop で画面の途切れが無くなったか目で見る（WS291 b574fbf6a・7650291df、機械は今 q1661 の /bin/wayland）、5330 の物理の keyboard・mouse。
+- ユーザーが拾える試験（頼まない）: 5330 の USB 2.5G（RTL8156）を vendor mode の driver（WS315）で使っている間に、adapter の抜き差しと、switch 側の cable の抜き差し（link の上げ下げ）をして、ue0 が戻って ping が通るか（P3 は遠隔でできない）、RDNA の desktop で画面の途切れが無くなったか目で見る（WS291 b574fbf6a・7650291df、機械は今 q1661 の /bin/wayland）、5330 の物理の keyboard・mouse。
 - `plan/records.json`（GitHub の同期の対応）に消した Phase の path が 118 か所残る（同期は今使っていない）。
 - VF2 の zedbsd.cfg は login=graphical を外したまま（元は zedbsd.cfg.p044orig、戻さない）。
 - GitHub への公開は push の指示の時だけ。
@@ -172,7 +173,7 @@ BUG-363 · q1695 · WS318 · KL_VERSION 103。使う前に衝突を確かめる�
 | [WS310](ws310/ws.md) | MG004 | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる（WS301 の Q301-3、2026-10-29 ユーザー「最終的には呼ぶが、別なWSにして…今は呼ばない。」） | planning | p001（WS301 の後） |
 | [WS313](ws313/ws.md) | MG008 | ODROID-C5（Amlogic S905X5M）の BSP（bsp-s905x5m）と Mali の GPU で、起動して desktop を表示する（2026-10-29 ユーザー） | incomplete（全 block の code を揃えた、実装済み・実機未試験。2026-10-29 夜にユーザーが実機で試験） | 夜の試験（plan/ws313/tests/README.md）→ 直し、Mali の desktop（render pass の LOAD など） |
 | [WS314](ws314/ws.md) | MG006 | libkeiland の API を component ごとの header に分け、プログラミングの解説（英語）を書き、fd と UNIX への依存を API から外す（2026-10-30 ユーザー） | incomplete（p001〜p003・p011 cleared、P2 q1690・p012 は Sonnet） | p001 header の分割から |
-| [WS315](ws315/ws.md) | MG003 | Realtek の USB 2.5G・5G の NIC を独自の方式（vendor mode）の driver で速く（2026-10-30 ユーザー） | planning（q1694 P3 が p001 から） | WS221 p014（xHCI）と NCM の観察の後に p001 設計 |
+| [WS315](ws315/ws.md) | MG003 | Realtek の USB 2.5G・5G の NIC を独自の方式（vendor mode）の driver で速く（2026-10-30 ユーザー） | incomplete（p001・p002・p004・p005 cleared、p003 は 5330 の image の試験待ち） | WS221 p014（xHCI）と NCM の観察の後に p001 設計 |
 | [WS316](ws316/ws.md) | MG003 | 5330 の USB4 と AQC の 10GbE（2026-10-30 ユーザー） | planning | p001 の調べ（5330 の Debian で CM・AQC の見え方・IOMMU） |
 | [WS317](ws317/ws.md) | MG005 | hotplugd: hot-plug の device（PCIe・USB・ディスク）の承認と driver の開始・終了、volumed を置き換え（2026-10-30 ユーザー） | planning（今は取り組まない、ユーザー） | p001 の設計から |
 | [WS292](ws292/ws.md) | MG006 | GHCI の session の保護（PROT）を zedBSD の driver に（WS290 の後） | planning | p001 設計（WS290 と G29 の回答の後） |

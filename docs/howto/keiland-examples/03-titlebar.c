@@ -253,6 +253,8 @@ colours_draw(
 		} else {
 			kl_canvas_ring(&colours->canvas, x, y, DOT_RADIUS, 2.0f, 1.0f, theme->panel);
 		}
+
+		/* Moves on to the next dot. */
 		x += (float)DOT_SPACING;
 	}
 }
@@ -334,6 +336,7 @@ colours_input(
 			colours->current++;
 			colours_show(colours);
 		}
+
 		break;
 	case KL_WINDOW_CONTROL_TEXT:
 		/* The search field's text as it is typed: the first colour it names. */
@@ -342,6 +345,7 @@ colours_input(
 			colours->current = (size_t)found;
 			colours_show(colours);
 		}
+
 		break;
 	case KL_WINDOW_CONTROL_DONE:
 		/* The search ended (Enter, Escape or elsewhere): the field is emptied for the next one. */
@@ -372,6 +376,8 @@ colours_find(
 	size_t length;
 	size_t index;
 	size_t at;
+	int name_letter;
+	int text_letter;
 	int same;
 
 	/* An empty search names no colour. */
@@ -383,12 +389,15 @@ colours_find(
 	for (index = 0; index < COLOUR_COUNT; index++) {
 		same = 1;
 		for (at = 0; at < length; at++) {
-			if (colour_table[index].name[at] == '\0' ||
-			    tolower((unsigned char)colour_table[index].name[at]) != tolower((unsigned char)text[at])) {
+			name_letter = tolower((unsigned char)colour_table[index].name[at]);
+			text_letter = tolower((unsigned char)text[at]);
+			if (colour_table[index].name[at] == '\0' || name_letter != text_letter) {
 				same = 0;
 				break;
 			}
 		}
+
+		/* Answers with the first colour whose name the text starts. */
 		if (same)
 			return (long)index;
 	}

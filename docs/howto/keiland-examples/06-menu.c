@@ -157,6 +157,8 @@ main(void)
 		fprintf(stderr, "counter: no font %s (%s)\n", FONT, strerror(status));
 		return 1;
 	}
+
+	/* Gives the widgets the font. */
 	counter.style.text = &counter.text;
 	counter.style.glass = 0;
 
@@ -388,6 +390,8 @@ counter_input(
 				fprintf(stderr, "counter: no context menu (%s)\n", strerror(status));
 			break;
 		}
+
+		/* Offers any other input to the widgets. */
 		taken = kl_ui_window_input(counter->ui, input);
 		if (taken)
 			counter->dirty = 1;
@@ -510,6 +514,8 @@ counter_states(
 		small = 0U;
 		large = KL_ACTION_CHECKED;
 	}
+
+	/* Tells the desktop which size is checked. */
 	(void)kl_window_set_action_state(counter->window, ACTION_SMALL, small);
 	(void)kl_window_set_action_state(counter->window, ACTION_LARGE, large);
 

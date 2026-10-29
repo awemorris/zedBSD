@@ -318,6 +318,8 @@ preview_picture_cancel(
 		(void)close(pending->output->fd);
 		free(pending->output);
 	}
+
+	/* The output is gone. */
 	pending->output = NULL;
 }
 

@@ -133,6 +133,8 @@ main(void)
 		fprintf(stderr, "greeter: no font %s (%s)\n", FONT, strerror(status));
 		return 1;
 	}
+
+	/* Gives the widgets the font. */
 	greeter.style.text = &greeter.text;
 	greeter.style.glass = 0;
 
@@ -402,6 +404,8 @@ greeter_swatches(
 		} else if ((hit & KL_HIT_HOT) != 0U) {
 			kl_canvas_round_border(&greeter->canvas, (float)rect.x - 3.0f, (float)rect.y - 3.0f, (float)rect.width + 6.0f, (float)rect.height + 6.0f, 10.0f, 1.0f, theme->separator);
 		}
+
+		/* Moves on to the next swatch. */
 		rect.x += SWATCH_SIZE + 12;
 	}
 }
@@ -481,6 +485,8 @@ greeter_input(
 		greeter->resized = 1;
 		return;
 	}
+
+	/* The close button ends the program. */
 	if (input->kind == KL_WINDOW_CLOSE) {
 		greeter->closed = 1;
 		return;

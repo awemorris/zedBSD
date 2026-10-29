@@ -341,9 +341,13 @@ counter_frame(
 			counter->lit = 0;
 			return 0;
 		}
+
+		/* A whole-window frame means everything is drawn again. */
 		if (need == KL_FRAME_WHOLE)
 			count = 0U;
 	}
+
+	/* Takes the frame's work as done. */
 	counter->dirty = 0;
 	counter->lit = 0;
 

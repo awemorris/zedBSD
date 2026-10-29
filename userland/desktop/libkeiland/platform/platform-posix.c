@@ -175,8 +175,13 @@ keiui_lock_give(
 keiui_thread_id
 keiui_thread_self(void)
 {
-	/* The POSIX thread. */
-	return pthread_self();
+	pthread_t self;
+
+	/* Asks the system for the calling thread. */
+	self = pthread_self();
+
+	/* The calling POSIX thread. */
+	return self;
 }
 
 /*

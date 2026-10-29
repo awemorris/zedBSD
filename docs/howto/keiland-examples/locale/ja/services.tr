@@ -1,0 +1,10 @@
+# The texts of 07-services.c in Japanese (domain services).  Installed as KEILAND_DATADIR/keiland/locale/ja/services.tr.
+msg	Services	サービス
+msg	Light	ライト
+msg	Dark	ダーク
+msg	Appearance: {1}	外観: {1}
+plural	{1} file opened	{1} files opened	開いたファイル {1} 件
+msg	Open...	開く...
+msg	Copy Path	パスをコピー
+msg	Notify	通知
+msg	Open	開く

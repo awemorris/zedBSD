@@ -94,6 +94,7 @@ static int process_find(const char *name, char **path);
 static int process_environment(const char *const *changes, char ***envp);
 static int process_arguments(const char *const *argv, char ***copy);
 static void process_launch_free(struct process_launch *launch);
+static void process_spawn_cleanup(int input[2], int output[2], int error_pipe[2]);
 static int process_spawn(struct kl_process *process, const struct process_launch *launch, const char *directory);
 static int process_spawn_terminal(struct kl_process *process, const struct process_launch *launch, const char *directory, unsigned columns, unsigned rows);
 static void process_child_terminal(const struct process_launch *launch, const char *directory);
@@ -132,10 +133,14 @@ keiui_child_start(
 		error = process_environment(options->environment, &launch.envp);
 	if (error == 0)
 		error = process_pipe(process->child.control);
+
+	/* Keeps the control pipe from blocking either side. */
 	if (error == 0) {
 		(void)fcntl(process->child.control[0], F_SETFL, O_NONBLOCK);
 		(void)fcntl(process->child.control[1], F_SETFL, O_NONBLOCK);
 	}
+
+	/* Gives up when something the child needs could not be made. */
 	if (error != 0) {
 		process_launch_free(&launch);
 		process_close(&process->child.control[0]);
@@ -148,7 +153,11 @@ keiui_child_start(
 		error = process_spawn_terminal(process, &launch, options->directory, options->columns, options->rows);
 	else
 		error = process_spawn(process, &launch, options->directory);
+
+	/* Frees what the child was started with; it has its own copy now. */
 	process_launch_free(&launch);
+
+	/* Gives up when the child could not be started. */
 	if (error != 0) {
 		process_close(&process->child.control[0]);
 		process_close(&process->child.control[1]);
@@ -393,6 +402,8 @@ keiui_launch_start(
 		process_close(&report[1]);
 		return error;
 	}
+
+	/* Runs the program's launch in the child; it never comes back. */
 	if (child == 0)
 		process_child_launch(&launch, options->directory, report[1]);
 
@@ -433,6 +444,7 @@ process_find(
 	const char *search;
 	const char *start;
 	const char *end;
+	const char *slash;
 	size_t length;
 	size_t name_length;
 	char *candidate;
@@ -441,7 +453,8 @@ process_find(
 
 	/* A path. */
 	*path = NULL;
-	if (strchr(name, '/') != NULL) {
+	slash = strchr(name, '/');
+	if (slash != NULL) {
 		status = access(name, X_OK);
 		if (status != 0)
 			return errno;
@@ -478,17 +491,26 @@ process_find(
 		status = access(candidate, X_OK);
 		if (status == 0) {
 			*path = candidate;
-			return 0;
+			error = 0;
+			break;
 		}
+
+		/* Remembers that a program was found there but may not be run. */
 		if (errno == EACCES)
 			error = EACCES;
+
+		/* Gives up this directory, and stops after the last one. */
 		free(candidate);
 		if (*end == '\0')
 			break;
 	}
 
-	/* Not found (or found and not to be run). */
-	return error;
+	/* Reports a program that was not found (or found and not to be run). */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the program's path is allocated. */
+	return 0;
 }
 
 /*
@@ -543,6 +565,7 @@ process_environment(
 	size_t used;
 	char **made;
 	int replaced;
+	int same;
 
 	/* How many there may be. */
 	for (inherited = 0; environ != NULL && environ[inherited] != NULL; inherited++)
@@ -562,18 +585,25 @@ process_environment(
 			length = strlen(changes[change]);
 			if (equals != NULL)
 				length = (size_t)(equals - changes[change]);
-			if (strncmp(environ[index], changes[change], length) == 0 && environ[index][length] == '=') {
+			same = strncmp(environ[index], changes[change], length);
+			if (same == 0 && environ[index][length] == '=') {
 				replaced = 1;
 				break;
 			}
 		}
+
+		/* Leaves out a variable a change names. */
 		if (replaced)
 			continue;
+
+		/* Copies the variable into the child's environment. */
 		made[used] = strdup(environ[index]);
 		if (made[used] == NULL) {
 			*envp = made;
 			return ENOMEM;
 		}
+
+		/* Counts the copy made. */
 		used++;
 	}
 
@@ -582,11 +612,15 @@ process_environment(
 		equals = strchr(changes[change], '=');
 		if (equals == NULL)
 			continue;
+
+		/* Copies the change into the child's environment. */
 		made[used] = strdup(changes[change]);
 		if (made[used] == NULL) {
 			*envp = made;
 			return ENOMEM;
 		}
+
+		/* Counts the copy made. */
 		used++;
 	}
 
@@ -644,13 +678,21 @@ process_spawn(
 		error = process_pipe(output);
 	if (error == 0 && (process->streams & KL_PROCESS_ERROR) != 0U)
 		error = process_pipe(error_pipe);
-	if (error != 0)
-		goto fail;
+
+	/* Gives up when a pipe could not be made. */
+	if (error != 0) {
+		process_spawn_cleanup(input, output, error_pipe);
+		return error;
+	}
 
 	/* The child's descriptors: the pipes' ends, the null device, nothing else. */
 	error = posix_spawn_file_actions_init(&actions);
-	if (error != 0)
-		goto fail;
+	if (error != 0) {
+		process_spawn_cleanup(input, output, error_pipe);
+		return error;
+	}
+
+	/* Gives the program its input: the pipe, or the null device. */
 	if (input[0] >= 0)
 		error = posix_spawn_file_actions_adddup2(&actions, input[0], STDIN_FILENO);
 	else
@@ -667,10 +709,15 @@ process_spawn(
 	/* Every signal's default action, none blocked. */
 	if (error == 0)
 		error = posix_spawnattr_init(&attributes);
+
+	/* Gives up when the child's attributes could not be made. */
 	if (error != 0) {
 		(void)posix_spawn_file_actions_destroy(&actions);
-		goto fail;
+		process_spawn_cleanup(input, output, error_pipe);
+		return error;
 	}
+
+	/* Sets every signal to its default action and none blocked. */
 	(void)sigfillset(&defaults);
 	(void)sigdelset(&defaults, SIGKILL);
 	(void)sigdelset(&defaults, SIGSTOP);
@@ -684,10 +731,16 @@ process_spawn(
 	/* The child. */
 	if (error == 0)
 		error = posix_spawn(&pid, launch->path, &actions, &attributes, launch->argv, launch->envp);
+
+	/* Frees the attributes and the descriptor actions, which the child has copied. */
 	(void)posix_spawnattr_destroy(&attributes);
 	(void)posix_spawn_file_actions_destroy(&actions);
-	if (error != 0)
-		goto fail;
+
+	/* Gives up when the child could not be started. */
+	if (error != 0) {
+		process_spawn_cleanup(input, output, error_pipe);
+		return error;
+	}
 
 	/* The child's ends close here; the application's do not block. */
 	process_close(&input[0]);
@@ -706,15 +759,22 @@ process_spawn(
 
 	/* Succeeded: it runs. */
 	return 0;
+}
 
-fail:
+/* Closes the pipes of a child that could not be started. */
+static void
+process_spawn_cleanup(
+	int input[2],
+	int output[2],
+	int error_pipe[2])
+{
+	/* Each end of each pipe. */
 	process_close(&input[0]);
 	process_close(&input[1]);
 	process_close(&output[0]);
 	process_close(&output[1]);
 	process_close(&error_pipe[0]);
 	process_close(&error_pipe[1]);
-	return error;
 }
 
 /*
@@ -772,12 +832,14 @@ process_child_terminal(
 	/* Every signal's default action, none blocked. */
 	process_child_signals();
 
-	/* The directory, nothing but the terminal open, and the program. */
+	/* Enters the directory. */
 	if (directory != NULL) {
 		status = chdir(directory);
 		if (status != 0)
 			_exit(127);
 	}
+
+	/* Leaves nothing open but the terminal, and runs the program. */
 	closefrom(STDERR_FILENO + 1);
 	(void)execve(launch->path, launch->argv, launch->envp);
 	_exit(127);
@@ -820,9 +882,11 @@ process_child_launch(
 		report = STDERR_FILENO + 1;
 		(void)fcntl(report, F_SETFD, FD_CLOEXEC);
 	}
+
+	/* Leaves nothing else open. */
 	closefrom(report + 1);
 
-	/* An empty input. */
+	/* Gives the program an empty input. */
 	null_device = open(PROCESS_NULL_DEVICE, O_RDONLY);
 	if (null_device < 0)
 		process_child_report(report, errno);
@@ -952,6 +1016,8 @@ process_wait_run(
 		process->how = KL_PROCESS_SIGNALED;
 		process->code = information.si_status;
 	}
+
+	/* Reaps the process while nobody signals it. */
 	do {
 		status = waitpid(pid, NULL, 0);
 	} while (status < 0 && errno == EINTR);
@@ -989,6 +1055,10 @@ process_io_run(
 	struct pollfd *input;
 	uint64_t drain_until;
 	unsigned used;
+	size_t output_room;
+	size_t error_room;
+	uint64_t now;
+	ssize_t got;
 	char bytes[64];
 	int timeout;
 	int closed;
@@ -1007,8 +1077,15 @@ process_io_run(
 
 		closed = process->closed;
 		reaped = process->reaped;
-		full = (process->child.output >= 0 && keiui_stream_room(&process->output) == 0U) ||
-		    (process->child.error >= 0 && keiui_stream_room(&process->error) == 0U);
+		output_room = keiui_stream_room(&process->output);
+		error_room = keiui_stream_room(&process->error);
+
+		/* A stream with no room stops the final read until the program reads it. */
+		full = 0;
+		if (process->child.output >= 0 && output_room == 0U)
+			full = 1;
+		else if (process->child.error >= 0 && error_room == 0U)
+			full = 1;
 
 		/* A terminal to hang up, and an input to close once written. */
 		if (process->child.hang_up && process->child.terminal >= 0) {
@@ -1016,6 +1093,8 @@ process_io_run(
 			process->output.ended = 1;
 			process->input_closed = 1;
 		}
+
+		/* An input whose writing is done closes. */
 		if (process->input_closing && process->input.count == 0U && process->child.input >= 0) {
 			process_close(&process->child.input);
 			process->input_closed = 1;
@@ -1034,27 +1113,33 @@ process_io_run(
 			output = &descriptors[used];
 			output->fd = process->child.terminal;
 			output->events = 0;
-			if (keiui_stream_room(&process->output) != 0U)
+			if (output_room != 0U)
 				output->events |= POLLIN;
 			if (process->input.count != 0U)
 				output->events |= POLLOUT;
 			output->revents = 0;
 			used++;
 		}
-		if (process->child.output >= 0 && keiui_stream_room(&process->output) != 0U) {
+
+		/* The output pipe, while its stream has room. */
+		if (process->child.output >= 0 && output_room != 0U) {
 			output = &descriptors[used];
 			output->fd = process->child.output;
 			output->events = POLLIN;
 			output->revents = 0;
 			used++;
 		}
-		if (process->child.error >= 0 && keiui_stream_room(&process->error) != 0U) {
+
+		/* The error pipe, while its stream has room. */
+		if (process->child.error >= 0 && error_room != 0U) {
 			error = &descriptors[used];
 			error->fd = process->child.error;
 			error->events = POLLIN;
 			error->revents = 0;
 			used++;
 		}
+
+		/* The input pipe, while input waits. */
 		if (process->child.input >= 0 && process->input.count != 0U) {
 			input = &descriptors[used];
 			input->fd = process->child.input;
@@ -1078,8 +1163,9 @@ process_io_run(
 			if (drain_until == 0U)
 				drain_until = process_now_ms() + PROCESS_DRAIN_MS;
 			timeout = 0;
-			if (process->child.terminal >= 0 && process_now_ms() < drain_until)
-				timeout = (int)(drain_until - process_now_ms());
+			now = process_now_ms();
+			if (process->child.terminal >= 0 && now < drain_until)
+				timeout = (int)(drain_until - now);
 			if (process->child.terminal < 0 && process->child.output < 0 && process->child.error < 0)
 				break;
 		}
@@ -1097,21 +1183,28 @@ process_io_run(
 
 		/* The control pipe's bytes. */
 		if ((descriptors[0].revents & POLLIN) != 0) {
-			while (read(process->child.control[0], bytes, sizeof(bytes)) > 0)
-				continue;
+			do {
+				got = read(process->child.control[0], bytes, sizeof(bytes));
+			} while (got > 0);
 		}
 
-		/* The output (a terminal's too), the error, and the input. */
+		/* A terminal is written to when it can take input. */
 		if (output != NULL && output->fd == process->child.terminal && (output->revents & POLLOUT) != 0)
 			process_io_write(process, &process->child.terminal);
+
+		/* The output (a terminal's too) is read when it has bytes or ended. */
 		if (output != NULL && (output->revents & (POLLIN | POLLHUP | POLLERR)) != 0) {
 			if (output->fd == process->child.terminal)
 				(void)process_io_read(process, &process->child.terminal, &process->output);
 			else
 				(void)process_io_read(process, &process->child.output, &process->output);
 		}
+
+		/* The error is read when it has bytes or ended. */
 		if (error != NULL && (error->revents & (POLLIN | POLLHUP | POLLERR)) != 0)
 			(void)process_io_read(process, &process->child.error, &process->error);
+
+		/* The input is written when its pipe can take bytes or broke. */
 		if (input != NULL && (input->revents & (POLLOUT | POLLHUP | POLLERR)) != 0)
 			process_io_write(process, &process->child.input);
 	}
@@ -1161,7 +1254,9 @@ process_io_read(
 	keiui_lock_take(&process->lock);
 
 	if (got > 0) {
-		empty = stream->count == 0U;
+		empty = 0;
+		if (stream->count == 0U)
+			empty = 1;
 		keiui_stream_put(stream, bytes, (size_t)got);
 		if (empty)
 			keiui_process_tell(process);
@@ -1195,6 +1290,7 @@ process_io_write(
 	ssize_t written;
 	size_t index;
 	size_t at;
+	size_t room;
 
 	/* A copy of what waits (taken out only once written). */
 	keiui_lock_take(&process->lock);
@@ -1221,15 +1317,18 @@ process_io_write(
 	/* What was written goes; a broken input drops the rest and refuses more. */
 	keiui_lock_take(&process->lock);
 
-	if (written > 0)
+	if (written > 0) {
 		(void)keiui_stream_take(&process->input, NULL, (size_t)written);
-	else {
+	} else {
 		(void)keiui_stream_take(&process->input, NULL, process->input.count);
 		process->input_closed = 1;
 		if (descriptor == &process->child.input)
 			process_close(descriptor);
 	}
-	if (process->input_wanted && keiui_stream_room(&process->input) != 0U) {
+
+	/* Tells the application of the room a short write wanted. */
+	room = keiui_stream_room(&process->input);
+	if (process->input_wanted && room != 0U) {
 		process->input_wanted = 0;
 		process->ready |= KL_PROCESS_READY_INPUT;
 		keiui_process_tell(process);

@@ -97,6 +97,8 @@ kl_app_open(
 		errno = error;
 		return NULL;
 	}
+
+	/* Opens the wake the posting threads ring. */
 	error = keiui_wake_open(&app->post_wake);
 	if (error != 0) {
 		keiui_lock_close(&app->post_lock);
@@ -104,6 +106,8 @@ kl_app_open(
 		errno = error;
 		return NULL;
 	}
+
+	/* Marks the posts' list, lock and wake as open, to be closed with the application. */
 	app->post_open = 1;
 
 	/* The app_id its windows get. */
@@ -222,6 +226,8 @@ kl_app_close(
 			app->post_first = post->next;
 			free(post);
 		}
+
+		/* Closes the wake and the lock. */
 		keiui_wake_close(&app->post_wake);
 		keiui_lock_close(&app->post_lock);
 	}
@@ -392,6 +398,8 @@ keiui_app_post_event(
 	own = keiui_thread_is(app->thread);
 	if (own) {
 		now = *event;
+
+		/* Queues the event now when no earlier post waits. */
 		keiui_lock_take(&app->post_lock);
 
 		queued = 0;
@@ -420,6 +428,8 @@ keiui_app_post_event(
 		app->post_first = post;
 		first = 1;
 	}
+
+	/* The new post is the list's end. */
 	app->post_last = post;
 
 	keiui_lock_give(&app->post_lock);
@@ -929,6 +939,8 @@ app_language_changed(
 		if (end == value || *end != '\0')
 			setting = 0;
 	}
+
+	/* Takes the language in. */
 	app_language_set(app, (int)setting);
 
 	/* The event, with the language's name. */
@@ -983,6 +995,7 @@ app_posts_move(
 	for (last = list; last->next != NULL; last = last->next)
 		continue;
 
+	/* Puts the rest back in front of what was posted meanwhile. */
 	keiui_lock_take(&app->post_lock);
 
 	last->next = app->post_first;
@@ -1089,8 +1102,13 @@ struct kl_app_event *
 keiui_app_slot(
 	struct kl_app *app)
 {
-	/* The slot. */
-	return app_slot(app);
+	struct kl_app_event *slot;
+
+	/* Takes the slot the queue offers. */
+	slot = app_slot(app);
+
+	/* The slot, or NULL when the queue is full. */
+	return slot;
 }
 
 /*

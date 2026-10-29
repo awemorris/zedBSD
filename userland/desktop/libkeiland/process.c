@@ -138,6 +138,8 @@ kl_process_write(
 		keiui_lock_give(&process->lock);
 		return EPIPE;
 	}
+
+	/* Puts what fits into the input stream. */
 	room = keiui_stream_room(&process->input);
 	taken = size;
 	if (taken > room)
@@ -626,6 +628,8 @@ keiui_stream_take(
 			memcpy(to, stream->bytes + stream->first, part);
 			to += part;
 		}
+
+		/* Moves the ring's start past the part taken. */
 		stream->first = (stream->first + part) % KL_PROCESS_BUFFER;
 		stream->count -= part;
 		size -= part;
@@ -708,6 +712,8 @@ process_line_end(
 			*found = 1;
 			return length;
 		}
+
+		/* Stops at the limit without an end. */
 		if (length == limit)
 			return limit;
 	}

@@ -6,7 +6,7 @@
  */
 
 /*
- * The asynchronous loader (plan/ws074/design.md §9): http and https
+ * The asynchronous loader: http and https
  * requests that never block the caller.  The loader runs them on a
  * network thread of its own; the caller hears that there is news through
  * its notify function (or waits for it, net_loader_wait) and takes it with
@@ -32,7 +32,7 @@
  * request again at its Location.  A request that makes no progress for
  * LOADER_TIMEOUT fails with ETIMEDOUT.
  *
- * Connections are kept (ws074-p058): a response that leaves its
+ * Connections are kept: a response that leaves its
  * connection open puts it in the loader's pool of idle connections, by
  * scheme, host and port, and the next request to the same place takes it
  * instead of connecting again (a kept connection the server has closed
@@ -1159,6 +1159,8 @@ loader_intake(
 			if (request->asked_cancel)
 				request->cancelled = 1;
 		}
+
+		/* Marks the asks as seen. */
 		loader->cancel_asked = 0;
 	}
 
@@ -1337,6 +1339,8 @@ loader_gather(
 			cut = 1;
 			break;
 		}
+
+		/* Watches this connection's socket. */
 		loader->fds[count].fd = request->descriptor;
 		loader->fds[count].events = request->wants;
 		loader->fds[count].revents = 0;
