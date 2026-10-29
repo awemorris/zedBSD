@@ -27,7 +27,7 @@
 | [ws327-p001](phase001/phase.md) | 設計（design.md、keiland_thread.h・keiland_socket.h の案、Win32 への写し方、移す app の一覧）、design-reviewer | cleared | — |
 | [ws327-p002](phase002/phase.md) | thread の層と host 試験（TSan） | cleared | p001 |
 | [ws327-p003](phase003/phase.md) | network の層と host 試験（loopback、IPv4・IPv6、poll）、zedBSD の guest で 1 回 | in-progress | p001 |
-| ws327-p004 | app の移行（Mailer の worker と network、Terminal・Installer・解説の例の thread など、p001 の一覧） | planning | p002・p003 |
+| [ws327-p004](phase004/phase.md) | app の移行（Mailer の worker と network、Terminal・Installer・解説の例の thread など、p001 の一覧） | in-progress | p002・p003 |
 | ws327-p005 | 解説（docs/howto/keiland-programming.md の 8 章などを新しい層に）と規約の全文の見直し | planning | p004 |
 | ws327-p006 | Win32 の実装（`thread-win32.c`・`socket-win32.c`）を書き mingw で cross compile（warning 0）、口が Windows で成り立つかの確かめ（決定 3、動作確認は不要） | planning | p005 |
 
@@ -36,3 +36,6 @@
 - 2026-10-30 Q1: 作成。
 - 2026-10-30 P2: p001 設計（[design.md](design.md)、review 18 件を反映、Q1 の答えは §12）・p002 thread（KL_VERSION 103）・p003 network（104）の
   実装と host 試験。次: p003 の zedBSD の guest での実行、p004 の app の移行（Mailer から）。
+- 2026-10-30 P2 ラップアップ（Q1 の指示: Phase を標準廉価実装手順の形に組み直してから再起動）。p003 は guest の実行が残り、p004 は Mailer の
+  `conn.c`・`tls.c`・`imap.c`・`mail.h` まで（`sync.c` が残り Mailer は build しない、[phase004](phase004/phase.md)）。guest の image の config は
+  `tests/config-amd64-guest.mk`（未 build）。p006（Win32）は未着手。
