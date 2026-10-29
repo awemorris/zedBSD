@@ -632,6 +632,30 @@ nvrtx_vk_gpu_retire(
 	ticket->submitted_us = 0U;
 }
 
+/*
+ * Reports whether the 3D state one of the session's runs leaves stays for
+ * its next run: the session has a channel of its own, which only its
+ * executor draws on (a lost channel takes no more runs).  The driver's
+ * work channel, shared with other sessions and the driver, keeps nothing.
+ */
+bool
+nvrtx_vk_gpu_state_kept(
+	void *owner)
+{
+	struct nvrtx_session *session;
+	struct nvrtx_work_channel *channel;
+
+	session = owner;
+
+	/* A channel of the session's own. */
+	channel = __atomic_load_n(&session->channel, __ATOMIC_ACQUIRE);
+	if (channel == NULL || channel == &session->node->gpu->work.driver)
+		return false;
+
+	/* Succeeded: its state is the executor's alone. */
+	return true;
+}
+
 /* Gives the session's newest run (no run before its first submission). */
 void
 nvrtx_vk_gpu_last(

@@ -242,6 +242,13 @@ nvrtx_vk_gpu_idle(void *owner)
 	return 0;
 }
 
+bool
+nvrtx_vk_gpu_state_kept(void *owner)
+{
+	(void)owner;
+	return false;
+}
+
 void
 nvrtx_vk_gpu_copied(void *owner, uint64_t bytes)
 {

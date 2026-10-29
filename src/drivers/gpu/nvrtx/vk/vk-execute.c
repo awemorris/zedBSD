@@ -153,12 +153,36 @@ struct execute_slot {
 	struct nvrtx_vk_ticket ticket;
 };
 
+/* The words nvrtx_exec_viewport() writes. */
+#define EXECUTE_VIEWPORT_BYTES		48U
+
+/*
+ * What draws one after another reuse: the viewport's words the last draw's
+ * viewport (viewport_in, as recorded) made (valid once viewport_bytes is
+ * not 0), and the pool handles of the textures (view and sampler) the
+ * fragment program sampled, each made in the push buffer counted by pools
+ * (execute_begin() counts each new one; the pools start empty there).
+ */
+struct execute_reuse {
+	uint32_t viewport_in[6];
+	uint8_t viewport[EXECUTE_VIEWPORT_BYTES];
+	size_t viewport_bytes;
+	uint32_t pools;
+	uint32_t texture_pools[NVRTX_VK_TEXTURES_MAX];
+	const void *texture_view[NVRTX_VK_TEXTURES_MAX];
+	const void *texture_sampler[NVRTX_VK_TEXTURES_MAX];
+	uint32_t texture_handle[NVRTX_VK_TEXTURES_MAX];
+};
+
 /*
  * The executor's own programs (a textured quad placed by push constants,
  * the draw-test draw's) and the session's slots.
  *
  * slot is the slot the push buffer is written in, cpu and va its views;
- * started says a push buffer is begun there and not yet submitted.  at is
+ * started says a push buffer is begun there and not yet submitted;
+ * class_ready that a run on the session's channel set the 3D class's
+ * initial state and the channel keeps it; reuse is what one draw leaves
+ * the next.  at is
  * where the push buffer goes on, constants, headers and samplers how much
  * of their parts the push buffer uses, draws and quads how many
  * application draws and own quads it holds (for the node's counts).  The
@@ -176,6 +200,7 @@ struct nvrtx_vk_execute {
 	uint32_t draws;
 	uint32_t quads;
 	bool started;
+	bool class_ready;
 	void *program_token;
 	uint8_t *program_cpu;
 	uint64_t program_va;
@@ -187,6 +212,7 @@ struct nvrtx_vk_execute {
 	void *shadow_token;
 	uint64_t shadow_va;
 	uint64_t shadow_bytes;
+	struct execute_reuse reuse;
 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
 	uint32_t shader_model;
 	uint32_t threed_class;
@@ -615,8 +641,10 @@ execute_start(
 
 /*
  * Begins a push buffer in the current slot: the 3D class's state a queue
- * starts with, the header and sampler pools, and the shader caches
- * emptied; nothing of the slot's parts is used yet.
+ * starts with (once on a channel that keeps it from one run to the next;
+ * its vertex stream substitute is the first slot's zero page, which lives
+ * as long as the session's runs), the header and sampler pools, and the
+ * shader caches emptied; nothing of the slot's parts is used yet.
  *
  * Procedure referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_queue.c
  * (nvk_queue_init_context_state) and src/nouveau/vulkan/nvk_cmd_draw.c
@@ -630,14 +658,17 @@ execute_begin(
 
 	/* The state and the pools. */
 	push = execute->cpu + EXECUTE_PUSH_AT;
-	execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
+	execute->at = 0U;
+	if (!execute->class_ready)
+		execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
 	execute->at = nvrtx_push_draw_textures(push, execute->at, execute->va + EXECUTE_HEADERS_AT, EXECUTE_POOL_ENTRIES,
 					       execute->va + EXECUTE_SAMPLERS_AT, EXECUTE_POOL_ENTRIES);
 
 	/* The programs and constants the CPU wrote since the last run are read anew, once for every draw of this push buffer. */
 	execute->at = nvrtx_push_draw_invalidate(push, execute->at);
 
-	/* Nothing of the parts is used. */
+	/* Nothing of the parts is used: no texture handle of an earlier push buffer is good here. */
+	execute->reuse.pools++;
 	execute->constants = 0U;
 	execute->headers = 0U;
 	execute->samplers = 0U;
@@ -665,8 +696,9 @@ execute_submit(
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the GPU runs it. */
+	/* Succeeded: the GPU runs it; the class's state it set stays for the next run on a channel that keeps it. */
 	execute->started = false;
+	execute->class_ready = nvrtx_vk_gpu_state_kept(session->owner);
 	return 0;
 }
 
@@ -1122,6 +1154,7 @@ execute_draw(
 	const struct nvrtx_vk_record *record)
 {
 	const struct nvrtx_vk_pipeline *pipeline;
+	struct execute_reuse *reuse;
 	struct nvrtx_exec_vertex vertex;
 	struct nvrtx_exec_blend blend;
 	struct nvrtx_exec_depth depth;
@@ -1194,7 +1227,13 @@ execute_draw(
 		y1 = (int32_t)state->target.height;
 	if (x1 <= x0 || y1 <= y0)
 		return 0;
-	execute->at = nvrtx_exec_viewport(push, execute->at, viewport);
+	reuse = &execute->reuse;
+	if (reuse->viewport_bytes == 0U || kern_memcmp(reuse->viewport_in, viewport, sizeof(reuse->viewport_in)) != 0) {
+		kern_memcpy(reuse->viewport_in, viewport, sizeof(reuse->viewport_in));
+		reuse->viewport_bytes = nvrtx_exec_viewport(reuse->viewport, 0U, viewport);
+	}
+	kern_memcpy(push + execute->at, reuse->viewport, reuse->viewport_bytes);
+	execute->at += reuse->viewport_bytes;
 	execute->at = nvrtx_exec_scissor(push, execute->at, (uint32_t)x0, (uint32_t)y0, (uint32_t)x1, (uint32_t)y1);
 
 	/* The culling, the depth test when the pass has a depth target, and the stencil test when it has a stencil. */
@@ -1307,7 +1346,8 @@ execute_uniforms(
 /*
  * Writes the handles of the fragment program's sampled images into a
  * draw's constants: each one's header and sampler from the bound set's
- * binding.  A binding with nothing bound refuses the draw.
+ * binding, put in the pools once a push buffer for a view and a sampler.
+ * A binding with nothing bound refuses the draw.
  */
 static int
 execute_textures(
@@ -1318,6 +1358,7 @@ execute_textures(
 	const struct nvrtx_vk_program *program;
 	const struct nvrtx_vk_descriptor_set *set;
 	const struct nvrtx_vk_descriptor_slot *slot;
+	struct execute_reuse *reuse;
 	uint32_t handle;
 	uint32_t index;
 	int error;
@@ -1332,10 +1373,22 @@ execute_textures(
 		if (slot->view == NULL || slot->sampler == NULL)
 			return EINVAL;
 
-		/* Its handle at its slot. */
-		error = execute_texture(execute, slot->view->payload, slot->sampler->payload, &handle);
-		if (error != 0)
-			return error;
+		/* Its handle at its slot: the one an earlier draw of this push buffer made for the same view and sampler, or a new one. */
+		reuse = &execute->reuse;
+		if (index < NVRTX_VK_TEXTURES_MAX && reuse->texture_pools[index] == reuse->pools &&
+		    reuse->texture_view[index] == slot->view->payload && reuse->texture_sampler[index] == slot->sampler->payload) {
+			handle = reuse->texture_handle[index];
+		} else {
+			error = execute_texture(execute, slot->view->payload, slot->sampler->payload, &handle);
+			if (error != 0)
+				return error;
+			if (index < NVRTX_VK_TEXTURES_MAX) {
+				reuse->texture_pools[index] = reuse->pools;
+				reuse->texture_view[index] = slot->view->payload;
+				reuse->texture_sampler[index] = slot->sampler->payload;
+				reuse->texture_handle[index] = handle;
+			}
+		}
 		nvrtx_put32(constants, NVRTX_SM75_CB_TEXTURES + index * 4U, handle);
 	}
 

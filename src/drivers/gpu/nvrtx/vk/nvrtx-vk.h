@@ -211,6 +211,14 @@ void nvrtx_vk_gpu_last(void *owner, struct nvrtx_vk_ticket *ticket);
 int nvrtx_vk_gpu_idle(void *owner);
 
 /*
+ * Tells whether the 3D state a run of the owner's leaves on its channel is
+ * still there for its next run (no other work draws on the channel), so
+ * the class's initial state need not be written again (provided by the
+ * node).
+ */
+bool nvrtx_vk_gpu_state_kept(void *owner);
+
+/*
  * Counts a transfer the CPU did through the window instead of the GPU, for
  * the node's counts (provided by the node).
  */
