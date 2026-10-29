@@ -1,7 +1,9 @@
 // The web platform pieces that are written in the page's own language (ws074-p230).
 // bind/prelude.c holds this text as a C string; this file is the readable source it is made from.
-(function (parseURL, g) {
+// It is a function of the natives (parseURL, setURL, scrollToFragment, fire, setHyperlinkFollower, nodeRect) and the global object.
+(function (native, g) {
   'use strict';
+  var parseURL = native.parseURL;
   function def(o, name, f) { Object.defineProperty(o, name, { value: f, writable: true, configurable: true, enumerable: false }); }
   function hidden(o, name, v) { Object.defineProperty(o, name, { value: v, writable: true, configurable: true, enumerable: false }); }
   function tag(C, name) { Object.defineProperty(C.prototype, Symbol.toStringTag, { value: name, configurable: true }); }
@@ -319,7 +321,7 @@
     def(g, 'Intl', Intl_);
   }
 
-  // ---- matchMedia, history, MessageChannel
+  // ---- matchMedia, MessageChannel
   if (!g.matchMedia) {
     def(g, 'matchMedia', function matchMedia(q) {
       q = String(q);
@@ -333,15 +335,6 @@
       if (/^\(\s*(any-)?pointer\s*:\s*fine\s*\)$/.test(q)) m.matches = true;
       return m;
     });
-  }
-  if (!g.history) {
-    var hist = {
-      length: 1, state: null, scrollRestoration: 'auto',
-      pushState: function (s) { hist.state = s === undefined ? null : s; },
-      replaceState: function (s) { hist.state = s === undefined ? null : s; },
-      back: function () {}, forward: function () {}, go: function () {}
-    };
-    def(g, 'history', hist);
   }
   class MessagePort extends EventTarget {
     constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); super(); this.onmessage = null; hidden(this, '_peer', null); hidden(this, '_open', true); }
@@ -371,11 +364,805 @@
     });
     def(g, 'cancelIdleCallback', function cancelIdleCallback(id) { clearTimeout(id); });
   }
+  // ---- Session history: History, Location's navigation and the Navigation API
+  // (https://html.spec.whatwg.org/multipage/nav-history-apis.html).  Every entry is of this document: a navigation to
+  // another document fires its navigate event and, unless a listener intercepts it, is not carried out here.
+  if (typeof document !== 'undefined' && g.location && !g.navigation) (function () {
+    var LocationProto = Object.getPrototypeOf(g.location);
+    var hrefGetter = Object.getOwnPropertyDescriptor(LocationProto, 'href').get;
+    var then = Promise.prototype.then;
+    function docURL() { return hrefGetter.call(g.location); }
+    function noFrag(u) { var i = u.indexOf('#'); return i < 0 ? u : u.slice(0, i); }
+    function frag(u) { var i = u.indexOf('#'); return i < 0 ? null : u.slice(i + 1); }
+    // The errors the browser makes (not a script's) are told apart for navigateerror's filename.
+    var browserErrors = new WeakSet();
+    function domError(name, message) { var e = new DOMException(message, name); browserErrors.add(e); return e; }
+    function abortError() { return domError('AbortError', 'The navigation was aborted.'); }
+    // A serialized state is { v: copy } (null is no state); each read is a fresh copy.
+    function serialize(v) { return { v: structuredClone(v) }; }
+    function deserialize(s) { return s ? structuredClone(s.v) : undefined; }
+    function uuid() {
+      if (g.crypto && typeof g.crypto.randomUUID === 'function') return g.crypto.randomUUID();
+      return 'xxxxxxxx-xxxx-4xxx-yxxx-xxxxxxxxxxxx'.replace(/[xy]/g, function (c) {
+        var r = Math.random() * 16 | 0;
+        return (c === 'x' ? r : (r & 3 | 8)).toString(16);
+      });
+    }
+    function deferred() {
+      var d = {};
+      d.promise = new Promise(function (resolve, reject) { d.resolve = resolve; d.reject = reject; });
+      return d;
+    }
+    function markHandled(p) { then.call(p, undefined, function () {}); return p; }
+    function baseURL() {
+      var b = document.querySelector('base[href]');
+      if (b) { try { return new URL(b.getAttribute('href'), docURL()).href; } catch (e) { /* the document's URL */ } }
+      return docURL();
+    }
+    function resolveURL(u) { try { return new URL(String(u), baseURL()).href; } catch (e) { return null; } }
+    // Whether the document's URL can become u without loading another document.
+    function canRewrite(u) {
+      var a, b;
+      try { a = new URL(u); b = new URL(docURL()); } catch (e) { return false; }
+      if (a.protocol !== b.protocol || a.username !== b.username || a.password !== b.password || a.host !== b.host) return false;
+      if (a.protocol === 'http:' || a.protocol === 'https:') return true;
+      if (a.protocol === 'file:' && a.pathname !== b.pathname) return false;
+      return true;
+    }
+    function enumValue(v, values, what) {
+      v = String(v);
+      if (values.indexOf(v) < 0) throw new TypeError("The provided value '" + v + "' is not a valid enum value of type " + what + '.');
+      return v;
+    }
+    function dictionary(o, what) {
+      if (o === undefined || o === null) return {};
+      if (typeof o !== 'object' && typeof o !== 'function') throw new TypeError("The provided value is not of type '" + what + "'.");
+      return o;
+    }
+    // An event handler IDL attribute (onnavigate and the like) over one listener.
+    function handlerAttribute(proto, type) {
+      Object.defineProperty(proto, 'on' + type, {
+        get: function () { var h = this._handlers && this._handlers[type]; return h ? h.f : null; },
+        set: function (v) {
+          var self = this, h;
+          if (!this._handlers) hidden(this, '_handlers', {});
+          h = this._handlers[type];
+          if (typeof v !== 'function' && (typeof v !== 'object' || v === null)) v = null;
+          if (v === null) {
+            if (h) { this.removeEventListener(type, h.l); delete this._handlers[type]; }
+            return;
+          }
+          if (h) { h.f = v; return; }
+          h = { f: v, l: null };
+          h.l = function (e) {
+            if (typeof h.f !== 'function') return;
+            if (h.f.call(self, e) === false) e.preventDefault();
+          };
+          this._handlers[type] = h;
+          this.addEventListener(type, h.l);
+        },
+        configurable: true, enumerable: true
+      });
+    }
+
+    // The session history entries of this document, oldest first, and the current one.
+    var entries = [];
+    var current = 0;
+    var classicState = null;
+    function makeEntry(url, navState, classic, from) {
+      return { url: url, key: uuid(), id: uuid(), navState: navState, classic: classic, scroll: null,
+        scrollMode: from ? from.scrollMode : 'auto', nhe: null };
+    }
+    // The first entry follows the document's URL until it is left (the URL is set after this runs).
+    var loadedURL = null;
+    function urlOf(entry) { return entry.url === null ? docURL() : entry.url; }
+    function leave(entry) {
+      if (entry.url === null) { entry.url = docURL(); loadedURL = entry.url; }
+      saveScroll(entry);
+    }
+    function findEntry(key) {
+      for (var i = 0; i < entries.length; i++) if (entries[i].key === key) return entries[i];
+      return null;
+    }
+
+    class NavigationHistoryEntry extends EventTarget {
+      constructor(key, entry) {
+        if (key !== KEY) throw new TypeError('Illegal constructor');
+        super();
+        hidden(this, '_e', entry);
+      }
+      get url() { return urlOf(this._e); }
+      get key() { return this._e.key; }
+      get id() { return this._e.id; }
+      get index() { return entries.indexOf(this._e); }
+      get sameDocument() { return true; }
+      getState() { return deserialize(this._e.navState); }
+    }
+    handlerAttribute(NavigationHistoryEntry.prototype, 'dispose');
+    tag(NavigationHistoryEntry, 'NavigationHistoryEntry');
+    function nhe(entry) {
+      if (!entry.nhe) entry.nhe = new NavigationHistoryEntry(KEY, entry);
+      return entry.nhe;
+    }
+
+    class NavigationDestination {
+      constructor(key, d) {
+        if (key !== KEY) throw new TypeError('Illegal constructor');
+        hidden(this, '_d', d);
+      }
+      get url() { return this._d.url; }
+      get key() { return this._d.entry ? this._d.entry.key : ''; }
+      get id() { return this._d.entry ? this._d.entry.id : ''; }
+      get index() { return this._d.index; }
+      get sameDocument() { return this._d.sameDocument; }
+      getState() { return deserialize(this._d.navState); }
+    }
+    tag(NavigationDestination, 'NavigationDestination');
+
+    class NavigationTransition {
+      constructor(key, type, from) {
+        if (key !== KEY) throw new TypeError('Illegal constructor');
+        hidden(this, '_type', type);
+        hidden(this, '_from', from);
+        hidden(this, '_c', deferred());
+        hidden(this, '_f', deferred());
+        markHandled(this._f.promise);
+      }
+      get navigationType() { return this._type; }
+      get from() { return this._from; }
+      get committed() { return this._c.promise; }
+      get finished() { return this._f.promise; }
+    }
+    tag(NavigationTransition, 'NavigationTransition');
+
+    class NavigationActivation {
+      constructor(key, from, entry, type) {
+        if (key !== KEY) throw new TypeError('Illegal constructor');
+        hidden(this, '_from', from);
+        hidden(this, '_entry', entry);
+        hidden(this, '_type', type);
+      }
+      get from() { return this._from; }
+      get entry() { return this._entry; }
+      get navigationType() { return this._type; }
+    }
+    tag(NavigationActivation, 'NavigationActivation');
+
+    var TYPES = ['push', 'replace', 'reload', 'traverse'];
+    class NavigateEvent extends Event {
+      constructor(type, init) {
+        if (arguments.length < 2) throw new TypeError("Failed to construct 'NavigateEvent': 2 arguments required.");
+        init = dictionary(init, 'NavigateEventInit');
+        if (!(init.destination instanceof NavigationDestination)) {
+          throw new TypeError("Failed to construct 'NavigateEvent': required member destination is not a NavigationDestination.");
+        }
+        if (!(init.signal instanceof AbortSignal)) throw new TypeError("Failed to construct 'NavigateEvent': required member signal is not an AbortSignal.");
+        super(type, init);
+        hidden(this, '_i', {
+          navigationType: init.navigationType === undefined ? 'push' : enumValue(init.navigationType, TYPES, 'NavigationType'),
+          destination: init.destination,
+          canIntercept: !!init.canIntercept,
+          userInitiated: !!init.userInitiated,
+          hashChange: !!init.hashChange,
+          signal: init.signal,
+          formData: init.formData === undefined ? null : init.formData,
+          downloadRequest: init.downloadRequest === undefined || init.downloadRequest === null ? null : String(init.downloadRequest),
+          info: init.info,
+          hasUAVisualTransition: !!init.hasUAVisualTransition,
+          sourceElement: init.sourceElement === undefined ? null : init.sourceElement
+        });
+        hidden(this, '_n', null);
+      }
+      get navigationType() { return this._i.navigationType; }
+      get destination() { return this._i.destination; }
+      get canIntercept() { return this._i.canIntercept; }
+      get userInitiated() { return this._i.userInitiated; }
+      get hashChange() { return this._i.hashChange; }
+      get signal() { return this._i.signal; }
+      get formData() { return this._i.formData; }
+      get downloadRequest() { return this._i.downloadRequest; }
+      get info() { return this._i.info; }
+      get hasUAVisualTransition() { return this._i.hasUAVisualTransition; }
+      get sourceElement() { return this._i.sourceElement; }
+      intercept(options) {
+        var n = this._n, handler, focusReset, scroll;
+        options = dictionary(options, 'NavigationInterceptOptions');
+        handler = options.handler;
+        if (handler !== undefined && typeof handler !== 'function') throw new TypeError("Failed to execute 'intercept' on 'NavigateEvent': The handler is not a function.");
+        focusReset = options.focusReset === undefined ? undefined : enumValue(options.focusReset, ['after-transition', 'manual'], 'NavigationFocusReset');
+        scroll = options.scroll === undefined ? undefined : enumValue(options.scroll, ['after-transition', 'manual'], 'NavigationScrollBehavior');
+        sharedChecks(this, 'intercept');
+        if (!this.canIntercept) throw domError('SecurityError', "Failed to execute 'intercept' on 'NavigateEvent': The navigation cannot be intercepted.");
+        if (!n.dispatching) throw domError('InvalidStateError', "Failed to execute 'intercept' on 'NavigateEvent': intercept() may only be called while the navigate event is being dispatched.");
+        n.state = 'intercepted';
+        if (handler !== undefined) n.handlers.push(handler);
+        if (focusReset !== undefined) n.focusReset = focusReset;
+        if (scroll !== undefined) n.scroll = scroll;
+      }
+      scroll() {
+        sharedChecks(this, 'scroll');
+        if (this._n.state !== 'committed') throw domError('InvalidStateError', "Failed to execute 'scroll' on 'NavigateEvent': scroll() may only be called after the navigation commits and before it finishes or scrolls.");
+        processScroll(this);
+      }
+    }
+    tag(NavigateEvent, 'NavigateEvent');
+    function sharedChecks(event, method) {
+      if (!event._n) throw domError('SecurityError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was not fired by the browser.");
+      if (event.defaultPrevented || event._n.canceled) throw domError('InvalidStateError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was canceled.");
+    }
+
+    class NavigationCurrentEntryChangeEvent extends Event {
+      constructor(type, init) {
+        if (arguments.length < 2) throw new TypeError("Failed to construct 'NavigationCurrentEntryChangeEvent': 2 arguments required.");
+        init = dictionary(init, 'NavigationCurrentEntryChangeEventInit');
+        if (!(init.from instanceof NavigationHistoryEntry)) {
+          throw new TypeError("Failed to construct 'NavigationCurrentEntryChangeEvent': required member from is not a NavigationHistoryEntry.");
+        }
+        super(type, init);
+        hidden(this, '_type', init.navigationType === undefined || init.navigationType === null ? null : enumValue(init.navigationType, TYPES, 'NavigationType'));
+        hidden(this, '_from', init.from);
+      }
+      get navigationType() { return this._type; }
+      get from() { return this._from; }
+    }
+    tag(NavigationCurrentEntryChangeEvent, 'NavigationCurrentEntryChangeEvent');
+
+    // The navigation API's state: the navigate event under way, the transition, and the method trackers whose
+    // promises navigate(), reload(), traverseTo(), back() and forward() return.
+    var ongoingEvent = null;
+    var ongoingTracker = null;
+    var upcomingTracker = null;
+    var upcomingTraverse = new Map();
+    var transition = null;
+    var focusChanged = false;
+    var suppressScroll = false;
+    var loaded = false;
+    function makeTracker(info, navState, key) {
+      var t = { committed: deferred(), finished: deferred(), info: info, navState: navState, key: key, entry: null };
+      markHandled(t.finished.promise);
+      return t;
+    }
+    function trackerResult(t) { return { committed: t.committed.promise, finished: t.finished.promise }; }
+    function earlyError(e) { return { committed: Promise.reject(e), finished: Promise.reject(e) }; }
+    function cleanUp(t) {
+      if (ongoingTracker === t) ongoingTracker = null;
+      else if (t.key !== null && upcomingTraverse.get(t.key) === t) upcomingTraverse.delete(t.key);
+    }
+    function notifyCommitted(t, entry) {
+      t.entry = entry;
+      if (t.key === null && t.navState !== null) entry._e.navState = t.navState;
+      t.committed.resolve(entry);
+    }
+    function resolveFinished(t) { t.committed.resolve(t.entry); t.finished.resolve(t.entry); cleanUp(t); }
+    function rejectFinished(t, e) { t.committed.reject(e); t.finished.reject(e); cleanUp(t); }
+    function errorMessage(e) {
+      try { if (e instanceof Error) return 'Uncaught ' + String(e); } catch (x) { /* none */ }
+      return '';
+    }
+    // The events the browser fires are trusted.  A browser error is the document's; a script error's script is not
+    // known, so the document as it was loaded stands for it.
+    function fire(target, event) { return native.fire(target, event); }
+    function fireError(e) {
+      var filename = browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
+      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 0, colno: 0 }));
+    }
+
+    // Aborts the navigate event under way (a new navigation, window.stop(), a canceled event).
+    function abortOngoing(e) {
+      var event = ongoingEvent, n = event._n;
+      focusChanged = false;
+      suppressScroll = false;
+      if (e === undefined) e = abortError();
+      if (n.dispatching) { n.canceled = true; if (event.cancelable) event.preventDefault(); }
+      n.controller.abort(e);
+      ongoingEvent = null;
+      fireError(e);
+      if (ongoingTracker) rejectFinished(ongoingTracker, e);
+      if (transition) {
+        transition._c.reject(e);
+        transition._f.reject(e);
+        transition = null;
+      }
+    }
+
+    // Scrolling: an entry keeps where the page was scrolled when it was left, and a fragment navigation scrolls to its target.
+    function saveScroll(entry) { entry.scroll = [g.scrollX || 0, g.scrollY || 0]; }
+    function restoreScroll(entry) { if (entry.scroll) g.scrollTo(entry.scroll[0], entry.scroll[1]); }
+    function scrollToFragment(url, toTop) {
+      var f = frag(url), name;
+      if (f === null) { if (toTop) g.scrollTo(0, 0); return; }
+      if (native.scrollToFragment(f)) return;
+      try { name = decodeURIComponent(f); } catch (e) { name = f; }
+      if (toTop || f === '' || name.toLowerCase() === 'top') g.scrollTo(0, 0);
+    }
+    function processScroll(event) {
+      var n = event._n;
+      n.state = 'scrolled';
+      if (n.type === 'traverse' || n.type === 'reload') restoreScroll(entries[current]);
+      else scrollToFragment(docURL(), true);
+    }
+
+    // Focus: an intercepted navigation that finishes moves the focus to the autofocus candidate or the viewport,
+    // unless something moved it while the navigation was under way.
+    document.addEventListener('focusin', function () { if (ongoingEvent) focusChanged = true; }, true);
+    document.addEventListener('focusout', function () { if (ongoingEvent) focusChanged = true; }, true);
+    function resetFocus(n) {
+      var changed = focusChanged, list, i, active;
+      focusChanged = false;
+      if (changed || n.focusReset === 'manual') return;
+      list = document.querySelectorAll('[autofocus]');
+      for (i = 0; i < list.length; i++) {
+        if (list[i].disabled || typeof list[i].focus !== 'function') continue;
+        list[i].focus();
+        if (document.activeElement === list[i]) return;
+      }
+      active = document.activeElement;
+      if (active && active !== document.body && typeof active.blur === 'function') active.blur();
+    }
+    function finish(event, fulfilled) {
+      var n = event._n;
+      if (n.state === 'none') return;
+      resetFocus(n);
+      if (fulfilled && n.state !== 'scrolled' && n.scroll !== 'manual') processScroll(event);
+      n.state = 'finished';
+    }
+
+    // Changing the current entry: a pushed entry drops those after the current one, a replacing entry keeps
+    // its key; either way the entries that left are disposed of after currententrychange.
+    function putEntry(entry, handling) {
+      var disposed = [], removed, i;
+      if (handling === 'push') {
+        removed = entries.splice(current + 1);
+        for (i = 0; i < removed.length; i++) if (removed[i].nhe) disposed.push(removed[i].nhe);
+        entries.push(entry);
+        current = entries.length - 1;
+      } else {
+        entry.key = entries[current].key;
+        if (entries[current].nhe) disposed.push(entries[current].nhe);
+        entries[current] = entry;
+      }
+      return disposed;
+    }
+    function entriesChanged(from, type, disposed) {
+      var i;
+      if (ongoingTracker) notifyCommitted(ongoingTracker, nhe(entries[current]));
+      if (transition) transition._c.resolve();
+      fire(navigation, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: type, from: from }));
+      for (i = 0; i < disposed.length; i++) fire(disposed[i], new Event('dispose'));
+    }
+    function queueHashChange(oldURL, newURL) {
+      setTimeout(function () { fire(g, new HashChangeEvent('hashchange', { oldURL: oldURL, newURL: newURL })); }, 0);
+    }
+    // The URL and history update steps: pushState(), replaceState() and intercepted navigations.
+    function updateURLAndHistory(url, classic, handling) {
+      var old = entries[current], from = nhe(old), entry, disposed;
+      leave(old);
+      entry = makeEntry(url, null, classic !== null ? classic : old.classic, old);
+      disposed = putEntry(entry, handling);
+      nhe(entry);
+      if (classic !== null) classicState = deserialize(classic);
+      native.setURL(url);
+      entriesChanged(from, handling, disposed);
+    }
+    // A navigation to a fragment of this document.
+    function navigateToFragment(url, handling, navState) {
+      var old = entries[current], from = nhe(old), oldURL = docURL(), entry, disposed;
+      leave(old);
+      entry = makeEntry(url, navState !== null ? navState : old.navState, null, old);
+      disposed = putEntry(entry, handling);
+      nhe(entry);
+      classicState = null;
+      native.setURL(url);
+      entriesChanged(from, handling, disposed);
+      scrollToFragment(url, false);
+      if (frag(oldURL) !== frag(url)) queueHashChange(oldURL, url);
+    }
+    // A traversal to another entry of this document.
+    function commitTraverse(entry) {
+      var old = entries[current], from = nhe(old), oldURL = docURL();
+      leave(old);
+      current = entries.indexOf(entry);
+      native.setURL(entry.url);
+      classicState = entry.classic ? deserialize(entry.classic) : null;
+      entriesChanged(from, 'traverse', []);
+      fire(g, new PopStateEvent('popstate', { state: classicState, hasUAVisualTransition: false }));
+      if (entry.scrollMode === 'auto' && !suppressScroll) restoreScroll(entry);
+      if (frag(oldURL) !== frag(entry.url)) queueHashChange(oldURL, entry.url);
+    }
+
+    function waitForAll(list, success, failure) {
+      var left = list.length, rejected = false, i;
+      for (i = 0; i < list.length; i++) {
+        then.call(list[i], function () { if (--left === 0 && !rejected) success(); },
+          function (r) { if (rejected) return; rejected = true; failure(r); });
+      }
+    }
+    // Fires the navigate event of a navigation; o has the navigation's type, url, destination entry (a traversal),
+    // navigation API state, classic history state (pushState), sameDocument, hashChange, the source element and
+    // commit(), which carries out a navigation of this document that no listener intercepted.
+    function fireNavigate(o) {
+      var t, controller, event, n, dispatched, intercepted, from, promises, i;
+      if (ongoingEvent) abortOngoing();
+      if (o.type === 'traverse') {
+        t = upcomingTraverse.get(o.entry.key) || null;
+        if (t) upcomingTraverse.delete(o.entry.key);
+      } else {
+        t = upcomingTracker;
+        upcomingTracker = null;
+      }
+      ongoingTracker = t;
+      controller = new AbortController();
+      event = new NavigateEvent('navigate', {
+        cancelable: true,
+        navigationType: o.type,
+        destination: new NavigationDestination(KEY, { url: o.url, entry: o.entry || null, index: o.entry ? entries.indexOf(o.entry) : -1,
+          navState: o.navState, sameDocument: o.sameDocument }),
+        canIntercept: canRewrite(o.url) && (o.type !== 'traverse' || o.sameDocument),
+        userInitiated: false,
+        hashChange: !!o.hashChange,
+        signal: controller.signal,
+        formData: o.formData || null,
+        downloadRequest: o.downloadRequest === undefined ? null : o.downloadRequest,
+        info: t ? t.info : undefined,
+        sourceElement: o.sourceElement || null
+      });
+      n = { state: 'none', handlers: [], focusReset: null, scroll: null, controller: controller, dispatching: true, canceled: false, type: o.type };
+      event._n = n;
+      ongoingEvent = event;
+      focusChanged = false;
+      suppressScroll = false;
+      try { dispatched = fire(navigation, event); } finally { n.dispatching = false; }
+      if (!dispatched || n.canceled) {
+        if (!controller.signal.aborted) abortOngoing();
+        return;
+      }
+      intercepted = n.state !== 'none';
+      if (!intercepted && !o.sameDocument) {
+        // Another document: loading it is not carried out here.
+        if (t) cleanUp(t);
+        return;
+      }
+      if (intercepted) {
+        from = nhe(entries[current]);
+        transition = new NavigationTransition(KEY, o.type, from);
+        if (o.type === 'traverse') suppressScroll = true;
+        if (o.type === 'push' || o.type === 'replace') updateURLAndHistory(o.url, o.classic || serialize(null), o.type);
+        else if (o.type === 'reload') entriesChanged(from, 'reload', []);
+        else o.commit();
+        n.state = 'committed';
+      } else {
+        o.commit();
+      }
+      promises = [];
+      for (i = 0; i < n.handlers.length; i++) {
+        try { promises.push(Promise.resolve(n.handlers[i]())); } catch (e) { promises.push(Promise.reject(e)); }
+      }
+      if (!promises.length) promises.push(Promise.resolve());
+      waitForAll(promises, function () {
+        if (controller.signal.aborted) return;
+        if (ongoingEvent === event) ongoingEvent = null;
+        finish(event, true);
+        fire(navigation, new Event('navigatesuccess'));
+        if (t) resolveFinished(t);
+        if (transition) { transition._f.resolve(); transition = null; }
+      }, function (reason) {
+        if (controller.signal.aborted) return;
+        if (ongoingEvent === event) ongoingEvent = null;
+        controller.abort(reason);
+        finish(event, false);
+        fireError(reason);
+        if (t) rejectFinished(t, reason);
+        if (transition) { transition._f.reject(reason); transition = null; }
+      });
+    }
+
+    // The navigate algorithm for a URL: a fragment of this document is navigated to here; another document only
+    // gets its navigate event.
+    function navigateTo(url, o) {
+      var handling = o.history, now = docURL(), f;
+      if (/^javascript:/i.test(url)) return;
+      // A page that is not a local file cannot navigate to one.
+      if (/^file:/i.test(url) && !/^file:/i.test(now)) return;
+      if (handling === 'auto') handling = url === now ? 'replace' : 'push';
+      if (handling === 'reload') {
+        fireNavigate({ type: 'reload', url: url, navState: o.navState, sameDocument: false, sourceElement: o.sourceElement });
+        return;
+      }
+      f = frag(url);
+      if (f !== null && noFrag(url) === noFrag(now)) {
+        fireNavigate({ type: handling, url: url, navState: o.navState, sameDocument: true, hashChange: f !== frag(now),
+          sourceElement: o.sourceElement, commit: function () { navigateToFragment(url, handling, o.navState); } });
+        return;
+      }
+      fireNavigate({ type: handling, url: url, navState: o.navState, sameDocument: false, sourceElement: o.sourceElement,
+        formData: o.formData, downloadRequest: o.downloadRequest });
+    }
+    // Location's navigation: before the load event finishes, a new entry replaces the current one.
+    function locationNavigate(url, handling) {
+      if (handling === 'auto' && !loaded) handling = 'replace';
+      navigateTo(url, { history: handling, navState: null });
+    }
+    function locationReload() {
+      navigateTo(docURL(), { history: 'reload', navState: entries[current].navState });
+    }
+    g.addEventListener('load', function () { setTimeout(function () { loaded = true; }, 0); });
+
+    // A traversal runs as a task, like the browser's own back and forward.
+    function traverse(find) {
+      setTimeout(function () {
+        var entry = find(), t;
+        if (!entry) return;
+        t = upcomingTraverse.get(entry.key) || null;
+        if (entry === entries[current]) { if (t) resolveFinished(t); return; }
+        fireNavigate({ type: 'traverse', url: entry.url, entry: entry, navState: entry.navState, sameDocument: true,
+          hashChange: noFrag(entry.url) === noFrag(docURL()) && frag(entry.url) !== frag(docURL()),
+          commit: function () { commitTraverse(entry); } });
+      }, 0);
+    }
+    function traverseToKey(key, options) {
+      var entry = entries[current], t;
+      if (entry.key === key) return { committed: Promise.resolve(nhe(entry)), finished: Promise.resolve(nhe(entry)) };
+      t = upcomingTraverse.get(key);
+      if (t) return trackerResult(t);
+      t = makeTracker(options.info, null, key);
+      upcomingTraverse.set(key, t);
+      traverse(function () {
+        var target = findEntry(key);
+        if (!target && upcomingTraverse.get(key) === t) rejectFinished(t, domError('InvalidStateError', 'The entry to traverse to is no longer in the session history.'));
+        return target;
+      });
+      return trackerResult(t);
+    }
+
+    class Navigation extends EventTarget {
+      constructor(key) {
+        if (key !== KEY) throw new TypeError('Illegal constructor');
+        super();
+      }
+      entries() { return entries.map(nhe); }
+      get currentEntry() { return nhe(entries[current]); }
+      updateCurrentEntry(options) {
+        var state;
+        if (arguments.length < 1) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': 1 argument required.");
+        options = dictionary(options, 'NavigationUpdateCurrentEntryOptions');
+        if (options.state === undefined) throw new TypeError("Failed to execute 'updateCurrentEntry' on 'Navigation': required member state is undefined.");
+        state = serialize(options.state);
+        entries[current].navState = state;
+        fire(this, new NavigationCurrentEntryChangeEvent('currententrychange', { navigationType: null, from: nhe(entries[current]) }));
+      }
+      get transition() { return transition; }
+      get activation() { return activation; }
+      get canGoBack() { return current > 0; }
+      get canGoForward() { return current < entries.length - 1; }
+      navigate(url, options) {
+        var handling, u, state = null, t;
+        options = dictionary(options, 'NavigationNavigateOptions');
+        handling = options.history === undefined ? 'auto' : enumValue(options.history, ['auto', 'push', 'replace'], 'NavigationHistoryBehavior');
+        u = resolveURL(url);
+        if (u === null) return earlyError(domError('SyntaxError', "Failed to execute 'navigate' on 'Navigation': Invalid URL '" + String(url) + "'."));
+        if (/^javascript:/i.test(u)) return earlyError(domError('NotSupportedError', "Failed to execute 'navigate' on 'Navigation': A javascript: URL cannot be navigated to with navigate()."));
+        if (options.state !== undefined) {
+          try { state = serialize(options.state); } catch (e) { return earlyError(e); }
+        }
+        t = makeTracker(options.info, state, null);
+        upcomingTracker = t;
+        if (handling === 'auto' && !loaded) handling = 'replace';
+        navigateTo(u, { history: handling, navState: state });
+        if (upcomingTracker === t) { upcomingTracker = null; return earlyError(abortError()); }
+        return trackerResult(t);
+      }
+      reload(options) {
+        var state, t;
+        options = dictionary(options, 'NavigationReloadOptions');
+        state = entries[current].navState;
+        if (options.state !== undefined) {
+          try { state = serialize(options.state); } catch (e) { return earlyError(e); }
+        }
+        t = makeTracker(options.info, state, null);
+        upcomingTracker = t;
+        navigateTo(docURL(), { history: 'reload', navState: state });
+        if (upcomingTracker === t) { upcomingTracker = null; return earlyError(abortError()); }
+        return trackerResult(t);
+      }
+      traverseTo(key, options) {
+        if (arguments.length < 1) throw new TypeError("Failed to execute 'traverseTo' on 'Navigation': 1 argument required.");
+        key = String(key);
+        options = dictionary(options, 'NavigationOptions');
+        if (!findEntry(key)) return earlyError(domError('InvalidStateError', "Failed to execute 'traverseTo' on 'Navigation': Invalid key."));
+        return traverseToKey(key, options);
+      }
+      back(options) {
+        options = dictionary(options, 'NavigationOptions');
+        if (current <= 0) return earlyError(domError('InvalidStateError', "Failed to execute 'back' on 'Navigation': Cannot go back."));
+        return traverseToKey(entries[current - 1].key, options);
+      }
+      forward(options) {
+        options = dictionary(options, 'NavigationOptions');
+        if (current >= entries.length - 1) return earlyError(domError('InvalidStateError', "Failed to execute 'forward' on 'Navigation': Cannot go forward."));
+        return traverseToKey(entries[current + 1].key, options);
+      }
+    }
+    ['navigate', 'navigatesuccess', 'navigateerror', 'currententrychange'].forEach(function (type) { handlerAttribute(Navigation.prototype, type); });
+    tag(Navigation, 'Navigation');
+
+    class History {
+      constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
+      get length() { return entries.length; }
+      get state() { return classicState; }
+      get scrollRestoration() { return entries[current].scrollMode; }
+      set scrollRestoration(v) { v = String(v); if (v === 'auto' || v === 'manual') entries[current].scrollMode = v; }
+      go(delta) {
+        delta = delta === undefined ? 0 : Number(delta) | 0;
+        if (delta === 0) { locationReload(); return; }
+        traverse(function () { return entries[current + delta] || null; });
+      }
+      back() { this.go(-1); }
+      forward() { this.go(1); }
+      pushState(data, unused, url) {
+        if (arguments.length < 2) throw new TypeError("Failed to execute 'pushState' on 'History': 2 arguments required.");
+        pushOrReplace(data, url, 'push');
+      }
+      replaceState(data, unused, url) {
+        if (arguments.length < 2) throw new TypeError("Failed to execute 'replaceState' on 'History': 2 arguments required.");
+        pushOrReplace(data, url, 'replace');
+      }
+    }
+    tag(History, 'History');
+    function pushOrReplace(data, url, handling) {
+      var classic = serialize(data), target = docURL();
+      if (url !== undefined && url !== null) {
+        target = resolveURL(url);
+        if (target === null) throw domError('SyntaxError', "Failed to execute '" + handling + "State' on 'History': Invalid URL '" + String(url) + "'.");
+        if (!canRewrite(target)) {
+          throw domError('SecurityError', "Failed to execute '" + handling + "State' on 'History': A history state object with URL '" + target +
+            "' cannot be created in a document with URL '" + docURL() + "'.");
+        }
+      }
+      fireNavigate({ type: handling, url: target, navState: null, classic: classic, sameDocument: true, hashChange: false,
+        commit: function () { updateURLAndHistory(target, classic, handling); } });
+    }
+
+    // Location's setters and methods navigate (the getters read the document's URL).
+    function locationSetter(name, apply) {
+      Object.defineProperty(LocationProto, name, {
+        get: Object.getOwnPropertyDescriptor(LocationProto, name).get,
+        set: function (v) { apply(String(v)); },
+        configurable: true, enumerable: true
+      });
+    }
+    function invalid(u) { return domError('SyntaxError', "'" + u + "' is not a valid URL."); }
+    locationSetter('href', function (v) {
+      var u = resolveURL(v);
+      if (u === null) throw invalid(v);
+      locationNavigate(u, 'auto');
+    });
+    locationSetter('hash', function (v) {
+      var u, now = docURL();
+      if (v.charAt(0) === '#') v = v.slice(1);
+      u = resolveURL(noFrag(now) + '#' + v);
+      if (u === null || frag(u) === frag(now)) return;
+      locationNavigate(u, 'auto');
+    });
+    ['search', 'pathname', 'host', 'hostname', 'port', 'protocol'].forEach(function (name) {
+      locationSetter(name, function (v) {
+        var u = new URL(docURL());
+        u[name] = v;
+        if (name === 'protocol' && u.protocol !== 'http:' && u.protocol !== 'https:') return;
+        locationNavigate(u.href, 'auto');
+      });
+    });
+    def(LocationProto, 'assign', function assign(url) {
+      var u = resolveURL(url);
+      if (u === null) throw invalid(url);
+      locationNavigate(u, 'auto');
+    });
+    def(LocationProto, 'replace', function replace(url) {
+      var u = resolveURL(url);
+      if (u === null) throw invalid(url);
+      locationNavigate(u, 'replace');
+    });
+    def(LocationProto, 'reload', function reload() { locationReload(); });
+    (function () {
+      var loc = g.location, d = Object.getOwnPropertyDescriptor(g, 'location'), proto, dd;
+      if (d && d.configurable) {
+        Object.defineProperty(g, 'location', { get: function () { return loc; }, set: function (v) { loc.href = v; }, configurable: true, enumerable: true });
+      }
+      for (proto = document; proto && !Object.prototype.hasOwnProperty.call(proto, 'location'); proto = Object.getPrototypeOf(proto));
+      dd = proto ? Object.getOwnPropertyDescriptor(proto, 'location') : null;
+      if (dd && dd.get && dd.configurable) {
+        Object.defineProperty(proto, 'location', { get: dd.get, set: function (v) { var l = dd.get.call(this); if (l) l.href = v; },
+          configurable: true, enumerable: dd.enumerable });
+      }
+    })();
+
+    // A link a script clicks (an a or area element, or SVG's a) navigates; a download link only fires its navigate event.
+    native.setHyperlinkFollower(function (link) {
+      var svg = link.namespaceURI === 'http://www.w3.org/2000/svg', href, target, u, download;
+      href = link.getAttribute('href');
+      if (href === null && svg) href = link.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+      if (href === null || !link.isConnected) return;
+      target = link.getAttribute('target');
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
+      u = resolveURL(href);
+      if (u === null) return;
+      download = !svg && link.hasAttribute('download') ? link.getAttribute('download') : null;
+      if (download !== null) {
+        fireNavigate({ type: 'push', url: u, navState: null, sameDocument: false, sourceElement: link, downloadRequest: download });
+        return;
+      }
+      navigateTo(u, { history: 'auto', navState: null, sourceElement: link });
+    });
+
+    // A form's submission navigates to its action: GET with the entries as the query, POST with them as the
+    // navigate event's formData (before the load event finishes, in place of the current entry), as a task.  requestSubmit() fires the submit event first, which a listener may cancel.
+    function submitForm(form, submitter) {
+      function attr(name, own) {
+        return submitter && submitter.hasAttribute(name) ? submitter.getAttribute(name) : form.getAttribute(own);
+      }
+      var action = attr('formaction', 'action'), method = String(attr('formmethod', 'method') || 'get').toLowerCase();
+      var target = attr('formtarget', 'target'), u, data, query, source, handling;
+      if (!form.isConnected || method === 'dialog') return;
+      if (target !== null && !/^\s*(_self)?\s*$/i.test(target) && !(/^\s*_(top|parent)\s*$/i.test(target) && g.top === g)) return;
+      u = resolveURL(action === null || action === '' ? docURL() : action);
+      if (u === null) return;
+      data = typeof g.FormData === 'function' ? new g.FormData(form) : null;
+      if (data && submitter && submitter.name) data.append(submitter.name, submitter.value);
+      source = submitter || form;
+      handling = loaded ? 'auto' : 'replace';
+      if (method !== 'post') {
+        query = data ? new URLSearchParams(data).toString() : '';
+        u = noFrag(u).replace(/\?.*$/, '') + '?' + query;
+        data = null;
+      }
+      setTimeout(function () { navigateTo(u, { history: handling, navState: null, sourceElement: source, formData: data }); }, 0);
+    }
+    if (g.HTMLFormElement && !g.HTMLFormElement.prototype.submit) {
+      def(g.HTMLFormElement.prototype, 'submit', function submit() { submitForm(this, null); });
+      def(g.HTMLFormElement.prototype, 'requestSubmit', function requestSubmit(submitter) {
+        var event;
+        if (submitter !== undefined && submitter !== null) {
+          if (!/^(submit|image)$/.test(submitter.type) || !/^(button|input)$/.test(submitter.localName))
+            throw new TypeError("Failed to execute 'requestSubmit' on 'HTMLFormElement': The specified element is not a submit button.");
+          if (submitter.form !== this)
+            throw new DOMException("Failed to execute 'requestSubmit' on 'HTMLFormElement': The specified element is not owned by this form element.", 'NotFoundError');
+        } else {
+          submitter = null;
+        }
+        event = new (g.SubmitEvent || Event)('submit', { bubbles: true, cancelable: true, submitter: submitter });
+        if (fire(this, event)) submitForm(this, submitter);
+      });
+    }
+
+    // window.stop() aborts the navigation under way (loading the document is not stopped).
+    def(g, 'stop', function stop() { if (ongoingEvent) abortOngoing(); });
+
+    entries.push(makeEntry(null, null, null, null));
+    var navigation = new Navigation(KEY);
+    var activation = new NavigationActivation(KEY, null, nhe(entries[0]), 'push');
+    def(g, 'navigation', navigation);
+    def(g, 'history', new History(KEY));
+    [['Navigation', Navigation], ['NavigationHistoryEntry', NavigationHistoryEntry], ['NavigationDestination', NavigationDestination],
+      ['NavigationTransition', NavigationTransition], ['NavigationActivation', NavigationActivation], ['NavigateEvent', NavigateEvent],
+      ['NavigationCurrentEntryChangeEvent', NavigationCurrentEntryChangeEvent], ['History', History]].forEach(function (p) {
+      def(g, p[0], p[1]);
+    });
+  })();
   // ---- Small objects scripts probe for
   if (!('isSecureContext' in g)) def(g, 'isSecureContext', location.protocol === 'https:');
   if (!g.open) def(g, 'open', function open() { return null; });
   if (!g.close) def(g, 'close', function close() {});
   if (!g.focus) { def(g, 'focus', function focus() {}); def(g, 'blur', function blur() {}); }
+  // Node.baseURI: the document's first <base href> resolved against its URL, or the URL.
+  if (g.Node && !('baseURI' in g.Node.prototype)) {
+    Object.defineProperty(g.Node.prototype, 'baseURI', {
+      get: function () {
+        var d = this.ownerDocument || this, url = d.URL || location.href;
+        var base = d.querySelector ? d.querySelector('base[href]') : null;
+        try { return base ? new URL(base.getAttribute('href'), url).href : url; } catch (e) { return url; }
+      },
+      configurable: true, enumerable: true
+    });
+  }
   if (!g.getSelection) {
     def(g, 'getSelection', function getSelection() {
       return { rangeCount: 0, isCollapsed: true, type: 'None', anchorNode: null, focusNode: null,
@@ -392,6 +1179,234 @@
     PerformanceObserver.supportedEntryTypes = [];
     def(g, 'PerformanceObserver', PerformanceObserver);
   }
+  // ---- Largest Contentful Paint: after each frame that follows a change, the largest text or image painted so far
+  // (its visible area, an image's scaled down to its natural one) becomes an entry for the observers of the type.
+  (function () {
+    var Native = g.PerformanceObserver, Entry = g.PerformanceEntry;
+    if (typeof Native !== 'function' || g.LargestContentfulPaint) return;
+    var TYPE = 'largest-contentful-paint';
+    var buffer = [], observers = new Set(), largest = 0, active = false, scheduled = false;
+    var reported = new WeakMap(), loads = new WeakMap(), pictures = new Map();
+    class LargestContentfulPaint {
+      constructor(key) { if (key !== KEY) throw new TypeError('Illegal constructor'); }
+      get name() { return ''; }
+      get entryType() { return TYPE; }
+      get startTime() { return this._t; }
+      get duration() { return 0; }
+      get renderTime() { return this._t; }
+      get paintTime() { return this._t; }
+      get loadTime() { return this._l; }
+      get size() { return this._s; }
+      get id() { return this._i; }
+      get url() { return this._u; }
+      get element() { var e = this._e; return e && e.isConnected && e.ownerDocument === document ? e : null; }
+      toJSON() {
+        return { name: this.name, entryType: this.entryType, startTime: this.startTime, duration: this.duration,
+          renderTime: this.renderTime, loadTime: this.loadTime, size: this.size, id: this.id, url: this.url };
+      }
+    }
+    if (Entry) Object.setPrototypeOf(LargestContentfulPaint.prototype, Entry.prototype);
+    tag(LargestContentfulPaint, 'LargestContentfulPaint');
+    function list(entries) {
+      var l = Object.create(g.PerformanceObserverEntryList ? g.PerformanceObserverEntryList.prototype : Object.prototype);
+      hidden(l, 'getEntries', function getEntries() { return entries.slice(); });
+      hidden(l, 'getEntriesByType', function getEntriesByType(t) { return entries.filter(function (e) { return e.entryType === String(t); }); });
+      hidden(l, 'getEntriesByName', function getEntriesByName(n, t) {
+        return entries.filter(function (e) { return e.name === String(n) && (t === undefined || e.entryType === String(t)); });
+      });
+      return l;
+    }
+    function deliver(o) {
+      if (o._lcpQueued) return;
+      o._lcpQueued = true;
+      setTimeout(function () {
+        o._lcpQueued = false;
+        var entries = o._lcpPending;
+        o._lcpPending = [];
+        if (!entries.length || !observers.has(o)) return;
+        o._lcpCallback.call(o, list(entries), o);
+      }, 0);
+    }
+    // The rectangle a node paints in the viewport, clipped to it, or null.
+    function visible(node) { return clip(native.nodeRect(node)); }
+    function shown(element) {
+      for (var e = element; e && e.nodeType === 1; e = e.parentElement) {
+        var s = getComputedStyle(e);
+        if (s.display === 'none' || Number(s.opacity) === 0) return false;
+        if (e === element && s.visibility !== 'visible') return false;
+      }
+      return true;
+    }
+    function transparent(s) {
+      var c = s.color.replace(/\s/g, '');
+      if (c !== 'transparent' && !/^rgba\(\d+,\d+,\d+,0\)$/.test(c)) return false;
+      if (s.textShadow && s.textShadow !== 'none') return false;
+      if (s.webkitTextStrokeWidth && parseFloat(s.webkitTextStrokeWidth) > 0) return false;
+      return true;
+    }
+    // The element a text node's paint counts for: its nearest ancestor that is not inline (a MathML element is its own).
+    function holder(element) {
+      if (element.namespaceURI === 'http://www.w3.org/1998/Math/MathML') return element;
+      for (var e = element; e; e = e.parentElement) {
+        var d = getComputedStyle(e).display;
+        if (d !== 'inline' && d !== 'contents') return e;
+      }
+      return element;
+    }
+    function picture(url) {
+      var p = pictures.get(url);
+      if (!p) {
+        p = new Image();
+        p.onload = p.onerror = schedule;
+        p.src = url;
+        pictures.set(url, p);
+      }
+      return p.complete && p.naturalWidth > 0 ? p : null;
+    }
+    function consider(candidates, element, url, area) {
+      if (area <= 0) return;
+      var key = url || '#text', done = reported.get(element);
+      if (done && done.indexOf(key) >= 0) return;
+      candidates.push({ element: element, url: url, size: Math.floor(area), key: key });
+    }
+    function area(rect) { return rect ? (rect[2] - rect[0]) * (rect[3] - rect[1]) : 0; }
+    function scan() {
+      scheduled = false;
+      if (!document.body) return schedule();
+      var candidates = [], texts = new Map(), walker = document.createTreeWalker(document.body, 5), node;
+      while ((node = walker.nextNode())) {
+        if (node.nodeType === 3) {
+          if (!/\S/.test(node.data) || !node.parentElement) continue;
+          var parent = node.parentElement, h = holder(parent);
+          if (!shown(parent) || transparent(getComputedStyle(parent))) continue;
+          var r = visible(node);
+          if (!r) continue;
+          var u = texts.get(h);
+          texts.set(h, u ? [Math.min(u[0], r[0]), Math.min(u[1], r[1]), Math.max(u[2], r[2]), Math.max(u[3], r[3])] : r);
+          continue;
+        }
+        var name = node.localName, element = node;
+        if (name === 'script' || name === 'style' || name === 'iframe') continue;
+        var s = getComputedStyle(element);
+        if (s.display === 'none') continue;
+        if (name === 'img' && element.complete && element.naturalWidth > 0 && element.namespaceURI === 'http://www.w3.org/1999/xhtml') {
+          if (shown(element)) image(candidates, element, element.currentSrc || element.src, element);
+        } else if (name === 'video' && element.getAttribute('poster')) {
+          var poster = picture(new URL(element.getAttribute('poster'), (document.baseURI || location.href)).href);
+          if (poster && shown(element)) image(candidates, element, poster.src, poster);
+        } else if (name === 'image' && element.namespaceURI === 'http://www.w3.org/2000/svg') {
+          var href = element.getAttribute('href') || element.getAttributeNS('http://www.w3.org/1999/xlink', 'href');
+          var p = href && picture(new URL(href, (document.baseURI || location.href)).href);
+          if (p && shown(element)) image(candidates, element, p.src, p);
+        }
+        var bg = /url\(\s*["']?([^"')]+)["']?\s*\)/.exec(s.backgroundImage || '');
+        if (bg && element !== document.body && element !== document.documentElement) {
+          var b = picture(new URL(bg[1], (document.baseURI || location.href)).href);
+          if (b && shown(element)) image(candidates, element, b.src, b);
+        }
+        var before = getComputedStyle(element, '::before').content;
+        if (before && before !== 'none' && before !== 'normal' && /^["']|attr\(/.test(before) && shown(element)) {
+          var rb = visible(element);
+          if (rb && !texts.has(holder(element))) texts.set(holder(element), rb);
+        }
+      }
+      texts.forEach(function (rect, element) { consider(candidates, element, '', area(rect)); });
+      var now = performance.now(), best = null;
+      candidates.forEach(function (c) {
+        var done = reported.get(c.element) || [];
+        done.push(c.key);
+        reported.set(c.element, done);
+        if (c.size > largest && (!best || c.size > best.size)) best = c;
+      });
+      if (best) {
+        largest = best.size;
+        var e = new LargestContentfulPaint(KEY);
+        hidden(e, '_t', now); hidden(e, '_s', best.size); hidden(e, '_i', best.element.id || '');
+        hidden(e, '_u', best.url); hidden(e, '_e', best.element);
+        hidden(e, '_l', best.url ? Math.min(loads.get(best.element) || now, now) : 0);
+        if (buffer.length < 150) buffer.push(e);
+        observers.forEach(function (o) { o._lcpPending.push(e); deliver(o); });
+      }
+    }
+    // An SVG <image> has no box of its own: its place is its x, y, width and height (its natural size by default)
+    // from the top left of its <svg>, clipped to the <svg>.
+    function svgRect(element, source) {
+      var svg = element.ownerSVGElement || element.closest('svg'), box = svg && native.nodeRect(svg);
+      if (!box) return null;
+      function length(name, fallback) { var v = parseFloat(element.getAttribute(name)); return isFinite(v) ? v : fallback; }
+      var x = box[0] + length('x', 0), y = box[1] + length('y', 0);
+      var w = length('width', source.naturalWidth), h = length('height', source.naturalHeight);
+      var x1 = Math.min(x + w, box[0] + box[2]), y1 = Math.min(y + h, box[1] + box[3]);
+      x = Math.max(x, box[0]); y = Math.max(y, box[1]);
+      return x1 > x && y1 > y ? [x, y, x1 - x, y1 - y] : null;
+    }
+    function clip(r) {
+      if (!r) return null;
+      var x0 = Math.max(r[0], 0), y0 = Math.max(r[1], 0);
+      var x1 = Math.min(r[0] + r[2], innerWidth), y1 = Math.min(r[1] + r[3], innerHeight);
+      return x1 > x0 && y1 > y0 ? [x0, y0, x1, y1] : null;
+    }
+    function image(candidates, element, url, source) {
+      var r = element.namespaceURI === 'http://www.w3.org/2000/svg' ? svgRect(element, source) : native.nodeRect(element);
+      var v = clip(r);
+      if (!r || !v) return;
+      // An image that covers the whole viewport is a background, not content.
+      if (r[0] <= 0 && r[1] <= 0 && r[0] + r[2] >= innerWidth && r[1] + r[3] >= innerHeight) return;
+      var shownArea = r[2] * r[3], natural = source.naturalWidth * source.naturalHeight, a = area(v);
+      if (shownArea > natural && shownArea > 0) a = a * natural / shownArea;
+      if (!loads.has(element)) loads.set(element, performance.now());
+      var key = url, done = reported.get(element);
+      if (done && done.indexOf(key) >= 0) return;
+      candidates.push({ element: element, url: url, size: Math.floor(a + 1e-6), key: key });
+    }
+    function schedule() {
+      if (scheduled || !active) return;
+      scheduled = true;
+      requestAnimationFrame(function () { setTimeout(scan, 0); });
+    }
+    function start() {
+      if (active) return;
+      active = true;
+      new MutationObserver(schedule).observe(document, { childList: true, subtree: true, attributes: true, characterData: true });
+      document.addEventListener('load', function (event) {
+        if (event.target && event.target.nodeType === 1) loads.set(event.target, performance.now());
+        schedule();
+      }, true);
+      schedule();
+    }
+    function wanted(options) {
+      if (!options) return false;
+      if (options.type !== undefined) return String(options.type) === TYPE;
+      return Array.isArray(options.entryTypes) && options.entryTypes.indexOf(TYPE) >= 0;
+    }
+    class PerformanceObserver extends Native {
+      constructor(callback) {
+        super(callback);
+        hidden(this, '_lcpCallback', callback);
+        hidden(this, '_lcpPending', []);
+        hidden(this, '_lcpQueued', false);
+      }
+      observe(options) {
+        if (!wanted(options)) return super.observe(options);
+        if (options.type === undefined) {
+          var rest = options.entryTypes.filter(function (t) { return t !== TYPE; });
+          if (rest.length) super.observe(Object.assign({}, options, { entryTypes: rest }));
+        }
+        var fresh = !observers.has(this);
+        observers.add(this);
+        if (fresh && options.buffered && buffer.length) {
+          this._lcpPending.push.apply(this._lcpPending, buffer);
+          deliver(this);
+        }
+        start();
+      }
+      disconnect() { observers.delete(this); this._lcpPending = []; return super.disconnect(); }
+      takeRecords() { var mine = this._lcpPending; this._lcpPending = []; return super.takeRecords().concat(mine); }
+      static get supportedEntryTypes() { return Object.freeze(Native.supportedEntryTypes.concat([TYPE]).sort()); }
+    }
+    def(g, 'PerformanceObserver', PerformanceObserver);
+    def(g, 'LargestContentfulPaint', LargestContentfulPaint);
+  })();
   if (!g.customElements) {
     var registry = new Map();
     def(g, 'customElements', {
@@ -505,4 +1520,23 @@
     Object.defineProperty(document, 'activeElement', { get: function () { return document.body; }, configurable: true });
     def(document, 'hasFocus', function hasFocus() { return true; });
   }
+  // Interfaces with an indexed getter and a length iterate as arrays do; NodeList and DOMTokenList are also iterable<>,
+  // with the array's entries, keys, values and forEach.
+  (function () {
+    var AP = Array.prototype;
+    ['NodeList', 'HTMLCollection', 'DOMTokenList', 'HTMLAllCollection', 'HTMLFormControlsCollection', 'HTMLOptionsCollection',
+      'DOMStringList', 'FileList', 'StyleSheetList', 'CSSRuleList', 'MediaList', 'DOMRectList', 'CSSStyleDeclaration',
+      'NamedNodeMap', 'TouchList', 'SVGNumberList', 'SVGLengthList', 'SVGStringList', 'SVGTransformList'].forEach(function (name) {
+      var C = g[name];
+      if (typeof C !== 'function' || !C.prototype || Object.prototype.hasOwnProperty.call(C.prototype, Symbol.iterator)) return;
+      def(C.prototype, Symbol.iterator, AP.values);
+    });
+    ['NodeList', 'DOMTokenList'].forEach(function (name) {
+      var C = g[name];
+      if (typeof C !== 'function' || !C.prototype) return;
+      ['entries', 'keys', 'values', 'forEach'].forEach(function (m) {
+        if (!Object.prototype.hasOwnProperty.call(C.prototype, m)) Object.defineProperty(C.prototype, m, { value: AP[m], writable: true, configurable: true, enumerable: true });
+      });
+    });
+  })();
 })

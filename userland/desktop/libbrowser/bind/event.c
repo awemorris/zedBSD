@@ -1251,6 +1251,7 @@ event_dispatch_method(
 	struct bind_window *window;
 	struct bind_listeners *listeners;
 	struct bind_event *event;
+	struct dom_node *node;
 	vm_value target;
 	int canceled;
 	int status;
@@ -1283,6 +1284,15 @@ event_dispatch_method(
 	status = bind_dispatch(window, target, js_argument(args, count, 0), &canceled);
 	if (status != 0)
 		return status;
+
+	/* A click nobody canceled activates the link it landed in. */
+	node = bind_node_of(target);
+	if (!canceled && event->interface == BIND_MOUSE_EVENT && node != NULL && node->type == DOM_ELEMENT &&
+	    vm_string_equal_ascii(event->type, "click")) {
+		status = bind_click_follow(window, (struct dom_element *)node);
+		if (status != 0)
+			return status;
+	}
 
 	/* True unless a listener canceled it. */
 	*result = VM_VALUE_TRUE;

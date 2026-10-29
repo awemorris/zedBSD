@@ -46,6 +46,9 @@ struct parser_state {
 	struct wb_vector imports;
 	struct wb_vector import_media;
 	struct wb_vector font_faces;
+	struct wb_vector try_rules;
+	/* The @scope whose block is being read (NULL outside one). */
+	const struct css_scope *scope;
 };
 
 /*
@@ -76,7 +79,8 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "required", CSS_PSEUDO_REQUIRED },
 	{ "optional", CSS_PSEUDO_OPTIONAL },
 	{ "defined", CSS_PSEUDO_ALWAYS },
-	{ "scope", CSS_PSEUDO_ROOT },
+	{ "scope", CSS_PSEUDO_SCOPE },
+	{ "target", CSS_PSEUDO_TARGET },
 	{ NULL, 0 }
 };
 
@@ -109,6 +113,7 @@ static int parser_supports(struct parser_state *state, const struct css_token *t
 static int parser_supports_group(struct parser_state *state, const struct css_token *tokens, size_t count, int *status);
 static int parser_import(struct parser_state *state, const struct css_token *tokens, size_t count);
 static int parser_font_face(struct parser_state *state, const struct css_token *tokens, size_t count);
+static int parser_position_try(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count);
 static int parser_font_descriptor(struct parser_state *state, const struct css_token *name, const struct css_token *tokens, size_t count, struct css_font_face *face);
 static int parser_font_family(struct parser_state *state, const struct css_token *tokens, size_t count, struct vm_string **family);
 static int parser_font_sources(struct parser_state *state, const struct css_token *tokens, size_t count, struct css_font_face *face);
@@ -117,6 +122,13 @@ static int parser_font_format(const struct css_token *format);
 static int parser_keep_font_faces(struct parser_state *state);
 static int parser_add_rule(struct parser_state *state, struct token_range prelude, struct token_range block, const struct css_media *media);
 static int parser_selectors(struct vm_heap *heap, struct wb_arena *arena, struct token_range prelude, struct css_selector **selectors, size_t *count);
+static int parser_scope(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count, const struct css_media *media);
+static int parser_scope_selectors(struct parser_state *state, struct token_range range, const struct css_selector **selectors, size_t *count);
+static int parser_scoped_selectors(struct parser_state *state, struct token_range prelude, struct css_selector **selectors, size_t *count);
+static int parser_names_scope(const struct css_selector *selector);
+static int parser_prepend_scope(struct wb_arena *arena, struct css_selector *selector, int combinator);
+static size_t parser_scope_declaration(const struct css_token *tokens, size_t count, size_t index);
+static int parser_scope_self(struct parser_state *state, const struct css_token *tokens, size_t count, const struct css_media *media);
 static int parser_selector(struct vm_heap *heap, struct wb_arena *arena, struct token_range tokens, struct css_selector *selector);
 static int parser_compound(struct vm_heap *heap, struct wb_arena *arena, const struct css_token *tokens, size_t count, size_t *index, struct css_compound *compound, uint32_t *specificity);
 static int parser_attribute(struct vm_heap *heap, const struct css_token *tokens, size_t count, struct css_simple *simple);
@@ -156,18 +168,29 @@ css_parse_sheet(
 	/* Reads the rules, the ones in @media and @supports blocks too. */
 	state.heap = heap;
 	state.sheet = sheet;
+	state.scope = NULL;
 	wb_vector_init(&state.rules, sizeof(struct css_rule));
 	wb_vector_init(&state.imports, sizeof(struct vm_string *));
 	wb_vector_init(&state.import_media, sizeof(struct css_media *));
 	wb_vector_init(&state.font_faces, sizeof(struct css_font_face));
+	wb_vector_init(&state.try_rules, sizeof(struct css_try_rule));
 	error = parser_rules(&state, tokens, count, NULL);
 	if (error == 0)
 		error = parser_keep_imports(&state);
 	if (error == 0)
 		error = parser_keep_font_faces(&state);
+	if (error == 0 && state.try_rules.count != 0) {
+		sheet->try_rules = wb_arena_alloc(&sheet->arena, state.try_rules.count * sizeof(struct css_try_rule));
+		if (sheet->try_rules == NULL)
+			error = ENOMEM;
+		else
+			memcpy(sheet->try_rules, state.try_rules.items, state.try_rules.count * sizeof(struct css_try_rule));
+		sheet->try_rule_count = state.try_rules.count;
+	}
 	wb_vector_release(&state.imports);
 	wb_vector_release(&state.import_media);
 	wb_vector_release(&state.font_faces);
+	wb_vector_release(&state.try_rules);
 	if (error != 0) {
 		wb_vector_release(&state.rules);
 		return error;
@@ -673,6 +696,18 @@ parser_rules(
 			continue;
 		}
 
+		/* Inside @scope, a declaration (a name and a colon, ending before any block) applies to the scope's root. */
+		if (state->scope != NULL) {
+			end = parser_scope_declaration(tokens, count, index);
+			if (end > index) {
+				error = parser_scope_self(state, tokens + index, end - index, media);
+				if (error == ENOMEM)
+					return error;
+				index = end;
+				continue;
+			}
+		}
+
 		/* A qualified rule: the prelude up to the block, then the block. */
 		start = index;
 		while (index < count && tokens[index].type != CSS_TOKEN_OPEN_CURLY && tokens[index].type != CSS_TOKEN_EOF) {
@@ -730,6 +765,8 @@ parser_at_rule(
 	int is_layer;
 	int is_import;
 	int is_font_face;
+	int is_scope;
+	int is_try;
 	int holds;
 	int error;
 
@@ -749,7 +786,9 @@ parser_at_rule(
 	is_supports = css_ident_equal(&tokens[0], "supports");
 	is_layer = css_ident_equal(&tokens[0], "layer");
 	is_font_face = css_ident_equal(&tokens[0], "font-face");
-	if (!is_media && !is_supports && !is_layer && !is_font_face)
+	is_scope = css_ident_equal(&tokens[0], "scope");
+	is_try = css_ident_equal(&tokens[0], "position-try");
+	if (!is_media && !is_supports && !is_layer && !is_font_face && !is_scope && !is_try)
 		return 0;
 	open = 1;
 	while (open < count && tokens[open].type != CSS_TOKEN_OPEN_CURLY)
@@ -768,6 +807,18 @@ parser_at_rule(
 		if (error == ENOMEM)
 			return error;
 		return 0;
+	}
+
+	/* An @position-try block's declarations, kept under its name. */
+	if (is_try) {
+		error = parser_position_try(state, tokens + 1, open - 1U, tokens + open + 1U, body_count);
+		return error;
+	}
+
+	/* An @scope block's rules apply in its scope. */
+	if (is_scope) {
+		error = parser_scope(state, tokens + 1, open - 1U, tokens + open + 1U, body_count, media);
+		return error;
 	}
 
 	/* An @media block's rules hold under its list and the ones it is nested in. */
@@ -797,6 +848,432 @@ parser_at_rule(
 		return error;
 
 	/* Succeeded: the at-rule is read. */
+	return 0;
+}
+
+/*
+ * Reads an @position-try rule: its name (a dashed identifier) and the
+ * declarations of its block, kept for the fallbacks that name it.
+ * https://drafts.csswg.org/css-anchor-position-1/#fallback-rule
+ */
+static int
+parser_position_try(
+	struct parser_state *state,
+	const struct css_token *prelude,
+	size_t prelude_count,
+	const struct css_token *body,
+	size_t body_count)
+{
+	struct css_try_rule rule;
+	struct token_range block;
+	size_t index;
+	size_t name;
+	int error;
+
+	/* The name, alone. */
+	name = prelude_count;
+	for (index = 0; index < prelude_count; index++) {
+		if (prelude[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (name != prelude_count || prelude[index].type != CSS_TOKEN_IDENT || prelude[index].length < 3 ||
+		    prelude[index].text[0] != '-' || prelude[index].text[1] != '-')
+			return 0;
+		name = index;
+	}
+	if (name == prelude_count)
+		return 0;
+	memset(&rule, 0, sizeof(rule));
+	rule.name = vm_atom_from_units(state->heap, prelude[name].text, prelude[name].length);
+	if (rule.name == NULL)
+		return ENOMEM;
+
+	/* The declarations. */
+	block.tokens = body;
+	block.count = body_count;
+	error = parser_declarations(state->heap, &state->sheet->arena, block, &rule.declarations, &rule.declaration_count);
+	if (error != 0)
+		return error == ENOMEM ? error : 0;
+
+	/* Succeeded: the rule is kept. */
+	return wb_vector_push(&state->try_rules, &rule);
+}
+
+/*
+ * Reads an @scope rule: its prelude ((roots) and "to (limits)", both
+ * optional) and the rules of its block, which apply in the scope.  A
+ * prelude that does not parse drops the rule.
+ */
+static int
+parser_scope(
+	struct parser_state *state,
+	const struct css_token *prelude,
+	size_t prelude_count,
+	const struct css_token *body,
+	size_t body_count,
+	const struct css_media *media)
+{
+	const struct css_scope *outer;
+	struct css_scope *scope;
+	struct token_range range;
+	size_t index;
+	size_t end;
+	int is_to;
+	int error;
+
+	/* The scope, in the sheet's arena. */
+	scope = wb_arena_zalloc(&state->sheet->arena, sizeof(*scope));
+	if (scope == NULL)
+		return ENOMEM;
+	scope->parent = state->scope;
+
+	/* The roots in parentheses, if any. */
+	index = 0;
+	while (index < prelude_count && prelude[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index < prelude_count && prelude[index].type == CSS_TOKEN_OPEN_PAREN) {
+		end = parser_skip_block(prelude, prelude_count, index);
+		range.tokens = prelude + index + 1U;
+		range.count = end - index - 2U;
+		range = parser_trim(range);
+		error = parser_scope_selectors(state, range, &scope->roots, &scope->root_count);
+		if (error != 0)
+			return error;
+		index = end;
+		while (index < prelude_count && prelude[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+	}
+
+	/* The limits after "to", if any. */
+	if (index < prelude_count) {
+		is_to = 0;
+		if (prelude[index].type == CSS_TOKEN_IDENT)
+			is_to = css_ident_equal(&prelude[index], "to");
+		if (!is_to)
+			return 0;
+		index++;
+		while (index < prelude_count && prelude[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+		if (index >= prelude_count || prelude[index].type != CSS_TOKEN_OPEN_PAREN)
+			return 0;
+		end = parser_skip_block(prelude, prelude_count, index);
+		range.tokens = prelude + index + 1U;
+		range.count = end - index - 2U;
+		range = parser_trim(range);
+
+		/* The limits are relative to the root, like the scope's own selectors. */
+		outer = state->scope;
+		state->scope = scope;
+		error = parser_scoped_selectors(state, range, (struct css_selector **)&scope->limits, &scope->limit_count);
+		state->scope = outer;
+		if (error != 0)
+			return error == ENOMEM ? error : 0;
+		index = end;
+		while (index < prelude_count && prelude[index].type == CSS_TOKEN_WHITESPACE)
+			index++;
+		if (index < prelude_count)
+			return 0;
+	}
+
+	/* The block's rules, read in the scope. */
+	outer = state->scope;
+	state->scope = scope;
+	error = parser_rules(state, body, body_count, media);
+	state->scope = outer;
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the scope's rules are added. */
+	return 0;
+}
+
+/*
+ * Parses the root selectors of an @scope: plain selectors, or, nested in
+ * another @scope, selectors relative to that scope's root.
+ */
+static int
+parser_scope_selectors(
+	struct parser_state *state,
+	struct token_range range,
+	const struct css_selector **selectors,
+	size_t *count)
+{
+	struct css_selector *list;
+	int error;
+
+	/* Nested in another scope, relative to its root. */
+	if (state->scope != NULL) {
+		error = parser_scoped_selectors(state, range, &list, count);
+		if (error != 0)
+			return error;
+		*selectors = list;
+		return 0;
+	}
+
+	/* Otherwise ordinary selectors. */
+	error = parser_selectors(state->heap, &state->sheet->arena, range, &list, count);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the roots are parsed. */
+	*selectors = list;
+	return 0;
+}
+
+/*
+ * Parses a selector list inside @scope.  Each selector is relative to the
+ * scope's root: one that starts with a combinator is joined to the root by
+ * it, and one with neither :scope nor & anywhere in its compounds is below
+ * the root.  The root adds no specificity (:where(:scope)).
+ */
+static int
+parser_scoped_selectors(
+	struct parser_state *state,
+	struct token_range prelude,
+	struct css_selector **selectors,
+	size_t *count)
+{
+	struct css_selector *list;
+	struct token_range one;
+	size_t start;
+	size_t index;
+	size_t made;
+	size_t commas;
+	int depth;
+	int combinator;
+	int error;
+
+	/* Counts the selectors (commas inside functions do not part them). */
+	commas = 0;
+	depth = 0;
+	for (index = 0; index < prelude.count; index++) {
+		if (prelude.tokens[index].type == CSS_TOKEN_FUNCTION || prelude.tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+			depth++;
+		if (prelude.tokens[index].type == CSS_TOKEN_CLOSE_PAREN)
+			depth--;
+		if (prelude.tokens[index].type == CSS_TOKEN_COMMA && depth == 0)
+			commas++;
+	}
+	list = wb_arena_zalloc(&state->sheet->arena, (commas + 1U) * sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+
+	/* Each selector between the commas. */
+	made = 0;
+	start = 0;
+	depth = 0;
+	for (index = 0; index <= prelude.count; index++) {
+		if (index < prelude.count) {
+			if (prelude.tokens[index].type == CSS_TOKEN_FUNCTION || prelude.tokens[index].type == CSS_TOKEN_OPEN_PAREN)
+				depth++;
+			if (prelude.tokens[index].type == CSS_TOKEN_CLOSE_PAREN)
+				depth--;
+			if (prelude.tokens[index].type != CSS_TOKEN_COMMA || depth != 0)
+				continue;
+		}
+		one.tokens = prelude.tokens + start;
+		one.count = index - start;
+		one = parser_trim(one);
+		start = index + 1U;
+
+		/* A leading combinator relates the selector to the root. */
+		combinator = CSS_COMBINATOR_NONE;
+		if (one.count > 0 && one.tokens[0].type == CSS_TOKEN_DELIM) {
+			if (one.tokens[0].delim == '>')
+				combinator = CSS_COMBINATOR_CHILD;
+			if (one.tokens[0].delim == '+')
+				combinator = CSS_COMBINATOR_NEXT;
+			if (one.tokens[0].delim == '~')
+				combinator = CSS_COMBINATOR_SUBSEQUENT;
+			if (combinator != CSS_COMBINATOR_NONE) {
+				one.tokens++;
+				one.count--;
+				one = parser_trim(one);
+			}
+		}
+
+		/* The selector itself. */
+		error = parser_selector(state->heap, &state->sheet->arena, one, &list[made]);
+		if (error != 0)
+			return error;
+
+		/* Below the root unless it names the root itself. */
+		if (combinator == CSS_COMBINATOR_NONE && !parser_names_scope(&list[made]))
+			combinator = CSS_COMBINATOR_DESCENDANT;
+		if (combinator != CSS_COMBINATOR_NONE) {
+			error = parser_prepend_scope(&state->sheet->arena, &list[made], combinator);
+			if (error != 0)
+				return error;
+		}
+		made++;
+	}
+
+	/* Succeeded: the list is relative to the scope's root. */
+	*selectors = list;
+	*count = made;
+	return 0;
+}
+
+/* Tells whether a selector names the scope's root itself: :scope or & in one of its compounds. */
+static int
+parser_names_scope(
+	const struct css_selector *selector)
+{
+	const struct css_compound *compound;
+	size_t index;
+	size_t simple;
+	size_t argument;
+	int named;
+
+	/* Each simple selector of each compound. */
+	for (index = 0; index < selector->count; index++) {
+		compound = &selector->compounds[index];
+		for (simple = 0; simple < compound->count; simple++) {
+			if (compound->simples[simple].kind != CSS_SIMPLE_PSEUDO_CLASS)
+				continue;
+			if (compound->simples[simple].pseudo == CSS_PSEUDO_SCOPE ||
+			    compound->simples[simple].pseudo == CSS_PSEUDO_SCOPE_NEST)
+				return 1;
+
+			/* Inside :is(), :where(), :not() and :has() too. */
+			for (argument = 0; argument < compound->simples[simple].argument_count; argument++) {
+				named = parser_names_scope(&compound->simples[simple].arguments[argument]);
+				if (named)
+					return 1;
+			}
+		}
+	}
+
+	/* No compound names the root. */
+	return 0;
+}
+
+/* Puts the scope's root (:where(:scope), no specificity) before a selector, joined by a combinator. */
+static int
+parser_prepend_scope(
+	struct wb_arena *arena,
+	struct css_selector *selector,
+	int combinator)
+{
+	struct css_compound *compounds;
+	struct css_simple *simple;
+
+	/* The root's compound: one simple selector. */
+	simple = wb_arena_zalloc(arena, sizeof(*simple));
+	if (simple == NULL)
+		return ENOMEM;
+	simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
+	simple->pseudo = CSS_PSEUDO_SCOPE_NEST;
+
+	/* The compounds with the root's first. */
+	compounds = wb_arena_alloc(arena, (selector->count + 1U) * sizeof(*compounds));
+	if (compounds == NULL)
+		return ENOMEM;
+	memset(&compounds[0], 0, sizeof(compounds[0]));
+	compounds[0].simples = simple;
+	compounds[0].count = 1;
+	compounds[0].combinator = CSS_COMBINATOR_NONE;
+	compounds[0].pseudo_element = CSS_PSEUDO_ELEMENT_NONE;
+	memcpy(compounds + 1, selector->compounds, selector->count * sizeof(*compounds));
+	compounds[1].combinator = combinator;
+
+	/* Succeeded: the selector starts at the root. */
+	selector->compounds = compounds;
+	selector->count++;
+	return 0;
+}
+
+/*
+ * Finds where a declaration inside an @scope block ends: a name, a colon,
+ * and a value up to a semicolon (or the end) with no block before it.
+ * Reports index itself when what starts there is not a declaration.
+ */
+static size_t
+parser_scope_declaration(
+	const struct css_token *tokens,
+	size_t count,
+	size_t index)
+{
+	size_t at;
+
+	/* A name, then a colon. */
+	if (tokens[index].type != CSS_TOKEN_IDENT)
+		return index;
+	at = index + 1U;
+	while (at < count && tokens[at].type == CSS_TOKEN_WHITESPACE)
+		at++;
+	if (at >= count || tokens[at].type != CSS_TOKEN_COLON)
+		return index;
+
+	/* The value runs to a semicolon; a block first makes it a rule. */
+	while (at < count && tokens[at].type != CSS_TOKEN_SEMICOLON && tokens[at].type != CSS_TOKEN_EOF) {
+		if (tokens[at].type == CSS_TOKEN_OPEN_CURLY)
+			return index;
+		if (tokens[at].type == CSS_TOKEN_OPEN_PAREN || tokens[at].type == CSS_TOKEN_OPEN_SQUARE ||
+		    tokens[at].type == CSS_TOKEN_FUNCTION) {
+			at = parser_skip_block(tokens, count, at);
+			continue;
+		}
+		at++;
+	}
+
+	/* Past the semicolon. */
+	if (at < count && tokens[at].type == CSS_TOKEN_SEMICOLON)
+		at++;
+	return at;
+}
+
+/* Adds a rule for declarations written directly in an @scope block: they apply to the scope's root (:where(:scope)). */
+static int
+parser_scope_self(
+	struct parser_state *state,
+	const struct css_token *tokens,
+	size_t count,
+	const struct css_media *media)
+{
+	struct token_range block;
+	struct css_selector *selector;
+	struct css_compound *compound;
+	struct css_simple *simple;
+	struct css_rule rule;
+	int error;
+
+	/* The selector: the root, adding no specificity. */
+	simple = wb_arena_zalloc(&state->sheet->arena, sizeof(*simple));
+	if (simple == NULL)
+		return ENOMEM;
+	simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
+	simple->pseudo = CSS_PSEUDO_SCOPE_NEST;
+	compound = wb_arena_zalloc(&state->sheet->arena, sizeof(*compound));
+	if (compound == NULL)
+		return ENOMEM;
+	compound->simples = simple;
+	compound->count = 1;
+	compound->combinator = CSS_COMBINATOR_NONE;
+	compound->pseudo_element = CSS_PSEUDO_ELEMENT_NONE;
+	selector = wb_arena_zalloc(&state->sheet->arena, sizeof(*selector));
+	if (selector == NULL)
+		return ENOMEM;
+	selector->compounds = compound;
+	selector->count = 1;
+
+	/* The declarations. */
+	memset(&rule, 0, sizeof(rule));
+	rule.media = media;
+	rule.scope = state->scope;
+	rule.selectors = selector;
+	rule.selector_count = 1;
+	block.tokens = tokens;
+	block.count = count;
+	error = parser_declarations(state->heap, &state->sheet->arena, block, &rule.declarations, &rule.declaration_count);
+	if (error != 0)
+		return error;
+
+	/* Appends the rule. */
+	error = wb_vector_push(&state->rules, &rule);
+	if (error != 0)
+		return ENOMEM;
+
+	/* Succeeded: the declarations apply to the root. */
 	return 0;
 }
 
@@ -1089,10 +1566,15 @@ parser_add_rule(
 	struct css_rule rule;
 	int error;
 
-	/* Reads the selectors; a selector list that does not parse drops the rule. */
+	/* Reads the selectors (relative to the scope's root inside @scope); a selector list that does not parse drops the rule. */
 	memset(&rule, 0, sizeof(rule));
 	rule.media = media;
-	error = parser_selectors(state->heap, &state->sheet->arena, prelude, &rule.selectors, &rule.selector_count);
+	rule.scope = state->scope;
+	if (state->scope != NULL) {
+		error = parser_scoped_selectors(state, prelude, &rule.selectors, &rule.selector_count);
+	} else {
+		error = parser_selectors(state->heap, &state->sheet->arena, prelude, &rule.selectors, &rule.selector_count);
+	}
 	if (error != 0)
 		return error;
 
@@ -1308,6 +1790,10 @@ parser_compound(
 			*specificity += 1U;
 		} else if (token->type == CSS_TOKEN_DELIM && token->delim == '*' && made == 0) {
 			simple->kind = CSS_SIMPLE_UNIVERSAL;
+		} else if (token->type == CSS_TOKEN_DELIM && token->delim == '&') {
+			/* The nesting selector: the scope's root (or the root element), adding no specificity. */
+			simple->kind = CSS_SIMPLE_PSEUDO_CLASS;
+			simple->pseudo = CSS_PSEUDO_SCOPE_NEST;
 		} else if (token->type == CSS_TOKEN_HASH && token->hash_is_id) {
 			/* An id selector. */
 			simple->kind = CSS_SIMPLE_ID;

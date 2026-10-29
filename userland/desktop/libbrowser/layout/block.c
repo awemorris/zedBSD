@@ -23,6 +23,7 @@ static layout_unit block_outer_height(const struct layout_box *box);
 static int block_owns_context(const struct layout_box *box);
 static int block_content(struct layout_tree *tree, struct layout_box *box);
 static int block_intrinsic(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
+static int block_is_button(const struct layout_box *box);
 static int block_is_intrinsic(const struct css_length *length);
 
 /*
@@ -54,12 +55,30 @@ layout_block(
 	int intrinsic;
 	int height_definite;
 	int saved_height_definite;
+	int wanted;
 	int error;
+
+	/* A box of another writing mode than the system it is laid out in has coordinates of its own. */
+	wanted = layout_logical_wanted(tree, box);
+	if (wanted) {
+		error = layout_logical(tree, box, containing_width);
+		return error;
+	}
 
 	/* A width of max-content, min-content or fit-content is measured first (ws074-p074). */
 	intrinsic = block_is_intrinsic(&box->style.width);
 	if (intrinsic && !box->replaced) {
 		error = block_intrinsic(tree, box, containing_width);
+		return error;
+	}
+
+	/* A block-level button of an auto width in a block's flow fits its content, as an inline one does. */
+	if (tree->measuring == 0 && box->style.width.unit == CSS_UNIT_AUTO && !box->replaced && !box->out_of_flow && block_is_button(box) &&
+	    box->parent != NULL && box->parent->kind == LAYOUT_BLOCK && !box->parent->children_inline &&
+	    (box->parent->style.display == CSS_DISPLAY_BLOCK || box->parent->style.display == CSS_DISPLAY_INLINE_BLOCK)) {
+		box->style.width.unit = CSS_UNIT_FIT_CONTENT;
+		error = block_intrinsic(tree, box, containing_width);
+		box->style.width.unit = CSS_UNIT_AUTO;
 		return error;
 	}
 
@@ -352,6 +371,19 @@ block_intrinsic(
 	return 0;
 }
 
+/* Tells whether a box is an HTML button's. */
+static int
+block_is_button(
+	const struct layout_box *box)
+{
+	const struct dom_element *element;
+
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+	element = (const struct dom_element *)box->node;
+	return element->ns == DOM_NS_HTML && element->tag == DOM_TAG_BUTTON;
+}
+
 /* Tells whether a width is one of the intrinsic keywords. */
 static int
 block_is_intrinsic(
@@ -499,8 +531,12 @@ block_owns_context(
 {
 	int clips;
 
-	/* The root, a float, a box out of the flow. */
+	/* The root, the root of a writing mode's domain, a float, a box out of the flow. */
 	if (box->parent == NULL)
+		return 1;
+	if (box->logical_root)
+		return 1;
+	if (layout_physical_mode(box) != layout_physical_mode(box->parent))
 		return 1;
 	if (box->floating != CSS_FLOAT_NONE)
 		return 1;

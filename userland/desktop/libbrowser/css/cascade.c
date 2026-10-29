@@ -40,6 +40,24 @@
 /* The most declarations one pending declaration expands into (a shorthand's longhands). */
 #define CASCADE_EXPANSION_MAX	16U
 
+/* The proximity of a declaration outside @scope: farther than any scope root. */
+#define CASCADE_UNSCOPED	0xffffffffU
+
+/* The slots of the table that remembers which elements are roots of which @scope, and the most it probes. */
+#define CASCADE_SCOPE_MEMO	65536U
+#define CASCADE_SCOPE_PROBES	32U
+
+/*
+ * One remembered answer: whether an element is a root of a scope, valid
+ * while generation is the engine's (one sheet of one element's cascade).
+ */
+struct cascade_scope_memo {
+	const struct css_scope *scope;
+	const struct dom_element *element;
+	uint32_t generation;
+	int result;
+};
+
 /* The precedence of a declaration by its origin and importance (higher wins). */
 #define RANK_USER_AGENT		0
 #define RANK_AUTHOR		1
@@ -59,6 +77,14 @@ struct cascade_sheet {
 	struct css_sheet *owned;
 	const struct css_media *media[CSS_MEDIA_CHAIN_MAX];
 	size_t media_count;
+	/* The element whose sheet it is (a <style>; NULL for none), whose parent an implicit @scope's root is. */
+	struct dom_element *owner;
+};
+
+/* A value copied into the engine's arena: where it is and how many bytes it has. */
+struct cascade_kept {
+	const void *data;
+	size_t size;
 };
 
 /*
@@ -86,6 +112,15 @@ struct css_engine {
 	struct wb_vector candidates;
 	struct wb_units word;
 	struct wb_arena arena;
+	/*
+	 * The grid areas and template line names styles point to, copied into
+	 * the arena (a declaration's own arena may end sooner); one copy of
+	 * each distinct value.
+	 */
+	struct wb_vector kept_areas;
+	/* Anchor sums and names copied into the arena (struct cascade_kept), each kept once. */
+	struct wb_vector kept_anchors;
+	struct wb_vector kept_names;
 	int pseudo_wanted;
 	int pseudo_seen;
 	struct cascade_classes *class_table;
@@ -98,6 +133,17 @@ struct css_engine {
 	css_container_lookup container_lookup;
 	void *container_context;
 	struct dom_element *current;
+	/* The @scope root :scope and & stand for while a scoped selector is matched (NULL: the root element). */
+	struct dom_element *scope_root;
+	/* The owner of the sheet whose rules are being matched (NULL for none). */
+	struct dom_element *sheet_owner;
+	/*
+	 * Which elements are roots of which @scope (allocated when first used;
+	 * NULL before), and the generation that makes its entries current:
+	 * it moves on for each sheet of each cascade, so nothing is cleared.
+	 */
+	struct cascade_scope_memo *scope_memo;
+	uint32_t scope_generation;
 	int container_missed;
 	struct wb_vector container_uses;
 	int (*visited_lookup)(void *, struct dom_element *);
@@ -154,6 +200,8 @@ struct cascade_match {
 	const struct css_declaration *declaration;
 	int rank;
 	uint32_t specificity;
+	/* How many generations the element is below its @scope root (CASCADE_UNSCOPED outside @scope); nearer wins. */
+	uint32_t proximity;
 	uint64_t order;
 };
 
@@ -187,6 +235,15 @@ static const struct cascade_hint_keyword cascade_vertical_align[] = {
 	{ NULL, NULL }
 };
 
+/* A <br>'s clear attribute (all and both clear both sides). */
+static const struct cascade_hint_keyword cascade_clear[] = {
+	{ "left", "clear:left;" },
+	{ "right", "clear:right;" },
+	{ "all", "clear:both;" },
+	{ "both", "clear:both;" },
+	{ NULL, NULL }
+};
+
 static int cascade_collect(struct css_engine *engine, struct dom_element *element, struct wb_vector *matches, struct wb_arena *scratch);
 static int cascade_presentational(struct css_engine *engine, struct dom_element *element, struct wb_vector *matches, struct wb_arena *scratch);
 static int cascade_hint_ascii(struct wb_units *units, const char *text);
@@ -198,7 +255,11 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
+static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
+static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
+static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
+static int cascade_in_scope(struct css_engine *engine, struct dom_element *element, struct dom_element *root, const struct css_scope *scope);
 static int cascade_compare(const void *left, const void *right);
 static int cascade_customs(struct css_engine *engine, struct css_style *style, const struct cascade_match *matches, size_t count);
 static int cascade_substitute(const struct css_custom *list, const struct css_token *tokens, size_t count, int depth, struct wb_vector *out);
@@ -242,9 +303,16 @@ static void cascade_inherit(struct css_style *style, const struct css_style *par
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
+static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
 static void cascade_tracks(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_track *tracks, int *count, struct css_track_repeat *repeat);
+static const struct css_line_names *cascade_line_names(struct css_engine *engine, const struct css_value *value);
+static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
+static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
+static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
+static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
+static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
 static float cascade_font_size(struct css_engine *engine, const struct css_value *value, float parent_size);
 static int cascade_font_size_keyword(const struct css_value *value, int parent_keyword);
 static void cascade_families(struct css_style *style, const struct css_value *value);
@@ -277,6 +345,9 @@ css_engine_create(
 	wb_units_init(&created->word);
 	wb_vector_init(&created->class_atoms, sizeof(struct vm_string *));
 	wb_vector_init(&created->container_uses, sizeof(struct cascade_container_use));
+	wb_vector_init(&created->kept_areas, sizeof(const struct css_grid_areas *));
+	wb_vector_init(&created->kept_anchors, sizeof(struct cascade_kept));
+	wb_vector_init(&created->kept_names, sizeof(const struct css_line_names *));
 	wb_arena_init(&created->arena, 0);
 	created->atom_id = vm_atom_from_ascii(heap, "id");
 	created->atom_class = vm_atom_from_ascii(heap, "class");
@@ -332,6 +403,10 @@ css_engine_destroy(
 	cascade_style_forget(engine);
 	free(engine->style_table);
 	wb_vector_release(&engine->container_uses);
+	wb_vector_release(&engine->kept_areas);
+	wb_vector_release(&engine->kept_anchors);
+	wb_vector_release(&engine->kept_names);
+	free(engine->scope_memo);
 	wb_arena_release(&engine->arena);
 	free(engine);
 }
@@ -431,6 +506,24 @@ css_engine_add_parsed(
 
 	/* Succeeded: the sheet takes part in the cascade. */
 	return 0;
+}
+
+/*
+ * Records the element whose sheet the engine's most recently added sheet
+ * is (a <style>), whose parent is the root of the sheet's implicit @scope.
+ */
+void
+css_engine_set_owner(
+	struct css_engine *engine,
+	struct dom_element *owner)
+{
+	struct cascade_sheet *sheets;
+
+	/* The last sheet, if there is one. */
+	if (engine->sheets.count == 0)
+		return;
+	sheets = engine->sheets.items;
+	sheets[engine->sheets.count - 1U].owner = owner;
 }
 
 /*
@@ -856,6 +949,9 @@ cascade_compute(
 	if (style->text_shadow_set && style->text_shadow.color == CSS_CURRENT_COLOR)
 		style->text_shadow.color = style->color;
 
+	/* The fallbacks of anchor positioning with their @position-try rules applied. */
+	cascade_try_styles(engine, style, parent);
+
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT)
@@ -877,11 +973,25 @@ void
 css_engine_query_begin(
 	struct css_engine *engine)
 {
-	/* No class attribute is split any more. */
+	/* No class attribute is split any more, and :scope is the root element until a query names its element. */
 	if (engine->class_table != NULL)
 		memset(engine->class_table, 0, engine->class_capacity * sizeof(*engine->class_table));
 	engine->class_count = 0;
 	engine->class_atoms.count = 0;
+	engine->scope_root = NULL;
+}
+
+/*
+ * Makes :scope stand for the element a query is made on (matches(),
+ * closest(), an element's querySelector()), NULL for the root element.
+ */
+void
+css_engine_query_scope(
+	struct css_engine *engine,
+	struct dom_element *element)
+{
+	/* The scoping element of the following matches. */
+	engine->scope_root = element;
 }
 
 /*
@@ -952,6 +1062,8 @@ css_initial_style(
 	style->transform_scale[0].value = 1.0f;
 	style->transform_scale[0].offset = 0;
 	style->transform_scale[1] = style->transform_scale[0];
+	style->position_area = -1;
+	style->position_visibility = 2;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
 	style->transform_origin[0].offset = 0;
@@ -1036,6 +1148,9 @@ cascade_collect(
 	if (error != 0)
 		return error;
 
+	/* Outside @scope, :scope is the root element (a query's scoping element does not reach the cascade). */
+	engine->scope_root = NULL;
+
 	/* The rules of every sheet whose media hold and whose selectors match, in the order of the sheets. */
 	sheets = engine->sheets.items;
 	for (sheet = 0; sheet < engine->sheets.count; sheet++) {
@@ -1046,7 +1161,10 @@ cascade_collect(
 			continue;
 
 		/* The sheet's matching rules. */
+		engine->sheet_owner = sheets[sheet].owner;
+		engine->scope_generation++;
 		error = cascade_collect_sheet(engine, element, sheets[sheet].sheet, (uint64_t)sheet, id, matches);
+		engine->sheet_owner = NULL;
 		if (error != 0)
 			return error;
 	}
@@ -1076,7 +1194,7 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, (uint64_t)engine->sheets.count << 44);
 	if (error != 0)
 		return error;
 
@@ -1170,6 +1288,11 @@ cascade_presentational(
 	if (error == 0 && font && value != NULL)
 		error = cascade_hint_color(&units, "color", value);
 
+	/* A line break's clear attribute clears the floats beside it. */
+	value = dom_attribute_ascii(element, "clear");
+	if (error == 0 && value != NULL && dom_element_is(&element->node, DOM_NS_HTML, DOM_TAG_BR))
+		error = cascade_hint_keywords(&units, value, cascade_clear);
+
 	/* A cell's bare nowrap attribute preserves its spaces and lines. */
 	value = dom_attribute_ascii(element, "nowrap");
 	if (error == 0 && cell && value != NULL)
@@ -1194,7 +1317,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1523,6 +1646,8 @@ cascade_collect_sheet(
 	struct css_index_bucket universal;
 	struct vm_string **class_keys;
 	uint32_t best;
+	uint32_t proximity;
+	uint32_t scoped;
 	uint64_t order;
 	size_t position;
 	size_t group;
@@ -1583,10 +1708,17 @@ cascade_collect_sheet(
 		if (rule->media != NULL)
 			holds = css_media_matches(rule->media, engine->viewport_width, engine->viewport_height);
 
-		/* Every candidate selector of the rule. */
+		/* Every candidate selector of the rule (in @scope, from the nearest root that it matches from). */
+		proximity = CASCADE_UNSCOPED;
 		for (item = position; item < group && holds; item++) {
 			selector = &rule->selectors[candidates[item].selector];
-			selector_matched = cascade_candidate_matches(engine, element, selector);
+			if (rule->scope != NULL) {
+				selector_matched = cascade_scoped_matches(engine, element, rule->scope, selector, &scoped);
+				if (selector_matched && scoped < proximity)
+					proximity = scoped;
+			} else {
+				selector_matched = cascade_candidate_matches(engine, element, selector);
+			}
 			if (selector_matched) {
 				if (!matched || selector->specificity > best)
 					best = selector->specificity;
@@ -1597,7 +1729,7 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, order);
 			if (error != 0)
 				return error;
 		}
@@ -1608,6 +1740,216 @@ cascade_collect_sheet(
 
 	/* Succeeded: the sheet's applying declarations are gathered. */
 	return 0;
+}
+
+/*
+ * Tells whether an element matches a selector of an @scope rule from some
+ * root of the scope it is in, and how many generations it is below the
+ * nearest such root.
+ */
+static int
+cascade_scoped_matches(
+	struct css_engine *engine,
+	struct dom_element *element,
+	const struct css_scope *scope,
+	const struct css_selector *selector,
+	uint32_t *proximity)
+{
+	struct dom_element *root;
+	struct dom_element *saved;
+	uint32_t generations;
+	int is_root;
+	int inside;
+	int matches;
+
+	/* Each ancestor (and the element itself), nearest first, as a possible root. */
+	saved = engine->scope_root;
+	generations = 0;
+	for (root = element; root != NULL; root = cascade_parent_element(root)) {
+		is_root = cascade_scope_root(engine, root, scope);
+		if (is_root) {
+			inside = cascade_in_scope(engine, element, root, scope);
+			if (inside) {
+				engine->scope_root = root;
+				matches = cascade_candidate_matches(engine, element, selector);
+				engine->scope_root = saved;
+				if (matches) {
+					*proximity = generations;
+					return 1;
+				}
+			}
+		}
+		generations++;
+	}
+
+	/* No root of the scope gives a match. */
+	return 0;
+}
+
+/* Tells whether an element is a root of a scope, remembering the answer for the rest of the sheet's cascade. */
+static int
+cascade_scope_root(
+	struct css_engine *engine,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct cascade_scope_memo *slot;
+	uintptr_t hash;
+	size_t probe;
+	int result;
+
+	/* The table, made the first time it is needed (without one, every answer is worked out). */
+	if (engine->scope_memo == NULL) {
+		engine->scope_memo = calloc(CASCADE_SCOPE_MEMO, sizeof(*engine->scope_memo));
+		if (engine->scope_memo == NULL) {
+			result = cascade_scope_root_compute(engine, root, scope);
+			return result;
+		}
+	}
+
+	/* A current answer in one of the slots the pair hashes to. */
+	hash = ((uintptr_t)root >> 4) * 31U + ((uintptr_t)scope >> 4);
+	for (probe = 0; probe < CASCADE_SCOPE_PROBES; probe++) {
+		slot = &engine->scope_memo[(hash + probe) % CASCADE_SCOPE_MEMO];
+		if (slot->generation != engine->scope_generation)
+			break;
+		if (slot->scope == scope && slot->element == root)
+			return slot->result;
+	}
+
+	/* Otherwise the answer, kept in a free slot when there is one. */
+	result = cascade_scope_root_compute(engine, root, scope);
+	for (probe = 0; probe < CASCADE_SCOPE_PROBES; probe++) {
+		slot = &engine->scope_memo[(hash + probe) % CASCADE_SCOPE_MEMO];
+		if (slot->generation == engine->scope_generation)
+			continue;
+		slot->scope = scope;
+		slot->element = root;
+		slot->generation = engine->scope_generation;
+		slot->result = result;
+		break;
+	}
+
+	/* Succeeded: the answer. */
+	return result;
+}
+
+/*
+ * Tells whether an element is a root of a scope: it matches the scope's
+ * root selectors (relative to a root of the scope it is nested in, which
+ * it must be in), or for an implicit scope it is the root element.
+ */
+static int
+cascade_scope_root_compute(
+	struct css_engine *engine,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct dom_element *outer;
+	struct dom_element *owner;
+	struct dom_element *saved;
+	size_t index;
+	int is_root;
+	int inside;
+	int matches;
+
+	/* An implicit scope's root is its sheet owner's parent element (the root element without one). */
+	if (scope->roots == NULL) {
+		owner = NULL;
+		if (engine->sheet_owner != NULL)
+			owner = cascade_parent_element(engine->sheet_owner);
+		if (owner == NULL) {
+			if (root->node.parent == NULL || root->node.parent->type != DOM_DOCUMENT)
+				return 0;
+		} else if (root != owner) {
+			return 0;
+		}
+
+		/* Nested in another scope, it must be in that one too. */
+		if (scope->parent == NULL)
+			return 1;
+		for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+			is_root = cascade_scope_root(engine, outer, scope->parent);
+			if (!is_root)
+				continue;
+			inside = cascade_in_scope(engine, root, outer, scope->parent);
+			if (inside)
+				return 1;
+		}
+		return 0;
+	}
+
+	/* Each outer root the element is in (or none at the top). */
+	saved = engine->scope_root;
+	for (outer = root; outer != NULL; outer = cascade_parent_element(outer)) {
+		if (scope->parent != NULL) {
+			is_root = cascade_scope_root(engine, outer, scope->parent);
+			if (!is_root)
+				continue;
+			inside = cascade_in_scope(engine, root, outer, scope->parent);
+			if (!inside)
+				continue;
+			engine->scope_root = outer;
+		}
+
+		/* The root selectors, relative to that outer root. */
+		for (index = 0; index < scope->root_count; index++) {
+			matches = cascade_candidate_matches(engine, root, &scope->roots[index]);
+			if (matches) {
+				engine->scope_root = saved;
+				return 1;
+			}
+		}
+		engine->scope_root = saved;
+
+		/* At the top there is no outer root to try. */
+		if (scope->parent == NULL)
+			break;
+	}
+
+	/* The element is no root of the scope. */
+	return 0;
+}
+
+/*
+ * Tells whether an element under (or at) a root is in the scope: neither
+ * it nor any element from it up to the root matches a limit (relative to
+ * the root).
+ */
+static int
+cascade_in_scope(
+	struct css_engine *engine,
+	struct dom_element *element,
+	struct dom_element *root,
+	const struct css_scope *scope)
+{
+	struct dom_element *between;
+	struct dom_element *saved;
+	size_t index;
+	int matches;
+
+	/* No limits, nothing is excluded. */
+	if (scope->limit_count == 0)
+		return 1;
+
+	/* The element and its ancestors up to the root itself (a limit of :scope excludes everything). */
+	saved = engine->scope_root;
+	engine->scope_root = root;
+	for (between = element; between != NULL; between = cascade_parent_element(between)) {
+		for (index = 0; index < scope->limit_count; index++) {
+			matches = cascade_candidate_matches(engine, between, &scope->limits[index]);
+			if (matches) {
+				engine->scope_root = saved;
+				return 0;
+			}
+		}
+		if (between == root)
+			break;
+	}
+	engine->scope_root = saved;
+
+	/* No limit cuts the element off. */
+	return 1;
 }
 
 /* Orders two index entries by rule, then selector. */
@@ -1643,6 +1985,7 @@ cascade_add_declarations(
 	size_t count,
 	int origin,
 	uint32_t specificity,
+	uint32_t proximity,
 	uint64_t order)
 {
 	struct cascade_match match;
@@ -1653,6 +1996,7 @@ cascade_add_declarations(
 	for (index = 0; index < count; index++) {
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
+		match.proximity = proximity;
 		match.order = order + (uint64_t)index;
 		if (origin == CSS_ORIGIN_USER_AGENT) {
 			match.rank = RANK_USER_AGENT;
@@ -2258,6 +2602,10 @@ cascade_compare(
 		return -1;
 	if (a->specificity > b->specificity)
 		return 1;
+	if (a->proximity > b->proximity)
+		return -1;
+	if (a->proximity < b->proximity)
+		return 1;
 	if (a->order < b->order)
 		return -1;
 	if (a->order > b->order)
@@ -2617,6 +2965,12 @@ cascade_pseudo_class(
 	switch (simple->pseudo) {
 	case CSS_PSEUDO_ROOT:
 		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
+	case CSS_PSEUDO_SCOPE:
+	case CSS_PSEUDO_SCOPE_NEST:
+		/* The scope's root inside @scope, the root element elsewhere. */
+		if (engine->scope_root != NULL)
+			return element == engine->scope_root;
+		return element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT;
 	case CSS_PSEUDO_FIRST_CHILD:
 		return cascade_previous_element(element) == NULL && cascade_parent_element(element) != NULL;
 	case CSS_PSEUDO_LAST_CHILD:
@@ -2731,6 +3085,9 @@ cascade_pseudo_class(
 		return attribute == NULL;
 	case CSS_PSEUDO_ALWAYS:
 		return 1;
+	case CSS_PSEUDO_TARGET:
+		/* The element the document's URL fragment names. */
+		return element->node.document->target == &element->node;
 	default:
 		return 0;
 	}
@@ -3422,46 +3779,84 @@ cascade_next_element(
 	return NULL;
 }
 
-/* Resolves the four logical margin names after the element's flow is computed. */
+/*
+ * Gives a logical property its physical one in a writing mode and a
+ * direction: the logical sides of margins, paddings, insets and borders,
+ * the logical sizes, and overflow-inline and overflow-block.  Block-start
+ * is the top, the left (vertical-lr) or the right (vertical-rl); the
+ * inline start is the left or the top, the right or the bottom for rtl.
+ */
 static int
 cascade_margin_property(
 	int property,
 	int writing_mode,
 	int direction)
 {
+	static const int groups[][2] = {
+		{ CSS_PROP_MARGIN_INLINE_START, CSS_PROP_MARGIN_TOP },
+		{ CSS_PROP_PADDING_INLINE_START, CSS_PROP_PADDING_TOP },
+		{ CSS_PROP_INSET_INLINE_START, CSS_PROP_TOP },
+		{ CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_TOP_WIDTH },
+		{ CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_TOP_STYLE },
+		{ CSS_PROP_BORDER_INLINE_START_COLOR, CSS_PROP_BORDER_TOP_COLOR }
+	};
+	size_t group;
+	int vertical;
+	int logical;
+	int side;
+
+	/* The axes. */
+	vertical = writing_mode != CSS_WRITING_HORIZONTAL_TB;
+
 	/* overflow-inline and overflow-block name the horizontal and vertical axes by the writing mode. */
 	if (property == CSS_PROP_OVERFLOW_INLINE)
-		return writing_mode == CSS_WRITING_HORIZONTAL_TB ? CSS_PROP_OVERFLOW_X : CSS_PROP_OVERFLOW_Y;
+		return vertical ? CSS_PROP_OVERFLOW_Y : CSS_PROP_OVERFLOW_X;
 	if (property == CSS_PROP_OVERFLOW_BLOCK)
-		return writing_mode == CSS_WRITING_HORIZONTAL_TB ? CSS_PROP_OVERFLOW_Y : CSS_PROP_OVERFLOW_X;
-	if (writing_mode == CSS_WRITING_VERTICAL_LR) {
-		switch (property) {
-		case CSS_PROP_MARGIN_INLINE_START:
-			return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_BOTTOM : CSS_PROP_MARGIN_TOP;
-		case CSS_PROP_MARGIN_INLINE_END:
-			return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_TOP : CSS_PROP_MARGIN_BOTTOM;
-		case CSS_PROP_MARGIN_BLOCK_START:
-			return CSS_PROP_MARGIN_LEFT;
-		case CSS_PROP_MARGIN_BLOCK_END:
-			return CSS_PROP_MARGIN_RIGHT;
-		default:
-			return property;
+		return vertical ? CSS_PROP_OVERFLOW_X : CSS_PROP_OVERFLOW_Y;
+
+	/* The sizes: the inline size is the width when the lines are horizontal. */
+	if (property == CSS_PROP_INLINE_SIZE)
+		return vertical ? CSS_PROP_HEIGHT : CSS_PROP_WIDTH;
+	if (property == CSS_PROP_BLOCK_SIZE)
+		return vertical ? CSS_PROP_WIDTH : CSS_PROP_HEIGHT;
+	if (property == CSS_PROP_MIN_INLINE_SIZE)
+		return vertical ? CSS_PROP_MIN_HEIGHT : CSS_PROP_MIN_WIDTH;
+	if (property == CSS_PROP_MAX_INLINE_SIZE)
+		return vertical ? CSS_PROP_MAX_HEIGHT : CSS_PROP_MAX_WIDTH;
+	if (property == CSS_PROP_MIN_BLOCK_SIZE)
+		return vertical ? CSS_PROP_MIN_WIDTH : CSS_PROP_MIN_HEIGHT;
+	if (property == CSS_PROP_MAX_BLOCK_SIZE)
+		return vertical ? CSS_PROP_MAX_WIDTH : CSS_PROP_MAX_HEIGHT;
+
+	/* The logical sides: the group, then the physical side. */
+	for (group = 0; group < sizeof(groups) / sizeof(groups[0]); group++) {
+		if (property < groups[group][0] || property > groups[group][0] + 3)
+			continue;
+		logical = property - groups[group][0];
+
+		/* Inline-start and inline-end. */
+		if (logical == 0 || logical == 1) {
+			side = vertical ? CSS_TOP : CSS_LEFT;
+			if (direction == CSS_DIRECTION_RTL)
+				side = vertical ? CSS_BOTTOM : CSS_RIGHT;
+			if (logical == 1)
+				side = (side + 2) % 4;
+			return groups[group][1] + side;
 		}
+
+		/* Block-start and block-end. */
+		side = CSS_TOP;
+		if (writing_mode == CSS_WRITING_VERTICAL_LR)
+			side = CSS_LEFT;
+		if (writing_mode == CSS_WRITING_VERTICAL_RL)
+			side = CSS_RIGHT;
+		if (logical == 3)
+			side = (side + 2) % 4;
+		return groups[group][1] + side;
 	}
 
-	/* Horizontal block flow has top/bottom block edges and direction-dependent inline edges. */
-	switch (property) {
-	case CSS_PROP_MARGIN_INLINE_START:
-		return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_RIGHT : CSS_PROP_MARGIN_LEFT;
-	case CSS_PROP_MARGIN_INLINE_END:
-		return direction == CSS_DIRECTION_RTL ? CSS_PROP_MARGIN_LEFT : CSS_PROP_MARGIN_RIGHT;
-	case CSS_PROP_MARGIN_BLOCK_START:
-		return CSS_PROP_MARGIN_TOP;
-	case CSS_PROP_MARGIN_BLOCK_END:
-		return CSS_PROP_MARGIN_BOTTOM;
-	default:
-		return property;
-	}
+	/* A physical property is itself. */
+	return property;
 }
 
 /* Applies one declaration to the style being computed. */
@@ -3480,6 +3875,7 @@ cascade_apply(
 	int side;
 	int line;
 	int span;
+	struct vm_string *name;
 	int parent_keyword;
 	float parent_size;
 
@@ -3527,8 +3923,45 @@ cascade_apply(
 		return;
 	}
 
+	/* A sum with anchor functions goes to the property's anchor slot. */
+	if (value->kind == CSS_VALUE_ANCHOR) {
+		cascade_anchor(engine, style, property, value->anchor);
+		return;
+	}
+
 	/* The property's value. */
 	switch (property) {
+	case CSS_PROP_TRANSFORM_SET:
+		style->transform_set = value->kind == CSS_VALUE_NUMBER && value->number != 0.0f;
+		break;
+	case CSS_PROP_POSITION_AREA:
+		style->position_area = value->kind == CSS_VALUE_NUMBER ? (int)value->number : -1;
+		break;
+	case CSS_PROP_POSITION_TRY_FALLBACKS:
+		style->position_try = NULL;
+		if (value->kind == CSS_VALUE_TRY && value->try_list != NULL)
+			style->position_try = cascade_keep(engine, value->try_list, sizeof(*value->try_list));
+		break;
+	case CSS_PROP_POSITION_TRY_ORDER:
+		style->position_try_order = (int)value->number;
+		break;
+	case CSS_PROP_POSITION_VISIBILITY:
+		style->position_visibility = (int)value->number;
+		break;
+	case CSS_PROP_ANCHOR_NAME:
+		style->anchor_names = NULL;
+		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
+			style->anchor_names = cascade_keep(engine, value->anchor_names, sizeof(*value->anchor_names));
+		break;
+	case CSS_PROP_ANCHOR_SCOPE:
+		style->anchor_scope = NULL;
+		style->anchor_scope_all = value->kind == CSS_VALUE_KEYWORD && value->keyword == 1;
+		if (value->kind == CSS_VALUE_ANCHOR_NAMES)
+			style->anchor_scope = cascade_keep(engine, value->anchor_names, sizeof(*value->anchor_names));
+		break;
+	case CSS_PROP_POSITION_ANCHOR:
+		style->position_anchor = value->keyword == 1 ? value->ident : NULL;
+		break;
 	case CSS_PROP_DISPLAY:
 		style->display = value->keyword;
 		break;
@@ -3708,8 +4141,11 @@ cascade_apply(
 		style->writing_sideways = 0;
 		style->writing_mode = value->keyword;
 		if (value->keyword > CSS_WRITING_VERTICAL_RL) {
+			/* sideways-lr flows its blocks like vertical-lr, sideways-rl like vertical-rl. */
 			style->writing_sideways = value->keyword - CSS_WRITING_VERTICAL_RL;
-			style->writing_mode = CSS_WRITING_HORIZONTAL_TB;
+			style->writing_mode = CSS_WRITING_VERTICAL_LR;
+			if (style->writing_sideways == 2)
+				style->writing_mode = CSS_WRITING_VERTICAL_RL;
 		}
 		break;
 	case CSS_PROP_TEXT_ORIENTATION:
@@ -3752,9 +4188,19 @@ cascade_apply(
 		break;
 	case CSS_PROP_GRID_TEMPLATE_COLUMNS:
 		cascade_tracks(engine, style, value, style->columns, &style->column_count, &style->column_repeat);
+		style->column_names = cascade_line_names(engine, value);
+		style->column_subgrid = cascade_subgrid(engine, value);
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		cascade_tracks(engine, style, value, style->rows, &style->row_count, &style->row_repeat);
+		style->row_names = cascade_line_names(engine, value);
+		style->row_subgrid = cascade_subgrid(engine, value);
+		break;
+	case CSS_PROP_GRID_TEMPLATE_AREAS:
+		/* The areas, in the engine's arena. */
+		style->areas = NULL;
+		if (value->kind == CSS_VALUE_AREAS && value->areas != NULL)
+			style->areas = cascade_keep_areas(engine, value->areas);
 		break;
 	case CSS_PROP_GRID_AUTO_FLOW:
 		style->grid_auto_flow = value->keyword;
@@ -3775,18 +4221,22 @@ cascade_apply(
 			place = &style->grid_row;
 		line = 0;
 		span = 0;
+		name = NULL;
 		if (value->kind == CSS_VALUE_GRID_LINE) {
 			line = (int)value->number;
 			span = value->keyword;
+			name = value->ident;
 		}
 
-		/* The start's line and span, or the end's. */
+		/* The start's line, span and name, or the end's. */
 		if (property == CSS_PROP_GRID_COLUMN_START || property == CSS_PROP_GRID_ROW_START) {
 			place->start = line;
 			place->start_span = span;
+			place->start_name = name;
 		} else {
 			place->end = line;
 			place->end_span = span;
+			place->end_name = name;
 		}
 
 		/* The place is set. */
@@ -4009,6 +4459,7 @@ cascade_inherit(
 	case CSS_PROP_ALIGN_ITEMS:
 		style->align_items = parent->align_items;
 		style->flex_keywords = (style->flex_keywords & ~4u) | (parent->flex_keywords & 4u);
+		style->last_baselines = (style->last_baselines & ~4u) | (parent->last_baselines & 4u);
 		break;
 	case CSS_PROP_ALIGN_CONTENT:
 		style->align_content = parent->align_content;
@@ -4017,10 +4468,12 @@ cascade_inherit(
 	case CSS_PROP_ALIGN_SELF:
 		style->align_self = parent->align_self;
 		style->flex_keywords = (style->flex_keywords & ~8u) | (parent->flex_keywords & 8u);
+		style->last_baselines = (style->last_baselines & ~8u) | (parent->last_baselines & 8u);
 		break;
 	case CSS_PROP_JUSTIFY_SELF:
 		style->justify_self = parent->justify_self;
 		style->flex_keywords = (style->flex_keywords & ~0u) | (parent->flex_keywords & 0u);
+		style->last_baselines = (style->last_baselines & ~0x100u) | (parent->last_baselines & 0x100u);
 		break;
 	case CSS_PROP_ROW_GAP:
 		style->row_gap = parent->row_gap;
@@ -4088,21 +4541,27 @@ cascade_inherit(
 		break;
 	case CSS_PROP_WIDTH:
 		style->width = parent->width;
+		style->anchor[CSS_ANCHOR_SLOT_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_WIDTH];
 		break;
 	case CSS_PROP_HEIGHT:
 		style->height = parent->height;
+		style->anchor[CSS_ANCHOR_SLOT_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_HEIGHT];
 		break;
 	case CSS_PROP_MIN_WIDTH:
 		style->min_width = parent->min_width;
+		style->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_MIN_WIDTH];
 		break;
 	case CSS_PROP_MAX_WIDTH:
 		style->max_width = parent->max_width;
+		style->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH] = parent->anchor[CSS_ANCHOR_SLOT_MAX_WIDTH];
 		break;
 	case CSS_PROP_MIN_HEIGHT:
 		style->min_height = parent->min_height;
+		style->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_MIN_HEIGHT];
 		break;
 	case CSS_PROP_MAX_HEIGHT:
 		style->max_height = parent->max_height;
+		style->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT] = parent->anchor[CSS_ANCHOR_SLOT_MAX_HEIGHT];
 		break;
 	case CSS_PROP_MARGIN_TOP:
 	case CSS_PROP_MARGIN_RIGHT:
@@ -4121,6 +4580,32 @@ cascade_inherit(
 	case CSS_PROP_BOTTOM:
 	case CSS_PROP_LEFT:
 		style->offset[property - CSS_PROP_TOP] = parent->offset[property - CSS_PROP_TOP];
+		style->anchor[property - CSS_PROP_TOP] = parent->anchor[property - CSS_PROP_TOP];
+		break;
+	case CSS_PROP_ANCHOR_NAME:
+		style->anchor_names = parent->anchor_names;
+		break;
+	case CSS_PROP_TRANSFORM_SET:
+		style->transform_set = parent->transform_set;
+		break;
+	case CSS_PROP_POSITION_AREA:
+		style->position_area = parent->position_area;
+		break;
+	case CSS_PROP_POSITION_TRY_FALLBACKS:
+		style->position_try = parent->position_try;
+		break;
+	case CSS_PROP_POSITION_TRY_ORDER:
+		style->position_try_order = parent->position_try_order;
+		break;
+	case CSS_PROP_POSITION_VISIBILITY:
+		style->position_visibility = parent->position_visibility;
+		break;
+	case CSS_PROP_ANCHOR_SCOPE:
+		style->anchor_scope = parent->anchor_scope;
+		style->anchor_scope_all = parent->anchor_scope_all;
+		break;
+	case CSS_PROP_POSITION_ANCHOR:
+		style->position_anchor = parent->position_anchor;
 		break;
 	case CSS_PROP_Z_INDEX:
 		style->z_index = parent->z_index;
@@ -4243,11 +4728,18 @@ cascade_inherit(
 		memcpy(style->columns, parent->columns, sizeof(style->columns));
 		style->column_count = parent->column_count;
 		style->column_repeat = parent->column_repeat;
+		style->column_names = parent->column_names;
+		style->column_subgrid = parent->column_subgrid;
 		break;
 	case CSS_PROP_GRID_TEMPLATE_ROWS:
 		memcpy(style->rows, parent->rows, sizeof(style->rows));
 		style->row_count = parent->row_count;
 		style->row_repeat = parent->row_repeat;
+		style->row_names = parent->row_names;
+		style->row_subgrid = parent->row_subgrid;
+		break;
+	case CSS_PROP_GRID_TEMPLATE_AREAS:
+		style->areas = parent->areas;
 		break;
 	case CSS_PROP_GRID_AUTO_FLOW:
 		style->grid_auto_flow = parent->grid_auto_flow;
@@ -4313,9 +4805,14 @@ cascade_align(
 	int keyword)
 {
 	style->flex_keywords &= ~(bit | (bit << 4));
+	style->last_baselines &= ~bit;
 	if ((keyword & 0x1000) != 0) {
 		keyword &= ~0x1000;
 		style->flex_keywords |= bit << 4;
+	}
+	if ((keyword & 0x2000) != 0) {
+		keyword &= ~0x2000;
+		style->last_baselines |= bit;
 	}
 	if (keyword == CSS_ALIGN_FLEX_START) {
 		keyword = CSS_ALIGN_START;
@@ -4358,6 +4855,8 @@ cascade_tracks(
 		repeat->length = value->tracks->repeat_length;
 		repeat->at = value->tracks->repeat_at;
 		repeat->fit = value->tracks->repeat_fit;
+		repeat->name_prefix = value->tracks->repeat_name_prefix;
+		repeat->name_end = value->tracks->repeat_name_end;
 	}
 
 	/* Each track. */
@@ -4413,6 +4912,299 @@ cascade_tracks(
 
 	/* The number of tracks. */
 	*count = (int)index;
+}
+
+/*
+ * The line names a declared grid template gives its lines, kept in the
+ * engine's arena, or NULL when it names none (or there is no memory).
+ */
+static const struct css_line_names *
+cascade_line_names(
+	struct css_engine *engine,
+	const struct css_value *value)
+{
+	const struct css_line_names *const *kept;
+	struct css_line_names *copy;
+	size_t lines;
+	size_t index;
+	int error;
+
+	/* Only a parsed track list with a name has names. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL)
+		return NULL;
+	if (!value->tracks->named)
+		return NULL;
+
+	/* A copy kept before with the same names. */
+	lines = CSS_TRACKS + 1U;
+	for (index = 0; index < engine->kept_names.count; index++) {
+		kept = wb_vector_at(&engine->kept_names, index);
+		if (memcmp(*kept, value->tracks->names, lines * sizeof(**kept)) == 0)
+			return *kept;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, lines * sizeof(*copy));
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, value->tracks->names, lines * sizeof(*copy));
+	error = wb_vector_push(&engine->kept_names, &copy);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the names live as long as the engine. */
+	return copy;
+}
+
+/*
+ * Works out the styles of a style's position-try-fallbacks entries that
+ * name a @position-try rule: the style with the rule's declarations of
+ * the properties such a rule can set applied.
+ */
+static void
+cascade_try_styles(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent)
+{
+	const struct css_try_rule *rule;
+	const struct css_declaration *declaration;
+	struct css_try_style result;
+	struct css_style *copy;
+	size_t index;
+	int entry;
+	int property;
+
+	/* Only a style with fallbacks. */
+	for (entry = 0; entry < CSS_TRY_ENTRIES; entry++)
+		style->try_styles[entry] = NULL;
+	if (style->position_try == NULL)
+		return;
+	copy = malloc(sizeof(*copy));
+	if (copy == NULL)
+		return;
+
+	/* Each named entry. */
+	for (entry = 0; entry < style->position_try->count; entry++) {
+		if (style->position_try->entries[entry].name == NULL)
+			continue;
+		rule = cascade_try_rule(engine, style->position_try->entries[entry].name);
+		if (rule == NULL)
+			continue;
+
+		/* The style with the rule's declarations that a fallback can set. */
+		*copy = *style;
+		for (index = 0; index < rule->declaration_count; index++) {
+			declaration = &rule->declarations[index];
+			property = declaration->property;
+			if (!((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
+			    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+			    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT) ||
+			    property == CSS_PROP_POSITION_AREA || property == CSS_PROP_POSITION_ANCHOR ||
+			    property == CSS_PROP_ALIGN_SELF || property == CSS_PROP_JUSTIFY_SELF ||
+			    (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_MAX_BLOCK_SIZE)))
+				continue;
+			cascade_apply(engine, copy, parent, declaration);
+		}
+
+		/* What it sets, kept. */
+		memset(&result, 0, sizeof(result));
+		memcpy(result.offset, copy->offset, sizeof(result.offset));
+		memcpy(result.margin, copy->margin, sizeof(result.margin));
+		result.width = copy->width;
+		result.height = copy->height;
+		result.min_width = copy->min_width;
+		result.min_height = copy->min_height;
+		result.max_width = copy->max_width;
+		result.max_height = copy->max_height;
+		memcpy(result.anchor, copy->anchor, sizeof(result.anchor));
+		result.position_area = copy->position_area;
+		result.position_anchor = copy->position_anchor;
+		result.justify_self = copy->justify_self;
+		result.align_self = copy->align_self;
+		style->try_styles[entry] = cascade_keep(engine, &result, sizeof(result));
+	}
+	free(copy);
+}
+
+/* Finds the @position-try rule of a name that comes last in the sheets (NULL when there is none). */
+static const struct css_try_rule *
+cascade_try_rule(
+	const struct css_engine *engine,
+	const struct vm_string *name)
+{
+	const struct cascade_sheet *sheets;
+	const struct css_try_rule *found;
+	size_t index;
+	size_t rule;
+
+	/* Each sheet's rules in order: the last of the name wins. */
+	found = NULL;
+	sheets = engine->sheets.items;
+	for (index = 0; index < engine->sheets.count; index++) {
+		if (sheets[index].sheet == NULL)
+			continue;
+		for (rule = 0; rule < sheets[index].sheet->try_rule_count; rule++) {
+			if (vm_string_equal(sheets[index].sheet->try_rules[rule].name, name))
+				found = &sheets[index].sheet->try_rules[rule];
+		}
+	}
+	return found;
+}
+
+/* Keeps a subgrid template's serialization in the engine's arena (NULL for another template). */
+static const char *
+cascade_subgrid(
+	struct css_engine *engine,
+	const struct css_value *value)
+{
+	/* Only a parsed subgrid list has one. */
+	if (value->kind != CSS_VALUE_TRACKS || value->tracks == NULL || value->tracks->subgrid == NULL)
+		return NULL;
+	return cascade_keep(engine, value->tracks->subgrid, strlen(value->tracks->subgrid) + 1U);
+}
+
+/* Copies a value into the engine's arena, once for each different value. */
+static const void *
+cascade_keep(
+	struct css_engine *engine,
+	const void *data,
+	size_t size)
+{
+	const struct cascade_kept *kept;
+	struct cascade_kept made;
+	void *copy;
+	size_t index;
+	int error;
+
+	/* A copy kept before with the same bytes. */
+	for (index = 0; index < engine->kept_anchors.count; index++) {
+		kept = wb_vector_at(&engine->kept_anchors, index);
+		if (kept->size == size && memcmp(kept->data, data, size) == 0)
+			return kept->data;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, size);
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, data, size);
+	made.data = copy;
+	made.size = size;
+	error = wb_vector_push(&engine->kept_anchors, &made);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the copy lives as long as the engine. */
+	return copy;
+}
+
+/*
+ * Puts a sum with anchor functions in an inset's or a size's anchor slot
+ * (ems and rems in pixels) and marks the property's length as anchored.
+ */
+static void
+cascade_anchor(
+	struct css_engine *engine,
+	struct css_style *style,
+	int property,
+	const struct css_anchor_expr *expr)
+{
+	struct css_anchor_expr resolved;
+	struct css_anchor_query *query;
+	struct css_length *length;
+	int slot;
+	int index;
+
+	/* The slot and the length of the property. */
+	switch (property) {
+	case CSS_PROP_TOP:
+	case CSS_PROP_RIGHT:
+	case CSS_PROP_BOTTOM:
+	case CSS_PROP_LEFT:
+		slot = property - CSS_PROP_TOP;
+		length = &style->offset[slot];
+		break;
+	case CSS_PROP_WIDTH:
+		slot = CSS_ANCHOR_SLOT_WIDTH;
+		length = &style->width;
+		break;
+	case CSS_PROP_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_HEIGHT;
+		length = &style->height;
+		break;
+	case CSS_PROP_MIN_WIDTH:
+		slot = CSS_ANCHOR_SLOT_MIN_WIDTH;
+		length = &style->min_width;
+		break;
+	case CSS_PROP_MIN_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_MIN_HEIGHT;
+		length = &style->min_height;
+		break;
+	case CSS_PROP_MAX_WIDTH:
+		slot = CSS_ANCHOR_SLOT_MAX_WIDTH;
+		length = &style->max_width;
+		break;
+	case CSS_PROP_MAX_HEIGHT:
+		slot = CSS_ANCHOR_SLOT_MAX_HEIGHT;
+		length = &style->max_height;
+		break;
+	default:
+		return;
+	}
+
+	/* The sum in pixels. */
+	memset(&resolved, 0, sizeof(resolved));
+	resolved.px = expr->px + expr->em * style->font_size + expr->rem * engine->root_font_size;
+	resolved.percent = expr->percent;
+	resolved.has_percent = expr->has_percent;
+	resolved.count = expr->count;
+	for (index = 0; index < expr->count; index++) {
+		query = &resolved.terms[index];
+		*query = expr->terms[index];
+		query->fallback_px += query->fallback_em * style->font_size + query->fallback_rem * engine->root_font_size;
+		query->fallback_em = 0;
+		query->fallback_rem = 0;
+	}
+
+	/* Kept, and the length marked. */
+	style->anchor[slot] = cascade_keep(engine, &resolved, sizeof(resolved));
+	length->unit = CSS_UNIT_ANCHOR;
+	length->value = 0;
+	length->offset = 0;
+	if (style->anchor[slot] == NULL)
+		length->unit = CSS_UNIT_AUTO;
+}
+
+/* Keeps a grid-template-areas value in the engine's arena (one copy of each distinct value); NULL when there is no memory. */
+static const struct css_grid_areas *
+cascade_keep_areas(
+	struct css_engine *engine,
+	const struct css_grid_areas *areas)
+{
+	const struct css_grid_areas *const *kept;
+	struct css_grid_areas *copy;
+	size_t index;
+	int error;
+
+	/* A copy kept before with the same cells. */
+	for (index = 0; index < engine->kept_areas.count; index++) {
+		kept = wb_vector_at(&engine->kept_areas, index);
+		if (memcmp(*kept, areas, sizeof(*areas)) == 0)
+			return *kept;
+	}
+
+	/* A new copy. */
+	copy = wb_arena_alloc(&engine->arena, sizeof(*copy));
+	if (copy == NULL)
+		return NULL;
+	memcpy(copy, areas, sizeof(*copy));
+	error = wb_vector_push(&engine->kept_areas, &copy);
+	if (error != 0)
+		return NULL;
+
+	/* Succeeded: the areas live as long as the engine. */
+	return copy;
 }
 
 /*
@@ -4477,6 +5269,8 @@ cascade_text_shadow(
 	style->text_shadow.x = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
 	length = cascade_length(engine, &declared->lengths[1], style->font_size);
 	style->text_shadow.y = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+	length = cascade_length(engine, &declared->lengths[2], style->font_size);
+	style->text_shadow.blur = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
 	style->text_shadow.color = declared->color;
 	style->text_shadow_set = 1;
 }

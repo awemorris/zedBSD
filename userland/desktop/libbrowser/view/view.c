@@ -649,6 +649,10 @@ browser_view_timeout(
 	if (view->page == NULL)
 		return timeout;
 
+	/* An image's event to fire is due at once. */
+	if (page_images_ready(view->page))
+		return 0;
+
 	/* A playing video's next picture (ws121-p004). */
 	media = page_media_timeout(view->page);
 	if (media >= 0 && (timeout < 0 || media < timeout))
@@ -697,6 +701,13 @@ browser_view_process(
 
 	/* The media's engines: their states and the pictures due (ws121-p004). */
 	page_media_process(view->page);
+
+	/* The images that came fire their elements' events. */
+	error = page_images_checkpoint(view->page);
+	if (error != 0 && view->callbacks.script_error != NULL)
+		view->callbacks.script_error(view->callbacks.context, view, error);
+	if (view->page == NULL)
+		return;
 
 	/* A page the scripts, the images and the media left as it was needs nothing more. */
 	changed = page_needs_layout(view->page);

@@ -11,6 +11,10 @@ Parent: [Master](../master.md)
 Owner: Q1（プロジェクト全体）。この Codex セッションがユーザーの指示で WS074 の Queue を単独管理し、WPT 2025 に進む。`master.md` は変更しない。
 Queue: [ws074-q20261019-55](queue.md) active（2026-10-18、Codex単独）。ユーザーが100%までの自走を指示。[契約](autonomy.md)。
 
+Event ws074-p260-start-20261027: ユーザー「WPT Interop 2025で、chromeが成功している項目に限り、100%を目指しましょう。」により [p260](phase260/phase.md) を立てた。分母は同じ runner で Chromium が PASS する ID。WPT を全体の checkout に直し（sparse で harness 1,072/static 1,536 に欠けていた）、Chromium の adapter と比較の道具を足した。基準の測定は実行中。
+
+Event ws074-cloud-setup-20261027: ユーザーの指示で、Claude Code on the web の container に host の build と Chromium（Chrome for Testing 153 の headless shell）との描画の比較を立てた。手順・結果・制限は「[クラウド環境での構築と Chromium との比較](#クラウド環境での構築と-chromium-との比較2026-10-27)」。ライブのサイトとの比較は network の方針で未達。
+
 Latest verified（q54）: actual global Proxy/revocable公開partial clear。public42 native/genuine一致・private866/Chrome864既知huge2、direct installer/revoker実GC/graph回収。全eligible3530 current pair・1482/3805・held0/未attempt275、harness whole494維持/旧PASS loss0・original IDL setup2修復/新14PASS28FAIL（net+16PASS）。source6b6be56e0 main統合・master編集無し。Reflect/whole/p100/full target/100%未達。[証拠](phase258/evidence/20261019-q54/README.md)。共有投影pending。
 
 Event ws074-q14-percentage-scope-reconciled-20261018: precode Chrome17条件でzero/cancelled %型の依存を確認。p251をi01、p250をi02へ改訂しglobal1491/static1561照合へ拡張、初期snapshot保存/60分deadline維持。
@@ -338,6 +342,63 @@ Event ws074-p205-addition-q1057-20261014: q1056旧PASS→FAIL8件のうち5件�
 Event ws074-p190-q1056-outcome-20261014: [p190](phase190/phase.md) q1056-i01は静的1,561 ID再集計を完了、640 local PASS/921 pixel FAIL/0 error/0 timeout。[証拠](phase190/evidence/20261014-q1056/README.md)。q1053旧359 errorは全て描画に進み、122 PASS/237 pixel FAIL。旧8 PASS→FAILは未回復。q1056部分cleared、p190/p173 whole未達。共有Master/Queue/GitHub publication保留。
 
 Event ws074-p204-q1055-outcome-and-p203-followup-20261014: [p204](phase204/phase.md) q1055-i01はwhole cleared。旧47 load errorは0、47 pixel FAILで描画に進んだ。[証拠](phase204/evidence/20261014-q1055/README.md)。host XML249/249・固定Flex10/10 PASS・Acid3差0/Acid2差1865。旧359 load errorの解消で[p203](phase203/phase.md) wholeも後続判定cleared、q1054 attempt結果は保持。p190/p173の画素・coverage・100%は未達、共有Master/Queue/GitHub publication保留。
+
+## クラウド環境での構築と Chromium との比較（2026-10-27）
+
+ユーザーの決定（原文、2026-10-27）: 「あなたはWebブラウザの改良、ws074を担当します。master.mdには書き込まず、ws074/ws.mdと下位のphaseにのみ書き込めます。
+環境構築が必要だと思います。クラウド環境でのlibbrowserやそのテスト用シェルの構築など。比較用のChromeのインストールなどもあります。まずはそれらの構築を進めて、手順はws.mdに記録してください。Chrome/Chromiumの描画結果と、libbrowserの描画結果を、比較できる状態まで持っていってください。」
+
+解釈: Claude Code on the web の container（Ubuntu 24.04、4 core、checkout は `/home/user/zedBSD`）を、host の build と Chromium との描画の比較ができる状態にする。
+書いてよいのは `plan/ws074/` の下だけ（master.md・queue.md・registry は書かない）。このセッションは Q1 の環境（`/home/awe/`、worktree、実機、QEMU の割当）を持たない。
+
+### 手順（新しい container ごとに）
+
+```sh
+cd /home/user/zedBSD
+sh plan/ws074/tests/cloud-setup.sh                 # apt の package、chromium の wrapper、fonts.conf
+CC=clang sh plan/ws074/tests/host-build.sh plain   # build/ws074-host/plain/browser と host-NAME
+python3 plan/ws074/tests/render-compare.py plan/ws074/tests/pages/blocks.html   # 1 頁を比べる
+sh plan/ws074/tests/fetch-suites.sh wpt            # WPT の固定 commit を build/ws074-suites/wpt へ（約 30 秒、425 MB）
+python3 -I plan/ws074/tests/run-acid-tests.py      # Acid2・Acid3（結果は build/ws074-acid/report.json）
+# scripted reftest の client（libbrowser.so を公開 API で使う）
+clang -std=gnu11 -O1 -g -Wall -Wextra -Werror -D_GNU_SOURCE -Ibuild/ws074-host/include -Iuserland/desktop/include \
+    plan/ws074/tests/wpt-ready-render.c -Lbuild/ws074-host/plain -lbrowser -Wl,-rpath,'$ORIGIN' \
+    -o build/ws074-host/plain/wpt-ready-render
+# Interop 2025 を Chromium と browser で測って比べる（p260）
+python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind chrome --out build/ws074-cmp/chrome
+python3 plan/ws074/tests/interop2025-chrome-gap.py measure --kind ours --out build/ws074-cmp/ours
+python3 plan/ws074/tests/interop2025-chrome-gap.py compare --chrome build/ws074-cmp/chrome --ours build/ws074-cmp/ours
+```
+
+- WPT は全体を取る（2026-10-27 に fetch-suites.sh の sparse を外した。sparse では Interop の html/ などが欠けた）。
+
+- `cloud-setup.sh` が入れる物: `clang`・`libvulkan-dev`・`mesa-vulkan-drivers`（lavapipe）・`fontconfig`・`python3-pil`。
+- **Chrome**: dl.google.com は network の方針で 403、Ubuntu の `chromium` は snap で使えない。container に Playwright が入れた
+  Chrome for Testing 153.0.8010.12 があるので、それを使う。ただし full の `chrome --headless --screenshot` は D-Bus が無く終わらない（120 秒の timeout）ので、
+  同じ版の `chrome-headless-shell`（`/opt/pw-browsers/chromium_headless_shell-*/`）を使う。
+  runner は `chromium` という名前で呼ぶので、`cloud-setup.sh` が wrapper `build/ws074-chrome/bin/chromium` を作り、`/usr/local/bin/chromium` をそれへの symlink にする。
+  runner が使う option（`--headless`・`--screenshot`・`--window-size`・`--dump-dom`・`--virtual-time-budget`・`--user-agent` ほか）は headless shell で通る。
+- **compiler**: Ubuntu の gcc は `_FORTIFY_SOURCE` を既定で付けるので、`net/loader.c` の `(void)write(...)` が `-Werror=unused-result` で止まる。`CC=clang`（clang 18.1.3）なら warning 0 で通る。
+- **font**: `chrome-fonts.sh` が `build/ws074-chrome/fonts.conf` を書き、Chromium にも browser と同じ font（Mahora・JetBrains Mono・Droid Sans Fallback）で描かせる。
+- 比べ方: `render-compare.py` は browser の `--render`（CPU）と Chromium の screenshot を 800×600 で撮り、`build/ws074-render/NAME-{ours,chrome,side}.png` を書く。
+  side は「ours | Chromium | 差（4 倍）」。どの channel の差も 16 以下の pixel を一致とする（design.md §14.5）。
+
+### 確かめた結果（2026-10-27 18:39 UTC、この container）
+
+| 確認 | 結果 |
+| --- | --- |
+| `CC=clang sh plan/ws074/tests/host-build.sh plain` | rc 0、warning・error 0（gcc では上の 1 件で止まる） |
+| render-compare（pages/ の 6 頁） | blocks 96.89%・flex 98.74%・grid 98.77%・floats 96.76%・decoration 98.65%・first 96.57%。blocks の side を目で見て、layout は一致、差は字形の antialias |
+| fetch-suites.sh wpt | 2d66b9b7998b、licence 確認済み |
+| run-acid-tests.py | Acid3 100/100・pixel 差 0、Acid2 99.27%（差 873 pixel）。記録の「Acid3 差 0/Acid2 差 873」と同じ |
+
+### 制限（未解決）
+
+- **ライブのサイトとの比較はできない**: container の外への HTTPS は proxy（`HTTPS_PROXY`）を通る。browser の loader は proxy を使わない（`https://example.com/` が No route to host）。
+  curl を使う `site-capture.py` も、proxy が example.com への CONNECT を 403 で拒む（GitHub は通る）。
+  使うには、ユーザーが環境の Network access で対象の host を許可する必要がある。加えて、live-compare.py に保存した capture（file の path）を渡すか、browser に proxy の対応を足す（範囲の外なので要判断）。
+- asan の build（`host-build.sh asan`）・試験の runner の全部（run-interop2025-*、run-wpt-reftests.py ほか）は、この container では未実施。
+- 環境は消えるので、`build/` は残らない。新しい container では上の手順をもう一度流す。
 
 ## Q1 向けの整理（2026-10-05、Q1）
 
@@ -708,6 +769,9 @@ p009 → p018 → p027 → p028 → p029 → p047 → p031 → p032 → p033 →
 | [ws074-p257](phase257/phase.md) | synchronous generator yield* delegation | cleared / q29 sync own criteria・Chrome38/native GC10 | q28 VM/GC・p189 pinned WebIDL2 |
 | [ws074-p258](phase258/phase.md) | native Proxy internal methods・GC/revocation | uncleared / q54 global Proxy/revocable partial cleared・whole残り | q29 VM/GC・p189 actual Proxy blocker |
 | [ws074-p259](phase259/phase.md) | inline specified numeric stateとflex-factor canonical serialization | in-progress / q55 | p191 CSSOM/p253 attribute commit/q54 full3530 baseline |
+| [ws074-p260](phase260/phase.md) | Interop 2025 の Chromium が通る試験を全部通す（2026-10-27 ユーザー） | in-progress / Queue なし（web のセッション） | クラウド環境の構築、chrome-run.js・interop2025-chrome-gap.py |
+| [ws074-p261](phase261/phase.md) | History と Navigation API（同じ文書の中）、p260 の一部 | in-progress | p260 の gap の測定 |
+| [ws074-p262](phase262/phase.md) | 縦書きの writing-mode を logical の座標で layout する、p260 の一部 | in-progress | p260 の gap の測定 |
 
 2026-10-13 / q1000-terminal-and-p179-addition: p178 の1領域試行は、参照の背景画像が欠ける全画面差のため uncleared。固定 WPT と host build warning0、Acid3 score100/100・差302056/480000、Acid2差1865/120000 の証拠は[p178](phase178/phase.md)と[q1000履歴](../history/queue-q1000.md)。原因の切り分けと修正を[p179](phase179/phase.md)として追加し、verified 出力後に p178 を再試行する。p100/WS074 の受け入れは未達。メインの共有 Queue/Project/GitHub への投影は未実施。
 

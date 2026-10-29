@@ -24,6 +24,7 @@
 #define BOX_BULLET_CIRCLE	0x25e6U
 #define BOX_BULLET_SQUARE	0x25aaU
 
+static void box_root_flow(struct layout_box *root);
 static int box_build_element(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, const struct css_style *parent_style, struct layout_box *parent, int depth);
 static int box_build_pseudo(struct layout_tree *tree, struct css_engine *css, struct dom_element *element, struct layout_box *box, int pseudo);
 static int box_build_children(struct layout_tree *tree, struct css_engine *css, struct dom_node *node, const struct css_style *style, struct layout_box *box, int depth);
@@ -41,6 +42,8 @@ static int box_flex_items(struct layout_tree *tree, struct layout_box *box);
 static void box_anonymous_style(const struct css_style *parent, struct css_style *style);
 static void box_marker(struct layout_box *box, int ordinal);
 static void box_relative_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
+static void box_relative_within(const struct layout_box *box, const struct layout_box *containing, layout_unit *dx, layout_unit *dy);
+static void box_inline_relative(struct layout_box *block);
 static void box_transform_offset(const struct layout_box *box, layout_unit *dx, layout_unit *dy);
 static void box_apply_scale(struct layout_box *box);
 static void box_static_inline(struct layout_box *box, layout_unit x, layout_unit y);
@@ -97,12 +100,20 @@ layout_build(
 	if (root == NULL)
 		return 0;
 
+	/* An HTML root uses its body's writing mode and direction (its own computed ones still pass to its children). */
+	box_root_flow(root);
+
 	/* Lays the root out in the viewport and makes every position absolute. */
 	error = layout_block(tree, root, tree->viewport_width);
 	if (error != 0)
 		return error;
 	root->x = root->margin[CSS_LEFT];
 	root->y = root->margin[CSS_TOP];
+
+	/* A vertical-rl root starts its blocks at the viewport's right edge. */
+	if (root->style.writing_mode == CSS_WRITING_VERTICAL_RL)
+		root->x = tree->viewport_width - root->margin[CSS_RIGHT] - root->border[CSS_RIGHT] -
+		    root->padding[CSS_RIGHT] - root->width - root->padding[CSS_LEFT] - root->border[CSS_LEFT];
 	layout_absolute(root, 0, 0);
 
 	/* The document is as tall as the root's margin box. */
@@ -209,6 +220,7 @@ layout_absolute(
 
 	/* The lines are relative to the block; boxes out of the flow among them start at its content's top. */
 	if (box->children_inline) {
+		box_inline_relative(box);
 		box_static_inline(box, content_x, content_y);
 		return;
 	}
@@ -253,6 +265,53 @@ layout_is_positioned(
 		return 1;
 
 	/* Static boxes. */
+	return 0;
+}
+
+/* Tells whether a box is the containing block of the boxes out of the flow inside it: a positioned box or one with a transform. */
+int
+layout_contains_absolute(
+	const struct layout_box *box)
+{
+	/* Positioned, or transformed. */
+	return layout_is_positioned(box) || layout_contains_fixed(box);
+}
+
+/* Tells whether a box is the containing block of the fixed boxes inside it: one with a transform. */
+int
+layout_contains_fixed(
+	const struct layout_box *box)
+{
+	/* A transformed block. */
+	return box->kind == LAYOUT_BLOCK && box->style.transform_set;
+}
+
+/*
+ * Tells whether a box is painted in its own turn of its stacking context:
+ * a positioned box, or a flex or grid item with a z-index (which stacks as
+ * a positioned box does without being positioned).
+ * https://drafts.csswg.org/css-flexbox-1/#painting
+ * https://drafts.csswg.org/css-grid-2/#z-order
+ */
+int
+layout_is_layered(
+	const struct layout_box *box)
+{
+	int display;
+
+	/* Positioned boxes. */
+	if (layout_is_positioned(box))
+		return 1;
+
+	/* An in-flow flex or grid item with an integer z-index. */
+	if (box->kind != LAYOUT_BLOCK || box->style.z_index_auto || box->out_of_flow || box->parent == NULL)
+		return 0;
+	display = box->parent->style.display;
+	if (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX ||
+	    display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
+		return 1;
+
+	/* Other boxes. */
 	return 0;
 }
 
@@ -319,6 +378,36 @@ layout_font_of(
 		found = text_select_family(tree->text, style->families[index], style->font_weight, style->font_italic, font);
 		if (found)
 			return;
+	}
+}
+
+/*
+ * Gives the root element's box the writing mode and direction of its first
+ * body child, as HTML documents use them.
+ * https://drafts.csswg.org/css-writing-modes-4/#principal-flow
+ */
+static void
+box_root_flow(
+	struct layout_box *root)
+{
+	const struct dom_element *element;
+	struct layout_box *child;
+	int is_body;
+
+	/* The first child box of a body element. */
+	for (child = root->first_child; child != NULL; child = child->next) {
+		if (child->node == NULL || child->node->type != DOM_ELEMENT)
+			continue;
+		element = (const struct dom_element *)child->node;
+		is_body = vm_string_equal_ascii(element->local_name, "body");
+		if (!is_body)
+			continue;
+
+		/* Its flow is the root's. */
+		root->style.writing_mode = child->style.writing_mode;
+		root->style.writing_sideways = child->style.writing_sideways;
+		root->style.direction = child->style.direction;
+		return;
 	}
 }
 
@@ -713,6 +802,11 @@ box_new(
 	box->kind = kind;
 	box->node = node;
 	box->style = *style;
+
+	/* Anchor functions are only for boxes out of the flow; the others' are invalid. */
+	if (box->style.position != CSS_POSITION_ABSOLUTE && box->style.position != CSS_POSITION_FIXED &&
+	    layout_anchor_wanted(box))
+		layout_anchor_resolve(tree, box, 0, 0, 0, 0);
 
 	/* An element's box finds the background image its style names (text shares its element's style, not its box). */
 	if (kind != LAYOUT_TEXT && style->background_image != NULL && tree->url_lookup != NULL)
@@ -1271,6 +1365,9 @@ box_anonymous_style(
 	style->text_align = parent->text_align;
 	style->text_indent = parent->text_indent;
 	style->direction = parent->direction;
+	style->writing_mode = parent->writing_mode;
+	style->writing_sideways = parent->writing_sideways;
+	style->text_orientation = parent->text_orientation;
 	style->white_space = parent->white_space;
 	style->visibility = parent->visibility;
 	style->underline = parent->underline;
@@ -1456,8 +1553,72 @@ box_relative_offset(
 	layout_unit *dx,
 	layout_unit *dy)
 {
+	/* Its containing block is its parent. */
+	box_relative_within(box, box->parent, dx, dy);
+}
+
+/* Moves the fragments and decorations of a block's lines by the offsets of their relatively positioned inline boxes. */
+static void
+box_inline_relative(
+	struct layout_box *block)
+{
+	struct layout_line *line;
+	const struct layout_box *walk;
+	layout_unit dx;
+	layout_unit dy;
+	layout_unit x;
+	layout_unit y;
+	size_t index;
+	size_t at;
+	int depth;
+
+	/* Each fragment and decoration: the sum of its inline ancestors' offsets. */
+	for (index = 0; index < block->line_count; index++) {
+		line = &block->lines[index];
+		for (at = 0; at < line->fragment_count; at++) {
+			dx = 0;
+			dy = 0;
+			for (walk = line->fragments[at].box, depth = 0; walk != NULL && walk != block && depth < 64;
+			    walk = walk->parent, depth++) {
+				if (walk->kind != LAYOUT_INLINE)
+					continue;
+				box_relative_within(walk, block, &x, &y);
+				dx += x;
+				dy += y;
+			}
+			line->fragments[at].x += dx;
+			line->fragments[at].shift += dy;
+		}
+		for (at = 0; at < line->decoration_count; at++) {
+			dx = 0;
+			dy = 0;
+			for (walk = line->decorations[at].box, depth = 0; walk != NULL && walk != block && depth < 64;
+			    walk = walk->parent, depth++) {
+				if (walk->kind != LAYOUT_INLINE)
+					continue;
+				box_relative_within(walk, block, &x, &y);
+				dx += x;
+				dy += y;
+			}
+			line->decorations[at].x += dx;
+			line->decorations[at].shift += dy;
+		}
+	}
+}
+
+/* Resolves a relatively positioned box's offsets against a containing block; zero for another box. */
+static void
+box_relative_within(
+	const struct layout_box *box,
+	const struct layout_box *containing,
+	layout_unit *dx,
+	layout_unit *dy)
+{
 	const struct css_length *offset;
+	const struct layout_box *parent;
 	layout_unit width;
+	layout_unit height;
+	int definite;
 
 	/* Only a relative box moves. */
 	*dx = 0;
@@ -1465,10 +1626,23 @@ box_relative_offset(
 	if (box->style.position != CSS_POSITION_RELATIVE)
 		return;
 
-	/* Percentages are of the containing block's width (and the height's are left at zero in this pass). */
+	/*
+	 * Percentages are of the containing block's width, and of its height when
+	 * that is definite (a height of its own, or a flex or grid item's).
+	 */
 	width = 0;
-	if (box->parent != NULL)
-		width = box->parent->width;
+	height = 0;
+	definite = 0;
+	parent = containing;
+	if (parent != NULL) {
+		width = parent->width;
+		height = parent->height;
+		definite = parent->style.height.unit == CSS_UNIT_PX || parent->style.height.unit == CSS_UNIT_PERCENT;
+		if (parent->parent != NULL && !parent->out_of_flow &&
+		    (parent->parent->style.display == CSS_DISPLAY_FLEX || parent->parent->style.display == CSS_DISPLAY_INLINE_FLEX ||
+		    parent->parent->style.display == CSS_DISPLAY_GRID || parent->parent->style.display == CSS_DISPLAY_INLINE_GRID))
+			definite = 1;
+	}
 	offset = box->style.offset;
 
 	/* Horizontally: left wins over right. */
@@ -1482,11 +1656,15 @@ box_relative_offset(
 		*dx = -((layout_unit)((float)width * offset[CSS_RIGHT].value / 100.0f) + layout_from_px(offset[CSS_RIGHT].offset));
 	}
 
-	/* Vertically: top wins over bottom. */
+	/* Vertically: top wins over bottom (an indefinite percentage is auto). */
 	if (offset[CSS_TOP].unit == CSS_UNIT_PX) {
 		*dy = layout_from_px(offset[CSS_TOP].value);
+	} else if (offset[CSS_TOP].unit == CSS_UNIT_PERCENT && definite) {
+		*dy = (layout_unit)((float)height * offset[CSS_TOP].value / 100.0f) + layout_from_px(offset[CSS_TOP].offset);
 	} else if (offset[CSS_BOTTOM].unit == CSS_UNIT_PX) {
 		*dy = -layout_from_px(offset[CSS_BOTTOM].value);
+	} else if (offset[CSS_BOTTOM].unit == CSS_UNIT_PERCENT && definite) {
+		*dy = -((layout_unit)((float)height * offset[CSS_BOTTOM].value / 100.0f) + layout_from_px(offset[CSS_BOTTOM].offset));
 	}
 }
 

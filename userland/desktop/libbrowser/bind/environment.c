@@ -17,7 +17,8 @@
  * data property of the prototype, so an own-property test on the object
  * fails as it does in other browsers; what changes (the screen's size,
  * the clock, the location) is an accessor.  The location is read from the
- * host (the page's URL); its hash setter navigates within this document.
+ * host (the page's URL); navigating it (the setters, history) is the
+ * prelude's session history, which scrolls with bind_scroll_to_fragment.
  * navigator.sendBeacon accepts a beacon without sending it.
  */
 
@@ -492,7 +493,6 @@ static int environment_part_accessor(struct vm_realm *realm, struct vm_object *o
 static int environment_empty_array(struct vm_realm *realm, vm_value *value);
 static int environment_screen_size(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int environment_location_part(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
-static int environment_location_hash_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int environment_fragment_target(struct bind_window *window, const struct wb_buffer *fragment, struct dom_node **target);
 static int environment_reveal_target(struct bind_window *window, struct dom_node *target);
 static int environment_hidden_until_found(const struct vm_string *value);
@@ -652,6 +652,16 @@ bind_environment_attribute_mutation(
 	window = document->view;
 	if (window == NULL || window->detached)
 		return 0;
+
+	/* An image whose source changed loads it again, its load or error event to follow. */
+	if (element->ns == DOM_NS_HTML &&
+	    element->tag == DOM_TAG_IMG &&
+	    window->host.image != NULL &&
+	    vm_string_equal_ascii(name, "src")) {
+		status = window->host.image(window->host.context, element, 1, NULL);
+		if (status != 0)
+			return status;
+	}
 
 	/* The DOM commit lent these retired strings without any intervening VM allocation. */
 	heap = window->realm->heap;
@@ -823,6 +833,58 @@ bind_location_part(
 
 	/* Succeeded: the part's string. */
 	*value = vm_value_cell(string);
+	return 0;
+}
+
+/*
+ * Scrolls to the element a fragment names, revealing its hidden ancestors.
+ *
+ * The fragment is UTF-8 text with or without its leading number sign; *found
+ * says whether an element has the decoded fragment as its id.
+ */
+int
+bind_scroll_to_fragment(
+	struct bind_window *window,
+	const struct wb_buffer *fragment,
+	int *found)
+{
+	struct dom_node *target;
+	struct vm_cell *target_root;
+	struct bind_box box;
+	int error;
+
+	*found = 0;
+
+	/* The element the fragment names, which becomes the document's target (none when it names nothing). */
+	error = environment_fragment_target(window, fragment, &target);
+	if (error != 0)
+		return error;
+	if (window->document->target != target) {
+		window->document->target = target;
+		window->document->generation++;
+	}
+	if (target == NULL)
+		return 0;
+
+	/* The target stays alive while revealing runs scripts' toggle handlers. */
+	*found = 1;
+	target_root = &target->cell;
+	error = vm_heap_add_root(window->realm->heap, &target_root);
+	if (error != 0)
+		return error;
+
+	/* Reveals the target, then scrolls to it when it is still in the document and has a box. */
+	error = environment_reveal_target(window, target);
+	if (error == 0 &&
+	    dom_is_inclusive_ancestor(&window->document->node, target) &&
+	    window->host.node_box != NULL && window->host.scroll_to != NULL &&
+	    window->host.node_box(window->host.context, target, &box))
+		window->host.scroll_to(window->host.context, 0.0, box.y);
+	vm_heap_remove_root(window->realm->heap, &target_root);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the target is shown. */
 	return 0;
 }
 
@@ -1025,8 +1087,7 @@ environment_install_location(
 	realm = window->realm;
 	prototype = window->prototypes[BIND_LOCATION];
 	for (part = environment_location_parts; part->name != NULL; part++) {
-		error = environment_part_accessor(realm, prototype, part->name, environment_location_part,
-			part->part == BIND_LOCATION_HASH ? environment_location_hash_set : NULL, part->part);
+		error = environment_part_accessor(realm, prototype, part->name, environment_location_part, NULL, part->part);
 		if (error != 0)
 			return error;
 	}
@@ -2976,54 +3037,6 @@ environment_reveal_target(
 	for (index = rooted; index != 0U; index--)
 		vm_heap_remove_root(window->realm->heap, &entries[index - 1U].node);
 	free(entries);
-	return error;
-}
-
-/* Same-document fragment navigation, including synchronous ancestor reveal. */
-static int
-environment_location_hash_set(
-	struct vm_realm *realm,
-	vm_value this_value,
-	const vm_value *args,
-	unsigned count,
-	vm_value *result)
-{
-	struct bind_window *window;
-	struct vm_string *given;
-	struct wb_buffer hash;
-	struct dom_node *target;
-	struct vm_cell *target_root;
-	struct bind_box box;
-	int error;
-
-	UNUSED_PARAMETER(this_value);
-	*result = VM_VALUE_UNDEFINED;
-	error = bind_to_string(realm, js_argument(args, count, 0), &given);
-	if (error != 0)
-		return error;
-	wb_buffer_init(&hash);
-	error = vm_string_to_utf8(given, &hash);
-	window = bind_window_of(realm);
-	if (error == 0 && window->host.fragment == NULL)
-		error = ENOTSUP;
-	if (error == 0)
-		error = window->host.fragment(window->host.context, wb_buffer_string(&hash), hash.length);
-	if (error == 0)
-		error = environment_fragment_target(window, &hash, &target);
-	if (error == 0 && target != NULL) {
-		target_root = &target->cell;
-		error = vm_heap_add_root(realm->heap, &target_root);
-		if (error == 0) {
-			error = environment_reveal_target(window, target);
-			if (error == 0 &&
-			    dom_is_inclusive_ancestor(&window->document->node, target) &&
-			    window->host.node_box != NULL && window->host.scroll_to != NULL &&
-			    window->host.node_box(window->host.context, target, &box))
-				window->host.scroll_to(window->host.context, 0.0, box.y);
-			vm_heap_remove_root(realm->heap, &target_root);
-		}
-	}
-	wb_buffer_release(&hash);
 	return error;
 }
 

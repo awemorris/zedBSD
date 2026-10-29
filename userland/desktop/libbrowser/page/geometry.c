@@ -48,6 +48,8 @@ struct page_box_slot {
 
 static int geometry_tree_box(const struct layout_tree *tree, const struct layout_box *first, struct dom_node *node, struct bind_box *box);
 static int geometry_child_box(struct page *page, struct dom_node *node, struct bind_box *box);
+static void geometry_overflow(const struct layout_box *box, int depth, layout_unit *left, layout_unit *top, layout_unit *right, layout_unit *bottom);
+static void geometry_scroll_size(const struct layout_box *first, struct bind_box *box);
 static int geometry_layout(struct page *page);
 static const struct layout_box *geometry_first_box(struct page *page, const struct dom_node *node);
 static int geometry_own_place(const struct layout_box *box);
@@ -144,6 +146,8 @@ page_grid_tracks(
 	struct dom_node *node,
 	int columns,
 	struct wb_vector *sizes,
+	int *leading,
+	int *repeats,
 	int *found)
 {
 	struct page *page;
@@ -157,6 +161,8 @@ page_grid_tracks(
 	/* Child Documents use transient geometry trees and need a separate owned-copy path. */
 	page = context;
 	*found = 0;
+	*leading = 0;
+	*repeats = 0;
 	if (node->document != page->document)
 		return 0;
 
@@ -177,9 +183,13 @@ page_grid_tracks(
 	/* Columns and rows are independent logical track sequences. */
 	tracks = box->grid_used_rows;
 	count = box->grid_used_row_count;
+	*leading = box->grid_leading_rows;
+	*repeats = box->style.row_repeat.count;
 	if (columns) {
 		tracks = box->grid_used_columns;
 		count = box->grid_used_column_count;
+		*leading = box->grid_leading_columns;
+		*repeats = box->style.column_repeat.count;
 	}
 
 	/* Copy every value while the current arena is still alive and unchanged. */
@@ -444,10 +454,169 @@ geometry_tree_box(
 		box->padding_right = layout_to_px(first->padding[1]);
 		box->padding_bottom = layout_to_px(first->padding[2]);
 		box->padding_left = layout_to_px(first->padding[3]);
+		box->inset_known = first->used_inset_known;
+		box->inset[0] = layout_to_px(first->used_inset[0]);
+		box->inset[1] = layout_to_px(first->used_inset[1]);
+		box->inset[2] = layout_to_px(first->used_inset[2]);
+		box->inset[3] = layout_to_px(first->used_inset[3]);
 	}
+
+	/* What a block scrolls over. */
+	if (first != NULL && block && first->kind == LAYOUT_BLOCK)
+		geometry_scroll_size(first, box);
 
 	/* Succeeded: the node has a box. */
 	return 1;
+}
+
+/*
+ * Adds the border boxes of a box's children in the flow and its absolutely
+ * positioned ones when it is positioned (and their descendants that do not
+ * clip) to a rectangle; a flex or grid item's margins count too.
+ */
+static void
+geometry_overflow(
+	const struct layout_box *box,
+	int depth,
+	layout_unit *left,
+	layout_unit *top,
+	layout_unit *right,
+	layout_unit *bottom)
+{
+	const struct layout_box *child;
+	layout_unit x0;
+	layout_unit y0;
+	layout_unit x1;
+	layout_unit y1;
+	int items;
+
+	/* Stops at the depth the layout stops at; lines of text are within their block. */
+	if (depth > 64 || box->children_inline)
+		return;
+	items = box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
+	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID;
+	for (child = box->first_child; child != NULL; child = child->next) {
+		/* A box out of the flow counts when this box (being positioned) is where it is placed. */
+		if (child->out_of_flow &&
+		    (child->style.position != CSS_POSITION_ABSOLUTE || box->style.position == CSS_POSITION_STATIC))
+			continue;
+		if (child->kind != LAYOUT_BLOCK && child->kind != LAYOUT_ANONYMOUS_BLOCK && child->kind != LAYOUT_REPLACED)
+			continue;
+		x0 = child->x;
+		y0 = child->y;
+		x1 = x0 + child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->width + child->padding[CSS_RIGHT] +
+		    child->border[CSS_RIGHT];
+		y1 = y0 + child->border[CSS_TOP] + child->padding[CSS_TOP] + child->height + child->padding[CSS_BOTTOM] +
+		    child->border[CSS_BOTTOM];
+		if (items && !child->out_of_flow) {
+			x0 -= child->margin[CSS_LEFT] > 0 ? child->margin[CSS_LEFT] : 0;
+			y0 -= child->margin[CSS_TOP] > 0 ? child->margin[CSS_TOP] : 0;
+			x1 += child->margin[CSS_RIGHT] > 0 ? child->margin[CSS_RIGHT] : 0;
+			y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
+		}
+		if (x0 < *left)
+			*left = x0;
+		if (y0 < *top)
+			*top = y0;
+		if (x1 > *right)
+			*right = x1;
+		if (y1 > *bottom)
+			*bottom = y1;
+		if (!layout_clips(child))
+			geometry_overflow(child, depth + 1, left, top, right, bottom);
+	}
+}
+
+/*
+ * Finds what a block scrolls over: its padding box, and its content's
+ * overflow with the padding at the far sides; overflow before the start
+ * of a block container cannot be scrolled to, a flex or grid container's
+ * can.
+ */
+static void
+geometry_scroll_size(
+	const struct layout_box *first,
+	struct bind_box *box)
+{
+	layout_unit pad_left;
+	layout_unit pad_top;
+	layout_unit pad_right;
+	layout_unit pad_bottom;
+	layout_unit left;
+	layout_unit top;
+	layout_unit right;
+	layout_unit bottom;
+	int flex;
+	int rtl;
+	int wrap_reverse;
+	int reversed_x;
+	int reversed_y;
+
+	/* The padding box. */
+	pad_left = first->x + first->border[CSS_LEFT];
+	pad_top = first->y + first->border[CSS_TOP];
+	pad_right = pad_left + first->padding[CSS_LEFT] + first->width + first->padding[CSS_RIGHT];
+	pad_bottom = pad_top + first->padding[CSS_TOP] + first->height + first->padding[CSS_BOTTOM];
+
+	/* The content, with the padding around it. */
+	left = pad_right;
+	top = pad_bottom;
+	right = pad_left;
+	bottom = pad_top;
+	geometry_overflow(first, 0, &left, &top, &right, &bottom);
+	if (right > left) {
+		left -= first->padding[CSS_LEFT];
+		right += first->padding[CSS_RIGHT];
+	}
+	if (bottom > top) {
+		top -= first->padding[CSS_TOP];
+		bottom += first->padding[CSS_BOTTOM];
+	}
+
+	/*
+	 * A container scrolls only toward its end sides: a block's or a grid's
+	 * follow its writing mode and direction, a horizontal flex container's
+	 * its main and cross axes (reversed ones scroll toward their starts
+	 * instead); a vertical flex container's overflow all counts.
+	 */
+	flex = first->style.display == CSS_DISPLAY_FLEX || first->style.display == CSS_DISPLAY_INLINE_FLEX;
+	if (!flex) {
+		if (first->style.direction == CSS_DIRECTION_RTL || first->style.writing_mode == CSS_WRITING_VERTICAL_RL)
+			right = pad_right;
+		else
+			left = pad_left;
+		top = pad_top;
+	} else if (flex && first->style.writing_mode == CSS_WRITING_HORIZONTAL_TB) {
+		rtl = first->style.direction == CSS_DIRECTION_RTL;
+		wrap_reverse = first->style.flex_wrap == CSS_FLEX_WRAP_REVERSE;
+		if (first->style.flex_direction == CSS_FLEX_ROW || first->style.flex_direction == CSS_FLEX_ROW_REVERSE) {
+			reversed_x = rtl != (first->style.flex_direction == CSS_FLEX_ROW_REVERSE);
+			reversed_y = wrap_reverse;
+		} else {
+			reversed_x = rtl != wrap_reverse;
+			reversed_y = first->style.flex_direction == CSS_FLEX_COLUMN_REVERSE;
+		}
+		if (reversed_x)
+			right = pad_right;
+		else
+			left = pad_left;
+		if (reversed_y)
+			bottom = pad_bottom;
+		else
+			top = pad_top;
+	}
+	if (left > pad_left)
+		left = pad_left;
+	if (top > pad_top)
+		top = pad_top;
+	if (right < pad_right)
+		right = pad_right;
+	if (bottom < pad_bottom)
+		bottom = pad_bottom;
+
+	/* In pixels. */
+	box->scroll_width = layout_to_px(right - left);
+	box->scroll_height = layout_to_px(bottom - top);
 }
 
 /* Builds a transient child layout without retaining native DOM edges in a C cache. */

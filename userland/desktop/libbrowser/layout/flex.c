@@ -12,12 +12,12 @@
  * align-items and align-self.  Each item is laid out as a block at the
  * main size the flexing gives it.  Not in this pass: align-content other
  * than start, wrap-reverse's order of lines, baselines (as start),
- * percentages of an indefinite height, and a column's automatic minimum
- * size (its items shrink to zero at most).  A row's item whose min-width
- * is auto (the initial value) and whose content does not scroll shrinks
- * no narrower than its content's min-content width, or its width when
- * that is given in pixels and narrower (the automatic minimum size,
- * ws074-p084), measured only for a line that has to shrink. Non-replaced
+ * and percentages of an indefinite height.  An item whose main-axis
+ * minimum is auto (the initial value) and whose content does not scroll
+ * shrinks no smaller than its content (a row's min-content width, a
+ * column's content height), or its main size when that is given in pixels
+ * and smaller (the automatic minimum size), measured only for a line that
+ * has to shrink. Non-replaced
  * preferred-ratio items instead establish their content-based minimum in
  * either axis before line collection, even with a zero flex basis.
  */
@@ -73,7 +73,8 @@ static layout_unit flex_ratio_definite_length(const struct css_length *length, l
 static layout_unit flex_ratio_cross_size(struct layout_tree *tree, const struct layout_box *container, const struct layout_box *child, int row);
 static layout_unit flex_ratio_main_size(const struct layout_box *box, int row, layout_unit cross);
 static int flex_ratio_minimum(struct layout_tree *tree, struct layout_box *container, struct flex_item *item, int row, layout_unit available);
-static int flex_auto_minimums(struct layout_tree *tree, struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
+static int flex_auto_minimums(struct layout_tree *tree, struct layout_box *box, int row, struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
+static int flex_content_height(struct layout_tree *tree, struct layout_box *box, struct layout_box *child, layout_unit *height);
 static int flex_min_content(struct layout_tree *tree, struct layout_box *box, layout_unit *width);
 static void flex_grow(struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
 static void flex_shrink(struct flex_item *items, size_t count, layout_unit available, layout_unit gap);
@@ -87,6 +88,7 @@ static void flex_static_positions(struct layout_box *box, int row, layout_unit c
 static void flex_place_line(struct layout_box *box, struct flex_item *items, size_t count, int row, layout_unit available, layout_unit gap, layout_unit cross_start, layout_unit line_cross);
 static layout_unit flex_cross_outer(const struct layout_box *item, int row);
 static int flex_align_of(const struct layout_box *box, const struct layout_box *item);
+static int flex_baseline_above(const struct layout_box *box, const struct layout_box *item, int row, layout_unit *above);
 static layout_unit flex_length(const struct css_length *length, layout_unit basis);
 
 /* One flex line while the container's lines are being sized. */
@@ -116,6 +118,10 @@ layout_flex(
 	layout_unit outer;
 	layout_unit cross;
 	layout_unit line_cross;
+	layout_unit max_above[2];
+	layout_unit max_below[2];
+	layout_unit above;
+	int group;
 	layout_unit cross_cursor;
 	layout_unit sizing;
 	layout_unit percentage_basis;
@@ -123,6 +129,7 @@ layout_flex(
 	size_t start;
 	size_t end;
 	size_t index;
+	size_t place;
 	struct flex_line *lines;
 	size_t line_count;
 	layout_unit cross_size;
@@ -246,7 +253,7 @@ layout_flex(
 		}
 
 		/* The automatic minimums of a line that has to shrink. */
-		error = flex_auto_minimums(tree, items + start, end - start, available, gap_main);
+		error = flex_auto_minimums(tree, box, row, items + start, end - start, available, gap_main);
 		if (error != 0) {
 			free(lines);
 			free(items);
@@ -256,6 +263,8 @@ layout_flex(
 		/* The free space shared, then each item laid out at its size. */
 		flex_resolve(items + start, end - start, available, gap_main);
 		line_cross = 0;
+		max_above[0] = max_above[1] = 0;
+		max_below[0] = max_below[1] = 0;
 		for (index = start; index < end; index++) {
 			error = flex_lay_item(tree, box, &items[index], row);
 			if (error != 0) {
@@ -268,6 +277,19 @@ layout_flex(
 			cross = flex_cross_outer(items[index].box, row);
 			if (cross > line_cross)
 				line_cross = cross;
+
+			/* Baseline-aligned items need room above and below their shared baseline (each group its own). */
+			group = flex_baseline_above(box, items[index].box, row, &above);
+			if (group != 0) {
+				if (above > max_above[group - 1])
+					max_above[group - 1] = above;
+				if (cross - above > max_below[group - 1])
+					max_below[group - 1] = cross - above;
+			}
+		}
+		for (group = 0; group < 2; group++) {
+			if (max_above[group] + max_below[group] > line_cross)
+				line_cross = max_above[group] + max_below[group];
 		}
 
 		/* A single line of a row fills a container of a height of its own; a column's line fills its width. */
@@ -371,6 +393,10 @@ layout_flex(
 			content_cross += gap_cross;
 		}
 		first_line = 0;
+		for (place = lines[index].start; place < lines[index].end; place++) {
+			items[place].box->item_row = (int)index + 1;
+			items[place].box->item_column = (int)(place - lines[index].start) + 1;
+		}
 		flex_place_line(box, items + lines[index].start, lines[index].end - lines[index].start, row, available,
 		    gap_main, cross_cursor, line_cross);
 		cross_cursor += line_cross;
@@ -475,6 +501,9 @@ flex_static_positions(
 	int safe_cross;
 	int child_inline_start;
 	int child_block_start;
+	int physical;
+	int physical_vertical;
+	int physical_rl;
 
 	if ((box->style.direction != CSS_DIRECTION_LTR && box->style.direction != CSS_DIRECTION_RTL))
 		return;
@@ -493,6 +522,15 @@ flex_static_positions(
 	cross_axis_start = row ? block_start : inline_start;
 	main_horizontal = row ? inline_horizontal : !inline_horizontal;
 	main_start = reverse ? flex_side_flip(main_axis_start) : main_axis_start;
+
+	/*
+	 * A vertical container laid out in its logical coordinates: left and
+	 * right still name the physical sides, which its block axis (vertical
+	 * here) runs between, from the right in vertical-rl.
+	 */
+	physical = layout_physical_mode(box);
+	physical_vertical = physical != box->style.writing_mode;
+	physical_rl = physical == CSS_WRITING_VERTICAL_RL;
 	cross_start = wrap_reverse ? flex_side_flip(cross_axis_start) : cross_axis_start;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (!child->out_of_flow || child->style.position != CSS_POSITION_ABSOLUTE)
@@ -516,9 +554,13 @@ flex_static_positions(
 			break;
 		case CSS_ALIGN_LEFT:
 			main_side = (main_horizontal || !inline_horizontal) ? FLEX_SIDE_START : main_axis_start;
+			if (physical_vertical && !main_horizontal)
+				main_side = physical_rl ? FLEX_SIDE_END : FLEX_SIDE_START;
 			break;
 		case CSS_ALIGN_RIGHT:
 			main_side = (main_horizontal || !inline_horizontal) ? FLEX_SIDE_END : main_axis_start;
+			if (physical_vertical && !main_horizontal)
+				main_side = physical_rl ? FLEX_SIDE_START : FLEX_SIDE_END;
 			break;
 		default:
 			main_side = main_start;
@@ -862,6 +904,27 @@ flex_base_size(
 		}
 	}
 
+	/* An image's natural ratio transfers a stretched cross size too (a size of its own goes through its layout). */
+	if (item->base < 0 && child->replaced && child->style.aspect_ratio <= 0.0f &&
+	    (row ? child->style.height.unit : child->style.width.unit) == CSS_UNIT_AUTO &&
+	    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
+		cross = flex_ratio_cross_size(tree, box, child, row);
+		if (cross >= 0) {
+			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER && row)
+				cross -= child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] +
+				    child->border[CSS_BOTTOM];
+			else if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+				cross -= child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] +
+				    child->border[CSS_RIGHT];
+			if (cross < 0)
+				cross = 0;
+			if (row)
+				item->base = (layout_unit)((double)cross * child->image->width / child->image->height);
+			else
+				item->base = (layout_unit)((double)cross * child->image->height / child->image->width);
+		}
+	}
+
 	/* An explicit content basis ignores the non-replaced preferred main size. */
 	if (item->base < 0 &&
 	    basis->unit == CSS_UNIT_CONTENT &&
@@ -908,6 +971,10 @@ flex_base_size(
 	    child->style.min_width.unit == CSS_UNIT_AUTO &&
 	    (child->style.overflow_x == CSS_OVERFLOW_VISIBLE || child->style.overflow_x == CSS_OVERFLOW_CLIP))
 		item->auto_minimum = 1;
+	if (!row && child->style.aspect_ratio <= 0.0f && child->style.writing_mode == box->style.writing_mode &&
+	    child->style.min_height.unit == CSS_UNIT_AUTO &&
+	    (child->style.overflow_y == CSS_OVERFLOW_VISIBLE || child->style.overflow_y == CSS_OVERFLOW_CLIP))
+		item->auto_minimum = 1;
 
 	/* Resolves the main-axis limits after the unconstrained base is measured. */
 	if (row) {
@@ -919,13 +986,15 @@ flex_base_size(
 		if (child->style.max_width.unit == CSS_UNIT_PX || child->style.max_width.unit == CSS_UNIT_PERCENT)
 			item->maximum = flex_length(&child->style.max_width, box->width) - sizing;
 	} else {
-		/* Explicit height limits apply on a column main axis. */
-		if (child->style.min_height.unit == CSS_UNIT_PX)
-			item->minimum = layout_from_px(child->style.min_height.value) - sizing;
+		/* Explicit height limits apply on a column main axis (percentages of a definite height). */
+		if (child->style.min_height.unit == CSS_UNIT_PX ||
+		    (child->style.min_height.unit == CSS_UNIT_PERCENT && available >= 0))
+			item->minimum = flex_length(&child->style.min_height, available) - sizing;
 
 		/* A finite height maximum is independent of the measured base. */
-		if (child->style.max_height.unit == CSS_UNIT_PX)
-			item->maximum = layout_from_px(child->style.max_height.value) - sizing;
+		if (child->style.max_height.unit == CSS_UNIT_PX ||
+		    (child->style.max_height.unit == CSS_UNIT_PERCENT && available >= 0))
+			item->maximum = flex_length(&child->style.max_height, available) - sizing;
 	}
 
 	/* Ratio items need their content floor before line breaking or flex growth. */
@@ -1501,27 +1570,30 @@ flex_ratio_minimum(
 static int
 flex_auto_minimums(
 	struct layout_tree *tree,
+	struct layout_box *box,
+	int row,
 	struct flex_item *items,
 	size_t count,
 	layout_unit available,
 	layout_unit gap)
 {
 	struct layout_box *child;
+	const struct css_length *size;
 	layout_unit used;
 	layout_unit least;
 	layout_unit given;
 	size_t index;
 	int error;
 
-	/* A line without a definite size, or that fits, does not shrink. */
-	if (available < 0)
+	/* A row line without a definite size, or that fits, does not shrink (a column's minimums always hold). */
+	if (row && available < 0)
 		return 0;
 	used = 0;
 	for (index = 0; index < count; index++)
 		used += items[index].size + items[index].frame + items[index].margin_start + items[index].margin_end;
 	if (count > 1)
 		used += gap * (layout_unit)(count - 1U);
-	if (used <= available)
+	if (row && used <= available)
 		return 0;
 
 	/* Each item whose minimum is automatic. */
@@ -1530,31 +1602,73 @@ flex_auto_minimums(
 			continue;
 		child = items[index].box;
 
-		/* The content's narrowest width. */
-		error = flex_min_content(tree, child, &least);
+		/* The content's narrowest width, or a column item's content height at the container's width. */
+		if (row)
+			error = flex_min_content(tree, child, &least);
+		else
+			error = flex_content_height(tree, box, child, &least);
 		if (error != 0)
 			return error;
 
-		/* A width in pixels that is narrower is the minimum instead. */
-		if (child->style.width.unit == CSS_UNIT_PX) {
-			given = layout_from_px(child->style.width.value);
+		/* A size in pixels that is smaller is the minimum instead. */
+		size = row ? &child->style.width : &child->style.height;
+		if (size->unit == CSS_UNIT_PX || (!row && size->unit == CSS_UNIT_PERCENT && available >= 0)) {
+			given = layout_from_px(size->value);
+			if (size->unit == CSS_UNIT_PERCENT)
+				given = (layout_unit)((float)available * size->value / 100.0f) + layout_from_px(size->offset);
 			if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
 				given -= items[index].frame;
 			if (given < least)
 				least = given;
 		}
 
-		/* Within max-width, and never above the base the item would shrink from. */
+		/* Within the maximum, and in a row never above the base the item would shrink from. */
 		if (items[index].maximum >= 0 && least > items[index].maximum)
 			least = items[index].maximum;
-		if (least > items[index].base)
+		if (row && least > items[index].base)
 			least = items[index].base;
 		if (least > items[index].minimum)
 			items[index].minimum = least;
+
+		/* The hypothetical size holds the minimum. */
+		if (items[index].size < items[index].minimum)
+			items[index].size = items[index].minimum;
 	}
 
 	/* Succeeded: the minimums are known. */
 	return 0;
+}
+
+/*
+ * Measures a column item's content height: the item laid out at the
+ * container's width with its height, minimum and maximum auto (its
+ * content-based minimum height), and its style put back.
+ */
+static int
+flex_content_height(
+	struct layout_tree *tree,
+	struct layout_box *box,
+	struct layout_box *child,
+	layout_unit *height)
+{
+	struct css_length saved_height;
+	struct css_length saved_minimum;
+	struct css_length saved_maximum;
+	int error;
+
+	/* The height left to the content. */
+	saved_height = child->style.height;
+	saved_minimum = child->style.min_height;
+	saved_maximum = child->style.max_height;
+	child->style.height.unit = CSS_UNIT_AUTO;
+	child->style.min_height.unit = CSS_UNIT_AUTO;
+	child->style.max_height.unit = CSS_UNIT_NONE;
+	error = layout_block(tree, child, box->width);
+	*height = child->height;
+	child->style.height = saved_height;
+	child->style.min_height = saved_minimum;
+	child->style.max_height = saved_maximum;
+	return error;
 }
 
 /*
@@ -2013,10 +2127,32 @@ flex_place_line(
 	layout_unit cross_outer;
 	layout_unit offset;
 	layout_unit frame;
+	layout_unit sizing;
 	layout_unit reverse_extent;
 	size_t index;
 	int reverse;
+	layout_unit above;
+	layout_unit max_above;
+	layout_unit max_below;
+	int group;
 	int align;
+	int auto_first;
+	int auto_last;
+
+	/*
+	 * The line's shared baselines: the first group's as far below the line's
+	 * top as any member's lies below its margin box's top, the last group's as
+	 * far above the line's bottom as any member's lies above its margin box's bottom.
+	 */
+	max_above = 0;
+	max_below = 0;
+	for (index = 0; index < count; index++) {
+		group = flex_baseline_above(box, items[index].box, row, &above);
+		if (group == 1 && above > max_above)
+			max_above = above;
+		if (group == 2 && flex_cross_outer(items[index].box, row) - above > max_below)
+			max_below = flex_cross_outer(items[index].box, row) - above;
+	}
 
 	/* Keep overflow signed for end and center; only an indefinite size has no remaining space. */
 	used = 0;
@@ -2111,12 +2247,36 @@ flex_place_line(
 				frame = child->border[CSS_TOP] + child->padding[CSS_TOP] + child->padding[CSS_BOTTOM] + child->border[CSS_BOTTOM];
 				child->height = line_cross - child->margin[CSS_TOP] - child->margin[CSS_BOTTOM] - frame;
 
+				/* The stretched height stays within the item's pixel maximum and minimum. */
+				sizing = child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame : 0;
+				if (child->style.max_height.unit == CSS_UNIT_PX &&
+				    child->height > layout_from_px(child->style.max_height.value) - sizing)
+					child->height = layout_from_px(child->style.max_height.value) - sizing;
+				if (child->style.min_height.unit == CSS_UNIT_PX &&
+				    child->height < layout_from_px(child->style.min_height.value) - sizing)
+					child->height = layout_from_px(child->style.min_height.value) - sizing;
+
 				/* Content inside a larger frame cannot have a negative height. */
 				if (child->height < 0)
 					child->height = 0;
 			}
 
 			/* Placement sees the actual cross size, including any cross constraints. */
+			cross_outer = flex_cross_outer(child, row);
+		} else if (!row && align == CSS_ALIGN_STRETCH && child->replaced && child->style.width.unit == CSS_UNIT_AUTO &&
+		    child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO && child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO) {
+			/* A replaced item of a column stretches across too, whatever its ratio, within its pixel limits. */
+			frame = child->border[CSS_LEFT] + child->padding[CSS_LEFT] + child->padding[CSS_RIGHT] + child->border[CSS_RIGHT];
+			child->width = line_cross - child->margin[CSS_LEFT] - child->margin[CSS_RIGHT] - frame;
+			sizing = child->style.box_sizing == CSS_BOX_SIZING_BORDER ? frame : 0;
+			if (child->style.max_width.unit == CSS_UNIT_PX &&
+			    child->width > layout_from_px(child->style.max_width.value) - sizing)
+				child->width = layout_from_px(child->style.max_width.value) - sizing;
+			if (child->style.min_width.unit == CSS_UNIT_PX &&
+			    child->width < layout_from_px(child->style.min_width.value) - sizing)
+				child->width = layout_from_px(child->style.min_width.value) - sizing;
+			if (child->width < 0)
+				child->width = 0;
 			cross_outer = flex_cross_outer(child, row);
 		}
 
@@ -2129,8 +2289,32 @@ flex_place_line(
 			child->x = cross_start + child->margin[CSS_LEFT];
 		}
 
-		/* At the end or the center, the item moves by the room the line leaves (half of it). */
-		if (align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) {
+		/* Auto margins across take the room the line leaves (shared when both are auto), before any alignment. */
+		auto_first = child->style.margin[row ? CSS_TOP : CSS_LEFT].unit == CSS_UNIT_AUTO;
+		auto_last = child->style.margin[row ? CSS_BOTTOM : CSS_RIGHT].unit == CSS_UNIT_AUTO;
+		if (auto_first || auto_last) {
+			frame = line_cross - cross_outer;
+			if (frame < 0)
+				frame = 0;
+			if (!auto_first)
+				frame = 0;
+			else if (auto_last)
+				frame = frame / 2;
+			if (row)
+				child->y += frame;
+			else
+				child->x += frame;
+		} else if ((group = flex_baseline_above(box, child, row, &above)) != 0) {
+			/* A baseline-aligned item moves down until its baseline is its group's (before wrap-reverse mirrors the line). */
+			if (group == 1)
+				frame = max_above - above;
+			else
+				frame = line_cross - max_below - above;
+			if (box->style.flex_wrap == CSS_FLEX_WRAP_REVERSE)
+				frame = line_cross - frame - cross_outer;
+			child->y += frame;
+		} else if (align == CSS_ALIGN_END || align == CSS_ALIGN_CENTER) {
+			/* At the end or the center, the item moves by the room the line leaves (half of it). */
 			frame = line_cross - cross_outer;
 			if (align == CSS_ALIGN_CENTER)
 				frame = frame / 2;
@@ -2187,6 +2371,49 @@ flex_align_of(
 
 	/* Reports the alignment. */
 	return align;
+}
+
+/*
+ * Tells whether an item of a row takes part in its line's first (1) or
+ * last (2) baseline alignment (align-self baseline or last baseline,
+ * without an auto margin across), and how far below its margin box's top
+ * that baseline is (the bottom of its border box when it has none).
+ */
+static int
+flex_baseline_above(
+	const struct layout_box *box,
+	const struct layout_box *item,
+	int row,
+	layout_unit *above)
+{
+	layout_unit baseline;
+	int align;
+	int last;
+	int found;
+
+	/* Only a row's items on a horizontal line (not one laid out logically for a vertical mode), aligned by their baselines. */
+	if (!row || box->style.writing_mode != CSS_WRITING_HORIZONTAL_TB ||
+	    layout_physical_mode(box) != CSS_WRITING_HORIZONTAL_TB ||
+	    item->style.writing_mode != CSS_WRITING_HORIZONTAL_TB)
+		return 0;
+	align = item->style.align_self;
+	last = (item->style.last_baselines & 8u) != 0;
+	if (align == CSS_ALIGN_AUTO) {
+		align = box->style.align_items;
+		last = (box->style.last_baselines & 4u) != 0;
+	}
+	if (align != CSS_ALIGN_BASELINE && !last)
+		return 0;
+	if (item->style.margin[CSS_TOP].unit == CSS_UNIT_AUTO || item->style.margin[CSS_BOTTOM].unit == CSS_UNIT_AUTO)
+		return 0;
+
+	/* Its first (or last) baseline, or its border box's bottom. */
+	found = last ? layout_last_baseline(item, &baseline) : layout_first_baseline(item, &baseline);
+	if (!found)
+		baseline = item->border[CSS_TOP] + item->padding[CSS_TOP] + item->height + item->padding[CSS_BOTTOM] +
+		    item->border[CSS_BOTTOM];
+	*above = item->margin[CSS_TOP] + baseline;
+	return last ? 2 : 1;
 }
 
 /* Resolves a length (pixels, or a percentage with its added pixels) against a basis; anything else is zero. */

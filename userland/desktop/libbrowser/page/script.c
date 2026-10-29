@@ -105,7 +105,7 @@ static const char *const script_types[] = {
 static int script_settle_network(struct page *page, double wait, double *elapsed);
 static void script_console(void *context, int level, const char *text, size_t length);
 static int script_location(void *context, int part, struct wb_buffer *out);
-static int script_fragment(void *context, const char *hash, size_t length);
+static int script_url_set(void *context, const char *href, size_t length);
 static int script_cookie_get(void *context, struct wb_buffer *out);
 static int script_cookie_set(void *context, const char *text, size_t length);
 static int script_type_runs(const struct dom_element *script);
@@ -396,7 +396,7 @@ page_start_scripts(
 	host.console = script_console;
 	host.user_agent = NET_USER_AGENT;
 	host.location = script_location;
-	host.fragment = script_fragment;
+	host.url_set = script_url_set;
 	host.cookie_get = script_cookie_get;
 	host.cookie_set = script_cookie_set;
 	host.selector_engine = page_selector_engine;
@@ -415,6 +415,7 @@ page_start_scripts(
 	host.element_at = page_element_at;
 	host.document_write = script_document_write;
 	host.media = page_media_host;
+	host.image = page_image_host;
 	error = bind_window_create(page->realm, page->document, &host, &page->window);
 	if (error != 0)
 		return error;
@@ -1158,7 +1159,7 @@ script_release(
 
 /*
  * Tells the scripts the document is parsed: DOMContentLoaded at the
- * document, then load at the window.
+ * document, then load and pageshow at the window.
  */
 int
 page_fire_load(
@@ -1176,6 +1177,11 @@ page_fire_load(
 	/* Then it is complete, and the window's load fires. */
 	bind_window_set_ready_state(page->window, "complete");
 	error = bind_fire_event(page->window, NULL, "load", BIND_EVENT_DOCUMENT, &canceled);
+	if (error != 0)
+		return error;
+
+	/* The document is shown: pageshow, last of the loading's events. */
+	error = bind_fire_event(page->window, NULL, "pageshow", BIND_EVENT_DOCUMENT, &canceled);
 	if (error != 0)
 		return error;
 
@@ -1245,6 +1251,7 @@ page_settle(
 	double next;
 	int rounds;
 	int found;
+	int images;
 	int error;
 
 	/* Only actual child work slows virtual jumps; ordinary timer-only settling stays fast. */
@@ -1254,10 +1261,18 @@ page_settle(
 		error = page_frames_checkpoint(page);
 		if (error != 0)
 			return error;
+
+		/* The images that came by now fire their elements' events. */
+		error = page_images_checkpoint(page);
+		if (error != 0)
+			return error;
 		found = page_next_timer(page, &due);
 
+		/* An image on its way is waited for within the bound, but does not keep the page unsettled past it. */
+		images = page_images_waiting(page) && page->now < budget && network_waited < 30000 && page->loader != NULL;
+
 		/* Pending real responses need descriptor progress before the virtual clock can leap ahead. */
-		if (page->frame_loads.count != 0) {
+		if (page->frame_loads.count != 0 || images) {
 			/* Unfinished real work cannot be reported as settled at an exhausted bound. */
 			if (page->now >= budget || network_waited >= 30000)
 				return ETIMEDOUT;
@@ -1401,53 +1416,52 @@ script_location(
 	return 0;
 }
 
-/* Changes only this page's fragment; the binding reveals and scrolls the target. */
+/*
+ * Changes this page's URL to another of the same document (a fragment, a
+ * history entry a script pushed); the href is resolved against the URL.
+ */
 static int
-script_fragment(
+script_url_set(
 	void *context,
-	const char *hash,
+	const char *href,
 	size_t length)
 {
 	struct page *page;
 	struct net_url current;
 	struct net_url next;
-	struct wb_buffer reference;
 	struct wb_buffer serialized;
 	char *copy;
 	int error;
 
+	/* The new URL, resolved against the page's. */
 	page = context;
 	error = page_url(page, &current);
 	if (error != 0)
 		return error;
-	wb_buffer_init(&reference);
-	wb_buffer_init(&serialized);
-	if (length != 0U && hash[0] != '#')
-		error = wb_buffer_append_byte(&reference, '#');
-	if (error == 0)
-		error = wb_buffer_append(&reference, hash, length);
-	if (error == 0 && reference.length != 0U) {
-		error = net_url_parse(wb_buffer_string(&reference), reference.length, &current, &next);
-		if (error == 0) {
-			error = net_url_serialize(&next, 0, &serialized);
-			net_url_release(&next);
-		}
-	} else if (error == 0) {
-		error = net_url_serialize(&current, 1, &serialized);
-	}
-	if (error == 0) {
-		copy = strdup(wb_buffer_string(&serialized));
-		if (copy == NULL)
-			error = ENOMEM;
-		else {
-			free(page->base);
-			page->base = copy;
-		}
-	}
-	wb_buffer_release(&serialized);
-	wb_buffer_release(&reference);
+	error = net_url_parse(href, length, &current, &next);
 	net_url_release(&current);
-	return error;
+	if (error != 0)
+		return error;
+
+	/* Its text. */
+	wb_buffer_init(&serialized);
+	error = net_url_serialize(&next, 0, &serialized);
+	net_url_release(&next);
+	if (error != 0) {
+		wb_buffer_release(&serialized);
+		return error;
+	}
+
+	/* The page keeps the text as its URL. */
+	copy = strdup(wb_buffer_string(&serialized));
+	wb_buffer_release(&serialized);
+	if (copy == NULL)
+		return ENOMEM;
+	free(page->base);
+	page->base = copy;
+
+	/* Succeeded: the page has the new URL. */
+	return 0;
 }
 
 /* Writes the cookies a script may see for the page's URL (the window's host callback). */

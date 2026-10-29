@@ -81,6 +81,7 @@ enum computed_property {
 	COMPUTED_BACKGROUND_COLOR,
 	COMPUTED_BACKGROUND_IMAGE,
 	COMPUTED_OPACITY,
+	COMPUTED_TEXT_SHADOW,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -125,7 +126,25 @@ enum computed_property {
 	COMPUTED_GRID_TEMPLATE_ROWS,
 	COMPUTED_GRID_AUTO_FLOW,
 	COMPUTED_GRID_AUTO_COLUMNS,
-	COMPUTED_GRID_AUTO_ROWS
+	COMPUTED_GRID_AUTO_ROWS,
+	COMPUTED_GRID_TEMPLATE_AREAS,
+	COMPUTED_GRID_ROW_START,
+	COMPUTED_GRID_ROW_END,
+	COMPUTED_GRID_COLUMN_START,
+	COMPUTED_GRID_COLUMN_END,
+	COMPUTED_GRID_ROW,
+	COMPUTED_GRID_COLUMN,
+	COMPUTED_GRID_AREA,
+	COMPUTED_FLEX,
+	COMPUTED_FLEX_FLOW,
+	COMPUTED_ANCHOR_NAME,
+	COMPUTED_POSITION_ANCHOR,
+	COMPUTED_ANCHOR_SCOPE,
+	COMPUTED_POSITION_AREA,
+	COMPUTED_POSITION_TRY_FALLBACKS,
+	COMPUTED_POSITION_TRY_ORDER,
+	COMPUTED_POSITION_TRY,
+	COMPUTED_POSITION_VISIBILITY
 };
 
 /*
@@ -146,7 +165,7 @@ struct computed_ref {
 
 static void computed_trace(struct vm_heap *heap, struct vm_cell *cell);
 static int computed_find(const struct vm_string *name, int *property);
-static int computed_write_grid(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out, int *handled);
+static int computed_write_grid(struct bind_window *window, struct dom_element *element, const struct css_style *style, int property, struct wb_units *out, int *handled);
 static int computed_write(struct bind_window *window, struct dom_element *element, int property, struct wb_units *out);
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
@@ -157,7 +176,11 @@ static int computed_write_percent(const struct css_length *length, struct wb_uni
 static int computed_write_url_quoted(const struct vm_string *text, struct wb_units *out);
 static int computed_write_offset(const struct css_style *style, int side, struct wb_units *out);
 static int computed_write_font_family(const struct css_style *style, struct wb_units *out);
-static int computed_write_tracks(const struct css_track *tracks, int count, struct wb_units *out);
+static int computed_write_tracks(const struct css_track *tracks, int count, const struct css_line_names *names, struct wb_units *out);
+static int computed_anchor_names(const struct css_anchor_names *names, const char *none, struct wb_units *out);
+static void computed_line_names(const struct css_line_names *names, const struct css_track_repeat *repeat, int repeats, int line, struct css_line_names *out);
+static void computed_names_add(struct css_line_names *out, const struct css_line_names *from, int first, int end);
+
 static int computed_track_minimum(const struct css_track *track, struct wb_units *out);
 static int computed_track_breadth(const struct css_track *track, struct wb_units *out);
 static int computed_name(const char *const *names, size_t count, int value, struct wb_units *out);
@@ -170,6 +193,7 @@ static int computed_color(uint32_t color, struct wb_units *out);
 static int computed_ascii(const char *ascii, struct wb_units *out);
 static int computed_decoration_append(struct wb_units *out, const struct wb_units *part);
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
+static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -224,6 +248,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "background-color", COMPUTED_BACKGROUND_COLOR },
 	{ "background-image", COMPUTED_BACKGROUND_IMAGE },
 	{ "opacity", COMPUTED_OPACITY },
+	{ "text-shadow", COMPUTED_TEXT_SHADOW },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -264,6 +289,24 @@ static const struct computed_entry computed_entries[] = {
 	{ "grid-auto-flow", COMPUTED_GRID_AUTO_FLOW },
 	{ "grid-auto-columns", COMPUTED_GRID_AUTO_COLUMNS },
 	{ "grid-auto-rows", COMPUTED_GRID_AUTO_ROWS },
+	{ "grid-template-areas", COMPUTED_GRID_TEMPLATE_AREAS },
+	{ "grid-row-start", COMPUTED_GRID_ROW_START },
+	{ "grid-row-end", COMPUTED_GRID_ROW_END },
+	{ "grid-column-start", COMPUTED_GRID_COLUMN_START },
+	{ "grid-column-end", COMPUTED_GRID_COLUMN_END },
+	{ "grid-row", COMPUTED_GRID_ROW },
+	{ "grid-column", COMPUTED_GRID_COLUMN },
+	{ "grid-area", COMPUTED_GRID_AREA },
+	{ "flex", COMPUTED_FLEX },
+	{ "flex-flow", COMPUTED_FLEX_FLOW },
+	{ "anchor-name", COMPUTED_ANCHOR_NAME },
+	{ "position-anchor", COMPUTED_POSITION_ANCHOR },
+	{ "anchor-scope", COMPUTED_ANCHOR_SCOPE },
+	{ "position-area", COMPUTED_POSITION_AREA },
+	{ "position-try-fallbacks", COMPUTED_POSITION_TRY_FALLBACKS },
+	{ "position-try-order", COMPUTED_POSITION_TRY_ORDER },
+	{ "position-try", COMPUTED_POSITION_TRY },
+	{ "position-visibility", COMPUTED_POSITION_VISIBILITY },
 	{ "text-decoration-line", COMPUTED_TEXT_DECORATION_LINE },
 	{ "text-decoration-style", COMPUTED_TEXT_DECORATION_STYLE },
 	{ "text-decoration-skip-ink", COMPUTED_TEXT_DECORATION_SKIP_INK },
@@ -690,7 +733,7 @@ computed_write(
 		computed_blockify(window, element, style);
 
 	/* Grid template axes resolve from actual track sizing when the host can copy them. */
-	error = computed_write_grid(window, element, property, out, &handled);
+	error = computed_write_grid(window, element, style, property, out, &handled);
 	if (error != 0) {
 		free(style);
 		return error;
@@ -724,14 +767,22 @@ static int
 computed_write_grid(
 	struct bind_window *window,
 	struct dom_element *element,
+	const struct css_style *style,
 	int property,
 	struct wb_units *out,
 	int *handled)
 {
 	struct wb_vector sizes;
+	const struct css_line_names *names;
 	const double *tracks;
 	size_t index;
+	int explicit_count;
 	int columns;
+	const struct css_track_repeat *repeat;
+	struct css_line_names named;
+	int leading;
+	int repeats;
+	int line;
 	int found;
 	int error;
 
@@ -739,6 +790,12 @@ computed_write_grid(
 	*handled = 0;
 	if (property != COMPUTED_GRID_TEMPLATE_COLUMNS && property != COMPUTED_GRID_TEMPLATE_ROWS)
 		return 0;
+
+	/* A subgrid axis is its line-name lists. */
+	if (property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid != NULL : style->row_subgrid != NULL) {
+		*handled = 1;
+		return computed_ascii(property == COMPUTED_GRID_TEMPLATE_COLUMNS ? style->column_subgrid : style->row_subgrid, out);
+	}
 
 	/* Hosts without this private query retain the established computed-value behavior. */
 	if (window->host.grid_tracks == NULL)
@@ -752,7 +809,7 @@ computed_write_grid(
 
 	/* Copy one axis from the current final layout. */
 	found = 0;
-	error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &found);
+	error = window->host.grid_tracks(window->host.context, &element->node, columns, &sizes, &leading, &repeats, &found);
 	if (error != 0)
 		goto cleanup;
 
@@ -767,11 +824,44 @@ computed_write_grid(
 		goto cleanup;
 	}
 
+	/* The explicit lines' names go around the explicit tracks (an automatic repeat's as many times as it was put in). */
+	names = style->row_names;
+	repeat = &style->row_repeat;
+	explicit_count = style->row_count;
+	if (columns) {
+		names = style->column_names;
+		repeat = &style->column_repeat;
+		explicit_count = style->column_count;
+	}
+	if (repeat->length > 0 && repeats > 1)
+		explicit_count += (repeats - 1) * repeat->length;
+
 	/* Every explicit and implicit track is serialized independently in logical order. */
 	tracks = sizes.items;
-	for (index = 0; index < sizes.count; index++) {
-		/* Separate adjacent tracks without inventing any extra gap track. */
-		if (index != 0) {
+	for (index = 0; index <= sizes.count; index++) {
+		/* The names of the line before the track (or after the last one). */
+		line = (int)index - leading;
+		named.count = 0;
+		if (names != NULL && line >= 0 && line <= explicit_count)
+			computed_line_names(names, repeat, repeats, line, &named);
+		if (named.count > 0) {
+			if (index != 0) {
+				error = computed_ascii(" ", out);
+				if (error != 0)
+					goto cleanup;
+			}
+			error = css_line_names_serialize(&named, out);
+			if (error != 0)
+				goto cleanup;
+			if (index == sizes.count)
+				break;
+			error = computed_ascii(" ", out);
+			if (error != 0)
+				goto cleanup;
+		} else if (index == sizes.count) {
+			break;
+		} else if (index != 0) {
+			/* Separate adjacent tracks without inventing any extra gap track. */
 			error = computed_ascii(" ", out);
 			if (error != 0)
 				goto cleanup;
@@ -849,6 +939,15 @@ computed_write_used(
 		/* The same proof applies to the block-axis automatic minimum. */
 		if (box->no_generated_box && style->min_height.unit == CSS_UNIT_AUTO)
 			has_used = 1;
+		break;
+	case COMPUTED_TOP:
+	case COMPUTED_RIGHT:
+	case COMPUTED_BOTTOM:
+	case COMPUTED_LEFT:
+		/* A box out of the flow's insets are its used ones. */
+		has_used = found && box->inset_known &&
+		    (style->position == CSS_POSITION_ABSOLUTE || style->position == CSS_POSITION_FIXED);
+		value = box->inset[property - COMPUTED_TOP];
 		break;
 	case COMPUTED_MARGIN_TOP:
 		has_used = found;
@@ -1024,6 +1123,9 @@ computed_write_keyword(
 	case COMPUTED_OPACITY:
 		error = computed_number(style->opacity, out);
 		break;
+	case COMPUTED_TEXT_SHADOW:
+		error = computed_text_shadow(style, out);
+		break;
 	case COMPUTED_Z_INDEX:
 		/* Auto, or the level. */
 		if (style->z_index_auto) {
@@ -1133,6 +1235,61 @@ computed_write_keyword(
 	case COMPUTED_FLEX_BASIS:
 		error = computed_length(&style->flex_basis, out);
 		break;
+	case COMPUTED_FLEX:
+		error = computed_number(style->flex_grow, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_number(style->flex_shrink, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_length(&style->flex_basis, out);
+		break;
+	case COMPUTED_ANCHOR_NAME:
+		error = computed_anchor_names(style->anchor_names, "none", out);
+		break;
+	case COMPUTED_ANCHOR_SCOPE:
+		if (style->anchor_scope_all)
+			error = computed_ascii("all", out);
+		else
+			error = computed_anchor_names(style->anchor_scope, "none", out);
+		break;
+	case COMPUTED_POSITION_ANCHOR:
+		if (style->position_anchor == NULL)
+			error = computed_ascii("auto", out);
+		else
+			error = css_serialize_ident(style->position_anchor, out);
+		break;
+	case COMPUTED_POSITION_AREA:
+		error = css_position_area_serialize(style->position_area, out);
+		break;
+	case COMPUTED_POSITION_TRY_FALLBACKS:
+		error = css_try_fallbacks_serialize(style->position_try, out);
+		break;
+	case COMPUTED_POSITION_TRY_ORDER:
+		error = css_try_order_serialize(style->position_try_order, out);
+		break;
+	case COMPUTED_POSITION_TRY:
+		error = 0;
+		if (style->position_try_order != 0) {
+			error = css_try_order_serialize(style->position_try_order, out);
+			if (error == 0)
+				error = computed_ascii(" ", out);
+		}
+		if (error == 0)
+			error = css_try_fallbacks_serialize(style->position_try, out);
+		break;
+	case COMPUTED_POSITION_VISIBILITY:
+		error = css_position_visibility_serialize(style->position_visibility, out);
+		break;
+	case COMPUTED_FLEX_FLOW:
+		error = computed_name(computed_flex_directions, 4, style->flex_direction, out);
+		if (error == 0)
+			error = computed_ascii(" ", out);
+		if (error == 0)
+			error = computed_name(computed_flex_wraps, 3, style->flex_wrap, out);
+		break;
 	case COMPUTED_JUSTIFY_CONTENT:
 		error = computed_align(style->justify_content == CSS_ALIGN_STRETCH ? CSS_ALIGN_NORMAL : style->justify_content, (style->flex_keywords & 1u) != 0, out);
 		break;
@@ -1140,10 +1297,15 @@ computed_write_keyword(
 		error = computed_name(computed_justifies, 14, style->justify_items, out);
 		break;
 	case COMPUTED_ALIGN_ITEMS:
-		error = computed_align(style->align_items, (style->flex_keywords & 4u) != 0, out);
+		if (style->last_baselines & 4u)
+			error = computed_ascii("last baseline", out);
+		else
+			error = computed_align(style->align_items, (style->flex_keywords & 4u) != 0, out);
 		break;
 	case COMPUTED_ALIGN_SELF:
-		if (style->align_self == CSS_ALIGN_SELF_START)
+		if (style->last_baselines & 8u)
+			error = computed_ascii("last baseline", out);
+		else if (style->align_self == CSS_ALIGN_SELF_START)
 			error = computed_ascii("self-start", out);
 		else if (style->align_self == CSS_ALIGN_SELF_END)
 			error = computed_ascii("self-end", out);
@@ -1151,7 +1313,12 @@ computed_write_keyword(
 			error = computed_align(style->align_self, (style->flex_keywords & 8u) != 0, out);
 		break;
 	case COMPUTED_JUSTIFY_SELF:
-		error = computed_name(computed_justifies, 14, style->justify_self, out);
+		if (style->last_baselines & 0x100u)
+			error = computed_ascii("last baseline", out);
+		else if (style->justify_self == CSS_ALIGN_ANCHOR_CENTER)
+			error = computed_ascii("anchor-center", out);
+		else
+			error = computed_name(computed_justifies, 14, style->justify_self, out);
 		break;
 	case COMPUTED_ALIGN_CONTENT:
 		error = computed_align(style->align_content == CSS_ALIGN_STRETCH ? CSS_ALIGN_NORMAL : style->align_content, (style->flex_keywords & 2u) != 0, out);
@@ -1175,10 +1342,10 @@ computed_write_keyword(
 		error = computed_color(style->outline_color, out);
 		break;
 	case COMPUTED_GRID_TEMPLATE_COLUMNS:
-		error = computed_write_tracks(style->columns, style->column_count, out);
+		error = computed_write_tracks(style->columns, style->column_count, style->column_names, out);
 		break;
 	case COMPUTED_GRID_TEMPLATE_ROWS:
-		error = computed_write_tracks(style->rows, style->row_count, out);
+		error = computed_write_tracks(style->rows, style->row_count, style->row_names, out);
 		break;
 	case COMPUTED_GRID_AUTO_FLOW:
 		if (style->grid_auto_flow & CSS_GRID_FLOW_COLUMN) {
@@ -1193,10 +1360,34 @@ computed_write_keyword(
 		}
 		break;
 	case COMPUTED_GRID_AUTO_COLUMNS:
-		error = computed_write_tracks(style->auto_columns, style->auto_column_count, out);
+		error = computed_write_tracks(style->auto_columns, style->auto_column_count, NULL, out);
 		break;
 	case COMPUTED_GRID_AUTO_ROWS:
-		error = computed_write_tracks(style->auto_rows, style->auto_row_count, out);
+		error = computed_write_tracks(style->auto_rows, style->auto_row_count, NULL, out);
+		break;
+	case COMPUTED_GRID_TEMPLATE_AREAS:
+		error = css_grid_areas_serialize(style->areas, out);
+		break;
+	case COMPUTED_GRID_ROW_START:
+		error = css_grid_line_serialize(&style->grid_row, 0, out);
+		break;
+	case COMPUTED_GRID_ROW_END:
+		error = css_grid_line_serialize(&style->grid_row, 1, out);
+		break;
+	case COMPUTED_GRID_COLUMN_START:
+		error = css_grid_line_serialize(&style->grid_column, 0, out);
+		break;
+	case COMPUTED_GRID_COLUMN_END:
+		error = css_grid_line_serialize(&style->grid_column, 1, out);
+		break;
+	case COMPUTED_GRID_ROW:
+		error = css_grid_lines_serialize(&style->grid_row, out);
+		break;
+	case COMPUTED_GRID_COLUMN:
+		error = css_grid_lines_serialize(&style->grid_column, out);
+		break;
+	case COMPUTED_GRID_AREA:
+		error = css_grid_area_serialize(&style->grid_row, &style->grid_column, out);
 		break;
 	default:
 		/* transform: the engine has none. */
@@ -1291,11 +1482,106 @@ computed_write_font_family(
 	return 0;
 }
 
+/* Writes anchor names a comma apart (none when there are none). */
+static int
+computed_anchor_names(
+	const struct css_anchor_names *names,
+	const char *none,
+	struct wb_units *out)
+{
+	int index;
+	int error;
+
+	/* None. */
+	if (names == NULL || names->count == 0)
+		return computed_ascii(none, out);
+
+	/* Each name. */
+	for (index = 0; index < names->count; index++) {
+		if (index > 0) {
+			error = computed_ascii(", ", out);
+			if (error != 0)
+				return error;
+		}
+		error = css_serialize_ident(names->names[index], out);
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/*
+ * Finds the names of a line of an explicit grid whose automatic repeat
+ * was put in repeats times: the template's own names, with the repeat's
+ * first and last lines' own names meeting at each line between two
+ * repetitions.
+ */
+static void
+computed_line_names(
+	const struct css_line_names *names,
+	const struct css_track_repeat *repeat,
+	int repeats,
+	int line,
+	struct css_line_names *out)
+{
+	int at;
+	int length;
+	int offset;
+
+	/* Without a repeat the template's line is the line. */
+	out->count = 0;
+	at = repeat->at;
+	length = repeat->length;
+	if (length <= 0 || repeats <= 1) {
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+
+	/* Before the repeat, at its first line, and after it. */
+	if (line <= at) {
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+	offset = line - at;
+	if (offset >= repeats * length) {
+		line -= (repeats - 1) * length;
+		computed_names_add(out, &names[line], 0, names[line].count);
+		return;
+	}
+
+	/* Between two repetitions: the last line's own names, then the first line's own ones. */
+	if (offset % length == 0) {
+		computed_names_add(out, &names[at + length], 0, repeat->name_end);
+		computed_names_add(out, &names[at], repeat->name_prefix, names[at].count);
+		return;
+	}
+
+	/* A line inside a repetition. */
+	line = at + offset % length;
+	computed_names_add(out, &names[line], 0, names[line].count);
+}
+
+/* Adds the names first to end of a line to a list (as many as it holds). */
+static void
+computed_names_add(
+	struct css_line_names *out,
+	const struct css_line_names *from,
+	int first,
+	int end)
+{
+	int index;
+
+	/* Each name in turn. */
+	for (index = first; index < end && out->count < CSS_LINE_NAMES; index++)
+		out->names[out->count++] = from->names[index];
+}
+
 /* Writes computed track breadths when actual used tracks are not requested or available. */
 static int
 computed_write_tracks(
 	const struct css_track *tracks,
 	int count,
+	const struct css_line_names *names,
 	struct wb_units *out)
 {
 	const struct css_track *track;
@@ -1318,6 +1604,16 @@ computed_write_tracks(
 		/* Resolves the current scalar track before appending its separator. */
 		track = &tracks[index];
 		if (index > 0) {
+			error = computed_ascii(" ", out);
+			if (error != 0)
+				return error;
+		}
+
+		/* The names of the line before the track. */
+		if (names != NULL && names[index].count > 0) {
+			error = css_line_names_serialize(&names[index], out);
+			if (error != 0)
+				return error;
 			error = computed_ascii(" ", out);
 			if (error != 0)
 				return error;
@@ -1360,6 +1656,16 @@ computed_write_tracks(
 			if (error != 0)
 				return error;
 		}
+	}
+
+	/* The names of the line after the last track. */
+	if (names != NULL && names[count].count > 0) {
+		error = computed_ascii(" ", out);
+		if (error != 0)
+			return error;
+		error = css_line_names_serialize(&names[count], out);
+		if (error != 0)
+			return error;
 	}
 
 	/* Succeeded: all computed track functions and keywords are complete. */
@@ -1626,6 +1932,8 @@ computed_align(
 		error = computed_ascii(flex ? "flex-end" : "end", out);
 		return error;
 	}
+	if (value == CSS_ALIGN_ANCHOR_CENTER)
+		return computed_ascii("anchor-center", out);
 	error = computed_name(computed_aligns, 10, value, out);
 	return error;
 }
@@ -1713,6 +2021,37 @@ computed_decoration_append(struct wb_units *out, const struct wb_units *part)
 			return error;
 	}
 	return wb_units_append(out, part->data, part->length);
+}
+
+/* Serializes the text shadow as its color and its offsets and blur in pixels, or none. */
+static int
+computed_text_shadow(
+	const struct css_style *style,
+	struct wb_units *out)
+{
+	const struct css_shadow *shadow;
+	int error;
+
+	/* No shadow. */
+	if (!style->text_shadow_set)
+		return computed_ascii("none", out);
+
+	/* The color, then the three lengths. */
+	shadow = &style->text_shadow;
+	error = computed_color(shadow->color, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->x, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->y, out);
+	if (error == 0)
+		error = computed_ascii(" ", out);
+	if (error == 0)
+		error = computed_pixels(shadow->blur, out);
+	return error;
 }
 
 /* Serializes the four cascaded decoration longhands as a computed shorthand. */

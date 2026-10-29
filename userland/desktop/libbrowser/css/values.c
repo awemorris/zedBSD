@@ -24,6 +24,22 @@
 /* The widest supported shorthand expands border's four sides into twelve longhands. */
 #define VALUES_EXPANSION_MAX	16
 
+/* values_border's side for a logical side: this plus 0 to 3 (inline-start, inline-end, block-start, block-end). */
+#define VALUES_LOGICAL_SIDE	4
+
+/*
+ * Where the areas form of grid-template is in a row: before it, after its
+ * leading line names, after its string, after its size, or after its
+ * trailing line names (the next row may still have leading ones).
+ */
+enum values_row_state {
+	VALUES_ROW_START,
+	VALUES_ROW_LEADING_NAMES,
+	VALUES_ROW_STRING,
+	VALUES_ROW_SIZE,
+	VALUES_ROW_TRAILING_NAMES
+};
+
 /* The shorthands this pass expands (numbered after the longhands). */
 enum values_shorthand {
 	SHORT_MARGIN = CSS_PROP_COUNT,
@@ -33,6 +49,10 @@ enum values_shorthand {
 	SHORT_BORDER_RIGHT,
 	SHORT_BORDER_BOTTOM,
 	SHORT_BORDER_LEFT,
+	SHORT_BORDER_INLINE_START,
+	SHORT_BORDER_INLINE_END,
+	SHORT_BORDER_BLOCK_START,
+	SHORT_BORDER_BLOCK_END,
 	SHORT_BORDER_WIDTH,
 	SHORT_BORDER_STYLE,
 	SHORT_BORDER_COLOR,
@@ -64,6 +84,9 @@ enum values_shorthand {
 	SHORT_GRID_TEMPLATE,
 	SHORT_GRID,
 	SHORT_PLACE_ITEMS,
+	SHORT_PLACE_SELF,
+	SHORT_PLACE_CONTENT,
+	SHORT_POSITION_TRY,
 	SHORT_CONTAINER,
 	SHORT_BORDER_SPACING,
 	SHORT_OVERFLOW,
@@ -167,6 +190,10 @@ static const struct values_name values_names[] = {
 	{ "bottom", CSS_PROP_BOTTOM },
 	{ "left", CSS_PROP_LEFT },
 	{ "z-index", CSS_PROP_Z_INDEX },
+	{ "anchor-name", CSS_PROP_ANCHOR_NAME },
+	{ "position-anchor", CSS_PROP_POSITION_ANCHOR },
+	{ "anchor-scope", CSS_PROP_ANCHOR_SCOPE },
+	{ "position-area", CSS_PROP_POSITION_AREA },
 	{ "clear", CSS_PROP_CLEAR },
 	{ "overflow", SHORT_OVERFLOW },
 	{ "transform", SHORT_TRANSFORM },
@@ -224,6 +251,7 @@ static const struct values_name values_names[] = {
 	{ "text-orientation", CSS_PROP_TEXT_ORIENTATION },
 	{ "grid-template-columns", CSS_PROP_GRID_TEMPLATE_COLUMNS },
 	{ "grid-template-rows", CSS_PROP_GRID_TEMPLATE_ROWS },
+	{ "grid-template-areas", CSS_PROP_GRID_TEMPLATE_AREAS },
 	{ "grid-auto-flow", CSS_PROP_GRID_AUTO_FLOW },
 	{ "grid-auto-columns", CSS_PROP_GRID_AUTO_COLUMNS },
 	{ "grid-auto-rows", CSS_PROP_GRID_AUTO_ROWS },
@@ -261,6 +289,12 @@ static const struct values_name values_names[] = {
 	{ "grid-template", SHORT_GRID_TEMPLATE },
 	{ "grid", SHORT_GRID },
 	{ "place-items", SHORT_PLACE_ITEMS },
+	{ "place-self", SHORT_PLACE_SELF },
+	{ "place-content", SHORT_PLACE_CONTENT },
+	{ "position-try", SHORT_POSITION_TRY },
+	{ "position-try-fallbacks", CSS_PROP_POSITION_TRY_FALLBACKS },
+	{ "position-try-order", CSS_PROP_POSITION_TRY_ORDER },
+	{ "position-visibility", CSS_PROP_POSITION_VISIBILITY },
 	{ "container", SHORT_CONTAINER },
 	{ "border-spacing", SHORT_BORDER_SPACING },
 	{ "margin", SHORT_MARGIN },
@@ -285,36 +319,36 @@ static const struct values_name values_names[] = {
 	{ "margin-inline-end", CSS_PROP_MARGIN_INLINE_END },
 	{ "margin-block-start", CSS_PROP_MARGIN_BLOCK_START },
 	{ "margin-block-end", CSS_PROP_MARGIN_BLOCK_END },
-	{ "padding-inline-start", CSS_PROP_PADDING_LEFT },
-	{ "padding-inline-end", CSS_PROP_PADDING_RIGHT },
-	{ "padding-block-start", CSS_PROP_PADDING_TOP },
-	{ "padding-block-end", CSS_PROP_PADDING_BOTTOM },
-	{ "inset-inline-start", CSS_PROP_LEFT },
-	{ "inset-inline-end", CSS_PROP_RIGHT },
-	{ "inset-block-start", CSS_PROP_TOP },
-	{ "inset-block-end", CSS_PROP_BOTTOM },
-	{ "inline-size", CSS_PROP_WIDTH },
-	{ "block-size", CSS_PROP_HEIGHT },
-	{ "min-inline-size", CSS_PROP_MIN_WIDTH },
-	{ "max-inline-size", CSS_PROP_MAX_WIDTH },
-	{ "min-block-size", CSS_PROP_MIN_HEIGHT },
-	{ "max-block-size", CSS_PROP_MAX_HEIGHT },
-	{ "border-inline-start-width", CSS_PROP_BORDER_LEFT_WIDTH },
-	{ "border-inline-end-width", CSS_PROP_BORDER_RIGHT_WIDTH },
-	{ "border-block-start-width", CSS_PROP_BORDER_TOP_WIDTH },
-	{ "border-block-end-width", CSS_PROP_BORDER_BOTTOM_WIDTH },
-	{ "border-inline-start-style", CSS_PROP_BORDER_LEFT_STYLE },
-	{ "border-inline-end-style", CSS_PROP_BORDER_RIGHT_STYLE },
-	{ "border-block-start-style", CSS_PROP_BORDER_TOP_STYLE },
-	{ "border-block-end-style", CSS_PROP_BORDER_BOTTOM_STYLE },
-	{ "border-inline-start-color", CSS_PROP_BORDER_LEFT_COLOR },
-	{ "border-inline-end-color", CSS_PROP_BORDER_RIGHT_COLOR },
-	{ "border-block-start-color", CSS_PROP_BORDER_TOP_COLOR },
-	{ "border-block-end-color", CSS_PROP_BORDER_BOTTOM_COLOR },
-	{ "border-inline-start", SHORT_BORDER_LEFT },
-	{ "border-inline-end", SHORT_BORDER_RIGHT },
-	{ "border-block-start", SHORT_BORDER_TOP },
-	{ "border-block-end", SHORT_BORDER_BOTTOM },
+	{ "padding-inline-start", CSS_PROP_PADDING_INLINE_START },
+	{ "padding-inline-end", CSS_PROP_PADDING_INLINE_END },
+	{ "padding-block-start", CSS_PROP_PADDING_BLOCK_START },
+	{ "padding-block-end", CSS_PROP_PADDING_BLOCK_END },
+	{ "inset-inline-start", CSS_PROP_INSET_INLINE_START },
+	{ "inset-inline-end", CSS_PROP_INSET_INLINE_END },
+	{ "inset-block-start", CSS_PROP_INSET_BLOCK_START },
+	{ "inset-block-end", CSS_PROP_INSET_BLOCK_END },
+	{ "inline-size", CSS_PROP_INLINE_SIZE },
+	{ "block-size", CSS_PROP_BLOCK_SIZE },
+	{ "min-inline-size", CSS_PROP_MIN_INLINE_SIZE },
+	{ "max-inline-size", CSS_PROP_MAX_INLINE_SIZE },
+	{ "min-block-size", CSS_PROP_MIN_BLOCK_SIZE },
+	{ "max-block-size", CSS_PROP_MAX_BLOCK_SIZE },
+	{ "border-inline-start-width", CSS_PROP_BORDER_INLINE_START_WIDTH },
+	{ "border-inline-end-width", CSS_PROP_BORDER_INLINE_END_WIDTH },
+	{ "border-block-start-width", CSS_PROP_BORDER_BLOCK_START_WIDTH },
+	{ "border-block-end-width", CSS_PROP_BORDER_BLOCK_END_WIDTH },
+	{ "border-inline-start-style", CSS_PROP_BORDER_INLINE_START_STYLE },
+	{ "border-inline-end-style", CSS_PROP_BORDER_INLINE_END_STYLE },
+	{ "border-block-start-style", CSS_PROP_BORDER_BLOCK_START_STYLE },
+	{ "border-block-end-style", CSS_PROP_BORDER_BLOCK_END_STYLE },
+	{ "border-inline-start-color", CSS_PROP_BORDER_INLINE_START_COLOR },
+	{ "border-inline-end-color", CSS_PROP_BORDER_INLINE_END_COLOR },
+	{ "border-block-start-color", CSS_PROP_BORDER_BLOCK_START_COLOR },
+	{ "border-block-end-color", CSS_PROP_BORDER_BLOCK_END_COLOR },
+	{ "border-inline-start", SHORT_BORDER_INLINE_START },
+	{ "border-inline-end", SHORT_BORDER_INLINE_END },
+	{ "border-block-start", SHORT_BORDER_BLOCK_START },
+	{ "border-block-end", SHORT_BORDER_BLOCK_END },
 	{ "margin-inline", SHORT_MARGIN_INLINE },
 	{ "margin-block", SHORT_MARGIN_BLOCK },
 	{ "padding-inline", SHORT_PADDING_INLINE },
@@ -444,6 +478,7 @@ static const struct values_keyword values_align[] = {
 	{ "space-between", CSS_ALIGN_SPACE_BETWEEN },
 	{ "space-around", CSS_ALIGN_SPACE_AROUND },
 	{ "space-evenly", CSS_ALIGN_SPACE_EVENLY },
+	{ "anchor-center", CSS_ALIGN_ANCHOR_CENTER },
 	{ NULL, 0 }
 };
 
@@ -949,6 +984,7 @@ static int values_background(struct css_parse *parse, const struct css_token *to
 static size_t values_function_length(const struct css_token *tokens, size_t count);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_repeat_parts(const struct css_token *const *parts, size_t count, struct css_value *value);
+static int values_subgrid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list);
 static int values_position_parts(const struct css_token *const *parts, size_t count, struct css_value *x, struct css_value *y);
 static int values_position_part(const struct css_token *token, struct css_value *value);
 static int values_position_axis(const struct css_token *token);
@@ -957,6 +993,10 @@ static int values_background_position(const struct css_token *tokens, size_t cou
 static int values_background_size(const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_takes_length(int property);
 static int values_flex(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_unitless_function(const struct css_token *tokens, size_t count);
+static int values_position_try(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_place(struct css_parse *parse, const struct css_token *tokens, size_t count, int align, int justify, struct css_declaration *out, size_t *made);
+static size_t values_place_value(const struct css_token *tokens, const size_t *starts, size_t components, size_t first);
 static int values_flex_flow(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_content(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_pair(struct css_parse *parse, int first, int second, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
@@ -982,16 +1022,30 @@ static int values_tracks(struct css_parse *parse, const struct css_token *tokens
 static int values_auto_tracks(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_grid_auto_flow(const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_track_list(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_track_list *list, int depth);
+static void values_line_name(struct css_track_list *list, size_t line, struct vm_string *name);
+static int values_areas(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_area_row(struct css_parse *parse, const struct css_token *token, struct css_grid_areas *areas, int *columns);
+static int values_area_name_unit(uint16_t unit);
+static int values_areas_check(const struct css_grid_areas *areas);
+static int values_area_seen(const struct css_grid_areas *areas, struct vm_string *name, int row, int column);
+static void values_copy_line_names(struct css_track_list *list, size_t from, size_t to, int skip, int end);
 static int values_track_minimum_rule(const struct css_token *token, int kind);
 static int values_track_maximum_rule(const struct css_token *token, int kind);
 static int values_one_track(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declared_track *track);
 static int values_track_size(struct css_parse *parse, const struct css_token *tokens, size_t count, int *kind, struct css_value *size);
 static size_t values_split_at(const struct css_token *tokens, size_t count, int type, uint32_t delim);
-static int values_grid_line(const struct css_token *tokens, size_t count, struct css_value *value);
-static int values_grid_pair(int start, int end, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
-static int values_grid_area(const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_physical_grammar(int property);
+static int values_grid_line(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_custom_ident(struct css_parse *parse, const struct css_token *token, struct vm_string **name);
+static int values_grid_line_is_name(const struct css_value *line);
+static int values_grid_pair(struct css_parse *parse, int start, int end, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_grid_area(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_grid_explicit(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_grid_template(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_grid_template_areas(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_tracks_none(struct css_parse *parse, struct css_value *value);
+static int values_grid(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
+static int values_grid_side(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 static int values_decoration_line(const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_text_decoration(const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
 
@@ -1094,9 +1148,6 @@ css_parse_property(
 	size_t *out_count)
 {
 	struct css_value value;
-	size_t starts[3];
-	size_t lengths[3];
-	size_t components;
 	int error;
 	int first;
 	int wide;
@@ -1116,9 +1167,6 @@ css_parse_property(
 	memset(&value, 0, sizeof(value));
 	wide = values_keyword(values_wide, &tokens[0], &value.kind);
 	if (count == 1 && wide) {
-		/* A complete grid shorthand needs the implicit longhands, which this pass cannot reset. */
-		if (property == SHORT_GRID || property == SHORT_GRID_TEMPLATE)
-			return EINVAL;
 		values_wide_keyword(property, &value, out, out_count);
 		return 0;
 	}
@@ -1145,6 +1193,12 @@ css_parse_property(
 		return values_border(parse, CSS_BOTTOM, tokens, count, out, out_count);
 	case SHORT_BORDER_LEFT:
 		return values_border(parse, CSS_LEFT, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_START:
+	case SHORT_BORDER_INLINE_END:
+	case SHORT_BORDER_BLOCK_START:
+	case SHORT_BORDER_BLOCK_END:
+		/* A logical side: the cascade finds its physical side. */
+		return values_border(parse, VALUES_LOGICAL_SIDE + property - SHORT_BORDER_INLINE_START, tokens, count, out, out_count);
 	case SHORT_BACKGROUND:
 		return values_background(parse, tokens, count, out, out_count);
 	case SHORT_BACKGROUND_POSITION:
@@ -1171,15 +1225,15 @@ css_parse_property(
 	case SHORT_MARGIN_BLOCK:
 		return values_pair(parse, CSS_PROP_MARGIN_BLOCK_START, CSS_PROP_MARGIN_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_PADDING_INLINE:
-		return values_pair(parse, CSS_PROP_PADDING_LEFT, CSS_PROP_PADDING_RIGHT, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_PADDING_INLINE_START, CSS_PROP_PADDING_INLINE_END, tokens, count, out, out_count);
 	case SHORT_PADDING_BLOCK:
-		return values_pair(parse, CSS_PROP_PADDING_TOP, CSS_PROP_PADDING_BOTTOM, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_PADDING_BLOCK_START, CSS_PROP_PADDING_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_INSET:
 		return values_four(parse, CSS_PROP_TOP, tokens, count, out, out_count);
 	case SHORT_INSET_INLINE:
-		return values_pair(parse, CSS_PROP_LEFT, CSS_PROP_RIGHT, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_INSET_INLINE_START, CSS_PROP_INSET_INLINE_END, tokens, count, out, out_count);
 	case SHORT_INSET_BLOCK:
-		return values_pair(parse, CSS_PROP_TOP, CSS_PROP_BOTTOM, tokens, count, out, out_count);
+		return values_pair(parse, CSS_PROP_INSET_BLOCK_START, CSS_PROP_INSET_BLOCK_END, tokens, count, out, out_count);
 	case SHORT_FLEX:
 		return values_flex(parse, tokens, count, out, out_count);
 	case SHORT_FLEX_FLOW:
@@ -1199,15 +1253,15 @@ css_parse_property(
 	case SHORT_OUTLINE:
 		return values_outline(parse, tokens, count, out, out_count);
 	case SHORT_GRID_COLUMN:
-		return values_grid_pair(CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, tokens, count, out, out_count);
+		return values_grid_pair(parse, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_COLUMN_END, tokens, count, out, out_count);
 	case SHORT_GRID_ROW:
-		return values_grid_pair(CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END, tokens, count, out, out_count);
+		return values_grid_pair(parse, CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_ROW_END, tokens, count, out, out_count);
 	case SHORT_GRID_AREA:
-		return values_grid_area(tokens, count, out, out_count);
+		return values_grid_area(parse, tokens, count, out, out_count);
 	case SHORT_GRID_TEMPLATE:
 		return values_grid_template(parse, tokens, count, out, out_count);
 	case SHORT_GRID:
-		return values_grid_explicit(parse, tokens, count, out, out_count);
+		return values_grid(parse, tokens, count, out, out_count);
 	case SHORT_OVERFLOW:
 		/* One keyword for both axes, or the horizontal then the vertical one. */
 		return values_pair(parse, CSS_PROP_OVERFLOW_X, CSS_PROP_OVERFLOW_Y, tokens, count, out, out_count);
@@ -1233,11 +1287,13 @@ css_parse_property(
 		/* A name alone makes a container of no type. */
 		return 0;
 	case SHORT_PLACE_ITEMS:
-		/* align-items (the justify-items after it is not kept in this pass). */
-		components = values_components(tokens, count, starts, lengths, 3);
-		if (components == 0)
-			return EINVAL;
-		return css_parse_value_as(parse, CSS_PROP_ALIGN_ITEMS, tokens + starts[0], lengths[0], out, out_count);
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_ITEMS, CSS_PROP_JUSTIFY_ITEMS, out, out_count);
+	case SHORT_PLACE_SELF:
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_SELF, CSS_PROP_JUSTIFY_SELF, out, out_count);
+	case SHORT_PLACE_CONTENT:
+		return values_place(parse, tokens, count, CSS_PROP_ALIGN_CONTENT, CSS_PROP_JUSTIFY_CONTENT, out, out_count);
+	case SHORT_POSITION_TRY:
+		return values_position_try(parse, tokens, count, out, out_count);
 	default:
 		break;
 	}
@@ -1690,6 +1746,33 @@ css_decoration_line_serialize(
 	return 0;
 }
 
+/* The physical property whose grammar a logical side or size takes (other properties their own). */
+static int
+values_physical_grammar(
+	int property)
+{
+	/* Each logical group, by its first physical property. */
+	if (property >= CSS_PROP_PADDING_INLINE_START && property <= CSS_PROP_PADDING_BLOCK_END)
+		return CSS_PROP_PADDING_TOP;
+	if (property >= CSS_PROP_INSET_INLINE_START && property <= CSS_PROP_INSET_BLOCK_END)
+		return CSS_PROP_TOP;
+	if (property >= CSS_PROP_BORDER_INLINE_START_WIDTH && property <= CSS_PROP_BORDER_BLOCK_END_WIDTH)
+		return CSS_PROP_BORDER_TOP_WIDTH;
+	if (property >= CSS_PROP_BORDER_INLINE_START_STYLE && property <= CSS_PROP_BORDER_BLOCK_END_STYLE)
+		return CSS_PROP_BORDER_TOP_STYLE;
+	if (property >= CSS_PROP_BORDER_INLINE_START_COLOR && property <= CSS_PROP_BORDER_BLOCK_END_COLOR)
+		return CSS_PROP_BORDER_TOP_COLOR;
+	if (property == CSS_PROP_INLINE_SIZE || property == CSS_PROP_BLOCK_SIZE)
+		return CSS_PROP_WIDTH;
+	if (property == CSS_PROP_MIN_INLINE_SIZE || property == CSS_PROP_MIN_BLOCK_SIZE)
+		return CSS_PROP_MIN_WIDTH;
+	if (property == CSS_PROP_MAX_INLINE_SIZE || property == CSS_PROP_MAX_BLOCK_SIZE)
+		return CSS_PROP_MAX_WIDTH;
+
+	/* Any other property is its own grammar. */
+	return property;
+}
+
 /* Looks a keyword up in a table; returns 1 and its value when it is there. */
 static int
 values_keyword(
@@ -1850,6 +1933,9 @@ values_single(
 	int is_safe;
 	int is_unsafe;
 
+	/* A logical side or size takes the grammar of a physical one. */
+	property = values_physical_grammar(property);
+
 	/* Skips surrounding whitespace. */
 	while (count > 0 &&
 	       tokens[0].type == CSS_TOKEN_WHITESPACE) {
@@ -1864,6 +1950,85 @@ values_single(
 	if (count == 0)
 		return EINVAL;
 	memset(value, 0, sizeof(*value));
+
+	/* An inset or a size with anchor functions is kept as a sum the layout finishes. */
+	if (((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT)) && css_anchor_mentioned(tokens, count)) {
+		error = css_anchor_parse(parse, tokens, count, property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT,
+		    &value->anchor);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_ANCHOR;
+		return 0;
+	}
+
+	/* anchor-name and anchor-scope: none (anchor-scope also all) or names. */
+	if (property == CSS_PROP_ANCHOR_NAME || property == CSS_PROP_ANCHOR_SCOPE) {
+		if (count == 1 && css_ident_equal(&tokens[0], "none")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 0;
+			return 0;
+		}
+		if (property == CSS_PROP_ANCHOR_SCOPE && count == 1 && css_ident_equal(&tokens[0], "all")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 1;
+			return 0;
+		}
+		error = css_anchor_names_parse(parse, tokens, count, &value->anchor_names);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_ANCHOR_NAMES;
+		return 0;
+	}
+
+	/* position-area: none or its keywords. */
+	if (property == CSS_PROP_POSITION_AREA) {
+		error = css_position_area_parse(tokens, count, &keyword);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)keyword;
+		return 0;
+	}
+
+	/* position-try-fallbacks, position-try-order and position-visibility. */
+	if (property == CSS_PROP_POSITION_TRY_FALLBACKS) {
+		error = css_try_fallbacks_parse(parse, tokens, count, &value->try_list);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_TRY;
+		return 0;
+	}
+	if (property == CSS_PROP_POSITION_TRY_ORDER || property == CSS_PROP_POSITION_VISIBILITY) {
+		if (property == CSS_PROP_POSITION_TRY_ORDER)
+			error = css_try_order_parse(tokens, count, &keyword);
+		else
+			error = css_position_visibility_parse(tokens, count, &keyword);
+		if (error != 0)
+			return error;
+		value->kind = CSS_VALUE_NUMBER;
+		value->number = (float)keyword;
+		return 0;
+	}
+
+	/* position-anchor: auto or a name. */
+	if (property == CSS_PROP_POSITION_ANCHOR) {
+		if (count != 1)
+			return EINVAL;
+		if (css_ident_equal(&tokens[0], "auto")) {
+			value->kind = CSS_VALUE_KEYWORD;
+			value->keyword = 0;
+			return 0;
+		}
+		if (tokens[0].type != CSS_TOKEN_IDENT || tokens[0].length < 3 || tokens[0].text[0] != '-' || tokens[0].text[1] != '-')
+			return EINVAL;
+		value->ident = vm_atom_from_units(parse->heap, tokens[0].text, tokens[0].length);
+		if (value->ident == NULL)
+			return ENOMEM;
+		value->kind = CSS_VALUE_KEYWORD;
+		value->keyword = 1;
+		return 0;
+	}
 
 	/* Decoration lines form an unordered list of distinct keywords. */
 	if (property == CSS_PROP_TEXT_DECORATION_LINE) {
@@ -2032,6 +2197,17 @@ values_single(
 		return 0;
 	}
 
+	/* Named grid areas are strings of cells. */
+	if (property == CSS_PROP_GRID_TEMPLATE_AREAS) {
+		/* Parse the selected component with its established native grammar. */
+		error = values_areas(parse, tokens, count, value);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the selected native scalar component was parsed. */
+		return 0;
+	}
+
 	/* Automatic grid placement has its own keyword grammar. */
 	if (property == CSS_PROP_GRID_AUTO_FLOW) {
 		/* Parse the selected component with its established native grammar. */
@@ -2059,7 +2235,7 @@ values_single(
 	if (property >= CSS_PROP_GRID_COLUMN_START &&
 	    property <= CSS_PROP_GRID_ROW_END) {
 		/* Parse the selected component with its established native grammar. */
-		error = values_grid_line(tokens, count, value);
+		error = values_grid_line(parse, tokens, count, value);
 		if (error != 0)
 			return error;
 
@@ -2165,7 +2341,7 @@ values_single(
 				is_last = css_ident_equal(parts[0], "last");
 		}
 
-		/* The last baseline falls back to the end edge; the first one remains a baseline. */
+		/* The last baseline is the end edge marked as a last baseline; the first one remains a baseline. */
 		if (is_baseline &&
 		    (is_first ||
 		     is_last)) {
@@ -2173,7 +2349,7 @@ values_single(
 			is_last = css_ident_equal(parts[0], "last");
 			value->keyword = CSS_ALIGN_BASELINE;
 			if (is_last)
-				value->keyword = CSS_ALIGN_END;
+				value->keyword = CSS_ALIGN_END | 0x2000;
 
 			/* Succeeded: the two-word baseline position is represented. */
 			return 0;
@@ -2321,8 +2497,14 @@ values_single(
 		     property == CSS_PROP_ALIGN_SELF) &&
 		    (keyword == CSS_ALIGN_LEFT || keyword == CSS_ALIGN_RIGHT))
 			return EINVAL;
-		if (property == CSS_PROP_JUSTIFY_ITEMS &&
+		/* auto is a self-alignment only. */
+		if ((property == CSS_PROP_JUSTIFY_ITEMS || property == CSS_PROP_ALIGN_ITEMS ||
+		     property == CSS_PROP_JUSTIFY_CONTENT || property == CSS_PROP_ALIGN_CONTENT) &&
 		    keyword == CSS_ALIGN_AUTO)
+			return EINVAL;
+		/* anchor-center is a self-alignment. */
+		if (table == values_align && keyword == CSS_ALIGN_ANCHOR_CENTER &&
+		    property != CSS_PROP_ALIGN_SELF && property != CSS_PROP_JUSTIFY_SELF)
 			return EINVAL;
 		if (property == CSS_PROP_JUSTIFY_CONTENT ||
 		    property == CSS_PROP_ALIGN_ITEMS ||
@@ -2788,6 +2970,14 @@ values_border(
 		return EINVAL;
 	}
 
+	/* A logical side declares its logical longhands. */
+	if (side >= VALUES_LOGICAL_SIDE) {
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + side - VALUES_LOGICAL_SIDE, &width);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + side - VALUES_LOGICAL_SIDE, &style);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + side - VALUES_LOGICAL_SIDE, &color);
+		return 0;
+	}
+
 	/* Declares the three longhands on the side or sides. */
 	first = side;
 	last = side;
@@ -3069,6 +3259,30 @@ values_wide_keyword(
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_START, value);
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_END, value);
 		return;
+	case SHORT_PADDING_INLINE:
+		values_add(out, made, CSS_PROP_PADDING_INLINE_START, value);
+		values_add(out, made, CSS_PROP_PADDING_INLINE_END, value);
+		return;
+	case SHORT_PADDING_BLOCK:
+		values_add(out, made, CSS_PROP_PADDING_BLOCK_START, value);
+		values_add(out, made, CSS_PROP_PADDING_BLOCK_END, value);
+		return;
+	case SHORT_INSET_INLINE:
+		values_add(out, made, CSS_PROP_INSET_INLINE_START, value);
+		values_add(out, made, CSS_PROP_INSET_INLINE_END, value);
+		return;
+	case SHORT_INSET_BLOCK:
+		values_add(out, made, CSS_PROP_INSET_BLOCK_START, value);
+		values_add(out, made, CSS_PROP_INSET_BLOCK_END, value);
+		return;
+	case SHORT_BORDER_INLINE_START:
+	case SHORT_BORDER_INLINE_END:
+	case SHORT_BORDER_BLOCK_START:
+	case SHORT_BORDER_BLOCK_END:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + property - SHORT_BORDER_INLINE_START, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + property - SHORT_BORDER_INLINE_START, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + property - SHORT_BORDER_INLINE_START, value);
+		return;
 	case SHORT_PADDING:
 		first = CSS_PROP_PADDING_TOP;
 		break;
@@ -3081,7 +3295,12 @@ values_wide_keyword(
 	case SHORT_BORDER_COLOR:
 		first = CSS_PROP_BORDER_TOP_COLOR;
 		break;
+	case SHORT_POSITION_TRY:
+		values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, value);
+		values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, value);
+		return;
 	case SHORT_TRANSFORM:
+		values_add(out, made, CSS_PROP_TRANSFORM_SET, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_X, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_Y, value);
 		values_add(out, made, CSS_PROP_TRANSFORM_SCALE_X, value);
@@ -3156,6 +3375,21 @@ values_wide_keyword(
 		/* All four. */
 		for (first = CSS_PROP_GRID_COLUMN_START; first <= CSS_PROP_GRID_ROW_END; first++)
 			values_add(out, made, first, value);
+		return;
+	case SHORT_GRID_TEMPLATE:
+		/* The explicit grid. */
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_ROWS, value);
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_COLUMNS, value);
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, value);
+		return;
+	case SHORT_GRID:
+		/* The explicit grid and the implicit one. */
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_ROWS, value);
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_COLUMNS, value);
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, value);
+		values_add(out, made, CSS_PROP_GRID_AUTO_FLOW, value);
+		values_add(out, made, CSS_PROP_GRID_AUTO_ROWS, value);
+		values_add(out, made, CSS_PROP_GRID_AUTO_COLUMNS, value);
 		return;
 	default:
 		break;
@@ -4522,10 +4756,12 @@ values_flex(
 	size_t index;
 	size_t last_number;
 	int numbers;
+	int basis_set;
 	int is_word;
 	int error;
 
 	/* The defaults of a flex value that names some parts: 1 1 0%. */
+	basis_set = 0;
 	memset(&grow, 0, sizeof(grow));
 	grow.kind = CSS_VALUE_NUMBER;
 	grow.number = 1;
@@ -4544,17 +4780,17 @@ values_flex(
 			shrink.number = 0;
 		} else {
 			is_word = css_ident_equal(&tokens[starts[0]], "auto");
-			if (!is_word)
-				return EINVAL;
 		}
 
-		/* Both keep an auto basis. */
-		basis.kind = CSS_VALUE_KEYWORD;
-		basis.keyword = CSS_UNIT_AUTO;
-		values_add(out, made, CSS_PROP_FLEX_GROW, &grow);
-		values_add(out, made, CSS_PROP_FLEX_SHRINK, &shrink);
-		values_add(out, made, CSS_PROP_FLEX_BASIS, &basis);
-		return 0;
+		/* Both keep an auto basis (another word is a basis alone). */
+		if (is_word) {
+			basis.kind = CSS_VALUE_KEYWORD;
+			basis.keyword = CSS_UNIT_AUTO;
+			values_add(out, made, CSS_PROP_FLEX_GROW, &grow);
+			values_add(out, made, CSS_PROP_FLEX_SHRINK, &shrink);
+			values_add(out, made, CSS_PROP_FLEX_BASIS, &basis);
+			return 0;
+		}
 	}
 
 	/* One to three parts: numbers are the factors in order, anything else the basis. */
@@ -4590,11 +4826,14 @@ values_flex(
 			continue;
 		}
 
-		/* The basis. */
+		/* The basis, once (a calculation without units is not one). */
+		if (basis_set || values_unitless_function(tokens + starts[index], lengths[index]))
+			return EINVAL;
 		error = values_single(parse, CSS_PROP_FLEX_BASIS, tokens + starts[index], lengths[index], &candidate);
 		if (error != 0)
 			return error;
 		basis = candidate;
+		basis_set = 1;
 	}
 
 	/* The three longhands. */
@@ -4604,6 +4843,143 @@ values_flex(
 
 	/* Succeeded: the flex longhands are declared. */
 	return 0;
+}
+
+/*
+ * Parses place-items, place-self or place-content: the align value, then
+ * the justify value (the align value again when there is none; nothing
+ * for place-content's baseline, which leaves justify-content initial).  A value may be two words (last baseline,
+ * safe center).
+ * https://drafts.csswg.org/css-align-3/#place-items-property
+ */
+static int
+values_place(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	int align,
+	int justify,
+	struct css_declaration *out,
+	size_t *made)
+{
+	size_t starts[4];
+	size_t lengths[4];
+	size_t components;
+	size_t first_end;
+	size_t second_end;
+	size_t end;
+	int error;
+
+	/* The components, cut into the two values. */
+	components = values_components(tokens, count, starts, lengths, 4);
+	if (components == 0 || components > 4)
+		return EINVAL;
+	first_end = values_place_value(tokens, starts, components, 0);
+	second_end = first_end;
+	if (first_end < components)
+		second_end = values_place_value(tokens, starts, components, first_end);
+	if (second_end != components)
+		return EINVAL;
+
+	/* The align value. */
+	end = starts[first_end - 1U] + lengths[first_end - 1U];
+	error = css_parse_value_as(parse, align, tokens + starts[0], end - starts[0], out, made);
+	if (error != 0)
+		return error;
+
+	/* The justify value: its own, or the align value's. */
+	if (first_end < components) {
+		end = starts[second_end - 1U] + lengths[second_end - 1U];
+		error = css_parse_value_as(parse, justify, tokens + starts[first_end], end - starts[first_end], out, made);
+	} else if (align == CSS_PROP_ALIGN_CONTENT && css_ident_equal(&tokens[starts[first_end - 1U]], "baseline")) {
+		/* A baseline has no justify meaning: justify-content stays at its initial value. */
+		error = 0;
+	} else {
+		error = css_parse_value_as(parse, justify, tokens + starts[0], end - starts[0], out, made);
+	}
+	return error;
+}
+
+/* The component after one value of a place shorthand that starts at first (a value is one or two words). */
+static size_t
+values_place_value(
+	const struct css_token *tokens,
+	const size_t *starts,
+	size_t components,
+	size_t first)
+{
+	const struct css_token *token;
+
+	/* A prefix word takes the word after it. */
+	token = &tokens[starts[first]];
+	if (first + 1U < components && token->type == CSS_TOKEN_IDENT &&
+	    (css_ident_equal(token, "first") || css_ident_equal(token, "last") ||
+	    css_ident_equal(token, "safe") || css_ident_equal(token, "unsafe")))
+		return first + 2U;
+
+	/* One word. */
+	return first + 1U;
+}
+
+/* Parses position-try: an optional position-try-order, then position-try-fallbacks. */
+static int
+values_position_try(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value order;
+	struct css_value fallbacks;
+	size_t first;
+	int keyword;
+	int error;
+
+	/* The order, when the first word is one. */
+	memset(&order, 0, sizeof(order));
+	order.kind = CSS_VALUE_NUMBER;
+	first = 0;
+	while (first < count && tokens[first].type == CSS_TOKEN_WHITESPACE)
+		first++;
+	if (first < count && css_try_order_parse(tokens + first, 1, &keyword) == 0) {
+		order.number = (float)keyword;
+		first++;
+	}
+
+	/* The fallbacks. */
+	memset(&fallbacks, 0, sizeof(fallbacks));
+	error = css_try_fallbacks_parse(parse, tokens + first, count - first, &fallbacks.try_list);
+	if (error != 0)
+		return error;
+	fallbacks.kind = CSS_VALUE_TRY;
+
+	/* Succeeded: both longhands. */
+	values_add(out, made, CSS_PROP_POSITION_TRY_ORDER, &order);
+	values_add(out, made, CSS_PROP_POSITION_TRY_FALLBACKS, &fallbacks);
+	return 0;
+}
+
+/* Tells whether a component is a function whose arguments have no dimension or percentage (a number). */
+static int
+values_unitless_function(
+	const struct css_token *tokens,
+	size_t count)
+{
+	size_t index;
+
+	/* A function. */
+	if (count < 2U || tokens[0].type != CSS_TOKEN_FUNCTION)
+		return 0;
+
+	/* Without units. */
+	for (index = 1; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_DIMENSION || tokens[index].type == CSS_TOKEN_PERCENTAGE)
+			return 0;
+	}
+
+	/* Succeeded: the function gives a number. */
+	return 1;
 }
 
 /* Parses flex-flow: a direction and a wrap, in either order, each optional. */
@@ -5170,6 +5546,7 @@ values_tracks(
 	struct css_value *value)
 {
 	struct css_track_list *list;
+	size_t index;
 	int is_none;
 	int error;
 
@@ -5187,6 +5564,11 @@ values_tracks(
 			return 0;
 	}
 
+	/* subgrid and its line names. */
+	index = values_skip_space(tokens, count, 0);
+	if (index < count && tokens[index].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[index], "subgrid"))
+		return values_subgrid(parse, tokens + index + 1U, count - index - 1U, list);
+
 	/* The tracks. */
 	error = values_track_list(parse, tokens, count, list, 0);
 	if (error != 0)
@@ -5198,6 +5580,166 @@ values_tracks(
 
 	/* Succeeded: the template is parsed. */
 	return 0;
+}
+
+/* Appends a token's text to a buffer as UTF-8. */
+static int
+values_token_utf8(
+	const struct css_token *token,
+	struct wb_buffer *out)
+{
+	size_t index;
+	int error;
+
+	/* Each unit (the identifiers of line names are not split across surrogates here). */
+	for (index = 0; index < token->length; index++) {
+		error = wb_buffer_append_utf8(out, token->text[index]);
+		if (error != 0)
+			return error;
+	}
+	return 0;
+}
+
+/* Parses one bracketed group of line names into its serialization ("[a b]"); *end is past it. */
+static int
+values_subgrid_names(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	size_t index,
+	struct wb_buffer *out,
+	size_t *end)
+{
+	struct vm_string *name;
+	int first;
+	int error;
+
+	/* The group's names, each a custom identifier. */
+	error = wb_buffer_append_byte(out, '[');
+	first = 1;
+	for (index++; error == 0 && index < count && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		error = values_custom_ident(parse, &tokens[index], &name);
+		if (error == 0 && !first)
+			error = wb_buffer_append_byte(out, ' ');
+		if (error == 0)
+			error = values_token_utf8(&tokens[index], out);
+		first = 0;
+	}
+	if (error != 0)
+		return error;
+	if (index == count)
+		return EINVAL;
+
+	/* Succeeded: the group is closed. */
+	*end = index + 1U;
+	return wb_buffer_append_byte(out, ']');
+}
+
+/*
+ * Parses what follows subgrid in a grid template: line-name groups, and
+ * repeat() of groups with a count or auto-fill (one at most), into the
+ * value's serialization kept in the arena.  The subgrid has no tracks of
+ * its own here.
+ */
+static int
+values_subgrid(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_track_list *list)
+{
+	struct wb_buffer text;
+	char *kept;
+	size_t index;
+	size_t end;
+	size_t inner;
+	size_t comma;
+	int automatic;
+	int groups;
+	int error;
+
+	/* subgrid, then each component after a space. */
+	wb_buffer_init(&text);
+	error = wb_buffer_append_string(&text, "subgrid");
+	automatic = 0;
+	index = 0;
+	while (error == 0 && index < count) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
+			index++;
+			continue;
+		}
+		error = wb_buffer_append_byte(&text, ' ');
+		if (error != 0)
+			break;
+
+		/* A group of names. */
+		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			error = values_subgrid_names(parse, tokens, count, index, &text, &index);
+			continue;
+		}
+
+		/* repeat() of groups: a positive count or auto-fill, a comma, then groups only. */
+		if (tokens[index].type != CSS_TOKEN_FUNCTION || !css_ident_equal(&tokens[index], "repeat")) {
+			error = EINVAL;
+			break;
+		}
+		end = index + values_function_length(tokens + index, count - index);
+		inner = values_skip_space(tokens, end, index + 1U);
+		error = wb_buffer_append_string(&text, "repeat(");
+		if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_IDENT && css_ident_equal(&tokens[inner], "auto-fill")) {
+			if (automatic)
+				error = EINVAL;
+			automatic = 1;
+			if (error == 0)
+				error = wb_buffer_append_string(&text, "auto-fill");
+		} else if (error == 0 && inner < end && tokens[inner].type == CSS_TOKEN_NUMBER && tokens[inner].integer &&
+		    tokens[inner].number >= 1 && tokens[inner].number <= 10000) {
+			error = wb_buffer_printf(&text, "%d", (int)tokens[inner].number);
+		} else if (error == 0) {
+			error = EINVAL;
+		}
+		comma = values_skip_space(tokens, end, inner + 1U);
+		if (error == 0 && (comma >= end || tokens[comma].type != CSS_TOKEN_COMMA))
+			error = EINVAL;
+		if (error == 0)
+			error = wb_buffer_append_byte(&text, ',');
+		groups = 0;
+		for (inner = comma + 1U; error == 0 && inner + 1U < end;) {
+			if (tokens[inner].type == CSS_TOKEN_WHITESPACE) {
+				inner++;
+				continue;
+			}
+			if (tokens[inner].type != CSS_TOKEN_OPEN_SQUARE) {
+				error = EINVAL;
+				break;
+			}
+			error = wb_buffer_append_byte(&text, ' ');
+			if (error == 0)
+				error = values_subgrid_names(parse, tokens, end - 1U, inner, &text, &inner);
+			groups++;
+		}
+		if (error == 0 && groups == 0)
+			error = EINVAL;
+		if (error == 0)
+			error = wb_buffer_append_byte(&text, ')');
+		index = end;
+	}
+
+	/* The serialization, kept in the arena. */
+	if (error == 0) {
+		kept = wb_arena_alloc(parse->arena, text.length + 1U);
+		if (kept == NULL) {
+			error = ENOMEM;
+		} else {
+			memcpy(kept, text.data, text.length);
+			kept[text.length] = '\0';
+			list->subgrid = kept;
+		}
+	}
+	wb_buffer_release(&text);
+	return error;
 }
 
 /* Parses an implicit track cycle through the same single-breadth grammar as explicit tracks. */
@@ -5271,6 +5813,7 @@ values_track_list(
 	int depth)
 {
 	struct css_declared_track track;
+	struct vm_string *name;
 	size_t index;
 	size_t end;
 	size_t inner;
@@ -5281,6 +5824,8 @@ values_track_list(
 	size_t added;
 	int is_repeat;
 	int last_was_names;
+	int prefix;
+	int body_end;
 	int error;
 
 	/* Walks the list: whitespace, bracketed names, repeat() and tracks. */
@@ -5293,17 +5838,22 @@ values_track_list(
 			continue;
 		}
 
-		/* Validate one group of line names; their values are not stored yet. */
+		/* One group of line names, kept on the line before the next track. */
 		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
 			if (last_was_names)
 				return EINVAL;
 			index++;
 			while (index < count && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE) {
-				if (tokens[index].type != CSS_TOKEN_WHITESPACE &&
-				    (tokens[index].type != CSS_TOKEN_IDENT ||
-				    css_ident_equal(&tokens[index], "auto") ||
-				    css_ident_equal(&tokens[index], "span")))
-					return EINVAL;
+				if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
+					index++;
+					continue;
+				}
+
+				/* Each name is a custom identifier. */
+				error = values_custom_ident(parse, &tokens[index], &name);
+				if (error != 0)
+					return error;
+				values_line_name(list, list->count, name);
 				index++;
 			}
 			if (index == count)
@@ -5335,12 +5885,21 @@ values_track_list(
 				if (comma >= end)
 					return EINVAL;
 				first = list->count;
+				prefix = 0;
+				if (first <= CSS_TRACKS)
+					prefix = list->names[first].count;
 				error = values_track_list(parse, tokens + comma + 1U, end - comma - 2U, list, depth + 1);
 				if (error != 0)
 					return error;
 				added = list->count - first;
 				if (added == 0)
 					return EINVAL;
+
+				/* Which names of the repeat's first and last lines are its own (the ones around it follow later). */
+				list->repeat_name_prefix = prefix;
+				list->repeat_name_end = 0;
+				if (list->count <= CSS_TRACKS)
+					list->repeat_name_end = list->names[list->count].count;
 
 				/* Every repeated track needs a definite size for layout to count the repeats. */
 				for (inner = first; inner < list->count; inner++) {
@@ -5362,15 +5921,32 @@ values_track_list(
 			if (comma >= end)
 				return EINVAL;
 
-			/* The tracks once, then again until the count (or the room) runs out. */
+			/* The tracks once, then again until the count (or the room) runs out; their line names with them. */
 			first = list->count;
+			prefix = 0;
+			if (first <= CSS_TRACKS)
+				prefix = list->names[first].count;
 			error = values_track_list(parse, tokens + comma + 1U, end - comma - 2U, list, depth + 1);
 			if (error != 0)
 				return error;
 			added = list->count - first;
+			if (added == 0)
+				return EINVAL;
+			body_end = 0;
+			if (first + added <= CSS_TRACKS)
+				body_end = list->names[first + added].count;
 			for (time = 1; time < times && added != 0; time++) {
 				for (inner = 0; inner < added && list->count < CSS_TRACKS; inner++) {
 					list->tracks[list->count] = list->tracks[first + inner];
+
+					/*
+					 * The repeated lines' names: the body's own at its first line, all at the inner
+					 * ones, and at its last only the body's own (not the next repetition's first ones).
+					 */
+					if (inner == 0)
+						values_copy_line_names(list, first, list->count, prefix, CSS_LINE_NAMES);
+					values_copy_line_names(list, first + inner + 1U, list->count + 1U, 0,
+					    inner + 1U == added ? body_end : CSS_LINE_NAMES);
 					list->count++;
 				}
 			}
@@ -5396,6 +5972,286 @@ values_track_list(
 	}
 
 	/* Succeeded: the tracks are appended. */
+	return 0;
+}
+
+/* Adds a name to one line of a track list (past the room it is dropped). */
+static void
+values_line_name(
+	struct css_track_list *list,
+	size_t line,
+	struct vm_string *name)
+{
+	struct css_line_names *names;
+
+	/* Lines past the last track the list keeps are not kept either. */
+	if (line > CSS_TRACKS)
+		return;
+
+	/* The name after the line's others. */
+	names = &list->names[line];
+	if (names->count < CSS_LINE_NAMES) {
+		names->names[names->count] = name;
+		names->count++;
+	}
+	list->named = 1;
+}
+
+/* Appends the names of one line of a track list, from its skip-th to before its end-th, to another (a repeated track's lines). */
+static void
+values_copy_line_names(
+	struct css_track_list *list,
+	size_t from,
+	size_t to,
+	int skip,
+	int end)
+{
+	int index;
+	int count;
+
+	/* Each name the source line has, as it is now. */
+	if (from > CSS_TRACKS || to > CSS_TRACKS)
+		return;
+	count = list->names[from].count;
+	if (count > end)
+		count = end;
+	for (index = skip; index < count; index++)
+		values_line_name(list, to, list->names[from].names[index]);
+}
+
+/*
+ * Parses grid-template-areas: none, or one string per row whose cell
+ * tokens (names, or runs of full stops for no area) are separated by
+ * whitespace; every row has the same number of cells and each name's
+ * cells make one filled rectangle.  Kept in the parse's arena.
+ */
+static int
+values_areas(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	struct css_grid_areas *areas;
+	size_t index;
+	int columns;
+	int is_none;
+	int error;
+
+	/* none is no areas. */
+	value->kind = CSS_VALUE_AREAS;
+	value->areas = NULL;
+	if (count == 1 && tokens[0].type == CSS_TOKEN_IDENT) {
+		is_none = css_ident_equal(&tokens[0], "none");
+		if (is_none)
+			return 0;
+	}
+
+	/* The cells, kept in the arena. */
+	areas = wb_arena_zalloc(parse->arena, sizeof(*areas));
+	if (areas == NULL)
+		return ENOMEM;
+
+	/* Each string is a row. */
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (tokens[index].type != CSS_TOKEN_STRING)
+			return EINVAL;
+		error = values_area_row(parse, &tokens[index], areas, &columns);
+		if (error != 0)
+			return error;
+	}
+
+	/* At least one row, and each name a rectangle. */
+	if (areas->rows == 0)
+		return EINVAL;
+	error = values_areas_check(areas);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the areas are parsed. */
+	value->areas = areas;
+	return 0;
+}
+
+/*
+ * Appends one row of grid-template-areas from its string: its cells,
+ * which must be as many as the earlier rows'; columns is set to them.
+ */
+static int
+values_area_row(
+	struct css_parse *parse,
+	const struct css_token *token,
+	struct css_grid_areas *areas,
+	int *columns)
+{
+	struct vm_string *name;
+	const uint16_t *text;
+	size_t length;
+	size_t at;
+	size_t start;
+	uint16_t unit;
+	int cells;
+	int is_name;
+
+	/* Refuses more rows than the areas keep. */
+	if (areas->rows >= CSS_AREA_TRACKS)
+		return EINVAL;
+
+	/* Walks the string's tokens. */
+	text = token->text;
+	length = token->length;
+	at = 0;
+	cells = 0;
+	while (at < length) {
+		unit = text[at];
+
+		/* Whitespace separates the tokens. */
+		if (unit == ' ' || unit == '\t' || unit == '\n' || unit == '\r' || unit == '\f') {
+			at++;
+			continue;
+		}
+
+		/* A run of full stops is a cell of no area; a run of name characters names one. */
+		start = at;
+		if (unit == '.') {
+			while (at < length && text[at] == '.')
+				at++;
+			name = NULL;
+		} else {
+			while (at < length) {
+				is_name = values_area_name_unit(text[at]);
+				if (!is_name)
+					break;
+				at++;
+			}
+
+			/* Any other character makes the value invalid. */
+			if (at == start)
+				return EINVAL;
+			name = vm_atom_from_units(parse->heap, text + start, at - start);
+			if (name == NULL)
+				return ENOMEM;
+		}
+
+		/* The cell, while the row has room. */
+		if (cells >= CSS_AREA_TRACKS)
+			return EINVAL;
+		areas->cells[areas->rows * CSS_AREA_TRACKS + cells] = name;
+		cells++;
+	}
+
+	/* A row has cells, as many as the others. */
+	if (cells == 0)
+		return EINVAL;
+	if (areas->rows > 0 && cells != areas->columns)
+		return EINVAL;
+
+	/* Succeeded: the row is appended. */
+	areas->columns = cells;
+	areas->rows++;
+	*columns = cells;
+	return 0;
+}
+
+/* Tells whether a UTF-16 unit may be part of an area's name (an identifier code point). */
+static int
+values_area_name_unit(
+	uint16_t unit)
+{
+	/* Letters, digits, the hyphen, the low line, and anything past ASCII. */
+	if (unit >= 'a' && unit <= 'z')
+		return 1;
+	if (unit >= 'A' && unit <= 'Z')
+		return 1;
+	if (unit >= '0' && unit <= '9')
+		return 1;
+	if (unit == '-' || unit == '_')
+		return 1;
+	if (unit >= 0x80)
+		return 1;
+
+	/* Anything else ends the name. */
+	return 0;
+}
+
+/* Checks that the cells of each name in grid-template-areas make one filled rectangle. */
+static int
+values_areas_check(
+	const struct css_grid_areas *areas)
+{
+	struct vm_string *name;
+	int row;
+	int column;
+	int top;
+	int left;
+	int bottom;
+	int right;
+	int cells;
+	int inner_row;
+	int inner_column;
+
+	/* Each name, from the first cell it has (read in order, so that cell is its area's top left). */
+	for (row = 0; row < areas->rows; row++) {
+		for (column = 0; column < areas->columns; column++) {
+			name = areas->cells[row * CSS_AREA_TRACKS + column];
+			if (name == NULL)
+				continue;
+
+			/* A name met before was checked at its first cell. */
+			if (values_area_seen(areas, name, row, column))
+				continue;
+
+			/* The rectangle the name's cells span, and how many cells it has. */
+			top = row;
+			left = column;
+			bottom = row;
+			right = column;
+			cells = 0;
+			for (inner_row = 0; inner_row < areas->rows; inner_row++) {
+				for (inner_column = 0; inner_column < areas->columns; inner_column++) {
+					if (areas->cells[inner_row * CSS_AREA_TRACKS + inner_column] != name)
+						continue;
+					cells++;
+					if (inner_row > bottom)
+						bottom = inner_row;
+					if (inner_column < left)
+						left = inner_column;
+					if (inner_column > right)
+						right = inner_column;
+				}
+			}
+
+			/* The cells fill the rectangle. */
+			if (cells != (bottom - top + 1) * (right - left + 1))
+				return EINVAL;
+		}
+	}
+
+	/* Succeeded: every name is a rectangle. */
+	return 0;
+}
+
+/* Tells whether a name occurs in grid-template-areas before a cell (in row order). */
+static int
+values_area_seen(
+	const struct css_grid_areas *areas,
+	struct vm_string *name,
+	int row,
+	int column)
+{
+	int index;
+	int end;
+
+	/* The cells before this one. */
+	end = row * areas->columns + column;
+	for (index = 0; index < end; index++) {
+		if (areas->cells[(index / areas->columns) * CSS_AREA_TRACKS + index % areas->columns] == name)
+			return 1;
+	}
+
+	/* None of them has the name. */
 	return 0;
 }
 
@@ -5686,58 +6542,153 @@ values_split_at(
 }
 
 /*
- * Parses a grid line: auto, a line number (negative from the
- * end), or span with a count; a named line is taken as auto.
+ * Parses a grid line: auto, a custom identifier (a named line), a line
+ * number other than zero (negative from the end) with an optional name,
+ * or span with a count, a name or both; anything else is invalid.
  */
 static int
 values_grid_line(
+	struct css_parse *parse,
 	const struct css_token *tokens,
 	size_t count,
 	struct css_value *value)
 {
+	struct vm_string *name;
 	size_t index;
 	int is_span;
-	int is_auto;
+	int has_number;
+	int number;
+	int same;
+	int error;
 
-	/* auto, and the forms this pass does not read, are auto. */
+	/* Starts from auto. */
 	value->kind = CSS_VALUE_GRID_LINE;
 	value->number = 0;
 	value->keyword = 0;
+	value->ident = NULL;
 	while (count > 0 && tokens[count - 1U].type == CSS_TOKEN_WHITESPACE)
 		count--;
-	if (count == 0)
+	index = values_skip_space(tokens, count, 0);
+	if (index == count)
 		return EINVAL;
-	is_auto = 0;
-	if (tokens[0].type == CSS_TOKEN_IDENT)
-		is_auto = css_ident_equal(&tokens[0], "auto");
-	if (is_auto)
-		return 0;
 
-	/* span and a count (one when it has none). */
+	/* auto stands alone. */
+	same = 0;
+	if (tokens[index].type == CSS_TOKEN_IDENT)
+		same = css_ident_equal(&tokens[index], "auto");
+	if (same) {
+		index = values_skip_space(tokens, count, index + 1U);
+		if (index != count)
+			return EINVAL;
+		return 0;
+	}
+
+	/* Takes span, a number and a name, each at most once and in any order. */
 	is_span = 0;
-	if (tokens[0].type == CSS_TOKEN_IDENT)
-		is_span = css_ident_equal(&tokens[0], "span");
+	has_number = 0;
+	number = 0;
+	name = NULL;
+	while (index < count) {
+		same = 0;
+		if (tokens[index].type == CSS_TOKEN_IDENT)
+			same = css_ident_equal(&tokens[index], "span");
+		if (same) {
+			/* span comes first or last, never between the number and the name. */
+			if (is_span)
+				return EINVAL;
+			if ((has_number || name != NULL) && values_skip_space(tokens, count, index + 1U) != count)
+				return EINVAL;
+			is_span = 1;
+		} else if (tokens[index].type == CSS_TOKEN_NUMBER) {
+			/* One integer other than zero. */
+			if (has_number || !tokens[index].integer || tokens[index].number == 0)
+				return EINVAL;
+			if (tokens[index].number > 10000 || tokens[index].number < -10000)
+				number = tokens[index].number > 0 ? 10000 : -10000;
+			else
+				number = (int)tokens[index].number;
+			has_number = 1;
+		} else {
+			/* One custom identifier. */
+			if (name != NULL)
+				return EINVAL;
+			error = values_custom_ident(parse, &tokens[index], &name);
+			if (error != 0)
+				return error;
+		}
+		index = values_skip_space(tokens, count, index + 1U);
+	}
+
+	/* A span counts at least one line; a line names its number, its name or both. */
 	if (is_span) {
+		if (has_number && number < 1)
+			return EINVAL;
+		if (!has_number && name == NULL)
+			return EINVAL;
 		value->keyword = 1;
-		index = values_skip_space(tokens, count, 1U);
-		if (index < count && tokens[index].type == CSS_TOKEN_NUMBER && tokens[index].integer && tokens[index].number >= 1)
-			value->keyword = (int)tokens[index].number;
-		return 0;
+		if (has_number)
+			value->keyword = number;
+	} else {
+		value->number = (float)number;
 	}
 
-	/* A line number other than zero. */
-	if (tokens[0].type == CSS_TOKEN_NUMBER && tokens[0].integer && tokens[0].number != 0) {
-		value->number = (float)tokens[0].number;
-		return 0;
-	}
-
-	/* A named line, taken as auto. */
+	/* Succeeded: the line is parsed. */
+	value->ident = name;
 	return 0;
 }
 
-/* Parses grid-column or grid-row: a start line, then optionally a slash and an end line (auto when missing). */
+/* Parses a custom identifier: an identifier that is no CSS-wide keyword nor auto, span or default. */
+static int
+values_custom_ident(
+	struct css_parse *parse,
+	const struct css_token *token,
+	struct vm_string **name)
+{
+	static const char *const reserved[] = {
+		"auto", "span", "default", "inherit", "initial", "unset", "revert", "revert-layer", NULL
+	};
+	size_t index;
+	int same;
+
+	/* Only an identifier names something. */
+	if (token->type != CSS_TOKEN_IDENT)
+		return EINVAL;
+
+	/* The reserved words are not names. */
+	for (index = 0; reserved[index] != NULL; index++) {
+		same = css_ident_equal(token, reserved[index]);
+		if (same)
+			return EINVAL;
+	}
+
+	/* The name, as an atom. */
+	*name = vm_atom_from_units(parse->heap, token->text, token->length);
+	if (*name == NULL)
+		return ENOMEM;
+
+	/* Succeeded: the identifier is a name. */
+	return 0;
+}
+
+/* Tells whether a parsed grid line is a custom identifier alone, which a shorthand copies to the missing lines. */
+static int
+values_grid_line_is_name(
+	const struct css_value *line)
+{
+	/* A name with no number and no span. */
+	if (line->ident == NULL)
+		return 0;
+	if (line->keyword != 0 || line->number != 0)
+		return 0;
+
+	/* Succeeded: the line is a name alone. */
+	return 1;
+}
+
+/* Parses grid-column or grid-row: a start line, then optionally a slash and an end line. */
 static int
 values_grid_pair(
+	struct css_parse *parse,
 	int start,
 	int end,
 	const struct css_token *tokens,
@@ -5752,19 +6703,22 @@ values_grid_pair(
 	int error;
 
 	/* The start before the slash. */
+	memset(&first, 0, sizeof(first));
 	slash = values_split_at(tokens, count, CSS_TOKEN_DELIM, '/');
-	error = values_grid_line(tokens, slash, &first);
+	error = values_grid_line(parse, tokens, slash, &first);
 	if (error != 0)
 		return error;
 
-	/* The end after it, or auto. */
+	/* The end after it, or the start's name alone, or auto. */
 	memset(&second, 0, sizeof(second));
 	second.kind = CSS_VALUE_GRID_LINE;
 	if (slash < count) {
 		index = values_skip_space(tokens, count, slash + 1U);
-		error = values_grid_line(tokens + index, count - index, &second);
+		error = values_grid_line(parse, tokens + index, count - index, &second);
 		if (error != 0)
 			return error;
+	} else if (values_grid_line_is_name(&first)) {
+		second.ident = first.ident;
 	}
 
 	/* The two longhands. */
@@ -5775,9 +6729,14 @@ values_grid_pair(
 	return 0;
 }
 
-/* Parses grid-area in its line form: row start / column start / row end / column end (the missing ones auto). */
+/*
+ * Parses grid-area: row start / column start / row end / column end.  A
+ * missing column start or row end takes the row start's name alone, a
+ * missing column end the column start's; otherwise a missing line is auto.
+ */
 static int
 values_grid_area(
+	struct css_parse *parse,
 	const struct css_token *tokens,
 	size_t count,
 	struct css_declaration *out,
@@ -5786,29 +6745,44 @@ values_grid_area(
 	static const int properties[4] = {
 		CSS_PROP_GRID_ROW_START, CSS_PROP_GRID_COLUMN_START, CSS_PROP_GRID_ROW_END, CSS_PROP_GRID_COLUMN_END
 	};
-	struct css_value line;
+	static const int copied_from[4] = { -1, 0, 0, 1 };
+	struct css_value lines[4];
 	size_t start;
 	size_t slash;
 	size_t part;
+	size_t given;
 	int error;
 
 	/* Each part up to its slash. */
 	start = 0;
-	for (part = 0; part < 4U; part++) {
-		memset(&line, 0, sizeof(line));
-		line.kind = CSS_VALUE_GRID_LINE;
-		if (start < count) {
-			start = values_skip_space(tokens, count, start);
-			slash = start + values_split_at(tokens + start, count - start, CSS_TOKEN_DELIM, '/');
-			error = values_grid_line(tokens + start, slash - start, &line);
-			if (error != 0)
-				return error;
-			start = slash + 1U;
-		}
-
-		/* The part's longhand. */
-		values_add(out, made, properties[part], &line);
+	given = 0;
+	for (part = 0; part < 4U && start < count; part++) {
+		memset(&lines[part], 0, sizeof(lines[part]));
+		slash = start + values_split_at(tokens + start, count - start, CSS_TOKEN_DELIM, '/');
+		error = values_grid_line(parse, tokens + start, slash - start, &lines[part]);
+		if (error != 0)
+			return error;
+		given++;
+		start = slash + 1U;
+		if (slash < count && start >= count)
+			return EINVAL;
 	}
+
+	/* More than four parts is not a grid area. */
+	if (start < count)
+		return EINVAL;
+
+	/* The missing parts. */
+	for (part = given; part < 4U; part++) {
+		memset(&lines[part], 0, sizeof(lines[part]));
+		lines[part].kind = CSS_VALUE_GRID_LINE;
+		if (values_grid_line_is_name(&lines[copied_from[part]]))
+			lines[part].ident = lines[copied_from[part]].ident;
+	}
+
+	/* The four longhands. */
+	for (part = 0; part < 4U; part++)
+		values_add(out, made, properties[part], &lines[part]);
 
 	/* Succeeded: the four are declared. */
 	return 0;
@@ -5865,7 +6839,11 @@ values_grid_explicit(
 	return 0;
 }
 
-/* Parses the supported grid-template forms without changing implicit tracks. */
+/*
+ * Parses grid-template: none; rows / columns as two track lists; or the
+ * areas form, rows of line names, a string and an optional size, then
+ * optionally a slash and the columns.  It declares the three longhands.
+ */
 static int
 values_grid_template(
 	struct css_parse *parse,
@@ -5876,10 +6854,46 @@ values_grid_template(
 {
 	struct css_value rows;
 	struct css_value columns;
+	struct css_value areas;
+	size_t index;
+	int is_none;
+	int has_string;
 	int error;
 
-	if (count != 1 || !css_ident_equal(&tokens[0], "none"))
-		return values_grid_explicit(parse, tokens, count, out, made);
+	/* The areas form has a string before any slash. */
+	has_string = 0;
+	for (index = 0; index < count; index++) {
+		if (tokens[index].type == CSS_TOKEN_DELIM && tokens[index].delim == '/')
+			break;
+		if (tokens[index].type == CSS_TOKEN_STRING)
+			has_string = 1;
+	}
+	if (has_string) {
+		error = values_grid_template_areas(parse, tokens, count, out, made);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the three longhands are declared. */
+		return 0;
+	}
+
+	/* No areas in the other forms. */
+	memset(&areas, 0, sizeof(areas));
+	areas.kind = CSS_VALUE_AREAS;
+
+	/* none alone resets both track lists; anything else is rows / columns. */
+	is_none = 0;
+	if (count == 1 && tokens[0].type == CSS_TOKEN_IDENT)
+		is_none = css_ident_equal(&tokens[0], "none");
+	if (!is_none) {
+		error = values_grid_explicit(parse, tokens, count, out, made);
+		if (error != 0)
+			return error;
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, &areas);
+
+		/* Succeeded: the three longhands are declared. */
+		return 0;
+	}
 
 	/* A lone none resets both explicit track lists. */
 	memset(&rows, 0, sizeof(rows));
@@ -5892,6 +6906,338 @@ values_grid_template(
 		return error;
 	values_add(out, made, CSS_PROP_GRID_TEMPLATE_ROWS, &rows);
 	values_add(out, made, CSS_PROP_GRID_TEMPLATE_COLUMNS, &columns);
+	values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, &areas);
+
+	/* Succeeded: the three longhands are declared. */
+	return 0;
+}
+
+/*
+ * Parses the areas form of grid-template: before the slash, rows of
+ * [line names]? "string" track-size? [line names]?, the names between two
+ * rows going to the line between them; after it an explicit track list
+ * without repeat().
+ */
+static int
+values_grid_template_areas(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_track_list *list;
+	struct css_grid_areas *cells;
+	struct css_value rows;
+	struct css_value columns;
+	struct css_value areas;
+	struct vm_string *name;
+	size_t slash;
+	size_t index;
+	size_t end;
+	size_t column_start;
+	int state;
+	int columns_found;
+	int error;
+
+	/* The rows' track list and the areas, in the arena. */
+	list = wb_arena_zalloc(parse->arena, sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+	cells = wb_arena_zalloc(parse->arena, sizeof(*cells));
+	if (cells == NULL)
+		return ENOMEM;
+
+	/* Each part of the rows before the slash. */
+	slash = values_split_at(tokens, count, CSS_TOKEN_DELIM, '/');
+	state = VALUES_ROW_START;
+	index = 0;
+	while (index < slash) {
+		/* Whitespace between the parts. */
+		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
+			index++;
+			continue;
+		}
+
+		/* Line names go on the line after the rows so far: one group before a row, one after it. */
+		if (tokens[index].type == CSS_TOKEN_OPEN_SQUARE) {
+			if (state == VALUES_ROW_LEADING_NAMES)
+				return EINVAL;
+			if (state == VALUES_ROW_STRING || state == VALUES_ROW_SIZE) {
+				state = VALUES_ROW_TRAILING_NAMES;
+			} else {
+				state = VALUES_ROW_LEADING_NAMES;
+			}
+			index++;
+			while (index < slash && tokens[index].type != CSS_TOKEN_CLOSE_SQUARE) {
+				if (tokens[index].type != CSS_TOKEN_WHITESPACE) {
+					error = values_custom_ident(parse, &tokens[index], &name);
+					if (error != 0)
+						return error;
+					values_line_name(list, list->count, name);
+				}
+				index++;
+			}
+			if (index == slash)
+				return EINVAL;
+			index++;
+			continue;
+		}
+
+		/* A string starts a row, auto until a size follows it. */
+		if (tokens[index].type == CSS_TOKEN_STRING) {
+			if (list->count >= CSS_TRACKS)
+				return EINVAL;
+			error = values_area_row(parse, &tokens[index], cells, &columns_found);
+			if (error != 0)
+				return error;
+			memset(&list->tracks[list->count], 0, sizeof(list->tracks[list->count]));
+			list->tracks[list->count].kind = CSS_TRACK_AUTO;
+			list->tracks[list->count].minimum_kind = CSS_TRACK_AUTO;
+			list->count++;
+			state = VALUES_ROW_STRING;
+			index++;
+			continue;
+		}
+
+		/* A size belongs to the row just before it, and to no other. */
+		if (state != VALUES_ROW_STRING)
+			return EINVAL;
+		end = index + 1U;
+		if (tokens[index].type == CSS_TOKEN_FUNCTION)
+			end = index + values_function_length(tokens + index, slash - index);
+		if (end > slash)
+			return EINVAL;
+		error = values_one_track(parse, tokens + index, end - index, &list->tracks[list->count - 1U]);
+		if (error != 0)
+			return error;
+		state = VALUES_ROW_SIZE;
+		index = end;
+	}
+
+	/* The rows end after a row (its size or its names), and each name's cells make one rectangle. */
+	if (state == VALUES_ROW_START || state == VALUES_ROW_LEADING_NAMES)
+		return EINVAL;
+	if (cells->rows == 0)
+		return EINVAL;
+	error = values_areas_check(cells);
+	if (error != 0)
+		return error;
+
+	/* The columns after the slash: a track list without repeat(), or none without one. */
+	memset(&columns, 0, sizeof(columns));
+	if (slash < count) {
+		column_start = values_skip_space(tokens, count, slash + 1U);
+		if (column_start == count)
+			return EINVAL;
+		for (index = column_start; index < count; index++) {
+			if (tokens[index].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[index], "repeat"))
+				return EINVAL;
+		}
+		error = values_tracks(parse, tokens + column_start, count - column_start, &columns);
+		if (error != 0)
+			return error;
+		if (columns.tracks->count == 0)
+			return EINVAL;
+	} else {
+		error = values_tracks_none(parse, &columns);
+		if (error != 0)
+			return error;
+	}
+
+	/* The three longhands. */
+	memset(&rows, 0, sizeof(rows));
+	rows.kind = CSS_VALUE_TRACKS;
+	rows.tracks = list;
+	memset(&areas, 0, sizeof(areas));
+	areas.kind = CSS_VALUE_AREAS;
+	areas.areas = cells;
+	values_add(out, made, CSS_PROP_GRID_TEMPLATE_ROWS, &rows);
+	values_add(out, made, CSS_PROP_GRID_TEMPLATE_COLUMNS, &columns);
+	values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, &areas);
+
+	/* Succeeded: the areas form is parsed. */
+	return 0;
+}
+
+/* Makes the empty track list (none). */
+static int
+values_tracks_none(
+	struct css_parse *parse,
+	struct css_value *value)
+{
+	struct css_track_list *list;
+
+	/* An empty list in the arena. */
+	list = wb_arena_zalloc(parse->arena, sizeof(*list));
+	if (list == NULL)
+		return ENOMEM;
+
+	/* Succeeded: the value is none. */
+	memset(value, 0, sizeof(*value));
+	value->kind = CSS_VALUE_TRACKS;
+	value->tracks = list;
+	return 0;
+}
+
+/*
+ * Parses the grid shorthand: a grid-template value, or rows / auto-flow
+ * (with dense) and implicit column sizes, or auto-flow (with dense) and
+ * implicit row sizes / columns.  Every grid longhand it does not give goes
+ * back to its initial value (the gaps are not among them).
+ */
+static int
+values_grid(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value initial;
+	struct css_value flow;
+	struct css_value tracks;
+	size_t slash;
+	size_t side;
+	size_t side_count;
+	size_t index;
+	size_t rest;
+	int auto_flow;
+	int dense;
+	int on_left;
+	int same;
+	int error;
+
+	/* Where the slash is, and on which side auto-flow is. */
+	slash = values_split_at(tokens, count, CSS_TOKEN_DELIM, '/');
+	on_left = -1;
+	for (index = 0; index < count; index++) {
+		same = 0;
+		if (tokens[index].type == CSS_TOKEN_IDENT)
+			same = css_ident_equal(&tokens[index], "auto-flow");
+		if (same) {
+			on_left = index < slash;
+			break;
+		}
+	}
+
+	/* Without auto-flow it is a grid-template value, with the implicit longhands initial. */
+	memset(&initial, 0, sizeof(initial));
+	initial.kind = CSS_VALUE_INITIAL;
+	if (on_left < 0) {
+		error = values_grid_template(parse, tokens, count, out, made);
+		if (error != 0)
+			return error;
+		values_add(out, made, CSS_PROP_GRID_AUTO_FLOW, &initial);
+		values_add(out, made, CSS_PROP_GRID_AUTO_ROWS, &initial);
+		values_add(out, made, CSS_PROP_GRID_AUTO_COLUMNS, &initial);
+
+		/* Succeeded: the template and the implicit longhands are declared. */
+		return 0;
+	}
+
+	/* The auto-flow form needs the slash. */
+	if (slash == count)
+		return EINVAL;
+
+	/* The auto-flow side: auto-flow and dense in either order, then the implicit sizes. */
+	side = 0;
+	side_count = slash;
+	if (!on_left) {
+		side = slash + 1U;
+		side_count = count;
+	}
+	auto_flow = 0;
+	dense = 0;
+	index = values_skip_space(tokens, side_count, side);
+	while (index < side_count && tokens[index].type == CSS_TOKEN_IDENT) {
+		same = css_ident_equal(&tokens[index], "auto-flow");
+		if (same && !auto_flow) {
+			auto_flow = 1;
+		} else {
+			same = css_ident_equal(&tokens[index], "dense");
+			if (!same || dense)
+				break;
+			dense = 1;
+		}
+		index = values_skip_space(tokens, side_count, index + 1U);
+	}
+	if (!auto_flow)
+		return EINVAL;
+	rest = index;
+
+	/* The flow: rows when auto-flow is on the rows' side, else columns. */
+	memset(&flow, 0, sizeof(flow));
+	flow.kind = CSS_VALUE_KEYWORD;
+	flow.keyword = CSS_GRID_FLOW_ROW;
+	if (!on_left)
+		flow.keyword = CSS_GRID_FLOW_COLUMN;
+	if (dense)
+		flow.keyword |= CSS_GRID_FLOW_DENSE;
+
+	/* The implicit sizes on the auto-flow side, auto when none are given. */
+	memset(&tracks, 0, sizeof(tracks));
+	tracks.kind = CSS_VALUE_INITIAL;
+	while (side_count > rest && tokens[side_count - 1U].type == CSS_TOKEN_WHITESPACE)
+		side_count--;
+	if (rest < side_count) {
+		error = values_auto_tracks(parse, tokens + rest, side_count - rest, &tracks);
+		if (error != 0)
+			return error;
+	}
+
+	/* The explicit track list on the other side, the other axis none. */
+	if (on_left) {
+		error = values_grid_side(parse, CSS_PROP_GRID_TEMPLATE_COLUMNS, tokens + slash + 1U, count - slash - 1U, out, made);
+		if (error != 0)
+			return error;
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_ROWS, &initial);
+		values_add(out, made, CSS_PROP_GRID_AUTO_ROWS, &tracks);
+		values_add(out, made, CSS_PROP_GRID_AUTO_COLUMNS, &initial);
+	} else {
+		error = values_grid_side(parse, CSS_PROP_GRID_TEMPLATE_ROWS, tokens, slash, out, made);
+		if (error != 0)
+			return error;
+		values_add(out, made, CSS_PROP_GRID_TEMPLATE_COLUMNS, &initial);
+		values_add(out, made, CSS_PROP_GRID_AUTO_COLUMNS, &tracks);
+		values_add(out, made, CSS_PROP_GRID_AUTO_ROWS, &initial);
+	}
+	values_add(out, made, CSS_PROP_GRID_TEMPLATE_AREAS, &initial);
+	values_add(out, made, CSS_PROP_GRID_AUTO_FLOW, &flow);
+
+	/* Succeeded: every grid longhand is declared. */
+	return 0;
+}
+
+/* Parses the explicit track list of one side of the grid shorthand and declares it. */
+static int
+values_grid_side(
+	struct css_parse *parse,
+	int property,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_declaration *out,
+	size_t *made)
+{
+	struct css_value list;
+	size_t start;
+	int error;
+
+	/* The side without its surrounding whitespace. */
+	start = values_skip_space(tokens, count, 0);
+	while (count > start && tokens[count - 1U].type == CSS_TOKEN_WHITESPACE)
+		count--;
+	if (start == count)
+		return EINVAL;
+
+	/* Its track list. */
+	memset(&list, 0, sizeof(list));
+	error = values_single(parse, property, tokens + start, count - start, &list);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the side is declared. */
+	values_add(out, made, property, &list);
 	return 0;
 }
 
@@ -6231,6 +7577,8 @@ values_transform(
 	struct css_declaration *out,
 	size_t *made)
 {
+	struct css_value set;
+	int functions;
 	struct css_value axis[2];
 	struct css_value scale[2];
 	struct css_value value;
@@ -6255,6 +7603,7 @@ values_transform(
 	scale[1] = scale[0];
 	seen = 0;
 	index = 0;
+	functions = 0;
 	while (index < count) {
 		if (tokens[index].type == CSS_TOKEN_WHITESPACE) {
 			index++;
@@ -6269,6 +7618,7 @@ values_transform(
 		}
 		if (tokens[index].type != CSS_TOKEN_FUNCTION)
 			return EINVAL;
+		functions++;
 
 		/* The function's extent: up to its closing parenthesis. */
 		depth = 1;
@@ -6366,7 +7716,11 @@ values_transform(
 	if (!seen)
 		return EINVAL;
 
-	/* Succeeded: the two translations. */
+	/* Succeeded: the two translations, and whether there is a transform. */
+	memset(&set, 0, sizeof(set));
+	set.kind = CSS_VALUE_NUMBER;
+	set.number = functions > 0 ? 1.0f : 0.0f;
+	values_add(out, made, CSS_PROP_TRANSFORM_SET, &set);
 	values_add(out, made, CSS_PROP_TRANSFORM_X, &axis[0]);
 	values_add(out, made, CSS_PROP_TRANSFORM_Y, &axis[1]);
 	values_add(out, made, CSS_PROP_TRANSFORM_SCALE_X, &scale[0]);

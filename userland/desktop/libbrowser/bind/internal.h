@@ -257,6 +257,8 @@ struct bind_window {
 	struct bind_request_pending *requests;
 	unsigned long next_request;
 	struct environment_mutation_observer *mutation_observers;
+	/* The prelude's function that follows a clicked hyperlink (NULL until the prelude sets it). */
+	struct vm_cell *follow_hyperlink;
 };
 
 /* One traced inline source owns its C model and original DOM Text until its final GC release. */
@@ -583,6 +585,7 @@ int bind_environment_install(struct bind_window *window);
 double bind_epoch_milliseconds(void);
 int bind_document_create_event(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 int bind_location_part(struct bind_window *window, int part, vm_value *value);
+int bind_scroll_to_fragment(struct bind_window *window, const struct wb_buffer *fragment, int *found);
 
 /* The window and the shared helpers (window.c). */
 struct bind_window *bind_window_of(struct vm_realm *realm);
@@ -592,6 +595,7 @@ int bind_illegal_constructor(struct vm_realm *realm, vm_value this_value, const 
 int bind_string(struct vm_realm *realm, const char *ascii, vm_value *value);
 int bind_install_prelude(struct bind_window *window);
 void bind_requests_release(struct bind_window *window);
+int bind_follow_hyperlink(struct bind_window *window, struct dom_element *element);
 int bind_units(struct vm_realm *realm, const uint16_t *units, size_t length, vm_value *value);
 int bind_to_string(struct vm_realm *realm, vm_value value, struct vm_string **string);
 int bind_to_atom(struct vm_realm *realm, vm_value value, int lower, struct vm_string **atom);
@@ -647,6 +651,7 @@ struct bind_event *bind_event_of(vm_value value);
 int bind_event_create(struct bind_window *window, int interface, struct vm_string *type, vm_value *value, struct bind_event **event);
 int bind_submit_event(struct bind_window *window, struct dom_element *form, struct dom_element *submitter, int *canceled);
 int bind_click(struct bind_window *window, struct dom_element *element);
+int bind_click_follow(struct bind_window *window, struct dom_element *element);
 int bind_dispatch(struct bind_window *window, vm_value target, vm_value event_value, int *canceled);
 int bind_event_prepare(struct bind_window *window, struct dom_node *target, int interface, const char *type, unsigned flags, vm_value *event_value, vm_value *target_value, struct bind_event **event);
 int bind_event_construct(struct vm_realm *realm, int interface, const vm_value *args, unsigned count, vm_value *result, struct bind_event **event);

@@ -201,6 +201,13 @@ struct layout_box {
 	/* An in-flow item of a horizontal grid whose writing mode is vertical; its inline room is the row's height (negative: unbounded). */
 	int grid_orthogonal;
 	layout_unit grid_room;
+	/*
+	 * Where a grid or flex item was put: 1 + its grid row and column, or
+	 * 1 + its flex line and its place in the line (0 when not known); the
+	 * container's own baseline comes from its first row or line.
+	 */
+	int item_row;
+	int item_column;
 
 	/* The text of a text box, whitespace kept as it came (the lines collapse it). */
 	const uint16_t *text;
@@ -241,6 +248,23 @@ struct layout_box {
 	int grid_used_column_count;
 	int grid_used_row_count;
 	int grid_used_valid;
+	/* A box out of the flow's insets from the area it was placed in (top, right, bottom, left), when used_inset_known. */
+	layout_unit used_inset[4];
+	int used_inset_known;
+	/* The pass of layout_position that placed the box out of the flow. */
+	int placed_pass;
+
+	/* anchor-center keeps a box inside its containing block (the range across, then down, when anchor_clamp_x or _y). */
+	int anchor_clamp_x;
+	int anchor_clamp_y;
+	layout_unit anchor_clamp[4];
+
+	/* How a position-try fallback turned the box's position-area: 4 over the diagonal (first), then 1 down and 2 across. */
+	int anchor_flip;
+
+	/* The implicit tracks a Grid put before its explicit ones (grid-names.c). */
+	int grid_leading_columns;
+	int grid_leading_rows;
 
 	/*
 	 * The width the box's content takes laid out without a limit (its
@@ -253,6 +277,15 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+
+	/*
+	 * While a vertical writing mode's domain is laid out in logical
+	 * coordinates (logical.c): the box's physical style, kept in the tree's
+	 * arena while its style is the logical one (NULL otherwise), and whether
+	 * the box is the root being laid out in coordinates of its own.
+	 */
+	struct css_style *physical_style;
+	int logical_root;
 };
 
 /*
@@ -299,6 +332,10 @@ struct layout_tree {
 	struct layout_box **sticky;
 	size_t sticky_count;
 	layout_unit sticky_scroll;
+	/* The placing of the boxes out of the flow: which pass it is (layout_box.placed_pass names the pass that placed a box). */
+	int position_pass;
+	/* The writing mode whose logical coordinates the boxes are being laid out in (horizontal-tb outside any vertical domain). */
+	int logical_mode;
 };
 
 /*
@@ -318,8 +355,19 @@ void layout_auto_margins(struct layout_box *box, layout_unit containing_width);
 void layout_replaced_size(struct layout_box *box, layout_unit containing_width, layout_unit containing_height, int height_definite);
 void layout_absolute(struct layout_box *box, layout_unit x, layout_unit y);
 int layout_is_positioned(const struct layout_box *box);
+int layout_is_layered(const struct layout_box *box);
+int layout_contains_absolute(const struct layout_box *box);
+int layout_contains_fixed(const struct layout_box *box);
+
+/* Anchor positioning (anchor.c). */
+int layout_anchor_wanted(const struct layout_box *box);
+int layout_anchor_try(struct layout_tree *tree, struct layout_box *box, int entry);
+void layout_anchor_center(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
+void layout_anchor_area(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
+void layout_anchor_resolve(const struct layout_tree *tree, struct layout_box *box, layout_unit x, layout_unit y, layout_unit width, layout_unit height);
 int layout_clips(const struct layout_box *box);
 int layout_position(struct layout_tree *tree);
+int layout_position_box(struct layout_tree *tree, struct layout_box *box);
 int layout_sticky_build(struct layout_tree *tree, layout_unit scroll_y);
 int layout_sticky_apply(struct layout_tree *tree, layout_unit scroll_y);
 
@@ -340,8 +388,14 @@ int layout_stacking_order(const struct layout_tree *tree, struct wb_vector *boxe
 void layout_release(struct layout_tree *tree);
 int layout_block(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_inline(struct layout_tree *tree, struct layout_box *box);
+int layout_first_baseline(const struct layout_box *box, layout_unit *baseline);
+int layout_last_baseline(const struct layout_box *box, layout_unit *baseline);
 int layout_flex(struct layout_tree *tree, struct layout_box *box);
 int layout_grid(struct layout_tree *tree, struct layout_box *box);
+void layout_grid_names(struct layout_box *box);
+int layout_physical_mode(const struct layout_box *box);
+int layout_logical_wanted(const struct layout_tree *tree, const struct layout_box *box);
+int layout_logical(struct layout_tree *tree, struct layout_box *box, layout_unit containing_width);
 int layout_table(struct layout_tree *tree, struct layout_box *box);
 layout_unit layout_flex_content_width(const struct layout_box *box);
 void layout_font_of(struct layout_tree *tree, const struct css_style *style, struct text_font *font);

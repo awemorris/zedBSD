@@ -49,6 +49,12 @@
 /* The most tracks a grid template keeps (the ones after are dropped). */
 #define CSS_TRACKS 24
 
+/* The most names one grid line keeps (the ones after are dropped). */
+#define CSS_LINE_NAMES 8
+
+/* The most rows and columns grid-template-areas takes (a larger one is invalid). */
+#define CSS_AREA_TRACKS 32
+
 /*
  * The pseudo-elements that make boxes, as numbers of the
  * cascade and as bits of a style's pseudo_elements.
@@ -72,7 +78,109 @@ enum css_unit {
 	CSS_UNIT_MAX_CONTENT,
 	CSS_UNIT_MIN_CONTENT,
 	CSS_UNIT_FIT_CONTENT,
-	CSS_UNIT_CONTENT
+	CSS_UNIT_CONTENT,
+	/* A sum with anchor functions, in the style's anchor slot of the property (css_style.anchor). */
+	CSS_UNIT_ANCHOR
+};
+
+/* The most anchor functions in one value, and names in one anchor-name or anchor-scope. */
+#define CSS_ANCHOR_TERMS	4
+#define CSS_ANCHOR_NAMES	8
+
+/*
+ * What an anchor() asks for (a side, a percentage along the axis, or the
+ * side across or along the inset's own) and what an anchor-size() asks
+ * for (from CSS_ANCHOR_WIDTH; CSS_ANCHOR_SIZE_DEFAULT is the property's
+ * own axis).
+ */
+enum css_anchor_side {
+	CSS_ANCHOR_TOP,
+	CSS_ANCHOR_RIGHT,
+	CSS_ANCHOR_BOTTOM,
+	CSS_ANCHOR_LEFT,
+	CSS_ANCHOR_START,
+	CSS_ANCHOR_END,
+	CSS_ANCHOR_SELF_START,
+	CSS_ANCHOR_SELF_END,
+	CSS_ANCHOR_CENTER,
+	CSS_ANCHOR_PERCENT,
+	CSS_ANCHOR_INSIDE,
+	CSS_ANCHOR_OUTSIDE,
+	CSS_ANCHOR_WIDTH,
+	CSS_ANCHOR_HEIGHT,
+	CSS_ANCHOR_BLOCK,
+	CSS_ANCHOR_INLINE,
+	CSS_ANCHOR_SELF_BLOCK,
+	CSS_ANCHOR_SELF_INLINE,
+	CSS_ANCHOR_SIZE_DEFAULT
+};
+
+/*
+ * One anchor() or anchor-size(): the anchor's name (an atom; NULL for the
+ * box's default anchor), what it asks for, the factor the sum gives it,
+ * and its fallback (a length and a percentage) when it has one.
+ */
+struct css_anchor_query {
+	struct vm_string *name;
+	int side;
+	float percent;
+	float coef;
+	int has_fallback;
+	float fallback_px;
+	float fallback_em;
+	float fallback_rem;
+	float fallback_percent;
+	int fallback_has_percent;
+};
+
+/* A value with anchor functions: pixels (ems and rems before the cascade), a percentage, and the functions times their factors. */
+struct css_anchor_expr {
+	float px;
+	float em;
+	float rem;
+	float percent;
+	int has_percent;
+	int count;
+	struct css_anchor_query terms[CSS_ANCHOR_TERMS];
+};
+
+/* The anchor names of anchor-name or anchor-scope (atoms). */
+struct css_anchor_names {
+	int count;
+	struct vm_string *names[CSS_ANCHOR_NAMES];
+};
+
+/* The most entries of position-try-fallbacks, and try-tactics (flip-block, flip-inline, flip-start, flip-x, flip-y) in one. */
+#define CSS_TRY_ENTRIES	8
+#define CSS_TRY_TACTICS	5
+
+/* One entry of position-try-fallbacks: a position-area (area, -2 for none), or a @position-try name (an atom) and try-tactics in order. */
+struct css_try_entry {
+	struct vm_string *name;
+	int tactics[CSS_TRY_TACTICS];
+	int tactic_count;
+	int area;
+};
+
+/* position-try-fallbacks' entries. */
+struct css_try_list {
+	int count;
+	struct css_try_entry entries[CSS_TRY_ENTRIES];
+};
+
+/* The properties that can hold anchor functions: the slots of css_style.anchor. */
+enum css_anchor_slot {
+	CSS_ANCHOR_SLOT_TOP,
+	CSS_ANCHOR_SLOT_RIGHT,
+	CSS_ANCHOR_SLOT_BOTTOM,
+	CSS_ANCHOR_SLOT_LEFT,
+	CSS_ANCHOR_SLOT_WIDTH,
+	CSS_ANCHOR_SLOT_HEIGHT,
+	CSS_ANCHOR_SLOT_MIN_WIDTH,
+	CSS_ANCHOR_SLOT_MIN_HEIGHT,
+	CSS_ANCHOR_SLOT_MAX_WIDTH,
+	CSS_ANCHOR_SLOT_MAX_HEIGHT,
+	CSS_ANCHOR_SLOTS
 };
 
 /* The values of display. */
@@ -399,7 +507,9 @@ enum css_align {
 	CSS_ALIGN_SELF_END,
 	/* Parsed keywords only: the cascade stores them as start and end with a flex bit. */
 	CSS_ALIGN_FLEX_START,
-	CSS_ALIGN_FLEX_END
+	CSS_ALIGN_FLEX_END,
+	/* A box out of the flow centered on its anchor (align-self and justify-self only). */
+	CSS_ALIGN_ANCHOR_CENTER
 };
 
 /* The generic font families. */
@@ -419,6 +529,27 @@ struct css_length {
 	int unit;
 	float offset;
 };
+
+/*
+ * The properties a @position-try rule can set, as an element's style has
+ * them with the rule applied (the fallback the rule's name is in).
+ */
+struct css_try_style {
+	struct css_length offset[4];
+	struct css_length margin[4];
+	struct css_length width;
+	struct css_length height;
+	struct css_length min_width;
+	struct css_length min_height;
+	struct css_length max_width;
+	struct css_length max_height;
+	const struct css_anchor_expr *anchor[10];
+	int position_area;
+	struct vm_string *position_anchor;
+	int justify_self;
+	int align_self;
+};
+
 
 /* An element's custom properties (css/internal.h). */
 struct css_custom;
@@ -484,6 +615,13 @@ struct css_track_repeat {
 	int fit;
 	/* The times layout has put the tracks in the template (zero before). */
 	int count;
+	/*
+	 * The names of the template's line at the repeat's start that come
+	 * before the repeat's own, and how many of the line after it are the
+	 * repeat's own (the others come after the repeat).
+	 */
+	int name_prefix;
+	int name_end;
 };
 
 /* Auto-placement direction and optional dense packing (row is zero). */
@@ -496,13 +634,35 @@ enum css_grid_auto_flow {
 /*
  * Where a grid item goes on one axis: its start and end,
  * each a line (0 for auto; a negative line counts from the end) or a span
- * (0 for none).
+ * (0 for none).  A named line or span keeps its name (an atom; NULL for
+ * none): the line is then the start-th (or end-th) line of that name, or
+ * the area of that name's line when the count is 0, and the span counts
+ * lines of that name.
  */
 struct css_grid_place {
 	int start;
 	int start_span;
 	int end;
 	int end_span;
+	struct vm_string *start_name;
+	struct vm_string *end_name;
+};
+
+/* The names of one grid line, as written in a template's brackets (atoms). */
+struct css_line_names {
+	struct vm_string *names[CSS_LINE_NAMES];
+	int count;
+};
+
+/*
+ * A grid-template-areas value: its rows and columns, and the name of each
+ * cell, row after row (atoms; NULL for a null cell token).  The named
+ * areas are the rectangles the cells of one name make.
+ */
+struct css_grid_areas {
+	int rows;
+	int columns;
+	struct vm_string *cells[CSS_AREA_TRACKS * CSS_AREA_TRACKS];
 };
 
 /*
@@ -547,6 +707,27 @@ struct css_style {
 	struct css_length padding[4];
 	struct css_length offset[4];
 	int box_sizing;
+
+	/*
+	 * Anchor positioning: the sums of the insets and sizes whose unit is
+	 * CSS_UNIT_ANCHOR (in the engine's arena), the box's anchor names, its
+	 * default anchor (position-anchor; NULL for auto), and the names
+	 * anchor-scope limits to its subtree (all of them when
+	 * anchor_scope_all).
+	 */
+	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
+	const struct css_anchor_names *anchor_names;
+	struct vm_string *position_anchor;
+	const struct css_anchor_names *anchor_scope;
+	int anchor_scope_all;
+	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */
+	int position_area;
+	/* position-try-fallbacks (NULL for none), position-try-order, and position-visibility's bits (css_position_visibility_parse). */
+	const struct css_try_list *position_try;
+	/* The style of each entry with a @position-try name (NULL for the others, or a name no rule has). */
+	const struct css_try_style *try_styles[CSS_TRY_ENTRIES];
+	int position_try_order;
+	int position_visibility;
 
 	/*
 	 * The box's decoration: each corner's radius, horizontal
@@ -614,6 +795,9 @@ struct css_style {
 	struct css_length transform_scale[2];
 	struct css_length transform_origin[2];
 
+	/* Whether transform is anything but none (the box then contains its descendants out of the flow). */
+	int transform_set;
+
 	/* aspect-ratio: the ratio as width over height (zero for none), and whether auto came with it (the initial value is auto alone). */
 	float aspect_ratio;
 	int aspect_auto;
@@ -643,7 +827,7 @@ struct css_style {
 	struct css_length text_indent;
 	int direction;
 	int writing_mode;
-	/* sideways-lr (1) or sideways-rl (2), reported as written while the text is laid out horizontally. */
+	/* sideways-lr (1) or sideways-rl (2), reported as written; writing_mode is then vertical-lr or vertical-rl. */
 	int writing_sideways;
 	int text_orientation;
 	int container_type;
@@ -692,6 +876,17 @@ struct css_style {
 	int row_count;
 	struct css_track_repeat column_repeat;
 	struct css_track_repeat row_repeat;
+	/*
+	 * The line names of the templates, column_count + 1 (and row_count + 1)
+	 * lines from the first, and the named areas; all in the declaring
+	 * sheet's arena, NULL for none.
+	 */
+	const struct css_line_names *column_names;
+	const struct css_line_names *row_names;
+	/* A subgrid axis's value as it serializes (in the engine's arena), or NULL. */
+	const char *column_subgrid;
+	const char *row_subgrid;
+	const struct css_grid_areas *areas;
 	struct css_track auto_columns[CSS_TRACKS];
 	int auto_column_count;
 	struct css_track auto_rows[CSS_TRACKS];
@@ -705,6 +900,8 @@ struct css_style {
 	int align_self;
 	/* Which of justify-content, align-content, align-items and align-self was written flex-start or flex-end. */
 	unsigned flex_keywords;
+	/* Which of align-items (4), align-self (8) and justify-self (0x100) is last baseline (stored as end). */
+	unsigned last_baselines;
 	int justify_self;
 	int order;
 
@@ -783,6 +980,25 @@ int css_declaration_valid(struct vm_heap *heap, const uint16_t *units, size_t le
 const char *css_property_name(size_t index);
 int css_number_serialize(const uint16_t *units, size_t length, struct wb_units *out, int *handled);
 int css_decoration_line_parse(const uint16_t *units, size_t length, int *lines);
+int css_serialize_ident(const struct vm_string *name, struct wb_units *out);
+int css_line_names_serialize(const struct css_line_names *names, struct wb_units *out);
+int css_grid_line_serialize(const struct css_grid_place *place, int end, struct wb_units *out);
+int css_grid_lines_serialize(const struct css_grid_place *place, struct wb_units *out);
+int css_grid_area_serialize(const struct css_grid_place *row, const struct css_grid_place *column, struct wb_units *out);
+int css_grid_areas_serialize(const struct css_grid_areas *areas, struct wb_units *out);
+int css_grid_declaration_serialize(struct vm_heap *heap, const uint16_t *units, size_t length, struct wb_units *out, int *handled);
+const char *const *css_grid_shorthand_longhands(const struct vm_string *name);
+const char *const *css_flex_shorthand_longhands(const struct vm_string *name);
+int css_flex_shorthand_parts(const struct vm_string *shorthand, const struct vm_string *value, struct wb_units *canonical, struct wb_units parts[3], int *found);
+int css_position_area_serialize(int packed, struct wb_units *out);
+int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units *out);
+int css_try_order_serialize(int order, struct wb_units *out);
+const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
+int css_anchor_shorthand_part(struct vm_heap *heap, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
+int css_anchor_canonical(struct vm_heap *heap, const struct vm_string *name, const struct vm_string *value, struct wb_units *out, int *handled);
+int css_position_visibility_serialize(int bits, struct wb_units *out);
+int css_position_area_regions(int packed, int writing_mode, int direction, int *x0, int *x1, int *y0, int *y1);
+int css_grid_shorthand_part(struct vm_heap *heap, const struct vm_string *shorthand, const struct vm_string *value, const char *longhand, struct wb_units *out, int *found);
 int css_decoration_line_serialize(int lines, struct wb_units *out);
 int css_decoration_shorthand_serialize(const uint16_t *units, size_t length, struct wb_units *shorthand, struct wb_units *line, struct wb_units *thickness, struct wb_units *style, struct wb_units *color);
 
@@ -793,6 +1009,7 @@ void css_engine_destroy(struct css_engine *engine);
 int css_engine_add_sheet(struct css_engine *engine, const uint16_t *units, size_t length);
 int css_engine_add_sheet_origin(struct css_engine *engine, const uint16_t *units, size_t length, int origin);
 int css_engine_add_parsed(struct css_engine *engine, const struct css_sheet *sheet, const struct css_media *const *media, size_t media_count);
+void css_engine_set_owner(struct css_engine *engine, struct dom_element *owner);
 int css_engine_parse_media(struct css_engine *engine, const uint16_t *units, size_t length, const struct css_media **media);
 void css_engine_set_viewport(struct css_engine *engine, float width, float height);
 void css_engine_set_container_lookup(struct css_engine *engine, css_container_lookup lookup, void *context);
@@ -804,6 +1021,7 @@ int css_engine_compute(struct css_engine *engine, struct dom_element *element, c
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);
+void css_engine_query_scope(struct css_engine *engine, struct dom_element *element);
 int css_engine_query_matches(struct css_engine *engine, struct dom_element *element, const struct css_query *query);
 
 #endif

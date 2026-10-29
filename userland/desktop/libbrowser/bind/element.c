@@ -52,7 +52,9 @@ static int image_width_set(struct vm_realm *realm, vm_value this_value, const vm
 static int image_height_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int image_height_set(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int image_complete(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
-static int image_natural_size(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int image_state(struct vm_realm *realm, struct dom_element *element, struct bind_image *state);
+static int image_natural_width(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int image_natural_height(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int image_rendered_dimension(struct vm_realm *realm, struct dom_element *element, const char *name, int *available, vm_value *result);
 static int image_dimension(struct vm_realm *realm, vm_value this_value, const char *name, vm_value *result);
 static int script_src_get(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -194,8 +196,8 @@ static const struct bind_attribute image_attributes[] = {
 	{ "width", image_width_get, image_width_set },
 	{ "height", image_height_get, image_height_set },
 	{ "complete", image_complete, NULL },
-	{ "naturalWidth", image_natural_size, NULL },
-	{ "naturalHeight", image_natural_size, NULL },
+	{ "naturalWidth", image_natural_width, NULL },
+	{ "naturalHeight", image_natural_height, NULL },
 	{ NULL, NULL, NULL }
 };
 
@@ -1180,7 +1182,7 @@ element_attribute_name(
 	return 0;
 }
 
-/* Reports the src attribute, or the empty string (src). */
+/* Reports the src attribute resolved against the document's URL, or the empty string (src). */
 static int
 image_src_get(
 	struct vm_realm *realm,
@@ -1194,12 +1196,12 @@ image_src_get(
 	UNUSED_PARAMETER(args);
 	UNUSED_PARAMETER(count);
 
-	/* The reflected attribute. */
-	status = element_reflect_get(realm, this_value, "src", result);
+	/* The reflected attribute, resolved against the document's URL. */
+	status = bind_reflect_url_get(realm, this_value, DOM_TAG_IMG, "src", result);
 	if (status != 0)
 		return status;
 
-	/* Succeeded: the attribute is reported. */
+	/* Succeeded: the URL is reported. */
 	return 0;
 }
 
@@ -1498,7 +1500,24 @@ image_height_set(
 	return 0;
 }
 
-/* Reports whether the image is complete: always, since an image a script makes is not loaded (complete). */
+/* Asks the host for an image's state; without a host an image has no source loaded. */
+static int
+image_state(
+	struct vm_realm *realm,
+	struct dom_element *element,
+	struct bind_image *state)
+{
+	struct bind_window *window;
+
+	/* Nothing until the host says. */
+	memset(state, 0, sizeof(*state));
+	window = bind_window_of(realm);
+	if (window->host.image == NULL)
+		return 0;
+	return window->host.image(window->host.context, element, 0, state);
+}
+
+/* Reports whether the image is complete: without a source, decoded or broken, but not while it loads (complete). */
 static int
 image_complete(
 	struct vm_realm *realm,
@@ -1508,6 +1527,7 @@ image_complete(
 	vm_value *result)
 {
 	struct dom_element *element;
+	struct bind_image state;
 	int status;
 
 	UNUSED_PARAMETER(args);
@@ -1517,15 +1537,18 @@ image_complete(
 	status = element_this(realm, this_value, &element);
 	if (status != 0)
 		return status;
+	status = image_state(realm, element, &state);
+	if (status != 0)
+		return status;
 
-	/* Succeeded: true. */
-	*result = VM_VALUE_TRUE;
+	/* Succeeded: whether it is done. */
+	*result = vm_value_boolean(state.state != BIND_IMAGE_LOADING);
 	return 0;
 }
 
-/* Reports the image's natural width or height: 0, since it is not loaded (naturalWidth, naturalHeight). */
+/* Reports the image's natural width: its decoded width, or 0 (naturalWidth). */
 static int
-image_natural_size(
+image_natural_width(
 	struct vm_realm *realm,
 	vm_value this_value,
 	const vm_value *args,
@@ -1533,6 +1556,7 @@ image_natural_size(
 	vm_value *result)
 {
 	struct dom_element *element;
+	struct bind_image state;
 	int status;
 
 	UNUSED_PARAMETER(args);
@@ -1542,9 +1566,41 @@ image_natural_size(
 	status = element_this(realm, this_value, &element);
 	if (status != 0)
 		return status;
+	status = image_state(realm, element, &state);
+	if (status != 0)
+		return status;
 
-	/* Succeeded: no size. */
-	*result = vm_value_int32(0);
+	/* Succeeded: the width. */
+	*result = vm_value_int32(state.width);
+	return 0;
+}
+
+/* Reports the image's natural height: its decoded height, or 0 (naturalHeight). */
+static int
+image_natural_height(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_element *element;
+	struct bind_image state;
+	int status;
+
+	UNUSED_PARAMETER(args);
+	UNUSED_PARAMETER(count);
+
+	/* this must be an element. */
+	status = element_this(realm, this_value, &element);
+	if (status != 0)
+		return status;
+	status = image_state(realm, element, &state);
+	if (status != 0)
+		return status;
+
+	/* Succeeded: the height. */
+	*result = vm_value_int32(state.height);
 	return 0;
 }
 

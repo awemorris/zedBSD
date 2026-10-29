@@ -110,6 +110,12 @@ struct bind_box {
 	double padding_left;
 	/* Successful layout proved this node generates no box; zero also covers unavailable geometry. */
 	int no_generated_box;
+	/* A box out of the flow's used insets (top, right, bottom, left) from its containing block, when inset_known. */
+	int inset_known;
+	double inset[4];
+	/* What a block scrolls over: its padding box and the overflow of its content (0 when not known). */
+	double scroll_width;
+	double scroll_height;
 };
 
 /*
@@ -153,6 +159,18 @@ struct bind_media {
 #define BIND_MEDIA_PLAY		1
 #define BIND_MEDIA_PAUSE	2
 #define BIND_MEDIA_SEEK		3
+
+/* An image element's state for scripts (bind_host.image): no source, loading, decoded at a natural size, or broken. */
+#define BIND_IMAGE_NONE		0
+#define BIND_IMAGE_LOADING	1
+#define BIND_IMAGE_LOADED	2
+#define BIND_IMAGE_BROKEN	3
+
+struct bind_image {
+	int state;
+	int width;
+	int height;
+};
 
 /*
  * A request a script makes (fetch and XMLHttpRequest): the
@@ -206,15 +224,20 @@ struct bind_host {
 	void (*console)(void *context, int level, const char *text, size_t length);
 	const char *user_agent;
 	int (*location)(void *context, int part, struct wb_buffer *out);
-	/* Updates this document's fragment without loading another document. */
-	int (*fragment)(void *context, const char *hash, size_t length);
+	/* Changes this document's URL (resolved against it) without loading another document. */
+	int (*url_set)(void *context, const char *href, size_t length);
 	int (*cookie_get)(void *context, struct wb_buffer *out);
 	int (*cookie_set)(void *context, const char *text, size_t length);
 	struct css_engine *(*selector_engine)(void *context);
 	/* May copy no_generated_box proof even when the ordinary bounds query returns zero. */
 	int (*node_box)(void *context, struct dom_node *node, struct bind_box *box);
-	/* Appends used CSS-pixel Grid tracks to a caller-owned double vector; found=0 requests computed fallback. */
-	int (*grid_tracks)(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *found);
+	/*
+	 * Appends used CSS-pixel Grid tracks to a caller-owned double vector and
+	 * reports how many implicit ones come before the explicit grid and how
+	 * many times an automatic repeat was put in it; found=0 requests
+	 * computed fallback.
+	 */
+	int (*grid_tracks)(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 	void (*document_size)(void *context, double *width, double *height);
 	void (*scroll)(void *context, double *x, double *y);
 	const struct bind_storage_calls *storage;
@@ -231,6 +254,8 @@ struct bind_host {
 	int (*document_write)(void *context, const uint16_t *units, size_t length);
 	/* A media element's state, play, pause or seek to a time (BIND_MEDIA_*, ws121-p005); fills state. */
 	int (*media)(void *context, struct dom_element *element, int request, double value, struct bind_media *state);
+	/* An <img>'s state (BIND_IMAGE_*); restart loads its source again, a load or error event to follow. */
+	int (*image)(void *context, struct dom_element *element, int restart, struct bind_image *state);
 };
 
 /*

@@ -396,6 +396,8 @@ struct dom_element {
 	int toggle_pending;
 	/* Native submission events suppress same-form reentrancy until dispatch completes. */
 	int firing_submission_events;
+	/* An image's load is watched for its load or error event once its source is first seen. */
+	int image_watched;
 	/* A connected iframe retains its child realm until synchronous removal. */
 	struct vm_cell *child_context;
 	/* Last attempted source and generation invalidate stale asynchronous responses. */
@@ -468,6 +470,8 @@ struct dom_document {
 	/* Loaded Documents own their final URL and normalized declared MIME essence. */
 	struct vm_string *resource_url;
 	struct vm_string *resource_mime;
+	/* The element the URL's fragment last named (:target), or NULL. */
+	struct dom_node *target;
 	enum dom_document_content content;
 	enum dom_quirks quirks;
 	uint32_t generation;

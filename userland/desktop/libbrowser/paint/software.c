@@ -392,8 +392,8 @@ software_text(
 		/* The bitmap's top left, from the pen and the baseline. */
 		if (item->vertical) {
 			origin_x = (int)floorf(layout_to_px(item->x) + 0.5f) + glyph.top - glyph.height;
-			origin_y = baseline +
-			    (int)floorf(layout_to_px(item->glyphs[index].x) + 0.5f) + glyph.left;
+			/* The pen runs down from the run's start, rounded once as a horizontal run's is. */
+			origin_y = (int)floorf(layout_to_px(item->y - scroll_y + item->glyphs[index].x) + 0.5f) + glyph.left;
 		} else {
 			origin_x = (int)floorf(layout_to_px(item->x + item->glyphs[index].x) + 0.5f) + glyph.left;
 			origin_y = baseline - glyph.top;

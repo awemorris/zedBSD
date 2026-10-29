@@ -130,7 +130,10 @@ enum css_pseudo_class {
 	CSS_PSEUDO_REQUIRED,
 	CSS_PSEUDO_OPTIONAL,
 	CSS_PSEUDO_ALWAYS,
-	CSS_PSEUDO_LANG
+	CSS_PSEUDO_LANG,
+	CSS_PSEUDO_SCOPE,
+	CSS_PSEUDO_SCOPE_NEST,
+	CSS_PSEUDO_TARGET
 };
 
 /*
@@ -167,7 +170,11 @@ enum css_value_kind {
 	CSS_VALUE_SHADOWS,
 	CSS_VALUE_INSET,
 	CSS_VALUE_TRACKS,
-	CSS_VALUE_GRID_LINE
+	CSS_VALUE_GRID_LINE,
+	CSS_VALUE_AREAS,
+	CSS_VALUE_ANCHOR,
+	CSS_VALUE_ANCHOR_NAMES,
+	CSS_VALUE_TRY
 };
 
 /* The units a declared length can have (converted to pixels by the cascade). */
@@ -328,6 +335,47 @@ enum css_property {
 	CSS_PROP_OBJECT_FIT,
 	CSS_PROP_OBJECT_POSITION_X,
 	CSS_PROP_OBJECT_POSITION_Y,
+	CSS_PROP_GRID_TEMPLATE_AREAS,
+	/*
+	 * The logical sides and sizes, each group in the order inline-start,
+	 * inline-end, block-start, block-end (or inline size, block size, and
+	 * their minima and maxima): the cascade gives them their physical
+	 * property once the writing mode and the direction are known.
+	 */
+	CSS_PROP_PADDING_INLINE_START,
+	CSS_PROP_PADDING_INLINE_END,
+	CSS_PROP_PADDING_BLOCK_START,
+	CSS_PROP_PADDING_BLOCK_END,
+	CSS_PROP_INSET_INLINE_START,
+	CSS_PROP_INSET_INLINE_END,
+	CSS_PROP_INSET_BLOCK_START,
+	CSS_PROP_INSET_BLOCK_END,
+	CSS_PROP_BORDER_INLINE_START_WIDTH,
+	CSS_PROP_BORDER_INLINE_END_WIDTH,
+	CSS_PROP_BORDER_BLOCK_START_WIDTH,
+	CSS_PROP_BORDER_BLOCK_END_WIDTH,
+	CSS_PROP_BORDER_INLINE_START_STYLE,
+	CSS_PROP_BORDER_INLINE_END_STYLE,
+	CSS_PROP_BORDER_BLOCK_START_STYLE,
+	CSS_PROP_BORDER_BLOCK_END_STYLE,
+	CSS_PROP_BORDER_INLINE_START_COLOR,
+	CSS_PROP_BORDER_INLINE_END_COLOR,
+	CSS_PROP_BORDER_BLOCK_START_COLOR,
+	CSS_PROP_BORDER_BLOCK_END_COLOR,
+	CSS_PROP_INLINE_SIZE,
+	CSS_PROP_BLOCK_SIZE,
+	CSS_PROP_MIN_INLINE_SIZE,
+	CSS_PROP_MAX_INLINE_SIZE,
+	CSS_PROP_MIN_BLOCK_SIZE,
+	CSS_PROP_MAX_BLOCK_SIZE,
+	CSS_PROP_ANCHOR_NAME,
+	CSS_PROP_POSITION_ANCHOR,
+	CSS_PROP_ANCHOR_SCOPE,
+	CSS_PROP_TRANSFORM_SET,
+	CSS_PROP_POSITION_AREA,
+	CSS_PROP_POSITION_TRY_FALLBACKS,
+	CSS_PROP_POSITION_TRY_ORDER,
+	CSS_PROP_POSITION_VISIBILITY,
 	CSS_PROP_COUNT
 };
 
@@ -447,6 +495,14 @@ struct css_value {
 	const struct css_shadow_list *shadows;
 	const struct css_declared_inset *inset;
 	const struct css_track_list *tracks;
+	/* A grid line's name (an atom; NULL for none), and grid-template-areas' cells (none when NULL). */
+	struct vm_string *ident;
+	const struct css_grid_areas *areas;
+	/* A sum with anchor functions, and the names of anchor-name or anchor-scope (in the parse's arena). */
+	const struct css_anchor_expr *anchor;
+	const struct css_anchor_names *anchor_names;
+	/* position-try-fallbacks' entries (in the parse's arena). */
+	const struct css_try_list *try_list;
 };
 
 /* One declared grid track: its kind, its size (a length, or the fr share) and minmax()'s minimum. */
@@ -469,6 +525,14 @@ struct css_track_list {
 	int repeat_at;
 	int repeat_length;
 	int repeat_fit;
+	/* How many names the repeat's first line has before its own, and how many of its last line's are its own. */
+	int repeat_name_prefix;
+	int repeat_name_end;
+	/* The names of the count + 1 lines around the tracks, and whether any line has one. */
+	struct css_line_names names[CSS_TRACKS + 1];
+	int named;
+	/* A subgrid's value as it serializes ("subgrid" and its line-name lists), NUL-terminated in the arena; NULL otherwise. */
+	const char *subgrid;
 };
 
 /* A declared clip-path: inset(): its four declared lengths, top, right, bottom, left. */
@@ -568,6 +632,24 @@ struct css_rule {
 	struct css_declaration *declarations;
 	size_t declaration_count;
 	const struct css_media *media;
+	/* The @scope the rule is in (NULL for none). */
+	const struct css_scope *scope;
+};
+
+/*
+ * An @scope rule's scope: the selectors of its roots (none for an implicit
+ * scope, whose root is the parent of the sheet's owner, or the root element)
+ * and of its limits (none for no limit), and the @scope it is nested in
+ * (NULL for none), in the sheet's arena.  An element is in the scope when
+ * it is a root or below one, and neither it nor an element between it and
+ * the root matches a limit.
+ */
+struct css_scope {
+	const struct css_selector *roots;
+	size_t root_count;
+	const struct css_selector *limits;
+	size_t limit_count;
+	const struct css_scope *parent;
 };
 
 /*
@@ -617,6 +699,13 @@ struct css_rule_index {
  * nested in), the URLs its @import rules name (atoms, in order) and their
  * media lists, its rule index and the arena all of them live in.
  */
+/* A @position-try rule: its name (an atom) and its declarations (in the sheet's arena). */
+struct css_try_rule {
+	struct vm_string *name;
+	struct css_declaration *declarations;
+	size_t declaration_count;
+};
+
 struct css_sheet {
 	struct wb_arena arena;
 	struct css_rule *rules;
@@ -626,6 +715,8 @@ struct css_sheet {
 	size_t import_count;
 	struct css_font_face *font_faces;
 	size_t font_face_count;
+	struct css_try_rule *try_rules;
+	size_t try_rule_count;
 	struct css_rule_index index;
 	int origin;
 };
@@ -651,6 +742,15 @@ int css_parse_sheet(struct vm_heap *heap, const uint16_t *units, size_t length, 
 int css_parse_declarations(struct vm_heap *heap, struct wb_arena *arena, const uint16_t *units, size_t length, struct css_declaration **declarations, size_t *count);
 void css_sheet_release(struct css_sheet *sheet);
 int css_ident_equal(const struct css_token *token, const char *ascii);
+
+/* Anchor positioning's values (anchor.c). */
+int css_anchor_mentioned(const struct css_token *tokens, size_t count);
+int css_anchor_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, int sizes, const struct css_anchor_expr **expr);
+int css_position_area_parse(const struct css_token *tokens, size_t count, int *packed);
+int css_try_fallbacks_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_try_list **list);
+int css_try_order_parse(const struct css_token *tokens, size_t count, int *order);
+int css_position_visibility_parse(const struct css_token *tokens, size_t count, int *bits);
+int css_anchor_names_parse(struct css_parse *parse, const struct css_token *tokens, size_t count, const struct css_anchor_names **names);
 int css_units_equal_ascii(const uint16_t *units, size_t length, const char *ascii);
 
 /* The rule index (index.c). */
