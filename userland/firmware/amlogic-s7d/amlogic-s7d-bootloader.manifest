@@ -16,6 +16,7 @@ acquisition-area-check=the image's sectors 6539 to 16383 are all zero, and its s
 acquisition-fallback=none on the network; the two files placed by hand in build/sources/firmware/amlogic-s7d/by-hand/ (the notice)
 
 mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-revision=43662bd72419deb927af6d533d90fe72aa158c74
 mirror-path=amlogic-s7d/
 
 hardware=Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D; the area's BL30 names itself S7D-s905x5m-26052812)
