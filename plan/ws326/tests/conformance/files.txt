@@ -1,0 +1,14 @@
+# The bitstream and the reference of the conformance zips whose file names do not settle them (read by run.sh):
+# <name> <bitstream> <reference> [<frames>], paths inside the unpacked zip; <frames> when the reference holds more
+# frames than the bitstream gives, and the reason after the paths in a comment line above.
+# alphaconformanceG: the primary pictures of the stream with alpha auxiliary pictures are the first 40 of the
+# 43 frames of the foreground stream test8b43 (readme.txt).
+alphaconformanceG	alphaconformanceG/alphaconformanceG.264	alphaconformanceG/test8b43.yuv	40
+# CVFC1_Sony_C: frame cropping; CVFC1_Sony_C.yuv is the whole 352x288 frame with the cropped-off part grey,
+# CVFC1_Sony_C_nogray.yuv the cropped window (50 frames of 75600 bytes).
+CVFC1_Sony_C	CVFC1_Sony_C.jsv	CVFC1_Sony_C_nogray.yuv
+# CVSE2_Sony_B, CVSE3_Sony_H, CVSEFDFT3_Sony_E: <name>-norpt.yuv is the decoded output; <name>.yuv repeats fields or
+# frames as the pic_struct of the picture timing SEI says (a display step, outside decoding; readme).
+CVSE2_Sony_B	CVSE2_Sony_B.jsv	CVSE2_Sony_B-norpt.yuv
+CVSE3_Sony_H	CVSE3_Sony_H.jsv	CVSE3_Sony_H-norpt.yuv
+CVSEFDFT3_Sony_E	CVSEFDFT3_Sony_E.jsv	CVSEFDFT3_Sony_E-norpt.yuv
