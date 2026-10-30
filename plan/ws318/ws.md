@@ -30,43 +30,49 @@
 
 ## Phase（p001 の設計の案、2026-10-31 P5。詳細と受け入れは [design.md](design.md) §14）
 
-設計は [design.md](design.md)、公開の interface の案は [proposed/](proposed/)、ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q318-1〜9）。型: O = Opus、S = Sonnet 5.5 high（標準廉価実装手順）、D = 文書・規約。
+設計は [design.md](design.md)、公開の interface の案は [proposed/](proposed/)、ユーザーの判断を待つ点は [user-questions.md](user-questions.md)（Q318-1〜14）、敵対的レビューは [design-review.md](design-review.md)。型: O = Opus、S = Sonnet 5.5 high（標準廉価実装手順）、D = 文書・規約。
 
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
-| ws318-p001 | 設計（design.md・proposed の header・問い・design-reviewer） | O | in-progress（q1752 P5） | — |
-| ws318-p002 | 公開の header（media.h・media-vulkan.h）・内部の header・骨格・run-unit と check-skeleton | O | planning | p001、Q318-3 |
-| ws318-p003 | 試験の道具 vkfake（lavapipe の上の偽の Vulkan Video） | O | planning | p002 |
+| ws318-p001 | 設計（design.md・proposed の header・問い・design-reviewer） | O | in-progress（q1752 P5。設計と review の反映は済み、Q1 の受け入れと Q318 の回答待ち） | — |
+| ws318-p002 | 公開の header（media.h・media-vulkan.h）・内部の header・骨格・exports の名前の列・run-unit と check-skeleton | O | planning | p001 |
+| ws318-p003a | vkfake の核（代わりの libvulkan、lavapipe、1.0 と許可の表、video の family と caps） | O | planning | p002 |
+| ws318-p003b | vkfake の video（session・parameter・decode の模倣と記録、今の runtime を通す） | O | planning | p003a |
 | ws318-p004 | libavcodec の decode を libmedia の中へ、Video Player・Music を libmedia だけに、media-app を外す（今の機能のまま） | O | planning | WS326 p023 |
-| ws318-p005 | context と device の共有の核（NONE・PRIVATE・SHARED、requirements、queue の lock、旧い口の shim） | O | planning | p003、p004 |
-| ws318-p006 | frame の model と decode の出力（参照の数、VkImage、i915 の plane の copy、software の upload、ops v2） | O | planning | p005、WS326 completed |
-| ws318-p007 | 形式の交渉と GPU の変換（compute の shader） | O | planning | p006 |
+| ws318-p005 | context と device の共有の核（NONE・PRIVATE・SHARED、requirements、queue の lock、旧い口の shim） | O | planning | p003b、p004 |
+| ws318-p006a | frame の model と ops v2（参照の数・identity・staging、backend と media-probe・host-codec の追従） | O | planning | p005、WS326 completed |
+| ws318-p006b | hardware の decode の VkImage の出力（DISTINCT・別名・i915 の transfer の道） | O | planning | p006a |
+| ws318-p007a | 変換の描画の pass の核（shader の生成、yuv420-to-rgb、交渉） | O | planning | p006b |
+| ws318-p007b | 残りの変換（packed422・rgb-to-yuv420・readback）と色の係数 | O（S） | planning | p007a |
 | ws318-p008 | thread の台帳と notify の callback、engine と libbrowser | O | planning | p005 |
-| ws318-p009 | Video Player を共有の device と VkImage の frame へ | O | planning | p007、p008 |
+| ws318-p009 | Video Player を共有の device と plane の frame へ | O | planning | p007a、p008 |
 | ws318-p010 | Music・media-probe・libbrowser を新しい口へ、旧い口と media-decoder.h を消す | O | planning | p009 |
-| ws318-p011 | Vulkan の header の更新（KHR の encode・H.265 の std）、sysroot は Q1 | O | planning | Q318-3 |
-| ws318-p012 | encoder の核・codec の問い合わせ・AAC-LC の backend・libavcodec の encode | O | planning | p007、p011 |
-| ws318-p013 | AAC の追加（窓の切り替え・TNS）の設計（標準廉価） | O | planning | p012、Q318-5 |
+| ws318-p011a | Vulkan の header に H.265 の decode を選び直す（版はそのまま）、sysroot は Q1 | O | planning | Q318-3 |
+| ws318-p011b | Vulkan の header を KHR の encode のある版へ、sysroot は Q1 | O | planning | Q318-3 |
+| ws318-p012a | encoder の核・codec の問い合わせ・packet の枠・AAC-LC の backend | O | planning | p007b |
+| ws318-p012b | libavcodec の encode の add-in | O | planning | p012a |
+| ws318-p013 | AAC の追加（窓の切り替え・TNS）の設計（標準廉価、判定を数値まで固定） | O | planning | p012a、Q318-5 |
 | ws318-p014 | AAC: 窓の切り替えと短い窓 | S | planning | p013 |
-| ws318-p015 | AAC: TNS | S | planning | p013 |
-| ws318-p016 | H.265 の Vulkan Video の decode の設計（標準廉価） | O | planning | p011 |
+| ws318-p015 | AAC: TNS | S | planning | p014 |
+| ws318-p016 | H.265 の Vulkan Video の decode の設計（標準廉価） | O | planning | p011a |
 | ws318-p017 | H.265: NAL・VPS・SPS | S | planning | p016 |
 | ws318-p018 | H.265: PPS・slice segment header | S | planning | p017 |
 | ws318-p019 | H.265: POC・RPS・DPB | S | planning | p018 |
-| ws318-p020 | H.265 の decode の runtime（vkfake、適合の stream の解析） | O | planning | p006、p019 |
-| ws318-p021 | Vulkan Video の encode（H.264） | O | planning | p012 |
+| ws318-p020 | H.265 の decode の runtime（vkfake、適合の stream の解析） | O | planning | p006b、p019 |
+| ws318-p021 | Vulkan Video の encode（H.264） | O | planning | p011b、p012a |
 | ws318-p022 | Vulkan Video の encode（H.265） | O | planning | p021、p017 |
-| ws318-p023 | camera の口と zedBSD の source | O | planning | p007、p012 |
-| ws318-p024 | MJPEG の段 | O（S） | planning | p023、Q318-4 |
-| ws318-p025 | kernel: camera の import を i915 の coherent な memory へ（HAL は変えない） | O | planning | p023 |
+| ws318-p023a | camera の層（slot の状態・待ちの列・notify）と偽の source の試験 | O | planning | p007b、p012a |
+| ws318-p023b | camera の zedBSD の source（DEVICE・IMPORT、OS の境界の checker） | O | planning | p023a |
+| ws318-p024 | MJPEG の段 | O（S） | planning | p023a、Q318-4 |
+| ws318-p025 | kernel: camera の import を i915 の coherent な memory へ（HAL は変えない） | O | planning | p023b |
 | ws318-p026 | 実機の受け入れ（5330 の Video Player、RTX・Pi 4 の非退行、QEMU Venus） | O | planning | p010、p020 |
-| ws318-p027 | camera の実機（5330 ＋ webcam） | O | planning | p023〜p025、WS282 の実機、Q318-6 |
+| ws318-p027 | camera の実機（5330 ＋ webcam） | O | planning | p023b〜p025、WS282 の実機、Q318-6 |
 | ws318-p028 | 解説の文書と規約の全文の見直し | D | planning | 全部 |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。担当は未割当。
-- 2026-10-31 P5（q1752-i01）: p001 の設計を書いた（design.md・proposed/・user-questions.md）。Q1 が受け入れ、ユーザーが Q318-1〜9 に答えた後に p002 から。WS326 に触れない Phase は WS326 の completed を待たずに始められる（design §14）。
+- 2026-10-31 P5（q1752-i01）: p001 の設計を書き（design.md・proposed/・user-questions.md）、design-reviewer の 37 件（blocker 3）を反映した（design-review.md）。次: Q1 が受け入れ、ユーザーが Q318-1〜14 に答えた後に p002 から。WS326 に触れない Phase を先に始めるかは Q318-14。
 
 ## 日程（2026-10-30 ユーザー、原文）
 

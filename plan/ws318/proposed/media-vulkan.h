@@ -12,14 +12,25 @@
  * device, makes its instance and device with that added to its own, and
  * hands them to media_context_create (MEDIA_DEVICE_SHARED).  libmedia then
  * decodes, converts, encodes and receives camera frames on that device,
- * and hands the program frames that are images of it.  libmedia reaches
- * Vulkan only through the program's vkGetInstanceProcAddr.  Memory that
- * must be shared with a kernel driver (a camera writing into an image) is
- * exported and imported inside libmedia; no handle leaves it.
+ * and hands the program frames whose planes are images of it.  libmedia
+ * reaches Vulkan only through the program's vkGetInstanceProcAddr and
+ * uses the Vulkan 1.0 core with extensions (KHR entry points), as the
+ * system's Vulkan offers.  Memory that must be shared with a kernel
+ * driver (a camera writing into GPU memory) is exported and imported
+ * inside libmedia; no handle leaves it.
  *
- * Images libmedia makes are created with VK_SHARING_MODE_CONCURRENT over
- * libmedia's queue families and the program's reader families, so no
- * queue family ownership transfer is needed on either side.
+ * Images libmedia hands out are created with VK_SHARING_MODE_CONCURRENT
+ * over libmedia's queue families and the program's reader families when
+ * those are more than one family, and with VK_SHARING_MODE_EXCLUSIVE when
+ * they are all one family; either way no queue family ownership transfer
+ * is needed on either side.
+ *
+ * Queues are externally synchronized (Vulkan): every queue libmedia uses
+ * that the program also uses carries the program's lock, and the program
+ * holds that same lock around its own vkQueueSubmit, vkQueuePresentKHR
+ * and vkQueueWaitIdle on it.  While any libmedia object of a context
+ * lives, the program does not call vkDeviceWaitIdle (it waits on its own
+ * fences or calls vkQueueWaitIdle under the lock instead).
  */
 
 #ifndef LIBMEDIA_MEDIA_VULKAN_H
@@ -29,20 +40,21 @@
 
 #include <vulkan/vulkan.h>
 
-/* The most names a requirement lists, queues a context uses, and reader families. */
+/* The most names a requirement lists, queues a context uses, reader families, and planes of a frame. */
 #define MEDIA_VULKAN_EXTENSIONS_MAX	16U
 #define MEDIA_VULKAN_QUEUES_MAX		4U
 #define MEDIA_VULKAN_READERS_MAX	4U
+#define MEDIA_VULKAN_PLANES_MAX		3U
 
 /* What libmedia does with a queue (bits). */
 #define MEDIA_QUEUE_DECODE	0x1U	/* Vulkan Video decode */
 #define MEDIA_QUEUE_ENCODE	0x2U	/* Vulkan Video encode */
-#define MEDIA_QUEUE_COMPUTE	0x4U	/* conversion, upload and copies (a compute-capable family) */
+#define MEDIA_QUEUE_CONVERT	0x4U	/* conversions (drawing passes: a graphics-capable family), uploads and copies */
 
 /*
- * What an instance must have: the lowest API version and the instance
- * extensions to enable, all of them present on this system (the names
- * are libmedia's constant strings).
+ * What an instance must have: the API version to ask for (libmedia
+ * needs only 1.0) and the instance extensions to enable, all of them
+ * present on this system (the names are libmedia's constant strings).
  */
 struct media_vulkan_instance_requirements {
 	uint32_t api_version;
@@ -54,16 +66,25 @@ struct media_vulkan_instance_requirements {
  * Fills what an instance needs.  get is the program's
  * vkGetInstanceProcAddr (libmedia asks it for
  * vkEnumerateInstanceExtensionProperties).  Returns 0, or ENOTSUP when
- * the system lacks an instance extension libmedia cannot work without
- * (libmedia then works only without a device), or EINVAL.
+ * the system lacks an instance extension libmedia cannot share a device
+ * without (the program then makes a context without a shared device),
+ * or EINVAL.
  */
 int media_vulkan_instance_requirements(PFN_vkGetInstanceProcAddr get, struct media_vulkan_instance_requirements *requirements);
 
-/* One queue family libmedia asks queues of, how many (at most), and for what. */
+/*
+ * One queue family libmedia asks for: the family, how many queues of it
+ * libmedia would like for itself (the program may give fewer and share
+ * its own), and for what.  shared_hint is set when the family has fewer
+ * queues than the program's and libmedia's uses together are likely to
+ * need (a device with one queue for everything), so the program plans to
+ * share a queue with its lock.
+ */
 struct media_vulkan_queue_request {
 	uint32_t family;
 	uint32_t count;
 	unsigned roles;
+	int shared_hint;
 };
 
 /*
@@ -72,8 +93,8 @@ struct media_vulkan_queue_request {
  * synchronization2 must be enabled, and the queues asked.  decode_codecs
  * and encode_codecs say what the device does in hardware (bit 1 <<
  * MEDIA_CODEC_*), so that a program choosing among devices may prefer
- * one.  A program that cannot give a queue of its own to compute shares
- * one of its own queues (struct media_vulkan_queue's lock).
+ * one; convert says whether libmedia can convert formats on it (a
+ * graphics-capable family exists).
  */
 struct media_vulkan_requirements {
 	const char *extensions[MEDIA_VULKAN_EXTENSIONS_MAX];
@@ -83,22 +104,24 @@ struct media_vulkan_requirements {
 	unsigned queue_count;
 	uint32_t decode_codecs;
 	uint32_t encode_codecs;
+	int convert;
 };
 
 /*
  * Fills what a device of a physical device needs for the roles asked
- * (MEDIA_QUEUE_*; COMPUTE is always included).  The instance must have
- * been made with media_vulkan_instance_requirements.  Returns 0 (with
- * fewer roles served when the device cannot do some: the codec masks say
- * which), ENOTSUP when the device has no compute-capable family, EINVAL.
+ * (MEDIA_QUEUE_*).  The instance must have been made with
+ * media_vulkan_instance_requirements.  Returns 0 (with fewer roles served
+ * when the device cannot do some: the codec masks and convert say which),
+ * EINVAL.
  */
 int media_vulkan_device_requirements(PFN_vkGetInstanceProcAddr get, VkInstance instance, VkPhysicalDevice physical, unsigned roles, struct media_vulkan_requirements *requirements);
 
 /*
  * One queue libmedia may submit to: its family and index, the handle,
- * the roles, and -- when the program also submits to it -- the program's
- * lock around submissions (libmedia holds it only around
- * vkQueueSubmit/vkQueueSubmit2; NULL lock when libmedia alone submits).
+ * the roles libmedia uses it for, and -- when the program also uses it --
+ * the program's lock (libmedia holds it only around its own
+ * vkQueueSubmit; NULL lock when libmedia alone uses the queue).  Any role,
+ * decode included, may be on a shared queue.
  */
 struct media_vulkan_queue {
 	uint32_t family;
@@ -135,32 +158,47 @@ struct media_vulkan_device {
 };
 
 /*
- * A frame as an image of the context's device.
+ * One plane of a frame as the program samples it: the image that holds
+ * it, the aspect to view (VK_IMAGE_ASPECT_PLANE_n_BIT of a multi-planar
+ * image, or VK_IMAGE_ASPECT_COLOR_BIT of an image of its own), the format
+ * of the view (R8, R8G8, R8G8B8A8 or B8G8R8A8 UNORM) and the plane's
+ * extent.
+ */
+struct media_vulkan_plane {
+	VkImage image;
+	VkImageAspectFlags aspect;
+	VkFormat view_format;
+	uint32_t width;
+	uint32_t height;
+};
+
+/*
+ * A frame as images of the context's device.
  *
- * image is valid while the program holds a reference; identity names the
- * image for the program's caches of views (it never names another image
- * while this one lives).  format, create_flags, usage and tiling are the
- * image's own; a multi-planar format has plane_count planes whose views
- * use plane_formats (R8 and R8G8 for NV12: create_flags then holds
- * VK_IMAGE_CREATE_MUTABLE_FORMAT_BIT and VK_IMAGE_CREATE_EXTENDED_USAGE_BIT).
- * image_width and image_height are the image's extent, x, y, width and
- * height the visible window.  layout is the layout the image is in; the
- * program reads it in that layout and does not change it.  The pixels
- * are complete when the frame is handed out (libmedia waited for the
- * work that wrote them); the program drops its reference only after its
- * own GPU work that reads the image has completed.
+ * format is the frame's MEDIA_FORMAT_*; its planes follow (one for the
+ * RGB formats, two for NV12, three for I420), each an image of its own
+ * or a plane of one multi-planar image (the program creates one view per
+ * plane from the plane's fields and needs no other knowledge of how
+ * libmedia keeps them).  x, y, width and height are the visible window
+ * in the first plane's pixels.  layout is the layout every plane is in;
+ * the program reads them in that layout and does not change it.
+ *
+ * identity names this set of images for the program's cache of views:
+ * it is drawn from a counter that only grows and is never given to other
+ * images, even after these are destroyed.  A program keeps its cache
+ * small (least recently used first out, destroying a view only after its
+ * own GPU work that used it completed); a frame whose identity is not in
+ * the cache gets new views.
+ *
+ * The pixels are complete when the frame is handed out (libmedia waited
+ * for the work that wrote them).  The program drops its reference only
+ * after its own GPU work that reads the planes has completed.
  */
 struct media_vulkan_frame {
-	VkImage image;
 	uint64_t identity;
-	VkFormat format;
-	VkImageCreateFlags create_flags;
-	VkImageUsageFlags usage;
-	VkImageTiling tiling;
+	unsigned format;
 	unsigned plane_count;
-	VkFormat plane_formats[3];
-	uint32_t image_width;
-	uint32_t image_height;
+	struct media_vulkan_plane planes[MEDIA_VULKAN_PLANES_MAX];
 	uint32_t x;
 	uint32_t y;
 	uint32_t width;
@@ -171,27 +209,30 @@ struct media_vulkan_frame {
 /* Describes a Vulkan frame: 0, or ENOTSUP for a frame in the CPU's memory. */
 int media_frame_vulkan(const struct media_frame *frame, struct media_vulkan_frame *vulkan);
 
-/* The VkFormat of a MEDIA_FORMAT_* (VK_FORMAT_UNDEFINED for none). */
-VkFormat media_vulkan_format(unsigned format);
+/*
+ * Wraps images of the program's as a frame, for an encoder to read: the
+ * description (as media_frame_vulkan gives; identity is ignored), a
+ * binary semaphore signalled by the program's work that wrote the images
+ * and submitted before the frame is sent (VK_NULL_HANDLE when that work is
+ * known complete; libmedia waits on it once, at its first read, and orders
+ * every later read of its own after that one), and the function called
+ * when the last reference goes and libmedia's reads have completed.  The
+ * function runs on whichever thread dropped the last reference or saw the
+ * reads complete (an encoder's send, receive or close on the caller's
+ * thread, or a libmedia thread), with no libmedia lock held, and must not
+ * call libmedia.  Returns 0, EINVAL, ENOTSUP (a format or layout libmedia
+ * does not read), ENOMEM.
+ */
+int media_frame_wrap_vulkan(struct media_context *context, const struct media_vulkan_frame *vulkan, VkSemaphore written, void (*release)(void *data, const struct media_vulkan_frame *vulkan), void *release_data, struct media_frame **frame);
 
 /*
- * Wraps an image of the program's as a frame, for an encoder to read: the
- * description (image, format, extent, window, layout, the image's
- * creation), a binary semaphore libmedia waits on before reading (signalled
- * by the program's work that wrote the image; VK_NULL_HANDLE when the work
- * is known complete), and the function called on a libmedia thread when
- * the last reference goes and libmedia's reads have completed.  The image
- * must have been made concurrent over libmedia's families or the program
- * must have released it to them.  Returns 0, EINVAL, ENOTSUP (a format
- * libmedia does not read), ENOMEM.
+ * Says that the program wrote a frame made by media_frame_create
+ * (MEDIA_MEMORY_VULKAN): the layout it left the planes in, and a binary
+ * semaphore its work signals, submitted before the frame is sent
+ * (VK_NULL_HANDLE when known complete).  libmedia waits on it once.
+ * 0, EINVAL (a frame not made by media_frame_create, a layout libmedia
+ * cannot leave).
  */
-int media_frame_wrap_vulkan(struct media_context *context, const struct media_vulkan_frame *vulkan, VkSemaphore written, void (*release)(void *data, VkImage image), void *release_data, struct media_frame **frame);
-
-/*
- * Says that the program's GPU work writing a frame made by
- * media_frame_create (MEDIA_MEMORY_VULKAN) signals a binary semaphore;
- * libmedia waits on it before its first read.  0, EINVAL.
- */
-int media_frame_written(struct media_frame *frame, VkSemaphore written);
+int media_frame_written(struct media_frame *frame, VkImageLayout layout, VkSemaphore written);
 
 #endif

@@ -31,12 +31,6 @@
  *
  * The library's internal API, for the desktop's programs; not a part of
  * any SDK.
- *
- * This is the proposed final form.  During the migration the calls of the
- * old interface (media_decoder_open, media_decoder_gpu_pictures,
- * media_frame_gpu, media_frame_free, media_codec_load, media_codec_reason,
- * media_engine_open, media_engine_wake_fd) stay beside these and are
- * removed in the last migration step.
  */
 
 #ifndef LIBMEDIA_MEDIA_H
@@ -92,7 +86,7 @@
 #define MEDIA_PROFILE_H264_MAIN			2U
 #define MEDIA_PROFILE_H264_HIGH			3U
 #define MEDIA_PROFILE_HEVC_MAIN			1U
-#define MEDIA_PROFILE_HEVC_MAIN_10		2U	/* named so a query can report it; not produced yet */
+#define MEDIA_PROFILE_HEVC_MAIN_10		2U	/* a query may report it; libmedia's frames are 8-bit */
 #define MEDIA_PROFILE_AAC_LC			1U
 
 /*
@@ -106,7 +100,7 @@
 #define MEDIA_FORMAT_UYVY	4U	/* 8-bit packed 4:2:2, bytes Cb Y0 Cr Y1 */
 #define MEDIA_FORMAT_BGRA8	5U	/* bytes B G R A (the canvas's 0xAARRGGBB on a little-endian CPU) */
 #define MEDIA_FORMAT_RGBA8	6U	/* bytes R G B A */
-#define MEDIA_FORMAT_P010	7U	/* reserved for 10-bit 4:2:0; not produced yet */
+#define MEDIA_FORMAT_P010	7U	/* 10-bit 4:2:0 in 16-bit samples; named for queries, libmedia does not convert it */
 #define MEDIA_FORMAT_MJPEG	8U	/* a camera mode only: frames are always decoded before they are handed out */
 #define MEDIA_FORMATS_MAX	8U	/* the most formats a request lists */
 
@@ -137,14 +131,16 @@ struct media_colour {
  * A CPU frame's planes: the format, the picture's size, how many planes
  * the format has, and each plane's first byte and bytes per row.  The
  * memory belongs to the frame; it stays valid while the caller holds a
- * reference.
+ * reference.  The samples are read-only: decoders and cameras share
+ * their frames (media_frame_planes_write gives writable planes of a frame
+ * the program made itself).
  */
 struct media_planes {
 	unsigned format;
 	uint32_t width;
 	uint32_t height;
 	unsigned count;
-	uint8_t *data[3];
+	const uint8_t *data[3];
 	size_t stride[3];
 };
 
@@ -154,11 +150,17 @@ struct media_planes {
 #define MEDIA_EVENT_LOST	3U	/* the context's device was lost */
 
 /*
- * A program's notify function.  libmedia calls it on one of its own
- * threads, holding none of its locks, once when something starts waiting
- * (it is not called again for the same object until the program has
- * taken what waits).  It must return at once and must not call libmedia;
- * a Keiland program posts an event with kl_app_post and does the work on
+ * A program's notify function.  libmedia calls it only on its own threads
+ * (an engine's or a camera's), holding none of its locks.  It is called
+ * once when an object goes from nothing waiting to something waiting;
+ * after that it is not called again for that object until the program
+ * has emptied what waits (media_camera_take answered EAGAIN, or
+ * media_engine_status was read), so a program that empties on each call
+ * loses no wake-up.  MEDIA_EVENT_LOST is told on the first libmedia thread
+ * that meets the lost device; a loss met on the program's own thread
+ * (a decoder or encoder call) is told by that call's MEDIA_PROBLEM_LOST
+ * only.  The function must return at once and must not call libmedia; a
+ * Keiland program posts an event with kl_app_post and does the work on
  * its own thread.
  */
 typedef void (*media_notify_fn)(void *data, unsigned event, void *object);
@@ -262,11 +264,14 @@ int media_codec_query(struct media_context *context, unsigned direction, unsigne
 
 /*
  * What a decoder is asked for: the kinds it may use (MEDIA_ALLOW_*, 0 for
- * all) or one implementation (id from media_codec_query, 0 for any); the
+ * all) or one implementation (id from media_codec_query, 0 for any; a
+ * named implementation that refuses is not replaced by another); the
  * memory its frames should be in (MEDIA_MEMORY_VULKAN needs a SHARED
  * context); the formats the program takes, preferred first (none: the
  * decoder's own); and how many frames the program keeps at once at most
- * (the decoder keeps that many images free of its references).
+ * (0 counts as 1).  The decoder keeps that many images beyond its own
+ * references; while the program holds more, send answers ENOBUFS until
+ * one is released.
  */
 struct media_decoder_config {
 	unsigned allow;
@@ -280,7 +285,9 @@ struct media_decoder_config {
 /*
  * Opens a decoder for a track.  The track and its private data may go
  * away after the call (the decoder keeps a copy).  Returns 0; a
- * MEDIA_PROBLEM_* as described above; EINVAL; ENOMEM.  A decoder whose
+ * MEDIA_PROBLEM_* as described above; EINVAL; ENOTSUP (Vulkan memory on a
+ * context without a shared device, or no listed format can be made);
+ * ENOMEM.  A decoder whose
  * implementation refuses the stream later (send answering ENOTSUP, ENODEV
  * or EBUSY inside libmedia) moves to the next implementation by itself.
  */
@@ -293,8 +300,11 @@ unsigned media_decoder_kind(const struct media_decoder *decoder);
 
 /*
  * Sends a packet (NULL drains the decoder at the end).  Returns 0, EAGAIN
- * when pictures or sound must be received first, EINVAL, ENOMEM, or a
- * MEDIA_PROBLEM_* when no implementation is left.
+ * when pictures or sound must be received first, ENOBUFS when the program
+ * holds more frames than its hold, EINVAL, ENOMEM, EIO when the stream
+ * cannot go on (a decode the device reported failed, or the device did
+ * not finish in time), MEDIA_PROBLEM_LOST, or another MEDIA_PROBLEM_*
+ * when no implementation is left.
  */
 int media_decoder_send(struct media_decoder *decoder, const struct media_packet *packet);
 
@@ -333,12 +343,22 @@ int64_t media_frame_time(const struct media_frame *frame);
 int media_frame_planes(const struct media_frame *frame, struct media_planes *planes);
 
 /*
+ * Gives the writable planes of a CPU frame the program made with
+ * media_frame_create and has not yet sent: 0, or EINVAL for any other
+ * frame.  data and stride receive count entries.
+ */
+int media_frame_planes_write(struct media_frame *frame, uint8_t *data[3], size_t stride[3]);
+
+/*
  * Makes an empty frame for the program to fill, with one reference: in
- * the CPU's memory (planes writable) or as an image of a SHARED context's
- * device usable as a colour attachment, a storage image or a transfer
- * destination (media-vulkan.h).  Returns 0, EINVAL (an odd size for a
- * 4:2:0 format, a format the memory cannot hold), ENOTSUP (Vulkan memory
- * without a SHARED context), ENOMEM.
+ * the CPU's memory (media_frame_planes_write), or as images of a SHARED
+ * context's device (media-vulkan.h) whose planes are separate
+ * single-plane images usable as colour attachments and transfer
+ * destinations (R8 and R8G8 for NV12, R8 three times for I420, the RGB
+ * format itself), so that the program may draw or copy into them.
+ * Returns 0, EINVAL (an odd size for a 4:2:0 format), ENOTSUP (Vulkan
+ * memory without a SHARED context, a packed 4:2:2 format in Vulkan
+ * memory, a plane format the device cannot draw into), ENOMEM.
  */
 int media_frame_create(struct media_context *context, unsigned memory, unsigned format, uint32_t width, uint32_t height, struct media_frame **frame);
 
@@ -366,8 +386,9 @@ void media_scaler_free(struct media_scaler *scaler);
  * What an encoder is asked for.  Video: codec, profile, level (0: chosen
  * from the size and rate), the picture's size and frame rate, the rate
  * control and its numbers (bits per second, qp for CQP), the key frame
- * interval in frames (0: two seconds), B-frames in a row (0 only for
- * now), the colour signalled.  Sound (AAC): rate, channels, bitrate.
+ * interval in frames (0: two seconds), B-frames in a row (at most the
+ * implementation's max_b_frames; libmedia's Vulkan Video encoder makes
+ * none and refuses more with MEDIA_PROBLEM_CONFIG), the colour signalled.  Sound (AAC): rate, channels, bitrate.
  * allow and implementation choose as for a decoder.  output frames the
  * packets (MEDIA_OUTPUT_*).
  */
@@ -470,9 +491,10 @@ struct media_camera_mode {
  * What a camera is opened with: the wanted size and frame rate (the
  * nearest mode is chosen), the memory and formats the program takes
  * (as for a decoder), how many frames may be held at once by the program
- * and an encoder together, an encoder the frames will go to (its input
- * format is preferred so that no conversion is needed; NULL for none),
- * and the notify function told of MEDIA_EVENT_CAMERA.
+ * and an encoder together, an encoder the frames will go to (read during
+ * the open only: its input format is preferred so that no conversion is
+ * needed; NULL for none), and the notify function told of
+ * MEDIA_EVENT_CAMERA.
  */
 struct media_camera_config {
 	uint32_t width;
@@ -509,9 +531,11 @@ int media_camera_stop(struct media_camera *camera);
 
 /*
  * Takes the oldest frame waiting, with one reference: 0; EAGAIN when none
- * waits; ENODEV when the camera went away; EIO when the stream failed.
- * When the program does not take frames in time the oldest are dropped
- * (counted in dropped).
+ * waits (notify is armed again); ENODEV when the camera went away; EIO
+ * when the stream failed.  When the program does not take frames in time
+ * the oldest are dropped; dropped receives how many were dropped since
+ * the camera was opened (by libmedia, and by the device for want of a
+ * buffer).
  */
 int media_camera_take(struct media_camera *camera, struct media_frame **frame, uint64_t *dropped);
 
@@ -545,8 +569,9 @@ struct media_status {
 };
 
 /*
- * Opens an engine on a context (NULL: a context of its own without a
- * GPU), playing a path or the caller's source.  The engine's thread calls
+ * Opens an engine on a context (NULL: a context of its own with
+ * MEDIA_DEVICE_PRIVATE, so hardware decoding is used and frames are read
+ * back), playing a path or the caller's source.  The engine's thread calls
  * notify (MEDIA_EVENT_ENGINE) when its state changed or a picture came;
  * the caller then reads media_engine_status, which also re-arms notify.
  */
