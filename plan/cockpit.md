@@ -37,20 +37,9 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 
 進捗: 2026-10-30 骨格と照合の script（P1）→ Sonnet 13 回で全文 → 統合で照合 PASS（14 file、例 12 compile）。sysctl の 4 byte の読みの不具合を Q1 が直した。
 
-### WS327 libkeiland の thread と socket の wrapper
+### WS327 libkeiland の thread と socket の wrapper — completed（2026-10-30）
 
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001〜p003 | 設計、thread の層、socket の層 | cleared |
-| p004〜p006 | 旧い一括の Phase | canceled（標準廉価実装手順に組み直し） |
-| p007 | 委譲の設計 | cleared |
-| p008〜p012 | app の移行（Mailer・Music/Video・Photos・Settings・IME/picker/audio、Sonnet） | cleared |
-| p013・p014 | thread-win32.c・socket-win32.c（mingw の compile まで） | cleared |
-| p015 | 解説（8 章、08-network.c） | cleared |
-| p016 | 受け入れ（P2） | in-progress（QEMU の回帰の途中、Video Player・Photos に未解析の FAIL） |
-| p017 | 規約の見直し | planned |
-
-進捗: 2026-10-30 Sonnet 9 回で実装。閉じた WS の試験 4 本を直した。Win32 の揺れ 17 項目は header を変えず、S7 は実装で直した。F-WS327-win32-build を登録。
+POSIX と Win32 で同じ interface の thread・socket の層と、app の移行。QEMU の回帰で退行なし（Photos の不具合は BUG-370、WS327 の外）。試験は plan/tools/keiland-layers/。
 
 ### WS315 Realtek USB 2.5G・5G（vendor mode）— completed（2026-10-30）
 

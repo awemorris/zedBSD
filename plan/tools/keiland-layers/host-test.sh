@@ -1,7 +1,7 @@
 #!/bin/sh
 # The host tests of libkeiland's threads and network (thread-test.c, socket-test.c).  Run from the worktree's root.
 #
-#   sh plan/ws327/tests/host-test.sh [LINUX_BUILD [TEST...]]      # TEST: thread, socket (default both)
+#   sh plan/tools/keiland-layers/host-test.sh [LINUX_BUILD [TEST...]]      # TEST: thread, socket (default both)
 #
 # builds each test with gcc and clang: linked with a Linux build of libkeiland (LINUX_BUILD, default
 # build/ws327-linux: make -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=DIR DIR/lib/libkeiland.so), and
@@ -43,7 +43,7 @@ run() {
 
 layers="userland/desktop/libkeiland/platform/thread-posix.c userland/desktop/libkeiland/platform/socket-posix.c"
 for test in $tests; do
-	source=plan/ws327/tests/$test-test.c
+	source=plan/tools/keiland-layers/$test-test.c
 	for cc in gcc clang; do
 		if [ -f "$build/lib/libkeiland.so" ]; then
 			run "$test-$cc-lib" $cc $flags "$source" -o "$out/$test-$cc-lib" -L"$build/lib" -lkeiland -pthread \

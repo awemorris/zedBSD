@@ -4,7 +4,7 @@
 # layers' own tests (thread-test.c, socket-test.c) built in the guest with its clang, linked with the built
 # libkeiland, and with the layers' sources under AddressSanitizer and UndefinedBehaviorSanitizer.  Run from the
 # worktree's root:
-#   GUEST_DIR=DIR sh plan/ws327/tests/freebsd-layers.sh OUT
+#   GUEST_DIR=DIR sh plan/tools/keiland-layers/freebsd-layers.sh OUT
 # GUEST_DIR is a prepared guest (build-guest.sh; another checkout's, read only: a fresh overlay is made in
 # GUEST_RUN).  GUEST_RUN (default build/ws327-freebsd-run) and SSH_PORT (default 2247) keep it apart from other
 # guests.  The judgement is the guest's exit status and the tests' lines over SSH; no console is read.  Prints
@@ -24,7 +24,7 @@ timeout 600 python3 -I plan/tools/keiland-freebsd/guest.py start > "$out/start.l
 	{ echo "ws327-freebsd: the guest did not start ($out/start.log)"; exit 1; }
 
 # The native build and the backend's tests, with this workstream's tests copied too.
-BACKEND_TEST_EXTRA_PATHS=plan/ws327/tests timeout 5400 sh plan/tools/keiland-freebsd/backend-test.sh "$PWD/$out/backend" \
+BACKEND_TEST_EXTRA_PATHS=plan/tools/keiland-layers timeout 5400 sh plan/tools/keiland-freebsd/backend-test.sh "$PWD/$out/backend" \
 	> "$out/backend.log" 2>&1 || failed=1
 echo "$(tail -n 1 "$out/backend.log")"
 
@@ -40,8 +40,8 @@ path=$(sed "s#^#$src/#" "$out/lib.txt" | paste -s -d : -)
 for test in thread socket; do
 	for kind in lib asan; do
 		case $kind in
-		lib) build="cc $flags plan/ws327/tests/$test-test.c -o /tmp/$test-$kind -L$lib -lkeiland -pthread -Wl,-rpath,$src/$lib" ;;
-		asan) build="cc $flags -fsanitize=address,undefined plan/ws327/tests/$test-test.c $layers -o /tmp/$test-$kind -pthread" ;;
+		lib) build="cc $flags plan/tools/keiland-layers/$test-test.c -o /tmp/$test-$kind -L$lib -lkeiland -pthread -Wl,-rpath,$src/$lib" ;;
+		asan) build="cc $flags -fsanitize=address,undefined plan/tools/keiland-layers/$test-test.c $layers -o /tmp/$test-$kind -pthread" ;;
 		esac
 		GUEST_COMMAND_TIMEOUT=400 g ssh "cd $src && $build && LD_LIBRARY_PATH=$path /tmp/$test-$kind > /tmp/$test-$kind.log 2>&1; echo status=\$?; cat /tmp/$test-$kind.log" \
 			> "$out/$test-$kind.log" 2>&1

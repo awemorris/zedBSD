@@ -28,7 +28,7 @@
 | 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
 | --- | --- | --- | --- |
 | P1 | q1705-i01 返却 | [WS009](ws009/ws.md) 文書: p028 の build・boot の再現の途中。次は [phase028](ws009/phase028/phase.md) の引き継ぎ（native の boot だけ → hybrid・uefi・bios → WS009 の完了の形）。その後 [WS296](ws296/ws.md)（P6 の 1809873bd を元に組み直す案は phase028 の末尾）→ [WS297](ws297/ws.md)（ユーザー: 1 WS ずつ） | QEMU |
-| P2 | q1703-i01 返却 | [WS327](ws327/ws.md) thread と socket の wrapper: p016 受け入れの途中。次は [phase016](ws327/phase016/phase.md) の引き継ぎ（image を作り直し音の device 無しで QEMU の回帰、Video Player の PAUSE・Photos の import の FAIL の解析、08-network の流し直し（BUG-367 は直った））→ p017 | QEMU |
+| P2 | q1703-i01 返却 | [WS327](ws327/ws.md) は 2026-10-30 P5（q1710）で completed | QEMU |
 | P3 | q1707-i01 返却（停止） | BUG-367・BUG-369 を閉じた。次の候補は [WS221](ws221/ws.md) Jumbo frame・[WS299](ws299/ws.md) 5330 の NVMe（ユーザー: WS315 の後） | 5330・10.0.10.3 |
 | P4 | q1698-i01 返却 | [WS307](ws307/ws.md) installer: ws.md の Resume point（p015 の QEMU の 3 回目 → p004 GTK4 の試験 → p008 → p014 → p007 firmware 変数の driver の設計の続き） | QEMU |
 | P5 | q1700-i01 返却 | [WS291](ws291/ws.md) NVIDIA: [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ desktop を測る → p012 以降） | 10.0.10.3 |
@@ -73,7 +73,6 @@
 - 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
 - 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
 - **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 20 Phase cleared、全体の流れと適合の試験へ。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
-- **libkeiland の thread と socket**（[WS327](ws327/ws.md)）: 実装は全部 cleared、受け入れの途中。
 - **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
 - **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
 - **インストーラ**（[WS307](ws307/ws.md)）: app と通しの試験は済み、残りは sleep の QEMU、GTK4 のセルフビルド、firmware 変数の driver、規約。
@@ -84,7 +83,7 @@
 <!-- master:priority:start -->
 優先順位（依存による順とは別。Queue の権限は変えない）:
 1. 次のセッションの始めにする事（上の 1〜6）。
-2. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074、WS327 の受け入れ。
+2. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074。
 3. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
 4. WS221（Jumbo frame）・WS299（5330 の NVMe）: 担当の割り当ての時（P3 は停止中）。
 5. WS290・WS292・WS226: WS290 の再開の後。保留の WS: Q1 とユーザーの整理の後。
@@ -172,7 +171,7 @@ BUG-371 · q1716 · WS332 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
 | [WS306](ws306/ws.md) | MG006 | GPU の driver の枠組みの「ゲーム最適化」の UAPI（ON/OFF と option の文字列、GPU の名前と driver の版の取得）（2026-10-27 ユーザー） | planning | p001 の設計（使用量が戻ってから） |
 | [WS052](ws052/ws.md) | MG003 | 電源管理（S0ix を 5330 で初めて動かす、modern standby、/dev/system） | incomplete | 再開点 p014（WS300 p002 の後）、並べて p015・p016、約 31 LW |
-| [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | planning | p001 一覧の作成（P2、q1713） |
+| [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | incomplete | p001 一覧の作成（P2、q1713） |
 | [WS009](ws009/ws.md) | MG001 | 文書 | incomplete（DOC-54 を今書く、2026-10-27 ユーザーの回答「今書く」） | DOC-54（/dev/gpu の UAPI の文書） |
 | [WS068](ws068/ws.md) | MG006 | EGL と OpenGL ES（と desktop GL 3.0〜4.6）を Vulkan と display 拡張の上に実装する（Wayland とディスプレイ直接の両方）（2026-09-26・27 ユーザー指示） | incomplete・継続（空き時間だけ。受け入れは Venus のみ、2026-10-29 ユーザー） | 次は p045（sample shading、Venus の試験だけ）→ p047〜p068（GL 4.x を分けた物）→ p007 規約 |
 | [WS074](ws074/ws.md) | MG006 | zedBSD の Web ブラウザ `userland/base/zdesktop-browser`（HTML5 の layout engine → 最適化にこだわらない JavaScript engine の接続 → CSS の準拠と Chrome との比較で目標値を段階的に上げる。JS と Wasm の実行 engine を共通化。画像は libpng-compat・新しい libjpeg-compat、TLS は当面 OpenSSL）（2026-09-27 ユーザー指示） | incomplete・継続（Codex のセッション） | WPT Interop 2025 の 100%（ws074-q20261019-55 active） |
@@ -198,7 +197,6 @@ BUG-371 · q1716 · WS332 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS324](ws324/ws.md) | MG006 | RTX 2070（nvrtx） の Vulkan Video: H.264 encode（NVENC）、H.265 decode（NVDEC）・encode（NVENC） | planning | WS318 の completed の後 |
 | [WS325](ws325/ws.md) | MG006 | RDNA（RX 5600 XT、VCN 2.0） の Vulkan Video: H.264・H.265 の decode と encode（VCN） | planning | WS318 の completed の後 |
 | [WS326](ws326/ws.md) | MG006 | libmedia の H.264 の software の decoder（独自、module の設計は Opus、実装は Sonnet 5.5 high）（2026-10-30 ユーザー） | incomplete（q1695 P1 が p001） | p001 module の設計 |
-| [WS327](ws327/ws.md) | MG006 | libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行、libbrowser は使わない（2026-10-30 ユーザー） | incomplete（q1697 P2） | p001 設計から |
 | [WS328](ws328/ws.md) | MG006 | libbrowser のベクトル描画（path・CSS の角丸・gradient・影）と SVG の描画（2026-10-30 ユーザー）。WebP・AVIF は WS326 の結果の後 | planning（WS074 と調整してから） | p001 設計から |
 | [WS329](ws329/ws.md) | MG006 | libmedia の H.264 の software の encoder（標準廉価実装手順、decoder と共通化）（2026-10-30 ユーザー） | planning | WS326 の completed の後に p001 設計（Opus） |
 | [WS330](ws330/ws.md) | MG006 | libmedia の H.265 の software の decoder と encoder（標準廉価実装手順、H.264 と共通化）（2026-10-30 ユーザー） | planning | WS329 の completed の後に p001 設計（Opus） |

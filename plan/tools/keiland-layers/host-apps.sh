@@ -2,7 +2,7 @@
 # Host tests of moved sources whose own tests belong to other workstreams (which this one does not change): each is
 # built here as its workstream builds it, with libkeiland's thread layer (platform/thread-posix.c) and the public
 # headers added, under ASan and UBSan.  Run from the worktree's root.
-#   sh plan/ws327/tests/host-apps.sh [LINUX_BUILD] TEST...     TEST: ime, picker
+#   sh plan/tools/keiland-layers/host-apps.sh [LINUX_BUILD] TEST...     TEST: ime, picker
 #     ime     the input method's engines with the user dictionary's writer thread (ime/ja-user.c), the driver
 #             plan/ws095/tests/host-engine.c
 #     picker  libkeiland's media picker's model (ui/picker-model.c) against the Linux libkeiland (LINUX_BUILD, default

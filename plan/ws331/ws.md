@@ -2,7 +2,7 @@
 
 # WS331: driver から HAL への直の依存を除き、kernel の口だけを使う形にする
 
-Status: planning
+Status: incomplete
 Primary Milestone: MG001
 Parent: [Master](../master.md)
 目標: `src/drivers/`・`include/drivers/` の HAL の header の include と `hal_*` の呼び出しを 0 にし、driver は kernel の機能（`kern_*`）だけを使う。規則は [Guardrail](../guardrail.md) の「driver は HAL を知らない」。

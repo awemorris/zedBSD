@@ -4,7 +4,7 @@
 # links win32-link.c, which calls every function of keiland_thread.h and keiland_socket.h, into a Windows program:
 # every function is defined and the layers build without a warning.  Nothing is run (no Windows, no wine).
 # Run from the worktree's root.
-#   sh plan/ws327/tests/build-win32.sh [OUT]     (OUT default build/tmp/ws327-win32, a new directory each run)
+#   sh plan/tools/keiland-layers/build-win32.sh [OUT]     (OUT default build/tmp/ws327-win32, a new directory each run)
 # Prints one line per step and "ws327-win32: PASS" or "FAIL".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -32,7 +32,7 @@ for cc in ${MINGW_CC:-x86_64-w64-mingw32-gcc i686-w64-mingw32-gcc}; do
 		fi
 	done
 	if [ -f "$out/$cc-thread-win32.o" ] && [ -f "$out/$cc-socket-win32.o" ]; then
-		if timeout 300 "$cc" $flags plan/ws327/tests/win32-link.c "$out/$cc-thread-win32.o" "$out/$cc-socket-win32.o" \
+		if timeout 300 "$cc" $flags plan/tools/keiland-layers/win32-link.c "$out/$cc-thread-win32.o" "$out/$cc-socket-win32.o" \
 		    -o "$out/$cc-win32-link.exe" -lws2_32 -liphlpapi > "$out/$cc-link.log" 2>&1; then
 			echo "$cc link win32-link.exe: PASS"
 		else
