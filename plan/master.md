@@ -25,7 +25,7 @@
 
 | 担当 | Queue | WS と次の手 | 実機 |
 | --- | --- | --- | --- |
-| P1 | q1705-i01 in-progress | [ws009](ws009/ws.md) DOC-54 は p010〜p024 cleared（main d2c8a5969）。P1 が WS009 の受け入れと完了の形 → WS296 の組み直しの設計（worktree p1-ws009r）。Bug: BUG-364〜366 | — |
+| P1 | q1705-i01 返却（12:3x、ラップアップ） | [ws009](ws009/ws.md): p025〜p027 cleared、p028 は DOC-T60 済み・build/boot の再現の途中（main 6bfc2c1e3）。次の 1 手は phase028/phase.md（`P028_BOOT_ONLY=… p028-reproduce.sh native` → hybrid uefi bios → 完了の形と移す物・消す物）。その後 WS296（P6 の 1809873bd を元に組み直す案は phase028.md の末尾）→ WS297。Q1 の残り: p1-ws009r の build/tmp/p028-20261030-110805（4.5 GB）・build/tmp/p028-run.out の削除 | — |
 | P2 | q1703-i01 in-progress | [ws327](ws327/ws.md): p001〜p003・p007〜p015 cleared（main b901b1968）。P2 が p016 受け入れ（境界・QEMU の回帰・FreeBSD）、その後 p017 規約の見直し（Sonnet） | QEMU |
 | P3 | q1706-i01 in-progress | [BUG-367](bugs/BUG-367.md) TCP の close が戻らない件（WS315 の後の WS221・WS299 はその後） | QEMU |
 | P4 | q1698-i01 返却（09:13） | [ws307](ws307/ws.md)（main fbdd143a8 に merge、branch agent/p4-ws307o 520360247）: p002 cleared（upload）。p015 sleep Never 実装・host 試験 PASS、QEMU は host の負荷で 2 回未達（load の低い時に 3 回目）。p004 pkgconf と各 package の開発の file、clang・libcxx は build 済み、installer-image を 1 本だけ build → p004-gtk.sh（並行の make は不可）。p008 は p004-gtk.sh の j3 で確かめ直し。p014 は p007 の C を後で。p007 は driver の設計の下書き（改訂 3、SMEP・SMAP の下の 1:1 の map を HAL を変えずに作れるか）。Q1 の残り: proposed/hal-uefi-variables.md・hal-fw-variables.md の削除（link を外してから）。CI の別件 2 つは phase002 | QEMU |
