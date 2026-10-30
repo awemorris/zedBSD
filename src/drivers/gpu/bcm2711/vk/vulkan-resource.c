@@ -138,6 +138,7 @@ bcm2711_vulkan_resource_backing(
 {
 	struct bcm2711_vulkan_memory *memory;
 	struct bcm2711_buffer *buffer;
+	uint64_t limit;
 	uint64_t begin;
 	uint64_t native;
 
@@ -149,7 +150,12 @@ bcm2711_vulkan_resource_backing(
 	    resource->memory == NULL ||
 	    bytes == 0)
 		return EINVAL;
-	if (offset > resource->bytes || bytes > resource->bytes - offset)
+
+	/* A mip-mapped image's levels lie after level 0, inside its whole storage. */
+	limit = resource->bytes;
+	if (resource->storage_bytes > limit)
+		limit = resource->storage_bytes;
+	if (offset > limit || bytes > limit - offset)
 		return EINVAL;
 	memory = resource->memory->payload;
 	if (memory->view == NULL || memory->view->quarantined)
@@ -178,6 +184,126 @@ bcm2711_vulkan_resource_backing(
 
 	/* Succeeded: the entire requested span belongs to the retained immutable binding. */
 	return 0;
+}
+
+/*
+ * Describes one mip level of an image: level 0 is the image's own raster;
+ * each smaller level halves the size above it (to no less than one texel)
+ * and starts where the one above ends, at a 64-byte multiple pitch.
+ */
+int
+bcm2711_vulkan_image_level(
+	const struct bcm2711_vulkan_resource *image,
+	uint32_t level,
+	struct bcm2711_vulkan_image_level *result)
+{
+	uint64_t offset;
+	uint32_t width;
+	uint32_t height;
+	uint32_t pitch;
+	uint32_t index;
+
+	/* Only the image's own levels exist; a one-level image counts as one. */
+	if (image == NULL || result == NULL)
+		return EINVAL;
+	if (level != 0 && level >= image->levels)
+		return EINVAL;
+
+	/* Level 0 is the image's raster. */
+	width = image->width;
+	height = image->height;
+	pitch = image->pitch;
+	offset = 0;
+
+	/* Each smaller level starts after the one above it. */
+	for (index = 1; index <= level; index++) {
+		offset += (uint64_t)pitch * height;
+		width >>= 1;
+		if (width == 0)
+			width = 1;
+		height >>= 1;
+		if (height == 0)
+			height = 1;
+		pitch = (width * 4U + 63U) & ~63U;
+	}
+
+	/* The level's rows. */
+	result->offset = offset;
+	result->bytes = (uint64_t)pitch * height;
+	result->width = width;
+	result->height = height;
+	result->pitch = pitch;
+
+	/* Succeeded: the caller has the level's place and size. */
+	return 0;
+}
+
+/*
+ * Fills view with one mip level of an image as a one-level image of its
+ * own: the level's raster at the binding offset moved to it, borrowing the
+ * image's memory and device (the caller keeps the image retained while it
+ * uses the view, and never publishes or releases it).
+ */
+int
+bcm2711_vulkan_image_level_view(
+	const struct bcm2711_vulkan_resource *image,
+	uint32_t level,
+	struct bcm2711_vulkan_resource *view)
+{
+	struct bcm2711_vulkan_image_level geometry;
+	int error;
+
+	/* The level's place and size. */
+	error = bcm2711_vulkan_image_level(image, level, &geometry);
+	if (error != 0)
+		return error;
+
+	/* The view is the image moved to the level's rows, with only that level. */
+	*view = *image;
+	view->offset = image->offset + geometry.offset;
+	view->bytes = geometry.bytes;
+	view->required_bytes = geometry.bytes;
+	view->width = geometry.width;
+	view->height = geometry.height;
+	view->pitch = geometry.pitch;
+	view->levels = 1;
+	view->storage_bytes = 0;
+	view->layout = bcm2711_vulkan_image_level_layout(image, level);
+
+	/* Succeeded: the view addresses the level's raster alone. */
+	return 0;
+}
+
+/* Reports the current layout of one mip level of an image. */
+VkImageLayout
+bcm2711_vulkan_image_level_layout(
+	const struct bcm2711_vulkan_resource *image,
+	uint32_t level)
+{
+	/* Level 0's layout is the image's own. */
+	if (level == 0 || level >= BCM2711_VULKAN_IMAGE_LEVELS)
+		return image->layout;
+
+	/* Succeeded: a smaller level's own layout. */
+	return image->level_layouts[level];
+}
+
+/* Records the layout one mip level of an image moved to. */
+void
+bcm2711_vulkan_image_set_level_layout(
+	struct bcm2711_vulkan_resource *image,
+	uint32_t level,
+	VkImageLayout layout)
+{
+	/* Level 0's layout is the image's own. */
+	if (level == 0) {
+		image->layout = layout;
+	} else if (level < BCM2711_VULKAN_IMAGE_LEVELS) {
+		image->level_layouts[level] = layout;
+	}
+
+	/* Succeeded: following operations see the level's layout. */
+	return;
 }
 
 /* Creates one native buffer description from the client's full standard record. */
@@ -237,7 +363,7 @@ create_buffer(
 	return 0;
 }
 
-/* Creates one single-level, single-layer raster colour image with exact native row pitch. */
+/* Creates one single-layer raster colour image, with its mip levels, with exact native row pitch. */
 static int
 create_image(
 	struct bcm2711_vulkan_session *session,
@@ -246,8 +372,11 @@ create_image(
 {
 	VkImageCreateInfo info;
 	struct bcm2711_vulkan_resource description;
+	struct bcm2711_vulkan_image_level geometry;
 	uint64_t device_id;
 	uint64_t present;
+	uint32_t largest;
+	uint32_t level;
 #if CONFIG_DRIVER_BCM2711_VIDEO
 	uint64_t chroma;
 #endif
@@ -275,7 +404,8 @@ create_image(
 	    info.extent.height == 0 ||
 	    info.extent.height > 4096 ||
 	    info.extent.depth != 1 ||
-	    info.mipLevels != 1 ||
+	    info.mipLevels == 0 ||
+	    info.mipLevels > BCM2711_VULKAN_IMAGE_LEVELS ||
 	    info.arrayLayers != 1 ||
 	    info.samples != VK_SAMPLE_COUNT_1_BIT)
 		return ENOTSUP;
@@ -324,6 +454,17 @@ create_image(
 	if (error != 0)
 		return error;
 
+	/* Only an optimally tiled colour image has mip levels, no more than its size halves to one texel. */
+	if (info.mipLevels != 1) {
+		if (nv12 || depth || info.tiling != VK_IMAGE_TILING_OPTIMAL)
+			return ENOTSUP;
+		largest = info.extent.width;
+		if (info.extent.height > largest)
+			largest = info.extent.height;
+		if ((largest >> (info.mipLevels - 1U)) == 0)
+			return EINVAL;
+	}
+
 	/* Optimal images use the same native raster backing; Vulkan does not require exposing their CPU subresource layout. */
 	kern_memset(&description, 0, sizeof(description));
 	description.width = info.extent.width;
@@ -341,6 +482,18 @@ create_image(
 	description.format = info.format;
 	description.tiling = info.tiling;
 	description.layout = info.initialLayout;
+
+	/* The smaller levels follow level 0, each starting where the one above ends; all start in the initial layout. */
+	description.levels = info.mipLevels;
+	description.storage_bytes = description.bytes;
+	for (level = 1; level < info.mipLevels; level++) {
+		error = bcm2711_vulkan_image_level(&description, level, &geometry);
+		if (error != 0)
+			return error;
+		description.storage_bytes = geometry.offset + geometry.bytes;
+		description.level_layouts[level] = info.initialLayout;
+	}
+	description.required_bytes = description.storage_bytes;
 	error = publish_resource(session, I915_VK_OBJ_IMAGE, &description, device_id, reader, reply);
 	if (error != 0)
 		return error;

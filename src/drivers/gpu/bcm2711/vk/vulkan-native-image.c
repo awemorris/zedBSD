@@ -24,7 +24,7 @@ static const uint32_t meta_corners[6][2] = {
 static int prepare_meta(struct bcm2711_vulkan_meta_draw *meta, const struct bcm2711_vulkan_transfer *transfer, uint32_t region);
 static int prepare_programs(struct bcm2711_vulkan_meta_draw *meta, VkFormat destination);
 static void release_meta(struct bcm2711_vulkan_meta_draw *meta);
-static int prepare_output(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_vulkan_resource *image, VkImageLayout layout, const VkRect2D *area);
+static int prepare_output(struct bcm2711_vulkan_native_pass *pass, struct bcm2711_vulkan_resource *image, struct bcm2711_vulkan_resource *target, uint32_t level, VkImageLayout layout, const VkRect2D *area);
 static int buffer_image_whole(const struct bcm2711_vulkan_record *record, struct bcm2711_vulkan_resource **image, struct bcm2711_vulkan_resource **buffer, uint64_t *offset, uint32_t *pitch);
 static int retain_raster(struct bcm2711_vulkan_resource *resource, uint64_t offset, uint64_t bytes, struct bcm2711_v3d_view **view, uint32_t *address, void **cpu);
 static bool copy_whole(const struct bcm2711_vulkan_transfer *transfer, uint32_t region, const struct bcm2711_vulkan_resource *source, const struct bcm2711_vulkan_resource *destination);
@@ -52,6 +52,8 @@ bcm2711_vulkan_native_image_create(
 	struct bcm2711_vulkan_meta_draw *meta;
 	struct bcm2711_vulkan_resource *source;
 	struct bcm2711_vulkan_resource *destination;
+	struct bcm2711_vulkan_resource output;
+	VkImageLayout current;
 	uint64_t remaining;
 	bool whole;
 	int error;
@@ -77,7 +79,11 @@ bcm2711_vulkan_native_image_create(
 	if (error != 0)
 		return error;
 	destination = transfer->record.objects[1]->payload;
-	if (source->layout != transfer->source_layout || destination->layout != transfer->destination_layout)
+	error = bcm2711_vulkan_image_level_view(destination, transfer->levels[1], &output);
+	if (error != 0)
+		return error;
+	current = bcm2711_vulkan_image_level_layout(source, transfer->levels[0]);
+	if (current != transfer->source_layout || output.layout != transfer->destination_layout)
 		return EINVAL;
 
 	/* One complete output owner exists before compiler, texture or numerical list allocations. */
@@ -92,7 +98,9 @@ bcm2711_vulkan_native_image_create(
 	 * A whole-image copy between equal raster images needs no shader or
 	 * texture: the tile buffer loads the source and stores the destination.
 	 */
-	whole = copy_whole(transfer, region, source, destination);
+	whole = false;
+	if (transfer->levels[0] == 0 && transfer->levels[1] == 0)
+		whole = copy_whole(transfer, region, source, destination);
 	if (whole) {
 		error = prepare_copy(created, transfer, source, destination, &remaining);
 		if (error != 0) {
@@ -124,7 +132,7 @@ bcm2711_vulkan_native_image_create(
 	/* The temporary CPU description retains no namespace object and is never part of the native DMA owner graph. */
 	error = prepare_meta(meta, transfer, region);
 	if (error == 0)
-		error = prepare_output(created, destination, transfer->destination_layout, &meta->area);
+		error = prepare_output(created, &output, destination, transfer->levels[1], transfer->destination_layout, &meta->area);
 	if (error == 0)
 		error = prepare_programs(meta, destination->format);
 	if (error == 0)
@@ -283,7 +291,7 @@ prepare_meta(
 	uint32_t region_index)
 {
 	const struct bcm2711_vulkan_transfer_region *region;
-	struct bcm2711_vulkan_resource *destination;
+	struct bcm2711_vulkan_resource destination;
 	uint32_t source[4];
 	uint32_t minimum[2];
 	uint32_t maximum[2];
@@ -291,13 +299,19 @@ prepare_meta(
 	uint32_t axis;
 	uint32_t index;
 	uint32_t extent;
+	int error;
 
 	/* Source/destination logical ownership remains on the independently pending primary. */
 	region = &transfer->regions[region_index];
-	meta->image = transfer->record.objects[0]->payload;
-	destination = transfer->record.objects[1]->payload;
-	meta->width = destination->width;
-	meta->height = destination->height;
+	error = bcm2711_vulkan_image_level_view(transfer->record.objects[0]->payload, transfer->levels[0], &meta->level);
+	if (error != 0)
+		return error;
+	meta->image = &meta->level;
+	error = bcm2711_vulkan_image_level_view(transfer->record.objects[1]->payload, transfer->levels[1], &destination);
+	if (error != 0)
+		return error;
+	meta->width = destination.width;
+	meta->height = destination.height;
 	meta->filter = transfer->filter;
 	meta->raw = false;
 	if (transfer->record.opcode == GPU_OP_CMD_COPY_IMAGE)
@@ -407,11 +421,13 @@ release_meta(
 	return;
 }
 
-/* Retains the complete coherent destination and preserves all pixels outside the exact destination viewport. */
+/* Retains the destination's level (image, a view of target's level) and preserves all pixels outside the exact destination viewport. */
 static int
 prepare_output(
 	struct bcm2711_vulkan_native_pass *pass,
 	struct bcm2711_vulkan_resource *image,
+	struct bcm2711_vulkan_resource *target,
+	uint32_t level,
 	VkImageLayout layout,
 	const VkRect2D *area)
 {
@@ -429,7 +445,8 @@ prepare_output(
 	bcm2711_v3d_memory_retain(view);
 	pass->output = view;
 	pass->cpu = cpu;
-	pass->target = image;
+	pass->target = target;
+	pass->target_level = level;
 	pass->initial_layout = layout;
 	pass->final_layout = layout;
 
@@ -579,7 +596,7 @@ prepare_copy(
 	area.offset.y = 0;
 	area.extent.width = destination->width;
 	area.extent.height = destination->height;
-	error = prepare_output(pass, destination, transfer->destination_layout, &area);
+	error = prepare_output(pass, destination, destination, 0, transfer->destination_layout, &area);
 	if (error != 0)
 		return error;
 

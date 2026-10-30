@@ -37,6 +37,8 @@ struct bcm2711_vulkan_native_pass {
 	void *cpu;
 	/* The enclosing pending primary retains this logical image through implicit pass layout transitions. */
 	struct bcm2711_vulkan_resource *target;
+	/* The target's mip level the pass writes, whose layout it moves. */
+	uint32_t target_level;
 	VkImageLayout initial_layout;
 	VkImageLayout final_layout;
 	struct bcm2711_vulkan_native_draw *first;

@@ -114,6 +114,8 @@ struct bcm2711_vulkan_meta_draw {
 	struct bcm2711_vulkan_pipeline pipeline;
 	struct bcm2711_shader_key key;
 	struct bcm2711_vulkan_resource *image;
+	/* The source's mip level as an image of its own, which image points to; the primary retains the real image. */
+	struct bcm2711_vulkan_resource level;
 	uint32_t vertices[36];
 	uint32_t viewport[6];
 	uint32_t width;

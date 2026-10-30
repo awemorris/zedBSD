@@ -302,15 +302,14 @@ build_view(
 	struct bcm2711_vulkan_resource *description;
 	struct bcm2711_vulkan_image_view *view;
 	uint32_t plane;
+	uint32_t levels;
 	int error;
 
-	/* Views address one colour subresource, or one plane of an NV12 picture, at its only level and layer. */
+	/* Views address one colour subresource, or one plane of an NV12 picture, from level 0 at its only layer. */
 	if (info->flags != 0 ||
 	    info->viewType != VK_IMAGE_VIEW_TYPE_2D ||
 	    info->subresourceRange.baseMipLevel != 0 ||
 	    info->subresourceRange.baseArrayLayer != 0)
-		return ENOTSUP;
-	if (info->subresourceRange.levelCount != 1 && info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS)
 		return ENOTSUP;
 	if (info->subresourceRange.layerCount != 1 && info->subresourceRange.layerCount != VK_REMAINING_ARRAY_LAYERS)
 		return ENOTSUP;
@@ -319,6 +318,15 @@ build_view(
 		return EINVAL;
 	description = image->payload;
 	if (description->device != device)
+		return EINVAL;
+
+	/* A view starts at level 0 and may span the image's levels; it is sampled at level 0. */
+	levels = description->levels;
+	if (levels == 0)
+		levels = 1;
+	if (info->subresourceRange.levelCount == 0)
+		return EINVAL;
+	if (info->subresourceRange.levelCount != VK_REMAINING_MIP_LEVELS && info->subresourceRange.levelCount > levels)
 		return EINVAL;
 
 	/* A plane view reads its plane in the plane's own format; any other view the image's whole colour. */
