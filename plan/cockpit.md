@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:32（Q1）
+最終更新: 2026-10-31 04:33（Q1）
 
 ## 担当（P1〜P8）
 
@@ -18,7 +18,7 @@
 | P7 | — | — | 返却（06:5x）。WS333 p006・p007 cleared | 次の割当を Q1 が決める |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
-実装の担当（WS326）: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）。p015・p017・p019・p021・p023 は cleared。
+実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
 
 ## WS ごとの進捗
 
