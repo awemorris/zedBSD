@@ -3,7 +3,7 @@
 # WS303 熱と fan（温度の読み・fan の回転数・thermal mode）
 
 - Master: [plan/master.md](../master.md)（2026-10-27 09:39 作成）。Primary Milestone: MG004。関係: [WS301](../ws301/ws.md)（DVFS、熱の上限の口は WS301 p002）、WS039 p012（amdrdna の SMU の fan）。
-- Status: planning（2026-10-27 09:39 新設）
+- Status: canceled（2026-10-31 ユーザーの指示で WS333 に統合。/dev/thermal で統一して設計し直すため。この WS の設計は WS333 の入力）
 - 出典: 2026-10-27 ユーザー「DVFSとP-core/E-coreは、/dev/systemに入れるのが適切ならそれでもいいですとお伝えください。ファン制御もあるといいですね。」、（クリック）fan は WS301 とは別の WS。
 
 ## 単一の到達目標

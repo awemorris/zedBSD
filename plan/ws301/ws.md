@@ -4,7 +4,7 @@
 
 - Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG004（既定構成の性能と電力）。Related: MG003、MG008（HAL の契約）、
   [WS302](../ws302/ws.md)（この WS の口を使う）、[WS052](../ws052/ws.md)（電源の UAPI と文書）、[WS303](../ws303/ws.md)（`/dev/thermal`・strategy・passive、この WS の UAPI の置き場所）、[WS310](../ws310/ws.md)（`_OSC`）。
-- Status: planning（2026-10-27 新設。設計 p001 は第 3 版の改訂 3、2026-10-29）
+- Status: canceled（2026-10-31 ユーザーの指示で WS333 に統合。/dev/thermal で統一して設計し直すため。この WS の設計は WS333 の入力）
 - 出典: 2026-10-27 ユーザー
   「CPUの省電力機能のドライバフレームワークを追加（WSを立てて検討）
   - コアごとのDVFSのステップ(設定可能な値)を取得する機能

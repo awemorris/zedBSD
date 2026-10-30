@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:16（Q1）
+最終更新: 2026-10-31 01:18（Q1）
 
 ## 担当（P1〜P8）
 
@@ -126,13 +126,14 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 ### 1. WS291 p022（i915、5330）: CPU の省電力（idle の C-state・P-state）を先に直すか
 
 - 背景: 5330 の zedBSD は idle で package の電力が 12.99 W（Linux は 3.2〜3.5 W）で、mview の時に電力の上限（PL1 13 W）に張り付いて GPU が 800 MHz（Linux は 1200 MHz）に抑えられている。CPU の idle が HLT（C1）だけで、P-state（CPU の周波数）の制御が無い見込み。GPU が 1200 MHz なら qs40 × 600 は約 45 fps 相当（今 30.1 fps、Linux 50.6 fps）。
-- (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（WS301 を進めるか新しい WS、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
+- (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（2026-10-31 に WS301・WS303 を統合した [WS333](ws333/ws.md) で、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
 - P1 の具体の案（2026-10-31）: amd64 の HAL の実装（src/hal/amd64/task.c の idle）を HLT から MWAIT に替える（CPUID で MWAIT と ARAT を確かめ、最深の C-state の hint、割り込みで起きる ECX bit0）。hal.h は変えない（実装の補完）。5330 で idle の package の電力と c600 の GPU の周波数を前後で測る。起動しない時は grub・BootNext で Debian に戻す形を保つ。P-state（HWP）は含まない。
 
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | WS301・WS303 → WS333 | WS301（CPU の DVFS）と WS303（熱と fan）を廃止し、/dev/thermal で統一して設計する WS333 に統合（CPU の idle も含める） | [ws333/ws.md](ws333/ws.md) |
 | 2026-10-31 | WS291 PowerVR | P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | HAL の atomic.h は macro だけの契約（直列化は macro の中の block で宣言して呼ぶ、cookie の型を消す、2 行の include を外す）、kernel の atomic.h は使った後に undef | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
