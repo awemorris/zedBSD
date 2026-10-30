@@ -1394,6 +1394,11 @@ list_fragment(
 		return;
 
 	/* An inline replaced box's margin box stands on the baseline (in a vertical line, its block-start side to the right). */
+	if (fragment->box->kind == LAYOUT_REPLACED && vertical == 2) {
+		/* Where the line runs up from the bottom, with the ascent to the left of the baseline. */
+		list_replaced(walk, fragment->box, x - fragment->ascent, baseline - fragment->width);
+		return;
+	}
 	if (fragment->box->kind == LAYOUT_REPLACED && vertical) {
 		list_replaced_vertical(walk, fragment, x, baseline);
 		return;
