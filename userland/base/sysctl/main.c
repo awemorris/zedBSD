@@ -338,11 +338,31 @@ show_name(
 		/* Reports successful completion. */
 		return 0;
 	} else {
-		length_local1 = sizeof(value);
+		unsigned char raw[sizeof(uint64_t)];
+		uint32_t narrow;
+		uint16_t half;
+
+		length_local1 = sizeof(raw);
 
 		/* Handles a failed sysctlbyname operation. */
-		if (sysctlbyname(name, &value, &length_local1, NULL, 0) != 0)
+		if (sysctlbyname(name, raw, &length_local1, NULL, 0) != 0)
 			return -1;
+
+		/* A narrower value is read as its own width, so its byte order holds. */
+		if (length_local1 == 1U) {
+			value = raw[0];
+		} else if (length_local1 == sizeof(half)) {
+			memcpy(&half, raw, sizeof(half));
+			value = half;
+		} else if (length_local1 == sizeof(narrow)) {
+			memcpy(&narrow, raw, sizeof(narrow));
+			value = narrow;
+		} else if (length_local1 == sizeof(value)) {
+			memcpy(&value, raw, sizeof(value));
+		} else {
+			errno = EIO;
+			return -1;
+		}
 		printf("%s: %llu\n", name, (unsigned long long)value);
 
 		/* Reports successful completion. */
