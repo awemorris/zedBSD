@@ -22,6 +22,8 @@
 #                                 OUT/linux-shot-COPIES.png
 #   5330-mview.sh linux-exec SCRIPT  (Debian) SCRIPT run there with the iGPU on i915 (vfio-pci again after), at
 #                                 most 600 s (for a Linux-side diagnostic, as Mesa's INTEL_DEBUG dumps)
+#   5330-mview.sh idle OUT        (zedBSD, the diagnostic kernel of i915-stats-diag.patch) the package power over 20 s
+#                                 of the idle desktop: OUT/idle.txt, the watts printed
 #   5330-mview.sh linux           Debian again (zedBSD rebooted; the BootOrder brings Debian back)
 #   5330-mview.sh zedbsd          zedBSD started once from Debian (when Debian runs)
 #   5330-mview.sh restore         (Debian) the backup written back to p4, p5, p6 and the ESP loader, and compared
@@ -327,7 +329,22 @@ linux_exec() {
 	echo "igpu $(igpu vfio)"
 }
 
+idle() {
+	mkdir -p "$1"
+	to_zedbsd || return 1
+	T=60 zs 'sleep 20; sysctl hw.gputelemetry | grep gpu=0; sleep 20; sysctl hw.gputelemetry | grep gpu=0; dmesg | grep "A64 IDLE"' < /dev/null > "$1/idle.txt" 2>&1
+	python3 -I -c 'import re, sys
+rows = [dict(re.findall(r"(\w+)=(\S+)", l)) for l in open(sys.argv[1]) if "gpu=0" in l]
+a, b = rows[0], rows[-1]
+unit = (int(a["objects_bytes"]) >> 40) & 0x1f
+joules = ((int(b["objects_bytes"]) - int(a["objects_bytes"])) & 0xffffffff) / float(1 << unit)
+seconds = (int(b["time_ns"]) - int(a["time_ns"])) / 1e9
+print("idle package %.2f W over %.1f s" % (joules / seconds, seconds))' "$1/idle.txt"
+	grep 'A64 IDLE' "$1/idle.txt"
+}
+
 case "$cmd" in
+idle) idle "$1" ;;
 linux-exec) linux_exec "$1" ;;
 shot) shot "$1" "$2" ;;
 linux-shot) linux_shot "$1" "$2" ;;
