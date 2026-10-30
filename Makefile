@@ -309,6 +309,10 @@ CONFIG_DRIVER_PCI_VMD ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_DRIVER_PCI_VENUS ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 CONFIG_DRIVER_PCI_I915 ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 
+# The x86 processor driver's use of the model-specific registers (HWP, the
+# hardware feedback, the energy and idle residency counters) is off by default.
+CONFIG_CPU_PERF ?= n
+
 # The NVIDIA Turing-and-later driver is on by default where it builds (amd64).
 CONFIG_DRIVER_PCI_NVRTX ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 
@@ -934,6 +938,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_VMD=$(if $(filter y,$(CONFIG_DRIVER_PCI_VMD)),1,0) \
 	-DCONFIG_DRIVER_PCI_VENUS=$(if $(filter y,$(CONFIG_DRIVER_PCI_VENUS)),1,0) \
 	-DCONFIG_DRIVER_PCI_I915=$(if $(filter y,$(CONFIG_DRIVER_PCI_I915)),1,0) \
+	-DCONFIG_CPU_PERF=$(if $(filter y,$(CONFIG_CPU_PERF)),1,0) \
 	-DCONFIG_DRIVER_PCI_NVRTX=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVRTX)),1,0) \
 	-DCONFIG_DRIVER_PCI_AMDRDNA=$(if $(filter y,$(CONFIG_DRIVER_PCI_AMDRDNA)),1,0) \
 	-DCONFIG_AMDRDNA_CONTROL=$(if $(filter y,$(CONFIG_AMDRDNA_CONTROL)),1,0) \
