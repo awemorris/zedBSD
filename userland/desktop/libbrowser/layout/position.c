@@ -59,6 +59,7 @@ static int position_place(struct layout_tree *tree, struct layout_box *box, cons
 static int position_place_once(struct layout_tree *tree, struct layout_box *box, const struct position_block *containing);
 static int position_fits(const struct layout_box *box, const struct position_block *containing);
 static uint32_t position_try_key(const struct css_try_list *list);
+static int position_in_scroller(const struct layout_box *box);
 static void position_padding_box(const struct layout_box *box, struct position_block *block);
 static int position_offset(const struct css_length *length, layout_unit size, layout_unit *value);
 static layout_unit position_frame(const struct layout_box *box);
@@ -651,6 +652,22 @@ position_place(
 	return position_place_once(tree, box, containing);
 }
 
+/* Tells whether a scroll container is among a box's ancestors (its containing block then reaches its scrollable overflow). */
+static int
+position_in_scroller(
+	const struct layout_box *box)
+{
+	const struct layout_box *ancestor;
+
+	for (ancestor = box->parent; ancestor != NULL; ancestor = ancestor->parent) {
+		if (ancestor->parent == NULL)
+			break;
+		if (ancestor->style.overflow_x != CSS_OVERFLOW_VISIBLE || ancestor->style.overflow_y != CSS_OVERFLOW_VISIBLE)
+			return 1;
+	}
+	return 0;
+}
+
 /* A number that stays the same while a position-try-fallbacks list does. */
 static uint32_t
 position_try_key(
@@ -733,6 +750,7 @@ position_place_once(
 	box->area_clamp_x = 0;
 	box->area_clamp_y = 0;
 	box->area_overflow = 0;
+	box->area_scrolls = position_in_scroller(box);
 
 	/* Insets and sizes with anchor functions are finished against the containing block. */
 	if (layout_anchor_wanted(box))
@@ -893,7 +911,7 @@ position_place_once(
 
 placed_x:
 	/* A position-area's normal alignment keeps an overflowing box inside the containing block. */
-	if (box->area_clamp_x) {
+	if (box->area_clamp_x && !box->area_scrolls) {
 		if (x + box->width + frame + box->margin[CSS_RIGHT] > box->area_clamp[1]) {
 			box->area_overflow = 1;
 			x = box->area_clamp[1] - box->margin[CSS_RIGHT] - frame - box->width;
@@ -938,7 +956,7 @@ placed_x:
 	}
 
 	/* The same down. */
-	if (box->area_clamp_y) {
+	if (box->area_clamp_y && !box->area_scrolls) {
 		if (y + position_outer_height(box) + box->margin[CSS_BOTTOM] > box->area_clamp[3]) {
 			box->area_overflow = 1;
 			y = box->area_clamp[3] - box->margin[CSS_BOTTOM] - position_outer_height(box);

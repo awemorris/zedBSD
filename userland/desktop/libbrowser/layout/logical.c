@@ -109,6 +109,10 @@ layout_logical_wanted(
 		display = box->parent->style.display;
 		if (display == CSS_DISPLAY_GRID || display == CSS_DISPLAY_INLINE_GRID)
 			return 0;
+
+		/* A replaced item is sized by its image's ratio, whatever its writing mode. */
+		if (box->replaced && (display == CSS_DISPLAY_FLEX || display == CSS_DISPLAY_INLINE_FLEX))
+			return 0;
 	}
 
 	/* Succeeded: the box needs its own coordinates. */

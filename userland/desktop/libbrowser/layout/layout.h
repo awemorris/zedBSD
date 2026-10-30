@@ -267,6 +267,7 @@ struct layout_box {
 	int area_clamp_x;
 	int area_clamp_y;
 	int area_overflow;
+	int area_scrolls;
 	layout_unit area_clamp[4];
 	layout_unit area_bounds[4];
 
