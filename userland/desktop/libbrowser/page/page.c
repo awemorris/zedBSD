@@ -215,7 +215,10 @@ page_load_html(
 	if (error != 0)
 		return error;
 
-	/* The document is parsed: DOMContentLoaded, then the window's load. */
+	/* The document is parsed: DOMContentLoaded, then the window's load.  The sheets it links block its deferred scripts. */
+	error = page_wait_sheets(page);
+	if (error != 0)
+		return error;
 	error = page_deferred_run(page);
 	if (error != 0)
 		return error;
@@ -434,6 +437,52 @@ page_failure_reason(void)
 	/* The network's reason. */
 	reason = net_tls_error();
 	return reason;
+}
+
+/*
+ * Starts the fetches of the style sheets (and, once they have come, the web
+ * fonts) and the images the document names, ahead of the layout that would.
+ */
+int
+page_load_resources(
+	struct page *page)
+{
+	int error;
+
+	/* The sheets the document links, and the images it shows. */
+	error = page_gather_styles(page);
+	if (error != 0)
+		return error;
+	error = page_load_images(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every resource the document names is fetched or on its way. */
+	return 0;
+}
+
+/*
+ * Tells whether a frame, a style sheet, a web font or an image of the
+ * document is still on its way (the window's load waits for them).
+ */
+int
+page_load_waiting(
+	const struct page *page)
+{
+	/* The frames. */
+	if (page->frame_loads.count != 0)
+		return 1;
+
+	/* The sheets, the fonts and the images. */
+	if (page_sheets_pending(page))
+		return 1;
+	if (page_fonts_pending(page))
+		return 1;
+	if (page_images_pending(page))
+		return 1;
+
+	/* None. */
+	return 0;
 }
 
 /*

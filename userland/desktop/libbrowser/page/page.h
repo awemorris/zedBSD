@@ -147,6 +147,8 @@ struct page {
 	struct wb_vector frame_loads;
 	/* Defer nested child-response checkpoints while the outer snapshot drains. */
 	int frames_running;
+	/* The window's load event waits for the frames the document embeds. */
+	int load_pending;
 	/* Defer nested ready-script drains while the outer insertion-order loop runs. */
 	int scripts_running;
 	struct wb_vector fonts;
@@ -204,6 +206,9 @@ int page_dump_style(struct page *page, struct wb_buffer *out);
 int page_open_fonts(struct page *page, const struct text_font_paths *paths);
 int page_layout(struct page *page, int width, int height);
 int page_update_styles(struct page *page);
+int page_load_resources(struct page *page);
+int page_wait_sheets(struct page *page);
+int page_load_waiting(const struct page *page);
 int page_paint(struct page *page);
 int page_title(const struct page *page, struct wb_buffer *out);
 
@@ -246,6 +251,7 @@ int page_start_scripts(struct page *page);
 int page_url(const struct page *page, struct net_url *url);
 int page_run_script_element(void *context, struct dom_element *script);
 int page_fire_load(struct page *page);
+int page_fire_load_resume(struct page *page);
 int page_set_time(struct page *page, double now);
 int page_next_timer(const struct page *page, double *due);
 int page_settle(struct page *page, double budget);
@@ -337,6 +343,7 @@ void page_images_release(struct page *page);
 int page_image_host(void *context, struct dom_element *element, int restart, struct bind_image *state);
 int page_images_checkpoint(struct page *page);
 int page_images_waiting(const struct page *page);
+int page_images_pending(const struct page *page);
 int page_images_ready(const struct page *page);
 
 /* The media of <video> and <audio> (media.c, ws121-p004). */

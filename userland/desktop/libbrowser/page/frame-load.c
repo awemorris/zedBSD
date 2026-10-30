@@ -116,6 +116,11 @@ page_frames_checkpoint(
 	if (error != 0)
 		return error;
 
+	/* A window load that waited for these frames fires when the last is done. */
+	error = page_fire_load_resume(page);
+	if (error != 0)
+		return error;
+
 	/* Succeeded: the finite completed-task snapshot has a terminal outcome. */
 	return 0;
 }

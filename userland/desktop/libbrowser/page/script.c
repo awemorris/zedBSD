@@ -103,6 +103,7 @@ static const char *const script_types[] = {
 };
 
 static int script_settle_network(struct page *page, double wait, double *elapsed);
+static int page_fire_load_events(struct page *page);
 static void script_console(void *context, int level, const char *text, size_t length);
 static int script_location(void *context, int part, struct wb_buffer *out);
 static int script_url_set(void *context, const char *href, size_t length);
@@ -715,6 +716,11 @@ page_run_script_element(
 	if (!runs)
 		return 0;
 
+	/* The style sheets linked before it block it. */
+	error = page_wait_sheets(page);
+	if (error != 0)
+		return error;
+
 	/* A script with a src runs the file. */
 	error = script_attribute(page, script, "src", &src);
 	if (error != 0)
@@ -809,6 +815,46 @@ script_document_write(
 		return error;
 
 	/* Succeeded: the inserted text used the production parser. */
+	return 0;
+}
+
+/*
+ * Waits for the style sheets the document links so far, which block the
+ * scripts that follow them (with the loader; otherwise they were read at
+ * once).  The wait is bounded.
+ */
+int
+page_wait_sheets(
+	struct page *page)
+{
+	double elapsed;
+	double waited;
+	int error;
+
+	/* Without the loader the sheets came when they were linked. */
+	if (page->loader == NULL)
+		return 0;
+
+	/* The sheets linked so far start loading. */
+	error = page_update_styles(page);
+	if (error != 0)
+		return error;
+
+	/* Each short wait lets the loader bring them in. */
+	waited = 0;
+	while (page_sheets_pending(page) && waited < 30000) {
+		error = script_settle_network(page, 10, &elapsed);
+		if (error != 0)
+			return error;
+		waited += elapsed;
+	}
+
+	/* The sheets that came are styled in. */
+	error = page_update_styles(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: no sheet linked so far is on its way (or the bound passed). */
 	return 0;
 }
 
@@ -1159,7 +1205,9 @@ script_release(
 
 /*
  * Tells the scripts the document is parsed: DOMContentLoaded at the
- * document, then load and pageshow at the window.
+ * document, then load and pageshow at the window.  The window's load waits
+ * for the frames the document embeds: it fires when the last of them is
+ * done (page_fire_load_resume).
  */
 int
 page_fire_load(
@@ -1174,18 +1222,83 @@ page_fire_load(
 	if (error != 0)
 		return error;
 
+	/* The frames, and with the loader the style sheets, fonts and images the document embeds, start loading now. */
+	error = page_frames_checkpoint(page);
+	if (error != 0)
+		return error;
+	if (page->loader != NULL) {
+		error = page_load_resources(page);
+		if (error != 0)
+			return error;
+	}
+
+	/* A resource still on its way holds the window's load back. */
+	if (page_load_waiting(page)) {
+		page->load_pending = 1;
+		return 0;
+	}
+
 	/* Then it is complete, and the window's load fires. */
+	error = page_fire_load_events(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the load events have run. */
+	return 0;
+}
+
+/*
+ * Fires the window's load, once the frames a held-back load waited for are done.
+ */
+int
+page_fire_load_resume(
+	struct page *page)
+{
+	int error;
+
+	/* Nothing waits. */
+	if (!page->load_pending)
+		return 0;
+
+	/* The style sheets that came, styled in: their fonts start loading. */
+	error = page_update_styles(page);
+	if (error != 0)
+		return error;
+
+	/* A resource is still on its way. */
+	if (page_load_waiting(page))
+		return 0;
+
+	/* The held-back load fires now. */
+	page->load_pending = 0;
+	error = page_fire_load_events(page);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the load events have run. */
+	return 0;
+}
+
+/* The document is complete: load, then pageshow, last of the loading's events. */
+static int
+page_fire_load_events(
+	struct page *page)
+{
+	int canceled;
+	int error;
+
+	/* The document is complete, and the window's load fires. */
 	bind_window_set_ready_state(page->window, "complete");
 	error = bind_fire_event(page->window, NULL, "load", BIND_EVENT_DOCUMENT, &canceled);
 	if (error != 0)
 		return error;
 
-	/* The document is shown: pageshow, last of the loading's events. */
+	/* The document is shown: pageshow. */
 	error = bind_fire_event(page->window, NULL, "pageshow", BIND_EVENT_DOCUMENT, &canceled);
 	if (error != 0)
 		return error;
 
-	/* Succeeded: the load events have run. */
+	/* Succeeded: load and pageshow have run. */
 	return 0;
 }
 
@@ -1269,7 +1382,7 @@ page_settle(
 		found = page_next_timer(page, &due);
 
 		/* An image on its way is waited for within the bound, but does not keep the page unsettled past it. */
-		images = page_images_waiting(page) && page->now < budget && network_waited < 30000 && page->loader != NULL;
+		images = (page_images_waiting(page) || page->load_pending) && page->now < budget && network_waited < 30000 && page->loader != NULL;
 
 		/* Pending real responses need descriptor progress before the virtual clock can leap ahead. */
 		if (page->frame_loads.count != 0 || images) {

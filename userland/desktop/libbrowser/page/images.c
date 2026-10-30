@@ -653,7 +653,29 @@ page_images_checkpoint(
 			return error;
 	}
 
+	/* A window load that waited for images fires when the last has come. */
+	error = page_fire_load_resume(page);
+	if (error != 0)
+		return error;
+
 	/* Succeeded: only images still on their way are watched. */
+	return 0;
+}
+
+/* Tells whether any image of the document is still on its way. */
+int
+page_images_pending(
+	const struct page *page)
+{
+	struct page_image **slot;
+	size_t index;
+
+	/* Any entry of the table whose request has not ended. */
+	for (index = 0; index < page->images.count; index++) {
+		slot = wb_vector_at((struct wb_vector *)&page->images, index);
+		if ((*slot)->request != NULL)
+			return 1;
+	}
 	return 0;
 }
 
