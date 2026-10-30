@@ -3,7 +3,7 @@
 # ws313-p003: 媒体と夜の試験の手順
 
 Status: in-progress（実装済み・実機未試験）
-Queue: q1675-i01・q1675-i02（P7）
+Queue: q1675-i01・q1675-i02（P7）、q1709-i01・q1714-i01・q1716-i01（P1）
 WS: [WS313](../ws.md)、設計 [design.md](../design.md) §2・§6・§7
 
 ## 実装（2026-10-29）
@@ -85,3 +85,25 @@ WS: [WS313](../ws.md)、設計 [design.md](../design.md) §2・§6・§7
   - `make -n … BUILD=build/odroid-c5 build/odroid-c5/hdd-image.img`: 命令が `--bootloader <cache>/548e2f…/u-boot.bin.signed --notice userland/firmware/amlogic-s7d/amlogic-s7d-bootloader.notice` になる（rc=0）。
 - **未実施**: package 経由の image の build（text の image）。build の前の license の自動の同意（`yes | make … firmware-licenses`）が権限の判定（ユーザーの代わりの同意）で拒まれ、回避せず止めた（Q1 へ報告）。ユーザーが端末で `firmware-licenses` に答えた後に、`BUILD=build/q1714-odroid-c5` で disk-image を作り、区画の SHA-256 を e6f02085… と照らす。
 - 残り: zedBSD-firmware の push（ユーザーの判断。`amlogic-s7d/` は license 未確認）と、push の後に `userland/firmware/zedbsd-firmware.mk` の `ZEDBSD_FIRMWARE_REPOSITORY_REVISION` を 227a76db8e82c91ddd63e4017faa97b7e713b08e に（それまでは各 package が upstream から取る）、mali-csf と amlogic-s7d の manifest に `mirror-revision`。menuconfig が保存する config は `CONFIG_ODROID_C5_SERIAL_CONSOLE`（catalog に無い）を書かない（Pi の `CONFIG_RPI4_SERIAL_CONSOLE` と同じ。範囲の外）。
+
+## q1716-i01（2026-10-30、P1）: bootloader を Hardkernel の公式の image から
+
+- ユーザーの決定（原文、2026-10-30）: 「ODROID-C5のLinuxイメージからブートローダを取得するように変更します。このイメージはODROID-C5で使われるために許可を受けて配布されているわけですよね。だったらこのボードのための利用許可なので、このボードで利用する分にはOKと考えます。」「このファイルは、このボードで利用する目的であれば、再配布可能です。zedBSD-firmwareに入れてください。ライセンスは下記です。 prior written permissionはHardkernelに与えられており、このボードでしか使用できないイメージであれば、再配布が可能なんだそうです。」（Amlogic の license の本文つき）。その後（Q1 の中継）「だめです。36MBのイメージそのものをリポジトリに入れないと、再配布許可のある状態にできません。」
+- 元の image: `/home/awe/ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz`（ユーザーが置いた公式の物、37760380 byte、SHA-256 04b9817d4e5e27ac4cc46dc4ad48fbc164e9a6c6f42eb1b0ba8d7a927accc5f2、展開で 545259520 byte）。MBR の code は 0・55aa、区画 1 つ（0x83、sector 16384 から）。sector 1〜6538 が bootloader（3347456 byte、SHA-256 6c5316ed320c78c9c2a67665cdee1089339be25bee625cf1eaffb0a6277c6562、BL30 `S7D-s905x5m-26052812`）、6539〜16383 は 0、sector 1〜16383 の SHA-256 は b6a4b424f0a6dac33be4287d2bad6f2651466d983ca9e4146a29357b8e3c8cba（P1 が `xz -dc | head -c 8388608` で確かめた）。
+- zedBSD-firmware: `amlogic-s7d/` を公式の `.img.xz` そのもの（名前も変えず無変更）・`LICENSE.amlogic`（ユーザーが示した本文、1273 byte、5e8f7ad6…）・README（英語、ODROID-C5 で使う目的でだけ再配布、Hardkernel に Amlogic の書面の許可、U-Boot の GPL の source の出所）に。mdrjr の 3 file と切り出した `.bin` は外した。top の README の表と SHA256SUMS を直し `sha256sum -c` OK。P1 の commit（852123aa・f147461e）は Q1 が 1 つの commit **43662bd72419deb927af6d533d90fe72aa158c74**（親 fcdfccfa、tree は f147461e と同じ）にまとめた。push は Q1。
+- zedBSD:
+  - 1bf02b7fa: package `amlogic-s7d-bootloader` は `.img.xz` と `LICENSE.amlogic` を zedBSD-firmware の `amlogic-s7d/` から取り、size と SHA-256 で検証し、`xz -dc` で展開して sector 1〜6538 を切り出し、その size と SHA-256（6c5316ed…）も検証して cache に置く（cache の名は `odroidc5-20260610`）。image の tool は `--bootloader` で sector 1 から置く今の形のまま。上流の取得先は無い（公式の image は build が自動で取れない）ので、repo が使えない時は `build/sources/firmware/amlogic-s7d/by-hand/` に 2 file を手で置き、同じ検証を通す（license の本文も file:// でそこから読み、同意の質問は同じ）。notice・manifest・platform の `odroid-c5-bootloader.notice`（`ODROID_C5_BOOTLOADER_FROM` の時の notice、donor の例を公式の image に）・`tools/release/license-components.json`（status `decided`、ユーザーの決定を引用）・`userland/firmware/README.md`。
+  - 40e11db10（revision だけ）: `userland/firmware/zedbsd-firmware.mk` の `ZEDBSD_FIRMWARE_REPOSITORY_REVISION` と mali-csf・amlogic の manifest の `mirror-revision` を 43662bd7…（push の前は各 package が upstream に fall back、amlogic は手の写しだけ）。
+  - 966a7eac0（Q1 の指示）: U-Boot の `GPL-2` を戻した（linux-firmware dc85cced から、18092 byte、8177f975…。repo の `amlogic-s7d/` には無いので 404 の後 kernel.org）。rootfs の `/usr/share/licenses/amlogic-s7d-bootloader/` に `LICENSE.amlogic`・`GPL-2`・notice。notice に U-Boot の source（github.com/hardkernel/u-boot の branch odroidc5-v2023.01、c99f3409d5）。
+- 確かめ（host、worktree の `build/tmp/q1716/`）:
+  - fixture の goal（`amlogic-s7d-bootloader-fixture-cache`、license を聞かない）で by-hand の 2 file から cache を作る: rc=0、cache の 4 file（img.xz・LICENSE.amlogic・GPL-2・切り出し）の SHA-256 が上の値と一致。既存の cache の再検証 rc=0。repo の URL が 404（fcdfccfa）の時も rc=0（img.xz と LICENSE は手の写し、GPL-2 は kernel.org）。
+  - 切り出しの範囲を 1 sector 縮めると size mismatch で rc=2、一時の directory は残らない。by-hand が空なら「no upstream … not placed by hand」で rc=2。
+  - `firmware-licenses-pending`: repo の 404 の後、手の写しの `LICENSE.amlogic` を取って pending の行を出す（rc=0、同意は記録していない）。
+  - `make -n … build/odroid-c5/hdd-image.img`（cache を fixture の物に）: `--bootloader …/odroidc5-20260610/odroidc5-20260610-bootloader.bin --notice userland/firmware/amlogic-s7d/amlogic-s7d-bootloader.notice`。
+  - `make menuconfig-host-test`: rc=0（firmware licenses PASS、round-trip PASS）。
+- 試験の image（`ODROID_C5_BOOTLOADER_FROM` の明示の上書き。公式の image の先頭 8 MiB を `build/tmp/q1716/odroidc5-20260610-head8m.img` に展開して渡す。parse の時の license の質問を出さないため、make の command line だけで `ZEDBSD_USER_PROGRAMS` から `amlogic-s7d-bootloader` を外した。config/ci は変えていない。`flock /tmp/zedbsd-image-build.lock make … disk-image`、mali は前の `build/fw-sources/mali-csf`。branch agent/p1-ws313 966a7eac0）:
+  - text: `/home/awe/zedBSD-worktrees/p1-ws313/build/odroid-c5/hdd-image.img`、461373440 byte、sha256 0f8f56a14baf6ba5656d1b81b2d06a8cb782dde85e5650593f875cc8298c9fc5（rc=0、15:52）。
+  - desktop: `/home/awe/zedBSD-worktrees/p1-ws313/build/odroid-c5-keiland/hdd-image.img`、464519168 byte、sha256 2cf1f64d468989c80a45bb46630f7292030286a463329f2287713a6b7496adfa（rc=0、16:22）。
+  - 両方: sector 1〜16383 の SHA-256 が b6a4b424…（公式の image と一致）、sector 1〜6538 は 6c5316ed…、MBR の code は 0・55aa、区画 FAT（16384 から 524288 sector）と UFS（540672 から）、FAT に boot.scr・vmunix・odroid-c5.dtb・data.img・swapfile・BOOTLOADER.txt（新しい platform の notice、Copied from、区画の SHA-256 18621d41…）、`ufs-root.img: canonical zedBSD UFS OK`。warning は openssl・openssh・perl だけ（zedBSD の source は 0）。desktop の rootfs の `mali_csffw.bin` はこの回は見ていない（未確認）。
+- 未実施: package 経由の image（ユーザーが端末で `make ZEDBSD_CONFIG=config/ci/config-odroid-c5.mk firmware-licenses` に答えた後。担当は代わりに答えない）。zedBSD-firmware の push の後の repo からの取得（43662bd7 は push 前で、raw の URL はまだ 404 の見込み）。実機。
+
