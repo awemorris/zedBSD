@@ -9042,7 +9042,14 @@ tcp_segment_input(
 
 	spin_unlock_irqrestore(&endpoint->tcp.inet.socket.lock, socket_irq);
 
-	/* A listener answers a bare SYN with a half-open child. */
+	/*
+	 * A listener answers a bare SYN with a half-open child, and an
+	 * acknowledging segment with a reset (RFC 793 section 3.9, LISTEN): no
+	 * connection on the port matched it, so it belongs to one this end has
+	 * freed.  The peer of an accepted connection that was closed first sends
+	 * its own FIN here once that connection is gone; dropped, the FIN would
+	 * be sent again until the peer's close gave up waiting for it.
+	 */
 	if (state == TCP_LISTEN) {
 		if ((flags & (TCP_SYN | TCP_ACK | TCP_RST)) == TCP_SYN) {
 			offered_mss = tcp_syn_offered_mss(tcp, header_length);
@@ -9050,7 +9057,10 @@ tcp_segment_input(
 			offered_sack = tcp_syn_offered_sack(tcp, header_length);
 			(void)tcp_passive_syn(endpoint, addresses, source_port, sequence, offered_mss, offered_wscale,
 			    offered_sack);
+		} else if ((flags & (TCP_ACK | TCP_RST)) == TCP_ACK) {
+			tcp_send_reset(addresses, tcp, payload_length);
 		}
+
 		packet_buf_free(packet);
 		socket_release(&endpoint->tcp.inet.socket);
 		return 0;

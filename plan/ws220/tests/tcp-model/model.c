@@ -38,7 +38,7 @@
  *             [--receive-buffer N] [--expect-receive-limit LOW:HIGH] [--second-flow-at-ms T] [--fair-skip-s S]
  *             [--expect-slow-start] [--expect-ca-growth N] [--expect-cwnd-limited SHARE]
  *             [--expect-ssthresh-held] [--cc NAME] [--second-flow-cc NAME] [--measure-from-s S]
- *             [--quiet]
+ *             [--close-first a|b] [--quiet]
  *
  * --loss-ab is the share (percent) of the frames from A to B (the data) the
  * link loses, --loss-ba of the frames back (the acknowledgements).
@@ -141,6 +141,14 @@
  * --cc NAME and --second-flow-cc NAME set TCP_CONGESTION ("reno",
  * "cubic") on A's first and second connections; --measure-from-s S prints
  * the "steady:" line, the reader's rate from S seconds in to the end.
+ *
+ * --close-first a|b closes the connection after the transfer as close(2)
+ * does, A's end first or B's (the accepted one), with B's listener left
+ * open: each end's file close sends its FIN, waits while what it sent is
+ * outstanding (the kernel's drain, at most TCP_CLOSE_DRAIN_MS), and the
+ * end is freed.  The "close-order:" line says how long each end's close
+ * waited; the second end's must end within a second, by the peer's
+ * acknowledgement or its reset, not by the drain's time running out.
  */
 
 #include "kern/net/tcp-socket.h"
@@ -317,6 +325,8 @@ struct model_settings {
 	int expect_ssthresh_held;
 	double expect_ca_growth;
 	double expect_cwnd_limited;
+	/* Which end closes first after the transfer (--close-first: 'a', 'b'; 0: neither closes). */
+	int close_first;
 	int quiet;
 };
 
@@ -516,6 +526,8 @@ static int pure_ack(const struct packet_buf *packet);
 static void report(uint64_t elapsed_ns, uint64_t interval_bytes);
 static struct tcp_socket *tcp_of(struct socket *socket);
 static int check_tcpstats(void);
+static uint64_t close_end(struct socket *socket);
+static int close_in_order(void);
 
 /*
  * Runs the transfer and reports how it went.
@@ -997,7 +1009,91 @@ main(
 	if (!complete)
 		return 1;
 
+	/* The close in the order the scenario names. */
+	error = close_in_order();
+	if (error != 0)
+		return 1;
+
 	/* Succeeded: the reader has every byte. */
+	return 0;
+}
+
+/*
+ * Closes one end as its file's close does and reports how long the close
+ * waited: the FIN, then the drain's wait while anything sent is
+ * outstanding, on a connection still alive, for at most
+ * TCP_CLOSE_DRAIN_MS, then the end is freed.  The model runs without a
+ * thread, so the kernel's own drain returns at once and the wait is made
+ * here, with the links and the timers running.
+ */
+static uint64_t
+close_end(
+	struct socket *socket)
+{
+	struct tcp_socket *tcp;
+	uint64_t begin_ns;
+
+	tcp = tcp_of(socket);
+	begin_ns = now_ns;
+	socket_close_endpoint(socket);
+	while (tcp->send_count != 0 && tcp->state != TCP_CLOSED && socket->error == 0 &&
+	    now_ns - begin_ns < 10000000000ULL)
+		step();
+	socket_release(socket);
+
+	/* Reports the time the close waited. */
+	return now_ns - begin_ns;
+}
+
+/*
+ * Closes the connection after the transfer, the end --close-first names
+ * first, B's listener left open, and checks that the second end's close
+ * ends within a second: by the acknowledgement of its FIN, or by a reset
+ * when its peer has already been freed.
+ */
+static int
+close_in_order(
+	void)
+{
+	struct socket *first;
+	struct socket *second_end;
+	uint64_t first_ns;
+	uint64_t second_ns;
+	int second_state;
+	int second_error;
+
+	/* A scenario that does not close. */
+	if (settings.close_first == 0)
+		return 0;
+
+	/* The ends in their order; the writer and the reader stop. */
+	first = receiver;
+	second_end = sender;
+	if (settings.close_first == 'a') {
+		first = sender;
+		second_end = receiver;
+	}
+	sender = NULL;
+	receiver = NULL;
+
+	/* The first end, then a second for its FIN to reach the other, then the second end. */
+	first_ns = close_end(first);
+	second_ns = now_ns + 1000000000ULL;
+	while (now_ns < second_ns)
+		step();
+	second_state = (int)tcp_of(second_end)->state;
+	second_error = second_end->error;
+	second_ns = close_end(second_end);
+	printf("close-order: first=%c first_ms=%.1f second_ms=%.1f second_state_before=%d second_error=%d\n",
+	    settings.close_first, (double)first_ns / 1e6, (double)second_ns / 1e6, second_state, second_error);
+
+	/* The second end's close is answered, not left to the drain's time. */
+	if (second_ns > 1000000000ULL) {
+		printf("check: FAIL: the second end's close waited %.1f ms, more than a second\n", (double)second_ns / 1e6);
+		return 1;
+	}
+
+	/* Succeeded: both ends closed in time. */
 	return 0;
 }
 
@@ -1227,6 +1323,7 @@ parse_settings(
 	settings.expect_slow_start = 0;
 	settings.expect_ca_growth = 0.0;
 	settings.expect_cwnd_limited = 0.0;
+	settings.close_first = 0;
 	settings.quiet = 0;
 
 	/* Each option and its value. */
@@ -1349,6 +1446,8 @@ parse_settings(
 		} else if (strcmp(argv[index], "--expect-timeouts-max") == 0) {
 			settings.expect_timeouts_max = strtoull(argv[index + 1], NULL, 0);
 			settings.expect_timeouts = 1;
+		} else if (strcmp(argv[index], "--close-first") == 0) {
+			settings.close_first = argv[index + 1][0];
 		} else if (strcmp(argv[index], "--close-at-ms") == 0) {
 			settings.close_at_ns = strtoull(argv[index + 1], NULL, 0) * 1000000ULL;
 		} else if (strcmp(argv[index], "--drop-ab-run") == 0) {
