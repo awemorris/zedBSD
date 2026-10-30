@@ -20,7 +20,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <threads.h>
 
 /* Where the desktop's fonts are (/opt/keiland/share/fonts for a Linux build under /opt/keiland). */
 #ifndef FONT_DIR
@@ -47,8 +46,8 @@
  * reader sleeps on changed while there is nothing new.
  */
 struct reader {
-	mtx_t lock;
-	cnd_t changed;
+	struct kl_mutex lock;
+	struct kl_cond changed;
 	struct kl_app *app;
 	unsigned long wanted;
 	unsigned long taken;
@@ -80,7 +79,7 @@ struct language {
 	struct kl_canvas canvas;
 	struct kl_settings *settings;
 	struct reader reader;
-	thrd_t thread;
+	struct kl_thread *thread;
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
@@ -102,7 +101,7 @@ static void language_input(struct language *language, const struct kl_window_eve
 static void language_changed(struct language *language, const char *name);
 static void language_read(struct language *language, struct reading *reading);
 static void language_switch(struct language *language);
-static int language_reader(void *argument);
+static void language_reader(void *argument);
 
 int
 main(void)
@@ -110,6 +109,7 @@ main(void)
 	static struct language language;
 	struct kl_window_options window_options;
 	struct kl_app_options app_options;
+	struct kl_thread_options thread_options;
 	struct kl_app_event event;
 	struct reading *reading;
 	uint32_t request;
@@ -144,14 +144,19 @@ main(void)
 
 	/* The reader: its shared record, then its thread, which sleeps until a change comes. */
 	language.reader.app = language.app;
-	status = mtx_init(&language.reader.lock, mtx_plain);
-	if (status != thrd_success)
+	status = kl_mutex_init(&language.reader.lock);
+	if (status != 0)
 		return 1;
-	status = cnd_init(&language.reader.changed);
-	if (status != thrd_success)
+	status = kl_cond_init(&language.reader.changed);
+	if (status != 0)
 		return 1;
-	status = thrd_create(&language.thread, language_reader, &language.reader);
-	if (status != thrd_success)
+	memset(&thread_options, 0, sizeof(thread_options));
+	thread_options.name = "language";
+	thread_options.run = language_reader;
+	thread_options.argument = &language.reader;
+	thread_options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&thread_options, &language.thread);
+	if (status != 0)
 		return 1;
 
 	/* Opens the window, titled in the language read. */
@@ -246,11 +251,12 @@ main(void)
 	}
 
 	/* Ends the reader before the application closes: no thread may post after it. */
-	mtx_lock(&language.reader.lock);
+	kl_mutex_lock(&language.reader.lock);
 	language.reader.quit = 1;
-	cnd_signal(&language.reader.changed);
-	mtx_unlock(&language.reader.lock);
-	(void)thrd_join(language.thread, NULL);
+	kl_cond_signal(&language.reader.changed);
+	kl_mutex_unlock(&language.reader.lock);
+	(void)kl_thread_join(language.thread);
+	language.thread = NULL;
 
 	/* Frees the readings the reader left: their catalogs are set aside unread. */
 	for (;;) {
@@ -268,8 +274,8 @@ main(void)
 	}
 
 	/* Frees the reader's record, the settings, the widgets' record, the frame, the font and the texts, and closes the connection. */
-	cnd_destroy(&language.reader.changed);
-	mtx_destroy(&language.reader.lock);
+	kl_cond_destroy(&language.reader.changed);
+	kl_mutex_destroy(&language.reader.lock);
 	kl_settings_close(language.settings);
 	kl_ui_destroy(language.ui);
 	kl_canvas_release(&language.canvas);
@@ -445,11 +451,11 @@ language_changed(
 	language->generation++;
 
 	/* Asks the reader for it, waking it if it sleeps; a change it has not taken yet is replaced. */
-	mtx_lock(&language->reader.lock);
+	kl_mutex_lock(&language->reader.lock);
 	language->reader.wanted = language->generation;
 	snprintf(language->reader.language, sizeof(language->reader.language), "%s", name);
-	cnd_signal(&language->reader.changed);
-	mtx_unlock(&language->reader.lock);
+	kl_cond_signal(&language->reader.changed);
+	kl_mutex_unlock(&language->reader.lock);
 }
 
 /*
@@ -511,7 +517,7 @@ language_switch(
  * language's catalogs, and posts the reading to the application.  It calls
  * nothing of libkeiland but kl_tr_read, which any thread may, and the post.
  */
-static int
+static void
 language_reader(
 	void *argument)
 {
@@ -525,21 +531,21 @@ language_reader(
 		/* The reading of the latest change not taken yet, or the end. */
 		reading = calloc(1, sizeof(*reading));
 		if (reading == NULL)
-			return 0;
-		mtx_lock(&reader->lock);
+			return;
+		kl_mutex_lock(&reader->lock);
 		while (!reader->quit && reader->wanted == reader->taken)
-			cnd_wait(&reader->changed, &reader->lock);
+			kl_cond_wait(&reader->changed, &reader->lock);
 		if (reader->quit) {
-			mtx_unlock(&reader->lock);
+			kl_mutex_unlock(&reader->lock);
 			free(reading);
-			return 0;
+			return;
 		}
 
 		/* Notes which change this reading answers. */
 		reader->taken = reader->wanted;
 		reading->generation = reader->wanted;
 		snprintf(reading->language, sizeof(reading->language), "%s", reader->language);
-		mtx_unlock(&reader->lock);
+		kl_mutex_unlock(&reader->lock);
 
 		/* Reads the catalogs, away from the windows' thread. */
 		reading->error = kl_tr_read(DOMAIN, reading->language, &reading->catalogs);

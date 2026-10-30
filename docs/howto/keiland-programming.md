@@ -14,7 +14,7 @@ The chapters go in the order a program is built; chapters 8 to 10 are what a pro
 5. [The widgets](#5-the-widgets): fields, lists, switches, sliders, and widgets you make yourself.
 6. [Menus](#6-menus): the window's menu and context menus.
 7. [Other services](#7-other-services): glass, appearance, translations, files, the clipboard and notifications.
-8. [Work on other threads](#8-work-on-other-threads): a worker thread that hands its results to the window, and a language whose catalogs are read on a thread.
+8. [Work on other threads](#8-work-on-other-threads): a worker thread that hands its results to the window, a language whose catalogs are read on a thread, and a conversation over the network.
 9. [Other programs](#9-other-programs): a program the window talks to, and a shell in a terminal of its own.
 10. [Running once and starting programs](#10-running-once-and-starting-programs): one copy of a program per user, and starting a program apart from the application.
 
@@ -34,6 +34,7 @@ The programs are in [keiland-examples/](keiland-examples/). Each one grows out o
 | [07-services.c](keiland-examples/07-services.c) | 7 | Glass, appearance, translations, a file chooser, the clipboard, a notification | 04 |
 | [08-worker.c](keiland-examples/08-worker.c) | 8 | Primes counted on a worker thread; its progress and its result posted to the window | 04 |
 | [08-language.c](keiland-examples/08-language.c) | 8 | The desktop's language followed, its catalogs read on a thread; the latest change wins | 07 |
+| [08-network.c](keiland-examples/08-network.c) | 8 | Two sockets on the loopback, waited for together on a network thread; Stop rings a waker | 08 |
 | [09-sort.c](keiland-examples/09-sort.c) | 9 | `sort` as a process: its input written, its output read by the line, its errors and exit code | 04 |
 | [09-shell.c](keiland-examples/09-shell.c) | 9 | `sh` in a terminal of its own: its output as bytes, the terminal's size and modes | 05 (the field) |
 | [10-instance.c](keiland-examples/10-instance.c) | 10 | One copy per user: later starts hand their requests over; Start Another launches it again | 04 |
@@ -79,7 +80,7 @@ Every libkeiland call of an application is made from the one thread that opened 
 
 
 
-The programs of chapter 8 use C11 threads (`<threads.h>`). zedBSD's C library holds them, and so does glibc from 2.34 (an older glibc needs `-lpthread`). FreeBSD keeps them in libstdthreads: add `-lstdthreads`. `10-instance.c` needs `XDG_RUNTIME_DIR` to be the user's own directory (mode 0700), as a Keiland session sets it.
+The programs of chapter 8 use libkeiland's threads (`keiland_thread.h`, part of `<keiland/keiland.h>`): they need no library besides libkeiland. `10-instance.c` needs `XDG_RUNTIME_DIR` to be the user's own directory (mode 0700), as a Keiland session sets it.
 
 ## 1. The application
 
@@ -4405,7 +4406,7 @@ The eighth program counts the prime numbers below 20,000,000. That takes seconds
 
 *2.5 seconds after Start was clicked: the bar part of the way, the line "N primes below M so far.", Start disabled and Stop enabled.*
 
-It is chapter 4's counter with a count in place of the number. What is new: the two records the threads hand each other (`struct count` and `struct progress`), the worker (`primes_count`), one function for every event (`primes_event`, because the end of the program takes events too), and `primes_post`, `primes_start` and `primes_finish`. The threads are standard C11 threads (`<threads.h>`, with `<stdatomic.h>` for a flag). What libkeiland adds is the way a thread talks to the application: a **post**, `kl_app_post` in [keiland_app.h](../../userland/desktop/include/keiland/keiland_app.h) and `kl_window_post` in [keiland_window.h](../../userland/desktop/include/keiland/keiland_window.h). Build the program as the others; the introduction says what C11 threads need on FreeBSD.
+It is chapter 4's counter with a count in place of the number. What is new: the two records the threads hand each other (`struct count` and `struct progress`), the worker (`primes_count`), one function for every event (`primes_event`, because the end of the program takes events too), and `primes_post`, `primes_start` and `primes_finish`. The threads are libkeiland's own ([keiland_thread.h](../../userland/desktop/include/keiland/keiland_thread.h)): `kl_thread_start` and `kl_thread_join` start and end a thread, `kl_mutex_*` and `kl_cond_*` lock and wait, and they are the same on every system the desktop runs on. A flag two threads use is a C11 atomic (`<stdatomic.h>`), which libkeiland does not wrap. The way a thread talks to the application is a **post**, `kl_app_post` in [keiland_app.h](../../userland/desktop/include/keiland/keiland_app.h) and `kl_window_post` in [keiland_window.h](../../userland/desktop/include/keiland/keiland_window.h). Build the program as the others.
 
 
 <!-- example: keiland-examples/08-worker.c -->
@@ -4431,7 +4432,6 @@ It is chapter 4's counter with a count in place of the number. What is new: the 
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <threads.h>
 
 /* Where the desktop's fonts are (/opt/keiland/share/fonts for a Linux build under /opt/keiland). */
 #ifndef FONT_DIR
@@ -4494,7 +4494,7 @@ struct primes {
 	uint32_t width;
 	uint32_t height;
 	struct count *count;
-	thrd_t worker;
+	struct kl_thread *worker;
 	unsigned long done;
 	unsigned long found;
 	char status[128];
@@ -4512,7 +4512,7 @@ static void primes_input(struct primes *primes, const struct kl_window_event *in
 static void primes_post(struct primes *primes, uint32_t code, void *data);
 static void primes_start(struct primes *primes);
 static void primes_finish(struct primes *primes);
-static int primes_count(void *argument);
+static void primes_count(void *argument);
 static int primes_is_prime(unsigned long number);
 
 int
@@ -4841,7 +4841,8 @@ primes_post(
 	/* The count handed back: its thread is ending, so it is joined; the record is the program's again. */
 	if (code == POST_FINISHED) {
 		count = data;
-		(void)thrd_join(primes->worker, NULL);
+		(void)kl_thread_join(primes->worker);
+		primes->worker = NULL;
 		primes->done = count->done;
 		primes->found = count->primes;
 		how = "Done";
@@ -4861,6 +4862,7 @@ static void
 primes_start(
 	struct primes *primes)
 {
+	struct kl_thread_options options;
 	struct count *count;
 	int status;
 
@@ -4878,8 +4880,13 @@ primes_start(
 	atomic_init(&count->stop, 0);
 
 	/* The worker: from here until POST_FINISHED, the record is its own but for stop. */
-	status = thrd_create(&primes->worker, primes_count, count);
-	if (status != thrd_success) {
+	memset(&options, 0, sizeof(options));
+	options.name = "primes";
+	options.run = primes_count;
+	options.argument = count;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&options, &primes->worker);
+	if (status != 0) {
 		free(count);
 		snprintf(primes->status, sizeof(primes->status), "No thread to count on.");
 		return;
@@ -4933,7 +4940,7 @@ primes_finish(
  * numbers, and hands the count back when it is done or asked to stop.  It
  * calls nothing of libkeiland but the two posts, which any thread may.
  */
-static int
+static void
 primes_count(
 	void *argument)
 {
@@ -4977,7 +4984,6 @@ primes_count(
 		fprintf(stderr, "primes: the count was lost (%s)\n", strerror(status));
 
 	/* The thread's end: the application's thread joins it. */
-	return 0;
 }
 
 /*
@@ -5011,7 +5017,7 @@ primes_is_prime(
 
 ### Reading the program
 
-**The codes of the posts ([lines 35-37](keiland-examples/08-worker.c#L35-L37)).** A **post** is an event of the program's own, handed to the application from any thread. It carries a 32-bit **code** and a pointer, and libkeiland looks at neither: the program decides what they mean. This program has two codes.
+**The codes of the posts ([lines 34-36](keiland-examples/08-worker.c#L34-L36)).** A **post** is an event of the program's own, handed to the application from any thread. It carries a 32-bit **code** and a pointer, and libkeiland looks at neither: the program decides what they mean. This program has two codes.
 
 ```c
 #define POST_PROGRESS	1U
@@ -5020,7 +5026,7 @@ primes_is_prime(
 
 `POST_PROGRESS` is a report of how far a count got, and `POST_FINISHED` is the count's end.
 
-**The records ([lines 47-67](keiland-examples/08-worker.c#L47-L67)).**
+**The records ([lines 46-66](keiland-examples/08-worker.c#L46-L66)).**
 
 ```c
 struct count {
@@ -5040,17 +5046,21 @@ struct progress {
 
 At any moment one thread **owns** a record: it alone reads and writes it, and a post hands the ownership over. `struct count` goes to the worker at the start and comes back at the end. While the worker has it, only `stop` is shared, and `stop` is an `atomic_int`, read and written with `atomic_load` and `atomic_store`. `struct progress` is one report: the worker makes it, and whoever takes the post frees it.
 
-**Starting a count ([lines 445-481](keiland-examples/08-worker.c#L445-L481), `primes_start`).** The function fills the record and starts the worker with it ([lines 468-474](keiland-examples/08-worker.c#L468-L474)):
+**Starting a count ([lines 445-487](keiland-examples/08-worker.c#L445-L487), `primes_start`).** The function fills the record and starts the worker with it ([lines 469-480](keiland-examples/08-worker.c#L469-L480)):
 
 ```c
-status = thrd_create(&primes->worker, primes_count, count);
+options.name = "primes";
+options.run = primes_count;
+options.argument = count;
+options.priority = KL_THREAD_PRIORITY_NORMAL;
+status = kl_thread_start(&options, &primes->worker);
 /* ... */
 primes->count = count;
 ```
 
-From here until `POST_FINISHED` comes back, the program does not touch the record but for `stop`.
+`struct kl_thread_options` names the thread (`"primes"`, which debuggers and the system's lists show), gives it the function to run and its argument, and leaves the priority normal and the stack to the system. `kl_thread_start` returns 0 or an errno value, and `*thread` is the thread's record, which the program joins once. From here until `POST_FINISHED` comes back, the program does not touch the record but for `stop`.
 
-**The worker ([lines 519-569](keiland-examples/08-worker.c#L519-L569), `primes_count`).** A **worker** is a thread of the program's own that does a long job. This one looks at every number below the limit. Every `STEP` numbers it reads `stop` and ends when it is asked, or posts a report to the window with `kl_window_post` ([lines 538-551](keiland-examples/08-worker.c#L538-L551)):
+**The worker ([lines 525-574](keiland-examples/08-worker.c#L525-L574), `primes_count`).** A **worker** is a thread of the program's own that does a long job. This one looks at every number below the limit. Every `STEP` numbers it reads `stop` and ends when it is asked, or posts a report to the window with `kl_window_post` ([lines 544-557](keiland-examples/08-worker.c#L544-L557)):
 
 ```c
 if (number % STEP == 0) {
@@ -5063,7 +5073,7 @@ if (number % STEP == 0) {
 			free(progress);
 ```
 
-When a post fails it did not take the data, so the worker frees the report itself. At the end it hands the count back with `kl_app_post` ([lines 562-565](keiland-examples/08-worker.c#L562-L565)):
+When a post fails it did not take the data, so the worker frees the report itself. At the end it hands the count back with `kl_app_post` ([lines 568-571](keiland-examples/08-worker.c#L568-L571)):
 
 ```c
 status = kl_app_post(count->app, POST_FINISHED, count);
@@ -5073,7 +5083,7 @@ if (status != 0)
 
 The worker calls nothing of libkeiland but these two posts, the calls any thread may make.
 
-**The main loop ([lines 157-167](keiland-examples/08-worker.c#L157-L167)).** The loop is chapter 4's. The posts arrive in the same queue as the input, and a post from another thread wakes `kl_app_dispatch`, even when it waits with -1: there is no timer and no polling.
+**The main loop ([lines 156-166](keiland-examples/08-worker.c#L156-L166)).** The loop is chapter 4's. The posts arrive in the same queue as the input, and a post from another thread wakes `kl_app_dispatch`, even when it waits with -1: there is no timer and no polling.
 
 ```c
 timeout = -1;
@@ -5084,7 +5094,7 @@ if (primes.dirty || primes.resized)
 status = kl_app_dispatch(primes.app, timeout);
 ```
 
-**Where the posts arrive ([lines 346-373](keiland-examples/08-worker.c#L346-L373), `primes_event`).** A post to the window arrives among the window's inputs, in its place among them: a `KL_APP_WINDOW` event whose `input.kind` is `KL_WINDOW_POST`, with `input.code` and `input.data` ([lines 359-368](keiland-examples/08-worker.c#L359-L368)). A post to the application arrives as `KL_APP_POST` with `event.code` and `event.data` ([lines 370-372](keiland-examples/08-worker.c#L370-L372)). So does a post to a window that closed before the post came: `window` is `NULL`, and the code and the data are the same.
+**Where the posts arrive ([lines 345-372](keiland-examples/08-worker.c#L345-L372), `primes_event`).** A post to the window arrives among the window's inputs, in its place among them: a `KL_APP_WINDOW` event whose `input.kind` is `KL_WINDOW_POST`, with `input.code` and `input.data` ([lines 358-367](keiland-examples/08-worker.c#L358-L367)). A post to the application arrives as `KL_APP_POST` with `event.code` and `event.data` ([lines 369-371](keiland-examples/08-worker.c#L369-L371)). So does a post to a window that closed before the post came: `window` is `NULL`, and the code and the data are the same.
 
 ```c
 	if (event->input.kind == KL_WINDOW_POST) {
@@ -5098,19 +5108,20 @@ if (event->kind == KL_APP_POST)
 
 The program sends both to `primes_post`, which frees the data either way.
 
-**Taking a post ([lines 403-443](keiland-examples/08-worker.c#L403-L443), `primes_post`).** A report is shown and freed. `POST_FINISHED` gives the record back: the worker's thread is ending (the post was its last act), so `thrd_join` returns at once. The result is copied, the record is freed, and a `NULL` count enables Start again ([lines 432-440](keiland-examples/08-worker.c#L432-L440)):
+**Taking a post ([lines 402-443](keiland-examples/08-worker.c#L402-L443), `primes_post`).** A report is shown and freed. `POST_FINISHED` gives the record back: the worker's thread is ending (the post was its last act), so `kl_thread_join` returns at once. The result is copied, the record is freed, and a `NULL` count enables Start again ([lines 431-440](keiland-examples/08-worker.c#L431-L440)):
 
 ```c
-(void)thrd_join(primes->worker, NULL);
+(void)kl_thread_join(primes->worker);
+primes->worker = NULL;
 primes->done = count->done;
 /* ... */
 free(count);
 primes->count = NULL;
 ```
 
-No report of a count can come after its `POST_FINISHED`: the posts of one thread arrive in the order it made them (the comment at [line 418](keiland-examples/08-worker.c#L418)).
+No report of a count can come after its `POST_FINISHED`: the posts of one thread arrive in the order it made them (the comment at [line 417](keiland-examples/08-worker.c#L417)).
 
-**Stop ([lines 306-312](keiland-examples/08-worker.c#L306-L312)).** The button raises the flag.
+**Stop ([lines 305-311](keiland-examples/08-worker.c#L305-L311)).** The button raises the flag.
 
 ```c
 if (clicked && primes->count != NULL)
@@ -5119,7 +5130,7 @@ if (clicked && primes->count != NULL)
 
 The worker sees it within `STEP` numbers and hands the count back as usual, short of the limit, and the line says "Stopped" ([lines 435-438](keiland-examples/08-worker.c#L435-L438)).
 
-**The end of the program ([193-194](keiland-examples/08-worker.c#L193-L194) and [483-517](keiland-examples/08-worker.c#L483-L517), `primes_finish`).** The window may close while a count runs. The program raises `stop`, then takes the posts the worker left, dispatching without waiting, until the count came back; taking that last post joins the thread, so the thread is joined exactly once:
+**The end of the program ([192-193](keiland-examples/08-worker.c#L192-L193) and [489-523](keiland-examples/08-worker.c#L489-L523), `primes_finish`).** The window may close while a count runs. The program raises `stop`, then takes the posts the worker left, dispatching without waiting, until the count came back; taking that last post joins the thread, so the thread is joined exactly once:
 
 ```c
 atomic_store(&primes->count->stop, 1);
@@ -5135,19 +5146,20 @@ It does this because the application must not be closed while a thread may still
 
 ### The rules
 
-- `kl_app_post(app, code, data)` and `kl_window_post(window, code, data)` may be called from any thread. Every other call stays on the application's thread: a worker computes and posts, and the application's thread draws ([lines 538-565](keiland-examples/08-worker.c#L538-L565)).
-- A post wakes `kl_app_dispatch` ([lines 157-167](keiland-examples/08-worker.c#L157-L167)).
-- A post to the window arrives among the window's inputs, as `KL_WINDOW_POST` with `input.code` and `input.data`. A post to the application arrives as `KL_APP_POST` with `event.code` and `event.data`, and so does a post to a window that closed first, with `window` `NULL` ([lines 346-373](keiland-examples/08-worker.c#L346-L373)). Use the window's post for news that belongs with that window's input, and the application's for the rest.
+- `kl_app_post(app, code, data)` and `kl_window_post(window, code, data)` may be called from any thread. Every other call stays on the application's thread: a worker computes and posts, and the application's thread draws ([lines 544-571](keiland-examples/08-worker.c#L544-L571)).
+- A post wakes `kl_app_dispatch` ([lines 156-166](keiland-examples/08-worker.c#L156-L166)).
+- A post to the window arrives among the window's inputs, as `KL_WINDOW_POST` with `input.code` and `input.data`. A post to the application arrives as `KL_APP_POST` with `event.code` and `event.data`, and so does a post to a window that closed first, with `window` `NULL` ([lines 345-372](keiland-examples/08-worker.c#L345-L372)). Use the window's post for news that belongs with that window's input, and the application's for the rest.
 - The posts of one thread arrive in the order they were made, and none is dropped: what the queue has no room for waits for the next dispatch. The posts of two threads have no order between them.
-- The data goes to whoever takes the event. libkeiland neither copies it nor frees it. A post that fails (`ENOMEM`, or `EINVAL` for a `NULL` application or window) did not take the data ([lines 545-550](keiland-examples/08-worker.c#L545-L550)).
-- End the threads that post before `kl_app_close`, and take what they posted: the posts not taken are dropped with their data ([lines 483-517](keiland-examples/08-worker.c#L483-L517)).
-- A value two threads use at once is atomic or under a mutex (`stop`, [lines 47-61](keiland-examples/08-worker.c#L47-L61)).
+- The data goes to whoever takes the event. libkeiland neither copies it nor frees it. A post that fails (`ENOMEM`, or `EINVAL` for a `NULL` application or window) did not take the data ([lines 551-556](keiland-examples/08-worker.c#L551-L556)).
+- End the threads that post before `kl_app_close`, and take what they posted: the posts not taken are dropped with their data ([lines 489-523](keiland-examples/08-worker.c#L489-L523)).
+- A thread that `kl_thread_start` returned is joined with `kl_thread_join`, or let go with `kl_thread_detach`, exactly once; the thread's function returns nothing, so its result goes back in a record or a post.
+- A value two threads use at once is atomic or under a mutex (`stop`, [lines 46-60](keiland-examples/08-worker.c#L46-L60)).
 
 ### Pitfalls
 
 - Calling another libkeiland function from the worker (drawing, `kl_window_set_title`, `kl_tr`). Post the result instead.
 - Freeing the data after a post that succeeded, or never freeing it on the side that takes it, including a window's post that arrives as `KL_APP_POST`.
-- Giving a `KL_WINDOW_POST` input to the widgets (`kl_ui_window_input`). Check `input.kind` first ([lines 361-364](keiland-examples/08-worker.c#L361-L364)).
+- Giving a `KL_WINDOW_POST` input to the widgets (`kl_ui_window_input`). Check `input.kind` first ([lines 360-363](keiland-examples/08-worker.c#L360-L363)).
 - Reading the record while the worker owns it (`count->primes` before `POST_FINISHED`). Read the reports.
 - Posting at every small step: each post is an event and usually a frame. Report in steps (`STEP`).
 - Closing the application while a worker may still post.
@@ -5190,7 +5202,6 @@ What is new against the language handling of `07-services.c`: the reader's share
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <threads.h>
 
 /* Where the desktop's fonts are (/opt/keiland/share/fonts for a Linux build under /opt/keiland). */
 #ifndef FONT_DIR
@@ -5217,8 +5228,8 @@ What is new against the language handling of `07-services.c`: the reader's share
  * reader sleeps on changed while there is nothing new.
  */
 struct reader {
-	mtx_t lock;
-	cnd_t changed;
+	struct kl_mutex lock;
+	struct kl_cond changed;
 	struct kl_app *app;
 	unsigned long wanted;
 	unsigned long taken;
@@ -5250,7 +5261,7 @@ struct language {
 	struct kl_canvas canvas;
 	struct kl_settings *settings;
 	struct reader reader;
-	thrd_t thread;
+	struct kl_thread *thread;
 	uint32_t *pixels;
 	uint32_t width;
 	uint32_t height;
@@ -5272,7 +5283,7 @@ static void language_input(struct language *language, const struct kl_window_eve
 static void language_changed(struct language *language, const char *name);
 static void language_read(struct language *language, struct reading *reading);
 static void language_switch(struct language *language);
-static int language_reader(void *argument);
+static void language_reader(void *argument);
 
 int
 main(void)
@@ -5280,6 +5291,7 @@ main(void)
 	static struct language language;
 	struct kl_window_options window_options;
 	struct kl_app_options app_options;
+	struct kl_thread_options thread_options;
 	struct kl_app_event event;
 	struct reading *reading;
 	uint32_t request;
@@ -5314,14 +5326,19 @@ main(void)
 
 	/* The reader: its shared record, then its thread, which sleeps until a change comes. */
 	language.reader.app = language.app;
-	status = mtx_init(&language.reader.lock, mtx_plain);
-	if (status != thrd_success)
+	status = kl_mutex_init(&language.reader.lock);
+	if (status != 0)
 		return 1;
-	status = cnd_init(&language.reader.changed);
-	if (status != thrd_success)
+	status = kl_cond_init(&language.reader.changed);
+	if (status != 0)
 		return 1;
-	status = thrd_create(&language.thread, language_reader, &language.reader);
-	if (status != thrd_success)
+	memset(&thread_options, 0, sizeof(thread_options));
+	thread_options.name = "language";
+	thread_options.run = language_reader;
+	thread_options.argument = &language.reader;
+	thread_options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&thread_options, &language.thread);
+	if (status != 0)
 		return 1;
 
 	/* Opens the window, titled in the language read. */
@@ -5416,11 +5433,12 @@ main(void)
 	}
 
 	/* Ends the reader before the application closes: no thread may post after it. */
-	mtx_lock(&language.reader.lock);
+	kl_mutex_lock(&language.reader.lock);
 	language.reader.quit = 1;
-	cnd_signal(&language.reader.changed);
-	mtx_unlock(&language.reader.lock);
-	(void)thrd_join(language.thread, NULL);
+	kl_cond_signal(&language.reader.changed);
+	kl_mutex_unlock(&language.reader.lock);
+	(void)kl_thread_join(language.thread);
+	language.thread = NULL;
 
 	/* Frees the readings the reader left: their catalogs are set aside unread. */
 	for (;;) {
@@ -5438,8 +5456,8 @@ main(void)
 	}
 
 	/* Frees the reader's record, the settings, the widgets' record, the frame, the font and the texts, and closes the connection. */
-	cnd_destroy(&language.reader.changed);
-	mtx_destroy(&language.reader.lock);
+	kl_cond_destroy(&language.reader.changed);
+	kl_mutex_destroy(&language.reader.lock);
 	kl_settings_close(language.settings);
 	kl_ui_destroy(language.ui);
 	kl_canvas_release(&language.canvas);
@@ -5615,11 +5633,11 @@ language_changed(
 	language->generation++;
 
 	/* Asks the reader for it, waking it if it sleeps; a change it has not taken yet is replaced. */
-	mtx_lock(&language->reader.lock);
+	kl_mutex_lock(&language->reader.lock);
 	language->reader.wanted = language->generation;
 	snprintf(language->reader.language, sizeof(language->reader.language), "%s", name);
-	cnd_signal(&language->reader.changed);
-	mtx_unlock(&language->reader.lock);
+	kl_cond_signal(&language->reader.changed);
+	kl_mutex_unlock(&language->reader.lock);
 }
 
 /*
@@ -5681,7 +5699,7 @@ language_switch(
  * language's catalogs, and posts the reading to the application.  It calls
  * nothing of libkeiland but kl_tr_read, which any thread may, and the post.
  */
-static int
+static void
 language_reader(
 	void *argument)
 {
@@ -5695,21 +5713,21 @@ language_reader(
 		/* The reading of the latest change not taken yet, or the end. */
 		reading = calloc(1, sizeof(*reading));
 		if (reading == NULL)
-			return 0;
-		mtx_lock(&reader->lock);
+			return;
+		kl_mutex_lock(&reader->lock);
 		while (!reader->quit && reader->wanted == reader->taken)
-			cnd_wait(&reader->changed, &reader->lock);
+			kl_cond_wait(&reader->changed, &reader->lock);
 		if (reader->quit) {
-			mtx_unlock(&reader->lock);
+			kl_mutex_unlock(&reader->lock);
 			free(reading);
-			return 0;
+			return;
 		}
 
 		/* Notes which change this reading answers. */
 		reader->taken = reader->wanted;
 		reading->generation = reader->wanted;
 		snprintf(reading->language, sizeof(reading->language), "%s", reader->language);
-		mtx_unlock(&reader->lock);
+		kl_mutex_unlock(&reader->lock);
 
 		/* Reads the catalogs, away from the windows' thread. */
 		reading->error = kl_tr_read(DOMAIN, reading->language, &reading->catalogs);
@@ -5755,11 +5773,11 @@ if (language.settings == NULL)
 	return 1;
 ```
 
-**What the threads share ([lines 43-65](keiland-examples/08-language.c#L43-L65)).** `struct reader` is what the two threads share, under its lock: `wanted`, the number of the latest change asked for, and its language; `taken`, the number the reader took last; `quit`; and the condition variable `changed` that the reader sleeps on. `struct reading` is one answer, posted to the application. Lines [145-155](keiland-examples/08-language.c#L145-L155) make the lock, the condition and the reader's thread.
+**What the threads share ([lines 42-64](keiland-examples/08-language.c#L42-L64)).** `struct reader` is what the two threads share, under its lock: `wanted`, the number of the latest change asked for, and its language; `taken`, the number the reader took last; `quit`; and the condition `changed` (`struct kl_cond`) that the reader sleeps on, beside the lock (`struct kl_mutex`). `struct reading` is one answer, posted to the application. Lines [145-160](keiland-examples/08-language.c#L145-L160) make the lock, the condition and the reader's thread (`kl_mutex_init`, `kl_cond_init` and `kl_thread_start`, the thread named "language").
 
 ```c
-mtx_t lock;
-cnd_t changed;
+struct kl_mutex lock;
+struct kl_cond changed;
 struct kl_app *app;
 unsigned long wanted;
 unsigned long taken;
@@ -5767,30 +5785,30 @@ char language[KL_TR_NAME_MAX + 1U];
 int quit;
 ```
 
-**A change ([219-221](keiland-examples/08-language.c#L219-L221) and [lines 434-453](keiland-examples/08-language.c#L434-L453), `language_changed`).** At each `KL_APP_LANGUAGE` the program numbers the change: this number is its **generation**. Under the lock it puts the number and the event's language where the reader takes them, and wakes the reader. A change the reader has not taken yet is replaced, so the reader reads only the latest.
+**A change ([224-226](keiland-examples/08-language.c#L224-L226) and [lines 440-459](keiland-examples/08-language.c#L440-L459), `language_changed`).** At each `KL_APP_LANGUAGE` the program numbers the change: this number is its **generation**. Under the lock it puts the number and the event's language where the reader takes them, and wakes the reader. A change the reader has not taken yet is replaced, so the reader reads only the latest.
 
 ```c
 language->generation++;
 /* ... */
-mtx_lock(&language->reader.lock);
+kl_mutex_lock(&language->reader.lock);
 language->reader.wanted = language->generation;
 snprintf(language->reader.language, sizeof(language->reader.language), "%s", name);
-cnd_signal(&language->reader.changed);
-mtx_unlock(&language->reader.lock);
+kl_cond_signal(&language->reader.changed);
+kl_mutex_unlock(&language->reader.lock);
 ```
 
-**The reader ([lines 509-554](keiland-examples/08-language.c#L509-L554), `language_reader`).** It sleeps until a change it has not taken comes ([lines 525-542](keiland-examples/08-language.c#L525-L542)). It reads that language's catalogs with `kl_tr_read` ([line 545](keiland-examples/08-language.c#L545)): any thread may call it, and the texts in use do not change. Then it posts the reading ([lines 547-552](keiland-examples/08-language.c#L547-L552)).
+**The reader ([lines 515-560](keiland-examples/08-language.c#L515-L560), `language_reader`).** It sleeps until a change it has not taken comes, with `kl_cond_wait` in a loop that tests the condition again, since a wait can end without a signal ([lines 531-548](keiland-examples/08-language.c#L531-L548)). It reads that language's catalogs with `kl_tr_read` ([line 551](keiland-examples/08-language.c#L551)): any thread may call it, and the texts in use do not change. Then it posts the reading ([lines 553-558](keiland-examples/08-language.c#L553-L558)).
 
 ```c
 while (!reader->quit && reader->wanted == reader->taken)
-	cnd_wait(&reader->changed, &reader->lock);
+	kl_cond_wait(&reader->changed, &reader->lock);
 /* ... */
 reading->error = kl_tr_read(DOMAIN, reading->language, &reading->catalogs);
 /* ... */
 status = kl_app_post(reader->app, POST_READ, reading);
 ```
 
-**A reading comes back ([223-225](keiland-examples/08-language.c#L223-L225) and [lines 455-489](keiland-examples/08-language.c#L455-L489), `language_read`).** A reading whose number is not the latest is set aside with `kl_tr_discard`. The latest one's catalogs become the texts with `kl_tr_use` (English when they could not be read), and the title and the frame follow ([lines 465-468](keiland-examples/08-language.c#L465-L468), [478](keiland-examples/08-language.c#L478), [487-488](keiland-examples/08-language.c#L487-L488)):
+**A reading comes back ([228-230](keiland-examples/08-language.c#L228-L230) and [lines 461-495](keiland-examples/08-language.c#L461-L495), `language_read`).** A reading whose number is not the latest is set aside with `kl_tr_discard`. The latest one's catalogs become the texts with `kl_tr_use` (English when they could not be read), and the title and the frame follow ([lines 471-474](keiland-examples/08-language.c#L471-L474), [484](keiland-examples/08-language.c#L484), [493-494](keiland-examples/08-language.c#L493-L494)):
 
 ```c
 if (reading->generation != language->generation) {
@@ -5808,14 +5826,14 @@ language->dirty = 1;
 
 The numbers exist for this case. The reader takes change 1. While it reads, the user changes the language twice more. The event of change 3 comes, and then change 1's reading comes back. Used, it would put back a language the desktop has left. With the numbers it is set aside, and change 3's reading, which the reader takes next, is used.
 
-**Asking for a change ([lines 491-507](keiland-examples/08-language.c#L491-L507), `language_switch`).** `kl_settings_set_int(settings, "ui.language", 0 or 1)` asks the desktop for the change. The program does not change its own texts here: the change comes back as an event, as one made in Settings does.
+**Asking for a change ([lines 497-513](keiland-examples/08-language.c#L497-L513), `language_switch`).** `kl_settings_set_int(settings, "ui.language", 0 or 1)` asks the desktop for the change. The program does not change its own texts here: the change comes back as an event, as one made in Settings does.
 
 ```c
 language->asked = !language->asked;
 status = kl_settings_set_int(language->settings, "ui.language", language->asked, NULL);
 ```
 
-**The answers ([lines 199-207](keiland-examples/08-language.c#L199-L207)).** `kl_settings_dispatch` and `kl_settings_take_result` take the answers to the program's requests, so that a refusal (`EPERM`, for instance) is told. The language itself comes as `KL_APP_LANGUAGE`.
+**The answers ([lines 204-212](keiland-examples/08-language.c#L204-L212)).** `kl_settings_dispatch` and `kl_settings_take_result` take the answers to the program's requests, so that a refusal (`EPERM`, for instance) is told. The language itself comes as `KL_APP_LANGUAGE`.
 
 ```c
 (void)kl_settings_dispatch(language.settings);
@@ -5826,30 +5844,1143 @@ for (;;) {
 		fprintf(stderr, "language: the desktop refused the change (%s)\n", strerror(error));
 ```
 
-**The end ([lines 248-268](keiland-examples/08-language.c#L248-L268)).** `quit` is set under the lock, the reader is woken and joined, and the readings it left are taken and set aside, as in the first program.
+**The end ([lines 253-274](keiland-examples/08-language.c#L253-L274)).** `quit` is set under the lock, the reader is woken and joined, and the readings it left are taken and set aside, as in the first program.
 
 ```c
-mtx_lock(&language.reader.lock);
+kl_mutex_lock(&language.reader.lock);
 language.reader.quit = 1;
-cnd_signal(&language.reader.changed);
-mtx_unlock(&language.reader.lock);
-(void)thrd_join(language.thread, NULL);
+kl_cond_signal(&language.reader.changed);
+kl_mutex_unlock(&language.reader.lock);
+(void)kl_thread_join(language.thread);
+language.thread = NULL;
 ```
 
 #### The rules of following the language
 
-- `KL_APP_LANGUAGE` carries the language the desktop changed to. Changes come as events in the order they were made, and the last one tells the language now. `kl_app_language` gives the language the application heard last ([line 132](keiland-examples/08-language.c#L132), [lines 219-221](keiland-examples/08-language.c#L219-L221)).
+- `KL_APP_LANGUAGE` carries the language the desktop changed to. Changes come as events in the order they were made, and the last one tells the language now. `kl_app_language` gives the language the application heard last ([line 132](keiland-examples/08-language.c#L132), [lines 224-226](keiland-examples/08-language.c#L224-L226)).
 - Use the event's language. Reading the setting back at the event may give a later change than the event's.
-- The catalogs can be changed on the application's thread (`kl_tr_open` at the event, `07-services.c`), or read on another thread (`kl_tr_read` there, then `kl_tr_use` or `kl_tr_discard` on the application's thread). Read them on a thread when their reading may be slow ([line 545](keiland-examples/08-language.c#L545), [lines 455-489](keiland-examples/08-language.c#L455-L489)).
-- Number each change, and use a reading only when it carries the latest number. Set the others aside with `kl_tr_discard`, which frees them ([lines 465-471](keiland-examples/08-language.c#L465-L471)).
-- A program that asks for a change learns of it as of any other change ([lines 491-507](keiland-examples/08-language.c#L491-L507)).
+- The catalogs can be changed on the application's thread (`kl_tr_open` at the event, `07-services.c`), or read on another thread (`kl_tr_read` there, then `kl_tr_use` or `kl_tr_discard` on the application's thread). Read them on a thread when their reading may be slow ([line 551](keiland-examples/08-language.c#L551), [lines 461-495](keiland-examples/08-language.c#L461-L495)).
+- Number each change, and use a reading only when it carries the latest number. Set the others aside with `kl_tr_discard`, which frees them ([lines 471-477](keiland-examples/08-language.c#L471-L477)).
+- A program that asks for a change learns of it as of any other change ([lines 497-513](keiland-examples/08-language.c#L497-L513)).
 
 #### Pitfalls
 
 - Calling `kl_tr_use` on the reader's thread: it changes the texts the application's thread is drawing with.
 - Using each reading in the order it arrives: a late one puts back a language the user left.
-- Keeping a text `kl_tr` gave across a change. The title is set again ([lines 486-488](keiland-examples/08-language.c#L486-L488)).
+- Keeping a text `kl_tr` gave across a change. The title is set again ([lines 492-494](keiland-examples/08-language.c#L492-L494)).
 - Changing the texts at the click, before the desktop's answer: the desktop may refuse, and other programs follow the event, not the click.
+
+### Talking over the network
+
+A program that talks to another machine waits for it: for the connection, for the answer, for room to send. [keiland_socket.h](../../userland/desktop/include/keiland/keiland_socket.h) is libkeiland's thin layer over the system's sockets (BSD sockets, or WinSock), the same on every system the desktop runs on. A socket is what the system's socket is: you open, bind, listen, connect, accept, send, receive and close it, blocking or not. What the layer adds is a wait for several sockets at once, `kl_socket_poll`, that another thread can end early with a **waker**. The application's thread never waits for a socket: a program talks over the network on a thread of its own, as chapter 8's programs do their long work, and hands what it got to the application with a post.
+
+`08-network.c` grows out of `08-worker.c`. Start opens a network thread. The thread opens two sockets on the loopback, the network inside the machine, so that the program runs where no outside network is: one listens, the other connects to it without waiting for the connection to end. The thread waits for the connection to arrive on one socket and for the connect to end on the other, in a single wait. Then it sends the line "ping N" from one socket to the other and back a hundred times, waiting for each answer, and times each round trip. Every ten round trips the window shows how far it got and the average time so far; after each round trip the thread pauses 20 milliseconds, so that there is time to press Stop. Stop ends the thread's wait at once through its waker.
+
+What is new against `08-worker.c`: the series' record (`struct exchange`), which holds a waker in place of the limit, and the thread's functions: `network_run`, `network_connect`, `network_join`, `network_trips`, `network_trip`, `network_pause`, `network_wait`, `network_send_line` and `network_receive_line`. The calls are in [keiland_socket.h](../../userland/desktop/include/keiland/keiland_socket.h); the window's side (`network_start`, `network_stop`, `network_post`, `network_finish`) is the worker's.
+
+<!-- example: keiland-examples/08-network.c -->
+```c
+/*
+ * zedBSD
+ * Copyright (C) 2026 Awe Morris
+ *
+ * SPDX-License-Identifier: Zlib
+ */
+
+/*
+ * A window that sends a line to itself over the network a hundred times and
+ * measures how long each round trip takes.  Start opens a thread of its own
+ * (the network thread), which opens two sockets on the loopback: one that
+ * listens and one that connects to it without waiting.  The thread waits for
+ * both of them at once with kl_socket_poll, then sends "ping N" from one
+ * socket to the other and back, waiting for each answer the same way.  It
+ * tells the application how far it got with kl_app_post.  Stop rings a
+ * waker, which ends the thread's wait at once.
+ */
+
+#include <keiland/keiland.h>
+#include <errno.h>
+#include <stdatomic.h>
+#include <stdio.h>
+#include <stdlib.h>
+#include <string.h>
+#include <time.h>
+
+/* Where the desktop's fonts are (/opt/keiland/share/fonts for a Linux build under /opt/keiland). */
+#ifndef FONT_DIR
+#define FONT_DIR	"/usr/share/fonts"
+#endif
+#define FONT		FONT_DIR "/keiland.ttf"
+#define FALLBACK_FONT	FONT_DIR "/keiland-fallback.ttf"
+
+/* The widgets' ids. */
+#define ID_START	1U
+#define ID_STOP		2U
+
+/* The program's own codes of its posts: how far the round trips got, and their end. */
+#define POST_PROGRESS	1U
+#define POST_FINISHED	2U
+
+/* The round trips made, how many pass between two reports, and the pause after each (milliseconds). */
+#define TRIPS		100U
+#define REPORT_EVERY	10U
+#define PAUSE_MS	20
+
+/* The room for one line, with its newline and NUL. */
+#define LINE_SIZE	32U
+
+/* The buttons' width and the room around them, in pixels. */
+#define BUTTON_WIDTH	96
+#define MARGIN		24
+
+/*
+ * One series of round trips: what the thread is given (the application and
+ * the waker), what it found (how many round trips it made, the time they
+ * took together, and why it ended), and the flag the window raises to stop
+ * it.  The application's thread owns the record until the thread starts,
+ * and again from the POST_FINISHED that hands it back; only stop and the
+ * waker are shared in between.
+ */
+struct exchange {
+	struct kl_app *app;
+	struct kl_socket_waker *waker;
+	unsigned done;
+	uint64_t total_us;
+	int error;
+	atomic_int stop;
+};
+
+/* One report of how far the round trips got: made by the thread, freed by the one who takes the post. */
+struct progress {
+	unsigned done;
+	uint64_t total_us;
+};
+
+/*
+ * Everything the program keeps: its connection, window and widgets, the
+ * series running (NULL when none) and its thread, what the window shows of
+ * it, and what the main loop has to do next.
+ */
+struct network {
+	struct kl_app *app;
+	struct kl_window *window;
+	struct kl_ui *ui;
+	struct kl_text text;
+	struct kl_style style;
+	struct kl_canvas canvas;
+	uint32_t *pixels;
+	uint32_t width;
+	uint32_t height;
+	struct exchange *exchange;
+	struct kl_thread *thread;
+	unsigned done;
+	char status[128];
+	int dirty;
+	int moving;
+	int resized;
+	int closed;
+};
+
+static int network_resize(struct network *network);
+static void network_draw(struct network *network, uint64_t now_us);
+static int network_frame(struct network *network);
+static void network_event(struct network *network, const struct kl_app_event *event);
+static void network_input(struct network *network, const struct kl_window_event *input);
+static void network_post(struct network *network, uint32_t code, void *data);
+static void network_start(struct network *network);
+static void network_stop(struct network *network);
+static void network_finish(struct network *network);
+static void network_run(void *argument);
+static int network_connect(struct kl_socket **listener, struct kl_socket **client);
+static int network_join(struct exchange *exchange, struct kl_socket *listener, struct kl_socket *client, struct kl_socket **server);
+static int network_trips(struct exchange *exchange, struct kl_socket *client, struct kl_socket *server);
+static int network_trip(struct exchange *exchange, struct kl_socket *client, struct kl_socket *server, unsigned number);
+static int network_pause(struct exchange *exchange);
+static int network_wait(struct exchange *exchange, struct kl_socket *socket, unsigned events);
+static int network_send_line(struct exchange *exchange, struct kl_socket *socket, const char *line);
+static int network_receive_line(struct exchange *exchange, struct kl_socket *socket, char *line, size_t size);
+static uint64_t network_now_us(void);
+
+int
+main(void)
+{
+	static struct network network;
+	struct kl_window_options window_options;
+	struct kl_app_options app_options;
+	struct kl_app_event event;
+	int timeout;
+	int status;
+	int taken;
+
+	/* Connects to the desktop. */
+	memset(&app_options, 0, sizeof(app_options));
+	app_options.application = "org.example.Network";
+	network.app = kl_app_open(&app_options);
+	if (network.app == NULL) {
+		fprintf(stderr, "network: no desktop (%s)\n", strerror(errno));
+		return 1;
+	}
+
+	/* Opens the window. */
+	memset(&window_options, 0, sizeof(window_options));
+	window_options.title = "Network";
+	window_options.width = 440;
+	window_options.height = 240;
+	window_options.present = KL_PRESENT_VULKAN;
+	network.window = kl_app_window_create(network.app, &window_options);
+	if (network.window == NULL) {
+		fprintf(stderr, "network: no window (%s)\n", strerror(errno));
+		return 1;
+	}
+
+	/* Makes the widgets' record and opens the font. */
+	network.ui = kl_ui_create();
+	if (network.ui == NULL)
+		return 1;
+	status = kl_text_open(&network.text, FONT, FALLBACK_FONT);
+	if (status != 0) {
+		fprintf(stderr, "network: no font %s (%s)\n", FONT, strerror(status));
+		return 1;
+	}
+
+	/* Gives the widgets the font. */
+	network.style.text = &network.text;
+	snprintf(network.status, sizeof(network.status), "No round trips yet.");
+
+	/* Makes the first frame. */
+	status = network_resize(&network);
+	if (status != 0)
+		return 1;
+
+	/* Runs until the window is closed; the thread's posts arrive among the other events. */
+	while (!network.closed) {
+		/* Waits for the desktop or a post: not at all while a frame is due, a frame's time while something moves. */
+		timeout = -1;
+		if (network.moving)
+			timeout = 16;
+		if (network.dirty || network.resized)
+			timeout = 0;
+		status = kl_app_dispatch(network.app, timeout);
+		if (status != 0)
+			break;
+
+		/* Takes every event queued, in order. */
+		for (;;) {
+			taken = kl_app_take(network.app, &event);
+			if (!taken)
+				break;
+			network_event(&network, &event);
+		}
+
+		/* A new size: a new frame of that size. */
+		if (network.resized) {
+			network.resized = 0;
+			status = network_resize(&network);
+			if (status != 0)
+				break;
+		}
+
+		/* Something changed or moves: draws and shows a frame. */
+		if (network.dirty || network.moving) {
+			status = network_frame(&network);
+			if (status != 0)
+				break;
+		}
+	}
+
+	/* Ends the round trips still running before the application closes: no thread may post after it. */
+	network_finish(&network);
+
+	/* Frees the widgets' record, the frame and the font, and closes the window and the connection. */
+	kl_ui_destroy(network.ui);
+	kl_canvas_release(&network.canvas);
+	free(network.pixels);
+	kl_text_close(&network.text);
+	kl_app_close(network.app);
+
+	/* Succeeded: the window was closed. */
+	return 0;
+}
+
+/*
+ * Makes the frame at the window's size; nonzero when it cannot.
+ */
+static int
+network_resize(
+	struct network *network)
+{
+	uint32_t *pixels;
+	int status;
+
+	/* Sets the presenter to the window's size, which it reports. */
+	status = kl_window_present_resize(network->window, &network->width, &network->height);
+	if (status != 0)
+		return -1;
+
+	/* Allocates the frame. */
+	pixels = malloc((size_t)network->width * network->height * sizeof(pixels[0]));
+	if (pixels == NULL)
+		return -1;
+
+	/* Puts the canvas on the new pixels in place of the old ones; the widgets draw on it. */
+	if (network->pixels != NULL)
+		kl_canvas_release(&network->canvas);
+	free(network->pixels);
+	network->pixels = pixels;
+	status = kl_canvas_init(&network->canvas, network->pixels, network->width, (int)network->width, (int)network->height);
+	if (status != 0)
+		return -1;
+	network->style.canvas = &network->canvas;
+
+	/* Succeeded: the new frame is drawn next. */
+	network->dirty = 1;
+	return 0;
+}
+
+/*
+ * Draws one frame: the question, how far the round trips got, what they
+ * found, and the Start and Stop buttons.
+ */
+static void
+network_draw(
+	struct network *network,
+	uint64_t now_us)
+{
+	const struct kl_theme *theme;
+	struct kl_rect whole;
+	struct kl_rect bar;
+	struct kl_rect start;
+	struct kl_rect stop;
+	unsigned start_flags;
+	unsigned stop_flags;
+	char line[64];
+	double fraction;
+	int baseline;
+	int clicked;
+
+	/* Starts the frame. */
+	theme = kl_theme_default();
+	network->style.theme = theme;
+	kl_ui_begin(network->ui, now_us);
+
+	/* Paints the ground. */
+	whole.x = 0;
+	whole.y = 0;
+	whole.width = (int)network->width;
+	whole.height = (int)network->height;
+	kl_canvas_gradient(&network->canvas, &whole, theme->ground_top, theme->ground_bottom);
+
+	/* The question. */
+	snprintf(line, sizeof(line), "%u round trips over the loopback", TRIPS);
+	baseline = kl_text_center(theme->text_body, MARGIN, 24);
+	(void)kl_text_draw(&network->text, &network->canvas, MARGIN, baseline, line, strlen(line), theme->text_body, 1, theme->text);
+
+	/* How far the round trips got, as a bar, and what they found. */
+	bar.x = MARGIN;
+	bar.y = MARGIN + 44;
+	bar.width = (int)network->width - 2 * MARGIN;
+	bar.height = 6;
+	fraction = (double)network->done / (double)TRIPS;
+	kl_progress(&network->style, &bar, fraction, now_us);
+	baseline = kl_text_center(theme->text_body, bar.y + 16, 24);
+	(void)kl_text_draw(&network->text, &network->canvas, MARGIN, baseline, network->status, strlen(network->status), theme->text_body, 0, theme->text_secondary);
+
+	/* Lays out the two buttons in a row at the bottom. */
+	start.x = MARGIN;
+	start.y = (int)network->height - MARGIN - theme->control_height;
+	start.width = BUTTON_WIDTH;
+	start.height = theme->control_height;
+	stop = start;
+	stop.x = start.x + BUTTON_WIDTH + 12;
+
+	/* Start: new round trips on a network thread; disabled while some run. */
+	start_flags = KL_BUTTON_PRIMARY;
+	if (network->exchange != NULL)
+		start_flags |= KL_BUTTON_DISABLED;
+	clicked = kl_button(network->ui, &network->style, ID_START, &start, "Start", start_flags);
+	if (clicked)
+		network_start(network);
+
+	/* Stop: asks the thread to end; its series comes back as usual, cut short. */
+	stop_flags = 0U;
+	if (network->exchange == NULL)
+		stop_flags = KL_BUTTON_DISABLED;
+	clicked = kl_button(network->ui, &network->style, ID_STOP, &stop, "Stop", stop_flags);
+	if (clicked && network->exchange != NULL)
+		network_stop(network);
+
+	/* Ends the frame. */
+	network->moving = kl_ui_end(network->ui, now_us);
+	kl_ui_window_text(network->ui, network->window);
+}
+
+
+/*
+ * Draws and shows a frame; nonzero when the frame cannot be shown.
+ */
+static int
+network_frame(
+	struct network *network)
+{
+	int status;
+
+	/* Draws the frame. */
+	network->dirty = 0;
+	network_draw(network, kl_clock_us());
+
+	/* Hands it to the compositor. */
+	status = kl_window_present(network->window, network->pixels, network->width);
+	if (status == EAGAIN) {
+		/* The window's size changed under the frame: a new frame of the new size. */
+		network->resized = 1;
+	} else if (status != 0) {
+		/* Refuses to go on when the frame could not be shown. */
+		return -1;
+	}
+
+	/* Succeeded: the frame is shown. */
+	return 0;
+}
+
+/*
+ * Acts on one event of the application: the theme, the window's input,
+ * and the posts, whether they came to the window or to the application.
+ */
+static void
+network_event(
+	struct network *network,
+	const struct kl_app_event *event)
+{
+	/* The appearance changed: the theme's colours are new. */
+	if (event->kind == KL_APP_THEME)
+		network->dirty = 1;
+
+	/* A post to the window comes among its input, as an input of its own kind. */
+	if (event->kind == KL_APP_WINDOW && event->window == network->window) {
+		if (event->input.kind == KL_WINDOW_POST) {
+			network_post(network, event->input.code, event->input.data);
+			return;
+		}
+
+		/* Offers any other input to the widgets. */
+		network_input(network, &event->input);
+	}
+
+	/* A post to the application, or one to a window that closed before it came. */
+	if (event->kind == KL_APP_POST)
+		network_post(network, event->code, event->data);
+}
+
+/*
+ * Gives one input of the window to the widgets, or acts on it.
+ */
+static void
+network_input(
+	struct network *network,
+	const struct kl_window_event *input)
+{
+	int taken;
+
+	/* The window's own inputs: a new size, the close button. */
+	if (input->kind == KL_WINDOW_RESIZE) {
+		network->resized = 1;
+		return;
+	}
+
+	/* The close button ends the program. */
+	if (input->kind == KL_WINDOW_CLOSE) {
+		network->closed = 1;
+		return;
+	}
+
+	/* The rest is the widgets'. */
+	taken = kl_ui_window_input(network->ui, input);
+	if (taken)
+		network->dirty = 1;
+}
+
+/*
+ * Takes one of the thread's posts: a report of progress, which is shown
+ * and freed, or the series handed back, which ends it.  The data of each is
+ * the program's from now on.
+ */
+static void
+network_post(
+	struct network *network,
+	uint32_t code,
+	void *data)
+{
+	struct progress *progress;
+	struct exchange *exchange;
+
+	/* A report: shown, then freed (the thread's reports come before its series, never after). */
+	if (code == POST_PROGRESS) {
+		progress = data;
+		network->done = progress->done;
+		snprintf(network->status, sizeof(network->status), "%u of %u round trips, %lu us each so far.", progress->done, TRIPS, (unsigned long)(progress->total_us / progress->done));
+		free(progress);
+		network->dirty = 1;
+		return;
+	}
+
+	/* The series handed back: its thread is ending, so it is joined, and only then is its waker closed. */
+	if (code == POST_FINISHED) {
+		exchange = data;
+		(void)kl_thread_join(network->thread);
+		network->thread = NULL;
+		kl_socket_waker_close(exchange->waker);
+		network->done = exchange->done;
+		if (exchange->error == 0) {
+			snprintf(network->status, sizeof(network->status), "Done: %u round trips, %lu us each.", exchange->done, (unsigned long)(exchange->total_us / exchange->done));
+		} else if (exchange->error == ECANCELED) {
+			snprintf(network->status, sizeof(network->status), "Stopped after %u round trips.", exchange->done);
+		} else {
+			snprintf(network->status, sizeof(network->status), "Failed after %u round trips (%s).", exchange->done, strerror(exchange->error));
+		}
+		free(exchange);
+		network->exchange = NULL;
+		network->dirty = 1;
+	}
+}
+
+/*
+ * Starts the round trips on a network thread.
+ */
+static void
+network_start(
+	struct network *network)
+{
+	struct kl_thread_options options;
+	struct exchange *exchange;
+	int status;
+
+	/* The series' record, handed to the thread. */
+	exchange = calloc(1, sizeof(*exchange));
+	if (exchange == NULL) {
+		snprintf(network->status, sizeof(network->status), "No memory for the round trips.");
+		return;
+	}
+
+	/* Gives the thread what it works with. */
+	exchange->app = network->app;
+	atomic_init(&exchange->stop, 0);
+
+	/* The waker that ends the thread's waits; it is closed after the thread is joined. */
+	status = kl_socket_waker_open(&exchange->waker);
+	if (status != 0) {
+		free(exchange);
+		snprintf(network->status, sizeof(network->status), "No waker (%s).", strerror(status));
+		return;
+	}
+
+	/* The network thread: from here until POST_FINISHED, the record is its own but for stop. */
+	memset(&options, 0, sizeof(options));
+	options.name = "network";
+	options.run = network_run;
+	options.argument = exchange;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&options, &network->thread);
+	if (status != 0) {
+		kl_socket_waker_close(exchange->waker);
+		free(exchange);
+		snprintf(network->status, sizeof(network->status), "No thread for the network.");
+		return;
+	}
+
+	/* Remembers the running series. */
+	network->exchange = exchange;
+	network->done = 0;
+	snprintf(network->status, sizeof(network->status), "Connecting...");
+}
+
+/*
+ * Asks the thread to end: raises its flag, then rings its waker, so that a
+ * wait in progress returns and the thread looks at the flag.
+ */
+static void
+network_stop(
+	struct network *network)
+{
+	/* The flag first: the thread looks at it after its wait returns. */
+	atomic_store(&network->exchange->stop, 1);
+
+	/* Ends the thread's wait, or the next one it makes. */
+	kl_socket_waker_ring(network->exchange->waker);
+}
+
+/*
+ * Ends round trips still running when the program ends: asks the thread to
+ * stop, and takes the posts it left, the last of which joins its thread.
+ */
+static void
+network_finish(
+	struct network *network)
+{
+	struct kl_app_event event;
+	int status;
+	int taken;
+
+	/* Nothing runs. */
+	if (network->exchange == NULL)
+		return;
+
+	/* Stops the thread; it posts its series as it ends, and taking that post joins it. */
+	network_stop(network);
+
+	/* Takes the posts, waiting for them, until the series came back (the last of them). */
+	while (network->exchange != NULL) {
+		status = kl_app_dispatch(network->app, -1);
+		if (status != 0)
+			break;
+		for (;;) {
+			taken = kl_app_take(network->app, &event);
+			if (!taken)
+				break;
+			if (event.kind == KL_APP_WINDOW && event.input.kind == KL_WINDOW_POST) {
+				network_post(network, event.input.code, event.input.data);
+			} else if (event.kind == KL_APP_POST) {
+				network_post(network, event.code, event.data);
+			}
+		}
+	}
+}
+
+/*
+ * The network thread: makes the round trips over two sockets of the
+ * loopback, reports every REPORT_EVERY of them, and hands the series back
+ * when it is done, failed or asked to stop.  It calls nothing of the
+ * application but the posts, which any thread may; it waits for the
+ * network only here, never on the application's thread.
+ */
+static void
+network_run(
+	void *argument)
+{
+	struct exchange *exchange;
+	struct kl_socket *listener;
+	struct kl_socket *client;
+	struct kl_socket *server;
+	int status;
+
+	/* Starts with no socket; each is closed below if it was opened. */
+	exchange = argument;
+	listener = NULL;
+	client = NULL;
+	server = NULL;
+
+	/* Opens the listening socket and the connecting one, and waits for them to meet. */
+	status = network_connect(&listener, &client);
+	if (status == 0)
+		status = network_join(exchange, listener, client, &server);
+
+	/* Makes the round trips over the two ends of the connection. */
+	if (status == 0)
+		status = network_trips(exchange, client, server);
+
+	/* Closes the sockets: this thread is the only one that used them. */
+	if (server != NULL)
+		kl_socket_close(server);
+	if (client != NULL)
+		kl_socket_close(client);
+	if (listener != NULL)
+		kl_socket_close(listener);
+
+	/* Notes why the series ended (0: all the round trips were made). */
+	exchange->error = status;
+
+	/* Hands the series back; it fails only without memory, and then the window shows the series as running. */
+	status = kl_app_post(exchange->app, POST_FINISHED, exchange);
+	if (status != 0)
+		fprintf(stderr, "network: the round trips were lost (%s)\n", strerror(status));
+
+	/* The thread's end: the application's thread joins it. */
+}
+
+/*
+ * Opens a socket that listens on the loopback, at a port the system
+ * chooses, and one that connects to it without waiting; zero when both are
+ * open.  The connect has not ended yet: network_join waits for it.
+ */
+static int
+network_connect(
+	struct kl_socket **listener,
+	struct kl_socket **client)
+{
+	struct kl_address address;
+	int status;
+
+	/* The listening socket: a port of the loopback, which the system chooses (0). */
+	kl_address_loopback(KL_ADDRESS_IPV4, 0, &address);
+	status = kl_socket_open(KL_ADDRESS_IPV4, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, listener);
+	if (status != 0)
+		return status;
+	status = kl_socket_bind(*listener, &address);
+	if (status != 0)
+		return status;
+	status = kl_socket_listen(*listener, 1);
+	if (status != 0)
+		return status;
+
+	/* Asks which port it got: that is where the other socket connects. */
+	status = kl_socket_local_address(*listener, &address);
+	if (status != 0)
+		return status;
+
+	/* The connecting socket: its connect returns EINPROGRESS and ends later, or ends at once on the loopback. */
+	status = kl_socket_open(KL_ADDRESS_IPV4, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, client);
+	if (status != 0)
+		return status;
+	status = kl_socket_connect(*client, &address);
+	if (status != 0 && status != EINPROGRESS)
+		return status;
+
+	/* Succeeded: both sockets are open, the connection may still be on its way. */
+	return 0;
+}
+
+/*
+ * Waits until the listening socket holds the connection (to accept it) and
+ * the connecting one has ended its connect, both at once, and ends early
+ * when asked to stop; zero when the connection is made, with the accepted
+ * socket in *server.
+ */
+static int
+network_join(
+	struct exchange *exchange,
+	struct kl_socket *listener,
+	struct kl_socket *client,
+	struct kl_socket **server)
+{
+	struct kl_socket_wait waits[3];
+	size_t count;
+	size_t ready;
+	size_t index;
+	int connected;
+	int stop;
+	int status;
+
+	/* Not connected yet; the connect may have ended at once, but the loop asks all the same. */
+	connected = 0;
+
+	/* Waits for the connection on both of its ends, and for the waker, until the two sockets are in use. */
+	while (*server == NULL || !connected) {
+		/* Lists what is still waited for: the connection to accept, the connect to end, and the waker. */
+		memset(waits, 0, sizeof(waits));
+		count = 0;
+		if (*server == NULL) {
+			waits[count].socket = listener;
+			waits[count].events = KL_SOCKET_READABLE;
+			count++;
+		}
+		if (!connected) {
+			waits[count].socket = client;
+			waits[count].events = KL_SOCKET_WRITABLE;
+			count++;
+		}
+		waits[count].waker = exchange->waker;
+		waits[count].events = KL_SOCKET_READABLE;
+		count++;
+
+		/* Waits for any of them. */
+		status = kl_socket_poll(waits, count, KL_SOCKET_FOREVER, &ready);
+		if (status != 0)
+			return status;
+
+		/* Looks at the stop flag only now that the wait returned: the ring came after the flag was raised. */
+		stop = atomic_load(&exchange->stop);
+		if (stop)
+			return ECANCELED;
+
+		/* Takes what became ready: the connection is accepted, the connect's end is read. */
+		for (index = 0; index < count; index++) {
+			if (waits[index].ready == 0)
+				continue;
+			if (waits[index].socket == listener) {
+				status = kl_socket_accept(listener, KL_SOCKET_NONBLOCKING, server, NULL);
+				if (status != 0 && status != EAGAIN)
+					return status;
+			} else if (waits[index].socket == client) {
+				status = kl_socket_connect_result(client);
+				if (status != 0)
+					return status;
+				connected = 1;
+			}
+		}
+	}
+
+	/* Succeeded: the client is connected and the server socket is its other end. */
+	return 0;
+}
+
+/*
+ * Makes the round trips one after the other, with a pause after each, and
+ * reports every REPORT_EVERY of them to the application; zero when all are
+ * made.
+ */
+static int
+network_trips(
+	struct exchange *exchange,
+	struct kl_socket *client,
+	struct kl_socket *server)
+{
+	struct progress *progress;
+	unsigned number;
+	int status;
+
+	/* Makes the round trips, numbered from 1. */
+	for (number = 1U; number <= TRIPS; number++) {
+		status = network_trip(exchange, client, server, number);
+		if (status != 0)
+			return status;
+
+		/* Every REPORT_EVERY round trips: tells the window how far it got. */
+		if (number % REPORT_EVERY == 0) {
+			progress = malloc(sizeof(*progress));
+			if (progress != NULL) {
+				progress->done = exchange->done;
+				progress->total_us = exchange->total_us;
+				status = kl_app_post(exchange->app, POST_PROGRESS, progress);
+				if (status != 0)
+					free(progress);
+			}
+		}
+
+		/* The pause, which a Stop ends at once. */
+		status = network_pause(exchange);
+		if (status != 0)
+			return status;
+	}
+
+	/* Succeeded: every round trip was made. */
+	return 0;
+}
+
+/*
+ * Makes one round trip: sends "ping N" from the client, the server socket
+ * receives it and sends the same line back, and the client receives it;
+ * zero when the line came back as it went, with the round trip counted.
+ */
+static int
+network_trip(
+	struct exchange *exchange,
+	struct kl_socket *client,
+	struct kl_socket *server,
+	unsigned number)
+{
+	char line[LINE_SIZE];
+	char heard[LINE_SIZE];
+	char answer[LINE_SIZE];
+	uint64_t started_us;
+	uint64_t elapsed_us;
+	int status;
+
+	/* The line, and the time it is sent at (the monotonic clock). */
+	snprintf(line, sizeof(line), "ping %u\n", number);
+	started_us = network_now_us();
+
+	/* The client sends it. */
+	status = network_send_line(exchange, client, line);
+	if (status != 0)
+		return status;
+
+	/* The server receives it and sends the same line back. */
+	status = network_receive_line(exchange, server, heard, sizeof(heard));
+	if (status != 0)
+		return status;
+	status = network_send_line(exchange, server, heard);
+	if (status != 0)
+		return status;
+
+	/* The client receives the answer. */
+	status = network_receive_line(exchange, client, answer, sizeof(answer));
+	if (status != 0)
+		return status;
+
+	/* The answer must be the line that went. */
+	status = strcmp(line, answer);
+	if (status != 0)
+		return EPROTO;
+
+	/* Counts the round trip and the time it took. */
+	elapsed_us = network_now_us() - started_us;
+	exchange->done++;
+	exchange->total_us += elapsed_us;
+
+	/* Succeeded: the line came back. */
+	return 0;
+}
+
+/*
+ * Pauses between two round trips by waiting for the waker alone, for
+ * PAUSE_MS: a Stop ends the pause at once.  Zero when the pause passed, or
+ * ECANCELED when Stop was asked.
+ */
+static int
+network_pause(
+	struct exchange *exchange)
+{
+	struct kl_socket_wait wait;
+	size_t ready;
+	int stop;
+	int status;
+
+	/* Waits for the waker only, with a time limit. */
+	memset(&wait, 0, sizeof(wait));
+	wait.waker = exchange->waker;
+	wait.events = KL_SOCKET_READABLE;
+	status = kl_socket_poll(&wait, 1, PAUSE_MS, &ready);
+	if (status != 0)
+		return status;
+
+	/* Looks at the stop flag after the wait returned, whether it timed out or was rung. */
+	stop = atomic_load(&exchange->stop);
+	if (stop)
+		return ECANCELED;
+
+	/* Succeeded: the pause passed. */
+	return 0;
+}
+
+/*
+ * Waits until a socket is ready for what events say, or until the waker
+ * rings; zero when the socket is ready, ECANCELED when Stop was asked.
+ */
+static int
+network_wait(
+	struct exchange *exchange,
+	struct kl_socket *socket,
+	unsigned events)
+{
+	struct kl_socket_wait waits[2];
+	size_t ready;
+	int stop;
+	int status;
+
+	/* The socket, and the waker that Stop rings. */
+	memset(waits, 0, sizeof(waits));
+	waits[0].socket = socket;
+	waits[0].events = events;
+	waits[1].waker = exchange->waker;
+	waits[1].events = KL_SOCKET_READABLE;
+	status = kl_socket_poll(waits, 2, KL_SOCKET_FOREVER, &ready);
+	if (status != 0)
+		return status;
+
+	/* Looks at the stop flag after the wait returned. */
+	stop = atomic_load(&exchange->stop);
+	if (stop)
+		return ECANCELED;
+
+	/* Succeeded: the socket is ready, or failed, which its next call reports. */
+	return 0;
+}
+
+/*
+ * Sends a whole line on a socket that does not block: what the socket
+ * takes goes at once, the rest after a wait for room.
+ */
+static int
+network_send_line(
+	struct exchange *exchange,
+	struct kl_socket *socket,
+	const char *line)
+{
+	size_t length;
+	size_t total;
+	size_t sent;
+	int status;
+
+	/* Sends until every byte of the line has gone. */
+	length = strlen(line);
+	total = 0;
+	while (total < length) {
+		status = kl_socket_send(socket, line + total, length - total, &sent);
+		if (status == EAGAIN) {
+			/* No room now: waits for it. */
+			status = network_wait(exchange, socket, KL_SOCKET_WRITABLE);
+			if (status != 0)
+				return status;
+			continue;
+		}
+		if (status != 0)
+			return status;
+		total += sent;
+	}
+
+	/* Succeeded: the line was sent. */
+	return 0;
+}
+
+/*
+ * Receives a line, up to its newline, on a socket that does not block,
+ * waiting for the bytes first; zero when the line is whole in the buffer.
+ */
+static int
+network_receive_line(
+	struct exchange *exchange,
+	struct kl_socket *socket,
+	char *line,
+	size_t size)
+{
+	size_t length;
+	size_t received;
+	int status;
+
+	/* Receives until the newline came. */
+	length = 0;
+	for (;;) {
+		/* Waits for bytes (or the stream's end), or for Stop. */
+		status = network_wait(exchange, socket, KL_SOCKET_READABLE);
+		if (status != 0)
+			return status;
+
+		/* Takes what is there; EAGAIN means the wait ended without bytes, so it waits again. */
+		status = kl_socket_receive(socket, line + length, size - 1U - length, &received);
+		if (status == EAGAIN)
+			continue;
+		if (status != 0)
+			return status;
+
+		/* Zero bytes are the stream's end: the peer closed before the line was whole. */
+		if (received == 0)
+			return ECONNRESET;
+		length += received;
+		if (line[length - 1U] == '\n')
+			break;
+
+		/* A line that fills the buffer without a newline is not one of ours. */
+		if (length == size - 1U)
+			return EMSGSIZE;
+	}
+
+	/* Succeeded: the line, ended for the string functions. */
+	line[length] = '\0';
+	return 0;
+}
+
+/*
+ * Reports the monotonic clock in microseconds.
+ */
+static uint64_t
+network_now_us(void)
+{
+	struct timespec now;
+
+	/* The monotonic clock, which a change of the time of day does not move. */
+	(void)clock_gettime(CLOCK_MONOTONIC, &now);
+
+	/* Reports it in microseconds. */
+	return (uint64_t)now.tv_sec * 1000000U + (uint64_t)now.tv_nsec / 1000U;
+}
+```
+
+#### Reading the program
+
+**The record ([lines 54-69](keiland-examples/08-network.c#L54-L69), `struct exchange`).** It is `struct count` of `08-worker.c` with the waker (`struct kl_socket_waker`) in it. The application's thread opens the waker before it starts the thread, and closes it after it joined the thread. The thread and the window share the waker and `stop`; everything else in the record is the thread's until `POST_FINISHED` gives it back.
+
+**Starting ([lines 464-512](keiland-examples/08-network.c#L464-L512), `network_start`).** The function opens the waker ([lines 486-492](keiland-examples/08-network.c#L486-L492)), then starts the thread named "network" ([lines 494-506](keiland-examples/08-network.c#L494-L506)). If the thread cannot start, the waker is closed again, since nobody else would close it:
+
+```c
+status = kl_socket_waker_open(&exchange->waker);
+/* ... */
+status = kl_thread_start(&options, &network->thread);
+if (status != 0) {
+	kl_socket_waker_close(exchange->waker);
+	free(exchange);
+	/* ... */
+}
+```
+
+**Addresses and sockets ([lines 617-657](keiland-examples/08-network.c#L617-L657), `network_connect`).** A `struct kl_address` is a value: a family (`KL_ADDRESS_IPV4` or `KL_ADDRESS_IPV6`), a port in the host's byte order, and the address's bytes. `kl_address_loopback` makes the loopback address of a family; `kl_address_parse` reads one written in numbers ("192.0.2.1", "2001:db8::1"). Port 0 asks the system to choose one. `kl_socket_open` opens a socket of a family and a kind (`KL_SOCKET_STREAM` is TCP, `KL_SOCKET_DATAGRAM` is UDP); `KL_SOCKET_NONBLOCKING` makes calls that cannot go on return `EAGAIN` in place of waiting. The listening socket is bound to the loopback and told to listen; `kl_socket_local_address` then says which port it got ([lines 630-645](keiland-examples/08-network.c#L630-L645)):
+
+```c
+kl_address_loopback(KL_ADDRESS_IPV4, 0, &address);
+status = kl_socket_open(KL_ADDRESS_IPV4, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, listener);
+/* ... */
+status = kl_socket_bind(*listener, &address);
+/* ... */
+status = kl_socket_listen(*listener, 1);
+/* ... */
+status = kl_socket_local_address(*listener, &address);
+```
+
+Every call returns 0 or an `errno` value, and a socket that cannot go on without blocking returns `EAGAIN`, never `EWOULDBLOCK`.
+
+**A connect that does not wait ([lines 647-653](keiland-examples/08-network.c#L647-L653)).** The second socket connects to that address. A socket that does not block returns `EINPROGRESS`: the connection is on its way. The program waits for the socket to be writable, and only then asks how the connect ended with `kl_socket_connect_result` (0, or the reason it failed):
+
+```c
+status = kl_socket_connect(*client, &address);
+if (status != 0 && status != EINPROGRESS)
+	return status;
+```
+
+**Waiting for several sockets ([lines 659-731](keiland-examples/08-network.c#L659-L731), `network_join`).** `kl_socket_poll` takes an array of `struct kl_socket_wait`, each naming one socket or one waker and the `events` it waits for, and returns when one is ready or the time ran out. Here the thread waits for the listening socket to be readable (a connection can be accepted), the connecting socket to be writable (its connect ended), and the waker ([lines 685-700](keiland-examples/08-network.c#L685-L700)):
+
+```c
+waits[count].socket = listener;
+waits[count].events = KL_SOCKET_READABLE;
+/* ... */
+waits[count].socket = client;
+waits[count].events = KL_SOCKET_WRITABLE;
+/* ... */
+waits[count].waker = exchange->waker;
+waits[count].events = KL_SOCKET_READABLE;
+/* ... */
+status = kl_socket_poll(waits, count, KL_SOCKET_FOREVER, &ready);
+```
+
+Afterwards each wait's `ready` says what was found: `KL_SOCKET_READABLE` (bytes, the end of the stream, or a connection to accept), `KL_SOCKET_WRITABLE` (room to send, or a connect that ended) and `KL_SOCKET_FAILED` (the socket failed; the next call on it says why). The program takes what became ready ([lines 712-726](keiland-examples/08-network.c#L712-L726)): it accepts the connection, with `KL_SOCKET_NONBLOCKING` for the new socket, and reads the connect's end. `kl_socket_accept` can still return `EAGAIN` (a connection can go away before it is taken), and the loop then waits again.
+
+**The pause and the waits of the round trips ([lines 831-894](keiland-examples/08-network.c#L831-L894), `network_pause` and `network_wait`).** Every wait of the thread has the waker among its waits, so Stop ends it whatever the thread is waiting for. The pause waits for the waker alone, with a time limit (`PAUSE_MS`): it returns when the time is out, or at once when Stop rang. `network_wait` waits for one socket and the waker.
+
+**Sending and receiving ([lines 896-977](keiland-examples/08-network.c#L896-L977), `network_send_line` and `network_receive_line`).** A send may take fewer bytes than asked, and `*sent` says how many; the function sends the rest after the socket is writable again. A receive returns whatever has arrived, so the function receives until the newline. A receive of 0 bytes (with 0 returned) is not an empty message: it is the end of the stream, the peer having closed its side ([lines 962-964](keiland-examples/08-network.c#L962-L964)).
+
+**Stop ([lines 514-527](keiland-examples/08-network.c#L514-L527), `network_stop`, and [lines 707-710](keiland-examples/08-network.c#L707-L710)).** The window raises the flag and then rings the waker. A ring ends the wait of the `kl_socket_poll` the waker is among, or the next one the thread makes; rings that come before the wait returns count as one. The rule that makes this safe: the thread looks at the flag after the wait returned, never before it. The flag was raised before the ring, so whatever ring the wait saw, the flag is there to be read:
+
+```c
+atomic_store(&network->exchange->stop, 1);
+kl_socket_waker_ring(network->exchange->waker);
+```
+
+```c
+status = kl_socket_poll(waits, count, KL_SOCKET_FOREVER, &ready);
+if (status != 0)
+	return status;
+stop = atomic_load(&exchange->stop);
+if (stop)
+	return ECANCELED;
+```
+
+**The end ([lines 444-461](keiland-examples/08-network.c#L444-L461), `network_post`; [lines 598-604](keiland-examples/08-network.c#L598-L604), `network_run`).** The thread closes its three sockets before its last post: it is the only thread that used them. The application's thread joins the thread when it takes `POST_FINISHED`, and closes the waker only after that ([lines 447-449](keiland-examples/08-network.c#L447-L449)), because the thread may still be in a wait that uses it until it returned:
+
+```c
+(void)kl_thread_join(network->thread);
+network->thread = NULL;
+kl_socket_waker_close(exchange->waker);
+```
+
+**Names.** The program connects to an address it made. A program that connects to a host by its name asks `kl_socket_resolve` for the addresses first. That call waits for the system's answer, which can take long, so it too is made on the network thread, never on the application's.
+
+#### The rules of the network
+
+- Wait for sockets on a thread of the program's own, never on the application's thread. The thread hands its results over with `kl_app_post`, and the application's thread draws them ([lines 609-612](keiland-examples/08-network.c#L609-L612)).
+- A thread that waits for a socket also waits for a waker, and the program ends the wait by ringing it. Raise the flag first and ring afterwards, and look at the flag after the wait returned ([lines 522-526](keiland-examples/08-network.c#L522-L526), [lines 707-710](keiland-examples/08-network.c#L707-L710)).
+- Close a waker after the thread that waits for it was joined ([lines 447-449](keiland-examples/08-network.c#L447-L449)). Close a socket on the thread that used it, once nobody waits for it, sends or receives on it.
+- A socket that does not block returns `EAGAIN` when it cannot go on. Compare with `EAGAIN` only: `EWOULDBLOCK` is never returned.
+- `kl_socket_connect_result` is asked after the wait found the socket writable or failed ([lines 720-725](keiland-examples/08-network.c#L720-L725)).
+- `kl_socket_resolve` waits for the system's answer: call it from the network thread.
+- One thread uses a socket at a time. The one exception is one thread sending while another receives on the same socket.
+- Whatever is sent can arrive in pieces, and several sends can arrive as one receive: keep the bytes until the message is whole ([lines 947-972](keiland-examples/08-network.c#L947-L972)).
+
+#### Pitfalls
+
+- Waiting for a socket on the application's thread: the window stops answering until the other side does.
+- Asking `kl_socket_connect_result` before the wait: the answer of a connect that has not ended yet cannot be told from a success.
+- Comparing the result with `EWOULDBLOCK`.
+- Taking a receive of 0 bytes for an empty message. On a stream it is the end: close the socket and stop receiving ([lines 962-964](keiland-examples/08-network.c#L962-L964)).
+- Closing the waker, or a socket another thread waits for, before the thread was joined.
+- Checking the flag before the wait, and not after: a Stop that comes while the thread waits is not seen until the wait ends by other means.
+- Using one socket from two threads for anything but sending on one and receiving on the other.
 
 A thread is one way to do a long job. Another is to have another program do it.
 
