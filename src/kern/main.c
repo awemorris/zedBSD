@@ -23,6 +23,7 @@
 #include "kern/platform.h"
 #include "kern/klog.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/thread.h"
 #include "kern/vm-commit.h"
 #include "kern/vm-reclaim.h"

@@ -27,6 +27,7 @@
 
 #include <uapi/errno.h>
 #include <stdbool.h>
+#include <hal/hal.h>
 
 #define NET_DEVICE_ALLOCATED 1U
 #define NET_DEVICE_LIVE      2U

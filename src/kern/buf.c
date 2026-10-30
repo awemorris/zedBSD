@@ -33,6 +33,7 @@
 #include "kern/thread.h"
 #include <uapi/errno.h>
 #include <kern/kcrt.h>
+#include <hal/hal.h>
 
 /*
  * The hash table's size: 2^16 buckets.  The cache holds an eighth of memory

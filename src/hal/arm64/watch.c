@@ -31,11 +31,12 @@
  * firmware the non-secure kernel cannot claim Group 0, and the BCM2711's
  * watchdog only resets the board, which loses the screen.
  *
- * The text goes to the planes of the display list the compositor (HVS)
- * scans out when a display driver owns the screen, and to the firmware's
- * framebuffer through the early console's cell painter otherwise.  A stop
- * that lasts long enough also replaces the display list with one plane,
- * so that a window above the text cannot hide it.  Once the kernel's
+ * The text goes to the planes the board's compositor (the Pi 4's HVS,
+ * through the board's hooks in bsp.h) scans out when a display driver owns
+ * the screen, and to the firmware's framebuffer through the early
+ * console's cell painter otherwise.  A stop that lasts long enough also
+ * has the compositor show one plane alone, so that a window above the
+ * text cannot hide it.  Once the kernel's
  * console has given the firmware's framebuffer up, the text goes nowhere
  * near it: a plane on it is passed over and the cell painter paints
  * nothing.
@@ -73,28 +74,7 @@
 /* How many return addresses a CPU records of its own call chain. */
 #define WATCH_CHAIN_DEPTH 6U
 
-/*
- * The BCM2711 compositor (HVS) the board maps (arm64_bsp_watch_compositor()):
- * its display-list register, its display-list memory and its size in words.
- */
-#define WATCH_HVS_DISPLIST0 0x20U
-#define WATCH_HVS_DLIST 0x4000U
-#define WATCH_HVS_DLIST_WORDS 2048U
-
-/* Where the watch's own one-plane list goes: above every list the display driver uses. */
-#define WATCH_HVS_OWN_LIST 1984U
-
-/* A display-list control word: end of list, valid, size, unscaled, and the pixel format. */
-#define WATCH_CTL_END 0x80000000U
-#define WATCH_CTL_VALID 0x40000000U
-#define WATCH_CTL_SIZE_SHIFT 24U
-#define WATCH_CTL_SIZE_MASK 0x3fU
-#define WATCH_CTL_UNITY 0x00008000U
-#define WATCH_CTL_FORMAT_MASK 0x0fU
-#define WATCH_CTL_FORMAT_RGBA8888 7U
-
-/* An unscaled plane is eight words; the most planes the watch looks at. */
-#define WATCH_PLANE_WORDS 8U
+/* The most planes the watch looks at. */
 #define WATCH_PLANES_MAX 8U
 
 /* The smallest plane drawn on, which keeps the text off the mouse cursor. */
@@ -120,20 +100,6 @@
 #define WATCH_CELL_COLUMNS 80U
 
 /*
- * One plane of the display list that the watch can draw on: where its
- * image is, how it is laid out, and where it sits on the screen.
- */
-struct watch_plane {
-	uint32_t list_index;
-	uint64_t physical;
-	uint32_t pitch;
-	uint32_t width;
-	uint32_t height;
-	uint32_t x;
-	uint32_t y;
-};
-
-/*
  * The report, one terminated line per row.
  *
  * Written only by the CPU that holds watch_report_lock; a debugger reads
@@ -156,12 +122,6 @@ static volatile unsigned watch_report_lock;
 static uint64_t watch_frequency;
 static uint64_t watch_stall_ticks;
 static uint64_t watch_takeover_ticks;
-
-/*
- * The compositor's registers through the direct map, or NULL when the
- * window could not be mapped.  Mapped once at boot; read only to draw.
- */
-static volatile uint32_t *watch_hvs;
 
 /*
  * The time of the last report and how many were written.  Under
@@ -229,10 +189,10 @@ static void line_hex(unsigned line, unsigned *column, uint64_t value, unsigned d
 static void line_decimal(unsigned line, unsigned *column, uint64_t value);
 static void line_seconds(unsigned line, unsigned *column, uint64_t ticks);
 static void line_address(unsigned line, unsigned *column, uint64_t address);
-static unsigned find_planes(struct watch_plane *planes, unsigned capacity);
-static void draw_plane(const struct watch_plane *plane);
+static unsigned find_planes(struct arm64_watch_plane *planes, unsigned capacity);
+static void draw_plane(const struct arm64_watch_plane *plane);
 static void draw_cells(void);
-static void take_over(const struct watch_plane *planes, unsigned count);
+static void take_over(const struct arm64_watch_plane *planes, unsigned count);
 
 /*
  * Prepares the watch on the boot CPU, once the kernel's tables exist.
@@ -251,8 +211,8 @@ arm64_watch_init(
 	if (frequency == 0)
 		return;
 
-	/* Maps the compositor the board has, whose display list the report is written into. */
-	watch_hvs = arm64_bsp_watch_compositor();
+	/* Lets the board map the compositor whose planes the report is written onto. */
+	arm64_bsp_watch_init();
 
 	/* The thresholds come last: a nonzero frequency turns the watch on. */
 	watch_stall_ticks = frequency * WATCH_STALL_SECONDS;
@@ -1071,16 +1031,16 @@ line_address(
 /*
  * Puts the report where a photograph of the screen reads it.
  *
- * The text goes onto the planes the compositor shows now; without a
- * compositor, or with no plane it can draw on, onto the firmware's
- * framebuffer.  A stop that lasts long enough replaces the display list
- * with the largest plane alone, so no window above it hides the text.
+ * The text goes onto the planes the board's compositor shows now; without
+ * a compositor, or with no plane it can draw on, onto the firmware's
+ * framebuffer.  A stop that lasts long enough has the compositor show the
+ * largest plane alone, so no window above it hides the text.
  */
 static void
 report_show(
 	uint64_t now)
 {
-	struct watch_plane planes[WATCH_PLANES_MAX];
+	struct arm64_watch_plane planes[WATCH_PLANES_MAX];
 	unsigned count;
 	unsigned index;
 	uint64_t stop_length;
@@ -1088,13 +1048,7 @@ report_show(
 	/* The report is as recent as now. */
 	watch_last_report = now;
 
-	/* The firmware's framebuffer on a board without a compositor. */
-	if (watch_hvs == NULL) {
-		draw_cells();
-		return;
-	}
-
-	/* The planes the compositor shows now. */
+	/* The planes the compositor shows now; the firmware's framebuffer without one. */
 	count = find_planes(planes, WATCH_PLANES_MAX);
 	if (count == 0) {
 		draw_cells();
@@ -1114,78 +1068,41 @@ report_show(
 }
 
 /*
- * Finds the unscaled 32-bit planes of the display list the compositor
- * shows on its first channel.
- *
- * The list is walked by each entry's own size; an entry that does not
- * look like a list entry ends the walk.
+ * Finds the planes the report can be drawn on: the board's compositor's
+ * unscaled 32-bit planes that are big enough to hold text, laid out as
+ * their pitch says, and not on the firmware's framebuffer once the
+ * kernel's console gave that up (nothing in the HAL paints there then).
  */
 static unsigned
 find_planes(
-	struct watch_plane *planes,
+	struct arm64_watch_plane *planes,
 	unsigned capacity)
 {
-	volatile uint32_t *list;
-	uint32_t index;
-	uint32_t control;
-	uint32_t size;
-	uint32_t pointer;
-	uint32_t extent;
+	struct arm64_watch_plane shown[WATCH_PLANES_MAX];
+	unsigned shown_count;
 	unsigned count;
-	unsigned entries;
+	unsigned index;
 	int given_up;
 
-	/* The list the hardware follows starts at the word DISPLIST0 names. */
-	list = (volatile uint32_t *)((volatile uint8_t *)watch_hvs + WATCH_HVS_DLIST);
-	index = watch_hvs[WATCH_HVS_DISPLIST0 / 4U];
+	/* The planes the compositor shows now; none on a board without one. */
+	if (capacity > WATCH_PLANES_MAX)
+		capacity = WATCH_PLANES_MAX;
+	shown_count = arm64_bsp_watch_planes(shown, capacity);
+	if (shown_count > capacity)
+		shown_count = capacity;
 	count = 0;
 
-	/* Walks the entries until the end marker, a bad entry, or enough planes. */
-	for (entries = 0; entries < 16U && count < capacity; entries++) {
-		/* An index past the list memory is not a list. */
-		if (index >= WATCH_HVS_DLIST_WORDS)
-			break;
-		control = list[index];
-		if ((control & WATCH_CTL_END) != 0)
-			break;
-		if ((control & WATCH_CTL_VALID) == 0)
-			break;
-
-		/* An entry's size covers at least its control word, and stays in the memory. */
-		size = (control >> WATCH_CTL_SIZE_SHIFT) & WATCH_CTL_SIZE_MASK;
-		if (size == 0 || index + size > WATCH_HVS_DLIST_WORDS)
-			break;
-
-		/* Only an unscaled 32-bit plane has its image where the watch can draw. */
-		if (size == WATCH_PLANE_WORDS &&
-		    (control & WATCH_CTL_UNITY) != 0 &&
-		    (control & WATCH_CTL_FORMAT_MASK) == WATCH_CTL_FORMAT_RGBA8888) {
-			pointer = list[index + 5U];
-			extent = list[index + 3U];
-			planes[count].list_index = index;
-			planes[count].physical = (uint64_t)(pointer & 0x3fffffffU);
-			planes[count].pitch = list[index + 7U] & 0xffffU;
-			planes[count].width = extent & 0xffffU;
-			planes[count].height = extent >> 16;
-			planes[count].x = list[index + 1U] & 0x3fffU;
-			planes[count].y = (list[index + 1U] >> 16) & 0x3fffU;
-
-			/*
-			 * Keeps a plane big enough to hold text and laid out as its pitch
-			 * says, and not on the firmware's framebuffer once the kernel's
-			 * console gave that up: nothing in the HAL paints there then.
-			 */
-			given_up = arm64_framebuffer_given_up(planes[count].physical, (uint64_t)planes[count].pitch * planes[count].height);
-			if (planes[count].width >= WATCH_PLANE_MIN_SIZE &&
-			    planes[count].height >= WATCH_PLANE_MIN_SIZE &&
-			    planes[count].pitch >= planes[count].width * 4U &&
-			    planes[count].physical != 0 &&
-			    !given_up)
-				count++;
+	/* Keeps the planes the report can be drawn on. */
+	for (index = 0; index < shown_count; index++) {
+		given_up = arm64_framebuffer_given_up(shown[index].physical, (uint64_t)shown[index].pitch * shown[index].height);
+		if (shown[index].width >= WATCH_PLANE_MIN_SIZE &&
+		    shown[index].height >= WATCH_PLANE_MIN_SIZE &&
+		    shown[index].pitch >= shown[index].width * 4U &&
+		    shown[index].physical != 0 &&
+		    !given_up) {
+			planes[count] = shown[index];
+			count++;
 		}
-
-		/* The next entry follows this one. */
-		index += size;
 	}
 
 	/* Succeeded: the planes found. */
@@ -1198,7 +1115,7 @@ find_planes(
  */
 static void
 draw_plane(
-	const struct watch_plane *plane)
+	const struct arm64_watch_plane *plane)
 {
 	volatile uint32_t *row;
 	const uint8_t *glyph;
@@ -1301,20 +1218,14 @@ draw_cells(
 }
 
 /*
- * Points the compositor at a list of the largest plane alone.
- *
- * The list goes into display-list memory above every list the display
- * driver writes, with fresh context words as the driver writes them.  The
- * compositor takes it at its next frame.  A display driver that still
- * runs points it back at its own list with its next flip.
+ * Has the compositor show the largest plane alone.
  */
 static void
 take_over(
-	const struct watch_plane *planes,
+	const struct arm64_watch_plane *planes,
 	unsigned count)
 {
-	volatile uint32_t *list;
-	const struct watch_plane *largest;
+	const struct arm64_watch_plane *largest;
 	uint64_t area;
 	uint64_t largest_area;
 	unsigned index;
@@ -1332,16 +1243,6 @@ take_over(
 	if (largest == NULL)
 		return;
 
-	/* Copies the plane's words, with fresh context words, then the end marker. */
-	list = (volatile uint32_t *)((volatile uint8_t *)watch_hvs + WATCH_HVS_DLIST);
-	for (index = 0; index < WATCH_PLANE_WORDS; index++)
-		list[WATCH_HVS_OWN_LIST + index] = list[largest->list_index + index];
-	list[WATCH_HVS_OWN_LIST + 4U] = 0xc0c0c0c0U;
-	list[WATCH_HVS_OWN_LIST + 6U] = 0xc0c0c0c0U;
-	list[WATCH_HVS_OWN_LIST + WATCH_PLANE_WORDS] = WATCH_CTL_END;
-
-	/* The complete list precedes the pointer the compositor follows. */
-	__asm__ volatile("dsb sy" ::: "memory");
-	watch_hvs[WATCH_HVS_DISPLIST0 / 4U] = WATCH_HVS_OWN_LIST;
-	__asm__ volatile("dsb sy" ::: "memory");
+	/* Hands it to the board's compositor. */
+	arm64_bsp_watch_show_alone(largest);
 }

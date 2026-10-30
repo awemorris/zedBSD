@@ -41,6 +41,7 @@ ARM64_BOARD_DEFINE_rpi5 := -DHAL_BOARD_RPI5 \
 ARM64_BOARD_BOOT_C_rpi4 := \
 	src/hal/arm64/bsp-rpi4/uart.c src/hal/arm64/bsp-rpi4/fdt.c \
 	src/hal/arm64/bsp-rpi4/activity-led.c src/hal/arm64/bsp-rpi4/board.c \
+	src/hal/arm64/bsp-rpi4/watch-hvs.c \
 	src/hal/arm64/bsp-rpi-common/mailbox.c \
 	src/hal/arm64/bsp-rpi-common/framebuffer-mailbox.c
 ARM64_BOARD_BOOT_C_rpi5 := \

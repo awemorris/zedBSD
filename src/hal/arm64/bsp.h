@@ -52,10 +52,42 @@ void arm64_cons_framebuffer_release(void);
 void arm64_bsp_map_devices(void);
 
 /*
- * Maps the display compositor the stall watch writes its report into, and
- * reports its registers; NULL when the board has none the watch knows.
+ * One plane the board's display compositor shows that the stall watch can
+ * draw its report on: an unscaled 32-bit image, where its pixels are, how
+ * they are laid out, and where it sits on the screen.  handle is the
+ * board's own name for the plane (arm64_bsp_watch_show_alone()).
  */
-volatile uint32_t *arm64_bsp_watch_compositor(void);
+struct arm64_watch_plane {
+	uint32_t handle;
+	uint64_t physical;
+	uint32_t pitch;
+	uint32_t width;
+	uint32_t height;
+	uint32_t x;
+	uint32_t y;
+};
+
+/*
+ * Maps the display compositor the stall watch writes its report onto, at
+ * boot while no CPU can be stuck holding the table lock; a board without
+ * one the watch knows does nothing.
+ */
+void arm64_bsp_watch_init(void);
+
+/*
+ * Reports the unscaled 32-bit planes the compositor shows now, at most
+ * capacity of them; 0 on a board without a compositor the watch knows,
+ * which leaves the report on the early console's framebuffer.  It runs
+ * while CPUs are stopped: it may not lock, allocate or wait.
+ */
+unsigned arm64_bsp_watch_planes(struct arm64_watch_plane *planes, unsigned capacity);
+
+/*
+ * Has the compositor show one of the planes arm64_bsp_watch_planes()
+ * reported alone, so that no window above it hides the report; a display
+ * driver that still runs takes the screen back with its next flip.
+ */
+void arm64_bsp_watch_show_alone(const struct arm64_watch_plane *plane);
 
 /*
  * Reports a core's number from its MPIDR affinity: the field the board

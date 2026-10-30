@@ -14,7 +14,6 @@
 #ifndef KERN_KERN_VM_OBJECT_H
 #define KERN_KERN_VM_OBJECT_H
 
-#include <hal/hal.h>
 #include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>

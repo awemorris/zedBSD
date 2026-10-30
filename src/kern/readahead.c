@@ -26,6 +26,7 @@
 #include <kern/thread.h>
 #include <kern/sched.h>
 #include <kern/kcrt.h>
+#include <hal/hal.h>
 
 #define RA_WORKERS 4U
 

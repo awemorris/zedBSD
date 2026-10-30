@@ -3,7 +3,6 @@
 #define KERN_KERN_INPUT_KEYMAP_H
 
 #include <stdint.h>
-#include <hal/hal.h>
 
 #define INPUT_KEY_MASK       0x000001ffU
 #define INPUT_KEY_SHIFT      0x00010000U

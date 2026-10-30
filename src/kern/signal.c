@@ -24,6 +24,7 @@
 #include <uapi/ptrace.h>
 #include "kern/process-timer.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/thread.h"
 #include "kern/uaccess.h"
 #include <kern/kcrt.h>

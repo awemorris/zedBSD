@@ -7,9 +7,9 @@
 
 /*
  * What the Raspberry Pi 4 gives the arm64 HAL beyond the Raspberry Pi
- * common support: its peripherals in the kernel's tables, its compositor
- * for the stall watch, the release of its cores from the firmware's spin
- * table, and the watchdog reset.
+ * common support: its peripherals in the kernel's tables, the release of
+ * its cores from the firmware's spin table, and the watchdog reset.  Its
+ * compositor for the stall watch is watch-hvs.c.
  */
 
 #include <hal/hal.h>
@@ -31,9 +31,6 @@
 #define PM_WDOG_TICKS 0x0000000aU
 #define PM_RSTC_FULL_RESET 0x00000020U
 
-/* The BCM2711 compositor (HVS): its registers and display-list memory. */
-#define WATCH_HVS_BASE 0xfe400000U
-#define WATCH_HVS_WINDOW 0x8000U
 
 /*
  * Maps the peripherals the HAL itself uses into the kernel's tables: each
@@ -54,30 +51,6 @@ arm64_bsp_map_devices(
 	arm64_space_map_device_block(info->gic_dist_base);
 	arm64_space_map_device_block(info->gic_cpu_base);
 	arm64_space_map_device_block(info->sdhci_base);
-}
-
-/*
- * Maps the compositor's registers and display-list memory, uncached, for
- * the stall watch's report.
- */
-volatile uint32_t *
-arm64_bsp_watch_compositor(
-	void)
-{
-	void *window;
-	int error;
-
-	/* A window the table cannot hold leaves the report on the framebuffer. */
-	window = NULL;
-	error = hal_space_map_device(WATCH_HVS_BASE,
-				     WATCH_HVS_WINDOW,
-				     HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE | HAL_SPACE_DEVICE,
-				     &window);
-	if (error != HAL_OK)
-		return NULL;
-
-	/* Succeeded: the compositor's registers. */
-	return (volatile uint32_t *)window;
 }
 
 /*

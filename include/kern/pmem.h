@@ -10,7 +10,7 @@
 #ifndef KERN_KERN_PMEM_H
 #define KERN_KERN_PMEM_H
 
-#include <hal/hal.h>
+#include <stddef.h>
 #include <stdint.h>
 
 /*

@@ -22,6 +22,7 @@
 #include "kern/cred.h"
 #include "kern/process-timer.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/usync.h"
 #include "kern/waitq.h"
 #include "kern/lock.h"

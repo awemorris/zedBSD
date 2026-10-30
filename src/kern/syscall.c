@@ -40,6 +40,7 @@
 #include "kern/poll.h"
 #include "kern/page.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/signal.h"
 #include "kern/cdev.h"
 #include "kern/random.h"

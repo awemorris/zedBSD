@@ -12,8 +12,8 @@
 #ifndef KERN_KERN_THREAD_H
 #define KERN_KERN_THREAD_H
 
-#include <hal/hal.h>
 #include <kern/sched.h>
+#include <kern/types.h>
 #include <kern/waitq.h>
 #include <kern/atomic.h>
 #include <kern/signal.h>
@@ -25,13 +25,17 @@ struct process;
 struct ucred;
 
 #define THREAD_FLAG_IDLE	0x00000001U
-#define SIGNAL_NEST_MAX		HAL_SIGNAL_NEST_MAX
+/* How deep signal handlers nest on one thread. */
+#define SIGNAL_NEST_MAX		8
+
+/* The arguments of one system call a restart keeps. */
+#define THREAD_SYSCALL_ARGS	6
 
 struct thread_signal_level {
 	uint32_t token;
 	sigset_t saved_mask;
 	uint32_t restart_number;
-	uintptr_t restart_args[HAL_SYSCALL_ARGS];
+	uintptr_t restart_args[THREAD_SYSCALL_ARGS];
 	unsigned restart_on_return;
 	unsigned used_altstack;
 	uintptr_t user_ucontext;
@@ -53,7 +57,7 @@ struct thread {
 	refcount_t refs;
 	tid_t tid;
 	struct process *proc;
-	hal_task_t task;
+	kern_task_handle_t task;
 	enum thread_state state;
 	unsigned flags;
 	unsigned notify_pending;
@@ -138,7 +142,7 @@ struct thread {
 	sigset_t signal_wait_set;
 	unsigned signal_waiting;
 	uint32_t syscall_restart_number;
-	uintptr_t syscall_restart_args[HAL_SYSCALL_ARGS];
+	uintptr_t syscall_restart_args[THREAD_SYSCALL_ARGS];
 	unsigned syscall_restart_valid;
 
 	/*
@@ -201,12 +205,6 @@ thread_abort_new(
 	struct thread *thread);
 
 int
-thread_fork(
-	struct process *process,
-	hal_task_t task,
-	struct thread **result);
-
-int
 kthread_create(
 	void (*entry)(void *),
 	void *arg,
@@ -216,10 +214,6 @@ kthread_create(
 int
 thread_prepare_secondaries(
 	unsigned cpu_count);
-
-void
-thread_init_secondary(
-	hal_cpu_id_t cpu);
 
 void
 thread_attach_secondaries(void);

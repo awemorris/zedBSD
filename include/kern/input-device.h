@@ -5,7 +5,6 @@
 #include "kern/input-capability.h"
 
 #include <uapi/input.h>
-#include <hal/hal.h>
 #include <stddef.h>
 #include <stdint.h>
 
