@@ -5,9 +5,9 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner | ws009 (q1704-i01 p024) | `/home/awe/zedBSD-worktrees/p1-ws009r` / `agent/p1-ws009r` | running（2026-10-30） | 25c8f74a4（merge 05d32e667） |
+| P1 | phase-runner | ws009 (q1704-i01 返却) | `/home/awe/zedBSD-worktrees/p1-ws009r` / `agent/p1-ws009r` | returned | 3a49cdad5（merge d2c8a5969） |
 | P2 | phase-runner | ws327 (q1703-i01 p016) | `/home/awe/zedBSD-worktrees/p2-ws327` / `agent/p2-ws327` | running（2026-10-30） | 0f60bee4a（merge 5de56c3e1） |
-| P3 | phase-runner | ws315 (q1702-i01 同時の send) | `/home/awe/zedBSD-worktrees/p3-ws315` / `agent/p3-ws315` | running（2026-10-30 再起動） | b2e867978（merge cbd98d6f4） |
+| P3 | phase-runner | ws315 (q1702-i01 返却、WS completed) | `/home/awe/zedBSD-worktrees/p3-ws315` / `agent/p3-ws315` | returned | 4aa437f67（merge 834d10d88） |
 | P4 | phase-runner | ws307 (q1698-i01 返却) | `/home/awe/zedBSD-worktrees/p4-ws307o` / `agent/p4-ws307o` | returned（次は ws307 の Resume point から） | 520360247（merge fbdd143a8） |
 | P5 | phase-runner | ws291 NVIDIA (q1700-i01 返却) | `/home/awe/zedBSD-worktrees/p5-ws291n` / `agent/p5-ws291n` | returned（次は phase010 の q1700-i01 節から） | c59e5a60e（merge 12a2cc467） |
 | P6 | phase-runner＋Sonnet | ws314 p011・p012 (q1691-i01 cleared) | `/home/awe/zedBSD-worktrees/p6-ws314doc` / `agent/p6-ws314doc` | returned | 64f09ca82（merge d4ba04b96） |

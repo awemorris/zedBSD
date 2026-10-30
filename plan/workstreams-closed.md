@@ -247,3 +247,4 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS311](ws311/ws.md) | MG005 | TCP の CUBIC と既定の切り替え（2026-10-29 ユーザー） | completed（2026-10-29） | 既定を CUBIC に（遅延の経路で 1.158 倍、LAN は同じ） |
 
 | [WS314](ws314/ws.md) | MG006 | libkeiland の API を component ごとの header に分け、プログラミングの解説（英語）を書き、fd と UNIX への依存を API から外す（2026-10-30 ユーザー） | completed（2026-10-30 ユーザー「completeでOKです。」） | header の分割・解説（docs/howto/keiland-programming.md）・kl_app_post・kl_process・kl_launch・kl_instance_bind・KL_APP_LANGUAGE・libbrowser の network の thread、fd の API を公開の API から外した。昇格の起動の API は F-WS314-elevate |
+| [WS315](ws315/ws.md) | MG003 | Realtek の USB 2.5G・5G の NIC を独自の方式（vendor mode）の driver で速く（2026-10-30 ユーザー） | completed（2026-10-30 Q1、main 834d10d88） | 5330 RTL8156B で Linux 並み（send 2370・recv 2373・同時 2268/2359）、10GbE も落ちない。5G（RTL8157）は資料だけの実装。制限は ws.md |

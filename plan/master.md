@@ -25,7 +25,7 @@
 | --- | --- | --- | --- |
 | P1 | q1704-i01 in-progress | [ws009](ws009/ws.md) DOC-54: p010〜p023 cleared（main d73c023ef、全 14 file の照合 PASS）。P1 が p024 正確さの review（worktree p1-ws009r）。Bug は BUG-364（foreign の fence）・BUG-365（一括 22 件）。その後 WS009 の受け入れ → WS296 → WS297 を同じ形で 1 つずつ（ユーザー） | — |
 | P2 | q1703-i01 in-progress | [ws327](ws327/ws.md): p001〜p003・p007〜p015 cleared（main b901b1968）。P2 が p016 受け入れ（境界・QEMU の回帰・FreeBSD）、その後 p017 規約の見直し（Sonnet） | QEMU |
-| P3 | q1696-i01 返却（09:16） | [ws315](ws315/ws.md) p006 in-progress、main cbd98d6f4 に merge（2026-10-30 ユーザー「WS315はマージしてOKです。再開時に同時sendを解決しましょう。」）。同時の send の退行（2 倍 1030、1.25 倍 1645、前 2347）が残り。次の 1 手は [phase006](ws315/phase006/phase.md) の「引き継ぎ」（1.5 倍の kernel を 5330 で、往復の延びで広げるのを止める案、決めた後に回帰と 10GbE）。Q1 の残り: p3-ws315 の build/tmp/p006-base・build/p006a-*・build/p006-k1・p006-g10・p006-g12・p006-amd64 の削除 | 5330（Debian、NVMe の zedBSD は g10 の kernel） |
+| P3 | q1702-i01 返却（WS315 completed） | [ws315](ws315/ws.md) completed（2026-10-30、main 834d10d88）。次はユーザーの順で WS221（Jumbo frame）と WS299（5330 の NVMe） | 5330 は Debian（NVMe の zedBSD は f1 の kernel）、10.0.10.3 は free |
 | P4 | q1698-i01 返却（09:13） | [ws307](ws307/ws.md)（main fbdd143a8 に merge、branch agent/p4-ws307o 520360247）: p002 cleared（upload）。p015 sleep Never 実装・host 試験 PASS、QEMU は host の負荷で 2 回未達（load の低い時に 3 回目）。p004 pkgconf と各 package の開発の file、clang・libcxx は build 済み、installer-image を 1 本だけ build → p004-gtk.sh（並行の make は不可）。p008 は p004-gtk.sh の j3 で確かめ直し。p014 は p007 の C を後で。p007 は driver の設計の下書き（改訂 3、SMEP・SMAP の下の 1:1 の map を HAL を変えずに作れるか）。Q1 の残り: proposed/hal-uefi-variables.md・hal-fw-variables.md の削除（link を外してから）。CI の別件 2 つは phase002 | QEMU |
 | P5 | q1700-i01 返却（09:13、計測は未実施） | [ws291](ws291/ws.md) NVIDIA: kernel の build だけ（vmunix-m0）、引き継ぎ c59e5a60e（main 12a2cc467）。次の 1 手は [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ、rtx-desk-profile.sh を 2 回、p012 を立てる） | 10.0.10.3 は free |
 | Sonnet | — | [ws326](ws326/ws.md): cleared 20 Phase（p007 参照の list も main 5d43ad00d）。次: p015（補間と重み）・p017（B の direct）を Sonnet で並べて起動 → p019 → p021 の前に reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
@@ -33,7 +33,7 @@
 予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
 **次のセッションの始めにする事（2026-10-30 ユーザー）**:
 1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）に取り組む（ユーザー「BUG-363は、次回のセッション開始時に取り組むようにスケジュールしておいてください。」）。
-2. WS315 p006 の同時の send の退行: P3 を 2026-10-30 に q1702-i01 で再起動済み（強制終了に備え phase006/phase.md の「引き継ぎ」を測りごとに更新）。止まっていれば同じ worktree で再起動。
+2. （済み）WS315 p006 の同時の send の退行は解決し WS315 は completed（2026-10-30 834d10d88）。
 3. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（ユーザー「WS250は流してよいです。」。fault の app・isolate の道は Future Work へ）。
 4. ユーザーに [WS309 p015](ws309/phase015/phase.md) の「要る判断」1〜4 を聞く（ユーザー「WS309の判断は、次回セッション開始時に聞いてくれるように記録してください。」。聞く前に AGENTS.md §3 の前置き: WS の番号と説明・状態・決まっていない事・用語の説明）。
 5. 上の表の担当（P1・P2・P4・P5）と WS326 の Sonnet（p015・p017）を再開。
@@ -184,7 +184,6 @@ BUG-366 · q1705 · WS331 · KL_VERSION 105。使う前に衝突を確かめる�
 | [WS309](ws309/ws.md) | MG006 | Keiland の compositor の thread の構成を整理し main loop が待たないようにする。ゲームモードは Vulkan display の仕様の中で | incomplete（p001〜p007・p019 cleared、P1 q1662-i05） | p008 の残り（fence 付きの task）から |
 | [WS310](ws310/ws.md) | MG004 | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる（WS301 の Q301-3、2026-10-29 ユーザー「最終的には呼ぶが、別なWSにして…今は呼ばない。」） | planning | p001（WS301 の後） |
 | [WS313](ws313/ws.md) | MG008 | ODROID-C5（Amlogic S905X5M）の BSP（bsp-s905x5m）と Mali の GPU で、起動して desktop を表示する（2026-10-29 ユーザー） | incomplete（全 block の code を揃えた、実装済み・実機未試験。2026-10-29 夜にユーザーが実機で試験） | 夜の試験（plan/ws313/tests/README.md）→ 直し、Mali の desktop（render pass の LOAD など） |
-| [WS315](ws315/ws.md) | MG003 | Realtek の USB 2.5G・5G の NIC を独自の方式（vendor mode）の driver で速く（2026-10-30 ユーザー） | incomplete（全 Phase cleared、completed の後片付けの前。main 9cd5fb8fc） | WS221 p014（xHCI）と NCM の観察の後に p001 設計 |
 | [WS316](ws316/ws.md) | MG003 | 5330 の USB4 と AQC の 10GbE（2026-10-30 ユーザー） | planning | p001 の調べ（5330 の Debian で CM・AQC の見え方・IOMMU） |
 | [WS317](ws317/ws.md) | MG005 | hotplugd: hot-plug の device（PCIe・USB・ディスク）の承認と driver の開始・終了、volumed を置き換え（2026-10-30 ユーザー） | planning（今は取り組まない、ユーザー） | p001 の設計から |
 | [WS318](ws318/ws.md) | MG006 | libmedia の作り直し: Vulkan の device の共有・codec の問い合わせと指定・encoder（H.264・H.265・AAC-LC）・カメラ・libavcodec の内部の fallback、app を libmedia だけに（2026-10-30 ユーザー） | planning | p001 設計から。2026-10-30 ユーザー「WS318はH.264デコーダのあとにすぐスケジュールします。」→ WS326 の completed の直後 |
