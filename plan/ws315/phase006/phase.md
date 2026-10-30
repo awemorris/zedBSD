@@ -104,7 +104,8 @@ Queue: q1696 / q1696-i01（P3）
 | p006-a2 | 案 A（a1 と同じ kernel） | 2349.9 | 2366.7 | 1538.5 | 2337.2 | 886784。host の load 20〜40（他の担当の build） |
 | Linux p006-lin1 | r8152（`5330-linux-both.sh`、同じ load） | — | — | 2253.7 | 2310.8 | — |
 | p006-b1 | p006 の前（c90327de3 の 3 file、128 KB 固定・ring 256、build/ws315-p006-base-vmunix） | 2371.6 | 2334.7 | 2285.5 | 1546.7 | 131072。load 40 → 14 |
-| p006-ag10 | 案 A ＋ 倍率 1.25 倍（tcp.c の 16U → 10U を一時に、build/ws315-p006-ag10-vmunix） | 測り中 | | | | |
+| p006-ag10 | 案 A ＋ 倍率 1.25 倍（tcp.c の 16U → 10U を一時に、build/ws315-p006-ag10-vmunix） | 2370.8 | 2355.8 | **2258.0** | **2300.7** | 452608。load 7 → 3。送りの retransmit 189・fast 19、srtt 1623 |
+| p006-a3 | 案 A（2 倍）を静かな host で測り直す | 測り中 | | | | |
 
 - 同時の送りの接続（net.tcpstats）: d1 retransmit 181・fast 14、a1 917・53、a2 483・57（in flight 約 650 KB、cwnd 約 820 KB、srtt 約 2.1 ms）。案 A では ring でなく損失（CUBIC の cwnd）が律している。損失の場所は未確認（host の ixgbe の ATR の入れ替え、host の load の影響の見込み）。
   見立て（b1 の後）: 案 A でも受けの窓が 900 KB まで広がると、switch の 5330 向きの queue（窓 − BDP）で送りの往復が 2 ms に延び、損失の後の CUBIC の戻りが遅い。同時の受けは窓 200〜374 KB で足りる（g10 の 2356）。
