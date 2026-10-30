@@ -262,6 +262,65 @@
  * Values referenced: Mesa 25.0.7 src/intel/compiler/brw_eu_defines.h
  * (BRW_HORIZONTAL_STRIDE_*, BRW_WIDTH_*, BRW_VERTICAL_STRIDE_*).
  */
+/*
+ * The three-source (align1) layout of Gen12, the one MAD takes: each
+ * field's highest and lowest bit.  A vertical stride is split over two bits
+ * (0, 1, 4 or 8 elements as 0..3, the high bit first); source two has only
+ * a horizontal stride.  The type is the low three bits of the operand's
+ * size and sign (F is 2) with the execution type 1 for float.
+ *
+ * Values referenced: Mesa 25.0.7 src/intel/compiler/brw_eu_inst.h (the
+ * three-source align1 fields, 12+), brw_reg_type.c
+ * (brw_type_encode_for_3src), brw_eu_emit.c (to_3src_align1_vstride,
+ * to_3src_align1_hstride).
+ */
+#define EU_3SRC_DST_REG_NR_HI		63U
+#define EU_3SRC_DST_REG_NR_LO		56U
+#define EU_3SRC_DST_FILE_BIT		50U
+#define EU_3SRC_DST_TYPE_HI		38U
+#define EU_3SRC_DST_TYPE_LO		36U
+#define EU_3SRC_EXEC_FLOAT_BIT		39U
+#define EU_3SRC_SRC0_REG_NR_HI		79U
+#define EU_3SRC_SRC0_REG_NR_LO		72U
+#define EU_3SRC_SRC0_SUBREG_HI		71U
+#define EU_3SRC_SRC0_SUBREG_LO		67U
+#define EU_3SRC_SRC0_FILE_BIT		66U
+#define EU_3SRC_SRC0_HSTRIDE_HI		65U
+#define EU_3SRC_SRC0_HSTRIDE_LO		64U
+#define EU_3SRC_SRC0_VSTRIDE_HIGH_BIT	43U
+#define EU_3SRC_SRC0_VSTRIDE_LOW_BIT	35U
+#define EU_3SRC_SRC0_TYPE_HI		42U
+#define EU_3SRC_SRC0_TYPE_LO		40U
+#define EU_3SRC_SRC0_NEGATE_BIT		45U
+#define EU_3SRC_SRC0_ABS_BIT		44U
+#define EU_3SRC_SRC1_REG_NR_HI		111U
+#define EU_3SRC_SRC1_REG_NR_LO		104U
+#define EU_3SRC_SRC1_SUBREG_HI		103U
+#define EU_3SRC_SRC1_SUBREG_LO		99U
+#define EU_3SRC_SRC1_FILE_BIT		98U
+#define EU_3SRC_SRC1_HSTRIDE_HI		97U
+#define EU_3SRC_SRC1_HSTRIDE_LO		96U
+#define EU_3SRC_SRC1_VSTRIDE_HIGH_BIT	91U
+#define EU_3SRC_SRC1_VSTRIDE_LOW_BIT	83U
+#define EU_3SRC_SRC1_TYPE_HI		90U
+#define EU_3SRC_SRC1_TYPE_LO		88U
+#define EU_3SRC_SRC1_NEGATE_BIT		87U
+#define EU_3SRC_SRC1_ABS_BIT		86U
+#define EU_3SRC_SRC2_REG_NR_HI		127U
+#define EU_3SRC_SRC2_REG_NR_LO		120U
+#define EU_3SRC_SRC2_SUBREG_HI		119U
+#define EU_3SRC_SRC2_SUBREG_LO		115U
+#define EU_3SRC_SRC2_FILE_BIT		114U
+#define EU_3SRC_SRC2_HSTRIDE_HI		113U
+#define EU_3SRC_SRC2_HSTRIDE_LO		112U
+#define EU_3SRC_SRC2_TYPE_HI		82U
+#define EU_3SRC_SRC2_TYPE_LO		80U
+#define EU_3SRC_SRC2_NEGATE_BIT		85U
+#define EU_3SRC_SRC2_ABS_BIT		84U
+#define EU_3SRC_TYPE_F			2U
+#define EU_3SRC_VSTRIDE_0		0U
+#define EU_3SRC_VSTRIDE_8		3U
+
 #define EU_HSTRIDE_0			0U
 #define EU_HSTRIDE_1			1U
 #define EU_HSTRIDE_2			2U

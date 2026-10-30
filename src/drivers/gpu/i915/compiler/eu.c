@@ -165,6 +165,7 @@ enum i915_eu_opcode {
 	I915_EU_OPCODE_RNDE,
 	I915_EU_OPCODE_RNDZ,
 	I915_EU_OPCODE_NOP,
+	I915_EU_OPCODE_MAD,
 	I915_EU_OPCODE_COUNT
 };
 
@@ -345,6 +346,7 @@ static const struct i915_eu_format i915_eu_format_gen12 = {
 		EU_OP_RNDE,
 		EU_OP_RNDZ,
 		EU_OP_NOP,
+		EU_OP_MAD,
 	},
 	{ 0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U },
 	{ 0U, 1U, 2U, 3U, 4U, 5U, 6U, 7U, 8U, 9U, 10U, 11U, 12U, 13U, 14U, 15U },
@@ -441,6 +443,7 @@ static const struct i915_eu_format i915_eu_format_gen9 = {
 		GEN9_EU_OP_RNDE,
 		GEN9_EU_OP_RNDZ,
 		GEN9_EU_OP_NOP,
+		I915_EU_NO_OPCODE,
 	},
 	{
 		4U,
@@ -568,6 +571,7 @@ static const struct i915_eu_format i915_eu_format_gen11 = {
 		GEN9_EU_OP_RNDE,
 		GEN9_EU_OP_RNDZ,
 		GEN9_EU_OP_NOP,
+		I915_EU_NO_OPCODE,
 	},
 	{
 		GEN11_EU_TYPE_UB,
@@ -618,6 +622,8 @@ static void i915_eu_send_gen12(uint32_t *inst, struct i915_eu_reg dst, struct i9
 static void i915_eu_send_gen9(struct i915_eu_buf *buffer, uint32_t *inst, int scope, struct i915_eu_reg dst, struct i915_eu_reg src0, struct i915_eu_reg src1, uint32_t descriptor, uint32_t ex_descriptor);
 static void i915_eu_scope(const struct i915_eu_buf *buffer, uint32_t *inst, int scope);
 static void i915_eu_sync(struct i915_eu_buf *buffer, uint32_t swsb);
+static int i915_eu_mad_source(struct i915_eu_reg reg, uint32_t *vstride);
+static void i915_eu_bits(uint32_t *inst, uint32_t high, uint32_t low, uint32_t value);
 static void i915_eu_wait_notification(struct i915_eu_buf *buffer);
 static void i915_eu_branch_target(struct i915_eu_buf *buffer, uint32_t *inst, int both);
 static void i915_eu_dst(struct i915_eu_buf *buffer, uint32_t *inst, struct i915_eu_reg reg);
@@ -1508,17 +1514,118 @@ drv_i915_eu_mad(
 	struct i915_eu_reg src1,
 	struct i915_eu_reg src2)
 {
-	UNUSED_PARAMETER(dst);
-	UNUSED_PARAMETER(src0);
-	UNUSED_PARAMETER(src1);
-	UNUSED_PARAMETER(src2);
+	uint32_t *inst;
+	uint32_t vstride0;
+	uint32_t vstride1;
 
 	/*
-	 * XXX: unimplemented.  An instruction without its operands is a different
-	 * instruction, so the buffer is poisoned: no caller can ship it by
-	 * accident.  The compiler lowers a*b+c to MUL, ADD.
+	 * Only the Gen12 three-source layout is encoded, for float registers: a
+	 * whole destination register, sources that are whole registers read
+	 * <8;8,1> or one float replicated <0;1,0>.  Anything else poisons the
+	 * buffer (the code generator then keeps MUL and ADD).
 	 */
-	buffer->error = 1;
+	if (buffer->format->has_swsb == 0 ||
+	    dst.file != EU_FILE_GRF || dst.type != EU_TYPE_F || dst.subnr != 0U ||
+	    i915_eu_mad_source(src0, &vstride0) != 0 ||
+	    i915_eu_mad_source(src1, &vstride1) != 0 ||
+	    i915_eu_mad_source(src2, NULL) != 0) {
+		buffer->error = 1;
+		return;
+	}
+
+	/* Reserves the instruction; a poisoned or full buffer takes nothing. */
+	inst = i915_eu_reserve(buffer);
+	if (inst == NULL)
+		return;
+
+	/* The opcode, SIMD8 and the in-order dependency, as for any ALU instruction. */
+	i915_eu_common(buffer, inst, I915_EU_OPCODE_MAD, I915_EU_IN_ORDER);
+
+	/* The float execution and the destination: a whole register, stride 1. */
+	i915_eu_bit(inst, EU_3SRC_EXEC_FLOAT_BIT, 1U);
+	i915_eu_bits(inst, EU_3SRC_DST_REG_NR_HI, EU_3SRC_DST_REG_NR_LO, dst.nr);
+	i915_eu_bit(inst, EU_3SRC_DST_FILE_BIT, 1U);
+	i915_eu_bits(inst, EU_3SRC_DST_TYPE_HI, EU_3SRC_DST_TYPE_LO, EU_3SRC_TYPE_F);
+
+	/* Source 0, the addend. */
+	i915_eu_bits(inst, EU_3SRC_SRC0_REG_NR_HI, EU_3SRC_SRC0_REG_NR_LO, src0.nr);
+	i915_eu_bits(inst, EU_3SRC_SRC0_SUBREG_HI, EU_3SRC_SRC0_SUBREG_LO, src0.subnr);
+	i915_eu_bit(inst, EU_3SRC_SRC0_FILE_BIT, 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC0_HSTRIDE_HI, EU_3SRC_SRC0_HSTRIDE_LO, src0.hstride == EU_HSTRIDE_0 ? 0U : 1U);
+	i915_eu_bit(inst, EU_3SRC_SRC0_VSTRIDE_HIGH_BIT, vstride0 >> 1);
+	i915_eu_bit(inst, EU_3SRC_SRC0_VSTRIDE_LOW_BIT, vstride0 & 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC0_TYPE_HI, EU_3SRC_SRC0_TYPE_LO, EU_3SRC_TYPE_F);
+	i915_eu_bit(inst, EU_3SRC_SRC0_NEGATE_BIT, src0.negate & 1U);
+	i915_eu_bit(inst, EU_3SRC_SRC0_ABS_BIT, src0.absolute & 1U);
+
+	/* Source 1, the first factor. */
+	i915_eu_bits(inst, EU_3SRC_SRC1_REG_NR_HI, EU_3SRC_SRC1_REG_NR_LO, src1.nr);
+	i915_eu_bits(inst, EU_3SRC_SRC1_SUBREG_HI, EU_3SRC_SRC1_SUBREG_LO, src1.subnr);
+	i915_eu_bit(inst, EU_3SRC_SRC1_FILE_BIT, 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC1_HSTRIDE_HI, EU_3SRC_SRC1_HSTRIDE_LO, src1.hstride == EU_HSTRIDE_0 ? 0U : 1U);
+	i915_eu_bit(inst, EU_3SRC_SRC1_VSTRIDE_HIGH_BIT, vstride1 >> 1);
+	i915_eu_bit(inst, EU_3SRC_SRC1_VSTRIDE_LOW_BIT, vstride1 & 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC1_TYPE_HI, EU_3SRC_SRC1_TYPE_LO, EU_3SRC_TYPE_F);
+	i915_eu_bit(inst, EU_3SRC_SRC1_NEGATE_BIT, src1.negate & 1U);
+	i915_eu_bit(inst, EU_3SRC_SRC1_ABS_BIT, src1.absolute & 1U);
+
+	/* Source 2, the second factor: its vertical stride is implied. */
+	i915_eu_bits(inst, EU_3SRC_SRC2_REG_NR_HI, EU_3SRC_SRC2_REG_NR_LO, src2.nr);
+	i915_eu_bits(inst, EU_3SRC_SRC2_SUBREG_HI, EU_3SRC_SRC2_SUBREG_LO, src2.subnr);
+	i915_eu_bit(inst, EU_3SRC_SRC2_FILE_BIT, 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC2_HSTRIDE_HI, EU_3SRC_SRC2_HSTRIDE_LO, src2.hstride == EU_HSTRIDE_0 ? 0U : 1U);
+	i915_eu_bits(inst, EU_3SRC_SRC2_TYPE_HI, EU_3SRC_SRC2_TYPE_LO, EU_3SRC_TYPE_F);
+	i915_eu_bit(inst, EU_3SRC_SRC2_NEGATE_BIT, src2.negate & 1U);
+	i915_eu_bit(inst, EU_3SRC_SRC2_ABS_BIT, src2.absolute & 1U);
+}
+
+/*
+ * Checks that a MAD source is a float register read whole (<8;8,1>) or as
+ * one replicated float (<0;1,0>), and gives its three-source vertical
+ * stride (NULL for source two, which has none).  Returns 0, or -1 for a
+ * source the layout cannot say.
+ */
+static int
+i915_eu_mad_source(
+	struct i915_eu_reg reg,
+	uint32_t *vstride)
+{
+	/* A float register only. */
+	if (reg.file != EU_FILE_GRF || reg.type != EU_TYPE_F)
+		return -1;
+
+	/* One float replicated. */
+	if (reg.vstride == EU_VSTRIDE_0 && reg.hstride == EU_HSTRIDE_0) {
+		if (vstride != NULL)
+			*vstride = EU_3SRC_VSTRIDE_0;
+		return 0;
+	}
+
+	/* A whole register, one float to a channel. */
+	if (reg.vstride == EU_VSTRIDE_8 && reg.hstride == EU_HSTRIDE_1 && reg.subnr == 0U) {
+		if (vstride != NULL)
+			*vstride = EU_3SRC_VSTRIDE_8;
+		return 0;
+	}
+
+	/* Succeeded: no other region. */
+	return -1;
+}
+
+/* Sets the bits `high` down to `low` of an instruction to `value`. */
+static void
+i915_eu_bits(
+	uint32_t *inst,
+	uint32_t high,
+	uint32_t low,
+	uint32_t value)
+{
+	struct i915_eu_field field;
+
+	/* As a field of the layout. */
+	field.high = high;
+	field.low = low;
+	i915_eu_field(inst, field, value);
 }
 
 /*
