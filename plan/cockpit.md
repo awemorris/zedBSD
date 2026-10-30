@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:13（Q1）
+最終更新: 2026-10-31 05:23（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
-| P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1771: p017 ACPI WMI の層（Dell の BIOS の口の土台、SMI は起こさない） | p018 Dell の provider（5330 の実機） |
+| P6 | — | — | 返却（06:0x）。WS333 p017（ACPI WMI の層、SMI を起こさずに 5330 の表で Dell の口を読めた）を main に | 次の割当を Q1 が決める |
 | P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1770: p011 x86 の CPU の driver の統合（HWP の道、関門、RAPL の meter） | p014 5330 の受け入れ（電源の入れ直しの後） |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
 
@@ -41,6 +41,7 @@
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
 | p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
 | p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
+| p017 | ACPI WMI の層（Dell の BIOS の口の土台） | cleared（5330 の表で 4 device・14 block、SMI の書き 0） |
 | p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
 | p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
 | p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |

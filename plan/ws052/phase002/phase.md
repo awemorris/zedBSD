@@ -41,7 +41,7 @@ Queue: q727（Q1 の投入、ベータ2 の準備）
 
 取り出しは user の許可（2026-10-04 17 時、queue.md の決定 (2): 5330 の ACPI の table の読み取り専用の取り出しと commit）の範囲で、Q1 の指示により
 10.0.30.3 から `sudo cat /sys/firmware/acpi/tables/FACP`・`LPIT`・`dynamic/SSDT16`〜`23`。置き場と sha256 は
-[plan/ws049/tests/latitude5330/README.md](../../ws049/tests/latitude5330/README.md)。host の設定は変えていない。
+[plan/tools/aml-host/latitude5330/README.md](../../tools/aml-host/latitude5330/README.md)。host の設定は変えていない。
 
 | 事柄 | 5330 の値 | 意味 |
 | --- | --- | --- |

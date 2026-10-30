@@ -90,7 +90,7 @@ GET_CONNECTOR_STATUS・GET_CURRENT_CAM の読み直しで確かめる。
 
 ## 3. 対象機（Latitude 5330）の UCSI
 
-[5330 の table](../ws049/tests/latitude5330/)（`ssdt8.dat`、OEM Table ID `UsbCTabl`）を `iasl -d` で読んだ結果（レビューの §F で確認済み）:
+[5330 の table](../tools/aml-host/latitude5330/)（`ssdt8.dat`、OEM Table ID `UsbCTabl`）を `iasl -d` で読んだ結果（レビューの §F で確認済み）:
 
 - device `\_SB.UBTC`: `_HID` `USBC000`、`_CID` `PNP0CA0`、`_UID` 1、`_DDN` "USB Type-C"。
 - `_STA`: GNVS の `USTC == 1` で、EC の 0x80・0x81（`VER1`・`VER2` に写る UCSI の VERSION）が 0 でなく、`OSYS >= 0x07DF` なら 0x0F。

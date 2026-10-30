@@ -2,7 +2,7 @@
 
 # ws333-p017: ACPI WMI の層と AML の harness の移し
 
-Status: in-progress（実装・host 試験・全 20 port の build・QEMU amd64 の起動は済み。受け入れの物は揃った。cleared は Q1 の判定の後）
+Status: cleared（2026-10-31 Q1、main 809dfe329）
 Parent: [WS333](../ws.md)
 Queue: q1771-i01（P6）
 
