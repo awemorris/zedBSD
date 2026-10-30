@@ -933,9 +933,8 @@ check_shared(
 /*
  * The contraction of a product and a sum: contract.comp's x * y + z is one
  * FFMA and no FMUL; precise.comp's same arithmetic, decorated NoContraction,
- * never becomes an FFMA.  The shared frontend refuses the NoContraction
- * decoration today, so precise.comp is refused; when it compiles, it must
- * keep its FMUL and FADD (the compiler reads the module for the decoration).
+ * never becomes an FFMA: the frontend marks the instructions of a precise
+ * result and the compiler keeps them apart.
  */
 static void
 check_contraction(
@@ -952,9 +951,8 @@ check_contraction(
 	}
 
 	binary = compile_file(directory, "precise");
-	if (binary == NULL) {
-		check(1, "precise.comp: refused (NoContraction not interpreted by the frontend), so never contracted");
-	} else {
+	check(binary != NULL, "precise.comp compiles");
+	if (binary != NULL) {
 		check(count_alu(binary, NVRTX_SM75_OP_FFMA) == 0U, "precise.comp: NoContraction keeps the product out of an FFMA");
 		check(count_alu(binary, NVRTX_SM75_OP_FMUL) == 1U, "precise.comp: the product is an FMUL");
 		check(count_alu(binary, NVRTX_SM75_OP_FADD) == 1U, "precise.comp: the sum is an FADD");

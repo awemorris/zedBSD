@@ -1029,7 +1029,7 @@ share(
 	uint32_t index)
 {
 	struct drv_gpu_shader_ir_inst *instruction;
-	const struct drv_gpu_shader_ir_inst *earlier;
+	struct drv_gpu_shader_ir_inst *earlier;
 	struct optimize_shape shape;
 	uint32_t slot;
 	uint32_t entry;
@@ -1052,10 +1052,14 @@ share(
 		earlier = &optimizer->code[entry];
 		same = same_operation(earlier, instruction, &shape);
 
-		/* An earlier operation computing the same takes over every result. */
+		/*
+		 * An earlier operation computing the same takes over every
+		 * result, kept apart when either was (NoContraction).
+		 */
 		if (earlier->op != DRV_GPU_IR_NOP && same != 0) {
 			for (result = 0; result < shape.results; result++)
 				optimizer->replace[instruction->dst + result] = earlier->dst + result;
+			earlier->no_contraction |= instruction->no_contraction;
 			instruction->op = DRV_GPU_IR_NOP;
 			optimizer->changed = 1;
 			return;

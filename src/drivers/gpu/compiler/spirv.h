@@ -91,12 +91,6 @@ struct drv_gpu_compile_diagnostic {
  */
 #define DRV_GPU_SPIRV_FEATURE_INLINE_CALLS 0x200U
 
-/*
- * The NoContraction decoration (GLSL's precise), for a backend that never
- * fuses a product into a sum (refused otherwise).
- */
-#define DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION 0x400U
-
 /* The features the GHCI backend lowers. */
 #define DRV_GPU_SPIRV_FEATURES_GHCI 0x7FU
 

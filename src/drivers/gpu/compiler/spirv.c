@@ -613,6 +613,12 @@ struct drv_gpu_spirv_id {
 	uint8_t noperspective;
 
 	/*
+	 * A result decorated NoContraction (GLSL's precise): the instructions
+	 * it is lowered to are marked so (drv_gpu_spirv_mark_no_contraction()).
+	 */
+	uint8_t no_contraction;
+
+	/*
 	 * An image type: its Dim, whether it is Arrayed and whether it is
 	 * multisampled (MS).
 	 */
@@ -1007,6 +1013,7 @@ static int drv_gpu_spirv_add_io_run(struct drv_gpu_spirv_parser *parser, int is_
 static void drv_gpu_spirv_add_uniform(struct drv_gpu_spirv_parser *parser, uint32_t id, uint32_t kind);
 static int drv_gpu_spirv_pass_body(struct drv_gpu_spirv_parser *parser);
 static int drv_gpu_spirv_lower(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
+static void drv_gpu_spirv_mark_no_contraction(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t first);
 static int drv_gpu_spirv_lower_variable(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
 static int drv_gpu_spirv_lower_access_chain(struct drv_gpu_spirv_parser *parser, const uint32_t *word, uint32_t count, uint32_t opcode, uint32_t offset);
 static int drv_gpu_spirv_chain_block(struct drv_gpu_spirv_parser *parser, struct drv_gpu_spirv_id *record, struct drv_gpu_spirv_id *pointee, struct drv_gpu_spirv_id *index_record, uint32_t index_id, uint32_t opcode, uint32_t offset);
@@ -1880,12 +1887,12 @@ drv_gpu_spirv_declare_entry_point(
  * Interprets one decoration.
  *
  * Interpreted: Location, Binding, DescriptorSet, BuiltIn, Block,
- * ArrayStride, Flat (kept for the draw's constant interpolation) and
+ * ArrayStride, Flat (kept for the draw's constant interpolation),
  * NoPerspective (a fragment input interpolated linearly; a vertex shader's
- * output only carries it).  Without effect on this lowering:
+ * output only carries it) and NoContraction (carried to the instructions
+ * the result is lowered to).  Without effect on this lowering:
  * RelaxedPrecision (a permission to lose precision, never used here) and
- * Centroid (a draw has one sample per pixel, whose centre is the centroid),
- * and NoContraction for a backend that never fuses a product into a sum.
+ * Centroid (a draw has one sample per pixel, whose centre is the centroid).
  * Anything else could place or qualify data -- components, buffer blocks --
  * and is refused.
  */
@@ -1929,6 +1936,8 @@ drv_gpu_spirv_declare_decoration(
 		record->flat = 1U;
 	} else if (word[2] == DEC_NO_PERSPECTIVE) {
 		record->noperspective = 1U;
+	} else if (word[2] == DEC_NO_CONTRACTION) {
+		record->no_contraction = 1U;
 	} else if (word[2] == DEC_BUFFER_BLOCK) {
 		record->buffer_block = 1U;
 	} else if (word[2] == DEC_CENTROID &&
@@ -1941,12 +1950,6 @@ drv_gpu_spirv_declare_decoration(
 	} else {
 		/* A decoration without effect, or one that is refused. */
 		ignored = drv_gpu_spirv_decoration_ignored(word[2]);
-
-		/* A backend that never fuses a product into a sum keeps NoContraction's results already. */
-		if (word[2] == DEC_NO_CONTRACTION &&
-		    (parser->features & DRV_GPU_SPIRV_FEATURE_NO_CONTRACTION) != 0U)
-			ignored = 1;
-
 		if (ignored == 0) {
 			/*
 			 * Records the unsupported instruction in the caller's
@@ -3045,6 +3048,7 @@ drv_gpu_spirv_pass_body(
 	uint32_t count;
 	uint32_t opcode;
 	uint32_t functions;
+	uint32_t first;
 	int in_function;
 
 	/*
@@ -3116,10 +3120,14 @@ drv_gpu_spirv_pass_body(
 		}
 
 		/* Lowers one instruction of the body. */
+		first = parser->ir->instruction_count;
 		error =
 		    drv_gpu_spirv_lower(parser, word, count, opcode, offset);
 		if (error != 0)
 			return error;
+
+		/* Keeps a precise result's instructions apart for the code generator. */
+		drv_gpu_spirv_mark_no_contraction(parser, word, count, opcode, first);
 
 		/* Advances beyond the fully lowered function instruction. */
 		offset += count;
@@ -3131,6 +3139,62 @@ drv_gpu_spirv_pass_body(
 
 	/* Succeeded: the whole body is lowered. */
 	return 0;
+}
+
+/*
+ * Marks the IR instructions from `first` on, the ones the floating point
+ * arithmetic instruction at `word` was lowered to, NoContraction when its
+ * result is decorated so.  Only arithmetic can be contracted (SPIR-V 1.6,
+ * 3.20: NoContraction applies to the result of an arithmetic instruction);
+ * a built-in function (OpExtInst) counts, since its lowering may multiply
+ * and add.
+ */
+static void
+drv_gpu_spirv_mark_no_contraction(
+	struct drv_gpu_spirv_parser *parser,
+	const uint32_t *word,
+	uint32_t count,
+	uint32_t opcode,
+	uint32_t first)
+{
+	struct drv_gpu_spirv_id *record;
+	uint32_t index;
+
+	/* Only arithmetic, whose result id is word 2. */
+	if (count < 3U)
+		return;
+	switch (opcode) {
+	case OP_EXT_INST:
+	case OP_FNEGATE:
+	case OP_FADD:
+	case OP_FSUB:
+	case OP_FMUL:
+	case OP_FDIV:
+	case OP_FREM:
+	case OP_FMOD:
+	case OP_VECTOR_TIMES_SCALAR:
+	case OP_MATRIX_TIMES_SCALAR:
+	case OP_VECTOR_TIMES_MATRIX:
+	case OP_MATRIX_TIMES_VECTOR:
+	case OP_MATRIX_TIMES_MATRIX:
+	case OP_OUTER_PRODUCT:
+	case OP_DOT:
+		break;
+	default:
+		return;
+	}
+
+	/* An undecorated result leaves its instructions free to contract. */
+	record = drv_gpu_spirv_id(parser, word[2]);
+	if (record == NULL || record->no_contraction == 0U)
+		return;
+
+	/* Marks every instruction the lowering appended. */
+	for (index = first; index < parser->ir->instruction_count; index++)
+		parser->ir->instructions[index].no_contraction = 1U;
+
+	/* Succeeded: the instructions are kept apart. */
+	return;
 }
 
 /* Lowers one instruction of the function body. */

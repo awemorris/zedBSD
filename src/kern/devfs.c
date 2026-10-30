@@ -603,7 +603,9 @@ devfs_cdev_inode(
 	 * makes its HID devices on (the input bridge).
 	 * The Zynq's programmable logic is root's: whoever opens it rewrites
 	 * the hardware.  A camera is root's until sessiond gives it
-	 * to the seat's user: whoever opens it sees the room.
+	 * to the seat's user: whoever opens it sees the room.  The ACPI
+	 * namespace node is root's: a write evaluates any AML method, and
+	 * methods write the embedded controller and raise SMIs.
 	 */
 	backlight = backlight_name(device->name);
 	raw = hidraw_name(device->name);
@@ -620,6 +622,8 @@ devfs_cdev_inode(
 	else if (kern_strcmp(device->name, "input-inject") == 0)
 		mode = 0600U;
 	else if (kern_strcmp(device->name, "fpga0") == 0)
+		mode = 0600U;
+	else if (kern_strcmp(device->name, "acpi") == 0)
 		mode = 0600U;
 	else
 		mode = 0666U;
