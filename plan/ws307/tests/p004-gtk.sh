@@ -6,10 +6,10 @@
 # root left mounted.  With the guest stopped, the host reads that file through the loader's UFS reader (the j3 rule on
 # a disk of 512-byte blocks).  Then the installed disk is started alone (its user's desktop by the automatic login):
 # as that user over SSH, plan/ws307/tests/p004-guest-run.sh builds plan/ws307/tests/p004-hello.c with the system's
-# clang and pkg-config, runs it in the session (its window is photographed over QMP) and builds and runs a C++
+# clang and pkg-config, runs it in the session (its window is photographed through the Venus head's VNC) and builds and runs a C++
 # program.  The summary is the steps' lines and "p004-gtk: PASS|FAIL OUT".  Output goes to a new
 # build/ws307-test/p004.*.
-#   sh plan/ws307/tests/p004-gtk.sh IMAGE
+#   VENUS_RENDERER=<renderer install> sh plan/ws307/tests/p004-gtk.sh IMAGE
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -eu
 cd "$(dirname "$0")/../../.."
@@ -56,8 +56,11 @@ else
 fi
 
 # The installed disk alone: the build and the window, as the installed user.
+# The desktop needs a GPU: the installed disk is started as an NVMe drive with the Venus GPU (zdesktop-guest.sh;
+# VENUS_RENDERER names the renderer's install), and the window is photographed through its VNC (zdesktop-shot.py).
+# On the standard VGA alone sessiond finds no display and the console login takes over.
 export GUEST_RUNTIME="$(pwd)/$out/guest-installed"
-g start "$out/nvme.img" --disk nvme > "$out/installed-start.txt" 2>&1 || true
+timeout 180 plan/ws035/tests/zdesktop-guest.sh start "$out/nvme.img" > "$out/installed-start.txt" 2>&1 || true
 port=$(python3 -I -c 'import json, sys; print(json.load(open(sys.argv[1]))["ssh_port"])' "$GUEST_RUNTIME/session.json" 2>/dev/null || echo 0)
 ssh_tester() {
 	timeout "${SSH_TIMEOUT:-60}" ssh -i plan/tmp/guest/id_ed25519 -p "$port" -o BatchMode=yes -o StrictHostKeyChecking=no \
@@ -85,7 +88,7 @@ if [ -n "$up" ]; then
 	while [ $n -lt 300 ] && kill -0 $run 2> /dev/null; do
 		if ssh_tester "grep -q '^P004 MAPPED' $dir/hello.out" 2> /dev/null; then
 			sleep 2
-			g screenshot "$out/hello.png" > /dev/null 2>&1 || true
+			timeout 60 python3 plan/ws035/tests/zdesktop-shot.py "$out/hello.png" --runtime "$GUEST_RUNTIME" > /dev/null 2>&1 || true
 			echo "SHOT $out/hello.png"
 			break
 		fi
@@ -97,7 +100,7 @@ if [ -n "$up" ]; then
 	grep -q '^P004 RUN DONE' "$out/run.txt" || status=1
 	grep -q '^STEP .* fail' "$out/run.txt" && status=1
 else
-	g screenshot "$out/installed-no-ssh.png" > /dev/null 2>&1 || true
+	timeout 60 python3 plan/ws035/tests/zdesktop-shot.py "$out/installed-no-ssh.png" --runtime "$GUEST_RUNTIME" > /dev/null 2>&1 || true
 	echo "SSH installed fail (no session socket over SSH within 600 s)"
 	status=1
 fi

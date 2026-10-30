@@ -16,8 +16,14 @@ echo "CFLAGS $(pkg-config --cflags gtk4 2>&1)"
 echo "LIBS $(pkg-config --libs gtk4 2>&1)"
 step build sh -c 'cc -Wall -Wextra -Werror -o p004-hello p004-hello.c $(pkg-config --cflags --libs gtk4)'
 
-# The desktop session of the automatic login is the user's own, at /run/user/<uid>.
+# The desktop session of the automatic login is the user's own, at /run/user/<uid>.  Its first login opens Settings'
+# Welcome over the whole screen; it is closed so the window is what the picture shows (chosen by the command's name,
+# not by its arguments, which this script's own command line would also match).
 uid=$(id -u)
+for pid in $(ps -A -o pid,comm | awk '$2 == "settings" { print $1 }'); do
+	kill "$pid" 2> /dev/null
+done
+sleep 2
 echo "SESSION $(ls /run/user/$uid 2>&1 | tr '\n' ' ')"
 : > hello.out
 XDG_RUNTIME_DIR=/run/user/$uid WAYLAND_DISPLAY=wayland-0 GDK_BACKEND=wayland GSK_RENDERER=cairo GTK_A11Y=none \
