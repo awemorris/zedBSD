@@ -62,6 +62,13 @@
  *                    user); SLEPT woke=…, NOSLEEP …, ERROR busy or ERROR
  *                    once the sleep is done
  *   POWER cancel     stops a sleep before the kernel is asked; no answer
+ *   THERMAL strategy performance|balanced|powersave
+ *   THERMAL strategy manual SPEED NOISE GATING
+ *   THERMAL boost all|FAN LEVEL
+ *                    the machine's strategy of heat and power, or a fan's
+ *                    boost (thermal.c: root or wheel only); OK with
+ *                    partial, pending or superseded, FAIL wheel, or ERROR
+ *                    and a word
  */
 
 #include "auth.h"
@@ -405,6 +412,13 @@ session_request(
 	match = strncmp(line, "SERVICE ", 8);
 	if (match == 0) {
 		sessiond_service(account, control, line + 8);
+		return 0;
+	}
+
+	/* The strategy of heat and power, or a fan's boost. */
+	match = strncmp(line, "THERMAL ", 8);
+	if (match == 0) {
+		sessiond_thermal(account, control, line + 8);
 		return 0;
 	}
 
