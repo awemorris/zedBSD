@@ -23,8 +23,16 @@
 /* The longest one sleep on the connection lasts while waiting for frame progress, in milliseconds. */
 #define WAYLAND_WAIT_SLICE_MS	50
 
-/* A stalled FIFO frame cannot hold presentation forever. */
-#define WAYLAND_WAIT_NS 10000000000ULL
+/*
+ * How long a FIFO present waits for the frame before it to be shown, in
+ * nanoseconds.  A compositor may hold a surface's frame callbacks for as
+ * long as it draws nothing (a sleep being entered, an output gone, a turn
+ * of the output); the frame then goes in unpaced, which replaces the image
+ * still queued and so frees it.  Only a broken connection loses the
+ * surface.  The wait stays well inside an application's acquire timeout,
+ * which waits for that image.
+ */
+#define WAYLAND_PACE_NS 1000000000ULL
 
 /* The initial native shared-image backend accepts these finite scanout extents. */
 #define WAYLAND_IMAGE_MIN_EXTENT 16U
@@ -783,14 +791,12 @@ wayland_commit(
 	surface = lease->surface;
 	image = private_image;
 	if (mode == VK_PRESENT_MODE_FIFO_KHR) {
-		/* A stalled compositor becomes terminal after the finite native watchdog. */
-		error = wayland_wait(lease, lease->submitted, WAYLAND_WAIT_NS);
-		if (error == VK_TIMEOUT) {
-			__atomic_store_n(&surface->lost, VK_TRUE, __ATOMIC_RELEASE);
-			return VK_ERROR_SURFACE_LOST_KHR;
-		}
+		/* Paces on the earlier frame; a compositor that holds its callback past the wait takes this one unpaced. */
+		error = wayland_wait(lease, lease->submitted, WAYLAND_PACE_NS);
+		if (error == VK_TIMEOUT)
+			error = VK_SUCCESS;
 
-		/* Other native failures prevent submission of another frame. */
+		/* A broken connection prevents submission of another frame. */
 		if (error != VK_SUCCESS)
 			return error;
 	}

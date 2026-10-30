@@ -312,10 +312,16 @@ keiui_present_frame(
 			keiui_stale_add(&present->targets[target].stale, present->extent.width, present->extent.height, &areas[index]);
 	}
 
-	/* The image to draw into, once the compositor has given one back. */
+	/*
+	 * The image to draw into, once the compositor has given one back.  A
+	 * compositor that is alive but busy (an output turned, a sleep being
+	 * entered) gives none back for as long as it takes; that is waited out
+	 * rather than taken as a lost window, since a closed connection ends
+	 * the wait with an error of its own.
+	 */
 	started = keiui_clock_ms();
 	present->operation = "vkAcquireNextImageKHR";
-	error = vkAcquireNextImageKHR(present->device, present->swapchain, PRESENT_TIMEOUT, present->acquired, VK_NULL_HANDLE, &image);
+	error = vkAcquireNextImageKHR(present->device, present->swapchain, UINT64_MAX, present->acquired, VK_NULL_HANDLE, &image);
 	present->acquire_ms = (unsigned)(keiui_clock_ms() - started);
 	present->stamps.acquired_us = kl_clock_us();
 	if (error != VK_SUCCESS && error != VK_SUBOPTIMAL_KHR)
