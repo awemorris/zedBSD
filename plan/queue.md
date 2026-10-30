@@ -359,7 +359,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1733 / q1733-i01 | P2（phase-runner-high、worktree p2-ws291v、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) | 2026-10-31 ユーザーから、P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい、という趣旨の指示を受けた | in-progress・返却（2026-10-31 P2: c13 42.30 → 45.78 fps、50 に未達。c8f69f7fa・806ff2ca2 は agent/p2-ws291v、BUG-375 の直しの後に merge） |
-| q1727 / q1727-i02 | P8（phase-runner-low、worktree p8-ws074、host と QEMU） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き（100% まで自走）。最初に zedBSD の image で libbrowser の build と QEMU の起動を確かめる | in-progress |
+| q1727 / q1727-i02 | P8（phase-runner-low、worktree p8-ws074、host と QEMU） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き（100% まで自走）。最初に zedBSD の image で libbrowser の build と QEMU の起動を確かめる | in-progress・返却（2,386 → 2,427、main 9175ad146。i03 へ） |
 
 ## 2026-10-31: WS333 p001（P5）・p002（P1）（q1734・q1735）
 
@@ -463,3 +463,4 @@
 | q1766 / q1766-i01 | S-333p009（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p009`） | [ws333-p009](ws333/phase009/phase.md) | 同上 | in-progress |
 | q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | in-progress |
 | q1768 / q1768-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333b`・branch `agent/p7-ws333b`、QEMU、出力は /tmp） | [ws333](ws333/ws.md) p012（tick の位相を揃える）→ [BUG-377](bugs/BUG-377.md) | p012 は amd64 の HAL の実装と QEMU の起動まで、5330 の計測は後。BUG-377 は config の依存の宣言だけ（noct の規則は変えない） | in-progress |
+| q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress |
