@@ -149,6 +149,29 @@ struct ph_view {
 };
 
 /*
+ * What a reread of the library keeps of the view, by ids (the photos'
+ * indices change with the library): the list and its album, the photos
+ * shown whole, chosen, on the album card and armed for a drag (empty for
+ * none), the picture shown whole with the turns it was made with and
+ * whether it failed, the slideshow and when it goes on, and the grid's
+ * place.
+ */
+struct ph_view_keep {
+	int list;
+	char album[PH_ID_SIZE];
+	char open[PH_ID_SIZE];
+	char chosen[PH_ID_SIZE];
+	char card[PH_ID_SIZE];
+	char drag[PH_ID_SIZE];
+	struct kl_image picture;
+	int picture_turns;
+	int picture_failed;
+	int slideshow;
+	uint64_t slide_at;
+	double grid_y;
+};
+
+/*
  * A picture the thread made: the photo, whether it is the whole picture
  * (else a thumbnail), the turns it was made with, the library's
  * generation, the error (0, or why it could not be made) and the picture.
@@ -180,6 +203,8 @@ int ph_worker_busy(void);
 int ph_view_init(struct ph_view *view);
 void ph_view_release(struct ph_view *view);
 int ph_view_reset(struct ph_view *view);
+void ph_view_remember(struct ph_view *view, struct ph_view_keep *keep);
+void ph_view_restore(struct ph_view *view, struct ph_view_keep *keep);
 void ph_view_action(struct ph_view *view, unsigned action, uint64_t now_us);
 void ph_view_key(struct ph_view *view, uint32_t key, unsigned modifiers, uint64_t now_us);
 void ph_view_result(struct ph_view *view, struct ph_result *result);

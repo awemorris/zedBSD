@@ -177,6 +177,21 @@ struct vulkan_writer {
 	VkResult error;
 };
 
+/*
+ * A batch of a long recording waiting for the recording thread: the
+ * command buffer, its bytes (the storage stays the batch's place's), the
+ * replies its head asks for, whether it waits, and the next one waiting.
+ */
+#define VULKAN_RECORDING_BATCHES 2U
+struct vulkan_recording_batch {
+	struct VkCommandBuffer_T *command;
+	struct vulkan_writer part;
+	uint32_t expected[2];
+	uint32_t count;
+	VkBool32 waiting;
+	struct vulkan_recording_batch *next;
+};
+
 /* The swapchain images one command buffer may name as written before it counts them unknown. */
 #define VULKAN_CONTENT_IMAGES 8U
 
@@ -220,6 +235,19 @@ struct VkCommandBuffer_T {
 	struct vulkan_image *content_images[VULKAN_CONTENT_IMAGES];
 	uint32_t content_count;
 	VkBool32 content_unknown;
+	/*
+	 * A long recording's batches sent by the recording thread
+	 * (commands.c): two places a batch's bytes wait in while the thread
+	 * sends them, the place the next batch takes, how many batches are
+	 * still to be sent, and the first failure they met, which the next
+	 * Begin, End or reset makes the command buffer's.  The places' storage
+	 * is kept for the next batches.  sent_pending and sent_error, and a
+	 * place while it waits, belong to the recording thread's lock.
+	 */
+	struct vulkan_recording_batch batches[VULKAN_RECORDING_BATCHES];
+	uint32_t batch_next;
+	uint32_t sent_pending;
+	VkResult sent_error;
 };
 
 /* Keeps one allocation alive independently of its active mapped view. */

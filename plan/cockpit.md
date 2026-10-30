@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 02:55（Q1）
+最終更新: 2026-10-31 03:05（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,11 +14,11 @@
 | P3 | [WS331](ws331/ws.md)・[WS332](ws332/ws.md) | driver から HAL への直の依存を除く・tick の周波数の API | q1737: WS331 p006 規約の全文の見直し → WS331 の完了 | q1738: WS332 p003・p004 → 完了（WS307 は完了、WS326 は Q1 が直に回す） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
-| P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
+| P6 | — | — | 返却（03:1x）。BUG-370・BUG-376 を直して closed、WS291 p014 で RTX の big-1000 を 67〜69 → 85〜91 fps | 次の割当を Q1 が決める |
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
-Sonnet の実装の担当（標準廉価実装手順）: S-p019（[WS326](ws326/ws.md) p019 再構成、02:3x 起動）。p015・p017 は cleared。
+実装の担当（WS326）: O-p021（Opus、[WS326](ws326/ws.md) p021 全体の流れと最初の全体の試験）。p015・p017・p019 は cleared。
 
 ## WS ごとの進捗
 
@@ -74,7 +74,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017 は cleared（02:2x）→ p019 再構成（Sonnet、in-progress）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019 は cleared → p021 全体の流れ（Opus、in-progress、03:2x 起動）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 
@@ -89,8 +89,8 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | closed（VF2 の実機で確かめた） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | closed（P7: 原因は GPU の kernel の命令の buffer が満杯の時に待たずに失敗する事。待つ形に直し、VF2 で 8 回とも落ちず。main 2c5897f26） |
 | [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
-| [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | P6 が直す（q1740） |
-| [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り open のたびに約 80 ms 待つ | P6（q1743） |
+| [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | closed（QEMU で確かめた） |
+| [BUG-376](bugs/BUG-376.md) | PS/2 の mouse が無くても aux の node を作り、open のたびに約 80 ms 待つ | closed（QEMUと実機 で確かめた） |
 | [BUG-222](bugs/BUG-222.md) | ue0 の SCP が約 10 Mbps（10-06 の UAT） | closed（10.0.10.3 の ue0 で 2500 Mbps、scp 62〜86 MB/s） |
 
 ## ユーザーの判断を待つ事

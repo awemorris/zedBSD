@@ -378,10 +378,10 @@
 | q1737 / q1737-i01 | P3（同じ worktree、q1736 の後） | [ws331](ws331/ws.md) p006 規約の全文の見直し → WS331 の完了 | 上のユーザーの指示 | in-progress |
 | q1738 / q1738-i01 | P3（同じ worktree、q1737 の後） | [ws332](ws332/ws.md) p003（率を仮定する残り）→ p004 規約 → WS332 の完了 | 上のユーザーの指示 | pending |
 | q1739 / q1739-i01 | P3（同じ worktree、q1738 の後、実装は phase-runner-low を標準廉価実装手順で） | [ws326](ws326/ws.md) p015・p017 以降 | 上のユーザーの指示 | canceled（2026-10-31 WS326 を昼までに終える指示で Q1 が直に回す、q1748 以降） |
-| q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | in-progress |
-| q1741 / q1741-i01 | P6（同じ worktree、q1740 の後、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) | 上のユーザーの指示 | pending |
+| q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | cleared（acf7ff71a・3dc13b2e5、BUG-370 closed） |
+| q1741 / q1741-i01 | P6（同じ worktree、q1740 の後、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) | 上のユーザーの指示 | in-progress・返却（4b7d0551c: big-1000 67〜69 → 85〜91 fps、NVK 136 に未達。残りは kernel の decode の短縮と WSI の block-linear） |
 | q1742 / q1742-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bug374`・branch `agent/p4-bug374`、実機 10.0.10.3 は P6 と lock で交代） | [BUG-374](bugs/BUG-374.md)（RTX の cursor の色が逆） | 上のユーザーの指示 | uncleared（2026-10-31 P4 b2e2993de、merge 54a134140。理由: ユーザーの目視待ち。診断の kernel と手順は ticket） |
-| q1743 / q1743-i01 | P6（同じ worktree p6-ws291、q1740 の後、q1741 の前、QEMU） | [BUG-376](bugs/BUG-376.md) | 2026-10-31 ユーザーから、PS/2 の aux を起票してどこでもいいので割り当てる、という趣旨の指示を受けた | pending |
+| q1743 / q1743-i01 | P6（同じ worktree p6-ws291、q1740 の後、q1741 の前、QEMU） | [BUG-376](bugs/BUG-376.md) | 2026-10-31 ユーザーから、PS/2 の aux を起票してどこでもいいので割り当てる、という趣旨の指示を受けた | cleared（933563341、BUG-376 closed、QEMU と実機） |
 | q1744 / q1744-i01 | 5330 が空いた担当（P1 の q1735・q1731 の後） | [ws299](ws299/ws.md) 5330 の NVMe の速さの続き | 2026-10-31 ユーザーから、WS299 は 5330 が空いたらどの担当でもよいのでスケジュールする、という趣旨の指示を受けた | in-progress（P1、worktree p1-ws299e・branch agent/p1-ws299e、2026-10-31 起動） |
 | q1745 / q1745-i01 | P4（Pi 5 の WS291 p021 の後、実機 Pi 5） | [ws304](ws304/ws.md) Pi 5 の外の PCIe の続き（ハードの切り分けを含む） | 2026-10-31 ユーザーから、WS304 は空いている所にスケジュールする、という趣旨の指示を受けた | pending |
 | q1746 / q1746-i01 | P5（WS333 p001 の後） | [ws306](ws306/ws.md) p001 設計 | 2026-10-31 ユーザーから、WS306 は検討済みなので進め、決定事項が不明なら cockpit に書けば答える、という趣旨の指示を受けた | uncleared（2026-10-31: 設計の第 3 版 3f1e3c655、merge 843847185。理由: ユーザーの問い Q306-7・Q306-9 の答え待ち。実装は Q306-9 の後） |
@@ -428,4 +428,4 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress |
-
+| q1755 / q1755-i01 | O-p021（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p021`・branch `agent/o-ws326-p021`） | [ws326-p021](ws326/phase021/phase.md) | phase.md のとおり。h264sw-reflist.h の非存在の frame の印だけ header を直してよい（新しい BASE を記録） | in-progress |

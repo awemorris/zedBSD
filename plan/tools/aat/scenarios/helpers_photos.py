@@ -14,8 +14,10 @@ records (id, path, sha256, taken, favorite, turns) and the albums (id, name, mem
 GIF and the damaged JPEG fall on the day of the run.  The same content is never copied twice (SHA-256).
 
 Photos logs `PHOTOS MEDIA done imported=I error=E snapshot=S` when its worker's job ends (I is 1 for an import, 0 for
-a reread); every change of the library (its own import or save too) wakes it to read the library again, which puts
-the view back on the Timeline (ph_view_reset), so the helper waits for those rereads to stop before it clicks.
+a reread); every change of the library (its own import or save too) wakes it to read the library again.  A reread
+keeps the list, the photo shown whole and the slideshow by their ids (ph_view_remember, ph_view_restore), but the
+grid's pictures are made again and the photos' indices may move, so the helper waits for the rereads to stop before
+it clicks.
 
 The photos' indices are the library's order (library.c library_compare_photos: the newest taken first, then by
 path), which the helper computes from metadata.db.  The places in Photos' window are view.c's layout: the lists'
@@ -301,15 +303,21 @@ def browse(item):
 		item.step("Escape, Space, waited, Space", f"{back}; {started}; {first}; {second}; {stopped}")
 		item.check(back and started and first and second and stopped, "the slideshow did not start from sea.jpg, go on and stop")
 		run.key("esc")
+		# The grid scrolled to its end, so every month's thumbnails are made (and kept in the cache) before closing:
+		# the view makes only the thumbnails it shows, and the July row is below a 680-high window.
+		run.aat("wheel", str(window.x + window.width * 2 // 3), str(window.y + window.height // 2), "-20")
+		time.sleep(3)
+		_, shown = run.sh(f"ls {CACHE} | grep -c '\\.ppm$'")
+		item.step("Escape, the grid scrolled to its end", f"cache {shown.strip()}")
 		run.close(item, window)
-		_, kept = run.sh(f"sha256sum {MEDIA}/metadata.db")
+		_, kept = run.sh(f"cksum -a sha256 {MEDIA}/metadata.db")
 		# Open again with the same import: nothing copied again, the album in the list, the thumbnails from the cache.
 		mark = run.mark()
 		window = run.open_as_user(item, f"/bin/photos --import={SOURCE}", ready=r"PHOTOS READY ", timeout=40)
 		window = sized(window, mark)
 		again = run.wait(r"PHOTOS MEDIA done imported=1 error=-?\d+ snapshot=-?\d+", mark, 60)
 		settled(mark)
-		_, now = run.sh(f"sha256sum {MEDIA}/metadata.db; find {MEDIA}/Files -type f | grep -c .")
+		_, now = run.sh(f"cksum -a sha256 {MEDIA}/metadata.db; find {MEDIA}/Files -type f | grep -c .")
 		database = library()
 		run.click(window.x + min(max(int(window.width * SIDEBAR_SHARE), SIDEBAR_MIN), SIDEBAR_MAX) // 2, window.y + FIRST_ALBUM_ROW)
 		listed = run.wait(r"PHOTOS LIST list=2 album=0", mark, 5)
