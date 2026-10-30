@@ -2,7 +2,7 @@
 
 # ws331-p010: atomic.h の HAL の分離と、pc98・pcat の legacy の窓の番地
 
-Status: in-progress（範囲 1〜4 は済み、判定は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS331](../ws.md)
 Queue: q1723（P2）
 

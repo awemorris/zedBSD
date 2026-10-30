@@ -2,7 +2,7 @@
 
 # ws331-p009: kernel の header から HAL を分ける
 
-Status: in-progress（1〜3 と確かめは済み、atomic.h はユーザーの判断待ち、判定は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS331](../ws.md)
 Queue: q1721（P2、p008 の後）
 

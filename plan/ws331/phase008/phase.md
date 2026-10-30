@@ -2,7 +2,7 @@
 
 # ws331-p008: Raspberry Pi の共通化と ODROID-C5 の分離（driver と HAL）
 
-Status: in-progress（範囲の作業は済み、判定は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS331](../ws.md)
 Queue: q1721（P2）
 
