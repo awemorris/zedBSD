@@ -38,7 +38,7 @@ As of 2026-08-28, the public contract is
 WS012 owns executable evidence for the strict YAML model and canonical writer,
 concurrent atomic policy updates, ZSV1 framing and lifecycle, argument-mode
 dispatch, the interactive console, and QEMU integration. That evidence is
-indexed in the [WS012 shared test cases](../../ws012/tests/README.md).
+recorded in [WS012](../../ws012/ws.md) (its test directory was removed when the WS completed).
 
 WS009 owns continuing public-document accuracy and navigation. DOC-T40 must
 therefore compare examples against the WS012 evidence rather than infer
