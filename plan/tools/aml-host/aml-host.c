@@ -62,9 +62,20 @@
  *                     String "zed") as its argument
  *     --ec-seq A=V,V...  successive EC reads of byte A (hex) take the values
  *                     (hex) in turn, the last one staying (with --ec)
- *     --smi-memory A=HEX  at each write of the SMI command port, store the
- *                     bytes (hex pairs) at system memory address A (hex),
- *                     as firmware answering in a shared buffer would
+ *     --smi-memory A=HEX[,HEX...]  at each write of the SMI command port,
+ *                     store the bytes (hex pairs) at system memory address
+ *                     A (hex), as firmware answering in a shared buffer
+ *                     would; with several runs (of the same length) the
+ *                     first SMI of the calls below stores the first, the
+ *                     next the next, and the last stays (an SMI while the
+ *                     tables load stores the first)
+ *     --dell          attach the Dell provider (src/drivers/acpi/acpi-dell.c)
+ *                     and list what it registered with the thermal core
+ *     --dell-apply S  give the Dell receiver the strategy S: performance,
+ *                     balanced, powersave, firmware or manual:SPEED:NOISE:GATING
+ *     --dell-poll     run the Dell receiver's poll once
+ *     --dell-fan      read every Dell fan
+ *     --dell-boost F:L  set Dell fan F's boost to level L
  *     --wmi           attach the WMI mapping devices and list the blocks,
  *                     with the SMI writes the attach caused
  *     --wmi-path PATH  attach the WMI mapping device at PATH (repeatable)
@@ -173,7 +184,12 @@ enum option_kind {
 	OPTION_WMI_PATH,
 	OPTION_WMI_QUERY,
 	OPTION_WMI_METHOD,
-	OPTION_EVAL_ARGS
+	OPTION_EVAL_ARGS,
+	OPTION_DELL,
+	OPTION_DELL_APPLY,
+	OPTION_DELL_POLL,
+	OPTION_DELL_FAN,
+	OPTION_DELL_BOOST
 };
 
 /*
@@ -246,11 +262,19 @@ struct memory_piece {
 
 /*
  * Bytes --smi-memory stores at a system memory address at each SMI.
+ *
+ * bytes holds steps runs of length bytes each: the first SMI of the
+ * calls stores the first run, the next SMI the next, and the last run
+ * stays for every SMI after it; an SMI before the calls (while the tables
+ * load and initialize) stores the first run.  next is the run the next
+ * SMI stores.
  */
 struct smi_store {
 	uint64_t address;
 	uint8_t *bytes;
 	size_t length;
+	unsigned steps;
+	unsigned next;
 };
 
 /*
@@ -324,6 +348,11 @@ static const struct option_name option_names[] = {
 	{ "--wmi-query", OPTION_WMI_QUERY, 1 },
 	{ "--wmi-method", OPTION_WMI_METHOD, 1 },
 	{ "--eval-args", OPTION_EVAL_ARGS, 1 },
+	{ "--dell", OPTION_DELL, 0 },
+	{ "--dell-apply", OPTION_DELL_APPLY, 1 },
+	{ "--dell-poll", OPTION_DELL_POLL, 0 },
+	{ "--dell-fan", OPTION_DELL_FAN, 0 },
+	{ "--dell-boost", OPTION_DELL_BOOST, 1 },
 };
 
 /*
@@ -399,6 +428,12 @@ static struct smi_store smi_stores[OPTION_LIST_MAX];
 static unsigned smi_store_count;
 
 /*
+ * Whether the calls run, from which on each SMI moves the --smi-memory
+ * stores to their next run.
+ */
+static int smi_steps_running;
+
+/*
  * Whether the interpreter lock is held.  The harness has one thread, so
  * the lock only checks that the interpreter takes and lets it go in pairs.
  */
@@ -449,6 +484,20 @@ static int parse_ec_sequence(const char *text);
 static int parse_smi_store(const char *text);
 static void smi_answer(uint8_t command);
 static int run_calls(const struct harness_options *options);
+static int run_dell_call(enum option_kind kind, const char *request);
+
+/*
+ * The calls of the Dell provider (aml-host-dell.c).
+ *
+ * They are weak so that a harness linked without the provider (another
+ * test's build of this file) still links; there the --dell options report
+ * that the provider is not linked.
+ */
+extern int host_dell_attach(void) __attribute__((weak));
+extern int host_dell_apply(const char *request) __attribute__((weak));
+extern int host_dell_poll(void) __attribute__((weak));
+extern int host_dell_fan(void) __attribute__((weak));
+extern int host_dell_boost(const char *request) __attribute__((weak));
 
 /*
  * Runs the harness.
@@ -960,7 +1009,7 @@ parse_arguments(
 
 	/* Refuses more WMI calls and evaluations with arguments than the harness keeps. */
 	if (options->call_count > OPTION_LIST_MAX) {
-		fprintf(stderr, "more than %u --wmi, --wmi-path, --wmi-query, --wmi-method and --eval-args options\n", OPTION_LIST_MAX);
+		fprintf(stderr, "more than %u --wmi, --dell and --eval-args options\n", OPTION_LIST_MAX);
 		return 1;
 	}
 
@@ -1112,6 +1161,11 @@ record_option(
 	case OPTION_WMI_QUERY:
 	case OPTION_WMI_METHOD:
 	case OPTION_EVAL_ARGS:
+	case OPTION_DELL:
+	case OPTION_DELL_APPLY:
+	case OPTION_DELL_POLL:
+	case OPTION_DELL_FAN:
+	case OPTION_DELL_BOOST:
 		/* The calls run in the order given, after the evaluations. */
 		if (options->call_count < OPTION_LIST_MAX) {
 			options->calls[options->call_count] = value;
@@ -2534,47 +2588,70 @@ parse_ec_sequence(
 	return 0;
 }
 
-/* Records bytes to store in system memory at each SMI: hex ADDRESS=HEX. */
+/*
+ * Records bytes to store in system memory at each SMI: hex
+ * ADDRESS=HEX[,HEX...], every run of the same length.
+ */
 static int
 parse_smi_store(
 	const char *text)
 {
 	struct smi_store *store;
 	unsigned long long address;
+	const char *runs;
+	const char *digit;
 	char pair[3];
 	char *end;
 	size_t digits;
+	size_t run_digits;
 	size_t index;
+	size_t total;
+	unsigned steps;
 
 	/* Refuses a store past the room. */
 	if (smi_store_count >= OPTION_LIST_MAX)
 		return 1;
 
-	/* The address and its equals sign, then an even number of digits. */
+	/* The address and its equals sign, then runs of an even number of digits. */
 	address = strtoull(text, &end, 16);
 	if (end == text || *end != '=')
 		return 1;
-	digits = strlen(end + 1);
-	if (digits == 0 || digits % 2U != 0U)
+	runs = end + 1;
+	run_digits = strcspn(runs, ",");
+	if (run_digits == 0 || run_digits % 2U != 0U)
 		return 1;
+
+	/* Counts the runs, each as long as the first. */
+	digits = strlen(runs);
+	if ((digits + 1U) % (run_digits + 1U) != 0U)
+		return 1;
+	steps = (unsigned)((digits + 1U) / (run_digits + 1U));
+	for (index = 1; index < steps; index++) {
+		if (runs[index * (run_digits + 1U) - 1U] != ',')
+			return 1;
+	}
 
 	/* Allocates the bytes. */
 	store = &smi_stores[smi_store_count];
-	store->bytes = malloc(digits / 2U);
+	total = (run_digits / 2U) * steps;
+	store->bytes = malloc(total);
 	if (store->bytes == NULL)
 		return 1;
 
-	/* Reads each pair. */
+	/* Reads each pair of each run; a run starts after the comma that ends the one before. */
 	pair[2] = '\0';
-	for (index = 0; index < digits / 2U; index++) {
-		pair[0] = end[1 + index * 2U];
-		pair[1] = end[2 + index * 2U];
+	for (index = 0; index < total; index++) {
+		digit = runs + (index / (run_digits / 2U)) * (run_digits + 1U) + (index % (run_digits / 2U)) * 2U;
+		pair[0] = digit[0];
+		pair[1] = digit[1];
 		store->bytes[index] = (uint8_t)strtoul(pair, NULL, 16);
 	}
 
 	/* Keeps the store. */
 	store->address = address;
-	store->length = digits / 2U;
+	store->length = run_digits / 2U;
+	store->steps = steps;
+	store->next = 0;
 	smi_store_count++;
 
 	/* The first store installs the hook that runs them. */
@@ -2596,14 +2673,18 @@ smi_answer(
 
 	UNUSED_PARAMETER(command);
 
-	/* Stores every requested run of bytes. */
+	/* Stores each store's run for this SMI, then moves it to the next run. */
 	for (index = 0; index < smi_store_count; index++) {
 		store = &smi_stores[index];
 		for (offset = 0; offset < store->length; offset++) {
 			byte = page_byte(DRV_ACPI_SPACE_SYSTEM_MEMORY, store->address + offset);
 			if (byte != NULL)
-				*byte = store->bytes[offset];
+				*byte = store->bytes[store->next * store->length + offset];
 		}
+
+		/* Moves to the next run once the calls run; the last run stays. */
+		if (smi_steps_running && store->next + 1U < store->steps)
+			store->next++;
 	}
 }
 
@@ -2615,6 +2696,9 @@ run_calls(
 	unsigned index;
 	int failed;
 	int error;
+
+	/* The SMIs of the calls take the --smi-memory runs in turn. */
+	smi_steps_running = 1;
 
 	/* Runs each call; a failed one makes the outcome a failure and the others still run. */
 	failed = 0;
@@ -2633,6 +2717,13 @@ run_calls(
 		case OPTION_WMI_METHOD:
 			error = host_wmi_method(options->calls[index]);
 			break;
+		case OPTION_DELL:
+		case OPTION_DELL_APPLY:
+		case OPTION_DELL_POLL:
+		case OPTION_DELL_FAN:
+		case OPTION_DELL_BOOST:
+			error = run_dell_call(options->call_kinds[index], options->calls[index]);
+			break;
 		default:
 			error = host_eval_args(options->calls[index]);
 			break;
@@ -2648,5 +2739,46 @@ run_calls(
 		return 1;
 
 	/* Succeeded: every call ran. */
+	return 0;
+}
+
+/* Runs one call of the Dell provider, or reports a harness linked without it. */
+static int
+run_dell_call(
+	enum option_kind kind,
+	const char *request)
+{
+	int error;
+
+	/* Refuses the call in a harness linked without the provider. */
+	if (host_dell_attach == NULL) {
+		fprintf(stderr, "the Dell provider is not linked into this harness\n");
+		return 1;
+	}
+
+	/* Runs the call by its kind. */
+	switch (kind) {
+	case OPTION_DELL:
+		error = host_dell_attach();
+		break;
+	case OPTION_DELL_APPLY:
+		error = host_dell_apply(request);
+		break;
+	case OPTION_DELL_POLL:
+		error = host_dell_poll();
+		break;
+	case OPTION_DELL_FAN:
+		error = host_dell_fan();
+		break;
+	default:
+		error = host_dell_boost(request);
+		break;
+	}
+
+	/* Reports a failed call. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the call ran. */
 	return 0;
 }

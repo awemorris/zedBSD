@@ -313,6 +313,11 @@ CONFIG_DRIVER_PCI_I915 ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 # hardware feedback, the energy and idle residency counters) is off by default.
 CONFIG_CPU_PERF ?= n
 
+# The Dell laptop provider's fan boost through the SMM fan call is off by
+# default: it is offered once a Dell machine has shown that a raised state
+# lifts the fan and leaves the firmware free to run it faster.
+CONFIG_DELL_SMM_BOOST ?= n
+
 # The NVIDIA Turing-and-later driver is on by default where it builds (amd64).
 CONFIG_DRIVER_PCI_NVRTX ?= $(if $(filter amd64,$(ZEDBSD_PLATFORM)),y,n)
 
@@ -939,6 +944,7 @@ ZEDBSD_CONFIG_CPPFLAGS := \
 	-DCONFIG_DRIVER_PCI_VENUS=$(if $(filter y,$(CONFIG_DRIVER_PCI_VENUS)),1,0) \
 	-DCONFIG_DRIVER_PCI_I915=$(if $(filter y,$(CONFIG_DRIVER_PCI_I915)),1,0) \
 	-DCONFIG_CPU_PERF=$(if $(filter y,$(CONFIG_CPU_PERF)),1,0) \
+	-DCONFIG_DELL_SMM_BOOST=$(if $(filter y,$(CONFIG_DELL_SMM_BOOST)),1,0) \
 	-DCONFIG_DRIVER_PCI_NVRTX=$(if $(filter y,$(CONFIG_DRIVER_PCI_NVRTX)),1,0) \
 	-DCONFIG_DRIVER_PCI_AMDRDNA=$(if $(filter y,$(CONFIG_DRIVER_PCI_AMDRDNA)),1,0) \
 	-DCONFIG_AMDRDNA_CONTROL=$(if $(filter y,$(CONFIG_AMDRDNA_CONTROL)),1,0) \
