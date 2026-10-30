@@ -133,4 +133,3 @@ userland/desktop/libkeiland/ui/picker-model.c userland/desktop/libkeiland/audio/
 
 Q1 へ: ws095 の `plan/ws095/tests/host-engine.sh` は ja-user.c を `-pthread` だけで build するので、移した後は link できない（閉じた WS、削除の候補）。
 host-apps.sh の ime が同じ試験を層と一緒に build する。
-
