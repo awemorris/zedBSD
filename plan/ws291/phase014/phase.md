@@ -2,7 +2,7 @@
 
 # ws291-p014: NVIDIA: 命令の記録の段と pass の終わりの全画面の copy を減らし、big-1000・subs-1000 を NVK に近づける
 
-Status: in-progress（2026-10-31 02:55 P6 q1741-i01 返却: big-1000 67〜69 → 85〜91 fps（libvulkan の batch を送る thread）。record の段の残りと pass の終わりの copy は未着手。cleared か uncleared かは Q1 の判定）
+Status: in-progress（2026-10-31 07:16 P3 q1764-i01 返却: big-1000 85〜88 → 115.8〜116.6 fps（record の短い道、push buffer を短く区切る）、NVK 136.2 には届かない。subs-1000 は 10.9 のまま（pass の終わりの copy は私用の fence のため遅らせられず、run ごとの GPU の固定の約 56 µs は未解明）。cleared か uncleared かは Q1 の判定）
 Parent: [WS291](../ws.md)
 Queue: q1741（P6）
 
@@ -91,3 +91,92 @@ Queue: q1741（P6）
 - 到達: big-1000 66.9〜69.5 → 85.3〜91.0 fps（NVK 136.2）。big-100・subs・scene は揺れの内。subs-1000 は 10.5〜11.0（NVK 75.4）。
 - 次の候補: (1) kernel の record の decode の短縮（今の律速、約 3.6 ms）、(2) 記録を kernel が push に直に組む形（executor の作り直し）、(3) subs は WSI の image の
   block-linear（p013 の (B)）。
+
+## q1764-i01（2026-10-31 P3、worktree p3-ws291r2、基点 main 901f5b5fc）
+
+- 承認: Queue q1764-i01（2026-10-31 ユーザーは昼頃まで不在で、その間 実装と試験を進める趣旨の指示を受けている）。範囲は上の「範囲」のとおり（p014 の続き）。
+- 実機: 10.0.10.3（RTX 2070）、lock /tmp/zedbsd-rdna.lock を 04:49 から保持。計測は全部 main の userland（networkd・libc・libvulkan・compositor ほか、
+  `make ZEDBSD_CONFIG=plan/ws291/tests/config.mk BUILD=/tmp/p3r2/n` の個別 target）を FILES で入れ、kernel だけを入れ替える `rtx-p013.sh`（SHOT=1、ROUNDS=2）。
+  各 window の終わりに file と kernel を戻して cksum 一致（vmunix-va1 1463007375）、Debian。
+
+### 直し 1: kernel の record の短い道（commit d74ebaff5、src/drivers/gpu/nvrtx/vk/vk-record.c）
+
+- draw ごとに記録される 5 つ（DRAW_INDEXED・DRAW・BIND_PIPELINE・set 1 つの BIND_DESCRIPTOR_SETS・PUSH_CONSTANTS）を、記録中で余裕のある command buffer
+  なら stream から直に読み（固定の部分の長さを 1 回だけ確かめ、wire の語を直に組む）、続く同じ command buffer の record も stream と dispatcher を通さずに
+  その場で取る。引数の確かめは一般の道と同じで、取れない物（他の opcode、短い stream、配列を伸ばす時、一般の道が断る引数）は何も読まず一般の道へ返す。
+- host: `nvrtx-draws-bench.sh`（1000 copies 1 submit）の record 3.7 → 約 1.5 ms（callgrind で 1 record 約 440 → 約 160 命令）、draw ごとの state の hash が
+  基点と全一致（1000×1・100×100）、nvrtx-vk 94/0・vk-d3 218/0。kernel warning 0・amd64 vmunix check PASS。
+
+### 直し 2: push buffer を短く区切って GPU を早く動かす（vk-execute.c、commit 02c6d4a66・788885030）
+
+- 02c6d4a66（e）: command buffer の最初の push buffer を 256 draw で GPU に渡す（frame の submit の時 GPU は空いている）。
+- 788885030（r）: 2 つ目からも 2048 draw ごとに GPU に渡す（`EXECUTE_RUN_DRAWS`）。PROF（nvrtx.vk.perf=1）で、big-1000 の GPU の実行は 1 frame 約 4.3 ms（NVK の fence 4.09 ms と
+  同等）なのに submit+fence が約 6.1 ms で、差の約 1.8 ms は GPU が executor の 1 MiB の push buffer の書き終わりを待つ時間と分かった（CPU は 1 draw 約 0.15 µs、
+  GPU は約 0.27 µs で CPU の方が速いが、1 MiB の push buffer は約 5000 draw で GPU の手が空く）。r で 1 frame の run は約 3 → 約 10 本、GPU は 1 run 約 0.41 ms、
+  submit+present+fence が約 4.6 ms（GPU の 4.3 ms にほぼ律速）。
+- host: bench の draw ごとの state の hash が基点と全一致（1000×1・100×100）、nvrtx-vk 94/0・vk-d3 218/0、kernel warning 0・vmunix check PASS。
+
+### 実機（10.0.10.3 RTX 2070、main の userland、fps、括弧は big-1000 の record・submit・fence ms）
+
+| kernel（window、round） | big-100 | big-1000 | subs-100 | subs-1000 | scene-1500 | scene-5000 | shot each・subs |
+| --- | --- | --- | --- | --- | --- | --- | --- |
+| base（main 901f5b5fc、3606953930）m1 1・2 | 586.4・573.9 | 85.0（4.97・2.32・4.33）・88.2（4.92・2.16・4.11） | 105.0・106.1 | 10.91・10.91 | 159.9・160.5 | 49.83・49.84 | 0・0 |
+| q（d74ebaff5、3987510353）m1 1・2、m3 1・2 | 620.4・630.3・601.4・639.9 | 92.7（4.08・2.50・4.04）・99.8（3.77・2.15・3.98）・97.6・93.2 | 105.4〜106.8 | 10.87〜10.92 | 159.6〜160.3 | 49.76〜49.84 | 0・0 |
+| e（02c6d4a66、2764037720）m3 1・2、m4 1・2 | 678.0・664.3・680.0・574.7 | 98.6（3.69・2.34・3.98）・99.5・99.3・97.0 | 105.9〜107.1 | 10.87〜10.93 | 159.9〜160.4 | 49.68〜49.87 | 0・0 |
+| r（e＋2048 draw、下の v 込みの 1085861505）m4 1・2 | 688.8・645.0 | 116.6（3.82・3.28・0.99）・115.8（3.77・3.45・1.01） | 106.5・106.5 | 10.99・10.98 | 159.7・160.9 | 49.79・49.73 | 0・0 |
+| r（788885030、v 無し 102504526）m5 1 | 662.9 | **116.0（3.81・3.30・1.02）** | 105.9 | 10.91 | 160.4 | 49.87 | 0・0 |
+| r8（r で slot を 3 → 8、3342390047）m5 1 | 672.1 | 116.3（3.84・2.35・2.23） | 107.3 | 10.90 | 160.3 | 49.79 | 0・0 |
+| nc（診断: pass の終わりの copy を書かない、画素は誤り、3312580597）m5 1 | 716.8 | 116.1 | 153.6 | 16.07（submit 54.8） | 162.6 | 49.93 | — |
+| NVK（p010） | — | 136.2（3.15・0.03・4.09） | — | 75.4 | 165.6 | 50.1 | — |
+
+- 証拠: /tmp/p3r2/m1（04:49〜05:04）・m3（05:08〜05:40）・m4（05:41〜06:13）・m5（06:13〜06:37）の summary.txt（host の /tmp、git に入れない）。
+  r の one・each・subs の still は base（m1）の one とも画素差 0（nc の one は base と全画素で違い、比べが効いていることも確かめた）。各 window の終わりに 13 の file と
+  NVMe の kernel を戻して cksum 一致、Debian。m4 の r 2 で deploy が「neither system answers」を出したが、次の問い合わせで r の kernel（1085861505）で上がっていた
+  （起動が遅かった。原因は調べていない）。
+- 起動の dmesg に毎回 `vram-window bar1 before the tables: fault ...`（base でも出る）、q の 1 回目だけ `vram-window retry 1`。今回の変更の前からの行。
+
+### desktop（後退の確かめ）
+
+- `rtx-desk-main.sh /tmp/p3r2/desk2 r の vmunix`（RUNS=1、main の desktop の program、06:38〜06:43、kernel 102504526）: launch 64・type 62・output 70・drag 61・
+  home 64・wiseview 64 fps（scroll・hover・keys は入力の間隔で決まる段）。p013 の d7（63・61・68・60・64・65）・P6 の d1（64・61・67・60・64・64）と同じ。後退なし。
+  終わりに file と kernel を戻して cksum 一致、Debian、RTX 4 function vfio-pci。（06:37 の 1 回目は m5 の Debian への戻りと重なり「zedBSD did not come up」で
+  何もせずに終わった。）
+
+### 試して入れない物
+
+- r8（executor の slot を 3 → 8）: r と揺れの内（116.3 対 116.0）→ 入れない（slot は 3 のまま）。
+
+- v（pipeline 間で同じ compiled program を共有し、vertex program の付け替えを無くす。mview の 2 系統の pipeline は vertex shader が同じ）: m4 で e と揺れの内
+  （big-1000 98.3・98.1 対 99.3・97.0）→ 入れない。差分は `plan/ws291/tests/nvrtx-program-share.patch`。bench は program を address でなく中身で hash する形にした
+  （program の置き場を変える executor の比べに使う）。
+- d（pass の終わりの shadow→target の copy を、signal する submit まで遅らせる）: subs-1000 は 10.9 のまま。libvulkan は fence の無い vkQueueSubmit にも私用の
+  fence（private_fence）を付けて送るので、kernel は「誰かが image を見るか」を submit から区別できず、毎 submit で copy した。d は入れない
+  （`plan/ws291/tests/nvrtx-shadow-defer.patch`）。copy を省くには、私用の fence を wire で示す（libvulkan と各 driver の protocol の変更）か、WSI の image を
+  block-linear にする（p013 の (B)）のどちらかが要る。
+
+### subs-N の内訳（m5 の nc と PROF）
+
+- PROF（subs-100）: GPU の 1 run は約 89 µs（r・r8 とも）。nc（診断、copy を書かない）で 1 run 約 60 µs（1 run は 1 copy の 16 draw、描画そのものは
+  scene-5000 から見積もって約 4 µs）。つまり pass の終わりの copy は約 29 µs で、残りの約 56 µs は run ごとの固定の費用。nc の subs-1000 は 16.07 fps
+  （submit 54.8 ms ＝ 1 submit 約 55 µs）。NVK は subs-1000 で submit 4.63 ms・fence 2.45 ms（1 submit 約 5〜7 µs）。
+- copy を省けても subs-1000 は約 16 fps までで、NVK の 75 fps に近づくには run ごとの固定の約 56 µs（GPU）の内訳（run の始めの texture pool と shader cache の
+  invalidate、最初の draw の全 state、pass の始めと終わりの barrier の WFI、run の終わりの WFI の fence、channel の切り替えの有無）を 1 つずつ外して測る段が要る
+  （今回は未着手）。
+
+### 機械の状態と再開点（2026-10-31 P3）
+
+- 機械: Debian、RTX は vfio-pci（4 function）、NVMe の kernel は vmunix-va1（1463007375）、NVMe の userland は 10-28 の file（各 window の終わりに cksum 照合、
+  *.p7old は残る）。
+- branch agent/p3-ws291r2: d74ebaff5（record の短い道）、02c6d4a66（最初の push buffer を 256 draw で）、788885030（以後 2048 draw ごと）、a940ef0e1（bench の
+  program の中身の hash、rtx-runcost.sh、試した差分の patch）と記録の commit。
+  main に入れてよい（実機で効果、画素差 0、scene の後退なし。desktop は下）。
+- 到達: big-1000 85.0〜88.2（base）→ 115.8〜116.6 fps（NVK 136.2）。frame 8.6 ms = record 3.8（NVK 3.15）+ submit・present・fence 4.6（GPU 約 4.3、NVK の fence 4.09）。
+  big-100 574〜586 → 645〜689。subs-1000 は 10.9 のまま（NVK 75.4）。scene-1500・scene-5000 は揺れの内。
+- 診断の run（rtx-runcost.sh、診断 kernel 4002989971、06:44〜）は計測に至らなかった: script が main の userland を入れた後、kernel を入れ替える前に
+  `timing on` で再起動したため、NVMe の古い kernel va1 と main の networkd の組で zedBSD の network が上がらず（BUG-371/373 の ABI 違い）、06:56〜07:12 は
+  Debian も zedBSD も答えなかった。Q1 が SwitchBot（AC276E42B252）で入れ直し、Debian から p4 の vmunix を診断 kernel に書き（`rdna-nvme.sh kernel`）、
+  zedBSD を起こして 13 の file と kernel を元に戻し cksum 一致（07:13〜07:15）、nvrtx.vk.perf の行 0、Debian、RTX 4 function vfio-pci。lock は 07:15 に返した。
+  script は kernel を先に入れてから timing on する順に直した（a940ef0e1）。run ごとの固定の費用の内訳（変種 0〜5）は未計測。
+- 次の候補: (1) subs: 私用の fence を wire で示して pass の終わりの copy を遅らせる（libvulkan と各 driver の protocol の変更、計画の判断が要る）か、WSI の
+  block-linear（p013 の (B)）。(2) subs: run ごとの GPU の固定の約 56 µs の内訳。(3) big-1000: record の段の残り（client の encode と最後の batch の decode、
+  約 0.7 ms）と GPU の約 0.2 ms。
