@@ -4389,7 +4389,7 @@ cg_ndblk(
  *
  * Groups follow one another fpg fragments apart, so only the group the
  * fragment divided by fpg falls in can hold it; a volume grown to many groups
- * (ws299) would otherwise be searched group by group for every block pointer.
+ * would otherwise be searched group by group for every block pointer.
  * A volume that staggers its group metadata (cgoffset under a cgmask that
  * leaves bits) moves where each group starts, so there every group is still
  * a candidate and the caller searches them all, as before.

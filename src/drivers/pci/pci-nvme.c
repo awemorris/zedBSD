@@ -39,14 +39,14 @@
 #define NVME_IO_QUEUE_ID 1U
 /*
  * Each slot's bounce memory, which carries the data of a request that does
- * not come as physical pages the device can reach (ws299: was one page).
+ * not come as physical pages the device can reach.
  */
 #define NVME_IO_BOUNCE_SIZE (64U * 1024U)
 
 /*
  * The most one command carries, before MDTS narrows it: 2 MiB, which is one
  * page of PRP list entries after PRP1 with 4 KiB pages, so a list never
- * chains (ws299).
+ * chains.
  */
 #define NVME_IO_MAX_COMMAND_BYTES (2U * 1024U * 1024U)
 #define NVME_IO_MAX_COMMAND_PAGES (NVME_IO_MAX_COMMAND_BYTES / KERN_PAGE_SIZE)
@@ -90,7 +90,7 @@ enum nvme_hmb_state {
 /*
  * How wide a DMA address an NVMe controller takes: PRP entries are 64-bit
  * (NVMe Base Specification 2.0, PRP entry), wider than the 32-bit default of
- * a PC's PCI bus (ws299, 2026-10-27 Q1).
+ * a PC's PCI bus.
  */
 #define NVME_DMA_ADDRESS_BITS 64U
 
@@ -238,7 +238,7 @@ struct drv_nvme_io_lifecycle {
 struct nvme_io_slot {
 	struct drv_nvme_io_lifecycle lifecycle;
 	struct drv_dma_buffer bounce_dma;
-	/* The page of PRP list entries a command of more than two pages names in PRP2 (ws299). */
+	/* The page of PRP list entries a command of more than two pages names in PRP2. */
 	struct drv_dma_buffer prp_list_dma;
 	/* The bus address of every page of the command being built, PRP1 first. */
 	uint64_t *page_bus;
@@ -271,7 +271,7 @@ struct nvme_io_slot {
 struct nvme_io_chunk {
 	struct nvme_io_slot *slot;
 	uint8_t *bytes;
-	/* The chunk's physical pages, when the request came as a page list (ws299). */
+	/* The chunk's physical pages, when the request came as a page list. */
 	const uint64_t *pages;
 	uint32_t page_count;
 	/* Set when the chunk's data went through the slot's bounce memory. */
@@ -382,27 +382,27 @@ struct nvme_controller {
 	size_t maximum_transfer_bytes;
 	/*
 	 * Set when the device can move physical pages directly: its DMA is
-	 * coherent and its memory page is the kernel's page (ws299).
+	 * coherent and its memory page is the kernel's page.
 	 */
 	unsigned page_vector;
 	/*
 	 * How many times the I/O path has been proven stopped (controller or bus
 	 * mastering off and the interrupts drained).  A request whose command
 	 * failed while posted waits for it to move before giving its pages
-	 * back (ws299).  Changed under command_lock.
+	 * back.  Changed under command_lock.
 	 */
 	uint64_t io_dma_quiesce_count;
 	/*
 	 * Page-list commands sent to the pages themselves and through the
-	 * bounce memory (the device could not reach a page), counted for the
-	 * measurement of ws299 and logged every NVME_IO_PATH_LOG_EVERY of them.
+	 * bounce memory (the device could not reach a page), counted for
+	 * measurement and logged every NVME_IO_PATH_LOG_EVERY of them.
 	 */
 	uint64_t io_direct_commands;
 	uint64_t io_bounced_commands;
 	/*
 	 * Sums of the time from post to the interrupt's completion and from
 	 * there to the waiter running, over latency_count commands, logged and
-	 * cleared every NVME_IO_LATENCY_LOG_EVERY (ws299-p004).  Changed under
+	 * cleared every NVME_IO_LATENCY_LOG_EVERY.  Changed under
 	 * command_lock.
 	 */
 	uint64_t latency_device_ns;
@@ -6210,7 +6210,7 @@ nvme_probe_namespace(
 
 	/*
 	 * Takes physical page lists when the device reaches the kernel's pages
-	 * directly: coherent DMA and a memory page equal to the kernel's (ws299).
+	 * directly: coherent DMA and a memory page equal to the kernel's.
 	 */
 	controller->page_vector = 0;
 	if (drv_dma_device_is_coherent(drv_pci_device_dma(controller->pci)) &&
@@ -6406,7 +6406,7 @@ nvme_io_dma_allocate(
 	/*
 	 * Gives every slot its bounce, PRP list page and page address array.
 	 * When the larger bounce cannot be had for every slot, all of them
-	 * start again with one-page bounces, as before ws299.
+	 * start again with one-page bounces.
 	 */
 	controller->io_bounce_size = NVME_IO_BOUNCE_SIZE;
 	index = 0;
@@ -6436,7 +6436,7 @@ nvme_io_dma_allocate(
 			goto fail;
 		}
 
-		/* Takes the page the slot's PRP lists are written in (ws299). */
+		/* Takes the page the slot's PRP lists are written in. */
 		error = drv_dma_alloc_coherent(
 			dma, controller->page_size, controller->page_size,
 			&controller->io_slots[index].prp_list_dma);

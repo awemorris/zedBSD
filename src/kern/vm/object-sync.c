@@ -960,7 +960,7 @@ vm_object_sync_range_buffer(
 	 * window.
 	 *
 	 * The pass walks the range in offset order through the page index and
-	 * resumes after the page it took last (ws299).  Searching the whole
+	 * resumes after the page it took last.  Searching the whole
 	 * page list from its head for every page made a sync quadratic in the
 	 * resident pages: a 3 GiB file kept the shutdown's sync running for
 	 * hours.
