@@ -129,6 +129,11 @@ layout_build(
 	if (error != 0)
 		return error;
 
+	/* The scrolled containers move their content. */
+	error = layout_scroll_apply(tree);
+	if (error != 0)
+		return error;
+
 	/* A box with nothing inside it that transform scales (a hairline border drawn at twice the size and halved) shrinks about its origin. */
 	box_apply_scale(root);
 

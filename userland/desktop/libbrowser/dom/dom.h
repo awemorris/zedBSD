@@ -410,6 +410,11 @@ struct dom_element {
 	uint64_t child_loaded_epoch;
 	/* Distinguish an unobserved source from an attempted absent or empty source. */
 	int child_load_seen;
+	/* How far a scroll container's content is scrolled, in CSS pixels (the document's is the page's). */
+	double scroll_x;
+	double scroll_y;
+	/* Whether a popover is showing (in the top layer). */
+	int popover_open;
 };
 
 /*
