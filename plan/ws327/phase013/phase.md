@@ -3,7 +3,7 @@
 # ws327-p013 thread の層の Win32 の実装（`thread-win32.c`）と mingw の cross compile
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §3・§5.1・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007。
-- Status: planned
+- Status: cleared（2026-10-30 Q1 の判定）
 - Disposition: normal
 - ユーザーの決定 3（ws.md、原文）: 「P2ですが、Windows用の実装を書いてしまってOKです。インタフェースがWindowsでも通用する形になっているかのチェックです。動作確認は不要です。mingwは使ってよいです。」
   → mingw で compile と link（warning 0）まで。wine でも Windows でも走らせない。
