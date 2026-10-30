@@ -167,6 +167,17 @@ sched_ticks(
 	return model_tick_base + model_now_us / (1000000U / KERN_CLOCK_HZ);
 }
 
+/* The monotonic counter, the virtual clock at a megahertz (the receive buffer's sizing times the round trip with it). */
+bool
+kern_rtc_read_counter(
+	uint64_t *counter,
+	uint64_t *frequency_hz)
+{
+	*counter = model_now_us;
+	*frequency_hz = 1000000U;
+	return true;
+}
+
 /* A sleep never happens in the model: its callers run without a thread. */
 void
 sched_sleep(

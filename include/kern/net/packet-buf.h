@@ -20,10 +20,14 @@
  * The packets of the whole stack, in two classes of one pool: standard
  * packets of PACKET_BUF_STORAGE_SIZE, and on the 64-bit machines a few
  * jumbo packets large enough for a 9000-byte frame with its headroom.  A
- * 64-bit machine's TCP offers a window of tens of kilobytes, a packet for
- * each segment of it, and keeps a copy of each segment it sends until the
- * peer has it (128 of them a connection); the 32-bit boards keep the small
- * pool their memory map was laid out for and have no jumbo packets.
+ * 64-bit machine's TCP offers a window of 128 KB to start with, a packet
+ * for each kilobyte of it, which grows by itself to a megabyte while the
+ * receive queues together take no more than a quarter of the pool, and
+ * keeps a copy of each segment it sends until the peer has it (256 of them
+ * a connection): 4096 packets, about 9 MB, leave the rest to the senders'
+ * copies and the frames that arrive while one connection has the largest
+ * window.  The 32-bit boards keep the small pool their memory map was laid
+ * out for and have no jumbo packets.
  *
  * PACKET_BUF_JUMBO_RESERVE jumbo packets are kept for the drivers'
  * receive (PACKET_BUF_ALLOC_RECEIVE): a sender or a copy that would take
@@ -45,7 +49,7 @@
 #if defined(CONFIG_PACKET_BUF_POOL_COUNT)
 #define PACKET_BUF_POOL_COUNT		CONFIG_PACKET_BUF_POOL_COUNT
 #else
-#define PACKET_BUF_POOL_COUNT		1024U
+#define PACKET_BUF_POOL_COUNT		4096U
 #endif
 #define PACKET_BUF_JUMBO_STORAGE_SIZE	9216U
 #define PACKET_BUF_JUMBO_COUNT		32U

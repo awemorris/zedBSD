@@ -38,9 +38,14 @@ timeout 1800 python3 -I plan/ws221/tests/perf-peer.py "$server_ip" $((port + 1))
 peer2=$!
 
 extra="echo old-start; echo user | sudo -S grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|panic|trap' /var/log/kernel.log.old | tail -40; echo; echo ---; lsusb -v; echo ---; dmesg | grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|usb: '; echo ---; ifconfig ue0; echo ---;"
-extra="$extra tcp-perf send $server_ip $port $seconds | tail -1; tcp-perf recv $server_ip $port $seconds | tail -1; echo ---;"
+# net.tcpstats is read 3 s before the end of the recv and of both (the receive buffer's size while it is in use).
+sample="(sleep $((seconds - 3)); sysctl net.tcpstats)"
+extra="$extra tcp-perf send $server_ip $port $seconds | tail -1; $sample > /tmp/ws315-stats-recv.txt 2>&1 &"
+extra="$extra tcp-perf recv $server_ip $port $seconds | tail -1; wait; echo stats-recv; cat /tmp/ws315-stats-recv.txt; echo ---;"
 extra="$extra echo both; tcp-perf send $server_ip $port $seconds > /tmp/ws315-both-send.txt 2>&1 &"
-extra="$extra tcp-perf recv $server_ip $((port + 1)) $seconds | tail -1; wait; tail -1 /tmp/ws315-both-send.txt; echo ---;"
+extra="$extra $sample > /tmp/ws315-stats-both.txt 2>&1 &"
+extra="$extra tcp-perf recv $server_ip $((port + 1)) $seconds | tail -1; wait; tail -1 /tmp/ws315-both-send.txt;"
+extra="$extra echo stats-both; cat /tmp/ws315-stats-both.txt; echo ---;"
 extra="$extra echo ping-a; ping -c 3 -W 3 -s 1472 $server_ip; echo ---;"
 extra="$extra echo user | sudo -S ifconfig ue0 mtu 9000; echo mtu9000-rc=\$?; ifconfig ue0 | head -1;"
 extra="$extra echo user | sudo -S ifconfig ue0 mtu 1500; echo mtu1500-rc=\$?; echo ping-b; ping -c 3 -W 3 -s 1472 $server_ip; echo ---;"
@@ -59,6 +64,13 @@ grep -E '^Bus |Driver ' "$out/extra.txt" | sed 's/^[[:space:]]*/5330-rtl: usb: /
 sed -n '/^old-start/,/^---/p' "$out/extra.txt" | sed 's/^/5330-rtl: previous start: /' | tee -a "$out/summary.txt"
 grep -E 'usb-rtl815x|usb-cdc-(ncm|ecm):|usb: ' "$out/extra.txt" | sed 's/^/5330-rtl: log: /' | tee -a "$out/summary.txt"
 grep -E '^TCP-PERF|^both' "$out/extra.txt" | sed 's/^/5330-rtl: /' | tee -a "$out/summary.txt"
+# The pool and each connection to this host's peers (receive window and buffer) from the two net.tcpstats readings.
+for stats in recv both; do
+	sed -n "/^stats-$stats/,/^---/p" "$out/extra.txt" | grep -E "packets_total=|remote=$server_ip:" |
+	    sed -E 's/.*(packets_total=[0-9]+ packets_used=[0-9]+ packets_used_max=[0-9]+ packet_alloc_failures=[0-9]+).*/\1/;
+		s/.*(remote=[^ ]+).*(srtt_us=[0-9]+).*(receive_window=[0-9]+).*(receive_bytes=[0-9]+).*(receive_limit_bytes=[0-9]+).*/\1 \2 \3 \4 \5/' |
+	    sed "s/^/5330-rtl: stats-$stats: /" | tee -a "$out/summary.txt"
+done
 sed 's/^/5330-rtl: peer: /' "$out/peer.log" | tee -a "$out/summary.txt"
 grep -E 'ping-[abc]|-rc=|packets transmitted|sendto|ifconfig:|mtu ' "$out/extra.txt" | sed 's/^/5330-rtl: /' | tee -a "$out/summary.txt"
 grep -E 'RX packets|TX packets|errors' "$out/extra.txt" | tail -4 | sed 's/^/5330-rtl: after: /' | tee -a "$out/summary.txt"

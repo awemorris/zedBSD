@@ -35,7 +35,7 @@
  *             [--drop-ab LIST] [--expect-fast-retransmits LOW:HIGH] [--expect-timeouts-max N]
  *             [--close-at-ms T] [--maxunacktime S] [--expect-probe-gap-s LOW:HIGH]
  *             [--bottleneck-mbps R --bottleneck-queue BYTES] [--run-s S]
- *             [--receive-buffer N] [--second-flow-at-ms T] [--fair-skip-s S]
+ *             [--receive-buffer N] [--expect-receive-limit LOW:HIGH] [--second-flow-at-ms T] [--fair-skip-s S]
  *             [--expect-slow-start] [--expect-ca-growth N] [--expect-cwnd-limited SHARE]
  *             [--expect-ssthresh-held] [--cc NAME] [--second-flow-cc NAME] [--measure-from-s S]
  *             [--quiet]
@@ -118,6 +118,9 @@
  * again) and a link of R Mbps out of it.  --run-s S sends for S seconds
  * rather than a number of bytes (the stream must still arrive intact).
  * --receive-buffer N sets B's SO_RCVBUF on each connection it accepts.
+ * The "receive:" line gives B's receive buffer at the end (it grows by
+ * itself unless SO_RCVBUF set one) and the round trip B measured for it;
+ * --expect-receive-limit LOW:HIGH checks the buffer's bytes.
  * --second-flow-at-ms T opens a second connection from A to B T into the
  * transfer, which writes and reads as fast as it can over the same
  * devices, wire and router; the "fair:" line gives the two connections'
@@ -296,6 +299,10 @@ struct model_settings {
 	uint64_t run_ns;
 	/* B's SO_RCVBUF on each accepted connection (--receive-buffer, 0: the default). */
 	unsigned receive_buffer;
+	/* The bytes B's receive buffer ends within (--expect-receive-limit; expect_receive 0: not checked). */
+	int expect_receive;
+	uint64_t expect_receive_low;
+	uint64_t expect_receive_high;
 	/* When a second connection opens (--second-flow-at-ms), and how long after it is up the shares are counted. */
 	uint64_t second_flow_at_ns;
 	int second_flow;
@@ -801,6 +808,19 @@ main(
 			    settings.send_buffer);
 	}
 
+	/* B's receive buffer at the end, against what the scenario expects of its sizing. */
+	if (receiver != NULL) {
+		printf("receive: b_limit_bytes=%zu b_packet_limit=%zu b_extra_packets=%u b_rtt_us=%u\n",
+		    tcp_of(receiver)->inet.socket.receive_hiwat_bytes, tcp_of(receiver)->inet.socket.receive_packet_limit,
+		    tcp_of(receiver)->receive_extra_packets, tcp_of(receiver)->receive_rtt_us);
+		if (settings.expect_receive &&
+		    (tcp_of(receiver)->inet.socket.receive_hiwat_bytes < settings.expect_receive_low ||
+		     tcp_of(receiver)->inet.socket.receive_hiwat_bytes > settings.expect_receive_high))
+			printf("check: FAIL: B's receive buffer is %zu bytes, not within %llu..%llu\n",
+			    tcp_of(receiver)->inet.socket.receive_hiwat_bytes, (unsigned long long)settings.expect_receive_low,
+			    (unsigned long long)settings.expect_receive_high);
+	}
+
 	/* With the pool held by other senders, the frames that arrived still found a packet. */
 	if (held_count != 0 || settings.pool_held_free >= 0) {
 		printf("tcp-model: pool held=%u receive_no_packet=%llu\n", held_count,
@@ -1198,6 +1218,9 @@ parse_settings(
 	settings.bottleneck_queue_bytes = 0;
 	settings.run_ns = 0;
 	settings.receive_buffer = 0;
+	settings.expect_receive = 0;
+	settings.expect_receive_low = 0;
+	settings.expect_receive_high = 0;
 	settings.second_flow_at_ns = 0;
 	settings.second_flow = 0;
 	settings.fair_skip_ns = 5000000000ULL;
@@ -1350,6 +1373,9 @@ parse_settings(
 			settings.bottleneck_queue_bytes = strtoull(argv[index + 1], NULL, 0);
 		} else if (strcmp(argv[index], "--run-s") == 0) {
 			settings.run_ns = strtoull(argv[index + 1], NULL, 0) * 1000000000ULL;
+		} else if (strcmp(argv[index], "--expect-receive-limit") == 0) {
+			parse_range(argv[index + 1], &settings.expect_receive_low, &settings.expect_receive_high);
+			settings.expect_receive = 1;
 		} else if (strcmp(argv[index], "--receive-buffer") == 0) {
 			settings.receive_buffer = (unsigned)strtoull(argv[index + 1], NULL, 0);
 		} else if (strcmp(argv[index], "--second-flow-at-ms") == 0) {
