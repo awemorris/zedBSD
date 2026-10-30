@@ -4,7 +4,7 @@
 
 - 親: [WS291](../ws.md)。前: [p011](../phase011/phase.md)（scene-5000 は 49.5〜49.7 fps で NVK 50.1 と揺れの内で同等、GPU の run 約 19.4 ms、
   頂点の program の命令を半分にしても GPU の時間は不変）。
-- 状態: in-progress（2026-10-30 14:12 P7、q1712-i01、worktree p7-ws291、基点 main 5aca73738）。
+- 状態: uncleared（2026-10-30 14:45 P7、q1712-i01、worktree p7-ws291、基点 main 5aca73738。理由: GPU の 19.4〜19.5 ms は頂点の側の固定機能の hardware の限界で NVK と同等（同じ続けての条件で 49.05 対 49.02 fps）、1 frame しか重ねない mview では上限 約 51.3 fps。Q1 の判断（2026-10-30）「(A) の時は、p012 を uncleared … として記録し、ws.md の残りへ」）。
 - 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」。範囲（Q1 の依頼）: p012 以降で
   scene-5000 を 50 fps を明らかに超える改善（今は 49.5〜49.7 fps で NVK と同等）。
 
@@ -85,3 +85,14 @@
   NVK も単独の run は 49.1。温度は 6 回で 56 → 67 ℃（GPU の通常の範囲、fan は GSP の制御）で、zedBSD の fps の下がりは小さい（49.9 → 48.7〜48.9）。
   Linux の nouveau（GSP）は hwmon を出さず、Linux 側の温度は未取得。
 - GPU の perf の行（zedBSD）: 1 frame に run 2（scene 約 19.5〜19.8 ms と present の約 0.1 ms、avg 9.8 ms）、max 19.5〜19.8 ms。
+
+### 結論（14:45 P7）
+
+- 「scene-5000 で 50 fps を明らかに超える」は driver では届かない: (1) GPU の時間は頂点の側の固定機能で決まる（cull=all で不変、VS の命令の半減で不変、
+  boost・文書の無い 3 つの method で速くならない）、(2) 同じ続けての条件で NVK と同じ fps（49.05 対 49.02）、(3) frame の CPU 側（約 0.5〜0.9 ms）を全部
+  消しても上限は GPU の 19.4〜19.5 ms で 約 51.3 fps。温度は 6 回で 56 → 67 ℃ で、zedBSD だけが熱い証拠は無い（Linux の温度は未取得）。
+- Q1 の判断（2026-10-30）: 「(C) を 1 枠で流し、温度・fan に差が無ければ (A) にする進め方で OK です。(A) の時は、p012 を uncleared（理由: 頂点の側の固定機能の
+  hardware の限界で NVK と同等、上限は約 51.3 fps）として記録し、ws.md の残りへ進んでください。」
+- driver の source の変更は無し（診断の patch 2 つは plan/ws291/tests/ に置くだけ、commit した source は不変）。
+- 残りの候補（実施しない、記録だけ）: CPU 側の差（GPU の終わり → 次の submit が GPU に届くまで、約 0.3〜0.5 ms）を詰めれば 50.5〜51 の見込み。
+  Linux の側の温度は nouveau（GSP）が hwmon を出さないので、BAR0 の 0x020460 を読む道具が要る。
