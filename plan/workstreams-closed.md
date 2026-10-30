@@ -254,3 +254,4 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS327](ws327/ws.md) | MG006 | libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行、libbrowser は使わない（2026-10-30 ユーザー） | completed（2026-10-30） | P5 q1710（merge a17e9386d）。試験は plan/tools/keiland-layers/ |
 | [WS307](ws307/ws.md) | MG003 | Keiland のアプリとしての zedBSD のグラフィカルなインストーラ（UEFI＋ACPI の PC、ウィザード、disk 全体／partition の選択、base・desktop・firmware・packages の tarball）（2026-10-28 ユーザー） | completed（2026-10-31 Q1、main db69ae87e。試験は plan/tools/installer/） | — |
 | [WS332](ws332/ws.md) | MG004 | tick の周波数を API で扱う（KERN_CLOCK_HZ の削除、今の周波数の取得の口。変える実装は将来）（2026-10-30 ユーザー） | completed（2026-10-31 Q1、main 39fc879c5。可変の tick の実装は F-WS332-variable-tick） | — |
+| [WS331](ws331/ws.md) | MG001 | driver から HAL への直の依存を除き kernel の口だけに（2026-10-30 ユーザー） | completed（2026-10-31 Q1、main 1035ec0a0。driver の HAL の include と hal_* の呼び出しは 0。試験は plan/tools/ports・boot-images・console-end） | — |

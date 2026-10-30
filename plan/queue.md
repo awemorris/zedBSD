@@ -246,7 +246,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | cleared（2026-10-30 Q1。p001 の一覧 6af47c4a4、merge f4fcb6ff2。Phase は in-progress のまま、ユーザーの決定待ち） |
+| q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/ws.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | cleared（2026-10-30 Q1。p001 の一覧 6af47c4a4、merge f4fcb6ff2。Phase は in-progress のまま、ユーザーの決定待ち） |
 
 ## 2026-10-30: WS313 の firmware を P1 で（q1714）
 
@@ -272,7 +272,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/phase002/phase.md)・[p003](ws331/phase003/phase.md)・[p004](ws331/phase004/phase.md) | ユーザー「表A,Bを許可します」 | cleared（2026-10-30 Q1。p002・p003・p004 cleared） |
+| q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/ws.md)・[p003](ws331/ws.md)・[p004](ws331/ws.md) | ユーザー「表A,Bを許可します」 | cleared（2026-10-30 Q1。p002・p003・p004 cleared） |
 
 ## 2026-10-30: WS307 p007 を P6 で（q1718）
 
@@ -284,32 +284,32 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1719 / q1719-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p005](ws331/phase005/phase.md) | 2026-10-30 ユーザーから、Raspberry Pi の console を kernel_putc の形に今作り直す、という趣旨の指示を受けた。pc98 の 3 か所も | uncleared（2026-10-30 返却。p005 は実装と QEMU・host・VF2 の起動まで。残り: VF2 の画面の目視、amd64 の Venus、Pi で GPU の最初の flip の EBUSY（HAL が framebuffer の view を持つ）） |
+| q1719 / q1719-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p005](ws331/ws.md) | 2026-10-30 ユーザーから、Raspberry Pi の console を kernel_putc の形に今作り直す、という趣旨の指示を受けた。pc98 の 3 か所も | uncleared（2026-10-30 返却。p005 は実装と QEMU・host・VF2 の起動まで。残り: VF2 の画面の目視、amd64 の Venus、Pi で GPU の最初の flip の EBUSY（HAL が framebuffer の view を持つ）） |
 
 ## 2026-10-30: WS331 p007 HAL の early console の framebuffer の窓を他の platform へ（q1720）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1720 / q1720-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU、実機 VF2） | [ws331-p007](ws331/phase007/phase.md) | 2026-10-30 ユーザーから、HAL が unmap device できるよう early console の GOP の領域を map の list に入れておく形（GHCI の時に PC で入った物）を確かめ、他の platform でも同じにする、という趣旨の指示を受けた | cleared（2026-10-30 Q1。arm64・riscv64 の窓、boot-fb の end。QEMU raspi4b で窓が外れる事、VF2 の実機で窓が外れる事（dmesg）、20 port の build。52ccb91b3） |
+| q1720 / q1720-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU、実機 VF2） | [ws331-p007](ws331/ws.md) | 2026-10-30 ユーザーから、HAL が unmap device できるよう early console の GOP の領域を map の list に入れておく形（GHCI の時に PC で入った物）を確かめ、他の platform でも同じにする、という趣旨の指示を受けた | cleared（2026-10-30 Q1。arm64・riscv64 の窓、boot-fb の end。QEMU raspi4b で窓が外れる事、VF2 の実機で窓が外れる事（dmesg）、20 port の build。52ccb91b3） |
 
 ## 2026-10-30: WS331 p008・p009 を P2、WS332 を P3 で（q1721・q1722）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1721 / q1721-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p008](ws331/phase008/phase.md) → [p009](ws331/phase009/phase.md) | 2026-10-30 ユーザーから、Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h の分離という趣旨の指示を受けた | uncleared（2026-10-30 返却。p008 済み（watch.c の HVS を bsp-rpi4 へ）、p009 は atomic.h を除いて済み。atomic.h はユーザーの判断待ち。570e03603、merge 2aa9aeabd） |
+| q1721 / q1721-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p008](ws331/ws.md) → [p009](ws331/ws.md) | 2026-10-30 ユーザーから、Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h の分離という趣旨の指示を受けた | uncleared（2026-10-30 返却。p008 済み（watch.c の HVS を bsp-rpi4 へ）、p009 は atomic.h を除いて済み。atomic.h はユーザーの判断待ち。570e03603、merge 2aa9aeabd） |
 | q1722 / q1722-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws332`・branch `agent/p3-ws332`、host・QEMU） | [ws332-p001](ws332/ws.md) → [p002](ws332/ws.md) | 2026-10-30 ユーザーから、KERN_CLOCK_HZ を今回削除し、tick を API で扱い可変にする WS を Q1 の提案どおり立てる、という趣旨の指示を受けた | cleared（2026-10-30 Q1。p001 設計、p002 KERN_CLOCK_HZ の削除、wlan の UAPI の deadline_ns、x68k の FPU の検査。19 port の build、QEMU 5 port、host 試験。24a5cdb0d、merge 9d6ed7005） |
 
 ## 2026-10-30: WS331 p010 を P2 で（q1723）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1723 / q1723-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p010](ws331/phase010/phase.md) | 2026-10-30 ユーザーから、HAL の atomic.h を macro だけの契約にして kernel の atomic.h で undef する形と、pc98・pcat の legacy の窓の番地を driver の基底で書く形の趣旨の指示を受けた | cleared（2026-10-30 Q1。atomic.h の分離（案 C）、pc98・pcat の窓の番地、20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験は Q1 が流して PASS。7396b8440、merge 94e9b6e88） |
+| q1723 / q1723-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p010](ws331/ws.md) | 2026-10-30 ユーザーから、HAL の atomic.h を macro だけの契約にして kernel の atomic.h で undef する形と、pc98・pcat の legacy の窓の番地を driver の基底で書く形の趣旨の指示を受けた | cleared（2026-10-30 Q1。atomic.h の分離（案 C）、pc98・pcat の窓の番地、20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験は Q1 が流して PASS。7396b8440、merge 94e9b6e88） |
 
 ## 2026-10-30: WS331 p011 を P2 で（q1724）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1724 / q1724-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p011](ws331/phase011/phase.md) | 2026-10-30 ユーザーから、arch の spinlock の取得を include/hal/arch/atomic/<arch>.h に分けて hal/atomic.h の macro の契約に入れる実装の指示を受けた | cleared（2026-10-30 Q1。arch の spinlock の取得・待ちの合図を include/hal/arch/atomic/<arch>.h の macro に、lock.c の out-of-line をやめた。20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験（Q1）。fa204ae82、merge 9e9b4a9c8） |
+| q1724 / q1724-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p011](ws331/ws.md) | 2026-10-30 ユーザーから、arch の spinlock の取得を include/hal/arch/atomic/<arch>.h に分けて hal/atomic.h の macro の契約に入れる実装の指示を受けた | cleared（2026-10-30 Q1。arch の spinlock の取得・待ちの合図を include/hal/arch/atomic/<arch>.h の macro に、lock.c の out-of-line をやめた。20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験（Q1）。fa204ae82、merge 9e9b4a9c8） |
 
 ## 2026-10-30: WS009 を P7 で（q1725）
 
@@ -375,7 +375,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1736 / q1736-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-seq`・branch `agent/p3-seq`、QEMU（OVMF）） | [ws307](ws307/ws.md) p007 の残り → WS307 の完了 | 上のユーザーの指示 | cleared（515766eaa・c8c98ef5d、merge db69ae87e。p007-install-entry PASS、WS307 completed） |
-| q1737 / q1737-i01 | P3（同じ worktree、q1736 の後） | [ws331](ws331/ws.md) p006 規約の全文の見直し → WS331 の完了 | 上のユーザーの指示 | in-progress |
+| q1737 / q1737-i01 | P3（同じ worktree、q1736 の後） | [ws331](ws331/ws.md) p006 規約の全文の見直し → WS331 の完了 | 上のユーザーの指示 | cleared（db1fd7749〜8aca507b9、main 1035ec0a0。20 port の build・QEMU 4 つ PASS、WS331 completed） |
 | q1738 / q1738-i01 | P6（2026-10-31 Q1 が P3 から移した、worktree `/home/awe/zedBSD-worktrees/p6-ws332`・branch `agent/p6-ws332`） | [ws332](ws332/ws.md) p003（率を仮定する残り）→ p004 規約 → WS332 の完了 | 上のユーザーの指示 | cleared（ca16e864b〜4c6c4de88、main 39fc879c5。WS332 completed） |
 | q1739 / q1739-i01 | P3（同じ worktree、q1738 の後、実装は phase-runner-low を標準廉価実装手順で） | [ws326](ws326/ws.md) p015・p017 以降 | 上のユーザーの指示 | canceled（2026-10-31 WS326 を昼までに終える指示で Q1 が直に回す、q1748 以降） |
 | q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | cleared（acf7ff71a・3dc13b2e5、BUG-370 closed） |
