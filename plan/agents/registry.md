@@ -8,7 +8,7 @@
 | P1 | conformance-reviewer | 返却（q1778 WS326 p025） | `/home/awe/zedBSD-worktrees/p1-ws326p025` / `agent/p1-ws326p025` | 返却（2026-10-31 08:2x） | 181a071ac（merge 1b37841bf） |
 | P2 | phase-runner-high | 返却（q1772 VF2 の Bug の束） | `/home/awe/zedBSD-worktrees/p2-vf2bugs` / `agent/p2-vf2bugs` | 返却（2026-10-31 06:5x） | f12ef81f2（merge f52088f45） |
 | P4 | phase-runner | WS326 の完了の片付け (q1780-i01) | `/home/awe/zedBSD-worktrees/p4-ws326close` / `agent/p4-ws326close` | in-progress（2026-10-31 起動） | 370fccb1e |
-| P5 | kernel-and-driver-designer | ws302 p001 (q1775-i01) | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | in-progress（2026-10-31 起動） | 84d01a58a（merge 299a2f4b3、WS330） |
+| P5 | kernel-and-driver-designer | 返却（q1775 WS302 p001） | `/home/awe/zedBSD-worktrees/p5-ws302` / `agent/p5-ws302` | 返却（2026-10-31 08:3x） | e6d67143f（merge 896d3e3db） |
 | P6 | kernel-and-driver-designer | ws310 p001 (q1779-i01) | `/home/awe/zedBSD-worktrees/p6-ws310` / `agent/p6-ws310` | in-progress（2026-10-31 起動） | f857f4647（merge a57216e81、WS333 p016・p021） |
 | P3 | phase-runner-high | ws291 p014 の続き (q1764-i01) | `/home/awe/zedBSD-worktrees/p3-ws291r2` / `agent/p3-ws291r2` | in-progress（2026-10-31 起動、10.0.10.3） | 8aca507b9（merge 1035ec0a0、WS331） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 起動し直し） | fccca00dc |

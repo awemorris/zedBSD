@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 06:44（Q1）
+最終更新: 2026-10-31 06:45（Q1）
 
 ## 担当（P1〜P8）
 
@@ -13,7 +13,7 @@
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き。big-1000 は 116 fps（NVK 136）、desktop の後退なし。今は subs の 1 run あたりの固定の費用を診断 | subs-1000（11 → NVK 75）は WSI の block-linear か protocol の変更が要る見込み |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1780: 完了の片付け（試験を plan/tools/h264sw/ へ、ws.md を完了の形に） | 午後: Pi 5 の実機 |
-| P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
+| P5 | — | — | 返却（08:3x）。WS302 の設計を main に（問い Q302-1〜7 は下の 0h） | 次の割当を Q1 が決める |
 | P6 | [WS310](ws310/ws.md) | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる | q1779: p001 設計（どの _OSC を何の bit で、前後の firmware の振る舞いの差の確かめ方） | WS317（hotplugd）はユーザーの「今は取り組まない」のとおり設計もしない |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,507（72.21%）、各段で後退 0 |
@@ -195,6 +195,19 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - (3) loader を差し替える。OpenSBI の reserved-memory と MAC の address を失う危険がある。
   - (4) 今のまま（ESP の vf2.dtb の道だけを支え、control の DTB は案内の log で止める）。Q1 の推し（他の案の費用と危険に見合う利点が無い）。
 - 決めてほしい事: どの案にするか。
+
+### 0h. WS302（デスクトップのスレッドバランサ DTB）の設計の問い Q302-1〜7（2026-10-31 新しい）
+
+- 背景: WS302 は、kernel が thread の振る舞い（GPU を使う・入力に応える・長く計算する）と nice から、速い P-core と省電力の E-core への割り付けを scheduler に提案する仕組み（CONFIG_DTB、既定 off、ユーザーの決定）。WS333 の CPU の口が入ったので、P5 が設計（約 22 LW、Phase p002〜p007）を書き、敵対的レビュー（blocker 2・major 11）を反映した（main 896d3e3db）。HAL は変えない。全文は [ws302/user-questions.md](ws302/user-questions.md)。
+- 用語: P-core は速い core、E-core は省電力の core（5330 は P 2・E 8）。SMT は 1 つの core を 2 つの CPU に見せる仕組み。starvation guard は優先度の低い thread が長く走れない事を防ぐ見張り。
+- Q302-1 規則の順: **推し A** nice → 長い計算（E-core）→ 画面を出す process（compositor）→ GPU の app → terminal → その他。（E は terminal を長い計算より先にする案。A は compiler を terminal の規則に含めない読み）
+- Q302-2 nice 0 の長い計算が空いた P-core にあふれてよいか: **推し A** よい（nice > 0 はあふれない）。
+- Q302-3 優先度の段（user の既定 10、compositor 8、GPU の app 9、nice を 8/9/11/12 に）と 100 ms の見張りを DTB が有効な時だけ: **推し A**。（B は上げない）
+- Q302-4 compositor から focus の hint の口: **推し B** v1 には入れない（5330 の数で要れば条件つきの p005）。
+- Q302-5 統計は CONFIG_DTB=y の build だけで集める: **推し A**。
+- Q302-6 観察の口（読みだけの sysctl `kern.dtb`）: **推し A**。
+- Q302-7 受け入れの数: **推し** design.md §6.4 の表（A1〜A7）。
+- 止めている物: WS302 の実装（p002 は Q302-5、p003 は Q302-2・3、p004 は Q302-1・6 の答えの後）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
