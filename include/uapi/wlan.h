@@ -18,7 +18,7 @@ extern "C" {
 
 #define KERN_WLAN_IOCTL_GROUP 'W'
 
-#define WLAN_ABI_VERSION 1U
+#define WLAN_ABI_VERSION 2U
 
 #define WLAN_SSID_MAX 32U
 #define WLAN_PASSPHRASE_MIN 8U
@@ -101,7 +101,8 @@ struct wlan_scan_status_request {
 	uint64_t generation;
 	uint64_t scan_generation;
 	uint64_t cache_sequence;
-	uint64_t deadline_ticks;
+	/* The operation's deadline on CLOCK_MONOTONIC, in nanoseconds; 0 when none. */
+	uint64_t deadline_ns;
 	uint32_t state;
 	int32_t terminal_error;
 	uint32_t result_count;
@@ -154,7 +155,8 @@ struct wlan_status_request {
 	uint64_t operation_generation;
 	uint64_t scan_generation;
 	uint64_t snapshot_generation;
-	uint64_t deadline_ticks;
+	/* The operation's deadline on CLOCK_MONOTONIC, in nanoseconds; 0 when none. */
+	uint64_t deadline_ns;
 	uint64_t cache_sequence;
 	uint32_t state;
 	uint32_t scan_state;

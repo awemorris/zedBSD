@@ -4653,9 +4653,9 @@ ioctl_scan_status(
 	request->scan_generation = station->scan_generation;
 	request->cache_sequence = station->cache_sequence;
 	if (station->scan_state == WLAN_SCAN_RUNNING)
-		request->deadline_ticks = station->scan_deadline;
+		request->deadline_ns = kern_ticks_to_ns(station->scan_deadline);
 	else
-		request->deadline_ticks = 0U;
+		request->deadline_ns = 0U;
 	request->state = station->scan_state;
 	request->terminal_error = station->scan_error;
 	request->result_count = station->snapshot_count;
@@ -5173,11 +5173,11 @@ ioctl_status(
 	if (station->state == WLAN_STATE_AUTHENTICATING ||
 	    station->state == WLAN_STATE_ASSOCIATING ||
 	    station->state == WLAN_STATE_FOUR_WAY)
-		request->deadline_ticks = station->connection_deadline;
+		request->deadline_ns = kern_ticks_to_ns(station->connection_deadline);
 	else if (station->scan_state == WLAN_SCAN_RUNNING)
-		request->deadline_ticks = station->scan_deadline;
+		request->deadline_ns = kern_ticks_to_ns(station->scan_deadline);
 	else
-		request->deadline_ticks = 0U;
+		request->deadline_ns = 0U;
 	request->cache_sequence = station->cache_sequence;
 	request->state = station->state;
 	request->scan_state = station->scan_state;

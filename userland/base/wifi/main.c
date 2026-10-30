@@ -87,6 +87,7 @@ static int connect_command(int descriptor, const char *interface,
 static int disconnect_command(int descriptor, const char *interface,
 	size_t interface_length);
 static int monotonic_ticks(uint64_t *ticks, uint64_t *frequency);
+static uint64_t monotonic_ns_to_ticks(uint64_t nanoseconds, uint64_t frequency);
 static int wait_slice(uint64_t now, uint64_t deadline, uint64_t frequency);
 static int wait_for_connection(int descriptor, const char *interface,
 	size_t interface_length, uint64_t generation, uint64_t deadline,
@@ -1346,6 +1347,28 @@ monotonic_ticks(uint64_t *ticks, uint64_t *frequency)
 	return 0;
 }
 
+/* Converts a CLOCK_MONOTONIC time in nanoseconds into the tick domain above, rounding up. */
+static uint64_t
+monotonic_ns_to_ticks(
+	uint64_t nanoseconds,
+	uint64_t frequency)
+{
+	uint64_t seconds;
+	uint64_t rest;
+
+	/* Whole seconds apart from the rest, so the products cannot overflow. */
+	seconds = nanoseconds / 1000000000ULL;
+	rest = nanoseconds % 1000000000ULL;
+
+	/* A time too far to count saturates, which only makes it the later deadline. */
+	if (seconds > (UINT64_MAX - frequency) / frequency)
+		return UINT64_MAX;
+
+	/* Reports the ticks that cover the time, so the wait never ends before the kernel's deadline. */
+	return seconds * frequency +
+	    (rest * frequency + 999999999ULL) / 1000000000ULL;
+}
+
 /* Sleeps for at most one polling slice and never past the known deadline. */
 static int
 wait_slice(uint64_t now, uint64_t deadline, uint64_t frequency)
@@ -1436,9 +1459,11 @@ wait_for_connection(int descriptor, const char *interface,
 		if (error != 0)
 			return error;
 		effective_deadline = deadline;
-		if (result->deadline_ticks != 0U &&
-		    result->deadline_ticks < effective_deadline)
-			effective_deadline = result->deadline_ticks;
+		if (result->deadline_ns != 0U &&
+		    monotonic_ns_to_ticks(result->deadline_ns, frequency) <
+		    effective_deadline)
+			effective_deadline = monotonic_ns_to_ticks(
+			    result->deadline_ns, frequency);
 		if (now >= effective_deadline)
 			return ETIMEDOUT;
 		error = wait_slice(now, effective_deadline, frequency);
@@ -1595,7 +1620,7 @@ print_status(const struct wlan_status_request *status)
 		    "operation-generation=%llu scan-generation=%llu "
 		    "snapshot-generation=%llu administrative=%u "
 		    "authenticated=%u associated=%u key=%u authorized=%u "
-		    "retries=%u error=%d deadline=%llu bssid=%s channel=%u "
+		    "retries=%u error=%d deadline-ns=%llu bssid=%s channel=%u "
 		    "frequency=%u rssi=%d security=%08x stop-pending=%u stop-error=%d\n", status->state,
 		    status->scan_state,
 		    (unsigned long long)status->operation_generation,
@@ -1605,7 +1630,7 @@ print_status(const struct wlan_status_request *status)
 		    status->associated, status->key_installed,
 		    status->controlled_port, status->retry_count,
 		    status->terminal_error,
-		    (unsigned long long)status->deadline_ticks,
+		    (unsigned long long)status->deadline_ns,
 		    hexadecimal_bssid, status->channel,
 		    status->center_frequency_mhz, status->rssi_dbm,
 		    status->security, (status->stop_flags & WLAN_STATUS_STOP_PENDING) != 0U,
@@ -1628,9 +1653,9 @@ print_status(const struct wlan_status_request *status)
 	    (status->stop_flags & WLAN_STATUS_STOP_PENDING) != 0U ? "yes" : "no",
 	    status->stop_error) < 0)
 		return EIO;
-	if (status->deadline_ticks != 0U &&
-	    printf(" deadline=%llu",
-		(unsigned long long)status->deadline_ticks) < 0)
+	if (status->deadline_ns != 0U &&
+	    printf(" deadline-ns=%llu",
+		(unsigned long long)status->deadline_ns) < 0)
 		return EIO;
 	if (!bytes_are_zero(status->bssid, sizeof(status->bssid)) &&
 	    printf(" bssid=%02x:%02x:%02x:%02x:%02x:%02x channel=%u "
