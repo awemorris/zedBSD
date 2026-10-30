@@ -437,6 +437,22 @@ machine_compare_once(
 	machine->memory_base = MEMORY_BASE;
 	machine->memory_words = MEMORY_WORDS;
 	groups = workspace->backend.group_count;
+	if (getenv("DUMP_OPS") != NULL && strstr(name, getenv("DUMP_OPS")) != NULL) {
+		/* The machine operations of the named shader, for a reading of its code (DUMP_OPS=NAME). */
+		unsigned op;
+		unsigned g;
+
+		for (op = 0; op < workspace->backend.operation_count; op++) {
+			const struct shader_machine_operation *o = &workspace->backend.operations[op];
+
+			g = 0;
+			while (g + 1U < workspace->backend.group_count && workspace->backend.group_first[g + 1U] <= op)
+				g++;
+			printf("  op %3u group %3u kind %2u var %u cond %u pair %u d %u:%u s %u:%u %u:%u %u:%u imm %08x\n", op, g, o->kind, o->variant,
+			       o->condition, o->pair, o->destination[0].bank, o->destination[0].index, o->source[0].bank, o->source[0].index,
+			       o->source[1].bank, o->source[1].index, o->source[2].bank, o->source[2].index, (unsigned)o->immediate);
+		}
+	}
 	if (program.shared_length != 0) {
 		/* The shared program on one instance, its words kept, the registers cleared after it. */
 		shared_backend.operation_count = workspace->shared_operation_count;
@@ -453,7 +469,7 @@ machine_compare_once(
 		}
 		printf("  %s: %u groups, shared program %u operations, %u words\n", name, groups, workspace->shared_operation_count, words_computed);
 	} else if (stage != POWERVR_SHADER_COMPUTE && current_key != NULL) {
-		printf("  %s: %u groups\n", name, groups);
+		printf("  %s: %u groups, %u temps\n", name, groups, (unsigned)program.temps);
 	}
 	error = machine_run_program(machine, &workspace->backend, stage == POWERVR_SHADER_COMPUTE ? lane_mask(program.workgroup[0]) : 0xffffffffU);
 	snprintf(label, sizeof(label), "%s runs on the machine simulator (%d)", name, error);

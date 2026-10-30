@@ -201,7 +201,8 @@ enum machine_kind {
  * _SAMPLE_WAITS);
  * coefficient_alias names, one more than its number, the coefficient
  * register a flat varying only float adds, multiplies and multiply-adds
- * read is read from in place (0 for none);
+ * read is read from in place (0 for none); vertex_input_alias the same
+ * for a vertex input word and its vertex input register;
  * iterate_sample marks the iterated varyings a sample iterates itself;
  * sample_half marks the samples so iterated whose four channels only one
  * sum of products reads, as they are (the sample returns half floats,
@@ -216,6 +217,7 @@ struct shader_backend {
 	uint16_t value_register[POWERVR_IR_VALUES];
 	uint16_t shared_alias[POWERVR_IR_VALUES];
 	uint16_t coefficient_alias[POWERVR_IR_VALUES];
+	uint16_t vertex_input_alias[POWERVR_IR_VALUES];
 	uint32_t first_use[POWERVR_IR_VALUES];
 	uint32_t last_use[POWERVR_IR_VALUES];
 	uint32_t uses[POWERVR_IR_VALUES];

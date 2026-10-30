@@ -154,6 +154,24 @@ struct backend_loop {
 #endif
 
 /*
+ * Whether a vertex input word only float adds, multiplies and
+ * multiply-adds read is read in its vertex input register (1), or moved
+ * into a temporary first (0).
+ */
+#ifndef POWERVR_SHADER_VERTEX_INPUT_ALIAS
+#define POWERVR_SHADER_VERTEX_INPUT_ALIAS	1
+#endif
+
+/*
+ * A test switch (0 as built): a vertex shader starts with this many extra
+ * multiply-adds on a scratch temporary, to tell how the geometry stage's
+ * time follows the vertex shader's length.
+ */
+#ifndef POWERVR_SHADER_VERTEX_PAD_TRIAL
+#define POWERVR_SHADER_VERTEX_PAD_TRIAL	0
+#endif
+
+/*
  * A test switch (0 as built): every float add, multiply and
  * multiply-add in the low precision forms (Mesa 26.2.5 pco_isa.py
  * fadd_lp, fmul_lp, lp_fma; pco uses none), to see on the board whether
@@ -218,6 +236,7 @@ static void merge_iterates(const struct powervr_shader_program *program, struct 
 static void reuse_immediates(struct shader_backend *backend);
 static void unpack_in_place(const struct powervr_shader_program *program, struct shader_backend *backend);
 static void alias_coefficients(const struct powervr_ir_shader *shader, const struct powervr_shader_program *program, struct shader_backend *backend);
+static void alias_vertex_inputs(const struct powervr_ir_shader *shader, const struct powervr_shader_program *program, struct shader_backend *backend);
 static void mark_iterate_samples(const struct powervr_ir_shader *shader, const struct powervr_shader_program *program, struct shader_backend *backend);
 static int lone_iterate(const struct powervr_ir_shader *shader, const struct powervr_ir_operand *operand, const struct powervr_ir_instruction **iterate);
 static int half_reader(const struct powervr_ir_shader *shader, unsigned value);
@@ -303,6 +322,7 @@ shader_backend_build(
 	/* The shared words only float operations read are read where they are; the varyings samples iterate themselves. */
 	alias_shared(shader, program, backend);
 	alias_coefficients(shader, program, backend);
+	alias_vertex_inputs(shader, program, backend);
 	mark_iterate_samples(shader, program, backend);
 
 	/* Works out where each value is live, and gives it registers. */
@@ -341,6 +361,19 @@ shader_backend_build(
 	}
 	if (backend->control_flow != 0)
 		select_condition(&select, CONDITION_START, PREDICATE_ALWAYS, 1, bank_register(POWERVR_USC_BANK_SPECIAL, SPECIAL_ZERO));
+
+#if POWERVR_SHADER_VERTEX_PAD_TRIAL > 0
+	/* The trial's padding of a vertex shader. */
+	for (at = 0; program->stage == POWERVR_SHADER_VERTEX && at < POWERVR_SHADER_VERTEX_PAD_TRIAL; at++) {
+		operation = append(&select, MACHINE_FLOAT_MULTIPLY_ADD);
+		if (operation != NULL) {
+			operation->destination[0] = temp_register(TEMP_SCRATCH);
+			operation->source[0] = temp_register(TEMP_SCRATCH);
+			operation->source[1] = temp_register(TEMP_SCRATCH);
+			operation->source[2] = temp_register(TEMP_SCRATCH);
+		}
+	}
+#endif
 
 	/* Each instruction in turn. */
 	for (at = 0; at < shader->instruction_count; at++) {
@@ -2085,6 +2118,68 @@ alias_coefficients(
 	}
 }
 
+/*
+ * Finds the vertex input words, each a one-word value a vertex input
+ * writes once, read only by float adds, multiplies and multiply-adds:
+ * those read the vertex input register in place, as any source of theirs
+ * can name one (its bank needs the two bits a coefficient's does), and
+ * the input selects nothing (a move into a temporary was an operation a
+ * word a vertex).
+ *
+ * Procedure referenced:
+ * Mesa 26.2.5 src/imagination/pco/pco_trans_nir.c (trans_load_input_vs:
+ * a vertex input is the vtxin register itself, which the instructions
+ * that read it name).
+ */
+static void
+alias_vertex_inputs(
+	const struct powervr_ir_shader *shader,
+	const struct powervr_shader_program *program,
+	struct shader_backend *backend)
+{
+	const struct powervr_ir_instruction *instruction;
+	const struct powervr_ir_instruction *reader;
+	unsigned value;
+	unsigned writes;
+	unsigned writer;
+	unsigned at;
+	unsigned source;
+	int ok;
+
+	/* None yet; only a vertex program's inputs. */
+	for (value = 0; value < POWERVR_IR_VALUES; value++)
+		backend->vertex_input_alias[value] = 0;
+	if (program->stage != POWERVR_SHADER_VERTEX || !POWERVR_SHADER_VERTEX_INPUT_ALIAS)
+		return;
+
+	/* Each vertex input into a one-word value written nowhere else. */
+	for (at = 0; at < shader->instruction_count; at++) {
+		instruction = &shader->instructions[at];
+		value = instruction->destination;
+		if (instruction->opcode != POWERVR_IR_INPUT ||
+		    value == 0 || value >= shader->value_count || shader->values[value].width != 1 ||
+		    instruction->immediate > COEFFICIENT_ALIAS_MOST)
+			continue;
+		(void)value_references(shader, value, &writes, &writer);
+		if (writes != 1)
+			continue;
+
+		/* Read only by float adds, multiplies and multiply-adds. */
+		ok = 1;
+		for (writer = 0; ok && writer < shader->instruction_count; writer++) {
+			reader = &shader->instructions[writer];
+			for (source = 0; source < 4; source++) {
+				if (reader->source[source].kind != POWERVR_IR_OPERAND_VALUE || reader->source[source].value != value)
+					continue;
+				if (reader->opcode != POWERVR_IR_FLOAT_ADD && reader->opcode != POWERVR_IR_FLOAT_MULTIPLY && reader->opcode != POWERVR_IR_FLOAT_MULTIPLY_ADD)
+					ok = 0;
+			}
+		}
+		if (ok)
+			backend->vertex_input_alias[value] = (uint16_t)(instruction->immediate + 1U);
+	}
+}
+
 /* The most constants hoist_addends puts in values. */
 #define HOISTED_MAX			4U
 
@@ -3672,6 +3767,9 @@ select_instruction(
 		}
 		break;
 	case POWERVR_IR_INPUT:
+		/* An input only float operations read is read in place. */
+		if (select->backend->vertex_input_alias[instruction->destination] != 0)
+			break;
 		operation = append(select, MACHINE_MOVE);
 		if (operation != NULL) {
 			operation->destination[0] = destination_of(select, instruction);
@@ -4234,6 +4332,13 @@ operand_register(
 		reg = bank_register(POWERVR_USC_BANK_COEFFICIENT, select->backend->coefficient_alias[operand->value] - 1U);
 
 		/* Succeeded: the coefficient register. */
+		return reg;
+	}
+	if (operand->kind == POWERVR_IR_OPERAND_VALUE && select->backend->vertex_input_alias[operand->value] != 0) {
+		*modifiers = operand->modifiers;
+		reg = bank_register(POWERVR_USC_BANK_VERTEX_INPUT, select->backend->vertex_input_alias[operand->value] - 1U);
+
+		/* Succeeded: the vertex input register. */
 		return reg;
 	}
 	if (operand->kind == POWERVR_IR_OPERAND_VALUE && select->backend->shared_alias[operand->value] != 0) {

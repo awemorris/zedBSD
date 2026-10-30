@@ -2,7 +2,8 @@
 # ws291-p020: mview's scene on the VisionFive 2's PowerVR with one tree's kernel and programs, run from the top of the
 # tree while the board is assigned:
 #   VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=... VF2_PLUG=14C19FA80F86 [COPIES='1 10 50 100 200'] [SPIN=12]
-#       [MODEL=qs40s] [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [SHOT_BUILD=DIR] [OLD=p7old] sh plan/ws291/tests/vf2-mview.sh OUT BUILD
+#       [MODEL=qs40s] [MVIEW_ARGS='--shading=pixel'] [TIMING=1] [KEEP=1] [REBOOT=1] [SHOT_BUILD=DIR] [OLD=p7old]
+#       sh plan/ws291/tests/vf2-mview.sh OUT BUILD
 # BUILD is the tree's build of plan/ws291/tests/config-vf2.mk (its vmunix, bin/wayland, bin/mview and the dynamic
 # libraries).  The board's kernel is kept on the board as vmunix.OLD (vmunix.p7old by default; when not kept already:
 # the original) and read
@@ -53,9 +54,15 @@ bsudo "test -f $old || cp -p /boot/boot0/vmunix $old; sync"
 bcp "$VF2_HOST:$old" "$out/board-vmunix" || { say "FAIL the board's kernel was not read back"; exit 1; }
 say "kept $(b "cksum $old" 2>&1)"
 
-# The tree's kernel, the board power-cycled until its render node is up.
-timeout 900 sh plan/tools/vf2/run.sh "$build/vmunix" "$out/boot" > "$out/boot.txt" 2>&1
-say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
+# The tree's kernel, the board power-cycled until its render node is up; a board already running it (KEEP=1 of an
+# earlier run) is power-cycled only when REBOOT=1.
+running=$(b 'cksum < /boot/boot0/vmunix' 2>/dev/null | cut -d' ' -f1)
+if [ "$running" = "$(cksum < "$build/vmunix" | cut -d' ' -f1)" ] && [ "${REBOOT:-0}" != 1 ]; then
+	say "boot skipped: the board already has BUILD's kernel"
+else
+	timeout 900 sh plan/tools/vf2/run.sh "$build/vmunix" "$out/boot" > "$out/boot.txt" 2>&1
+	say "boot $(tail -3 "$out/boot.txt" | tr '\n' ' ')"
+fi
 say "kernel $(cksum < "$build/vmunix" | cut -d' ' -f1) on the board: $(b 'uname -sm; cksum /boot/boot0/vmunix; sysctl hw.gpu.powervr.stages' 2>&1 | tr '\n' ' ')"
 
 # The programs, the libraries and the model in the user's ~/p7.
