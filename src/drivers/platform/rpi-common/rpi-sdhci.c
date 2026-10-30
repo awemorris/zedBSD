@@ -18,9 +18,10 @@
 #include <stddef.h>
 
 #include <drivers/mmc/sdhci.h>
+#include <kern/pmem.h>
 
-/* The kernel's direct map of the physical address space, where device registers are reached. */
-#define DIRECT_BASE 0xffff000000000000ULL
+/* The bytes of the controller's registers the glue maps: one page holds them all. */
+#define RPI_SDHCI_WINDOW 0x1000U
 
 /* The unit number of the SD card slot, which names its disk mmcblk0. */
 #define RPI_SDHCI_UNIT 0U
@@ -49,10 +50,16 @@ drv_rpi_sdhci_init(
 {
 	struct drv_sdhci_config config;
 	struct disk *disk;
+	void *registers;
 	int error;
 
-	/* Describes the controller through the direct map, with no card detect. */
-	config.registers = (volatile uint8_t *)(DIRECT_BASE + physical_base);
+	/* Maps the controller's registers. */
+	error = kern_device_map(physical_base, RPI_SDHCI_WINDOW, KERN_DEVICE_UNCACHED, &registers);
+	if (error != 0)
+		return error;
+
+	/* Describes the controller through the mapping, with no card detect. */
+	config.registers = registers;
 	config.physical_base = physical_base;
 	config.base_clock_hz = base_clock_hz;
 	config.max_clock_hz = 0;
@@ -61,10 +68,12 @@ drv_rpi_sdhci_init(
 	config.context = NULL;
 	config.unit = RPI_SDHCI_UNIT;
 
-	/* Brings the card up and publishes it. */
+	/* Brings the card up and publishes it; a controller that does not answer is unmapped again. */
 	error = drv_sdhci_attach(&config, &disk);
-	if (error != 0)
+	if (error != 0) {
+		(void)kern_device_unmap(registers, RPI_SDHCI_WINDOW);
 		return error;
+	}
 
 	/* Succeeded: the card is the board's SD disk. */
 	rpi_sdhci_disk = disk;
