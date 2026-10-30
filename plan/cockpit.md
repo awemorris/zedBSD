@@ -1,15 +1,15 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 10:50（Q1）
+最終更新: 2026-10-30 11:10（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS009](ws009/ws.md) | 文書（残りは /dev/gpu の UAPI の文書 DOC-54） | p024 の正確さの review（Opus）。14 file のうち gpu.md・requests・memory・sharing・display・display-control を直した | review の残り 8 file → WS009 の受け入れ → WS296 → WS297（標準廉価実装手順で 1 つずつ） |
+| P1 | [WS009](ws009/ws.md) → [WS296](ws296/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書）→ src/drivers の comment の管理情報の削除と規約 | DOC-54 は全 Phase cleared。WS009 の受け入れの確かめと完了の形 | WS009 completed → WS296 を標準廉価実装手順に組み直す設計 → Sonnet → WS297 |
 | P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | p016 の受け入れ: 境界・build・host 試験 PASS、Win32 の揺れの一覧、QEMU の app の回帰へ | QEMU の回帰 → FreeBSD の build → p017 規約の見直し（Sonnet）→ WS の完了 |
-| P3 | [WS315](ws315/ws.md) | Realtek の USB 2.5G・5G の NIC（vendor mode） | 全 Phase cleared（main bc991f3ca）。QEMU の流し直しと WS の受け入れの確かめ | WS315 の完了の形 → WS221（Jumbo frame）・WS299（5330 の NVMe）（ユーザー: WS315 の後） |
+| P3 | — | — | 返却（WS315 completed、main 834d10d88） | 次は WS221（Jumbo frame）・WS299（5330 の NVMe）（ユーザー: WS315 の後） |
 | P4 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 返却（09:13）。次の 1 手は ws.md の Resume point | p015 の QEMU の 3 回目 → p004 clang・libcxx・GTK4 のセルフビルド → p008 → p014 → p007 firmware 変数の driver |
 | P5 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 返却（09:13、計測なし） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ（デスクトップ機） |
 | P6 | — | — | 返却（WS282・WS284 は main に merge 済み） | 未割当 |
@@ -29,7 +29,8 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p010〜p021 | 節ごとの文書 12（Sonnet） | cleared |
 | p022 | 要求の索引 | cleared |
 | p023 | 統合・Bug の候補の一覧 | cleared（BUG-364・BUG-365 を登録） |
-| p024 | 正確さの review（Opus） | in-progress（P1） |
+| p024 | 正確さの review（Opus） | cleared（12 file を直した、BUG-366 と BUG-365 の追加） |
+| WS の完了 | 受け入れの確かめ | in-progress（P1） |
 
 進捗: 2026-10-30 骨格と照合の script（P1）→ Sonnet 13 回で全文 → 統合で照合 PASS（14 file、例 12 compile）。sysctl の 4 byte の読みの不具合を Q1 が直した。
 
@@ -48,14 +49,9 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 
 進捗: 2026-10-30 Sonnet 9 回で実装。閉じた WS の試験 4 本を直した。Win32 の揺れ 17 項目は header を変えず、S7 は実装で直した。F-WS327-win32-build を登録。
 
-### WS315 Realtek USB 2.5G・5G（vendor mode）
+### WS315 Realtek USB 2.5G・5G（vendor mode）— completed（2026-10-30）
 
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001〜p005 | driver、xHCI、5G（資料だけ） | cleared |
-| p006 | TCP の受けの buffer（F-WS315-rcvbuf） | cleared |
-
-進捗: 5330 の同時 recv 1443 → 2359、同時 send 2268（Linux 2341・2346）、10GbE も落ちない。F-WS315-rcvbuf は解決。WS の完了の確かめ中。
+5330 の RTL8156B で send 2370・recv 2373・同時 2268/2359（Linux 2353・2354・2346/2341）、10GbE も落ちない。5G（RTL8157）は資料だけ。試験は plan/tools/rtl815x/ に。F-WS315-rcvbuf は解決。
 
 ### WS307 graphical installer
 
