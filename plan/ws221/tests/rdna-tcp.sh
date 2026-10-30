@@ -10,7 +10,8 @@
 # back, read back and compared.  The caller holds the RDNA slot's lock.  Judged from the programs' own lines over
 # SSH, never the console.
 #   sh plan/ws221/tests/rdna-tcp.sh --kernel VMUNIX --bin DIR [--runs LIST] [--seconds N] [--chunk BYTES] NAME
-# --runs: a comma list of send (the machine sends) and recv (it receives), default send,recv; --seconds each (20).
+# --runs: a comma list of send (the machine sends), recv (it receives) and both (a send and a recv at once, the recv on
+# the next port), default send,recv; --seconds each (20).
 # The output is build/ws221-rdna/NAME (plan/tools/fresh-out.sh): summary.txt and the raw outputs.  Nothing is removed.
 # CAPTURE=DIRS (a comma list of send and recv): those runs are captured on this host as well, only read (tcpdump -p:
 # no promiscuous mode, nothing about the interface changes), the TCP headers of the run's connection (96 bytes of each
@@ -146,6 +147,14 @@ if [ -n "$zip" ]; then
 		hif=$(ip -o route get "$rip" | sed -n 's/.* dev \([^ ]*\).*/\1/p')
 		timeout $((count * (seconds + 60) + 120)) $pin python3 -I plan/ws221/tests/perf-peer.py "$PEER_IP" "$PERF_PORT" "$out/peer.log" "$count" > /dev/null 2>&1 &
 		peer=$!
+		# A both run's recv takes a second peer on the next port.
+		boths=$(echo "$runs" | tr ',' '\n' | grep -c '^both$')
+		peer2=
+		if [ "$boths" -gt 0 ]; then
+			timeout $((count * (seconds + 60) + 120)) $pin python3 -I plan/ws221/tests/perf-peer.py "$PEER_IP" \
+			    $((PERF_PORT + 1)) "$out/peer.log" "$boths" > /dev/null 2>&1 &
+			peer2=$!
+		fi
 		sleep 2
 		n=0
 		for dir in $(echo "$runs" | tr ',' ' '); do
@@ -169,8 +178,10 @@ if [ -n "$zip" ]; then
 				sleep 2
 				;;
 			esac
-			T=$((seconds + 60)) zs "$rip" "(while :; do /tmp/sysctl net.tcpstats; sleep 2; done) > /tmp/tcpstats-$run.txt 2>&1 & s=\$!; /tmp/tcp-perf $dir $PEER_IP $PERF_PORT $seconds $chunk; kill \$s" > "$out/perf-$run.txt" 2>&1
-			say "run $run: exit $? $(grep '^TCP-PERF' "$out/perf-$run.txt")"
+			perf="/tmp/tcp-perf $dir $PEER_IP $PERF_PORT $seconds $chunk"
+			[ "$dir" = both ] && perf="/tmp/tcp-perf send $PEER_IP $PERF_PORT $seconds $chunk > /tmp/both-send.txt 2>&1 & b=\$!; /tmp/tcp-perf recv $PEER_IP $((PERF_PORT + 1)) $seconds $chunk; wait \$b; cat /tmp/both-send.txt"
+			T=$((seconds + 60)) zs "$rip" "(while :; do /tmp/sysctl net.tcpstats; sleep 2; done) > /tmp/tcpstats-$run.txt 2>&1 & s=\$!; $perf; kill \$s" > "$out/perf-$run.txt" 2>&1
+			say "run $run: exit $? $(grep '^TCP-PERF' "$out/perf-$run.txt" | tr '\n' ' ')"
 			if [ -n "$capture" ]; then
 				sleep 2
 				sudo -n pkill -INT -f "tcpdump -p -n -i $cif -s 96 .*$capture/run.pcap" 2> /dev/null
@@ -200,6 +211,7 @@ if [ -n "$zip" ]; then
 			fi
 		done
 		wait "$peer"
+		[ -n "$peer2" ] && wait "$peer2"
 		say "peer: $(tr '\n' ' ' < "$out/peer.log")"
 		zs "$rip" "ifconfig $IFACE" > "$out/counters-after.txt" 2>&1
 		say "$IFACE after: $(grep -E 'packets' "$out/counters-after.txt" | tr -s ' \n' ' ')"

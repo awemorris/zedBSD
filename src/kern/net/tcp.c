@@ -207,23 +207,26 @@
 #define TCP_RECEIVE_EXTRA_SHARE 4U
 
 /*
- * What the buffer grows to, in eighths of what one round trip brings.
- * Twice it (the measure the procedure above takes) lets the peer queue a
- * round trip's worth more in front of the link (the window settles where
- * the round trip has doubled), and the data of the other direction, and
- * its acknowledgements, wait behind that queue too.
+ * What the buffer grows to, in eighths of what one round trip brings: a
+ * quarter more than it.  Twice it (the measure the procedure above takes)
+ * lets the peer queue a round trip's worth more in front of the link (the
+ * window settles where the round trip has doubled), and the
+ * acknowledgements of what this end sends the peer at the same time wait
+ * behind that queue too: its round trip grows with it, and its sending
+ * slows.  A quarter more still keeps the link busy while the queue the
+ * window leaves stays short.
  */
-#define TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 16U
+#define TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 10U
 
 /*
  * The send buffer a connection starts with: on the 64-bit machines more
- * than their ring holds in segments of an Ethernet MTU (256 of 1460
+ * than their ring holds in segments of an Ethernet MTU (768 of 1460
  * bytes), so the ring bounds a transfer unless SO_SNDBUF sets a smaller
  * buffer; elsewhere the common default, which is more than their ring of
  * 8 holds.
  */
 #if PACKET_BUF_POOL_COUNT >= 1024U
-#define TCP_SEND_BUFFER (384U * 1024U)
+#define TCP_SEND_BUFFER (1152U * 1024U)
 #else
 #define TCP_SEND_BUFFER SOCKET_BUFFER_DEFAULT
 #endif
@@ -8023,11 +8026,12 @@ tcp_receive_tune_start_locked(
  * shortest of those times.  What one round trip brings is then the bytes
  * received scaled by the round trip over the time they took (a window that
  * took longer than a round trip did not hold the peer back, and its bytes
- * count for less); when twice that is more than the buffer,
- * and the reader keeps up (the queue holds less than half the buffer, so
- * the window is what limits, not the reader), the buffer grows to twice
- * it, up to TCP_RECEIVE_AUTO_MAX and as far as the shared budget lets the
- * packet limit follow.  It never shrinks: a window offered stays offered.
+ * count for less); when TCP_RECEIVE_AUTO_GROWTH_EIGHTHS of that is more
+ * than the buffer, and the reader keeps up (the queue holds less than half
+ * the buffer, so the window is what limits, not the reader), the buffer
+ * grows to it, up to TCP_RECEIVE_AUTO_MAX and as far as the shared budget
+ * lets the packet limit follow.  It never shrinks: a window offered stays
+ * offered.
  * The caller holds the socket lock.
  */
 static void

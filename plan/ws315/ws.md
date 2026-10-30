@@ -3,7 +3,7 @@
 # WS315 Realtek の USB の 2.5G・5G の NIC を、Realtek の独自の方式（vendor mode）の driver で速くする
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG003。
-- Status: incomplete（2026-10-30 06:15 P3: 全 Phase が cleared、WS の受け入れと completed の判定は Q1 待ち。2026-10-30 Q1 が作成、P3 q1694-i01 が p001 に着手）
+- Status: incomplete（2026-10-30 10:45 P3: p006 も cleared、全 Phase が cleared、WS の受け入れと completed の判定は Q1 待ち。06:15 P3: p001〜p005 cleared。2026-10-30 Q1 が作成、P3 q1694-i01 が p001 に着手）
 - 目標: 市場の USB の 2.5GbE・5GbE の NIC のほとんどが使う Realtek の chip（RTL8156・RTL8157 の類）を、汎用の CDC NCM ではなく
   Realtek の独自の方式で動かす driver を作り、Linux（r8152）と同じ程度の速さにする。
 
@@ -32,7 +32,7 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
 | [ws315-p003](phase003/phase.md) | 5330 の実機: send・recv 30 s、NCM・Linux との比べ、USB の他の device の非退行、調整（design.md §5.4・§8） | cleared（2026-10-30 06:15 P3: image の試験 img1 と調整 k6。send 2372.0・recv 2338.3、同時 send 2346.5・recv 1442.9（調整の前 1037.1、Linux の同時 2345.7・2340.9、残りの差は TCP の受けの window 128 KB と見る）、ping・MTU・down/up・他の USB の device PASS。camcap は WS282 の範囲。抜き差しは未実施） | p002 |
 | [ws315-p004](phase004/phase.md) | RTL8157（資料だけ）: 記述子 v2、version 16 の初期化、5000 の広告、host 試験、build。実機はユーザーの購入の後 | cleared（2026-10-30 05:43 P3、host 試験 PASS・amd64・pcat の build warning 0。実機は未実施） | p002 |
 | [ws315-p005](phase005/phase.md) | 規約の全文の見直し | cleared（2026-10-30 05:53 P3、conformance-reviewer。host 試験 PASS、build warning 0） | p002〜p004 |
-| [ws315-p006](phase006/phase.md) | TCP の受けの buffer の自動調整（F-WS315-rcvbuf、2026-10-30 ユーザー「F-WS315-rcvbufを解決してほしいです。WS315のphaseにして、今取り組んでください。」） | in-progress（2026-10-30 09:16 P3 q1696-i01 ラップアップ: 実装・tcp-model・21 config の build・QEMU は済み。5330 の同時 recv 2334〜2356（Linux 2341）だが同時 send が 1030〜1645 に落ちた（前 2347）、倍率の調整が残り） | p003 |
+| [ws315-p006](phase006/phase.md) | TCP の受けの buffer の自動調整（F-WS315-rcvbuf、2026-10-30 ユーザー「F-WS315-rcvbufを解決してほしいです。WS315のphaseにして、今取り組んでください。」） | cleared（2026-10-30 10:45 P3 q1702-i01: 受けの自動（倍率 1.25 倍）と 64 bit の送りの ring 768。5330 の同時 send 2268.3・recv 2359.2（Linux 2254〜2346・2311〜2341）、片方向・10GbE は落ちない） | p003 |
 
 ## Resume point
 
@@ -55,3 +55,4 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
   5330 は Debian に戻った（NVMe の zedBSD は img1 の userland と k6 の kernel）。
 - 2026-10-30 09:16 P3（q1696-i01、ラップアップ）: p006 を追加（ユーザー「F-WS315-rcvbufを解決してほしいです。WS315のphaseにして、今取り組んでください。」）。受けの buffer の自動調整を実装（8b9523b20）、
   同時 recv は Linux 並みになったが同時 send が落ちた。再開は [phase006](phase006/phase.md) の「引き継ぎ」（次: 1.5 倍の g12 を 5330 で、倍率の決め、10GbE）。5330 は Debian、NVMe の zedBSD の kernel は g10。
+- 2026-10-30 10:45 P3（q1702-i01）: p006 cleared。同時の send の退行は、受けの窓が送りの in flight（ring 256）を超えると両方向の比で送りが落ちる事と、2 倍の倍率が switch に作る queue: 64 bit の送りの ring 768・TCP_SEND_BUFFER 1152 KB（Q1 が採った）と倍率 1.25 倍で解いた（4575db11d・f49185c5b）。5330 は Debian（NVMe の zedBSD の kernel は f1）、10.0.10.3 は返した。

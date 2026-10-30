@@ -34,14 +34,18 @@ enum tcp_state {
  * window and the peer's advertised window narrow it further whenever they
  * are smaller.  Each queued segment keeps a copy of its payload in a
  * packet of the shared pool, so the 64-bit machines, whose pool is large,
- * keep enough for a gigabit link's round trip with the stack's delays and
- * for a whole 128 KB write while half the ring is free (256 segments of
- * 1460 bytes), and the 32-bit boards a few.
+ * keep more than the largest window their receive side grows to (768
+ * segments of 1460 bytes, 1.1 MB, against 1 MB), and the 32-bit boards a
+ * few.  When a link carries a transfer each way at once, each direction's
+ * acknowledgements wait behind the other's data, so the two share one
+ * round trip and divide the link as their windows stand to each other: a
+ * ring smaller than the window this end offers the peer would leave this
+ * end's sending that share of the link.
  */
 #ifndef CONFIG_TCP_SEND_QUEUE_MAX
 #if defined(HAL_ARCH_AMD64) || defined(HAL_ARCH_ARM64) || \
     defined(HAL_ARCH_RISCV64)
-#define CONFIG_TCP_SEND_QUEUE_MAX 256
+#define CONFIG_TCP_SEND_QUEUE_MAX 768
 #else
 #define CONFIG_TCP_SEND_QUEUE_MAX 8
 #endif
