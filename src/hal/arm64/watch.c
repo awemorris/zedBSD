@@ -45,7 +45,6 @@
 #include "percpu.h"
 #include "space.h"
 #include "watch.h"
-#include "bsp-rpi-common/cons.h"
 #include "bsp-rpi-common/font.h"
 #include "bsp-rpi-common/framebuffer.h"
 
@@ -1069,10 +1068,10 @@ line_address(
 /*
  * Puts the report where a photograph of the screen reads it.
  *
- * With a display driver in charge the text goes onto the planes the
- * compositor shows; otherwise onto the firmware's framebuffer.  A stop
- * that lasts long enough replaces the display list with the largest plane
- * alone, so no window above it hides the text.
+ * The text goes onto the planes the compositor shows now; without a
+ * compositor, or with no plane it can draw on, onto the firmware's
+ * framebuffer.  A stop that lasts long enough replaces the display list
+ * with the largest plane alone, so no window above it hides the text.
  */
 static void
 report_show(
@@ -1082,14 +1081,12 @@ report_show(
 	unsigned count;
 	unsigned index;
 	uint64_t stop_length;
-	int suspended;
 
 	/* The report is as recent as now. */
 	watch_last_report = now;
 
-	/* The firmware's framebuffer when no display driver owns the screen. */
-	suspended = rpi_cons_output_suspended();
-	if (!suspended || watch_hvs == NULL) {
+	/* The firmware's framebuffer on a board without a compositor. */
+	if (watch_hvs == NULL) {
 		draw_cells();
 		return;
 	}

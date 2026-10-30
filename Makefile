@@ -682,7 +682,8 @@ override CONFIG_DRIVER_GRAPHICS := y
 endif
 
 #
-# PC/AT, PC-98 and sun4u (the firmware framebuffer) provide a
+# PC/AT, PC-98, sun4u (the firmware framebuffer) and the Raspberry Pi 4,
+# the Raspberry Pi 5 and the ODROID-C5 (the boot framebuffer) provide a
 # /dev/graphics implementation.  Keep this derived capability internal: an
 # unsupported target may still carry an old CONFIG_DRIVER_GRAPHICS=y
 # setting without acquiring a generic node or an unresolved
@@ -692,7 +693,8 @@ endif
 ZEDBSD_GRAPHICS_BACKEND := $(strip \
 	$(if $(filter pcat amd64,$(ZEDBSD_PLATFORM_DIR)),pcat,\
 	$(if $(filter pc98,$(ZEDBSD_PLATFORM_DIR)),pc98,\
-	$(if $(filter sparcv9,$(ZEDBSD_PLATFORM_DIR)),sun4u))))
+	$(if $(filter sparcv9,$(ZEDBSD_PLATFORM_DIR)),sun4u,\
+	$(if $(filter rpi4 rpi5 odroid-c5,$(ZEDBSD_PLATFORM)),bootfb)))))
 
 override CONFIG_DRIVER_GRAPHICS_DEVICE := $(if $(and \
 	$(filter y,$(CONFIG_DRIVER_GRAPHICS)),$(ZEDBSD_GRAPHICS_BACKEND)),y,n)

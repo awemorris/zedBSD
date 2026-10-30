@@ -6,57 +6,56 @@
  */
 
 /*
- * Raspberry Pi 4 console: /dev/console over the PL011 serial port.
+ * The console of the Raspberry Pi 4, the Raspberry Pi 5 and the ODROID-C5:
+ * /dev/console over the screen the firmware or the boot loader left on,
+ * and over the debug UART when the build makes the serial line the
+ * console.
  *
- * The board has no text display of its own, so the console is a teletype:
- * each character goes to kern_console_early_putc(), which writes it to the
- * serial port and to the firmware framebuffer.  A positioned write has no
- * teletype meaning and is dropped; the grid only answers the size and
- * cursor queries that programs make.
- *
- * Input is read from the PL011 receive FIFO by a kernel thread that looks
- * at it every few milliseconds, so the console needs no interrupt routing.
- * Without the serial console in the build (CONFIG_RPI4_SERIAL_CONSOLE, off
- * by default) the port is left alone: no reader, and output goes only to
- * the framebuffer until a display driver takes it.
- *
- * Once a GPU has flipped its first image the console leaves the
- * framebuffer for good: the hardware layer's framebuffer output is
- * suspended and never resumed, and the serial line carries on.
+ * The screen and the text on it are the generic boot framebuffer's and
+ * framebuffer text console's; this file gives them the board's screen and
+ * the UART, and reads the UART's receive FIFO into the console from a
+ * kernel thread that looks at it every few milliseconds, so the console
+ * needs no interrupt routing.  Without the serial console in the build
+ * (CONFIG_RPI4_SERIAL_CONSOLE, off by default) the port is left alone.
  */
 
+#include <stddef.h>
 #include <stdint.h>
 
 #include "drivers/platform/rpi4/rpi4-console.h"
 
-#include "hal/arm64/bsp-rpi-common/cons.h"
+#include <drivers/generic/boot-fb.h>
+#include <drivers/generic/fb-text.h>
+#include <kern/boot.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
+#include <kern/klog.h>
 #include <kern/platform.h>
+#include <kern/pmem.h>
 #include <kern/sched.h>
-#include <kern/text-display.h>
 #include <kern/thread.h>
 #include <kern/tty.h>
 #include <uapi/errno.h>
 
-/* The kernel's direct map of physical memory and devices. */
-#define RPI4_DIRECT_BASE	0xffff000000000000ULL
-
 #if defined(HAL_BOARD_ODROID_C5)
 /*
  * The ODROID-C5's debug UART (the S905X5M's uart_B), an Amlogic UART: its
- * receive FIFO, its status register and the status's receive-empty bit.
+ * transmit and receive FIFOs, its status register, and the status's
+ * receive-empty and transmit-full bits.
  *
  * Values referenced: Hardkernel Linux odroids7d-6.12.y common_drivers
  * arch/arm64/boot/dts/amlogic/meson-s7d.dtsi (uart_B under apb4's
- * ranges); Linux v7.3 drivers/tty/serial/meson_uart.c (the receive FIFO
- * and status offsets, and the receive-empty bit).
+ * ranges); Linux v7.3 drivers/tty/serial/meson_uart.c (the FIFO and
+ * status offsets, and the receive-empty and transmit-full bits).
  */
 #define RPI4_UART_BASE		0xfe07a000ULL
-#define RPI4_UART_DR		0x04U
-#define RPI4_UART_FR		0x0cU
-#define RPI4_UART_FR_RXFE	0x00100000U
-#elif defined(HAL_BOARD_RPI5)
+#define RPI4_UART_TX		0x00U
+#define RPI4_UART_RX		0x04U
+#define RPI4_UART_STATUS	0x0cU
+#define RPI4_UART_RX_EMPTY	0x00100000U
+#define RPI4_UART_TX_FULL	0x00200000U
+#else
+#if defined(HAL_BOARD_RPI5)
 /*
  * The Pi 5's PL011 of the three-pin debug connector, which shares nothing
  * with the Bluetooth controller.
@@ -71,25 +70,25 @@
 #define RPI4_UART_BASE		0xfe201000ULL
 #endif
 
-/* The name prefix under which the hardware layer describes the firmware's screen. */
-#if defined(HAL_BOARD_ODROID_C5)
-#define RPI4_FRAMEBUFFER_NAME	"odroidc5.framebuffer"
-#elif defined(HAL_BOARD_RPI5)
-#define RPI4_FRAMEBUFFER_NAME	"rpi5.framebuffer"
-#else
-#define RPI4_FRAMEBUFFER_NAME	"rpi4.framebuffer"
+/*
+ * A PL011's data and flag registers, and the flag's receive-empty and
+ * transmit-full bits.
+ *
+ * Values referenced: ARM PrimeCell UART (PL011) Technical Reference
+ * Manual, r1p5 (UARTDR, UARTFR and its RXFE and TXFF bits).
+ */
+#define RPI4_UART_TX		0x00U
+#define RPI4_UART_RX		0x00U
+#define RPI4_UART_STATUS	0x18U
+#define RPI4_UART_RX_EMPTY	0x10U
+#define RPI4_UART_TX_FULL	0x20U
 #endif
 
-/* A PL011's data and flag registers, and the flag's receive-empty bit. */
-#if !defined(HAL_BOARD_ODROID_C5)
-#define RPI4_UART_DR		0x00U
-#define RPI4_UART_FR		0x18U
-#define RPI4_UART_FR_RXFE	0x10U
-#endif
+/* The bytes of the UART's registers the console maps. */
+#define RPI4_UART_WINDOW	0x1000U
 
-/* The grid a serial terminal is assumed to have. */
-#define RPI4_CONSOLE_COLUMNS	80U
-#define RPI4_CONSOLE_ROWS	24U
+/* How long a write waits for room in the transmitter before dropping the byte. */
+#define RPI4_UART_SPIN_LIMIT	100000U
 
 /* Whether the serial line is the console (CONFIG_RPI4_SERIAL_CONSOLE). */
 #ifdef RPI4_SERIAL_CONSOLE
@@ -98,42 +97,56 @@
 #define RPI4_CONSOLE_SERIAL	0
 #endif
 
+/* The name prefix under which the platform hands the screen over. */
+#if defined(HAL_BOARD_ODROID_C5)
+#define RPI4_FRAMEBUFFER_NAME	"odroidc5.framebuffer"
+#elif defined(HAL_BOARD_RPI5)
+#define RPI4_FRAMEBUFFER_NAME	"rpi5.framebuffer"
+#else
+#define RPI4_FRAMEBUFFER_NAME	"rpi4.framebuffer"
+#endif
+
+/*
+ * The platform's pixel order as the screen's format value names it: blue
+ * in the low byte, or red.
+ */
+#define RPI4_FRAMEBUFFER_BLUE_FIRST	0U
+#define RPI4_FRAMEBUFFER_RED_FIRST	1U
+
+/*
+ * The bits every pixel carries set.  The ODROID-C5's boot loader may leave
+ * a plane that blends by the top byte, which shows only pixels whose alpha
+ * is full; the byte is padding on every other form, so it is set there
+ * always.  The Pi's firmware planes take the byte as it is.
+ */
+#if defined(HAL_BOARD_ODROID_C5)
+#define RPI4_FRAMEBUFFER_OPAQUE	0xff000000U
+#else
+#define RPI4_FRAMEBUFFER_OPAQUE	0x00000000U
+#endif
+
 /* How often the receive FIFO is read, and how much of it at a time. */
 #define RPI4_CONSOLE_POLL_MS	10U
 #define RPI4_CONSOLE_DRAIN	64U
 
-static void console_get_size(unsigned *columns, unsigned *rows);
-static void console_putc(int character);
-static void console_write(unsigned row, unsigned column, uint8_t attribute, const char *utf8);
-static void console_clear(void);
-static int console_set_cursor(unsigned row, unsigned column);
-static void console_get_cursor(unsigned *row, unsigned *column, int *visible);
-static void console_show_cursor(int visible);
-static void console_nothing(void);
-static void console_suspend(void);
-static void console_resume(void);
-static int console_end(const struct kern_text_range *ranges, unsigned count);
-static uint32_t uart_read(unsigned offset);
-static void console_input_worker(void *argument);
+/* The terminal's Enter and Delete, and what the line discipline expects. */
+#define RPI4_CONSOLE_RETURN	0x0dU
+#define RPI4_CONSOLE_DELETE	0x7fU
+#define RPI4_CONSOLE_BACKSPACE	0x08U
 
 /*
- * The console's text operations, registered once at start-up and never
- * changed.  Everything but a character goes nowhere, because the console is
- * a teletype.
+ * The UART's registers, mapped once by drv_rpi4_console_init() when the
+ * serial line is the console; NULL otherwise and when the mapping failed.
+ * Never changed afterwards.
  */
-static const struct kern_text_ops rpi4_console_ops = {
-	.get_size = console_get_size,
-	.putc = console_putc,
-	.write = console_write,
-	.clear = console_clear,
-	.set_cursor = console_set_cursor,
-	.get_cursor = console_get_cursor,
-	.show_cursor = console_show_cursor,
-	.update_cursor = console_nothing,
-	.suspend = console_suspend,
-	.resume = console_resume,
-	.end = console_end
-};
+static volatile uint8_t *uart_registers;
+
+/*
+ * What the board gives the console: the serial line when it is the
+ * console.  Filled once by drv_rpi4_console_init() before the console
+ * starts and not changed afterwards.
+ */
+static struct drv_fb_text_board rpi4_console_board;
 
 /*
  * The kernel thread that reads the serial port, or NULL before input was
@@ -142,24 +155,42 @@ static const struct kern_text_ops rpi4_console_ops = {
  */
 static struct thread *input_worker;
 
-/*
- * Whether the console has left the framebuffer for good: a resume no
- * longer gives the screen back to the hardware layer's console.  Set once
- * by console_end() before it suspends the hardware layer's output; read by
- * console_resume() before and after it resumes that output, all
- * sequentially consistent, so that no resume outlives an end.
- */
-static int console_ended;
+static void map_screen(void);
+static void serial_write(int character);
+static uint32_t uart_read(unsigned offset);
+static void uart_write(unsigned offset, uint32_t value);
+static void console_input_worker(void *argument);
 
 /*
- * Publishes the console output.
+ * Publishes the console: the screen, the serial line, the text console
+ * over both, and the screen's /dev/graphics backend.
  */
 void
 drv_rpi4_console_init(
 	void)
 {
-	/* Makes the teletype the console's text output. */
-	kern_text_register(&rpi4_console_ops);
+	void *mapped;
+	int error;
+
+	/* Maps the UART the console writes and reads, when the serial line is the console. */
+	if (RPI4_CONSOLE_SERIAL) {
+		error = kern_device_map(RPI4_UART_BASE, RPI4_UART_WINDOW, KERN_DEVICE_UNCACHED, &mapped);
+		if (error == 0) {
+			uart_registers = mapped;
+			rpi4_console_board.serial_write = serial_write;
+		}
+	}
+
+	/* Maps the screen; without one the console is the serial line alone. */
+	map_screen();
+
+	/* Starts the text console over the screen and the serial line. */
+	drv_fb_text_init(&rpi4_console_board);
+
+	/* Offers the screen to /dev/graphics; without one there is no device. */
+	error = drv_boot_fb_register_backend();
+	if (error != 0 && error != ENODEV)
+		kern_logf("graphics: firmware framebuffer not offered (%d)\n", error);
 }
 
 /*
@@ -171,13 +202,12 @@ drv_rpi4_console_start_input(
 {
 	int error;
 
-	/* No reader without the serial console, nor a second one. */
-	if (!RPI4_CONSOLE_SERIAL || input_worker != NULL)
+	/* No reader without the serial console's port, nor a second one. */
+	if (uart_registers == NULL || input_worker != NULL)
 		return 0;
 
 	/* Creates the reader; without it the console stays output only. */
-	error = kthread_create(console_input_worker, NULL,
-	    SCHED_PRIORITY_DEFAULT, &input_worker);
+	error = kthread_create(console_input_worker, NULL, SCHED_PRIORITY_DEFAULT, &input_worker);
 	if (error != 0)
 		return error;
 
@@ -188,102 +218,69 @@ drv_rpi4_console_start_input(
 	return 0;
 }
 
-/* Reports the assumed terminal grid. */
+/*
+ * Hands the screen the platform names to the boot framebuffer driver, its
+ * pixel order turned into the kernel's format.
+ */
 static void
-console_get_size(
-	unsigned *columns,
-	unsigned *rows)
+map_screen(
+	void)
 {
-	/* Reports the width when the caller asked for it. */
-	if (columns != NULL)
-		*columns = RPI4_CONSOLE_COLUMNS;
+	struct kern_boot_framebuffer screen;
+	int error;
 
-	/* Reports the height when the caller asked for it. */
-	if (rows != NULL)
-		*rows = RPI4_CONSOLE_ROWS;
+	/* Reads the screen; a boot whose firmware allocated none has nothing to map. */
+	error = kern_boot_framebuffer(RPI4_FRAMEBUFFER_NAME, &screen);
+	if (error != 0 || screen.size == 0U)
+		return;
+
+	/* Names the pixel order in the kernel's terms; another value is left unmapped. */
+	if (screen.format == RPI4_FRAMEBUFFER_BLUE_FIRST) {
+		screen.format = KERN_BOOT_FRAMEBUFFER_BGRX8888;
+	} else if (screen.format == RPI4_FRAMEBUFFER_RED_FIRST) {
+		screen.format = KERN_BOOT_FRAMEBUFFER_RGBX8888;
+	} else {
+		return;
+	}
+
+	/* Maps it; a screen that cannot be mapped leaves the console on the serial line. */
+	error = drv_boot_fb_init(&screen, RPI4_FRAMEBUFFER_OPAQUE);
+	if (error != 0)
+		kern_logf("console: firmware framebuffer not mapped (%d)\n", error);
 }
 
-/* Sends one character to the serial port and the framebuffer. */
+/*
+ * Writes one byte to the UART, a carriage return before a newline; a byte
+ * the transmitter never takes is dropped.
+ */
 static void
-console_putc(
+serial_write(
 	int character)
 {
-	/* Writes the character wherever the hardware layer shows the console. */
-	kern_console_early_putc(character);
-}
+	unsigned spins;
+	uint32_t status;
 
-/* Drops a positioned write, which a teletype cannot place. */
-static void
-console_write(
-	unsigned row,
-	unsigned column,
-	uint8_t attribute,
-	const char *utf8)
-{
-	(void)row;
-	(void)column;
-	(void)attribute;
-	(void)utf8;
-}
+	/* Nothing to write without the serial console's port. */
+	if (uart_registers == NULL)
+		return;
 
-/* Leaves the terminal as it is: the teletype has nothing to blank. */
-static void
-console_clear(
-	void)
-{
-}
+	/* A terminal needs the carriage return to start the next line at its left. */
+	if (character == '\n')
+		serial_write('\r');
 
-/* Accepts a position inside the grid without moving anything. */
-static int
-console_set_cursor(
-	unsigned row,
-	unsigned column)
-{
-	/* Refuses a row below the grid. */
-	if (row >= RPI4_CONSOLE_ROWS)
-		return 0;
+	/* Waits for room in the transmit FIFO. */
+	for (spins = 0; spins < RPI4_UART_SPIN_LIMIT; spins++) {
+		status = uart_read(RPI4_UART_STATUS);
+		if ((status & RPI4_UART_TX_FULL) == 0)
+			break;
+	}
 
-	/* Refuses a column right of the grid. */
-	if (column >= RPI4_CONSOLE_COLUMNS)
-		return 0;
+	/* Drops the byte on a port that never drains. */
+	if (spins == RPI4_UART_SPIN_LIMIT)
+		return;
 
-	/* Succeeded: the position is inside the grid. */
-	return 1;
-}
-
-/* Reports the home position and a shown cursor. */
-static void
-console_get_cursor(
-	unsigned *row,
-	unsigned *column,
-	int *visible)
-{
-	/* Reports the home row when the caller asked for it. */
-	if (row != NULL)
-		*row = 0;
-
-	/* Reports the home column when the caller asked for it. */
-	if (column != NULL)
-		*column = 0;
-
-	/* Reports a shown cursor when the caller asked for it. */
-	if (visible != NULL)
-		*visible = 1;
-}
-
-/* Ignores the request: the terminal draws its own cursor. */
-static void
-console_show_cursor(
-	int visible)
-{
-	(void)visible;
-}
-
-/* Does nothing for an operation a teletype does not have. */
-static void
-console_nothing(
-	void)
-{
+	/* Queues the byte. */
+	uart_write(RPI4_UART_TX, (uint32_t)character & 0xffU);
 }
 
 /* Reads one register of the debug UART. */
@@ -293,12 +290,21 @@ uart_read(
 {
 	uint32_t value;
 
-	/* Reads the register through the kernel's map of the device. */
-	value = kern_mmio_read32((const volatile void *)(uintptr_t)
-	    (RPI4_DIRECT_BASE + RPI4_UART_BASE + offset));
+	/* Reads the register through the console's mapping of the device. */
+	value = kern_mmio_read32(uart_registers + offset);
 
 	/* Succeeded: the register value. */
 	return value;
+}
+
+/* Writes one register of the debug UART. */
+static void
+uart_write(
+	unsigned offset,
+	uint32_t value)
+{
+	/* Writes the register through the console's mapping of the device. */
+	kern_mmio_write32(uart_registers + offset, value);
 }
 
 /*
@@ -312,7 +318,7 @@ console_input_worker(
 	void *argument)
 {
 	unsigned drained;
-	uint32_t flags;
+	uint32_t status;
 	uint8_t byte;
 	uint64_t wake;
 
@@ -324,16 +330,16 @@ console_input_worker(
 		/* Moves at most one batch of received bytes into the console. */
 		for (drained = 0; drained < RPI4_CONSOLE_DRAIN; drained++) {
 			/* Stops when the receive FIFO is empty. */
-			flags = uart_read(RPI4_UART_FR);
-			if ((flags & RPI4_UART_FR_RXFE) != 0)
+			status = uart_read(RPI4_UART_STATUS);
+			if ((status & RPI4_UART_RX_EMPTY) != 0)
 				break;
 
 			/* Takes the byte and translates Enter and backspace. */
-			byte = (uint8_t)uart_read(RPI4_UART_DR);
-			if (byte == (uint8_t)'\r') {
+			byte = (uint8_t)uart_read(RPI4_UART_RX);
+			if (byte == RPI4_CONSOLE_RETURN) {
 				byte = (uint8_t)'\n';
-			} else if (byte == 0x7fU) {
-				byte = 8U;
+			} else if (byte == RPI4_CONSOLE_DELETE) {
+				byte = RPI4_CONSOLE_BACKSPACE;
 			}
 
 			/* Hands the byte to the console's line discipline. */
@@ -344,81 +350,4 @@ console_input_worker(
 		wake = sched_ticks() + kern_ms_to_ticks(RPI4_CONSOLE_POLL_MS);
 		sched_sleep(wake);
 	}
-}
-
-/* Keeps UART output and retained text active while graphics owns the framebuffer. */
-static void
-console_suspend(
-	void)
-{
-	/* Stops only the early console's pixel writes under its own output lock. */
-	rpi_cons_suspend_output();
-
-	/* Succeeded: subsequent text cannot paint into graphics-owned scanout. */
-	return;
-}
-
-/* Restores framebuffer text after the display driver confirms console adoption. */
-static void
-console_resume(
-	void)
-{
-	int ended;
-
-	/* A console that left the framebuffer stays off it; the serial line goes on. */
-	ended = __atomic_load_n(&console_ended, __ATOMIC_SEQ_CST);
-	if (ended)
-		return;
-
-	/* Repaints the retained early console without discarding newer log messages. */
-	rpi_cons_resume_output();
-
-	/* An end that came meanwhile may have suspended the output first: it stays suspended. */
-	ended = __atomic_load_n(&console_ended, __ATOMIC_SEQ_CST);
-	if (ended)
-		rpi_cons_suspend_output();
-
-	/* Succeeded: the framebuffer shows the console again, unless it has left it. */
-	return;
-}
-
-/*
- * Ends the console's use of the framebuffer for good: the hardware layer's
- * framebuffer output is suspended and no later resume gives it back, while
- * the serial line goes on.  The hardware layer's stall watch still draws a
- * stop's report on the firmware's framebuffer when it has no compositor to
- * draw on, so that screen counts as left: EBUSY when it lies in the
- * ranges, 0 otherwise.
- */
-static int
-console_end(
-	const struct kern_text_range *ranges,
-	unsigned count)
-{
-	struct kern_boot_framebuffer screen;
-	int overlaps;
-	int error;
-
-	/*
-	 * No resume gives the screen back from now on: one that read the mark
-	 * clear before this store suspends the output again after its own
-	 * repaint, since it reads the mark once more.
-	 */
-	__atomic_store_n(&console_ended, 1, __ATOMIC_SEQ_CST);
-
-	/* Stops the hardware layer's framebuffer writes under its output lock. */
-	rpi_cons_suspend_output();
-
-	/* A boot whose firmware allocated no screen leaves nothing behind. */
-	error = kern_boot_framebuffer(RPI4_FRAMEBUFFER_NAME, &screen);
-	if (error != 0 || screen.size == 0U)
-		return 0;
-
-	/* The firmware's screen, which a stop's report may still draw on. */
-	overlaps = kern_text_range_overlaps(ranges, count, screen.physical_base, screen.size);
-	if (overlaps)
-		return EBUSY;
-
-	/* Succeeded: nothing the console leaves behind lies in the ranges. */
-	return 0;
 }
