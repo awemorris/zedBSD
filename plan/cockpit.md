@@ -1,9 +1,11 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:48（Q1）
+最終更新: 2026-10-31 01:50（Q1）
 
 ## 担当（P1〜P8）
+
+2026-10-31 01:50 から昼頃までユーザーは不在（自走を続ける趣旨の指示を受けた）。判断が要る物は uncleared にして下の「判断を待つ事」に置き、先へ進む。
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
@@ -86,7 +88,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking を飛ばす | 直しを main に merge、QEMU で確かめた（Wi-Fi が失敗しても有線が上がる）。実機で確かめてから閉じる |
 | [BUG-372](bugs/BUG-372.md) | VF2 の serial の console が入力を受けない（元から未実装） | 直しを main に merge、VF2 の実機の確かめ待ち |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が EBUSY で終わる（VF2） | 解析中（P7） |
-| [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 解析だけ（nvrtx が受ける画像は正しい、原因は未特定。画面の目視が要る） |
+| [BUG-374](bugs/BUG-374.md) | RTX の mouse の cursor の色が他の GPU と逆 | 診断の kernel を用意済み（矢印の色で原因が分かれる）。ユーザーの目視待ち（下の「拾える試験」） |
 | [BUG-370](bugs/BUG-370.md) | Photos で保存すると全面表示が閉じる | P6 が直す（q1740） |
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り open のたびに約 80 ms 待つ | P6（q1743） |
 | [BUG-222](bugs/BUG-222.md) | ue0 の SCP が約 10 Mbps（10-06 の UAT） | closed（10.0.10.3 の ue0 で 2500 Mbps、scp 62〜86 MB/s） |
@@ -152,6 +154,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 - **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: その時の main で最新の image を作り直して渡す（P4）。Q1 が声をかける。画面に console の login が出るか、起動の後に P4 が SSH で GPU の clock と fps を測る。
 - **ODROID-C5（2026-10-31 の午後、VF2 の最適化の後）**: 試験の image で HDMI に画面が出なかった（ユーザー）。serial（今は VF2 につないでいる）を C5 につないで、起動のどこで止まるかを見る。Q1 が担当（WS313）を起動して声をかける。
 - VF2: 新しい kernel で画面と serial の login（BUG-372）。
+- **10.0.10.3（BUG-374、RTX の cursor の色）**: 診断の kernel（白を赤・黒を青に塗る）で desktop の矢印の内側と外枠の色を見る。2026-10-31 01:44 に一度用意したがユーザーは不在になったので戻した。入れ直しの手順は [BUG-374](bugs/BUG-374.md)、Q1 が声をかける。
 
 ## 決まった事
 
