@@ -104,6 +104,7 @@ kern_platform_init(
 	struct kern_boot_device *device;
 	uint64_t fdt_phys;
 	uint64_t sdhci_phys;
+	int sdhci_error;
 #if CONFIG_DRIVER_BCM2711_GPU
 	struct kern_boot_framebuffer framebuffer;
 	struct drv_bcm2711_boot_screen screen;
@@ -143,15 +144,20 @@ kern_platform_init(
 #if CONFIG_DRIVER_BCM2711_WIFI
 	rpi4_sd_base = (uintptr_t)sdhci_phys;
 #endif
-	if (drv_rpi_sdhci_init((uintptr_t)sdhci_phys, 0) != 0) {
+	sdhci_error = drv_rpi_sdhci_init((uintptr_t)sdhci_phys, 0);
+	if (sdhci_error != 0) {
 		/*
 		 * QEMU raspi4b currently attaches -drive if=sd to the legacy
 		 * Arasan controller, while real Pi 4 firmware boots from eMMC2.
 		 */
 		if (sdhci_phys != 0xfe340000ULL)
 			return 0;
-		if (drv_rpi_sdhci_init(0xfe300000ULL, 0) != 0)
+
+		/* Tries the legacy controller QEMU attaches the card to. */
+		sdhci_error = drv_rpi_sdhci_init(0xfe300000ULL, 0);
+		if (sdhci_error != 0)
 			return 0;
+
 #if CONFIG_DRIVER_BCM2711_WIFI
 		rpi4_sd_base = (uintptr_t)0xfe300000ULL;
 #endif

@@ -314,6 +314,7 @@ kernel_entry(
 	const void *handoff)
 {
 	const struct kern_boot_handoff *h;
+	uint64_t timer_ms;
 	int quiet;
 
 	/* Refuses a handoff that is missing, foreign, or truncated. */
@@ -374,11 +375,16 @@ kernel_entry(
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
+
+	/* Reads the length of one timer tick in milliseconds for the boot report. */
+	timer_ms = kern_clock_resolution_ns() / 1000000U;
+
+	/* Reports the machine the HAL found. */
 	kern_logf("boot: HAL initialized successfully. "
 		   "[cpu %u, memory %uMB, timer %ums]\n",
 		   hal_cpu_count(),
 		   (unsigned)(hal_pmem_get_total_size() / (1024U * 1024U)),
-		   (unsigned)(kern_clock_resolution_ns() / 1000000U));
+		   (unsigned)timer_ms);
 	kern_logf("boot: CPUs ready: %u\n", hal_cpu_count());
 	kern_log_boot_step("the HAL and the CPUs are ready");
 

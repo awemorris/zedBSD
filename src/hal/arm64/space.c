@@ -213,6 +213,7 @@ arm64_space_init(
 	int text_executable;
 	int rodata_protected;
 	int data_protected;
+	int no_map;
 
 	/* Locates the kernel image's sections physically. */
 	total = hal_pmem_get_total_size();
@@ -263,10 +264,19 @@ arm64_space_init(
 	system_kernel_l1[0] = table_desc(system_kernel_l2_low);
 	for (index = 0; index < 512U; index++) {
 		physical = (uint64_t)index << 21;
-		if (index != 0 && arm64_boot_is_no_map(physical, (uint64_t)1 << 21)) {
+
+		/* Asks whether the device tree forbids this block, except for block zero. */
+		no_map = 0;
+		if (index != 0)
+			no_map = arm64_boot_is_no_map(physical, (uint64_t)1 << 21);
+
+		/* Leaves a forbidden block unmapped. */
+		if (no_map) {
 			system_kernel_l2_low[index] = 0;
 			continue;
 		}
+
+		/* Maps the block as normal memory, never executable. */
 		system_kernel_l2_low[index] = physical | BLOCK_FLAGS | PTE_PXN | PTE_UXN;
 	}
 
@@ -280,6 +290,8 @@ arm64_space_init(
 		} else if (physical >= rodata_start && physical < rodata_end) {
 			flags |= PTE_RO;
 		}
+
+		/* Installs the page with the permissions chosen for it. */
 		system_kernel_l3_low[index] = physical | flags;
 	}
 
@@ -1416,6 +1428,8 @@ fb_window_fill(
 		stop = block + ARM64_DEVICE_BLOCK_SIZE;
 		if (stop > end)
 			stop = end;
+
+		/* Maps each page of the framebuffer inside this block. */
 		for (; page < stop; page += ARM64_PAGE_SIZE)
 			table[(page - block) / ARM64_PAGE_SIZE] = page | PAGE_FLAGS | flags;
 		fb_window_l2[index] = table_desc(table);

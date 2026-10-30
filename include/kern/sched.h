@@ -39,6 +39,11 @@ enum sched_queue_kind {
 	SCHED_QUEUE_WOKEN,
 };
 
+/*
+ * The scheduler's state of one thread.
+ *
+ * It lives inside the thread, so it exists as long as the thread does.
+ */
 struct sched {
 	int priority;
 	uint32_t quantum;
@@ -53,7 +58,7 @@ struct sched {
 	uint64_t queued_tick;
 
 	/*
-	 * The latency diagnostic (kern.perf=1, ws213-p007).  When a wakeup or
+	 * The latency diagnostic (kern.perf=1).  When a wakeup or
 	 * a preemption made the thread runnable, the counter then (zero while
 	 * no wait is being measured), why (SCHED_PERF_*), the CPU it waits on
 	 * and that CPU's switch count then, which together say how long it

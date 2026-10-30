@@ -207,6 +207,12 @@ struct vm_region {
 	struct vm_region *next;
 };
 
+/*
+ * One address space: the regions of a process and the machine layer's tables
+ * that translate them.
+ *
+ * It lives until its last reference is released, after which it is reaped.
+ */
 struct vmspace {
 	kern_space_handle_t space;
 	refcount_t refs;

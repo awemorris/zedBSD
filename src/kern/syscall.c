@@ -4649,6 +4649,7 @@ sys_nanosleep_call(
 		/* Reports the remaining time to a caller interrupted by a signal. */
 		left = kern_deadline_remaining(sched_ticks(), deadline);
 		if (args[1] != 0) {
+			/* Converts the remaining ticks to the time the caller reads. */
 			kern_ticks_to_timespec(left, &remaining);
 			error = copyout(&remaining, args[1], sizeof(remaining));
 			if (error != 0)

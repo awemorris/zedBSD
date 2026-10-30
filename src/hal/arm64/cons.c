@@ -109,8 +109,10 @@ hal_putc(
 	/* Serializes character rendering with all console output. */
 	interrupts_enabled = output_enter();
 
+	/* Renders the character while no other output can interleave. */
 	putc_locked(character);
 
+	/* Lets the other output proceed. */
 	output_leave(interrupts_enabled);
 }
 
@@ -171,8 +173,10 @@ arm64_cons_framebuffer_release(
 	/* Waits for a character being painted, then keeps the next ones off the framebuffer. */
 	interrupts_enabled = output_enter();
 
+	/* Detaches the early console from the framebuffer. */
 	arm64_framebuffer_forget();
 
+	/* Lets the other output proceed. */
 	output_leave(interrupts_enabled);
 }
 
@@ -337,7 +341,7 @@ putc_locked(
 	/* Removes the cursor before the cell under it changes. */
 	draw_locked(cursor_row, cursor_column);
 
-	/* Handles the line and column control characters. */
+	/* Acts on a control character instead of storing it in a cell. */
 	if (character == '\n') {
 		/* A new line moves to the start of the next row. */
 		newline_locked();
