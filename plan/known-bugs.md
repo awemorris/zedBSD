@@ -66,7 +66,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-196](bugs/BUG-196.md) | 実機 5330 で電源ボタンを押すと直ちに電源が切れる（ACPI の attach の失敗で ACPI の mode に入っていない見込み） | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled（P1 1eff1521 で直し、実機は UAT） | UAT 2026-10-05 午後 | WS049・WS132（P1、BUG-195 と同じ根） |
 | [BUG-197](bugs/BUG-197.md) | 実機 5330 で shutdown しても電源が落ちない（DSDT の `\_S5` が引けない見込み） | reproduced（実機） / **resolved**（2026-10-06 ユーザー「電源オフは動作成功しました。」） | UAT 2026-10-05 午後 | WS049（P1、BUG-195 と同じ根） |
 | [BUG-198](bugs/BUG-198.md) | amd64 の kernel が上限 16 MiB の手前（余り約 440 KiB、.bss が 13.7 MiB） | reproduced（link） / resolved（2026-10-05、T1-192） | P1 2026-10-05 | overlay の inode の表を起動時の確保へ（P1 q764、余り 3.2 MiB 以上）、T1 の UEFI・BIOS の boot 待ち |
-| [BUG-199](bugs/BUG-199.md) | ws001 の overlay の host 試験が link できない（古い試験） | reproduced（host） / tracking | P1 2026-10-05 | WS001 の試験 |
+| [BUG-199](bugs/BUG-199.md) | ws001 の overlay の host 試験が link できない（古い試験） | reproduced（host） / closed の案（2026-10-31 q1761 P2: 参照の無い古い host 試験 3 つを削除） | P1 2026-10-05 | WS001 の試験 |
 | [BUG-200](bugs/BUG-200.md) | plan/ws081/tests/run-pdftouch.sh が壊れている（古い試験） | reproduced（host） / resolved | P2 2026-10-05 | ws131-p023 で直した、2026-10-08 ユーザー「解決でOK」 |
 | [BUG-201](bugs/BUG-201.md) | Windows の QEMU（Venus）で desktop がフリーズする | resolved（2026-10-08 夜 ユーザー「completedです」） | ユーザー 2026-10-05 夜 | 2026-10-08 ユーザー「保留」 |
 | [BUG-202](bugs/BUG-202.md) | 5330 の起動中の scheduler queue underflow / idle thread sleeps | reproduced（実機） / **resolved**（2026-10-06 実機の UAT で起動・使用でき fatal 無し） | ユーザー 2026-10-05〜06 | ws073-p055 / q779: LPSSのD0復帰10ms待ちをidleが実行。device discoveryを通常boot_workerへ移動（e093bebe）、main統合済み、amd64 warning/error 0。userのUAT待ち |

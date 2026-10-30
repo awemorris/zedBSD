@@ -40,14 +40,14 @@ aware VFS creation and `ws001-p023` for directory `fsync`.
 | Pre-merge q042 identifier | Test cases / executable evidence |
 | --- | --- |
 | `ws001-p015` (credential-aware VFS creation) | `credential-creation-request-host-test.mk` verifies the exact production authorization/parent-attribute locking boundary; `credential-vfs-qemu.mk` builds native UFS1, UFS2, tmpfs, FAT, and normal overlay-root credential/object probes; `fat-native-vfs-host-test.c` retains the exact FAT production-path regression |
-| `ws001-p016` (directory fsync) | `directory-fsync-host-test.mk` links the exact production VFS, UFS1/UFS2, and overlay directory-sync functions and deterministically checks explicit directory dispatch, UFS inode-before-device order, overlay upper-before-journal-before-mount order, and first-error propagation |
+| `ws001-p016` (directory fsync) | the host fixture was removed on 2026-10-31 (it no longer built: the UFS driver fragments it linked are gone); the q050 QEMU runner below remains |
 
 Canonical q050 completion extends those retained fixtures as follows:
 
 | Active Phase | Additional executable evidence |
 | --- | --- |
-| `ws001-p022` | `credential-vfs-ufs-socket-fault-host-test.mk` and `credential-vfs-overlay-fault-host-test.mk` link the exact production rollback paths; `credential-vfs-qemu.noct` drives the five-launch backend/reopen/remount matrix built by `credential-vfs-qemu.mk` |
-| `ws001-p023` | `directory-fsync-host-test.mk` also drives production UFS1/UFS2 namespace write/rollback cells; the shared q050 QEMU runner supplies abrupt-stop/remount durability evidence |
+| `ws001-p022` | `credential-vfs-qemu.noct` drives the five-launch backend/reopen/remount matrix built by `credential-vfs-qemu.mk` |
+| `ws001-p023` | the shared q050 QEMU runner supplies abrupt-stop/remount durability evidence |
 
 When a new Phase fixes a ledger item, add its normative case, failure case,
 executable path, and environment here before marking the row reviewed.
@@ -133,43 +133,11 @@ the pinned interpreter rejected. That was a separate `ws008-p010` blocker and
 was not evidence that guest acceptance passed. q050 used the subsequently
 restored runtime `--path=tools/build` contract and completed the guest matrix.
 
-## q042 pre-merge ws001-p016: directory fsync ordering
-
-[`directory-fsync-host-test.mk`](./directory-fsync-host-test.mk) builds five
-small host executables from the exact production functions.  It uses linker
-section collection to avoid substituting copied filesystem logic and makes
-only the private UFS/overlay sync entry points visible in the temporary object
-files.  Run it without the aggregate test target:
-
-```sh
-make -f plan/ws001/tests/directory-fsync-host-test.mk run
-```
-
-The VFS cell proves that a directory without an explicit operation returns
-`EOPNOTSUPP` without falling through to `inode_sync()`, while regular-file
-fallback remains unchanged.  The UFS cell proves inode persistence precedes
-the device flush and that either error is returned.  The overlay cell proves
-upper-directory sync, journal sync, and upper-mount sync order, including
-lower-only/read-only cases and independent failures at every boundary.
-
-This host fixture alone does not prove namespace survival across a real
-remount or a storage-device flush. q050 therefore adds the separate
-disposable-image/QEMU acceptance below; neither proof is inferred from the
-other.
-
 ## q050 canonical p022/p023 completion
 
-Run the deterministic fault and ordering matrix without the aggregate test
-target:
-
-```sh
-make -f plan/ws001/tests/credential-vfs-ufs-socket-fault-host-test.mk \
-    run sanitize analyze
-make -f plan/ws001/tests/credential-vfs-overlay-fault-host-test.mk \
-    run sanitize analyze
-make -f plan/ws001/tests/directory-fsync-host-test.mk \
-    run run-sanitize analyze
-```
+The host fault and ordering fixtures of p022/p023 (UFS socket, overlay and
+directory fsync) were removed on 2026-10-31: they no longer built against the
+current UFS and overlay sources.
 
 The QEMU runner makes all images in a private output directory and requires a
 path which does not yet exist:
@@ -190,11 +158,6 @@ representable root creation and explicit non-root rejection, and remounts the
 same image. Source images are hashed before and after and must remain
 unchanged. Historical guest markers use `WS001-P015` and map to canonical
 `ws001-p022`.
-
-The `analyze` targets analyze the programmable fixture translation unit, then
-link and execute it against ordinary-warning production objects. They are
-fixture-scoped analyzer evidence, not a claim that GCC's analyzer covered the
-entire production overlay/UFS translation units.
 
 ## 2026-09-27 からの utility の Phase（p024〜）
 
