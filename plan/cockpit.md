@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 13:10（Q1）
+最終更新: 2026-10-30 13:20（Q1）
 
 ## 担当（P1〜P8）
 
@@ -94,66 +94,9 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 
 | # | WS | 一行の問い |
 | --- | --- | --- |
-| 1 | WS309 Keiland の compositor の thread の整理 | **決定済み（2026-10-30）**: 1 は (a)・切り替えは compositor の都合、2〜4 は推し。次のセッションで p015 の実装へ |
-| 2 | BUG-364 GPU の fence の受け取り | **決定済み（2026-10-30）**: (A) どの GPU の fence も受ける今の動きを正とし、comment と header を直す |
-| 3 | WS328 libbrowser のベクトル描画と SVG（WS074 も Claude に移った） | WS328 と、Codex から移った WS074（Web ブラウザ）の、どちらをいつ始めるか |
+| 1 | WS328 libbrowser のベクトル描画と SVG（WS074 も Claude に移った） | WS328 と、Codex から移った WS074（Web ブラウザ）の、どちらをいつ始めるか |
 
-### 1. WS309: ゲームモードの V2 をどう作るか
-
-**背景**
-- WS309 は、Keiland（zedBSD のデスクトップ）の compositor の thread の構成を整理する WS。p001〜p014・p016〜p019 は済み、残りはこの p015 だけ。
-- **ゲームモード**は、全画面のゲームの画面を compositor が合成せず、そのまま画面に出す形。今は暫定で、compositor の画面の出力の係（T4 という thread）が、ゲームが描いた buffer を kernel の display の口（`GPU_DISPLAY_PRESENT`）で直に画面に出している。この直の口は Guardrail の例外として当面だけ許されている。
-- 正式な形は「Vulkan の仕様の中」で作る（2026-10-29 のユーザーの決定 8）。2026-10-29 にユーザーは 2 つの形から **V2** を選んだ:
-  - V1（copy）: compositor が、ゲームの buffer を自分の画面の画像へ毎 frame GPU で写してから出す。1080p で毎 frame 約 8 MB の写し。
-  - **V2（貸し出し）**: compositor が、画面に出す画像（swapchain の image）そのものをゲームに貸し、ゲームがそこに直に描く。写しが無いので速いが、Vulkan の標準に無い部分を足す必要がある。
-- 担当（P1）が V2 の作りを詰めたら、実装の前に決める事が 4 つ出た。
-
-**用語**
-- swapchain: 画面に出す画像を数枚まとめて持ち、順に描いて出すための Vulkan の仕組み。
-- WSI（Window System Integration）: Vulkan が窓や画面に絵を出す部分。libvulkan（zedBSD の Vulkan の library）の中の `wsi-wayland.c` が Wayland の窓用。
-- Wayland の protocol: app と compositor が話す約束事。private な protocol は zedBSD の中だけの約束事。
-- acquire・present: swapchain から空いた画像を受け取る事・描いた画像を画面に出す事。
-- fence: GPU の仕事が終わった事を知らせる印。
-- export・import: GPU の memory を他の process に渡す事・受け取る事（fd で渡す）。
-- Mesa: Linux・FreeBSD の標準の GPU の library。そこで動く app は zedBSD の libvulkan を使わない。
-
-**決める事と推し**
-
-1. **app 側の形** — **決定（2026-10-30 ユーザー）: (a)。全画面と窓の切り替えは compositor の都合で行い、app は気づかない。**
-   - (a)【推し・決定】libvulkan の Wayland の WSI が、ゲームモードの間だけ、compositor から借りた画像を swapchain の画像として使う。ゲームの app は今の Vulkan の書き方のまま、変更なし。
-   - (b) 新しい約束事を app が直に使う。mview などの app を書き直す。
-   - 推しの理由: Vulkan を OS の正式な口にする決定 8 の趣旨に合い、app を書き直さずに済む。得失: Linux・FreeBSD で動く app（Mesa を使う）は (a) の恩恵を受けず、今の暫定の経路に残る。
-2. **compositor と app の間に、新しい private な Wayland の protocol を作るか**（製品の判断）
-   - 運ぶ物: 貸す画像の fd・形式・枚数、「この画像が空いた」の知らせ（acquire・release）、app の描き終わりの fence。名前の案は `keiland_game_surface_v1`。
-   - 推し: 作る。(a) を選ぶなら、この約束事が無いと画像を貸せない。zedBSD の中だけの約束事なので、外の app には影響しない。
-3. **libvulkan が画像の memory を外に出す口**
-   - (a)【推し】標準の型の組み合わせで出す: swapchain を作る時に `VkExternalMemoryImageCreateInfo` を付けて受け、画像の memory を `vkGetMemoryFdKHR` で fd にする。この組み合わせは標準に書かれていないが、型は全部標準。
-   - (b) libvulkan に zedBSD 独自の関数を足す。
-   - 推しの理由: 独自の型を増やさない。費用: GPU の driver（venus・amdrdna・nvrtx・i915・mali・powervr）ごとに、swapchain の画像を外に出せる memory で作れるかの調べと直しが要る（他の担当の driver と重なるので Q1 が調整する）。
-4. **画像が画面から外れた事の知り方**
-   - 推し: 同じ画像を再び acquire できた事で知る（T4 が acquire を待つ）。Vulkan の present fence（`VK_EXT_swapchain_maintenance1`）は「present に使った資源を再び使ってよい」を示すだけで、画面から外れた事は示さないので使わない。
-
-**決定（2026-10-30 ユーザー）**: 1 は (a)（全画面と窓の切り替えは compositor の都合で、app は気づかない）、2〜4 は推しのとおり。p015 は planned に戻り、実装に入れる。
-
-### 2. BUG-364: display が別の GPU の fence を無条件に受けてよいか
-
-**背景**
-- 多くの板（Raspberry Pi、VisionFive 2、ODROID-C5）とノート PC（Intel の内蔵 GPU で画面、NVIDIA で描画）では、**画面を出す GPU（display）と描く GPU（render）が別の device**。zedBSD ではそれぞれ別の node（`/dev/gpu0`・`/dev/gpu1` など）になる。
-- compositor は render の GPU で描き、「描き終わり」の fence を付けて display の GPU に画面を出させる。display は、その別の GPU の fence を待ってから画面を切り替える。これが「別の GPU の fence」の場面。
-- kernel の source の comment は「display は、**承認した companion** の GPU の fence を受ける」と書くが、実際のコード（`gpu.c` の `gpu_fence_get`）は、fence がどの GPU の物かを一切比べず、どの GPU の fence でも受ける。WS009 の文書を書く途中（2026-10-30）で見つかった。
-
-**用語**
-- fence: GPU の仕事が終わった事を知らせる印。fd で他の process や他の GPU の node に渡せる。
-- companion（ここでの意味）: display の node が「自分と組む render の GPU はこれ」と示す相手。`struct gpu_device_info` の `companion_id` の欄で示す仕組みはあるが、今は **全部の driver が 0（組の指定なし）** を入れている。header は「0 は好みが無いだけで、共有できない証明ではない」と書く。
-- 承認: comment の言う「承認した」に当たる確かめは、コードのどこにも無い。
-
-**選択肢**
-- (A)【推し】どの GPU の fence も受ける今の動きを正しい設計とし、comment と header の文を直す。理由: fence は「待つ」だけで、相手の GPU の memory を読み書きしない（悪い fence で出来るのは画面の切り替えを遅らせる事くらいで、それは自分の app の画面だけ）。全部の driver が companion を 0 にしているので、(B) にすると今の Pi・VF2・C5 の画面の出し方が壊れる。ノート PC の Intel と NVIDIA の組のように、組が driver の外で決まる場合も受けられる。
-- (B) companion の組だけを受ける。各 driver に正しい companion_id を入れさせ、組でない GPU の fence は断る。費用: driver ごとの組の調べと実装、試験。得: 誤った組み合わせを早く断れる。
-
-**決定（2026-10-30 ユーザー）**: (A)。Q1 が `gpu.c` の 2 つの comment を「どの GPU の fence も受ける」に直して BUG-364 を閉じた（876b64d55、code は変えていない）。
-
-### 3. WS328: libbrowser のベクトル描画と SVG をいつ始めるか
+### 1. WS328: libbrowser のベクトル描画と SVG をいつ始めるか
 
 **背景**
 - WS074 は zedBSD の Web ブラウザ（libbrowser と Browser の app）を作る WS。これまで別の Codex のセッションが作っていたが、2026-10-30 にユーザーが Codex を解約し、**WS074 は Claude（Q1）の管理下に移った**。Codex との file の衝突の心配は無くなった。WS074 の Queue は Codex の解約で止まっていて、Q1 が担当を割り当て直す必要がある。
@@ -170,3 +113,11 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 - (C) 両方を並べて始め、Q1 が file の分担を決める（担当が 2 人要る）。
 
 **決まらない間**: WS328 は planning のまま、WS074 は止まったまま。
+
+## 決まった事
+
+| 日付 | WS | 決定 | 記録 |
+| --- | --- | --- | --- |
+| 2026-10-30 | WS309 compositor の thread の整理 | p015 ゲームモードの V2: 1 は (a)（app は変更なし、全画面と窓の切り替えは compositor の都合で app は気づかない）、2 は private な Wayland の protocol `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせで画像の memory を出す、4 は同じ画像の再 acquire で画面から外れた事を知る。p015 は planned に戻り、次のセッションで実装 | [ws309/ws.md](ws309/ws.md) |
+| 2026-10-30 | BUG-364 GPU の fence | (A) display はどの GPU の fence も受ける（今の動きを正とする）。Q1 が gpu.c の comment を直し、BUG-364 を閉じた（876b64d55） | [BUG-364](bugs/BUG-364.md) |
+| 2026-10-30 | WS074 Web ブラウザ | Codex を解約、WS074 は Claude（Q1）の管理下に | [ws074/ws.md](ws074/ws.md) |
