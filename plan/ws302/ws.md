@@ -2,8 +2,8 @@
 
 # WS302 デスクトップスレッドバランサ（DTB）
 
-- Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG006（グラフィカルな操作環境の応答）。Related: MG004、[WS301](../ws301/ws.md)（core の相対の性能・domain・topology、前提）。
-- Status: planning（2026-10-27 新設。計画だけ）
+- Master: [plan/master.md](../master.md)（2026-10-27 作成、q1615 P1 の計画）。Primary Milestone: MG006（グラフィカルな操作環境の応答）。Related: MG004、[WS333](../ws333/ws.md)（core の種類・相対の性能・topology の口、WS301 を統合。2026-10-31 に口は main に入った）。旧 [WS301](../ws301/ws.md) は WS333 に統合された。
+- Status: planning（2026-10-27 新設。2026-10-31 P5 q1775-i01: p001 の設計 [design.md](design.md) 第 1 版と問い [user-questions.md](user-questions.md)、ユーザーの答え待ち）
 - 出典: 2026-10-27 ユーザー
   「デスクトップスレッドバランサの追加（WSを立てて検討）
   - コンフィグで有効にできるデスクトップスレッドバランサ(DTB)をカーネルに追加
@@ -36,13 +36,13 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
   syscall の数・最後の syscall の時刻・自発／非自発の切り替え・wake の数は無い（`ru_nvcsw`・`ru_nivcsw` は宣言だけ）。足す所は `syscall_dispatch_body`（syscall.c:9796、main 61630bb0b）、`sched_wakeup`・`sched_yield`・`switch_without_enqueue`。
 - HID: `src/drivers/generic/input.c` に kernel の購読の口 `drv_input_subscribe`（:1517、最大 8、今は console だけ）。数・最後の入力の時刻は無い。
 - GPU: `/dev/gpuN` の `struct gpu_session`（`src/drivers/gpu/gpu.c:219`）に process ごとの使用量は無い。device ごとの `hw.gputelemetry`（busy_ns など）だけ。
-- core の性能・topology の口は無い → [WS333](../ws333/ws.md)（WS301 を統合した WS）が作る。
+- core の性能・topology の口は無い → [WS333](../ws333/ws.md)（WS301 を統合した WS）が作る。（2026-10-31 追記: 口は main に入った。design.md §2.5）
 
 ## 範囲
 
 - 含む: 「どの情報からどんな balancing ができるか」の検討（p001、ユーザーの「まず」）、nice を sched の priority に効かせる事（2026-10-27 09:39 ユーザーの決定、上の原文）、sched への依頼の口（hint、走っている thread の安全な点での移動）、
   統計の追加（thread・HID・GPU）、DTB の本体（周期の評価・分類・hint・履歴の幅）、config、観察の道具、5330 の評価。
-- 含まない: sched の作り直し（hint を受ける最小の変更だけ）、DVFS の policy（WS301）、他の機種の評価（hybrid でない機械では「速い core」が無い。電力の寄せ方だけ後で）。
+- 含まない: sched の作り直し（hint を受ける最小の変更だけ）、DVFS の policy（WS301、今は WS333）、他の機種の評価（hybrid でない機械では「速い core」が無い。電力の寄せ方だけ後で）。
 
 ## 検討の骨組み（p001 で埋める表の案）
 
@@ -74,30 +74,31 @@ sched に core の種類の希望（hint）を出し、DTB を切った時に比
 4. `CONFIG_DTB=n` で今の動きと同じ（統計の追加の負担は測って小さい事を示す）。build warning 0（全 platform）、`boot-test.sh` の回帰（T）。
 5. 規約の全文と文書。
 
-## Phase の案と見積もり（LW、±50%）
+## Phase（本体は [design.md](design.md) §7、±50%、2026-10-31 P5 で書き直した）
 
-| Phase | 内容 | 依存 | LW |
-| --- | --- | --- | --- |
-| p001 | 検討と設計: 上の表を 5330 の実測（今の sched での P/E への散り方、各情報が取れるか）で埋め、衝突の規則・物差し・sched と DTB の口・統計の追加の場所と負担・config、design-reviewer、ユーザーの review | WS301 p001（API の形） | 6 |
-| p002 | sched の口: thread ごとの core の種類の希望（強さ付き）、走っている thread の安全な点での移動、配置と盗みで希望と core の性能を見る | p001、WS301 p002 | 6 |
-| p003 | 統計: thread ごと（実行の時間、syscall の数と最後の時刻、自発／非自発の切り替え、wake）、GPU の session ごとの submit と busy、HID の最後の入力と頻度 | p001 | 5 |
-| p004 | DTB の本体（`CONFIG_DTB`、周期の評価、分類、hint、履歴の幅、観察の道具） | p002、p003、WS301 p004 | 6 |
-| p005 | compositor の focus の hint（D4 で採る時だけ、UAPI の決定の後） | p004 | 3 |
-| p006 | 5330 の評価（on・off の比較の script）と閾値の調整 | p004 | 4 |
-| p007 | 規約の全文の見直しと文書 | p006 | 2 |
+| Phase | 内容 | 状態 | 依存 | LW |
+| --- | --- | --- | --- | --- |
+| [p001](phase001/phase.md) | 検討と設計: 情報 → 性質 → hint の表、規則の強さの順、sched の口、統計の場所と負担、config、試験と受け入れ、design-reviewer、ユーザーの問い | in-progress（設計と review の反映は済み、ユーザーの答え待ち） | — | — |
+| p002 | config（`CONFIG_DTB`・`CONFIG_DTB_TEST`）、`dtb.h`・`sched-hint.h` の型、統計（thread の計数・syscall の入口・tick・wakeup、process の GPU と表示の時刻、gpu.c・input.c の通知） | planned | p001 | 3 |
+| p003 | sched の口: base の priority と `sched_hint_set`、CPU の種類の表、行き先の選び、置き場所・盗み・tick の助け、`sched_hint_place`、走っている thread の手渡し、飢えの防ぎ、計数 | planned | p002 | 6 |
+| p004 | DTB の本体（dtb.c・dtb-policy.c、分類・履歴・nice の段・HID の状態・周期・予算、`dtb=off`、試験の偽の種類と stress、`kern.dtb`） | planned | p003、Q302-1〜3・5・6 | 6 |
+| p005 | （条件つき）compositor からの前面の app の hint（Q302-4 で作る時か、p006 の数で要る時だけ） | — | p004、UAPI の決定 | 3 |
+| p006 | 5330 の評価（on・off の比べの 1 本の script）と閾値の調整 | planned | p004、WS333 p011・p013（電力の meter と相対の性能）、5330 の割当 | 4 |
+| p007 | 規約の全文の見直しと文書 | planned | p006 | 2 |
 
-合計 約 32 LW（p005 を採らなければ 29）。
+合計 約 21 LW（p005 を立てれば 24）。旧い表（約 32 LW、WS301 の Phase に依存）は git の履歴にある。
 
 ## 判断が要る点
 
 - D1: 決定済み（2026-10-27 09:39 ユーザー（クリック）「CONFIG_DTB の既定は off」、上の原文）。
-- D2: 規則の強さの順（nice・GPU・tty・長い計算）。P-core が 2 つ（4 thread）しかない 5330 で、GPU の app と terminal の app が競う時。
-- D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。
-- D4: 前面の app を kernel が知る口（compositor からの focus の hint の UAPI）を作るか。作らなければ HID は「人が操作中か」だけに使う。
-- D5: 統計の追加（syscall の数と時刻）を DTB が off の時も常に取るか（負担の数を p001 で示す）。
+- D2: → Q302-1（推し: nice → 忙しい計算 → 画面を作る process → GPU の app → terminal）と Q302-2（忙しい計算の空いた P への溢れ）。
+- D3: 決定済み（2026-10-27 09:39 ユーザー（クリック）「nice は core の選択に加えて sched の priority にも効かせる」、上の原文）。今は sched が nice を読まない（survey-source.md §2）ので、飢えを防ぐ対応（段か重みか上限か）は p001 の設計で決める。→ 段と 100 ms の飢えの防ぎ（design.md §4.7）、段の幅と on の時だけにするかは Q302-3。
+- D4: → Q302-4（推し: v1 では作らず、p006 の数で要れば条件つきの p005）。
+- D5: → Q302-5（推し: `CONFIG_DTB=y` の build の時だけ取る）。
+- 新: Q302-6（観察の読みだけの UAPI `kern.dtb`）、Q302-7（受け入れの数、design.md §6.4）。
 
-## 再開点（2026-10-29 P5、q1666）
+## 再開点（2026-10-31 P5、q1775-i01）
 
-
-
-- source の棚卸し [survey-source.md](survey-source.md)（Opus の調べ、Q1 の指示で止めた。未調査は §7）。§0 の ws.md の食い違い（:21 の決定と :45・:64・:93・:95）は Q1 の確かめの後に直す。再開は p001 の設計（WS301 p001 の後、WS309 の thread の種類と合わせる）。
+- p001 の設計 [design.md](design.md) 第 1 版（main 3d820d9ca の code で書いた）、header の案 [proposed/include/kern/](proposed/include/kern/)（`sched-hint.h`・`dtb.h`）、問い [user-questions.md](user-questions.md)（Q302-1〜7）、review [design-review.md](design-review.md)。HAL は変えない（design.md §5）。
+- 次: ユーザーの答え。p002・p003 は答えを待たずに始められる（Q1 が Queue を立てる）。p004 は Q302-1〜3・5・6 の答えの後。
+- 前の再開点（2026-10-29）の source の棚卸し [survey-source.md](survey-source.md) は design.md §2.8 で引き直した。§0 の ws.md の食い違いは既に直っていた。
