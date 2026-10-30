@@ -27,7 +27,7 @@ A job is in one of three states. A fourth case, no record, is what remains when 
 | `GPU_JOB_RESERVE` succeeds | no record | reserved | A new `sequence`, the reservation deadline, and the fence bound to it when `fd` was given. |
 | `GPU_JOB_RESERVE` fails | no record | no record | No record and no deadline. The `sequence` field of the caller's structure may already hold a number, which names nothing (see the request). |
 | `GPU_JOB_COMMIT` succeeds | reserved | committed | The execution deadline replaces the reservation deadline, and the fence becomes eligible as a dependency of the kernel's `*_SYNC` requests. |
-| `GPU_JOB_COMMIT` fails in the fence transition or in the driver | reserved | finished, if the driver then accepts a fault cancel; otherwise reserved | The kernel treats the native work as possibly started. The open fails with `EIO` ([session failure](gpu-submission.md#session-failure-and-recovery)); the record is terminal with the open's errno. |
+| `GPU_JOB_COMMIT` fails after the reservation check (the job, the open or the device ended meanwhile, the fence refuses the transition, or the driver refuses to publish) | reserved | finished, if the driver then accepts a fault cancel; otherwise reserved | The kernel treats the native work as possibly started. When the driver accepts the fault cancel, the open fails with `EIO` ([session failure](gpu-submission.md#session-failure-and-recovery)) and the record is terminal with the open's errno. |
 | `GPU_JOB_CANCEL` with flags zero succeeds | reserved | no record | The record is discarded. The fence, if any, stays pending and is unbound, and its generation is unchanged. The sequence names nothing. |
 | `GPU_JOB_CANCEL` with `GPU_JOB_CANCEL_FAULT` succeeds | reserved or committed | finished | The open fails with `EIO` (or keeps an errno it had already recorded). All records of the open that the driver still owns become terminal with the open's errno, and the fences bound to them are signaled with it. |
 | The driver reports completion | committed | finished | `status` is zero for success, or the errno the driver reported. A fence bound to the job is signaled with the same result, success included. A completion that reports success while the job is still reserved is recorded as `EIO`. |
@@ -53,7 +53,7 @@ The first failure of an open decides the `status` of every record it ends. When 
 
 ##### Supervision
 
-The kernel runs one supervisor per device, started by the first reservation on it, so the deadlines are enforced even when no client is running. Three intervals are fixed when the kernel is built and cannot be extended by a client. `GPU_JOB_POLICY` reports them in nanoseconds.
+The kernel runs one supervisor per device, started by the first reservation on it (or by the close of an open, when the driver can be asked to stop native work), so the deadlines are enforced even when no client is running. Three intervals are fixed when the kernel is built and cannot be extended by a client. `GPU_JOB_POLICY` reports them in nanoseconds.
 
 | Interval | Build setting | Default | Armed when | If it expires |
 | --- | --- | --- | --- | --- |
@@ -72,7 +72,7 @@ Capacity is what lets a producer reserve without blocking. `GPU_JOB_CAPACITY` ha
 - QUERY (`GPU_JOB_CAPACITY_QUERY` in `flags`) returns at once with the node's current capacity sequence and whether a reservation would find room now.
 - WAIT (`flags` zero; there is no macro for it) takes a sequence that an earlier call returned and waits for something to change. It returns when the capacity sequence differs from the one given, or when there is room now.
 
-The capacity sequence belongs to the node and is shared by all its opens. It starts at one. It advances when a record of any open retires or is consumed, when a reservation is cancelled, when an open or the device fails or recovers, and when the driver reports a change of its own capacity. It never wraps: when it reaches the largest value the request fails with `EOVERFLOW`. Room means that the driver reports capacity in the requested domain and that the calling open has a free record in its pool of `GPU_SUBMIT_MAX`. Terminal records that are not consumed do not make a repeated wait return by themselves.
+The capacity sequence belongs to the node and is shared by all its opens. It starts at one. It advances when a record of any open retires or is consumed, when a reservation is cancelled, when an open or the device fails or recovers, and when the driver reports a change of its own capacity. It never wraps: once a change would advance it past its largest value, every later `GPU_JOB_CAPACITY` on the node fails with `EOVERFLOW`. Room means that the driver reports capacity in the requested domain and that the calling open has a free record in its pool of `GPU_SUBMIT_MAX`. Terminal records that are not consumed do not make a repeated wait return by themselves.
 
 `available` in the answer is only a hint: it is 1 when there was room at the moment of the call and 0 otherwise, and another caller can take the room before the producer reserves. A producer follows this order: observe with QUERY, consume the terminal records it can, try `GPU_JOB_RESERVE`; when that returns `EAGAIN`, wait with the sequence from the observation, and start again. `GPU_JOB_RESERVE` returns `EAGAIN` when the open has no free record, when it has no free slot for another bound fence (at most `GPU_SUBMIT_MAX` bound at a time), or when the driver has no capacity in the domain.
 
@@ -119,7 +119,7 @@ Tells the kernel that the native work was accepted by the hardware and publishes
 
 The request does not run under the open's admission and does not write to the caller's structure.
 
-If the commit fails after the kernel has checked that the job is reserved (the fence refuses the transition, or the driver refuses to publish), the native work may already exist. The kernel then does not roll the job back: it asks the driver to cancel the job as a fault, and when the driver accepts, the open fails with `EIO` and the job becomes terminal with the open's errno. The request still returns the error that stopped the commit. When the driver refuses the fault cancel too, the job stays reserved and the caller sees the original error.
+If the commit fails after the kernel has checked that the job is reserved (the job, the open or the device ended in between, the fence refuses the transition, or the driver refuses to publish), the native work may already exist. The kernel then does not roll the job back: it asks the driver to cancel the job as a fault, and when the driver accepts, the open fails with `EIO` and the job becomes terminal with the open's errno. The request still returns the error that stopped the commit. When the driver refuses the fault cancel too, the job stays reserved and the caller sees the original error.
 
 Errors:
 
@@ -131,7 +131,7 @@ Errors:
 - `EBUSY`: another job request of this open is still working on the same record.
 - `EOVERFLOW`: the record already has the largest possible number of observers.
 - `EALREADY`: the job is already committed, or it is finished with `status` zero.
-- `ENODEV`: the job was ended, or the device was withdrawn or failed, between the check and the commit.
+- `ENODEV`: the job was ended, this open failed, or the device was withdrawn or failed, between the check and the commit.
 - `ESTALE` and `EPERM`: the fence's generation changed (it was reset) or the fence is no longer owned by this job.
 - `ETIMEDOUT`, `EIO` and the other errno values that a failure can record: the job is already finished with a failure, and the request returns the record's `status` (the open's recorded errno).
 - Other values: the driver's commit operation returns its own errno unchanged; the Venus driver answers `ESTALE` for a token that is no longer reserved and `ENODEV` when its transport has failed or is shutting down.
@@ -183,7 +183,7 @@ Errors:
 - `EOPNOTSUPP`: the node does not offer `GPU_CAP_JOB_CAPACITY`.
 - `EFAULT`: the argument cannot be read, or the result cannot be written back (observation does not consume anything).
 - `EINVAL`: `version` is not `GPU_ABI_VERSION` or `size` is not the structure size; `flags` has a bit other than `GPU_JOB_CAPACITY_QUERY`; `sequence`, `available` or `reserved` is not zero; QUERY with a non-zero `observed_sequence` or `timeout_ns`; WAIT with a zero `observed_sequence`, or one larger than the node's current sequence.
-- `EOVERFLOW`: `timeout_ns` is so large that the deadline cannot be represented, or the capacity sequence reached its largest value.
+- `EOVERFLOW`: `timeout_ns` is so large that the deadline cannot be represented, or the capacity sequence could not advance past its largest value.
 - `ENODEV`: the device was withdrawn, or the device or this open failed with `ENODEV`.
 - `EIO`: the device or this open has failed and the recorded errno is returned (`EIO` and `ETIMEDOUT` are values the kernel itself records; a driver can record others).
 - `EAGAIN`: WAIT with `timeout_ns` zero and no change.

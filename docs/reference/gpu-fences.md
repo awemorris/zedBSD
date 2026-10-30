@@ -53,10 +53,10 @@ The six fence requests and the two `_SYNC` requests need `GPU_CAP_FENCE`; withou
 The request proceeds in this order:
 
 1. The nested header and the shape of the signal pair are checked, so a malformed pair fails before any wait; then the signal descriptor is resolved and pinned.
-2. The prerequisite (`wait_fd` and `wait_generation`; a malformed pair fails with `EINVAL`) is waited for, before the open's admission is taken and before anything is queued or shown. A prerequisite that is terminal does not wait: `GPU_FENCE_SIGNALED` lets the request go on, and `GPU_FENCE_ERROR` ends it at once with the fence's `error` as the errno, so that failed work is never followed by work that depends on it; nothing is submitted. A prerequisite that is still pending is waited for only when a driver has accepted responsibility for completing it (a generation that a committed job owns, see [jobs](gpu-jobs.md)); the wait is interruptible (`EINTR`) and has no timeout. A pending generation that no job owns, in particular one bound with `GPU_FENCE_BIND`, fails with `EAGAIN` at once, because the kernel does not wait for a program to signal future work. If the fence is reset while the request waits, it fails with `ESTALE`.
+2. The prerequisite (`wait_fd` and `wait_generation`; a malformed pair fails with `EINVAL`) is waited for, before the open's admission is taken and before anything is queued or shown. A prerequisite that is terminal does not wait: `GPU_FENCE_SIGNALED` lets the request go on, and `GPU_FENCE_ERROR` ends it at once with the fence's `error` as the errno, so that failed work is never followed by work that depends on it; nothing is submitted. A prerequisite that is still pending is waited for only when a driver has accepted responsibility for completing it (a generation that a committed job owns, see [jobs](gpu-jobs.md)); the wait is interruptible (`EINTR`) and has no timeout. A pending generation that no committed job owns, in particular one bound with `GPU_FENCE_BIND` or one whose job is still only reserved, fails with `EAGAIN` at once, because the kernel does not wait for a program to signal future work. If the fence is reset while the request waits, it fails with `ESTALE`.
 3. The completion target (`signal_fd` and `signal_generation`) is bound to the calling open before the nested request runs, so that closing the open always ends the target.
 4. The nested submission or present runs under the open's admission, with the validation and errors of `GPU_COMMAND_SUBMIT` ([submission](gpu-submission.md)) or `GPU_DISPLAY_PRESENT` ([display](gpu-display.md)).
-5. If the nested request fails, the outcome of the target depends on the request. A failed command releases the binding, and the target stays pending and unbound. A failed present ends the target in `GPU_FENCE_ERROR` with the errno that the present returned. If the open's admission fails before the nested request runs, the binding is released in both cases and the target stays pending and unbound.
+5. If the nested request fails, the outcome of the target depends on the request. A failed command releases the binding, and the target stays pending and unbound. A failed present ends the target in `GPU_FENCE_ERROR` with the errno that the present returned. If the open's admission fails before the nested request runs, the binding is released in both cases and the target stays pending and unbound. The exception is a failure of the open or the device while the target is bound: the kernel then ends the target with the recorded errno itself, as for any binding of the open, and the release leaves it in `GPU_FENCE_ERROR`.
 
 What the target means after a success differs. For `GPU_COMMAND_SUBMIT_SYNC` the target is associated with the accepted completion record (`command.sequence`), and only a failure of that record signals it, as described under binding. Success is not signaled by the kernel: the program signals `GPU_FENCE_SIGNAL` with `error` zero after it has observed the work succeed. For `GPU_DISPLAY_PRESENT_SYNC` the target is signaled by the request itself when it returns: `GPU_FENCE_SIGNALED` after the present was selected for display, which is the same boundary as a plain `GPU_DISPLAY_PRESENT` and not the physical refresh. A queue notification never replaces a verified `GPU_FENCE_SIGNAL`.
 
@@ -161,7 +161,7 @@ Errors:
 - `EBADF`: `fd` is not an open descriptor of the calling process, or is not a kernel handle descriptor of the driver kind (an ordinary file, for example).
 - `EXDEV`: the fence belongs to another device.
 - `EPERM`: this open holds no binding for this fence and generation (it was never bound, was bound by another open, or was ended by an earlier `GPU_FENCE_SIGNAL` or release); the binding belongs to a job; or the kernel had already ended the generation with a failure, so that this open no longer owns it.
-- `ESTALE`: this open still holds a binding for `generation`, but the kernel had ended that generation with a failure and the fence has since been reset to a later one.
+- `ESTALE`: this open still holds a binding for `generation`, but the kernel had ended that generation with a failure and the fence has since been reset to a later one; or the signal took effect and another thread reset the fence before the reply was read (the generation is then ended, but the reply is not written).
 - Other values: none. The request does not call the driver, and every errno comes from the checks above.
 
 Sources: [gpu-fence.h](../../include/uapi/gpu-fence.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_fence_ioctl`, `gpu_fence_state_ioctl`, `gpu_fence_binding_end`), [gpu-fence.c](../../src/drivers/gpu/gpu-fence.c) (`drv_gpu_fence_signal_deferred`), [main.c](../../userland/tests/acquire-fence/main.c).
@@ -183,7 +183,7 @@ Errors:
 - `ENODEV`: the device was withdrawn or has a recorded failure (binding only).
 - `ENOENT`: `sequence` is not zero and names no completion record of this open that is still listed (binding only).
 - `EAGAIN`: the open already holds `GPU_SUBMIT_MAX` bindings (binding only).
-- `ESTALE`: `generation` is not the current generation.
+- `ESTALE`: binding: `generation` is not the current generation. Release: this open still holds a binding for `generation`, but the kernel had ended that generation with a failure and the fence has since been reset.
 - `EBUSY`: binding: the generation already has an owner or is no longer pending. Release: the binding was made with a non-zero `sequence`.
 - `EPERM`: release only: this open holds no binding for this fence and generation, the binding belongs to a job, or the generation had already ended.
 - Other values: none. The request does not call the driver, and every errno comes from the checks above.
@@ -196,7 +196,7 @@ Requires: open mode W; capability `GPU_CAP_FENCE` and `GPU_CAP_NOTIFICATION`.
 
 Submits one command like `GPU_COMMAND_SUBMIT`, after waiting for an optional prerequisite fence and with an optional fence as the completion target. The outer structure has no `version` or `size`; the nested `command` carries `version` `GPU_ABI_VERSION` and `size` equal to `sizeof(struct gpu_command_submit)` (40), and all of its other fields are those of `GPU_COMMAND_SUBMIT` ([submission](gpu-submission.md)). `wait_fd` and `wait_generation` name the prerequisite; `signal_fd` and `signal_generation` name the target; an absent one is `-1` with generation zero. The order of the steps, what a prerequisite in each state does, and what happens to the target are in Fence model, Dependencies in the `_SYNC` requests.
 
-On success `command.sequence` names the accepted completion record, as for `GPU_COMMAND_SUBMIT`; a target is then associated with that record, and the program observes the work with `GPU_COMMAND_WAIT` and signals the target itself after it has verified success. On failure the target is left pending and unbound, `command.sequence` may hold a number that names nothing, and nothing was submitted if the failure came from the prerequisite.
+On success `command.sequence` names the accepted completion record, as for `GPU_COMMAND_SUBMIT`; a target is then associated with that record, and the program observes the work with `GPU_COMMAND_WAIT` and signals the target itself after it has verified success. On failure the request keeps no binding: a target it had bound is released and stays pending (unless a failure of the open or the device ended it first, see Fence model), `command.sequence` may hold a number that names nothing, and nothing was submitted if the failure came from the prerequisite.
 
 Errors:
 
@@ -209,7 +209,7 @@ Errors:
 - `EXDEV`: the wait fence or the signal fence belongs to another device.
 - `ESTALE`: `signal_generation` is not the current generation of the signal fence; or `wait_generation` is not the current generation of the wait fence, or the wait fence was reset during the wait.
 - `EBUSY`: the signal generation already has an owner or is no longer pending.
-- `EAGAIN`: the wait fence is pending and no job owns it; or the open already holds `GPU_SUBMIT_MAX` bindings; or all `GPU_SUBMIT_MAX` completion records of the open are in use.
+- `EAGAIN`: the wait fence is pending and no committed job owns it; or the open already holds `GPU_SUBMIT_MAX` bindings; or all `GPU_SUBMIT_MAX` completion records of the open are in use.
 - `EINTR`: a signal arrived while the request waited for the prerequisite or for the open's admission.
 - `ENODEV`: the device was withdrawn or has a recorded failure, or the open failed with `ENODEV`.
 - `EIO`: the open or the device failed and the recorded errno is returned (`EIO` and `ETIMEDOUT` are values the kernel itself records; a driver can record others, see [submission](gpu-submission.md)).
@@ -236,10 +236,11 @@ Errors:
 - `EXDEV`: the signal fence belongs to another device.
 - `ESTALE`: `signal_generation` is not the current generation of the signal fence; or `wait_generation` is not the current generation of the wait fence, or the wait fence was reset during the wait.
 - `EBUSY`: the signal generation already has an owner or is no longer pending.
-- `EAGAIN`: the wait fence is pending and no job owns it; or the open already holds `GPU_SUBMIT_MAX` bindings.
+- `EAGAIN`: the wait fence is pending and no committed job owns it; or the open already holds `GPU_SUBMIT_MAX` bindings.
 - `EINTR`: a signal arrived while the request waited for the prerequisite or for the open's admission.
 - `ENODEV`: the device was withdrawn or has a recorded failure, or the open failed with `ENODEV`.
 - `EIO`: the open or the device failed and the recorded errno is returned, or the driver reported success with a zero `sequence`.
+- `EPERM`: the present succeeded, but a failure of the open or the device had already ended the target with the recorded errno, so the request could not signal it.
 - Any positive errno value: the wait fence ended in `GPU_FENCE_ERROR`; the request returns that fence's `error` and the frame is not presented.
 - Other values: the driver's present operation answers pass through unchanged, as for `GPU_DISPLAY_PRESENT` (for example `ENXIO` for an output that is not connected, `EBUSY` for a lease that is not this open's, `ETIMEDOUT` for an adoption that did not come). When the present itself fails after the target was bound, the target is signaled `GPU_FENCE_ERROR` with the same errno.
 

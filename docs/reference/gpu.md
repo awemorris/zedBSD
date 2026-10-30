@@ -382,8 +382,11 @@ the open file description, and the final close runs after it returns.
 
 **Closing.** When the last reference to the open file description goes away,
 the kernel closes the open. It stops new work from the open, withdraws job
-reservations that were never committed, lets committed jobs finish, and signals
-the failure `ENODEV` on any fence the open still has bound after that. It then
+reservations that were never committed and lets committed jobs finish. Every
+fence the open has bound ends with the open's recorded error (`ENODEV` when the
+open had not failed before), except a fence that a still running committed job
+owns, which that job signals when it finishes; a fence still bound after that
+ends with `ENODEV`. It then
 destroys every resource of the open and closes the driver's session. A display
 lease that the open held ends with it, and a claimed lease keeps the keyboard
 from the text console until the lease is released or the open is closed. The
