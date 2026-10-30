@@ -90,6 +90,9 @@ static struct bcm2711_native_storage *find_program(const struct bcm2711_vulkan_n
 static int prepare_programs(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, struct bcm2711_native_shader *shader);
 static int prepare_records(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, const struct bcm2711_native_shader *shader);
 static int prepare_fetch(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, struct bcm2711_native_attribute attributes[BCM2711_VULKAN_VERTEX_ATTRIBUTES]);
+static int prepare_indices(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event);
+static int direct_fetch(const struct bcm2711_vulkan_prepared_event *event, uint32_t location, uint32_t components, struct bcm2711_native_attribute *attribute);
+static int pack_fetch(struct bcm2711_vulkan_native_draw *draw, const struct bcm2711_vulkan_prepared_event *event, uint64_t available, const uint32_t *locations, const uint32_t *widths, uint32_t count, struct bcm2711_native_attribute attributes[BCM2711_VULKAN_VERTEX_ATTRIBUTES]);
 static int resolve_fetch(const struct bcm2711_vulkan_prepared_event *event, uint32_t location, uint32_t components, struct native_fetch *fetch);
 static int format_components(VkFormat format, uint32_t *components);
 static void write_word(uint8_t *destination, uint32_t word);
@@ -129,10 +132,9 @@ bcm2711_vulkan_native_draw_create(
 	    event == NULL ||
 	    event->pipeline == NULL)
 		return EINVAL;
-	if (event->opcode != GPU_OP_CMD_DRAW ||
-	    event->draw[0] == 0 ||
-	    event->draw[1] != 1 ||
-	    event->draw[3] != 0)
+	if (event->opcode != GPU_OP_CMD_DRAW && event->opcode != GPU_OP_CMD_DRAW_INDEXED)
+		return EINVAL;
+	if (event->draw[0] == 0 || event->draw[1] == 0)
 		return EINVAL;
 
 	/* One finite job-wide budget prevents independent draws from bypassing the total native staging bound. */
@@ -151,6 +153,13 @@ bcm2711_vulkan_native_draw_create(
 	created->space = space;
 	created->earlier = earlier;
 	created->vertices = event->draw[0];
+	created->instances = event->draw[1];
+	created->first = event->draw[2];
+	created->base_instance = event->draw[3];
+	if (event->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		created->base_vertex = event->draw[3];
+		created->base_instance = event->draw[4];
+	}
 	kern_memset(&shader, 0, sizeof(shader));
 
 	/* Real IDENT1 determines available VPM; native encoders reject insufficient capacity without launching. */
@@ -819,7 +828,15 @@ prepare_records(
 	return 0;
 }
 
-/* Packs canonical float inputs once, supplying missing format components and rebasing the copied first vertex to zero. */
+/*
+ * Describes the attribute fetch of one draw's shader inputs.
+ *
+ * A user draw's hardware reads each location in place from its vertex
+ * buffer: address, stride and per-instance divisor go into the attribute
+ * record, so no vertex is copied.  A location the hardware cannot read so,
+ * and the private meta quad, take the packed copy instead, which only a
+ * single-instance vertex array can use.
+ */
 static int
 prepare_fetch(
 	struct bcm2711_vulkan_native_draw *draw,
@@ -829,23 +846,17 @@ prepare_fetch(
 {
 	const struct bcm2711_shader_binary *coordinate;
 	const struct bcm2711_shader_binary *vertex;
-	struct native_fetch fetch[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
-	uint32_t fetched;
-	uint8_t *destination;
-	const uint8_t *source;
-	uint64_t bytes;
+	uint32_t locations[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
+	uint32_t widths[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
 	uint32_t input;
 	uint32_t location;
 	uint32_t components;
 	uint32_t count;
-	uint32_t stride;
-	uint32_t item;
-	uint32_t scalar;
 	uint32_t index;
-	uint32_t offset;
+	bool direct;
 	int error;
 
-	/* Current native variants use one identical canonical input FIFO; differing metadata cannot share this fetch packing. */
+	/* Current native variants use one identical canonical input FIFO; differing metadata cannot share this fetch. */
 	coordinate = event->pipeline->programs[BCM2711_SHADER_COORDINATE];
 	vertex = event->pipeline->programs[BCM2711_SHADER_VERTEX];
 	if (coordinate->input_count != vertex->input_count || vertex->input_count > BCM2711_SHADER_INTERFACE_WORDS)
@@ -856,7 +867,6 @@ prepare_fetch(
 	}
 
 	/* Shader locations are ascending and every declared component is a leading consecutive scalar. */
-	kern_memset(fetch, 0, sizeof(fetch));
 	count = 0;
 	input = 0;
 	while (input < vertex->input_count) {
@@ -872,16 +882,235 @@ prepare_fetch(
 			components++;
 			input++;
 		}
-
-		/* Resolve complete logical source intervals before any packed GPU input can be published. */
-		error = resolve_fetch(event, location, components, &fetch[count]);
-		if (error != 0)
-			return error;
+		locations[count] = location;
+		widths[count] = components;
 		count++;
 	}
 
+	/* An indexed draw's indices are read in place as well. */
+	if (event->opcode == GPU_OP_CMD_DRAW_INDEXED) {
+		error = prepare_indices(draw, event);
+		if (error != 0)
+			return error;
+	}
+
+	/* Each location of a user draw is read in place unless one of them cannot be. */
+	direct = false;
+	if (event->meta == NULL)
+		direct = true;
+	for (index = 0; index < count && direct; index++) {
+		error = direct_fetch(event, locations[index], widths[index], &attributes[index]);
+		if (error == ENOTSUP) {
+			direct = false;
+		} else if (error != 0) {
+			return error;
+		}
+	}
+
+	/* The hardware reads every location in place. */
+	if (direct) {
+		draw->attributes = count;
+
+		/* Succeeded: every attribute record points into its vertex buffer. */
+		return 0;
+	}
+
+	/* The packed copy holds one instance of a vertex array only. */
+	if (event->opcode != GPU_OP_CMD_DRAW || draw->instances != 1 || draw->base_instance != 0)
+		return ENOTSUP;
+	kern_memset(attributes, 0, sizeof(*attributes) * BCM2711_VULKAN_VERTEX_ATTRIBUTES);
+	error = pack_fetch(draw, event, available, locations, widths, count, attributes);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: every attribute record points into the draw's packed copy. */
+	return 0;
+}
+
+/*
+ * Resolves an indexed draw's index buffer to the interval the hardware
+ * reads: from the bound offset to the end of the buffer, the first index
+ * as a byte offset into it.  Recording checked that the drawn indices lie
+ * inside the buffer.
+ */
+static int
+prepare_indices(
+	struct bcm2711_vulkan_native_draw *draw,
+	const struct bcm2711_vulkan_prepared_event *event)
+{
+	struct bcm2711_vulkan_resource *resource;
+	struct bcm2711_v3d_view *view;
+	void *cpu;
+	uint64_t bytes;
+	uint64_t first;
+	uint32_t address;
+	int error;
+
+	/* The retained index buffer and its type, 16 or 32 bits. */
+	resource = event->indices;
+	if (resource == NULL || event->index_offset >= resource->bytes)
+		return EINVAL;
+	draw->index_size = 2U;
+	if (event->index_type == VK_INDEX_TYPE_UINT32)
+		draw->index_size = 4U;
+
+	/* The interval from the bound offset to the end of the buffer, in current storage. */
+	bytes = resource->bytes - event->index_offset;
+	if (bytes > 0xffffffffU)
+		return EINVAL;
+	error = bcm2711_vulkan_resource_backing(resource, event->index_offset, bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+
+	/* The first index is a byte offset inside that interval. */
+	first = (uint64_t)event->draw[2] * draw->index_size;
+	if (first > bytes)
+		return EINVAL;
+	draw->indexed = 1;
+	draw->index_address = address;
+	draw->index_bytes = (uint32_t)bytes;
+	draw->first = (uint32_t)first;
+
+	/* Succeeded: the hardware reads the draw's indices in place. */
+	return 0;
+}
+
+/*
+ * Describes one location the hardware reads in place from its vertex
+ * buffer, or reports ENOTSUP when it cannot: the shader reads more
+ * components than the format has, or the address or stride is not a
+ * multiple of four bytes.
+ *
+ * The maximum index keeps every fetch inside the buffer, whichever
+ * vertex an index or instance names (the hardware's field has 24 bits).
+ */
+static int
+direct_fetch(
+	const struct bcm2711_vulkan_prepared_event *event,
+	uint32_t location,
+	uint32_t components,
+	struct bcm2711_native_attribute *attribute)
+{
+	const VkVertexInputAttributeDescription *description;
+	const VkVertexInputBindingDescription *binding;
+	struct bcm2711_vulkan_resource *resource;
+	struct bcm2711_v3d_view *view;
+	void *cpu;
+	uint64_t begin;
+	uint64_t bytes;
+	uint64_t maximum;
+	uint32_t address;
+	uint32_t source_components;
+	uint32_t index;
+	int error;
+
+	/* Immutable pipeline array counts precede all declaration searches. */
+	if (event->pipeline->attribute_count > BCM2711_VULKAN_VERTEX_ATTRIBUTES || event->pipeline->binding_count > BCM2711_VULKAN_VERTEX_BINDINGS)
+		return EINVAL;
+	description = NULL;
+	for (index = 0; index < event->pipeline->attribute_count; index++) {
+		if (event->pipeline->attributes[index].location == location)
+			description = &event->pipeline->attributes[index];
+	}
+
+	/* A shader-consumed location cannot inherit an undefined user vertex source. */
+	if (description == NULL || description->binding >= BCM2711_VULKAN_VERTEX_BINDINGS)
+		return EINVAL;
+	resource = event->vertices[description->binding];
+	if (resource == NULL)
+		return EINVAL;
+
+	/* The binding declaring the stride and input rate. */
+	binding = NULL;
+	for (index = 0; index < event->pipeline->binding_count; index++) {
+		if (event->pipeline->bindings[index].binding == description->binding)
+			binding = &event->pipeline->bindings[index];
+	}
+	if (binding == NULL)
+		return EINVAL;
+	error = format_components(description->format, &source_components);
+	if (error != 0)
+		return error;
+
+	/* Missing format components would need Vulkan's defaults, which only the packed copy supplies. */
+	if (components > source_components)
+		return ENOTSUP;
+
+	/* The hardware reads whole aligned floats. */
+	begin = event->offsets[description->binding];
+	if (begin > resource->bytes || description->offset > resource->bytes - begin)
+		return EINVAL;
+	begin += description->offset;
+	if ((begin & 3U) != 0 || (binding->stride & 3U) != 0)
+		return ENOTSUP;
+
+	/* At least the first element lies inside the buffer's current storage. */
+	bytes = source_components * 4U;
+	if (bytes > resource->bytes - begin)
+		return EINVAL;
+	error = bcm2711_vulkan_resource_backing(resource, begin, bytes, &view, &address, &cpu);
+	if (error != 0)
+		return error;
+
+	/* The last element whose bytes all lie inside the buffer bounds every fetch. */
+	maximum = 0xffffffU;
+	if (binding->stride != 0)
+		maximum = (resource->bytes - begin - bytes) / binding->stride;
+	if (maximum > 0xffffffU)
+		maximum = 0xffffffU;
+
+	/* The record: format width, the shader's leading components, stride and rate. */
+	attribute->address = address;
+	attribute->stride = binding->stride;
+	attribute->maximum_index = (uint32_t)maximum;
+	attribute->components = source_components;
+	attribute->coordinate_values = components;
+	attribute->vertex_values = components;
+	attribute->divisor = 0;
+	if (binding->inputRate == VK_VERTEX_INPUT_RATE_INSTANCE)
+		attribute->divisor = 1;
+
+	/* Succeeded: the record reads the location from the user's buffer. */
+	return 0;
+}
+
+/* Packs canonical float inputs once, supplying missing format components and rebasing the copied first vertex to zero. */
+static int
+pack_fetch(
+	struct bcm2711_vulkan_native_draw *draw,
+	const struct bcm2711_vulkan_prepared_event *event,
+	uint64_t available,
+	const uint32_t *locations,
+	const uint32_t *widths,
+	uint32_t count,
+	struct bcm2711_native_attribute attributes[BCM2711_VULKAN_VERTEX_ATTRIBUTES])
+{
+	struct native_fetch fetch[BCM2711_VULKAN_VERTEX_ATTRIBUTES];
+	uint32_t fetched;
+	uint8_t *destination;
+	const uint8_t *source;
+	uint64_t bytes;
+	uint32_t stride;
+	uint32_t item;
+	uint32_t scalar;
+	uint32_t index;
+	uint32_t offset;
+	int error;
+
+	/* Resolve complete logical source intervals before any packed GPU input can be published. */
+	kern_memset(fetch, 0, sizeof(fetch));
+	stride = 0;
+	for (index = 0; index < count; index++) {
+		error = resolve_fetch(event, locations[index], widths[index], &fetch[index]);
+		if (error != 0)
+			return error;
+		stride += widths[index] * 4U;
+	}
+
+	/* The copy starts at the source's first vertex, so the hardware's array starts at zero. */
+	draw->first = 0;
+
 	/* Zero-input shaders need no fetch allocation; the independently uploaded defaults still exist. */
-	stride = vertex->input_count * 4U;
 	if (stride != 0) {
 		bytes = (uint64_t)draw->vertices * stride;
 		error = upload_take(draw, bytes, available, &destination, &fetched);

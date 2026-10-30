@@ -17,6 +17,7 @@ static int same_device(struct bcm2711_vulkan_object *object, struct bcm2711_vulk
 static int validate_sets(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_vertices(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_push(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
+static int validate_indices(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_pass(struct bcm2711_vulkan_command_buffer *command, const struct bcm2711_vulkan_record *record);
 static int validate_viewport(const struct bcm2711_vulkan_record *record);
 
@@ -66,13 +67,21 @@ bcm2711_vulkan_record_validate(
 		    record->area.extent.height > 0x7fffffffU - (uint32_t)record->area.offset.y)
 			return EINVAL;
 		break;
+	case GPU_OP_CMD_BIND_INDEX_BUFFER:
+		error = validate_indices(command, record);
+		break;
 	case GPU_OP_CMD_DRAW:
-		/* Keiland uses ordinary nonindexed single-instance triangles; zero-count draws remain legitimate no-ops. */
+	case GPU_OP_CMD_DRAW_INDEXED:
+		/* Triangle lists inside a pass; zero-count draws remain legitimate no-ops. */
 		if (!command->render_open)
 			return EINVAL;
-		if (record->words[1] > 1 || record->words[3] != 0)
-			return ENOTSUP;
+
+		/* The first vertex (or index) and first instance plus their counts stay representable. */
 		if (record->words[0] > 0xffffffffU - record->words[2])
+			return EOVERFLOW;
+		if (record->opcode == GPU_OP_CMD_DRAW && record->words[1] > 0xffffffffU - record->words[3])
+			return EOVERFLOW;
+		if (record->opcode == GPU_OP_CMD_DRAW_INDEXED && record->words[1] > 0xffffffffU - record->words[4])
 			return EOVERFLOW;
 		break;
 	default:
@@ -170,6 +179,40 @@ validate_vertices(
 	}
 
 	/* Succeeded: each selected logical vertex offset has an independently retainable bound resource. */
+	return 0;
+}
+
+/* Checks one index buffer selection: bound index storage on this device, a 16- or 32-bit type and an offset aligned to it. */
+static int
+validate_indices(
+	struct bcm2711_vulkan_command_buffer *command,
+	const struct bcm2711_vulkan_record *record)
+{
+	struct bcm2711_vulkan_resource *resource;
+	uint32_t size;
+	int error;
+
+	/* The buffer belongs to the recording device and was created and bound for index reads. */
+	error = same_device(record->objects[0], command->owner.device);
+	if (error != 0)
+		return error;
+	if (record->objects[0]->kind != I915_VK_OBJ_BUFFER)
+		return EINVAL;
+	resource = record->objects[0]->payload;
+	if (resource->memory == NULL || (resource->usage & VK_BUFFER_USAGE_INDEX_BUFFER_BIT) == 0)
+		return EINVAL;
+
+	/* Only the two Vulkan 1.0 index types exist; the offset is a multiple of the index size. */
+	if (record->first == VK_INDEX_TYPE_UINT16)
+		size = 2U;
+	else if (record->first == VK_INDEX_TYPE_UINT32)
+		size = 4U;
+	else
+		return ENOTSUP;
+	if (record->offsets[0] >= resource->bytes || (record->offsets[0] & (size - 1U)) != 0)
+		return EINVAL;
+
+	/* Succeeded: draws can read whole indices from the selected offset. */
 	return 0;
 }
 

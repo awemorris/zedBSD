@@ -1392,8 +1392,8 @@ enum gpu_op {
 	 * vkCmdBindIndexBuffer.  Number: VK_EXT_command_serialization.xml:152.
 	 * Arguments: [buffer][u64 offset][u32 index type].
 	 * Sent by: libvulkan/commands-generated.inc: vkCmdBindIndexBuffer.
-	 * Decoded by: i915/command.c: i915_record_bind_index; bcm2711 has no
-	 * route.
+	 * Decoded by: i915/command.c: i915_record_bind_index;
+	 * bcm2711/vulkan-record-decode.c: bcm2711_vulkan_record_decode.
 	 */
 	GPU_OP_CMD_BIND_INDEX_BUFFER = 104,
 
@@ -1425,7 +1425,9 @@ enum gpu_op {
 	 * Arguments: [u32 indices][u32 instances][u32 first index]
 	 * [u32 vertex offset, signed][u32 first instance].
 	 * Sent by: libvulkan/commands-generated.inc: vkCmdDrawIndexed.
-	 * Decoded by: i915/command.c: i915_record_command; bcm2711 has no route.
+	 * Decoded by: i915/command.c: i915_record_command;
+	 * bcm2711/vulkan-record-decode.c: bcm2711_vulkan_record_decode, run by
+	 * bcm2711/vulkan-draw.c: walk_records.
 	 */
 	GPU_OP_CMD_DRAW_INDEXED = 107,
 

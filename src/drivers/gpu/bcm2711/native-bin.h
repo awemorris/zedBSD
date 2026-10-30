@@ -5,14 +5,20 @@
  * SPDX-License-Identifier: Zlib
  */
 
-/* One complete state sequence resets inherited binning state before a rebased triangle-array draw. */
+/* One complete state sequence resets inherited binning state before one triangle-list draw. */
 #ifndef KERN_DRIVERS_GPU_BCM2711_NATIVE_BIN_H
 #define KERN_DRIVERS_GPU_BCM2711_NATIVE_BIN_H
 
 #include <stddef.h>
 #include "drivers/gpu/bcm2711/native-viewport.h"
 
-#define BCM2711_NATIVE_BIN_BYTES 133U
+/*
+ * The state takes 123 bytes; the draw after it at most 32 (Index Buffer
+ * Setup, Base Vertex Base Instance and Indexed Instanced Prim List), and a
+ * shorter draw is followed by NOPs, so every draw has the same length.
+ */
+#define BCM2711_NATIVE_BIN_STATE_BYTES 123U
+#define BCM2711_NATIVE_BIN_BYTES 155U
 
 /*
  * One face's stencil test in the hardware's codes: the operations are the
@@ -37,7 +43,19 @@ struct bcm2711_native_bin {
 	uint32_t window[4];
 	uint32_t shader;
 	uint32_t attributes;
+	/* The vertices, or for an indexed draw the indices, of one instance. */
 	uint32_t vertices;
+	uint32_t instances;
+	/* The first vertex; for an indexed draw the first index's byte offset from index_address. */
+	uint32_t first;
+	/* Added to every index of an indexed draw (Vulkan's vertexOffset, two's complement). */
+	uint32_t base_vertex;
+	uint32_t base_instance;
+	/* One: the draw reads index_bytes of indices of index_size (2 or 4) bytes at index_address. */
+	uint32_t indexed;
+	uint32_t index_address;
+	uint32_t index_bytes;
+	uint32_t index_size;
 	uint32_t forward;
 	uint32_t reverse;
 	uint32_t clockwise;

@@ -60,9 +60,21 @@ bcm2711_vulkan_record_decode(
 	case GPU_OP_CMD_CLEAR_COLOR_IMAGE:
 		error = decode_clear(session, reader, record);
 		break;
+	case GPU_OP_CMD_BIND_INDEX_BUFFER:
+		/* The buffer, its 64-bit offset and the index type, which first keeps. */
+		identity = drv_i915_wire_read_u64(reader);
+		record->offsets[0] = drv_i915_wire_read_u64(reader);
+		record->first = drv_i915_wire_read_u32(reader);
+		record->objects[0] = bcm2711_vulkan_object_find(session, I915_VK_OBJ_BUFFER, identity);
+		break;
 	case GPU_OP_CMD_DRAW:
 		/* Draw's four words preserve exact vertex/instance counts and base selections. */
 		for (index = 0; index < 4; index++)
+			record->words[index] = drv_i915_wire_read_u32(reader);
+		break;
+	case GPU_OP_CMD_DRAW_INDEXED:
+		/* Index count, instance count, first index, signed vertex offset and first instance. */
+		for (index = 0; index < 5; index++)
 			record->words[index] = drv_i915_wire_read_u32(reader);
 		break;
 	case GPU_OP_CMD_END_RENDER_PASS:

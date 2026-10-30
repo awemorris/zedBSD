@@ -106,6 +106,14 @@ bcm2711_vulkan_native_bin_prepare(
 	state.shader = draw->shader;
 	state.attributes = draw->attributes;
 	state.vertices = draw->vertices;
+	state.instances = draw->instances;
+	state.first = draw->first;
+	state.base_vertex = draw->base_vertex;
+	state.base_instance = draw->base_instance;
+	state.indexed = draw->indexed;
+	state.index_address = draw->index_address;
+	state.index_bytes = draw->index_bytes;
+	state.index_size = draw->index_size;
 	error = bcm2711_native_bin_encode(&state, draw->bin, sizeof(draw->bin));
 	if (error != 0)
 		return error;

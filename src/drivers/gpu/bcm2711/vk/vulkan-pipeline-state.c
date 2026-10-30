@@ -129,9 +129,11 @@ fetch_state(
 		return EINVAL;
 	for (index = 0; index < input->vertexBindingDescriptionCount; index++) {
 		binding = &input->pVertexBindingDescriptions[index];
-		if (binding->binding >= BCM2711_VULKAN_VERTEX_BINDINGS ||
-		    binding->stride > 2048U ||
-		    binding->inputRate != VK_VERTEX_INPUT_RATE_VERTEX)
+		if (binding->binding >= BCM2711_VULKAN_VERTEX_BINDINGS || binding->stride > 2048U)
+			return ENOTSUP;
+
+		/* A binding advances per vertex or, one element per instance, per instance. */
+		if (binding->inputRate != VK_VERTEX_INPUT_RATE_VERTEX && binding->inputRate != VK_VERTEX_INPUT_RATE_INSTANCE)
 			return ENOTSUP;
 		for (previous = 0; previous < index; previous++) {
 			if (input->pVertexBindingDescriptions[previous].binding == binding->binding)

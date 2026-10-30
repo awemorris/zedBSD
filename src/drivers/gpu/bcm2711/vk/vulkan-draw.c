@@ -180,7 +180,14 @@ walk_records(
 			}
 
 			break;
+		case GPU_OP_CMD_BIND_INDEX_BUFFER:
+			/* Indexed draws read this buffer until another bind replaces it. */
+			state->indices = record->objects[0]->payload;
+			state->index_offset = record->offsets[0];
+			state->index_type = record->first;
+			break;
 		case GPU_OP_CMD_DRAW:
+		case GPU_OP_CMD_DRAW_INDEXED:
 			/* Resolve exact current shader inputs and complete logical fetch ranges. */
 			error = bcm2711_vulkan_draw_validate(state, record);
 			if (error != 0)

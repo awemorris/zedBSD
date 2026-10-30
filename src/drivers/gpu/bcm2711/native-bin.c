@@ -16,11 +16,13 @@
 static void write_word(uint8_t *bytes, uint32_t word);
 static void write_half(uint8_t *bytes, uint32_t half);
 static void write_varyings(uint8_t *bytes, uint8_t opcode, uint32_t mask);
+static int validate_draw(const struct bcm2711_native_bin *state);
+static void write_draw(uint8_t *bytes, const struct bcm2711_native_bin *state);
 static int validate_stencil(const struct bcm2711_native_stencil *stencil);
 static void write_stencil(uint8_t *bytes, const struct bcm2711_native_stencil *stencil, uint32_t front, uint32_t back);
 
 /*
- * Encodes complete fixed graphics state followed by one non-indexed triangle-list draw rebased to vertex zero.
+ * Encodes complete fixed graphics state followed by one triangle-list draw, indexed or not, of one or more instances.
  *
  * Every inherited flag is reset explicitly.  A blending draw uses the tile
  * buffer's premultiplied source-over, so fragment code never reads the tile
@@ -59,6 +61,11 @@ bcm2711_native_bin_encode(
 		return EINVAL;
 	if ((uint64_t)state->shader + 36U + state->attributes * 16U > ((uint64_t)1 << 32))
 		return EINVAL;
+
+	/* The draw's counts, bases and index interval fit its packets. */
+	error = validate_draw(state);
+	if (error != 0)
+		return error;
 
 	/* Finite raster state can encode only the implemented Boolean facing choices. */
 	if (state->forward > 1 ||
@@ -202,11 +209,8 @@ bcm2711_native_bin_encode(
 	write_stencil(bytes + 111, &state->front, 1, 0);
 	write_stencil(bytes + 117, &state->back, 0, 1);
 
-	/* Packed fetch already applied source firstVertex; this hardware array starts at zero and consumes exactly copied vertices. */
-	bytes[123] = 36;
-	bytes[124] = 4;
-	write_word(bytes + 125, state->vertices);
-	write_word(bytes + 129, 0);
+	/* The draw follows the state. */
+	write_draw(bytes + BCM2711_NATIVE_BIN_STATE_BYTES, state);
 
 	/* Succeeded: the complete atomic sequence can be copied into the owned enclosing bin list before native launch. */
 	return 0;
@@ -264,6 +268,113 @@ write_varyings(
 	bytes[9] = 0;
 
 	/* Succeeded: interpolation metadata has no dependence on a previous native draw's flags. */
+	return;
+}
+
+/* Refuses a draw whose counts, bases or index interval its packets cannot hold. */
+static int
+validate_draw(
+	const struct bcm2711_native_bin *state)
+{
+	/* Every draw has at least one instance and a known kind. */
+	if (state->instances == 0 || state->indexed > 1)
+		return EINVAL;
+
+	/* A vertex array has no index interval. */
+	if (state->indexed == 0)
+		return 0;
+
+	/* The indexed list's length field has 31 bits. */
+	if (state->vertices > 0x7fffffffU)
+		return EINVAL;
+
+	/* Indices are 16 or 32 bits, aligned, and the read ones lie inside the stated interval. */
+	if (state->index_size != 2U && state->index_size != 4U)
+		return EINVAL;
+	if (state->index_address == 0 ||
+	    (state->index_address & (state->index_size - 1U)) != 0 ||
+	    (state->first & (state->index_size - 1U)) != 0)
+		return EINVAL;
+	if ((uint64_t)state->index_address + state->index_bytes > ((uint64_t)1 << 32))
+		return EINVAL;
+	if ((uint64_t)state->first + (uint64_t)state->vertices * state->index_size > state->index_bytes)
+		return EINVAL;
+
+	/* Succeeded: the draw's packets can hold it. */
+	return 0;
+}
+
+/*
+ * Writes one triangle-list draw after the state, padded with NOPs to the
+ * fixed draw length (a zero byte would be Halt).
+ *
+ * The base vertex and base instance are set by every draw, so none
+ * inherits another's.  A single instance uses the plain list packets, as
+ * Mesa does; the primitive mode is triangles (4), primitive restart stays
+ * off, and an indexed list's offset is in bytes.
+ *
+ * Values referenced: Mesa 25.0.7 src/broadcom/cle/v3d_packet.xml (Base
+ * Vertex Base Instance 43, Index Buffer Setup 44, Indexed Prim List 32,
+ * Indexed Instanced Prim List 34, Vertex Array Prims 36, Vertex Array
+ * Instanced Prims 38, NOP 1) and vulkan/v3dvx_cmd_buffer.c's draw emission.
+ */
+static void
+write_draw(
+	uint8_t *bytes,
+	const struct bcm2711_native_bin *state)
+{
+	uint32_t type;
+
+	/* Every byte the draw leaves is a NOP. */
+	kern_memset(bytes, 1, BCM2711_NATIVE_BIN_BYTES - BCM2711_NATIVE_BIN_STATE_BYTES);
+
+	/* The bases come first: the vertex offset added to indices and the first instance. */
+	bytes[0] = 43;
+	write_word(bytes + 1, state->base_vertex);
+	write_word(bytes + 5, state->base_instance);
+
+	/* A vertex array draws vertices first to first plus vertices, once or per instance. */
+	if (state->indexed == 0) {
+		if (state->instances == 1) {
+			bytes[9] = 36;
+			bytes[10] = 4;
+			write_word(bytes + 11, state->vertices);
+			write_word(bytes + 15, state->first);
+		} else {
+			bytes[9] = 38;
+			bytes[10] = 4;
+			write_word(bytes + 11, state->vertices);
+			write_word(bytes + 15, state->instances);
+			write_word(bytes + 19, state->first);
+		}
+
+		/* Succeeded: one vertex-array draw follows the bases. */
+		return;
+	}
+
+	/* The index buffer, whose 16-bit indices are type 1 and 32-bit ones type 2. */
+	bytes[9] = 44;
+	write_word(bytes + 10, state->index_address);
+	write_word(bytes + 14, state->index_bytes);
+	type = 1U;
+	if (state->index_size == 4U)
+		type = 2U;
+
+	/* One indexed list, once or per instance. */
+	if (state->instances == 1) {
+		bytes[18] = 32;
+		bytes[19] = (uint8_t)(4U | (type << 6));
+		write_word(bytes + 20, state->vertices);
+		write_word(bytes + 24, state->first);
+	} else {
+		bytes[18] = 34;
+		bytes[19] = (uint8_t)(4U | (type << 6));
+		write_word(bytes + 20, state->vertices);
+		write_word(bytes + 24, state->instances);
+		write_word(bytes + 28, state->first);
+	}
+
+	/* Succeeded: the index buffer and one indexed draw follow the bases. */
 	return;
 }
 
