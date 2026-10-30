@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 18:05（Q1）
+最終更新: 2026-10-30 18:15（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1716）。bootloader を Hardkernel の公式の image（20260610）の物に替え、Amlogic の license と一緒に zedBSD-firmware へ。試験の image を作り直す | Q1 が zedBSD-firmware を push → 実機の結果で各 Phase を直す |
-| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（表 A・表 B）は下の「WS331」の節 | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner-high、q1717）。p002 kernel に表 B を足す | p003 表 A の置き換え → p004 i915 → p005（rpi4 は未決）→ p006 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -75,10 +75,10 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
-| p001 | 違反の全数、置き換え先の一覧（表 A）、kernel に足す関数の案（表 B） | in-progress（一覧は済み、ユーザーの決定待ち） |
-| p002 | kernel に表 B を足す（driver は変えない） | 未作成（表 B の決定の後） |
-| p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | 未作成 |
-| p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | 未作成 |
+| p001 | 違反の全数、置き換え先の一覧（表 A）、kernel に足す関数の案（表 B） | cleared（2026-10-30 ユーザーが表 A・B を許可） |
+| p002 | kernel に表 B を足す（driver は変えない） | in-progress（P2） |
+| p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | planned（P2） |
+| p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | planned（P2） |
 | p005 | 例外の候補（pc98 の 3 か所、rpi4 の console） | 未作成 |
 | p006 | 規約の全文の見直し | 未作成 |
 
@@ -104,7 +104,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | B7 | kern_console_early_putc | 起動の早い段の console に 1 文字（今の hal_putc と同じ動き） | serial-console、rpi4・sun4u・x68k の console |
 | B8 | 型 kern_physaddr_t | 物理 address の型（HAL の名前なしで書く） | 多数（23 file） |
 
-未決（ユーザー）: 表 B の採否と MSI の直し方、rpi4 の console の 2 関数（HAL の early console の状態を使う、P2 の推しは当面の例外）、build の macro HAL_ARCH_* を残すか、kernel の header 13 個が HAL の header を include する件を WS331 に入れるか。全文は [phase001](ws331/phase001/phase.md)。
+未決（ユーザー）: rpi4 の console の 2 関数（HAL の early console の状態を使う、P2 の推しは当面の例外）、build の macro HAL_ARCH_* を残すか、kernel の header 13 個が HAL の header を include する件を WS331 に入れるか。全文は [phase001](ws331/phase001/phase.md)。
 
 ### WS326 libmedia の H.264 の software の decoder（標準廉価実装手順）
 
@@ -139,10 +139,12 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 - 今の扱い（Q1 の既定）: zedBSD の今の fps で約 40 fps になる scene を決め、profile を見て 50 fps 以上に上げる。P3 が実施中（copies 1 で 62 fps、10 で 31 fps）。
 - 決めてほしい事: この既定でよいか、別の SD に Linux を入れて Linux の基準を立てるか。
 
-### 4. WS331（driver から HAL への直の依存を除く）p001 の一覧
+### 4. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
 
-- 背景: ユーザーの規則「driver は HAL を知らない」に反して、driver の 38 file が HAL を include している。P2 が、置き換え先の kernel の関数（表 A）と、kernel に足す関数の案（表 B）を作った: [phase001](ws331/phase001/phase.md)。
-- 決めてほしい事: (1) 表 B の採否（kern_device_map の write-combine と読み出しだけの属性、MSI の割り込みの 4 関数、kern_cpu_current、kern_console_early_putc、kern_physaddr_t）と MSI の直し方、(2) Raspberry Pi 4 の console の 2 関数（HAL の early console の中の状態を使う）を当面の例外にするか、(3) build の macro HAL_ARCH_* を残すか、(4) kernel の header 13 個が HAL の header を include する件（driver が間接に HAL を見られる）を WS331 に入れるか。
+- 背景: 表 A・B は 2026-10-30 に許可された。残りは次の 3 点（詳細は下の「WS331」の節と [phase001](ws331/phase001/phase.md) §4・§6）。
+- (1) Raspberry Pi 4 の console の 2 関数（rpi_cons_suspend_output・resume_output）: HAL の early console（起動の早い段の画面の文字の出力）の中の状態と lock を使うので、driver にも kernel にも移せない。案 (a) 当面の例外として残す（P2 の推し）、(b) 汎用の HAL の口を足す（HAL の API の変更、承認が要る）、(c) driver が画面の文字を自分で描く作りにする。
+- (2) build の macro HAL_ARCH_*・HAL_BOARD_*（6 file・16 行、どの CPU・board 向けかを compile の時に分ける印）を driver に残すか。
+- (3) kernel の header 13 個が HAL の header を include していて、driver が間接に HAL の名前を見られる件を WS331 の範囲に入れるか。
 
 ## 決まった事
 

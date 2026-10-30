@@ -2,7 +2,7 @@
 
 # ws331-p001: driver の HAL の利用の一覧と、kernel の置き換え先
 
-Status: in-progress
+Status: cleared（2026-10-30 ユーザー「表A,Bを許可します」）
 Parent: [WS331](../ws.md)
 Queue: q1713（P2）
 

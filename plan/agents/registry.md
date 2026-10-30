@@ -6,7 +6,7 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws313 p003 (q1716-i01) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313`、firmware: `/home/awe/zedBSD-worktrees/p1-c5-firmware` / `agent/p1-c5-firmware` | in-progress（2026-10-30 16:4x 起動） | 0772a6994（merge bfd2fd903） |
-| P2 | phase-runner | ws331 p001 (q1713-i01 cleared) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | returned（一覧をユーザーに） | 6af47c4a4（merge f4fcb6ff2） |
+| P2 | phase-runner-high | ws331 p002〜p004 (q1717-i01) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | in-progress（2026-10-30 18:1x 起動） | 6af47c4a4（merge f4fcb6ff2） |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner | ws307 (q1711-i01 返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | returned（p007 はユーザーの判断待ち） | 93f7ec9d3 |
 | P3 | phase-runner-high | ws291 p020 (q1715-i02) | `/home/awe/zedBSD-worktrees/p3-ws291` / `agent/p3-ws291` | in-progress（2026-10-30 再起動、VF2 の HDMI を接続済み） | a7e9379f5（merge 0e52e0744） |

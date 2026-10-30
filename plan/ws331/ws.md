@@ -15,6 +15,8 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 - 「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」
 - 解釈（Q1）: (1) 規則を guardrail に書く（済み）。(2) 最初の成果は 2 つの一覧: 違反に使われた `hal_*` の関数ごとに、置き換える kernel の関数（既存の wrapper）の一覧と、kernel に wrapper が無い関数の一覧（kernel に足す関数の案）。ユーザーが見て、kernel に足す関数を決める。(3) driver の書き換えは一覧の後の Phase で（一覧の後に Phase を立てる）。HAL の API は変えない。
 
+- 2026-10-30 ユーザー（原文）「表A,Bを許可します」 → p001 の表 A（置き換え先）と表 B（B1〜B8: kern_device_map の WRITECOMBINE・READONLY、MSI の 4 関数 kern_irq_alloc_msi・attach_msi・detach_msi_sync・free_msi、kern_cpu_current、kern_console_early_putc、kern_physaddr_t）を許可。MSI は表 B の関数を足す形（別の案は採らない、Q1 の解釈）。未決のまま: rpi4 の console の 2 関数、build の macro HAL_ARCH_*、kernel の header が HAL の header を include する件。
+
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
 - include: `hal/hal.h` 38 file、`hal/i386/i386.h`（pc98-lgy98.c）、`hal/i386/bsp-pc98/display.h`（pc98/graphics/backend.c）、`hal/arm64/bsp-rpi-common/cons.h`（rpi4-console.c）。`include/drivers/` は 0。
@@ -24,5 +26,9 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 違反の全数と、関数ごとの置き換え先（既存の kern_*）の一覧、wrapper の無い関数（kernel に足す案）の一覧 | in-progress（P2、q1713） | — |
-| p002〜 | 一覧をユーザーが見た後に立てる（kernel の関数の追加、driver の書き換え、規約の全文の見直し） | — | p001 |
+| [p001](phase001/phase.md) | 違反の全数と、関数ごとの置き換え先（既存の kern_*）の一覧、wrapper の無い関数（kernel に足す案）の一覧 | cleared（2026-10-30 ユーザーが表 A・B を許可） | — |
+| [p002](phase002/phase.md) | kernel に表 B を足す（driver は変えない） | in-progress（P2、q1717） | p001 |
+| [p003](phase003/phase.md) | 表 A の機械的な置き換えと include だけの file（sparcv9 の 2 file は別の commit） | planned（P2、q1717） | p002 |
+| [p004](phase004/phase.md) | i915 の map（WRITECOMBINE・READONLY）と MSI（B2〜B5）、試験の代役 | planned（P2、q1717） | p002 |
+| p005 | 例外の候補（pc98 の 3 か所、rpi4 の console） | 未作成（rpi4 はユーザーの決定待ち） | p003 |
+| p006 | 規約の全文の見直し | 未作成 | p003〜p005 |
