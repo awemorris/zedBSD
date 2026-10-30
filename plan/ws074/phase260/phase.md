@@ -240,6 +240,7 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev39（zoom まで） | zoom（cascade）、css-viewport/zoom +11 | 1,022 | 1,160 | 263 | 41 | 2,486（71.60%） |
   | dev40（efd1d8313） | navigation-api の DataCloneError・intercept・detach、Streams・WebAssembly.Memory の stub | 1,039 | 1,160 | 263 | 41 | 2,503（72.09%） |
   | dev42（cfd40a883） | grid の abspos の descendant、display: contents の blockify、grid-*-gap の computed | 1,041 | 1,160 | 263 | 41 | 2,505（72.15%） |
+  | dev43（hit test の変更まで、source は 0c8adb187 の直前の commit） | flex・grid の hit test の順 | 1,043 | 1,160 | 263 | 41 | 2,507（72.21%） |
 
   どの測定も後退 0（dev31 または直前の gap との差で、4 runner とも gap に新しく入った ID は無い）。
 - 直した物:
