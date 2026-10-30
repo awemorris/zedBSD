@@ -473,7 +473,7 @@ power_thread(
 	(void)argument;
 
 	/* For as long as the kernel runs. */
-	deadline = sched_ticks() + KERN_MS_TO_TICKS(BATTERY_PERIOD_MS);
+	deadline = sched_ticks() + kern_ms_to_ticks(BATTERY_PERIOD_MS);
 	for (;;) {
 		/* Waits until a notify marks a device, or the batteries' time comes. */
 		irq = spin_lock_irqsave(&power_lock);
@@ -499,7 +499,7 @@ power_thread(
 				}
 
 				/* The next time comes a period later. */
-				deadline = now + KERN_MS_TO_TICKS(BATTERY_PERIOD_MS);
+				deadline = now + kern_ms_to_ticks(BATTERY_PERIOD_MS);
 				continue;
 			}
 

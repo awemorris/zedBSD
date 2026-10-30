@@ -501,7 +501,7 @@ drv_i915_delayed_queue(
 	 * the current tick is partly used, hence one tick more.
 	 */
 	now = sched_ticks();
-	ticks = ((uint64_t)delay_ms * KERN_CLOCK_HZ + (I915_MILLISECONDS_PER_SECOND - 1U)) / I915_MILLISECONDS_PER_SECOND + 1U;
+	ticks = kern_ms_to_ticks(delay_ms) + 1U;
 	deadline = 0U;
 	error = kern_deadline_after(now, ticks, &deadline);
 	if (error != 0) {

@@ -292,7 +292,7 @@ struct tcp_segment_addresses {
 #endif
 #define TCP_EPHEMERAL_FIRST 49152U
 /* The initial retransmission timeout of RFC 6298, one second. */
-#define TCP_INITIAL_RTO KERN_MS_TO_TICKS(1000U)
+#define TCP_INITIAL_RTO kern_ms_to_ticks(1000U)
 
 /*
  * The least term the round-trip variation adds to the smoothed round-trip
@@ -308,7 +308,7 @@ struct tcp_segment_addresses {
  * The timeout a connection starts its data with when its SYN had to be
  * resent and no round trip was measured (RFC 6298 section 5.7).
  */
-#define TCP_SYN_RETRIED_RTO KERN_MS_TO_TICKS(3000U)
+#define TCP_SYN_RETRIED_RTO kern_ms_to_ticks(3000U)
 
 /*
  * The persist timer (ws220-p005, FreeBSD's): the probe interval is the RTO
@@ -317,12 +317,12 @@ struct tcp_segment_addresses {
  * given up after min(2 hours, RTO x the backoff's total, 2559); one this end
  * has closed to after 60 seconds of silence.
  */
-#define TCP_PERSIST_MIN KERN_MS_TO_TICKS(5000U)
-#define TCP_PERSIST_MAX KERN_MS_TO_TICKS(60000U)
+#define TCP_PERSIST_MIN kern_ms_to_ticks(5000U)
+#define TCP_PERSIST_MAX kern_ms_to_ticks(60000U)
 #define TCP_PERSIST_SHIFT_MAX 12U
 #define TCP_PERSIST_TOTAL_BACKOFF 2559U
-#define TCP_PERSIST_IDLE_MAX KERN_MS_TO_TICKS(7200000U)
-#define TCP_PERSIST_CLOSED_IDLE KERN_MS_TO_TICKS(60000U)
+#define TCP_PERSIST_IDLE_MAX kern_ms_to_ticks(7200000U)
+#define TCP_PERSIST_CLOSED_IDLE kern_ms_to_ticks(60000U)
 
 /*
  * The system's TCP_MAXUNACKTIME for a new socket, in milliseconds: 0 turns
@@ -419,7 +419,7 @@ enum tcp_drain {
  * The longest the retransmission timeout grows to as it doubles for each
  * resend: RFC 6298 section 2.5 allows a maximum of at least 60 seconds.
  */
-#define TCP_RETRANSMIT_TIMEOUT_MAX KERN_MS_TO_TICKS(60000U)
+#define TCP_RETRANSMIT_TIMEOUT_MAX kern_ms_to_ticks(60000U)
 
 /*
  * How long the timer goes on resending the oldest segment before the
@@ -490,9 +490,9 @@ enum tcp_refusal {
 #endif
 
 #define TCP_KEEPALIVE_IDLE \
-	((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS * KERN_CLOCK_HZ / 1000U)
+	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_IDLE_MS)
 #define TCP_KEEPALIVE_INTERVAL \
-	((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS * KERN_CLOCK_HZ / 1000U)
+	kern_ms_to_ticks((uint64_t)CONFIG_TCP_KEEPALIVE_INTERVAL_MS)
 #define TCP_KEEPALIVE_COUNT ((unsigned)CONFIG_TCP_KEEPALIVE_COUNT)
 #define TCP_LISTEN_BACKLOG_MAX 16U
 
@@ -744,7 +744,7 @@ tcp_socket_create(
 
 	/* The system's TCP_MAXUNACKTIME (ws220-p005). */
 	endpoint->tcp.maxunack_seconds = CONFIG_TCP_MAXUNACKTIME_MS / 1000U;
-	endpoint->tcp.maxunack = KERN_MS_TO_TICKS(CONFIG_TCP_MAXUNACKTIME_MS);
+	endpoint->tcp.maxunack = kern_ms_to_ticks(CONFIG_TCP_MAXUNACKTIME_MS);
 
 	/* The system's congestion control, net.tcp.congestion. */
 	endpoint->tcp.cc = tcp_cc_default();
@@ -1889,7 +1889,7 @@ tcp_setsockopt(
 		irq = spin_lock_irqsave(&socket->lock);
 
 		endpoint->tcp.maxunack_seconds = (unsigned)enabled;
-		endpoint->tcp.maxunack = KERN_MS_TO_TICKS((uint64_t)(unsigned)enabled * 1000U);
+		endpoint->tcp.maxunack = kern_ms_to_ticks((uint64_t)(unsigned)enabled * 1000U);
 
 		spin_unlock_irqrestore(&socket->lock, irq);
 
@@ -3377,7 +3377,7 @@ tcp_rtt_sample_locked(
 
 	/* The sample in microseconds, bounded so the sums below stay small. */
 	ticks = now - endpoint->tcp.rtt_start;
-	sample = ticks * 1000000U / KERN_CLOCK_HZ;
+	sample = kern_ticks_to_us(ticks);
 	if (sample > TCP_RTT_SAMPLE_MAX_US)
 		sample = TCP_RTT_SAMPLE_MAX_US;
 
@@ -3404,7 +3404,7 @@ tcp_rtt_sample_locked(
 		endpoint->tcp.rtt_samples++;
 
 	/* The term added to SRTT: the largest of the clock's tick, 4 RTTVAR and the least term. */
-	granularity = 1000000U / KERN_CLOCK_HZ;
+	granularity = (kern_clock_resolution_ns() + 999U) / 1000U;
 	term = (uint64_t)endpoint->tcp.rttvar_us * 4U;
 	if (term < granularity)
 		term = granularity;
@@ -3419,7 +3419,7 @@ tcp_rtt_sample_locked(
 	 * delayed acknowledgement comes just at the least term).  No longer
 	 * than the longest timeout.
 	 */
-	timeout = (timeout_us * KERN_CLOCK_HZ + 999999U) / 1000000U + 1U;
+	timeout = kern_us_to_ticks(timeout_us) + 1U;
 	if (timeout > TCP_RETRANSMIT_TIMEOUT_MAX)
 		timeout = TCP_RETRANSMIT_TIMEOUT_MAX;
 	endpoint->tcp.rto = timeout;
@@ -3511,9 +3511,9 @@ tcp_retransmit_given_up_locked(
 	/* A connection being set up resends its SYN for longer than one that carries data. */
 	if (endpoint->tcp.state == TCP_SYN_SENT ||
 	    endpoint->tcp.state == TCP_SYN_RECEIVED) {
-		limit = KERN_MS_TO_TICKS(TCP_GIVE_UP_SYN_MS);
+		limit = kern_ms_to_ticks(TCP_GIVE_UP_SYN_MS);
 	} else {
-		limit = KERN_MS_TO_TICKS(TCP_GIVE_UP_DATA_MS);
+		limit = kern_ms_to_ticks(TCP_GIVE_UP_DATA_MS);
 	}
 
 	/* R2 has not passed yet: the segment is resent again. */

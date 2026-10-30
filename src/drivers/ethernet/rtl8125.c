@@ -4526,7 +4526,7 @@ reset_phy(
 			return 0;
 
 		/* Sleeps a millisecond before asking again. */
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(RTL_PHY_RESET_POLL_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(RTL_PHY_RESET_POLL_MS);
 		sched_sleep(deadline);
 	}
 
@@ -4737,7 +4737,7 @@ link_worker(
 		now = sched_ticks();
 		if (now >= next_link) {
 			check_link(device);
-			next_link = now + KERN_MS_TO_TICKS(RTL_LINK_MS);
+			next_link = now + kern_ms_to_ticks(RTL_LINK_MS);
 		}
 
 		/* Samples whether the interface is open. */
@@ -4755,7 +4755,7 @@ link_worker(
 		profile_report(device);
 
 		/* Sleeps until the next service. */
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(RTL_POLL_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(RTL_POLL_MS);
 		sched_sleep(deadline);
 	}
 }
@@ -5024,7 +5024,7 @@ profile_report(
 	frames = device->profile.poll_frames + device->profile.transmits;
 	if (now >= device->profile.next_report && frames != device->profile.reported_frames) {
 		device->profile.reported_frames = frames;
-		device->profile.next_report = now + KERN_MS_TO_TICKS(1000U);
+		device->profile.next_report = now + kern_ms_to_ticks(1000U);
 		profile = device->profile;
 		report = 1U;
 	}

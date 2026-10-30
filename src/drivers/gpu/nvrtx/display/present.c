@@ -298,7 +298,7 @@ nvrtx_present_refresh_sample(
 		advance = nvrtx_disp_frame_advance(node->refresh_frame, frame);
 		if (advance != 0U) {
 			node->refresh_count += advance;
-			node->refresh_time_ns = sched_ticks() * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+			node->refresh_time_ns = kern_ticks_to_ns(sched_ticks());
 		}
 	}
 
@@ -690,7 +690,7 @@ present_refresh_wait(
 
 	/* The deadline in scheduler ticks, rounded up. */
 	now = sched_ticks();
-	deadline = now + (request->timeout_ns * KERN_CLOCK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+	deadline = now + kern_ns_to_ticks(request->timeout_ns);
 
 	/* Until a boundary after the cursor, or the deadline. */
 	for (;;) {

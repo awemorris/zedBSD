@@ -581,7 +581,7 @@ kern_platform_refresh_devices(
 
 	/* Without a name, waits up to five seconds for the first disk to arrive. */
 	if (disk_count() == 0) {
-		deadline = clock_ticks() + BOOT_STORAGE_WAIT_SECONDS * KERN_CLOCK_HZ;
+		deadline = clock_ticks() + kern_ms_to_ticks(BOOT_STORAGE_WAIT_SECONDS * 1000U);
 		kern_logf("boot: waiting up to 5 seconds for boot storage\n");
 		while (disk_count() == 0 && clock_ticks() < deadline)
 			sched_yield();
@@ -941,7 +941,7 @@ wait_for_boot_disk(
 		return;
 
 	/* Waits while it is missing, looking again when the number of disks changes. */
-	deadline = clock_ticks() + BOOT_STORAGE_WAIT_SECONDS * KERN_CLOCK_HZ;
+	deadline = clock_ticks() + kern_ms_to_ticks(BOOT_STORAGE_WAIT_SECONDS * 1000U);
 	kern_logf("boot: waiting up to 5 seconds for the boot disk (FAT %s)\n", uuid);
 	while (!present && clock_ticks() < deadline) {
 		sched_yield();

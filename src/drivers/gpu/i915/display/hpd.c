@@ -1270,7 +1270,7 @@ i915_hpd_deadline(void)
 	/* Five seconds of scheduler ticks from now. */
 	deadline = 0U;
 	now = sched_ticks();
-	(void)kern_deadline_after(now, I915_HPD_SYNC_SECONDS * KERN_CLOCK_HZ, &deadline);
+	(void)kern_deadline_after(now, kern_ms_to_ticks((uint64_t)I915_HPD_SYNC_SECONDS * 1000U), &deadline);
 
 	/* Succeeded: the deadline. */
 	return deadline;

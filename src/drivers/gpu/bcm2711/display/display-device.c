@@ -991,7 +991,7 @@ output_wait(
 	timeout = request->timeout_ns;
 	if (timeout > KERN_NSEC_PER_SEC)
 		timeout = KERN_NSEC_PER_SEC;
-	timeout = (timeout + KERN_NSEC_PER_SEC / KERN_CLOCK_HZ - 1U) / (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	timeout = kern_ns_to_ticks(timeout);
 
 	/* Sleeps for the adoption without any mutex; only the lease's own open waits. */
 	lease_owner(session, request->lease, &owner);
@@ -1001,7 +1001,7 @@ output_wait(
 
 	/* The highest number adopted with every lower one, and the time of that adoption. */
 	request->completed_sequence = adopted;
-	request->present_time_ns = adopted_ticks * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(adopted_ticks);
 	request->generation = 1;
 
 	/* Succeeded: the queried sequence was adopted on this actual output. */

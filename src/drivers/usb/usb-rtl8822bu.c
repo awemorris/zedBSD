@@ -69,8 +69,8 @@
 #define RTL8822BU_REG_PROCESSING_DELAY		0x04e0U
 #define RTL8822BU_REGISTER_TIMEOUT_MS		20U
 #define RTL8822BU_VENDOR_CONTROL_TIMEOUT_MS	500U
-#define RTL8822BU_VENDOR_CONTROL_TIMEOUT_TICKS  ((RTL8822BU_VENDOR_CONTROL_TIMEOUT_MS * KERN_CLOCK_HZ + 999U) / 1000U)
-#define RTL8822BU_RECOVERY_SNAPSHOT_TICKS	((KERN_CLOCK_HZ + 9U) / 10U)
+#define RTL8822BU_VENDOR_CONTROL_TIMEOUT_TICKS  kern_ms_to_ticks(RTL8822BU_VENDOR_CONTROL_TIMEOUT_MS)
+#define RTL8822BU_RECOVERY_SNAPSHOT_TICKS	kern_ms_to_ticks(100U)
 #define RTL8822BU_EFUSE_POLL_MAX		100U
 #define RTL8822BU_FIRMWARE_TRANSFER_TIMEOUT_MS	50U
 #define RTL8822BU_H2C_TRANSFER_TIMEOUT_MS	50U
@@ -103,8 +103,8 @@
  * 412326 us of explicit table/RF delay.  Fifteen seconds retains a finite
  * failure bound without assuming an unrealistically low host USB latency.
  */
-#define RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS	(15U * KERN_CLOCK_HZ)
-#define RTL8822BU_RADIO_STOP_TIMEOUT_TICKS	(1U * KERN_CLOCK_HZ)
+#define RTL8822BU_RADIO_OPEN_TIMEOUT_TICKS	kern_ms_to_ticks(15000U)
+#define RTL8822BU_RADIO_STOP_TIMEOUT_TICKS	kern_ms_to_ticks(1000U)
 
 /*
  * Four key inverses, association clear, radio disconnect, TX report retirement,
@@ -113,10 +113,9 @@
 #define RTL8822BU_STATION_CLOSE_TIMEOUT_TICKS                                  \
 	(RTL8822BU_TX_REPORT_RETIRE_TICKS +                                    \
 	 5U * WLAN_CONNECT_TRANSITION_TICKS +                                  \
-	 RTL8822BU_SECURITY_TIMEOUT_TICKS + KERN_CLOCK_HZ)
+	 RTL8822BU_SECURITY_TIMEOUT_TICKS + kern_ms_to_ticks(1000U))
 
-#define RTL8822BU_ACTIVITY_JOIN_TICKS		(5U * KERN_CLOCK_HZ)
-#define RTL8822BU_MICROSECONDS_PER_SECOND	1000000ULL
+#define RTL8822BU_ACTIVITY_JOIN_TICKS		kern_ms_to_ticks(5000U)
 #define RTL8822BU_RELAXATIONS_PER_MICROSECOND	128U
 
 #define RTL8822BU_REG_SYS_FUNC_EN		0x0002U
@@ -190,14 +189,14 @@
 
 #define RTL8822BU_MTU				1500U
 #define RTL8822BU_RX_BUFFER_SIZE		RTL8822B_RX_AGGREGATE_MAX
-#define RTL8822BU_SECURITY_TIMEOUT_TICKS	(1U * KERN_CLOCK_HZ)
+#define RTL8822BU_SECURITY_TIMEOUT_TICKS	kern_ms_to_ticks(1000U)
 #define RTL8822BU_GROUP_KEY_COUNT		4U
 #define RTL8822BU_PAIRWISE_STAGING_SLOT		5U
 #define RTL8822BU_GROUP_STAGING_SLOT_BASE	8U
 #define RTL8822BU_CAM_OWNED_SLOT_COUNT		12U
 #define RTL8822BU_TX_REPORT_COUNT		64U
 #define RTL8822BU_TX_REPORT_SEQUENCE_STEP	4U
-#define RTL8822BU_TX_REPORT_RETIRE_TICKS	((KERN_CLOCK_HZ + 1U) / 2U)
+#define RTL8822BU_TX_REPORT_RETIRE_TICKS	kern_ms_to_ticks(500U)
 #define RTL8822BU_C2H_CCX_TX_REPORT_ID		0x03U
 #define RTL8822BU_C2H_EXTENDED_ID		0xffU
 #define RTL8822BU_C2H_EXTENDED_CCX_REPORT_ID	0x0fU
@@ -1008,7 +1007,7 @@ rtl8822bu_radio_delay_us(
 	uint32_t microseconds,
 	uint64_t deadline_ticks)
 {
-	uint64_t now, target, ticks, scaled;
+	uint64_t now, target, ticks;
 	uint32_t remaining, batch, spin;
 
 	(void)context;
@@ -1029,8 +1028,6 @@ rtl8822bu_radio_delay_us(
 	 * minutes. atomic_spin_hint() keeps the bounded sub-tick path
 	 * architecture-neutral.
 	 */
-	scaled = (uint64_t)microseconds * KERN_CLOCK_HZ;
-
 	/*
 	 * One millisecond and longer is rare (power transition or an explicit
 	 * table pseudo-op) and needs a guaranteed minimum, so round it once to
@@ -1038,8 +1035,7 @@ rtl8822bu_radio_delay_us(
 	 */
 	if (microseconds >= 1000U) {
 		/* Handles the ticks condition. */
-		ticks = (scaled + RTL8822BU_MICROSECONDS_PER_SECOND - 1U) /
-			RTL8822BU_MICROSECONDS_PER_SECOND;
+		ticks = kern_us_to_ticks(microseconds);
 		if (ticks > UINT64_MAX - now)
 			return EOVERFLOW;
 
@@ -1678,7 +1674,7 @@ rtl8822bu_register_control(
 	/* Handles the remaining condition. */
 	timeout_ms = RTL8822BU_VENDOR_CONTROL_TIMEOUT_MS;
 	if (remaining < RTL8822BU_VENDOR_CONTROL_TIMEOUT_TICKS)
-		timeout_ms = (unsigned)(remaining * 1000U / KERN_CLOCK_HZ);
+		timeout_ms = (unsigned)kern_ticks_to_ms(remaining);
 
 	/* Handles the timeout ms condition. */
 	if (timeout_ms == 0U)
@@ -1722,9 +1718,9 @@ rtl8822bu_log_error(
 	/* Handles the emit condition. */
 	emit = now >= adapter->diagnostic_deadline;
 	if (emit) {
-		adapter->diagnostic_deadline = UINT64_MAX - now < KERN_CLOCK_HZ
+		adapter->diagnostic_deadline = UINT64_MAX - now < kern_ms_to_ticks(1000U)
 						       ? UINT64_MAX
-						       : now + KERN_CLOCK_HZ;
+						       : now + kern_ms_to_ticks(1000U);
 	}
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -4280,9 +4276,7 @@ rtl8822bu_frame_transmit_private(
 		remaining = deadline - now;
 
 		/* Handles the milliseconds condition. */
-		milliseconds = remaining > UINT64_MAX / 1000ULL
-				       ? UINT64_MAX
-				       : (remaining * 1000ULL) / KERN_CLOCK_HZ;
+		milliseconds = kern_ticks_to_ms(remaining);
 		if (milliseconds == 0U)
 			milliseconds = 1U;
 
@@ -6739,9 +6733,7 @@ rtl8822bu_deauthenticate_best_effort(
 	remaining = deadline - now;
 
 	/* Handles the milliseconds condition. */
-	milliseconds = remaining > UINT64_MAX / 1000ULL
-			       ? UINT64_MAX
-			       : (remaining * 1000ULL) / KERN_CLOCK_HZ;
+	milliseconds = kern_ticks_to_ms(remaining);
 	if (milliseconds == 0U)
 		milliseconds = 1U;
 
@@ -6981,9 +6973,7 @@ rtl8822bu_management_transmit(
 		remaining = deadline - now;
 
 		/* Handles the milliseconds condition. */
-		milliseconds = remaining > UINT64_MAX / 1000ULL
-				       ? UINT64_MAX
-				       : (remaining * 1000ULL) / KERN_CLOCK_HZ;
+		milliseconds = kern_ticks_to_ms(remaining);
 		if (milliseconds == 0U)
 			milliseconds = 1U;
 
@@ -7248,9 +7238,9 @@ rtl8822bu_h2c_packet_send(
 	timeout_ms = RTL8822BU_H2C_TRANSFER_TIMEOUT_MS;
 
 	/* Handles the remaining condition. */
-	if (remaining < KERN_CLOCK_HZ) {
+	if (remaining < kern_ms_to_ticks(1000U)) {
 		/* Handles the milliseconds condition. */
-		milliseconds = remaining * 1000U / KERN_CLOCK_HZ;
+		milliseconds = kern_ticks_to_ms(remaining);
 		if (milliseconds < timeout_ms)
 			timeout_ms = (unsigned)milliseconds;
 	}
@@ -7637,9 +7627,8 @@ rtl8822bu_recovery_tx_snapshot(
 		 */
 		if (elapsed < RTL8822BU_RECOVERY_SNAPSHOT_TICKS) {
 			timeout_ms =
-				(unsigned)((RTL8822BU_RECOVERY_SNAPSHOT_TICKS -
-					    elapsed) *
-					   1000U / KERN_CLOCK_HZ);
+				(unsigned)kern_ticks_to_ms(
+					RTL8822BU_RECOVERY_SNAPSHOT_TICKS - elapsed);
 
 			/* Handles the timeout ms condition. */
 			if (timeout_ms > RTL8822BU_REGISTER_TIMEOUT_MS)

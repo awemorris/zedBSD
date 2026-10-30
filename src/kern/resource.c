@@ -328,17 +328,15 @@ resource_limit_cpu_tick(
 		return;
 
 	/* Decides under the process lock which signal, if any, is due. */
-	elapsed_seconds = total_ticks / KERN_CLOCK_HZ;
+	elapsed_seconds = kern_ticks_to_ms(total_ticks) / 1000U;
 	irq = spin_lock_irqsave(&process->lock);
 
 	limit = process->limits.values[RLIMIT_CPU];
 	if (limit.maximum != RLIM_INFINITY &&
-	    (limit.maximum <= UINT64_MAX / KERN_CLOCK_HZ) &&
-	    total_ticks >= limit.maximum * KERN_CLOCK_HZ) {
+	    elapsed_seconds >= limit.maximum) {
 		signo = SIGKILL;
 	} else if (limit.current != RLIM_INFINITY &&
-	    (limit.current <= UINT64_MAX / KERN_CLOCK_HZ) &&
-	    total_ticks >= limit.current * KERN_CLOCK_HZ &&
+	    elapsed_seconds >= limit.current &&
 	    process->cpu_limit_signal_second <= elapsed_seconds) {
 		process->cpu_limit_signal_second = elapsed_seconds + 1U;
 		signo = SIGXCPU;

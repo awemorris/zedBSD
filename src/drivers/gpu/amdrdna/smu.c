@@ -199,7 +199,7 @@
 #define THERMAL_SPIN_POLL_US		100000U
 #define THERMAL_CHECK_POLLS		50U
 #define THERMAL_CHECK_POLL_US		10000U
-#define THERMAL_WATCH_TICKS		KERN_CLOCK_HZ
+#define THERMAL_WATCH_TICKS		kern_ms_to_ticks(1000U)
 
 /*
  * The defaults: the static duty (50 %), the temperature limit (95 degrees
@@ -241,8 +241,8 @@
  * Value referenced: Linux v6.19
  * drivers/gpu/drm/amd/amdgpu/amdgpu_gfx.h (GFX_PROFILE_IDLE_TIMEOUT).
  */
-#define THERMAL_BOOST_IDLE_TICKS	KERN_CLOCK_HZ
-#define THERMAL_BOOST_READ_TICKS	(KERN_CLOCK_HZ / 10U)
+#define THERMAL_BOOST_IDLE_TICKS	kern_ms_to_ticks(1000U)
+#define THERMAL_BOOST_READ_TICKS	kern_ms_to_ticks(100U)
 
 /* How long the stop waits for the watch thread, and its step. */
 #define THERMAL_STOP_WAIT_US		2000000U

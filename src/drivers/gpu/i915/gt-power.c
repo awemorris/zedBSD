@@ -559,14 +559,14 @@ drv_i915_rps_stop(
 
 	/* The evaluations' timer goes first: it feeds the work's queue. */
 	if (rps->timers_ready != 0) {
-		(void)drv_i915_delayed_cancel_sync(&rps->timers, &rps->tick_work, sched_ticks() + KERN_MS_TO_TICKS(I915_RPS_STOP_WAIT_MS));
+		(void)drv_i915_delayed_cancel_sync(&rps->timers, &rps->tick_work, sched_ticks() + kern_ms_to_ticks(I915_RPS_STOP_WAIT_MS));
 		drv_i915_timer_queue_destroy(&rps->timers);
 		rps->timers_ready = 0;
 	}
 
 	/* Waits for the work, then lets its queue go. */
 	if (rps->work_ready != 0) {
-		(void)drv_i915_cancel_work_sync(&rps->workqueue, &rps->work, sched_ticks() + KERN_MS_TO_TICKS(I915_RPS_STOP_WAIT_MS));
+		(void)drv_i915_cancel_work_sync(&rps->workqueue, &rps->work, sched_ticks() + kern_ms_to_ticks(I915_RPS_STOP_WAIT_MS));
 		drv_i915_workqueue_destroy(&rps->workqueue);
 		rps->work_ready = 0;
 	}

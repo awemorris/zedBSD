@@ -25,12 +25,12 @@
 #include <uapi/errno.h>
 
 #define VENUS_DISPLAY_REFRESH		50000U
-#define VENUS_DISPLAY_MAX_REFRESH	(KERN_CLOCK_HZ * 1000U)
+#define VENUS_DISPLAY_MAX_REFRESH	((uint64_t)kern_clock_tick_rate() * 1000U)
 #define VENUS_EDID_BYTES		1024U
 #define VENUS_PROTOCOL_SCANOUTS		16U
 #define VENUS_DISPLAY_EXTENT		4096U
-#define VENUS_CONSOLE_STOP_TICKS	(15U * KERN_CLOCK_HZ)
-#define VENUS_DISPLAY_HOLD_TICKS	(10U * KERN_CLOCK_HZ)
+#define VENUS_CONSOLE_STOP_TICKS	kern_ms_to_ticks(15000U)
+#define VENUS_DISPLAY_HOLD_TICKS	kern_ms_to_ticks(10000U)
 
 /*
  * One validated progressive EDID timing retained until the next topology query.
@@ -1125,7 +1125,7 @@ display_wait(
 
 	/* The timestamp describes the guest virtual clock, not host monitor vblank. */
 	request->completed_sequence = output->sequence;
-	request->present_time_ns = output->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(output->present_tick);
 	request->generation = output->generation;
 	mutex_unlock(&controller->mutex);
 
@@ -1261,9 +1261,9 @@ display_refresh_boundary(
 	/* Any open may observe the clock; the deadline is in scheduler ticks, rounded up. */
 	(void)private_session;
 	controller = device;
-	ticks_per_kilo = (uint64_t)KERN_CLOCK_HZ * 1000U;
+	ticks_per_kilo = (uint64_t)kern_clock_tick_rate() * 1000U;
 	now = sched_ticks();
-	deadline = now + (request->timeout_ns * KERN_CLOCK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+	deadline = now + kern_ns_to_ticks(request->timeout_ns);
 
 	/* Until a boundary after the cursor, or the deadline. */
 	for (;;) {
@@ -1305,7 +1305,7 @@ display_refresh_boundary(
 		/* Cursor zero, or a boundary after the cursor while scanning out: reported. */
 		if (request->cursor == 0U || (scanning != 0U && count > request->cursor)) {
 			request->sequence = count;
-			request->time_ns = boundary * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+			request->time_ns = kern_ticks_to_ns(boundary);
 			request->flags = GPU_DISPLAY_VIRTUAL_CLOCK;
 			break;
 		}
@@ -1315,7 +1315,7 @@ display_refresh_boundary(
 			return ETIMEDOUT;
 
 		/* Sleeps to the next boundary, or a short while to look at the output again. */
-		target = now + KERN_CLOCK_HZ / 100U;
+		target = now + kern_ms_to_ticks(10U);
 		if (scanning != 0U)
 			target = ((count + 1U) * ticks_per_kilo + refresh - 1U) / refresh;
 		if (target > deadline)
@@ -1823,7 +1823,7 @@ display_hold_replaced(
 
 	/* Records how long the screen showed the ended lease's picture, for the hand-over's measurement. */
 	now = sched_ticks();
-	held = (now - engine->hold_since) * 1000U / KERN_CLOCK_HZ;
+	held = kern_ticks_to_ms(now - engine->hold_since);
 	kern_logf(
 		"venus: the next lease's first frame after holding the last picture for %llu ms\n",
 		(unsigned long long)held);
@@ -2228,7 +2228,7 @@ display_next_refresh(
 
 	/* Nominal frame phase carries the fractional period instead of rounding every period upward. */
 	now = sched_ticks();
-	ticks = (uint64_t)KERN_CLOCK_HZ * 1000U;
+	ticks = (uint64_t)kern_clock_tick_rate() * 1000U;
 	if (now > UINT64_MAX / refresh)
 		return EOVERFLOW;
 	frame = now * refresh / ticks + 1U;

@@ -2548,7 +2548,7 @@ kick(
 
 	/* A probe kick reads the core's state a little after the kick, before any recovery. */
 	if (state->probing) {
-		sched_sleep(sched_ticks() + (PROBE_STATE_MS * KERN_CLOCK_HZ + 999U) / 1000U);
+		sched_sleep(sched_ticks() + kern_ms_to_ticks(PROBE_STATE_MS));
 		probe_registers(state->render->core);
 	}
 

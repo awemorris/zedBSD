@@ -2405,7 +2405,7 @@ tty_read_noncanonical(
 	minimum = tty->termios.c_cc[VMIN];
 	deciseconds = tty->termios.c_cc[VTIME];
 	deadline = 0;
-	interval = (uint64_t)deciseconds * (KERN_CLOCK_HZ / 10U);
+	interval = kern_ms_to_ticks((uint64_t)deciseconds * 100U);
 	timed_input_used = 0;
 
 	/* A pure timer read arms its deadline; a resumed timed read keeps its own. */

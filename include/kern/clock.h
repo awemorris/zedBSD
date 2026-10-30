@@ -14,87 +14,62 @@
 
 #include <stdbool.h>
 #include <stdint.h>
-#include <hal/arch.h>
 #include <uapi/time.h>
 
 struct ucred;
 
-/*
- * The kernel's tick, in hertz.
- *
- * It is the machine's timer rate and nothing else: each architecture chooses
- * it in its <hal/arch/ARCH.h> (HAL_TIMER_FREQUENCY), and the kernel only reads it.
- * No code may assume a particular value.  A time given in milliseconds is
- * turned into ticks with kern_ms_to_ticks(), and back with kern_ticks_to_ms();
- * nothing multiplies or divides by a number of its own.
- */
-#define KERN_CLOCK_HZ	HAL_TIMER_FREQUENCY
 #define KERN_NSEC_PER_SEC	1000000000ULL
 
 /*
- * Converts a time in milliseconds to ticks, rounding up.
+ * The kernel's time is counted in ticks, from clock_ticks() and
+ * sched_ticks(), and every deadline is a tick count.  How long a tick is
+ * belongs to the clock alone: no other code may assume a length or a rate,
+ * or multiply or divide by one of its own.  A time is written in its own
+ * unit and turned into ticks, or back, by the functions below.
  *
- * Rounding up is what makes a wait safe at any rate: at 100 Hz a 2 ms
- * recovery interval becomes one tick, 10 ms, and never zero, which would
- * not wait at all.  Zero stays zero.  A time too long to count saturates.
+ * A wait rounds up, so that it never ends early and a nonzero time is never
+ * zero ticks; a report rounds down, so that it never claims more time than
+ * has passed.  A value too large to express saturates at UINT64_MAX.
  */
-static inline uint64_t
+uint64_t
 kern_ms_to_ticks(
-	uint64_t milliseconds)
-{
-	/* Handles a time too long to count in ticks. */
-	if (milliseconds > (UINT64_MAX - 999U) / KERN_CLOCK_HZ)
-		return UINT64_MAX;
+	uint64_t milliseconds);
 
-	/* Returns the computed result. */
-	return (milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
-}
+uint64_t
+kern_us_to_ticks(
+	uint64_t microseconds);
 
-/*
- * The same conversion for a constant, so a driver can name its interval in
- * milliseconds where an expression must be constant.  The argument must be
- * small enough not to overflow; kern_ms_to_ticks() is for run-time values.
- */
-#define KERN_MS_TO_TICKS(milliseconds)                                        \
-	(((uint64_t)(milliseconds) * KERN_CLOCK_HZ + 999U) / 1000U)
+uint64_t
+kern_ns_to_ticks(
+	uint64_t nanoseconds);
 
-/*
- * Converts a number of ticks to milliseconds, rounding down.
- *
- * Rounding down reports no more time than has passed.  A count too large
- * to express saturates.
- */
-static inline uint64_t
+uint64_t
 kern_ticks_to_ms(
-	uint64_t ticks)
-{
-	uint64_t seconds;
+	uint64_t ticks);
 
-	/* Handles a count too large to express in milliseconds. */
-	seconds = ticks / KERN_CLOCK_HZ;
-	if (seconds > UINT64_MAX / 1000U - 1U)
-		return UINT64_MAX;
+uint64_t
+kern_ticks_to_us(
+	uint64_t ticks);
 
-	/* Returns the computed result. */
-	return seconds * 1000U + (ticks % KERN_CLOCK_HZ) * 1000U / KERN_CLOCK_HZ;
-}
+uint64_t
+kern_ticks_to_ns(
+	uint64_t ticks);
 
-/*
- * Converts a number of ticks to a count at another fixed rate, rounding down.
- *
- * This is how the kernel hands a CPU time to a user ABI whose unit is fixed
- * (times(2), the process list), whatever the tick is on this machine.  Whole
- * seconds are taken apart from the rest so the product cannot overflow.
- */
-static inline uint64_t
+uint64_t
 kern_ticks_to_rate(
 	uint64_t ticks,
-	uint64_t rate)
-{
-	/* Returns the computed result. */
-	return ticks / KERN_CLOCK_HZ * rate +
-	    ticks % KERN_CLOCK_HZ * rate / KERN_CLOCK_HZ;
-}
+	uint64_t rate);
+
+void
+kern_ticks_to_timespec(
+	uint64_t ticks,
+	struct timespec *result);
+
+uint64_t
+kern_clock_resolution_ns(void);
+
+uint32_t
+kern_clock_tick_rate(void);
 
 struct kern_timespec {
 	int64_t tv_sec;

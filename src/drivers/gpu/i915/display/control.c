@@ -97,7 +97,7 @@ drv_i915_display_refresh_wait(
 
 	/* The deadline in scheduler ticks, rounded up. */
 	now = sched_ticks();
-	deadline = now + (request->timeout_ns * KERN_CLOCK_HZ + KERN_NSEC_PER_SEC - 1U) / KERN_NSEC_PER_SEC;
+	deadline = now + kern_ns_to_ticks(request->timeout_ns);
 
 	/* Until a boundary after the cursor, or the deadline. */
 	for (;;) {
@@ -231,7 +231,7 @@ i915_refresh_sample(
 		frame = drv_i915_xd_pipe_frame(&display->xd.io, (unsigned)pipe);
 		if (display->refresh.frame_valid && frame > display->refresh.frame) {
 			display->refresh.count += frame - display->refresh.frame;
-			display->refresh.time_ns = sched_ticks() * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+			display->refresh.time_ns = kern_ticks_to_ns(sched_ticks());
 		}
 
 		/* The next read counts from this frame. */

@@ -19,6 +19,7 @@ Resume point: p001（設計）と p002（KERN_CLOCK_HZ の削除）を P3（q172
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
-| [p001](phase001/phase.md) | 設計: 時間の API（tick の数でなく ms・ns の期限）、可変の tick（周期を変える口、mode と電源管理 WS052・WS301・WS306 との関係）、各 arch の HAL の timer の実装の補完（hal.h を変えずに済むか） | in-progress（P3） | — |
-| [p002](phase002/phase.md) | KERN_CLOCK_HZ の削除: 175 か所を時間の単位の API に置き換え、clock.h から HAL_TIMER_FREQUENCY を外す。全 port の build と、主な port の QEMU の起動 | planned | p001 |
-| p003 | 規約の全文の見直し | — | p002 |
+| [p001](phase001/phase.md) | 設計: 時間の API（tick の数でなく ms・ns の期限）、可変の tick（周期を変える口、mode と電源管理 WS052・WS301・WS306 との関係）、各 arch の HAL の timer の実装の補完（hal.h を変えずに済むか） | in-progress（P3、2026-10-30 設計と review 済み、[design.md](design.md)） | — |
+| [p002](phase002/phase.md) | KERN_CLOCK_HZ の削除: 175 か所を時間の単位の API に置き換え、clock.h から HAL_TIMER_FREQUENCY を外す。全 port の build と、主な port の QEMU の起動 | in-progress（P3） | p001 |
+| p003 | 率を仮定する残り（tick の数の literal: VM_FREE_WAIT_TICKS・rpi4-vchiq・i915 の WAIT・EVADE、「次の tick まで」の +1 の約 8 か所）を時間の単位の API に（design.md §2・§5） | planned | p002 |
+| p004 | 規約の全文の見直し | — | p003 |

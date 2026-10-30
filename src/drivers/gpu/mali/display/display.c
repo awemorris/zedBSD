@@ -928,7 +928,7 @@ output_wait(
 	}
 
 	request->completed_sequence = display->sequence;
-	request->present_time_ns = display->present_tick * (KERN_NSEC_PER_SEC / KERN_CLOCK_HZ);
+	request->present_time_ns = kern_ticks_to_ns(display->present_tick);
 	request->generation = DISPLAY_GENERATION;
 
 	mutex_unlock(&display->mutex);

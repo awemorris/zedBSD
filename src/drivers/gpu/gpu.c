@@ -6575,7 +6575,6 @@ gpu_completion_deadline(
 {
 	uint64_t ticks;
 	uint64_t now;
-	uint64_t quantum;
 
 	/* Zero is query-only and the maximum value requests an unbounded observation. */
 	*deadline = 0U;
@@ -6583,10 +6582,7 @@ gpu_completion_deadline(
 		return 0;
 
 	/* Rounds upward so a finite wait never expires before its requested interval. */
-	quantum = KERN_NSEC_PER_SEC / KERN_CLOCK_HZ;
-	ticks = timeout / quantum;
-	if (timeout % quantum != 0U)
-		ticks++;
+	ticks = kern_ns_to_ticks(timeout);
 
 	/* Deadline addition must not wrap into an unrelated early tick. */
 	now = sched_ticks();
@@ -7460,9 +7456,7 @@ gpu_monitor_deadline(
 	uint64_t now;
 
 	/* Round upward so clock granularity cannot shorten the selected policy. */
-	ticks = milliseconds * KERN_CLOCK_HZ / 1000U;
-	if (milliseconds * KERN_CLOCK_HZ % 1000U != 0U)
-		ticks++;
+	ticks = kern_ms_to_ticks(milliseconds);
 
 	/* Configuration always remains finite, including near clock exhaustion. */
 	now = sched_ticks();

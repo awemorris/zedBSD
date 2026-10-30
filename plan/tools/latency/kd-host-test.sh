@@ -83,6 +83,13 @@ clock_ticks(void)
 	return fake_ticks;
 }
 
+/* The fake tick is a millisecond. */
+uint64_t
+kern_ticks_to_ms(uint64_t ticks)
+{
+	return ticks;
+}
+
 static void perf_note_longest(struct sched_perf_longest *longest, uint64_t counts, const struct thread *thread, int ahead);
 #include "sched-functions.inc"
 

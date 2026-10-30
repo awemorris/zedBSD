@@ -1606,7 +1606,7 @@ powervr_timing_now(
 	}
 
 	/* Succeeded: the scheduler's clock, at its own rate. */
-	timing_rate = KERN_CLOCK_HZ;
+	timing_rate = kern_clock_tick_rate();
 	now = sched_ticks();
 	return now;
 }
@@ -1654,7 +1654,7 @@ timing_report(
 
 	/* Not yet time. */
 	now = sched_ticks();
-	if (now - timing_reported < KERN_MS_TO_TICKS(TIMING_REPORT_MS))
+	if (now - timing_reported < kern_ms_to_ticks(TIMING_REPORT_MS))
 		return;
 	timing_reported = now;
 
@@ -3274,7 +3274,7 @@ ms_ticks(
 	unsigned milliseconds)
 {
 	/* Rounds up, so a short span is still a tick. */
-	return ((uint64_t)milliseconds * KERN_CLOCK_HZ + 999U) / 1000U;
+	return kern_ms_to_ticks(milliseconds);
 }
 
 /* Reads whether the device is in quarantine. */
@@ -3306,7 +3306,7 @@ timing_us(
 	/* The timing clock's rate; the scheduler's before the first reading. */
 	rate = timing_rate;
 	if (rate == 0U)
-		rate = KERN_CLOCK_HZ;
+		rate = kern_clock_tick_rate();
 
 	/* Succeeded: the whole seconds and the rest, each scaled. */
 	return ticks / rate * 1000000U + ticks % rate * 1000000U / rate;

@@ -20,6 +20,9 @@ struct packet_buf;
 struct net_device;
 
 /* Host A (the sender of the transfer) and host B (its receiver), in host order. */
+/* The rate of the kernel's tick in the model, ticks a second (amd64's). */
+#define MODEL_TICK_HZ 1000U
+
 #define MODEL_ADDRESS_A 0x0a000001U
 #define MODEL_ADDRESS_B 0x0a000002U
 

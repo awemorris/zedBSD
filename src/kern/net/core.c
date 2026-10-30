@@ -281,7 +281,7 @@ net_shutdown_for_boot(
 	 * error transitions to avoid an unbounded shutdown-time diagnostic
 	 * storm while a retry is still making progress.
 	 */
-	deadline = clock_ticks() + KERN_MS_TO_TICKS(NET_SHUTDOWN_LIMIT_MS);
+	deadline = clock_ticks() + kern_ms_to_ticks(NET_SHUTDOWN_LIMIT_MS);
 	last_error = 0;
 	for (;;) {
 		error = net_device_shutdown_all();
@@ -402,8 +402,8 @@ wlan_retirement_worker(void *argument)
 	for (;;) {
 		wlan_retirement_run(clock_ticks());
 		now = clock_ticks();
-		sched_sleep(now < UINT64_MAX - KERN_CLOCK_HZ ?
-		    now + KERN_CLOCK_HZ : UINT64_MAX);
+		sched_sleep(now < UINT64_MAX - kern_ms_to_ticks(1000U) ?
+		    now + kern_ms_to_ticks(1000U) : UINT64_MAX);
 	}
 }
 

@@ -1247,7 +1247,7 @@ runtime_reaper(
 		enabled = spin_lock_irqsave(&node->queue_lock);
 
 		observed = waitq_sequence(&node->reaper_wake);
-		deadline = sched_ticks() + KERN_MS_TO_TICKS(RUNTIME_REAPER_PERIOD_MS);
+		deadline = sched_ticks() + kern_ms_to_ticks(RUNTIME_REAPER_PERIOD_MS);
 		(void)waitq_sleep(&node->reaper_wake, &node->queue_lock, observed, deadline, 0U);
 		stopping = node->reaper_stop;
 

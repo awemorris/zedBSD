@@ -65,19 +65,19 @@
 #define UHCI_MAX_TDS 255U
 #define UHCI_PCI_COMMAND 0x04U
 #define UHCI_PCI_MASTER 0x0004U
-#define UHCI_IRQ_DRAIN_TICKS KERN_MS_TO_TICKS(1000U)
-#define UHCI_RETIRE_TICKS KERN_MS_TO_TICKS(1000U)
-#define UHCI_QUIESCE_TICKS KERN_MS_TO_TICKS(1000U)
-#define UHCI_ADVANCE_POLL_TICKS KERN_MS_TO_TICKS(10U)
+#define UHCI_IRQ_DRAIN_TICKS kern_ms_to_ticks(1000U)
+#define UHCI_RETIRE_TICKS kern_ms_to_ticks(1000U)
+#define UHCI_QUIESCE_TICKS kern_ms_to_ticks(1000U)
+#define UHCI_ADVANCE_POLL_TICKS kern_ms_to_ticks(10U)
 
 /*
  * Match the established UHCI stuck-QH threshold: a normal TD-status/QH-element
  * writeback window must not be mistaken for the early-Intel element bug.
  */
-#define UHCI_QH_STALL_TICKS KERN_MS_TO_TICKS(200U)
+#define UHCI_QH_STALL_TICKS kern_ms_to_ticks(200U)
 
 /* A bounded 100-ms poll of the root ports. */
-#define UHCI_ROOT_POLL_TICKS KERN_MS_TO_TICKS(100U)
+#define UHCI_ROOT_POLL_TICKS kern_ms_to_ticks(100U)
 #define UHCI_PERIODIC_LEVELS 8U
 #define UHCI_MAX_PERIODIC_INTERVAL (1U << (UHCI_PERIODIC_LEVELS - 1U))
 #define UHCI_ASYNC_SKELETON UHCI_PERIODIC_LEVELS
