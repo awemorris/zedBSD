@@ -318,6 +318,14 @@ test_resolve(void)
 		if (strcmp(text, "127.0.0.1:25") != 0 && strcmp(text, "[::1]:25") != 0)
 			loopback = 0;
 	}
+	if (!loopback) {
+		/* What came instead, for the log. */
+		printf("NOTE resolve-localhost error=%d count=%zu\n", error, error == 0 ? count : (size_t)0);
+		for (index = 0; error == 0 && index < count; index++) {
+			(void)kl_address_format(&addresses[index], text, sizeof(text));
+			printf("NOTE resolve-localhost address=%s\n", text);
+		}
+	}
 	test_check(loopback, "resolve-localhost");
 
 	/* A number is its own address, of one family. */

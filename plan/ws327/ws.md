@@ -30,7 +30,7 @@
 | --- | --- | --- | --- | --- |
 | [ws327-p001](phase001/phase.md) | 設計（design.md、header の案、Win32 への写し方、移す app の一覧）、design-reviewer | P2 | cleared | — |
 | [ws327-p002](phase002/phase.md) | thread の層（`thread-posix.c`）と host 試験 | P2 | cleared | p001 |
-| [ws327-p003](phase003/phase.md) | network の層（`socket-posix.c`）と host 試験、zedBSD の guest で 1 回 | P2 | in-progress（guest の実行が残り） | p001 |
+| [ws327-p003](phase003/phase.md) | network の層（`socket-posix.c`）と host 試験、zedBSD の guest で 1 回 | P2 | in-progress（2026-10-30 guest で thread 27・socket 53 PASS、cleared の候補。判定は Q1） | p001 |
 | [ws327-p004](phase004/phase.md) | app の移行（一括） | — | canceled（p008〜p012 に分けた。Mailer の途中の移行 6bb8c3c8d は p008 が引き継ぐ） | — |
 | ws327-p005 | 解説と規約の全文の見直し（一括） | — | canceled（p015・p017 に分けた） | — |
 | ws327-p006 | Win32 の実装（一括） | — | canceled（p013・p014 に分けた） | — |

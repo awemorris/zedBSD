@@ -1,0 +1,13 @@
+# The allowed lines of check-layers.py (T1, N1).  Columns, separated by tabs: the check, a source (a file, or a
+# directory ending in /), the name found (a function, a type, a header; * for any), and why it is allowed.
+N1	userland/desktop/libkeiland/ui/app.c	*	the window's own wait on the Wayland connection's descriptor (the library's OS layer, not an IP socket)
+N1	userland/desktop/libkeiland/ui/window.c	*	the Wayland connection's descriptor waited for (the library's OS layer)
+N1	userland/desktop/libkeiland/ui/primary.c	*	the primary selection's pipe from the compositor waited for (Wayland, not an IP socket)
+N1	userland/desktop/libkeiland/ui/clipboard.c	*	the clipboard's pipes from the compositor waited for (Wayland, not an IP socket)
+N1	userland/desktop/libkeiland/system/system.c	*	the system calls' Wayland connection waited for (the library's OS layer)
+N1	userland/desktop/libkeiland/audio/audio.c	*	the sound stream's Wayland connection waited for (the library's OS layer)
+N1	userland/desktop/libkeiland/instance.c	*	one copy of a program: a local socket between two starts of the same program (Win32: a named pipe), not the IP network
+N1	userland/desktop/preview/	*	the preview's sandbox checks that the network is closed to it (part of the sandbox, not I/O)
+N1	userland/desktop/ime/main.c	*	the input method's own loop on its Wayland descriptor and signal pipe (not a socket of the network)
+N1	userland/desktop/installer/admin/	*	the installer's root helper, a program apart from the application API
+N1	userland/desktop/photos/media-worker.c	sys/socket.h	shutdown of the worker's own duplicate of the Wayland descriptor, to cut a blocked request (not the network)

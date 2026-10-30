@@ -100,7 +100,9 @@ static atomic_uint test_key_destroyed;
 static atomic_int test_detached_ran;
 
 /* The name the named thread read back for itself (Linux). */
+#if defined(__linux__)
 static char test_name_read[32];
+#endif
 
 static void test_check(int passed, const char *name);
 static uint64_t test_now_ms(void);
