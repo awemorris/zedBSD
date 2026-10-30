@@ -16,6 +16,12 @@
 #                                 game content, mailbox, 4 images (MVIEW_ARGS added, ZEDBSD_ENV set); MVIEW SPIN and
 #                                 STAGES lines, the compositor's KWL SCANOUT lines and the kernel's new lines of i915;
 #                                 OUT/summary.txt
+#   5330-mview.sh shot OUT COPIES (zedBSD) mview's still view of COPIES copies (FIFO, composed) taken by keiland-shot
+#                                 6 s in: OUT/shot-COPIES.png, compared with OUT/../linux-shot-COPIES.png when there
+#   5330-mview.sh linux-shot OUT COPIES  (Debian) the same view on weston (--debug) taken by weston-screenshooter:
+#                                 OUT/linux-shot-COPIES.png
+#   5330-mview.sh linux-exec SCRIPT  (Debian) SCRIPT run there with the iGPU on i915 (vfio-pci again after), at
+#                                 most 600 s (for a Linux-side diagnostic, as Mesa's INTEL_DEBUG dumps)
 #   5330-mview.sh linux           Debian again (zedBSD rebooted; the BootOrder brings Debian back)
 #   5330-mview.sh zedbsd          zedBSD started once from Debian (when Debian runs)
 #   5330-mview.sh restore         (Debian) the backup written back to p4, p5, p6 and the ESP loader, and compared
@@ -222,16 +228,19 @@ run() {
 rm -f /tmp/mview.log /tmp/mview-scanout.log /tmp/mview-kernel.log
 n=\$(wc -l < $SESSION)
 k=\$(dmesg | wc -l)
+( for i in \$(seq 1 $((${SPIN:-12} * 2 + 6))); do sysctl hw.gputelemetry | sed -n 's|.* cur_mhz=\([0-9]*\) req_mhz=\([0-9]*\).* objects_limit=\([0-9]*\).*|\1/\2/\3|p'; sleep 0.5; done > /tmp/mview-freq.log 2>&1 ) &
 su $user -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 ${ZEDBSD_ENV:-} /bin/mview --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-}' > /tmp/mview.log 2>&1 < /dev/null
 tail -n +\$n $SESSION | grep -E 'KWL SCANOUT' > /tmp/mview-scanout.log
 dmesg | tail -n +\$((k + 1)) > /tmp/mview-kernel.log
+wait
 EOS
-		zget "$out" /tmp/mview.log /tmp/mview-scanout.log /tmp/mview-kernel.log || { echo "c$copies FAIL logs" >> "$summary"; continue; }
-		for f in mview mview-scanout mview-kernel; do
+		zget "$out" /tmp/mview.log /tmp/mview-scanout.log /tmp/mview-kernel.log /tmp/mview-freq.log || { echo "c$copies FAIL logs" >> "$summary"; continue; }
+		for f in mview mview-scanout mview-kernel mview-freq; do
 			mv "$out/$f.log" "$out/c$copies-$f.log"
 		done
 		echo "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED)' "$out/c$copies-mview.log" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')" >> "$summary"
 		echo "c$copies scanout $(grep -c 'direct=1' "$out/c$copies-mview-scanout.log") direct, $(grep -c 'direct=0' "$out/c$copies-mview-scanout.log") not: $(grep 'direct=0' "$out/c$copies-mview-scanout.log" | head -1)" >> "$summary"
+		echo "c$copies cur/req_mhz $(sort -n "$out/c$copies-mview-freq.log" | uniq -c | sort -rn | head -4 | awk '{printf "%s×%s ", $2, $1}')" >> "$summary"
 		grep -iE 'i915|vk|fault|hang|reset|lost' "$out/c$copies-mview-kernel.log" | grep -v 'timing' | head -4 | sed "s/^/c$copies kernel /" >> "$summary"
 	done
 	cat "$summary"
@@ -246,7 +255,7 @@ linux_build() {
 
 # The iGPU to i915 (MODE host, the render node opened to the user, who is not in its group) or back to vfio-pci (MODE vfio), as plan/ws031/tests/host/igpu-mode.sh.
 igpu() {
-	T=120 deb "sudo -n sh -c 'D=0000:00:02.0; S=/sys/bus/pci/devices/\$D; cur=\$(basename \$(readlink \$S/driver) 2> /dev/null); want=\$( [ $1 = host ] && echo i915 || echo vfio-pci); if [ \"\$cur\" != \$want ]; then [ -n \"\$cur\" ] && echo \$D > \$S/driver/unbind; echo \$want > \$S/driver_override; [ \$want = i915 ] && modprobe i915; echo \$D > /sys/bus/pci/drivers_probe; fi; for i in 1 2 3 4 5 6 7 8 9 10; do [ \$want = vfio-pci ] || [ -e /dev/dri/renderD128 ] && break; sleep 1; done; [ \$want = i915 ] && setfacl -m u:\$SUDO_USER:rw /dev/dri/renderD128; basename \$(readlink \$S/driver)'"
+	T=120 deb "sudo -n sh -c 'D=0000:00:02.0; S=/sys/bus/pci/devices/\$D; cur=\$(basename \$(readlink \$S/driver) 2> /dev/null); want=\$( [ $1 = host ] && echo i915 || echo vfio-pci); if [ \"\$cur\" != \$want ]; then [ -n \"\$cur\" ] && echo \$D > \$S/driver/unbind; echo \$want > \$S/driver_override; [ \$want = i915 ] && modprobe i915; echo \$D > /sys/bus/pci/drivers_probe; fi; for i in 1 2 3 4 5 6 7 8 9 10; do [ \$want = vfio-pci ] || ls /dev/dri/renderD* > /dev/null 2>&1 && break; sleep 1; done; [ \$want = i915 ] && setfacl -m u:\$SUDO_USER:rw /dev/dri/renderD*; basename \$(readlink \$S/driver)'"
 }
 
 linux_run() {
@@ -260,10 +269,12 @@ linux_run() {
 	T=60 deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u); mkdir -p \$XDG_RUNTIME_DIR; pgrep -x weston > /dev/null || (export LIBSEAT_BACKEND=seatd; nohup weston --backend=drm --shell=kiosk --continue-without-input --socket=wayland-1 --log=/tmp/p022-weston.log --logger-scopes=log,drm-backend > /tmp/p022-weston.out 2>&1 < /dev/null & sleep 6); pgrep -x weston > /dev/null && echo weston up || { echo weston down; tail -5 /tmp/p022-weston.out; }" >> "$summary" 2>&1
 	T=30 deb "grep -E 'Output .*(mode|enabled)|head|1920|Chipset|Vulkan|GL_RENDERER' /tmp/p022-weston.log | head -6" >> "$out/weston-head.txt" 2>&1
 	for copies in ${*:-1 1030}; do
-		T=$((${SPIN:-12} + 120)) deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1; n=\$(wc -l < /tmp/p022-weston.log); VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json ${LINUX_ENV:-} ~/p1-p022/linux-mview/bin/mview --model=\$HOME/p1-p022/linux-mview/share/mview/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} > /tmp/p022-mview.log 2>&1 < /dev/null; tail -n +\$n /tmp/p022-weston.log | grep -E 'Using (plane-only|mixed|renderer)' | sed -E 's/^\[[0-9:.]+\][[:space:]]*//' | sort | uniq -c > /tmp/p022-planes.log"
+		T=$((${SPIN:-12} + 120)) deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1; n=\$(wc -l < /tmp/p022-weston.log); sudo -n setfacl -m u:\$(id -un):rw /dev/dri/renderD*; (for i in \$(seq 1 $((${SPIN:-12} * 2 + 4))); do cat /sys/class/drm/card*/gt_act_freq_mhz 2> /dev/null | head -1; sleep 0.5; done > /tmp/p022-freq.log) & VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json ${LINUX_ENV:-} ~/p1-p022/linux-mview/bin/mview --model=\$HOME/p1-p022/linux-mview/share/mview/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} > /tmp/p022-mview.log 2>&1 < /dev/null; tail -n +\$n /tmp/p022-weston.log | grep -E 'Using (plane-only|mixed|renderer)' | sed -E 's/^\[[0-9:.]+\][[:space:]]*//' | sort | uniq -c > /tmp/p022-planes.log"
 		timeout 60 scp -q "$HOST:/tmp/p022-mview.log" "$out/c$copies-mview.log"
 		timeout 60 scp -q "$HOST:/tmp/p022-planes.log" "$out/c$copies-planes.log"
+		timeout 60 scp -q "$HOST:/tmp/p022-freq.log" "$out/c$copies-freq.log"
 		echo "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED)' "$out/c$copies-mview.log" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')" >> "$summary"
+		echo "c$copies act_mhz $(sort -n "$out/c$copies-freq.log" | uniq -c | sort -rn | head -4 | awk '{printf "%s×%s ", $2, $1}')" >> "$summary"
 		echo "c$copies weston $(sed 's/^ *//' "$out/c$copies-planes.log" | tr '\n' ' ')" >> "$summary"
 	done
 	grep -m1 -E 'deviceName|device=|GPU' "$out/c${1:-1}-mview.log" >> "$summary" 2>/dev/null
@@ -272,7 +283,54 @@ linux_run() {
 	cat "$summary"
 }
 
+shot() {
+	out=$1
+	copies=$2
+	mkdir -p "$out"
+	to_zedbsd || return 1
+	user=$(T=15 zs "awk -F: '\$3 == 1000 { print \$1; exit }' /etc/passwd" < /dev/null)
+	zrun << EOS || return 1
+rm -f /tmp/shot.png /tmp/mview-shot.log
+su $user -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 /bin/mview --token=shot --frames=900 --content=none --present=fifo --copies=$copies' > /tmp/mview-shot.log 2>&1 < /dev/null &
+sleep 6
+su $user -c 'env XDG_RUNTIME_DIR=/run/user/1000 keiland-shot /tmp/shot.png' > /dev/null 2>&1 < /dev/null
+wait
+EOS
+	zget "$out" /tmp/shot.png /tmp/mview-shot.log || return 1
+	mv "$out/shot.png" "$out/shot-$copies.png"
+	grep -E 'MVIEW (DONE|FAILED)' "$out/mview-shot.log"
+	ref=$(dirname "$out")/linux-shot-$copies.png
+	[ -f "$ref" ] && echo "against $ref: $(python3 -I plan/tools/frame-ops/shot-diff.py "$ref" "$out/shot-$copies.png")"
+}
+
+linux_shot() {
+	out=$1
+	copies=$2
+	mkdir -p "$out"
+	to_linux || return 1
+	echo "igpu $(igpu host)"
+	T=60 deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) LIBSEAT_BACKEND=seatd; pgrep -x weston > /dev/null || (nohup weston --debug --backend=drm --shell=kiosk --continue-without-input --socket=wayland-1 > /tmp/p022-weston-shot.out 2>&1 < /dev/null & sleep 6); pgrep -x weston > /dev/null && echo weston up || echo weston down"
+	T=120 deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1; cd /tmp; rm -f wayland-screenshot*.png; sudo -n setfacl -m u:\$(id -un):rw /dev/dri/renderD*; VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json ~/p1-p022/linux-mview/bin/mview --model=\$HOME/p1-p022/linux-mview/share/mview/qs40 --token=shot --frames=600 --content=none --present=fifo --copies=$copies > /tmp/p022-mview-shot.log 2>&1 < /dev/null & sleep 6; weston-screenshooter > /dev/null 2>&1 < /dev/null; wait; grep -E 'MVIEW (DONE|FAILED)' /tmp/p022-mview-shot.log; ls /tmp/wayland-screenshot*.png | head -1" > "$out/linux-shot.txt" 2>&1
+	cat "$out/linux-shot.txt"
+	png=$(grep 'wayland-screenshot' "$out/linux-shot.txt" | tail -1)
+	[ -n "$png" ] && timeout 60 scp -q "$HOST:$png" "$out/linux-shot-$copies.png"
+	T=30 deb 'pkill -x weston; sleep 3; pgrep -x weston > /dev/null && echo weston still running || echo weston ended'
+	echo "igpu $(igpu vfio)"
+	ls -la "$out/linux-shot-$copies.png" 2>&1
+}
+
+linux_exec() {
+	to_linux || return 1
+	echo "igpu $(igpu host)"
+	timeout 60 scp -q "$1" "$HOST:p1-p022/exec.sh" || return 1
+	T=600 deb 'sh p1-p022/exec.sh'
+	echo "igpu $(igpu vfio)"
+}
+
 case "$cmd" in
+linux-exec) linux_exec "$1" ;;
+shot) shot "$1" "$2" ;;
+linux-shot) linux_shot "$1" "$2" ;;
 linux-build) linux_build ;;
 linux-run) linux_run "$@" ;;
 backup) backup ;;

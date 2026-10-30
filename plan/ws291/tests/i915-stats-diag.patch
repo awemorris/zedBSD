@@ -1,0 +1,187 @@
+diff -ru a/src/drivers/gpu/i915/gt-power.c b/src/drivers/gpu/i915/gt-power.c
+--- a/src/drivers/gpu/i915/gt-power.c	2026-10-31 00:39:40.685740658 +0900
++++ b/src/drivers/gpu/i915/gt-power.c	2026-10-31 00:39:40.649740754 +0900
+@@ -17,6 +17,7 @@
+  */
+ 
+ #include "i915.h"
++#define I915_P022_CAGF 1
+ #include "gt-power.h"
+ #include "irq.h"
+ #include "mmio.h"
+@@ -776,6 +777,13 @@
+ 	if (rps->busy_runs != 0U && now > rps->busy_since_ns)
+ 		busy += now - rps->busy_since_ns;
+ 	written = rps->last_freq;
++#ifdef I915_P022_CAGF
++	if (rps->mmio != NULL && rps->busy_runs != 0U) {
++		entry->cur_mhz = ((drv_i915_read32(rps->mmio, I915_GT_GEN12_RPSTAT1) & I915_GT_GEN12_CAGF_MASK) >> I915_GT_GEN12_CAGF_SHIFT) * 50U / 3U;
++		entry->valid |= GPU_TELEMETRY_CUR_MHZ;
++		entry->objects_limit = drv_i915_read32(rps->mmio, 0x1381a8U);
++	}
++#endif
+ 	lowest = rps->min_softlimit;
+ 	highest = rps->max_softlimit;
+ 	enabled = rps->enabled;
+diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
+--- a/src/drivers/gpu/i915/vk/vk-draw.c	2026-10-31 00:39:57.409696297 +0900
++++ b/src/drivers/gpu/i915/vk/vk-draw.c	2026-10-31 00:39:57.409696297 +0900
+@@ -40,6 +40,10 @@
+ 
+ #include "../intel/genxml.h"
+ #include "../intel/genxml-gen9.h"
++#ifdef I915_P022_STATS
++#include "../intel/commands.h"
++#include "../mmio.h"
++#endif
+ 
+ /*
+  * The draw checkpoint.
+@@ -117,6 +121,9 @@
+ 	work->cursor.cmds = work->batch->address;
+ 	work->cursor.count = 0U;
+ 	work->cursor.capacity = I915_GFX_BATCH_BYTES / 4U;
++#ifdef I915_P022_STATS
++	work->cursor.capacity -= 64U;
++#endif
+ 	work->cursor.overflow = 0;
+ 	work->cursor.graphics_ver = session->vk->i915->gt.graphics_ver;
+ 	work->window_generation = 1U;
+@@ -200,6 +207,50 @@
+ 	return 0;
+ }
+ 
++#ifdef I915_P022_STATS
++static const uint32_t i915_p022_regs[6] = { 0x2310U, 0x2318U, 0x2320U, 0x2338U, 0x2340U, 0x2348U };
++
++static void
++i915_p022_srm(
++	struct i915_gfx_session *work,
++	unsigned half)
++{
++	uint64_t va;
++	unsigned i;
++
++	for (i = 0U; i < 6U; i++) {
++		va = work->batch->va + I915_GFX_BATCH_BYTES - 256U + half * 64U + i * 8U;
++		drv_i915_batch_emit(&work->cursor, I915_CMD_MI_STORE_REGISTER_MEM_GEN8);
++		drv_i915_batch_emit(&work->cursor, i915_p022_regs[i]);
++		drv_i915_batch_emit(&work->cursor, (uint32_t)va);
++		drv_i915_batch_emit(&work->cursor, (uint32_t)(va >> 32));
++	}
++}
++
++static void
++i915_p022_collect(
++	struct i915_render_session *session,
++	struct i915_gfx_session *work)
++{
++	uint32_t cagf;
++
++	const uint32_t *tail;
++	unsigned i;
++
++	tail = (const uint32_t *)((const uint8_t *)work->batch->address + I915_GFX_BATCH_BYTES - 256U);
++	for (i = 0U; i < 6U; i++)
++		work->stat_counts[i] += (uint32_t)(tail[16U + i * 2U] - tail[i * 2U]);
++	(void)session;
++	cagf = (tail[28] >> 11) & 0x1ffU;
++	if (work->ops_pending < 10U)
++		return;
++	work->stat_cagf_sum += cagf;
++	work->stat_cagf_n++;
++	if (work->stat_cagf_min == 0U || cagf < work->stat_cagf_min)
++		work->stat_cagf_min = cagf;
++}
++#endif
++
+ /*
+  * Runs what a submission recorded and closes its batch.
+  *
+@@ -354,6 +405,10 @@
+ 			return error;
+ 	}
+ 
++#ifdef I915_P022_STATS
++	if (work->cursor.count == 0U)
++		i915_p022_srm(work, 0U);
++#endif
+ 	/* Hands the next slot and the batch to the operation, which starts here. */
+ 	space->slot = (uint8_t *)work->state->address + (uint64_t)work->slot_next * I915_GFX_SLOT_BYTES;
+ 	space->slot_va = work->state->va + (uint64_t)work->slot_next * I915_GFX_SLOT_BYTES;
+@@ -429,9 +484,21 @@
+ 		return 0;
+ 	}
+ 
++#ifdef I915_P022_STATS
++	drv_i915_batch_emit(&work->cursor, I915_CMD_MI_STORE_REGISTER_MEM_GEN8);
++	drv_i915_batch_emit(&work->cursor, 0x1381b4U);
++	drv_i915_batch_emit(&work->cursor, (uint32_t)(work->batch->va + I915_GFX_BATCH_BYTES - 256U + 112U));
++	drv_i915_batch_emit(&work->cursor, (uint32_t)((work->batch->va + I915_GFX_BATCH_BYTES - 256U + 112U) >> 32));
++	drv_i915_batch_pipe_control(&work->cursor, I915_CMD_PIPE_CONTROL_CS_STALL);
++	i915_p022_srm(work, 1U);
++#endif
+ 	/* Runs the batch to its end on the session's render context, timing it for the frame timing. */
+ 	start = drv_i915_perf_now();
+ 	error = drv_i915_gfx_batch_run(session, &work->cursor, work->batch->va, I915_ENGINE_RCS0);
++#ifdef I915_P022_STATS
++	if (error == 0)
++		i915_p022_collect(session, work);
++#endif
+ 	work->stat_run_ns += drv_i915_perf_now() - start;
+ 	work->stat_runs++;
+ 	work->stat_ops += work->ops_pending;
+@@ -1274,6 +1341,27 @@
+ 			  (unsigned)((window - work->stat_submit_ns) / per / 1000U));
+ 	}
+ 
++#ifdef I915_P022_STATS
++	if (work->stat_submits >= 50U)
++		kern_logf("i915: vk: session %u: stats per submit: ia_vertices %u ia_primitives %u vs %u cl %u cl_prims %u ps %u\n",
++			  session->gpu->identifier,
++			  (unsigned)(work->stat_counts[0] / work->stat_submits),
++			  (unsigned)(work->stat_counts[1] / work->stat_submits),
++			  (unsigned)(work->stat_counts[2] / work->stat_submits),
++			  (unsigned)(work->stat_counts[3] / work->stat_submits),
++			  (unsigned)(work->stat_counts[4] / work->stat_submits),
++			  (unsigned)(work->stat_counts[5] / work->stat_submits));
++	if (work->stat_cagf_n != 0U)
++		kern_logf("i915: vk: session %u: actual GT frequency at the end of a batch of 10 ops or more (GPU read): avg %u MHz, lowest %u MHz (%u reads)\n",
++			  session->gpu->identifier,
++			  (unsigned)(work->stat_cagf_sum * 50U / 3U / work->stat_cagf_n),
++			  work->stat_cagf_min * 50U / 3U,
++			  work->stat_cagf_n);
++	work->stat_cagf_sum = 0U;
++	work->stat_cagf_n = 0U;
++	work->stat_cagf_min = 0U;
++	kern_memset(work->stat_counts, 0, sizeof(work->stat_counts));
++#endif
+ 	/* A new window starts. */
+ 	work->stat_start = now;
+ 	work->stat_submits = 0U;
+diff -ru a/src/drivers/gpu/i915/vk/vk-draw.h b/src/drivers/gpu/i915/vk/vk-draw.h
+--- a/src/drivers/gpu/i915/vk/vk-draw.h	2026-10-31 00:39:40.685740658 +0900
++++ b/src/drivers/gpu/i915/vk/vk-draw.h	2026-10-31 00:39:40.633740796 +0900
+@@ -21,6 +21,9 @@
+ #ifndef DRIVERS_GPU_I915_VK_VK_DRAW_H
+ #define DRIVERS_GPU_I915_VK_VK_DRAW_H
+ 
++/* Diagnostic build: the pipeline statistics of every batch. */
++#define I915_P022_STATS 1
++
+ #include <stdint.h>
+ 
+ #include "vk-batch.h"
+@@ -124,6 +127,12 @@
+ 	uint32_t stat_ops_max;
+ 	uint64_t stat_submit_ns;
+ 	uint64_t stat_run_ns;
++#ifdef I915_P022_STATS
++	uint64_t stat_counts[6];
++	uint64_t stat_cagf_sum;
++	uint32_t stat_cagf_n;
++	uint32_t stat_cagf_min;
++#endif
+ };
+ 
+ /*

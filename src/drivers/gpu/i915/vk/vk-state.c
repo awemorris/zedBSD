@@ -931,6 +931,50 @@ drv_i915_gfx_mocs_uncached(
 }
 
 /*
+ * Returns the MOCS field value a draw's inputs and internal surfaces use
+ * (vertex and index buffers, textures, uniform data, the depth buffer, the
+ * state): on Gen12 index 2, write-back in the L3 and the LLC; Gen9 and
+ * Ice Lake keep the uncached entry.  The caches hold nothing across a
+ * submission's end: the request's flush writes the L3 back and its
+ * invalidate drops the read caches.
+ *
+ * Values referenced: Mesa 25.0.7 src/intel/isl/isl.c (isl_device_setup_mocs,
+ * the Tiger Lake and Alder Lake case: internal 2).
+ */
+uint32_t
+drv_i915_gfx_mocs_cached(
+	unsigned graphics_ver)
+{
+	/* Gen9's and Gen11's: unchanged. */
+	if (graphics_ver < 12U)
+		return GEN12_MOCS(GEN9_MOCS_UNCACHED_INDEX);
+
+	/* Gen12's. */
+	return GEN12_MOCS(I915_MOCS_WRITEBACK_INDEX);
+}
+
+/*
+ * Returns the MOCS field value of a draw's colour targets, which the
+ * display may scan out: on Gen12 index 61, write-back in the L3 (written
+ * back at the submission's end) and uncached in the LLC, which the display
+ * does not read through; Gen9 and Ice Lake keep the uncached entry.
+ *
+ * Values referenced: Mesa 25.0.7 src/intel/isl/isl.c (isl_device_setup_mocs,
+ * the Tiger Lake and Alder Lake case: external 61).
+ */
+uint32_t
+drv_i915_gfx_mocs_display(
+	unsigned graphics_ver)
+{
+	/* Gen9's and Gen11's: unchanged. */
+	if (graphics_ver < 12U)
+		return GEN12_MOCS(GEN9_MOCS_UNCACHED_INDEX);
+
+	/* Gen12's. */
+	return GEN12_MOCS(I915_MOCS_DISPLAY_INDEX);
+}
+
+/*
  * Emits the start of one operation of a 3D batch: the pipeline switch, the
  * state bases and the state programmed once per context before its first
  * draw.
@@ -2703,7 +2747,8 @@ i915_state_write_surfaces(
 	const char *missing;
 
 	/* Points the render targets' binding table entries at the levels and layers their views write. */
-	error = i915_state_write_targets(surface, state, target, mocs, graphics_ver);
+	/* The colour targets take the entry of a surface the display may scan out. */
+	error = i915_state_write_targets(surface, state, target, drv_i915_gfx_mocs_display(graphics_ver), graphics_ver);
 	if (error != 0)
 		return error;
 
