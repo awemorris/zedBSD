@@ -44,7 +44,6 @@
 #include <kern/waitq.h>
 #include <uapi/errno.h>
 #include <uapi/gpu.h>
-#include <hal/hal.h>
 
 #include "drivers/gpu/powervr/render-private.h"
 #include "drivers/gpu/powervr/fixed-area.h"
@@ -153,7 +152,7 @@ static void describe_timelines(const struct powervr_session *session);
 
 /*
  * The job trace: with POWERVR_JOB_TRACE 1 every render
- * kick waits, spinning on the fine counter (hal_rtc_read_counter), for its
+ * kick waits, spinning on the fine counter (kern_rtc_read_counter), for its
  * geometry's and its fragment's timeline values, and the times from the
  * kick's start to its commands sent, to the TA's end and to the 3D's end
  * are summed for small jobs (a render area of less than TRACE_SMALL_PIXELS)
@@ -647,7 +646,7 @@ powervr_session_kick_render(
 	/* When the kick began, for the job trace; one small job's firmware trace is marked to be dumped. */
 	trace_started = 0;
 	if (POWERVR_JOB_TRACE) {
-		(void)hal_rtc_read_counter(&trace_started, &trace_rate);
+		(void)kern_rtc_read_counter(&trace_started, &trace_rate);
 		if (session->trace_pixels < TRACE_SMALL_PIXELS) {
 			trace_small_jobs++;
 			if (trace_small_jobs == TRACE_DUMP_JOB) {
@@ -1588,7 +1587,7 @@ powervr_busy_clock(
 
 /*
  * Reads the timing's clock now, for the start of a timed part: the fine
- * counter (hal_rtc_read_counter; the scheduler's 1 ms tick hides the
+ * counter (kern_rtc_read_counter; the scheduler's 1 ms tick hides the
  * parts of a job), else the scheduler's ticks.
  */
 uint64_t
@@ -1600,7 +1599,7 @@ powervr_timing_now(
 	bool ok;
 
 	/* The fine counter, its rate kept for timing_us. */
-	ok = hal_rtc_read_counter(&now, &rate);
+	ok = kern_rtc_read_counter(&now, &rate);
 	if (ok && rate != 0U) {
 		timing_rate = rate;
 		return now;
@@ -3339,7 +3338,7 @@ job_trace(
 	bool ok;
 
 	/* Without the counter, nothing is traced. */
-	ok = hal_rtc_read_counter(&now, &rate);
+	ok = kern_rtc_read_counter(&now, &rate);
 	if (!ok || rate == 0U || started == 0U)
 		return;
 
@@ -3350,7 +3349,7 @@ job_trace(
 	limit = now + rate * TRACE_SPIN_MS / 1000U;
 	geometry_done = false;
 	for (;;) {
-		(void)hal_rtc_read_counter(&now, &rate);
+		(void)kern_rtc_read_counter(&now, &rate);
 		geometry_now = powervr_object_get32(&context->geometry.timeline, POWERVR_SYNC_ADDRESS);
 		fragment_now = powervr_object_get32(&context->fragment.timeline, POWERVR_SYNC_ADDRESS);
 

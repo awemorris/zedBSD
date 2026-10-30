@@ -116,7 +116,7 @@ drv_bcm2712_gpu_attach(
 	}
 
 	/* Finds the device tree in the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (fdt_phys == 0 || blob == NULL) {
 		bcm2711_stage_mark(BCM2711_FAMILY_V3D, "no device tree");
 		return ENODEV;

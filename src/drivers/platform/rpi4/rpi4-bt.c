@@ -410,7 +410,7 @@ drv_rpi4_bt_probe(
 	}
 
 	/* Maps the tree's address. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL) {
 		atomic_raw_store_release(&bt_probe_state, PROBE_REFUSED);
 		return ENODEV;

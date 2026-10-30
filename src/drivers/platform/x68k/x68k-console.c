@@ -6,12 +6,13 @@
  */
 
 /*
- * The X68000 console: /dev/console over the HAL's text screen.
+ * The X68000 console: /dev/console over the platform's text screen.
  *
- * The console is a teletype: each character goes to hal_putc(), which
- * draws it on the text screen.  A positioned write has no teletype meaning
- * and is dropped; the grid only answers the size and cursor queries that
- * programs make.  The console has no input yet.
+ * The console is a teletype: each character goes to
+ * kern_console_early_putc(), which draws it on the text screen.  A
+ * positioned write has no teletype meaning and is dropped; the grid only
+ * answers the size and cursor queries that programs make.  The console has
+ * no input yet.
  *
  * Once a GPU has flipped its first image the console leaves the text
  * screen for good: the kernel takes the character path over from the
@@ -24,11 +25,11 @@
 #include "drivers/platform/x68k/x68k-console.h"
 
 #include <hal/hal.h>
-
+#include <kern/platform.h>
 #include <kern/text-display.h>
 #include <uapi/errno.h>
 
-/* The grid the console reports, the HAL's text screen's. */
+/* The grid the console reports, the platform's text screen's. */
 #define X68K_CONSOLE_COLUMNS	96U
 #define X68K_CONSOLE_ROWS	32U
 
@@ -94,7 +95,7 @@ console_putc(
 	int character)
 {
 	/* Writes the character wherever the hardware layer shows the console. */
-	hal_putc(character);
+	kern_console_early_putc(character);
 }
 
 /* Drops a positioned write, which a teletype cannot place. */

@@ -17,7 +17,6 @@
  */
 
 #include <uapi/errno.h>
-#include <hal/hal.h>
 #include <kern/device-io.h>
 #include <kern/text-display.h>
 #include <kern/klog.h>
@@ -984,7 +983,7 @@ drv_pcat_text_reveal_fatal(
 	int locked;
 
 	/* Takes text_lock unless this CPU holds it already or another holds it too long. */
-	cpu = (unsigned)hal_cpu_current();
+	cpu = kern_cpu_current();
 	locked = 0;
 	for (spins = 0; spins < TEXT_FATAL_LOCK_SPINS; spins++) {
 		/* This CPU stopped inside a console write: drawing without the lock is all that is left. */

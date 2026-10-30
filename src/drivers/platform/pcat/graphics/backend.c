@@ -15,7 +15,6 @@
 #include "drivers/platform/pcat/graphics/pcat.h"
 
 #include <drivers/pci/pci.h>
-#include <hal/hal.h>
 #include <kern/kcrt.h>
 #include "kern/klog.h"
 #include "kern/text-display.h"

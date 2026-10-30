@@ -23,7 +23,6 @@ void thread_start(struct thread *);
 #endif
 
 #include <uapi/errno.h>
-#include <hal/hal.h>
 #include <limits.h>
 #include <stdint.h>
 #include "kern/irq.h"

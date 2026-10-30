@@ -81,7 +81,7 @@ drv_rpi4_pcie_init(
 	register_usb_drivers();
 
 	/* Finds the device tree in the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL)
 		return ENODEV;
 

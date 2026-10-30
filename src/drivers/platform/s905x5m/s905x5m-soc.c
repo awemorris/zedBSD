@@ -21,7 +21,6 @@
 
 #include <drivers/platform/s905x5m/s905x5m-soc.h>
 
-#include <hal/hal.h>
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
@@ -191,7 +190,7 @@ drv_s905x5m_soc_init(
 		return 0;
 
 	/* Opens the device tree through the direct map. */
-	blob = kern_pmem_to_kernel((hal_physaddr_t)fdt_phys);
+	blob = kern_pmem_to_kernel((kern_physaddr_t)fdt_phys);
 	if (blob == NULL)
 		return ENODEV;
 	error = drv_fdt_open(&s905x5m_soc.fdt, blob, S905X5M_FDT_READ_LIMIT);

@@ -25,7 +25,6 @@
 #include "drivers/platform/s905x5m/s905x5m-soc.h"
 #include "drivers/mmc/meson-mmc.h"
 
-#include <hal/hal.h>
 #include <kern/device-io.h>
 #include <kern/disk.h>
 #include <kern/kcrt.h>

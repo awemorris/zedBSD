@@ -36,8 +36,7 @@
 
 #include "splash.h"
 
-#include <hal/hal.h>
-
+#include <kern/clock.h>
 #include <stdbool.h>
 #include <stddef.h>
 
@@ -272,7 +271,7 @@ drv_pcat_splash_stop(
 }
 
 /*
- * Finds the frame for the time now from the HAL's monotonic counter.
+ * Finds the frame for the time now from the kernel's monotonic counter.
  * Reports 0 when the counter cannot be read yet, and the caller steps once
  * per line instead.
  */
@@ -285,8 +284,8 @@ splash_timed_frame(
 	uint64_t steps;
 	bool available;
 
-	/* Reads the counter, which an early HAL may not have yet. */
-	available = hal_rtc_read_counter(&counter, &frequency);
+	/* Reads the counter, which may not run yet this early. */
+	available = kern_rtc_read_counter(&counter, &frequency);
 	if (!available)
 		return 0;
 

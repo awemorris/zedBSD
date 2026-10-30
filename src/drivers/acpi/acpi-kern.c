@@ -20,7 +20,6 @@
 
 #include <stdarg.h>
 
-#include <hal/hal.h>
 #include <kern/kcrt.h>
 #include <uapi/errno.h>
 
@@ -29,11 +28,13 @@
 #include <drivers/pci/pci.h>
 
 #include "kern/clock.h"
+#include "kern/device-io.h"
 #include "kern/irq.h"
 #include "kern/klog.h"
 #include "kern/kmem.h"
 #include "kern/lock.h"
 #include "kern/platform.h"
+#include "kern/pmem.h"
 #include "kern/sched.h"
 #include "kern/sleep.h"
 #include "kern/thread.h"
@@ -467,13 +468,13 @@ drv_acpi_os_port_read(
 	/* Reads at the width. */
 	switch (width) {
 	case 8:
-		*value = hal_io_inp8((uint16_t)port);
+		*value = kern_io_in8((uint16_t)port);
 		break;
 	case 16:
-		*value = hal_io_inp16((uint16_t)port);
+		*value = kern_io_in16((uint16_t)port);
 		break;
 	case 32:
-		*value = hal_io_inp32((uint16_t)port);
+		*value = kern_io_in32((uint16_t)port);
 		break;
 	default:
 		/* Refuses another width. */
@@ -500,13 +501,13 @@ drv_acpi_os_port_write(
 	/* Writes at the width. */
 	switch (width) {
 	case 8:
-		hal_io_outp8((uint16_t)port, (uint8_t)value);
+		kern_io_out8((uint16_t)port, (uint8_t)value);
 		break;
 	case 16:
-		hal_io_outp16((uint16_t)port, (uint16_t)value);
+		kern_io_out16((uint16_t)port, (uint16_t)value);
 		break;
 	case 32:
-		hal_io_outp32((uint16_t)port, value);
+		kern_io_out32((uint16_t)port, value);
 		break;
 	default:
 		/* Refuses another width. */
@@ -728,8 +729,8 @@ start_global_lock(void)
 	page = firmware.facs_address & ~(uint64_t)(PAGE_SIZE - 1U);
 	offset = firmware.facs_address - page;
 	size = (size_t)((offset + FACS_LOCK_END + PAGE_SIZE - 1U) & ~(uint64_t)(PAGE_SIZE - 1U));
-	error = hal_space_map_device((hal_physaddr_t)page, size, HAL_SPACE_READ | HAL_SPACE_WRITE, &mapping);
-	if (error != HAL_OK)
+	error = kern_device_map(page, size, KERN_DEVICE_UNCACHED, &mapping);
+	if (error != 0)
 		return EFAULT;
 
 	/* Finds the FACS inside the mapping. */
@@ -747,14 +748,14 @@ start_global_lock(void)
 	    facs[2] != 'C' ||
 	    facs[3] != 'S' ||
 	    length < FACS_LOCK_END) {
-		(void)hal_space_unmap_device(mapping, size);
+		(void)kern_device_unmap(mapping, size);
 		return EINVAL;
 	}
 
 	/* Hands the lock's dword to the interpreter. */
 	error = drv_acpi_global_lock_attach((volatile uint32_t *)(facs + FACS_GLOBAL_LOCK));
 	if (error != 0) {
-		(void)hal_space_unmap_device(mapping, size);
+		(void)kern_device_unmap(mapping, size);
 		return error;
 	}
 
@@ -919,15 +920,15 @@ read_physical(
 			part = length;
 
 		/* Maps the page for reading. */
-		error = hal_space_map_device((hal_physaddr_t)page, PAGE_SIZE, HAL_SPACE_READ, &mapping);
-		if (error != HAL_OK)
+		error = kern_device_map(page, PAGE_SIZE, KERN_DEVICE_UNCACHED | KERN_DEVICE_READONLY, &mapping);
+		if (error != 0)
 			return EFAULT;
 
 		/* Copies the part. */
 		kern_memcpy(destination, (const uint8_t *)mapping + offset, part);
 
 		/* Lets the mapping go; a mapping that will not go only wastes address space. */
-		(void)hal_space_unmap_device(mapping, PAGE_SIZE);
+		(void)kern_device_unmap(mapping, PAGE_SIZE);
 
 		/* Moves on past the part. */
 		destination += part;
@@ -1037,36 +1038,36 @@ memory_move(
 	case 8:
 		/* Writes or reads one byte. */
 		if (write) {
-			hal_mmio_write8(virtual_address, (uint8_t)*value);
+			kern_mmio_write8(virtual_address, (uint8_t)*value);
 		} else {
-			*value = hal_mmio_read8(virtual_address);
+			*value = kern_mmio_read8(virtual_address);
 		}
 
 		break;
 	case 16:
 		/* Writes or reads one word. */
 		if (write) {
-			hal_mmio_write16(virtual_address, (uint16_t)*value);
+			kern_mmio_write16(virtual_address, (uint16_t)*value);
 		} else {
-			*value = hal_mmio_read16(virtual_address);
+			*value = kern_mmio_read16(virtual_address);
 		}
 
 		break;
 	case 32:
 		/* Writes or reads one double word. */
 		if (write) {
-			hal_mmio_write32(virtual_address, (uint32_t)*value);
+			kern_mmio_write32(virtual_address, (uint32_t)*value);
 		} else {
-			*value = hal_mmio_read32(virtual_address);
+			*value = kern_mmio_read32(virtual_address);
 		}
 
 		break;
 	default:
 		/* Writes or reads one quad word, the only width left. */
 		if (write) {
-			hal_mmio_write64(virtual_address, *value);
+			kern_mmio_write64(virtual_address, *value);
 		} else {
-			*value = hal_mmio_read64(virtual_address);
+			*value = kern_mmio_read64(virtual_address);
 		}
 
 		break;
@@ -1108,13 +1109,13 @@ memory_page(
 	}
 
 	/* Maps the page uncached, as firmware memory and devices want it. */
-	error = hal_space_map_device((hal_physaddr_t)page, PAGE_SIZE, HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE, &mapping);
-	if (error != HAL_OK)
+	error = kern_device_map(page, PAGE_SIZE, KERN_DEVICE_UNCACHED, &mapping);
+	if (error != 0)
 		return EFAULT;
 
 	/* Lets the oldest mapping go; a mapping that will not go only wastes address space. */
 	if (oldest->virtual_address != NULL)
-		(void)hal_space_unmap_device(oldest->virtual_address, PAGE_SIZE);
+		(void)kern_device_unmap(oldest->virtual_address, PAGE_SIZE);
 
 	/* Keeps the new mapping in the slot, stamped as used now. */
 	oldest->page = page;
@@ -1151,38 +1152,38 @@ io_handler(
 	case 8:
 		/* Writes or reads one byte. */
 		if (access->write) {
-			hal_io_outp8(port, (uint8_t)*value);
+			kern_io_out8(port, (uint8_t)*value);
 		} else {
-			*value = hal_io_inp8(port);
+			*value = kern_io_in8(port);
 		}
 
 		break;
 	case 16:
 		/* Writes or reads one word. */
 		if (access->write) {
-			hal_io_outp16(port, (uint16_t)*value);
+			kern_io_out16(port, (uint16_t)*value);
 		} else {
-			*value = hal_io_inp16(port);
+			*value = kern_io_in16(port);
 		}
 
 		break;
 	case 32:
 		/* Writes or reads one double word. */
 		if (access->write) {
-			hal_io_outp32(port, (uint32_t)*value);
+			kern_io_out32(port, (uint32_t)*value);
 		} else {
-			*value = hal_io_inp32(port);
+			*value = kern_io_in32(port);
 		}
 
 		break;
 	default:
 		/* Writes or reads two double words, the lower first. */
 		if (access->write) {
-			hal_io_outp32(port, (uint32_t)*value);
-			hal_io_outp32((uint16_t)(port + 4U), (uint32_t)(*value >> 32));
+			kern_io_out32(port, (uint32_t)*value);
+			kern_io_out32((uint16_t)(port + 4U), (uint32_t)(*value >> 32));
 		} else {
-			*value = hal_io_inp32(port);
-			*value |= (uint64_t)hal_io_inp32((uint16_t)(port + 4U)) << 32;
+			*value = kern_io_in32(port);
+			*value |= (uint64_t)kern_io_in32((uint16_t)(port + 4U)) << 32;
 		}
 
 		break;

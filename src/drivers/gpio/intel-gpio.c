@@ -31,9 +31,8 @@
  * low), and while a bit is set in both GPI_IS and GPI_IE the controller
  * asserts its own interrupt line, the Interrupt of its _CRS (the 5330's
  * \_SB.GPI0: IRQ 14, level, active low; its MADT has no override for 14,
- * so the line is configured with hal_irq_set_mode through
- * kern_irq_set_mode).  The registers are those of the Tiger Lake LP family
- * (INTC1055, INT34C5): HOSTSW_OWN at 0xb0,
+ * so the line is configured with kern_irq_set_mode).  The registers are
+ * those of the Tiger Lake LP family (INTC1055, INT34C5): HOSTSW_OWN at 0xb0,
  * GPI_IS at 0x100 and GPI_IE at 0x120 in the community, one 32-bit
  * register a group, the group's index being where its HOSTSW_OWN register
  * is (\_SB.GPCL's fourth field: 0xb0 plus 4 a group).  Another family is

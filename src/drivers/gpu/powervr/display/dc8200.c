@@ -37,7 +37,6 @@
 #include "drivers/gpu/powervr/display/dc8200-hdmi.h"
 #include "drivers/gpu/powervr/display/dc8200-mode.h"
 #include "drivers/gpu/powervr/powervr.h"
-#include <hal/hal.h>
 #include <kern/atomic.h>
 #include <kern/boot.h>
 #include <kern/clock.h>
@@ -650,7 +649,7 @@ drv_powervr_dc_own_wanted(
 		return 1;
 
 	/* A boot line that names a mode, readable or not, asks for the driver's own. */
-	line = hal_get_arch_handoff("boot.command-line");
+	line = kern_boot_handoff("boot.command-line");
 	error = powervr_dc_mode_from_line(line, &width, &height, &refresh);
 	if (error != ENOENT)
 		return 1;
@@ -1171,7 +1170,7 @@ commit_held_here(
 		return 0;
 
 	/* The lock is this CPU's when the published owner is this CPU. */
-	return dc_commit_lock.owner_cpu == hal_cpu_current();
+	return dc_commit_lock.owner_cpu == kern_cpu_current();
 }
 
 /* Writes one of the planes' or panels' registers by its controller offset. */
@@ -1543,7 +1542,7 @@ choose_mode(
 	int error;
 
 	/* The boot parameters are not parsed yet, so the line is read here. */
-	line = hal_get_arch_handoff("boot.command-line");
+	line = kern_boot_handoff("boot.command-line");
 	error = powervr_dc_mode_from_line(line, &width, &height, &refresh);
 	if (error == ENOENT)
 		return powervr_dc_mode_default();

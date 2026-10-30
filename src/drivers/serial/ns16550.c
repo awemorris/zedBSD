@@ -42,7 +42,6 @@
 #include <drivers/serial/ns16550.h>
 
 #include <drivers/generic/fdt.h>
-#include <hal/hal.h>
 #include <kern/device-io.h>
 #include <kern/kcrt.h>
 #include <kern/irq.h>
@@ -295,7 +294,7 @@ drv_ns16550_putc_polled(
 		return;
 
 	/* Keeps an interrupt's byte from coming between this one's wait and its write. */
-	interrupts_enabled = hal_irq_disable();
+	interrupts_enabled = kern_irq_disable();
 
 	/*
 	 * Takes the line from the other processors.  A holder that never lets
@@ -331,7 +330,7 @@ drv_ns16550_putc_polled(
 
 	/* Restores interrupts only when they were on. */
 	if (interrupts_enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 }
 
 /*

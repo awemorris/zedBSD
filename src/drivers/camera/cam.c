@@ -1112,7 +1112,7 @@ cam_slot_import(
 	}
 
 	/* The source's view of the pages, uncached like the GPU's. */
-	run.paddr = (hal_physaddr_t)backing.pages[0];
+	run.paddr = (kern_physaddr_t)backing.pages[0];
 	run.size = bytes;
 	error = kern_pmem_map_uncached(&run, &view);
 	if (error != 0) {
