@@ -10,6 +10,8 @@
 #  4. times each SPEED_RUNS times (default 5; best and median frames/s, one thread);
 #  5. profiles one stream (SPEED_PROFILE_STREAM, default high-1080-grain) with perf (sudo when perf_event_paranoid
 #     needs it) or, without perf, gprof, and sums the self time by function and by module.
+# libx264's output differs a little from run to run; to compare two trees, give the first run's streams/*.h264 as
+# FILEs to the second, which then replace the streams it made under the same names.
 # Prints the summary (also summary.txt in the output directory); the last line is run-speed: PASS or FAIL.
 #   sh plan/ws326/tests/speed/run-speed.sh [FILE...]
 #   SPEED_RUNS=3 SPEED_FRAMES=120 SPEED_PROFILE=0 SPEED_OUT=/tmp/x sh plan/ws326/tests/speed/run-speed.sh

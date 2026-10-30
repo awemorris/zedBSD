@@ -24,7 +24,7 @@
  */
 
 #include "userland/desktop/libmedia/h264sw-decoder.h"
-#include "userland/desktop/libmedia/h264sw-nal.h"
+#include "userland/desktop/libmedia/vcodec-nal.h"
 
 #include <errno.h>
 #include <stdio.h>
@@ -243,7 +243,7 @@ decode_once(
 	cpu_start = clock_seconds(CLOCK_PROCESS_CPUTIME_ID);
 	cursor = 0U;
 	for (;;) {
-		found = h264sw_nal_find(data, size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			break;
 		taken = take_output(decoder, write, &run->frames);

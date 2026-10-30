@@ -3,7 +3,7 @@
 # ws326-p024 速さの設計と最初の最適化
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: in-progress（2026-10-31 P1、q1773-i01。計測・profile・目標・案・割りは下の「設計」。最初の最適化は p026 の merge の後）。
+- 状態: 実装済み・試験 PASS（2026-10-31 P1、q1773-i01。設計は下の「設計」、最初の最適化（案 1 と案 2 の bS）の結果は「結果」。cleared は Q1）。
 - 依存: p022、p023（依存の Phase の実装が main に入ってから始める）。
 
 ## 読む物
@@ -124,19 +124,48 @@ code を読んで分かった原因:
 | 続き e | Pi 5（Linux の上で同じ speed-bench を build）と 5330 の実測、換算の置き換え、目標の判定 | Q1 が実機を割り当てる担当 | run-speed を実機で（1 本の script） |
 
 - 依存: a・b は p024 の後（file が別なので並べてよい）、c は a・b の後（画素の処理が速くなった後の割合で thread を決める）、d・e は c の後。
-- 変えてはいけない物（各 Phase 共通）: `userland/desktop/libmedia/h264sw*.h`。p026 の merge の後は `vcodec*.h`（`vcodec.h`・`vcodec-bitreader.h`・`vcodec-nal.h`・`vcodec-cabac.h`）も。check-skeleton の BASE は p026 の merge の後は p026 の header の commit（Q1 が知らせる値）。
+- 変えてはいけない物（各 Phase 共通）: `userland/desktop/libmedia/h264sw*.h`。`vcodec*.h`（`vcodec.h`・`vcodec-bitreader.h`・`vcodec-nal.h`・`vcodec-cabac.h`、p026 から）も。check-skeleton の BASE は 92ca2d0e8（p026 の後）。
 - 段 A の各 Phase の受け入れ: 出力が bit 単位で同じ（run-stream・run-host-decode・適合の in 101 本が全 frame 一致、単体試験の数が同じか増える）、run-speed の best が前より上がる（数を phase.md に）。
+
+## 結果（2026-10-31 05:59 P1、q1773-i01）
+
+- 基点: main 8085f5af0 から。p026 の merge（main a058c08d7）を 94b21eff8 で取り込んだ後に最適化を入れた。
+- 変えた file: `userland/desktop/libmedia/h264sw-interp.c`（案 1）、`h264sw-deblock.c`（案 2 の bS）、`plan/ws326/tests/speed/`（計測、p026 の改名 `vcodec_nal_find` に追従）。header は変えていない。
+  - interp: 窓（luma は前 2・後 3、chroma は後 1）が plane の内なら plane から直に読み、外なら列の clamp を 1 回に纏めた窓へ写す。luma は Table 8-12 の位置を block に 1 回選び、b・h・j を block 単位に作って（j は行ごとに縦の中間値を width + 5 列作ってから横の 6 tap）、四分の一の位置は 2 つの block の平均。chroma は内なら clamp 無しの loop。
+  - deblock: macroblock ごとに縦横 8 本の edge の bS を 1 回求め（`edge_strengths`、4x4 の番号は file の中の表）、luma と chroma の edge で使い回す。bS が全部 0 の edge は飛ばす。`h264sw_deblock_bs`（公開、単体試験が使う）は同じ `edge_strengths` を呼ぶ。filter の順と式は変えていない。
+- 確かめ（worktree、94b21eff8 ＋ 上の変更）:
+  - `BASE=92ca2d0e8 timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - `sh plan/ws326/tests/run-unit.sh all` → `run-unit: PASS`、24 本、各本の checks の数は前と同じ（test-interp 23460・test-deblock 3313・test-recon 33584 など、test-bits は p026 で test-bitreader 169）。
+  - `sh plan/ws326/tests/run-stream.sh` → `run-stream: PASS`（22 本 408 frame が ffmpeg と一致、壊した stream 200 通り・開始 63 通り PASS、前と同じ）。
+  - `sh plan/ws326/tests/backend/run-host-decode.sh` → `run-host-decode: PASS`（5 本 各 50 picture、h264-software）。
+  - `H264SW_CONFORMANCE_DIR=/tmp/o-ws326-p022/conformance sh plan/ws326/tests/conformance/run.sh` → `conform-run: PASS (101 in, 103 out)`、in 101 本 14526 frame が参照と一致、slice を逆順の 6 本も一致（前と同じ）。
+  - 旧 interp との差分の乱数試験（worktree の外の使い捨て、ASan・UBSan、plane 1〜60、座標 ±25 と INT_MIN・INT_MAX の近く、block 0〜17、frac 0〜7）200 万件で出力の差 0。
+  - run-unit all と run-stream を流し始めた後に h264sw-deblock.c に comment だけを足した（if・loop の意図）。その後に check-skeleton と `run-unit.sh deblock interp recon` を流し直し PASS（数は同じ）。run-host-decode・適合・run-speed は comment の後の file で流した。
+  - zedBSD amd64 の `build/amd64/dynamic/libmedia.so`（確かめの command の make）→ exit 0、warning 0。`git diff --check` → 差無し。cc と clang の `-std=c89 -Wall -Wextra -Werror -Wpedantic` で 2 file とも warning 0。
+- 速さ（`run-speed.sh`、host の Xeon Gold 6130、-O2、1 thread、各 5 回の best、同じ stream の file。前 `/tmp/p1-speed-before.run.pldTbf`、後 `/tmp/p1-speed-after.run.8Nix0m`、両方 ffmpeg と全 frame 一致）:
+
+| stream | 前 fps | 後 fps | 倍 |
+| --- | --- | --- | --- |
+| high-1080-grain（High CABAC B 8x8、8 Mbps） | 16.71 | 24.13 | 1.44 |
+| high-1080-clean（High CRF 23） | 19.72 | 36.25 | 1.84 |
+| main-1080-cavlc（Main CAVLC、8 Mbps） | 17.30 | 27.30 | 1.58 |
+| 実 stream A（Main 1080p24、8 Mbps） | 18.44 | 35.69 | 1.94 |
+| 実 stream B（High 1080p30、13 Mbps） | 13.02 | 17.54 | 1.35 |
+
+- 後の profile（grain、module ごと）: deblock 24.5%（luma の filter 11.1%、`edge_strengths` 5.2%）、interp 15.7%、transform 11.7%、vcodec-cabac 9.6%、recon 8.9%、weight 8.2%、mb 7.5%。次に効くのは deblock の filter・weight・neighbour・transform（§5 の案 2 の残り〜5、§6 の続き a・b）。
+- 段 A の目標（grain で 50 fps）まで残り約 2 倍。Pi 5・5330 は未実測（§4 の換算は推定のまま）。
+- 未実施: QEMU・実機（Pi 5・5330）での計測、Video Player での再生の確かめ、arm64 の build。
 
 ## 変えてはいけない物
 
-- `userland/desktop/libmedia/h264sw*.h`（全部）。header の不備・矛盾・足りない口を見つけたら、直さずに止めて Q1 に返す: どの header のどの関数か、何が足りないか、案の差分。
+- `userland/desktop/libmedia/h264sw*.h`（全部）と `vcodec*.h`（`vcodec.h`・`vcodec-bitreader.h`・`vcodec-nal.h`・`vcodec-cabac.h`、p026 から）。header の不備・矛盾・足りない口を見つけたら、直さずに止めて Q1 に返す: どの header のどの関数か、何が足りないか、案の差分。
 - 担当の module 以外の `h264sw-*.c`（他の Phase の物）。既存の libmedia の file（bits.c・h264.c・vkvideo.c・decoder.c など）、Makefile、`plan/ws326/tests/run-unit.sh`・`check.h`・`bitwriter.h`・`check-skeleton.sh`（不備は Q1 へ）。
 - HAL・toolchain・共有の build/（AGENTS.md §7）。rm などの削除をしない。
 - 上の「注意」がこの Phase に明示に許す物だけは、この節の限りでない。
 
 ## 確かめの command（worktree の root で）
 
-- `BASE=8ddb130a9 timeout 300 sh plan/ws326/tests/check-skeleton.sh`（p026 の merge の後は p026 の header の commit を BASE に、下の「設計」§6） → `check-skeleton: PASS`（header が p001 の物から変わっていない、cc と clang で warning 0）。
+- `BASE=92ca2d0e8 timeout 300 sh plan/ws326/tests/check-skeleton.sh`（2026-10-31 p026 の merge 2a13ccfc5 の後の BASE） → `check-skeleton: PASS`（header が p001 の物から変わっていない、cc と clang で warning 0）。
 - zedBSD amd64: `timeout 1200 make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so` → exit 0、出力に warning が 0。
 - `git diff --check`。
 
