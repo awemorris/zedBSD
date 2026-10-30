@@ -19,8 +19,8 @@
  * its own image the console leaves the screen for good: the grid is never
  * drawn again and the framebuffer's mapping is given back, while the
  * characters still reach the serial port.  Without a framebuffer each
- * character goes to hal_putc() as before.  A positioned write has no
- * teletype meaning and is dropped.
+ * character goes to kern_console_early_putc() as before.  A positioned
+ * write has no teletype meaning and is dropped.
  *
  * Input is read from the serial port, a 16550, by a kernel thread that
  * looks at it every few milliseconds, so the console needs no interrupt
@@ -38,6 +38,8 @@
 #include <kern/clock.h>
 #include <kern/device-io.h>
 #include <kern/graphics-backend.h>
+#include <kern/irq.h>
+#include <kern/platform.h>
 #include <kern/sched.h>
 #include <kern/text-display.h>
 #include <kern/thread.h>
@@ -217,7 +219,7 @@ drv_sun4u_console_init(
 		return;
 
 	/* Finds the serial port the console writes itself, when there is one. */
-	port = hal_get_arch_handoff("sun4u.serial.port");
+	port = kern_boot_handoff("sun4u.serial.port");
 	if (port != NULL && *port <= UINT16_MAX)
 		serial_port = (uint16_t)*port;
 
@@ -261,7 +263,7 @@ drv_sun4u_console_start_input(
 		return 0;
 
 	/* Without the port's name from the HAL, the console reads no input. */
-	port = hal_get_arch_handoff("sun4u.serial.port");
+	port = kern_boot_handoff("sun4u.serial.port");
 	if (port == NULL || *port > UINT16_MAX)
 		return 0;
 	serial_port = (uint16_t)*port;
@@ -306,7 +308,7 @@ console_putc(
 {
 	/* Without the framebuffer, the hardware layer shows the console. */
 	if (!screen_on) {
-		hal_putc(character);
+		kern_console_early_putc(character);
 		return;
 	}
 
@@ -532,7 +534,7 @@ console_end(
 	int framebuffer_error;
 
 	/* Finds the serial port, which a console that never drew the screen has not looked up. */
-	port = hal_get_arch_handoff("sun4u.serial.port");
+	port = kern_boot_handoff("sun4u.serial.port");
 
 	/*
 	 * Stops drawing the grid for good, apart from any writer: once this
@@ -659,7 +661,7 @@ screen_enter(
 	unsigned busy;
 
 	/* Keeps interrupt handlers out; the port has one processor. */
-	enabled = hal_irq_disable();
+	enabled = kern_irq_disable();
 
 	/* Sets the mark; one already set is this processor coming back in. */
 	busy = __atomic_exchange_n(&screen_busy, 1U, __ATOMIC_ACQUIRE);
@@ -683,7 +685,7 @@ screen_leave(
 
 	/* Lets interrupts in again when they were on. */
 	if (enabled)
-		hal_irq_enable();
+		kern_irq_enable();
 }
 
 /* Puts one character at the cursor. */
