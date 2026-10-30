@@ -10,7 +10,7 @@
 - 共通: [design.md](../design.md) §13.1 の「読む物（共通）」（AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文、design.md §1・§2・§3・§7・§8・§10.1、`vcodec.h`・`h265sw.h`）。
 - 仕様: ITU-T H.265 (V11) (01/2026)、`/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h265-202601.pdf`（SHA-256 `78b093480e178a2b99d8cb7499934240f359c50c6d09568f8be651bc1151d4d2`、git の外）。**PDF の頁 = 印刷の頁 + 18**。`pdftotext -layout -f N -l M` で読み、表と式（上付きが崩れる: 2^15 が「215」になる）は Read の tool で PDF の頁の画を見て確かめる。
 - header（仕様の正本）: `userland/desktop/libmedia/h265sw-transform.h`（p003 の前は [proposed/](../proposed/)）。
-- 仕様の節: 8.6.1（印刷 175〜176 = PDF 193〜194、8-282〜8-290、Table 8-10）、8.6.2〜8.6.4（印刷 176〜181 = PDF 194〜199、8-291〜8-323）。
+- 仕様の節: 8.6.1（印刷 175〜176 = PDF 193〜194、8-282〜8-290、Table 8-10）、8.6.2〜8.6.4（印刷 176〜181 = PDF 194〜199、8-291〜8-321）。
 
 ## 2. 作る物
 
@@ -22,7 +22,7 @@
 
 - Table 8-10 の全値（PDF の画で照合）、8-283 の折り返し（負の qPY_PRED + delta）。
 - scale: levelScale と qp / 6 の shift、m の 16 と行列、clip の境、int64 の積。
-- 逆変換: transMatrix（8-318〜8-323）の値を PDF と照合、直交性（各行の内積が 64^2·n の倍数の対角に近い）、DC だけの入力が平ら、1 係数の入力が基底の列、DST（8-316）。中間の clip（8-314）。
+- 逆変換: transMatrix（8-318〜8-321）の値を PDF と照合、直交性（各行の内積が 64^2·n の倍数の対角に近い）、DC だけの入力が平ら、1 係数の入力が基底の列、DST（8-316）。中間の clip（8-314）。
 - residual: bypass、skip（tsShift）、通常、bdShift の負の値の丸め。
 - 共通: 誤りの入力・途中で切れた入力・乱数の入力で落ちず（ASan・UBSan 0）決められた誤りを返す。
 
