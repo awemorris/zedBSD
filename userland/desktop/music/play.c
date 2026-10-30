@@ -23,7 +23,6 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <time.h>
 
 /* The longest a full ring is waited on before looking at the requests again (ms). */
 #define PLAY_WAIT_MS		10
@@ -50,7 +49,7 @@ struct play_reader {
 	int16_t samples[PLAY_FRAMES * 2];
 };
 
-static void *play_run(void *argument);
+static void play_run(void *argument);
 static int play_reader_open(struct play_reader *reader, const char *path);
 static void play_reader_close(struct play_reader *reader);
 static int play_feed(struct play_reader *reader, const struct media_packet *packet);
@@ -73,8 +72,8 @@ mu_player_init(
 
 	/* Nothing open. */
 	memset(player, 0, sizeof(*player));
-	(void)pthread_mutex_init(&player->lock, NULL);
-	(void)pthread_cond_init(&player->wake, NULL);
+	(void)kl_mutex_init(&player->lock);
+	(void)kl_cond_init(&player->wake);
 
 	/* The sound. */
 	error = vp_audio_open(&player->audio);
@@ -91,8 +90,8 @@ mu_player_release(
 	/* The song, then the sound. */
 	mu_player_close(player);
 	vp_audio_close(&player->audio);
-	(void)pthread_cond_destroy(&player->wake);
-	(void)pthread_mutex_destroy(&player->lock);
+	kl_cond_destroy(&player->wake);
+	kl_mutex_destroy(&player->lock);
 }
 
 /*
@@ -106,6 +105,7 @@ mu_player_open(
 	const char *path)
 {
 	struct play_reader *reader;
+	struct kl_thread_options options;
 	int64_t length_us;
 	int error;
 
@@ -130,7 +130,7 @@ mu_player_open(
 	}
 
 	/* What is known of it, playing from its start. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	player->duration = 0.0;
 	length_us = media_file_duration_us(reader->file);
 	if (length_us > 0)
@@ -142,10 +142,15 @@ mu_player_open(
 	player->seek_wanted = 0;
 	player->clock_time = 0.0;
 	player->clock_frames = vp_audio_clock_position(&player->audio);
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 
-	/* The thread reads ahead from here. */
-	error = pthread_create(&player->thread, NULL, play_run, reader);
+	/* The thread reads ahead from here: its name, what it runs and its priority. */
+	memset(&options, 0, sizeof(options));
+	options.name = "music-play";
+	options.run = play_run;
+	options.argument = reader;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	error = kl_thread_start(&options, &player->thread);
 	if (error != 0) {
 		play_reader_close(reader);
 		free(reader);
@@ -168,11 +173,12 @@ mu_player_close(
 {
 	/* The thread is asked to end, and waited for. */
 	if (player->thread_started) {
-		(void)pthread_mutex_lock(&player->lock);
+		kl_mutex_lock(&player->lock);
 		player->quit = 1;
-		(void)pthread_cond_broadcast(&player->wake);
-		(void)pthread_mutex_unlock(&player->lock);
-		(void)pthread_join(player->thread, NULL);
+		kl_cond_broadcast(&player->wake);
+		kl_mutex_unlock(&player->lock);
+		(void)kl_thread_join(player->thread);
+		player->thread = NULL;
 		player->thread_started = 0;
 	}
 
@@ -181,10 +187,10 @@ mu_player_close(
 	(void)vp_audio_flush(&player->audio);
 
 	/* Nothing plays. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	player->state = MU_STOPPED;
 	player->ended = 0;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 }
 
 /*
@@ -195,17 +201,17 @@ mu_player_play(
 	struct mu_player *player)
 {
 	/* Only a paused song. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	if (player->state != MU_PAUSED) {
-		(void)pthread_mutex_unlock(&player->lock);
+		kl_mutex_unlock(&player->lock);
 		return;
 	}
 
 	/* The position goes on from where it stood. */
 	player->clock_frames = vp_audio_clock_position(&player->audio);
 	player->state = MU_PLAYING;
-	(void)pthread_cond_broadcast(&player->wake);
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_cond_broadcast(&player->wake);
+	kl_mutex_unlock(&player->lock);
 
 	/* And the sound with it. */
 	(void)vp_audio_start(&player->audio);
@@ -221,9 +227,9 @@ mu_player_pause(
 	double now;
 
 	/* Only a playing song. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	if (player->state != MU_PLAYING) {
-		(void)pthread_mutex_unlock(&player->lock);
+		kl_mutex_unlock(&player->lock);
 		return;
 	}
 
@@ -231,7 +237,7 @@ mu_player_pause(
 	now = mu_player_position(player);
 	player->state = MU_PAUSED;
 	player->clock_time = now;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 
 	/* And the sound with it. */
 	(void)vp_audio_stop(&player->audio);
@@ -252,9 +258,9 @@ mu_player_seek(
 		seconds = player->duration;
 
 	/* The request; the position stands at the time sought until the thread goes on from it. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	if (player->state == MU_STOPPED) {
-		(void)pthread_mutex_unlock(&player->lock);
+		kl_mutex_unlock(&player->lock);
 		return;
 	}
 
@@ -263,8 +269,8 @@ mu_player_seek(
 	player->seek_to = seconds;
 	player->clock_time = seconds;
 	player->ended = 0;
-	(void)pthread_cond_broadcast(&player->wake);
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_cond_broadcast(&player->wake);
+	kl_mutex_unlock(&player->lock);
 }
 
 /*
@@ -305,11 +311,11 @@ mu_player_state(
 	unsigned state;
 
 	/* Read under the lock; the end is taken. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	state = player->state;
 	*ended = player->ended;
 	player->ended = 0;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	return state;
 }
 
@@ -324,15 +330,15 @@ mu_player_failure(
 	int failure;
 
 	/* Read and taken under the lock. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	failure = player->failure;
 	player->failure = 0;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	return failure;
 }
 
 /* The thread: reads, decodes and writes until it is told to end. */
-static void *
+static void
 play_run(
 	void *argument)
 {
@@ -376,7 +382,6 @@ play_run(
 	/* The reader goes with the thread. */
 	play_reader_close(reader);
 	free(reader);
-	return NULL;
 }
 
 /* Opens the file and the decoder of its first sound track; 0 or an errno value (player->problem says a decoding problem). */
@@ -557,9 +562,9 @@ play_sound(
 		stop = play_stopping(player);
 		if (stop)
 			return 1;
-		(void)pthread_mutex_lock(&player->lock);
+		kl_mutex_lock(&player->lock);
 		stop = player->seek_wanted;
-		(void)pthread_mutex_unlock(&player->lock);
+		kl_mutex_unlock(&player->lock);
 		if (stop)
 			return 1;
 
@@ -593,10 +598,10 @@ play_seek(
 
 	/* A seek asked for. */
 	player = reader->player;
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	wanted = player->seek_wanted;
 	seconds = player->seek_to;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	if (!wanted)
 		return 0;
 
@@ -624,13 +629,13 @@ play_seek(
 	reader->skip_before = seconds;
 
 	/* The position anchored at the time sought. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	player->clock_time = seconds;
 	player->clock_frames = vp_audio_clock_position(&player->audio);
 	player->seek_wanted = 0;
 	player->ended = 0;
 	player->draining = 0;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	mu_log("PLAY seek to_ms=%lld", (long long)(seconds * 1000.0));
 
 	/* Carried out. */
@@ -659,7 +664,7 @@ play_end(
 	/* Played out: the end, once; otherwise a little wait. */
 	read = vp_audio_read_position(&player->audio);
 	written = vp_audio_write_position(&player->audio);
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	if (read >= written && player->state == MU_PLAYING && player->draining == 1) {
 		player->draining = 2;
 		player->ended = 1;
@@ -669,7 +674,7 @@ play_end(
 	}
 
 	/* The state is let go. */
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 
 	/* Until the next look. */
 	play_sleep_ms(PLAY_WAIT_MS * 5);
@@ -688,11 +693,11 @@ play_fail(
 
 	/* Told once, stopped, and the thread asked to end. */
 	player = reader->player;
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	player->failure = failure;
 	player->state = MU_STOPPED;
 	player->quit = 1;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	mu_log("PLAY failed reason=%d", failure);
 }
 
@@ -704,9 +709,9 @@ play_stopping(
 	int quit;
 
 	/* Read under the lock. */
-	(void)pthread_mutex_lock(&player->lock);
+	kl_mutex_lock(&player->lock);
 	quit = player->quit;
-	(void)pthread_mutex_unlock(&player->lock);
+	kl_mutex_unlock(&player->lock);
 	return quit;
 }
 
@@ -715,10 +720,5 @@ static void
 play_sleep_ms(
 	unsigned ms)
 {
-	struct timespec wait;
-
-	/* The wait. */
-	wait.tv_sec = ms / 1000U;
-	wait.tv_nsec = (long)(ms % 1000U) * 1000000L;
-	(void)nanosleep(&wait, NULL);
+	kl_thread_sleep(ms);
 }

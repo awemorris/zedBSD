@@ -28,7 +28,7 @@
 #include "userland/desktop/libmedia/media.h"
 #include "userland/desktop/media-app/decoder.h"
 
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
 #include <stddef.h>
 #include <stdint.h>
 #include <vulkan/vulkan.h>
@@ -189,12 +189,12 @@ struct vp_audio {
  * picture is taken or a request comes.
  */
 struct vp_media {
-	pthread_t thread;
+	struct kl_thread *thread;
 	int thread_started;
 	struct vp_audio *audio;
 
-	pthread_mutex_t lock;
-	pthread_cond_t wake;
+	struct kl_mutex lock;
+	struct kl_cond wake;
 
 	/* What is open: the path, the picture's size, the length (seconds), and whether there is sound. */
 	char path[1024];

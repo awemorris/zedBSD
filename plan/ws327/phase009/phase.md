@@ -108,4 +108,38 @@ userland/desktop/media-app/avcodec.c plan/tools/music/host-music-play.sh plan/to
 
 ## 結果
 
-（実装の担当が書く）
+日付: 2026-10-30（host の `date`）。担当: 実装の担当（Sonnet 5.5 high）。
+
+### 流した command と最後の行
+
+- `sh plan/tools/music/host-music-play.sh build/ws327-p009-music/host-music-play` → exit 0、PASS 12 件、最後の行 `host-music-play: PASS`。
+- `sh plan/tools/media/run-host-codec.sh` → 最後の行 `run-host-codec: PASS`（各 file の `host-codec: PASS`）。
+- `sh plan/ws327/tests/build-zedbsd.sh p009 {amd64,arm64,riscv64} "music videoplayer"` → 各 `zedbsd <arch> make=0 warnings=0`。
+- `python3 -I plan/ws327/tests/check-layers.py userland/desktop/music/ userland/desktop/videoplayer/ userland/desktop/media-app/` →
+  T1 0・N1 0、`ws327-check-layers: PASS`。
+- `sh plan/ws327/tests/check-base.sh p009` → `ws327-check-base: PASS`。
+
+### 突然変異（git の外で壊し、`cmp` で戻した）
+
+1. `mu_player_open` の `options.run` を NULL に（`play_run` が未使用で build が先に落ちるので、到達しない条件の三項で NULL に） →
+   host-music-play が `FAIL 9`（exit 1）。捕まった。
+2. `kl_once(&codec_once, codec_load)` を、決して真にならない `if` の中に（単に消すと `codec_load` の未使用で build が落ちる） →
+   run-host-codec が ASan の SEGV で `run-host-codec: FAIL`。捕まった。
+3. `play_run` の `if (stop) break;` を決して真にならない条件に → `mu_player_close` の join が戻らず `timeout 60` で exit 124。捕まった。
+4. Video Player: `media.c` の `kl_mutex_lock` を `pthread_mutex_lock` に戻す → check-layers が `T1 FAIL ... media.c:175: pthread_mutex_lock`。捕まった。
+   全て元に戻し `cmp` で一致を確かめた。
+
+### 自分で決めた点
+
+- `options` の宣言は `mu_player_open`・`vp_media_open` の先頭に足した。起動の comment は「The thread reads ahead from here: its name, what it runs and its priority.」。
+- `mu_player_release` の `pthread_cond_destroy`・`pthread_mutex_destroy` は §13.2 の表で `kl_cond_destroy`・`kl_mutex_destroy`（`(void)` 無し）にした。
+- `play.c` は `<time.h>` を外した（他に使う物が無い）。`media.c` は `media_now_us` が `clock_gettime(CLOCK_MONOTONIC)` を使うので `<time.h>` を残した。
+- host 試験の `-D_GNU_SOURCE` は phase.md の指示のとおり（`run-host-codec.sh` の層の object の行）。
+
+### 未実施・Q1 への所見
+
+- Video Player に host 試験は無い（check-layers と build のみ）。再生の開始・停止は p016 の QEMU。
+- `build-zedbsd.sh` の `sysroot-<arch>` は、worktree の `build/llvm*` が無いと LLVM を worktree の中で build し始める（30 分では終わらない）。Q1 の指示で
+  `build/{NoctLang,distfiles,llvm,llvm-build,llvm-source,sources}` を共有への link にしてから build した（`build/<arch>` と `host-noct-state` は実 directory）。
+  最初に始まった LLVM の build は止め、`build/llvm-build`・`build/llvm-source` の途中の物は `build/tmp/aborted-llvm/` に移した（消す物: 同 directory 一式）。
+  次の実装の担当の起動の手順に、この link を先に作る事を入れると良い。
