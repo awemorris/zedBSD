@@ -100,14 +100,17 @@ Queue: q1696 / q1696-i01（P3）
 | p006-k1 | 2 倍 | 2364.3 | 2372.2 | 1030.3 | 2334.3 | 973824 |
 | p006-g10 | 1.25 倍 | 2367.7 | 2372.3 | 1644.7 | 2356.2 | 373760 |
 | p006-d1 | 診断: 2 倍 ＋ ring 768・sndbuf 1152 KB（一時の変更、commit しない） | 2370.9 | 2368.5 | **2176.1** | **2350.3** | 864256（recv だけ 686080） |
+| p006-a1 | 案 A（4575db11d、kernel の sha256 は d1 と同じ d10d30aeb406c145: 説明だけの差） | 2367.2 | 2372.4 | 1616.1 | 2286.3 | 923648（recv だけ 653312）。この host（相手の perf-peer）が 21 config の build と QEMU で load 19 の間に測った: 測り直す |
 
 - d1 の他: ping・MTU・down/up 3/3、5330-run PASS、Debian に戻った（uname で確かめた）。pool の使用の最大 1074/4096、alloc の失敗 0。ue0 の TX dropped 550183（g10 は 152516、送りが driver の TX の queue を溢れさせた分、SACK で回復）。証拠 build/ws315-hw/p006-d1/、plan/tools/hw5330/evidence/ws315-p006-d1.md。
   **見立ては確かめられた**: 送りの in flight を受けの窓の上限より大きくすると同時の send が戻る（1030 → 2176、Linux 2346）。
 - kernel: build/ws315-p006-{k1,g10,g12,d1}-vmunix（d1 は include/kern/net/tcp-socket.h の 256→768 と tcp.c の TCP_SEND_BUFFER 384→1152 KB を一時に書いて build、戻した）。
-- 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。5330 は Debian、NVMe の zedBSD の kernel は d1（vmunix.old は g10）。
+- 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。5330 は Debian、NVMe の zedBSD の kernel は a1（= d1 と同じ binary）。
   10.0.10.3 は使っていない（lock は取っていない、kernel は触っていない）。QEMU は止まっている。
-- 確かめの進み: tcp-model PASS（4575db11d の tree、build/tmp/p006-model-a2.txt。往復 10 ms の場面が 32 → 67 MB/s）。21 config の build は `build/tmp/p006-buildall.sh b`（出力 build/tmp/p006-buildall-b.txt、build/p006b-*）を流している。5330 の kernel は build/ws315-p006-a1-vmunix（build/p006-a1、warning 0）。
-- 次の 1 手: 5330 で a1（`MODE=--nvme-kernel sh plan/ws315/tests/5330-rtl.sh build/ws315-p006-a1-vmunix p006-a1 30`）、21 config の結果、QEMU、Linux の基準、10GbE。
+- 確かめの進み: tcp-model PASS（4575db11d の tree、build/tmp/p006-model-a2.txt。往復 10 ms の場面が 32 → 67 MB/s）。21 config の vmunix の build（`build/tmp/p006-buildall.sh b`、build/tmp/p006-buildall-b.txt、build/p006b-*）すべて rc 0・warning 0。
+  QEMU `qemu-tcp.sh "" 15 inet,inet6` PASS（build/tmp/p006-qemu-tcp-a.txt、send_ring=768、guest send/recv inet 58.2/34.6、inet6 61.1/24.4 Mbit/s: 速さは emulator の物）。5330 の kernel は build/ws315-p006-a1-vmunix（build/p006-a1、warning 0）。
+  rdna-tcp.sh に `--runs both` を足した（2de3b6dc8、Q1 が範囲に足した）。
+- 次の 1 手: host が静かな時に 5330 の a1 を測り直す（name p006-a2）、Linux の基準（`5330-linux-both.sh`）、10GbE（基準 = c90327de3 の tcp.c・tcp-socket.h・packet-buf.h を一時に置いた RTL8127 の kernel と、案 A の build/p006b-amd64-rtl8127/vmunix を `--runs send,recv,both,both`）。
   その後: tcp-model・21 config の build（`build/tmp/p006-buildall.sh <tag>`）・QEMU（`plan/ws221/tests/qemu-tcp.sh "" 15 inet,inet6`）・5330・Linux の基準（`5330-linux-both.sh`）・
   10GbE（`flock -n /tmp/zedbsd-rdna.lock`、`plan/ws221/tests/rdna-tcp.sh --kernel build/<rtl8127>/vmunix --bin build/p006-rdna-bin/bin --runs send,recv,recv NAME`、
   終わりに vmunix-va1 cksum 1463007375 に戻し lock を free に）、F-WS315-rcvbuf の解決の文案を Q1 へ。
