@@ -70,4 +70,30 @@ Parent: [WS333](../ws.md)、設計 [design.md](../design.md) §15
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-31 実装の担当 S-ws333-p009（q1766-i01）。基点 `39f4a5597` から header は無変更。
+
+作った物: `src/drivers/platform/pcat/cpu-x86/cpux86-hwp.c`（17 関数）、`plan/ws333/tests/cpux86/unit/test-hwp.c`。
+
+確かめ（worktree の root、実行して出力を読んだ）:
+
+| command | 結果 |
+| --- | --- |
+| `timeout 600 sh plan/ws333/tests/cpux86/run-unit.sh hwp` | `test-hwp: PASS (12804888 checks)`、`run-unit: PASS` |
+| `timeout 900 sh plan/ws333/tests/cpux86/run-unit.sh all` | test-builders 21・test-cpux86 4140・test-hwp 12804888 check、`run-unit: PASS` |
+| `BASE=39f4a5597 timeout 300 sh plan/ws333/tests/cpux86/check-skeleton.sh` | `check-skeleton: PASS` |
+| `make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk CONFIG_CPU_PERF=y BUILD=/tmp/s-ws333-p009/b /tmp/s-ws333-p009/b/vmunix`（出力を / の空きのため /tmp に） | exit 0、log の warning 0 件、`cpux86-hwp.o` が build された |
+| `git diff --check` | 出力なし |
+
+わざと壊す確かめ（git の外の写し、`/tmp/s-ws333-p009/mut/`。.c の写しを変えて同じ flag で test-hwp を build して流した）: 24 通りで全部が FAIL（捕えた）、見逃し 0。
+desired の範囲を min〜max に、window の同点を大きい exponent に、header の padding を外す、ack が raw を書き戻す、offset の溢れの検査を外す、valid を bit 58 に、status ack の反転、window の exponent の数、pointer の上限の検査を外す、config の誤りの順、capabilities の予約の範囲、Thread Director の無い時に class 数を使う、cell の class の項を外す、status が bit 1 を許す、timestamp の byte の順、source の反転、HW_FEEDBACK 無しの ENOTSUP を外す、minimum < lowest の検査を外す、window decode の exponent の幅、row の padding を class ごとに、ack が bit 1 を落とす、page 数の溢れの検査を外す、Highest_Change の bit、PM_ENABLE の予約の範囲。元の `cpux86-hwp.c` は /tmp の写しにだけ変えたので無変更。
+
+自分で決めた点（header が決めていない所）:
+
+1. `cpux86_feedback_layout()` は `feedback_capabilities` の bit 7:0 だけを見る（EDX[7:0] の定義）。bit 8 以上だけが立つ値は 0 と同じ（ENOTSUP）、bit 8 以上は数えない。
+2. `feedback_pages` は偽の値でも溢れないよう 64 bit で `pages * 4096` を作り、32 bit に入らない時（pages が 1048576 以上）は EINVAL。0 頁は「header と 1 行が入らない」で EINVAL。16 を超える値（processor は返さない）は表が 32 bit に入る限り受ける。
+3. `feedback_change`・`feedback_cell` は offset を 64 bit で作り、各項を足す前に「table_size に入る」ことを検べる（溢れも範囲の外も EINVAL）。layout の `header_size` が小さく偽でも表の中の byte しか読まない。
+4. `cpux86_hwp_window_encode()` は exponent 0..7 を小さい方から試し、各 exponent の最大の mantissa（127 まで）の window が真に大きい時だけ採る（同点は小さい exponent が残る）。
+5. 試験は `check_table()` が表を `feedbackbuild.h` で書き全 cell・change byte を読み戻し、5330 の形（CP 2・CL 4）・CL 5・CP 3・CL 255 と頁 16・CP 8 と CL 255 を通す。偽の layout は malloc した 4096 byte の表で ASan に見せる。
+
+未実施: 実機・QEMU の確認（この Phase の範囲外、純粋な関数の host 試験のみ）。clang での build は check-skeleton が通した（警告なし）。
+cleared は Q1 の判定。
