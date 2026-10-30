@@ -430,7 +430,7 @@ event_name(
 	return 1;
 }
 
-/* Identifies the raw HID devices, which live in /dev/input beside the event devices (ws161-p002). */
+/* Identifies the raw HID devices, which live in /dev/input beside the event devices */
 static DEVFS_HIGH int
 hidraw_name(
 	const char *name)
@@ -447,7 +447,7 @@ hidraw_name(
 }
 
 /*
- * Identifies the input bridge, /dev/input/bridge (ws143-p005): the node
+ * Identifies the input bridge, /dev/input/bridge: the node
  * the Bluetooth daemon makes its HID devices on, beside the devices it
  * makes.
  */
@@ -466,7 +466,7 @@ bridge_name(
 	return 1;
 }
 
-/* Identifies the smart card readers' slots, /dev/smartcard<n> (ws161-p003). */
+/* Identifies the smart card readers' slots, /dev/smartcard<n> */
 static DEVFS_HIGH int
 smartcard_name(
 	const char *name)
@@ -482,7 +482,7 @@ smartcard_name(
 	return 1;
 }
 
-/* Identifies the Bluetooth controllers' HCI nodes, /dev/bluetooth<n> (ws143-p002). */
+/* Identifies the Bluetooth controllers' HCI nodes, /dev/bluetooth<n> */
 static DEVFS_HIGH int
 bluetooth_name(
 	const char *name)
@@ -522,7 +522,7 @@ camera_name(
 	return 1;
 }
 
-/* Identifies names owned by the /dev/backlight namespace (ws113-p013). */
+/* Identifies names owned by the /dev/backlight namespace. */
 static DEVFS_HIGH int
 backlight_name(
 	const char *name)
@@ -597,12 +597,12 @@ devfs_cdev_inode(
 	 * Input event nodes are group-readable only; a backlight is read by
 	 * anyone and changed by its owner (the seat's user, given by sessiond).
 	 * A security key's raw HID node and a smart card slot are root's alone
-	 * until sessiond gives them to the seat's user (ws161: whoever opens
-	 * them can ask the key to sign).  A Bluetooth controller is root's
-	 * alone: the daemon's privileged part opens it (ws143, D16), and so is
-	 * the node it makes its HID devices on (the input bridge, ws143-p005).
+	 * until sessiond gives them to the seat's user (whoever opens them
+	 * can ask the key to sign).  A Bluetooth controller is root's
+	 * alone: the daemon's privileged part opens it, and so is the node it
+	 * makes its HID devices on (the input bridge).
 	 * The Zynq's programmable logic is root's: whoever opens it rewrites
-	 * the hardware (WS286).  A camera is root's until sessiond gives it
+	 * the hardware.  A camera is root's until sessiond gives it
 	 * to the seat's user: whoever opens it sees the room.
 	 */
 	backlight = backlight_name(device->name);
@@ -1127,7 +1127,7 @@ devfs_lookup(
 		return error;
 	}
 
-	/* The backlight devices' directory (ws113-p013). */
+	/* The backlight devices' directory. */
 	matched = component_equal(component, "backlight");
 	if (matched) {
 		error = devfs_fixed_inode(directory, DEVFS_BACKLIGHT_INO, result);
