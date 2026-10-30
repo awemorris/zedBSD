@@ -84,4 +84,26 @@ Settings の thread の source に host 試験は無い。
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-30 10:09 実装の担当（Sonnet 5.5 high）。
+
+- 変えた file: `settings.h`・`look.c`・`storage-scan.h`・`storage-scan.c`・`storage-trash.h`・`storage-trash.c`。pthread の呼び出しは Settings の全 source から消えた
+  （`grep -n pthread userland/desktop/settings/*.c *.h` は 0 行。Makefile 3 本の `-pthread` は残した）。名前は `settings-look`・`storage-scan`（4 本とも）・`storage-trash`。
+- 流した command と最後の行:
+  - `sh plan/ws327/tests/build-zedbsd.sh p011 amd64|arm64|riscv64 "settings"` → `zedbsd amd64 make=0 warnings=0`・`zedbsd arm64 make=0 warnings=0`・`zedbsd riscv64 make=0 warnings=0`。
+  - Linux の make（§4 の 2） → `status=0`、`grep -c 'warning:'` は 0。
+  - `python3 -I plan/ws327/tests/check-layers.py userland/desktop/settings/` → `ws327-check-layers: PASS`（T1 0・N1 0）。
+  - `git diff --check` → 問題なし。`sh plan/ws327/tests/check-base.sh p011` は commit の後に流した（下の「check-base」）。
+- 突然変異（git の外、控えを取り `cmp` で戻りを確認）:
+  1. `storage-scan.c` の `kl_cond_broadcast` を 1 つ `pthread_cond_broadcast` に → check-layers `T1 1 found`・FAIL。戻して `cmp` 一致。
+  2. `storage-trash.h` の `struct kl_mutex lock;` を `pthread_mutex_t lock;` に → check-layers FAIL（T1）。戻して `cmp` 一致。
+  3. `look.c` の `options.run = look_load_run;` を消す → Linux の settings の build が失敗（`-Werror`、error 42 行）。戻して `cmp` 一致。
+- 自分で決めた点:
+  - `settings.h` は `<keiland/keiland.h>`（`keiland_thread.h` を含む）を既に include するので、`<pthread.h>` を外すだけにして `keiland_thread.h` は足さなかった（§13.2）。`storage-scan.h`・`storage-trash.h` は `settings.h` の中で `keiland.h` より前に include されるので、自分で `<keiland/keiland_thread.h>` を include する。
+  - `storage-scan.c` の join の loop は `scan->threads[index] = NULL;` を足すために `{ }` を付けた（付けないと `-Wmisleading-indentation`）。
+  - thread の起動の形は §13.3 のとおり（`kl_thread_options` を `memset`、優先度 NORMAL、`stack_size` 0）。`kl_mutex_init` の戻り値は look.c は今までどおり見て、storage-scan・storage-trash は `(void)`。
+- 閉じた WS の試験: `sh plan/ws089/tests/host-wallpaper.sh` を流した（`build/ws089-host/` に書く）。**Q1 へ: 壊れた**。link の段で `kl_mutex_*`・`kl_thread_start`・`kl_thread_join`
+  などが undefined reference（`look.c` と `storage-trash.c` を `-pthread` だけで build し libkeiland を link しないため）。直さなかった（読むだけ）。
+- 未試験: 見た目の page（壁紙の小さな写し）・storage の page（走査の終わり、ごみ箱の量）の動き。p016 の QEMU が見る。FreeBSD の build は範囲の外（流していない）。
+- 作業の途中で、Q1 の指示により、worktree の `build/llvm-source`・`build/llvm-build` に途中まで始まった LLVM の build を止め、`build/tmp/stale-llvm/` へ `mv` した（rm していない。Q1 が消す物）。
+  `build/{NoctLang,distfiles,llvm,llvm-build,llvm-source,sources}` は共有の tree への symlink にした。`build/amd64`・`build/arm64` は実 directory。
+

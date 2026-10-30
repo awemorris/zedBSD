@@ -15,7 +15,8 @@
 #ifndef SE_STORAGE_TRASH_H
 #define SE_STORAGE_TRASH_H
 
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
+
 #include <stddef.h>
 #include <stdint.h>
 
@@ -30,8 +31,8 @@
  * state, the count and the error.
  */
 struct se_trash {
-	pthread_mutex_t lock;
-	pthread_t thread;
+	struct kl_mutex lock;
+	struct kl_thread *thread;
 	int started;
 	char path[1024];
 	unsigned state;

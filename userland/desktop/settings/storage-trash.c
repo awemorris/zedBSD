@@ -31,7 +31,7 @@
 /* The deepest folders emptied (a deeper one is left, and counted as an error). */
 #define TRASH_DEPTH		64U
 
-static void *trash_worker(void *argument);
+static void trash_worker(void *argument);
 static int trash_clear(struct se_trash *trash, int parent, const char *name, dev_t device, unsigned depth);
 static int trash_clear_folder(struct se_trash *trash, int folder, dev_t device, unsigned depth);
 
@@ -79,6 +79,7 @@ se_trash_empty_start(
 	struct se_trash *trash,
 	const char *path)
 {
+	struct kl_thread_options options;
 	size_t length;
 	int error;
 
@@ -92,15 +93,20 @@ se_trash_empty_start(
 	if (length >= sizeof(trash->path))
 		return ENAMETOOLONG;
 	memset(trash, 0, sizeof(*trash));
-	(void)pthread_mutex_init(&trash->lock, NULL);
+	(void)kl_mutex_init(&trash->lock);
 	memcpy(trash->path, path, length + 1U);
 	trash->state = SE_TRASH_EMPTYING;
 
 	/* The thread. */
-	error = pthread_create(&trash->thread, NULL, trash_worker, trash);
+	memset(&options, 0, sizeof(options));
+	options.name = "storage-trash";
+	options.run = trash_worker;
+	options.argument = trash;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	error = kl_thread_start(&options, &trash->thread);
 	if (error != 0) {
 		trash->state = SE_TRASH_IDLE;
-		(void)pthread_mutex_destroy(&trash->lock);
+		kl_mutex_destroy(&trash->lock);
 		return error;
 	}
 
@@ -128,13 +134,13 @@ se_trash_poll(
 		return SE_TRASH_IDLE;
 
 	/* The state as it is now. */
-	pthread_mutex_lock(&trash->lock);
+	kl_mutex_lock(&trash->lock);
 
 	state = trash->state;
 	*removed = trash->removed;
 	*error = trash->error;
 
-	pthread_mutex_unlock(&trash->lock);
+	kl_mutex_unlock(&trash->lock);
 
 	/* Reports it. */
 	return state;
@@ -153,13 +159,14 @@ se_trash_finish(
 		return;
 
 	/* The thread joined. */
-	(void)pthread_join(trash->thread, NULL);
-	(void)pthread_mutex_destroy(&trash->lock);
+	(void)kl_thread_join(trash->thread);
+	trash->thread = NULL;
+	kl_mutex_destroy(&trash->lock);
 	trash->started = 0;
 }
 
 /* Empties the trash's files/ and info/ folders, then says it is done. */
-static void *
+static void
 trash_worker(
 	void *argument)
 {
@@ -187,16 +194,15 @@ trash_worker(
 	}
 
 	/* Done, with the first error met. */
-	pthread_mutex_lock(&trash->lock);
+	kl_mutex_lock(&trash->lock);
 
 	trash->state = SE_TRASH_EMPTIED;
 	if (trash->error == 0)
 		trash->error = first;
 
-	pthread_mutex_unlock(&trash->lock);
+	kl_mutex_unlock(&trash->lock);
 
 	/* The thread ends. */
-	return NULL;
 }
 
 /* Empties one folder of the trash by its name under a parent (a missing one is empty); returns 0 or the first errno value. */
@@ -280,11 +286,11 @@ trash_clear_folder(
 
 		/* Counted, or the first error kept. */
 		if (error == 0) {
-			pthread_mutex_lock(&trash->lock);
+			kl_mutex_lock(&trash->lock);
 
 			trash->removed++;
 
-			pthread_mutex_unlock(&trash->lock);
+			kl_mutex_unlock(&trash->lock);
 		} else if (first == 0) {
 			first = errno;
 			if (error > 0)

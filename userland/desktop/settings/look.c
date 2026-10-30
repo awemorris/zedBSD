@@ -97,7 +97,7 @@ static void look_language(void *data, const char *language);
 static int look_write(struct se_app *app, const char *key, const char *value);
 static void look_add_picture(struct se_app *app, const char *path, const char *name);
 static void look_load_start(struct se_app *app);
-static void *look_load_run(void *argument);
+static void look_load_run(void *argument);
 static void look_load_take(struct se_app *app);
 static void look_load_stop(struct se_app *app);
 static unsigned look_found_add(struct look_found *found, unsigned count, const char *name);
@@ -641,6 +641,7 @@ static void
 look_load_start(
 	struct se_app *app)
 {
+	struct kl_thread_options options;
 	struct se_look_loader *loader;
 	unsigned index;
 	int error;
@@ -653,14 +654,19 @@ look_load_start(
 		(void)snprintf(loader->paths[index], sizeof(loader->paths[index]), "%s", app->look.wallpapers[index].path);
 
 	/* The lock the thread hands each finished copy over under. */
-	error = pthread_mutex_init(&loader->lock, NULL);
+	error = kl_mutex_init(&loader->lock);
 	if (error == 0) {
 		/* The thread; running says it must be joined. */
 		loader->running = 1;
-		error = pthread_create(&loader->thread, NULL, look_load_run, loader);
+		memset(&options, 0, sizeof(options));
+		options.name = "settings-look";
+		options.run = look_load_run;
+		options.argument = loader;
+		options.priority = KL_THREAD_PRIORITY_NORMAL;
+		error = kl_thread_start(&options, &loader->thread);
 		if (error != 0) {
 			loader->running = 0;
-			(void)pthread_mutex_destroy(&loader->lock);
+			kl_mutex_destroy(&loader->lock);
 		}
 	}
 
@@ -682,7 +688,7 @@ look_load_start(
  * order (so the tiles fill from the first) and hands it over under the
  * lock.  It ends early when the window closes.
  */
-static void *
+static void
 look_load_run(
 	void *argument)
 {
@@ -701,11 +707,11 @@ look_load_run(
 	/* Each picture in turn, until every one is read or the window closes. */
 	for (index = 0; index < loader->count; index++) {
 		/* A closing window asks the thread to end between pictures. */
-		(void)pthread_mutex_lock(&loader->lock);
+		kl_mutex_lock(&loader->lock);
 
 		stopping = loader->stopping;
 
-		(void)pthread_mutex_unlock(&loader->lock);
+		kl_mutex_unlock(&loader->lock);
 
 		/* The window is closing: the rest are not read. */
 		if (stopping != 0)
@@ -722,18 +728,17 @@ look_load_run(
 		 * The copy (empty when the picture could not be read) is handed
 		 * over; done tells the window's thread it may take it.
 		 */
-		(void)pthread_mutex_lock(&loader->lock);
+		kl_mutex_lock(&loader->lock);
 
 		loader->images[index] = image;
 		loader->errors[index] = error;
 		loader->milliseconds[index] = milliseconds;
 		loader->done[index] = 1;
 
-		(void)pthread_mutex_unlock(&loader->lock);
+		kl_mutex_unlock(&loader->lock);
 	}
 
 	/* Succeeded: the thread ends and waits to be joined. */
-	return NULL;
 }
 
 /*
@@ -756,7 +761,7 @@ look_load_take(
 
 	/* Each copy finished and not yet taken goes to its tile. */
 	taken = 0;
-	(void)pthread_mutex_lock(&loader->lock);
+	kl_mutex_lock(&loader->lock);
 
 	for (index = 0; index < loader->count; index++) {
 		/* A copy the thread has not finished, or one already taken, stays. */
@@ -781,7 +786,7 @@ look_load_take(
 		se_log("LOOK picture path=%s error=%d ms=%ld", wallpaper->path, loader->errors[index], loader->milliseconds[index]);
 	}
 
-	(void)pthread_mutex_unlock(&loader->lock);
+	kl_mutex_unlock(&loader->lock);
 
 	/* A tile that filled is drawn. */
 	if (taken != 0)
@@ -792,8 +797,9 @@ look_load_take(
 		return;
 
 	/* Every copy is taken: the thread has ended, or is about to, and is joined. */
-	(void)pthread_join(loader->thread, NULL);
-	(void)pthread_mutex_destroy(&loader->lock);
+	(void)kl_thread_join(loader->thread);
+	loader->thread = NULL;
+	kl_mutex_destroy(&loader->lock);
 	loader->running = 0;
 
 	/* The log line the tests read. */
@@ -818,15 +824,16 @@ look_load_stop(
 		return;
 
 	/* stopping tells the thread to read no further picture. */
-	(void)pthread_mutex_lock(&loader->lock);
+	kl_mutex_lock(&loader->lock);
 
 	loader->stopping = 1;
 
-	(void)pthread_mutex_unlock(&loader->lock);
+	kl_mutex_unlock(&loader->lock);
 
 	/* The thread ends after the picture it is reading. */
-	(void)pthread_join(loader->thread, NULL);
-	(void)pthread_mutex_destroy(&loader->lock);
+	(void)kl_thread_join(loader->thread);
+	loader->thread = NULL;
+	kl_mutex_destroy(&loader->lock);
 	loader->running = 0;
 
 	/* The copies no tile took are freed. */

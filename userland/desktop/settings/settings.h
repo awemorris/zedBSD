@@ -28,7 +28,6 @@
 
 #include <keiland/keiland.h>
 
-#include <pthread.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -1111,8 +1110,8 @@ struct se_wallpaper {
  * thread has to be joined; the lock exists while running is 1.
  */
 struct se_look_loader {
-	pthread_t thread;
-	pthread_mutex_t lock;
+	struct kl_thread *thread;
+	struct kl_mutex lock;
 	int running;
 	int stopping;
 	unsigned count;

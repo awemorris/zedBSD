@@ -44,7 +44,7 @@
 /* How many entries a worker reads before it looks at the stop and adds what it counted. */
 #define SCAN_BATCH		256U
 
-static void *scan_worker(void *argument);
+static void scan_worker(void *argument);
 static int scan_take(struct se_scan *scan, struct se_scan_job *job);
 static void scan_folder(struct se_scan *scan, const struct se_scan_job *job);
 static int scan_push(struct se_scan *scan, const char *path, unsigned group);
@@ -65,6 +65,7 @@ se_scan_start(
 	struct se_scan *scan,
 	const char *root)
 {
+	struct kl_thread_options options;
 	struct stat status;
 	unsigned index;
 	size_t length;
@@ -84,8 +85,8 @@ se_scan_start(
 
 	/* A fresh scan of it, with its lock. */
 	memset(scan, 0, sizeof(*scan));
-	(void)pthread_mutex_init(&scan->lock, NULL);
-	(void)pthread_cond_init(&scan->wake, NULL);
+	(void)kl_mutex_init(&scan->lock);
+	(void)kl_cond_init(&scan->wake);
 	scan->initialized = 1;
 	memcpy(scan->root, root, length + 1U);
 	scan->device = status.st_dev;
@@ -108,7 +109,12 @@ se_scan_start(
 
 	/* The workers. */
 	for (index = 0; index < SE_SCAN_THREADS; index++) {
-		error = pthread_create(&scan->threads[index], NULL, scan_worker, scan);
+		memset(&options, 0, sizeof(options));
+		options.name = "storage-scan";
+		options.run = scan_worker;
+		options.argument = scan;
+		options.priority = KL_THREAD_PRIORITY_NORMAL;
+		error = kl_thread_start(&options, &scan->threads[index]);
 		if (error != 0)
 			break;
 		scan->thread_count++;
@@ -138,7 +144,7 @@ se_scan_stop(
 		return;
 
 	/* The stop, told to every worker waiting for a job. */
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	if (scan->state == SE_SCAN_RUNNING) {
 		scan->stop = 1;
@@ -148,9 +154,9 @@ se_scan_stop(
 	}
 
 	/* Every worker waiting hears it. */
-	pthread_cond_broadcast(&scan->wake);
+	kl_cond_broadcast(&scan->wake);
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 
 	/* The workers end. */
 	se_scan_finish(scan);
@@ -173,8 +179,10 @@ se_scan_finish(
 		return;
 
 	/* Every worker. */
-	for (index = 0; index < scan->thread_count; index++)
-		(void)pthread_join(scan->threads[index], NULL);
+	for (index = 0; index < scan->thread_count; index++) {
+		(void)kl_thread_join(scan->threads[index]);
+		scan->threads[index] = NULL;
+	}
 	scan->thread_count = 0U;
 
 	/* The folders left on the list, and the set of links. */
@@ -207,7 +215,7 @@ se_scan_view(
 		return;
 
 	/* The totals and the groups as they are now. */
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	memcpy(view->root, scan->root, sizeof(view->root));
 	view->state = scan->state;
@@ -222,14 +230,14 @@ se_scan_view(
 		view->group_count++;
 	}
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 
 	/* The largest first. */
 	qsort(view->groups, view->group_count, sizeof(view->groups[0]), scan_larger);
 }
 
 /* Takes folders from the list and walks them until the list is empty and no worker walks any, or the scan stops. */
-static void *
+static void
 scan_worker(
 	void *argument)
 {
@@ -247,7 +255,7 @@ scan_worker(
 		free(job.path);
 
 		/* The folder is done; the last worker to finish the last one ends the scan. */
-		pthread_mutex_lock(&scan->lock);
+		kl_mutex_lock(&scan->lock);
 
 		scan->busy--;
 		if (scan->job_count == 0U && scan->busy == 0U && scan->state == SE_SCAN_RUNNING) {
@@ -257,13 +265,12 @@ scan_worker(
 		}
 
 		/* The others hear the end, or that a folder is done. */
-		pthread_cond_broadcast(&scan->wake);
+		kl_cond_broadcast(&scan->wake);
 
-		pthread_mutex_unlock(&scan->lock);
+		kl_mutex_unlock(&scan->lock);
 	}
 
 	/* The worker ends. */
-	return NULL;
 }
 
 /* Waits for a folder to walk; returns 1 with it, 0 when the scan is over (stopped, or nothing is left). */
@@ -276,10 +283,10 @@ scan_take(
 
 	/* A job, or the end. */
 	taken = 0;
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	while (!scan->stop && scan->job_count == 0U && scan->busy != 0U)
-		pthread_cond_wait(&scan->wake, &scan->lock);
+		kl_cond_wait(&scan->wake, &scan->lock);
 	if (!scan->stop && scan->job_count != 0U) {
 		scan->job_count--;
 		*job = scan->jobs[scan->job_count];
@@ -294,7 +301,7 @@ scan_take(
 		scan->generation++;
 	}
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 
 	/* Reports whether one was taken. */
 	return taken;
@@ -329,11 +336,11 @@ scan_folder(
 	if (folder == NULL) {
 		if (descriptor >= 0)
 			(void)close(descriptor);
-		pthread_mutex_lock(&scan->lock);
+		kl_mutex_lock(&scan->lock);
 
 		scan->unreadable++;
 
-		pthread_mutex_unlock(&scan->lock);
+		kl_mutex_unlock(&scan->lock);
 		return;
 	}
 
@@ -382,11 +389,11 @@ scan_folder(
 		scan_add(scan, job->group, bytes, files);
 		bytes = 0U;
 		files = 0U;
-		pthread_mutex_lock(&scan->lock);
+		kl_mutex_lock(&scan->lock);
 
 		stop = scan->stop;
 
-		pthread_mutex_unlock(&scan->lock);
+		kl_mutex_unlock(&scan->lock);
 	}
 
 	/* The rest, and the folder closed. */
@@ -411,7 +418,7 @@ scan_push(
 		return ENOMEM;
 
 	/* Room on the list, and the job; a worker waiting takes it. */
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	if (scan->job_count == scan->job_capacity) {
 		capacity = scan->job_capacity * 2U;
@@ -419,7 +426,7 @@ scan_push(
 			capacity = 64U;
 		grown = realloc(scan->jobs, capacity * sizeof(scan->jobs[0]));
 		if (grown == NULL) {
-			pthread_mutex_unlock(&scan->lock);
+			kl_mutex_unlock(&scan->lock);
 			free(copy);
 			return ENOMEM;
 		}
@@ -433,9 +440,9 @@ scan_push(
 	scan->jobs[scan->job_count].path = copy;
 	scan->jobs[scan->job_count].group = group;
 	scan->job_count++;
-	pthread_cond_signal(&scan->wake);
+	kl_cond_signal(&scan->wake);
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 
 	/* Succeeded: the folder waits. */
 	return 0;
@@ -462,7 +469,7 @@ scan_linked(
 
 	/* Seen already, or remembered now. */
 	first = 1;
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	for (index = 0; index < scan->linked_count; index++) {
 		if (scan->linked[index] == key) {
@@ -489,7 +496,7 @@ scan_linked(
 		scan->linked_count++;
 	}
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 
 	/* Reports whether it counts. */
 	return first;
@@ -508,13 +515,13 @@ scan_add(
 		return;
 
 	/* Added. */
-	pthread_mutex_lock(&scan->lock);
+	kl_mutex_lock(&scan->lock);
 
 	scan->groups[group].bytes += bytes;
 	scan->groups[group].files += files;
 	scan->generation++;
 
-	pthread_mutex_unlock(&scan->lock);
+	kl_mutex_unlock(&scan->lock);
 }
 
 /* Reads the root's entries: its files for "Files here", a group and a job for each folder.  Returns 0 or an errno value. */
