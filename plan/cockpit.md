@@ -12,7 +12,7 @@
 | P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1778: p025 規約の全文の見直し（WS326 の最後の Phase） | 終われば WS326 を完了の形に |
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
-| P4 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1777: p019 sessiond の熱の要求の口（UAPI 待ちの所は仮の口） | 午後: Pi 5 の実機 |
+| P4 | — | — | 返却（07:2x）。WS333 p019（sessiond の熱の要求の口と権限の規則、kernel への呼びは UAPI まで仮）を main に | 午後: Pi 5 の実機 |
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | — | — | 返却（07:1x）。WS333 p016（危ない温度での非常の停止、QEMU で温度を上げて電源断まで確かめた）・p021（温度で CPU の上限を下げる）を main に | 次の割当を Q1 が決める |
 | P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1776: p018 Dell の provider（BIOS の熱の mode・fan・boost、host の harness まで） | 5330 の実機は電源の入れ直しの後 |
