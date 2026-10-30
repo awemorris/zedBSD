@@ -1206,7 +1206,7 @@ gpu_stage(
 		}
 
 		/* A backdrop filter works on pixels already drawn; the GPU path draws none of it. */
-		if (item->kind == PAINT_BACKDROP)
+		if (item->kind == PAINT_BACKDROP || item->kind == PAINT_GROUP || item->kind == PAINT_GROUP_END)
 			continue;
 
 		/* A rectangle is one instance. */

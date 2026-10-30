@@ -82,6 +82,7 @@ static const struct parser_pseudo_name parser_pseudo_names[] = {
 	{ "defined", CSS_PSEUDO_ALWAYS },
 	{ "scope", CSS_PSEUDO_SCOPE },
 	{ "target", CSS_PSEUDO_TARGET },
+	{ "popover-open", CSS_PSEUDO_POPOVER_OPEN },
 	{ "active-view-transition", CSS_PSEUDO_ACTIVE_VT },
 	{ NULL, 0 }
 };

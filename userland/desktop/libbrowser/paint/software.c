@@ -30,6 +30,11 @@ static void software_rect(struct paint_bitmap *bitmap, const struct paint_item *
 static int software_text(struct paint_bitmap *bitmap, struct text_system *text, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static void software_image(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static int software_backdrop(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
+static size_t software_group_end(const struct paint_list *list, size_t start, size_t last);
+static int software_items(const struct paint_list *list, struct text_system *text, size_t first, size_t last, layout_unit scroll_y, struct paint_bitmap *bitmap);
+static int software_group(const struct paint_list *list, struct text_system *text, size_t start, size_t end, layout_unit scroll_y, struct paint_bitmap *bitmap, const struct paint_clip *clip);
+static void software_filter_colors(float *pixels, float *alpha, int count, const struct css_filter *filters, int filter_count);
+static int software_region(const struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip, int *first_x, int *first_y, int *width, int *height);
 static void software_blend(struct paint_bitmap *bitmap, int x, int y, uint32_t color, float coverage, int nearest);
 static float software_overlap(float start, float end, int pixel);
 
@@ -70,32 +75,46 @@ paint_bitmap_release(
 	memset(bitmap, 0, sizeof(*bitmap));
 }
 
-/*
- * Draws a display list into a bitmap, the document scrolled up by scroll_y.
- */
-int
-paint_software(
+/* Finds the end of the group that starts at an index (the last item when it is not closed). */
+static size_t
+software_group_end(
+	const struct paint_list *list,
+	size_t start,
+	size_t last)
+{
+	const struct paint_item *item;
+	size_t depth;
+	size_t index;
+
+	depth = 0;
+	for (index = start; index < last; index++) {
+		item = wb_vector_at(&list->items, index);
+		if (item->kind == PAINT_GROUP)
+			depth++;
+		else if (item->kind == PAINT_GROUP_END && --depth == 0)
+			return index;
+	}
+	return last - 1;
+}
+
+/* Draws the items from an index up to (not including) another, in painting order, inside the clips the list starts and ends. */
+static int
+software_items(
 	const struct paint_list *list,
 	struct text_system *text,
+	size_t first,
+	size_t last,
 	layout_unit scroll_y,
 	struct paint_bitmap *bitmap)
 {
 	const struct paint_item *item;
 	struct paint_clips clips;
-	uint32_t canvas;
-	size_t count;
 	size_t index;
+	size_t end;
 	int error;
 
-	/* The canvas: its color laid over white, so the bitmap starts opaque. */
-	count = (size_t)bitmap->width * (size_t)bitmap->height;
-	canvas = paint_canvas_pixel(list->canvas_color);
-	for (index = 0; index < count; index++)
-		bitmap->pixels[index] = canvas;
-
-	/* Draws each item in painting order, inside the clips the list starts and ends. */
 	paint_clips_init(&clips, bitmap->width, bitmap->height);
-	for (index = 0; index < list->items.count; index++) {
+	for (index = first; index < last; index++) {
 		item = wb_vector_at(&list->items, index);
 
 		/* A clip starts. */
@@ -122,6 +141,18 @@ paint_software(
 			continue;
 		}
 
+		/* A filtered group: what is inside is painted apart, filtered and laid over the page. */
+		if (item->kind == PAINT_GROUP) {
+			end = software_group_end(list, index, last);
+			error = software_group(list, text, index, end, scroll_y, bitmap, paint_clips_top(&clips));
+			if (error != 0)
+				return error;
+			index = end;
+			continue;
+		}
+		if (item->kind == PAINT_GROUP_END)
+			continue;
+
 		/* The filters of a backdrop-filter, over what is drawn so far. */
 		if (item->kind == PAINT_BACKDROP) {
 			error = software_backdrop(bitmap, item, scroll_y, paint_clips_top(&clips));
@@ -135,6 +166,35 @@ paint_software(
 		if (error != 0)
 			return error;
 	}
+
+	return 0;
+}
+
+/*
+ * Draws a display list into a bitmap, the document scrolled up by scroll_y.
+ */
+int
+paint_software(
+	const struct paint_list *list,
+	struct text_system *text,
+	layout_unit scroll_y,
+	struct paint_bitmap *bitmap)
+{
+	uint32_t canvas;
+	size_t count;
+	size_t index;
+	int error;
+
+	/* The canvas: its color laid over white, so the bitmap starts opaque. */
+	count = (size_t)bitmap->width * (size_t)bitmap->height;
+	canvas = paint_canvas_pixel(list->canvas_color);
+	for (index = 0; index < count; index++)
+		bitmap->pixels[index] = canvas;
+
+	/* Draws each item in painting order, inside the clips the list starts and ends. */
+	error = software_items(list, text, 0, list->items.count, scroll_y, bitmap);
+	if (error != 0)
+		return error;
 
 	/* Succeeded: the bitmap shows the page. */
 	return 0;
@@ -211,43 +271,27 @@ paint_write_ppm(
 }
 
 /*
- * Applies a backdrop item's filter functions to the pixels drawn so far inside its rectangle (cut to the clip), as
- * the color matrices and the blur of the filter effects module define them (the blur's edges mirror).
+ * Finds the pixels of an item's rectangle (as the box's edges snap), cut to the clip and the bitmap; reports whether any
+ * is left.
  */
 static int
-software_backdrop(
-	struct paint_bitmap *bitmap,
+software_region(
+	const struct paint_bitmap *bitmap,
 	const struct paint_item *item,
 	layout_unit scroll_y,
-	const struct paint_clip *clip)
+	const struct paint_clip *clip,
+	int *first_x,
+	int *first_y,
+	int *width,
+	int *height)
 {
-	const struct css_filter *filter;
-	float *pixels;
 	float left;
 	float top;
 	float right;
 	float bottom;
-	float amount;
-	float red;
-	float green;
-	float blue;
-	float cosine;
-	float sine;
-	float matrix[9];
-	float mixed;
-	uint32_t pixel;
-	int first_x;
-	int first_y;
 	int last_x;
 	int last_y;
-	int width;
-	int height;
-	int index;
-	int count;
-	int x;
-	int y;
 
-	/* The rectangle in whole pixels (as the box's edges snap), cut to the clip and the bitmap. */
 	left = layout_to_px(item->x);
 	top = layout_to_px(item->y - scroll_y);
 	right = layout_to_px(item->x + item->width);
@@ -260,44 +304,64 @@ software_backdrop(
 		right = clip->right;
 	if (bottom > clip->bottom)
 		bottom = clip->bottom;
-	first_x = (int)floorf(left + 0.5f);
-	first_y = (int)floorf(top + 0.5f);
+	*first_x = (int)floorf(left + 0.5f);
+	*first_y = (int)floorf(top + 0.5f);
 	last_x = (int)floorf(right + 0.5f);
 	last_y = (int)floorf(bottom + 0.5f);
-	if (first_x < 0)
-		first_x = 0;
-	if (first_y < 0)
-		first_y = 0;
+	if (*first_x < 0)
+		*first_x = 0;
+	if (*first_y < 0)
+		*first_y = 0;
 	if (last_x > bitmap->width)
 		last_x = bitmap->width;
 	if (last_y > bitmap->height)
 		last_y = bitmap->height;
-	width = last_x - first_x;
-	height = last_y - first_y;
-	if (width <= 0 || height <= 0)
-		return 0;
+	*width = last_x - *first_x;
+	*height = last_y - *first_y;
+	return *width > 0 && *height > 0;
+}
 
-	/* The region as floats in 0..1, three channels a pixel. */
-	pixels = malloc((size_t)width * (size_t)height * 3U * sizeof(float));
-	if (pixels == NULL)
-		return ENOMEM;
-	count = width * height;
-	for (index = 0; index < count; index++) {
-		pixel = bitmap->pixels[(size_t)(first_y + index / width) * (size_t)bitmap->width + (size_t)(first_x + index % width)];
-		pixels[3 * index] = (float)((pixel >> 16) & 0xffU) / 255.0f;
-		pixels[3 * index + 1] = (float)((pixel >> 8) & 0xffU) / 255.0f;
-		pixels[3 * index + 2] = (float)(pixel & 0xffU) / 255.0f;
-	}
+/*
+ * Applies filter functions to colors (three floats in 0..1 a pixel, not premultiplied), as the color matrices of the
+ * filter effects module define them; the blur is not drawn.  An opacity() function scales the alphas when they are
+ * given.
+ */
+static void
+software_filter_colors(
+	float *pixels,
+	float *alpha,
+	int count,
+	const struct css_filter *filters,
+	int filter_count)
+{
+	const struct css_filter *filter;
+	float amount;
+	float red;
+	float green;
+	float blue;
+	float cosine;
+	float sine;
+	float matrix[9];
+	float mixed;
+	int index;
+	int y;
 
 	/* Each function in order. */
-	for (index = 0; index < item->filter_count; index++) {
-		filter = &item->filters[index];
+	for (index = 0; index < filter_count; index++) {
+		filter = &filters[index];
 		amount = filter->amount;
 		/* A blur spreads past the box and mirrors its edge in the other browsers; it is not drawn (a plain Gaussian inside the box matched the references worse than none). */
 		if (filter->kind == CSS_FILTER_BLUR)
 			continue;
-		if (filter->kind == CSS_FILTER_OPACITY)
+		if (filter->kind == CSS_FILTER_OPACITY) {
+			/* Over a group it makes the group translucent. */
+			if (alpha != NULL) {
+				amount = filter->amount > 1.0f ? 1.0f : filter->amount;
+				for (y = 0; y < count; y++)
+					alpha[y] *= amount;
+			}
 			continue;
+		}
 
 		/* The color matrix of the others (rows of red, green and blue). */
 		matrix[0] = 1.0f; matrix[1] = 0.0f; matrix[2] = 0.0f;
@@ -358,6 +422,44 @@ software_backdrop(
 			pixels[3 * y + 2] = blue < 0.0f ? 0.0f : (blue > 1.0f ? 1.0f : blue);
 		}
 	}
+}
+
+/*
+ * Applies a backdrop item's filter functions to the pixels drawn so far inside its rectangle (cut to the clip).
+ */
+static int
+software_backdrop(
+	struct paint_bitmap *bitmap,
+	const struct paint_item *item,
+	layout_unit scroll_y,
+	const struct paint_clip *clip)
+{
+	float *pixels;
+	uint32_t pixel;
+	int first_x;
+	int first_y;
+	int width;
+	int height;
+	int index;
+	int count;
+	int x;
+	int y;
+
+	if (!software_region(bitmap, item, scroll_y, clip, &first_x, &first_y, &width, &height))
+		return 0;
+
+	/* The region as floats in 0..1, three channels a pixel. */
+	pixels = malloc((size_t)width * (size_t)height * 3U * sizeof(float));
+	if (pixels == NULL)
+		return ENOMEM;
+	count = width * height;
+	for (index = 0; index < count; index++) {
+		pixel = bitmap->pixels[(size_t)(first_y + index / width) * (size_t)bitmap->width + (size_t)(first_x + index % width)];
+		pixels[3 * index] = (float)((pixel >> 16) & 0xffU) / 255.0f;
+		pixels[3 * index + 1] = (float)((pixel >> 8) & 0xffU) / 255.0f;
+		pixels[3 * index + 2] = (float)(pixel & 0xffU) / 255.0f;
+	}
+	software_filter_colors(pixels, NULL, count, item->filters, item->filter_count);
 
 	/* Back into the bitmap, opaque. */
 	for (y = 0; y < height; y++) {
@@ -373,6 +475,122 @@ software_backdrop(
 	free(pixels);
 
 	/* Succeeded: the region is filtered. */
+	return 0;
+}
+
+/*
+ * Draws the items of a filtered group apart from the page: twice, over black and over white, which gives each pixel's
+ * color and coverage (the bitmaps have no alpha).  The filter functions work on that color and the result is laid over the
+ * page inside the group's rectangle (cut to the clip).
+ */
+static int
+software_group(
+	const struct paint_list *list,
+	struct text_system *text,
+	size_t start,
+	size_t end,
+	layout_unit scroll_y,
+	struct paint_bitmap *bitmap,
+	const struct paint_clip *clip)
+{
+	const struct paint_item *group;
+	struct paint_bitmap dark;
+	struct paint_bitmap light;
+	float *pixels;
+	float *alpha;
+	float background;
+	float over;
+	uint32_t black;
+	uint32_t white;
+	uint32_t base;
+	uint32_t shift;
+	size_t total;
+	size_t at;
+	int first_x;
+	int first_y;
+	int width;
+	int height;
+	int count;
+	int index;
+	int error;
+	int x;
+	int y;
+
+	group = wb_vector_at(&list->items, start);
+	if (!software_region(bitmap, group, scroll_y, clip, &first_x, &first_y, &width, &height))
+		return 0;
+
+	/* The group's items over black and over white. */
+	error = paint_bitmap_create(&dark, bitmap->width, bitmap->height);
+	if (error != 0)
+		return error;
+	error = paint_bitmap_create(&light, bitmap->width, bitmap->height);
+	if (error != 0) {
+		paint_bitmap_release(&dark);
+		return error;
+	}
+	total = (size_t)bitmap->width * (size_t)bitmap->height;
+	for (at = 0; at < total; at++) {
+		dark.pixels[at] = 0xff000000U;
+		light.pixels[at] = 0xffffffffU;
+	}
+	error = software_items(list, text, start + 1, end, scroll_y, &dark);
+	if (error == 0)
+		error = software_items(list, text, start + 1, end, scroll_y, &light);
+
+	/* Each pixel's color and alpha, from how far white shows through. */
+	count = width * height;
+	pixels = malloc((size_t)count * 3U * sizeof(float));
+	alpha = malloc((size_t)count * sizeof(float));
+	if (error == 0 && (pixels == NULL || alpha == NULL))
+		error = ENOMEM;
+	if (error != 0) {
+		free(pixels);
+		free(alpha);
+		paint_bitmap_release(&dark);
+		paint_bitmap_release(&light);
+		return error;
+	}
+	for (index = 0; index < count; index++) {
+		at = (size_t)(first_y + index / width) * (size_t)bitmap->width + (size_t)(first_x + index % width);
+		black = dark.pixels[at];
+		white = light.pixels[at];
+		over = 0.0f;
+		for (shift = 0; shift <= 16U; shift += 8U)
+			over += (float)((white >> shift) & 0xffU) - (float)((black >> shift) & 0xffU);
+		alpha[index] = 1.0f - over / (3.0f * 255.0f);
+		if (alpha[index] < 0.0f)
+			alpha[index] = 0.0f;
+		for (y = 0; y < 3; y++) {
+			base = (black >> (16U - 8U * (uint32_t)y)) & 0xffU;
+			pixels[3 * index + y] = alpha[index] > 0.0f ? (float)base / 255.0f / alpha[index] : 0.0f;
+			if (pixels[3 * index + y] > 1.0f)
+				pixels[3 * index + y] = 1.0f;
+		}
+	}
+	software_filter_colors(pixels, alpha, count, group->filters, group->filter_count);
+
+	/* Laid over the page. */
+	for (y = 0; y < height; y++) {
+		for (x = 0; x < width; x++) {
+			index = y * width + x;
+			if (alpha[index] <= 0.0f)
+				continue;
+			at = (size_t)(first_y + y) * (size_t)bitmap->width + (size_t)(first_x + x);
+			over = alpha[index] > 1.0f ? 1.0f : alpha[index];
+			base = 0xff000000U;
+			for (shift = 0; shift <= 16U; shift += 8U) {
+				background = (float)((bitmap->pixels[at] >> shift) & 0xffU);
+				background = background * (1.0f - over) + pixels[3 * index + (2U - shift / 8U)] * 255.0f * over;
+				base |= (uint32_t)(background + 0.5f) << shift;
+			}
+			bitmap->pixels[at] = base;
+		}
+	}
+	free(pixels);
+	free(alpha);
+	paint_bitmap_release(&dark);
+	paint_bitmap_release(&light);
 	return 0;
 }
 

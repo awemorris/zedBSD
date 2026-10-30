@@ -41,6 +41,7 @@
 ## 3. module
 
 全部 `userland/desktop/libmedia/`。関数の接頭辞 `h264sw_`、定数 `H264SW_`。各 header の comment が仕様（入力・出力・前提・誤り・節）。
+codec に依らない部分（p026 で移した、H.265 と WS329 の encoder も使う）は `vcodec.h`（共通の約束・誤りの値）、`vcodec-bitreader`（旧 h264sw-bits）、`vcodec-nal`（Annex B の分割と emulation prevention の除去）、`vcodec-cabac`（算術の engine・表 9-44・9-45・式 9-5）。下の表の h264sw-bits は vcodec-bitreader、h264sw-nal と h264sw-cabac は H.264 の部分（header・context）と読む（[phase026](phase026/phase.md)）。
 
 | module（.h/.c） | 内容（節） | 使う module |
 | --- | --- | --- |

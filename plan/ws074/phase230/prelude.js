@@ -1873,4 +1873,102 @@
     def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
     def(g, 'Animation', Animation);
   })();
+  // ---- document.fonts: load() and check() (the faces the page names are loaded or not by its stylesheets alone)
+  (function () {
+    var desc = typeof g.Document === 'function' ? Object.getOwnPropertyDescriptor(g.Document.prototype, 'fonts') : null;
+    if (!desc || !desc.get) return;
+    Object.defineProperty(g.Document.prototype, 'fonts', {
+      get: function () {
+        var set = desc.get.call(this);
+        if (set && typeof set.load !== 'function') {
+          def(set, 'load', function load() { return Promise.resolve([]); });
+          def(set, 'check', function check() { return true; });
+          hidden(set, 'status', 'loaded');
+        }
+        return set;
+      },
+      configurable: true, enumerable: true
+    });
+  })();
+  // ---- Range.getClientRects() and getBoundingClientRect(): the rectangles of the text nodes the range covers (whole nodes)
+  if (typeof g.Range === 'function' && typeof g.DOMRect === 'function' && !g.Range.prototype.getBoundingClientRect) (function () {
+    function rects(range) {
+      var out = [], start = range.startContainer, end = range.endContainer;
+      function add(node) {
+        var r = native.nodeRect(node);
+        if (r) out.push(new g.DOMRect(r[0], r[1], r[2], r[3]));
+      }
+      if (start === end && start.nodeType === 3) { add(start); return out; }
+      var walker = document.createTreeWalker(range.commonAncestorContainer, 4), node;
+      while ((node = walker.nextNode())) {
+        if (typeof range.intersectsNode !== 'function' || range.intersectsNode(node)) add(node);
+      }
+      return out;
+    }
+    def(g.Range.prototype, 'getClientRects', function getClientRects() { return rects(this); });
+    def(g.Range.prototype, 'getBoundingClientRect', function getBoundingClientRect() {
+      var list = rects(this), x0 = 0, y0 = 0, x1 = 0, y1 = 0, i;
+      for (i = 0; i < list.length; i++) {
+        if (i === 0) { x0 = list[i].left; y0 = list[i].top; x1 = list[i].right; y1 = list[i].bottom; continue; }
+        x0 = Math.min(x0, list[i].left); y0 = Math.min(y0, list[i].top);
+        x1 = Math.max(x1, list[i].right); y1 = Math.max(y1, list[i].bottom);
+      }
+      return new g.DOMRect(x0, y0, x1 - x0, y1 - y0);
+    });
+  })();
+  // ---- Popover: the popover attribute and showPopover(), hidePopover(), togglePopover() (the top layer is a high z-index)
+  if (typeof g.Element === 'function' && !g.Element.prototype.showPopover) (function () {
+    function kind(element) {
+      var v = element.getAttribute('popover');
+      if (v === null) return null;
+      v = v.toLowerCase();
+      if (v === '' || v === 'auto') return 'auto';
+      return v === 'hint' ? 'hint' : 'manual';
+    }
+    function open(element) { return element.matches(':popover-open'); }
+    function need(element) {
+      if (kind(element) === null) throw new DOMException('The element has no popover attribute.', 'NotSupportedError');
+    }
+    function change(element, to) {
+      var from = to === 'open' ? 'closed' : 'open', ev;
+      if (typeof g.ToggleEvent === 'function') ev = new g.ToggleEvent('beforetoggle', { oldState: from, newState: to, cancelable: to === 'open' });
+      else { ev = new Event('beforetoggle', { cancelable: to === 'open' }); ev.oldState = from; ev.newState = to; }
+      if (!element.dispatchEvent(ev) && to === 'open') return false;
+      native.setPopover(element, to === 'open');
+      Promise.resolve().then(function () {
+        var t;
+        if (typeof g.ToggleEvent === 'function') t = new g.ToggleEvent('toggle', { oldState: from, newState: to });
+        else { t = new Event('toggle'); t.oldState = from; t.newState = to; }
+        element.dispatchEvent(t);
+      });
+      return true;
+    }
+    Object.defineProperty(g.Element.prototype, 'popover', {
+      get: function () { return kind(this); },
+      set: function (v) { if (v === null) this.removeAttribute('popover'); else this.setAttribute('popover', String(v)); },
+      configurable: true, enumerable: true
+    });
+    def(g.Element.prototype, 'showPopover', function showPopover() {
+      need(this);
+      if (open(this)) return;
+      if (!this.isConnected) throw new DOMException('The element is not connected.', 'InvalidStateError');
+      if (kind(this) === 'auto') {
+        Array.from(document.querySelectorAll('[popover]:popover-open')).forEach(function (other) {
+          if (other !== this && kind(other) === 'auto' && !other.contains(this) && !this.contains(other)) change(other, 'closed');
+        }, this);
+      }
+      change(this, 'open');
+    });
+    def(g.Element.prototype, 'hidePopover', function hidePopover() {
+      need(this);
+      if (!open(this)) return;
+      change(this, 'closed');
+    });
+    def(g.Element.prototype, 'togglePopover', function togglePopover(force) {
+      need(this);
+      var want = force === undefined ? !open(this) : !!force;
+      if (want) this.showPopover(); else this.hidePopover();
+      return open(this);
+    });
+  })();
 })

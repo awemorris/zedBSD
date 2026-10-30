@@ -40,6 +40,7 @@ static int prelude_scroll_fragment(struct vm_realm *realm, vm_value this_value, 
 static int prelude_fire(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_set_follower(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_node_rect(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
+static int prelude_set_popover(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_active(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
 static int prelude_view_transition_duration(struct vm_realm *realm, vm_value this_value, const vm_value *args, unsigned count, vm_value *result);
@@ -502,6 +503,34 @@ prelude_view_transition_duration(
 	*result = vm_value_number(0.0);
 	if (window->host.view_transition_duration != NULL)
 		*result = vm_value_number(window->host.view_transition_duration(window->host.context));
+	return 0;
+}
+
+/* setPopover(element, open): whether the popover of an element is showing (the page is styled again). */
+static int
+prelude_set_popover(
+	struct vm_realm *realm,
+	vm_value this_value,
+	const vm_value *args,
+	unsigned count,
+	vm_value *result)
+{
+	struct dom_node *node;
+	struct dom_element *element;
+	int open;
+
+	UNUSED_PARAMETER(this_value);
+	*result = VM_VALUE_UNDEFINED;
+	node = bind_node_of(js_argument(args, count, 0));
+	if (node == NULL || node->type != DOM_ELEMENT)
+		return 0;
+	element = (struct dom_element *)node;
+	open = js_argument(args, count, 1) == VM_VALUE_TRUE;
+	if (element->popover_open != open) {
+		element->popover_open = open;
+		element->node.document->generation++;
+	}
+	UNUSED_PARAMETER(realm);
 	return 0;
 }
 
@@ -969,6 +998,10 @@ bind_install_prelude(
 		status = js_builtin_function(realm, "nodeRect", 1, prelude_node_rect, NULL, &function);
 	if (status == 0)
 		status = js_builtin_value(realm, natives, "nodeRect", vm_value_cell(function), JS_BUILTIN_METHOD);
+	if (status == 0)
+		status = js_builtin_function(realm, "setPopover", 2, prelude_set_popover, NULL, &function);
+	if (status == 0)
+		status = js_builtin_value(realm, natives, "setPopover", vm_value_cell(function), JS_BUILTIN_METHOD);
 	if (status == 0)
 		status = js_builtin_function(realm, "viewTransition", 2, prelude_view_transition, NULL, &function);
 	if (status == 0)

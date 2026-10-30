@@ -56,7 +56,7 @@ static int decoder_slice(struct h264sw_decoder *decoder, const struct h264sw_nal
 static int decoder_activate(struct h264sw_decoder *decoder, const struct h264sw_pps *pps);
 static int decoder_size_arrays(struct h264sw_decoder *decoder);
 static int decoder_start_picture(struct h264sw_decoder *decoder, const struct h264sw_pps *pps, int64_t time_us);
-static int decoder_decode_slice(struct h264sw_decoder *decoder, struct h264sw_bits *bits);
+static int decoder_decode_slice(struct h264sw_decoder *decoder, struct vcodec_bitreader *bits);
 static int decoder_finish_picture(struct h264sw_decoder *decoder);
 static void decoder_conceal(struct h264sw_decoder *decoder);
 static void decoder_conceal_samples(struct h264sw_frame *frame, unsigned x, unsigned y, const struct h264sw_frame *source);
@@ -420,11 +420,11 @@ decoder_parameter_set(
 	struct h264sw_decoder *decoder,
 	const struct h264sw_nal *nal)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int error;
 
 	/* Reads the set from its RBSP; a set that fails leaves the store as it was. */
-	h264sw_bits_init(&bits, nal->rbsp, nal->rbsp_size);
+	vcodec_bitreader_init(&bits, nal->rbsp, nal->rbsp_size);
 	if (nal->type == H264SW_NAL_SPS) {
 		error = h264sw_ps_read_sps(&decoder->ps, &bits);
 	} else {
@@ -452,7 +452,7 @@ decoder_slice(
 	const struct h264sw_nal *nal,
 	int64_t time_us)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	struct h264sw_slice_header *header;
 	const struct h264sw_pps *pps;
 	const struct h264sw_sps *named_sps;
@@ -461,7 +461,7 @@ decoder_slice(
 
 	/* Reads the slice header into the decoder's header of the slice being decoded. */
 	header = &decoder->header;
-	h264sw_bits_init(&bits, nal->rbsp, nal->rbsp_size);
+	vcodec_bitreader_init(&bits, nal->rbsp, nal->rbsp_size);
 	error = h264sw_slice_read(&bits, nal, &decoder->ps, header);
 	if (error == ENOTSUP) {
 		decoder->stats.unsupported++;
@@ -826,7 +826,7 @@ decoder_start_picture(
 static int
 decoder_decode_slice(
 	struct h264sw_decoder *decoder,
-	struct h264sw_bits *bits)
+	struct vcodec_bitreader *bits)
 {
 	struct h264sw_picture_ctx *picture;
 	struct h264sw_slice_ctx *slice;

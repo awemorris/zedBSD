@@ -1,6 +1,6 @@
 #!/bin/sh
 # The host unit tests of the software H.264 decoder (libmedia's h264sw-*): each test
-# plan/ws326/tests/unit/test-<name>.c is built with every h264sw-*.c except the back end (modules
+# plan/ws326/tests/unit/test-<name>.c is built with every h264sw-*.c and vcodec-*.c except the back end (modules
 # not implemented yet are skeletons that answer ENOSYS) and bits.c, with ASan and UBSan, and run.
 # Each test's last line is "test-<name>: PASS (...)" or "test-<name>: FAIL (...)".
 #   sh plan/ws326/tests/run-unit.sh <name>...     one or more tests
@@ -28,7 +28,7 @@ if [ -z "$names" ]; then
 fi
 
 modules=""
-for file in userland/desktop/libmedia/h264sw-*.c; do
+for file in userland/desktop/libmedia/h264sw-*.c userland/desktop/libmedia/vcodec-*.c; do
 	case "$file" in
 	*/h264sw-backend.c) ;;
 	*) modules="$modules $file" ;;

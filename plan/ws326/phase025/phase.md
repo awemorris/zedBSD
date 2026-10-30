@@ -4,7 +4,7 @@
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
 - 状態: planned（2026-10-30 p001 で作成）。
-- 依存: p023（と速さの Phase）（依存の Phase の実装が main に入ってから始める）。
+- 依存: p023・p026（と速さの Phase）（依存の Phase の実装が main に入ってから始める）。
 
 ## 読む物
 
@@ -20,19 +20,19 @@
 
 ## 試験の項目
 
-- WS が足した C（h264sw*.c・h264sw*.h・decoder.c の変更・試験の C）を全文と照らし、書き方だけを直す（動作を変えない）。表の block ごとの出典の comment の形を確かめる。
+- WS が足した C（h264sw*.c・h264sw*.h・vcodec*.c・vcodec*.h・decoder.c の変更・試験の C）を全文と照らし、書き方だけを直す（動作を変えない）。表の block ごとの出典の comment の形を確かめる。
 - 共通: 誤りの入力（範囲外・途中で切れた・巨大な値）で落ちず、header に書かれた誤りを返す。ASan・UBSan の報告が 0。
 
 ## 変えてはいけない物
 
-- `userland/desktop/libmedia/h264sw*.h`（全部）。header の不備・矛盾・足りない口を見つけたら、直さずに止めて Q1 に返す: どの header のどの関数か、何が足りないか、案の差分。
+- `userland/desktop/libmedia/h264sw*.h`・`vcodec*.h`（全部）。header の不備・矛盾・足りない口を見つけたら、直さずに止めて Q1 に返す: どの header のどの関数か、何が足りないか、案の差分。
 - 担当の module 以外の `h264sw-*.c`（他の Phase の物）。既存の libmedia の file（bits.c・h264.c・vkvideo.c・decoder.c など）、Makefile、`plan/ws326/tests/run-unit.sh`・`check.h`・`bitwriter.h`・`check-skeleton.sh`（不備は Q1 へ）。
 - HAL・toolchain・共有の build/（AGENTS.md §7）。rm などの削除をしない。
 - 上の「注意」がこの Phase に明示に許す物だけは、この節の限りでない。
 
 ## 確かめの command（worktree の root で）
 
-- `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`（header が p001 の物から変わっていない、cc と clang で warning 0）。
+- `BASE=92ca2d0e8 timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`（header が p026 の物から変わっていない、cc と clang で warning 0。WS329 p002 が header を移したらその commit）。
 - zedBSD amd64: `timeout 1200 make ZEDBSD_CONFIG=config/ci/config-amd64.mk ZEDBSD_TARGET_LLVM_BIN=/home/awe/zedBSD-claude1/build/llvm/bin ZEDBSD_SYSROOT_AMD64=/home/awe/zedBSD-claude1/build/amd64/sysroot -o /home/awe/zedBSD-claude1/build/amd64/sysroot/.zedbsd-sysroot-complete -j8 build/amd64/dynamic/libmedia.so` → exit 0、出力に warning が 0。
 - `git diff --check`。
 

@@ -595,11 +595,11 @@ read_block(
 	unsigned *total,
 	size_t *position)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int error;
 
 	/* Reads the block with the module under test. */
-	h264sw_bits_init(&bits, in->data, bytes);
+	vcodec_bitreader_init(&bits, in->data, bytes);
 	error = h264sw_cavlc_residual_block(&bits, nc, start, end, max_coeff, levels, total);
 
 	/* Reports where the reader stopped. */
@@ -673,7 +673,7 @@ check_picked_tokens(
 	unsigned tail;
 	unsigned total;
 	unsigned trailing;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	int error;
 
 	/* Each codeword followed by all zeros and by all ones must decode the same, using only its own bits. */
@@ -682,7 +682,7 @@ check_picked_tokens(
 			bitwriter_init(&writer);
 			put_bits(&writer, picks[index].bits);
 			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
-			h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			total = 99U;
 			trailing = 99U;
 			error = cavlc_coeff_token(&bits, nc, &total, &trailing);
@@ -723,7 +723,7 @@ check_token_columns(void)
 	static const unsigned expect_length[] = { 1U, 1U, 2U, 2U, 4U, 4U, 6U, 6U, 1U };
 	static const unsigned expect_total[] = { 0U, 0U, 0U, 0U, 0U, 0U, 16U, 16U, 1U };
 	static const unsigned expect_trailing[] = { 0U, 0U, 0U, 0U, 0U, 0U, 0U, 0U, 1U };
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned total;
 	unsigned trailing;
 	unsigned index;
@@ -733,7 +733,7 @@ check_token_columns(void)
 		bitwriter_init(&writer);
 		put_bits(&writer, "1111");
 		bitwriter_u(&writer, 0U, 16U);
-		h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+		vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 		CHECK(cavlc_coeff_token(&bits, nc_values[index], &total, &trailing) == 0);
 		CHECK(total == expect_total[index]);
 		CHECK(trailing == expect_trailing[index]);
@@ -744,7 +744,7 @@ check_token_columns(void)
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
 	bitwriter_u(&writer, 0U, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, -2, &total, &trailing) == EINVAL);
 	CHECK(cavlc_coeff_token(&bits, -100, &total, &trailing) == EINVAL);
 }
@@ -753,7 +753,7 @@ check_token_columns(void)
 static void
 check_token_errors(void)
 {
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned total;
 	unsigned trailing;
 
@@ -761,37 +761,37 @@ check_token_errors(void)
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 10");
 	bitwriter_u(&writer, 0xffffU, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 8, &total, &trailing) == EINVAL);
 
 	/* 0001 11 is unused in the 8 <= nC column too (TrailingOnes 3 of TotalCoeff 2). */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0001 11");
 	bitwriter_u(&writer, 0xffffU, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 8, &total, &trailing) == EINVAL);
 
 	/* A run of 16 zeros is in no column of nC 0 and above, whatever follows it. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
 	bitwriter_u(&writer, 0xffffU, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 2, &total, &trailing) == EINVAL);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 5, &total, &trailing) == EINVAL);
 
 	/* A code cut by the end of the RBSP is an error: 0000 0011 1 needs 9 bits, only 8 are there. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 0011");
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
 
 	/* A reader that already failed reads nothing. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	bits.error = EINVAL;
 	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
 }
@@ -928,7 +928,7 @@ check_total_zeros(void)
 	unsigned zeros;
 	unsigned tail;
 	size_t count;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 
 	/* The tables of 4x4 blocks: each picked code with zeros and ones after it reads the same value. */
 	count = sizeof(zeros_4x4) / sizeof(zeros_4x4[0]);
@@ -937,7 +937,7 @@ check_total_zeros(void)
 			bitwriter_init(&writer);
 			put_bits(&writer, zeros_4x4[index].bits);
 			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
-			h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			zeros = 99U;
 			CHECK(cavlc_total_zeros(&bits, zeros_4x4[index].first, 16U, &zeros) == 0);
 			CHECK(zeros == zeros_4x4[index].second);
@@ -949,7 +949,7 @@ check_total_zeros(void)
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 10");
 	bitwriter_u(&writer, 0U, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_total_zeros(&bits, 1U, 15U, &zeros) == 0);
 	CHECK(zeros == 8U);
 
@@ -960,7 +960,7 @@ check_total_zeros(void)
 			bitwriter_init(&writer);
 			put_bits(&writer, zeros_chroma_dc[index].bits);
 			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
-			h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			zeros = 99U;
 			CHECK(cavlc_total_zeros(&bits, zeros_chroma_dc[index].first, 4U, &zeros) == 0);
 			CHECK(zeros == zeros_chroma_dc[index].second);
@@ -971,7 +971,7 @@ check_total_zeros(void)
 	/* A TotalCoeff with no table row (0, 16 and above; 4 and above for chroma DC) is refused. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0xffffU, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_total_zeros(&bits, 0U, 16U, &zeros) == EINVAL);
 	CHECK(cavlc_total_zeros(&bits, 16U, 16U, &zeros) == EINVAL);
 	CHECK(cavlc_total_zeros(&bits, 0U, 4U, &zeros) == EINVAL);
@@ -980,9 +980,9 @@ check_total_zeros(void)
 	/* The all-zero pattern is no code of tzVlcIndex 1 (nine zeros), and is the last code, 11, of tzVlcIndex 5 (0000 0). */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_total_zeros(&bits, 1U, 16U, &zeros) == EINVAL);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_total_zeros(&bits, 5U, 16U, &zeros) == 0);
 	CHECK(zeros == 11U);
 }
@@ -995,7 +995,7 @@ check_run_before(void)
 	unsigned run;
 	unsigned tail;
 	size_t count;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 
 	/* Each picked code with zeros and ones after it reads the same value, for the zerosLeft of its row. */
 	count = sizeof(runs) / sizeof(runs[0]);
@@ -1004,7 +1004,7 @@ check_run_before(void)
 			bitwriter_init(&writer);
 			put_bits(&writer, runs[index].bits);
 			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
-			h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			run = 99U;
 			CHECK(cavlc_run_before(&bits, runs[index].first, &run) == 0);
 			CHECK(run == runs[index].second);
@@ -1015,15 +1015,15 @@ check_run_before(void)
 	/* A zerosLeft of 0 has no code. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0xffffU, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_run_before(&bits, 0U, &run) == EINVAL);
 
 	/* The all-zero pattern of 11 bits is no code, in the row above 6 and in the rows below. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_run_before(&bits, 9U, &run) == EINVAL);
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(cavlc_run_before(&bits, 1U, &run) == 0);
 	CHECK(run == 1U);
 }
@@ -1255,13 +1255,13 @@ check_block_errors(void)
 	int32_t levels[16];
 	unsigned total;
 	size_t end_position;
-	struct h264sw_bits bits;
+	struct vcodec_bitreader bits;
 	unsigned prefix;
 
 	/* A missing reader, levels or count, and a block shape no syntax produces. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	CHECK(h264sw_cavlc_residual_block(NULL, 0, 0U, 15U, 16U, levels, &total) == EINVAL);
 	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, NULL, &total) == EINVAL);
 	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, NULL) == EINVAL);
@@ -1339,7 +1339,7 @@ check_block_errors(void)
 	/* A reader that already failed gives an error and leaves zero levels. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
-	h264sw_bits_init(&bits, writer.data, bitwriter_bytes(&writer));
+	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	bits.error = EINVAL;
 	memset(levels, 0x55, sizeof(levels));
 	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, &total) == EINVAL);

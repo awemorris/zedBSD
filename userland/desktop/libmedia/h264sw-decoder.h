@@ -179,7 +179,7 @@ void h264sw_decoder_destroy(struct h264sw_decoder *decoder);
  * Decodes one NAL unit.
  *
  * nal and size are the NAL unit's bytes after its start code (from
- * h264sw_nal_find); time_us is the presentation time of the packet it
+ * vcodec_nal_find); time_us is the presentation time of the packet it
  * came in (kept for a picture whose first slice it is).  Runs the flow
  * above; frames that become ready for output are appended to the output
  * queue.

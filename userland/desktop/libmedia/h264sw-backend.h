@@ -20,7 +20,7 @@
  * open: takes MEDIA_CODEC_H264 only (else MEDIA_PROBLEM_FORMAT).  Opens
  *   the bitstream conversion (media_bitstream_open), reads the parameter
  *   sets of the codec private data (the converted prefix, split with
- *   h264sw_nal_find and given to h264sw_decoder_nal) and answers
+ *   vcodec_nal_find and given to h264sw_decoder_nal) and answers
  *   MEDIA_PROBLEM_PROFILE when one is refused as unsupported (ENOTSUP):
  *   interlace, 4:0:0, 4:2:2, 4:4:4, more than 8 bits, slice groups and
  *   the other profiles go to the next back end.  With no parameter sets

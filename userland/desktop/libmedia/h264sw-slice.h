@@ -16,7 +16,7 @@
 #define LIBMEDIA_H264SW_SLICE_H
 
 #include "h264sw.h"
-#include "h264sw-bits.h"
+#include "vcodec-bitreader.h"
 #include "h264sw-nal.h"
 #include "h264sw-ps.h"
 
@@ -197,7 +197,7 @@ struct h264sw_slice_header {
  * present: frame_mbs_only_flag is 1 in every SPS kept), slice groups, and
  * nal_unit_type 2..4 (data partitioning, which the caller filters first).
  */
-int h264sw_slice_read(struct h264sw_bits *bits, const struct h264sw_nal *nal, const struct h264sw_ps_store *store, struct h264sw_slice_header *header);
+int h264sw_slice_read(struct vcodec_bitreader *bits, const struct h264sw_nal *nal, const struct h264sw_ps_store *store, struct h264sw_slice_header *header);
 
 /*
  * Reports whether a slice starts a new picture (7.4.1.2.4).

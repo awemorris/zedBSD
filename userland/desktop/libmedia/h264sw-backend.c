@@ -215,7 +215,7 @@ h264sw_backend_open(
 	/* Gives each parameter set of the private data to the decoder. */
 	cursor = 0U;
 	while (backend->bitstream.prefix != NULL) {
-		found = h264sw_nal_find(backend->bitstream.prefix, backend->bitstream.prefix_size, &cursor, &nal, &nal_size);
+		found = vcodec_nal_find(backend->bitstream.prefix, backend->bitstream.prefix_size, &cursor, &nal, &nal_size);
 		if (found == 0)
 			break;
 
@@ -505,7 +505,7 @@ h264sw_backend_pump(
 
 		/* The next NAL unit of the packet. */
 		if (backend->cursor < backend->size) {
-			found = h264sw_nal_find(backend->data, backend->size, &backend->cursor, &nal, &nal_size);
+			found = vcodec_nal_find(backend->data, backend->size, &backend->cursor, &nal, &nal_size);
 			if (found == 0) {
 				backend->cursor = backend->size;
 				continue;

@@ -11,6 +11,12 @@
  * Embedded Controller, at the ports QEMU's q35 uses.  Status registers
  * clear the bits written as one; the EC answers every command at once.
  *
+ * A byte of the EC may be given a sequence of values that successive reads
+ * take in turn (the last one stays), for firmware that reads a counter and
+ * then items from one register.  Writes of the SMI command port are counted,
+ * and a hook the harness installs runs at each, for a simulated firmware
+ * that answers in system memory.
+ *
  * The FACS Global Lock has a simulated firmware on its other side: at each
  * tick (a sleep of the interpreter) it asks for a lock the operating system
  * owns, or lets go of a lock it owns; it takes the lock when GBL_RLS says
@@ -62,6 +68,10 @@
 #define EC_WRITE	0x81U
 #define EC_QUERY	0x84U
 
+/* The most EC bytes with a sequence of values, and the most values in one. */
+#define EC_SEQUENCES_MAX	16U
+#define EC_SEQUENCE_VALUES_MAX	64U
+
 /*
  * What the EC expects on its data port next.
  */
@@ -72,6 +82,17 @@ enum ec_phase {
 	EC_WRITE_DATA
 };
 
+
+/*
+ * One EC byte whose reads take a sequence of values: the byte's address,
+ * the values, how many there are, and the one the next read takes.
+ */
+struct ec_sequence {
+	uint8_t address;
+	uint8_t values[EC_SEQUENCE_VALUES_MAX];
+	unsigned count;
+	unsigned next;
+};
 
 /*
  * The registers of the simulated hardware.
@@ -119,6 +140,21 @@ static volatile uint32_t global_lock;
 static bool firmware_owns;
 static bool firmware_waits;
 
+/*
+ * The EC bytes with a sequence of values, filled from the command line
+ * before any AML runs; each sequence's next moves as the EC reads it.
+ */
+static struct ec_sequence ec_sequences[EC_SEQUENCES_MAX];
+static unsigned ec_sequence_count;
+
+/*
+ * How many times the SMI command port was written, and the hook that runs
+ * at each write (NULL when the harness installed none).  The harness runs
+ * one thread.
+ */
+static unsigned long smi_writes;
+static void (*smi_hook)(uint8_t command);
+
 static bool port_modelled(uint32_t port);
 static int access_byte(uint32_t port, bool write, uint8_t *value);
 static void control_write(uint32_t port, uint8_t *value);
@@ -126,6 +162,7 @@ static void smi_command(bool write, uint8_t *value);
 static int ec_data(bool write, uint8_t *value);
 static int ec_command(bool write, uint8_t *value);
 static void ec_query_answer(void);
+static uint8_t ec_read_byte(uint8_t address);
 
 /*
  * Reads or writes a port of the simulated hardware.
@@ -232,6 +269,58 @@ hardware_ec_ports(
 	/* The EC answers on these from now on. */
 	ec_data_port = data;
 	ec_command_port = command;
+}
+
+/*
+ * Gives an EC byte a sequence of values that its reads take in turn.
+ *
+ * Returns 0, or -1 when the sequences or the values do not fit.
+ */
+int
+hardware_ec_sequence(
+	uint8_t address,
+	const uint8_t *values,
+	unsigned count)
+{
+	struct ec_sequence *sequence;
+
+	/* Refuses a sequence that does not fit, or an empty one. */
+	if (ec_sequence_count >= EC_SEQUENCES_MAX)
+		return -1;
+	if (count == 0 || count > EC_SEQUENCE_VALUES_MAX)
+		return -1;
+
+	/* Keeps the sequence; the first read takes its first value. */
+	sequence = &ec_sequences[ec_sequence_count];
+	sequence->address = address;
+	memcpy(sequence->values, values, count);
+	sequence->count = count;
+	sequence->next = 0;
+	ec_sequence_count++;
+
+	/* Succeeded: the byte's reads take the values. */
+	return 0;
+}
+
+/*
+ * Reports how many times the SMI command port has been written.
+ */
+unsigned long
+hardware_smi_writes(void)
+{
+	/* The count since the harness started. */
+	return smi_writes;
+}
+
+/*
+ * Installs the hook that runs at each write of the SMI command port.
+ */
+void
+hardware_smi_hook(
+	void (*hook)(uint8_t command))
+{
+	/* Replaces any hook installed before. */
+	smi_hook = hook;
 }
 
 /*
@@ -471,6 +560,11 @@ smi_command(
 		return;
 	}
 
+	/* Counts the write, and lets the harness's simulated firmware answer it. */
+	smi_writes++;
+	if (smi_hook != NULL)
+		smi_hook(*value);
+
 	/* Either enable value sets SCI_EN in PM1_CNT. */
 	if (*value == ACPI_ENABLE) {
 		pm1_control[0] |= 0x01U;
@@ -493,8 +587,8 @@ ec_data(
 		/* A write carries the address or the byte of the command in progress. */
 		switch (ec_phase) {
 		case EC_READ_ADDRESS:
-			/* The address of a read: the byte there waits on the data port. */
-			ec_output = ec_ram[*value];
+			/* The address of a read: the byte there, or its sequence's next value, waits on the data port. */
+			ec_output = ec_read_byte(*value);
 			ec_output_full = 1;
 			ec_phase = EC_IDLE;
 			break;
@@ -575,4 +669,30 @@ ec_query_answer(void)
 
 	/* The answer waits on the data port. */
 	ec_output_full = 1;
+}
+
+/* Reads an EC byte for the data port: its sequence's next value, or the RAM. */
+static uint8_t
+ec_read_byte(
+	uint8_t address)
+{
+	struct ec_sequence *sequence;
+	uint8_t value;
+	unsigned index;
+
+	/* Looks for a sequence of the address. */
+	for (index = 0; index < ec_sequence_count; index++) {
+		sequence = &ec_sequences[index];
+		if (sequence->address != address)
+			continue;
+
+		/* Takes the next value; the last one stays. */
+		value = sequence->values[sequence->next];
+		if (sequence->next + 1U < sequence->count)
+			sequence->next++;
+		return value;
+	}
+
+	/* A byte without a sequence is the RAM's. */
+	return ec_ram[address];
 }

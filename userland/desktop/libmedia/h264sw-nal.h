@@ -6,9 +6,10 @@
  */
 
 /*
- * The NAL units of the software H.264 decoder: finding them in a byte
- * stream (Annex B), reading the NAL unit header (7.3.1) and removing the
- * emulation prevention bytes to give the RBSP (7.4.1).
+ * The NAL units of the software H.264 decoder: reading the NAL unit
+ * header (7.3.1) and giving the RBSP (7.4.1).  Finding NAL units in a
+ * byte stream (Annex B) and removing the emulation prevention bytes are
+ * the codec-independent part (vcodec-nal.h).
  *
  * The input is always a byte stream: libmedia's bitstream conversion
  * (media_bitstream_convert) turns a container's length-prefixed NAL units
@@ -19,6 +20,7 @@
 #define LIBMEDIA_H264SW_NAL_H
 
 #include "h264sw.h"
+#include "vcodec-nal.h"
 
 /* The nal_unit_type values the decoder acts on (Table 7-1). */
 #define H264SW_NAL_SLICE 1U
@@ -60,36 +62,15 @@ struct h264sw_nal {
 };
 
 /*
- * Finds the next NAL unit of a byte stream (B.1.1, B.2).
- *
- * Starting at *cursor in data[0..size), skips leading_zero_8bits and
- * finds a start code prefix (0x000001, which a zero_byte may precede).
- * On success, *nal and *nal_size name the NAL unit's bytes after the
- * start code up to (not including) the next start code prefix or the end
- * of data, with the trailing_zero_8bits before the next start code (and
- * the zero_byte of a four-byte start code) removed; *cursor is moved to
- * the end of the bytes consumed.
- *
- * Returns 1 when a NAL unit was found, 0 when no start code is left from
- * *cursor (then *cursor is size), never an error: bytes before the first
- * start code are skipped (B.3, a decoder starting in the middle of a
- * stream).  A NAL unit of 0 bytes (two start codes in a row) is skipped.
- * The returned bytes point into data and live as long as data does.
- */
-int h264sw_nal_find(const uint8_t *data, size_t size, size_t *cursor, const uint8_t **nal, size_t *nal_size);
-
-/*
  * Reads a NAL unit's header and copies its RBSP into buffer (7.3.1, 7.4.1).
  *
- * nal and size are one NAL unit's bytes from h264sw_nal_find.  buffer has
+ * nal and size are one NAL unit's bytes from vcodec_nal_find.  buffer has
  * capacity bytes, at least size; the RBSP is never longer than the NAL
  * unit.  Fills out: type, ref_idc and the RBSP in buffer.
  *
- * Emulation prevention: each 0x000003 has its 0x03 removed.  A NAL unit
- * that ends in 0x000003 is valid (7.4.1: the 0x03 appended after a final
- * cabac_zero_word); its final 0x03 is dropped before the rest is
- * unescaped.  The unescaping uses media_rbsp_unescape (bits.h), which
- * refuses such a final 0x03, so the drop must come first.
+ * Emulation prevention: the bytes after the header are unescaped by
+ * vcodec_nal_unescape (each 0x000003 has its 0x03 removed; a final
+ * 0x000003 after a cabac_zero_word is valid, 7.4.1).
  *
  * Returns 0; EINVAL when size is 0, forbidden_zero_bit is 1, or the bytes
  * hold a three-byte sequence that cannot occur in a NAL unit (0x000000,

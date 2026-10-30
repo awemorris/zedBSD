@@ -10,7 +10,8 @@ LIBMEDIA_SOURCES := userland/desktop/libmedia/engine.c userland/desktop/libmedia
 	userland/desktop/libmedia/aac-bands.c userland/desktop/libmedia/aac-frame.c \
 	userland/desktop/libmedia/aac-synth.c userland/desktop/libmedia/aac.c userland/desktop/libmedia/sound.c \
 	userland/desktop/libmedia/sbc.c userland/desktop/libmedia/aac-encode.c \
-	userland/desktop/libmedia/h264sw-bits.c userland/desktop/libmedia/h264sw-nal.c \
+	userland/desktop/libmedia/vcodec-bitreader.c userland/desktop/libmedia/vcodec-nal.c \
+	userland/desktop/libmedia/vcodec-cabac.c userland/desktop/libmedia/h264sw-nal.c \
 	userland/desktop/libmedia/h264sw-tables.c userland/desktop/libmedia/h264sw-ps.c \
 	userland/desktop/libmedia/h264sw-slice.c userland/desktop/libmedia/h264sw-frame.c \
 	userland/desktop/libmedia/h264sw-poc.c userland/desktop/libmedia/h264sw-dpb.c \

@@ -3,14 +3,14 @@
 #
 #   make -C plan/ws052/tests     build build/ws052/host/aml-host-sleep (ASan/UBSan)
 #
-# The WS049 harness (plan/ws049/tests/aml-host.c) with acpi-sleep.c and
+# The AML host harness (plan/tools/aml-host/aml-host.c) with acpi-sleep.c and
 # host-sleep.c, which plays the WS052_SLEEP steps before the harness frees
 # the namespace (the linker's --wrap=drv_acpi_reset).
 
 REPO := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
 OUT ?= $(REPO)/build/ws052/host
 CC ?= cc
-HARNESS := $(REPO)/plan/ws049/tests
+HARNESS := $(REPO)/plan/tools/aml-host
 
 SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-tables.c \
@@ -19,8 +19,11 @@ SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-text.c \
 	$(REPO)/src/drivers/acpi/acpi-resource.c \
 	$(REPO)/src/drivers/acpi/acpi-sleep.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi-table.c \
 	$(HARNESS)/aml-host.c \
 	$(HARNESS)/aml-host-hardware.c \
+	$(HARNESS)/aml-host-wmi.c \
 	$(REPO)/plan/ws052/tests/host-sleep.c
 HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 	$(REPO)/include/drivers/acpi/acpi.h \

@@ -3,7 +3,7 @@
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-    plan/ws049/tests/compare-devices.py [--methods] [--init] NAME TABLE...
+    plan/tools/aml-host/compare-devices.py [--methods] [--init] NAME TABLE...
 
 Evaluates _HID _CID _UID _ADR _STA _CRS of every device with aml-host
 --devices, then the same paths in the same order with acpiexec (one
@@ -14,7 +14,7 @@ for all the PCI configuration regions that start at 0.  With --methods, every me
 instead (acpiexec's While loops time out after one second, -to 1).  With
 --init, both first initialize the devices (_STA and _INI) and connect the
 spaces (_REG); acpiexec does that during its start, so it then runs
-without -l and -di.  Writes build/ws049/devices/NAME-{ours,oracle}.txt and
+without -l and -di.  Writes build/aml-host/devices/NAME-{ours,oracle}.txt and
 NAME.diff; exits 0 when every result is the same.
 """
 import difflib
@@ -24,7 +24,7 @@ import subprocess
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-sys.path.insert(0, os.path.join(REPO, "plan", "ws049", "tests"))
+sys.path.insert(0, os.path.join(REPO, "plan", "tools", "aml-host"))
 
 
 def parse_value(lines, index):
@@ -112,9 +112,9 @@ def main():
 		return 2
 	name = arguments[0]
 	tables = arguments[1:]
-	out = os.path.join(REPO, "build", "ws049", "devices")
+	out = os.path.join(REPO, "build", "aml-host", "devices")
 	os.makedirs(out, exist_ok=True)
-	host = os.path.join(REPO, "build", "ws049", "host", "aml-host")
+	host = os.path.join(REPO, "build", "aml-host", "aml-host")
 	extra = ["--reg", "--init"] if initialize else []
 	raw = subprocess.run([host, "--quiet", "--shared-pci", mode] + extra + tables, capture_output=True, text=True).stdout
 	ours = []

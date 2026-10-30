@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:12（Q1）
+最終更新: 2026-10-31 05:29（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,14 +9,14 @@
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | — | — | 返却（05:5x）。WS299 の UFS の書きの直しを main に（QEMU で新しい file 490 → 851 MB/s、上書き 410 → 852） | 5330 の電源の入れ直しの後に実測（script は用意済み） |
+| P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1773: p024 速さ（計測・profile・目標・案を先に、最適化は p026 の後） | WS299 は 5330 の実測待ち |
 | P2 | Bug | VF2 の実機の Bug の束 | q1772: BUG-338（hart 0）→ 342（PowerVR の static data）→ 340（SD の CRC）→ 343（root が live にならない）→ 339（U-Boot の DTB）を今の main で実機で | 4 つ目の束は closed 5 件 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
-| P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1771: p017 ACPI WMI の層（Dell の BIOS の口の土台、SMI は起こさない） | p018 Dell の provider（5330 の実機） |
+| P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1774: p016 危ない温度での非常の停止（init への通知・sync・電源断）→ p021 passive（温度で CPU の上限を下げる） | 非常の停止を止める起動の switch（`thermal.emergency=off`）は作らない（下の 0 の Q1 の判断の項目） |
 | P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1770: p011 x86 の CPU の driver の統合（HWP の道、関門、RAPL の meter） | p014 5330 の受け入れ（電源の入れ直しの後） |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,427（69.90%）。flexbox の auto の最小・表・justify・backdrop-filter・filter・@keyframes を足した |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,454（70.68%）。要素の scroll・popover・document.fonts・Range の矩形を足した、後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
 
@@ -41,6 +41,7 @@
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
 | p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
 | p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
+| p017 | ACPI WMI の層（Dell の BIOS の口の土台） | cleared（5330 の表で 4 device・14 block、SMI の書き 0） |
 | p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
 | p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
 | p006 | cpuperf の枠組み（kernel、CPU の速さの制御の要求・方針の写し・上限・idle の統計） | cleared（main b5c8e8f50、host 試験 196 checks、QEMU の起動 4 つ PASS） |
@@ -56,7 +57,7 @@ completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick �
 
 ### WS074 Web ブラウザ（libbrowser）
 
-Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%、10-31 04:5x、main 9175ad146）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
+Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%）→ 2,454（70.68%、10-31 06:1x、main に merge）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
 
 ### WS307 graphical installer
 
@@ -121,6 +122,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
   - Q333-5 Dell の BIOS の Quiet（fan を遅くして CPU の電力を下げる mode）を選んでよいか: **推し A**＝manual で騒音を低く（≤ 33）した時だけ。
   - Q333-6 電力（RAPL、CPU の電力の積算の計数）と CPU の休みの深さの割合を /dev/thermal で読めるようにするか: **推し A**＝入れる（読みだけ）。
   - Q333-7 CPU の速さの制御（`CONFIG_CPU_PERF`、今は既定で無効）の既定をいつ有効にするか: **推し A**＝5330 の受け入れの試験（p014）が通ったら amd64 の既定で有効（server の設定は変えない）。
+- 追加の問い（Q1 から）: 起動の時に非常の停止を止める switch（`thermal.emergency=off`、診断用）を入れてよいか。ユーザーの決定（危ない温度で止める）を止める物なので、答えまで作らない。
 - 止めている物: 無し。Q1 は推しで進める（CPU の道 p003→p006→p011→p014 は問いを待たない）。Q333-4 だけは UAPI を実装する Phase の前に答えがほしい。
 
 ### 0b. WS306（GPU の「ゲーム最適化」の UAPI と driver の識別）の設計の問い Q306-7・Q306-9（2026-10-31 新しい）
@@ -162,6 +164,12 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - Q329-4 WS318 と並べて進める: **推し A** WS326 の完了の後に p002〜p023 を WS318 と並べ、p024 は WS318 p012a、p025 は WS318 p008 を待つ。
 - Q329-5 libmedia の encoder の設定に速さの欄を足す: **推し A** WS318 の media_encoder_config に `speed` を 1 つ足す。
 - 止めている物: 無し（実装は WS326 の完了待ち）。
+
+### 0e. WS326（H.264 の software の decoder）の速さの続きをどこで行うか（2026-10-31 新しい）
+
+- 背景: WS326 の decoder は正しく decode できる（JVT の適合で範囲の中の 101 本が全 frame 一致）。今の速さは host の 1 thread で 1080p が 12〜19 fps（ffmpeg の C だけで 88 fps）。重いのは補間（30〜35%）と deblocking（22〜27%）。P1 の p024 の設計は、段 A（C の書き直しで 1 thread 3 倍）→ 段 B（thread）→ 段 C（SIMD）で、目標は Pi 5 で 1080p30 High（4 thread で 40 fps 以上）。
+- Q1 の進め方: WS326 は p024 の最初の最適化（補間の block 化）と p025（規約の見直し）で閉じる（昼までに終える指示）。
+- 決めてほしい事: 速さの続き（deblock・weight の書き直し、neighbour・transform、thread、SIMD、Pi 5・5330 の実測）を **(a) 新しい WS にする（推し）** か、(b) WS326 の中に Phase を足して完了を遅らせるか。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 

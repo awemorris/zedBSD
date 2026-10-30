@@ -3,11 +3,11 @@
 
 Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 
-    plan/ws049/tests/run-asl.py [NAME...]
+    plan/tools/aml-host/run-asl.py [NAME...]
 
-Each plan/ws049/tests/asl/NAME.asl defines \\MAIN, which returns 0 when every
+Each plan/tools/aml-host/asl/NAME.asl defines \\MAIN, which returns 0 when every
 check holds or the number of the first failing check.  The test is compiled
-with iasl -oa (no constant folding) into build/ws049/asl/, run by aml-host
+with iasl -oa (no constant folding) into build/aml-host/asl/, run by aml-host
 --main, and run by acpiexec as the reference; it passes when both return 0.
 
 Optional files beside a test:
@@ -20,7 +20,7 @@ Optional files beside a test:
   NAME.output        lines aml-host must print (e.g. "NOTIFY \\DEV0 0x80")
 
 asl/support/*.asl are tables other tests use: each is compiled to
-build/ws049/asl/support/NAME.aml, and its bytes are written to NAME.inc as
+build/aml-host/asl/support/NAME.aml, and its bytes are written to NAME.inc as
 a list a test can #include inside a Buffer.  Needs acpica-tools.
 """
 import os
@@ -29,10 +29,10 @@ import subprocess
 import sys
 
 REPO = os.path.abspath(os.path.join(os.path.dirname(__file__), "..", "..", ".."))
-SOURCE = os.path.join(REPO, "plan", "ws049", "tests", "asl")
-OUT = os.path.join(REPO, "build", "ws049", "asl")
+SOURCE = os.path.join(REPO, "plan", "tools", "aml-host", "asl")
+OUT = os.path.join(REPO, "build", "aml-host", "asl")
 SUPPORT = os.path.join(OUT, "support")
-HOST = os.path.join(REPO, "build", "ws049", "host", "aml-host")
+HOST = os.path.join(REPO, "build", "aml-host", "aml-host")
 
 
 def compile_asl(source, prefix):

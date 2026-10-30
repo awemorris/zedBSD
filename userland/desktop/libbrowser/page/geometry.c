@@ -50,6 +50,7 @@ static int geometry_tree_box(const struct layout_tree *tree, const struct layout
 static int geometry_child_box(struct page *page, struct dom_node *node, struct bind_box *box);
 static void geometry_overflow(const struct layout_box *box, int depth, layout_unit *left, layout_unit *top, layout_unit *right, layout_unit *bottom);
 static void geometry_scroll_size(const struct layout_box *first, struct bind_box *box);
+static void geometry_lines_overflow(const struct layout_box *box, layout_unit *left, layout_unit *top, layout_unit *right, layout_unit *bottom);
 static int geometry_layout(struct page *page);
 static const struct layout_box *geometry_first_box(struct page *page, const struct dom_node *node);
 static int geometry_own_place(const struct layout_box *box);
@@ -463,11 +464,67 @@ geometry_tree_box(
 	}
 
 	/* What a block scrolls over. */
-	if (first != NULL && block && first->kind == LAYOUT_BLOCK)
+	if (first != NULL && block && first->kind == LAYOUT_BLOCK) {
 		geometry_scroll_size(first, box);
+		box->scrolls = first->parent != NULL && (first->style.overflow_x == CSS_OVERFLOW_HIDDEN ||
+		    first->style.overflow_x == CSS_OVERFLOW_SCROLL || first->style.overflow_x == CSS_OVERFLOW_AUTO ||
+		    first->style.overflow_y == CSS_OVERFLOW_HIDDEN || first->style.overflow_y == CSS_OVERFLOW_SCROLL ||
+		    first->style.overflow_y == CSS_OVERFLOW_AUTO);
+	}
 
 	/* Succeeded: the node has a box. */
 	return 1;
+}
+
+/* Adds the extent of a block's lines (their fragments) to a rectangle. */
+static void
+geometry_lines_overflow(
+	const struct layout_box *box,
+	layout_unit *left,
+	layout_unit *top,
+	layout_unit *right,
+	layout_unit *bottom)
+{
+	const struct layout_line *line;
+	const struct layout_fragment *fragment;
+	layout_unit origin_x;
+	layout_unit origin_y;
+	layout_unit x0;
+	layout_unit y0;
+	layout_unit x1;
+	layout_unit y1;
+	size_t index;
+	size_t item;
+
+	origin_x = box->x + box->border[CSS_LEFT] + box->padding[CSS_LEFT];
+	origin_y = box->y + box->border[CSS_TOP] + box->padding[CSS_TOP];
+	for (index = 0; index < box->line_count; index++) {
+		line = &box->lines[index];
+		for (item = 0; item < line->fragment_count; item++) {
+			fragment = &line->fragments[item];
+			if (fragment->width <= 0)
+				continue;
+			if (box->vertical_inline) {
+				x0 = origin_x + line->y;
+				y0 = origin_y + line->left + fragment->x;
+				x1 = x0 + line->height;
+				y1 = y0 + fragment->width;
+			} else {
+				x0 = origin_x + line->left + fragment->x;
+				y0 = origin_y + line->y;
+				x1 = x0 + fragment->width;
+				y1 = y0 + line->height;
+			}
+			if (x0 < *left)
+				*left = x0;
+			if (y0 < *top)
+				*top = y0;
+			if (x1 > *right)
+				*right = x1;
+			if (y1 > *bottom)
+				*bottom = y1;
+		}
+	}
 }
 
 /*
@@ -491,9 +548,15 @@ geometry_overflow(
 	layout_unit y1;
 	int items;
 
-	/* Stops at the depth the layout stops at; lines of text are within their block. */
-	if (depth > 64 || box->children_inline)
+	/* Stops at the depth the layout stops at. */
+	if (depth > 64)
 		return;
+
+	/* The lines of text reach as far as their fragments do, past the block when they do not wrap. */
+	if (box->children_inline) {
+		geometry_lines_overflow(box, left, top, right, bottom);
+		return;
+	}
 	items = box->style.display == CSS_DISPLAY_FLEX || box->style.display == CSS_DISPLAY_INLINE_FLEX ||
 	    box->style.display == CSS_DISPLAY_GRID || box->style.display == CSS_DISPLAY_INLINE_GRID;
 	for (child = box->first_child; child != NULL; child = child->next) {
@@ -512,6 +575,10 @@ geometry_overflow(
 		if (items && !child->out_of_flow) {
 			x0 -= child->margin[CSS_LEFT] > 0 ? child->margin[CSS_LEFT] : 0;
 			y0 -= child->margin[CSS_TOP] > 0 ? child->margin[CSS_TOP] : 0;
+			x1 += child->margin[CSS_RIGHT] > 0 ? child->margin[CSS_RIGHT] : 0;
+			y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
+		} else if (!child->out_of_flow && child->kind == LAYOUT_BLOCK) {
+			/* A block child's margin at the end sides is scrollable too. */
 			x1 += child->margin[CSS_RIGHT] > 0 ? child->margin[CSS_RIGHT] : 0;
 			y1 += child->margin[CSS_BOTTOM] > 0 ? child->margin[CSS_BOTTOM] : 0;
 		}
@@ -565,6 +632,14 @@ geometry_scroll_size(
 	right = pad_left;
 	bottom = pad_top;
 	geometry_overflow(first, 0, &left, &top, &right, &bottom);
+
+	/* The content is moved by the scroll: its place before is what is measured. */
+	if (first->node != NULL && first->node->type == DOM_ELEMENT && right > left) {
+		left += layout_from_px((float)((const struct dom_element *)first->node)->scroll_x);
+		right += layout_from_px((float)((const struct dom_element *)first->node)->scroll_x);
+		top += layout_from_px((float)((const struct dom_element *)first->node)->scroll_y);
+		bottom += layout_from_px((float)((const struct dom_element *)first->node)->scroll_y);
+	}
 	if (right > left) {
 		left -= first->padding[CSS_LEFT];
 		right += first->padding[CSS_RIGHT];

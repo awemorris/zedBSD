@@ -1,11 +1,11 @@
-# WS049: host tests of the AML interpreter.
+# The host harness of the AML interpreter (src/drivers/acpi/aml-*.c).
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   make -C plan/ws049/tests            build build/ws049/host/aml-host (ASan/UBSan)
-#   make -C plan/ws049/tests release    build build/ws049/host/aml-host-O2 (stack measurement)
+#   make -C plan/tools/aml-host            build build/aml-host/aml-host (ASan/UBSan)
+#   make -C plan/tools/aml-host release    build build/aml-host/aml-host-O2 (stack measurement)
 
 REPO := $(abspath $(dir $(lastword $(MAKEFILE_LIST)))/../../..)
-OUT ?= $(REPO)/build/ws049/host
+OUT ?= $(REPO)/build/aml-host
 CC ?= cc
 
 SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
@@ -14,11 +14,16 @@ SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-ec.c \
 	$(REPO)/src/drivers/acpi/acpi-text.c \
 	$(REPO)/src/drivers/acpi/acpi-resource.c \
-	$(REPO)/plan/ws049/tests/aml-host.c \
-	$(REPO)/plan/ws049/tests/aml-host-hardware.c
+	$(REPO)/src/drivers/acpi/acpi-wmi.c \
+	$(REPO)/src/drivers/acpi/acpi-wmi-table.c \
+	$(REPO)/plan/tools/aml-host/aml-host.c \
+	$(REPO)/plan/tools/aml-host/aml-host-hardware.c \
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.c
 HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 	$(REPO)/include/drivers/acpi/acpi.h \
-	$(REPO)/plan/ws049/tests/aml-host-hardware.h
+	$(REPO)/include/drivers/acpi/wmi.h \
+	$(REPO)/plan/tools/aml-host/aml-host-hardware.h \
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.h
 
 WARNINGS := -Wall -Wextra -Werror -Wdeclaration-after-statement \
 	-Wstrict-prototypes -Wmissing-prototypes -Wshadow
