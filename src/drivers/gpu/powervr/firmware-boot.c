@@ -43,6 +43,9 @@
 #include "drivers/gpu/powervr/mips-table.h"
 #include "drivers/gpu/powervr/render-command.h"
 
+/* How long a poll of the firmware sleeps before it looks again, in milliseconds (a tick at least). */
+#define BOOT_POLL_MS 1U
+
 /*
  * Where the firmware file is, and the most bytes the driver accepts.
  *
@@ -1404,8 +1407,8 @@ wait_started(
 			return ETIMEDOUT;
 		}
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(BOOT_POLL_MS));
 	}
 
 	/* What the firmware wrote at its start: the flag, its time, and the identities it filled. */
@@ -1561,8 +1564,8 @@ wait_register(
 			return ETIMEDOUT;
 		}
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(BOOT_POLL_MS));
 	}
 
 	/* Succeeded: the register reads as asked. */
@@ -1746,6 +1749,7 @@ watch_thread(
 	uint64_t now;
 	uint64_t reported;
 	uint64_t interval;
+	unsigned seconds;
 
 	(void)argument;
 	interval = kern_ms_to_ticks(WATCH_REPORT_MS);
@@ -1765,7 +1769,10 @@ watch_thread(
 		if (reported != 0 && now - reported < interval)
 			continue;
 		reported = now;
-		kern_logf("powervr: firmware: still in %s after %u s\n", name, (unsigned)(kern_ticks_to_ms(now - began) / 1000U));
+
+		/* Names the step and how long it has run. */
+		seconds = (unsigned)(kern_ticks_to_ms(now - began) / 1000U);
+		kern_logf("powervr: firmware: still in %s after %u s\n", name, seconds);
 	}
 }
 

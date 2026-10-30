@@ -970,12 +970,18 @@ drv_usb_trace_now_ns(
 	uint64_t frequency;
 	uint64_t seconds;
 	uint64_t rest;
+	uint64_t ticks;
+	uint64_t nanoseconds;
 	bool have;
 
 	/* The counter; a machine without one has only the clock's ticks. */
 	have = kern_rtc_read_counter(&counter, &frequency);
-	if (!have || frequency == 0U)
-		return kern_ticks_to_ns(sched_ticks());
+	if (!have || frequency == 0U) {
+		/* Without a counter, the scheduler's ticks in nanoseconds. */
+		ticks = sched_ticks();
+		nanoseconds = kern_ticks_to_ns(ticks);
+		return nanoseconds;
+	}
 
 	/* Whole seconds, then the rest, so the product does not overflow. */
 	seconds = counter / frequency;

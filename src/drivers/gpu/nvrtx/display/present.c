@@ -49,6 +49,9 @@
 
 #include "drivers/gpu/nvrtx/nvrtx-node.h"
 
+/* How long a refresh wait sleeps before it looks again, in milliseconds (a tick at least). */
+#define PRESENT_POLL_MS 1U
+
 /* The largest frame a presentation takes. */
 #define PRESENT_MAX_FRAME_BYTES		(64ULL << 20)
 
@@ -710,8 +713,8 @@ present_refresh_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Looks again a tick later. */
-		sched_sleep(now + 1U);
+		/* Looks again a millisecond later. */
+		sched_sleep(now + kern_ms_to_ticks(PRESENT_POLL_MS));
 	}
 
 	/* Succeeded: the boundary after the cursor. */

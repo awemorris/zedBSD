@@ -1706,6 +1706,7 @@ rtl8822bu_log_error(
 {
 	unsigned long enabled;
 	uint64_t now;
+	uint64_t period;
 	int emit;
 
 	/*
@@ -1713,14 +1714,16 @@ rtl8822bu_log_error(
 	 * error.
 	 */
 	now = clock_ticks();
+	period = kern_ms_to_ticks(1000U);
 	enabled = spin_lock_irqsave(&adapter->lock);
 
 	/* Handles the emit condition. */
 	emit = now >= adapter->diagnostic_deadline;
 	if (emit) {
-		adapter->diagnostic_deadline = UINT64_MAX - now < kern_ms_to_ticks(1000U)
-						       ? UINT64_MAX
-						       : now + kern_ms_to_ticks(1000U);
+		/* The next diagnostic waits a second, saturating at the end of the clock. */
+		adapter->diagnostic_deadline = UINT64_MAX;
+		if (UINT64_MAX - now >= period)
+			adapter->diagnostic_deadline = now + period;
 	}
 
 	spin_unlock_irqrestore(&adapter->lock, enabled);
@@ -7142,6 +7145,7 @@ rtl8822bu_h2c_packet_send(
 	uint32_t free_bytes;
 	uint64_t remaining;
 	uint64_t milliseconds;
+	uint64_t second;
 	uint64_t now;
 	size_t actual;
 	uint16_t checksum;
@@ -7237,8 +7241,9 @@ rtl8822bu_h2c_packet_send(
 	remaining = deadline - now;
 	timeout_ms = RTL8822BU_H2C_TRANSFER_TIMEOUT_MS;
 
-	/* Handles the remaining condition. */
-	if (remaining < kern_ms_to_ticks(1000U)) {
+	/* Under a second left, the transfer takes no longer than what is left. */
+	second = kern_ms_to_ticks(1000U);
+	if (remaining < second) {
 		/* Handles the milliseconds condition. */
 		milliseconds = kern_ticks_to_ms(remaining);
 		if (milliseconds < timeout_ms)

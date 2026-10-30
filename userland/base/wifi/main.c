@@ -1407,6 +1407,7 @@ wait_for_connection(int descriptor, const char *interface,
 	struct wlan_status_request *result)
 {
 	uint64_t effective_deadline;
+	uint64_t kernel_deadline;
 	uint64_t now;
 	uint32_t state_bit;
 	unsigned polls;
@@ -1458,12 +1459,15 @@ wait_for_connection(int descriptor, const char *interface,
 		error = monotonic_ticks(&now, &frequency);
 		if (error != 0)
 			return error;
+
+		/* The kernel's deadline for the operation bounds the wait when it is earlier. */
 		effective_deadline = deadline;
-		if (result->deadline_ns != 0U &&
-		    monotonic_ns_to_ticks(result->deadline_ns, frequency) <
-		    effective_deadline)
-			effective_deadline = monotonic_ns_to_ticks(
-			    result->deadline_ns, frequency);
+		if (result->deadline_ns != 0U) {
+			kernel_deadline = monotonic_ns_to_ticks(result->deadline_ns, frequency);
+			if (kernel_deadline < effective_deadline)
+				effective_deadline = kernel_deadline;
+		}
+
 		if (now >= effective_deadline)
 			return ETIMEDOUT;
 		error = wait_slice(now, effective_deadline, frequency);

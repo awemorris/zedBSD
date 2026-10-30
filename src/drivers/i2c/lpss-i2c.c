@@ -68,6 +68,9 @@
 /* How long a function coming out of D3 is left alone (the PCI specification's 10 ms). */
 #define LPSS_D3_RECOVERY_US	10000U
 
+/* How long a transfer sleeps while the bus moves bytes, in milliseconds. */
+#define LPSS_PAUSE_MS		1U
+
 /* The LPSS private reset register, and its value with the core and its DMA out of reset. */
 #define LPSS_PRIVATE_RESETS	0x204U
 #define LPSS_RESETS_RELEASED	0x7U
@@ -765,12 +768,12 @@ lpss_write(
 }
 
 /*
- * Waits while the bus moves bytes, for a tick.  Transfers are made by the
- * clients' threads, never while the platform starts.
+ * Waits while the bus moves bytes, for a millisecond.  Transfers are made
+ * by the clients' threads, never while the platform starts.
  */
 static void
 lpss_pause(void)
 {
-	/* A sleep of one tick lets other threads run while the bus works. */
-	sched_sleep(sched_ticks() + 1U);
+	/* A short sleep lets other threads run while the bus works. */
+	sched_sleep(sched_ticks() + kern_ms_to_ticks(LPSS_PAUSE_MS));
 }

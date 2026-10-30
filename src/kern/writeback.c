@@ -41,6 +41,9 @@
 
 #define WB_AGE kern_ms_to_ticks(2000U)
 
+/* How long a pause sleeps between two looks at the worker it waits out, in milliseconds. */
+#define WB_PAUSE_POLL_MS 1U
+
 #define WB_MEMORY (WRITEBACK_TICKET_BYTES + KERN_PAGE_SIZE)
 
 struct writeback_worker {
@@ -1555,6 +1558,7 @@ worker_pause(struct writeback_worker *worker)
 {
 	struct writeback_budget snapshot;
 	uint64_t sequence;
+	uint64_t deadline;
 	unsigned long irq;
 	int error;
 
@@ -1578,8 +1582,9 @@ worker_pause(struct writeback_worker *worker)
 		if (!worker->busy && snapshot.tickets == 0)
 			break;
 		sequence = waitq_sequence(&worker->wake);
+		deadline = clock_ticks() + kern_ms_to_ticks(WB_PAUSE_POLL_MS);
 		error = waitq_sleep(&worker->wake, &policy_registry, sequence,
-		    clock_ticks() + 1U, WAITQ_INTERRUPTIBLE);
+		    deadline, WAITQ_INTERRUPTIBLE);
 		if (error != 0 && error != EAGAIN && error != ETIMEDOUT) {
 			spin_unlock_irqrestore(&policy_registry, irq);
 			worker_restore(worker);

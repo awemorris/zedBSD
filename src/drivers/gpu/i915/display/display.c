@@ -80,7 +80,7 @@
 /* The ports the output setup walks (A, B, TC1 to TC4). */
 #define I915_DISPLAY_PORT_MASK		((1U << 0) | (1U << 1) | (1U << 3) | (1U << 4) | (1U << 5) | (1U << 6))
 
-/* How long the DMC stop waits for its worker (500 ticks). */
+/* How long the DMC stop waits for its worker (five seconds). */
 #define I915_DISPLAY_DMC_FINI_TICKS	kern_ms_to_ticks(5000U)
 
 /* DC_STATE_EN, read for the registration log. */

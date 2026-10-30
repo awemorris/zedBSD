@@ -1220,8 +1220,13 @@ static uint64_t
 ms_ticks(
 	unsigned milliseconds)
 {
+	uint64_t ticks;
+
 	/* Rounds up, so a short span is still a tick. */
-	return kern_ms_to_ticks(milliseconds);
+	ticks = kern_ms_to_ticks(milliseconds);
+
+	/* Reports the ticks that cover the span. */
+	return ticks;
 }
 
 /* Reads the parameter manager's catalogues (VCE 0 to 3, TE 0 to 3, ALIST) from one half of a target's record. */

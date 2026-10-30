@@ -19,6 +19,7 @@
 
 #include "../intel/display-dpcd-xd.h"
 
+#include <kern/clock.h>
 #include <kern/kcrt.h>
 
 #include <uapi/errno.h>
@@ -68,12 +69,13 @@
 
 /*
  * How long an update waits for the scan line to leave the lines before
- * the vertical blank: 1 ms, rounded up to 10 ms ticks, plus one.
+ * the vertical blank, in milliseconds.  The wait is this rounded up to
+ * ticks, plus one tick, as a deadline counts from the last tick.
  *
  * Values referenced: Linux v6.8.12 drivers/gpu/drm/i915/display/intel_crtc.c
  * (intel_pipe_update_start: msecs_to_jiffies_timeout(1)).
  */
-#define I915_XD_SCREEN_EVADE_TICKS	2L
+#define I915_XD_SCREEN_EVADE_MS		1U
 
 /*
  * The steps of a light and of a dark, by the hook each runs: an index
@@ -475,7 +477,7 @@ drv_i915_xd_screen_update(
 		} else {
 			/* Interrupts off, then the scan line until it is outside the window. */
 			hooks->irq_off(hooks->context);
-			ticks = I915_XD_SCREEN_EVADE_TICKS;
+			ticks = (long)kern_ms_to_ticks(I915_XD_SCREEN_EVADE_MS) + 1L;
 			for (;;) {
 				/* Outside the window the writes may go. */
 				line = drv_i915_xd_pipe_scanline(io, update->pipe, update->vtotal, update->scanline_offset);

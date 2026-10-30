@@ -50,6 +50,9 @@
 #include "drivers/gpu/powervr/render-pass.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
+/* How long a timeline poll sleeps before it looks again, in milliseconds (a tick at least). */
+#define RENDER_POLL_MS 1U
+
 /*
  * How often, and how far apart, a refused registration is tried again.
  */
@@ -757,7 +760,7 @@ powervr_session_wait(
 	uint64_t now;
 	uint32_t current;
 
-	/* Reads the timeline once a tick until it reaches the value or the bound is spent. */
+	/* Reads the timeline once a millisecond until it reaches the value or the bound is spent. */
 	deadline = sched_ticks() + kern_ms_to_ticks(milliseconds);
 	for (;;) {
 		current = powervr_session_timeline(session);
@@ -769,8 +772,8 @@ powervr_session_wait(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(RENDER_POLL_MS));
 	}
 
 	/* Succeeded: the timeline reached the value. */

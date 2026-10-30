@@ -52,6 +52,9 @@
 #include "drivers/gpu/powervr/render-command.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 
+/* How long a poll of the queue sleeps before it looks again, in milliseconds (a tick at least). */
+#define QUEUE_POLL_MS 1U
+
 /* The program heaps' base registers (sources: see send_command). */
 #define EXEC_BASE_PDS		0x0610U
 #define EXEC_BASE_USC0		0x4008U
@@ -1685,12 +1688,14 @@ timing_report(
 		"list make", "context make", "mmu flush", "gpu ta", "gpu 3d", "gpu frame",
 	};
 	uint64_t now;
+	uint64_t period;
 	uint64_t average;
 	unsigned part;
 
 	/* Not yet time. */
 	now = sched_ticks();
-	if (now - timing_reported < kern_ms_to_ticks(TIMING_REPORT_MS))
+	period = kern_ms_to_ticks(TIMING_REPORT_MS);
+	if (now - timing_reported < period)
 		return;
 	timing_reported = now;
 
@@ -2464,7 +2469,7 @@ send_command(
 	return 0;
 }
 
-/* Sends a command, trying again once a tick while the kernel's buffer is full, bounded. */
+/* Sends a command, trying again once a millisecond while the kernel's buffer is full, bounded. */
 static int
 send_waiting(
 	struct powervr_core *core,
@@ -2487,8 +2492,8 @@ send_waiting(
 		if (now >= deadline)
 			return ETIMEDOUT;
 
-		/* Sleeps one tick. */
-		sched_sleep(now + 1U);
+		/* Sleeps a millisecond (a tick at least). */
+		sched_sleep(now + kern_ms_to_ticks(QUEUE_POLL_MS));
 	}
 
 	/* The firmware's buffer refused it for another reason. */
@@ -3337,8 +3342,13 @@ static uint64_t
 ms_ticks(
 	unsigned milliseconds)
 {
+	uint64_t ticks;
+
 	/* Rounds up, so a short span is still a tick. */
-	return kern_ms_to_ticks(milliseconds);
+	ticks = kern_ms_to_ticks(milliseconds);
+
+	/* Reports the ticks that cover the span. */
+	return ticks;
 }
 
 /* Reads whether the device is in quarantine. */

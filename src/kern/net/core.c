@@ -397,13 +397,21 @@ static void
 wlan_retirement_worker(void *argument)
 {
 	uint64_t now;
+	uint64_t period;
+	uint64_t deadline;
 
 	(void)argument;
 	for (;;) {
+		/* Runs the retirements that are due. */
 		wlan_retirement_run(clock_ticks());
+
+		/* Sleeps a second, saturating at the end of the clock. */
 		now = clock_ticks();
-		sched_sleep(now < UINT64_MAX - kern_ms_to_ticks(1000U) ?
-		    now + kern_ms_to_ticks(1000U) : UINT64_MAX);
+		period = kern_ms_to_ticks(1000U);
+		deadline = UINT64_MAX;
+		if (now < UINT64_MAX - period)
+			deadline = now + period;
+		sched_sleep(deadline);
 	}
 }
 

@@ -79,6 +79,9 @@
 #define VCHIQ_ANSWER_WAIT_MS		1000U
 #define VCHIQ_SLOT_WAIT_MS		1000U
 
+/* The longest sleep for a recycled slot before the ring is looked at again. */
+#define VCHIQ_RECYCLE_WAIT_MS		2U
+
 /* The empty control replies (CLOSE, PAUSE, REMOTE_USE_ACTIVE) the receive thread may have waiting. */
 #define VCHIQ_CONTROL_PENDING		16U
 
@@ -1456,13 +1459,13 @@ reserve_wait(
 			return EIO;
 		}
 
-		/* Sleeps until the VPU recycles a slot, or two ticks pass. */
+		/* Sleeps until the VPU recycles a slot, or two milliseconds pass. */
 		vchiq->ring.local->recycle.armed = 1U;
 		kern_io_barrier();
 		enabled = spin_lock_irqsave(&vchiq->lock);
 
 		observed = waitq_sequence(&vchiq->slot_wake);
-		wake = sched_ticks() + 2U;
+		wake = sched_ticks() + kern_ms_to_ticks(VCHIQ_RECYCLE_WAIT_MS);
 		(void)waitq_sleep(&vchiq->slot_wake, &vchiq->lock, observed, wake, 0);
 
 		spin_unlock_irqrestore(&vchiq->lock, enabled);
