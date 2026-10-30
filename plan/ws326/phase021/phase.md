@@ -68,3 +68,9 @@ deblocking は chroma の QP に `picture->chroma_qp_offset[0]`・`[1]` を全 m
 
 - CABAC の residual（coded_block_flag、8x8 の coded_flags の bit、mb_qp_delta の文脈、CABAC の I_16x16・I_4x4）は p018 の単体試験に無い。統合と適合（CABAC の stream）で確かめる。
 - SP・SI の slice は ENOTSUP（範囲の外の profile）。
+
+## p007 から引き継ぐ事（2026-10-30 Q1）
+
+- **header と仕様の食い違い（直す事）**: h264sw-reflist.h は「非存在の frame も他と同じく list に入る」と書くが、8.2.4.2.3 は B の slice で pic_order_cnt_type 0 の時に非存在の frame を両方の list から除く。`h264sw_reflist_build` は POC type を知らないので、p007 は header に従った。仕様に合わせるには header が POC type（か「非存在を除く」の印）を渡す必要がある。Q1（か Opus）が p021 の前に header を直し、reflist の実装と test-reflist を合わせる（BASE の更新を記録する）。
+- 1 の list の list 0 との比べと入れ替えは num_ref_idx_active での切り詰めの前（8.2.4.2 の順）。
+- `h264sw_reflist_find` は欠けた位置を飛ばすので、代わりの entry だけが持つ frame は -1（direct は隠しとして数える）。

@@ -3,7 +3,7 @@
 # ws326-p007 reference picture list
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-10-30 p001 で作成、2026-10-30 実装）。
+- 状態: cleared（2026-10-30 Q1 の判定。実装と試験は Sonnet 5.5 high、ce9b158f1）。
 - 依存: p006（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
