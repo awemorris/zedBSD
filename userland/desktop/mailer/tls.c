@@ -34,7 +34,7 @@
 #include <dlfcn.h>
 #include <errno.h>
 #include <limits.h>
-#include <pthread.h>
+#include <keiland/keiland_thread.h>
 #include <stddef.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -166,7 +166,7 @@ static char tls_reason[ML_TEXT_MAX];
 static char tls_fingerprint[ML_PIN_MAX];
 
 /* Keeps two threads from loading the library at once; held only while it loads. */
-static pthread_mutex_t tls_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct kl_mutex tls_lock = KL_MUTEX_INIT;
 
 static int tls_load(void);
 static int tls_load_locked(void);
@@ -208,7 +208,7 @@ ml_tls_add_ca_file(
  */
 int
 ml_tls_open(
-	int fd,
+	intptr_t socket,
 	const char *host,
 	const char *pin,
 	void **tls)
@@ -231,8 +231,8 @@ ml_tls_open(
 	if (ssl == NULL)
 		return ENOMEM;
 
-	/* The socket. */
-	result = tls_library.set_fd(ssl, fd);
+	/* The socket's own handle, which the library reads and writes itself (on the network's thread, where SIGPIPE is blocked). */
+	result = tls_library.set_fd(ssl, (int)socket);
 	if (result != 1) {
 		tls_fail("setup", ssl, 0);
 		tls_library.ssl_free(ssl);
@@ -421,11 +421,11 @@ tls_load(void)
 	int error;
 
 	/* One loader at a time. */
-	pthread_mutex_lock(&tls_lock);
+	kl_mutex_lock(&tls_lock);
 
 	error = tls_load_locked();
 
-	pthread_mutex_unlock(&tls_lock);
+	kl_mutex_unlock(&tls_lock);
 
 	/* Reports why TLS cannot be used. */
 	if (error != 0)

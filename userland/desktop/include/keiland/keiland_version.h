@@ -154,6 +154,10 @@ extern "C" {
  *      and kl_app_language
  * 102: no descriptor in the interface: kl_app_watch_fd, KL_APP_FD (and KL_APP_FD_*, KL_APP_FDS_MAX),
  *      kl_app_event.fd and kl_instance_fd are gone (kl_app_post, kl_process, kl_instance_bind instead)
+ * 103: a program's threads, kl_thread_*, kl_mutex_*, kl_cond_*, kl_once and kl_thread_key_*
+ *      (<keiland/keiland_thread.h>)
+ * 104: a program's network, kl_address_*, kl_socket_* and kl_socket_poll with its wakers
+ *      (<keiland/keiland_socket.h>)
  *
  * The file chooser of KL_VERSION 12 moved to the widgets with KL_VERSION 16:
  * kl_file_chooser_* of <keiland/keiland_file_chooser.h>, made of the
@@ -163,7 +167,7 @@ extern "C" {
  * are kl_settings_* of <keiland/keiland_settings.h>, and desktop.conf is the
  * compositor's own file.
  */
-#define KL_VERSION 102U
+#define KL_VERSION 104U
 
 /*
  * Reports the interface version of the library that was loaded.

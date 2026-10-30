@@ -21,6 +21,8 @@
 #include <stdint.h>
 #include <time.h>
 
+struct kl_socket;
+
 /* Marks a parameter a function does not use (a callback's that its kind of reader needs no part of). */
 #ifndef UNUSED_PARAMETER
 #define UNUSED_PARAMETER(name) ((void)(name))
@@ -114,7 +116,7 @@ struct ml_account_config {
  * buffer), and how long a read waits for the server.
  */
 struct ml_conn {
-	int fd;
+	struct kl_socket *socket;
 	void *tls;
 	unsigned char buffer[ML_CONN_BUFFER];
 	size_t start;
@@ -187,7 +189,7 @@ typedef void (*ml_imap_fetched_fn)(void *data, uint32_t uid, unsigned flags, siz
 
 /* The TLS of the OpenSSL package (tls.c). */
 int ml_tls_add_ca_file(const char *path);
-int ml_tls_open(int fd, const char *host, const char *pin, void **tls);
+int ml_tls_open(intptr_t socket, const char *host, const char *pin, void **tls);
 int ml_tls_read(void *tls, unsigned char *bytes, size_t length, size_t *received);
 int ml_tls_write(void *tls, const unsigned char *bytes, size_t length);
 int ml_tls_pending(void *tls);

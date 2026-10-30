@@ -732,7 +732,7 @@ ml_imap_close(
 	unsigned tag;
 
 	/* A logged-in session says goodbye (its answer is not waited for). */
-	if (imap->conn.fd >= 0 && imap->idle_tag == 0U)
+	if (imap->conn.socket != NULL && imap->idle_tag == 0U)
 		(void)imap_send(imap, &tag, "LOGOUT");
 
 	/* The connection. */

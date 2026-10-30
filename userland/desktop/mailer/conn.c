@@ -17,15 +17,11 @@
 
 #include "mail.h"
 
+#include <keiland/keiland_socket.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <netdb.h>
-#include <poll.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <sys/socket.h>
-#include <unistd.h>
 
 /* How long a read waits for the server by default (ms). */
 #define CONN_TIMEOUT_MS		30000
@@ -36,8 +32,11 @@
 /* The highest port number. */
 #define CONN_PORT_MAX		65535UL
 
+/* The addresses of a server tried in turn. */
+#define CONN_ADDRESSES		16U
+
 static int conn_fill(struct ml_conn *conn);
-static int conn_connect(int fd, const struct sockaddr *address, socklen_t length);
+static int conn_connect(const struct kl_address *address, struct kl_socket **socket);
 
 /*
  * Reads a server as "host" or "host:port": the port (the fallback when
@@ -100,56 +99,40 @@ ml_conn_open(
 	struct ml_conn *conn,
 	const struct ml_server *server)
 {
-	struct addrinfo hints;
-	struct addrinfo *found;
-	struct addrinfo *address;
-	char port[16];
+	struct kl_address addresses[CONN_ADDRESSES];
+	struct kl_socket *socket;
+	size_t count;
+	size_t index;
 	int status;
 	int error;
-	int fd;
 
 	/* Nothing yet. */
 	memset(conn, 0, sizeof(conn[0]));
-	conn->fd = -1;
 	conn->timeout_ms = CONN_TIMEOUT_MS;
 
-	/* The host's addresses for a stream. */
-	(void)snprintf(port, sizeof(port), "%u", server->port);
-	memset(&hints, 0, sizeof(hints));
-	hints.ai_family = AF_UNSPEC;
-	hints.ai_socktype = SOCK_STREAM;
-	status = getaddrinfo(server->host, port, &hints, &found);
+	/* The host's addresses for a stream; any failure to find them is a name not found, as the window says. */
+	status = kl_socket_resolve(server->host, (uint16_t)server->port, KL_ADDRESS_ANY, KL_SOCKET_STREAM,
+	    addresses, CONN_ADDRESSES, &count);
 	if (status != 0)
 		return ENOENT;
 
 	/* The first address that takes the connection. */
 	error = ECONNREFUSED;
-	for (address = found; address != NULL; address = address->ai_next) {
-		/* A socket of its family. */
-		fd = socket(address->ai_family, address->ai_socktype, address->ai_protocol);
-		if (fd < 0) {
-			error = errno;
-			continue;
-		}
-
+	for (index = 0; index < count; index++) {
 		/* Connected in time, or the next address. */
-		status = conn_connect(fd, address->ai_addr, address->ai_addrlen);
+		status = conn_connect(&addresses[index], &socket);
 		if (status != 0) {
 			error = status;
-			(void)close(fd);
 			continue;
 		}
 
 		/* This one. */
-		conn->fd = fd;
+		conn->socket = socket;
 		break;
 	}
 
-	/* The addresses are not needed after. */
-	freeaddrinfo(found);
-
 	/* No address took it. */
-	if (conn->fd < 0)
+	if (conn->socket == NULL)
 		return error;
 
 	/* A secure server: TLS at once. */
@@ -182,7 +165,7 @@ ml_conn_start_tls(
 		return EPROTO;
 
 	/* The handshake. */
-	error = ml_tls_open(conn->fd, server->host, server->pin, &conn->tls);
+	error = ml_tls_open(kl_socket_native(conn->socket), server->host, server->pin, &conn->tls);
 	if (error != 0)
 		return error;
 
@@ -199,7 +182,7 @@ ml_conn_write(
 	const char *bytes,
 	size_t length)
 {
-	ssize_t written;
+	size_t written;
 	size_t done;
 	int error;
 
@@ -214,12 +197,10 @@ ml_conn_write(
 	/* Plain, until everything is sent. */
 	done = 0;
 	while (done < length) {
-		written = write(conn->fd, bytes + done, length - done);
-		if (written < 0 && errno == EINTR)
-			continue;
-		if (written <= 0)
+		error = kl_socket_send(conn->socket, bytes + done, length - done, &written);
+		if (error != 0 || written == 0U)
 			return EIO;
-		done += (size_t)written;
+		done += written;
 	}
 
 	/* Succeeded: everything is sent. */
@@ -348,9 +329,8 @@ ml_conn_close(
 	conn->tls = NULL;
 
 	/* The socket. */
-	if (conn->fd >= 0)
-		(void)close(conn->fd);
-	conn->fd = -1;
+	kl_socket_close(conn->socket);
+	conn->socket = NULL;
 	conn->start = 0;
 	conn->end = 0;
 }
@@ -360,10 +340,10 @@ static int
 conn_fill(
 	struct ml_conn *conn)
 {
-	struct pollfd watched;
-	ssize_t received;
+	struct kl_socket_wait watched;
+	size_t received;
 	size_t decrypted;
-	int ready;
+	size_t ready;
 	int pending;
 	int error;
 
@@ -372,13 +352,13 @@ conn_fill(
 	if (conn->tls != NULL)
 		pending = ml_tls_pending(conn->tls);
 	if (!pending) {
-		watched.fd = conn->fd;
-		watched.events = POLLIN;
-		watched.revents = 0;
-		ready = poll(&watched, 1, conn->timeout_ms);
-		if (ready < 0)
-			return errno;
-		if (ready == 0)
+		watched.socket = conn->socket;
+		watched.waker = NULL;
+		watched.events = KL_SOCKET_READABLE;
+		error = kl_socket_poll(&watched, 1U, conn->timeout_ms, &ready);
+		if (error != 0)
+			return error;
+		if (ready == 0U)
 			return ETIMEDOUT;
 	}
 
@@ -396,74 +376,70 @@ conn_fill(
 	}
 
 	/* Plain. */
-	received = read(conn->fd, conn->buffer, sizeof(conn->buffer));
-	if (received < 0)
-		return errno;
-	if (received == 0)
+	error = kl_socket_receive(conn->socket, conn->buffer, sizeof(conn->buffer), &received);
+	if (error != 0)
+		return error;
+	if (received == 0U)
 		return EPIPE;
 
 	/* Succeeded: the buffer has bytes. */
-	conn->end = (size_t)received;
+	conn->end = received;
 	return 0;
 }
 
 /*
- * Connects a socket to an address, waiting at most CONN_CONNECT_MS for
- * the server to take it; the socket blocks again after.  Returns 0,
- * ETIMEDOUT, or the connection's errno value.
+ * Connects a new socket to an address, waiting at most CONN_CONNECT_MS for
+ * the server to take it; the socket blocks again after.  Returns 0 with
+ * *socket set, ETIMEDOUT, or the connection's errno value.
  */
 static int
 conn_connect(
-	int fd,
-	const struct sockaddr *address,
-	socklen_t length)
+	const struct kl_address *address,
+	struct kl_socket **socket)
 {
-	struct pollfd watched;
-	socklen_t size;
-	int flags;
+	struct kl_socket_wait watched;
+	struct kl_socket *made;
+	size_t ready;
 	int status;
-	int ready;
 	int error;
 
-	/* The socket does not block while it connects. */
-	flags = fcntl(fd, F_GETFL, 0);
-	if (flags < 0)
-		return errno;
-	status = fcntl(fd, F_SETFL, flags | O_NONBLOCK);
-	if (status != 0)
-		return errno;
+	/* A socket of the address's family that does not block while it connects. */
+	*socket = NULL;
+	error = kl_socket_open(address->family, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, &made);
+	if (error != 0)
+		return error;
 
 	/* The connection started (a local one may be made at once). */
-	status = connect(fd, address, length);
-	if (status != 0 && errno != EINPROGRESS)
-		return errno;
+	status = kl_socket_connect(made, address);
+	if (status != 0 && status != EINPROGRESS) {
+		kl_socket_close(made);
+		return status;
+	}
 
-	/* Its end, waited for in time. */
+	/* Its end, waited for in time, and how it ended. */
 	if (status != 0) {
-		watched.fd = fd;
-		watched.events = POLLOUT;
-		watched.revents = 0;
-		ready = poll(&watched, 1, CONN_CONNECT_MS);
-		if (ready < 0)
-			return errno;
-		if (ready == 0)
-			return ETIMEDOUT;
-
-		/* How it ended. */
-		error = 0;
-		size = sizeof(error);
-		status = getsockopt(fd, SOL_SOCKET, SO_ERROR, &error, &size);
-		if (status != 0)
-			return errno;
-		if (error != 0)
+		watched.socket = made;
+		watched.waker = NULL;
+		watched.events = KL_SOCKET_WRITABLE;
+		error = kl_socket_poll(&watched, 1U, CONN_CONNECT_MS, &ready);
+		if (error == 0 && ready == 0U)
+			error = ETIMEDOUT;
+		if (error == 0)
+			error = kl_socket_connect_result(made);
+		if (error != 0) {
+			kl_socket_close(made);
 			return error;
+		}
 	}
 
 	/* The socket blocks again, as the reads and writes expect. */
-	status = fcntl(fd, F_SETFL, flags);
-	if (status != 0)
-		return errno;
+	error = kl_socket_set_nonblocking(made, 0);
+	if (error != 0) {
+		kl_socket_close(made);
+		return error;
+	}
 
 	/* Succeeded: the server took the connection. */
+	*socket = made;
 	return 0;
 }
