@@ -2659,10 +2659,15 @@ gpu_info_ioctl(
 	if (error != 0)
 		return error;
 
-	/* The core, rather than the backend, declares this ioctl contract. */
+	/*
+	 * The core, rather than the backend, declares this ioctl contract.  A
+	 * backend may report fewer capabilities than it registered (one it
+	 * cannot serve on this device, such as jobs without a strict host
+	 * queue), never more.
+	 */
 	information.version = GPU_ABI_VERSION;
 	information.size = sizeof(information);
-	information.capabilities = device->ops->capabilities;
+	information.capabilities &= device->ops->capabilities;
 	information.driver_name[sizeof(information.driver_name) - 1U] = '\0';
 
 	/* Returns the initialized snapshot to the requesting process. */
