@@ -430,7 +430,7 @@ event_name(
 	return 1;
 }
 
-/* Identifies the raw HID devices, which live in /dev/input beside the event devices */
+/* Identifies the raw HID devices, which live in /dev/input beside the event devices. */
 static DEVFS_HIGH int
 hidraw_name(
 	const char *name)
@@ -466,7 +466,7 @@ bridge_name(
 	return 1;
 }
 
-/* Identifies the smart card readers' slots, /dev/smartcard<n> */
+/* Identifies the smart card readers' slots, /dev/smartcard<n>. */
 static DEVFS_HIGH int
 smartcard_name(
 	const char *name)
@@ -482,7 +482,7 @@ smartcard_name(
 	return 1;
 }
 
-/* Identifies the Bluetooth controllers' HCI nodes, /dev/bluetooth<n> */
+/* Identifies the Bluetooth controllers' HCI nodes, /dev/bluetooth<n>. */
 static DEVFS_HIGH int
 bluetooth_name(
 	const char *name)
