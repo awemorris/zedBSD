@@ -84,6 +84,7 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
   | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
   | ours-dev30（4078977d5、2026-10-31、q1727-i02、4 runner を測り直し。static は static-subset.py の全件を並列で。後退あり、下の記述） | 998 | 1,137 | 236 | 41 | 2,412（69.47%） |
+  | ours-dev31（a6fad1068、2026-10-31、q1727-i02、4 runner を測り直し。後退は scripted の 2 件だけ） | 998 | 1,146 | 242 | 41 | 2,427（69.90%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -206,6 +207,15 @@ Origin: 2026-10-27 ユーザーの指示。
   net の増分は +26 だが、後退 17 ID を直すまで dev30 を「後退 0」とは言えない。
 - 追加で直した物（4078977d5）: 入れ子の column の flex で item の主軸の大きさが定まるのは flex-basis が長さの時（basis が auto なら height が長さの時）だけにした（広げすぎて percentage-heights-005〜007・flex-basis-012 が後退したのを直した）。
   画像の content-based minimum は row だけ（column は比の無い SVG で後退した）。`filter`（同じ関数群、border box に後から適用）と `will-change`（transform・perspective・filter・backdrop-filter は containing block と backdrop root を作る）を足した。
+
+- **最終の測定（ours-dev31、source a6fad1068、`build/ws074-cmp/ours-dev31`）: 2,427 / 3,472 = 69.90%**（dev28 は 2,386、+41）。gap 1,045: harness 479、static 406、scripted 154、crash 6。
+  dev28 の gap に無く dev31 の gap にある ID（後退）は **harness 0・static 0・crash 0・scripted 2**。上の dev30 の後退 17 件のうち 15 件を、blur を描かない（Gauss の blur は box の外へ滲まず端が mirror でないため、無い方が reference に近かった）、
+  `@keyframes`（parser.c の `parser_keyframes`、cascade.c の `cascade_animation`: 名前・delay・duration から時刻 0 の進みを求め、backdrop-filter・filter だけを前後の keyframe の間で補間）、
+  view-transition-name を持つ祖先を backdrop root として直した。残る 2 件（scripted）:
+  `css-view-transitions/new-element-on-start`（view-transition の pseudo-element の `filter: invert(1)` が image-pair の描きに入る。以前は filter を無視した偶然の一致）と
+  `css-view-transitions/backdrop-filter-animated`（pseudo-element の animation で backdrop-filter を動かし `getAnimations()` の currentTime を使う）。次の Attempt で直す。
+  Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0（dev30 の時点。dev31 の source の差は css・paint の追加だけで、build は warning 0）。
+  gap 一覧: `build/tmp/p8/gap31.json`。
 - 調べて直さなかった物（次の候補）:
   - 直交 flow の flex item（縦書きの item を横の flex に置く）は layout_logical_wanted が flex の item を物理座標のままにするため、base size が inline の max-content になる（flexbox-writing-mode-009〜016、align-self-vert-rtl、align-self-horiz 約 25 件）。
     正しくは item を論理座標の領域にして block size を base にする。縦の行は折り返さない簡易実装（`vertical_inline`）が前提なので、まず flex の item を領域にする設計が要る。
