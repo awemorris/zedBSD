@@ -105,7 +105,6 @@ static unsigned stream_failures;
 /* The state of the pseudo-random generator of the damage, from the seed; the same seed gives the same damage. */
 static uint32_t stream_rng;
 
-/* Static function declarations. */
 static int md5_setup(void);
 static void md5_init(struct stream_md5 *md5);
 static void md5_block(struct stream_md5 *md5, const uint8_t *block);
@@ -137,6 +136,7 @@ main(
 {
 	uint8_t *data;
 	size_t size;
+	int difference;
 	int status;
 
 	/* Checks the MD5 against its known answers before trusting it. */
@@ -157,7 +157,10 @@ main(
 	}
 
 	/* Decodes damaged copies of a file. */
-	if (argc == 5 && strcmp(argv[1], "--fuzz") == 0) {
+	difference = 1;
+	if (argc == 5)
+		difference = strcmp(argv[1], "--fuzz");
+	if (difference == 0) {
 		data = read_file(argv[2], &size);
 		if (data == NULL)
 			return 1;
@@ -167,7 +170,10 @@ main(
 	}
 
 	/* Starts a file at each picture. */
-	if (argc == 3 && strcmp(argv[1], "--start") == 0) {
+	difference = 1;
+	if (argc == 3)
+		difference = strcmp(argv[1], "--start");
+	if (difference == 0) {
 		data = read_file(argv[2], &size);
 		if (data == NULL)
 			return 1;
@@ -190,6 +196,7 @@ md5_setup(void)
 	struct stream_md5 md5;
 	char text[33];
 	unsigned index;
+	int difference;
 
 	/* The constants are the integer parts of 2^32 times the sines (RFC 1321, 3.4). */
 	for (index = 0U;
@@ -200,14 +207,16 @@ md5_setup(void)
 	/* The empty string. */
 	md5_init(&md5);
 	md5_text(&md5, text);
-	if (strcmp(text, "d41d8cd98f00b204e9800998ecf8427e") != 0)
+	difference = strcmp(text, "d41d8cd98f00b204e9800998ecf8427e");
+	if (difference != 0)
 		return 1;
 
 	/* "message digest", which needs no second block. */
 	md5_init(&md5);
 	md5_update(&md5, (const uint8_t *)"message digest", 14U);
 	md5_text(&md5, text);
-	if (strcmp(text, "f96b697d7cb7938d525a2f31aaf161d0") != 0)
+	difference = strcmp(text, "f96b697d7cb7938d525a2f31aaf161d0");
+	if (difference != 0)
 		return 1;
 
 	/* Succeeded: the MD5 gives the known answers. */
@@ -363,6 +372,8 @@ md5_text(
 		text[2U * index] = digits[byte >> 4];
 		text[2U * index + 1U] = digits[byte & 15U];
 	}
+
+	/* Ends the digest text. */
 	text[32] = '\0';
 }
 
@@ -422,6 +433,8 @@ read_file(
 		printf("decode-stream: FAIL (no memory)\n");
 		return NULL;
 	}
+
+	/* Reads the whole file and refuses an empty or oversized one. */
 	length = fread(data, 1U, STREAM_MAX_FILE, file);
 	fclose(file);
 	if (length == 0U || length >= STREAM_MAX_FILE) {
@@ -474,6 +487,8 @@ frame_md5(
 		     row++)
 			md5_update(&md5, frame->plane[plane] + (size_t)(y + row) * frame->stride[plane] + x, width);
 	}
+
+	/* Finishes the digest of the frame. */
 	md5_text(&md5, text);
 }
 
@@ -712,6 +727,7 @@ compare_tail(
 {
 	unsigned whole_index;
 	unsigned part_index;
+	int difference;
 
 	/* Finds where each tail begins. */
 	whole_index = frames_from(whole, whole_time);
@@ -725,10 +741,13 @@ compare_tail(
 
 	/* Each frame of one tail equals the frame at the same place of the other. */
 	while (whole_index < whole->count) {
-		if (strcmp(whole->frame[whole_index].md5, part->frame[part_index].md5) != 0) {
+		difference = strcmp(whole->frame[whole_index].md5, part->frame[part_index].md5);
+		if (difference != 0) {
 			printf("frame %u differs\n", whole_index);
 			return 0;
 		}
+
+		/* Moves both tails to their next frame. */
 		whole_index++;
 		part_index++;
 	}
@@ -866,11 +885,15 @@ run_fuzz(
 			} else {
 				same = compare_tail(&whole, (int64_t)idr, &damaged, (int64_t)(idr - length));
 			}
+
+			/* Records whether the output recovered from the next IDR picture, and counts it. */
 			check(same, "output from the next IDR picture", index);
 			if (same)
 				recovered++;
 		}
 	}
+
+	/* Frees the damaged copy. */
 	free(copy);
 
 	/* Reports the cases. */
@@ -912,6 +935,7 @@ run_start(
 	unsigned index;
 	unsigned leading;
 	unsigned leading_total;
+	int difference;
 	int found;
 	int has_idr;
 	int same;
@@ -949,11 +973,14 @@ run_start(
 			if (index < whole.count && whole.count - index == part.count) {
 				same = 1;
 				while (same && index < whole.count) {
-					if (strcmp(whole.frame[index].md5, part.frame[part.count - (whole.count - index)].md5) != 0)
+					difference = strcmp(whole.frame[index].md5, part.frame[part.count - (whole.count - index)].md5);
+					if (difference != 0)
 						same = 0;
 					index++;
 				}
 			}
+
+			/* Records whether the output from the start picture matched the whole decode's. */
 			check(same, "output from a start at an IDR or I picture", starts);
 			if (type == H264SW_NAL_IDR)
 				check(part.stats.dropped == 0U, "nothing dropped at an IDR start", starts);
@@ -966,6 +993,8 @@ run_start(
 				if (whole.frame[index].time_us > (int64_t)picture)
 					leading++;
 			}
+
+			/* Records that exactly the leading pictures were dropped. */
 			check(part.stats.dropped == leading, "the leading pictures are dropped", starts);
 			leading_total += leading;
 		} else {
@@ -1000,6 +1029,8 @@ run_start(
 				check(same, "output from the IDR picture after a reset", 0U);
 			}
 		}
+
+		/* Frees the decoder of this start. */
 		h264sw_decoder_destroy(decoder);
 	}
 

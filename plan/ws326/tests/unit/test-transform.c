@@ -132,6 +132,8 @@ int
 main(
 	void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	check_levelscale();
 	check_unscan();
@@ -145,8 +147,13 @@ main(
 	check_extremes();
 	check_missing();
 
-	/* Succeeded when no check failed. */
-	return check_finish("transform");
+	/* Prints the summary line and takes the exit status from it. */
+	status = check_finish("transform");
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every check passed. */
+	return 0;
 }
 
 /* Divides by 2^count and rounds toward minus infinity, as an arithmetic right shift does. */
@@ -219,6 +226,7 @@ reference_scale(
 {
 	int64_t product;
 	int64_t result;
+	int32_t clamped;
 
 	/* Forms the product of the level and the scaling factor. */
 	product = (int64_t)level * (int64_t)factor;
@@ -230,8 +238,11 @@ reference_scale(
 		result = floor_divide(product + power_of_two((unsigned)(base - 1 - qp / 6)), (unsigned)(base - qp / 6));
 	}
 
+	/* Holds the value to its range. */
+	clamped = clamp_range(result);
+
 	/* Reports the value held to its range. */
-	return clamp_range(result);
+	return clamped;
 }
 
 /* Tells whether a value is within the range the clauses give. */
@@ -304,6 +315,8 @@ check_levelscale(void)
 			}
 		}
 	}
+
+	/* Checks the 8x8 weights of the flat lists the same way. */
 	for (list = 0; list < 2U; list++) {
 		for (m = 0; m < 6U; m++) {
 			for (position = 0; position < 64U; position++) {
@@ -321,10 +334,14 @@ check_levelscale(void)
 		for (idx = 0; idx < 16U; idx++)
 			scaling.list4x4[list][idx] = (uint8_t)(1U + list * 16U + idx);
 	}
+
+	/* Fills the 8x8 lists with distinct weights. */
 	for (list = 0; list < 2U; list++) {
 		for (idx = 0; idx < 64U; idx++)
 			scaling.list8x8[list][idx] = (uint8_t)(1U + list * 100U + idx);
 	}
+
+	/* Rebuilds the level scale from the distinct lists. */
 	h264sw_levelscale_init(&levelscale, &scaling);
 	for (list = 0; list < 6U; list++) {
 		for (m = 0; m < 6U; m++) {
@@ -335,6 +352,8 @@ check_levelscale(void)
 			}
 		}
 	}
+
+	/* Checks the 8x8 weights against the scan positions of Figure 8-8. */
 	for (list = 0; list < 2U; list++) {
 		for (m = 0; m < 6U; m++) {
 			for (position = 0; position < 64U; position++) {
@@ -408,6 +427,7 @@ check_scale4x4(void)
 	int qp;
 	unsigned i;
 
+	/* Uses the flat weights, so that LevelScale is 16 times the table value. */
 	flat_levelscale(&levelscale);
 
 	/* qP 28 (m = 4, qP / 6 = 4): a left shift of 0, so d = c * LevelScale; c00 = 3 gives 3 * 256. */
@@ -576,6 +596,7 @@ check_scale8x8(void)
 	int qp;
 	unsigned i;
 
+	/* Uses the flat weights, so that LevelScale is 16 times the table value. */
 	flat_levelscale(&levelscale);
 
 	/* qP 36 (m = 0, qP / 6 = 6): no shift; c00 = 10 gives 10 * 320. */
@@ -743,6 +764,8 @@ check_luma_dc(void)
 		for (column = 0; column < 4U; column++)
 			CHECK(dc[4U * row + column] == 160 * sign_c01[column]);
 	}
+
+	/* Puts the single level at c02 and checks its basis row. */
 	memset(dc, 0, sizeof(dc));
 	dc[2] = 1;
 	h264sw_luma_dc(dc, 160, 36);
@@ -750,6 +773,8 @@ check_luma_dc(void)
 		for (column = 0; column < 4U; column++)
 			CHECK(dc[4U * row + column] == 160 * sign_c02[column]);
 	}
+
+	/* Puts the single level at c03 and checks its basis row. */
 	memset(dc, 0, sizeof(dc));
 	dc[3] = 1;
 	h264sw_luma_dc(dc, 160, 36);
@@ -766,6 +791,8 @@ check_luma_dc(void)
 		for (column = 0; column < 4U; column++)
 			CHECK(dc[4U * row + column] == 160 * sign_c01[row]);
 	}
+
+	/* Puts the single level at c20 and checks its basis column. */
 	memset(dc, 0, sizeof(dc));
 	dc[8] = 1;
 	h264sw_luma_dc(dc, 160, 36);
@@ -773,6 +800,8 @@ check_luma_dc(void)
 		for (column = 0; column < 4U; column++)
 			CHECK(dc[4U * row + column] == 160 * sign_c02[row]);
 	}
+
+	/* Puts the single level at c30 and checks its basis column. */
 	memset(dc, 0, sizeof(dc));
 	dc[12] = 1;
 	h264sw_luma_dc(dc, 160, 36);
@@ -812,6 +841,7 @@ check_chroma_dc(void)
 	int32_t dc[4];
 	int qp;
 	int64_t scaled;
+	int32_t clamped;
 
 	/*
 	 * c = (1, 2, 3, 4) as c00, c01, c10, c11: f00 = 10, f01 = 1 - 2 + 3 -
@@ -891,11 +921,15 @@ check_chroma_dc(void)
 		dc[3] = 0;
 		h264sw_chroma_dc(dc, 192, qp);
 		scaled = floor_divide((int64_t)5 * 192 * ((int64_t)1 << (qp / 6)), 5U);
-		CHECK(dc[0] == clamp_range(scaled));
-		CHECK(dc[2] == clamp_range(scaled));
+		clamped = clamp_range(scaled);
+		CHECK(dc[0] == clamped);
+		clamped = clamp_range(scaled);
+		CHECK(dc[2] == clamped);
 		scaled = floor_divide((int64_t)13 * 192 * ((int64_t)1 << (qp / 6)), 5U);
-		CHECK(dc[1] == clamp_range(scaled));
-		CHECK(dc[3] == clamp_range(scaled));
+		clamped = clamp_range(scaled);
+		CHECK(dc[1] == clamped);
+		clamped = clamp_range(scaled);
+		CHECK(dc[3] == clamped);
 	}
 }
 
@@ -921,6 +955,8 @@ check_add_residual(void)
 			CHECK(out[row * 12U + column] == 255);
 		CHECK(out[row * 12U + 4U] == 9);
 	}
+
+	/* Checks that the row under the block is untouched, then clips the other way. */
 	CHECK(out[4U * 12U] == 9);
 	for (i = 0; i < 16U; i++)
 		residual[i] = -200;
@@ -958,6 +994,8 @@ check_add_residual(void)
 		for (column = 0; column < 10U; column++)
 			pred[row * 10U + column] = (uint8_t)(row * 10U + column);
 	}
+
+	/* Fills the residual with its own index and clears the output. */
 	for (i = 0; i < 64U; i++)
 		residual[i] = (int32_t)i;
 	memset(out, 0, sizeof(out));
@@ -973,6 +1011,8 @@ check_add_residual(void)
 		for (column = 0; column < 4U; column++)
 			pred[row * 10U + column] = (uint8_t)(50U + row);
 	}
+
+	/* Makes the residual its index minus 8 and writes it over the prediction. */
 	for (i = 0; i < 16U; i++)
 		residual[i] = (int32_t)i - 8;
 	h264sw_add_residual(pred, 10, residual, 4, pred, 10);
@@ -1018,25 +1058,42 @@ check_extremes(void)
 	unsigned a;
 	unsigned q;
 	unsigned i;
+	int in_bounds;
+	int32_t level;
 
 	/* Scales of the largest weights, 255 times the largest v, with every level at 2^15 - 1 and -2^15. */
 	memset(&scaling, 255, sizeof(scaling));
 	h264sw_levelscale_init(&levelscale, &scaling);
 	for (a = 0; a < 2U; a++) {
+		/* The first pass uses the largest level, the second the smallest. */
+		level = 32767;
+		if (a != 0U)
+			level = -32768;
+
+
+		/* Takes every qP of the range. */
 		for (q = 0; q <= 51U; q++) {
 			for (i = 0; i < 16U; i++)
-				block[i] = (a == 0U) ? 32767 : -32768;
+				block[i] = level;
 			h264sw_scale4x4(block, levelscale.scale4x4[3][q % 6U], (int)q, 0);
-			for (i = 0; i < 16U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 16U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Transforms the scaled 4x4 block, which must stay in the range of a residual. */
 			h264sw_idct4x4(block);
 			for (i = 0; i < 16U; i++)
 				CHECK(block[i] >= -512 && block[i] <= 512);
 			for (i = 0; i < 64U; i++)
-				block[i] = (a == 0U) ? 32767 : -32768;
+				block[i] = level;
 			h264sw_scale8x8(block, levelscale.scale8x8[1][q % 6U], (int)q);
-			for (i = 0; i < 64U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 64U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Transforms the scaled 8x8 block, which must stay in the range of a residual. */
 			h264sw_idct8x8(block);
 			for (i = 0; i < 64U; i++)
 				CHECK(block[i] >= -512 && block[i] <= 512);
@@ -1053,28 +1110,46 @@ check_extremes(void)
 			for (i = 0; i < 16U; i++)
 				block[i] = big[(i + a) % 6U];
 			h264sw_scale4x4(block, scale4, qps[q], 0);
-			for (i = 0; i < 16U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 16U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Scales the 4x4 block again with the last argument set to 1. */
 			for (i = 0; i < 16U; i++)
 				block[i] = big[(i + a) % 6U];
 			h264sw_scale4x4(block, scale4, qps[q], 1);
-			for (i = 0; i < 16U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 16U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Reloads the levels and scales them as an 8x8 block. */
 			for (i = 0; i < 64U; i++)
 				block[i] = big[(i + a) % 6U];
 			h264sw_scale8x8(block, scale8, qps[q]);
-			for (i = 0; i < 64U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 64U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Reloads the levels and scales them as a luma DC block. */
 			for (i = 0; i < 16U; i++)
 				block[i] = big[(i + a) % 6U];
 			h264sw_luma_dc(block, big[a], qps[q]);
-			for (i = 0; i < 16U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 16U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
+
+			/* Reloads the levels and scales them as a chroma DC block. */
 			for (i = 0; i < 4U; i++)
 				block[i] = big[(i + a) % 6U];
 			h264sw_chroma_dc(block, big[(a + 1U) % 6U], qps[q]);
-			for (i = 0; i < 4U; i++)
-				CHECK(in_range(block[i]));
+			for (i = 0; i < 4U; i++) {
+				in_bounds = in_range(block[i]);
+				CHECK(in_bounds);
+			}
 		}
 	}
 
@@ -1096,13 +1171,19 @@ check_extremes(void)
 	for (i = 0; i < 16U; i++)
 		block[i] = 32767;
 	h264sw_luma_dc(block, 255 * 18, 51);
-	for (i = 0; i < 16U; i++)
-		CHECK(in_range(block[i]));
+	for (i = 0; i < 16U; i++) {
+		in_bounds = in_range(block[i]);
+		CHECK(in_bounds);
+	}
+
+	/* Loads the smallest level into the chroma DC block. */
 	for (i = 0; i < 4U; i++)
 		block[i] = -32768;
 	h264sw_chroma_dc(block, 255 * 18, 51);
-	for (i = 0; i < 4U; i++)
-		CHECK(in_range(block[i]));
+	for (i = 0; i < 4U; i++) {
+		in_bounds = in_range(block[i]);
+		CHECK(in_bounds);
+	}
 }
 
 /* Checks that a missing array is refused quietly. */

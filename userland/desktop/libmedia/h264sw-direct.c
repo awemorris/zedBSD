@@ -96,6 +96,8 @@ h264sw_direct_setup(
 		direct->dist_scale[i] = 0;
 		direct->long_term0[i] = 1;
 	}
+
+	/* Starts the spatial state as not derived, with no reference and a zero vector in both lists. */
 	direct->spatial_ready = 0;
 	direct->spatial_ref[0] = -1;
 	direct->spatial_ref[1] = -1;
@@ -217,6 +219,8 @@ h264sw_direct_quadrant(
 	} else {
 		error = direct_quadrant_temporal(ctx, quadrant, inference);
 	}
+
+	/* Reports a derivation that failed. */
 	if (error != 0)
 		return error;
 
@@ -418,6 +422,7 @@ direct_spatial_prepare(
 	int ref_a;
 	int ref_b;
 	int ref_c;
+	int ref_bc;
 	int available;
 	int ref[2];
 	int16_t mvp[2];
@@ -435,8 +440,9 @@ direct_spatial_prepare(
 		if (!available)
 			ref_c = direct_neighbour_ref(ctx, list, -1, -1, &available);
 
-		/* Combines the three with MinPositive. */
-		ref[list] = direct_min_positive(ref_a, direct_min_positive(ref_b, ref_c));
+		/* Combines B and C with MinPositive, then A with that. */
+		ref_bc = direct_min_positive(ref_b, ref_c);
+		ref[list] = direct_min_positive(ref_a, ref_bc);
 	}
 
 	/* Uses reference index 0 with zero vectors when neither list has a neighbour reference (8-186, 8-188 to 8-190). */

@@ -127,7 +127,6 @@ static const unsigned conform_format_profiles[] = {
 	100U, 110U, 122U, 244U, 44U, 83U, 86U, 118U, 128U, 138U, 139U, 134U, 135U
 };
 
-/* Static function declarations. */
 static int md5_setup(void);
 static void md5_init(struct conform_md5 *md5);
 static void md5_block(struct conform_md5 *md5, const uint8_t *block);
@@ -184,10 +183,14 @@ main(
 			argv++;
 		}
 	}
+
+	/* Refuses a command line without the bitstream and the reference. */
 	if (argc != 3 && argc != 4) {
 		fprintf(stderr, "usage: conform [--aso] BITSTREAM REFERENCE [FRAMES]\n");
 		return 2;
 	}
+
+	/* An optional frame limit stops the comparison after that many frames. */
 	if (argc == 4)
 		run.limit = (unsigned)strtoul(argv[3], NULL, 10);
 
@@ -244,6 +247,8 @@ main(
 				give_reversed(decoder, &run, data, slice, slice_size, slices);
 				slices = 0U;
 			}
+
+			/* Keeps the slice of this picture for the group the reversed order needs. */
 			slice[slices] = nal;
 			slice_size[slices] = nal_size;
 			slices++;
@@ -268,6 +273,8 @@ main(
 		printf("error %d at the flush\n", error);
 		run.errors++;
 	}
+
+	/* Takes the frames the flush released. */
 	take_output(decoder, &run);
 
 	/* Keeps the counters and frees everything but the run. */
@@ -291,6 +298,7 @@ md5_setup(void)
 	struct conform_md5 md5;
 	char text[33];
 	unsigned index;
+	int difference;
 
 	/* The constants are the integer parts of 2^32 times the sines (RFC 1321, 3.4). */
 	for (index = 0U;
@@ -301,14 +309,16 @@ md5_setup(void)
 	/* The empty string. */
 	md5_init(&md5);
 	md5_text(&md5, text);
-	if (strcmp(text, "d41d8cd98f00b204e9800998ecf8427e") != 0)
+	difference = strcmp(text, "d41d8cd98f00b204e9800998ecf8427e");
+	if (difference != 0)
 		return 1;
 
 	/* "message digest", which needs no second block. */
 	md5_init(&md5);
 	md5_update(&md5, (const uint8_t *)"message digest", 14U);
 	md5_text(&md5, text);
-	if (strcmp(text, "f96b697d7cb7938d525a2f31aaf161d0") != 0)
+	difference = strcmp(text, "f96b697d7cb7938d525a2f31aaf161d0");
+	if (difference != 0)
 		return 1;
 
 	/* Succeeded: the MD5 gives the known answers. */
@@ -464,6 +474,8 @@ md5_text(
 		text[2U * index] = digits[byte >> 4];
 		text[2U * index + 1U] = digits[byte & 15U];
 	}
+
+	/* Ends the digest text. */
 	text[32] = '\0';
 }
 
@@ -502,6 +514,8 @@ read_file(
 				printf("conform: FAIL (size of %s)\n", path);
 				return NULL;
 			}
+
+			/* Makes room for the next block of the file. */
 			grown = realloc(data, capacity + CONFORM_READ_STEP);
 			if (grown == NULL) {
 				free(data);
@@ -509,6 +523,8 @@ read_file(
 				printf("conform: FAIL (no memory)\n");
 				return NULL;
 			}
+
+			/* Takes the larger buffer. */
 			data = grown;
 			capacity += CONFORM_READ_STEP;
 		}
@@ -519,6 +535,8 @@ read_file(
 			break;
 		length += got;
 	}
+
+	/* Closes the file; its bytes are all in memory. */
 	fclose(file);
 
 	/* An empty file is not a bitstream. */
@@ -572,6 +590,8 @@ frame_md5(
 		     row++)
 			md5_update(&md5, frame->plane[plane] + (size_t)(y + row) * frame->stride[plane] + x, width);
 	}
+
+	/* Finishes the digest of the frame. */
 	md5_text(&md5, text);
 }
 
@@ -602,6 +622,8 @@ compare_frame(
 			run->errors++;
 			return;
 		}
+
+		/* Keeps the larger reference buffer. */
 		run->expected = grown;
 		run->expected_capacity = frame_size;
 	}
@@ -662,6 +684,8 @@ describe_difference(
 		printf("\n");
 		return;
 	}
+
+	/* Counts the frame whose difference is described. */
 	run->details++;
 
 	/* Compares every sample, marking the macroblock (in the frame, before the crop) of each difference. */
@@ -703,14 +727,20 @@ describe_difference(
 					       (unsigned)ours[x], (unsigned)expected[x]);
 					first = 0;
 				}
+
+				/* Marks the macroblock the differing sample lies in, once. */
 				if (mb < H264SW_MAX_FRAME_MBS && marks[mb] == 0U) {
 					marks[mb] = 1U;
 					marked++;
 				}
 			}
+
+			/* Moves to the next row of the reference. */
 			expected += width;
 		}
 	}
+
+	/* Prints how many macroblocks differ. */
 	printf(" mbs %u\n", marked);
 }
 
@@ -859,6 +889,8 @@ skip_scaling_lists(
 					delta = 127;
 				next = (last + delta + 256) % 256;
 			}
+
+			/* A scale of zero ends the deltas of the list: the last nonzero scale stays in force for the rest. */
 			if (next != 0)
 				last = next;
 		}
@@ -916,10 +948,14 @@ sps_reason(
 			strcpy(reason, "format");
 			return;
 		}
+
+		/* Refuses a lossless profile. */
 		if (lossless != 0U) {
 			strcpy(reason, "lossless");
 			return;
 		}
+
+		/* A stream with a scaling matrix has its lists skipped. */
 		matrix = vcodec_bitreader_u1(&bits);
 		if (matrix != 0U)
 			skip_scaling_lists(&bits, 8U);
@@ -992,6 +1028,8 @@ slice_reason(
 		strcpy(reason, "sp-slices");
 		return;
 	}
+
+	/* Any other reason. */
 	strcpy(reason, "other");
 }
 
@@ -1015,6 +1053,8 @@ refusal_reason(
 		add_reason(run, reason);
 		return;
 	}
+
+	/* Parses the NAL unit; a unit that cannot be parsed has the reason found so far. */
 	error = h264sw_nal_parse(nal, size, buffer, sizeof(buffer), &unit);
 	if (error != 0) {
 		add_reason(run, reason);
@@ -1033,6 +1073,8 @@ refusal_reason(
 	} else if (unit.type == H264SW_NAL_SLICE || unit.type == H264SW_NAL_IDR) {
 		slice_reason(&unit, reason);
 	}
+
+	/* Records the reason the unit lies outside the decoder's range, if any. */
 	add_reason(run, reason);
 }
 
@@ -1049,6 +1091,7 @@ finish(
 	unsigned extra;
 	unsigned index;
 	int failed;
+	const char *reference_state;
 
 	/* Counts the reference frames left over: any byte left is a frame the decoder did not output, unless a limit says the reference is longer. */
 	extra = 0U;
@@ -1074,8 +1117,14 @@ finish(
 		printf("conform: OUT (");
 		for (index = 0U;
 		     index < run->reasons;
-		     index++)
-			printf("%s%s", index == 0U ? "" : ",", run->reason[index]);
+		     index++) {
+			/* The reasons are separated by commas. */
+			if (index != 0U)
+				printf(",");
+			printf("%s", run->reason[index]);
+		}
+
+		/* Closes the list of reasons. */
 		printf(")\n");
 		return 3;
 	}
@@ -1094,8 +1143,11 @@ finish(
 	}
 
 	/* Anything else fails. */
+	reference_state = "ended";
+	if (extra != 0U)
+		reference_state = "has more frames";
 	printf("conform: FAIL (%u of %u frames differ, %u not in the reference, reference %s, %u errors)\n",
-	       run->different, run->frames, run->missing, extra != 0U ? "has more frames" : "ended",
+	       run->different, run->frames, run->missing, reference_state,
 	       run->errors);
 	return 1;
 }

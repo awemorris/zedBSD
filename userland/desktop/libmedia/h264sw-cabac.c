@@ -131,6 +131,7 @@ h264sw_cabac_start(
 		if (alignment_bit != 1U)
 			return EINVAL;
 
+		/* Looks at whether the byte boundary has been reached. */
 		aligned = vcodec_bitreader_aligned(bits);
 	}
 

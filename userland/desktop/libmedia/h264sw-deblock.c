@@ -231,12 +231,14 @@ h264sw_deblock_bs(
 			if (mb_x == 0U)
 				return;
 
+			/* The p0 samples lie in the macroblock to the left. */
 			p_mb = q_mb - 1;
 		} else {
 			/* A horizontal macroblock edge on the picture's upper border is not filtered. */
 			if (mb_y == 0U)
 				return;
 
+			/* The p0 samples lie in the macroblock above. */
 			p_mb = q_mb - picture->width_mbs;
 		}
 	}
@@ -588,6 +590,7 @@ motion_differs(
 		if (p_motion->ref_idx[list][p_quad] < 0)
 			continue;
 
+		/* Appends the reference picture and vector of this list. */
 		p_ref[p_count] = p_motion->ref_id[list][p_quad];
 		p_mv[p_count] = p_motion->mv[list][p_blk];
 		p_count++;
@@ -601,6 +604,7 @@ motion_differs(
 		if (q_motion->ref_idx[list][q_quad] < 0)
 			continue;
 
+		/* Appends the reference picture and vector of this list. */
 		q_ref[q_count] = q_motion->ref_id[list][q_quad];
 		q_mv[q_count] = q_motion->mv[list][q_blk];
 		q_count++;
@@ -650,6 +654,7 @@ motion_differs(
 			if (straight_p1 != 0)
 				return 1;
 
+			/* Both vectors are close, so bS is 0. */
 			return 0;
 		}
 
@@ -659,6 +664,7 @@ motion_differs(
 		if (cross_p1 != 0)
 			return 1;
 
+		/* Both crossed vectors are close, so bS is 0. */
 		return 0;
 	}
 
@@ -739,6 +745,8 @@ edge_strengths(
 			bs[segment] = 2;
 			continue;
 		}
+
+		/* The same holds for the q0 side. */
 		if (((q_mb->nonzero >> q_blk) & 1U) != 0U) {
 			bs[segment] = 2;
 			continue;

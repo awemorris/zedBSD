@@ -380,6 +380,8 @@ make_ops(
 	unsigned index;
 	unsigned pick;
 	unsigned roll;
+	uint32_t draw;
+	int is_listed;
 
 	/* The contexts the slice kind initializes, each with a first bias toward a bin of 1. */
 	usable_count = 0U;
@@ -387,7 +389,8 @@ make_ops(
 		bias[ctx_idx] = bias_pool[random_next() % (sizeof(bias_pool) / sizeof(bias_pool[0]))];
 		if (ctx_idx == H264SW_CABAC_TERMINATE)
 			continue;
-		if (!listed(kind, ctx_idx))
+		is_listed = listed(kind, ctx_idx);
+		if (!is_listed)
 			continue;
 		usable[usable_count] = ctx_idx;
 		usable_count++;
@@ -399,7 +402,8 @@ make_ops(
 		pick = usable[random_next() % usable_count];
 
 		/* A context's bias changes now and then, so its state can cross from one end of the table to the other. */
-		if (random_next() % 700U == 0U)
+		draw = random_next();
+		if (draw % 700U == 0U)
 			bias[pick] = bias_pool[random_next() % (sizeof(bias_pool) / sizeof(bias_pool[0]))];
 
 		/* Chooses the kind of operation by the roll. */
@@ -411,7 +415,8 @@ make_ops(
 			ops[index].type = OP_DECISION;
 			ops[index].ctx = pick;
 			ops[index].bin = 0U;
-			if ((random_next() & 255U) < bias[pick])
+			draw = random_next();
+			if ((draw & 255U) < bias[pick])
 				ops[index].bin = 1U;
 		} else if (roll < 96U) {
 			ops[index].type = OP_BYPASS;
@@ -444,6 +449,8 @@ encode_ops(
 	unsigned ctx_idx;
 	unsigned index;
 	size_t sample_index;
+	int is_listed;
+	size_t bytes;
 
 	/* The context variables start from the (m, n) of the set, as 9.3.1.1 says. */
 	set = 0U;
@@ -453,7 +460,8 @@ encode_ops(
 	for (ctx_idx = 0U; ctx_idx < H264SW_CABAC_CONTEXTS; ctx_idx++) {
 		if (ctx_idx == H264SW_CABAC_TERMINATE)
 			continue;
-		if (!listed(kind, ctx_idx))
+		is_listed = listed(kind, ctx_idx);
+		if (!is_listed)
 			continue;
 		cabacwriter_context_set(&writer, ctx_idx,
 		    h264sw_cabac_init_mn[ctx_idx][set][0],
@@ -491,7 +499,8 @@ encode_ops(
 		bitwriter_u(&written, 0U, 1U);
 
 	/* Reports the bytes written. */
-	return bitwriter_bytes(&written);
+	bytes = bitwriter_bytes(&written);
+	return bytes;
 }
 
 /* Decodes the bytes written for the operations and compares every bin and I_PCM sample. */
@@ -518,6 +527,7 @@ decode_and_compare(
 	size_t sample_index;
 	uint32_t prefix_value;
 	int status;
+	unsigned pcm_expected;
 
 	/* Reads the slice header bits and starts the engine. */
 	vcodec_bitreader_init(&bits, written.data, bytes);
@@ -553,7 +563,8 @@ decode_and_compare(
 			if (status != 0)
 				bin = 2U;
 			for (sample_index = 0U; sample_index < PCM_BYTES; sample_index++) {
-				if (samples[sample_index] != pcm_byte(pcm_seed, index, sample_index))
+				pcm_expected = pcm_byte(pcm_seed, index, sample_index);
+				if (samples[sample_index] != pcm_expected)
 					bin = 2U;
 			}
 		}
@@ -565,6 +576,8 @@ decode_and_compare(
 			mismatches++;
 		}
 	}
+
+	/* Names the first operation that decoded to a different bin, so a failure can be reproduced. */
 	if (mismatches != 0U)
 		printf("stream kind %u idc %u qp %d: first mismatch at operation %u of %u\n", kind, idc, qp, first_mismatch, count);
 	CHECK(mismatches == 0U);
@@ -609,11 +622,15 @@ check_tables(
 				CHECK(vcodec_cabac_range_lps[state_idx][column] == vcodec_cabac_range_lps[state_idx][column + 1U]);
 			}
 		}
+
+		/* Checks that each column of rangeTabLPS never rises as pStateIdx grows. */
 		for (column = 0U; column < 4U; column++) {
 			if (state_idx > 0U)
 				CHECK(vcodec_cabac_range_lps[state_idx][column] <= vcodec_cabac_range_lps[state_idx - 1U][column]);
 		}
 	}
+
+	/* Checks that the last state, pStateIdx 63, has the fixed range 2 in every column. */
 	for (column = 0U; column < 4U; column++)
 		CHECK(vcodec_cabac_range_lps[63][column] == 2U);
 
@@ -624,10 +641,14 @@ check_tables(
 		} else {
 			CHECK(vcodec_cabac_trans_mps[state_idx] == 63U);
 		}
+
+		/* Checks that an LPS never moves to a higher state, and that state 0 stays at 0. */
 		CHECK(vcodec_cabac_trans_lps[state_idx] <= state_idx);
 		if (state_idx > 0U && state_idx < 63U)
 			CHECK(vcodec_cabac_trans_lps[state_idx] >= vcodec_cabac_trans_lps[state_idx - 1U]);
 	}
+
+	/* Checks that state 0 stays at state 0 after an LPS. */
 	CHECK(vcodec_cabac_trans_lps[0] == 0U);
 
 	/* The decoder's tables equal the encoder's own copy of the tables, entry by entry. */
@@ -655,6 +676,8 @@ check_init(
 	unsigned index;
 	int qp;
 	int status;
+	int is_listed;
+	unsigned idc_count;
 
 	/* The context variables worked out by hand. */
 	for (index = 0U; index < sizeof(hands) / sizeof(hands[0]); index++) {
@@ -667,25 +690,32 @@ check_init(
 
 	/* Every slice type, cabac_init_idc and SliceQPY: the listed contexts have the state of 9-5, the others are 0, and 276 is never set. */
 	for (kind = 0U; kind < KINDS; kind++) {
-		for (idc = 0U; idc < (kind == KIND_I ? 1U : 3U); idc++) {
+		idc_count = 3U;
+		if (kind == KIND_I)
+			idc_count = 1U;
+		for (idc = 0U; idc < idc_count; idc++) {
 			for (qp = -3; qp <= 54; qp++) {
 				status = engine_start(&cabac, data, sizeof(data), kind, idc, qp);
 				CHECK(status == 0);
 				CHECK(cabac.engine.error == 0);
 				CHECK(cabac.engine.range == 510U);
 
+				/* Chooses the row of the init table: I slices use the first, others one per cabac_init_idc. */
 				set = 0U;
 				if (kind != KIND_I)
 					set = 1U + idc;
 				for (ctx_idx = 0U; ctx_idx < H264SW_CABAC_CONTEXTS; ctx_idx++) {
 					expected = 0U;
-					if (ctx_idx != H264SW_CABAC_TERMINATE && listed(kind, ctx_idx)) {
+					is_listed = listed(kind, ctx_idx);
+					if (ctx_idx != H264SW_CABAC_TERMINATE && is_listed) {
 						cabacwriter_context_set(&reference, ctx_idx,
 						    h264sw_cabac_init_mn[ctx_idx][set][0],
 						    h264sw_cabac_init_mn[ctx_idx][set][1],
 						    qp);
 						expected = reference.state[ctx_idx];
 					}
+
+					/* Requires the context variable to equal the one the reference initialization gives. */
 					CHECK(cabac.state[ctx_idx] == expected);
 				}
 			}
@@ -722,12 +752,16 @@ check_roundtrip(
 	unsigned pairs_seen;
 	size_t bytes;
 	uint32_t pcm_seed;
+	unsigned idc_count;
 
 	/* Every slice type and QP, with two of the three cabac_init_idc for P and B slices, and 24000 operations each. */
 	operations = 0U;
 	prefix_bits = 0U;
 	for (kind = 0U; kind < KINDS; kind++) {
-		for (idc = 0U; idc < (kind == KIND_I ? 1U : 3U); idc++) {
+		idc_count = 3U;
+		if (kind == KIND_I)
+			idc_count = 1U;
+		for (idc = 0U; idc < idc_count; idc++) {
 			for (qp_index = 0U; qp_index < QP_COUNT; qp_index++) {
 				random_state = 0x9e3779b9U + kind * 7919U + idc * 104729U + qp_index * 1299709U;
 				count = make_ops(kind, OPS_MAX, 0U);
@@ -742,6 +776,8 @@ check_roundtrip(
 			}
 		}
 	}
+
+	/* Requires enough operations to make the coverage below meaningful. */
 	CHECK(operations >= 100000U);
 
 	/* Every pStateIdx from 0 to 62 was left by a least probable symbol, and the table rows and columns were all met. */
@@ -755,6 +791,8 @@ check_roundtrip(
 				pairs_seen++;
 		}
 	}
+
+	/* Reports how many states and (pStateIdx, qCodIRangeIdx) pairs the random streams reached. */
 	printf("coverage: %u of 63 states left by an LPS, %u of 252 (pStateIdx, qCodIRangeIdx) pairs decoded\n", 63U - lps_missing, pairs_seen);
 	CHECK(lps_missing == 0U);
 	CHECK(pairs_seen >= 240U);
@@ -796,6 +834,8 @@ check_pcm(
 				pcm_ops++;
 		}
 	}
+
+	/* Requires enough I_PCM macroblocks among the streams to exercise the alignment path. */
 	CHECK(pcm_ops >= 1000U);
 
 	/* An I_PCM macroblock first in the slice and nothing else: terminate 1 right after the start. */
@@ -835,6 +875,8 @@ check_errors(
 		CHECK(bin == 0U);
 		CHECK(cabac.engine.error == 0);
 	}
+
+	/* Reads one bypass bin past the end of the data, which must set the error. */
 	bin = vcodec_cabac_bypass(&cabac.engine);
 	CHECK(bin == 0U);
 	CHECK(cabac.engine.error != 0);
@@ -845,6 +887,8 @@ check_errors(
 		(void)vcodec_cabac_bypass(&cabac.engine);
 		(void)vcodec_cabac_terminate(&cabac.engine);
 	}
+
+	/* Requires the error to stay set after reading far past the end. */
 	CHECK(cabac.engine.error != 0);
 
 	/* A decision that renormalizes past the end sets the error too. */
@@ -953,6 +997,7 @@ check_garbage(
 	unsigned kind;
 	unsigned idc;
 	int status;
+	uint32_t draw;
 
 	/* Random streams from 0 to 39 bytes, random slice types, QPs and calls, with I_PCM reads of random sizes. */
 	random_state = 0xdeadbeefU;
@@ -961,9 +1006,15 @@ check_garbage(
 		for (index = 0U; index < length; index++)
 			data[index] = (uint8_t)random_next();
 		if ((round % 4U) == 0U) {
-			for (index = 0U; index < length; index++)
-				data[index] = (uint8_t)(random_next() % 3U == 0U ? 0xffU : 0x00U);
+			for (index = 0U; index < length; index++) {
+				data[index] = 0x00U;
+				draw = random_next();
+				if (draw % 3U == 0U)
+					data[index] = 0xffU;
+			}
 		}
+
+		/* Picks a slice kind and cabac_init_idc at random for the engine start. */
 		kind = random_next() % KINDS;
 		idc = random_next() % 4U;
 

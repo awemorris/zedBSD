@@ -88,6 +88,24 @@ static const unsigned v8_expected[6][6] = {
 };
 
 /* Expands runs into a list of the given size and compares it with a table; returns 1 when equal. */
+static int list_matches_runs(const uint8_t *list, unsigned size, const struct run *runs, unsigned run_count);
+
+/* Checks a scan of side x side against its figure, as a permutation and as a connected zig-zag walk. */
+static void check_scan(const uint8_t *scan, unsigned side, const unsigned *figure);
+
+/* Checks the two zig-zag scans, including a few entries worked out from Tables 8-13 and 8-14. */
+static void test_scans(void);
+
+/* Checks the four default scaling lists value by value, through their run-length form. */
+static void test_defaults(void);
+
+/* Checks QPC of Table 8-15: the ends, the steps of the second column and the monotone shape. */
+static void test_chroma_qp(void);
+
+/* Checks the normalization matrices of equations 8-315 and 8-318 and their structure. */
+static void test_norm(void);
+
+/* Expands runs into a list of the given size and compares it with a table; returns 1 when equal. */
 static int
 list_matches_runs(
 	const uint8_t *list,
@@ -149,6 +167,8 @@ check_scan(
 		if (scan[index] < count)
 			seen[scan[index]]++;
 	}
+
+	/* Requires every position to be visited exactly once, so the scan is a permutation. */
 	for (index = 0U; index < count; index++)
 		CHECK(seen[index] == 1U);
 
@@ -282,6 +302,8 @@ test_norm(
 			CHECK(h264sw_norm4x4[m][k] * 100U > h264sw_norm4x4[m - 1U][k] * 105U);
 			CHECK(h264sw_norm4x4[m][k] * 100U < h264sw_norm4x4[m - 1U][k] * 125U);
 		}
+
+		/* Checks that each step of QP % 6 raises the scale by between 5 and 25 percent. */
 		for (k = 0U; k < 6U; k++) {
 			CHECK(h264sw_norm8x8[m][k] * 100U > h264sw_norm8x8[m - 1U][k] * 105U);
 			CHECK(h264sw_norm8x8[m][k] * 100U < h264sw_norm8x8[m - 1U][k] * 125U);
@@ -297,6 +319,8 @@ int
 main(
 	void)
 {
+	int status;
+
 	/* Runs every group of checks and prints the summary line. */
 	test_scans();
 	test_defaults();
@@ -304,5 +328,6 @@ main(
 	test_norm();
 
 	/* Succeeded when every check passed. */
-	return check_finish("tables");
+	status = check_finish("tables");
+	return status;
 }

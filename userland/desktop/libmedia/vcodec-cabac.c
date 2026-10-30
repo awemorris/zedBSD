@@ -314,6 +314,7 @@ vcodec_cabac_decision(
 		if (state_idx == 0U)
 			value_mps = 1U - value_mps;
 
+		/* The context moves to the state that follows a least probable symbol. */
 		state_idx = vcodec_cabac_trans_lps[state_idx];
 	} else {
 		bin = value_mps;

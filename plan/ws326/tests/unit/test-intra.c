@@ -286,9 +286,13 @@ static void check_edge8x8(void);
 static void check_edge16_and_chroma(void);
 static void check_edge_errors(void);
 
+/* Runs the checks. */
 int
-main(void)
+main(
+	void)
 {
+	int status;
+
 	/* Checks the predictions of each block size from hand-made edges. */
 	check_pred4x4();
 	check_pred4x4_requirements();
@@ -309,8 +313,13 @@ main(void)
 	check_edge16_and_chroma();
 	check_edge_errors();
 
-	/* Reports how many checks passed. */
-	return check_finish("intra");
+	/* Prints the summary line and takes the exit status from it. */
+	status = check_finish("intra");
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every check passed. */
+	return 0;
 }
 
 /* Gives the luma sample the tests put at (x, y) of the picture: a pattern whose neighbours differ. */
@@ -505,6 +514,8 @@ make_edge16(
 		edge->top[i] = (uint8_t)((int)base + top_step * (int)i);
 		edge->left[i] = (uint8_t)((int)base + left_step * (int)i);
 	}
+
+	/* Sets the corner sample and marks every part but the top right as available. */
 	edge->top_left = (uint8_t)top_left;
 	edge->available = ALL_BUT_RIGHT;
 }
@@ -579,6 +590,8 @@ check_luma_edge(
 		ox = 8U * (blk % 2U);
 		oy = 8U * (blk / 2U);
 	}
+
+	/* Finds the picture position of the top left sample of the block. */
 	ax = (addr % PIC_W) * 16U + ox;
 	ay = (addr / PIC_W) * 16U + oy;
 
@@ -593,22 +606,30 @@ check_luma_edge(
 			if (edge.left[i] != want)
 				left_ok = 0;
 		}
+
+		/* Compares the top row with the picture. */
 		if ((expected & H264SW_EDGE_TOP) != 0U) {
 			want = luma_value(ax + i, ay - 1U);
 			if (edge.top[i] != want)
 				top_ok = 0;
 		}
+
+		/* Compares the top-right row with the picture. */
 		if ((expected & H264SW_EDGE_TOP_RIGHT) != 0U) {
 			want = luma_value(ax + size + i, ay - 1U);
 			if (edge.top[size + i] != want)
 				right_ok = 0;
 		}
 	}
+
+	/* Compares the corner with the picture. */
 	if ((expected & H264SW_EDGE_TOP_LEFT) != 0U) {
 		want = luma_value(ax - 1U, ay - 1U);
 		if (edge.top_left != want)
 			corner_ok = 0;
 	}
+
+	/* Reports each comparison as one check. */
 	CHECK(left_ok);
 	CHECK(top_ok);
 	CHECK(corner_ok);
@@ -655,6 +676,8 @@ check_chroma_edge(
 			if (edge.left[i] != want)
 				left_ok = 0;
 		}
+
+		/* Compares the top row with the chroma plane. */
 		if ((expected & H264SW_EDGE_TOP) != 0U) {
 			want = cb_value(ax + i, ay - 1U);
 			if (plane == 2U)
@@ -663,6 +686,8 @@ check_chroma_edge(
 				top_ok = 0;
 		}
 	}
+
+	/* Compares the corner with the chroma plane. */
 	if ((expected & H264SW_EDGE_TOP_LEFT) != 0U) {
 		want = cb_value(ax - 1U, ay - 1U);
 		if (plane == 2U)
@@ -670,6 +695,8 @@ check_chroma_edge(
 		if (edge.top_left != want)
 			corner_ok = 0;
 	}
+
+	/* Reports each comparison as one check. */
 	CHECK(left_ok);
 	CHECK(top_ok);
 	CHECK(corner_ok);
@@ -682,62 +709,76 @@ check_pred4x4(void)
 	struct h264sw_intra_edge edge;
 	uint8_t pred[16];
 	int status;
+	int matches;
 
 	/* Predicts with every part available, in each mode, and compares with the worked-out tables. */
 	make_edge4(&edge);
 	status = h264sw_intra_pred4x4(H264SW_I4_VERTICAL, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_vertical, 16U));
+	matches = same_samples(pred, expect_4x4_vertical, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_HORIZONTAL, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_horizontal, 16U));
+	matches = same_samples(pred, expect_4x4_horizontal, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_DIAGONAL_DOWN_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_ddl, 16U));
+	matches = same_samples(pred, expect_4x4_ddl, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_DIAGONAL_DOWN_RIGHT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_ddr, 16U));
+	matches = same_samples(pred, expect_4x4_ddr, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_VERTICAL_RIGHT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_vr, 16U));
+	matches = same_samples(pred, expect_4x4_vr, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_HORIZONTAL_DOWN, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_hd, 16U));
+	matches = same_samples(pred, expect_4x4_hd, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_VERTICAL_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_vl, 16U));
+	matches = same_samples(pred, expect_4x4_vl, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_HORIZONTAL_UP, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_hu, 16U));
+	matches = same_samples(pred, expect_4x4_hu, 16U);
+	CHECK(matches);
 
 	/* Predicts DC with both sides: ( 10 + 20 + 30 + 40 + 5 + 15 + 25 + 35 + 4 ) >> 3 = 23 (8-48). */
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 23U));
+	matches = all_equal(pred, 16U, 23U);
+	CHECK(matches);
 
 	/* Predicts DC with the top only: ( 100 + 2 ) >> 2 = 25 (8-50). */
 	edge.available = H264SW_EDGE_TOP;
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 25U));
+	matches = all_equal(pred, 16U, 25U);
+	CHECK(matches);
 
 	/* Predicts DC with the left only: ( 80 + 2 ) >> 2 = 20 (8-49). */
 	edge.available = H264SW_EDGE_LEFT;
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 20U));
+	matches = all_equal(pred, 16U, 20U);
+	CHECK(matches);
 
 	/* Predicts DC with the top-left and top-right only: nothing it uses is available, so 128 (8-51). */
 	edge.available = H264SW_EDGE_TOP_LEFT | H264SW_EDGE_TOP_RIGHT;
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 128U));
+	matches = all_equal(pred, 16U, 128U);
+	CHECK(matches);
 
 	/* Predicts DC with the left and a top-right but no top: the top-right is not the top, so the left only counts (8-49). */
 	edge.available = H264SW_EDGE_LEFT | H264SW_EDGE_TOP_RIGHT;
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 20U));
+	matches = all_equal(pred, 16U, 20U);
+	CHECK(matches);
 
 	/* Substitutes p[ 3, -1 ] for the absent top-right samples (8.3.1.2): the garbage in top[4..7] must not matter. */
 	make_edge4(&edge);
@@ -748,10 +789,12 @@ check_pred4x4(void)
 	edge.top[7] = 253;
 	status = h264sw_intra_pred4x4(H264SW_I4_DIAGONAL_DOWN_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_ddl_substituted, 16U));
+	matches = same_samples(pred, expect_4x4_ddl_substituted, 16U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(H264SW_I4_VERTICAL_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_4x4_vl_substituted, 16U));
+	matches = same_samples(pred, expect_4x4_vl_substituted, 16U);
+	CHECK(matches);
 
 	/* Uses the top-right samples when they are available: the same garbage then matters. */
 	edge.available = ALL_PARTS;
@@ -771,6 +814,7 @@ check_pred4x4_requirements(void)
 	uint8_t pred[16];
 	unsigned i;
 	int status;
+	int matches;
 
 	/* Offers no top: the modes that need it refuse. */
 	make_edge4(&edge);
@@ -779,7 +823,8 @@ check_pred4x4_requirements(void)
 		memset(pred, 0x55, sizeof(pred));
 		status = h264sw_intra_pred4x4(top_only[i], &edge, pred);
 		CHECK(status == EINVAL);
-		CHECK(all_equal(pred, 16U, 128U));
+		matches = all_equal(pred, 16U, 128U);
+		CHECK(matches);
 	}
 
 	/* Offers no left: the modes that need it refuse. */
@@ -788,7 +833,8 @@ check_pred4x4_requirements(void)
 		memset(pred, 0x55, sizeof(pred));
 		status = h264sw_intra_pred4x4(left_only[i], &edge, pred);
 		CHECK(status == EINVAL);
-		CHECK(all_equal(pred, 16U, 128U));
+		matches = all_equal(pred, 16U, 128U);
+		CHECK(matches);
 	}
 
 	/* Offers no top-left: the modes that need the three parts refuse. */
@@ -797,7 +843,8 @@ check_pred4x4_requirements(void)
 		memset(pred, 0x55, sizeof(pred));
 		status = h264sw_intra_pred4x4(corner_all[i], &edge, pred);
 		CHECK(status == EINVAL);
-		CHECK(all_equal(pred, 16U, 128U));
+		matches = all_equal(pred, 16U, 128U);
+		CHECK(matches);
 	}
 
 	/* Offers no left: Diagonal_Down_Right refuses too, and no top: so does Horizontal_Down. */
@@ -819,7 +866,8 @@ check_pred4x4_requirements(void)
 	edge.available = 0;
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 16U, 128U));
+	matches = all_equal(pred, 16U, 128U);
+	CHECK(matches);
 }
 
 /* Checks the nine Intra_8x8 modes against the tables, with the reference sample filtering visible in the vertical and horizontal modes. */
@@ -829,56 +877,69 @@ check_pred8x8(void)
 	struct h264sw_intra_edge edge;
 	uint8_t pred[64];
 	int status;
+	int matches;
 
 	/* Predicts with every part available, in each mode, and compares with the worked-out tables. */
 	make_edge8(&edge);
 	status = h264sw_intra_pred8x8(H264SW_I4_VERTICAL, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_vertical, 64U));
+	matches = same_samples(pred, expect_8x8_vertical, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_HORIZONTAL, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_horizontal, 64U));
+	matches = same_samples(pred, expect_8x8_horizontal, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_DIAGONAL_DOWN_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_ddl, 64U));
+	matches = same_samples(pred, expect_8x8_ddl, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_DIAGONAL_DOWN_RIGHT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_ddr, 64U));
+	matches = same_samples(pred, expect_8x8_ddr, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_VERTICAL_RIGHT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_vr, 64U));
+	matches = same_samples(pred, expect_8x8_vr, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_HORIZONTAL_DOWN, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_hd, 64U));
+	matches = same_samples(pred, expect_8x8_hd, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_VERTICAL_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_vl, 64U));
+	matches = same_samples(pred, expect_8x8_vl, 64U);
+	CHECK(matches);
 	status = h264sw_intra_pred8x8(H264SW_I4_HORIZONTAL_UP, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_hu, 64U));
+	matches = same_samples(pred, expect_8x8_hu, 64U);
+	CHECK(matches);
 
 	/* Predicts DC with both sides: p' top sums to 390 and p' left to 544, ( 390 + 544 + 8 ) >> 4 = 58 (8-91). */
 	status = h264sw_intra_pred8x8(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 64U, 58U));
+	matches = all_equal(pred, 64U, 58U);
+	CHECK(matches);
 
 	/* Predicts DC with the left and the top-left only: ( 544 + 4 ) >> 3 = 68 (8-92). */
 	edge.available = H264SW_EDGE_LEFT | H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred8x8(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 64U, 68U));
+	matches = all_equal(pred, 64U, 68U);
+	CHECK(matches);
 
 	/* Predicts DC with the top and the top-left only: ( 390 + 4 ) >> 3 = 49 (8-93). */
 	edge.available = H264SW_EDGE_TOP | H264SW_EDGE_TOP_LEFT | H264SW_EDGE_TOP_RIGHT;
 	status = h264sw_intra_pred8x8(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 64U, 49U));
+	matches = all_equal(pred, 64U, 49U);
+	CHECK(matches);
 
 	/* Predicts DC with neither side: 128 (8-94). */
 	edge.available = H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred8x8(H264SW_I4_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 }
 
 /* Checks the Intra_8x8 reference sample filtering where the corner or the top-right is absent (8-79, 8-86, 8.3.2.2). */
@@ -893,6 +954,7 @@ check_pred8x8_variants(void)
 	int rows_ok;
 	int same;
 	unsigned y;
+	int matches;
 
 	/* Predicts vertically without the corner: p'[ 0, -1 ] = ( 3 * 20 + 25 + 2 ) >> 2 = 21 (8-79), the others as before (8-80, 8-81). */
 	make_edge8(&edge);
@@ -905,6 +967,8 @@ check_pred8x8_variants(void)
 		if (same == 0)
 			rows_ok = 0;
 	}
+
+	/* Reports whether every row was the vertical prediction. */
 	CHECK(rows_ok);
 
 	/* Predicts horizontally without the corner: p'[ -1, 0 ] = ( 3 * 15 + 30 + 2 ) >> 2 = 19 (8-86). */
@@ -924,19 +988,22 @@ check_pred8x8_variants(void)
 	edge.available = ALL_BUT_RIGHT;
 	status = h264sw_intra_pred8x8(H264SW_I4_DIAGONAL_DOWN_LEFT, &edge, pred);
 	CHECK(status == 0);
-	CHECK(same_samples(pred, expect_8x8_ddl_substituted, 64U));
+	matches = same_samples(pred, expect_8x8_ddl_substituted, 64U);
+	CHECK(matches);
 
 	/* Refuses a mode that needs a part the edge lacks, with a block of 128, and refuses a mode above 8. */
 	edge.available = H264SW_EDGE_LEFT | H264SW_EDGE_TOP_LEFT;
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred8x8(H264SW_I4_VERTICAL, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 	edge.available = H264SW_EDGE_TOP | H264SW_EDGE_LEFT;
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred8x8(H264SW_I4_VERTICAL_RIGHT, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 	edge.available = ALL_PARTS;
 	status = h264sw_intra_pred8x8(9U, &edge, pred);
 	CHECK(status == EINVAL);
@@ -953,6 +1020,7 @@ check_pred16x16(void)
 	int status;
 	int vertical_ok;
 	int horizontal_ok;
+	int matches;
 
 	/* Predicts vertically: pred[ x, y ] = p[ x, -1 ] = 100 + 3 * x (8-116). */
 	make_edge16(&edge, 100U, 3, 5, 90U);
@@ -965,6 +1033,8 @@ check_pred16x16(void)
 				vertical_ok = 0;
 		}
 	}
+
+	/* Reports whether every sample was the vertical ramp. */
 	CHECK(vertical_ok);
 
 	/* Predicts horizontally: pred[ x, y ] = p[ -1, y ] = 100 + 5 * y (8-117). */
@@ -977,37 +1047,44 @@ check_pred16x16(void)
 				horizontal_ok = 0;
 		}
 	}
+
+	/* Reports whether every sample was the horizontal ramp. */
 	CHECK(horizontal_ok);
 
 	/* Predicts DC with both sides: the top sums to 16 * 100 + 3 * 120 = 1960, the left to 1600 + 5 * 120 = 2200, ( 1960 + 2200 + 16 ) >> 5 = 130 (8-118). */
 	status = h264sw_intra_pred16x16(H264SW_I16_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 256U, 130U));
+	matches = all_equal(pred, 256U, 130U);
+	CHECK(matches);
 
 	/* Predicts DC with the left only: ( 2200 + 8 ) >> 4 = 138 (8-119). */
 	edge.available = H264SW_EDGE_LEFT;
 	status = h264sw_intra_pred16x16(H264SW_I16_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 256U, 138U));
+	matches = all_equal(pred, 256U, 138U);
+	CHECK(matches);
 
 	/* Predicts DC with the top only: ( 1960 + 8 ) >> 4 = 123 (8-120). */
 	edge.available = H264SW_EDGE_TOP;
 	status = h264sw_intra_pred16x16(H264SW_I16_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 256U, 123U));
+	matches = all_equal(pred, 256U, 123U);
+	CHECK(matches);
 
 	/* Predicts DC with neither: 128 (8-121). */
 	edge.available = H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred16x16(H264SW_I16_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 256U, 128U));
+	matches = all_equal(pred, 256U, 128U);
+	CHECK(matches);
 
 	/* Refuses a vertical mode without the top, a horizontal one without the left, and a mode above 3, with a block of 128. */
 	edge.available = H264SW_EDGE_LEFT | H264SW_EDGE_TOP_LEFT;
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred16x16(H264SW_I16_VERTICAL, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 256U, 128U));
+	matches = all_equal(pred, 256U, 128U);
+	CHECK(matches);
 	edge.available = H264SW_EDGE_TOP | H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred16x16(H264SW_I16_HORIZONTAL, &edge, pred);
 	CHECK(status == EINVAL);
@@ -1050,6 +1127,7 @@ check_pred16x16_plane(void)
 	uint8_t pred[256];
 	unsigned i;
 	int status;
+	int matches;
 
 	/* Predicts case one, whose left column starts at 50 and so differs from the top row's base. */
 	make_edge16(&edge, 100U, 3, 0, 90U);
@@ -1085,7 +1163,8 @@ check_pred16x16_plane(void)
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred16x16(H264SW_I16_PLANE, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 256U, 128U));
+	matches = all_equal(pred, 256U, 128U);
+	CHECK(matches);
 }
 
 /* Checks the four chroma modes: DC with the rules of each 4x4 block's position, horizontal, vertical and plane (8-132 to 8-149). */
@@ -1100,6 +1179,7 @@ check_pred_chroma(void)
 	int same;
 	int vertical_ok;
 	int horizontal_ok;
+	int matches;
 
 	/*
 	 * Predicts DC with both sides.  The top is 40, 45, 50, 60 | 70, 85, 90,
@@ -1141,7 +1221,8 @@ check_pred_chroma(void)
 	edge.available = H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred_chroma(H264SW_ICHROMA_DC, &edge, pred);
 	CHECK(status == 0);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 
 	/* Predicts horizontally and vertically (8-142, 8-143). */
 	make_edge_chroma(&edge);
@@ -1154,7 +1235,11 @@ check_pred_chroma(void)
 		if (same == 0)
 			horizontal_ok = 0;
 	}
+
+	/* Reports whether every row was the left sample repeated. */
 	CHECK(horizontal_ok);
+
+	/* Predicts vertically in the chroma plane. */
 	status = h264sw_intra_pred_chroma(H264SW_ICHROMA_VERTICAL, &edge, pred);
 	CHECK(status == 0);
 	vertical_ok = 1;
@@ -1163,6 +1248,8 @@ check_pred_chroma(void)
 		if (same == 0)
 			vertical_ok = 0;
 	}
+
+	/* Reports whether every row was the top row. */
 	CHECK(vertical_ok);
 
 	/*
@@ -1182,14 +1269,16 @@ check_pred_chroma(void)
 	CHECK(pred[3 * 8 + 3] == 110U);
 	CHECK(pred[7] == 107U);
 	CHECK(pred[63] == 199U);
-	CHECK(same_samples(pred, expect_chroma_plane, 64U));
+	matches = same_samples(pred, expect_chroma_plane, 64U);
+	CHECK(matches);
 
 	/* Refuses each mode whose samples are absent, with a block of 128. */
 	edge.available = H264SW_EDGE_TOP | H264SW_EDGE_LEFT;
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred_chroma(H264SW_ICHROMA_PLANE, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 	edge.available = H264SW_EDGE_TOP | H264SW_EDGE_TOP_LEFT;
 	status = h264sw_intra_pred_chroma(H264SW_ICHROMA_HORIZONTAL, &edge, pred);
 	CHECK(status == EINVAL);
@@ -1205,6 +1294,7 @@ check_pred_errors(void)
 	struct h264sw_intra_edge edge;
 	uint8_t pred[256];
 	int status;
+	int matches;
 
 	/* Refuses a missing output without touching anything. */
 	make_edge4(&edge);
@@ -1221,25 +1311,30 @@ check_pred_errors(void)
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred4x4(H264SW_I4_DC, NULL, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 16U, 128U));
+	matches = all_equal(pred, 16U, 128U);
+	CHECK(matches);
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred8x8(H264SW_I4_DC, NULL, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred16x16(H264SW_I16_DC, NULL, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 256U, 128U));
+	matches = all_equal(pred, 256U, 128U);
+	CHECK(matches);
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred_chroma(H264SW_ICHROMA_DC, NULL, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 64U, 128U));
+	matches = all_equal(pred, 64U, 128U);
+	CHECK(matches);
 
 	/* Refuses a mode beyond the last one of its table, including a huge value, with a block of 128. */
 	memset(pred, 0x55, sizeof(pred));
 	status = h264sw_intra_pred4x4(9U, &edge, pred);
 	CHECK(status == EINVAL);
-	CHECK(all_equal(pred, 16U, 128U));
+	matches = all_equal(pred, 16U, 128U);
+	CHECK(matches);
 	status = h264sw_intra_pred4x4(0xffffffffU, &edge, pred);
 	CHECK(status == EINVAL);
 	status = h264sw_intra_pred8x8(0xffffffffU, &edge, pred);
@@ -1263,6 +1358,7 @@ static void
 check_modes4x4(void)
 {
 	unsigned mode;
+	unsigned predicted_mode;
 
 	/* Uses the smaller of the two neighbours' modes: A's block 5 (left of block 0) is 5, B's block 10 (above block 0) is 3, so the predicted mode is 3. */
 	setup_picture();
@@ -1274,29 +1370,40 @@ check_modes4x4(void)
 	CHECK(mode == 3U);
 
 	/* With the flag 0, a rem below the predicted mode is the mode: rem 0, 1, 2 give 0, 1, 2 (8-41). */
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 0U) == 0U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 1U) == 1U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 2U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 0U);
+	CHECK(predicted_mode == 0U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 1U);
+	CHECK(predicted_mode == 1U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 2U);
+	CHECK(predicted_mode == 2U);
 
 	/* With the flag 0, a rem at or above the predicted mode is one more: rem 3 gives 4, rem 7 gives 8 (8-41). */
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 3U) == 4U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 7U) == 8U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 3U);
+	CHECK(predicted_mode == 4U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 7U);
+	CHECK(predicted_mode == 8U);
 
 	/* Never gives a mode above 8, even for a rem the syntax cannot carry. */
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 8U) <= 8U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 0xffffffffU) <= 8U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 8U);
+	CHECK(predicted_mode <= 8U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 0xffffffffU);
+	CHECK(predicted_mode <= 8U);
 
 	/* Predicts DC when A is not available (the macroblock at the left edge, address 3): the predicted mode is 2 whatever B holds. */
 	select_mb(3U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 1U) == 1U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 2U) == 3U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 1U);
+	CHECK(predicted_mode == 1U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 0U, 2U);
+	CHECK(predicted_mode == 3U);
 
 	/* Predicts DC when B is not available (the macroblock in the top row, address 1). */
 	test_mbs[0].kind = H264SW_MB_I_4X4;
 	test_mbs[0].intra4x4_mode[5] = 0;
 	select_mb(1U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 
 	/* Predicts DC when A is in another slice (not available, 6.4.8). */
 	setup_picture();
@@ -1306,7 +1413,8 @@ check_modes4x4(void)
 	test_mbs[1].kind = H264SW_MB_I_4X4;
 	test_mbs[1].intra4x4_mode[10] = 0;
 	select_mb(4U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 
 	/* Predicts DC for both when A is inter coded and constrained_intra_pred_flag is 1, though B is Intra_4x4 with mode 0 (8.3.1.1 step 2). */
 	setup_picture();
@@ -1314,11 +1422,13 @@ check_modes4x4(void)
 	test_mbs[1].kind = H264SW_MB_I_4X4;
 	test_mbs[1].intra4x4_mode[10] = 0;
 	test_pps.constrained_intra_pred = 1;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 
 	/* Takes B's mode 0 when the same A is inter coded but constrained_intra_pred_flag is 0: A counts as DC, so the minimum is 0 (8.3.1.1 step 3). */
 	test_pps.constrained_intra_pred = 0;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 0U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 0U);
 
 	/* Predicts DC for both when B is inter coded and constrained_intra_pred_flag is 1. */
 	setup_picture();
@@ -1326,12 +1436,14 @@ check_modes4x4(void)
 	test_mbs[3].intra4x4_mode[5] = 0;
 	test_mbs[1].kind = H264SW_MB_B_SKIP;
 	test_pps.constrained_intra_pred = 1;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 
 	/* Uses an Intra_4x4 neighbour in a P slice when constrained_intra_pred_flag is 1: Intra is not barred. */
 	test_mbs[1].kind = H264SW_MB_I_4X4;
 	test_mbs[1].intra4x4_mode[10] = 1;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 0U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 0U);
 
 	/* Reads a neighbour that is not Intra_4x4 or Intra_8x8 as DC whatever its mode entries hold: Intra_16x16 with a stale 7, and I_PCM. */
 	setup_picture();
@@ -1339,12 +1451,14 @@ check_modes4x4(void)
 	test_mbs[3].intra4x4_mode[5] = 7;
 	test_mbs[1].kind = H264SW_MB_I_4X4;
 	test_mbs[1].intra4x4_mode[10] = 6;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 	test_mbs[3].kind = H264SW_MB_I_4X4;
 	test_mbs[3].intra4x4_mode[5] = 7;
 	test_mbs[1].kind = H264SW_MB_I_PCM;
 	test_mbs[1].intra4x4_mode[10] = 7;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 
 	/* Reads an Intra_8x8 neighbour's mode from its 4x4 entries: A's four entries 4..7 hold 7 (8x8 block 1), B's 8..11 hold 4, so block 0 predicts 4 (8.3.1.1 step 3). */
 	setup_picture();
@@ -1358,25 +1472,31 @@ check_modes4x4(void)
 	test_mbs[1].intra4x4_mode[9] = 4;
 	test_mbs[1].intra4x4_mode[10] = 4;
 	test_mbs[1].intra4x4_mode[11] = 4;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U) == 4U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 4U);
 
 	/* Takes both neighbours inside the current macroblock: block 3's A is block 2 and its B is block 1. */
 	setup_picture();
 	test_mbs[4].kind = H264SW_MB_I_4X4;
 	test_mbs[4].intra4x4_mode[2] = 6;
 	test_mbs[4].intra4x4_mode[1] = 4;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 3U, 1U, 0U) == 4U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 3U, 1U, 0U);
+	CHECK(predicted_mode == 4U);
 
 	/* Takes one neighbour in the current macroblock and one outside: block 5's A is block 4 of the current macroblock, its B is block 15 of the macroblock above. */
 	test_mbs[4].intra4x4_mode[4] = 8;
 	test_mbs[1].kind = H264SW_MB_I_4X4;
 	test_mbs[1].intra4x4_mode[15] = 5;
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 5U, 1U, 0U) == 5U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 5U, 1U, 0U);
+	CHECK(predicted_mode == 5U);
 
 	/* Falls back to DC for a missing context and a block that does not exist. */
-	CHECK(h264sw_intra4x4_mode(NULL, 0U, 1U, 0U) == 2U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 16U, 1U, 0U) == 2U);
-	CHECK(h264sw_intra4x4_mode(&test_ctx, 0xffffffffU, 0U, 3U) == 2U);
+	predicted_mode = h264sw_intra4x4_mode(NULL, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 16U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
+	predicted_mode = h264sw_intra4x4_mode(&test_ctx, 0xffffffffU, 0U, 3U);
+	CHECK(predicted_mode == 2U);
 }
 
 /*
@@ -1385,6 +1505,8 @@ check_modes4x4(void)
 static void
 check_modes8x8(void)
 {
+	unsigned predicted_mode;
+
 	/* Reads an Intra_4x4 neighbour at n 1 for A and n 2 for B: A's 8x8 block 1 holds 4x4 blocks 4..7 = 0, 7, 1, 2 and B's 8x8 block 2 holds 8..11 = 1, 2, 3, 4, so block 0 takes A's entry 5 (7) and B's entry 10 (3). */
 	setup_picture();
 	test_mbs[3].kind = H264SW_MB_I_4X4;
@@ -1397,13 +1519,18 @@ check_modes8x8(void)
 	test_mbs[1].intra4x4_mode[9] = 2;
 	test_mbs[1].intra4x4_mode[10] = 3;
 	test_mbs[1].intra4x4_mode[11] = 4;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 3U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 3U);
 
 	/* Applies the flag and the rem as the 4x4 derivation does: predicted 3, rem 2 gives 2, rem 3 gives 4 (8-73). */
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 2U) == 2U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 3U) == 4U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 7U) == 8U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 0xffffffffU) <= 8U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 2U);
+	CHECK(predicted_mode == 2U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 3U);
+	CHECK(predicted_mode == 4U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 7U);
+	CHECK(predicted_mode == 8U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 0U, 0xffffffffU);
+	CHECK(predicted_mode <= 8U);
 
 	/* Reads an Intra_8x8 neighbour's 8x8 mode: A's block 1 is 5 and B's block 2 is 6, so block 0 predicts 5. */
 	setup_picture();
@@ -1417,7 +1544,8 @@ check_modes8x8(void)
 	test_mbs[1].intra4x4_mode[9] = 6;
 	test_mbs[1].intra4x4_mode[10] = 6;
 	test_mbs[1].intra4x4_mode[11] = 6;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 5U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 5U);
 
 	/* Takes both neighbours inside an Intra_8x8 current macroblock: block 3's A is block 2 (4) and its B is block 1 (1). */
 	test_mbs[4].kind = H264SW_MB_I_8X8;
@@ -1429,7 +1557,8 @@ check_modes8x8(void)
 	test_mbs[4].intra4x4_mode[5] = 1;
 	test_mbs[4].intra4x4_mode[6] = 1;
 	test_mbs[4].intra4x4_mode[7] = 1;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 3U, 1U, 0U) == 1U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 3U, 1U, 0U);
+	CHECK(predicted_mode == 1U);
 
 	/* Takes the 4x4 entries of a current macroblock coded in Intra_4x4 for blocks of its own: block 3's A is block 2, entry 9, and its B is block 1, entry 6. */
 	test_mbs[4].kind = H264SW_MB_I_4X4;
@@ -1437,7 +1566,8 @@ check_modes8x8(void)
 	test_mbs[4].intra4x4_mode[6] = 7;
 	test_mbs[4].intra4x4_mode[8] = 0;
 	test_mbs[4].intra4x4_mode[10] = 0;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 3U, 1U, 0U) == 7U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 3U, 1U, 0U);
+	CHECK(predicted_mode == 7U);
 
 	/* Takes a neighbour in the macroblock above for block 1: its B is the 8x8 block 3 of the macroblock above. */
 	setup_picture();
@@ -1451,13 +1581,16 @@ check_modes8x8(void)
 	test_mbs[4].intra4x4_mode[1] = 6;
 	test_mbs[4].intra4x4_mode[2] = 6;
 	test_mbs[4].intra4x4_mode[3] = 6;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 1U, 1U, 0U) == 3U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 1U, 1U, 0U);
+	CHECK(predicted_mode == 3U);
 
 	/* Predicts DC when a neighbour is not available, or inter coded under constrained_intra_pred_flag 1, and reads a barred-free inter neighbour as DC. */
 	select_mb(3U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 	select_mb(1U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 	setup_picture();
 	test_mbs[3].kind = H264SW_MB_P_8X8;
 	test_mbs[1].kind = H264SW_MB_I_8X8;
@@ -1466,13 +1599,17 @@ check_modes8x8(void)
 	test_mbs[1].intra4x4_mode[10] = 0;
 	test_mbs[1].intra4x4_mode[11] = 0;
 	test_pps.constrained_intra_pred = 1;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 	test_pps.constrained_intra_pred = 0;
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U) == 0U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 0U, 1U, 0U);
+	CHECK(predicted_mode == 0U);
 
 	/* Falls back to DC for a missing context and a block that does not exist. */
-	CHECK(h264sw_intra8x8_mode(NULL, 0U, 1U, 0U) == 2U);
-	CHECK(h264sw_intra8x8_mode(&test_ctx, 4U, 1U, 0U) == 2U);
+	predicted_mode = h264sw_intra8x8_mode(NULL, 0U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
+	predicted_mode = h264sw_intra8x8_mode(&test_ctx, 4U, 1U, 0U);
+	CHECK(predicted_mode == 2U);
 }
 
 /*

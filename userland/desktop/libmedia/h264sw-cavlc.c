@@ -780,9 +780,12 @@ h264sw_cavlc_residual_block(
 		if (run > zeros_left)
 			return EINVAL;
 
+		/* Keeps the run and takes it off the zeros left. */
 		run_values[index] = run;
 		zeros_left = zeros_left - run;
 	}
+
+	/* The zeros no run took precede the coefficient of the lowest frequency. */
 	run_values[total - 1U] = zeros_left;
 
 	/* Places the levels from the lowest frequency, each after its run of zeros (9.2.4). */
@@ -794,6 +797,7 @@ h264sw_cavlc_residual_block(
 		if (position > end)
 			return EINVAL;
 
+		/* Stores the level at its place in scan order and moves past it. */
 		levels[position] = level_values[index - 1U];
 		position++;
 	}
@@ -1085,6 +1089,8 @@ cavlc_levels(
 			level_values[index] = -1;
 		}
 	}
+
+	/* Refuses sign bits that ran past the end of the RBSP. */
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -1141,6 +1147,7 @@ cavlc_levels(
 		if (level > CAVLC_LEVEL_MAX || level < CAVLC_LEVEL_MIN)
 			return EINVAL;
 
+		/* Keeps the level in the order it was sent. */
 		level_values[index] = level;
 
 		/* Adapts suffixLength: it starts at 1 after the first level, and grows when a level is large. */

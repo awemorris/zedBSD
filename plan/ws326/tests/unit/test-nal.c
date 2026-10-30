@@ -20,6 +20,21 @@
 #include <errno.h>
 
 /* Checks the byte stream cases of vcodec_nal_find. */
+static void test_find(void);
+
+/* Checks the header fields and the removal of emulation prevention bytes. */
+static void test_parse(void);
+
+/* Checks the errors of h264sw_nal_parse and the types with a longer header. */
+static void test_parse_error(void);
+
+/* Checks that find and parse together recover RBSPs the bit writer escaped. */
+static void test_round_trip(void);
+
+/* Checks that arbitrary bytes never make find or parse leave their buffers. */
+static void test_garbage(void);
+
+/* Checks the byte stream cases of vcodec_nal_find. */
 static void
 test_find(
 	void)
@@ -283,6 +298,8 @@ test_round_trip(
 			rbsp[index] = (uint8_t)(index * 31U + 5U);
 		}
 	}
+
+	/* Ends the RBSP with two zero bytes, so the escaping also has to protect zeros at the end. */
 	rbsp[sizeof(rbsp) - 1U] = 0U;
 	rbsp[sizeof(rbsp) - 2U] = 0U;
 
@@ -369,6 +386,8 @@ test_garbage(
 				bad_range = 1;
 		}
 	}
+
+	/* Requires that every search advanced and every result stayed inside its buffer. */
 	CHECK(stuck == 0);
 	CHECK(bad_range == 0);
 }
@@ -378,6 +397,9 @@ int
 main(
 	void)
 {
+	int status;
+
+	/* Runs every group of checks. */
 	test_find();
 	test_parse();
 	test_parse_error();
@@ -385,5 +407,6 @@ main(
 	test_garbage();
 
 	/* Reports the result. */
-	return check_finish("nal");
+	status = check_finish("nal");
+	return status;
 }

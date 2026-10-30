@@ -25,6 +25,33 @@ static const uint32_t ue_values[] = {
 };
 
 /* Starts a reader over everything a writer holds. */
+static void reader_from_writer(struct vcodec_bitreader *bits, const struct bitwriter *writer);
+
+/* Checks u(n) at the widths 0, 1, 17 and 32 and across byte boundaries. */
+static void test_u(void);
+
+/* Checks the sticky error of a read past the end and of a width above 32. */
+static void test_u_error(void);
+
+/* Checks ue(v) and se(v) on values that cross the length classes of Table 9-1. */
+static void test_exp_golomb(void);
+
+/* Checks ue(v) and se(v) on codes that are too long or cut short. */
+static void test_exp_golomb_error(void);
+
+/* Checks te(v) for a range of 0, 1 and above 1. */
+static void test_te(void);
+
+/* Checks peek, skip, left and aligned. */
+static void test_peek_skip(void);
+
+/* Checks more_rbsp_data and the trailing bits. */
+static void test_trailing(void);
+
+/* Checks that arbitrary bytes and arbitrary read sequences never move the reader out of its data. */
+static void test_garbage(void);
+
+/* Starts a reader over everything a writer holds. */
 static void
 reader_from_writer(
 	struct vcodec_bitreader *bits,
@@ -186,6 +213,8 @@ test_exp_golomb(
 		CHECK(code == ue_values[index]);
 		CHECK(bits.error == 0);
 	}
+
+	/* Requires that the reader is exactly at the end after the last code, with the error clear. */
 	CHECK(vcodec_bitreader_more_rbsp_data(&bits) == 0);
 	CHECK(vcodec_bitreader_trailing(&bits) == 0);
 
@@ -450,6 +479,7 @@ test_garbage(
 	unsigned size;
 	unsigned index;
 	int outside;
+	unsigned mask;
 
 	/* A fixed linear congruential sequence makes the bytes and the operations repeatable. */
 	state = 12345U;
@@ -460,9 +490,17 @@ test_garbage(
 		size = (state >> 16) % 25U;
 		for (index = 0U; index < size; index++) {
 			state = state * 1664525U + 1013904223U;
-			bytes[index] = (uint8_t)((state >> 24) & ((round % 3U == 0U) ? 0x03U : 0xFFU));
+			mask = 0xFFU;
+			if (round % 3U == 0U)
+				mask = 0x03U;
+			bytes[index] = (uint8_t)((state >> 24) & mask);
 		}
-		vcodec_bitreader_init(&bits, size == 0U ? NULL : bytes, size);
+
+		/* Starts the reader on the random bytes, or on no data when the size is zero. */
+		if (size == 0U)
+			vcodec_bitreader_init(&bits, NULL, size);
+		else
+			vcodec_bitreader_init(&bits, bytes, size);
 
 		/* Runs a few operations chosen by the sequence. */
 		for (step = 0U; step < 12U; step++) {
@@ -493,10 +531,14 @@ test_garbage(
 				vcodec_bitreader_trailing(&bits);
 				break;
 			}
+
+			/* Notes any read that moved the position past the end of the data. */
 			if (bits.position > bits.size * 8U)
 				outside = 1;
 		}
 	}
+
+	/* Requires that no read ever moved the position outside the data. */
 	CHECK(outside == 0);
 }
 
@@ -505,6 +547,9 @@ int
 main(
 	void)
 {
+	int status;
+
+	/* Runs every group of checks. */
 	test_u();
 	test_u_error();
 	test_exp_golomb();
@@ -515,5 +560,6 @@ main(
 	test_garbage();
 
 	/* Reports the result. */
-	return check_finish("bitreader");
+	status = check_finish("bitreader");
+	return status;
 }

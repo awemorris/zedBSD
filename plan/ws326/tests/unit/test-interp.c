@@ -228,6 +228,7 @@ test_luma_impulse(void)
 	predict_luma(plane, 9U, 9U, 5, 4, 2U, 0U, 1U, 1U, &sample);
 	CHECK(sample == 0U);
 
+	/* The plane belongs to this test, so it is given back before the next one starts. */
 	free(plane);
 }
 
@@ -294,6 +295,7 @@ test_luma_clip(void)
 	predict_luma(plane, 9U, 9U, 4, 4, 0U, 2U, 1U, 1U, &sample);
 	CHECK(sample == 255U);
 
+	/* The plane belongs to this test, so it is given back before the next one starts. */
 	free(plane);
 }
 
@@ -337,6 +339,7 @@ test_luma_ramp(void)
 				plane[row * plane_side + col] = (uint8_t)(8U * col + 4U * row);
 		}
 
+		/* The block receives the prediction of the whole plane area under test. */
 		block = (uint8_t *)malloc((size_t)size * size);
 		CHECK(block != NULL);
 
@@ -352,10 +355,13 @@ test_luma_ramp(void)
 							wrong = 1;
 					}
 				}
+
+				/* Every sample must have matched the gradient formula, or the fractional position is wrong. */
 				CHECK(!wrong);
 			}
 		}
 
+		/* Both buffers belong to this size, so they are given back before the next size. */
 		free(block);
 		free(plane);
 	}
@@ -435,20 +441,24 @@ test_luma_far_outside(void)
 			for (i = 0U; i < 16U; i++)
 				CHECK(base[i] == plane[0]);
 
+			/* A reference far above and left of the plane clamps to its top left sample. */
 			predict_luma(plane, PW, PH, 1000, -1000, frac_x, frac_y, 4U, 4U, base);
 			for (i = 0U; i < 16U; i++)
 				CHECK(base[i] == plane[PW - 1]);
 
+			/* A reference far above and right of the plane clamps to its top right sample. */
 			predict_luma(plane, PW, PH, -1000, 1000, frac_x, frac_y, 4U, 4U, base);
 			for (i = 0U; i < 16U; i++)
 				CHECK(base[i] == plane[(PH - 1) * PW]);
 
+			/* A reference far below and left of the plane clamps to its bottom left sample. */
 			predict_luma(plane, PW, PH, 1000, 1000, frac_x, frac_y, 4U, 4U, base);
 			for (i = 0U; i < 16U; i++)
 				CHECK(base[i] == plane[PH * PW - 1]);
 		}
 	}
 
+	/* The plane belongs to this test, so it is given back before the next one starts. */
 	free(plane);
 }
 
@@ -504,6 +514,7 @@ test_luma_partial_edge(void)
 		}
 	}
 
+	/* The block sizes the padded reference is compared at: 2, 4, 8 and 16 wide and high. */
 	sizes[0] = 2U;
 	sizes[1] = 4U;
 	sizes[2] = 8U;
@@ -525,6 +536,7 @@ test_luma_partial_edge(void)
 		}
 	}
 
+	/* Both buffers belong to this test, so they are given back before it ends. */
 	free(padded);
 	free(plane);
 }
@@ -543,6 +555,7 @@ test_luma_refused(void)
 	unsigned i;
 	int same;
 
+	/* A plane whose samples all differ, so a wrong sample position shows as a wrong value. */
 	plane = plane_new(8U, 8U);
 	for (i = 0U; i < 64U; i++)
 		plane[i] = (uint8_t)(i * 3U);
@@ -575,6 +588,8 @@ test_luma_refused(void)
 		else
 			CHECK(out[i] == SENTINEL);
 	}
+
+	/* The rest of the output buffer lies outside the block and must keep the sentinel. */
 	for (i = 16U; i < 64U; i++)
 		CHECK(out[i] == SENTINEL);
 
@@ -596,6 +611,7 @@ test_luma_refused(void)
 	for (i = 0U; i < 16U; i++)
 		CHECK(direct[i] == 77U);
 
+	/* The plane belongs to this test, so it is given back before the next one starts. */
 	free(plane);
 }
 
@@ -682,6 +698,8 @@ test_chroma_ramp(void)
 						wrong = 1;
 				}
 			}
+
+			/* Every sample must have matched the interpolation of the gradient, or the fractional position is wrong. */
 			CHECK(!wrong);
 		}
 	}
@@ -706,6 +724,7 @@ test_chroma_clamp(void)
 	int far_values[4];
 	unsigned index;
 
+	/* The far positions, including the extreme integer, must clamp without overflowing the position arithmetic. */
 	far_values[0] = -1000;
 	far_values[1] = INT_MIN;
 	far_values[2] = 1000;
@@ -733,6 +752,8 @@ test_chroma_clamp(void)
 				if (block[row] != (uint8_t)expect)
 					wrong = 1;
 			}
+
+			/* Every sample must have matched the one-sided chroma filter, or the clamping at the plane edge is wrong. */
 			CHECK(!wrong);
 		}
 	}
@@ -762,6 +783,7 @@ test_chroma_refused(void)
 	unsigned i;
 	int same;
 
+	/* A plane whose samples all differ, so a wrong sample position shows as a wrong value. */
 	for (i = 0U; i < 16U; i++)
 		plane[i] = (uint8_t)(i * 11U);
 
@@ -826,6 +848,7 @@ test_fuzz(void)
 		x = (int)(rng_next() % 200U) - 100;
 		y = (int)(rng_next() % 200U) - 100;
 
+		/* A plane of random size that the random block is read from. */
 		plane = plane_new(plane_w, plane_h);
 		lowest = 255U;
 		highest = 0U;
@@ -837,6 +860,7 @@ test_fuzz(void)
 				highest = plane[i];
 		}
 
+		/* The block receives the prediction of the random position. */
 		block = (uint8_t *)malloc((size_t)block_w * block_h);
 		CHECK(block != NULL);
 
@@ -850,8 +874,11 @@ test_fuzz(void)
 			if (block[i] < lowest || block[i] > highest)
 				in_range = 0;
 		}
+
+		/* Every predicted sample must lie between the lowest and the highest sample of the plane. */
 		CHECK(in_range);
 
+		/* Both buffers belong to this round, so they are given back before the next round. */
 		free(block);
 		free(plane);
 	}
@@ -863,6 +890,9 @@ test_fuzz(void)
 int
 main(void)
 {
+	int status;
+
+	/* Each group of checks in turn. */
 	test_luma_impulse();
 	test_luma_clip();
 	test_luma_ramp();
@@ -876,5 +906,8 @@ main(void)
 	test_fuzz();
 
 	/* Reports the checks. */
-	return check_finish("interp");
+	status = check_finish("interp");
+
+	/* The exit status says whether every check held. */
+	return status;
 }

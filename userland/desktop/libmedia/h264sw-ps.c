@@ -576,6 +576,8 @@ ps_read_scaling_list(
 		} else {
 			list[index] = (uint8_t)next_scale;
 		}
+
+		/* The entry just kept is the base of the next delta. */
 		last_scale = list[index];
 	}
 
@@ -813,6 +815,8 @@ ps_read_sps_order(
 		if (value > PS_MAX_LOG2_MINUS4)
 			return EINVAL;
 		sps->log2_max_poc_lsb = value + 4U;
+
+		/* Succeeded: type 0 has no further fields. */
 		return 0;
 	}
 
@@ -839,6 +843,8 @@ ps_read_sps_order(
 		sps->offset_for_ref_frame[index] = offset;
 		sps->expected_delta_per_poc_cycle += (int64_t)offset;
 	}
+
+	/* A read that ran past the end of the RBSP is a truncated set. */
 	if (bits->error != 0)
 		return EINVAL;
 

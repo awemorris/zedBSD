@@ -171,6 +171,8 @@ media_decoder_open(
 			free(opened);
 			return ENOMEM;
 		}
+
+		/* The copy is what the next back end is opened with. */
 		memcpy(opened->private_data, track->private_data, track->private_size);
 		opened->track.private_data = opened->private_data;
 	}
@@ -221,6 +223,7 @@ media_decoder_send(
 {
 	int status;
 	int resend;
+	int refused;
 
 	/* After a switch the packets wait for a key frame. */
 	if (decoder->dropping) {
@@ -249,7 +252,10 @@ media_decoder_send(
 			break;
 		if (packet == NULL)
 			return status;
-		if (!decoder_refusal(status))
+
+		/* Only a refusal of the stream passes it to the next back end. */
+		refused = decoder_refusal(status);
+		if (!refused)
 			return status;
 
 		/* The next back end takes over, or the refusal stands. */
@@ -287,6 +293,8 @@ media_decoder_receive(
 		decoder->picked_ops->picture_free(decoder->picked);
 		decoder->picked = NULL;
 	}
+
+	/* Nothing is handed out yet. */
 	decoder->picked_last = 0;
 
 	/* The pictures drained from a replaced back end come first. */
@@ -296,6 +304,8 @@ media_decoder_receive(
 		decoder->picked_ops = held->ops;
 		*time_us = held->time_us;
 		decoder->picked_last = 1;
+
+		/* Moves the remaining held pictures up one place. */
 		for (index = 1U; index < decoder->held_count; index++)
 			decoder->held[index - 1U] = decoder->held[index];
 		decoder->held_count--;
@@ -648,7 +658,9 @@ decoder_try(
 			continue;
 
 		/* A back end that cannot open the track now: the next may. */
-		if (status == MEDIA_PROBLEM_DEVICE || status == MEDIA_PROBLEM_PROFILE || status == MEDIA_PROBLEM_BUSY) {
+		if (status == MEDIA_PROBLEM_DEVICE ||
+		    status == MEDIA_PROBLEM_PROFILE ||
+		    status == MEDIA_PROBLEM_BUSY) {
 			if (first == MEDIA_PROBLEM_FORMAT)
 				first = status;
 			continue;
@@ -827,5 +839,7 @@ decoder_release(
 		decoder->picked_ops->picture_free(decoder->picked);
 		decoder->picked = NULL;
 	}
+
+	/* Nothing is handed out any more. */
 	decoder->picked_last = 0;
 }

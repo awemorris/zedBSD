@@ -68,6 +68,69 @@ struct expect {
  */
 static uint32_t rng_state;
 
+/* Forward declarations of the static functions. */
+static uint32_t rng_next(void);
+static void env_setup(struct env *env, uint32_t max_frame_num);
+static void env_teardown(struct env *env);
+static void env_add(struct env *env, unsigned slot, unsigned marking, uint32_t frame_num, uint32_t long_idx, int32_t poc);
+static void header_set(struct env *env, unsigned slice_type, unsigned active0, unsigned active1);
+static void header_mod(struct env *env, unsigned which, unsigned idc, uint32_t value);
+static int env_build(struct env *env, uint32_t frame_num, int32_t poc);
+static void check_list(const struct env *env, const char *name, unsigned which, const struct expect *expected, unsigned count);
+static void test_p_initial(void);
+static void test_p_wrap(void);
+static void test_b_initial(void);
+static void test_b_non_existing(void);
+static void test_b_equal_poc(void);
+static void test_b_switch(void);
+static void test_modify_short(void);
+static void test_modify_wrap(void);
+static void test_modify_long(void);
+static void test_modify_b(void);
+static void test_missing(void);
+static void test_find(void);
+static void test_errors(void);
+static void check_properties(const struct env *env, uint32_t frame_num, unsigned which);
+static void test_random(void);
+
+/*
+ * Runs every check and prints the summary line.
+ */
+int
+main(
+	void)
+{
+	int status;
+
+	/* The initial lists. */
+	test_p_initial();
+	test_p_wrap();
+	test_b_initial();
+	test_b_equal_poc();
+	test_b_switch();
+	test_b_non_existing();
+
+	/* The modifications. */
+	test_modify_short();
+	test_modify_wrap();
+	test_modify_long();
+	test_modify_b();
+
+	/* The absent pictures, the search, the refusals and random input. */
+	test_missing();
+	test_find();
+	test_errors();
+	test_random();
+
+	/* Prints the summary line and takes the exit status from it. */
+	status = check_finish("reflist");
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every check passed. */
+	return 0;
+}
+
 /*
  * Gives the next pseudo-random number (a linear congruential generator).
  */
@@ -206,8 +269,17 @@ env_build(
 	uint32_t frame_num,
 	int32_t poc)
 {
-	/* The DPB, the header and the current picture's numbers. */
-	return h264sw_reflist_build(&env->dpb, &env->header, frame_num, env->max_frame_num, poc, env->poc_type, &env->lists);
+	int error;
+
+	/* Builds the lists from the DPB, the header and the current picture's numbers. */
+	error = h264sw_reflist_build(&env->dpb, &env->header, frame_num, env->max_frame_num, poc, env->poc_type, &env->lists);
+
+	/* Reports why the lists could not be built. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the lists are built. */
+	return 0;
 }
 
 /*
@@ -255,6 +327,8 @@ check_list(
 			    expected[index].slot, (int)env->lists.list[which][index].pic_num,
 			    env->lists.list[which][index].long_term, env->lists.list[which][index].missing);
 		}
+
+		/* Counts the position as one check. */
 		CHECK(good);
 	}
 }
@@ -347,6 +421,7 @@ test_p_initial(void)
 	CHECK(env.lists.count[1] == 0U);
 	CHECK(env.lists.list[0][0].frame == env.frame[1]);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -382,6 +457,7 @@ test_p_wrap(void)
 	CHECK(error == 0);
 	check_list(&env, "p wrap", 0U, wrapped, 4U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -468,6 +544,7 @@ test_b_initial(void)
 	CHECK(env.lists.count[1] == 1U);
 	CHECK(env.lists.list[1][0].frame == env.frame[4]);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -552,6 +629,7 @@ test_b_non_existing(void)
 	CHECK(error == 0);
 	check_list(&env, "p type0", 0U, p_list, 3U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -595,6 +673,7 @@ test_b_equal_poc(void)
 	check_list(&env, "b equal list0", 0U, list0, 3U);
 	check_list(&env, "b equal list1", 1U, list1, 3U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -783,6 +862,7 @@ test_modify_short(void)
 	CHECK(error == 0);
 	check_list(&env, "mod short ended", 0U, ended, 4U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -824,6 +904,7 @@ test_modify_wrap(void)
 	CHECK(error == 0);
 	check_list(&env, "mod wrap", 0U, result, 4U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -948,6 +1029,7 @@ test_modify_b(void)
 	check_list(&env, "mod b list0", 0U, list0, 3U);
 	check_list(&env, "mod b list1", 1U, list1, 3U);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -1140,6 +1222,7 @@ test_find(void)
 {
 	struct env env;
 	int error;
+	int found_index;
 
 	/* The lists of test_modify_short: 2, 3, 2, 4 (frame_num 1 to 4 in buffers 0 to 3). */
 	env_setup(&env, 16U);
@@ -1155,13 +1238,20 @@ test_find(void)
 	CHECK(error == 0);
 
 	/* Frame_num 2 is at 0 and 2, 3 at 1, 4 at 3; frame_num 1 fell off the list. */
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[1]->id) == 0);
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[2]->id) == 1);
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[3]->id) == 3);
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[0]->id) == -1);
-	CHECK(h264sw_reflist_find(&env.lists, 0U) == -1);
-	CHECK(h264sw_reflist_find(&env.lists, 0xFFFFFFFFU) == -1);
-	CHECK(h264sw_reflist_find(NULL, env.frame[1]->id) == -1);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[1]->id);
+	CHECK(found_index == 0);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[2]->id);
+	CHECK(found_index == 1);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[3]->id);
+	CHECK(found_index == 3);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[0]->id);
+	CHECK(found_index == -1);
+	found_index = h264sw_reflist_find(&env.lists, 0U);
+	CHECK(found_index == -1);
+	found_index = h264sw_reflist_find(&env.lists, 0xFFFFFFFFU);
+	CHECK(found_index == -1);
+	found_index = h264sw_reflist_find(NULL, env.frame[1]->id);
+	CHECK(found_index == -1);
 
 	/* A stand-in is not the frame the stream named: PicNum 0 names no frame, so position 0 is missing and holds the frame of position 1. */
 	header_set(&env, H264SW_SLICE_P, 3U, 0U);
@@ -1170,7 +1260,8 @@ test_find(void)
 	CHECK(error == 0);
 	CHECK(env.lists.list[0][0].missing == 1);
 	CHECK(env.lists.list[0][0].frame == env.frame[3]);
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[3]->id) == 1);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[3]->id);
+	CHECK(found_index == 1);
 
 	/* A list 0 whose every position is a stand-in finds nothing. */
 	env_teardown(&env);
@@ -1179,11 +1270,13 @@ test_find(void)
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	error = env_build(&env, 2U, 10);
 	CHECK(error == 0);
-	CHECK(h264sw_reflist_find(&env.lists, env.frame[0]->id) == -1);
+	found_index = h264sw_reflist_find(&env.lists, env.frame[0]->id);
+	CHECK(found_index == -1);
 
 	/* A count above the array is bounded, whatever the structure holds. */
 	env.lists.count[0] = 0xFFFFFFFFU;
-	CHECK(h264sw_reflist_find(&env.lists, 0xFFFFFFFFU) == -1);
+	found_index = h264sw_reflist_find(&env.lists, 0xFFFFFFFFU);
+	CHECK(found_index == -1);
 	env_teardown(&env);
 }
 
@@ -1212,82 +1305,108 @@ test_errors(void)
 
 	/* Missing arguments. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
-	CHECK(h264sw_reflist_build(NULL, &env.header, 4U, 16U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, NULL, 4U, 16U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 16U, 8, 2U, NULL) == EINVAL);
+	error = h264sw_reflist_build(NULL, &env.header, 4U, 16U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, NULL, 4U, 16U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 4U, 16U, 8, 2U, NULL);
+	CHECK(error == EINVAL);
 
 	/* Slice types: SP is like P; the types above 4 are not slice types. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
 	env.header.slice_type = 5U;
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	env.header.slice_type = 0xFFFFFFFFU;
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	CHECK(env.lists.count[0] == 0U);
 
 	/* The list lengths: 0 and above 32 are out of range, for either list of a B slice. */
 	header_set(&env, H264SW_SLICE_P, 0U, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	header_set(&env, H264SW_SLICE_P, 33U, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	header_set(&env, H264SW_SLICE_P, 0xFFFFFFFFU, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	header_set(&env, H264SW_SLICE_B, 2U, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	header_set(&env, H264SW_SLICE_B, 2U, 33U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	header_set(&env, H264SW_SLICE_B, 32U, 32U);
-	CHECK(env_build(&env, 4U, 8) == 0);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
 	CHECK(env.lists.count[0] == 32U);
 	CHECK(env.lists.count[1] == 32U);
 
 	/* MaxFrameNum and frame_num out of range. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0U, 0U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 65537U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 0xFFFFFFFFU, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 16U, 16U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0xFFFFFFFFU, 16U, 8, 2U, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 65535U, 65536U, 8, 2U, &env.lists) == 0);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 15U, 16U, 8, 2U, &env.lists) == 0);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 0U, 0U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 4U, 65537U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 4U, 0xFFFFFFFFU, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 16U, 16U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 0xFFFFFFFFU, 16U, 8, 2U, &env.lists);
+	CHECK(error == EINVAL);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 65535U, 65536U, 8, 2U, &env.lists);
+	CHECK(error == 0);
+	error = h264sw_reflist_build(&env.dpb, &env.header, 15U, 16U, 8, 2U, &env.lists);
+	CHECK(error == 0);
 
 	/* More operations than the header keeps. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
 	env.header.modification_count[0] = H264SW_MAX_MODIFICATIONS + 1U;
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	CHECK(env.lists.count[0] == 0U);
 	env.header.modification_count[0] = 0xFFFFFFFFU;
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 
 	/* An idc above 3, in the first or a later position. */
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, 4U, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	CHECK(env.lists.count[0] == 0U);
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, H264SW_MOD_SUBTRACT, 0U);
 	header_mod(&env, 0U, 0xFFFFFFFFU, 0U);
-	CHECK(env_build(&env, 4U, 8) == EINVAL);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == EINVAL);
 	CHECK(env.lists.count[0] == 0U);
 
 	/* A difference of MaxFrameNum or more, and the largest value, name no picture. */
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, H264SW_MOD_SUBTRACT, 16U);
-	CHECK(env_build(&env, 4U, 8) == 0);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
 	CHECK(env.lists.list[0][0].missing == 1);
 	CHECK(env.lists.list[0][1].missing == 0);
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, H264SW_MOD_ADD, 0xFFFFFFFFU);
-	CHECK(env_build(&env, 4U, 8) == 0);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
 	CHECK(env.lists.list[0][0].missing == 1);
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, H264SW_MOD_LONG_TERM, 0xFFFFFFFFU);
-	CHECK(env_build(&env, 4U, 8) == 0);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
 	CHECK(env.lists.list[0][0].missing == 1);
 
 	/* The largest difference that is allowed (MaxFrameNum - 1) goes round to the same number: picNum 3 - 16 + 16. */
 	header_set(&env, H264SW_SLICE_P, 2U, 0U);
 	header_mod(&env, 0U, H264SW_MOD_SUBTRACT, 15U);
-	CHECK(env_build(&env, 3U, 8) == 0);
+	error = env_build(&env, 3U, 8);
+	CHECK(error == 0);
 	CHECK(env.lists.list[0][0].missing == 0);
 	CHECK(env.lists.list[0][0].frame == env.frame[0]);
 
@@ -1301,6 +1420,8 @@ test_errors(void)
 			idc = H264SW_MOD_LONG_TERM;
 		header_mod(&env, 0U, idc, 0U);
 	}
+
+	/* Builds the lists with more operations than positions. */
 	error = env_build(&env, 4U, 8);
 	CHECK(error == 0);
 	CHECK(env.lists.count[0] == 1U);
@@ -1318,6 +1439,8 @@ test_errors(void)
 			idc = H264SW_MOD_ADD;
 		header_mod(&env, 0U, idc, index);
 	}
+
+	/* Builds the lists with the full number of operations. */
 	error = env_build(&env, 4U, 8);
 	CHECK(error == 0);
 	CHECK(env.lists.count[0] == H264SW_MAX_LIST);
@@ -1326,6 +1449,7 @@ test_errors(void)
 	     index++)
 		CHECK(env.lists.list[0][index].frame != NULL);
 
+	/* Releases the frames and the pool of the environment. */
 	env_teardown(&env);
 }
 
@@ -1369,6 +1493,8 @@ check_properties(
 				entry = &env->dpb.entry[slot];
 			}
 		}
+
+		/* Checks that the frame of this position is held by a buffer of the DPB. */
 		CHECK(found);
 		if (!found)
 			continue;
@@ -1420,6 +1546,7 @@ test_random(void)
 	uint32_t max_frame_num;
 	uint32_t frame_num;
 	uint32_t value;
+	uint32_t draw;
 	int32_t poc;
 	int32_t previous;
 	int error;
@@ -1436,8 +1563,10 @@ test_random(void)
 	for (iteration = 0U;
 	     iteration < 4000U;
 	     iteration++) {
+		/* One round in four uses a MaxFrameNum other than the usual 16. */
+		draw = rng_next();
 		max_frame_num = 16U;
-		if (rng_next() % 4U == 0U)
+		if (draw % 4U == 0U)
 			max_frame_num = 1U + rng_next() % 65536U;
 		env_setup(&env, max_frame_num);
 
@@ -1454,7 +1583,8 @@ test_random(void)
 			else
 				poc = (int32_t)(rng_next() % 41U) - 20;
 			env_add(&env, slot, marking, rng_next() % max_frame_num, rng_next() % 18U, poc);
-			if (rng_next() % 8U == 0U)
+			draw = rng_next();
+			if (draw % 8U == 0U)
 				env.frame[slot]->non_existing = 1;
 			any_frame = 1;
 		}
@@ -1463,7 +1593,8 @@ test_random(void)
 		env.poc_type = rng_next() % 3U;
 		slice_type = rng_next() % 3U;
 		header_set(&env, slice_type, 1U + rng_next() % H264SW_MAX_LIST, 1U + rng_next() % H264SW_MAX_LIST);
-		if (rng_next() % 3U != 0U) {
+		draw = rng_next();
+		if (draw % 3U != 0U) {
 			for (which = 0U;
 			     which < 2U;
 			     which++) {
@@ -1480,9 +1611,12 @@ test_random(void)
 				}
 			}
 		}
+
+		/* Draws the picture the lists are built for. */
 		frame_num = rng_next() % max_frame_num;
 		poc = (int32_t)(rng_next() % 41U) - 20;
-		if (rng_next() % 16U == 0U)
+		draw = rng_next();
+		if (draw % 16U == 0U)
 			poc = extreme[rng_next() % 7U];
 
 		/* Builds; only an intra slice or an empty DPB may refuse. */
@@ -1523,6 +1657,8 @@ test_random(void)
 							twice = 1;
 					}
 				}
+
+				/* Checks that no frame is in list 0 twice. */
 				CHECK(!twice);
 				for (index = 1U;
 				     index < env.lists.count[0];
@@ -1539,43 +1675,18 @@ test_random(void)
 								good = 0;
 						}
 					}
+
+					/* A long-term picture must not come before a short-term one. */
 					if (env.lists.list[0][index - 1U].long_term && !env.lists.list[0][index].long_term)
 						good = 0;
 				}
+
+				/* Counts the order of list 0 as one check. */
 				CHECK(good);
 			}
 		}
 
+		/* Releases the frames and the pool of the environment. */
 		env_teardown(&env);
 	}
-}
-
-/*
- * Runs every check and prints the summary line.
- */
-int
-main(void)
-{
-	/* The initial lists. */
-	test_p_initial();
-	test_p_wrap();
-	test_b_initial();
-	test_b_equal_poc();
-	test_b_switch();
-	test_b_non_existing();
-
-	/* The modifications. */
-	test_modify_short();
-	test_modify_wrap();
-	test_modify_long();
-	test_modify_b();
-
-	/* The absent pictures, the search, the refusals and random input. */
-	test_missing();
-	test_find();
-	test_errors();
-	test_random();
-
-	/* The summary. */
-	return check_finish("reflist");
 }

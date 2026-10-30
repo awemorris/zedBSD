@@ -467,6 +467,8 @@ decoder_slice(
 		decoder->stats.unsupported++;
 		return ENOTSUP;
 	}
+
+	/* A header that cannot be read is a damaged slice. */
 	if (error != 0) {
 		decoder->stats.slice_errors++;
 		return EINVAL;
@@ -701,12 +703,20 @@ decoder_start_picture(
 				if (!new_picture)
 					same_picture = 1;
 			}
+
+			/* A picture not yet counted adds to the dropped count. */
 			if (!same_picture)
 				decoder->stats.dropped++;
+
+			/* Remembers this slice so that the next slice of the picture is not counted again. */
 			decoder->previous = *header;
 			decoder->waiting = DECODER_WAITING_DROPPED;
+
+			/* The picture is dropped without error. */
 			return 0;
 		}
+
+		/* The picture can start decoding. */
 		starting = 1;
 	}
 

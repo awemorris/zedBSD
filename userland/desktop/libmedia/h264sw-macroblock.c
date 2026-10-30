@@ -264,12 +264,16 @@ h264sw_macroblock_parse(
 				mb->transform_8x8 = 1;
 			}
 		}
+
+		/* Records the resolved kind in the entry, where the contexts of the neighbours read it. */
 		mb->kind = (uint8_t)syntax->type.kind;
 
+		/* Reads the intra prediction modes of the macroblock. */
 		error = mb_pred_intra(ctx);
 		if (error != 0)
 			return error;
 	} else if (syntax->type.kind == H264SW_MB_I_16X16) {
+		/* Reads the chroma prediction mode; the luma mode is in mb_type. */
 		error = mb_pred_intra(ctx);
 		if (error != 0)
 			return error;
@@ -785,6 +789,7 @@ mb_parse_pcm(
 	unsigned index;
 	int error;
 
+	/* Takes the entry being written. */
 	mb = ctx->n.current;
 
 	/* Reads the samples with the CABAC engine, which finds the byte position itself and restarts afterwards. */
@@ -839,6 +844,7 @@ mb_pred_intra(
 	uint32_t code;
 	int error;
 
+	/* Takes the entry being written and the syntax being filled. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 
@@ -859,6 +865,8 @@ mb_pred_intra(
 			if (flag == 0U)
 				rem = vcodec_bitreader_u(&ctx->bits, 3U);
 		}
+
+		/* Records the flag and the remainder of the block's mode. */
 		syntax->prev_intra_flag[index] = (uint8_t)flag;
 		syntax->rem_intra_mode[index] = (uint8_t)rem;
 	}
@@ -874,6 +882,8 @@ mb_pred_intra(
 			return EINVAL;
 		chroma_mode = code;
 	}
+
+	/* Records the chroma mode in the entry, where the contexts of the neighbours read it. */
 	mb->chroma_pred_mode = (uint8_t)chroma_mode;
 
 	/* Reports a read past the end of the data as an error. */
@@ -905,6 +915,7 @@ mb_pred_inter(
 	int mvd;
 	int error;
 
+	/* Takes the entry being written and the syntax being filled. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 
@@ -929,6 +940,7 @@ mb_pred_inter(
 			if (uses == 0)
 				continue;
 
+			/* Reads the index and records it where the next partition's context reads it. */
 			error = mb_read_ref_idx(ctx, list, x[part], y[part], &ref_idx);
 			if (error != 0)
 				return error;
@@ -945,6 +957,7 @@ mb_pred_inter(
 			if (uses == 0)
 				continue;
 
+			/* Reads both components of the difference and records their magnitudes for the contexts. */
 			for (component = 0; component < 2U; component++) {
 				error = mb_read_mvd(ctx, list, x[part], y[part], component, &mvd);
 				if (error != 0)
@@ -990,6 +1003,7 @@ mb_sub_pred(
 	int mvd;
 	int error;
 
+	/* Takes the entry being written, the syntax being filled and the slice type. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	slice_type = ctx->header->slice_type;
@@ -1023,6 +1037,7 @@ mb_sub_pred(
 			if (uses == 0)
 				continue;
 
+			/* Finds the origin of the quadrant, which is also the origin of its reference index. */
 			base_x = 8U * (quadrant & 1U);
 			base_y = 8U * (quadrant >> 1);
 			ref_idx = 0;
@@ -1031,6 +1046,8 @@ mb_sub_pred(
 				if (error != 0)
 					return error;
 			}
+
+			/* Records the index where the next quadrant's context reads it. */
 			syntax->ref_idx[list][quadrant] = (int8_t)ref_idx;
 			mb_store_ref_idx(mb, list, base_x, base_y, 8U, 8U, ref_idx);
 		}
@@ -1044,6 +1061,7 @@ mb_sub_pred(
 			if (uses == 0)
 				continue;
 
+			/* Reads the differences of each partition of the sub-macroblock, found from the quadrant's origin. */
 			base_x = 8U * (quadrant & 1U);
 			base_y = 8U * (quadrant >> 1);
 			for (sub = 0; sub < syntax->sub[quadrant].parts; sub++) {
@@ -1110,6 +1128,7 @@ mb_residual_luma(
 	int intra16x16;
 	int error;
 
+	/* Takes the entry being written, the syntax being filled and the kind of the luma prediction. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	intra16x16 = 0;
@@ -1180,6 +1199,7 @@ mb_residual_chroma(
 	unsigned blk;
 	int error;
 
+	/* Takes the syntax being filled. */
 	syntax = &ctx->syntax;
 
 	/* Reads the chroma DC block of Cb then Cr when any chroma is coded. */
@@ -1229,6 +1249,7 @@ mb_residual_block(
 	int nc;
 	int error;
 
+	/* Takes the entry being written. */
 	mb = ctx->n.current;
 
 	/* Reads the block with CABAC, then records its coded_block_flag in the bit of its category. */
@@ -1261,16 +1282,22 @@ mb_residual_block(
 		return 0;
 	}
 
-	/* Finds nC from the counts of the neighbouring blocks (9.2.1); the chroma DC has its own column, the Intra_16x16 DC block uses block 0's neighbours. */
+	/* Finds nC from the counts of the neighbouring blocks (9.2.1); the chroma DC has its own column. */
 	nc = H264SW_NC_CHROMA_DC;
+
+	/* The Intra_16x16 DC block uses block 0's neighbours. */
 	if (cat == H264SW_CAT_LUMA_DC) {
 		nc_block = 0;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
 	}
+
+	/* A luma block of 4x4 levels uses the neighbours of its own block. */
 	if (cat == H264SW_CAT_LUMA_AC || cat == H264SW_CAT_LUMA_4X4) {
 		nc_block = blk;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
 	}
+
+	/* A chroma AC block uses the neighbours of its own block in the chroma part of the count table. */
 	if (cat == H264SW_CAT_CHROMA_AC) {
 		nc_block = MB_TOTAL_CHROMA_AC + 4U * (component - 1U) + blk;
 		nc = h264sw_cavlc_nc(ctx, nc_block);
@@ -1306,6 +1333,7 @@ mb_slice_skip(
 	uint32_t run;
 	unsigned flag;
 
+	/* Takes the picture, and starts from a macroblock that is coded. */
 	picture = ctx->picture;
 	*skipped = 0;
 

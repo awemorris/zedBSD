@@ -137,6 +137,8 @@ static void check_picture_errors(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs every group of checks. */
 	check_tables();
 	check_luma_weak();
@@ -156,7 +158,10 @@ main(void)
 	check_picture_errors();
 
 	/* Succeeded: reports the summary line. */
-	return check_finish("deblock");
+	status = check_finish("deblock");
+
+	/* The exit status says whether every check held. */
+	return status;
 }
 
 /*
@@ -295,13 +300,24 @@ snapshot(void)
 static int
 planes_unchanged(void)
 {
-	if (memcmp(luma, luma_before, sizeof(luma)) != 0)
-		return 0;
-	if (memcmp(cb, cb_before, sizeof(cb)) != 0)
-		return 0;
-	if (memcmp(cr, cr_before, sizeof(cr)) != 0)
+	int different;
+
+	/* Compares the luma plane with the snapshot. */
+	different = memcmp(luma, luma_before, sizeof(luma));
+	if (different != 0)
 		return 0;
 
+	/* Compares the Cb plane with the snapshot. */
+	different = memcmp(cb, cb_before, sizeof(cb));
+	if (different != 0)
+		return 0;
+
+	/* Compares the Cr plane with the snapshot. */
+	different = memcmp(cr, cr_before, sizeof(cr));
+	if (different != 0)
+		return 0;
+
+	/* All three planes equal the snapshot. */
 	return 1;
 }
 
@@ -326,6 +342,7 @@ make_inter(
 {
 	unsigned quadrant;
 
+	/* Starts from a reset macroblock, then marks it as a P macroblock that predicts from the given frame. */
 	h264sw_mb_reset(&mbs[addr], 0);
 	mbs[addr].kind = H264SW_MB_P;
 	mbs[addr].qp = (uint8_t)qp;
@@ -354,9 +371,14 @@ same8(
 	const uint8_t *first,
 	const uint8_t *second)
 {
-	if (memcmp(first, second, 8) != 0)
+	int different;
+
+	/* Compares the eight samples of the two rows. */
+	different = memcmp(first, second, 8);
+	if (different != 0)
 		return 0;
 
+	/* The two rows are the same. */
 	return 1;
 }
 
@@ -377,9 +399,11 @@ run_luma(
 {
 	unsigned line;
 
+	/* Every line of the edge starts as a copy of the same eight samples. */
 	for (line = 0; line < 16U; line++)
 		memcpy(out[line], samples, 8);
 
+	/* Filters the vertical edge between the fourth and fifth sample of each line. */
 	h264sw_deblock_luma_edge(&out[0][4], 1, 8, bs, qp_av, offset_a, offset_b);
 }
 
@@ -402,13 +426,16 @@ run_luma_rows(
 	unsigned row;
 	unsigned column;
 
+	/* The same eight samples go down every column, so the rows of the block are the samples of one line turned a quarter. */
 	for (row = 0; row < 8U; row++) {
 		for (column = 0; column < 16U; column++)
 			block[row][column] = samples[row];
 	}
 
+	/* Filters the horizontal edge between the fourth and fifth row. */
 	h264sw_deblock_luma_edge(&block[4][0], 16, 1, bs, qp_av, offset_a, offset_b);
 
+	/* Turns the filtered rows back into lines, so the caller reads them as it reads a vertical edge. */
 	for (column = 0; column < 16U; column++) {
 		for (row = 0; row < 8U; row++)
 			out[column][row] = block[row][column];
@@ -427,9 +454,11 @@ run_chroma(
 {
 	unsigned line;
 
+	/* Every line of the edge starts as a copy of the same eight samples. */
 	for (line = 0; line < 8U; line++)
 		memcpy(out[line], samples, 8);
 
+	/* Filters the vertical chroma edge between the fourth and fifth sample of each line. */
 	h264sw_deblock_chroma_edge(&out[0][4], 1, 8, bs, qp_av, offset_a, offset_b);
 }
 
@@ -447,13 +476,16 @@ run_chroma_rows(
 	unsigned row;
 	unsigned column;
 
+	/* The same eight samples go down every column, so the rows of the block are the samples of one line turned a quarter. */
 	for (row = 0; row < 8U; row++) {
 		for (column = 0; column < 8U; column++)
 			block[row][column] = samples[row];
 	}
 
+	/* Filters the horizontal chroma edge between the fourth and fifth row. */
 	h264sw_deblock_chroma_edge(&block[4][0], 8, 1, bs, qp_av, offset_a, offset_b);
 
+	/* Turns the filtered rows back into lines, so the caller reads them as it reads a vertical edge. */
 	for (column = 0; column < 8U; column++) {
 		for (row = 0; row < 8U; row++)
 			out[column][row] = block[row][column];
@@ -473,6 +505,7 @@ luma_uniform(
 	uint8_t bs[4];
 	uint8_t lines[16][8];
 
+	/* All four segments of the edge carry the same strength. */
 	bs[0] = (uint8_t)strength;
 	bs[1] = (uint8_t)strength;
 	bs[2] = (uint8_t)strength;
@@ -488,12 +521,16 @@ all_lines_equal(
 	uint8_t lines[16][8])
 {
 	unsigned line;
+	int different;
 
+	/* The lines are expected to be equal, so the first line is compared with the rest. */
 	for (line = 1; line < 16U; line++) {
-		if (memcmp(lines[0], lines[line], 8) != 0)
+		different = memcmp(lines[0], lines[line], 8);
+		if (different != 0)
 			return 0;
 	}
 
+	/* Every line equals the first. */
 	return 1;
 }
 
@@ -505,6 +542,7 @@ near_value(
 	if (value == 0U)
 		return 1U;
 
+	/* A value of 0 has no value below it, so 1 is the neighbour. */
 	return value - 1U;
 }
 
@@ -523,6 +561,7 @@ alpha_filters(
 	uint8_t samples[8];
 	uint8_t out[8];
 
+	/* A row whose step between p0 and q0 is the given step, flat on both sides. */
 	samples[0] = 50;
 	samples[1] = 50;
 	samples[2] = 1;
@@ -536,11 +575,15 @@ alpha_filters(
 		samples[6] = (uint8_t)(step + 50U);
 		samples[7] = (uint8_t)(step + 50U);
 	}
+
+	/* Filters at the given index with a bS 4 edge. */
 	luma_uniform(samples, 4, qp_av, offset_a, 51, out);
 
+	/* Reports whether p0 was left unchanged, which means the step was not filtered. */
 	if (out[3] != samples[3])
 		return 1;
 
+	/* p0 changed, so the step was filtered. */
 	return 0;
 }
 
@@ -565,6 +608,7 @@ check_tables(void)
 	unsigned step;
 	unsigned alpha;
 	unsigned beta;
+	unsigned first_step;
 	unsigned q1;
 	int delta;
 	int unclipped;
@@ -578,6 +622,7 @@ check_tables(void)
 		if (alpha != 0U)
 			step = alpha - 1U;
 
+		/* A row with p0 = 0 and q0 = step; p1 and q1 are near their p0 and q0 so that only the alpha test decides. */
 		samples[0] = 50;
 		samples[1] = 50;
 		samples[2] = 1;
@@ -588,6 +633,7 @@ check_tables(void)
 		samples[7] = samples[6];
 		luma_uniform(samples, 4, (int)index, 0, 51, out);
 
+		/* Below alpha' the bS 4 filter changes p0 as 8-480 says; alpha' 0 can filter nothing. */
 		if (alpha != 0U) {
 			q1 = near_value(step);
 			CHECK(out[3] == ((2U * 1U + 0U + q1 + 2U) >> 2));
@@ -609,9 +655,12 @@ check_tables(void)
 	/* Sweeps beta: a difference of beta' - 1 on either side is filtered and one of beta' is not. */
 	for (index = 0; index < 52U; index++) {
 		beta = spec_beta[index];
+		first_step = beta;
+		if (beta != 0U)
+			first_step = beta - 1U;
 
 		/* The p side: p1 is p0 + t, q1 is q0, with p2, q2 far from p0, q0. */
-		for (step = (beta == 0U ? 0U : beta - 1U); step <= beta; step++) {
+		for (step = first_step; step <= beta; step++) {
 			samples[0] = 150;
 			samples[1] = 150;
 			samples[2] = (uint8_t)(100U + step);
@@ -622,6 +671,7 @@ check_tables(void)
 			samples[7] = 150;
 			luma_uniform(samples, 4, (int)index, 51, 0, out);
 
+			/* A difference below beta' on the p side is filtered by the bS 4 equations; one of beta' leaves the row alone. */
 			if (step < beta) {
 				CHECK(out[3] == ((2U * (100U + step) + 100U + 100U + 2U) >> 2));
 				CHECK(out[4] == ((2U * 100U + 100U + (100U + step) + 2U) >> 2));
@@ -631,7 +681,7 @@ check_tables(void)
 		}
 
 		/* The q side: q1 is q0 + t, p1 is p0. */
-		for (step = (beta == 0U ? 0U : beta - 1U); step <= beta; step++) {
+		for (step = first_step; step <= beta; step++) {
 			samples[0] = 150;
 			samples[1] = 150;
 			samples[2] = 100;
@@ -642,6 +692,7 @@ check_tables(void)
 			samples[7] = 150;
 			luma_uniform(samples, 4, (int)index, 51, 0, out);
 
+			/* A difference below beta' on the q side is filtered by the bS 4 equations; one of beta' leaves the row alone. */
 			if (step < beta) {
 				CHECK(out[3] == ((2U * 100U + 100U + (100U + step) + 2U) >> 2));
 				CHECK(out[4] == ((2U * (100U + step) + 100U + 100U + 2U) >> 2));
@@ -680,6 +731,7 @@ check_tables(void)
 			if (alpha == 0U)
 				delta = 0;
 
+			/* p0 moves up by delta and q0 moves down by the same amount. */
 			CHECK((int)out[3] == delta);
 			CHECK((int)out[4] == (int)step - delta);
 
@@ -1003,14 +1055,17 @@ check_index_clip(void)
 	luma_uniform(samples, 4, 40, 51, -12, out);
 	CHECK(out[3] != 100U);
 
+	/* A difference of 7 reaches beta' 7 of the negative offset, so nothing is filtered. */
 	samples[2] = 107;
 	luma_uniform(samples, 4, 40, 51, -12, out);
 	CHECK(same8(out, samples));
 
+	/* With the positive offset the difference of 117 is one below beta' 18 and is filtered. */
 	samples[2] = 117;
 	luma_uniform(samples, 4, 40, 51, 12, out);
 	CHECK(out[3] != 100U);
 
+	/* The difference of 118 reaches beta' 18 of the positive offset, so nothing is filtered. */
 	samples[2] = 118;
 	luma_uniform(samples, 4, 40, 51, 12, out);
 	CHECK(same8(out, samples));
@@ -1082,6 +1137,7 @@ begin_inter_picture(void)
 {
 	unsigned addr;
 
+	/* Starts from a 2 by 2 picture whose macroblocks are all inter macroblocks. */
 	begin_picture(2, 2);
 	for (addr = 0; addr < 4U; addr++)
 		make_inter(addr, 36U, 10U);
@@ -1105,6 +1161,7 @@ bs_is(
 	if (bs[3] != fourth)
 		return 0;
 
+	/* Every segment has the strength that was asked for. */
 	return 1;
 }
 
@@ -1457,6 +1514,7 @@ check_bs_errors(void)
 {
 	uint8_t bs[4];
 
+	/* An inter picture whose macroblock 3 is intra, so edges against it are strong. */
 	begin_inter_picture();
 	make_intra(3, 36U);
 
@@ -1539,12 +1597,16 @@ check_picture_idc(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The chroma planes get the same step at the macroblock edge. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 8; x < 16U; x++) {
 			set_cb(x, y, 106);
 			set_cr(x, y, 106);
 		}
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	h264sw_deblock_picture(&picture);
 	CHECK(planes_unchanged() != 0);
@@ -1589,6 +1651,8 @@ check_picture_idc(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The picture is filtered, then the samples next to the edge are read. */
 	h264sw_deblock_picture(&picture);
 	CHECK(get_luma(15, 3) == 102U);
 	CHECK(get_luma(16, 3) == 104U);
@@ -1605,10 +1669,14 @@ check_picture_idc(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The Cb plane gets the same step at the macroblock edge. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 8; x < 16U; x++)
 			set_cb(x, y, 106);
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	h264sw_deblock_picture(&picture);
 	CHECK(planes_unchanged() != 0);
@@ -1641,6 +1709,8 @@ check_picture_idc(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The picture is filtered, then the samples next to the edge are read. */
 	h264sw_deblock_picture(&picture);
 	CHECK(get_luma(13, 5) == 100U);
 	CHECK(get_luma(14, 5) == 100U);
@@ -1663,6 +1733,8 @@ check_picture_idc(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	h264sw_deblock_picture(&picture);
 	CHECK(planes_unchanged() != 0);
@@ -1710,6 +1782,8 @@ check_picture_order(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, 100U + 4U * (x / 4U));
 	}
+
+	/* The picture is filtered, then every row is compared with the expected smoothing of the vertical edges. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++)
@@ -1722,6 +1796,8 @@ check_picture_order(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, 100U + 4U * (y / 4U));
 	}
+
+	/* The picture is filtered, then every row is compared with the expected smoothing of the horizontal edges. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++)
@@ -1753,6 +1829,8 @@ check_picture_order(void)
 				set_luma(x, y, 100);
 		}
 	}
+
+	/* The picture is filtered, then every row is compared with the expected result. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 16U; y++)
 		CHECK(get_luma(3, y) == column3[y]);
@@ -1801,12 +1879,16 @@ check_picture_transform(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, 100U + 4U * (x / 4U));
 	}
+
+	/* The chroma planes get the same step as the luma plane, one sample per two. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			set_cb(x, y, (x < 4U) ? 100U : 108U);
 			set_cr(x, y, (x < 4U) ? 100U : 108U);
 		}
 	}
+
+	/* The picture is filtered; the luma edge at 4 is not an edge of the 8x8 transform, so luma is unchanged. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++)
@@ -1822,10 +1904,14 @@ check_picture_transform(void)
 				expected_cb = 103U;
 				expected_cr = 102U;
 			}
+
+			/* The first sample on the right of the edge moves up by the other amount. */
 			if (x == 4U) {
 				expected_cb = 105U;
 				expected_cr = 106U;
 			}
+
+			/* Both chroma samples must match what the edge gave them. */
 			CHECK(get_cb(x, y) == expected_cb);
 			CHECK(get_cr(x, y) == expected_cr);
 		}
@@ -1838,12 +1924,16 @@ check_picture_transform(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, 100U + 4U * (y / 4U));
 	}
+
+	/* The chroma planes get the same step as the luma plane, one sample per two. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			set_cb(x, y, (y < 4U) ? 100U : 108U);
 			set_cr(x, y, (y < 4U) ? 100U : 108U);
 		}
 	}
+
+	/* The picture is filtered; the luma edge at row 4 is not an edge of the 8x8 transform, so luma is unchanged. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++)
@@ -1897,6 +1987,8 @@ check_picture_qp(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 116);
 	}
+
+	/* The picture is filtered, then the samples next to the edge are read. */
 	h264sw_deblock_picture(&picture);
 	CHECK(get_luma(14, 2) == 100U);
 	CHECK(get_luma(15, 2) == 104U);
@@ -1924,12 +2016,16 @@ check_picture_qp(void)
 		for (x = 0; x < 32U; x++)
 			set_luma(x, y, 116);
 	}
+
+	/* The chroma planes get the same step in the lower macroblocks. */
 	for (y = 8; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
 			set_cb(x, y, 116);
 			set_cr(x, y, 116);
 		}
 	}
+
+	/* The picture is filtered, then the samples next to the edge are read. */
 	h264sw_deblock_picture(&picture);
 	CHECK(get_luma(20, 14) == 100U);
 	CHECK(get_luma(20, 15) == 104U);
@@ -1951,12 +2047,16 @@ check_picture_qp(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 130);
 	}
+
+	/* The chroma planes get the same step at the macroblock edge. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 8; x < 16U; x++) {
 			set_cb(x, y, 130);
 			set_cr(x, y, 130);
 		}
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	h264sw_deblock_picture(&picture);
 	CHECK(planes_unchanged() != 0);
@@ -1989,6 +2089,7 @@ check_picture_inter(void)
 	unsigned x;
 	unsigned y;
 
+	/* One inter macroblock of QP 36 whose second 4x4 block has coefficients. */
 	begin_picture(1, 1);
 	make_inter(0, 36U, 10U);
 	mbs[0].nonzero = 1U << 1;
@@ -1996,6 +2097,8 @@ check_picture_inter(void)
 		for (x = 0; x < 16U; x++)
 			set_luma(x, y, (x < 4U) ? 100U : 108U);
 	}
+
+	/* The picture is filtered, then the samples next to the edge are read. */
 	h264sw_deblock_picture(&picture);
 	/* Rows 0..3 on the left of the edge at x = 4 are smoothed; the other rows are not. */
 	for (y = 0; y < 4U; y++) {
@@ -2003,6 +2106,8 @@ check_picture_inter(void)
 		CHECK(get_luma(2, y) == 102U);
 		CHECK(get_luma(3, y) == 103U);
 	}
+
+	/* The rows below the first four keep the left side of the edge as it was. */
 	for (y = 4; y < 16U; y++) {
 		CHECK(get_luma(1, y) == 100U);
 		CHECK(get_luma(2, y) == 100U);
@@ -2014,6 +2119,8 @@ check_picture_inter(void)
 		CHECK(get_luma(4, y) == 105U);
 		CHECK(get_luma(5, y) == 106U);
 	}
+
+	/* The rows from 8 down show only the vertical edge at x = 4. */
 	for (y = 8; y < 16U; y++) {
 		CHECK(get_luma(4, y) == 108U);
 		CHECK(get_luma(5, y) == 108U);
@@ -2038,6 +2145,8 @@ check_picture_inter(void)
 			set_cr(x, y, (x < 4U) ? 100U : 108U);
 		}
 	}
+
+	/* The picture is filtered, then every chroma sample is compared with the expected one. */
 	h264sw_deblock_picture(&picture);
 	for (y = 0; y < 8U; y++) {
 		CHECK(get_cb(2, y) == 100U);
@@ -2081,6 +2190,8 @@ check_picture_errors(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	picture.frame = NULL;
 	h264sw_deblock_picture(&picture);
@@ -2132,6 +2243,8 @@ check_picture_errors(void)
 		for (x = 16; x < 32U; x++)
 			set_luma(x, y, 106);
 	}
+
+	/* The planes are copied before the filter runs, so a later check can tell what did not change. */
 	snapshot();
 	h264sw_deblock_picture(&picture);
 	CHECK(planes_unchanged() != 0);

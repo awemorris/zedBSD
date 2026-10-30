@@ -171,6 +171,8 @@ h264sw_cabac_mb_skip(
 		if (ctx->n.a->kind != H264SW_MB_P_SKIP && ctx->n.a->kind != H264SW_MB_B_SKIP)
 			inc++;
 	}
+
+	/* The upper neighbour counts the same way. */
 	if (ctx->n.b != NULL) {
 		if (ctx->n.b->kind != H264SW_MB_P_SKIP && ctx->n.b->kind != H264SW_MB_B_SKIP)
 			inc++;
@@ -281,6 +283,7 @@ h264sw_cabac_sub_mb_type(
 			return 0;
 		}
 
+		/* Bin 1 with ctxIdx 22: 0 ends the strings 1 and 00. */
 		bin_1 = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_SUB_MB_TYPE_P + 1U);
 		if (bin_1 == 0U) {
 			/* The string 00 is P_L0_8x4. */
@@ -288,6 +291,7 @@ h264sw_cabac_sub_mb_type(
 			return 0;
 		}
 
+		/* Bin 2 with ctxIdx 23 tells the string 011 from 010. */
 		bin_2 = h264sw_cabac_decision(&ctx->cabac, SE_OFFSET_SUB_MB_TYPE_P + 2U);
 		if (bin_2 != 0U) {
 			/* The string 011 is P_L0_4x8. */
@@ -362,6 +366,8 @@ h264sw_cabac_transform_8x8(
 		if (ctx->n.a->transform_8x8 != 0U)
 			inc++;
 	}
+
+	/* The upper neighbour counts the same way. */
 	if (ctx->n.b != NULL) {
 		if (ctx->n.b->transform_8x8 != 0U)
 			inc++;
@@ -423,6 +429,8 @@ h264sw_cabac_chroma_mode(
 		    ctx->n.a->chroma_pred_mode != 0U)
 			inc++;
 	}
+
+	/* The upper neighbour counts the same way. */
 	if (ctx->n.b != NULL) {
 		if (ctx->n.b->kind < H264SW_MB_P_SKIP &&
 		    ctx->n.b->kind != H264SW_MB_I_PCM &&
@@ -503,6 +511,7 @@ h264sw_cabac_ref_idx(
 		if (count >= active)
 			return EINVAL;
 
+		/* Bin 1 uses ctxIdx 58 and every later bin ctxIdx 59. */
 		bin_ctx = SE_OFFSET_REF_IDX + 5U;
 		if (count == 1U)
 			bin_ctx = SE_OFFSET_REF_IDX + 4U;
@@ -738,6 +747,7 @@ h264sw_cabac_qp_delta(
 		if (mapped > SE_QP_DELTA_MAPPED_MAX)
 			return EINVAL;
 
+		/* Bin 1 uses ctxIdx 62 and every later bin ctxIdx 63. */
 		bin_ctx = SE_OFFSET_QP_DELTA + 3U;
 		if (mapped == 1U)
 			bin_ctx = SE_OFFSET_QP_DELTA + 2U;
@@ -860,6 +870,7 @@ h264sw_cabac_residual_block(
 			positions[count] = index;
 			count++;
 
+			/* The last flag of the significant position says whether the map ends here. */
 			inc = se_significance_inc(cat, index, 1);
 			flag = h264sw_cabac_decision(&ctx->cabac, last_offset + inc);
 			if (flag != 0U) {
@@ -868,6 +879,7 @@ h264sw_cabac_residual_block(
 			}
 		}
 
+		/* Moves on to the next position of the map. */
 		index++;
 	}
 
@@ -1304,6 +1316,7 @@ se_exp_golomb_suffix(
 		if (ones > SE_EXP_GOLOMB_UNARY_MAX)
 			return EINVAL;
 
+		/* This 1 stands for 2^k, and the next one for twice as much. */
 		suffix += (uint32_t)1 << order;
 		order++;
 		bin = vcodec_cabac_bypass(&ctx->cabac.engine);

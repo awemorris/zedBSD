@@ -63,7 +63,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 tests/backend） | 実装済み・host 試験 PASS（実 stream の試験は p021 の取り込み後） | cleared（2026-10-31 Q1、ac1109d25・37789c4d6。host 試験 202＋112 checks、p021 の merge の後に run-host-decode PASS（MP4・TS・複数 slice を h264-software で ffmpeg と一致）。QEMU の Video Player は未実施）
 | [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: h264sw-interp・h264sw-deblock（試験 tests/speed/run-speed.sh） | cleared（2026-10-31 Q1、b667c71b5〜544298816、main 13a9ae886。補間の block 化と deblocking の bS の書き直しで host 1 thread の 1080p が 1.35〜1.94 倍（例 Main 8 Mbps 18.4 → 35.7 fps）、全試験が前と同じ。速さの続きは案 a〜e、別 WS にするかはユーザーの判断） | p022、p023、p026 |
 | [ws326-p026](phase026/phase.md) | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | cleared（2026-10-31 Q1、92ca2d0e8（新しい BASE）・ac38fd1d9。前後で run-unit・run-stream・backend・host-decode・適合 212 行・nm -D が同じ。frame・DPB は WS330 へ） | p022 |
-| [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | in-progress（q1778、P1） | p023・p026（と速さの Phase） |
+| [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | cleared（2026-10-31 Q1、181a071ac。style-check の違反 0、全試験が前と同じ） | p023・p026（と速さの Phase） |
 
 ## Resume point
 

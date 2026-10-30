@@ -480,6 +480,6 @@
 | q1775 / q1775-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws302`・branch `agent/p5-ws302`） | [ws302](ws302/ws.md) p001 設計 | plan/ws302/ だけ、design-reviewer と問いまで | in-progress |
 | q1776 / q1776-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p018 Dell の provider | host の harness まで、5330 の実機は電源の入れ直しの後。SMM の失敗の印は値だけを出典つきで（Q1 の判断） | in-progress・返却（2923e980e・cf6ed87fb、main 4d656bf2e。host の harness 30 項目 PASS、5330 の実機は電源の入れ直しの後） |
 | q1777 / q1777-i01 | P4（phase-runner、worktree p4-bugs） | [ws333](ws333/ws.md) p019 sessiond の THERMAL の要求 | UAPI（p004）待ちの kernel への呼びは仮の口 | in-progress・返却（370fccb1e を main に。rules の host 試験 113 checks、kernel への呼びは UAPI まで stub） |
-| q1778 / q1778-i01 | P1（conformance-reviewer、worktree `/home/awe/zedBSD-worktrees/p1-ws326p025`・branch `agent/p1-ws326p025`） | [ws326-p025](ws326/phase025/phase.md) | 書き方だけ、全試験が前と同じ | in-progress |
+| q1778 / q1778-i01 | P1（conformance-reviewer、worktree `/home/awe/zedBSD-worktrees/p1-ws326p025`・branch `agent/p1-ws326p025`） | [ws326-p025](ws326/phase025/phase.md) | 書き方だけ、全試験が前と同じ | cleared（181a071ac） |
 | q1779 / q1779-i01 | P6（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p6-ws310`・branch `agent/p6-ws310`） | [ws310](ws310/ws.md) p001 設計 | plan/ws310/ だけ、design-reviewer と問いまで | in-progress |
 | q1727 / q1727-i04 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 4 回目 | 100% までの自走（ユーザーの指示）、計測は /tmp | in-progress |

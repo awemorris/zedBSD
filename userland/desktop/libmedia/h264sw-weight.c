@@ -319,6 +319,8 @@ weight_floor_shift(
 	/* Rounds the magnitude of a negative value up, then negates it. */
 	magnitude = -value;
 	rounding = ((int64_t)1 << shift) - 1;
+
+	/* Reports the floor of the negative value divided by the power of two. */
 	return -((magnitude + rounding) >> shift);
 }
 
@@ -512,6 +514,7 @@ weight_single(
 			else
 				value = product + (int64_t)offset;
 
+			/* Clips the weighted sample to the 8-bit range and stores it (8-274, 8-275). */
 			out[(size_t)row * out_stride + col] = weight_clip_sample(value);
 		}
 	}

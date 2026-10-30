@@ -186,9 +186,11 @@ h264sw_reflist_build(
 	for (which = 0U;
 	     which < used;
 	     which++) {
+		/* Cuts or pads the initial list to the active length. */
 		lists->count[which] = header->num_ref_idx_active[which];
 		reflist_load(dpb, order[which], order_count[which], lists->count[which], frame_num, max_frame_num, lists->list[which]);
 
+		/* Applies the modification operations of the slice header to the list. */
 		error = reflist_modify(dpb, header, which, frame_num, max_frame_num, lists->list[which]);
 		if (error != 0) {
 			/* A broken modification leaves no usable list. */
@@ -275,6 +277,7 @@ reflist_frame_num_wrap(
 	uint32_t max_frame_num)
 {
 	int64_t wrap;
+	int32_t clamped;
 
 	/* The frame_num of the frame, taken as a signed number. */
 	wrap = (int64_t)entry_frame_num;
@@ -284,7 +287,10 @@ reflist_frame_num_wrap(
 		wrap = wrap - (int64_t)max_frame_num;
 
 	/* The result is far inside the range for a valid DPB; clamps a broken one. */
-	return reflist_clamp32(wrap);
+	clamped = reflist_clamp32(wrap);
+
+	/* Reports FrameNumWrap of the frame. */
+	return clamped;
 }
 
 /*
@@ -296,12 +302,19 @@ reflist_pic_num(
 	uint32_t frame_num,
 	uint32_t max_frame_num)
 {
+	int32_t number;
+
 	/* A long-term frame is numbered by its LongTermFrameIdx. */
-	if (entry->reference == H264SW_REF_LONG)
-		return reflist_clamp32((int64_t)entry->long_term_frame_idx);
+	if (entry->reference == H264SW_REF_LONG) {
+		number = reflist_clamp32((int64_t)entry->long_term_frame_idx);
+		return number;
+	}
 
 	/* A short-term frame is numbered by FrameNumWrap. */
-	return reflist_frame_num_wrap(entry->frame_num, frame_num, max_frame_num);
+	number = reflist_frame_num_wrap(entry->frame_num, frame_num, max_frame_num);
+
+	/* Reports the picture number of the short-term frame. */
+	return number;
 }
 
 /*
@@ -434,10 +447,12 @@ reflist_sort(
 			if (in_place)
 				break;
 
+			/* Moves the candidate that must follow the held one up a place. */
 			items[position] = items[position - 1U];
 			position--;
 		}
 
+		/* Puts the held candidate in the place that was left open. */
 		items[position] = held;
 	}
 }
@@ -459,7 +474,7 @@ reflist_select(
 	unsigned index;
 	int takes;
 
-	/* Looks at each candidate in turn. */
+	/* Takes every candidate whose key is in the requested relation to the current order count. */
 	taken = 0U;
 	for (index = 0U;
 	     index < count;
@@ -474,6 +489,7 @@ reflist_select(
 		if (selection == REFLIST_SELECT_BELOW_OR_EQUAL && items[index].key <= poc)
 			takes = 1;
 
+		/* Keeps the candidate that is in the relation. */
 		if (takes) {
 			out[taken] = items[index];
 			taken++;
@@ -650,6 +666,7 @@ reflist_find_short(
 {
 	const struct h264sw_dpb_entry *entry;
 	unsigned index;
+	int32_t entry_pic_num;
 
 	/* Looks at each short-term frame for the number. */
 	for (index = 0U;
@@ -660,7 +677,8 @@ reflist_find_short(
 			continue;
 		if (entry->reference != H264SW_REF_SHORT)
 			continue;
-		if ((int64_t)reflist_pic_num(entry, frame_num, max_frame_num) != pic_num)
+		entry_pic_num = reflist_pic_num(entry, frame_num, max_frame_num);
+		if ((int64_t)entry_pic_num != pic_num)
 			continue;
 
 		/* Found the picture the modification names. */
@@ -810,6 +828,7 @@ reflist_modify(
 			if (pic_num_no_wrap > (int64_t)frame_num)
 				pic_num = pic_num_no_wrap - (int64_t)max_frame_num;
 
+			/* Looks the number up among the short-term frames. */
 			found = reflist_find_short(dpb, pic_num, frame_num, max_frame_num, &wanted);
 		} else {
 			/* A difference of MaxFrameNum or more is out of range (7.4.3.1): no picture. */
@@ -842,6 +861,7 @@ reflist_modify(
 				}
 			}
 
+			/* Keeps every entry that is not another copy of the picture. */
 			if (!removes) {
 				work[target] = work[source];
 				target++;

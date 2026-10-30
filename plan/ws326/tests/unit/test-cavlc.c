@@ -285,8 +285,11 @@ static const unsigned cbp_inter_expected[48] = {
 
 /* Runs every check and prints the summary. */
 int
-main(void)
+main(
+	void)
 {
+	int status;
+
 	/* The tables of the module first: their shape and the codewords picked from the specification. */
 	check_table_shapes();
 	check_token_tables();
@@ -307,8 +310,13 @@ main(void)
 	check_nc();
 	check_cbp();
 
-	/* Succeeded: reports the totals. */
-	return check_finish("cavlc");
+	/* Prints the summary line and takes the exit status from it. */
+	status = check_finish("cavlc");
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every check passed. */
+	return 0;
 }
 
 /* Gives the next number of a xorshift generator, so a failure repeats. */
@@ -466,6 +474,8 @@ put_level(
 				break;
 			prefix++;
 		}
+
+		/* Sizes the suffix of the escape from the prefix that was found. */
 		suffix_size = prefix - 3U;
 		suffix = rest - base;
 	}
@@ -545,6 +555,8 @@ put_block(
 		} else {
 			level_code = -2 * level - 1;
 		}
+
+		/* A first level after fewer than three trailing ones cannot have magnitude 1, so its code is 2 lower (9.2.2.1). */
 		if (index == trailing && trailing < 3U)
 			level_code = level_code - 2;
 		put_level(out, level_code, suffix_length);
@@ -578,6 +590,8 @@ put_block(
 		} else {
 			put_table_code(out, run_before[zeros_left - 1U], zeros_left + 1U, run);
 		}
+
+		/* Takes the run off the zeros that are still left. */
 		zeros_left = zeros_left - run;
 	}
 }
@@ -671,17 +685,23 @@ check_picked_tokens(
 {
 	unsigned index;
 	unsigned tail;
+	unsigned fill;
 	unsigned total;
 	unsigned trailing;
 	struct vcodec_bitreader bits;
 	int error;
+	size_t bit_count;
 
 	/* Each codeword followed by all zeros and by all ones must decode the same, using only its own bits. */
 	for (index = 0; index < count; index++) {
 		for (tail = 0; tail < 2U; tail++) {
 			bitwriter_init(&writer);
 			put_bits(&writer, picks[index].bits);
-			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
+			/* Follows the codeword with all zeros first and all ones second. */
+			fill = 0U;
+			if (tail != 0U)
+				fill = 0xffffU;
+			bitwriter_u(&writer, fill, 16U);
 			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			total = 99U;
 			trailing = 99U;
@@ -689,7 +709,8 @@ check_picked_tokens(
 			CHECK(error == 0);
 			CHECK(trailing == picks[index].first);
 			CHECK(total == picks[index].second);
-			CHECK(bits.position == bits_length(picks[index].bits));
+			bit_count = bits_length(picks[index].bits);
+			CHECK(bits.position == bit_count);
 		}
 	}
 }
@@ -727,6 +748,7 @@ check_token_columns(void)
 	unsigned total;
 	unsigned trailing;
 	unsigned index;
+	int error;
 
 	/* Reads the same bits with each nC. */
 	for (index = 0; index < (unsigned)(sizeof(nc_values) / sizeof(nc_values[0])); index++) {
@@ -734,7 +756,8 @@ check_token_columns(void)
 		put_bits(&writer, "1111");
 		bitwriter_u(&writer, 0U, 16U);
 		vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-		CHECK(cavlc_coeff_token(&bits, nc_values[index], &total, &trailing) == 0);
+		error = cavlc_coeff_token(&bits, nc_values[index], &total, &trailing);
+		CHECK(error == 0);
 		CHECK(total == expect_total[index]);
 		CHECK(trailing == expect_trailing[index]);
 		CHECK(bits.position == expect_length[index]);
@@ -745,8 +768,10 @@ check_token_columns(void)
 	put_bits(&writer, "1");
 	bitwriter_u(&writer, 0U, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, -2, &total, &trailing) == EINVAL);
-	CHECK(cavlc_coeff_token(&bits, -100, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, -2, &total, &trailing);
+	CHECK(error == EINVAL);
+	error = cavlc_coeff_token(&bits, -100, &total, &trailing);
+	CHECK(error == EINVAL);
 }
 
 /* Checks the bit patterns that are in no column: unused codes and a run of zeros. */
@@ -756,44 +781,52 @@ check_token_errors(void)
 	struct vcodec_bitreader bits;
 	unsigned total;
 	unsigned trailing;
+	int error;
 
 	/* 0000 10 is unused in the 8 <= nC column (it would be TrailingOnes 2 of TotalCoeff 1). */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 10");
 	bitwriter_u(&writer, 0xffffU, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 8, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 8, &total, &trailing);
+	CHECK(error == EINVAL);
 
 	/* 0001 11 is unused in the 8 <= nC column too (TrailingOnes 3 of TotalCoeff 2). */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0001 11");
 	bitwriter_u(&writer, 0xffffU, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 8, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 8, &total, &trailing);
+	CHECK(error == EINVAL);
 
 	/* A run of 16 zeros is in no column of nC 0 and above, whatever follows it. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
 	bitwriter_u(&writer, 0xffffU, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 0, &total, &trailing);
+	CHECK(error == EINVAL);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 2, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 2, &total, &trailing);
+	CHECK(error == EINVAL);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 5, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 5, &total, &trailing);
+	CHECK(error == EINVAL);
 
 	/* A code cut by the end of the RBSP is an error: 0000 0011 1 needs 9 bits, only 8 are there. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 0011");
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 0, &total, &trailing);
+	CHECK(error == EINVAL);
 
 	/* A reader that already failed reads nothing. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	bits.error = EINVAL;
-	CHECK(cavlc_coeff_token(&bits, 0, &total, &trailing) == EINVAL);
+	error = cavlc_coeff_token(&bits, 0, &total, &trailing);
+	CHECK(error == EINVAL);
 }
 
 /*
@@ -814,20 +847,32 @@ check_table_shapes(void)
 	unsigned trailing;
 	unsigned long expect;
 	const struct cavlc_code *column;
+	int prefix_ok;
+	unsigned long sum;
 
 	/* Every coeff_token column is a prefix code with the codes the table has. */
-	CHECK(prefix_free(coeff_token_0_2, CAVLC_TOKEN_COUNT));
-	CHECK(prefix_free(coeff_token_2_4, CAVLC_TOKEN_COUNT));
-	CHECK(prefix_free(coeff_token_4_8, CAVLC_TOKEN_COUNT));
-	CHECK(prefix_free(coeff_token_8_up, CAVLC_TOKEN_COUNT));
-	CHECK(prefix_free(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT));
+	prefix_ok = prefix_free(coeff_token_0_2, CAVLC_TOKEN_COUNT);
+	CHECK(prefix_ok);
+	prefix_ok = prefix_free(coeff_token_2_4, CAVLC_TOKEN_COUNT);
+	CHECK(prefix_ok);
+	prefix_ok = prefix_free(coeff_token_4_8, CAVLC_TOKEN_COUNT);
+	CHECK(prefix_ok);
+	prefix_ok = prefix_free(coeff_token_8_up, CAVLC_TOKEN_COUNT);
+	CHECK(prefix_ok);
+	prefix_ok = prefix_free(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT);
+	CHECK(prefix_ok);
 
 	/* The 8 <= nC column is 64 six-bit codes less two unused; 0 <= nC < 2 leaves 15 zeros, 2 <= nC < 4 leaves 13, 4 <= nC < 8 leaves 10; nC -1 is full. */
-	CHECK(kraft_sum(coeff_token_0_2, CAVLC_TOKEN_COUNT) == KRAFT_ONE - (KRAFT_ONE >> 15));
-	CHECK(kraft_sum(coeff_token_2_4, CAVLC_TOKEN_COUNT) == KRAFT_ONE - (KRAFT_ONE >> 13));
-	CHECK(kraft_sum(coeff_token_4_8, CAVLC_TOKEN_COUNT) == KRAFT_ONE - (KRAFT_ONE >> 10));
-	CHECK(kraft_sum(coeff_token_8_up, CAVLC_TOKEN_COUNT) == KRAFT_ONE - 2UL * (KRAFT_ONE >> 6));
-	CHECK(kraft_sum(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT) == KRAFT_ONE);
+	sum = kraft_sum(coeff_token_0_2, CAVLC_TOKEN_COUNT);
+	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 15));
+	sum = kraft_sum(coeff_token_2_4, CAVLC_TOKEN_COUNT);
+	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 13));
+	sum = kraft_sum(coeff_token_4_8, CAVLC_TOKEN_COUNT);
+	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 10));
+	sum = kraft_sum(coeff_token_8_up, CAVLC_TOKEN_COUNT);
+	CHECK(sum == KRAFT_ONE - 2UL * (KRAFT_ONE >> 6));
+	sum = kraft_sum(coeff_token_chroma_dc, CAVLC_TOKEN_CHROMA_DC_COUNT);
+	CHECK(sum == KRAFT_ONE);
 
 	/* The fixed-length column has only 6-bit codes, as the table prints it. */
 	for (index = 0; index < CAVLC_TOKEN_COUNT; index++)
@@ -845,6 +890,7 @@ check_table_shapes(void)
 			column = coeff_token_8_up;
 		}
 
+		/* Counts how often each pair of TotalCoeff and TrailingOnes occurs in the column. */
 		memset(seen, 0, sizeof(seen));
 		for (index = 0; index < CAVLC_TOKEN_COUNT; index++) {
 			total = (unsigned)column[index].value >> 2;
@@ -857,6 +903,8 @@ check_table_shapes(void)
 			if (total <= 16U && trailing <= 3U)
 				seen[total][trailing]++;
 		}
+
+		/* Checks that every valid pair occurs exactly once. */
 		for (total = 0; total <= 16U; total++) {
 			for (trailing = 0; trailing <= 3U; trailing++) {
 				if (trailing <= total)
@@ -877,6 +925,8 @@ check_table_shapes(void)
 		if (total <= 16U && trailing <= 3U)
 			seen[total][trailing]++;
 	}
+
+	/* Checks that every valid pair occurs exactly once. */
 	for (total = 0; total <= 4U; total++) {
 		for (trailing = 0; trailing <= 3U; trailing++) {
 			if (trailing <= total)
@@ -891,27 +941,39 @@ check_table_shapes(void)
 		expect = KRAFT_ONE;
 		if (index == 1U)
 			expect = KRAFT_ONE - (KRAFT_ONE >> 9);
-		CHECK(kraft_sum(total_zeros_4x4[index - 1U], 17U - index) == expect);
+		sum = kraft_sum(total_zeros_4x4[index - 1U], 17U - index);
+		CHECK(sum == expect);
 	}
 
 	/* total_zeros of the chroma DC block of 4:2:0 are full. */
-	for (index = 1; index <= 3U; index++)
-		CHECK(kraft_sum(total_zeros_chroma_dc[index - 1U], 5U - index) == KRAFT_ONE);
+	for (index = 1; index <= 3U; index++) {
+		sum = kraft_sum(total_zeros_chroma_dc[index - 1U], 5U - index);
+		CHECK(sum == KRAFT_ONE);
+	}
 
 	/* run_before: zerosLeft 1 to 6 are full; above 6 leaves the 11-bit all-zero pattern. */
-	for (index = 1; index <= 6U; index++)
-		CHECK(kraft_sum(run_before[index - 1U], index + 1U) == KRAFT_ONE);
-	CHECK(kraft_sum(run_before[6], 15U) == KRAFT_ONE - (KRAFT_ONE >> 11));
+	for (index = 1; index <= 6U; index++) {
+		sum = kraft_sum(run_before[index - 1U], index + 1U);
+		CHECK(sum == KRAFT_ONE);
+	}
+
+	/* Checks that zerosLeft above 6 leaves room for the 11-bit all-zero pattern. */
+	sum = kraft_sum(run_before[6], 15U);
+	CHECK(sum == KRAFT_ONE - (KRAFT_ONE >> 11));
 
 	/* The entries of total_zeros and run_before are numbered from 0 in order. */
 	for (index = 1; index <= 15U; index++) {
 		for (pair = 0; pair < 17U - index; pair++)
 			CHECK((unsigned)total_zeros_4x4[index - 1U][pair].value == pair);
 	}
+
+	/* Checks the numbering of the chroma DC tables of total_zeros the same way. */
 	for (index = 1; index <= 3U; index++) {
 		for (pair = 0; pair < 5U - index; pair++)
 			CHECK((unsigned)total_zeros_chroma_dc[index - 1U][pair].value == pair);
 	}
+
+	/* Checks the numbering of the run_before row for zerosLeft above 6. */
 	for (pair = 0; pair < 15U; pair++)
 		CHECK((unsigned)run_before[6][pair].value == pair);
 	for (index = 1; index <= 6U; index++) {
@@ -927,8 +989,11 @@ check_total_zeros(void)
 	unsigned index;
 	unsigned zeros;
 	unsigned tail;
+	unsigned fill;
 	size_t count;
 	struct vcodec_bitreader bits;
+	int error;
+	size_t bit_count;
 
 	/* The tables of 4x4 blocks: each picked code with zeros and ones after it reads the same value. */
 	count = sizeof(zeros_4x4) / sizeof(zeros_4x4[0]);
@@ -936,12 +1001,18 @@ check_total_zeros(void)
 		for (tail = 0; tail < 2U; tail++) {
 			bitwriter_init(&writer);
 			put_bits(&writer, zeros_4x4[index].bits);
-			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
+			/* Follows the codeword with all zeros first and all ones second. */
+			fill = 0U;
+			if (tail != 0U)
+				fill = 0xffffU;
+			bitwriter_u(&writer, fill, 16U);
 			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			zeros = 99U;
-			CHECK(cavlc_total_zeros(&bits, zeros_4x4[index].first, 16U, &zeros) == 0);
+			error = cavlc_total_zeros(&bits, zeros_4x4[index].first, 16U, &zeros);
+			CHECK(error == 0);
 			CHECK(zeros == zeros_4x4[index].second);
-			CHECK(bits.position == bits_length(zeros_4x4[index].bits));
+			bit_count = bits_length(zeros_4x4[index].bits);
+			CHECK(bits.position == bit_count);
 		}
 	}
 
@@ -950,7 +1021,8 @@ check_total_zeros(void)
 	put_bits(&writer, "0000 10");
 	bitwriter_u(&writer, 0U, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_total_zeros(&bits, 1U, 15U, &zeros) == 0);
+	error = cavlc_total_zeros(&bits, 1U, 15U, &zeros);
+	CHECK(error == 0);
 	CHECK(zeros == 8U);
 
 	/* The chroma DC table is chosen by max_coeff 4. */
@@ -959,12 +1031,18 @@ check_total_zeros(void)
 		for (tail = 0; tail < 2U; tail++) {
 			bitwriter_init(&writer);
 			put_bits(&writer, zeros_chroma_dc[index].bits);
-			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
+			/* Follows the codeword with all zeros first and all ones second. */
+			fill = 0U;
+			if (tail != 0U)
+				fill = 0xffffU;
+			bitwriter_u(&writer, fill, 16U);
 			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			zeros = 99U;
-			CHECK(cavlc_total_zeros(&bits, zeros_chroma_dc[index].first, 4U, &zeros) == 0);
+			error = cavlc_total_zeros(&bits, zeros_chroma_dc[index].first, 4U, &zeros);
+			CHECK(error == 0);
 			CHECK(zeros == zeros_chroma_dc[index].second);
-			CHECK(bits.position == bits_length(zeros_chroma_dc[index].bits));
+			bit_count = bits_length(zeros_chroma_dc[index].bits);
+			CHECK(bits.position == bit_count);
 		}
 	}
 
@@ -972,18 +1050,24 @@ check_total_zeros(void)
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0xffffU, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_total_zeros(&bits, 0U, 16U, &zeros) == EINVAL);
-	CHECK(cavlc_total_zeros(&bits, 16U, 16U, &zeros) == EINVAL);
-	CHECK(cavlc_total_zeros(&bits, 0U, 4U, &zeros) == EINVAL);
-	CHECK(cavlc_total_zeros(&bits, 4U, 4U, &zeros) == EINVAL);
+	error = cavlc_total_zeros(&bits, 0U, 16U, &zeros);
+	CHECK(error == EINVAL);
+	error = cavlc_total_zeros(&bits, 16U, 16U, &zeros);
+	CHECK(error == EINVAL);
+	error = cavlc_total_zeros(&bits, 0U, 4U, &zeros);
+	CHECK(error == EINVAL);
+	error = cavlc_total_zeros(&bits, 4U, 4U, &zeros);
+	CHECK(error == EINVAL);
 
 	/* The all-zero pattern is no code of tzVlcIndex 1 (nine zeros), and is the last code, 11, of tzVlcIndex 5 (0000 0). */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_total_zeros(&bits, 1U, 16U, &zeros) == EINVAL);
+	error = cavlc_total_zeros(&bits, 1U, 16U, &zeros);
+	CHECK(error == EINVAL);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_total_zeros(&bits, 5U, 16U, &zeros) == 0);
+	error = cavlc_total_zeros(&bits, 5U, 16U, &zeros);
+	CHECK(error == 0);
 	CHECK(zeros == 11U);
 }
 
@@ -994,8 +1078,11 @@ check_run_before(void)
 	unsigned index;
 	unsigned run;
 	unsigned tail;
+	unsigned fill;
 	size_t count;
 	struct vcodec_bitreader bits;
+	int error;
+	size_t bit_count;
 
 	/* Each picked code with zeros and ones after it reads the same value, for the zerosLeft of its row. */
 	count = sizeof(runs) / sizeof(runs[0]);
@@ -1003,12 +1090,18 @@ check_run_before(void)
 		for (tail = 0; tail < 2U; tail++) {
 			bitwriter_init(&writer);
 			put_bits(&writer, runs[index].bits);
-			bitwriter_u(&writer, tail == 0U ? 0U : 0xffffU, 16U);
+			/* Follows the codeword with all zeros first and all ones second. */
+			fill = 0U;
+			if (tail != 0U)
+				fill = 0xffffU;
+			bitwriter_u(&writer, fill, 16U);
 			vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 			run = 99U;
-			CHECK(cavlc_run_before(&bits, runs[index].first, &run) == 0);
+			error = cavlc_run_before(&bits, runs[index].first, &run);
+			CHECK(error == 0);
 			CHECK(run == runs[index].second);
-			CHECK(bits.position == bits_length(runs[index].bits));
+			bit_count = bits_length(runs[index].bits);
+			CHECK(bits.position == bit_count);
 		}
 	}
 
@@ -1016,15 +1109,18 @@ check_run_before(void)
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0xffffU, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_run_before(&bits, 0U, &run) == EINVAL);
+	error = cavlc_run_before(&bits, 0U, &run);
+	CHECK(error == EINVAL);
 
 	/* The all-zero pattern of 11 bits is no code, in the row above 6 and in the rows below. */
 	bitwriter_init(&writer);
 	bitwriter_u(&writer, 0U, 16U);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_run_before(&bits, 9U, &run) == EINVAL);
+	error = cavlc_run_before(&bits, 9U, &run);
+	CHECK(error == EINVAL);
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(cavlc_run_before(&bits, 1U, &run) == 0);
+	error = cavlc_run_before(&bits, 1U, &run);
+	CHECK(error == 0);
 	CHECK(run == 1U);
 }
 
@@ -1039,6 +1135,7 @@ check_hand_blocks(void)
 	unsigned total;
 	size_t end_position;
 	int error;
+	size_t bit_count;
 
 	/* Each block is read and must give its levels, TotalCoeff and end where its bits end. */
 	count = (unsigned)(sizeof(hand_blocks) / sizeof(hand_blocks[0]));
@@ -1047,12 +1144,14 @@ check_hand_blocks(void)
 		put_bits(&writer, hand_blocks[index].bits);
 		bitwriter_trailing(&writer);
 
+		/* Reads the block back, starting from marker values. */
 		memset(levels, 0x55, sizeof(levels));
 		total = 99U;
 		error = read_block(&writer, bitwriter_bytes(&writer), hand_blocks[index].nc, hand_blocks[index].start, hand_blocks[index].end, hand_blocks[index].max_coeff, levels, &total, &end_position);
 		CHECK(error == 0);
 		CHECK(total == hand_blocks[index].total);
-		CHECK(end_position == bits_length(hand_blocks[index].bits));
+		bit_count = bits_length(hand_blocks[index].bits);
+		CHECK(end_position == bit_count);
 		for (position = 0; position < hand_blocks[index].max_coeff; position++)
 			CHECK(levels[position] == hand_blocks[index].levels[position]);
 
@@ -1090,9 +1189,12 @@ check_level_edges(void)
 			} else {
 				put_block(&writer, -1, 0U, 3U, 4U, expected);
 			}
+
+			/* Notes where the block ends, before the stop bit is written. */
 			block_bits = writer.bits;
 			bitwriter_trailing(&writer);
 
+			/* Reads the block back, starting from marker values. */
 			memset(levels, 0x55, sizeof(levels));
 			error = 0;
 			if (shape == 0U) {
@@ -1102,6 +1204,8 @@ check_level_edges(void)
 			} else {
 				error = read_block(&writer, bitwriter_bytes(&writer), -1, 0U, 3U, 4U, levels, &total, &end_position);
 			}
+
+			/* Checks the read against the block that was written. */
 			CHECK(error == 0);
 			CHECK(total == 1U);
 			CHECK(end_position == block_bits);
@@ -1134,6 +1238,7 @@ check_round_trips(void)
 	unsigned pool[16];
 	unsigned picked;
 	unsigned kind;
+	uint32_t draw;
 	int nc;
 	int32_t expected[16];
 	int32_t levels[16];
@@ -1192,10 +1297,20 @@ check_round_trips(void)
 			} else {
 				value = 32767;
 			}
-			if ((random_next() & 1U) != 0U)
+
+			/* Gives half of the levels a negative sign. */
+			draw = random_next();
+			if ((draw & 1U) != 0U)
 				value = -value;
-			if (kind == 19U && (random_next() & 1U) != 0U)
-				value = -32768;
+
+			/* Makes half of the largest levels the most negative value. */
+			if (kind == 19U) {
+				draw = random_next();
+				if ((draw & 1U) != 0U)
+					value = -32768;
+			}
+
+			/* Stores the level at the position it was drawn for. */
 			expected[pool[slot]] = value;
 		}
 
@@ -1216,6 +1331,8 @@ check_round_trips(void)
 			if (levels[index] != expected[index])
 				same = 0;
 		}
+
+		/* Reports whether every level read back is the one written. */
 		CHECK(same);
 		CHECK(end_position == block_bits);
 	}
@@ -1229,21 +1346,25 @@ check_truncated(void)
 	unsigned count;
 	size_t cut;
 	size_t bytes;
+	size_t bit_count;
 	int32_t levels[16];
 	unsigned total;
 	size_t end_position;
+	int error;
 
 	/* Every hand-made block with some bits, cut at each shorter length in bytes. */
 	count = (unsigned)(sizeof(hand_blocks) / sizeof(hand_blocks[0]));
 	for (index = 0; index < count; index++) {
 		bitwriter_init(&writer);
 		put_bits(&writer, hand_blocks[index].bits);
-		bytes = (bits_length(hand_blocks[index].bits) + 7U) / 8U;
+		bit_count = bits_length(hand_blocks[index].bits);
+		bytes = (bit_count + 7U) / 8U;
 		for (cut = 0; cut < bytes; cut++) {
 			/* A cut inside the last byte still holds all the bits of a block of 8 bits or fewer; only cuts that remove bits count. */
-			if (cut * 8U >= bits_length(hand_blocks[index].bits))
+			if (cut * 8U >= bit_count)
 				continue;
-			CHECK(read_block(&writer, cut, hand_blocks[index].nc, hand_blocks[index].start, hand_blocks[index].end, hand_blocks[index].max_coeff, levels, &total, &end_position) == EINVAL);
+			error = read_block(&writer, cut, hand_blocks[index].nc, hand_blocks[index].start, hand_blocks[index].end, hand_blocks[index].max_coeff, levels, &total, &end_position);
+			CHECK(error == EINVAL);
 		}
 	}
 }
@@ -1257,39 +1378,59 @@ check_block_errors(void)
 	size_t end_position;
 	struct vcodec_bitreader bits;
 	unsigned prefix;
+	int error;
+	size_t byte_count;
 
 	/* A missing reader, levels or count, and a block shape no syntax produces. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "1");
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
-	CHECK(h264sw_cavlc_residual_block(NULL, 0, 0U, 15U, 16U, levels, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, NULL, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, NULL) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 8U, levels, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 64U, levels, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 4U, 3U, 16U, levels, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 16U, 16U, levels, &total) == EINVAL);
-	CHECK(h264sw_cavlc_residual_block(&bits, -2, 0U, 15U, 16U, levels, &total) == EINVAL);
+	error = h264sw_cavlc_residual_block(NULL, 0, 0U, 15U, 16U, levels, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, NULL, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, NULL);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 8U, levels, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 64U, levels, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 4U, 3U, 16U, levels, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 16U, 16U, levels, &total);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, -2, 0U, 15U, 16U, levels, &total);
+	CHECK(error == EINVAL);
 
 	/* TotalCoeff 16 in a block of 15 coefficients (end 14) is not allowed. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 0000 0000 1000");
 	bitwriter_u(&writer, 0U, 32U);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 14U, 15U, levels, &total, &end_position) == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 14U, 15U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
 
 	/* TotalCoeff 5 with endIdx - startIdx + 1 = 4, and TotalCoeff 5 for the 4 coefficients of chroma DC (nC 0 code). */
 	bitwriter_init(&writer);
 	put_bits(&writer, "0000 100");
 	bitwriter_u(&writer, 0U, 32U);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 3U, 16U, levels, &total, &end_position) == EINVAL);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 3U, 4U, levels, &total, &end_position) == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 3U, 16U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 3U, 4U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
 
 	/* total_zeros that pushes a coefficient past endIdx: two trailing ones (001, signs 00), total_zeros 14 (0000 00): fine in 16 coefficients, one too many in 15. */
 	bitwriter_init(&writer);
 	put_bits(&writer, "001 00 0000 00");
 	bitwriter_u(&writer, 0xffffU, 16U);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 14U, 15U, levels, &total, &end_position) == EINVAL);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == 0);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 14U, 15U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+	CHECK(error == 0);
 	CHECK(total == 2U);
 	CHECK(levels[15] == 1 && levels[14] == 1 && levels[0] == 0);
 
@@ -1297,7 +1438,9 @@ check_block_errors(void)
 	bitwriter_init(&writer);
 	put_bits(&writer, "0001 1 000 0010 0000 0000 001");
 	bitwriter_u(&writer, 0xffffU, 16U);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
 
 	/* level_prefix of 26 is out of range; 25 is read but its level is out of range. */
 	for (prefix = 25U; prefix <= 27U; prefix++) {
@@ -1307,7 +1450,9 @@ check_block_errors(void)
 		bitwriter_u(&writer, 1U, 1U);
 		bitwriter_u(&writer, 0x3fffffU, 22U);
 		bitwriter_u(&writer, 0xffffU, 16U);
-		CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == EINVAL);
+		byte_count = bitwriter_bytes(&writer);
+		error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+		CHECK(error == EINVAL);
 	}
 
 	/* A level_prefix with no 1 bit in the rest of the RBSP. */
@@ -1315,7 +1460,9 @@ check_block_errors(void)
 	put_bits(&writer, "0001 01");
 	bitwriter_u(&writer, 0U, 32U);
 	bitwriter_u(&writer, 0U, 8U);
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
 
 	/* The level 32768, one above the range: prefix 19 with a 16-bit suffix of 4062 (levelCode 65532 + 2 = 65534). */
 	bitwriter_init(&writer);
@@ -1324,7 +1471,9 @@ check_block_errors(void)
 	bitwriter_u(&writer, 1U, 1U);
 	bitwriter_u(&writer, 4062U, 16U);
 	put_bits(&writer, "1");
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == EINVAL);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+	CHECK(error == EINVAL);
 
 	/* The level 32767 is the largest one accepted: levelCode 65532 gives 32767, prefix 19 with suffix 4060. */
 	bitwriter_init(&writer);
@@ -1333,7 +1482,9 @@ check_block_errors(void)
 	bitwriter_u(&writer, 1U, 1U);
 	bitwriter_u(&writer, 4060U, 16U);
 	put_bits(&writer, "1");
-	CHECK(read_block(&writer, bitwriter_bytes(&writer), 0, 0U, 15U, 16U, levels, &total, &end_position) == 0);
+	byte_count = bitwriter_bytes(&writer);
+	error = read_block(&writer, byte_count, 0, 0U, 15U, 16U, levels, &total, &end_position);
+	CHECK(error == 0);
 	CHECK(levels[0] == 32767);
 
 	/* A reader that already failed gives an error and leaves zero levels. */
@@ -1342,7 +1493,8 @@ check_block_errors(void)
 	vcodec_bitreader_init(&bits, writer.data, bitwriter_bytes(&writer));
 	bits.error = EINVAL;
 	memset(levels, 0x55, sizeof(levels));
-	CHECK(h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, &total) == EINVAL);
+	error = h264sw_cavlc_residual_block(&bits, 0, 0U, 15U, 16U, levels, &total);
+	CHECK(error == EINVAL);
 }
 
 /* Reads random bytes with random shapes: only success or EINVAL, a bounded count and levels in range. */
@@ -1360,6 +1512,7 @@ check_fuzz(void)
 	int nc;
 	int error;
 	int32_t levels[16];
+	uint32_t draw;
 	int bad;
 	static const unsigned maxes[3] = { 4U, 15U, 16U };
 
@@ -1367,21 +1520,27 @@ check_fuzz(void)
 	for (round = 0; round < 40000U; round++) {
 		bitwriter_init(&writer);
 		length = random_next() % 24U;
-		for (index = 0; index < length; index++)
-			bitwriter_u(&writer, random_next() & 0xffU, 8U);
+		for (index = 0; index < length; index++) {
+			draw = random_next();
+			bitwriter_u(&writer, draw & 0xffU, 8U);
+		}
 
 		/* Often a few set bits and mostly zeros, which reach the long codes. */
-		if ((random_next() & 3U) == 0U) {
+		draw = random_next();
+		if ((draw & 3U) == 0U) {
 			bitwriter_init(&writer);
 			for (index = 0; index < length; index++) {
-				if ((random_next() & 7U) == 0U) {
-					bitwriter_u(&writer, random_next() & 0xffU, 8U);
+				draw = random_next();
+				if ((draw & 7U) == 0U) {
+					draw = random_next();
+					bitwriter_u(&writer, draw & 0xffU, 8U);
 				} else {
 					bitwriter_u(&writer, 0U, 8U);
 				}
 			}
 		}
 
+		/* Draws the parameters of the block to read. */
 		max_coeff = maxes[random_next() % 3U];
 		end = random_next() % max_coeff;
 		start = random_next() % (end + 1U);
@@ -1403,6 +1562,8 @@ check_fuzz(void)
 						bad = 1;
 				}
 			}
+
+			/* Reports whether the read stayed within the bounds of the call. */
 			CHECK(!bad);
 			CHECK(end_position <= (size_t)length * 8U);
 		}
@@ -1441,6 +1602,7 @@ static void
 check_nc(void)
 {
 	unsigned index;
+	int predicted_nc;
 
 	/* The centre macroblock (address 4) has the left macroblock 3 and the upper macroblock 1. */
 	setup_nc(4U, 0, 0);
@@ -1448,96 +1610,121 @@ check_nc(void)
 	/* Block 0: A is block 5 of the left macroblock and B block 10 of the upper one; (3 + 6 + 1) >> 1 is 5. */
 	nc_mbs[3].total_coeff[5] = 3U;
 	nc_mbs[1].total_coeff[10] = 6U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 5);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 5);
 
 	/* The mean rounds up: (2 + 3 + 1) >> 1 is 3. */
 	nc_mbs[3].total_coeff[5] = 2U;
 	nc_mbs[1].total_coeff[10] = 3U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 3);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 3);
 
 	/* A skipped macroblock counts 0: (0 + 8 + 1) >> 1 is 4 (the parser keeps 0 for it). */
 	nc_mbs[3].total_coeff[5] = 0U;
 	nc_mbs[1].total_coeff[10] = 8U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 4);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 4);
 
 	/* I_PCM counts 16 (the parser keeps 16 for it): 16 and 16 give 16, 16 and 0 give 8. */
 	nc_mbs[3].total_coeff[5] = 16U;
 	nc_mbs[1].total_coeff[10] = 16U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 16);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 16);
 	nc_mbs[1].total_coeff[10] = 0U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 8);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 8);
 
 	/* Block 3 has both neighbours in the current macroblock: A is block 2 and B block 1; (5 + 9 + 1) >> 1 is 7. */
 	nc_mbs[4].total_coeff[2] = 5U;
 	nc_mbs[4].total_coeff[1] = 9U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 3U) == 7);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 3U);
+	CHECK(predicted_nc == 7);
 
 	/* Block 5 has A in the current macroblock (block 4) and B in the upper one (block 15). */
 	nc_mbs[4].total_coeff[4] = 4U;
 	nc_mbs[1].total_coeff[15] = 7U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 5U) == 6);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 5U);
+	CHECK(predicted_nc == 6);
 
 	/* Block 2 has A in the left macroblock (block 7) and B in the current macroblock (block 0). */
 	nc_mbs[3].total_coeff[7] = 10U;
 	nc_mbs[4].total_coeff[0] = 3U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 2U) == 7);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 2U);
+	CHECK(predicted_nc == 7);
 
 	/* The Cb AC block 0 (block index 16) has A in chroma block 1 and B in chroma block 2 of the neighbours (counts kept at 16 + n). */
 	nc_mbs[3].total_coeff[17] = 2U;
 	nc_mbs[1].total_coeff[18] = 5U;
 	nc_mbs[3].total_coeff[21] = 9U;
 	nc_mbs[1].total_coeff[22] = 12U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 16U) == 4);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 16U);
+	CHECK(predicted_nc == 4);
 
 	/* The Cr AC block 0 (index 20) reads the counts kept at 20 + n: (9 + 12 + 1) >> 1 is 11. */
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 20U) == 11);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 20U);
+	CHECK(predicted_nc == 11);
 
 	/* The chroma block 3 (index 19) has A and B in the current macroblock: chroma blocks 2 and 1. */
 	nc_mbs[4].total_coeff[18] = 6U;
 	nc_mbs[4].total_coeff[17] = 1U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 19U) == 4);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 19U);
+	CHECK(predicted_nc == 4);
 	nc_mbs[4].total_coeff[22] = 2U;
 	nc_mbs[4].total_coeff[21] = 7U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 23U) == 5);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 23U);
+	CHECK(predicted_nc == 5);
 
 	/* A block index no macroblock has gives no neighbours. */
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 24U) == 0);
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 1000U) == 0);
-	CHECK(h264sw_cavlc_nc(NULL, 0U) == 0);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 24U);
+	CHECK(predicted_nc == 0);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 1000U);
+	CHECK(predicted_nc == 0);
+	predicted_nc = h264sw_cavlc_nc(NULL, 0U);
+	CHECK(predicted_nc == 0);
 
 	/* Only the left neighbour is available (address 1 is in the top row: A is macroblock 0, B is outside). Block 2 also has B in the current macroblock (block 0, count 0): (4 + 0 + 1) >> 1 is 2. */
 	setup_nc(1U, 0, 0);
 	nc_mbs[0].total_coeff[5] = 9U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 9);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 9);
 	nc_mbs[0].total_coeff[7] = 4U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 2U) == 2);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 2U);
+	CHECK(predicted_nc == 2);
 
 	/* Only the upper neighbour is available (address 3 has no left neighbour). */
 	setup_nc(3U, 0, 0);
 	nc_mbs[0].total_coeff[10] = 7U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 7);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 7);
 
 	/* Neighbours of another slice are not available: the left one is decoded in slice 1 here, the upper one in slice 0. */
 	setup_nc(4U, 1, 0);
 	nc_mbs[3].total_coeff[5] = 12U;
 	nc_mbs[1].total_coeff[10] = 3U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 3);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 3);
 
 	/* No neighbour at all: the first macroblock, block 0, and the first blocks of both chroma kinds. */
 	setup_nc(0U, 0, 0);
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 0U) == 0);
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 16U) == 0);
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 20U) == 0);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 0U);
+	CHECK(predicted_nc == 0);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 16U);
+	CHECK(predicted_nc == 0);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 20U);
+	CHECK(predicted_nc == 0);
 
 	/* The neighbours inside the current macroblock count even with no neighbouring macroblock: block 1 has A in block 0. */
 	nc_mbs[0].total_coeff[0] = 5U;
-	CHECK(h264sw_cavlc_nc(&nc_ctx, 1U) == 5);
+	predicted_nc = h264sw_cavlc_nc(&nc_ctx, 1U);
+	CHECK(predicted_nc == 5);
 
 	/* Every luma block of a lone macroblock reads only itself or nothing. */
 	for (index = 0; index < 16U; index++)
 		nc_mbs[0].total_coeff[index] = 0U;
-	for (index = 0; index < 24U; index++)
-		CHECK(h264sw_cavlc_nc(&nc_ctx, index) == 0);
+	for (index = 0; index < 24U; index++) {
+		predicted_nc = h264sw_cavlc_nc(&nc_ctx, index);
+		CHECK(predicted_nc == 0);
+	}
 }
 
 /* Checks the coded_block_pattern mapping of Table 9-4 (a) in full, and its errors. */
@@ -1548,19 +1735,23 @@ check_cbp(void)
 	unsigned cbp;
 	unsigned seen_intra[48];
 	unsigned seen_inter[48];
+	int error;
 
 	/* Every codeNum of both columns against the table as read from the page. */
 	memset(seen_intra, 0, sizeof(seen_intra));
 	memset(seen_inter, 0, sizeof(seen_inter));
 	for (code = 0; code < 48U; code++) {
 		cbp = 99U;
-		CHECK(h264sw_cavlc_cbp(code, 1, &cbp) == 0);
+		error = h264sw_cavlc_cbp(code, 1, &cbp);
+		CHECK(error == 0);
 		CHECK(cbp == cbp_intra_expected[code]);
 		if (cbp < 48U)
 			seen_intra[cbp]++;
 
+		/* Reads the same code as an inter macroblock. */
 		cbp = 99U;
-		CHECK(h264sw_cavlc_cbp(code, 0, &cbp) == 0);
+		error = h264sw_cavlc_cbp(code, 0, &cbp);
+		CHECK(error == 0);
 		CHECK(cbp == cbp_inter_expected[code]);
 		if (cbp < 48U)
 			seen_inter[cbp]++;
@@ -1574,10 +1765,15 @@ check_cbp(void)
 
 	/* A nonzero intra flag other than 1 is still intra, and codeNum 48 and above is an error that leaves the output. */
 	cbp = 99U;
-	CHECK(h264sw_cavlc_cbp(0U, 7, &cbp) == 0);
+	error = h264sw_cavlc_cbp(0U, 7, &cbp);
+	CHECK(error == 0);
 	CHECK(cbp == 47U);
-	CHECK(h264sw_cavlc_cbp(48U, 1, &cbp) == EINVAL);
-	CHECK(h264sw_cavlc_cbp(49U, 0, &cbp) == EINVAL);
-	CHECK(h264sw_cavlc_cbp(0xffffffffUL, 0, &cbp) == EINVAL);
-	CHECK(h264sw_cavlc_cbp(0U, 1, NULL) == EINVAL);
+	error = h264sw_cavlc_cbp(48U, 1, &cbp);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_cbp(49U, 0, &cbp);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_cbp(0xffffffffUL, 0, &cbp);
+	CHECK(error == EINVAL);
+	error = h264sw_cavlc_cbp(0U, 1, NULL);
+	CHECK(error == EINVAL);
 }
