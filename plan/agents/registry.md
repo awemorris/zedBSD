@@ -9,7 +9,7 @@
 | P2 | phase-runner-high | VF2 の Bug の束 (q1772-i01: BUG-338・342・340・343・339) | `/home/awe/zedBSD-worktrees/p2-vf2bugs` / `agent/p2-vf2bugs` | in-progress（2026-10-31 起動、VF2） | b35939531（merge 9154dc6db） |
 | P4 | phase-runner-high | ws326 p026 (q1769-i01) | `/home/awe/zedBSD-worktrees/p4-ws326p026` / `agent/p4-ws326p026` | in-progress（2026-10-31 起動） | 5b56cbaef（merge b0b4577c7） |
 | P5 | kernel-and-driver-designer | ws330 p001 (q1763-i01) | `/home/awe/zedBSD-worktrees/p5-ws330` / `agent/p5-ws330` | in-progress（2026-10-31 起動） | c56fb91dc（merge 455a7d5b4、WS329 p001） |
-| P6 | phase-runner-high | 返却（q1771 WS333 p017） | `/home/awe/zedBSD-worktrees/p6-ws333` / `agent/p6-ws333` | 返却（2026-10-31 06:0x） | 93fb7eadd（merge 809dfe329） |
+| P6 | phase-runner-high | ws333 p016 → p021 (q1774-i01) | `/home/awe/zedBSD-worktrees/p6-ws333` / `agent/p6-ws333` | in-progress（2026-10-31 起動） | 93fb7eadd（merge 809dfe329） |
 | P3 | phase-runner-high | ws291 p014 の続き (q1764-i01) | `/home/awe/zedBSD-worktrees/p3-ws291r2` / `agent/p3-ws291r2` | in-progress（2026-10-31 起動、10.0.10.3） | 8aca507b9（merge 1035ec0a0、WS331） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 起動し直し） | fccca00dc |
 | P7 | phase-runner-high | ws333 p011 (q1770-i01) | `/home/awe/zedBSD-worktrees/p7-ws333b` / `agent/p7-ws333b` | in-progress（2026-10-31 起動） | 87a6d4ff7（merge 22c629663） |
