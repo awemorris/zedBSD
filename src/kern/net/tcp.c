@@ -207,6 +207,15 @@
 #define TCP_RECEIVE_EXTRA_SHARE 4U
 
 /*
+ * What the buffer grows to, in eighths of what one round trip brings.
+ * Twice it (the measure the procedure above takes) lets the peer queue a
+ * round trip's worth more in front of the link (the window settles where
+ * the round trip has doubled), and the data of the other direction, and
+ * its acknowledgements, wait behind that queue too.
+ */
+#define TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 16U
+
+/*
  * The send buffer a connection starts with: on the 64-bit machines more
  * than their ring holds in segments of an Ethernet MTU (256 of 1460
  * bytes), so the ring bounds a transfer unless SO_SNDBUF sets a smaller
@@ -8079,9 +8088,9 @@ tcp_receive_tune_locked(
 		round_trip = elapsed;
 	endpoint->tcp.receive_rtt_us = (uint32_t)round_trip;
 
-	/* Twice what one round trip brought. */
+	/* What one round trip brought, and the buffer's share beyond it. */
 	received = endpoint->tcp.receive_next - endpoint->tcp.receive_tune_base;
-	wanted = 2U * (received * round_trip / elapsed);
+	wanted = received * round_trip / elapsed * TCP_RECEIVE_AUTO_GROWTH_EIGHTHS / 8U;
 	if (wanted > TCP_RECEIVE_AUTO_MAX)
 		wanted = TCP_RECEIVE_AUTO_MAX;
 
