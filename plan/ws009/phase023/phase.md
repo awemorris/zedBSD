@@ -117,3 +117,9 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - **`gpu_fence_get` の foreign=1 は fence の device を比べない**（`GPU_DISPLAY_PRESENT_SYNC` の wait_fd、`GPU_DISPLAY_COMMIT` の plane の fence）。comment は「approved companion GPU」と書くが承認の確かめが無い。別の GPU の fence を受けて良いかの設計の確かめが要る。
 - kernel が終えた binding は open を閉じるまで slot（GPU_SUBMIT_MAX の 1 つ）を持ち続ける（`gpu_fence_binding_end`、他に解放が無い）。
 - `GPU_FENCE_BIND` だけで結んだ pending の fence は `_SYNC` で待たれず EAGAIN（header に無い）。
+
+## p013 から（2026-10-30 Q1）
+
+- `GPU_RESOURCE_IMPORT` の Requires は capability none（GPU_CAP_SHARE か display の import の op）。gpu-requests.md の索引に none を写す。
+- gpu-memory.md の GPU_BLOB_SHAREABLE・GPU_BLOB_CROSS_DEVICE の文を gpu-sharing.md と合わせる（core は CROSS_DEVICE・SCANOUT_FOREIGN・companion_id を見ない、venus の image の export だけ CROSS_DEVICE を読む）。
+- `GPU_ALLOCATION_IMPORT` の header は入力を version・size・fd と書くが、code は flags 0 も要る。

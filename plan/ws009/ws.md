@@ -37,7 +37,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p010`](phase010/phase.md) | cleared（2026-10-30 Q1、main fa61e266b。照合 --final PASS、link PASS） | gpu.md: node・権限・呼び方・並行と待ち・互換。依存: なし |
 | [`ws009-p011`](phase011/phase.md) | cleared（2026-10-30 Q1、main e75adfd29。照合 --final PASS、link PASS） | gpu-capabilities.md: bit・GET_INFO・GET_CAPSET・capset 4。依存: なし |
 | [`ws009-p012`](phase012/phase.md) | cleared（2026-10-30 Q1、main 23a127662。照合 --final PASS、link PASS） | gpu-memory.md: resource・blob・placed・transfer・map・device。依存: なし |
-| [`ws009-p013`](phase013/phase.md) | 書いた・照合 PASS（2026-10-30、cleared は Q1 が決める） | gpu-sharing.md: export・import（resource・allocation・scanout）。依存: なし |
+| [`ws009-p013`](phase013/phase.md) | cleared（2026-10-30 Q1、main 920060ea3。照合 --final PASS、link PASS） | gpu-sharing.md: export・import（resource・allocation・scanout）。依存: なし |
 | [`ws009-p014`](phase014/phase.md) | cleared（2026-10-30 Q1、main 30ba69459。照合 --final PASS、link PASS） | gpu-submission.md: COMMAND・SUBMIT・WAIT・PRESENT・失敗と回復。依存: なし |
 | [`ws009-p015`](phase015/phase.md) | cleared（2026-10-30 Q1、main adae0d7b6。照合 --final PASS、link PASS） | gpu-fences.md: fence と *_SYNC。依存: なし |
 | [`ws009-p016`](phase016/phase.md) | cleared（2026-10-30 Q1、main a1fa5f50c。照合 --final PASS、link PASS） | gpu-jobs.md: job。依存: なし |
