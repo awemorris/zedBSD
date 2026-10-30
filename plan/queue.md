@@ -231,7 +231,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1708 / q1708-i01 | P8（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/p8-ws074`・branch `agent/p8-ws074`、基点 main 2ba50ae52、host だけ） | [ws074-p260](ws074/phase260/phase.md)（と p261・p262） | local の host で Chromium との比較の環境を作り直し（WPT の固定 commit を自分の build へ、Debian の chromium 153.0.8010.52）、Chromium の基準と dev20 の全件の測定、その後 gap の大きい原因から libbrowser を直す。区切りごとに全件の測定で後退 0 | in-progress |
+| q1708 / q1708-i01 | P8（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/p8-ws074`・branch `agent/p8-ws074`、基点 main 2ba50ae52、host だけ） | [ws074-p260](ws074/phase260/phase.md)（と p261・p262） | local の host で Chromium との比較の環境を作り直し（WPT の固定 commit を自分の build へ、Debian の chromium 153.0.8010.52）、Chromium の基準と dev20 の全件の測定、その後 gap の大きい原因から libbrowser を直す。区切りごとに全件の測定で後退 0 | uncleared（2026-10-30 返却。Debian の比較の環境 5e20c8da9、測定は背景で継続、修正 0。q1708-i02 で続ける） |
 
 ## 2026-10-30 14:0x: WS313・WS327・WS307・WS291 を P1・P5・P6・P7 で（q1709〜）
 
@@ -246,10 +246,11 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | in-progress |
+| q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | cleared（2026-10-30 Q1。p001 の一覧 6af47c4a4、merge f4fcb6ff2。Phase は in-progress のまま、ユーザーの決定待ち） |
 
 ## 2026-10-30 15:2x: WS313 の firmware を P1 で（q1714）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1714 / q1714-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`（main に追従）と zedBSD-firmware の worktree `/home/awe/zedBSD-worktrees/p1-c5-firmware`・branch `agent/p1-c5-firmware`、host だけ） | [ws313](ws313/ws.md) p003 媒体（firmware の package 化） | ユーザー「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」 zedBSD-firmware の push はユーザーの指示の時だけ（Q1） | in-progress |
+| q1714 / q1714-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`（main に追従）と zedBSD-firmware の worktree `/home/awe/zedBSD-worktrees/p1-c5-firmware`・branch `agent/p1-c5-firmware`、host だけ） | [ws313](ws313/ws.md) p003 媒体（firmware の package 化） | ユーザー「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」 zedBSD-firmware の push はユーザーの指示の時だけ（Q1） | uncleared（2026-10-30 返却。package・menuconfig・firmware.list は 9c09f68f4、zedBSD-firmware は local の 227a76db8。package 経由の image の build は license の自動の同意が権限の判定で止まり未実施。zedBSD-firmware の push はユーザーの判断待ち（Amlogic の license）） |
+| q1708 / q1708-i02 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き: 背景の測定の compare、gap の大きい原因から libbrowser の修正 | in-progress |

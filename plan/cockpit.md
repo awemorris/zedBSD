@@ -1,20 +1,20 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 15:25（Q1）
+最終更新: 2026-10-30 15:40（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1714）。Amlogic の bootloader と Mali の firmware を zedBSD-firmware に足し、menuconfig の firmware の package に（C5 の BSP で自動で有効、license の同意あり）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | zedBSD-firmware の push はユーザーの指示で → 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
-| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner、q1713）。p001: 違反の関数ごとの置き換え先（既存の kern_*）と、wrapper の無い関数の一覧 | 一覧をユーザーに → kernel に足す関数をユーザーが決める → 書き換えの Phase |
+| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。bootloader と Mali の firmware を menuconfig の package に（C5 の board で自動で有効）、zedBSD-firmware は local の commit | ユーザーの判断: Amlogic の bootloader の公開、license の同意（端末で）。その後 package 経由の image の build |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（置き換え先の表 A、kernel に足す関数の表 B） | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
 | P3 | — | — | — | — |
 | P4 | — | — | — | — |
 | P5 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 起動（phase-runner、q1710）。p016 受け入れの残り（QEMU の回帰、Video Player・Photos の FAIL の解析、08-network） | p017 規約 → WS の完了 → 返却 |
 | P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（phase-runner、q1711）。ws.md の Resume point から | p015 の QEMU の 3 回目 → p004 GTK4 → p008 → p014 → p007 → WS の完了 → 返却 |
 | P7 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（phase-runner-high、q1712、10.0.10.3） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ → WS の完了 → 返却 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 13:50 起動（phase-runner-low、Sonnet 5.5 high）。local の host で Chromium との比較の環境を作り直す | dev20 の全件の測定（前回 dev19 は 3,472 のうち 2,096、60.37%）→ gap の大きい原因（grid・縦書きの baseline、track sizing、subgrid、View Transitions ほか）から直す |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 
@@ -67,7 +67,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | p008 | UFS からの起動の確かめ直し | in-progress |
 | p012 | 実機の導入 | canceled |
 | p014 | 規約の見直し | in-progress |
-| p015 | 画面の lock、sleep の既定 Never | in-progress（QEMU の 3 回目が要る） |
+| p015 | 画面の lock、sleep の既定 Never | cleared（2026-10-30 QEMU の 3 回目 4 項目 PASS） |
 
 ### WS291 GPU の描画の速さ（NVIDIA の段）
 
