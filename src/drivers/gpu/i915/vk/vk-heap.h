@@ -198,4 +198,10 @@
  */
 #define I915_MOCS_UNCACHED_INDEX	3U
 
+/*
+ * The Gen12 MOCS table entry of a colour target the display may scan out:
+ * index 61, L3 write-back and LLC uncached.
+ */
+#define I915_MOCS_DISPLAY_INDEX		61U
+
 #endif

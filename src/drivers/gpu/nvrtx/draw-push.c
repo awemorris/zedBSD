@@ -16,6 +16,7 @@
  * built from their bits.
  */
 
+#include <stdbool.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -775,6 +776,35 @@ nvrtx_push_draw_pipeline(
 	at = draw_set(push, at, M_SET_USER_CLIP_OP, 0U);
 
 	/* Succeeded: the pipeline is bound. */
+	return at;
+}
+
+/*
+ * Writes one program of a bound pipeline anew (the vertex program, or the
+ * pixel program when pixel is set): what nvrtx_push_draw_pipeline() wrote
+ * for the others stays.
+ *
+ * Returns where the push buffer goes on.
+ *
+ * Procedure referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_shader.c
+ * (nvk_shader_fill_push).
+ */
+size_t
+nvrtx_push_draw_program(
+	uint8_t *push,
+	size_t at,
+	bool pixel,
+	uint64_t address,
+	uint32_t gprs)
+{
+	/* The pixel program, or the vertex program. */
+	if (pixel) {
+		at = draw_program(push, at, NVRTX_DRAW_TYPE_PIXEL, address, gprs, V_GROUP_PIXEL);
+		return at;
+	}
+	at = draw_program(push, at, NVRTX_DRAW_TYPE_VERTEX, address, gprs, V_GROUP_VERTEX);
+
+	/* Succeeded: the program is bound. */
 	return at;
 }
 

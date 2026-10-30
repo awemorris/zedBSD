@@ -315,10 +315,41 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1725 / q1725-i01 | P7（phase-runner、worktree `/home/awe/zedBSD-worktrees/p7-ws009`・branch `agent/p7-ws009`、QEMU） | [ws009](ws009/ws.md) p028（clean build と QEMU の起動の再現）→ WS の受け入れの確認 → 完了の形 | 2026-10-30 ユーザーから、WS009 を P7 で実行する、という趣旨の指示を受けた | in-progress |
+| q1725 / q1725-i01 | P7（phase-runner、worktree `/home/awe/zedBSD-worktrees/p7-ws009`・branch `agent/p7-ws009`、QEMU） | [ws009](ws009/ws.md) p028（clean build と QEMU の起動の再現）→ WS の受け入れの確認 → 完了の形 | 2026-10-30 ユーザーから、WS009 を P7 で実行する、という趣旨の指示を受けた | cleared（2026-10-30 Q1。p028 cleared、WS009 completed。89e9ecbb1、merge 94f1dec75） |
 
 ## 2026-10-30: WS291 p020 を P2 で（q1726）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1726 / q1726-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws291v`・branch `agent/p2-ws291v`、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) PowerVR の qs40 × 13 で 50 fps | 2026-10-30 ユーザーから、WS291 の PowerVR の最適化を P2 で実行する、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-30: WS074 を P8 で自走（q1727）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1727 / q1727-i01 | P8（phase-runner-low、worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | 2026-10-30 ユーザーから、Interop 2025 で Chromium が PASS する項目の 100% をゴールに P8 が自走する、という趣旨の指示を受けた。返却のたびに Q1 が次の attempt で起動し直す | in-progress |
+
+## 2026-10-30: WS291 p013 を P3 で（q1728）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1728 / q1728-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r`・branch `agent/p3-ws291r`、実機 10.0.10.3） | [ws291-p013](ws291/phase013/phase.md) | 2026-10-30 ユーザーから、WS291 の RTX の改善を P3 で行う、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-30: WS291 p021 を P4 で（q1729）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1729 / q1729-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws291pi`・branch `agent/p4-ws291pi`、image の build、実機 Pi 5 はユーザーが起動した後 SSH） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 で Pi 5 の GPU の改善を行い、PowerVR と同じくスペックの比から目標を決め、Pi 5 の image を渡す、という趣旨の指示を受けた | uncleared（2026-10-30 ラップアップ。image を作った（rpi5-p021.img）、driver の欠けの設計。権限の判定で Mesa の照合の試験が止まり、ユーザーの許可の後に q1730 で起動し直す。5291c05b1、merge 5a329d692） |
+
+## 2026-10-30: WS291 p021 の続き（P4）と p022（P1）（q1730・q1731）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1730 / q1730-i01 | P4（phase-runner-high、worktree p4-ws291pi） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 に plan/ws141/temp/ の利用を許可して起動し直す、という趣旨の指示を受けた。driver の欠け（indexed・instance・mip・直の fetch）の実装と V3D の host 試験 | uncleared（2026-10-31 返却。host: indexed・instance・直の fetch・mip の第 1 段、glass の試験の直し、Pi 4・Pi 5 の build warning 0、host 試験 PASS。実機は未。branch agent/p4-ws291pi e4f77b9e5 は Pi 4 の desktop の回帰を実機で確かめるまで main に merge しない） |
+| q1731 / q1731-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws291i`・branch `agent/p1-ws291i`、実機 5330） | [ws291-p022](ws291/phase022/phase.md) | 2026-10-30 ユーザーから、i915 も WS291 に Phase を作り 5330 で最適化を行い P1 を割り当てる、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-31: BUG-371・372・373 を P7 で（q1732）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1732 / q1732-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-bug373`・branch `agent/p7-bug373`、QEMU） | [BUG-373](bugs/BUG-373.md)・[BUG-371](bugs/BUG-371.md)・[BUG-372](bugs/BUG-372.md) | 今日の変更による network の退行（Q1 の判断、AGENTS.md の Bug の扱い） | in-progress |

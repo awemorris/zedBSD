@@ -1,41 +1,28 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 22:48（Q1）
+最終更新: 2026-10-31 00:18（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す（WS009 は P7 へ） |
+| P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（q1726）。p020: qs40 × 13・1920x1080 を 26.6 fps から 50 fps 以上へ | profile（TA と 3D の分け、解像度に比例する費用、頂点の側）→ 改善 |
-| P3 | — | — | 返却（WS332: p001・p002 cleared、KERN_CLOCK_HZ を削除、wlan の UAPI の期限の不具合を直した） | WS332 p003（率を仮定する残りの literal）・p004 規約は未割当 |
-| P4 | — | — | — | — |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
+| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 返却。host で driver の欠け（indexed・instance・直の fetch・mip の第 1 段）を実装、build と host 試験 PASS。実機は未、branch は未 merge（Pi 4 の desktop の回帰の確かめ待ち） | Pi 5 の起動の後: image を作り直し、desktop の回帰、clock の確かめ、fps の計測 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
-| P7 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 起動（q1725）。p028 の clean build と QEMU の起動の再現（native → hybrid・uefi・bios） | WS の受け入れの確認 → 完了の形 → 返却 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 返却（2026-10-30）。3,472 のうち 2,215（63.80%）、後退 0、Acid3 100/100 | 次の候補: scripted reftest 281、grid の baseline 68、View Transitions 約 35、flexbox の baseline 約 25、Element.animate 約 20。zedBSD の image の build（gradient.c の追加）は未確認 |
+| P7 | Bug | BUG-373（main の kernel で Wi-Fi の正規化が EINVAL、network が上がらない）・BUG-371・BUG-372 | 起動（q1732）。QEMU で再現と原因の特定 | 直し → VF2・10.0.10.3 の担当に連絡 |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走（q1727、ユーザーの指示）。今 3,472 のうち 2,215（63.80%） | 100% まで。返却のたびに Q1 が起動し直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 
 ## WS ごとの進捗
 
-### WS009 文書（DOC-54: /dev/gpu の UAPI の文書）
+### WS009 文書 — completed（2026-10-30）
 
-| Phase | 内容 | 状態 |
-| --- | --- | --- |
-| p001〜p008 | 既存の文書 | cleared |
-| p009 | DOC-54 一括 | canceled（p010〜p024 に分けた） |
-| p010〜p021 | 節ごとの文書 12（Sonnet） | cleared |
-| p022 | 要求の索引 | cleared |
-| p023 | 統合・Bug の候補の一覧 | cleared（BUG-364・BUG-365 を登録） |
-| p024 | 正確さの review（Opus） | cleared（12 file を直した、BUG-366 と BUG-365 の追加） |
-| p025 | managed-wlan.md の書き直し（Opus） | cleared |
-| p026 | build の文書・索引・Status 行（Sonnet） | cleared |
-| p027 | 文書の検査の script を今の規則に直し plan/tools へ（Sonnet） | cleared |
-| p028 | clean build・QEMU 起動の再現、WS001 との照合（Opus） | in-progress（照合は済み。native の image まで、boot は未判定、hybrid・uefi・bios は未） |
-
-進捗: 2026-10-30 骨格と照合の script（P1）→ Sonnet 13 回で全文 → 統合で照合 PASS（14 file、例 12 compile）。sysctl の 4 byte の読みの不具合を Q1 が直した。
+/dev/gpu の UAPI の文書（DOC-54）を書き、clean tree から 4 種の image の build と 5 つの起動を build の文書どおりに再現（P7）。docs の照合の道具は plan/tools/docs-check/。
 
 ### WS327 libkeiland の thread と socket の wrapper — completed（2026-10-30）
 
@@ -65,8 +52,11 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p001〜p006 | RDNA | cleared |
 | p010 | NVIDIA desktop 60 fps | cleared（2026-10-30 P7、実機で 2 回、60〜68 fps） |
 | p010a・p011 | NVIDIA の executor、scene-5000 | cleared（49.5〜49.7 fps、NVK と同等） |
+| p013 | draw・submit の多い bench の CPU の費用を NVK 並みに | in-progress（P3） |
 | p012 | 50 fps を明らかに超える改善 | uncleared（2026-10-30 P7: 頂点の側の固定機能の hardware の限界、NVK と同等 49.0 fps、上限 約 51.3。温度の差なし） |
 | p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
+| p022 | Intel i915（5330）: Linux（ANV）で約 50 fps の scene を zedBSD で Linux 以上に（ユーザーの指示で実測の Linux が基準） | in-progress（P1） |
+| p021 | Raspberry Pi 5 の model 50 fps（qs40 × スペックの比） | in-progress（P4） |
 | p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（26.6 fps、2026-10-30） |
 
 ### WS331 driver から HAL への直の依存を除く（P2）

@@ -640,6 +640,7 @@ main(
 	int status;
 	int poll_result;
 	int poll_timeout;
+	int normalize_result;
 	size_t index;
 	struct pollfd descriptors[3U + NETWORKD_SUBSCRIBER_MAX];
 	unsigned ipv6_slot;
@@ -680,17 +681,20 @@ main(
 		    strerror(saved));
 		return 1;
 	}
-	if (retire_managed_policy() != 0) {
-		saved = errno != 0 ? errno : EIO;
-		(void)close(route_events);
-		route_events = -1;
-		(void)close_listener(&listener);
-		(void)snprintf(record, sizeof(record), "FAIL %d wifi-normalize %s\n",
-		    saved, strerror(saved));
-		notify_init(record);
-		fprintf(stderr, "networkd: initial Wi-Fi normalization: %s\n",
-		    strerror(saved));
-		return 1;
+
+	/*
+	 * Leaves every radio down before anyone can ask for Wi-Fi.  A failure
+	 * costs Wi-Fi alone: the policy stays disabled, a later request to
+	 * enable it looks at the radios again and reports its own error, and
+	 * the wired interfaces and whatever waits for this daemon go on.
+	 */
+	normalize_result = retire_managed_policy();
+	if (normalize_result != 0) {
+		saved = errno;
+		if (saved == 0)
+			saved = EIO;
+		fprintf(stderr, "networkd: initial Wi-Fi normalization: %s; "
+		    "Wi-Fi stays disabled\n", strerror(saved));
 	}
 	notify_init("READY\n");
 	control_listener = listener.descriptor;

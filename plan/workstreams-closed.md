@@ -12,6 +12,7 @@ WS が完了・取り下げになったら、行を master.md からここへ移
 | [WS006](ws006/ws.md) | MG006 | 入力と evdev | completed | — |
 | [WS007](ws007/ws.md) | MG006 | グラフィックス・デスクトップ（旧） | canceled（2026-10-05） | p004 の再現条件、amd64 の残件 |
 | [WS008](ws008/ws.md) | MG006 | Noct と BeUI | completed | — |
+| [WS009](ws009/ws.md) | MG001 | 文書 | completed（2026-10-30） | P7 q1725（merge 94f1dec75）。docs の照合は plan/tools/docs-check/ |
 | [WS010](ws010/ws.md) | MG001 | Noct の script と build tool | completed | — |
 | [WS011](ws011/ws.md) | MG005 | ネットワーク設定 console | completed | — |
 | [WS012](ws012/ws.md) | MG005 | サービス管理 console | completed | — |
