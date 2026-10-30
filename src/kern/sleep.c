@@ -46,6 +46,7 @@
 #include <uapi/system.h>
 
 #include <stdbool.h>
+#include <hal/hal.h>
 
 /* The state of the sleep the coordinator runs. */
 #define SLEEP_NONE		0U

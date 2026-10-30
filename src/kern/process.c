@@ -30,6 +30,7 @@
 void process_timer_cleanup(struct process *);
 #endif
 #include "kern/thread.h"
+#include "kern/thread_private.h"
 #include "kern/tty.h"
 #include "kern/vmspace.h"
 #include "kern/filedesc.h"
@@ -37,6 +38,7 @@ void process_timer_cleanup(struct process *);
 #include "kern/cred.h"
 #include "kern/signal.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/namei.h"
 #include "kern/sandbox.h"
 #include "kern/test-checkpoint.h"

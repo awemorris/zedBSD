@@ -1,7 +1,7 @@
 /* Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib */
 #ifndef KERN_KERN_IO_SCRATCH_H
 #define KERN_KERN_IO_SCRATCH_H
-#include <hal/hal.h>
+#include <stddef.h>
 #include <kern/pmem.h>
 
 /* One contiguous physical region for CPU scratch. */

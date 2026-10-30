@@ -12,8 +12,8 @@
 #ifndef KERN_KERN_SCHED_H
 #define KERN_KERN_SCHED_H
 
-#include <hal/hal.h>
 #include <kern/clock.h>
+#include <kern/types.h>
 #include <stdint.h>
 
 struct thread;
@@ -65,7 +65,7 @@ struct sched {
 	uint64_t perf_runnable_at;
 	uint64_t perf_runnable_switches;
 	unsigned perf_runnable_kind;
-	hal_cpu_id_t perf_runnable_cpu;
+	kern_cpu_id_t perf_runnable_cpu;
 
 	/*
 	 * How many times the thread has been switched away from its CPU, with
@@ -75,8 +75,8 @@ struct sched {
 	 * CPU while holding it.
 	 */
 	uint64_t perf_switch_outs;
-	hal_cpu_id_t cpu;
-	hal_cpu_id_t last_cpu;
+	kern_cpu_id_t cpu;
+	kern_cpu_id_t last_cpu;
 	unsigned need_migrate;
 	struct thread *next;
 	struct thread *prev;
@@ -208,31 +208,8 @@ unsigned
 sched_test_preempt_count(void);
 
 void
-sched_wait_task(void);
-
-void
 sched_notify_task(
-	hal_task_t task);
-
-void
-sched_exit_current(void)
-__attribute__((noreturn));
-
-void
-sched_clock_cpu(
-	hal_cpu_id_t cpu,
-	uint64_t now);
-
-/*
- * Mark kernel execution entered from, and returning to, user mode.  These
- * calls classify scheduler ticks without exposing architecture context
- * details through the HAL task interface.
- */
-void
-sched_accounting_kernel_enter(void);
-
-void
-sched_accounting_kernel_leave(void);
+	kern_task_handle_t task);
 
 void
 sched_sleep(
@@ -295,36 +272,15 @@ struct sched_cpu_time {
 
 int
 sched_cpu_time(
-	hal_cpu_id_t cpu,
+	kern_cpu_id_t cpu,
 	struct sched_cpu_time *time);
 
 int
 sched_has_runnable(void);
 
-void
-sched_idle(void) __attribute__((noreturn));
-
-void
-sched_secondary_init(
-	hal_cpu_id_t cpu) __attribute__((noreturn));
-
-int
-sched_wait_others_online(void);
-
 int
 sched_set_cpu(
 	struct thread *thread,
-	hal_cpu_id_t cpu);
-
-void
-sched_cpu_notify(
-	hal_cpu_id_t cpu);
-
-#ifdef KERN_SCHED_TEST
-int
-sched_test_cpu_online(
-	hal_cpu_id_t,
-	struct thread *);
-#endif
+	kern_cpu_id_t cpu);
 
 #endif

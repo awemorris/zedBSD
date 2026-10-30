@@ -32,6 +32,7 @@
 #include <uapi/wlan.h>
 #include <uapi/errno.h>
 #include <stdbool.h>
+#include <hal/hal.h>
 
 #define INET_IOCTL_DIRECTION_MASK KERN_IOC_INOUT
 #define INET_IOCTL_SIZE_MASK (0x1fffUL << 16)

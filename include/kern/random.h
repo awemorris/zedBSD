@@ -12,7 +12,7 @@
 #ifndef KERN_KERN_RANDOM_H
 #define KERN_KERN_RANDOM_H
 
-#include <hal/hal.h>
+#include <kern/types.h>
 #include <stddef.h>
 
 /* kern_random_read(): wait until the generator is seeded. */
@@ -25,7 +25,7 @@ kern_random_init(void);
 /* Mixes the counter's timing of one timer tick into the pool. */
 void
 kern_random_tick(
-	hal_cpu_id_t cpu);
+	kern_cpu_id_t cpu);
 
 /* Mixes caller-supplied bytes into the pool without crediting them. */
 void

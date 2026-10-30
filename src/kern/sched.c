@@ -19,6 +19,7 @@
 
 #include "kern/sleep.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/atomic.h"
 #include "kern/thread.h"
 #include "kern/process.h"

@@ -16,6 +16,8 @@
  */
 
 #include "kern/thread.h"
+#include "kern/thread_private.h"
+#include "kern/sched_private.h"
 #include "kern/cred.h"
 #include "kern/process.h"
 #include "kern/vmspace.h"

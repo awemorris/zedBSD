@@ -25,6 +25,7 @@
 #define KERN_VM_VMSPACE_INTERNAL_H
 
 #include "kern/vmspace.h"
+#include "kern/vmspace_private.h"
 #include "kern/lock.h"
 
 struct file;

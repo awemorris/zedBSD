@@ -36,10 +36,12 @@
 #include "kern/process.h"
 #include "kern/random.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/user-probe.h"
 #include "kern/syscall.h"
 #include "kern/sysctl.h"
 #include "kern/thread.h"
+#include "kern/thread_private.h"
 
 /*
  * The fixed kernel heap.  A small allocation that does not fit falls back

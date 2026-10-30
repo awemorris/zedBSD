@@ -10,7 +10,6 @@
 
 #include <stddef.h>
 #include <stdint.h>
-#include <hal/hal.h>
 #include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>

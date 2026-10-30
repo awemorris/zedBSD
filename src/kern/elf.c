@@ -29,6 +29,7 @@
 #include <uapi/tls.h>
 #include <uapi/errno.h>
 #include <stdint.h>
+#include <hal/hal.h>
 
 #define ELF_PHNUM_MAX 32U
 #define PAGE_SIZE KERN_PAGE_SIZE

@@ -13,7 +13,7 @@
 #ifndef KERN_KERN_VMSPACE_H
 #define KERN_KERN_VMSPACE_H
 
-#include <hal/hal.h>
+#include <kern/types.h>
 #include <kern/pmem.h>
 #include <kern/atomic.h>
 #include <kern/lock.h>
@@ -208,7 +208,7 @@ struct vm_region {
 };
 
 struct vmspace {
-	hal_space_t space;
+	kern_space_handle_t space;
 	refcount_t refs;
 
 	/*

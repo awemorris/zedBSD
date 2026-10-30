@@ -32,6 +32,7 @@
 #include <kern/waitq.h>
 
 #include <uapi/errno.h>
+#include <hal/hal.h>
 
 /* Output made under one hold of the lock; longer requests loop. */
 #define RANDOM_CHUNK		256U

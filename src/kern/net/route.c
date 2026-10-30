@@ -25,6 +25,7 @@
 #include <uapi/route.h>
 #include <uapi/errno.h>
 #include <stdbool.h>
+#include <hal/hal.h>
 
 #define ROUTE_MAX 16U
 #define ROUTE_FLAGS_ALLOWED (RTF_UP | RTF_GATEWAY | RTF_HOST | RTF_STATIC | \

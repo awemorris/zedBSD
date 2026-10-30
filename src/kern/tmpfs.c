@@ -33,6 +33,7 @@
 #include <uapi/errno.h>
 #include <stdint.h>
 #include <uapi/statvfs.h>
+#include <hal/hal.h>
 
 /*
  * The smallest node quota a mount gets.  The quota itself is the share of

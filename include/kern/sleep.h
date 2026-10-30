@@ -14,7 +14,7 @@
 #ifndef KERN_KERN_SLEEP_H
 #define KERN_KERN_SLEEP_H
 
-#include <hal/hal.h>
+#include <kern/types.h>
 #include <stddef.h>
 #include <stdint.h>
 
@@ -53,7 +53,7 @@ struct kern_sleep_outcome {
 
 int kern_sleep_supported(void);
 void kern_sleep_s0idle(struct kern_sleep_outcome *outcome);
-void kern_sleep_idle(hal_cpu_id_t cpu);
+void kern_sleep_idle(kern_cpu_id_t cpu);
 void kern_sleep_note_wake(unsigned reason);
 
 #endif

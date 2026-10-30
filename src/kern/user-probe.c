@@ -17,6 +17,7 @@
 #include "kern/user-probe.h"
 #include "kern/process.h"
 #include "kern/sched.h"
+#include "kern/sched_private.h"
 #include "kern/signal.h"
 #include "kern/thread.h"
 #include "kern/vmspace.h"

@@ -26,6 +26,7 @@
 #include <kern/kcrt.h>
 
 #include <uapi/errno.h>
+#include <hal/hal.h>
 
 /* The entries one table holds: one page of physical addresses. */
 #define TMPFS_PAGES_FANOUT ((uint64_t)(KERN_PAGE_SIZE / sizeof(hal_physaddr_t)))
