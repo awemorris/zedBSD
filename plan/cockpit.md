@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 06:39（Q1）
+最終更新: 2026-10-31 06:44（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,7 +11,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | — | — | 返却（08:2x）。WS326 p025（規約の全文の見直し、style の違反 0、全試験が前と同じ）を main に | 次の割当を Q1 が決める |
 | P2 | — | — | 返却（06:5x）。VF2: BUG-338・340・342・343 closed（SD の CRC の誤りの根を直し、10 回の起動で root が毎回 live）、339 は判断待ち（0g） | 次の割当を Q1 が決める |
-| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き。big-1000 は 116 fps（NVK 136）、desktop の後退なし。今は subs の 1 run あたりの固定の費用を診断 | subs-1000（11 → NVK 75）は WSI の block-linear か protocol の変更が要る見込み |
 | P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1780: 完了の片付け（試験を plan/tools/h264sw/ へ、ws.md を完了の形に） | 午後: Pi 5 の実機 |
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | [WS310](ws310/ws.md) | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる | q1779: p001 設計（どの _OSC を何の bit で、前後の firmware の振る舞いの差の確かめ方） | WS317（hotplugd）はユーザーの「今は取り組まない」のとおり設計もしない |
