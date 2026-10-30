@@ -29,3 +29,4 @@ Resume point: p002（GPU ドライバ、i915 から）を P1 が q1240-i01 で�
 | p001 | 棚卸し: 機械の検査で件数と file の一覧、log の文字列の照合先の一覧、群ごとの分け方 | planned |
 | [p002](phase002/phase.md) | GPU ドライバ（src/drivers/gpu/）の comment と log。開発・試験の運用の話も消す（2026-10-17 ユーザー） | cleared（2026-10-19 Q1、全 file の通読はしていない） |
 | p003〜 | 残りの群ごとの削除（p001 で分割）。src/drivers の gpu/ 以外は [WS296](../ws296/ws.md) に移した（2026-10-27 00:22） | planned |
+- 2026-10-30 Q1: userland/base/net/main.c・networkd/main.c の comment に管理情報（ws005-p024・BUG-187・q631 など）が残る（WS009 p025 の P1 の所見）。この WS の範囲で消す。
