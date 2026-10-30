@@ -121,3 +121,25 @@ mview が qs40 を描くのに driver に欠けていた物（どれも HAL は�
   板に残る物: /boot/boot0/vmunix.p7old（元の写し）、user kei の ~/p7（program・library・qs40・qs40s・vkmatrix・keiland-shot・画面の PNG。次の計測で使う）。
 - 再開の手順: `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 [TIMING=1] [KEEP=1] COPIES=13 sh plan/ws291/tests/vf2-mview.sh OUT BUILD`
   （BUILD は `make ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=… …/vmunix …/bin/wayland …/bin/mview`、timing は `ZEDBSD_TEST_CPPFLAGS=-DPOWERVR_SUBMIT_TIMING=1`）。
+
+### q1726-i01（2026-10-30 22:50〜 P2、worktree p2-ws291v、基点 main 780e7349b）
+
+- 承認: 2026-10-30 ユーザーの指示（WS291 の PowerVR の最適化を P2 で）。目標は ws.md の末尾の決定のとおり qs40 × 13・1920x1080・direct scanout で 50 fps 以上。
+- 道具: `vf2-mview.sh` に `OLD=`（板に残す元の kernel の名前、既定 p7old）を足した。P2 は `OLD=p2old`。
+
+#### 足した物（commit e14843450、板では未確かめ）
+
+1. 計測: timing の build（`-DPOWERVR_SUBMIT_TIMING=1`）の kernel の行に `gpu ta`・`gpu 3d`・`gpu frame` を足した。service の pass が起きるたびに、走っている render job の
+   geometry と fragment の timeline を読み、届いた時刻を job に付ける（render-job.c `powervr_render_jobs_stamp`）。reap の時に、TA ＝（kick・前の TA の終わり・geometry が待った 3D の終わりの遅い方）から TA の終わりまで、
+   3D ＝（TA の終わり・前の 3D の終わりの遅い方）から 3D の終わりまで、frame ＝ 前の 3D の終わりから。時刻は service の thread が起きた時なので、割り込みから thread までの遅れを含む。
+2. TA と 3D の重なり: これまで render の geometry は context の直前の 3D（`fragment.submitted`）を待っていた → 次の frame の TA は前の frame の 3D が終わるまで始まらず、frame ＝ TA ＋ 3D だった。
+   Linux v7.3 の pvr_job.c（geometry は同じ HWRT data の job だけを待つ）と Mesa（data set の 2 つの rt_data を交互に）に合わせ、target の half ごとに最後の 3D の値を覚え（render-target.c `powervr_target_half_fragment`・`_note`）、
+   geometry は同じ half の前の 3D だけを待つ形にした。half は既に交互（`powervr_target_take_half`）。注意: vertex の段が前の pass の fragment の出力を読む使い方（同じ session の前の 3D に依存する TA）は、これで順が保証されなくなる（mview・compositor には無い）。
+3. cutout の shader: `if (a < 0.5) discard;` が EMC の if・else・end の分岐になり 29 group（不透明の物は 8）。kill だけの arm と merge の selection を、分岐なしの discard の select に直した（shader-spirv-control.c `reader_kill_only`）→ 14 group。
+- host 試験: p010-compiler 3062 PASS・group 29 PASS（cutout の 2 つは lane の一部を drop し machine と interpreter が一致）、p010 全 PASS（job-host-test に stand-in 4 つ）。build（vf2b、timing 付き）warning 0。
+
+#### 板（23:0x）: 起動しない
+
+- 22:55 に `OLD=p2old TIMING=1 KEEP=1 COPIES='1 13'` で main 780e7349b ＋ 1 の kernel（build/ws291/vf2t、cksum 4291544047）を入れた（読み返しで一致）→ run.sh の 8 回の入れ直しで SSH が来ず、
+  23:08 にもう 1 回入れ直して 3 分 ping も無し。元の kernel は板の /boot/boot0/vmunix.p2old・.p7old（2825517684）。この host に VF2 の serial（/dev/ttyUSB0）が無く戻せない → Q1 に回復を頼んだ。
+- 見込み（未確かめ）: 1 は service の pass で timeline を読むだけで起動に効かない。main の riscv64 の変更（WS331 p007〜p011）の VF2 の退行の疑い。P3 の起動した kernel は main 5aca73738 の上。

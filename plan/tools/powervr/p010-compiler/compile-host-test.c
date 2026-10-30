@@ -452,7 +452,7 @@ machine_compare_once(
 				words_computed = program.requests[word].words;
 		}
 		printf("  %s: %u groups, shared program %u operations, %u words\n", name, groups, workspace->shared_operation_count, words_computed);
-	} else if (stage == POWERVR_SHADER_FRAGMENT && current_key != NULL) {
+	} else if (stage != POWERVR_SHADER_COMPUTE && current_key != NULL) {
 		printf("  %s: %u groups\n", name, groups);
 	}
 	error = machine_run_program(machine, &workspace->backend, stage == POWERVR_SHADER_COMPUTE ? lane_mask(program.workgroup[0]) : 0xffffffffU);
