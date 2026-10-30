@@ -463,7 +463,7 @@
 | q1766 / q1766-i01 | S-333p009（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p009`） | [ws333-p009](ws333/phase009/phase.md) | 同上 | cleared（9fb61c61e） |
 | q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | cleared（35d5d4500） |
 | q1768 / q1768-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333b`・branch `agent/p7-ws333b`、QEMU、出力は /tmp） | [ws333](ws333/ws.md) p012（tick の位相を揃える）→ [BUG-377](bugs/BUG-377.md) | p012 は amd64 の HAL の実装と QEMU の起動まで、5330 の計測は後。BUG-377 は config の依存の宣言だけ（noct の規則は変えない） | in-progress・返却（p012 9b86c8c4a は main 22c629663、5330 の電力の数待ち。BUG-377 87a6d4ff7 fixed） |
-| q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress |
+| q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress・返却（2,427 → 2,507（72.21%）、main bdbf90154。i04 へ） |
 
 ## 2026-10-31: 空いた P4・P6・P7 の割り当て（q1769〜q1771）
 
@@ -482,3 +482,4 @@
 | q1777 / q1777-i01 | P4（phase-runner、worktree p4-bugs） | [ws333](ws333/ws.md) p019 sessiond の THERMAL の要求 | UAPI（p004）待ちの kernel への呼びは仮の口 | in-progress・返却（370fccb1e を main に。rules の host 試験 113 checks、kernel への呼びは UAPI まで stub） |
 | q1778 / q1778-i01 | P1（conformance-reviewer、worktree `/home/awe/zedBSD-worktrees/p1-ws326p025`・branch `agent/p1-ws326p025`） | [ws326-p025](ws326/phase025/phase.md) | 書き方だけ、全試験が前と同じ | in-progress |
 | q1779 / q1779-i01 | P6（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p6-ws310`・branch `agent/p6-ws310`） | [ws310](ws310/ws.md) p001 設計 | plan/ws310/ だけ、design-reviewer と問いまで | in-progress |
+| q1727 / q1727-i04 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 4 回目 | 100% までの自走（ユーザーの指示）、計測は /tmp | in-progress |
