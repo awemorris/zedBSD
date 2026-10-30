@@ -464,3 +464,14 @@
 | q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | cleared（35d5d4500） |
 | q1768 / q1768-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333b`・branch `agent/p7-ws333b`、QEMU、出力は /tmp） | [ws333](ws333/ws.md) p012（tick の位相を揃える）→ [BUG-377](bugs/BUG-377.md) | p012 は amd64 の HAL の実装と QEMU の起動まで、5330 の計測は後。BUG-377 は config の依存の宣言だけ（noct の規則は変えない） | in-progress・返却（p012 9b86c8c4a は main 22c629663、5330 の電力の数待ち。BUG-377 87a6d4ff7 fixed） |
 | q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress |
+
+## 2026-10-31: 空いた P4・P6・P7 の割り当て（q1769〜q1771）
+
+2026-10-31 ユーザーから、不在の間は実装できる WS は実装を、試験できるなら試験も進め、libmedia の WS は昼までに終えるよう優先度を上げる、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1769 / q1769-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws326p026`・branch `agent/p4-ws326p026`） | ws326-p026 | 設計を先に、移しは p022 の merge の後（Q1 が知らせる） | in-progress |
+| q1770 / q1770-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p011 x86 の CPU の driver の統合 | HWP の道だけ（legacy の 0xCE の比の道は作らない）。5330 は p014 で | in-progress |
+| q1771 / q1771-i01 | P6（phase-runner-high、worktree p6-ws333） | [ws333](ws333/ws.md) p017 ACPI WMI の層 | SMI を起こさない。AML の harness を plan/tools/aml-host/ へ | in-progress |
+
