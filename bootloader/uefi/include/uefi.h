@@ -133,6 +133,9 @@ typedef struct {
 	void *VendorTable;
 } EFI_CONFIGURATION_TABLE;
 
+/* The attribute of a range the firmware keeps using at runtime. */
+#define EFI_MEMORY_RUNTIME 0x8000000000000000ULL
+
 /* One range of the firmware's memory map. */
 typedef struct {
 	UINT32 Type;
@@ -255,6 +258,28 @@ typedef EFI_STATUS(EFIAPI *EFI_LOCATE_HANDLE_BUFFER)(
 typedef EFI_STATUS(EFIAPI *EFI_CONNECT_CONTROLLER)(EFI_HANDLE, EFI_HANDLE *,
 						   void *, BOOLEAN);
 
+/*
+ * The runtime service that moves the firmware's runtime services to the
+ * virtual addresses its memory descriptors name.
+ */
+typedef EFI_STATUS(EFIAPI *EFI_SET_VIRTUAL_ADDRESS_MAP)(
+	UINTN, UINTN, UINT32, EFI_MEMORY_DESCRIPTOR *);
+
+/*
+ * The runtime services table, up to the one service the loader calls.
+ *
+ * It stays valid after ExitBootServices, at its physical address until
+ * SetVirtualAddressMap has been called.
+ */
+typedef struct efi_runtime_services {
+	EFI_TABLE_HEADER Hdr;
+	void *GetTime;
+	void *SetTime;
+	void *GetWakeupTime;
+	void *SetWakeupTime;
+	EFI_SET_VIRTUAL_ADDRESS_MAP SetVirtualAddressMap;
+} EFI_RUNTIME_SERVICES;
+
 /* The boot services table, valid until ExitBootServices. */
 typedef struct efi_boot_services {
 	EFI_TABLE_HEADER Hdr;
@@ -315,7 +340,7 @@ typedef struct efi_system_table {
 	EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *ConOut;
 	EFI_HANDLE StandardErrorHandle;
 	EFI_SIMPLE_TEXT_OUTPUT_PROTOCOL *StdErr;
-	void *RuntimeServices;
+	EFI_RUNTIME_SERVICES *RuntimeServices;
 	EFI_BOOT_SERVICES *BootServices;
 	UINTN NumberOfTableEntries;
 	EFI_CONFIGURATION_TABLE *ConfigurationTable;

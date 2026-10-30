@@ -464,6 +464,58 @@ _Static_assert(offsetof(struct system_sleep_request, device) == 16U,
  */
 #define KERN_SYSTEM_SHOW_CONSOLE _IO(KERN_SYSTEM_IOC_GROUP, 21)
 
+/*
+ * The firmware's variables: the settings a firmware keeps in its own
+ * non-volatile store, such as UEFI's boot entries.  A variable is named by
+ * a space and a name, both UTF-8 strings ending in NUL.  On UEFI the space
+ * is the vendor GUID in its lowercase text form
+ * ("8be4df61-93ca-11d2-aa0d-00e098032b8c" for the global variables) and
+ * the name the variable's name; the value is bytes the caller interprets.
+ * attributes carries the firmware's own attribute bits (on UEFI
+ * EFI_VARIABLE_NON_VOLATILE 1, BOOTSERVICE_ACCESS 2, RUNTIME_ACCESS 4).
+ *
+ * Only root may ask (EPERM).  A platform whose firmware has no variable
+ * store the kernel can reach answers EOPNOTSUPP.
+ *
+ * KERN_SYSTEM_FIRMWARE_VARIABLE_GET reads one variable into the value_size
+ * bytes at value and sets value_size and attributes; a variable larger
+ * than value_size is refused with ERANGE and value_size set to its size.
+ * ENOENT names a variable that does not exist.
+ *
+ * KERN_SYSTEM_FIRMWARE_VARIABLE_SET writes value_size bytes from value with
+ * attributes; a value_size of zero deletes the variable.
+ *
+ * KERN_SYSTEM_FIRMWARE_VARIABLE_NEXT replaces space and name with those of
+ * the variable after them in the firmware's order; an empty name starts at
+ * the first.  ENOENT ends the walk.  value and value_size are not used.
+ */
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_VERSION		1U
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_SPACE_MAX		40U
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_NAME_MAX		512U
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_VALUE_MAX		65536U
+
+struct system_firmware_variable {
+	uint32_t version;
+	uint32_t attributes;
+	uint32_t value_size;
+	uint32_t reserved;
+	uint64_t value;
+	char space[KERN_SYSTEM_FIRMWARE_VARIABLE_SPACE_MAX];
+	char name[KERN_SYSTEM_FIRMWARE_VARIABLE_NAME_MAX];
+};
+
+_Static_assert(sizeof(struct system_firmware_variable) == 576U,
+    "firmware variable ABI must be identical on ILP32 and LP64");
+_Static_assert(offsetof(struct system_firmware_variable, space) == 24U,
+    "firmware variable space offset is an ABI contract");
+
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_GET                                   \
+	_IOWR(KERN_SYSTEM_IOC_GROUP, 22, struct system_firmware_variable)
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_SET                                   \
+	_IOW(KERN_SYSTEM_IOC_GROUP, 23, struct system_firmware_variable)
+#define KERN_SYSTEM_FIRMWARE_VARIABLE_NEXT                                  \
+	_IOWR(KERN_SYSTEM_IOC_GROUP, 24, struct system_firmware_variable)
+
 #ifdef __cplusplus
 }
 #endif

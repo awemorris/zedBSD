@@ -480,7 +480,7 @@ AMD64_KERNEL_SOURCES := \
 	$(AMD64_RTL8125_SOURCES) \
 	$(AMD64_ACPI_SOURCES) \
 	$(AMD64_I2C_SOURCES) \
-	src/drivers/platform/pcat/pcat-ide.c src/drivers/ethernet/dp8390.c \
+	src/drivers/platform/pcat/pcat-ide.c src/drivers/platform/pcat/uefi-variables.c src/drivers/ethernet/dp8390.c \
 	src/drivers/isa/ne2000.c src/drivers/isa/ps2-8042.c \
 	src/drivers/disklabel/mbr.c src/drivers/disklabel/gpt.c \
 	src/drivers/disklabel/pcat.c src/kern/platform/pcat.c \

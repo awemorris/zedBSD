@@ -135,6 +135,129 @@ allocation_covers(const struct zbl6_memory_handoff *memory,
 }
 
 /*
+ * Validates where a version-eight handoff keeps its runtime descriptors.
+ *
+ * The copy must lie in the low block the bootstrap maps, be covered by one
+ * of the loader's boot allocations, and hold whole descriptors of a size
+ * the HAL's own copy can take.
+ */
+int
+zbl6_uefi_runtime_envelope_valid(
+	const struct zbl6_uefi_runtime_handoff *runtime,
+	const struct zbl6_memory_handoff *memory,
+	const struct zbl6_boot_allocation *allocations)
+{
+	uint64_t bytes;
+	int placed;
+	int covered;
+
+	/* Refuses a missing record. */
+	if (runtime == NULL || memory == NULL || allocations == NULL)
+		return 0;
+
+	/* Refuses a record without a system table or with a reserved field set. */
+	if (runtime->system_table == 0 || runtime->reserved != 0)
+		return 0;
+
+	/* Refuses a descriptor too small for its fields, unaligned, or a count of none. */
+	if (runtime->descriptor_size < ZBL6_UEFI_MEMORY_DESCRIPTOR_MIN_SIZE ||
+	    (runtime->descriptor_size & 7U) != 0 ||
+	    runtime->descriptor_count == 0)
+		return 0;
+
+	/* Refuses a descriptor larger than the HAL's copy. */
+	if (runtime->descriptor_size > ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES)
+		return 0;
+
+	/* Refuses more descriptors than the HAL's copy holds. */
+	if (runtime->descriptor_count > ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES / runtime->descriptor_size)
+		return 0;
+
+	/* Refuses a copy outside the bootstrap's identity map. */
+	bytes = (uint64_t)runtime->descriptor_count * runtime->descriptor_size;
+	placed = low_array_valid(runtime->descriptors, runtime->descriptor_count, runtime->descriptor_size);
+	if (!placed)
+		return 0;
+
+	/* Refuses a copy the loader did not keep for the kernel. */
+	covered = allocation_covers(memory, allocations, runtime->descriptors, bytes, 0);
+	if (!covered)
+		return 0;
+
+	/* Succeeded: the copy can be read whole. */
+	return 1;
+}
+
+/*
+ * Validates the runtime descriptors a version-eight handoff carried.
+ *
+ * Every range must be whole pages, lie inside the runtime window at the
+ * address the loader gave the firmware, follow the previous range there,
+ * and the system table must lie in one of them.
+ */
+int
+zbl6_uefi_runtime_descriptors_valid(
+	const struct zbl6_uefi_runtime_handoff *runtime,
+	const uint8_t *descriptors)
+{
+	const uint8_t *descriptor;
+	uint64_t physical;
+	uint64_t virtual_start;
+	uint64_t pages;
+	uint64_t bytes;
+	uint64_t window_end;
+	uint64_t previous_end;
+	uint32_t index;
+	int holds_table;
+
+	/* Starts below the window with no range holding the table yet. */
+	window_end = ZBL6_UEFI_RUNTIME_VIRTUAL_BASE + ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE;
+	previous_end = ZBL6_UEFI_RUNTIME_VIRTUAL_BASE;
+	holds_table = 0;
+
+	/* Checks every descriptor in the order the loader gave them their addresses. */
+	for (index = 0; index < runtime->descriptor_count; index++) {
+		/* Reads the physical start, the virtual start and the page count. */
+		descriptor = descriptors + (size_t)index * runtime->descriptor_size;
+		__builtin_memcpy(&physical, descriptor + 8, sizeof(physical));
+		__builtin_memcpy(&virtual_start, descriptor + 16, sizeof(virtual_start));
+		__builtin_memcpy(&pages, descriptor + 24, sizeof(pages));
+
+		/* Refuses an empty range or one larger than the window. */
+		if (pages == 0 || pages > ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE / ZBL6_PAGE_SIZE)
+			return 0;
+
+		/* Refuses an unaligned range or one that wraps physical memory. */
+		bytes = pages * ZBL6_PAGE_SIZE;
+
+		if (((physical | virtual_start) & (ZBL6_PAGE_SIZE - 1U)) != 0 ||
+		    physical > UINT64_MAX - bytes)
+			return 0;
+
+		/* Refuses a range before the previous one or past the window's end. */
+		if (virtual_start < previous_end ||
+		    virtual_start > window_end ||
+		    bytes > window_end - virtual_start)
+			return 0;
+
+		/* The next range starts no lower than this one ends. */
+		previous_end = virtual_start + bytes;
+
+		/* Notes the range that holds the system table. */
+		if (runtime->system_table >= physical &&
+		    runtime->system_table - physical < bytes)
+			holds_table = 1;
+	}
+
+	/* Refuses descriptors none of which holds the system table. */
+	if (!holds_table)
+		return 0;
+
+	/* Succeeded: every range has its place in the window. */
+	return 1;
+}
+
+/*
  * Classifies a decoded ZBL6 handoff envelope.
  */
 enum zbl6_handoff_form
@@ -206,6 +329,21 @@ zbl6_handoff_classify(
 		    ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS;
 		if (size == ZBL6_HANDOFF_V7_UEFI_SIZE && flags == required)
 			return ZBL6_HANDOFF_FORM_V7_UEFI;
+		return ZBL6_HANDOFF_FORM_INVALID;
+	}
+
+	/* V8 retains V7 and may carry the firmware's runtime services. */
+	if (version == ZBL6_HANDOFF_V8_VERSION) {
+		required |= ZBL6_HANDOFF_FLAG_FRAMEBUFFER |
+		    ZBL6_HANDOFF_FLAG_BOOT_UUID | ZBL6_HANDOFF_FLAG_BOOT_PARAMETERS |
+		    ZBL6_HANDOFF_FLAG_BOOT_ALLOCATIONS;
+
+		/* Accepts the exact size with the V7 flags and the optional runtime flag. */
+		if (size == ZBL6_HANDOFF_V8_UEFI_SIZE &&
+		    (flags & ~ZBL6_HANDOFF_FLAG_UEFI_RUNTIME) == required)
+			return ZBL6_HANDOFF_FORM_V8_UEFI;
+
+		/* Rejects every other version-eight representation. */
 		return ZBL6_HANDOFF_FORM_INVALID;
 	}
 
@@ -334,7 +472,8 @@ zbl6_uefi_partition_handoff_valid(
 	/* Requires version five and its authoritative boot-volume UUID. */
 	if ((version != ZBL6_HANDOFF_V5_VERSION &&
 	    version != ZBL6_HANDOFF_V6_VERSION &&
-	    version != ZBL6_HANDOFF_V7_VERSION) ||
+	    version != ZBL6_HANDOFF_V7_VERSION &&
+	    version != ZBL6_HANDOFF_V8_VERSION) ||
 	    (flags & ZBL6_HANDOFF_FLAG_BOOT_UUID) == 0U)
 		return 0;
 

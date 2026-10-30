@@ -75,6 +75,24 @@ int kern_device_map(uint64_t address, size_t size,
 		    unsigned attributes, void **mapped);
 int kern_device_unmap(void *mapped, size_t size);
 
+/* Firmware mapping attributes for kern_firmware_map(). */
+#define KERN_FIRMWARE_CACHED	0U
+#define KERN_FIRMWARE_UNCACHED	1U
+
+/*
+ * Map a firmware range at the kernel address the firmware was told.
+ *
+ * Firmware that keeps running under the kernel, such as UEFI's runtime
+ * services, was given the kernel addresses of its ranges before the
+ * kernel started, so the caller names the address.  protection is the OR
+ * of KERN_PROT_*, and may include KERN_PROT_EXEC for the firmware's code;
+ * attributes is KERN_FIRMWARE_CACHED or KERN_FIRMWARE_UNCACHED.  The
+ * range must not be RAM the kernel manages, and the mapping lasts for the
+ * kernel's life.  A platform without a firmware window refuses the call.
+ */
+int kern_firmware_map(uint64_t address, void *mapped, size_t size,
+		      unsigned protection, unsigned attributes);
+
 /*
  * Map and unmap a physical run a second time, without caching.
  *

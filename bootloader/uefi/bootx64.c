@@ -66,6 +66,7 @@
 #define MEMORY_RANGES_OFFSET		0x7000U
 #define BOOT_ALLOCATIONS_OFFSET		0xa000U
 #define FRAMEBUFFER_PD_OFFSET		0x9000U
+#define RUNTIME_DESCRIPTORS_OFFSET	0xb000U
 #define TRANSITION_STACK_TOP		0x10000U
 
 /* Kernel placement: candidates retried and map lines printed on failure. */
@@ -250,6 +251,7 @@ static void console_kernel_map(struct loader_context *context, const EFI_MEMORY_
 static EFI_STATUS allocate_kernel_at(EFI_BOOT_SERVICES *boot, EFI_PHYSICAL_ADDRESS wanted, UINTN pages);
 static EFI_STATUS place_kernel_at(struct loader_context *context, struct zbl_elf64_plan *plan, EFI_PHYSICAL_ADDRESS wanted, UINTN pages);
 static EFI_STATUS place_kernel(struct loader_context *context, struct zbl_elf64_plan *plan, const struct kernel_placement_policy *policy, EFI_PHYSICAL_ADDRESS *address, UINTN pages);
+static void give_runtime_addresses(const EFI_SYSTEM_TABLE *system, const uint8_t *map, UINTN map_size, UINTN descriptor_size, UINT32 descriptor_version, uint64_t low_base, struct zbl6_handoff_v8_uefi *handoff);
 static void build_bootstrap(uint64_t low_base, const struct zbl_elf64_plan *plan, const struct zbl6_framebuffer *framebuffer, const struct zbl_uefi_framebuffer_mapping *framebuffer_mapping, uint32_t boot_volume_serial, uint8_t partition_scheme, const struct kern_boot_parameter_record *parameters, const struct kern_boot_provenance *provenance);
 static int root_block_read(void *device_context, uint64_t block, uint32_t count, void *buffer);
 static void __attribute__((noreturn)) fail_root(struct loader_context *context, struct discovered_volume *discovered, const char *reason);
@@ -288,7 +290,7 @@ efi_main(
 	UINTN descriptor_size;
 	UINT32 descriptor_version;
 	EFI_MEMORY_DESCRIPTOR *map;
-	struct zbl6_handoff_v7_uefi *handoff;
+	struct zbl6_handoff_v8_uefi *handoff;
 	struct zbl6_handoff_v3 *handoff_common;
 	struct zbl6_framebuffer framebuffer;
 	struct zbl_uefi_framebuffer_mapping framebuffer_mapping;
@@ -736,6 +738,15 @@ efi_main(
 	/* Publishes the final range count. */
 	handoff_common->memory_range_count = range_count;
 	handoff->memory.range_count = range_count;
+
+	/* Moves the firmware's runtime services into the kernel's runtime window, when they fit. */
+	give_runtime_addresses(system,
+			       (const uint8_t *)map,
+			       map_size,
+			       descriptor_size,
+			       descriptor_version,
+			       low_address,
+			       handoff);
 	debug_port("A64 UEFI EXIT\n");
 
 	/* Chooses the transition: a quiet boot enters past the third progress block. */
@@ -2799,7 +2810,7 @@ build_bootstrap(
 	uint64_t *high_pdpt;
 	uint64_t *high_pd;
 	uint64_t *framebuffer_pd;
-	struct zbl6_handoff_v7_uefi *handoff;
+	struct zbl6_handoff_v8_uefi *handoff;
 	struct zbl6_handoff_v3 *common;
 	UINTN transition_size;
 	unsigned index;
@@ -2882,7 +2893,7 @@ build_bootstrap(
 
 	/* Fills the handoff's identity and what it carries. */
 	common->magic = ZBL6_HANDOFF_MAGIC;
-	common->version = ZBL6_HANDOFF_V7_VERSION;
+	common->version = ZBL6_HANDOFF_V8_VERSION;
 	common->size = sizeof(*handoff);
 	common->flags = ZBL6_HANDOFF_FLAG_UEFI |
 			ZBL6_HANDOFF_FLAG_MEMORY_MAP |
@@ -2916,6 +2927,109 @@ build_bootstrap(
 	handoff->prefix.common.boot_volume_serial = boot_volume_serial;
 	byte_copy(&handoff->prefix.parameters, parameters, sizeof(*parameters));
 	byte_copy(&handoff->provenance, provenance, sizeof(*provenance));
+}
+
+/*
+ * Gives the firmware's runtime services their addresses in the kernel's
+ * runtime window and describes them in the handoff.
+ *
+ * It runs after ExitBootServices, on the firmware's identity map, where
+ * UEFI allows the one SetVirtualAddressMap call of the boot.  The runtime
+ * descriptors are copied to the low block and given consecutive parts of
+ * the window in map order.  When they do not fit the window or the copy,
+ * or the firmware refuses the map, the handoff carries no runtime services
+ * and the boot goes on without them.
+ */
+static void
+give_runtime_addresses(
+	const EFI_SYSTEM_TABLE *system,
+	const uint8_t *map,
+	UINTN map_size,
+	UINTN descriptor_size,
+	UINT32 descriptor_version,
+	uint64_t low_base,
+	struct zbl6_handoff_v8_uefi *handoff)
+{
+	EFI_RUNTIME_SERVICES *runtime;
+	const EFI_MEMORY_DESCRIPTOR *descriptor;
+	EFI_MEMORY_DESCRIPTOR *copy;
+	uint8_t *copies;
+	UINTN offset;
+	UINTN copied_bytes;
+	uint64_t window_used;
+	uint32_t count;
+	EFI_STATUS status;
+
+	/* Refuses descriptors without the fields the window needs, or larger than the copy. */
+	if (descriptor_size < ZBL6_UEFI_MEMORY_DESCRIPTOR_MIN_SIZE ||
+	    descriptor_size > ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES ||
+	    (descriptor_size & 7U) != 0)
+		return;
+
+	/* Refuses a firmware whose runtime services cannot be moved. */
+	runtime = system->RuntimeServices;
+	if (runtime == 0 || runtime->SetVirtualAddressMap == 0)
+		return;
+
+	/* Copies each runtime descriptor and gives it the next free part of the window. */
+	copies = (uint8_t *)(uintptr_t)(low_base + RUNTIME_DESCRIPTORS_OFFSET);
+	copied_bytes = 0;
+	window_used = 0;
+	count = 0;
+	for (offset = 0;
+	     offset + descriptor_size <= map_size;
+	     offset += descriptor_size) {
+		descriptor = (const void *)(map + offset);
+
+		/* Skips memory the firmware does not use at runtime, and empty ranges. */
+		if ((descriptor->Attribute & EFI_MEMORY_RUNTIME) == 0 ||
+		    descriptor->NumberOfPages == 0)
+			continue;
+
+		/* Leaves the services where they are when the range does not fit what is left of the window. */
+		if (descriptor->NumberOfPages > (ZBL6_UEFI_RUNTIME_VIRTUAL_SIZE - window_used) / PAGE_SIZE) {
+			debug_port("A64 UEFI RUNTIME WINDOW FULL\n");
+			return;
+		}
+
+		/* Leaves them too when the copy would leave its place in the low block. */
+		if (descriptor_size > ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES - copied_bytes) {
+			debug_port("A64 UEFI RUNTIME MAP FULL\n");
+			return;
+		}
+
+		/* Copies the descriptor and names its place in the window. */
+		byte_copy(copies + copied_bytes, descriptor, descriptor_size);
+		copy = (void *)(copies + copied_bytes);
+		copy->VirtualStart = ZBL6_UEFI_RUNTIME_VIRTUAL_BASE + window_used;
+		window_used += descriptor->NumberOfPages * PAGE_SIZE;
+		copied_bytes += descriptor_size;
+		count++;
+	}
+
+	/* A firmware without runtime memory has nothing to move. */
+	if (count == 0)
+		return;
+
+	/* Moves the runtime services; after a refusal the kernel does not call them. */
+	status = runtime->SetVirtualAddressMap(copied_bytes,
+					       descriptor_size,
+					       descriptor_version,
+					       (EFI_MEMORY_DESCRIPTOR *)copies);
+	if (status != EFI_SUCCESS) {
+		debug_port("A64 UEFI RUNTIME MAP REFUSED\n");
+		return;
+	}
+
+	/* Describes the moved services; the system table keeps its physical address. */
+	handoff->runtime.system_table = (uintptr_t)system;
+	handoff->runtime.descriptors = low_base + RUNTIME_DESCRIPTORS_OFFSET;
+	handoff->runtime.descriptor_count = count;
+	handoff->runtime.descriptor_size = (uint32_t)descriptor_size;
+	handoff->runtime.descriptor_version = descriptor_version;
+
+	/* Tells the HAL the runtime part of the handoff is filled. */
+	handoff->prefix.common.common.flags |= ZBL6_HANDOFF_FLAG_UEFI_RUNTIME;
 }
 
 /*
@@ -3353,8 +3467,16 @@ boot_file_read(
 	return EFI_SUCCESS;
 }
 
+/*
+ * The runtime descriptors sit above the boot allocations and leave the top
+ * of the low block to the transition stack.
+ */
+_Static_assert(RUNTIME_DESCRIPTORS_OFFSET >= BOOT_ALLOCATIONS_OFFSET + ZBL6_MAX_BOOT_ALLOCATIONS * ZBL6_BOOT_ALLOCATION_SIZE &&
+	       RUNTIME_DESCRIPTORS_OFFSET + ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES + 0x2000U <= TRANSITION_STACK_TOP,
+	       "UEFI runtime descriptors must fit their low-memory slot");
+
 /* The handoff must fit between its offset and the memory ranges in the low block. */
-_Static_assert(ZBL6_HANDOFF_V7_UEFI_SIZE <= MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
+_Static_assert(ZBL6_HANDOFF_V8_UEFI_SIZE <= MEMORY_RANGES_OFFSET - HANDOFF_OFFSET,
 	       "UEFI parameter handoff must fit its low-memory slot");
 
 /* The discovery's partition styles are the handoff's partition schemes. */

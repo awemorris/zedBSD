@@ -29,6 +29,9 @@
 /* How many values of the boot framebuffer the kernel reads by name. */
 #define PCAT_FRAMEBUFFER_VALUE_COUNT 6U
 
+/* How many values of the firmware's runtime services the kernel reads by name. */
+#define PCAT_UEFI_RUNTIME_VALUE_COUNT 4U
+
 struct vga_font_handoff {
 	uint32_t magic;
 	uint16_t version;
@@ -93,7 +96,36 @@ static const char *const framebuffer_value_names[PCAT_FRAMEBUFFER_VALUE_COUNT] =
  */
 static uint64_t framebuffer_values[PCAT_FRAMEBUFFER_VALUE_COUNT];
 
+/*
+ * The names under which the kernel reads the firmware's runtime services,
+ * one per value, in the order of uefi_runtime_values[].
+ */
+static const char *const uefi_runtime_value_names[PCAT_UEFI_RUNTIME_VALUE_COUNT] = {
+	"uefi.system-table",
+	"uefi.runtime-map-count",
+	"uefi.runtime-map-entry-size",
+	"uefi.runtime-map-version",
+};
+
+/*
+ * The firmware's runtime services handed to the kernel by name, each a
+ * 64-bit word: the system table's physical address, and the number, the
+ * size and the version of the UEFI memory descriptors in uefi_runtime_map.
+ * Filled once from a version-eight handoff whose runtime part was accepted;
+ * the names report no object while the system table's address is zero.
+ */
+static uint64_t uefi_runtime_values[PCAT_UEFI_RUNTIME_VALUE_COUNT];
+
+/*
+ * The firmware's runtime memory descriptors, copied out of the loader's
+ * low block before it is reused, with each VirtualStart inside the runtime
+ * window.  The kernel reads them as "uefi.runtime-map" while
+ * uefi_runtime_values[0] is not zero.
+ */
+static uint8_t uefi_runtime_map[ZBL6_UEFI_RUNTIME_MAP_MAX_BYTES] __attribute__((aligned(8)));
+
 static void accept_memory(const struct zbl6_memory_handoff *memory, uint32_t source);
+static void accept_uefi_runtime(const struct zbl6_uefi_runtime_handoff *runtime);
 static int handoff_name_is(const char *name, const char *expected);
 static char hex_digit(unsigned value);
 static void set_boot_uuid(uint32_t serial);
@@ -149,6 +181,7 @@ prekern_bsp_boot_init(
 	hal_memset(&boot_info_v2, 0, sizeof(boot_info_v2));
 	hal_memset(&boot_framebuffer, 0, sizeof(boot_framebuffer));
 	hal_memset(framebuffer_values, 0, sizeof(framebuffer_values));
+	hal_memset(uefi_runtime_values, 0, sizeof(uefi_runtime_values));
 	hal_memset(boot_selector, 0, sizeof(boot_selector));
 	(void)kern_boot_provenance_set(NULL);
 	form = zbl6_handoff_classify_raw(raw_boot_info);
@@ -158,12 +191,13 @@ prekern_bsp_boot_init(
 		HAL_FATAL("unsupported amd64 ZBL6 handoff");
 
 	v6 = form == ZBL6_HANDOFF_FORM_V6_BIOS ||
-	    form == ZBL6_HANDOFF_FORM_V6_UEFI || form == ZBL6_HANDOFF_FORM_V7_UEFI;
+	    form == ZBL6_HANDOFF_FORM_V6_UEFI || form == ZBL6_HANDOFF_FORM_V7_UEFI ||
+	    form == ZBL6_HANDOFF_FORM_V8_UEFI;
 	hal_memset(&boot_memory, 0, sizeof(boot_memory));
 	boot_kernel_phys_start = 0;
 	boot_kernel_phys_end = 0;
 	boot_kernel_placement_known = 0;
-	if (form == ZBL6_HANDOFF_FORM_V7_UEFI) {
+	if (form == ZBL6_HANDOFF_FORM_V7_UEFI || form == ZBL6_HANDOFF_FORM_V8_UEFI) {
 		struct kern_boot_provenance provenance;
 
 		/* The raw packed tail may be unaligned; retain an aligned copy. */
@@ -335,6 +369,11 @@ prekern_bsp_boot_init(
 			    memory->kernel_phys_end != raw_v2->kernel_phys_end)
 				HAL_FATAL("inconsistent amd64 memory handoff");
 			accept_memory(memory, ZBL6_MEMORY_SOURCE_UEFI);
+
+			/* Keeps the firmware's runtime services when the loader moved them. */
+			if (form == ZBL6_HANDOFF_FORM_V8_UEFI &&
+			    (raw_v2->flags & ZBL6_HANDOFF_FLAG_UEFI_RUNTIME) != 0)
+				accept_uefi_runtime(&((const struct zbl6_handoff_v8_uefi *)raw)->runtime);
 		} else {
 			/* Copies and validates the ordered UEFI memory map. */
 			source = (const void *)(uintptr_t)raw_v2->memory_ranges;
@@ -444,6 +483,21 @@ hal_get_arch_handoff(
 			match = handoff_name_is(name, framebuffer_value_names[index]);
 			if (match)
 				return &framebuffer_values[index];
+		}
+	}
+
+	/* Exposes the firmware's runtime services only when the loader moved them. */
+	if (uefi_runtime_values[0] != 0) {
+		/* Returns the copied runtime descriptors under their own name. */
+		match = handoff_name_is(name, "uefi.runtime-map");
+		if (match)
+			return uefi_runtime_map;
+
+		/* Returns one of the runtime values under its own name. */
+		for (index = 0; index < PCAT_UEFI_RUNTIME_VALUE_COUNT; index++) {
+			match = handoff_name_is(name, uefi_runtime_value_names[index]);
+			if (match)
+				return &uefi_runtime_values[index];
 		}
 	}
 
@@ -763,6 +817,44 @@ accept_memory(const struct zbl6_memory_handoff *memory, uint32_t source)
 		if (boot_memory_range[i].type == ZBL6_MEMORY_USABLE && end > total_memory)
 			total_memory = end;
 	}
+}
+
+/*
+ * Keeps the firmware's runtime services a version-eight handoff carried.
+ *
+ * The descriptors are copied before the loader's low block is reused.  A
+ * runtime part that fails validation is dropped: the kernel then finds no
+ * runtime services, and the boot goes on.
+ */
+static void
+accept_uefi_runtime(
+	const struct zbl6_uefi_runtime_handoff *runtime)
+{
+	size_t bytes;
+	int valid;
+
+	/* Drops a runtime part whose descriptors lie where the loader kept nothing. */
+	valid = zbl6_uefi_runtime_envelope_valid(runtime, &boot_memory, boot_allocations);
+	if (!valid)
+		return;
+
+	/* Copies the descriptors out of the low block. */
+	bytes = (size_t)runtime->descriptor_count * runtime->descriptor_size;
+	hal_memset(uefi_runtime_map, 0, sizeof(uefi_runtime_map));
+	hal_memcpy(uefi_runtime_map, (const void *)(uintptr_t)runtime->descriptors, bytes);
+
+	/* Drops descriptors that leave the runtime window or miss the system table. */
+	valid = zbl6_uefi_runtime_descriptors_valid(runtime, uefi_runtime_map);
+	if (!valid) {
+		hal_memset(uefi_runtime_map, 0, sizeof(uefi_runtime_map));
+		return;
+	}
+
+	/* Publishes the values under the kernel's names; the system table's address enables them. */
+	uefi_runtime_values[1] = runtime->descriptor_count;
+	uefi_runtime_values[2] = runtime->descriptor_size;
+	uefi_runtime_values[3] = runtime->descriptor_version;
+	uefi_runtime_values[0] = runtime->system_table;
 }
 
 /* Reports the loader's kernel placement; legacy forms carry none (linked). */
