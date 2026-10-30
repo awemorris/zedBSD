@@ -40,6 +40,7 @@
 #include "kern/user-probe.h"
 #include "kern/syscall.h"
 #include "kern/sysctl.h"
+#include "kern/thermal.h"
 #include "kern/thread.h"
 #include "kern/thread_private.h"
 
@@ -389,6 +390,9 @@ kernel_entry(
 	if (net_init() != 0)
 		hal_fatal(__FILE__, __LINE__,
 			  "network subsystem initialization failed");
+
+	/* Starts the thermal core's threads; drivers that registered before keep their place. */
+	kern_thermal_init();
 
 	/* Enables timer and device interrupts before the boot worker can wait. */
 	hal_irq_enable();

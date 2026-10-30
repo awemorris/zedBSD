@@ -460,7 +460,7 @@ AMD64_KERNEL_SOURCES := \
 	src/kern/namecache.c src/kern/namei.c src/kern/mount.c \
 	src/kern/tmpfs.c src/kern/tmpfs-pages.c src/drivers/fs/overlayfs.c src/kern/vfs.c \
 	src/kern/backing-claim.c \
- src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c src/kern/sysctl.c \
+ src/kern/buf.c src/kern/cache.c src/kern/readahead.c src/kern/writeback.c src/kern/io.c src/kern/sysctl.c src/kern/thermal.c \
 	src/kern/resource.c src/kern/poll.c src/kern/usync.c \
 	src/kern/disk.c src/kern/partition.c \
 	src/drivers/generic/loop.c src/drivers/generic/dma.c src/drivers/pci/pci.c \
