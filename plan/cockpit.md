@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（q1721）。p008: Pi の共通化（rpi-common）と ODROID-C5 の分離（s905x5m、bsp-s905x5m-common・bsp-odroidc5） | p009 kernel の header の _private.h → p006 規約 |
-| P3 | [WS332](ws332/ws.md) | tick の周波数を API で扱い可変にする（KERN_CLOCK_HZ の削除） | 起動（q1722）。p001 設計 | p002 KERN_CLOCK_HZ の削除（175 か所） → 可変の tick |
+| P3 | [WS332](ws332/ws.md) | tick の周波数を API で扱う（KERN_CLOCK_HZ の削除、取得の口だけ） | 起動（q1722）。p001 設計 | p002 KERN_CLOCK_HZ の削除（175 か所） → p003 規約 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
@@ -126,7 +126,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | --- | --- | --- |
 | p001 | 設計（時間の API、可変の tick、HAL の timer） | in-progress（P3） |
 | p002 | KERN_CLOCK_HZ の削除（175 か所） | planned |
-| p003〜 | 可変の tick と mode（ゲーム 1000・通常 100・待機 10 Hz） | 設計の後 |
+| p003 | 規約の見直し（周波数を変える実装は将来、ユーザーの指示） | planned |
 
 ## ユーザーの判断を待つ事
 
