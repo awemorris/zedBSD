@@ -120,3 +120,50 @@ plan/ws009/phase009/phase.md、plan/ws309/design.md（game mode の語）、plan
 ## 出典の規則（guardrail）
 
 - design の中に、source に入れてはいけない管理情報を source へ書く指示は無い。§4 の RADV・DXVK の書式は慣習の比較だけで、code・symbol の写しは無い。vulkaninfo の patch は Apache-2.0 の file への変更になるので、package の監査の記録に patch の license を書く（§7 に一言）。製品名の表を作るなら m10。
+
+---
+
+# 第 2 回: design.md 第 3 版の敵対的レビュー（design-reviewer、2026-10-31）
+
+対象: agent/p5-ws306 c0e511840（親 main 9946e22c0）の design.md 第 3 版。照合した tree も同じ。file は変えていない（sizeof と警告の確かめは scratchpad）。
+結果: Blocker 0・Major 7・Minor 13。反映は [design.md](design.md) §18（全部を反映、見送り 0）。
+
+## Major
+
+- **M1 `apply` の契約が実際の callback の順と合わない**: 許可の表の `GPU_DEVICE_QUERY` は `ops->scanout->query_device(…, session->backend)`（gpu.c 5031）を、`GPU_GAME_INFO` は `identity` を呼ぶ。poll は凍らせないが `gpu_events_snapshot` → `ops->display->events`（2452 付近）を呼ぶ（COMMAND と DISPLAY_EVENTS を同じ node に持つ amdrdna・i915・nvrtx・ghci・venus で起きる）。凍らせないまま close した session では `drain`・`resource_destroy`・`close` が走り `apply` は無い。`apply` は admission の外で、同じ session の他の callback と並ぶ（gpu.h 109〜111 の前提の外）。→ 契約を「仕事を出す・compile する callback の前に多くても 1 回、他は前・無しにもありうる、並行しうる、open は OFF で初期化、offline では飛ばす」に書き直す。
+- **M2 試験が latch と option の核心を確かめられない**: QEMU の venus は option 0 個で `active` は常に 0、OPTION は常に EINVAL。競合の試験は 1 つの fd で 1000 回なので 2 回目からは凍った後の速い道しか試さない。「最初の callback の前に 1 回」は guest の出力から観測できない。「kernel の warning が無い」の判定の方法が無い（AGENTS.md §9）。→ 偽の backend を gpu.c につないだ host の模型（WS014 の `plan/ws014/tests/gpu-framework.c` が前例、runner は無い）、各回新しい open の競合、libvulkan の `active` の変化は host の差し替えか amdrdna の実機、dmesg は serial.py・SSH の対話、性質と試験の対応の表。
+- **M3 `requires` は C++20 の予約語**: UAPI・kernel・libvulkan の struct の field 名。vulkaninfo（C++）とゲーム（C++20）で compile できない。→ `requirements` に。`vulkan_zedbsd.h` に `extern "C"`・`VKAPI_ATTR`/`VKAPI_CALL`、struct の tag と関数の名前を重ねない、ACTIVE の flag を header に定義。
+- **M4 一覧の配列と要素ごとの `size`**: 呼び手が古い struct の配列を渡すと新しい libvulkan の歩幅で配列の外に書く。→ 1 個ずつ取る関数か、stride の引数か、`options[0].size` を歩幅にすると明記。
+- **M5 Q306-8 の前提の誤り**: zedBSD の libc の `getenv`（`userland/base/libc/posix.c` 355〜）・`setenv`（409〜）は `environment_lock()`（`pthread.c` 177）の下で、getenv は thread ごとの複写を返す。「setenv は thread のある program で安全でない」は zedBSD では成り立たない（移植性だけの問題）。→ 問いと §9.4 を直してから問う。
+- **M6 標準廉価実装手順を条件の外で使う案に問いが無い**: 手順 §1 は条件を全部満たす時だけ使い、満たさなければ普通の Phase と書く（ユーザーの決定）。design §13 は条件 1 を満たさないと認めながら推し、段取り（p002 と p003 で 8 LW）が実装より大きい。→ ユーザーに問うか、推しをやめて普通の Phase に入れる。
+- **M7 GAME の bit を足す所**: COMMAND は executor を bind する関数で後から足す（amdrdna `runtime.c` 204、nvrtx `runtime.c` 235、powervr `render-runtime.c` 97、mali `sched.c` 395、bcm2711 `render-runtime.c` 71、ghci `vk/vk-node.c` 129。初期値に COMMAND の無い powervr `render.c` 181、mali `render.c` 130、bcm2711 `render-device.c` 26）。GAME を静的な初期化に置くと executor の無い構成で登録の検査が EINVAL になり node ごと消える。→ 全 driver で COMMAND と同じ所で足すと書き、executor の無い構成の登録を試験する。
+
+## Minor
+
+- m1 venus の位置の初期化は `-Wall -Wextra -Werror`（Makefile 1098〜1101）の `-Wmissing-field-initializers` で止まる。「driver の source の変更は要らない」は誤り（venus.c に 1 行要る）。
+- m2 NGG の mode を読むのは 2 か所（`vk/vk-execute.c` 624 の quad の program も）。`amdrdna_vk_geometry_mode` の中で session の値を返し、試験に quad の program の mode を足す。
+- m3 mutex を壊す関数は無く、`mutex_init` の失敗は NULL の時だけ（`src/kern/lock.c` 207〜）。§6・§11 の手順の文を消し、rank を明記、SET の copyin と解読を `game_lock` の外で。
+- m4 INFO・OPTION を admission の下か外かが無い。SET の `address` は `gpu_user_range`（gpu.c 3072〜）で検査する。
+- m5 `enable = 0` と `bytes > 512`・`reserved != 0` の検査の順、「依存は 1 段」と「繰り返す」の食い違い、符号の無い `name` は Q306-2 への追加、名前の境は 31 と 32（33 は境の外）、`:`・`.` を EINVAL にすると将来の書式で古い kernel が文字列全体を拒否する。
+- m6 p006 の依存「p005 の venus」と p004 の「venus の identity」の食い違い、文書が WS291 待ちの p007 に依存、vulkaninfo は libcxx が要り（harfbuzz の `DEPENDS`）その build は Q1 の許可が要る、`ZEDBSD_EXTERNAL_SOURCE` は 1 つの名前に 1 つの archive（external.mk 291〜）、tag の archive の SHA-256 が変わる事例（推測）。
+- m7 `deviceName` を揃えると利用者に見える名前が変わる（bcm2711・mali・ghci・amdrdna。powervr は同じで `plan/tools/powervr/p009/frame-host.c` 934 の照合は保たれる）。変える一覧を Q1 に確かめるか、今の文字列を保つ。
+- m8 Q306-9 に gpu.c での WS291 の job の案・WS250 との衝突の費用を書く。WS291 が欄を足すのは `drv_gpu_job_ops` で、版を上げるかは WS291 の文書に無い。
+- m9 試験の image を `plan/ws306/tests/` の config.mk で作り、guest の program を入れる構成を書く。
+- m10 ws.md の p001 の行・Phase の表・目標の「session（process）ごと」・原文の引用、`phase001/phase.md` が無い、pipeline cache の注意が §8.2・p007 に無い。
+- m11 session・device に誤りがある時の凍らせの扱い。
+- m12 build の一覧に ghci・venus の構成が無い。
+- m13 `VkPhysicalDeviceDriverProperties` の引き継ぎと、WS226 が header を替える時に `vulkan_zedbsd.h` と `API-PROVENANCE.md` の行を残す事を、Q1 が WS226 に記録する。
+
+## 確かめて合っていた事（要点）
+
+- 'G' 0〜45 は重なり・抜け無し、46〜48 と 131072 は空き、WS291 の予約は 49・50 と 262144・524288（job-submit-design.md 6・31〜32・90〜91 行）。
+- struct の大きさ: info 160・option 184・set 40・`zedbsd_vulkan_game_identity` 352 byte（x86_64・`-m32`）、暗黙の padding 無し。
+- design の引く gpu.c・gpu.h の行は全部合っていた。admission の外の経路の一覧も合っていた。
+- latch の骨組み: file の操作は open・close・ioctl・poll・mmap（1414〜1420）、ioctl は全部 `gpu_ioctl_body` を通る、mmap は backend の callback を呼ばない（3719〜）、lock の順に循環は無い、`busy_owner` の再入は速い道で影響しない、rank は実行時に検査されない、release と acquire で `apply` の書き込みはその後の callback に見える。
+- libvulkan: SET の置き場所は正しい（GET_INFO・GET_CAPSET の後、次は `instance_create_remote` の blob・command）、`vulkan_context_open` の呼び手は 721 だけ、display の session は `wsi-display.c` 1720・`wsi-display-nodes.c` 473 の別の open、`VkPhysicalDevice_T` は 1 つの context の fd に属する（internal.h 121〜124、Venus では 1 つの context に複数の physical device）、instance を作る間に thread は無い。
+- amdrdna で NGG を session ごとに選ぶのは安全（program ごとの `primitive_shader`、pm4 の geometry の flush は両向き、session をまたぐ shader の cache は無い、culling を飛ばす判断は compile に残る gfx10-compile.c 740〜743）。
+- COMMAND を持つのは render の node だけ。HAL の API の変更は要らない。source に管理情報を書く指示・外部の code の写しは無い。
+
+## 第 1 回の指摘の解消（第 2 回の判定）
+
+解消: B1・M3〜M7、m1（venus の文を除く）・m2〜m7・m9・m10・m13。一部: M1・M2・M8・B1 の (4)・m8・m11（それぞれ第 2 回の M1・m7・M2・m2・m6・m10 で直した）。未解消: m12（ws.md の語、第 3 版の反映で直した）。
