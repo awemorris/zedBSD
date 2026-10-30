@@ -115,7 +115,7 @@ Queue: q1696 / q1696-i01（P3）、q1702 / q1702-i01（P3、同時の send の�
   最終の 1 回目の send 5444 だけ低い（その run の送りの側の 1 CPU が 90 % sys、3 回の測り直しは 6237〜6276）。片方向・同時とも落ちていない。
   `plan/ws221/tests/rdna-tcp.sh` に `--runs both`（send と recv を同時、recv は次の port）を足した（2de3b6dc8、Q1 が範囲に足した）。
 - host: tcp-model PASS（build/tmp/p006-model-f.txt。往復 10 ms の場面 32 → 60 MB/s、LAN の受けの buffer 174 KB、10 ms で 1 MB。nodelay-1024 の期待を 16000 → 15000: 大きな ring で device の満杯の間に後ろの write が詰まる、15570）。
-- build: 21 config（f49185c5b の tree、build/tmp/p006-buildall-c.txt）すべて rc 0・warning 0。QEMU `qemu-tcp.sh "" 15 inet,inet6` PASS（4575db11d の tree、send_ring=768）。倍率の変更の後の QEMU は未実施（64 bit の定数 1 つ、tcp-model で確かめた）。
+- build: 21 config（f49185c5b の tree、build/tmp/p006-buildall-c.txt）すべて rc 0・warning 0。QEMU `qemu-tcp.sh "" 15 inet,inet6` PASS（4575db11d の tree、send_ring=768）、最終の tree でも PASS（build/tmp/p006-qemu-tcp-f.txt、guest send/recv inet 60.5/29.9、inet6 46.6/44.7 Mbit/s）。
 
 ## 引き継ぎ（2026-10-30 10:45 q1702-i01 P3、Phase は cleared）
 
@@ -123,7 +123,7 @@ Queue: q1696 / q1696-i01（P3）、q1702 / q1702-i01（P3、同時の send の�
   f49185c5b（倍率 1.25 倍と説明）、2de3b6dc8（rdna-tcp.sh の `--runs both`）。未 commit の source は無い（d1・base の kernel の一時の変更は戻した）。
 - 測りの全部は上の「結果」の表（q1702-i01）。
 - 機械の状態: 5330 は Debian（10:45 に uname で確かめた）。NVMe の zedBSD の kernel は f1（= ag10、sha256 f561a0d9a6dc9bad、vmunix.old も f1）、userland は p003 の img1、zedbsd.cfg に CFG_ADD の行は無い。
-  10.0.10.3 は 10:37 に lock を返した（free、Debian 6.12.111、NVMe の kernel は vmunix-va1 cksum 1463007375 を確かめた）。QEMU は qemu-tcp の最後の確かめ（最終の tree）を流している → 結果は Q1 への最終の報告に。
+  10.0.10.3 は 10:37 に lock を返した（free、Debian 6.12.111、NVMe の kernel は vmunix-va1 cksum 1463007375 を確かめた）。QEMU は止まっている（最終の tree の qemu-tcp PASS）。
 - 残り: なし（Phase の範囲）。F-WS315-rcvbuf の解決の文案は Q1 に送った。WS315 の受け入れと completed の判定は Q1。
 - 消してよい物（Q1 へ）: build/tmp/p006-base、build/p006a-*・build/p006b-*・build/p006c-*（21 config の build）、build/p006-{k1,g10,g12,d1,a1,ag10,amd64,base5330,base8127,f-5330,f-8127}、
   build/p006-model-{a,ag10,f}、build/ws315-p006-{k1,g10,g12,d1,a1,ag10,base}-vmunix（f1 は 5330 の NVMe と同じなので残してもよい）、build/tmp/p006-host-*。
