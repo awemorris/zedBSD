@@ -1310,13 +1310,15 @@ ZEDBSD_SHADOW := userland/base/etc/shadow
 endif
 
 ZEDBSD_ACCOUNT_INPUTS := userland/base/etc/passwd userland/base/etc/group \
-	$(ZEDBSD_SHADOW) userland/base/etc/services
+	$(ZEDBSD_SHADOW) userland/base/etc/services userland/base/etc/hosts
 ZEDBSD_ACCOUNT_FILES := --file /etc/passwd=userland/base/etc/passwd \
 	--file /etc/group=userland/base/etc/group \
 	--file /etc/shadow=$(ZEDBSD_SHADOW) \
 	--file /etc/services=userland/base/etc/services \
+	--file /etc/hosts=userland/base/etc/hosts \
 	--mode /etc/passwd=0644 --mode /etc/group=0644 \
-	--mode /etc/shadow=0400 --mode /etc/services=0644
+	--mode /etc/shadow=0400 --mode /etc/services=0644 \
+	--mode /etc/hosts=0644
 ZEDBSD_BASE_DATA_INPUTS := $(ZEDBSD_USERLAND_DATA_INPUTS)
 ZEDBSD_BASE_DATA_FILES := $(ZEDBSD_USERLAND_DATA_FILES) \
 	$(ZEDBSD_USERLAND_DATA_MODES)

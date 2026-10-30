@@ -617,6 +617,7 @@ static int run_command_until(char *const [], unsigned, uint64_t,
 static void release_dhcp6(const char *interface, uint64_t deadline, char diagnostic[CHILD_OUTPUT_MAX]);
 static void clean_diagnostic(char *text);
 static int default_route_exists(void);
+static int default_route_clear(uint64_t deadline, char diagnostic[CHILD_OUTPUT_MAX]);
 static int write_resolver(char *const addresses[], int count);
 static void lan_static_resolver(void);
 static void handle_lan_configure(int client, struct networkd_request *request, const struct kern_peercred *peer);
@@ -4234,16 +4235,8 @@ execute_wired_request(
 		*error = errno;
 	} else if (request->header.opcode ==
 	    NETWORKD_OP_DEFAULT_ROUTE_CLEAR) {
-		present = default_route_exists();
-		if (present == 0) {
-			result = 0;
-		} else if (present > 0) {
-			arguments[0] = "/sbin/route";
-			arguments[1] = "delete";
-			arguments[2] = "default";
-			arguments[3] = NULL;
-			result = run_command_until(arguments, 10, deadline, diagnostic);
-		}
+		/* Every default route goes, however many interfaces put one in. */
+		result = default_route_clear(deadline, diagnostic);
 		*error = errno;
 	} else if (request->header.opcode == NETWORKD_OP_DNS) {
 		for (index = 0U; index < request->dns_count; index++)
@@ -9661,6 +9654,65 @@ default_route_exists(
 	return errno == ENOENT ? 0 : -1;
 }
 
+/*
+ * Removes every IPv4 default route; returns 0, or -1 with errno set.
+ *
+ * Two interfaces that each obtained a lease may each hold a default route,
+ * and the kernel deletes a route only when the request names exactly one:
+ * a bare "route delete default" fails with EBUSY while there are two.  So
+ * each default route is deleted through its own interface, one at a time,
+ * for as many rounds as the route table can hold interfaces.
+ */
+static int
+default_route_clear(
+	uint64_t deadline,
+	char diagnostic[CHILD_OUTPUT_MAX])
+{
+	char *arguments[6];
+	char name[IFNAMSIZ];
+	uint32_t ifindex;
+	unsigned round;
+	int descriptor;
+	int found;
+	int named;
+	int result;
+
+	/* Deletes the first default route of the table until none is left. */
+	for (round = 0U; round < NETWORKD_LAN_MAX + 2U; round++) {
+		found = default_route_index(&ifindex);
+		if (found < 0)
+			return -1;
+
+		/* Succeeded: no default route is left. */
+		if (found == 0)
+			return 0;
+
+		/* The name of the interface the route goes through. */
+		descriptor = socket(AF_INET, SOCK_DGRAM, IPPROTO_UDP);
+		if (descriptor < 0)
+			return -1;
+		named = netutil_ifname(descriptor, ifindex, name);
+		(void)close(descriptor);
+		if (named != 0)
+			return -1;
+
+		/* Deletes that interface's default route. */
+		arguments[0] = "/sbin/route";
+		arguments[1] = "delete";
+		arguments[2] = "default";
+		arguments[3] = "-ifp";
+		arguments[4] = name;
+		arguments[5] = NULL;
+		result = run_command_until(arguments, 10, deadline, diagnostic);
+		if (result != 0)
+			return -1;
+	}
+
+	/* Still a default route after every round: the table did not let go. */
+	errno = EBUSY;
+	return -1;
+}
+
 /* Supports the write resolver operation. */
 static int
 write_resolver(
@@ -10031,7 +10083,6 @@ lan_configure_apply(
 	char *arguments[8];
 	char seconds[16];
 	unsigned index;
-	int present;
 	int result;
 	int fixed;
 
@@ -10063,17 +10114,9 @@ lan_configure_apply(
 	if (result != 0)
 		return EIO;
 
-	/* A static address's router replaces the default route (without one, another interface's stays). */
-	present = 0;
+	/* A static address's router replaces the default routes (without one, another interface's stay). */
 	if (fixed && request->gateway[0] != '\0')
-		present = default_route_exists();
-	if (present > 0) {
-		arguments[0] = "/sbin/route";
-		arguments[1] = "delete";
-		arguments[2] = "default";
-		arguments[3] = NULL;
-		(void)run_command_until(arguments, 10, 0U, diagnostic);
-	}
+		(void)default_route_clear(0U, diagnostic);
 
 	/* The router comes. */
 	if (fixed && request->gateway[0] != '\0') {

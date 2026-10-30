@@ -315,7 +315,7 @@ vmspace_map_device(
 	size_t size,
 	uint32_t prot,
 	struct vm_device_mapping *mapping,
-	int exact,
+	int placement,
 	uintptr_t *mapped)
 {
 	struct vm_region *region;
@@ -346,6 +346,17 @@ vmspace_map_device(
 	if (rounded > mapping->bytes)
 		return EINVAL;
 
+	/* MAP_FIXED replaces what the range holds, as it does for memory and files (POSIX). */
+	if (placement == VM_DEVICE_PLACE_FIXED) {
+		error = vmspace_map_device_replace(vm, hint, rounded, prot, mapping);
+		if (error != 0)
+			return error;
+
+		/* Succeeded: the mapping is at the very address asked for. */
+		*mapped = hint;
+		return 0;
+	}
+
 	/* Address selection and region publication share the usual VM serializer. */
 	vm_metadata_enter();
 	mutex_lock(&vm->lock);
@@ -353,7 +364,7 @@ vmspace_map_device(
 	/* Resolves an exact unoccupied placement or searches the ordinary user address range. */
 	start = hint;
 	error = 0;
-	if (exact) {
+	if (placement == VM_DEVICE_PLACE_NOREPLACE) {
 		/* Exact placement must satisfy user range bounds before overlap can be examined. */
 		valid = vmspace_range_valid(start, rounded);
 		if (!valid) {
