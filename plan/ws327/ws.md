@@ -3,7 +3,7 @@
 # WS327 libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成、担当は未割当）
+- Status: incomplete（2026-10-30 q1697 P2。p001・p002 cleared、p003 の guest は PASS（P2 の branch、未 merge）、標準廉価実装手順に組み直し）
 - 目標: libkeiland に、pthread の類を包む thread の層と、socket の概念を見せる network の層を足し、Keiland の app の thread と socket をそれに移す。POSIX（zedBSD・Linux・FreeBSD）と Win32 で同じ interface で実装できる形。libbrowser は使わない。
 
 ## ユーザーの決定（2026-10-30、原文）
