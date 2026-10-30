@@ -238,9 +238,9 @@ remain as traceable history and are not new implementation work.
 | [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |
 | [BUG-369](bugs/BUG-369.md) | QEMU の guest への SSH の往復が数回の後から 3〜32 秒に伸びる | closed（2026-10-30、main e1c714fb5） |
 | [BUG-370](bugs/BUG-370.md) | Photos で全面表示の写真を回転・お気に入りなどで保存すると約 1 秒後に全面表示が閉じる（WS327 の回帰で発見、WS327 とは無関係） | open（2026-10-30） |
-| [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking 全体を飛ばす | open（2026-10-30） |
-| [BUG-372](bugs/BUG-372.md) | VisionFive 2 の今の main の kernel で serial の console が入力を受けない（WS331 p005 の疑い） | open（2026-10-30） |
-| [BUG-373](bugs/BUG-373.md) | 今の main の kernel で networkd の初期の Wi-Fi の正規化が EINVAL、networking が上がらない（Wi-Fi の無い機械でも） | open（2026-10-31、P7） |
+| [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking 全体を飛ばす | closed（2026-10-31 Q1 の判定、30fd47a4f。QEMU と VF2 の実機で有線が上がる。radio のある実機の失敗の場面は未実施） |
+| [BUG-372](bugs/BUG-372.md) | VisionFive 2 の今の main の kernel で serial の console が入力を受けない（WS331 p005 の疑い） | closed（2026-10-31 Q1 の判定、30fd47a4f。VF2 の実機で serial の login が通った） |
+| [BUG-373](bugs/BUG-373.md) | 今の main の kernel で networkd の初期の Wi-Fi の正規化が EINVAL、networking が上がらない（Wi-Fi の無い機械でも） | closed（2026-10-31 Q1 の判定、30fd47a4f。QEMU と VF2 の実機で版 1・main の networkd とも network が上がる） |
 | [BUG-374](bugs/BUG-374.md) | RTX（nvrtx）の mouse の cursor の色が他の GPU と逆（外枠が白・内側が黒） | open（2026-10-31、P3） |
 | [BUG-375](bugs/BUG-375.md) | direct scanout の後に window mode へ戻る時、compositor が lease の解放より先に swapchain を作り EBUSY で終了（VF2） | closed（2026-10-31 Q1 の判定、P7 157a69cc0: kernel の CCB の満杯を待つ。VF2 で 8 回とも落ちず） |
 | [BUG-376](bugs/BUG-376.md) | PS/2 の mouse の port が mouse が無くても node を作り、open のたびに約 80 ms 待って EIO | open（2026-10-31、P6） |
