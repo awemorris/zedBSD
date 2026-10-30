@@ -287,6 +287,10 @@ Origin: 2026-10-27 ユーザーの指示。
   | dev46（9b45c337b） | thead/tfoot の順、position-area の直列化、anchor の scope・containing block の連鎖・logical 側・margin の anchor-size、IMCB での fit、offsetParent の transform | 1,059 | 1,204 | 265 | 41 | 2,569（73.99%） |
   | dev47（2e179c668） | 縦の行の replaced を central baseline に、minmax の最小が最大より大きい track、image-set（ここまで） | 1,061 | 1,205 | 266 | 41 | 2,573（74.11%） |
 
+  | dev48（08f927f15） | position-visibility、position: fixed を viewport に付ける、dialog、top layer の anchor | 1,062 | 1,209 | 281 | 41 | 2,593（74.68%） |
+  | dev49（e04957d55） | 縦書きの root の view transition の old/new の大きさ（inline-size・block-size）、logical な border radius | 1,063 | 1,209 | 293 | 41 | 2,606（75.06%） |
+  | dev50（36a244fec） | 非 grid の repeat() の computed、table の高さ（caption を除く）、flex の中の table の最小幅 | 1,065 | 1,210 | 293 | 41 | 2,609（75.14%） |
+
   dev43 → dev47 の差: 後退は static の css-writing-modes/table-column-order-slr-007 の 1 件だけ（sideways-lr で正しい配置になり、以前の合格は
   縦書きの rtl の偶然の一致。この試験は rtl の中の数字の run を視覚順に並べ替える bidi が要る。engine には bidi が無い）。他の runner は後退 0。
 - 順の判断: gap の数が大きい物から直した。subgrid（約 60）は track の共有の設計が要るので後回し、直交 flex は layout_logical_wanted を
@@ -305,6 +309,14 @@ Origin: 2026-10-27 ユーザーの指示。
      position-area の setter の直列化（宣言の形を保つ）。rtl の block の max-content は左 margin の余りを数えない。
   5. grid: repeat(auto-fill, minmax(30px, 6.5%)) のように最大が最小より小さい track は最小を使う。
   6. image-set()（background-image の最初の候補とその解像度）、zoom を背景画像の固有の大きさに掛ける。
+- dev47 の後に直した物（dev48〜dev50）:
+  7. position-visibility（layout/anchor.c `layout_anchor_hides`、position.c）: anchors-visible は default anchor が間にある scroll container の padding box の外へ出た時・anchor 自身が hidden の時に箱を隠す（paint と hit test は `anchor_hidden` の箱を飛ばす）、no-overflow は fallback の後でも IMCB をはみ出す時。
+  8. position: fixed の箱を viewport に付ける（layout/sticky.c: fixed の箱を sticky と同じ list に入れ、scroll の分だけ下げる。anchor が scroll する物に付いた箱は動かさない）。view の scroll の要求を load 中に取りこぼさない（view/view.c）。
+  9. `<dialog>`（HTMLDialogElement を interface に足し、prelude.js に show・showModal・close・open・returnValue、UA の sheet、top layer は popover と同じ flag に開いた順の番号）、`document.scrollingElement`、top layer の要素を anchor にできるのは先に top layer に入った物だけ。
+  10. view transition の old/new の大きさを UA の sheet の `inline-size: 100%; block-size: auto` に（縦書きの root で高さが 100%、幅は snapshot の比から。layout/box.c）。massive-element-* 10 件と root の縦書き 2 件ほか。
+  11. 非 grid の要素の `grid-template-columns/rows` に repeat() がある時は書いた形で返す（css/values.c `values_declared_text`、cascade.c `cascade_declared`で em を px に）、border-*-radius の logical 4 つ（物理の corner への対応は cascade.c と bind/computed.c）と computed の radius。
+  12. table: `height` は caption を除く grid box の高さ（flex が全体の高さを与える時は `table_wrapper_height` で caption を引く）、flex の row の中の table は columns の最小幅より狭くならない、stretch で内容より低くならない。
+  13. @layer（css/parser.c: layer の名前を sheet の順に、statement と block と無名、`css_rule.layer`。cascade.c: layer の重み、通常の宣言は layer 無しが最強・後の layer が強く、!important は逆）。
 - 調べて直さなかった物: position-try-order（most-width 等）・@position-try の CSSOM（CSSPositionTryRule の class と insertRule）・var() を持つ try rule、
   navigation-api の initial about:blank（prelude の `initialBlank()` が iframe の作成中は parent を持たず常に false。直すと activation 等が使う経路に入るが、
   iframe の onload が出ず no_output になる試験が残り、得は無かったので戻した）、table-cell を writing-mode の root にする試験（srl-057 など 4 件）、
