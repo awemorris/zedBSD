@@ -419,7 +419,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1753 / q1753-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bugs`・branch `agent/p4-bugs`、QEMU と host、image は /tmp） | [BUG-351](bugs/BUG-351.md)・[BUG-349](bugs/BUG-349.md)・[BUG-362](bugs/BUG-362.md)・[BUG-368](bugs/BUG-368.md)・[BUG-359](bugs/BUG-359.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+| q1753 / q1753-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bugs`・branch `agent/p4-bugs`、QEMU と host、image は /tmp） | [BUG-351](bugs/BUG-351.md)・[BUG-349](bugs/BUG-349.md)・[BUG-362](bugs/BUG-362.md)・[BUG-368](bugs/BUG-368.md)・[BUG-359](bugs/BUG-359.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | cleared（d3219b01a〜5b56cbaef、main b0b4577c7。BUG-351・359 closed（QEMU）、349・362・368 fixed（確かめの残り）） |
 
 ## 2026-10-31: WS333 の実装の始め（q1754）
 
