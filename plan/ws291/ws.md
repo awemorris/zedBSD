@@ -56,7 +56,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p013](phase013/phase.md) | NVIDIA: draw と submit の多い bench（big-1000・subs-1000）の CPU の費用を NVK 並みに | p011 | in-progress（P3、q1728） |
 | [p020](phase020/phase.md) | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順） | RDNA の手順の確立（p002 と最初の改善） | in-progress（2026-10-30 16:50 P3 q1715-i02: HDMI で表示が出た。driver の欠け（instance rate・discard・CopyBuffer・mip の transfer・direct scanout の BLOB・stage-log の lock）を埋めて mview が描けた。目標 c13（594 MHz）は 26.6 fps、profile の途中） |
 | [p021](phase021/phase.md) | Raspberry Pi 5（V3D 7.1）で qs40 の model を、スペックの比で決めた copies・1920x1080 で 50 fps | p011 | in-progress（P4、q1729。2026-10-30 23:50: 試験の image（rpi5-p021.img、戻しの kernel 入り）を作った、実機は未起動。V3D の Vulkan の実行器に mview の要る index の draw・instance・mip が無い） |
-| [p022](phase022/phase.md) | Intel（i915、5330 の Alder Lake）で qs40 の model を、スペックの比で決めた copies で 50 fps | p011 | in-progress（P1、q1731） |
+| [p022](phase022/phase.md) | Intel（i915、5330 の Alder Lake）で qs40 の model を、Linux（ANV）の実測で決めた scene（qs40 × 600、1920x1080、Linux 50.6 fps）以上で | p011 | in-progress（P1、q1731。2026-10-31: zedBSD 23.0 → 32.6 fps（MOCS、compiler の直読み・MAD、WS333 p002 の MWAIT）。主因は package の電力の上限 13 W で GT 850〜900 MHz（Linux 1100〜1200）、zedBSD の idle 11.6 W（Linux 3.3 W）。Notes は窓が出た） |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
 - 2026-10-27 04:44 ユーザー（Q1 の問い「NGG の A〜C をどう進めますか？」へのクリック）「A〜C を今進める（推し）」。
