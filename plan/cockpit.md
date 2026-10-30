@@ -133,6 +133,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 - 背景: 5330 の zedBSD は idle で package の電力が 12.99 W（Linux は 3.2〜3.5 W）で、mview の時に電力の上限（PL1 13 W）に張り付いて GPU が 800 MHz（Linux は 1200 MHz）に抑えられている。CPU の idle が HLT（C1）だけで、P-state（CPU の周波数）の制御が無い見込み。GPU が 1200 MHz なら qs40 × 600 は約 45 fps 相当（今 30.1 fps、Linux 50.6 fps）。
 - (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（WS301 を進めるか新しい WS、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
+- P1 の具体の案（2026-10-31）: amd64 の HAL の実装（src/hal/amd64/task.c の idle）を HLT から MWAIT に替える（CPUID で MWAIT と ARAT を確かめ、最深の C-state の hint、割り込みで起きる ECX bit0）。hal.h は変えない（実装の補完）。5330 で idle の package の電力と c600 の GPU の周波数を前後で測る。起動しない時は grub・BootNext で Debian に戻す形を保つ。P-state（HWP）は含まない。
 
 ## 決まった事
 
