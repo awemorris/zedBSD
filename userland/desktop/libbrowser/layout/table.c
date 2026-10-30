@@ -90,6 +90,7 @@ struct table_sizes {
 
 static int table_collect(struct layout_box *box, struct table_state *state);
 static int table_collect_row(struct layout_box *row, struct table_state *state);
+static int table_group_pass(const struct layout_box *group);
 static int table_slot_taken(const struct table_state *state, size_t row, int column);
 static int table_span(const struct layout_box *cell, const char *name);
 static int table_measure(struct layout_tree *tree, struct layout_box *box, struct table_state *state);
@@ -251,33 +252,60 @@ table_collect(
 {
 	struct layout_box *child;
 	struct layout_box *row;
+	int pass;
 	int error;
 
-	/* The rows among the table's children, and in its row groups. */
-	for (child = box->first_child; child != NULL; child = child->next) {
-		if (child->out_of_flow)
-			continue;
-		if (child->style.display == CSS_DISPLAY_TABLE_ROW) {
-			error = table_collect_row(child, state);
-			if (error != 0)
-				return error;
-			continue;
-		}
-
-		/* A row group's rows. */
-		if (child->style.display != CSS_DISPLAY_TABLE_ROW_GROUP)
-			continue;
-		for (row = child->first_child; row != NULL; row = row->next) {
-			if (row->out_of_flow || row->style.display != CSS_DISPLAY_TABLE_ROW)
+	/* The rows among the table's children, and in its row groups: the head's first, the foot's last. */
+	for (pass = 0; pass < 3; pass++) {
+		for (child = box->first_child; child != NULL; child = child->next) {
+			if (child->out_of_flow)
 				continue;
-			error = table_collect_row(row, state);
-			if (error != 0)
-				return error;
+			if (child->style.display == CSS_DISPLAY_TABLE_ROW) {
+				if (pass != 1)
+					continue;
+				error = table_collect_row(child, state);
+				if (error != 0)
+					return error;
+				continue;
+			}
+
+			/* A row group's rows. */
+			if (child->style.display != CSS_DISPLAY_TABLE_ROW_GROUP)
+				continue;
+			if (table_group_pass(child) != pass)
+				continue;
+			for (row = child->first_child; row != NULL; row = row->next) {
+				if (row->out_of_flow || row->style.display != CSS_DISPLAY_TABLE_ROW)
+					continue;
+				error = table_collect_row(row, state);
+				if (error != 0)
+					return error;
+			}
 		}
 	}
 
 	/* Succeeded: the rows and cells are gathered. */
 	return 0;
+}
+
+/* Tells when a row group's rows go: 0 for a table head (first), 2 for a table foot (last), 1 otherwise. */
+static int
+table_group_pass(
+	const struct layout_box *group)
+{
+	const struct dom_element *element;
+
+	/* Only an HTML thead or tfoot. */
+	if (group->node == NULL || group->node->type != DOM_ELEMENT)
+		return 1;
+	element = (const struct dom_element *)group->node;
+	if (element->ns != DOM_NS_HTML)
+		return 1;
+	if (element->tag == DOM_TAG_THEAD)
+		return 0;
+	if (element->tag == DOM_TAG_TFOOT)
+		return 2;
+	return 1;
 }
 
 /* Adds a row and its cells, left to right; the widest row makes the columns. */

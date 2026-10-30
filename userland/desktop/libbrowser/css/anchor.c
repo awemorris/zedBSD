@@ -714,7 +714,6 @@ css_position_area_serialize(
 	const struct anchor_area_keyword *swap;
 	const char *a;
 	const char *b;
-	int axis;
 
 	/* none, and one keyword. */
 	if (packed < 0)
@@ -731,21 +730,9 @@ css_position_area_serialize(
 	    (second->axis == ANCHOR_AREA_CENTER || second->axis == ANCHOR_AREA_ALL))
 		goto both;
 
-	/* The generic keywords: span-all makes the other a block (first) or inline (second) keyword. */
+	/* The generic keywords stay as they are, whatever they are paired with. */
 	if (first->axis == ANCHOR_AREA_GENERIC || first->axis == ANCHOR_AREA_SELF_GENERIC ||
 	    second->axis == ANCHOR_AREA_GENERIC || second->axis == ANCHOR_AREA_SELF_GENERIC) {
-		if (second->axis == ANCHOR_AREA_ALL || first->axis == ANCHOR_AREA_ALL) {
-			swap = first->axis == ANCHOR_AREA_ALL ? second : first;
-			axis = first->axis == ANCHOR_AREA_ALL ? ANCHOR_AREA_INLINE : ANCHOR_AREA_BLOCK;
-			if (swap->axis == ANCHOR_AREA_SELF_GENERIC)
-				axis = axis == ANCHOR_AREA_BLOCK ? ANCHOR_AREA_SELF_BLOCK : ANCHOR_AREA_SELF_INLINE;
-			for (a = NULL, packed = 0; packed < (int)ANCHOR_AREA_KEYWORDS; packed++) {
-				if (anchor_area_keywords[packed].axis == axis && anchor_area_keywords[packed].brief != NULL &&
-				    strcmp(anchor_area_keywords[packed].brief, swap->name) == 0)
-					a = anchor_area_keywords[packed].name;
-			}
-			return anchor_area_append(out, a != NULL ? a : swap->name);
-		}
 		goto both;
 	}
 
@@ -763,10 +750,8 @@ css_position_area_serialize(
 		first = second;
 		second = swap;
 	}
-	a = first->brief != NULL && second->axis != ANCHOR_AREA_CENTER ? first->brief : first->name;
-	b = second->brief != NULL ? second->brief : second->name;
-	if (first->brief != NULL && second->axis == ANCHOR_AREA_CENTER)
-		a = first->brief;
+	a = first->name;
+	b = second->name;
 	if (strcmp(a, b) == 0)
 		return anchor_area_append(out, a);
 	if (anchor_area_append(out, a) != 0 || anchor_area_append(out, " ") != 0)
@@ -1236,6 +1221,7 @@ css_anchor_canonical(
 	int shorthand;
 	int fallbacks;
 	int visibility;
+	int area;
 	int order;
 	int error;
 
@@ -1244,7 +1230,8 @@ css_anchor_canonical(
 	shorthand = vm_string_equal_ascii(name, "position-try");
 	fallbacks = vm_string_equal_ascii(name, "position-try-fallbacks");
 	visibility = vm_string_equal_ascii(name, "position-visibility");
-	if (!shorthand && !fallbacks && !visibility)
+	area = vm_string_equal_ascii(name, "position-area");
+	if (!shorthand && !fallbacks && !visibility && !area)
 		return 0;
 
 	/* The value's tokens. */
@@ -1259,6 +1246,15 @@ css_anchor_canonical(
 		count--;
 	parse.heap = heap;
 	parse.arena = &arena;
+
+	/* position-area. */
+	if (area) {
+		if (css_position_area_parse(tokens, count, &order) == 0) {
+			error = css_position_area_serialize(order, out);
+			*handled = error == 0;
+		}
+		goto cleanup;
+	}
 
 	/* position-visibility. */
 	if (visibility) {
