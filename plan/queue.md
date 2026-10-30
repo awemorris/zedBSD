@@ -461,6 +461,6 @@
 | q1764 / q1764-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r2`・branch `agent/p3-ws291r2`、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) の続き | kernel の record の decode の短縮など、phase014 の再開点の候補 | in-progress |
 | q1765 / q1765-i01 | S-333p008（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p008`） | [ws333-p008](ws333/phase008/phase.md) | phase.md のとおり、header を変えない（BASE 39f4a5597） | in-progress |
 | q1766 / q1766-i01 | S-333p009（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p009`） | [ws333-p009](ws333/phase009/phase.md) | 同上 | in-progress |
-| q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | in-progress |
+| q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | cleared（35d5d4500） |
 | q1768 / q1768-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333b`・branch `agent/p7-ws333b`、QEMU、出力は /tmp） | [ws333](ws333/ws.md) p012（tick の位相を揃える）→ [BUG-377](bugs/BUG-377.md) | p012 は amd64 の HAL の実装と QEMU の起動まで、5330 の計測は後。BUG-377 は config の依存の宣言だけ（noct の規則は変えない） | in-progress |
 | q1727 / q1727-i03 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074](ws074/ws.md) phase260 の自走の 3 回目 | 100% までの自走（ユーザーの指示）、計測の出力は /tmp | in-progress |

@@ -2,7 +2,7 @@
 
 # ws333-p010: module — 0xCE と電力の register（cpux86-pstate.c・cpux86-power.c）
 
-Status: planned
+Status: cleared（2026-10-31 Q1、35d5d4500）
 Parent: [WS333](../ws.md)、設計 [design.md](../design.md) §15
 依存: p007（header の確定と `cpux86.c` の実装、基点の SHA `39f4a5597`）。p008 とは独立（`struct cpux86_identity` は試験で直に組む）。p007 が main に merge された後に main から始める
 担当の想定: Sonnet 5.5 high（phase-runner-low）を 1 回起動（標準廉価実装手順 [docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md) §5）。header は p007 の設計で、変えない。
@@ -70,4 +70,23 @@ design.md §9 の p010 の元の範囲のうち、ACPI の `_PSS` の package �
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-31 S-333p010（Sonnet 5.5 high、q1767-i01）。worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`。
+
+作った物: `cpux86-pstate.c`（2 関数）、`cpux86-power.c`（10 関数。allow list の表と滞在の counter の表は block ごとに `Values referenced:` で表の番号を書いた const の data）、単体試験 `plan/ws333/tests/cpux86/unit/test-pstate.c`・`test-power.c`。header・試験の道具・他の module は変えていない。
+
+確かめた事（実行したコマンドと結果）:
+- `sh plan/ws333/tests/cpux86/run-unit.sh pstate power`: `test-pstate: PASS (120186 checks)`・`test-power: PASS (275202 checks)`・`run-unit: PASS`。`run-unit.sh all`: test-builders 21・test-cpux86 4140・test-power・test-pstate すべて PASS、最後の行 `run-unit: PASS`（ASan・UBSan、`-std=c89 -Wpedantic -Werror`）。
+- `BASE=39f4a5597 sh plan/ws333/tests/cpux86/check-skeleton.sh`: `check-skeleton: PASS`（cc・clang、header は基点から無変更）。
+- `make -j16 ZEDBSD_CONFIG=config/ci/config-amd64.mk CONFIG_CPU_PERF=y BUILD=/tmp/s-ws333-p010/b /tmp/s-ws333-p010/b/vmunix`（出力は host の空きの都合で /tmp）: exit 0、log に warning 0 行。`cpux86-pstate.o`・`cpux86-power.o` が生成された。
+- `git diff --check`: 出力なし。
+- わざと壊す確かめ（git の外の写し `/tmp/s-ws333-p010/mut/`、元の file は無変更）18 通りを全部試験が捕えた（FAIL）: allow list に 0x99 を足す、MC6 の rate を TSC に、energy の一周の補いを外す（飽和の引き算に）、µJ の下位の項を落とす、lock の検査を外す、ConfigTDP 3 の検査を外す、ratio 256 を通す、滞在の減りの ERANGE を外す、limit の encode で他の bit を保たない、ns の余りの項を落とす、µJ の和の溢れの検査を外す、energy の total の溢れの検査を外す、RAPL の予約の bit 63:20 の検査を外す、started の検査を外す、limit の予約の code の境界をずらす、0xCE の field の位置をずらす、µJ の shift を 15 bit に切る、CORE C3 の scope を PACKAGE に。見逃しは無し。
+
+自分で決めた点:
+- allow list の 5 つの model（0x97・0x9A・0xB7・0xBA・0xBF）の register の集合は全部同じ 15 bit（0x7FFF）。header が 5 model を同じ表（§2.17・§2.17.5）の下に置いているため、model ごとの差は付けていない。
+- `cpux86_model_registers()` の ENOTSUP の時は `*registers = 0`（header の「0 on ENOTSUP」）。NULL の時は EINVAL で出力を触らない。
+- 誤りの順: `cpux86_pkg_cstate_limit_encode()` は引数の検査（NULL・limit）が先で、その後に lock の EACCES。両方に当たる入力は EINVAL。
+- µJ の溢れの境界は shift 0 と 14 で手で出した（limit = 18446744073709 の整数部、余り 9037 で成功・9038 で ERANGE）。shift 20 以上は 64 bit の最大値でも溢れない事を手で確かめた。shift 31 では 64 bit の units の整数部が 2^33 までなので、ERANGE は起きない（試験でその事を確かめた）。
+- 乱数の試験は xorshift の固定の種。pstate は手で書いた shift と照合、power は header が許す戻りの値だけである事を確かめた。
+
+未実施: 実機・QEMU の確認（この Phase は host の単体試験まで。0xCE・0xE2 の実機の値は p011 以降）。`CONFIG_CPU_PERF` 無しの build（Phase の command に無い）。
+残り: Q1 の判定と merge。
