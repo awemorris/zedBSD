@@ -90,3 +90,23 @@ Q072 uses this check together with DOC-T00 and `git diff --check` to complete
 `ws009-p006`; it does not rerun the already accepted producer runtime matrices.
 The final run passed 11 product-document status banners, while DOC-T00 passed
 all 1,803 permanent `docs/` and `plan/` relative links.
+
+## DOC-54 command
+
+The `/dev/gpu` reference (`docs/reference/gpu.md` and `gpu-*.md`) is checked
+against the public headers by:
+
+```sh
+python3 -I plan/ws009/tests/check-gpu-uapi-doc.py [--base SHA] [--examples] [--final [FILE...]]
+```
+
+It compares the request index (number, direction, argument, size), every
+constant's value, every structure's member offsets, sizes and types (on LP64
+and ILP32), and the capability-set layout read by libvulkan; it rejects
+unknown names, errno names, broken links, links into `plan/` and
+development-management references, and checks that each request section's
+`Requires:` line agrees with the index. `--final` fails on remaining
+placeholders and missing `Errors:`/`Sources:` lines; `--base` keeps the
+skeleton's headings; `--examples` compiles the examples with the target
+clang. The rules are in the script's docstring and in
+[gpu-doc-rules.md](../gpu-doc-rules.md).

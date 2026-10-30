@@ -3,13 +3,13 @@
 # WS009: documentation
 
 <!-- awesome-plan-current:start -->
-Status: incomplete（2026-10-27 ユーザーの回答（クリック）「今書く」: DOC-54（/dev/gpu の UAPI の文書）を今書く、保留から外した）。旧: incomplete・保留（DOC-54）（2026-10-27 P3 の精査 q1608、ユーザー「…masterとWSを修正して、completedやcanceledにしてください。」: p001〜p008 は completed。残りの DOC-54（/dev/gpu の UAPI の文書）は ws009/ws.…
+Status: incomplete（2026-10-27 ユーザーの回答（クリック）「今書く」: DOC-54（/dev/gpu の UAPI の文書）を今書く。2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」: p009 を標準廉価実装手順で p010〜p023 に分けた）
 Primary Milestone: MG001
 Related Milestones: MG006, MG008, MG009
 Objectives: O2, O4, O5
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: p001〜p008 cleared。DOC-54 は [p009](phase009/phase.md)（設計 第 2 版 2026-10-29、p009a・p009b、22 LW、担当は Q1 が割り当てる）。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` が無い（固定版の欠け、触らない、2026-10-29 Q1）
+Resume point: p001〜p008 cleared。DOC-54 は p009 を分けた p010〜p023（2026-10-30 P1 の設計、q1701）。骨格 docs/reference/gpu.md・gpu-*.md と照合の script plan/ws009/tests/check-gpu-uapi-doc.py は基点 5fedf634d。共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。p010〜p021 は互いに独立（Sonnet 5.5 high、並べてよい）、p022 は全部の後、p023 は p022 の後。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` が無い（固定版の欠け、触らない、2026-10-29 Q1）。docs/reference・docs/architecture の既存の link 切れ 4 件は 2026-10-30 P1 が直した
 Target: **ベータ2**（2026-10-13 ユーザー「WS196、WS172、WS009はベータ2に入れます。」。旧: ベータ3（2026-10-08 ユーザー））
 <!-- awesome-plan-current:end -->
 
@@ -27,7 +27,21 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p006`](phase006/phase.md) | Complete (`q072`) | Current WLAN, physical USB HID, Intel Mac Variant, Noct 2.0.1, and project-toolchain behavior is published without claiming planned removals or new UAPIs |
 | [`ws009-p007`](phase007/phase.md) | Complete (`q150`) | Architecture, compatibility, console/graphics/system and multi-radio WLAN reconciled; 283 product links pass |
 | [`ws009-p008`](phase008/phase.md) | Complete (`q190`) | Current amd64/PC98 installer and native-root workflows, recovery/limits, producer evidence and 293 product links verified |
-| [`ws009-p009`](phase009/phase.md) | Planned (design 2026-10-29, q1666) | DOC-54 `/dev/gpu` UAPI reference: two stages p009a/p009b, 22 LW; design review in [design-review.md](phase009/design-review.md) |
+| [`ws009-p009`](phase009/phase.md) | canceled（2026-10-30、p010〜p023 に分けて置き換えた） | DOC-54 の第 2 版の設計（p009a・p009b、22 LW）。review の指摘（[design-review.md](phase009/design-review.md)）は p010〜p023 の骨格の spec と phase.md に移した |
+| [`ws009-p010`](phase010/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu.md: node・権限・呼び方・誤り・並行と待ち・索引・互換。依存: なし |
+| [`ws009-p011`](phase011/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-capabilities.md: bit・GET_INFO・GET_CAPSET・capset 4。依存: なし |
+| [`ws009-p012`](phase012/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-memory.md: resource・blob・placed・transfer・map・device。依存: なし |
+| [`ws009-p013`](phase013/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-sharing.md: export・import（resource・allocation・scanout）。依存: なし |
+| [`ws009-p014`](phase014/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-submission.md: COMMAND・SUBMIT・WAIT・PRESENT・失敗と回復。依存: なし |
+| [`ws009-p015`](phase015/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-fences.md: fence と *_SYNC。依存: なし |
+| [`ws009-p016`](phase016/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-jobs.md: job。依存: なし |
+| [`ws009-p017`](phase017/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-display.md: output・lease・present・wait・events・constraints・副作用。依存: なし |
+| [`ws009-p018`](phase018/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-display-control.md: power・refresh・cursor・commit・overlay。依存: なし |
+| [`ws009-p019`](phase019/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-drivers.md: node の種類の表。依存: なし |
+| [`ws009-p020`](phase020/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-command-stream.md・gpu-sysctl.md。依存: なし |
+| [`ws009-p021`](phase021/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-examples.md: compile できる例。依存: なし |
+| [`ws009-p022`](phase022/phase.md) | planned（2026-10-30 P1 の設計、q1701） | 統合: 全 file の --final、索引と Requires の解消、既存の文書の直し。依存: p010〜p021 |
+| [`ws009-p023`](phase023/phase.md) | planned（2026-10-30 P1 の設計、q1701） | 正確さの敵対的レビュー（Opus を推す）。依存: p022 |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
@@ -80,7 +94,7 @@ than assumed here.
 | DOC-51 | Complete (`q150`) | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |
 | DOC-52 | Complete (`q150`) | `/dev/system` HAL-bridge reference | Device/UAPI audit | Operations, permissions, data structures, and architecture hooks are specified |
 | DOC-53 | Complete through `ws009-p004` | evdev and `/dev/input` UAPI reference | IN-00 through the q044 p006/p007 boundary | ABI profile, event semantics, examples, current ownership, and compatibility differences are published without claiming live USB HID |
-| DOC-54 | Planned as [`ws009-p009`](phase009/phase.md) (hold lifted 2026-10-27) | `/dev/gpu` UAPI and capability reference | GFX-10 | Versioned object model and supported profiles match headers/tests |
+| DOC-54 | Planned as `ws009-p010`〜`p023`（p009 を分けた、2026-10-30） | `/dev/gpu` UAPI and capability reference (`docs/reference/gpu.md` and `gpu-*.md`) | GFX-10 | Versioned object model and supported profiles match headers/tests; `plan/ws009/tests/check-gpu-uapi-doc.py --final --examples` passes |
 | DOC-55 | Complete (`q150`) | `networkd`, `net`, `dhcpc`, WPA backend, and rc.conf networking reference | NET-20+ as applicable | Command/config/protocol/error examples pass tests |
 
 ## 3. Required document qualities

@@ -2,7 +2,7 @@
 
 # ws009-p009: DOC-54 `/dev/gpu` の UAPI と capability の reference
 
-Status: planned（第 2 版、2026-10-29 P5 の設計、q1666。[design-review.md](design-review.md) の B1〜B3・M1〜M12・m1〜m8 を反映。実行の Queue は未割当）
+Status: planned → disposition canceled（2026-10-30 P1、q1701。2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」により、標準廉価実装手順で節ごとの p010〜p023 に分けて置き換えた。この設計と review の指摘は p010〜p023 の骨格の spec と phase.md に移した。以下は第 2 版の記録）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-27 ユーザーの回答（クリック）「今書く」（DOC-54 を保留から外した。ws.md の Status の原文）
 依存: なし。並行の作業との merge の順は 8 節
