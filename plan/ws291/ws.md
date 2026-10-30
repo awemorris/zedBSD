@@ -53,7 +53,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p010a](phase010a/phase.md) | NVIDIA: nvrtx の executor に mview が要る物（depth・index の draw・instance・mip・uniform buffer・cull） | p010 | cleared（2026-10-29 10:48 q1670-i04: 実機で depth・texture が参照と一致、scene-5000 42.2 fps。残り: instance の rate の実機の個別の確かめ） |
 | [p011](phase011/phase.md) | NVIDIA: Linux（NVK）で約 50 fps の scene（qs40 ×5000）での差の計測と 50 fps（p012〜p019 は改善の予備）。GPU の待ちを lock の外へ出す件（非同期の submit）は 2026-10-29 Q1 の判断でこの p011 で行う（WS250 は担当が無く止まっている。WS250 の design.md の期限の STOP・session ごとの worker と食い違わない形にし、WS250 はその上に作る） | p010a | cleared（2026-10-30 Q1 の判定: NVK と揺れの内で同等、文の「50 fps 以上」は未達（49.5〜49.7 fps）。2026-10-29: scene-5000 は 49.1〜49.5 fps で、同じ機械の NVK の単独の run 49.1・平均 50.1 と揺れの内で並ぶ。残りは GPU 19.5 ms、50 fps を明らかに超えるのは p012 以降の予備（vertex の program の質）。2026-10-30 q1693-i01: compiler の FFMA と operand の直読み（VS 108 → 59 命令）でも GPU の時間は不変、49.50・49.69 fps。固定機能で決まる見込み） |
 | [p012](phase012/phase.md) | NVIDIA: scene-5000 を 50 fps を明らかに超える所へ（p011 の予備） | p011 | uncleared（2026-10-30 14:45 P7 q1712-i01: GPU の 19.4 ms は頂点の側の固定機能の hardware の限界で NVK と同等（続けての 6 回の平均 49.05 対 NVK 49.02）、cull=all・boost・VPC/VTG の method で不変、上限は約 51.3 fps。driver の変更なし） |
-| [p020](phase020/phase.md) | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順） | RDNA の手順の確立（p002 と最初の改善） | planned（2026-10-30 P7 q1712-i01: 道具と riscv64 の mview の直しまで。板に表示が無く（no boot framebuffer）mview が動かない、50 fps の基準は未決でユーザーに問い合わせ中） |
+| [p020](phase020/phase.md) | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順） | RDNA の手順の確立（p002 と最初の改善） | planned（2026-10-30 P7 q1712-i01: 道具と riscv64 の mview の直しまで。板に表示が無く（no boot framebuffer）mview が動かない、50 fps の基準は未決でユーザーに問い合わせ中。15:05 P3 q1715-i01: 元の kernel でも 10-28 以降の全起動でも framebuffer 無し、退行ではなく HDMI の接続の見込み、止め） |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
 - 2026-10-27 04:44 ユーザー（Q1 の問い「NGG の A〜C をどう進めますか？」へのクリック）「A〜C を今進める（推し）」。
@@ -259,5 +259,6 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
   `rtx-scene-main.sh`・`rtx-thermal.sh`・`rtx-files.sh`（NVMe の kernel を読み戻し、main の desktop の program を入れて測り、終わりに戻して照合）。
 - Q1 の指示（2026-10-30）: 「RDNA の p006・p008・p009 は、RX 5600 XT が抜かれていて実機が無いので、今回は進めません。ws.md に「実機が戻るまで止め」と記録してください。」→ p006・p008・p009 は実機（RX 5600 XT）が戻るまで止め。規約の見直しは RDNA の後。
 - p020（15:00 P7）: VF2 で main の kernel は起動し PowerVR の render node は ok だが、板に表示が無く（`powervr: no display: no boot framebuffer`）compositor・mview が動かない。HDMI の画面をつなぐ人の作業と、50 fps の基準の決定（Q1 がユーザーに問い合わせ中）を待つ。[phase020](phase020/phase.md)。
+- p020（2026-10-30 15:05 P3、q1715-i01）: 板の元の kernel（2825517684）でも、板に残る 10-28 19:47 以降の起動の記録 32 個でも全部 `no boot framebuffer (6)` → main の kernel の退行ではなく、U-Boot の GOP が無い（HDMI に画面が無い見込み）。物理の接続を Q1 に報告して止めた。画面なしで測る案（display の node を own mode の画面で attach、driver の側）は Q1 の判断待ち。[phase020](phase020/phase.md)。
 - WS291 は incomplete のまま返却（Q1 の指示「p020 が終わったら（または進めなくなったら）、規約の見直しは RDNA の後に回し、WS291 は incomplete のまま返却してください。」）。
 - 再開点（14:45 P7）: NVIDIA の段の残りは無い。ws.md の残りは p008〜p009（RDNA、RX 5600 XT を挿し直すまで実機が無い）、p020（PowerVR、VF2 の割り当てが要る）、最後の規約の見直し。

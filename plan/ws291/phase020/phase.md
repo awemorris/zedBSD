@@ -39,3 +39,16 @@
 2. 50 fps の基準が未決（上）。
 - 再開の手順: 表示がつながった後に `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 sh plan/ws291/tests/vf2-mview.sh OUT build/ws291/vf2`
   で copies 1・10・50・100・200 の fps を取り、基準の決定に沿って scene を決める。
+
+### 表示が無い原因の切り分け（2026-10-30 15:05 P3、q1715-i01）
+
+- 板の今の kernel は元の物（/boot/boot0/vmunix cksum 2825517684、uname は zedBSD 5c83c16 の userland）。SSH で読んだだけで、板の file・電源は変えていない。
+- 元の kernel でも `visionfive2: no framebuffer (6)`・`powervr: no display: no boot framebuffer (6)`。/dev に gpu0 だけ（display の node が無い）。
+- 板の /boot/boot0/log の起動の記録 32 個（boot-000118〜000149、2026-10-28 19:47〜）は全部 `no framebuffer (6)`・`no display: no boot framebuffer (6)`。
+  10-28 の WS288 の GHCI の kernel（vmunix.p3orig）の頃から、どの kernel でも loader の framebuffer が無い → main の kernel の退行ではない。
+- 経路: U-Boot の boot.scr → zedBSD の UEFI の loader（BOOTRISCV64.EFI）→ kernel。loader の framebuffer は U-Boot の GOP から来る。
+  GOP が無い（U-Boot の HDMI の video が上がっていない）見込み: HDMI に画面（か dummy plug）がつながっていない・電源が切れている、が最もありそう（未確かめ: 板の HDMI の HPD を読む道具は無い）。
+- 参考: kernel の自前の点灯（ws277-p005 の own mode）は動いている（`dc8200: own mode 1920x1080@60 clock 148500 kHz … fb 404b0000/7680`、HDMI PLL の未 lock の行なし）。
+  しかし display の node（`src/drivers/gpu/powervr/display/display.c` の attach）は loader の framebuffer だけを見るので、own mode の画面では node が出来ず、compositor が動かない。
+  画面をつながずに測る案（driver の側の変更、HAL は変えない）: loader の framebuffer が無い時に display の node を own mode の画面（dc8200 の own_screen の run）で attach する。範囲の外の新しい作業なので Q1 の判断を待つ。
+- 判断（範囲の 1 のとおり）: 物理の接続の見込みが高いのでここで止め、Q1 に報告した。
