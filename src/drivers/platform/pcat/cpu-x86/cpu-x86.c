@@ -173,6 +173,11 @@ drv_cpu_x86_init(void)
 		kern_logf("cpu-x86: the performance framework refused the provider (%d)\n", error);
 		return error;
 	}
+	kern_logf("cpu-x86: family %02xH model %02xH, %u CPUs described%s\n",
+		  drv_cpu_x86_machine.identity.display_family,
+		  drv_cpu_x86_machine.identity.display_model,
+		  count,
+		  drv_cpu_x86_machine.hybrid != 0U ? ", hybrid" : "");
 
 #if CONFIG_CPU_PERF
 	/* Prepares the feedback tables and the energy meters, which need the CPUs' places. */
