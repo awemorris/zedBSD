@@ -458,7 +458,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1763 / q1763-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws330`・branch `agent/p5-ws330`） | [ws330](ws330/ws.md) p001 設計 | plan/ws330/ だけ、design-reviewer と問いまで。実装は WS329 の完了の後 | uncleared（設計 84d01a58a、merge 299a2f4b3。理由: ユーザーの問い Q330-1〜4 の答え待ち） |
-| q1764 / q1764-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r2`・branch `agent/p3-ws291r2`、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) の続き | kernel の record の decode の短縮など、phase014 の再開点の候補 | in-progress |
+| q1764 / q1764-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r2`・branch `agent/p3-ws291r2`、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) の続き | kernel の record の decode の短縮など、phase014 の再開点の候補 | in-progress・返却（d74ebaff5〜1f66a9e89、main 7dd9f1538。big-1000 116 fps、subs は判断待ち） |
 | q1765 / q1765-i01 | S-333p008（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p008`） | [ws333-p008](ws333/phase008/phase.md) | phase.md のとおり、header を変えない（BASE 39f4a5597） | cleared（fae4a0d41） |
 | q1766 / q1766-i01 | S-333p009（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p009`） | [ws333-p009](ws333/phase009/phase.md) | 同上 | cleared（9fb61c61e） |
 | q1767 / q1767-i01 | S-333p010（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p010`） | [ws333-p010](ws333/phase010/phase.md) | 同上。legacy の 0xCE の比の道は p011 で使わない（Q1 の判断） | cleared（35d5d4500） |
