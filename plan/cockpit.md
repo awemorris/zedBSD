@@ -105,7 +105,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 - 背景: WS333 p007（x86 の CPU の register を読む module の設計）で、P7 が AMD の公開の仕様書 APM Vol 3（24594、CPUID の HwPstate・CPB の bit の位置の出典）を amd.com から取ろうとした。1 回目は bot の確かめの page が返り、2 回目に browser の header を付けた取得が**権限の判定（bot の確かめの回避）で止められた**。P7 は回避せず止め、AMD の取得はしない。
 - 影響: AMD の CPU の P-state の bit を仕様で裏付けられないので、p008 の範囲から外し「仕様未取得」と記録して進める。5330（Intel）には影響しない。Intel の SDM は取得済み。
-- 同じ形でもう 1 件: ACPI 6.5 の第 8 章（_PSS・_PSD・_PPC、firmware が示す P-state の表の形の出典）を uefi.org から取ったら Cloudflare の challenge の page が返り、P7 は再試行せず止めた。p010 から _PSS などの解析を「仕様未取得」として外す。
+- 同じ形でもう 1 件: ACPI 6.5 の第 8 章（_PSS・_PSD・_PPC、firmware が示す P-state の表の形の出典）を uefi.org から取ったら Cloudflare の challenge の page が返り、P7 は再試行せず止めた。p010 から _PSS などの解析を「仕様未取得」として外す。08:1x に WS310（_OSC の設計、P6）でも同じ ACPI 6.5 の PDF の取得が bot の確かめで 403 になり、回避せず「仕様で未確認」の印で進めている。
 - 決めてほしい事: ユーザーが AMD APM Vol 3 と ACPI 6.5 の PDF を手で置くか（置き場所は Q1 が決める、git の外）、その 2 つの部分は後回しにするか。
 
 ### 02. 共有の /tmp の試験の作業 directory の片付け（2026-10-31 05:1x、権限の判定で止められた）
