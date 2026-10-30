@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 06:33（Q1）
+最終更新: 2026-10-31 06:36（Q1）
 
 ## 担当（P1〜P8）
 
@@ -16,7 +16,7 @@
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
 | P6 | [WS310](ws310/ws.md) | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる | q1779: p001 設計（どの _OSC を何の bit で、前後の firmware の振る舞いの差の確かめ方） | WS317（hotplugd）はユーザーの「今は取り組まない」のとおり設計もしない |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,472（71.20%）。flex・grid の baseline、fieldset、CSS の論理の box の property を足した、後退 0 |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,507（72.21%）、各段で後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
 
@@ -60,7 +60,7 @@ completed（2026-10-31、main 39fc879c5）。KERN_CLOCK_HZ を無くし、tick �
 
 ### WS074 Web ブラウザ（libbrowser）
 
-Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%）→ 2,454 → 2,472（71.20%、10-31 06:4x、main に merge）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
+Interop 2025 で Chromium 156 が通る 3,472 件: 2,105（10-30 の始め）→ 2,386 → 2,427（69.90%）→ 2,454 → 2,472 → 2,507（72.21%、10-31 08:0x、main に merge）。後退は偶然通っていた scripted の 2 件だけ、Acid3 100/100。P8 が 100% まで自走（ユーザーの指示）、3 回目（i03）に入った。
 
 ### WS307 graphical installer
 
