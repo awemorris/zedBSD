@@ -3,7 +3,7 @@
 # WS328 libbrowser のベクトル描画（path の塗りと線、CSS の角丸・gradient など）と、それを使った SVG の描画
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: planning（2026-10-30 Q1 が作成、担当は未割当。WS074（Browser、Codex のセッション）と file が重なるので、始める前に WS074 と調整する）
+- Status: planning（2026-10-30 Q1 が作成。2026-10-30 ユーザーの決定で WS074 を止めて先に実装する）
 - 目標: libbrowser の描画（`userland/desktop/libbrowser/paint/`）にベクトル描画を足し、それで CSS の描画（角丸・gradient・影など）と、libbrowser の中の SVG の描画を作る。既存の library は使わない（libbrowser は単体の library）。
 
 ## ユーザーの決定（2026-10-30、原文）
@@ -43,3 +43,7 @@ module と実装の Phase の正確な分け方は p001 が決める（下の p0
 - 2026-10-30 Q1: 作成。WS074 と調整してから始める。
 
 - 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形にした。p001 の設計（Opus）から、着手の時期は未定（WS074 と調整）。
+
+## 日程（2026-10-30 ユーザー、原文）
+
+「WS328に関しては、WS074を止めてWS328を先に実装する、です。」（Codex の解約で WS074 は Claude の管理下に移った後の判断）→ WS074 は止めたまま、WS328 を p001（設計、Opus）から進める。WS074 の再開は WS328 の後。

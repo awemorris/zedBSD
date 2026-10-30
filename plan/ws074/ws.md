@@ -9,7 +9,7 @@ Related Milestones: MG002
 Objectives: O1, O2
 Parent: [Master](../master.md)
 Owner: Q1（プロジェクト全体）。2026-10-30 ユーザー「Codexは解約しました。WS074はClaudeの管理下に移ります。」→ Codex のセッションは終わり、WS074 は Q1 が Queue を管理し Claude の担当に割り当てる（旧: Codex のセッションが単独で管理）。
-Queue: [ws074-q20261019-55](queue.md)（2026-10-18、Codex単独で開始。2026-10-30 Codex の解約で止まった。次は Q1 が Claude の担当に割り当てる）。ユーザーが100%までの自走を指示。[契約](autonomy.md)。
+Queue: [ws074-q20261019-55](queue.md)（2026-10-18、Codex単独で開始。2026-10-30 Codex の解約で止まった。2026-10-30 ユーザー「WS328に関しては、WS074を止めてWS328を先に実装する、です。」で WS328 の後に再開）。ユーザーが100%までの自走を指示。[契約](autonomy.md)。
 
 Event ws074-p260-start-20261027: ユーザー「WPT Interop 2025で、chromeが成功している項目に限り、100%を目指しましょう。」により [p260](phase260/phase.md) を立てた。分母は同じ runner で Chromium が PASS する ID。WPT を全体の checkout に直し（sparse で harness 1,072/static 1,536 に欠けていた）、Chromium の adapter と比較の道具を足した。基準の測定は実行中。
 
