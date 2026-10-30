@@ -119,17 +119,17 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
+### 1. WS331（driver から HAL への直の依存を除く）の残りの未決 2 点
 
 - 背景: 表 A・B は 2026-10-30 に許可された。残りは次の 3 点（詳細は下の「WS331」の節と [phase001](ws331/phase001/phase.md) §4・§6）。
-- (1) Raspberry Pi 4 の console の 2 関数（rpi_cons_suspend_output・resume_output）: HAL の early console（起動の早い段の画面の文字の出力）の中の状態と lock を使うので、driver にも kernel にも移せない。案 (a) 当面の例外として残す（P2 の推し）、(b) 汎用の HAL の口を足す（HAL の API の変更、承認が要る）、(c) driver が画面の文字を自分で描く作りにする。
-- (2) build の macro HAL_ARCH_*・HAL_BOARD_*（6 file・16 行、どの CPU・board 向けかを compile の時に分ける印）を driver に残すか。
-- (3) kernel の header 13 個が HAL の header を include していて、driver が間接に HAL の名前を見られる件を WS331 の範囲に入れるか。
+- (1) build の macro HAL_ARCH_*・HAL_BOARD_*（6 file・16 行、どの CPU・board 向けかを compile の時に分ける印）を driver に残すか。
+- (2) kernel の header 13 個が HAL の header を include していて、driver が間接に HAL の名前を見られる件を WS331 の範囲に入れるか。
 
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS331 driver の HAL 依存 | rpi4 の console: HAL の BSP の非公開の関数を呼ばない。resume に当たる処理は driver の中に同等の関数を作る（suspend は kernel_putc の約束で、要れば HAL の実装を直す） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS291 GPU の速さ | PowerVR の目標: Linux の RTX 2070 の scene-5000（qs40 × 5000、50 fps）をカタログの FP32 の比（約 392 倍、GPU 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上 | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | kernel_putc は宣言を kernel の header に。kernel_notify_task は既存の sched_notify_task へ | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS313 ODROID-C5 | zedBSD-firmware に Hardkernel の公式の image（無変更）と Amlogic の license、Mali の firmware を入れて push（ユーザー「WS313のpushはやってください。」、GitHub の main 43662bd） | [ws313/ws.md](ws313/ws.md) |

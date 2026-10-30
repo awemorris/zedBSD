@@ -17,6 +17,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 
 - 2026-10-30 ユーザー（原文）「表A,Bを許可します」 → p001 の表 A（置き換え先）と表 B（B1〜B8: kern_device_map の WRITECOMBINE・READONLY、MSI の 4 関数 kern_irq_alloc_msi・attach_msi・detach_msi_sync・free_msi、kern_cpu_current、kern_console_early_putc、kern_physaddr_t）を許可。MSI は表 B の関数を足す形（別の案は採らない、Q1 の解釈）。未決のまま: rpi4 の console の 2 関数、build の macro HAL_ARCH_*、kernel の header が HAL の header を include する件。
 - 2026-10-30 p003 で見つかった表 B の漏れ（kernel_putc・kernel_notify_task、hal.h だけに宣言のある kernel の名前）へのユーザーの回答（原文）「kern_task_notifyはなんか変。sched系の名前にするのがいいのでは？putcはOK。」 → kernel_putc は既存の宣言を include/kern/text-display.h に足す。kernel_notify_task は新しい関数を足さず、既存の sched_notify_task（include/kern/sched.h）に driver の呼び出しを替える（Q1 の解釈）。
+- 2026-10-30 ユーザーから、rpi4-console.c が呼ぶ rpi_cons_suspend_output・rpi_cons_resume_output（HAL の Raspberry Pi の BSP の中の非公開の関数）について、HAL の呼び出しに加えて非公開の関数まで呼んでいたのは違反であり、resume に当たる処理は driver の中に同等の関数を定義して使えばよい、という趣旨の指示を受けた。→ Q1 の解釈: suspend は hal.h の既存の約束（kernel が kernel_putc を公開したら HAL の early console は描かない）で済ませ、BSP がその約束を守っていなければ HAL の実装（src/hal/）を直す（hal.h は不変）。resume（残した文字の描き直し）は driver の中に実装する。p005 で行う。
 
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
