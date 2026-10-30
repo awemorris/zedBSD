@@ -86,3 +86,5 @@ PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測�
     余りは NOP で埋める（0 で埋めると HALT）。pass の measure（`native-pass.c`・`native71-pass.c`）は draw ごとの固定の長さのまま使える。indexed・instanced では 43 を値付きで必ず出す。
   - mip: `vulkan-resource.c:278` の `mipLevels != 1` の拒否、copy・blit・sample の level の扱い（未調査）。RGBA8 に BLIT を報告しているので mview は mip を作る。
 - 次の安全な地点: 上の record〜BCL を入れ、Pi 4（`config/ci/config-rpi4.mk` の build/arm64/vmunix）と Pi 5（`plan/ws291/tests/config-rpi5.mk`）の vmunix が warning 0、host 試験 PASS で commit。
+
+- 2026-10-31 ユーザーから、Pi 5 の試験は今日の午後に行い、その時の main で最新の image を作り直して実施する、Q1 が声をかける、という趣旨の指示を受けた。

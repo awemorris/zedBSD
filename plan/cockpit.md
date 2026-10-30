@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:32（Q1）
+最終更新: 2026-10-31 01:33（Q1）
 
 ## 担当（P1〜P8）
 
@@ -154,7 +154,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 
-- Pi 5: `/home/awe/zedBSD-worktrees/p4-ws291pi/build/ws291-p021/rpi5-p021.img` を SD に書いて起動し、画面に console の login が出るか（起動しなければ config.txt の `kernel=vmunix-fallback`）。起動したら Q1 に知らせると P4 が SSH で測る。
+- **Pi 5（2026-10-31 の午後にユーザーが行う予定）**: その時の main で最新の image を作り直して渡す（P4）。Q1 が声をかける。画面に console の login が出るか、起動の後に P4 が SSH で GPU の clock と fps を測る。
 - ODROID-C5: 試験の image（上の WS313）で起動と画面。
 - VF2: 新しい kernel で画面と serial の login（BUG-372）。
 
