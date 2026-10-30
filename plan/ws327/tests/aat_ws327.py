@@ -119,9 +119,13 @@ def videoplayer_close(item):
 
 @run.define("ws327.settings.storage-scan")
 def storage_scan(item):
+	# A trash with one file: an absent Trash/files is an empty trash, counted by no thread (storage.c).
+	trash_files = f"{aatlib.HOME}/.local/share/Trash/files"
+	run.sh(f"mkdir -p {trash_files} && echo ws327 > {trash_files}/ws327-trashed.txt && "
+		f"chown -R {aatlib.USER} {aatlib.HOME}/.local")
 	window, since = run.settings(item, "storage")
 	trash = run.wait(r"ZSETTINGS STORAGE trash bytes=\d+ items=\d+", since, 20)
-	item.step("the Storage page", trash or "no STORAGE trash line")
+	item.step("the Storage page (one file in the Trash)", trash or "no STORAGE trash line")
 	controls = run.controls(since, "storage")
 	mark = run.mark()
 	run.click_control(item, window, controls, STORAGE_ANALYZE, "Analyze")
@@ -129,7 +133,8 @@ def storage_scan(item):
 	done = run.wait(r"ZSETTINGS STORAGE done root=\S+ bytes=\d+ files=\d+", mark, 120)
 	item.step("Analyze", f"{started}; {done}")
 	run.shot(item, "analyzed")
-	item.check(trash, "the Trash's size was not counted")
+	run.sh(f"rm -f {trash_files}/ws327-trashed.txt")
+	item.check(trash and not trash.endswith("items=0"), "the Trash's size was not counted")
 	item.check(started and done, "the scan did not start and end")
 	item.passed(f"{trash}; {done}")
 

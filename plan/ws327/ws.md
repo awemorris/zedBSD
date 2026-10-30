@@ -3,8 +3,9 @@
 # WS327 libkeiland の thread と network の薄い wrapper（POSIX と Win32 で同じ interface）と app の移行
 
 - Master: [plan/master.md](../master.md)（2026-10-30 作成）。Primary Milestone: MG006。
-- Status: incomplete（2026-10-30 Q1。p001〜p003・p007 cleared、p008〜p015 を Sonnet 5.5 high に委ねる（ユーザー「P2は手順書を書いたとのことですので、Sonnetで実施してOKです。」））
+- Status: completed（2026-10-30 P5 が完了の形に書いた。Q1 の確認と master.md の行の移動を待つ）
 - 目標: libkeiland に、pthread の類を包む thread の層と、socket の概念を見せる network の層を足し、Keiland の app の thread と socket をそれに移す。POSIX（zedBSD・Linux・FreeBSD）と Win32 で同じ interface で実装できる形。libbrowser は使わない。
+- 設計: [design.md](design.md)（§5.4 の Win32 の表は Future Work F-WS327-win32-build が参照する）。
 
 ## ユーザーの決定（2026-10-30、原文）
 
@@ -12,55 +13,72 @@
 2. 「WS327を立ててOKです。appの対応も入れます。libbrowserは単体のライブラリなので、このラッパーは不使用です。」
 3. （2026-10-30、Q1 経由）「P2ですが、Windows用の実装を書いてしまってOKです。インタフェースがWindowsでも通用する形になっているかのチェックです。動作確認は不要です。mingwは使ってよいです。」
    - 解釈（Q1）: `thread-win32.c`・`socket-win32.c` を書き、`x86_64-w64-mingw32-gcc` で cross compile（warning 0）まで。wine での試験はしない。写せない所・口を変えた方がよい所は design.md に書いて Q1 に返す。p005 の後の p006。
+4. （2026-10-30）「P2をいったんラップアップして、標準廉価実装手順を適用するようにWS237のphaseを整理しなおして、再起動してほしいです。」
+   - 解釈（Q1）: WS237 は完了済みの i915 の WS なので WS327 の事。Phase を設計の担当（P2）と実装の担当（Sonnet 5.5 high）に分けた（p007〜p017）。
+5. （2026-10-30）「WS327をP5で実行します。P5はこのWSが終わったら返却してください。」（p016 の残り・p017・完了の形）
 
-## 方針（Q1 の案、2026-10-30。設計で置き換える）
+## 結果
 
-- thread（`kl_thread_*` の類）: 作成・join・detach、mutex・条件変数・once、thread ごとの値、atomic（C11 の <stdatomic.h> で足りれば使う）、名前（WS309 の名前の付いた thread）、優先度と CPU の指定。POSIX は pthread、Win32 は CreateThread・SRWLOCK・CONDITION_VARIABLE。
-- network（`kl_socket_*` の類）: socket の作成・connect・bind・listen・accept・send・recv・shutdown・close、非 blocking、address（IPv4・IPv6）、名前の解決（getaddrinfo の包み）、複数の socket の待ち（`kl_socket_poll` の類、BSD は poll か select、WinSock は WSAPoll か select、WSAPoll の connect の失敗の不具合を補う）。handle は不透明な型。TLS は範囲の外。
-- WS309・WS314 の方針: socket の待ちは app の network の thread の中で使い、結果は kl_app_post で main に返す。kl_app_dispatch に fd の待ちは戻さない。
-- 実装は libkeiland/platform/ の POSIX の層に（WS314 と同じ置き場）。Win32 の実装は interface が移せる事を設計で示す（build は範囲の外、可能なら host の cross の compile だけ）。
+- **層**: `userland/desktop/include/keiland/keiland_thread.h`（thread の作成・join・detach、mutex・条件変数・once、thread ごとの値、
+  名前・優先度・CPU、sleep・時計、KL_VERSION 103）と `keiland_socket.h`（不透明な socket、IPv4・IPv6 の address、名前の解決、
+  非 blocking、connect の結果、複数の socket と waker の `kl_socket_poll`、KL_VERSION 104）。実装は `libkeiland/platform/`
+  `thread-posix.c`・`socket-posix.c`（zedBSD・Linux・FreeBSD）と `thread-win32.c`・`socket-win32.c`（mingw x86_64・i686 で compile と link、
+  warning 0、走らせていない: ユーザーの決定 3）。Win32 で header の約束が揺れる所は design §5.4（W1〜W8・S1〜S9）、header を変える必要は無い。
+- **app の移行**: Mailer（conn・tls・imap・sync）、Music、Video Player と media-app、Photos（thumbs・media-worker）、Settings（look・
+  storage-scan・storage-trash）、IME の辞書の writer、libkeiland の picker-model・audio。app と libkeiland の platform/ の外は pthread・
+  socket を直に呼ばない: OS 境界の checker に T1・N1 を足した（`plan/tools/keiland-os-boundary/check.sh`、FAIL は WS327 の前と同じ 64 行）。
+- **解説**: `docs/howto/keiland-programming.md` の 8 章（08-worker・08-language を新しい層に、network の節と `08-network.c`、
+  `08-network.png`）。
+- **確かめ**（p016・p017）: zedBSD amd64・arm64・riscv64 と Linux の build warning 0、host の thread 27（28）・socket 53 を gcc・clang の
+  plain・TSan・ASan+UBSan で、FreeBSD 15.1 の guest で thread 27・socket 53、host の ime・picker・mail・music・codec、doc-examples 76、
+  QEMU（音の device 無し）の app の回帰（Mail・Video Player・Settings・Terminal・IME・壁紙・WS327 の 4 項目、8 章の例 5 つの絵）。
+  詳細は phase016・phase017 の結果（Phase の directory の削除の後は git の履歴）。
+- p017 で WS327 が変えた C の行を coding-style の全文と照らして直した（header は comment だけ: `kl_socket_close(NULL)` は何もしない、
+  `kl_thread_start` の失敗で `*thread` は NULL）。
 
-## Phase（2026-10-30 Q1 が標準廉価実装手順の形に組み直した）
+## 制限・移管
 
-ユーザーの指示（2026-10-30、原文）「P2をいったんラップアップして、標準廉価実装手順を適用するようにWS237のphaseを整理しなおして、再起動してほしいです。」
-（Q1 の解釈: WS237 は完了済みの i915 の WS なので WS327 の事。手順は [docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)。
-設計の担当 = P2（Opus 5.5）、実装の担当 = Sonnet 5.5 high を Phase ごとに別の worktree で。`keiland_thread.h`・`keiland_socket.h` は p002・p003 で凍結した BASE とし、実装の担当は変えない。）
+- Windows の build（Makefile・DLL）と走らせての確かめは範囲の外: Future Work F-WS327-win32-build。
+- Music の音ありの QEMU は p016 の run 1・2（P2）で通ったのが最後。run 3 は音の device 無し（BUG-368 の irq.c の fatal が intel-hda 付きで
+  1 回出たため、open）。
+- apps.photos.browse の R の後の FAIL は BUG-370（Photos の自分の保存で全面表示が閉じる、WS327 の外）。その helper と仕様は今の
+  mediastorage に合わせて書き直した（`plan/tools/aat/scenarios/helpers_photos.py`、`tests/scenarios/apps/photos/browse.md`）。
+- BUG-367（loopback TCP の close）は WS327 の中で見つかり閉じた。zedBSD の image に `/etc/hosts` が無い（"localhost" が解けない、p003）は
+  Q1 の判断の待ち。
+- 人の確かめが要る写真（needs-person 8 項目）は `build/ws327-p016-apps3/*/png/`（p5-ws327 の worktree）。
 
-| Phase | 目的 | 担当 | 状態 | 依存 |
-| --- | --- | --- | --- | --- |
-| [ws327-p001](phase001/phase.md) | 設計（design.md、header の案、Win32 への写し方、移す app の一覧）、design-reviewer | P2 | cleared | — |
-| [ws327-p002](phase002/phase.md) | thread の層（`thread-posix.c`）と host 試験 | P2 | cleared | p001 |
-| [ws327-p003](phase003/phase.md) | network の層（`socket-posix.c`）と host 試験、zedBSD の guest で 1 回 | P2 | cleared（2026-10-30 Q1、main merge。host 12 build と zedBSD の guest で thread 27・socket 53 PASS） | p001 |
-| [ws327-p004](phase004/phase.md) | app の移行（一括） | — | canceled（p008〜p012 に分けた。Mailer の途中の移行 6bb8c3c8d は p008 が引き継ぐ） | — |
-| ws327-p005 | 解説と規約の全文の見直し（一括） | — | canceled（p015・p017 に分けた） | — |
-| ws327-p006 | Win32 の実装（一括） | — | canceled（p013・p014 に分けた） | — |
-| [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | cleared（2026-10-30 Q1、0f60bee4a。phase008〜017、design §13、design-reviewer 21 件を反映） | p003 |
-| [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | cleared（2026-10-30 Q1、main d2efaeeb6。host-mail-backend・sync PASS（ASan・UBSan）、zedBSD 3 arch warning 0、突然変異 3 で全て検出。QEMU は p016） | p007 |
-| [ws327-p009](phase009/phase.md) | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | cleared（2026-10-30 Q1、main d0fe48954。host-music-play・run-host-codec PASS、zedBSD 3 arch warning 0、check-layers PASS、突然変異 4 で全て検出。Video Player の再生は p016 の QEMU で） | p007 |
-| [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | cleared（2026-10-30 Q1、main ff55398bf。zedBSD 3 arch の build warning 0、check-layers PASS。動作は p016 の QEMU で） | p007 |
-| [ws327-p011](phase011/phase.md) | Settings（look・storage-scan・storage-trash）の移行 | Sonnet | cleared（2026-10-30 Q1、main e28b3b526。zedBSD 3 arch・Linux の build warning 0、check-layers PASS、突然変異 3 で全て検出。動作は p016 の QEMU で） | p007 |
-| [ws327-p012](phase012/phase.md) | IME の辞書の thread、libkeiland の picker-model・audio の移行 | Sonnet | cleared（2026-10-30 Q1、main 88fcf2ac5。host-apps ime 230・picker PASS、zedBSD 3 arch・Linux warning 0、check-layers PASS。突然変異 4 のうち join の除去は試験で見えない（記録）。audio の動作は p016） | p007 |
-| [ws327-p013](phase013/phase.md) | `thread-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | cleared（2026-10-30 Q1、main 93e627b96。mingw x86_64・i686 で compile と link PASS・warning 0、sleep は QPC、cpu_count は affinity。Win32 で header が揺れる 5 点は phase013 の結果、p016 で Q1 に一覧） | p007 |
-| [ws327-p014](phase014/phase.md) | `socket-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | cleared（2026-10-30 Q1、main 61bd8c914。mingw x86_64・i686 で compile と link PASS・warning 0。WinSock で header が揺れる点は phase014 の結果、p016 で一覧） | p007 |
-| [ws327-p015](phase015/phase.md) | 解説（keiland-programming.md の 8 章、08-worker.c・08-language.c を新しい層に、network の節と 08-network.c） | Sonnet | cleared（2026-10-30 Q1、main d695576d1。doc-examples 76 PASS（clang・gcc -Werror、写しの一致）、doc-lines PASS。08-network の窓の道は p016 の guest で） | p007（API は凍結済み。2026-10-30 P2 が p008〜p012 から外した） |
-| [ws327-p016](phase016/phase.md) | 受け入れ: OS の境界の check（design §1.3）、全 app の QEMU の回帰（design §6.4）、Win32 で口が成り立たない所の Q1 への報告 | P2 | in-progress（2026-10-30 P2 ラップアップ、QEMU の回帰が途中） | p008〜p015 |
-| [ws327-p017](phase017/phase.md) | 規約の全文の見直し | Sonnet | planned | p016 |
+## Phase
 
-## Resume point
+| Phase | 目的 | 結果 |
+| --- | --- | --- |
+| ws327-p001 | 設計（design.md）、design-reviewer | cleared |
+| ws327-p002 | thread の層（`thread-posix.c`）と host 試験 | cleared |
+| ws327-p003 | network の層（`socket-posix.c`）と host 試験、zedBSD の guest | cleared |
+| ws327-p004 | app の移行（一括） | canceled（p008〜p012 に分けた） |
+| ws327-p005 | 解説と規約の見直し（一括） | canceled（p015・p017） |
+| ws327-p006 | Win32 の実装（一括） | canceled（p013・p014） |
+| ws327-p007 | 委譲の設計（標準廉価実装手順） | cleared |
+| ws327-p008 | Mailer の移行 | cleared |
+| ws327-p009 | Music・Video Player・media-app | cleared |
+| ws327-p010 | Photos | cleared |
+| ws327-p011 | Settings | cleared |
+| ws327-p012 | IME・picker-model・audio | cleared |
+| ws327-p013 | `thread-win32.c`（mingw の compile） | cleared |
+| ws327-p014 | `socket-win32.c`（mingw の compile） | cleared |
+| ws327-p015 | 解説（8 章） | cleared |
+| ws327-p016 | 受け入れ（境界・build・host・FreeBSD・Win32・QEMU） | cleared の候補（2026-10-30 P5。FAIL は Q1 が受け入れた物だけ） |
+| ws327-p017 | 規約の全文の見直し | cleared の候補（2026-10-30 P5） |
 
-- 2026-10-30 Q1: 作成。
-- 2026-10-30 P2: p001 設計（[design.md](design.md)、review 18 件を反映、Q1 の答えは §12）・p002 thread（KL_VERSION 103）・p003 network（104）の
-  実装と host 試験。次: p003 の zedBSD の guest での実行、p004 の app の移行（Mailer から）。
-- 2026-10-30 P2 ラップアップ（Q1 の指示: Phase を標準廉価実装手順の形に組み直してから再起動）。p003 は guest の実行が残り、p004 は Mailer の
-  `conn.c`・`tls.c`・`imap.c`・`mail.h` まで（`sync.c` が残り Mailer は build しない、[phase004](phase004/phase.md)）。guest の image の config は
-  `tests/config-amd64-guest.mk`（未 build）。p006（Win32）は未着手。
-- 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形に組み直した（上の表）。P2 を再起動し p003 の guest の実行と p007 の委譲の設計から。
-- 2026-10-30 P2（q1697-i02）: p003 の guest の実行 PASS（cleared の候補）。p007: p008〜p017 の phase.md、design §13（実装の Phase の共通の約束）、
-  Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
-  `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。design-reviewer 21 件を反映（high の 1: Mailer が main で壊れないよう
-  P2 が `sync.c` を移した。p008 は確かめと host 試験の直し）。実装の担当は ws.md に触らない（Q1 が merge の時に表を直す）。
-- 2026-10-30 P2（q1703-i01、p016）ラップアップ（Q1 の指示）: 境界（B5 の直し、T1・N1 を check.sh に、WS327 の前と同じ 64 行）・zedBSD 3 arch と
-  Linux の build（warning 0）・host 全部・FreeBSD 15.1（backend-test と thread 27・socket 53）・Win32 の表（design §5.4、S7 を直した）・
-  network_finish（join を先に）・閉じた WS の試験 4 本の直しは済み。QEMU の回帰は途中（Mail・Music・Settings の頁は通った、Video Player と
-  Photos が fail で未解析、残りのシナリオは未実行）。BUG-367（loopback TCP の close）・BUG-368（irq.c の fatal、再現せず）を見つけた。
-  08-network の guest は BUG-367 の後。再開の手順と削除の候補は [phase016](phase016/phase.md) の「引き継ぎ」。
+## 試験の行き先（Q1 への案）
+
+- 今後も回帰に使う物を `plan/tools/keiland-layers/` へ移し plan/tools.md に登録する案: `host-test.sh`・`thread-test.c`・`socket-test.c`
+  （層の host 試験）、`build-win32.sh`・`win32-link.c`（Win32 の compile と link）、`freebsd-layers.sh`（FreeBSD の guest）、
+  `host-apps.sh`（ime・picker の host 試験の link）、`aat_ws327.py`（Music・Video Player の窓を閉じて終わる、Settings の Storage、IME の
+  終わりの辞書）。移す時に script の中の `plan/ws327/tests` の path を直す。
+- この WS だけの物（削除の候補）: `check-layers.py`・`layers-allow.tsv`（check.sh の T1・N1 に入った）、`check-base.sh`（実装の
+  Phase 用）、`build-zedbsd.sh`、`guest-apps.sh`・`config-amd64-aat.mk`・`config-amd64-guest.mk`・`config-amd64-layers.mk`・
+  `guest-layers.sh`、`doc-lines.py`、`make-frozen.sh`・`frozen.sha256`（あれば）、`__pycache__`。Phase の directory（phase001〜017、
+  phase016 の `check-t1-n1.patch`・`tcp-close-repro.c` を含む。後者の写しは `plan/tools/tcp-close/`）。
+- 参照の直し: `plan/bugs/BUG-367.md` の `plan/ws327/phase016/tcp-close-repro.c` → `plan/tools/tcp-close/tcp-close-repro.c`、
+  `plan/bugs/BUG-368.md` の plan/ws327 の参照（Q1 の範囲）。
+
