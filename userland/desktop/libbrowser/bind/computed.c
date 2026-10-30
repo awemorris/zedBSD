@@ -83,6 +83,7 @@ enum computed_property {
 	COMPUTED_OPACITY,
 	COMPUTED_TEXT_SHADOW,
 	COMPUTED_BACKDROP_FILTER,
+	COMPUTED_FILTER,
 	COMPUTED_Z_INDEX,
 	COMPUTED_FONT_SIZE,
 	COMPUTED_FONT_WEIGHT,
@@ -219,6 +220,7 @@ static int computed_decoration_append(struct wb_units *out, const struct wb_unit
 static int computed_decoration(const struct css_style *style, struct wb_units *out);
 static int computed_text_shadow(const struct css_style *style, struct wb_units *out);
 static int computed_backdrop_filter(const struct css_style *style, struct wb_units *out);
+static int computed_filter_list(const struct css_filter *filters, int count, struct wb_units *out);
 
 /* The state of a computed declaration, which marks its element's object. */
 static const struct vm_cell_type computed_ref_type = { "computed-style", computed_trace, NULL };
@@ -299,6 +301,7 @@ static const struct computed_entry computed_entries[] = {
 	{ "opacity", COMPUTED_OPACITY },
 	{ "text-shadow", COMPUTED_TEXT_SHADOW },
 	{ "backdrop-filter", COMPUTED_BACKDROP_FILTER },
+	{ "filter", COMPUTED_FILTER },
 	{ "z-index", COMPUTED_Z_INDEX },
 	{ "font-size", COMPUTED_FONT_SIZE },
 	{ "font-weight", COMPUTED_FONT_WEIGHT },
@@ -1292,6 +1295,9 @@ computed_write_keyword(
 		break;
 	case COMPUTED_BACKDROP_FILTER:
 		error = computed_backdrop_filter(style, out);
+		break;
+	case COMPUTED_FILTER:
+		error = computed_filter_list(style->filters, style->filter_count, out);
 		break;
 	case COMPUTED_TEXT_SHADOW:
 		error = computed_text_shadow(style, out);
@@ -2314,6 +2320,16 @@ computed_backdrop_filter(
 	const struct css_style *style,
 	struct wb_units *out)
 {
+	return computed_filter_list(style->backdrop_filters, style->backdrop_filter_count, out);
+}
+
+/* Serializes a filter list. */
+static int
+computed_filter_list(
+	const struct css_filter *filters,
+	int count,
+	struct wb_units *out)
+{
 	static const char *const names[] = {
 		"blur", "brightness", "contrast", "grayscale", "hue-rotate", "invert", "opacity", "saturate", "sepia"
 	};
@@ -2322,11 +2338,11 @@ computed_backdrop_filter(
 	int error;
 
 	/* No function. */
-	if (style->backdrop_filter_count == 0)
+	if (count == 0)
 		return computed_ascii("none", out);
 	error = 0;
-	for (index = 0; index < style->backdrop_filter_count && error == 0; index++) {
-		filter = &style->backdrop_filters[index];
+	for (index = 0; index < count && error == 0; index++) {
+		filter = &filters[index];
 		if (index != 0)
 			error = computed_ascii(" ", out);
 		if (error == 0)

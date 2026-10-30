@@ -1625,7 +1625,7 @@ flex_auto_minimums(
 			return error;
 
 		/* An image's content size suggestion is its natural ratio applied to a definite cross size. */
-		if (child->replaced && child->style.aspect_ratio <= 0.0f &&
+		if (row && child->replaced && child->style.aspect_ratio <= 0.0f &&
 		    child->image != NULL && child->image->width > 0 && child->image->height > 0) {
 			layout_unit cross;
 
@@ -1901,7 +1901,10 @@ flex_lay_sized(
 	}
 
 	/* A column's item: its height, its vertical margins, and its width by its alignment. */
-	child->height_indefinite = box->style.height.unit != CSS_UNIT_PX;
+	/* The item's main size is definite in an auto-height container only when its basis is a length (its height when the basis is auto). */
+	child->height_indefinite = box->style.height.unit != CSS_UNIT_PX &&
+	    !(child->style.flex_basis.unit == CSS_UNIT_PX ||
+	    (child->style.flex_basis.unit == CSS_UNIT_AUTO && child->style.height.unit == CSS_UNIT_PX));
 	child->style.height.unit = CSS_UNIT_PX;
 	child->style.height.value = layout_to_px(size);
 	child->style.min_height.unit = CSS_UNIT_PX;

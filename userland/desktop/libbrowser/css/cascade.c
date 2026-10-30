@@ -314,7 +314,7 @@ static void cascade_inherit(struct css_style *style, const struct css_style *par
 static struct css_length cascade_flex_basis(struct css_engine *engine, const struct css_value *value, float font_size);
 static struct css_length cascade_length(struct css_engine *engine, const struct css_value *value, float font_size);
 static void cascade_shadows(struct css_engine *engine, struct css_style *style, const struct css_value *value);
-static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value);
+static void cascade_filters(struct css_engine *engine, struct css_style *style, const struct css_value *value, struct css_filter *out, int *count);
 static const char *cascade_subgrid(struct css_engine *engine, const struct css_value *value);
 static void cascade_text_shadow(struct css_engine *engine, struct css_style *style, const struct css_value *value);
 static void cascade_align(struct css_style *style, unsigned bit, int *field, int keyword);
@@ -4532,7 +4532,10 @@ cascade_apply(
 		style->opacity = value->number;
 		break;
 	case CSS_PROP_BACKDROP_FILTER:
-		cascade_filters(engine, style, value);
+		cascade_filters(engine, style, value, style->backdrop_filters, &style->backdrop_filter_count);
+		break;
+	case CSS_PROP_FILTER:
+		cascade_filters(engine, style, value, style->filters, &style->filter_count);
 		break;
 	case CSS_PROP_WILL_CHANGE:
 		style->will_change_contains = value->kind == CSS_VALUE_KEYWORD ? value->keyword : 0;
@@ -5511,25 +5514,27 @@ static void
 cascade_filters(
 	struct css_engine *engine,
 	struct css_style *style,
-	const struct css_value *value)
+	const struct css_value *value,
+	struct css_filter *out,
+	int *count)
 {
 	const struct css_declared_filter *declared;
 	struct css_length length;
 	size_t index;
 
 	/* Anything but a list is no filter. */
-	style->backdrop_filter_count = 0;
+	*count = 0;
 	if (value->kind != CSS_VALUE_FILTERS || value->filters == NULL)
 		return;
 	for (index = 0; index < value->filters->count && index < CSS_FILTERS; index++) {
 		declared = &value->filters->filters[index];
-		style->backdrop_filters[index].kind = declared->kind;
-		style->backdrop_filters[index].amount = declared->amount.number;
+		out[index].kind = declared->kind;
+		out[index].amount = declared->amount.number;
 		if (declared->kind == CSS_FILTER_BLUR) {
 			length = cascade_length(engine, &declared->amount, style->font_size);
-			style->backdrop_filters[index].amount = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
+			out[index].amount = length.unit == CSS_UNIT_PX ? length.value : 0.0f;
 		}
-		style->backdrop_filter_count++;
+		(*count)++;
 	}
 }
 

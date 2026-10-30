@@ -273,6 +273,8 @@ static const struct values_name values_names[] = {
 	{ "caption-side", CSS_PROP_CAPTION_SIDE },
 	{ "backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "will-change", CSS_PROP_WILL_CHANGE },
+	{ "filter", CSS_PROP_FILTER },
+	{ "-webkit-filter", CSS_PROP_FILTER },
 	{ "-webkit-backdrop-filter", CSS_PROP_BACKDROP_FILTER },
 	{ "-webkit-clip-path", CSS_PROP_CLIP_PATH },
 	{ "flex", SHORT_FLEX },
@@ -2298,13 +2300,17 @@ values_single(
 				return EINVAL;
 			if (css_ident_equal(&tokens[at], "transform") || css_ident_equal(&tokens[at], "perspective") ||
 			    css_ident_equal(&tokens[at], "filter") || css_ident_equal(&tokens[at], "backdrop-filter"))
-				value->keyword = 1;
+				value->keyword |= 3;
+			if (css_ident_equal(&tokens[at], "clip-path") || css_ident_equal(&tokens[at], "mask") ||
+			    css_ident_equal(&tokens[at], "mask-image") || css_ident_equal(&tokens[at], "mix-blend-mode") ||
+			    css_ident_equal(&tokens[at], "opacity"))
+				value->keyword |= 2;
 		}
 		return count == 0 ? EINVAL : 0;
 	}
 
 	/* backdrop-filter takes none or a list of filter functions. */
-	if (property == CSS_PROP_BACKDROP_FILTER) {
+	if (property == CSS_PROP_BACKDROP_FILTER || property == CSS_PROP_FILTER) {
 		error = values_filters(parse, tokens, count, value);
 		if (error != 0)
 			return error;

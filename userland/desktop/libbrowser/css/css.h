@@ -824,7 +824,10 @@ struct css_style {
 	/* backdrop-filter: the functions applied to what is painted behind the box. */
 	struct css_filter backdrop_filters[CSS_FILTERS];
 	int backdrop_filter_count;
-	/* will-change names a property that makes the box a containing block of fixed and absolute boxes (transform, filter...). */
+	/* filter: the functions applied to the box's own painting (its border box, over what was painted). */
+	struct css_filter filters[CSS_FILTERS];
+	int filter_count;
+	/* will-change names a property that makes the box a containing block of fixed and absolute boxes (bit 0: transform, filter...) or a backdrop root (bit 1: those and opacity, clip-path, mask, mix-blend-mode). */
 	int will_change_contains;
 	/* One inherited sharp text shadow; blur and lists are added by a later phase. */
 	struct css_shadow text_shadow;

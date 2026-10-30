@@ -145,6 +145,8 @@ static void list_box_own(struct list_walk *walk, const struct layout_box *box, c
 static const struct layout_box **list_children_ordered(const struct layout_box *box);
 static const struct layout_box *list_child(const struct layout_box *from, const struct layout_box **ordered, size_t index);
 static void list_backdrop(struct list_walk *walk, const struct layout_box *box);
+static void list_filter(struct list_walk *walk, const struct layout_box *box);
+static void list_filter_items(struct list_walk *walk, const struct layout_box *box, const struct css_filter *filters, int filter_count);
 static void list_fade(struct list_walk *walk, size_t first, float opacity);
 static void list_scale(struct list_walk *walk, size_t first, const struct layout_box *box);
 static int list_border_shape(const struct layout_box *box, struct list_shape *shape);
@@ -722,6 +724,10 @@ list_box_part(
 	/* A translucent box fades what was painted for it. */
 	if (box->style.opacity < 1.0f)
 		list_fade(walk, first, box->style.opacity);
+
+	/* The box's filter works on its border box once it is painted. */
+	if (part != LIST_BOX_DECORATION && box->style.filter_count != 0 && box->parent != NULL)
+		list_filter(walk, box);
 }
 
 /* Starts the clip of a box's clip-path inset(), and reports whether there is one to end. */
@@ -2736,11 +2742,40 @@ list_rect(
 		walk->error = error;
 }
 
-/* Adds the backdrop filter of a box: its border box, with the box's filter functions. */
+/* Adds the backdrop filter of a box (or its own filter, after it is painted): its border box, with the filter functions. */
 static void
 list_backdrop(
 	struct list_walk *walk,
 	const struct layout_box *box)
+{
+	const struct layout_box *ancestor;
+
+	/* Inside a backdrop root the backdrop is only what the root painted: none is drawn before this box here. */
+	for (ancestor = box->parent; ancestor != NULL && ancestor->parent != NULL; ancestor = ancestor->parent) {
+		if (ancestor->style.backdrop_filter_count != 0 || ancestor->style.filter_count != 0 ||
+		    ancestor->style.opacity < 1.0f || ancestor->style.mix_blend_mode != 0 ||
+		    ancestor->style.clip_inset != 0 || ancestor->style.clip_rect != 0 ||
+		    ancestor->style.will_change_contains != 0)
+			return;
+	}
+	list_filter_items(walk, box, box->style.backdrop_filters, box->style.backdrop_filter_count);
+}
+
+/* Adds the filter of a box over its painted border box. */
+static void
+list_filter(
+	struct list_walk *walk,
+	const struct layout_box *box)
+{
+	list_filter_items(walk, box, box->style.filters, box->style.filter_count);
+}
+
+static void
+list_filter_items(
+	struct list_walk *walk,
+	const struct layout_box *box,
+	const struct css_filter *filters,
+	int filter_count)
 {
 	struct paint_item item;
 	int error;
@@ -2755,8 +2790,8 @@ list_backdrop(
 	item.height = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->height + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 	if (item.width <= 0 || item.height <= 0)
 		return;
-	item.filters = box->style.backdrop_filters;
-	item.filter_count = box->style.backdrop_filter_count;
+	item.filters = filters;
+	item.filter_count = filter_count;
 	error = wb_vector_push(&walk->list->items, &item);
 	if (error != 0)
 		walk->error = error;
