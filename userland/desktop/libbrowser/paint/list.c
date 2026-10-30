@@ -1292,7 +1292,12 @@ list_lines(
 			}
 
 			/* Text and replaced boxes. */
-			if (box->vertical_inline) {
+			if (box->vertical_inline == 2) {
+				/* sideways-lr: the glyphs turn counterclockwise and the line runs up from the content box's bottom. */
+				list_fragment(walk, fragment,
+				    left + line->y + line->baseline + fragment->shift,
+				    top + box->height - line->left - fragment->x, 2);
+			} else if (box->vertical_inline) {
 				list_fragment(walk, fragment,
 				    left + line->y + line->height - line->baseline - fragment->shift,
 				    top + line->left + fragment->x, 1);

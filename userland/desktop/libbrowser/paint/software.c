@@ -783,7 +783,10 @@ software_text(
 			continue;
 
 		/* The bitmap's top left, from the pen and the baseline. */
-		if (item->vertical) {
+		if (item->vertical == 2) {
+			origin_x = (int)floorf(layout_to_px(item->x) + 0.5f) - glyph.top;
+			origin_y = (int)floorf(layout_to_px(item->y - scroll_y - item->glyphs[index].x) + 0.5f) - glyph.left - glyph.width;
+		} else if (item->vertical) {
 			origin_x = (int)floorf(layout_to_px(item->x) + 0.5f) + glyph.top - glyph.height;
 			/* The pen runs down from the run's start, rounded once as a horizontal run's is. */
 			origin_y = (int)floorf(layout_to_px(item->y - scroll_y + item->glyphs[index].x) + 0.5f) + glyph.left;
@@ -797,7 +800,10 @@ software_text(
 			for (column = 0; column < glyph.width; column++) {
 				pixel_x = origin_x + column;
 				pixel_y = origin_y + row;
-				if (item->vertical) {
+				if (item->vertical == 2) {
+					pixel_x = origin_x + row;
+					pixel_y = origin_y + glyph.width - 1 - column;
+				} else if (item->vertical) {
 					pixel_x = origin_x + glyph.height - 1 - row;
 					pixel_y = origin_y + column;
 				}
