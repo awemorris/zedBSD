@@ -111,3 +111,9 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - gpu-capabilities.md は GPU_CAP_JOB_CAPACITY を「timeline があと幾つ予約を取れるか」と書くが、`gpu_capacity_ioctl` の `available` は 0 か 1。
 - gpu-submission.md の ECANCELED（取り下げた予約）は、flags 0 の cancel が record を捨てるので wait は ENOENT。ECANCELED は既に待っていた thread だけ。文を正確にする。
 - job の callback は venus だけ読んだ。他の driver の errno・timeline の範囲は未確かめ。
+
+## p015 から（2026-10-30 Q1、Bug の候補の一覧に入れる。1 つ目は優先して確かめる）
+
+- **`gpu_fence_get` の foreign=1 は fence の device を比べない**（`GPU_DISPLAY_PRESENT_SYNC` の wait_fd、`GPU_DISPLAY_COMMIT` の plane の fence）。comment は「approved companion GPU」と書くが承認の確かめが無い。別の GPU の fence を受けて良いかの設計の確かめが要る。
+- kernel が終えた binding は open を閉じるまで slot（GPU_SUBMIT_MAX の 1 つ）を持ち続ける（`gpu_fence_binding_end`、他に解放が無い）。
+- `GPU_FENCE_BIND` だけで結んだ pending の fence は `_SYNC` で待たれず EAGAIN（header に無い）。
