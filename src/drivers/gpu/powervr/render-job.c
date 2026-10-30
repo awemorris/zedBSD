@@ -59,6 +59,15 @@
 #define GENERAL_TERMINATE_PPP		0xb400U
 #define GENERAL_BYTES			0xc000U
 
+/*
+ * A test switch (1 as built): 0 lets a render's geometry not wait for a
+ * transfer left running, to see on the board what that wait costs.  Not
+ * safe: a render may read what the transfer wrote.
+ */
+#ifndef RENDER_TRANSFER_WAIT_TRIAL
+#define RENDER_TRANSFER_WAIT_TRIAL	1
+#endif
+
 /* The most pixels of a job the timing counts as small (256 x 256). */
 #define JOB_SMALL_PIXELS		65536U
 
@@ -529,7 +538,7 @@ powervr_render_job_run(
 	}
 
 	/* A render after a transfer left running waits for it too (it may read what the transfer wrote). */
-	if (session->last_kind == POWERVR_POINT_TRANSFER)
+	if (session->last_kind == POWERVR_POINT_TRANSFER && RENDER_TRANSFER_WAIT_TRIAL)
 		wait_count += powervr_session_point_sync(session, session->last_kind, session->last_value, &previous[wait_count]);
 	error = powervr_session_kick_render(render, session, target, half, memory->geometry, memory->fragment, memory->fragment, previous, wait_count, &memory->marks);
 

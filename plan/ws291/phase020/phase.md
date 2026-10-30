@@ -3,7 +3,7 @@
 # ws291-p020 PowerVR（VisionFive 2）: model の 50 fps
 
 - 親: [WS291](../ws.md)。
-- 状態: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
+- 状態: in-progress（2026-10-31 01:1x P2 q1726-i01: direct scanout の c13 42.35 fps（目標 50）。前の「direct」は合成だった。下の「q1726-i01」節と「訂正」節。権限の判定で板の回帰の前に止まった）。前: in-progress（2026-10-30 16:50 P3、q1715-i02: 表示が出て、driver の欠け（instance rate・discard・vkCmdCopyBuffer・mip の transfer・direct scanout の BLOB）を
   埋めて mview の qs40 が描けた。目標の copies 13 は 26.6 fps（目標 50）。profile の途中。下の「q1715-i02」節）。
 - 承認: ユーザー（2026-10-30 原文）「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」。VF2 の割り当て: Q1（2026-10-30）「VF2 を P7 に割り当てます。」。
 - 未決（ws.md）: 50 fps の基準（Linux との比較か、絶対値か）。VF2 の Linux の PowerVR の driver は今の板の SD に無い。Q1 がユーザーに (a) Linux の基準を立てる、
@@ -182,3 +182,59 @@ mview が qs40 を描くのに driver に欠けていた物（どれも HAL は�
   同時に走る frame は 1 つ。GPU は CPU の record・submit・present（約 4.5 ms）の間に止まり、TA と 3D の重なり（2）は効く場面が無い（効果は未確かめ）。
 - TA の費用: c1 4.9 ms、c13 20.7 ms → 1 copy（25861 頂点、37000 三角形）あたり約 1.3 ms ＋ 固定 約 3.6 ms。目標の 20 ms（50 fps）には、mview が 1 frame しか重ねない限り CPU ＋ TA ＋ 3D ≦ 20 ms が要る。
 - cutout の分岐なし（3）は 3D の側。c1 の 3D 5.5 ms（P3 の c1 の fence 13.0 ms の時の分けは無い）。
+
+#### 訂正: これまでの「direct」は合成を経た数（2026-10-31 01:0x P2）
+
+- P3（q1715-i02）の「direct」の数と、P2 の b2・p8〜p13 の数は、**direct scanout ではなく合成**だった。compositor の log: `KWL SCANOUT direct=1` の直後に `KL SCANOUT refused step=import errno=48`（EXDEV）→ `KWL SCANOUT direct=0 reason=refused`。
+  診断の kernel（1 frame ごとの job と transfer の記録）で、mview の session が毎 frame `GPU_OP_CMD_COPY_IMAGE`（WSI の present の copy、1080p）を 1 つ、compositor の session が毎 frame 1920x1080 の render job（1 draw）を 1 つ出していた。
+- 原因: Keiland の zedBSD backend の scanout_import（userland/desktop/libkeiland-backend-zedbsd/scanout-zedbsd.c）が GPU_RESOURCE_IMPORT を flags 0 で呼ぶ。VF2 では display（gpu1、dc8200）と render（gpu0、PowerVR）が別の device なので、
+  gpu.c の import は「foreign かつ GPU_IMPORT_SCANOUT 無し」で EXDEV を返す。直し（Q1 の判断で範囲に含めた、d983c4ee5）: `import.flags = GPU_IMPORT_SCANOUT`（libvulkan の wsi-display.c と同じ）。
+- 同じ device の GPU で動きが変わらない事（gpu.c の import を読んだ）: foreign でない時、flags は device の share の import_resource にそのまま渡る。amdrdna（node_import）・nvrtx（share_import）・i915（i915_share_import）・powervr（render_import）・
+  venus（share_import）・mali・bcm2711 の render と display はどれも `(void)flags` で使わない。GHCI（ghci/share.c）だけ SCANOUT を ENOTSUP で断るが、GHCI は display を持たず scanout の道を通らない。
+- host 試験: `plan/tools/gpu-boundary/v1-check.sh build/ws291/vf2b` は 1（grep）と 3 で FAIL 無し、2（poison した header での compile）は amd64 の sysroot がこの worktree に無く 0 source（未実施と同じ）。
+- 直した後は direct が続く（c1 717 frame、c13 508 frame、refused 無し、`reason=no-window` は mview の終わり）。ただし game mode の終わりに compositor が window mode に戻る時、display の swapchain の作成が
+  `VULKAN kernel error errno=17 device lost`（EBUSY、display の lease）→ `KWL FAILED site=window_mode` → compositor が終了する事がある（2 回中 2 回目、別の run では 1 回目）。Q1 が BUG-375 に登録（P7 が直す）。BUG-375 が直るまで d983c4ee5 は main に入れない（Q1）。
+- 残る copy: mview は Wayland の client なので、WSI は game mode でも自分の image から共有の image へ毎 frame copy する（libvulkan の swapchain_direct_possible は VK_KHR_display の面だけ direct）。zero copy は WS309 p015 の候補（compositor が game mode の image を貸す形）。
+
+#### 計測（2026-10-31、main 1f8960e4c を merge した 0d68d5341 ＋ 差分、TIMING=1、qs40、1920x1080、mailbox 4 枚）
+
+direct scanout（d983c4ee5 の直しあり、refused 無し）:
+
+| kernel | scene | fps | frame ms | fence ms | gpu ta ms | gpu 3d ms |
+| --- | --- | --- | --- | --- | --- | --- |
+| m1（SLC あり） | c1 | 83.43 | 11.97 | 9.85 | 7.7 ※ | 2.9 |
+| m1（SLC あり） | c13 | 42.35 | 23.57 | 20.84 | 15.2 ※ | 6.8 |
+| m2（m1 ＋ transfer の待ちを外す試し、安全でない） | c1 | 87.05 | 11.48 | 9.22 | 1.7 | 8.3 ※※ |
+
+※ TA の数は前の frame の present の copy を待つ時間を含む（geometry は session の最後の transfer を待つ）。※※ 待ちを外すと copy（3D の hardware、約 5 ms）が次の 3D の前に入り、3D の数に移る。c13 は compositor が BUG-375 で落ちて測れず。
+P3 の基点（cb03c9983 ＋ 差分、p15、scratch の tree に同じ直し）でも c1 83.35・c13 42.40（同じ）。
+
+合成（直す前、P3 の基点 ＋ 差分、kernel 5686341 系、板の古い userland、TIMING=1）:
+
+| 試し | scene | fps | gpu ta ms | gpu 3d ms | 分かった事 |
+| --- | --- | --- | --- | --- | --- |
+| b2 / p2 基点 | c1・c13 | 66.5・27.4 | 4.9・20.7 | 5.5・7.8 | TA が律速 |
+| p3・p4・p6・p7 window 320x180〜1600x900 | c13 | 45.3〜31.4 | 16.2〜19.2 | 0.97〜6.2 | TA の約 15 ms は解像度に依らない頂点の側、1080p で ＋約 4.5 ms（tiling）。3D は画面の面積に比例 |
+| p8 vertex shader に 48 group の水増し（49→91 group） | c13 | 27.43 | 20.7 | 7.8 | TA は不変 → shader の長さは律速でない |
+| p9 POWERVR_DEVICE_MEMORY_CACHED=1（device-local の Vulkan memory を SLC に通す） | c1・c13 | 71.2・38.2 | 4.6・11.0 | 5.1・7.8 | **TA 20.7→11.0 ms**。memory の読みが律速 |
+| p11 同じ、window 320x180 | c13 | 81.2 | 6.2 | 0.85 | 頂点の側 15→6 ms |
+| p10 ＋ POWERVR_PROGRAM_SLC_CACHED=1 | c1・c13 | 71.4・38.2 | 4.6・11.1 | 5.2・8.0 | 効果なし |
+| p12 ＋ render target の memory（macrotile・region header・vheap・tails）も SLC（scratch の試し） | c1・c13 | 71.2・38.1 | 4.5・11.0 | 5.1・8.1 | 効果なし（戻した） |
+| p13 SLC、画面の PNG（build/ws291/run/p13/shot-c1.png・shot-c13.png） | c1・c13 | 69.7・37.8 | — | — | 見た目は崩れなし（cutout の髪の毛先、13 体の並び。P2 の目視） |
+
+- SLC（POWERVR_DEVICE_MEMORY_CACHED=1）は 10-21 に「板を log 無しで再起動させた」記録があるが、今回は 12 run（mview の起動と終わりを含む）で再起動・fault 無し（serial の log も）。既定はまだ 0（既定を 1 にする前に vkmatrix・vkcoherency・desktop の回帰が要る。
+  vkmatrix を板で流す command は権限の判定で拒否された（下）ので未実施）。
+- 他: `--shading=pixel` は c1 から device lost（vkWaitForFences -4、記録だけ）。`--cull=all`（VK_CULL_MODE_FRONT_AND_BACK）は pipeline の作成で ENOTSUP（`a state the executor does not take`）。
+- vertex input の直読み（vertex shader が入力を temp に写さず vtxin の register を float の演算で直に読む、e180f3f03）: mview.vert 49→45 group、host 試験 PASS。TA には効かない（上の水増しの結果のとおり）。
+- mview に `--inflight=N`（1〜2、既定 1）を足した（d983c4ee5、Q1 の OK、参考の数のため。受け入れは既定の 1 のまま）。板では未実施。
+
+#### 再開点（2026-10-31 01:1x P2、権限の判定で止まった）
+
+- 止まった操作: 板で SLC の kernel（build/ws291/m1）を run.sh で入れ、ssh・sudo で ~/p7/bin/vkmatrix を流す 1 本の command が auto mode の判定（Interfere With Workloads）で拒否された。回避していない。
+- 次の手（順に）:
+  1. SLC を既定にする前の回帰: vkmatrix・vkcoherency・gpu-selftest・Keiland の desktop（frame-ops）を SLC の kernel で（権限の扱いを Q1・ユーザーが決めてから）。通れば `POWERVR_DEVICE_MEMORY_CACHED` の既定を 1 に（interface.h）。
+  2. present の copy を次の geometry が待つ件: transfer が buffer を書いた時と、job の vertex shader が image を読む時だけ geometry を待たせ、他は fragment（と partial render）に待たせる（render-kick-layout.c に fragment の waits を足す）。c13 で TA と copy が重なり 約 4 ms 縮む見込み。
+  3. copy 自体（1080p、約 5 ms）を無くす zero copy は WS309 p015（範囲の外）。
+  4. BUG-375 が直るまで、direct の計測は COPIES を 1 つずつ別の run（compositor を毎回起こし直す）にする。
+- 再開の command: `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 OLD=p2old TIMING=1 KEEP=1 COPIES=13 sh plan/ws291/tests/vf2-mview.sh OUT build/ws291/m1`
+  （build: `make ZEDBSD_CONFIG=plan/ws291/tests/config-vf2.mk BUILD=build/ws291/m1 ZEDBSD_TEST_CPPFLAGS="-DPOWERVR_SUBMIT_TIMING=1 -DPOWERVR_DEVICE_MEMORY_CACHED=1" …/vmunix …/bin/wayland …/bin/mview`）。serial: /dev/serial/by-id/usb-FTDI_TTL232R_FTBTJOV8-if00-port0。
