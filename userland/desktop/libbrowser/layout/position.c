@@ -707,6 +707,9 @@ position_fits(
 	layout_unit right;
 	layout_unit bottom;
 
+	/* The inset-modified containing block of the placing is what it fits in. */
+	(void)containing;
+
 	/* A box a position-area had to move back inside the block did not fit. */
 	if (box->area_overflow)
 		return 0;
@@ -716,8 +719,7 @@ position_fits(
 	top = box->y - box->margin[CSS_TOP];
 	right = box->x + position_frame(box) + box->width + box->margin[CSS_RIGHT];
 	bottom = box->y + position_outer_height(box) + box->margin[CSS_BOTTOM];
-	return left >= containing->x && top >= containing->y &&
-	    right <= containing->x + containing->width && bottom <= containing->y + containing->height;
+	return left >= box->imcb[0] && top >= box->imcb[2] && right <= box->imcb[1] && bottom <= box->imcb[3];
 }
 
 /* Lays out and places one box out of the flow in its containing block. */
@@ -796,6 +798,12 @@ position_place_once(
 	has_right = position_offset(&offset[CSS_RIGHT], area_width, &right);
 	has_top = position_offset(&offset[CSS_TOP], area_height, &top);
 	has_bottom = position_offset(&offset[CSS_BOTTOM], area_height, &bottom);
+
+	/* The containing block the insets leave: what a fallback has to fit in. */
+	box->imcb[0] = area_left + (has_left ? left : 0);
+	box->imcb[1] = area_left + area_width - (has_right ? right : 0);
+	box->imcb[2] = area_top + (has_top ? top : 0);
+	box->imcb[3] = area_top + area_height - (has_bottom ? bottom : 0);
 
 	/* The room between the offsets that are set. */
 	room = area_width;
