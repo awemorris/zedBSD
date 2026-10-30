@@ -6,7 +6,7 @@
 # counts the innermost kernel functions.
 #   sh plan/ws299/tests/qemu-raw-curve.sh IMAGE          (IMAGE built with CONFIG_PCAT_SERIAL_MIRROR=y; VMUNIX is its
 #                                                         kernel, default the image's directory's vmunix)
-# W is build/tmp/qemu-raw-curve (a fresh run each time).  The last line is "qemu-raw-curve: done|FAIL".
+# W is ${WS299_RUNS:-build/tmp}/qemu-raw-curve (a fresh run each time).  The last line is "qemu-raw-curve: done|FAIL".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
@@ -16,8 +16,8 @@ VMUNIX=${VMUNIX:-$(dirname "$IMAGE")/vmunix}
 CHUNKS=${CHUNKS:-16}
 SAMPLES=${SAMPLES:-0}
 GDB_PORT=${GDB_PORT:-22212}
-fresh_out build/tmp/qemu-raw-curve
-W=build/tmp/qemu-raw-curve
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-raw-curve
+W=${WS299_RUNS:-build/tmp}/qemu-raw-curve
 truncate -s 6G "$W/d.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"
 timeout 1800 qemu-system-x86_64 -name p1-raw-curve -machine q35 -m 8G -smp 4 $(qemu_accel_args max) \

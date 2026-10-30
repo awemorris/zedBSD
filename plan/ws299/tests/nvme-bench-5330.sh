@@ -41,8 +41,21 @@ say() {
 lin() {
 	timeout "${TO:-120}" ssh -o BatchMode=yes -o ConnectTimeout=10 "$HOST" "$1"
 }
+# The account on zedBSD: user (password user), or kei (password kei) on an image made before the OS name became
+# zedBSD; the first one that answers is kept (ZB_USER chooses it).
+ZBU=${ZB_USER:-}
+zb_account() {
+	for name in user kei; do
+		if timeout 20 sshpass -p "$name" ssh $SO "$name@$ZB" true 2> /dev/null; then
+			ZBU=$name
+			return 0
+		fi
+	done
+	return 1
+}
 zb() {
-	timeout "${TO:-60}" sshpass -p kei ssh $SO "kei@$ZB" "$1"
+	[ -n "$ZBU" ] || zb_account || return 255
+	timeout "${TO:-60}" sshpass -p "$ZBU" ssh $SO "$ZBU@$ZB" "$1"
 }
 debian_up() {
 	start=$(date +%s)
@@ -120,13 +133,13 @@ for mode in $MODES; do
 	done
 	say "zedBSD up after $(($(date +%s) - start + 20)) s ($mode)"
 	sleep "${SETTLE:-30}"
-	TO=60 timeout 60 sshpass -p kei scp $SO $T/bench-zedbsd.sh "$RANDREAD_DIR/randread-zedbsd" "$RANDREAD_DIR/patwrite-zedbsd" "$RANDREAD_DIR/directio-zedbsd" \
-	    "$RANDREAD_DIR/cpuloop-zedbsd" "kei@$ZB:/tmp/" ||
+	TO=60 timeout 60 sshpass -p "$ZBU" scp $SO $T/bench-zedbsd.sh "$RANDREAD_DIR/randread-zedbsd" "$RANDREAD_DIR/patwrite-zedbsd" "$RANDREAD_DIR/directio-zedbsd" \
+	    "$RANDREAD_DIR/cpuloop-zedbsd" "$ZBU@$ZB:/tmp/" ||
 		say "copy to zedBSD failed"
-	TO=1500 zb "echo kei | sudo -S env $envrun sh /tmp/bench-zedbsd.sh $run" > "$LOGS/$NAME-$mode.txt" 2>&1
+	TO=1500 zb "echo $ZBU | sudo -S env $envrun sh /tmp/bench-zedbsd.sh $run" > "$LOGS/$NAME-$mode.txt" 2>&1
 	say "zedbsd $mode rc=$? ($(tail -1 "$LOGS/$NAME-$mode.txt"))"
 	zb 'dmesg' > "$LOGS/$NAME-$mode-dmesg.txt" 2>&1
-	zb 'echo kei | sudo -S reboot' > /dev/null 2>&1
+	zb 'echo $ZBU | sudo -S reboot' > /dev/null 2>&1
 	debian_up
 	[ "$mode" = write ] && p6fresh
 done

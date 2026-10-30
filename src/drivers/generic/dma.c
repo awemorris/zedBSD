@@ -664,7 +664,7 @@ drv_dma_map(
  * Gives the bus address a device uses for memory the caller owns.
  *
  * This is for memory outside the device's own coherent allocations whose
- * physical address the caller knows, such as a buffer-cache page (ws299).
+ * physical address the caller knows, such as a buffer-cache page.
  * Only a coherent device is served, because one that does not snoop the
  * caches would need cache maintenance this call does not do; every other
  * case, and a range outside the device's reach, fails, and the caller moves

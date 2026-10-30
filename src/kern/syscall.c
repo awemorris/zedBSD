@@ -89,7 +89,7 @@
 /*
  * The largest bounce buffer a regular file or block device transfer
  * allocates, so a long read or write reaches the disk as one long request
- * instead of 64 KiB ones (ws299, 2026-10-27 Q1).
+ * instead of 64 KiB ones.
  */
 #define SYSCALL_LARGE_CHUNK (1024U * 1024U)
 #define SYSCALL_SOCKET_BUFFER_MAX (64U * 1024U)
@@ -2863,7 +2863,7 @@ syscall_io_pooled(
  *
  * A short transfer uses the caller's stack buffer.  A transfer of a regular
  * file or a block device longer than one pool batch first gets a heap buffer
- * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests (ws299).
+ * of up to SYSCALL_LARGE_CHUNK, so the disk sees long requests.
  * Otherwise a regular file or a block device borrows shared scratch without
  * allocation or waiting.  A pipe, socket or other device gets a heap buffer of up to
  * SYSCALL_STREAM_CHUNK: it may block while it holds it, so it does not take
