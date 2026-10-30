@@ -3,7 +3,7 @@
 # ws307-p007 UEFI の runtime services と Boot####
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §5.8（U5・U15）。Queue: q1665 / q1665-i01（担当 P4、2026-10-29）。
-- Status: in-progress（2026-10-30 ユーザーの回答で HAL の差分の案は取り下げ。kernel の driver の形で作り直す（改訂 3、下）。code はまだ無い）
+- Status: in-progress（改訂 5 の案 [proposed/uefi-runtime-window.md](../proposed/uefi-runtime-window.md) でユーザーの判断待ち（2026-10-30 q1711-i01。改訂 4 はユーザーの「ドライバから見て、HALは使えません。…」で作り直し）。code はまだ無い）
 - 出典: 2026-10-28 U5「…Boot####の作成もWSに入れる。」、U15「末尾に足します。また、KeiではなくzedBSDです。…」。
 
 ## 最初の段（2026-10-29、P4）
@@ -46,14 +46,14 @@
 - 記録だけ（3c14ef8f4、branch `agent/p4-ws307o`）。code は無い。`proposed/` の 2 file は取り下げ、削除は Q1。
 - 次の 1 手: 設計の下書きの 3 の「map の方式」を詰める（`hal_space_map(HAL_SPACE_SYS, …)` で EXEC の kernel の map が作れるか、SMEP・SMAP の下で 1:1 の map を HAL の実装の中だけで作れるか、SetVirtualAddressMap を HAL の起動の早い段で呼ぶ形か）。既存の口で足りなければ理由を付けて Q1 に返す。決めた後 loader v8 → HAL の名前 → driver → /dev → efiboot → OVMF の試験の順。
 
-## q1711-i01（2026-10-30、P6、worktree p6-ws307、branch agent/p6-ws307、基点 main 5aca73738）: map の方式を決めた
+## q1711-i01（2026-10-30、P6、worktree p6-ws307、branch agent/p6-ws307、基点 main 5aca73738）: map の方式の案（承認待ち）
 
 - 調べた事（HAL の API を変えない形を探した）:
   - `hal_space_map` は user の半分の VA しか受けない（`space.c` の `valid_user_range`）。`HAL_SPACE_SYS`（NULL）は拒む。管理された RAM でない頁は `HAL_SPACE_DEVICE` だけで、それは実行を拒む。`hal_space_map_device` も EXEC を拒み、RAM を拒む。よって driver から既存の口で「実行できる kernel の map」を作ることはできない。
   - driver から CR3 を切り替える口も無い（1:1 の private な page table に移る (a) は driver からはできない）。
   - 一方、HAL の実装（`src/hal/amd64`、承認不要）は system の page table を自分で組み、framebuffer・ACPI・ECAM・device の窓を top の PML4 の PDPT の slot 507〜511 に置いている。slot 0〜506 は空き。top の PDPT は全ての user の空間が共有する（`hal_space_create` が `system_pml4` の上半分を写す）。
   - loader は ExitBootServices の後も firmware の identity の map の上で走る。UEFI の規則で SetVirtualAddressMap は ExitBootServices の後、物理の address の mode で 1 度だけ呼べる。
-- **決めた形（(b) の変形、HAL の API・`hal.h` は変えない）**:
+- **案の形（(b) の変形、`hal.h` は変えない）**。2026-10-30 Q1 の判断: 新しい名前・HAL の窓の map・SetVirtualAddressMap の 3 つはユーザーの承認が要る（guardrail の前例）。案は [proposed/uefi-runtime-window.md](../proposed/uefi-runtime-window.md)（改訂 4 f1ba6c9b3。改訂 5 で driver は kern_* だけを使う形に作り直し、足りない点 G1〜G3 を挙げた）、Q1 がユーザーに聞く。承認まで p007 の code は書かない:
   1. loader（`bootloader/uefi/bootx64.c`）: ExitBootServices の直後、最後の map の `EFI_MEMORY_RUNTIME` の記述子に、決まった kernel の窓 `ZBL6_UEFI_RUNTIME_VIRTUAL_BASE`（PDPT の slot 506 = `0xfffffffe80000000`）から詰めて VirtualStart を付け、SetVirtualAddressMap を呼ぶ。窓（64 MiB）に入らない・呼び出しが失敗した時は runtime を渡さない（起動は続ける）。記述子（物理・仮想・page 数・型・attribute）を low block の handoff の後ろの決まった場所に写し、handoff v8 に system table の物理 address・記述子の数・SetVirtualAddressMap の結果の flag を足す。
   2. HAL の実装（`src/hal/amd64`）: handoff v8 を読み、記述子を自分の static な領域に写す（low block は init の後に再利用される）。system の page table を組む時に、slot 506 の窓に各記述子を VirtualStart で 4 KiB の頁で map する（RuntimeServicesCode は実行可・書き込み可（PE の .data を含む）、他は NX、MMIO と WB の無い物は uncached）。`hal_get_arch_handoff("uefi.system-table")` は system table の kernel の VA（uint64_t）を返す（無い時 NULL）。framebuffer の値と同じ「名前ごとに 1 つの uint64_t」。
   3. driver（`src/drivers/platform/pcat/`）: system table と RuntimeServices の signature・revision・CRC32 を確かめ、mutex で直列にし、割り込みを止め、FP の状態を fxsave64 で退避して MXCSR 0x1F80・x87 0x037F にし、`__attribute__((ms_abi))` の関数 pointer で GetVariable・SetVariable・GetNextVariableName を呼び、戻す。
