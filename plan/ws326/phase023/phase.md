@@ -3,7 +3,7 @@
 # ws326-p023 libmedia の backend と backend の切り替え
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: cleared（2026-10-31 Q1。p021 の merge の後に run-host-decode PASS）。
 - 依存: p021（p022 を推す）（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 

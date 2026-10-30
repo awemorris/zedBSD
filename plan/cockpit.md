@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 03:21（Q1）
+最終更新: 2026-10-31 03:44（Q1）
 
 ## 担当（P1〜P8）
 
@@ -18,7 +18,7 @@
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
-実装の担当（WS326）: O-p021（Opus、[WS326](ws326/ws.md) p021 全体の流れと最初の全体の試験）、S-p023（Sonnet、p023 libmedia の backend、p021 と並べて）。p015・p017・p019 は cleared。
+実装の担当（WS326）: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）。p015・p017・p019・p021・p023 は cleared。
 
 ## WS ごとの進捗
 
@@ -76,7 +76,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019 は cleared → p021 全体の流れ（Opus、in-progress、03:2x 起動）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+20 Phase cleared。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared → p022 JVT の適合（Opus）→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 

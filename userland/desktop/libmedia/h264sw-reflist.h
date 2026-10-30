@@ -55,7 +55,8 @@ struct h264sw_reflist {
  *
  * dpb holds the references as marked before the current picture;
  * header is the slice's header; frame_num is the current picture's
- * frame_num and poc its PicOrderCnt.  Computes FrameNumWrap (8-27) and
+ * frame_num, poc its PicOrderCnt and poc_type the active SPS's
+ * pic_order_cnt_type.  Computes FrameNumWrap (8-27) and
  * the picture numbers, builds the initial lists: for P, the short-term
  * frames by descending PicNum then the long-term frames by ascending
  * LongTermPicNum (8.2.4.2.1); for B, list 0 the short-term frames with
@@ -63,8 +64,10 @@ struct h264sw_reflist {
  * ascending POC, then the long-term frames by ascending LongTermPicNum,
  * list 1 the same with the two short-term halves swapped, and when list
  * 1 has more than one entry and equals list 0, its first two entries
- * swapped (8.2.4.2.3).  Non-existing frames are in the lists like the
- * others.  Each list is cut to num_ref_idx_active (8.2.4.2) and then
+ * swapped (8.2.4.2.3).  Non-existing frames are in the initial lists
+ * like the others, except in a B slice with poc_type 0, where they are
+ * left out of both initial lists (8.2.4.2.3: their PicOrderCnt is not
+ * defined then).  Each list is cut to num_ref_idx_active (8.2.4.2) and then
  * modified (8.2.4.3.1 for idc 0 and 1 with picNumPred, picNumNoWrap and
  * picNum of 8-34 to 8-37; 8.2.4.3.2 for idc 2), shifting the entries as
  * the clauses say.
@@ -78,7 +81,7 @@ struct h264sw_reflist {
  * For I slices both counts are 0 and nothing else is done.  Returns 0
  * and *lists; EINVAL as above.
  */
-int h264sw_reflist_build(const struct h264sw_dpb *dpb, const struct h264sw_slice_header *header, uint32_t frame_num, uint32_t max_frame_num, int32_t poc, struct h264sw_reflist *lists);
+int h264sw_reflist_build(const struct h264sw_dpb *dpb, const struct h264sw_slice_header *header, uint32_t frame_num, uint32_t max_frame_num, int32_t poc, unsigned poc_type, struct h264sw_reflist *lists);
 
 /*
  * Finds the lowest index of list 0 whose frame is the frame of a given id (8.4.1.2.3, refIdxL0).

@@ -45,6 +45,7 @@ struct env {
 	struct h264sw_slice_header header;
 	struct h264sw_reflist lists;
 	uint32_t max_frame_num;
+	unsigned poc_type;
 };
 
 /*
@@ -94,6 +95,7 @@ env_setup(
 	/* Everything not named stays 0. */
 	memset(env, 0, sizeof(*env));
 	env->max_frame_num = max_frame_num;
+	env->poc_type = 2U;
 	env->dpb.size = H264SW_MAX_DPB_FRAMES;
 	env->dpb.max_frame_num = max_frame_num;
 	env->dpb.max_long_term_frame_idx = -1;
@@ -205,7 +207,7 @@ env_build(
 	int32_t poc)
 {
 	/* The DPB, the header and the current picture's numbers. */
-	return h264sw_reflist_build(&env->dpb, &env->header, frame_num, env->max_frame_num, poc, &env->lists);
+	return h264sw_reflist_build(&env->dpb, &env->header, frame_num, env->max_frame_num, poc, env->poc_type, &env->lists);
 }
 
 /*
@@ -465,6 +467,90 @@ test_b_initial(void)
 	CHECK(env.lists.list[0][9].frame == env.frame[3]);
 	CHECK(env.lists.count[1] == 1U);
 	CHECK(env.lists.list[1][0].frame == env.frame[4]);
+
+	env_teardown(&env);
+}
+
+/*
+ * Checks the frames of a gap in frame_num in the lists of a B slice.
+ *
+ * With pic_order_cnt_type 0 a non-existing frame has no order count, so
+ * 8.2.4.2.3 leaves it out of both initial lists; with types 1 and 2 it
+ * has one and is ordered like any other frame.  Frames at counts 2
+ * (frame_num 1), 6 (frame_num 2, non-existing) and 12 (frame_num 3),
+ * current count 8: type 0 gives list 0 = 2, 12 and list 1 = 12, 2;
+ * type 2 gives list 0 = 6, 2, 12 and list 1 = 12, 6, 2.  A P slice keeps
+ * the non-existing frame whatever the type (8.2.4.2.1 takes no exception).
+ */
+static void
+test_b_non_existing(void)
+{
+	static const struct expect type0_list0[] = {
+		{ 0U, 1, 0, 0 },
+		{ 2U, 3, 0, 0 }
+	};
+	static const struct expect type0_list1[] = {
+		{ 2U, 3, 0, 0 },
+		{ 0U, 1, 0, 0 }
+	};
+	static const struct expect type2_list0[] = {
+		{ 1U, 2, 0, 0 },
+		{ 0U, 1, 0, 0 },
+		{ 2U, 3, 0, 0 }
+	};
+	static const struct expect type2_list1[] = {
+		{ 2U, 3, 0, 0 },
+		{ 1U, 2, 0, 0 },
+		{ 0U, 1, 0, 0 }
+	};
+	static const struct expect p_list[] = {
+		{ 2U, 3, 0, 0 },
+		{ 1U, 2, 0, 0 },
+		{ 0U, 1, 0, 0 }
+	};
+	struct env env;
+	int error;
+
+	/* Three short-term frames, the middle one standing for a gap. */
+	env_setup(&env, 16U);
+	env_add(&env, 0U, H264SW_REF_SHORT, 1U, 0U, 2);
+	env_add(&env, 1U, H264SW_REF_SHORT, 2U, 0U, 6);
+	env.frame[1]->non_existing = 1;
+	env_add(&env, 2U, H264SW_REF_SHORT, 3U, 0U, 12);
+
+	/* Type 0: the non-existing frame is in neither list. */
+	env.poc_type = 0U;
+	header_set(&env, H264SW_SLICE_B, 2U, 2U);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
+	check_list(&env, "b type0 list0", 0U, type0_list0, 2U);
+	check_list(&env, "b type0 list1", 1U, type0_list1, 2U);
+
+	/* Type 0 with a longer list: the place the left-out frame would take is padded as missing. */
+	header_set(&env, H264SW_SLICE_B, 3U, 3U);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
+	CHECK(env.lists.list[0][2].missing == 1);
+	CHECK(env.lists.list[1][2].missing == 1);
+
+	/* Types 1 and 2: the frame is ordered by its count like the others. */
+	env.poc_type = 2U;
+	header_set(&env, H264SW_SLICE_B, 3U, 3U);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
+	check_list(&env, "b type2 list0", 0U, type2_list0, 3U);
+	check_list(&env, "b type2 list1", 1U, type2_list1, 3U);
+	env.poc_type = 1U;
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
+	check_list(&env, "b type1 list0", 0U, type2_list0, 3U);
+
+	/* A P slice keeps the frame with type 0 too. */
+	env.poc_type = 0U;
+	header_set(&env, H264SW_SLICE_P, 3U, 0U);
+	error = env_build(&env, 4U, 8);
+	CHECK(error == 0);
+	check_list(&env, "p type0", 0U, p_list, 3U);
 
 	env_teardown(&env);
 }
@@ -1126,9 +1212,9 @@ test_errors(void)
 
 	/* Missing arguments. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
-	CHECK(h264sw_reflist_build(NULL, &env.header, 4U, 16U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, NULL, 4U, 16U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 16U, 8, NULL) == EINVAL);
+	CHECK(h264sw_reflist_build(NULL, &env.header, 4U, 16U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, NULL, 4U, 16U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 16U, 8, 2U, NULL) == EINVAL);
 
 	/* Slice types: SP is like P; the types above 4 are not slice types. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
@@ -1156,13 +1242,13 @@ test_errors(void)
 
 	/* MaxFrameNum and frame_num out of range. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0U, 0U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 65537U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 0xFFFFFFFFU, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 16U, 16U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0xFFFFFFFFU, 16U, 8, &env.lists) == EINVAL);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 65535U, 65536U, 8, &env.lists) == 0);
-	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 15U, 16U, 8, &env.lists) == 0);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0U, 0U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 65537U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 4U, 0xFFFFFFFFU, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 16U, 16U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 0xFFFFFFFFU, 16U, 8, 2U, &env.lists) == EINVAL);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 65535U, 65536U, 8, 2U, &env.lists) == 0);
+	CHECK(h264sw_reflist_build(&env.dpb, &env.header, 15U, 16U, 8, 2U, &env.lists) == 0);
 
 	/* More operations than the header keeps. */
 	header_set(&env, H264SW_SLICE_P, 1U, 0U);
@@ -1373,7 +1459,8 @@ test_random(void)
 			any_frame = 1;
 		}
 
-		/* A random slice header: type, lengths, operations. */
+		/* A random slice header: type, lengths, operations; and the SPS's order count type. */
+		env.poc_type = rng_next() % 3U;
 		slice_type = rng_next() % 3U;
 		header_set(&env, slice_type, 1U + rng_next() % H264SW_MAX_LIST, 1U + rng_next() % H264SW_MAX_LIST);
 		if (rng_next() % 3U != 0U) {
@@ -1475,6 +1562,7 @@ main(void)
 	test_b_initial();
 	test_b_equal_poc();
 	test_b_switch();
+	test_b_non_existing();
 
 	/* The modifications. */
 	test_modify_short();
