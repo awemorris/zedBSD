@@ -40,6 +40,9 @@
 - 閉じた WS の試験（ws095 の host-engine、ws089 の host-wallpaper、ws191 の host-audio-stream）は変えず、`host-apps.sh` が ime・picker を
   層と一緒に build する。ws191 の host-audio-stream は WS327 の変更の前の audio.c で既に FAIL（EOPNOTSUPP）なので使わない。
 
+- `plan/tools/music/host-music-play.c` は main で既に link できなかった（decoder の API が `media_decoder_*` から `app_decoder_*` に変わり、
+  backend・frame_us・trim が増えた）。p007 で stand-in を直した（`plan/tools/music/` の最小の変更）。
+
 ## 確かめ（2026-10-30）
 
 - `sh plan/ws327/tests/build-win32.sh` → 骨格の 2 file が warning 0 で compile、`win32-link.exe` が link（`ws327-win32: PASS`）。
@@ -48,8 +51,11 @@
 - `sh plan/ws327/tests/host-apps.sh build/ws327-linux ime picker` → `ws327-host-apps: PASS`（ime 230 件、picker）。
 - `sh plan/ws314/tests/doc-examples.sh build/ws327-linux/lib` → `SUMMARY pass=71 fail=0`（p015 の基準）。
 - `python3 -I plan/ws327/tests/doc-lines.py 08-worker.c` → PASS。
+- `sh plan/tools/music/host-music-play.sh build/tmp/p007/music/host-music-play` → `host-music-play: PASS`（stand-in を直した後、移す前の play.c）。
+- `sh plan/tools/media/run-host-codec.sh` → `run-host-codec: PASS`（移す前、p009 の基準）。
 - Photos・Settings・picker・audio の source の host の `-fsyntax-only`（phase010 の command）が移す前の tree で通る。
-- 6bb8c3c8d の Mailer の `conn.c`・`tls.c`・`imap.c` が host の gcc で `-Wall -Wextra -Werror` の compile を通る（link・試験は p008）。
+- 6bb8c3c8d の Mailer の `conn.c`・`tls.c`・`imap.c` が host の gcc で `-Wall -Wextra -Werror` の compile を通る。IDLE の待ちだけ仮に直した
+  host-mail-backend.c の写し（build/tmp/p007/mailprobe）で `host-mail-backend: PASS`（50 件）。sync の試験は p008。
 
 ## 結果
 

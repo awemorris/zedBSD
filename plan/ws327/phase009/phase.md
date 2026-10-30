@@ -63,6 +63,8 @@ Music・Video Player の Makefile は libkeiland を既に `REQUIRE` に持つ�
 
 ### 4.1 `plan/tools/music/host-music-play.sh`
 
+- 基準: p007 で P2 が `host-music-play.c` の stand-in を今の decoder の API（`app_decoder_*`、backend・frame_us・trim を足す）に直し、
+  移す前の tree で `host-music-play: PASS` を確かめた。
 - source に `userland/desktop/libkeiland/platform/thread-posix.c` を足す（`-std=gnu11` のままで C11 の `<stdatomic.h>` が読める。
   header は script が `$dir/inc/keiland/` に写す物で足りる）。`-lpthread` は残す。
 

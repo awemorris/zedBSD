@@ -14,6 +14,8 @@
 - header（仕様）: `userland/desktop/include/keiland/keiland_thread.h`・`keiland_socket.h`（変えない）。
 - 途中まで移した source（6bb8c3c8d、P2、host の compile は通るが未試験）: `userland/desktop/mailer/conn.c`・`tls.c`・`imap.c`・`mail.h`。
   読んで §6.2 と合っているか確かめる（食い違いは直してよい。直した点は結果に書く）。
+  P2 の確かめ（p007）: host-mail-backend.c の IDLE の待ちだけを仮に `kl_socket_native` の fd の poll にした写しを、層の 2 file と
+  `-std=gnu17` で build し fake-mail-server.py に対して流すと `host-mail-backend: PASS`（50 件、TLS・STARTTLS・IDLE・SMTP）。
 
 ## 2. 作る物・直す物（触ってよい file はこれだけ）
 

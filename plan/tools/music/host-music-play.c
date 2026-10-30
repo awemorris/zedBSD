@@ -145,26 +145,26 @@ media_file_close(
 
 /* The decoder's stand-ins: a scripted packet does not decode; the others give a little sound each. */
 int
-media_decoder_open(
+app_decoder_open(
 	const struct media_track *track,
-	struct media_decoder **decoder)
+	struct app_decoder **decoder)
 {
 	(void)track;
-	*decoder = (struct media_decoder *)&test_byte;
+	*decoder = (struct app_decoder *)&test_byte;
 	return 0;
 }
 
 const char *
-media_decoder_name(
-	const struct media_decoder *decoder)
+app_decoder_name(
+	const struct app_decoder *decoder)
 {
 	(void)decoder;
 	return "test";
 }
 
 int
-media_decoder_send(
-	struct media_decoder *decoder,
+app_decoder_send(
+	struct app_decoder *decoder,
 	const struct media_packet *packet)
 {
 	(void)decoder;
@@ -178,8 +178,8 @@ media_decoder_send(
 }
 
 int
-media_decoder_receive(
-	struct media_decoder *decoder,
+app_decoder_receive(
+	struct app_decoder *decoder,
 	int64_t *time_us)
 {
 	(void)decoder;
@@ -191,8 +191,8 @@ media_decoder_receive(
 }
 
 size_t
-media_decoder_sound(
-	struct media_decoder *decoder,
+app_decoder_sound(
+	struct app_decoder *decoder,
 	int16_t *samples,
 	size_t capacity,
 	uint32_t rate)
@@ -205,17 +205,43 @@ media_decoder_sound(
 	return 16U;
 }
 
+const char *
+app_decoder_backend(
+	const struct app_decoder *decoder)
+{
+	(void)decoder;
+	return "test";
+}
+
+int64_t
+app_decoder_frame_us(
+	const struct app_decoder *decoder)
+{
+	(void)decoder;
+	return 0;
+}
+
+int
+app_decoder_trim(
+	struct app_decoder *decoder,
+	int64_t before_us)
+{
+	(void)decoder;
+	(void)before_us;
+	return 0;
+}
+
 void
-media_decoder_flush(
-	struct media_decoder *decoder)
+app_decoder_flush(
+	struct app_decoder *decoder)
 {
 	(void)decoder;
 	test_pending = 0;
 }
 
 void
-media_decoder_close(
-	struct media_decoder *decoder)
+app_decoder_close(
+	struct app_decoder *decoder)
 {
 	(void)decoder;
 }
