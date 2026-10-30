@@ -412,3 +412,12 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1752 / q1752-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws318`・branch `agent/p5-ws318`） | [ws318](ws318/ws.md) p001 設計 | plan/ws318/ だけ、design-reviewer と問いの一覧まで | in-progress |
+
+## 2026-10-31: Bug の 2 つ目の束（q1753）
+
+上の q1750 と同じユーザーの指示（Bug を自動でスケジュールして直す）。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1753 / q1753-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bugs`・branch `agent/p4-bugs`、QEMU と host、image は /tmp） | [BUG-351](bugs/BUG-351.md)・[BUG-349](bugs/BUG-349.md)・[BUG-362](bugs/BUG-362.md)・[BUG-368](bugs/BUG-368.md)・[BUG-359](bugs/BUG-359.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
+
