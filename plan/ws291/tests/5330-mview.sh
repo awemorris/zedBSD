@@ -228,7 +228,7 @@ run() {
 rm -f /tmp/mview.log /tmp/mview-scanout.log /tmp/mview-kernel.log
 n=\$(wc -l < $SESSION)
 k=\$(dmesg | wc -l)
-( for i in \$(seq 1 $((${SPIN:-12} * 2 + 6))); do sysctl hw.gputelemetry | sed -n 's|.* cur_mhz=\([0-9]*\) req_mhz=\([0-9]*\).* objects_limit=\([0-9]*\).*|\1/\2/\3|p'; sleep 0.5; done > /tmp/mview-freq.log 2>&1 ) &
+( for i in \$(seq 1 $((${SPIN:-12} * 2 + 6))); do sysctl hw.gputelemetry | grep 'gpu=0'; sleep 0.5; done > /tmp/mview-freq.log 2>&1 ) &
 su $user -c 'env XDG_RUNTIME_DIR=/run/user/1000 WAYLAND_DISPLAY=wayland-0 ${ZEDBSD_ENV:-} /bin/mview --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-}' > /tmp/mview.log 2>&1 < /dev/null
 tail -n +\$n $SESSION | grep -E 'KWL SCANOUT' > /tmp/mview-scanout.log
 dmesg | tail -n +\$((k + 1)) > /tmp/mview-kernel.log
@@ -240,7 +240,7 @@ EOS
 		done
 		echo "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED)' "$out/c$copies-mview.log" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')" >> "$summary"
 		echo "c$copies scanout $(grep -c 'direct=1' "$out/c$copies-mview-scanout.log") direct, $(grep -c 'direct=0' "$out/c$copies-mview-scanout.log") not: $(grep 'direct=0' "$out/c$copies-mview-scanout.log" | head -1)" >> "$summary"
-		echo "c$copies cur/req_mhz $(sort -n "$out/c$copies-mview-freq.log" | uniq -c | sort -rn | head -4 | awk '{printf "%s×%s ", $2, $1}')" >> "$summary"
+		echo "c$copies $(python3 -I plan/ws291/tests/telemetry-sum.py zedbsd "$out/c$copies-mview-freq.log")" >> "$summary"
 		grep -iE 'i915|vk|fault|hang|reset|lost' "$out/c$copies-mview-kernel.log" | grep -v 'timing' | head -4 | sed "s/^/c$copies kernel /" >> "$summary"
 	done
 	cat "$summary"
@@ -269,12 +269,12 @@ linux_run() {
 	T=60 deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u); mkdir -p \$XDG_RUNTIME_DIR; pgrep -x weston > /dev/null || (export LIBSEAT_BACKEND=seatd; nohup weston --backend=drm --shell=kiosk --continue-without-input --socket=wayland-1 --log=/tmp/p022-weston.log --logger-scopes=log,drm-backend > /tmp/p022-weston.out 2>&1 < /dev/null & sleep 6); pgrep -x weston > /dev/null && echo weston up || { echo weston down; tail -5 /tmp/p022-weston.out; }" >> "$summary" 2>&1
 	T=30 deb "grep -E 'Output .*(mode|enabled)|head|1920|Chipset|Vulkan|GL_RENDERER' /tmp/p022-weston.log | head -6" >> "$out/weston-head.txt" 2>&1
 	for copies in ${*:-1 1030}; do
-		T=$((${SPIN:-12} + 120)) deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1; n=\$(wc -l < /tmp/p022-weston.log); sudo -n setfacl -m u:\$(id -un):rw /dev/dri/renderD*; (for i in \$(seq 1 $((${SPIN:-12} * 2 + 4))); do cat /sys/class/drm/card*/gt_act_freq_mhz 2> /dev/null | head -1; sleep 0.5; done > /tmp/p022-freq.log) & VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json ${LINUX_ENV:-} ~/p1-p022/linux-mview/bin/mview --model=\$HOME/p1-p022/linux-mview/share/mview/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} > /tmp/p022-mview.log 2>&1 < /dev/null; tail -n +\$n /tmp/p022-weston.log | grep -E 'Using (plane-only|mixed|renderer)' | sed -E 's/^\[[0-9:.]+\][[:space:]]*//' | sort | uniq -c > /tmp/p022-planes.log"
+		T=$((${SPIN:-12} + 120)) deb "export XDG_RUNTIME_DIR=/run/user/\$(id -u) WAYLAND_DISPLAY=wayland-1; n=\$(wc -l < /tmp/p022-weston.log); sudo -n setfacl -m u:\$(id -un):rw /dev/dri/renderD*; (for i in \$(seq 1 $((${SPIN:-12} * 2 + 4))); do echo \$(date +%s%N) \$(cat /sys/class/drm/card*/gt_act_freq_mhz 2> /dev/null | head -1) \$(sudo -n cat /sys/class/powercap/intel-rapl:0/energy_uj); sleep 0.5; done > /tmp/p022-freq.log) & VK_DRIVER_FILES=/usr/share/vulkan/icd.d/intel_icd.json ${LINUX_ENV:-} ~/p1-p022/linux-mview/bin/mview --model=\$HOME/p1-p022/linux-mview/share/mview/qs40 --token=c$copies --spin=${SPIN:-12} --copies=$copies --content=game --present=mailbox --images=4 ${MVIEW_ARGS:-} > /tmp/p022-mview.log 2>&1 < /dev/null; tail -n +\$n /tmp/p022-weston.log | grep -E 'Using (plane-only|mixed|renderer)' | sed -E 's/^\[[0-9:.]+\][[:space:]]*//' | sort | uniq -c > /tmp/p022-planes.log"
 		timeout 60 scp -q "$HOST:/tmp/p022-mview.log" "$out/c$copies-mview.log"
 		timeout 60 scp -q "$HOST:/tmp/p022-planes.log" "$out/c$copies-planes.log"
 		timeout 60 scp -q "$HOST:/tmp/p022-freq.log" "$out/c$copies-freq.log"
 		echo "c$copies $(grep -E 'MVIEW (SPIN|STAGES|FAILED)' "$out/c$copies-mview.log" | sed 's/frames=[0-9]* seconds=[0-9.]* //' | tr '\n' ' ')" >> "$summary"
-		echo "c$copies act_mhz $(sort -n "$out/c$copies-freq.log" | uniq -c | sort -rn | head -4 | awk '{printf "%s×%s ", $2, $1}')" >> "$summary"
+		echo "c$copies $(python3 -I plan/ws291/tests/telemetry-sum.py linux "$out/c$copies-freq.log")" >> "$summary"
 		echo "c$copies weston $(sed 's/^ *//' "$out/c$copies-planes.log" | tr '\n' ' ')" >> "$summary"
 	done
 	grep -m1 -E 'deviceName|device=|GPU' "$out/c${1:-1}-mview.log" >> "$summary" 2>/dev/null

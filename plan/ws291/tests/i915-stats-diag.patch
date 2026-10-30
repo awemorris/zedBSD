@@ -1,6 +1,7 @@
-diff -ru a/src/drivers/gpu/i915/gt-power.c b/src/drivers/gpu/i915/gt-power.c
---- a/src/drivers/gpu/i915/gt-power.c	2026-10-31 00:39:40.685740658 +0900
-+++ b/src/drivers/gpu/i915/gt-power.c	2026-10-31 00:39:40.649740754 +0900
+diff --git a/src/drivers/gpu/i915/gt-power.c b/src/drivers/gpu/i915/gt-power.c
+index 98356f9f0..2a80a4e73 100644
+--- a/src/drivers/gpu/i915/gt-power.c
++++ b/src/drivers/gpu/i915/gt-power.c
 @@ -17,6 +17,7 @@
   */
  
@@ -9,7 +10,7 @@ diff -ru a/src/drivers/gpu/i915/gt-power.c b/src/drivers/gpu/i915/gt-power.c
  #include "gt-power.h"
  #include "irq.h"
  #include "mmio.h"
-@@ -776,6 +777,13 @@
+@@ -776,6 +777,13 @@ drv_i915_rps_telemetry_read(
  	if (rps->busy_runs != 0U && now > rps->busy_since_ns)
  		busy += now - rps->busy_since_ns;
  	written = rps->last_freq;
@@ -23,9 +24,26 @@ diff -ru a/src/drivers/gpu/i915/gt-power.c b/src/drivers/gpu/i915/gt-power.c
  	lowest = rps->min_softlimit;
  	highest = rps->max_softlimit;
  	enabled = rps->enabled;
-diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
---- a/src/drivers/gpu/i915/vk/vk-draw.c	2026-10-31 00:39:57.409696297 +0900
-+++ b/src/drivers/gpu/i915/vk/vk-draw.c	2026-10-31 00:39:57.409696297 +0900
+@@ -801,6 +809,15 @@ drv_i915_rps_telemetry_read(
+ 		entry->valid |= GPU_TELEMETRY_RANGE_MHZ;
+ 	}
+ 
++#ifdef I915_P022_CAGF
++	if (rps->mmio != NULL)
++		entry->objects_bytes = drv_i915_read32(rps->mmio, 0x14593cU) |
++		    ((uint64_t)drv_i915_read32(rps->mmio, 0x145938U) << 32);
++	if (rps->mmio != NULL && rps->busy_runs != 0U) {
++		entry->min_mhz = drv_i915_read32(rps->mmio, 0x1459a0U);
++		entry->max_mhz = drv_i915_read32(rps->mmio, 0x1459a4U);
++	}
++#endif
+ 	/* Succeeded: the entry holds what the RPS keeps. */
+ 	return 0;
+ }
+diff --git a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
+index 713d48e3c..6da1c7fb1 100644
+--- a/src/drivers/gpu/i915/vk/vk-draw.c
++++ b/src/drivers/gpu/i915/vk/vk-draw.c
 @@ -40,6 +40,10 @@
  
  #include "../intel/genxml.h"
@@ -37,7 +55,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  
  /*
   * The draw checkpoint.
-@@ -117,6 +121,9 @@
+@@ -117,6 +121,9 @@ drv_i915_gfx_session_get(
  	work->cursor.cmds = work->batch->address;
  	work->cursor.count = 0U;
  	work->cursor.capacity = I915_GFX_BATCH_BYTES / 4U;
@@ -47,7 +65,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  	work->cursor.overflow = 0;
  	work->cursor.graphics_ver = session->vk->i915->gt.graphics_ver;
  	work->window_generation = 1U;
-@@ -200,6 +207,50 @@
+@@ -200,6 +207,50 @@ drv_i915_gfx_submit_begin(
  	return 0;
  }
  
@@ -98,7 +116,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  /*
   * Runs what a submission recorded and closes its batch.
   *
-@@ -354,6 +405,10 @@
+@@ -354,6 +405,10 @@ drv_i915_gfx_op_begin(
  			return error;
  	}
  
@@ -109,7 +127,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  	/* Hands the next slot and the batch to the operation, which starts here. */
  	space->slot = (uint8_t *)work->state->address + (uint64_t)work->slot_next * I915_GFX_SLOT_BYTES;
  	space->slot_va = work->state->va + (uint64_t)work->slot_next * I915_GFX_SLOT_BYTES;
-@@ -429,9 +484,21 @@
+@@ -429,9 +484,21 @@ drv_i915_gfx_flush(
  		return 0;
  	}
  
@@ -131,7 +149,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  	work->stat_run_ns += drv_i915_perf_now() - start;
  	work->stat_runs++;
  	work->stat_ops += work->ops_pending;
-@@ -1274,6 +1341,27 @@
+@@ -1274,6 +1341,27 @@ i915_gfx_frame_stat(
  			  (unsigned)((window - work->stat_submit_ns) / per / 1000U));
  	}
  
@@ -159,9 +177,10 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.c b/src/drivers/gpu/i915/vk/vk-draw.c
  	/* A new window starts. */
  	work->stat_start = now;
  	work->stat_submits = 0U;
-diff -ru a/src/drivers/gpu/i915/vk/vk-draw.h b/src/drivers/gpu/i915/vk/vk-draw.h
---- a/src/drivers/gpu/i915/vk/vk-draw.h	2026-10-31 00:39:40.685740658 +0900
-+++ b/src/drivers/gpu/i915/vk/vk-draw.h	2026-10-31 00:39:40.633740796 +0900
+diff --git a/src/drivers/gpu/i915/vk/vk-draw.h b/src/drivers/gpu/i915/vk/vk-draw.h
+index 11179398b..701b2f930 100644
+--- a/src/drivers/gpu/i915/vk/vk-draw.h
++++ b/src/drivers/gpu/i915/vk/vk-draw.h
 @@ -21,6 +21,9 @@
  #ifndef DRIVERS_GPU_I915_VK_VK_DRAW_H
  #define DRIVERS_GPU_I915_VK_VK_DRAW_H
@@ -172,7 +191,7 @@ diff -ru a/src/drivers/gpu/i915/vk/vk-draw.h b/src/drivers/gpu/i915/vk/vk-draw.h
  #include <stdint.h>
  
  #include "vk-batch.h"
-@@ -124,6 +127,12 @@
+@@ -124,6 +127,12 @@ struct i915_gfx_session {
  	uint32_t stat_ops_max;
  	uint64_t stat_submit_ns;
  	uint64_t stat_run_ns;
