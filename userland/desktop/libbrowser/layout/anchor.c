@@ -37,6 +37,8 @@ static int anchor_find_state(const struct layout_tree *tree, const struct layout
 static void anchor_search(const struct layout_tree *tree, const struct layout_box *walk, const struct layout_box *box, const struct layout_box *containing, const struct vm_string *name, int inside, int *passed, const struct layout_box **found, int depth);
 static int anchor_chain_before(const struct layout_box *candidate, const struct layout_box *box, const struct layout_box *containing);
 static const struct layout_box *anchor_scope_root(const struct layout_box *box, const struct vm_string *name);
+static int anchor_fixed(const struct layout_box *box);
+static int anchor_top_layer(const struct layout_box *box);
 static const struct layout_box *anchor_up(const struct layout_box *box);
 static int anchor_outside(const struct layout_box *scroller, const struct layout_rect *rect);
 static int anchor_scrolls(const struct layout_box *box);
@@ -392,6 +394,10 @@ anchor_find_state(
 		rect->y -= layout_from_px((float)scroll_y);
 	}
 
+	/* The box is placed by an anchor that scrolls with the page: it follows it (an anchor that is fixed itself stays with the viewport). */
+	if (!anchor_fixed(found))
+		((struct layout_box *)box)->anchored = 1;
+
 	/* Whether a scroll container in between shows none of it. */
 	if (anchor != NULL)
 		*anchor = found;
@@ -413,6 +419,30 @@ anchor_find_state(
 		}
 	}
 	return 1;
+}
+
+/* Tells whether a box is fixed or inside a fixed box (it stays where the viewport is). */
+static int
+anchor_fixed(
+	const struct layout_box *box)
+{
+	const struct layout_box *up;
+
+	for (up = box; up != NULL; up = up->parent) {
+		if (up->out_of_flow && up->style.position == CSS_POSITION_FIXED)
+			return 1;
+	}
+	return 0;
+}
+
+/* Tells where a box is in the top layer (a modal dialog or an open popover: the later it opened the higher), 0 when it is not in it. */
+static int
+anchor_top_layer(
+	const struct layout_box *box)
+{
+	if (box->node == NULL || box->node->type != DOM_ELEMENT)
+		return 0;
+	return ((const struct dom_element *)box->node)->popover_open;
 }
 
 /* The next box up a box's chain of containing blocks: its parent, or for a box out of the flow where it is placed (NULL at the top). */
@@ -505,6 +535,7 @@ anchor_search(
 		}
 		child_inside = inside || walk == containing;
 		if (child_inside && anchor_has_name(child, name) && anchor_scope_root(child, name) == anchor_scope_root(box, name) &&
+		    (anchor_top_layer(child) == 0 || (anchor_top_layer(box) != 0 && anchor_top_layer(child) < anchor_top_layer(box))) &&
 		    anchor_chain_before(child, box, containing) &&
 		    (!child->out_of_flow || !*passed || (layout_containing_box(child) != containing && !anchor_scrolls(layout_containing_box(child)))))
 			found[0] = child;

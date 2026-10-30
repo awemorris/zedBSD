@@ -298,6 +298,8 @@ struct layout_box {
 	/* How far a sticky box is moved from where the flow put it (sticky.c). */
 	layout_unit sticky_dx;
 	layout_unit sticky_dy;
+	/* A box placed by an anchor follows it when the page scrolls, even a fixed one (set by the anchor functions). */
+	int anchored;
 
 	/*
 	 * While a vertical writing mode's domain is laid out in logical

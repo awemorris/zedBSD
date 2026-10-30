@@ -526,8 +526,12 @@ prelude_set_popover(
 		return 0;
 	element = (struct dom_element *)node;
 	open = js_argument(args, count, 1) == VM_VALUE_TRUE;
-	if (element->popover_open != open) {
-		element->popover_open = open;
+	if ((element->popover_open != 0) != (open != 0)) {
+		/* What opens later is above (its number is its place in the top layer). */
+		static int top_layer_order;
+
+		top_layer_order++;
+		element->popover_open = open ? top_layer_order : 0;
 		element->node.document->generation++;
 	}
 	UNUSED_PARAMETER(realm);

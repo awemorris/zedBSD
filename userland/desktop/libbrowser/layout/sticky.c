@@ -114,6 +114,17 @@ layout_sticky_apply(
 	for (index = 0; index < tree->sticky_count; index++) {
 		box = tree->sticky[index];
 
+		/* A fixed box is moved down by the scroll so that it stays in the viewport (one an anchor places scrolls with the anchor). */
+		if (box->style.position == CSS_POSITION_FIXED) {
+			dy = box->anchored ? 0 : scroll_y;
+			if (dy == box->sticky_dy)
+				continue;
+			sticky_shift(box, 0, dy - box->sticky_dy, 0);
+			box->sticky_dy = dy;
+			moved = 1;
+			continue;
+		}
+
 		/* The nearest block around it gives the limit, the nearest clipping box the scrollport. */
 		block = box->parent;
 		while (block != NULL && block->kind != LAYOUT_BLOCK && block->kind != LAYOUT_ANONYMOUS_BLOCK)
@@ -176,8 +187,9 @@ sticky_collect(
 	if (depth > STICKY_DEPTH)
 		return 0;
 
-	/* A block or an inline block with the position (the lines of an inline box are not boxes to move). */
-	if (box->style.position == CSS_POSITION_STICKY && !box->out_of_flow &&
+	/* A block or an inline block with the position (the lines of an inline box are not boxes to move); a fixed box stays where the viewport is. */
+	if (((box->style.position == CSS_POSITION_STICKY && !box->out_of_flow) ||
+	    (box->style.position == CSS_POSITION_FIXED && box->out_of_flow)) &&
 	    (box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_ANONYMOUS_BLOCK)) {
 		box->sticky_dx = 0;
 		box->sticky_dy = 0;

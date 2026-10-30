@@ -124,6 +124,7 @@ enum bind_interface_index {
 	BIND_PERFORMANCE_MARK,
 	BIND_PERFORMANCE_OBSERVER,
 	BIND_PERFORMANCE_OBSERVER_ENTRY_LIST,
+	BIND_HTML_DIALOG_ELEMENT,
 	BIND_ERROR_EVENT,
 	BIND_INTERFACES
 };
@@ -373,6 +374,7 @@ extern const struct bind_interface bind_svg_text_path_element_interface;
 /* Scoped branded HTML reflected attributes (html-reflection.c). */
 extern const struct bind_interface bind_html_button_element_interface;
 extern const struct bind_interface bind_html_details_element_interface;
+extern const struct bind_interface bind_html_dialog_element_interface;
 extern const struct bind_interface bind_html_label_element_interface;
 extern const struct bind_interface bind_html_meta_element_interface;
 extern const struct bind_interface bind_html_link_element_interface;

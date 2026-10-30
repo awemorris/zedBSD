@@ -1972,6 +1972,53 @@
       return open(this);
     });
   })();
+  // ---- document.scrollingElement: the root element (this engine has no quirks-mode body scrolling)
+  if (typeof g.Document === 'function' && !('scrollingElement' in g.Document.prototype)) {
+    Object.defineProperty(g.Document.prototype, 'scrollingElement', {
+      get: function () { return this.documentElement; }, configurable: true, enumerable: true
+    });
+  }
+  // ---- Dialog: open, returnValue, show(), showModal() and close() (a modal dialog is in the top layer: a high z-index, fixed)
+  if (typeof g.HTMLDialogElement === 'function') (function () {
+    var P = g.HTMLDialogElement.prototype;
+    function isOpen(d) { return d.hasAttribute('open'); }
+    function modal(d) { return d.__zedModal === true; }
+    Object.defineProperty(P, 'open', {
+      get: function () { return isOpen(this); },
+      set: function (v) { if (v) { if (!isOpen(this)) this.setAttribute('open', ''); } else if (isOpen(this)) this.close(); },
+      configurable: true, enumerable: true
+    });
+    Object.defineProperty(P, 'returnValue', {
+      get: function () { return this.__zedReturn === undefined ? '' : this.__zedReturn; },
+      set: function (v) { hidden(this, '__zedReturn', String(v)); },
+      configurable: true, enumerable: true
+    });
+    def(P, 'show', function show() {
+      if (isOpen(this)) {
+        if (modal(this)) throw new DOMException("Failed to execute 'show' on 'HTMLDialogElement': The dialog is already open as a modal dialog, and therefore cannot be opened as a non-modal dialog.", 'InvalidStateError');
+        return;
+      }
+      this.setAttribute('open', '');
+    });
+    def(P, 'showModal', function showModal() {
+      if (isOpen(this)) {
+        if (modal(this)) return;
+        throw new DOMException("Failed to execute 'showModal' on 'HTMLDialogElement': The dialog is already open as a non-modal dialog, and therefore cannot be opened as a modal dialog.", 'InvalidStateError');
+      }
+      if (!this.isConnected) throw new DOMException("Failed to execute 'showModal' on 'HTMLDialogElement': The element is not in a document.", 'InvalidStateError');
+      this.setAttribute('open', '');
+      hidden(this, '__zedModal', true);
+      native.setPopover(this, true);
+    });
+    def(P, 'close', function close(returnValue) {
+      var d = this;
+      if (!isOpen(d)) return;
+      if (returnValue !== undefined) hidden(d, '__zedReturn', String(returnValue));
+      d.removeAttribute('open');
+      if (modal(d)) { hidden(d, '__zedModal', false); native.setPopover(d, false); }
+      Promise.resolve().then(function () { d.dispatchEvent(new Event('close')); });
+    });
+  })();
   // ---- Streams and WebAssembly.Memory as far as a page can tell them apart from plain data: objects that cannot be cloned
   (function () {
     function stream(name) {
