@@ -2,7 +2,7 @@
 
 # ws333-p006: cpuperf の枠組み（kernel）
 
-Status: 実装済み・試験 PASS（host 試験・全 port の build・QEMU の起動の回帰。cleared は Q1 の判定の後）
+Status: cleared（2026-10-31 Q1、main b5c8e8f50）
 Parent: [WS333](../ws.md)
 Queue: q1754-i01（P7）、起動の回帰は q1759-i01（P7）
 
