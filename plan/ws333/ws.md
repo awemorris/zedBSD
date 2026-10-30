@@ -3,7 +3,7 @@
 # WS333: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
-- Status: incomplete（2026-10-31 Q1: p001 設計済み、p002・p003 を main に、p006 を実装中）
+- Status: incomplete（2026-10-31 Q1: p001 設計済み、p002・p003 を main に、p006 を main に、p005・p007 を進行中）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
 - Resume point: p001（統一の設計、P5）と p002（amd64 の idle の MWAIT、P1）を並べて進める。
 
@@ -21,4 +21,4 @@
 | [p001](phase001/phase.md) | 統一の設計: /dev/thermal の UAPI（CPU の idle・P-state・P/E core・熱の zone・fan・strategy・非常の停止）、kernel の枠組みと driver の分け方、HAL の口で足りるか（足りないと主張する時は理由）、WS301・WS303 の設計からの引き継ぎと食い違いの整理、Phase の分け方。design-reviewer を通す | in-progress（P5、q1734） | — |
 | [p002](phase002/phase.md) | amd64 の CPU の idle を HLT から MWAIT の C-state に（5330 で idle の電力を下げ、i915 の GPU の電力の枠を空ける） | in-progress（P1、q1735。2026-10-31: MWAIT C6 を実装、5330 で idle 13.00 → 11.70 W、c600 30.6 → 32.6 fps（GT 800 → 850〜900 MHz）。Linux の idle 3.2〜3.5 W にはまだ遠い） | — |
 | [p003](phase003/phase.md) | kernel の口の header（include/kern/thermal.h・cpuperf.h、kern_cpu_count・KERN_CPU_MAX）、design-reviewer 1 回 | cleared（P7、q1754-i01。全 20 port の vmunix の build、warning 0） | p001 |
-| [p006](phase006/phase.md) | cpuperf の枠組み（kernel）: topology・domain・箱と notify の道・provider の口・相対の性能・受け手「cpu」・strategy の写し・直の設定・上限・legacy の governor・idle の統計・WS302 の口 | 実装済み・試験 PASS（P7、q1754-i01・q1759-i01。host 試験 PASS 196 check、全 20 port の vmunix warning 0、QEMU の起動の回帰 amd64（login）・armv7-virt・riscv64-virt・raspi4b PASS。実機は未実施。cleared は Q1 の判定の後） | p003 |
+| [p006](phase006/phase.md) | cpuperf の枠組み（kernel）: topology・domain・箱と notify の道・provider の口・相対の性能・受け手「cpu」・strategy の写し・直の設定・上限・legacy の governor・idle の統計・WS302 の口 | cleared（2026-10-31 Q1、main b5c8e8f50。P7、q1754-i01・q1759-i01。host 試験 PASS 196 check、全 20 port の vmunix warning 0、QEMU の起動の回帰 amd64（login）・armv7-virt・riscv64-virt・raspi4b PASS。実機は未実施） | p003 |
