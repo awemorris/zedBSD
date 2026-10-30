@@ -9,7 +9,7 @@
 | P2 | phase-runner-high | ws291 p020 (q1726-i01) | `/home/awe/zedBSD-worktrees/p2-ws291v` / `agent/p2-ws291v` | in-progress（2026-10-30 起動、VF2） | — |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner-high | ws307 (q1718-i01 返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | returned（p007 の残り 2 つ） | ccd0c8693（merge 061230951） |
-| P3 | phase-runner-high | ws332 (q1722-i01 cleared) | `/home/awe/zedBSD-worktrees/p3-ws332` / `agent/p3-ws332` | returned | 24a5cdb0d（merge 9d6ed7005） |
+| P3 | phase-runner-high | ws291 p013 (q1728-i01) | `/home/awe/zedBSD-worktrees/p3-ws291r` / `agent/p3-ws291r` | in-progress（2026-10-30 起動、10.0.10.3） | — |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i01) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-30 起動、100% まで自走） | 9df11eec9（merge 11888c436） |
 | P7 | phase-runner | ws009 p028 (q1725-i01) | `/home/awe/zedBSD-worktrees/p7-ws009` / `agent/p7-ws009` | in-progress（2026-10-30 起動） | — |
 
