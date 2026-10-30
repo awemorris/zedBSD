@@ -247,3 +247,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | in-progress |
+
+## 2026-10-30 15:2x: WS313 の firmware を P1 で（q1714）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1714 / q1714-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`（main に追従）と zedBSD-firmware の worktree `/home/awe/zedBSD-worktrees/p1-c5-firmware`・branch `agent/p1-c5-firmware`、host だけ） | [ws313](ws313/ws.md) p003 媒体（firmware の package 化） | ユーザー「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」 zedBSD-firmware の push はユーザーの指示の時だけ（Q1） | in-progress |

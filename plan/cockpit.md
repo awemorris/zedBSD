@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 15:15（Q1）
+最終更新: 2026-10-30 15:25（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。試験の image 2 つを作った（text: p1-ws313/build/odroid-c5/hdd-image.img、Keiland: p1-ws313/build/odroid-c5-keiland/hdd-image.img） | ユーザーの実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
+| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1714）。Amlogic の bootloader と Mali の firmware を zedBSD-firmware に足し、menuconfig の firmware の package に（C5 の BSP で自動で有効、license の同意あり）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | zedBSD-firmware の push はユーザーの指示で → 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner、q1713）。p001: 違反の関数ごとの置き換え先（既存の kern_*）と、wrapper の無い関数の一覧 | 一覧をユーザーに → kernel に足す関数をユーザーが決める → 書き換えの Phase |
 | P3 | — | — | — | — |
 | P4 | — | — | — | — |
