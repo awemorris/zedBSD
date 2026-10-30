@@ -111,7 +111,24 @@ P2（q1703-i01、worktree p2-ws327、基点 main b901b1968）。日付は host �
 
 削除の候補は無い（4 本とも直した）。`plan/ws327/tests/host-apps.sh` の「audio.c に host 試験が無い」の comment を直した。
 
-（以下 5・6 と QEMU・FreeBSD は続き）
+### 6. `network_finish` の待ち方（2026-10-30 10:35〜10:45）
+
+決めた形: **終わりは thread を先に join し、その後に post を待たずに取る**（08-language.c が既にこの形）。理由:
+- 前の `network_finish` は FINISHED の post を `kl_app_dispatch(app, -1)` で待つ。thread の `kl_app_post` は ENOMEM で失敗しうる
+  （header の約束）ので、失った時に終わりが止まる。
+- 前の `primes_finish` は timeout 0 で、take が 0 を返すと抜ける。worker がまだ走っていて FINISHED を post する前なら、thread を join せずに
+  抜け、`kl_app_close` の後に worker が閉じた app へ post しうる（解放の後の使用）。
+- join の後は thread の post は全て list に在り（`keiui_app_post_event`）、`kl_app_dispatch(app, 0)` が移す。一つも運ばない dispatch で
+  残りが無いと分かる。post を失った record（count・exchange）は finish が free する（network は waker も join の後に閉じる）。
+  FINISHED の handler（`primes_post`・`network_post`）は thread が NULL なら join しない（二重の join を避ける）。
+
+直した file: `docs/howto/keiland-examples/08-worker.c`（`primes_post`・`primes_finish`）、`08-network.c`（`network_post`・`network_finish`）、
+`docs/howto/keiland-programming.md`（例の全文の写し 2 つ、「Taking a post」「The end of the program」「The rules」の該当の行、network の
+「The end」に finish の 1 段落、動いた行の link）。確かめ: `python3 -I plan/ws327/tests/doc-lines.py 08-worker.c 08-network.c` →
+`ws327-doc-lines: PASS`（全ての参照の最初と最後の行を目で見た）、`sh plan/ws314/tests/doc-examples.sh build/ws327-p016-linux/lib` →
+`SUMMARY pass=76 fail=0 not-done=0`（clang・gcc の -Werror、link、写しの一致）。ENOMEM の道は走らせていない（未実施）。窓の道は下の QEMU で。
+
+（以下 5 と QEMU・FreeBSD は続き）
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
 

@@ -441,11 +441,13 @@ network_post(
 		return;
 	}
 
-	/* The series handed back: its thread is ending, so it is joined, and only then is its waker closed. */
+	/* The series handed back: its thread is ending, so it is joined (if network_finish has not), and only then is its waker closed. */
 	if (code == POST_FINISHED) {
 		exchange = data;
-		(void)kl_thread_join(network->thread);
-		network->thread = NULL;
+		if (network->thread != NULL) {
+			(void)kl_thread_join(network->thread);
+			network->thread = NULL;
+		}
 		kl_socket_waker_close(exchange->waker);
 		network->done = exchange->done;
 		if (exchange->error == 0) {
@@ -528,7 +530,10 @@ network_stop(
 
 /*
  * Ends round trips still running when the program ends: asks the thread to
- * stop, and takes the posts it left, the last of which joins its thread.
+ * stop, waits for it, and then takes the posts it left.  It joins the
+ * thread rather than wait for the series' post, which fails when there is
+ * no memory: once the thread has ended no post is on its way, and a series
+ * that did not come back is closed and freed here.
  */
 static void
 network_finish(
@@ -537,29 +542,43 @@ network_finish(
 	struct kl_app_event event;
 	int status;
 	int taken;
+	int found;
 
 	/* Nothing runs. */
 	if (network->exchange == NULL)
 		return;
 
-	/* Stops the thread; it posts its series as it ends, and taking that post joins it. */
+	/* Stops the thread and waits for it: every post it made now waits for a dispatch. */
 	network_stop(network);
+	(void)kl_thread_join(network->thread);
+	network->thread = NULL;
 
-	/* Takes the posts, waiting for them, until the series came back (the last of them). */
-	while (network->exchange != NULL) {
-		status = kl_app_dispatch(network->app, -1);
+	/* Takes the posts left, without waiting: a dispatch that brings none means none is left. */
+	for (;;) {
+		status = kl_app_dispatch(network->app, 0);
 		if (status != 0)
 			break;
+		found = 0;
 		for (;;) {
 			taken = kl_app_take(network->app, &event);
 			if (!taken)
 				break;
+			found++;
 			if (event.kind == KL_APP_WINDOW && event.input.kind == KL_WINDOW_POST) {
 				network_post(network, event.input.code, event.input.data);
 			} else if (event.kind == KL_APP_POST) {
 				network_post(network, event.code, event.data);
 			}
 		}
+		if (found == 0)
+			break;
+	}
+
+	/* A series whose post was lost (no memory) is the program's: its waker is closed, as the thread was joined. */
+	if (network->exchange != NULL) {
+		kl_socket_waker_close(network->exchange->waker);
+		free(network->exchange);
+		network->exchange = NULL;
 	}
 }
 
