@@ -117,7 +117,12 @@
   - `kcrt`: `kern_memcpy_ram`（RAM どうしの写し、amd64 は 256 byte 以上を `hal_memcpy` の rep movsb、他の機種と host 試験は word の loop）。buffer cache・pinned の user page（`copyin_pinned`・`copyout_pinned`）・VM の page の写しに使う。device memory には使わない（uncached では byte ずつになる）。hal.h は変えていない。
 - QEMU の数（2 GiB、MB/s、`tprobe` 入りの kernel、ぶれは ±10% ほど）: 64 KiB の run（hint・memcpy まで）新しい file 490・上書き 410・raw 743 → 1 MiB の run 715 → 回しを足して 854・738・800 → 束の書きを足して 851・852・835。main の kernel（probe なし）は新しい file 219〜409・上書き 733〜912（QEMU の I/O で頭打ち、CPU の差は 5330 で見る）。
 - 確かめ: build config-5330・serial・cache128・cache32 warning 0。host: `buf-slab-test`・`buf-readahead-test`・`buf-direct-test`・`plan/ws299/tests/host/ufs-cgmap-test.sh`（新規、`cg_free_blocks` を素直な bit の歩きと 315 万通り比べる）・`run-kcrt-host-tests.sh`・`run-copy-sum-host-test.sh` PASS。QEMU（`plan/ws299/tests/qemu-suite.sh`、新規）: cache-stress・nvme-shapes・directio・cache32-write（400 MiB）・boot-test PASS。readahead は試験の disk が host の build/tmp（host の disk が満杯に近く遅い）だと main の kernel も NVMe の `I/O queue recovered` と `writeback_errors` で FAIL、disk を tmpfs（`WS299_RUNS`）に置くと PASS。ws299 の QEMU 試験は `WS299_RUNS` で run の置き場を選べる（suite の既定 /tmp/ws299-runs）。
-- 未実施（この時点）: 5330 の測り、他の機種の build、UFS の crash の試験、design-reviewer。
+- 訂正: 上の QEMU の suite の PASS は hint と memcpy までの kernel（回し・束・1 MiB の前）で流した物だった。最終の kernel で流し直した結果は下。
+- 他の機種の build（3a4e64353）: pcat・visionfive2・rpi4・rpi5・m68k-virt の vmunix が rc 0・warning 0。
+- コードの敵対的レビュー（design-reviewer、3a4e64353）: (1) **重大**: tail journal（v2、journal-snapshot の profile）の volume では run の中身を journal の 1 group（`UFS_JOURNAL_GROUP_SECTORS` 128 sector）で commit するので、1 MiB の run が `drv_ufs_journal_publishv` で EINVAL になり write が失敗する。QEMU で再現（host の `make-ufs-test-image.py --profile journal-snapshot` の 256 MiB の volume に 16 MiB の dd が "Invalid argument"、`plan/ws299/temp/qemu-v2-write.sh`）。→ v2 の volume では run を 128 sector までにした（4e7b2a827）。同じ試験で一致。(2) 束の書きが一度だめだと write の残り全部を 1 line ずつにしていた → 16 line ごとに試し直す。(3) 回しの comment の誤り（回した line は 2 周目を得る、と直した）。(4) wrap の 2 回目の探しを始めの hint までに。(5)〜(8) は軽い（`ms->lock` の保持が run の分だけ長い、j3 の hold の line の pin が run の大きさだけ増える、hit の数え方、`kern_memcpy_ram` の呼び手の buffer が RAM である事を buf.c は保証しない — 辿った呼び手は全部 RAM）。
+- 他: P6 の q1681 の comment の WS の番号の削除（pci-nvme.c・dma.c/h・syscall.c・object-sync.c・ufs.c、p008 の一部）を取り込んだ（609295cd0）。
+- 最終の kernel（4e7b2a827）の QEMU（disk は tmpfs、`WS299_RUNS=/tmp/...`）: `qemu-suite.sh` の cache-stress・readahead・nvme-shapes・directio・cache32-write（400 MiB）・boot-test 全部 PASS、`qemu-ufs-crash.sh` の 2・6・15 秒の切断 3 回とも kept・remount・check ok、v2 の volume の 16 MiB の書きが一致。
+- 試験の追加: `plan/ws299/tests/qemu-ufs-crash.sh`（native の UFS に 72 MiB を書いて fsync、600 MiB の書きの途中で QEMU を kill、次の起動で journal の replay・72 MiB の cksum・新しい file の fsync と再 mount・host の `check-volume.py`）。
 
 ## 変えない物
 

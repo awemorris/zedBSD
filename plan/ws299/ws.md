@@ -170,7 +170,7 @@ Dell Latitude 5330（Intel VMD 8086:467f の下の KIOXIA BG5 KBG50ZNS256G、DRA
 - 2026-10-31 ユーザーから、WS299 は 5330 が空いたらどの担当でもよいので割り当てる、また不在の間は設計・実装・試験を進められる所まで進める、という趣旨の指示を受けた（Q1 経由）。
 - p004 の commit（ded5ae2e9・36d0d7b5d・1e0ac531a）は main に入っている（Q1 の判定待ちのまま）。
 - 5330: main 9946e22c0 の kernel を WS291 の restore の後の古い userland に入れた起動で network が上がらず止まった（電源の入れ直し待ち、遠隔の電源は無い）。次は main の userland の image（/tmp/p1-ws299/img5330、config-5330.mk）を `--nvme-image` で書いてから測る。
-- 書き手の CPU の直し（3a4e64353、[phase005](phase005/phase.md) の「2026-10-31」）: LRU の歩きで dirty の line を head へ回す、P6 の束の書きの取り込み、UFS の allocation run を 1 MiB・free map の探しを前の run の終わりから、`kern_memcpy_ram`（amd64 は rep movsb）。QEMU の 2 GiB で UFS の新しい file 490 → 851 MB/s、上書き 410 → 852、raw 743 → 835（同じ probe 入りの kernel どうし）。QEMU の回帰（suite）PASS、readahead は試験の disk を tmpfs に置いて PASS（host の disk だと main も FAIL）。
+- 書き手の CPU の直し（3a4e64353、[phase005](phase005/phase.md) の「2026-10-31」）: LRU の歩きで dirty の line を head へ回す、P6 の束の書きの取り込み、UFS の allocation run を 1 MiB・free map の探しを前の run の終わりから、`kern_memcpy_ram`（amd64 は rep movsb）。QEMU の 2 GiB で UFS の新しい file 490 → 851 MB/s、上書き 410 → 852、raw 743 → 835（同じ probe 入りの kernel どうし）。最終の kernel（4e7b2a827、レビューの重大 1 件 = tail journal の volume の run の大きさを直した後）で QEMU の suite・crash 試験 PASS（disk は tmpfs。host の disk に置くと readahead は main も NVMe の queue の recovery で FAIL）。他機種の build warning 0。
 - 再開点: 5330 の電源が戻ったら (1) image を書いて素の起動（`5330-run.sh --nvme-image`）、(2) `nvme-bench-5330.sh` で Debian と zedBSD を同じ条件で（p7raw・p7fs・p7direct・read・write）、(3) 未達の項目の切り分け → p007 → p008。
 
 ## 日程（2026-10-30 ユーザー、原文）
