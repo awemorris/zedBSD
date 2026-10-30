@@ -2211,3 +2211,11 @@ bcm43455_device_destroy(
 	CHECK(device == (struct bcm43455_device *)&fake_device_token);
 	devices_destroyed++;
 }
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
+}

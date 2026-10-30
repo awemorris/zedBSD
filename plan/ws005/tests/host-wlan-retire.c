@@ -427,3 +427,35 @@ main(void)
 	printf("host-wlan-retire: PASS\n");
 	return 0;
 }
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
+}
+
+/* The test's ticks are milliseconds already. */
+uint64_t
+kern_ticks_to_ms(
+	uint64_t ticks)
+{
+	return ticks;
+}
+
+/* Microseconds to the test's millisecond ticks, rounding up. */
+uint64_t
+kern_us_to_ticks(
+	uint64_t microseconds)
+{
+	return (microseconds + 999U) / 1000U;
+}
+
+/* The test's millisecond ticks in nanoseconds. */
+uint64_t
+kern_ticks_to_ns(
+	uint64_t ticks)
+{
+	return ticks * 1000000U;
+}

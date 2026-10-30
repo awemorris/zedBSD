@@ -216,9 +216,9 @@ main(
 	return 0;
 }
 
-/* Answers the hardware layer's names. */
+/* Answers the boot handoff names. */
 void *
-hal_get_arch_handoff(
+kern_boot_handoff(
 	const char *name)
 {
 	/* The serial port is always named. */

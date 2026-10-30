@@ -869,3 +869,11 @@ drv_pci_device_unmap_bar(
 	(void)mapping;
 	stub_fail("a PCI device was asked for");
 }
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
+}

@@ -37,7 +37,11 @@ def main():
                         f"ZEDBSD_PLATFORM={platform}",
                         f"ZEDBSD_ARCHITECTURE={architecture}",
                         f"ZEDBSD_BOARD={board}",
+                        # Every backend that selects the GPU framework.
                         f"CONFIG_DRIVER_PCI_VENUS={selected}",
+                        f"CONFIG_DRIVER_PCI_I915={selected}",
+                        f"CONFIG_DRIVER_PCI_GHCI={selected}",
+                        f"CONFIG_DRIVER_BCM2711_GPU={selected}",
                         f"Q311_OBJECT_LIST={objects}", "q311-gpu-selection",
                     ], cwd=ROOT, text=True, capture_output=True, timeout=30,
                     check=True,
@@ -54,7 +58,7 @@ def main():
                         "src/drivers/gpu/gpu.c", "src/drivers/gpu/gpu-fence.c"
                     ], (platform, sources)
                     assert len(gpu_objects.split()) == 2, (platform, gpu_objects)
-                print(f"GPU build selection: {platform} Venus={selected} PASS")
+                print(f"GPU build selection: {platform} backends={selected} PASS")
     print("GPU framework and fence are conditional together; generic fd/handle remain in all six lists PASS")
 
 

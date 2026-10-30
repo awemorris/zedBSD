@@ -534,3 +534,11 @@ waitq_wake_all(
 {
 	(void)queue;
 }
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
+}

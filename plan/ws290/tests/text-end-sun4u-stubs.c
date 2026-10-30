@@ -78,9 +78,9 @@ kern_io_out8(
 	stub_uart_sent[stub_uart_sent_count] = '\0';
 }
 
-/* The hardware layer's output: delegates once the kernel published one, else draws itself. */
+/* The early console: delegates once the kernel published one, else draws itself. */
 void
-hal_putc(
+kern_console_early_putc(
 	int c)
 {
 	void (*published)(int);
@@ -98,7 +98,7 @@ hal_putc(
 
 /* Turns interrupts off and reports whether they were on. */
 bool
-hal_irq_disable(
+kern_irq_disable(
 	void)
 {
 	/* Counts the depth. */
@@ -112,7 +112,7 @@ hal_irq_disable(
 
 /* Turns interrupts back on. */
 void
-hal_irq_enable(
+kern_irq_enable(
 	void)
 {
 	/* Counts the depth down. */
@@ -154,7 +154,7 @@ spin_lock_irqsave(
 {
 	(void)lock;
 
-	/* Counts the depth as hal_irq_disable() does. */
+	/* Counts the depth as kern_irq_disable() does. */
 	stub_irq_off++;
 	return 1;
 }
@@ -329,4 +329,12 @@ sched_sleep(
 	uint64_t timeout_tick)
 {
 	(void)timeout_tick;
+}
+
+/* A tick of the test's clock is one millisecond. */
+uint64_t
+kern_ms_to_ticks(
+	uint64_t milliseconds)
+{
+	return milliseconds;
 }
