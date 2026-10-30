@@ -1,14 +1,14 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 17:55（Q1）
+最終更新: 2026-10-30 18:05（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1716）。bootloader を Hardkernel の公式の image（20260610）の物に替え、Amlogic の license と一緒に zedBSD-firmware へ。試験の image を作り直す | Q1 が zedBSD-firmware を push → 実機の結果で各 Phase を直す |
-| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（置き換え先の表 A、kernel に足す関数の表 B） | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
+| P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（表 A・表 B）は下の「WS331」の節 | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
@@ -68,6 +68,43 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p012 | 50 fps を明らかに超える改善 | uncleared（2026-10-30 P7: 頂点の側の固定機能の hardware の限界、NVK と同等 49.0 fps、上限 約 51.3。温度の差なし） |
 | p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
 | p020 | PowerVR | planned |
+
+### WS331 driver から HAL への直の依存を除く（P2）
+
+規則（2026-10-30 ユーザー）: driver は HAL を知らず、kernel の関数（kern_*）だけを使う。今は driver の 38 file が HAL を include し、`hal_*` を 105 回（本体 80・試験 25）呼ぶ。
+
+| Phase | 内容 | 状態 |
+| --- | --- | --- |
+| p001 | 違反の全数、置き換え先の一覧（表 A）、kernel に足す関数の案（表 B） | in-progress（一覧は済み、ユーザーの決定待ち） |
+| p002 | kernel に表 B を足す（driver は変えない） | 未作成（表 B の決定の後） |
+| p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | 未作成 |
+| p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | 未作成 |
+| p005 | 例外の候補（pc98 の 3 か所、rpi4 の console） | 未作成 |
+| p006 | 規約の全文の見直し | 未作成 |
+
+表 A（kernel に置き換え先が既にある物）:
+
+| driver が使う HAL | kernel の置き換え先 | 違い |
+| --- | --- | --- |
+| hal_space_map_device・unmap_device | kern_device_map・kern_device_unmap | 戻り値が errno。属性は uncached と write-through だけ（→ B1） |
+| hal_get_arch_handoff | kern_boot_handoff | 無し（driver の 13 か所は既に使う） |
+| hal_rtc_read_counter | kern_rtc_read_counter | 無し |
+| hal_irq_disable・enable・send_eoi、hal_irq_ack_t | kern_irq_disable・enable・send_eoi、kern_irq_ack_t | 型の名前だけ |
+| hal_io_inp*・outp*、hal_mmio_* | kern_io_in*・out*、kern_mmio_* | 名前だけ |
+| HAL_FATAL | KERN_FATAL | 止まる前に log と console に記録する（よりよい） |
+| HAL_OK | 0（errno） | — |
+
+表 B（kernel に足す物の案、ユーザーが決める）:
+
+| # | 足す物 | 何に使うか | 使う driver |
+| --- | --- | --- | --- |
+| B1 | 定数 KERN_DEVICE_WRITECOMBINE と flag KERN_DEVICE_READONLY | write-combine の map（画面の memory を速く書く）と、読み出しだけの map | i915、ACPI |
+| B2〜B5 | kern_irq_alloc_msi・attach_msi・detach_msi_sync・free_msi | MSI（PCI の message 型の割り込み）の確保と handler の付け外し。別の案は i915 を既存の kern_irq_register_msi に寄せる（関数を足さない） | i915 |
+| B6 | kern_cpu_current | 今の CPU の番号 | pcat の text、dc8200、i915 |
+| B7 | kern_console_early_putc | 起動の早い段の console に 1 文字（今の hal_putc と同じ動き） | serial-console、rpi4・sun4u・x68k の console |
+| B8 | 型 kern_physaddr_t | 物理 address の型（HAL の名前なしで書く） | 多数（23 file） |
+
+未決（ユーザー）: 表 B の採否と MSI の直し方、rpi4 の console の 2 関数（HAL の early console の状態を使う、P2 の推しは当面の例外）、build の macro HAL_ARCH_* を残すか、kernel の header 13 個が HAL の header を include する件を WS331 に入れるか。全文は [phase001](ws331/phase001/phase.md)。
 
 ### WS326 libmedia の H.264 の software の decoder（標準廉価実装手順）
 
