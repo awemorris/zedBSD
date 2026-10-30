@@ -27,6 +27,7 @@
 #include "kern/atomic.h"
 #include "kern/buf.h"
 #include "kern/clock.h"
+#include "kern/cpuperf.h"
 #include "kern/kernel.h"
 #include "kern/kmem.h"
 #include "kern/klog.h"
@@ -374,6 +375,9 @@ kernel_entry(
 	if (kern_cpu_notify_probe() != HAL_OK)
 		hal_fatal(__FILE__, __LINE__,
 			  "secondary CPU notification failed");
+
+	/* Builds the table of the CPUs' performance now that each takes notifications. */
+	kern_cpuperf_init();
 	kern_logf("boot: HAL initialized successfully. "
 		   "[cpu %u, memory %uMB, timer %ums]\n",
 		   hal_cpu_count(),

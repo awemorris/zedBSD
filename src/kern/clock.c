@@ -18,6 +18,7 @@
 
 #include "kern/random.h"
 #include "kern/clock.h"
+#include "kern/cpuperf.h"
 #include "kern/atomic.h"
 #include "kern/cred.h"
 #include "kern/process-timer.h"
@@ -44,7 +45,7 @@ static const uint32_t tick_rate = HAL_TIMER_FREQUENCY;
 
 /*
  * The counter's value when CPU 0 last entered suspend-to-idle, and the
- * counts left over from the ticks it brought forward (ws052-p006).  Only
+ * counts left over from the ticks it brought forward.  Only
  * CPU 0's idle loop touches them, around hal_cpu_idle_suspend(); begun is
  * 1 between the two halves.
  */
@@ -124,7 +125,7 @@ kernel_timer_handler(
 
 /*
  * Notes the counter as CPU 0 enters suspend-to-idle, whose tick stops
- * until it returns (ws052-p006).  Only CPU 0 calls it, from its idle loop.
+ * until it returns.  Only CPU 0 calls it, from its idle loop.
  */
 void
 kern_clock_idle_suspend_begin(
@@ -148,7 +149,7 @@ kern_clock_idle_suspend_begin(
 /*
  * Brings kernel_ticks forward by the time CPU 0 spent in suspend-to-idle,
  * from the counter that kept running, carrying the counts short of a tick
- * to the next time (ws052-p006).  Only CPU 0 calls it, from its idle loop.
+ * to the next time.  Only CPU 0 calls it, from its idle loop.
  */
 void
 kern_clock_idle_suspend_end(
@@ -199,6 +200,9 @@ kernel_cpu_notify_handler(
 	/* Counts the notification for the delivery probe. */
 	if (cpu < HAL_CPU_MAX)
 		(void)atomic_raw_fetch_add_relaxed(&cpu_notify_count[cpu], 1U);
+
+	/* Applies the CPU performance work posted for this CPU, if any. */
+	kern_cpuperf_notify(cpu);
 
 	sched_cpu_notify(cpu);
 }

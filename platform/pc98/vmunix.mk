@@ -69,6 +69,7 @@ KERN_OBJS := $(BUILD)/src/kern/entry.o $(BUILD)/src/kern/clock.o \
 	$(BUILD)/src/kern/process.o $(BUILD)/src/kern/thread.o \
 	$(BUILD)/src/kern/sched.o \
 	$(BUILD)/src/kern/sleep.o \
+	$(BUILD)/src/kern/cpuperf.o \
 	$(BUILD)/src/kern/freeze.o \
 	$(KERN_VM_OBJS) \
 	$(BUILD)/src/kern/filedesc.o $(BUILD)/src/kern/handle.o $(BUILD)/src/kern/fd-object.o $(BUILD)/src/kern/pipe.o \
