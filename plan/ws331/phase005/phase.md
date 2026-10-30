@@ -32,25 +32,29 @@ Queue: q1719（P2）
 
 ## 結果（2026-10-30）
 
-- commit: 84e3e2698（Pi、Q1 が main に merge 429fef1d1）、609d97bd5（VF2、cons.h の git rm）、fde6f9ece（gpu.c）、1d950e03c（pc98 の 2 か所）。
+- commit: 84e3e2698（Pi、Q1 が main に merge 429fef1d1）、609d97bd5（VF2、cons.h の git rm）、fde6f9ece（gpu.c）、1d950e03c（pc98 の 2 か所）、977f43204（pc98 の display.c・display.h の git rm と jisx0208.c の driver への git mv・drv_pc98_jisx0208_to_ucs への改名（Q1 の OK）、boot-fb の end の判定を画面全体に、fb-text の end は画面も serial も無ければ ENOTSUP、WS290 の試験の追従）。
+- pc98 の 3 か所は済み: pc98-lgy98 は kern_io、GDC の START・STOP は driver、JIS の表は `src/drivers/platform/pc98/graphics/jisx0208.c`（graphics の obj にだけ入る。存在しない試験の古い規則 `hal-pc98-keyboard-host-test` も外した）。
 - build: `plan/ws331/tests/build-vmunix-all.sh build/p005d` で 20 port の vmunix が全部 rc=0・warning 0（fde6f9ece）。pc98 は 1d950e03c の後も rc=0・warning 0（build/p005e）。
 - QEMU raspi4b（boot-test.sh、画面の PNG を読んだ）:
   - 試験の image `plan/ws331/tests/config-rpi4-text.mk`（`-DKERN_TEST_TEXT_SUSPEND_SECONDS=20`: fb-text.c の試験の thread が kern_text_suspend の後に画面を青で塗り "GRAPHICS OWNER" を描き、30 秒後に kern_text_resume）: login PASS、画面の読み取りで "GRAPHICS OWNER" を見た後、login: の画面に描き直された（resume の後の PNG を見て青が無く grid が戻った事を確認）。途中の PNG は boot-test が残さない。
   - serial の build `plan/ws331/tests/config-rpi4-serial.mk`（CONFIG_RPI4_SERIAL_CONSOLE=y）: `plan/tools/guest/rpi4-serial.sh` で serial の login・`uname -a`・`echo` が通り、boot-test の画面の login も PASS。
 - grep: rpi4-console.c・boot-fb・fb-text・pc98-lgy98.c・pc98/graphics/backend.c に `hal/`・`hal_` は無い。残るのは build の macro `HAL_BOARD_*`（未決）。
+- host 試験（Q1 の指示で WS290 の試験を新しい形に直した。試験の古さは見つけた担当が直す運用）: `plan/ws290/tests/text-end-boards-host-test.sh` PASS（rpi4・VF2 の scene を新しい形に、14 scene × ordinary・undefined と address の 8、計 36）、`text-end-host-test.sh`（pcat の text の end、範囲を受けて map を外す scene を含む）PASS（p003 の kern_cpu_current・kern_rtc_read_counter の stub が無く link できなかったのを直した）、`ghci-host-test.sh`（gpu.c を含む）PASS。
+- build: 977f43204 で rpi4・rpi5・odroid-c5・visionfive2・pc98 の vmunix rc=0・warning 0（build/p005g）。
+- VF2 の実機（Q1 の割当、`plan/tools/vf2/run.sh`、VF2_PLUG=14C19FA80F86）: 板の kernel（cksum 2825517684）を `/boot/boot0/vmunix.p2old` に残し、build/p005g/visionfive2/vmunix（config/ci/config-visionfive2.mk）を入れて起動。SSH が上がり、dmesg に `visionfive2: framebuffer 1920x1080 … format 2`・`console UART at 10000000`・PowerVR の render node（stages render-node=ok）、`not mapped`・`not offered`・`could not leave` の行は無く、`/dev/graphics` がある（元の kernel には無い）。その後に元の kernel を戻して cksum 2825517684 を照合し、入れ直して起動（SSH と `/dev/graphics` の無い事で元の kernel を確かめた）。KC705・zedbsd.cfg には触っていない。
 
 ## 未実施・残り
 
 - /dev/graphics の ioctl を通した enter・leave（guest の program が要る。suspend・resume は kernel の試験の thread で確かめた）。
-- amd64 の Venus（virtio-gpu）で flip の後も表示と serial が続く事（`plan/ws290/tests/text-end-qemu.sh core` が合うが、Venus の renderer がこの host に無い）と、pcat の end が範囲を受けて map を外せる事の QEMU の確かめ。
-- Pi 5・ODROID-C5・VisionFive 2 の実機（build だけ）。
-- WS290 の `plan/ws290/tests/text-end-boards-host-test.sh` が compile できなくなった（stub が VF2 の console_ended と旧 rpi4-console の形を参照）。WS290 の file なので直していない（Q1 に報告済み）。
+- amd64 の Venus（virtio-gpu）で flip の後も表示と serial が続く事: 未実施（`plan/ws290/tests/text-end-qemu.sh core` が合うが、Venus の renderer がこの host に無い）。pcat の end が範囲を受けて map を外す事は host 試験だけ（QEMU は未実施）。
+- VF2 の実機の画面の login と serial の login: 未確かめ（この host に HDMI の capture も VF2 の serial も無い。/dev/ttyUSB2 は Digilent の KC705 側で触っていない。板に /dev/mem も無い）。確かめたのは上の起動・log・/dev/graphics まで。
+- Pi 5・ODROID-C5 の実機（build だけ）。
 - 副作用: kernel_putc の公開の後は kernel の log が hal_putc を通らず、Pi の HAL の stall の報告の「log の最後の行」は HAL 自身の行だけになる（HAL の口が要るので行っていない）。HVS がある Pi では、console の状態でも stall の報告が HVS の plane に描かれ、長い stop では firmware の display list を一枚の plane の list に替える。
-- pc98 の JIS の表の git mv と HAL の display.c・display.h の git rm は Q1 の OK 待ち（一覧を送った）。
+- pc98 の起動（PC-98 の QEMU の道具は未実施）。
 
 ## 再開点
 
-Q1 の OK を受けて pc98 の git mv・git rm と vmunix.mk の path を直し、pc98 の build。その後 phase の判定は Q1。
+範囲の作業は済み。phase の判定は Q1。残りは上の未実施（Venus の QEMU、VF2 の画面と serial の目視、Pi 5・ODROID-C5・pc98 の起動）。
 
 ## 確かめ
 
