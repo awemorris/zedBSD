@@ -1288,6 +1288,7 @@ stmt_import(
 			js_fail(parser, "as is expected after import *");
 		js_next(parser);
 		specifier = stmt_import_specifier(parser, 0);
+		specifier->flags |= JS_FLAG_ALL;
 		js_append(&node->first, &last, specifier);
 	} else if (parser->lexer.token.punctuator == JS_P_LBRACE) {
 		js_next(parser);
@@ -1353,6 +1354,9 @@ stmt_import_specifier(
 	return specifier;
 }
 
+/* The name of the hidden binding that holds the value of export default expression. */
+static const uint16_t stmt_default_name[] = { '*', 'd', 'e', 'f', 'a', 'u', 'l', 't', '*' };
+
 /* Parses an export declaration. */
 static struct js_node *
 stmt_export(
@@ -1361,6 +1365,7 @@ stmt_export(
 	struct js_node *node;
 	struct js_node *last;
 	struct js_node *specifier;
+	struct js_node *declarator;
 	uint32_t flags;
 	int lexical;
 	int async_function;
@@ -1416,8 +1421,17 @@ stmt_export(
 		} else if (parser->lexer.token.keyword == JS_W_CLASS) {
 			node->first = js_parse_class(parser, 2);
 		} else {
-			node->first = js_parse_assignment(parser);
+			/* An expression is the value of a hidden constant that is exported as default. */
+			node->flags &= ~JS_FLAG_DEFAULT;
+			declarator = js_node_new(parser, JS_NODE_DECLARATOR);
+			declarator->first = js_node_new(parser, JS_NODE_IDENTIFIER);
+			declarator->first->text = stmt_default_name;
+			declarator->first->text_length = sizeof(stmt_default_name) / sizeof(stmt_default_name[0]);
+			declarator->second = js_parse_assignment(parser);
 			js_semicolon(parser);
+			node->first = js_node_new(parser, JS_NODE_VARIABLES);
+			node->first->op = JS_P_CONST;
+			node->first->first = declarator;
 		}
 
 		/* The default export. */
