@@ -78,7 +78,9 @@ do not mean arbitrary user strides, multiplication overflows or out-of-range
 rectangles are accepted. Returned mode may differ from the requested
 preference.
 
-There is no published current GPU object ABI to enumerate here.
+GPU nodes (`/dev/gpuN`) are a separate interface and are not part of the
+console and graphics devices described here. Their requests, permissions and
+display leases are described in [GPU device interface](gpu.md).
 
 ## System administration and observation
 

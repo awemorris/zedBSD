@@ -338,7 +338,7 @@ main(void)
 The program treats the outcomes of the wait as follows.
 
 - A finite `timeout_ns` that expires returns `ETIMEDOUT`. The record is unchanged, and the program waits again; it gives up after five seconds.
-- A signal returns `EINTR`. The kernel does not restart the request and the record is unchanged, so the program waits again.
+- A signal returns `EINTR` when the handler was installed without `SA_RESTART`. The record is unchanged, so the program waits again.
 - A request that fails with `EIO` or `ENODEV`, or a record whose `status` is not zero, can mean that the open or the whole device has failed. After a non-zero `status` the program asks `GPU_GET_INFO`, which fails on a failed open; if it fails, the program closes the descriptor and opens the node again, as [submission](gpu-submission.md) describes. Nothing of the old open is revived, so the program starts the whole sequence again on the new open.
 
 The stream is not one that libvulkan would send for a Vulkan call. It is the framing that libvulkan puts around every command: it names the blob that receives the replies (`GPU_OP_SET_REPLY_STREAM`), moves the reply cursor to the last 20 bytes of the blob (`GPU_OP_SEEK_REPLY_STREAM`) and asks for the version query that ends each submission (`GPU_OP_ENUMERATE_INSTANCE_VERSION` with `GPU_OP_FLAG_REPLY`). A real stream comes from libvulkan, which also reads the replies where the Vulkan results are; this program does not read them. Whether a node decodes the stream itself or passes it to a host is in [the command stream](gpu-command-stream.md) and [drivers](gpu-drivers.md).
@@ -577,7 +577,7 @@ main(void)
 
 ## Presenting to a display
 
-A display is used through a lease. The program counts the outputs with `GPU_DISPLAY_QUERY` and `GPU_DISPLAY_COUNT_ONLY`, queries them by index, and picks the first one that is connected, takes whole-frame FIFO presents, is not `GPU_DISPLAY_LIMITED` and accepts BGRA frames of its current size. `GPU_DISPLAY_CLAIM` takes the lease on plane 0 of that output with the `display_id` and `generation` of the query. The frame is a storage resource filled with one colour, written in pieces of at most `GPU_COPY_MAX` bytes. `GPU_DISPLAY_PRESENT` shows the whole frame and returns its `sequence`. `GPU_DISPLAY_WAIT` waits at most one second per call until the frame is adopted. The lease is released at the end whatever happened ([display](gpu-display.md)). The first successful present of a boot also ends the text console's use of the screen.
+A display is used through a lease. The program counts the outputs with `GPU_DISPLAY_QUERY` and `GPU_DISPLAY_COUNT_ONLY`, queries them by index, and picks the first one that is connected, takes whole-frame FIFO presents, is not `GPU_DISPLAY_LIMITED` and accepts BGRA frames of its current size. `GPU_DISPLAY_CLAIM` takes the lease on plane 0 of that output with the `display_id` and `generation` of the query. The frame is a storage resource filled with one colour, written in pieces of at most `GPU_COPY_MAX` bytes. `GPU_DISPLAY_PRESENT` shows the whole frame and returns its `sequence`. `GPU_DISPLAY_WAIT` waits at most one second per call until the frame is adopted (a driver whose presents return only once the frame is adopted answers at once). The lease is released at the end whatever happened ([display](gpu-display.md)). The first successful present of a boot also ends the text console's use of the screen.
 
 The errors it expects are these.
 

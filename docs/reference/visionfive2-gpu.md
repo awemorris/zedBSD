@@ -9,10 +9,19 @@ that check it.
 
 The StarFive JH7110 has two GPU nodes:
 
-- `/dev/gpu0`: the display controller (DC8200). It only shows images and
+- The display node: the display controller (DC8200). It only shows images and
   has no Vulkan device.
-- `/dev/gpu1`: the render node of the Imagination PowerVR BXE-4-32. This is
-  the Vulkan device.
+- The render node: the Imagination PowerVR BXE-4-32. This is the Vulkan
+  device.
+
+The driver registers the display node first, so the display node is normally
+`/dev/gpu0` and the render node `/dev/gpu1`. The numbers are the lowest free
+numbers in probe order, not fixed names: without the firmware the render node
+does not appear, and a board with another GPU takes numbers too. A program
+tells the nodes apart by the roles that `GPU_DEVICE_QUERY` reports, not by the
+number. The rules for node names and permissions, and the request interface of
+both nodes, are in [GPU device interface](gpu.md); what each node offers is in
+[GPU drivers and node kinds](gpu-drivers.md).
 
 `libvulkan` opens both nodes and offers one physical device, the render node.
 A program that presents to the screen through `VK_KHR_display` draws on the

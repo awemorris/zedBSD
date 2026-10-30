@@ -64,7 +64,7 @@ hands the screen to another by itself.
 | --- | --- | --- |
 | Text console (`/dev/console`) | The board's display, through the [text-display table](../../include/kern/text-display.h) | The board's display driver, once, during its bring-up. On PC/AT that is the [text driver](../../src/drivers/platform/pcat/graphics/text.c), which draws into the firmware's framebuffer (the UEFI GOP framebuffer, or VGA text memory on a BIOS boot) |
 | `/dev/graphics` | The same board display, in a drawing mode | The board's [graphics driver](../../src/drivers/platform/pcat/graphics/pcat-graphics.c). Entering a mode suspends the text console, and the final close resumes it |
-| GPU node (`/dev/gpu0`) | The panel and outputs the GPU drives | The GPU driver ([i915](../../src/drivers/gpu/i915), [Venus](../../src/drivers/gpu/venus)). Keiland's compositor is its user |
+| GPU node (`/dev/gpu0`) | The panel and outputs the GPU drives | The GPU driver ([i915](../../src/drivers/gpu/i915), [Venus](../../src/drivers/gpu/venus) and the others in [GPU drivers and node kinds](../reference/gpu-drivers.md)). Keiland's compositor is its user. The interface is described in [GPU device interface](../reference/gpu.md) |
 
 The text console and `/dev/graphics` are one board-level pair. The text
 console calls only the text-display table, so it stays a platform-independent
@@ -85,9 +85,16 @@ A GPU driver is not part of that pair:
   display interface: a display lease, which Keiland's compositor takes when it
   starts. Then the driver reads out the pipe the firmware left lit, stops it,
   sets its own mode and shows the client's buffers.
-- From then on the text console still draws into the firmware framebuffer in
-  memory. The panel no longer scans that memory out, so console output is not
-  on screen while the GPU drives the panel.
+- Until the first image is flipped to a display, the text console keeps
+  drawing on the screen, also while a lease is held. The first flip that any
+  GPU node accepts (`GPU_PRESENT`, `GPU_DISPLAY_PRESENT`,
+  `GPU_DISPLAY_PRESENT_SYNC` or `GPU_DISPLAY_COMMIT`) makes the kernel ask the
+  text console to end its use of the display, once for the whole system. After
+  that the console's characters reach only the serial line and the log for the
+  rest of the boot, and they do not come back on the screen when the lease
+  ends. What the screen then shows depends on the driver
+  ([GPU device interface](../reference/gpu.md),
+  [Display](../reference/gpu-display.md)).
 - Keiland does not show the text console between the greeter and the session
   either (see [Keiland](keiland.md)).
 

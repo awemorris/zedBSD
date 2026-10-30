@@ -42,9 +42,9 @@ The legacy `GPU_PRESENT` request (see [gpu-requests.md](gpu-requests.md)) also f
 
 ##### Sequence numbers, adoption and waiting
 
-Each present on a lease, and each `GPU_DISPLAY_COMMIT` on it (see [gpu-display-control.md](gpu-display-control.md)), is given the next number of a count that increases and is nonzero. `GPU_DISPLAY_PRESENT` returns the number of its frame in `sequence`, which must be zero on input. A number has meaning only with the lease that returned it; the count of a new lease starts again.
+Each present on a lease, and each `GPU_DISPLAY_COMMIT` on it (see [gpu-display-control.md](gpu-display-control.md)), is given the next number of a count that increases and is nonzero. `GPU_DISPLAY_PRESENT` returns the number of its frame in `sequence`, which must be zero on input. A number has meaning only with the lease that returned it. Most drivers start the count again with a new lease; the bcm2711 display keeps counting across leases, so a program does not compare numbers of different leases.
 
-A frame is adopted when the display has taken it to be shown, or when a later frame that replaces it has been adopted. `completed_sequence` of `GPU_DISPLAY_WAIT` is the highest number that is adopted together with every lower number. `GPU_DISPLAY_WAIT` with a `sequence` waits until that number is adopted, for at most `timeout_ns`: one call waits at most one second, and zero answers at once. On success it reports `completed_sequence`, the time of that adoption in `present_time_ns` and the output's `generation`. With `GPU_DISPLAY_VIRTUAL_CLOCK` the time is the output's virtual clock, not a monitor's refresh.
+A frame is adopted when the display has taken it to be shown, or when a later frame that replaces it has been adopted. `completed_sequence` of `GPU_DISPLAY_WAIT` is the highest number that is adopted together with every lower number. `GPU_DISPLAY_WAIT` with a `sequence` waits until that number is adopted, for at most `timeout_ns` on a driver that waits: one call waits at most one second, and zero answers at once. A driver whose presents return only once the frame is adopted answers at once. On success it reports `completed_sequence`, the time of that adoption in `present_time_ns` and the output's `generation`. With `GPU_DISPLAY_VIRTUAL_CLOCK` the time is the output's virtual clock, not a monitor's refresh.
 
 ##### When GPU_DISPLAY_PRESENT returns
 
@@ -200,9 +200,9 @@ Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/dr
 
 Requires: open mode R; capability `GPU_CAP_DISPLAY`.
 
-Waits until a presented frame has been adopted. `lease` must be this open's and `sequence` the number that `GPU_DISPLAY_PRESENT` (or `GPU_DISPLAY_COMMIT`) returned. `timeout_ns` bounds the wait: zero answers at once, and one call waits at most one second whatever the value. On success `completed_sequence` is the highest number adopted together with every lower number, and is at least `sequence`; `present_time_ns` is the time of that adoption in nanoseconds and `generation` is the output's generation. The three output fields must be zero on input.
+Waits until a presented frame has been adopted. `lease` must be this open's and `sequence` the number that `GPU_DISPLAY_PRESENT` (or `GPU_DISPLAY_COMMIT`) returned. `timeout_ns` bounds the wait on the drivers that wait (ghci and bcm2711): zero answers at once, and one call waits at most one second whatever the value. The other drivers do not use `timeout_ns` (see below). On success `completed_sequence` is the highest number adopted together with every lower number, and is at least `sequence`; `present_time_ns` is the time of that adoption in nanoseconds and `generation` is the output's generation. The three output fields must be zero on input.
 
-On an output whose presents return only once adopted, the request answers at once and ignores `timeout_ns`. A request that is not ready answers `EAGAIN` when `timeout_ns` is zero, and `ETIMEDOUT` when the time ran out. A signal ends the wait with `EINTR`; there is no cancellation request, and a new call waits again. The lease ending during the wait is an error (`EBUSY`).
+On an output whose presents return only once adopted, the request answers at once and ignores `timeout_ns`. A request that is not ready answers `EAGAIN` when `timeout_ns` is zero, and `ETIMEDOUT` when the time ran out. A signal ends the wait with `EINTR` on the bcm2711 display only; the wait of the ghci display does not end on a signal. There is no cancellation request, and a new call waits again. The lease ending during the wait is an error (`EBUSY`).
 
 Whether other requests of the open run during the wait depends on the node (see [gpu.md](gpu.md)). On failure the argument is not written.
 
@@ -214,7 +214,7 @@ Errors:
 - `EINVAL`: `version` or `size` is not the structure's; `lease` is zero; `completed_sequence`, `present_time_ns` or `generation` is not zero.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through, and the header lists them: `EAGAIN` when `timeout_ns` is zero and the sequence is not adopted (also when nothing has been presented yet), `ETIMEDOUT` when the time ran out, `EINTR` on a signal, `EBUSY` for a lease that is not this open's or that ended during the wait (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `ENXIO` for an output that is not connected, and `EINVAL` for a `sequence` the lease has not been given.
+- Other values: Driver answers pass through, and the header lists them: `EAGAIN` when `timeout_ns` is zero and the sequence is not adopted (also when nothing has been presented yet), `ETIMEDOUT` when the time ran out, `EINTR` on a signal (bcm2711 only), `EBUSY` for a lease that is not this open's or that ended during the wait (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `ENXIO` for an output that is not connected, and `EINVAL` for a `sequence` the lease has not been given.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_ungated`), [hvs-load](../../userland/tests/hvs-load/main.c).
 

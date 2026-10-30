@@ -1,7 +1,7 @@
 # Kernel boot parameters
 
 Status: current for the four x86 production-loader paths; reconciled with
-current source and retained configured-loader evidence on 2026-09-09
+current source and retained configured-loader evidence
 
 This document defines the implemented textual kernel-parameter contract for
 selecting boot filesystems, the root mode, swap sources, and PID 1. The common
@@ -68,8 +68,8 @@ rootpart=
 overlay-root= overlay-data=
 swap0= swap1= swap2= swap3=
 init=
-kmsg= login=          (ws035-p097, Sections 7a and 7b)
-mac0=                 (ws289-p005, Section 7e)
+kmsg= login=          (Sections 7a and 7b)
+mac0=                 (Section 7e)
 ```
 
 ## 3. Block-device selectors
@@ -296,9 +296,8 @@ are documented in Section 9.1.
 
 ## 7a. Kernel messages: kmsg=
 
-`kmsg=` says where the kernel's messages go (ws035-p097, 2026-09-28 user
-direction: a fully graphical boot keeps them off the screen and only stores
-them, like dmesg).
+`kmsg=` says where the kernel's messages go (a fully graphical boot keeps
+them off the screen and only stores them, like dmesg).
 
 ```text
 kmsg=console     the default: every message is also written on the console
@@ -333,8 +332,8 @@ kmsg=quiet       messages go to the log buffer (dmesg, sysctl kern.msgbuf)
 
 ## 7b. The login: login=
 
-`login=` chooses how a person logs in on the machine's screen (ws035-p098,
-2026-09-28 user decision: the graphical login is the default).  The kernel
+`login=` chooses how a person logs in on the machine's screen (the graphical login is the
+default).  The kernel
 only validates it and reports it as `sysctl kern.boot.login`; the graphical
 login's `sessiond` (the rc.conf service `greeter`) reads it.
 
@@ -346,8 +345,9 @@ login=console    the console's getty (also what no login= means)
 - Any other value is an error, as for `kmsg=`.
 - With `login=graphical`, init holds `getty_console` back (the greeter
   service says `replaces=getty_console`).  When the machine has no display
-  (`/dev/gpu0`), no `/bin/wayland`, or the greeter fails three times in a
-  row, `sessiond` ends and init starts `getty_console` (the console is then
+  (no `/dev/gpu0`; GPU node numbers follow the order in which drivers
+  register, see [GPU device interface](gpu.md)), no `/bin/wayland`, or the
+  greeter fails three times in a row, `sessiond` ends and init starts `getty_console` (the console is then
   revealed by its read, Section 7a).  Serial and SSH logins are unchanged.
 - On amd64 UEFI, holding Shift while the loader runs gives the kernel
   `login=console` for that one boot, whatever `zedbsd.cfg` says (Section 7c).
@@ -360,7 +360,7 @@ default; the build menu's "Graphical boot").  For kernel development set it to
 `n` (the messages on the console and the console login), or edit the lines on
 the image's boot FAT32 partition labelled `ZEDBSD` (`/zedbsd.cfg` there, which
 the running system shows at `/boot/boot0/zedbsd.cfg`; the ESP holds only the
-loader since WS238): remove the three tokens or write
+loader): remove the three tokens or write
 `kmsg=console login=console`.
 
 ## 7c. Boot keys (amd64 UEFI)
@@ -435,9 +435,8 @@ parameter table, so `boot: ignored 1 unknown parameter` is also logged.
 ## 7e. The Ethernet address: mac0=
 
 `mac0=` gives the first Ethernet port its station address on a board that
-has none of its own where the kernel can read it (ws289-p005, 2026-10-23
-user decision U5).  The value is six pairs of hex digits separated by
-colons, such as `mac0=02:5a:59:42:4f:31`.
+has none of its own where the kernel can read it.  The value is six pairs
+of hex digits separated by colons, such as `mac0=02:5a:59:42:4f:31`.
 
 ```text
 mac0=xx:xx:xx:xx:xx:xx   a unicast address, not all zeros
@@ -638,19 +637,19 @@ The implementation is divided into focused production-code gates:
 - BR-T42 covers bounded parsing, owned storage, the complete key set,
   duplicates, malformed input, and `init=`;
 - BR-T43 covers the shared record and all four x86 handoff layouts;
-- WS013 CT-T008--CT-T018 cover bounded `/zedbsd.cfg` parsing, selected-FAT
+- CT-T008--CT-T018 cover bounded `/zedbsd.cfg` parsing, selected-FAT
   normalization, configured-kernel loading, discovery, and ignored UEFI
   `LoadOptions`;
 - BR-T44 covers selectors, private boot slots, aliases, root-mode selection,
   path validation, and reverse-order failure unwind;
 - BR-T45 covers `ZEDSWAP1`, `ZEDSWAP2`, four-source aggregation,
   allocation/free, first-error flush, and shutdown;
-- q015 BR-T46 is the completed common-parser/root/swap QEMU acceptance gate;
+- BR-T46 is the completed common-parser/root/swap QEMU acceptance gate;
   and
-- WS013 CT-T025--CT-T031 are the later current-loader configuration and
+- CT-T025--CT-T031 are the later current-loader configuration and
   no-fallback gates for PC/AT BIOS and PC-98.
 
-The authoritative q015 BR-T46 run passed 31 cells: six common cases on each of
+The authoritative BR-T46 run passed 31 cells: six common cases on each of
 i386 PC/AT, i386 PC-98, amd64 BIOS, and amd64 UEFI (24 cells); mixed file/raw
 swap, UUID disk reordering, and PARTUUID disk reordering on both amd64 firmware
 paths (six cells); and one PC/AT native-root/raw-swap alias rejection cell. The
@@ -664,6 +663,6 @@ positive page-in counter. The alias-rejection cell failed before swap
 publication, root mount, or init. The UUID and PARTUUID reordering cells
 enumerated another disk first while still selecting the production boot image,
 so loader-origin `boot0` and explicit secondary-slot resolution were both
-proved. These later Queue records replace q015 only for loader configuration
-and fallback wording; q015 remains the integrated kernel parser, root, swap,
-and PID 1 evidence. 
+proved. The later loader gates (CT-T025--CT-T031) replace BR-T46 only for
+loader configuration and fallback wording; BR-T46 remains the integrated
+kernel parser, root, swap, and PID 1 evidence.
