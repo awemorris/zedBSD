@@ -1,19 +1,19 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 22:29（Q1）
+最終更新: 2026-10-30 22:47（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
+| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す（WS009 は P7 へ） |
 | P2 | — | — | 返却（WS331: p011 cleared。残りは p006 規約の見直し） | — |
 | P3 | — | — | 返却（WS332: p001・p002 cleared、KERN_CLOCK_HZ を削除、wlan の UAPI の期限の不具合を直した） | WS332 p003（率を仮定する残りの literal）・p004 規約は未割当 |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
-| P7 | — | — | 返却（WS291: p010 cleared、p012 uncleared、PowerVR は P3 へ） | — |
+| P7 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 起動（q1725）。p028 の clean build と QEMU の起動の再現（native → hybrid・uefi・bios） | WS の受け入れの確認 → 完了の形 → 返却 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
