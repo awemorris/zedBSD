@@ -2,7 +2,7 @@
 
 # ws009-p028: clean な tree からの build と amd64 QEMU の boot の再現、互換の主張の照合（案 D）
 
-Status: in-progress（2026-10-30 P7。終わりの条件を満たした: clean tree の 4 variant の build と 5 つの boot が画面の login: まで、DOC-T60 済み。cleared は Q1 が決める）
+Status: cleared（2026-10-30 Q1、main に 5e17e926e を merge。P7: 終わりの条件を満たした: clean tree の 4 variant の build と 5 つの boot が画面の login: まで、DOC-T60 済み）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」。2026-10-30 Q1: 案 D は P1 が実行、QEMU は P1 専用の名前・port・directory で流してよい。
 実行の担当: Opus（P1）
@@ -120,7 +120,7 @@ PNG（Q1 がユーザーに見せる）: `build/review/p028-boot-native-uefi-nvm
 
 未実施: 否定の側（`uefi` を SeaBIOS で、`bios` を OVMF で起動しないこと、`native` を SeaBIOS で起動しないこと）、`make run` そのもの（boot-test.sh の uefi-nvme・bios-ide は同じ firmware・bus の組で、command line は同じでない）、i386 PC/AT・PC-98（範囲の外、過去の WS010 の証拠のまま）、toolchain の 2 手。
 
-観察（直していない、Q1 へ）: BIOS の 2 つの起動で kernel が「boot: ignored 1 unknown parameter; first=video」と出す（loader の cfg の `video=640x480` を kernel が知らない）。起動には影響が無い。
+観察: BIOS の 2 つの起動で kernel が「boot: ignored 1 unknown parameter; first=video」と出す。出所は試験の script ではなく `platform/amd64/zedbsd.cfg`・`zedbsd-native-uefi.cfg` の `video=640x480` の行。共通の parser は `kernel=` の他の行を全部 kernel の token にし、amd64 UEFI の loader は record の `video=` を読んで GOP の mode を選ぶだけで消さない（`bootloader/uefi/video.c`）、BIOS の loader は読まない。kernel の parameter の表（`src/kern/boot.c` の `parameter_names`）に `video` が無いので、どの経路でも unknown として数える（UEFI の画面では上に流れて見えなかった）。起動には影響が無い。文書の直し: `docs/reference/kernel-boot-parameters.md` 9 節（loader の parser の段）にこの振る舞いを書いた。code を変えて消す（kernel が `video` を知る、か loader が消す）かは WS009 の範囲の外（Q1 へ）。
 
 ### 文書の直し（docs/howto/build-from-source.md）
 
