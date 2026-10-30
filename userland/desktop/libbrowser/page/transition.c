@@ -14,6 +14,7 @@
 #include "page/page.h"
 
 #include <errno.h>
+#include <stdlib.h>
 #include <string.h>
 
 static void transition_end(struct page *page);
@@ -155,4 +156,75 @@ page_view_transition_duration(
 	if (!page->transition_on || transition_layout(page) != 0 || page->layout.root == NULL)
 		return 0.0;
 	return transition_longest(page->layout.root, 0) * 1000.0;
+}
+
+/*
+ * Computes the style of a view transition pseudo-element of the root element, each inheriting from the one
+ * above it (the group's classes are the entry's of the name when there is a transition).
+ */
+int
+page_vt_pseudo_style(
+	void *context,
+	struct dom_element *element,
+	int pseudo,
+	const struct vm_string *name,
+	struct css_style *style)
+{
+	struct page *page;
+	struct css_style *chain;
+	const struct layout_transition_name *entry;
+	const struct vm_string *classes;
+	size_t first;
+	size_t last;
+	size_t index;
+	int siblings;
+	int level;
+	int count;
+	int kind;
+	int error;
+
+	page = context;
+	if (element != (struct dom_element *)page->document->node.first_child && element->node.parent != &page->document->node)
+		return ENOENT;
+	chain = malloc(5U * sizeof(*chain));
+	if (chain == NULL)
+		return ENOMEM;
+	error = page_computed_style(page, element, &chain[0]);
+	classes = NULL;
+	if (error == 0 && page->transition_on) {
+		entry = layout_transition_find(&page->transition, name);
+		if (entry != NULL)
+			classes = entry->classes;
+	}
+	/* The root, the group and the pair come before an old or new image; each is the parent of the next. */
+	count = pseudo <= CSS_PSEUDO_ELEMENT_VT_PAIR ? pseudo - CSS_PSEUDO_ELEMENT_VT_ROOT + 1 : 4;
+	siblings = CSS_VT_FIRST | CSS_VT_LAST;
+	if (page->transition_on) {
+		first = page->transition.count;
+		last = 0;
+		for (index = 0; index < page->transition.count; index++) {
+			if (!page->transition.names[index].has_old && !page->transition.names[index].has_new)
+				continue;
+			if (first == page->transition.count)
+				first = index;
+			last = index;
+		}
+		entry = layout_transition_find(&page->transition, name);
+		if (entry != NULL && pseudo == CSS_PSEUDO_ELEMENT_VT_GROUP)
+			siblings = (entry == &page->transition.names[first] ? CSS_VT_FIRST : 0) | (entry == &page->transition.names[last] ? CSS_VT_LAST : 0);
+		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_OLD)
+			siblings = CSS_VT_FIRST;
+		if (entry != NULL && entry->has_old && entry->has_new && pseudo == CSS_PSEUDO_ELEMENT_VT_NEW)
+			siblings = CSS_VT_LAST;
+	}
+	for (level = 0; error == 0 && level < count; level++) {
+		kind = level == count - 1 ? pseudo : CSS_PSEUDO_ELEMENT_VT_ROOT + level;
+		error = css_engine_compute_vt_pseudo(page->css, element, kind, kind == CSS_PSEUDO_ELEMENT_VT_ROOT ? NULL : name,
+		    kind == CSS_PSEUDO_ELEMENT_VT_ROOT ? NULL : classes, kind == pseudo ? siblings : CSS_VT_FIRST | CSS_VT_LAST,
+		    &chain[level], &chain[level + 1]);
+	}
+	if (error == 0)
+		*style = chain[count];
+	free(chain);
+	return error;
 }

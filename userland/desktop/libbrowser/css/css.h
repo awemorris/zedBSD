@@ -70,6 +70,9 @@
 #define CSS_PSEUDO_ELEMENT_VT_OLD 7
 #define CSS_PSEUDO_ELEMENT_VT_NEW 8
 /* The translation a view transition group's style starts with until its rectangle is known (an author's transform replaces it). */
+/* The places a view transition pseudo-element can have among its siblings (for :first-child, :last-child and :only-child). */
+#define CSS_VT_FIRST 1
+#define CSS_VT_LAST 2
 #define CSS_VT_TRANSLATE_PENDING (-12345.5f)
 
 /*
@@ -1078,7 +1081,7 @@ void css_engine_container_use(const struct css_engine *engine, size_t index, con
 void css_engine_forget_styles(struct css_engine *engine);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
-int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, const struct css_style *parent, struct css_style *style);
+int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, int siblings, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);
 void css_engine_query_scope(struct css_engine *engine, struct dom_element *element);

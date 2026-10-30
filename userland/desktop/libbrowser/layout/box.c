@@ -766,12 +766,13 @@ box_transition_pseudo(
 	const struct css_style *parent_style,
 	int pseudo,
 	const struct layout_transition_name *name,
+	int siblings,
 	struct css_style *style,
 	int *error)
 {
 	struct layout_box *box;
 
-	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, parent_style, style);
+	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, siblings, parent_style, style);
 	if (*error != 0)
 		return NULL;
 	if (style->display == CSS_DISPLAY_NONE)
@@ -818,8 +819,20 @@ box_build_transition(
 	float picture_width;
 	float picture_height;
 	float group_width;
+	size_t first_group;
+	size_t last_group;
+	int siblings;
 
 	transition = tree->transition;
+	first_group = transition->count;
+	last_group = 0;
+	for (index = 0; index < transition->count; index++) {
+		if (!transition->names[index].has_old && !transition->names[index].has_new)
+			continue;
+		if (first_group == transition->count)
+			first_group = index;
+		last_group = index;
+	}
 	root_style = malloc(4U * sizeof(*root_style));
 	if (root_style == NULL)
 		return ENOMEM;
@@ -827,14 +840,21 @@ box_build_transition(
 	pair_style = root_style + 2;
 	image_style = root_style + 3;
 	error = 0;
-	top = box_transition_pseudo(tree, css, element, root, &root->style, CSS_PSEUDO_ELEMENT_VT_ROOT, NULL, root_style, &error);
+	top = box_transition_pseudo(tree, css, element, root, &root->style, CSS_PSEUDO_ELEMENT_VT_ROOT, NULL, CSS_VT_FIRST | CSS_VT_LAST, root_style, &error);
 	for (index = 0; top != NULL && error == 0 && index < transition->count; index++) {
 		name = &transition->names[index];
 		if (!name->has_old && !name->has_new)
 			continue;
 
+		/* Its place among the groups. */
+		siblings = 0;
+		if (index == first_group)
+			siblings |= CSS_VT_FIRST;
+		if (index == last_group)
+			siblings |= CSS_VT_LAST;
+
 		/* The group, at the size and place its animation has reached. */
-		group = box_transition_pseudo(tree, css, element, top, root_style, CSS_PSEUDO_ELEMENT_VT_GROUP, name, group_style, &error);
+		group = box_transition_pseudo(tree, css, element, top, root_style, CSS_PSEUDO_ELEMENT_VT_GROUP, name, siblings, group_style, &error);
 		if (group == NULL)
 			continue;
 		memset(&rect, 0, sizeof(rect));
@@ -851,7 +871,7 @@ box_build_transition(
 		group_width = group->style.width.unit == CSS_UNIT_PX ? group->style.width.value : layout_to_px(rect.width);
 
 		/* The pair holds the two images. */
-		pair = box_transition_pseudo(tree, css, element, group, &group->style, CSS_PSEUDO_ELEMENT_VT_PAIR, name, pair_style, &error);
+		pair = box_transition_pseudo(tree, css, element, group, &group->style, CSS_PSEUDO_ELEMENT_VT_PAIR, name, CSS_VT_FIRST | CSS_VT_LAST, pair_style, &error);
 		if (pair == NULL)
 			continue;
 		for (which = 0; which < 2 && error == 0; which++) {
@@ -860,7 +880,9 @@ box_build_transition(
 			if (which == 1 && !name->has_new)
 				continue;
 			image = box_transition_pseudo(tree, css, element, pair, &pair->style,
-			    which == 0 ? CSS_PSEUDO_ELEMENT_VT_OLD : CSS_PSEUDO_ELEMENT_VT_NEW, name, image_style, &error);
+			    which == 0 ? CSS_PSEUDO_ELEMENT_VT_OLD : CSS_PSEUDO_ELEMENT_VT_NEW, name,
+			    (name->has_old && name->has_new) ? (which == 0 ? CSS_VT_FIRST : CSS_VT_LAST) : (CSS_VT_FIRST | CSS_VT_LAST),
+			    image_style, &error);
 			if (image == NULL)
 				continue;
 			if (which == 0)

@@ -330,6 +330,7 @@ struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
 int page_view_transition(void *context, int step);
+int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);
 double page_view_transition_duration(void *context);
 void page_document_size(void *context, double *width, double *height);
 void page_scroll(void *context, double *x, double *y);

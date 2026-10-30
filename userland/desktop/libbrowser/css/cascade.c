@@ -128,6 +128,7 @@ struct css_engine {
 	const struct vm_string *vt_classes[4];
 	int vt_class_count;
 	int vt_names;
+	int vt_siblings;
 	struct cascade_classes *class_table;
 	size_t class_capacity;
 	size_t class_count;
@@ -758,6 +759,7 @@ css_engine_compute_vt_pseudo(
 	int pseudo,
 	const struct vm_string *name,
 	const struct vm_string *classes,
+	int siblings,
 	const struct css_style *parent,
 	struct css_style *style)
 {
@@ -769,6 +771,7 @@ css_engine_compute_vt_pseudo(
 
 	/* The classes are the words of a list; the first four count. */
 	engine->vt_name = name;
+	engine->vt_siblings = siblings;
 	engine->vt_class_count = 0;
 	if (classes != NULL) {
 		length = classes->length;
@@ -2821,12 +2824,34 @@ cascade_compound_matches(
 	struct dom_element *element,
 	const struct css_compound *compound)
 {
+	const struct css_simple *simple;
 	size_t index;
 	int matches;
+	int after;
 
 	/* Every simple selector must match. */
+	after = 0;
 	for (index = 0; index < compound->count; index++) {
-		matches = cascade_simple_matches(engine, element, &compound->simples[index]);
+		simple = &compound->simples[index];
+		if (simple->kind == CSS_SIMPLE_PSEUDO_ELEMENT)
+			after = 1;
+
+		/* After a view transition pseudo-element, the structural pseudo-classes are about its place among its siblings. */
+		if (after && engine->vt_names && simple->kind == CSS_SIMPLE_PSEUDO_CLASS &&
+		    (simple->pseudo == CSS_PSEUDO_FIRST_CHILD || simple->pseudo == CSS_PSEUDO_LAST_CHILD || simple->pseudo == CSS_PSEUDO_ONLY_CHILD)) {
+			if (engine->pseudo_wanted == CSS_PSEUDO_ELEMENT_VT_ROOT)
+				return 0;
+			if (simple->pseudo == CSS_PSEUDO_FIRST_CHILD)
+				matches = (engine->vt_siblings & CSS_VT_FIRST) != 0;
+			else if (simple->pseudo == CSS_PSEUDO_LAST_CHILD)
+				matches = (engine->vt_siblings & CSS_VT_LAST) != 0;
+			else
+				matches = engine->vt_siblings == (CSS_VT_FIRST | CSS_VT_LAST);
+			if (!matches)
+				return 0;
+			continue;
+		}
+		matches = cascade_simple_matches(engine, element, simple);
 		if (!matches)
 			return 0;
 	}
