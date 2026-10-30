@@ -106,6 +106,11 @@ struct css_engine {
 	struct vm_string *atom_style;
 	struct vm_string *atom_href;
 	float root_font_size;
+	/* The zoom of the element being styled: the product through its ancestors, and its own factor. */
+	float zoom_eff;
+	float zoom_rel;
+	/* The root element's zoom, which rem units are unscaled by. */
+	float root_zoom;
 	float viewport_width;
 	float viewport_height;
 	struct wb_vector class_keys;
@@ -351,6 +356,9 @@ css_engine_create(
 		return ENOMEM;
 	created->heap = heap;
 	created->root_font_size = CASCADE_DEFAULT_FONT_SIZE;
+	created->zoom_eff = 1.0f;
+	created->zoom_rel = 1.0f;
+	created->root_zoom = 1.0f;
 	created->viewport_width = CASCADE_DEFAULT_VIEWPORT_WIDTH;
 	created->viewport_height = CASCADE_DEFAULT_VIEWPORT_HEIGHT;
 	wb_vector_init(&created->sheets, sizeof(struct cascade_sheet));
@@ -863,6 +871,7 @@ cascade_paint_color(
 	struct css_style visited_parent;
 	const struct css_style *alternate_parent;
 	float root_font_size;
+	float root_zoom;
 	size_t container_uses;
 	int container_missed;
 	int error;
@@ -882,12 +891,14 @@ cascade_paint_color(
 
 	/* An alternate cascade is discarded except for color and cannot affect later layout. */
 	root_font_size = engine->root_font_size;
+	root_zoom = engine->root_zoom;
 	container_uses = engine->container_uses.count;
 	container_missed = engine->container_missed;
 	engine->visited_pass = 1;
 	error = cascade_compute(engine, element, alternate_parent, &visited, pseudo);
 	engine->visited_pass = 0;
 	engine->root_font_size = root_font_size;
+	engine->root_zoom = root_zoom;
 	engine->container_uses.count = container_uses;
 	engine->container_missed = container_missed;
 	if (error != 0)
@@ -979,6 +990,31 @@ cascade_compute(
 	matches = list.items;
 	if (list.count > 1)
 		qsort(matches, list.count, sizeof(*matches), cascade_compare);
+
+	/* The zoom: the winning declaration's factor, and the product with the ancestors'. */
+	engine->zoom_rel = 1.0f;
+	for (index = 0; index < list.count; index++) {
+		if (matches[index].declaration->property == CSS_PROP_ZOOM &&
+		    matches[index].declaration->value.kind != CSS_VALUE_INHERIT && matches[index].declaration->value.number > 0.0f)
+			engine->zoom_rel = matches[index].declaration->value.number;
+	}
+	engine->zoom_eff = (parent != NULL ? parent->zoom_eff : 1.0f) * engine->zoom_rel;
+	style->zoom_eff = engine->zoom_eff;
+	if (engine->zoom_rel != 1.0f && parent == NULL)
+		style->font_size *= engine->zoom_rel;
+	if (engine->zoom_rel != 1.0f && parent != NULL) {
+		/* What the element inherits is in the parent's zoom: it is scaled to its own. */
+		style->font_size *= engine->zoom_rel;
+		if (style->line_height.unit == CSS_UNIT_PX)
+			style->line_height.value *= engine->zoom_rel;
+		if (style->text_indent.unit == CSS_UNIT_PX)
+			style->text_indent.value *= engine->zoom_rel;
+		style->border_spacing[0] *= engine->zoom_rel;
+		style->border_spacing[1] *= engine->zoom_rel;
+		style->text_shadow.x *= engine->zoom_rel;
+		style->text_shadow.y *= engine->zoom_rel;
+		style->text_shadow.blur *= engine->zoom_rel;
+	}
 
 	/* The element's custom properties, then the declarations that wait for them. */
 	error = cascade_customs(engine, style, matches, list.count);
@@ -1076,8 +1112,10 @@ cascade_compute(
 	is_root = 0;
 	if (pseudo == CSS_PSEUDO_ELEMENT_NONE && element->node.parent != NULL && element->node.parent->type == DOM_DOCUMENT)
 		is_root = 1;
-	if (is_root)
+	if (is_root) {
 		engine->root_font_size = style->font_size;
+		engine->root_zoom = style->zoom_eff;
+	}
 
 	/* Succeeded: the style is computed. */
 	return 0;
@@ -1185,6 +1223,7 @@ css_initial_style(
 	style->position_area = -1;
 	style->position_visibility = 2;
 	style->zoom = 1.0f;
+	style->zoom_eff = 1.0f;
 	style->transform_origin[0].unit = CSS_UNIT_PERCENT;
 	style->transform_origin[0].value = 50.0f;
 	style->transform_origin[0].offset = 0;
@@ -2531,10 +2570,10 @@ cascade_calc(
 	/* Computes each argument before choosing the outer operation. */
 	any_percent = 0;
 	for (index = 0; index < calc->count; index++) {
-		values[index] = calc->sums[index].px +
+		values[index] = calc->sums[index].px * engine->zoom_eff +
 				calc->sums[index].em * font_size +
 				calc->sums[index].ex * font_size * 0.5f +
-				calc->sums[index].rem * engine->root_font_size +
+				calc->sums[index].rem * engine->root_font_size / engine->root_zoom * engine->zoom_eff +
 				calc->sums[index].vw * engine->viewport_width / 100.0f +
 				calc->sums[index].vh * engine->viewport_height / 100.0f +
 				calc->sums[index].vmin * vmin / 100.0f +
@@ -5790,13 +5829,13 @@ cascade_length(
 	/* Each unit's size in pixels. */
 	switch (value->unit) {
 	case CSS_DUNIT_PX:
-		length.value = value->number;
+		length.value = value->number * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_EM:
 		length.value = value->number * font_size;
 		break;
 	case CSS_DUNIT_REM:
-		length.value = value->number * engine->root_font_size;
+		length.value = value->number * engine->root_font_size / engine->root_zoom * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_EX:
 		length.value = value->number * font_size * 0.5f;
@@ -5806,22 +5845,22 @@ cascade_length(
 		length.unit = CSS_UNIT_PERCENT;
 		break;
 	case CSS_DUNIT_PT:
-		length.value = value->number * 96.0f / 72.0f;
+		length.value = value->number * 96.0f / 72.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_PC:
-		length.value = value->number * 16.0f;
+		length.value = value->number * 16.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_IN:
-		length.value = value->number * 96.0f;
+		length.value = value->number * 96.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_CM:
-		length.value = value->number * 96.0f / 2.54f;
+		length.value = value->number * 96.0f / 2.54f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_MM:
-		length.value = value->number * 96.0f / 25.4f;
+		length.value = value->number * 96.0f / 25.4f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VW:
-		length.value = value->number * engine->viewport_width / 100.0f;
+		length.value = value->number * engine->viewport_width / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_CQW:
 		cascade_container(engine, &container_width, &container_height);
@@ -5832,7 +5871,7 @@ cascade_length(
 		length.value = value->number * container_height / 100.0f;
 		break;
 	case CSS_DUNIT_VH:
-		length.value = value->number * engine->viewport_height / 100.0f;
+		length.value = value->number * engine->viewport_height / 100.0f * engine->zoom_eff;
 		break;
 	case CSS_DUNIT_VMIN:
 		length.value = value->number * engine->viewport_width / 100.0f;
@@ -5863,22 +5902,22 @@ cascade_font_size(
 
 	/* em and percentages measure the parent's size. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_PERCENT)
-		return parent_size * value->number / 100.0f;
+		return parent_size * value->number / 100.0f * engine->zoom_rel;
 
 	/* So do a calculation's. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_CALC && value->calc != NULL) {
-		length = cascade_calc(engine, value->calc, parent_size);
+		length = cascade_calc(engine, value->calc, parent_size * engine->zoom_rel);
 		if (length.unit == CSS_UNIT_PERCENT)
-			return parent_size * length.value / 100.0f + length.offset;
+			return parent_size * engine->zoom_rel * length.value / 100.0f + length.offset;
 		return length.value;
 	}
 
 	/* A keyword is its size at the default size. */
 	if (value->kind == CSS_VALUE_LENGTH && value->unit == CSS_DUNIT_FONT_KEYWORD)
-		return value->number;
+		return value->number * engine->zoom_eff;
 
-	/* Resolves every other length and accepts only a pixel result. */
-	length = cascade_length(engine, value, parent_size);
+	/* Resolves every other length and accepts only a pixel result (an em is the parent's size in the element's zoom). */
+	length = cascade_length(engine, value, parent_size * engine->zoom_rel);
 	if (length.unit != CSS_UNIT_PX)
 		return parent_size;
 

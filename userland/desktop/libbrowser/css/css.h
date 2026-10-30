@@ -799,8 +799,9 @@ struct css_style {
 	struct vm_string *animation_timing;
 	/* mix-blend-mode: 0 normal, 1 plus-lighter, 2 any other blend. */
 	int mix_blend_mode;
-	/* zoom: the factor (1 for normal; not applied to the layout yet). */
+	/* zoom: the factor the element's own declaration gives (1 for normal), and the product of it and its ancestors' that scales its lengths. */
 	float zoom;
+	float zoom_eff;
 	const struct css_anchor_names *anchor_scope;
 	int anchor_scope_all;
 	/* position-area's keywords (css_position_area_parse packs them; -1 for none). */

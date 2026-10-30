@@ -198,6 +198,9 @@ static int computed_write(struct bind_window *window, struct dom_element *elemen
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
+/* The zoom the style being written was laid out in (lengths are reported without it). */
+static float computed_zoom = 1.0f;
+
 static int computed_logical_property(const struct css_style *style, int property);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
@@ -1074,6 +1077,9 @@ computed_write(
 		free(style);
 		return error;
 	}
+
+	/* Lengths are reported unzoomed: the zoom the element's lengths were scaled by is taken off in the numbers written. */
+	computed_zoom = style->zoom_eff > 0.0f ? style->zoom_eff : 1.0f;
 
 	/* A flow-relative property is the physical one it maps to here. */
 	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
@@ -2653,7 +2659,7 @@ computed_pixels(
 	int error;
 
 	/* The number and the unit. */
-	error = computed_number(value, out);
+	error = computed_number(value / (double)computed_zoom, out);
 	if (error != 0)
 		return error;
 	error = computed_ascii("px", out);
