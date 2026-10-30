@@ -111,7 +111,7 @@ git diff --check
 ### Bug の候補・観察（直していない）
 
 - source の comment に開発の管理情報が残る: net/main.c（`(2026-10-03 user decision)`、`(ws005-p024)`、`(ws089-p022)`）、networkd/main.c（`ws005-p019`・`ws005-p024`・`ws052-p010`・`ws089-p021`・`ws130-p007`・`ws254`・`BUG-187`・`q631` ほか）。AGENTS.md §10。drivers の外なので WS296 の範囲でもない。
-- `wifi-store.h` の公開の宣言 `wifi_store_set_key_for_effective_user` は、`set-key` の口が消えた後も残る（使い手は grep で net の外に無い。未確認: 他の呼び手）。
+- `wifi-store.h` の `wifi_store_set_key_for_effective_user`（追加か置き換え）は、`net` の口からは消えたが desktop の `userland/desktop/libkeiland-backend-zedbsd/network-link-zedbsd.c` が使う（desktop の設定の画面の保存）。この経路は `net wifi` の文書の範囲の外として書かなかった。
 
 ### 未実施
 
