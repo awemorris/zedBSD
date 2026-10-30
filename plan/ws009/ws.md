@@ -49,7 +49,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p022`](phase022/phase.md) | cleared（2026-10-30 Q1、main 4374dde38。照合 --final PASS（placeholder 0）、link PASS） | gpu-requests.md: 索引の 2 列と共通の errno の表。依存: p010〜p021 |
 | [`ws009-p023`](phase023/phase.md) | cleared（2026-10-30 Q1、main 4a3b4e0e4。全 14 file の照合 --final --examples PASS（12 compile）、link PASS 826。Bug の候補 23 は phase023 の結果） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
 | [`ws009-p024`](phase024/phase.md) | cleared（2026-10-30 Q1、main d2c8a5969。14 file を code と照らし 12 file を直した、照合 --final --examples PASS、link PASS 676。新しい Bug の候補 15 は BUG-365・BUG-366） | 正確さの敵対的レビュー（Opus を推す）。依存: p023 |
-| [`ws009-p025`](phase025/phase.md) | planned（2026-10-30 P1 の設計、Opus = P1 が実行） | 案 A: DOC-55 managed-wlan.md を今の `net wifi`（add・modify・delete・session）と `net lan`・`net startup` に合わせる。依存: なし |
+| [`ws009-p025`](phase025/phase.md) | 書いた・link PASS（2026-10-30 P1。usage の 9 形が文書に一致、`set-key` 0。cleared は Q1） | 案 A: DOC-55 managed-wlan.md を今の `net wifi`（add・modify・delete・session）と `net lan`・`net startup` に合わせる。依存: なし |
 | [`ws009-p026`](phase026/phase.md) | cleared（2026-10-30 Q1、main 2dd8d03b0。Noct 2.0.3 の値、menuconfig の label、索引から全て辿れる・Status 行の欠け 0、link PASS 1036） | 案 B: build-from-source.md の Noct 2.0.3 と variant の label、evdev.md の Noct の版、索引（media-playback・release の beta2）、状態の行 11 file。依存: なし |
 | [`ws009-p027`](phase027/phase.md) | planned（2026-10-30 P1 の設計、Sonnet 5.5 high、Q1 が起動） | 案 C: DOC-T70〜T72 の照合を source から値を読む `check-docs-current.py` に作り直す、plan/tools/docs-check/ へ移す案。依存: p025・p026 |
 | [`ws009-p028`](phase028/phase.md) | planned（2026-10-30 P1 の設計、Opus = P1 が実行） | 案 D: clean な tree からの build と amd64 QEMU の boot の再現（DOC-T20・T30・T72）、互換の主張と WS001 の照合（DOC-T60）。依存: p026（DOC-T60 は依存なし） |

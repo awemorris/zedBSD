@@ -115,18 +115,60 @@ existing argv `net up`, `net down`, `net dhcp`, `net static`, `net
 defaultroute`, and `net dns` recovery primitives remain available but do not
 provide confirmed-commit semantics.
 
+## Wired management commands
+
+Besides the console, `/sbin/net` takes these argument forms for the wired
+interfaces and for the boot:
+
+```text
+net lan enable
+net lan disable
+net lan set IF dhcp [--dns A[,B]]
+net lan set IF static ADDRESS NETMASK [ROUTER] [--dns A[,B]]
+net startup
+```
+
+- `net lan enable` reads `/etc/net.conf`, configures an enabled loopback
+  interface itself, and hands the wired interfaces' entries to `networkd`,
+  which from then on brings each one up and configures it as its cable comes
+  and goes. The command returns as soon as `networkd` has recorded the policy;
+  the work itself runs in the background. `networkd` never opens
+  `/etc/net.conf` for this; `net` reads it and sends it.
+- `net lan disable` tells `networkd` to stop managing the wired interfaces
+  and leaves them as they stand.
+- `net lan set` configures one existing wired interface (not the loopback and
+  not a radio) with DHCP or a static IPv4 address, netmask and optional
+  router, and one or two name servers with `--dns`. `networkd` checks the
+  values, writes that interface's entry in `/etc/net.conf` atomically under
+  the writer's lock (changing nothing else in the file but the default route
+  and the name servers the command names), and applies it at once. An unknown
+  interface fails with `ENODEV`, and an armed confirmed transaction makes it
+  fail with `EBUSY`. If the entry is saved but cannot be applied, the command
+  reports `saved, but could not be applied now`. Every outcome is logged with
+  the caller's effective UID.
+- `net startup` is what the boot runs (the
+  [`networking`](../../userland/base/init/services/networking) oneshot
+  service, as root): `net lan enable`, then the Wi-Fi `enable` from a detached
+  process unless Wi-Fi was turned off (see
+  [Managed WLAN administration](managed-wlan.md#wi-fi-across-boots)). When the
+  `networking` service's `wait` setting in `/etc/rc.conf` is `true`, `yes` or
+  `1`, it then waits up to 30 seconds for some interface to obtain an address
+  and fails with `no interface was configured within 30 seconds` if none does.
+
+Root may run all of these. A member of the `network` group may run
+`net lan set`, but `net lan enable`, `net lan disable` and `net startup` are
+root's.
+
 ## Implementation and evidence
 
 | Contract | Production source |
 | --- | --- |
 | Console grammar and transaction ordering | [`net/main.c`](../../userland/base/net/main.c) |
+| `net lan` and `net startup` | `lan_command`, `lan_set_command`, `startup_command` in [`net/main.c`](../../userland/base/net/main.c); `handle_lan_configure` in [`networkd/main.c`](../../userland/base/networkd/main.c); [`managed-lan.c`](../../userland/base/networkd/managed-lan.c), [`lan-configure.c`](../../userland/base/networkd/lan-configure.c) |
 | Complete wired reconcile and rollback generation | [`reconcile.c`](../../userland/base/net/reconcile.c) |
 | Atomic persistence and writer lock | [`netconf.c`](../../userland/base/net/netconf.c) |
 | Volatile timer, secure program ownership, and bounded rollback | [`confirmed.c`](../../userland/base/networkd/confirmed.c), [`networkd/main.c`](../../userland/base/networkd/main.c) |
 | Private ZNV2 fields and bounds | [`protocol.h`](../../userland/base/net/protocol.h) |
 
 The private rollback language and `ZNV2` messages are implementation contracts,
-not public administration interfaces. QEMU timeout recovery and confirmed
-persistence remain WS011 p007 automatic acceptance; the physical
-remote-administration scenario is the separate p008 follow-up after its
-transport and safe recovery topology are selected.
+not public administration interfaces.
