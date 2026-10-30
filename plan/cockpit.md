@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 04:33（Q1）
+最終更新: 2026-10-31 04:34（Q1）
 
 ## 担当（P1〜P8）
 
@@ -15,7 +15,7 @@
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
 | P6 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1762: p005 の前半（熱の core: sensor・fan・電力の meter・方針と受け手・3 つの thread、host 試験と QEMU の起動） | UAPI（p004）はユーザーの review の後。WS332 は完了 |
-| P7 | — | — | 返却（06:5x）。WS333 p006・p007 cleared | 次の割当を Q1 が決める |
+| P7 | [WS333](ws333/ws.md)・Bug | 電力・熱の枠組み、noct の依存の Bug | q1768: p012（全 CPU の tick の時刻を揃え、全 core が同時に深く休めるように、amd64 の HAL の実装）→ BUG-377（emacs が libEGL 無しで起動しない、config の依存） | 5330 の電力の計測は電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
@@ -90,7 +90,7 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 
 ### 00. host の disk の一括の片付け（2026-10-31 02:3x、急ぎ）
 
-- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消したが、新しい担当の sysroot の写しなどで 05:3x に空きは約 6 GB。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
+- 背景: host の / が満杯になり（938G 中 891G、空き 0）、P1・P4・P8・P3・P6 の build が「No space left on device」で落ちた。担当が頼んだ一時物を Q1 が消したが、新しい担当の sysroot の写し（1 つ約 1.7 GB）などで 04:3x に空きは約 3.8 GB（危ない）。担当には出力を全部 /tmp に置かせ、消せる物を挙げさせている。大きいのは古い担当の worktree（`/home/awe/zedBSD-worktrees/` に約 250 個、合わせて約 559 GB）の `build/`（試験の image・kernel・sysroot の写し）。
 - Q1 がしようとした事: 今使っていない worktree（返却済み・merge 済みの担当の物）の `build/` の中身を消す（`build/review` の PNG は残す、今動いている担当の worktree と WS313 の ODROID の image は残す、git の中身と branch は消さない）。**権限の判定（取り返せない削除）で止められた**ので、回避せずユーザーに聞く。
 - 決めてほしい事: この片付けをしてよいか。よければ settings に許可を足すか、ユーザーが `! ` で直に走らせる。それまで担当は大きな image を /tmp（tmpfs、空き約 69G）に作る。
 
