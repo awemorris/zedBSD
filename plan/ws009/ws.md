@@ -9,7 +9,7 @@ Related Milestones: MG006, MG008, MG009
 Objectives: O2, O4, O5
 Parent: [Master](../master.md)
 Queue: なし
-Resume point: p001〜p008 cleared。DOC-54 は p009 を分けた p010〜p024（2026-10-30 P1 の設計、q1701。review と反映は [gpu-doc-review.md](gpu-doc-review.md)）。骨格 docs/reference/gpu.md・gpu-*.md の基点は 4dfcce008、照合の script は plan/ws009/tests/check-gpu-uapi-doc.py、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。p010〜p021 は互いに独立（Sonnet 5.5 high、並べてよい。ws.md の表の行の merge の競合は Q1 が merge で解く）、p022 は p010〜p021 の後、p023 は p022 の後、p024（Opus を推す）は p023 の後。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` が無い（固定版の欠け、触らない、2026-10-29 Q1）。docs/reference・docs/architecture の既存の link 切れ 4 件は 2026-10-30 P1 が直した
+Resume point: p001〜p008・p010〜p024 cleared（p009 canceled）。DOC-54 は完了（p024 main d2c8a5969）。2026-10-30 P1（q1705-i01）が WS の完了の条件を確かめ、満ちない条件が残った（下の「WS の受け入れの確認（2026-10-30）」）。完了の形への書き直しと Phase の directory の片付けは、その条件を満たしてから。照合の script は plan/ws009/tests/check-gpu-uapi-doc.py（基点 4dfcce008）、共通の規則は [gpu-doc-rules.md](gpu-doc-rules.md)。docs の link の試験の既知の失敗: `docs/agent/awesome-plan/README.md` の `img/1.png` ほか 6 件（固定版の欠け、触らない、2026-10-29 Q1）
 Target: **ベータ2**（2026-10-13 ユーザー「WS196、WS172、WS009はベータ2に入れます。」。旧: ベータ3（2026-10-08 ユーザー））
 <!-- awesome-plan-current:end -->
 
@@ -49,6 +49,39 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p022`](phase022/phase.md) | cleared（2026-10-30 Q1、main 4374dde38。照合 --final PASS（placeholder 0）、link PASS） | gpu-requests.md: 索引の 2 列と共通の errno の表。依存: p010〜p021 |
 | [`ws009-p023`](phase023/phase.md) | cleared（2026-10-30 Q1、main 4a3b4e0e4。全 14 file の照合 --final --examples PASS（12 compile）、link PASS 826。Bug の候補 23 は phase023 の結果） | 統合: 全 file の --final・二重の主張の照合・既存の文書の直し。依存: p022 |
 | [`ws009-p024`](phase024/phase.md) | cleared（2026-10-30 Q1、main d2c8a5969。14 file を code と照らし 12 file を直した、照合 --final --examples PASS、link PASS 676。新しい Bug の候補 15 は BUG-365・BUG-366） | 正確さの敵対的レビュー（Opus を推す）。依存: p023 |
+
+## WS の受け入れの確認（2026-10-30 P1、q1705-i01、基点 main aaf2bc280）
+
+WS の完了の条件（下の「WS completion conditions」）を一つずつ確かめた。**満ちない条件が残る**ので、ws.md は完了の形にしない。
+
+| 条件 | 確かめ | 結果 |
+| --- | --- | --- |
+| 全ての work item の公開 | §2 の表の DOC-00〜DOC-55 | 全部 Complete（DOC-54 は p024 で完了、この確認で表を直した）。ただし公開済みの DOC-55 と DOC-20 の一部が今の source と食い違う（下の 3・4） |
+| 相互の link（docs の索引から辿れる） | docs/README.md から相対 link を辿る（scratchpad の script） | 56 file のうち 50 に届く。届かない product の文書: `docs/reference/media-playback.md`、`docs/release/zedbsd-1.0.0-beta2.md`（`docs/agent/` の 4 file は agent 向けで対象外と見る） |
+| header・source・試験への辿り（DOC-54） | `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --examples --final` | PASS（14 files、46 index rows、46 request sections、98 constant rows、47 structures、20 capset rows、0 placeholders、12 example compiles） |
+| 辿り（DOC-T70〜T72、`check-completed-producer-docs.noct`） | `noct plan/ws009/tests/check-completed-producer-docs.noct .` | **FAIL**（最初の失敗で止まる: `userland/base/net/main.c: missing required text: net wifi set-key SSID PASSPHRASE [auto]`）。失敗を全部数えた写し（scratchpad）では、文の照合 9 件と状態の行 29 件が落ちる（下の 3〜6） |
+| link の検査 | `noct plan/ws009/tests/check-relative-links.noct <dir>` | docs/reference 614・docs/architecture 62・docs/howto 349・docs/release 9 links PASS。`docs` 全体は既知の `docs/agent/awesome-plan/README.md` の `img/1.png` で止まる。`plan` は `plan/agents/P1/queue.md -> ../../ws005/phase018/phase.md` で止まる（数えた写しで plan の切れは約 4,770 件、消した Phase の directory への link が大半。plan の記録は Q1 の record-audit の範囲で、WS009 の product の文書の条件ではないと見る） |
+| 構造（状態の行） | docs/style.md「Begin each document with a status line that says what kind of document it is」 | `Status:` の行の無い docs の file が 16（product の物: docs/README.md、architecture/README.md、reference/README.md、reference/agent-acceptance-test.md・atomic-publication.md・block-administration.md・media-playback.md・security-keys.md・tls.md・vulkan-video.md、release/zedbsd-1.0.0-beta2.md、style.md） |
+| clean な環境での build と boot の再現（DOC-T20・T30・T72） | — | **未実施**（最後の再現は p002・q190。その後 amd64 の既定の profile が `native` になり、Noct が 2.0.3 になった） |
+| 互換の主張と WS001 の一致（DOC-T60） | — | **未実施**（WS001 は incomplete・保留で、POSIX の header の Phase が残る） |
+
+満ちない点の詳細:
+
+1. `docs/reference/media-playback.md`・`docs/release/zedbsd-1.0.0-beta2.md` が索引から辿れない。
+2. 状態の行の無い product の文書（上の表）。
+3. **DOC-55 `docs/reference/managed-wlan.md` が古い**: 「Status: current」で `net wifi set-key SSID PASSPHRASE [auto]` を唯一の文法とするが、今の `userland/base/net/main.c` の usage は `net wifi add SSID [--password PASSWORD] [--auto yes|no]`・`modify`・`delete`・`enable`・`disable`・`list`・`connect`・`disconnect`・`session open|close [account]`（利用者ごとの store、login session の間だけ join）と `net lan ...`・`net startup`。`set-key` は main.c に 0 件。
+4. **DOC-20 `docs/howto/build-from-source.md` の Noct が古い**: 文書は「post-2.0.1 commit `bb239816e…`」、`userland/base/noct/version.mk` は `ZEDBSD_NOCT_VERSION := 2.0.3`・tag `f6efa83a8c…`。
+5. `check-completed-producer-docs.noct` 自体が古い（文書が正しく試験が古い物）: evdev の「remain implemented and are deprecated」（legacy の console の event は削除済みと文書が正しく書く）、Makefile の `ZEDBSD_VARIANTS_amd64_pcat := hybrid uefi bios`（今は `native hybrid uefi bios`）、variant の label `UEFI + BIOS (for PC/AT)`・`BIOS (for PC/AT)`・「correctly built `uefi` image\nis expected not to boot」の改行の位置、Noct 2.0.1 の 3 件。状態の行の規則（current/experimental/deprecated/planned）は style.md の今の規則（文書の種類を書く）と合わない。
+6. 上の 5 の通り、DOC-T70〜T72 の試験は直すか、AGENTS.md §9 の試験の整理の基準で置き換える必要がある。
+
+満たすための案（Q1 の判断。新しい Phase は Q1 が立てる）:
+
+| 案 | 内容 | 担当の目安 |
+| --- | --- | --- |
+| A | managed-wlan.md を今の `net wifi`・`net lan`・`net startup`・session の振る舞いに書き直す（source と networkd を照らす） | Opus（振る舞いの読み取りが要る） |
+| B | build-from-source.md の Noct の版と variant の記述を今の Makefile・version.mk に合わせる。索引から辿れない 2 file を索引に足す。状態の行を足す | Sonnet 5.5 high で 1 回 |
+| C | `check-completed-producer-docs.noct` を今の source と style.md の状態の行の規則に合わせて直す（失敗を全部出す形）。今後も使うなら `plan/tools/` へ移す | Sonnet 5.5 high で 1 回（A・B の後） |
+| D | clean な環境での build と amd64 QEMU の boot の再現（DOC-T20・T30・T72）、WS001 の互換の主張の照合（DOC-T60） | Q1 が QEMU を割り当てて Opus |
 
 Documentation work may be extracted alongside a producer WS when it describes
 a newly frozen public interface, but it retains a WS009 Phase ID and acceptance
@@ -101,7 +134,7 @@ than assumed here.
 | DOC-51 | Complete (`q150`) | `/dev/graphics` HAL-bridge reference | GFX takeover design | Framebuffer, mmap/ioctl, ownership, and GPU takeover are specified |
 | DOC-52 | Complete (`q150`) | `/dev/system` HAL-bridge reference | Device/UAPI audit | Operations, permissions, data structures, and architecture hooks are specified |
 | DOC-53 | Complete through `ws009-p004` | evdev and `/dev/input` UAPI reference | IN-00 through the q044 p006/p007 boundary | ABI profile, event semantics, examples, current ownership, and compatibility differences are published without claiming live USB HID |
-| DOC-54 | Planned as `ws009-p010`〜`p024`（p009 を分けた、2026-10-30） | `/dev/gpu` UAPI and capability reference (`docs/reference/gpu.md` and `gpu-*.md`) | GFX-10 | Versioned object model and supported profiles match headers/tests; `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --examples --final` passes |
+| DOC-54 | Complete through `ws009-p024`（2026-10-30、main d2c8a5969） | `/dev/gpu` UAPI and capability reference (`docs/reference/gpu.md` and `gpu-*.md`) | GFX-10 | Versioned object model and supported profiles match headers/tests; `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --examples --final` passes |
 | DOC-55 | Complete (`q150`) | `networkd`, `net`, `dhcpc`, WPA backend, and rc.conf networking reference | NET-20+ as applicable | Command/config/protocol/error examples pass tests |
 
 ## 3. Required document qualities
