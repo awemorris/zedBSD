@@ -6,15 +6,15 @@
 # checks every reader's checksum against the source, the file's checksum after a second reload, and the raw regions
 # again.  Reloads refused while readers hold the disk open are expected (EBUSY) and only counted.
 #   sh plan/ws299/tests/qemu-cache-stress.sh IMAGE
-# W is build/tmp/qemu-cache-stress (a fresh run each time).  The last line is "qemu-cache-stress: PASS|FAIL ...".
+# W is ${WS299_RUNS:-build/tmp}/qemu-cache-stress (a fresh run each time).  The last line is "qemu-cache-stress: PASS|FAIL ...".
 # Every guest command line stays short (the console line is limited), so the concurrent part is written to scripts.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
 . plan/tools/fresh-out.sh
 IMAGE=${1:?image}
-fresh_out build/tmp/qemu-cache-stress
-W=build/tmp/qemu-cache-stress
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-cache-stress
+W=${WS299_RUNS:-build/tmp}/qemu-cache-stress
 truncate -s 1G "$W/d.img"
 printf '\125\252' | dd of="$W/d.img" bs=1 seek=510 conv=notrunc 2> /dev/null
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"

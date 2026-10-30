@@ -4,7 +4,7 @@
 # and checks the file against its source; a write that never ends is cut by the guest command's timeout.
 #   sh plan/ws299/tests/qemu-cache32-write.sh IMAGE [VMUNIX] [MIB]
 # VMUNIX, when given, replaces the image's kernel in a copy of the image (the FAT boot partition), so one image
-# tests another kernel built with the same configuration.  W is build/tmp/qemu-cache32-write (fresh each run).
+# tests another kernel built with the same configuration.  W is ${WS299_RUNS:-build/tmp}/qemu-cache32-write (fresh each run).
 # The last line is "qemu-cache32-write: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -13,8 +13,8 @@ set -u
 IMAGE=${1:?image}
 KERNEL=${2:-}
 MIB=${3:-200}
-fresh_out build/tmp/qemu-cache32-write
-W=build/tmp/qemu-cache32-write
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-cache32-write
+W=${WS299_RUNS:-build/tmp}/qemu-cache32-write
 if [ -n "$KERNEL" ]; then
 	cp "$IMAGE" "$W/image.img"
 	mcopy -o -i "$W/image.img@@$((133120 * 512))" "$KERNEL" ::/vmunix || { echo "qemu-cache32-write: FAIL kernel copy"; exit 1; }

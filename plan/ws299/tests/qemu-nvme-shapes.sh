@@ -5,14 +5,14 @@
 # lie both below and above 4 GiB) writes the same 200 MiB of random data raw to each with 1 MiB and 64 KiB writes,
 # reads it back the same ways, compares checksums with the source, and prints the kernel's page-list counts.
 #   sh plan/ws299/tests/qemu-nvme-shapes.sh IMAGE         (IMAGE built with CONFIG_PCAT_SERIAL_MIRROR=y)
-# W is build/tmp/qemu-nvme-shapes (a fresh run each time).  The last line is "qemu-nvme-shapes: PASS|FAIL ...".
+# W is ${WS299_RUNS:-build/tmp}/qemu-nvme-shapes (a fresh run each time).  The last line is "qemu-nvme-shapes: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
 . plan/tools/fresh-out.sh
 IMAGE=${1:?image}
-fresh_out build/tmp/qemu-nvme-shapes
-W=build/tmp/qemu-nvme-shapes
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-nvme-shapes
+W=${WS299_RUNS:-build/tmp}/qemu-nvme-shapes
 truncate -s 1G "$W/d4k.img"
 truncate -s 1G "$W/d512.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"

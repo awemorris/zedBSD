@@ -991,7 +991,7 @@ vm_object_cache_read_missing(
 			valid = PAGE_SIZE;
 		if (count >= (ssize_t)((size_t)index * PAGE_SIZE + valid)) {
 			kern_memset(hal_pmem_to_kernel(page->pmem.paddr), 0, PAGE_SIZE);
-			kern_memcpy(hal_pmem_to_kernel(page->pmem.paddr), (uint8_t *)scratch +
+			kern_memcpy_ram(hal_pmem_to_kernel(page->pmem.paddr), (uint8_t *)scratch +
 			    (size_t)index * PAGE_SIZE, valid);
 			page->flags = 0;
 			page->error = 0;
@@ -1013,7 +1013,7 @@ vm_object_cache_read_missing(
 		copied = (size_t)count - in_page;
 		if (copied > wanted)
 			copied = wanted;
-		kern_memcpy(buffer, (uint8_t *)scratch + in_page, copied);
+		kern_memcpy_ram(buffer, (uint8_t *)scratch + in_page, copied);
 	}
 
 	io_pool_release(scratch);

@@ -37,8 +37,8 @@ REST=${REST:-30}
 RAND_SECONDS=${RAND_SECONDS:-15}
 RANDREAD=${RANDREAD:-/tmp/randread-zedbsd}
 FILE_MIB=${FILE_MIB:-1024}
-WFILE=${WFILE:-/home/kei/ws299-w.bin}
-WFILE_NEW=${WFILE_NEW:-/home/kei/ws299-n.bin}
+WFILE=${WFILE:-/root/ws299-w.bin}
+WFILE_NEW=${WFILE_NEW:-/root/ws299-n.bin}
 PATWRITE=${PATWRITE:-/tmp/patwrite-zedbsd}
 DIRECTIO=${DIRECTIO:-/tmp/directio-zedbsd}
 P7=/dev/nvme0n1p7
@@ -123,7 +123,7 @@ read)
 	snap reread
 	;;
 write)
-	df /home/kei
+	df /root
 	bytes=$((FILE_MIB * 1048576))
 	# WFILE must be whole before it is written over, or the write would allocate.
 	have=0

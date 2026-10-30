@@ -38,6 +38,22 @@
 
 #include <kern/kcrt.h>
 
+/*
+ * The kernel on amd64 copies long ranges of RAM with the HAL's string move.
+ * A host test of this file (KERN_KCRT_NATIVE) has no HAL and keeps the word
+ * loop.
+ */
+#if defined(HAL_ARCH_AMD64) && !defined(KERN_KCRT_NATIVE)
+#define KCRT_STRING_MOVE 1
+#include <hal/hal.h>
+
+/*
+ * The length from which kern_memcpy_ram() copies with the HAL's string move
+ * on amd64.  Below it the move's start-up cost outweighs its rate.
+ */
+#define KCRT_STRING_MOVE_MIN ((size_t)256)
+#endif
+
 /* The widest field width honoured; a larger width is cut to this. */
 #define KCRT_WIDTH_MAX 4096U
 
@@ -193,6 +209,40 @@ kern_memcpy(
 	}
 
 	/* Reports the destination as memcpy() does. */
+	return destination;
+}
+
+/*
+ * Copies count bytes between ranges of ordinary cached memory that do not
+ * overlap: the pages of the buffer cache and of the VM objects, and pinned
+ * user pages.
+ *
+ * On amd64 a long copy is the HAL's string move, which a processor with
+ * fast string operations runs a cache line at a time, several times the
+ * word loop's rate on a page of file data.  It is not used for every copy
+ * because on uncached device memory the move goes a byte at a time, where
+ * a device may need whole words.  Elsewhere this is kern_memcpy().
+ */
+void *
+kern_memcpy_ram(
+	void *destination,
+	const void *source,
+	size_t count)
+{
+#if defined(KCRT_STRING_MOVE)
+	/* A long copy is one string move. */
+	if (count >= KCRT_STRING_MOVE_MIN) {
+		hal_memcpy(destination, source, count);
+
+		/* Succeeded: the destination, as memcpy() reports it. */
+		return destination;
+	}
+#endif
+
+	/* A short copy, or another processor's, is the word loop. */
+	kern_memcpy(destination, source, count);
+
+	/* Succeeded: the destination, as memcpy() reports it. */
 	return destination;
 }
 

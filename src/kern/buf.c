@@ -520,6 +520,7 @@ static void release_run(struct buf **lines, unsigned count, unsigned busy);
 static void finish_run_line(struct buf *buffer, uint64_t generation, int write, int error);
 static int disk_cache_range(struct disk *disk, struct disk **leaf_out, uint64_t *start_out, uint64_t *end_out);
 static int evict_one(struct disk *disk, uint64_t start, uint64_t end, int range, unsigned flags, size_t *freed);
+static int evict_take_locked(struct buf *buffer, unsigned flags, int range);
 static int writeback_one_reclaimable(void);
 static void dirty_link(struct buf *buffer);
 static void mark_dirty(struct buf *buffer, uint64_t offset, uint64_t count, int pinned);
@@ -538,6 +539,7 @@ static int readahead_running(struct disk *leaf);
 static uint64_t readahead_now_ns(void);
 static void readahead_account(uint64_t *sum, uint64_t value);
 static uint32_t copy_cached_lines(struct disk *disk, uint64_t block, uint64_t remaining, uint8_t *out);
+static uint32_t write_cached_lines(const struct disk *disk, struct disk *leaf, uint64_t block, uint64_t remaining, const uint8_t *in);
 static struct buf *recycle_line_locked(struct disk *disk, uint64_t line_block, uint64_t line_blocks, uint64_t line_bytes, int needed);
 static uint64_t dirty_limit_for(uint64_t cap);
 static int cluster_line_locked(const struct buf *buffer, uint64_t line_blocks);
@@ -980,7 +982,7 @@ buf_read(
 		amount_blocks = buffer->b_block_count - offset_blocks;
 		if (amount_blocks > end - mapped)
 			amount_blocks = end - mapped;
-		kern_memcpy(out, (uint8_t *)buffer->b_data +
+		kern_memcpy_ram(out, (uint8_t *)buffer->b_data +
 		    offset_blocks * leaf->d_block_size,
 		    (size_t)(amount_blocks * leaf->d_block_size));
 		buf_release(buffer);
@@ -1085,9 +1087,11 @@ write_range(
 	uint64_t amount_blocks;
 	int full;
 	int delayed;
+	int batching;
 	uint32_t run_blocks;
 
 	in = data;
+	batching = 1;
 
 	/* Rejects a missing buffer, an empty range, or a read-only disk. */
 	if (data == NULL || count == 0)
@@ -1128,6 +1132,24 @@ write_range(
 			continue;
 		}
 
+		/*
+		 * A delayed write of whole lines takes several at once, under
+		 * one hold of the cache lock to look them up and one to give
+		 * them back.  Once the cache has no line to take over, the rest
+		 * of the write goes a line at a time, which allocates.
+		 */
+		if (delayed && batching) {
+			run_blocks = write_cached_lines(disk, leaf, mapped, end - mapped, in);
+			if (run_blocks == 0)
+				batching = 0;
+		}
+		if (run_blocks != 0) {
+			mapped += run_blocks;
+			in += (size_t)run_blocks * leaf->d_block_size;
+			writeback_kick(disk);
+			continue;
+		}
+
 		if (leaf->d_block_size > KERN_PAGE_SIZE)
 			line_bytes = leaf->d_block_size;
 		else
@@ -1150,7 +1172,7 @@ write_range(
 		if (error != 0)
 			return error;
 
-		kern_memcpy((uint8_t *)buffer->b_data +
+		kern_memcpy_ram((uint8_t *)buffer->b_data +
 		       offset_blocks * leaf->d_block_size, in,
 		       (size_t)(amount_blocks * leaf->d_block_size));
 
@@ -3494,7 +3516,7 @@ transfer_run_lines(
 	bytes = data;
 	for (index = 0; index < count; index++) {
 		if (write) {
-			kern_memcpy(lines[index]->b_data, bytes + index * line_bytes, (size_t)line_bytes);
+			kern_memcpy_ram(lines[index]->b_data, bytes + index * line_bytes, (size_t)line_bytes);
 			buf_mark_dirty(lines[index]);
 		}
 
@@ -3568,10 +3590,10 @@ transfer_run_lines(
 			if (prefetch) {
 				/* A prefetch leaves the data in the line for its reader. */
 			} else if (!write && pages != NULL) {
-				kern_memcpy(bytes + index * line_bytes, lines[index]->b_data,
+				kern_memcpy_ram(bytes + index * line_bytes, lines[index]->b_data,
 				    (size_t)line_bytes);
 			} else if (!write) {
-				kern_memcpy(lines[index]->b_data, bytes + index * line_bytes,
+				kern_memcpy_ram(lines[index]->b_data, bytes + index * line_bytes,
 				    (size_t)line_bytes);
 			}
 		} else if (line_error == 0) {
@@ -3637,42 +3659,42 @@ evict_one(
 	struct buf *candidate;
 	unsigned long irq;
 	struct buf *buffer;
-	unsigned long birq;
-	unsigned long dirty_irq;
+	struct buf *previous;
+	struct buf *last;
 	unsigned bucket;
+	int taken;
 
 	candidate = NULL;
 	irq = spin_lock_irqsave(&cache_lock);
 
-	/* Walks the LRU from the tail for an unreferenced, idle buffer. */
-	for (buffer = lru_tail; buffer != NULL;
-	     buffer = buffer->b_lru_prev) {
+	/*
+	 * Walks the LRU from the tail for an unreferenced, idle buffer.  An
+	 * unranged walk moves the lines it cannot take because they are dirty
+	 * or being written to the head (evict_take_locked), and ends at the
+	 * line that was the head when it began.
+	 */
+	last = lru_head;
+	for (buffer = lru_tail; buffer != NULL; buffer = previous) {
+		previous = buffer->b_lru_prev;
+
+		/* A ranged eviction looks only at the lines of its range. */
 		if (range && (buffer->b_disk != disk ||
 		    buffer->b_block >= end ||
 		    buffer->b_block + buffer->b_block_count <= start))
 			continue;
-		if (refcount_load(&buffer->b_refs) != 1)
-			continue;
-		birq = spin_lock_irqsave(&buffer->b_lock);
-		dirty_irq = spin_lock_irqsave(&dirty_index_lock);
-		if (refcount_load(&buffer->b_refs) != 1 || buffer->b_busy ||
-		    buffer->b_io_inflight ||
-		    ((buffer->b_flags & BUF_DIRTY) &&
-		     !(flags & BUF_INVALIDATE_DISCARD))) {
-			spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
-			spin_unlock_irqrestore(&buffer->b_lock, birq);
-			continue;
+
+		/* Takes the line when nobody holds, writes or needs it. */
+		taken = 0;
+		if (refcount_load(&buffer->b_refs) == 1)
+			taken = evict_take_locked(buffer, flags, range);
+		if (taken) {
+			candidate = buffer;
+			break;
 		}
 
-		dirty_unlink_locked(buffer);
-		buffer->b_flags |= BUF_INVALID;
-		spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
-		spin_unlock_irqrestore(&buffer->b_lock, birq);
-		lru_remove_locked(buffer);
-		hash_remove_locked(buffer);
-		(void)refcount_put(&buffer->b_refs);
-		candidate = buffer;
-		break;
+		/* The walk has seen every line that was on the list when it began. */
+		if (buffer == last)
+			break;
 	}
 
 	/* A ranged eviction that found nothing fails when a buffer is in use. */
@@ -3705,6 +3727,58 @@ evict_one(
 
 	/* Reports the eviction. */
 	return 0;
+}
+
+/*
+ * Takes an LRU line for eviction when it is idle: unlinks it from the dirty
+ * index, the LRU and the hash table and drops the cache's reference, and
+ * reports 1.  A line that is referenced, busy, being written or dirty (and
+ * not to be discarded) is left, and an unranged walk moves it to the head,
+ * so that the lines a writer keeps dirty at the tail are not walked over
+ * again by every eviction; they come back to the tail written.  cache_lock
+ * is held.
+ */
+static int
+evict_take_locked(
+	struct buf *buffer,
+	unsigned flags,
+	int range)
+{
+	unsigned long birq;
+	unsigned long dirty_irq;
+	int busy;
+
+	/* Looks at the line's state under its own lock and the dirty index's. */
+	birq = spin_lock_irqsave(&buffer->b_lock);
+	dirty_irq = spin_lock_irqsave(&dirty_index_lock);
+	busy = 0;
+	if (refcount_load(&buffer->b_refs) != 1 ||
+	    buffer->b_busy ||
+	    buffer->b_io_inflight ||
+	    ((buffer->b_flags & BUF_DIRTY) &&
+	     !(flags & BUF_INVALIDATE_DISCARD)))
+		busy = 1;
+	if (busy) {
+		spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
+		spin_unlock_irqrestore(&buffer->b_lock, birq);
+
+		/* A line kept dirty goes to the head, out of the next walk's way. */
+		if (!range)
+			lru_add_locked(buffer);
+		return 0;
+	}
+
+	/* Invalidates the idle line and takes it out of every index. */
+	dirty_unlink_locked(buffer);
+	buffer->b_flags |= BUF_INVALID;
+	spin_unlock_irqrestore(&dirty_index_lock, dirty_irq);
+	spin_unlock_irqrestore(&buffer->b_lock, birq);
+	lru_remove_locked(buffer);
+	hash_remove_locked(buffer);
+	(void)refcount_put(&buffer->b_refs);
+
+	/* Succeeded: the caller frees the line. */
+	return 1;
 }
 
 /* Writes back the least recently used dirty buffer that reclaim could then evict. */
@@ -4287,7 +4361,7 @@ write_lines(
 		 * Copies the data into the line and leaves it dirty; the blocks
 		 * are the journal's now, no longer unjournaled (ws073-p053).
 		 */
-		kern_memcpy((uint8_t *)buffer->b_data + offset_blocks * leaf->d_block_size,
+		kern_memcpy_ram((uint8_t *)buffer->b_data + offset_blocks * leaf->d_block_size,
 			    in,
 			    (size_t)(amount_blocks * leaf->d_block_size));
 		mark_dirty(buffer, offset_blocks, amount_blocks, 1);
@@ -5704,7 +5778,7 @@ copy_cached_lines(
 		if (!usable)
 			break;
 
-		kern_memcpy(out + (size_t)index * KERN_PAGE_SIZE, lines[index]->b_data, KERN_PAGE_SIZE);
+		kern_memcpy_ram(out + (size_t)index * KERN_PAGE_SIZE, lines[index]->b_data, KERN_PAGE_SIZE);
 
 		irq = spin_lock_irqsave(&lines[index]->b_lock);
 
@@ -5735,6 +5809,154 @@ copy_cached_lines(
 }
 
 /*
+ * Writes the whole lines at the start of a range into the cache and leaves
+ * them dirty, up to BUF_RUN_LINES of them, and reports the blocks written;
+ * the caller has found the write delayed.
+ *
+ * The lines are looked up, or taken over from idle clean lines when the
+ * cache is full, under one hold of the cache lock, and given back under
+ * one more.  A line that is in use, of another shape, or missing while the
+ * cache still has room ends the run without waiting, and zero leaves the
+ * range to the path that writes a line at a time.  The run is taken only
+ * while it keeps dirty memory within the disk's bound, so that a write
+ * past the bound still goes through at once.
+ */
+static uint32_t
+write_cached_lines(
+	const struct disk *disk,
+	struct disk *leaf,
+	uint64_t block,
+	uint64_t remaining,
+	const uint8_t *in)
+{
+	struct buf *lines[BUF_RUN_LINES];
+	uint64_t line_blocks;
+	uint64_t line_block;
+	uint64_t dirty;
+	uint64_t limit;
+	unsigned count;
+	unsigned found;
+	unsigned taken;
+	unsigned recycled;
+	unsigned index;
+	unsigned long irq;
+	int usable;
+
+	/* Takes whole page-sized lines only, from a line's start. */
+	if (leaf->d_block_size == 0 || leaf->d_block_size > KERN_PAGE_SIZE)
+		return 0;
+	line_blocks = KERN_PAGE_SIZE / leaf->d_block_size;
+	if (block % line_blocks != 0 || remaining < 2U * line_blocks)
+		return 0;
+	count = BUF_RUN_LINES;
+	if (remaining / line_blocks < count)
+		count = (unsigned)(remaining / line_blocks);
+
+	/* Leaves out a line the disk's end cuts short. */
+	if (block >= leaf->d_block_count)
+		return 0;
+	if ((leaf->d_block_count - block) / line_blocks < count)
+		count = (unsigned)((leaf->d_block_count - block) / line_blocks);
+	if (count < 2U)
+		return 0;
+
+	/* Keeps the run within the bound of dirty memory. */
+	dirty = atomic_u64_load_acquire(&cache_dirty_bytes);
+	limit = dirty_limit_of(disk);
+	if (dirty > limit)
+		return 0;
+	if ((limit - dirty) / KERN_PAGE_SIZE < count)
+		count = (unsigned)((limit - dirty) / KERN_PAGE_SIZE);
+	if (count < 2U)
+		return 0;
+
+	/* References the lines that are there, or takes over idle ones, under one hold. */
+	found = 0;
+	recycled = 0;
+	irq = spin_lock_irqsave(&cache_lock);
+
+	for (index = 0; index < count; index++) {
+		line_block = block + index * line_blocks;
+		lines[index] = hash_find_locked(leaf, line_block);
+		if (lines[index] != NULL) {
+			/* A hit: referenced and kept out of the LRU while it is written. */
+			refcount_get(&lines[index]->b_refs);
+			lru_remove_locked(lines[index]);
+		} else {
+			/* A miss: an idle line of a full cache comes back hashed, invalid and referenced. */
+			lines[index] = recycle_line_locked(leaf, line_block, line_blocks, KERN_PAGE_SIZE, 0);
+			if (lines[index] == NULL)
+				break;
+			recycled++;
+		}
+		found++;
+	}
+
+	spin_unlock_irqrestore(&cache_lock, irq);
+
+	/* Counts the lookups as the line-at-a-time path does. */
+	stat_add(&stat_hits, found - recycled);
+	stat_add(&stat_misses, recycled);
+	stat_add(&stat_evictions, recycled);
+
+	/* Takes each idle line of the page's shape in turn, stopping at the first other one. */
+	taken = 0;
+	for (index = 0; index < found; index++) {
+		irq = spin_lock_irqsave(&lines[index]->b_lock);
+		usable = 0;
+		if (!lines[index]->b_busy &&
+		    !lines[index]->b_io_inflight &&
+		    lines[index]->b_block_count == line_blocks &&
+		    lines[index]->b_memory.size == KERN_PAGE_SIZE) {
+			lines[index]->b_busy = 1;
+			usable = 1;
+		}
+		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+		if (!usable)
+			break;
+		taken++;
+	}
+
+	/*
+	 * Copies the caller's bytes into each line taken and marks it dirty,
+	 * its blocks written outside any journal, as the line-at-a-time path
+	 * does, then lets it go.
+	 */
+	for (index = 0; index < taken; index++) {
+		kern_memcpy_ram(lines[index]->b_data, in + (size_t)index * KERN_PAGE_SIZE, KERN_PAGE_SIZE);
+		mark_dirty(lines[index], 0, line_blocks, 0);
+
+		irq = spin_lock_irqsave(&lines[index]->b_lock);
+
+		lines[index]->b_busy = 0;
+		waitq_wake_all(&lines[index]->b_waitq);
+
+		spin_unlock_irqrestore(&lines[index]->b_lock, irq);
+	}
+
+	/* Nothing was looked up: the caller writes a line at a time. */
+	if (found == 0)
+		return 0;
+
+	/*
+	 * Gives every reference back under one hold.  A line taken over but
+	 * not written stays hashed, invalid and idle, as a line whose read
+	 * has not started would.
+	 */
+	irq = spin_lock_irqsave(&cache_lock);
+
+	for (index = 0; index < found; index++) {
+		if (refcount_put_not_last(&lines[index]->b_refs) == 1)
+			lru_add_locked(lines[index]);
+	}
+
+	spin_unlock_irqrestore(&cache_lock, irq);
+
+	/* Succeeded: the blocks of the lines written. */
+	return (uint32_t)(taken * line_blocks);
+}
+
+/*
  * Takes over an idle line for another block when the cache is full;
  * cache_lock is held and the block is known to be missing.
  *
@@ -5752,6 +5974,7 @@ recycle_line_locked(
 	int needed)
 {
 	struct buf *buffer;
+	struct buf *previous;
 	struct buf saved;
 	unsigned long birq;
 	unsigned long dirty_irq;
@@ -5770,17 +5993,26 @@ recycle_line_locked(
 	if (disk_media_status(disk) != 0)
 		return NULL;
 
-	/* Looks at a few lines from the LRU tail for an idle one of this disk and size. */
+	/*
+	 * Looks at a few lines from the LRU tail for an idle one of this disk
+	 * and size.  A dirty one is moved to the head, as evict_one() does, so
+	 * that the next look sees other lines.
+	 */
 	looked = 0;
-	for (buffer = lru_tail; buffer != NULL && looked < BUF_RECYCLE_LOOK; buffer = buffer->b_lru_prev) {
+	for (buffer = lru_tail; buffer != NULL && looked < BUF_RECYCLE_LOOK; buffer = previous) {
+		previous = buffer->b_lru_prev;
 		looked++;
 		if (buffer->b_disk != disk ||
 		    buffer->b_block_count != line_blocks ||
 		    buffer->b_memory.size != line_bytes ||
-		    refcount_load(&buffer->b_refs) != 1 ||
-		    (buffer->b_flags & BUF_DIRTY) != 0 ||
-		    buffer->b_dirty_linked)
+		    refcount_load(&buffer->b_refs) != 1)
 			continue;
+
+		/* A line kept dirty goes to the head, out of the next look's way. */
+		if ((buffer->b_flags & BUF_DIRTY) != 0 || buffer->b_dirty_linked) {
+			lru_add_locked(buffer);
+			continue;
+		}
 
 		/* An idle, clean line is taken out of the LRU and the hash table. */
 		birq = spin_lock_irqsave(&buffer->b_lock);

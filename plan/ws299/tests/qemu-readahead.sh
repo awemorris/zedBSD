@@ -11,14 +11,14 @@
 #   (e) a cold 4 KiB-block sequential read.
 # and prints the read-ahead log line and the I/O counters.
 #   sh plan/ws299/tests/qemu-readahead.sh IMAGE      (IMAGE built with CONFIG_PCAT_SERIAL_MIRROR=y)
-# W is build/tmp/qemu-readahead (a fresh run each time).  The last line is "qemu-readahead: PASS|FAIL ...".
+# W is ${WS299_RUNS:-build/tmp}/qemu-readahead (a fresh run each time).  The last line is "qemu-readahead: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
 . plan/tools/fresh-out.sh
 IMAGE=${1:?image}
-fresh_out build/tmp/qemu-readahead
-W=build/tmp/qemu-readahead
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-readahead
+W=${WS299_RUNS:-build/tmp}/qemu-readahead
 truncate -s 1G "$W/d.img"
 printf '\125\252' | dd of="$W/d.img" bs=1 seek=510 conv=notrunc 2> /dev/null
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"

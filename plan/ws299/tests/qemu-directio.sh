@@ -5,15 +5,15 @@
 # write of 256 MiB of the NVMe disk and direct reads of it in 4 MiB and 1 MiB requests, and prints the I/O counts.
 #   sh plan/ws299/tests/qemu-directio.sh IMAGE
 # IMAGE: plan/tools/posix/config-amd64-serial.mk with ZEDBSD_EXTRA_FILES='--file /root/directio=OUT/directio-zedbsd'
-# (OUT from build-randread.sh).  W is build/tmp/qemu-directio (a fresh run each time).  The last line is
+# (OUT from build-randread.sh).  W is ${WS299_RUNS:-build/tmp}/qemu-directio (a fresh run each time).  The last line is
 # "qemu-directio: PASS|FAIL ...".
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 . plan/tools/guest/qemu-accel.sh
 . plan/tools/fresh-out.sh
 IMAGE=${1:?image}
-fresh_out build/tmp/qemu-directio
-W=build/tmp/qemu-directio
+mkdir -p "${WS299_RUNS:-build/tmp}"; fresh_out "${WS299_RUNS:-build/tmp}"/qemu-directio
+W=${WS299_RUNS:-build/tmp}/qemu-directio
 truncate -s 1G "$W/nvme.img"
 truncate -s 256M "$W/ahci.img"
 cp /usr/share/OVMF/OVMF_VARS_4M.fd "$W/vars.fd"

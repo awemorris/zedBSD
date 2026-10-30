@@ -162,8 +162,13 @@
 
 #define UFS_QUOTA_XATTR			"system.zedbsd.quota"
 
-#define UFS_ALLOCATION_BLOCKS		16U
-#define UFS_ALLOCATION_BYTES		65536U
+/*
+ * The most one allocation run of a file write covers: the blocks it
+ * allocates, records in the cylinder group and the inode, and publishes
+ * together, so that a long write updates them once a run.
+ */
+#define UFS_ALLOCATION_BLOCKS		128U
+#define UFS_ALLOCATION_BYTES		(1024U * 1024U)
 
 #define SECTOR_SIZE			512U
 
@@ -482,6 +487,15 @@ struct ufs_mount_state {
 	uint32_t cg_nextfreeoff;
 	uint32_t active_cg;
 	uint32_t rotor_cg;
+	/*
+	 * Where the last allocation run ended (a group and the fragment in it),
+	 * so that the next run's search of that group starts there instead of
+	 * walking the blocks it has just used from the group's start.  Only a
+	 * starting point: a search that finds nothing past it goes on from the
+	 * start, so a block freed below it is still found.
+	 */
+	uint32_t alloc_hint_cg;
+	uint32_t alloc_hint_fragment;
 	struct ufs_journal journal;
 	struct kern_pmem journal_memory;
 	struct ufs_snapshot snapshot;
@@ -772,6 +786,9 @@ static int read_content_block(struct mount *mountp, uint64_t fragment, void *buf
 static int write_content_block(struct mount *mountp, uint64_t fragment, const void *buffer);
 static int write_content_context(struct mount *mountp, uint64_t fragment, const void *buffer, const struct io_context *context);
 static int bit_test(const uint8_t *map, uint32_t bit);
+static int cg_block_free(const uint8_t *map, uint32_t fragment, uint32_t frag);
+static uint32_t cg_free_blocks(const struct ufs_super *super, const uint8_t *map, uint32_t start, uint32_t end, uint32_t want, uint32_t *found);
+static uint32_t cg_search_start(const struct ufs_mount_state *ms, uint32_t cg, uint32_t base, uint32_t end);
 static void bit_set(uint8_t *map, uint32_t bit);
 static void bit_clear(uint8_t *map, uint32_t bit);
 static uint64_t cgstart(const struct ufs_super *super, uint32_t cg);
@@ -4218,6 +4235,121 @@ bit_clear(
 	map[bit >> 3] &= (uint8_t)~(1U << (bit & 7U));
 }
 
+/* Asks whether every fragment of the block at fragment is free in a group's map. */
+static int
+cg_block_free(
+	const uint8_t *map,
+	uint32_t fragment,
+	uint32_t frag)
+{
+	uint32_t n;
+	int free_bit;
+
+	/* Looks at each fragment of the block in turn. */
+	for (n = 0; n < frag; n++) {
+		/* A used fragment means the block cannot be taken. */
+		free_bit = bit_test(map, fragment + n);
+		if (!free_bit)
+			return 0;
+	}
+
+	/* Succeeded: the whole block is free. */
+	return 1;
+}
+
+/*
+ * Finds the first whole free block of a group's free map from start, a
+ * fragment on the group's block grid, to end, and counts the free blocks
+ * that follow it unbroken, up to want.  Reports that count with the
+ * block's fragment in found, or zero when the range has no free block.
+ */
+static uint32_t
+cg_free_blocks(
+	const struct ufs_super *super,
+	const uint8_t *map,
+	uint32_t start,
+	uint32_t end,
+	uint32_t want,
+	uint32_t *found)
+{
+	uint32_t fragment;
+	uint32_t count;
+	int bytewise;
+	int free_block;
+
+	/*
+	 * A block of eight fragments that starts on a byte boundary is one
+	 * byte of the map, all of whose bits are set when it is free.
+	 */
+	bytewise = 0;
+	if (super->frag == 8U && start % 8U == 0)
+		bytewise = 1;
+
+	/* Walks the blocks for the first one with every fragment free. */
+	for (fragment = start;
+	     fragment < end && super->frag <= end - fragment;
+	     fragment += super->frag) {
+		if (bytewise) {
+			/* The block's byte says it at once. */
+			free_block = 0;
+			if (map[fragment >> 3] == 0xffU)
+				free_block = 1;
+		} else {
+			/* The block's fragments are asked one by one. */
+			free_block = cg_block_free(map, fragment, super->frag);
+		}
+		if (free_block)
+			break;
+	}
+
+	/* The range has no whole free block left. */
+	if (fragment >= end || super->frag > end - fragment)
+		return 0;
+
+	/* Counts the free blocks that follow it, up to the number wanted. */
+	count = 1;
+	while (count < want &&
+	       super->frag <= end - fragment - count * super->frag) {
+		/* A block with a used fragment ends the run. */
+		free_block = cg_block_free(map, fragment + count * super->frag, super->frag);
+		if (!free_block)
+			break;
+
+		count++;
+	}
+
+	*found = fragment;
+
+	/* Succeeded: the run's length in blocks. */
+	return count;
+}
+
+/*
+ * Reports where an allocation run's search of a group starts: where the
+ * last run in the same group ended, when that is inside the group and on
+ * its block grid from base, and otherwise base.
+ */
+static uint32_t
+cg_search_start(
+	const struct ufs_mount_state *ms,
+	uint32_t cg,
+	uint32_t base,
+	uint32_t end)
+{
+	/* Another group starts from its beginning. */
+	if (cg != ms->alloc_hint_cg)
+		return base;
+
+	/* A hint outside the group's data, or off its block grid, is not used. */
+	if (ms->alloc_hint_fragment <= base ||
+	    ms->alloc_hint_fragment >= end ||
+	    (ms->alloc_hint_fragment - base) % ms->super.frag != 0)
+		return base;
+
+	/* Succeeded: the search resumes where the last run ended. */
+	return ms->alloc_hint_fragment;
+}
+
 /* Reports the fragment a cylinder group begins at. */
 static uint64_t
 cgstart(
@@ -7611,7 +7743,7 @@ allocation_run_reserve(
 	uint32_t free_blocks;
 	unsigned count;
 	unsigned n;
-	int free_bit;
+	int wrapped;
 	int error;
 
 	/*
@@ -7633,56 +7765,37 @@ allocation_run_reserve(
 		ndblk = cg_ndblk(&ms->super, cg);
 
 		/*
-		 * Find the first complete free block and its bounded contiguous
-		 * run.
+		 * Finds the first complete free block and its bounded
+		 * contiguous run: from where the last run in this group ended,
+		 * and when nothing is free past that, from the group's start.
 		 */
-		for (fragment = ms->super.dblkno;
-		     fragment < ndblk;
-		     fragment += ms->super.frag) {
-			count = 0;
+		fragment = cg_search_start(ms, cg, ms->super.dblkno, ndblk);
+		wrapped = 0;
+		if (fragment == ms->super.dblkno)
+			wrapped = 1;
+		for (;;) {
+			/* Finds the next free block and the free blocks after it. */
+			count = cg_free_blocks(&ms->super, map, fragment, ndblk, run->reserved, &fragment);
 
-			/*
-			 * Walks the group for as many free blocks as the run
-			 * reserved.
-			 */
-			while (count < run->reserved) {
-				/*
-				 * A run reaching past the group cannot be taken
-				 * from it.
-				 */
-				if ((uint64_t)fragment + (count + 1U) * ms->super.frag > ndblk)
-					break;
-
-				/*
-				 * Counts the free fragments that make up one
-				 * block.
-				 */
-				for (n = 0; n < ms->super.frag; n++) {
-					/*
-					 * Asks whether this fragment is free.
-					 */
-					free_bit = bit_test(map, fragment + count * ms->super.frag + n);
-
-					/* A used fragment ends the run. */
-					if (!free_bit)
-						break;
-				}
-
-				/*
-				 * A block with a used fragment cannot be taken.
-				 */
-				if (n != ms->super.frag)
-					break;
-
-				count++;
+			/* Nothing is free past the hint: the start of the group is searched once. */
+			if (count == 0 && !wrapped) {
+				wrapped = 1;
+				fragment = ms->super.dblkno;
+				continue;
 			}
+
+			/* The group has no free block left. */
+			if (count == 0)
+				break;
 
 			/*
 			 * A group that cannot cover the tree is no use to this
 			 * run.
 			 */
-			if (count <= run->missing_nodes)
+			if (count <= run->missing_nodes) {
+				fragment += ms->super.frag;
 				continue;
+			}
 
 			/*
 			 * Save the entire current group before changing its
@@ -7716,6 +7829,10 @@ allocation_run_reserve(
 				      free_blocks - count, ms->super.swapped);
 
 			ms->super.cstotal_nbfree -= count;
+
+			/* The group's next search starts past this run. */
+			ms->alloc_hint_cg = cg;
+			ms->alloc_hint_fragment = fragment + count * ms->super.frag;
 
 			/* Succeeded. */
 			return 0;
