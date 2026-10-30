@@ -53,3 +53,22 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果（2026-10-31、S-p023）
+
+実装: `userland/desktop/libmedia/h264sw-backend.c`（header の仕様どおり。出た frame を確保済みの pool の media_picture へ即複写、queue は H264SW_OUTPUT_MAX、queue が溢れる packet の残りは backend が所有する複写に溜めて receive の中で decoder に渡す、`refused`（ENOTSUP）は send が 1 回だけ返す、ENOMEM は flush まで続く）と `userland/desktop/libmedia/decoder.c`（表は vkvideo・h264sw・aac。open の DEVICE・PROFILE・BUSY で次へ、全部だめなら最初の問題。send の ENOTSUP・ENODEV・EBUSY で次の backend が開けば切り替え: 受け入れ 0 なら同じ packet を新しい backend へ、後なら旧 backend を drain して held の picture に溜め、key frame まで捨て、数を media_log に。key frame が来ないまま終端なら元の誤りを返す）。header は変えていない。
+補足: `h264sw_decoder_create` が ENOSYS（骨格）の間は backend の open が MEDIA_PROBLEM_FORMAT を返し、次の backend へ回る（既存の host 試験 plan/tools/media/run-host-codec.sh の libavcodec への経路が壊れない）。run-host-codec.sh には `h264sw-*.c` を link に足した（decoder.c が media_h264sw_ops を参照するため）。
+
+実行した command と結果（worktree の root）:
+
+- `sh plan/ws326/tests/backend/run-backend.sh` → test-backend PASS（202 checks）、test-switch PASS（112 checks）、run-backend: PASS（ASan・UBSan 報告 0）。test-backend は decoder の代役（scripted）、test-switch は 3 つの偽の backend の表で decoder.c を試験: open の順と最初の問題、受け入れ 0 の拒否（ENOTSUP・ENODEV・EBUSY、他の誤りは切り替えない、後続が無ければ拒否のまま）、受け入れ後の拒否（drain した picture が先に出る、key frame まで捨てる、捨てた数の log、拒否された packet が key frame の場合）、key frame が来ない終端、flush、2 段の切り替え。
+- `BASE=fd1d6f88c sh plan/ws326/tests/check-skeleton.sh` → check-skeleton: PASS。
+- amd64 の libmedia.so（確かめの command の make）→ exit 0、log に warning 0（build/tmp/libmedia-build.log）。
+- `git diff --check` → 出力なし。
+- `sh plan/tools/media/run-host-codec.sh` → run-host-codec: PASS（8 file、H.264 は骨格の間 libavcodec へ回る）。
+
+未実施:
+
+- 実 stream の decode（`sh plan/ws326/tests/backend/run-host-decode.sh`: MP4・MKV・TS の H.264 を ffmpeg の出力と比べる）。道具は書いて ffmpeg の参照の生成まで確かめたが、decoder が骨格のため open が失敗する（DEVICE）。p021 の取り込み後に流す。
+- QEMU の Video Player での再生（Q1 の割り当て）。
+- 規約の §14 の checklist は自分で見直したが、試験の C は production の規約ほど厳密に整えていない。
