@@ -3,7 +3,7 @@
 # ws326-p026 H.265 でも使える部分を codec に依らない名前の module へ移す
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。Queue: q1769-i01（P4、Opus）。
-- 状態: in-progress（2026-10-31 P4。設計は済み、移しは p022 の merge の後）。
+- 状態: 実装済み・試験 PASS（2026-10-31 P4、92ca2d0e8。cleared は Q1）。
 - 依存: p022（JVT の適合。`h264sw-*.c` が p022 で直る可能性があるので、移しは p022 の merge の後の tree に当てる）。
 - 調べた tree: main a08e7f129（worktree `p4-ws326p026`）。仕様: ITU-T H.264 (08/2021)（design.md §1）と ITU-T H.265 (V11) (01/2026)（`/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h265-202601.pdf`、SHA-256 `78b093480e178a2b99d8cb7499934240f359c50c6d09568f8be651bc1151d4d2`、git に入れない。H.265 の節の番号は pdftotext の見出しで照合した）。
 - 2026-10-31 ユーザーから、libmedia の実装の WS を昼までに終えるよう優先度を上げる、という趣旨の指示を受けた（Q1 経由）。この Phase の移しは小さく安全な範囲に絞る（§1 の「先送り」）。
@@ -48,7 +48,7 @@ ws.md のユーザーの決定 3（共通部分は `h264sw_` でなく汎用の�
 | `h264sw_nal_parse` の中の「末尾の 0x03 を落として `media_rbsp_unescape`」 | `vcodec_nal_unescape`（新しい公開の関数）。`h264sw_nal_parse` はそれを呼ぶ | 同上 |
 | `h264sw_nal_parse`・`struct h264sw_nal`・`H264SW_NAL_*` | 変えない（h264sw-nal に残る） | — |
 | `struct h264sw_cabac` の engine の field（data・size・position・range・offset・bits_left・error） | `struct vcodec_cabac`。`struct h264sw_cabac` は `struct vcodec_cabac engine;` と `uint8_t state[H264SW_CABAC_CONTEXTS];` を持つ | 構造の変更（§3.4） |
-| `cabac.error`・`cabac->error`（macroblock.c・cabac-se.c・試験） | `cabac.engine.error`・`cabac->engine.error` | 機械の置き換え、compile で確かめる |
+| `cabac.error`・`cabac->error`・`cabac.range`（macroblock.c・cabac-se.c・cabac-se.h の comment・試験） | `cabac.engine.error` など | 機械の置き換え、compile で確かめる |
 | `h264sw_cabac_bypass(X)`・`h264sw_cabac_terminate(X)`・`h264sw_cabac_pcm(X, …)` | `vcodec_cabac_bypass(&(X)->engine)` などの形（`&ctx->cabac` → `&ctx->cabac.engine`、`&cabac` → `&cabac.engine`） | 呼び出しの形ごとに置き換え。型が合わないと `-Werror` の compile が止まるので漏れは残らない |
 | `h264sw_cabac_decision(cabac, ctx_idx)` | 変えない（ctxIdx の検査をして `vcodec_cabac_decision(&cabac->engine, &cabac->state[ctx_idx])`） | h264sw-cabac.c の中 |
 | `h264sw_cabac_start` | 変えない（alignment の bit・slice type の context の初期化の後に `vcodec_cabac_start`） | 同上 |
@@ -78,7 +78,8 @@ int vcodec_nal_unescape(const uint8_t *escaped, size_t size, uint8_t *buffer, si
 
 - `vcodec_nal_find`: 今の `h264sw_nal_find` の契約のまま（H.264 B.1.1・B.2、H.265 B.2）。
 - `vcodec_nal_unescape`: NAL unit の header の後の byte（escaped、size）から RBSP を buffer へ。末尾が 0x000003 なら最後の 0x03 を先に落とす（H.264 7.4.1、H.265 7.4.2: 最後の cabac_zero_word の後の 0x03）。残りを `media_rbsp_unescape`（bits.h）で除く。
-  返り値: 0 と `*rbsp_size`、EINVAL（NAL unit に起こりえない 3 byte の並び）、ENOBUFS（capacity が足りない）。size 0 は 0 と `*rbsp_size` 0（今の `h264sw_nal_parse` の 1 byte だけの NAL unit と同じ結果）。
+  返り値: 0 と `*rbsp_size`、EINVAL（NAL unit に起こりえない 3 byte の並び、rbsp_size が NULL、size が 0 でないのに escaped が NULL、capacity が 0 でないのに buffer が NULL）、ENOBUFS（capacity が足りない）。size 0 は 0 と `*rbsp_size` 0（今の `h264sw_nal_parse` の 1 byte だけの NAL unit と同じ結果）。
+  `h264sw_nal_parse` は長さを local に受け、成功の時だけ out に書く（今のまま）。
 - `h264sw_nal_parse` は header の読み（forbidden_zero_bit・nal_ref_idc・nal_unit_type、14・20・21 は header だけ）を残し、RBSP は `vcodec_nal_unescape(nal + 1, size - 1, …)`。誤りの順と値は今と同じ（size 0・forbidden で EINVAL が先）。
 
 ### 3.4 vcodec-cabac.h と h264sw-cabac.h
@@ -106,7 +107,9 @@ int vcodec_cabac_pcm(struct vcodec_cabac *engine, uint8_t *samples, size_t count
   `h264sw_cabac_start` の契約は変えない（全体を 0 にして engine.error を EINVAL にしてから検査、alignment の bit、`VCODEC_CABAC_START_BYTES` の前の検査、表 9-11 の一覧の context を `vcodec_cabac_context_init` で、最後に `vcodec_cabac_start`）。
   `h264sw_cabac_decision` は ctxIdx 460 以上か 276 で `engine.error = EINVAL` と 0、他は `vcodec_cabac_decision(&cabac->engine, &cabac->state[ctx_idx])`。
   `h264sw_cabac_bypass`・`_terminate`・`_pcm` は消し、呼び手（cabac-se.c・macroblock.c・試験）が vcodec の関数を engine で呼ぶ（中継だけの関数を残さない）。
-- 速さ: decision は h264sw の関数から vcodec の関数への 1 段の呼び出しが増える（別の翻訳単位なので inline にならない）。bypass・terminate は増えない。移しの前後で run-stream の時間を観察として記録し（受け入れの条件にしない）、詰めは p024（速さ）で。
+- `vcodec_cabac_start` は最初に engine の全部の field を 0 にし error を EINVAL にしてから検査する（data は size が 0 の時だけ NULL）。`vcodec_cabac_context_init` の m・n は -128..127（H.264 の表、H.265 の式 9-5 の値）。
+- vcodec の file は vcodec*.h・bits.h・libc だけを include し、comment にも h264sw の名前を書かない（check-skeleton が grep で確かめる）。節の番号の版は vcodec.h の block（H.264 (08/2021)、H.265 (V11) (01/2026)）。
+- 速さ: decision は h264sw の関数から vcodec の関数への 1 段の呼び出しが増える（別の翻訳単位なので inline にならない）。bypass・terminate は増えない。試験の build は ASan・-O1 なので時間の比べは意味が無く、測らない。詰めは p024（速さ、p026 の後）で。
 
 ## 4. H.264 に残す物
 
@@ -128,7 +131,7 @@ h264sw.h（範囲の文と上限）・h264sw-nal（header と `H264SW_NAL_*`、`
 
 ## 6. 確かめ（前後で同じ）
 
-出力は `/tmp/o-ws326-p026/{before,after}/`（小さい text だけ）。各 command に `timeout`。
+出力は `/tmp/o-ws326-p026/{before,after}/`（小さい text だけ）。前は p022 の merge の後の tree（1e90322b4）を `git archive` で `/tmp/o-ws326-p026/tree-before` に写して流す（移しの編集と並べるため）。各 command に `timeout`。どの試験も「同じ」に加えて PASS の行そのもの（適合は p022 の `conform-run: PASS (101 in, 103 out)`、run-stream は `streams:` の数が 0 でない）を条件にする（何も走らずに同じになることを防ぐ）。
 
 | 項目 | command（worktree の root） | 同じであることの判定 |
 | --- | --- | --- |
@@ -136,21 +139,24 @@ h264sw.h（範囲の文と上限）・h264sw-nal（header と `H264SW_NAL_*`、`
 | 骨格 | `BASE=<p022 の後の基点> sh plan/ws326/tests/check-skeleton.sh`（前）、`sh plan/ws326/tests/check-skeleton.sh`（後、cc と clang で vcodec*.h も単独 compile）、commit の後に `BASE=<この commit> …` | `check-skeleton: PASS` |
 | 全体の試験 | `timeout 3600 sh plan/ws326/tests/run-stream.sh` | 出力の全行が同じ（stream ごとの frame の数と stats、fuzz・start の行） |
 | backend | `timeout 1200 sh plan/ws326/tests/backend/run-host-decode.sh`、`timeout 600 sh plan/ws326/tests/backend/run-backend.sh` | 出力の全行が同じ、PASS |
-| 適合 | p022 の script（cache `/tmp/o-ws326-p022/conformance` を読むだけ） | stream ごとの結果（in/out、frame の一致の数）が全部同じ |
+| 適合 | `H264SW_CONFORMANCE_DIR=/tmp/o-ws326-p022/conformance sh plan/ws326/tests/conformance/run.sh`（cache は読むだけ、Q1 の指定） | 全行が同じ、最後の行 `conform-run: PASS (101 in, 103 out)` |
 | libmedia.so | design.md §6 の make（`build/amd64/dynamic/libmedia.so`） | exit 0、warning 0。`nm -D --defined-only` の公開の symbol の一覧が前後で同じ（vcodec_* は local） |
 | 残り | `git diff --check`、`grep -rn 'h264sw_bits\|h264sw-bits\|h264sw_nal_find\|h264sw_cabac_\(bypass\|terminate\|pcm\)\b' userland plan/ws326/tests plan/tools/media` が 0 | — |
 
-時間（観察だけ）: run-stream と適合の実行の時間を前後で記録する。
+`plan/tools/media/run-host-codec.sh` は libavcodec の add-in の試験で、h264sw の link の行を足しただけ。後に 1 回流して PASS を確かめる。
 
 ## 7. 他の WS への引き継ぎ
 
 - **WS329**（H.264 の encoder）: p003 が proposed/ の名前を置き換える: `struct h264sw_bits`・`h264sw_bits_*` → `vcodec_bitreader`、`h264sw_cabac_range_lps`・`_trans_lps`・`_trans_mps` → `vcodec_cabac_*`（`vcodec-cabac.h` で宣言済み）。`vcodec-cabac-enc` は `vcodec_cabac_context_init` で context を作れる。
+  decoder の読み戻しの名前: `h264sw_cabac_pcm(&c, …)` → `vcodec_cabac_pcm(&c.engine, …)`（bypass・terminate も同じ）、`h264sw_nal_find` → `vcodec_nal_find`。`proposed/h264enc.h` の「Conventions, as h264sw.h」は vcodec.h へ（encoder の EAGAIN を vcodec.h の誤りの表に足すかは WS329 p003 が決める）。
+  名前の対称: reader の `vcodec_nal_find`・`_unescape` と writer の `vcodec_nal_escaped_size`・`_append` が同じ接頭辞を分け合う（衝突は無い）。writer を `vcodec_nalwriter_*` に揃えることを提案する。
   p002 の R3 は「context の初期化を `h264sw_cabac_contexts_init` に分ける」だけが残る（表の宣言は済み）。R3 の後も `struct h264sw_cabac` の形（`engine`・`state`）は保つ。R1・R2・R4・R5 はこの Phase の名前の上に足す。check-skeleton の BASE は p026 の commit に、WS329 p002 でもう一度移る。
 - **WS330**（H.265）p001: 使える物は vcodec.h・vcodec-bitreader・vcodec-nal（find と unescape。2 byte の header は H.265 の module で）・vcodec-cabac（engine と表と式 9-6）。足りない物の候補:
   1. PCM の標本が 8 bit でない時（H.265 の PcmBitDepthY < 8、u(v)）と WPP・tile の substream の終わり（end_of_sub_stream_one_bit の後の byte の境で engine を再開）。`vcodec_cabac_pcm` を「算術の復号が着いた byte の位置を返す」と「その位置から engine を再開する」の 2 つに分けると両方に使える（H.264 の pcm はその 2 つで書ける）。
-  2. context の保存と復元（H.265 9.3.2.4・9.3.2.5、WPP）: context は engine の外の byte の配列なので、H.265 の側の memcpy で済む。
+  2. context の保存と復元（H.265 9.3.2.4・9.3.2.5、WPP）: context は engine の外の byte の配列なので、その部分は H.265 の側の memcpy で済む（StatCoeff・palette の予測も対象で、それは H.265 の側）。
+  4. aligned bypass（H.265 9.3.4.3.6、cabac_bypass_alignment_enabled_flag、Main の外の RExt）は engine に無い。
   3. frame の pool（plane・参照の数・id・時刻・表示の情報）と出力の順（POC 最小の bumping、出力の queue）の共通化: §1 の理由で先送りした。`struct h264sw_frame` の H.264 の部分（motion・frame_num・top/bottom の POC・non_existing）を分ける設計を WS330 p001 で。
-- **Q1（WS326 の完了の時）**: `plan/ws326/tests/unit/check.h`・`bitwriter.h`・`cabacwriter.h` と、残す単体試験を `plan/tools/` へ移して tools.md に登録する（WS329・WS330 が include する）。
+- **Q1（WS326 の完了の時）**: `plan/ws326/tests/unit/check.h`・`bitwriter.h`・`cabacwriter.h` と、残す単体試験・`run-unit.sh`・`run-stream.sh`・`conformance/` を `plan/tools/` へ移して tools.md に登録する（WS329 の各 Phase が path で呼び、WS330 が include する）。
 
 ## 8. Q1 に頼む事
 
@@ -158,10 +164,43 @@ h264sw.h（範囲の文と上限）・h264sw-nal（header と `H264SW_NAL_*`、`
 2. `plan/tools/media/run-host-codec.sh` の link の行に `userland/desktop/libmedia/vcodec-*.c` を足すこと（Q1 が直すか、この Phase の commit に入れる許し）。足さないと移しの後にこの道具の build が未定義の symbol で落ちる。
 3. 移しの後の ws.md の header の基点（BASE）の更新は、この Phase の commit の SHA で P4 が書く（WS326 の記録）。WS329 の記録（design.md §5.3 の BASE の注）への反映は Q1。
 
-## 9. design-reviewer
+## 9. design-reviewer（2026-10-31、1 回）
 
-（レビューの後に書く）
+13 件（blocker 0・major 4・minor 9）。反映:
 
-## 結果
+| # | 指摘 | 反映 |
+| --- | --- | --- |
+| 1 | vcodec が h264sw に依存しないことを決めていない・確かめない | §3.4 に規則、vcodec-bitreader.h は vcodec.h を include、check-skeleton に「vcodec の file に h264sw の名前が無い」の grep と vcodec*.h の単独 compile |
+| 2 | p024 と p026 が同じ hot path を触るのに並べられる、p024・p025 の BASE と凍結に vcodec*.h が無い | ws.md の p024 の依存に p026。p025 の phase.md の BASE と「変えてはいけない物」を直した。p024 の phase.md は P1 が書いているので Q1 が P1 に伝える（Q1 の指示） |
+| 3 | frame・DPB の先送りはユーザーの決定 3 の Q1 の解釈を狭める | Q1 に返し、Q1 が技術の判断として認めた（2026-10-31）。ws.md の「進め方」に記録 |
+| 4 | 前後の「同じ」が何も走らなくても成り立つ（適合の cache の環境変数、ffmpeg の無い時）、run-host-codec.sh を流していない | §6 に PASS の行そのものを条件にし、適合は環境変数を明示、run-host-codec.sh を後に流す |
+| 5 | context_init の m・n の範囲が契約に無い | header に -128..127 |
+| 6 | vcodec_cabac_start が engine 全体を初期化することが契約に無い、data NULL | memset と EINVAL を先に、data NULL は size 0 の時だけ（header と実装） |
+| 7 | vcodec_nal_unescape の NULL の場合、parse が out を失敗で書き換えない | 契約に足し、parse は local に受ける |
+| 8 | H.265 の Annex B の節（B.2〜B.4）、9.3.4.3.6・StatCoeff、版の置き場 | vcodec-nal.h を B.2〜B.4 に、版は vcodec.h の block、表の `Values referenced:` に「ITU-T H.265 (V11) (01/2026) Table 9-52/9-53」。WS330 への引き継ぎに 9.3.4.3.6 と StatCoeff を足した（§7） |
+| 9 | include の置き換えの式・`cabac.range`・表の名前の grep・古くなる comment | 置き換えは path の形も含めた、`cabac.range` を表に、test-cabac.c の `extern` と「no header declares」の comment を消し header の宣言を使う、cabac-se.h・macroblock.h の comment を直した |
+| 10 | WS329 への引き継ぎの不足（pcm・nal_find・h264enc.h の約束、試験の道具の移し） | §7 に足した |
+| 11 | `vcodec_nal_` の接頭辞が reader と writer に分かれる | §7 で WS329 p003 に `vcodec_nalwriter_*` を提案（揃えるかは WS329 が決める） |
+| 12 | ASan の試験で時間を比べても意味が無い | 時間の観察を外した（§3.4） |
+| 13 | 出力の置き場（AGENTS §4 は fresh-out か build/tmp） | 試験の script の出力は各 script の fresh_out（worktree の build/tmp）。前後の要約の小さい text と前の tree の写しは Q1 の指示（大きな物は /tmp）で /tmp/o-ws326-p026 に置いた。消すのは Q1 |
 
-（移しの後に書く）
+## 結果（2026-10-31 P4）
+
+- commit: 設計 acb27716b、main の取り込み 1e90322b4（親 acb27716b・f31bbac2e、p022 の e6ca0232e を含む）、移し **92ca2d0e8**（46 file、新しい BASE）、記録はこの次の commit。
+- 移した物: `vcodec.h`（新）、`vcodec-bitreader.h/.c`（h264sw-bits から git mv）、`vcodec-nal.h/.c`（新、`vcodec_nal_find`・`vcodec_nal_unescape`）、`vcodec-cabac.h/.c`（新、engine・表・`vcodec_cabac_context_init`）。h264sw-nal・h264sw-cabac は H.264 の部分だけ、`struct h264sw_cabac` は `engine` と `state`。試験 `test-bits.c` → `test-bitreader.c`（git mv、Q1 の OK）。Makefile、run-unit・run-stream・run-backend・run-host-decode・conformance/run.sh・check-skeleton.sh（vcodec*.h の単独 compile、vcodec に h264sw の名前が無い検査、BASE の照合を両方に）、`plan/tools/media/run-host-codec.sh`（Q1 の許し）。
+- 前（p022 の後の tree 1e90322b4 の写し）と後（92ca2d0e8 の前の作業の tree、同じ内容）の出力の照合（`/tmp/o-ws326-p026/{before,after}/`、`/tmp/o-ws326-p026/record.sh`）:
+
+| 項目 | 前 | 後 | 差 |
+| --- | --- | --- | --- |
+| `sh plan/ws326/tests/run-unit.sh all` | 25 本 PASS、`run-unit: PASS` | 同じ | `test-bits: PASS (169 checks)` が `test-bitreader: PASS (169 checks)` になった行だけ |
+| `sh plan/ws326/tests/check-skeleton.sh` | PASS | PASS | 無し。commit の後 `BASE=92ca2d0e8` でも PASS |
+| `sh plan/ws326/tests/run-stream.sh` | `streams: 22 streams, 408 frames equal to ffmpeg`、fuzz・start も PASS | 同じ | 無し（全行） |
+| `sh plan/ws326/tests/backend/run-host-decode.sh` | PASS | PASS | 無し |
+| `sh plan/ws326/tests/backend/run-backend.sh` | PASS | PASS | 無し |
+| `H264SW_CONFORMANCE_DIR=/tmp/o-ws326-p022/conformance sh plan/ws326/tests/conformance/run.sh` | 212 行、`conform-run: PASS (101 in, 103 out)` | 同じ | 無し（全行） |
+| libmedia.so（design.md §6 の make） | exit 0、warning 0、公開の symbol 55 | exit 0、warning 0 | `nm -D --defined-only` の一覧が同じ（vcodec_* は local） |
+| `sh plan/tools/media/run-host-codec.sh` | 未実施 | `run-host-codec: PASS` | — |
+
+- `git diff --check` は空。`grep 'h264sw' userland/desktop/libmedia/vcodec*` は 0（check-skeleton の中）。
+- 未実施: QEMU・実機（この Phase は host の照合だけ）。速さの測り（§3.4、p024 で）。conformance-reviewer の全文の見直し（p025）。
+- 残り: p024・p025 の BASE は 92ca2d0e8（p025 の phase.md は直した。p024 の phase.md は P1 が書いているので Q1 から伝える）。WS329・WS330 への引き継ぎは §7。
