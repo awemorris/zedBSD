@@ -450,3 +450,13 @@
 | --- | --- | --- | --- | --- |
 | q1761 / q1761-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs4`・branch `agent/p2-bugs4`、QEMU と host、出力は全部 /tmp） | [BUG-312](bugs/BUG-312.md)・[BUG-173](bugs/BUG-173.md)・[BUG-238](bugs/BUG-238.md)・[BUG-199](bugs/BUG-199.md)・[BUG-281](bugs/BUG-281.md)・[BUG-308](bugs/BUG-308.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
 | q1762 / q1762-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws333`・branch `agent/p6-ws333`、host と QEMU、出力は /tmp） | [ws333](ws333/ws.md) p005 の前半（熱の core） | UAPI（p004）・/dev/thermal・/sbin/thermal は作らない | in-progress |
+
+## 2026-10-31: 空いた P3・P5 の割り当て（q1763・q1764）
+
+2026-10-31 ユーザーから、不在の間は設計だけ進められる WS は設計を、実装できる WS は実装を、試験できるなら試験も進める、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1763 / q1763-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws330`・branch `agent/p5-ws330`） | [ws330](ws330/ws.md) p001 設計 | plan/ws330/ だけ、design-reviewer と問いまで。実装は WS329 の完了の後 | in-progress |
+| q1764 / q1764-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r2`・branch `agent/p3-ws291r2`、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) の続き | kernel の record の decode の短縮など、phase014 の再開点の候補 | in-progress |
+
