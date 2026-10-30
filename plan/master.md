@@ -64,7 +64,7 @@
 - 全担当の成果は main に merge 済み（上の Queue の作業中の物を除く）。`agent/p2-ws288-p006` は WS288 の終了で使わない。
 - 既定の config: Pi の BT は config-rpi4.mk・config-rpi5.mk で n（ユーザー）、Pi 5 の GPU（CONFIG_DRIVER_BCM2712_GPU）は CI で n、
   fan（CONFIG_DRIVER_RPI5_FAN）は y、CI の VF2 は CONFIG_POWERVR_DEBUG n。
-- firmware は全部 zedBSD-firmware（rev fcdfccf、i915 の DMC 6 file を含む、push 済み）から取る。
+- firmware は全部 zedBSD-firmware（rev 43662bd、i915 の DMC 6 file、Mali の CSF、ODROID-C5 の公式の image（Amlogic の bootloader）を含む、push 済み）から取る。
 <!-- master:merge:end -->
 
 ### Focus と優先順位

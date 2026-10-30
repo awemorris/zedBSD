@@ -1,13 +1,13 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 18:35（Q1）
+最終更新: 2026-10-30 18:45（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
-| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。試験の image を公式の bootloader で作り直した（text: p1-ws313/build/odroid-c5/hdd-image.img sha256 0f8f56a1…、Keiland: p1-ws313/build/odroid-c5-keiland/hdd-image.img sha256 2cf1f64d…） | zedBSD-firmware の push（ユーザー）→ Q1 が agent/p1-ws313 を merge → 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
+| P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。zedBSD-firmware を push し branch を merge（b4e549bfc）。試験の image は p1-ws313/build/odroid-c5{,-keiland}/hdd-image.img | 実機の結果で各 Phase を直す。WS009 p028 は後で再開 |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 起動（phase-runner-high、q1717）。p002 kernel に表 B を足す | p003 表 A の置き換え → p004 i915 → p005（rpi4 は未決）→ p006 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
@@ -119,19 +119,13 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-### 1. WS313（ODROID-C5）: zedBSD-firmware の GitHub への push
-
-- 背景: ユーザーの指示で、Hardkernel の公式の ODROID-C5 の image（36 MiB の .img.xz、無変更）と Amlogic の license の本文、Mali の GPU の firmware を zedBSD-firmware の repo に入れる。zedBSD の build はそこから bootloader の区画を切り出す。commit は 43662bd（branch q1-c5-firmware、親は GitHub の main の fcdfccf）。
-- 問題: Q1 の push は権限の判定（Out-of-Place Publication）で止められた。回避はしていない。
-- 決めてほしい事: push してよければ、端末に `! cd /home/awe/zedBSD-firmware && git push origin q1-c5-firmware:main` と打つ（このセッションで実行される）。push の後に Q1 が zedBSD の側の revision の commit を main に merge する。
-
-### 2. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
+### 1. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
 
 - 背景: RDNA と NVIDIA では「Linux で約 50 fps になる重さの 3D の scene」を決め、zedBSD が同じ fps 以上を出す事を目標にした。VF2 の今の SD には PowerVR の GPU の driver を持つ Linux が無く、Linux の基準を立てられない。
 - 今の扱い（Q1 の既定）: zedBSD の今の fps で約 40 fps になる scene を決め、profile を見て 50 fps 以上に上げる。P3 が実施中（copies 1 で 62 fps、10 で 31 fps）。
 - 決めてほしい事: この既定でよいか、別の SD に Linux を入れて Linux の基準を立てるか。
 
-### 3. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
+### 2. WS331（driver から HAL への直の依存を除く）の残りの未決 3 点
 
 - 背景: 表 A・B は 2026-10-30 に許可された。残りは次の 3 点（詳細は下の「WS331」の節と [phase001](ws331/phase001/phase.md) §4・§6）。
 - (1) Raspberry Pi 4 の console の 2 関数（rpi_cons_suspend_output・resume_output）: HAL の early console（起動の早い段の画面の文字の出力）の中の状態と lock を使うので、driver にも kernel にも移せない。案 (a) 当面の例外として残す（P2 の推し）、(b) 汎用の HAL の口を足す（HAL の API の変更、承認が要る）、(c) driver が画面の文字を自分で描く作りにする。
@@ -142,6 +136,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS313 ODROID-C5 | zedBSD-firmware に Hardkernel の公式の image（無変更）と Amlogic の license、Mali の firmware を入れて push（ユーザー「WS313のpushはやってください。」、GitHub の main 43662bd） | [ws313/ws.md](ws313/ws.md) |
 | 2026-10-30 | WS307 graphical installer | p007 の G2: amd64 の hal_space_map が HAL_SPACE_SYS（firmware の窓）への実行可の map を受けるのは実装の補完で、HAL の API の変更ではない（ユーザー）。P6 が実装 | [ws307/ws.md](ws307/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | p001 の表 A・表 B を許可 | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS309 compositor の thread の整理 | p015 ゲームモードの V2: 1 は (a)（app は変更なし、全画面と窓の切り替えは compositor の都合で app は気づかない）、2 は private な Wayland の protocol `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせで画像の memory を出す、4 は同じ画像の再 acquire で画面から外れた事を知る。p015 は planned に戻り、次のセッションで実装 | [ws309/ws.md](ws309/ws.md) |
