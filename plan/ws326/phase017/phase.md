@@ -3,7 +3,7 @@
 # ws326-p017 B の direct
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: 実装済み・試験 PASS（2026-10-31 S-p017。cleared は Q1 の受け入れ後）。
+- 状態: cleared（2026-10-31 Q1、2134a8efe。実装と試験 S-p017）。
 - 依存: p007、p008、p016（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
