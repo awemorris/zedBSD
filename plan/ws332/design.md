@@ -2,7 +2,7 @@
 
 # WS332 設計: 時間の単位の API と tick の率を取る口
 
-Parent: [WS332](ws.md)。Phase: [p001](phase001/phase.md)（2026-10-30 P3、q1722）。
+Parent: [WS332](ws.md)。Phase: p001（2026-10-30 P3、q1722、記録は git の履歴）。
 数は 2026-10-30 の worktree `agent/p3-ws332`（main fe1d64379 と同じ source）の grep。
 
 **範囲（2026-10-30 Q1 経由のユーザーの指示で絞った）**: (1) `KERN_CLOCK_HZ` の置き換え（時間の単位の API）、(2) 今の tick の率を走っている時に
