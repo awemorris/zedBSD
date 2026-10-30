@@ -122,7 +122,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-376 · q1734 · WS334 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-376 · q1736 · WS334 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
@@ -168,7 +168,7 @@ BUG-376 · q1734 · WS334 · KL_VERSION 105。使う前に衝突を確かめる�
 | --- | --- | --- | --- | --- |
 | [WS299](ws299/ws.md) | MG004 | 5330 の NVMe の読み書きを速くする（512 MiB の崖、転送・queue・readahead）（2026-10-27 ユーザー） | incomplete | p001〜p003・p009 cleared（raw の読み 583 MB/s ≒ Debian の 50%）。受け入れは Debian の 95% 以上、HMB はやる（ユーザー）。q1634（P1）で p004 raw の先読み → p005〜p008 2026-10-30 ユーザー「WS299はRealtek 2.5Gのあとにスケジュールします。」→ WS315 の後 |
 | [WS300](ws300/ws.md) | MG003 | NVMe と VMD の低電力（S0 idle の VMD の suspend・NVMe の状態、APST・ASPM・LTR）（2026-10-27 ユーザー） | incomplete（p001 cleared、p002〜p005 実装済み・試験未実施、branch agent/p6-ws300 は 5330 の試験の後に merge） | p006（5330、WS052 p014 と一緒）。Q300-6（_OSC 無しの ASPM）はユーザーの判断待ち |
-| [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | planning | p001 統一の設計（担当は未定） |
+| [WS333](ws333/ws.md) | MG004 | /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）。WS301・WS303 を統合（2026-10-31 ユーザー） | planning | p001 統一の設計（P5）、p002 amd64 の idle の MWAIT（P1） |
 | [WS302](ws302/ws.md) | MG006 | デスクトップスレッドバランサ DTB（CONFIG_DTB、sched への hint）（2026-10-27 ユーザー） | planning | p001 検討（WS301 p001 の後）、約 32 LW |
 | [WS304](ws304/ws.md) | MG003 | Raspberry Pi 5 の外の PCIe（pcie1、M.2）と NVMe（2026-10-27 ユーザー、実機の試験はまだ） | incomplete | p001・p002 cleared（e616b4128、host 試験・build のみ）、p003 の実機は新しい SwitchBot の後、HAT の型番をユーザーに確認 |
 | [WS305](ws305/ws.md) | MG006 | デスクトップの GPU の passthrough の試験環境（Linux＋VFIO＋QEMU、素の起動と使い分け）（2026-10-27 ユーザー） | incomplete（再開待ち） | P4 はラップアップ（2026-10-27）。script と guest の image は用意済み、host（10.0.10.3）では未着手。再開は ws.md の「状態と再開点」 |
