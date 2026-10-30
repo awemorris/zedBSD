@@ -103,6 +103,13 @@ struct powervr_target {
 	 * reuses the parameter manager state its predecessor's 3D read.
 	 */
 	unsigned next_half;
+
+	/*
+	 * The 3D value (on the session's fragment timeline) of the last
+	 * render kicked on each half, 0 for none: a render's geometry waits
+	 * for the 3D that last read its half's parameter manager state.
+	 */
+	uint32_t half_fragment[2];
 };
 
 /*
@@ -1251,6 +1258,32 @@ powervr_target_take_half(
 
 	/* Succeeded: the half. */
 	return half;
+}
+
+/* Reports the 3D value of the last render kicked on one half of a target, 0 for none. */
+uint32_t
+powervr_target_half_fragment(
+	const struct powervr_target *target,
+	unsigned half)
+{
+	uint32_t value;
+
+	/* The half's last 3D value. */
+	value = target->half_fragment[half & 1U];
+
+	/* Succeeded: the value. */
+	return value;
+}
+
+/* Notes the 3D value of the render just kicked on one half of a target. */
+void
+powervr_target_half_note(
+	struct powervr_target *target,
+	unsigned half,
+	uint32_t fragment_value)
+{
+	/* The half's last 3D value, which its next render's geometry waits for. */
+	target->half_fragment[half & 1U] = fragment_value;
 }
 
 /* Reports the firmware address of a target's render target data record. */

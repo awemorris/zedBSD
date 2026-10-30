@@ -27,6 +27,7 @@ static int reader_edge(struct shader_spirv_reader *reader, uint32_t from, uint32
 static int reader_exit(struct shader_spirv_reader *reader, uint32_t target, uint32_t *exited);
 static int reader_phi_moves(struct shader_spirv_reader *reader, uint32_t from, uint32_t target);
 static int reader_block_body(struct shader_spirv_reader *reader, uint32_t label, uint32_t *terminator);
+static int reader_kill_only(struct shader_spirv_reader *reader, uint32_t label);
 
 /*
  * Inlines one function: its parameters are already bound; its blocks
@@ -105,6 +106,8 @@ reader_region(
 {
 	const uint32_t *words;
 	struct powervr_ir_operand condition;
+	struct powervr_ir_operand discard;
+	struct powervr_ir_operand all_ones;
 	struct shader_spirv_id *label;
 	uint32_t block;
 	uint32_t at;
@@ -113,6 +116,8 @@ reader_region(
 	uint32_t merge;
 	uint32_t exited_true;
 	uint32_t exited_false;
+	int killed_true;
+	int killed_false;
 	uint32_t first;
 	int error;
 
@@ -172,7 +177,32 @@ reader_region(
 			if ((label->flags & FLAG_LOOP) != 0)
 				merge = 0;
 
-			if (merge != 0) {
+			/*
+			 * A selection whose one arm only kills and whose other arm is
+			 * the merge: the discard is selected, without branches (a
+			 * fragment shader's alpha test, which every fragment runs).
+			 */
+			killed_true = 0;
+			killed_false = 0;
+			if (merge != 0 && reader->discard != 0 && words[3] == merge)
+				killed_true = reader_kill_only(reader, words[2]);
+			if (merge != 0 && reader->discard != 0 && words[2] == merge)
+				killed_false = reader_kill_only(reader, words[3]);
+			if (killed_true != 0 || killed_false != 0) {
+				discard = shader_spirv_value_operand(reader->discard, 0);
+				all_ones = shader_spirv_constant_operand(UINT32_MAX);
+				if (killed_true != 0) {
+					shader_spirv_emit(reader, POWERVR_IR_SELECT, reader->discard, &condition, &all_ones, &discard, 0, 0);
+				} else {
+					shader_spirv_emit(reader, POWERVR_IR_SELECT, reader->discard, &condition, &discard, &all_ones, 0, 0);
+				}
+				error = reader_phi_moves(reader, block, merge);
+				if (error != 0)
+					return error;
+				if (merge == stop)
+					return reader->error;
+				block = merge;
+			} else if (merge != 0) {
 				/* A selection: an if over the two arms, then the merge. */
 				shader_spirv_emit(reader, POWERVR_IR_IF, 0, &condition, NULL, NULL, 0, 0);
 				error = reader_arm(reader, block, words[2], merge);
@@ -552,4 +582,34 @@ reader_block_body(
 
 	/* A block without a terminator. */
 	return EINVAL;
+}
+
+/*
+ * Reports whether a block holds nothing but a kill (OpKill or
+ * OpTerminateInvocation right after its label).
+ */
+static int
+reader_kill_only(
+	struct shader_spirv_reader *reader,
+	uint32_t label)
+{
+	uint32_t at;
+	uint32_t opcode;
+	int error;
+
+	/* The instruction after the label. */
+	error = shader_spirv_find_block(reader, label, &at);
+	if (error != 0)
+		return 0;
+	at += reader->words[at] >> 16;
+	if (at >= reader->count)
+		return 0;
+
+	/* A kill there ends the block at once. */
+	opcode = reader->words[at] & 0xffffU;
+	if (opcode == OP_KILL || opcode == OP_TERMINATE_INVOCATION)
+		return 1;
+
+	/* Anything else: not a kill-only block. */
+	return 0;
 }

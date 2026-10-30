@@ -168,6 +168,14 @@ struct powervr_job_done {
 	struct load_draw *load;
 	uint64_t kicked;
 	int small;
+
+	/*
+	 * The submission timing's marks: the 3D value the geometry waited
+	 * for (0 none), and when the TA and the 3D were seen done (0 not yet).
+	 */
+	uint32_t waited_fragment;
+	uint64_t ta_seen;
+	uint64_t fragment_seen;
 };
 
 /* The job's memory and programs while it runs. */
@@ -267,6 +275,7 @@ static int job_draw_memory_make(struct powervr_render *render, struct powervr_se
 static int attribute_words(uint32_t format, uint32_t components, uint32_t *words, uint32_t *defaults);
 static void put_words(struct powervr_buffer *buffer, uint32_t offset, const uint32_t *words, unsigned count);
 static void put_bytes(struct powervr_buffer *buffer, uint32_t offset, const uint8_t *bytes, size_t count);
+static void job_timing(struct powervr_session *session, struct powervr_job_done *done);
 
 /* The components a vertex format lacks: (0, 0, 0, 1.0) for a float format, then (0, 0, 0, 1) for an integer one, little-endian. */
 static const uint8_t attribute_defaults[32] = {
@@ -308,6 +317,7 @@ powervr_render_job_run(
 	struct powervr_sync previous[2];
 	unsigned wait_count;
 	unsigned half;
+	uint32_t half_fragment;
 	unsigned long enabled;
 	uint64_t draws_started;
 	uint64_t started;
@@ -489,24 +499,32 @@ powervr_render_job_run(
 	mutex_lock(&render->core->lock);
 
 	/*
-	 * The geometry waits for the context's earlier 3D (the render target
-	 * data's parameter manager state is rebuilt by the geometry, which a
-	 * 3D still reading it must not see), as Mesa makes the first geometry
-	 * on a data set wait for its previous fragment.
+	 * The geometry waits for the 3D of the last render on the same half
+	 * of the target (the half's parameter manager state is rebuilt by
+	 * the geometry, which a 3D still reading it must not see).  Renders
+	 * alternate between the halves, so a render's geometry runs while
+	 * the previous render's 3D reads the other half.
 	 *
 	 * Procedure referenced:
-	 * Mesa 26.2.5 src/imagination/vulkan/winsys/pvrsrvkm/pvr_arch_srv_job_render.c
-	 * (the geometry's wait on the data set's previous fragment sync).
+	 * Linux v7.3 drivers/gpu/drm/imagination/pvr_job.c (prepare_job_syncs,
+	 * update_job_resvs: the geometry job writes the HWRT data's region
+	 * headers and so waits for every job on that one HWRT data, the
+	 * fragment job reads them; the set's other HWRT data is not waited
+	 * for) and Mesa 26.2.5
+	 * src/imagination/vulkan/pvr_arch_job_render.c (pvr_arch_render_job_submit:
+	 * the data set's two render target datas taken in turn).
 	 */
 	half = powervr_target_take_half(target);
 	session->trace_pixels = (uint64_t)job->area.width * job->area.height;
 	session->noted_target = target;
 	session->noted_half = half;
 	powervr_target_catalogues(target, half, session->noted_catalogues);
+	half_fragment = powervr_target_half_fragment(target, half);
 	wait_count = 0;
-	if (session->render_context != NULL && session->render_context->fragment.submitted != 0U) {
+	if (session->render_context != NULL && half_fragment != 0U) {
 		previous[wait_count].address = powervr_object_address(&session->render_context->fragment.timeline, 0);
-		previous[wait_count].value = session->render_context->fragment.submitted;
+		previous[wait_count].value = half_fragment;
+		done->waited_fragment = half_fragment;
 		wait_count++;
 	}
 
@@ -547,6 +565,9 @@ powervr_render_job_run(
 	spin_unlock_irqrestore(&render->queue_lock, enabled);
 
 	powervr_session_point_set(session, POWERVR_POINT_FRAGMENT, memory->marks.fragment_value);
+
+	/* The half's 3D value, which the half's next render's geometry waits for. */
+	powervr_target_half_note(target, half, memory->marks.fragment_value);
 
 	/* Succeeded: the render was kicked. */
 	return 0;
@@ -611,6 +632,8 @@ powervr_render_jobs_reap(
 		session->jobs_done = done->next;
 		if (session->jobs_done == NULL)
 			session->jobs_done_tail = NULL;
+		if (POWERVR_SUBMIT_TIMING && !halted)
+			job_timing(session, done);
 
 		spin_unlock_irqrestore(&render->queue_lock, enabled);
 
@@ -628,6 +651,43 @@ powervr_render_jobs_reap(
 		load_draw_free(done->work, done->load);
 		powervr_timing_add(POWERVR_TIMING_JOB_RELEASE, started);
 		kern_free(done);
+	}
+}
+
+/*
+ * Notes when the TA and the 3D of a session's running render jobs were
+ * seen done, for the submission timing: a job whose geometry or fragment
+ * timeline reached its value takes now as that part's end.  The queue
+ * lock is held; the service calls it after each wakeup.
+ */
+void
+powervr_render_jobs_stamp(
+	struct powervr_session *session,
+	uint64_t now)
+{
+	struct powervr_render_context *context;
+	struct powervr_job_done *done;
+	uint32_t geometry_now;
+	uint32_t fragment_now;
+
+	/* A session without a render context runs no render jobs. */
+	context = session->render_context;
+	if (context == NULL)
+		return;
+
+	/* The timelines' values now. */
+	geometry_now = powervr_object_get32(&context->geometry.timeline, POWERVR_SYNC_ADDRESS);
+	fragment_now = powervr_object_get32(&context->fragment.timeline, POWERVR_SYNC_ADDRESS);
+
+	/* Each running job whose TA or 3D reached its value since the last look. */
+	for (done = session->jobs_done; done != NULL; done = done->next) {
+		/* Its TA, once the geometry's value is reached. */
+		if (done->ta_seen == 0U && (int32_t)(geometry_now - done->memory->marks.geometry_value) >= 0)
+			done->ta_seen = now;
+
+		/* Its 3D, once the fragment's value is reached. */
+		if (done->fragment_seen == 0U && (int32_t)(fragment_now - done->memory->marks.fragment_value) >= 0)
+			done->fragment_seen = now;
 	}
 }
 
@@ -2171,4 +2231,63 @@ job_draw_memory_room(
 
 	/* Succeeded: the room. */
 	return room;
+}
+
+/*
+ * Sums a reaped render job's GPU time for the submission timing: its TA
+ * from when it could start (its kick, the previous TA's end and the end
+ * of the 3D its geometry waited for) to its end, its 3D from the later of
+ * its TA's end and the previous 3D's end to its own end, and the time
+ * between the previous 3D's end and its own.  A part not seen done takes
+ * its end now.  The queue lock is held.
+ */
+static void
+job_timing(
+	struct powervr_session *session,
+	struct powervr_job_done *done)
+{
+	uint64_t now;
+	uint64_t ta_start;
+	uint64_t fragment_start;
+	unsigned index;
+
+	/* The parts the service did not see done end now. */
+	now = powervr_timing_now();
+	if (done->ta_seen == 0U)
+		done->ta_seen = now;
+	if (done->fragment_seen == 0U)
+		done->fragment_seen = now;
+
+	/* The TA's start: its kick, or later the previous TA's end or the end of the 3D its geometry waited for. */
+	ta_start = done->kicked;
+	if (session->timing_ta_done > ta_start)
+		ta_start = session->timing_ta_done;
+	for (index = 0; index < 2U; index++) {
+		/* Not the 3D the geometry waited for. */
+		if (done->waited_fragment == 0U || session->timing_fragment_values[index] != done->waited_fragment)
+			continue;
+
+		/* That 3D ended after the start so far. */
+		if (session->timing_fragment_ends[index] > ta_start)
+			ta_start = session->timing_fragment_ends[index];
+	}
+
+	powervr_timing_add_span(POWERVR_TIMING_GPU_TA, ta_start, done->ta_seen);
+
+	/* The 3D's start: its TA's end, or later the previous 3D's end. */
+	fragment_start = done->ta_seen;
+	if (session->timing_fragment_done > fragment_start)
+		fragment_start = session->timing_fragment_done;
+	powervr_timing_add_span(POWERVR_TIMING_GPU_3D, fragment_start, done->fragment_seen);
+
+	/* The time from the previous 3D's end, once there was one. */
+	if (session->timing_fragment_done != 0U)
+		powervr_timing_add_span(POWERVR_TIMING_GPU_FRAME, session->timing_fragment_done, done->fragment_seen);
+
+	/* This job's ends for the next one; its 3D value and end replace the older of the two kept. */
+	session->timing_ta_done = done->ta_seen;
+	session->timing_fragment_done = done->fragment_seen;
+	session->timing_fragment_values[session->timing_fragment_next] = done->memory->marks.fragment_value;
+	session->timing_fragment_ends[session->timing_fragment_next] = done->fragment_seen;
+	session->timing_fragment_next ^= 1U;
 }

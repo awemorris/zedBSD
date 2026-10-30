@@ -1634,6 +1634,34 @@ powervr_timing_add(
 }
 
 /*
+ * Adds the ticks from start to end to a part's sum and counts one more of
+ * it; a span whose end is not after its start counts as none.
+ */
+void
+powervr_timing_add_span(
+	enum powervr_timing_part part,
+	uint64_t start,
+	uint64_t end)
+{
+	uint64_t span;
+
+	/* Nothing when the timing is off. */
+	if (!POWERVR_SUBMIT_TIMING)
+		return;
+
+	/* The span, none when the stamps are out of order. */
+	span = 0;
+	if (end > start)
+		span = end - start;
+
+	/* The part's time, count and longest. */
+	timing_ticks[part] += span;
+	timing_count[part]++;
+	if (span > timing_most[part])
+		timing_most[part] = span;
+}
+
+/*
  * Says the submission timing's sums once TIMING_REPORT_MS passed since
  * the last report: for each part its count, its average and total and its longest in
  * microseconds, then clears them.  Only the timing's thread calls it.
@@ -1646,7 +1674,7 @@ timing_report(
 		"submit", "job setup", "job map", "job build", "job kick", "job wait", "job release", "transfer", "dispatch",
 		"wait ta", "wait 3d", "wait small job", "job build programs", "job build draws", "draw memory", "draw code",
 		"render jobs", "order wait", "reap", "target make", "buffer run", "buffer clear", "buffer alias", "buffer map",
-		"list make", "context make", "mmu flush",
+		"list make", "context make", "mmu flush", "gpu ta", "gpu 3d", "gpu frame",
 	};
 	uint64_t now;
 	uint64_t average;
@@ -2730,6 +2758,8 @@ service_pass(
 		enabled = spin_lock_irqsave(&render->queue_lock);
 
 		take_reached(session, &delivery);
+		if (POWERVR_SUBMIT_TIMING)
+			powervr_render_jobs_stamp(session, powervr_timing_now());
 		if (session->pending_count != 0U) {
 			pending = 1;
 

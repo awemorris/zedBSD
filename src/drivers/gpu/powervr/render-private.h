@@ -428,6 +428,18 @@ struct powervr_session {
 	struct powervr_job_done *jobs_done_tail;
 
 	/*
+	 * The submission timing's marks of the session's render jobs (only
+	 * with the timing on): when the last reaped job's TA and 3D were seen
+	 * done, and the 3D values and ends of the last two reaped jobs, one of
+	 * which a later job's geometry waited for.  Under the queue lock.
+	 */
+	uint64_t timing_ta_done;
+	uint64_t timing_fragment_done;
+	uint32_t timing_fragment_values[2];
+	uint64_t timing_fragment_ends[2];
+	unsigned timing_fragment_next;
+
+	/*
 	 * The memory of finished render jobs kept mapped for the next ones
 	 * (render-job.c), job_keep_count of them, under the queue lock; freed
 	 * with the session (powervr_render_jobs_forget).
@@ -643,6 +655,13 @@ void powervr_session_point_set(struct powervr_session *session, unsigned kind, u
 void powervr_render_jobs_reap(struct powervr_render *render, struct powervr_session *session, int wait);
 void powervr_render_jobs_forget(struct powervr_render *render, struct powervr_session *session);
 
+/*
+ * Notes when the TA and the 3D of a session's running render jobs were
+ * seen done, for the submission timing; the queue lock is held
+ * (render-job.c).
+ */
+void powervr_render_jobs_stamp(struct powervr_session *session, uint64_t now);
+
 /* Frees the transfer memory a session kept mapped, when the session ends (transfer-job.c). */
 void powervr_transfer_forget(struct powervr_render *render, struct powervr_session *session);
 
@@ -785,6 +804,12 @@ const struct powervr_target_layout *powervr_target_layout_of(const struct powerv
 
 /* Takes the half of a target the next render uses; renders alternate between the two (render-target.c). */
 unsigned powervr_target_take_half(struct powervr_target *target);
+
+/* Reports the 3D value of the last render kicked on one half of a target, 0 for none (render-target.c). */
+uint32_t powervr_target_half_fragment(const struct powervr_target *target, unsigned half);
+
+/* Notes the 3D value of the render just kicked on one half of a target (render-target.c). */
+void powervr_target_half_note(struct powervr_target *target, unsigned half, uint32_t fragment_value);
 
 /* Reads the parameter manager's catalogues from one half of a target's record (render-target.c). */
 void powervr_target_catalogues(const struct powervr_target *target, unsigned half, uint64_t catalogues[POWERVR_TARGET_CATALOGUES]);

@@ -409,11 +409,17 @@ enum powervr_timing_part {
 	POWERVR_TIMING_LIST_MAKE,
 	POWERVR_TIMING_CONTEXT_MAKE,
 	POWERVR_TIMING_MMU_FLUSH,
+	POWERVR_TIMING_GPU_TA,
+	POWERVR_TIMING_GPU_3D,
+	POWERVR_TIMING_GPU_FRAME,
 	POWERVR_TIMING_PARTS
 };
 
 /* Adds the ticks since start to a part's sum and counts one more of it (render-queue.c). */
 void powervr_timing_add(enum powervr_timing_part part, uint64_t start);
+
+/* Adds the ticks from start to end to a part's sum and counts one more of it (render-queue.c). */
+void powervr_timing_add_span(enum powervr_timing_part part, uint64_t start, uint64_t end);
 
 /* The timer's ticks now, for a part's start (render-queue.c). */
 uint64_t powervr_timing_now(void);
