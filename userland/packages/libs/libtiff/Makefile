@@ -111,8 +111,8 @@ libtiff: $(ZEDBSD_LIBTIFF_STAGED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library under its SONAME.  The headers and the .pc file go with the
-# development packages of the GTK port (WS115 p002).
+# The library under its SONAME.  The headers and the .pc file are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libtiff,TIFF image library,*,n,package,,y,\
 	packages/libs,libs/libtiff,libs/zlib libs/libjpeg-turbo))
 
@@ -121,3 +121,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter libtiff,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter libtiff,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_LIBTIFF_SONAME)=$(ZEDBSD_LIBTIFF_LIBRARY) \
 	--file /usr/share/licenses/libtiff/LICENSE.md=$(ZEDBSD_LIBTIFF_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libtiff,$(ZEDBSD_EXT_libtiff_STAGEDIR),\
+	$(addprefix include/,tiff.h tiffconf.h tiffio.h tiffvers.h) lib/pkgconfig/libtiff-4.pc,\
+	,\
+	$(ZEDBSD_LIBTIFF_SONAME)))

@@ -65,8 +65,8 @@ libepoxy: $(ZEDBSD_LIBEPOXY_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library goes in under its SONAME.  The headers and the .pc file go with
-# the development packages of the GTK port (WS115 p002).
+# The library goes in under its SONAME.  The headers and the .pc file are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libepoxy,GL function pointer loader,*,n,package,,y,\
 	packages/libs,libs/libepoxy,))
 
@@ -75,3 +75,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter libepoxy,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter libepoxy,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_LIBEPOXY_SONAME)=$(ZEDBSD_LIBEPOXY_LIBRARY) \
 	--file /usr/share/licenses/libepoxy/COPYING=$(ZEDBSD_LIBEPOXY_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libepoxy,$(ZEDBSD_EXT_libepoxy_STAGEDIR),\
+	lib/pkgconfig/epoxy.pc,\
+	include/epoxy,\
+	$(ZEDBSD_LIBEPOXY_SONAME)))

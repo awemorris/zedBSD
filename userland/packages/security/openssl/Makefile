@@ -117,3 +117,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter openssl,$(ZEDBSD_USER_PROGRAMS)),\
 	--file $(ZEDBSD_PACKAGE_BINDIR)/openssl=$(ZEDBSD_OPENSSL_APP) \
 	--file /etc/ssl/openssl.cnf=$(ZEDBSD_OPENSSL_CONF) \
 	--file /usr/share/licenses/openssl/LICENSE.txt=$(ZEDBSD_OPENSSL_LICENSE))
+
+# The development files: the headers and the .pc files.  The libraries are
+# installed under their unversioned SONAMEs, so they need no links.
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,openssl,$(ZEDBSD_EXT_openssl_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,libcrypto.pc libssl.pc openssl.pc),\
+	include/openssl,\
+	))

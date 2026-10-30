@@ -73,8 +73,7 @@ libxkbcommon: $(ZEDBSD_LIBXKBCOMMON_CHECKED)
 # ---------------------------------------------------------------- packaging
 
 # The library under its SONAME; the data comes with xkeyboard-config.  The
-# headers and the .pc file go with the development packages of the GTK port
-# (WS115 p002).
+# headers and the .pc file are the development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libxkbcommon,Keymap handling library,*,n,package,,y,\
 	packages/libs,libs/libxkbcommon,libs/xkeyboard-config))
 
@@ -83,3 +82,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter libxkbcommon,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter libxkbcommon,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_LIBXKBCOMMON_SONAME)=$(ZEDBSD_LIBXKBCOMMON_LIBRARY) \
 	--file /usr/share/licenses/libxkbcommon/LICENSE=$(ZEDBSD_LIBXKBCOMMON_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libxkbcommon,$(ZEDBSD_EXT_libxkbcommon_STAGEDIR),\
+	lib/pkgconfig/xkbcommon.pc,\
+	include/xkbcommon,\
+	$(ZEDBSD_LIBXKBCOMMON_SONAME)))

@@ -92,8 +92,7 @@ libjpeg-turbo: $(ZEDBSD_LIBJPEG_TURBO_STAGED)
 # ---------------------------------------------------------------- packaging
 
 # The library under its SONAME, with LICENSE.md and the IJG notice it
-# points to.  The headers and the .pc file go with the development packages
-# of the GTK port (WS115 p002).
+# points to.  The headers and the .pc file are the development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libjpeg-turbo,JPEG image codec,*,n,package,,y,\
 	packages/libs,libs/libjpeg-turbo,))
 
@@ -104,3 +103,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter libjpeg-turbo,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_LIBJPEG_TURBO_SONAME)=$(ZEDBSD_LIBJPEG_TURBO_LIBRARY) \
 	--file /usr/share/licenses/libjpeg-turbo/LICENSE.md=$(ZEDBSD_LIBJPEG_TURBO_LICENSE) \
 	--file /usr/share/licenses/libjpeg-turbo/README.ijg=$(ZEDBSD_LIBJPEG_TURBO_README_IJG))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libjpeg-turbo,$(ZEDBSD_EXT_libjpeg-turbo_STAGEDIR),\
+	$(addprefix include/,jconfig.h jerror.h jmorecfg.h jpeglib.h) lib/pkgconfig/libjpeg.pc,\
+	,\
+	$(ZEDBSD_LIBJPEG_TURBO_SONAME)))

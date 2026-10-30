@@ -164,6 +164,24 @@ define ZEDBSD_EXTERNAL_VIEW
 	done
 endef
 
+# The development files a package puts in the root beside its libraries, so
+# that a program can be compiled against them on the running system: the
+# headers, the .pc files and the unversioned name of each library the linker
+# looks for.  $(1) = the program (installed only when it is selected),
+# $(2) = its stage, $(3) = files under the stage's usr/ (a header, a .pc file),
+# $(4) = directories under usr/ that go as a whole (a library's own include
+# directory), $(5) = the libraries' SONAMEs, each of which gets its name
+# without the version as a link to it in /usr/lib (libcairo.so.2 gives
+# libcairo.so).  The stage is among the package's inputs through its own
+# stamp, and the root is staged after it, so the files exist by then.
+define ZEDBSD_EXTERNAL_DEVELOPMENT
+ZEDBSD_PACKAGE_FILES += $$(if $$(filter $(1),$$(ZEDBSD_USER_PROGRAMS)),\
+	$(foreach file,$(3),--file /usr/$(file)=$(2)/usr/$(file)) \
+	$(foreach directory,$(4),--subtree /usr/$(directory)=$(2)/usr/$(directory)))
+ZEDBSD_PACKAGE_LINKS += $$(if $$(filter $(1),$$(ZEDBSD_USER_PROGRAMS)),\
+	$(foreach soname,$(5),/usr/lib/$(basename $(soname))=$(soname)))
+endef
+
 # A Meson package after ZEDBSD_EXTERNAL_SOURCE.  $(1) = package name.  It reads
 #
 #   ZEDBSD_EXT_<name>_MAKEFILE       the package's Makefile (its options live there)

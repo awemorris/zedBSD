@@ -114,11 +114,18 @@ libavcodec: $(ZEDBSD_LIBAVCODEC_STAGED)
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,libavcodec,FFmpeg audio and video libraries (LGPL),*,n,package,,y,\
 	packages/multimedia,multimedia/libavcodec,))
 
-# The runtime: each library under its soname (the name the loader asks for) and the license texts.  The headers and
-# the unversioned links belong to the link step and stay in the staging tree, which the player is built against.
+# Each library under its soname (the name the loader asks for) and the license texts.  The headers, the .pc files
+# and the unversioned links are the development files below.
 ZEDBSD_PACKAGE_INPUTS += $(if $(filter libavcodec,$(ZEDBSD_USER_PROGRAMS)),\
 	$(ZEDBSD_LIBAVCODEC_STAGED_LIBRARIES) $(ZEDBSD_LIBAVCODEC_LICENSES))
 ZEDBSD_PACKAGE_FILES += $(if $(filter libavcodec,$(ZEDBSD_USER_PROGRAMS)),\
 	$(foreach library,$(ZEDBSD_LIBAVCODEC_LIBRARIES),--file /usr/lib/$(library)=$(ZEDBSD_EXT_libavcodec_STAGEDIR)/usr/lib/$(library)) \
 	--file /usr/share/licenses/ffmpeg/COPYING.LGPLv2.1=$(ZEDBSD_EXT_libavcodec_SRCDIR)/COPYING.LGPLv2.1 \
 	--file /usr/share/licenses/ffmpeg/LICENSE.md=$(ZEDBSD_EXT_libavcodec_SRCDIR)/LICENSE.md)
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libavcodec,$(ZEDBSD_EXT_libavcodec_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,libavcodec.pc libavformat.pc libavutil.pc libswresample.pc libswscale.pc),\
+	$(addprefix include/,libavcodec libavformat libavutil libswresample libswscale),\
+	$(ZEDBSD_LIBAVCODEC_LIBRARIES)))

@@ -116,3 +116,9 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter libpng,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_LINKS += $(if $(filter libpng,$(ZEDBSD_USER_PROGRAMS)),\
 	/usr/lib/libpng16.so=$(ZEDBSD_LIBPNG_SONAME) \
 	/usr/lib/libpng.so=libpng16.so)
+
+# libpng.pc, the name without the version some builds ask pkg-config for.
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libpng,$(ZEDBSD_EXT_libpng_STAGEDIR),\
+	lib/pkgconfig/libpng.pc,\
+	,\
+	))

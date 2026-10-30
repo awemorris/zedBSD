@@ -102,9 +102,8 @@ glib: $(ZEDBSD_GLIB_CHECKED)
 # ---------------------------------------------------------------- packaging
 
 # Each library goes in under its SONAME, which is the name the loader asks
-# for.  This is the runtime: the headers, the .pc files and the GIO tools go
-# with the development packages of the GTK port (WS115 p002), which are what
-# compiles against GLib on the target.
+# for.  The headers and the .pc files are the development files below; the
+# GIO tools are not installed.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,glib,GLib utility library,*,n,package,,y,\
 	packages/libs,libs/glib,libs/libffi libs/pcre2 libs/zlib))
 
@@ -114,3 +113,11 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter glib,$(ZEDBSD_USER_PROGRAMS)),\
 	$(foreach library,$(ZEDBSD_GLIB_LIBRARIES),\
 		--file /usr/lib/$(ZEDBSD_GLIB_SONAME_$(library))=$(call ZEDBSD_GLIB_REALNAME,$(library))) \
 	--file /usr/share/licenses/glib/COPYING=$(ZEDBSD_GLIB_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,glib,$(ZEDBSD_EXT_glib_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,glib-2.0.pc gobject-2.0.pc gio-2.0.pc gio-unix-2.0.pc gmodule-2.0.pc \
+	gmodule-export-2.0.pc gmodule-no-export-2.0.pc gthread-2.0.pc),\
+	include/glib-2.0 include/gio-unix-2.0 lib/glib-2.0/include,\
+	$(foreach library,$(ZEDBSD_GLIB_LIBRARIES),$(ZEDBSD_GLIB_SONAME_$(library)))))
