@@ -958,7 +958,7 @@ usb_hid_completion(
 
 	/* Handles the worker availability. */
 	if (worker != NULL)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 }
 
 /* Joins the gate that lets a transfer be submitted. */
@@ -1260,7 +1260,7 @@ usb_hid_join_worker(
 	/* Handles the worker condition. */
 	if (worker == curthread)
 		return EBUSY;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
 	       THREAD_ZOMBIE)
@@ -1295,7 +1295,7 @@ usb_hid_close_admission(
 
 	/* Handles the worker availability. */
 	if (hid->worker != NULL)
-		kernel_notify_task(hid->worker->task);
+		sched_notify_task(hid->worker->task);
 	/* Continue until the operation reaches a terminal state. */
 	for (;;) {
 		irq = spin_lock_irqsave(&hid->lock);

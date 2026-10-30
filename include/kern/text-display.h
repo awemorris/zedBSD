@@ -216,6 +216,18 @@ void kern_text_progress(void);
 void kern_text_progress_end(void);
 
 /*
+ * The kernel's console output, or NULL until a console draws it.
+ *
+ * A console driver publishes its character routine here with a release
+ * store once it can draw, and reads it with an acquire load to see whether
+ * another path was published first. Once it is set, the early console
+ * hands every character to it. It is called from interrupt context and
+ * from a fatal error, so the routine must not sleep and must take only
+ * interrupt-safe locks.
+ */
+extern void (*kernel_putc)(int c);
+
+/*
  * Ends the console's use of the display for good, for a display driver
  * that flipped its first image to the display or is about to give the
  * memory behind ranges (the processor physical ranges the driver's device

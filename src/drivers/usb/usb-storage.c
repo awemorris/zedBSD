@@ -2160,7 +2160,7 @@ storage_control_stop(
 	if (worker == NULL)
 		return 0;
 	atomic_raw_store_release(&storage->control_stopping, 1U);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 	deadline = sched_ticks() + kern_ms_to_ticks(STORAGE_CONTROL_STOP_MS);
 	/* Continue while the operation condition remains true. */
 	while (atomic_raw_load_acquire((volatile unsigned *)&worker->state) !=
@@ -2299,7 +2299,7 @@ storage_attach(
 
 	(void)drv_usb_interface_set_driver_data(interface, storage);
 	atomic_raw_store_release(&storage->control_ready, 1U);
-	kernel_notify_task(storage->control_worker->task);
+	sched_notify_task(storage->control_worker->task);
 
 	/* Says that the reader waits for a medium in any of its LUNs. */
 	if (medium_absent && maximum_lun == 0) {

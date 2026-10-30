@@ -560,7 +560,7 @@ ehci_retirement_worker_wakeup(
 	}
 
 	__atomic_store_n(&controller->retirement_pending, 1U, __ATOMIC_RELEASE);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
@@ -588,7 +588,7 @@ ehci_root_worker_arm(
 	controller->root_ready = 1;
 	controller->root_wake_generation++;
 	worker = controller->root_worker;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
@@ -3675,7 +3675,7 @@ ehci_root_worker_stop(
 	__atomic_store_n(&controller->root_stopping, 1U, __ATOMIC_RELEASE);
 	controller->root_ready = 0;
 	controller->root_wake_generation++;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	/*
 	 * Fatal shutdown runs on the retirement worker.  A root dispatch may be
@@ -3859,7 +3859,7 @@ ehci_retirement_worker_stop(
 	controller->retirement_joining = 1;
 	__atomic_store_n(&controller->retirement_stopping, 1U,
 			 __ATOMIC_RELEASE);
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 
@@ -4174,7 +4174,7 @@ ehci_root_worker_request_stop(
 	/* Handles the worker availability. */
 	worker = controller->root_worker;
 	if (worker != NULL && !controller->root_joining)
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }
@@ -4202,7 +4202,7 @@ ehci_root_event_defer(
 
 	__atomic_store_n(&controller->root_pending, 1U, __ATOMIC_RELEASE);
 	controller->root_wake_generation++;
-	kernel_notify_task(worker->task);
+	sched_notify_task(worker->task);
 
 	spin_unlock_irqrestore(&controller->active_lock, irq);
 }

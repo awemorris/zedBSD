@@ -316,7 +316,7 @@ usb_ccid_detach(
 	if (worker != NULL) {
 		if (worker == curthread)
 			return EBUSY;
-		kernel_notify_task(worker->task);
+		sched_notify_task(worker->task);
 		for (;;) {
 			state = atomic_raw_load_acquire((volatile unsigned *)&worker->state);
 			if (state == THREAD_ZOMBIE)
