@@ -132,3 +132,5 @@
 
 「はい、2～4は推しでOKです。」（Q1 の問い: 2 は `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせ（`VkExternalMemoryImageCreateInfo` を swapchain の作成に付け、`vkGetMemoryFdKHR` で出す）、4 は同じ画像を再び acquire できた事で画面から外れたと知る）
 → 判断 1〜4 は全て決まった。p015 は uncleared（判断待ち）から planned に戻し、実装に入れる。
+
+- 2026-10-31 ユーザーから、game mode（全画面の 3D）では mouse の cursor を表示しない事にする、という趣旨の指示を受けた。

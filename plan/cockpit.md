@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:33（Q1）
+最終更新: 2026-10-31 01:34（Q1）
 
 ## 担当（P1〜P8）
 
@@ -95,12 +95,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 今の作業を止めている判断は無い。
 
-### 1. BUG-374（RTX の cursor の色が逆）の確かめ
-
-- 背景: P3 の調べで、nvrtx の driver が受ける cursor の画像は正しく、display の設定の値も NVIDIA の定義と合っていた。原因は未特定。P4 が続けて調べている（q1742）。
-- 決めてほしい事: 原因が絞れない時に、10.0.10.3 の画面で、game mode（全画面の 3D）の間と desktop の間で cursor の色が同じかを見ていただく試験を、お手すきの時の試験の一覧に置いてよいか。
-
-### 2. WS299 で見つかった、5330 の NVMe 以外の課題
+### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
 - 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）。idle と HWP は WS333 に入れた。WS299 そのものは、5330 が空いたら担当を付ける（2026-10-31 の指示、q1744）。
 - 残り 3 つ:
@@ -109,7 +104,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
   - libc の memcpy・memset の速さの続き（大きな copy、build の flag -fno-builtin -Os）。
 - 決めてほしい事: この 3 つを Bug にするか、WS にするか。
 
-### 3. P4 が 10-27 の記録の監査（q1660）の時に拾った候補（詳しくした物）
+### 2. P4 が 10-27 の記録の監査（q1660）の時に拾った候補（詳しくした物）
 
 - 背景: 10-27 に P4 が、完了した WS の記録を片付ける作業（記録の監査）の途中で、判断が要りそうな物を一覧にした。記録が短く、Q1 が調べ直した結果を書く。
 - (a) WS162（FIDO2 の login）を canceled にするか → 調べ直すと、WS162 は 2026-10-27 に「WS172・WS199 で達成」として completed になっていた。**判断は要らない（解決済み）**。
@@ -119,7 +114,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 - (e) `plan/ws004/tests/pci-msi-qemu.c` を残すか → QEMU の EDU という試験用の PCI の device で MSI の割り込みが届くかを見る kernel の試験の code。これを有効にする唯一の config（CONFIG_KERNEL_TEST_CHECKPOINTS）が消えたので、今は build されない。残す（config を作り直す）か、消すか。
 - (f) master-design-policy.md へ移す候補 約 25 件 → 各 WS の ws.md に書かれたユーザーの決定のうち、WS をまたいで効く物（設計の方針）を、全体の方針の文書に写すかどうか。一覧は Q1 が作り直して改めて聞く。
 
-### 5. UEFI の loader の GOP の mode（画面の解像度）の選び方
+### 3. UEFI の loader の GOP の mode（画面の解像度）の選び方
 
 - 背景: UEFI の firmware は、起動の時の画面の mode（解像度と pixel の形）を GOP（Graphics Output Protocol）という口で出す。zedBSD の UEFI の loader（`bootloader/uefi/video.c`）は、kernel に渡す前に mode を選ぶ。今の動きは次の 3 段。
   1. 起動の設定（zedbsd.cfg）に `video=幅x高さ` があれば、その大きさの mode にする。
@@ -133,7 +128,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
   - あわせて、amd64 の zedbsd.cfg の `video=640x480` を残すか外すか。
 - 決めてほしい事: (a)〜(c) のどれにするか。推しは (b)（monitor に合う、読めない時は今と同じ）。
 
-### 6. WS153（Settings の Apps の頁と third-party の app の repository）の U2〜U15
+### 4. WS153（Settings の Apps の頁と third-party の app の repository）の U2〜U15
 
 - 背景: [WS153](ws153/ws.md) は、第三者の app を repository から入れる仕組み（package の形、配り方、署名、Settings の Apps の頁）の WS。2026-10-05 に U1（導入の範囲は system 全体の /apps/）はユーザーが決めた。残りの U2〜U15 は「ユーザーが検討中（質問しない）」として止めていて、WS153 は p001 の後で保留。設計の文書は [ws153/design.md](ws153/design.md)（各項目に Q1 の推しがある）。
 - 項目（推しは design.md の表）:
@@ -147,7 +142,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
   - U12 展開の上限（package 256 MiB・展開 1 GiB など）。U13 導入の確認の dialog を誰が描くか（compositor）。U14 既定の app の UI を段 1 に入れるか（段 2）。U15 system 全体に入れる特権の helper（setuid root の小さな program）の口。
 - 決めてほしい事: 今は進めないなら、このまま保留（聞かない）。進めるなら、design.md の推しで決めてよい項目と、話し合いたい項目を教えてほしい。
 
-### 4. 以前からの物（変わっていない）
+### 5. 以前からの物（変わっていない）
 
 - WS282〜WS285（camera など）: 実装を始める時期、WS282 の試験の画面を出す PC と買う webcam。
 - BUG-345（Pi 5 の click が画面に出ない窓、再発したら知らせてもらう）。
@@ -162,6 +157,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | WS309・BUG-374 | game mode（全画面の 3D）では mouse の cursor を表示しない。BUG-374 はユーザーが今画面を見て確かめる | [ws309/ws.md](ws309/ws.md)・[BUG-374](bugs/BUG-374.md) |
 | 2026-10-31 | BUG-222 | 別の対応（WS315 の Realtek USB の vendor mode）で解決済みの見込みなので、試験だけ流して閉じる | [BUG-222](bugs/BUG-222.md) |
 | 2026-10-31 | 名前 | OS 名は zedBSD に決定（仮決めでなく）。Keiland・libkeiland は残す。変える時はユーザーが改めて伝える | [master.md](master.md) |
 | 2026-10-31 | 割り当て・整理 | PS/2 の aux を BUG-376 として起票し P6 へ。WS299 は 5330 が空いたら（q1744）、WS304 は P4 の Pi 5 の後（q1745）、WS306 は検討済みなので P5 が WS333 p001 の後に進める（q1746）。openXC7 の導入と LLVM の cache の upload は済み、保留の WS の整理は済み（項目を消した） | [queue.md](queue.md) |
