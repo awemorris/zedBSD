@@ -110,18 +110,20 @@ code を読んで分かった原因:
 
 出力の picture への複写（1080p で 3 MB/frame）の削減は WS318 p006a（ws.md の 2026-10-31 の引き継ぎ）、この Phase の外。
 
-### 6. 後の Phase への割り（案。番号は Q1 が決める。1 Phase = 1 回の起動）
+### 6. 後の Phase への割り（案。番号は付けない。1 Phase = 1 回の起動）
+
+2026-10-31 Q1: WS326 は p024 の最初の最適化（案 1、時間が有れば案 2 の bS）と p025（規約の見直し）で閉じる。下の続きは案のまま置き、別の WS にするかは Q1 がユーザーと決める。LTO・header の変更は今はしない。
 
 | 案の Phase | 内容 | 担当の案 | 試験 |
 | --- | --- | --- | --- |
 | p024（この Phase） | 計測・設計（済み）と最初の最適化: 案 1（interp の luma と chroma）、時間が有れば案 2 の bS | Opus | run-unit・check-skeleton・run-stream・run-host-decode・適合が前と同じ、run-speed の前後 |
-| p027 | 案 2 の残り（deblock の filter）と案 3（weight） | Sonnet 5.5 high（標準廉価実装手順: header を変えず、1 module の .c の中、単体試験と全体の試験が oracle） | 同上 |
-| p028 | 案 4（neighbour）・案 5（transform・syntax の消し）・案 6 の file の中の部分 | Sonnet 5.5 high（mb・transform・macroblock・cabac は別々の .c、並べてよい） | 同上 |
-| p029 | 段 B の thread の設計と実装（案 7 の (a)(b)）。decoder.c の流れ・slice の context の持ち方を変える | Opus（WS318 の thread.c の状態を Q1 と確かめてから） | 同上と ThreadSanitizer、run-speed の thread の数ごと |
-| p030 | 段 C の SIMD（必要な時だけ） | Opus か Sonnet（module ごと） | 同上と arm64 の build、QEMU の aarch64 の単体試験 |
-| p031 | Pi 5（Linux の上で同じ speed-bench を build）と 5330 の実測、換算の置き換え、目標の判定 | Q1 が実機を割り当てる担当 | run-speed を実機で（1 本の script） |
+| 続き a | 案 2 の残り（deblock の filter）と案 3（weight） | Sonnet 5.5 high（標準廉価実装手順: header を変えず、1 module の .c の中、単体試験と全体の試験が oracle） | 同上 |
+| 続き b | 案 4（neighbour）・案 5（transform・syntax の消し）・案 6 の file の中の部分 | Sonnet 5.5 high（mb・transform・macroblock・cabac は別々の .c、並べてよい） | 同上 |
+| 続き c | 段 B の thread の設計と実装（案 7 の (a)(b)）。decoder.c の流れ・slice の context の持ち方を変える | Opus（WS318 の thread.c の状態を Q1 と確かめてから） | 同上と ThreadSanitizer、run-speed の thread の数ごと |
+| 続き d | 段 C の SIMD（必要な時だけ） | Opus か Sonnet（module ごと） | 同上と arm64 の build、QEMU の aarch64 の単体試験 |
+| 続き e | Pi 5（Linux の上で同じ speed-bench を build）と 5330 の実測、換算の置き換え、目標の判定 | Q1 が実機を割り当てる担当 | run-speed を実機で（1 本の script） |
 
-- 依存: p027・p028 は p024 の後（p027 と p028 は file が別なので並べてよい）、p029 は p027・p028 の後（画素の処理が速くなった後の割合で thread を決める）、p030・p031 は p029 の後。規約の見直し p025 はこれらの後。
+- 依存: a・b は p024 の後（file が別なので並べてよい）、c は a・b の後（画素の処理が速くなった後の割合で thread を決める）、d・e は c の後。
 - 変えてはいけない物（各 Phase 共通）: `userland/desktop/libmedia/h264sw*.h`。p026 の merge の後は `vcodec*.h`（`vcodec.h`・`vcodec-bitreader.h`・`vcodec-nal.h`・`vcodec-cabac.h`）も。check-skeleton の BASE は p026 の merge の後は p026 の header の commit（Q1 が知らせる値）。
 - 段 A の各 Phase の受け入れ: 出力が bit 単位で同じ（run-stream・run-host-decode・適合の in 101 本が全 frame 一致、単体試験の数が同じか増える）、run-speed の best が前より上がる（数を phase.md に）。
 
