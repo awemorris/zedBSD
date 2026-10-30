@@ -670,9 +670,15 @@ powervr_render_jobs_stamp(
 	uint32_t geometry_now;
 	uint32_t fragment_now;
 
-	/* A session without a render context runs no render jobs. */
+	/*
+	 * Nothing to note without a running job: a session's render context
+	 * may still be being made (its timelines not yet mapped) until its
+	 * first job is kicked.
+	 */
+	if (session->jobs_done == NULL)
+		return;
 	context = session->render_context;
-	if (context == NULL)
+	if (context == NULL || !context->kicked)
 		return;
 
 	/* The timelines' values now. */
