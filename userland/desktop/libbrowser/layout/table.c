@@ -126,7 +126,6 @@ layout_table(
 	layout_unit used;
 	layout_unit containing;
 	layout_unit cursor;
-	layout_unit below;
 	layout_unit total;
 	layout_unit sizing;
 	int column;
@@ -195,7 +194,6 @@ layout_table(
 
 	/* The captions above the rows (those of caption-side: bottom are laid out for their height, and placed below the rows). */
 	cursor = 0;
-	below = 0;
 	for (child = box->first_child; child != NULL; child = child->next) {
 		if (child->out_of_flow || child->style.display != CSS_DISPLAY_TABLE_CAPTION)
 			continue;
@@ -203,7 +201,6 @@ layout_table(
 		if (error != 0)
 			break;
 		if (child->style.caption_side != 0) {
-			below += child->margin[CSS_TOP] + table_frame_down(child) + child->height + child->margin[CSS_BOTTOM];
 			continue;
 		}
 		child->x = child->margin[CSS_LEFT];
@@ -217,10 +214,10 @@ layout_table(
 	if (box->style.box_sizing != CSS_BOX_SIZING_BORDER)
 		sizing = box->border[CSS_TOP] + box->padding[CSS_TOP] + box->padding[CSS_BOTTOM] + box->border[CSS_BOTTOM];
 	if (box->style.height.unit == CSS_UNIT_PX)
-		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing - below;
+		total = layout_from_px(box->style.height.value) - table_frame_down(box) + sizing;
 	if (box->style.min_height.unit == CSS_UNIT_PX &&
-	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below > total)
-		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing - below;
+	    layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing > total)
+		total = layout_from_px(box->style.min_height.value) - table_frame_down(box) + sizing;
 
 	/* The rows, then the row groups around them. */
 	if (error == 0)
@@ -862,7 +859,7 @@ table_lay_rows(
 		layout_unit extra;
 		layout_unit given;
 
-		sum = *cursor + state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
+		sum = state->edge_y + state->edge_y + state->down * (layout_unit)(state->rows.count - 1U);
 		for (number = 0; number < state->rows.count; number++)
 			sum += heights[number];
 		extra = total - sum;

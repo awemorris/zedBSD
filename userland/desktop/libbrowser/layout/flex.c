@@ -49,6 +49,8 @@ struct flex_item {
 	int auto_minimum;
 	int frozen;
 	int violation;
+	/* A table item's height as its rows left it (a stretch does not shorten it). */
+	layout_unit table_height;
 };
 
 /*
@@ -1006,6 +1008,33 @@ flex_base_size(
 	/* Neither is the minimum. */
 	if (item->minimum < 0)
 		item->minimum = 0;
+
+	/* A table in a row is never narrower than its columns' least width, whatever minimum it is given. */
+	if (row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+	    child->style.writing_mode == CSS_WRITING_HORIZONTAL_TB && box->style.writing_mode == CSS_WRITING_HORIZONTAL_TB &&
+	    !child->replaced) {
+		struct layout_context table_context;
+		struct wb_vector table_floats;
+		struct css_length table_width;
+		layout_unit least;
+
+		/* Laid out in no room, its width is the least. */
+		table_width = child->style.width;
+		child->style.width.unit = CSS_UNIT_AUTO;
+		tree->measuring++;
+		layout_context_begin(tree, &table_context, &table_floats);
+		error = layout_block(tree, child, 0);
+		layout_context_end(tree, &table_context);
+		tree->measuring--;
+		child->style.width = table_width;
+		if (error != 0)
+			return error;
+		least = child->width;
+		if (child->style.box_sizing == CSS_BOX_SIZING_BORDER)
+			least += item->frame;
+		if (item->minimum < least - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? item->frame : 0))
+			item->minimum = least - (child->style.box_sizing == CSS_BOX_SIZING_BORDER ? item->frame : 0);
+	}
 
 	/* A table never gets narrower than its content: an orthogonal one's width is its block size, which its rows give. */
 	if (row && (child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
@@ -2336,6 +2365,7 @@ flex_place_line(
 			offset = reverse_extent - cursor - main_outer + items[index].margin_start;
 
 		/* Across: stretched, at the start, the end or the center of the line. */
+		items[index].table_height = child->height;
 		align = flex_align_of(box, child);
 		cross_outer = flex_cross_outer(child, row);
 		if (row && align == CSS_ALIGN_STRETCH && child->style.height.unit == CSS_UNIT_AUTO) {
@@ -2356,6 +2386,11 @@ flex_place_line(
 				/* Content inside a larger frame cannot have a negative height. */
 				if (child->height < 0)
 					child->height = 0;
+
+				/* A table stretched is no shorter than its rows and captions. */
+				if ((child->style.display == CSS_DISPLAY_TABLE || child->style.display == CSS_DISPLAY_INLINE_TABLE) &&
+				    items[index].table_height > child->height)
+					child->height = items[index].table_height;
 			}
 
 			/* Placement sees the actual cross size, including any cross constraints. */
