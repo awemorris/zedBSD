@@ -37,7 +37,7 @@
 | [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | cleared（2026-10-30 Q1、0f60bee4a。phase008〜017、design §13、design-reviewer 21 件を反映） | p003 |
 | [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | planned | p007 |
 | [ws327-p009](phase009/phase.md) | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | planned | p007 |
-| [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | planned | p007 |
+| [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | cleared（2026-10-30 Q1、main ff55398bf。zedBSD 3 arch の build warning 0、check-layers PASS。動作は p016 の QEMU で） | p007 |
 | [ws327-p011](phase011/phase.md) | Settings（look・storage-scan・storage-trash）の移行 | Sonnet | planned | p007 |
 | [ws327-p012](phase012/phase.md) | IME の辞書の thread、libkeiland の picker-model・audio の移行 | Sonnet | planned | p007 |
 | [ws327-p013](phase013/phase.md) | `thread-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | cleared（2026-10-30 Q1、main 93e627b96。mingw x86_64・i686 で compile と link PASS・warning 0、sleep は QPC、cpu_count は affinity。Win32 で header が揺れる 5 点は phase013 の結果、p016 で Q1 に一覧） | p007 |
