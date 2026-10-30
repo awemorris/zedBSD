@@ -6,7 +6,7 @@
  * MAIN returns 0 when every check holds, or the number of the first check
  * that failed.  The loaded tables are support/dynamic.asl and
  * support/dynamic2.asl, whose bytes the test runner writes to
- * build/ws049/asl/support/*.inc.
+ * build/aml-host/asl/support/*.inc.
  */
 DefinitionBlock ("", "DSDT", 2, "ZEDBSD", "LOAD", 1)
 {

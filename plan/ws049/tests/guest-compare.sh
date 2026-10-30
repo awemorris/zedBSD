@@ -14,7 +14,7 @@ cd "$root" || exit 1
 export GUEST_RUNTIME=${GUEST_RUNTIME:-build/ws049-guest-run}
 guest=plan/tools/guest/guest.py
 out=build/ws049/guest
-host=build/ws049/host/aml-host
+host=build/aml-host/aml-host
 rm -rf "$out"
 mkdir -p "$out"
 

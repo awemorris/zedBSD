@@ -4,7 +4,7 @@
 # every DSDT in QEMU's ACPI test data.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
-#   plan/ws049/tests/compare-corpus.sh [QEMU_SOURCE]
+#   plan/tools/aml-host/compare-corpus.sh [QEMU_SOURCE]
 #
 # QEMU_SOURCE defaults to ~/qemu-pc98 (a QEMU source tree; its
 # tests/data/acpi holds the expected tables of each machine and option).
@@ -27,10 +27,10 @@ for dsdt in $(find "$data" -name 'DSDT*' -type f | sort); do
 		set -- "$@" "$ssdt"
 	done
 	name=$(echo "${dsdt#$data/}" | tr '/' '_')
-	if "$repo/plan/ws049/tests/compare-namespace.sh" "$name" "$@" > /dev/null &&
-	    python3 "$repo/plan/ws049/tests/compare-devices.py" "$name" "$@" > /dev/null &&
-	    python3 "$repo/plan/ws049/tests/compare-devices.py" --methods "$name-methods" "$@" > /dev/null &&
-	    python3 "$repo/plan/ws049/tests/compare-devices.py" --init "$name-init" "$@" > /dev/null; then
+	if "$repo/plan/tools/aml-host/compare-namespace.sh" "$name" "$@" > /dev/null &&
+	    python3 "$repo/plan/tools/aml-host/compare-devices.py" "$name" "$@" > /dev/null &&
+	    python3 "$repo/plan/tools/aml-host/compare-devices.py" --methods "$name-methods" "$@" > /dev/null &&
+	    python3 "$repo/plan/tools/aml-host/compare-devices.py" --init "$name-init" "$@" > /dev/null; then
 		pass=$((pass + 1))
 	else
 		fail=$((fail + 1))
