@@ -3,7 +3,7 @@
 # ws309-p015 game mode の V2: display の swapchain の image を client に貸す（libvulkan の export、compositor の受け渡し）
 
 - 親: [WS309](../ws.md)、設計 [design.md](../design.md) §6（J1 の決定「V2 swapchain 共有 (推し)」）。Queue: q1662-i10（P1）。
-- 状態: uncleared（2026-10-29 q1662-i10 P1: 実装に入る前に決める事がある。下の「要る判断」。source の変更なし）。
+- 状態: planned（2026-10-30 判断 1〜4 がユーザーの回答で決まった: 1 (a)・全画面と窓の切り替えは compositor の都合で app は気づかない、2〜4 は推し。旧: uncleared、判断待ち）。
 - 依存: p013（cleared、T4 と暫定の ioctl）。
 
 ## 今（main 868318312 の後、branch `agent/p1-ws309i`）

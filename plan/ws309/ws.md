@@ -116,7 +116,7 @@
 | [ws309-p012](phase012/phase.md) | display の thread（swapchain・modeset・回転・hotplug の列挙・scanout の可否と claim・release・backlight、seat の pause）。回転の壁紙（`kwl_glass_size_prepare`）を A1・T9 へ（p010 から、2026-10-29 Q1 の判断）。BUG-353 をこの中で直し、受け入れに RTX の再現（`plan/ws291/tests/rtx-mview-order.sh`、実機の枠は Q1、2026-10-29 Q1 の決定） | cleared（q1662-i09: 非同期の park と drain・T3・移動・window mode・ゲームモード・回転・head・列挙・backlight・lid、glass maps と層の絵を保つ。QEMU resize・grave・hand・scanout・rotate PASS、RTX `rtx-bug353-pair.sh` PASS（BUG-353）。backlight・lid の実機は未実施） | p009 |
 | [ws309-p013](phase013/phase.md) | present の常駐の thread（暫定の ioctl、共通の wake） | cleared（QEMU `scanout-guest.sh`・`resize-guest.sh` PASS。実機・arm64・riscv64・FreeBSD の build は未実施） | p012 |
 | [ws309-p014](phase014/phase.md) | process の起動（J5 の形）と clipboard の書き込みを poll で | cleared（libc に addclosefrom_np（Q1 の決定）、QEMU `spawn-guest.sh`・libc の `spawn-closefrom/run.sh`、host `clip-write` PASS。input method の起動と実機は未実施） | p005、J5 |
-| [ws309-p015](phase015/phase.md) | game mode の V2: libvulkan の display の swapchain の image の export、compositor の受け渡し | uncleared（2026-10-29: 実装の前に判断が要る（client 側の形・新しい private の protocol・libvulkan の export の口）、phase.md の「要る判断」） | p013 |
+| [ws309-p015](phase015/phase.md) | game mode の V2: libvulkan の display の swapchain の image の export、compositor の受け渡し | planned（2026-10-30 判断 1〜4 が決まった。旧: uncleared、2026-10-29: 実装の前に判断が要る（client 側の形・新しい private の protocol・libvulkan の export の口）、phase.md の「要る判断」） | p013 |
 | [ws309-p016](phase016/phase.md) | Linux・FreeBSD の seat 経由の入力の open（J4）と seat の callback の detach の ack を wake で受ける形（p004 から） | cleared（seat の let-go・paused_done の契約、logind の TakeDevice を bus で、Linux の gdm の guest PASS、FreeBSD の native の build と host-seat-freebsd PASS。let-go を待つ経路は host 試験だけ） | p003 |
 | [ws309-p017](phase017/phase.md) | QEMU の回帰（Venus: 基準・GPU の境界・`KWL THREADS`・`KWL PERF pass`）と遅さの注入の host 試験 | cleared（WS309 の guest 試験 16・forge・fence PASS、C1・C2 PASS、C9 の p052・p076 は前の image でも FAIL（load）、p126 などの kei→user の追従、io-file の安定化） | p003〜p014 |
 | [ws309-p018](phase018/phase.md) | 規約の全文の見直し | cleared（31 file の書き方、style-check の WS309 の行 88→9） | 全て |
@@ -127,3 +127,8 @@
 
 「WS309の判断ですが、appは意識せずに、コンポジタの都合で、全画面とウィンドウを切り替えられるようにしたいです。そうすると、app側は(a)しかありえないのではないでしょうか。」
 → 解釈（Q1）: 判断 1 は (a)（libvulkan の Wayland の WSI が、game mode の間だけ compositor から借りた画像を swapchain の画像として使う。app は変更なし）。加えて、全画面と窓の切り替えは compositor が決め、app は気づかない（libvulkan の WSI が窓の経路と借りた画像の経路を内部で切り替える。swapchain の作り直しを app に求めない形を設計の目標にする）。判断 2〜4 は未回答。
+
+## p015 の判断 2〜4（2026-10-30 ユーザー、原文）
+
+「はい、2～4は推しでOKです。」（Q1 の問い: 2 は `keiland_game_surface_v1` を作る、3 は標準の型の組み合わせ（`VkExternalMemoryImageCreateInfo` を swapchain の作成に付け、`vkGetMemoryFdKHR` で出す）、4 は同じ画像を再び acquire できた事で画面から外れたと知る）
+→ 判断 1〜4 は全て決まった。p015 は uncleared（判断待ち）から planned に戻し、実装に入れる。
