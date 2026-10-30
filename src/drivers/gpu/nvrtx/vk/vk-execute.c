@@ -96,6 +96,17 @@
 #define EXECUTE_RECORD_ROOM		32768U
 
 /*
+ * The application draws after which a push buffer is put on the GPU: the
+ * first of a command buffer's run after a few, so the GPU (idle when a
+ * frame is submitted) starts while the CPU writes the rest, the others
+ * after more.  A draw is written in about half the time the GPU takes to
+ * run it, so push buffers this short keep the GPU fed (a long one left
+ * it waiting for the CPU to finish it).
+ */
+#define EXECUTE_FIRST_DRAWS		256U
+#define EXECUTE_RUN_DRAWS		2048U
+
+/*
  * A texture handle: the header's index, and the sampler's from bit 20.
  *
  * Value referenced: Mesa 25.3.6 src/nouveau/vulkan/nvk_descriptor_types.h
@@ -275,7 +286,9 @@ struct execute_held {
  * the last application draw.  at is
  * where the push buffer goes on, constants, headers and samplers how much
  * of their parts the push buffer uses, draws and quads how many
- * application draws and own quads it holds (for the node's counts).  The
+ * application draws and own quads it holds (for the node's counts); early
+ * says the push buffer is a command buffer's first, put on the GPU after
+ * EXECUTE_FIRST_DRAWS draws (the others after EXECUTE_RUN_DRAWS).  The
  * programs are compiled once, into a run of their own.
  */
 struct nvrtx_vk_execute {
@@ -290,6 +303,7 @@ struct nvrtx_vk_execute {
 	uint32_t draws;
 	uint32_t quads;
 	bool started;
+	bool early;
 	bool class_ready;
 	void *program_token;
 	uint8_t *program_cpu;
@@ -455,7 +469,8 @@ nvrtx_vk_execute(
 		error = execute_start(session, execute);
 	}
 
-	/* Each record in order, the push buffer put on the GPU when it fills. */
+	/* Each record in order, the push buffer put on the GPU when it fills (the first one early). */
+	execute->early = true;
 	for (index = 0U; index < command->record_count && error == 0; index++) {
 		error = execute_room(session, execute, state);
 		if (error != 0)
@@ -861,7 +876,8 @@ execute_drain(
 
 /*
  * Makes room for one record: runs the push buffer when the record could
- * pass its end or the run's other parts are nearly used.  The target is
+ * pass its end or the run's other parts are nearly used, or when it holds
+ * its share of draws (fewer for a command buffer's first).  The target is
  * written again in the next push buffer.
  */
 static int
@@ -881,13 +897,20 @@ execute_room(
 		full = true;
 	if (execute->headers + NVRTX_VK_REGIONS_MAX + NVRTX_VK_TEXTURES_MAX > EXECUTE_POOL_ENTRIES)
 		full = true;
+
+	/* The command buffer's first push buffer goes to the idle GPU after a few draws, the others after more. */
+	if (execute->early && execute->draws >= EXECUTE_FIRST_DRAWS)
+		full = true;
+	if (execute->draws >= EXECUTE_RUN_DRAWS)
+		full = true;
 	if (!full)
 		return 0;
 
-	/* Runs what there is. */
+	/* Runs what there is; the push buffers after it fill. */
 	error = execute_flush(session, execute);
 	if (error != 0)
 		return error;
+	execute->early = false;
 
 	/* Succeeded: the next push buffer has room; its target is written anew. */
 	state->target_written = false;

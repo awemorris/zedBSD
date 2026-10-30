@@ -44,6 +44,21 @@
 #define RECORD_COLOUR_TAG		2U
 #define RECORD_COLOUR_WORDS		4U
 
+/*
+ * The bytes of the commands a draw records as the short way reads them: the
+ * header (the opcode and the reply flag), the command buffer, then
+ * vkCmdDrawIndexed's five counts, vkCmdDraw's four, vkCmdBindPipeline's bind
+ * point and pipeline, vkCmdBindDescriptorSets with one set and no dynamic
+ * offsets, and vkCmdPushConstants up to its bytes.
+ */
+#define RECORD_QUICK_HEADER		8U
+#define RECORD_QUICK_BUFFER		8U
+#define RECORD_QUICK_DRAW_INDEXED	20U
+#define RECORD_QUICK_DRAW		16U
+#define RECORD_QUICK_PIPELINE		12U
+#define RECORD_QUICK_SETS		48U
+#define RECORD_QUICK_PUSH		28U
+
 static int record_decode(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader, struct nvrtx_vk_record *record, uint8_t *push);
 static int record_hold(struct nvrtx_vk_session *session, struct nvrtx_vk_record *record, enum i915_vk_object_kind kind, uint64_t identity);
 static int record_pipeline(struct nvrtx_vk_session *session, struct i915_wire_reader *reader, struct nvrtx_vk_record *record);
@@ -63,6 +78,14 @@ static int record_begin_pass(struct nvrtx_vk_session *session, struct i915_wire_
 static int record_line_width(struct i915_wire_reader *reader);
 static int record_room(struct nvrtx_vk_command_buffer *command, uint32_t opcode);
 static void record_drop(struct nvrtx_vk_record *record);
+static bool record_quick(struct nvrtx_vk_session *session, uint32_t opcode, struct i915_wire_reader *reader);
+static bool record_quick_taken(uint32_t opcode);
+static bool record_quick_one(struct nvrtx_vk_session *session, struct nvrtx_vk_command_buffer *command, uint32_t opcode, const uint8_t *arguments, size_t left, size_t *taken);
+static bool record_quick_pipeline(struct nvrtx_vk_session *session, const uint8_t *bytes, struct nvrtx_vk_record *record);
+static bool record_quick_sets(struct nvrtx_vk_session *session, const uint8_t *bytes, struct nvrtx_vk_record *record);
+static bool record_quick_push(struct nvrtx_vk_command_buffer *command, const uint8_t *bytes, size_t left, struct nvrtx_vk_record *record, size_t *taken);
+static uint32_t record_word(const uint8_t *bytes);
+static uint64_t record_wide(const uint8_t *bytes);
 
 /*
  * Records one vkCmd* command; *handled stays clear for an opcode of
@@ -83,12 +106,24 @@ nvrtx_vk_record_route(
 	uint8_t push[NVRTX_VK_PUSH_BYTES];
 	uint8_t *bytes;
 	uint64_t identity;
+	bool quick;
 	bool video;
 	int refused;
 	int room;
 
 	UNUSED_PARAMETER(requested);
 	UNUSED_PARAMETER(reply);
+
+	/*
+	 * The commands of each draw, for a recording command buffer with room,
+	 * take the short way (most of a frame's commands are these); anything
+	 * the short way does not take is read the general way below.
+	 */
+	quick = record_quick(session, opcode, reader);
+	if (quick) {
+		*handled = 1;
+		return 0;
+	}
 
 	/* Only the recorded commands. */
 	*handled = 0;
@@ -1086,4 +1121,351 @@ record_drop(
 	if (record->regions != NULL)
 		kern_free(record->regions);
 	record->regions = NULL;
+}
+
+/*
+ * Records one of the commands every draw records (a draw, a pipeline, one
+ * descriptor set, push constants) the short way, and the ones that follow
+ * it for the same command buffer: each read in place from the stream into
+ * the next record of a command buffer that is recording and has room,
+ * each argument checked as the general way checks it.  The following ones
+ * are taken without going through the stream's and the dispatcher's steps
+ * again (they ask for no reply and use no scratch); the session's last
+ * opcode names the last one taken.
+ *
+ * Returns false, with nothing read or held, when the first command is not
+ * taken (another command, a stream too short, a command buffer that is not
+ * recording or must grow, an argument the general way refuses or reads
+ * otherwise): the general way then reads it and reports what it finds.
+ * A following command that is not taken is left in the stream.
+ */
+static bool
+record_quick(
+	struct nvrtx_vk_session *session,
+	uint32_t opcode,
+	struct i915_wire_reader *reader)
+{
+	struct nvrtx_vk_command_buffer *command;
+	const uint8_t *bytes;
+	uint64_t identity;
+	uint32_t requested;
+	size_t left;
+	size_t taken;
+	bool recorded;
+
+	/* Only a command the short way takes, its command buffer inside the stream. */
+	recorded = record_quick_taken(opcode);
+	if (!recorded || reader->error != 0)
+		return false;
+	left = reader->size - reader->offset;
+	if (left < RECORD_QUICK_BUFFER)
+		return false;
+	bytes = reader->base + reader->offset;
+
+	/* A command buffer that is recording. */
+	identity = record_wide(bytes);
+	command = nvrtx_vk_payload(session, I915_VK_OBJ_COMMAND_BUFFER, identity);
+	if (command == NULL || command->state != NVRTX_VK_COMMAND_RECORDING)
+		return false;
+
+	/* The first command, which the general way reads when the short way does not. */
+	recorded = record_quick_one(session, command, opcode, bytes + RECORD_QUICK_BUFFER, left - RECORD_QUICK_BUFFER, &taken);
+	if (!recorded)
+		return false;
+	reader->offset += RECORD_QUICK_BUFFER + taken;
+
+	/* The commands that follow for the same command buffer, without a reply, while the short way takes them. */
+	for (;;) {
+		left = reader->size - reader->offset;
+		if (left < RECORD_QUICK_HEADER + RECORD_QUICK_BUFFER)
+			break;
+		bytes = reader->base + reader->offset;
+		opcode = record_word(bytes);
+		requested = record_word(bytes + 4U);
+		if (requested != 0U || record_wide(bytes + 8U) != identity)
+			break;
+		recorded = record_quick_taken(opcode);
+		if (!recorded)
+			break;
+		recorded = record_quick_one(session, command, opcode, bytes + RECORD_QUICK_HEADER + RECORD_QUICK_BUFFER,
+					    left - RECORD_QUICK_HEADER - RECORD_QUICK_BUFFER, &taken);
+		if (!recorded)
+			break;
+		reader->offset += RECORD_QUICK_HEADER + RECORD_QUICK_BUFFER + taken;
+		session->last_opcode = opcode;
+	}
+
+	/* Succeeded: the first command, and those after it that were taken, are recorded. */
+	return true;
+}
+
+/* Reports whether the short way takes an opcode at all. */
+static bool
+record_quick_taken(
+	uint32_t opcode)
+{
+	/* The commands every draw records. */
+	switch (opcode) {
+	case GPU_OP_CMD_DRAW_INDEXED:
+	case GPU_OP_CMD_DRAW:
+	case GPU_OP_CMD_BIND_PIPELINE:
+	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
+	case GPU_OP_CMD_PUSH_CONSTANTS:
+		return true;
+	default:
+		break;
+	}
+
+	/* Another command: the general way's. */
+	return false;
+}
+
+/*
+ * Records one command the short way into the next record of a recording
+ * command buffer, from its arguments (left bytes of the stream after its
+ * command buffer).  *taken gets the bytes of its arguments.  Returns false,
+ * with nothing held and the command buffer as it was, when the short way
+ * does not take it.
+ */
+static bool
+record_quick_one(
+	struct nvrtx_vk_session *session,
+	struct nvrtx_vk_command_buffer *command,
+	uint32_t opcode,
+	const uint8_t *arguments,
+	size_t left,
+	size_t *taken)
+{
+	struct nvrtx_vk_record *record;
+	size_t needed;
+	bool recorded;
+
+	/* The fixed part of each command. */
+	switch (opcode) {
+	case GPU_OP_CMD_DRAW_INDEXED:
+		needed = RECORD_QUICK_DRAW_INDEXED;
+		break;
+	case GPU_OP_CMD_DRAW:
+		needed = RECORD_QUICK_DRAW;
+		break;
+	case GPU_OP_CMD_BIND_PIPELINE:
+		needed = RECORD_QUICK_PIPELINE;
+		break;
+	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
+		needed = RECORD_QUICK_SETS;
+		break;
+	default:
+		needed = RECORD_QUICK_PUSH;
+		break;
+	}
+
+	/* The fixed part lies inside the stream; the array has room for one more record without growing. */
+	if (left < needed)
+		return false;
+	if (command->record_count == command->record_capacity)
+		return false;
+
+	/* The record starts as the general way starts it, in its place at the end of the array. */
+	record = &command->records[command->record_count];
+	kern_memset(record, 0, sizeof(*record));
+	record->opcode = opcode;
+
+	/* The arguments of each command. */
+	*taken = needed;
+	switch (opcode) {
+	case GPU_OP_CMD_DRAW_INDEXED:
+		/* The index count, the instance count, the first index, the vertex offset and the first instance. */
+		record->values[0] = record_word(arguments);
+		record->values[1] = record_word(arguments + 4U);
+		record->values[2] = record_word(arguments + 8U);
+		record->values[3] = record_word(arguments + 12U);
+		record->values[4] = record_word(arguments + 16U);
+		recorded = true;
+		break;
+	case GPU_OP_CMD_DRAW:
+		/* The vertex count, the instance count, the first vertex and the first instance. */
+		record->values[0] = record_word(arguments);
+		record->values[1] = record_word(arguments + 4U);
+		record->values[2] = record_word(arguments + 8U);
+		record->values[3] = record_word(arguments + 12U);
+		recorded = true;
+		break;
+	case GPU_OP_CMD_BIND_PIPELINE:
+		recorded = record_quick_pipeline(session, arguments, record);
+		break;
+	case GPU_OP_CMD_BIND_DESCRIPTOR_SETS:
+		recorded = record_quick_sets(session, arguments, record);
+		break;
+	default:
+		recorded = record_quick_push(command, arguments, left, record, taken);
+		break;
+	}
+
+	/* Anything the short way does not take is left (the record's place is written over later). */
+	if (!recorded)
+		return false;
+
+	/* Succeeded: the record is the command buffer's. */
+	command->record_count++;
+	return true;
+}
+
+/* vkCmdBindPipeline the short way: [bind point][pipeline], a known graphics pipeline, held. */
+static bool
+record_quick_pipeline(
+	struct nvrtx_vk_session *session,
+	const uint8_t *bytes,
+	struct nvrtx_vk_record *record)
+{
+	struct nvrtx_vk_object *object;
+	uint32_t point;
+	uint64_t pipeline;
+	int error;
+
+	/* The graphics bind point. */
+	point = record_word(bytes);
+	if (point != VK_PIPELINE_BIND_POINT_GRAPHICS)
+		return false;
+
+	/* A known pipeline. */
+	pipeline = record_wide(bytes + 4U);
+	object = nvrtx_vk_object_find(session, I915_VK_OBJ_PIPELINE, pipeline);
+	if (object == NULL)
+		return false;
+
+	/* The record holds it. */
+	error = nvrtx_vk_object_retain(object);
+	if (error != 0)
+		return false;
+	record->objects[0] = object;
+	record->object_count = 1U;
+
+	/* Succeeded: the pipeline is recorded. */
+	return true;
+}
+
+/*
+ * vkCmdBindDescriptorSets the short way: [bind point][layout][first set]
+ * [count][count = 1]{set}[dynamic count][count = 0], a known graphics set
+ * in a slot a pipeline layout has, held.
+ */
+static bool
+record_quick_sets(
+	struct nvrtx_vk_session *session,
+	const uint8_t *bytes,
+	struct nvrtx_vk_record *record)
+{
+	struct nvrtx_vk_object *object;
+	uint32_t point;
+	uint32_t first;
+	uint64_t count;
+	uint64_t identity;
+	uint64_t offsets;
+	int error;
+
+	/* The graphics bind point, a first set inside the layouts' sets, one set and no dynamic offsets. */
+	point = record_word(bytes);
+	first = record_word(bytes + 12U);
+	count = record_wide(bytes + 20U);
+	offsets = record_wide(bytes + 40U);
+	if (point != VK_PIPELINE_BIND_POINT_GRAPHICS)
+		return false;
+	if (first >= NVRTX_VK_SETS_MAX || count != 1U || offsets != 0U)
+		return false;
+
+	/* A known set (a null one leaves its slot as it was, the general way's case). */
+	identity = record_wide(bytes + 28U);
+	object = nvrtx_vk_object_find(session, I915_VK_OBJ_DESCRIPTOR_SET, identity);
+	if (object == NULL)
+		return false;
+
+	/* The record holds it as its object 0, set first. */
+	error = nvrtx_vk_object_retain(object);
+	if (error != 0)
+		return false;
+	record->objects[0] = object;
+	record->object_count = 1U;
+	record->first = first;
+	record->count = 1U;
+
+	/* Succeeded: the set is recorded. */
+	return true;
+}
+
+/*
+ * vkCmdPushConstants the short way: [layout][stages][offset][size][count]
+ * {bytes, padded to words}, within the push constant bytes a program
+ * reads, the bytes copied to the end of the command buffer's run (which
+ * must have room without growing).  *taken gets the bytes read after the
+ * command buffer.
+ */
+static bool
+record_quick_push(
+	struct nvrtx_vk_command_buffer *command,
+	const uint8_t *bytes,
+	size_t left,
+	struct nvrtx_vk_record *record,
+	size_t *taken)
+{
+	uint32_t offset;
+	uint32_t size;
+	uint64_t count;
+	size_t padded;
+
+	/* The range and the byte count: one count, within the bytes a program reads. */
+	offset = record_word(bytes + 12U);
+	size = record_word(bytes + 16U);
+	count = record_wide(bytes + 20U);
+	if (count != size || size > NVRTX_VK_PUSH_BYTES)
+		return false;
+	if (offset > NVRTX_VK_PUSH_BYTES || size > NVRTX_VK_PUSH_BYTES - offset)
+		return false;
+
+	/* The bytes, padded to words, lie inside the stream; the run has room for them. */
+	padded = ((size_t)size + 3U) & ~(size_t)3U;
+	if (padded > left - RECORD_QUICK_PUSH)
+		return false;
+	if (NVRTX_VK_PUSH_BYTES > command->push_capacity - command->push_used)
+		return false;
+
+	/* The bytes go to the end of the run, the record says where. */
+	if (size != 0U)
+		kern_memcpy(command->push_bytes + command->push_used, bytes + RECORD_QUICK_PUSH, size);
+	record->first = offset;
+	record->count = size;
+	record->push_at = command->push_used;
+	command->push_used += size;
+
+	/* Succeeded: the push constants are recorded. */
+	*taken = RECORD_QUICK_PUSH + padded;
+	return true;
+}
+
+/* Reads one little-endian wire word at bytes. */
+static uint32_t
+record_word(
+	const uint8_t *bytes)
+{
+	uint32_t word;
+
+	/* Composes the word in wire order, which is little endian whatever the host is. */
+	word = (uint32_t)bytes[0];
+	word |= (uint32_t)bytes[1] << 8;
+	word |= (uint32_t)bytes[2] << 16;
+	word |= (uint32_t)bytes[3] << 24;
+	return word;
+}
+
+/* Reads one little-endian 64-bit wire value at bytes, the low word first. */
+static uint64_t
+record_wide(
+	const uint8_t *bytes)
+{
+	uint64_t low;
+	uint64_t high;
+
+	/* The two words. */
+	low = record_word(bytes);
+	high = record_word(bytes + 4U);
+	return low | (high << 32);
 }
