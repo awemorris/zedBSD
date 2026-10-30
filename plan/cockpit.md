@@ -79,7 +79,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p002 | kernel に表 B を足す（driver は変えない） | 実装・確かめ済み（20 port の build） |
 | p003 | 表 A の機械的な置き換え（sparcv9 の 2 file は別の commit） | 実装・確かめ済み（QEMU の起動 pcat・sun4u・rpi4・amd64 など） |
 | p004 | i915 の map（write-combine・読み出しだけ）と MSI、試験の代役 | 実装・確かめ済み（ktest-sync の 5330 の実機は未実施） |
-| p005 | Raspberry Pi の console を kernel_putc の形に作り直す（ユーザーの決定）、pc98 の 3 か所 | in-progress（P2） |
+| p005 | Pi 4・Pi 5・VisionFive 2・ODROID-C5 に /dev/graphics と console を PC/AT の形で（GPU の最初の描画で console が framebuffer から離れる）、pc98 の 3 か所 | in-progress（P2） |
 | p006 | 規約の全文の見直し | 未作成 |
 
 表 A（kernel に置き換え先が既にある物）:
