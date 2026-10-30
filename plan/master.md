@@ -15,17 +15,20 @@
 ### 動いている担当と Queue
 
 <!-- master:agents:start -->
-2026-10-29 22:2x 復旧: 16:50 頃にセッションごと止まった P1〜P7 を、同じ名前・同じ worktree の新しい起動で再開した（未 commit の差分は各担当が読んで続ける）。
+**2026-10-30 引き継ぎ（週間の利用の上限でセッションが終わる。次のセッションの Q1 はここから自動で再開する）**: ユーザー「P3,P5,P4をラップアップして、進捗を報告してください。次のセッションで自動再開できるように、ハンドオーバーしてください。」
+再開の手順: (1) 下の表の各担当の branch の最後の SHA を `git cat-file -t` で確かめ、未 merge の物を registry で見る。(2) ラップアップした担当（P3・P4・P5）は同じ名前・同じ worktree で起動し、ws.md の Resume point から続けさせる。(3) P1・P2 と Sonnet の p007 は、終わっていなければ同じ worktree で再起動（未 commit の差分は担当が読んで続ける）。(4) /tmp/zedbsd-rdna.lock の中身で 10.0.10.3 の状態を確かめる。
 
 | 担当 | Queue | WS と次の手 | 実機 |
 | --- | --- | --- | --- |
-| P1 | q1695-i01 in-progress | [ws326](ws326/ws.md) p001 H.264 の software の decoder の module の設計（WS309 は p015 の判断待ちで返却のまま） | — |
-| P2 | q1697-i01 in-progress | [ws327](ws327/ws.md) libkeiland の thread と socket の wrapper（p001 設計から） | — |
-| P3 | q1696-i01 in-progress | [ws315](ws315/ws.md) p006 TCP の受けの buffer（F-WS315-rcvbuf） | 5330・10.0.10.3 |
-| P4 | q1698-i01 in-progress | [ws307](ws307/ws.md) の残り（upload・sleep・p004・p008・p014）。p007 は回答待ち | QEMU |
-| P5 | q1693-i01 返却 | [ws291](ws291/ws.md) RTX: big-1000 24→52 fps、subs-100 67→104、subs-1000 6.6→10.9（NVK 136・75）、scene 同等（main d71b2b446）。subs の残りは全画面の copy（WS309 p015 の (B)）、big は CPU（record・submit） | — |
-| P6 | q1667-i05 返却 | [ws282](ws282/ws.md)・[ws284](ws284/ws.md) は main に merge 済み、別のツリーのセッションは [ws282 handover](ws282/handover.md)・[ws284 handover](ws284/handover.md) の試験から続ける | — |
-| P7 | q1687-i01 返却 | [ws313](ws313/ws.md) Mali の残りと Mesa との照合の直しを main に（b6649f09f）。実機未実施。C5 で描画がおかしい時の境目は c08176e6c・db080e110 | — |
+| P1 | q1701-i01 in-progress | [ws009](ws009/ws.md) p009（DOC-54 /dev/gpu の文書）を標準廉価実装手順の Phase に組み直す設計（worktree p1-ws009）。済んだら Sonnet で節ごとの Phase、その後 WS296 → WS297 を同じ形で 1 つずつ（ユーザー） | — |
+| P2 | q1697-i02 in-progress | [ws327](ws327/ws.md) p003 の zedBSD の guest の試験 → p007 委譲の設計（worktree p2-ws327、branch は未 merge。Mailer の途中の移行 6bb8c3c8d は build しないので p008 の後に merge） | QEMU |
+| P3 | q1696-i01 ラップアップ | [ws315](ws315/ws.md) p006 TCP の受けの buffer の自動調整（8b9523b20〜）。同時の recv 1443→2334（Linux 2341）、同時の send が 2347→1030 に落ちた件を広げる倍率で調整中。詳細は phase006/phase.md の引き継ぎ | 5330 |
+| P4 | q1698-i01 ラップアップ | [ws307](ws307/ws.md): p002 upload 済み（release rev-0、16e45a703・07c144e8e、branch agent/p4-ws307o）、p015 の QEMU は host の負荷で FAIL 2 回（3 回目が要る）、p004 clang・libcxx・gtk4 の package の build の途中、p008・p014・p007（firmware 変数の kernel driver）が残り。CI の別件 2 つ（ci.yml の qemu の zip の前の config が pc98、release.yml の ALLOW_DRAFT） | QEMU |
+| P5 | q1700-i01 ラップアップ | [ws291](ws291/ws.md) NVIDIA: p010 desktop の測り直し、p012 以降で scene-5000 を 50 fps 超えへ（worktree p5-ws291n） | 10.0.10.3 |
+| Sonnet | — | [ws326](ws326/ws.md) p007 参照の list（worktree s-ws326-p007）。cleared 18 Phase。p007 の後に p015・p017 → p019 → p021（Opus）→ p022 → p026（共通部分を汎用の名前へ）・p023〜p025 | — |
+
+予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
+ユーザーへの未回答: WS250 を「QEMU の起動の回帰だけ流して完了、fault の app と isolate は Future Work」で閉じてよいか、WS309 p015 の判断 1〜4（phase015/phase.md）。
 
 止めたまま: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS299](ws299/ws.md)（継続の判断待ち）。
 main に未 merge の branch は [registry](agents/registry.md) の試験待ちの欄。web の GET は「統合の注意」の条件で可。HAL の差分の承認は無い。
