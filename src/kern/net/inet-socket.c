@@ -85,6 +85,7 @@ static bool inet_ioctl_caller_is_superuser(void);
 static bool inet_ioctl_is_wlan_group(unsigned long command);
 static void inet_ioctl_scrub(void *buffer, size_t size);
 static int inet_ioctl_wlan_classify(unsigned long command, size_t *size, bool *query);
+static int inet_ioctl_wlan_validate_name(const struct wlan_ioctl_header *header);
 static int inet_ioctl_wlan_validate(const struct wlan_ioctl_header *header, size_t size);
 static int inet_ioctl_wlan(unsigned long command, uintptr_t argument);
 static int inet_create(int type, int protocol, struct socket **result);
@@ -1466,18 +1467,37 @@ inet_ioctl_wlan_classify(
 	return 0;
 }
 
-/* Checks the common header of a WLAN request. */
+/*
+ * Checks the interface name of a WLAN request, which every version of the
+ * request carries first.
+ */
+static int
+inet_ioctl_wlan_validate_name(
+	const struct wlan_ioctl_header *header)
+{
+	const void *terminator;
+
+	/* Refuses a missing or empty name. */
+	if (header == NULL || header->ifr_name[0] == '\0')
+		return EINVAL;
+
+	/* Refuses a name that fills the field without ending. */
+	terminator = kern_memchr(header->ifr_name, '\0', sizeof(header->ifr_name));
+	if (terminator == NULL)
+		return EINVAL;
+
+	/* Succeeded: the name can be looked up. */
+	return 0;
+}
+
+/* Checks the version and size of a request for a WLAN device. */
 static int
 inet_ioctl_wlan_validate(
 	const struct wlan_ioctl_header *header,
 	size_t size)
 {
-	/* The version and size must match and the name must be terminated. */
-	if (header == NULL ||
-	    header->version != WLAN_ABI_VERSION ||
-	    header->size != size ||
-	    header->ifr_name[0] == '\0' ||
-	    kern_memchr(header->ifr_name, '\0', sizeof(header->ifr_name)) == NULL)
+	/* The request must be this kernel's version, at its size. */
+	if (header->version != WLAN_ABI_VERSION || header->size != size)
 		return EINVAL;
 
 	/* Reports a valid header. */
@@ -1520,7 +1540,7 @@ inet_ioctl_wlan(
 	error = copyin(argument, &request, size);
 	if (error != 0)
 		goto out;
-	error = inet_ioctl_wlan_validate(&request.header, size);
+	error = inet_ioctl_wlan_validate_name(&request.header);
 	if (error != 0)
 		goto out;
 
@@ -1537,10 +1557,21 @@ inet_ioctl_wlan(
 		goto out_device;
 	}
 
+	/*
+	 * An interface that is not a WLAN device answers no version of the
+	 * request, so it is refused before the version is looked at: a caller
+	 * built for another version still learns that the interface is not a
+	 * radio, and goes on with the others.
+	 */
 	if ((capabilities & NET_DEVICE_CAP_WLAN) == 0) {
 		error = EOPNOTSUPP;
 		goto out_device;
 	}
+
+	/* Only a request of this kernel's version reaches the device. */
+	error = inet_ioctl_wlan_validate(&request.header, size);
+	if (error != 0)
+		goto out_device;
 
 	/* Forwards the request. */
 	error = net_device_ioctl(device, command, &request);
