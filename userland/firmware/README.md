@@ -116,14 +116,18 @@ Command Stream Frontend of the ODROID-C5's Mali-G310, under the arch 10.8,
 `LICENCE.mali_csffw`, WHENCE and the manifest; the mali driver
 (`CONFIG_DRIVER_MALI_GPU`) selects it. `amlogic-s7d/` (package
 `amlogic-s7d-bootloader`) is the ODROID-C5's bootloader: Amlogic's signed boot
-stages and Hardkernel's U-Boot in one file, `u-boot.bin.signed`, from
-Hardkernel's Yocto layer `mdrjr/meta-odroid-aml` commit
-`548e2f037e01c626e3fc964fa298464df148fd51`. Choosing the ODROID-C5 board
-selects it; the image build writes the file from the SD card's sector 1 and
-the root file system gets only the GPL-2 text, the layer's recipe, the notice
-and the manifest. No licence text for Amlogic's stages has been found, so the
-notice says their redistribution terms are unknown and that a card made with
-it is not to be passed on until they are known.
+stages and Hardkernel's U-Boot, in sectors 1 to 6538 of Hardkernel's official
+ODROID-C5 image `ubuntu-22.04-gnome-desktop-odroidc5-20260610-bsp-boot.img.xz`.
+A build cannot fetch that image from Hardkernel, so it is kept unmodified,
+with Amlogic's `LICENSE.amlogic`, in the firmware repository below, which is
+the package's only network source (without it the two files are placed by
+hand, as the notice says). The package checks the image's size and SHA-256,
+decompresses it, cuts the sectors and checks their size and SHA-256 too.
+Choosing the ODROID-C5 board selects it; the image build writes the area from
+the SD card's sector 1 and the root file system gets only `LICENSE.amlogic`,
+the notice and the manifest. Amlogic's license allows redistribution only
+with its written permission, which Hardkernel holds; the files are
+redistributed unmodified and only for use on the ODROID-C5.
 Every entry is default-off, and ordinary builds perform no firmware fetch.
 
 Every file a package fetches is also kept, byte for byte and with its license
