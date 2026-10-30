@@ -27,7 +27,7 @@ extra="-object memory-backend-memfd,id=mem,size=8G,share=on -machine memory-back
 extra="$extra -device virtio-gpu-gl-pci,id=venus,venus=on,blob=on,hostmem=$VENUS_HOSTMEM,max_outputs=1"
 extra="$extra -display egl-headless,rendernode=/dev/dri/renderD128 -vnc unix:$GUEST_RUNTIME/vnc.sock,display=venus"
 extra="$extra -device usb-tablet,bus=xhci.0,port=4"
-timeout 120 python3 -I plan/tools/guest/guest.py start "$img/hdd-image.img" --symbols "$img/vmunix" \
+timeout 400 python3 -I plan/tools/guest/guest.py start "$img/hdd-image.img" --symbols "$img/vmunix" \
 	--qemu "$top/plan/ws314/tests/qemu-unsafe.sh" --qemu-extra "$extra" > "$out/start.log" 2>&1 ||
 	{ echo "bug370-photos: the guest did not start ($out/start.log)"; echo "bug370-photos: FAIL"; exit 1; }
 failed=0

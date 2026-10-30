@@ -237,7 +237,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | closed（2026-10-30、main 701b21b19） |
 | [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |
 | [BUG-369](bugs/BUG-369.md) | QEMU の guest への SSH の往復が数回の後から 3〜32 秒に伸びる | closed（2026-10-30、main e1c714fb5） |
-| [BUG-370](bugs/BUG-370.md) | Photos で全面表示の写真を回転・お気に入りなどで保存すると約 1 秒後に全面表示が閉じる（WS327 の回帰で発見、WS327 とは無関係） | open（2026-10-30） |
+| [BUG-370](bugs/BUG-370.md) | Photos で全面表示の写真を回転・お気に入りなどで保存すると約 1 秒後に全面表示が閉じる（WS327 の回帰で発見、WS327 とは無関係） | fixed（2026-10-31 P6 q1740、acf7ff71a、QEMU の scenario で確かめた。merge 待ち） |
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking 全体を飛ばす | open（2026-10-30） |
 | [BUG-372](bugs/BUG-372.md) | VisionFive 2 の今の main の kernel で serial の console が入力を受けない（WS331 p005 の疑い） | open（2026-10-30） |
 | [BUG-373](bugs/BUG-373.md) | 今の main の kernel で networkd の初期の Wi-Fi の正規化が EINVAL、networking が上がらない（Wi-Fi の無い機械でも） | open（2026-10-31、P7） |
