@@ -93,7 +93,15 @@ enum values_shorthand {
 	SHORT_TRANSFORM,
 	SHORT_TRANSFORM_ORIGIN,
 	SHORT_ASPECT_RATIO,
-	SHORT_OBJECT_POSITION
+	SHORT_OBJECT_POSITION,
+	SHORT_BORDER_INLINE,
+	SHORT_BORDER_BLOCK,
+	SHORT_BORDER_INLINE_WIDTH,
+	SHORT_BORDER_INLINE_STYLE,
+	SHORT_BORDER_INLINE_COLOR,
+	SHORT_BORDER_BLOCK_WIDTH,
+	SHORT_BORDER_BLOCK_STYLE,
+	SHORT_BORDER_BLOCK_COLOR
 };
 
 /*
@@ -349,6 +357,14 @@ static const struct values_name values_names[] = {
 	{ "border-inline-end", SHORT_BORDER_INLINE_END },
 	{ "border-block-start", SHORT_BORDER_BLOCK_START },
 	{ "border-block-end", SHORT_BORDER_BLOCK_END },
+	{ "border-inline", SHORT_BORDER_INLINE },
+	{ "border-block", SHORT_BORDER_BLOCK },
+	{ "border-inline-width", SHORT_BORDER_INLINE_WIDTH },
+	{ "border-inline-style", SHORT_BORDER_INLINE_STYLE },
+	{ "border-inline-color", SHORT_BORDER_INLINE_COLOR },
+	{ "border-block-width", SHORT_BORDER_BLOCK_WIDTH },
+	{ "border-block-style", SHORT_BORDER_BLOCK_STYLE },
+	{ "border-block-color", SHORT_BORDER_BLOCK_COLOR },
 	{ "margin-inline", SHORT_MARGIN_INLINE },
 	{ "margin-block", SHORT_MARGIN_BLOCK },
 	{ "padding-inline", SHORT_PADDING_INLINE },
@@ -1199,6 +1215,22 @@ css_parse_property(
 	case SHORT_BORDER_BLOCK_END:
 		/* A logical side: the cascade finds its physical side. */
 		return values_border(parse, VALUES_LOGICAL_SIDE + property - SHORT_BORDER_INLINE_START, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE:
+	case SHORT_BORDER_BLOCK:
+		/* Both sides of an axis. */
+		return values_border(parse, VALUES_LOGICAL_SIDE + 4 + property - SHORT_BORDER_INLINE, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_WIDTH:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_WIDTH, CSS_PROP_BORDER_INLINE_END_WIDTH, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_STYLE:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_STYLE, CSS_PROP_BORDER_INLINE_END_STYLE, tokens, count, out, out_count);
+	case SHORT_BORDER_INLINE_COLOR:
+		return values_pair(parse, CSS_PROP_BORDER_INLINE_START_COLOR, CSS_PROP_BORDER_INLINE_END_COLOR, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_WIDTH:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_WIDTH, CSS_PROP_BORDER_BLOCK_END_WIDTH, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_STYLE:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_STYLE, CSS_PROP_BORDER_BLOCK_END_STYLE, tokens, count, out, out_count);
+	case SHORT_BORDER_BLOCK_COLOR:
+		return values_pair(parse, CSS_PROP_BORDER_BLOCK_START_COLOR, CSS_PROP_BORDER_BLOCK_END_COLOR, tokens, count, out, out_count);
 	case SHORT_BACKGROUND:
 		return values_background(parse, tokens, count, out, out_count);
 	case SHORT_BACKGROUND_POSITION:
@@ -2981,6 +3013,16 @@ values_border(
 	}
 
 	/* A logical side declares its logical longhands. */
+	if (side >= VALUES_LOGICAL_SIDE + 4) {
+		/* Both sides of the axis: the inline ones (2 places on), or the block ones. */
+		first = 2 * (side - VALUES_LOGICAL_SIDE - 4);
+		for (index = 0; index < 2U; index++) {
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + first + (int)index, &width);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + first + (int)index, &style);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + first + (int)index, &color);
+		}
+		return 0;
+	}
 	if (side >= VALUES_LOGICAL_SIDE) {
 		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + side - VALUES_LOGICAL_SIDE, &width);
 		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + side - VALUES_LOGICAL_SIDE, &style);
@@ -3268,6 +3310,38 @@ values_wide_keyword(
 	case SHORT_MARGIN_BLOCK:
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_START, value);
 		values_add(out, made, CSS_PROP_MARGIN_BLOCK_END, value);
+		return;
+	case SHORT_BORDER_INLINE:
+	case SHORT_BORDER_BLOCK:
+		for (first = 0; first < 2; first++) {
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+			values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR + 2 * (property - SHORT_BORDER_INLINE) + first, value);
+		}
+		return;
+	case SHORT_BORDER_INLINE_WIDTH:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_WIDTH, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_WIDTH, value);
+		return;
+	case SHORT_BORDER_INLINE_STYLE:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_STYLE, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_STYLE, value);
+		return;
+	case SHORT_BORDER_INLINE_COLOR:
+		values_add(out, made, CSS_PROP_BORDER_INLINE_START_COLOR, value);
+		values_add(out, made, CSS_PROP_BORDER_INLINE_END_COLOR, value);
+		return;
+	case SHORT_BORDER_BLOCK_WIDTH:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_WIDTH, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_WIDTH, value);
+		return;
+	case SHORT_BORDER_BLOCK_STYLE:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_STYLE, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_STYLE, value);
+		return;
+	case SHORT_BORDER_BLOCK_COLOR:
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_START_COLOR, value);
+		values_add(out, made, CSS_PROP_BORDER_BLOCK_END_COLOR, value);
 		return;
 	case SHORT_PADDING_INLINE:
 		values_add(out, made, CSS_PROP_PADDING_INLINE_START, value);

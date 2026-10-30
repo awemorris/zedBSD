@@ -144,7 +144,11 @@ enum computed_property {
 	COMPUTED_POSITION_TRY_FALLBACKS,
 	COMPUTED_POSITION_TRY_ORDER,
 	COMPUTED_POSITION_TRY,
-	COMPUTED_POSITION_VISIBILITY
+	COMPUTED_POSITION_VISIBILITY,
+
+	/* The flow-relative properties, six families of four (inline-start, inline-end, block-start, block-end): margin, padding, inset, border width, style and color. */
+	COMPUTED_LOGICAL_FIRST,
+	COMPUTED_LOGICAL_LAST = COMPUTED_LOGICAL_FIRST + 23
 };
 
 /*
@@ -170,6 +174,7 @@ static int computed_write(struct bind_window *window, struct dom_element *elemen
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
+static int computed_logical_property(const struct css_style *style, int property);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
 static int computed_needs_quotes(const struct vm_string *family);
@@ -204,6 +209,30 @@ static const struct vm_cell_type computed_ref_type = { "computed-style", compute
  * for the life of the program.
  */
 static const struct computed_entry computed_entries[] = {
+	{ "margin-inline-start", COMPUTED_LOGICAL_FIRST + 0 },
+	{ "margin-inline-end", COMPUTED_LOGICAL_FIRST + 1 },
+	{ "margin-block-start", COMPUTED_LOGICAL_FIRST + 2 },
+	{ "margin-block-end", COMPUTED_LOGICAL_FIRST + 3 },
+	{ "padding-inline-start", COMPUTED_LOGICAL_FIRST + 4 },
+	{ "padding-inline-end", COMPUTED_LOGICAL_FIRST + 5 },
+	{ "padding-block-start", COMPUTED_LOGICAL_FIRST + 6 },
+	{ "padding-block-end", COMPUTED_LOGICAL_FIRST + 7 },
+	{ "inset-inline-start", COMPUTED_LOGICAL_FIRST + 8 },
+	{ "inset-inline-end", COMPUTED_LOGICAL_FIRST + 9 },
+	{ "inset-block-start", COMPUTED_LOGICAL_FIRST + 10 },
+	{ "inset-block-end", COMPUTED_LOGICAL_FIRST + 11 },
+	{ "border-inline-start-width", COMPUTED_LOGICAL_FIRST + 12 },
+	{ "border-inline-end-width", COMPUTED_LOGICAL_FIRST + 13 },
+	{ "border-block-start-width", COMPUTED_LOGICAL_FIRST + 14 },
+	{ "border-block-end-width", COMPUTED_LOGICAL_FIRST + 15 },
+	{ "border-inline-start-style", COMPUTED_LOGICAL_FIRST + 16 },
+	{ "border-inline-end-style", COMPUTED_LOGICAL_FIRST + 17 },
+	{ "border-block-start-style", COMPUTED_LOGICAL_FIRST + 18 },
+	{ "border-block-end-style", COMPUTED_LOGICAL_FIRST + 19 },
+	{ "border-inline-start-color", COMPUTED_LOGICAL_FIRST + 20 },
+	{ "border-inline-end-color", COMPUTED_LOGICAL_FIRST + 21 },
+	{ "border-block-start-color", COMPUTED_LOGICAL_FIRST + 22 },
+	{ "border-block-end-color", COMPUTED_LOGICAL_FIRST + 23 },
 	{ "display", COMPUTED_DISPLAY },
 	{ "position", COMPUTED_POSITION },
 	{ "float", COMPUTED_FLOAT },
@@ -728,6 +757,10 @@ computed_write(
 		free(style);
 		return error;
 	}
+
+	/* A flow-relative property is the physical one it maps to here. */
+	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
+		property = computed_logical_property(style, property);
 
 	/* The computed display of a floated, positioned or flex or grid item box is blockified. */
 	if (property == COMPUTED_DISPLAY)
@@ -1804,6 +1837,60 @@ computed_overflow_axis(
 	if (own == CSS_OVERFLOW_VISIBLE && !other_open)
 		return CSS_OVERFLOW_AUTO;
 	return own;
+}
+
+/*
+ * Maps a flow-relative property (margin-inline-start and the like) to the
+ * physical property it stands for in the style's writing mode and direction.
+ */
+static int
+computed_logical_property(
+	const struct css_style *style,
+	int property)
+{
+	static const int bases[6] = {
+		COMPUTED_MARGIN_TOP, COMPUTED_PADDING_TOP, COMPUTED_TOP,
+		COMPUTED_BORDER_TOP_WIDTH, COMPUTED_BORDER_TOP_STYLE, COMPUTED_BORDER_TOP_COLOR
+	};
+	int index;
+	int family;
+	int part;
+	int axis_block;
+	int end;
+	int side;
+	int vertical;
+	int reversed;
+
+	/* Which family, and which of its four sides. */
+	index = property - COMPUTED_LOGICAL_FIRST;
+	family = index / 4;
+	part = index % 4;
+	axis_block = part >= 2;
+	end = part % 2;
+	vertical = style->writing_mode != CSS_WRITING_HORIZONTAL_TB;
+
+	/* The block axis runs top to bottom, or from the right (vertical-rl) or the left (vertical-lr). */
+	if (axis_block) {
+		if (!vertical)
+			side = end ? 2 : 0;
+		else if (style->writing_mode == CSS_WRITING_VERTICAL_RL)
+			side = end ? 3 : 1;
+		else
+			side = end ? 1 : 3;
+		return bases[family] + side;
+	}
+
+	/* The inline axis runs left to right (right to left for rtl), or top to bottom (bottom to top for sideways-lr). */
+	reversed = style->direction == CSS_DIRECTION_RTL;
+	if (vertical && style->writing_sideways == 1)
+		reversed = !reversed;
+	if (reversed)
+		end = !end;
+	if (!vertical)
+		side = end ? 1 : 3;
+	else
+		side = end ? 2 : 0;
+	return bases[family] + side;
 }
 
 /* Writes overflow: one keyword when the two axes agree, otherwise both. */
