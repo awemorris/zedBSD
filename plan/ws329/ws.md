@@ -65,3 +65,4 @@
 
 - 2026-10-31 Q1（WS318 の設計からの引き継ぎ）: 依存に WS318 p012a（encoder の口）を足す。p001 の設計は WS326 の完了を待たずに q1758（P5）で先に進める。
 - 2026-10-31 P5（q1758-i01）: p001 の設計を branch agent/p5-ws329 に（design.md・proposed/ の header 26 個（shared 3 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q329-1〜5）・phase002〜026 の phase.md・design-review.md）。design-reviewer の 29 件（blocker 0・major 10・minor 19）を反映。source は変えていない。次: Q1 が受け入れて merge、Q329-1〜5 の回答、WS326 p026 に `vcodec-` の名前を渡す（design §14）。WS326 completed の後に p002。
+- 2026-10-31 Q1（WS326 p026・WS330 の設計からの引き継ぎ）: header の基点は 92ca2d0e8 に移った。p003 で `h264sw_bits` → `vcodec_bitreader`、表 → `vcodec_cabac_*`、`h264sw_cabac_pcm` など → `vcodec_cabac_*(&c.engine)`、`h264sw_nal_find` → `vcodec_nal_find` に置き換える。comment の「H.265 9.3.4.3」は「9.3.5」。frame・DPB の共通化は WS330 p002 で WS329 の試験も前後一致で確かめる。

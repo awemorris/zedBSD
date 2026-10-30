@@ -457,7 +457,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1763 / q1763-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws330`・branch `agent/p5-ws330`） | [ws330](ws330/ws.md) p001 設計 | plan/ws330/ だけ、design-reviewer と問いまで。実装は WS329 の完了の後 | in-progress |
+| q1763 / q1763-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws330`・branch `agent/p5-ws330`） | [ws330](ws330/ws.md) p001 設計 | plan/ws330/ だけ、design-reviewer と問いまで。実装は WS329 の完了の後 | uncleared（設計 84d01a58a、merge 299a2f4b3。理由: ユーザーの問い Q330-1〜4 の答え待ち） |
 | q1764 / q1764-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r2`・branch `agent/p3-ws291r2`、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) の続き | kernel の record の decode の短縮など、phase014 の再開点の候補 | in-progress |
 | q1765 / q1765-i01 | S-333p008（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p008`） | [ws333-p008](ws333/phase008/phase.md) | phase.md のとおり、header を変えない（BASE 39f4a5597） | cleared（fae4a0d41） |
 | q1766 / q1766-i01 | S-333p009（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws333-p009`） | [ws333-p009](ws333/phase009/phase.md) | 同上 | cleared（9fb61c61e） |
@@ -472,7 +472,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1769 / q1769-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws326p026`・branch `agent/p4-ws326p026`） | ws326-p026 | 設計を先に、移しは p022 の merge の後（Q1 が知らせる） | cleared（acb27716b〜ac38fd1d9、新しい BASE 92ca2d0e8） |
-| q1770 / q1770-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p011 x86 の CPU の driver の統合 | HWP の道だけ（legacy の 0xCE の比の道は作らない）。5330 は p014 で | in-progress |
+| q1770 / q1770-i01 | P7（phase-runner-high、worktree p7-ws333b） | [ws333](ws333/ws.md) p011 x86 の CPU の driver の統合 | HWP の道だけ（legacy の 0xCE の比の道は作らない）。5330 は p014 で | in-progress・返却（a904b540d〜dc2d8a647、main a058c08d7。5330 は p014） |
 | q1771 / q1771-i01 | P6（phase-runner-high、worktree p6-ws333） | [ws333](ws333/ws.md) p017 ACPI WMI の層 | SMI を起こさない。AML の harness を plan/tools/aml-host/ へ | cleared（caff3950b〜93fb7eadd、main 809dfe329） |
 | q1772 / q1772-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-vf2bugs`・branch `agent/p2-vf2bugs`、実機 VF2） | [BUG-338](bugs/BUG-338.md)・[BUG-342](bugs/BUG-342.md)・[BUG-340](bugs/BUG-340.md)・[BUG-343](bugs/BUG-343.md)・[BUG-339](bugs/BUG-339.md) | 今の main の kernel で実機で確かめ、残りは直す。出力は /tmp | in-progress |
 | q1773 / q1773-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws326p024`・branch `agent/p1-ws326p024`） | [ws326-p024](ws326/phase024/phase.md) | 計測・profile・目標・案を先に、h264sw-*.c の変更は p026 の merge の後 | in-progress |

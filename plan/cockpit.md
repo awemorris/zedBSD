@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 05:29（Q1）
+最終更新: 2026-10-31 05:46（Q1）
 
 ## 担当（P1〜P8）
 
@@ -12,10 +12,10 @@
 | P1 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1773: p024 速さ（計測・profile・目標・案を先に、最適化は p026 の後） | WS299 は 5330 の実測待ち |
 | P2 | Bug | VF2 の実機の Bug の束 | q1772: BUG-338（hart 0）→ 342（PowerVR の static data）→ 340（SD の CRC）→ 343（root が live にならない）→ 339（U-Boot の DTB）を今の main で実機で | 4 つ目の束は closed 5 件 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
-| P4 | [WS326](ws326/ws.md) | libmedia の H.264 の software の decoder | q1769: p026 共通部分を codec に依らない名前に（設計を先に、移しは p022 の後） | 午後: Pi 5 の実機 |
-| P5 | [WS330](ws330/ws.md) | libmedia の H.265 の software の decoder と encoder | q1763: p001 設計（H.264 との共通化、H.265 の module、design-reviewer と問いまで） | 実装は WS329 の完了の後（ユーザーの決定）。WS329 の設計は済み（問いは 0d） |
+| P4 | — | — | 返却（06:2x）。WS326 p026（共通部分を vcodec- の名前に、前後の試験が全部同じ）を main に | 午後: Pi 5 の実機 |
+| P5 | — | — | 返却（06:3x）。WS330 の設計を main に（問い Q330-1〜4 は下の 0f） | 次の割当を Q1 が決める |
 | P6 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1774: p016 危ない温度での非常の停止（init への通知・sync・電源断）→ p021 passive（温度で CPU の上限を下げる） | 非常の停止を止める起動の switch（`thermal.emergency=off`）は作らない（下の 0 の Q1 の判断の項目） |
-| P7 | [WS333](ws333/ws.md) | 電力・熱の枠組み | q1770: p011 x86 の CPU の driver の統合（HWP の道、関門、RAPL の meter） | p014 5330 の受け入れ（電源の入れ直しの後） |
+| P7 | — | — | 返却（06:2x）。WS333 p011（x86 の CPU の driver、HWP・RAPL・HFI、QEMU では MSR に触らない）を main に | p014 5330 の受入れは電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,454（70.68%）。要素の scroll・popover・document.fonts・Range の矩形を足した、後退 0 |
 
 実装の担当: O-p022（Opus、[WS326](ws326/ws.md) p022 JVT の適合の試験）、S-333p008・p009・p010（Sonnet 3 人、[WS333](ws333/ws.md) の x86 の CPUID・HWP・電力の module）。p015・p017・p019・p021・p023 は cleared。
@@ -41,6 +41,7 @@
 | p003 | kernel の口の header（cpuperf.h・thermal.h、kern_cpu_count） | cleared（main f197c8a3f、20 port の build warning 0、design-reviewer を反映） |
 | p005 | 熱の core（前半） | 前半を main に（b7ac4f576、host 試験 13 場面・QEMU で hw.thermal）。後半は UAPI の review の後 |
 | p008〜p010 | x86 の CPUID・HWP・電力の module（Sonnet 3 人） | cleared（試験は計 1,700 万 checks 余り） |
+| p011 | x86 の CPU の driver の統合（HWP・RAPL・HFI・滞在。QEMU では MSR に触らず topology だけ） | main a058c08d7。host 試験 16 場面・QEMU 2 通り PASS。5330 は p014 |
 | p017 | ACPI WMI の層（Dell の BIOS の口の土台） | cleared（5330 の表で 4 device・14 block、SMI の書き 0） |
 | p012 | 全 CPU の tick の時刻を揃える（TSC-deadline） | main 22c629663、QEMU の 2 通り PASS。5330 の電力の前後の数待ち |
 | p007 | x86 の CPU の register を読む module の設計（標準廉価実装手順、header 5・46 関数・試験の道具） | cleared。AMD と ACPI の仕様は取れず範囲の外（上の 01）。次は p008〜p010 を Sonnet 3 人で並べて |
@@ -69,7 +70,7 @@ completed（2026-10-31、main db69ae87e）。最後の p007: 導入が UEFI の�
 
 ### WS326 libmedia の H.264 の software の decoder
 
-22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022 は cleared → p026 共通の名前への移し（P4、in-progress）→ p024 速さ → p025 規約→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
+22 Phase cleared（p022 JVT の適合: 範囲の中の 101 本 14,526 frame が全部一致、decoder の直し 0）。ユーザーの指示で昼までに終える（優先度を上げた）。p015・p017・p019・p021（全体の流れ、22 本 408 frame が ffmpeg と一致）・p023（libmedia の backend、実際の stream を h264-software で decode）は cleared ・p022・p026（共通の名前への移し）は cleared → p024 速さ（P1、補間と deblocking の書き直しで 1080p 17 → 24〜37 fps の見込み）→ p025 規約→ p021 全体の流れ（Opus）→ p022 適合・p023 backend → p024 速さ・p026 汎用の名前 → p025 規約。P3 の列（q1739）からは外した。
 
 ### 最近完了した WS
 
@@ -170,6 +171,16 @@ disk の空きの件（下の 00）だけが作業を遅らせている。
 - 背景: WS326 の decoder は正しく decode できる（JVT の適合で範囲の中の 101 本が全 frame 一致）。今の速さは host の 1 thread で 1080p が 12〜19 fps（ffmpeg の C だけで 88 fps）。重いのは補間（30〜35%）と deblocking（22〜27%）。P1 の p024 の設計は、段 A（C の書き直しで 1 thread 3 倍）→ 段 B（thread）→ 段 C（SIMD）で、目標は Pi 5 で 1080p30 High（4 thread で 40 fps 以上）。
 - Q1 の進め方: WS326 は p024 の最初の最適化（補間の block 化）と p025（規約の見直し）で閉じる（昼までに終える指示）。
 - 決めてほしい事: 速さの続き（deblock・weight の書き直し、neighbour・transform、thread、SIMD、Pi 5・5330 の実測）を **(a) 新しい WS にする（推し）** か、(b) WS326 の中に Phase を足して完了を遅らせるか。
+
+### 0f. WS330（libmedia の H.265 の software の decoder と encoder）の設計の問い Q330-1〜4（2026-10-31 新しい）
+
+- 背景: WS330 は、H.265 の decoder と encoder を既存の library を使わずに作る WS（実装は WS329 の後、ユーザーの決定）。P5 が設計（header の案 38、Phase p002〜p049）を書き、敵対的レビュー（blocker 1・major 11）を反映した（main 299a2f4b3）。H.264 と共通の部品（bit の読み・NAL・CABAC・frame・DPB）は `vcodec-` の名前で共有する。全文は [ws330/user-questions.md](ws330/user-questions.md)。
+- 用語: Main は 8 bit 4:2:0 の基本の profile、Main 10 は 10 bit（HDR など）。WPP・tile は 1 枚の画を並列に decode できる分け方。
+- Q330-1 範囲: **推し A** Main（8 bit）だけ。10 bit は libavcodec に回し、WS318 が 10 bit の出力を持った後に別の WS で。
+- Q330-2 H.265 の解析を WS318（GPU の Vulkan Video の道）と共有するか: **推し A** 1 つにする（WS318 p016 がこの設計の header を採る）。
+- Q330-3 速さと画質の目標: **推し A** decoder は 5330 で 1080p30（並列にできない stream は 720p30）、Pi 5 は 720p30。encoder は 5330 で速い preset。SIMD は範囲の外。
+- Q330-4 decoder の部分を早く始めるか: **推し A** 決定どおり WS329 の完了の後（共通化を 1 回で済ませる）。
+- 止めている物: 無し（実装は WS329 の後）。
 
 ### 1. WS299 で見つかった、5330 の NVMe 以外の課題
 
