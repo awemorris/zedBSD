@@ -143,3 +143,15 @@ mview が qs40 を描くのに driver に欠けていた物（どれも HAL は�
 - 22:55 に `OLD=p2old TIMING=1 KEEP=1 COPIES='1 13'` で main 780e7349b ＋ 1 の kernel（build/ws291/vf2t、cksum 4291544047）を入れた（読み返しで一致）→ run.sh の 8 回の入れ直しで SSH が来ず、
   23:08 にもう 1 回入れ直して 3 分 ping も無し。元の kernel は板の /boot/boot0/vmunix.p2old・.p7old（2825517684）。この host に VF2 の serial（/dev/ttyUSB0）が無く戻せない → Q1 に回復を頼んだ。
 - 見込み（未確かめ）: 1 は service の pass で timeline を読むだけで起動に効かない。main の riscv64 の変更（WS331 p007〜p011）の VF2 の退行の疑い。P3 の起動した kernel は main 5aca73738 の上。
+- 23:12〜23:40 の 25 分も ping は無い（SwitchBot は on）。この host に VF2 の serial も HDMI の capture も無く、私からは戻せない。
+- main の VF2 の起動の確かめ（ws331 の記録から）: p005・p007 は VF2 の実機で起動（p007 は `end-vf2.sh` PASS、画面あり）。p008〜p011（Pi の共通化、kernel の header、atomic.h、spinlock の macro。d272f0a05 は 22:28）は QEMU の amd64・rpi4・m68k・riscv64-virt だけ → VF2 では未確かめ。
+- 備え（未 commit の build だけ）: 板で起動した P3 の基点（cb03c9983、main の祖先）に e14843450 の driver の差分を当てた tree を build/tmp/p3src に作り、`build/tmp/p3src/build/b`（vmunix cksum 3248386891・wayland・mview・library、timing 付き、warning 0）を build。
+  plain main（780e7349b、timing 付き）の kernel は build/ws291/vf2m（1895595753）、main ＋ 差分は build/ws291/vf2b（2042075504）。
+
+#### 再開点（2026-10-30 23:40 P2）
+
+1. 板の回復（人手）: SD の 3 番目の FAT の区画（/boot/boot0）の vmunix を vmunix.p2old（2825517684）で上書き（または U-Boot の serial で fatload・fatwrite）。
+2. 戻ったら、まず起動の分かっている基点の上の差分で測る: `VF2_HOST=kei@10.0.30.2 VF2_PASSWORD=… VF2_PLUG=14C19FA80F86 OLD=p2old TIMING=1 KEEP=1 COPIES='1 13' SPIN=12 sh plan/ws291/tests/vf2-mview.sh OUT build/tmp/p3src/build/b`
+   （c1・c13 の fps と kernel の `gpu ta`・`gpu 3d`・`gpu frame` の行）。TA/3D の重なりと cutout の効果を分けるには、P3 の基点そのまま（P3 の build/ws291/vf2t、計測の stamp は無い）と比べる。
+3. main の kernel（build/ws291/vf2m）の VF2 の起動は、回復の手段（serial）がある時だけ試す（起動しないと板がまた止まる）。
+4. その後の手（phase020 の次の手の 1〜3）: c1 の 1080p の非線形な 3D の費用（texture の mip 0 の読み・cache）、頂点の側（mview.vert 49 group、TA の固定機能・parameter buffer の書き）、cutout の残り（14 group: 比較・select・tstz を 1 つの test に寄せる、feedback を色の後ろへ）。
