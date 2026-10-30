@@ -87,3 +87,10 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - Venus の kernel は host の capset がちょうど 168 byte の時だけ vendor の suffix を読み、libvulkan は 168 と 176 で読む（176 byte の host で strict が食い違う）。
 - gpu-op.h の video の properties の comment は i915 だけと書くが、nvrtx と bcm2711（video 付きの build）も NATIVE_VIDEO_DECODE_H264 を立てる。
 - i915 は契約が未実装（XXX）のまま vendor flags 7 を返す。
+
+## p019 から（2026-10-30 Q1、Bug の候補の一覧に入れる）
+
+- amdrdna の `present_present` の comment は flip の始まりで返ると書くが、code は flip を運ぶ update を待つ。
+- `i915/display/present.c` の file の comment（output 1 つ、hot-plug・topology の event 無し）が code（複数の connector、GPU_DISPLAY_LIMITED、display の event）と食い違う。
+- `CONFIG_DRIVER_PCI_AMDRDNA` の既定が config/drivers/pci.drivers は n、Makefile の amd64 は y。
+- nvrtx・i915 は GPU_CAP_DISPLAY_CONTROL を立てるが GPU_DISPLAY_POWER に EOPNOTSUPP。
