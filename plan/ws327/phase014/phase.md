@@ -3,7 +3,7 @@
 # ws327-p014 network の層の Win32 の実装（`socket-win32.c`）と mingw の cross compile
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §4・§5.2・§5.3・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007（p013 と並べてよい）。
-- Status: planned
+- Status: in-progress（2026-10-30。実装と確かめは済んだ、cleared の判定は Q1）
 - Disposition: normal
 - ユーザーの決定 3（ws.md、原文）: 「P2ですが、Windows用の実装を書いてしまってOKです。インタフェースがWindowsでも通用する形になっているかのチェックです。動作確認は不要です。mingwは使ってよいです。」
   → mingw で compile と link（warning 0）まで。wine でも Windows でも走らせない。
@@ -88,4 +88,59 @@ plan/ws327/phase014/phase.md`（ws.md は Q1）。動作の確かめはしない
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-30（host の `date`）。担当: 実装の担当（Sonnet 5.5 high）。動作は走らせていない（決定 3）。
+
+### 流した command と最後の行
+
+- `sh plan/ws327/tests/build-win32.sh` → x86_64・i686 とも `compile socket-win32.c: PASS (warnings 0)`、`link win32-link.exe: PASS`、最後 `ws327-win32: PASS`。
+- `sh plan/ws327/tests/check-base.sh p014` → `ws327-check-base: PASS`。
+- `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p014-linux build/ws327-p014-linux/lib/libkeiland.so` → 終了 0、warning 0。
+- `git diff --check` → 0。
+- 突然変異（§5）: `kl_socket_waker_ring` を消す → 両方で `link win32-link.exe: FAIL`。使わない局所の変数 `unused_mutation` を足す → 両方で `compile socket-win32.c: FAIL`。
+  どちらも元に戻して `cmp` で一致を確かめた。
+
+### 自分で決めた点（phase.md と違う所・足した所）
+
+- `struct kl_socket` に `connecting` を足した（connect が EINPROGRESS を返してから `connect_result` までの間 1）。`WSAEINVAL` を EALREADY にするのは
+  `nonblocking && connecting` の時だけ。これが無いと、listen の socket への connect（`WSAEINVAL`）も非 blocking なら EALREADY になる。
+- `kl_socket_poll` の 3 つの集合は 1 回の `malloc(3 * set_bytes)` を切り分ける（`offsetof(fd_set, fd_array) + count * sizeof(SOCKET)` の倍数で、
+  `SOCKET` の整列に合う）。`count` が大きすぎて掛け算が溢れる時は ENOMEM。
+- `kl_socket_resolve` は service 名を渡さず（`GetAddrInfoW(name, NULL, ...)`）、答えの port を後で入れる（port の文字列の変換を避けた）。
+- accept の取り直しは `WSAECONNRESET` に加えて `WSAECONNABORTED`（design §4.3 の ECONNABORTED）。POSIX の `ENETDOWN` などの取り直しは Windows の
+  accept の誤りに無く、`WSAENETDOWN` を取り直すと blocking の accept が回り続けるので取り直さない。
+- `kl_socket_receive` は `WSAEMSGSIZE`（datagram socket の接続済みの recv が長い datagram を切った）を buffer の大きさで成功、`WSAESHUTDOWN`
+  （`shutdown(SD_RECEIVE)` の後）を `*received == 0`（終わり）で成功にした（POSIX は両方とも誤りにならない）。
+- `socket_error` に表へ足した値: `WSAEMSGSIZE` → EMSGSIZE、`WSAENOTSOCK` → ENOTSOCK、`WSAEOPNOTSUPP` → EOPNOTSUPP、`WSA_NOT_ENOUGH_MEMORY` → ENOMEM。
+  `SetHandleInformation` の失敗は EIO。
+- 全ての公開の関数（address の 4 つと `kl_socket_native`・`kl_socket_close(NULL)`・`kl_socket_waker_close(NULL)` を除く）が最初に `socket_start()`。
+  `socket_start` が失敗すれば void の関数（`ring`）は何もしない。
+- waker の組は accept の peer（accept が書く address）を connect した側の `getsockname` と比べる（phase.md の `getpeername` と同じ値）。
+  listen の backlog は 4。ends[0] が accept した側（読む）、ends[1] が connect した側（書く）。
+
+### Q1 へ（Windows で header の約束をそのまま守れない所・差）
+
+Q1 の決定（2026-10-30）: 1 の send の ECONNABORTED・ECONNRESET はそのまま（header は変えない）、3 は POSIX に合わせる（下に反映）。
+
+header は変えていない。次は「Windows では約束の文言のとおりにならない」所で、いずれも header の「or another errno value」や Mailer の使い方
+（EPIPE と ECONNRESET を同じに扱う、`ml_conn_*`・sync.c）の範囲に収まる。実機では確かめていない。
+
+1. **send の EPIPE**: header「peer が閉じた socket への send は EPIPE」。WinSock は自分が `shutdown(SD_SEND)` した後だけ `WSAESHUTDOWN`（→ EPIPE）で、
+   peer が閉じた（RST を受けた）後の send は `WSAECONNABORTED` か `WSAECONNRESET`（→ ECONNABORTED か ECONNRESET）。EPIPE にはならない。
+   `socket_error` の表のとおりに返した。header の文言を「EPIPE か ECONNRESET か ECONNABORTED」にするか、send で `WSAECONNABORTED` を EPIPE に写すかは Q1 の判断。
+2. **接続済みの UDP の ICMP 到達不能**: `SIO_UDP_CONNRESET` を切ったので、繋いでいない UDP の受信が `WSAECONNRESET` で壊れるのは避けられるが、
+   接続した UDP の受信が Linux のように ECONNREFUSED を返す事も無くなる（Windows には同じ通知が無い）。header は約束していない。
+3. **bind していない socket の `kl_socket_local_address`**: Windows の `getsockname` は `WSAEINVAL` だが、Q1 の決定（2026-10-30）で POSIX に合わせ、
+   `WSAEINVAL` なら 0 を返して socket の family の any の address・port 0 にした（`kl_address_any`）。差は無くなった。
+4. **bind の乗っ取り**: `SO_EXCLUSIVEADDRUSE` を付けない（design §5.2）ので、Windows では他の process が `SO_REUSEADDR` で同じ port に bind できる
+   （listen する server 用途の app が出たら再検討）。waker の listen の socket だけは `SO_EXCLUSIVEADDRUSE` で、accept の peer を照合する。
+5. **ready の意味**: POSIX の `POLLHUP`（両方向が閉じた → events の全て）は select に無い。Windows の select は FIN を受けた socket を readable、
+   RST の socket を readable と writable に出すが、「閉じた socket の WRITABLE」は実機で未確認。FAILED は connect 失敗を except 集合で出す事で守れる。
+6. **link**: 利用側（libkeiland の Windows 用の Makefile、本 WS の範囲の外）は `-lws2_32 -liphlpapi`（`if_nametoindex`）が要る。
+   `inet_pton`・`inet_ntop` は Vista 以降、`WSA_FLAG_NO_HANDLE_INHERIT` は Windows 7 SP1 以降、`SetThreadDescription` 側の thread-win32.c と
+   合わせて Windows 10 を前提にした（build-win32.sh は `_WIN32_WINNT=0x0A00`）。
+
+### 未実施
+
+- 走らせていない（Windows でも wine でも。決定 3）。poll の select の写し・waker の組・SIO_UDP_CONNRESET・accept の取り直しは build が通るだけで動作は未確認。
+- 規約の全文の見直しは自分の diff を `plan/coding-style.md` §14 で読んだ範囲（forward 宣言・関数の comment・宣言の位置・paragraph の comment・
+  条件の中で関数を呼ばない・最後の return は成功）。
