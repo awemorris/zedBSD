@@ -216,6 +216,26 @@ struct tcp_socket {
 	 */
 	uint32_t receive_mss;
 	/*
+	 * The receive buffer's automatic sizing (dynamic right-sizing).
+	 * receive_auto says the buffer grows by itself as the transfer asks
+	 * (cleared for good once SO_RCVBUF sets one), and receive_extra_packets
+	 * is how many packets beyond the default its queue took from the
+	 * system's budget, which the socket gives back when it closes.  A
+	 * measurement runs while receive_tune_on is set: it began with
+	 * receive_next at receive_tune_base, at receive_tune_start_us, and
+	 * ends when receive_next passes receive_tune_mark, the right edge of
+	 * the window when it began.  receive_rtt_us is the round trip as this
+	 * end sees it receiving (0: none measured).  All moved under the
+	 * socket lock.
+	 */
+	uint8_t receive_auto;
+	uint8_t receive_tune_on;
+	unsigned receive_extra_packets;
+	uint32_t receive_tune_mark;
+	uint32_t receive_tune_base;
+	uint64_t receive_tune_start_us;
+	uint32_t receive_rtt_us;
+	/*
 	 * The congestion control of RFC 5681 in bytes: the congestion window
 	 * (RFC 6928's ten segments to start), the slow start threshold, and
 	 * the bytes acknowledged towards the next segment of growth in

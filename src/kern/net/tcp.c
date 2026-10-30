@@ -160,13 +160,60 @@
  * KB, which the scale lets the peer see, keeps a fast link busy over a
  * longer round trip.  Its queue's packet limit takes that many bytes
  * however the segments are cut (TCP_RECEIVE_PACKETS of
- * SOCKET_STREAM_PACKET_BYTES).  SO_RCVBUF sets another.
+ * SOCKET_STREAM_PACKET_BYTES).  SO_RCVBUF sets another, and on the 64-bit
+ * machines the buffer grows by itself (TCP_RECEIVE_AUTO).
  */
 #if PACKET_BUF_POOL_COUNT >= 1024U
 #define TCP_RECEIVE_BUFFER (128U * 1024U)
 #else
 #define TCP_RECEIVE_BUFFER SOCKET_BUFFER_DEFAULT
 #endif
+
+/*
+ * Whether a connection's receive buffer grows by itself, as the transfer
+ * asks, from TCP_RECEIVE_BUFFER up to TCP_RECEIVE_AUTO_MAX: on the machines
+ * whose pool has room for it (the 64-bit ones; the small pool of the
+ * 32-bit boards keeps its fixed queue).  A connection whose window is what
+ * holds the transfer back (a fast link with a round trip longer than 128
+ * KB lasts: 2.5 Gbit/s over 1 ms takes 300 KB) would otherwise run at the
+ * window over the round trip.  SO_RCVBUF turns it off for its socket.
+ *
+ * Procedure referenced: M. Fisk and W. Feng, "Dynamic Right-Sizing in
+ * TCP", Los Alamos Computer Science Institute Symposium, 2001 (the
+ * receiver takes the time one window's worth of data takes to arrive as
+ * the round trip, and keeps its buffer at twice what one round trip
+ * brings).
+ */
+#if PACKET_BUF_POOL_COUNT >= 1024U
+#define TCP_RECEIVE_AUTO 1U
+#else
+#define TCP_RECEIVE_AUTO 0U
+#endif
+
+/*
+ * The largest buffer a connection grows to by itself: the largest
+ * SO_RCVBUF takes, which this end's window scale (TCP_RECEIVE_WSCALE)
+ * still covers.
+ */
+#define TCP_RECEIVE_AUTO_MAX SOCKET_BUFFER_MAX
+
+/*
+ * The share of the packet pool the receive queues may take together
+ * beyond each one's TCP_RECEIVE_PACKETS, grown by themselves or by
+ * SO_RCVBUF: a quarter, so that a connection with the largest buffer
+ * leaves the pool to the copies the senders keep and to the frames the
+ * devices receive.
+ */
+#define TCP_RECEIVE_EXTRA_SHARE 4U
+
+/*
+ * What the buffer grows to, in eighths of what one round trip brings.
+ * Twice it (the measure the procedure above takes) lets the peer queue a
+ * round trip's worth more in front of the link (the window settles where
+ * the round trip has doubled), and the data of the other direction, and
+ * its acknowledgements, wait behind that queue too.
+ */
+#define TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 16U
 
 /*
  * The send buffer a connection starts with: on the 64-bit machines more
@@ -488,6 +535,15 @@ static const char *const tcp_cc_names[TCP_CC_COUNT] = { "reno", "cubic" };
 static struct tcp_socket *tcp_ack_head;
 static struct spinlock tcp_ack_lock;
 
+/*
+ * The packets all receive queues together may take beyond their
+ * TCP_RECEIVE_PACKETS (tcp_socket.receive_extra_packets, summed): it stays
+ * within TCP_RECEIVE_EXTRA_SHARE of the pool, a socket adding to it only
+ * by compare and exchange and taking its part back when it closes.  No
+ * lock guards it.
+ */
+static atomic_uint_t tcp_receive_extra_packets;
+
 static struct tcp_endpoint * tcp_endpoint(struct socket *socket);
 static void tcp_forget_peer(struct tcp_endpoint *endpoint);
 static void tcp_listener_remove(struct tcp_endpoint *child);
@@ -596,6 +652,13 @@ static ssize_t tcp_recvfrom(struct socket *socket, void *buffer, size_t length, 
 static uint32_t tcp_receive_window(struct tcp_endpoint *endpoint);
 static uint32_t tcp_receive_offered(const struct tcp_endpoint *endpoint);
 static uint32_t tcp_receive_sws_step(const struct tcp_endpoint *endpoint);
+static unsigned tcp_receive_extra_take(unsigned wanted);
+static void tcp_receive_extra_give(unsigned count);
+static unsigned tcp_receive_packets_set_locked(struct tcp_endpoint *endpoint, unsigned packets);
+static int tcp_receive_clock_us(uint64_t *now_us);
+static void tcp_receive_tune_start_locked(struct tcp_endpoint *endpoint, uint64_t now_us);
+static void tcp_receive_tune_locked(struct tcp_endpoint *endpoint);
+static void tcp_buffer_changed(struct socket *socket, int option);
 static int tcp_reset_error_locked(const struct tcp_endpoint *endpoint, uint8_t flags, uint32_t acknowledgement);
 static void tcp_send_reset(const struct tcp_segment_addresses *addresses, const struct tcp_wire *segment, size_t payload_length);
 static void tcp_send_reset6(const struct tcp_segment_addresses *addresses, struct packet_buf *packet);
@@ -637,6 +700,7 @@ static const struct socket_ops tcp_ops = {
 	.poll = tcp_poll,
 	.close = tcp_close,
 	.endpoint_close = tcp_endpoint_close,
+	.buffer_changed = tcp_buffer_changed,
 	.setsockopt = tcp_setsockopt,
 	.getsockopt = tcp_getsockopt,
 	.keepalive_changed = tcp_keepalive_changed,
@@ -665,9 +729,14 @@ tcp_socket_create(
 	    &tcp_ops);
 	endpoint->tcp.state = TCP_CLOSED;
 
-	/* Its receive queue takes the packets the window it offers counts, and the bytes of its buffer. */
+	/*
+	 * Its receive queue takes the packets the window it offers counts, and
+	 * the bytes of its buffer, which grows by itself where the pool has
+	 * room until SO_RCVBUF sets one.
+	 */
 	endpoint->tcp.inet.socket.receive_packet_limit = TCP_RECEIVE_PACKETS;
 	endpoint->tcp.inet.socket.receive_hiwat_bytes = TCP_RECEIVE_BUFFER;
+	endpoint->tcp.receive_auto = (uint8_t)TCP_RECEIVE_AUTO;
 	endpoint->tcp.inet.socket.send_hiwat_bytes = TCP_SEND_BUFFER;
 
 	/* The system's TCP_MAXUNACKTIME (ws220-p005). */
@@ -7806,6 +7875,277 @@ tcp_receive_window(
 	return (uint32_t)room;
 }
 
+/*
+ * Takes up to wanted packets from the receive queues' shared budget, as
+ * many as it has left, and reports how many it took.
+ */
+static unsigned
+tcp_receive_extra_take(
+	unsigned wanted)
+{
+	struct packet_buf_pool_usage usage;
+	unsigned budget;
+	unsigned taken;
+	unsigned granted;
+	int exchanged;
+
+	/* The budget is a share of the packets the pool really got (fewer when memory was short). */
+	packet_buf_pool_usage(&usage);
+	budget = usage.total / TCP_RECEIVE_EXTRA_SHARE;
+
+	/* Adds the part granted to what the queues hold, unless another socket moved it meanwhile. */
+	taken = atomic_load_acquire(&tcp_receive_extra_packets);
+	for (;;) {
+		/* Nothing is left to take. */
+		if (taken >= budget)
+			return 0;
+
+		granted = budget - taken;
+		if (granted > wanted)
+			granted = wanted;
+		exchanged = atomic_compare_exchange(&tcp_receive_extra_packets, &taken, taken + granted);
+		if (exchanged)
+			break;
+	}
+
+	/* Succeeded: the packets this socket now holds of the budget. */
+	return granted;
+}
+
+/* Gives packets a receive queue held back to the shared budget. */
+static void
+tcp_receive_extra_give(
+	unsigned count)
+{
+	/* Nothing held is nothing to give. */
+	if (count == 0)
+		return;
+
+	/* Subtracts them (adding the two's complement). */
+	(void)atomic_fetch_add_relaxed(&tcp_receive_extra_packets, 0U - count);
+}
+
+/*
+ * Sets how many packets a connection's receive queue may hold: packets,
+ * but never fewer than TCP_RECEIVE_PACKETS, and those beyond it only as
+ * the shared budget grants them (packets beyond what it had are taken,
+ * those it no longer needs given back).  Reports the limit set.  The
+ * caller holds the socket lock, or the socket is not yet reachable.
+ */
+static unsigned
+tcp_receive_packets_set_locked(
+	struct tcp_endpoint *endpoint,
+	unsigned packets)
+{
+	unsigned wanted;
+	unsigned held;
+
+	/* The packets wanted beyond the default. */
+	wanted = 0;
+	if (packets > TCP_RECEIVE_PACKETS)
+		wanted = packets - TCP_RECEIVE_PACKETS;
+
+	/* Takes what is missing from the budget, or gives back what is not needed. */
+	held = endpoint->tcp.receive_extra_packets;
+	if (wanted > held) {
+		held += tcp_receive_extra_take(wanted - held);
+	} else if (wanted < held) {
+		tcp_receive_extra_give(held - wanted);
+		held = wanted;
+	}
+
+	/* The queue's limit counts what it holds of the budget. */
+	endpoint->tcp.receive_extra_packets = held;
+	endpoint->tcp.inet.socket.receive_packet_limit = TCP_RECEIVE_PACKETS + held;
+
+	/* Succeeded: the limit now in force. */
+	return TCP_RECEIVE_PACKETS + held;
+}
+
+/*
+ * Reads the time in microseconds from the machine's monotonic counter, for
+ * the receive buffer's sizing: the clock's tick (a millisecond or ten) is
+ * longer than a round trip on a LAN.  Reports 0 without a counter.
+ */
+static int
+tcp_receive_clock_us(
+	uint64_t *now_us)
+{
+	uint64_t counter;
+	uint64_t frequency;
+	bool have;
+
+	/* Refuses when the machine has no counter, or one of no known rate. */
+	have = kern_rtc_read_counter(&counter, &frequency);
+	if (!have || frequency == 0)
+		return 0;
+
+	/* Whole seconds and the rest apart, so that the product stays within 64 bits. */
+	*now_us = counter / frequency * 1000000U + counter % frequency * 1000000U / frequency;
+
+	/* Succeeded: the time is read. */
+	return 1;
+}
+
+/*
+ * Starts a measurement for the receive buffer's sizing at now_us: it ends
+ * when receive_next passes the right edge of the window this end offers
+ * now (at least a segment ahead).  The caller holds the socket lock.
+ */
+static void
+tcp_receive_tune_start_locked(
+	struct tcp_endpoint *endpoint,
+	uint64_t now_us)
+{
+	uint32_t window;
+	uint32_t mss;
+
+	/* The window as the next acknowledgement offers it, a segment at least. */
+	window = tcp_receive_window(endpoint);
+	mss = tcp_receive_mss(endpoint);
+	if (window < mss)
+		window = mss;
+
+	/* The measurement runs from here to that edge. */
+	endpoint->tcp.receive_tune_base = endpoint->tcp.receive_next;
+	endpoint->tcp.receive_tune_mark = endpoint->tcp.receive_next + window;
+	endpoint->tcp.receive_tune_start_us = now_us;
+	endpoint->tcp.receive_tune_on = 1;
+}
+
+/*
+ * Grows a connection's receive buffer when its window is what holds the
+ * transfer back (dynamic right-sizing), after a payload queued in order.
+ *
+ * A measurement ends when the window it began with has arrived: as long as
+ * the window holds the peer back, that takes one round trip, and longer
+ * otherwise.  The round trip as this end sees it, receive_rtt_us, is the
+ * shortest of those times.  What one round trip brings is then the bytes
+ * received scaled by the round trip over the time they took (a window that
+ * took longer than a round trip did not hold the peer back, and its bytes
+ * count for less); when twice that is more than the buffer,
+ * and the reader keeps up (the queue holds less than half the buffer, so
+ * the window is what limits, not the reader), the buffer grows to twice
+ * it, up to TCP_RECEIVE_AUTO_MAX and as far as the shared budget lets the
+ * packet limit follow.  It never shrinks: a window offered stays offered.
+ * The caller holds the socket lock.
+ */
+static void
+tcp_receive_tune_locked(
+	struct tcp_endpoint *endpoint)
+{
+	struct socket *socket = &endpoint->tcp.inet.socket;
+	uint64_t now_us;
+	uint64_t elapsed;
+	uint64_t received;
+	uint64_t round_trip;
+	uint64_t wanted;
+	unsigned packets;
+	int passed;
+	int have;
+
+	/* Only a buffer that grows by itself is measured. */
+	if (endpoint->tcp.receive_auto == 0)
+		return;
+
+	/* A measurement whose window has not all arrived goes on. */
+	if (endpoint->tcp.receive_tune_on) {
+		passed = tcp_sequence_at_or_before(endpoint->tcp.receive_tune_mark, endpoint->tcp.receive_next);
+		if (!passed)
+			return;
+	}
+
+	/* The time now; without a counter nothing is measured. */
+	have = tcp_receive_clock_us(&now_us);
+	if (!have)
+		return;
+
+	/* The first payload starts the first measurement. */
+	if (endpoint->tcp.receive_tune_on == 0) {
+		tcp_receive_tune_start_locked(endpoint, now_us);
+		return;
+	}
+
+	/*
+	 * A window that came within the counter's resolution says nothing of
+	 * the round trip: the measurement goes on to the next window's edge.
+	 */
+	elapsed = now_us - endpoint->tcp.receive_tune_start_us;
+	if (elapsed == 0) {
+		endpoint->tcp.receive_tune_mark = endpoint->tcp.receive_next + tcp_receive_window(endpoint);
+		return;
+	}
+
+	/*
+	 * The round trip: the shortest sample yet.  Each is the round trip or
+	 * longer, and the round trip itself only while the window holds the
+	 * peer back, so a longer one says nothing of it.
+	 */
+	round_trip = endpoint->tcp.receive_rtt_us;
+	if (elapsed > TCP_RTT_SAMPLE_MAX_US)
+		elapsed = TCP_RTT_SAMPLE_MAX_US;
+	if (round_trip == 0 || elapsed < round_trip)
+		round_trip = elapsed;
+	endpoint->tcp.receive_rtt_us = (uint32_t)round_trip;
+
+	/* What one round trip brought, and the buffer's share beyond it. */
+	received = endpoint->tcp.receive_next - endpoint->tcp.receive_tune_base;
+	wanted = received * round_trip / elapsed * TCP_RECEIVE_AUTO_GROWTH_EIGHTHS / 8U;
+	if (wanted > TCP_RECEIVE_AUTO_MAX)
+		wanted = TCP_RECEIVE_AUTO_MAX;
+
+	/*
+	 * The buffer grows when the window held the transfer back: more than
+	 * the buffer wanted, and a reader that keeps up.  The bytes follow the
+	 * packets the budget granted, which every packet holds at least.
+	 */
+	if (wanted > socket->receive_hiwat_bytes &&
+	    socket->receive_bytes < socket->receive_hiwat_bytes / 2U) {
+		packets = (unsigned)((wanted + SOCKET_STREAM_PACKET_BYTES - 1U) / SOCKET_STREAM_PACKET_BYTES);
+		packets = tcp_receive_packets_set_locked(endpoint, packets);
+		if ((size_t)packets * SOCKET_STREAM_PACKET_BYTES > socket->receive_hiwat_bytes)
+			socket->receive_hiwat_bytes = (size_t)packets * SOCKET_STREAM_PACKET_BYTES;
+	}
+
+	/* The next measurement starts here. */
+	tcp_receive_tune_start_locked(endpoint, now_us);
+}
+
+/*
+ * Takes a receive buffer SO_RCVBUF set (the socket layer has stored its
+ * bytes): the buffer no longer grows by itself, and the queue's packet
+ * limit follows the bytes as far as the shared budget lets it (no fewer
+ * than the default), so that a buffer larger than the default is a larger
+ * window too.
+ */
+static void
+tcp_buffer_changed(
+	struct socket *socket,
+	int option)
+{
+	struct tcp_endpoint *endpoint;
+	unsigned long irq;
+	unsigned packets;
+
+	/* Only the receive buffer concerns the window. */
+	if (option != SO_RCVBUF)
+		return;
+
+	/* Fixes the buffer and sets the packets it takes. */
+	endpoint = tcp_endpoint(socket);
+	irq = spin_lock_irqsave(&socket->lock);
+
+	endpoint->tcp.receive_auto = 0;
+	endpoint->tcp.receive_tune_on = 0;
+	if (TCP_RECEIVE_AUTO != 0U) {
+		packets = (unsigned)((socket->receive_hiwat_bytes + SOCKET_STREAM_PACKET_BYTES - 1U) /
+		    SOCKET_STREAM_PACKET_BYTES);
+		(void)tcp_receive_packets_set_locked(endpoint, packets);
+	}
+
+	spin_unlock_irqrestore(&socket->lock, irq);
+}
+
 /* Shuts down one or both directions, sending a FIN for the write side. */
 static int
 tcp_shutdown(
@@ -7983,6 +8323,10 @@ tcp_close(
 	}
 
 	spin_unlock_irqrestore(&tcp_registry_lock, irq);
+
+	/* The packets its receive queue took beyond the default go back to the other connections. */
+	tcp_receive_extra_give(endpoint->tcp.receive_extra_packets);
+	endpoint->tcp.receive_extra_packets = 0;
 
 	tcp_retransmit_clear(endpoint);
 	tcp_reorder_free(endpoint);
@@ -8348,6 +8692,7 @@ tcp_passive_syn(
 	struct socket *created;
 	struct tcp_endpoint *child;
 	unsigned long irq;
+	unsigned packets;
 	int error;
 
 	/* Creates the child socket, of the listener's family. */
@@ -8404,6 +8749,20 @@ tcp_passive_syn(
 	    listener->tcp.inet.socket.reuse_address;
 	child->tcp.inet.bind_reuse_address =
 	    listener->tcp.inet.bind_reuse_address;
+
+	/*
+	 * A receive buffer SO_RCVBUF set on the listener is the child's too,
+	 * fixed as the listener's is (BSD and Linux pass it on the same way);
+	 * the child is not yet where a segment finds it.
+	 */
+	if (TCP_RECEIVE_AUTO != 0U && listener->tcp.receive_auto == 0) {
+		child->tcp.receive_auto = 0;
+		child->tcp.inet.socket.receive_hiwat_bytes = listener->tcp.inet.socket.receive_hiwat_bytes;
+		packets = (unsigned)((child->tcp.inet.socket.receive_hiwat_bytes + SOCKET_STREAM_PACKET_BYTES - 1U) /
+		    SOCKET_STREAM_PACKET_BYTES);
+		(void)tcp_receive_packets_set_locked(child, packets);
+	}
+
 	child->tcp.queue_next = listener->tcp.half_open_head;
 	listener->tcp.half_open_head = &child->tcp;
 	listener->tcp.half_open_count++;
@@ -9282,6 +9641,10 @@ tcp_segment_input(
 		/* A payload taken is counted. */
 		if (queued)
 			endpoint->tcp.counters.data_bytes_in += payload_length;
+
+		/* A payload queued in order may end a measurement of the receive buffer's sizing. */
+		if (advanced)
+			tcp_receive_tune_locked(endpoint);
 
 		/* A segment the receive queue had no room for is counted for net.tcpstats. */
 		if (!queued)

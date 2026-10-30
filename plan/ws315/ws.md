@@ -32,6 +32,7 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
 | [ws315-p003](phase003/phase.md) | 5330 の実機: send・recv 30 s、NCM・Linux との比べ、USB の他の device の非退行、調整（design.md §5.4・§8） | cleared（2026-10-30 06:15 P3: image の試験 img1 と調整 k6。send 2372.0・recv 2338.3、同時 send 2346.5・recv 1442.9（調整の前 1037.1、Linux の同時 2345.7・2340.9、残りの差は TCP の受けの window 128 KB と見る）、ping・MTU・down/up・他の USB の device PASS。camcap は WS282 の範囲。抜き差しは未実施） | p002 |
 | [ws315-p004](phase004/phase.md) | RTL8157（資料だけ）: 記述子 v2、version 16 の初期化、5000 の広告、host 試験、build。実機はユーザーの購入の後 | cleared（2026-10-30 05:43 P3、host 試験 PASS・amd64・pcat の build warning 0。実機は未実施） | p002 |
 | [ws315-p005](phase005/phase.md) | 規約の全文の見直し | cleared（2026-10-30 05:53 P3、conformance-reviewer。host 試験 PASS、build warning 0） | p002〜p004 |
+| [ws315-p006](phase006/phase.md) | TCP の受けの buffer の自動調整（F-WS315-rcvbuf、2026-10-30 ユーザー「F-WS315-rcvbufを解決してほしいです。WS315のphaseにして、今取り組んでください。」） | in-progress（2026-10-30 09:16 P3 q1696-i01 ラップアップ: 実装・tcp-model・21 config の build・QEMU は済み。5330 の同時 recv 2334〜2356（Linux 2341）だが同時 send が 1030〜1645 に落ちた（前 2347）、倍率の調整が残り） | p003 |
 
 ## Resume point
 
@@ -52,3 +53,5 @@ Realtek方式については、NCMでどこまで速度が上がるか観察し�
   同時の受けが 1037 で、TX queue で純粋な ACK を data の前に出す調整（k6）で 1443（Linux 2341）。残りの差は TCP の受けの window（128 KB、stack の側、範囲の外）と見る。
   camcap の frames=0 は WS282 の範囲（Q1 の判断）。全 Phase が cleared: WS の受け入れ（Linux と同じ程度の速さ: send・recv の片方向は満たす、同時は上の差）と completed の判定は Q1。
   5330 は Debian に戻った（NVMe の zedBSD は img1 の userland と k6 の kernel）。
+- 2026-10-30 09:16 P3（q1696-i01、ラップアップ）: p006 を追加（ユーザー「F-WS315-rcvbufを解決してほしいです。WS315のphaseにして、今取り組んでください。」）。受けの buffer の自動調整を実装（8b9523b20）、
+  同時 recv は Linux 並みになったが同時 send が落ちた。再開は [phase006](phase006/phase.md) の「引き継ぎ」（次: 1.5 倍の g12 を 5330 で、倍率の決め、10GbE）。5330 は Debian、NVMe の zedBSD の kernel は g10。

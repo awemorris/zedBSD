@@ -27,8 +27,8 @@ done
 $cc -o "$out/tcp-model" $objects -lc || { echo "tcp-model: link failed"; exit 2; }
 # ws311-p002: a second build whose limits let A's window and B's take a bottleneck's round trip (the send ring, B's
 # receive queue and reorder queue raised to 1024; the kernel's defaults are 256, 128 and 128): the congestion scenarios.
-# The model's two hosts share one packet pool, so it is four times the kernel's 1024 (ws311-p003: A's copies and B's
-# queues of a 1 MB window took all 1024, and the connection died).
+# The model's two hosts share one packet pool, 4096 (ws311-p003: A's copies and B's queues of a 1 MB window took all
+# 1024, and the connection died; since ws315-p006 the kernel's own pool is 4096 too).
 mkdir -p "$out/big"
 big_flags="-DCONFIG_TCP_SEND_QUEUE_MAX=1024 -DCONFIG_TCP_RECEIVE_PACKETS=1024 -DCONFIG_TCP_REORDER_MAX=1024
 	-DCONFIG_PACKET_BUF_POOL_COUNT=4096U"
@@ -100,8 +100,19 @@ scenario nagle-1024 4 --bytes 16777216 --delay-us 5000 --expect-segments-max 116
 scenario nodelay-1024 4 --bytes 16777216 --delay-us 5000 --nodelay --expect-segments-min 16000
 # ws221-p008: SO_SNDBUF bounds the payload A's ring holds (16 KB: no more is queued, and the window it keeps busy).
 scenario send-buffer-16k 20 --bytes 16777216 --send-buffer 16384
-# 10 ms of round trip: the rate is the window over the round trip (64 KB: 6.4 MB/s).
+# 10 ms of round trip: the rate was the window over the round trip (64 KB: 6.4 MB/s; 128 KB: 12.1 MB/s); since ws315-p006
+# B's buffer grows and A's ring limits (32 MB/s).
 scenario rtt-10ms 4 --bytes 16777216 --delay-us 5000
+# ws315-p006: B's receive buffer grows by itself (dynamic right-sizing) while its window is what holds the transfer
+# back: over 10 ms of round trip the 128 KB window gave 12.1 MB/s, the buffer grows to the megabyte a connection may take
+# and A's ring of 256 segments limits instead (32 MB/s).  On the clean LAN, where the link limits, it grows no more than
+# about twice what a window's time brings (285 KB; the measured round trip is a window's time, 1.2 ms, not the link's
+# 0.2 ms).  With SO_RCVBUF it stays where it was put: 128 KB keeps the rate at the window over the round trip, and 1 MB,
+# larger than the default, is a 1 MB window too (before, the queue's 128 packets kept the window at 128 KB).
+scenario receive-auto-10ms 20 --bytes 16777216 --delay-us 5000 --expect-receive-limit 524288:1048576
+scenario receive-auto-lan 30 --bytes 67108864 --expect-receive-limit 131072:524288
+scenario receive-fixed-10ms 10 --bytes 16777216 --delay-us 5000 --receive-buffer 131072 --expect-receive-limit 131072:131072
+scenario receive-buffer-1m 20 --bytes 16777216 --delay-us 5000 --receive-buffer 1048576 --expect-receive-limit 1048576:1048576
 # (The resends of these and of slow-reader stay at most the counts of ws220-p005, --expect-retransmits-max: p004 review-1 G2
 # took p003's; p005 made slow-reader's 8566 (p003 14246; the probes of its closed window, which no longer count as
 # duplicates) and lan-loss-1's 85 with 2 timeouts.
