@@ -6,7 +6,7 @@ Status: planning
 Primary Milestone: MG001
 Parent: [Master](../master.md)
 目標: `src/drivers/`・`include/drivers/` の HAL の header の include と `hal_*` の呼び出しを 0 にし、driver は kernel の機能（`kern_*`）だけを使う。規則は [Guardrail](../guardrail.md) の「driver は HAL を知らない」。
-Resume point: p001（一覧の作成）を P2 が実行中（q1713）。
+Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）を P2 が phase001/phase.md に書いた（q1713）。Q1 がユーザーに表 B と未決を見せ、決定の後に p002〜 を立てる。
 
 ## ユーザーの決定（原文、2026-10-30）
 
