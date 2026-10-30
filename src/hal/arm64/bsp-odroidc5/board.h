@@ -10,8 +10,8 @@
  * handoff objects, and the peripherals the HAL reaches at fixed addresses.
  */
 
-#ifndef KERN_HAL_ARM64_BSP_S905X5M_BOARD_H
-#define KERN_HAL_ARM64_BSP_S905X5M_BOARD_H
+#ifndef KERN_HAL_ARM64_BSP_ODROIDC5_BOARD_H
+#define KERN_HAL_ARM64_BSP_ODROIDC5_BOARD_H
 
 /*
  * The board's name in the HAL's boot messages, and the prefix of the

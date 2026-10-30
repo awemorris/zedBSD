@@ -74,10 +74,10 @@ $(ODROID_C5_BOOTLOADER_RECORD): odroid-c5-bootloader-choice
 
 # The HAL's device tree parser on the board's tree, on the host.
 $(BUILD)/tests/odroid-c5-fdt-host-test: tests/odroid-c5-fdt-host-test.c \
-	src/hal/arm64/bsp-s905x5m/fdt.c src/hal/arm64/bsp-rpi-common/fdt.h
+	src/hal/arm64/bsp-s905x5m-common/fdt.c src/hal/arm64/fdt.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Iinclude -Isrc \
- src/hal/arm64/bsp-s905x5m/fdt.c $< -o $@
+ src/hal/arm64/bsp-s905x5m-common/fdt.c $< -o $@
 
 .PHONY: odroid-c5-fdt-host-test
 odroid-c5-fdt-host-test: $(BUILD)/tests/odroid-c5-fdt-host-test $(ODROID_C5_DTB)

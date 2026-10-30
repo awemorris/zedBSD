@@ -6,9 +6,10 @@
  */
 
 /*
- * What the ODROID-C5 gives the arm64 HAL beyond the common support: its
- * peripherals in the kernel's tables, and the secure firmware's PSCI
- * calls that start the cores, reset and power off.
+ * What an S905X5M board gives the arm64 HAL beyond the common support:
+ * the secure firmware's PSCI calls that start the cores, reset and power
+ * off, and the numbering of the SoC's cores.  The board's own part (its
+ * peripherals in the kernel's tables) is the board's board.c.
  */
 
 #include <hal/hal.h>
@@ -42,43 +43,7 @@
 /* The affinity field the Cortex-A55 numbers its cores in: Aff1 (MPIDR bits 8-15), since MT is set. */
 #define CORE_AFFINITY_SHIFT	8U
 
-/* The bytes of one HAL peripheral window: a page covers each register block. */
-#define S905X5M_DEVICE_WINDOW	0x1000UL
-
-static void map_one(uint64_t physical, const char *name);
 static int64_t psci_call(uint64_t function, uint64_t argument1, uint64_t argument2, uint64_t argument3);
-
-/*
- * Maps the peripherals the HAL itself uses into the kernel's direct map.
- *
- * Each one gets a device window of its own; the rest of the gigabyte the
- * boot mapped as device memory is RAM's or nobody's in the kernel's
- * tables.  The tables are not live yet; a failure stops the boot, since
- * the console and the interrupt controller would be gone after the
- * switch.
- */
-void
-arm64_bsp_map_devices(
-	void)
-{
-	const struct rpi_fdt_info *info;
-
-	/* The debug UART the early console writes to before the tree is read. */
-	map_one(S905X5M_DEBUG_UART_BASE, "debug UART");
-	info = rpi_boot_info();
-
-	/* The GIC's distributor, which routes the shared interrupts. */
-	if (info->gic_dist_base != 0)
-		map_one(info->gic_dist_base, "GIC distributor");
-
-	/* The GIC's CPU interface, which every interrupt is taken through. */
-	if (info->gic_cpu_base != 0)
-		map_one(info->gic_cpu_base, "GIC CPU interface");
-
-	/* The UART the tree names, in case it is not the fixed debug UART. */
-	if (info->uart_base != 0 && info->uart_base != S905X5M_DEBUG_UART_BASE)
-		map_one(info->uart_base, "UART");
-}
 
 /*
  * Leaves the stall watch's report on the framebuffer.
@@ -115,7 +80,7 @@ arm64_bsp_core_of(
  */
 int
 arm64_bsp_cpu_startable(
-	const struct rpi_fdt_cpu *cpu)
+	const struct arm64_fdt_cpu *cpu)
 {
 	/* A core the tree does not give to PSCI is left alone. */
 	if (cpu->psci == 0)
@@ -133,7 +98,7 @@ arm64_bsp_cpu_startable(
  */
 int
 arm64_bsp_cpu_release(
-	const struct rpi_fdt_cpu *cpu,
+	const struct arm64_fdt_cpu *cpu,
 	uint64_t entry_phys)
 {
 	int64_t result;
@@ -191,29 +156,6 @@ hal_poweroff(
 	/* A firmware that refused leaves the CPU halted. */
 	for (;;)
 		arm64_wfi();
-}
-
-/* Maps one peripheral window as device memory, or stops the boot. */
-static void
-map_one(
-	uint64_t physical,
-	const char *name)
-{
-	void *window;
-	int error;
-
-	/* Gives the window a Device-nGnRE block in the direct map. */
-	error = hal_space_map_device((hal_physaddr_t)physical,
-				     S905X5M_DEVICE_WINDOW,
-				     HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_DEVICE,
-				     &window);
-	if (error != HAL_OK) {
-		hal_printf(ARM64_BOARD_TAG " cannot map the %s at %llx (%d)\n",
-			   name,
-			   (unsigned long long)physical,
-			   error);
-		HAL_FATAL("ODROID-C5 peripheral mapping failed");
-	}
 }
 
 /* Makes one PSCI call through the secure monitor, and reports its result. */

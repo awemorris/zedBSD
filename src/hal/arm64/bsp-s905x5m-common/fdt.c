@@ -6,7 +6,7 @@
  */
 
 /*
- * The ODROID-C5's device tree, read by the HAL at boot: the board, the
+ * An S905X5M board's device tree, read by the HAL at boot: the board, the
  * RAM and the reserved ranges (the reservation block's and
  * /reserved-memory's), the CPUs, the command line, the UART and the GIC
  * the HAL uses, and the framebuffer the bootloader left scanning out.
@@ -20,7 +20,7 @@
  */
 
 #include <hal/hal.h>
-#include "../bsp-rpi-common/fdt.h"
+#include "../fdt.h"
 
 /* The blob's magic number and the structure block's tokens. */
 #define FDT_MAGIC 0xd00dfeedU
@@ -39,7 +39,7 @@
 #define FDT_HEADER_BYTES 40U
 #define FDT_MAX_BLOB_BYTES (2U * 1024U * 1024U)
 
-/* The parse's results; rpi_fdt_error() names them in this order. */
+/* The parse's results; arm64_fdt_error() names them in this order. */
 enum {
 	FDT_OK,
 	FDT_E_HEADER,
@@ -137,7 +137,7 @@ struct fdt_parse {
 	const uint8_t *end;
 	int depth;
 	struct fdt_node stack[FDT_MAX_DEPTH];
-	struct rpi_fdt_info *info;
+	struct arm64_fdt_info *info;
 };
 
 static uint32_t read_be32(const uint8_t *p);
@@ -147,15 +147,15 @@ static int string_equal(const uint8_t *s, size_t n, const char *literal);
 static int compatible_has(const uint8_t *p, size_t length, const char *wanted);
 static int cells_to_u64(const uint32_t *cells, unsigned count, uint64_t *value);
 static int translate(const struct fdt_node *parent, uint64_t address, uint64_t *translated);
-static int add_range(struct rpi_fdt_range *ranges, unsigned *count, unsigned maximum, uint64_t base, uint64_t size);
+static int add_range(struct arm64_fdt_range *ranges, unsigned *count, unsigned maximum, uint64_t base, uint64_t size);
 static uint32_t decode_irq(const uint32_t *cells, unsigned count);
-static int commit_node(struct fdt_node *node, const struct fdt_node *parent, struct rpi_fdt_info *info);
-static int commit_memory(const struct fdt_node *node, struct rpi_fdt_info *info);
-static int commit_framebuffer(const struct fdt_node *node, const struct fdt_node *parent, struct rpi_fdt_info *info);
-static int commit_device(const struct fdt_node *node, const struct fdt_node *parent, struct rpi_fdt_info *info);
-static int commit_cpu(const struct fdt_node *node, struct rpi_fdt_info *info);
-static int commit_reserved(const struct fdt_node *node, struct rpi_fdt_info *info);
-static int read_reserve_map(const uint8_t *data, uint32_t total, uint32_t off_reserve, struct rpi_fdt_info *info);
+static int commit_node(struct fdt_node *node, const struct fdt_node *parent, struct arm64_fdt_info *info);
+static int commit_memory(const struct fdt_node *node, struct arm64_fdt_info *info);
+static int commit_framebuffer(const struct fdt_node *node, const struct fdt_node *parent, struct arm64_fdt_info *info);
+static int commit_device(const struct fdt_node *node, const struct fdt_node *parent, struct arm64_fdt_info *info);
+static int commit_cpu(const struct fdt_node *node, struct arm64_fdt_info *info);
+static int commit_reserved(const struct fdt_node *node, struct arm64_fdt_info *info);
+static int read_reserve_map(const uint8_t *data, uint32_t total, uint32_t off_reserve, struct arm64_fdt_info *info);
 static int begin_node(struct fdt_parse *parse);
 static int read_property(struct fdt_parse *parse);
 static void record_property(struct fdt_node *node, const uint8_t *name, size_t name_length, const uint8_t *value, uint32_t length);
@@ -169,10 +169,10 @@ static int end_node(struct fdt_parse *parse);
  * caller says are readable before it is used.
  */
 int
-rpi_fdt_parse(
+arm64_fdt_parse(
 	const void *blob,
 	size_t available,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	struct fdt_parse parse;
 	const uint8_t *data;
@@ -258,7 +258,7 @@ rpi_fdt_parse(
 			if (parse.depth != -1)
 				return FDT_E_STRUCTURE;
 
-			/* The tree must be an ODROID-C5's. */
+			/* The tree must be an S905X5M (S7D) board's. */
 			if (!info->compatible_board)
 				return FDT_E_NOT_BOARD;
 
@@ -282,7 +282,7 @@ rpi_fdt_parse(
  * Names a parse error for the boot log.
  */
 const char *
-rpi_fdt_error(
+arm64_fdt_error(
 	int error)
 {
 	static const char *const names[] = {
@@ -511,7 +511,7 @@ translate(
 /* Appends a range to a table; an empty range adds nothing. */
 static int
 add_range(
-	struct rpi_fdt_range *ranges,
+	struct arm64_fdt_range *ranges,
 	unsigned *count,
 	unsigned maximum,
 	uint64_t base,
@@ -567,7 +567,7 @@ static int
 commit_node(
 	struct fdt_node *node,
 	const struct fdt_node *parent,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	int error;
 
@@ -620,7 +620,7 @@ commit_node(
 static int
 commit_memory(
 	const struct fdt_node *node,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	const uint32_t *cells;
 	uint32_t cell_count;
@@ -661,7 +661,7 @@ commit_memory(
 			return error;
 
 		/* Gives the range to the allocator. */
-		error = add_range(info->memory, &info->memory_count, RPI_FDT_MAX_MEMORY, base, size);
+		error = add_range(info->memory, &info->memory_count, ARM64_FDT_MAX_MEMORY, base, size);
 		if (error != FDT_OK)
 			return error;
 	}
@@ -678,7 +678,7 @@ static int
 commit_device(
 	const struct fdt_node *node,
 	const struct fdt_node *parent,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	unsigned stride;
 	uint64_t base;
@@ -754,7 +754,7 @@ static int
 commit_framebuffer(
 	const struct fdt_node *node,
 	const struct fdt_node *parent,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	unsigned stride;
 	uint64_t base;
@@ -815,9 +815,9 @@ commit_framebuffer(
 static int
 commit_cpu(
 	const struct fdt_node *node,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
-	struct rpi_fdt_cpu *cpu;
+	struct arm64_fdt_cpu *cpu;
 	uint64_t mpidr;
 	int error;
 
@@ -831,7 +831,7 @@ commit_cpu(
 		return error;
 
 	/* CPUs past the table are left out. */
-	if (info->cpu_count >= RPI_FDT_MAX_CPUS)
+	if (info->cpu_count >= ARM64_FDT_MAX_CPUS)
 		return FDT_OK;
 
 	/* Appends the CPU. */
@@ -855,7 +855,7 @@ commit_cpu(
 static int
 commit_reserved(
 	const struct fdt_node *node,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	unsigned stride;
 	unsigned offset;
@@ -883,13 +883,13 @@ commit_reserved(
 			return error;
 
 		/* Keeps the range out of the allocator. */
-		error = add_range(info->reserved, &info->reserved_count, RPI_FDT_MAX_RESERVED, base, size);
+		error = add_range(info->reserved, &info->reserved_count, ARM64_FDT_MAX_RESERVED, base, size);
 		if (error != FDT_OK)
 			return error;
 
 		/* And out of the direct map, when the tree says it may not be mapped. */
 		if (node->is_no_map) {
-			error = add_range(info->no_map, &info->no_map_count, RPI_FDT_MAX_NO_MAP, base, size);
+			error = add_range(info->no_map, &info->no_map_count, ARM64_FDT_MAX_NO_MAP, base, size);
 			if (error != FDT_OK)
 				return error;
 		}
@@ -905,7 +905,7 @@ read_reserve_map(
 	const uint8_t *data,
 	uint32_t total,
 	uint32_t off_reserve,
-	struct rpi_fdt_info *info)
+	struct arm64_fdt_info *info)
 {
 	uint32_t offset;
 	uint64_t base;
@@ -922,7 +922,7 @@ read_reserve_map(
 			break;
 
 		/* Keeps the range out of the allocator. */
-		error = add_range(info->reserved, &info->reserved_count, RPI_FDT_MAX_RESERVED, base, size);
+		error = add_range(info->reserved, &info->reserved_count, ARM64_FDT_MAX_RESERVED, base, size);
 		if (error != FDT_OK)
 			return error;
 	}

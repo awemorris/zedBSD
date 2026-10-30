@@ -6,15 +6,16 @@
  */
 
 /*
- * The ODROID-C5's debug UART: uart_B of the S905X5M, on the board's UART
- * connector, which the bootloader has already started at the console's
- * rate from the 24 MHz crystal.
+ * The debug UART of an S905X5M board, an Amlogic UART, which the
+ * bootloader has already started at the console's rate from the 24 MHz
+ * crystal.  Which of the SoC's UARTs it is is the board's (board.h's
+ * S905X5M_DEBUG_UART_BASE; uart_B, the UART connector, on the ODROID-C5).
  */
 
 #include <hal/hal.h>
 #include "../defs.h"
 #include "board.h"
-#include "../bsp-rpi-common/uart.h"
+#include "../uart.h"
 
 /*
  * The UART's registers: the transmit and receive FIFOs, the control, the
@@ -90,7 +91,7 @@ static volatile uint8_t *const uart = (volatile uint8_t *)(ARM64_DIRECT_BASE + S
  * parity, two wires.
  */
 void
-rpi_uart_init(
+arm64_uart_init(
 	void)
 {
 	uint32_t control;
@@ -127,14 +128,14 @@ rpi_uart_init(
  * Writes one byte, a newline as a carriage return and a newline.
  */
 void
-rpi_uart_putc(
+arm64_uart_putc(
 	int c)
 {
 	uint32_t status;
 
 	/* A terminal needs the carriage return to start the next line at its left. */
 	if (c == '\n')
-		rpi_uart_putc('\r');
+		arm64_uart_putc('\r');
 
 	/* Waits for room in the transmit FIFO. */
 	for (;;) {
@@ -151,7 +152,7 @@ rpi_uart_putc(
  * Reports whether a received byte is waiting.
  */
 int
-rpi_uart_poll(
+arm64_uart_poll(
 	void)
 {
 	uint32_t status;
@@ -177,7 +178,7 @@ rpi_uart_poll(
  * Reads one received byte, waiting for it.
  */
 int
-rpi_uart_getc(
+arm64_uart_getc(
 	void)
 {
 	uint32_t data;
@@ -185,7 +186,7 @@ rpi_uart_getc(
 
 	/* Waits until a byte is waiting. */
 	for (;;) {
-		ready = rpi_uart_poll();
+		ready = arm64_uart_poll();
 		if (ready)
 			break;
 	}
@@ -199,7 +200,7 @@ rpi_uart_getc(
  * Lets the received bytes raise the UART's interrupt.
  */
 void
-rpi_uart_enable_rx_irq(
+arm64_uart_enable_rx_irq(
 	void)
 {
 	uint32_t control;
@@ -221,7 +222,7 @@ rpi_uart_enable_rx_irq(
  * threshold; reading the bytes ends it, so there is nothing to clear.
  */
 void
-rpi_uart_clear_rx_irq(
+arm64_uart_clear_rx_irq(
 	void)
 {
 	/* Succeeded: the interrupt ends with the FIFO drained. */

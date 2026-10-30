@@ -148,7 +148,7 @@ device tree, and enters the kernel with the device tree's address in `x0`.
 `vmunix` is a raw binary with the arm64 Image header, not an ELF file.
 The firmware puts `cmdline.txt` into the device tree's `/chosen/bootargs`;
 it is the kernel's parameter line, and there is no `zedbsd.cfg`.
-`src/hal/arm64/bsp-rpi-common/boot.c` reads the device tree and the command line
+`src/hal/arm64/boot.c` reads the device tree and the command line
 and builds the kernel handoff.
 
 QEMU's `raspi4b` machine does not run the Pi's firmware, so `make run` and

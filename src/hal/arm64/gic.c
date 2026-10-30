@@ -6,14 +6,14 @@
  */
 
 /*
- * The GIC-400 of the Raspberry Pi 4 and 5: its distributor, which routes
+ * The board's GIC-400 (a GICv2): its distributor, which routes
  * the shared lines, and each CPU's banked private lines and CPU interface.
  */
 
 #include <hal/hal.h>
-#include "../bsp.h"
-#include "../defs.h"
-#include "../spin.h"
+#include "bsp.h"
+#include "defs.h"
+#include "spin.h"
 #include "gic.h"
 
 /* The distributor's registers. */
@@ -42,7 +42,7 @@
 
 /*
  * The distributor and the CPU interface through the direct map, and the
- * number of lines the distributor has.  Set once by rpi_gic_init() on the
+ * number of lines the distributor has.  Set once by arm64_gic_init() on the
  * boot CPU before any line is used; NULL and zero before.
  */
 static volatile uint32_t *dist;
@@ -65,15 +65,15 @@ static void write8(volatile uint32_t *base, unsigned offset, uint8_t value);
  * device interrupts stay on the boot CPU).
  */
 void
-rpi_gic_init(
+arm64_gic_init(
 	void)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 	uint32_t lines;
 	uint32_t index;
 
 	/* Finds the distributor and the CPU interface in the device tree. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	if (info->gic_dist_base == 0 || info->gic_cpu_base == 0)
 		HAL_FATAL("GIC missing from FDT");
 	dist = (volatile uint32_t *)(ARM64_DIRECT_BASE + (uintptr_t)info->gic_dist_base);
@@ -106,7 +106,7 @@ rpi_gic_init(
 		dist[GICD_ICFGR / 4 + index] = 0;
 
 	/* The boot CPU's private lines and CPU interface, as every other CPU's. */
-	rpi_gic_init_cpu();
+	arm64_gic_init_cpu();
 
 	/* Starts the distributor for both groups. */
 	dist[GICD_CTLR / 4] = 3;
@@ -123,7 +123,7 @@ rpi_gic_init(
  * ignored and the primary IAR serves Group 1, where the firmware put them.
  */
 void
-rpi_gic_init_cpu(
+arm64_gic_init_cpu(
 	void)
 {
 	uint32_t groups;
@@ -136,8 +136,8 @@ rpi_gic_init_cpu(
 	/* Groups the private lines, the HAL's SGIs and the timer in Group 0. */
 	groups = 0xffffffffU;
 	groups &= ~(1U << GIC_TIMER_PPI);
-	groups &= ~(1U << RPI_SGI_STOP);
-	groups &= ~(1U << RPI_SGI_NOTIFY);
+	groups &= ~(1U << ARM64_SGI_STOP);
+	groups &= ~(1U << ARM64_SGI_NOTIFY);
 	dist[GICD_IGROUPR / 4] = groups;
 
 	/* Gives the private lines the same priority as the shared ones. */
@@ -145,7 +145,7 @@ rpi_gic_init_cpu(
 		write8(dist, GICD_IPRIORITYR + line, GIC_PRIORITY);
 
 	/* Enables the HAL's SGIs; the GIC-400 keeps SGIs enabled in any case. */
-	dist[GICD_ISENABLER / 4] = (1U << RPI_SGI_STOP) | (1U << RPI_SGI_NOTIFY);
+	dist[GICD_ISENABLER / 4] = (1U << ARM64_SGI_STOP) | (1U << ARM64_SGI_NOTIFY);
 
 	/* Lets every priority through and enables both groups at the interface. */
 	cpuif[GICC_PMR / 4] = 0xff;
@@ -160,7 +160,7 @@ rpi_gic_init_cpu(
  * before they take the interrupt.
  */
 void
-rpi_gic_send_sgi(
+arm64_gic_send_sgi(
 	uint32_t sgi,
 	uint32_t target_interfaces)
 {
@@ -179,7 +179,7 @@ rpi_gic_send_sgi(
  * Takes the highest pending interrupt at the calling CPU's interface.
  */
 uint32_t
-rpi_gic_ack(
+arm64_gic_ack(
 	void)
 {
 	uint32_t acknowledge;
@@ -195,7 +195,7 @@ rpi_gic_ack(
  * Ends an interrupt the calling CPU took.
  */
 void
-rpi_gic_eoi(
+arm64_gic_eoi(
 	uint32_t value)
 {
 	/* Writes back what the acknowledge read gave. */
@@ -207,7 +207,7 @@ rpi_gic_eoi(
  * Disables one interrupt line.
  */
 void
-rpi_gic_mask(
+arm64_gic_mask(
 	uint32_t id)
 {
 	/* A line the distributor does not have is ignored. */
@@ -226,7 +226,7 @@ rpi_gic_mask(
  * ignored and the primary IAR aliases Group 1.
  */
 void
-rpi_gic_unmask(
+arm64_gic_unmask(
 	uint32_t id)
 {
 	bool enabled;
@@ -250,7 +250,7 @@ rpi_gic_unmask(
  * Configures the trigger mode of one disabled interrupt.
  */
 int
-rpi_gic_set_trigger(
+arm64_gic_set_trigger(
 	uint32_t id,
 	int trigger)
 {

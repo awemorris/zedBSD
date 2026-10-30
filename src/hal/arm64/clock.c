@@ -6,14 +6,14 @@
  */
 
 /*
- * The Raspberry Pi scheduling tick and counter, from the generic timer.
+ * The arm64 scheduling tick and counter, from the generic timer.
  */
 
 #include <hal/hal.h>
-#include "../asm.h"
-#include "../defs.h"
-#include "../percpu.h"
-#include "../watch.h"
+#include "asm.h"
+#include "defs.h"
+#include "percpu.h"
+#include "watch.h"
 #include "clock.h"
 #include "gic.h"
 
@@ -38,7 +38,7 @@ static void set_cval(uint64_t value);
  * 30; the boot CPU also reads the counter's frequency.
  */
 void
-rpi_timer_init(
+arm64_timer_init(
 	void)
 {
 	struct arm64_percpu *cpu;
@@ -66,7 +66,7 @@ rpi_timer_init(
 
 	/* Enables the timer and its interrupt on this CPU. */
 	__asm__ volatile("msr cntp_ctl_el0, %0\n\tisb" : : "r"((uint64_t)1) : "memory");
-	rpi_gic_unmask(ARM64_CNTP_INTID);
+	arm64_gic_unmask(ARM64_CNTP_INTID);
 }
 
 /*
@@ -76,7 +76,7 @@ rpi_timer_init(
  * came late does not make the following ones come early.
  */
 void
-rpi_timer_interrupt(
+arm64_timer_interrupt(
 	hal_irq_ack_t acknowledge)
 {
 	struct arm64_percpu *cpu;

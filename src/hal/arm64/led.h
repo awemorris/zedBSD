@@ -12,12 +12,12 @@
  * waits are common (led.c).
  */
 
-#ifndef KERN_HAL_ARM64_BSP_RPI_COMMON_LED_H
-#define KERN_HAL_ARM64_BSP_RPI_COMMON_LED_H
+#ifndef KERN_HAL_ARM64_LED_H
+#define KERN_HAL_ARM64_LED_H
 
-void rpi_led_init(void);
-void rpi_led_set(int on);
-void rpi_led_stage(unsigned stage);
-void rpi_delay_ms(unsigned milliseconds);
+void arm64_led_init(void);
+void arm64_led_set(int on);
+void arm64_led_stage(unsigned stage);
+void arm64_delay_ms(unsigned milliseconds);
 
 #endif

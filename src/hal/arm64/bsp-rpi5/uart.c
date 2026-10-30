@@ -13,7 +13,7 @@
 #include <hal/hal.h>
 #include "../defs.h"
 #include "board.h"
-#include "../bsp-rpi-common/uart.h"
+#include "../uart.h"
 
 /* The PL011's registers. */
 #define UART_DR 0x00
@@ -65,7 +65,7 @@ static volatile uint32_t *const uart = (volatile uint32_t *)(ARM64_DIRECT_BASE +
  * only its interrupts are masked.
  */
 void
-rpi_uart_init(
+arm64_uart_init(
 	void)
 {
 	uint32_t control;
@@ -92,14 +92,14 @@ rpi_uart_init(
  * Writes one byte, a newline as a carriage return and a newline.
  */
 void
-rpi_uart_putc(
+arm64_uart_putc(
 	int c)
 {
 	uint32_t flags;
 
 	/* A terminal needs the carriage return to start the next line at its left. */
 	if (c == '\n')
-		rpi_uart_putc('\r');
+		arm64_uart_putc('\r');
 
 	/* Waits for room in the transmit FIFO. */
 	for (;;) {
@@ -116,7 +116,7 @@ rpi_uart_putc(
  * Reports whether a received byte is waiting.
  */
 int
-rpi_uart_poll(
+arm64_uart_poll(
 	void)
 {
 	uint32_t flags;
@@ -134,7 +134,7 @@ rpi_uart_poll(
  * Reads one received byte, waiting for it.
  */
 int
-rpi_uart_getc(
+arm64_uart_getc(
 	void)
 {
 	uint32_t data;
@@ -142,7 +142,7 @@ rpi_uart_getc(
 
 	/* Waits until a byte is waiting. */
 	for (;;) {
-		ready = rpi_uart_poll();
+		ready = arm64_uart_poll();
 		if (ready)
 			break;
 	}
@@ -156,7 +156,7 @@ rpi_uart_getc(
  * Lets the received bytes raise the UART's interrupt.
  */
 void
-rpi_uart_enable_rx_irq(
+arm64_uart_enable_rx_irq(
 	void)
 {
 	/* Drops what was pending, then unmasks receive and receive timeout. */
@@ -168,7 +168,7 @@ rpi_uart_enable_rx_irq(
  * Ends the UART's receive interrupt.
  */
 void
-rpi_uart_clear_rx_irq(
+arm64_uart_clear_rx_irq(
 	void)
 {
 	/* Clears receive and receive timeout. */

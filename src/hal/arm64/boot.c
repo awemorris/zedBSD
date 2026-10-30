@@ -6,31 +6,31 @@
  */
 
 /*
- * What the Raspberry Pi HAL keeps from the boot and hands to the kernel:
+ * What the arm64 HAL keeps from the boot and hands to the kernel:
  * the device tree's record, the kernel's handoff, and the named objects of
  * hal_get_arch_handoff().
  *
- * The names start with the board's ("rpi4.fdt", "rpi5.fdt"), which
- * board.h gives.
+ * The names start with the board's ("rpi4.fdt", "rpi5.fdt",
+ * "odroidc5.fdt"), which board.h gives.
  */
 
 #include <hal/hal.h>
 #include <kern/boot.h>
-#include "../bsp.h"
-#include "../defs.h"
+#include "bsp.h"
+#include "defs.h"
 #include "board.h"
 
 /* How many values of the boot framebuffer the kernel reads by name. */
-#define RPI_FRAMEBUFFER_VALUE_COUNT 6U
+#define ARM64_FRAMEBUFFER_VALUE_COUNT 6U
 
 /*
  * The device tree's record and the tree's physical address.
  *
- * Filled once by rpi_boot_set_info() on the boot CPU before any other CPU
+ * Filled once by arm64_boot_set_info() on the boot CPU before any other CPU
  * starts; afterwards only the framebuffer's reservation is added to it, on
  * the same CPU.  Every other reader only reads it.
  */
-static struct rpi_fdt_info boot_info;
+static struct arm64_fdt_info boot_info;
 static uintptr_t boot_fdt;
 
 /*
@@ -41,7 +41,7 @@ static uintptr_t boot_fdt;
 static struct kern_boot_handoff kernel_handoff;
 
 /*
- * The firmware's command line (/chosen/bootargs, from cmdline.txt), copied
+ * The firmware's command line (/chosen/bootargs), copied
  * out of the device tree while the tree is known to be intact, and handed
  * to the kernel as "boot.command-line".  Filled once at boot; the first
  * byte is zero when the firmware passed no line.
@@ -70,7 +70,7 @@ static const uint64_t handoff_sdhci_clock_hz = ARM64_BOARD_SDHCI_CLOCK_HZ;
  * The names under which the kernel reads the boot framebuffer, one per
  * value, in the order of framebuffer_values[].
  */
-static const char *const framebuffer_value_names[RPI_FRAMEBUFFER_VALUE_COUNT] = {
+static const char *const framebuffer_value_names[ARM64_FRAMEBUFFER_VALUE_COUNT] = {
 	ARM64_BOARD_HANDOFF ".framebuffer.phys",
 	ARM64_BOARD_HANDOFF ".framebuffer.size",
 	ARM64_BOARD_HANDOFF ".framebuffer.width",
@@ -87,17 +87,17 @@ static const char *const framebuffer_value_names[RPI_FRAMEBUFFER_VALUE_COUNT] = 
  * and not changed afterwards; the names report no object while the size
  * is zero.
  */
-static uint64_t framebuffer_values[RPI_FRAMEBUFFER_VALUE_COUNT];
+static uint64_t framebuffer_values[ARM64_FRAMEBUFFER_VALUE_COUNT];
 
-static void copy_command_line(const struct rpi_fdt_info *info, uintptr_t fdt_phys);
+static void copy_command_line(const struct arm64_fdt_info *info, uintptr_t fdt_phys);
 static int handoff_name_is(const char *name, const char *wanted);
 
 /*
  * Keeps the device tree's record and prepares the kernel's handoff.
  */
 void
-rpi_boot_set_info(
-	const struct rpi_fdt_info *info,
+arm64_boot_set_info(
+	const struct arm64_fdt_info *info,
 	uintptr_t fdt_phys)
 {
 	/* Keeps the record and where the tree is, for the rest of the HAL. */
@@ -130,7 +130,7 @@ rpi_boot_set_info(
  * Keeps the firmware's framebuffer for the kernel and out of the allocator.
  */
 void
-rpi_boot_set_framebuffer(
+arm64_boot_set_framebuffer(
 	uint64_t phys,
 	uint64_t size,
 	uint32_t width,
@@ -138,7 +138,7 @@ rpi_boot_set_framebuffer(
 	uint32_t pitch,
 	uint32_t format)
 {
-	struct rpi_fdt_range *range;
+	struct arm64_fdt_range *range;
 
 	/* Publishes the values under their names, in the order of the names. */
 	framebuffer_values[0] = phys;
@@ -151,7 +151,7 @@ rpi_boot_set_framebuffer(
 	/* An empty framebuffer reserves nothing, and a full table takes no more. */
 	if (size == 0)
 		return;
-	if (boot_info.reserved_count >= RPI_FDT_MAX_RESERVED)
+	if (boot_info.reserved_count >= ARM64_FDT_MAX_RESERVED)
 		return;
 
 	/* Keeps the framebuffer's memory out of the page allocator. */
@@ -166,11 +166,11 @@ rpi_boot_set_framebuffer(
  * range the device tree marks no-map.
  */
 int
-rpi_boot_is_no_map(
+arm64_boot_is_no_map(
 	uint64_t base,
 	uint64_t size)
 {
-	const struct rpi_fdt_range *range;
+	const struct arm64_fdt_range *range;
 	unsigned index;
 
 	/* Looks for a no-map range that holds the whole of it. */
@@ -187,8 +187,8 @@ rpi_boot_is_no_map(
 /*
  * Reports the device tree's record kept at boot.
  */
-const struct rpi_fdt_info *
-rpi_boot_info(
+const struct arm64_fdt_info *
+arm64_boot_info(
 	void)
 {
 	/* Succeeded: the record, which lives as long as the kernel. */
@@ -199,7 +199,7 @@ rpi_boot_info(
  * Reports the device tree's physical address.
  */
 uintptr_t
-rpi_boot_fdt_phys(
+arm64_boot_fdt_phys(
 	void)
 {
 	/* Succeeded: the address the firmware passed. */
@@ -210,10 +210,10 @@ rpi_boot_fdt_phys(
  * Reports the handoff the kernel's entry reads.
  */
 const void *
-rpi_kernel_handoff(
+arm64_kernel_handoff(
 	void)
 {
-	/* Succeeded: the handoff, filled by rpi_boot_set_info(). */
+	/* Succeeded: the handoff, filled by arm64_boot_set_info(). */
 	return &kernel_handoff;
 }
 
@@ -224,10 +224,10 @@ rpi_kernel_handoff(
  * "<board>.sdhci" are the physical addresses of the device tree and of the
  * SD controller it names, each a 64-bit word; "<board>.sdhci.clock" is the
  * SD controller's base clock in hertz, a 64-bit word, on a board whose
- * board.h names one; "<board>.framebuffer.phys",
- * ".size", ".width", ".height", ".pitch" and ".format" are the firmware's
- * framebuffer, each a 64-bit word, all present or all absent.  <board> is
- * "rpi4" on a Pi 4 and "rpi5" on a Pi 5.
+ * board.h names one; "<board>.framebuffer.phys", ".size", ".width",
+ * ".height", ".pitch" and ".format" are the console's framebuffer, each a
+ * 64-bit word, all present or all absent.  <board> is board.h's
+ * ARM64_BOARD_HANDOFF.
  */
 void *
 hal_get_arch_handoff(
@@ -269,7 +269,7 @@ hal_get_arch_handoff(
 	/* Exposes the framebuffer's values when the firmware allocated one. */
 	if (framebuffer_values[1] != 0) {
 		/* Returns one of the framebuffer's values under its own name. */
-		for (index = 0; index < RPI_FRAMEBUFFER_VALUE_COUNT; index++) {
+		for (index = 0; index < ARM64_FRAMEBUFFER_VALUE_COUNT; index++) {
 			match = handoff_name_is(name, framebuffer_value_names[index]);
 			if (match)
 				return &framebuffer_values[index];
@@ -288,7 +288,7 @@ hal_get_arch_handoff(
  */
 static void
 copy_command_line(
-	const struct rpi_fdt_info *info,
+	const struct arm64_fdt_info *info,
 	uintptr_t fdt_phys)
 {
 	const char *line;

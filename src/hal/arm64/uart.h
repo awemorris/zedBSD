@@ -12,14 +12,14 @@
  * is set up differently on each.
  */
 
-#ifndef KERN_HAL_ARM64_BSP_RPI_COMMON_UART_H
-#define KERN_HAL_ARM64_BSP_RPI_COMMON_UART_H
+#ifndef KERN_HAL_ARM64_UART_H
+#define KERN_HAL_ARM64_UART_H
 
-void rpi_uart_init(void);
-void rpi_uart_putc(int c);
-int rpi_uart_getc(void);
-int rpi_uart_poll(void);
-void rpi_uart_enable_rx_irq(void);
-void rpi_uart_clear_rx_irq(void);
+void arm64_uart_init(void);
+void arm64_uart_putc(int c);
+int arm64_uart_getc(void);
+int arm64_uart_poll(void);
+void arm64_uart_enable_rx_irq(void);
+void arm64_uart_clear_rx_irq(void);
 
 #endif

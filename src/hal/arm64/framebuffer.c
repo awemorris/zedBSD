@@ -8,8 +8,9 @@
 /*
  * The framebuffer the firmware or the bootloader scans out, painted with
  * 80x25 text cells of the 8x16 font in the middle 640x400 pixels of the
- * screen.  Where it comes from is the board's (framebuffer-mailbox.c on a
- * Raspberry Pi).
+ * screen.  Where it comes from is the board's (arm64_bsp_framebuffer_init():
+ * the firmware's mailbox on a Raspberry Pi, the device tree's
+ * simple-framebuffer on an S905X5M board).
  *
  * Until the kernel's tables are switched to, the painting goes through
  * the boot tables' direct map.  From then on it goes through the early
@@ -19,8 +20,8 @@
  */
 
 #include <hal/hal.h>
-#include "../bsp.h"
-#include "../defs.h"
+#include "bsp.h"
+#include "defs.h"
 #include "font.h"
 #include "framebuffer.h"
 #include "led.h"
@@ -36,10 +37,10 @@
 
 /*
  * Where the framebuffer is painted: the boot tables' direct map from
- * rpi_framebuffer_adopt(), the early console's window from
- * rpi_framebuffer_move(), both on the boot CPU before any other runs, and
+ * arm64_framebuffer_adopt(), the early console's window from
+ * arm64_framebuffer_move(), both on the boot CPU before any other runs, and
  * NULL before the firmware or the bootloader has given one and again once
- * rpi_framebuffer_forget() gave it up.  Every painter reads it once and
+ * arm64_framebuffer_forget() gave it up.  Every painter reads it once and
  * paints through what it read.
  */
 static volatile uint8_t *pixels;
@@ -53,13 +54,13 @@ static int pixels_cached;
 
 /*
  * Whether the framebuffer was given up to the kernel: nothing paints it
- * again.  Set once by rpi_framebuffer_forget().
+ * again.  Set once by arm64_framebuffer_forget().
  */
 static int pixels_given_up;
 
 /*
  * The framebuffer's memory and shape.  Filled once by
- * rpi_framebuffer_adopt() on the boot CPU and not changed afterwards.
+ * arm64_framebuffer_adopt() on the boot CPU and not changed afterwards.
  */
 static uint64_t pixels_phys;
 static uint64_t pixels_size;
@@ -99,7 +100,7 @@ static void flush_screen(void);
  * attribute's foreground on its background.
  */
 void
-rpi_framebuffer_cell(
+arm64_framebuffer_cell(
 	unsigned row,
 	unsigned column,
 	int character,
@@ -126,14 +127,14 @@ rpi_framebuffer_cell(
 		return;
 
 	/* The glyph of the character (the font covers every byte value). */
-	glyph = &rpi_font8x16[((unsigned)character & 0xffU) * RPI_FONT_HEIGHT];
+	glyph = &arm64_font8x16[((unsigned)character & 0xffU) * ARM64_FONT_HEIGHT];
 	foreground = colour(attribute & 15U);
 	background = colour(attribute >> 4);
 	x = x_origin + column * 8U;
-	y = y_origin + row * RPI_FONT_HEIGHT;
+	y = y_origin + row * ARM64_FONT_HEIGHT;
 
 	/* Each row, from its leftmost pixel in the high bit. */
-	for (line = 0; line < RPI_FONT_HEIGHT; line++) {
+	for (line = 0; line < ARM64_FONT_HEIGHT; line++) {
 		bits = glyph[line];
 
 		/* Each pixel of the row is the foreground where its bit is set. */
@@ -146,7 +147,7 @@ rpi_framebuffer_cell(
 	}
 
 	/* The cell, out to the memory the display reads. */
-	flush_rows(target, x, y, 8U, RPI_FONT_HEIGHT);
+	flush_rows(target, x, y, 8U, ARM64_FONT_HEIGHT);
 }
 
 /*
@@ -155,7 +156,7 @@ rpi_framebuffer_cell(
  * Only a visible cursor is drawn; the cell's own repaint removes it.
  */
 void
-rpi_framebuffer_cursor(
+arm64_framebuffer_cursor(
 	unsigned row,
 	unsigned column,
 	int visible)
@@ -177,14 +178,14 @@ rpi_framebuffer_cursor(
 
 	/* Paints the underline white. */
 	cell_x = x_origin + column * 8U;
-	cell_y = y_origin + row * RPI_FONT_HEIGHT;
-	for (y = CURSOR_FIRST_ROW; y < RPI_FONT_HEIGHT; y++) {
+	cell_y = y_origin + row * ARM64_FONT_HEIGHT;
+	for (y = CURSOR_FIRST_ROW; y < ARM64_FONT_HEIGHT; y++) {
 		for (x = 0; x < 8U; x++)
 			put_pixel(target, cell_x + x, cell_y + y, colour(15));
 	}
 
 	/* The underline, out to the memory the display reads. */
-	flush_rows(target, cell_x, cell_y + CURSOR_FIRST_ROW, 8U, RPI_FONT_HEIGHT - CURSOR_FIRST_ROW);
+	flush_rows(target, cell_x, cell_y + CURSOR_FIRST_ROW, 8U, ARM64_FONT_HEIGHT - CURSOR_FIRST_ROW);
 }
 
 /*
@@ -197,7 +198,7 @@ rpi_framebuffer_cursor(
  * a plane that blends by it).  Returns 0 when the framebuffer is ready.
  */
 int
-rpi_framebuffer_adopt(
+arm64_framebuffer_adopt(
 	uint64_t phys,
 	uint64_t size,
 	uint32_t pixel_width,
@@ -238,7 +239,7 @@ rpi_framebuffer_adopt(
 	y_origin = (height - MIN_HEIGHT) / 2U;
 
 	/* Hands the framebuffer to the kernel and keeps it out of the allocator. */
-	rpi_boot_set_framebuffer(pixels_phys, pixels_size, width, height, pitch, order);
+	arm64_boot_set_framebuffer(pixels_phys, pixels_size, width, height, pitch, order);
 
 	/* Clears the screen to black. */
 	fill_screen(colour(0));
@@ -252,7 +253,7 @@ rpi_framebuffer_adopt(
  * Reports whether the firmware's framebuffer is set up.
  */
 int
-rpi_framebuffer_ready(
+arm64_framebuffer_ready(
 	void)
 {
 	/* Succeeded: whether there is a framebuffer to paint. */
@@ -264,7 +265,7 @@ rpi_framebuffer_ready(
  * or 0 when the firmware or the bootloader gave none.
  */
 int
-rpi_framebuffer_extent(
+arm64_framebuffer_extent(
 	uint64_t *phys,
 	uint64_t *size)
 {
@@ -272,7 +273,7 @@ rpi_framebuffer_extent(
 	if (pixels_size == 0)
 		return 0;
 
-	/* Succeeded: the memory rpi_framebuffer_adopt() took. */
+	/* Succeeded: the memory arm64_framebuffer_adopt() took. */
 	*phys = pixels_phys;
 	*size = pixels_size;
 	return 1;
@@ -284,7 +285,7 @@ rpi_framebuffer_extent(
  * other CPU runs, once the kernel's tables hold the view.
  */
 void
-rpi_framebuffer_move(
+arm64_framebuffer_move(
 	volatile uint8_t *address,
 	int cached)
 {
@@ -304,7 +305,7 @@ rpi_framebuffer_move(
  * before could still be painting through it.
  */
 void
-rpi_framebuffer_forget(
+arm64_framebuffer_forget(
 	void)
 {
 	/* No painting reaches the framebuffer from now on. */
@@ -317,7 +318,7 @@ rpi_framebuffer_forget(
  * up, so that nothing paints there: 1 when it does, 0 otherwise.
  */
 int
-rpi_framebuffer_given_up(
+arm64_framebuffer_given_up(
 	uint64_t phys,
 	uint64_t size)
 {
@@ -345,7 +346,7 @@ rpi_framebuffer_given_up(
  * in which colour order.
  */
 void
-rpi_framebuffer_test_pattern(
+arm64_framebuffer_test_pattern(
 	void)
 {
 	uint32_t value;
@@ -372,7 +373,7 @@ rpi_framebuffer_test_pattern(
 
 	/* Out to memory, then time to look at it. */
 	flush_screen();
-	rpi_delay_ms(3000U);
+	arm64_delay_ms(3000U);
 
 	/* Black again for the console. */
 	fill_screen(colour(0));
@@ -383,7 +384,7 @@ rpi_framebuffer_test_pattern(
  * Reports what the firmware gave for the framebuffer.
  */
 void
-rpi_framebuffer_describe(
+arm64_framebuffer_describe(
 	void)
 {
 	/* The size, the row length, the order and where it is. */

@@ -110,7 +110,7 @@ release, and `SYN_REPORT` in one bounded report, so `EVIOCGKEY` cannot retain a
 fabricated held key. Truthful platform declarations are in the
 [PC/AT](../../src/hal/amd64/bsp-pcat/cons.c),
 [PC-98](../../src/hal/i386/bsp-pc98/cons.c),
-[arm64](../../src/hal/arm64/bsp-rpi-common/cons.c), and
+[arm64](../../src/hal/arm64/cons.c), and
 [sparcv9](../../src/hal/sparcv9/bsp-sun4u/console.c) HAL sources. The X68000
 console has no keyboard input yet
 ([x68k-console.c](../../src/drivers/platform/x68k/x68k-console.c)), so it

@@ -6,7 +6,7 @@
  */
 
 /*
- * The Raspberry Pi console font: the public-domain IBM PC-compatible
+ * The early console's font: the public-domain IBM PC-compatible
  * 8x16 VGA font, 256 glyphs of 16 rows, one byte per row with the leftmost
  * pixel in the high bit.
  *
@@ -21,7 +21,7 @@
  * The glyphs, 16 bytes each in character order.  Constant for the life of
  * the kernel; the early console and the stall watch read it.
  */
-const uint8_t rpi_font8x16[RPI_FONT_GLYPHS * RPI_FONT_HEIGHT] = {
+const uint8_t arm64_font8x16[ARM64_FONT_GLYPHS * ARM64_FONT_HEIGHT] = {
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00,
 	0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0x81, 0xa5, 0x81, 0x81, 0xbd,
 	0x99, 0x81, 0x81, 0x7e, 0x00, 0x00, 0x00, 0x00, 0x00, 0x00, 0x7e, 0xff,

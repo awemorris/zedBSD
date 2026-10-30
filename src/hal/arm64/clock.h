@@ -9,12 +9,12 @@
  * The scheduling tick of each CPU, from the generic timer.
  */
 
-#ifndef KERN_HAL_ARM64_BSP_RPI_COMMON_CLOCK_H
-#define KERN_HAL_ARM64_BSP_RPI_COMMON_CLOCK_H
+#ifndef KERN_HAL_ARM64_CLOCK_H
+#define KERN_HAL_ARM64_CLOCK_H
 
 #include <hal/hal.h>
 
-void rpi_timer_init(void);
-void rpi_timer_interrupt(hal_irq_ack_t acknowledge);
+void arm64_timer_init(void);
+void arm64_timer_interrupt(hal_irq_ack_t acknowledge);
 
 #endif

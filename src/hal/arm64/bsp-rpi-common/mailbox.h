@@ -12,8 +12,8 @@
  * a different bus address on each.
  */
 
-#ifndef KERN_HAL_ARM64_BSP_RPI_COMMON_MAILBOX_H
-#define KERN_HAL_ARM64_BSP_RPI_COMMON_MAILBOX_H
+#ifndef KERN_HAL_ARM64_MAILBOX_H
+#define KERN_HAL_ARM64_MAILBOX_H
 
 #include <hal/types.h>
 

@@ -77,12 +77,12 @@ reserve_range(uint64_t base, uint64_t size)
 void
 arm64_page_init(void)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 	uint64_t top;
 	unsigned i;
 
 	/* Finds the top of RAM the device tree lists. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	top = 0;
 	for (i = 0; i < info->memory_count; i++) {
 		uint64_t end = info->memory[i].base + info->memory[i].size;
@@ -105,7 +105,7 @@ arm64_page_init(void)
 	reserve_range(0, 0x100000);
 	reserve_range(arm64_direct_to_phys(__kernel_vma_start),
 	    (uintptr_t)(__kernel_vma_end - __kernel_vma_start));
-	reserve_range(rpi_boot_fdt_phys(), info->totalsize);
+	reserve_range(arm64_boot_fdt_phys(), info->totalsize);
 	for (i = 0; i < info->reserved_count; i++)
 		reserve_range(info->reserved[i].base, info->reserved[i].size);
 

@@ -4,8 +4,8 @@
 #include "percpu.h"
 #include "spin.h"
 #include "watch.h"
-#include "bsp-rpi-common/clock.h"
-#include "bsp-rpi-common/gic.h"
+#include "clock.h"
+#include "gic.h"
 
 #define IRQ_MAX 1020
 #define TIMER_INTID 30
@@ -72,7 +72,7 @@ hal_irq_mask(int irq)
 {
 	if (irq < 0 || irq >= IRQ_MAX)
 		HAL_FATAL("bad IRQ mask");
-	rpi_gic_mask((uint32_t)irq);
+	arm64_gic_mask((uint32_t)irq);
 }
 
 void
@@ -80,7 +80,7 @@ hal_irq_unmask(int irq)
 {
 	if (irq < 0 || irq >= IRQ_MAX)
 		HAL_FATAL("bad IRQ unmask");
-	rpi_gic_unmask((uint32_t)irq);
+	arm64_gic_unmask((uint32_t)irq);
 }
 
 /*
@@ -103,7 +103,7 @@ hal_irq_send_eoi(
 		HAL_FATAL("invalid AArch64 IRQ acknowledgement");
 
 	/* Ends the interrupt; the acknowledgement carries the IAR value plus one. */
-	rpi_gic_eoi((uint32_t)(acknowledge - 1U));
+	arm64_gic_eoi((uint32_t)(acknowledge - 1U));
 	cpu->active_ack = HAL_IRQ_ACK_NONE;
 }
 
@@ -184,7 +184,7 @@ hal_irq_set_mode(
 		return HAL_ERR_UNSUPPORTED;
 
 	/* Programs the masked line and checks the controller's readback. */
-	error = rpi_gic_set_trigger((uint32_t)irq, trigger);
+	error = arm64_gic_set_trigger((uint32_t)irq, trigger);
 	if (error != HAL_OK)
 		return error;
 
@@ -274,18 +274,18 @@ arm64_irq_dispatch(
 
 	/* The scheduling tick of this CPU. */
 	if (id == TIMER_INTID) {
-		rpi_timer_interrupt(acknowledge);
+		arm64_timer_interrupt(acknowledge);
 		return;
 	}
 
 	/* Another CPU asks this one to look for work. */
-	if (id == RPI_SGI_NOTIFY) {
+	if (id == ARM64_SGI_NOTIFY) {
 		kernel_cpu_notify_handler(cpu->logical_id, acknowledge);
 		return;
 	}
 
 	/* Another CPU panicked: this one stops where it is. */
-	if (id == RPI_SGI_STOP) {
+	if (id == ARM64_SGI_STOP) {
 		hal_irq_send_eoi(acknowledge);
 		hal_cpu_park();
 	}

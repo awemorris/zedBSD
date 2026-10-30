@@ -6,7 +6,7 @@
  */
 
 /*
- * The Raspberry Pi early console.
+ * The arm64 early console.
  *
  * This exists so the HAL and the early part of kernel start-up have
  * somewhere to print. It is output only, and it writes to both the UART
@@ -21,13 +21,13 @@
  * keyboard.
  *
  * The serial line is used only when the build asks for it
- * (CONFIG_RPI4_SERIAL_CONSOLE or CONFIG_RPI5_SERIAL_CONSOLE, off by
- * default); otherwise the UART is never set up or written.
+ * (the board's serial-console option, which defines ARM64_SERIAL_CONSOLE);
+ * otherwise the UART is never set up or written.
  */
 
 #include <hal/hal.h>
-#include "../bsp.h"
-#include "../watch.h"
+#include "bsp.h"
+#include "watch.h"
 #include "framebuffer.h"
 #include "uart.h"
 
@@ -115,7 +115,7 @@ hal_putc(
 }
 
 /*
- * Prepares the Raspberry Pi early console.
+ * Prepares the early console.
  *
  * This runs before kernel_entry(), so it may not allocate or block.
  */
@@ -125,7 +125,7 @@ prekern_bsp_cons_init(
 {
 	/* Brings up the serial line the HAL prints to, when the build uses it. */
 	if (CONS_SERIAL)
-		rpi_uart_init();
+		arm64_uart_init();
 
 	/* Starts from a known screen and cursor position. */
 	output_lock = 0;
@@ -145,10 +145,10 @@ void
 prekern_bsp_cons_irq_init(
 	void)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 
 	/* Finds the UART's interrupt in the device tree's record. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 
 	/* Keeps the line quiet until its driver claims it. */
 	if (info != NULL && info->uart_irq != 0)
@@ -163,7 +163,7 @@ prekern_bsp_cons_irq_init(
  * before the hand-over finishes before the window goes.
  */
 void
-rpi_cons_framebuffer_release(
+arm64_cons_framebuffer_release(
 	void)
 {
 	bool interrupts_enabled;
@@ -171,7 +171,7 @@ rpi_cons_framebuffer_release(
 	/* Waits for a character being painted, then keeps the next ones off the framebuffer. */
 	interrupts_enabled = output_enter();
 
-	rpi_framebuffer_forget();
+	arm64_framebuffer_forget();
 
 	output_leave(interrupts_enabled);
 }
@@ -235,7 +235,7 @@ draw_locked(
 
 	/* Paints the cell's character in its attribute. */
 	c = &shadow[row][column];
-	rpi_framebuffer_cell(row, column, c->character, c->attribute);
+	arm64_framebuffer_cell(row, column, c->character, c->attribute);
 }
 
 /* Draws the cursor at the tracked position. */
@@ -244,7 +244,7 @@ update_cursor_locked(
 	void)
 {
 	/* Draws the cursor under the cell the next character goes to. */
-	rpi_framebuffer_cursor(cursor_row, cursor_column, 1);
+	arm64_framebuffer_cursor(cursor_row, cursor_column, 1);
 }
 
 /* Fills one row with blanks. */
@@ -332,7 +332,7 @@ putc_locked(
 
 	/* The serial line, when the build uses it, carries every byte, control characters too. */
 	if (CONS_SERIAL)
-		rpi_uart_putc(character);
+		arm64_uart_putc(character);
 
 	/* Removes the cursor before the cell under it changes. */
 	draw_locked(cursor_row, cursor_column);

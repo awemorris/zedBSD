@@ -12,13 +12,13 @@
  */
 
 #include <hal/hal.h>
-#include "../bsp-rpi-common/led.h"
+#include "../led.h"
 
 /*
  * Sets up the boot stages' LED: there is none to set up.
  */
 void
-rpi_led_init(
+arm64_led_init(
 	void)
 {
 	/* Succeeded: nothing to drive. */
@@ -29,7 +29,7 @@ rpi_led_init(
  * Turns the boot stages' LED on or off: there is none.
  */
 void
-rpi_led_set(
+arm64_led_set(
 	int on)
 {
 	/* No LED shows the level. */

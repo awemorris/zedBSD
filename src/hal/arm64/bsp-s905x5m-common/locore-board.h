@@ -6,12 +6,13 @@
  */
 
 /*
- * The ODROID-C5's part of locore.S: assembler macros the boot path
- * expands.
+ * The S905X5M boards' part of locore.S: assembler macros the boot path
+ * expands.  A board's directory, on the include path before this one, may
+ * give its own.
  */
 
-#ifndef KERN_HAL_ARM64_BSP_S905X5M_LOCORE_BOARD_H
-#define KERN_HAL_ARM64_BSP_S905X5M_LOCORE_BOARD_H
+#ifndef KERN_HAL_ARM64_BSP_S905X5M_COMMON_LOCORE_BOARD_H
+#define KERN_HAL_ARM64_BSP_S905X5M_COMMON_LOCORE_BOARD_H
 
 /*
  * Puts the image where it is linked, then goes on at arm64_boot_placed.

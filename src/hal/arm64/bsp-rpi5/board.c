@@ -60,7 +60,7 @@ void
 arm64_bsp_map_devices(
 	void)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 
 	/* The debug UART the early console writes to before the tree is read. */
 	map_one(RPI5_DEBUG_UART_BASE, "debug UART");
@@ -69,7 +69,7 @@ arm64_bsp_map_devices(
 	map_one(RPI5_AON_GPIO_BASE, "always-on GPIO");
 
 	/* The firmware mailbox the framebuffer and the drivers ask through. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	if (info->mailbox_base != 0)
 		map_one(info->mailbox_base, "mailbox");
 
@@ -126,7 +126,7 @@ arm64_bsp_core_of(
  */
 int
 arm64_bsp_cpu_startable(
-	const struct rpi_fdt_cpu *cpu)
+	const struct arm64_fdt_cpu *cpu)
 {
 	/* A core the tree does not give to PSCI is left alone. */
 	if (cpu->psci == 0)
@@ -144,7 +144,7 @@ arm64_bsp_cpu_startable(
  */
 int
 arm64_bsp_cpu_release(
-	const struct rpi_fdt_cpu *cpu,
+	const struct arm64_fdt_cpu *cpu,
 	uint64_t entry_phys)
 {
 	int64_t result;

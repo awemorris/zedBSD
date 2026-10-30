@@ -13,14 +13,20 @@ ARM64_PLATFORM := platform/arm64
 # The board the kernel is built for: the Raspberry Pi 4 (BCM2711), the
 # Raspberry Pi 5 (BCM2712) or the ODROID-C5 (Amlogic S905X5M).  The HAL's
 # board support is the board's own directory (src/hal/arm64/bsp-rpi4/,
-# bsp-rpi5/, bsp-s905x5m/), which is on the include path for its board.h
-# and locore-board.h, and the common support (bsp-rpi-common/, which
-# despite its name holds the GIC, the generic timer, the console and the
-# boot handoff every board shares).  The drivers the boards share tell
-# them apart by HAL_BOARD_RPI4, HAL_BOARD_RPI5 and HAL_BOARD_ODROID_C5.
+# bsp-rpi5/, bsp-odroidc5/), which is on the include path for its board.h
+# and locore-board.h, then the support its SoC family shares
+# (bsp-rpi-common/ for the Raspberry Pi boards, bsp-s905x5m-common/ for
+# the S905X5M boards), whose directory is on the include path after the
+# board's.  The GIC, the generic timer, the early console and the boot
+# handoff every board shares are in src/hal/arm64/ itself.  The HAL tells
+# the boards apart by HAL_BOARD_RPI4, HAL_BOARD_RPI5 and
+# HAL_BOARD_ODROID_C5; the drivers do not.
 ARM64_BSP_DIR_rpi4 := bsp-rpi4
 ARM64_BSP_DIR_rpi5 := bsp-rpi5
-ARM64_BSP_DIR_odroid-c5 := bsp-s905x5m
+ARM64_BSP_DIR_odroid-c5 := bsp-odroidc5
+ARM64_SOC_DIR_rpi4 := bsp-rpi-common
+ARM64_SOC_DIR_rpi5 := bsp-rpi-common
+ARM64_SOC_DIR_odroid-c5 := bsp-s905x5m-common
 ARM64_BOARD_DEFINE_odroid-c5 := -DHAL_BOARD_ODROID_C5 \
 	-DCONFIG_DRIVER_MALI_GPU=$(if $(filter y,$(CONFIG_DRIVER_MALI_GPU)),1,0)
 ARM64_BOARD_DEFINE_rpi4 := -DHAL_BOARD_RPI4
@@ -29,9 +35,9 @@ ARM64_BOARD_DEFINE_rpi5 := -DHAL_BOARD_RPI5 \
 	-DCONFIG_DRIVER_RPI5_FAN=$(if $(filter y,$(CONFIG_DRIVER_RPI5_FAN)),1,0) \
 	-DCONFIG_DRIVER_BCM2712_GPU=$(if $(filter y,$(CONFIG_DRIVER_BCM2712_GPU)),1,0)
 
-# The board's own HAL code.  The Raspberry Pi boards take their console's
-# framebuffer from the firmware through the mailbox; the ODROID-C5 takes
-# the one its bootloader left scanning out.
+# The board's own HAL code and its SoC family's.  The Raspberry Pi boards
+# take their console's framebuffer from the firmware through the mailbox;
+# the S905X5M boards take the one the bootloader left scanning out.
 ARM64_BOARD_BOOT_C_rpi4 := \
 	src/hal/arm64/bsp-rpi4/uart.c src/hal/arm64/bsp-rpi4/fdt.c \
 	src/hal/arm64/bsp-rpi4/activity-led.c src/hal/arm64/bsp-rpi4/board.c \
@@ -43,9 +49,10 @@ ARM64_BOARD_BOOT_C_rpi5 := \
 	src/hal/arm64/bsp-rpi-common/mailbox.c \
 	src/hal/arm64/bsp-rpi-common/framebuffer-mailbox.c
 ARM64_BOARD_BOOT_C_odroid-c5 := \
-	src/hal/arm64/bsp-s905x5m/uart.c src/hal/arm64/bsp-s905x5m/fdt.c \
-	src/hal/arm64/bsp-s905x5m/activity-led.c src/hal/arm64/bsp-s905x5m/board.c \
-	src/hal/arm64/bsp-s905x5m/framebuffer-boot.c
+	src/hal/arm64/bsp-odroidc5/activity-led.c src/hal/arm64/bsp-odroidc5/board.c \
+	src/hal/arm64/bsp-s905x5m-common/uart.c src/hal/arm64/bsp-s905x5m-common/fdt.c \
+	src/hal/arm64/bsp-s905x5m-common/soc.c \
+	src/hal/arm64/bsp-s905x5m-common/framebuffer-boot.c
 
 # The BCM43455 driver, on the Pi 4's and the Pi 5's SDIO hosts.
 ARM64_BCM43455_SOURCES := src/drivers/wifi/bcm43455/bcm43455.c \
@@ -157,6 +164,7 @@ endif
 # definitions (include/uapi/hosted.h, include/kern/kcrt.h).
 ARM64_CPPFLAGS := -nostdlibinc -Iinclude -Isrc -I. \
 	-Isrc/hal/arm64 -Isrc/hal/arm64/$(ARM64_BSP_DIR_$(ZEDBSD_BOARD)) \
+	-Isrc/hal/arm64/$(ARM64_SOC_DIR_$(ZEDBSD_BOARD)) \
 	-DHAL_ARCH_ARM64 $(ARM64_BOARD_DEFINE_$(ZEDBSD_BOARD)) \
 	-DKERN_USER_ABI_AARCH64 -DKERN_USER_ABI_LP64
 ARM64_CPPFLAGS += $(ZEDBSD_CONFIG_CPPFLAGS)
@@ -175,11 +183,11 @@ ARM64_BOOT_C := src/hal/arm64/smp.c src/hal/arm64/percpu.c src/hal/arm64/watch.c
 	src/hal/arm64/int.c src/hal/arm64/irq.c \
 	src/hal/arm64/task.c \
 	src/hal/arm64/cmain.c src/hal/arm64/debug.c \
-	src/hal/arm64/bsp-rpi-common/cons.c \
-	src/hal/arm64/bsp-rpi-common/framebuffer.c \
-	src/hal/arm64/bsp-rpi-common/boot.c src/hal/arm64/bsp-rpi-common/gic.c \
-	src/hal/arm64/bsp-rpi-common/clock.c src/hal/arm64/bsp-rpi-common/font.c \
-	src/hal/arm64/bsp-rpi-common/led.c \
+	src/hal/arm64/cons.c \
+	src/hal/arm64/framebuffer.c \
+	src/hal/arm64/boot.c src/hal/arm64/gic.c \
+	src/hal/arm64/clock.c src/hal/arm64/font.c \
+	src/hal/arm64/led.c \
 	$(ARM64_BOARD_BOOT_C_$(ZEDBSD_BOARD))
 ARM64_BOOT_S := src/hal/arm64/locore.S src/hal/arm64/trap.S \
 	src/hal/arm64/dispatch.S
@@ -427,7 +435,7 @@ ARM64_USER_OBJS := $(ARM64_USER_SH_OBJS)
 
 vmunix: $(BUILD)/vmunix
 $(BUILD)/tests/rpi4-fdt-host-test: tests/rpi4-fdt-host-test.c \
-	src/hal/arm64/bsp-rpi4/fdt.c src/hal/arm64/bsp-rpi-common/fdt.h src/drivers/generic/fdt.c \
+	src/hal/arm64/bsp-rpi4/fdt.c src/hal/arm64/fdt.h src/drivers/generic/fdt.c \
 	src/drivers/platform/rpi4/rpi4-board.c
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Iinclude -Isrc \
@@ -442,7 +450,7 @@ CHECK_RUN_TARGETS += rpi4-fdt-host-test
 # The Pi 5's trees (C1 and D0) through the HAL's parser built for the Pi 5.
 ifeq ($(ZEDBSD_BOARD),rpi5)
 $(BUILD)/tests/rpi5-fdt-host-test: tests/rpi5-fdt-host-test.c \
-	src/hal/arm64/bsp-rpi5/fdt.c src/hal/arm64/bsp-rpi-common/fdt.h
+	src/hal/arm64/bsp-rpi5/fdt.c src/hal/arm64/fdt.h
 	@mkdir -p $(dir $@)
 	$(HOSTCC) -std=c11 -O2 -Wall -Wextra -Werror -Iinclude -Isrc \
  src/hal/arm64/bsp-rpi5/fdt.c $< -o $@

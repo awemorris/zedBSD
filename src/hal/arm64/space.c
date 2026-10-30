@@ -5,7 +5,7 @@
 #include "space.h"
 #include "percpu.h"
 #include "spin.h"
-#include "bsp-rpi-common/framebuffer.h"
+#include "framebuffer.h"
 
 #define ARM64_USER_LIMIT 0x0001000000000000ULL
 _Static_assert(ARM64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
@@ -263,7 +263,7 @@ arm64_space_init(
 	system_kernel_l1[0] = table_desc(system_kernel_l2_low);
 	for (index = 0; index < 512U; index++) {
 		physical = (uint64_t)index << 21;
-		if (index != 0 && rpi_boot_is_no_map(physical, (uint64_t)1 << 21)) {
+		if (index != 0 && arm64_boot_is_no_map(physical, (uint64_t)1 << 21)) {
 			system_kernel_l2_low[index] = 0;
 			continue;
 		}
@@ -295,7 +295,7 @@ arm64_space_init(
 
 	/* The early console paints the framebuffer through its window from now on. */
 	if (fb_window.state == ARM64_FB_WINDOW_HELD)
-		rpi_framebuffer_move((volatile uint8_t *)fb_window.address, fb_window.cached);
+		arm64_framebuffer_move((volatile uint8_t *)fb_window.address, fb_window.cached);
 
 	/* Checks W^X on the three sections the kernel runs from. */
 	text_executable = (system_kernel_l3_low[(text_start >> 12) & 511U] & PTE_PXN) == 0;
@@ -1282,7 +1282,7 @@ fb_window_build(
 
 	/* Nothing to hold without a framebuffer. */
 	fb_window.state = ARM64_FB_WINDOW_NONE;
-	present = rpi_framebuffer_extent(&physical, &size);
+	present = arm64_framebuffer_extent(&physical, &size);
 	if (!present)
 		return;
 
@@ -1501,7 +1501,7 @@ fb_window_remove(
 	arm64_spin_unlock(&kernel_table_lock, enabled);
 
 	/* The early console gives the framebuffer up first. */
-	rpi_cons_framebuffer_release();
+	arm64_cons_framebuffer_release();
 
 	/* Unlinks the window, then every CPU drops its translations. */
 	enabled = arm64_spin_lock(&kernel_table_lock);
@@ -1521,13 +1521,13 @@ range_touches_ram(
 	uint64_t physical,
 	uint64_t size)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 	uint64_t ram_end;
 	uint64_t end;
 	unsigned i;
 
 	/* Compares the range with every memory range of the firmware's tree. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	end = physical + size;
 	for (i = 0; i < info->memory_count; i++) {
 		/* Skips a memory range that ends before the range starts. */
@@ -1553,12 +1553,12 @@ range_is_ram(
 	uint64_t physical,
 	uint64_t size)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 	uint64_t ram_end;
 	unsigned i;
 
 	/* Looks for a memory range of the firmware's tree that holds it all. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 	for (i = 0; i < info->memory_count; i++) {
 		/* Skips a memory range that starts after the range. */
 		if (info->memory[i].base > physical)

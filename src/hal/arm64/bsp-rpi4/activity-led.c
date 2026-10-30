@@ -12,7 +12,7 @@
 #include <hal/hal.h>
 #include "../defs.h"
 #include "board.h"
-#include "../bsp-rpi-common/led.h"
+#include "../led.h"
 
 /* The GPIO block's function select for pins 40 to 49, and the set and clear registers of pins 32 to 57. */
 #define GPFSEL4			0x10U
@@ -29,7 +29,7 @@ static volatile uint8_t *gpio_registers(void);
  * Makes GPIO 42 an output, and turns the LED off.
  */
 void
-rpi_led_init(
+arm64_led_init(
 	void)
 {
 	volatile uint8_t *base;
@@ -43,14 +43,14 @@ rpi_led_init(
 	hal_mmio_write32(base + GPFSEL4, select);
 
 	/* Dark until a stage is shown. */
-	rpi_led_set(0);
+	arm64_led_set(0);
 }
 
 /*
  * Turns the LED on or off.
  */
 void
-rpi_led_set(
+arm64_led_set(
 	int on)
 {
 	volatile uint8_t *base;

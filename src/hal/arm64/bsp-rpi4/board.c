@@ -43,10 +43,10 @@ void
 arm64_bsp_map_devices(
 	void)
 {
-	const struct rpi_fdt_info *info;
+	const struct arm64_fdt_info *info;
 
 	/* The device tree names where each peripheral is. */
-	info = rpi_boot_info();
+	info = arm64_boot_info();
 
 	/* The UART, the mailbox, the GIC's two parts and the SD controller. */
 	arm64_space_map_device_block(info->uart_base);
@@ -97,7 +97,7 @@ arm64_bsp_core_of(
  */
 int
 arm64_bsp_cpu_startable(
-	const struct rpi_fdt_cpu *cpu)
+	const struct arm64_fdt_cpu *cpu)
 {
 	/* A core without a spin table, or without the address it waits on, cannot be released. */
 	if (cpu->spin_table == 0)
@@ -115,7 +115,7 @@ arm64_bsp_cpu_startable(
  */
 int
 arm64_bsp_cpu_release(
-	const struct rpi_fdt_cpu *cpu,
+	const struct arm64_fdt_cpu *cpu,
 	uint64_t entry_phys)
 {
 	volatile uint64_t *release;

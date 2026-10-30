@@ -26,28 +26,28 @@ static uint64_t counter_frequency(void);
  * Shows a stage of the boot: as many blinks as its number, then a pause.
  */
 void
-rpi_led_stage(
+arm64_led_stage(
 	unsigned stage)
 {
 	unsigned blink;
 
 	/* Blinks once for each step of the stage's number. */
 	for (blink = 0; blink < stage; blink++) {
-		rpi_led_set(1);
-		rpi_delay_ms(BLINK_ON_MS);
-		rpi_led_set(0);
-		rpi_delay_ms(BLINK_OFF_MS);
+		arm64_led_set(1);
+		arm64_delay_ms(BLINK_ON_MS);
+		arm64_led_set(0);
+		arm64_delay_ms(BLINK_OFF_MS);
 	}
 
 	/* The pause that separates one stage from the next. */
-	rpi_delay_ms(STAGE_PAUSE_MS);
+	arm64_delay_ms(STAGE_PAUSE_MS);
 }
 
 /*
  * Waits for a number of milliseconds on the generic timer.
  */
 void
-rpi_delay_ms(
+arm64_delay_ms(
 	unsigned milliseconds)
 {
 	uint64_t frequency;
