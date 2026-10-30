@@ -1635,4 +1635,242 @@
       });
     });
   })();
+  // ---- View Transitions (https://drafts.csswg.org/css-view-transitions-1/)
+  // The script side: the states of a transition, its three promises and its types.  What the transition shows
+  // (the captured images and the pseudo-element tree) is the engine's, told through native.viewTransition.
+  if (typeof document !== 'undefined' && typeof g.Document === 'function' && !g.Document.prototype.startViewTransition) (function () {
+    var then = Promise.prototype.then;
+    var VT = {};
+    var current = null;
+    function deferred() {
+      var d = {};
+      d.promise = new Promise(function (resolve, reject) { d.resolve = resolve; d.reject = reject; });
+      return d;
+    }
+    function markHandled(p) { then.call(p, undefined, function () {}); return p; }
+    class ViewTransitionTypeSet extends Set {
+      constructor(key) {
+        if (key !== VT) throw new TypeError('Illegal constructor');
+        super();
+      }
+      add(value) { var r = super.add(String(value)); typesChanged(this); return r; }
+      delete(value) { var r = super.delete(String(value)); typesChanged(this); return r; }
+      clear() { super.clear(); typesChanged(this); }
+    }
+    // The style engine matches :active-view-transition-type() against the active transition's types.
+    function typesChanged(set) { if (current && current._types === set) native.viewTransitionActive(1, Array.from(set)); }
+    tag(ViewTransitionTypeSet, 'ViewTransitionTypeSet');
+    class ViewTransition {
+      constructor(key) {
+        if (key !== VT) throw new TypeError('Illegal constructor');
+        hidden(this, '_ready', deferred());
+        hidden(this, '_done', deferred());
+        hidden(this, '_finished', deferred());
+        hidden(this, '_phase', 'pending-capture');
+        hidden(this, '_callback', null);
+        hidden(this, '_types', new ViewTransitionTypeSet(VT));
+        markHandled(this._ready.promise);
+        markHandled(this._done.promise);
+        markHandled(this._finished.promise);
+      }
+      get ready() { return this._ready.promise; }
+      get finished() { return this._finished.promise; }
+      get updateCallbackDone() { return this._done.promise; }
+      get types() { return this._types; }
+      skipTransition() { if (this._phase !== 'done') skip(this, new DOMException('Skipped view transition due to skipTransition() call.', 'AbortError')); }
+    }
+    tag(ViewTransition, 'ViewTransition');
+    // Calls the update callback once; its outcome settles updateCallbackDone.
+    function callUpdate(t) {
+      var result, d = t._done;
+      if (t._phase === 'pending-capture') t._phase = 'update-callback-called';
+      if (t._updated) return;
+      t._updated = true;
+      try {
+        result = t._callback ? t._callback.call(undefined) : undefined;
+      } catch (e) {
+        d.reject(e);
+        return;
+      }
+      then.call(Promise.resolve(result), function () { d.resolve(undefined); t._updateDone = 1; }, function (e) { d.reject(e); t._updateDone = 2; });
+    }
+    function skip(t, reason) {
+      var wasPending = t._phase === 'pending-capture';
+      t._phase = 'done';
+      if (current === t) {
+        current = null;
+        native.viewTransition(0);
+        native.viewTransitionActive(0, []);
+      }
+      if (wasPending) setTimeout(function () { callUpdate(t); }, 0);
+      t._ready.reject(reason);
+      then.call(t._done.promise, function () { t._finished.resolve(undefined); }, function (e) { t._finished.reject(e); });
+      if (!wasPending && !t._updated) callUpdate(t);
+    }
+    function finish(t) {
+      if (t._phase === 'done') return;
+      t._phase = 'done';
+      if (current === t) {
+        current = null;
+        native.viewTransition(0);
+        native.viewTransitionActive(0, []);
+      }
+      t._finished.resolve(undefined);
+    }
+    // After the update callback: the new state, the pseudo-element tree and the animations.
+    function activate(t) {
+      if (t._phase === 'done') return;
+      t._phase = 'animating';
+      if (!native.viewTransition(2)) {
+        skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
+        return;
+      }
+      t._ready.resolve(undefined);
+      requestAnimationFrame(function () { setTimeout(function () { finish(t); }, native.viewTransitionDuration()); });
+    }
+    g.Document.prototype.startViewTransition = function startViewTransition(callbackOptions) {
+      var t = new ViewTransition(VT), cb = callbackOptions, i, list;
+      if (typeof cb === 'function') {
+        t._callback = cb;
+      } else if (cb !== undefined && cb !== null) {
+        if (typeof cb !== 'object') throw new TypeError("Failed to execute 'startViewTransition' on 'Document': The provided value is not of type 'StartViewTransitionOptions'.");
+        if (cb.update !== undefined && cb.update !== null) {
+          if (typeof cb.update !== 'function') throw new TypeError("Failed to execute 'startViewTransition' on 'Document': The provided callback is not a function.");
+          t._callback = cb.update;
+        }
+        if (cb.types !== undefined && cb.types !== null) {
+          list = Array.from(cb.types);
+          for (i = 0; i < list.length; i++) t._types.add(String(list[i]));
+        }
+      }
+      if (document.visibilityState === 'hidden') {
+        skip(t, new DOMException('Skipped view transition due to document being hidden.', 'InvalidStateError'));
+        return t;
+      }
+      if (current) skip(current, new DOMException('Old view transition aborted by new view transition.', 'AbortError'));
+      current = t;
+      native.viewTransitionActive(1, Array.from(t._types));
+      // The next rendering opportunity: the old state is captured, then the callback runs and the new state is made.
+      requestAnimationFrame(function () {
+        if (t._phase === 'done') return;
+        if (!native.viewTransition(1)) {
+          skip(t, new DOMException('Skipped view transition due to an invalid state.', 'InvalidStateError'));
+          return;
+        }
+        setTimeout(function () {
+          if (t._phase === 'done') return;
+          callUpdate(t);
+          then.call(t._done.promise, function () { requestAnimationFrame(function () { activate(t); }); }, function (e) { skip(t, e); });
+        }, 0);
+      });
+      return t;
+    };
+    Object.defineProperty(g.Document.prototype, 'activeViewTransition', { get: function () { return current; }, configurable: true, enumerable: true });
+    def(g, 'ViewTransition', ViewTransition);
+    def(g, 'ViewTransitionTypeSet', ViewTransitionTypeSet);
+  })();
+  // ---- Element.animate (https://drafts.csswg.org/web-animations-1/)
+  // The timeline of an animation: its promises, play state and time, without any effect on the page's style.
+  if (typeof document !== 'undefined' && typeof g.Element === 'function' && !g.Element.prototype.animate) (function () {
+    var ANIM = {};
+    function deferred() {
+      var d = {};
+      d.promise = new Promise(function (resolve, reject) { d.resolve = resolve; d.reject = reject; });
+      return d;
+    }
+    var all = new Set();
+    class Animation extends EventTarget {
+      constructor(key, target, keyframes, options) {
+        if (key !== ANIM) throw new TypeError('Illegal constructor');
+        super();
+        var o = typeof options === 'number' ? { duration: options } : (options || {});
+        hidden(this, '_target', target);
+        hidden(this, '_keyframes', keyframes);
+        hidden(this, '_timing', {
+          delay: +o.delay || 0, endDelay: +o.endDelay || 0, fill: o.fill || 'auto', iterationStart: +o.iterationStart || 0,
+          iterations: o.iterations === undefined ? 1 : +o.iterations, duration: o.duration === undefined ? 'auto' : o.duration,
+          direction: o.direction || 'normal', easing: o.easing || 'linear'
+        });
+        hidden(this, '_state', 'running');
+        hidden(this, '_ready', deferred());
+        hidden(this, '_finished', deferred());
+        hidden(this, '_timer', 0);
+        hidden(this, '_start', performance.now());
+        hidden(this, '_hold', null);
+        this.id = o.id || '';
+        this.onfinish = null;
+        this.oncancel = null;
+        this._ready.resolve(this);
+        this._finished.promise.then(undefined, function () {});
+        all.add(this);
+        this._arm();
+      }
+      _total() {
+        var t = this._timing, d = t.duration === 'auto' ? 0 : +t.duration;
+        return t.delay + d * t.iterations + t.endDelay;
+      }
+      _arm() {
+        var self = this, left;
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        if (this._state !== 'running') return;
+        left = this._total() - this.currentTime;
+        if (!isFinite(left)) return;
+        this._timer = setTimeout(function () { self._finish(); }, Math.max(0, left));
+      }
+      _finish() {
+        if (this._state === 'finished' || this._state === 'idle') return;
+        this._state = 'finished';
+        this._hold = this._total();
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        this._finished.resolve(this);
+        var ev = new Event('finish');
+        if (typeof this.onfinish === 'function') { try { this.onfinish.call(this, ev); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+        this.dispatchEvent(ev);
+      }
+      get effect() { var a = this; return { target: a._target, getTiming: function () { return Object.assign({}, a._timing); }, getComputedTiming: function () { return Object.assign({ endTime: a._total(), activeDuration: a._total() - a._timing.delay - a._timing.endDelay, currentIteration: 0, progress: 0 }, a._timing); }, getKeyframes: function () { return a._keyframes; } }; }
+      get playState() { return this._state; }
+      get pending() { return false; }
+      get replaceState() { return 'active'; }
+      get ready() { return this._ready.promise; }
+      get finished() { return this._finished.promise; }
+      get startTime() { return this._state === 'idle' ? null : this._start; }
+      get currentTime() {
+        if (this._state === 'idle') return null;
+        if (this._hold !== null) return this._hold;
+        return performance.now() - this._start;
+      }
+      set currentTime(v) { this._start = performance.now() - v; if (this._hold !== null) this._hold = v; this._arm(); }
+      get timeline() { return document.timeline || null; }
+      play() { if (this._state === 'finished' || this._state === 'idle') { this._start = performance.now(); this._hold = null; this._finished = deferred(); this._finished.promise.then(undefined, function () {}); } else if (this._hold !== null) { this._start = performance.now() - this._hold; this._hold = null; } this._state = 'running'; this._arm(); }
+      pause() { if (this._state === 'running') { this._hold = this.currentTime; this._state = 'paused'; if (this._timer) clearTimeout(this._timer); this._timer = 0; } }
+      finish() { this._finish(); }
+      cancel() {
+        if (this._state === 'idle') return;
+        this._state = 'idle';
+        if (this._timer) clearTimeout(this._timer);
+        this._timer = 0;
+        this._finished.reject(new DOMException('The animation was aborted', 'AbortError'));
+        this._finished = deferred();
+        this._finished.promise.then(undefined, function () {});
+        all.delete(this);
+        var ev = new Event('cancel');
+        if (typeof this.oncancel === 'function') { try { this.oncancel.call(this, ev); } catch (e) { setTimeout(function () { throw e; }, 0); } }
+        this.dispatchEvent(ev);
+      }
+      reverse() {}
+      updatePlaybackRate() {}
+      persist() {}
+      commitStyles() {}
+    }
+    tag(Animation, 'Animation');
+    def(g.Element.prototype, 'animate', function animate(keyframes, options) { return new Animation(ANIM, this, keyframes, options); });
+    def(g.Element.prototype, 'getAnimations', function getAnimations() {
+      var self = this;
+      return Array.from(all).filter(function (a) { return a._target === self && (a._state === 'running' || a._state === 'paused'); });
+    });
+    def(g.Document.prototype, 'getAnimations', function getAnimations() { return Array.from(all).filter(function (a) { return a._state === 'running' || a._state === 'paused'; }); });
+    def(g, 'Animation', Animation);
+  })();
 })

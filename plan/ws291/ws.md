@@ -280,3 +280,4 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 
 - 2026-10-30 ユーザーから、Pi 5 の V3D の host 試験のために P4 に plan/ws141/temp/ の利用（Mesa の照合用の file を plan/ws141/temp/mesa/ に置き、試験を compile・実行する）を許可する、という趣旨の指示を受けた（q1730 で P4 を起動し直した）。
 - 2026-10-30 ユーザーから、5330 は Linux も起動できるので、p022（i915）は RTX の比ではなく 5330 の Linux（ANV）の実測の性能をゴールにする、という趣旨の指示を受けた。→ RDNA・NVIDIA と同じく、Linux で約 50 fps の qs40 の scene を決め、zedBSD がその scene で Linux 以上。
+- 2026-10-31 ユーザーから、P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい、という趣旨の指示を受けた（権限の判定で止まった件への許可、q1733 で P2 を起動し直した）。

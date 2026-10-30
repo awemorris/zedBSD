@@ -1,20 +1,20 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 00:18（Q1）
+最終更新: 2026-10-31 01:16（Q1）
 
 ## 担当（P1〜P8）
 
 | 担当 | WS | WS の説明 | 今している事 | 作業の予定 |
 | --- | --- | --- | --- | --- |
 | P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
-| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（q1726）。p020: qs40 × 13・1920x1080 を 26.6 fps から 50 fps 以上へ | profile（TA と 3D の分け、解像度に比例する費用、頂点の側）→ 改善 |
+| P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動し直し（q1733、VF2 の SSH・sudo の許可）。SLC の既定の回帰、present の copy を geometry が待たない直し | qs40 × 13 を 42.35 → 50 fps 以上へ。branch は BUG-375 の後に merge |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
 | P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 返却。host で driver の欠け（indexed・instance・直の fetch・mip の第 1 段）を実装、build と host 試験 PASS。実機は未、branch は未 merge（Pi 4 の desktop の回帰の確かめ待ち） | Pi 5 の起動の後: image を作り直し、desktop の回帰、clock の確かめ、fps の計測 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
 | P7 | Bug | BUG-373（main の kernel で Wi-Fi の正規化が EINVAL、network が上がらない）・BUG-371・BUG-372 | 起動（q1732）。QEMU で再現と原因の特定 | 直し → VF2・10.0.10.3 の担当に連絡 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走（q1727、ユーザーの指示）。今 3,472 のうち 2,215（63.80%） | 100% まで。返却のたびに Q1 が起動し直す |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走の 2 回目（q1727-i02）。今 3,472 のうち 2,386（68.72%） | zedBSD の image での build と QEMU → 要素の scroll、baseline、subgrid、View Transitions の残り |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 
@@ -57,7 +57,7 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | p006・p008・p009 | RDNA の残り | 止め（RX 5600 XT が抜かれて実機なし） |
 | p022 | Intel i915（5330）: Linux（ANV）で約 50 fps の scene を zedBSD で Linux 以上に（ユーザーの指示で実測の Linux が基準） | in-progress（P1） |
 | p021 | Raspberry Pi 5 の model 50 fps（qs40 × スペックの比） | in-progress（P4） |
-| p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（26.6 fps、2026-10-30） |
+| p020 | PowerVR の model 50 fps（qs40 × 13） | in-progress（direct で 42.35 fps、2026-10-31） |
 
 ### WS331 driver から HAL への直の依存を除く（P2）
 
@@ -123,12 +123,17 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-今は無し。
+### 1. WS291 p022（i915、5330）: CPU の省電力（idle の C-state・P-state）を先に直すか
+
+- 背景: 5330 の zedBSD は idle で package の電力が 12.99 W（Linux は 3.2〜3.5 W）で、mview の時に電力の上限（PL1 13 W）に張り付いて GPU が 800 MHz（Linux は 1200 MHz）に抑えられている。CPU の idle が HLT（C1）だけで、P-state（CPU の周波数）の制御が無い見込み。GPU が 1200 MHz なら qs40 × 600 は約 45 fps 相当（今 30.1 fps、Linux 50.6 fps）。
+- (a) CPU の idle（MWAIT の C-state）と P-state を先に直す（WS301 を進めるか新しい WS、担当を決める）。(b) 当面は GPU の側の改善だけを続ける（P1 は (b) を続けている）。
+- P1 の具体の案（2026-10-31）: amd64 の HAL の実装（src/hal/amd64/task.c の idle）を HLT から MWAIT に替える（CPUID で MWAIT と ARAT を確かめ、最深の C-state の hint、割り込みで起きる ECX bit0）。hal.h は変えない（実装の補完）。5330 で idle の package の電力と c600 の GPU の周波数を前後で測る。起動しない時は grub・BootNext で Debian に戻す形を保つ。P-state（HWP）は含まない。
 
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | WS291 PowerVR | P2 が VF2 で SSH と sudo を使って kernel の入れ替えと計測の program の実行を続けてよい | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | HAL の atomic.h は macro だけの契約（直列化は macro の中の block で宣言して呼ぶ、cookie の型を消す、2 行の include を外す）、kernel の atomic.h は使った後に undef | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331・WS332 | driver は rpi-common・s905x5m、HAL は bsp-rpi-common・bsp-s905x5m-common・bsp-odroidc5 に分ける。kernel の header は整数の型を kernel で定義し、sched・atomic・thread・vmspace は _private.h に分ける。KERN_CLOCK_HZ は obsolete なので削除し、tick を API で扱い可変にする WS332 を立てる | [ws331/ws.md](ws331/ws.md)・[ws332/ws.md](ws332/ws.md) |

@@ -57,6 +57,7 @@ Queue: q1731（P1）
 | --- | --- | --- | --- |
 | main 48a27d158 | 22.96・23.04 | 約 39.4 ms/frame | draw の全 surface が MOCS 3（L3・LLC uncached） |
 | ＋ MOCS（入力・depth・state は index 2 WB、colour target は 61） | 30.10・30.16 | 約 30.7 ms/frame | 1.31 倍 |
+| ＋ compiler: push 定数・float の即値・頂点の attribute を register に写さず直に読む、always 書く VUE の register を 0 で埋めない（mview の VS 134 → 83 命令） | 31.37・31.62 | 約 29.7 ms/frame | ＋4.5%。shot は ANV と同じ（c1 一致、c600 1 pixel 1 階調）、desktop の keiland-shot も正常。tree の VS 21 本は全て compile でき、全部縮んだ |
 
 - cull=all（MOCS の後）: 35.3 fps（前段だけで約 26 ms、Linux 約 16 ms）。
 - pipeline statistics（診断の kernel、c600 の 1 frame）: IA 21.2M prims、VS 16.5M（頂点の cache は効いている、unique 15.5M）、CL 21.2M、PS 6.9M。

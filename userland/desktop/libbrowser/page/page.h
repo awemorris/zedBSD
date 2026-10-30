@@ -177,6 +177,15 @@ struct page {
 	struct page_box_slot *box_index;
 	size_t box_index_capacity;
 	uint32_t box_index_serial;
+	/* The view transition (transition.c): its state, whether there is one, and the counts that tell the layout it changed. */
+	struct layout_transition transition;
+	int transition_on;
+	uint32_t transition_generation;
+	uint32_t laid_out_transition;
+	/* Whether a view transition is active and its types (for :active-view-transition; the style engines are told). */
+	int vt_active;
+	const struct vm_string *vt_types[8];
+	int vt_type_count;
 };
 
 /*
@@ -324,6 +333,10 @@ void page_set_scroll(struct page *page, double x, double y);
 struct css_engine *page_selector_engine(void *context);
 int page_grid_tracks(void *context, struct dom_node *node, int columns, struct wb_vector *sizes, int *leading, int *repeats, int *found);
 int page_node_box(void *context, struct dom_node *node, struct bind_box *box);
+int page_view_transition(void *context, int step);
+int page_vt_pseudo_style(void *context, struct dom_element *element, int pseudo, const struct vm_string *name, struct css_style *style);
+double page_view_transition_duration(void *context);
+void page_view_transition_active(void *context, int active, struct vm_string **types, size_t count);
 void page_document_size(void *context, double *width, double *height);
 void page_scroll(void *context, double *x, double *y);
 int page_computed_style(void *context, struct dom_element *element, struct css_style *style);
