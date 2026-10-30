@@ -52,8 +52,10 @@ struct gpu_allocation_export {
 
 /*
  * One allocation capability imported into an independent renderer context.
- * Only version, size and fd are inputs. Success returns an owned resource and
- * the sender's immutable metadata; the supplied fd remains caller-owned.
+ * Only version, size and fd are inputs; flags, handle, resource_id, reserved
+ * and the whole allocation are zero (EINVAL otherwise). Success returns an
+ * owned resource and the sender's immutable metadata; the supplied fd
+ * remains caller-owned.
  */
 struct gpu_allocation_import {
 	uint32_t version;

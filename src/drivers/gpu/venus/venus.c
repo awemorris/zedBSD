@@ -605,15 +605,16 @@ venus_get_info(
 	void *private_session,
 	struct gpu_info *info)
 {
-	struct venus_controller *controller;
-
+	(void)device;
 	(void)private_session;
 
-	/* Legacy rendering and capability queries remain available without strict queue completion. */
-	controller = device;
+	/*
+	 * The framework replies with the registered bits, which stay the same
+	 * for the node's life: JOB and JOB_CAPACITY stay set without strict
+	 * queue completion, and the job reservation and capacity requests
+	 * refuse instead (the capset's VENDOR_STRICT_QUEUE tells in advance).
+	 */
 	info->capabilities = VENUS_CAPABILITIES;
-	if (controller->transport.strict_queue == 0U)
-		info->capabilities &= ~(GPU_CAP_JOB | GPU_CAP_JOB_CAPACITY);
 
 	/* Limits describe the retained controller rather than the current renderer session. */
 	info->max_resources = UINT32_MAX;

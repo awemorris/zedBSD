@@ -232,7 +232,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | open |
 | [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、8c8c556b5: base の image に /etc/hosts。QEMU で確かめた） |
 | [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | closed（2026-10-30、comment の直し） |
-| [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
+| [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | partly fixed（2026-10-31 P2 q1757-i01。header・comment 13 件と code 3 件（venus の 176 byte の capset、i915 の capset の id、AMDRDNA の既定）。残りは ticket の「要判断」） |
 | [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、e722b9556: 指定の address に置き換えて map。QEMU の /dev/dsp0 で確かめた） |
 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | closed（2026-10-30、main 701b21b19） |
 | [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |

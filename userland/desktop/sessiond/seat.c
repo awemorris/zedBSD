@@ -153,7 +153,7 @@ sessiond_seat_restore(
 	char path[32];
 	unsigned index;
 
-	/* Every display, which anyone may open again. */
+	/* Every display, root's again (the GPU node admits only root and the node's owner, whatever its mode). */
 	for (index = 0U; index < SEAT_GPU_COUNT; index++) {
 		snprintf(path, sizeof(path), "/dev/gpu%u", index);
 		seat_set(path, 0, SEAT_WHEEL_GID, SEAT_GPU_MODE);

@@ -15,7 +15,8 @@
  * time; FIFO presentation of storage frames (copied by the CPU into one
  * of the display's two frames, then flipped to) and of blobs (flipped to
  * as they are, when their rows are the display's).  A presentation
- * returns once its flip has begun, so a wait answers at once.  Releasing
+ * returns once the display controller has taken its flip (the update that
+ * carries it), so a wait answers at once.  Releasing
  * the lease, closing its session or destroying the blob on the screen
  * flips back to the console's surface, the firmware's.
  *
@@ -597,11 +598,11 @@ present_release(
  * 256-byte boundary of the VRAM.  Storage is copied into the display's
  * frame not on the screen, which is flipped to.  A frame of another size
  * than the mode shown sets a mode of its size first (one the display
- * offers, at the refresh asked for); the call returns once the flip has
- * begun.  Returns 0 with the frame's sequence, EINVAL for another
- * session's lease or a frame the display cannot show, ESTALE for another
- * generation, or EIO when the mode set failed or the flip did not begin
- * (the display is then broken).
+ * offers, at the refresh asked for); the call returns once the update
+ * that carries the flip has been taken.  Returns 0 with the frame's
+ * sequence, EINVAL for another session's lease or a frame the display
+ * cannot show, ESTALE for another generation, or EIO when the mode set
+ * failed or the flip was not taken (the display is then broken).
  */
 static int
 present_present(
