@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 13:25（Q1）
+最終更新: 2026-10-30 13:40（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 返却（ラップアップ）。p028 の build・boot の再現の途中（native の image まで出来た、boot の判定は script の誤りで未判定、直した script は未実行） | 次のセッション: p028 の native の boot → hybrid・uefi・bios → WS009 completed → WS296（P6 の実装を元に組み直す）→ WS297 |
 | P2 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 返却（ラップアップ）。p016 の受け入れの途中: 境界・build・host 試験・FreeBSD は PASS、QEMU の回帰は Mail・Music・Settings まで | 次のセッション: QEMU の回帰の残り（Video Player の PAUSE・Photos の import の FAIL の解析）、BUG-367 の後に 08-network → p017 → WS の完了 |
-| P3 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close が戻らない | QEMU で再現と解析、今日の TCP の変更との関係を確かめて直す | BUG-367 → WS221（Jumbo frame）・WS299（5330 の NVMe） |
+| P3 | [BUG-367](bugs/BUG-367.md) → [BUG-369](bugs/BUG-369.md) | TCP の close が 10 秒待つ不具合（直した）→ QEMU の guest への SSH が数回後から 3〜32 秒に伸びる不具合 | BUG-367: 原因（listen 中の socket が RST を返さない）を直し、tcp-model・QEMU の close の試験 PASS。qemu-tcp と 21 config の build を流す（約 50 分） | BUG-367 を閉じる → BUG-369 の解析 → WS221（Jumbo frame）・WS299（5330 の NVMe）。WS315（2.5GbE）は 2026-10-30 に completed |
 | P4 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 返却（09:13）。次の 1 手は ws.md の Resume point | p015 の QEMU の 3 回目 → p004 clang・libcxx・GTK4 のセルフビルド → p008 → p014 → p007 firmware 変数の driver |
 | P5 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 返却（09:13、計測なし） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ（デスクトップ機） |
 | P6 | — | — | 返却（WS282・WS284 は main に merge 済み） | 未割当 |
