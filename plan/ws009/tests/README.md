@@ -73,23 +73,34 @@ this file-existence check. Ignored disposable `temp/` trees and prohibited
 
 ## DOC-T70--T72 command
 
-Run the completed-producer reconciliation check from the repository root:
+Run the current-source reconciliation check from the repository root:
 
 ```sh
-build/NoctLang/build-static/noct \
-  plan/ws009/tests/check-completed-producer-docs.noct .
+python3 -I plan/ws009/tests/check-docs-current.py .
 ```
 
-It compares the managed-WLAN command/state/credential claims, USB HID and
-consumer state, amd64 Variant labels, Noct release, LLVM cache, and sysroot
-ownership against current production source. It also requires every product
-document to use a `current`, `experimental`, `deprecated`, or `planned` status
-banner and rejects retained internal paths in `docs/`.
+It reads every value from the current tree and collects all failures
+(`FAIL <file>: <reason>`) before the last line, `check-docs-current: PASS (...)`
+or `check-docs-current: FAIL (<n> problems)`. It checks:
 
-Q072 uses this check together with DOC-T00 and `git diff --check` to complete
-`ws009-p006`; it does not rerun the already accepted producer runtime matrices.
-The final run passed 11 product-document status banners, while DOC-T00 passed
-all 1,803 permanent `docs/` and `plan/` relative links.
+- the managed-WLAN document against the `net wifi` usage of
+  `userland/base/net/main.c` (every form present, no other verb, no `set-key`),
+  the policy states of `managed-wlan-state.h` in backquotes, and the file size
+  limit of `wifi-conf.h`;
+- `evdev.md`: the two retired sentences are absent, the legacy console event
+  ioctls are said to have been removed, and the BeUI consumer names the Noct
+  version of `userland/base/noct/version.mk`;
+- `build-from-source.md`: each amd64 variant of the Makefile has a table row,
+  each amd64 variant label of `tools/menuconfig.py` is in backquotes, the Noct
+  tag, archive size, SHA-256 and `v<version>`, the LLVM version and cache tag,
+  and the sysroot and Target Noct rows;
+- every product document (`docs/` except `docs/agent/` and
+  `docs/release/zedbsd-*.md`) has a `Status: ` line in its first 12 lines, does
+  not contain `.internal/`, and is reachable from `docs/README.md` by relative
+  links.
+
+The earlier `check-completed-producer-docs.noct` compared fixed strings and
+stopped at the first failure; it is replaced by this script.
 
 ## DOC-54 command
 
