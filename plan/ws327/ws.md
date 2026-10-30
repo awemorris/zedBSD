@@ -35,7 +35,7 @@
 | ws327-p005 | 解説と規約の全文の見直し（一括） | — | canceled（p015・p017 に分けた） | — |
 | ws327-p006 | Win32 の実装（一括） | — | canceled（p013・p014 に分けた） | — |
 | [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | cleared（2026-10-30 Q1、0f60bee4a。phase008〜017、design §13、design-reviewer 21 件を反映） | p003 |
-| [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | planned | p007 |
+| [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | cleared（2026-10-30 Q1、main d2efaeeb6。host-mail-backend・sync PASS（ASan・UBSan）、zedBSD 3 arch warning 0、突然変異 3 で全て検出。QEMU は p016） | p007 |
 | [ws327-p009](phase009/phase.md) | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | planned | p007 |
 | [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | cleared（2026-10-30 Q1、main ff55398bf。zedBSD 3 arch の build warning 0、check-layers PASS。動作は p016 の QEMU で） | p007 |
 | [ws327-p011](phase011/phase.md) | Settings（look・storage-scan・storage-trash）の移行 | Sonnet | planned | p007 |

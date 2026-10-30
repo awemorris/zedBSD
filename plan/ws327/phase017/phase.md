@@ -43,3 +43,8 @@ WS327 が足した・変えた C の source（`git diff --stat <WS327 の前の 
 ## 結果
 
 （担当が書く）
+
+## p008 から（2026-10-30 Q1）
+
+- Mailer の file の先頭の comment に WS・Phase の番号が残っている（AGENTS.md §10 に反する）。規約の見直しで消す。`sync.c` の `sync_wait` の "New mail" の辺りの空白・字下げも直す。
+- 読む前の poll の待ちの events を変えても捕まえる試験が無い（read の timeout の試験）。p016 で足すかを決める。
