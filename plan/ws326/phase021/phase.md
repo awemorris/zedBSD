@@ -58,3 +58,8 @@
 ## p020 から引き継ぐ事（2026-10-30 Q1）
 
 deblocking は chroma の QP に `picture->chroma_qp_offset[0]`・`[1]` を全 macroblock で使う（context に slice ごとの PPS の offset が無い）。1 つの picture の slice が chroma_qp_index_offset の違う PPS を指す stream があり得るか（7.4.1.2.1 などの制約）を統合で確かめ、あり得るなら macroblock ごとの値を持たせる直しを Q1 に返す。
+
+## p006 から引き継ぐ事（2026-10-30 Q1）
+
+- memory_management_control_operation 5 の picture は、`h264sw_dpb_store` を呼ぶ前に `frame->frame_num = 0` にする（7.4.3。DPB の項目の frame_num は `current->frame_num` から写る。decoder.h の手順 6 は POC の写しだけを書いている）。
+- gap の非存在の frame の POC（type 0）は DPB の中の最も新しい frame の POC か 0（p006 の判断、phase006/phase.md の結果）。適合の試験の gap の stream（MR9_BT_B など）で出力の順を確かめる。
