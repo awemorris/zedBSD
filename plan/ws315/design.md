@@ -168,12 +168,12 @@ Linux の `r8156_init`・`rtl8156_up`・`rtl8156_enable` と違う所は、ま�
 
 ## 10. 試験の道
 
-- host（`plan/ws315/tests/`）: frame の純粋な部分を `include/drivers/usb/usb-rtl815x.h`・`src/drivers/usb/usb-rtl815x-frame.c` に出し、ASan・UBSan で:
+- host（`plan/tools/rtl815x/`）: frame の純粋な部分を `include/drivers/usb/usb-rtl815x.h`・`src/drivers/usb/usb-rtl815x-frame.c` に出し、ASan・UBSan で:
   RX の block の解析（v1・v2、揃え、FCS を除く、最後の frame、長さの壊れ（大きすぎ・小さすぎ・block を越える）で残りを捨てる、checksum の bit の読み）、
   TX の block の組み立て（v1・v2、揃え、16 KB に入る数、入らない frame を残す、checksum の指示と offset の上限）、version の表、PHYSTATUS の速さ、register の dword の shift と byte enable。
 - build: amd64・pcat・rpi4・rpi5・zybo・VF2・5330（`config-5330-jumbo.mk`）・RTL8127 の config の vmunix の warning 0。
 - QEMU: Realtek の USB の NIC の模型が無い。usb-net（ECM）・usb-storage の非退行（USB core の選び分けの変更が他の device に効かない事）だけ。
-- 実機 5330（新しい `plan/ws315/tests/5330-rtl.sh`、`5330-ncm.sh` の形、image の build は firmware の license を `yes | make firmware-licenses` で通してよい（2026-10-30 ユーザー
+- 実機 5330（新しい `plan/tools/rtl815x/5330-rtl.sh`、`5330-ncm.sh` の形、image の build は firmware の license を `yes | make firmware-licenses` で通してよい（2026-10-30 ユーザー
   「試験に関しては私はすべてのライセンスに同意しておりますので、自動でいいです」））:
   - attach の行（chip・version・mac・urbs）、link 2500、ifconfig ue0、tcp-perf send・recv 30 s（相手 10.0.10.2）、ping 1472、MTU 9000 の ping（相手が 9000 の時だけ、
     相手の無い時は未実施）、RX errors・dropped、`usb.rtl815x=off` の起動で NCM に戻る事（A/B）、内蔵の USB（Broadcom の ccid・AX211 の bt・camera）の非退行、camcap。
@@ -208,7 +208,7 @@ review: 致命 1・重大 4・中 9・軽微（[phase001](phase001/phase.md) に
 | m6 範囲の外の chip | ID の表を 0x8156・0x8157 に絞る。拒否は log に version と token を出す。core に configuration の前の probe の口を足すのは範囲の外（記録だけ） |
 | m7 登録の場所 | pcat.c の NCM の隣（amd64・pcat）。arm64 の platform は既定 n なので今は足さない |
 | m8 開いたままの MTU | RMS・EARLY_SIZE・（8156B の）TX FIFO を書き直すだけ。p003 で開いたままの変更と ping を試す。問題が出たら disable → enable の形へ |
-| m9 試験 | 5330-rtl.sh に down・up の後の ping、開いたままの MTU の変更を入れた。send と recv の同時、port の上げ下げは p003 で。Linux の基準の firmware の有無は p003 で dmesg を見る。試験の config は `plan/ws315/tests/config-5330-rtl.mk` |
+| m9 試験 | 5330-rtl.sh に down・up の後の ping、開いたままの MTU の変更を入れた。send と recv の同時、port の上げ下げは p003 で。Linux の基準の firmware の有無は p003 で dmesg を見る。試験の config は `plan/tools/rtl815x/config-5330-rtl.mk` |
 | 軽微 | ZLP は `DRV_USB_URB_ZERO_PACKET`。boot の token は一度だけ読む。Linux の版は ref の tree の commit c339f4010（7.3 の開発版）。register・bit の名前は FreeBSD・Linux と違う独自の名前にした。PHY の firmware は範囲の外。IPV4_CS に IP header の計算を任せる（FreeBSD と同じ）のは p003 の send の成否で確かめる |
 
 ## 13. 危険と未決
