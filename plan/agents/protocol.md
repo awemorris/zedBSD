@@ -12,15 +12,18 @@
 
 | 定義 | 使う時 |
 | --- | --- |
-| phase-runner（Opus、high） | 既定。kernel・driver・i915・Keiland・bug の修正 |
-| phase-runner-mid（Opus、medium） | 試行の多い WS（ブラウザ、app） |
+| phase-runner（Opus 5.5、medium） | 既定 |
+| phase-runner-high（Opus 5.5、high） | kernel・driver・バグの修正 |
+| phase-runner-mid（Opus 5.5、medium） | 試行の多い WS（app） |
+| phase-runner-low（Sonnet 5.5、high） | 標準廉価実装手順の実装の担当、WS074（Web ブラウザ）の Phase |
+| document-writer（Sonnet 5.5、high） | 文書の作成（人間が読む文書に寄ったモデルなので Opus より向く） |
 | kernel-and-driver-designer | 設計の Phase（code は書かない） |
 | design-reviewer | 設計ごとの敵対的レビュー（設計の担当が呼ぶ） |
 | bug-analyzer ／ bug-fixer | Bug の原因の解析だけ ／ 解析を受けた修正 |
-| conformance-reviewer・p3-conformance-haiku・p3-conformance-sonnet-low | 「規約の全文の見直し」の Phase（書き方だけ） |
+| conformance-reviewer | 「規約の全文の見直し」の Phase（書き方だけ） |
 | hard-debugger | ユーザーが指定した難しい Phase・debug |
 | test-runner | 試験の担当 T |
-| browser-runner-b1 | WS074 の B1 |
+| browser-runner-b1 | 旧 WS074 の B1（2026-10-30 から WS074 は phase-runner-low） |
 
 ## 2. 起動と Queue
 

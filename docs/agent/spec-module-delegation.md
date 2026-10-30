@@ -10,7 +10,7 @@
 | --- | --- |
 | Q1 | main の checkout の統括のセッション。計画・Queue・merge・判定を行う。 |
 | 設計の担当 | module の設計の Phase を行うエージェント。model は Opus（定義 phase-runner）。 |
-| 実装の担当 | module の .c と単体試験を書くエージェント。model は Sonnet 5.5、effort high。1 Phase = 1 回の起動。 |
+| 実装の担当 | module の .c と単体試験を書くエージェント。model は Sonnet 5.5、effort high（定義 phase-runner-low）。1 Phase = 1 回の起動。 |
 | design-reviewer | 設計の敵対的レビューのエージェント。設計の担当が 1 本起動する。 |
 | 仕様 | 外部の標準の文書（例: ITU-T H.264、ISO/IEC の規格、RFC、Khronos の仕様）。 |
 | 基点の SHA | 設計の Phase が header を確定させた commit。実装の Phase は header がこの SHA から変わっていないことを照合する。 |
@@ -142,7 +142,7 @@ commit の SHA（骨格、header の確定の SHA = 基点、plan）、module �
 
 1. 依存の Phase が全部 main に merge され cleared になっていることを確かめる。
 2. Phase ごとに新しい worktree と branch を main から作る（例: `/home/awe/zedBSD-worktrees/s-<WS>-<Phase>`、branch `agent/s-<WS>-<Phase>`）。依存の満ちた Phase は並べて起動してよい（同時の数は Q1 が決める。目安 3〜5）。
-3. エージェントを `subagent_type: general-purpose`、`model: sonnet`、`effort: high`（ユーザーが Sonnet 5.5 High を指定した時）で、background で起動する。
+3. エージェントを `subagent_type: phase-runner-low`（Sonnet 5.5・high）で、background で起動する。
 4. prompt は 5.2 の型に、Phase の名前と worktree と、その Phase に固有の強調点（仕様の節）を入れる。
 
 ### 5.2 prompt の型

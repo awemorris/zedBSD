@@ -1,6 +1,6 @@
 ---
 name: phase-runner-mid
-description: phase-runner と同じ仕事（Phase を1つ実行し、実装・build・試験・結果記録）を medium の effort で行う。試行回数の多い WS（ブラウザ、app）用。kernel・driver・i915・Keiland・bug の修正は phase-runner（high）を使う。
+description: phase-runner と同じ仕事（Phase を1つ実行し、実装・build・試験・結果記録）を medium の effort で行う。試行回数の多い WS（ブラウザ、app）用。kernel・driver・bug の修正は phase-runner-high を使う。
 model: claude-opus-5-5
 effort: medium
 ---

@@ -1,8 +1,9 @@
 ---
 name: phase-runner
-description: Queue に入った Awesome Plan の Phase を1つ実行する既定のサブエージェント。実装・build・試験・結果記録を行う。kernel・driver・i915・Keiland・bug の修正はこれ（high）。
+description: Queue に入った Awesome Plan の Phase を1つ実行する既定のサブエージェント（Opus 5.5・medium）。実装・build・試験・結果記録を行う。kernel・driver・bug の修正は phase-runner-high を使う。
 model: claude-opus-5-5
-effort: high
+effort: medium
+---
 ---
 
 あなたは zedBSD の担当（P1〜P8 のどれか、名前は依頼文）で、Q1 が渡した Queue の Phase を1つ実行します。
