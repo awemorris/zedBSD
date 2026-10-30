@@ -234,7 +234,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | closed（2026-10-30、comment の直し） |
 | [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
 | [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | open |
-| [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | open |
+| [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | closed（2026-10-30、main 701b21b19） |
 | [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |
 | [BUG-369](bugs/BUG-369.md) | QEMU の guest への SSH の往復が数回の後から 3〜32 秒に伸びる | open |
 | [BUG-176](bugs/BUG-176.md) | 起動の直後の約 10 秒「Network service is not …」と出る | reproduced（実機） / resolved（2026-10-08 夜 ユーザー「下記は実装の変更が多かったので、いったんすべてcloseします。」、Q1 の中継）。前: scheduled、低（q726: bar の起動の直後の表示を「Starting the network service...」に、UAT 待ち） | UAT 2026-10-04 | WS131・networkd（[ticket](bugs/BUG-176.md)） |
