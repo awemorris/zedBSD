@@ -19,7 +19,9 @@ U=userland/desktop
 # The client side: the tree's headers (wayland-client.h, keiland/keiland*.h) and libwayland.
 client_flags="-std=gnu17 -D_GNU_SOURCE -O1 -g -Wall -Wextra -Werror $san -I. -I$U/include -I$U/libkeiland/audio -Iplan/ws191/tests"
 wayland=$(sed -n 's#^.*\(userland/desktop/libwayland/[a-z-]*\.c\).*$#\1#p' $U/libwayland/Makefile.linux)
-for file in $wayland $U/libkeiland/audio/audio.c $U/libkeiland/audio/audio-protocol.c plan/ws191/tests/host-audio-client.c; do
+# audio.c's pump runs on libkeiland's threads (platform/thread-posix.c).
+for file in $wayland $U/libkeiland/audio/audio.c $U/libkeiland/audio/audio-protocol.c $U/libkeiland/platform/thread-posix.c \
+    plan/ws191/tests/host-audio-client.c; do
 	$cc $client_flags -c "$file" -o "$work/client-$(basename "$file" .c).o"
 done
 

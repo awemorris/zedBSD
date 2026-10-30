@@ -59,6 +59,10 @@ for file in userland/desktop/libkeiland/settings-cache.c userland/desktop/libkei
 	"$cc" -O2 -g -Wall -Werror -D_GNU_SOURCE -I$out/include -I. -Iuserland/desktop/libkeiland -c "$file" -o "$object"
 	objects="$objects $object"
 done
+# libkeiland's threads (look.c's loader, storage-scan.c and storage-trash.c run on kl_thread_*; gnu17 for its atomics).
+object="$out/obj/shared-thread-posix.o"
+"$cc" -O2 -g -std=gnu17 -Wall -Werror -D_GNU_SOURCE -I$out/include -c userland/desktop/libkeiland/platform/thread-posix.c -o "$object"
+objects="$objects $object"
 # The desktop's system (WS131 p011): a stand-in for kl_system_* without Wayland (no compositor: the sound page
 # says it is not available; host-network.c fills the network pages by hand).
 object="$out/obj/shared-host-kl-system.o"
