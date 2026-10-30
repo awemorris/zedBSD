@@ -233,7 +233,7 @@
 | --- | --- | --- | --- | --- |
 | q1708 / q1708-i01 | P8（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/p8-ws074`・branch `agent/p8-ws074`、基点 main 2ba50ae52、host だけ） | [ws074-p260](ws074/phase260/phase.md)（と p261・p262） | local の host で Chromium との比較の環境を作り直し（WPT の固定 commit を自分の build へ、Debian の chromium 153.0.8010.52）、Chromium の基準と dev20 の全件の測定、その後 gap の大きい原因から libbrowser を直す。区切りごとに全件の測定で後退 0 | uncleared（2026-10-30 返却。Debian の比較の環境 5e20c8da9、測定は背景で継続、修正 0。q1708-i02 で続ける） |
 
-## 2026-10-30 14:0x: WS313・WS327・WS307・WS291 を P1・P5・P6・P7 で（q1709〜）
+## 2026-10-30: WS313・WS327・WS307・WS291 を P1・P5・P6・P7 で（q1709〜）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
@@ -248,7 +248,7 @@
 | --- | --- | --- | --- | --- |
 | q1713 / q1713-i01 | P2（phase-runner、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、基点 main、host だけ） | [ws331-p001](ws331/phase001/phase.md) | 一覧の作成だけ（code は変えない）。ユーザー「了解です。ガードレールに記載してください。これを修正するWSを立ててください。P2で実行してください。HALのマップ関数には、カーネル側に相当する関数があるはずです。まずは違反利用された関数が、どの関数に置き換えられるか、一覧を作成してください。そして、ラッパーがない場合、カーネルに関数追加しますので、その一覧をください。」 | cleared（2026-10-30 Q1。p001 の一覧 6af47c4a4、merge f4fcb6ff2。Phase は in-progress のまま、ユーザーの決定待ち） |
 
-## 2026-10-30 15:2x: WS313 の firmware を P1 で（q1714）
+## 2026-10-30: WS313 の firmware を P1 で（q1714）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
@@ -261,45 +261,45 @@
 | --- | --- | --- | --- | --- |
 | q1715 / q1715-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291`・branch `agent/p3-ws291`、基点 main、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」 基準はユーザーの未回答の間 Q1 の既定: zedBSD の今の fps で 40 fps 前後の scene を決め、50 fps 以上へ | uncleared（2026-10-30 返却。VF2 の HDMI に画面が無く loader の framebuffer が無い（元の kernel でも同じ、10-28 から）。fps は未計測。a7e9379f5） |
 
-## 2026-10-30 16:4x: WS313 の bootloader を公式の image から（q1716）
+## 2026-10-30: WS313 の bootloader を公式の image から（q1716）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1716 / q1716-i01 | P1（phase-runner-high、worktree p1-ws313 と p1-c5-firmware） | [ws313](ws313/ws.md) p003 媒体 | ユーザー「このファイルは、このボードで利用する目的であれば、再配布可能です。zedBSD-firmwareに入れてください。ライセンスは下記です。 prior written permissionはHardkernelに与えられており、このボードでしか使用できないイメージであれば、再配布が可能なんだそうです。」（下に Amlogic の license の本文、2018 Amlogic の「Redistribution and use … strictly prohibited without prior written permission from Amlogic.」） bootloader を公式の image の物に替え、zedBSD-firmware に license の本文と一緒に入れる。試験の image を作り直す。push は Q1 | cleared（2026-10-30 Q1。zedBSD-firmware 43662bd（未 push）、zedBSD 1bf02b7f・40e11db1（revision）・966a7eac・68683b74。試験の image 2 つは公式の bootloader。main への merge は zedBSD-firmware の push の後） |
 | q1715 / q1715-i02 | P3（phase-runner-high、同じ worktree p3-ws291、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「VF2はHDMIを接続しました。P3を再始動し、必要ならVF2をSwitchbotで再起動してください。」 i01 の続き（範囲の 2: scene の決定・計測・改善） | uncleared（2026-10-30 返却。driver の欠け 7 つを直し qs40 × 13 は direct で 26.57 fps、目標 50 に未達、profile の途中。cb03c9983、merge 7e77db340） |
 
-## 2026-10-30 18:1x: WS331 p002〜p004 を P2 で（q1717）
+## 2026-10-30: WS331 p002〜p004 を P2 で（q1717）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1717 / q1717-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws331`・branch `agent/p2-ws331`、main に追従、host・QEMU） | [ws331-p002](ws331/phase002/phase.md)・[p003](ws331/phase003/phase.md)・[p004](ws331/phase004/phase.md) | ユーザー「表A,Bを許可します」 | cleared（2026-10-30 Q1。p002・p003・p004 cleared） |
 
-## 2026-10-30 18:3x: WS307 p007 を P6 で（q1718）
+## 2026-10-30: WS307 p007 を P6 で（q1718）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1718 / q1718-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、main に追従、QEMU（OVMF）） | [ws307-p007](ws307/phase007/phase.md) → p014 → WS307 の完了 | ユーザー「WS307の判断事項は、HAL_SPACE_SYS で 実行可能フラグが使えない実装になっているから、使えるようにしよう、という指摘ですか？もしそうなら、それは実装の問題であって、HALのAPIの変更ではないです。」（改訂 5 の G1〜G3 で実装） | uncleared（2026-10-30 返却。p007 の efiboot の OVMF の試験 PASS、p014 cleared。残り: install-admin の導入の QEMU、古い entry の掃除。ccd0c8693、merge 061230951） |
 
-## 2026-10-30 19:4x: WS331 p005 を P2 で（q1719）
+## 2026-10-30: WS331 p005 を P2 で（q1719）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1719 / q1719-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p005](ws331/phase005/phase.md) | 2026-10-30 ユーザーから、Raspberry Pi の console を kernel_putc の形に今作り直す、という趣旨の指示を受けた。pc98 の 3 か所も | uncleared（2026-10-30 返却。p005 は実装と QEMU・host・VF2 の起動まで。残り: VF2 の画面の目視、amd64 の Venus、Pi で GPU の最初の flip の EBUSY（HAL が framebuffer の view を持つ）） |
 
-## 2026-10-30 21:0x: WS331 p007 HAL の early console の framebuffer の窓を他の platform へ（q1720）
+## 2026-10-30: WS331 p007 HAL の early console の framebuffer の窓を他の platform へ（q1720）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1720 / q1720-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU、実機 VF2） | [ws331-p007](ws331/phase007/phase.md) | 2026-10-30 ユーザーから、HAL が unmap device できるよう early console の GOP の領域を map の list に入れておく形（GHCI の時に PC で入った物）を確かめ、他の platform でも同じにする、という趣旨の指示を受けた | cleared（2026-10-30 Q1。arm64・riscv64 の窓、boot-fb の end。QEMU raspi4b で窓が外れる事、VF2 の実機で窓が外れる事（dmesg）、20 port の build。52ccb91b3） |
 
-## 2026-10-30 21:5x: WS331 p008・p009 を P2、WS332 を P3 で（q1721・q1722）
+## 2026-10-30: WS331 p008・p009 を P2、WS332 を P3 で（q1721・q1722）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1721 / q1721-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p008](ws331/phase008/phase.md) → [p009](ws331/phase009/phase.md) | 2026-10-30 ユーザーから、Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h の分離という趣旨の指示を受けた | uncleared（2026-10-30 返却。p008 済み（watch.c の HVS を bsp-rpi4 へ）、p009 は atomic.h を除いて済み。atomic.h はユーザーの判断待ち。570e03603、merge 2aa9aeabd） |
 | q1722 / q1722-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws332`・branch `agent/p3-ws332`、host・QEMU） | [ws332-p001](ws332/phase001/phase.md) → [p002](ws332/phase002/phase.md) | 2026-10-30 ユーザーから、KERN_CLOCK_HZ を今回削除し、tick を API で扱い可変にする WS を Q1 の提案どおり立てる、という趣旨の指示を受けた | cleared（2026-10-30 Q1。p001 設計、p002 KERN_CLOCK_HZ の削除、wlan の UAPI の deadline_ns、x68k の FPU の検査。19 port の build、QEMU 5 port、host 試験。24a5cdb0d、merge 9d6ed7005） |
 
-## 2026-10-30 23:4x: WS331 p010 を P2 で（q1723）
+## 2026-10-30: WS331 p010 を P2 で（q1723）
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
