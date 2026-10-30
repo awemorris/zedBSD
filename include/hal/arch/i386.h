@@ -69,29 +69,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_ENTER
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-static inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous = 1U;
-
-	__asm__ volatile("xchgl %0, %1"
-			 : "+r"(previous), "+m"(*value)
-			 :
-			 : "memory");
-	return previous == 0U;
-}
-
-static inline void
-hal_atomic_relax(void)
-{
-	__asm__ volatile("pause" ::: "memory");
-}
-
-#endif
-
 /*
  * Checks
  */

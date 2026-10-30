@@ -56,58 +56,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_ENTER
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-/*
- * Takes a lock word: swaps in one with acquire ordering and reports
- * whether the word was zero.
- */
-static __inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous;
-	unsigned one;
-
-	/* Swaps one into the word until the store-conditional holds. */
-	__asm__ volatile(".set push\n\t"
-			 ".set noreorder\n"
-			 "1:\tll %0, 0(%2)\n\t"
-			 "li %1, 1\n\t"
-			 "sc %1, 0(%2)\n\t"
-			 "beqz %1, 1b\n\t"
-			 "nop\n\t"
-			 "sync\n\t"
-			 ".set pop"
-			 : "=&r"(previous), "=&r"(one)
-			 : "r"(value)
-			 : "memory");
-
-	/* The lock was free when the word held zero. */
-	if (previous == 0U)
-		return true;
-
-	/* Another holder has the lock. */
-	return false;
-}
-
-/*
- * Lets the processor rest in a spin.
- *
- * MIPS32 release 2 has no spin hint outside the multithreading
- * extension: its pause waits for the link bit to clear, which is not the
- * meaning of a spin, so the wait slot is an ordinary no-op.
- */
-static __inline void
-hal_atomic_relax(
-	void)
-{
-	/* Spends one no-op slot. */
-	__asm__ volatile("nop" ::: "memory");
-}
-
-#endif
-
 /*
  * Debugging
  */

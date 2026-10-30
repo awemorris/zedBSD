@@ -8,11 +8,19 @@
 #include <hal/hal.h>
 
 /*
- * The serialization region's entry points, declared as the macros of
- * <hal/atomic.h> declare them, so that a definition which drifts from the
- * macros does not compile.
+ * The lock-word macro calls the function defined below.  The name is freed
+ * here, before the function is declared and defined, so that neither is
+ * taken for a use of the macro.
+ */
+#undef hal_atomic_uint_try_acquire
+
+/*
+ * The serialization region's entry points and the lock-word function,
+ * declared as the macros of <hal/atomic.h> declare them, so that a
+ * definition which drifts from the macros does not compile.
  */
 HAL_ATOMIC_ENTER_DECLARE();
+HAL_ATOMIC_TRY_ACQUIRE_DECLARE();
 
 /*
  * The MC68030 HAL is uniprocessor.  Excluding interrupts therefore

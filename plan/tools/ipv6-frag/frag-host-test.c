@@ -1311,21 +1311,3 @@ test_quoted_error(void)
 	check(error_count == 0U, "quoted error: no Time Exceeded about an error message");
 	settle("quoted error");
 }
-
-/*
- * The kernel's lock-word claim and spin hint, which the kernel core defines
- * with the HAL.  The host's exchange stands in for the port's sequence.
- */
-int
-atomic_raw_try_acquire_zero(
-	volatile unsigned *value)
-{
-	return __atomic_exchange_n(value, 1U, __ATOMIC_ACQUIRE) == 0U;
-}
-
-/* The host has no spin instruction to give. */
-void
-atomic_spin_hint(
-	void)
-{
-}

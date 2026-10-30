@@ -57,63 +57,6 @@ struct hal_task_signal_frame_head {
  */
 #define HAL_ATOMIC_STYLE	HAL_ATOMIC_STYLE_NATIVE
 
-#if !defined(__ASSEMBLER__) && !defined(_ASM_SRC_)
-
-/*
- * Takes a lock word: stores one where the word held zero, with acquire
- * ordering, and reports whether the word was zero.
- *
- * A word found held is left with clrex, so that the exclusive monitor is
- * not left open by the attempt.
- */
-static __inline bool
-hal_atomic_uint_try_acquire(
-	volatile unsigned *value)
-{
-	unsigned previous;
-	unsigned failed;
-
-	/* Retries the store while another observer broke the reservation. */
-	__asm__ volatile("1:\tldrex %0, [%2]\n\t"
-			 "cmp %0, #0\n\t"
-			 "bne 2f\n\t"
-			 "strex %1, %3, [%2]\n\t"
-			 "cmp %1, #0\n\t"
-			 "bne 1b\n\t"
-			 "dmb ish\n\t"
-			 "b 3f\n"
-			 "2:\tclrex\n"
-			 "3:"
-			 : "=&r"(previous), "=&r"(failed)
-			 : "r"(value), "r"(1U)
-			 : "cc", "memory");
-
-	/* The lock was free when the word held zero. */
-	if (previous == 0U)
-		return true;
-
-	/* Another holder has the lock. */
-	return false;
-}
-
-/*
- * Lets the processor rest in a spin.
- *
- * yield is the ARMv7-A spin hint, which the Cortex-A9 runs as a no-op.
- * A spin does not wait with wfe and wake its waiters with sev: an sev
- * would also wake the ZYBO's second processor, which waits in the boot
- * ROM's wfe loop until the HAL starts it.
- */
-static __inline void
-hal_atomic_relax(
-	void)
-{
-	/* Spends one hint slot. */
-	__asm__ volatile("yield" ::: "memory");
-}
-
-#endif
-
 /*
  * Debugging
  */
