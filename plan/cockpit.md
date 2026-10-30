@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 17:45（Q1）
+最終更新: 2026-10-30 17:55（Q1）
 
 ## 担当（P1〜P8）
 
@@ -82,12 +82,30 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 
 ## ユーザーの判断を待つ事
 
-| WS | 何を | 背景と案 |
-| --- | --- | --- |
-| [WS307](ws307/ws.md) graphical installer | p007 の G2: kernel の新しい関数 kern_firmware_map の下で、amd64 の HAL の実装が kernel の側の firmware の窓（64 MiB）への実行可の map を受ける事を「実装の補完」と見てよいか | installer が UEFI の起動の項目（Boot####）を書くため、kernel の driver が firmware の関数（runtime services）を呼ぶ。driver は kern_* だけを使う（ユーザー）。firmware の code を実行するには kernel の側に実行可の map が要り、今の HAL はどの port も kernel の側（HAL_SPACE_SYS）の map を拒む。hal.h は変えない。案は [proposed/uefi-runtime-window.md](ws307/proposed/uefi-runtime-window.md) 改訂 5 |
-| [WS313](ws313/ws.md) ODROID-C5 | zedBSD-firmware の push（commit 43662bd、公式の image と Amlogic の license、Mali の firmware） | push は権限の判定で止まった。ユーザーが `! cd /home/awe/zedBSD-firmware && git push origin q1-c5-firmware:main` を打つか指示 |
-| [WS291](ws291/ws.md) GPU の速さ | PowerVR の 50 fps の基準 | 当面は zedBSD の今の fps で約 40 fps の scene から 50 fps 以上へ |
-| [WS331](ws331/ws.md) driver の HAL 依存 | p001 の表 B（kernel に足す関数）の採否と未決 4 点 | [phase001](ws331/phase001/phase.md) |
+### 1. WS307（Keiland の graphical installer）p007: firmware の関数を kernel から実行する map の扱い
+
+- 背景: installer は、導入した disk から起動できるよう UEFI の起動の項目（Boot####）を書く。UEFI の firmware は、OS の起動の後も呼べる関数（runtime services。GetVariable・SetVariable など）を持つ。ユーザーの決定で、これを呼ぶのは kernel の driver で、driver は HAL を知らず kernel の関数（kern_*）だけを使う。
+- 問題: firmware の関数は code なので、kernel の memory に「実行してよい」印で map しないと呼べない。今の kernel には実行可の map を作る関数が無い。その下の HAL も、どの CPU の port でも、kernel の側の領域（HAL_SPACE_SYS）への map を拒む（user の program の領域だけを受ける）。
+- 案（P6 の改訂 5、[proposed/uefi-runtime-window.md](ws307/proposed/uefi-runtime-window.md)）: kernel に新しい関数 kern_firmware_map を足し、driver はそれだけを呼ぶ。その下で amd64 の HAL の実装が、kernel の側の決まった 64 MiB の窓（firmware 専用）にだけ map を受けるようにする。hal.h（HAL の API の宣言）は変えない。
+- 決めてほしい事: この HAL の変更を「hal.h を変えない実装の補完」（承認不要の扱い）と見てよいか、「HAL の契約の変更」として差分を見てから承認するか。別の道として、HAL も kernel も変えず loader が次の起動で Boot#### を書く案（C4）もあるが、起動した後の system から項目の一覧・削除ができない。
+- 用語: loader = zedBSD を読み込む UEFI の program。SetVirtualAddressMap = firmware の関数を OS の仮想 address から呼べるよう配置を一度だけ知らせる UEFI の呼び出し（loader が呼ぶ、HAL とは無関係）。
+
+### 2. WS313（ODROID-C5）: zedBSD-firmware の GitHub への push
+
+- 背景: ユーザーの指示で、Hardkernel の公式の ODROID-C5 の image（36 MiB の .img.xz、無変更）と Amlogic の license の本文、Mali の GPU の firmware を zedBSD-firmware の repo に入れる。zedBSD の build はそこから bootloader の区画を切り出す。commit は 43662bd（branch q1-c5-firmware、親は GitHub の main の fcdfccf）。
+- 問題: Q1 の push は権限の判定（Out-of-Place Publication）で止められた。回避はしていない。
+- 決めてほしい事: push してよければ、端末に `! cd /home/awe/zedBSD-firmware && git push origin q1-c5-firmware:main` と打つ（このセッションで実行される）。push の後に Q1 が zedBSD の側の revision の commit を main に merge する。
+
+### 3. WS291（GPU の描画の速さ）p020: VF2 の PowerVR の「model の 50 fps」の基準
+
+- 背景: RDNA と NVIDIA では「Linux で約 50 fps になる重さの 3D の scene」を決め、zedBSD が同じ fps 以上を出す事を目標にした。VF2 の今の SD には PowerVR の GPU の driver を持つ Linux が無く、Linux の基準を立てられない。
+- 今の扱い（Q1 の既定）: zedBSD の今の fps で約 40 fps になる scene を決め、profile を見て 50 fps 以上に上げる。P3 が実施中（copies 1 で 62 fps、10 で 31 fps）。
+- 決めてほしい事: この既定でよいか、別の SD に Linux を入れて Linux の基準を立てるか。
+
+### 4. WS331（driver から HAL への直の依存を除く）p001 の一覧
+
+- 背景: ユーザーの規則「driver は HAL を知らない」に反して、driver の 38 file が HAL を include している。P2 が、置き換え先の kernel の関数（表 A）と、kernel に足す関数の案（表 B）を作った: [phase001](ws331/phase001/phase.md)。
+- 決めてほしい事: (1) 表 B の採否（kern_device_map の write-combine と読み出しだけの属性、MSI の割り込みの 4 関数、kern_cpu_current、kern_console_early_putc、kern_physaddr_t）と MSI の直し方、(2) Raspberry Pi 4 の console の 2 関数（HAL の early console の中の状態を使う）を当面の例外にするか、(3) build の macro HAL_ARCH_* を残すか、(4) kernel の header 13 個が HAL の header を include する件（driver が間接に HAL を見られる）を WS331 に入れるか。
 
 ## 決まった事
 
