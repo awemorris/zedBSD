@@ -105,22 +105,24 @@ Queue: q1696 / q1696-i01（P3）
 | Linux p006-lin1 | r8152（`5330-linux-both.sh`、同じ load） | — | — | 2253.7 | 2310.8 | — |
 | p006-b1 | p006 の前（c90327de3 の 3 file、128 KB 固定・ring 256、build/ws315-p006-base-vmunix） | 2371.6 | 2334.7 | 2285.5 | 1546.7 | 131072。load 40 → 14 |
 | p006-ag10 | 案 A ＋ 倍率 1.25 倍（tcp.c の 16U → 10U を一時に、build/ws315-p006-ag10-vmunix） | 2370.8 | 2355.8 | **2258.0** | **2300.7** | 452608。load 7 → 3。送りの retransmit 189・fast 19、srtt 1623 |
-| p006-a3 | 案 A（2 倍）を静かな host で測り直す | 測り中 | | | | |
+| p006-a3 | 案 A（2 倍）を静かな host で測り直す | 2372.4 | 2348.4 | 1873.8 | 2346.7 | load 4〜6 |
 
 - 同時の送りの接続（net.tcpstats）: d1 retransmit 181・fast 14、a1 917・53、a2 483・57（in flight 約 650 KB、cwnd 約 820 KB、srtt 約 2.1 ms）。案 A では ring でなく損失（CUBIC の cwnd）が律している。損失の場所は未確認（host の ixgbe の ATR の入れ替え、host の load の影響の見込み）。
   見立て（b1 の後）: 案 A でも受けの窓が 900 KB まで広がると、switch の 5330 向きの queue（窓 − BDP）で送りの往復が 2 ms に延び、損失の後の CUBIC の戻りが遅い。同時の受けは窓 200〜374 KB で足りる（g10 の 2356）。
-  そこで「案 A ＋ 1.25 倍」（ag10）を測る。**未 commit の一時の変更: src/kern/net/tcp.c の TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 16U → 10U**（再開したら `git diff` で確かめ、決めるまで commit しない）。
+  **決め: 案 A ＋ 1.25 倍（f49185c5b: TCP_RECEIVE_AUTO_GROWTH_EIGHTHS 10U と説明、tcp-model の説明の値）**。tcp-model PASS（build/tmp/p006-model-f.txt、往復 10 ms 60 MB/s、LAN の受けの buffer 174 KB、10 ms で 1 MB）。
+  最終の 5330 の kernel build/ws315-p006-f1-vmunix は ag10 と同じ binary（sha256 f561a0d9a6dc9bad）。RTL8127 の kernel は build/p006-f-8127/vmunix、p006 の前は build/p006-base8127/vmunix。
   host の load を揃えて比べるため、p006 の前の kernel（c90327de3 の 3 file を一時に置いて build、戻した。build/ws315-p006-base-vmunix）を同じ時間帯に測る。
 
 - d1 の他: ping・MTU・down/up 3/3、5330-run PASS、Debian に戻った（uname で確かめた）。pool の使用の最大 1074/4096、alloc の失敗 0。ue0 の TX dropped 550183（g10 は 152516、送りが driver の TX の queue を溢れさせた分、SACK で回復）。証拠 build/ws315-hw/p006-d1/、plan/tools/hw5330/evidence/ws315-p006-d1.md。
   **見立ては確かめられた**: 送りの in flight を受けの窓の上限より大きくすると同時の send が戻る（1030 → 2176、Linux 2346）。
 - kernel: build/ws315-p006-{k1,g10,g12,d1}-vmunix（d1 は include/kern/net/tcp-socket.h の 256→768 と tcp.c の TCP_SEND_BUFFER 384→1152 KB を一時に書いて build、戻した）。
 - 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。5330 は Debian、NVMe の zedBSD の kernel は a1（= d1 と同じ binary）。
-  10.0.10.3 は使っていない（lock は取っていない、kernel は触っていない）。QEMU は止まっている。
+  NVMe の zedBSD の kernel は ag10（= f1）。**10.0.10.3: 10:24 に lock を取った（/tmp/zedbsd-rdna.lock に P3 q1702-i01 と書いた）、Q1 の排他の返事待ち**。終わったら `free since HH:MM (P3 q1702-i01 ...)` と書いて返す。QEMU は止まっている。
+  21 config の build を `build/tmp/p006-buildall.sh c`（build/tmp/p006-buildall-c.txt）で流している。
 - 確かめの進み: tcp-model PASS（4575db11d の tree、build/tmp/p006-model-a2.txt。往復 10 ms の場面が 32 → 67 MB/s）。21 config の vmunix の build（`build/tmp/p006-buildall.sh b`、build/tmp/p006-buildall-b.txt、build/p006b-*）すべて rc 0・warning 0。
   QEMU `qemu-tcp.sh "" 15 inet,inet6` PASS（build/tmp/p006-qemu-tcp-a.txt、send_ring=768、guest send/recv inet 58.2/34.6、inet6 61.1/24.4 Mbit/s: 速さは emulator の物）。5330 の kernel は build/ws315-p006-a1-vmunix（build/p006-a1、warning 0）。
   rdna-tcp.sh に `--runs both` を足した（2de3b6dc8、Q1 が範囲に足した）。
-- 次の 1 手: host が静かな時に 5330 の a1 を測り直す（name p006-a2）、Linux の基準（`5330-linux-both.sh`）、10GbE（基準 = c90327de3 の tcp.c・tcp-socket.h・packet-buf.h を一時に置いた RTL8127 の kernel と、案 A の build/p006b-amd64-rtl8127/vmunix を `--runs send,recv,both,both`）。
+- 次の 1 手: 10GbE（`sh plan/ws221/tests/rdna-tcp.sh --kernel build/p006-base8127/vmunix --bin build/p006-rdna-bin/bin --runs send,recv,both,both p006-base` と `--kernel build/p006-f-8127/vmunix ... p006-f`、20 s）、保存の kernel の cksum が 1463007375 か確かめ、lock を返す。5330 で f1 をもう 1 回（再現）、21 config の結果、F-WS315-rcvbuf の文案を Q1 へ、phase.md の結果と Status、ws.md の表。
   その後: tcp-model・21 config の build（`build/tmp/p006-buildall.sh <tag>`）・QEMU（`plan/ws221/tests/qemu-tcp.sh "" 15 inet,inet6`）・5330・Linux の基準（`5330-linux-both.sh`）・
   10GbE（`flock -n /tmp/zedbsd-rdna.lock`、`plan/ws221/tests/rdna-tcp.sh --kernel build/<rtl8127>/vmunix --bin build/p006-rdna-bin/bin --runs send,recv,recv NAME`、
   終わりに vmunix-va1 cksum 1463007375 に戻し lock を free に）、F-WS315-rcvbuf の解決の文案を Q1 へ。
