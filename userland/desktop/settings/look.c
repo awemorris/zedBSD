@@ -60,8 +60,8 @@
 #define LOOK_DELAY_MAX		1000
 #define LOOK_DELAY_DEFAULT	400
 /* The minutes without input before a sleep, as the compositor takes them (settings-keys.c power.sleep.*). */
-#define LOOK_SLEEP_AC		30
-#define LOOK_SLEEP_BATTERY	15
+#define LOOK_SLEEP_AC		0
+#define LOOK_SLEEP_BATTERY	0
 
 /* The pictures: the default (the session's --wallpaper) and the folder of the others. */
 #define LOOK_DEFAULT_PICTURE	KEILAND_DATADIR "/keiland/wallpaper.png"

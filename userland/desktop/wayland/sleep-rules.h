@@ -43,9 +43,9 @@
 #define KWL_SLEEP_PAUSE_FIRST_MS	30000U
 #define KWL_SLEEP_PAUSE_SECOND_MS	120000U
 #define KWL_SLEEP_PAUSE_LAST_MS		600000U
-/* The time without input before the machine sleeps, on the power adapter and on battery (minutes; the 2026-10-05 user decision). */
-#define KWL_SLEEP_AC_MINUTES		30
-#define KWL_SLEEP_BATTERY_MINUTES	15
+/* The time without input before the machine sleeps, on the power adapter and on battery (minutes, 0 never: never unless chosen). */
+#define KWL_SLEEP_AC_MINUTES		0
+#define KWL_SLEEP_BATTERY_MINUTES	0
 
 /* Where a sleep is in its course. */
 enum kwl_sleep_state {
