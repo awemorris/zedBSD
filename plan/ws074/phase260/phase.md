@@ -83,6 +83,7 @@ Origin: 2026-10-27 ユーザーの指示。
   | ours-dev26（7727cb0b0、harness だけ測り直し。static・scripted・crash は dev25 のまま） | 976 | 1,085 | 115 | 39 | 2,215（63.80%） |
   | ours-dev27（ad3b33639、2026-10-31、q1727-i01、4 runner を測り直し） | 986 | 1,107 | 235 | 41 | 2,369（68.23%） |
   | ours-dev28（5b032c17b、harness・scripted・crash を測り直し。static は同じ source の部分測定の再実行 1,111 pass で後退 0、数えは 1,107） | 996 | 1,107 | 242 | 41 | 2,386（68.72%） |
+  | ours-dev30（4078977d5、2026-10-31、q1727-i02、4 runner を測り直し。static は static-subset.py の全件を並列で。後退あり、下の記述） | 998 | 1,137 | 236 | 41 | 2,412（69.47%） |
 
   dev3 → dev6 の主な修正: grid の明示の grid より前の暗黙の線（負の線番号）、auto-repeat の中の名前付きの線、
   直交する item を持つ縦書きの flex・grid は元の物理座標の処理、縦書きの flex での abspos の静的な位置の揃え、
@@ -193,6 +194,18 @@ Origin: 2026-10-27 ユーザーの指示。
      表示 list の PAINT_BACKDROP と software renderer の色行列・Gauss blur（GPU は描かない）。`will-change: transform|perspective|filter|backdrop-filter` と backdrop-filter は fixed・absolute の containing block を作る。
      filter-effects の static 51 のうち gap だった 20 → 10（残りは border-radius の clip、zoom、opacity と backdrop root、transform、SVG の rect の CSS の幅）。
 - 部分の確認: css-flexbox・css-grid・css-align・css-position・css-writing-modes・css-tables の static（1,413 件の subset）で後退 0、FIXED +16（flexbox 以外の abspos 22 は q1727-i01 の分）。
+
+- 全件の測定（ours-dev30、source 4078977d5、`build/ws074-cmp/ours-dev30`）: 2,412 / 3,472 = 69.47%（dev28 は 2,386）。gap 1,060: harness 479、static 415、scripted 160、crash 6。
+  Acid3 100/100・pixel 差 0（exact match）、Acid2 99.27%（基準と同じ）、host build は `-Wall -Wextra -Werror` で warning 0。
+  **後退あり（dev28 の gap に無く dev30 の gap にある ID）: harness 0、crash 0、static 9、scripted 8**。原因は backdrop-filter の実装で、これまで「test も reference も backdrop-filter を無視して偶然同じ絵」で通っていた物:
+  - static: css-backdrop-filters-animation-{blur,brightness,contrast,grayscale,hue-rotate,invert,saturate,sepia}（8）は reference が backdrop-filter を使い、test が @keyframes の animation（paused、delay -2s）で backdrop-filter を動かす。engine に @keyframes が無いので test に効かない。
+    + css-view-transitions/view-transition-name-is-backdrop-filter-root（1）。
+  - scripted: filter-effects/backdrop-filter-{basic-blur,boundary,edge-clipping-2,edge-mirror,edge-pixels-2}（5）は blur の端（blur は box の外へ滲む、mirror の端）が Chromium と違い maxDifference を超える。
+    css-view-transitions/{backdrop-filter-animated,new-element-on-start,old-content-captures-different-size}（3）は、old-content-captures-different-size は単独で PASS（測定中の負荷による時間切れの疑い）、new-element-on-start は単独でも FAIL（20,000 画素差）、backdrop-filter-animated は @keyframes。
+  次の Attempt は、(1) @keyframes（parser.c の `@position-try` と同じ形で名前付きの rule を sheet に持ち、animation-name から progress を求めて backdrop-filter・filter を補間する）、(2) blur の端（box の外へ滲む filter と mirror の backdrop）で後退を 0 にする。
+  net の増分は +26 だが、後退 17 ID を直すまで dev30 を「後退 0」とは言えない。
+- 追加で直した物（4078977d5）: 入れ子の column の flex で item の主軸の大きさが定まるのは flex-basis が長さの時（basis が auto なら height が長さの時）だけにした（広げすぎて percentage-heights-005〜007・flex-basis-012 が後退したのを直した）。
+  画像の content-based minimum は row だけ（column は比の無い SVG で後退した）。`filter`（同じ関数群、border box に後から適用）と `will-change`（transform・perspective・filter・backdrop-filter は containing block と backdrop root を作る）を足した。
 - 調べて直さなかった物（次の候補）:
   - 直交 flow の flex item（縦書きの item を横の flex に置く）は layout_logical_wanted が flex の item を物理座標のままにするため、base size が inline の max-content になる（flexbox-writing-mode-009〜016、align-self-vert-rtl、align-self-horiz 約 25 件）。
     正しくは item を論理座標の領域にして block size を base にする。縦の行は折り返さない簡易実装（`vertical_inline`）が前提なので、まず flex の item を領域にする設計が要る。
