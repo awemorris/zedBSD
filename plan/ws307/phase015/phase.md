@@ -3,7 +3,7 @@
 # ws307-p015 画面の lock の既定を never にし、never でも lock される不具合を直す
 
 - 親: [WS307](../ws.md)。Queue: q1674 / q1674-i01（担当 P5、2026-10-29、worktree p5-ws307lock、基点 main 55ee43590）。
-- Status: in-progress（2026-10-29 に lock の分は cleared（Q1 の判定）。2026-10-30 ユーザーの「sleep の既定もneverにします。」で q1698-i01 が sleep の既定を Never に変えた（211103282）。QEMU は未達、下の「q1698-i01」）
+- Status: in-progress（lock の分は 2026-10-29 cleared。sleep の既定 Never（211103282）の QEMU は q1711-i01 の 3 回目で PASS（下）。Q1 の判定待ち）
 - ユーザーの指示（原文、2026-10-29）:「WS307でついでに行ってほしいのですが、デスクトップがロックされるデフォルトの時間の設定を、neverをデフォルトにしてほしいです。また、neverにしても、現在は実際にはロックされてしまうみたいなので、直しておいてほしいです。」
 - 範囲（Q1）: idle の後に画面を lock する時間の既定を never に（Settings の頁、compositor の既定、設定の file の既定。file に値がある利用者はその値を保つ）。never でも lock される原因を探して直す。sleep（suspend）の既定は範囲の外（変えない）。
 
@@ -48,3 +48,15 @@
 - image: `AAT_CONFIG=plan/ws307/tests/config-amd64-p015.mk plan/tools/aat/build-image.sh build/ws307-p015s` rc 0、変えた file の warning 0（warning は openssh・openssl・libavcodec の外部の source の既存の物だけ）。
 - QEMU（`VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install plan/ws307/tests/p015-lock.sh build/ws307-p015s/hdd-image.img OUT`）: **未達**。run1（`build/ws307-p015s-run1`）: SSH は通ったが 180 秒で `KWL READY` を読めず FAIL。run2（`build/ws307-p015s-run2`）: SSH が 240 秒で応えず FAIL、`no-ssh.png` は起動の splash。どちらも同じ時に clang の package の build が走り host の load が約 30 だった。同じ image を手で起動した時（load 約 10）は session が上がり `KWL READY … role=normal` を session.log に読めた（`build/tmp/p015dbg`）。原因は load の見込みだが未確定。
 - 次の 1 手: host の load が低い時（他の build を止めて）に同じ command で run3。3 回目も同じなら gdbstub・QMP で起動の停止を解析する（AGENTS.md §9）。
+
+## q1711-i01（2026-10-30、P6、worktree p6-ws307、branch agent/p6-ws307、基点 main 5aca73738）: QEMU の 3 回目
+
+- image: `AAT_CONFIG=plan/ws307/tests/config-amd64-p015.mk plan/tools/aat/build-image.sh build/ws307-p015s`（`flock /tmp/zedbsd-image-build.lock`、sysroot は main の build/amd64/sysroot の複写）rc 0、`check-amd64-native-image: OK`。source は 211103282 を含む main 5aca73738。
+- 実行: 他の build を重ねず（host の load 約 14、開始の時）、`VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install sh plan/ws307/tests/p015-lock.sh build/ws307-p015s/hdd-image.img build/ws307-p015s-run3` → **PASS**（`build/ws307-p015s-run3/summary.txt`、p6-ws307 の worktree）:
+  - p015.default-never pass: power.lock・power.sleep.ac・power.sleep.battery が 0、960 秒の無操作で lock も画面の消灯も無し。Power の頁の PNG で Sleep の 2 つの slider と Screen Lock が Never（目で確かめた）。
+  - p015.slider pass: 1 分と Never が適用され、150 秒で lock 無し。
+  - p015.locks pass: 1 分の idle で lock、password で unlock。
+  - p015.sleep-time pass: power.sleep.ac 2 分で 1 分で画面が消え、Never に戻し Esc で点いた。
+  - PNG: `build/ws307-p015s-run3/png/`（8 枚）。判定は session の行と SSH の screenshot（console・serial の log は使っていない）。
+- 前の 2 回の未達は host の load（clang の build と重なり load 約 30）の見込みのまま、原因は確定していない（今回は同じ script・image の形で通った）。
+- 実機: 未実施（範囲の外）。Q1 の cleared の判定待ち。
