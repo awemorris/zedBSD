@@ -2071,6 +2071,24 @@ values_single(
 
 	/* zoom: normal, a number or a percentage that is not negative (zero means normal). */
 	if (property == CSS_PROP_ZOOM) {
+		/* A calculation of numbers, or of percentages. */
+		if (count > 1 && tokens[0].type == CSS_TOKEN_FUNCTION) {
+			error = values_calc(parse, property, tokens, count, value);
+			if (error != 0)
+				return error;
+			if (value->kind != CSS_VALUE_NUMBER) {
+				if (value->kind != CSS_VALUE_LENGTH || value->unit != CSS_DUNIT_CALC || value->calc->count != 1 ||
+				    value->calc->sums[0].px != 0.0f || !value->calc->sums[0].has_percent)
+					return EINVAL;
+				value->number = value->calc->sums[0].percent / 100.0f;
+				value->kind = CSS_VALUE_NUMBER;
+			}
+			if (value->number < 0)
+				return EINVAL;
+			if (value->number == 0.0f)
+				value->number = 1.0f;
+			return 0;
+		}
 		if (count != 1)
 			return EINVAL;
 		value->kind = CSS_VALUE_NUMBER;
@@ -4297,7 +4315,7 @@ values_calc(
 
 	/* A calculation of plain numbers is a number: line-height's, or zero for a length. */
 	if (calc.count == 0) {
-		if (property == CSS_PROP_LINE_HEIGHT) {
+		if (property == CSS_PROP_LINE_HEIGHT || property == CSS_PROP_ZOOM) {
 			value->kind = CSS_VALUE_NUMBER;
 			value->number = calc.sums[0].px;
 			return 0;
