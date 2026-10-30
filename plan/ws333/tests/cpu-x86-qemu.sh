@@ -8,7 +8,7 @@
 # operations (vmunix.map beside the image).  Under a hypervisor the framework
 # must hold the driver's provider with the description only: topology and
 # describe set, every operation that touches a register NULL.
-#   cpu-x86-qemu.sh OUT [CONFIG]
+#   cpu-x86-qemu.sh OUT [CONFIG]     (IMAGE_BUILD=<dir> builds the image there instead of OUT/img)
 # Last line: cpu-x86-qemu: PASS or cpu-x86-qemu: FAIL.  The console is not read.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
@@ -18,15 +18,16 @@ config=${2:-plan/ws333/tests/config-amd64-cpuperf.mk}
 mkdir -p "$out"
 cd "$repo" || exit 1
 status=0
+img=${IMAGE_BUILD:-$out/img}
 
 # Builds the image (one image build at a time on the host).
 if ! timeout 3600 flock /tmp/zedbsd-image-build.lock \
-	make -j24 ZEDBSD_CONFIG="$config" BUILD="$out/img" disk-image > "$out/build.log" 2>&1; then
+	make -j24 ZEDBSD_CONFIG="$config" BUILD="$img" disk-image > "$out/build.log" 2>&1; then
 	echo "cpu-x86-qemu: image build failed ($out/build.log)"
 	echo "cpu-x86-qemu: FAIL"
 	exit 1
 fi
-image=$out/img/hdd-image.img
+image=$img/hdd-image.img
 echo "cpu-x86-qemu: kernel warnings $(grep -c 'warning:' "$out/build.log") in the image build log (userland included)"
 
 # Boots to the login prompt and shows the driver's lines.
@@ -40,8 +41,8 @@ else
 fi
 
 # Boots again and reads the framework's provider and the driver's operations.
-map=$out/img/vmunix.map
-[ -f "$map" ] || map=$(find "$out/img" -name vmunix.map | head -1)
+map=$img/vmunix.map
+[ -f "$map" ] || map=$(find "$img" -name vmunix.map | head -1)
 symbol() { awk -v name="$1" '$NF == name { print $1; exit }' "$map"; }
 holder=$(symbol cpuperf_provider)
 ops=$(symbol cpu_x86_provider)

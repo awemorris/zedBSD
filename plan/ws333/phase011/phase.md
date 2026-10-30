@@ -2,7 +2,7 @@
 
 # ws333-p011: x86 の CPU の driver の統合
 
-Status: in-progress（実装・host 試験・amd64 の build は済み。全 port の build と QEMU は下）
+Status: in-progress（受け入れの確かめ（host 試験・amd64 の 2 通りの build・全 port の build・QEMU）は全部済み。cleared は Q1 の判定。5330 は p014）
 Parent: [WS333](../ws.md)
 Queue: q1770-i01（P7）
 
@@ -46,10 +46,15 @@ design.md §9 の p011: [p006](../phase006/phase.md) の cpuperf の枠組みの
   - 5330 の形（i5-1245U: P-core 2 の SMT と E-core 8、x2APIC 0・1・8・9・16〜30、P の能力 56・21・20・1、E 33・12・15・1、06_9AH）: 起動で MSR を 1 つも書かない、topology（core・thread・L2 の module・P/E）、RANGE と CORE、start の順（最初の書きが PM_ENABLE）、HWP_CTL の bit 0 を落とす、HFI の PTR と CONFIG=1、apply の encode（EPP・UNKNOWN の EPP・範囲外は EINVAL で書かない）、sample の excursion と ack、delivered と measure（4400・3300 MHz、大きな差での溢れ無し）、HFI の写し・ack・行の読み・相対、滞在の ns（1600 MHz の TSC）、meter 3 本と単位 1/2^14 J。
   - わざと壊す確かめ（scratchpad の写しで 1 つずつ）: hypervisor の関門・HWP_CTL の書き・PM_ENABLE の書き・EPP の関門・HFI の前の software の検査・rate の式・meter の 1 package の条件・`cpuperf.hwp=off`・share・L2 の module・HFI の ack・`cpuperf=off`・P/E の写し・platform の meter の 0 の検査・enable の前の CAPABILITIES の読み、の 15 個と、滞在の 2 つの関門を両方外した物、全部を該当の場面が FAIL で捕えた（滞在の関門は allow list と TSC の rate の 2 重なので、片方だけ外したものは捕えない＝冗長の守り）。
 - decode の module の道具（p007）: `BASE=39f4a5597 check-skeleton.sh` PASS（header は不変）、`run-unit.sh all` PASS。
-- amd64 の vmunix: `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=/tmp/p7-ws333-p011/amd64-def …/vmunix`（既定 n）と `CONFIG_CPU_PERF=y`（`BUILD=/tmp/p7-ws333-p011/amd64-n`、名前は最初の試しの誤りで中身は y）の 2 通りで rc 0・warning 0。
+- amd64 の vmunix: `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=/tmp/p7-ws333-p011/amd64-def …/vmunix`（既定 n）と `CONFIG_CPU_PERF=y`（`BUILD=/tmp/p7-ws333-p011/amd64-n`、名前は最初の試しの誤りで中身は y）の 2 通りで rc 0・warning 0（a904b540d の tree）。その後の log の 1 行の追加（9eec145cc）の後は、下の QEMU の 2 つの image の build（y と既定）で kernel を含め warning 0。
+- 全 port の vmunix: `plan/tools/ports/build-vmunix-all.sh /tmp/p7-ws333-p011/all`（a904b540d の tree）で 20 port 全部 rc 0・warning 0。pcat だけ 1 回目が rc 2（`stdbool.h` が無い）: 同時に走った pc98 と、この worktree の `build/i386/sysroot`（main の sysroot への symlink を置いていた所）を make が作り直す途中でぶつかった物で、pcat だけを再実行して rc 0・warning 0（`/tmp/p7-ws333-p011/all-pcat/pcat.log`）。main の `build/i386/sysroot` は日時・中身とも変わっていない事を見た。
+- QEMU+KVM（`-cpu host`、hypervisor の bit が立つ。host は Xeon Gold 6130、06_55H）: [tests/cpu-x86-qemu.sh](../tests/cpu-x86-qemu.sh)（image の build → `plan/tools/boot-test.sh` で login prompt → 模擬の keyboard で root の login と `dmesg | grep cpu-x86` → 画面の PNG。もう 1 度起動して HMP の `x` で枠組みの `cpuperf_provider` と driver の `cpu_x86_provider` の 12 語を読む。console・serial の log は判定に使っていない）。
+  - `CONFIG_CPU_PERF=y`（[tests/config-amd64-cpuperf.mk](../tests/config-amd64-cpuperf.mk)、9eec145cc の tree、`IMAGE_BUILD=/tmp/p7-ws333-p011/qemu-y/img … /tmp/p7-ws333-p011/qemu-y2`）: **PASS**。画面に `cpu-x86: running under a hypervisor; the model-specific registers are left alone` と `cpu-x86: family 06H model 55H, 4 CPUs described`。HMP: `cpuperf_provider` = `cpu_x86_provider`（0xffffffff80f79850）、topology・describe だけが非 0 で start・apply・sample・measure・feedback・idle などは全部 0（関門で止まり、MSR の道の provider が無い）。PNG `build/review/ws333-p011/qemu-cpuperf-y.png`（worktree の中、git に入れない）。1 回目（qemu-y）は BOOT_THEN が root の password を待たずに落ちた（道具の手順の誤り、HMP の判定は同じく PASS）ので直してやり直した。
+  - 既定（n、[tests/config-amd64-cpu-x86.mk](../tests/config-amd64-cpu-x86.mk)、`/tmp/p7-ws333-p011/qemu-n`）: **PASS**。画面に `cpu-x86: family 06H model 55H, 4 CPUs described`（hypervisor の行は無い: n の kernel は関門の code を持たない）、HMP は y と同じ形（0xffffffff80f78880）。driver は全 amd64 の kernel で topology を読むので、既定の kernel の起動の回帰として流した。PNG `build/review/ws333-p011/qemu-default.png`。
 
 ## 未実施
 
+- 他の amd64 の QEMU の形（TCG の `-cpu max`、hypervisor の bit の無い CPU の模型）、Intel Mac の config の起動。
 - 5330 の実機（止まっている。p014 で）。HWP の enable・REQUEST の書き・HFI・RAPL・滞在の値は host の模型までで、実の processor では確かめていない。
 - PC8〜PC10（630H〜632H）の滞在は読まない（allow list に無い、§15.8 の Q1-c）。5330 の 0xE2 の lock の bit も未読（Q1-e）。
 
