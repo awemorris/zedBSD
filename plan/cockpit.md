@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 14:05（Q1）
+最終更新: 2026-10-30 14:50（Q1）
 
 ## 担当（P1〜P8）
 
@@ -74,7 +74,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | Phase | 内容 | 状態 |
 | --- | --- | --- |
 | p001〜p006 | RDNA | cleared |
-| p010 | NVIDIA desktop 60 fps | in-progress（WS309 の後の測り直し） |
+| p010 | NVIDIA desktop 60 fps | cleared（2026-10-30 P7、実機で 2 回、60〜68 fps） |
 | p010a・p011 | NVIDIA の executor、scene-5000 | cleared（49.5〜49.7 fps、NVK と同等） |
 | p012〜 | 50 fps を明らかに超える改善 | planned |
 | p020 | PowerVR | planned |
