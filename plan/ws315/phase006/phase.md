@@ -95,12 +95,14 @@ Queue: q1696 / q1696-i01（P3）
 | p003 k6 | 128 KB 固定 | 2372.0 | 2338.3 | 2346.5 | 1442.9 | 128 KB |
 | p006-k1 | 2 倍 | 2364.3 | 2372.2 | 1030.3 | 2334.3 | 973824 |
 | p006-g10 | 1.25 倍 | 2367.7 | 2372.3 | 1644.7 | 2356.2 | 373760 |
-| p006-d1 | 診断: 2 倍 ＋ ring 768・sndbuf 1152 KB（一時の変更、commit しない） | 測り中 | | | | |
+| p006-d1 | 診断: 2 倍 ＋ ring 768・sndbuf 1152 KB（一時の変更、commit しない） | 2370.9 | 2368.5 | **2176.1** | **2350.3** | 864256（recv だけ 686080） |
 
+- d1 の他: ping・MTU・down/up 3/3、5330-run PASS、Debian に戻った（uname で確かめた）。pool の使用の最大 1074/4096、alloc の失敗 0。ue0 の TX dropped 550183（g10 は 152516、送りが driver の TX の queue を溢れさせた分、SACK で回復）。証拠 build/ws315-hw/p006-d1/、plan/tools/hw5330/evidence/ws315-p006-d1.md。
+  **見立ては確かめられた**: 送りの in flight を受けの窓の上限より大きくすると同時の send が戻る（1030 → 2176、Linux 2346）。
 - kernel: build/ws315-p006-{k1,g10,g12,d1}-vmunix（d1 は include/kern/net/tcp-socket.h の 256→768 と tcp.c の TCP_SEND_BUFFER 384→1152 KB を一時に書いて build、戻した）。
-- 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。NVMe の zedBSD の kernel は g10 → d1 の測りで d1 に替わる（5330-run.sh が測りの後に Debian に戻す）。
+- 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。5330 は Debian、NVMe の zedBSD の kernel は d1（vmunix.old は g10）。
   10.0.10.3 は使っていない（lock は取っていない、kernel は触っていない）。QEMU は止まっている。
-- 次の 1 手: d1 の結果で、同時 send が戻れば「送りの ring を広げる」案を Q1 に諮る（送りの側）。戻らなければ受けの側の形（倍率・往復の延び）を詰める。
+- 次の 1 手: 「64 bit の送りの ring 256 → 768・TCP_SEND_BUFFER 384 → 1152 KB」を Q1 に諮った（送りの側、返事待ち）。承認なら source に入れて下の確かめへ。否なら倍率 1.25 倍（g10）で決めて同時 send 1645 を制限として残す。
   その後: tcp-model・21 config の build（`build/tmp/p006-buildall.sh <tag>`）・QEMU（`plan/ws221/tests/qemu-tcp.sh "" 15 inet,inet6`）・5330・Linux の基準（`5330-linux-both.sh`）・
   10GbE（`flock -n /tmp/zedbsd-rdna.lock`、`plan/ws221/tests/rdna-tcp.sh --kernel build/<rtl8127>/vmunix --bin build/p006-rdna-bin/bin --runs send,recv,recv NAME`、
   終わりに vmunix-va1 cksum 1463007375 に戻し lock を free に）、F-WS315-rcvbuf の解決の文案を Q1 へ。
