@@ -175,6 +175,31 @@ Origin: 2026-10-27 ユーザーの指示。
   - 未対応（残り）: inline 要素の capture（inline-element-size・new-content-is-inline など約 10）、縦書きの massive element、iframe の transition（約 10）、shadow の ::part（6）、
     Web Animations（getAnimations・set-current-time・web-animations-api 約 8）、dialog・top layer、scrollbar・scroll の rebase、harness の pseudo-elements-valid の URL variant。
 
+### q1727-i02 の途中経過（2026-10-31、P8）
+
+- 確かめ（image・QEMU）: `flock /tmp/zedbsd-image-build.lock sh plan/ws074/tests/build-browser-image.sh build/amd64` が exit 0（libbrowser の warning 無し）。
+  Venus の guest（runtime build/ws074-run）で wayland --glass と `/bin/browser` が起動し、`browser-start.sh` が PASS（start → about → 戻る、zdesktop に ERROR 無し）。
+  browser-start.sh は古かった（既定の頁が google.com に変わった事、待ちが早すぎた事）ので直した（start.html を URL に渡し、wayland の socket と window の map を待つ。7215eef0b）。
+  引数無しの起動は https://www.google.com/ を network から読んで描いた（画面で確認）。
+- 直した物（commit 6aed8bc06、ec73c1d7a、7f65d6e32）:
+  1. flex の自動の最小（min-width: auto）は行が収まる時も、flex-basis より大きい時も効く（収まる時の省略と base での頭打ちを外した）。flex: 0 0 0% の項目が内容の幅になる。
+  2. flex・grid の item は inline-block のように 1 つずつ丸ごと描く（背景を先に全部描いてから文字、をやめた）。隣の item に食い込む文字の重なり順が合う（flexbox_flex-0-* など）。
+  3. table: `caption-side`（top・bottom）、table の height・min-height は行が分け合う（caption を除く）、column の flex で stretch された table は幅を満たす。
+  4. flex の `justify-content: start|end`（flex-start・flex-end でない）は container の writing mode の左・右（column は上・下）で、flex-direction の逆でも変わらない。
+  5. flex-shrink の合計が 1 未満なら、不足の一部（合計倍）だけ縮む（9.7 の規則）。
+  6. 入れ子の column の flex で、auto の高さの container の中の item の % の高さは auto 扱い（`height_indefinite`）。
+  7. 画像の flex item の content-based minimum は、定まった cross size に自然な比を掛けた値。
+  8. `backdrop-filter`（blur・brightness・contrast・grayscale・hue-rotate・invert・opacity・saturate・sepia、url() は読み飛ばし）の parse・cascade・computed、
+     表示 list の PAINT_BACKDROP と software renderer の色行列・Gauss blur（GPU は描かない）。`will-change: transform|perspective|filter|backdrop-filter` と backdrop-filter は fixed・absolute の containing block を作る。
+     filter-effects の static 51 のうち gap だった 20 → 10（残りは border-radius の clip、zoom、opacity と backdrop root、transform、SVG の rect の CSS の幅）。
+- 部分の確認: css-flexbox・css-grid・css-align・css-position・css-writing-modes・css-tables の static（1,413 件の subset）で後退 0、FIXED +16（flexbox 以外の abspos 22 は q1727-i01 の分）。
+- 調べて直さなかった物（次の候補）:
+  - 直交 flow の flex item（縦書きの item を横の flex に置く）は layout_logical_wanted が flex の item を物理座標のままにするため、base size が inline の max-content になる（flexbox-writing-mode-009〜016、align-self-vert-rtl、align-self-horiz 約 25 件）。
+    正しくは item を論理座標の領域にして block size を base にする。縦の行は折り返さない簡易実装（`vertical_inline`）が前提なので、まず flex の item を領域にする設計が要る。
+  - table の `height` は caption を除く grid box の高さ（caption は外）。flex が与える高さは wrapper 全体（caption を含む）なので両者を区別する印が要る（table-as-item-inflexible-in-row-2、min-height-1）。
+  - backdrop-filter の parse: drop-shadow()・url("...") の保持、canonical な直列化（blur(0px)・hue-rotate(0deg)・100% の上限）。
+  - flexbox の SVG の viewBox と片方の寸法から決まる固有の大きさ、`min-height: min-content`。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。
