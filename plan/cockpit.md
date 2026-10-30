@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 16:45（Q1）
+最終更新: 2026-10-30 17:30（Q1）
 
 ## 担当（P1〜P8）
 
@@ -51,9 +51,9 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 | --- | --- | --- |
 | p001・p003・p005・p006・p009〜p011・p013 | 仕様、build、道具、4096 sector、helper、app、通し、文書 | cleared |
 | p002 | OS 名を zedBSD に、release の upload | cleared（push 後の CI は未確かめ） |
-| p004 | package の開発の file、clang・libcxx・GTK4 のセルフビルド | in-progress |
+| p004 | package の開発の file、clang・libcxx・GTK4 のセルフビルド | cleared（2026-10-30 QEMU run4 PASS: 導入先で GTK4 の app と C++ を build・実行） |
 | p007 | firmware 変数の kernel の driver（HAL を変えない） | in-progress（設計の下書き） |
-| p008 | UFS からの起動の確かめ直し | in-progress |
+| p008 | UFS からの起動の確かめ直し | cleared（2026-10-30 512 の j3 の sync 3 回 ok） |
 | p012 | 実機の導入 | canceled |
 | p014 | 規約の見直し | in-progress |
 | p015 | 画面の lock、sleep の既定 Never | cleared（2026-10-30 QEMU の 3 回目 4 項目 PASS） |
