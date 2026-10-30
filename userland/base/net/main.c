@@ -37,6 +37,7 @@
 #include <sys/stat.h>
 #include <sys/wait.h>
 #include <sys/un.h>
+#include <syslog.h>
 #include <termios.h>
 #include <unistd.h>
 
@@ -120,6 +121,18 @@ static int decimal_mtu(const char *text, unsigned *result);
  * there is not, so the wait has to end somewhere.
  */
 #define NET_STARTUP_WAIT_SECONDS 30U
+
+/*
+ * How long a startup keeps trying to put in the configured default route.
+ * The route needs its gateway reachable, which it is only once the wired
+ * policy has given an interface the address of the gateway's network, and
+ * a USB adapter may appear well after the boot.
+ */
+#define NET_STARTUP_ROUTE_SECONDS 120U
+
+static int startup_send_routing(void);
+static void startup_routing_worker(const char *gateway, const char *servers);
+static int startup_quiet_backend(const char *operation, const char *operands);
 
 static int usage(void);
 static int console_configuration(struct console *console, int count, char **words);
@@ -2594,6 +2607,9 @@ startup_command(
 	if (lan_send_policy() != 0)
 		return 1;
 
+	/* The default route and the name servers the file names, which the policy does not carry. */
+	(void)startup_send_routing();
+
 	/*
 	 * The radio is started in a process of its own.  Associating takes
 	 * as long as it takes, and the wired side has no reason to stand
@@ -2652,6 +2668,181 @@ start_detached(
 		continue;
 
 	/* Reports successful completion. */
+	return 0;
+}
+
+/*
+ * Puts in the default route and the name servers that net.conf names, as a
+ * commit does; the wired policy carries only the interfaces' addresses.
+ *
+ * The work is done by a process of its own, so that the boot is not held:
+ * the name servers are written at once, and the route is tried until the
+ * gateway can be reached or NET_STARTUP_ROUTE_SECONDS pass.  Returns 0, or
+ * 1 when the file cannot be read or the process cannot be started.
+ */
+static int
+startup_send_routing(
+	void)
+{
+	struct netconf configuration;
+	const struct netconf_route *route;
+	char gateway[NETCONF_ADDRESS_MAX + 1];
+	char servers[(NETCONF_ADDRESS_MAX + 1) * NETCONF_MAX_DNS];
+	char error[160];
+	const char *separator;
+	const char *colon;
+	size_t used;
+	size_t index;
+	pid_t child;
+	pid_t waited;
+	pid_t worker;
+	int status;
+	int count;
+	int loaded;
+	int named;
+
+	/* The configuration; one that cannot be read was reported by the policy already. */
+	error[0] = '\0';
+	loaded = netconf_load(NETCONF_PATH, &configuration, error, sizeof(error));
+	if (loaded != 0)
+		return 1;
+
+	/* The IPv4 default route's gateway: the first route named default whose gateway is not IPv6's. */
+	gateway[0] = '\0';
+	for (index = 0; index < configuration.route_count; index++) {
+		route = &configuration.routes[index];
+		named = strcmp(route->destination, "default");
+		if (named != 0)
+			continue;
+		colon = strchr(route->gateway, ':');
+		if (colon != NULL)
+			continue;
+		(void)snprintf(gateway, sizeof(gateway), "%s", route->gateway);
+		break;
+	}
+
+	/* The name servers, one space between each. */
+	used = 0;
+	servers[0] = '\0';
+	for (index = 0; index < configuration.dns_count; index++) {
+		separator = " ";
+		if (used == 0U)
+			separator = "";
+		count = snprintf(servers + used, sizeof(servers) - used, "%s%s",
+				 separator, configuration.dns_servers[index]);
+		if (count < 0 || (size_t)count >= sizeof(servers) - used)
+			return 1;
+		used += (size_t)count;
+	}
+
+	/* Succeeded: a file that names neither leaves nothing to do. */
+	if (gateway[0] == '\0' && servers[0] == '\0')
+		return 0;
+
+	/* The worker, a child of a child, so that nobody is left to wait for it. */
+	child = fork();
+	if (child < 0) {
+		fprintf(stderr, "net: cannot fork: %s\n", strerror(errno));
+		return 1;
+	}
+
+	/* The first child starts the worker and leaves. */
+	if (child == 0) {
+		/* The middle process leaves the worker to init at once. */
+		worker = fork();
+		if (worker != 0)
+			_exit(0);
+		(void)setsid();
+		startup_routing_worker(gateway, servers);
+		_exit(0);
+	}
+
+	/* The middle process exits at once and is waited for here. */
+	status = 0;
+	for (;;) {
+		waited = waitpid(child, &status, 0);
+		if (waited >= 0 || errno != EINTR)
+			break;
+	}
+
+	/* Succeeded: the worker puts the route and the servers in. */
+	return 0;
+}
+
+/*
+ * Writes the name servers and puts in the default route through gateway,
+ * trying once a second until the gateway can be reached.  The servers are
+ * written again once the route is in, so that a lease obtained meanwhile
+ * does not replace them: servers the file names win over a lease's, as in
+ * a commit.  Either string may be empty.
+ */
+static void
+startup_routing_worker(
+	const char *gateway,
+	const char *servers)
+{
+	unsigned second;
+	int status;
+
+	/* The name servers need no interface: they are written at once. */
+	if (servers[0] != '\0') {
+		status = startup_quiet_backend("DNS", servers);
+		if (status != 0)
+			syslog(LOG_WARNING, "net: the name servers %s could not be written", servers);
+	}
+
+	/* No route is named: the servers were all there was to do. */
+	if (gateway[0] == '\0')
+		return;
+
+	/* Tries the route each second until the gateway is reachable or the time is up. */
+	status = 1;
+	for (second = 0; second < NET_STARTUP_ROUTE_SECONDS; second++) {
+		status = startup_quiet_backend("DEFAULTROUTE", gateway);
+		if (status == 0)
+			break;
+		(void)sleep(1U);
+	}
+
+	/* A route never put in is logged; the servers stay as written. */
+	if (status != 0) {
+		syslog(LOG_WARNING, "net: the default route via %s could not be put in within %u seconds",
+		       gateway, NET_STARTUP_ROUTE_SECONDS);
+		return;
+	}
+
+	/* The servers once more, over any lease obtained while the route waited. */
+	if (servers[0] != '\0')
+		(void)startup_quiet_backend("DNS", servers);
+}
+
+/* Sends one operation to networkd without reporting a failure; returns 0, or 1. */
+static int
+startup_quiet_backend(
+	const char *operation,
+	const char *operands)
+{
+	unsigned char payload[NETWORKD_REQUEST_MAX];
+	size_t payload_length;
+	uint32_t opcode;
+	int server_error;
+	int status;
+
+	/* The typed request. */
+	status = backend_opcode(operation, &opcode);
+	if (status != 0)
+		return 1;
+	status = backend_payload(opcode, operands, payload, sizeof(payload), &payload_length);
+	if (status != 0)
+		return 1;
+
+	/* The exchange, its failure left to the caller to report. */
+	server_error = 0;
+	status = backend_exchange_result(opcode, payload, payload_length, 0, 15U, 0, NULL, &server_error);
+	if (status != 0)
+		return 1;
+
+	/* Succeeded: networkd carried the operation out. */
 	return 0;
 }
 
