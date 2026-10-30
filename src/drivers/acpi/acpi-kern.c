@@ -24,6 +24,7 @@
 #include <uapi/errno.h>
 
 #include <drivers/acpi/acpi.h>
+#include <drivers/acpi/dell.h>
 #include <drivers/acpi/wmi.h>
 #include <kern/system-event.h>
 #include <drivers/pci/pci.h>
@@ -254,6 +255,11 @@ drv_acpi_attach(void)
 	error = drv_acpi_wmi_attach();
 	if (error != 0 && error != ENODEV)
 		kern_logf("acpi: the WMI mapping devices did not attach (error %d)\n", error);
+
+	/* Serves a Dell laptop's fans and thermal mode to the thermal core; another machine has no Dell WMI. */
+	error = drv_acpi_dell_attach();
+	if (error != 0 && error != ENODEV)
+		kern_logf("acpi: the Dell thermal provider did not attach (error %d)\n", error);
 
 	/* Finds the LPS0 device of S0 idle and its _DSM functions; a platform without one only lacks S0 idle. */
 	error = drv_acpi_lps0_attach();

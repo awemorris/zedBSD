@@ -16,18 +16,25 @@ SOURCES := $(sort $(wildcard $(REPO)/src/drivers/acpi/aml-*.c)) \
 	$(REPO)/src/drivers/acpi/acpi-resource.c \
 	$(REPO)/src/drivers/acpi/acpi-wmi.c \
 	$(REPO)/src/drivers/acpi/acpi-wmi-table.c \
+	$(REPO)/src/drivers/acpi/acpi-dell.c \
+	$(REPO)/src/drivers/acpi/acpi-dell-codec.c \
 	$(REPO)/plan/tools/aml-host/aml-host.c \
 	$(REPO)/plan/tools/aml-host/aml-host-hardware.c \
-	$(REPO)/plan/tools/aml-host/aml-host-wmi.c
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.c \
+	$(REPO)/plan/tools/aml-host/aml-host-dell.c
 HEADERS := $(wildcard $(REPO)/src/drivers/acpi/*.h) \
 	$(REPO)/include/drivers/acpi/acpi.h \
 	$(REPO)/include/drivers/acpi/wmi.h \
+	$(REPO)/include/drivers/acpi/dell.h \
+	$(REPO)/include/kern/thermal.h \
 	$(REPO)/plan/tools/aml-host/aml-host-hardware.h \
-	$(REPO)/plan/tools/aml-host/aml-host-wmi.h
+	$(REPO)/plan/tools/aml-host/aml-host-wmi.h \
+	$(REPO)/plan/tools/aml-host/aml-host-dell.h
 
 WARNINGS := -Wall -Wextra -Werror -Wdeclaration-after-statement \
 	-Wstrict-prototypes -Wmissing-prototypes -Wshadow
-CPPFLAGS := -I$(REPO)/include -I$(REPO)/src
+# The Dell provider's boost is built in, so the harness reaches the SMM fan calls.
+CPPFLAGS := -I$(REPO)/include -I$(REPO)/src -DCONFIG_DELL_SMM_BOOST=1
 SANITIZE := -fsanitize=address,undefined -fno-sanitize-recover=all \
 	-fno-omit-frame-pointer
 
