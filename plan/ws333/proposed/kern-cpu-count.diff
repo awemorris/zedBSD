@@ -1,0 +1,175 @@
+diff --git a/include/kern/sched.h b/include/kern/sched.h
+index 058771207..6f6e9069d 100644
+--- a/include/kern/sched.h
++++ b/include/kern/sched.h
+@@ -53,7 +53,7 @@ struct sched {
+ 	uint64_t queued_tick;
+ 
+ 	/*
+-	 * The latency diagnostic (kern.perf=1, ws213-p007).  When a wakeup or
++	 * The latency diagnostic (kern.perf=1).  When a wakeup or
+ 	 * a preemption made the thread runnable, the counter then (zero while
+ 	 * no wait is being measured), why (SCHED_PERF_*), the CPU it waits on
+ 	 * and that CPU's switch count then, which together say how long it
+@@ -201,6 +201,15 @@ kern_preempt_enable(void);
+ unsigned
+ kern_cpu_current(void);
+ 
++/*
++ * Reports how many CPUs the kernel runs on.
++ *
++ * Any context, no lock.  CPUs are numbered 0 .. count - 1, and the count
++ * does not change once the secondary CPUs have joined the scheduler.
++ */
++unsigned
++kern_cpu_count(void);
++
+ /* Test-only: current CPU's kern_preempt_disable() nesting depth. */
+ unsigned
+ sched_test_preempt_count(void);
+@@ -258,7 +267,7 @@ sched_ticks(void);
+ 
+ /*
+  * One CPU's clock ticks since boot by what it was doing when each came
+- * (hw.cputimes, ws134-p005): a user thread in user mode, a thread in the
++ * (hw.cputimes): a user thread in user mode, a thread in the
+  * kernel or a kernel thread, its idle thread, or between threads.
+  */
+ struct sched_cpu_time {
+diff --git a/include/kern/sched_private.h b/include/kern/sched_private.h
+index ff269f30d..12e38e402 100644
+--- a/include/kern/sched_private.h
++++ b/include/kern/sched_private.h
+@@ -25,6 +25,9 @@ _Static_assert(__builtin_types_compatible_p(kern_cpu_id_t, hal_cpu_id_t),
+ _Static_assert(__builtin_types_compatible_p(kern_task_handle_t, hal_task_t),
+ 	       "kern_task_handle_t is not hal_task_t");
+ 
++/* The kernel's limit on CPUs is the HAL's. */
++_Static_assert(KERN_CPU_MAX == HAL_CPU_MAX, "KERN_CPU_MAX is not HAL_CPU_MAX");
++
+ void
+ sched_wait_task(void);
+ 
+diff --git a/include/kern/types.h b/include/kern/types.h
+index cab327d9b..71ae75fcf 100644
+--- a/include/kern/types.h
++++ b/include/kern/types.h
+@@ -20,6 +20,14 @@
+ /* A CPU's number, from 0. */
+ typedef uint32_t kern_cpu_id_t;
+ 
++/*
++ * The most CPUs the kernel can run on, and the number of 64-bit words of
++ * a set with one bit per CPU.  A table with one entry per CPU is sized by
++ * it; kern_cpu_count() tells how many entries are in use.
++ */
++#define KERN_CPU_MAX		512U
++#define KERN_CPU_MASK_WORDS	((KERN_CPU_MAX + 63U) / 64U)
++
+ /*
+  * The machine layer's state of one thread (its registers and stack) and of
+  * one address space (its translation tables), held by the kernel as
+diff --git a/src/kern/sched.c b/src/kern/sched.c
+index 953cd0e2a..898229509 100644
+--- a/src/kern/sched.c
++++ b/src/kern/sched.c
+@@ -131,7 +131,7 @@ sched_wake_latency_report(void)
+ #define SCHED_TIMES		4U
+ 
+ /*
+- * The latency diagnostic (ws213-p007): the boot token that turns it on,
++ * The latency diagnostic: the boot token that turns it on,
+  * how often it reports, and why a thread's wait to run is being measured
+  * (struct sched's perf_runnable_kind).  A preempted thread is one a wakeup
+  * took the CPU from (sched_preempt()); a quantum that ran out is not
+@@ -703,6 +703,16 @@ kern_cpu_current(void)
+ 	return (unsigned)hal_cpu_current();
+ }
+ 
++/*
++ * Reports how many CPUs the kernel runs on.
++ */
++unsigned
++kern_cpu_count(void)
++{
++	/* The kernel runs on every CPU the platform brought up. */
++	return hal_cpu_count();
++}
++
+ /* Test-only: read the current CPU's preempt nesting depth. */
+ unsigned
+ sched_test_preempt_count(void)
+@@ -1300,7 +1310,7 @@ sched_sleep(
+ 	if (thread == NULL || thread->sched.cpu != hal_cpu_current())
+ 		HAL_FATAL("invalid scheduler sleep");
+ 
+-	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue (BUG-202). */
++	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue. */
+ 	refuse_idle_sleep(thread, "sched_sleep", __builtin_return_address(0));
+ 
+ 	/* Publishes the sleep, with the deadline on the sleep queue. */
+@@ -1346,7 +1356,7 @@ sched_sleep_locked(
+ 	    thread->sched.cpu != hal_cpu_current())
+ 		HAL_FATAL("invalid locked sleep");
+ 
+-	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue (BUG-202). */
++	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue. */
+ 	refuse_idle_sleep(thread, "sched_sleep_locked", __builtin_return_address(0));
+ 
+ 	/* Publishes the sleep before dropping the condition lock. */
+@@ -1390,7 +1400,7 @@ sched_sleep_locked_interruptible(
+ 	    thread->sched.cpu != hal_cpu_current())
+ 		HAL_FATAL("invalid interruptible locked sleep");
+ 
+-	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue (BUG-202). */
++	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue. */
+ 	refuse_idle_sleep(thread, "sched_sleep_locked_interruptible", __builtin_return_address(0));
+ 	cpu = sched_cpu_state(thread->sched.cpu);
+ 	spin_lock(&cpu->lock);
+@@ -1450,7 +1460,7 @@ sched_sleep_locked_notify(
+ 	    thread->sched.cpu != hal_cpu_current())
+ 		HAL_FATAL("invalid notifying locked sleep");
+ 
+-	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue (BUG-202). */
++	/* Not the idle thread, which has nothing to switch to and would stay on the sleep queue. */
+ 	refuse_idle_sleep(thread, "sched_sleep_locked_notify", __builtin_return_address(0));
+ 
+ 	/* Publishes the sleep before dropping the condition lock. */
+@@ -1591,7 +1601,7 @@ sched_idle(
+ 			continue;
+ 		}
+ 
+-		/* Halts as a CPU that others may hand work to (suspended to idle during a system sleep, ws052-p006). */
++		/* Halts as a CPU that others may hand work to (suspended to idle during a system sleep). */
+ 		idle_mask_set(cpu);
+ 		kern_sleep_idle(cpu);
+ 		idle_mask_clear(cpu);
+@@ -2077,7 +2087,7 @@ queue_remove(
+ 	else
+ 		queue->tail = thread->sched.prev;
+ 	if (queue->count == 0) {
+-		/* The queue and the thread, and where the removal came from, for the screen before the fatal (BUG-202). */
++		/* The queue and the thread, and where the removal came from, for the screen before the fatal. */
+ 		queue_report_underflow(queue, thread, __builtin_return_address(0));
+ 		HAL_FATAL("scheduler queue underflow");
+ 	}
+@@ -2088,8 +2098,8 @@ queue_remove(
+ }
+ 
+ /*
+- * Writes what a removal from an empty queue found, before the fatal
+- * (BUG-202): which queue of which CPU it is (run or woken at a priority,
++ * Writes what a removal from an empty queue found, before the fatal:
++ * which queue of which CPU it is (run or woken at a priority,
+  * the sleep queue, or none of the thread's CPU), its count and ends, the
+  * thread's id, state, flags, queue kind and priority, the CPU running, and
+  * the address the removal was called from (the kernel is not stripped, so
+@@ -2134,7 +2144,7 @@ queue_report_underflow(
+ }
+ 
+ /*
+- * Stops the kernel when the idle thread enters a sleep (BUG-202).
++ * Stops the kernel when the idle thread enters a sleep.
+  *
+  * switch_without_enqueue() returns at once to an idle thread that finds
+  * nothing to run, so a sleep with a deadline would leave it linked on the

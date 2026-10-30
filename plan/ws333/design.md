@@ -118,7 +118,8 @@ int kern_thermal_meter_register(const char *name, uint32_t kind, const struct ke
 void kern_thermal_event(uint32_t type, uint32_t index, int64_t value);	/* thread context only */
 void kern_thermal_resume(void);						/* from sleep.c after a system sleep */
 
-/* kernel の CPU の数の口（driver が HAL を知らずに CPU ごとの表を作るため。HAL は変えない） */
+/* kernel の CPU の数の口（driver が HAL を知らずに CPU ごとの表を作るため。HAL は変えない）。
+   p003 で include/kern/sched.h の kern_cpu_current の隣に置き、上限 KERN_CPU_MAX は include/kern/types.h に置いた */
 unsigned kern_cpu_count(void);
 ```
 
@@ -496,7 +497,7 @@ CPU の省電力を先にする。CPU の道は p003 → p006 → p011 → p014 
 | p008 | module: CPUID の解析（1FH/0BH・04H・1AH の topology、05H の C-state、06H の機能の bit、01H の hypervisor・EIST・TSC-deadline） | p007 | 1 | 単体試験 PASS、わざと壊す確かめ | Sonnet（phase-runner-low） |
 | p009 | module: HWP の CAPABILITIES・REQUEST の field の decode・encode と範囲の検査、HFI の表の形の解析 | p007 | 2 | 同上 | Sonnet |
 | p010 | module: legacy の段の源（ACPI の `_PSS` の package の形、0xCE の比、AMD の HwPstate）と RAPL の単位・energy の一周・C-state の滞在の計数（p007 で Vol 4 にあると確かめた物だけ） | p007 | 2 | 同上 | Sonnet |
-| p011 | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、legacy の道、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key | p006、p008〜p010 | 5 | host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し | Opus（phase-runner-high） |
+| p011 | x86 の CPU の driver の統合: 関門（hypervisor・CPUID の bit・allow list・既定 n・`cpuperf=off`）、MSR の小さな file、probe、HWP の enable の順と既に 1 の道、Highest の MHz の測り、HFI の page、legacy の道、RAPL の meter・滞在の統計、provider の登録、起動の parameter の key | p006、p008〜p010、p005（RAPL の meter の登録 `kern_thermal_meter_register` の所だけ。p003 の review M8） | 5 | host 試験（模擬の CPUID・MSR）、amd64 の build、QEMU で provider 無し | Opus（phase-runner-high） |
 | p012 | tick の位相を揃える（amd64 の HAL の実装、承認不要）: 方式（周期の始めを揃える／TSC-deadline）の選び、今の形に戻す build の macro、5330 の前後の電力と PC の滞在（器具は p002 と同じ診断の patch か、p011 の後なら meter） | p002 | 3 | QEMU の起動、5330 の前後の数（下がらなくても記録して cleared、方式の採否は数で決める） | Opus（phase-runner-high） |
 | p013 | CPU の ioctl・`/sbin/thermal` の CPU と電力の表示・strategy の保存と rc の restore（Q333-1 の推し B） | p004、p005、p006 | 3 | ioctl の host 試験、QEMU | Opus |
 | p014 | 5330 の CPU の受け入れ（§8.4 の 5330 の 1〜4、1 本の script）。§4.3.3 の段 4 の判断の数 | p011、p012、p013（p004 が遅れる時は p005 の注入の口で） | 4 | §8.4 の PASS | Opus＋Q1 の実機の割当 |
