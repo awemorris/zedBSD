@@ -31,6 +31,12 @@
 
 - （Q1 の決定、2026-10-29、ユーザーの原文ではない）J5: 下の表の「spawner の process」は Q1 の解釈だったので取り下げ、io-file の thread から `posix_spawn`、pid・kill・`waitpid(WNOHANG)` は main（ユーザーには Q1 が伝え、覆れば P1 に知らせる）。
   J6: daemon の thread は main で blocking の I/O をする接続だけ（audiod・networkd・bluetoothd・phone・volumed の 5 本）。
+- （2026-10-31、ユーザーの決定を Q1 が趣旨で伝えた。原文は Q1 の記録）「game mode（全画面の 3D）では、platform に関わらず mouse の cursor を表示しない」。
+  Q1 の技術の判断（同日）: game mode（top が fullscreen の content=game）では pointer が動いても直の scanout を出ない（ゲームは mouse を常に動かし、
+  cursor を出さないので出入りは誤り）。game でない fullscreen（動画など）は今の規則のまま。
+  実装（P7、q1732、[BUG-375](../bugs/BUG-375.md)）: `userland/desktop/wayland/scanout.c` の `kwl_scanout_cursor_hidden`（top が fullscreen の game で上に何も
+  描かれていない時）を `compose.c` の合成の cursor と cursor plane の像の選び（`kwl_compose_cursor_source`）が見て出さない。直の scanout の間は
+  lease に cursor を set しないので元から出ない。`scanout-rules.c` の pointer の規則は content が game でない時だけ。
 
 ## 決まった構成（解釈。上の原文が正）
 
