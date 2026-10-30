@@ -52,6 +52,8 @@ int vcodec_nal_find(const uint8_t *data, size_t size, size_t *cursor, const uint
  * cabac_zero_word, H.264 7.4.1 and H.265 7.4.2): that final 0x03 is
  * dropped.  Writes *rbsp_size.
  *
+ * size 0 gives 0 and *rbsp_size 0 (a NAL unit of only its header).
+ *
  * Returns 0; EINVAL when the payload holds a three-byte sequence that
  * cannot occur in a NAL unit (0x000000, 0x000001, 0x000002, or 0x000003
  * followed by a byte above 0x03); ENOBUFS when capacity is smaller than

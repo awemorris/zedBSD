@@ -20,7 +20,7 @@
 #define LIBMEDIA_H265SW_SCALING_H
 
 #include "h265sw.h"
-#include "vcodec-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * The scaling lists of one SPS or PPS as signalled or inferred.
@@ -69,7 +69,7 @@ void h265sw_scaling_default(struct h265sw_scaling_list *list);
  * Returns 0; EINVAL for a value out of range or a read error.  On error
  * list is left partly written (the caller discards it).
  */
-int h265sw_scaling_read(struct h265sw_scaling_list *list, struct vcodec_bits *bits);
+int h265sw_scaling_read(struct h265sw_scaling_list *list, struct vcodec_bitreader *bits);
 
 /*
  * Derives the quantization matrices of a list (7-44 to 7-49): sizeId 0

@@ -19,8 +19,11 @@
  * (C.5.2.3).  Frames output by bumping are appended to a struct
  * vcodec_output_queue in output order.
  *
- * The frames are struct vcodec_frame whose side data is the motion
- * h265sw-tmvp.h defines (struct h265sw_col_motion per 16x16 block).
+ * The buffers, the removal of unneeded pictures, the bumping, the flush
+ * and the clear are the shared ones of vcodec-dpb.h; this module adds
+ * the H.265 marking and the H.265 conditions for bumping.  The frames
+ * are struct vcodec_frame whose side data is the motion h265sw-tmvp.h
+ * defines (struct h265sw_col_motion per 16x16 block).
  */
 
 #ifndef LIBMEDIA_H265SW_DPB_H
@@ -28,56 +31,33 @@
 
 #include "h265sw.h"
 #include "h265sw-poc.h"
+#include "vcodec-dpb.h"
 #include "vcodec-frame.h"
 #include "vcodec-output.h"
 
-/* The marking of an entry (8.3.2). */
-#define H265SW_REF_UNUSED 0U
-#define H265SW_REF_SHORT 1U
-#define H265SW_REF_LONG 2U
-
 /*
- * One picture storage buffer.
- *
- * frame NULL for an empty buffer (the entry holds one reference
- * otherwise); reference H265SW_REF_*; output_needed 1 while "needed for
- * output"; latency PicLatencyCount; poc PicOrderCntVal (also in the
- * frame, kept here for the marking); generated 1 for a picture made by
- * 8.3.3 or as a stand-in (never output).
- */
-struct h265sw_dpb_entry {
-	struct vcodec_frame *frame;
-	unsigned reference;
-	int output_needed;
-	uint32_t latency;
-	int32_t poc;
-	int generated;
-};
-
-/*
- * The decoded picture buffer.
- *
- * size is sps_max_dec_pic_buffering_minus1[ HighestTid ] + 1 (1..16),
- * reorder sps_max_num_reorder_pics[ HighestTid ], max_latency
- * SpsMaxLatencyPictures[ HighestTid ] (7-9: reorder +
+ * The decoded picture buffer of H.265: the shared buffers base (size is
+ * sps_max_dec_pic_buffering_minus1[ HighestTid ] + 1, 1..16; each entry
+ * with the marking VCODEC_REF_*, poc PicOrderCntVal, latency
+ * PicLatencyCount, and generated for the pictures of 8.3.3 and the
+ * stand-ins), and the
+ * sequence's output rules: reorder sps_max_num_reorder_pics[ HighestTid ],
+ * max_latency SpsMaxLatencyPictures[ HighestTid ] (7-9: reorder +
  * sps_max_latency_increase_plus1 - 1) with latency_limited
  * sps_max_latency_increase_plus1 != 0.  HighestTid is the highest
- * sub-layer (the decoder decodes all of them).  entry[0..size) are the
- * buffers; pictures counts the non-empty ones.
+ * sub-layer (the decoder decodes all of them).  Embedded in the decoder.
  */
 struct h265sw_dpb {
-	unsigned size;
+	struct vcodec_dpb base;
 	unsigned reorder;
 	uint64_t max_latency;
 	int latency_limited;
-	struct h265sw_dpb_entry entry[H265SW_MAX_DPB];
-	unsigned pictures;
 };
 
 /*
  * The reference picture set of the current picture as entries of the
  * DPB (8.3.2): RefPicSetStCurrBefore, StCurrAfter, StFoll, LtCurr and
- * LtFoll, each an index into dpb->entry or -1 for "no reference
+ * LtFoll, each an index into dpb->base.entry or -1 for "no reference
  * picture", in the order of the matching lists of struct
  * h265sw_rps_pocs.
  */
@@ -94,7 +74,7 @@ struct h265sw_ref_sets {
 	int lt_foll[H265SW_MAX_RPS];
 };
 
-/* Makes an empty DPB with the sequence's parameters (sizes as struct h265sw_dpb says; size 1..16). */
+/* Makes an empty DPB with the sequence's parameters (vcodec_dpb_init with size 1..16, and the output rules as struct h265sw_dpb says). */
 void h265sw_dpb_init(struct h265sw_dpb *dpb, unsigned size, unsigned reorder, uint32_t max_latency_increase_plus1);
 
 /*
@@ -164,14 +144,9 @@ int h265sw_dpb_before_picture(struct h265sw_dpb *dpb, const struct h265sw_ref_se
 int h265sw_dpb_store(struct h265sw_dpb *dpb, struct vcodec_frame *frame, int32_t poc, int pic_output, struct vcodec_output_queue *output);
 
 /*
- * Outputs every picture still needed for output in increasing
- * PicOrderCntVal (repeated bumping) and empties the DPB: the end of the
- * stream, an end of sequence NAL unit, and a drain.  Returns 0 or
- * ENOBUFS.
+ * The flush (the end of the stream, an end of sequence NAL unit, a
+ * drain) and the clear (a seek, NoOutputOfPriorPicsFlag 1) are
+ * vcodec_dpb_flush and vcodec_dpb_clear on dpb->base.
  */
-int h265sw_dpb_flush(struct h265sw_dpb *dpb, struct vcodec_output_queue *output);
-
-/* Empties the DPB without output (a seek, or NoOutputOfPriorPicsFlag 1). */
-void h265sw_dpb_clear(struct h265sw_dpb *dpb);
 
 #endif

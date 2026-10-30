@@ -22,7 +22,7 @@
 #define LIBMEDIA_H265SW_VUI_H
 
 #include "h265sw.h"
-#include "vcodec-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * What the decoder keeps of a VUI.
@@ -68,6 +68,6 @@ struct h265sw_vui {
  * (cpb_cnt_minus1 above 31, a ue(v) above its stated range).  The caller
  * decides what a failed VUI means for the SPS (h265sw-ps.h).
  */
-int h265sw_vui_read(struct h265sw_vui *vui, struct vcodec_bits *bits, unsigned max_sub_layers_minus1);
+int h265sw_vui_read(struct h265sw_vui *vui, struct vcodec_bitreader *bits, unsigned max_sub_layers_minus1);
 
 #endif

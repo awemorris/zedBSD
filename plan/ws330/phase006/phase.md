@@ -9,7 +9,7 @@
 
 - 共通: [design.md](../design.md) §13.1 の「読む物（共通）」（AGENTS.md §4・§7・§9・§10、plan/agents/protocol.md、plan/coding-style.md の全文、design.md §1・§2・§3・§7・§8・§10.1、`vcodec.h`・`h265sw.h`）。
 - 仕様: ITU-T H.265 (V11) (01/2026)、`/home/awe/zedBSD-claude1/build/sources/specs/itu-t-h265-202601.pdf`（SHA-256 `78b093480e178a2b99d8cb7499934240f359c50c6d09568f8be651bc1151d4d2`、git の外）。**PDF の頁 = 印刷の頁 + 18**。`pdftotext -layout -f N -l M` で読み、表と式（上付きが崩れる: 2^15 が「215」になる）は Read の tool で PDF の頁の画を見て確かめる。
-- header（仕様の正本）: `userland/desktop/libmedia/h265sw-scaling.h`、`userland/desktop/libmedia/h265sw-scan.h`、`userland/desktop/libmedia/vcodec-bits.h`（p003 の前は [proposed/](../proposed/)）。
+- header（仕様の正本）: `userland/desktop/libmedia/h265sw-scaling.h`、`userland/desktop/libmedia/h265sw-scan.h`、`userland/desktop/libmedia/vcodec-bitreader.h`（p003 の前は [proposed/](../proposed/)）。
 - 仕様の節: 7.3.4（印刷 45 = PDF 63）、7.4.5（印刷 92〜95 = PDF 110〜113、7-42〜7-49、Table 7-3〜7-6）、8.6.3（8-308）。
 
 ## 2. 作る物

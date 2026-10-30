@@ -21,7 +21,7 @@
  *  3. SPS and PPS: h265sw_ps_read_sps and _pps.  Suffix SEI: the decoded
  *     picture hash of the picture in progress (h265sw_sei_read_hash).
  *     End of sequence: the DPB is flushed with output
- *     (h265sw_dpb_flush) and the next picture has NoRaslOutputFlag 1.
+ *     (vcodec_dpb_flush) and the next picture has NoRaslOutputFlag 1.
  *     VPS, AUD, prefix SEI, filler data, reserved and unspecified types
  *     are skipped.
  *  4. A slice segment of a decodable type (h265sw_nal_is_decodable):

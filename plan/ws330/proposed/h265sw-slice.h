@@ -22,7 +22,7 @@
 #include "h265sw-nal.h"
 #include "h265sw-ps.h"
 #include "h265sw-rps.h"
-#include "vcodec-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * The explicit weights of one slice (7.4.7.3), derived: luma_log2_denom
@@ -138,7 +138,7 @@ struct h265sw_slice_header {
  * nal_type and temporal_id from nal).  Returns 0; EINVAL for a read
  * error or a pps_id above 63.
  */
-int h265sw_slice_read_start(struct h265sw_slice_header *out, struct vcodec_bits *bits, const struct h265sw_nal *nal);
+int h265sw_slice_read_start(struct h265sw_slice_header *out, struct vcodec_bitreader *bits, const struct h265sw_nal *nal);
 
 /*
  * Reads the rest of a slice segment header after h265sw_slice_read_start
@@ -163,12 +163,12 @@ int h265sw_slice_read_start(struct h265sw_slice_header *out, struct vcodec_bits 
  * offset_len_minus1 0..31, num_entry_point_offsets at most
  * PicHeightInCtbsY * tile columns or the tile count as 7.4.7.1 bounds it,
  * slice_segment_header_extension_length 0..256) and ends with
- * byte_alignment() (vcodec_bits_byte_alignment); data_offset is then the
+ * byte_alignment() (vcodec_bitreader_byte_alignment); data_offset is then the
  * reader's position / 8.
  *
  * Returns 0; EINVAL for any violation or read error; ENOTSUP for nothing
  * (the SPS and PPS were checked).  On error out is partly written.
  */
-int h265sw_slice_read_rest(struct h265sw_slice_header *out, struct vcodec_bits *bits, const struct h265sw_sps *sps, const struct h265sw_pps *pps, const struct h265sw_slice_header *independent);
+int h265sw_slice_read_rest(struct h265sw_slice_header *out, struct vcodec_bitreader *bits, const struct h265sw_sps *sps, const struct h265sw_pps *pps, const struct h265sw_slice_header *independent);
 
 #endif

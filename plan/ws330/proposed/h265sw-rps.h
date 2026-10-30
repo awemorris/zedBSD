@@ -17,7 +17,7 @@
 #define LIBMEDIA_H265SW_RPS_H
 
 #include "h265sw.h"
-#include "vcodec-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * One short-term reference picture set after 7.4.8.
@@ -65,6 +65,6 @@ struct h265sw_st_rps {
  * Returns 0 and *out; EINVAL for a value out of range, a derived set
  * whose sizes break the bounds above, or a read error.
  */
-int h265sw_rps_read(struct vcodec_bits *bits, unsigned index, unsigned num_sets, const struct h265sw_st_rps *sets, unsigned max_pictures, struct h265sw_st_rps *out);
+int h265sw_rps_read(struct vcodec_bitreader *bits, unsigned index, unsigned num_sets, const struct h265sw_st_rps *sets, unsigned max_pictures, struct h265sw_st_rps *out);
 
 #endif

@@ -31,7 +31,7 @@
 | Phase | 目的 | 型 | 状態 | 依存 |
 | --- | --- | --- | --- | --- |
 | ws330-p001 | 設計（Opus 5.5）: H.264 との共通部分の洗い出しと共通化の設計、H.265 の decoder の module・header・試験の道・実装の Phase の表、encoder の地図と公開の header | O | in-progress（q1763 P5。設計と review の反映の後、Q1 の受け入れと Q330-1〜4 の回答待ち） | — |
-| [ws330-p002](phase002/phase.md) | decoder 側の共通化（vcodec.h・vcodec-frame・vcodec-output、WS326 p026 の残り） | O | planned | WS329 completed、WS326 p026 |
+| [ws330-p002](phase002/phase.md) | 共通化（vcodec.h の補助・frame・DPB・出力・CABAC の追加を H.264 と H.265 で共通に、H.264 の decoder と encoder を移し前後一致で確かめる） | O | planned | WS329 completed、WS326 p026 |
 | [ws330-p003](phase003/phase.md) | decoder の header と骨格を source に、試験の道具、BASE | O | planned | p002 |
 | [ws330-p004](phase004/phase.md) | h265sw-nal、h265sw-sei | S | planned | p003 |
 | [ws330-p005](phase005/phase.md) | h265sw-scan、h265sw-pic | S | planned | p003 |
@@ -83,4 +83,4 @@
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS329 の completed の後に p001。
-- 2026-10-31 P5（q1763-i01）: p001 の設計を branch agent/p5-ws330 に（design.md・proposed/ の header 36 個（common 6 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q330-1〜4）・phase002〜033 の phase.md・tests/conformance の list・fetch.sh・sha256・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q330-1〜4 の回答、design §14 の Q1 への注意（仕様の PDF の写し、WS326 p026 と WS329 p003 への入力、WS318 の記録）。WS329 completed の後に p002。
+- 2026-10-31 P5（q1763-i01）: p001 の設計を branch agent/p5-ws330 に（design.md・proposed/ の header 37 個（common 7 を含む、cc と clang の c89 pedantic で単独 compile を確かめた）・user-questions.md（Q330-1〜4）・phase002〜033 の phase.md・tests/conformance の list・fetch.sh・sha256・design-review.md）。source は変えていない。次: Q1 が受け入れて merge、Q330-1〜4 の回答、design §14 の Q1 への注意（仕様の PDF の写し、WS326 p026 と WS329 p003 への入力、WS318 の記録）。WS329 completed の後に p002。

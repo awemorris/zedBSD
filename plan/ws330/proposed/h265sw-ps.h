@@ -25,7 +25,7 @@
 #include "h265sw-rps.h"
 #include "h265sw-scaling.h"
 #include "h265sw-vui.h"
-#include "vcodec-bits.h"
+#include "vcodec-bitreader.h"
 
 /*
  * The general profile, tier and level of profile_tier_level( 1, ... )
@@ -235,7 +235,7 @@ void h265sw_ps_init(struct h265sw_ps_store *store);
  * max_pictures = max_dec_pic_buffering_minus1 of the highest sub-layer),
  * the long-term pictures, the VUI (h265sw_vui_read) and the extension
  * flags, then the range extension when present, then the trailing bits
- * (vcodec_bits_trailing; extension data after sps_extension_4bits is
+ * (vcodec_bitreader_trailing; extension data after sps_extension_4bits is
  * skipped up to the trailing bits).
  *
  * The decoder's range: chroma_format_idc 1, bit_depth_luma_minus8 and
@@ -255,7 +255,7 @@ void h265sw_ps_init(struct h265sw_ps_store *store);
  *
  * Returns 0; EINVAL for a syntax or range error; ENOTSUP as above.
  */
-int h265sw_ps_read_sps(struct h265sw_ps_store *store, struct vcodec_bits *bits);
+int h265sw_ps_read_sps(struct h265sw_ps_store *store, struct vcodec_bitreader *bits);
 
 /*
  * Reads a picture parameter set RBSP and keeps it in store (7.3.2.3).
@@ -268,7 +268,7 @@ int h265sw_ps_read_sps(struct h265sw_ps_store *store, struct vcodec_bits *bits);
  * Returns 0; EINVAL for a syntax or range error; ENOTSUP for a tool
  * outside the range (pps_refused set).
  */
-int h265sw_ps_read_pps(struct h265sw_ps_store *store, struct vcodec_bits *bits);
+int h265sw_ps_read_pps(struct h265sw_ps_store *store, struct vcodec_bitreader *bits);
 
 /*
  * Checks a PPS against the SPS it names, for the values whose ranges

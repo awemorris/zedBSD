@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws330-p002 -->
 
-# ws330-p002 decoder 側の共通化（vcodec.h・vcodec-frame・vcodec-output と WS326 p026 の残り、H.264 の decoder を移す）
+# ws330-p002 decoder 側の共通化（vcodec.h の補助・vcodec-frame・vcodec-dpb・vcodec-output・CABAC の追加、H.264 の decoder と encoder を移す）
 
 - 親: [ws.md](../ws.md)、設計 [design.md](../design.md)。型: O（Opus、phase-runner）。
 - 状態: planned（2026-10-31 p001 が作成）。依存: WS329 completed、WS326 p026。
@@ -13,13 +13,14 @@
 
 ## 2. すること
 
-design.md §4.1・§5.1・§5.2 の C1〜C4 を行う。proposed/common/ の header を source に置き（p026 の名前に合わせる）、H.264 の decoder の該当の code を移す。振る舞いを変えない。
+design.md §4.1・§5.1・§5.2 の C1〜C4 を行う。proposed/common/ の header（WS326 p026 が置いた vcodec.h・vcodec-bitreader・vcodec-nal・vcodec-cabac に足す物と、新しい vcodec-frame・vcodec-dpb・vcodec-output）を source に置き、H.264 の decoder（WS326）と encoder（WS329、h264sw_frame・h264sw_frame_pool・h264sw_dpb を使う）の該当の code を移す。振る舞いを変えない。変更の前に前の記録を取り、後の記録と比べる（WS326 p026 §6 の形）。
 
 ## 3. 受け入れ
 
-- WS326: `sh plan/ws326/tests/run-unit.sh all`、`run-stream.sh`、適合（JVT の `in` の全部）が前後で同じ（件数と MD5）。
-- WS329: run-unit all と roundtrip の MD5 が前後で同じ。
-- 新しい test-vcodec_frame（pool の limit・dead・side_init・参照の数）・test-vcodec_output（queue と retime）。
+- WS326: run-unit all・run-stream・backend の 2 つ・JVT の適合（`in` の全部）の出力の全行が前後で同じ。
+- WS329: run-unit all と roundtrip（MD5 と stats）の出力の全行が前後で同じ。
+- 新しい test-vcodec（補助の境）・test-vcodec_frame（pool の limit・dead・side_init・参照の数）・test-vcodec_dpb（put・remove_unused・bump の順・flush・waiting）・test-vcodec_output（queue と retime）・test-vcodec_cabac（bypass_bits と position）。
+- `nm -D` の公開の symbol が前後で同じ。
 - amd64 の libmedia.so の build warning 0。WS326 の check-skeleton の BASE をこの commit に移すことを Q1 に報告。
 
 ## 4. 規則

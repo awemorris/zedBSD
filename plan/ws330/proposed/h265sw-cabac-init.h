@@ -88,7 +88,7 @@ unsigned h265sw_cabac_init_type(unsigned slice_type, int cabac_init_flag);
 /*
  * Initializes every context variable of a slice (9.3.2.2): for each
  * index, slopeIdx and offsetIdx of initValue (9-4), m and n (9-5), and
- * the state by vcodec_cabac_context_state( m, n, slice_qp ) (9-6).
+ * the state by vcodec_cabac_context_init( m, n, slice_qp ) (9-6).
  * slice_qp is SliceQpY (any value; it is clipped to 0..51 there).
  */
 void h265sw_cabac_init_contexts(uint8_t *contexts, unsigned init_type, int slice_qp);

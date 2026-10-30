@@ -28,6 +28,9 @@
 /* The bit of a context variable's byte that holds valMps; pStateIdx is the byte & 63. */
 #define VCODEC_CABAC_MPS 64U
 
+/* The fewest bytes the engine's initialization needs (the 9 bits of the offset). */
+#define VCODEC_CABAC_START_BYTES 2U
+
 /*
  * rangeTabLPS[ pStateIdx ][ qRangeIdx ] and the transitions transIdxLps
  * and transIdxMps, the same in both codecs.
@@ -71,9 +74,10 @@ struct vcodec_cabac {
  * 510, offset the first 9 bits.
  *
  * data is byte aligned by construction; data may be NULL only with size
- * 0.  Returns 0; EINVAL when the first 9 bits are 510 or 511 (forbidden
- * by both specifications) or size is 0.  The context variables are not
- * touched (they are the caller's).
+ * 0.  Returns 0; EINVAL (and error EINVAL) when size is below
+ * VCODEC_CABAC_START_BYTES or the first 9 bits are 510 or 511 (forbidden
+ * by both specifications).  The context variables are not touched (they
+ * are the caller's).
  */
 int vcodec_cabac_start(struct vcodec_cabac *cabac, const uint8_t *data, size_t size);
 
@@ -118,12 +122,22 @@ unsigned vcodec_cabac_terminate(struct vcodec_cabac *cabac);
 int vcodec_cabac_position(const struct vcodec_cabac *cabac, size_t *byte_offset);
 
 /*
+ * Reads the samples of an H.264 I_PCM macroblock and restarts the engine
+ * (H.264 7.3.5, 9.3.1.2): from the byte vcodec_cabac_position gives, count bytes into samples,
+ * then vcodec_cabac_start on the bytes after them.  Returns 0, or EINVAL
+ * when the data ends first.  H.265 PCM samples (PcmBitDepth bits each)
+ * are read by the caller from vcodec_cabac_position with a bit reader,
+ * then vcodec_cabac_start.
+ */
+int vcodec_cabac_pcm(struct vcodec_cabac *cabac, uint8_t *samples, size_t count);
+
+/*
  * Returns the initial state of a context variable from m, n and the
  * slice's luma QP: preCtxState = Clip3( 1, 126, ( ( m * Clip3( 0, 51,
  * qp ) ) >> 4 ) + n ), valMps = preCtxState > 63, pStateIdx = valMps ?
  * preCtxState - 64 : 63 - preCtxState (H.264 9-5, H.265 9-6).  The
  * ">> 4" of a negative product is the floor (vcodec_asr32).
  */
-uint8_t vcodec_cabac_context_state(int m, int n, int qp);
+uint8_t vcodec_cabac_context_init(int m, int n, int qp);
 
 #endif
