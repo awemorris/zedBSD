@@ -389,6 +389,22 @@
    "note": "The whole software with its notices and the licence; use solely with Mali-based products; the licence forbids reverse engineering except as the law permits and is subject to export control laws."
   },
   {
+   "id": "amlogic-s7d-bootloader",
+   "name": "ODROID-C5 bootloader (Amlogic S905X5M boot stages BL2-BL32 and Hardkernel's U-Boot)",
+   "when": "program:amlogic-s7d-bootloader",
+   "license": "GPL-2.0-only (U-Boot) AND LicenseRef-amlogic-boot-stages (redistribution terms unknown)",
+   "upstream": "mdrjr/meta-odroid-aml (Hardkernel's Yocto layer)",
+   "version": "548e2f037e01c626e3fc964fa298464df148fd51",
+   "notices": [
+    "/usr/share/licenses/amlogic-s7d-bootloader/GPL-2",
+    "/usr/share/licenses/amlogic-s7d-bootloader/u-boot-odroid-c5.bb",
+    "/usr/share/licenses/amlogic-s7d-bootloader/amlogic-s7d-bootloader.notice"
+   ],
+   "paths": [],
+   "note": "Written to the SD card's sectors 1-6600, not into the root file system. No licence text for Amlogic's boot stages was found; Amlogic's published terms for its other SoCs' boot stages forbid redistribution without its written permission. U-Boot is GPL-2.0 and its source is Hardkernel's (git.odroid.com). An image with it is not to be passed on until the user decides.",
+   "status": "decision"
+  },
+  {
    "id": "powervr-firmware",
    "name": "Imagination PowerVR Rogue GPU firmware (BXE-4-32, VisionFive 2)",
    "when": "program:powervr-firmware",

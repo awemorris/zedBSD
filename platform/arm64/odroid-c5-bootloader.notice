@@ -4,7 +4,10 @@ Hardware: Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D)
 Files:    the SD card's bootloader area: the MBR's boot code and the sectors from 1
           up to the first partition (at most 8 MiB); this file on the SD card's boot
           partition as /BOOTLOADER.txt
-Source:   not fetched by zedBSD.  The area is copied, byte for byte, from the card
+Source:   This notice is for a card made with ODROID_C5_BOOTLOADER_FROM; a card
+          made with the firmware package amlogic-s7d-bootloader carries that
+          package's notice instead.  Here the area is not fetched by zedBSD: it
+          is copied, byte for byte, from the card
           image named by ODROID_C5_BOOTLOADER_FROM, which is expected to be one of
           Hardkernel's own ODROID-C5 operating system images, obtained by whoever
           builds the image.  The lines after "Copied from" on the card's copy name

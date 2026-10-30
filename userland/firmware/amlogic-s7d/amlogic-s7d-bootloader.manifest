@@ -1,0 +1,31 @@
+# zedBSD optional firmware package manifest
+# Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
+
+package=amlogic-s7d-bootloader
+package-version=548e2f037e01c626e3fc964fa298464df148fd51
+consumer=the ODROID-C5 image build (platform/arm64/odroid-c5.mk), which writes the file from the SD card's sector 1
+installed-file=none (the bootloader is on the SD card's sectors 1 to 6600, not in the root file system)
+installed-license=/usr/share/licenses/amlogic-s7d-bootloader/GPL-2
+installed-recipe=/usr/share/licenses/amlogic-s7d-bootloader/u-boot-odroid-c5.bb
+installed-notice=/usr/share/licenses/amlogic-s7d-bootloader/amlogic-s7d-bootloader.notice
+
+acquisition-repository=https://github.com/mdrjr/meta-odroid-aml.git
+acquisition-revision=548e2f037e01c626e3fc964fa298464df148fd51
+acquisition-file=recipes-bsp/u-boot-odroid-c5/files/u-boot.bin.signed size=3379200 sha256=8c2e66919a05921d79e130cc00a977a07cf8df6b34153e66c18c3241c0809e3c
+acquisition-recipe=recipes-bsp/u-boot-odroid-c5/u-boot-odroid-c5.bb size=803 sha256=93711ea64b8037d0f3c9aa9a1602d36c54bbdb96cddaf14b254e525a84a05fec
+acquisition-license-repository=https://git.kernel.org/pub/scm/linux/kernel/git/firmware/linux-firmware.git
+acquisition-license-revision=dc85ccedc9c973682fbcf4d628ca61174bcc3120
+acquisition-license-path=GPL-2
+acquisition-license-size=18092
+acquisition-license-sha256=8177f97513213526df2cf6184d8ff986c675afb514d4e68a404010521b880643
+
+mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-path=amlogic-s7d/
+
+hardware=Hardkernel ODROID-C5 (Amlogic S905X5M, SoC family S7D; the file's BL30 names itself S7D-s905x5m-25022719)
+placement=from the SD card's sector 1 (the layer's odroid-c5.wks: rawcopy --offset 1S); the MBR's boot code stays zero
+license=GPL-2.0-only for U-Boot (the recipe); Amlogic's boot stages: no licence text found, redistribution terms unknown
+redistribution=unknown for Amlogic's boot stages; an SD card image made with this package is not to be passed on until the terms are known
+modification=none; the boot ROM accepts only stages signed for the S905X5M
+source-tree-blob=absent
+runtime-network-fetch=forbidden

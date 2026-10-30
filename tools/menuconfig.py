@@ -21,6 +21,7 @@ PLATFORMS = [
     ("amd64", "amd64", "pcat", "x86_64 PC/AT compatible"),
     ("pc98", "i386", "pc98", "NEC PC-9800"),
     ("rpi4", "arm64", "rpi4", "Raspberry Pi 4 Arm64"),
+    ("odroid-c5", "arm64", "odroid-c5", "Hardkernel ODROID-C5 (Amlogic S905X5M)"),
     ("riscv64-virt", "riscv64", "virt", "QEMU virt RISC-V 64"),
     ("visionfive2", "riscv64", "visionfive2", "StarFive VisionFive 2"),
     ("riscv32-virt", "riscv32", "virt", "QEMU virt RISC-V 32"),
@@ -40,6 +41,7 @@ BOARD_LABELS = {
     "pcat": "IBM PC/AT compatible",
     "pc98": "NEC PC-9800",
     "rpi4": "Raspberry Pi 4",
+    "odroid-c5": "Hardkernel ODROID-C5",
     "virt": "QEMU virt",
     "zybo": "Digilent ZYBO",
     "visionfive2": "StarFive VisionFive 2",
@@ -64,6 +66,7 @@ BOARD_VARIANTS = {
     ],
     ("i386", "pc98"): [("default", "Default")],
     ("arm64", "rpi4"): [("default", "Default")],
+    ("arm64", "odroid-c5"): [("default", "Default")],
     ("riscv64", "virt"): [("default", "Default")],
     ("riscv64", "visionfive2"): [("default", "Default")],
     ("riscv32", "virt"): [("default", "Default")],
@@ -102,6 +105,7 @@ PACKAGE_LABELS = {
 MENU_CPUS = [
     ("amd64", "x86_64", "amd64", "UEFI + ACPI"),
     ("arm64", "arm64", "rpi4", "Raspberry Pi 4"),
+    ("arm64", "arm64", "odroid-c5", "ODROID-C5"),
     ("i386", "i386", "pc98", "PC-9800"),
     ("i386", "i386", "i386", "PC/AT"),
     ("riscv64", "RISC-V 64", "riscv64-virt", "QEMU virt"),
@@ -260,11 +264,13 @@ def driver_firmware_table() -> dict[str, list[str]]:
 
 def driver_firmware(values: dict[str, object], platform: str) -> set[str]:
     """The firmware packages the drivers that are on and build for this
-    platform need."""
+    platform need, and the ones the board itself needs (a row whose key is
+    the platform's name, such as its bootloader)."""
     targets = {row[0]: row[3] for row in driver_rows()}
     needed: set[str] = set()
     for key, packages in driver_firmware_table().items():
-        if values.get(key) == "y" and applies(targets.get(key, ""), platform):
+        if key == platform or (values.get(key) == "y" and
+                               applies(targets.get(key, ""), platform)):
             needed.update(packages)
     return needed
 

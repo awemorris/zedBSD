@@ -408,8 +408,8 @@ def check_platform_drivers() -> None:
     Raspberry Pi 4 turns its Platform drivers on, VCHIQ and Vulkan Video
     too (2026-10-15 user: the Pi 4 video code is on by default)."""
     categories = ["Disk", "Input", "GPU", "Audio", "Ethernet", "WiFi",
-                  "Bluetooth", "USB", "Platform"]
-    platforms = ("amd64", "i386", "pc98", "rpi4", "sun4u", "x68k")
+                  "Bluetooth", "Camera", "USB", "Platform"]
+    platforms = ("amd64", "i386", "pc98", "rpi4", "odroid-c5", "sun4u", "x68k")
     shared = None
     for platform in platforms:
         groups = menu.driver_groups(platform)
@@ -507,10 +507,11 @@ def check_driver_firmware() -> None:
     server one selects the firmware of its drivers."""
     table = menu.driver_firmware_table()
     drivers = {row[0] for row in menu.driver_rows()}
+    boards = {item[0] for item in menu.PLATFORMS}
     firmware = {row[0] for row in USER_PROGRAM_ROWS if row[4] == "firmware"}
     for key, packages in table.items():
-        if key not in drivers:
-            fail(f"config/drivers/firmware.list names no driver {key}")
+        if key not in drivers and key not in boards:
+            fail(f"config/drivers/firmware.list names no driver or platform {key}")
         for package in packages:
             if package not in firmware:
                 fail(f"config/drivers/firmware.list names no firmware package {package}")
@@ -559,6 +560,34 @@ def check_driver_firmware() -> None:
     walk(menu.select_cpu_board, ["CPU: arm64", "x86_64", "Back"], values)
     if selected(values) != {"i915-firmware", "intelbt-firmware", "rtl8822b-firmware"}:
         fail(f"x86_64 chosen back from the Pi selects {sorted(selected(values))}")
+
+    # The ODROID-C5 (2026-10-30 user: "ODROID-C5のBSPを選ぶと、Amlogicのこのチップの
+    # ファームウェアが自動で依存関係で有効になるようにしてください。"): the board
+    # brings its bootloader and its Mali driver the GPU's firmware; turning the
+    # driver off takes the GPU's firmware, not the bootloader; another board
+    # takes both.
+    walk(menu.select_cpu_board, ["CPU: x86_64", "arm64", "Board: Raspberry Pi 4",
+                                 "ODROID-C5", "Back"], values)
+    if values["ZEDBSD_PLATFORM"] != "odroid-c5":
+        fail(f"choosing the ODROID-C5 made {values['ZEDBSD_PLATFORM']}")
+    if not {"amlogic-s7d-bootloader", "mali-csf-firmware"} <= selected(values) or \
+            selected(values) & {"bcm43455-firmware", "brcmbt-firmware", "i915-firmware"}:
+        fail(f"the ODROID-C5 selects {sorted(selected(values))}")
+    c5 = {row[0]: row[2] for row in dict(menu.driver_groups("odroid-c5"))["Platform"]}
+    walk(menu.drivers_menu, ["Platform", f"[*] {c5['CONFIG_DRIVER_MALI_GPU']}", "Back", "Back"],
+         values)
+    if "mali-csf-firmware" in values["ZEDBSD_USER_PROGRAMS"] or \
+            "amlogic-s7d-bootloader" not in values["ZEDBSD_USER_PROGRAMS"]:
+        fail(f"the ODROID-C5 without its Mali driver selects {sorted(selected(values))}")
+    walk(menu.select_cpu_board, ["Board: ODROID-C5", "Raspberry Pi 4", "Back"],
+         values)
+    if selected(values) & {"amlogic-s7d-bootloader", "mali-csf-firmware"}:
+        fail(f"the Raspberry Pi 4 chosen from the ODROID-C5 selects {sorted(selected(values))}")
+    for name, mali in (("config-odroid-c5.mk", "n"), ("config-odroid-c5-keiland.mk", "y")):
+        ci = menu.load(menu.REPO / "config" / "ci" / name)
+        if ci["ZEDBSD_PLATFORM"] != "odroid-c5" or ci.get("CONFIG_DRIVER_MALI_GPU") != mali or \
+                "amlogic-s7d-bootloader" not in ci["ZEDBSD_USER_PROGRAMS"]:
+            fail(f"{name} loads as {ci['ZEDBSD_PLATFORM']}, Mali {ci.get('CONFIG_DRIVER_MALI_GPU')}")
 
     # Every CI image selects the firmware of the drivers it builds (the server one is the user's).
     for path in sorted((menu.REPO / "config" / "ci").glob("config-*.mk")):

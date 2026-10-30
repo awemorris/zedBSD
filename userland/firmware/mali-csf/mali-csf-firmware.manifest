@@ -28,6 +28,9 @@ acquisition-whence-size=425450
 acquisition-whence-sha256=c282239a5a2d849677e9304e6f361e475e1b6e71e7c771c03f8986f71b309527
 whence-origin=WHENCE section "Driver: panthor - Arm Mali CSF firmware" lists arm/mali/arch10.{8,10,12}/mali_csffw.bin with "License: Redistributable. See LICENCE.mali_csffw for details"
 
+mirror-repository=https://github.com/awemorris/zedBSD-firmware.git
+mirror-path=mali-csf/
+
 hardware=Arm Mali-G310 (Valhall, arch 10, CSF) of the Amlogic S905X5M (ODROID-C5)
 redistribution=the whole software, with its copyright and other notices and a copy of LICENCE.mali_csffw; Arm's names, logos and trademarks are not used to market applications
 use=solely for applications used in conjunction with Mali-based products

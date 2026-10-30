@@ -6,9 +6,12 @@
 # tree is built from Hardkernel's sources for the board, fetched file by
 # file at pinned revisions into a verified cache, with zedBSD's additions
 # (platform/arm64/odroid-c5/odroid-c5.dts).  The bootloader itself is not
-# built: ODROID_C5_BOOTLOADER_FROM names a card image (Hardkernel's own,
-# uncompressed) whose bootloader area is copied into the SD image, and
-# without it the image is made only when ODROID_C5_NO_BOOTLOADER=y says so.
+# built: it is the firmware package amlogic-s7d-bootloader
+# (userland/firmware/amlogic-s7d), which choosing the board selects, written
+# from the card's sector 1.  ODROID_C5_BOOTLOADER_FROM, when given, names a
+# card image (Hardkernel's own, uncompressed) whose bootloader area is copied
+# instead.  Without either the image is made only when
+# ODROID_C5_NO_BOOTLOADER=y says so.
 
 ODROID_C5_DIR := $(ARM64_PLATFORM)/odroid-c5
 ODROID_C5_DTS_MANIFEST := $(ODROID_C5_DIR)/dts-sources.txt
@@ -20,6 +23,10 @@ ODROID_C5_DTB := $(BUILD)/odroid-c5.dtb
 ODROID_C5_BOOT_SCRIPT := $(BUILD)/boot.scr
 ODROID_C5_BOOTLOADER_FROM ?=
 ODROID_C5_NO_BOOTLOADER ?= n
+# The package's file, when the configuration selects the package and no
+# card image is named.
+ODROID_C5_BOOTLOADER_FILE := $(if $(ODROID_C5_BOOTLOADER_FROM),,$(if \
+ $(filter amlogic-s7d-bootloader,$(ZEDBSD_USER_PROGRAMS)),$(AMLOGIC_S7D_BOOTLOADER_IMAGE)))
 
 # The bootloader the image was made with: a record that changes when the
 # choice does, so that a new choice remakes the image.
@@ -59,7 +66,7 @@ odroid-c5-boot-files: $(ODROID_C5_DTB) $(ODROID_C5_BOOT_SCRIPT)
 .PHONY: odroid-c5-bootloader-choice
 odroid-c5-bootloader-choice:
 	@mkdir -p $(BUILD)/odroid-c5
-	@printf '%s|%s\n' '$(ODROID_C5_BOOTLOADER_FROM)' '$(ODROID_C5_NO_BOOTLOADER)' > $(ODROID_C5_BOOTLOADER_RECORD).new
+	@printf '%s|%s|%s\n' '$(ODROID_C5_BOOTLOADER_FROM)' '$(ODROID_C5_BOOTLOADER_FILE)' '$(ODROID_C5_NO_BOOTLOADER)' > $(ODROID_C5_BOOTLOADER_RECORD).new
 	@cmp -s $(ODROID_C5_BOOTLOADER_RECORD).new $(ODROID_C5_BOOTLOADER_RECORD) || \
  cp $(ODROID_C5_BOOTLOADER_RECORD).new $(ODROID_C5_BOOTLOADER_RECORD)
 $(ODROID_C5_BOOTLOADER_RECORD): odroid-c5-bootloader-choice
@@ -81,10 +88,12 @@ CHECK_RUN_TARGETS += odroid-c5-fdt-host-test
 # The SD card: the bootloader area, the FAT boot partition and the UFS root.
 $(BUILD)/hdd-image.img: $(BUILD)/vmunix $(BUILD)/ufs-root.img $(DATA_IMAGE) $(SWAP_IMAGE) \
 	$(ODROID_C5_DTB) $(ODROID_C5_BOOT_SCRIPT) $(ODROID_C5_BOOTLOADER_RECORD) \
-	$(ODROID_C5_BOOTLOADER_FROM) \
-	platform/arm64/odroid-c5-bootloader.notice \
+	$(ODROID_C5_BOOTLOADER_FROM) $(ODROID_C5_BOOTLOADER_FILE) \
+	platform/arm64/odroid-c5-bootloader.notice $(if $(ODROID_C5_BOOTLOADER_FILE),$(AMLOGIC_S7D_BOOTLOADER_NOTICE)) \
 	platform/arm64/tools/make-odroid-c5-hdd-image.py tools/build/check-ufs-image.py
 	$(PYTHON) platform/arm64/tools/make-odroid-c5-hdd-image.py --force \
  --kernel $(BUILD)/vmunix --dtb $(ODROID_C5_DTB) --script $(ODROID_C5_BOOT_SCRIPT) \
  --data-image $(DATA_IMAGE) --swapfile $(SWAP_IMAGE) --ufs-root $(BUILD)/ufs-root.img \
- $(if $(ODROID_C5_BOOTLOADER_FROM),--bootloader-from $(ODROID_C5_BOOTLOADER_FROM),$(if $(filter y,$(ODROID_C5_NO_BOOTLOADER)),--no-bootloader)) $@
+ $(if $(ODROID_C5_BOOTLOADER_FROM),--bootloader-from $(ODROID_C5_BOOTLOADER_FROM),$(if \
+ $(ODROID_C5_BOOTLOADER_FILE),--bootloader $(ODROID_C5_BOOTLOADER_FILE) --notice $(AMLOGIC_S7D_BOOTLOADER_NOTICE),$(if \
+ $(filter y,$(ODROID_C5_NO_BOOTLOADER)),--no-bootloader))) $@
