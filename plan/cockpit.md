@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:21（Q1）
+最終更新: 2026-10-31 01:22（Q1）
 
 ## 担当（P1〜P8）
 
@@ -91,7 +91,56 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 ## ユーザーの判断を待つ事
 
-今は無し。
+今の作業を止めている判断は無い。以下は、master.md の「ユーザーの未決」に残っている物と、担当の無い仕事の割り当て。急ぐ物から。
+
+### 1. 担当の無い仕事を、誰にいつ割り当てるか
+
+- 背景: 今日の作業の残りで、担当の無い物がある。空いている担当は P3・P4（Pi 5 の実機待ち）・P6。
+- 一覧:
+  - WS307（graphical installer）p007 の残り: installer で導入する時に起動の項目を作る道の QEMU、古い「zedBSD」の項目の掃除。これで WS307 が完了する。
+  - WS331（driver の HAL 依存）p006: 規約の全文の見直し。これで WS331 が完了する。
+  - WS332（tick の API）p003: tick の数を literal で書いた残り（VM_FREE_WAIT_TICKS など、「次の tick まで」の +1 約 8 か所）。
+  - WS326（H.264 の decoder）p015・p017 以降（標準廉価実装手順、Sonnet）。
+  - WS291 p013（RTX の CPU の費用）の続き: 命令の記録の段（約 7 ms）を無くす新しい形、pass の終わりの全画面の copy。
+  - BUG-370（Photos で保存すると全面表示が閉じる）。
+- 決めてほしい事: どれを誰に、どの順で。
+
+### 2. BUG-374（RTX の cursor の色が逆）の確かめ
+
+- 背景: P3 の調べで、nvrtx の driver が受ける cursor の画像は正しく（白 69・黒 49 の画素で矢印の通り）、display の設定の値も NVIDIA の定義と合っていた。原因は未特定。
+- 決めてほしい事: 10.0.10.3 の画面で、cursor が「cursor の plane」（hardware の cursor）か「合成で描いた cursor」かを見分けるため、次に見ていただける時に、game mode（全画面の 3D）の間と desktop の間で cursor の色が同じかを見てほしい（頼みではなく、お手すきの時の試験の一覧に置く形でよいか）。
+
+### 3. WS299（5330 の NVMe の速さ）で担当の外に見つけた物の扱い
+
+- 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）で、NVMe 以外の課題が見つかった。
+  - amd64 の idle（C1 だけ）・HWP・P/E core の置き方 → 2026-10-31 に WS333 に入れた（解決）。
+  - clock_gettime に vDSO（kernel に入らずに時刻を読む仕組み）が無く、時刻が 1 ms 刻み。
+  - main から return した時に stdout が flush されない（libc の不具合）。
+  - libc の memcpy・memset の続き（大きな copy、build の flag -fno-builtin -Os）。
+- 決めてほしい事: 残りの 3 つを Bug にするか WS にするか、いつ直すか。WS299 そのものを続けるか（raw の読みは Debian の約 50%）。
+
+### 4. PS/2 の aux（mouse の port）
+
+- 背景: kernel の PS/2 の driver（src/kern/platform/pcat.c の drv_pcat_ps2_8042_init の辺り）が、mouse が無いのに node を作り、open のたびに約 80 ms 待って EIO を返す。
+- 決めてほしい事: Bug にするか、いつ直すか。
+
+### 5. P4 が 10-27 に拾った候補（q1660）
+
+- WS162 を canceled にするか（WS172 に吸収）。WS279 p009（Pi 5 の GPU の license と類似性の監査）の担当。P4m の時々の失敗（T1-691）を Bug にするか。nvrtx.disp.own の既定。pci-msi-qemu.c（唯一の config が消えた試験の code）を残すか。master-design-policy.md へ移す候補 約 25 件。
+
+### 6. WS304（Pi 5 の外の PCIe、M.2 の NVMe）
+
+- 背景: 実機で pcie1 の link が上がらず、ハードの側の切り分けで止まっている。
+- 決めてほしい事: Raspberry Pi OS で、同じ HAT（Geekworm X1001）・FFC の cable・NVMe の link が上がるかを見るか（上がれば zedBSD の driver の問題、上がらなければハードの問題）。
+
+### 7. 以前からの物（変わっていない）
+
+- WS306（ゲーム最適化の UAPI）: 環境変数の名前と書式、知らない option の扱い（p001 の設計で推しを示す予定）。
+- WS282〜WS285（camera など）: 実装を始める時期、WS282 の試験の画面を出す PC と買う webcam。
+- WS286 の後: openXC7 の host への導入、LLVM の cache の asset を GitHub の release に upload してよいか。
+- 保留の WS の整理（以前のベータ3・4 の中身を含む）。
+- OS 名: Keiland・libkeiland は残し、OS 名は zedBSD（仮決め。installer と firmware の repo は zedBSD で進んでいる）。
+- UEFI の loader の GOP の mode の選び方、BUG-222（ue0 の SCP が約 10 Mbps、tracking）、BUG-345（Pi 5 の click、再発したら知らせてもらう）、WS153 U2〜U15（検討中、聞かない）。
 
 ## ユーザーが拾える試験（頼まない、お手すきの時に）
 

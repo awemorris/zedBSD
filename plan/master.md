@@ -96,7 +96,7 @@
 ### ユーザーの未決
 
 <!-- master:open-decisions:start -->
-- WS299 の継続（P1 の report: ws299/ws.md の「結果（2026-10-28 21:50）」）。担当の外で見つけた物の扱い: amd64 の idle（C1 だけ）・HWP・P/E core の置き方（CPU が Debian の 70〜90%）、clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き（大きな copy・memset・build の flag -fno-builtin -Os）。
+- WS299 の継続（P1 の report: ws299/ws.md の「結果（2026-10-28 21:50）」）。担当の外で見つけた物の扱い（amd64 の idle・HWP・P/E core は 2026-10-31 に WS333 へ）: clock_gettime に vDSO が無く 1 ms 刻み、main から return した時に stdout が flush されない、libc の memcpy の続き（大きな copy・memset・build の flag -fno-builtin -Os）。
 - kernel の PS/2 の aux: mouse が無いのに node を作り、open のたびに 約 80 ms 待って EIO（src/kern/platform/pcat.c の drv_pcat_ps2_8042_init の辺り）。Bug にするか、いつ直すか。
 - P4（q1660）が拾った候補: WS162 を canceled にするか（WS172 に吸収）、WS279 p009（ライセンスと類似性の監査）の担当、P4m の時々の失敗（T1-691）の Bug、nvrtx.disp.own の既定、pci-msi-qemu.c（CONFIG_KERNEL_TEST_CHECKPOINTS の唯一の config が消えた）を残すか、master-design-policy.md へ移す候補 約 25 件（各 WS の ws.md に原文）。retained の 41 WS は source の comment の掃除の Queue の後に片付ける。
 - 名前の変更（2026-10-28 ユーザー「…KeiというOS名を削除して、zedBSDに統一します。インストーラだけでなくすべてに影響します。…」、WS307 の Phase）: Keiland・libkeiland は残す、OS 名は zedBSD に仮決め。
