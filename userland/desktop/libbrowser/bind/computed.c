@@ -996,7 +996,7 @@ computed_blockify(
 	blockify = style->float_side != CSS_FLOAT_NONE || style->position == CSS_POSITION_ABSOLUTE ||
 	    style->position == CSS_POSITION_FIXED;
 	parent = element->node.parent;
-	if (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
+	while (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
 		parent_style = malloc(sizeof(*parent_style));
 		if (parent_style == NULL)
 			return;
@@ -1004,11 +1004,19 @@ computed_blockify(
 			error = window->host.computed_style(window->host.context, (struct dom_element *)parent, parent_style);
 		else
 			error = bind_style_context_compute(window, (struct dom_element *)parent, parent_style);
+
+		/* A parent that makes no box of its own passes the question on to its own parent. */
+		if (error == 0 && parent_style->display == CSS_DISPLAY_CONTENTS) {
+			free(parent_style);
+			parent = parent->parent;
+			continue;
+		}
 		if (error == 0 && (parent_style->display == CSS_DISPLAY_FLEX ||
 		    parent_style->display == CSS_DISPLAY_INLINE_FLEX ||
 		    parent_style->display == CSS_DISPLAY_GRID || parent_style->display == CSS_DISPLAY_INLINE_GRID))
 			blockify = 1;
 		free(parent_style);
+		break;
 	}
 	if (!blockify)
 		return;

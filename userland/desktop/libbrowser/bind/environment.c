@@ -1171,7 +1171,7 @@ static const char environment_structured_clone[] =
 	"        if (x.stack !== undefined) Object.defineProperty(r, 'stack', { value: x.stack, writable: true, configurable: true });\n"
 	"        return r;\n"
 	"      }\n"
-	"      if ((typeof EventTarget === 'function' && x instanceof EventTarget) || (typeof Event === 'function' && x instanceof Event)) throw fail('#<' + (x.constructor && x.constructor.name || 'Object') + '>');\n"
+	"      if ((typeof x.addEventListener === 'function' && typeof x.dispatchEvent === 'function') || (typeof x.preventDefault === 'function' && typeof x.stopPropagation === 'function')) throw fail('#<' + (x.constructor && x.constructor.name || 'Object') + '>');\n"
 	"      if (tag !== '[object Object]') throw fail('#<' + tag.slice(8, -1) + '>');\n"
 	"      r = {}; seen.set(x, r);\n"
 	"      keys = Object.keys(x);\n"
