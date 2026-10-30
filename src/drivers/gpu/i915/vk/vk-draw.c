@@ -548,8 +548,8 @@ drv_i915_gfx_draw(
 	if (work == NULL)
 		return ENOMEM;
 
-	/* Every surface, vertex buffer and state of a draw is uncached. */
-	mocs = drv_i915_gfx_mocs_uncached(work->cursor.graphics_ver);
+	/* A draw's inputs, depth and state are cached (its colour targets take the display's entry). */
+	mocs = drv_i915_gfx_mocs_cached(work->cursor.graphics_ver);
 
 	/* Takes the pipeline's kernels and their push data layouts. */
 	drv_i915_gfx_pipeline_kernels(state->pipeline, &kernels);
