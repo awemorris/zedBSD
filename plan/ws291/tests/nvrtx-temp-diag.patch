@@ -1,0 +1,18 @@
+diff --git a/src/drivers/gpu/nvrtx/node.c b/src/drivers/gpu/nvrtx/node.c
+index b5221bff6..b6ecf13f1 100644
+--- a/src/drivers/gpu/nvrtx/node.c
++++ b/src/drivers/gpu/nvrtx/node.c
+@@ -1156,6 +1156,13 @@ node_perf_report(
+ 	taken.cursor_move_us = __atomic_exchange_n(&node->counts.cursor_move_us, 0U, __ATOMIC_RELAXED);
+ 	node->perf_since_us = now;
+ 
++	/* DIAG (not for commit): the thermal sensor (nouveau gp100_temp_get: 0x020460, valid bit 29, degrees in 16:8). */
++	{
++		uint32_t tsensor = nvrtx_rd32(node->gpu, 0x020460U);
++		nvrtx_stage_mark("perf: DIAG temp %u valid %u raw %08x", (unsigned)((tsensor & 0x0001fff8U) >> 8),
++		    (unsigned)((tsensor >> 29) & 1U), (unsigned)tsensor);
++	}
++
+ 	/* The runs and the frames, each line within the log's 79 columns: the runs a wait saw end, from their submission. */
+ 	nvrtx_stage_mark("perf %llums: runs %llu, ended %llu avg %lluus max %lluus",
+ 	    (unsigned long long)(period / 1000U),

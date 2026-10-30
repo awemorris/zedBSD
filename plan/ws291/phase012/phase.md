@@ -64,3 +64,24 @@
 - 別の観察: この起動では既定でも 48.4〜48.8 fps（s1 の 49.1〜50.4 より低い）。s1 も 1 つの起動の中で run を重ねると下がる（base 49.4・50.4・49.1 → cull 49.0・49.1・48.5）。
   長い負荷で clock が下がる（温度か電力の上限）見込み、未確かめ（温度・clock を読む道は nvrtx に無い）。
 - 機械: 終わりに戻して照合（vmunix 1463007375、perf の行 0）、Debian、RTX は vfio-pci。source の診断の変更は build の後に戻した（git の差分 0）。
+
+### 温度と NVK の同じ条件の比べ（2026-10-30 14:35〜14:44、診断の kernel cksum 2403965308、`plan/ws291/tests/rtx-thermal.sh`、build/ws291/rtx/q1712-therm）
+
+- 診断の patch `plan/ws291/tests/nvrtx-temp-diag.patch`（node.c の perf の行に温度の register 0x020460 を足す。nouveau の gp100_temp_get と同じ読み方。
+  commit しない source の変更、build の後に戻した）。scene-5000 を続けて 6 回（12 s ずつ、間は約 20 s の SSH と準備）、その後 Debian で RTX を nouveau（GSP）に移し、
+  この tree の Linux の mview（`plan/tools/gpu-perf/linux/build-mview.sh build/ws291/linux-mview`、~/linux-mview に写した）で同じ 6 回。最後に vfio-pci に戻した。
+
+| run | zedBSD fps | zedBSD の GPU の温度（run の後、℃） | NVK fps |
+| --- | --- | --- | --- |
+| 1 | 49.16 | 56（起動の後の idle 49） | 49.07 |
+| 2 | 49.93 | 58 | 49.34 |
+| 3 | 48.87 | 61 | 48.84 |
+| 4 | 48.74 | 63 | 48.66 |
+| 5 | 48.70 | 66 | 48.89 |
+| 6 | 48.92 | 67 | 49.31 |
+| 平均 | **49.05** | | **49.02** |
+
+- 読み: 同じ続けての条件で zedBSD と NVK は同じ（平均 49.05 対 49.02）。p010 の NVK の 50.1 は bench の中（run の間が長く GPU が冷えた状態）の値で、
+  NVK も単独の run は 49.1。温度は 6 回で 56 → 67 ℃（GPU の通常の範囲、fan は GSP の制御）で、zedBSD の fps の下がりは小さい（49.9 → 48.7〜48.9）。
+  Linux の nouveau（GSP）は hwmon を出さず、Linux 側の温度は未取得。
+- GPU の perf の行（zedBSD）: 1 frame に run 2（scene 約 19.5〜19.8 ms と present の約 0.1 ms、avg 9.8 ms）、max 19.5〜19.8 ms。
