@@ -24,7 +24,7 @@
 | P2 | q1697-i02 in-progress | [ws327](ws327/ws.md) p003 の zedBSD の guest の試験 → p007 委譲の設計（worktree p2-ws327、branch は未 merge。Mailer の途中の移行 6bb8c3c8d は build しないので p008 の後に merge） | QEMU |
 | P3 | q1696-i01 ラップアップ | [ws315](ws315/ws.md) p006 TCP の受けの buffer の自動調整（8b9523b20〜）。同時の recv 1443→2334（Linux 2341）、同時の send が 2347→1030 に落ちた件を広げる倍率で調整中。詳細は phase006/phase.md の引き継ぎ | 5330 |
 | P4 | q1698-i01 ラップアップ | [ws307](ws307/ws.md): p002 upload 済み（release rev-0、16e45a703・07c144e8e、branch agent/p4-ws307o）、p015 の QEMU は host の負荷で FAIL 2 回（3 回目が要る）、p004 clang・libcxx・gtk4 の package の build の途中、p008・p014・p007（firmware 変数の kernel driver）が残り。CI の別件 2 つ（ci.yml の qemu の zip の前の config が pc98、release.yml の ALLOW_DRAFT） | QEMU |
-| P5 | q1700-i01 ラップアップ | [ws291](ws291/ws.md) NVIDIA: p010 desktop の測り直し、p012 以降で scene-5000 を 50 fps 超えへ（worktree p5-ws291n） | 10.0.10.3 |
+| P5 | q1700-i01 返却（09:13、計測は未実施） | [ws291](ws291/ws.md) NVIDIA: kernel の build だけ（vmunix-m0）、引き継ぎ c59e5a60e（main 12a2cc467）。次の 1 手は [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ、rtx-desk-profile.sh を 2 回、p012 を立てる） | 10.0.10.3 は free |
 | Sonnet | — | [ws326](ws326/ws.md) p007 参照の list（worktree s-ws326-p007）。cleared 18 Phase。p007 の後に p015・p017 → p019 → p021（Opus）→ p022 → p026（共通部分を汎用の名前へ）・p023〜p025 | — |
 
 予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
