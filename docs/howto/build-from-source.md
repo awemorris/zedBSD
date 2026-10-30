@@ -90,7 +90,7 @@ The build ownership boundary is:
 
 The x86_64 Linux cache is an asset of release `rev-0` named after the LLVM
 version and the zedBSD patch level, currently
-`zedbsd-llvm-23.1.0-zedbsd9-x86_64-linux.tar.gz`; its SHA-256 is tracked in
+`zedbsd-llvm-23.1.0-zedbsd11-x86_64-linux.tar.gz`; its SHA-256 is tracked in
 `toolchain/llvm/version.mk`.
 `make toolchain-cache` validates the archive, installed identity, tool set,
 versions, and license. `make -j16 toolchain` remains the authoritative
