@@ -38,7 +38,10 @@ def main():
         imgs = []
         for c in r["captures"]:
             rec = json.loads((raw / c["record"]).read_text())
-            imgs.append(Image.open(rec["png"]["file"]).convert("RGB"))
+            if "png" in rec:
+                imgs.append(Image.open(rec["png"]["file"]).convert("RGB"))
+            else:
+                print("   capture", c.get("resource"), rec.get("outcome"), str(rec.get("readiness"))[:200])
         info = [(e["equal"], e["different_pixels"], e["fuzzy"]) for e in r["edges"]]
         print(n, tid, r["outcome"], info)
         if len(imgs) >= 2 and imgs[0].size == imgs[1].size:

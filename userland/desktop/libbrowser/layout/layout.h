@@ -400,7 +400,7 @@ int layout_contains_fixed(const struct layout_box *box);
 
 /* View transitions (transition.c). */
 struct layout_transition_name *layout_transition_find(const struct layout_transition *transition, const struct vm_string *name);
-int layout_transition_measure(const struct layout_tree *tree, struct layout_transition *transition, int old_state, struct vm_string *root_name);
+int layout_transition_measure(const struct layout_tree *tree, struct layout_transition *transition, int old_state);
 const struct layout_box *layout_transition_box(const struct layout_box *box, const struct vm_string *name, int depth);
 void layout_transition_release(struct layout_transition *transition);
 float layout_transition_progress(const struct css_style *style, float elapsed);

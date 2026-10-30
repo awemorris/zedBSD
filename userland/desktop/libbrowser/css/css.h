@@ -1074,7 +1074,7 @@ void css_engine_container_use(const struct css_engine *engine, size_t index, con
 void css_engine_forget_styles(struct css_engine *engine);
 int css_engine_compute(struct css_engine *engine, struct dom_element *element, const struct css_style *parent, struct css_style *style);
 int css_engine_compute_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct css_style *element_style, struct css_style *style);
-int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *const *classes, int class_count, const struct css_style *parent, struct css_style *style);
+int css_engine_compute_vt_pseudo(struct css_engine *engine, struct dom_element *element, int pseudo, const struct vm_string *name, const struct vm_string *classes, const struct css_style *parent, struct css_style *style);
 void css_initial_style(struct css_style *style);
 void css_engine_query_begin(struct css_engine *engine);
 void css_engine_query_scope(struct css_engine *engine, struct dom_element *element);

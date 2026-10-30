@@ -757,18 +757,36 @@ css_engine_compute_vt_pseudo(
 	struct dom_element *element,
 	int pseudo,
 	const struct vm_string *name,
-	const struct vm_string *const *classes,
-	int class_count,
+	const struct vm_string *classes,
 	const struct css_style *parent,
 	struct css_style *style)
 {
-	int index;
+	uint16_t word[64];
+	size_t length;
+	size_t used;
+	size_t index;
 	int error;
 
+	/* The classes are the words of a list; the first four count. */
 	engine->vt_name = name;
 	engine->vt_class_count = 0;
-	for (index = 0; index < class_count && index < 4; index++)
-		engine->vt_classes[engine->vt_class_count++] = classes[index];
+	if (classes != NULL) {
+		length = classes->length;
+		used = 0;
+		for (index = 0; index <= length; index++) {
+			if (index < length && vm_string_at(classes, index) != ' ') {
+				if (used < 64U)
+					word[used++] = vm_string_at(classes, index);
+				continue;
+			}
+			if (used > 0 && engine->vt_class_count < 4) {
+				engine->vt_classes[engine->vt_class_count] = vm_atom_from_units(engine->heap, word, used);
+				if (engine->vt_classes[engine->vt_class_count] != NULL)
+					engine->vt_class_count++;
+			}
+			used = 0;
+		}
+	}
 	engine->vt_names = 1;
 	error = css_engine_compute_pseudo(engine, element, pseudo, parent, style);
 	engine->vt_names = 0;

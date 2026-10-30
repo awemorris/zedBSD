@@ -40,6 +40,7 @@ const char css_user_agent_sheet[] =
 	"tr, td, th { vertical-align: inherit; }\n"
 	"th { text-align: center; }\n"
 	"html { color: black; font-family: serif; font-size: medium; line-height: normal; }\n"
+	":root { view-transition-name: root; }\n"
 	"body { margin: 8px; }\n"
 	"p, blockquote, figure, listing, plaintext, pre, xmp, dl { margin-block-start: 1em; margin-block-end: 1em; }\n"
 	"blockquote, figure { margin-inline-start: 40px; margin-inline-end: 40px; }\n"

@@ -771,7 +771,7 @@ box_transition_pseudo(
 {
 	struct layout_box *box;
 
-	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, NULL, 0, parent_style, style);
+	*error = css_engine_compute_vt_pseudo(css, element, pseudo, name != NULL ? name->name : NULL, name != NULL ? name->classes : NULL, parent_style, style);
 	if (*error != 0)
 		return NULL;
 	if (style->display == CSS_DISPLAY_NONE)

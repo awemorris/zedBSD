@@ -36,8 +36,17 @@ static int
 transition_layout(
 	struct page *page)
 {
+	int error;
+
 	if (!page_needs_layout(page))
 		return 0;
+
+	/* A page whose view has given it no fonts or no size yet cannot be laid out. */
+	if (page->font_paths == NULL || page->viewport_width <= 0 || page->viewport_height <= 0)
+		return EINVAL;
+	error = page_open_fonts(page, page->font_paths);
+	if (error != 0)
+		return error;
 	return page_layout(page, page->viewport_width, page->viewport_height);
 }
 
@@ -54,7 +63,6 @@ page_view_transition(
 	struct page *page;
 	struct layout_transition_name *entry;
 	const struct layout_box *box;
-	struct vm_string *root;
 	size_t index;
 	int error;
 
@@ -70,11 +78,8 @@ page_view_transition(
 		error = transition_layout(page);
 		if (error != 0 || page->layout.root == NULL)
 			return 0;
-		root = vm_atom_from_ascii(page->heap, "root");
-		if (root == NULL)
-			return 0;
 		page->transition_on = 1;
-		error = layout_transition_measure(&page->layout, &page->transition, 1, root);
+		error = layout_transition_measure(&page->layout, &page->transition, 1);
 		for (index = 0; error == 0 && index < page->transition.count; index++) {
 			entry = &page->transition.names[index];
 			box = NULL;
@@ -100,7 +105,7 @@ page_view_transition(
 	page->transition_generation++;
 	error = transition_layout(page);
 	if (error == 0 && page->layout.root != NULL)
-		error = layout_transition_measure(&page->layout, &page->transition, 0, NULL);
+		error = layout_transition_measure(&page->layout, &page->transition, 0);
 	if (error != 0) {
 		transition_end(page);
 		return 0;

@@ -111,6 +111,7 @@ struct list_walk {
 	const struct layout_tree *tree;
 	const struct layout_transition *transition;
 	int vt_hide;
+	int vt_capturing;
 	const struct layout_box *vt_capture;
 };
 
@@ -239,12 +240,15 @@ paint_build(
 		return 0;
 	wb_vector_init(&order_vt, sizeof(const struct layout_box *));
 
-	/* While a view transition is shown only its tree is painted (over the white page), the page being in its images. */
+	/* While a view transition is shown the boxes it names are painted by its images; with the root named, only its tree is painted (over the white page). */
 	if (tree->transition != NULL && tree->transition->show) {
-		list->canvas_color = LIST_CANVAS_DEFAULT;
-		walk.canvas_box = NULL;
 		walk.tree = tree;
 		walk.transition = tree->transition;
+		walk.vt_hide = 1;
+	}
+	if (tree->transition != NULL && tree->transition->show && tree->transition->count != 0 && tree->transition->names[0].is_root) {
+		list->canvas_color = LIST_CANVAS_DEFAULT;
+		walk.canvas_box = NULL;
 		error = layout_stacking_order(tree, &order_vt, &flow_index);
 		if (error != 0) {
 			wb_vector_release(&order_vt);
@@ -3406,7 +3410,7 @@ list_vt_left_out(
 	const struct layout_box *box)
 {
 	if (box->vt_tree)
-		return 1;
+		return walk->vt_capturing;
 	if (box == walk->vt_capture)
 		return 0;
 	return list_vt_named(walk, box);
@@ -3447,6 +3451,7 @@ list_vt_paint(
 
 	sub = *walk;
 	sub.vt_hide = 1;
+	sub.vt_capturing = 1;
 	sub.vt_capture = capture;
 	wb_vector_init(&order, sizeof(const struct layout_box *));
 	error = layout_stacking_order(walk->tree, &order, &flow_index);

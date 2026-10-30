@@ -18,7 +18,7 @@
 #include <stdlib.h>
 #include <string.h>
 
-static int transition_collect(const struct layout_box *box, struct layout_transition *transition, int old_state, int depth);
+static int transition_collect(const struct layout_box *box, struct layout_transition *transition, int old_state, layout_unit viewport_width, layout_unit viewport_height, int depth);
 static struct layout_transition_name *transition_add(struct layout_transition *transition, struct vm_string *name);
 static void transition_rect(const struct layout_box *box, struct layout_rect *rect);
 static float transition_ease(float progress);
@@ -121,6 +121,8 @@ transition_collect(
 	const struct layout_box *box,
 	struct layout_transition *transition,
 	int old_state,
+	layout_unit viewport_width,
+	layout_unit viewport_height,
 	int depth)
 {
 	const struct layout_box *child;
@@ -132,10 +134,17 @@ transition_collect(
 		return 0;
 	if (box->vt_tree)
 		return 0;
-	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && box->node != NULL && box->parent != NULL &&
+	if ((box->kind == LAYOUT_BLOCK || box->kind == LAYOUT_REPLACED) && box->node != NULL &&
 	    box->style.view_transition_name != NULL && box->style.display != CSS_DISPLAY_NONE) {
 		entry = layout_transition_find(transition, box->style.view_transition_name);
 		transition_rect(box, &rect);
+		if (box->parent == NULL) {
+			/* The root is the whole viewport. */
+			rect.x = 0;
+			rect.y = 0;
+			rect.width = viewport_width;
+			rect.height = viewport_height;
+		}
 		if (old_state) {
 			if (entry != NULL && entry->has_old)
 				return EEXIST;
@@ -143,6 +152,7 @@ transition_collect(
 			if (entry == NULL)
 				return ENOMEM;
 			entry->has_old = 1;
+			entry->is_root = box->parent == NULL;
 			entry->old_rect = rect;
 			entry->classes = box->style.view_transition_class;
 		} else {
@@ -155,12 +165,11 @@ transition_collect(
 			}
 			entry->has_new = 1;
 			entry->new_rect = rect;
-			if (entry->classes == NULL)
-				entry->classes = box->style.view_transition_class;
+			entry->classes = box->style.view_transition_class;
 		}
 	}
 	for (child = box->first_child; child != NULL; child = child->next) {
-		error = transition_collect(child, transition, old_state, depth + 1);
+		error = transition_collect(child, transition, old_state, viewport_width, viewport_height, depth + 1);
 		if (error != 0)
 			return error;
 	}
@@ -168,46 +177,25 @@ transition_collect(
 }
 
 /*
- * Measures a laid out tree for a transition: with old_state, makes the root's entry and an entry for each named
- * box (the old rectangles); otherwise marks the entries whose boxes are in the tree and adds the ones new to it.
+ * Measures a laid out tree for a transition: with old_state, makes an entry for the root and each named box
+ * (the old rectangles); otherwise marks the entries whose boxes are in the tree and adds the ones new to it.
  * Fails (EEXIST) when two boxes have one name.
  */
 int
 layout_transition_measure(
 	const struct layout_tree *tree,
 	struct layout_transition *transition,
-	int old_state,
-	struct vm_string *root_name)
+	int old_state)
 {
-	struct layout_transition_name *entry;
 	size_t index;
 
 	if (tree->root == NULL)
 		return EINVAL;
-	if (old_state) {
-		/* The root group comes first. */
-		if (transition->count == 0 && transition_add(transition, root_name) == NULL)
-			return ENOMEM;
-		entry = &transition->names[0];
-		entry->is_root = 1;
-		entry->has_old = 1;
-		entry->old_rect.x = 0;
-		entry->old_rect.y = 0;
-		entry->old_rect.width = tree->viewport_width;
-		entry->old_rect.height = tree->viewport_height;
-	} else {
+	if (!old_state) {
 		for (index = 0; index < transition->count; index++)
 			transition->names[index].has_new = 0;
-		if (transition->count == 0)
-			return EINVAL;
-		entry = &transition->names[0];
-		entry->has_new = 1;
-		entry->new_rect.x = 0;
-		entry->new_rect.y = 0;
-		entry->new_rect.width = tree->viewport_width;
-		entry->new_rect.height = tree->viewport_height;
 	}
-	return transition_collect(tree->root, transition, old_state, 0);
+	return transition_collect(tree->root, transition, old_state, tree->viewport_width, tree->viewport_height, 0);
 }
 
 /* The ease timing function: cubic-bezier(0.25, 0.1, 0.25, 1). */
