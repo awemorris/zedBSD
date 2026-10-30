@@ -16,6 +16,7 @@ Queue: q1719（P2）
 
 - 2026-10-30 ユーザーから、Pi 4 にも /dev/graphics を作り HAL に依存せず描画し、その上で kernel_putc を登録する、という趣旨の指示を受けた。→ 1 は sun4u の形でなく pcat の形にする: Raspberry Pi の graphics の backend を generic の graphics-device（src/drivers/generic/graphics-device.c）に登録して /dev/graphics を出し、その上の text の console が kern_text で描き kernel_putc を公開する。
 - 2026-10-30 ユーザーから次の趣旨の指示を受けた: /dev/graphics は Pi 4 だけでなく Pi 5・VisionFive 2・ODROID-C5 にも作る。手本は保守されていない sun4u でなく PC/AT にする。console は GPU の driver の最初の描画で framebuffer から切り離す PC/AT の方式（kern_text_end、src/drivers/gpu/gpu.c の最初の flip）にし、GPU の最初の描画で firmware の framebuffer を完全に手放す既存の実装（kern_text_end に ranges を渡す形）にも合わせる。
+- 2026-10-30 ユーザーから、GPU の枠組みの gpu.c も最初の flip で firmware の framebuffer を解放する形にする、という趣旨の指示を受けた。→ gpu.c の kern_text_end(NULL, 0) を、boot の framebuffer の物理の範囲を渡す形に（ghci の boot_end と同じ考え）。全ての GPU の driver に効く。
 
 ## 確かめ
 
