@@ -224,3 +224,11 @@
 | q1705 / q1705-i01 | P1（worktree `/home/awe/zedBSD-worktrees/p1-ws009r`、main aaf2bc280） | [ws009](ws009/ws.md) の受け入れと完了の形 → [ws296](ws296/ws.md) を標準廉価実装手順に組み直す設計 | 2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」 | uncleared（2026-10-30 ラップアップ。p025〜p027 cleared、p028 途中、36c56acb1） |
 | q1706 / q1706-i01 | P3（worktree `/home/awe/zedBSD-worktrees/p3-ws315`、main b776fd468、QEMU） | [BUG-367](bugs/BUG-367.md) loopback の TCP の close が戻らない件の解析と修正 | 2026-10-30 Q1（WS327 p016 で P2 が発見、AGENTS.md の Bug の扱い） | cleared（2026-10-30 Q1、BUG-367 closed、main 701b21b19） |
 | q1707 / q1707-i01 | P3（worktree `/home/awe/zedBSD-worktrees/p3-ws315`、main 36359a937、QEMU） | [BUG-369](bugs/BUG-369.md) QEMU の guest への SSH の往復の伸びの解析と修正（TIME_WAIT が原因なら F-BUG367-time-wait も） | 2026-10-30 Q1（AGENTS.md の Bug の扱い） | cleared（2026-10-30 Q1、BUG-369 closed、main e1c714fb5） |
+
+## 2026-10-30 13:50: WS074 を P8 で（q1708〜）
+
+承認: 2026-10-30 13:4x ユーザー「P8でWS074（libbrowserの改善）を実行してください。」（同日「WS074はphase-runner-lowで実行することにします。」）。同日の「WS328に関しては、WS074を止めてWS328を先に実装する」より新しい指示なので、WS074 を今再開する（WS328 は未着手のまま）。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1708 / q1708-i01 | P8（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/p8-ws074`・branch `agent/p8-ws074`、基点 main 2ba50ae52、host だけ） | [ws074-p260](ws074/phase260/phase.md)（と p261・p262） | local の host で Chromium との比較の環境を作り直し（WPT の固定 commit を自分の build へ、Debian の chromium 153.0.8010.52）、Chromium の基準と dev20 の全件の測定、その後 gap の大きい原因から libbrowser を直す。区切りごとに全件の測定で後退 0 | in-progress |

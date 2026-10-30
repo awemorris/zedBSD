@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 13:20（Q1）
+最終更新: 2026-10-30 13:50（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P5 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 返却（09:13、計測なし） | p010 desktop の測り直し → p012 以降で 3D を 50 fps 超えへ（デスクトップ機） |
 | P6 | — | — | 返却（WS282・WS284 は main に merge 済み） | 未割当 |
 | P7 | [WS313](ws313/ws.md) | ODROID-C5 の BSP と Mali | 返却（実機の結果待ち） | VF2 が空いたら C5 の実機の試験 |
-| P8 | — | — | 未使用 | — |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 13:50 起動（phase-runner-low、Sonnet 5.5 high）。local の host で Chromium との比較の環境を作り直す | dev20 の全件の測定（前回 dev19 は 3,472 のうち 2,096、60.37%）→ gap の大きい原因（grid・縦書きの baseline、track sizing、subgrid、View Transitions ほか）から直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 

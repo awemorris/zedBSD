@@ -31,18 +31,19 @@
 | P3 | q1707-i01 返却（停止） | BUG-367・BUG-369 を閉じた。次の候補は [WS221](ws221/ws.md) Jumbo frame・[WS299](ws299/ws.md) 5330 の NVMe（ユーザー: WS315 の後） | 5330・10.0.10.3 |
 | P4 | q1698-i01 返却 | [WS307](ws307/ws.md) installer: ws.md の Resume point（p015 の QEMU の 3 回目 → p004 GTK4 の試験 → p008 → p014 → p007 firmware 変数の driver の設計の続き） | QEMU |
 | P5 | q1700-i01 返却 | [WS291](ws291/ws.md) NVIDIA: [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ desktop を測る → p012 以降） | 10.0.10.3 |
+| P8 | q1708-i01 in-progress | [WS074](ws074/ws.md) Web ブラウザ（libbrowser）: [phase260](ws074/phase260/phase.md) Interop 2025 の Chromium が通る試験を全部通す。local の host で比較の環境を作り直し → dev20 の全件の測定 → gap の大きい原因から（phase-runner-low、2026-10-30 ユーザー） | host |
 | P6・P7 | 返却 | P7 は [WS313](ws313/ws.md) C5 の実機の試験（VF2 が空いてから）。P6 は未割当 | — |
 | Sonnet | — | [WS326](ws326/ws.md) H.264 decoder: 20 Phase cleared。次は p015（補間と重み）・p017（B の direct）を並べて起動 → p019 → reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
 
 **次のセッションの始めにする事**（ユーザーの指示の原文は各 ws.md・ticket）:
 1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）。
 2. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（fault の app・isolate の道は Future Work へ）。
-3. [WS328](ws328/ws.md)（libbrowser のベクトル描画と SVG）を p001 の設計（Opus）から。WS074 は止めたまま、WS328 の後。
+3. [WS328](ws328/ws.md)（libbrowser のベクトル描画と SVG）を p001 の設計（Opus）から。WS074 は 2026-10-30 ユーザー「P8でWS074（libbrowserの改善）を実行してください。」で P8 が先に再開（q1708）。
 4. [WS309](ws309/ws.md) p015（ゲームモードの V2、判断 1〜4 は決まった）を担当に。
 5. 上の表の P1・P2・P4・P5 と WS326 の Sonnet を再開。
 6. Q1 の片付け（worktree の build の一時物）: p1-ws009r の build/tmp/p028-20261030-110805・p028-run.out、p2-ws327 の build/tmp/p016-base-src・plan/ws327/tests/__pycache__、p3-ws315 の build/bug367*・bug369*・build/arm64、s-ws327-p008 の build/tmp/stale、s-ws327-p011 の build/tmp/stale-llvm、s-ws327-p009 の build/tmp/aborted-llvm、終わった s-ws326-*・s-ws327-*・s-ws009-* の worktree。
 
-**予定**（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS009 → WS296 → WS297 を 1 つずつ（標準廉価実装手順）。WS328 → WS074。
+**予定**（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS009 → WS296 → WS297 を 1 つずつ（標準廉価実装手順）。WS074 は P8 で再開（q1708）、WS328 は未着手。
 **止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd（今は取り組まない）。HAL の差分の承認は無い。
 <!-- master:agents:end -->
 
@@ -117,7 +118,7 @@
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-370 · q1708 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-370 · q1709 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的

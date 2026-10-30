@@ -11,6 +11,7 @@
 | P4 | phase-runner | ws307 (q1698-i01 返却) | `/home/awe/zedBSD-worktrees/p4-ws307o` / `agent/p4-ws307o` | returned（次は ws307 の Resume point から） | 520360247（merge fbdd143a8） |
 | P5 | phase-runner | ws291 NVIDIA (q1700-i01 返却) | `/home/awe/zedBSD-worktrees/p5-ws291n` / `agent/p5-ws291n` | returned（次は phase010 の q1700-i01 節から） | c59e5a60e（merge 12a2cc467） |
 | P6 | phase-runner＋Sonnet | ws314 p011・p012 (q1691-i01 cleared) | `/home/awe/zedBSD-worktrees/p6-ws314doc` / `agent/p6-ws314doc` | returned | 64f09ca82（merge d4ba04b96） |
+| P8 | phase-runner-low | ws074 p260 (q1708-i01) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-30 13:50 起動） | — |
 | P7 | phase-runner | ws313 (q1687-i01 返却) | `/home/awe/zedBSD-worktrees/p7-ws313e` / `agent/p7-ws313e` | returned（実機の結果待ち） | b35b6240c（merge b6649f09f） |
 
 - 同時に動かす数は 6（2026-10-29 ユーザーの P1〜P6 の指示）。VF2（主）と 5330（従）は P3、10.0.10.3 は空き（2026-10-30 09:13 P5 返却）。
