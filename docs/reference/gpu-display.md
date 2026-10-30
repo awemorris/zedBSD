@@ -16,7 +16,7 @@ The flags of `struct gpu_display_info` describe what the output offers; each fla
 
 Two name spaces describe pixel formats and must not be mixed. The `formats` field of `struct gpu_display_info` and `struct gpu_scanout_constraints` is a bit mask of `GPU_DISPLAY_FORMAT_BGRA8888` and `GPU_DISPLAY_FORMAT_RGBA8888`. The `format` field of `struct gpu_display_present` is a single value, `GPU_PIXEL_BGRA8888` or `GPU_PIXEL_RGBA8888` (defined in `include/uapi/gpu.h`). The numbers are the same, but the first is a set of bits and the second is one value; the core accepts only these two values in a present, and the driver refuses a format that the output's `formats` mask does not contain.
 
-A request that names an output that is not connected fails with `ENXIO` in the requests that depend on the connection (claim, present and wait). The driver decides; an unconnected output normally remains in the inventory with `GPU_DISPLAY_CONNECTED` clear, and its `generation` has changed.
+A request that names an output that is not connected normally fails with `ENXIO` in the requests that depend on the connection (present and wait, and claim on most drivers; the ghci display lets a claim through). The driver decides; an unconnected output normally remains in the inventory with `GPU_DISPLAY_CONNECTED` clear, and its `generation` has changed.
 
 ## Leases
 
@@ -24,7 +24,7 @@ A lease is an exclusive reservation of one plane of one output. `GPU_DISPLAY_CLA
 
 Plane 0 is the output's primary plane and is the only plane a claim names in this ABI; overlay planes and the cursor plane of an output are used through the primary lease (see [gpu-display-control.md](gpu-display-control.md)). While a plane is leased, a claim of the same plane by any open, including the open that holds it, fails with `EBUSY`. A claim on an output that is `GPU_DISPLAY_LIMITED` fails with `ENOSPC`.
 
-The requests that need the lease are the ones that carry a `lease` field: `GPU_DISPLAY_RELEASE`, `GPU_DISPLAY_PRESENT`, `GPU_DISPLAY_WAIT`, and the requests of [gpu-display-control.md](gpu-display-control.md) that act on the leased output. `GPU_DISPLAY_QUERY`, `GPU_DISPLAY_MODE`, `GPU_DISPLAY_CONSTRAINTS`, `GPU_DISPLAY_EVENTS` and `GPU_DISPLAY_REFRESH` need none.
+The requests that need the lease are the ones that carry a `lease` field: `GPU_DISPLAY_RELEASE`, `GPU_DISPLAY_PRESENT`, `GPU_DISPLAY_WAIT`, and the requests of [gpu-display-control.md](gpu-display-control.md) that act on the leased output. `GPU_DISPLAY_QUERY`, `GPU_DISPLAY_MODE`, `GPU_DISPLAY_CONSTRAINTS`, `GPU_DISPLAY_EVENTS`, `GPU_DISPLAY_REFRESH` and `GPU_DISPLAY_OVERLAY_INFO` need none.
 
 `GPU_DISPLAY_RELEASE` ends a lease explicitly. On success the driver has retired the scanout and the private buffers the lease used, and the lease value is no longer valid. Closing the last reference to the open file description ends every lease of the open in the same way. The kernel core first gives back the keyboard holds of the open's claims (see User-visible side effects) and then calls the driver's close operation, which ends the leases. After a lease ends the output belongs to nobody; what it shows is decided by the driver and is not specified here (see User-visible side effects). The next claim of the output succeeds.
 
@@ -64,7 +64,7 @@ A node with `GPU_CAP_DISPLAY_EVENTS` reports changes of its set of outputs throu
 
 The driver keeps a sequence number for the node. It starts at one and increases for every change, so a new open has not acknowledged it and must first do a complete query of the outputs. `GPU_DISPLAY_EVENTS` without `GPU_DISPLAY_EVENT_ACK` is a query: it returns the current `sequence`, and `events` is `GPU_DISPLAY_EVENT_CHANGE` when that sequence is newer than the one this open has acknowledged. A query changes nothing about readiness.
 
-The protocol is: query the events and keep the `sequence`; enumerate the outputs again with `GPU_DISPLAY_QUERY` (new `display_id` and `generation` values); then acknowledge that sequence with `GPU_DISPLAY_EVENTS` with `GPU_DISPLAY_EVENT_ACK` in `flags` and the kept value in `ack_sequence`. The acknowledgement covers only that sequence. Changes after it leave the open ready for `POLLPRI` and `events` set, so a change that happens during the re-enumeration is not lost. `ack_sequence` must be a sequence that this open has already received successfully from this request, and not newer than the current one; any other value fails with `EINVAL`, and nothing is changed. Acknowledging a sequence older than one already acknowledged is accepted and does not move the acknowledgement back.
+The protocol is: query the events and keep the `sequence`; enumerate the outputs again with `GPU_DISPLAY_QUERY` (new `display_id` and `generation` values); then acknowledge that sequence with `GPU_DISPLAY_EVENTS` with `GPU_DISPLAY_EVENT_ACK` in `flags` and the kept value in `ack_sequence`. The acknowledgement covers only that sequence. Changes after it leave the open ready for `POLLPRI` and `events` set, so a change that happens during the re-enumeration is not lost. `ack_sequence` must not be newer than the highest sequence this open has received successfully from this request, nor newer than the current one; a newer value fails with `EINVAL`, and nothing is changed. Acknowledging a sequence older than one already acknowledged is accepted and does not move the acknowledgement back.
 
 `poll()` with `POLLPRI` reports that the open has an unacknowledged change. It does so only for an open that can read and only on a node with `GPU_CAP_DISPLAY_EVENTS`; if the driver's snapshot fails, `poll()` reports `POLLERR` instead.
 
@@ -74,7 +74,7 @@ The acknowledgement belongs to the open file description, so descriptors that sh
 
 These are effects on the console and the keyboard that a program does not ask for by name.
 
-The first flip ends the text console on the display. After the first request that flips an image to a display and succeeds (`GPU_PRESENT`, `GPU_DISPLAY_PRESENT`, `GPU_DISPLAY_PRESENT_SYNC` or `GPU_DISPLAY_COMMIT`), the kernel asks the text console to end its use of the display. This happens once for the whole system, on the first successful flip of any GPU node, and it is not undone: the console no longer draws on the display for the rest of the boot, whether or not the lease ends, and a later lease on any output does not bring it back. The console's characters still reach its serial line and the log. A failed flip does not end the console. A board that has no display console, or whose console cannot stop, has nothing to stop; the request is not affected. Any other failure is logged, and the request still succeeds.
+The first flip ends the text console on the display. After the first request that flips an image to a display and succeeds (`GPU_PRESENT`, `GPU_DISPLAY_PRESENT`, `GPU_DISPLAY_PRESENT_SYNC` or `GPU_DISPLAY_COMMIT`; any successful commit counts, whatever its planes), the kernel asks the text console to end its use of the display. This happens once for the whole system, on the first successful flip of any GPU node, and it is not undone: the console no longer draws on the display for the rest of the boot, whether or not the lease ends, and a later lease on any output does not bring it back. The console's characters still reach its serial line and the log. A failed flip does not end the console. A board that has no display console, or whose console cannot stop, has nothing to stop; the request is not affected. Any other failure is logged, and the request still succeeds.
 
 A claim stops the boot splash and holds the keyboard. The first claim also ends the boot's progress display for good, if the board shows one. Each successful claim holds the console's keyboard input: while any claim exists, anywhere in the system, the keyboard events do not reach the text console. `GPU_DISPLAY_RELEASE` gives back the hold of that claim, and closing the open gives back the holds of all its claims that were not released. The keyboard reaches the console again when the last hold ends.
 
@@ -126,7 +126,7 @@ Errors:
 - `EIO`: A validation succeeded in the driver but left `width`, `height` or `refresh_millihz` zero.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EINVAL` for a mode the output cannot show or an `index` that is out of range, and `ENOENT` where an output does not exist.
+- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EINVAL` for a mode the output cannot show or an `index` that is out of range (the bcm2711 display answers `ENOTSUP` for a mode other than its one mode), and `ENOENT` where an output does not exist.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`), [ghci-display](../../userland/tests/ghci-display/main.c).
 
@@ -149,7 +149,7 @@ Errors:
 - `EIO`: The driver reported success with a zero `lease`.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through: `EBUSY` for a plane that is leased, `ENOSPC` for an output with `GPU_DISPLAY_LIMITED`, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EINVAL` for a `plane_index` other than 0 (one driver answers `EBUSY`), and `EOVERFLOW` when lease numbers are exhausted.
+- Other values: Driver answers pass through: `EBUSY` for a plane that is leased, `ENOSPC` for an output with `GPU_DISPLAY_LIMITED`, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EINVAL` for a `plane_index` other than 0 (one driver answers `EBUSY`), `ENOENT`, `EINVAL` or `ENXIO` (depending on the driver) for a `display_id` the node does not have, `EIO` for a display that is broken (amdrdna, nvrtx), and `EOVERFLOW` when lease numbers are exhausted.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_close`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -192,7 +192,7 @@ Errors:
 - `EIO`: The driver reported success with a zero `sequence`.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EBUSY` for a lease that is not this open's or that has ended (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `EINVAL` for a frame size, format or stride the output does not accept, `ETIMEDOUT` for an adoption that did not come, and `EIO` for a lost GPU. After `ETIMEDOUT` the output may keep the frame's buffers and refuse the lease's later presents with `EBUSY`.
+- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EBUSY` for a lease that is not this open's or that has ended (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `EINVAL` for a frame size, format or stride the output does not accept, `ETIMEDOUT` for an adoption that did not come, `EIO` for a lost GPU, and `ENODEV` for a failed transport (venus). After `ETIMEDOUT` the output may keep the frame's buffers and refuse the lease's later presents with `EBUSY`.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_present_resource`, `gpu_display_ungated`, `gpu_display_admit`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -202,7 +202,7 @@ Requires: open mode R; capability `GPU_CAP_DISPLAY`.
 
 Waits until a presented frame has been adopted. `lease` must be this open's and `sequence` the number that `GPU_DISPLAY_PRESENT` (or `GPU_DISPLAY_COMMIT`) returned. `timeout_ns` bounds the wait on the drivers that wait (ghci and bcm2711): zero answers at once, and one call waits at most one second whatever the value. The other drivers do not use `timeout_ns` (see below). On success `completed_sequence` is the highest number adopted together with every lower number, and is at least `sequence`; `present_time_ns` is the time of that adoption in nanoseconds and `generation` is the output's generation. The three output fields must be zero on input.
 
-On an output whose presents return only once adopted, the request answers at once and ignores `timeout_ns`. A request that is not ready answers `EAGAIN` when `timeout_ns` is zero, and `ETIMEDOUT` when the time ran out. A signal ends the wait with `EINTR` on the bcm2711 display only; the wait of the ghci display does not end on a signal. There is no cancellation request, and a new call waits again. The lease ending during the wait is an error (`EBUSY`).
+On an output whose presents return only once adopted, the request answers at once and ignores `timeout_ns`. The i915 node also ignores `timeout_ns`, but it first waits for the flip of the lease's newest present to latch and fails with `EIO` if the flip does not latch. A request that is not ready answers `EAGAIN` when `timeout_ns` is zero, and `ETIMEDOUT` when the time ran out. A signal ends the wait with `EINTR` on the bcm2711 display only; the wait of the ghci display does not end on a signal. There is no cancellation request, and a new call waits again. The lease ending during the wait is an error (`EBUSY`).
 
 Whether other requests of the open run during the wait depends on the node (see [gpu.md](gpu.md)). On failure the argument is not written.
 
@@ -214,7 +214,7 @@ Errors:
 - `EINVAL`: `version` or `size` is not the structure's; `lease` is zero; `completed_sequence`, `present_time_ns` or `generation` is not zero.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through, and the header lists them: `EAGAIN` when `timeout_ns` is zero and the sequence is not adopted (also when nothing has been presented yet), `ETIMEDOUT` when the time ran out, `EINTR` on a signal (bcm2711 only), `EBUSY` for a lease that is not this open's or that ended during the wait (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `ENXIO` for an output that is not connected, and `EINVAL` for a `sequence` the lease has not been given.
+- Other values: Driver answers pass through, and the header lists them: `EAGAIN` when `timeout_ns` is zero and the sequence is not adopted (also when nothing has been presented yet), `ETIMEDOUT` when the time ran out, `EINTR` on a signal (bcm2711 only), `EBUSY` for a lease that is not this open's or that ended during the wait (some drivers answer `EPERM` or `EINVAL` for a foreign lease), `ENXIO` for an output that is not connected, `EINVAL` for a `sequence` the lease has not been given (the bcm2711 display instead waits for it and answers `EAGAIN` or `ETIMEDOUT`), `EIO` when the i915 flip did not latch, and `ENODEV` for a failed transport (venus).
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_ungated`), [hvs-load](../../userland/tests/hvs-load/main.c).
 
@@ -224,7 +224,7 @@ Requires: open mode R; capability `GPU_CAP_DISPLAY_EVENTS`.
 
 Queries the display-change sequence of the node, or acknowledges one, for this open (see Display events). The request does not change the display and does not wait: it runs outside the open's admission, so it works while another thread of the same open presents or waits.
 
-A query has `flags` zero and `ack_sequence` zero. An acknowledgement has `flags` set to `GPU_DISPLAY_EVENT_ACK` and `ack_sequence` set to a nonzero sequence this open has already received. `events`, `sequence` and `reserved` must be zero on input, and `flags` has no other bit. The reply gives the node's current `sequence` and, in `events`, `GPU_DISPLAY_EVENT_CHANGE` if a change newer than the acknowledged one is pending after this request. The reply describes the state after the acknowledgement of this request and not later events. The kernel records the observation and the acknowledgement only after the reply has been copied out.
+A query has `flags` zero and `ack_sequence` zero. An acknowledgement has `flags` set to `GPU_DISPLAY_EVENT_ACK` and `ack_sequence` set to a nonzero sequence that is not above the highest one this open has already received. `events`, `sequence` and `reserved` must be zero on input, and `flags` has no other bit. The reply gives the node's current `sequence` and, in `events`, `GPU_DISPLAY_EVENT_CHANGE` if a change newer than the acknowledged one is pending after this request. The reply describes the state after the acknowledgement of this request and not later events. The kernel records the observation and the acknowledgement only after the reply has been copied out.
 
 Errors:
 
@@ -244,7 +244,7 @@ Requires: open mode none; capability `GPU_CAP_DISPLAY`.
 
 Returns the requirements for getting frames to one generation of an output, before any allocation or import. `display_id` and `generation` must be nonzero and must be those of a query; every other input field must be zero. The reply gives `flags` (the routes `GPU_SCANOUT_SHARED`, `GPU_SCANOUT_COPY` and `GPU_SCANOUT_FOREIGN`), `formats` (a mask of `GPU_DISPLAY_FORMAT_BGRA8888` and `GPU_DISPLAY_FORMAT_RGBA8888`), the stride and offset alignments in bytes (zero means byte alignment, otherwise a power of two), `placement` (a mask of `GPU_PLACEMENT_DMA32`, `GPU_PLACEMENT_CONTIGUOUS` and `GPU_PLACEMENT_COHERENT` that the allocation must meet, see [gpu-memory.md](gpu-memory.md)) and `max_dma_address` (the highest address the display can read; zero means the backend exposes no limit). The requirements describe the output; they do not promise that a particular allocation can be shown.
 
-The request needs neither a read nor a write open. The kernel checks the reply: unknown route, placement or format bits, a route `GPU_SCANOUT_COPY` on a node without `GPU_CAP_RESOURCE` and `GPU_CAP_TRANSFER`, alignments that are not powers of two, a route `GPU_SCANOUT_FOREIGN` without `GPU_SCANOUT_SHARED` or without an import operation, or a changed `display_id` or `generation` all fail with `EIO`. On failure the argument is not written.
+The request needs neither a read nor a write open. The kernel checks the reply: unknown route, placement or format bits, a route `GPU_SCANOUT_COPY` on a node without `GPU_CAP_RESOURCE` and `GPU_CAP_TRANSFER`, alignments that are not powers of two, a route `GPU_SCANOUT_FOREIGN` without `GPU_SCANOUT_SHARED` or without an import operation, a nonzero `reserved`, or a changed `display_id` or `generation` all fail with `EIO`. On failure the argument is not written.
 
 Errors:
 
@@ -254,7 +254,7 @@ Errors:
 - `EIO`: The driver's reply breaks the rules above.
 - `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (requests that run under it).
-- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, and `ENOENT` or `EINVAL` for an output that does not exist.
+- Other values: Driver answers pass through: `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, and `ENOENT` or `EINVAL` for an output that does not exist (the bcm2711 display answers `ENXIO`). The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_constraints_ioctl`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -266,8 +266,8 @@ Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/dr
 | `GPU_DISPLAY_VIRTUAL_CLOCK` | 2 | The output has no scanout of its own: its refresh boundaries and presentation times come from a virtual clock. Used with `GPU_DISPLAY_REFRESH` (see gpu-display-control.md). |
 | `GPU_DISPLAY_FIFO` | 4 | The output takes whole-frame presents shown in the order presented, one number each, so a program can offer a FIFO present mode. Set on every output of the drivers in the tree. |
 | `GPU_DISPLAY_ATOMIC_MODE_PRESENT` | 8 | The `width`, `height` and `refresh_millihz` of a present select the output's mode together with the frame in one operation. Without it a different frame size may be refused or shown at the output's fixed mode. |
-| `GPU_DISPLAY_ACTIVE` | 16 | The plane is showing an image now; clear for an output that is dark or that no lease has presented to. |
-| `GPU_DISPLAY_BLOB` | 32 | The output accepts `GPU_DISPLAY_PRESENT_BLOB`: a shared allocation is shown without a copy. |
+| `GPU_DISPLAY_ACTIVE` | 16 | The plane is showing an image now; clear for an output that is dark. Most drivers set it only once a lease has presented a frame; some also set it for an image that no lease presented (the bcm2711 display always sets it). |
+| `GPU_DISPLAY_BLOB` | 32 | The output accepts `GPU_DISPLAY_PRESENT_BLOB`: a shared allocation is shown without a copy. The bcm2711 display node accepts `GPU_DISPLAY_PRESENT_BLOB` without setting the flag. |
 | `GPU_DISPLAY_POWER_CONTROL` | 64 | `GPU_DISPLAY_POWER` works on the output; set only on a node with `GPU_CAP_DISPLAY_CONTROL`. |
 | `GPU_DISPLAY_POWERED_OFF` | 128 | The lease holder has powered the output off with `GPU_DISPLAY_POWER`. |
 | `GPU_DISPLAY_REFRESH_COUNTER` | 256 | `GPU_DISPLAY_REFRESH` reports the output's refresh boundaries; set only on a node with `GPU_CAP_DISPLAY_CONTROL`. |
@@ -397,7 +397,7 @@ Sources: [gpu-scanout.h](../../include/uapi/gpu-scanout.h), [gpu.c](../../src/dr
 | 8 | 4 | `uint32_t` | `flags` | in | Zero for a query, or `GPU_DISPLAY_EVENT_ACK` to acknowledge `ack_sequence`. |
 | 12 | 4 | `uint32_t` | `events` | out | `GPU_DISPLAY_EVENT_CHANGE` if a change newer than the acknowledged one is pending after this request, otherwise zero. Must be zero on input. |
 | 16 | 8 | `uint64_t` | `sequence` | out | The node's current display-change sequence; starts at one. Must be zero on input. |
-| 24 | 8 | `uint64_t` | `ack_sequence` | in | Sequence to acknowledge: nonzero with `GPU_DISPLAY_EVENT_ACK`, and a value this open has received; zero for a query. |
+| 24 | 8 | `uint64_t` | `ack_sequence` | in | Sequence to acknowledge: nonzero with `GPU_DISPLAY_EVENT_ACK`, and not above the highest sequence this open has received; zero for a query. |
 | 32 | 8 | `uint64_t` | `reserved` | zero | Reserved; must be zero. |
 
 #### `struct gpu_scanout_constraints`

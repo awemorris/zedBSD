@@ -148,7 +148,11 @@ request that takes the admission, the display requests that run outside it,
 `GPU_JOB_CAPACITY`, and every new submission or job reservation. Requests that
 only look at what the open already has still answer: `GPU_COMMAND_WAIT`
 reports the records the open holds, `GPU_JOB_POLICY` reports the policy, and
-the fence requests do not look at the device's state. An open on the failed
+the fence requests other than `GPU_FENCE_BIND` do not look at the device's
+state. A request that binds a fence to new work (`GPU_FENCE_BIND`, and a
+`GPU_COMMAND_SUBMIT_SYNC`, `GPU_DISPLAY_PRESENT_SYNC` or `GPU_DISPLAY_COMMIT`
+that names a signal fence, once its wait fence has completed) fails with
+`ENODEV` on a failed device, whatever error the device recorded. An open on the failed
 device fails with the recorded error unless it recovers the device. A device can recover
 only when `gpu_recover_open` finds that the new open is the only one: every
 older open of the device has been closed, no capability exported from the
@@ -211,8 +215,8 @@ are:
 - `struct gpu_image_descriptor` and `struct gpu_allocation_descriptor` carry
   their own `version` and `size`. On export the kernel checks them like a
   top-level header: both must match, and the description must pass the
-  request's checks, otherwise `EINVAL` (or `EOPNOTSUPP` for an unsupported
-  tiling or pixel format). On import the descriptor is an output: it must be
+  request's checks, otherwise `EINVAL` (or, for an image descriptor,
+  `EOPNOTSUPP` for an unsupported tiling, memory type or pixel format). On import the descriptor is an output: it must be
   all zero on input, and the kernel returns the description stored with the
   exported capability.
 
