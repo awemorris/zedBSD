@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 23:40（Q1）
+最終更新: 2026-10-31 00:08（Q1）
 
 ## 担当（P1〜P8）
 
@@ -10,7 +10,7 @@
 | P1 | [WS291](ws291/ws.md) | GPU の描画の速さ（Intel i915、5330 の Alder Lake の段） | 起動（q1731）。p022: main の kernel の起動と mview の確かめ、5330 の Linux（ANV）で約 50 fps の scene を決める | 今の fps → 改善（WS313 の ODROID-C5 は実機の結果待ちのまま） |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（q1726）。p020: qs40 × 13・1920x1080 を 26.6 fps から 50 fps 以上へ | profile（TA と 3D の分け、解像度に比例する費用、頂点の側）→ 改善 |
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段） | 起動（q1728）。p013: big-1000（52 対 NVK 136 fps）・subs-1000（10.9 対 75.4 fps）の CPU の費用 | profile → nvrtx の record・submit の改善 |
-| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 起動し直し（q1730、plan/ws141/temp の許可）。driver の欠け（indexed・instance・mip・直の fetch）の実装と host 試験。試験の image は p4-ws291pi/build/ws291-p021/rpi5-p021.img | 実機の起動の後に clock を確かめて目標を確定 → 改善 |
+| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の V3D 7.1 の段） | 返却。host で driver の欠け（indexed・instance・直の fetch・mip の第 1 段）を実装、build と host 試験 PASS。実機は未、branch は未 merge（Pi 4 の desktop の回帰の確かめ待ち） | Pi 5 の起動の後: image を作り直し、desktop の回帰、clock の確かめ、fps の計測 |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
 | P7 | — | — | 返却（WS009 completed、2026-10-30） | 次は WS296（WS009 の後の予定） |
