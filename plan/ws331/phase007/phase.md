@@ -2,7 +2,7 @@
 
 # ws331-p007: HAL の early console の framebuffer の map を、kernel が外せる形に（amd64 の fb_window を他の platform へ）
 
-Status: in-progress（P2 の作業は済み、判定は Q1）
+Status: cleared（2026-10-30 Q1。実機の Pi・ODROID-C5、RAM の中の framebuffer の道、VF2 の画面の目視、実の GPU の flip での end は未実施）
 Parent: [WS331](../ws.md)
 Queue: q1720（P2）
 
