@@ -2,7 +2,7 @@
 
 # ws009-p022: DOC-54 gpu-requests.md: 要求の索引の 2 列と共通の errno の表
 
-Status: planned（2026-10-30 P1 の設計、q1701。p009 を節ごとに分けた物）
+Status: in-progress（書いた・照合 PASS。cleared は Q1 が決める。2026-10-30 の起動）
 Parent: [WS009](../ws.md)
 Approval: 2026-10-27 ユーザーの回答（クリック）「今書く」（DOC-54）。2026-10-30 ユーザー「WS009、WS296・WS297は標準廉価実装手順を適用してphaseを作り替え、今から実行してOKです。ただ、1 WSずつ実施します。」
 実装の担当: Sonnet 5.5 high（1 回の起動）
@@ -56,4 +56,53 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu-req
 
 ## 結果
 
-（未実施）
+2026-10-30、Sonnet 5.5 high（1 回の起動）。作った物: `docs/reference/gpu-requests.md`（134 行。導入・索引の 2 列の説明 3 段落・errno の表 21 行・driverが返す値の注意）。
+基点の後の UAPI の変化: `git log --oneline 4dfcce008..HEAD -- include/uapi/gpu*.h include/uapi/sysctl.h include/uapi/errno.h src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c userland/desktop/libvulkan/context.c` は 0 件（出力なし）。
+
+### 実行した command と最後の行
+
+- `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --final docs/reference/gpu-requests.md` → `check-gpu-uapi-doc: PASS (14 files, 46 index rows, 46 request sections, 98 constant rows, 47 structures, 20 capset rows, 0 placeholders, final 1 files)`
+- `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008` → `check-gpu-uapi-doc: PASS (14 files, 46 index rows, 46 request sections, 98 constant rows, 47 structures, 20 capset rows, 0 placeholders, final 0 files)`
+- `timeout 120 .../noct plan/ws009/tests/check-relative-links.noct docs/reference docs/architecture` → `Markdown relative-link check: PASS (663 links)`
+- `git diff --check` → 出力なし（終了 0）
+
+### 自分で決めた点
+
+- 索引の Open mode・Capability は 46 要求の `Requires:` の行から script で写し、その後 gpu.c の入口（`gpu_ioctl_body` と各 handler。`gpu_display_ioctl`・`gpu_fence_ioctl`・`gpu_dependency_ioctl`・`gpu_commit_ioctl`・`gpu_export_ioctl`・`gpu_import_ioctl` など）で一つずつ読み直した。食い違いは無く、どの file の `Requires:` も直していない。
+- `GPU_RESOURCE_IMPORT` の capability は `none`（`GPU_CAP_SHARE` または scanout の import_image。bit でない条件が片方なので Y に書かない規則）。`GPU_RESOURCE_DESTROY` も `none`（`GPU_CAP_RESOURCE | GPU_CAP_BLOB` または scanout の import_image）。索引の前の説明に理由を書いた。
+- どの要求も Open mode が `RW` ではない（`RW` は表に現れない）。
+- 二つの検査（open mode と capability）の順は要求で違う（display の要求・`GPU_DISPLAY_EVENTS`・`GPU_DISPLAY_REFRESH`・`GPU_FENCE_*` は capability が先、他は open mode が先）。code で確かめて索引の前に書いた。
+- errno の表は各節の `Errors:` から集めた 21 値。`ENXIO` と `ECANCELED` は kernel 自身の検査では返さない（driver と記録された完了の error）ので表に入れず、表の後に注意として書いた。`ENOTSUP` は `EOPNOTSUPP` と同じ値なので 1 行にした。
+
+### 統合の Phase（p023）への引き継ぎ
+
+- `Requires:` と gpu.c の食い違い: 無し（46 件とも一致）。
+- gpu.md の「Requests that observe state need a readable open ... a few need both or neither」の「both」: 全要求を見て `RW` の要求は無い（`neither` だけ）。gpu.md の文は「both」を含み、索引と合わない。p023 で gpu.md を直すか判断を。
+- gpu.md の「A descriptor that does not name a GPU fence fails with EBADF or EINVAL」: gpu.c の `gpu_fence_get` は `EBADF` を返す（`handle_fd_get` が NULL）。`EINVAL` になる条件は未確認。
+
+### 節ごとの主張の表（文書には置かない）
+
+| 主張（節と要約） | 根拠 | 試験 |
+| --- | --- | --- |
+| 索引: 各要求の Open mode と Capability | `gpu_ioctl_body`・各 handler の入口（`session->readable`・`writable`・`GPU_CAP_*` の検査） | 無し（照合の script が `Requires:` と索引を照らす） |
+| 索引: 検査の順（display・fence は capability が先、他は open mode が先） | `gpu_display_ioctl`・`gpu_commit_ioctl`・`gpu_events_ioctl`・`gpu_refresh_ioctl`・`gpu_fence_ioctl`（capability が先）、`gpu_create_ioctl`・`gpu_blob_ioctl`・`gpu_submit_ioctl`・`gpu_job_reserve_ioctl`・`gpu_dependency_ioctl` ほか（writable が先） | 無し |
+| errno `EINVAL`: 資源の handle が不明・破棄済み・他の open の物は `EINVAL` | `gpu_resource_lookup` | 無し |
+| errno `EOPNOTSUPP`: 不明な要求番号 | `gpu_ioctl_body` の `default:` | 無し |
+| errno `EACCES`: open mode の不足 | 各 handler の入口 | 無し |
+| errno `ENOENT`: 完了 record の sequence が無い | `gpu_wait_ioctl` ほか（`return ENOENT`） | 無し |
+| errno `EBADF`/`EPERM`: fence の descriptor・所有 | `gpu_fence_get`、`gpu-fence.c` と `gpu_fence_state_ioctl` の `EPERM` | 無し |
+| errno `ENODEV`/`EIO`: 撤去と記録された失敗 | `gpu_session_enter`、`gpu_session_error_locked`、`gpu_session_fail_locked` | 無し |
+| errno `EBUSY`: 再入 | `gpu_session_enter` | 無し |
+| errno `ESRCH`/`E2BIG`/`ENOSPC` | `gpu_export_install`、`gpu_submit_ioctl`、`gpu_create_ioctl` | 無し |
+| errno `ECANCELED`/`ENXIO` は kernel の検査では返さない | `grep ECANCELED`（`gpu_completion_discard` の completion の status と driver の完了）、`ENXIO` は gpu.c に無い | 無し |
+
+### 3 つの読み直し（gpu.c の code を読み直した）
+
+1. `GPU_RESOURCE_DESTROY` の capability が `none`: `gpu_destroy_ioctl` は writable を検査し、`(GPU_CAP_RESOURCE | GPU_CAP_BLOB) == 0` の時だけ scanout の import_image の有無で `EOPNOTSUPP` を返す。bit と bit でない条件の「どれか」なので Y は `none`。合う。
+2. `resource handle` は `EINVAL`: `gpu_resource_lookup` は handle が 0 でも見つからなくても `EINVAL` を返す。`ENOENT` は完了 record（`gpu_wait_ioctl`、job の commit・cancel）にだけ。合う。
+3. 検査の順: `gpu_display_ioctl` は `GPU_CAP_DISPLAY` の後に `readable`/`writable`、`gpu_fence_ioctl` は `GPU_CAP_FENCE` の後に access、`gpu_job_reserve_ioctl` は `writable` の後に `GPU_CAP_JOB`。合う。
+
+### 未確認・未実施
+
+- 表の `ESRCH`・`EMFILE` の `GPU_FENCE_CREATE` の分は、各節の `Errors:` から写した（`gpu_fence_create_ioctl` の descriptor の install の経路は読み切っていない）。`EMFILE` は gpu.c に文字が無く、descriptor table の側の値。
+- QEMU・実機の試験は無し（文書のみ）。
