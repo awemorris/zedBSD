@@ -1,57 +1,113 @@
 # Managed WLAN administration
 
-Status: current for the managed WLAN v1 interface
+Status: current for the managed WLAN interface of `/sbin/net`
 
-The supported high-level interface is `/sbin/net wifi`. It manages one global
-WLAN policy through root `networkd`, selects saved WPA2-Personal/CCMP profiles,
-and acquires IPv4 configuration only after the controlled port is authorized.
+The supported high-level interface is `/sbin/net wifi`. It saves
+WPA2-Personal/CCMP networks in per-account credential stores and manages one
+global WLAN policy through root `networkd`, which joins a saved network and
+acquires IPv4 configuration only after the controlled port is authorized.
 No high-level command accepts an interface operand.
 
 The commands and configuration model build for the maintained amd64 and i386
-base systems. Earlier acceptance covers RTL8822BU 2.4-GHz and Japan W52
-5-GHz operation. Later q124 tests cover AX211 PCI passthrough together with
-a physical TP-Link Archer T3U Plus (USB 2357:0138) in QEMU. Either radio may
-become wlan0 or wlan1. This does not claim DFS, W53/W56, WPA3, roaming, AP mode,
-or universal freedom from firmware initialization failures.
+base systems. The radios used with this interface are the RTL8822BU (2.4 GHz
+and Japan W52 5 GHz) and the Intel AX211; either may become `wlan0` or
+`wlan1`. This does not claim DFS, W53/W56, WPA3, roaming, AP mode, or
+universal freedom from firmware initialization failures.
 
 ## Command grammar
 
-The complete public v1 grammar is:
+The complete public grammar is:
 
 ```text
-net wifi set-key SSID PASSPHRASE [auto]
+net wifi add SSID [--password PASSWORD] [--auto yes|no]
+net wifi modify SSID [--password PASSWORD|-] [--auto yes|no]
+net wifi delete SSID
 net wifi enable
 net wifi disable
 net wifi list
 net wifi connect SSID
 net wifi disconnect
+net wifi session open|close [account]
 ```
 
 These forms are available both as arguments to `/sbin/net` and within the
-argument-free interactive `net>` console. `auto` is the only optional policy
-word accepted by `set-key`. Omitting it creates a manual profile; an explicit
-`manual` argument is rejected. Supplying `wlan0`, another interface name, a
-UID, a file path, or a credential to any other `net wifi` operation is also a
-syntax error.
+argument-free interactive `net>` console, where the leading `net` is left
+out. Supplying `wlan0`, another interface name, a file path, or a credential
+to `enable`, `disable`, `list`, `connect` or `disconnect` is a syntax error.
+`connect` takes an SSID of 1 to 32 bytes.
 
-For example, an administrator may save an automatically eligible profile and
-enable management with:
+## Saving networks
+
+`add`, `modify` and `delete` change the credential store of the account that
+runs the command (see [Credential stores and format](#credential-stores-and-format));
+an account never changes another account's saved networks.
+
+- `add SSID` saves a network that is not saved yet and appends it to the
+  store. `--auto` defaults to `yes`, which makes the network eligible for
+  automatic joining; `--auto no` saves it for an explicit `connect` only.
+  Adding an SSID that is already saved fails with `Wi-Fi network SSID is
+  saved already; use net wifi modify to change it`.
+- `modify SSID` changes only what it is given: `--password` replaces the key,
+  `--auto` replaces the mode, and at least one of them is required. The
+  profile keeps its place in the store. Modifying an SSID that is not saved
+  fails with `Wi-Fi network SSID is not saved`.
+- `delete SSID` forgets a saved network; the later profiles keep their order.
+  It takes no option. If the current managed connection was made with the
+  deleted profile's key, `networkd` leaves that network and searches again.
+- Each option may be given once. An unknown option, a missing value, or an
+  `--auto` value other than `yes` or `no` is a syntax error.
+
+The key need not appear on the command line. `add` without `--password`, and
+`modify` with `--password -`, read the key from standard input: on a
+terminal after a `Password:` prompt with echo turned off, otherwise as one
+line. The line end (and a carriage return before it) is not part of the key;
+an empty line, end of input, or a key longer than 63 characters is refused.
+`add --password -` is refused, because leaving `--password` out already
+means standard input.
 
 ```sh
-net wifi set-key 'EXAMPLE-SSID' 'REPLACE-WITH-SECRET' auto
+net wifi add 'EXAMPLE-SSID'
 net wifi enable
 net wifi list
 ```
 
-The passphrase argument is visible to the invoking shell and may be retained
-in shell history. Avoid entering a real credential in a recorded terminal,
-script, bug report, or shared command log. `set-key` clears its mutable argv
-copy before returning, but it cannot erase copies retained by the parent shell.
+A key given with `--password` is visible to the invoking shell and may be
+retained in shell history. `net` overwrites its own argv copy of the key and
+its input buffer once the change has been applied, but it cannot erase copies
+held by the parent shell. The interactive `net>` console does not add
+`wifi add` and `wifi modify` lines to its own history.
+
+After a successful change, `net` tells `networkd` that a store changed. The
+notice carries no account, key or SSID; `networkd` takes the account from the
+socket's peer credentials. If the notice cannot reach `networkd`, the change
+is still saved and `net` warns `Wi-Fi network saved; networkd notification
+failed`.
+
+## Login sessions
+
+An account's own store is used for automatic joining only while that account
+has an open login session. `sessiond` runs `net wifi session open UID` after a
+login and `net wifi session close UID` after the logout, as root. Without an
+account operand the command is about the account that runs it.
+
+Root may name any account in the account database. A member of the `network`
+group may name only itself. At most eight sessions are listed at a time; a
+further `open` fails with `ENOSPC`. Opening a session that is already listed
+moves it to the newest place. The list starts empty when `networkd` starts,
+so a session that stayed open across a restart of `networkd` counts again
+from its next login.
+
+Closing a session removes that account's store from the candidates. If the
+account owns the policy, the policy goes back to root, the connection ends and
+the search starts again. If the policy is root's but the current connection's
+key came from the closing account's store, that connection ends and the
+search resumes. Closing root's session ends nothing, because root's store is
+the system's and stays a candidate.
 
 ## Process and authority boundary
 
 ```text
-person or desktop
+person, sessiond or desktop
         |
         v
    /sbin/net
@@ -66,18 +122,21 @@ root networkd ---- /sbin/wifi ---- WLAN ioctls and link state
 `networkd` listens on `/run/networkd.sock`, owned by `root:network` with mode
 `0660`. It obtains the connecting process's effective UID from the kernel with
 `SO_PEERCRED`; request fields cannot select or impersonate another account.
-Root and members of the `network` group may reach the administration socket,
-but the active managed policy still has one authenticated owner UID. Root may
-override that owner. A non-root administrator may mutate only a policy it owns,
-except that `enable` may validate and install that caller as the new owner.
 
-`net` remains stateless. It writes credentials locally only for `set-key` and
-sends no passphrase, UID, home directory, profile record, or interface name in
-a global WLAN request. `networkd` derives the profile location from the
-attested UID, reads a selected credential only when needed, passes it to one
-private `/sbin/wifi` child on descriptor 4, and wipes all operation-local
-copies when the child ends. The persistent profile file is the only long-lived
-passphrase owner.
+The enabled policy has one owner account, whose store is a candidate besides
+the system's and the open sessions' stores. Root and every member of the
+`network` group may control the policy whoever owns it: `enable`, `disable`,
+`connect` and `disconnect` are not reserved to the owner. `enable` makes the
+caller the owner. A `connect` by an account that does not own the policy moves
+the policy to that account, and the key comes from that account's own store.
+Any other account is refused with `EPERM`.
+
+`net` sends no passphrase or profile record, and no interface name, in a
+WLAN request. `networkd` derives each store's location from the account,
+reads a selected credential only when needed, passes it to one private
+`/sbin/wifi` child on descriptor 4, and wipes all operation-local copies when
+the child ends. The persistent store files are the only long-lived passphrase
+owners.
 
 The `ZNV2` protocol on `/run/networkd.sock` and the private
 `wifi --machine --passphrase-fd=4` form are internal implementation contracts,
@@ -85,20 +144,21 @@ not public administration interfaces.
 
 ## Credential stores and format
 
-`net wifi set-key` selects the store from its effective UID:
+Each account has one store, selected from the effective UID:
 
 | Effective UID | Store |
 | --- | --- |
-| `0` | `/etc/wifi.conf` |
+| `0` | `/etc/wifi.conf` (the system's store) |
 | nonzero | `.wifi.conf` below that UID's passwd-record home directory |
 
-The implementation does not trust `HOME`. `sudo net wifi set-key ...`
-therefore updates the root store intentionally. The store, lock, and temporary
-generation are checked as single-link regular files with the selected owner and
-group and mode `0600`; symlinks, replacement races, unsafe directory ownership,
-and group/world-writable parent directories are rejected. Publication uses a
-same-directory temporary file, validation, sync, and atomic rename. Replacing
-an existing SSID preserves its profile order; a new SSID is appended.
+The implementation does not trust `HOME`. `sudo net wifi add ...` therefore
+updates the system's store. The store, lock, and temporary generation are
+checked as single-link regular files with the selected owner and group and
+mode `0600`; symlinks, replacement races, unsafe directory ownership, and
+group/world-writable parent directories are rejected. Every change is one
+locked rewrite: the store is read and parsed under its lock, changed, written
+to a same-directory temporary file that is read back and validated, synced,
+and renamed over the old one. A refused change leaves the store as it was.
 
 The canonical version-1 file begins with `wifi-conf 1` and contains one record
 per profile:
@@ -116,14 +176,13 @@ contain 8--63 printable ASCII bytes. Quoted fields accept `\"`, `\\`, `\t`,
 bytes in total. Duplicate SSIDs, unsupported security/mode words, carriage
 returns, malformed escapes, and trailing syntax are errors.
 
-Use `net wifi set-key` instead of editing the file by hand. A valid manual mode
-is written by omitting `auto` from the command even though the canonical file
-spells that stored mode as `manual`.
+Use `net wifi add`, `modify` and `delete` instead of editing the file by hand.
+`--auto yes` is stored as `auto` and `--auto no` as `manual`.
 
 ## Selection and state
 
 There is at most one managed connection across all detected WLAN interfaces.
-The persistent public policy states are:
+The policy states are:
 
 | State | Meaning |
 | --- | --- |
@@ -132,30 +191,68 @@ The persistent public policy states are:
 | `connected` | One selected radio owns the managed L2/L3 connection |
 | `manual-disconnected` | Owner retained and radios scan, but automatic selection is suppressed |
 
-`connecting` and `reconnecting` may be visible briefly in `net wifi list`, but
-are bounded operation transients rather than persistent policy states. The
-first list line has the form `wifi state=STATE interface=NAME`; `-` denotes no
-selected interface. The remaining bounded output reports each discovered
-radio and its current scan cache without displaying credentials.
+`connecting`, `reconnecting` and `disconnecting` may be visible briefly in
+`net wifi list`, but are bounded operation transients rather than persistent
+policy states.
 
-`enable` first validates the caller's fixed store and obtains a stable radio
-enumeration without changing the existing policy. It then brings usable radios
-up and starts asynchronous scans. An empty successful enumeration is a valid
-`auto-searching` hotplug-wait state. If some radios fail preparation, selection
-continues with the usable radios in their original stable order.
+`net wifi list` reports, for each discovered radio, a line of the form
+`interface=NAME snapshot-age-ms=AGE scan-snapshot=available` (or
+`scan-snapshot=not-yet-observed`) followed by its current scan cache, without
+credentials. The last line is the policy record:
 
-Automatic selection walks `auto` profiles in file order, then chooses the first
-stable-discovery-order radio currently reporting a supported visible candidate.
-It does not wait for every other radio's scan to finish. Failed radios are
-skipped and later candidates can be considered in subsequent sweeps. Manual
-`connect SSID` requires an enabled policy and an exact saved profile, whether
-that profile is marked manual or auto; it uses the same stable radio rule.
-DHCP starts only after WPA2/CCMP authorization succeeds.
+```text
+wifi state=STATE interface=NAME owner=UID store=UID sessions=LIST ssid=HEX rejected=LIST scan=N
+```
 
-Saving an `auto` profile after `enable` notifies the active policy and permits
-automatic connection. Repeating `enable` for the existing healthy policy
-preserves its lease rather than launching another DHCP client. The selected
-radio alone owns managed IPv4; loser scans are stopped when selection commits.
+`interface` is `-` when no radio is selected. `owner` is the policy owner's
+UID. `store` is the UID whose store gave the current connection's key, or `-`.
+`sessions` lists the UIDs with an open session, oldest first, separated by
+commas, or `-`. `ssid` is the current connection's SSID in lower-case hex, or
+`-`. `rejected` lists remembered key refusals as `UID:SSID-IN-HEX`, or `-`.
+Account numbers are not secret; keys never appear.
+
+Automatic joining reads the candidate stores in this order, and an SSID that
+an earlier store gave is not taken again:
+
+1. the open sessions' stores, the newest session first;
+2. the store of the account that owns the policy;
+3. the system's store.
+
+A store that is missing or cannot be read adds nothing; the others are still
+used. Within one store, `auto` profiles are tried in file order. Selection
+then chooses the first stable-discovery-order radio currently reporting a
+supported visible candidate; it does not wait for every other radio's scan to
+finish. Failed radios are skipped and later candidates can be considered in
+subsequent sweeps. DHCP starts only after WPA2/CCMP authorization succeeds.
+The selected radio alone owns managed IPv4; losing scans are stopped when
+selection commits.
+
+When a network refuses a saved key during the handshake, `networkd`
+remembers the refusal (at most eight, the oldest dropped first) and automatic
+joining passes over that key. A refusal is forgotten when its store changes,
+when an explicit `connect` of that network with that store succeeds, and when
+Wi-Fi is turned off.
+
+`enable` first validates the caller's store and obtains a stable radio
+enumeration. If the caller already owns a healthy connected policy, it keeps
+that connection and its lease. Otherwise it retires the prior connection,
+makes the caller the owner, brings usable radios up, and leaves association
+to scheduled background work. An empty successful enumeration is a valid
+`auto-searching` hotplug-wait state. If some radios fail preparation,
+selection continues with the usable radios in their original stable order.
+
+`connect SSID` requires an enabled policy and an exact saved profile in the
+store it uses (the owner's, or the caller's when the caller does not own the
+policy), whether that profile is `auto` or `manual`. It retires the current
+connection, then waits up to 30 seconds for a radio that sees the network.
+A failed explicit join leaves the policy in `manual-disconnected`: no other
+saved network is joined until someone joins a network or turns Wi-Fi off and
+on again.
+
+A store change that `networkd` is told about restarts a running automatic
+search when the changed store is a candidate (the system's, the owner's, or
+an open session's).
+
 `wifi wlan0 list` is a nonblocking scan-cache snapshot: an empty result while
 scanning is valid, not proof that the hardware found no access points.
 
@@ -166,38 +263,58 @@ interface/address state before concluding that connection has succeeded.
 
 `disconnect` cancels managed work, retires the current managed L2/L3 state,
 enters `manual-disconnected`, and leaves radios up and scanning. `disable`
-retires managed state, lowers all detected WLAN radios, clears the owner, and
-enters `disabled`.
+retires managed state, lowers all detected WLAN radios, clears the owner and
+the remembered refusals, and enters `disabled`.
 
-On carrier loss from `connected`, `networkd` enters `reconnecting`, rereads the
-active owner's current store, and starts exactly one ordinary `/sbin/wifi`
-connection attempt for the same SSID. That command owns one monotonic 30-second
-scan/select/connect retry window. Success returns to `connected`; failure
-removes stale managed L2/L3 state and settles in `auto-searching`. There is no
-nested daemon retry and no kernel-owned high-level reconnect loop.
+On carrier loss from `connected`, `networkd` enters `reconnecting`, rereads
+the store the connection's key came from, and starts exactly one ordinary
+`/sbin/wifi` connection attempt for the same SSID. That command owns one
+monotonic 30-second scan/select/connect window. Success returns to
+`connected`; failure removes stale managed L2/L3 state and settles in
+`auto-searching`. There is no nested daemon retry and no kernel-owned
+high-level reconnect loop.
 
 Startup publishes `networkd` readiness only after every detected WLAN has been
 normalized through disconnect, scan stop, and interface down. Normal daemon
 exit repeats that normalization. A normalization failure prevents successful
 readiness or exit rather than reporting a clean `disabled` state.
 
+## Wi-Fi across boots
+
+The [`networking`](../../userland/base/init/services/networking) oneshot
+service runs `net startup` as root at boot. It enables the wired interfaces
+and then sends `enable` from a detached process, so association does not hold
+up the boot. The policy enabled this way is root's, and the boot joins from the
+system's store.
+
+A successful `disable` creates the empty file `/var/db/wifi-off`; a successful
+`enable` removes it. While the file exists, `net startup` prints `Wi-Fi stays
+off, as it was turned off` and does not enable Wi-Fi. A failure to create or
+remove the file is reported by `networkd` and otherwise ignored.
+
 ## Failure behavior
 
-- Failure to read or validate the selected profile store reports a bounded
+- Failure to read or validate the selected store reports a bounded
   `wifi.conf` diagnostic and does not install a new policy owner.
 - `connect` while disabled fails with `Wi-Fi is disabled`; an unknown saved
-  SSID and zero detected radios fail distinctly.
+  SSID (`ENOENT`), zero detected radios (`ENODEV`), a network that no radio
+  sees within the selection window (`ENETUNREACH`), and a refused key
+  (`EACCES`) fail distinctly.
+- `enable`, `connect` and `disconnect` fail with `EBUSY` while a `disable` is
+  still retiring.
 - A pre-mutation validation or enumeration error preserves the previous
   policy. An error after mutation retires transaction-owned work before
   reporting failure when possible.
-- Incomplete L2/L3 retirement is reported as degraded rather than successful.
-- A successful local `set-key` remains successful if the subsequent empty
-  profile-change notification cannot reach `networkd`; a warning explains that
-  the durable profile was saved but the daemon was not notified.
-- `enable` and explicit `connect` are bounded by a 100-second client response
-  wait. The internal high-level `/sbin/wifi connect` window remains 30 seconds;
-  automatic selection and DHCP account for the larger compound-operation
-  budget.
+- Incomplete L2/L3 retirement is reported as degraded rather than successful;
+  `networkd` retries it with a back-off of up to 60 seconds.
+- `networkd` logs a failed operation with the stage at which it failed, never
+  with a key or an SSID.
+- `enable` and `connect` are bounded by a 105-second client response wait
+  (90 seconds of work and a 15-second transport margin); `disable`,
+  `disconnect`, `list` and `session close` by 45 seconds; the store-change
+  notice and `session open` by 17 seconds. The internal `/sbin/wifi connect`
+  window remains 30 seconds; selection and DHCP account for the larger
+  compound-operation budget.
 
 `/sbin/wifi` is also a privileged recovery primitive with explicit interface
 forms for `up`, `down`, `search start`, `search stop`, `list`, `status`,
@@ -205,24 +322,16 @@ forms for `up`, `down`, `search start`, `search stop`, `list`, `status`,
 argv and does not run DHCP, choose among all interfaces, read profile files, or
 maintain policy. Routine administration should use `net wifi`.
 
-## Implementation and evidence
+## Implementation
 
 | Contract | Production source |
 | --- | --- |
-| Public grammar and local `set-key` dispatch | [`userland/base/net/main.c`](../../userland/base/net/main.c) |
-| Profile grammar, limits, validation, and wiping | [`wifi-conf.c`](../../userland/base/net/wifi-conf.c), [`wifi-conf.h`](../../userland/base/net/wifi-conf.h) |
-| UID-derived secure publication | [`wifi-store.c`](../../userland/base/net/wifi-store.c) |
-| Authenticated socket and global orchestration | [`networkd/main.c`](../../userland/base/networkd/main.c), [`protocol.h`](../../userland/base/net/protocol.h) |
-| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`route.h`](../../include/uapi/route.h) |
+| Public grammar, key input, store edits and session requests | [`userland/base/net/main.c`](../../userland/base/net/main.c) |
+| Profile grammar, limits, add/modify/delete, validation, and wiping | [`wifi-conf.c`](../../userland/base/net/wifi-conf.c), [`wifi-conf.h`](../../userland/base/net/wifi-conf.h) |
+| UID-derived store selection and locked atomic rewrite | [`wifi-store.c`](../../userland/base/net/wifi-store.c), [`wifi-store.h`](../../userland/base/net/wifi-store.h) |
+| Authenticated socket, permissions, candidate stores, sessions, refusals, and the off record | [`networkd/main.c`](../../userland/base/networkd/main.c), [`protocol.h`](../../userland/base/net/protocol.h) |
+| Managed states and link-loss recovery | [`managed-wlan.c`](../../userland/base/networkd/managed-wlan.c), [`managed-wlan-state.h`](../../userland/base/networkd/managed-wlan-state.h), [`route.h`](../../include/uapi/route.h) |
 | Finite L2 primitive and secret descriptor | [`wifi/main.c`](../../userland/base/wifi/main.c), [`wifi-child.c`](../../userland/base/networkd/wifi-child.c) |
-
-The automatic protocol, credential, orchestration, lifecycle, build, and QEMU
-gates passed in q071. The project owner also accepted the consolidated
-RTL8822BU physical WLAN result on 2026-09-05.
-
-One measured RTL selection reached OFFER in 6.524 seconds and IPv4 in 9.152
-seconds; an AX211 selection reached IPv4 in 18.962 seconds. These are
-individual test observations, not a latency guarantee. AX211 initialization
-assertions remain a possible firmware failure with a tested recovery path.
-Console reporting is implemented in
-[dhcpc/main.c](../../userland/base/dhcpc/main.c). 
+| Login and logout notices | [`sessiond/session.c`](../../userland/desktop/sessiond/session.c) |
+| Boot-time `net startup` | [`networking`](../../userland/base/init/services/networking), `startup_command` in [`net/main.c`](../../userland/base/net/main.c) |
+| First-OFFER, bound and failure console events | [`dhcpc/main.c`](../../userland/base/dhcpc/main.c) |
