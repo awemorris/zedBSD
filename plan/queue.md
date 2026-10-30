@@ -253,7 +253,7 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1714 / q1714-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`（main に追従）と zedBSD-firmware の worktree `/home/awe/zedBSD-worktrees/p1-c5-firmware`・branch `agent/p1-c5-firmware`、host だけ） | [ws313](ws313/ws.md) p003 媒体（firmware の package 化） | ユーザー「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」 zedBSD-firmware の push はユーザーの指示の時だけ（Q1） | uncleared（2026-10-30 返却。package・menuconfig・firmware.list は 9c09f68f4、zedBSD-firmware は local の 227a76db8。package 経由の image の build は license の自動の同意が権限の判定で止まり未実施。zedBSD-firmware の push はユーザーの判断待ち（Amlogic の license）） |
-| q1708 / q1708-i02 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き: 背景の測定の compare、gap の大きい原因から libbrowser の修正 | in-progress |
+| q1708 / q1708-i02 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き: 背景の測定の compare、gap の大きい原因から libbrowser の修正 | uncleared（2026-10-30 返却。Chromium 156 の PASS 3,472 のうち 2,105 → 2,215（63.80%）、後退 0、Acid3 100/100。9df11eec9、merge 11888c436。p260 は in-progress） |
 
 ## 2026-10-30 16:0x: WS291 PowerVR を P3 で（q1715）
 
