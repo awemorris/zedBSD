@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 15:50（Q1）
+最終更新: 2026-10-30 16:05（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,11 +9,11 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 返却。bootloader と Mali の firmware を menuconfig の package に（C5 の board で自動で有効）、zedBSD-firmware は local の commit | ユーザーの判断: Amlogic の bootloader の公開、license の同意（端末で）。その後 package 経由の image の build |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（置き換え先の表 A、kernel に足す関数の表 B） | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
-| P3 | — | — | — | — |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 起動（phase-runner-high、q1715）。VF2 の画面が出ない（no boot framebuffer）の切り分けから | 40 fps 前後の scene を決め 50 fps 以上へ（基準はユーザーの回答で変える） |
 | P4 | — | — | — | — |
-| P5 | [WS327](ws327/ws.md) | libkeiland の thread と socket の薄い wrapper（POSIX と Win32） | 起動（phase-runner、q1710）。p016 受け入れの残り（QEMU の回帰、Video Player・Photos の FAIL の解析、08-network） | p017 規約 → WS の完了 → 返却 |
+| P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（phase-runner、q1711）。ws.md の Resume point から | p015 の QEMU の 3 回目 → p004 GTK4 → p008 → p014 → p007 → WS の完了 → 返却 |
-| P7 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX・PowerVR） | p010 cleared、p012 uncleared（hardware の限界）。VF2 を割り当てて p020 PowerVR へ | p020 → WS291 は incomplete のまま返却（RDNA の Phase は実機が戻るまで止め） |
+| P7 | — | — | 返却（WS291: p010 cleared、p012 uncleared、PowerVR は P3 へ） | — |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 再起動（q1708-i02）。Debian の比較の環境は出来た、Chromium 156 の基準と dev20 の全件の測定の完了待ち | compare → gap の大きい原因から直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。

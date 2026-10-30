@@ -238,9 +238,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1709 / q1709-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`、基点 main 5aca73738、host・image の build） | [ws313](ws313/ws.md) ODROID-C5 の BSP と Mali | ユーザー「WS313をP1で実行します。ODROIDのテスト用イメージをください。」→ まず実機の試験の image（text の console と Keiland）を作って渡す（bootloader の区画を含む）。その後 ws.md の Resume point から | cleared（2026-10-30 Q1。試験の image 2 つ（text・Keiland）、bootloader は mdrjr/meta-odroid-aml 548e2f037e、試験だけに使う。Phase は実装済み・実機未試験のまま。merge 0384466f5） |
-| q1710 / q1710-i01 | P5（phase-runner、worktree `/home/awe/zedBSD-worktrees/p5-ws327`・branch `agent/p5-ws327`、基点 main 5aca73738、QEMU） | [ws327](ws327/ws.md) p016 受け入れの残り → p017 → WS の完了 | ユーザー「WS327をP5で実行します。P5はこのWSが終わったら返却してください。」 | in-progress |
+| q1710 / q1710-i01 | P5（phase-runner、worktree `/home/awe/zedBSD-worktrees/p5-ws327`・branch `agent/p5-ws327`、基点 main 5aca73738、QEMU） | [ws327](ws327/ws.md) p016 受け入れの残り → p017 → WS の完了 | ユーザー「WS327をP5で実行します。P5はこのWSが終わったら返却してください。」 | cleared（2026-10-30 Q1。WS327 の全 Phase、cf2963051、merge a17e9386d。完了の片付けは Q1） |
 | q1711 / q1711-i01 | P6（phase-runner、worktree `/home/awe/zedBSD-worktrees/p6-ws307`・branch `agent/p6-ws307`、基点 main 5aca73738、QEMU） | [ws307](ws307/ws.md) graphical installer の残り（Resume point から） | ユーザー「WS307をP6で実行します。P6はこのWSが終わったら返却してください。」 | in-progress |
-| q1712 / q1712-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws291`・branch `agent/p7-ws291`、基点 main 5aca73738、実機 10.0.10.3） | [ws291](ws291/ws.md) GPU の描画の速さ（NVIDIA の段、p010 の q1700-i01 節から → p012 以降） | ユーザー「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」 | in-progress |
+| q1712 / q1712-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws291`・branch `agent/p7-ws291`、基点 main 5aca73738、実機 10.0.10.3） | [ws291](ws291/ws.md) GPU の描画の速さ（NVIDIA の段、p010 の q1700-i01 節から → p012 以降） | ユーザー「WS291をP7で実行します。P7はこのWSが終わったら返却してください。」 | uncleared（2026-10-30 返却。p010 cleared、p012 uncleared（hardware の限界）、RDNA は実機なしで止め、p020 は VF2 の画面なしと基準未決で止め。6c49a6095、merge 28cf45cc8） |
 
 ## 2026-10-30 15:0x: WS331 を P2 で（q1713）
 
@@ -254,3 +254,9 @@
 | --- | --- | --- | --- | --- |
 | q1714 / q1714-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws313`・branch `agent/p1-ws313`（main に追従）と zedBSD-firmware の worktree `/home/awe/zedBSD-worktrees/p1-c5-firmware`・branch `agent/p1-c5-firmware`、host だけ） | [ws313](ws313/ws.md) p003 媒体（firmware の package 化） | ユーザー「P1: ODROIDで使うamlogicブートローダとMaliファームウェアは、zedBSD-firmwareリポジトリに追加してください。make menuconfigにファームウェアとして入れてください。当然他のファームウェアと同じでライセンス合意も必要です。ODROID-C5のBSPを選ぶと、Amlogicのこのチップのファームウェアが自動で依存関係で有効になるようにしてください。」 zedBSD-firmware の push はユーザーの指示の時だけ（Q1） | uncleared（2026-10-30 返却。package・menuconfig・firmware.list は 9c09f68f4、zedBSD-firmware は local の 227a76db8。package 経由の image の build は license の自動の同意が権限の判定で止まり未実施。zedBSD-firmware の push はユーザーの判断待ち（Amlogic の license）） |
 | q1708 / q1708-i02 | P8（phase-runner-low、同じ worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | i01 の続き: 背景の測定の compare、gap の大きい原因から libbrowser の修正 | in-progress |
+
+## 2026-10-30 16:0x: WS291 PowerVR を P3 で（q1715）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1715 / q1715-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291`・branch `agent/p3-ws291`、基点 main、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」 基準はユーザーの未回答の間 Q1 の既定: zedBSD の今の fps で 40 fps 前後の scene を決め、50 fps 以上へ | in-progress |
