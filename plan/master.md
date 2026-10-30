@@ -20,7 +20,7 @@
 
 | 担当 | Queue | WS と次の手 | 実機 |
 | --- | --- | --- | --- |
-| P1 | q1701-i01 返却 | [ws009](ws009/ws.md) DOC-54: p010〜p019・p021 cleared（main 51f4f7b3b）、p020（command stream・sysctl）を Sonnet が実行中（worktree s-ws009-p020）。次: p022 索引 → p023 統合（Bug の候補の一覧は phase023/phase.md に集めた。foreign の fence の device の比べ無しを優先）→ p024 正確さの review（Opus 推し）。その後 WS296 → WS297 を同じ形で 1 つずつ（ユーザー） | — |
+| P1 | q1704-i01 in-progress | [ws009](ws009/ws.md) DOC-54: p010〜p023 cleared（main d73c023ef、全 14 file の照合 PASS）。P1 が p024 正確さの review（worktree p1-ws009r）。Bug は BUG-364（foreign の fence）・BUG-365（一括 22 件）。その後 WS009 の受け入れ → WS296 → WS297 を同じ形で 1 つずつ（ユーザー） | — |
 | P2 | q1703-i01 in-progress | [ws327](ws327/ws.md): p001〜p003・p007〜p015 cleared（main b901b1968）。P2 が p016 受け入れ（境界・QEMU の回帰・FreeBSD）、その後 p017 規約の見直し（Sonnet） | QEMU |
 | P3 | q1696-i01 返却（09:16） | [ws315](ws315/ws.md) p006 in-progress、main cbd98d6f4 に merge（2026-10-30 ユーザー「WS315はマージしてOKです。再開時に同時sendを解決しましょう。」）。同時の send の退行（2 倍 1030、1.25 倍 1645、前 2347）が残り。次の 1 手は [phase006](ws315/phase006/phase.md) の「引き継ぎ」（1.5 倍の kernel を 5330 で、往復の延びで広げるのを止める案、決めた後に回帰と 10GbE）。Q1 の残り: p3-ws315 の build/tmp/p006-base・build/p006a-*・build/p006-k1・p006-g10・p006-g12・p006-amd64 の削除 | 5330（Debian、NVMe の zedBSD は g10 の kernel） |
 | P4 | q1698-i01 返却（09:13） | [ws307](ws307/ws.md)（main fbdd143a8 に merge、branch agent/p4-ws307o 520360247）: p002 cleared（upload）。p015 sleep Never 実装・host 試験 PASS、QEMU は host の負荷で 2 回未達（load の低い時に 3 回目）。p004 pkgconf と各 package の開発の file、clang・libcxx は build 済み、installer-image を 1 本だけ build → p004-gtk.sh（並行の make は不可）。p008 は p004-gtk.sh の j3 で確かめ直し。p014 は p007 の C を後で。p007 は driver の設計の下書き（改訂 3、SMEP・SMAP の下の 1:1 の map を HAL を変えずに作れるか）。Q1 の残り: proposed/hal-uefi-variables.md・hal-fw-variables.md の削除（link を外してから）。CI の別件 2 つは phase002 | QEMU |
@@ -114,7 +114,7 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### 次の番号
 
 <!-- master:next:start -->
-BUG-366 · q1704 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
+BUG-366 · q1705 · WS331 · KL_VERSION 105。使う前に衝突を確かめる（`ls plan/bugs`・`ls -d plan/ws*`・`grep q16 plan/queue.md`）。
 <!-- master:next:end -->
 
 ## 目的
