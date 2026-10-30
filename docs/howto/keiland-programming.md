@@ -5907,6 +5907,10 @@ A program that talks to another machine waits for it: for the connection, for th
 
 `08-network.c` grows out of `08-worker.c`. Start opens a network thread. The thread opens two sockets on the loopback, the network inside the machine, so that the program runs where no outside network is: one listens, the other connects to it without waiting for the connection to end. The thread waits for the connection to arrive on one socket and for the connect to end on the other, in a single wait. Then it sends the line "ping N" from one socket to the other and back a hundred times, waiting for each answer, and times each round trip. Every ten round trips the window shows how far it got and the average time so far; after each round trip the thread pauses 20 milliseconds, so that there is time to press Stop. Stop ends the thread's wait at once through its waker.
 
+![The window of 08-network.c after the hundred round trips](keiland-examples/08-network.png)
+
+*After Start: the bar full, the line "Done: 100 round trips, N us each.", Start enabled again and Stop disabled.*
+
 What is new against `08-worker.c`: the series' record (`struct exchange`), which holds a waker in place of the limit, and the thread's functions: `network_run`, `network_connect`, `network_join`, `network_trips`, `network_trip`, `network_pause`, `network_wait`, `network_send_line` and `network_receive_line`. The calls are in [keiland_socket.h](../../userland/desktop/include/keiland/keiland_socket.h); the window's side (`network_start`, `network_stop`, `network_post`, `network_finish`) is the worker's.
 
 <!-- example: keiland-examples/08-network.c -->
