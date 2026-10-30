@@ -3,7 +3,7 @@
 # ws327-p007 委譲の設計（標準廉価実装手順 §4.4〜§4.8）
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §13・§14。Queue: q1697 / q1697-i02（担当 P2、2026-10-30）。
-- Status: in-progress（2026-10-30）
+- Status: in-progress（2026-10-30。成果は揃った、cleared の判定は Q1）
 - Disposition: normal
 - ユーザーの指示（2026-10-30、原文）: 「P2をいったんラップアップして、標準廉価実装手順を適用するようにWS237のphaseを整理しなおして、再起動してほしいです。」
   （Q1 の解釈: WS327 の事。手順は main の `docs/agent/spec-module-delegation.md`。）
@@ -25,7 +25,7 @@
 | Win32 の骨格（mingw で compile・link が通る、全関数は未実装の印） | `userland/desktop/libkeiland/platform/thread-win32.c`・`socket-win32.c` |
 | mingw の build と全関数の link の確かめ | `tests/build-win32.sh`・`tests/win32-link.c` |
 | 境界の check（design §1.3 の T1・N1） | `tests/check-layers.py`・`tests/layers-allow.tsv` |
-| 凍結の照合 | `tests/check-base.sh`・`tests/make-frozen.sh`・`tests/frozen.sha256` |
+| 凍結と Phase の範囲の照合（branch の分岐点との diff） | `tests/check-base.sh <phase>`（`make-frozen.sh`・`frozen.sha256` は review #4 で使わなくなった。削除を Q1 に頼む） |
 | 他の WS の試験を層と一緒に build する host 試験（IME・picker） | `tests/host-apps.sh` |
 | 解説の行の参照の一覧 | `tests/doc-lines.py` |
 | p003 の guest の試験（p007 の前に） | `tests/guest-layers.sh`・`tests/config-amd64-layers.mk` |
@@ -57,6 +57,17 @@
 - 6bb8c3c8d の Mailer の `conn.c`・`tls.c`・`imap.c` が host の gcc で `-Wall -Wextra -Werror` の compile を通る。IDLE の待ちだけ仮に直した
   host-mail-backend.c の写し（build/tmp/p007/mailprobe）で `host-mail-backend: PASS`（50 件）。sync の試験は p008。
 
+- sync.c を移した後（design-reviewer #1）: `sh plan/ws327/tests/build-zedbsd.sh p007m amd64 "mailer"` → `make=0 warnings=0`。
+  基点の 3 arch（#8）: amd64 `p007 "music videoplayer photos settings keiland-ime"`、arm64・riscv64 `p007b "mailer music videoplayer photos
+  settings keiland-ime"` → 全て `make=0 warnings=0`（移す前の app、sync.c だけ移した後）。Linux の libkeiland・settings・keiland-ime も
+  status 0・warning 0。仮に直した host-mail-sync の写しで `host-mail-sync: PASS`（10 件）。
+- `sh plan/ws327/tests/build-win32.sh` → x86_64・i686 の両方で compile（warning 0）と link が PASS。
+- `python3 -I plan/ws327/tests/check-layers.py` → T1 298・N1 0（残りは p009〜p012 の file だけ）。
+
 ## 結果
 
-（design-reviewer の後に書く）
+- 2026-10-30 P2: design-reviewer 1 本（21 件: high 1・medium 7・medium-low 1・low-medium 1・low 11）。全てを design.md §14 のとおり反映。
+  high の 1 は P2 が `sync.c` を移して解いた（p008 は確かめと host 試験の直しに）。
+- Q1 へ: `plan/ws327/tests/make-frozen.sh`・`frozen.sha256` は使わなくなった（削除の候補）。Sonnet の worktree の `build/<arch>` は
+  共有の build への link にしない（build-zedbsd.sh が sysroot を `build/<arch>/sysroot` に書くので、link なら止まる）。
+- Status: 成果は揃った。cleared の判定は Q1。

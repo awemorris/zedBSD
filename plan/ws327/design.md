@@ -69,7 +69,7 @@ grep の語: `pthread_*`・`thrd_`・`mtx_`・`cnd_`・`<threads.h>`・`socket(`
 
 ### 1.3 OS の境界の check（p007 の道具、p016 で check.sh へ）
 
-WS327 の間は `plan/ws327/tests/check-layers.py`（許可の表 `layers-allow.tsv`、引数で範囲を絞れる）が T1・N1 を見る。p016 で
+WS327 の間は `plan/ws327/tests/check-layers.py`（許可の表 `plan/ws327/tests/layers-allow.tsv`、引数で範囲を絞れる）が T1・N1 を見る。p016 で
 `plan/tools/keiland-os-boundary/check.sh` に移す案を Q1 に出す（`plan/tools/` は Q1 の範囲）。中身:
 
 - `T1`: app（check.sh の「application」の集合）と libkeiland の `platform/` の外が `pthread_*`・`thrd_*`・`mtx_*`・`cnd_*`・`call_once`・
@@ -77,7 +77,7 @@ WS327 の間は `plan/ws327/tests/check-layers.py`（許可の表 `layers-allow.
 - `N1`: 同じ範囲が `socket`・`connect`・`bind`・`listen`・`accept`・`accept4`・`getaddrinfo`・`poll`・`select`・`<sys/socket.h>`・`<netdb.h>`・
   `<poll.h>`・`<netinet/*>`・`<arpa/inet.h>` を使わない。呼び出しは `(?<![\w.>])name\s*\(`（`->select(`・`.select(` の member を除く）。
 - libbrowser・libmedia を外すのは T1・N1 だけ（A1〜A5 は今どおり見る）。
-- 許す行（`app-allow.tsv`、理由つき）: libkeiland の Wayland の fd の `poll`（`ui/app.c`・`ui/window.c`・`ui/primary.c`・`ui/clipboard.c`・
+- 許す行（`layers-allow.tsv`、理由つき。p016 で check.sh に移す時に `app-allow.tsv` へ）: libkeiland の Wayland の fd の `poll`（`ui/app.c`・`ui/window.c`・`ui/primary.c`・`ui/clipboard.c`・
   `system/system.c`・`audio/audio.c`）、`instance.c`（local な socket）、`preview/`（sandbox）、`ime/main.c`（自前の loop）、
   `photos/media-worker.c`（Wayland の fd の `shutdown` と `<sys/socket.h>`）、libbrowser・libmedia（単体の library: check の集合から外す）。
 
@@ -476,11 +476,11 @@ void kl_socket_waker_close(struct kl_socket_waker *waker);
 ### 5.3 誤りの値
 
 POSIX の errno の値をそのまま返す。Win32 は `GetLastError`・`WSAGetLastError` を、MSVC の `<errno.h>` の POSIX の補い（`ECONNREFUSED` など、
-VS 2010 以降）の値に写す表を `socket-win32.c` に持つ（`WSAEWOULDBLOCK` → EAGAIN、`WSAEINPROGRESS` → EINPROGRESS、`WSAECONNREFUSED` →
+VS 2010 以降）の値に写す表を `socket-win32.c` に持つ（`WSAEWOULDBLOCK` → EAGAIN、`WSAEINPROGRESS`（WinSock 1.1 の blocking の呼び出しの途中で、非 blocking の connect の意味ではない）→ EALREADY、`WSAECONNREFUSED` →
 ECONNREFUSED、`WSAECONNRESET` → ECONNRESET、`WSAETIMEDOUT` → ETIMEDOUT、`WSAENETUNREACH` → ENETUNREACH、`WSAEHOSTUNREACH` → EHOSTUNREACH、
 `WSAEADDRINUSE` → EADDRINUSE、`WSAEADDRNOTAVAIL` → EADDRNOTAVAIL、`WSAEAFNOSUPPORT` → EAFNOSUPPORT、`WSAEMFILE` → EMFILE、`WSAENOTCONN` →
 ENOTCONN、`WSAESHUTDOWN` → EPIPE、`WSAENOBUFS` → ENOMEM、`WSAEALREADY` → EALREADY、`WSAECONNABORTED` → ECONNABORTED、`WSAENETRESET` →
-ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEACCES` → EACCES、`WSAEINVAL` → EINVAL、`WSAEISCONN` → EISCONN、他 → EIO）。`recvfrom` の
+ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEHOSTDOWN` → EHOSTUNREACH（mingw の errno.h に EHOSTDOWN が無い）、`WSAEACCES` → EACCES、`WSAEINVAL` → EINVAL、`WSAEISCONN` → EISCONN、他 → EIO）。`recvfrom` の
 `WSAEMSGSIZE` は誤りにせず「切った datagram」として buffer の大きさを返す（§4.3）。MSVC・mingw の errno.h では EAGAIN と EWOULDBLOCK が別の値
 （11・140）なので、library は EAGAIN だけを返す（header に「EWOULDBLOCK と比べない」と書く）。
 
@@ -491,7 +491,7 @@ ECONNRESET、`WSAENETDOWN` → ENETDOWN、`WSAEACCES` → EACCES、`WSAEINVAL` �
 | program | thread（名前） | 数 | 何で止まって待つか |
 | --- | --- | --- | --- |
 | Mailer | `mail-sync` | 窓 1 つに 1（今と同じ） | `kl_socket_poll`（IDLE の各 account の socket と waker）、時間切れ |
-| Music | `music-play` | 再生中に 1 | `kl_cond_wait`・`kl_thread_sleep`（音の stream の空き） |
+| Music | `music-play` | 再生中に 1 | `kl_thread_sleep` で回る（音の stream の空き。条件変数は止めの broadcast だけで、待つ者は無い） |
 | Video Player | `video-decode` | 開いた動画 1 つに 1 | `kl_cond_wait_for`（絵の空き・要求、`MEDIA_WAIT_MS`） |
 | Photos | `photos-thumbs`・`photos-import` | 1・1 | `kl_cond_wait` |
 | Settings | `settings-look`・`storage-scan`（`SE_SCAN_THREADS` 本）・`storage-trash` | 開いた page の分 | `kl_cond_wait`・file の I/O |
@@ -626,7 +626,8 @@ cross compile（warning 0）まで（wine の試験はしない）を p006 と�
 
 - `userland/desktop/include/keiland/` の全ての header（`keiland_thread.h`・`keiland_socket.h` は BASE）、`libkeiland/exports.map`・`exports.py`、
   `libkeiland/platform/thread-posix.c`・`socket-posix.c`、libkeiland の Makefile 3 本、この design.md、`plan/ws327/tests/` の全て（試験の道具）。
-  `sh plan/ws327/tests/check-base.sh` が `frozen.sha256` で照合する。
+  `sh plan/ws327/tests/check-base.sh <phase>` が branch の分岐点（`git merge-base HEAD main`）と比べて照合し、phase.md の §2 の外の file の変更も
+  見つける（design-reviewer #4・#7）。
 - HAL・toolchain・共有の `build/`・main の checkout・他の WS の file（`plan/ws*/` の他の WS の試験も読むだけ。`plan/tools/` は phase.md が
   名指す file だけ）。
 - header・凍結の file・試験の道具に不備を見つけたら、直さずに止めて、どの file のどこで何が足りないかを報告する。
@@ -711,7 +712,7 @@ worker_ready(void)
   KEILAND_LINUX_BUILD=build/ws327-<phase>-linux build/ws327-<phase>-linux/lib/libkeiland.so [build/ws327-<phase>-linux/bin/settings]
   [build/ws327-<phase>-linux/libexec/keiland-ime] > build/ws327-<phase>-linux.log 2>&1; echo $?` と `grep -c 'warning:'` が 0。
 - 境界: `python3 -I plan/ws327/tests/check-layers.py <自分の directory...>` が `ws327-check-layers: PASS`（T1・N1 が 0）。
-- 凍結: `sh plan/ws327/tests/check-base.sh` が `ws327-check-base: PASS`。
+- 凍結と範囲: `sh plan/ws327/tests/check-base.sh <phase>` が `ws327-check-base: PASS`。
 - 各 phase.md の host 試験。
 - `git diff --check`（check-base.sh が branch の分を見る）。
 
@@ -726,5 +727,31 @@ host 試験が通った後、移した code をわざと壊し（git の外で�
 - 上の command を全て流し、最後の行を自分で読む。規約（`plan/coding-style.md` の §14 の checklist）で自分の diff を見直す。
 - commit: 新しい file は先に `git add`、`git commit -m WIP -- <phase.md が挙げる path>`。push しない。rm しない（消す物は報告に書く）。
 - phase.md の「結果」の節（日付は host の `date`）: 流した command と最後の行、件数、突然変異の結果、自分で決めた点、未実施、Q1 への所見。
-  ws.md の表のこの行は「実装済み・試験 PASS（日付）」（cleared は Q1）。
+  `plan/ws327/ws.md` は触らない（並べた Phase の merge が表の隣の行で衝突する。Q1 が merge の時に直す、design-reviewer #6）。
 - 報告: commit の SHA、command と最後の行、自分で決めた点、未実施。
+
+## 14. p007 の design-reviewer の指摘と反映（2026-10-30、21 件）
+
+| # | 重さ | 指摘 | 反映 |
+| --- | --- | --- | --- |
+| 1 | high | 6bb8c3c8d の conn.c・mail.h と未移行の sync.c で Mailer が build できず、p007 を main に merge すると main の image が壊れる | P2 が p007 で `sync.c` を移した（zedBSD amd64 の mailer が make 0・warning 0、仮に直した host-mail-sync の写しで 10 件 PASS）。p008 は確かめと host 試験の直しに |
+| 2 | medium | p008 の突然変異 3（読みの前の待ちを WRITABLE に）は捕まらない | connect の EINPROGRESS を誤りにする壊し方に。読みの時間切れの試験が無い事は見逃しとして書かせる |
+| 3 | medium | p012 の突然変異 1（範囲の変化の signal）は捕まらない事が多い | `keiui_picker_fini` の止めの signal を消す形に |
+| 4 | medium | 凍結の照合が sha256 の file 自身を守らず、絶対の hash で他の WS の変更でも FAIL する | `check-base.sh <phase>` を branch の分岐点（`git merge-base HEAD main`）との diff に。`frozen.sha256`・`make-frozen.sh` は使わない（削除を Q1 に頼む） |
+| 5 | medium | build-zedbsd.sh の sysroot は `build/<arch>/sysroot` に書かれ、共有の build への link なら壊す。sysroot の status を捨てる | link なら止める、sysroot の status も見る、comment を直した |
+| 6 | medium | 並べた Phase が ws.md の隣の行を直して merge が衝突する | 実装の担当は ws.md に触らない（§13.7、各 phase.md） |
+| 7 | medium | Phase の範囲の外の file の変更を見つける道具が無い | `check-base.sh <phase>` に Phase ごとの許可の path |
+| 8 | medium | arm64・riscv64 の app の基点の build が無い | P2 が移す前の tree（sync.c の後）で全 program × arm64・riscv64 を build（結果は phase007） |
+| 9 | medium-low | `kl_socket_close(NULL)` を Mailer が頼るが header・Win32 の骨格が黙る | 骨格と phase014 に「NULL は何もしない」。header の comment は p017 へ持ち越し |
+| 10 | low-medium | 振る舞いの変わる所（start の前の signal、IME の作り直し、`kl_cond_wait_for`）に試験が無い | p016 の QEMU に足した、p010・p011 に「未試験」と書かせる |
+| 11 | low | `-D_DEFAULT_SOURCE` で thread-posix.c が通らない | phase009 で `-D_GNU_SOURCE` と明記 |
+| 12 | low | Music は条件変数で待たない（§6.1 の誤り）、p009 の突然変異 3 が捕まらない | §6.1 を直し、`play_run` の止めの確かめを消す壊し方に |
+| 13 | low | doc-lines.py が 1 行多く数え、link の文字と行の食い違いを見ない | `splitlines`、「[lines A-B]」と `#LA-LB` の照合 |
+| 14 | low | check-layers が `send`・`recv`・`ppoll`・`<sys/select.h>` などを拾わず、許可の行が `*` で広い | N1 を広げ、libkeiland・IME の許可を `poll`・`poll.h` に絞った。§1.3 の表の名前を直した |
+| 15 | low | WSAEHOSTDOWN の写しの食い違い、WSAEINPROGRESS → EINPROGRESS は誤り | §5.3・骨格を EHOSTUNREACH と EALREADY に揃えた |
+| 16 | low | `Sleep` などは tick で早く返り「at least」を守れない | `kl_thread_sleep` は `GetTickCount64` で眠り直す（骨格・phase013）。cond と select は p013 の「Q1 へ」 |
+| 17 | low | `_beginthreadex` の後に id を書くまでの競合 | `CREATE_SUSPENDED` → id・handle を書く → `ResumeThread`（骨格・phase013） |
+| 18 | low | DLL の unload 後の FLS の callback など | phase013 の「Q1 へ」の候補 |
+| 19 | low | x86_64 の mingw だけ | build-win32.sh が i686 も compile・link（PASS） |
+| 20 | low | `conn.socket` が NULL の idling の account を poll に入れると EINVAL | sync.c は `conn.socket != NULL` の時だけ入れる |
+| 21 | low | p015 が 1 回分として大きい | 分けない（例は 08-worker から育てる 1 つ）。重ければ Q1 が 08-network と節を別の起動に分けてよい |

@@ -16,7 +16,8 @@
  * with, and a new one right after its sign-in), so that what IDLE tells
  * after is new mail.
  *
- * The window wakes the thread through a pipe (a byte for each job); the
+ * The window wakes the thread through a waker (rings merge until the
+ * thread's wait finds them; the thread then looks at its jobs); the
  * thread tells the window of a batch of results through the window's ready
  * function (the application posts itself an event).  The queues are lists
  * under one lock; a job's and a result's memory goes with it from one
@@ -36,14 +37,12 @@
 
 #include "sync.h"
 
+#include <keiland/keiland_socket.h>
+#include <keiland/keiland_thread.h>
 #include <errno.h>
-#include <fcntl.h>
-#include <poll.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
-#include <unistd.h>
 
 /* How many of the latest messages of a folder are got the first time. */
 #define SYNC_LATEST		50U
@@ -75,7 +74,7 @@ struct sync_account {
 };
 
 /*
- * The thread and its queues: the thread, its pipe (to wake it among the
+ * The thread and its queues: the thread, its waker (to wake it among the
  * servers' sockets it waits for), the window's function told when results
  * wait (with its context) and whether it was told since the window last
  * found none, the lock over the queues, the flag and the stop flag, the
@@ -83,13 +82,13 @@ struct sync_account {
  * (the thread's own, in the window's order).
  */
 struct ml_sync {
-	pthread_t thread;
+	struct kl_thread *thread;
 	int started;
-	int wake[2];
+	struct kl_socket_waker *waker;
 	int (*ready)(void *context);
 	void *ready_context;
 	int told;
-	pthread_mutex_t lock;
+	struct kl_mutex lock;
 	int stopping;
 	struct ml_job *jobs;
 	struct ml_job *jobs_last;
@@ -121,7 +120,7 @@ struct sync_fetch {
 	size_t large_count;
 };
 
-static void *sync_run(void *argument);
+static void sync_run(void *argument);
 static int sync_wait(struct ml_sync *sync);
 static void sync_do(struct ml_sync *sync, struct ml_job *job);
 static int sync_open(struct ml_sync *sync, int account);
@@ -156,6 +155,7 @@ ml_sync_start(
 	void *context,
 	struct ml_sync **made)
 {
+	struct kl_thread_options options;
 	struct ml_sync *sync;
 	size_t index;
 	int status;
@@ -165,11 +165,15 @@ ml_sync_start(
 	sync = calloc(1U, sizeof(*sync));
 	if (sync == NULL)
 		return ENOMEM;
-	sync->wake[0] = -1;
-	sync->wake[1] = -1;
 	sync->ready = ready;
 	sync->ready_context = context;
-	(void)pthread_mutex_init(&sync->lock, NULL);
+
+	/* The lock over the queues. */
+	status = kl_mutex_init(&sync->lock);
+	if (status != 0) {
+		free(sync);
+		return status;
+	}
 
 	/* The accounts. */
 	for (index = 0; index < count && index < ML_ACCOUNTS_MAX; index++) {
@@ -180,18 +184,20 @@ ml_sync_start(
 	/* How many were taken. */
 	sync->account_count = index;
 
-	/* The pipe that wakes the thread. */
-	status = pipe(sync->wake);
+	/* The waker that wakes the thread. */
+	status = kl_socket_waker_open(&sync->waker);
 	if (status != 0) {
 		ml_sync_stop(sync);
-		return errno;
+		return status;
 	}
 
-	/* The window's end never blocks. */
-	(void)fcntl(sync->wake[1], F_SETFL, O_NONBLOCK);
-
-	/* The thread. */
-	status = pthread_create(&sync->thread, NULL, sync_run, sync);
+	/* The thread, by its name. */
+	memset(&options, 0, sizeof(options));
+	options.name = "mail-sync";
+	options.run = sync_run;
+	options.argument = sync;
+	options.priority = KL_THREAD_PRIORITY_NORMAL;
+	status = kl_thread_start(&options, &sync->thread);
 	if (status != 0) {
 		ml_sync_stop(sync);
 		return status;
@@ -213,7 +219,6 @@ ml_sync_stop(
 {
 	struct ml_result result;
 	struct ml_job *job;
-	char byte;
 	int taken;
 
 	/* Nothing started. */
@@ -222,16 +227,16 @@ ml_sync_stop(
 
 	/* Told to stop and woken, then waited for. */
 	if (sync->started) {
-		pthread_mutex_lock(&sync->lock);
+		kl_mutex_lock(&sync->lock);
 
 		sync->stopping = 1;
 
-		pthread_mutex_unlock(&sync->lock);
+		kl_mutex_unlock(&sync->lock);
 
 		/* Woken, and waited for. */
-		byte = 's';
-		(void)write(sync->wake[1], &byte, 1U);
-		(void)pthread_join(sync->thread, NULL);
+		kl_socket_waker_ring(sync->waker);
+		(void)kl_thread_join(sync->thread);
+		sync->thread = NULL;
 	}
 
 	/* The jobs not done. */
@@ -250,12 +255,10 @@ ml_sync_stop(
 		ml_sync_release(&result);
 	}
 
-	/* The pipes and the state. */
-	if (sync->wake[0] >= 0)
-		(void)close(sync->wake[0]);
-	if (sync->wake[1] >= 0)
-		(void)close(sync->wake[1]);
-	(void)pthread_mutex_destroy(&sync->lock);
+	/* The waker and the state. */
+	if (sync->waker != NULL)
+		kl_socket_waker_close(sync->waker);
+	kl_mutex_destroy(&sync->lock);
 	free(sync);
 }
 
@@ -269,7 +272,6 @@ ml_sync_queue(
 	const struct ml_job *job)
 {
 	struct ml_job *queued;
-	char byte;
 
 	/* The copy. */
 	queued = malloc(sizeof(*queued));
@@ -279,7 +281,7 @@ ml_sync_queue(
 	queued->next = NULL;
 
 	/* At the end of the list. */
-	pthread_mutex_lock(&sync->lock);
+	kl_mutex_lock(&sync->lock);
 
 	if (sync->jobs_last != NULL)
 		sync->jobs_last->next = queued;
@@ -287,11 +289,10 @@ ml_sync_queue(
 		sync->jobs = queued;
 	sync->jobs_last = queued;
 
-	pthread_mutex_unlock(&sync->lock);
+	kl_mutex_unlock(&sync->lock);
 
-	/* The thread woken (a full pipe already wakes it). */
-	byte = 'j';
-	(void)write(sync->wake[1], &byte, 1U);
+	/* The thread woken (rings merge until its wait finds them). */
+	kl_socket_waker_ring(sync->waker);
 	return 0;
 }
 
@@ -307,7 +308,7 @@ ml_sync_take(
 	struct ml_result *first;
 
 	/* The first result; none left means the window is to be told of the next one. */
-	pthread_mutex_lock(&sync->lock);
+	kl_mutex_lock(&sync->lock);
 
 	first = sync->results;
 	if (first != NULL) {
@@ -317,7 +318,7 @@ ml_sync_take(
 	} else
 		sync->told = 0;
 
-	pthread_mutex_unlock(&sync->lock);
+	kl_mutex_unlock(&sync->lock);
 
 	/* None. */
 	if (first == NULL)
@@ -342,7 +343,7 @@ ml_sync_release(
 }
 
 /* The thread: each job, then the IDLE of every account until the next job. */
-static void *
+static void
 sync_run(
 	void *argument)
 {
@@ -359,7 +360,7 @@ sync_run(
 	/* Each round. */
 	for (;;) {
 		/* The next job, or the stop. */
-		pthread_mutex_lock(&sync->lock);
+		kl_mutex_lock(&sync->lock);
 
 		stopping = sync->stopping;
 		job = sync->jobs;
@@ -369,7 +370,7 @@ sync_run(
 				sync->jobs_last = NULL;
 		}
 
-		pthread_mutex_unlock(&sync->lock);
+		kl_mutex_unlock(&sync->lock);
 
 		/* Stopped: the sessions end. */
 		if (stopping)
@@ -395,9 +396,6 @@ sync_run(
 		sync->account_count--;
 		sync_close(sync, (int)sync->account_count);
 	}
-
-	/* The thread ends. */
-	return NULL;
 }
 
 /* Waits for a job's byte or for a server to speak in IDLE; new mail is got at once. */
@@ -405,25 +403,25 @@ static int
 sync_wait(
 	struct ml_sync *sync)
 {
-	struct pollfd watched[1 + ML_ACCOUNTS_MAX];
+	struct kl_socket_wait watched[1 + ML_ACCOUNTS_MAX];
 	int accounts[1 + ML_ACCOUNTS_MAX];
-	char bytes[64];
 	size_t count;
+	size_t found;
 	size_t index;
 	int ready;
 	int arrived;
 	int error;
 	int timeout;
 
-	/* The job pipe, and each idling session. */
-	watched[0].fd = sync->wake[0];
-	watched[0].events = POLLIN;
-	watched[0].revents = 0;
+	/* The waker, and each idling session. */
+	memset(watched, 0, sizeof(watched));
+	watched[0].waker = sync->waker;
+	watched[0].events = KL_SOCKET_READABLE;
 	count = 1;
 	timeout = SYNC_IDLE_MS;
 	for (index = 0; index < sync->account_count; index++) {
-		/* An account not idling is tried again later. */
-		if (!sync->accounts[index].idling) {
+		/* An account not idling (or without its connection) is tried again later. */
+		if (!sync->accounts[index].idling || sync->accounts[index].imap.conn.socket == NULL) {
 			timeout = SYNC_RETRY_MS;
 			continue;
 		}
@@ -434,24 +432,19 @@ sync_wait(
 			timeout = 0;
 
 		/* Its socket. */
-		watched[count].fd = sync->accounts[index].imap.conn.fd;
-		watched[count].events = POLLIN;
-		watched[count].revents = 0;
+		watched[count].socket = sync->accounts[index].imap.conn.socket;
+		watched[count].events = KL_SOCKET_READABLE;
 		accounts[count] = (int)index;
 		count++;
 	}
 
-	/* The wait. */
-	ready = poll(watched, (nfds_t)count, timeout);
-	if (ready < 0)
-		return errno;
-
-	/* The job pipe's bytes (the jobs are in the list). */
-	if ((watched[0].revents & POLLIN) != 0U)
-		(void)read(sync->wake[0], bytes, sizeof(bytes));
+	/* The wait; a ring is emptied by it (the jobs are in the list). */
+	error = kl_socket_poll(watched, count, timeout, &found);
+	if (error != 0)
+		return error;
 
 	/* A long IDLE is ended so that the next round starts it again. */
-	if (ready == 0) {
+	if (found == 0U) {
 		sync_idle_stop_all(sync);
 		return 0;
 	}
@@ -459,7 +452,7 @@ sync_wait(
 	/* Each session that spoke: new mail is got. */
 	for (index = 1; index < count; index++) {
 		/* Nothing from this one. */
-		if ((watched[index].revents & (POLLIN | POLLHUP | POLLERR)) == 0U)
+		if ((watched[index].ready & (KL_SOCKET_READABLE | KL_SOCKET_FAILED)) == 0U)
 			continue;
 
 		/* What it said. */
@@ -1119,7 +1112,7 @@ sync_post(
 	int error;
 
 	/* At the end of the list; the window is to be told when it was not. */
-	pthread_mutex_lock(&sync->lock);
+	kl_mutex_lock(&sync->lock);
 
 	result->next = NULL;
 	if (sync->results_last != NULL)
@@ -1133,7 +1126,7 @@ sync_post(
 		tell = 1;
 	}
 
-	pthread_mutex_unlock(&sync->lock);
+	kl_mutex_unlock(&sync->lock);
 
 	/* Not to be told. */
 	if (!tell)
@@ -1142,11 +1135,11 @@ sync_post(
 	/* The window told; when it cannot be, the next result tries again. */
 	error = sync->ready(sync->ready_context);
 	if (error != 0) {
-		pthread_mutex_lock(&sync->lock);
+		kl_mutex_lock(&sync->lock);
 
 		sync->told = 0;
 
-		pthread_mutex_unlock(&sync->lock);
+		kl_mutex_unlock(&sync->lock);
 	}
 }
 

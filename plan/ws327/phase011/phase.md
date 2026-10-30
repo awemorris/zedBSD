@@ -20,7 +20,7 @@
 | `userland/desktop/settings/look.c` | §3.1 |
 | `userland/desktop/settings/storage-scan.h`・`storage-scan.c` | §3.2 |
 | `userland/desktop/settings/storage-trash.h`・`storage-trash.c` | §3.3 |
-| `plan/ws327/phase011/phase.md` の「結果」、`plan/ws327/ws.md` の p011 の行 | 記録 |
+| `plan/ws327/phase011/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 Settings の Makefile 3 本（zedBSD・`Makefile.linux`・`Makefile.freebsd`）は libkeiland を既に link するので変えない（`-pthread` も残す）。
 
@@ -61,14 +61,14 @@ Settings の Makefile 3 本（zedBSD・`Makefile.linux`・`Makefile.freebsd`）�
 2. Linux: `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p011-linux build/ws327-p011-linux/lib/libkeiland.so build/ws327-p011-linux/bin/settings > build/ws327-p011-linux.log 2>&1; echo status=$?; grep -c 'warning:' build/ws327-p011-linux.log`
    → `status=0` と `0`。
 3. `python3 -I plan/ws327/tests/check-layers.py userland/desktop/settings/` → PASS。
-4. `sh plan/ws327/tests/check-base.sh` → PASS。
+4. `sh plan/ws327/tests/check-base.sh p011` → PASS。
 
 ## 5. 突然変異の確かめ（§13.6）
 
 Settings の thread の source に host 試験は無い。
 
 1. `storage-scan.c` の `kl_cond_broadcast` を 1 つ `pthread_cond_broadcast` に戻す（git の外）→ check-layers の T1 が FAIL。
-2. 戻して `cmp`。見た目の page・storage の page の動き（走査の終わり、ごみ箱の量）は p016 の QEMU。
+2. 戻して `cmp`。見た目の page・storage の page の動き（走査の終わり、ごみ箱の量）はこの Phase では**未試験**と結果に書く。p016 の QEMU が見る。
 
 ## 6. 注意
 
@@ -80,7 +80,7 @@ Settings の thread の source に host 試験は無い。
 
 ## 7. 受け入れ（Q1 が見る）
 
-§4 の 1〜4 が PASS、§5 の 1 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/settings/ plan/ws327/phase011/phase.md plan/ws327/ws.md`。
+§4 の 1〜4 が PASS、§5 の 1 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/settings/ plan/ws327/phase011/phase.md`（ws.md は Q1）。
 
 ## 結果
 

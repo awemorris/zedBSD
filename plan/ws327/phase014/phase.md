@@ -24,7 +24,7 @@
 | file | 何を |
 | --- | --- |
 | `userland/desktop/libkeiland/platform/socket-win32.c` | 全ての関数を骨格の comment どおりに書く。static の補助を足してよい。record の型は変えてよいが、変えた点を結果に書く |
-| `plan/ws327/phase014/phase.md` の「結果」、`plan/ws327/ws.md` の p014 の行 | 記録 |
+| `plan/ws327/phase014/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 libkeiland の Makefile には足さない。`thread-win32.c` は p013 の物で触らない（`kl_once` はそこの関数を使う。p013 の前でも link は通る）。
 
@@ -47,6 +47,8 @@ libkeiland の Makefile には足さない。`thread-win32.c` は p013 の物で
   socket の組）ので select の WSAEINVAL は起きない。時間は `struct timeval`（FOREVER は NULL）。select の後: read の集合に有れば READABLE（events に有る時）、
   write は WRITABLE、except は FAILED（events に関わらず）。waker は read に有れば `recv` で読み切り（`WSAEWOULDBLOCK` まで）、その後
   `InterlockedExchange(&rung, 0)`、READABLE。`*ready` は ready が 0 でない wait の数。集合を free。
+- **close**: `kl_socket_close(NULL)`・`kl_socket_waker_close(NULL)` は何もしない（POSIX の実装と同じ。Mailer の `ml_conn_close` が開けな
+  かった接続で NULL を渡す。design-reviewer #9）。
 - **waker**: open は骨格の comment の手順（`SO_EXCLUSIVEADDRUSE` の listen、`getsockname`、blocking の connect、accept の peer の照合、
   listen の close、両端の非 blocking、`TCP_NODELAY`）。ring は `InterlockedCompareExchange(&rung, 1, 0) == 0` の時だけ 1 byte を `send`。
 - **誤りの表**: `socket_error`（§5.3 と骨格の comment の全て）。`EHOSTDOWN`・`ENONET` は mingw の `errno.h` に無い（`#if defined` で）。
@@ -58,8 +60,9 @@ libkeiland の Makefile には足さない。`thread-win32.c` は p013 の物で
 
 ## 4. 確かめの command
 
-1. `sh plan/ws327/tests/build-win32.sh` → `compile socket-win32.c: PASS (warnings 0)`・`link win32-link.exe: PASS`・`ws327-win32: PASS`。
-2. `sh plan/ws327/tests/check-base.sh` → PASS。
+1. `sh plan/ws327/tests/build-win32.sh` → x86_64 と i686 の両方で `compile socket-win32.c: PASS (warnings 0)`・`link win32-link.exe: PASS`、
+   最後に `ws327-win32: PASS`。
+2. `sh plan/ws327/tests/check-base.sh p014` → PASS。
 3. `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p014-linux build/ws327-p014-linux/lib/libkeiland.so` → 0。
 
 ## 5. 突然変異の確かめ（§13.6 の Win32 の形）
@@ -81,7 +84,7 @@ libkeiland の Makefile には足さない。`thread-win32.c` は p013 の物で
 ## 7. 受け入れ（Q1 が見る）
 
 §4 の 1〜3 が PASS、§5 の 1・2 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/libkeiland/platform/socket-win32.c
-plan/ws327/phase014/phase.md plan/ws327/ws.md`。動作の確かめはしない（決定 3）。
+plan/ws327/phase014/phase.md`（ws.md は Q1）。動作の確かめはしない（決定 3）。
 
 ## 結果
 

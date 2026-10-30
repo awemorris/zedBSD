@@ -34,7 +34,7 @@
 | [ws327-p004](phase004/phase.md) | app の移行（一括） | — | canceled（p008〜p012 に分けた。Mailer の途中の移行 6bb8c3c8d は p008 が引き継ぐ） | — |
 | ws327-p005 | 解説と規約の全文の見直し（一括） | — | canceled（p015・p017 に分けた） | — |
 | ws327-p006 | Win32 の実装（一括） | — | canceled（p013・p014 に分けた） | — |
-| [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | in-progress（2026-10-30 q1697-i02） | p003 |
+| [ws327-p007](phase007/phase.md) | 委譲の設計（手順の §4.4〜§4.8）: p008〜p017 の各 phase.md（触る file、design の節、移す前後の対応、試験のコマンド、突然変異の確かめ、受け入れ）、Win32 の `thread-win32.c`・`socket-win32.c` の骨格と mingw の build の script、app の移行の試験の道（既存の host 試験の link の直し方を含む）、境界の check の script | P2 | in-progress（2026-10-30 成果は揃った、design-reviewer 21 件を反映。cleared の判定は Q1） | p003 |
 | [ws327-p008](phase008/phase.md) | Mailer の移行の残り（`sync.c`、6bb8c3c8d の `conn.c`・`tls.c`・`imap.c` の確かめ）、`plan/tools/mail/` の host 試験の link と `host-mail-backend.c`・`host-mail-sync.c` | Sonnet | planned | p007 |
 | [ws327-p009](phase009/phase.md) | Music・Video Player・media-app の移行、`plan/tools/music/`・`plan/tools/media/` の host 試験の link | Sonnet | planned | p007 |
 | [ws327-p010](phase010/phase.md) | Photos（thumbs・media-worker）の移行 | Sonnet | planned | p007 |
@@ -57,4 +57,5 @@
 - 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形に組み直した（上の表）。P2 を再起動し p003 の guest の実行と p007 の委譲の設計から。
 - 2026-10-30 P2（q1697-i02）: p003 の guest の実行 PASS（cleared の候補）。p007: p008〜p017 の phase.md、design §13（実装の Phase の共通の約束）、
   Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`＋`frozen.sha256`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
-  `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。
+  `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。design-reviewer 21 件を反映（high の 1: Mailer が main で壊れないよう
+  P2 が `sync.c` を移した。p008 は確かめと host 試験の直し）。実装の担当は ws.md に触らない（Q1 が merge の時に表を直す）。

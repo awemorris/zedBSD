@@ -23,7 +23,7 @@
 | file | 何を |
 | --- | --- |
 | `userland/desktop/libkeiland/platform/thread-win32.c` | 全ての関数を骨格の comment どおりに書く。static の補助を足してよい。骨格の型（`struct kl_thread`・`struct thread_key_value`・`struct thread_key`・`struct thread_once_call`）は変えてよいが、変えた点を結果に書く |
-| `plan/ws327/phase013/phase.md` の「結果」、`plan/ws327/ws.md` の p013 の行 | 記録 |
+| `plan/ws327/phase013/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 libkeiland の Makefile には足さない（Windows の build は無い。`build-win32.sh` だけが compile する）。`socket-win32.c` は p014 の物で触らない。
 
@@ -31,13 +31,13 @@ libkeiland の Makefile には足さない（Windows の build は無い。`buil
 
 | 関数 | Win32 |
 | --- | --- |
-| `kl_thread_start` | 引数の確かめ（run が NULL・優先度が HIGH より上は EINVAL、`*thread = NULL`）、record を calloc（ENOMEM）、名前を `KL_THREAD_NAME_MAX` で切って写す、owners 2、`_beginthreadex(NULL, (unsigned)stack, thread_main, record, STACK_SIZE_PARAM_IS_A_RESERVATION, &id)`（stack が `UINT_MAX` を超えれば `UINT_MAX` に）。0 なら record を放して EAGAIN。handle と id を record に |
+| `kl_thread_start` | 引数の確かめ（run が NULL・優先度が HIGH より上は EINVAL、`*thread = NULL`）、record を calloc（ENOMEM）、名前を `KL_THREAD_NAME_MAX` で切って写す、owners 2、`_beginthreadex(NULL, (unsigned)stack, thread_main, record, CREATE_SUSPENDED | STACK_SIZE_PARAM_IS_A_RESERVATION, &id)`（stack が `UINT_MAX` を超えれば `UINT_MAX` に）。0 なら record を放して EAGAIN。handle と id を record に書いてから `ResumeThread`（thread の中の `kl_thread_is_current` が id を読む前に書く、design-reviewer #17）。`ResumeThread` の失敗は handle を閉じ record を放して EAGAIN |
 | `thread_main` | `thread_set_name`・`thread_set_priority`、`run(argument)`、`thread_release`、0 を返す |
 | `kl_thread_join` | `GetCurrentThreadId() == id` は EDEADLK（record はそのまま）。`WaitForSingleObject(handle, INFINITE)`、`CloseHandle`、free、0 |
 | `kl_thread_detach` | `CloseHandle`、`thread_release`、0 |
 | `thread_release` | `InterlockedDecrement(&owners) == 0` なら free |
 | `kl_thread_is_current` | `GetCurrentThreadId() == id` |
-| `kl_thread_sleep` | `Sleep(ms == UINT32_MAX ? UINT32_MAX - 1U : ms)`（`INFINITE` を避ける） |
+| `kl_thread_sleep` | `Sleep` は tick の粒度で早く返りうるので、`GetTickCount64` の期限まで残りを眠り直す（header の「at least」）。1 回の `Sleep` は `INFINITE` を避けて `UINT32_MAX - 1` まで |
 | `kl_thread_yield` | `(void)SwitchToThread()` |
 | `kl_thread_cpu_count` | `GetCurrentProcessorNumberEx(&number)`、`GetActiveProcessorCount(number.Group)`、0 は 1 |
 | mutex | `InitializeSRWLock`・`AcquireSRWLockExclusive`・`TryAcquireSRWLockExclusive`（0 は EBUSY）・`ReleaseSRWLockExclusive`、init は 0、destroy は何もしない |
@@ -49,10 +49,10 @@ libkeiland の Makefile には足さない（Windows の build は無い。`buil
 
 ## 4. 確かめの command
 
-1. `sh plan/ws327/tests/build-win32.sh` → `compile thread-win32.c: PASS (warnings 0)`・`compile socket-win32.c: PASS`・
-   `link win32-link.exe: PASS`・`ws327-win32: PASS`（flags は `-std=gnu17 -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes
+1. `sh plan/ws327/tests/build-win32.sh` → x86_64 と i686（32 bit: `__stdcall` の callback と room の大きさ）の両方で
+   `compile thread-win32.c: PASS (warnings 0)`・`compile socket-win32.c: PASS`・`link win32-link.exe: PASS`、最後に `ws327-win32: PASS`（flags は `-std=gnu17 -Wall -Wextra -Werror -Wshadow -Wstrict-prototypes
    -Wmissing-prototypes`、Windows 10）。
-2. `sh plan/ws327/tests/check-base.sh` → PASS。
+2. `sh plan/ws327/tests/check-base.sh p013` → PASS。
 3. POSIX の build に影響が無い事: `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p013-linux build/ws327-p013-linux/lib/libkeiland.so`
    → 0（`thread-win32.c` は Makefile に無いので compile されない。変わらない事の確かめ）。
 
@@ -71,14 +71,16 @@ libkeiland の Makefile には足さない（Windows の build は無い。`buil
 - `_beginthreadex` の stack は `unsigned`、`SetThreadDescription` は無い system がある（Windows 10 1607 より前）: run time に探す。
 - `struct kl_mutex` などの room の中に Win32 の物を置く（`thread_lock` などの補助）。`_Static_assert` は残す。
 - 写せない所・header の約束を Win32 で守れない所を見つけたら、直さずに結果の「Q1 へ」に書く（ユーザーの決定 3 の目的: interface が
-  Windows で通用するかの確かめ）。例: key の destroy の回数（1 回）、`FlsFree` が生きた値の destroy を呼ぶ事（header は未規定と書く）。
+  Windows で通用するかの確かめ）。例: key の destroy の回数（1 回）、`FlsFree` が生きた値の destroy を呼ぶ事（header は未規定と書く）、
+  libkeiland の DLL が unload された後の FLS の callback、destroy の中で同じ key に set した時、`SleepConditionVariableSRW` の待ちが
+  tick の粒度で早く返る事（`kl_cond_wait_for` は偽の起きとして 0 を返してよい）。
 - source の comment に開発の管理情報（WS・Phase の番号、plan/ への参照）を書かない。骨格の「Not written yet.」の comment は、書いた
   関数では中身の comment に置き換える。
 
 ## 7. 受け入れ（Q1 が見る）
 
 §4 の 1〜3 が PASS、§5 の 1・2 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/libkeiland/platform/thread-win32.c
-plan/ws327/phase013/phase.md plan/ws327/ws.md`。動作の確かめはしない（決定 3）。
+plan/ws327/phase013/phase.md`（ws.md は Q1）。動作の確かめはしない（決定 3）。
 
 ## 結果
 

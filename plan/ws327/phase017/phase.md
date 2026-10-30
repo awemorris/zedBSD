@@ -23,8 +23,8 @@ WS327 が足した・変えた C の source（`git diff --stat <WS327 の前の 
 - `plan/coding-style.md` の全文（§14 の checklist の全項目）と照らし、**書き方だけ**を直す（動作を変えない）。WS327 が変えた行と、
   その関数の中だけ（file の他の所の古い書き方は直さない）。
 - header の comment の持ち越しの直し（実装の Phase の間に見つかった header の comment の誤り。p008〜p016 の結果の「Q1 へ」と Q1 の記録に
-  あれば）。header の宣言・型・値は変えない（ABI）。直すと `frozen.sha256` が変わる: `sh plan/ws327/tests/make-frozen.sh` で作り直す
-  （この Phase だけ許す）。
+  あれば。例: `kl_socket_close(NULL)` は何もしない事、`kl_thread_start` の失敗で `*thread` が NULL）。header の宣言・型・値は変えない（ABI）。
+  `sh plan/ws327/tests/check-base.sh p017` はこの Phase だけ 2 つの header の変更を許す。
 - source の comment に開発の管理情報（WS・Phase・Bug の番号、plan/ への参照、日付の経緯）が無い事。
 
 ## 確かめ
@@ -38,7 +38,7 @@ WS327 が足した・変えた C の source（`git diff --stat <WS327 の前の 
 
 ## 受け入れ
 
-上が PASS、直した点の一覧を結果に、`git commit -m WIP -- <触った file> plan/ws327/phase017/phase.md plan/ws327/ws.md`。
+上が PASS、直した点の一覧を結果に、`git commit -m WIP -- <触った file> plan/ws327/phase017/phase.md`（ws.md は Q1）。
 
 ## 結果
 

@@ -19,7 +19,7 @@
 | `userland/desktop/ime/ja-user.c` | §3.1 |
 | `userland/desktop/libkeiland/ui/picker.h`・`picker-model.c` | §3.2 |
 | `userland/desktop/libkeiland/audio/audio.c` | §3.3 |
-| `plan/ws327/phase012/phase.md` の「結果」、`plan/ws327/ws.md` の p012 の行 | 記録 |
+| `plan/ws327/phase012/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 libkeiland の Makefile 3 本と IME の Makefile 3 本は変えない（libkeiland の Makefile は凍結。`thread-posix.c` は既に libkeiland に入っている）。
 
@@ -71,11 +71,13 @@ libkeiland の Makefile 3 本と IME の Makefile 3 本は変えない（libkeil
    host-engine.c の 230 件、picker: ws197 の picker-model-host-test。どちらも ASan・UBSan）。
 3. `sh plan/ws327/tests/build-zedbsd.sh p012 amd64 "keiland-ime"`、同 `arm64`、`riscv64` → 各 `make=0 warnings=0`（libkeiland.so も build する）。
 4. `python3 -I plan/ws327/tests/check-layers.py userland/desktop/ime/ userland/desktop/libkeiland/` → PASS。
-5. `sh plan/ws327/tests/check-base.sh` → PASS。
+5. `sh plan/ws327/tests/check-base.sh p012` → PASS。
 
 ## 5. 突然変異の確かめ（§13.6）
 
-1. `picker-model.c` の範囲が変わった時の `kl_cond_signal`（314 行あたり）を消す → picker の試験の縮小の待ちが時間切れで FAIL。
+1. `keiui_picker_fini` の止めの `kl_cond_signal`（259 行あたり）を消す → 縮小を作り終えた thread は `kl_cond_wait` に入っているので
+   join が戻らず、picker の試験が `timeout 60` で FAIL。（範囲の変化の signal（314 行）を消す壊し方は、試験が start の直後に範囲を書くので
+   捕まらない事が多い。design-reviewer #3）
 2. `ja-user.c` の `user_writer_flush` の `kl_thread_join` を消す → ime の試験の「the writer wrote 明後日 before the dictionary was freed」
    が FAIL するか、ASan が報告する（時機による。捕まらなければ「見逃し」と書く）。
 3. `ja-user.c` の `user_writer_ready` が常に ENOMEM を返す形にする → save_later は同期で書く道に落ち、ime の試験は PASS のまま
@@ -96,7 +98,7 @@ libkeiland の Makefile 3 本と IME の Makefile 3 本は変えない（libkeil
 ## 7. 受け入れ（Q1 が見る）
 
 §4 の 1〜5 が PASS、§5 の 1・4 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/ime/ja-user.c userland/desktop/libkeiland/ui/picker.h
-userland/desktop/libkeiland/ui/picker-model.c userland/desktop/libkeiland/audio/audio.c plan/ws327/phase012/phase.md plan/ws327/ws.md`。
+userland/desktop/libkeiland/ui/picker-model.c userland/desktop/libkeiland/audio/audio.c plan/ws327/phase012/phase.md`（ws.md は Q1）。
 
 ## 結果
 

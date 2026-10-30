@@ -23,7 +23,7 @@
 | `userland/desktop/media-app/avcodec.c` | §3.3 |
 | `plan/tools/music/host-music-play.sh` | §4.1 |
 | `plan/tools/media/run-host-codec.sh` | §4.2 |
-| `plan/ws327/phase009/phase.md` の「結果」、`plan/ws327/ws.md` の p009 の行 | 記録 |
+| `plan/ws327/phase009/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 Music・Video Player の Makefile は libkeiland を既に `REQUIRE` に持つので変えない。
 
@@ -73,8 +73,8 @@ Music・Video Player の Makefile は libkeiland を既に `REQUIRE` に持つ�
 - 「2. The decoding」の `cc -std=c89 ...` の前に、層を gnu17 で 1 つの object にする行を足す:
   `cc -std=gnu17 -O1 -g -Wall -Wextra -Werror -D_DEFAULT_SOURCE -fsanitize=address,undefined -fno-omit-frame-pointer -Iuserland/desktop/include -c userland/desktop/libkeiland/platform/thread-posix.c -o "$out/thread-posix.o" || { echo "run-host-codec: FAIL (build)"; exit 1; }`
 - `cc -std=c89 ...` の行に `-Iuserland/desktop/include` と `"$out/thread-posix.o"` を足す（`-lpthread` は残す）。
-- `-D_DEFAULT_SOURCE` で `thread-posix.c` の `pthread_setname_np`・`gettid` が見えない時は、その object の行だけ `-D_GNU_SOURCE` にする
-  （試して決め、結果に書く）。
+- 上の object の行は `-D_GNU_SOURCE`（`-D_DEFAULT_SOURCE` では `thread-posix.c` の `pthread_setname_np` が宣言されず FAIL する。
+  design-reviewer #11 が確かめた）。上の例の `-D_DEFAULT_SOURCE` をその行だけ `-D_GNU_SOURCE` に替えて書く。
 
 ## 5. 確かめの command（§13.5）
 
@@ -82,14 +82,14 @@ Music・Video Player の Makefile は libkeiland を既に `REQUIRE` に持つ�
 2. `sh plan/tools/media/run-host-codec.sh` → 最後の行 `run-host-codec: PASS`。
 3. `sh plan/ws327/tests/build-zedbsd.sh p009 amd64 "music videoplayer"`、同 `arm64`、`riscv64` → 各 `make=0 warnings=0`。
 4. `python3 -I plan/ws327/tests/check-layers.py userland/desktop/music/ userland/desktop/videoplayer/ userland/desktop/media-app/` → PASS。
-5. `sh plan/ws327/tests/check-base.sh` → PASS。
+5. `sh plan/ws327/tests/check-base.sh p009` → PASS。
 
 ## 6. 突然変異の確かめ（§13.6）
 
 1. `mu_player_open` の `options.run` を NULL にする → `kl_thread_start` が EINVAL、host-music-play の再生の check が FAIL。
 2. `avcodec.c` の `kl_once(&codec_once, codec_load)` を消す → add-in が読まれず run-host-codec が FAIL。
-3. Music でもう 1 つ、試験が捕まえる壊し方を探して確かめる（例: `mu_player_close` の `kl_cond_broadcast` を消す → join が戻らず
-   timeout）。捕まらなければ、それを「見逃し」として結果に書く。
+3. `play_run` の中の止め（`quit`）の確かめを消す → `mu_player_close` の join が戻らず host-music-play が `timeout 60` で FAIL。
+   （`kl_cond_broadcast` を消す壊し方は捕まらない: Music の thread は条件変数で待たず `kl_thread_sleep` で回る。）
 4. 各々の後に戻し `cmp` で確かめる。Video Player は host 試験が無い: check-layers で（`pthread_mutex_lock` を 1 つ戻すと T1）確かめ、
    再生は p016 の QEMU。
 
@@ -104,8 +104,7 @@ Music・Video Player の Makefile は libkeiland を既に `REQUIRE` に持つ�
 ## 8. 受け入れ（Q1 が見る）
 
 §5 の 5 つが PASS、§6 の 1・2 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/music/ userland/desktop/videoplayer/
-userland/desktop/media-app/avcodec.c plan/tools/music/host-music-play.sh plan/tools/media/run-host-codec.sh plan/ws327/phase009/phase.md
-plan/ws327/ws.md`。QEMU の再生の開始・停止は p016。
+userland/desktop/media-app/avcodec.c plan/tools/music/host-music-play.sh plan/tools/media/run-host-codec.sh plan/ws327/phase009/phase.md`（ws.md は Q1）。QEMU の再生の開始・停止は p016。
 
 ## 結果
 

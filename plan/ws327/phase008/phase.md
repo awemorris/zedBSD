@@ -1,6 +1,6 @@
 <!-- awesome-plan project=zedbsd record=ws327-p008 -->
 
-# ws327-p008 Mailer の移行の残り（sync.c）と Mail の host 試験
+# ws327-p008 Mailer の移行の確かめと Mail の host 試験の直し
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §6.2・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007。
 - Status: planned
@@ -14,24 +14,25 @@
 - header（仕様）: `userland/desktop/include/keiland/keiland_thread.h`・`keiland_socket.h`（変えない）。
 - 途中まで移した source（6bb8c3c8d、P2、host の compile は通るが未試験）: `userland/desktop/mailer/conn.c`・`tls.c`・`imap.c`・`mail.h`。
   読んで §6.2 と合っているか確かめる（食い違いは直してよい。直した点は結果に書く）。
-  P2 の確かめ（p007）: host-mail-backend.c の IDLE の待ちだけを仮に `kl_socket_native` の fd の poll にした写しを、層の 2 file と
+  P2 の確かめ（p007）: sync.c を移した後、§4.3 の形に仮に直した host-mail-sync.c の写しで `host-mail-sync: PASS`（10 件、IDLE の新着を
+  waker と kl_socket_poll で）。 host-mail-backend.c の IDLE の待ちだけを仮に `kl_socket_native` の fd の poll にした写しを、層の 2 file と
   `-std=gnu17` で build し fake-mail-server.py に対して流すと `host-mail-backend: PASS`（50 件、TLS・STARTTLS・IDLE・SMTP）。
 
 ## 2. 作る物・直す物（触ってよい file はこれだけ）
 
 | file | 何を |
 | --- | --- |
-| `userland/desktop/mailer/sync.c` | 下の §3 の対応表どおりに移す |
+| `userland/desktop/mailer/sync.c` | P2 が p007 で §3 の表どおりに移した（main の Mailer が壊れないよう p007 の merge の前に。design-reviewer #1）。表と合うか確かめ、誤りがあれば直す |
 | `userland/desktop/mailer/conn.c`・`tls.c`・`imap.c`・`mail.h` | 確かめて、誤りがあれば直す（6bb8c3c8d の続き） |
 | `plan/tools/mail/run-host-mail-backend.sh` | §4.1 |
 | `plan/tools/mail/host-mail-backend.c` | §4.2 |
 | `plan/tools/mail/host-mail-sync.c` | §4.3（main で既に壊れている: 6a53bce99 で `ml_sync_start` の引数が変わり、`ml_sync_fd` が無くなった） |
-| `plan/ws327/phase008/phase.md` の「結果」、`plan/ws327/ws.md` の p008 の行 | 記録 |
+| `plan/ws327/phase008/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 Mailer の Makefile（`userland/desktop/mailer/Makefile`）は libkeiland を既に `REQUIRE` に持つので変えない（ws.md の古い記述の
 「Makefile 3 本」は誤り。Mailer は zedBSD だけで build する）。
 
-## 3. sync.c の前後の対応
+## 3. sync.c の前後の対応（p007 で P2 が適用済み。確かめの基準）
 
 | 所 | 前 | 後 |
 | --- | --- | --- |
@@ -42,7 +43,7 @@ Mailer の Makefile（`userland/desktop/mailer/Makefile`）は libkeiland を既
 | `ml_sync_stop` | `write(wake[1], 's')`、`pthread_join`、`close(wake[0..1])`、`pthread_mutex_destroy` | `kl_socket_waker_ring(sync->waker)`、`kl_thread_join(sync->thread)`、`if (sync->waker != NULL) kl_socket_waker_close(sync->waker)`、`kl_mutex_destroy` |
 | `ml_sync_queue` | `write(wake[1], 'j')` | `kl_socket_waker_ring(sync->waker)`（comment「a full pipe already wakes it」は「rings merge」に） |
 | `sync_run` | `static void *sync_run(void *)`、`return NULL;` | `static void sync_run(void *argument)`、return 無し（前方の宣言も直す） |
-| `sync_wait` | `struct pollfd watched[1 + ML_ACCOUNTS_MAX]`、`watched[0].fd = wake[0]`、各 account の `imap.conn.fd` を POLLIN、`poll(watched, count, timeout)`、`ready < 0` は errno、wake の read、`revents & (POLLIN \| POLLHUP \| POLLERR)` | `struct kl_socket_wait watched[1 + ML_ACCOUNTS_MAX]`（`memset` で 0）、`watched[0].waker = sync->waker; .events = KL_SOCKET_READABLE`、各 account は `.socket = sync->accounts[index].imap.conn.socket; .events = KL_SOCKET_READABLE`、`error = kl_socket_poll(watched, count, timeout, &found)`（`size_t found`）、誤りはその値を返す、wake の read は消す（poll が waker を空にする）、`found == 0` が時間切れ、各 session は `(watched[index].ready & (KL_SOCKET_READABLE \| KL_SOCKET_FAILED)) == 0U` なら飛ばす |
+| `sync_wait` | `struct pollfd watched[1 + ML_ACCOUNTS_MAX]`、`watched[0].fd = wake[0]`、各 account の `imap.conn.fd` を POLLIN、`poll(watched, count, timeout)`、`ready < 0` は errno、wake の read、`revents & (POLLIN \| POLLHUP \| POLLERR)` | `struct kl_socket_wait watched[1 + ML_ACCOUNTS_MAX]`（`memset` で 0）、`watched[0].waker = sync->waker; .events = KL_SOCKET_READABLE`、各 account は（`idling` で `conn.socket != NULL` の時だけ）`.socket = sync->accounts[index].imap.conn.socket; .events = KL_SOCKET_READABLE`、`error = kl_socket_poll(watched, count, timeout, &found)`（`size_t found`）、誤りはその値を返す、wake の read は消す（poll が waker を空にする）、`found == 0` が時間切れ、各 session は `(watched[index].ready & (KL_SOCKET_READABLE \| KL_SOCKET_FAILED)) == 0U` なら飛ばす |
 | lock の所（`sync_take`・`sync_post` など全て） | `pthread_mutex_lock`・`unlock` | `kl_mutex_lock`・`kl_mutex_unlock` |
 
 - `conn.socket` を直に見る（`imap.c` の `ml_imap_close` と同じ形）。design §6.2 の「ml_conn の関数に」は、field を直に見る形に決めた
@@ -78,13 +79,15 @@ Mailer の Makefile（`userland/desktop/mailer/Makefile`）は libkeiland を既
    `host-mail-*` が出す行を読む）。
 2. `sh plan/ws327/tests/build-zedbsd.sh p008 amd64 "mailer"`、同 `arm64`、`riscv64` → 各 `make=0 warnings=0`。
 3. `python3 -I plan/ws327/tests/check-layers.py userland/desktop/mailer/` → `ws327-check-layers: PASS`。
-4. `sh plan/ws327/tests/check-base.sh` → `ws327-check-base: PASS`。
+4. `sh plan/ws327/tests/check-base.sh p008` → `ws327-check-base: PASS`。
 
 ## 6. 突然変異の確かめ（§13.6、それぞれ 1 の試験が FAIL か時間切れになる事）
 
 1. `ml_sync_queue` の `kl_socket_waker_ring` を消す → sync の試験の sign-in が `TEST_WAIT_MS`（10 s）で来ない。
 2. `sync_wait` の session の判定から `KL_SOCKET_READABLE` を外す（FAILED だけ）→ sync の試験の `arrived` が来ない。
-3. `conn.c` の読みの前の待ちの events を `KL_SOCKET_WRITABLE` にする → backend の試験の読みが時間切れか誤り。
+3. `conn.c` の `ml_conn_open` で `kl_socket_connect` の EINPROGRESS を誤りとして扱う（loopback への非 blocking の connect は EINPROGRESS を
+   返すので全ての接続が失敗する）→ backend の試験の open が FAIL。
+   （読みの前の待ちの events を変える壊し方は捕まらない: 接続の後の socket は blocking で、読みの時間切れの試験が無い。結果に「見逃し」と書く。）
 4. 各々の後に元に戻し `cmp` で確かめる。見逃しがあれば結果に書く（試験の追加は Q1 に頼む: 試験の file の変更は §2 の 3 つだけ）。
 
 ## 7. 注意
@@ -97,8 +100,8 @@ Mailer の Makefile（`userland/desktop/mailer/Makefile`）は libkeiland を既
 
 ## 8. 受け入れ（Q1 が見る）
 
-§5 の 4 つが PASS、§6 の 3 つが捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/mailer/ plan/tools/mail/run-host-mail-backend.sh
-plan/tools/mail/host-mail-backend.c plan/tools/mail/host-mail-sync.c plan/ws327/phase008/phase.md plan/ws327/ws.md`。
+§5 の 4 つが PASS、§6 の 3 つが捕まる、規約の見直し、`sh plan/ws327/tests/check-base.sh p008` が PASS、`git commit -m WIP -- userland/desktop/mailer/ plan/tools/mail/run-host-mail-backend.sh
+plan/tools/mail/host-mail-backend.c plan/tools/mail/host-mail-sync.c plan/ws327/phase008/phase.md`（ws.md は Q1 が直す）。
 QEMU の Mailer（fake-mail-server での接続・IDLE・送信）は p016。
 
 ## 結果

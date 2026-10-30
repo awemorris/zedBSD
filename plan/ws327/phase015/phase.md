@@ -23,7 +23,7 @@
 | `docs/howto/keiland-examples/08-language.c` | §3.1 |
 | `docs/howto/keiland-examples/08-network.c`（新） | §3.2 |
 | `docs/howto/keiland-programming.md` | §3.3 |
-| `plan/ws327/phase015/phase.md` の「結果」、`plan/ws327/ws.md` の p015 の行 | 記録 |
+| `plan/ws327/phase015/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 `docs/` から `plan/` へ link しない（docs は目標の設計の文書）。`docs/howto/keiland-examples/*.png` は作らない（08-network の写真は
 p016 で P2 が guest で撮る。それまで本文に画像の行を置かない）。`plan/ws314/tests/doc-examples.sh` は閉じた WS の物で変えない。
@@ -76,7 +76,7 @@ p016 で P2 が guest で撮る。それまで本文に画像の行を置かな�
 2. 行の参照: `python3 -I plan/ws327/tests/doc-lines.py 08-worker.c 08-language.c 08-network.c` → `ws327-doc-lines: PASS`。さらに出力の
    各参照の first・last の行が、本文がその参照で説明している code（直後の ``` の block や「(`function`)」）と合う事を自分で全て読んで確かめる。
 3. 08-network を host で動かす事はしない（窓が要る）。guest の写真は p016。
-4. `sh plan/ws327/tests/check-base.sh` → PASS。
+4. `sh plan/ws327/tests/check-base.sh p015` → PASS。
 
 ## 5. 突然変異の確かめ（§13.6）
 
@@ -94,7 +94,7 @@ p016 で P2 が guest で撮る。それまで本文に画像の行を置かな�
 ## 7. 受け入れ（Q1 が見る）
 
 §4 の 1・2・4 が PASS、§5 の 1・2 が捕まる、規約の見直し、`git commit -m WIP -- docs/howto/keiland-programming.md docs/howto/keiland-examples/08-worker.c
-docs/howto/keiland-examples/08-language.c docs/howto/keiland-examples/08-network.c plan/ws327/phase015/phase.md plan/ws327/ws.md`（新しい file は先に `git add`）。
+docs/howto/keiland-examples/08-language.c docs/howto/keiland-examples/08-network.c plan/ws327/phase015/phase.md`（ws.md は Q1）（新しい file は先に `git add`）。
 
 ## 結果
 

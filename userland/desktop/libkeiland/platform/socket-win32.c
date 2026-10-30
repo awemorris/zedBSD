@@ -506,7 +506,8 @@ kl_socket_native(
 /*
  * Closes a socket and frees its record.
  *
- * Win32: closesocket.
+ * Win32: closesocket.  NULL does nothing, as on POSIX (a connection that
+ * never opened is closed with NULL).
  */
 void
 kl_socket_close(
@@ -585,7 +586,7 @@ kl_socket_waker_ring(
 /*
  * Closes a waker.
  *
- * Win32: closesocket on both ends, the record freed.
+ * Win32: closesocket on both ends, the record freed.  NULL does nothing.
  */
 void
 kl_socket_waker_close(
@@ -619,7 +620,9 @@ socket_start_once(void)
 /*
  * Turns a WinSock or Win32 error into its POSIX name: WSAEWOULDBLOCK
  * EAGAIN (never EWOULDBLOCK: the two differ on Windows), WSAEINPROGRESS
- * EINPROGRESS, WSAECONNREFUSED ECONNREFUSED, WSAECONNRESET ECONNRESET,
+ * EALREADY (a WinSock 1.1 blocking call under way, not a connect that did
+ * not block: kl_socket_connect turns WSAEWOULDBLOCK into EINPROGRESS
+ * itself), WSAECONNREFUSED ECONNREFUSED, WSAECONNRESET ECONNRESET,
  * WSAETIMEDOUT ETIMEDOUT, WSAENETUNREACH ENETUNREACH, WSAEHOSTUNREACH
  * EHOSTUNREACH, WSAEADDRINUSE EADDRINUSE, WSAEADDRNOTAVAIL EADDRNOTAVAIL,
  * WSAEAFNOSUPPORT EAFNOSUPPORT, WSAEMFILE EMFILE, WSAENOTCONN ENOTCONN,

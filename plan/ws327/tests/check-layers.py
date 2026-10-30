@@ -2,7 +2,8 @@
 # The applications and libkeiland outside its platform/ use libkeiland's threads and network, not the system's
 # (the checks T1 and N1 of plan/ws327/design.md §1.3, meant to join plan/tools/keiland-os-boundary/check.sh):
 #   T1  no pthread_*, thrd_*, mtx_*, cnd_*, call_once, <pthread.h>, <threads.h>
-#   N1  no socket, connect, bind, listen, accept, accept4, getaddrinfo, poll, select calls, no <sys/socket.h>,
+#   N1  no socket, connect, bind, listen, accept, accept4, getaddrinfo, poll, ppoll, select, pselect, epoll_*, kqueue,
+#       kevent, send, recv, sendto, recvfrom, setsockopt, shutdown calls, no <sys/socket.h>, <sys/select.h>, <sys/un.h>,
 #       <netdb.h>, <poll.h>, <netinet/*>, <arpa/inet.h>
 # The sources are check.sh's applications (userland/desktop's folders but the compositor, the system's services, the
 # X server, the graphics and compatibility libraries and libkeiland-backend*), less libbrowser and libmedia (libraries
@@ -26,14 +27,14 @@ NOT_APPLICATIONS = {
 }
 CALLS = {
     'T1': re.compile(r'(?<![\w.>])(pthread_\w+|thrd_\w+|mtx_\w+|cnd_\w+|call_once)\s*\('),
-    'N1': re.compile(r'(?<![\w.>])(socket|connect|bind|listen|accept|accept4|getaddrinfo|poll|select)\s*\('),
+    'N1': re.compile(r'(?<![\w.>])(socket|connect|bind|listen|accept|accept4|getaddrinfo|poll|ppoll|select|pselect|epoll_\w+|kqueue|kevent|send|recv|sendto|recvfrom|setsockopt|shutdown)\s*\('),
 }
 TYPES = {
     'T1': re.compile(r'(?<![\w.>])(pthread_\w+_t|thrd_t|mtx_t|cnd_t|once_flag|PTHREAD_\w+)\b'),
 }
 HEADERS = {
     'T1': re.compile(r'^\s*#\s*include\s*<(pthread\.h|threads\.h)>'),
-    'N1': re.compile(r'^\s*#\s*include\s*<(sys/socket\.h|netdb\.h|poll\.h|netinet/[^>]*|arpa/inet\.h)>'),
+    'N1': re.compile(r'^\s*#\s*include\s*<(sys/socket\.h|sys/select\.h|sys/un\.h|netdb\.h|poll\.h|netinet/[^>]*|arpa/inet\.h)>'),
 }
 
 

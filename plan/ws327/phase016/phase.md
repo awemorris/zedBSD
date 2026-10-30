@@ -32,8 +32,10 @@
      `--arrivals 1`。名前でなく address で指す: zedBSD に `/etc/hosts` が無い）、guest の Mailer が接続・sign-in・IDLE・新着・送信（`MAIL SIGNED-IN`・`MAIL REFRESHED`・
      `MAIL MESSAGE ... arrived=1`・`MAIL SENT` の行）。
    - Music・Video Player: `plan/tools/media/sample.mp4` の再生の開始と停止（窓の写真と、停止の後に process が残らない）。
-   - Photos: 縮小（写真の一覧の写真）。Settings: storage の page（走査の終わりの log）と見た目の page。IME: 辞書の書き（変換の後の
-     `~/.config` の辞書の file）。Terminal の起動（回帰）。
+   - Photos: 起動の直後（縮小の thread の start の前後）の縮小の要求と一覧の写真（静的な条件変数の once、design-reviewer #10）。
+     Settings: storage の page（走査の終わりの log）と見た目の page。IME: 辞書の書きを 2 回（1 回目の flush で thread が終わった後に
+     もう 1 回: once で作った条件変数の再使用）、`~/.config` の辞書の file の中身。Video Player の `kl_cond_wait_for` は再生の途切れの
+     無い事（写真 2 枚の間の時間）で。Terminal の起動（回帰）。
    - 8 章の例: `sh plan/ws314/tests/doc-examples.sh guest build/ws327-p016-img 08-worker 08-language` の写真、08-network は同じ方法で撮り
      `docs/howto/keiland-examples/08-network.png` と本文の画像の行を足す（p015 が置かなかった物）。
 5. **Win32**: p013・p014 の結果の「Q1 へ」をまとめ、interface を Windows で守れない所（例: key の destroy の回数、`FlsFree` の destroy、

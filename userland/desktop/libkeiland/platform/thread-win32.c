@@ -107,11 +107,14 @@ static struct thread_key *thread_key(struct kl_thread_key *key);
  * Starts a thread under its name and priority.
  *
  * Win32: the record as on POSIX, then _beginthreadex (not CreateThread, so
- * that the C runtime is set up for the thread) with the stack size as a
- * reservation (STACK_SIZE_PARAM_IS_A_RESERVATION; 0 is the system's) and
- * thread_main as the trampoline.  _beginthreadex's failure (0, errno EAGAIN,
- * EINVAL or EACCES) is EAGAIN; the record is freed.  Nothing is blocked:
- * Windows has no signals.
+ * that the C runtime is set up for the thread) suspended (CREATE_SUSPENDED)
+ * with the stack size as a reservation (STACK_SIZE_PARAM_IS_A_RESERVATION;
+ * 0 is the system's) and thread_main as the trampoline; the handle and the
+ * identifier are written into the record before ResumeThread lets the
+ * thread run, so that kl_thread_is_current inside it reads them.
+ * _beginthreadex's failure (0, errno EAGAIN, EINVAL or EACCES) is EAGAIN;
+ * the record is freed.  ResumeThread's failure closes the handle, frees the
+ * record and is EAGAIN.  Nothing is blocked: Windows has no signals.
  */
 int
 kl_thread_start(
@@ -172,8 +175,9 @@ kl_thread_is_current(
 /*
  * Sleeps at least a number of milliseconds.
  *
- * Win32: Sleep; UINT32_MAX is INFINITE there, so it sleeps UINT32_MAX - 1
- * (the wait stays finite, as the header says).
+ * Win32: Sleep ends on the system's tick and may return a little early, so
+ * the rest is slept again until GetTickCount64 reaches the end; one Sleep
+ * is at most UINT32_MAX - 1 (UINT32_MAX is INFINITE there).
  */
 void
 kl_thread_sleep(

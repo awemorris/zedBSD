@@ -18,7 +18,7 @@
 | --- | --- |
 | `userland/desktop/photos/thumbs.c` | §3.1 |
 | `userland/desktop/photos/media-worker.c` | §3.2 |
-| `plan/ws327/phase010/phase.md` の「結果」、`plan/ws327/ws.md` の p010 の行 | 記録 |
+| `plan/ws327/phase010/phase.md` の「結果」 | 記録（`plan/ws327/ws.md` は触らない: 並べた Phase の merge が衝突するので Q1 が直す） |
 
 Photos の Makefile は libkeiland を既に `REQUIRE` に持つので変えない。
 
@@ -54,7 +54,7 @@ Photos の Makefile は libkeiland を既に `REQUIRE` に持つので変えな�
 
 1. `sh plan/ws327/tests/build-zedbsd.sh p010 amd64 "photos"`、同 `arm64`、`riscv64` → 各 `make=0 warnings=0`。
 2. `python3 -I plan/ws327/tests/check-layers.py userland/desktop/photos/` → PASS（`media-worker.c` の `<sys/socket.h>` は許可の行で通る）。
-3. `sh plan/ws327/tests/check-base.sh` → PASS。
+3. `sh plan/ws327/tests/check-base.sh p010` → PASS。
 4. host の compile の確かめ（Photos は Linux で build しないので、文法と型の確かめとして）:
    `for f in thumbs media-worker; do cc -std=gnu17 -D_GNU_SOURCE -Wall -Wextra -Werror -fsyntax-only -I. -Iuserland/desktop/include userland/desktop/photos/$f.c || echo FAIL $f; done`
    （移す前の tree で通る事を P2 が確かめた。この確かめは補助）。
@@ -65,7 +65,7 @@ Photos に host 試験は無い。
 
 1. `thumbs.c` の `kl_cond_wait` を 1 つ `pthread_cond_wait` に戻す（git の外で）→ check-layers の T1 が FAIL（と build も失敗）。
 2. `ph_worker_queue` の `worker_ready()` の判定を逆にする → 結果に「host 試験が無いので捕まらない、p016 の QEMU の縮小で見る」と書く。
-3. 戻して `cmp`。縮小・取り込みの動きは p016 の QEMU（Photos の縮小）。
+3. 戻して `cmp`。縮小・取り込みの動き（start の前の要求を含む）はこの Phase では**未試験**と結果に書く。p016 の QEMU が見る。
 
 ## 6. 注意
 
@@ -78,7 +78,7 @@ Photos に host 試験は無い。
 ## 7. 受け入れ（Q1 が見る）
 
 §4 の 1〜3 が PASS、§5 の 1 が捕まる、規約の見直し、`git commit -m WIP -- userland/desktop/photos/thumbs.c userland/desktop/photos/media-worker.c
-plan/ws327/phase010/phase.md plan/ws327/ws.md`。
+plan/ws327/phase010/phase.md`（ws.md は Q1）。
 
 ## 結果
 
