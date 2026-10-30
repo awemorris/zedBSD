@@ -100,3 +100,8 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - sessiond の `seat.c` の `sessiond_seat_restore` の comment は root に返した node を「誰でも開ける」と書くが、`gpu_open` は root と owner だけ（mode 0666 でも EACCES）。
 - `gpu-display.h` の `struct gpu_display_wait` は「signal で EINTR」と書くが、ghci の display の wait と adoption の wait は flags 0 の `waitq_sleep` で signal で終わらない（bcm2711 だけ中断できる）。`GPU_DISPLAY_REFRESH` の 4 driver も signal を見ない。
 - `GPU_DISPLAY_OVERLAY_INFO` は ungated の経路でしか届かない（gpu-display-control.md の p018 に知らせ済みでなければ統合で合わせる）。
+
+## p012 から（2026-10-30 Q1）
+
+- **gpu.md と食い違う見込み（統合で直す）**: `device_id` は物理の device ごとでなく node ごと（同じ GPU の render と display の node は別の id）。gpu.md と骨格の spec が「device_id で同じ device と分かる」と仮定していないか確かめ、合わせる。
+- `GPU_BLOB_CREATE` は `flags` を書き戻す（HOST_BLOB の無い node で GPU_BLOB_HOST を落とす）が header は入力だけ。`GPU_RESOURCE_MAP` は resource の種類を見ない。`GPU_RESOURCE_DESTROY` は map 中 EBUSY、display の使用中は待つ、投入済みの仕事は見ない、export した descriptor は取り消さない。
