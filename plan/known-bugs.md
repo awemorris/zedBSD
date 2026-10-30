@@ -195,7 +195,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-325](bugs/BUG-325.md) | 5330 で操作中に compositor が GPU への投入で失敗して終了する（compose_draw submit result=-4、kernel は device lost 0） | reproduced（実機 1 回）/ tracking | P1 2026-10-16 | 未割当（記録だけ） |
 | [BUG-326](bugs/BUG-326.md) | DHCP の lease が取れても /etc/resolv.conf を書けず dhcpc が失敗する（前の起動の resolv.conf.tmp.<pid> が残る） | reproduced（実機 3 回）/ resolved（実機の確認は未実施） | P1 2026-10-16 | Q1 が修正 |
 | [BUG-327](bugs/BUG-327.md) | 5330 で zedBSD の USB の stick の小さな読み込みが 1 回 30〜54 ms 待ち、起動が遅い（同じ stick を Linux から 0.4 ms、stick の劣化ではない） | reproduced（実機の記録 1 回）/ tracking | P2 2026-10-16 | P2（WS253、q1221-i04） |
-| [BUG-328](bugs/BUG-328.md) | 静的な設定の default route と DNS が起動の後に入らない（net startup が address だけを送る） | reproduced（QEMU）/ fixed（2026-10-31 P2 q1750-i01、7e22a31c9: net startup の worker が route を最大 120 秒試し DNS を書く。QEMU の再起動で確かめた、実機は未実施） | P4 2026-10-16 | P2（Q1 の判定待ち） |
+| [BUG-328](bugs/BUG-328.md) | 静的な設定の default route と DNS が起動の後に入らない（net startup が address だけを送る） | reproduced（QEMU）/ closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、7e22a31c9: net startup の worker が route を最大 120 秒試し DNS を書く。QEMU の再起動で確かめた、実機は未実施） | P4 2026-10-16 | P2（Q1 の判定待ち） |
 | [BUG-329](bugs/BUG-329.md) | RX 5600 XT で Notes が起動しない（executor に depth/stencil の format が無い） | reproduced（実機 1 回）/ tracking | P3 2026-10-16 | 未割当（WS039 の executor） |
 | [BUG-330](bugs/BUG-330.md) | framebuffer の console のスクロールが遅い（1920x1080 で 1 秒に約 4 行、毎行で全部の cell を描き直す） | reproduced（ユーザー）/ tracking（2026-10-16 夜 ユーザーの指示で修正を止めた。途中の変更は tag saved/20261018-bug330-console） | ユーザー 2026-10-16 | 未割当 |
 | [BUG-331](bugs/BUG-331.md) | RDNA 機の desktop が App Home を閉じる animation 中に固まり（mouse も止まる）、reset して Debian に戻る（p017 の 2 段目の試験の kernel） | reproduced 0 回（ユーザー 1 回）/ tracking | ユーザー 2026-10-16 | P3（p017 の中） |
@@ -211,7 +211,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-341](bugs/BUG-341.md) | VF2 の自前の表示の点灯で DC8200 の model が 0 と読め画面が点かない | resolved（2026-10-20 06:11 ユーザーの実機で画面が点いた、15b1043a2） | ユーザーの VF2 の UAT | P1 |
 | [BUG-342](bugs/BUG-342.md) | PowerVR の session の GPU の VA に mainline の static data area が無い（MCU fence 等） | unknown / scheduled（2026-10-20） | design-p010-review-2 M-4 | 修正済み・実機未確認（2026-10-20、VF2 の T1 試験待ち） |
 | [BUG-343](bugs/BUG-343.md) | VF2 の SD からの起動で root が 60 秒たっても live にならない事がある（dw-mmc の read の失敗、`firmware: file failed (42)`） | reproduced / tracking（2026-10-20） | WS269 の UAT の電源の入れ直し | WS256（SD の clock・mount の retry）で見る。2026-10-21: 長く動いた後に root の read が全部 EIO（電源の入れ直しで戻る）を追記。2026-10-21 q1531: 回復を controller の全部の reset にし、5 回の try と 1 block ずつの retry を足し、failed の固定を 3 回の回復の失敗の時だけにした（板は未実施）。シリアルの log で `vfs:` の止まる所を |
-| [BUG-344](bugs/BUG-344.md) | libc の fscanf/vfscanf/scanf が 1 行しか読まず、使わなかった入力を stream に戻さない（`src/libc/stdio-extra.c`、fgets + vsscanf） | reproduced / fixed（2026-10-31 P2 q1750-i01、b69021a4b: src/libc/scan.c の stream から読む scanner、host 試験 scanf-host-test と QEMU で確かめた、実機は未実施） | WS269 の gpu-selftest の present（板 83） | gpu-selftest は自前の header 読みで回避（b70559027、戻していない） |
+| [BUG-344](bugs/BUG-344.md) | libc の fscanf/vfscanf/scanf が 1 行しか読まず、使わなかった入力を stream に戻さない（`src/libc/stdio-extra.c`、fgets + vsscanf） | reproduced / closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、b69021a4b: src/libc/scan.c の stream から読む scanner、host 試験 scanf-host-test と QEMU で確かめた、実機は未実施） | WS269 の gpu-selftest の present（板 83） | gpu-selftest は自前の header 読みで回避（b70559027、戻していない） |
 | [BUG-345](bugs/BUG-345.md) | Pi 5 のデスクトップでマウスのクリックが時々効かない（USB・evdev・compositor の menu には 6/6 届いていて、組んだ frame が静止した画面に出ない窓の疑い） | unreproduced / tracking（2026-10-23、再起動の後は 0 件） | ユーザーの Pi 5 の UAT（Terminal の Shell の menu） | 再発した時に hvs6-flip の record・adoption の記録の kernel で同じ実演（ticket） |
 | [BUG-346](bugs/BUG-346.md) | sshd の listener が子の sshd-session [priv] を刈らずに残し、MaxStartups で新しい SSH の接続が banner の前に落ちる（10.0.10.3、負荷の高い時、GPU と無関係の見込み） | reproduced / resolved（2026-10-27 05:10、ae266e6fe） | 2026-10-27 04:08 WS291 p003 | P1（q1607）。resolved は Q1 の判定、amd64 の実機は未確認 |
 | [BUG-347](bugs/BUG-347.md) | disk image の system の file が group-writable（build の umask がそのまま。/lib/libc.so が rwxrwxr-x、wheel の kei が書き換えられる、security） | resolved（2026-10-28 Q1、merge a79ce5edb。QEMU で確認、b0cc18f2f。root の tree の規則と overlay の tool で umask 022、image の書き込みのある inode は /tmp・/shm だけ。resolved は Q1 の判定） | 2026-10-28 ws307-p001 の review | P4（q1647、2026-10-28 ユーザー） |
@@ -219,9 +219,9 @@ remain as traceable history and are not new implementation work.
 | [BUG-349](bugs/BUG-349.md) | venus は strict の queue が無くても GPU_CAP_JOB を返すが GPU_JOB_RESERVE は ENOTSUP（DOC-54 の review で見つけた、source の読みのみ） | open |
 | [BUG-350](bugs/BUG-350.md) | VF2 で usb_hub_worker が 1 CPU を常に 100 % 使う（idle でも） | fixed（確かめ: VF2・QEMU、P3 f3d89900a: USB の同期待ちの yield の回し続けを wait queue に） |
 | [BUG-351](bugs/BUG-351.md) | /dev/acpi が 0666 で一般の user が AML の method（EC の書き・SMI）を評価できる見込み（source の読み、未試験） | open |
-| [BUG-352](bugs/BUG-352.md) | DHCP の interface が 2 つで両方が default route を入れると、次からの net の commit が `route: Device or resource busy` で失敗（rollback も degraded） | fixed（2026-10-31 P2 q1750-i01、4edbbd7dc: networkd が default route を interface ごとに消す。QEMU で確かめた） |
+| [BUG-352](bugs/BUG-352.md) | DHCP の interface が 2 つで両方が default route を入れると、次からの net の commit が `route: Device or resource busy` で失敗（rollback も degraded） | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、4edbbd7dc: networkd が default route を interface ごとに消す。QEMU で確かめた） |
 | [BUG-353](bugs/BUG-353.md) | RTX 2070 で mview をゲームの表示（mailbox）で一度動かすと、後から開いた mview の window が写らない | reproduced（実機） / fixed（WS309 p012、agent/p1-ws309i、未 merge） |
-| [BUG-354](bugs/BUG-354.md) | `top -b` が全ての process の %CPU を 0.0 と出す | fixed（2026-10-31 P2 q1750-i01、20f8ce41a・e08fa9af6: top が %CPU・TIME+ を cpu_ticks から出し、batch は delay を待つ。QEMU で確かめた、実機は未実施） |
+| [BUG-354](bugs/BUG-354.md) | `top -b` が全ての process の %CPU を 0.0 と出す | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、20f8ce41a・e08fa9af6: top が %CPU・TIME+ を cpu_ticks から出し、batch は delay を待つ。QEMU で確かめた、実機は未実施） |
 | [BUG-355](bugs/BUG-355.md) | native の UFS への大きい書き込みが約 1 MB/s（2 GiB の swap file に約 30 分） | closed（2026-10-30 Q1 の判定、main ed93695ac、実機は未実施。q1688-i01、6387b82a0。mkfs の native が tail journal を書かず batched journal に、QEMU） |
 | [BUG-356](bugs/BUG-356.md) | Venus の desktop が動く時、networkd の pump の経路の競合で LAN_ENABLE が「mismatched networkd response」で失敗し ue0 が設定されない（SSH が上がらない） | closed（2026-10-29 Q1 の判定、fd29cf832、QEMU で確かめた） |
 | [BUG-357](bugs/BUG-357.md) | kernel が先頭の 4 台の disk しか partition を調べず、boot の stick が 5 台目以降だと VFS の初期化が失敗する | closed（2026-10-29 Q1 の判定、fd29cf832、QEMU で確かめた） |
@@ -230,10 +230,10 @@ remain as traceable history and are not new implementation work.
 | [BUG-360](bugs/BUG-360.md) | live の session の入力欄で Backspace が空白を消さない（installer の大きさの欄、IME か key の経路の見込み）。読めない大きさで「作成」が無言で何もしない | open |
 | [BUG-361](bugs/BUG-361.md) | NVIDIA RTX 2070（nvrtx）で Notes が起動しない（executor に stencil の format・test が無い） | fixed（2026-10-30 P5 q1692、実機で Notes の pen と文字、agent/p5-ws243 48f21726b、main に未 merge） |
 | [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | open |
-| [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | fixed（2026-10-31 P2 q1750-i01、8c8c556b5: base の image に /etc/hosts。QEMU で確かめた） |
+| [BUG-363](bugs/BUG-363.md) | zedBSD の image に /etc/hosts が無く、localhost の名前の解決が失敗する | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、8c8c556b5: base の image に /etc/hosts。QEMU で確かめた） |
 | [BUG-364](bugs/BUG-364.md) | gpu_fence_get の foreign の fence が device を比べず別の GPU の fence を承認なしに受ける | closed（2026-10-30、comment の直し） |
 | [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
-| [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | fixed（2026-10-31 P2 q1750-i01、e722b9556: 指定の address に置き換えて map。QEMU の /dev/dsp0 で確かめた） |
+| [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | closed（2026-10-31 Q1 の判定、main f81fef099。2026-10-31 P2 q1750-i01、e722b9556: 指定の address に置き換えて map。QEMU の /dev/dsp0 で確かめた） |
 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | closed（2026-10-30、main 701b21b19） |
 | [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |
 | [BUG-369](bugs/BUG-369.md) | QEMU の guest への SSH の往復が数回の後から 3〜32 秒に伸びる | closed（2026-10-30、main e1c714fb5） |
