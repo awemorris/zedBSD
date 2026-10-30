@@ -218,7 +218,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-348](bugs/BUG-348.md) | warm reboot（Linux の後）で USB の LAN（RTL8156、usb-cdc-ncm）の link が上がらず、zedBSD が network に出てこない（10.0.10.3、止まったように見える） | open・deferred（再現: Linux から warm reboot、修正の時期は未定、ユーザー） | 2026-10-28 WS291 q1645 | 未割当。回避は WS291 の measure.sh と NIC の監視の service（P2） |
 | [BUG-349](bugs/BUG-349.md) | venus は strict の queue が無くても GPU_CAP_JOB を返すが GPU_JOB_RESERVE は ENOTSUP（DOC-54 の review で見つけた、source の読みのみ） | fixed（2026-10-31 P4 q1753-i01、e8c67ac77: core の GET_INFO が backend の報告を登録の bit と AND。build のみ、QEMU は未実施、未 merge） |
 | [BUG-350](bugs/BUG-350.md) | VF2 で usb_hub_worker が 1 CPU を常に 100 % 使う（idle でも） | fixed（確かめ: VF2・QEMU、P3 f3d89900a: USB の同期待ちの yield の回し続けを wait queue に） |
-| [BUG-351](bugs/BUG-351.md) | /dev/acpi が 0666 で一般の user が AML の method（EC の書き・SMI）を評価できる見込み（source の読み、未試験） | open |
+| [BUG-351](bugs/BUG-351.md) | /dev/acpi が 0666 で一般の user が AML の method（EC の書き・SMI）を評価できる見込み（source の読み、未試験） | fixed（2026-10-31 P4 q1753-i01、d3219b01a: /dev/acpi を 0600。QEMU で user は Permission denied、未 merge） |
 | [BUG-352](bugs/BUG-352.md) | DHCP の interface が 2 つで両方が default route を入れると、次からの net の commit が `route: Device or resource busy` で失敗（rollback も degraded） | open |
 | [BUG-353](bugs/BUG-353.md) | RTX 2070 で mview をゲームの表示（mailbox）で一度動かすと、後から開いた mview の window が写らない | reproduced（実機） / fixed（WS309 p012、agent/p1-ws309i、未 merge） |
 | [BUG-354](bugs/BUG-354.md) | `top -b` が全ての process の %CPU を 0.0 と出す（未確認） | open |
@@ -226,7 +226,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-356](bugs/BUG-356.md) | Venus の desktop が動く時、networkd の pump の経路の競合で LAN_ENABLE が「mismatched networkd response」で失敗し ue0 が設定されない（SSH が上がらない） | closed（2026-10-29 Q1 の判定、fd29cf832、QEMU で確かめた） |
 | [BUG-357](bugs/BUG-357.md) | kernel が先頭の 4 台の disk しか partition を調べず、boot の stick が 5 台目以降だと VFS の初期化が失敗する | closed（2026-10-29 Q1 の判定、fd29cf832、QEMU で確かめた） |
 | [BUG-358](bugs/BUG-358.md) | 4096 byte の sector の disk で native UFS への書き込みが極端に遅い（小さな file の多い導入で 30〜40 KB/s、512 の約 2.4 倍以上の時間） | closed（2026-10-30 Q1 の判定、main ed93695ac、実機は未実施。q1688-i01、6387b82a0。BUG-355 と同じ直し＋4096 の batched journal の sector の単位の誤り、QEMU） |
-| [BUG-359](bugs/BUG-359.md) | 遅い USB の mass storage で xHCI の command が時間切れになると device を失い回復しない（QEMU で host の fsync が遅い時、live の stick なら init が動かず SSH が上がらない） | open |
+| [BUG-359](bugs/BUG-359.md) | 遅い USB の mass storage で xHCI の command が時間切れになると device を失い回復しない（QEMU で host の fsync が遅い時、live の stick なら init が動かず SSH が上がらない） | fixed（2026-10-31 P4 q1753-i01、bb2b25ff3: 時間切れの判定の前に event ring を読む。QEMU の絞った stick で旧は再現・新は回復、実機は未実施、未 merge） |
 | [BUG-360](bugs/BUG-360.md) | live の session の入力欄で Backspace が空白を消さない（installer の大きさの欄、IME か key の経路の見込み）。読めない大きさで「作成」が無言で何もしない | open |
 | [BUG-361](bugs/BUG-361.md) | NVIDIA RTX 2070（nvrtx）で Notes が起動しない（executor に stencil の format・test が無い） | fixed（2026-10-30 P5 q1692、実機で Notes の pen と文字、agent/p5-ws243 48f21726b、main に未 merge） |
 | [BUG-362](bugs/BUG-362.md) | 共有の shader の frontend が SPIR-V の NoContraction（precise）を拒み、precise を含む shader が compile されない | fixed（2026-10-31 P4 q1753-i01、f97f13268: frontend が印を IR に運び nvrtx・i915 が融合しない。host 試験、実機は未実施、未 merge） |
@@ -235,7 +235,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-365](bugs/BUG-365.md) | GPU の文書の調べで見つかった header・comment と code の食い違い（一括、22 件＋p024 の 13 件） | open |
 | [BUG-366](bugs/BUG-366.md) | device の mmap で MAP_FIXED が hint として扱われる（POSIX に反する） | open |
 | [BUG-367](bugs/BUG-367.md) | loopback の TCP で accept 側を先に close すると connect 側の close(2) が戻らない | closed（2026-10-30、main 701b21b19） |
-| [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | open |
+| [BUG-368](bugs/BUG-368.md) | amd64 の QEMU で invalid amd64 APIC acknowledgement の fatal（Video Player の再生中、intel-hda 付き） | fixed（2026-10-31 P4 q1753-i01、f045ddf59: xHCI の割り込みの中の URB の完了が sched_yield していた、spin に。原因は読みと objdump、再現は未実施、未 merge） |
 | [BUG-369](bugs/BUG-369.md) | QEMU の guest への SSH の往復が数回の後から 3〜32 秒に伸びる | closed（2026-10-30、main e1c714fb5） |
 | [BUG-370](bugs/BUG-370.md) | Photos で全面表示の写真を回転・お気に入りなどで保存すると約 1 秒後に全面表示が閉じる（WS327 の回帰で発見、WS327 とは無関係） | open（2026-10-30） |
 | [BUG-371](bugs/BUG-371.md) | Wi-Fi の初期化の失敗だけで init が有線を含む networking 全体を飛ばす | open（2026-10-30） |
