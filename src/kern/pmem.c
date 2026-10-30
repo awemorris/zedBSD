@@ -25,6 +25,9 @@
 /* The longest name of one boot framebuffer value, terminator included. */
 #define BOOT_FRAMEBUFFER_NAME_MAX	64U
 
+/* The part of kern_device_map()'s attributes that names the cache policy. */
+#define DEVICE_CACHE_POLICY_MASK	0xffU
+
 static int boot_framebuffer_value(const char *prefix, const char *value_name, uint64_t *value);
 
 /*
@@ -132,7 +135,7 @@ kern_pmem_free(
  */
 void *
 kern_pmem_to_kernel(
-	hal_physaddr_t address)
+	kern_physaddr_t address)
 {
 	/* RAM is direct-mapped; device memory has no kernel alias. */
 	return hal_pmem_to_kernel(address);
@@ -149,17 +152,40 @@ kern_device_map(
 	void **mapped)
 {
 	uint32_t flags;
+	int status;
 
-	/* Every device mapping is readable and writable. */
-	flags = HAL_SPACE_READ | HAL_SPACE_WRITE;
+	/* Refuses attribute bits the kernel does not define. */
+	if ((attributes & ~(DEVICE_CACHE_POLICY_MASK | KERN_DEVICE_READONLY)) != 0)
+		return EINVAL;
 
-	/* Selects write-through when the caller asked for it. */
-	if ((attributes & KERN_DEVICE_WRITETHROUGH) != 0)
-		flags |= HAL_SPACE_WRITETHRU;
-	else
+	/* A read-only view is never writable; every other view is both. */
+	flags = HAL_SPACE_READ;
+	if ((attributes & KERN_DEVICE_READONLY) == 0)
+		flags |= HAL_SPACE_WRITE;
+
+	/* Translates the one cache policy the caller named. */
+	switch (attributes & DEVICE_CACHE_POLICY_MASK) {
+	case KERN_DEVICE_UNCACHED:
 		flags |= HAL_SPACE_NOCACHE;
-	return pmem_error(hal_space_map_device((hal_physaddr_t)address, size,
-					       flags, mapped));
+		break;
+	case KERN_DEVICE_WRITETHROUGH:
+		flags |= HAL_SPACE_WRITETHRU;
+		break;
+	case KERN_DEVICE_WRITECOMBINE:
+		flags |= HAL_SPACE_WC;
+		break;
+	default:
+		return EINVAL;
+	}
+
+	/* Maps the range; the platform refuses a policy it cannot provide. */
+	status = hal_space_map_device((hal_physaddr_t)address, size, flags,
+				      mapped);
+	if (status != HAL_OK)
+		return pmem_error(status);
+
+	/* Succeeded: the caller owns the view until kern_device_unmap(). */
+	return 0;
 }
 
 /*
@@ -299,6 +325,21 @@ kern_boot_framebuffer(
 
 	/* Succeeded: the platform handed over a framebuffer. */
 	return 0;
+}
+
+/*
+ * Writes one character to the early console.
+ *
+ * Before the kernel console exists the platform's own early console
+ * shows it; once the kernel console is published the character goes
+ * there instead.
+ */
+void
+kern_console_early_putc(
+	int character)
+{
+	/* The platform chooses which console is current. */
+	hal_putc(character);
 }
 
 /*

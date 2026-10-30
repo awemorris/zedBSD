@@ -14,14 +14,22 @@
 #include <stdint.h>
 
 /*
+ * A physical address.
+ *
+ * It is wide enough for any physical address the platform hands to the
+ * kernel, so a driver can hold one without naming a platform type.
+ */
+typedef uintptr_t kern_physaddr_t;
+
+/*
  * One physical run owned by a kernel subsystem.
  *
- * hal_pmem_alloc() returns a physical address only, and hal_pmem_free()
- * needs the matching size, so callers which hold a run for a while keep
- * both together. Use hal_pmem_to_kernel() to address the run.
+ * The allocation reports a physical address only, and the release needs
+ * the matching size, so callers which hold a run for a while keep both
+ * together. Use kern_pmem_to_kernel() to address the run.
  */
 struct kern_pmem {
-	hal_physaddr_t paddr;
+	kern_physaddr_t paddr;
 	size_t size;
 };
 
@@ -36,9 +44,19 @@ struct kern_pmem {
 #define KERN_PROT_WRITE		2U
 #define KERN_PROT_EXEC		4U
 
-/* Device mapping attributes for kern_device_map(). */
-#define KERN_DEVICE_UNCACHED	0U
+/*
+ * Device mapping attributes for kern_device_map().
+ *
+ * The low byte names one cache policy. KERN_DEVICE_WRITECOMBINE lets the
+ * CPU gather writes before they reach the device, for a linear aperture
+ * such as a framebuffer; never use it for registers. KERN_DEVICE_READONLY
+ * may be added to any policy for a view the caller only reads, such as a
+ * firmware table or an option ROM.
+ */
+#define KERN_DEVICE_UNCACHED		0U
 #define KERN_DEVICE_WRITETHROUGH	1U
+#define KERN_DEVICE_WRITECOMBINE	2U
+#define KERN_DEVICE_READONLY		0x100U
 
 /*
  * Allocate and release physical RAM.
@@ -62,14 +80,17 @@ int kern_pmem_free(struct kern_pmem *run);
  * RAM is direct-mapped, so this never fails for managed RAM and
  * reports NULL for anything else.
  */
-void *kern_pmem_to_kernel(hal_physaddr_t address);
+void *kern_pmem_to_kernel(kern_physaddr_t address);
 
 /*
  * Map and unmap a device range in kernel space.
  *
  * Device memory is not direct-mapped. The kernel chooses the address
- * and reports it. attributes is KERN_DEVICE_UNCACHED or
- * KERN_DEVICE_WRITETHROUGH.
+ * and reports it. attributes is one cache policy, KERN_DEVICE_UNCACHED,
+ * KERN_DEVICE_WRITETHROUGH or KERN_DEVICE_WRITECOMBINE, optionally with
+ * KERN_DEVICE_READONLY. Both report 0 on success. kern_device_map()
+ * reports EINVAL for attributes it does not know and ENOTSUP for a policy
+ * the platform cannot provide.
  */
 int kern_device_map(uint64_t address, size_t size,
 		    unsigned attributes, void **mapped);

@@ -692,6 +692,16 @@ kern_preempt_enable(void)
 		sched_preempt();
 }
 
+/*
+ * Reports the number of the CPU the caller runs on.
+ */
+unsigned
+kern_cpu_current(void)
+{
+	/* The kernel numbers CPUs as the platform does. */
+	return (unsigned)hal_cpu_current();
+}
+
 /* Test-only: read the current CPU's preempt nesting depth. */
 unsigned
 sched_test_preempt_count(void)
