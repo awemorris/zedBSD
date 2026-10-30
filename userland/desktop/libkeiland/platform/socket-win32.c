@@ -1034,6 +1034,9 @@ kl_socket_shutdown(
 
 /*
  * Reads the local address a socket is bound to (getsockname).
+ *
+ * A socket not bound yet (getsockname's WSAEINVAL) gives the unspecified
+ * address of its family and port 0, as on POSIX.
  */
 int
 kl_socket_local_address(
@@ -1056,6 +1059,14 @@ kl_socket_local_address(
 	status = getsockname(socket->handle, (struct sockaddr *)&system, &length);
 	if (status != 0) {
 		wsa = WSAGetLastError();
+
+		/* A socket not bound yet has the unspecified address and port 0, as on POSIX. */
+		if (wsa == WSAEINVAL) {
+			kl_address_any(socket->family, 0U, address);
+			return 0;
+		}
+
+		/* Why the address cannot be read. */
 		error = socket_error(wsa);
 		return error;
 	}

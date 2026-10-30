@@ -3,7 +3,7 @@
 # ws327-p014 network の層の Win32 の実装（`socket-win32.c`）と mingw の cross compile
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §4・§5.2・§5.3・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007（p013 と並べてよい）。
-- Status: planned
+- Status: in-progress（2026-10-30。実装と確かめは済んだ、cleared の判定は Q1）
 - Disposition: normal
 - ユーザーの決定 3（ws.md、原文）: 「P2ですが、Windows用の実装を書いてしまってOKです。インタフェースがWindowsでも通用する形になっているかのチェックです。動作確認は不要です。mingwは使ってよいです。」
   → mingw で compile と link（warning 0）まで。wine でも Windows でも走らせない。
@@ -119,6 +119,8 @@ plan/ws327/phase014/phase.md`（ws.md は Q1）。動作の確かめはしない
 
 ### Q1 へ（Windows で header の約束をそのまま守れない所・差）
 
+Q1 の決定（2026-10-30）: 1 の send の ECONNABORTED・ECONNRESET はそのまま（header は変えない）、3 は POSIX に合わせる（下に反映）。
+
 header は変えていない。次は「Windows では約束の文言のとおりにならない」所で、いずれも header の「or another errno value」や Mailer の使い方
 （EPIPE と ECONNRESET を同じに扱う、`ml_conn_*`・sync.c）の範囲に収まる。実機では確かめていない。
 
@@ -127,8 +129,8 @@ header は変えていない。次は「Windows では約束の文言のとお�
    `socket_error` の表のとおりに返した。header の文言を「EPIPE か ECONNRESET か ECONNABORTED」にするか、send で `WSAECONNABORTED` を EPIPE に写すかは Q1 の判断。
 2. **接続済みの UDP の ICMP 到達不能**: `SIO_UDP_CONNRESET` を切ったので、繋いでいない UDP の受信が `WSAECONNRESET` で壊れるのは避けられるが、
    接続した UDP の受信が Linux のように ECONNREFUSED を返す事も無くなる（Windows には同じ通知が無い）。header は約束していない。
-3. **bind していない socket の `kl_socket_local_address`**: Windows の `getsockname` は `WSAEINVAL`（EINVAL）で、Linux は 0.0.0.0:0 を返して 0。
-   header は「0 or an errno value」。waker の組は bind の後なので影響しない。
+3. **bind していない socket の `kl_socket_local_address`**: Windows の `getsockname` は `WSAEINVAL` だが、Q1 の決定（2026-10-30）で POSIX に合わせ、
+   `WSAEINVAL` なら 0 を返して socket の family の any の address・port 0 にした（`kl_address_any`）。差は無くなった。
 4. **bind の乗っ取り**: `SO_EXCLUSIVEADDRUSE` を付けない（design §5.2）ので、Windows では他の process が `SO_REUSEADDR` で同じ port に bind できる
    （listen する server 用途の app が出たら再検討）。waker の listen の socket だけは `SO_EXCLUSIVEADDRUSE` で、accept の peer を照合する。
 5. **ready の意味**: POSIX の `POLLHUP`（両方向が閉じた → events の全て）は select に無い。Windows の select は FIN を受けた socket を readable、
