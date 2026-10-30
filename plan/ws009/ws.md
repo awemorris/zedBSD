@@ -41,7 +41,7 @@ Shared tests: [WS009 test index](tests/README.md)
 | [`ws009-p014`](phase014/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-submission.md: COMMAND・SUBMIT・WAIT・PRESENT・失敗と回復。依存: なし |
 | [`ws009-p015`](phase015/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-fences.md: fence と *_SYNC。依存: なし |
 | [`ws009-p016`](phase016/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-jobs.md: job。依存: なし |
-| [`ws009-p017`](phase017/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-display.md: output・lease・present・wait・events・constraints・副作用。依存: なし |
+| [`ws009-p017`](phase017/phase.md) | 書いた・照合 PASS（2026-10-30。cleared は Q1 が決める） | gpu-display.md: output・lease・present・wait・events・constraints・副作用。依存: なし |
 | [`ws009-p018`](phase018/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-display-control.md: power・refresh・cursor・commit・overlay。依存: なし |
 | [`ws009-p019`](phase019/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-drivers.md: node の種類の表。依存: なし |
 | [`ws009-p020`](phase020/phase.md) | planned（2026-10-30 P1 の設計、q1701） | gpu-command-stream.md・gpu-sysctl.md。依存: なし |
