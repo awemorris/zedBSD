@@ -66,7 +66,7 @@ Resume point: **q1709-i01（2026-10-30、P1）**: ユーザーに渡す実機の
 | [p008](phase008/phase.md) | GPU（Mali-G310）と Vulkan の device | in-progress（kernel の driver は実装済み・実機未試験。Vulkan の段は設計だけ） | p002 |
 | [p010](phase010/phase.md) | Valhall の shader compiler（`src/drivers/gpu/mali/compiler/`、cube・gather/compare・storage image・spill・FragDepth・SampleMask・UBO の vector load・textureGrad・SampleId・stencil の書き込み、共通の front end の call の inline を含む） | in-progress（実装済み・host の試験 PASS・実機未試験） | p008 |
 | [p011](phase011/phase.md) | render の node・scheduler・Vulkan の executor・CS の builder（LOAD の pre-frame・display の import・WLS・拡大の blit・clear attachments・depth attachment・mip level を含む） | in-progress（実装済み・実機未試験） | p008・p010 |
-| p009 | desktop（Keiland の config） | planned | p007・p010・p011 |
+| p009 | desktop（Keiland の config） | in-progress（`config-odroid-c5-keiland.mk`（graphical login・Mali・mali-csf-firmware）は 2026-10-29 にある。2026-10-30 q1709-i01 で image を作成、実機未試験） | p007・p010・p011 |
 | 最後 | 規約の全文の見直し | planned | 全て |
 
 Audio（line-out）は desktop の表示の受け入れに要らないので Future Work の案（Q1 へ）。
