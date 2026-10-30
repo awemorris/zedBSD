@@ -4,11 +4,11 @@ against the public headers, mechanically.
 
 Run from anywhere with python3 -I:
 
-  python3 -I plan/ws009/tests/check-gpu-uapi-doc.py [--root R] [--base SHA] [--final [FILE...]]
-  python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --examples
-  python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --emit struct gpu_info
-  python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --emit constants NAME...
-  python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --emit ioctls
+  python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py [--root R] [--base SHA] [--final [FILE...]]
+  python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --examples
+  python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --emit struct gpu_info
+  python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --emit constants NAME...
+  python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --emit ioctls
 
 The last line is "check-gpu-uapi-doc: PASS ..." or "check-gpu-uapi-doc: FAIL ...".
 

@@ -1,6 +1,6 @@
 # Build zedBSD from source
 
-Status: current for the 2026-10-09 build and image interface
+Status: current for the 2026-10-30 build and image interface
 
 This guide builds a zedBSD disk image from a source checkout and starts the
 supported x86 QEMU targets. Commands are run from the repository root.
@@ -115,11 +115,13 @@ The main menu has these entries:
 
 | Entry | What it sets |
 | --- | --- |
-| **CPU / Board** | The CPU: `x86_64` (boots on UEFI + ACPI PCs) or `arm64` (Raspberry Pi 4). The board follows the CPU. |
+| **CPU / Board** | The CPU and the board it boots on: `x86_64` (UEFI + ACPI PCs), `arm64` (Raspberry Pi 4 or ODROID-C5), `i386` (PC-9800 or PC/AT), `RISC-V 64` (QEMU virt or StarFive VisionFive 2) or `RISC-V 32` (QEMU virt). Choosing a CPU selects its first board. |
 | **Boot Option** | Graphical boot (no kernel messages on the boot console), graphical login (starts Keiland by itself), and mirroring the kernel messages to the serial port. |
+| **Drivers** | The kernel's device drivers, by group (Disk, Input, GPU, Audio, Ethernet, WiFi, Bluetooth, USB, Platform). |
 | **Development** | Whether the image carries the development files (`/usr/include`, the `.so` links, `.pc` and `.a` files). |
 | **Base** | The base programs (`/bin`, `/sbin`) and the compilers, by group. |
-| **Desktop** | Keiland and its applications. |
+| **Retro** | The X11 programs `Xzed`, `zwm`, `zshell` and `zterm`, on every CPU. |
+| **Desktop** | Keiland and its applications (shown only for the CPUs the desktop is built for). |
 | **Packages** | The third-party packages of `userland/packages/`, one submenu per directory (Languages, Development, Libraries, Multimedia, Fonts, Network, Security, ...). |
 | **Firmware** | The device firmware packages (Intel graphics, Wi-Fi and Bluetooth, Realtek Wi-Fi). |
 | **Build boot image** | Saves `config.mk` and builds the disk image (see below). |
@@ -130,8 +132,8 @@ sole selected-target input; normal build targets reject a missing or invalid
 file.
 
 Some settings are not in the menu and are written in `config.mk` by hand: the
-disk layout (`ZEDBSD_VARIANT`), the kernel's options and drivers, the X11
-programs, the test programs and hooks, and Noct's GPU accelerator. The menu
+disk layout (`ZEDBSD_VARIANT`), the kernel's options, the X11 programs other
+than Retro's, the test programs and hooks, and Noct's GPU accelerator. The menu
 reads the values such a `config.mk` holds and writes them back unchanged.
 
 **Build boot image** asks for confirmation, saves `config.mk` and runs the
@@ -158,8 +160,8 @@ not a build setting. Each amd64 variant publishes its image at
 `build/amd64/hdd-image.img`, so preserve a copy elsewhere if several outputs
 are needed at once.
 
-The i386 targets (PC/AT and NEC PC-98) are no longer offered by the menu; the
-menu keeps one that a `config.mk` already selects.
+The i386 targets (PC/AT and NEC PC-98) are chosen under **CPU / Board** as the
+`i386` CPU with the `PC/AT` or `PC-9800` board.
 
 The maintained x86 output directories are:
 
@@ -211,12 +213,22 @@ OVMF (`OVMF_CODE`, `OVMF_VARS`, by default under `/usr/share/OVMF/`) from an
 NVMe disk, with a copy of the variables file under the build directory. For the
 other profiles it uses the default QEMU PC machine and SeaBIOS, which suits
 `hybrid` and `bios`; a correctly built `uefi` image is expected not to boot
-through that command. Use an OVMF launch or the
-maintained six-cell runner above for the UEFI path; give every run a disposable
+through that command. Use an OVMF launch (below) for the UEFI path; give every run a disposable
 writable OVMF variables file and never let firmware modify the source image
 used as retained evidence.
 
-For amd64, the equivalent explicit command is:
+For amd64 `native` (and `uefi`), the equivalent explicit command is:
+
+```sh
+cp /usr/share/OVMF/OVMF_VARS_4M.fd build/amd64/run-ovmf-vars.fd
+qemu-system-x86_64 -machine q35 -m 8192 -smp 4 \
+  -drive if=pflash,format=raw,readonly=on,file=/usr/share/OVMF/OVMF_CODE_4M.fd \
+  -drive if=pflash,format=raw,file="$(pwd)/build/amd64/run-ovmf-vars.fd" \
+  -drive file="$(pwd)/build/amd64/hdd-image.img",format=raw,if=none,id=boot \
+  -device nvme,drive=boot,serial=zedbsd
+```
+
+For amd64 `hybrid` and `bios` through SeaBIOS:
 
 ```sh
 qemu-system-x86_64 -machine pc -m 512 -smp 4 \
@@ -239,7 +251,10 @@ make QEMU=/path/to/qemu-system-i386 run
 ```
 
 The initial success marker for the maintained x86 images is an init sequence
-followed by `login:`. Exit QEMU normally with its UI or monitor controls; do
+followed by `login:`. With the menu's default graphical login the greeter starts
+first; when it finds no display it can use (as under the QEMU commands above),
+it ends and the console login takes over, so the screen still ends with
+`login:`. Exit QEMU normally with its UI or monitor controls; do
 not write to a real disk device when following this guide.
 
 The `UEFI (for Apple)` label describes a portable, UEFI-only disk-image layout;
@@ -254,7 +269,7 @@ device, so the reader limitation is not a boot dependency.
 
 - `config.mk is missing or invalid`: run `make menuconfig` and save a target.
 - A UEFI-only amd64 image appears not to boot under `make run`: this is the
-  expected SeaBIOS-negative profile; use OVMF or the maintained Variant runner.
+  expected SeaBIOS-negative profile; use the OVMF launch of section 5.
 - Noct download/build failure: verify network access, `curl`, `tar`, `patch`,
   CMake, and the host C compiler, then rerun `make toolchain`; do not replace the recorded archive with unverified bytes.
 - `Missing project target tool` or `Missing target sysroot`: on x86_64 Linux,

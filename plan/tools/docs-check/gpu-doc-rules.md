@@ -1,16 +1,16 @@
 # /dev/gpu の UAPI の文書（DOC-54）の書き方の共通の規則
 
-Parent: [WS009](ws.md)。p010〜p024 の phase.md が「読む物」に挙げる。設計は p009 を分けた物（[ws.md](ws.md) の Phase の表）。
+Parent: [WS009](../../ws009/ws.md)。p010〜p024 の phase.md が「読む物」に挙げる。設計は p009 を分けた物（[ws.md](../../ws009/ws.md) の Phase の表）。
 
-標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)）を文書の仕事に当てた形:
+標準廉価実装手順（[docs/agent/spec-module-delegation.md](../../../docs/agent/spec-module-delegation.md)）を文書の仕事に当てた形:
 header の仕様の comment に当たる物が、骨格の各節の `<!-- spec: ... -->`。.c の骨格に当たる物が、PENDING の印の入った骨格の文書。
-単体試験と骨格の照合に当たる物が `plan/ws009/tests/check-gpu-uapi-doc.py`。
+単体試験と骨格の照合に当たる物が `plan/tools/docs-check/check-gpu-uapi-doc.py`。
 
 ## 1. 基点と正
 
 - 骨格の基点の SHA: **4dfcce008**（`git cat-file -t 4dfcce008` は commit。design-reviewer の反映の後の骨格。最初の骨格 5fedf634d は使わない）。全ての書き手の Phase は、見出し（H1〜H4）がこの SHA から変わっていないことを `--base 4dfcce008` で照合する。
 - **基点の後の UAPI の変化**: 着手の時と commit の前に `git log --oneline 4dfcce008..HEAD -- include/uapi/gpu*.h include/uapi/sysctl.h include/uapi/errno.h src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c userland/desktop/libvulkan/context.c` を見る。header・libvulkan に変化があれば（索引・構造体・定数・capset の機械の列が変わりうる）、書かずに止めて報告する。gpu.c・gpu-fence.c だけの変化なら、自分の節に関わる関数の差を読んでから続け、結果の節に書く。
-- 骨格の作り直し（Q1 か設計の担当）: header が変わった時は `python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --emit struct NAME...`・`--emit constants NAME...`・`--emit ioctls` で機械の行を作り直し、骨格の該当の表を差し替え（書き手の Meaning の列は残す）、新しい基点の SHA をこの文書と全 phase.md に書く。
+- 骨格の作り直し（Q1 か設計の担当）: header が変わった時は `python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --emit struct NAME...`・`--emit constants NAME...`・`--emit ioctls` で機械の行を作り直し、骨格の該当の表を差し替え（書き手の Meaning の列は残す）、新しい基点の SHA をこの文書と全 phase.md に書く。
 - 正は source（`include/uapi/` の header と、`src/drivers/gpu/` などの code）。`<!-- spec: -->` は何を書くかの案内で、source の言い換え。source と食い違えば source に従い、phase.md の結果の節に食い違いを書き、Q1 に報告する。
 - header の comment と code が食い違えば、code の今の振る舞いを書き、食い違いを結果の節に書いて Q1 に報告する（Bug の候補）。文書の中で「誤り」「不具合」と書かず、予定（直す・変える）も書かない。
 - 書くのは今の ABI（ABI version 1、`GPU_OP_PROTOCOL_VERSION` 2）。予定・設計中の UAPI は書かない。範囲の外: driver の開発用の制御の device（`/dev/amdrdna0`、`include/uapi/amdrdna.h`）、driver の内部の ops（`include/drivers/gpu/`）。
@@ -18,7 +18,7 @@ header の仕様の comment に当たる物が、骨格の各節の `<!-- spec: 
 
 ## 2. 文書の形（照合の script が読む規則。script の先頭の docstring が正本）
 
-1. 言語は英語（docs/ の全文書と同じ）。[docs/style.md](../../docs/style.md) に従う。各 file の 3 行目の `Status: experimental reference for GPU ABI version 1.` を変えない。
+1. 言語は英語（docs/ の全文書と同じ）。[docs/style.md](../../../docs/style.md) に従う。各 file の 3 行目の `Status: experimental reference for GPU ABI version 1.` を変えない。
 2. `<!-- spec: ... -->` を本文で置き換え、comment は残さない。`PENDING` を全部埋める。
 3. 見出しの H1〜H4 を変えない・足さない・消さない・順を変えない（`--base` で照合）。小見出しが要る時は H5（`#####`）を足してよい。
 4. 機械の列を変えない: 構造体の表の Offset・Bytes・Type・Field、定数の表の Name・Value、索引の Request・Nr・Direction・Argument・Bytes・Described in、capset の表の Offset・Bytes・Payload field・Capset constant・Value。構造体の表と定数の表に行を足さない（capset の payload の表には範囲の行を足してよい）。
@@ -43,9 +43,9 @@ header の仕様の comment に当たる物が、骨格の各節の `<!-- spec: 
 
 ```sh
 git log --oneline 4dfcce008..HEAD -- include/uapi/gpu*.h include/uapi/sysctl.h include/uapi/errno.h src/drivers/gpu/gpu.c src/drivers/gpu/gpu-fence.c userland/desktop/libvulkan/context.c
-python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008 --final docs/reference/<自分の file>
-python3 -I plan/ws009/tests/check-gpu-uapi-doc.py --base 4dfcce008
-timeout 120 /home/awe/zedBSD-claude1/build/NoctLang/build-static/noct plan/ws009/tests/check-relative-links.noct docs/reference docs/architecture
+python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --base 4dfcce008 --final docs/reference/<自分の file>
+python3 -I plan/tools/docs-check/check-gpu-uapi-doc.py --base 4dfcce008
+timeout 120 /home/awe/zedBSD-claude1/build/NoctLang/build-static/noct plan/tools/docs-check/check-relative-links.noct docs/reference docs/architecture
 git diff --check
 git diff --name-only <起点の commit> HEAD   # 自分の file・自分の phase.md・ws.md だけ
 ```
@@ -66,7 +66,7 @@ script のわざと壊す確かめは設計の Phase が済ませた（script �
 
 ## 5. 変えてはいけない物
 
-自分の Phase の file（phase.md の「作る物」）以外の全部: 他の gpu*.md、docs/ の他の文書（統合の Phase を除く）、`plan/ws009/tests/` の script、header・source、HAL、toolchain、共有の build。
+自分の Phase の file（phase.md の「作る物」）以外の全部: 他の gpu*.md、docs/ の他の文書（統合の Phase を除く）、`plan/tools/docs-check/` の script、header・source、HAL、toolchain、共有の build。
 script・骨格の不備（見出しが足りない、機械の列の誤り、照合の規則が source と合わない）を見つけたら、直さずに止め、どの file のどこで何が足りないかを報告する。
 
 ## 6. 終わりの条件
