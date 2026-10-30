@@ -2,7 +2,7 @@
 
 # WS310: ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる
 
-Status: planning
+Status: incomplete（2026-10-31: p001 設計済み、問い Q310-1〜6 待ち）
 Primary Milestone: MG004
 Resume point: p001 の設計を終えた（[design.md](design.md)、review は [design-review.md](design-review.md)）。次は Q1 の確かめと [user-questions.md](user-questions.md) の Q310-1〜6 の答え、その後 p002（aml-host の option）と p004（codec）を並べて。
 
