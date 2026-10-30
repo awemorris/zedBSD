@@ -148,7 +148,7 @@ remain as traceable history and are not new implementation work.
 | [BUG-278](bugs/BUG-278.md) | 状態の島のパネルの Mute の button の文字が右にずれる | reproduced（実機） / resolved（2026-10-10 UAT） | UAT 2026-10-10 | WS192 |
 | [BUG-279](bugs/BUG-279.md) | Settings で「No security key registered」と出て YubiKey を操作できない | reproduced（実機） / resolved（2026-10-10 ユーザー「FIDO2のキー登録とログインができました」） | UAT 2026-10-10 | WS161・WS172 |
 | [BUG-280](bugs/BUG-280.md) | App Home への遷移が Linux の driver より滑らかでない（fps が半分〜75% くらいに見える） | reproduced（実機） / tracking | UAT 2026-10-10 | WS094・WS139 |
-| [BUG-281](bugs/BUG-281.md) | QEMU の guest で SSH の session が約 1〜2 分止まって戻ることがある（間欠） | reproduced（QEMU） / tracking | T1-513・T1-515 2026-10-10 | 未定 |
+| [BUG-281](bugs/BUG-281.md) | QEMU の guest で SSH の session が約 1〜2 分止まって戻ることがある（間欠） | reproduced（QEMU） / tracking（2026-10-31 q1761 P2: source の読みで再送の timer の段と長さが合う推測。再現は SSH の image が要り、/ の空きの制約で未実施） | T1-513・T1-515 2026-10-10 | 再現の image の判断 |
 | [BUG-282](bugs/BUG-282.md) | bluetoothd の HID が page の途中に同じ機器の接続の要求を断ると page の失敗と取り違える（潜在） | unknown / tracking（ベータ3） | WS197 p003 の設計 2026-10-10 | WS143 |
 | [BUG-283](bugs/BUG-283.md) | ロック画面の Password と Security Key の button の高さが小さい | reproduced（実機） / resolved（2026-10-10 UAT） | UAT 2026-10-10 | WS187 |
 | [BUG-284](bugs/BUG-284.md) | Settings の Ethernet の頁に wlan0 の card が出て No cable | reproduced（実機） / resolved（2026-10-10 UAT） | 2026-10-10 | WS089 |
