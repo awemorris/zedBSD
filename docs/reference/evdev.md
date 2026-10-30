@@ -183,7 +183,7 @@ incorporated into the zedBSD base system.
 | HID descriptor/report parsing | [`hid-report.c`](../../src/drivers/usb/usb-hid.c) | and |
 | USB HID Report-Protocol producers, hotplug, and generation-safe nodes | [`usb-hid.c`](../../src/drivers/usb/usb-hid.c), [`input-device.c`](../../src/drivers/generic/input.c), [`devfs.c`](../../src/kern/devfs.c) | — |
 | Xzed evdev-only consumer | [Xzed input owner](../../userland/x11/xzed/input-posix.c) | and its |
-| Noct 2.0.1 BeUI evdev consumer | [zedBSD BeUI backend](../../userland/base/noct/patches/0001-connect-zedbsd-target-adapter.patch) | — |
+| Noct 2.0.3 BeUI evdev consumer | zedBSD BeUI backend in the upstream release, adapted to this tree by [patch 0001](../../userland/base/noct/patches/0001-connect-zedbsd-target-adapter.patch) | — |
 
 Registration requires `EV_SYN/SYN_REPORT`; malformed declarations and
 undeclared producer events are rejected, keeping advertised capabilities and
@@ -194,7 +194,7 @@ pass with xHCI and paired EHCI/UHCI, including hotplug, stale-fd isolation,
 event-number reuse, console coexistence, and concurrent USB-root I/O, and
 physical USB HID operation has been confirmed.
 
-Xzed and the selected Noct 2.0.1 BeUI backend both discover
+Xzed and the selected Noct 2.0.3 BeUI backend both discover
 `/dev/input/eventN` by capabilities and consume evdev without the console
 event interface. `/dev/mouse` is absent. The legacy
 `/dev/console` continuous-event, input-mode, drain-input, and key-state ioctls

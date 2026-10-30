@@ -59,10 +59,10 @@ firmware inputs even when those firmware packages are not selected. Downloaded
 bytes are ignored by Git but remain inside the working tree, allowing the
 post-download tree to be packed as a multi-license source distribution.
 
-Both host and target Noct come from post-2.0.1 commit
-`bb239816e20294c073702dc127142f6767375072`, including the LP64 File.seek fix.
-The tracked archive identity is 2,528,421 bytes with SHA-256
-`fd3d9adc7da6de0e7de6e96a1e42edd08f2f07807b00ac5078e5f0457ca1887f`.
+Both host and target Noct come from upstream release `v2.0.3`, the commit
+`f6efa83a8ccb9262ce7f802c0e89e23a39c31c5a`. The tracked archive identity is
+2,529,835 bytes with SHA-256
+`b46863cecfc885a98d3d84e8ff892d0205408e47cf08be024f5e0d502ac0006c`.
 Acquisition checks the size, digest, archive paths, member types, strict
 zero-fuzz patches, and a complete extracted-source manifest before publication.
 It never substitutes a Git checkout for that pinned archive.
@@ -145,12 +145,12 @@ menu is `make -j16 disk-image` (section 4).
 
 On amd64 `ZEDBSD_VARIANT` chooses the disk image's layout:
 
-| Value | Image boot paths | Expected firmware behavior |
-| --- | --- | --- |
-| `native` (default) | GPT: ESP with only the UEFI loader; a FAT32 partition of the Basic Data type labelled `ZEDBSD` with `vmunix`, `zedbsd.cfg` and the logo (shown at `/boot/boot0`, mountable by Windows and macOS); a UFS root partition mounted read-write; a swap partition. The running system shows the ESP at `/boot/efi` | Boots with OVMF; does not boot with SeaBIOS |
-| `hybrid` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
-| `uefi` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload (for Apple computers) | Boots with OVMF; does not boot with SeaBIOS |
-| `bios` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
+| Value | Menu label | Image boot paths | Expected firmware behavior |
+| --- | --- | --- | --- |
+| `native` (default) | `UEFI, UFS root partition (for PC/AT)` | GPT: ESP with only the UEFI loader; a FAT32 partition of the Basic Data type labelled `ZEDBSD` with `vmunix`, `zedbsd.cfg` and the logo (shown at `/boot/boot0`, mountable by Windows and macOS); a UFS root partition mounted read-write; a swap partition. The running system shows the ESP at `/boot/efi` | Boots with OVMF; does not boot with SeaBIOS |
+| `hybrid` | `UEFI + BIOS (for PC/AT)` | Complete GPT/ESP plus compatibility BIOS path | Boots with OVMF and SeaBIOS |
+| `uefi` | `UEFI (for Apple)` | Pure Protective MBR, primary GPT, ESP, and payload FAT32; no BIOS payload (for Apple computers) | Boots with OVMF; does not boot with SeaBIOS |
+| `bios` | `BIOS (for PC/AT)` | Legacy MBR and BIOS payload; no GPT or ESP | Boots with SeaBIOS; does not boot with OVMF |
 
 The variant describes disk-image composition only; it does not change the
 kernel, target triple, or compiled BIOS/UEFI loader artifacts. Disk capacity is

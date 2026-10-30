@@ -1,5 +1,7 @@
 # Security keys and smart card readers
 
+Status: reference.
+
 zedBSD gives programs two device interfaces for FIDO security keys and smart
 cards. Both are reached through `open(2)`, `read(2)`, `write(2)`, `poll(2)`
 and `ioctl(2)`; the library that speaks CTAP on top of them (libpasskey) is a

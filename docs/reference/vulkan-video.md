@@ -1,5 +1,7 @@
 # Vulkan Video decode
 
+Status: reference.
+
 zedBSD's libvulkan offers H.264 video decode through the Khronos Vulkan Video
 extensions on Intel Gen12 graphics (Alder Lake and later integrated GPUs). A
 program decodes on the GPU's video engine (VCS0, the MFX unit) and reads the

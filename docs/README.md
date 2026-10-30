@@ -1,6 +1,8 @@
 zedBSD documentation
 ====================
 
+Status: current navigation index
+
 This tree holds the design of zedBSD and Keiland and the interfaces that
 programs and people rely on. Documents come first and the implementation
 follows them; see the [documentation rules](style.md).

@@ -1,5 +1,7 @@
 # Agent Acceptance Test interfaces
 
+Status: reference.
+
 An agent drives a zedBSD machine over SSH: it moves the pointer, clicks,
 types and takes screen captures, as a person at the machine would. These
 interfaces exist only in test images. A release image has neither the

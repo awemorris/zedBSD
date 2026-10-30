@@ -90,4 +90,12 @@ git diff --stat
 
 ## 結果
 
-（未着手）
+2026-10-30、Sonnet 5.5。書いた・確かめ PASS（cleared は Q1）。
+
+- version.mk の値（2.0.3、f6efa83a…、2529835、b46863ce…）と build-from-source.md の Noct の段落が一致。「LP64 File.seek fix」と古い 2.0.1 の値は消した。docs/ の `2.0.1`・`bb239816` の残りは 0。
+- variant の表に `Menu label` の列を足し、menuconfig.py の 4 label を写した。
+- evdev.md: patches/ には 0001（`api-beui-zedbsd.c` の include の path だけを直す）が残り、BeUI の backend 本体は upstream の `src/api/api-beui-zedbsd.c` にある。そこで表の行を「Noct 2.0.3 BeUI evdev consumer | upstream release の backend を patch 0001 で tree に合わせた物」にし、link は実在する patch のまま。197 行の版は 2.0.3。
+- 索引: reference/README.md に media-playback.md、release/README.md に zedbsd-1.0.0-beta2.md（Release notes）。
+- Status: README 3 file と style.md は `current navigation index`／`current documentation rules`。reference の 6 file（agent-acceptance-test・atomic-publication・block-administration・security-keys・tls・vulkan-video）は `Status: reference.`。media-playback.md は本文が「physical playback verification is still pending」と言うので `Status: reference; physical playback verification on the i915 video decoder is still pending.`。「design」にした file は無い。
+- 確かめ: `unreached []`・`no status []`、link の検査 PASS (1036 links)、`git diff --check` 無出力。docs/release/zedbsd-1.0.0-beta2.md は無変更。
+- 食い違い: 見つからず。未実施: なし。

@@ -1,5 +1,7 @@
 # Media playback
 
+Status: reference; physical playback verification on the i915 video decoder is still pending.
+
 Video Player and Music first use zedBSD's native media library. Its audio decoder supports AAC-LC. Its video decoder supports progressive, 8-bit, 4:2:0 H.264 Baseline, Main and High, using Vulkan Video.
 
 ## Hardware video

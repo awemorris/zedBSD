@@ -1,5 +1,7 @@
 # Atomic file publication
 
+Status: reference.
+
 A staging file can be published without replacing an existing pathname:
 
 ```sh

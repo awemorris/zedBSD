@@ -1,6 +1,8 @@
 Documentation rules
 ===================
 
+Status: current documentation rules
+
 These rules follow the project owner's policy (2026-10-03).
 
 ## Documents come first
