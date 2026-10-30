@@ -118,8 +118,8 @@ gtk4: $(ZEDBSD_GTK4_CHECKED) $(ZEDBSD_GTK4_SCHEMAS)
 
 # The library under its SONAME, the demo programs, the compiled schemas and
 # the licence.  GTK's own data (icons, CSS, emoji) is compiled into the
-# library as GResources.  The headers, the .pc files and the other tools go
-# with the development packages later.
+# library as GResources.  The headers and the .pc files are the development
+# files below; the other tools are not installed.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,gtk4,GTK 4 toolkit,amd64,n,package,,y,\
 	packages/desktop,desktop/gtk4,libs/glib libs/cairo libs/pango libs/harfbuzz libs/fribidi \
 	libs/fontconfig libs/freetype libs/gdk-pixbuf libs/libpng libs/libtiff libs/libjpeg-turbo \
@@ -134,3 +134,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter gtk4,$(ZEDBSD_USER_PROGRAMS)),\
 		--mode $(ZEDBSD_PACKAGE_BINDIR)/$(program)=0755) \
 	--file /usr/share/glib-2.0/schemas/gschemas.compiled=$(ZEDBSD_GTK4_SCHEMAS) \
 	--file /usr/share/licenses/gtk4/COPYING=$(ZEDBSD_GTK4_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,gtk4,$(ZEDBSD_EXT_gtk4_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,gtk4.pc gtk4-wayland.pc gtk4-unix-print.pc),\
+	include/gtk-4.0,\
+	$(ZEDBSD_GTK4_SONAME)))

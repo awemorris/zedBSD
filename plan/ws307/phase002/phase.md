@@ -3,8 +3,8 @@
 # ws307-p002 OS 名「Kei」を削除して zedBSD に統一する
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §13a（U15・U26〜U29・J3）。Queue: q1665 / q1665-i01（担当 P4、2026-10-29）。
-- Status: in-progress（A〜G・compositor・H の段 2 の準備と試験を commit。残りは asset の upload（ユーザーの指示）と、その後の upload の branch の merge。下の「残り」）
-- Queue: q1665-i01（前の P4）、q1665-i02（2026-10-29、P4、worktree p4-ws307f、基点 35d2a373c）、q1671-i01（2026-10-29、P5、worktree p5-ws307p002、基点 86d6441af）。
+- Status: in-progress（A〜H を commit。q1698-i01 で asset の upload と f24bd97bf の cherry-pick（16e45a703）を済ませた。cleared の判定は Q1、材料は下の「結果 q1698-i01」）
+- Queue: q1665-i01（前の P4）、q1665-i02（2026-10-29、P4、worktree p4-ws307f、基点 35d2a373c）、q1671-i01（2026-10-29、P5、worktree p5-ws307p002、基点 86d6441af）、q1698-i01（2026-10-30、P4、worktree p4-ws307o、基点 d3abf7c27）。
 - 出典: 2026-10-28 ユーザー「P4に伝えてください。起動ロゴ画像を含めて、KeiというOS名を削除して、zedBSDに統一します。インストーラだけでなくすべてに影響します。そういうphaseをこのWSに追加してください。」、U26・U27・U28・U29・J3（ws.md の原文）。
 
 ## 前の段: plan/tools を user → kei の順に（Q1 が q1665 に足した、2026-10-29）
@@ -86,3 +86,26 @@
 1. **upload**（ユーザーの指示で Q1）: P5 の worktree の `build/tmp/nightly-new/zedbsd-nightly-base-winq-a10-1.zip`（SHA-256 962f7926…cb149）を rev-0 に。読み戻して SHA-256 を照合し、branch `agent/p5-nightly-upload`（f24bd97bf）を main に merge、`make … zedbsd-nightly-zip` で新しい URL からの取得、push の後の CI の 1 回。旧い asset は rev-0 に残す（消すかはユーザーの判断）。
 2. 試験の道具の古さ（Q1 に送った、この Phase の範囲の外）: `keiland-shot` が greeter を撮れない（QEMU、`no-active-compositor`、新旧の image で同じ）ので desktop.session.logout-login が QEMU で fail。`plan/ws131/tests` の host-seat-freebsd・host-session・host-power の link の一覧に `kl_backend_notify_poll_done` が無い。
 3. `plan/tools` の中の kei: 利用者の既定（aat・serial・gpu-perf・hw5330）は前の段で user → kei の順。残る 371 行は試験の data（host 試験の偽の passwd の `kei`、FreeBSD の guest の利用者 `kei`）、記録（hw5330/evidence）、`plan/tools/keiui` の名前など。guest で `kei` に login を前提にする試験（`plan/tools/accounts/user-commands-guest.sh` など）は新しい image で直しが要る。直すか消すかは各試験の次の実行の時（AGENTS.md §9 の試験の整理）、Q1 の判断。
+
+## 結果 q1698-i01（2026-10-30、P4）
+
+- ユーザーの許可（2026-10-30、原文、ws.md）:「GitHub releaseのアップロードはご提案の通り許可します。」
+- base の作り直し: この worktree（基点 d3abf7c27）で `python3 -I tools/release/make-zedbsd-nightly-base.py --original /home/awe/Kei-nightly.zip --cache build/tmp/nightly/cache --output build/tmp/nightly/zedbsd-nightly-base-winq-a10-1.zip --draft` → 56344120 byte、SHA-256 `962f79263b46581bffb2aae61b0109096e8a21e2476c3008518397fb962cb149`。P5 の `build/tmp/nightly-new/` の物と byte で同じ（再現する）。
+- upload（gh、git push とは別）: `gh release upload rev-0 build/tmp/nightly/zedbsd-nightly-base-winq-a10-1.zip --repo awemorris/zedBSD` → rc 0（`--clobber` 無し）。読み戻し: `curl --fail --location https://github.com/awemorris/zedBSD/releases/download/rev-0/zedbsd-nightly-base-winq-a10-1.zip` → 56344120 byte、SHA-256 962f7926…cb149（一致）。旧い asset `kei-nightly-base-winq-a10-1.zip` は rev-0 に残した（HTTP 200、消すかはユーザーの判断）。
+- f24bd97bf の取り込み: merge でなく `git cherry-pick --no-commit f24bd97bf` → `git commit -m WIP -- tools/release/make-zedbsd-nightly-zip.py tools/release/zedbsd-nightly.mk`（16e45a703、競合なし）。9715c5167 の取り消しの後の作業の branch に、upload の branch の 2 file の変更（asset の名前・SHA-256・archive の root `zedbsd-nightly/`）だけが入った。
+- 新しい名前での取得（make の規則、CI と同じ target）: 空の `build/releases/` で `make ZEDBSD_CONFIG=config/ci/config-amd64.mk BUILD=build/tmp/nightly-mk zedbsd-nightly-base` → rc 0、新しい URL から取得して pin と一致（`build/releases/zedbsd-nightly-base-winq-a10-1.zip`）。`make … ZEDBSD_NIGHTLY_IMAGE=build/ws307-p015s/hdd-image.img zedbsd-nightly-zip` → rc 0、`zedbsd-nightly.zip` 185336300 byte、212 member が全部 `zedbsd-nightly/` の下、`zedbsd-nightly/data/hdd-image.img` あり。
+- `git grep -i -e kei-nightly -e Kei-nightly`（plan/ を除く）: `make-zedbsd-nightly-base.py` の元の package の名前（3 行、SHA-256 で固定の入力）と `zedbsd-nightly.mk` の旧い asset の注記（1 行）だけ（「残す物の一覧」の物）。zip の script の旧い名前は 0。
+- 未実施: CI の 1 回の実行（push はユーザーの指示の後）、Windows での zip の起動（範囲の外）。
+- CI について見つけた事（この Phase の変更によらない、Q1 へ）: `.github/workflows/ci.yml` の「Package zedbsd-qemu.zip」の段は、直前の段が `config.mk` を pc98 の物にした後で `make zedbsd-nightly-zip` を走らせるので、`zedbsd-nightly: … use an amd64 config` で止まる見込み（`continue-on-error: true`）。また amd64 の最後の build は server の config なので、amd64 の config で走らせても image は server の物。`release.yml` は `ZEDBSD_NIGHTLY_ALLOW_DRAFT=` で走らせるので、draft の base（fork の commit 未確定）を拒む見込み（前の asset でも同じ）。どちらも push の後の CI で確かめる事で、直すかは Q1 の判断。
+
+### cleared の判定の材料（Q1 へ）
+
+- 受け入れ（spec §13a の H）: 新しい名前の asset が rev-0 にあり、tree の規則が新しい URL から取って pin と一致し、zip が `zedbsd-nightly/` の root で作れる → 満たした（上の確かめ）。
+- A〜G・compositor・docs は q1665-i01・i02・q1671-i01 で commit 済み、`git grep -i kei` の残りは「残す物の一覧」の物だけ（q1671-i01 の数え）。
+- 残る未実施: push の後の CI の 1 回、`plan/tools` の中の kei（371 行、各試験の次の実行の時に直すか消す、Q1 の判断）、試験の道具の古さ 2 つ（keiland-shot と greeter、ws131 の link の一覧、Q1 に送った物）。どれも名前の変更の受け入れの外と見る。
+
+### 引き継ぎ（2026-10-30 09:13、q1698-i01 のラップアップ）
+
+- branch `agent/p4-ws307o`、この Phase の commit: 16e45a703（cherry-pick）、07c144e8e（記録）。未 commit の物は無い。
+- 次の 1 手: Q1 の cleared の判定。push の後に CI の 1 回（`zedbsd-nightly-zip` が新しい URL から取るか）。
+- CI の別件 2 つ（この Phase の変更によらない、直すかは Q1）: (1) `.github/workflows/ci.yml` の「Package zedbsd-qemu.zip」は直前の段が `config.mk` を pc98 にした後に走るので「use an amd64 config」で止まる見込み（continue-on-error）。amd64 の最後の build は server の config。(2) `.github/workflows/release.yml` は `ZEDBSD_NIGHTLY_ALLOW_DRAFT=` で走らせるので draft の base（fork の commit 未確定）を拒む見込み（前の asset でも同じ）。

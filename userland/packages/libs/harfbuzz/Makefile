@@ -98,9 +98,8 @@ harfbuzz: $(ZEDBSD_HARFBUZZ_CHECKED)
 # ---------------------------------------------------------------- packaging
 
 # Each library goes in under its SONAME, which is the name the loader asks
-# for.  This is the runtime: the headers and the .pc files go with the
-# development packages of the GTK port (WS115 p002).  No C++ runtime is
-# listed, because the libraries do not need one.
+# for.  The headers and the .pc files are the development files below.  No
+# C++ runtime is listed, because the libraries do not need one.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,harfbuzz,HarfBuzz text shaping library,*,n,package,,y,\
 	packages/libs,libs/harfbuzz,libs/glib libs/freetype))
 
@@ -110,3 +109,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter harfbuzz,$(ZEDBSD_USER_PROGRAMS)),\
 	$(foreach library,$(ZEDBSD_HARFBUZZ_LIBRARIES),\
 		--file /usr/lib/$(ZEDBSD_HARFBUZZ_SONAME_$(library))=$(call ZEDBSD_HARFBUZZ_REALNAME,$(library))) \
 	--file /usr/share/licenses/harfbuzz/COPYING=$(ZEDBSD_HARFBUZZ_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,harfbuzz,$(ZEDBSD_EXT_harfbuzz_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,harfbuzz.pc harfbuzz-gobject.pc harfbuzz-subset.pc),\
+	include/harfbuzz,\
+	$(foreach library,$(ZEDBSD_HARFBUZZ_LIBRARIES),$(ZEDBSD_HARFBUZZ_SONAME_$(library)))))

@@ -71,8 +71,8 @@ gdk-pixbuf: $(ZEDBSD_GDK_PIXBUF_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library goes in under its SONAME.  The headers and the .pc file go with
-# the development packages of the GTK port (WS115 p002).
+# The library goes in under its SONAME.  The headers and the .pc file are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,gdk-pixbuf,Image loading library,*,n,package,,y,\
 	packages/libs,libs/gdk-pixbuf,libs/glib libs/libpng libs/libjpeg-turbo libs/libtiff))
 
@@ -81,3 +81,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter gdk-pixbuf,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter gdk-pixbuf,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_GDK_PIXBUF_SONAME)=$(ZEDBSD_GDK_PIXBUF_LIBRARY) \
 	--file /usr/share/licenses/gdk-pixbuf/COPYING=$(ZEDBSD_GDK_PIXBUF_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,gdk-pixbuf,$(ZEDBSD_EXT_gdk-pixbuf_STAGEDIR),\
+	lib/pkgconfig/gdk-pixbuf-2.0.pc,\
+	include/gdk-pixbuf-2.0,\
+	$(ZEDBSD_GDK_PIXBUF_SONAME)))

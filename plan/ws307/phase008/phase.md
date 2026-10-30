@@ -3,7 +3,7 @@
 # ws307-p008 boot loader が UFS から kernel を読む
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §5.9（loader の FAT・firmware の FAT）・§5.10。Queue: q1665 / q1665-i01（担当 P4、2026-10-29）。
-- Status: in-progress（2026-10-29 Q1 の判定: 512 と 4096 の段は受け入れを満たした。残り: 512 の disk の j3 の sync の確かめ（p009 の段 7 の QEMU で））
+- Status: in-progress（2026-10-29 Q1 の判定: 512 と 4096 の段は受け入れを満たした。残り: 512 の disk の j3 の sync の確かめ。q1665-i07 で一度確かめた後に UFS の直しが入ったので、q1698-i01 で今の tree での確かめ直しを p004 の試験に入れた（未実行））
 - 出典: 2026-10-28 ユーザー「P4に、ESPにカーネルをインストールすると回答してしまいましたが、ブートローダがUFSからカーネルをロードできるようにしたいです。そのphaseを作ってほしいです。」
 
 ## 結果（2026-10-29、P4）
@@ -61,3 +61,9 @@
 
 - p009 の段 7 の QEMU（`plan/ws307/tests/p009-install.sh`、installer の image から SATA の 512 の disk に導入した後）: live の system で導入した root（native UFS、j3）を mount し、`/boot/p009-sync.new` に 2,867,200 byte を書き、`mv` で `/boot/p009-sync.bin` に rename、`sync`、mount のまま QEMU を止めた（SIGTERM）。host で loader の UFS の reader（`plan/ws307/tests/host/ufs-cat.c`＋`bootloader/common/ufs-read.c`、512 byte の block）が同じ cksum で読んだ（`HOST j3-sync ok`）。2 回（`build/ws307-test/p009.Gdm7dW`・`p009.hCvrjA`）とも ok。spec §5.10 の 6 の「書く→fsync→rename→sync で home の位置まで書かれる」を 512 でも確かめた（4096 は i04 の p006-4k）。
 - これで p008 の残りの j3 の確かめは済み（判定は Q1）。`video=640x480` の観察は Q1 の判断のまま。
+
+## q1698-i01（2026-10-30、P4、worktree p4-ws307o、branch agent/p4-ws307o）: 512 の j3 の sync の再確認
+
+- 512 の j3 の sync は q1665-i07 の p009 の試験で確かめたが、その後に UFS の遅さの直し（6387b82a0: mkfs の native が tail journal を書かない、batched journal、cache の包み `ufs_buf_*`）が入ったので、今の tree で確かめ直す。
+- 形: p004 の試験 `plan/ws307/tests/p004-gtk.sh` が兼ねる（install-admin で NVMe 512 に導入した root に 2,867,200 byte を書き rename・sync し、mount のまま guest を止め、host の `ufs-cat`（`plan/ws307/tests/host/ufs-cat.c`＋`bootloader/common/ufs-read.c`、512 byte）が同じ cksum で読むか。行 `HOST j3-sync ok|fail`）。script は commit 済み（2aad28963）、**未実行**（image の build の前にラップアップ）。
+- 次の 1 手: p004 の phase.md の「次の 1 手」の 1 と 3（installer-image の build と p004-gtk.sh）。p004 を待たずに確かめるなら、同じ tree で `make … ZEDBSD_CONFIG=plan/ws307/tests/config-amd64-p009.mk … installer-image` の後 `sh plan/ws307/tests/p009-install.sh IMAGE`（SATA の 512 で同じ確かめ）。

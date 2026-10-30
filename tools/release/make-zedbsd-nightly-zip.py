@@ -1,10 +1,10 @@
 #!/usr/bin/env python3
-# Add a Kei disk image to the Kei-nightly base archive (ws088-p003).
+# Add a zedBSD disk image to the zedbsd-nightly base archive.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
 # The base archive holds the Windows QEMU, its libraries, firmware and
-# licenses under Kei-nightly/. The output is the base archive with every
-# entry copied unchanged plus Kei-nightly/data/hdd-image.img, which boot.ps1
+# licenses under zedbsd-nightly/. The output is the base archive with every
+# entry copied unchanged plus zedbsd-nightly/data/hdd-image.img, which boot.ps1
 # starts.
 
 import argparse
@@ -15,7 +15,7 @@ import shutil
 import sys
 import zipfile
 
-ROOT = "Kei-nightly/"
+ROOT = "zedbsd-nightly/"
 IMAGE = ROOT + "data/hdd-image.img"
 REQUIRED = (ROOT + "boot.bat", ROOT + "boot.ps1", ROOT + "qemu-system-x86_64.exe",
             ROOT + "libvirglrenderer-1.dll", ROOT + "data/edk2-x86_64-code.fd",
@@ -38,10 +38,10 @@ def sha256_file(path):
 
 def main():
     parser = argparse.ArgumentParser(description=__doc__)
-    parser.add_argument("--base", required=True, help="the Kei-nightly base archive")
+    parser.add_argument("--base", required=True, help="the zedbsd-nightly base archive")
     parser.add_argument("--sha256", required=True, help="pinned SHA-256 of the base archive")
     parser.add_argument("--image", required=True, help="the amd64 hdd-image.img to add")
-    parser.add_argument("--output", required=True, help="Kei-nightly.zip to write")
+    parser.add_argument("--output", required=True, help="zedbsd-nightly.zip to write")
     parser.add_argument("--allow-draft", action="store_true",
                         help="accept a base archive whose fork commits are unconfirmed")
     args = parser.parse_args()

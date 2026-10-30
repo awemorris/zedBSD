@@ -1,5 +1,5 @@
 # zedbsd-nightly.zip: the Windows package (WINQ-EMU QEMU with Venus) plus the
-# amd64 disk image (ws088-p003).
+# amd64 disk image.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 #
 # The image-less base archive is published once, like the LLVM cache, on the
@@ -7,17 +7,17 @@
 # tools/release/make-zedbsd-nightly-base.py. `make zedbsd-nightly-zip` downloads it
 # into build/releases/ (or reuses a verified copy there), then writes
 # $(BUILD)/zedbsd-nightly.zip with $(ZEDBSD_NIGHTLY_IMAGE) as
-# Kei-nightly/data/hdd-image.img. It packages the image already built by
+# zedbsd-nightly/data/hdd-image.img. It packages the image already built by
 # `make` and does not rebuild it (CI runs it right after the build).
 
 override ZEDBSD_NIGHTLY_BASE_TAG := rev-0
-# The asset keeps its first name, and the archive its top directory Kei-nightly/, until a base archive under the
-# zedBSD name is published (the upload is the user's decision): changing the name here before the upload breaks
-# every download.
-override ZEDBSD_NIGHTLY_BASE_ASSET := kei-nightly-base-winq-a10-1.zip
-# Draft value (ws088-p001, fork commits unconfirmed). Replace it with the
-# digest of the published asset before the upload (ws088-p002).
-override ZEDBSD_NIGHTLY_BASE_SHA256 := 81120981aabc80de6dbdc526b7dfa314ee84a8041a1c3b137081e078a81f665c
+# The base under the system's name, its top directory zedbsd-nightly/. The
+# earlier kei-nightly-base-winq-a10-1.zip (top directory Kei-nightly/) stays on
+# rev-0 for the older trees that still pin it.
+override ZEDBSD_NIGHTLY_BASE_ASSET := zedbsd-nightly-base-winq-a10-1.zip
+# A draft (the fork commits unconfirmed): replace the asset and this digest
+# once the base is rebuilt with the fork commits.
+override ZEDBSD_NIGHTLY_BASE_SHA256 := 962f79263b46581bffb2aae61b0109096e8a21e2476c3008518397fb962cb149
 
 ZEDBSD_NIGHTLY_FETCH ?= curl --fail --location --silent --show-error
 ZEDBSD_NIGHTLY_BASE_URL := https://github.com/awemorris/zedBSD/releases/download/$(ZEDBSD_NIGHTLY_BASE_TAG)/$(ZEDBSD_NIGHTLY_BASE_ASSET)

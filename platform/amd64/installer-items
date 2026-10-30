@@ -9,7 +9,7 @@ base	-	required	Base System	base
 desktop	-	on	Keiland Desktop	desktop
 firmware	-	on	Firmware	firmware
 packages	-	on	Packages	-
-clang	packages	off	Clang	lang-clang
+clang	packages	off	Clang	lang-clang devel-pkgconf
 openssh	packages	on	OpenSSH	network-openssh
 openssl	packages	on	OpenSSL and CA certificates	security-openssl security-ca-certificates
 gtk4	packages	off	GTK4	desktop-gtk4

@@ -39,6 +39,7 @@ static void test_keys(void);
 static void test_read(void);
 static void test_set(void);
 static void test_lock(void);
+static void test_sleep(void);
 static void test_merge(void);
 static void test_hand_edit(void);
 static void test_two_stores(void);
@@ -70,6 +71,7 @@ main(
 	test_read();
 	test_set();
 	test_lock();
+	test_sleep();
 	test_merge();
 	test_hand_edit();
 	test_two_stores();
@@ -266,6 +268,34 @@ test_lock(void)
 	(void)kwl_settings_store_load(&store);
 	entry = kwl_settings_store_find(&store, "power.lock");
 	check(entry != NULL && strcmp(entry->value, "10") == 0 && entry->chosen, "lock: the file's 10 minutes stays (%s)", entry != NULL ? entry->value : "-");
+	kwl_settings_store_close(&store);
+}
+
+/* The sleep's minutes: never on both sources without a value in the file, and a user's own value kept. */
+static void
+test_sleep(void)
+{
+	struct kwl_settings_store store;
+	struct kwl_settings_entry *entry;
+
+	/* No value in the file: never (0), not chosen. */
+	put_file("mouse.speed=50\n");
+	(void)kwl_settings_store_open(&store, test_home);
+	(void)kwl_settings_store_load(&store);
+	entry = kwl_settings_store_find(&store, "power.sleep.ac");
+	check(entry != NULL && strcmp(entry->value, "0") == 0 && !entry->chosen, "sleep: without a value the adapter's sleep is never (%s)", entry != NULL ? entry->value : "-");
+	entry = kwl_settings_store_find(&store, "power.sleep.battery");
+	check(entry != NULL && strcmp(entry->value, "0") == 0 && !entry->chosen, "sleep: without a value the battery's sleep is never (%s)", entry != NULL ? entry->value : "-");
+	kwl_settings_store_close(&store);
+
+	/* A value the user chose stays. */
+	put_file("power.sleep.ac=30\npower.sleep.battery=15\n");
+	(void)kwl_settings_store_open(&store, test_home);
+	(void)kwl_settings_store_load(&store);
+	entry = kwl_settings_store_find(&store, "power.sleep.ac");
+	check(entry != NULL && strcmp(entry->value, "30") == 0 && entry->chosen, "sleep: the file's 30 minutes stays (%s)", entry != NULL ? entry->value : "-");
+	entry = kwl_settings_store_find(&store, "power.sleep.battery");
+	check(entry != NULL && strcmp(entry->value, "15") == 0 && entry->chosen, "sleep: the file's 15 minutes stays (%s)", entry != NULL ? entry->value : "-");
 	kwl_settings_store_close(&store);
 }
 

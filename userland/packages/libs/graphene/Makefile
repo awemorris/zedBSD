@@ -64,8 +64,8 @@ graphene: $(ZEDBSD_GRAPHENE_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library goes in under its SONAME.  The headers and the .pc file go with
-# the development packages of the GTK port (WS115 p002).
+# The library goes in under its SONAME.  The headers and the .pc files are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,graphene,Vector and matrix library,*,n,package,,y,\
 	packages/libs,libs/graphene,libs/glib))
 
@@ -74,3 +74,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter graphene,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter graphene,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_GRAPHENE_SONAME)=$(ZEDBSD_GRAPHENE_LIBRARY) \
 	--file /usr/share/licenses/graphene/LICENSE.txt=$(ZEDBSD_GRAPHENE_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,graphene,$(ZEDBSD_EXT_graphene_STAGEDIR),\
+	lib/pkgconfig/graphene-1.0.pc lib/pkgconfig/graphene-gobject-1.0.pc,\
+	include/graphene-1.0 lib/graphene-1.0/include,\
+	$(ZEDBSD_GRAPHENE_SONAME)))

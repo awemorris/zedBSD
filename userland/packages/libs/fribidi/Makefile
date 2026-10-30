@@ -60,8 +60,8 @@ fribidi: $(ZEDBSD_FRIBIDI_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library goes in under its SONAME.  The headers and the .pc file go with
-# the development packages of the GTK port (WS115 p002).
+# The library goes in under its SONAME.  The headers and the .pc file are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,fribidi,Unicode bidirectional algorithm,*,n,package,,y,\
 	packages/libs,libs/fribidi,))
 
@@ -70,3 +70,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter fribidi,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter fribidi,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_FRIBIDI_SONAME)=$(ZEDBSD_FRIBIDI_LIBRARY) \
 	--file /usr/share/licenses/fribidi/COPYING=$(ZEDBSD_FRIBIDI_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,fribidi,$(ZEDBSD_EXT_fribidi_STAGEDIR),\
+	lib/pkgconfig/fribidi.pc,\
+	include/fribidi,\
+	$(ZEDBSD_FRIBIDI_SONAME)))

@@ -139,9 +139,17 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter libcxx,$(ZEDBSD_USER_PROGRAMS)),\
 	$(ZEDBSD_LIBCXX_LICENSE))
 # The loader opens a dependency by the name recorded in DT_NEEDED, which is
 # the SONAME, so that is the name each library is installed under.  The
-# unversioned link belongs to the link step and stays in the staging tree.
+# unversioned link the link step looks for is among the development files
+# below.
 ZEDBSD_PACKAGE_FILES += $(if $(filter libcxx,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/libunwind.so.1=$(ZEDBSD_LIBCXX_UNWIND) \
 	--file /usr/lib/libc++abi.so.1=$(ZEDBSD_LIBCXX_CXXABI) \
 	--file /usr/lib/libc++.so.1=$(ZEDBSD_LIBCXX_CXX) \
 	--file /usr/share/licenses/libcxx/LICENSE.TXT=$(ZEDBSD_LIBCXX_LICENSE))
+
+# The development files: the C++ library's headers (include/c++/v1), the
+# unwinder's, and the unversioned names the linker looks for.
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,libcxx,$(ZEDBSD_LIBCXX_STAGE),\
+	$(addprefix include/,__libunwind_config.h libunwind.h unwind.h unwind_arm_ehabi.h unwind_itanium.h),\
+	include/c++,\
+	libunwind.so.1 libc++abi.so.1 libc++.so.1))

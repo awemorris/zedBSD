@@ -132,3 +132,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter fontconfig,$(ZEDBSD_USER_PROGRAMS)),\
 		--file /etc/fonts/conf.d/$(conf)=$(ZEDBSD_FONTCONFIG_CONF_AVAIL)/$(conf)) \
 	--file /etc/fonts/conf.d/55-zedbsd-families.conf=$(ZEDBSD_FONTCONFIG_FAMILIES) \
 	--file /usr/share/licenses/fontconfig/COPYING=$(ZEDBSD_FONTCONFIG_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,fontconfig,$(ZEDBSD_EXT_fontconfig_STAGEDIR),\
+	lib/pkgconfig/fontconfig.pc,\
+	include/fontconfig,\
+	$(ZEDBSD_FONTCONFIG_SONAME)))

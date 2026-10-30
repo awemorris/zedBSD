@@ -82,9 +82,9 @@ pango: $(ZEDBSD_PANGO_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# Each library goes in under its SONAME.  pango-view and the other tools,
-# the headers and the .pc files go with the development packages of the GTK
-# port (WS115 p002).
+# Each library goes in under its SONAME.  The headers and the .pc files are
+# the development files below; pango-view and the other tools are not
+# installed.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,pango,Text layout library,*,n,package,,y,\
 	packages/libs,libs/pango,libs/glib libs/fribidi libs/harfbuzz libs/fontconfig libs/freetype libs/cairo))
 
@@ -94,3 +94,10 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter pango,$(ZEDBSD_USER_PROGRAMS)),\
 	$(foreach library,$(ZEDBSD_PANGO_LIBRARIES),\
 		--file /usr/lib/$(ZEDBSD_PANGO_SONAME_$(library))=$(call ZEDBSD_PANGO_REALNAME,$(library))) \
 	--file /usr/share/licenses/pango/COPYING=$(ZEDBSD_PANGO_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,pango,$(ZEDBSD_EXT_pango_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,pango.pc pangocairo.pc pangofc.pc pangoft2.pc pangoot.pc),\
+	include/pango-1.0,\
+	$(foreach library,$(ZEDBSD_PANGO_LIBRARIES),$(ZEDBSD_PANGO_SONAME_$(library)))))

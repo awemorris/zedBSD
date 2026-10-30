@@ -72,8 +72,7 @@ freetype: $(ZEDBSD_FREETYPE_CHECKED)
 # ---------------------------------------------------------------- packaging
 
 # The library goes in under its SONAME, which is the name the loader asks
-# for.  This is the runtime: the headers and the .pc file go with the
-# development packages of the GTK port (WS115 p002).
+# for.  The headers and the .pc file are the development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,freetype,FreeType font rasterizer,*,n,package,,y,\
 	packages/libs,libs/freetype,libs/zlib libs/libpng))
 
@@ -82,3 +81,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter freetype,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter freetype,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_FREETYPE_SONAME)=$(ZEDBSD_FREETYPE_LIBRARY) \
 	--file /usr/share/licenses/freetype/FTL.TXT=$(ZEDBSD_FREETYPE_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,freetype,$(ZEDBSD_EXT_freetype_STAGEDIR),\
+	lib/pkgconfig/freetype2.pc,\
+	include/freetype2,\
+	$(ZEDBSD_FREETYPE_SONAME)))

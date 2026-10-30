@@ -70,8 +70,8 @@ pixman: $(ZEDBSD_PIXMAN_CHECKED)
 
 # ---------------------------------------------------------------- packaging
 
-# The library goes in under its SONAME.  The headers and the .pc file go with
-# the development packages of the GTK port (WS115 p002).
+# The library goes in under its SONAME.  The headers and the .pc file are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,pixman,Pixel manipulation library,*,n,package,,y,\
 	packages/libs,libs/pixman,))
 
@@ -80,3 +80,10 @@ ZEDBSD_PACKAGE_INPUTS += $(if $(filter pixman,$(ZEDBSD_USER_PROGRAMS)),\
 ZEDBSD_PACKAGE_FILES += $(if $(filter pixman,$(ZEDBSD_USER_PROGRAMS)),\
 	--file /usr/lib/$(ZEDBSD_PIXMAN_SONAME)=$(ZEDBSD_PIXMAN_LIBRARY) \
 	--file /usr/share/licenses/pixman/COPYING=$(ZEDBSD_PIXMAN_LICENSE))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,pixman,$(ZEDBSD_EXT_pixman_STAGEDIR),\
+	lib/pkgconfig/pixman-1.pc,\
+	include/pixman-1,\
+	$(ZEDBSD_PIXMAN_SONAME)))

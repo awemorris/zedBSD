@@ -91,8 +91,8 @@ cairo: $(ZEDBSD_CAIRO_CHECKED)
 # ---------------------------------------------------------------- packaging
 
 # Each library goes in under its SONAME, with the licence notice and both
-# licences it may be taken under.  The headers and the .pc files go with the
-# development packages of the GTK port (WS115 p002).
+# licences it may be taken under.  The headers and the .pc files are the
+# development files below.
 $(eval $(call ZEDBSD_USERLAND_PACKAGE,cairo,2D graphics library,*,n,package,,y,\
 	packages/libs,libs/cairo,libs/pixman libs/freetype libs/fontconfig libs/libpng libs/zlib libs/glib))
 
@@ -104,3 +104,11 @@ ZEDBSD_PACKAGE_FILES += $(if $(filter cairo,$(ZEDBSD_USER_PROGRAMS)),\
 		--file /usr/lib/$(ZEDBSD_CAIRO_SONAME_$(library))=$(call ZEDBSD_CAIRO_REALNAME,$(library))) \
 	$(foreach license,$(ZEDBSD_CAIRO_LICENSES),\
 		--file /usr/share/licenses/cairo/$(license)=$(ZEDBSD_EXT_cairo_SRCDIR)/$(license)))
+
+# The development files: the headers, the .pc files and the unversioned names
+# of the libraries (external.mk).
+$(eval $(call ZEDBSD_EXTERNAL_DEVELOPMENT,cairo,$(ZEDBSD_EXT_cairo_STAGEDIR),\
+	$(addprefix lib/pkgconfig/,cairo.pc cairo-fc.pc cairo-ft.pc cairo-gobject.pc cairo-pdf.pc cairo-png.pc cairo-ps.pc \
+	cairo-script.pc cairo-script-interpreter.pc cairo-svg.pc),\
+	include/cairo,\
+	$(foreach library,$(ZEDBSD_CAIRO_LIBRARIES),$(ZEDBSD_CAIRO_SONAME_$(library)))))
