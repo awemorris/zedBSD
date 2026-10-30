@@ -3,7 +3,7 @@
 # WS333: /dev/thermal で統一する電力・熱の枠組み（CPU の idle・DVFS・P/E core、熱・fan）
 
 - Master: [plan/master.md](../master.md)（2026-10-31 作成）。Primary Milestone: MG004。
-- Status: planning
+- Status: incomplete（2026-10-31 Q1: p001 設計済み、p002・p003 を main に、p006 を実装中）
 - 目標: CPU の idle（C-state、MWAIT）・P-state（HWP と、HWP の無い CPU の driver の P-state）・P/E core の相対性能・熱の監視・fan・非常の停止を、1 つの device `/dev/thermal`（と `/sbin/thermal`）の下で統一して設計し、実装する。
 - Resume point: p001（統一の設計、P5）と p002（amd64 の idle の MWAIT、P1）を並べて進める。
 

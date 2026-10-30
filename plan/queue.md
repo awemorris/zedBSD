@@ -427,7 +427,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress（p003 cleared c6ef3afbc、main f197c8a3f。p006 を実装中） |
+| q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress・返却（p003 cleared main f197c8a3f。p006 は 44678bac6・c33842bc9、host 試験 196 checks PASS・20 port の build、QEMU の起動は q1759 で） |
 | q1755 / q1755-i01 | O-p021（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p021`・branch `agent/o-ws326-p021`） | [ws326-p021](ws326/phase021/phase.md) | phase.md のとおり。h264sw-reflist.h の非存在の frame の印だけ header を直してよい（新しい BASE を記録） | in-progress |
 | q1756 / q1756-i01 | S-p023（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p023`・branch `agent/s-ws326-p023`） | [ws326-p023](ws326/phase023/phase.md) | phase.md のとおり。p021 と並べ、実 stream の試験は p021 の merge の後 | in-progress（ac1109d25・37789c4d6 を main に merge。host 試験 PASS、実 stream の試験は p021 の後） |
 
@@ -439,3 +439,4 @@
 | --- | --- | --- | --- | --- |
 | q1757 / q1757-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-bugs3`・branch `agent/p2-bugs3`、QEMU と host、image は /tmp） | [BUG-360](bugs/BUG-360.md)・[BUG-306](bugs/BUG-306.md)・[BUG-292](bugs/BUG-292.md)・[BUG-289](bugs/BUG-289.md)・[BUG-365](bugs/BUG-365.md) | ticket ごとに直し・確かめ・ticket と Bug Board の行の更新 | in-progress |
 | q1758 / q1758-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws329`・branch `agent/p5-ws329`） | [ws329](ws329/ws.md) p001 設計 | plan/ws329/ だけ、design-reviewer と問いの一覧まで。実装は WS326 の完了の後 | in-progress |
+| q1759 / q1759-i01 | P7（phase-runner-high、同じ worktree p7-ws333） | [ws333](ws333/ws.md) p006 の QEMU の起動の回帰 → p007 x86 の decode の module の設計 | boot-test.sh で amd64・armv7-virt・riscv64-virt・raspi4b。p007 は design.md §9 のとおり、5330 の読みは未実施で可 | in-progress |
