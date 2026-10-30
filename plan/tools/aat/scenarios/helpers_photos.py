@@ -14,8 +14,10 @@ records (id, path, sha256, taken, favorite, turns) and the albums (id, name, mem
 GIF and the damaged JPEG fall on the day of the run.  The same content is never copied twice (SHA-256).
 
 Photos logs `PHOTOS MEDIA done imported=I error=E snapshot=S` when its worker's job ends (I is 1 for an import, 0 for
-a reread); every change of the library (its own import or save too) wakes it to read the library again, which puts
-the view back on the Timeline (ph_view_reset), so the helper waits for those rereads to stop before it clicks.
+a reread); every change of the library (its own import or save too) wakes it to read the library again.  A reread
+keeps the list, the photo shown whole and the slideshow by their ids (ph_view_remember, ph_view_restore), but the
+grid's pictures are made again and the photos' indices may move, so the helper waits for the rereads to stop before
+it clicks.
 
 The photos' indices are the library's order (library.c library_compare_photos: the newest taken first, then by
 path), which the helper computes from metadata.db.  The places in Photos' window are view.c's layout: the lists'

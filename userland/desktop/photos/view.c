@@ -160,6 +160,8 @@ static void view_drop_thumbs(struct ph_view *view);
 static void view_card(struct ph_view *view, struct kl_ui *ui, const struct kl_style *style, int width, int height, uint64_t now_us);
 static void view_add_to(struct ph_view *view, size_t album, uint64_t now_us);
 static void view_drag_arm(struct ph_view *view, struct kl_ui *ui, long photo);
+static void view_note_id(long photo, char *id);
+static long view_found(const char *id);
 
 /*
  * Makes the view's state: the timeline shown, nothing chosen or open, a
@@ -262,6 +264,129 @@ ph_view_reset(
 	view->generation++;
 	kl_scroll_move_to(&view->grid_scroll, 0.0, 0.0, 0, 0);
 	return 0;
+}
+
+/*
+ * Notes what a reread of the library is to keep of the view (before the
+ * library goes): what it lists, its photos by their ids, the slideshow and
+ * the grid's place.  The picture shown whole moves into the note.
+ */
+void
+ph_view_remember(
+	struct ph_view *view,
+	struct ph_view_keep *keep)
+{
+	struct ph_album *albums;
+	size_t album_count;
+
+	/* Nothing yet. */
+	memset(keep, 0, sizeof(*keep));
+
+	/* The list, an album by its id. */
+	keep->list = view->list;
+	albums = ph_albums(&album_count);
+	if (view->list == PH_LIST_ALBUM && view->album < album_count)
+		memcpy(keep->album, albums[view->album].id, PH_ID_SIZE);
+
+	/* The photos shown whole and chosen, by their ids. */
+	view_note_id(view->open, keep->open);
+	view_note_id(view->chosen, keep->chosen);
+
+	/* The photo of the album card and the one armed for a drag, while they are. */
+	if (view->adding)
+		view_note_id(view->card_photo, keep->card);
+	if (view->drag_armed)
+		view_note_id(view->drag_photo, keep->drag);
+
+	/* The picture shown whole (already fitted and turned): moved, not made again. */
+	keep->picture = view->picture;
+	keep->picture_turns = view->picture_turns;
+	keep->picture_failed = view->picture_failed;
+	memset(&view->picture, 0, sizeof(view->picture));
+
+	/* The slideshow and the grid's place. */
+	keep->slideshow = view->slideshow;
+	keep->slide_at = view->slide_at;
+	keep->grid_y = view->grid_scroll.y;
+}
+
+/*
+ * Puts back, after ph_view_reset on the library read again, what
+ * ph_view_remember noted: what is gone from the library is not put back
+ * (a gone album leaves the Timeline, a gone photo shown whole leaves the
+ * grid).  The note's picture is the view's or freed.
+ */
+void
+ph_view_restore(
+	struct ph_view *view,
+	struct ph_view_keep *keep)
+{
+	struct ph_photo *photos;
+	struct ph_album *albums;
+	size_t album_count;
+	size_t count;
+	size_t album;
+	long photo;
+	int step;
+	int same;
+
+	/* The favourites, or the album found again by its id (else the Timeline that ph_view_reset left). */
+	albums = ph_albums(&album_count);
+	if (keep->list == PH_LIST_FAVORITES) {
+		view->list = PH_LIST_FAVORITES;
+	} else if (keep->list == PH_LIST_ALBUM) {
+		/* Looks for the album's id among those read. */
+		for (album = 0; album < album_count; album++) {
+			same = strcmp(albums[album].id, keep->album);
+			if (same == 0) {
+				view->list = PH_LIST_ALBUM;
+				view->album = album;
+				break;
+			}
+		}
+	}
+
+	/* The photo chosen in the grid, at its new place. */
+	view->chosen = view_found(keep->chosen);
+
+	/* The photo shown whole, with its picture turned as the photo is now, and the slideshow on it. */
+	photos = ph_photos(&count);
+	photo = view_found(keep->open);
+	if (photo >= 0) {
+		view->open = photo;
+		view->chosen = photo;
+		view->picture = keep->picture;
+		memset(&keep->picture, 0, sizeof(keep->picture));
+		view->picture_turns = photos[photo].turns;
+		view->picture_failed = keep->picture_failed;
+		step = (photos[photo].turns - keep->picture_turns) & 3;
+		if (view->picture.pixels != NULL && step != 0)
+			view_turn_image(&view->picture, step);
+		view->slideshow = keep->slideshow;
+		view->slide_at = keep->slide_at;
+	}
+
+	/* The album card on its photo, closed when the photo is gone. */
+	photo = view_found(keep->card);
+	view->adding = 0;
+	if (photo >= 0) {
+		view->card_photo = photo;
+		view->adding = 1;
+	}
+
+	/* The drag armed on its photo, disarmed when the photo is gone. */
+	photo = view_found(keep->drag);
+	view->drag_armed = 0;
+	if (photo >= 0) {
+		view->drag_photo = photo;
+		view->drag_armed = 1;
+	}
+
+	/* The grid where it was (the scroll's bounds hold it in the list as it is now). */
+	kl_scroll_move_to(&view->grid_scroll, 0.0, keep->grid_y, 0, 0);
+
+	/* A picture not put back. */
+	kl_image_release(&keep->picture);
 }
 
 /*
@@ -2029,4 +2154,39 @@ view_drag_arm(
 	view->drag_press_x = x;
 	view->drag_press_y = y;
 	view->drag_frame = view->frame;
+}
+
+/* Notes a photo's id (an empty string for none). */
+static void
+view_note_id(
+	long photo,
+	char *id)
+{
+	struct ph_photo *photos;
+	size_t count;
+
+	/* None, or one of the library. */
+	id[0] = '\0';
+	photos = ph_photos(&count);
+	if (photo < 0 || (size_t)photo >= count)
+		return;
+	memcpy(id, photos[photo].id, PH_ID_SIZE);
+}
+
+/* Finds a photo of the library by its id (-1 for an empty id or one not there). */
+static long
+view_found(
+	const char *id)
+{
+	long photo;
+
+	/* No photo noted. */
+	if (id[0] == '\0')
+		return -1;
+
+	/* Looks for it in the library read again. */
+	photo = ph_library_find_id(id);
+
+	/* Its index, or -1 when it is gone. */
+	return photo;
 }

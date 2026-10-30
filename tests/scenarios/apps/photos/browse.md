@@ -25,7 +25,7 @@ EXIF の日付の無い file は取り込んだ日（guest の local の暦）�
 2026 年 9 月 20 日より後に流すと、0〜2 が取り込んだ日の 3 枚（同じ秒なら broken.jpg・sticker.png・wave.gif の順）、3 lake.jpg、4 hill.jpg、5 sea.jpg、
 6 cake.jpg、7 park.jpg、8 garden.jpg。
 
-Photos は library が変わる度（自分の取り込み・保存も）に読み直し（`PHOTOS MEDIA done imported=0 ...`）、そこで表示を Timeline に戻す。
+Photos は library が変わる度（自分の取り込み・保存も）に読み直し（`PHOTOS MEDIA done imported=0 ...`）。読み直しても、見ている list・全面の写真・slideshow は id で保つ（library から消えた物は閉じる）。
 助けは読み直しが止むのを待ってから操作する。
 
 ## 操作と確認

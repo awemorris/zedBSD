@@ -466,6 +466,7 @@ ph_media_results(
 	struct ph_window *photos)
 {
 	struct ph_media_result result;
+	struct ph_view_keep keep;
 	FILE *snapshot;
 	int taken;
 	int error;
@@ -501,6 +502,8 @@ ph_media_results(
 			error = errno;
 			close(result.descriptor);
 		} else {
+			/* The view keeps its place, its photo shown whole and its slideshow across the reread. */
+			ph_view_remember(&photos->view, &keep);
 			ph_worker_drop_thumbs();
 			ph_library_release();
 			photos->root_known = 0;
@@ -521,6 +524,9 @@ ph_media_results(
 				if (error == 0)
 					error = view_error;
 			}
+
+			/* What of the noted view is still in the library. */
+			ph_view_restore(&photos->view, &keep);
 		}
 	}
 
