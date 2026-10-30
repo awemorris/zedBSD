@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-30 22:48（Q1）
+最終更新: 2026-10-30 22:49（Q1）
 
 ## 担当（P1〜P8）
 
@@ -14,7 +14,7 @@
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | — | — | 返却（WS307: p007 の efiboot は QEMU で PASS、残りは install-admin の導入の QEMU と古い entry の掃除） | — |
 | P7 | [WS009](ws009/ws.md) | 文書（DOC-54 /dev/gpu の UAPI の文書と、完了の条件の不足） | 起動（q1725）。p028 の clean build と QEMU の起動の再現（native → hybrid・uefi・bios） | WS の受け入れの確認 → 完了の形 → 返却 |
-| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 返却（2026-10-30）。3,472 のうち 2,215（63.80%）、後退 0、Acid3 100/100 | 次の候補: scripted reftest 281、grid の baseline 68、View Transitions 約 35、flexbox の baseline 約 25、Element.animate 約 20。zedBSD の image の build（gradient.c の追加）は未確認 |
+| P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）の改善: Interop 2025 で Chromium が通る試験を全部通す（p260） | 自走（q1727、ユーザーの指示）。今 3,472 のうち 2,215（63.80%） | 100% まで。返却のたびに Q1 が起動し直す |
 
 Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [WS326](ws326/ws.md) p015（補間と重み）・p017（B の direct）。
 

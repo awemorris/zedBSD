@@ -322,3 +322,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1726 / q1726-i01 | P2（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p2-ws291v`・branch `agent/p2-ws291v`、実機 VF2） | [ws291-p020](ws291/phase020/phase.md) PowerVR の qs40 × 13 で 50 fps | 2026-10-30 ユーザーから、WS291 の PowerVR の最適化を P2 で実行する、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-30: WS074 を P8 で自走（q1727）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1727 / q1727-i01 | P8（phase-runner-low、worktree p8-ws074） | [ws074-p260](ws074/phase260/phase.md) | 2026-10-30 ユーザーから、Interop 2025 で Chromium が PASS する項目の 100% をゴールに P8 が自走する、という趣旨の指示を受けた。返却のたびに Q1 が次の attempt で起動し直す | in-progress |
