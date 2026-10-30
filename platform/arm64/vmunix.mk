@@ -114,6 +114,17 @@ ARM64_BOARD_KERNEL_SOURCES_odroid-c5 := \
 	src/kern/dcache.c \
 	src/kern/uncached.c \
 	src/drivers/generic/fdt.c src/drivers/generic/dma.c
+# The console's text over the boot framebuffer, which /dev/graphics also
+# draws through when the build has it.
+ARM64_BOOTFB_SOURCES := src/drivers/generic/boot-fb.c \
+	src/drivers/generic/fb-text.c \
+	src/drivers/platform/pcat/graphics/vgafont.c
+ifeq ($(CONFIG_DRIVER_GRAPHICS_DEVICE),y)
+ARM64_BOOTFB_SOURCES += src/drivers/generic/graphics-device.c
+endif
+ARM64_BOARD_KERNEL_SOURCES_rpi4 += $(ARM64_BOOTFB_SOURCES)
+ARM64_BOARD_KERNEL_SOURCES_rpi5 += $(ARM64_BOOTFB_SOURCES)
+ARM64_BOARD_KERNEL_SOURCES_odroid-c5 += $(ARM64_BOOTFB_SOURCES)
 # The Mali GPU and its display (platform/arm64/mali.mk), when the build asks for it.
 ifeq ($(ZEDBSD_BOARD)$(CONFIG_DRIVER_MALI_GPU),odroid-c5y)
 include platform/arm64/mali.mk

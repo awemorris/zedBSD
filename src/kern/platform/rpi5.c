@@ -272,8 +272,18 @@ void
 kern_platform_debug_write(
 	const char *s)
 {
+	void (*console)(int character);
+
 	/* Ignores a missing string. */
 	if (s == NULL)
+		return;
+
+	/*
+	 * Writes nothing once the kernel's console is published: the log
+	 * already wrote the record there, serial line included.
+	 */
+	console = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (console != NULL)
 		return;
 
 	/* Emits every byte through the early console. */
