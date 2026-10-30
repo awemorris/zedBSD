@@ -55,3 +55,7 @@
 ## 結果
 
 （P2 が書く）
+
+## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
+
+p011 の後に `plan/ws089/tests/host-wallpaper.sh`（と `host-build.sh` の見込み）が link で壊れる（look.c・storage-trash.c を `-pthread` だけで build）。p012 の後の `plan/ws095/tests/host-engine.sh`、前から FAIL の `plan/ws191/tests/host-audio-stream.sh` も同じ扱い。`plan/ws196/ws.md` が ws089/tests を参照しているので、AGENTS.md §9 の試験の整理の基準で、参照が生きていれば層を link するよう直し、生きていなければ削除の一覧を Q1 に送る。
