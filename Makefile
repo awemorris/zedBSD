@@ -610,6 +610,17 @@ override ZEDBSD_USER_PROGRAMS := $(filter-out \
 	$(ZEDBSD_TARGET_PACKAGE_HOLD),$(ZEDBSD_USER_PROGRAMS))
 
 #
+# Noct built with its OpenGL ES accelerator (ZEDBSD_NOCT_ACCEL := y, an
+# amd64 option) links libEGL and libGLESv2, so with the option noct needs
+# both libraries in the image, and choosing noct (or Emacs, which runs on
+# it) chooses them.  The noct package's own registration does not name
+# them, for without the option it needs neither.
+#
+ifneq ($(and $(filter amd64,$(ZEDBSD_ARCHITECTURE)),$(filter y,$(ZEDBSD_NOCT_ACCEL))),)
+USERLAND_noct_REQUIRE += desktop/libegl desktop/libglesv2
+endif
+
+#
 # Package dependencies are named by their registered stable path (for
 # example, editors/remacs -> base/noct). Resolve those paths back to
 # program names even when config.mk was hand-edited.
