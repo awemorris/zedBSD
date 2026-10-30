@@ -5,7 +5,7 @@
 
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
-| P1 | phase-runner-high | ws313 (q1714-i01 返却) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313`、firmware: `/home/awe/zedBSD-worktrees/p1-c5-firmware` / `agent/p1-c5-firmware` | returned（license の同意と zedBSD-firmware の公開の判断待ち） | 0772a6994（merge bfd2fd903） |
+| P1 | phase-runner-high | ws313 p003 (q1716-i01) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313`、firmware: `/home/awe/zedBSD-worktrees/p1-c5-firmware` / `agent/p1-c5-firmware` | in-progress（2026-10-30 16:4x 起動） | 0772a6994（merge bfd2fd903） |
 | P2 | phase-runner | ws331 p001 (q1713-i01 cleared) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | returned（一覧をユーザーに） | 6af47c4a4（merge f4fcb6ff2） |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner | ws307 (q1711-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | in-progress（2026-10-30 起動） | — |

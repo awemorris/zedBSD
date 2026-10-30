@@ -260,3 +260,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1715 / q1715-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291`・branch `agent/p3-ws291`、基点 main、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」 基準はユーザーの未回答の間 Q1 の既定: zedBSD の今の fps で 40 fps 前後の scene を決め、50 fps 以上へ | uncleared（2026-10-30 返却。VF2 の HDMI に画面が無く loader の framebuffer が無い（元の kernel でも同じ、10-28 から）。fps は未計測。a7e9379f5） |
+
+## 2026-10-30 16:4x: WS313 の bootloader を公式の image から（q1716）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1716 / q1716-i01 | P1（phase-runner-high、worktree p1-ws313 と p1-c5-firmware） | [ws313](ws313/ws.md) p003 媒体 | ユーザー「このファイルは、このボードで利用する目的であれば、再配布可能です。zedBSD-firmwareに入れてください。ライセンスは下記です。 prior written permissionはHardkernelに与えられており、このボードでしか使用できないイメージであれば、再配布が可能なんだそうです。」（下に Amlogic の license の本文、2018 Amlogic の「Redistribution and use … strictly prohibited without prior written permission from Amlogic.」） bootloader を公式の image の物に替え、zedBSD-firmware に license の本文と一緒に入れる。試験の image を作り直す。push は Q1 | in-progress |
