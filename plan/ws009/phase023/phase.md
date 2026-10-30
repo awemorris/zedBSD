@@ -123,3 +123,8 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 - `GPU_RESOURCE_IMPORT` の Requires は capability none（GPU_CAP_SHARE か display の import の op）。gpu-requests.md の索引に none を写す。
 - gpu-memory.md の GPU_BLOB_SHAREABLE・GPU_BLOB_CROSS_DEVICE の文を gpu-sharing.md と合わせる（core は CROSS_DEVICE・SCANOUT_FOREIGN・companion_id を見ない、venus の image の export だけ CROSS_DEVICE を読む）。
 - `GPU_ALLOCATION_IMPORT` の header は入力を version・size・fd と書くが、code は flags 0 も要る。
+
+## p018 から（2026-10-30 Q1）
+
+- COMMIT の `sequence` が lease ごとに数え直すか: gpu-display.md は数え直すと書くが bcm2711 の code は戻さない。統合で事実に合わせる。
+- plane_state の comment「storage of this open」と code（blob か scanout の allocation だけ、他は EINVAL）の食い違い。cursor の EOPNOTSUPP は header の GPU_DISPLAY_HAS_CURSOR でなく op の有無。REFRESH の ENODEV は記録された誤りも含む。
