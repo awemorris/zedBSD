@@ -225,16 +225,19 @@ $(BUILD)/user/%.o: %.c
 	$(M68K_CC) $(M68K_USER_CPPFLAGS) $(M68K_USER_CFLAGS) \
  -fno-strict-aliasing -MMD -MP -c $< -o $@
 
+# The 68881/68882 mnemonics by name, not any word starting with f: a jump table's data disassembles as ColdFire's ff1.
+X68K_FPU_INSN_PATTERN := ^[[:space:]]*[0-9a-f]+:[[:space:]]+f(abs|acos|add|asin|atan|b|cmp|cos|db|div|etox|getexp|getman|int|log|mod|move|mul|neg|nop|rem|restore|s|tan|tentox|trap|tst|twotox)[a-z0-9]*([[:space:]]|$$)
+
 x68k-target-audit: $(X68K_AUDIT_C_OBJS) $(X68K_AUDIT_S_OBJS) \
 	$(X68K_CRT0_OBJ) $(X68K_USER_CONTRACT_OBJ)
 	@if $(M68K_OBJDUMP) -d --no-show-raw-insn $(X68K_AUDIT_C_OBJS) | \
- grep -E '^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z]'; then \
+ grep -E '$(X68K_FPU_INSN_PATTERN)'; then \
  echo "ERROR: m68k soft-float C object contains FPU instruction" >&2; \
  exit 1; \
 	fi
 	@if $(M68K_OBJDUMP) -d --no-show-raw-insn \
  $(X68K_CRT0_OBJ) $(X68K_USER_CONTRACT_OBJ) | \
- grep -E '^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z]'; then \
+ grep -E '$(X68K_FPU_INSN_PATTERN)'; then \
  echo "ERROR: m68k soft-float user object contains FPU instruction" >&2; \
  exit 1; \
 	fi
@@ -281,7 +284,7 @@ $(BUILD)/bin/sh: $(X68K_USER_OBJS) $(X68K_USER_READLINE_LIB) \
 	@test -z "$$($(M68K_NM) -u $@)" || { $(M68K_NM) -u $@; exit 1; }
 	$(PYTHON) tools/build/check-user-elf.py --machine m68k $@
 	@if $(M68K_OBJDUMP) -d --no-show-raw-insn $@ | \
- grep -E '^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z]'; then \
+ grep -E '$(X68K_FPU_INSN_PATTERN)'; then \
  echo "ERROR: m68k soft-float shell contains FPU instruction" >&2; \
  exit 1; \
 	fi
@@ -354,7 +357,7 @@ $(BUILD)/vmunix: $(X68K_VMUNIX_OBJS) $(X68K_PLATFORM)/vmunix.ld \
 		{ $(M68K_NM) -u $@; exit 1; }
 	$(PYTHON) platform/x68k/tools/check-m68k-vmunix.py $@
 	@if $(M68K_OBJDUMP) -d --no-show-raw-insn $(X68K_VMUNIX_OBJS) | \
- grep -E '^[[:space:]]*[0-9a-f]+:[[:space:]]+f[a-z]'; then \
+ grep -E '$(X68K_FPU_INSN_PATTERN)'; then \
  echo "ERROR: m68k kernel contains unexpected FPU instructions" >&2; \
  exit 1; \
 	fi
