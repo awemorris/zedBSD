@@ -2755,7 +2755,7 @@ list_backdrop(
 		if (ancestor->style.backdrop_filter_count != 0 || ancestor->style.filter_count != 0 ||
 		    ancestor->style.opacity < 1.0f || ancestor->style.mix_blend_mode != 0 ||
 		    ancestor->style.clip_inset != 0 || ancestor->style.clip_rect != 0 ||
-		    ancestor->style.will_change_contains != 0)
+		    ancestor->style.will_change_contains != 0 || ancestor->style.view_transition_name != NULL)
 			return;
 	}
 	list_filter_items(walk, box, box->style.backdrop_filters, box->style.backdrop_filter_count);

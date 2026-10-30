@@ -742,6 +742,20 @@ struct css_try_rule {
 	size_t declaration_count;
 };
 
+/* One keyframe of an @keyframes rule: its offset (0 to 1) and its declarations. */
+struct css_keyframe {
+	float offset;
+	struct css_declaration *declarations;
+	size_t declaration_count;
+};
+
+/* An @keyframes rule: its name (an atom) and its keyframes in the order written. */
+struct css_keyframes_rule {
+	struct vm_string *name;
+	struct css_keyframe *frames;
+	size_t frame_count;
+};
+
 struct css_sheet {
 	struct wb_arena arena;
 	struct css_rule *rules;
@@ -753,6 +767,8 @@ struct css_sheet {
 	size_t font_face_count;
 	struct css_try_rule *try_rules;
 	size_t try_rule_count;
+	struct css_keyframes_rule *keyframes;
+	size_t keyframe_count;
 	struct css_rule_index index;
 	int origin;
 };

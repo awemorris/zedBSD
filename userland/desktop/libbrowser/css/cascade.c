@@ -323,6 +323,7 @@ static const struct css_line_names *cascade_line_names(struct css_engine *engine
 static const void *cascade_keep(struct css_engine *engine, const void *data, size_t size);
 static const struct css_gradient *cascade_gradient(struct css_engine *engine, const struct css_gradient *gradient, float font_size);
 static void cascade_try_styles(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
+static void cascade_animation(struct css_engine *engine, struct css_style *style, const struct css_style *parent);
 static const struct css_try_rule *cascade_try_rule(const struct css_engine *engine, const struct vm_string *name);
 static void cascade_anchor(struct css_engine *engine, struct css_style *style, int property, const struct css_anchor_expr *expr);
 static const struct css_grid_areas *cascade_keep_areas(struct css_engine *engine, const struct css_grid_areas *areas);
@@ -1067,6 +1068,9 @@ cascade_compute(
 
 	/* The fallbacks of anchor positioning with their @position-try rules applied. */
 	cascade_try_styles(engine, style, parent);
+
+	/* The filters an @keyframes animation gives at the start of the page's time. */
+	cascade_animation(engine, style, parent);
 
 	/* The root's font size is what rem measures (its pseudo-elements do not change it). */
 	is_root = 0;
@@ -5260,6 +5264,167 @@ cascade_try_styles(
 		style->try_styles[entry] = cascade_keep(engine, &result, sizeof(result));
 	}
 	free(copy);
+}
+
+/* The amount of a filter function that changes nothing. */
+static float
+cascade_filter_identity(
+	int kind)
+{
+	if (kind == CSS_FILTER_BRIGHTNESS || kind == CSS_FILTER_CONTRAST || kind == CSS_FILTER_OPACITY ||
+	    kind == CSS_FILTER_SATURATE)
+		return 1.0f;
+	return 0.0f;
+}
+
+/*
+ * Mixes two filter lists by a share (0 to 1): functions of the same kinds in the same order mix their amounts; a list
+ * against none mixes with the identity of its functions; anything else switches halfway.
+ */
+static void
+cascade_filter_mix(
+	const struct css_filter *from,
+	int from_count,
+	const struct css_filter *to,
+	int to_count,
+	float share,
+	struct css_filter *out,
+	int *count)
+{
+	const struct css_filter *shape;
+	float start;
+	float end;
+	int index;
+
+	if (from_count != to_count && from_count != 0 && to_count != 0) {
+		shape = share < 0.5f ? from : to;
+		*count = share < 0.5f ? from_count : to_count;
+		for (index = 0; index < *count; index++)
+			out[index] = shape[index];
+		return;
+	}
+	*count = from_count > to_count ? from_count : to_count;
+	shape = from_count != 0 ? from : to;
+	for (index = 0; index < *count; index++) {
+		if (from_count != 0 && to_count != 0 && from[index].kind != to[index].kind) {
+			out[index] = share < 0.5f ? from[index] : to[index];
+			continue;
+		}
+		start = from_count != 0 ? from[index].amount : cascade_filter_identity(shape[index].kind);
+		end = to_count != 0 ? to[index].amount : cascade_filter_identity(shape[index].kind);
+		out[index].kind = shape[index].kind;
+		out[index].amount = start + (end - start) * share;
+	}
+}
+
+/*
+ * Applies an @keyframes animation's backdrop-filter and filter at the start of the page's time: the animation's
+ * progress with its delay and duration (linear), mixed between the keyframes around it, the style's own value standing
+ * in for a missing 0% or 100%.  Other properties of the keyframes are not applied.
+ */
+static void
+cascade_animation(
+	struct css_engine *engine,
+	struct css_style *style,
+	const struct css_style *parent)
+{
+	const struct cascade_sheet *sheets;
+	const struct css_keyframes_rule *rule;
+	const struct css_keyframe *frame;
+	struct css_style *scratch;
+	struct css_filter *own;
+	struct css_filter from[CSS_FILTERS];
+	struct css_filter to[CSS_FILTERS];
+	struct css_filter mixed[CSS_FILTERS];
+	float from_offset;
+	float to_offset;
+	float progress;
+	float share;
+	size_t index;
+	size_t at;
+	size_t declaration;
+	int from_count;
+	int to_count;
+	int property;
+	int pass;
+	int found_from;
+	int found_to;
+	int count;
+
+	/* Only an animation with a name and a length that has begun. */
+	if (style->animation_name == NULL || style->animation_duration <= 0.0f || style->animation_delay > 0.0f)
+		return;
+	progress = -style->animation_delay / style->animation_duration;
+	if (progress > 1.0f)
+		progress = 1.0f;
+
+	/* The last @keyframes rule of the name. */
+	rule = NULL;
+	sheets = engine->sheets.items;
+	for (index = 0; index < engine->sheets.count; index++) {
+		if (sheets[index].sheet == NULL)
+			continue;
+		for (at = 0; at < sheets[index].sheet->keyframe_count; at++) {
+			if (vm_string_equal(sheets[index].sheet->keyframes[at].name, style->animation_name))
+				rule = &sheets[index].sheet->keyframes[at];
+		}
+	}
+	if (rule == NULL)
+		return;
+	scratch = malloc(sizeof(*scratch));
+	if (scratch == NULL)
+		return;
+
+	/* backdrop-filter, then filter. */
+	for (pass = 0; pass < 2; pass++) {
+		property = pass == 0 ? CSS_PROP_BACKDROP_FILTER : CSS_PROP_FILTER;
+		own = pass == 0 ? style->backdrop_filters : style->filters;
+		from_offset = 0.0f;
+		to_offset = 1.0f;
+		found_from = 0;
+		found_to = 0;
+		from_count = pass == 0 ? style->backdrop_filter_count : style->filter_count;
+		to_count = from_count;
+		memcpy(from, own, sizeof(from));
+		memcpy(to, own, sizeof(to));
+
+		/* The nearest keyframes before and after the progress that set the property. */
+		for (index = 0; index < rule->frame_count; index++) {
+			frame = &rule->frames[index];
+			for (declaration = 0; declaration < frame->declaration_count; declaration++) {
+				if (frame->declarations[declaration].property != property)
+					continue;
+				*scratch = *style;
+				cascade_apply(engine, scratch, parent, &frame->declarations[declaration]);
+				if (frame->offset <= progress && (!found_from || frame->offset >= from_offset)) {
+					from_offset = frame->offset;
+					found_from = 1;
+					from_count = pass == 0 ? scratch->backdrop_filter_count : scratch->filter_count;
+					memcpy(from, pass == 0 ? scratch->backdrop_filters : scratch->filters, sizeof(from));
+				}
+				if (frame->offset >= progress && (!found_to || frame->offset < to_offset)) {
+					to_offset = frame->offset;
+					found_to = 1;
+					to_count = pass == 0 ? scratch->backdrop_filter_count : scratch->filter_count;
+					memcpy(to, pass == 0 ? scratch->backdrop_filters : scratch->filters, sizeof(to));
+				}
+			}
+		}
+		if (!found_from && !found_to)
+			continue;
+		share = to_offset > from_offset ? (progress - from_offset) / (to_offset - from_offset) : 0.0f;
+		if (share < 0.0f)
+			share = 0.0f;
+		if (share > 1.0f)
+			share = 1.0f;
+		cascade_filter_mix(from, from_count, to, to_count, share, mixed, &count);
+		memcpy(own, mixed, sizeof(struct css_filter) * (size_t)count);
+		if (pass == 0)
+			style->backdrop_filter_count = count;
+		else
+			style->filter_count = count;
+	}
+	free(scratch);
 }
 
 /* Finds the @position-try rule of a name that comes last in the sheets (NULL when there is none). */
