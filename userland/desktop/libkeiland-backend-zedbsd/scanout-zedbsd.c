@@ -41,6 +41,7 @@
 
 #include <uapi/gpu.h>
 #include <uapi/gpu-display.h>
+#include <uapi/gpu-scanout.h>
 #include <errno.h>
 #include <fcntl.h>
 #include <pthread.h>
@@ -453,11 +454,16 @@ scanout_import(
 	/*
 	 * The fd alone: the kernel takes the image's description from the
 	 * export and refuses one the importer supplies (gpu_import_ioctl).
+	 * The import is for the display to scan (GPU_IMPORT_SCANOUT, as
+	 * libvulkan's display images ask): a display node that is not the
+	 * client's renderer (the VisionFive 2's) takes a foreign image only so,
+	 * and a renderer that is its own display takes the flag as it is.
 	 */
 	memset(&import, 0, sizeof(import));
 	import.version = GPU_ABI_VERSION;
 	import.size = sizeof(import);
 	import.fd = record->descriptor;
+	import.flags = GPU_IMPORT_SCANOUT;
 	error = ioctl(scanout->gpu, GPU_RESOURCE_IMPORT, &import);
 	if (error != 0)
 		return errno;

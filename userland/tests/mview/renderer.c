@@ -96,6 +96,7 @@ mview_renderer_open(
 	uint32_t copies,
 	int each_draw,
 	uint32_t submits,
+	uint32_t inflight,
 	int cull_all,
 	uint32_t images)
 {
@@ -114,6 +115,8 @@ mview_renderer_open(
 	renderer->copies = copies;
 	renderer->each_draw = each_draw;
 	renderer->submits = submits;
+	renderer->inflight = inflight;
+	renderer->slot = 0U;
 	renderer->cull_all = cull_all;
 	renderer->images = images;
 
@@ -330,8 +333,24 @@ mview_renderer_draw(
 	uint32_t image;
 	uint32_t part;
 
-	/* The acquire semaphore is signaled only after the compositor releases an image. */
+	/*
+	 * With frames in flight, the next slot's previous frame must finish
+	 * before its command buffers and fence are used again (the wait counts
+	 * as the fence stage).
+	 */
 	mark = renderer_cycles();
+	if (renderer->inflight > 1U) {
+		renderer->slot = (renderer->slot + 1U) % renderer->inflight;
+		renderer->fence = renderer->slot_fences[renderer->slot];
+		renderer->acquired = renderer->slot_acquired[renderer->slot];
+		renderer->operation = "vkWaitForFences";
+		error = vkWaitForFences(renderer->device, 1U, &renderer->fence, VK_TRUE, RENDERER_GPU_TIMEOUT);
+		if (error != VK_SUCCESS)
+			return error;
+		renderer_stage(renderer, MVIEW_STAGE_FENCE, &mark);
+	}
+
+	/* The acquire semaphore is signaled only after the compositor releases an image. */
 	renderer->operation = "vkAcquireNextImageKHR";
 	acquired = vkAcquireNextImageKHR(renderer->device, renderer->swapchain, RENDERER_GPU_TIMEOUT, renderer->acquired, VK_NULL_HANDLE, &image);
 	if (acquired != VK_SUCCESS && acquired != VK_SUBOPTIMAL_KHR)
@@ -351,7 +370,7 @@ mview_renderer_draw(
 	 */
 	for (part = 0U; part < renderer->submits; part++) {
 		/* Retires the part's prior recording before describing the next one. */
-		renderer->command = renderer->commands[part];
+		renderer->command = renderer->commands[renderer->slot * renderer->submits + part];
 		error = renderer_begin(renderer);
 		if (error != VK_SUCCESS)
 			return error;
@@ -391,7 +410,7 @@ mview_renderer_draw(
 			return error;
 		renderer_stage(renderer, MVIEW_STAGE_SUBMIT, &mark);
 	}
-	renderer->command = renderer->commands[0];
+	renderer->command = renderer->commands[renderer->slot * renderer->submits];
 
 	/* Transfers the completed acquired image to the surface. */
 	memset(&present, 0, sizeof(present));
@@ -405,12 +424,14 @@ mview_renderer_draw(
 	presented = vkQueuePresentKHR(renderer->queue, &present);
 	renderer_stage(renderer, MVIEW_STAGE_PRESENT, &mark);
 
-	/* Command-buffer reuse is ordered by the rendering fence whatever the present did. */
-	renderer->operation = "vkWaitForFences";
-	error = vkWaitForFences(renderer->device, 1U, &renderer->fence, VK_TRUE, RENDERER_GPU_TIMEOUT);
-	if (error != VK_SUCCESS)
-		return error;
-	renderer_stage(renderer, MVIEW_STAGE_FENCE, &mark);
+	/* Command-buffer reuse is ordered by the rendering fence whatever the present did (with one frame in flight, here). */
+	if (renderer->inflight <= 1U) {
+		renderer->operation = "vkWaitForFences";
+		error = vkWaitForFences(renderer->device, 1U, &renderer->fence, VK_TRUE, RENDERER_GPU_TIMEOUT);
+		if (error != VK_SUCCESS)
+			return error;
+		renderer_stage(renderer, MVIEW_STAGE_FENCE, &mark);
+	}
 	renderer->stage_frames++;
 
 	/* A lost or failed present is reported after the fence is idle. */
@@ -563,13 +584,13 @@ mview_renderer_close(
 		}
 		free(renderer->commands);
 
-		/* The acquire semaphore has no future render submission to serve. */
-		if (renderer->acquired != VK_NULL_HANDLE)
-			vkDestroySemaphore(renderer->device, renderer->acquired, NULL);
-
-		/* The final completion wait has already consumed the fence's purpose. */
-		if (renderer->fence != VK_NULL_HANDLE)
-			vkDestroyFence(renderer->device, renderer->fence, NULL);
+		/* The acquire semaphores have no future render submission to serve; the final completion wait consumed the fences' purpose. */
+		for (index = 0U; index < MVIEW_INFLIGHT_MAX; index++) {
+			if (renderer->slot_acquired[index] != VK_NULL_HANDLE)
+				vkDestroySemaphore(renderer->device, renderer->slot_acquired[index], NULL);
+			if (renderer->slot_fences[index] != VK_NULL_HANDLE)
+				vkDestroyFence(renderer->device, renderer->slot_fences[index], NULL);
+		}
 
 		/* Drops the protocol image owners before retiring their device context. */
 		if (renderer->swapchain != VK_NULL_HANDLE)
@@ -1245,7 +1266,7 @@ renderer_commands(
 	 * by one (a driver may bound how many one call makes); the first also
 	 * records the uploads.
 	 */
-	renderer->commands = calloc(renderer->submits, sizeof(*renderer->commands));
+	renderer->commands = calloc((size_t)renderer->submits * renderer->inflight, sizeof(*renderer->commands));
 	if (renderer->commands == NULL) {
 		renderer->operation = "calloc";
 		return VK_ERROR_OUT_OF_HOST_MEMORY;
@@ -1256,28 +1277,38 @@ renderer_commands(
 	command.level = VK_COMMAND_BUFFER_LEVEL_PRIMARY;
 	command.commandBufferCount = 1U;
 	renderer->operation = "vkAllocateCommandBuffers";
-	for (index = 0U; index < renderer->submits; index++) {
+	for (index = 0U; index < renderer->submits * renderer->inflight; index++) {
 		error = vkAllocateCommandBuffers(renderer->device, &command, &renderer->commands[index]);
 		if (error != VK_SUCCESS)
 			return error;
 	}
 	renderer->command = renderer->commands[0];
 
-	/* Creates the completion fence used before command reuse. */
+	/*
+	 * Creates each slot's completion fence, used before command reuse
+	 * (signaled from the start past the first slot, whose fence the
+	 * upload signals), and acquire semaphore; the first slot's are the
+	 * current ones.
+	 */
 	memset(&fence, 0, sizeof(fence));
 	fence.sType = VK_STRUCTURE_TYPE_FENCE_CREATE_INFO;
-	renderer->operation = "vkCreateFence";
-	error = vkCreateFence(renderer->device, &fence, NULL, &renderer->fence);
-	if (error != VK_SUCCESS)
-		return error;
-
-	/* Creates the acquire semaphore consumed by each render submission. */
 	memset(&semaphore, 0, sizeof(semaphore));
 	semaphore.sType = VK_STRUCTURE_TYPE_SEMAPHORE_CREATE_INFO;
-	renderer->operation = "vkCreateSemaphore";
-	error = vkCreateSemaphore(renderer->device, &semaphore, NULL, &renderer->acquired);
-	if (error != VK_SUCCESS)
-		return error;
+	for (index = 0U; index < renderer->inflight; index++) {
+		fence.flags = 0U;
+		if (index != 0U)
+			fence.flags = VK_FENCE_CREATE_SIGNALED_BIT;
+		renderer->operation = "vkCreateFence";
+		error = vkCreateFence(renderer->device, &fence, NULL, &renderer->slot_fences[index]);
+		if (error != VK_SUCCESS)
+			return error;
+		renderer->operation = "vkCreateSemaphore";
+		error = vkCreateSemaphore(renderer->device, &semaphore, NULL, &renderer->slot_acquired[index]);
+		if (error != VK_SUCCESS)
+			return error;
+	}
+	renderer->fence = renderer->slot_fences[0];
+	renderer->acquired = renderer->slot_acquired[0];
 
 	/* Succeeded: the renderer can submit and wait for one batch at a time. */
 	return VK_SUCCESS;

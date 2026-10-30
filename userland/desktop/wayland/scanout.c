@@ -31,13 +31,17 @@
  * newest image goes next.
  *
  * As soon as the facts change -- something to draw over it (an edge's
- * gesture, App Home, a menu, the keyboard), the pointer moving, a
- * screenshot asked, another size -- the game mode is left: the display
- * thread releases the display once the present in flight has returned,
- * and window mode opens the swapchain again after it (display.c), so the
- * gesture's feedback and the pointer are drawn.  The images the display
- * held are let go when it has been released, or when their client goes.
- * The input goes to the compositor all along.
+ * gesture, App Home, a menu, the keyboard), the pointer moving over a
+ * video, a screenshot asked, another size -- the game mode is left: the
+ * display thread releases the display once the present in flight has
+ * returned, and window mode opens the swapchain again after it
+ * (display.c), so the gesture's feedback and the pointer are drawn.  The
+ * images the display held are let go when it has been released, or when
+ * their client goes.  The input goes to the compositor all along.
+ *
+ * A game that fills the output shows no cursor on any platform, whether
+ * it is shown straight or composed (kwl_scanout_cursor_hidden), so its
+ * pointer moving does not leave the game mode.
  *
  * Log: "KWL SCANOUT direct=1 surface=N client=C switch_ms=M" and
  * "KWL SCANOUT direct=0 reason=R surface=N frames=F" (also once for a
@@ -333,6 +337,37 @@ kwl_scanout_surface_gone(
 		server->scanout_refused = NULL;
 	if (server->scanout_noted == surface)
 		server->scanout_noted = NULL;
+}
+
+/*
+ * Tells whether the cursor is left out because a game fills the output:
+ * the top window is a fullscreen one that says it shows a game, and
+ * nothing is drawn over it.  Neither the cursor plane nor the composed
+ * frame shows the cursor then, whether the display shows the game
+ * straight or the compositor composes it, on every backend.  Returns 1
+ * or 0.
+ */
+int
+kwl_scanout_cursor_hidden(
+	struct kwl_server *server)
+{
+	struct kwl_object *top;
+	int overlay;
+
+	/* A fullscreen game on top. */
+	top = kwl_top_window(server);
+	if (top == NULL || !top->fullscreen)
+		return 0;
+	if (top->content_type != KWL_SCANOUT_CONTENT_GAME)
+		return 0;
+
+	/* Something drawn over it (a menu, App Home, the keyboard) is pointed at with the cursor. */
+	overlay = scanout_overlay(server, top);
+	if (overlay)
+		return 0;
+
+	/* Succeeded: the game alone, without the cursor. */
+	return 1;
 }
 
 /* Gathers the facts of a pass for the rules. */

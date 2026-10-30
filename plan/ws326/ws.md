@@ -51,11 +51,11 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p012](phase012/phase.md) | CABAC の syntax element: h264sw-cabac-se（試験 test-cabac_se） | cleared（2026-10-30 Q1、main 00ecfcc80。test-cabac_se 168241 checks、突然変異 15 のうち 14 を検出（残り 1 は等価）） | p008、p011 |
 | [ws326-p013](phase013/phase.md) | 変換と逆量子化: h264sw-transform（試験 test-transform） | cleared（2026-10-30 Q1、main 4c2e27dd5。test-transform 33158 checks） | p003 |
 | [ws326-p014](phase014/phase.md) | intra 予測: h264sw-intra（試験 test-intra） | cleared（2026-10-30 Q1、main dfd380ae5。test-intra 593 checks） | p008 |
-| [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | planned | p007 |
+| [ws326-p015](phase015/phase.md) | 補間と重み: h264sw-interp、h264sw-weight（試験 test-interp、test-weight） | cleared（2026-10-31 Q1、34119fa06。test-interp 23460・test-weight 159 checks・全 22 本 PASS・check-skeleton PASS を Q1 も実行、突然変異 18 を検出） | p007 |
 | [ws326-p016](phase016/phase.md) | MV の予測と P_Skip: h264sw-mvpred（試験 test-mvpred） | cleared（2026-10-30 Q1、main 4f596bbc6。test-mvpred 83 checks） | p008 |
-| [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | planned | p007、p008、p016 |
+| [ws326-p017](phase017/phase.md) | B の direct: h264sw-direct（試験 test-direct） | cleared（2026-10-31 Q1、2134a8efe。test-direct 259 checks・全 21 本 PASS・check-skeleton PASS を Q1 も実行、突然変異 7 件を検出） | p007、p008、p016 |
 | [ws326-p018](phase018/phase.md) | slice data と macroblock の syntax: h264sw-macroblock（試験 test-macroblock） | cleared（2026-10-30 Q1、main 3195bbd68。test-macroblock 1107981 checks、突然変異 29 で残りは同値 1・CABAC の residual は p021・p022 で） | p002、p008、p009、p012 |
-| [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | planned | p013〜p018 |
+| [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | in-progress（q1751） | p013〜p018 |
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | cleared（2026-10-30 Q1、main 9fa35fc76。test-deblock 3313 checks、突然変異約 35 で残りは観測できない 1 つ） | p003、p008 |
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | planned | p002〜p020 |
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
@@ -69,3 +69,4 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 - 2026-10-30 Q1: 作成。P1 が q1695 で p001。
 - 2026-10-30 P1（q1695-i01）: p001 の成果を branch agent/p1-ws326 に（header と骨格 fd1d6f88c、plan は次の commit）。design-reviewer の 23 件を反映（design.md §9）。次: Q1 が受け入れて main に merge、p002 から（p008・p010 は p001 だけに依存、並べられる）。
 - 2026-10-30 Q1: ユーザーの決定 3（共通部分を汎用の名前に）を記録し、p026 を足した。p020 cleared（main 9fa35fc76）。
+- 2026-10-31 Q1: ユーザーから、libmedia の実装の WS を昼までに終えるよう優先度を上げる、という趣旨の指示を受けた。p015（q1748）・p017（q1749）を Sonnet 2 人で同時に起動。

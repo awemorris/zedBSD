@@ -2308,6 +2308,7 @@ void kwl_scanout_take(struct kwl_server *server);
 void kwl_scanout_present_wait(void);
 void kwl_scanout_surface_gone(struct kwl_server *server, struct kwl_object *surface);
 void kwl_scanout_client_gone(struct kwl_server *server, struct kwl_client *client);
+int kwl_scanout_cursor_hidden(struct kwl_server *server);
 void kwl_shot_open(struct kwl_server *server);
 void kwl_shot_close(struct kwl_server *server);
 void kwl_shot_tick(struct kwl_server *server);

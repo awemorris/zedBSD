@@ -13,6 +13,7 @@
 
 #include <hal/hal.h>
 #include "task.h"
+#include "bsp.h"
 #include "defs.h"
 #include "asm.h"
 #include "descriptor.h"
@@ -707,8 +708,8 @@ void
 hal_cpu_idle(
 	void)
 {
-	/* Enables, waits for, and then disables local interrupts atomically. */
-	__asm__ volatile("sti; hlt; cli" ::: "memory");
+	/* Waits in the board's idle state (an MWAIT C-state, or halted) for one interrupt. */
+	bsp_cpu_idle();
 }
 
 /*

@@ -18,7 +18,7 @@
 
 #include <stdint.h>
 
-/* How long the pointer stays still before the game mode comes back (milliseconds; a moving pointer is drawn composed). */
+/* How long the pointer stays still before the game mode comes back (milliseconds; a moving pointer over a video is drawn composed). */
 #define KWL_SCANOUT_POINTER_IDLE_MS	2000U
 
 /* The content types the game mode takes (wp_content_type_v1's video and game). */

@@ -75,7 +75,7 @@ static int image_surface(const struct powervr_vk_image *image, uint32_t level, s
 static int level_edges(const struct powervr_vk_image *image, uint32_t level, uint32_t *width, uint32_t *height, uint32_t *padded_width);
 static int image_view(const struct powervr_vk_image *image, uint32_t level, struct powervr_view_shape *view, struct powervr_image_layout *level_layout);
 static void blit_request(const VkImageBlit *blit, uint32_t filter, struct powervr_transfer_request *request);
-static int run_one(struct powervr_vk_session *session, struct powervr_transfer_request *request);
+static int run_one(struct powervr_vk_session *session, struct powervr_transfer_request *request, bool writes_buffer);
 static int buffer_copy_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry, const VkBufferCopy *span, struct transfer_work *work);
 static void buffer_rows(struct transfer_work *work, uint64_t source, uint64_t destination, uint32_t width, uint32_t height);
 
@@ -366,9 +366,9 @@ powervr_vk_transfer_run(
 			work->request.area.height = copy->imageExtent.height;
 		}
 
-		/* The region's transfer. */
+		/* The region's transfer (into a buffer for an image's copy to one). */
 		if (error == 0)
-			error = run_one(session, &work->request);
+			error = run_one(session, &work->request, entry->opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER);
 	}
 
 	/* The working state goes; a transfer that could not run. */
@@ -644,12 +644,14 @@ blit_request(
 
 /*
  * Runs one region's transfer, after the session's work before it and
- * left running; one that did not finish abandons the session.
+ * left running; one that did not finish abandons the session.  One that
+ * writes a buffer is noted, for a later render's geometry to wait for.
  */
 static int
 run_one(
 	struct powervr_vk_session *session,
-	struct powervr_transfer_request *request)
+	struct powervr_transfer_request *request,
+	bool writes_buffer)
 {
 	struct powervr_session *owner;
 	int error;
@@ -662,6 +664,12 @@ run_one(
 	if (error != 0) {
 		kern_logf("powervr: vk: a transfer did not run (%d)\n", error);
 		return error;
+	}
+
+	/* The transfer's point, when it wrote a buffer. */
+	if (writes_buffer) {
+		owner->transfer_wrote_buffer = 1;
+		owner->transfer_buffer_value = owner->last_value;
 	}
 
 	/* Succeeded: the region is done. */
@@ -717,7 +725,7 @@ buffer_copy_run(
 		if (rows - done < BUFFER_ROWS_MAX)
 			height = (uint32_t)(rows - done);
 		buffer_rows(work, source + done * BUFFER_ROW_WORDS * 4U, destination + done * BUFFER_ROW_WORDS * 4U, BUFFER_ROW_WORDS, height);
-		error = run_one(session, &work->request);
+		error = run_one(session, &work->request, true);
 		if (error != 0)
 			return error;
 	}
@@ -726,7 +734,7 @@ buffer_copy_run(
 	left = (uint32_t)(words % BUFFER_ROW_WORDS);
 	if (left != 0) {
 		buffer_rows(work, source + rows * BUFFER_ROW_WORDS * 4U, destination + rows * BUFFER_ROW_WORDS * 4U, left, 1);
-		error = run_one(session, &work->request);
+		error = run_one(session, &work->request, true);
 		if (error != 0)
 			return error;
 	}

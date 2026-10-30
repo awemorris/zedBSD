@@ -76,3 +76,5 @@ Resume point: **q1716-i01（2026-10-30、P1）**: bootloader の出所を Hardke
 | 最後 | 規約の全文の見直し | planned | 全て |
 
 Audio（line-out）は desktop の表示の受け入れに要らないので Future Work の案（Q1 へ）。
+
+- 2026-10-31 ユーザーが ODROID-C5 で試験の image を起動したところ、HDMI に画面が出なかった。serial が要るので、VF2 の最適化（WS291 p020、serial を VF2 に使っている）が終わった後、今日の午後に行う、という趣旨の指示を受けた。

@@ -3,7 +3,7 @@
 # ws326-p015 補間と重み
 
 - 親: [WS326](../ws.md)、設計 [design.md](../design.md)。
-- 状態: planned（2026-10-30 p001 で作成）。
+- 状態: cleared（2026-10-31 Q1、34119fa06。実装と試験 S-p015）。
 - 依存: p007（依存の Phase の実装が main に入ってから始める）。
 - 担当の想定: Sonnet 5.5 high の subagent を 1 回起動（ws.md のユーザーの決定 2）。header は p001 の Opus の設計で、変えない。
 
@@ -51,3 +51,36 @@
 - 自分の diff を coding-style の §14 の checklist で見直した。表の block ごとに `Values referenced: ITU-T H.264 (08/2021) Table ...` の複数行の comment がある。source の comment・log に WS・Phase の番号や plan/ への参照が無い。
 - `git commit -m WIP -- <変えた path>`（push しない）。SHA・実行した command と結果・未実施・残りを Q1 に返す。
 - この phase.md に「結果」の節（日付は host の `date`、実行した command、PASS の数、未実施）を足し、ws.md の表のこの行を「実装済み・試験 PASS」にする（cleared は Q1 が受け入れを見て決める）。
+
+## 結果（2026-10-31）
+
+- 実装: `userland/desktop/libmedia/h264sw-interp.c`、`userland/desktop/libmedia/h264sw-weight.c`（骨格を置き換え。header は変えていない）。単体試験: `plan/ws326/tests/unit/test-interp.c`、`plan/ws326/tests/unit/test-weight.c`。
+- 実行した command と結果（worktree の root）:
+  - `timeout 600 sh plan/ws326/tests/run-unit.sh interp weight` → `test-interp: PASS (23460 checks)`、`test-weight: PASS (159 checks)`、最後の行 `run-unit: PASS`（ASan・UBSan の報告 0）。
+  - `timeout 900 sh plan/ws326/tests/run-unit.sh all` → 22 本全部 PASS（test-bits 169、test-bitwriter 14、test-cabac 195654、test-cabac_init 4159、test-cabac_se 168241、test-cavlc 87868、test-deblock 3313、test-dpb 129447、test-frame 284、test-interp 23460、test-intra 593、test-macroblock 1107981、test-mb 1938、test-mvpred 83、test-nal 95、test-poc 382、test-ps 41887、test-reflist 278758、test-slice 141694、test-tables 846、test-transform 33158、test-weight 159）、最後の行 `run-unit: PASS`。
+  - `BASE=fd1d6f88c timeout 300 sh plan/ws326/tests/check-skeleton.sh` → `check-skeleton: PASS`。
+  - zedBSD amd64 の `make ... build/amd64/dynamic/libmedia.so`（Phase の command のとおり）→ exit 0、log の `warning` は 0 行（h264sw-interp.c・h264sw-weight.c は `-Wall -Wextra -Werror` で compile され、link まで通った）。
+  - `git diff --check` → 出力なし（exit 0）。
+- 試験の作り方（期待の値は仕様の式と手の計算だけ。他の decoder の source・出力は使っていない）:
+  - luma: 9x9 の 0 の plane に 1 つの impulse（100）を置き、6 tap の各 tap（20・1・-5）に当たる 4 つの位置（G・H・E・A）の 16 位置 x 4 表を手で計算（b1 = 20 x 100 = 2000 → b = 63、j1 = 40000 → j = 39 など）。255 の clip、負の値の clip、j と b の丸めの境（impulse 32 の j1 = 12800 で (j1 + 512) >> 10 = 13、impulse 4 の b1 = 80 で (80 + 16) >> 5 = 3）。
+    一次の ramp（8x + 4y）は filter が厳密に再現するので、8x8 と 16x16 の block の全 16 位置が G + 2 xFrac + yFrac。
+    plane の外を指す MV（-1000・1000・INT_MIN・INT_MAX）は端の sample の繰り返しになる（左右では全 xFrac が同じ、上下では全 yFrac が同じ、隅では隅の sample）。端をまたぐ block は、端を繰り返しで埋めた plane（border 24）での予測と全位置で一致（2x2・4x4・8x8）。plane は malloc の丁度の大きさで ASan が読み越しを見る。
+  - chroma: 8x8 の plane（3x + 17y + 5）で xFrac 3・yFrac 5 の 4 隅と中（17・37・125・145・97）を式 8-270 で手計算、64 の分数位置の全部を ramp の式（A + ((24 xFrac + 136 yFrac + 32) >> 6)）と比較、端の clamp（左右上下の遠い値）。
+  - weight: default の単・双（丸め）、explicit の logWD 0・1・5・7、負の重み、負の積の floor の shift、offset（正・負・平均の floor）、clip、list 1 だけ、双予測（8-276）、実装の block 全体（stride、destination が source、block の外は不変）。モードの選択（P・SP・B の idc 0..3・I・table が無い時）。
+    explicit の factors（luma・Cb・Cr、list 0 だけ・list 1 だけ・両方、index 31）。implicit は poc の組で tb・td・tx・DistScaleFactor を手で計算（中間・外挿・境界 128 と 136・下の外れ・逆順・奇数の距離・同じ POC・long-term・複数の組・範囲外の組が 32）。
+  - 誤りの入力: NULL・0 の大きさ・16 を超える block・0 の plane（何も書かない）、分数位置の mask、巨大な ref_idx・component・logWD・weight・offset・order count（INT32_MIN・INT32_MAX）・list の count（UBSan・ASan の報告 0）。乱数の plane・位置・分数・block の大きさ 3000 回（luma は落ちない、chroma は plane の最小〜最大の中）。
+- わざと壊した確かめ（git の外で一時的に変え、試験が FAIL することを確かめ、`cmp` で元に戻ったことを確かめた）: 6 tap の係数、j の丸め 512 → 511、g の m の列、clamp の size - 1、chroma の重み b の入れ替え、chroma の +32、平均の +1、p の s の行、floor の shift を切り捨てに、offset の平均の +1、DistScaleFactor の +32、上限 128 を >=、chroma の添字、long-term の判定、単の丸め項、双の丸め項、implicit の組の転置、tx の符号。
+  最初の 18 のうち 17 が FAIL、j の丸め 511 だけが通ったので、丸めの境の impulse（上の 32 と 4）を足し、j の 511 と b・h の 15 も FAIL になることを確かめた。
+- 自分で決めた点（header が黙っている所）:
+  - 3 関数の誤りの入力は戻り値が無い（void）ので、何も書かない: interp は plane・out が NULL、plane の幅か高さが 0、block の幅か高さが 0 か 16 超（chroma も同じ上限）。weights_apply は factors・out が NULL、block が空、p0 も p1 も NULL。
+    分数位置は luma を & 3、chroma を & 7 にする（定義済みの動作）。x・y は int の全範囲を受け、座標は int64 で clamp する。stride は plane_width 以上と仮定する（読む位置は clamp 後で plane の範囲）。
+  - 負の値の右 shift は使わない: filter の中間値は「負なら 0」に clip（(v + add) < 0 なら clip で 0 になる）、weight の shift は floor の補助関数（負の値は大きさを切り上げて符号を戻す）。tx の除算は大きさで割って符号を戻す（8-197 の「0 へ切り捨て」）。weight の積は int64。
+  - weights_apply の logWD が 7 を超える時は 7 として扱う（構文の上限）。w・o は int の全範囲で未定義の動作にならない。
+  - weights_setup: explicit は header->weighted が 1 の時だけ（table を読んでいない header は default）。B の weighted_bipred_idc が 3 の時は default。SP は P と同じ。I は default。lists が NULL の implicit は mode だけ implicit で全部の組が 32。
+    list の count が 32 を超える時は 32 で止める。implicit_w0 は全 entry を 32 で初期化してから、使う組だけ 8-280〜8-283 で上書きする。reflist の `missing` の entry（stand-in の frame）は、その entry の poc・long_term をそのまま使う。
+  - weights_of: 使う list が無い・index が 32 以上・component が 2 超・weights が NULL は default の factors（weighted 0、他は 0）。implicit は両方の list の時だけ（片方は default）。explicit は使わない list の w・o を 0 にする。
+  - 8.4.3 の MBAFF の場合（8-284、8-285 の >> 1）と field の場合は範囲の外（frame だけ）なので実装していない。header と同じ。
+- 観測できない物: なし（全分岐を試験で通した。j の丸めと b の丸めは境の impulse で観測できる）。
+- 未実施: QEMU・実機の試験（この Phase は host の単体試験と build まで）。recon との結合（p019）は後の Phase。規約の全文の見直しはこの WS の最後の Phase。
+- header の不備: 見つけていない（header は変えていない）。
+- 注: worktree の `.git` の file が worktree 作成の時に commit-msg の hook の内容で上書きされていた（`gitdir:` の行が無く git が動かなかった）。`gitdir: /home/awe/zedBSD-claude1/.git/worktrees/s-ws326-p015` の 1 行に書き直した（worktree の中の file の修復。main の checkout には触れていない）。他の worktree でも同じ事が起きていないか Q1 に確認を頼む。

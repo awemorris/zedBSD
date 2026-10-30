@@ -69,6 +69,10 @@ uint64_t powervr_timing_now(void) { return 0; }
 unsigned powervr_target_take_half(struct powervr_target *target) { (void)target; return 0; }
 void powervr_target_catalogues(const struct powervr_target *target, unsigned half, uint64_t catalogues[POWERVR_TARGET_CATALOGUES]) { unsigned i; (void)target; (void)half; for (i = 0; i < POWERVR_TARGET_CATALOGUES; i++) catalogues[i] = 0; }
 uint32_t powervr_object_address(const struct powervr_object *object, uint32_t offset) { (void)object; return offset; }
+uint32_t powervr_object_get32(const struct powervr_object *object, uint32_t offset) { (void)object; (void)offset; return 0; }
+uint32_t powervr_target_half_fragment(const struct powervr_target *target, unsigned half) { (void)target; (void)half; return 0; }
+void powervr_target_half_note(struct powervr_target *target, unsigned half, uint32_t fragment_value) { (void)target; (void)half; (void)fragment_value; }
+void powervr_timing_add_span(enum powervr_timing_part part, uint64_t start, uint64_t end) { (void)part; (void)start; (void)end; }
 unsigned long spin_lock_irqsave(struct spinlock *lock) { (void)lock; return 0; }
 void spin_unlock_irqrestore(struct spinlock *lock, unsigned long enabled) { (void)lock; (void)enabled; }
 /* The host's render finishes at its kick: every point is reached at once. */
@@ -158,9 +162,9 @@ int powervr_session_target(struct powervr_render *render, struct powervr_session
 const struct powervr_target_layout *powervr_target_layout_of(const struct powervr_target *target) { (void)target; return &layout_stand_in; }
 
 int
-powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, struct powervr_render_marks *marks)
+powervr_session_kick_render(struct powervr_render *render, struct powervr_session *session, struct powervr_target *target, unsigned half, const uint8_t *geometry, const uint8_t *partial, const uint8_t *fragment, const struct powervr_sync *waits, unsigned wait_count, const struct powervr_sync *fragment_waits, unsigned fragment_wait_count, struct powervr_render_marks *marks)
 {
-	(void)render; (void)session; (void)target; (void)half; (void)partial; (void)waits; (void)wait_count;
+	(void)render; (void)session; (void)target; (void)half; (void)partial; (void)waits; (void)wait_count; (void)fragment_waits; (void)fragment_wait_count;
 	memcpy(kicked_geometry, geometry, sizeof(kicked_geometry));
 	memcpy(kicked_fragment, fragment, sizeof(kicked_fragment));
 	marks->geometry_value = 1;

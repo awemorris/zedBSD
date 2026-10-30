@@ -230,6 +230,7 @@ sequence(void)
 	static uint8_t fragment[POWERVR_FRAGMENT_BYTES];
 	struct powervr_render_request request;
 	struct powervr_sync waits[POWERVR_RENDER_WAITS_MAX + 1U];
+	struct powervr_sync fragment_waits[2];
 	uint64_t background[POWERVR_BACKGROUND_WORDS];
 	unsigned index;
 
@@ -259,6 +260,8 @@ sequence(void)
 	request.target_data = 0x9000;
 	request.waits = waits;
 	request.wait_count = 2;
+	request.fragment_waits = NULL;
+	request.fragment_wait_count = 0;
 	request.geometry = geometry;
 	request.partial = partial;
 	request.fragment = fragment;
@@ -312,6 +315,30 @@ sequence(void)
 	expect(powervr_render_sequence_make(&request, &seq) == 0 && seq.partial_commands[0].size == 32U * 8U, "31 waits: a fence of 32");
 	request.wait_count = POWERVR_RENDER_WAITS_MAX + 1U;
 	expect(powervr_render_sequence_make(&request, &seq) == EINVAL, "32 waits refused");
+
+	/*
+	 * Waits of the 3D alone (a transfer the geometry runs beside): the
+	 * geometry keeps its own; the partial render waits for both and the
+	 * geometry last; the fragment for the 3D's and the geometry last.
+	 */
+	fragment_waits[0].address = 0x6800;
+	fragment_waits[0].value = 7;
+	fragment_waits[1].address = 0x6900;
+	fragment_waits[1].value = 8;
+	request.wait_count = 1;
+	request.fragment_waits = fragment_waits;
+	request.fragment_wait_count = 2;
+	expect(powervr_render_sequence_make(&request, &seq) == 0, "3D waits: sequence builds");
+	expect(command_is(&seq.geometry_commands[0], 0x2abc00d7U, 8) && read32(seq.geometry_commands[0].data, 0) == 0x6000, "3D waits: geometry keeps its one");
+	expect(command_is(&seq.partial_commands[0], 0x2abc00d7U, 32) && read32(seq.partial_commands[0].data, 8) == 0x6800 &&
+	       read32(seq.partial_commands[0].data, 16) == 0x6900 && read32(seq.partial_commands[0].data, 24) == 0x7000, "3D waits: partial render waits for all, geometry last");
+	expect(command_is(&seq.fragment_commands[0], 0x2abc00d7U, 24) && read32(seq.fragment_commands[0].data, 0) == 0x6800 &&
+	       read32(seq.fragment_commands[0].data, 12) == 8 && read32(seq.fragment_commands[0].data, 16) == 0x7000 && read32(seq.fragment_commands[0].data, 20) == 5,
+	       "3D waits: fragment waits for the 3D's and the geometry last");
+	request.wait_count = POWERVR_RENDER_WAITS_MAX - 1U;
+	expect(powervr_render_sequence_make(&request, &seq) == EINVAL, "3D waits past the most refused");
+	request.wait_count = POWERVR_RENDER_WAITS_MAX - 2U;
+	expect(powervr_render_sequence_make(&request, &seq) == 0 && seq.partial_commands[0].size == 32U * 8U, "3D waits at the most: a fence of 32");
 	expect(POWERVR_VDM_TERMINATE == 0xc0000000U, "VDM terminate block 6 << 29");
 }
 

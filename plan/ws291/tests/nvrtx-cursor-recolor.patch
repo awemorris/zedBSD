@@ -1,0 +1,15 @@
+diff --git a/src/drivers/gpu/nvrtx/display/cursor.c b/src/drivers/gpu/nvrtx/display/cursor.c
+index fdd7d890a..a8e8ca541 100644
+--- a/src/drivers/gpu/nvrtx/display/cursor.c
++++ b/src/drivers/gpu/nvrtx/display/cursor.c
+@@ -469,6 +469,10 @@ cursor_read(
+ 			}
+ 
+ 			pixels[row * NVRTX_DISP_CURSOR_SIDE + column] = nvrtx_disp_cursor_pixel(pixel, rgba);
++			if (pixels[row * NVRTX_DISP_CURSOR_SIDE + column] == 0xffffffffU)
++				pixels[row * NVRTX_DISP_CURSOR_SIDE + column] = 0xffff0000U;
++			else if (pixels[row * NVRTX_DISP_CURSOR_SIDE + column] == 0xff000000U)
++				pixels[row * NVRTX_DISP_CURSOR_SIDE + column] = 0xff0000ffU;
+ 		}
+ 	}
+ 

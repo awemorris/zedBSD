@@ -3879,7 +3879,7 @@ compose_record(
 /*
  * Draws the cursor at the pointer: the client's cursor surface (its hotspot
  * at the pointer), or the compositor's arrow (its tip), with alpha; nothing when
- * hidden (design D8).
+ * hidden (design D8) or over a game that fills the output.
  */
 static void
 compose_cursor(
@@ -3891,6 +3891,7 @@ compose_cursor(
 	struct kwl_import alpha;
 	int32_t hotspot_x;
 	int32_t hotspot_y;
+	int hidden;
 	int shown;
 
 	/*
@@ -3919,6 +3920,11 @@ compose_cursor(
 
 	/* A cursor that has not moved since the start is not drawn. */
 	if (server->pointer_unmoved)
+		return;
+
+	/* A game that fills the output shows no cursor. */
+	hidden = kwl_scanout_cursor_hidden(server);
+	if (hidden)
 		return;
 
 	/* The cursor plane shows the cursor without the frame (cursor-plane.c). */
@@ -3982,9 +3988,9 @@ compose_cursor(
 /*
  * Tells which image shows the cursor and where its hotspot is, as compose_cursor draws it.
  *
- * Returns 1 with the image, 0 when no cursor shows (unmoved, hidden, a
- * cursor surface without an image) and -1 for a drag, whose icon and marks
- * only composing draws.
+ * Returns 1 with the image, 0 when no cursor shows (unmoved, hidden, over
+ * a game that fills the output, a cursor surface without an image) and -1
+ * for a drag, whose icon and marks only composing draws.
  */
 int
 kwl_compose_cursor_source(
@@ -3995,6 +4001,7 @@ kwl_compose_cursor_source(
 {
 	const struct kwl_import *found;
 	struct kwl_object *surface;
+	int hidden;
 	int shown;
 
 	/* Nothing found yet. */
@@ -4008,6 +4015,11 @@ kwl_compose_cursor_source(
 
 	/* A cursor that has not moved since the start shows nothing. */
 	if (server->pointer_unmoved)
+		return 0;
+
+	/* A game that fills the output shows no cursor. */
+	hidden = kwl_scanout_cursor_hidden(server);
+	if (hidden)
 		return 0;
 
 	/* Away from the client's window: the frame's arrow or the compositor's. */
