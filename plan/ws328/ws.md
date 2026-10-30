@@ -24,12 +24,22 @@
 - SVG: rect・circle・ellipse・line・polyline・polygon・path、fill・stroke、transform、viewBox、g、use、defs の gradient、clip-path の順に。`<img>` の SVG も。
 - WebP・AVIF（libwebp-compat の類）は [WS326](../ws326/ws.md)（H.264 の software の decoder を安い model で作れるかの実験）の結果を待つ。
 
-## Phase
+## Phase（2026-10-30 Q1 が標準廉価実装手順の形に）
 
-| Phase | 目的 | 状態 | 依存 |
-| --- | --- | --- | --- |
-| ws328-p001 | 設計: path の item と CPU・GPU の描画、CSS と SVG への当て方、試験（WPT の該当の試験と画素の比べ）、WS074 との調整 | planning | — |
+ユーザーの指示（2026-10-30、原文）「WS328は標準廉価実装手順を適用してphaseを書いてください。」
+→ 手順は [docs/agent/spec-module-delegation.md](../../docs/agent/spec-module-delegation.md)。設計の担当は Opus 5.5、実装の担当は Sonnet 5.5 high を Phase ごとに別の worktree で。
+基づく標準: SVG 2（W3C）、CSS Backgrounds and Borders 3（border-radius・box-shadow）、CSS Images 3（gradient）、Compositing and Blending 1。WPT の該当の試験を照合に使う。
+module と実装の Phase の正確な分け方は p001 が決める（下の p002〜 は Q1 の見込みで、p001 の表で置き換える）。
+
+| Phase | 目的 | 担当 | 状態 | 依存 |
+| --- | --- | --- | --- | --- |
+| ws328-p001 | 設計（Opus）: WS074 との file の分け方の調整、module の分け方、各 header（定数・構造体・関数と仕様の comment、標準の節）の凍結、.c の骨格、試験の道具（CPU の参照の描画と Vulkan の描画の画素の比べ、独立の参照の rasterizer か WPT の reftest、単体試験の run-unit と check-skeleton）、実装の Phase の表と各 phase.md、design-reviewer | Opus | planned | WS074 と調整 |
+| ws328-p002〜 | 実装（Sonnet）、見込み: path の幾何（Bézier・arc の平坦化、変換）／線の展開（join・cap・dash）／塗りの coverage（nonzero・evenodd、CPU の参照）／gradient（線形・放射・conic）／影の blur／Vulkan の path の描画（stencil か compute の coverage）／display list の path の item と software.c・vulkan.c の受け／CSS（border-radius・gradient の background・box-shadow）／SVG の図形と style（rect〜path、fill・stroke、transform、viewBox、g・use・defs）／SVG の gradient と clip-path／`<img>` の SVG | Sonnet | planning | p001 |
+| ws328-p0xx | 統合: Browser の上の描画、WPT の該当の試験、QEMU の画面 | Opus | planning | 実装の Phase |
+| ws328-p0xx | 規約の全文の見直し | Sonnet | planning | 統合 |
 
 ## Resume point
 
 - 2026-10-30 Q1: 作成。WS074 と調整してから始める。
+
+- 2026-10-30 Q1: ユーザーの指示で Phase を標準廉価実装手順の形にした。p001 の設計（Opus）から、着手の時期は未定（WS074 と調整）。
