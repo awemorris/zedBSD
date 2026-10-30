@@ -43,7 +43,7 @@
 | [ws327-p013](phase013/phase.md) | `thread-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | cleared（2026-10-30 Q1、main 93e627b96。mingw x86_64・i686 で compile と link PASS・warning 0、sleep は QPC、cpu_count は affinity。Win32 で header が揺れる 5 点は phase013 の結果、p016 で Q1 に一覧） | p007 |
 | [ws327-p014](phase014/phase.md) | `socket-win32.c` を書き mingw で cross compile（warning 0）。動作確認は不要（決定 3） | Sonnet | cleared（2026-10-30 Q1、main 61bd8c914。mingw x86_64・i686 で compile と link PASS・warning 0。WinSock で header が揺れる点は phase014 の結果、p016 で一覧） | p007 |
 | [ws327-p015](phase015/phase.md) | 解説（keiland-programming.md の 8 章、08-worker.c・08-language.c を新しい層に、network の節と 08-network.c） | Sonnet | cleared（2026-10-30 Q1、main d695576d1。doc-examples 76 PASS（clang・gcc -Werror、写しの一致）、doc-lines PASS。08-network の窓の道は p016 の guest で） | p007（API は凍結済み。2026-10-30 P2 が p008〜p012 から外した） |
-| [ws327-p016](phase016/phase.md) | 受け入れ: OS の境界の check（design §1.3）、全 app の QEMU の回帰（design §6.4）、Win32 で口が成り立たない所の Q1 への報告 | P2 | planned | p008〜p015 |
+| [ws327-p016](phase016/phase.md) | 受け入れ: OS の境界の check（design §1.3）、全 app の QEMU の回帰（design §6.4）、Win32 で口が成り立たない所の Q1 への報告 | P2 | in-progress（2026-10-30 P2 ラップアップ、QEMU の回帰が途中） | p008〜p015 |
 | [ws327-p017](phase017/phase.md) | 規約の全文の見直し | Sonnet | planned | p016 |
 
 ## Resume point
@@ -59,3 +59,8 @@
   Win32 の骨格、試験の道具（`check-layers.py`・`check-base.sh`＋`frozen.sha256`・`build-win32.sh`・`host-apps.sh`・`doc-lines.py`・
   `guest-layers.sh`）。p015 の依存を p007 に（API は凍結済み）。design-reviewer 21 件を反映（high の 1: Mailer が main で壊れないよう
   P2 が `sync.c` を移した。p008 は確かめと host 試験の直し）。実装の担当は ws.md に触らない（Q1 が merge の時に表を直す）。
+- 2026-10-30 P2（q1703-i01、p016）ラップアップ（Q1 の指示）: 境界（B5 の直し、T1・N1 を check.sh に、WS327 の前と同じ 64 行）・zedBSD 3 arch と
+  Linux の build（warning 0）・host 全部・FreeBSD 15.1（backend-test と thread 27・socket 53）・Win32 の表（design §5.4、S7 を直した）・
+  network_finish（join を先に）・閉じた WS の試験 4 本の直しは済み。QEMU の回帰は途中（Mail・Music・Settings の頁は通った、Video Player と
+  Photos が fail で未解析、残りのシナリオは未実行）。BUG-367（loopback TCP の close）・BUG-368（irq.c の fatal、再現せず）を見つけた。
+  08-network の guest は BUG-367 の後。再開の手順と削除の候補は [phase016](phase016/phase.md) の「引き継ぎ」。

@@ -3,7 +3,7 @@
 # ws327-p016 受け入れ: 境界の check、全 arch・Linux・FreeBSD の build、QEMU の回帰、Win32 の報告
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §1.3・§6.4・§8・§13。担当: P2（設計の担当）。依存: p008〜p015 が main に merge され cleared。
-- Status: planned
+- Status: in-progress（2026-10-30 P2 ラップアップ、QEMU の回帰が途中。下の「引き継ぎ」）
 - Disposition: normal
 
 ## 目的
@@ -157,7 +157,63 @@ Q1 の判断（2026-10-30）: S7 は直す、S9 は p017 で header の comment 
   global-buffer-overflow → 配列を型ごとに分けた（Linux の host-test.sh の thread 6 build も PASS のまま）。(b) libkeiland の link の試験で
   libtruetype.so が見つからない → build の全ての lib の directory を LD_LIBRARY_PATH に。層の実装の直しは無い。
 
-（以下 QEMU は続き）
+### 4. QEMU の回帰（2026-10-30 10:46〜11:13、Q1 の指示のラップアップで途中で止めた）
+
+道具（新しい）: `plan/ws327/tests/config-amd64-aat.mk`（AAT の image から clang・libcxx・emacs を外した物。phase.md の
+config-amd64-guest.mk の代わり: app の数が揃い、AAT の操作の道具（aat-input・keiland-shot）があり、toolchain の package の build を避ける）、
+`plan/ws327/tests/guest-apps.sh IMGBUILD OUT`（Venus 1280x800＋音の device で起動 → `run-aat.sh qemu` で app のシナリオ → Mail の
+sign-in-code の helper を単独で → `aat_ws327.py`（Music・Video Player の窓を閉じて process が残らない、Settings の Storage の Analyze、
+IME の SIGTERM で辞書の書き出し）→ 停止 → 判定の一覧）。image: `test-image.sh plan/ws327/tests/config-amd64-aat.mk build/ws327-p016-aat
+--file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png`（exit 0、warning 13 は全て外部の ffmpeg の package）。
+VENUS_RENDERER は main の checkout の `build/ws035-sq-venus/install`（読むだけ）。
+
+- run 1（`build/ws327-p016-apps`）: apps.mailer.read-compose **needs-person**（`MAIL SIGNED-IN account=0; MAIL REFRESHED account=0`、
+  `MAIL OPEN`、`MAIL SENT account=0; the server got 1`、受信箱の絵 3 通）、apps.music.play **needs-person**（`MUSIC LIBRARY songs=2 error=0`・
+  `MUSIC AUDIO error=0`・aac-lc/libmedia で再生・2197 ms まで進む・Next・Space で PAUSE/RESUME・`MUSIC ENDED`/`STOP`・RESCAN・
+  窓の close で `KWL CLIENT gone`）。apps.videoplayer.play の途中で guest の kernel が止まった: **BUG-368**（QMP: 4 CPU とも HLT・IF=0、
+  gdbstub で klog_buffer の末尾 `fatal: src/hal/amd64/irq.c:290: invalid amd64 APIC acknowledgement`、caller hal_irq_send_eoi+0x77、
+  直前 `venus: context=9 opened pid=448`）。後のシナリオは SSH が切れて全て fail（判定に使わない）。
+- run 2（`build/ws327-p016-apps2`、同じ image と条件）: **BUG-368 は再現しなかった**（videoplayer・photos・settings まで kernel は生きていた）。
+  mailer.read-compose・music.play は needs-person（run 1 と同じ）、apps.settings.pages **needs-person**（15 頁の LAYOUT、FAILED 無し）、
+  apps.videoplayer.play **fail**（`VIDEOPLAYER OPEN … video=mpeg4/libavcodec audio=aac-lc/libmedia … dropped=0`、FRAMES は shown=1・100 と
+  進むが Space の後 5 s に `VIDEOPLAYER PAUSE` が無い）、apps.photos.browse **fail**（`/bin/photos --import=~/AATPhotos` の後に取り込みの
+  行が無い: "the nine photos were not imported"）。desktop.appearance.wallpaper の途中で止めた（ラップアップ）。
+  videoplayer と photos の fail は WS327 の移行（Video Player の `kl_cond_wait_for`、Photos の thumbs・media-worker）の退行か試験の環境かを
+  **解析していない**（次のセッションで: records と logs、`build/ws327-p016-apps2/aat/{records,logs,png}`）。
+
+8 章の例（`VENUS_RENDERER=… sh plan/ws314/tests/doc-examples.sh guest build/ws327-p016-doc 08-worker 08-network 08-network-stop
+08-network-close 08-language`、`SUMMARY pass=21 fail=0`、ただし絵を見て判定）: doc-examples.sh の 2 点を直した（BUILD が build/amd64 で
+ないと sysroot の path を誤り zedBSD の build が全部 FAIL していた: sysroot は常に build/amd64/sysroot。08-network・08-network-stop・
+08-network-close の 3 つの run を足した）。
+- 08-worker: 数えている途中の絵（`build/review/ws314-doc-08-worker.png`、552319 primes below 8200000）。OK。
+- 08-network: 100 往復が終わるが "Done" にならず Start が戻らない。trace を入れた版（scratch）で `kl_socket_close(client)` が戻らない事を
+  確かめた → **BUG-367**（zedBSD の loopback TCP: accept した側を先に close すると connect した側の close(2) が戻らない。再現
+  `plan/ws327/phase016/tcp-close-repro.c`、f5f7dbe4c）。Q1 の決定: 例の close の順は変えない、08-network の guest の試験は BUG-367 の
+  修正の後に流し直す。08-network-close（走行中に窓を閉じる）も同じ理由で network_finish の join が戻らず process が残った。
+- 08-network-stop・08-language: 前の 08-network の process が残って窓の位置がずれ、決まった座標の click が外れた（絵は Start 前・
+  Switch Language 前）。BUG-367 の後に流し直す。
+- `docs/howto/keiland-examples/08-network.png` と本文の画像の行は未（BUG-367 の後）。
+
+## 引き継ぎ（2026-10-30 11:15、P2 ラップアップ、Q1 の指示）
+
+- 最後の SHA: 下の commit（branch agent/p2-ws327、基点 main b901b1968）。Status は in-progress のまま（受け入れ未達: QEMU の回帰が途中）。
+- 済んだ確かめ: 1（境界、B5 の直し、T1・N1 を check.sh に）、2（zedBSD 3 arch・Linux の build）、3（host 全部）、3b（FreeBSD）、
+  4 の一部（Mail・Music は needs-person の絵、Settings の頁）、5（Win32 の表と S7 の直し）、6（network_finish）、閉じた WS の試験 4 本の直し。
+- 残り（次のセッションが自動で再開する手順）:
+  1. image を作り直す（`plan/tools/guest/test-image.sh plan/ws327/tests/config-amd64-aat.mk build/ws327-p016-aat --file
+     /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png`）。
+  2. 音の device を外して流す（Q1「その後は音の device を外して残りの回帰を進めてよい」）: guest-apps.sh の `-audiodev … hda-duplex` の
+     行を外す（apps.music.play は `MUSIC AUDIO error` で fail しうる。Music は run 1・2 で音ありで通った事を記録済み）。
+     `VENUS_RENDERER=/home/awe/zedBSD-claude1/build/ws035-sq-venus/install sh plan/ws327/tests/guest-apps.sh build/ws327-p016-aat build/ws327-p016-apps3`。
+  3. apps.videoplayer.play（Space の後に PAUSE が無い）と apps.photos.browse（取り込みの行が無い）の fail を解析する（WS327 の退行なら直す、
+     run 2 の records・logs から）。
+  4. 未実行: desktop.appearance.wallpaper、apps.terminal.type-command、desktop.input-method.japanese-textedit、Mail の sign-in-code（IDLE の新着
+     `MAIL MESSAGE … arrived=1`）、aat_ws327.py の 4 項目。
+  5. BUG-367 の修正の後: doc-examples の 08-network・08-network-stop・08-network-close・08-language を流し直し、08-network.png を
+     `docs/howto/keiland-examples/` に置き本文に画像の行を足す。
+- Q1 への削除の候補: `build/tmp/p016-base-src`（WS327 前の比較の clone）、`plan/ws327/phase016/check-t1-n1.patch`（当て済み）、
+  `plan/ws327/tests/__pycache__`（py_compile）、`plan/ws327/tests/make-frozen.sh`・`frozen.sha256`（前からの依頼）。
+- 範囲の外で見つけた物: BUG-367（TCP の close）、BUG-368（irq.c:290 の fatal、run 2 で再現せず）。
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
 

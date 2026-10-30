@@ -50,7 +50,7 @@ fi
 
 if [ $failed = 0 ]; then
 	# The session's desktop is up (the runner waits for it too), then the scenarios and the checks of this workstream.
-	timeout 120 python3 -I plan/tools/aat/aat --qemu check > "$out/check.log" 2>&1 || failed=1
+	timeout 120 python3 plan/tools/aat/aat --qemu check > "$out/check.log" 2>&1 || failed=1
 	# shellcheck disable=SC2086
 	timeout 5400 plan/tools/aat/run-aat.sh qemu "$top/$out/aat" $scenarios > "$out/aat.log" 2>&1
 	timeout 900 python3 plan/tools/aat/scenarios/helpers_mailer.py --outdir "$top/$out/mail-code" \
