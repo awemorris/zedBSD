@@ -474,11 +474,11 @@
         super();
         hidden(this, '_e', entry);
       }
-      get url() { return urlOf(this._e); }
-      get key() { return this._e.key; }
-      get id() { return this._e.id; }
-      get index() { return entries.indexOf(this._e); }
-      get sameDocument() { return this._e.docId === docId; }
+      get url() { return active() ? urlOf(this._e) : ''; }
+      get key() { return active() ? this._e.key : ''; }
+      get id() { return active() ? this._e.id : ''; }
+      get index() { return active() ? entries.indexOf(this._e) : -1; }
+      get sameDocument() { return active() && this._e.docId === docId; }
       getState() { return deserialize(this._e.navState); }
     }
     handlerAttribute(NavigationHistoryEntry.prototype, 'dispose');
@@ -494,9 +494,9 @@
         hidden(this, '_d', d);
       }
       get url() { return this._d.url; }
-      get key() { return this._d.entry ? this._d.entry.key : ''; }
-      get id() { return this._d.entry ? this._d.entry.id : ''; }
-      get index() { return this._d.index; }
+      get key() { return this._d.entry && active() ? this._d.entry.key : ''; }
+      get id() { return this._d.entry && active() ? this._d.entry.id : ''; }
+      get index() { return active() ? this._d.index : -1; }
       get sameDocument() { return this._d.sameDocument; }
       getState() { return deserialize(this._d.navState); }
     }
@@ -591,6 +591,7 @@
     tag(NavigateEvent, 'NavigateEvent');
     function sharedChecks(event, method) {
       if (!event._n) throw domError('SecurityError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was not fired by the browser.");
+      if (!active()) throw domError('InvalidStateError', "Failed to execute '" + method + "' on 'NavigateEvent': The document is not fully active.");
       if (event.defaultPrevented || event._n.canceled) throw domError('InvalidStateError', "Failed to execute '" + method + "' on 'NavigateEvent': The event was canceled.");
     }
 
@@ -642,11 +643,11 @@
       return '';
     }
     // The events the browser fires are trusted.  A browser error is the document's; a script error's script is not
-    // known, so the document as it was loaded stands for it.
+    // known, so the document as it was loaded stands for it, at line 1 column 1 (the engine keeps no position for an Error).
     function fire(target, event) { return native.fire(target, event); }
     function fireError(e) {
       var filename = browserErrors.has(e) || loadedURL === null ? docURL() : loadedURL;
-      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 0, colno: 0 }));
+      fire(navigation, new ErrorEvent('navigateerror', { error: e, message: errorMessage(e), filename: filename, lineno: 1, colno: 1 }));
     }
 
     // Aborts the navigate event under way (a new navigation, window.stop(), a canceled event).
@@ -1970,5 +1971,40 @@
       if (want) this.showPopover(); else this.hidePopover();
       return open(this);
     });
+  })();
+  // ---- Streams and WebAssembly.Memory as far as a page can tell them apart from plain data: objects that cannot be cloned
+  (function () {
+    function stream(name) {
+      var C = class { constructor() { } get locked() { return false; } };
+      Object.defineProperty(C, 'name', { value: name });
+      tag(C, name);
+      if (typeof g[name] === 'undefined') def(g, name, C);
+    }
+    stream('ReadableStream');
+    stream('WritableStream');
+    stream('TransformStream');
+    if (typeof g.WebAssembly === 'undefined') {
+      class SharedBuffer { constructor(length) { hidden(this, '_length', length); } get byteLength() { return this._length; } }
+      tag(SharedBuffer, 'SharedArrayBuffer');
+      class Memory {
+        constructor(descriptor) {
+          if (descriptor === null || typeof descriptor !== 'object') throw new TypeError("WebAssembly.Memory(): Argument 0 must be a memory descriptor");
+          if (descriptor.initial === undefined) throw new TypeError("WebAssembly.Memory(): Property 'initial' is required");
+          if (descriptor.shared && descriptor.maximum === undefined) throw new TypeError("WebAssembly.Memory(): If shared is true, maximum property should be defined.");
+          hidden(this, '_shared', !!descriptor.shared);
+          hidden(this, '_pages', Number(descriptor.initial));
+          hidden(this, '_buffer', null);
+        }
+        get buffer() {
+          if (!this._buffer) this._buffer = this._shared ? new SharedBuffer(this._pages * 65536) : new ArrayBuffer(this._pages * 65536);
+          return this._buffer;
+        }
+      }
+      tag(Memory, 'WebAssembly.Memory');
+      var wasm = {};
+      def(wasm, 'Memory', Memory);
+      tag({ prototype: wasm }, 'WebAssembly');
+      def(g, 'WebAssembly', wasm);
+    }
   })();
 })

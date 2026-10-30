@@ -198,6 +198,9 @@ static int computed_write(struct bind_window *window, struct dom_element *elemen
 static int computed_write_used(const struct css_style *style, const struct bind_box *box, int found, int property, struct wb_units *out);
 static int computed_write_keyword(const struct css_style *style, int property, struct wb_units *out);
 static int computed_overflow_axis(int own, int other);
+/* The zoom the style being written was laid out in (lengths are reported without it). */
+static float computed_zoom = 1.0f;
+
 static int computed_logical_property(const struct css_style *style, int property);
 static int computed_write_overflow(const struct css_style *style, struct wb_units *out);
 static int computed_write_url(const struct vm_string *url, struct wb_units *out);
@@ -345,6 +348,8 @@ static const struct computed_entry computed_entries[] = {
 	{ "order", COMPUTED_ORDER },
 	{ "row-gap", COMPUTED_ROW_GAP },
 	{ "column-gap", COMPUTED_COLUMN_GAP },
+	{ "grid-row-gap", COMPUTED_ROW_GAP },
+	{ "grid-column-gap", COMPUTED_COLUMN_GAP },
 	{ "outline-width", COMPUTED_OUTLINE_WIDTH },
 	{ "outline-style", COMPUTED_OUTLINE_STYLE },
 	{ "outline-color", COMPUTED_OUTLINE_COLOR },
@@ -993,7 +998,7 @@ computed_blockify(
 	blockify = style->float_side != CSS_FLOAT_NONE || style->position == CSS_POSITION_ABSOLUTE ||
 	    style->position == CSS_POSITION_FIXED;
 	parent = element->node.parent;
-	if (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
+	while (!blockify && parent != NULL && parent->type == DOM_ELEMENT) {
 		parent_style = malloc(sizeof(*parent_style));
 		if (parent_style == NULL)
 			return;
@@ -1001,11 +1006,19 @@ computed_blockify(
 			error = window->host.computed_style(window->host.context, (struct dom_element *)parent, parent_style);
 		else
 			error = bind_style_context_compute(window, (struct dom_element *)parent, parent_style);
+
+		/* A parent that makes no box of its own passes the question on to its own parent. */
+		if (error == 0 && parent_style->display == CSS_DISPLAY_CONTENTS) {
+			free(parent_style);
+			parent = parent->parent;
+			continue;
+		}
 		if (error == 0 && (parent_style->display == CSS_DISPLAY_FLEX ||
 		    parent_style->display == CSS_DISPLAY_INLINE_FLEX ||
 		    parent_style->display == CSS_DISPLAY_GRID || parent_style->display == CSS_DISPLAY_INLINE_GRID))
 			blockify = 1;
 		free(parent_style);
+		break;
 	}
 	if (!blockify)
 		return;
@@ -1074,6 +1087,9 @@ computed_write(
 		free(style);
 		return error;
 	}
+
+	/* Lengths are reported unzoomed: the zoom the element's lengths were scaled by is taken off in the numbers written. */
+	computed_zoom = style->zoom_eff > 0.0f ? style->zoom_eff : 1.0f;
 
 	/* A flow-relative property is the physical one it maps to here. */
 	if (property >= COMPUTED_LOGICAL_FIRST && property <= COMPUTED_LOGICAL_LAST)
@@ -2653,7 +2669,7 @@ computed_pixels(
 	int error;
 
 	/* The number and the unit. */
-	error = computed_number(value, out);
+	error = computed_number(value / (double)computed_zoom, out);
 	if (error != 0)
 		return error;
 	error = computed_ascii("px", out);

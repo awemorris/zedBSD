@@ -64,8 +64,8 @@ layout_replaced_size(
 	natural_height = 0;
 	has_ratio = 0;
 	if (box->image != NULL) {
-		natural_width = (layout_unit)box->image->width * LAYOUT_UNIT;
-		natural_height = (layout_unit)box->image->height * LAYOUT_UNIT;
+		natural_width = layout_from_px((float)box->image->width * box->style.zoom_eff);
+		natural_height = layout_from_px((float)box->image->height * box->style.zoom_eff);
 		has_ratio = 1;
 	}
 
