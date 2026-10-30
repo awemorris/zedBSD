@@ -94,6 +94,8 @@ int
 main(
 	void)
 {
+	int status;
+
 	/* Runs each group of checks. */
 	check_reset();
 	check_intra_types();
@@ -107,8 +109,13 @@ main(
 	check_block_neighbours();
 	check_neighbour_errors();
 
-	/* Succeeded when no check failed. */
-	return check_finish("mb");
+	/* Prints the summary line and takes the exit status from it. */
+	status = check_finish("mb");
+	if (status != 0)
+		return status;
+
+	/* Succeeded: every check passed. */
+	return 0;
 }
 
 /* Builds a picture of PIC_W by PIC_H macroblocks, all decoded in slice 0. */
@@ -225,8 +232,10 @@ check_intra_types(void)
 	struct h264sw_mb_type shifted;
 	unsigned t;
 	unsigned slice_type;
+	unsigned expected_luma;
 	unsigned offset;
 	int error;
+	int difference;
 
 	/* I_NxN: mb_type 0 has no partitions and its coded block pattern comes later. */
 	error = h264sw_mb_type_of(H264SW_SLICE_I, 0, &type);
@@ -249,7 +258,10 @@ check_intra_types(void)
 		CHECK(type.kind == H264SW_MB_I_16X16);
 		CHECK(type.intra16x16_mode == (t - 1U) % 4U);
 		CHECK(type.cbp_chroma == ((t - 1U) / 4U) % 3U);
-		CHECK(type.cbp_luma == (t >= 13U ? 15U : 0U));
+		expected_luma = 0U;
+		if (t >= 13U)
+			expected_luma = 15U;
+		CHECK(type.cbp_luma == expected_luma);
 		CHECK(type.parts == 0);
 	}
 
@@ -275,7 +287,8 @@ check_intra_types(void)
 			CHECK(error == 0);
 			error = h264sw_mb_type_of(slice_type, t + offset, &shifted);
 			CHECK(error == 0);
-			CHECK(memcmp(&type, &shifted, sizeof(type)) == 0);
+			difference = memcmp(&type, &shifted, sizeof(type));
+			CHECK(difference == 0);
 		}
 	}
 }
@@ -489,6 +502,7 @@ check_type_errors(void)
 	struct h264sw_mb_type before;
 	struct h264sw_sub_mb_type sub;
 	int error;
+	int difference;
 
 	/* Marks the outputs so that a write on error shows. */
 	memset(&type, 0x5a, sizeof(type));
@@ -526,7 +540,8 @@ check_type_errors(void)
 	CHECK(error == EINVAL);
 
 	/* The output was not written by any refusal. */
-	CHECK(memcmp(&type, &before, sizeof(type)) == 0);
+	difference = memcmp(&type, &before, sizeof(type));
+	CHECK(difference == 0);
 
 	/* Sub-macroblock types: P stops at 3, B at 12, other slice types have none. */
 	error = h264sw_sub_mb_type_of(H264SW_SLICE_P, 4, &sub);
@@ -552,6 +567,8 @@ check_type_errors(void)
 static void
 check_block_scan(void)
 {
+	unsigned block_index;
+
 	/* Figure 6-10 read by row: 0 1 4 5 / 2 3 6 7 / 8 9 12 13 / 10 11 14 15. */
 	static const unsigned expect_x[16] = { 0, 4, 0, 4, 8, 12, 8, 12, 0, 4, 0, 4, 8, 12, 8, 12 };
 	static const unsigned expect_y[16] = { 0, 0, 4, 4, 0, 0, 4, 4, 8, 8, 12, 12, 8, 8, 12, 12 };
@@ -563,8 +580,10 @@ check_block_scan(void)
 	for (blk = 0; blk < 16U; blk++) {
 		CHECK(h264sw_blk4x4_x[blk] == expect_x[blk]);
 		CHECK(h264sw_blk4x4_y[blk] == expect_y[blk]);
-		CHECK(h264sw_blk4x4_at(expect_x[blk], expect_y[blk]) == blk);
-		CHECK(h264sw_blk4x4_at(expect_x[blk] + 3U, expect_y[blk] + 3U) == blk);
+		block_index = h264sw_blk4x4_at(expect_x[blk], expect_y[blk]);
+		CHECK(block_index == blk);
+		block_index = h264sw_blk4x4_at(expect_x[blk] + 3U, expect_y[blk] + 3U);
+		CHECK(block_index == blk);
 	}
 
 	/* Every sample of the macroblock is in the block whose square holds it. */
@@ -578,8 +597,10 @@ check_block_scan(void)
 	}
 
 	/* A location beyond the macroblock still gives a block index. */
-	CHECK(h264sw_blk4x4_at(0xffffffffU, 0xffffffffU) < 16U);
-	CHECK(h264sw_blk4x4_at(16, 0) == 0);
+	block_index = h264sw_blk4x4_at(0xffffffffU, 0xffffffffU);
+	CHECK(block_index < 16U);
+	block_index = h264sw_blk4x4_at(16, 0);
+	CHECK(block_index == 0);
 }
 
 /* Checks the neighbouring macroblocks A, B, C and D (6.4.8, 6.4.9) of a 4 by 3 picture. */
@@ -786,6 +807,7 @@ check_expected(
 		CHECK(found != NULL);
 		CHECK(blk_n == a[blk].blk);
 
+		/* Looks up neighbour B with the same marker that a lookup must overwrite. */
 		blk_n = 99;
 		found = finder(n, blk, 1, &blk_n);
 		if (b[blk].in_current != 0U)

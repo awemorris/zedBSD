@@ -130,6 +130,44 @@ static struct h264sw_ps_store saved;
 /* The RBSP being built. */
 static struct bitwriter writer;
 
+static void sps_defaults(struct sps_params *p);
+static void sps_high(struct sps_params *p);
+static unsigned list_value(unsigned kind, unsigned base, unsigned index);
+static void write_scaling_list(struct bitwriter *w, unsigned kind, unsigned base, unsigned size);
+static void write_scaling_matrix(struct bitwriter *w, const unsigned *kind, const unsigned *base, unsigned count);
+static void write_hrd(struct bitwriter *w, unsigned cpb_cnt_minus1);
+static void write_vui(struct bitwriter *w, const struct vui_params *v);
+static size_t write_sps(struct bitwriter *w, const struct sps_params *p);
+static void pps_defaults(struct pps_params *p);
+static void write_pps(struct bitwriter *w, const struct pps_params *p);
+static int read_sps_bytes(const uint8_t *data, size_t size);
+static int read_pps_bytes(const uint8_t *data, size_t size);
+static int read_sps(const struct sps_params *p);
+static int read_pps(const struct pps_params *p);
+static void check_store_unchanged(void);
+static void save_store(void);
+static void test_sps_baseline(void);
+static void test_sps_poc(void);
+static void test_sps_poc_cycle_255(void);
+static void test_sps_crop(void);
+static void test_sps_vui(void);
+static void test_sps_vui_dropped(void);
+static void test_sps_invalid(void);
+static void test_sps_unsupported(void);
+static void test_sps_truncated(void);
+static void test_sps_dpb(void);
+static void test_sps_generation(void);
+static void test_sps_scaling(void);
+static void test_sps_scaling_delta(void);
+static void test_pps(void);
+static void test_pps_errors(void);
+static void read_sps_lists(int matrix_present, const unsigned *kind, const unsigned *base);
+static void read_pps_lists(int matrix_present, int transform_8x8, const unsigned *kind, const unsigned *base);
+static int list_equals_pattern(const uint8_t *list, unsigned size, unsigned kind, unsigned base);
+static int list_equals_table(const uint8_t *list, const uint8_t *table, unsigned size);
+static void test_scaling_resolution(void);
+static void test_damage(void);
+
 /* Gives the parameters of a plain Baseline stream: 720x576, level 3.0, order count type 2. */
 static void
 sps_defaults(
@@ -225,6 +263,8 @@ write_scaling_matrix(
 			bitwriter_u(w, 0U, 1U);
 			continue;
 		}
+
+		/* A present list is flagged, then sized by its index: 4 by 4 lists first, then 8 by 8. */
 		bitwriter_u(w, 1U, 1U);
 		size = 16U;
 		if (index >= 6U)
@@ -241,14 +281,19 @@ write_hrd(
 {
 	unsigned index;
 
+	/* Writes the CPB count and the two rate scales. */
 	bitwriter_ue(w, cpb_cnt_minus1);
 	bitwriter_u(w, 3U, 4U);
 	bitwriter_u(w, 5U, 4U);
+
+	/* Writes the bit rate, size and mode of every CPB specification. */
 	for (index = 0U; index <= cpb_cnt_minus1; index++) {
 		bitwriter_ue(w, 1000U + index);
 		bitwriter_ue(w, 5000U + index);
 		bitwriter_u(w, index & 1U, 1U);
 	}
+
+	/* Writes the four delay and time lengths of the HRD. */
 	bitwriter_u(w, 23U, 5U);
 	bitwriter_u(w, 23U, 5U);
 	bitwriter_u(w, 23U, 5U);
@@ -465,8 +510,12 @@ write_pps(
 				count = 8U;
 			write_scaling_matrix(w, p->list_kind, p->list_base, count);
 		}
+
+		/* The second chroma offset follows the extension. */
 		bitwriter_se(w, p->second_offset);
 	}
+
+	/* Ends the RBSP with its stop bit and alignment. */
 	bitwriter_trailing(w);
 }
 
@@ -477,9 +526,18 @@ read_sps_bytes(
 	size_t size)
 {
 	struct vcodec_bitreader bits;
+	int error;
 
+	/* Opens the reader on the bytes. */
 	vcodec_bitreader_init(&bits, data, size);
-	return h264sw_ps_read_sps(&store, &bits);
+
+	/* Parses the bytes as an SPS into the store. */
+	error = h264sw_ps_read_sps(&store, &bits);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the SPS is in the store. */
+	return 0;
 }
 
 /* Reads the RBSP in w as a PPS into the store. */
@@ -489,9 +547,18 @@ read_pps_bytes(
 	size_t size)
 {
 	struct vcodec_bitreader bits;
+	int error;
 
+	/* Opens the reader on the bytes. */
 	vcodec_bitreader_init(&bits, data, size);
-	return h264sw_ps_read_pps(&store, &bits);
+
+	/* Parses the bytes as a PPS into the store. */
+	error = h264sw_ps_read_pps(&store, &bits);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the PPS is in the store. */
+	return 0;
 }
 
 /* Builds an SPS from the parameters and reads it; returns the reader's answer. */
@@ -500,10 +567,19 @@ read_sps(
 	const struct sps_params *p)
 {
 	size_t start;
+	int error;
 
+	/* Writes the parameters as an SPS RBSP. */
 	start = write_sps(&writer, p);
 	CHECK(start != 0U);
-	return read_sps_bytes(writer.data, bitwriter_bytes(&writer));
+
+	/* Reads the RBSP back through the parser under test. */
+	error = read_sps_bytes(writer.data, bitwriter_bytes(&writer));
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the SPS was accepted. */
+	return 0;
 }
 
 /* Builds a PPS from the parameters and reads it; returns the reader's answer. */
@@ -1541,6 +1617,8 @@ test_sps_scaling(
 		CHECK(s->scaling4x4[4][index] == list_value(LIST_SHORT, 30U, index));
 		CHECK(s->scaling4x4[5][index] == list_value(LIST_SHORT, 30U, index));
 	}
+
+	/* Checks that both 8 by 8 lists fell back to their defaults. */
 	for (index = 0U; index < 64U; index++) {
 		CHECK(s->scaling8x8[0][index] == h264sw_default8x8[0][index]);
 		CHECK(s->scaling8x8[1][index] == h264sw_default8x8[1][index]);
@@ -1889,12 +1967,15 @@ read_sps_lists(
 	unsigned index;
 	int error;
 
+	/* Describes the SPS with the given lists. */
 	sps_high(&p);
 	p.matrix_present = matrix_present;
 	for (index = 0U; index < 8U; index++) {
 		p.list_kind[index] = kind[index];
 		p.list_base[index] = base[index];
 	}
+
+	/* Reads the SPS and expects it to be accepted. */
 	error = read_sps(&p);
 	CHECK(error == 0);
 }
@@ -1911,6 +1992,7 @@ read_pps_lists(
 	unsigned index;
 	int error;
 
+	/* Describes the PPS with the given lists. */
 	pps_defaults(&p);
 	p.id = 0U;
 	p.extension = 1;
@@ -1920,6 +2002,8 @@ read_pps_lists(
 		p.list_kind[index] = kind[index];
 		p.list_base[index] = base[index];
 	}
+
+	/* Reads the PPS and expects it to be accepted. */
 	error = read_pps(&p);
 	CHECK(error == 0);
 }
@@ -1933,11 +2017,16 @@ list_equals_pattern(
 	unsigned base)
 {
 	unsigned index;
+	unsigned expected;
 
+	/* Compares each entry with the value the pattern gives at that index. */
 	for (index = 0U; index < size; index++) {
-		if (list[index] != list_value(kind, base, index))
+		expected = list_value(kind, base, index);
+		if (list[index] != expected)
 			return 0;
 	}
+
+	/* The whole list follows the pattern. */
 	return 1;
 }
 
@@ -1948,7 +2037,15 @@ list_equals_table(
 	const uint8_t *table,
 	unsigned size)
 {
-	return memcmp(list, table, size) == 0;
+	int different;
+
+	/* Compares the two lists byte for byte. */
+	different = memcmp(list, table, size);
+	if (different != 0)
+		return 0;
+
+	/* The lists are equal. */
+	return 1;
 }
 
 /* Checks the four cases of h264sw_ps_scaling and the fall-back rules A and B. */
@@ -2146,6 +2243,8 @@ test_damage(
 				/* The others flip one bit of it. */
 				writer.data[index] = (uint8_t)(copy[index] ^ (1U << round));
 			}
+
+			/* Reads the damaged SPS; it may be accepted or refused but never crash. */
 			error = read_sps_bytes(writer.data, size);
 			CHECK(error == 0 || error == EINVAL || error == ENOTSUP);
 		}

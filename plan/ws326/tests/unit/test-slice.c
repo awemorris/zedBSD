@@ -119,6 +119,63 @@ static size_t header_bits;
 /* The configuration the last install used. */
 static struct config current_config;
 
+/* Forward declarations of the static functions. */
+static void config_defaults(struct config *c);
+static void params_idr(struct params *p);
+static void params_slice(struct params *p, uint32_t slice_type);
+static void write_sps(struct bitwriter *w, const struct config *c);
+static void write_pps(struct bitwriter *w, const struct config *c, uint32_t pps_id);
+static void install(const struct config *c);
+static unsigned active_count(const struct config *c, const struct params *p, unsigned list);
+static void write_modifications(struct bitwriter *w, const struct params *p, unsigned list);
+static void write_weights(struct bitwriter *w, const struct params *p, unsigned list, unsigned count);
+static void write_marking(struct bitwriter *w, const struct params *p);
+static void write_header(struct bitwriter *w, const struct config *c, const struct params *p);
+static void build(const struct config *c, const struct params *p);
+static int read_rbsp(unsigned type, unsigned ref_idc, const uint8_t *data, size_t size, struct h264sw_slice_header *header);
+static int read_slice(const struct params *p, struct h264sw_slice_header *header);
+static void expect_error(const struct params *p, int expected);
+static void expect_ok(const struct params *p, struct h264sw_slice_header *header);
+static void test_hand_coded(void);
+static void test_intra(void);
+static void test_predicted(void);
+static void test_bidirectional(void);
+static void test_slice_types(void);
+static void test_errors(void);
+static void test_extremes(void);
+static void test_arguments(void);
+static void test_truncation(void);
+static void check_invariants(const struct h264sw_slice_header *h);
+static uint32_t next_random(uint32_t *state);
+static void test_fuzz(void);
+static void test_new_picture(void);
+
+/* Runs every test and prints the summary line. */
+int
+main(void)
+{
+	int status;
+
+	/* Each group of tests in turn. */
+	test_hand_coded();
+	test_intra();
+	test_predicted();
+	test_bidirectional();
+	test_slice_types();
+	test_errors();
+	test_extremes();
+	test_arguments();
+	test_truncation();
+	test_fuzz();
+	test_new_picture();
+
+	/* Prints the summary line. */
+	status = check_finish("slice");
+
+	/* The exit status says whether every check held. */
+	return status;
+}
+
 /* Gives the configuration of a plain stream: order count type 2, CAVLC, no optional PPS fields. */
 static void
 config_defaults(
@@ -174,6 +231,8 @@ write_sps(
 	if (c->poc_type == 0U) {
 		bitwriter_ue(w, c->log2_poc_minus4);
 	}
+
+	/* Order count type 1 sends the offset cycle and its offsets (7.3.2.1.1). */
 	if (c->poc_type == 1U) {
 		bitwriter_u(w, (unsigned)c->always_zero, 1U);
 		bitwriter_se(w, -2);
@@ -274,6 +333,8 @@ active_count(
 		if (p->override != 0)
 			minus1 = p->n1_minus1;
 	}
+
+	/* A count above the list size is cut to the list size. */
 	if (minus1 >= H264SW_MAX_LIST)
 		return H264SW_MAX_LIST;
 	return minus1 + 1U;
@@ -296,6 +357,8 @@ write_modifications(
 		bitwriter_ue(w, p->mod_idc[list][index]);
 		bitwriter_ue(w, p->mod_value[list][index]);
 	}
+
+	/* The list ends with the end-of-modifications code 3. */
 	bitwriter_ue(w, 3U);
 }
 
@@ -317,6 +380,8 @@ write_weights(
 			bitwriter_se(w, p->luma_weight[list][index]);
 			bitwriter_se(w, p->luma_offset[list][index]);
 		}
+
+		/* The chroma weights follow the luma weights of the same index. */
 		bitwriter_u(w, (unsigned)p->chroma_flag[list][index], 1U);
 		if (p->chroma_flag[list][index] != 0) {
 			for (plane = 0U; plane < 2U; plane++) {
@@ -359,6 +424,8 @@ write_marking(
 		if (m->operation == 4U)
 			bitwriter_ue(w, m->max_plus1);
 	}
+
+	/* The list ends with the end-of-operations code 0. */
 	bitwriter_ue(w, 0U);
 }
 
@@ -373,6 +440,7 @@ write_header(
 	int idr;
 	unsigned count;
 
+	/* An IDR picture is told by the NAL unit type; the slice type has its repeat-by-5 form removed. */
 	idr = (p->nal_type == H264SW_NAL_IDR);
 	type = p->slice_type % 5U;
 
@@ -390,11 +458,15 @@ write_header(
 		if (c->bottom_poc != 0)
 			bitwriter_se(w, p->delta_bottom);
 	}
+
+	/* Order count type 1 sends the delta counts unless they are always zero. */
 	if (c->poc_type == 1U && c->always_zero == 0) {
 		bitwriter_se(w, p->delta0);
 		if (c->bottom_poc != 0)
 			bitwriter_se(w, p->delta1);
 	}
+
+	/* A redundant picture count follows when the configuration asks for it. */
 	if (c->redundant != 0)
 		bitwriter_ue(w, p->redundant);
 	if (type == 1U)
@@ -426,6 +498,8 @@ write_header(
 			write_weights(w, p, 1U, count);
 		}
 	}
+
+	/* A reference picture carries its marking. */
 	if (p->ref_idc != 0U)
 		write_marking(w, p);
 
@@ -467,6 +541,7 @@ read_rbsp(
 	struct vcodec_bitreader bits;
 	struct h264sw_nal nal;
 
+	/* The NAL unit carries the given type and reference indication around the RBSP. */
 	nal.type = type;
 	nal.ref_idc = ref_idc;
 	nal.rbsp = data;
@@ -494,6 +569,7 @@ expect_error(
 	struct h264sw_slice_header header;
 	int error;
 
+	/* The slice header is read and the answer is compared with the expected one. */
 	error = read_slice(p, &header);
 	CHECK(error == expected);
 }
@@ -506,6 +582,7 @@ expect_ok(
 {
 	int error;
 
+	/* The slice header must read without error and end exactly where the writer ended it. */
 	error = read_slice(p, header);
 	CHECK(error == 0);
 	CHECK(header->data_position == header_bits);
@@ -654,6 +731,7 @@ test_predicted(void)
 	struct h264sw_slice_header header;
 	unsigned index;
 
+	/* A configuration with order count type 1 and the optional fields present. */
 	config_defaults(&c);
 	c.poc_type = 1U;
 	c.bottom_poc = 1;
@@ -828,6 +906,8 @@ test_predicted(void)
 		p.mod_idc[0][index] = index % 3U;
 		p.mod_value[0][index] = index % 15U;
 	}
+
+	/* The slice header is read back and the full list of modifications must come out. */
 	expect_ok(&p, &header);
 	CHECK(header.modification_count[0] == H264SW_MAX_MODIFICATIONS);
 	CHECK(header.modification[0][H264SW_MAX_MODIFICATIONS - 1U].idc == (H264SW_MAX_MODIFICATIONS - 1U) % 3U);
@@ -842,6 +922,7 @@ test_bidirectional(void)
 	struct params p;
 	struct h264sw_slice_header header;
 
+	/* A configuration for B slices with order count type 0. */
 	config_defaults(&c);
 	c.poc_type = 0U;
 	c.log2_poc_minus4 = 2U;
@@ -952,6 +1033,7 @@ test_slice_types(void)
 	struct h264sw_slice_header header;
 	uint32_t type;
 
+	/* A plain configuration is installed before the slice types are tried. */
 	config_defaults(&c);
 	install(&c);
 
@@ -977,6 +1059,7 @@ test_errors(void)
 	struct h264sw_slice_header header;
 	unsigned index;
 
+	/* A configuration with CABAC and the deblocking filter fields present. */
 	config_defaults(&c);
 	c.poc_type = 0U;
 	c.cabac = 1;
@@ -1113,6 +1196,8 @@ test_errors(void)
 		p.mod_idc[0][index] = 2U;
 		p.mod_value[0][index] = index;
 	}
+
+	/* One more modification than the header allows is refused. */
 	expect_error(&p, EINVAL);
 	p.mod_count[0] = TEST_MODS;
 	expect_error(&p, EINVAL);
@@ -1173,6 +1258,8 @@ test_errors(void)
 		p.mmco[index].operation = 6U;
 		p.mmco[index].long_term_frame_idx = index;
 	}
+
+	/* The header with the most operations allowed is read back whole. */
 	expect_ok(&p, &header);
 	CHECK(header.mmco_count == H264SW_MAX_MMCO);
 	CHECK(header.mmco[H264SW_MAX_MMCO - 1U].long_term_frame_idx == H264SW_MAX_MMCO - 1U);
@@ -1247,6 +1334,7 @@ test_extremes(void)
 	struct params p;
 	struct h264sw_slice_header header;
 
+	/* A configuration with the longest frame number and order count fields. */
 	config_defaults(&c);
 	c.poc_type = 0U;
 	c.log2_poc_minus4 = 12U;
@@ -1294,6 +1382,7 @@ test_arguments(void)
 	struct vcodec_bitreader bits;
 	struct h264sw_nal nal;
 
+	/* A configuration is installed and the RBSP of a slice is built for the truncation checks. */
 	config_defaults(&c);
 	install(&c);
 	params_slice(&p, 2U);
@@ -1326,6 +1415,7 @@ test_truncation(void)
 	int error;
 	unsigned round;
 
+	/* The truncation checks run for a P slice and a B slice. */
 	for (round = 0U; round < 2U; round++) {
 		config_defaults(&c);
 		c.poc_type = 0U;
@@ -1371,6 +1461,8 @@ test_truncation(void)
 			error = read_rbsp(1U, 2U, copy, length, &header);
 			CHECK(error == EINVAL);
 		}
+
+		/* Every length from the needed one up to the full size reads. */
 		for (length = needed; length <= size; length++) {
 			error = read_rbsp(1U, 2U, copy, length, &header);
 			CHECK(error == 0);
@@ -1386,6 +1478,7 @@ check_invariants(
 	unsigned list;
 	unsigned index;
 
+	/* The slice type is one of P, B and I, as the syntax allows. */
 	CHECK(h->slice_type <= H264SW_SLICE_B || h->slice_type == H264SW_SLICE_I);
 	CHECK(h->first_mb < TEST_SIZE_MBS);
 	CHECK(h->qp >= 0 && h->qp <= 51);
@@ -1401,6 +1494,8 @@ check_invariants(
 		for (index = 0U; index < h->modification_count[list]; index++)
 			CHECK(h->modification[list][index].idc <= 2U);
 	}
+
+	/* Every operation is one of 1 to 6. */
 	for (index = 0U; index < h->mmco_count; index++)
 		CHECK(h->mmco[index].operation >= 1U && h->mmco[index].operation <= 6U);
 	if (h->idr != 0) {
@@ -1432,7 +1527,9 @@ test_fuzz(void)
 	size_t flips;
 	size_t at;
 	uint32_t state;
+	uint32_t draw;
 	unsigned type;
+	unsigned ref_idc;
 	int error;
 
 	/* A configuration with every optional field present, and a P slice using many of them. */
@@ -1474,10 +1571,15 @@ test_fuzz(void)
 			damaged[at / 8U] ^= (uint8_t)(0x80U >> (at % 8U));
 			flips--;
 		}
+
+		/* The type is mostly a non-IDR slice, and now and then an IDR slice. */
 		type = 1U;
-		if ((next_random(&state) & 7U) == 0U)
+		draw = next_random(&state);
+		if ((draw & 7U) == 0U)
 			type = 5U;
-		error = read_rbsp(type, 1U + (next_random(&state) % 3U), damaged, size, &header);
+		draw = next_random(&state);
+		ref_idc = 1U + (draw % 3U);
+		error = read_rbsp(type, ref_idc, damaged, size, &header);
 		CHECK(error == 0 || error == EINVAL || error == ENOTSUP);
 		if (error == 0)
 			check_invariants(&header);
@@ -1489,9 +1591,12 @@ test_fuzz(void)
 		for (at = 0U; at < size; at++)
 			damaged[at] = (uint8_t)next_random(&state);
 		type = 1U;
-		if ((next_random(&state) & 7U) == 0U)
+		draw = next_random(&state);
+		if ((draw & 7U) == 0U)
 			type = 5U;
-		error = read_rbsp(type, 1U + (next_random(&state) % 3U), damaged, size, &header);
+		draw = next_random(&state);
+		ref_idc = 1U + (draw % 3U);
+		error = read_rbsp(type, ref_idc, damaged, size, &header);
 		CHECK(error == 0 || error == EINVAL || error == ENOTSUP);
 		if (error == 0)
 			check_invariants(&header);
@@ -1615,22 +1720,4 @@ test_new_picture(void)
 	CHECK(h264sw_slice_new_picture(&base, &other, &sps) == 0);
 	other.frame_num = 0U;
 	CHECK(h264sw_slice_new_picture(&base, &other, &sps) == 1);
-}
-
-/* Runs every test and prints the summary line. */
-int
-main(void)
-{
-	test_hand_coded();
-	test_intra();
-	test_predicted();
-	test_bidirectional();
-	test_slice_types();
-	test_errors();
-	test_extremes();
-	test_arguments();
-	test_truncation();
-	test_fuzz();
-	test_new_picture();
-	return check_finish("slice");
 }

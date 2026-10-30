@@ -340,6 +340,8 @@ h264sw_dpb_gaps(
 			h264sw_frame_unref(frame);
 			return error;
 		}
+
+		/* Finds the buffer that was emptied. */
 		index = dpb_find_empty(dpb);
 		if (index < 0) {
 			h264sw_frame_unref(frame);
@@ -479,6 +481,8 @@ h264sw_dpb_store(
 	int error;
 	int bumped;
 	int done;
+	int lowest;
+	unsigned output_count;
 
 	/* Refuses the calls that cannot work. */
 	if (dpb == NULL)
@@ -532,17 +536,21 @@ h264sw_dpb_store(
 				dpb->entry[index].output_needed = 1;
 				dpb->entry[index].frame_num = current->frame_num;
 				done = 1;
-			} else if (dpb_is_lowest(dpb, current->poc)) {
-				/* The picture precedes every waiting frame in output order: it is output without being stored. */
-				error = dpb_queue_push(queue, current);
-				if (error != 0)
-					return ENOBUFS;
-				done = 1;
 			} else {
-				/* A frame waiting before the picture is output first, which may free a buffer. */
-				bumped = h264sw_dpb_bump(dpb, queue);
-				if (bumped <= 0)
-					return ENOBUFS;
+				/* Finds out whether the picture precedes every waiting frame in output order. */
+				lowest = dpb_is_lowest(dpb, current->poc);
+				if (lowest) {
+					/* The picture comes first: it is output without being stored. */
+					error = dpb_queue_push(queue, current);
+					if (error != 0)
+						return ENOBUFS;
+					done = 1;
+				} else {
+					/* A frame waiting before the picture is output first, which may free a buffer. */
+					bumped = h264sw_dpb_bump(dpb, queue);
+					if (bumped <= 0)
+						return ENOBUFS;
+				}
 			}
 		}
 
@@ -552,15 +560,19 @@ h264sw_dpb_store(
 	}
 
 	/* Outputs frames while more wait than the stream's reorder depth allows. */
-	for (pass = 0U;
-	     pass <= limit && dpb_count_output(dpb) > dpb->reorder;
-	     pass++) {
+	pass = 0U;
+	output_count = dpb_count_output(dpb);
+	while (pass <= limit && output_count > dpb->reorder) {
 		/* Runs the bumping process once. */
 		bumped = h264sw_dpb_bump(dpb, queue);
 		if (bumped < 0)
 			return ENOBUFS;
 		if (bumped == 0)
 			break;
+
+		/* Counts again the frames that still wait for output. */
+		output_count = dpb_count_output(dpb);
+		pass++;
 	}
 
 	/* Succeeded: the picture is stored or output. */
@@ -638,6 +650,7 @@ h264sw_dpb_make_room(
 	unsigned limit;
 	int index;
 	int bumped;
+	int freed;
 
 	/* Refuses the calls that cannot work. */
 	if (dpb == NULL)
@@ -647,16 +660,19 @@ h264sw_dpb_make_room(
 
 	/* Frees buffers until one is empty. */
 	limit = dpb_limit(dpb);
+	freed = 0;
 	for (pass = 0U;
-	     pass <= 2U * limit + 1U;
+	     pass <= 2U * limit + 1U && !freed;
 	     pass++) {
 		/* Empties the buffers that hold nothing needed. */
 		dpb_sweep(dpb);
 
 		/* A buffer is free: the loop is done. */
 		index = dpb_find_empty(dpb);
-		if (index >= 0)
-			return 0;
+		if (index >= 0) {
+			freed = 1;
+			continue;
+		}
 
 		/* Outputs the next frame in output order, which frees its buffer when it is no reference. */
 		bumped = h264sw_dpb_bump(dpb, queue);
@@ -675,7 +691,11 @@ h264sw_dpb_make_room(
 	}
 
 	/* The buffers could not be freed: the DPB has no buffer or the passes ran out. */
-	return ENOBUFS;
+	if (!freed)
+		return ENOBUFS;
+
+	/* Succeeded: a buffer is empty. */
+	return 0;
 }
 
 /*

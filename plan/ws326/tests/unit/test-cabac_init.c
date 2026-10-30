@@ -218,6 +218,8 @@ check_shape(
 				min_n = value;
 		}
 	}
+
+	/* The extremes of n are the ones the header states. */
 	CHECK(max_n == 127);
 	CHECK(min_n == -94);
 
@@ -231,8 +233,19 @@ main(
 	int argc,
 	char **argv)
 {
-	/* The cross-check reads the table this way and makes no checks of its own. */
-	if (argc == 2 && strcmp(argv[1], "--dump") == 0) {
+	int dump;
+	int same;
+
+	/* Decides whether the table is only to be printed, as the cross-check reads it. */
+	dump = 0;
+	if (argc == 2) {
+		same = strcmp(argv[1], "--dump");
+		if (same == 0)
+			dump = 1;
+	}
+
+	/* Prints the table, making no checks of its own. */
+	if (dump) {
 		dump_pairs();
 		return 0;
 	}

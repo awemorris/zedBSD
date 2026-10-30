@@ -15,6 +15,9 @@
 #include "bitwriter.h"
 
 /* Reports whether the writer holds exactly the bit string text (of '0' and '1'). */
+static int bits_equal(const struct bitwriter *writer, const char *text);
+
+/* Reports whether the writer holds exactly the bit string text (of '0' and '1'). */
 static int
 bits_equal(
 	const struct bitwriter *writer,
@@ -49,6 +52,7 @@ main(
 	static const uint8_t rbsp[] = { 0x00U, 0x00U, 0x01U, 0x00U, 0x00U, 0x00U };
 	uint8_t nal[16];
 	size_t size;
+	int status;
 
 	/*
 	 * Table 9-2: codeNum 0 is "1", 1 is "010", 2 is "011", 3 is "00100",
@@ -100,5 +104,6 @@ main(
 	CHECK(nal[9] == 0x03U);
 
 	/* Reports the result. */
-	return check_finish("bitwriter");
+	status = check_finish("bitwriter");
+	return status;
 }

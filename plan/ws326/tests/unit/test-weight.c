@@ -100,10 +100,20 @@ apply_one(
 	uint8_t p1)
 {
 	uint8_t out;
+	const uint8_t *list0;
+	const uint8_t *list1;
 
 	/* Passes the lists that are in use as pointers, the others as NULL. */
+	list0 = NULL;
+	if (has_p0)
+		list0 = &p0;
+	list1 = NULL;
+	if (has_p1)
+		list1 = &p1;
+
+	/* Applies the prediction to one sample. */
 	out = 0xEEU;
-	h264sw_weights_apply(factors, has_p0 ? &p0 : NULL, has_p1 ? &p1 : NULL, 1U, 1U, 1U, &out, 1U);
+	h264sw_weights_apply(factors, list0, list1, 1U, 1U, 1U, &out, 1U);
 
 	/* Reports the sample. */
 	return out;
@@ -117,6 +127,7 @@ test_default(void)
 {
 	struct h264sw_weight_factors factors;
 
+	/* Sets the factors of a default prediction. */
 	make_factors(&factors, 0, 0U, 0, 0, 0, 0);
 
 	/* One list is copied, list 0 or list 1 (8-271, 8-272). */
@@ -285,6 +296,8 @@ test_apply_blocks(void)
 			}
 		}
 	}
+
+	/* Only the 3 by 2 block was written and the rest of the destination is untouched. */
 	CHECK(right);
 
 	/* The destination may be the list 0 prediction: the weighted result replaces it. */
@@ -297,6 +310,8 @@ test_apply_blocks(void)
 				right = 0;
 		}
 	}
+
+	/* Every sample of the 3 by 2 block was replaced in place. */
 	CHECK(right);
 
 	/* A single list with weights is applied in place too. */
@@ -646,6 +661,7 @@ test_hostile(void)
 	int32_t extremes[2];
 	unsigned i;
 
+	/* Takes the two extreme order counts the references are given. */
 	extremes[0] = INT32_MIN;
 	extremes[1] = INT32_MAX;
 
@@ -703,6 +719,8 @@ test_hostile(void)
 		set_ref(0U, i, extremes[i % 2U], 0);
 		set_ref(1U, i, extremes[(i + 1U) % 2U], 0);
 	}
+
+	/* Derives the implicit weights for the extreme and the zero current order count. */
 	h264sw_weights_setup(&test_weights, &test_pps, &test_header, &test_lists, INT32_MIN);
 	h264sw_weights_setup(&test_weights, &test_pps, &test_header, &test_lists, INT32_MAX);
 	h264sw_weights_setup(&test_weights, &test_pps, &test_header, &test_lists, 0);

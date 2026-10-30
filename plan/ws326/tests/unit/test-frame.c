@@ -40,6 +40,10 @@
 /* The sample value of a grey frame. */
 #define TEST_GREY 128U
 
+static struct h264sw_frame_pool *make_pool(unsigned limit);
+static void check_motion_intra(const struct h264sw_frame *frame);
+static int bytes_are(const uint8_t *data, size_t size, unsigned value);
+
 /*
  * Makes the pool most checks use and checks that it was made.
  */
@@ -91,6 +95,8 @@ check_motion_intra(
 				if (frame->motion[index].ref_id[list][part] != 0U)
 					clean = 0;
 			}
+
+			/* Looks at the motion vector of each of the macroblock's 16 blocks. */
 			for (block = 0U;
 			     block < 16U;
 			     block++) {
@@ -410,6 +416,8 @@ test_ids(void)
 		previous = frame->id;
 		h264sw_frame_unref(frame);
 	}
+
+	/* The ids only ever went up, ending at the hundredth. */
 	CHECK(increasing);
 	CHECK(previous == 100U);
 
@@ -448,6 +456,8 @@ test_limit(void)
 		frames[index] = h264sw_frame_get(pool);
 		CHECK(frames[index] != NULL);
 	}
+
+	/* The pool now holds exactly as many frames as its limit. */
 	CHECK(pool->allocated == TEST_LIMIT);
 
 	/* One more fails, and keeps failing. */
@@ -646,6 +656,8 @@ test_largest_frame(void)
 		CHECK(frame->plane[2][luma / 4U - 1U] == TEST_GREY);
 		h264sw_frame_unref(frame);
 	}
+
+	/* Destroys the pool of the largest frame. */
 	h264sw_frame_pool_destroy(pool);
 }
 

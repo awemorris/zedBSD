@@ -132,6 +132,8 @@ static int cabac_end(unsigned slice_type);
 static void check_cabac_pcm(void);
 static void check_cabac_skip(void);
 static void check_cabac_inter(void);
+static int parse_error_case(unsigned slice_type, unsigned active0, unsigned active1, int t8x8, void (*build)(void));
+static void check_sane_after_parse(unsigned slice_type);
 
 int
 main(
@@ -323,6 +325,8 @@ put_block_two(
 	} else {
 		put_text("1");
 	}
+
+	/* Writes total_zeros 0, which ends the block. */
 	put_text("1");
 }
 
@@ -402,6 +406,7 @@ check_i4x4(void)
 	unsigned index;
 	int status;
 
+	/* Sets up the parse of one macroblock in an I slice. */
 	env_make(H264SW_SLICE_I, 0, 1, 0, 0, 0, 26, ADDR);
 	stream_begin();
 	bitwriter_ue(&writer, 0U);
@@ -414,6 +419,8 @@ check_i4x4(void)
 			bitwriter_u(&writer, index >> 1, 3U);
 		}
 	}
+
+	/* Writes the chroma mode, the coded block pattern and the QP delta. */
 	bitwriter_ue(&writer, 2U);
 	bitwriter_ue(&writer, 29U);
 	bitwriter_se(&writer, -3);
@@ -425,6 +432,7 @@ check_i4x4(void)
 	put_block_one(0U, 2U);
 	stream_end();
 
+	/* Parses the stream and checks that it was read to its end. */
 	status = h264sw_macroblock_parse(&ctx, 0);
 	CHECK(status == 0);
 	check_consumed();
@@ -446,6 +454,8 @@ check_i4x4(void)
 			CHECK(ctx.syntax.rem_intra_mode[index] == (index >> 1));
 		}
 	}
+
+	/* The syntax elements of the macroblock were stored in its entry. */
 	CHECK(mbs[ADDR].chroma_pred_mode == 2U);
 
 	/* The pattern, the quantizer (26 - 3 by 7-37), and the counts for the nC of the next blocks. */
@@ -487,6 +497,7 @@ check_i16x16(void)
 	unsigned index;
 	int status;
 
+	/* Sets up the parse of one macroblock in an I slice. */
 	env_make(H264SW_SLICE_I, 0, 1, 0, 1, 0, 26, ADDR);
 	stream_begin();
 	bitwriter_ue(&writer, 18U);
@@ -500,6 +511,7 @@ check_i16x16(void)
 	put_text("01");
 	stream_end();
 
+	/* Parses the stream and checks that it was read to its end. */
 	status = h264sw_macroblock_parse(&ctx, 0);
 	CHECK(status == 0);
 	check_consumed();
@@ -539,6 +551,7 @@ check_pcm(void)
 	unsigned index;
 	int status;
 
+	/* Sets up the parse of one macroblock in an I slice. */
 	env_make(H264SW_SLICE_I, 0, 1, 0, 0, 0, 30, ADDR);
 	stream_begin();
 	bitwriter_ue(&writer, 25U);
@@ -549,6 +562,7 @@ check_pcm(void)
 	stream_end();
 	ctx.prev_qp_delta_nonzero = 1;
 
+	/* Parses the stream and checks that it was read to its end. */
 	status = h264sw_macroblock_parse(&ctx, 0);
 	CHECK(status == 0);
 	check_consumed();
@@ -584,6 +598,7 @@ check_i8x8_in_p(void)
 	unsigned index;
 	int status;
 
+	/* Sets up the parse of one macroblock in a P slice. */
 	env_make(H264SW_SLICE_P, 0, 1, 0, 1, 0, 26, ADDR);
 	stream_begin();
 	bitwriter_ue(&writer, 5U);
@@ -610,10 +625,12 @@ check_i8x8_in_p(void)
 	put_chroma_dc_one(0U, 3U);
 	stream_end();
 
+	/* Parses the stream and checks that it was read to its end. */
 	status = h264sw_macroblock_parse(&ctx, 0);
 	CHECK(status == 0);
 	check_consumed();
 
+	/* The parsed kind is the one the stream sent. */
 	CHECK(ctx.syntax.mb_type == 5U);
 	CHECK(ctx.syntax.type.kind == H264SW_MB_I_8X8);
 	CHECK(mbs[ADDR].kind == H264SW_MB_I_8X8);
@@ -640,6 +657,8 @@ check_i8x8_in_p(void)
 		if (index != 1U && index != 11U)
 			CHECK(mbs[ADDR].total_coeff[index] == 0U);
 	}
+
+	/* Checks that nothing else in the entry was set. */
 	want_clear();
 	want.luma8x8[0][1] = -1;
 	want.luma8x8[2][7] = 1;
@@ -684,6 +703,8 @@ check_p_types(void)
 		CHECK(mbs[ADDR].mvd[0][blk][1] == 2U);
 		CHECK(mbs[ADDR].mvd[1][blk][0] == 0U);
 	}
+
+	/* No block is coded, so the pattern is zero. */
 	CHECK(mbs[ADDR].cbp == 0U);
 	CHECK(mbs[ADDR].qp == 26U);
 	CHECK(ctx.syntax.qp_delta == 0);
@@ -726,6 +747,8 @@ check_p_types(void)
 			CHECK(mbs[ADDR].mvd[0][blk][1] == 255U);
 		}
 	}
+
+	/* The coded block pattern is the one the stream carried. */
 	CHECK(mbs[ADDR].cbp == 1U);
 	CHECK(mbs[ADDR].qp == 27U);
 	CHECK(ctx.prev_qp_delta_nonzero == 1);
@@ -844,10 +867,14 @@ check_p_8x8(void)
 		CHECK(mbs[ADDR].mvd[0][blk][0] == blocks[blk][0]);
 		CHECK(mbs[ADDR].mvd[0][blk][1] == blocks[blk][1]);
 	}
+
+	/* Every partition used reference index 0. */
 	for (blk = 0; blk < 4U; blk++) {
 		CHECK(ctx.syntax.ref_idx[0][blk] == 0);
 		CHECK(mbs[ADDR].motion.ref_idx[0][blk] == 0);
 	}
+
+	/* A P macroblock has no direct blocks. */
 	CHECK(mbs[ADDR].direct == 0U);
 
 	/* A P_8x8 of four 8x8 sub-macroblocks with the 8x8 transform allowed and luma coded: the flag follows the pattern (here 1), then mb_qp_delta 0 and the first quadrant's four interleaved lists (levels at list 0 index 1, list 1 index 0, list 3 index 2). */
@@ -1003,6 +1030,8 @@ check_b_types(void)
 		CHECK(ctx.syntax.ref_idx[0][blk] == -1);
 		CHECK(ctx.syntax.ref_idx[1][blk] == -1);
 	}
+
+	/* The unused motion of both lists was left clear. */
 	check_unused_motion(0U, 0U);
 	check_unused_motion(1U, 0U);
 
@@ -1270,6 +1299,7 @@ qp_case(
 {
 	int result;
 
+	/* Parses an empty Intra_16x16 macroblock that carries the QP delta. */
 	env_make(H264SW_SLICE_I, 0, 1, 0, 0, 0, start, ADDR);
 	stream_begin();
 	put_16x16_empty(delta);
@@ -1617,6 +1647,8 @@ check_truncated(void)
 			bitwriter_u(&writer, index >> 1, 3U);
 		}
 	}
+
+	/* Writes the chroma mode, the coded block pattern and the QP delta. */
 	bitwriter_ue(&writer, 2U);
 	bitwriter_ue(&writer, 29U);
 	bitwriter_se(&writer, -3);
@@ -1669,6 +1701,8 @@ check_sane_after_parse(
 	} else {
 		CHECK(mbs[ctx.mb_addr].motion.intra == 0U);
 	}
+
+	/* The slice type of the header is the one that was given. */
 	CHECK(slice_type == header.slice_type);
 }
 
@@ -1695,6 +1729,8 @@ check_fuzz_cavlc(void)
 		} else {
 			slice_type = H264SW_SLICE_B;
 		}
+
+		/* Fills a buffer of that length with random bytes. */
 		length = 1U + random_next() % 200U;
 		for (index = 0; index < length; index++)
 			data[index] = (uint8_t)random_next();
@@ -1940,6 +1976,8 @@ cabac_begin(void)
 		number = random_next();
 		encoder.state[ctx_idx] = (uint8_t)((((number >> 8) & 1U) << 6) | (number % 63U));
 	}
+
+	/* Keeps the starting state so the decoder side can be given the same one. */
 	memcpy(initial_state, encoder.state, sizeof(initial_state));
 
 	/* The encoder writes into an empty stream. */
@@ -2172,6 +2210,8 @@ check_cabac_inter(void)
 			CHECK(mbs[3].mvd[0][blk][0] == 1U);
 		}
 	}
+
+	/* The block pattern is empty and the arithmetic decoder reported no error. */
 	CHECK(mbs[3].cbp == 0U);
 	CHECK(ctx.cabac.engine.error == 0);
 
@@ -2221,6 +2261,8 @@ check_fuzz_cabac(void)
 		} else {
 			slice_type = H264SW_SLICE_B;
 		}
+
+		/* Fills a buffer of that length with random bytes. */
 		length = 2U + random_next() % 250U;
 		for (index = 0; index < length; index++)
 			data[index] = (uint8_t)random_next();
@@ -2243,6 +2285,8 @@ check_fuzz_cabac(void)
 			h264sw_mb_neighbours(mbs, PIC_W, ADDR + 1U, &ctx.n);
 		}
 	}
+
+	/* Most of the random streams parse as macroblocks. */
 	CHECK(successes > 100U);
 
 	/* The slice data loop on random bytes of both entropy coders (with a reconstruction that always succeeds): it ends, and every entry is either decoded in the slice or reset. */
@@ -2266,6 +2310,8 @@ check_fuzz_cabac(void)
 		} else {
 			ctx.bits = bits;
 		}
+
+		/* Runs the slice data loop and checks that it ends with a known status. */
 		status = copy_slice_data(&ctx);
 		CHECK(status == 0 || status == EINVAL || status == ENOTSUP);
 		for (index = 0; index < PIC_MBS; index++)
@@ -2286,6 +2332,8 @@ stub_recon_mb(
 		recon_kind[recon_count] = slice->n.current->kind;
 		memcpy(recon_pcm[recon_count], slice->syntax.pcm, PCM_BYTES);
 	}
+
+	/* Counts the macroblock as reconstructed. */
 	recon_count++;
 
 	/* Fails at the address the case asked for. */

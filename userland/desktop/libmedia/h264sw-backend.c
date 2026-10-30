@@ -225,6 +225,8 @@ h264sw_backend_open(
 			h264sw_backend_close(backend);
 			return MEDIA_PROBLEM_PROFILE;
 		}
+
+		/* A parameter set that cannot be stored for lack of memory fails the open. */
 		if (error == ENOMEM) {
 			h264sw_backend_close(backend);
 			return ENOMEM;
@@ -262,6 +264,7 @@ h264sw_backend_send(
 	unsigned worth;
 	int error;
 
+	/* Recovers the back end from the caller's opaque state. */
 	backend = state;
 
 	/* A lasting error stays until a flush. */
@@ -346,6 +349,7 @@ h264sw_backend_receive(
 	struct h264sw_backend *backend;
 	struct h264sw_backend_entry *entry;
 
+	/* Recovers the back end from the caller's opaque state. */
 	backend = state;
 
 	/* The previous receive's picture stays available until this receive replaces it. */
@@ -386,6 +390,7 @@ h264sw_backend_picture(
 {
 	struct h264sw_backend *backend;
 
+	/* Recovers the back end from the caller's opaque state. */
 	backend = state;
 
 	/* No picture was received. */
@@ -421,6 +426,7 @@ h264sw_backend_flush(
 {
 	struct h264sw_backend *backend;
 
+	/* Recovers the back end from the caller's opaque state. */
 	backend = state;
 
 	/* The pictures waiting and the one received last go. */
@@ -450,6 +456,7 @@ h264sw_backend_close(
 {
 	struct h264sw_backend *backend;
 
+	/* Recovers the back end from the caller's opaque state. */
 	backend = state;
 
 	/* A failed open leaves nothing to close. */
@@ -637,6 +644,8 @@ h264sw_backend_keep(
 			backend->failed = ENOMEM;
 			return;
 		}
+
+		/* The grown buffer replaces the old one and remembers its size. */
 		backend->rest = bytes;
 		backend->rest_capacity = backend->size;
 	}
@@ -669,6 +678,7 @@ h264sw_backend_copy(
 	unsigned y;
 	int error;
 
+	/* No picture is handed out unless the copy succeeds. */
 	*result = NULL;
 
 	/* A cropping window outside the frame cannot be shown. */
@@ -793,6 +803,8 @@ h264sw_backend_clear(
 		media_picture_unref(backend->queue[place].picture);
 		backend->queue[place].picture = NULL;
 	}
+
+	/* The queue is empty again. */
 	backend->head = 0U;
 	backend->count = 0U;
 }

@@ -156,11 +156,15 @@ h264sw_mvpred(
 		found_mv[0] = a.mv[0];
 		found_mv[1] = a.mv[1];
 	}
+
+	/* B refers to the same picture as well. */
 	if (b.ref_idx == ref_idx) {
 		matches++;
 		found_mv[0] = b.mv[0];
 		found_mv[1] = b.mv[1];
 	}
+
+	/* C refers to the same picture as well. */
 	if (c.ref_idx == ref_idx) {
 		matches++;
 		found_mv[0] = c.mv[0];

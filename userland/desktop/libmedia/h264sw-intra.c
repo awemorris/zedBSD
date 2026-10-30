@@ -1132,6 +1132,8 @@ intra_filter_8x8(
 			/* With both neighbours the corner is filtered between them (8-84). */
 			value = (top[0] + 2 * top[-1] + left[0] + 2) >> 2;
 		}
+
+		/* The filtered corner serves as p[ -1, -1 ] of both the top row and the left column. */
 		filtered_top[-1] = (uint8_t)value;
 		filtered_left[-1] = (uint8_t)value;
 	}
@@ -1279,6 +1281,8 @@ intra_pred_diagonal_down_left(
 				/* The others take the three samples along the diagonal (8-53, 8-96). */
 				value = (top[x + y] + 2 * top[x + y + 1] + top[x + y + 2] + 2) >> 2;
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}
@@ -1315,6 +1319,8 @@ intra_pred_diagonal_down_right(
 				/* On the diagonal the samples lean on the corner (8-56, 8-99). */
 				value = (top[0] + 2 * top[-1] + left[0] + 2) >> 2;
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}
@@ -1360,6 +1366,8 @@ intra_pred_vertical_right(
 				/* A lower zVR comes from the left column (8-60, 8-103). */
 				value = (left[y - 2 * x - 1] + 2 * left[y - 2 * x - 2] + left[y - 2 * x - 3] + 2) >> 2;
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}
@@ -1405,6 +1413,8 @@ intra_pred_horizontal_down(
 				/* A lower zHD comes from the top row (8-64, 8-107). */
 				value = (top[x - 2 * y - 1] + 2 * top[x - 2 * y - 2] + top[x - 2 * y - 3] + 2) >> 2;
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}
@@ -1439,6 +1449,8 @@ intra_pred_vertical_left(
 				/* An odd row is a sample between three top samples (8-66, 8-109). */
 				value = (top[i] + 2 * top[i + 1] + top[i + 2] + 2) >> 2;
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}
@@ -1477,6 +1489,8 @@ intra_pred_horizontal_up(
 				/* Beyond it the samples repeat the last left sample (8-70, 8-113). */
 				value = left[n - 1];
 			}
+
+			/* Stores the predicted sample. */
 			pred[y * n + x] = (uint8_t)value;
 		}
 	}

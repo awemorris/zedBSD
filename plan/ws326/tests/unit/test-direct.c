@@ -73,6 +73,8 @@ static void check_errors(void);
 int
 main(void)
 {
+	int status;
+
 	/* Runs every group of checks. */
 	check_setup();
 	check_temporal();
@@ -87,7 +89,10 @@ main(void)
 	check_errors();
 
 	/* Reports the outcome as the one last line. */
-	return check_finish("direct");
+	status = check_finish("direct");
+
+	/* The exit status says whether every check held. */
+	return status;
 }
 
 /*
@@ -448,6 +453,8 @@ check_temporal(void)
 		CHECK(quadrant_mv_is(0, quadrant, 0, 0));
 		CHECK(quadrant_mv_is(1, quadrant, 0, 0));
 	}
+
+	/* After the loop every quadrant was served from the intra block, so nothing was concealed. */
 	CHECK(ctx.concealed == 0U);
 
 	/* A frame the co-located block referred to that list 0 lacks: index 0, counted as concealed. */
@@ -595,6 +602,8 @@ check_spatial_refs(void)
 		CHECK(quadrant_mv_is(0, quadrant, 10, 20));
 		CHECK(quadrant_mv_is(1, quadrant, 0, 0));
 	}
+
+	/* After the loop the neighbour scan ran once and is cached, and no zero direct flag was set. */
 	CHECK(ctx.direct.spatial_ready == 1);
 	CHECK(ctx.direct.direct_zero == 0);
 

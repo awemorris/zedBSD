@@ -119,6 +119,8 @@ h264sw_slice_read(
 	if (header->idr != 0) {
 		header->idr_pic_id = vcodec_bitreader_ue(bits);
 	}
+
+	/* A read that ran past the end of the RBSP is a truncated header. */
 	if (bits->error != 0)
 		return EINVAL;
 
@@ -797,9 +799,11 @@ slice_read_operations(
 		if (operation == H264SW_MMCO_ALL_UNUSED)
 			header->has_mmco5 = 1;
 
-		/* Keeps the entry once its fields are read. */
+		/* A read that ran past the end of the RBSP is a truncated header. */
 		if (bits->error != 0)
 			return EINVAL;
+
+		/* Keeps the entry now that its fields are read. */
 		count++;
 	}
 

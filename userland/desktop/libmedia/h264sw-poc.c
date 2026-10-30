@@ -69,6 +69,7 @@ h264sw_poc_compute(
 	int64_t offset;
 	int64_t reset_top;
 	int64_t reset_bottom;
+	int fits;
 	int error;
 
 	/* Refuses a missing argument. */
@@ -100,9 +101,11 @@ h264sw_poc_compute(
 		return error;
 
 	/* Both counts of the frame must fit the range the decoding process allows (8.2.1). */
-	if (!poc_fits(top))
+	fits = poc_fits(top);
+	if (!fits)
 		return EINVAL;
-	if (!poc_fits(bottom))
+	fits = poc_fits(bottom);
+	if (!fits)
 		return EINVAL;
 
 	/* PicOrderCnt of a frame is the smaller of its two counts (8-1). */
@@ -173,6 +176,7 @@ h264sw_poc_finish(
 			state->prev_lsb = poc->top;
 		}
 
+		/* The reset picture has left the state its next picture reads; nothing else is kept. */
 		return;
 	}
 
@@ -377,6 +381,7 @@ poc_type0(
 	int64_t prev_lsb;
 	int64_t msb;
 	int64_t sum;
+	int fits;
 	int error;
 
 	/* MaxPicOrderCntLsb is 2 to the power log2_max_pic_order_cnt_lsb (7-11). */
@@ -412,7 +417,8 @@ poc_type0(
 	}
 
 	/* PicOrderCntMsb is a count the range of 8.2.1 limits. */
-	if (!poc_fits(msb))
+	fits = poc_fits(msb);
+	if (!fits)
 		return EINVAL;
 
 	/* TopFieldOrderCnt is the msb plus the lsb (8-4). */

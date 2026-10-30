@@ -180,6 +180,8 @@ int
 main(
 	void)
 {
+	int status;
+
 	/* The intra and the transform paths of one macroblock. */
 	check_pcm();
 	check_i16_dc();
@@ -217,7 +219,8 @@ main(
 	check_slice_random();
 
 	/* Reports the result. */
-	return check_finish("recon");
+	status = check_finish("recon");
+	return status;
 }
 
 /* Gives the next pseudo-random number (xorshift), for test data. */
@@ -503,6 +506,8 @@ neighbour_inter(
 		mbs[addr].motion.mv[0][blk][0] = (int16_t)x;
 		mbs[addr].motion.mv[0][blk][1] = (int16_t)y;
 	}
+
+	/* Recomputes the neighbours of the current macroblock from the motion just set. */
 	neighbours_update();
 }
 
@@ -542,8 +547,11 @@ mb_luma(
 	unsigned column,
 	unsigned row)
 {
+	int sample;
+
 	/* The macroblock's upper-left sample plus the offset. */
-	return luma_at(16U * (cur_addr % pic_w) + column, 16U * (cur_addr / pic_w) + row);
+	sample = luma_at(16U * (cur_addr % pic_w) + column, 16U * (cur_addr / pic_w) + row);
+	return sample;
 }
 
 /* Reads a Cb sample of the current macroblock. */
@@ -552,8 +560,11 @@ mb_cb(
 	unsigned column,
 	unsigned row)
 {
+	int sample;
+
 	/* The macroblock's upper-left chroma sample plus the offset. */
-	return cb_at(8U * (cur_addr % pic_w) + column, 8U * (cur_addr / pic_w) + row);
+	sample = cb_at(8U * (cur_addr % pic_w) + column, 8U * (cur_addr / pic_w) + row);
+	return sample;
 }
 
 /* Reads a Cr sample of the current macroblock. */
@@ -562,8 +573,11 @@ mb_cr(
 	unsigned column,
 	unsigned row)
 {
+	int sample;
+
 	/* The macroblock's upper-left chroma sample plus the offset. */
-	return cr_at(8U * (cur_addr % pic_w) + column, 8U * (cur_addr / pic_w) + row);
+	sample = cr_at(8U * (cur_addr % pic_w) + column, 8U * (cur_addr / pic_w) + row);
+	return sample;
 }
 
 /* Tells whether a rectangle of the current macroblock's luma is the given value everywhere. */
@@ -577,11 +591,13 @@ luma_is(
 {
 	unsigned x;
 	unsigned y;
+	int luma_actual;
 
 	/* Looks for a sample that differs. */
 	for (y = row; y < row + height; y++) {
 		for (x = column; x < column + width; x++) {
-			if (mb_luma(x, y) != value)
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != value)
 				return 0;
 		}
 	}
@@ -746,7 +762,11 @@ check_pcm(void)
 	unsigned x;
 	unsigned y;
 	int ok;
+	int cb_actual;
+	int cr_actual;
+	int luma_actual;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_I, PIC_W, PIC_H, ADDR, 26);
 	set_type(H264SW_SLICE_I, 25U);
 	for (index = 0; index < 384U; index++)
@@ -757,22 +777,29 @@ check_pcm(void)
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (mb_luma(x, y) != (int)((((y * 16U + x) * 7U) + 3U) & 255U))
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != (int)((((y * 16U + x) * 7U) + 3U) & 255U))
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* The Cb samples follow the luma ones in the array, and the Cr samples the Cb ones. */
 	ok = 1;
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
-			if (mb_cb(x, y) != (int)(((((256U + y * 8U + x)) * 7U) + 3U) & 255U))
+			cb_actual = mb_cb(x, y);
+			if (cb_actual != (int)(((((256U + y * 8U + x)) * 7U) + 3U) & 255U))
 				ok = 0;
-			if (mb_cr(x, y) != (int)(((((320U + y * 8U + x)) * 7U) + 3U) & 255U))
+			cr_actual = mb_cr(x, y);
+			if (cr_actual != (int)(((((320U + y * 8U + x)) * 7U) + 3U) & 255U))
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* The samples around the macroblock are untouched. */
@@ -869,7 +896,10 @@ check_i16_ac(void)
 	unsigned y;
 	int rows_equal;
 	int varies;
+	int luma_actual;
+	int luma_other;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_I, PIC_W, PIC_H, ADDR, 28);
 	set_type(H264SW_SLICE_I, 3U);
 	ctx.syntax.luma[5][1] = 20;
@@ -881,12 +911,18 @@ check_i16_ac(void)
 	varies = 0;
 	for (y = 0; y < 4U; y++) {
 		for (x = 0; x < 4U; x++) {
-			if (mb_luma(12U + x, y) != mb_luma(12U + x, 0U))
+			luma_actual = mb_luma(12U + x, y);
+			luma_other = mb_luma(12U + x, 0U);
+			if (luma_actual != luma_other)
 				rows_equal = 0;
-			if (mb_luma(12U + x, y) != mb_luma(12U, 0U))
+			luma_actual = mb_luma(12U + x, y);
+			luma_other = mb_luma(12U, 0U);
+			if (luma_actual != luma_other)
 				varies = 1;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(rows_equal);
 	CHECK(varies);
 
@@ -917,6 +953,7 @@ chroma_qp_case(
 	int expected_cb;
 	int expected_cr;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_I, PIC_W, PIC_H, ADDR, qp);
 	picture.chroma_qp_offset[0] = offset_cb;
 	picture.chroma_qp_offset[1] = offset_cr;
@@ -1034,6 +1071,7 @@ check_i4x4_order(void)
 	unsigned mode_b;
 	int ok;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_I, PIC_W, PIC_H, ADDR, 28);
 	set_type(H264SW_SLICE_I, 0U);
 	ctx.syntax.type.kind = H264SW_MB_I_4X4;
@@ -1051,13 +1089,20 @@ check_i4x4_order(void)
 			if (mode_b < pred)
 				pred = mode_b;
 		}
+
+		/* Codes the mode as the predicted-mode flag when it equals the prediction, else as the remaining mode. */
 		if (modes[blk] == pred) {
 			ctx.syntax.prev_intra_flag[blk] = 1;
 		} else {
 			ctx.syntax.prev_intra_flag[blk] = 0;
-			ctx.syntax.rem_intra_mode[blk] = (uint8_t)(modes[blk] < pred ? modes[blk] : modes[blk] - 1U);
+			if (modes[blk] < pred)
+				ctx.syntax.rem_intra_mode[blk] = (uint8_t)modes[blk];
+			else
+				ctx.syntax.rem_intra_mode[blk] = (uint8_t)(modes[blk] - 1U);
 		}
 	}
+
+	/* Marks the luma block 0 as having a coefficient and reconstructs the macroblock. */
 	ctx.syntax.luma[0][0] = 1;
 	run_mb(0);
 
@@ -1070,6 +1115,8 @@ check_i4x4_order(void)
 		if (mbs[ADDR].intra4x4_mode[blk] != modes[blk])
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(mbs[ADDR].nonzero == 1U);
 
@@ -1094,6 +1141,7 @@ check_i8x8(void)
 	unsigned part;
 	int ok;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_I, PIC_W, PIC_H, ADDR, 28);
 	set_type(H264SW_SLICE_I, 0U);
 	ctx.syntax.type.kind = H264SW_MB_I_8X8;
@@ -1104,6 +1152,7 @@ check_i8x8(void)
 	ctx.syntax.luma8x8[0][0] = 1;
 	run_mb(0);
 
+	/* Requires the prediction value 130 everywhere and the first 8x8 block marked as having coefficients. */
 	CHECK(luma_is(0U, 0U, 16U, 16U, 130));
 	CHECK(mbs[ADDR].nonzero == 0xfU);
 
@@ -1114,6 +1163,8 @@ check_i8x8(void)
 		if (part != 2U)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(chroma_is(1U, 0U, 0U, 8U, 8U, 128));
 	CHECK(ctx.concealed == 0U);
@@ -1246,6 +1297,12 @@ check_p16x16(void)
 	int ok_cb;
 	int ok_cr;
 	unsigned addr;
+	int cb_actual;
+	int chroma_reference;
+	int clamped_sample;
+	int cr_actual;
+	int luma_actual;
+	int luma_reference;
 
 	/* The middle macroblock and the right edge one, whose shifted positions pass the edge of the 48 sample wide picture. */
 	for (addr = ADDR; addr <= 5U; addr++) {
@@ -1264,18 +1321,28 @@ check_p16x16(void)
 		ok_cr = 1;
 		for (y = 0; y < 16U; y++) {
 			for (x = 0; x < 16U; x++) {
-				if (mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U * (addr % PIC_W) + x) + 4, (int)(16U * (addr / PIC_W) + y)))
+				luma_actual = mb_luma(x, y);
+				luma_reference = ref_luma(&frames[FRAME_A], (int)(16U * (addr % PIC_W) + x) + 4, (int)(16U * (addr / PIC_W) + y));
+				if (luma_actual != luma_reference)
 					ok_luma = 0;
 			}
 		}
+
+		/* Compares the samples of each row of the block. */
 		for (y = 0; y < 8U; y++) {
 			for (x = 0; x < 8U; x++) {
-				if (mb_cb(x, y) != ref_chroma(&frames[FRAME_A], 1U, (int)(8U * (addr % PIC_W) + x) + 2, (int)(8U * (addr / PIC_W) + y)))
+				cb_actual = mb_cb(x, y);
+				chroma_reference = ref_chroma(&frames[FRAME_A], 1U, (int)(8U * (addr % PIC_W) + x) + 2, (int)(8U * (addr / PIC_W) + y));
+				if (cb_actual != chroma_reference)
 					ok_cb = 0;
-				if (mb_cr(x, y) != ref_chroma(&frames[FRAME_A], 2U, (int)(8U * (addr % PIC_W) + x) + 2, (int)(8U * (addr / PIC_W) + y)))
+				cr_actual = mb_cr(x, y);
+				chroma_reference = ref_chroma(&frames[FRAME_A], 2U, (int)(8U * (addr % PIC_W) + x) + 2, (int)(8U * (addr / PIC_W) + y));
+				if (cr_actual != chroma_reference)
 					ok_cr = 0;
 			}
 		}
+
+		/* Requires that every value compared above matched. */
 		CHECK(ok_luma);
 		CHECK(ok_cb);
 		CHECK(ok_cr);
@@ -1301,14 +1368,19 @@ check_p16x16(void)
 	ok_luma = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
 			if (x < 4U && y < 4U) {
-				if (mb_luma(x, y) != clamp255(ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y)) + 4))
+				clamped_sample = clamp255(luma_reference + 4);
+				if (luma_actual != clamped_sample)
 					ok_luma = 0;
-			} else if (mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y))) {
+			} else if (luma_actual != luma_reference) {
 				ok_luma = 0;
 			}
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok_luma);
 	CHECK(mbs[ADDR].nonzero == 1U);
 }
@@ -1334,7 +1406,12 @@ check_p_fraction(void)
 	int expected;
 	int ok_luma;
 	int ok_cb;
+	int cb_actual;
+	int chroma_expected;
+	int cr_actual;
+	int luma_actual;
 
+	/* Runs the case twice: the second time with the weights set explicitly. */
 	for (which = 0; which < 2U; which++) {
 		env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
 		set_ref(0, 0, FRAME_A, 0);
@@ -1351,18 +1428,27 @@ check_p_fraction(void)
 				base = (int)(16U + x) + whole[which];
 				sum = ref_luma(&frames[FRAME_A], base - 2, (int)(16U + y)) - 5 * ref_luma(&frames[FRAME_A], base - 1, (int)(16U + y)) + 20 * ref_luma(&frames[FRAME_A], base, (int)(16U + y)) + 20 * ref_luma(&frames[FRAME_A], base + 1, (int)(16U + y)) - 5 * ref_luma(&frames[FRAME_A], base + 2, (int)(16U + y)) + ref_luma(&frames[FRAME_A], base + 3, (int)(16U + y));
 				expected = clamp255((sum + 16) >> 5);
-				if (mb_luma(x, y) != expected)
+				luma_actual = mb_luma(x, y);
+				if (luma_actual != expected)
 					ok_luma = 0;
 			}
 		}
+
+		/* Compares the samples of each row of the block. */
 		for (y = 0; y < 8U; y++) {
 			for (x = 0; x < 8U; x++) {
-				if (mb_cb(x, y) != expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), vectors[which], 0))
+				cb_actual = mb_cb(x, y);
+				chroma_expected = expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), vectors[which], 0);
+				if (cb_actual != chroma_expected)
 					ok_cb = 0;
-				if (mb_cr(x, y) != expect_chroma(&frames[FRAME_A], 2U, (int)(8U + x), (int)(8U + y), vectors[which], 0))
+				cr_actual = mb_cr(x, y);
+				chroma_expected = expect_chroma(&frames[FRAME_A], 2U, (int)(8U + x), (int)(8U + y), vectors[which], 0);
+				if (cr_actual != chroma_expected)
 					ok_cb = 0;
 			}
 		}
+
+		/* Requires that every value compared above matched. */
 		CHECK(ok_luma);
 		CHECK(ok_cb);
 	}
@@ -1383,7 +1469,12 @@ check_p_weighted(void)
 	int ok_luma;
 	int ok_cb;
 	int ok_cr;
+	int cb_actual;
+	int clamped_sample;
+	int cr_actual;
+	int luma_actual;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
 	set_ref(0, 0, FRAME_A, 0);
 	pps.weighted_pred = 1;
@@ -1401,26 +1492,37 @@ check_p_weighted(void)
 	ctx.syntax.ref_idx[0][0] = 0;
 	run_mb(0);
 
+	/* Reconstructs the macroblock, then compares every luma and chroma sample with the weighted prediction. */
 	ok_luma = 1;
 	ok_cb = 1;
 	ok_cr = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
 			p = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
-			if (mb_luma(x, y) != clamp255(((p * 3 + 1) >> 1) + 2))
+			luma_actual = mb_luma(x, y);
+			clamped_sample = clamp255(((p * 3 + 1) >> 1) + 2);
+			if (luma_actual != clamped_sample)
 				ok_luma = 0;
 		}
 	}
+
+	/* Compares the samples of each row of the block. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			p = ref_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y));
-			if (mb_cb(x, y) != clamp255(((p * 5 + 2) >> 2) + 1))
+			cb_actual = mb_cb(x, y);
+			clamped_sample = clamp255(((p * 5 + 2) >> 2) + 1);
+			if (cb_actual != clamped_sample)
 				ok_cb = 0;
 			p = ref_chroma(&frames[FRAME_A], 2U, (int)(8U + x), (int)(8U + y));
-			if (mb_cr(x, y) != clamp255(((p * 6 + 2) >> 2) - 1))
+			cr_actual = mb_cr(x, y);
+			clamped_sample = clamp255(((p * 6 + 2) >> 2) - 1);
+			if (cr_actual != clamped_sample)
 				ok_cr = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok_luma);
 	CHECK(ok_cb);
 	CHECK(ok_cr);
@@ -1441,6 +1543,11 @@ check_pskip(void)
 	unsigned y;
 	unsigned blk;
 	int ok;
+	int cb_actual;
+	int chroma_expected;
+	int luma_actual;
+	int luma_reference;
+	int vector_matches;
 
 	/* The neighbours A (3), B (1) and C (2) all move by (8, 4) from index 0. */
 	env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
@@ -1453,9 +1560,12 @@ check_pskip(void)
 	run_mb(0);
 	ok = 1;
 	for (blk = 0; blk < 16U; blk++) {
-		if (!mv_is(0, blk, 8, 4))
+		vector_matches = mv_is(0, blk, 8, 4);
+		if (!vector_matches)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(mbs[ADDR].motion.ref_idx[0][0] == 0 && mbs[ADDR].motion.ref_idx[0][2] == 0);
 	CHECK(mbs[ADDR].motion.ref_id[0][1] == ID_A);
@@ -1465,16 +1575,24 @@ check_pskip(void)
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x) + 2, (int)(16U + y) + 1))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x) + 2, (int)(16U + y) + 1);
+			if (luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Compares the samples of each row of the block. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
-			if (mb_cb(x, y) != expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 8, 4))
+			cb_actual = mb_cb(x, y);
+			chroma_expected = expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 8, 4);
+			if (cb_actual != chroma_expected)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* Without B (address 1) the vector is 0 and the macroblock copies the reference. */
@@ -1488,10 +1606,14 @@ check_pskip(void)
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y)))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
+			if (luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 }
 
@@ -1511,6 +1633,11 @@ check_p_parts(void)
 	unsigned y;
 	unsigned blk;
 	int ok;
+	int cb_actual;
+	int chroma_expected;
+	int luma_actual;
+	int luma_reference;
+	int vector_matches;
 
 	/* 16x8. */
 	env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
@@ -1526,31 +1653,47 @@ check_p_parts(void)
 	run_mb(0);
 	ok = 1;
 	for (blk = 0; blk < 16U; blk++) {
-		if (blk < 8U && !mv_is(0, blk, 4, -8))
+		vector_matches = mv_is(0, blk, 4, -8);
+		if (blk < 8U && !vector_matches)
 			ok = 0;
-		if (blk >= 8U && !mv_is(0, blk, 4, -4))
+		vector_matches = mv_is(0, blk, 4, -4);
+		if (blk >= 8U && !vector_matches)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (y < 8U && mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x) + 1, (int)(16U + y) - 2))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x) + 1, (int)(16U + y) - 2);
+			if (y < 8U && luma_actual != luma_reference)
 				ok = 0;
-			if (y >= 8U && mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x) + 1, (int)(16U + y) - 1))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x) + 1, (int)(16U + y) - 1);
+			if (y >= 8U && luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	ok = 1;
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
-			if (y < 4U && mb_cb(x, y) != expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 4, -8))
+			cb_actual = mb_cb(x, y);
+			chroma_expected = expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 4, -8);
+			if (y < 4U && cb_actual != chroma_expected)
 				ok = 0;
-			if (y >= 4U && mb_cb(x, y) != expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 4, -4))
+			cb_actual = mb_cb(x, y);
+			chroma_expected = expect_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y), 4, -4);
+			if (y >= 4U && cb_actual != chroma_expected)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* 8x16. */
@@ -1566,11 +1709,15 @@ check_p_parts(void)
 	run_mb(0);
 	ok = 1;
 	for (blk = 0; blk < 16U; blk++) {
-		if (h264sw_blk4x4_x[blk] < 8U && !mv_is(0, blk, 8, 0))
+		vector_matches = mv_is(0, blk, 8, 0);
+		if (h264sw_blk4x4_x[blk] < 8U && !vector_matches)
 			ok = 0;
-		if (h264sw_blk4x4_x[blk] >= 8U && !mv_is(0, blk, 12, 4))
+		vector_matches = mv_is(0, blk, 12, 4);
+		if (h264sw_blk4x4_x[blk] >= 8U && !vector_matches)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 }
 
@@ -1600,7 +1747,11 @@ check_p_sub(void)
 	unsigned y;
 	unsigned blk;
 	int ok;
+	int luma_actual;
+	int luma_reference;
+	int vector_matches;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
 	set_ref(0, 0, FRAME_A, 0);
 	set_type(H264SW_SLICE_P, 3U);
@@ -1615,11 +1766,15 @@ check_p_sub(void)
 		ctx.syntax.mvd[0][0][blk][0] = 4;
 	run_mb(0);
 
+	/* Reconstructs the macroblock, then compares each block's vector with the expected one. */
 	ok = 1;
 	for (blk = 0; blk < 16U; blk++) {
-		if (!mv_is(0, blk, expected_x[blk], 0))
+		vector_matches = mv_is(0, blk, expected_x[blk], 0);
+		if (!vector_matches)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* Each 4x4 block of the first sub-macroblock is predicted from its own vector: 1, 2, 2 and 3 samples. */
@@ -1627,11 +1782,15 @@ check_p_sub(void)
 	for (blk = 0; blk < 4U; blk++) {
 		for (y = 0; y < 4U; y++) {
 			for (x = 0; x < 4U; x++) {
-				if (mb_luma(h264sw_blk4x4_x[blk] + x, h264sw_blk4x4_y[blk] + y) != ref_luma(&frames[FRAME_A], (int)(16U + h264sw_blk4x4_x[blk] + x) + expected_x[blk] / 4, (int)(16U + h264sw_blk4x4_y[blk] + y)))
+				luma_actual = mb_luma(h264sw_blk4x4_x[blk] + x, h264sw_blk4x4_y[blk] + y);
+				luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + h264sw_blk4x4_x[blk] + x) + expected_x[blk] / 4, (int)(16U + h264sw_blk4x4_y[blk] + y));
+				if (luma_actual != luma_reference)
 					ok = 0;
 			}
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(ctx.decoded_4x4 == 0xffffU);
 }
@@ -1651,7 +1810,10 @@ check_p_refs(void)
 	unsigned y;
 	int ok;
 	int want;
+	int luma_actual;
+	int luma_reference;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_P, PIC_W, PIC_H, ADDR, 26);
 	header.num_ref_idx_active[0] = 2;
 	set_ref(0, 0, FRAME_A, 0);
@@ -1661,8 +1823,11 @@ check_p_refs(void)
 		set_sub(H264SW_SLICE_P, quadrant, 0U);
 		ctx.syntax.ref_idx[0][quadrant] = (int8_t)refs[quadrant];
 	}
+
+	/* Reconstructs the macroblock with the four references. */
 	run_mb(0);
 
+	/* Compares the reference picture each quadrant used with the one its index names. */
 	ok = 1;
 	for (quadrant = 0; quadrant < 4U; quadrant++) {
 		want = (int)ID_A;
@@ -1674,13 +1839,19 @@ check_p_refs(void)
 			ok = 0;
 		for (y = 0; y < 8U; y++) {
 			for (x = 0; x < 8U; x++) {
-				if (refs[quadrant] == 0 && mb_luma(8U * (quadrant % 2U) + x, 8U * (quadrant / 2U) + y) != ref_luma(&frames[FRAME_A], (int)(16U + 8U * (quadrant % 2U) + x), (int)(16U + 8U * (quadrant / 2U) + y)))
+				luma_actual = mb_luma(8U * (quadrant % 2U) + x, 8U * (quadrant / 2U) + y);
+				luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + 8U * (quadrant % 2U) + x), (int)(16U + 8U * (quadrant / 2U) + y));
+				if (refs[quadrant] == 0 && luma_actual != luma_reference)
 					ok = 0;
-				if (refs[quadrant] == 1 && mb_luma(8U * (quadrant % 2U) + x, 8U * (quadrant / 2U) + y) != ref_luma(&frames[FRAME_B], (int)(16U + 8U * (quadrant % 2U) + x), (int)(16U + 8U * (quadrant / 2U) + y)))
+				luma_actual = mb_luma(8U * (quadrant % 2U) + x, 8U * (quadrant / 2U) + y);
+				luma_reference = ref_luma(&frames[FRAME_B], (int)(16U + 8U * (quadrant % 2U) + x), (int)(16U + 8U * (quadrant / 2U) + y));
+				if (refs[quadrant] == 1 && luma_actual != luma_reference)
 					ok = 0;
 			}
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 }
 
@@ -1699,7 +1870,11 @@ check_b_bi(void)
 	int ok_chroma;
 	int a;
 	int b;
+	int cb_actual;
+	int cr_actual;
+	int luma_actual;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_B, PIC_W, PIC_H, ADDR, 26);
 	set_ref(0, 0, FRAME_A, 0);
 	set_ref(1, 0, FRAME_B, 8);
@@ -1714,18 +1889,24 @@ check_b_bi(void)
 		for (x = 0; x < 16U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
 			b = ref_luma(&frames[FRAME_B], (int)(16U + x), (int)(16U + y));
-			if (mb_luma(x, y) != ((a + b + 1) >> 1))
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != ((a + b + 1) >> 1))
 				ok_luma = 0;
 		}
 	}
+
+	/* Compares the samples of each row of the block. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			a = ref_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y));
 			b = ref_chroma(&frames[FRAME_B], 1U, (int)(8U + x), (int)(8U + y));
-			if (mb_cb(x, y) != ((a + b + 1) >> 1))
+			cb_actual = mb_cb(x, y);
+			if (cb_actual != ((a + b + 1) >> 1))
 				ok_chroma = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok_luma);
 	CHECK(ok_chroma);
 	CHECK(mbs[ADDR].motion.ref_id[0][0] == ID_A && mbs[ADDR].motion.ref_id[1][0] == ID_B);
@@ -1747,18 +1928,24 @@ check_b_bi(void)
 		for (x = 0; x < 16U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)(16U + x) + 2, (int)(16U + y));
 			b = ref_luma(&frames[FRAME_B], (int)(16U + x) - 1, (int)(16U + y));
-			if (mb_luma(x, y) != ((a + b + 1) >> 1))
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != ((a + b + 1) >> 1))
 				ok_luma = 0;
 		}
 	}
+
+	/* Compares the samples of each row of the block. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			a = expect_chroma(&frames[FRAME_A], 2U, (int)(8U + x), (int)(8U + y), 8, 0);
 			b = expect_chroma(&frames[FRAME_B], 2U, (int)(8U + x), (int)(8U + y), -4, 0);
-			if (mb_cr(x, y) != ((a + b + 1) >> 1))
+			cr_actual = mb_cr(x, y);
+			if (cr_actual != ((a + b + 1) >> 1))
 				ok_chroma = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok_luma);
 	CHECK(ok_chroma);
 }
@@ -1778,7 +1965,11 @@ check_b_implicit(void)
 	int a;
 	int b;
 	int ok;
+	int cb_actual;
+	int clamped_sample;
+	int luma_actual;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_B, PIC_W, PIC_H, ADDR, 26);
 	set_ref(0, 0, FRAME_A, 0);
 	set_ref(1, 0, FRAME_B, 8);
@@ -1793,18 +1984,26 @@ check_b_implicit(void)
 		for (x = 0; x < 16U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
 			b = ref_luma(&frames[FRAME_B], (int)(16U + x), (int)(16U + y));
-			if (mb_luma(x, y) != clamp255((a * 48 + b * 16 + 32) >> 6))
+			luma_actual = mb_luma(x, y);
+			clamped_sample = clamp255((a * 48 + b * 16 + 32) >> 6);
+			if (luma_actual != clamped_sample)
 				ok = 0;
 		}
 	}
+
+	/* Compares the samples of each row of the block. */
 	for (y = 0; y < 8U; y++) {
 		for (x = 0; x < 8U; x++) {
 			a = ref_chroma(&frames[FRAME_A], 1U, (int)(8U + x), (int)(8U + y));
 			b = ref_chroma(&frames[FRAME_B], 1U, (int)(8U + x), (int)(8U + y));
-			if (mb_cb(x, y) != clamp255((a * 48 + b * 16 + 32) >> 6))
+			cb_actual = mb_cb(x, y);
+			clamped_sample = clamp255((a * 48 + b * 16 + 32) >> 6);
+			if (cb_actual != clamped_sample)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 }
 
@@ -1818,7 +2017,10 @@ check_b_mixed(void)
 	unsigned x;
 	unsigned y;
 	int ok;
+	int luma_actual;
+	int luma_reference;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_B, PIC_W, PIC_H, ADDR, 26);
 	set_ref(0, 0, FRAME_A, 0);
 	set_ref(1, 0, FRAME_B, 8);
@@ -1832,12 +2034,18 @@ check_b_mixed(void)
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (y < 8U && mb_luma(x, y) != ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y)))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
+			if (y < 8U && luma_actual != luma_reference)
 				ok = 0;
-			if (y >= 8U && mb_luma(x, y) != ref_luma(&frames[FRAME_B], (int)(16U + x), (int)(16U + y)))
+			luma_actual = mb_luma(x, y);
+			luma_reference = ref_luma(&frames[FRAME_B], (int)(16U + x), (int)(16U + y));
+			if (y >= 8U && luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* The upper half uses list 0 only, the lower list 1 only. */
@@ -1866,6 +2074,7 @@ check_b_direct(void)
 	int ok;
 	int a;
 	int c;
+	int luma_actual;
 
 	/* Spatial, B_Skip. */
 	env_make(H264SW_SLICE_B, PIC_W, PIC_H, ADDR, 26);
@@ -1881,15 +2090,20 @@ check_b_direct(void)
 		for (x = 0; x < 16U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)(16U + x), (int)(16U + y));
 			c = ref_luma(&frames[FRAME_C], (int)(16U + x), (int)(16U + y));
-			if (mb_luma(x, y) != ((a + c + 1) >> 1))
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != ((a + c + 1) >> 1))
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	for (quadrant = 0; quadrant < 4U; quadrant++) {
 		CHECK(mbs[ADDR].motion.ref_idx[0][quadrant] == 0 && mbs[ADDR].motion.ref_idx[1][quadrant] == 0);
 		CHECK(mbs[ADDR].motion.ref_id[0][quadrant] == ID_A && mbs[ADDR].motion.ref_id[1][quadrant] == ID_C);
 	}
+
+	/* Requires that the direct flags cover all four quadrants and every 4x4 block was decoded. */
 	CHECK(mbs[ADDR].direct == 0xfU);
 	CHECK(ctx.decoded_4x4 == 0xffffU);
 
@@ -1904,10 +2118,14 @@ check_b_direct(void)
 		frames[FRAME_C].motion[ADDR].ref_idx[0][quadrant] = 0;
 		frames[FRAME_C].motion[ADDR].ref_id[0][quadrant] = ID_A;
 	}
+
+	/* Gives the co-located macroblock a vector of 16 on every block. */
 	for (blk = 0; blk < 16U; blk++) {
 		frames[FRAME_C].motion[ADDR].mv[0][blk][0] = 16;
 		frames[FRAME_C].motion[ADDR].mv[0][blk][1] = 0;
 	}
+
+	/* Prepares the direct-mode state for a B picture of picture order count 4. */
 	h264sw_direct_setup(&ctx.direct, &ctx.lists, 4);
 	set_type(H264SW_SLICE_B, 0U);
 	CHECK(ctx.syntax.type.kind == H264SW_MB_B_DIRECT);
@@ -1919,10 +2137,13 @@ check_b_direct(void)
 		for (x = 0; x < 16U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)(16U + x) + 2, (int)(16U + y));
 			c = ref_luma(&frames[FRAME_C], (int)(16U + x) - 2, (int)(16U + y));
-			if (mb_luma(x, y) != ((a + c + 1) >> 1))
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != ((a + c + 1) >> 1))
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(mbs[ADDR].motion.ref_id[0][0] == ID_A);
 	CHECK(mbs[ADDR].direct == 0xfU);
@@ -1947,7 +2168,9 @@ check_b_8x8(void)
 	int a;
 	int c;
 	int want;
+	int luma_actual;
 
+	/* Starts a fresh decoding environment for this case. */
 	env_make(H264SW_SLICE_B, PIC_W, PIC_H, ADDR, 26);
 	header.direct_spatial = 1;
 	set_ref(0, 0, FRAME_A, 0);
@@ -1970,6 +2193,7 @@ check_b_8x8(void)
 	ctx.syntax.mvd[0][3][0][0] = 8;
 	run_mb(0);
 
+	/* Reconstructs the macroblock, then compares every luma sample with the expected prediction. */
 	ok = 1;
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
@@ -1980,10 +2204,13 @@ check_b_8x8(void)
 				want = c;
 			if (x >= 8U && y >= 8U)
 				want = ref_luma(&frames[FRAME_A], (int)(16U + x) + 2, (int)(16U + y));
-			if (mb_luma(x, y) != want)
+			luma_actual = mb_luma(x, y);
+			if (luma_actual != want)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(mbs[ADDR].direct == 1U);
 	CHECK(mbs[ADDR].motion.ref_idx[0][0] == 0 && mbs[ADDR].motion.ref_idx[1][0] == 0);
@@ -2171,13 +2398,18 @@ fuzz_syntax(void)
 	unsigned addr;
 	int status;
 	int raw_type;
+	uint32_t draw;
+	int fill_neighbour;
 
+	/* Reconstructs 30000 random macroblocks: the call must return 0 or EINVAL and stay inside the picture. */
 	for (iteration = 0; iteration < 30000U; iteration++) {
 		/* A slice type and a macroblock somewhere in the picture, with random neighbours. */
 		slice_type = H264SW_SLICE_I;
-		if (random_next() % 3U == 1U)
+		draw = random_next();
+		if (draw % 3U == 1U)
 			slice_type = H264SW_SLICE_P;
-		if (random_next() % 3U == 2U)
+		draw = random_next();
+		if (draw % 3U == 2U)
 			slice_type = H264SW_SLICE_B;
 		addr = random_next() % PIC_MBS;
 		env_make(slice_type, PIC_W, PIC_H, addr, (int)(random_next() % 52U));
@@ -2185,7 +2417,11 @@ fuzz_syntax(void)
 		picture.chroma_qp_offset[0] = (int)(random_next() % 25U) - 12;
 		picture.chroma_qp_offset[1] = (int)(random_next() % 25U) - 12;
 		for (index = 0; index < PIC_MBS; index++) {
-			if (index != addr && random_next() % 2U == 0U) {
+			/* Draws whether this macroblock gets random contents; the current one is never filled and draws nothing. */
+			fill_neighbour = 0;
+			if (index != addr)
+				fill_neighbour = random_next() % 2U == 0U;
+			if (fill_neighbour != 0) {
 				mbs[index].slice = 0;
 				mbs[index].kind = (uint8_t)(random_next() % 13U);
 				mbs[index].motion.intra = (uint8_t)(random_next() % 2U);
@@ -2199,6 +2435,8 @@ fuzz_syntax(void)
 				}
 			}
 		}
+
+		/* Recomputes the neighbours of the macroblock after the random motion was written. */
 		neighbours_update();
 
 		/* The lists: some entries present, some missing, some empty. */
@@ -2206,9 +2444,12 @@ fuzz_syntax(void)
 			index = random_next() % 4U;
 			for (part = 0; part < index; part++)
 				set_ref(list, part, FRAME_A + (random_next() % 3U), (int)(random_next() % 20U));
-			if (random_next() % 8U == 0U && index > 0U)
+			draw = random_next();
+			if (draw % 8U == 0U && index > 0U)
 				ctx.lists.list[list][0].missing = 1;
 		}
+
+		/* Prepares the direct-mode state and picks the direct flags at random. */
 		h264sw_direct_setup(&ctx.direct, &ctx.lists, 4);
 		header.direct_spatial = (int)(random_next() % 2U);
 		sps.direct_8x8_inference = (int)(random_next() % 2U);
@@ -2223,11 +2464,16 @@ fuzz_syntax(void)
 				h264sw_mb_skip_type(slice_type, &ctx.syntax.type);
 			}
 		}
+
+		/* Splits an NxN intra macroblock into 4x4 or 8x8 prediction at random. */
 		if (ctx.syntax.type.kind == H264SW_MB_I_NXN) {
 			ctx.syntax.type.kind = H264SW_MB_I_4X4;
-			if (random_next() % 2U == 0U)
+			draw = random_next();
+			if (draw % 2U == 0U)
 				ctx.syntax.type.kind = H264SW_MB_I_8X8;
 		}
+
+		/* Corrupts the macroblock type at random, to meet kinds outside the legal range. */
 		raw_type = (int)(random_next() % 10U);
 		if (raw_type == 0)
 			ctx.syntax.type.kind = random_next() % 20U;
@@ -2256,7 +2502,8 @@ fuzz_syntax(void)
 		for (list = 0; list < 2U; list++) {
 			for (part = 0; part < 4U; part++) {
 				ctx.syntax.ref_idx[list][part] = (int8_t)((int)(random_next() % 5U) - 1);
-				if (random_next() % 16U == 0U)
+				draw = random_next();
+				if (draw % 16U == 0U)
 					ctx.syntax.ref_idx[list][part] = (int8_t)random_next();
 				for (sub = 0; sub < 4U; sub++) {
 					ctx.syntax.mvd[list][part][sub][0] = (int16_t)random_next();
@@ -2264,43 +2511,62 @@ fuzz_syntax(void)
 				}
 			}
 		}
+
+		/* Fills the intra prediction modes with random values. */
 		for (part = 0; part < 16U; part++) {
 			ctx.syntax.prev_intra_flag[part] = (uint8_t)(random_next() % 2U);
 			ctx.syntax.rem_intra_mode[part] = (uint8_t)(random_next() % 8U);
 		}
+
+		/* Fills the I_PCM samples with random bytes. */
 		for (part = 0; part < 384U; part++)
 			ctx.syntax.pcm[part] = (uint8_t)random_next();
 		for (part = 0; part < 16U; part++) {
-			if (random_next() % 4U == 0U)
+			draw = random_next();
+			if (draw % 4U == 0U)
 				ctx.syntax.luma_dc[part] = (int32_t)(random_next() % 65536U) - 32768;
-			if (random_next() % 40U == 0U)
+			draw = random_next();
+			if (draw % 40U == 0U)
 				ctx.syntax.luma_dc[part] = extreme[random_next() % 6U];
 			for (sub = 0; sub < 16U; sub++) {
-				if (random_next() % 8U == 0U)
+				draw = random_next();
+				if (draw % 8U == 0U)
 					ctx.syntax.luma[part][sub] = (int32_t)(random_next() % 65536U) - 32768;
-				if (random_next() % 200U == 0U)
+				draw = random_next();
+				if (draw % 200U == 0U)
 					ctx.syntax.luma[part][sub] = extreme[random_next() % 6U];
 			}
 		}
+
+		/* Fills the 8x8 luma blocks and the chroma DC levels with random levels, some of them extreme. */
 		for (part = 0; part < 4U; part++) {
 			for (sub = 0; sub < 64U; sub++) {
-				if (random_next() % 8U == 0U)
+				draw = random_next();
+				if (draw % 8U == 0U)
 					ctx.syntax.luma8x8[part][sub] = (int32_t)(random_next() % 65536U) - 32768;
-				if (random_next() % 200U == 0U)
+				draw = random_next();
+				if (draw % 200U == 0U)
 					ctx.syntax.luma8x8[part][sub] = extreme[random_next() % 6U];
 			}
+
+			/* Fills the chroma DC levels with random levels, some of them extreme. */
 			for (list = 0; list < 2U; list++) {
 				ctx.syntax.chroma_dc[list][part] = (int32_t)(random_next() % 65536U) - 32768;
-				if (random_next() % 20U == 0U)
+				draw = random_next();
+				if (draw % 20U == 0U)
 					ctx.syntax.chroma_dc[list][part] = extreme[random_next() % 6U];
 				for (sub = 0; sub < 16U; sub++) {
-					if (random_next() % 4U == 0U)
+					draw = random_next();
+					if (draw % 4U == 0U)
 						ctx.syntax.chroma_ac[list][part][sub] = (int32_t)(random_next() % 65536U) - 32768;
-					if (random_next() % 100U == 0U)
+					draw = random_next();
+					if (draw % 100U == 0U)
 						ctx.syntax.chroma_ac[list][part][sub] = extreme[random_next() % 6U];
 				}
 			}
 		}
+
+		/* Reconstructs the macroblock from the random syntax and checks that it reports success or EINVAL. */
 		ctx.decoded_4x4 = 0;
 		status = h264sw_recon_mb(&ctx);
 		CHECK(status == 0 || status == EINVAL);
@@ -2402,6 +2668,9 @@ check_slice_intra(void)
 	unsigned x;
 	unsigned y;
 	int ok;
+	int cb_actual;
+	int cr_actual;
+	int luma_actual;
 
 	/* Four Intra_16x16 DC macroblocks: mb_type 3, intra_chroma_pred_mode 0, mb_qp_delta 0, an empty DC block (coeff_token 1 as every nC is 0). */
 	slice_env(H264SW_SLICE_I);
@@ -2412,21 +2681,30 @@ check_slice_intra(void)
 		bitwriter_se(&writer, 0);
 		bitwriter_u(&writer, 1U, 1U);
 	}
+
+	/* Decodes the slice data and requires that all four macroblocks were decoded. */
 	stream_run(0U);
 	CHECK(picture.decoded_mbs == 4U);
 	ok = 1;
 	for (y = 0; y < 32U; y++) {
 		for (x = 0; x < 32U; x++) {
-			if (luma_at(x, y) != 128)
+			luma_actual = luma_at(x, y);
+			if (luma_actual != 128)
 				ok = 0;
 		}
 	}
+
+	/* Compares the whole picture with the flat 128 an I_PCM-less intra picture gives. */
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (cb_at(x, y) != 128 || cr_at(x, y) != 128)
+			cb_actual = cb_at(x, y);
+			cr_actual = cr_at(x, y);
+			if (cb_actual != 128 || cr_actual != 128)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(ctx.concealed == 0U);
 
@@ -2442,23 +2720,32 @@ check_slice_intra(void)
 		for (y = 0; y < 16U; y++) {
 			for (x = 0; x < 16U; x++) {
 				index = y * 16U + x;
-				if (luma_at(16U * (mb % 2U) + x, 16U * (mb / 2U) + y) != (int)((index * 7U + 13U * mb + 3U) & 255U))
+				luma_actual = luma_at(16U * (mb % 2U) + x, 16U * (mb / 2U) + y);
+				if (luma_actual != (int)((index * 7U + 13U * mb + 3U) & 255U))
 					ok = 0;
 			}
 		}
+
+		/* Compares the samples of each row of the block. */
 		for (y = 0; y < 8U; y++) {
 			for (x = 0; x < 8U; x++) {
 				index = 256U + y * 8U + x;
-				if (cb_at(8U * (mb % 2U) + x, 8U * (mb / 2U) + y) != (int)((index * 7U + 13U * mb + 3U) & 255U))
+				cb_actual = cb_at(8U * (mb % 2U) + x, 8U * (mb / 2U) + y);
+				if (cb_actual != (int)((index * 7U + 13U * mb + 3U) & 255U))
 					ok = 0;
 				index = 320U + y * 8U + x;
-				if (cr_at(8U * (mb % 2U) + x, 8U * (mb / 2U) + y) != (int)((index * 7U + 13U * mb + 3U) & 255U))
+				cr_actual = cr_at(8U * (mb % 2U) + x, 8U * (mb / 2U) + y);
+				if (cr_actual != (int)((index * 7U + 13U * mb + 3U) & 255U))
 					ok = 0;
 			}
 		}
+
+		/* Requires that the macroblock was recorded as intra with all its coefficients and a zero QP. */
 		if (mbs[mb].nonzero != 0xffffU || mbs[mb].qp != 0U || mbs[mb].motion.intra != 1U)
 			ok = 0;
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	save_picture();
 }
@@ -2482,6 +2769,11 @@ check_slice_inter(void)
 	int ok;
 	int a;
 	int c;
+	int cb_actual;
+	int chroma_reference;
+	int cr_actual;
+	int luma_actual;
+	int luma_reference;
 
 	/* The skip run. */
 	slice_env(H264SW_SLICE_P);
@@ -2493,18 +2785,28 @@ check_slice_inter(void)
 	ok = 1;
 	for (y = 0; y < 32U; y++) {
 		for (x = 0; x < 32U; x++) {
-			if (luma_at(x, y) != ref_luma(&frames[FRAME_A], (int)x, (int)y))
+			luma_actual = luma_at(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)x, (int)y);
+			if (luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Compares the picture with the reference picture copied without motion. */
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (cb_at(x, y) != ref_chroma(&frames[FRAME_A], 1U, (int)x, (int)y))
+			cb_actual = cb_at(x, y);
+			chroma_reference = ref_chroma(&frames[FRAME_A], 1U, (int)x, (int)y);
+			if (cb_actual != chroma_reference)
 				ok = 0;
-			if (cr_at(x, y) != ref_chroma(&frames[FRAME_A], 2U, (int)x, (int)y))
+			cr_actual = cr_at(x, y);
+			chroma_reference = ref_chroma(&frames[FRAME_A], 2U, (int)x, (int)y);
+			if (cr_actual != chroma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 
 	/* Four P_L0_16x16 macroblocks. */
@@ -2518,23 +2820,35 @@ check_slice_inter(void)
 		bitwriter_se(&writer, 0);
 		bitwriter_ue(&writer, 0U);
 	}
+
+	/* Decodes the slice data and requires that all four macroblocks were decoded. */
 	stream_run(0U);
 	CHECK(picture.decoded_mbs == 4U);
 	ok = 1;
 	for (y = 0; y < 32U; y++) {
 		for (x = 0; x < 32U; x++) {
-			if (luma_at(x, y) != ref_luma(&frames[FRAME_A], (int)x + 4, (int)y))
+			luma_actual = luma_at(x, y);
+			luma_reference = ref_luma(&frames[FRAME_A], (int)x + 4, (int)y);
+			if (luma_actual != luma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Compares the picture with the reference picture shifted by the motion vector. */
 	for (y = 0; y < 16U; y++) {
 		for (x = 0; x < 16U; x++) {
-			if (cb_at(x, y) != ref_chroma(&frames[FRAME_A], 1U, (int)x + 2, (int)y))
+			cb_actual = cb_at(x, y);
+			chroma_reference = ref_chroma(&frames[FRAME_A], 1U, (int)x + 2, (int)y);
+			if (cb_actual != chroma_reference)
 				ok = 0;
-			if (cr_at(x, y) != ref_chroma(&frames[FRAME_A], 2U, (int)x + 2, (int)y))
+			cr_actual = cr_at(x, y);
+			chroma_reference = ref_chroma(&frames[FRAME_A], 2U, (int)x + 2, (int)y);
+			if (cr_actual != chroma_reference)
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 	CHECK(mv_is(0, 0, 16, 0));
 	CHECK(mbs[3].motion.mv[0][15][0] == 16 && mbs[3].motion.mv[0][15][1] == 0);
@@ -2551,10 +2865,13 @@ check_slice_inter(void)
 		for (x = 0; x < 32U; x++) {
 			a = ref_luma(&frames[FRAME_A], (int)x, (int)y);
 			c = ref_luma(&frames[FRAME_C], (int)x, (int)y);
-			if (luma_at(x, y) != ((a + c + 1) >> 1))
+			luma_actual = luma_at(x, y);
+			if (luma_actual != ((a + c + 1) >> 1))
 				ok = 0;
 		}
 	}
+
+	/* Requires that every value compared above matched. */
 	CHECK(ok);
 }
 
@@ -2573,6 +2890,7 @@ check_slice_random(void)
 	unsigned index;
 	unsigned total;
 	int status;
+	uint32_t draw;
 
 	/* Every prefix of the valid stream of four I_PCM macroblocks. */
 	slice_env(H264SW_SLICE_I);
@@ -2600,7 +2918,8 @@ check_slice_random(void)
 		bitwriter_init(&writer);
 		for (index = 0; index < length; index++)
 			writer.data[index] = (uint8_t)random_next();
-		if (random_next() % 2U == 0U)
+		draw = random_next();
+		if (draw % 2U == 0U)
 			writer.data[0] = (uint8_t)(0x80U | (random_next() % 128U));
 		vcodec_bitreader_init(&ctx.bits, writer.data, length);
 		status = h264sw_slice_data(&ctx);

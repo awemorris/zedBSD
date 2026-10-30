@@ -248,6 +248,8 @@ env_make(
 		mbs[ADDR_A].slice = 0;
 		mbs[ADDR_A].kind = (uint8_t)a_kind;
 	}
+
+	/* Gives the macroblock above its kind when the case has one. */
 	if (b_kind != NONE) {
 		mbs[ADDR_B].slice = 0;
 		mbs[ADDR_B].kind = (uint8_t)b_kind;
@@ -278,6 +280,8 @@ stream_begin(
 		number = next_random();
 		writer.state[ctx_idx] = (uint8_t)((((number >> 8) & 1U) << 6) | (number % 63U));
 	}
+
+	/* Remembers the context variables the encoder starts from, so the decoder can be given the same ones. */
 	memcpy(initial_state, writer.state, sizeof(initial_state));
 
 	/* Starts the encoder on an empty output. */
@@ -376,6 +380,8 @@ put_exp_golomb(
 				order--;
 				put_bypass((value >> order) & 1U);
 			}
+
+			/* Stops the escape sequence: the suffix has been written to the end. */
 			stop = 1;
 		}
 	}
@@ -493,6 +499,8 @@ put_mb_type(
 			put_string("1", 14U, 0U);
 			put_string(bins_i[value - 5U], 17U, 0U);
 		}
+
+		/* Leaves the function, since a P slice type is complete without the B slice codes below. */
 		return;
 	}
 
@@ -540,16 +548,31 @@ put_mvd(
 	unsigned inc;
 
 	/* The magnitude and the length of the truncated unary prefix, at most 9. */
-	magnitude = value < 0 ? (unsigned)(-(int64_t)value) : (unsigned)value;
+	if (value < 0)
+		magnitude = (unsigned)(-(int64_t)value);
+	else
+		magnitude = (unsigned)value;
 	prefix = magnitude < 9U ? magnitude : 9U;
 
 	/* Codes the prefix bins of 1 and, below 9, the 0 that ends them: the increments are inc0, 3, 4, 5, 6, 6, ... */
 	for (bin_idx = 0; bin_idx < prefix; bin_idx++) {
-		inc = bin_idx == 0U ? inc0 : (bin_idx < 4U ? bin_idx + 2U : 6U);
+		if (bin_idx == 0U)
+			inc = inc0;
+		else if (bin_idx < 4U)
+			inc = bin_idx + 2U;
+		else
+			inc = 6U;
 		put(offset + inc, 1U);
 	}
+
+	/* Codes the 0 that ends the prefix when the magnitude is below 9, else the suffix follows. */
 	if (magnitude < 9U) {
-		inc = prefix == 0U ? inc0 : (prefix < 4U ? prefix + 2U : 6U);
+		if (prefix == 0U)
+			inc = inc0;
+		else if (prefix < 4U)
+			inc = prefix + 2U;
+		else
+			inc = 6U;
 		put(offset + inc, 0U);
 	} else {
 		put_exp_golomb(magnitude - 9U, 3U);
@@ -573,6 +596,7 @@ put_abs_level(
 	unsigned limit;
 	unsigned prefix;
 	unsigned bin_idx;
+	unsigned bin_inc;
 
 	/* 9-23: bin 0 is 0 once a level above 1 was seen, else Min( 4, 1 + eq1 ). */
 	if (gt1 != 0U) {
@@ -589,10 +613,19 @@ put_abs_level(
 
 	/* The prefix: min( 14, value ) bins of 1 and, below 14, a 0. */
 	prefix = abs_minus1 < 14U ? abs_minus1 : 14U;
-	for (bin_idx = 0; bin_idx < prefix; bin_idx++)
-		put(ctx_abs[cat] + (bin_idx == 0U ? inc_first : inc_rest), 1U);
+	for (bin_idx = 0; bin_idx < prefix; bin_idx++) {
+		bin_inc = inc_rest;
+		if (bin_idx == 0U)
+			bin_inc = inc_first;
+		put(ctx_abs[cat] + bin_inc, 1U);
+	}
+
+	/* Ends the prefix with a 0 below 14, else codes the Exp-Golomb suffix. */
 	if (abs_minus1 < 14U) {
-		put(ctx_abs[cat] + (prefix == 0U ? inc_first : inc_rest), 0U);
+		bin_inc = inc_rest;
+		if (prefix == 0U)
+			bin_inc = inc_first;
+		put(ctx_abs[cat] + bin_inc, 0U);
 	} else {
 		/* The suffix of 9-6 with k 0 for the part above 14. */
 		put_exp_golomb(abs_minus1 - 14U, 0U);
@@ -687,7 +720,10 @@ put_residual(
 	for (index = last_pos + 1U; index > start; index--) {
 		if (levels[index - 1U] == 0)
 			continue;
-		abs_level = levels[index - 1U] < 0 ? (unsigned)(-(int64_t)levels[index - 1U]) : (unsigned)levels[index - 1U];
+		if (levels[index - 1U] < 0)
+			abs_level = (unsigned)(-(int64_t)levels[index - 1U]);
+		else
+			abs_level = (unsigned)levels[index - 1U];
 		put_abs_level(cat, abs_level - 1U, eq1, gt1);
 		put_bypass(levels[index - 1U] < 0 ? 1U : 0U);
 		if (abs_level == 1U)
@@ -721,6 +757,8 @@ residual_case(
 		if (levels[index] != 0)
 			expected_coded = 1;
 	}
+
+	/* Treats a block of category 5 as coded, because its coded_block_flag is not sent. */
 	if (cat == 5U)
 		expected_coded = 1;
 
@@ -730,6 +768,8 @@ residual_case(
 			if (levels[index] != 0)
 				break;
 		}
+
+		/* Skips the check when a category 5 block has no level, since it cannot be coded. */
 		if (index > end)
 			return;
 	}
@@ -796,6 +836,8 @@ check_mb_skip(
 				got = h264sw_cabac_mb_skip(&ctx);
 				CHECK(got == value);
 			}
+
+			/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 			stream_check(1);
 		}
 	}
@@ -848,6 +890,8 @@ check_mb_type_i(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 
 		/* I_PCM uses the terminate bin, after a value that is not I_PCM. */
@@ -874,15 +918,25 @@ check_mb_type_p(
 	unsigned got;
 	unsigned setup;
 	int status;
+	unsigned neighbour_a;
+	unsigned neighbour_b;
 
 	/* Three neighbour setups, to show that the first bin does not depend on them. */
 	for (setup = 0; setup < 3U; setup++) {
-		env_make(H264SW_SLICE_P, setup == 0U ? NONE : K_I_16X16, setup == 2U ? K_P_SKIP : NONE);
+		neighbour_a = NONE;
+		if (setup != 0U)
+			neighbour_a = K_I_16X16;
+		neighbour_b = NONE;
+		if (setup == 2U)
+			neighbour_b = K_P_SKIP;
+		env_make(H264SW_SLICE_P, neighbour_a, neighbour_b);
 		stream_begin();
 		for (value = 0; value < 30U; value++) {
 			if (value != 4U)
 				put_mb_type(H264SW_SLICE_P, value, 0U);
 		}
+
+		/* Ends the encoded stream so the decoder can read it back. */
 		stream_end(1);
 		for (value = 0; value < 30U; value++) {
 			if (value == 4U)
@@ -892,6 +946,8 @@ check_mb_type_p(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 	}
 
@@ -946,6 +1002,8 @@ check_mb_type_b(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 
 		/* I_PCM (mb_type 48) uses the terminate bin. */
@@ -1012,6 +1070,8 @@ check_sub_mb_type(
 		for (value = 0; value < 4U; value++)
 			put_string(bins_sub_p[(value + round) % 4U], 21U, 0U);
 	}
+
+	/* Ends the encoded stream so the decoder can read it back. */
 	stream_end(1);
 	for (round = 0; round < 3U; round++) {
 		for (value = 0; value < 4U; value++) {
@@ -1021,6 +1081,8 @@ check_sub_mb_type(
 			CHECK(got == (value + round) % 4U);
 		}
 	}
+
+	/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 	stream_check(1);
 
 	/* The values of B slices. */
@@ -1030,6 +1092,8 @@ check_sub_mb_type(
 		for (value = 0; value < 13U; value++)
 			put_string(bins_sub_b[(value + 5U * round) % 13U], 36U, 0U);
 	}
+
+	/* Ends the encoded stream so the decoder can read it back. */
 	stream_end(1);
 	for (round = 0; round < 3U; round++) {
 		for (value = 0; value < 13U; value++) {
@@ -1039,6 +1103,8 @@ check_sub_mb_type(
 			CHECK(got == (value + 5U * round) % 13U);
 		}
 	}
+
+	/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 	stream_check(1);
 }
 
@@ -1074,6 +1140,8 @@ check_transform_8x8(
 						got = h264sw_cabac_transform_8x8(&ctx);
 						CHECK(got == (repeat & 1U));
 					}
+
+					/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 					stream_check(1);
 				}
 			}
@@ -1104,6 +1172,8 @@ check_intra_mode(
 			put(69U, (rem >> 2) & 1U);
 		}
 	}
+
+	/* Ends the encoded stream so the decoder can read it back. */
 	stream_end(1);
 	for (round = 0; round < 3U; round++) {
 		got_flag = 9;
@@ -1117,6 +1187,8 @@ check_intra_mode(
 			CHECK(flag == 0U && got_rem == rem);
 		}
 	}
+
+	/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 	stream_check(1);
 }
 
@@ -1168,11 +1240,15 @@ check_chroma_mode(
 			if ((value % 4U) > 1U)
 				put(67U, (value % 4U) > 2U ? 1U : 0U);
 		}
+
+		/* Ends the encoded stream so the decoder can read it back. */
 		stream_end(1);
 		for (value = 0; value < 8U; value++) {
 			got = h264sw_cabac_chroma_mode(&ctx);
 			CHECK(got == value % 4U);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 	}
 }
@@ -1232,6 +1308,8 @@ check_ref_idx(
 	int status;
 	int quadrant_a;
 	int quadrant_b;
+	unsigned bin_ctx;
+	unsigned next_active;
 
 	/* Each setup with every value up to the limit of 4 reference indices. */
 	for (index = 0; index < sizeof(cases) / sizeof(cases[0]); index++) {
@@ -1245,6 +1323,8 @@ check_ref_idx(
 				mbs[ADDR_A].motion.ref_idx[cases[index].list][quadrant_a] = (int8_t)cases[index].a_ref;
 				mbs[ADDR_A].direct = (uint8_t)cases[index].a_direct;
 			}
+
+			/* Gives macroblock B its reference index and direct flag when the case has a B neighbour. */
 			if (cases[index].b_kind != NONE) {
 				mbs[ADDR_B].motion.ref_idx[cases[index].list][quadrant_b] = (int8_t)cases[index].b_ref;
 				mbs[ADDR_B].direct = (uint8_t)cases[index].b_direct;
@@ -1256,6 +1336,7 @@ check_ref_idx(
 			mbs[ADDR_CUR].motion.ref_idx[cases[index].list][1] = (int8_t)cases[index].b_ref;
 		}
 
+		/* Starts a fresh encoded stream for this case. */
 		stream_begin();
 		for (value = 0; value < 4U; value++)
 			put_unary(value, 54U + cases[index].inc, 58U, 59U);
@@ -1266,11 +1347,13 @@ check_ref_idx(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 	}
 
 	/* The limit: values up to num_ref_idx_active - 1 are read, for several limits including 32. */
-	for (active = 2; active <= 32U; active = active < 4U ? active + 1U : active * 2U) {
+	for (active = 2; active <= 32U; active = next_active) {
 		env_make(H264SW_SLICE_P, NONE, NONE);
 		header.num_ref_idx_active[0] = active;
 		stream_begin();
@@ -1283,6 +1366,8 @@ check_ref_idx(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 
 		/* A value equal to the limit is refused as soon as its last 1 is read. */
@@ -1295,14 +1380,27 @@ check_ref_idx(
 		status = h264sw_cabac_ref_idx(&ctx, 0U, 0U, 0U, &got);
 		CHECK(status == EINVAL);
 		CHECK(got == 0U);
+
+		/* Steps the limit by one up to 4 and doubles it after that. */
+		next_active = active * 2U;
+		if (active < 4U)
+			next_active = active + 1U;
 	}
 
 	/* A long run of 1 bins ends at the limit and does not loop on. */
 	env_make(H264SW_SLICE_P, NONE, NONE);
 	header.num_ref_idx_active[0] = 32U;
 	stream_begin();
-	for (value = 0; value < 200U; value++)
-		put(value == 0U ? 54U : (value == 1U ? 58U : 59U), 1U);
+	for (value = 0; value < 200U; value++) {
+		bin_ctx = 59U;
+		if (value == 0U)
+			bin_ctx = 54U;
+		else if (value == 1U)
+			bin_ctx = 58U;
+		put(bin_ctx, 1U);
+	}
+
+	/* Ends the stream and requires that the run of 1 bins is refused at the limit of 32. */
 	stream_end(1);
 	status = h264sw_cabac_ref_idx(&ctx, 0U, 0U, 0U, &got);
 	CHECK(status == EINVAL);
@@ -1391,6 +1489,7 @@ check_mvd(
 				if (cases[index].a_kind == K_B_DIRECT)
 					mbs[ADDR_A].direct = 0xf;
 
+				/* Selects the context offset of mvd_l0 for the horizontal component or the vertical one. */
 				offset = component == 0U ? 40U : 47U;
 				stream_begin();
 				for (value_index = 0; value_index < sizeof(values) / sizeof(values[0]); value_index++)
@@ -1402,6 +1501,8 @@ check_mvd(
 					CHECK(status == 0);
 					CHECK(got == values[value_index]);
 				}
+
+				/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 				stream_check(1);
 			}
 		}
@@ -1655,6 +1756,8 @@ check_cbp(
 						cond_a = bins[2] != 0U ? 0U : 1U;
 						cond_b = bins[1] != 0U ? 0U : 1U;
 					}
+
+					/* Codes the luma bin with the context chosen from the bins of the neighbouring blocks. */
 					put(73U + cond_a + 2U * cond_b, bins[blk]);
 				}
 
@@ -1666,11 +1769,15 @@ check_cbp(
 					put(77U + inc, chroma > 1U ? 1U : 0U);
 				}
 			}
+
+			/* Ends the encoded stream so the decoder can read it back. */
 			stream_end(1);
 			for (value = 0; value < 48U; value++) {
 				got = h264sw_cabac_cbp(&ctx);
 				CHECK(got == ((value / 16U) << 4 | (value % 16U)));
 			}
+
+			/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 			stream_check(1);
 		}
 	}
@@ -1801,15 +1908,23 @@ check_qp_delta(
 			mbs[cases[index].prev_addr].kind = (uint8_t)cases[index].prev_kind;
 			mbs[cases[index].prev_addr].cbp = (uint8_t)cases[index].prev_cbp;
 		}
+
+		/* Sets what the previous macroblock in decoding order held, which the QP delta context reads. */
 		ctx.prev_mb_addr = cases[index].prev_addr;
 		ctx.prev_qp_delta_nonzero = cases[index].prev_nonzero;
 
+		/* Starts a fresh encoded stream for this case. */
 		stream_begin();
 		for (value = -26; value <= 25; value++) {
 			/* Table 9-3 maps k to 2k - 1 for positive values and to -2k for the others, and U codes the mapped value. */
-			mapped = value > 0 ? (unsigned)(2 * value - 1) : (unsigned)(-2 * value);
+			if (value > 0)
+				mapped = (unsigned)(2 * value - 1);
+			else
+				mapped = (unsigned)(-2 * value);
 			put_unary(mapped, 60U + cases[index].inc, 62U, 63U);
 		}
+
+		/* Ends the encoded stream so the decoder can read it back. */
 		stream_end(1);
 		for (value = -26; value <= 25; value++) {
 			got = 999;
@@ -1817,6 +1932,8 @@ check_qp_delta(
 			CHECK(status == 0);
 			CHECK(got == value);
 		}
+
+		/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 		stream_check(1);
 	}
 
@@ -1854,6 +1971,8 @@ check_qp_delta(
 				ctx_idx = 62U;
 			put(ctx_idx, bin_idx < mapped ? 1U : 0U);
 		}
+
+		/* Ends the encoded stream so the decoder can read it back. */
 		stream_end(1);
 		got = 999;
 		status = h264sw_cabac_qp_delta(&ctx, &got);
@@ -1880,6 +1999,8 @@ check_end_of_slice(
 		flag = h264sw_cabac_end_of_slice(&ctx);
 		CHECK(flag == 0U);
 	}
+
+	/* Requires that the decoder read to where the encoder stopped and holds the encoder's context variables. */
 	stream_check(1);
 }
 
@@ -1896,6 +2017,7 @@ levels_pattern(
 	};
 	unsigned index;
 	uint32_t number;
+	uint32_t draw;
 
 	/* Starts with every level 0. */
 	for (index = 0; index < 64U; index++)
@@ -1906,10 +2028,14 @@ levels_pattern(
 		levels[start] = 7;
 		return;
 	}
+
+	/* Pattern 1 puts one level at the last position. */
 	if (pattern == 1U) {
 		levels[end] = -3;
 		return;
 	}
+
+	/* Pattern 2 puts one level in the middle. */
 	if (pattern == 2U) {
 		levels[start + (end - start) / 2U] = 1;
 		return;
@@ -1921,12 +2047,16 @@ levels_pattern(
 			levels[index] = (index & 1U) != 0U ? -1 : 1;
 		return;
 	}
+
+	/* Pattern 4 mixes the magnitudes with alternating signs. */
 	if (pattern == 4U) {
 		for (index = start; index <= end; index++) {
 			levels[index] = magnitudes[(index - start) % (sizeof(magnitudes) / sizeof(magnitudes[0]))];
 			if ((index & 2U) != 0U)
 				levels[index] = -levels[index];
 		}
+
+		/* Leaves with the pattern complete. */
 		return;
 	}
 
@@ -1942,10 +2072,13 @@ levels_pattern(
 		number = next_random();
 		if (number % 3U == 0U) {
 			levels[index] = (int32_t)(1U + (next_random() % magnitudes[next_random() % (sizeof(magnitudes) / sizeof(magnitudes[0]))]));
-			if ((next_random() & 1U) != 0U)
+			draw = next_random();
+			if ((draw & 1U) != 0U)
 				levels[index] = -levels[index];
 		}
 	}
+
+	/* Puts a level at each end for some patterns, so the first and last position are both met. */
 	if (pattern % 5U == 0U)
 		levels[end] = (int32_t)(1U + next_random() % 40U);
 	if (pattern % 7U == 0U)
@@ -1995,9 +2128,12 @@ check_residual_levels(
 				if (levels[index] != 0)
 					all_zero = 0;
 			}
+
+			/* Skips a category 5 block without any level, which cannot be coded. */
 			if (all_zero != 0U && shapes[shape].cat == 5U)
 				continue;
 
+			/* Picks the block index inside the macroblock from the shape. */
 			blk = shape % shapes[shape].max_coeff % 4U;
 			if (shapes[shape].cat == 0U || shapes[shape].cat == 3U)
 				blk = 0;
@@ -2150,6 +2286,8 @@ check_residual_contexts(
 				levels[0] = 2;
 				levels[max_coeff - 1U] = -1;
 			}
+
+			/* Runs the case with the levels, whose ends are set in the first round. */
 			residual_case(cases[index].cat, cases[index].blk, cases[index].comp, 0U, max_coeff - 1U, max_coeff, cases[index].inc, levels);
 		}
 	}
@@ -2170,6 +2308,7 @@ check_residual_errors(
 	unsigned cat;
 	unsigned max_coeff;
 	int status;
+	unsigned component;
 
 	/* Arguments that describe no block of 4:2:0 are refused without reading, and the levels are not touched. */
 	env_make(H264SW_SLICE_I, K_I_16X16, K_I_16X16);
@@ -2256,7 +2395,10 @@ check_residual_errors(
 		for (index = 0; index < 40U; index++)
 			put_bypass(1U);
 		stream_end(1);
-		status = h264sw_cabac_residual_block(&ctx, cat, 0U, cat == 3U || cat == 4U ? 1U : 0U, 0U, max_coeff - 1U, max_coeff, block, &coded);
+		component = 0U;
+		if (cat == 3U || cat == 4U)
+			component = 1U;
+		status = h264sw_cabac_residual_block(&ctx, cat, 0U, component, 0U, max_coeff - 1U, max_coeff, block, &coded);
 		CHECK(status == EINVAL);
 	}
 
@@ -2300,6 +2442,11 @@ check_fuzz(
 	int delta;
 	int status;
 	uint32_t number;
+	unsigned component;
+	unsigned blk_limit;
+	unsigned blk;
+	unsigned max_type;
+	uint32_t draw;
 
 	/* Many random streams and neighbour states. */
 	for (iteration = 0; iteration < 1500U; iteration++) {
@@ -2311,13 +2458,27 @@ check_fuzz(
 			if (iteration % 11U == 0U)
 				data[index] = 0x00;
 		}
+
+		/* Ends the data with a set bit as the slice data trailing bits do, and picks the slice type from the random number. */
 		data[sizeof(data) - 1U] |= 0x80U;
-		slice_type = number % 3U == 0U ? H264SW_SLICE_I : (number % 3U == 1U ? H264SW_SLICE_P : H264SW_SLICE_B);
+		if (number % 3U == 0U)
+			slice_type = H264SW_SLICE_I;
+		else if (number % 3U == 1U)
+			slice_type = H264SW_SLICE_P;
+		else
+			slice_type = H264SW_SLICE_B;
 		env_make(slice_type, K_I_4X4, K_P);
 
 		/* Random neighbour entries. */
 		for (index = 0; index < 9U; index++) {
-			mbs[index].slice = (index == ADDR_CUR || (next_random() & 3U) != 0U) ? 0 : -1;
+			mbs[index].slice = 0;
+			if (index != ADDR_CUR) {
+				draw = next_random();
+				if ((draw & 3U) == 0U)
+					mbs[index].slice = -1;
+			}
+
+			/* Fills the rest of the neighbour entry with random contents. */
 			mbs[index].kind = (uint8_t)(next_random() % 13U);
 			mbs[index].cbp = (uint8_t)next_random();
 			mbs[index].transform_8x8 = (uint8_t)(next_random() & 1U);
@@ -2329,6 +2490,8 @@ check_fuzz(
 			mbs[index].motion.ref_idx[0][1] = (int8_t)((int)(next_random() % 6U) - 1);
 			mbs[index].motion.ref_idx[1][2] = (int8_t)((int)(next_random() % 6U) - 1);
 		}
+
+		/* Derives the neighbours of the current macroblock and randomizes the decoder's per-slice state. */
 		h264sw_mb_neighbours(mbs, 3U, ADDR_CUR, &ctx.n);
 		ctx.prev_mb_addr = (int32_t)(next_random() % 11U) - 2;
 		ctx.prev_qp_delta_nonzero = (int)(next_random() & 1U);
@@ -2347,14 +2510,23 @@ check_fuzz(
 				flag = h264sw_cabac_mb_skip(&ctx);
 				CHECK(flag <= 1U);
 			}
+
+			/* Decodes the macroblock type and checks that it is in the range of the slice type. */
 			status = h264sw_cabac_mb_type(&ctx, slice_type, &value);
 			CHECK(status == 0);
-			CHECK(value <= (slice_type == H264SW_SLICE_I ? 25U : (slice_type == H264SW_SLICE_P ? 30U : 48U)));
+			max_type = 48U;
+			if (slice_type == H264SW_SLICE_I)
+				max_type = 25U;
+			else if (slice_type == H264SW_SLICE_P)
+				max_type = 30U;
+			CHECK(value <= max_type);
 			if (slice_type != H264SW_SLICE_I) {
 				status = h264sw_cabac_sub_mb_type(&ctx, slice_type, &value);
 				CHECK(status == 0);
 				CHECK(value <= (slice_type == H264SW_SLICE_P ? 3U : 12U));
 			}
+
+			/* Decodes the transform size flag, then the intra prediction mode. */
 			flag = h264sw_cabac_transform_8x8(&ctx);
 			CHECK(flag <= 1U);
 			h264sw_cabac_intra_mode(&ctx, &flag, &rem);
@@ -2369,6 +2541,8 @@ check_fuzz(
 				CHECK(status == 0 || status == EINVAL);
 				CHECK(status != 0 || (delta >= -32768 && delta <= 32767));
 			}
+
+			/* Decodes the coded block pattern and the QP delta. */
 			value = h264sw_cabac_cbp(&ctx);
 			CHECK(value < 48U);
 			status = h264sw_cabac_qp_delta(&ctx, &delta);
@@ -2377,10 +2551,31 @@ check_fuzz(
 
 			/* A residual block of a random category with a random range inside it. */
 			cat = next_random() % 6U;
-			max_coeff = cat == 0U ? 16U : (cat == 1U ? 15U : (cat == 2U ? 16U : (cat == 3U ? 4U : (cat == 4U ? 15U : 64U))));
+			if (cat == 0U || cat == 2U)
+				max_coeff = 16U;
+			else if (cat == 1U || cat == 4U)
+				max_coeff = 15U;
+			else if (cat == 3U)
+				max_coeff = 4U;
+			else
+				max_coeff = 64U;
+
+			/* Draws the range of positions that carries levels. */
 			start = next_random() % max_coeff;
 			end = start + next_random() % (max_coeff - start);
-			status = h264sw_cabac_residual_block(&ctx, cat, cat == 0U || cat == 3U ? 0U : next_random() % (cat == 4U || cat == 5U ? 4U : 16U), cat == 3U || cat == 4U ? 1U + (next_random() & 1U) : 0U, start, end, max_coeff, levels, &coded);
+			blk = 0U;
+			if (cat != 0U && cat != 3U) {
+				blk_limit = 16U;
+				if (cat == 4U || cat == 5U)
+					blk_limit = 4U;
+				blk = next_random() % blk_limit;
+			}
+
+			/* Picks the component index for the categories that have two. */
+			component = 0U;
+			if (cat == 3U || cat == 4U)
+				component = 1U + (next_random() & 1U);
+			status = h264sw_cabac_residual_block(&ctx, cat, blk, component, start, end, max_coeff, levels, &coded);
 			CHECK(status == 0 || status == EINVAL);
 			CHECK(coded <= 1U);
 			for (value = 0; value < max_coeff; value++)
@@ -2396,6 +2591,8 @@ int
 main(
 	void)
 {
+	int status;
+
 	/* The elements, the neighbour contexts and the error cases. */
 	check_mb_skip();
 	check_mb_type_i();
@@ -2417,5 +2614,6 @@ main(
 	check_fuzz();
 
 	/* Reports the checks. */
-	return check_finish("cabac_se");
+	status = check_finish("cabac_se");
+	return status;
 }

@@ -58,6 +58,73 @@ struct env {
  */
 static uint32_t rng_state;
 
+/* Forward declarations of the static functions. */
+static uint32_t rng_next(void);
+static void env_setup(struct env *env, unsigned dpb_frames, unsigned refs, int reorder, unsigned poc_type, unsigned pool_limit);
+static unsigned pool_free_count(const struct h264sw_frame_pool *pool);
+static void env_teardown(struct env *env);
+static uint32_t small_or_any(uint32_t limit);
+static void header_make(struct h264sw_slice_header *header, uint32_t frame_num, unsigned ref_idc, int idr);
+static void header_mmco(struct h264sw_slice_header *header, unsigned operation, uint32_t difference_minus1, uint32_t long_term_pic_num, uint32_t long_term_frame_idx, uint32_t plus1);
+static void decode_at(struct env *env, const struct h264sw_slice_header *header, int32_t poc, int output, int changed);
+static int32_t decode_full(struct env *env, const struct h264sw_slice_header *header, int output);
+static unsigned drain(struct env *env, int32_t *pocs, unsigned max);
+static void check_list(const int32_t *got, unsigned got_count, const int32_t *want, unsigned want_count);
+static void check_queue(struct env *env, const int32_t *want, unsigned want_count);
+static const struct h264sw_dpb_entry *find_entry(const struct h264sw_dpb *dpb, uint32_t frame_num);
+static unsigned state_of(const struct h264sw_dpb *dpb, uint32_t frame_num);
+static unsigned filled(const struct h264sw_dpb *dpb);
+static void test_queue(void);
+static void test_sliding_window(void);
+static void test_mmco(void);
+static void test_mmco5_output(void);
+static void test_idr(void);
+static void test_make_room(void);
+static void test_output_order(void);
+static void check_non_existing(const struct h264sw_dpb_entry *entry, uint32_t frame_num, int32_t poc);
+static void test_gaps(void);
+static void fill_queue(struct env *env);
+static void test_queue_full(void);
+static void test_errors(void);
+static void test_random(uint32_t seed, unsigned dpb_frames, unsigned refs, int reorder, unsigned poc_type);
+
+/*
+ * Runs every check and prints the summary line.
+ */
+int
+main(void)
+{
+	int status;
+
+	/* Each part of the module in turn. */
+	test_queue();
+	test_sliding_window();
+	test_mmco();
+	test_mmco5_output();
+	test_idr();
+	test_make_room();
+	test_output_order();
+	test_gaps();
+	test_queue_full();
+	test_errors();
+
+	/* Hostile input: several shapes of DPB and several orders of numbers. */
+	test_random(1U, 1U, 1U, -1, 2U);
+	test_random(2U, 2U, 2U, 0, 0U);
+	test_random(3U, 4U, 3U, 1, 1U);
+	test_random(4U, 4U, 8U, -1, 2U);
+	test_random(5U, 6U, 0U, 2, 0U);
+	test_random(6U, 16U, 16U, -1, 2U);
+	test_random(7U, 16U, 4U, 3, 1U);
+	test_random(8U, 3U, 3U, -1, 0U);
+
+	/* Prints the summary and gives the exit status. */
+	status = check_finish("dpb");
+
+	/* The exit status says whether every check held. */
+	return status;
+}
+
 /*
  * Gives the next pseudo-random number (a linear congruential generator).
  */
@@ -69,6 +136,28 @@ rng_next(void)
 
 	/* Hands out the high half, mixed with the low one so small ranges vary. */
 	return (rng_state >> 8) ^ (rng_state << 3);
+}
+
+/*
+ * Gives a pseudo-random operand that is half the time below the limit and
+ * otherwise any value, so both ordinary and hostile operands occur.
+ */
+static uint32_t
+small_or_any(
+	uint32_t limit)
+{
+	uint32_t draw;
+	uint32_t value;
+
+	/* Half of the draws give a small operand. */
+	draw = rng_next();
+	if (draw % 2U != 0U)
+		value = rng_next() % limit;
+	else
+		value = rng_next();
+
+	/* The operand is small or arbitrary, as the draw said. */
+	return value;
 }
 
 /*
@@ -354,6 +443,8 @@ check_list(
 		if (got[index] != want[index])
 			same = 0;
 	}
+
+	/* Every number in the queue must equal the expected output order. */
 	CHECK(same);
 }
 
@@ -461,6 +552,7 @@ test_queue(void)
 	int bumped;
 	int same;
 
+	/* A DPB of 16 frames and the largest frame pool, so the output queue can be filled to its limit. */
 	env_setup(&env, 16U, 16U, -1, 2U, H264SW_FRAME_POOL_MAX);
 
 	/* An empty queue has nothing to take. */
@@ -481,10 +573,14 @@ test_queue(void)
 			header_make(&header, 1U, 0U, 0);
 			decode_at(&env, &header, (int32_t)(total + index), 1, 0);
 		}
+
+		/* Flushing bumps every stored picture out into the output queue. */
 		error = h264sw_dpb_flush(&env.dpb, &env.queue);
 		CHECK(error == 0);
 		total += count;
 	}
+
+	/* Every batch reached the queue, which is now full. */
 	CHECK(total == H264SW_OUTPUT_MAX);
 	CHECK(env.queue.count == H264SW_OUTPUT_MAX);
 
@@ -531,6 +627,8 @@ test_queue(void)
 		if (got[index] != want[index])
 			same = 0;
 	}
+
+	/* The queue holds exactly the numbers that were not taken, in order. */
 	CHECK(same);
 
 	/* Clearing a queue drops its references (teardown checks that none is left). */
@@ -543,6 +641,7 @@ test_queue(void)
 	CHECK(env.queue.count == 0U);
 	CHECK(h264sw_output_take(&env.queue) == NULL);
 
+	/* Teardown checks that no frame reference is left. */
 	env_teardown(&env);
 }
 
@@ -644,6 +743,8 @@ test_sliding_window(void)
 		CHECK(filled(&env.dpb) == 2U);
 		h264sw_frame_unref(held);
 	}
+
+	/* Teardown checks that no frame reference is left. */
 	env_teardown(&env);
 
 	/* max_num_ref_frames 0 still keeps one frame (Max( max_num_ref_frames, 1 )). */
@@ -684,6 +785,8 @@ test_mmco(void)
 		header_make(&header, number, 1U, 0);
 		decode_at(&env, &header, (int32_t)(2U * number), 1, 0);
 	}
+
+	/* Four references are held: pictures 0 to 3. */
 	CHECK(h264sw_dpb_references(&env.dpb) == 4U);
 
 	/*
@@ -889,6 +992,8 @@ test_idr(void)
 			want[3] = 12;
 			check_queue(&env, want, 4U);
 		}
+
+		/* Teardown checks that no frame reference is left. */
 		env_teardown(&env);
 	}
 
@@ -1007,6 +1112,8 @@ test_make_room(void)
 		CHECK(frame->refs == 1U);
 		h264sw_frame_unref(frame);
 	}
+
+	/* Flushing empties the DPB, and the non-reference picture leaves nothing to output. */
 	error = h264sw_dpb_flush(&env.dpb, &env.queue);
 	CHECK(error == 0);
 	CHECK(env.queue.count == 0U);
@@ -1340,6 +1447,8 @@ test_gaps(void)
 		CHECK(value == (int32_t)(2U * number));
 		(void)drain(&env, NULL, 0U);
 	}
+
+	/* A picture whose frame_num is below the last one wraps, and the gap process runs for it. */
 	header_make(&header, 2U, 1U, 0);
 	error = h264sw_dpb_gaps(&env.dpb, &env.sps, &header, &env.poc, env.pool, &env.queue);
 	CHECK(error == 0);
@@ -1520,14 +1629,20 @@ fill_queue(
 			header_make(&header, 1U, 0U, 0);
 			decode_at(&scratch, &header, (int32_t)(1000U + total + index), 1, 0);
 		}
+
+		/* The batch is flushed into the scratch queue. */
 		CHECK(h264sw_dpb_flush(&scratch.dpb, &scratch.queue) == 0);
 		while (scratch.queue.count > 0U) {
 			moved = h264sw_output_take(&scratch.queue);
 			env->queue.frame[(env->queue.head + env->queue.count) % H264SW_OUTPUT_MAX] = moved;
 			env->queue.count++;
 		}
+
+		/* The batch is moved to the queue under test, so the count of moved frames grows. */
 		total += count;
 	}
+
+	/* The queue under test is full now. */
 	CHECK(env->queue.count == H264SW_OUTPUT_MAX);
 
 	/* The scratch pool lives until its last frame is released (the pool's rule for a dead pool). */
@@ -1599,6 +1714,8 @@ test_queue_full(void)
 		CHECK(error == ENOBUFS);
 		h264sw_frame_unref(frame);
 	}
+
+	/* Teardown checks that no frame reference is left. */
 	env_teardown(&env);
 }
 
@@ -1615,6 +1732,7 @@ test_errors(void)
 	unsigned marking;
 	uint32_t long_idx;
 
+	/* A small DPB and a frame pool of 8 frames. */
 	env_setup(&env, 4U, 2U, -1, 2U, 8U);
 	header_make(&header, 1U, 1U, 0);
 	frame = h264sw_frame_get(env.pool);
@@ -1704,10 +1822,18 @@ test_random(
 	uint32_t long_idx;
 	uint32_t frame_num;
 	uint32_t value;
+	uint32_t draw;
+	uint32_t difference_minus1;
+	uint32_t long_term_pic_num;
+	uint32_t long_term_frame_idx;
+	uint32_t plus1;
+	unsigned references;
+	int with_operations;
 	int idr;
 	int ok;
 	int error;
 
+	/* The same seed gives the same sequence on every run. */
 	rng_state = seed;
 	env_setup(&env, dpb_frames, refs, reorder, poc_type, 2U * dpb_frames + 4U);
 	if (env.pool == NULL)
@@ -1736,17 +1862,27 @@ test_random(
 		header.long_term_reference = (int)(rng_next() % 3U == 0U);
 
 		/* Operations: sometimes many, with small or huge values. */
-		if (!idr && header.nal_ref_idc != 0U && (rng_next() % 3U) == 0U) {
+		with_operations = 0;
+		if (!idr && header.nal_ref_idc != 0U) {
+			draw = rng_next();
+			if (draw % 3U == 0U)
+				with_operations = 1;
+		}
+
+		/* Many operations, with small or huge values, when the draw asked for them. */
+		if (with_operations) {
 			count = rng_next() % (H264SW_MAX_MMCO + 1U);
 			for (index = 0U;
 			     index < count;
 			     index++) {
 				operation = rng_next() % 8U;
-				header_mmco(&header, operation,
-				    (rng_next() % 2U) ? rng_next() % 20U : rng_next(),
-				    (rng_next() % 2U) ? rng_next() % 4U : rng_next(),
-				    (rng_next() % 2U) ? rng_next() % 4U : rng_next(),
-				    (rng_next() % 2U) ? rng_next() % 6U : rng_next());
+
+				/* The four operands are drawn from the last to the first, which fixes the random sequence. */
+				plus1 = small_or_any(6U);
+				long_term_frame_idx = small_or_any(4U);
+				long_term_pic_num = small_or_any(4U);
+				difference_minus1 = small_or_any(20U);
+				header_mmco(&header, operation, difference_minus1, long_term_pic_num, long_term_frame_idx, plus1);
 			}
 		}
 
@@ -1758,17 +1894,23 @@ test_random(
 			(void)drain(&env, NULL, 0U);
 			continue;
 		}
+
+		/* The frame stands for the picture, with its numbers from the random draw. */
 		frame->frame_num = frame_num;
 		frame->poc = (int32_t)(rng_next() % 41U) - 20;
 		frame->top_poc = frame->poc;
 		frame->bottom_poc = frame->poc;
 		frame->idr = idr;
-		error = h264sw_dpb_remove(&env.dpb, &env.sps, &header, frame, (int)(rng_next() % 2U), &marking, &long_idx, &env.queue);
+		draw = rng_next();
+		error = h264sw_dpb_remove(&env.dpb, &env.sps, &header, frame, (int)(draw % 2U), &marking, &long_idx, &env.queue);
 		CHECK(error == 0 || error == ENOBUFS);
 		if (error == 0) {
-			error = h264sw_dpb_store(&env.dpb, frame, marking, long_idx, (int)(rng_next() % 5U != 0U), &env.queue);
+			draw = rng_next();
+			error = h264sw_dpb_store(&env.dpb, frame, marking, long_idx, (int)(draw % 5U != 0U), &env.queue);
 			CHECK(error == 0 || error == ENOBUFS);
 		}
+
+		/* The DPB holds its own reference, so this one is given up. */
 		h264sw_frame_unref(frame);
 
 		/* Follows the reference frame_num like the order count state does. */
@@ -1791,6 +1933,8 @@ test_random(
 					ok = 0;
 				continue;
 			}
+
+			/* Entries that hold a frame are counted and checked. */
 			filled_count++;
 			if (index >= env.dpb.size)
 				ok = 0;
@@ -1799,9 +1943,12 @@ test_random(
 			if (env.dpb.entry[index].reference > H264SW_REF_LONG)
 				ok = 0;
 		}
+
+		/* The counts of filled entries, references and allocated frames must stay within their limits. */
 		if (filled_count > env.dpb.size)
 			ok = 0;
-		if (h264sw_dpb_references(&env.dpb) > filled_count)
+		references = h264sw_dpb_references(&env.dpb);
+		if (references > filled_count)
 			ok = 0;
 		if (env.pool->allocated > env.pool->limit)
 			ok = 0;
@@ -1814,36 +1961,4 @@ test_random(
 	(void)drain(&env, NULL, 0U);
 	CHECK(filled(&env.dpb) == 0U);
 	env_teardown(&env);
-}
-
-/*
- * Runs every check and prints the summary line.
- */
-int
-main(void)
-{
-	/* Each part of the module in turn. */
-	test_queue();
-	test_sliding_window();
-	test_mmco();
-	test_mmco5_output();
-	test_idr();
-	test_make_room();
-	test_output_order();
-	test_gaps();
-	test_queue_full();
-	test_errors();
-
-	/* Hostile input: several shapes of DPB and several orders of numbers. */
-	test_random(1U, 1U, 1U, -1, 2U);
-	test_random(2U, 2U, 2U, 0, 0U);
-	test_random(3U, 4U, 3U, 1, 1U);
-	test_random(4U, 4U, 8U, -1, 2U);
-	test_random(5U, 6U, 0U, 2, 0U);
-	test_random(6U, 16U, 16U, -1, 2U);
-	test_random(7U, 16U, 4U, 3, 1U);
-	test_random(8U, 3U, 3U, -1, 0U);
-
-	/* Prints the summary and gives the exit status. */
-	return check_finish("dpb");
 }

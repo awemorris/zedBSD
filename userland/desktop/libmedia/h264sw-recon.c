@@ -175,11 +175,13 @@ recon_check(
 	if (bottom > frame->height)
 		return EINVAL;
 
-	/* Refuses a frame whose planes are missing or whose rows overlap. */
+	/* Refuses a frame whose planes are missing. */
 	for (plane = 0; plane < 3U; plane++) {
 		if (frame->plane[plane] == NULL)
 			return EINVAL;
 	}
+
+	/* Refuses a frame whose rows overlap. */
 	if (frame->stride[0] < frame->width)
 		return EINVAL;
 	if (frame->stride[1] < frame->width / 2U)
@@ -402,6 +404,7 @@ recon_pcm(
 	unsigned size;
 	unsigned offset;
 
+	/* Takes the entry being written, the frame and the samples the parser read. */
 	mb = ctx->n.current;
 	frame = ctx->picture->frame;
 	pcm = ctx->syntax.pcm;
@@ -433,6 +436,7 @@ recon_intra(
 {
 	struct h264sw_mb *mb;
 
+	/* Takes the entry being written. */
 	mb = ctx->n.current;
 
 	/* An intra macroblock uses no reference list. */
@@ -472,6 +476,7 @@ recon_intra4x4(
 	int has_level;
 	int error;
 
+	/* Takes the entry being written, the syntax and the frame. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	frame = ctx->picture->frame;
@@ -526,6 +531,7 @@ recon_intra8x8(
 	int has_level;
 	int error;
 
+	/* Takes the entry being written, the syntax and the frame. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	frame = ctx->picture->frame;
@@ -584,6 +590,7 @@ recon_intra16x16(
 	int has_ac;
 	int error;
 
+	/* Takes the entry being written, the syntax and the frame. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	frame = ctx->picture->frame;
@@ -639,6 +646,7 @@ recon_intra_chroma(
 	unsigned plane;
 	int error;
 
+	/* Takes the frame the prediction is written into. */
 	frame = ctx->picture->frame;
 
 	/* Predicts each chroma component from its own edge. */
@@ -676,9 +684,11 @@ recon_chroma_residual(
 	unsigned blk;
 	unsigned list;
 	unsigned index;
+	int luma_qp;
 	int qp;
 	int any;
 
+	/* Takes the syntax and the frame. */
 	syntax = &ctx->syntax;
 	frame = ctx->picture->frame;
 
@@ -691,11 +701,14 @@ recon_chroma_residual(
 				break;
 			any = recon_has_level(syntax->chroma_ac[component][blk], 16U);
 		}
+
+		/* A component whose levels are all zero adds nothing to the prediction. */
 		if (any == 0)
 			continue;
 
 		/* Finds QP'C (8.5.8) and the scaling of the component's list: Intra or Inter, Cb then Cr. */
-		qp = recon_chroma_qp(ctx->picture, recon_qp(ctx->n.current), component);
+		luma_qp = recon_qp(ctx->n.current);
+		qp = recon_chroma_qp(ctx->picture, luma_qp, component);
 		list = RECON_SCALE4_INTER_CB + component;
 		if (intra != 0)
 			list = RECON_SCALE4_INTRA_CB + component;
@@ -729,6 +742,7 @@ recon_luma_residual(
 	int qp;
 	int has_level;
 
+	/* Takes the entry being written, the syntax, the frame and QPY. */
 	mb = ctx->n.current;
 	syntax = &ctx->syntax;
 	frame = ctx->picture->frame;
@@ -801,6 +815,7 @@ recon_motion(
 	unsigned kind;
 	int error;
 
+	/* Takes the kind the derivation is picked by. */
 	kind = ctx->syntax.type.kind;
 
 	/* Picks the derivation the macroblock's kind needs. */
@@ -836,6 +851,7 @@ recon_motion_pskip(
 	unsigned blk;
 	unsigned quadrant;
 
+	/* Takes the motion record of the macroblock being written. */
 	motion = &ctx->n.current->motion;
 
 	/* Refuses a slice whose list 0 has no first entry to predict from. */
@@ -896,6 +912,7 @@ recon_motion_parts(
 	unsigned height;
 	int error;
 
+	/* Takes the syntax and the size of the partitions. */
 	syntax = &ctx->syntax;
 	width = syntax->type.part_width;
 	height = syntax->type.part_height;
@@ -934,6 +951,7 @@ recon_motion_sub(
 	unsigned y;
 	int error;
 
+	/* Takes the syntax. */
 	syntax = &ctx->syntax;
 
 	/* Derives each sub-macroblock in order, so that the later ones see the motion of the earlier ones. */
@@ -945,6 +963,8 @@ recon_motion_sub(
 			error = h264sw_direct_quadrant(ctx, quadrant);
 			if (error != 0)
 				return error;
+
+			/* Marks the quadrant's blocks as having their motion for the sub-macroblocks after it. */
 			recon_mark_decoded(ctx, 8U * (quadrant % 2U), 8U * (quadrant / 2U), 8U, 8U);
 			continue;
 		}
@@ -996,6 +1016,7 @@ recon_partition(
 	int used;
 	int error;
 
+	/* Takes the syntax. */
 	syntax = &ctx->syntax;
 
 	/* Refuses a partition that is not made of whole 4x4 blocks inside the macroblock, whatever the type says. */
@@ -1055,6 +1076,7 @@ recon_vector(
 	unsigned blk;
 	unsigned quadrant;
 
+	/* Takes the motion record of the macroblock being written. */
 	motion = &ctx->n.current->motion;
 
 	/* Refuses a reference index outside the list or naming no frame. */
@@ -1127,6 +1149,7 @@ recon_uniform(
 	unsigned block_x;
 	unsigned block_y;
 
+	/* Finds the first block of the square and its quadrant, which the others are compared with. */
 	first = h264sw_blk4x4_at(x, y);
 	first_quadrant = 2U * (y / 8U) + x / 8U;
 
@@ -1163,6 +1186,7 @@ recon_predict(
 	int uniform;
 	int error;
 
+	/* Takes the entry being read. */
 	mb = ctx->n.current;
 
 	/* A macroblock that moves as one is predicted as one 16x16 block. */
@@ -1187,6 +1211,8 @@ recon_predict(
 				return error;
 			continue;
 		}
+
+		/* Predicts the quadrant block by block when its blocks move differently. */
 		for (part = 0; part < 4U; part++) {
 			error = recon_predict_block(ctx, x + 4U * (part % 2U), y + 4U * (part / 2U), 4U);
 			if (error != 0)
@@ -1234,6 +1260,7 @@ recon_predict_block(
 	int plane_x;
 	int plane_y;
 
+	/* Takes the entry being read, the frame, the block's quadrant and first 4x4 block, and the chroma block size. */
 	mb = ctx->n.current;
 	frame = ctx->picture->frame;
 	quadrant = 2U * (y / 8U) + x / 8U;

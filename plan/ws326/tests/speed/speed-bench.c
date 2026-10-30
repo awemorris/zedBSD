@@ -40,14 +40,6 @@
 
 struct speed_run;
 
-static uint8_t *read_file(const char *path, size_t *size);
-static int write_frame(const struct h264sw_frame *frame);
-static int take_output(struct h264sw_decoder *decoder, int write, unsigned long *frames);
-static double clock_seconds(clockid_t id);
-static int decode_once(const uint8_t *data, size_t size, int write, struct speed_run *run);
-static int compare_fps(const void *a, const void *b);
-static int measure(const uint8_t *data, size_t size, unsigned runs);
-
 /*
  * The result of one decode: frames output, the wall and CPU seconds, the
  * concealed macroblocks and the NAL units refused.
@@ -59,6 +51,85 @@ struct speed_run {
 	unsigned long concealed;
 	unsigned long errors;
 };
+
+static uint8_t *read_file(const char *path, size_t *size);
+static int write_frame(const struct h264sw_frame *frame);
+static int take_output(struct h264sw_decoder *decoder, int write, unsigned long *frames);
+static double clock_seconds(clockid_t id);
+static int decode_once(const uint8_t *data, size_t size, int write, struct speed_run *run);
+static int compare_fps(const void *a, const void *b);
+static int measure(const uint8_t *data, size_t size, unsigned runs);
+
+/*
+ * Runs the measurement or the --yuv decode the arguments name.
+ */
+int
+main(
+	int argc,
+	char **argv)
+{
+	struct speed_run run;
+	uint8_t *data;
+	size_t size;
+	long runs;
+	int yuv;
+	int difference;
+	int result;
+	int status;
+
+	/* --yuv FILE: one decode written out. */
+	yuv = 0;
+	if (argc == 3) {
+		difference = strcmp(argv[1], "--yuv");
+		if (difference == 0)
+			yuv = 1;
+	}
+
+	/* The --yuv mode reads the file and decodes it once. */
+	if (yuv) {
+		data = read_file(argv[2], &size);
+		if (data == NULL)
+			return 1;
+
+		/* Decodes once, writing the frames to the standard output. */
+		status = 0;
+		result = decode_once(data, size, 1, &run);
+		if (result != 0)
+			status = 1;
+		free(data);
+
+		/* A failed flush of the output is a failed run. */
+		result = fflush(stdout);
+		if (result != 0)
+			status = 1;
+
+		/* Exits with 1 when the decode or the flush failed. */
+		return status;
+	}
+
+	/* FILE RUNS: the measurement. */
+	if (argc != 3) {
+		fprintf(stderr, "usage: speed-bench FILE RUNS | speed-bench --yuv FILE\n");
+		return 2;
+	}
+
+	/* Reads the number of runs and refuses a count outside the limit. */
+	runs = strtol(argv[2], NULL, 10);
+	if (runs < 1L || runs > (long)SPEED_MAX_RUNS) {
+		fprintf(stderr, "speed-bench: RUNS must be 1 to %u\n", SPEED_MAX_RUNS);
+		return 2;
+	}
+
+	/* Reads the file and measures the decoder on it. */
+	data = read_file(argv[1], &size);
+	if (data == NULL)
+		return 1;
+	status = measure(data, size, (unsigned)runs);
+	free(data);
+
+	/* Exits with the measurement's status. */
+	return status;
+}
 
 /*
  * Reads a whole file into memory.  Returns the bytes (the caller frees
@@ -81,18 +152,24 @@ read_file(
 		fprintf(stderr, "speed-bench: cannot open %s\n", path);
 		return NULL;
 	}
+
+	/* Measures the file by seeking to its end. */
 	result = fseek(file, 0L, SEEK_END);
 	if (result != 0) {
 		fprintf(stderr, "speed-bench: cannot seek %s\n", path);
 		fclose(file);
 		return NULL;
 	}
+
+	/* Reads the length and refuses an empty or oversized file. */
 	length = ftell(file);
 	if (length <= 0L || (unsigned long)length > SPEED_MAX_FILE) {
 		fprintf(stderr, "speed-bench: %s is empty or too large\n", path);
 		fclose(file);
 		return NULL;
 	}
+
+	/* Goes back to the start for the read. */
 	rewind(file);
 
 	/* Reads the bytes. */
@@ -102,6 +179,8 @@ read_file(
 		fclose(file);
 		return NULL;
 	}
+
+	/* Reads the whole file. */
 	got = fread(data, 1U, (size_t)length, file);
 	fclose(file);
 	if (got != (size_t)length) {
@@ -109,6 +188,8 @@ read_file(
 		free(data);
 		return NULL;
 	}
+
+	/* Hands the bytes and their length to the caller. */
 	*size = (size_t)length;
 	return data;
 }
@@ -154,6 +235,8 @@ write_frame(
 				return -1;
 		}
 	}
+
+	/* Succeeded: the frame's planes were written. */
 	return 0;
 }
 
@@ -184,9 +267,13 @@ take_output(
 			if (written != 0)
 				result = -1;
 		}
+
+		/* Counts the frame and gives it back to the decoder. */
 		(*frames)++;
 		h264sw_frame_unref(frame);
 	}
+
+	/* Reports whether every frame was written. */
 	return result;
 }
 
@@ -204,6 +291,8 @@ clock_seconds(
 	result = clock_gettime(id, &now);
 	if (result != 0)
 		return 0.0;
+
+	/* Reports the clock's seconds. */
 	return (double)now.tv_sec + (double)now.tv_nsec / 1e9;
 }
 
@@ -246,9 +335,13 @@ decode_once(
 		found = vcodec_nal_find(data, size, &cursor, &nal, &nal_size);
 		if (!found)
 			break;
+
+		/* Takes the frames the previous NAL unit made ready. */
 		taken = take_output(decoder, write, &run->frames);
 		if (taken != 0)
 			failed = 1;
+
+		/* Gives the decoder the NAL unit, timed by its byte offset. */
 		error = h264sw_decoder_nal(decoder, nal, nal_size, (int64_t)(nal - data));
 
 		/* A refused NAL unit is counted; the decoder goes on as it does for the back end. */
@@ -266,6 +359,8 @@ decode_once(
 	taken = take_output(decoder, write, &run->frames);
 	if (taken != 0)
 		failed = 1;
+
+	/* Records the elapsed times and the concealed macroblocks, then frees the decoder. */
 	run->wall = clock_seconds(CLOCK_MONOTONIC) - wall_start;
 	run->cpu = clock_seconds(CLOCK_PROCESS_CPUTIME_ID) - cpu_start;
 	run->concealed = (unsigned long)decoder->stats.concealed_mbs;
@@ -276,6 +371,8 @@ decode_once(
 		fprintf(stderr, "speed-bench: writing the frames failed\n");
 		return -1;
 	}
+
+	/* Succeeded: the file was decoded and the counters are in *run. */
 	return 0;
 }
 
@@ -297,6 +394,8 @@ compare_fps(
 		return -1;
 	if (x > y)
 		return 1;
+
+	/* Equal rates. */
 	return 0;
 }
 
@@ -325,15 +424,22 @@ measure(
 	for (i = 0U;
 	     i < runs;
 	     i++) {
+		/* Decodes once, timing it. */
 		result = decode_once(data, size, 0, &run);
 		if (result != 0)
 			return 1;
+
+		/* The first run sets the frame count the others must match. */
 		if (i == 0U)
 			frames = run.frames;
+
+		/* A run with a different or empty frame count fails the measurement. */
 		if (run.frames != frames || run.frames == 0UL) {
 			printf("speed-bench: FAIL (run %u gave %lu frames, the first %lu)\n", i, run.frames, frames);
 			return 1;
 		}
+
+		/* Keeps the run's counters for the last line. */
 		concealed = run.concealed;
 		errors = run.errors;
 
@@ -341,6 +447,8 @@ measure(
 		fps[i] = 0.0;
 		if (run.wall > 0.0)
 			fps[i] = (double)run.frames / run.wall;
+
+		/* Prints the run's line. */
 		printf("run %u frames %lu wall %.3f cpu %.3f fps %.2f\n", i, run.frames, run.wall, run.cpu, fps[i]);
 		fflush(stdout);
 	}
@@ -349,55 +457,7 @@ measure(
 	qsort(fps, runs, sizeof(fps[0]), compare_fps);
 	printf("speed-bench: frames %lu best_fps %.2f median_fps %.2f concealed %lu errors %lu\n", frames,
 	    fps[runs - 1U], fps[runs / 2U], concealed, errors);
+
+	/* Succeeded: every run matched and the summary was printed. */
 	return 0;
-}
-
-int
-main(
-	int argc,
-	char **argv)
-{
-	struct speed_run run;
-	uint8_t *data;
-	size_t size;
-	long runs;
-	int yuv;
-	int result;
-	int status;
-
-	/* --yuv FILE: one decode written out. */
-	yuv = 0;
-	if (argc == 3)
-		yuv = strcmp(argv[1], "--yuv") == 0;
-	if (yuv) {
-		data = read_file(argv[2], &size);
-		if (data == NULL)
-			return 1;
-		status = 0;
-		result = decode_once(data, size, 1, &run);
-		if (result != 0)
-			status = 1;
-		free(data);
-		result = fflush(stdout);
-		if (result != 0)
-			status = 1;
-		return status;
-	}
-
-	/* FILE RUNS: the measurement. */
-	if (argc != 3) {
-		fprintf(stderr, "usage: speed-bench FILE RUNS | speed-bench --yuv FILE\n");
-		return 2;
-	}
-	runs = strtol(argv[2], NULL, 10);
-	if (runs < 1L || runs > (long)SPEED_MAX_RUNS) {
-		fprintf(stderr, "speed-bench: RUNS must be 1 to %u\n", SPEED_MAX_RUNS);
-		return 2;
-	}
-	data = read_file(argv[1], &size);
-	if (data == NULL)
-		return 1;
-	status = measure(data, size, (unsigned)runs);
-	free(data);
-	return status;
 }
