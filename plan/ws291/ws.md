@@ -55,6 +55,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p012](phase012/phase.md) | NVIDIA: scene-5000 を 50 fps を明らかに超える所へ（p011 の予備） | p011 | uncleared（2026-10-30 14:45 P7 q1712-i01: GPU の 19.4 ms は頂点の側の固定機能の hardware の限界で NVK と同等（続けての 6 回の平均 49.05 対 NVK 49.02）、cull=all・boost・VPC/VTG の method で不変、上限は約 51.3 fps。driver の変更なし） |
 | [p013](phase013/phase.md) | NVIDIA: draw と submit の多い bench（big-1000・subs-1000）の CPU の費用を NVK 並みに | p011 | in-progress（P3、q1728） |
 | [p020](phase020/phase.md) | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順） | RDNA の手順の確立（p002 と最初の改善） | in-progress（2026-10-30 16:50 P3 q1715-i02: HDMI で表示が出た。driver の欠け（instance rate・discard・CopyBuffer・mip の transfer・direct scanout の BLOB・stage-log の lock）を埋めて mview が描けた。目標 c13（594 MHz）は 26.6 fps、profile の途中） |
+| [p021](phase021/phase.md) | Raspberry Pi 5（V3D 7.1）で qs40 の model を、スペックの比で決めた copies・1920x1080 で 50 fps | p011 | in-progress（P4、q1729） |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
 - 2026-10-27 04:44 ユーザー（Q1 の問い「NGG の A〜C をどう進めますか？」へのクリック）「A〜C を今進める（推し）」。

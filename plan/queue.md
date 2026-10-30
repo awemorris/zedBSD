@@ -334,3 +334,9 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1728 / q1728-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r`・branch `agent/p3-ws291r`、実機 10.0.10.3） | [ws291-p013](ws291/phase013/phase.md) | 2026-10-30 ユーザーから、WS291 の RTX の改善を P3 で行う、という趣旨の指示を受けた | in-progress |
+
+## 2026-10-30: WS291 p021 を P4 で（q1729）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1729 / q1729-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws291pi`・branch `agent/p4-ws291pi`、image の build、実機 Pi 5 はユーザーが起動した後 SSH） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 で Pi 5 の GPU の改善を行い、PowerVR と同じくスペックの比から目標を決め、Pi 5 の image を渡す、という趣旨の指示を受けた | in-progress |
