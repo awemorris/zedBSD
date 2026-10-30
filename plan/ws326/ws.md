@@ -34,7 +34,7 @@
 ## Phase
 
 設計は [design.md](design.md)（module・決定・所有・試験の道）、各 module の仕様は `userland/desktop/libmedia/h264sw*.h` の comment。p002〜p020 は Sonnet 5.5 high の 1 回の起動で 1 Phase（header 1〜2 個）、依存の Phase の実装が main に入ってから始める。
-p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は 8ddb130a9（2026-10-31 p021 で h264sw-reflist.h だけを直した。実装の Phase は header を変えない、`BASE=8ddb130a9 sh plan/ws326/tests/check-skeleton.sh`）。2026-10-31 p021 で Q1 の許した h264sw-reflist.h の直し（`h264sw_reflist_build` に `poc_type`、8.2.4.2.3）を commit 8ddb130a9 に入れ、以後の BASE は 8ddb130a9（fd1d6f88c との header の差はこの直しだけ）。2026-10-31 p026 で codec に依らない部分を vcodec*.h へ移し、以後の BASE は 92ca2d0e8（check-skeleton は h264sw*.h と vcodec*.h の両方を照合する。WS329 p002 でもう一度移る）。
+p021（最初の全体の試験、module の間の誤りがここで出る）・p022（適合）・p024（速さの設計）は Opus を推す（Q1 の判断）。header の基点は 77ed48ac4（2026-10-31: p021 で h264sw-reflist.h、p026 で vcodec*.h（92ca2d0e8）、p025 の後に h264sw-ps.h の comment の大きさだけ。`BASE=77ed48ac4 sh plan/ws326/tests/check-skeleton.sh`）。2026-10-31 p021 で Q1 の許した h264sw-reflist.h の直し（`h264sw_reflist_build` に `poc_type`、8.2.4.2.3）を commit 8ddb130a9 に入れ、以後の BASE は 8ddb130a9（fd1d6f88c との header の差はこの直しだけ）。2026-10-31 p026 で codec に依らない部分を vcodec*.h へ移し、以後の BASE は 92ca2d0e8（check-skeleton は h264sw*.h と vcodec*.h の両方を照合する。WS329 p002 でもう一度移る）。
 
 | Phase | 目的 | 状態 | 依存 |
 | --- | --- | --- | --- |
