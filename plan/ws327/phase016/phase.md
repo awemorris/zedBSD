@@ -128,7 +128,14 @@ P2（q1703-i01、worktree p2-ws327、基点 main b901b1968）。日付は host �
 `ws327-doc-lines: PASS`（全ての参照の最初と最後の行を目で見た）、`sh plan/ws314/tests/doc-examples.sh build/ws327-p016-linux/lib` →
 `SUMMARY pass=76 fail=0 not-done=0`（clang・gcc の -Werror、link、写しの一致）。ENOMEM の道は走らせていない（未実施）。窓の道は下の QEMU で。
 
-（以下 5 と QEMU・FreeBSD は続き）
+### 5. Win32（2026-10-30 10:50）
+
+p013・p014 の「Q1 へ」と p016 の確かめ（`kl_cond_wait_for`・`kl_socket_poll` の時間、select の数）を [design.md §5.4](../design.md) の
+表（W1〜W8・S1〜S9）にまとめた。**header を変える必要は無い**（どれも header の「another errno value」「on some systems」「未規定」「at most」の内、
+または実装・build の側で直せる）。Q1 に判断を頼む物: S7（Win32 の poll の時間を QPC で測り待ち直すか。W1 と揃える実装の直し、走らせられない）、
+S9（`kl_socket_close(NULL)` の comment を p017 で header に足す）、W5・S8（Windows の Makefile を作る時の約束、Future Work の候補）。
+
+（以下 QEMU・FreeBSD は続き）
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験
 
