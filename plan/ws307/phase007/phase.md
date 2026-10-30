@@ -89,4 +89,6 @@
   - after（同じ VARS で起動し直し）: BootCurrent 0003（その entry で起動）、entry は残り、BootNext は使われて消えた。delete → 一覧と BootOrder から消えた。
   - gone（もう一度起動）: 消えたまま。
   - nouefi（ESP の loader を f69189c7e の v7 の loader に替えた image）: kernel は起動し SSH が答え、`efiboot list` は `Operation not supported`（名前が NULL）。
-- 未実施: BIOS の起動の回帰（hybrid の image で流し中）、他の port の kernel の build（流し中）、install-admin の Boot#### の導入の QEMU（installer-image の build が要る）、実機（release の UAT）。
+- QEMU の 2 回目（全部、最後の source 178c8517b の image）: `ZEDBSD_VARIANT=hybrid` の image（`plan/tools/guest/test-image.sh plan/ws307/tests/config-amd64-p007.mk build/amd64 ZEDBSD_VARIANT=hybrid`）で `sh plan/ws307/tests/p007-efiboot.sh build/p007/hybrid2.img <f69189c7e の BOOTX64.EFI> build/p007/hybrid2.img` PASS（`build/ws307-test/p007-efiboot.j32eXu`）: 上の 4 つの起動に加え、SeaBIOS（`-machine pc`、IDE。SeaBIOS は NVMe からこの image を起動しない）で起動し SSH が答え、`efiboot list` は `Operation not supported`。
+- 他の port（warning 0）: `make -j16 ZEDBSD_CONFIG=config/ci/config-<port>.mk BUILD=build/p007-ports/<port> …/vmunix` が pcat・pc98・intelmac・armv7-virt・zybo・m68k-virt・ppc32-mac99・ppc64-pseries・riscv32-virt・riscv64-virt・visionfive2・rpi4・rpi5・odroid-c5 の 14 で rc 0、warning 0（`pmem.c`・`system-device.c` を含む）。CI の config の無い sparcv9・x68k・mips32/64-malta は build していない。
+- 未実施: install-admin の Boot#### の導入の QEMU（installer-image の build が要る）、実機（release の UAT）。
