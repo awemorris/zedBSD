@@ -367,3 +367,17 @@
 | --- | --- | --- | --- | --- |
 | q1734 / q1734-i01 | P5（kernel-and-driver-designer、worktree `/home/awe/zedBSD-worktrees/p5-ws333`・branch `agent/p5-ws333`） | [ws333-p001](ws333/phase001/phase.md) | 2026-10-31 ユーザーから、WS301・WS303 を統合した WS333 で CPU の省電力を先に直す、という趣旨の指示を受けた | in-progress |
 | q1735 / q1735-i01 | P1（phase-runner-high、worktree p1-ws291i、実機 5330） | [ws333-p002](ws333/phase002/phase.md) | 同上（amd64 の idle の MWAIT を先に） | in-progress |
+
+## 2026-10-31: 担当の無い仕事の割り当て（q1736〜q1742）
+
+2026-10-31 ユーザーから、WS307・WS331・WS332・WS326 を空いている P3 に、BUG-370 と WS291 を P6 に、BUG-374 を P4 に割り当てる、という趣旨の指示を受けた。
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1736 / q1736-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-seq`・branch `agent/p3-seq`、QEMU（OVMF）） | [ws307](ws307/ws.md) p007 の残り → WS307 の完了 | 上のユーザーの指示 | in-progress |
+| q1737 / q1737-i01 | P3（同じ worktree、q1736 の後） | [ws331](ws331/ws.md) p006 規約の全文の見直し → WS331 の完了 | 上のユーザーの指示 | pending |
+| q1738 / q1738-i01 | P3（同じ worktree、q1737 の後） | [ws332](ws332/ws.md) p003（率を仮定する残り）→ p004 規約 → WS332 の完了 | 上のユーザーの指示 | pending |
+| q1739 / q1739-i01 | P3（同じ worktree、q1738 の後、実装は phase-runner-low を標準廉価実装手順で） | [ws326](ws326/ws.md) p015・p017 以降 | 上のユーザーの指示 | pending |
+| q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | in-progress |
+| q1741 / q1741-i01 | P6（同じ worktree、q1740 の後、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) | 上のユーザーの指示 | pending |
+| q1742 / q1742-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-bug374`・branch `agent/p4-bug374`、実機 10.0.10.3 は P6 と lock で交代） | [BUG-374](bugs/BUG-374.md)（RTX の cursor の色が逆） | 上のユーザーの指示 | in-progress |

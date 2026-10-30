@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 01:26（Q1）
+最終更新: 2026-10-31 01:27（Q1）
 
 ## 担当（P1〜P8）
 
@@ -9,10 +9,10 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS333](ws333/ws.md)・[WS291](ws291/ws.md) | CPU の idle の省電力と、i915（5330）の描画の速さ | WS333 p002: amd64 の idle を HLT から MWAIT に替え、5330 で idle の電力と GPU の周波数を前後で測る | WS291 p022 に戻って測り直す（今 qs40 × 600 で 31.0 fps、Linux 50.6）。Notes は 5330 で起動を確かめた |
 | P2 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | p020: GPU の memory を cache（SLC）に通す既定の回帰、表示用の copy を頂点の処理が待たない直し | qs40 × 13 を 42.35 → 50 fps 以上へ。branch は BUG-375 が直るまで main に入れない |
-| P3 | — | — | 返却（WS291 p013: big-1000 48 → 69.7 fps、NVK 136 には届かず。BUG-374 は解析だけ） | — |
-| P4 | [WS291](ws291/ws.md) | GPU の描画の速さ（Raspberry Pi 5 の段） | 返却。host で driver の欠けを実装済み（branch は未 merge） | ユーザーが Pi 5 の image で起動した後に: image を作り直し、Pi 4 の desktop の回帰、clock の確かめ、fps の計測 |
+| P3 | [WS307](ws307/ws.md)・[WS331](ws331/ws.md)・[WS332](ws332/ws.md)・[WS326](ws326/ws.md) | 残りの仕事を順に | 起動（q1736）。WS307 p007 の残り（installer の導入の QEMU、古い entry の掃除） | WS331 p006 規約 → WS332 p003・p004 → WS326 p015・p017 以降 |
+| P4 | Bug・[WS291](ws291/ws.md) | BUG-374（RTX の cursor の色が逆）と Pi 5 の GPU | 起動（q1742）。BUG-374 の原因の特定と直し（10.0.10.3 は P6 と lock で交代） | Pi 5 の起動の後に WS291 p021 |
 | P5 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | p001: 統一の設計（WS301・WS303 の設計を入力に） | design-reviewer → ユーザーの判断の一覧 |
-| P6 | — | — | 空き（WS307 は p007 の残り 2 つで止め） | — |
+| P6 | Bug・[WS291](ws291/ws.md) | BUG-370（Photos）と RTX の CPU の費用 | 起動（q1740）。BUG-370 の直し（QEMU） | WS291 p014: 命令の記録の段と全画面の copy を減らす（10.0.10.3） |
 | P7 | Bug | network と VF2 と compositor の Bug | BUG-371 の QEMU の確かめ、BUG-375（game mode の後に compositor が落ちる）の解析 | 直し → VF2（P2）と 10.0.10.3（P3）で確かめ |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
@@ -26,7 +26,7 @@ Sonnet の実装の担当（標準廉価実装手順）: 今は無し。次は [
 | --- | --- | --- | --- | --- |
 | p001〜p006 | AMD RDNA | Linux（RADV）と同等 | 同等 | cleared（p006・p008・p009 は RX 5600 XT が抜かれて止め） |
 | p010〜p012 | NVIDIA RTX 2070 | desktop 60 fps、scene-5000 で NVK（50.1 fps） | desktop 60〜68 fps、scene-5000 49.9 fps（hardware の限界で NVK と同等） | p010・p011 cleared、p012 uncleared（限界） |
-| p013 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
+| p013・p014 | NVIDIA RTX 2070 | draw・submit の多い bench を NVK 並みに（big-1000 136.2、subs-1000 75.4） | big-1000 48 → 69.7 fps、big-100 401 → 604 fps、subs-1000 11 fps（残りは命令の記録の解読約 7 ms と、pass の終わりの全画面の copy） | uncleared（2026-10-31、差の内訳を記録） |
 | p020 | PowerVR（VF2） | qs40 × 13・1920x1080・direct scanout で 50 fps（RTX のカタログの FP32 の比） | 42.35 fps（direct） | in-progress（P2） |
 | p021 | Raspberry Pi 5（V3D 7.1） | スペックの比の copies で 50 fps（clock を実機で確定） | 未計測（mview に要る driver の機能を host で実装済み） | in-progress（P4、実機待ち） |
 | p022 | Intel i915（5330） | 5330 の Linux（ANV）で 50.6 fps の qs40 × 600 で Linux 以上 | 31.0 fps（頂点の shader 134 → 67 命令。GPU が電力の上限で 800 MHz、WS333 p002 で CPU の idle を先に直す） | in-progress（P1） |
@@ -93,24 +93,12 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 今の作業を止めている判断は無い。以下は、master.md の「ユーザーの未決」に残っている物と、担当の無い仕事の割り当て。急ぐ物から。
 
-### 1. 担当の無い仕事を、誰にいつ割り当てるか
-
-- 背景: 今日の作業の残りで、担当の無い物がある。空いている担当は P3・P4（Pi 5 の実機待ち）・P6。
-- 一覧:
-  - WS307（graphical installer）p007 の残り: installer で導入する時に起動の項目を作る道の QEMU、古い「zedBSD」の項目の掃除。これで WS307 が完了する。
-  - WS331（driver の HAL 依存）p006: 規約の全文の見直し。これで WS331 が完了する。
-  - WS332（tick の API）p003: tick の数を literal で書いた残り（VM_FREE_WAIT_TICKS など、「次の tick まで」の +1 約 8 か所）。
-  - WS326（H.264 の decoder）p015・p017 以降（標準廉価実装手順、Sonnet）。
-  - WS291 p013（RTX の CPU の費用）の続き: 命令の記録の段（約 7 ms）を無くす新しい形、pass の終わりの全画面の copy。
-  - BUG-370（Photos で保存すると全面表示が閉じる）。
-- 決めてほしい事: どれを誰に、どの順で。
-
-### 2. BUG-374（RTX の cursor の色が逆）の確かめ
+### 1. BUG-374（RTX の cursor の色が逆）の確かめ
 
 - 背景: P3 の調べで、nvrtx の driver が受ける cursor の画像は正しく（白 69・黒 49 の画素で矢印の通り）、display の設定の値も NVIDIA の定義と合っていた。原因は未特定。
 - 決めてほしい事: 10.0.10.3 の画面で、cursor が「cursor の plane」（hardware の cursor）か「合成で描いた cursor」かを見分けるため、次に見ていただける時に、game mode（全画面の 3D）の間と desktop の間で cursor の色が同じかを見てほしい（頼みではなく、お手すきの時の試験の一覧に置く形でよいか）。
 
-### 3. WS299（5330 の NVMe の速さ）で担当の外に見つけた物の扱い
+### 2. WS299（5330 の NVMe の速さ）で担当の外に見つけた物の扱い
 
 - 背景: 2026-10-28 の P1 の報告（[ws299/ws.md](ws299/ws.md) の「結果（2026-10-28 21:50）」）で、NVMe 以外の課題が見つかった。
   - amd64 の idle（C1 だけ）・HWP・P/E core の置き方 → 2026-10-31 に WS333 に入れた（解決）。
@@ -119,21 +107,21 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
   - libc の memcpy・memset の続き（大きな copy、build の flag -fno-builtin -Os）。
 - 決めてほしい事: 残りの 3 つを Bug にするか WS にするか、いつ直すか。WS299 そのものを続けるか（raw の読みは Debian の約 50%）。
 
-### 4. PS/2 の aux（mouse の port）
+### 3. PS/2 の aux（mouse の port）
 
 - 背景: kernel の PS/2 の driver（src/kern/platform/pcat.c の drv_pcat_ps2_8042_init の辺り）が、mouse が無いのに node を作り、open のたびに約 80 ms 待って EIO を返す。
 - 決めてほしい事: Bug にするか、いつ直すか。
 
-### 5. P4 が 10-27 に拾った候補（q1660）
+### 4. P4 が 10-27 に拾った候補（q1660）
 
 - WS162 を canceled にするか（WS172 に吸収）。WS279 p009（Pi 5 の GPU の license と類似性の監査）の担当。P4m の時々の失敗（T1-691）を Bug にするか。nvrtx.disp.own の既定。pci-msi-qemu.c（唯一の config が消えた試験の code）を残すか。master-design-policy.md へ移す候補 約 25 件。
 
-### 6. WS304（Pi 5 の外の PCIe、M.2 の NVMe）
+### 5. WS304（Pi 5 の外の PCIe、M.2 の NVMe）
 
 - 背景: 実機で pcie1 の link が上がらず、ハードの側の切り分けで止まっている。
 - 決めてほしい事: Raspberry Pi OS で、同じ HAT（Geekworm X1001）・FFC の cable・NVMe の link が上がるかを見るか（上がれば zedBSD の driver の問題、上がらなければハードの問題）。
 
-### 7. 以前からの物（変わっていない）
+### 6. 以前からの物（変わっていない）
 
 - WS306（ゲーム最適化の UAPI）: 環境変数の名前と書式、知らない option の扱い（p001 の設計で推しを示す予定）。
 - WS282〜WS285（camera など）: 実装を始める時期、WS282 の試験の画面を出す PC と買う webcam。
@@ -152,6 +140,7 @@ p001〜p006・p008〜p011・p013〜p015 cleared（p012 canceled）。p007（firm
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-31 | 割り当て | WS307・WS331・WS332・WS326 を P3、BUG-370 と WS291（RTX の続き p014）を P6、BUG-374 を P4 | [queue.md](queue.md) |
 | 2026-10-31 | WS291 PowerVR | VF2 の kernel と userland の入れ替えはすべて自動でよい。P2 は bug-analyzer の subagent を使ってよい | [ws291/ws.md](ws291/ws.md) |
 | 2026-10-31 | WS291 p022・WS333 | CPU の省電力（idle の C-state・P-state）を先に直す。WS333 p002 で amd64 の idle の MWAIT を先に（P1）、p001 で統一の設計（P5） | [ws333/ws.md](ws333/ws.md) |
 | 2026-10-31 | WS301・WS303 → WS333 | WS301（CPU の DVFS）と WS303（熱と fan）を廃止し、/dev/thermal で統一して設計する WS333 に統合（CPU の idle も含める） | [ws333/ws.md](ws333/ws.md) |
