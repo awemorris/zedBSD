@@ -90,6 +90,7 @@ main(
 	char key;
 	int fd, batch, iterations, delay, i;
 	struct termios saved, raw;
+	struct timespec pause;
 	int tty;
 	struct pollfd input;
 
@@ -152,6 +153,19 @@ main(
 		/* Handles the iterations condition. */
 		if (iterations >= 0 && i + 1 >= iterations)
 			break;
+
+		/*
+		 * Batch mode reads no keys: it waits the whole delay, since a
+		 * standard input at its end (a pipe, a closed SSH input) would
+		 * otherwise end every wait at once and the draws would come
+		 * with no time between them.
+		 */
+		if (batch) {
+			pause.tv_sec = delay / 1000;
+			pause.tv_nsec = (long)(delay % 1000) * 1000000L;
+			(void)nanosleep(&pause, NULL);
+			continue;
+		}
 
 		/* Handles a failed poll operation. */
 		if (poll(&input, 1, delay) > 0 &&
