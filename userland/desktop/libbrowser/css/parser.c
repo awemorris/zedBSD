@@ -50,6 +50,9 @@ struct parser_state {
 	struct wb_vector keyframes;
 	/* The @scope whose block is being read (NULL outside one). */
 	const struct css_scope *scope;
+	/* The cascade layers named so far (full names, in the order they appeared) and the one whose block is being read (0 for none). */
+	struct wb_vector layers;
+	int layer;
 };
 
 /*
@@ -127,6 +130,9 @@ static int parser_font_format(const struct css_token *format);
 static int parser_keep_font_faces(struct parser_state *state);
 static int parser_add_rule(struct parser_state *state, struct token_range prelude, struct token_range block, const struct css_media *media);
 static int parser_selectors(struct vm_heap *heap, struct wb_arena *arena, struct token_range prelude, struct css_selector **selectors, size_t *count);
+static int parser_layer_path(struct parser_state *state, const struct css_token *tokens, size_t count, int *index);
+static int parser_layer_names(struct parser_state *state, const struct css_token *tokens, size_t count);
+static int parser_layer_block(struct parser_state *state, const struct css_token *tokens, size_t count);
 static int parser_scope(struct parser_state *state, const struct css_token *prelude, size_t prelude_count, const struct css_token *body, size_t body_count, const struct css_media *media);
 static int parser_scope_selectors(struct parser_state *state, struct token_range range, const struct css_selector **selectors, size_t *count);
 static int parser_scoped_selectors(struct parser_state *state, struct token_range prelude, struct css_selector **selectors, size_t *count);
@@ -176,6 +182,8 @@ css_parse_sheet(
 	state.heap = heap;
 	state.sheet = sheet;
 	state.scope = NULL;
+	state.layer = 0;
+	wb_vector_init(&state.layers, sizeof(struct vm_string *));
 	wb_vector_init(&state.rules, sizeof(struct css_rule));
 	wb_vector_init(&state.imports, sizeof(struct vm_string *));
 	wb_vector_init(&state.import_media, sizeof(struct css_media *));
@@ -208,6 +216,7 @@ css_parse_sheet(
 	}
 	wb_vector_release(&state.keyframes);
 	wb_vector_release(&state.try_rules);
+	wb_vector_release(&state.layers);
 	if (error != 0) {
 		wb_vector_release(&state.rules);
 		return error;
@@ -761,6 +770,141 @@ parser_rules(
 }
 
 /*
+ * Reads one layer name path (identifiers joined by dots, under the layer being read) from tokens and makes it a
+ * layer of the sheet when it is new; reports its place (1 for the first layer; 0 when the tokens are no name).
+ */
+static int
+parser_layer_path(
+	struct parser_state *state,
+	const struct css_token *tokens,
+	size_t count,
+	int *index)
+{
+	uint16_t units[256];
+	struct vm_string **names;
+	struct vm_string *name;
+	size_t length;
+	size_t at;
+	size_t unit;
+	int found;
+	int error;
+
+	/* The enclosing layer's name, a dot, then the path. */
+	*index = 0;
+	length = 0;
+	if (state->layer != 0) {
+		names = state->layers.items;
+		for (unit = 0; unit < names[state->layer - 1]->length && length < 250U; unit++)
+			units[length++] = vm_string_at(names[state->layer - 1], unit);
+		units[length++] = (uint16_t)'.';
+	}
+	found = 0;
+	for (at = 0; at < count; at++) {
+		if (tokens[at].type == CSS_TOKEN_WHITESPACE)
+			continue;
+		if (tokens[at].type == CSS_TOKEN_DELIM && tokens[at].length == 1U && tokens[at].text[0] == '.') {
+			if (length < 250U)
+				units[length++] = (uint16_t)'.';
+			continue;
+		}
+		if (tokens[at].type != CSS_TOKEN_IDENT)
+			return 0;
+		for (unit = 0; unit < tokens[at].length && length < 250U; unit++)
+			units[length++] = tokens[at].text[unit];
+		found = 1;
+	}
+	if (!found)
+		return 0;
+
+	/* A name the sheet has is its place; a new one is added at the end. */
+	name = vm_atom_from_units(state->heap, units, length);
+	if (name == NULL)
+		return ENOMEM;
+	names = state->layers.items;
+	for (at = 0; at < state->layers.count; at++) {
+		if (names[at] == name) {
+			*index = (int)at + 1;
+			return 0;
+		}
+	}
+	error = wb_vector_push(&state->layers, &name);
+	if (error != 0)
+		return error;
+	*index = (int)state->layers.count;
+	return 0;
+}
+
+/* Names the layers of an @layer statement (comma separated paths), in the order given. */
+static int
+parser_layer_names(
+	struct parser_state *state,
+	const struct css_token *tokens,
+	size_t count)
+{
+	size_t start;
+	size_t at;
+	int index;
+	int error;
+
+	start = 0;
+	for (at = 0; at <= count; at++) {
+		if (at < count && tokens[at].type != CSS_TOKEN_COMMA && tokens[at].type != CSS_TOKEN_SEMICOLON)
+			continue;
+		error = parser_layer_path(state, tokens + start, at - start, &index);
+		if (error != 0 && error != EINVAL)
+			return error;
+		start = at + 1U;
+	}
+	return 0;
+}
+
+/*
+ * The layer an @layer block's rules are in: the one its name makes, or a layer of its own (an anonymous one is
+ * the next after those named so far).
+ */
+static int
+parser_layer_block(
+	struct parser_state *state,
+	const struct css_token *tokens,
+	size_t count)
+{
+	struct vm_string *name;
+	size_t at;
+	int named;
+	int index;
+
+	named = 0;
+	for (at = 0; at < count; at++) {
+		if (tokens[at].type != CSS_TOKEN_WHITESPACE)
+			named = 1;
+	}
+	if (named) {
+		if (parser_layer_path(state, tokens, count, &index) != 0)
+			return state->layer;
+		return index;
+	}
+
+	/* An anonymous layer: a name no path can have (a space and its place). */
+	{
+		uint16_t units[16];
+		size_t length;
+		unsigned number;
+
+		length = 0;
+		units[length++] = (uint16_t)' ';
+		number = (unsigned)state->layers.count + 1U;
+		do {
+			units[length++] = (uint16_t)('0' + number % 10U);
+			number /= 10U;
+		} while (number != 0 && length < 15U);
+		name = vm_atom_from_units(state->heap, units, length);
+		if (name == NULL || wb_vector_push(&state->layers, &name) != 0)
+			return state->layer;
+		return (int)state->layers.count;
+	}
+}
+
+/*
  * Reads one at-rule (its tokens from the at-keyword to its semicolon or
  * the end of its block): @import before the style rules, the rules of an
  * @media block under its media list, of an @supports block whose
@@ -777,6 +921,7 @@ parser_at_rule(
 	struct css_media *nested;
 	size_t open;
 	size_t body_count;
+	int outer_layer;
 	int is_media;
 	int is_supports;
 	int is_layer;
@@ -812,8 +957,15 @@ parser_at_rule(
 	open = 1;
 	while (open < count && tokens[open].type != CSS_TOKEN_OPEN_CURLY)
 		open++;
-	if (open >= count)
+	if (open >= count) {
+		/* @layer a, b; names the layers, in this order. */
+		if (is_layer) {
+			error = parser_layer_names(state, tokens + 1, count - 1U);
+			if (error == ENOMEM)
+				return error;
+		}
 		return 0;
+	}
 
 	/* The block's rules, without its closing brace. */
 	body_count = count - open - 1U;
@@ -867,8 +1019,11 @@ parser_at_rule(
 		return error;
 	}
 
-	/* An @layer block's rules count in the order they come (the layers' own order is not kept). */
+	/* An @layer block's rules are in the layer it names (or one of its own without a name). */
+	outer_layer = state->layer;
+	state->layer = parser_layer_block(state, tokens + 1, open - 1U);
 	error = parser_rules(state, tokens + open + 1U, body_count, media);
+	state->layer = outer_layer;
 	if (error != 0)
 		return error;
 
@@ -1374,6 +1529,7 @@ parser_scope_self(
 	memset(&rule, 0, sizeof(rule));
 	rule.media = media;
 	rule.scope = state->scope;
+	rule.layer = state->layer;
 	rule.selectors = selector;
 	rule.selector_count = 1;
 	block.tokens = tokens;
@@ -1684,6 +1840,7 @@ parser_add_rule(
 	memset(&rule, 0, sizeof(rule));
 	rule.media = media;
 	rule.scope = state->scope;
+	rule.layer = state->layer;
 	if (state->scope != NULL) {
 		error = parser_scoped_selectors(state, prelude, &rule.selectors, &rule.selector_count);
 	} else {

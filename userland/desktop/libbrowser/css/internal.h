@@ -681,6 +681,8 @@ struct css_rule {
 	const struct css_media *media;
 	/* The @scope the rule is in (NULL for none). */
 	const struct css_scope *scope;
+	/* The cascade layer the rule is in: 1 for the first the sheet names, and so on (0 for none: unlayered rules win). */
+	int layer;
 };
 
 /*

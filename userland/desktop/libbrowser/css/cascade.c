@@ -218,6 +218,8 @@ struct cascade_match {
 	uint32_t specificity;
 	/* How many generations the element is below its @scope root (CASCADE_UNSCOPED outside @scope); nearer wins. */
 	uint32_t proximity;
+	/* The cascade layer's weight (a later layer is more; no layer is the most; the reverse for !important). */
+	uint32_t layer;
 	uint64_t order;
 };
 
@@ -271,7 +273,7 @@ static int cascade_element_keys(struct css_engine *engine, struct dom_element *e
 static int cascade_add_bucket(struct css_engine *engine, const struct css_rule_index *index, const struct css_index_bucket *bucket);
 static int cascade_collect_sheet(struct css_engine *engine, struct dom_element *element, const struct css_sheet *sheet, uint64_t sheet_number, struct vm_string *id, struct wb_vector *matches);
 static int cascade_entry_compare(const void *left, const void *right);
-static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, uint64_t order);
+static int cascade_add_declarations(struct wb_vector *matches, const struct css_declaration *declarations, size_t count, int origin, uint32_t specificity, uint32_t proximity, int layer, uint64_t order);
 static int cascade_scoped_matches(struct css_engine *engine, struct dom_element *element, const struct css_scope *scope, const struct css_selector *selector, uint32_t *proximity);
 static int cascade_scope_root(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
 static int cascade_scope_root_compute(struct css_engine *engine, struct dom_element *root, const struct css_scope *scope);
@@ -1357,7 +1359,7 @@ cascade_collect(
 		return 0;
 
 	/* They come after every sheet's rules. */
-	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, (uint64_t)engine->sheets.count << 44);
+	error = cascade_add_declarations(matches, declarations, declaration_count, CSS_ORIGIN_AUTHOR, 0xffffffffU, CASCADE_UNSCOPED, 0, (uint64_t)engine->sheets.count << 44);
 	if (error != 0)
 		return error;
 
@@ -1480,7 +1482,7 @@ cascade_presentational(
 	if (error != 0)
 		return 0;
 	return cascade_add_declarations(matches, declarations, declaration_count,
-	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0);
+	    CSS_ORIGIN_AUTHOR, 0, CASCADE_UNSCOPED, 0, 0);
 }
 
 /* Appends an ASCII fragment to a declaration being made. */
@@ -1892,7 +1894,7 @@ cascade_collect_sheet(
 		/* A rule whose selectors all failed does not apply. */
 		if (matched) {
 			order = (sheet_number << 44) | ((uint64_t)candidates[position].rule << 16);
-			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, order);
+			error = cascade_add_declarations(matches, rule->declarations, rule->declaration_count, sheet->origin, best, proximity, rule->layer, order);
 			if (error != 0)
 				return error;
 		}
@@ -2149,6 +2151,7 @@ cascade_add_declarations(
 	int origin,
 	uint32_t specificity,
 	uint32_t proximity,
+	int layer,
 	uint64_t order)
 {
 	struct cascade_match match;
@@ -2160,6 +2163,9 @@ cascade_add_declarations(
 		match.declaration = &declarations[index];
 		match.specificity = specificity;
 		match.proximity = proximity;
+		match.layer = layer != 0 ? (uint32_t)layer : 0x40000000U;
+		if (declarations[index].important)
+			match.layer = layer != 0 ? 0x40000000U - (uint32_t)layer : 0U;
 		match.order = order + (uint64_t)index;
 		if (origin == CSS_ORIGIN_USER_AGENT) {
 			match.rank = RANK_USER_AGENT;
@@ -2760,6 +2766,10 @@ cascade_compare(
 	if (a->rank < b->rank)
 		return -1;
 	if (a->rank > b->rank)
+		return 1;
+	if (a->layer < b->layer)
+		return -1;
+	if (a->layer > b->layer)
 		return 1;
 	if (a->specificity < b->specificity)
 		return -1;
