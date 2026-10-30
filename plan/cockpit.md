@@ -138,14 +138,11 @@ POSIX と Win32 で同じ interface の thread・socket の層と、app の移�
 - 案 2（P2 の推し）: atomic.h を compiler の組み込みの __atomic で書く。CPU が atomic の命令を持たない port（m68k・i386・ppc32・ppc64・riscv32・mips32）だけ、build が印を足して kernel の割り込みの禁止で囲む。HAL の atomic の方式と同じかは atomic_private.h で確かめる。欠点: HAL の atomic の実装と arch の事実を kernel の側にも写す（二重の持ち方）。
 - 案 3: atomic.h だけ例外として今のまま残す。
 
-### 2. WS331: pc98・pcat の driver が HAL の窓の番地を直に書いている 4 か所
-
-- pc98 の graphics の text.c・display-glyph.c（i386 の HAL の text VRAM・CG の窓 0x800a0000 など）、display-gdc.c（VRAM の物理番地をそのまま仮想番地として、HAL の 1 対 1 の map が前提）、pcat の font.c（VGA の窓 0x800a0000）。kern_device_map で求める形に直せる見込み。WS331 で直すか。
-
 ## 決まった事
 
 | 日付 | WS | 決定 | 記録 |
 | --- | --- | --- | --- |
+| 2026-10-30 | WS331 driver の HAL 依存 | pc98・pcat の legacy の VRAM・VGA の窓: platform driver は straight map の基底 0x80000000 を知っている前提で、基底は driver の中で定義し、HAL の定数は参照しない（handoff・API は足さない） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS331・WS332 | driver は rpi-common・s905x5m、HAL は bsp-rpi-common・bsp-s905x5m-common・bsp-odroidc5 に分ける。kernel の header は整数の型を kernel で定義し、sched・atomic・thread・vmspace は _private.h に分ける。KERN_CLOCK_HZ は obsolete なので削除し、tick を API で扱い可変にする WS332 を立てる | [ws331/ws.md](ws331/ws.md)・[ws332/ws.md](ws332/ws.md) |
 | 2026-10-30 | WS331 driver の HAL 依存 | rpi4 の console: HAL の BSP の非公開の関数を呼ばない。resume に当たる処理は driver の中に同等の関数を作る（suspend は kernel_putc の約束で、要れば HAL の実装を直す） | [ws331/ws.md](ws331/ws.md) |
 | 2026-10-30 | WS291 GPU の速さ | PowerVR の目標: Linux の RTX 2070 の scene-5000（qs40 × 5000、50 fps）をカタログの FP32 の比（約 392 倍、GPU 594 MHz）で割り、qs40 × 13・1920x1080 で 50 fps 以上 | [ws291/ws.md](ws291/ws.md) |

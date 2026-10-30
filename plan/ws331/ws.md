@@ -20,6 +20,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 - 2026-10-30 ユーザーから、rpi4-console.c が呼ぶ rpi_cons_suspend_output・rpi_cons_resume_output（HAL の Raspberry Pi の BSP の中の非公開の関数）について、HAL の呼び出しに加えて非公開の関数まで呼んでいたのは違反であり、resume に当たる処理は driver の中に同等の関数を定義して使えばよい、という趣旨の指示を受けた。→ Q1 の解釈: suspend は hal.h の既存の約束（kernel が kernel_putc を公開したら HAL の early console は描かない）で済ませ、BSP がその約束を守っていなければ HAL の実装（src/hal/）を直す（hal.h は不変）。resume（残した文字の描き直し）は driver の中に実装する。p005 で行う。
 - 2026-10-30 ユーザーから、Raspberry Pi の console は kernel_putc を入れた時に作り直さなかった事が原因なので、今ここで作り直す、という趣旨の指示を受けた。→ p005 で rpi4-console.c（Pi 4・Pi 5・ODROID-C5）を sun4u-console.c と同じ形に作り直す: driver が firmware の framebuffer を kernel の口で map し、自分の文字の表と font で描き、serial の時は UART の送信も driver で行い、kernel_putc を公開する。graphics が画面を持つ間は描かず、返された時に driver が描き直す。HAL の watch.c の描く先の判断は HVS の状態だけで決める。cons.c の rpi_cons_suspend/resume_output は使われなくなる。
 - 2026-10-30 ユーザーから、driver の build の macro HAL_ARCH_*・HAL_BOARD_* はなるべく残さない、kernel の header が HAL を include する件は簡単なら分ける、という趣旨の指示を受け、Q1 の調べ（16 か所、13 header）を受けて p008・p009 の形になった。
+- 2026-10-30 ユーザーから、pc98・pcat の legacy の VRAM・VGA の窓は straight map の範囲の中にあるので、framebuffer のように HAL から handoff したり straight map の基底を取る kernel の API を足したりはせず、platform driver は基底 0x80000000 を知っている前提で作り、その基底は driver の中で定義し直して HAL の定数を参照しない、という趣旨の指示を受けた。
 
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
