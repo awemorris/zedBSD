@@ -2,7 +2,7 @@
 
 # ws291-p013: NVIDIA: draw と submit の多い bench の CPU の側の費用を Linux（NVK）並みに
 
-Status: in-progress
+Status: uncleared（2026-10-31 Q1。NVK と同等には届かず。差の内訳を記録。次の手は新しい transport で record の段を無くす事など）
 Parent: [WS291](../ws.md)
 Queue: q1728（P3）
 

@@ -333,7 +333,7 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1728 / q1728-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r`・branch `agent/p3-ws291r`、実機 10.0.10.3） | [ws291-p013](ws291/phase013/phase.md) | 2026-10-30 ユーザーから、WS291 の RTX の改善を P3 で行う、という趣旨の指示を受けた | in-progress |
+| q1728 / q1728-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291r`・branch `agent/p3-ws291r`、実機 10.0.10.3） | [ws291-p013](ws291/phase013/phase.md) | 2026-10-30 ユーザーから、WS291 の RTX の改善を P3 で行う、という趣旨の指示を受けた | uncleared（2026-10-31 返却。big-1000 48 → 69.7 fps、big-100 401〜420 → 567〜604、subs-1000 11（NVK 75.4）。差の内訳は phase013。BUG-374 は解析だけ。823ce7bde、merge ccd7bf2d2） |
 
 ## 2026-10-30: WS291 p021 を P4 で（q1729）
 
