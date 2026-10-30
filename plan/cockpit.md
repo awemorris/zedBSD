@@ -9,7 +9,7 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS313](ws313/ws.md) | ODROID-C5（Amlogic S905X5M）の BSP と Mali の GPU | 起動（q1716）。bootloader を Hardkernel の公式の image（20260610）の物に替え、Amlogic の license と一緒に zedBSD-firmware へ。試験の image を作り直す | Q1 が zedBSD-firmware を push → 実機の結果で各 Phase を直す |
 | P2 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除き、kernel の口（kern_*）だけを使う形に | 返却。p001 の一覧（置き換え先の表 A、kernel に足す関数の表 B） | ユーザーが表 B と未決 4 点を決める → p002〜p006 |
-| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 返却。VF2 の HDMI に画面が無く（10-28 から）fps が測れない | 画面か dummy plug の接続（ユーザー）か、画面なしで測る案の判断の後に再開 |
+| P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（PowerVR の段、VF2） | 再起動（q1715-i02）。ユーザーが VF2 の HDMI を接続。板を入れ直して framebuffer を確かめ、計測へ | 40 fps 前後の scene を決め 50 fps 以上へ |
 | P4 | — | — | — | — |
 | P5 | — | — | 返却（WS327 完了、2026-10-30） | — |
 | P6 | [WS307](ws307/ws.md) | Keiland のアプリの graphical installer | 起動（phase-runner、q1711）。ws.md の Resume point から | p015 の QEMU の 3 回目 → p004 GTK4 → p008 → p014 → p007 → WS の完了 → 返却 |

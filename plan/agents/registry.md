@@ -9,7 +9,7 @@
 | P2 | phase-runner | ws331 p001 (q1713-i01 cleared) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | returned（一覧をユーザーに） | 6af47c4a4（merge f4fcb6ff2） |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner | ws307 (q1711-i01、WS の完了で返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | in-progress（2026-10-30 起動） | — |
-| P3 | phase-runner-high | ws291 p020 (q1715-i01 返却) | `/home/awe/zedBSD-worktrees/p3-ws291` / `agent/p3-ws291` | returned（VF2 の画面の接続待ち） | a7e9379f5 |
+| P3 | phase-runner-high | ws291 p020 (q1715-i02) | `/home/awe/zedBSD-worktrees/p3-ws291` / `agent/p3-ws291` | in-progress（2026-10-30 再起動、VF2 の HDMI を接続済み） | a7e9379f5（merge 0e52e0744） |
 | P8 | phase-runner-low | ws074 p260 (q1708-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（i01 返却の後に再起動） | 94cbacb31（merge fca92282d） |
 | P7 | phase-runner-high | ws291 (q1712-i01 返却) | `/home/awe/zedBSD-worktrees/p7-ws291` / `agent/p7-ws291` | returned | 6c49a6095（merge 28cf45cc8） |
 

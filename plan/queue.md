@@ -266,3 +266,4 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1716 / q1716-i01 | P1（phase-runner-high、worktree p1-ws313 と p1-c5-firmware） | [ws313](ws313/ws.md) p003 媒体 | ユーザー「このファイルは、このボードで利用する目的であれば、再配布可能です。zedBSD-firmwareに入れてください。ライセンスは下記です。 prior written permissionはHardkernelに与えられており、このボードでしか使用できないイメージであれば、再配布が可能なんだそうです。」（下に Amlogic の license の本文、2018 Amlogic の「Redistribution and use … strictly prohibited without prior written permission from Amlogic.」） bootloader を公式の image の物に替え、zedBSD-firmware に license の本文と一緒に入れる。試験の image を作り直す。push は Q1 | in-progress |
+| q1715 / q1715-i02 | P3（phase-runner-high、同じ worktree p3-ws291、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「VF2はHDMIを接続しました。P3を再始動し、必要ならVF2をSwitchbotで再起動してください。」 i01 の続き（範囲の 2: scene の決定・計測・改善） | in-progress |
