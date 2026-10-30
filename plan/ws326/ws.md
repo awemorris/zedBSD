@@ -58,7 +58,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p019](phase019/phase.md) | macroblock の再構成: h264sw-recon（試験 test-recon） | cleared（2026-10-31 Q1、053bafc0b。test-recon 33584 checks・全 PASS・check-skeleton PASS を Q1 も実行、突然変異 18 のうち 17 を検出（残り 1 は等価）） | p013〜p018 |
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | cleared（2026-10-30 Q1、main 9fa35fc76。test-deblock 3313 checks、突然変異約 35 で残りは観測できない 1 つ） | p003、p008 |
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 run-stream.sh） | cleared（2026-10-31 Q1、86539318e。header の直し 8ddb130a9 が新しい BASE。22 本 408 frame が ffmpeg と一致、壊した stream 200 通り・開始 63 通り PASS、BASE 8ddb130a9。cleared は Q1 が決める） | p002〜p020 |
-| [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
+| [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 tests/conformance/run.sh） | 実装済み・試験 PASS（2026-10-31 O-p022、q1760。204 本を取得し in 101 本が全 frame（14526）参照の YUV と一致、out 103 本（interlace 73・format 25・slice-groups 3・profile-88 2）、slice を逆順にした 6 本も一致、decoder の修正 0。cleared は Q1） | p021 |
 | [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 tests/backend） | 実装済み・host 試験 PASS（実 stream の試験は p021 の取り込み後） | cleared（2026-10-31 Q1、ac1109d25・37789c4d6。host 試験 202＋112 checks、p021 の merge の後に run-host-decode PASS（MP4・TS・複数 slice を h264-software で ffmpeg と一致）。QEMU の Video Player は未実施）
 | [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | planned | p022、p023 |
 | ws326-p026 | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | planned | p022 |
