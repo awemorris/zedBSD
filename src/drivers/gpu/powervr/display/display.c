@@ -781,10 +781,14 @@ output_query(
 	if (request->index != 0U)
 		return EINVAL;
 
-	/* Connected, FIFO, active while a lease has shown a frame. */
+	/*
+	 * Connected, FIFO, showing shared frames (an imported render buffer,
+	 * scanned straight when it can be, see check_direct_scan), active
+	 * while a lease has shown a frame.
+	 */
 	request->display_id = POWERVR_DISPLAY_ID;
 	request->generation = POWERVR_DISPLAY_GENERATION;
-	request->flags = GPU_DISPLAY_CONNECTED | GPU_DISPLAY_FIFO;
+	request->flags = GPU_DISPLAY_CONNECTED | GPU_DISPLAY_FIFO | GPU_DISPLAY_BLOB;
 
 	/* The cursor plane, when the controller is the driver's (counting frames). */
 	if (!display->scanout)
