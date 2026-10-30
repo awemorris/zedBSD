@@ -42,5 +42,5 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p008](phase008/phase.md) | Pi の共通化（drivers rpi-common、HAL bsp-rpi-common）、ODROID-C5 の分離（drivers s905x5m、HAL bsp-s905x5m-common と bsp-odroidc5）、残りの HAL_ARCH_* | cleared（2026-10-30 Q1） | p007 |
 | [p009](phase009/phase.md) | kernel の header から HAL を分ける（kernel の整数の型、_private.h） | cleared（2026-10-30 Q1） | p008 |
 | [p010](phase010/phase.md) | atomic.h の HAL の分離（HAL の atomic.h を macro だけの契約に）、pc98・pcat の legacy の窓の番地を driver の基底で | cleared（2026-10-30 Q1） | p009 |
-| [p011](phase011/phase.md) | arch の spinlock の取得と待ちの合図を HAL の atomic.h の macro の契約へ（include/hal/arch/atomic/<arch>.h） | in-progress（P2、q1724。d272f0a05・de67657dc（sparcv9）、20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験は済み、判定は Q1） | p010 |
+| [p011](phase011/phase.md) | arch の spinlock の取得と待ちの合図を HAL の atomic.h の macro の契約へ（include/hal/arch/atomic/<arch>.h） | cleared（2026-10-30 Q1） | p010 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |

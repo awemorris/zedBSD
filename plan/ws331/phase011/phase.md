@@ -2,7 +2,7 @@
 
 # ws331-p011: arch の spinlock の取得と待ちの合図を HAL の atomic.h の macro の契約へ
 
-Status: in-progress（範囲 1〜4 を実施し結果を記録、判定は Q1）
+Status: cleared（2026-10-30 Q1）
 Parent: [WS331](../ws.md)
 Queue: q1724（P2）
 

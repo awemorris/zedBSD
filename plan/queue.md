@@ -309,4 +309,4 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1724 / q1724-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p011](ws331/phase011/phase.md) | 2026-10-30 ユーザーから、arch の spinlock の取得を include/hal/arch/atomic/<arch>.h に分けて hal/atomic.h の macro の契約に入れる実装の指示を受けた | in-progress |
+| q1724 / q1724-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p011](ws331/phase011/phase.md) | 2026-10-30 ユーザーから、arch の spinlock の取得を include/hal/arch/atomic/<arch>.h に分けて hal/atomic.h の macro の契約に入れる実装の指示を受けた | cleared（2026-10-30 Q1。arch の spinlock の取得・待ちの合図を include/hal/arch/atomic/<arch>.h の macro に、lock.c の out-of-line をやめた。20 port の build、QEMU pcat・amd64・rpi4・m68k、host 試験、gpu の build の選択の試験（Q1）。fa204ae82、merge 9e9b4a9c8） |
