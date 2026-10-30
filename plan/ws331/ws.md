@@ -19,6 +19,7 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 - 2026-10-30 p003 で見つかった表 B の漏れ（kernel_putc・kernel_notify_task、hal.h だけに宣言のある kernel の名前）へのユーザーの回答（原文）「kern_task_notifyはなんか変。sched系の名前にするのがいいのでは？putcはOK。」 → kernel_putc は既存の宣言を include/kern/text-display.h に足す。kernel_notify_task は新しい関数を足さず、既存の sched_notify_task（include/kern/sched.h）に driver の呼び出しを替える（Q1 の解釈）。
 - 2026-10-30 ユーザーから、rpi4-console.c が呼ぶ rpi_cons_suspend_output・rpi_cons_resume_output（HAL の Raspberry Pi の BSP の中の非公開の関数）について、HAL の呼び出しに加えて非公開の関数まで呼んでいたのは違反であり、resume に当たる処理は driver の中に同等の関数を定義して使えばよい、という趣旨の指示を受けた。→ Q1 の解釈: suspend は hal.h の既存の約束（kernel が kernel_putc を公開したら HAL の early console は描かない）で済ませ、BSP がその約束を守っていなければ HAL の実装（src/hal/）を直す（hal.h は不変）。resume（残した文字の描き直し）は driver の中に実装する。p005 で行う。
 - 2026-10-30 ユーザーから、Raspberry Pi の console は kernel_putc を入れた時に作り直さなかった事が原因なので、今ここで作り直す、という趣旨の指示を受けた。→ p005 で rpi4-console.c（Pi 4・Pi 5・ODROID-C5）を sun4u-console.c と同じ形に作り直す: driver が firmware の framebuffer を kernel の口で map し、自分の文字の表と font で描き、serial の時は UART の送信も driver で行い、kernel_putc を公開する。graphics が画面を持つ間は描かず、返された時に driver が描き直す。HAL の watch.c の描く先の判断は HVS の状態だけで決める。cons.c の rpi_cons_suspend/resume_output は使われなくなる。
+- 2026-10-30 ユーザーから、driver の build の macro HAL_ARCH_*・HAL_BOARD_* はなるべく残さない、kernel の header が HAL を include する件は簡単なら分ける、という趣旨の指示を受け、Q1 の調べ（16 か所、13 header）を受けて p008・p009 の形になった。
 
 ## 調べの起点（2026-10-30 Q1 の grep、main f29e49c3c）
 
@@ -35,4 +36,6 @@ Resume point: p001 の一覧（表 A・表 B・例外・Phase の案・未決）
 | [p004](phase004/phase.md) | i915 の map（WRITECOMBINE・READONLY）と MSI（B2〜B5）、試験の代役 | cleared（2026-10-30 Q1） | p002 |
 | [p005](phase005/phase.md) | rpi4 の console の作り直し（kernel_putc を公開）と pc98 の 3 か所。追加: Pi 5・ODROID-C5・VF2 の /dev/graphics（generic の boot-fb・fb-text）、gpu.c の最初の flip で boot の framebuffer を手放す | in-progress（P2、q1719。84e3e2698〜977f43204、20 port の build、raspi4b の起動・描き直し・serial、WS290 の host 試験、VF2 の実機の起動（画面・serial の目視は未確かめ）は済み、Venus は未実施、判定は Q1） | p003 |
 | [p007](phase007/phase.md) | HAL の early console の framebuffer の窓を、kernel が外せる形に（amd64 の fb_window を arm64・riscv64 へ） | cleared（2026-10-30 Q1） | p005 |
+| [p008](phase008/phase.md) | Pi の共通化（drivers rpi-common、HAL bsp-rpi-common）、ODROID-C5 の分離（drivers s905x5m、HAL bsp-s905x5m-common と bsp-odroidc5）、残りの HAL_ARCH_* | in-progress（P2、q1721） | p007 |
+| [p009](phase009/phase.md) | kernel の header から HAL を分ける（kernel の整数の型、_private.h） | planned（P2、q1721） | p008 |
 | p006 | 規約の全文の見直し | 未作成 | p003〜p005 |

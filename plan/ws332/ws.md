@@ -1,0 +1,24 @@
+<!-- awesome-plan project=zedbsd record=ws332 -->
+
+# WS332: tick の周波数を compile の時の定数でなく API で扱い、可変の tick にする
+
+Status: incomplete
+Primary Milestone: MG004
+Parent: [Master](../master.md)
+目標: obsolete の `KERN_CLOCK_HZ`（中身は HAL の `HAL_TIMER_FREQUENCY`）を kernel・driver から無くし、時間は単位（ms・ns）の API で扱う。tick の周波数を走りながら変えられるようにし、用途の mode（ゲーム 1000 Hz、通常のデスクトップ 100 Hz、待機 10 Hz など）に合わせる。
+Resume point: p001（設計）と p002（KERN_CLOCK_HZ の削除）を P3（q1722）。
+
+## ユーザーの決定（要点）
+
+- 2026-10-30 ユーザーから、HAL_TIMER_FREQUENCY を POSIX の公開の macro でないなら API で取る形にし、client の computer では clock を可変にする（ゲームモード 1000 Hz、一般のデスクトップ 100 Hz、待機 10 Hz など）のが現代的だ、という趣旨の指示を受けた。
+- 2026-10-30 ユーザーから、sysconf(_SC_CLK_TCK) の導入で KERN_CLOCK_HZ は obsolete になっており、主に試験していた platform 以外での動作が怪しかったので削除を遅らせていた経緯があり、今回削除する、という趣旨の指示を受けた。WS332 は Q1 の提案どおり。
+- Q1 の調べ: POSIX に kernel の tick の周波数の compile の時の macro は無い（CLOCKS_PER_SEC は clock() の単位で XSI は 1,000,000 固定、times() の単位は sysconf(_SC_CLK_TCK)、CLK_TCK は廃止）。KERN_CLOCK_HZ の利用は kernel と driver に 175 か所（2026-10-30 の grep）。
+
+## Phase
+
+| Phase | 目的 | 状態 | 依存 |
+| --- | --- | --- | --- |
+| [p001](phase001/phase.md) | 設計: 時間の API（tick の数でなく ms・ns の期限）、可変の tick（周期を変える口、mode と電源管理 WS052・WS301・WS306 との関係）、各 arch の HAL の timer の実装の補完（hal.h を変えずに済むか） | in-progress（P3） | — |
+| [p002](phase002/phase.md) | KERN_CLOCK_HZ の削除: 175 か所を時間の単位の API に置き換え、clock.h から HAL_TIMER_FREQUENCY を外す。全 port の build と、主な port の QEMU の起動 | planned | p001 |
+| p003〜 | 可変の tick の実装と mode（p001 の設計の後に立てる） | — | p002 |
+| 最後 | 規約の全文の見直し | — | 実装の全部 |

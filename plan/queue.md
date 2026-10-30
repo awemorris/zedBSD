@@ -291,3 +291,10 @@
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
 | q1720 / q1720-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU、実機 VF2） | [ws331-p007](ws331/phase007/phase.md) | 2026-10-30 ユーザーから、HAL が unmap device できるよう early console の GOP の領域を map の list に入れておく形（GHCI の時に PC で入った物）を確かめ、他の platform でも同じにする、という趣旨の指示を受けた | cleared（2026-10-30 Q1。arm64・riscv64 の窓、boot-fb の end。QEMU raspi4b で窓が外れる事、VF2 の実機で窓が外れる事（dmesg）、20 port の build。52ccb91b3） |
+
+## 2026-10-30 21:5x: WS331 p008・p009 を P2、WS332 を P3 で（q1721・q1722）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1721 / q1721-i01 | P2（phase-runner-high、worktree p2-ws331、QEMU） | [ws331-p008](ws331/phase008/phase.md) → [p009](ws331/phase009/phase.md) | 2026-10-30 ユーザーから、Pi の共通化と ODROID-C5 の分離、kernel の header の _private.h の分離という趣旨の指示を受けた | in-progress |
+| q1722 / q1722-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws332`・branch `agent/p3-ws332`、host・QEMU） | [ws332-p001](ws332/phase001/phase.md) → [p002](ws332/phase002/phase.md) | 2026-10-30 ユーザーから、KERN_CLOCK_HZ を今回削除し、tick を API で扱い可変にする WS を Q1 の提案どおり立てる、という趣旨の指示を受けた | in-progress |

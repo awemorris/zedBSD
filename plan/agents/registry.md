@@ -6,10 +6,10 @@
 | 担当 | 定義 | 仕事（Queue） | worktree / branch | 状態 | 最後の merge |
 | --- | --- | --- | --- | --- | --- |
 | P1 | phase-runner-high | ws313 (q1716-i01 cleared) | `/home/awe/zedBSD-worktrees/p1-ws313` / `agent/p1-ws313` | returned（実機の結果待ち。branch は zedBSD-firmware の push の後に merge） | 68683b749 |
-| P2 | phase-runner-high | ws331 p007 (q1720-i01 cleared) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | returned | 52ccb91b3 |
+| P2 | phase-runner-high | ws331 p008・p009 (q1721-i01) | `/home/awe/zedBSD-worktrees/p2-ws331` / `agent/p2-ws331` | in-progress（2026-10-30 21:5x 起動） | 52ccb91b3 |
 | P5 | phase-runner | ws327 (q1710-i01 cleared) | `/home/awe/zedBSD-worktrees/p5-ws327` / `agent/p5-ws327` | returned（WS327 完了） | cf2963051（merge a17e9386d） |
 | P6 | phase-runner-high | ws307 (q1718-i01 返却) | `/home/awe/zedBSD-worktrees/p6-ws307` / `agent/p6-ws307` | returned（p007 の残り 2 つ） | ccd0c8693（merge 061230951） |
-| P3 | phase-runner-high | ws291 p020 (q1715-i02 返却) | `/home/awe/zedBSD-worktrees/p3-ws291` / `agent/p3-ws291` | returned（p020 は 26.6 fps、次は profile と改善） | cb03c9983（merge 7e77db340） |
+| P3 | phase-runner-high | ws332 p001・p002 (q1722-i01) | `/home/awe/zedBSD-worktrees/p3-ws332` / `agent/p3-ws332` | in-progress（2026-10-30 21:5x 起動） | — |
 | P8 | phase-runner-low | ws074 p260 (q1708-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（i01 返却の後に再起動） | 94cbacb31（merge fca92282d） |
 | P7 | phase-runner-high | ws291 (q1712-i01 返却) | `/home/awe/zedBSD-worktrees/p7-ws291` / `agent/p7-ws291` | returned | 6c49a6095（merge 28cf45cc8） |
 
