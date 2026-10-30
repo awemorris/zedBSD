@@ -14,7 +14,7 @@
 | P3 | [WS291](ws291/ws.md) | GPU の描画の速さ（NVIDIA RTX の段、10.0.10.3） | q1764: p014 の続き（kernel の record の decode の短縮など） | big-1000 を 85〜91 → NVK の 136 fps へ。WS331 は完了 |
 | P4 | — | — | 返却（07:2x）。WS333 p019（sessiond の熱の要求の口と権限の規則、kernel への呼びは UAPI まで仮）を main に | 午後: Pi 5 の実機 |
 | P5 | [WS302](ws302/ws.md) | デスクトップのスレッドバランサ（DTB） | q1775: p001 設計（WS333 の CPU の口を使う、design-reviewer と問いまで） | WS330 の設計は済み（問いは 0f） |
-| P6 | — | — | 返却（07:1x）。WS333 p016（危ない温度での非常の停止、QEMU で温度を上げて電源断まで確かめた）・p021（温度で CPU の上限を下げる）を main に | 次の割当を Q1 が決める |
+| P6 | [WS310](ws310/ws.md) | ACPI の _OSC を呼び、システム全体の挙動を厳重に確かめる | q1779: p001 設計（どの _OSC を何の bit で、前後の firmware の振る舞いの差の確かめ方） | WS317（hotplugd）はユーザーの「今は取り組まない」のとおり設計もしない |
 | P7 | — | — | 返却（07:4x）。WS333 p018（Dell の BIOS の熱の mode・fan・boost の provider、5330 の表で SMI の数まで確かめた）を main に | 5330 の実機（p014・p018）は電源の入れ直しの後 |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 3 回目（q1727-i03）: 偶然通っていた 2 件の後退の直し → 直交の flex・grid の揃え・要素の scroll・subgrid・View Transitions の残り | 今 3,472 のうち 2,472（71.20%）。flex・grid の baseline、fieldset、CSS の論理の box の property を足した、後退 0 |
 
