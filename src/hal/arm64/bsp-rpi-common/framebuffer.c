@@ -10,6 +10,12 @@
  * 80x25 text cells of the 8x16 font in the middle 640x400 pixels of the
  * screen.  Where it comes from is the board's (framebuffer-mailbox.c on a
  * Raspberry Pi).
+ *
+ * Until the kernel's tables are switched to, the painting goes through
+ * the boot tables' direct map.  From then on it goes through the early
+ * console's own window of the framebuffer (space.c), which the kernel's
+ * console takes over and removes once it prints; the painting stops for
+ * good then.
  */
 
 #include <hal/hal.h>
@@ -29,11 +35,32 @@
 #define CURSOR_FIRST_ROW 14U
 
 /*
- * The framebuffer through the direct map, NULL until the firmware or the
- * bootloader has given one; the rest describes it.  Filled once by
- * rpi_framebuffer_adopt() on the boot CPU and not changed afterwards.
+ * Where the framebuffer is painted: the boot tables' direct map from
+ * rpi_framebuffer_adopt(), the early console's window from
+ * rpi_framebuffer_move(), both on the boot CPU before any other runs, and
+ * NULL before the firmware or the bootloader has given one and again once
+ * rpi_framebuffer_forget() gave it up.  Every painter reads it once and
+ * paints through what it read.
  */
 static volatile uint8_t *pixels;
+
+/*
+ * Whether the view in pixels is cached, so that every painting is cleaned
+ * out to the memory the display reads; a device view is not.  Set with
+ * pixels.
+ */
+static int pixels_cached;
+
+/*
+ * Whether the framebuffer was given up to the kernel: nothing paints it
+ * again.  Set once by rpi_framebuffer_forget().
+ */
+static int pixels_given_up;
+
+/*
+ * The framebuffer's memory and shape.  Filled once by
+ * rpi_framebuffer_adopt() on the boot CPU and not changed afterwards.
+ */
 static uint64_t pixels_phys;
 static uint64_t pixels_size;
 static uint32_t width;
@@ -61,8 +88,9 @@ static const uint32_t palette[16] = {
 };
 
 static uint32_t colour(uint8_t index);
-static void put_pixel(unsigned x, unsigned y, uint32_t value);
-static void flush_rows(unsigned x, unsigned y, unsigned columns, unsigned rows);
+static volatile uint8_t *paint_target(void);
+static void put_pixel(volatile uint8_t *target, unsigned x, unsigned y, uint32_t value);
+static void flush_rows(volatile uint8_t *target, unsigned x, unsigned y, unsigned columns, unsigned rows);
 static void fill_screen(uint32_t value);
 static void flush_screen(void);
 
@@ -77,6 +105,7 @@ rpi_framebuffer_cell(
 	int character,
 	uint8_t attribute)
 {
+	volatile uint8_t *target;
 	const uint8_t *glyph;
 	uint32_t foreground;
 	uint32_t background;
@@ -87,8 +116,9 @@ rpi_framebuffer_cell(
 	unsigned bit;
 	uint8_t bits;
 
-	/* Nothing to paint before the framebuffer exists. */
-	if (pixels == 0)
+	/* Nothing to paint before the framebuffer exists or once it was given up. */
+	target = paint_target();
+	if (target == NULL)
 		return;
 
 	/* Nothing to paint off the grid. */
@@ -111,12 +141,12 @@ rpi_framebuffer_cell(
 			value = background;
 			if ((bits & (0x80U >> bit)) != 0)
 				value = foreground;
-			put_pixel(x + bit, y + line, value);
+			put_pixel(target, x + bit, y + line, value);
 		}
 	}
 
 	/* The cell, out to the memory the display reads. */
-	flush_rows(x, y, 8U, RPI_FONT_HEIGHT);
+	flush_rows(target, x, y, 8U, RPI_FONT_HEIGHT);
 }
 
 /*
@@ -130,13 +160,15 @@ rpi_framebuffer_cursor(
 	unsigned column,
 	int visible)
 {
+	volatile uint8_t *target;
 	unsigned x;
 	unsigned y;
 	unsigned cell_x;
 	unsigned cell_y;
 
-	/* Nothing to draw before the framebuffer exists, for a hidden cursor, or off the grid. */
-	if (pixels == 0)
+	/* Nothing to draw before the framebuffer exists or once it was given up, for a hidden cursor, or off the grid. */
+	target = paint_target();
+	if (target == NULL)
 		return;
 	if (!visible)
 		return;
@@ -148,11 +180,11 @@ rpi_framebuffer_cursor(
 	cell_y = y_origin + row * RPI_FONT_HEIGHT;
 	for (y = CURSOR_FIRST_ROW; y < RPI_FONT_HEIGHT; y++) {
 		for (x = 0; x < 8U; x++)
-			put_pixel(cell_x + x, cell_y + y, colour(15));
+			put_pixel(target, cell_x + x, cell_y + y, colour(15));
 	}
 
 	/* The underline, out to the memory the display reads. */
-	flush_rows(cell_x, cell_y + CURSOR_FIRST_ROW, 8U, RPI_FONT_HEIGHT - CURSOR_FIRST_ROW);
+	flush_rows(target, cell_x, cell_y + CURSOR_FIRST_ROW, 8U, RPI_FONT_HEIGHT - CURSOR_FIRST_ROW);
 }
 
 /*
@@ -199,8 +231,9 @@ rpi_framebuffer_adopt(
 	order = pixel_order;
 	opaque = opaque_bits;
 
-	/* Reaches the framebuffer through the direct map, with the text grid centred. */
+	/* Reaches the framebuffer through the boot tables' direct map, cached, with the text grid centred. */
 	pixels = (volatile uint8_t *)(ARM64_DIRECT_BASE + pixels_phys);
+	pixels_cached = 1;
 	x_origin = (width - MIN_WIDTH) / 2U;
 	y_origin = (height - MIN_HEIGHT) / 2U;
 
@@ -224,6 +257,85 @@ rpi_framebuffer_ready(
 {
 	/* Succeeded: whether there is a framebuffer to paint. */
 	return pixels != 0;
+}
+
+/*
+ * Reports the framebuffer's memory: 1 with its physical base and size,
+ * or 0 when the firmware or the bootloader gave none.
+ */
+int
+rpi_framebuffer_extent(
+	uint64_t *phys,
+	uint64_t *size)
+{
+	/* No framebuffer was adopted. */
+	if (pixels_size == 0)
+		return 0;
+
+	/* Succeeded: the memory rpi_framebuffer_adopt() took. */
+	*phys = pixels_phys;
+	*size = pixels_size;
+	return 1;
+}
+
+/*
+ * Paints the framebuffer through a new view from now on: the early
+ * console's window, cached or not.  Called on the boot CPU, before any
+ * other CPU runs, once the kernel's tables hold the view.
+ */
+void
+rpi_framebuffer_move(
+	volatile uint8_t *address,
+	int cached)
+{
+	/* Nothing to move before a framebuffer exists. */
+	if (pixels == 0)
+		return;
+
+	/* The new view and whether its paintings need cleaning. */
+	pixels_cached = cached;
+	__atomic_store_n(&pixels, address, __ATOMIC_RELEASE);
+}
+
+/*
+ * Gives the framebuffer up: nothing paints it again.  The early console
+ * calls it under its output lock before the window goes, so no character
+ * is half painted then; only a stall report that read the view just
+ * before could still be painting through it.
+ */
+void
+rpi_framebuffer_forget(
+	void)
+{
+	/* No painting reaches the framebuffer from now on. */
+	pixels_given_up = 1;
+	__atomic_store_n(&pixels, NULL, __ATOMIC_RELEASE);
+}
+
+/*
+ * Reports whether a physical range meets the framebuffer once it was given
+ * up, so that nothing paints there: 1 when it does, 0 otherwise.
+ */
+int
+rpi_framebuffer_given_up(
+	uint64_t phys,
+	uint64_t size)
+{
+	int given_up;
+
+	/* A framebuffer still held, or never given, keeps every range paintable. */
+	given_up = __atomic_load_n(&pixels_given_up, __ATOMIC_ACQUIRE);
+	if (!given_up)
+		return 0;
+
+	/* A range wholly before or wholly after the framebuffer does not meet it. */
+	if (phys + size <= pixels_phys)
+		return 0;
+	if (phys >= pixels_phys + pixels_size)
+		return 0;
+
+	/* Succeeded: the range meets the given-up framebuffer. */
+	return 1;
 }
 
 /*
@@ -254,7 +366,7 @@ rpi_framebuffer_test_pattern(
 				value = colour(9);
 			if (x < 16U || y < 16U || x >= width - 16U || y >= height - 16U)
 				value = colour(15);
-			put_pixel(x, y, value);
+			put_pixel(pixels, x, y, value);
 		}
 	}
 
@@ -304,9 +416,24 @@ colour(
 	return swapped | opaque;
 }
 
-/* Writes one pixel. */
+/* Reads the view to paint through once: NULL before a framebuffer exists or once it was given up. */
+static volatile uint8_t *
+paint_target(
+	void)
+{
+	volatile uint8_t *target;
+
+	/* The view the last move or the adoption published. */
+	target = __atomic_load_n(&pixels, __ATOMIC_ACQUIRE);
+
+	/* Succeeded: the view, or NULL. */
+	return target;
+}
+
+/* Writes one pixel through a view of the framebuffer. */
 static void
 put_pixel(
+	volatile uint8_t *target,
 	unsigned x,
 	unsigned y,
 	uint32_t value)
@@ -314,17 +441,18 @@ put_pixel(
 	volatile uint32_t *pixel;
 
 	/* The pixel's word: its row, then its column of four bytes. */
-	pixel = (volatile uint32_t *)(pixels + (size_t)y * pitch + (size_t)x * 4U);
+	pixel = (volatile uint32_t *)(target + (size_t)y * pitch + (size_t)x * 4U);
 	*pixel = value;
 }
 
 /*
- * Makes rows of pixels reach memory.  The framebuffer is written through
- * the cacheable direct map, and the display reads memory past the CPU's
- * caches, so a pixel that stays in the data cache is never shown.
+ * Makes rows of pixels reach memory.  A cached view keeps what the CPU
+ * wrote in the data cache, and the display reads memory past the CPU's
+ * caches, so a pixel that stays there is never shown.
  */
 static void
 flush_rows(
+	volatile uint8_t *target,
 	unsigned x,
 	unsigned y,
 	unsigned columns,
@@ -333,10 +461,12 @@ flush_rows(
 	uintptr_t start;
 	unsigned line;
 
-	/* Each row's bytes, cleaned from the data cache to memory. */
-	for (line = 0; line < rows; line++) {
-		start = (uintptr_t)(pixels + (size_t)(y + line) * pitch + (size_t)x * 4U);
-		hal_dcache_clean_range(start, (size_t)columns * 4U);
+	/* Each row's bytes of a cached view, cleaned from the data cache to memory. */
+	if (pixels_cached) {
+		for (line = 0; line < rows; line++) {
+			start = (uintptr_t)(target + (size_t)(y + line) * pitch + (size_t)x * 4U);
+			hal_dcache_clean_range(start, (size_t)columns * 4U);
+		}
 	}
 
 	/* The display is outside the CPU's shareable domain: a full barrier. */
@@ -354,7 +484,7 @@ fill_screen(
 	/* Each pixel, row by row. */
 	for (y = 0; y < height; y++) {
 		for (x = 0; x < width; x++)
-			put_pixel(x, y, value);
+			put_pixel(pixels, x, y, value);
 	}
 }
 

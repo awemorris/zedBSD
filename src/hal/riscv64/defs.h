@@ -60,6 +60,14 @@
 #define RISCV64_DEVICE_LIMIT		0x1000000000
 
 /*
+ * The early console's window of the screen the firmware left on: the
+ * screen's memory from the 2 MiB block it starts in, through root entry
+ * 448 (one gigabyte).
+ */
+#define RISCV64_FB_WINDOW_BASE		0xfffffff000000000
+#define RISCV64_FB_WINDOW_ROOT_INDEX	448
+
+/*
  * The kernel image window: the image is linked at RISCV64_KERNEL_VIRT_BASE
  * for the physical address RISCV64_KERNEL_LINK_PHYS, and runs wherever its
  * first byte was loaded, through root entry 510.  A linked address V is

@@ -45,4 +45,25 @@ riscv64_board_flush_physical(
 	uint64_t physical,
 	uint64_t size);
 
+/*
+ * Reports the screen the board's early console draws on and names to the
+ * kernel: 1 with its physical base and size, or 0 for none.  The kernel's
+ * tables give the console its own window of it, which the kernel's
+ * console takes over and removes.
+ */
+int
+riscv64_board_screen(
+	uint64_t *physical,
+	uint64_t *size);
+
+/*
+ * Has the early console draw the screen through the window from now on,
+ * address being where the window holds the screen's first byte.  Called on
+ * the boot hart, before any other hart runs, once the kernel's tables are
+ * in use.
+ */
+void
+riscv64_board_screen_window(
+	uintptr_t address);
+
 #endif

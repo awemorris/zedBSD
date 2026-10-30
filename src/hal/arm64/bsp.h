@@ -31,6 +31,12 @@ void prekern_bsp_cons_init(void);
 void prekern_bsp_cons_irq_init(void);
 
 /*
+ * Gives the framebuffer up to the kernel's console once it removes the
+ * early console's window of it: nothing in the HAL paints it again.
+ */
+void rpi_cons_framebuffer_release(void);
+
+/*
  * Maps the peripherals the HAL itself uses into the kernel's tables while
  * arm64_space_init() builds them, before they are switched to.
  */

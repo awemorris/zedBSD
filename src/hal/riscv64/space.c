@@ -17,15 +17,18 @@
  *
  * The kernel's half holds the direct map of RAM (without the ranges the
  * firmware reserved as no-map), the device window, filled as drivers map
- * their registers, and the kernel image, page by page so that its text
- * alone is executable.  The cache behaviour of memory is the platform's
- * and is not chosen in the tables.
+ * their registers, the early console's window of the screen the firmware
+ * left on, which the kernel's console takes over and removes, and the
+ * kernel image, page by page so that its text alone is executable.  The
+ * cache behaviour of memory is the platform's and is not chosen in the
+ * tables.
  */
 
 #include <hal/hal.h>
 #include "asm.h"
 #include "bootinfo.h"
 #include "bsp.h"
+#include "cons.h"
 #include "defs.h"
 #include "page.h"
 #include "percpu.h"
@@ -95,8 +98,41 @@ static int kernel_mapping_checked;
  */
 static uint64_t *device_tables[RISCV64_DEVICE_ROOT_COUNT];
 
-/* Guards the device window's entries; zero when free. */
+/* Guards the device window's entries and the screen window's state; zero when free. */
 static volatile unsigned kernel_table_lock;
+
+/*
+ * The states of the early console's window of the screen: none (no
+ * screen, or one the window cannot reach), held by the early console,
+ * given to the kernel's console (one mapping request of exactly the
+ * screen once the kernel prints), and removed.
+ */
+enum riscv64_fb_window_state {
+	RISCV64_FB_WINDOW_NONE,
+	RISCV64_FB_WINDOW_HELD,
+	RISCV64_FB_WINDOW_GIVEN,
+	RISCV64_FB_WINDOW_REMOVED
+};
+
+/*
+ * The early console's window of the screen: its state, the screen's
+ * physical base and size as the kernel reads them, the kernel address of
+ * its first byte, and the second-level table below the window's root
+ * entry, whose entries go when the window is removed.
+ */
+struct riscv64_fb_window {
+	enum riscv64_fb_window_state state;
+	uint64_t physical;
+	uint64_t size;
+	uintptr_t address;
+	uint64_t *table;
+};
+
+/*
+ * The early console's window of the screen.  Built by
+ * riscv64_space_init(); its state changes under kernel_table_lock.
+ */
+static struct riscv64_fb_window fb_window;
 
 /*
  * Every user space that exists.  Kept under space_registry_lock; a space is
@@ -131,6 +167,9 @@ static void build_direct_gigapage(unsigned root_index, uint64_t physical);
 static void build_direct_megapage(uint64_t *table, unsigned index, uint64_t physical);
 static void build_device_window(void);
 static void build_kernel_window(void);
+static void build_fb_window(void);
+static int fb_window_give(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
+static int fb_window_remove(void *address, size_t size, int *matched);
 static uint64_t kernel_page_flags(uintptr_t address);
 static void map_hal_devices(void);
 static void map_device_blocks(uint64_t physical, uint64_t size);
@@ -252,6 +291,9 @@ riscv64_space_init(
 	build_device_window();
 	build_kernel_window();
 
+	/* Gives the early console its own window of the screen, which the kernel's console can remove. */
+	build_fb_window();
+
 	/* No root entry changes from here on. */
 	kernel_root_sealed = 1;
 
@@ -264,6 +306,10 @@ riscv64_space_init(
 	riscv64_write_satp(satp);
 	cpu = riscv64_percpu_current();
 	cpu->current_space = HAL_SPACE_SYS;
+
+	/* The early console draws the screen through its window from now on. */
+	if (fb_window.state == RISCV64_FB_WINDOW_HELD)
+		riscv64_board_screen_window(fb_window.address);
 
 	/* Checks W^X on the three kinds of section the kernel runs from. */
 	text_page = kernel_page_flags((uintptr_t)__kernel_text_start);
@@ -1124,6 +1170,7 @@ hal_space_map_device(
 	bool ram;
 	bool touches;
 	bool enabled;
+	int given;
 
 	/* Requires a destination and a non-empty range the window reaches. */
 	if (vaddr == NULL || size == 0)
@@ -1138,6 +1185,11 @@ hal_space_map_device(
 		return HAL_ERR_INVALID;
 	if ((attr & (HAL_SPACE_WC | HAL_SPACE_WRITETHRU)) != 0)
 		return HAL_ERR_UNSUPPORTED;
+
+	/* The early console's window of exactly the screen goes to the kernel's console once it prints. */
+	given = fb_window_give(paddr, size, attr, vaddr);
+	if (given)
+		return HAL_OK;
 
 	/* Returns RAM's existing alias. */
 	ram = riscv64_range_is_ram((uint64_t)paddr, (uint64_t)size);
@@ -1179,6 +1231,18 @@ hal_space_unmap_device(
 {
 	uint64_t address;
 	uint64_t offset;
+	int matched;
+	int error;
+
+	/* The early console's window, given to the kernel's console, goes. */
+	error = fb_window_remove(vaddr, size, &matched);
+	if (matched) {
+		if (error != HAL_OK)
+			return error;
+
+		/* Succeeded: no hart keeps a translation of the screen through the window. */
+		return HAL_OK;
+	}
 
 	/* Requires a non-empty range inside the device window or the direct map. */
 	address = (uint64_t)(uintptr_t)vaddr;
@@ -1573,6 +1637,174 @@ kernel_page_flags(
 }
 
 /*
+ * Builds the early console's window of the screen below its root entry:
+ * a megapage leaf where the screen's pages fill the megapage, and a table
+ * of only its pages where they do not, so that the window reaches the
+ * screen and nothing beside it.  A screen the window cannot reach stays
+ * drawn where the board drew it, and is never given.
+ */
+static void
+build_fb_window(
+	void)
+{
+	hal_physaddr_t table_physical;
+	hal_physaddr_t pages_physical;
+	uint64_t *table;
+	uint64_t *pages;
+	uint64_t physical;
+	uint64_t size;
+	uint64_t aligned;
+	uint64_t end;
+	uint64_t block;
+	unsigned index;
+	int present;
+	int error;
+
+	/* Nothing to hold without a screen the early console draws on. */
+	fb_window.state = RISCV64_FB_WINDOW_NONE;
+	present = riscv64_board_screen(&physical, &size);
+	if (!present || size == 0)
+		return;
+
+	/* Refuses a screen that wraps or that one gigabyte of window does not hold. */
+	if (physical > ~0ULL - size - RISCV64_PAGE_SIZE)
+		return;
+	aligned = physical & ~((uint64_t)RISCV64_MEGAPAGE_SIZE - 1U);
+	end = (physical + size + RISCV64_PAGE_SIZE - 1U) & ~((uint64_t)RISCV64_PAGE_SIZE - 1U);
+	if (end - aligned > RISCV64_GIGAPAGE_SIZE)
+		return;
+
+	/* The second-level table below the window's root entry. */
+	error = alloc_table(&table, &table_physical);
+	if (error != HAL_OK)
+		HAL_FATAL("riscv64 screen window table allocation failed");
+
+	/* Links it into the window's root entry. */
+	kernel_root[RISCV64_FB_WINDOW_ROOT_INDEX] = pointer_entry(table_physical);
+
+	/* Each megapage the screen touches, read-write and never executable. */
+	for (block = aligned; block < end; block += RISCV64_MEGAPAGE_SIZE) {
+		index = (unsigned)((block - aligned) / RISCV64_MEGAPAGE_SIZE);
+
+		/* A megapage the screen fills is one leaf. */
+		if (physical <= block && end - block >= RISCV64_MEGAPAGE_SIZE) {
+			table[index] = leaf_entry(block, KERNEL_LEAF | RISCV64_PTE_R | RISCV64_PTE_W);
+			continue;
+		}
+
+		/* A megapage it fills partly gets a table of its pages alone. */
+		error = alloc_table(&pages, &pages_physical);
+		if (error != HAL_OK)
+			HAL_FATAL("riscv64 screen window table allocation failed");
+		(void)riscv64_window_fill_pages(pages, block, physical, size, KERNEL_LEAF | RISCV64_PTE_R | RISCV64_PTE_W);
+		table[index] = pointer_entry(pages_physical);
+	}
+
+	/* The early console holds it, and draws through it until the kernel prints. */
+	fb_window.physical = physical;
+	fb_window.size = size;
+	fb_window.address = (uintptr_t)(RISCV64_FB_WINDOW_BASE + (physical - aligned));
+	fb_window.table = table;
+	fb_window.state = RISCV64_FB_WINDOW_HELD;
+}
+
+/*
+ * Gives the early console's window to the kernel's console: the first
+ * mapping request of exactly the screen (its physical base and size,
+ * uncached and writable) once the kernel prints through kernel_putc, when
+ * the early console draws no more.  Returns 1 with address set, or 0 for
+ * every other request.
+ */
+static int
+fb_window_give(
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr,
+	void **address)
+{
+	void (*printer)(int);
+	bool enabled;
+	int given;
+
+	/* Only the uncached writable mapping a console asks for. */
+	if (attr != (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE))
+		return 0;
+
+	/* Only once the kernel prints, so that the early console no longer draws. */
+	printer = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (printer == NULL)
+		return 0;
+
+	/* Gives only the screen itself, exactly, while the early console holds it. */
+	enabled = riscv64_spin_lock(&kernel_table_lock);
+
+	given = 0;
+	if (fb_window.state == RISCV64_FB_WINDOW_HELD &&
+	    fb_window.physical == (uint64_t)physical &&
+	    fb_window.size == (uint64_t)size) {
+		/* GIVEN: the one holder's release removes it; no other request gets it. */
+		fb_window.state = RISCV64_FB_WINDOW_GIVEN;
+		*address = (void *)fb_window.address;
+		given = 1;
+	}
+
+	riscv64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* Reports whether the request took the window. */
+	return given;
+}
+
+/*
+ * Removes the early console's window once it was given and its holder
+ * releases it (address and size as given): the early console forgets the
+ * screen, the window's entries go, and every hart drops every translation
+ * of it.  The root entry stays, as every root entry of the kernel's half
+ * does, pointing at an empty table.  matched says whether the release was
+ * of the window.
+ */
+static int
+fb_window_remove(
+	void *address,
+	size_t size,
+	int *matched)
+{
+	unsigned index;
+	bool enabled;
+
+	/* Takes only a release of the window as it was given. */
+	enabled = riscv64_spin_lock(&kernel_table_lock);
+
+	*matched = 0;
+	if (fb_window.state != RISCV64_FB_WINDOW_GIVEN ||
+	    fb_window.address != (uintptr_t)address ||
+	    fb_window.size != (uint64_t)size) {
+		riscv64_spin_unlock(&kernel_table_lock, enabled);
+		return HAL_OK;
+	}
+
+	/* REMOVED: the window is the remover's alone from here. */
+	*matched = 1;
+	fb_window.state = RISCV64_FB_WINDOW_REMOVED;
+
+	riscv64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* The early console forgets the screen first. */
+	riscv64_cons_detach_screen();
+
+	/* Clears every entry below the root entry, then every hart drops its translations. */
+	enabled = riscv64_spin_lock(&kernel_table_lock);
+
+	for (index = 0; index < RISCV64_TABLE_ENTRIES; index++)
+		__atomic_store_n(&fb_window.table[index], 0U, __ATOMIC_RELEASE);
+	riscv64_tlb_flush_everywhere();
+
+	riscv64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* Succeeded: the window is gone. */
+	return HAL_OK;
+}
+
+/*
  * Maps the devices the HAL itself reaches: the interrupt controller, the
  * firmware configuration interface, the UART, the cache controller and a
  * screen the firmware left on that the direct map does not hold, which the
@@ -1610,9 +1842,11 @@ map_hal_devices(
 	if (framebuffer == NULL)
 		return;
 
-	/* A screen the direct map holds is drawn through it. */
+	/* A screen the direct map holds is drawn through it, and one the early console's window holds through that. */
 	direct = riscv64_space_in_direct_map(framebuffer->phys, framebuffer->size);
 	if (direct)
+		return;
+	if (fb_window.state == RISCV64_FB_WINDOW_HELD)
 		return;
 
 	/* Reaches any other screen, device memory or no-map RAM, through the device window. */

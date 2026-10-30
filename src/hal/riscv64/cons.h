@@ -20,4 +20,8 @@ void
 riscv64_cons_redraw(
 	void);
 
+void
+riscv64_cons_detach_screen(
+	void);
+
 #endif

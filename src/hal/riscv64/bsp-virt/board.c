@@ -70,6 +70,32 @@ riscv64_board_handoff(
 }
 
 /*
+ * Reports no screen the kernel can take over: the board's screen is the
+ * hardware layer's own RAM framebuffer.
+ */
+int
+riscv64_board_screen(
+	uint64_t *physical,
+	uint64_t *size)
+{
+	UNUSED_PARAMETER(physical);
+	UNUSED_PARAMETER(size);
+
+	/* No screen is named to the kernel. */
+	return 0;
+}
+
+/*
+ * Ignores the early console's window of a screen: the board has none.
+ */
+void
+riscv64_board_screen_window(
+	uintptr_t address)
+{
+	UNUSED_PARAMETER(address);
+}
+
+/*
  * Writes the board's display to the boot log.
  */
 void

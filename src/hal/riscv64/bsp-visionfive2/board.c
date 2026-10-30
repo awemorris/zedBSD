@@ -17,8 +17,10 @@
  * through the direct map, cached, and flushes each range it drew, since
  * the display controller is not known to see the processor's cache.  A
  * screen the direct map leaves out (no-map RAM, or device memory) is drawn
- * through the device window instead, RAM still flushed.  The board names
- * the screen to the kernel as "riscv64.framebuffer.*".
+ * through the device window instead, RAM still flushed.  Once the kernel's
+ * tables are in use, the console draws through its own window of the
+ * screen (space.c), which the kernel's console takes over and removes.
+ * The board names the screen to the kernel as "riscv64.framebuffer.*".
  */
 
 #include <hal/hal.h>
@@ -127,8 +129,8 @@ static int board_screen_error = HAL_ERR_UNSUPPORTED;
 /*
  * The kernel address the console draws the screen's first byte at, which
  * the screen's flush turns back into physical addresses.  Set by
- * show_screen() before the console is attached, and not changed
- * afterwards.
+ * show_screen() before the console is attached, and once more by
+ * riscv64_board_screen_window() on the boot hart before any other runs.
  */
 static uintptr_t board_screen_address;
 
@@ -216,6 +218,37 @@ riscv64_board_handoff(
 
 	/* An unknown handoff. */
 	return NULL;
+}
+
+/*
+ * Reports the screen the early console draws on, the loader's.
+ */
+int
+riscv64_board_screen(
+	uint64_t *physical,
+	uint64_t *size)
+{
+	/* A screen the console does not draw on has no window to hold. */
+	if (board_screen_window == BOARD_SCREEN_NONE)
+		return 0;
+
+	/* Succeeded: the loader's screen. */
+	*physical = board_framebuffer_phys;
+	*size = board_framebuffer_size;
+	return 1;
+}
+
+/*
+ * Has the early console draw the screen through its window, flushed by
+ * the window's addresses from now on.
+ */
+void
+riscv64_board_screen_window(
+	uintptr_t address)
+{
+	/* The flush translates the window's addresses, and the console draws there. */
+	board_screen_address = address;
+	riscv64_fbcons_move(address);
 }
 
 /*

@@ -5,6 +5,7 @@
 #include "space.h"
 #include "percpu.h"
 #include "spin.h"
+#include "bsp-rpi-common/framebuffer.h"
 
 #define ARM64_USER_LIMIT 0x0001000000000000ULL
 _Static_assert(ARM64_USER_LIMIT - 1U <= (uintptr_t)INTPTR_MAX,
@@ -86,6 +87,63 @@ static volatile unsigned kernel_table_lock;
  */
 static uint64_t uncached_next;
 
+/* The system half's level-0 entry that holds the early console's window of the framebuffer. */
+#define ARM64_FB_WINDOW_L0_INDEX 2U
+
+/* Where the window starts, and the most it reaches: one level-2 table's gigabyte. */
+#define ARM64_FB_WINDOW_BASE (ARM64_DIRECT_BASE + ((uint64_t)ARM64_FB_WINDOW_L0_INDEX << 39))
+#define ARM64_FB_WINDOW_SPAN ARM64_DIRECT_L1_SPAN
+
+/*
+ * The states of the early console's window of the framebuffer: none (no
+ * framebuffer, or one the window cannot reach), held by the early console,
+ * given to the kernel's console (one mapping request of exactly the
+ * framebuffer once the kernel prints), and removed.
+ */
+enum arm64_fb_window_state {
+	ARM64_FB_WINDOW_NONE,
+	ARM64_FB_WINDOW_HELD,
+	ARM64_FB_WINDOW_GIVEN,
+	ARM64_FB_WINDOW_REMOVED
+};
+
+/*
+ * The early console's window of the framebuffer: its state, the
+ * framebuffer's physical base and size as the kernel reads them, the
+ * kernel address of its first byte, and whether the window is cached
+ * memory (a framebuffer in RAM) rather than device memory.
+ */
+struct arm64_fb_window {
+	enum arm64_fb_window_state state;
+	uint64_t physical;
+	uint64_t size;
+	uintptr_t address;
+	int cached;
+};
+
+/*
+ * The window's tables: the level-1 table of its level-0 entry, the
+ * level-2 table of its gigabyte, and the level-3 tables of the two 2 MiB
+ * blocks at the framebuffer's ends that it shares with other memory, so
+ * that the window reaches the framebuffer's pages and no others.  Filled
+ * by arm64_space_init(), and unlinked from the level-0 entry when the
+ * window is removed.
+ */
+static uint64_t fb_window_l1[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+static uint64_t fb_window_l2[512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+static uint64_t fb_window_l3[2][512] __attribute__((aligned(ARM64_PAGE_SIZE)));
+
+/*
+ * The early console's window of the framebuffer.  Set while the kernel's
+ * tables are built; its state changes under kernel_table_lock.
+ */
+static struct arm64_fb_window fb_window;
+
+static void fb_window_build(void);
+static void fb_window_device_direct(uint64_t physical, uint64_t size);
+static void fb_window_fill(uint64_t physical, uint64_t size, uint64_t flags);
+static int fb_window_give(hal_physaddr_t physical, size_t size, uint32_t attr, void **address);
+static int fb_window_remove(void *address, size_t size, int *matched);
 static bool range_touches_ram(uint64_t physical, uint64_t size);
 static int uncached_leaf(uint64_t address, bool create, uint64_t **leaf);
 static int uncached_table(uint64_t *table, unsigned index, bool create, uint64_t **next);
@@ -225,12 +283,19 @@ arm64_space_init(
 		system_kernel_l3_low[index] = physical | flags;
 	}
 
+	/* Gives the early console its own window of the framebuffer, which the kernel's console can remove. */
+	fb_window_build();
+
 	/* Switches the boot CPU to the final tables, with the kernel alone selected. */
 	system_ttbr0 = arm64_direct_to_phys(system_user_l0);
 	arm64_write_ttbr1(arm64_direct_to_phys(system_kernel_l0));
 	arm64_write_ttbr0(system_ttbr0);
 	arm64_flush_tlb();
 	arm64_percpu_current()->current_space = HAL_SPACE_SYS;
+
+	/* The early console paints the framebuffer through its window from now on. */
+	if (fb_window.state == ARM64_FB_WINDOW_HELD)
+		rpi_framebuffer_move((volatile uint8_t *)fb_window.address, fb_window.cached);
 
 	/* Checks W^X on the three sections the kernel runs from. */
 	text_executable = (system_kernel_l3_low[(text_start >> 12) & 511U] & PTE_PXN) == 0;
@@ -929,6 +994,7 @@ hal_space_map_device(
 	bool ram;
 	bool touches_ram;
 	bool enabled;
+	int given;
 	int error;
 
 	/* Requires a destination and a non-empty range the direct map reaches. */
@@ -944,6 +1010,11 @@ hal_space_map_device(
 		return HAL_ERR_INVALID;
 	if ((attr & HAL_SPACE_WC) != 0)
 		return HAL_ERR_UNSUPPORTED;
+
+	/* The early console's window of exactly the framebuffer goes to the kernel's console once it prints. */
+	given = fb_window_give(paddr, size, attr, vaddr);
+	if (given)
+		return HAL_OK;
 
 	/* Returns RAM's existing cacheable alias. */
 	ram = range_is_ram((uint64_t)paddr, (uint64_t)size);
@@ -1154,6 +1225,18 @@ hal_space_unmap_device(
 {
 	uint64_t address;
 	uint64_t physical;
+	int matched;
+	int error;
+
+	/* The early console's window, given to the kernel's console, goes. */
+	error = fb_window_remove(vaddr, size, &matched);
+	if (matched) {
+		if (error != HAL_OK)
+			return error;
+
+		/* Succeeded: no CPU keeps a translation of the framebuffer through the window. */
+		return HAL_OK;
+	}
 
 	/* Requires a nonempty range in the device mapping's direct window. */
 	address = (uint64_t)(uintptr_t)vaddr;
@@ -1170,6 +1253,265 @@ hal_space_unmap_device(
 		return HAL_ERR_INVALID;
 
 	/* Succeeded: this caller has released its handle; shared aliases remain. */
+	return HAL_OK;
+}
+
+/*
+ * Builds the early console's window of the framebuffer into the kernel's
+ * tables before they are switched to.
+ *
+ * The window is the same memory type the direct map gives the framebuffer,
+ * so that no page is mapped with two types: cached for a framebuffer in
+ * RAM, as the direct map holds all RAM, and Device-nGnRE for one outside
+ * RAM, as hal_space_map_device() gives device memory, with the direct
+ * map's blocks of it made device blocks too.  A framebuffer the window
+ * cannot reach is left out: the early console keeps painting it through
+ * the direct map, and it is never given.
+ */
+static void
+fb_window_build(
+	void)
+{
+	uint64_t physical;
+	uint64_t size;
+	uint64_t aligned;
+	uint64_t end;
+	uint64_t flags;
+	bool ram;
+	int present;
+
+	/* Nothing to hold without a framebuffer. */
+	fb_window.state = ARM64_FB_WINDOW_NONE;
+	present = rpi_framebuffer_extent(&physical, &size);
+	if (!present)
+		return;
+
+	/* Refuses a framebuffer that wraps or that one gigabyte of window does not hold. */
+	if (physical + size < physical)
+		return;
+	aligned = physical & ~(ARM64_DEVICE_BLOCK_SIZE - 1U);
+	end = (physical + size + ARM64_PAGE_SIZE - 1U) & ~((uint64_t)ARM64_PAGE_SIZE - 1U);
+	if (end - aligned > ARM64_FB_WINDOW_SPAN)
+		return;
+
+	/* The direct map's memory type for the framebuffer. */
+	ram = range_is_ram(physical, size);
+	if (ram) {
+		/* RAM: cached, inner shareable like the direct map. */
+		flags = PTE_ATTR(0) | PTE_PXN | PTE_UXN;
+	} else {
+		/*
+		 * Device memory: the boot tables' cached lines of it go first, then
+		 * the direct map's blocks of it become device blocks.
+		 */
+		hal_dcache_invalidate_range((uintptr_t)arm64_phys_to_direct((uintptr_t)physical), (size_t)size);
+		fb_window_device_direct(physical, size);
+		flags = PTE_ATTR(1) | PTE_PXN | PTE_UXN;
+	}
+
+	/* Maps the framebuffer's pages into the window. */
+	fb_window_fill(physical, size, flags);
+
+	/* The early console holds it, and paints through it until the kernel prints. */
+	fb_window.physical = physical;
+	fb_window.size = size;
+	fb_window.address = (uintptr_t)(ARM64_FB_WINDOW_BASE + (physical - aligned));
+	fb_window.cached = 0;
+	if (ram)
+		fb_window.cached = 1;
+	fb_window.state = ARM64_FB_WINDOW_HELD;
+}
+
+/*
+ * Makes the direct map's 2 MiB blocks of a framebuffer outside RAM device
+ * blocks, in the tables being built.  Only blocks of the two split
+ * gigabytes are made so, and only those that hold no RAM; another block
+ * keeps its mapping (a gigabyte block of RAM is not split).
+ */
+static void
+fb_window_device_direct(
+	uint64_t physical,
+	uint64_t size)
+{
+	uint64_t *table;
+	uint64_t block;
+	uint64_t end;
+	unsigned l1_index;
+	unsigned l2_index;
+	bool touches;
+
+	/* Each 2 MiB block the framebuffer touches. */
+	end = physical + size;
+	for (block = physical & ~(ARM64_DEVICE_BLOCK_SIZE - 1U); block < end; block += ARM64_DEVICE_BLOCK_SIZE) {
+		/* Only the first gigabyte and the 3--4 GiB one are split into blocks. */
+		l1_index = (unsigned)(block / ARM64_DIRECT_L1_SPAN);
+		l2_index = (unsigned)((block % ARM64_DIRECT_L1_SPAN) / ARM64_DEVICE_BLOCK_SIZE);
+		if (l1_index == 0U) {
+			table = system_kernel_l2_low;
+		} else if (l1_index == 3U) {
+			table = system_kernel_l2_high;
+		} else {
+			continue;
+		}
+
+		/* A block left unmapped stays so, and one that holds RAM stays cached. */
+		if ((table[l2_index] & PTE_VALID) == 0)
+			continue;
+		touches = range_touches_ram(block, ARM64_DEVICE_BLOCK_SIZE);
+		if (touches)
+			continue;
+
+		/* The tables are not in use yet: the entry changes without a break. */
+		table[l2_index] = block | BLOCK_FLAGS | PTE_ATTR(1) | PTE_PXN | PTE_UXN;
+	}
+}
+
+/*
+ * Writes the window's entries for a framebuffer: a 2 MiB block entry where
+ * the framebuffer's pages fill the block, and a level-3 table of only its
+ * pages at either end where they do not.
+ */
+static void
+fb_window_fill(
+	uint64_t physical,
+	uint64_t size,
+	uint64_t flags)
+{
+	uint64_t *table;
+	uint64_t aligned;
+	uint64_t first;
+	uint64_t end;
+	uint64_t block;
+	uint64_t page;
+	uint64_t stop;
+	unsigned edge;
+	unsigned index;
+
+	/* Links the window's level-1 and level-2 tables under its level-0 entry. */
+	system_kernel_l0[ARM64_FB_WINDOW_L0_INDEX] = table_desc(fb_window_l1);
+	fb_window_l1[0] = table_desc(fb_window_l2);
+
+	/* The framebuffer's first and past-the-end pages, and the block the window starts at. */
+	first = physical & ~((uint64_t)ARM64_PAGE_SIZE - 1U);
+	end = (physical + size + ARM64_PAGE_SIZE - 1U) & ~((uint64_t)ARM64_PAGE_SIZE - 1U);
+	aligned = physical & ~(ARM64_DEVICE_BLOCK_SIZE - 1U);
+
+	/* Each block the framebuffer touches, at most two of them partly. */
+	edge = 0;
+	for (block = aligned; block < end; block += ARM64_DEVICE_BLOCK_SIZE) {
+		index = (unsigned)((block - aligned) / ARM64_DEVICE_BLOCK_SIZE);
+
+		/* A block the framebuffer fills is one entry. */
+		if (first <= block && end - block >= ARM64_DEVICE_BLOCK_SIZE) {
+			fb_window_l2[index] = block | BLOCK_FLAGS | flags;
+			continue;
+		}
+
+		/* A block it fills partly gets an edge table with its pages alone. */
+		table = fb_window_l3[edge];
+		edge++;
+		page = block;
+		if (page < first)
+			page = first;
+		stop = block + ARM64_DEVICE_BLOCK_SIZE;
+		if (stop > end)
+			stop = end;
+		for (; page < stop; page += ARM64_PAGE_SIZE)
+			table[(page - block) / ARM64_PAGE_SIZE] = page | PAGE_FLAGS | flags;
+		fb_window_l2[index] = table_desc(table);
+	}
+}
+
+/*
+ * Gives the early console's window to the kernel's console: the first
+ * mapping request of exactly the framebuffer (its physical base and size,
+ * uncached and writable) once the kernel prints through kernel_putc, when
+ * the early console paints no more.  Returns 1 with address set, or 0 for
+ * every other request.
+ */
+static int
+fb_window_give(
+	hal_physaddr_t physical,
+	size_t size,
+	uint32_t attr,
+	void **address)
+{
+	void (*printer)(int);
+	bool enabled;
+	int given;
+
+	/* Only the uncached writable mapping a console asks for. */
+	if (attr != (HAL_SPACE_READ | HAL_SPACE_WRITE | HAL_SPACE_NOCACHE))
+		return 0;
+
+	/* Only once the kernel prints, so that the early console no longer paints. */
+	printer = __atomic_load_n(&kernel_putc, __ATOMIC_ACQUIRE);
+	if (printer == NULL)
+		return 0;
+
+	/* Gives only the framebuffer itself, exactly, while the early console holds it. */
+	enabled = arm64_spin_lock(&kernel_table_lock);
+
+	given = 0;
+	if (fb_window.state == ARM64_FB_WINDOW_HELD &&
+	    fb_window.physical == (uint64_t)physical &&
+	    fb_window.size == (uint64_t)size) {
+		/* GIVEN: the one holder's release removes it; no other request gets it. */
+		fb_window.state = ARM64_FB_WINDOW_GIVEN;
+		*address = (void *)fb_window.address;
+		given = 1;
+	}
+
+	arm64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* Reports whether the request took the window. */
+	return given;
+}
+
+/*
+ * Removes the early console's window once it was given and its holder
+ * releases it (address and size as given): the early console gives the
+ * framebuffer up, the window's level-0 entry goes, and every CPU drops
+ * every translation of it.  matched says whether the release was of the
+ * window.
+ */
+static int
+fb_window_remove(
+	void *address,
+	size_t size,
+	int *matched)
+{
+	bool enabled;
+
+	/* Takes only a release of the window as it was given. */
+	enabled = arm64_spin_lock(&kernel_table_lock);
+
+	*matched = 0;
+	if (fb_window.state != ARM64_FB_WINDOW_GIVEN ||
+	    fb_window.address != (uintptr_t)address ||
+	    fb_window.size != (uint64_t)size) {
+		arm64_spin_unlock(&kernel_table_lock, enabled);
+		return HAL_OK;
+	}
+
+	/* REMOVED: the window is the remover's alone from here. */
+	*matched = 1;
+	fb_window.state = ARM64_FB_WINDOW_REMOVED;
+
+	arm64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* The early console gives the framebuffer up first. */
+	rpi_cons_framebuffer_release();
+
+	/* Unlinks the window, then every CPU drops its translations. */
+	enabled = arm64_spin_lock(&kernel_table_lock);
+
+	__atomic_store_n(&system_kernel_l0[ARM64_FB_WINDOW_L0_INDEX], 0U, __ATOMIC_RELEASE);
+	arm64_flush_tlb();
+
+	arm64_spin_unlock(&kernel_table_lock, enabled);
+
+	/* Succeeded: the window is gone. */
 	return HAL_OK;
 }
 

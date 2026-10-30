@@ -86,11 +86,14 @@ drv_boot_fb_register_backend(
 /*
  * Gives the framebuffer up for good once the console has left the display.
  *
- * Nothing is drawn on it again and the driver's mapping of it is given
- * back (the hardware is not written).  The hardware layer keeps its own
- * view of the screen for its stall and fatal reports, so the screen counts
- * as left: returns EBUSY when it lies in the count ranges, 0 otherwise.  A
- * later call waits for the first one and judges against its own ranges.
+ * Nothing is drawn on it again, and the driver's mapping of it and the
+ * early console's, which the kernel hands over as a mapping of exactly the
+ * screen once the console prints through the kernel, are removed (the
+ * hardware is not written).  Returns 0 when no mapping of the screen is
+ * left or the screen lies outside the count ranges, the error of a failed
+ * removal, or EBUSY for a mapping kept for good, when the screen lies in
+ * them.  A later call waits for the first one and judges against its own
+ * ranges.
  * The caller stopped the console's drawing first, and holds /dev/graphics's
  * lock when /dev/graphics draws here; thread context, it may sleep.  It is
  * also /dev/graphics's backend end.
