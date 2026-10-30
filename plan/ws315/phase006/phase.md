@@ -117,8 +117,16 @@ Queue: q1696 / q1696-i01（P3）
   **見立ては確かめられた**: 送りの in flight を受けの窓の上限より大きくすると同時の send が戻る（1030 → 2176、Linux 2346）。
 - kernel: build/ws315-p006-{k1,g10,g12,d1}-vmunix（d1 は include/kern/net/tcp-socket.h の 256→768 と tcp.c の TCP_SEND_BUFFER 384→1152 KB を一時に書いて build、戻した）。
 - 機械の状態: 5330 は d1 の測りに入る前に Debian を確かめた。5330 は Debian、NVMe の zedBSD の kernel は a1（= d1 と同じ binary）。
-  NVMe の zedBSD の kernel は ag10（= f1）。**10.0.10.3: 10:24 に lock を取った（/tmp/zedbsd-rdna.lock に P3 q1702-i01 と書いた）、Q1 の排他の返事待ち**。終わったら `free since HH:MM (P3 q1702-i01 ...)` と書いて返す。QEMU は止まっている。
-  21 config の build を `build/tmp/p006-buildall.sh c`（build/tmp/p006-buildall-c.txt）で流している。
+  NVMe の zedBSD の kernel は ag10（= f1）。**10.0.10.3: 10:24 に lock を取った（/tmp/zedbsd-rdna.lock に P3 q1702-i01 と書いた、Q1 が 11:09 まで可と確かめた）**。rdna-tcp.sh は毎回保存の kernel（cksum 1463007375 = vmunix-va1）を戻し、Debian に戻る。終わったら `free since HH:MM (P3 q1702-i01 ...)` と書いて返す。QEMU は止まっている。
+  21 config の build（f49185c5b の tree、`build/tmp/p006-buildall.sh c`、build/tmp/p006-buildall-c.txt）すべて rc 0・warning 0。
+- 10GbE（10.0.10.3 の RTL8127 ← → centris、20 s、build/ws221-rdna/<name>/summary.txt）:
+
+| run | send | recv | 同時 recv / send（2 回） | 送りの send_refused |
+| --- | --- | --- | --- | --- |
+| p006-base（p006 の前） | 5982.8 | 4993.2 | 3621.9 / 4739.9、3611.9 / 4896.9 | 0 |
+| p006-f（最終） | **5444.3** | 6129.6 | 3732.7 / 4650.1、3561.4 / 4924.6 | 4767 |
+
+  recv は上がり同時は同じ。send が 9 % 低い（1 回、送り側の 1 CPU が 90 % sys、base は 31 %）: 再現を見るため send を 3 回ずつ流している（p006-f-s・p006-base-s）。
 - 確かめの進み: tcp-model PASS（4575db11d の tree、build/tmp/p006-model-a2.txt。往復 10 ms の場面が 32 → 67 MB/s）。21 config の vmunix の build（`build/tmp/p006-buildall.sh b`、build/tmp/p006-buildall-b.txt、build/p006b-*）すべて rc 0・warning 0。
   QEMU `qemu-tcp.sh "" 15 inet,inet6` PASS（build/tmp/p006-qemu-tcp-a.txt、send_ring=768、guest send/recv inet 58.2/34.6、inet6 61.1/24.4 Mbit/s: 速さは emulator の物）。5330 の kernel は build/ws315-p006-a1-vmunix（build/p006-a1、warning 0）。
   rdna-tcp.sh に `--runs both` を足した（2de3b6dc8、Q1 が範囲に足した）。
