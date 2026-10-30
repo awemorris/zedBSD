@@ -377,6 +377,8 @@ test_imap(
 	error = ml_imap_idle_start(&imap);
 	(void)snprintf(name, sizeof(name), "%s-idle-start", label);
 	test_check(name, error == 0, imap.error);
+
+	/* Waits for the news: at once when the connection holds it, else on its socket. */
 	memset(&watched, 0, sizeof(watched));
 	watched.socket = imap.conn.socket;
 	watched.events = KL_SOCKET_READABLE;
@@ -384,11 +386,16 @@ test_imap(
 	ready = ml_conn_ready(&imap.conn);
 	if (!ready) {
 		error = kl_socket_poll(&watched, 1U, 5000, &found);
-		ready = (error == 0 && found > 0U);
+		if (error == 0 && found > 0U)
+			ready = 1;
 	}
+
+	/* Takes the news when it came. */
 	arrived = 0;
 	if (ready)
 		error = ml_imap_idle_take(&imap, &arrived);
+
+	/* It came, and it was a new message. */
 	(void)snprintf(name, sizeof(name), "%s-idle-arrived", label);
 	test_check(name, ready && error == 0 && arrived == 1, "");
 	error = ml_imap_idle_stop(&imap);

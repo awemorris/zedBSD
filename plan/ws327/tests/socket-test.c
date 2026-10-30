@@ -263,40 +263,56 @@ test_addresses(void)
 	struct kl_address address;
 	char text[KL_ADDRESS_TEXT];
 	char small[8];
+	int same;
 	int error;
 
 	/* IPv4. */
 	error = kl_address_parse("192.0.2.1", 993U, &address);
 	if (error == 0)
 		error = kl_address_format(&address, text, sizeof(text));
-	test_check(error == 0 && address.family == KL_ADDRESS_IPV4 && strcmp(text, "192.0.2.1:993") == 0, "address-ipv4");
+	same = strcmp(text, "192.0.2.1:993");
+	test_check(error == 0 && address.family == KL_ADDRESS_IPV4 && same == 0, "address-ipv4");
 
 	/* IPv6, and with a scope. */
 	error = kl_address_parse("2001:db8::1", 993U, &address);
 	if (error == 0)
 		error = kl_address_format(&address, text, sizeof(text));
-	test_check(error == 0 && address.family == KL_ADDRESS_IPV6 && strcmp(text, "[2001:db8::1]:993") == 0, "address-ipv6");
+	same = strcmp(text, "[2001:db8::1]:993");
+	test_check(error == 0 && address.family == KL_ADDRESS_IPV6 && same == 0, "address-ipv6");
 	error = kl_address_parse("fe80::1%2", 80U, &address);
 	if (error == 0)
 		error = kl_address_format(&address, text, sizeof(text));
-	test_check(error == 0 && address.scope == 2U && strcmp(text, "[fe80::1%2]:80") == 0, "address-scope");
+	same = strcmp(text, "[fe80::1%2]:80");
+	test_check(error == 0 && address.scope == 2U && same == 0, "address-scope");
 
 	/* What is not an address in numbers. */
-	test_check(kl_address_parse("1.2.3", 1U, &address) == EINVAL, "address-short");
-	test_check(kl_address_parse("1.2.3.4%1", 1U, &address) == EINVAL, "address-ipv4-scope");
-	test_check(kl_address_parse("fe80::1%", 1U, &address) == EINVAL, "address-empty-scope");
-	test_check(kl_address_parse("localhost", 1U, &address) == EINVAL, "address-name");
-	test_check(kl_address_parse("", 1U, &address) == EINVAL, "address-empty");
+	error = kl_address_parse("1.2.3", 1U, &address);
+	test_check(error == EINVAL, "address-short");
+	error = kl_address_parse("1.2.3.4%1", 1U, &address);
+	test_check(error == EINVAL, "address-ipv4-scope");
+	error = kl_address_parse("fe80::1%", 1U, &address);
+	test_check(error == EINVAL, "address-empty-scope");
+	error = kl_address_parse("localhost", 1U, &address);
+	test_check(error == EINVAL, "address-name");
+	error = kl_address_parse("", 1U, &address);
+	test_check(error == EINVAL, "address-empty");
 
-	/* Too little room, and the any and loopback addresses. */
+	/* Too little room for an address's text. */
 	(void)kl_address_parse("192.0.2.1", 993U, &address);
-	test_check(kl_address_format(&address, small, sizeof(small)) == ENOSPC, "address-room");
+	error = kl_address_format(&address, small, sizeof(small));
+	test_check(error == ENOSPC, "address-room");
+
+	/* The loopback address. */
 	kl_address_loopback(KL_ADDRESS_IPV6, 7U, &address);
 	error = kl_address_format(&address, text, sizeof(text));
-	test_check(error == 0 && strcmp(text, "[::1]:7") == 0, "address-loopback");
+	same = strcmp(text, "[::1]:7");
+	test_check(error == 0 && same == 0, "address-loopback");
+
+	/* The any address. */
 	kl_address_any(KL_ADDRESS_IPV4, 8U, &address);
 	error = kl_address_format(&address, text, sizeof(text));
-	test_check(error == 0 && strcmp(text, "0.0.0.0:8") == 0, "address-any");
+	same = strcmp(text, "0.0.0.0:8");
+	test_check(error == 0 && same == 0, "address-any");
 }
 
 /* Checks resolving names and numbers. */
@@ -306,8 +322,11 @@ test_resolve(void)
 	struct kl_address addresses[8];
 	char text[KL_ADDRESS_TEXT];
 	size_t count;
+	size_t shown;
 	size_t index;
 	int loopback;
+	int ipv4;
+	int ipv6;
 	int error;
 
 	/* localhost is the loopback, whichever family. */
@@ -315,17 +334,25 @@ test_resolve(void)
 	loopback = error == 0 && count >= 1U;
 	for (index = 0; index < count && loopback; index++) {
 		(void)kl_address_format(&addresses[index], text, sizeof(text));
-		if (strcmp(text, "127.0.0.1:25") != 0 && strcmp(text, "[::1]:25") != 0)
+		ipv4 = strcmp(text, "127.0.0.1:25");
+		ipv6 = strcmp(text, "[::1]:25");
+		if (ipv4 != 0 && ipv6 != 0)
 			loopback = 0;
 	}
+
+	/* What came instead, for the log. */
 	if (!loopback) {
-		/* What came instead, for the log. */
-		printf("NOTE resolve-localhost error=%d count=%zu\n", error, error == 0 ? count : (size_t)0);
+		shown = 0;
+		if (error == 0)
+			shown = count;
+		printf("NOTE resolve-localhost error=%d count=%zu\n", error, shown);
 		for (index = 0; error == 0 && index < count; index++) {
 			(void)kl_address_format(&addresses[index], text, sizeof(text));
 			printf("NOTE resolve-localhost address=%s\n", text);
 		}
 	}
+
+	/* The result. */
 	test_check(loopback, "resolve-localhost");
 
 	/* A number is its own address, of one family. */
@@ -337,10 +364,11 @@ test_resolve(void)
 
 	/* A name under .invalid has no address (EAGAIN where the host has no resolver at all). */
 	error = kl_socket_resolve("no-such-host.invalid", 80U, KL_ADDRESS_ANY, KL_SOCKET_STREAM, addresses, 8U, &count);
-	if (error == EAGAIN)
+	if (error == EAGAIN) {
 		test_not_done("resolve-none (no resolver)");
-	else
+	} else {
 		test_check(error == ENOENT && count == 0U, "resolve-none");
+	}
 
 	/* No room is refused. */
 	error = kl_socket_resolve("localhost", 80U, KL_ADDRESS_ANY, KL_SOCKET_STREAM, addresses, 0U, &count);
@@ -358,10 +386,11 @@ test_stream(
 	struct kl_socket *server;
 	struct kl_address address;
 	struct kl_address peer;
-	struct kl_address client_local;
+	struct kl_address client_address;
 	char buffer[16];
 	size_t sent;
 	size_t received;
+	int same;
 	int error;
 
 	/* A listener (no IPv6 on the host: not done). */
@@ -369,8 +398,7 @@ test_stream(
 	if (error == EAFNOSUPPORT || error == EADDRNOTAVAIL) {
 		test_not_done(name);
 		return;
-	}
-	if (error != 0) {
+	} else if (error != 0) {
 		test_check(0, name);
 		return;
 	}
@@ -384,8 +412,8 @@ test_stream(
 	if (error == 0)
 		error = kl_socket_accept(listener, 0U, &server, &peer);
 	if (error == 0)
-		error = kl_socket_local_address(client, &client_local);
-	if (error != 0 || peer.port != client_local.port || peer.family != family) {
+		error = kl_socket_local_address(client, &client_address);
+	if (error != 0 || peer.port != client_address.port || peer.family != family) {
 		test_check(0, name);
 		kl_socket_close(server);
 		kl_socket_close(client);
@@ -397,18 +425,23 @@ test_stream(
 	error = kl_socket_send(client, "hello", 5U, &sent);
 	if (error == 0)
 		error = kl_socket_receive(server, buffer, sizeof(buffer), &received);
-	test_check(error == 0 && sent == 5U && received == 5U && memcmp(buffer, "hello", 5U) == 0, name);
+	same = memcmp(buffer, "hello", 5U);
+	test_check(error == 0 && sent == 5U && received == 5U && same == 0, name);
 	error = kl_socket_send(server, "back", 4U, &sent);
 	if (error == 0)
 		error = kl_socket_receive(client, buffer, sizeof(buffer), &received);
-	test_check(error == 0 && received == 4U && memcmp(buffer, "back", 4U) == 0, "stream-back");
+	same = memcmp(buffer, "back", 4U);
+	test_check(error == 0 && received == 4U && same == 0, "stream-back");
 
 	/* The client's sending closed: the server receives the end. */
 	error = kl_socket_shutdown(client, KL_SOCKET_SHUT_SEND);
 	if (error == 0)
 		error = kl_socket_receive(server, buffer, sizeof(buffer), &received);
 	test_check(error == 0 && received == 0U, "stream-end");
-	test_check(kl_socket_peer_address(client, &peer) == 0 && peer.port == address.port, "stream-peer");
+
+	/* The client's peer is the listener's address. */
+	error = kl_socket_peer_address(client, &peer);
+	test_check(error == 0 && peer.port == address.port, "stream-peer");
 	kl_socket_close(server);
 	kl_socket_close(client);
 	kl_socket_close(listener);
@@ -437,33 +470,39 @@ test_nonblocking(
 	if (error == EAFNOSUPPORT || error == EADDRNOTAVAIL) {
 		test_not_done(name);
 		return;
-	}
-	if (error != 0) {
+	} else if (error != 0) {
 		test_check(0, name);
 		return;
 	}
 
-	/* The connection starts (or is made at once over the loopback), and the wait finds it writable. */
+	/* The client that does not block. */
 	error = kl_socket_open(family, KL_SOCKET_STREAM, KL_SOCKET_NONBLOCKING, &client);
 	if (error != 0) {
 		test_check(0, name);
 		kl_socket_close(listener);
 		return;
 	}
+
+	/* The connect starts, and the wait finds the socket writable. */
 	connected = kl_socket_connect(client, &address);
 	wait.socket = client;
 	wait.waker = NULL;
 	wait.events = KL_SOCKET_WRITABLE;
 	error = kl_socket_poll(&wait, 1U, TEST_LATE_MS, &ready);
-	if (error == 0 && ready == 1U && (wait.ready & KL_SOCKET_WRITABLE) != 0U)
+	if (error == 0 && ready == 1U && (wait.ready & KL_SOCKET_WRITABLE) != 0U) {
 		error = kl_socket_connect_result(client);
-	else
+	} else {
 		error = EIO;
+	}
+
+	/* The connect started or ended, and the result is clean. */
 	test_check((connected == 0 || connected == EINPROGRESS) && error == 0, name);
 
 	/* The server takes it. */
 	error = kl_socket_accept(listener, 0U, &server, NULL);
 	test_check(error == 0, "connect-nonblocking-accept");
+
+	/* The sockets closed. */
 	if (error == 0)
 		kl_socket_close(server);
 	kl_socket_close(client);
@@ -488,6 +527,8 @@ test_refused(void)
 		test_check(0, "connect-refused");
 		return;
 	}
+
+	/* Nobody listens now. */
 	kl_socket_close(listener);
 
 	/* The connection that does not block fails: the wait ends at once and the result is ECONNREFUSED. */
@@ -496,6 +537,8 @@ test_refused(void)
 		test_check(0, "connect-refused");
 		return;
 	}
+
+	/* The connect, and when it is in progress the wait and the result. */
 	connected = kl_socket_connect(client, &address);
 	if (connected == EINPROGRESS) {
 		wait.socket = client;
@@ -505,6 +548,8 @@ test_refused(void)
 		if (error == 0 && ready == 1U)
 			connected = kl_socket_connect_result(client);
 	}
+
+	/* It was refused. */
 	test_check(connected == ECONNREFUSED, "connect-refused");
 	kl_socket_close(client);
 
@@ -514,6 +559,8 @@ test_refused(void)
 		error = kl_socket_connect(client, &address);
 		kl_socket_close(client);
 	}
+
+	/* It was refused. */
 	test_check(error == ECONNREFUSED, "connect-refused-blocking");
 }
 
@@ -529,6 +576,7 @@ test_accept_flags(void)
 	char buffer[4];
 	size_t received;
 	size_t ready;
+	int descriptor;
 	int flags;
 	int error;
 
@@ -538,10 +586,12 @@ test_accept_flags(void)
 		test_check(0, "accept-none");
 		return;
 	}
+
+	/* Nobody connected. */
 	error = kl_socket_accept(listener, 0U, &server, NULL);
 	test_check(error == EAGAIN && server == NULL, "accept-none");
 
-	/* A client; the wait finds the listener readable; the accepted socket does not block as asked. */
+	/* A client connects. */
 	error = kl_socket_open(KL_ADDRESS_IPV4, KL_SOCKET_STREAM, 0U, &client);
 	if (error == 0)
 		error = kl_socket_connect(client, &address);
@@ -550,16 +600,22 @@ test_accept_flags(void)
 		kl_socket_close(listener);
 		return;
 	}
+
+	/* The wait finds the listener readable. */
 	wait.socket = listener;
 	wait.waker = NULL;
 	wait.events = KL_SOCKET_READABLE;
 	error = kl_socket_poll(&wait, 1U, TEST_LATE_MS, &ready);
 	test_check(error == 0 && ready == 1U && wait.ready == KL_SOCKET_READABLE, "accept-ready");
+
+	/* The accepted socket does not block as asked: a receive with nothing sent is EAGAIN. */
 	error = kl_socket_accept(listener, KL_SOCKET_NONBLOCKING, &server, NULL);
 	if (error == 0) {
 		error = kl_socket_receive(server, buffer, sizeof(buffer), &received);
 		kl_socket_close(server);
 	}
+
+	/* Nothing was sent: the receive would block. */
 	test_check(error == EAGAIN, "accept-nonblocking");
 
 	/* Another, accepted as blocking although the listener does not block. */
@@ -571,11 +627,16 @@ test_accept_flags(void)
 		error = kl_socket_poll(&wait, 1U, TEST_LATE_MS, &ready);
 	if (error == 0)
 		error = kl_socket_accept(listener, 0U, &server, NULL);
+
+	/* Its flags must not say non-blocking. */
 	flags = -1;
 	if (error == 0) {
-		flags = fcntl((int)kl_socket_native(server), F_GETFL);
+		descriptor = (int)kl_socket_native(server);
+		flags = fcntl(descriptor, F_GETFL);
 		kl_socket_close(server);
 	}
+
+	/* It does not say non-blocking. */
 	test_check(error == 0 && flags >= 0 && (flags & O_NONBLOCK) == 0, "accept-blocking");
 	kl_socket_close(client);
 	kl_socket_close(listener);
@@ -604,6 +665,8 @@ test_many(void)
 			break;
 		opened++;
 	}
+
+	/* Not all opened: the opened ones are closed and the check fails. */
 	if (opened != TEST_PAIRS) {
 		test_check(0, "poll-many-open");
 		for (index = 0; index < opened; index++)
@@ -611,12 +674,14 @@ test_many(void)
 		return;
 	}
 
-	/* Nothing to read anywhere: the wait runs out after its time. */
+	/* Watches every server end for bytes. */
 	for (index = 0; index < TEST_PAIRS; index++) {
 		waits[index].socket = pairs[index].server;
 		waits[index].waker = NULL;
 		waits[index].events = KL_SOCKET_READABLE;
 	}
+
+	/* Nothing to read anywhere: the wait runs out after its time. */
 	start = test_now_ms();
 	error = kl_socket_poll(waits, TEST_PAIRS, TEST_WAIT_MS, &ready);
 	waited = test_now_ms() - start;
@@ -633,6 +698,8 @@ test_many(void)
 		if (index != TEST_PAIR_WRITTEN && waits[index].ready != 0U)
 			right = 0;
 	}
+
+	/* Only the written one was ready. */
 	test_check(right, "poll-many");
 
 	/* The pairs closed. */
@@ -687,6 +754,8 @@ test_wakers(void)
 		error = kl_socket_poll(waits, 2U, KL_SOCKET_FOREVER, &ready);
 		(void)kl_thread_join(threads[0]);
 	}
+
+	/* The waker was found, and the socket was not. */
 	test_check(error == 0 && ready == 1U && waits[1].ready == KL_SOCKET_READABLE && waits[0].ready == 0U, "waker-ends-wait");
 
 	/* Three rings before a wait are one: found once, then quiet. */
@@ -711,12 +780,18 @@ test_wakers(void)
 			break;
 		started++;
 	}
+
+	/* Waits again and again while they ring. */
 	for (index = 0; index < 1000U; index++)
 		(void)kl_socket_poll(&waits[1], 1U, 1, &ready);
+
+	/* Joins them, clears the waker, and rings it once more. */
 	for (index = 0; index < started; index++)
 		(void)kl_thread_join(threads[index]);
 	(void)kl_socket_poll(&waits[1], 1U, 0, &ready);
 	kl_socket_waker_ring(waker);
+
+	/* That last ring is found. */
 	error = kl_socket_poll(&waits[1], 1U, TEST_LATE_MS, &ready);
 	test_check(started == TEST_RINGERS && error == 0 && ready == 1U, "waker-race");
 
@@ -736,6 +811,8 @@ test_wakers(void)
 			break;
 		started++;
 	}
+
+	/* Waits and looks at the counter until it has every ring, or a wait runs out. */
 	seen = 0;
 	error = 0;
 	while (seen < started * TEST_RINGS && error == 0) {
@@ -744,8 +821,12 @@ test_wakers(void)
 			error = ETIMEDOUT;
 		seen = atomic_load(&counter);
 	}
+
+	/* Joins the ringers. */
 	for (index = 0; index < started; index++)
 		(void)kl_thread_join(threads[index]);
+
+	/* No ring was lost. */
 	test_check(started == TEST_RINGERS && error == 0 && seen == TEST_RINGERS * TEST_RINGS, "waker-no-lost-ring");
 	test_pair_close(&pair);
 	kl_socket_waker_close(waker);
@@ -770,6 +851,8 @@ test_ends(void)
 		test_check(0, "end-received");
 		return;
 	}
+
+	/* The server's end is closed. */
 	kl_socket_close(pair.server);
 	pair.server = NULL;
 	wait.socket = pair.client;
@@ -806,6 +889,7 @@ test_datagrams(
 	char buffer[4];
 	size_t sent;
 	size_t received;
+	int same;
 	int error;
 
 	/* A receiver bound to the loopback (no IPv6 on the host: not done). */
@@ -816,11 +900,12 @@ test_datagrams(
 	if (error == EAFNOSUPPORT) {
 		test_not_done(name);
 		return;
-	}
-	if (error != 0) {
+	} else if (error != 0) {
 		test_check(0, name);
 		return;
 	}
+
+	/* Binds it to the loopback and reads its address. */
 	kl_address_loopback(family, 0U, &loopback);
 	error = kl_socket_bind(receiver, &loopback);
 	if (error == EADDRNOTAVAIL) {
@@ -828,6 +913,8 @@ test_datagrams(
 		kl_socket_close(receiver);
 		return;
 	}
+
+	/* Its address. */
 	if (error == 0)
 		error = kl_socket_local_address(receiver, &address);
 
@@ -845,7 +932,8 @@ test_datagrams(
 		error = kl_socket_send_to(sender, "0123456789", 10U, &address, &sent);
 	if (error == 0)
 		error = kl_socket_receive_from(receiver, buffer, sizeof(buffer), &from, &received);
-	test_check(error == 0 && sent == 10U && received == 4U && memcmp(buffer, "0123", 4U) == 0 &&
+	same = memcmp(buffer, "0123", 4U);
+	test_check(error == 0 && sent == 10U && received == 4U && same == 0 &&
 	    from.port == sender_address.port && from.family == family, name);
 	kl_socket_close(sender);
 	kl_socket_close(receiver);
@@ -857,6 +945,7 @@ test_ipv6_only(void)
 {
 	struct kl_socket *socket6;
 	socklen_t length;
+	int descriptor;
 	int only;
 	int status;
 	int error;
@@ -872,16 +961,27 @@ test_ipv6_only(void)
 	only = -1;
 	length = sizeof(only);
 	status = error;
-	if (status == 0)
-		status = getsockopt((int)kl_socket_native(socket6), IPPROTO_IPV6, IPV6_V6ONLY, &only, &length);
+	descriptor = -1;
+	if (status == 0) {
+		descriptor = (int)kl_socket_native(socket6);
+		status = getsockopt(descriptor, IPPROTO_IPV6, IPV6_V6ONLY, &only, &length);
+	}
+
+	/* An IPv6 socket is IPv6 only by default. */
 	test_check(status == 0 && only == 1, "ipv6-only");
+
+	/* Turns the option off, and reads it back. */
 	error = kl_socket_set_option(socket6, KL_SOCKET_IPV6_ONLY, 0);
 	length = sizeof(only);
 	if (error == 0)
-		status = getsockopt((int)kl_socket_native(socket6), IPPROTO_IPV6, IPV6_V6ONLY, &only, &length);
+		status = getsockopt(descriptor, IPPROTO_IPV6, IPV6_V6ONLY, &only, &length);
 	test_check(error == 0 && status == 0 && only == 0, "ipv6-only-off");
-	test_check(kl_socket_set_option(socket6, KL_SOCKET_BROADCAST, 1) == ENOPROTOOPT, "option-wrong-kind");
-	test_check(kl_socket_set_option(socket6, KL_SOCKET_NO_DELAY, 2) == EINVAL, "option-value");
+
+	/* An option of another kind of socket, and a value out of range, are refused. */
+	error = kl_socket_set_option(socket6, KL_SOCKET_BROADCAST, 1);
+	test_check(error == ENOPROTOOPT, "option-wrong-kind");
+	error = kl_socket_set_option(socket6, KL_SOCKET_NO_DELAY, 2);
+	test_check(error == EINVAL, "option-value");
 	kl_socket_close(socket6);
 }
 
@@ -901,19 +1001,26 @@ test_poll_limits(void)
 	error = kl_socket_poll(NULL, 0U, TEST_WAIT_MS, &ready);
 	waited = test_now_ms() - start;
 	test_check(error == 0 && ready == 0U && waited >= TEST_WAIT_MS, "poll-none");
-	test_check(kl_socket_poll(NULL, 0U, KL_SOCKET_FOREVER, &ready) == EINVAL, "poll-none-forever");
+	error = kl_socket_poll(NULL, 0U, KL_SOCKET_FOREVER, &ready);
+	test_check(error == EINVAL, "poll-none-forever");
 
-	/* A wait with neither, with both, or with an event a wait cannot ask for. */
+	/* A waker for the waits that follow. */
 	error = kl_socket_waker_open(&waker);
 	if (error != 0) {
 		test_check(0, "poll-wrong");
 		return;
 	}
+
+	/* A wait naming neither a socket nor a waker. */
 	memset(&wait, 0, sizeof(wait));
 	wait.events = KL_SOCKET_READABLE;
-	test_check(kl_socket_poll(&wait, 1U, 0, &ready) == EINVAL, "poll-neither");
+	error = kl_socket_poll(&wait, 1U, 0, &ready);
+	test_check(error == EINVAL, "poll-neither");
+
+	/* A wait with an event a wait cannot ask for. */
 	wait.waker = waker;
 	wait.events = KL_SOCKET_FAILED;
-	test_check(kl_socket_poll(&wait, 1U, 0, &ready) == EINVAL, "poll-unknown-event");
+	error = kl_socket_poll(&wait, 1U, 0, &ready);
+	test_check(error == EINVAL, "poll-unknown-event");
 	kl_socket_waker_close(waker);
 }

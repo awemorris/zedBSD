@@ -26,7 +26,9 @@ static void link_run(void *argument);
 static void link_once_run(void);
 static void link_destroy(void *value);
 
-/* Calls each function once. */
+/*
+ * Calls each function once.
+ */
 int
 main(void)
 {
@@ -107,8 +109,12 @@ main(void)
 	sum += kl_socket_poll(&wait, 1U, 0, &count);
 	kl_socket_waker_close(waker);
 
+	/* Failed when the calls' results do not sum to zero (the program is only built, never run). */
+	if (sum != 0)
+		return 1;
+
 	/* Succeeded: linked. */
-	return sum == 0 ? 0 : 1;
+	return 0;
 }
 
 /* What the thread runs: nothing. */

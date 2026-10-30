@@ -4841,10 +4841,14 @@ primes_post(
 	/* The count handed back: its thread is ending, so it is joined (if primes_finish has not); the record is the program's again. */
 	if (code == POST_FINISHED) {
 		count = data;
+
+		/* Joins the thread unless primes_finish did. */
 		if (primes->worker != NULL) {
 			(void)kl_thread_join(primes->worker);
 			primes->worker = NULL;
 		}
+
+		/* Takes the result and shows how the count ended. */
 		primes->done = count->done;
 		primes->found = count->primes;
 		how = "Done";
@@ -4932,6 +4936,8 @@ primes_finish(
 		status = kl_app_dispatch(primes->app, 0);
 		if (status != 0)
 			break;
+
+		/* Acts on every post this dispatch brought, counting them. */
 		found = 0;
 		for (;;) {
 			taken = kl_app_take(primes->app, &event);
@@ -4944,6 +4950,8 @@ primes_finish(
 				primes_post(primes, event.code, event.data);
 			}
 		}
+
+		/* No post came: none is left. */
 		if (found == 0)
 			break;
 	}
@@ -5064,7 +5072,7 @@ struct progress {
 
 At any moment one thread **owns** a record: it alone reads and writes it, and a post hands the ownership over. `struct count` goes to the worker at the start and comes back at the end. While the worker has it, only `stop` is shared, and `stop` is an `atomic_int`, read and written with `atomic_load` and `atomic_store`. `struct progress` is one report: the worker makes it, and whoever takes the post frees it.
 
-**Starting a count ([lines 447-489](keiland-examples/08-worker.c#L447-L489), `primes_start`).** The function fills the record and starts the worker with it ([lines 471-482](keiland-examples/08-worker.c#L471-L482)):
+**Starting a count ([lines 451-493](keiland-examples/08-worker.c#L451-L493), `primes_start`).** The function fills the record and starts the worker with it ([lines 475-486](keiland-examples/08-worker.c#L475-L486)):
 
 ```c
 options.name = "primes";
@@ -5078,7 +5086,7 @@ primes->count = count;
 
 `struct kl_thread_options` names the thread (`"primes"`, which debuggers and the system's lists show), gives it the function to run and its argument, and leaves the priority normal and the stack to the system. `kl_thread_start` returns 0 or an errno value, and `*thread` is the thread's record, which the program joins once. From here until `POST_FINISHED` comes back, the program does not touch the record but for `stop`.
 
-**The worker ([lines 543-592](keiland-examples/08-worker.c#L543-L592), `primes_count`).** A **worker** is a thread of the program's own that does a long job. This one looks at every number below the limit. Every `STEP` numbers it reads `stop` and ends when it is asked, or posts a report to the window with `kl_window_post` ([lines 562-575](keiland-examples/08-worker.c#L562-L575)):
+**The worker ([lines 551-600](keiland-examples/08-worker.c#L551-L600), `primes_count`).** A **worker** is a thread of the program's own that does a long job. This one looks at every number below the limit. Every `STEP` numbers it reads `stop` and ends when it is asked, or posts a report to the window with `kl_window_post` ([lines 570-583](keiland-examples/08-worker.c#L570-L583)):
 
 ```c
 if (number % STEP == 0) {
@@ -5091,7 +5099,7 @@ if (number % STEP == 0) {
 			free(progress);
 ```
 
-When a post fails it did not take the data, so the worker frees the report itself. At the end it hands the count back with `kl_app_post` ([lines 586-589](keiland-examples/08-worker.c#L586-L589)):
+When a post fails it did not take the data, so the worker frees the report itself. At the end it hands the count back with `kl_app_post` ([lines 594-597](keiland-examples/08-worker.c#L594-L597)):
 
 ```c
 status = kl_app_post(count->app, POST_FINISHED, count);
@@ -5126,7 +5134,7 @@ if (event->kind == KL_APP_POST)
 
 The program sends both to `primes_post`, which frees the data either way.
 
-**Taking a post ([lines 402-445](keiland-examples/08-worker.c#L402-L445), `primes_post`).** A report is shown and freed. `POST_FINISHED` gives the record back: the worker's thread is ending (the post was its last act), so `kl_thread_join` returns at once (unless the end of the program joined it already, below). The result is copied, the record is freed, and a `NULL` count enables Start again ([lines 431-442](keiland-examples/08-worker.c#L431-L442)):
+**Taking a post ([lines 402-449](keiland-examples/08-worker.c#L402-L449), `primes_post`).** A report is shown and freed. `POST_FINISHED` gives the record back: the worker's thread is ending (the post was its last act), so `kl_thread_join` returns at once (unless the end of the program joined it already, below). The result is copied, the record is freed, and a `NULL` count enables Start again ([lines 433-446](keiland-examples/08-worker.c#L433-L446)):
 
 ```c
 if (primes->worker != NULL) {
@@ -5148,9 +5156,9 @@ if (clicked && primes->count != NULL)
 	atomic_store(&primes->count->stop, 1);
 ```
 
-The worker sees it within `STEP` numbers and hands the count back as usual, short of the limit, and the line says "Stopped" ([lines 437-440](keiland-examples/08-worker.c#L437-L440)).
+The worker sees it within `STEP` numbers and hands the count back as usual, short of the limit, and the line says "Stopped" ([lines 441-444](keiland-examples/08-worker.c#L441-L444)).
 
-**The end of the program ([192-193](keiland-examples/08-worker.c#L192-L193) and [491-541](keiland-examples/08-worker.c#L491-L541), `primes_finish`).** The window may close while a count runs. The program raises `stop` and joins the worker's thread, then takes the posts the worker left, dispatching without waiting, until a dispatch brings none:
+**The end of the program ([192-193](keiland-examples/08-worker.c#L192-L193) and [495-549](keiland-examples/08-worker.c#L495-L549), `primes_finish`).** The window may close while a count runs. The program raises `stop` and joins the worker's thread, then takes the posts the worker left, dispatching without waiting, until a dispatch brings none:
 
 ```c
 atomic_store(&primes->count->stop, 1);
@@ -5165,16 +5173,16 @@ for (;;) {
 }
 ```
 
-It does this because the application must not be closed while a thread may still post, and the posts not taken when it closes are dropped with their data, which nobody would free. Once the thread is joined no post is on its way: every post it made waits for a dispatch, so a dispatch that brings none means none is left. The program does not wait for the count's own post instead, because that post can fail (`ENOMEM`), and a wait for it would never end; a count whose post was lost is freed at the end ([lines 538-540](keiland-examples/08-worker.c#L538-L540)). `primes_post` then finds the thread joined and does not join it again.
+It does this because the application must not be closed while a thread may still post, and the posts not taken when it closes are dropped with their data, which nobody would free. Once the thread is joined no post is on its way: every post it made waits for a dispatch, so a dispatch that brings none means none is left. The program does not wait for the count's own post instead, because that post can fail (`ENOMEM`), and a wait for it would never end; a count whose post was lost is freed at the end ([lines 546-548](keiland-examples/08-worker.c#L546-L548)). `primes_post` then finds the thread joined and does not join it again.
 
 ### The rules
 
-- `kl_app_post(app, code, data)` and `kl_window_post(window, code, data)` may be called from any thread. Every other call stays on the application's thread: a worker computes and posts, and the application's thread draws ([lines 562-589](keiland-examples/08-worker.c#L562-L589)).
+- `kl_app_post(app, code, data)` and `kl_window_post(window, code, data)` may be called from any thread. Every other call stays on the application's thread: a worker computes and posts, and the application's thread draws ([lines 570-597](keiland-examples/08-worker.c#L570-L597)).
 - A post wakes `kl_app_dispatch` ([lines 156-166](keiland-examples/08-worker.c#L156-L166)).
 - A post to the window arrives among the window's inputs, as `KL_WINDOW_POST` with `input.code` and `input.data`. A post to the application arrives as `KL_APP_POST` with `event.code` and `event.data`, and so does a post to a window that closed first, with `window` `NULL` ([lines 345-372](keiland-examples/08-worker.c#L345-L372)). Use the window's post for news that belongs with that window's input, and the application's for the rest.
 - The posts of one thread arrive in the order they were made, and none is dropped: what the queue has no room for waits for the next dispatch. The posts of two threads have no order between them.
-- The data goes to whoever takes the event. libkeiland neither copies it nor frees it. A post that fails (`ENOMEM`, or `EINVAL` for a `NULL` application or window) did not take the data ([lines 569-574](keiland-examples/08-worker.c#L569-L574)).
-- End the threads that post before `kl_app_close`: join them, then take what they posted without waiting, and free what a failed post did not hand over. The posts not taken are dropped with their data ([lines 491-541](keiland-examples/08-worker.c#L491-L541)). Do not wait for a thread's last post to learn that it ended: the post can fail.
+- The data goes to whoever takes the event. libkeiland neither copies it nor frees it. A post that fails (`ENOMEM`, or `EINVAL` for a `NULL` application or window) did not take the data ([lines 577-582](keiland-examples/08-worker.c#L577-L582)).
+- End the threads that post before `kl_app_close`: join them, then take what they posted without waiting, and free what a failed post did not hand over. The posts not taken are dropped with their data ([lines 495-549](keiland-examples/08-worker.c#L495-L549)). Do not wait for a thread's last post to learn that it ended: the post can fail.
 - A thread that `kl_thread_start` returned is joined with `kl_thread_join`, or let go with `kl_thread_detach`, exactly once; the thread's function returns nothing, so its result goes back in a record or a post.
 - A value two threads use at once is atomic or under a mutex (`stop`, [lines 46-60](keiland-examples/08-worker.c#L46-L60)).
 
@@ -6237,7 +6245,6 @@ network_draw(
 	kl_ui_window_text(network->ui, network->window);
 }
 
-
 /*
  * Draws and shows a frame; nonzero when the frame cannot be shown.
  */
@@ -6349,12 +6356,18 @@ network_post(
 	/* The series handed back: its thread is ending, so it is joined (if network_finish has not), and only then is its waker closed. */
 	if (code == POST_FINISHED) {
 		exchange = data;
+
+		/* Joins the thread unless network_finish did. */
 		if (network->thread != NULL) {
 			(void)kl_thread_join(network->thread);
 			network->thread = NULL;
 		}
+
+		/* Closes the waker: nothing waits on it now. */
 		kl_socket_waker_close(exchange->waker);
 		network->done = exchange->done;
+
+		/* Shows how the series ended: all made, stopped, or failed. */
 		if (exchange->error == 0) {
 			snprintf(network->status, sizeof(network->status), "Done: %u round trips, %lu us each.", exchange->done, (unsigned long)(exchange->total_us / exchange->done));
 		} else if (exchange->error == ECANCELED) {
@@ -6362,6 +6375,8 @@ network_post(
 		} else {
 			snprintf(network->status, sizeof(network->status), "Failed after %u round trips (%s).", exchange->done, strerror(exchange->error));
 		}
+
+		/* The series is the program's again: frees it. */
 		free(exchange);
 		network->exchange = NULL;
 		network->dirty = 1;
@@ -6463,6 +6478,8 @@ network_finish(
 		status = kl_app_dispatch(network->app, 0);
 		if (status != 0)
 			break;
+
+		/* Acts on every post this dispatch brought, counting them. */
 		found = 0;
 		for (;;) {
 			taken = kl_app_take(network->app, &event);
@@ -6475,6 +6492,8 @@ network_finish(
 				network_post(network, event.code, event.data);
 			}
 		}
+
+		/* No post came: none is left. */
 		if (found == 0)
 			break;
 	}
@@ -6614,11 +6633,15 @@ network_join(
 			waits[count].events = KL_SOCKET_READABLE;
 			count++;
 		}
+
+		/* The connecting socket, until its connect has ended. */
 		if (!connected) {
 			waits[count].socket = client;
 			waits[count].events = KL_SOCKET_WRITABLE;
 			count++;
 		}
+
+		/* The waker, always. */
 		waits[count].waker = exchange->waker;
 		waits[count].events = KL_SOCKET_READABLE;
 		count++;
@@ -6844,6 +6867,8 @@ network_send_line(
 				return status;
 			continue;
 		}
+
+		/* Refuses to go on when the send failed. */
 		if (status != 0)
 			return status;
 		total += sent;
@@ -6920,7 +6945,7 @@ network_now_us(void)
 
 **The record ([lines 54-69](keiland-examples/08-network.c#L54-L69), `struct exchange`).** It is `struct count` of `08-worker.c` with the waker (`struct kl_socket_waker`) in it. The application's thread opens the waker before it starts the thread, and closes it after it joined the thread. The thread and the window share the waker and `stop`; everything else in the record is the thread's until `POST_FINISHED` gives it back.
 
-**Starting ([lines 466-514](keiland-examples/08-network.c#L466-L514), `network_start`).** The function opens the waker ([lines 488-494](keiland-examples/08-network.c#L488-L494)), then starts the thread named "network" ([lines 496-508](keiland-examples/08-network.c#L496-L508)). If the thread cannot start, the waker is closed again, since nobody else would close it:
+**Starting ([lines 473-521](keiland-examples/08-network.c#L473-L521), `network_start`).** The function opens the waker ([lines 495-501](keiland-examples/08-network.c#L495-L501)), then starts the thread named "network" ([lines 503-515](keiland-examples/08-network.c#L503-L515)). If the thread cannot start, the waker is closed again, since nobody else would close it:
 
 ```c
 status = kl_socket_waker_open(&exchange->waker);
@@ -6933,7 +6958,7 @@ if (status != 0) {
 }
 ```
 
-**Addresses and sockets ([lines 636-676](keiland-examples/08-network.c#L636-L676), `network_connect`).** A `struct kl_address` is a value: a family (`KL_ADDRESS_IPV4` or `KL_ADDRESS_IPV6`), a port in the host's byte order, and the address's bytes. `kl_address_loopback` makes the loopback address of a family; `kl_address_parse` reads one written in numbers ("192.0.2.1", "2001:db8::1"). Port 0 asks the system to choose one. `kl_socket_open` opens a socket of a family and a kind (`KL_SOCKET_STREAM` is TCP, `KL_SOCKET_DATAGRAM` is UDP); `KL_SOCKET_NONBLOCKING` makes calls that cannot go on return `EAGAIN` in place of waiting. The listening socket is bound to the loopback and told to listen; `kl_socket_local_address` then says which port it got ([lines 649-664](keiland-examples/08-network.c#L649-L664)):
+**Addresses and sockets ([lines 647-687](keiland-examples/08-network.c#L647-L687), `network_connect`).** A `struct kl_address` is a value: a family (`KL_ADDRESS_IPV4` or `KL_ADDRESS_IPV6`), a port in the host's byte order, and the address's bytes. `kl_address_loopback` makes the loopback address of a family; `kl_address_parse` reads one written in numbers ("192.0.2.1", "2001:db8::1"). Port 0 asks the system to choose one. `kl_socket_open` opens a socket of a family and a kind (`KL_SOCKET_STREAM` is TCP, `KL_SOCKET_DATAGRAM` is UDP); `KL_SOCKET_NONBLOCKING` makes calls that cannot go on return `EAGAIN` in place of waiting. The listening socket is bound to the loopback and told to listen; `kl_socket_local_address` then says which port it got ([lines 660-675](keiland-examples/08-network.c#L660-L675)):
 
 ```c
 kl_address_loopback(KL_ADDRESS_IPV4, 0, &address);
@@ -6948,7 +6973,7 @@ status = kl_socket_local_address(*listener, &address);
 
 Every call returns 0 or an `errno` value, and a socket that cannot go on without blocking returns `EAGAIN`, never `EWOULDBLOCK`.
 
-**A connect that does not wait ([lines 666-672](keiland-examples/08-network.c#L666-L672)).** The second socket connects to that address. A socket that does not block returns `EINPROGRESS`: the connection is on its way. The program waits for the socket to be writable, and only then asks how the connect ended with `kl_socket_connect_result` (0, or the reason it failed):
+**A connect that does not wait ([lines 677-683](keiland-examples/08-network.c#L677-L683)).** The second socket connects to that address. A socket that does not block returns `EINPROGRESS`: the connection is on its way. The program waits for the socket to be writable, and only then asks how the connect ended with `kl_socket_connect_result` (0, or the reason it failed):
 
 ```c
 status = kl_socket_connect(*client, &address);
@@ -6956,7 +6981,7 @@ if (status != 0 && status != EINPROGRESS)
 	return status;
 ```
 
-**Waiting for several sockets ([lines 678-750](keiland-examples/08-network.c#L678-L750), `network_join`).** `kl_socket_poll` takes an array of `struct kl_socket_wait`, each naming one socket or one waker and the `events` it waits for, and returns when one is ready or the time ran out. Here the thread waits for the listening socket to be readable (a connection can be accepted), the connecting socket to be writable (its connect ended), and the waker ([lines 704-719](keiland-examples/08-network.c#L704-L719)):
+**Waiting for several sockets ([lines 689-765](keiland-examples/08-network.c#L689-L765), `network_join`).** `kl_socket_poll` takes an array of `struct kl_socket_wait`, each naming one socket or one waker and the `events` it waits for, and returns when one is ready or the time ran out. Here the thread waits for the listening socket to be readable (a connection can be accepted), the connecting socket to be writable (its connect ended), and the waker ([lines 715-734](keiland-examples/08-network.c#L715-L734)):
 
 ```c
 waits[count].socket = listener;
@@ -6971,13 +6996,13 @@ waits[count].events = KL_SOCKET_READABLE;
 status = kl_socket_poll(waits, count, KL_SOCKET_FOREVER, &ready);
 ```
 
-Afterwards each wait's `ready` says what was found: `KL_SOCKET_READABLE` (bytes, the end of the stream, or a connection to accept), `KL_SOCKET_WRITABLE` (room to send, or a connect that ended) and `KL_SOCKET_FAILED` (the socket failed; the next call on it says why). The program takes what became ready ([lines 731-745](keiland-examples/08-network.c#L731-L745)): it accepts the connection, with `KL_SOCKET_NONBLOCKING` for the new socket, and reads the connect's end. `kl_socket_accept` can still return `EAGAIN` (a connection can go away before it is taken), and the loop then waits again.
+Afterwards each wait's `ready` says what was found: `KL_SOCKET_READABLE` (bytes, the end of the stream, or a connection to accept), `KL_SOCKET_WRITABLE` (room to send, or a connect that ended) and `KL_SOCKET_FAILED` (the socket failed; the next call on it says why). The program takes what became ready ([lines 746-760](keiland-examples/08-network.c#L746-L760)): it accepts the connection, with `KL_SOCKET_NONBLOCKING` for the new socket, and reads the connect's end. `kl_socket_accept` can still return `EAGAIN` (a connection can go away before it is taken), and the loop then waits again.
 
-**The pause and the waits of the round trips ([lines 850-913](keiland-examples/08-network.c#L850-L913), `network_pause` and `network_wait`).** Every wait of the thread has the waker among its waits, so Stop ends it whatever the thread is waiting for. The pause waits for the waker alone, with a time limit (`PAUSE_MS`): it returns when the time is out, or at once when Stop rang. `network_wait` waits for one socket and the waker.
+**The pause and the waits of the round trips ([lines 865-928](keiland-examples/08-network.c#L865-L928), `network_pause` and `network_wait`).** Every wait of the thread has the waker among its waits, so Stop ends it whatever the thread is waiting for. The pause waits for the waker alone, with a time limit (`PAUSE_MS`): it returns when the time is out, or at once when Stop rang. `network_wait` waits for one socket and the waker.
 
-**Sending and receiving ([lines 915-996](keiland-examples/08-network.c#L915-L996), `network_send_line` and `network_receive_line`).** A send may take fewer bytes than asked, and `*sent` says how many; the function sends the rest after the socket is writable again. A receive returns whatever has arrived, so the function receives until the newline. A receive of 0 bytes (with 0 returned) is not an empty message: it is the end of the stream, the peer having closed its side ([lines 981-983](keiland-examples/08-network.c#L981-L983)).
+**Sending and receiving ([lines 930-1013](keiland-examples/08-network.c#L930-L1013), `network_send_line` and `network_receive_line`).** A send may take fewer bytes than asked, and `*sent` says how many; the function sends the rest after the socket is writable again. A receive returns whatever has arrived, so the function receives until the newline. A receive of 0 bytes (with 0 returned) is not an empty message: it is the end of the stream, the peer having closed its side ([lines 998-1000](keiland-examples/08-network.c#L998-L1000)).
 
-**Stop ([lines 516-529](keiland-examples/08-network.c#L516-L529), `network_stop`, and [lines 726-729](keiland-examples/08-network.c#L726-L729)).** The window raises the flag and then rings the waker. A ring ends the wait of the `kl_socket_poll` the waker is among, or the next one the thread makes; rings that come before the wait returns count as one. The rule that makes this safe: the thread looks at the flag after the wait returned, never before it. The flag was raised before the ring, so whatever ring the wait saw, the flag is there to be read:
+**Stop ([lines 523-536](keiland-examples/08-network.c#L523-L536), `network_stop`, and [lines 741-744](keiland-examples/08-network.c#L741-L744)).** The window raises the flag and then rings the waker. A ring ends the wait of the `kl_socket_poll` the waker is among, or the next one the thread makes; rings that come before the wait returns count as one. The rule that makes this safe: the thread looks at the flag after the wait returned, never before it. The flag was raised before the ring, so whatever ring the wait saw, the flag is there to be read:
 
 ```c
 atomic_store(&network->exchange->stop, 1);
@@ -6993,37 +7018,39 @@ if (stop)
 	return ECANCELED;
 ```
 
-**The end ([lines 444-463](keiland-examples/08-network.c#L444-L463), `network_post`; [lines 617-623](keiland-examples/08-network.c#L617-L623), `network_run`).** The thread closes its three sockets before its last post: it is the only thread that used them. The application's thread joins the thread when it takes `POST_FINISHED`, and closes the waker only after that ([lines 447-451](keiland-examples/08-network.c#L447-L451)), because the thread may still be in a wait that uses it until it returned:
+**The end ([lines 443-470](keiland-examples/08-network.c#L443-L470), `network_post`; [lines 628-634](keiland-examples/08-network.c#L628-L634), `network_run`).** The thread closes its three sockets before its last post: it is the only thread that used them. The application's thread joins the thread when it takes `POST_FINISHED`, and closes the waker only after that ([lines 448-454](keiland-examples/08-network.c#L448-L454)), because the thread may still be in a wait that uses it until it returned:
 
 ```c
 if (network->thread != NULL) {
 	(void)kl_thread_join(network->thread);
 	network->thread = NULL;
 }
+
+/* Closes the waker: nothing waits on it now. */
 kl_socket_waker_close(exchange->waker);
 ```
 
-The end of the program (`network_finish`) is `primes_finish`'s: it rings the waker, joins the thread, and takes the posts left without waiting. A series whose post was lost is closed there, its waker after the join ([lines 578-582](keiland-examples/08-network.c#L578-L582)).
+The end of the program (`network_finish`) is `primes_finish`'s: it rings the waker, joins the thread, and takes the posts left without waiting. A series whose post was lost is closed there, its waker after the join ([lines 589-593](keiland-examples/08-network.c#L589-L593)).
 
 **Names.** The program connects to an address it made. A program that connects to a host by its name asks `kl_socket_resolve` for the addresses first. That call waits for the system's answer, which can take long, so it too is made on the network thread, never on the application's.
 
 #### The rules of the network
 
-- Wait for sockets on a thread of the program's own, never on the application's thread. The thread hands its results over with `kl_app_post`, and the application's thread draws them ([lines 628-631](keiland-examples/08-network.c#L628-L631)).
-- A thread that waits for a socket also waits for a waker, and the program ends the wait by ringing it. Raise the flag first and ring afterwards, and look at the flag after the wait returned ([lines 524-528](keiland-examples/08-network.c#L524-L528), [lines 726-729](keiland-examples/08-network.c#L726-L729)).
-- Close a waker after the thread that waits for it was joined ([lines 447-451](keiland-examples/08-network.c#L447-L451)). Close a socket on the thread that used it, once nobody waits for it, sends or receives on it.
+- Wait for sockets on a thread of the program's own, never on the application's thread. The thread hands its results over with `kl_app_post`, and the application's thread draws them ([lines 639-642](keiland-examples/08-network.c#L639-L642)).
+- A thread that waits for a socket also waits for a waker, and the program ends the wait by ringing it. Raise the flag first and ring afterwards, and look at the flag after the wait returned ([lines 531-535](keiland-examples/08-network.c#L531-L535), [lines 741-744](keiland-examples/08-network.c#L741-L744)).
+- Close a waker after the thread that waits for it was joined ([lines 448-454](keiland-examples/08-network.c#L448-L454)). Close a socket on the thread that used it, once nobody waits for it, sends or receives on it.
 - A socket that does not block returns `EAGAIN` when it cannot go on. Compare with `EAGAIN` only: `EWOULDBLOCK` is never returned.
-- `kl_socket_connect_result` is asked after the wait found the socket writable or failed ([lines 739-744](keiland-examples/08-network.c#L739-L744)).
+- `kl_socket_connect_result` is asked after the wait found the socket writable or failed ([lines 754-759](keiland-examples/08-network.c#L754-L759)).
 - `kl_socket_resolve` waits for the system's answer: call it from the network thread.
 - One thread uses a socket at a time. The one exception is one thread sending while another receives on the same socket.
-- Whatever is sent can arrive in pieces, and several sends can arrive as one receive: keep the bytes until the message is whole ([lines 966-991](keiland-examples/08-network.c#L966-L991)).
+- Whatever is sent can arrive in pieces, and several sends can arrive as one receive: keep the bytes until the message is whole ([lines 983-1008](keiland-examples/08-network.c#L983-L1008)).
 
 #### Pitfalls
 
 - Waiting for a socket on the application's thread: the window stops answering until the other side does.
 - Asking `kl_socket_connect_result` before the wait: the answer of a connect that has not ended yet cannot be told from a success.
 - Comparing the result with `EWOULDBLOCK`.
-- Taking a receive of 0 bytes for an empty message. On a stream it is the end: close the socket and stop receiving ([lines 981-983](keiland-examples/08-network.c#L981-L983)).
+- Taking a receive of 0 bytes for an empty message. On a stream it is the end: close the socket and stop receiving ([lines 998-1000](keiland-examples/08-network.c#L998-L1000)).
 - Closing the waker, or a socket another thread waits for, before the thread was joined.
 - Checking the flag before the wait, and not after: a Stop that comes while the thread waits is not seen until the wait ends by other means.
 - Using one socket from two threads for anything but sending on one and receiving on the other.
