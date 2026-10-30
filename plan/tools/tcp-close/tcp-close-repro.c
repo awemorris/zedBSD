@@ -1,4 +1,8 @@
-/* Loopback TCP pair, one line each way, then close in the order asked; prints each step. */
+/*
+ * Loopback TCP pair, one line each way, then close in the order asked; prints each step with the milliseconds since
+ * the start, so a close that waits shows in the next step's time.
+ *   tcp-close-repro [ORDER [NONBLOCKING]]   ORDER 0: the accepted end first, 1: the connected end first
+ */
 #include <arpa/inet.h>
 #include <errno.h>
 #include <fcntl.h>
@@ -8,7 +12,21 @@
 #include <stdlib.h>
 #include <string.h>
 #include <sys/socket.h>
+#include <time.h>
 #include <unistd.h>
+
+static struct timespec start;
+
+/* Prints a step and the milliseconds since the start. */
+static void
+step(const char *name)
+{
+	struct timespec now;
+
+	clock_gettime(CLOCK_MONOTONIC, &now);
+	printf("%s %ld ms\n", name, (long)((now.tv_sec - start.tv_sec) * 1000 + (now.tv_nsec - start.tv_nsec) / 1000000));
+	fflush(stdout);
+}
 
 int
 main(int argc, char **argv)
@@ -19,6 +37,7 @@ main(int argc, char **argv)
 	char buffer[16];
 	int listener, client, server, nonblocking, order;
 
+	clock_gettime(CLOCK_MONOTONIC, &start);
 	order = argc > 1 ? atoi(argv[1]) : 0;
 	nonblocking = argc > 2 ? atoi(argv[2]) : 1;
 	listener = socket(AF_INET, SOCK_STREAM, 0);
@@ -46,14 +65,16 @@ main(int argc, char **argv)
 	p.fd = client; p.events = POLLIN; poll(&p, 1, 2000);
 	printf("client read %zd\n", read(client, buffer, sizeof(buffer)));
 	fflush(stdout);
+	step("exchanged");
 	if (order == 0) {
-		printf("close server\n"); fflush(stdout); close(server);
-		printf("close client\n"); fflush(stdout); close(client);
+		step("close server"); close(server);
+		step("close client"); close(client);
 	} else {
-		printf("close client\n"); fflush(stdout); close(client);
-		printf("close server\n"); fflush(stdout); close(server);
+		step("close client"); close(client);
+		step("close server"); close(server);
 	}
-	printf("close listener\n"); fflush(stdout); close(listener);
+	step("close listener"); close(listener);
+	step("closed");
 	printf("done\n");
 	return 0;
 }
