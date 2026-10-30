@@ -268,6 +268,8 @@ struct layout_box {
 	int area_clamp_y;
 	int area_overflow;
 	int area_scrolls;
+	/* The inset-modified containing block the last placing used (left, right, top, bottom), which a fallback has to fit in. */
+	layout_unit imcb[4];
 	layout_unit area_clamp[4];
 	layout_unit area_bounds[4];
 

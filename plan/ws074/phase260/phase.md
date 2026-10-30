@@ -276,6 +276,40 @@ Origin: 2026-10-27 ユーザーの指示。
   - CSS Transitions・Animations・Web Animations が computed style を補間しない（flex-grow・flex-basis・order・grid-template-*・backdrop-filter の interpolation・composition、約 25）。prelude.js の `Animation` は時刻の管理だけ。
   - css-logical の shorthand（margin-inline など）を inline style の longhand に展開して直列化する（logical-box-margin・padding・inset・border-width・border-color が各 11 subtest）。position-try の last-successful の状態（約 10）。navigation-api の window.open・popup・複数 frame（約 80）。
 
+### q1727-i04 の途中経過（2026-10-31、P8）
+
+- 測定（gap は build/tmp/p8/gap44〜47.json、測定の出力は /tmp/p8out/devNN）:
+
+  | 測定 | 内容 | harness | static | scripted | crash | 計（3,472 のうち） |
+  | --- | --- | --- | --- | --- | --- | --- |
+  | dev44（4bd58180d） | 直交 flex item、position-try の last-successful・position-area のはみ出し | 1,045 | 1,164 | 263 | 41 | 2,513（72.38%） |
+  | dev45（3220b8c7c） | sideways-lr、table の direction:rtl | 1,047 | 1,193 | 264 | 41 | 2,544（73.27%） |
+  | dev46（9b45c337b） | thead/tfoot の順、position-area の直列化、anchor の scope・containing block の連鎖・logical 側・margin の anchor-size、IMCB での fit、offsetParent の transform | 1,059 | 1,204 | 265 | 41 | 2,569（73.99%） |
+  | dev47（2e179c668） | 縦の行の replaced を central baseline に、minmax の最小が最大より大きい track、image-set（ここまで） | 1,061 | 1,205 | 266 | 41 | 2,573（74.11%） |
+
+  dev43 → dev47 の差: 後退は static の css-writing-modes/table-column-order-slr-007 の 1 件だけ（sideways-lr で正しい配置になり、以前の合格は
+  縦書きの rtl の偶然の一致。この試験は rtl の中の数字の run を視覚順に並べ替える bidi が要る。engine には bidi が無い）。他の runner は後退 0。
+- 順の判断: gap の数が大きい物から直した。subgrid（約 60）は track の共有の設計が要るので後回し、直交 flex は layout_logical_wanted を
+  flex の item にも使う（直交の item は fit-content の inline size、column の stretch、self-start/self-end、table の最小幅）で +6、
+  flexbox-writing-mode-009〜016（縦の flex container + 横の item）は container が物理座標で layout される経路で未対応。
+- 直した物:
+  1. sideways-lr（layout/logical.c）: vertical-lr の領域で inline の軸を反転する mode（`LOGICAL_SIDEWAYS_LR`）。logical の左＝物理の下。unflip で box の y を
+     親の inline の大きさから反転、行は `vertical_inline = 2`。描画は paint/list.c で反時計回りの glyph（paint_item.vertical = 2、software.c と GPU の shader に
+     kind 4 を足して paint/shaders.h を再生成）。css-writing-modes の slr 系 +25、wm-propagation-body-* 8 件（縦の行の replaced は central baseline、sideways は alphabetic で行の下から上へ）。
+  2. table（layout/table.c）: `direction: rtl` の列を右から、thead の行を先頭・tfoot を末尾（row-progression 系 3 件）。
+  3. position-try（layout/position.c）: 最後に fit した fallback を要素に覚え（`dom_element.anchor_last`、fallbacks の一覧が変わると忘れる）、どれも fit しない時はそれを使う。
+     position-area の normal の揃えではみ出した box は containing block の中へ戻す（scroll container の中は戻さない）。fallback が fit する範囲は inset を引いた
+     containing block（IMCB）。getComputedStyle の offsetParent は transform を持つ祖先も数える。
+  4. anchor（layout/anchor.c、css/anchor.c）: anchor-scope（同じ scope の中だけで anchor が見える）、anchor の containing block の連鎖の最後が abspos で後ろにある時は取らない、
+     anchor() の start/end/% と anchor-size() の block/inline を containing block の writing mode と direction で、margin の anchor-size()、閉じ括弧の無い関数、
+     position-area の setter の直列化（宣言の形を保つ）。rtl の block の max-content は左 margin の余りを数えない。
+  5. grid: repeat(auto-fill, minmax(30px, 6.5%)) のように最大が最小より小さい track は最小を使う。
+  6. image-set()（background-image の最初の候補とその解像度）、zoom を背景画像の固有の大きさに掛ける。
+- 調べて直さなかった物: position-try-order（most-width 等）・@position-try の CSSOM（CSSPositionTryRule の class と insertRule）・var() を持つ try rule、
+  navigation-api の initial about:blank（prelude の `initialBlank()` が iframe の作成中は parent を持たず常に false。直すと activation 等が使う経路に入るが、
+  iframe の onload が出ず no_output になる試験が残り、得は無かったので戻した）、table-cell を writing-mode の root にする試験（srl-057 など 4 件）、
+  shape-outside（engine に無い。css-shapes の選定 16 件は全部 sideways の変種で、clip-path も要る）、bidi。
+
 再開点（2026-10-31、q1727-i01 の停止）:
 - 最後の全件の測定は ours-dev28（source 5b032c17b、`build/ws074-cmp/ours-dev28` の harness・scripted・crash と、static は `static-subset.py` の全件の再実行）。2,386 / 3,472 = 68.72%、
   4 runner とも dev25/26 の PASS に対する後退 0。その後に commit は無い（この記録の commit だけ）。Acid3 100/100・pixel 差 0、Acid2 99.27%（基準と同じ）。

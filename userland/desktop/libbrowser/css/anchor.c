@@ -396,10 +396,11 @@ anchor_function(
 			return error;
 	}
 
-	/* The closing parenthesis. */
-	if (!anchor_at_close(reader))
+	/* The closing parenthesis (the end of the value closes it too). */
+	if (!anchor_at_close(reader) && reader->at < reader->count)
 		return EINVAL;
-	reader->at++;
+	if (reader->at < reader->count)
+		reader->at++;
 
 	/* Succeeded: one anchor function. */
 	return 0;
@@ -703,7 +704,7 @@ css_position_area_parse(
 	return 0;
 }
 
-/* Writes a position-area value in its canonical form. */
+/* Writes a position-area value as it is computed: the logical keywords in their short forms. */
 int
 css_position_area_serialize(
 	int packed,
@@ -767,6 +768,68 @@ css_position_area_serialize(
 	b = second->brief != NULL ? second->brief : second->name;
 	if (first->brief != NULL && second->axis == ANCHOR_AREA_CENTER)
 		a = first->brief;
+	if (strcmp(a, b) == 0)
+		return anchor_area_append(out, a);
+	if (anchor_area_append(out, a) != 0 || anchor_area_append(out, " ") != 0)
+		return ENOMEM;
+	return anchor_area_append(out, b);
+
+both:
+	/* The two as they are. */
+	if (anchor_area_append(out, first->name) != 0 || anchor_area_append(out, " ") != 0)
+		return ENOMEM;
+	return anchor_area_append(out, second->name);
+}
+
+/* Writes a position-area value as a declaration sets it: the keywords as given, in their canonical order. */
+int
+css_position_area_serialize_declared(
+	int packed,
+	struct wb_units *out)
+{
+	const struct anchor_area_keyword *first;
+	const struct anchor_area_keyword *second;
+	const struct anchor_area_keyword *swap;
+	const char *a;
+	const char *b;
+
+	/* none, and one keyword. */
+	if (packed < 0)
+		return anchor_area_append(out, "none");
+	first = &anchor_area_keywords[packed % 256];
+	if (packed / 256 == 0)
+		return anchor_area_append(out, first->name);
+	second = &anchor_area_keywords[packed / 256 - 1];
+
+	/* The same keyword twice is one, as are center center and span-all span-all. */
+	if (first == second)
+		return anchor_area_append(out, first->name);
+	if ((first->axis == ANCHOR_AREA_CENTER || first->axis == ANCHOR_AREA_ALL) &&
+	    (second->axis == ANCHOR_AREA_CENTER || second->axis == ANCHOR_AREA_ALL))
+		goto both;
+
+	/* The generic keywords stay as they are, whatever they are paired with. */
+	if (first->axis == ANCHOR_AREA_GENERIC || first->axis == ANCHOR_AREA_SELF_GENERIC ||
+	    second->axis == ANCHOR_AREA_GENERIC || second->axis == ANCHOR_AREA_SELF_GENERIC) {
+		goto both;
+	}
+
+	/* span-all leaves the other keyword alone. */
+	if (first->axis == ANCHOR_AREA_ALL)
+		return anchor_area_append(out, second->name);
+	if (second->axis == ANCHOR_AREA_ALL)
+		return anchor_area_append(out, first->name);
+
+	/* Horizontal before vertical, block before inline (the logical ones in their short forms), center in the missing place. */
+	if (first->axis == ANCHOR_AREA_Y || first->axis == ANCHOR_AREA_INLINE || first->axis == ANCHOR_AREA_SELF_INLINE ||
+	    (first->axis == ANCHOR_AREA_CENTER && (second->axis == ANCHOR_AREA_X || second->axis == ANCHOR_AREA_BLOCK ||
+	    second->axis == ANCHOR_AREA_SELF_BLOCK))) {
+		swap = first;
+		first = second;
+		second = swap;
+	}
+	a = first->name;
+	b = second->name;
 	if (strcmp(a, b) == 0)
 		return anchor_area_append(out, a);
 	if (anchor_area_append(out, a) != 0 || anchor_area_append(out, " ") != 0)
@@ -1236,6 +1299,7 @@ css_anchor_canonical(
 	int shorthand;
 	int fallbacks;
 	int visibility;
+	int area;
 	int order;
 	int error;
 
@@ -1244,7 +1308,8 @@ css_anchor_canonical(
 	shorthand = vm_string_equal_ascii(name, "position-try");
 	fallbacks = vm_string_equal_ascii(name, "position-try-fallbacks");
 	visibility = vm_string_equal_ascii(name, "position-visibility");
-	if (!shorthand && !fallbacks && !visibility)
+	area = vm_string_equal_ascii(name, "position-area");
+	if (!shorthand && !fallbacks && !visibility && !area)
 		return 0;
 
 	/* The value's tokens. */
@@ -1259,6 +1324,15 @@ css_anchor_canonical(
 		count--;
 	parse.heap = heap;
 	parse.arena = &arena;
+
+	/* position-area. */
+	if (area) {
+		if (css_position_area_parse(tokens, count, &order) == 0) {
+			error = css_position_area_serialize_declared(order, out);
+			*handled = error == 0;
+		}
+		goto cleanup;
+	}
 
 	/* position-visibility. */
 	if (visibility) {

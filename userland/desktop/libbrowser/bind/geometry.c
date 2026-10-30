@@ -1541,8 +1541,13 @@ geometry_position(
 	if (style == NULL)
 		return ENOMEM;
 	error = window->host.computed_style(window->host.context, element, style);
-	if (error == 0)
+	if (error == 0) {
 		*position = style->position;
+
+		/* A transformed element is the containing block of what is positioned inside it: as good as positioned here. */
+		if (*position == CSS_POSITION_STATIC && style->transform_set)
+			*position = CSS_POSITION_RELATIVE;
+	}
 	free(style);
 
 	/* An element outside the document is static. */

@@ -1228,7 +1228,8 @@ inline_finish_line(
 			 * the one that aligns: a replaced box is centered on the strut's middle.
 			 */
 			if (box->physical_style != NULL && box->physical_style->writing_mode != CSS_WRITING_HORIZONTAL_TB &&
-			    box->physical_style->writing_sideways == 0 && !pieces[index].box->has_baseline) {
+			    box->physical_style->writing_sideways == 0 && !pieces[index].box->has_baseline &&
+			    pieces[index].box->kind == LAYOUT_REPLACED && pieces[index].box->control == DOM_CONTROL_NONE) {
 				layout_unit whole;
 
 				whole = fragment->ascent + fragment->descent;

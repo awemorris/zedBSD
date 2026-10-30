@@ -1025,6 +1025,7 @@ static size_t values_function_length(const struct css_token *tokens, size_t coun
 static int values_filter_argument(const struct css_token *token, int kind, struct css_value *amount);
 static int values_filters(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_url(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
+static int values_image_set(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_view_transition_class(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation_single(struct css_parse *parse, int property, const struct css_token *tokens, size_t count, struct css_value *value);
 static int values_animation(struct css_parse *parse, const struct css_token *tokens, size_t count, struct css_declaration *out, size_t *made);
@@ -2016,9 +2017,10 @@ values_single(
 
 	/* An inset or a size with anchor functions is kept as a sum the layout finishes. */
 	if (((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
-	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT)) && css_anchor_mentioned(tokens, count)) {
-		error = css_anchor_parse(parse, tokens, count, property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT,
-		    &value->anchor);
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+	    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT)) && css_anchor_mentioned(tokens, count)) {
+		error = css_anchor_parse(parse, tokens, count, property != CSS_PROP_TOP && property != CSS_PROP_RIGHT &&
+		    property != CSS_PROP_BOTTOM && property != CSS_PROP_LEFT, &value->anchor);
 		if (error != 0)
 			return error;
 		value->kind = CSS_VALUE_ANCHOR;
@@ -2238,6 +2240,10 @@ values_single(
 			value->kind = CSS_VALUE_GRADIENT;
 			return 0;
 		}
+
+		/* image-set(): the first image with its resolution. */
+		if (count > 0 && tokens[0].type == CSS_TOKEN_FUNCTION && css_ident_equal(&tokens[0], "image-set"))
+			return values_image_set(parse, tokens, count, value);
 
 		/* Parse the selected component with its established native grammar. */
 		error = values_url(parse, tokens, count, value);
@@ -4170,6 +4176,65 @@ values_view_transition_class(
 	}
 	wb_units_release(&joined);
 	return error;
+}
+
+/*
+ * Parses image-set(url("..") 2x, ...) into the URL of its first image and that image's resolution
+ * (the number of the value: image pixels per CSS pixel).
+ */
+static int
+values_image_set(
+	struct css_parse *parse,
+	const struct css_token *tokens,
+	size_t count,
+	struct css_value *value)
+{
+	size_t index;
+	size_t end;
+	size_t unit;
+	float density;
+	int error;
+
+	/* The first candidate: skips the function and its whitespace; a url token, or url( string ). */
+	memset(value, 0, sizeof(*value));
+	index = 1;
+	while (index < count && tokens[index].type == CSS_TOKEN_WHITESPACE)
+		index++;
+	if (index >= count)
+		return EINVAL;
+	end = index + 1;
+	if (tokens[index].type == CSS_TOKEN_FUNCTION) {
+		while (end < count && tokens[end].type != CSS_TOKEN_CLOSE_PAREN)
+			end++;
+		if (end >= count)
+			return EINVAL;
+		end++;
+	} else if (tokens[index].type != CSS_TOKEN_STRING && tokens[index].type != CSS_TOKEN_URL) {
+		return EINVAL;
+	}
+	if (tokens[index].type == CSS_TOKEN_STRING) {
+		value->url = vm_atom_from_units(parse->heap, tokens[index].text, tokens[index].length);
+		if (value->url == NULL)
+			return ENOMEM;
+		value->kind = CSS_VALUE_URL;
+	} else {
+		error = values_url(parse, tokens + index, end - index, value);
+		if (error != 0)
+			return error;
+	}
+
+	/* Its resolution: a number and x (or dppx), 1x when none is given. */
+	density = 1.0f;
+	unit = end;
+	while (unit < count && tokens[unit].type == CSS_TOKEN_WHITESPACE)
+		unit++;
+	if (unit < count && tokens[unit].type == CSS_TOKEN_DIMENSION &&
+	    (css_ident_equal(&tokens[unit], "x") || css_ident_equal(&tokens[unit], "dppx")))
+		density = (float)tokens[unit].number;
+	if (density <= 0.0f)
+		density = 1.0f;
+	value->number = density;
+	return 0;
 }
 
 /*
