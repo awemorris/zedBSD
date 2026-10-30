@@ -140,6 +140,11 @@ scenario overlap 30 --bytes 33554432 --overlap-ab 5
 scenario overlap-wrap 30 --bytes 16777216 --overlap-ab 5 --wrap-before 4194304 --limit-s 120
 # ws220-p002: a blind reset within the window, one outside it and a SYN, 100 ms in: none ends the connection.
 scenario blind-segments 30 --bytes 33554432 --blind-at-ms 100
+# The close in each order after a transfer, B's listener left open: closed first, B's accepted end is freed once its FIN
+# is taken, and A's FIN then reaches the listener, which answers it with a reset (before, it was dropped and A's close
+# waited the drain's 10 s).  Neither end's close may wait more than a second.
+scenario close-b-first 1 --bytes 1048576 --close-first b
+scenario close-a-first 1 --bytes 1048576 --close-first a
 # ws220-p003: a device queue shorter than the send ring (8): what the device refuses waits unsent, in order, and goes on the
 # pass its transmit completion runs, instead of its writer sleeping 10 ms (before p003: 0.68, 0.49, 0.20, 0.10 MB/s).
 scenario queue-7 30 --bytes 67108864 --queue 7
