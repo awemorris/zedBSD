@@ -81,7 +81,7 @@ Errors:
 - `EOVERFLOW`: the device already has the largest possible number of live exports.
 - `EMFILE`: the process has no free descriptor number below its limit.
 - `ESRCH`: the calling thread has no process descriptor table.
-- Other values: the driver's export operation returns its own errno unchanged, and so does the descriptor table when it cannot reserve or install the number. In-tree drivers return `EOPNOTSUPP` for a blob that was not created with `GPU_BLOB_SHAREABLE`, `EOPNOTSUPP` for an image smaller than 16 or larger than 4096 pixels on a side (one driver), `EINVAL` for a resource that is not a blob or for a second image that differs from the first, and `ENODEV` when the driver's transport has failed.
+- Other values: the driver's export operation returns its own errno unchanged, and so does the descriptor table when it cannot reserve or install the number. The Venus driver returns `EOPNOTSUPP` for a blob that was not created with `GPU_BLOB_SHAREABLE`, for a blob created without `GPU_BLOB_CROSS_DEVICE` when its host does not report that it scans out, and for an image smaller than 16 or larger than 4096 pixels on a side; `EINVAL` for a second image that differs from the first; and `ENODEV` when its transport has failed. The BCM2711 render node returns `ENOTSUP` and the BCM2711 display node `EINVAL` for a blob that was not created with `GPU_BLOB_SHAREABLE`; the other in-tree drivers do not read the flag. The amdrdna and nvrtx drivers return `EINVAL` for a resource that is not a blob.
 
 Sources: [gpu.h](../../include/uapi/gpu.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_export_ioctl`, `gpu_image_validate`, `gpu_export_install`, `gpu_shared_hold_device`, `gpu_shared_release`), [display-scanout](../../userland/tests/display-scanout/main.c), [gpu-check.c](../../userland/tests/amdrdnactl/gpu-check.c).
 
@@ -143,7 +143,7 @@ Errors:
 - `EOVERFLOW`: the device already has the largest possible number of live exports.
 - `EMFILE`: the process has no free descriptor number below its limit.
 - `ESRCH`: the calling thread has no process descriptor table.
-- Other values: the driver's export operation returns its own errno unchanged, and so does the descriptor table when it cannot reserve or install the number. In-tree drivers return `EOPNOTSUPP` for a blob that was not created with `GPU_BLOB_SHAREABLE` and `EINVAL` for a resource that is not a blob.
+- Other values: the driver's export operation returns its own errno unchanged, and so does the descriptor table when it cannot reserve or install the number. For a blob that was not created with `GPU_BLOB_SHAREABLE` the Venus driver returns `EOPNOTSUPP`, the BCM2711 render node `ENOTSUP` and the BCM2711 display node `EINVAL`; the other in-tree drivers do not read the flag. The nvrtx driver returns `EINVAL` for a resource that is not a blob, and the Venus driver `ENODEV` when its transport has failed.
 
 Sources: [gpu-allocation.h](../../include/uapi/gpu-allocation.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_allocation_export_ioctl`, `gpu_allocation_validate`, `gpu_export_install`, `gpu_shared_hold_device`), no source-tree test.
 

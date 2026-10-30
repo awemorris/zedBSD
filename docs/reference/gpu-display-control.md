@@ -14,7 +14,7 @@ A refresh boundary is the instant at which an output starts a new refresh. `GPU_
 
 There are two kinds of boundary. On an output that scans out to a monitor, a boundary is a frame of the display controller (amdrdna, i915 and nvrtx read the frame counter of the controller's timing generator). An output with `GPU_DISPLAY_VIRTUAL_CLOCK` (venus) has no scanout of its own: its boundaries are the ticks of a clock the driver keeps at the output's refresh rate, and the reply says so with `GPU_DISPLAY_VIRTUAL_CLOCK` in `flags`. The reply's `flags` is zero for the other kind. In both kinds `time_ns` is on the monotonic scheduler clock of the kernel, which advances in steps of 1 ms, and the drivers read the count at least once a tick.
 
-An output that does not scan out makes no boundary. A wait for a boundary after a nonzero `cursor` on such an output ends with `ETIMEDOUT` when its time runs out, and so does a wait with a timeout of zero when no boundary has come after `cursor`. Which outputs do not scan out depends on the driver: an output the lease holder has powered off with `GPU_DISPLAY_POWER` makes none on amdrdna and venus, and i915 lights only one output, so its other connectors make none. A call with a `cursor` of zero never waits; it reports the count at that moment, which can be zero when nothing has been counted yet.
+An output that does not scan out makes no boundary. A wait for a boundary after a nonzero `cursor` on such an output ends with `ETIMEDOUT` when its time runs out, and so does a wait with a timeout of zero when no boundary has come after `cursor`. Which outputs do not scan out depends on the driver: an output the lease holder has powered off with `GPU_DISPLAY_POWER` makes none on amdrdna and venus, a venus output that shows no image makes none, and i915 counts boundaries only on its resident output, so its other connectors make none, even a second output that is lit. A call with a `cursor` of zero never waits; it reports the count at that moment, which can be zero when nothing has been counted yet.
 
 Other changes are tied to a boundary. A change of the cursor (`GPU_DISPLAY_CURSOR_SET`, `GPU_DISPLAY_CURSOR_MOVE`, `GPU_DISPLAY_CURSOR_HIDE`) shows from the next boundary, and the call does not wait for it. The planes of a `GPU_DISPLAY_COMMIT` show together, from one boundary. `GPU_DISPLAY_WAIT`, and a commit with `GPU_DISPLAY_COMMIT_WAIT`, report when a record has been taken by a boundary (see [gpu-display.md](gpu-display.md)).
 
@@ -54,7 +54,7 @@ Switches the output the open leases on or off. `display_id` and `generation` nam
 
 What off does depends on the driver. amdrdna blanks the plane, so the output shows black, venus disables the output's scanout and keeps its images, and i915 switches off the light of an eDP panel. On amdrdna and venus an output that is off makes no refresh boundary (see Refresh boundaries). The output reports it with `GPU_DISPLAY_POWERED_OFF` in the `flags` of `GPU_DISPLAY_QUERY`. Asking for the state the output already has succeeds. The end of the lease powers the output on again. A power change is not a topology change: the output's `generation` stays the same and no display event is raised.
 
-The request needs the node-wide `GPU_CAP_DISPLAY_CONTROL`, but it works only on an output with `GPU_DISPLAY_POWER_CONTROL`. For an output without it the driver answers `EOPNOTSUPP`: nvrtx answers so for its output after it has checked the display, the generation and the lease, and i915 answers so for its resident output unless that is an eDP panel, before it checks the lease.
+The request needs the node-wide `GPU_CAP_DISPLAY_CONTROL`, but it works only on an output with `GPU_DISPLAY_POWER_CONTROL`. For an output without it the driver answers `EOPNOTSUPP`: nvrtx answers so for its output after it has checked the display, the generation and the lease, and i915 answers so for its resident output unless that is an eDP panel, and for a second output it lights, before it checks the lease.
 
 Errors:
 
@@ -96,7 +96,7 @@ Sets the image of the cursor of the output the open leases. `lease` is the lease
 
 The driver copies the image before the call returns, so the storage is not borrowed afterwards and the program may write it at once. A driver may skip the copy when it holds the same rows from storage that has not changed since, and it always copies storage that a process maps. A cursor that is shown shows the new image from the next refresh boundary; a cursor that is hidden stays hidden until `GPU_DISPLAY_CURSOR_MOVE`. The image is kept until the lease ends or a new one is set.
 
-The request needs an output with a cursor plane (`GPU_DISPLAY_HAS_CURSOR`). On a node whose driver has no cursor operations it fails with `EOPNOTSUPP`. A driver may have the operations and still answer `EOPNOTSUPP` for an output without the plane (nvrtx does when its cursor channel was not set up). The three cursor requests run outside the open's admission on a node with ungated display and under it on the others (see [gpu.md](gpu.md)).
+The request needs an output with a cursor plane (`GPU_DISPLAY_HAS_CURSOR`). On a node whose driver has no cursor operations it fails with `EOPNOTSUPP`. A driver may have the operations and still answer `EOPNOTSUPP` for an output without the plane (nvrtx does when its cursor channel was not set up, and powervr when it does not count the controller's frames). The three cursor requests run outside the open's admission on a node with ungated display and under it on the others (see [gpu.md](gpu.md)).
 
 The request can fail with `EBUSY` for a moment even for the open's own lease: when every cursor image the hardware has is still named by a display list it has not yet left, and none holds the same rows, nothing changes and the call may succeed a refresh later (ghci, bcm2711 and nvrtx).
 
@@ -106,9 +106,9 @@ Errors:
 - `EACCES`: The open cannot write.
 - `EFAULT`: The argument cannot be read.
 - `EINVAL`: `version` or `size` is not the structure's; `lease` or `generation` is zero; `reserved` is not zero; `width` or `height` is zero or above `GPU_DISPLAY_CURSOR_MAX`; `format` is not a defined value; `stride` is smaller than `width` times 4 or not a multiple of 4; `handle` is zero, unknown or of a kind that cannot hold a frame; `offset` or the rows lie outside the storage.
-- `ENODEV`: The device is offline (withdrawn), or the device or the open has failed.
+- `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (on a node without ungated display).
-- Other values: Driver answers pass through. `EBUSY` for a lease that is not this open's or that has ended, or for the moment described above, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane, `EINVAL` for an image the plane cannot take, `ENOMEM` when the driver cannot allocate the cursor surfaces and `EIO` for a display that is broken.
+- Other values: Driver answers pass through. `EBUSY` for a lease that is not this open's or that has ended, or for the moment described above, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane, `EINVAL` for an image the plane cannot take, `ENOMEM` when the driver cannot allocate the cursor surfaces and `EIO` for a display that is broken. The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_cursor_resource`, `gpu_display_ungated`), [display-device.c](../../src/drivers/gpu/bcm2711/display/display-device.c) (`output_cursor_set`), [display.c](../../src/drivers/gpu/ghci/display.c) (`display_cursor_set`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -126,9 +126,9 @@ Errors:
 - `EACCES`: The open cannot write.
 - `EFAULT`: The argument cannot be read.
 - `EINVAL`: `version` or `size` is not the structure's; `lease` or `generation` is zero; `reserved` is not zero.
-- `ENODEV`: The device is offline (withdrawn), or the device or the open has failed.
+- `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (on a node without ungated display).
-- Other values: Driver answers pass through. `EINVAL` when the lease has set no image, `EBUSY` for a lease that is not this open's or that has ended, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane and `EIO` for a display that is broken.
+- Other values: Driver answers pass through. `EINVAL` when the lease has set no image, `EBUSY` for a lease that is not this open's or that has ended, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane and `EIO` for a display that is broken. The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_ungated`), [display-device.c](../../src/drivers/gpu/bcm2711/display/display-device.c) (`output_cursor_move`), [present.c](../../src/drivers/gpu/amdrdna/present.c) (`present_cursor_move`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -144,9 +144,9 @@ Errors:
 - `EACCES`: The open cannot write.
 - `EFAULT`: The argument cannot be read.
 - `EINVAL`: `version` or `size` is not the structure's; `lease` or `generation` is zero; `reserved` is not zero.
-- `ENODEV`: The device is offline (withdrawn), or the device or the open has failed.
+- `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (on a node without ungated display).
-- Other values: Driver answers pass through. `EBUSY` for a lease that is not this open's or that has ended, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane and `EIO` for a display that is broken.
+- Other values: Driver answers pass through. `EBUSY` for a lease that is not this open's or that has ended, `ESTALE` for an old `generation`, `ENXIO` for an output that is not connected, `EOPNOTSUPP` for an output without a cursor plane and `EIO` for a display that is broken. The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_ungated`), [display-device.c](../../src/drivers/gpu/bcm2711/display/display-device.c) (`output_cursor_hide`), [present.c](../../src/drivers/gpu/amdrdna/present.c) (`present_cursor_hide`), [display-scanout](../../userland/tests/display-scanout/main.c).
 
@@ -163,15 +163,15 @@ Errors:
 - `EOPNOTSUPP`: The node does not have `GPU_CAP_DISPLAY`; its driver has no commit operation; or the commit names a fence (a `wait_fd` or the `signal_fd`) and the node does not have `GPU_CAP_FENCE`.
 - `EACCES`: The open cannot write.
 - `EFAULT`: The argument cannot be read or written (the planes are already recorded if the reply cannot be written).
-- `EINVAL`: `version` or `size` is not the structure's; `lease` or `generation` is zero; `reserved0`, `reserved`, `sequence` or `adopted` is not zero; `flags` has a bit other than `GPU_DISPLAY_COMMIT_WAIT`; `count` is zero or above 5; `signal_fd` is below -1, or is -1 with a nonzero `signal_generation`, or is a descriptor with a zero `signal_generation` or without `GPU_DISPLAY_COMMIT_WAIT`; `GPU_DISPLAY_COMMIT_WAIT` without the primary plane among the states; a plane named twice; a plane above `GPU_DISPLAY_OVERLAY_MAX`; `flags` of a state with a bit other than `GPU_DISPLAY_PLANE_SHOWN` and `GPU_DISPLAY_PLANE_IMAGE`; `result` nonzero or `serial` zero; `wait_fd` below -1, or -1 with a nonzero `wait_generation`, or a descriptor with a zero `wait_generation`; a shown plane with a zero source or destination size, or a destination that overflows; a state without `GPU_DISPLAY_PLANE_IMAGE` with a nonzero `handle` or a `wait_fd` other than -1; a new image with a zero `handle`, `width` or `height`, a `format` that is not a defined value, a `stride` below `width` times 4 or not a multiple of 4, or a source rectangle outside the image; an entry from `count` on that is not zero (or whose `wait_fd` is not -1); a `handle` that is unknown, or of ordinary storage; `offset` or `stride` times `height` outside the allocation; a `wait_fd` or the `signal_fd` that is a driver object but not a GPU fence.
+- `EINVAL`: `version` or `size` is not the structure's; `lease` or `generation` is zero; `reserved0`, `reserved`, `sequence` or `adopted` is not zero; `flags` has a bit other than `GPU_DISPLAY_COMMIT_WAIT`; `count` is zero or above 5; `signal_fd` is below -1, or is -1 with a nonzero `signal_generation`, or is a descriptor with a zero `signal_generation` or without `GPU_DISPLAY_COMMIT_WAIT`; `GPU_DISPLAY_COMMIT_WAIT` without the primary plane among the states; a plane named twice; a plane above `GPU_DISPLAY_OVERLAY_MAX`; `flags` of a state with a bit other than `GPU_DISPLAY_PLANE_SHOWN` and `GPU_DISPLAY_PLANE_IMAGE`; `result` nonzero or `serial` zero; `wait_fd` below -1, or -1 with a nonzero `wait_generation`, or a descriptor with a zero `wait_generation`; a shown plane with a zero source or destination size, or a destination that overflows; a state without `GPU_DISPLAY_PLANE_IMAGE` with a nonzero `handle` or a `wait_fd` other than -1; a new image with a zero `handle`, `width` or `height`, a `format` that is not a defined value, a `stride` below `width` times 4 or not a multiple of 4, or a source rectangle outside the image; an entry from `count` on whose `plane`, `flags`, `handle` or `result` is not zero or whose `wait_fd` is not -1; a `handle` that is unknown, or of ordinary storage; `offset` or `stride` times `height` outside the allocation; a `wait_fd` or the `signal_fd` that is a driver object but not a GPU fence.
 - `EBADF`: A `wait_fd` or the `signal_fd` is not an open descriptor of a driver object.
 - `EXDEV`: The `signal_fd` is a fence of another device.
 - `EAGAIN`: A `wait_fd` names a generation whose work the driver has not yet taken, or the open has no free place to bind the `signal_fd`.
 - `EBUSY`: The generation named by `signal_fd` is not pending or already has a producer.
 - `ESTALE`: A fence generation is not the current one.
 - `EINTR`: A signal arrived while the call waited for a `wait_fd`.
-- `ENODEV`: The device is offline (withdrawn), or the device or the open has failed.
-- Other values: Driver answers pass through, and so do the errors of the fences. `EBUSY` (from the driver) for a lease that is not this open's or that has ended (also while the call waits), after a `ETIMEDOUT` of the lease, and for a moment when the driver has no room for the images a commit replaces; `ESTALE` for an old `generation`; `ENOSPC` when the planes would exceed the output's bandwidth or the overlays' limits, with nothing changed; `ETIMEDOUT` when the adoption did not come; `EINVAL` for a state the output cannot show, such as an image of another layout than the allocation was imported with or a plane the output does not have; `EIO` for a display that is broken; a fence that ended in error fails the call with that error.
+- `ENODEV`: The device is offline (withdrawn); with a `signal_fd`, also when the device has a recorded error.
+- Other values: Driver answers pass through, and so do the errors of the fences. `EBUSY` (from the driver) for a lease that is not this open's or that has ended (also while the call waits), after a `ETIMEDOUT` of the lease, and for a moment when the driver has no room for the images a commit replaces; `ESTALE` for an old `generation`; `ENOSPC` when the planes would exceed the output's bandwidth or the overlays' limits, with nothing changed; `ETIMEDOUT` when the adoption did not come; `EINVAL` for a state the output cannot show, such as an image of another layout than the allocation was imported with or a plane the output does not have; `EIO` for a display that is broken; `ENODEV` for a display the driver has detached; `EFAULT` when the driver cannot reach a cached image to clean it (bcm2711); a fence that ended in error fails the call with that error. The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_commit_ioctl`, `gpu_commit_check`, `gpu_commit_plane_check`, `gpu_commit_record`), [display-device.c](../../src/drivers/gpu/bcm2711/display/display-device.c) (`output_commit`, `commit_change`, `output_adoption_wait`), [display-flip.c](../../src/drivers/gpu/bcm2711/display/display-flip.c) (`bcm2711_display_flip_commit`, `bcm2711_display_flip_wait`), [hvs-load](../../userland/tests/hvs-load/main.c).
 
@@ -189,9 +189,9 @@ Errors:
 - `EACCES`: The open cannot read.
 - `EFAULT`: The argument cannot be read or written.
 - `EINVAL`: `version` or `size` is not the structure's; `display_id` or `generation` is zero; `plane` is 0 or above `GPU_DISPLAY_OVERLAY_MAX`; an output field or `reserved` is not zero.
-- `ENODEV`: The device is offline (withdrawn), or the device or the open has failed.
+- `ENODEV`: The device is offline (withdrawn).
 - `EINTR`: A signal arrived while the request waited for the open's admission (on a node without ungated display, before it answers `EOPNOTSUPP`).
-- Other values: Driver answers pass through. `ESTALE` for an old `generation`, `ENXIO` for an output the node does not have (bcm2711 answers it for an unknown `display_id`) or that is not connected, and `EINVAL` for an overlay plane the output does not have.
+- Other values: Driver answers pass through. `ESTALE` for an old `generation`, `ENXIO` for an output the node does not have (bcm2711 answers it for an unknown `display_id`) or that is not connected, and `EINVAL` for an overlay plane the output does not have. The device's or the open's recorded error is returned if it has failed.
 
 Sources: [gpu-display.h](../../include/uapi/gpu-display.h), [gpu.c](../../src/drivers/gpu/gpu.c) (`gpu_display_ioctl`, `gpu_display_ungated`), [display-device.c](../../src/drivers/gpu/bcm2711/display/display-device.c) (`output_overlay_info`); no source-tree test.
 

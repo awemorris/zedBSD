@@ -577,7 +577,7 @@ main(void)
 
 ## Presenting to a display
 
-A display is used through a lease. The program counts the outputs with `GPU_DISPLAY_QUERY` and `GPU_DISPLAY_COUNT_ONLY`, queries them by index, and picks the first one that is connected, takes whole-frame FIFO presents, is not `GPU_DISPLAY_LIMITED` and accepts BGRA frames of its current size. `GPU_DISPLAY_CLAIM` takes the lease on plane 0 of that output with the `display_id` and `generation` of the query. The frame is a storage resource filled with one colour, written in pieces of at most `GPU_COPY_MAX` bytes. `GPU_DISPLAY_PRESENT` shows the whole frame and returns its `sequence`. `GPU_DISPLAY_WAIT` waits at most one second per call until the frame is adopted (a driver whose presents return only once the frame is adopted answers at once). The lease is released at the end whatever happened ([display](gpu-display.md)). The first successful present of a boot also ends the text console's use of the screen.
+A display is used through a lease. The program counts the outputs with `GPU_DISPLAY_QUERY` and `GPU_DISPLAY_COUNT_ONLY`, queries them by index, and picks the first one that is connected, takes whole-frame FIFO presents, is not `GPU_DISPLAY_LIMITED` and accepts BGRA frames of its current size. `GPU_DISPLAY_CLAIM` takes the lease on plane 0 of that output with the `display_id` and `generation` of the query. The frame is a storage resource filled with one colour, written in pieces of at most `GPU_COPY_MAX` bytes. `GPU_DISPLAY_PRESENT` shows the whole frame and returns its `sequence`. `GPU_DISPLAY_WAIT` waits until the frame is adopted. On the ghci and bcm2711 drivers one call waits at most one second; on the i915 driver it can wait for the flip of its last present to latch, whatever `timeout_ns` says; the other drivers answer at once, because their presents return only once the frame is taken. The lease is released at the end whatever happened ([display](gpu-display.md)). The first successful present of a boot also ends the text console's use of the screen.
 
 The errors it expects are these.
 
@@ -776,7 +776,7 @@ show_frame(int fd)
 		destroy.handle = handle;
 		ioctl(fd, GPU_RESOURCE_DESTROY, &destroy);
 
-		/* One wait lasts at most a second; a timeout leaves the frame pending. */
+		/* On ghci and bcm2711 one wait lasts at most a second; a timeout leaves the frame pending. */
 		for (tries = 0; tries < ATTEMPTS; tries++) {
 			memset(&wait, 0, sizeof(wait));
 			wait.version = GPU_ABI_VERSION;
