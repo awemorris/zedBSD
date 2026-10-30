@@ -3,7 +3,7 @@
 # ws327-p008 Mailer の移行の確かめと Mail の host 試験の直し
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §6.2・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007。
-- Status: planned
+- Status: in-progress
 - Disposition: normal
 
 ## 1. 読む物
@@ -106,4 +106,23 @@ QEMU の Mailer（fake-mail-server での接続・IDLE・送信）は p016。
 
 ## 結果
 
-（実装の担当が書く）
+2026-10-30（host の `date`）。
+
+- 確かめ: `sync.c`（§3 の表の全行）・`conn.c`（§6.2）・`tls.c`（`intptr_t`、`tls_lock` は `KL_MUTEX_INIT`）・`imap.c`・`mail.h` を読み、
+  表・§6.2 と合っていた。Mailer の source は直していない（変更なし）。`mailer/` に `<poll.h>`・`<netdb.h>`・`<sys/socket.h>`・`<pthread.h>` は無い。
+- 直した物: `run-host-mail-backend.sh`（§4.1）、`host-mail-backend.c`（IDLE の待ちを `kl_socket_poll`、`conn.fd` を見る所は他に無い）、
+  `host-mail-sync.c`（`ml_sync_start` の引数、`kl_thread_sleep(100U)`）。
+- 流した command と結果:
+  - `sh plan/tools/mail/run-host-mail-backend.sh build/ws327-p008-mail` → exit 0、`PASS` 行 60 件（FAIL 0）、`host-mail-backend: PASS`、`host-mail-sync: PASS`（ASan・UBSan）。
+  - `sh plan/ws327/tests/build-zedbsd.sh p008 {amd64,arm64,riscv64} "mailer"` → 各 `zedbsd <arch> make=0 warnings=0`。
+  - `python3 -I plan/ws327/tests/check-layers.py userland/desktop/mailer/` → `ws327-check-layers: PASS`（T1 0・N1 0）。
+  - `git diff --check` → 0。
+- 突然変異（git の外で壊し、`cmp` で戻した事を確かめた）:
+  1. `ml_sync_queue` の `kl_socket_waker_ring` を消す → `run-host-mail-backend.sh` が exit 1（sync の試験が待ちで進まず `timeout 60` に殺された。捕まる）。
+  2. `sync_wait` の判定から `KL_SOCKET_READABLE` を外す → `FAIL arrived`、`host-mail-sync: 1 FAILED`（捕まる）。
+  3. `conn_connect` で EINPROGRESS を誤りにする → backend の `imaps-open`・`smtps-send`・`starttls-open`・`submission-send` ほか FAIL（捕まる）。
+  - 見逃し: 読みの前の待ちの events を変える壊し方は捕まらない（phase.md の予告どおり）。
+- 自分で決めた点: `host-mail-backend.c` の `ready` は `int`（`ml_conn_ready` が真、または poll が 0 で `found > 0`）。`struct kl_socket_wait` は `memset` で 0 にした。
+- 環境: 最初の build で worktree の `build/` に LLVM の build（`llvm-build`・`llvm-source`）が始まったので止め、Q1 の指示で `NoctLang`・`distfiles`・
+  `llvm`・`llvm-build`・`llvm-source`・`sources` を main の `build/` への symlink にした。途中の物は `build/tmp/stale/` に移した（Q1 が消す）。
+- 未実施: QEMU の Mailer（p016）。

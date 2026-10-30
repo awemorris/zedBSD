@@ -30,7 +30,7 @@
 #include "userland/desktop/mailer/mail.h"
 
 #include <errno.h>
-#include <poll.h>
+#include <keiland/keiland_socket.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -316,9 +316,10 @@ test_imap(
 	char name[64];
 	struct test_fetches fetches;
 	struct ml_imap imap;
-	struct pollfd watched;
+	struct kl_socket_wait watched;
 	uint32_t exists;
 	uint32_t last_uid;
+	size_t found;
 	int arrived;
 	int ready;
 	int error;
@@ -376,17 +377,20 @@ test_imap(
 	error = ml_imap_idle_start(&imap);
 	(void)snprintf(name, sizeof(name), "%s-idle-start", label);
 	test_check(name, error == 0, imap.error);
-	watched.fd = imap.conn.fd;
-	watched.events = POLLIN;
-	watched.revents = 0;
+	memset(&watched, 0, sizeof(watched));
+	watched.socket = imap.conn.socket;
+	watched.events = KL_SOCKET_READABLE;
+	found = 0U;
 	ready = ml_conn_ready(&imap.conn);
-	if (!ready)
-		ready = poll(&watched, 1, 5000);
+	if (!ready) {
+		error = kl_socket_poll(&watched, 1U, 5000, &found);
+		ready = (error == 0 && found > 0U);
+	}
 	arrived = 0;
-	if (ready > 0)
+	if (ready)
 		error = ml_imap_idle_take(&imap, &arrived);
 	(void)snprintf(name, sizeof(name), "%s-idle-arrived", label);
-	test_check(name, ready > 0 && error == 0 && arrived == 1, "");
+	test_check(name, ready && error == 0 && arrived == 1, "");
 	error = ml_imap_idle_stop(&imap);
 	(void)snprintf(name, sizeof(name), "%s-idle-stop", label);
 	test_check(name, error == 0, imap.error);

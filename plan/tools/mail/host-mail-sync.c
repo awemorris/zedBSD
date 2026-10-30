@@ -21,7 +21,7 @@
 #include "userland/desktop/mailer/sync.h"
 
 #include <errno.h>
-#include <poll.h>
+#include <keiland/keiland_thread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -75,7 +75,7 @@ main(
 	account.smtp.secure = 1;
 
 	/* The thread without accounts. */
-	error = ml_sync_start(NULL, 0U, &sync);
+	error = ml_sync_start(NULL, 0U, NULL, NULL, &sync);
 	test_check("start", error == 0, "");
 	if (error != 0)
 		return 1;
@@ -183,7 +183,6 @@ test_wait_for(
 	struct ml_result *found,
 	unsigned *messages)
 {
-	struct pollfd watched;
 	struct ml_result result;
 	int waited;
 	int taken;
@@ -212,10 +211,7 @@ test_wait_for(
 		}
 
 		/* The next wake. */
-		watched.fd = ml_sync_fd(sync);
-		watched.events = POLLIN;
-		watched.revents = 0;
-		(void)poll(&watched, 1, 100);
+		kl_thread_sleep(100U);
 	}
 
 	/* Not in time. */
