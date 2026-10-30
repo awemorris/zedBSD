@@ -61,3 +61,28 @@ V3D の Vulkan の実行器（`src/drivers/gpu/bcm2711/vk/`、Pi 4 と共有）�
 5. 性能の構造: sample する image は raster のまま持ち、pass ごとに CPU で tile の形へ写す（`prepare_texture_image`、perf の行の `tex`）。
 
 PowerVR（p020）と同じく、1〜3 を入れるまで「今の fps」は測れない（mview の失敗の記録になる）。
+
+### 再開点（2026-10-31 P4 のラップアップ、q1729-i01）
+
+- Q1 の判断（2026-10-30）: 実機を待つ間に上の 1〜4（index の draw、instance の数と instance rate、mip の image、直の attribute の address）を host で実装してよい。
+  条件: driver と Vulkan の backend の中だけ・HAL を変えない・hal_* を使わない、Pi 4 と共有の code なので Pi 4 を壊さない（Pi 4 の build と既存の host 試験）、改善ごとに commit と報告、実機は Q1 の連絡の後。
+- 実装の進み: source は未変更（読んだだけ）。commit は e00f72140（道具）・ad8da825c（記録）。
+- host 試験: `plan/tools/v3d-qpu/shader-host-test.sh`・`qpu-format-host-test.sh`・`glass-shader-host-test.sh` は `plan/ws141/temp/mesa/src/broadcom/` の Mesa の file
+  （git に入らない oracle）が要り、どの checkout にも無い。Mesa 25.3.6 から取得した物（読むだけ、未実行）: `build/tmp/mesa-dl/`（この worktree）の
+  qpu_instr.c f61745f35e5b34c74aad56b01afb9e068860ecb067361b8f9610dc1b673c8d4e、qpu_instr.h 4b1b90e3bb8ea614dea36484e24d83049392c55cf19b01125627fa5ff4c9d07f、
+  qpu_pack.c abf436006dd3bed52cf1e77245d7267105a9100f02d8b3d643ddc6641fd6d551（3 つとも script の固定の値と一致）、v3d_packet.xml b13f995b1a4b606a1adcb2c048ff9bca067106be14e22ce1ee86e01055094e1b（packet の配置の参照）。
+  `src/broadcom/common/v3d_device_info.h` も要る（未取得）。置いて試験を compile・実行する命令は auto mode の判定で拒否され、Q1 経由でユーザーの許可待ちだった（2026-10-30 Q1 から「許可が出た」）。
+- 実装の設計（読んで決めた所）:
+  - record: `vulkan-record.c` の dispatch・`vulkan-record-decode.c` に `GPU_OP_CMD_BIND_INDEX_BUFFER`（[buffer][u64 offset][u32 type]、objects[0]・offsets[0]・first=type）と
+    `GPU_OP_CMD_DRAW_INDEXED`（5 word: indices・instances・first index・vertex offset・first instance）。`vulkan-record-validate.c` で INDEX_BUFFER の usage・offset の整列・
+    UINT16/UINT32、DRAW の instance の数の制限（`words[1] > 1`・`words[3] != 0` の ENOTSUP）を外す。
+  - 状態: `vulkan-draw.h` の draw_state に index の resource・offset・type、`vulkan-draw.c` の walk と `vulkan-draw-validate.c`（index の範囲・instance rate の attribute の範囲）、
+    `vulkan-prepared.h` の event に index と `draw[5]`、`vulkan-prepared.c`、`vulkan-uniform.c:50`・`vulkan-native-pass.c:656`・`vulkan-native-draw.c:132` の `GPU_OP_CMD_DRAW` の判定を両方の draw に。
+  - fetch: `vulkan-native-draw.c` の `prepare_fetch` を、user の buffer の GPU の address（`bcm2711_vulkan_resource_backing`、texture の TFU と同じく GPU が直に読む）・binding の stride・
+    instance rate なら divisor 1（attribute の record の byte 6〜7）・maximum_index は buffer の範囲から計算（GPU が resource の外を読まない）にする。index の draw は直の形だけ
+    （packed の形は index の範囲を CPU で読む必要がある）。shader の読む成分が format の成分より多い時は今の packed の形に残す。
+  - BCL: draw の packet は 4.2・7.1 で同じ（36 Vertex Array Prims、38 Vertex Array Instanced Prims、34 Indexed Instanced Prim List、32 Indexed Prim List、44 Index Buffer Setup、
+    43 Base Vertex Base Instance、1 NOP、0 は HALT）。`native-bin.h` の BCM2711_NATIVE_BIN_BYTES（133、末尾 10 byte が 36）を、状態 123 byte＋draw の 32 byte（44・43・34 の最大）に広げ、
+    余りは NOP で埋める（0 で埋めると HALT）。pass の measure（`native-pass.c`・`native71-pass.c`）は draw ごとの固定の長さのまま使える。indexed・instanced では 43 を値付きで必ず出す。
+  - mip: `vulkan-resource.c:278` の `mipLevels != 1` の拒否、copy・blit・sample の level の扱い（未調査）。RGBA8 に BLIT を報告しているので mview は mip を作る。
+- 次の安全な地点: 上の record〜BCL を入れ、Pi 4（`config/ci/config-rpi4.mk` の build/arm64/vmunix）と Pi 5（`plan/ws291/tests/config-rpi5.mk`）の vmunix が warning 0、host 試験 PASS で commit。
