@@ -23,7 +23,7 @@
 
 ## Q310-2 5330 で platform の `_OSC` が Thunderbolt の CM の mode と CMOS に触れる時
 
-- 背景: 5330 の firmware は platform の `_OSC` の commit で、OS が USB4 を扱わないと申告すると Thunderbolt の CM を firmware の mode に揃え（違っていれば Thunderbolt の controller に切り替えを送る）、設定によっては CMOS の 1 byte（index 0xF2）に書く（design §3.1 の 3）。CMOS は残るので、同じ 5330 の Debian（SW CM を使う見込み）と交互に起動すると互いに書き合う。実際に起きるかは firmware の値（`U4SE`・`U4CM`）次第で、p003 で読むまで分からない。
+- 背景: 5330 の firmware は platform の `_OSC` の commit で、OS が USB4 を扱わないと申告すると Thunderbolt の CM を firmware の mode に揃え（違っていれば Thunderbolt の controller に切り替えを送る）、設定によっては CMOS の 1 byte（index 0xF2）に書く（design §3.1 の 3）。CMOS は残るので、同じ 5330 の Debian（SW CM を使う見込み）と交互に起動すると互いに書き合う。5330 の試験の道具は毎回 Debian から zedBSD を 1 回起動して Debian に戻るので、試験の全ての回がこの交互の形になる。切り替えは TBT の電源の振る舞い（S0 idle の電力）も変える。実際に起きるかは firmware の値（`U4SE`・`U4CM`）次第で、p003 で読むまで分からない。
 - 選択肢:
   - A（推し）: p003 で値を読み、切り替えも CMOS の書きも起きないと分かったら platform の `_OSC` を呼ぶ。起きると分かったら、その時に改めて聞く（それまで 5330 の試験は `acpi.osc=pcie,cpu` まで）。
   - B: 起きても呼ぶ（Debian と交互の起動で問題が無い事を p006 で確かめる）。
@@ -41,12 +41,12 @@
 
 ## Q310-4 PCIe の `_OSC` で OS が制御を得る範囲
 
-- 背景: PCIe の `_OSC` の control の bit で、OS は PCIe の機能の担当を firmware から受け取る。5330 は hotplug と PME（wake の合図）の bit を求めた時点で firmware の処理を止める（design §3.3）が、zedBSD に代わりの処理は無い。WS300（NVMe と VMD の低電力）の ASPM・LTR は「PCIe Capability」と「LTR」の制御が要る（WS300 の Q300-6 と同じ話）。
+- 背景: PCIe の `_OSC` の control の bit で、OS は PCIe の機能の担当を firmware から受け取る。5330 は hotplug と PME（wake の合図）の bit を求めた時点で firmware の処理を止める（design §3.3）が、zedBSD に代わりの処理は無い。WS300（NVMe と VMD の低電力）の ASPM・LTR は「PCIe Capability」と「LTR」の制御が要る（WS300 の Q300-6 と同じ話）。今の main には ASPM・LTR を有効にする code が無い。
 - 選択肢:
-  - A（推し）: PCIe Capability と LTR の 2 つだけ求める。hotplug・PME・AER・DPC は求めない。
-  - B: 何も求めない（support の申告だけ）。WS300 の ASPM は `_OSC` 無しのまま（Q300-6 の判断に戻る）。
+  - A（推し）: 今は何も求めない（support の申告だけ）。WS300 の ASPM・LTR を有効にする code が main に入る時に、PCIe Capability と LTR の 2 つだけを求める形に変え、5330 で確かめ直す。hotplug・PME・AER・DPC は求めない。
+  - B: 今から PCIe Capability と LTR を求める（使う code が無いので確かめは空振りになる）。
   - C: Linux と同じく hotplug・PME・AER も求める（zedBSD に代わりの処理を作るまで 5330 の wake・hotplug が壊れる見込み）。
-- 推しの理由: zedBSD が実際に扱う物だけを受け取り、firmware の wake の処理を残す。Q300-6 の答えの形にもなる。
+- 推しの理由: zedBSD が実際に扱う物だけを、扱う code と一緒に受け取り、firmware の wake の処理を残す。Q300-6 の答えの形にもなる。
 
 ## Q310-5 一晩の耐久の試験
 
@@ -59,5 +59,5 @@
 
 ## Q310-6 ACPI 6.5 などの仕様の入手
 
-- cockpit の 01（WS333 で ACPI 6.5 を手で置く件）と同じ件。この WS では ACPI 6.5 §6.2.11（`_OSC` と platform-wide の bit の表）、PCI Firmware Specification（PCIe の `_OSC` の bit）、Intel の processor の `_OSC` の文書が要る。今は 5330 の firmware の使い方と Linux の起動の log の bit の名前で裏付けた bit だけを使い、code の merge の前に仕様で確かめる（design §9）。
-- 推し: 01 の答えに合わせる。手で置くなら ACPI 6.5 の PDF に加えて PCI Firmware Specification 3.3 も（PCI-SIG の会員向け。手に入らなければ ACPI と firmware の使い方で進める）。
+- cockpit の 01（WS333 で ACPI 6.5 を手で置く件）と同じ件。この WS では ACPI 6.5 §6.2.11（`_OSC` と platform-wide の bit の表）、PCI Firmware Specification（PCIe の `_OSC` の bit）、Intel の processor の `_OSC` の文書が要る。今は Linux の header の定数（GPL の file の定数は出典を示せば使える、という既存の規則）と 5330 の firmware の使い方の両方で裏付けた bit を使う。仕様が無くても実装は止まらない（design §9）。
+- 推し: 01 の答えに合わせる。手で置くなら ACPI 6.5 の PDF に加えて PCI Firmware Specification 3.3 も（PCI-SIG の会員向け。手に入らなければ Linux の定数と firmware の使い方で進める）。

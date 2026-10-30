@@ -10,7 +10,7 @@ Status: in-progress（設計と review を終えた、Q1 の確かめ待ち）
 ## 成果
 
 - [design.md](../design.md): 呼ぶ `_OSC`（PCIe の host bridge・platform-wide・processor）と bit、時期と順、内部の口、起動の switch `acpi.osc=`、失敗と回復、他の WS との関係、host・QEMU・5330 の前後の確かめ、WS の受け入れ、Phase の表。
-- [design-review.md](../design-review.md): design-reviewer の敵対的レビューと反映。
+- [design-review.md](../design-review.md): design-reviewer の敵対的レビュー（blocker 0・major 12・minor 9）と反映。M12（ws.md の原文）は Q1 の指示で反映せず、Q1 への確認に挙げた。design.md は第 2 版。
 - [user-questions.md](../user-questions.md): Q310-1〜6。
 
 ## 確かめた事
@@ -20,5 +20,5 @@ Status: in-progress（設計と review を終えた、Q1 の確かめ待ち）
 
 ## 未実施
 
-- ACPI 6.5・PCI Firmware Specification・Intel の processor の `_OSC` の文書の取得（uefi.org が bot の確かめの page を返した。回避していない。Q310-6）。
+- ACPI 6.5・PCI Firmware Specification・Intel の processor の `_OSC` の文書の取得（uefi.org が bot の確かめの page を返した。回避していない。Q310-6）。代わりに Linux v6.12.5 の header の定数（`/home/awe/visionfive-linux`、読むだけ）で bit の値を確かめた。
 - 5330 の実機の値の読み（p003）。
