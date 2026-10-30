@@ -56,6 +56,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p013](phase013/phase.md) | NVIDIA: draw と submit の多い bench（big-1000・subs-1000）の CPU の費用を NVK 並みに | p011 | in-progress（P3、q1728） |
 | [p020](phase020/phase.md) | PowerVR（VF2）: model の 50 fps（RDNA で確立した手順） | RDNA の手順の確立（p002 と最初の改善） | in-progress（2026-10-30 16:50 P3 q1715-i02: HDMI で表示が出た。driver の欠け（instance rate・discard・CopyBuffer・mip の transfer・direct scanout の BLOB・stage-log の lock）を埋めて mview が描けた。目標 c13（594 MHz）は 26.6 fps、profile の途中） |
 | [p021](phase021/phase.md) | Raspberry Pi 5（V3D 7.1）で qs40 の model を、スペックの比で決めた copies・1920x1080 で 50 fps | p011 | in-progress（P4、q1729。2026-10-30 23:50: 試験の image（rpi5-p021.img、戻しの kernel 入り）を作った、実機は未起動。V3D の Vulkan の実行器に mview の要る index の draw・instance・mip が無い） |
+| [p022](phase022/phase.md) | Intel（i915、5330 の Alder Lake）で qs40 の model を、スペックの比で決めた copies で 50 fps | p011 | in-progress（P1、q1731） |
 | 最後 | 規約の全文の見直し | 実装の全部 | — |
 
 - 2026-10-27 04:44 ユーザー（Q1 の問い「NGG の A〜C をどう進めますか？」へのクリック）「A〜C を今進める（推し）」。
@@ -276,3 +277,5 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - 目標（Q1 の案）: 同じ 1920x1080・qs40 で copies を比で割った scene、600 MHz なら copies 13（5000 ÷ 389、約 48 万三角形）、400 MHz なら copies 9（5000 ÷ 583）で 50 fps 以上。VF2 の GPU の clock は P3 が確かめる。
 
 - 2026-10-30 ユーザー（原文）「PowerVRはLinuxではドライバがぜんぜんダメで、実用水準ではないです。Linuxで、の定義にこだわらなくていいです。指示通り、LinuxでのRTX 2070での50fpsとのきのモデル規模と、RTX 2070とのカタログスペック比で、50fpsになるべきモデル規模を決定してください。」 → 決定（Q1）: 基準は Linux（NVK）の RTX 2070 の scene-5000（qs40 × 5000、1920x1080、50.1 fps）。カタログの FP32 の比（RTX 2070 約 7.46 TFLOPS 対 VF2 の BXE-4-32 MC1 の 594 MHz（P3 が dmesg で確かめた）で 32 × 594 MHz = 19.0 GFLOPS、約 392 倍）で割り、**qs40 × 13（copies 13、1920x1080）で 50 fps 以上**を p020 の受け入れにする。
+
+- 2026-10-30 ユーザーから、Pi 5 の V3D の host 試験のために P4 に plan/ws141/temp/ の利用（Mesa の照合用の file を plan/ws141/temp/mesa/ に置き、試験を compile・実行する）を許可する、という趣旨の指示を受けた（q1730 で P4 を起動し直した）。

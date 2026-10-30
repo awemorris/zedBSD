@@ -339,4 +339,11 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1729 / q1729-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws291pi`・branch `agent/p4-ws291pi`、image の build、実機 Pi 5 はユーザーが起動した後 SSH） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 で Pi 5 の GPU の改善を行い、PowerVR と同じくスペックの比から目標を決め、Pi 5 の image を渡す、という趣旨の指示を受けた | in-progress |
+| q1729 / q1729-i01 | P4（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p4-ws291pi`・branch `agent/p4-ws291pi`、image の build、実機 Pi 5 はユーザーが起動した後 SSH） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 で Pi 5 の GPU の改善を行い、PowerVR と同じくスペックの比から目標を決め、Pi 5 の image を渡す、という趣旨の指示を受けた | uncleared（2026-10-30 ラップアップ。image を作った（rpi5-p021.img）、driver の欠けの設計。権限の判定で Mesa の照合の試験が止まり、ユーザーの許可の後に q1730 で起動し直す。5291c05b1、merge 5a329d692） |
+
+## 2026-10-30: WS291 p021 の続き（P4）と p022（P1）（q1730・q1731）
+
+| Queue | 担当 | Phase | 範囲 | 結果 |
+| --- | --- | --- | --- | --- |
+| q1730 / q1730-i01 | P4（phase-runner-high、worktree p4-ws291pi） | [ws291-p021](ws291/phase021/phase.md) | 2026-10-30 ユーザーから、P4 に plan/ws141/temp/ の利用を許可して起動し直す、という趣旨の指示を受けた。driver の欠け（indexed・instance・mip・直の fetch）の実装と V3D の host 試験 | in-progress |
+| q1731 / q1731-i01 | P1（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p1-ws291i`・branch `agent/p1-ws291i`、実機 5330） | [ws291-p022](ws291/phase022/phase.md) | 2026-10-30 ユーザーから、i915 も WS291 に Phase を作り 5330 で最適化を行い P1 を割り当てる、という趣旨の指示を受けた | in-progress |

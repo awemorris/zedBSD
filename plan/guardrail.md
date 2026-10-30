@@ -123,6 +123,8 @@ zedBSD の貢献の規則と標準の索引。Queue・backlog・実行許可で�
 
 Linux の vc4・v3d（GPL-2.0）から作る作業の文書は `plan/ws141/temp/` に置き commit しない（書き写し可）。zedBSD の code を書く前に定数を全て一括で独自の名前に変え、WS の最後に license と字面・設計の類似を監査する。BLOB は `userland/firmware/` へ移して file から load。register の定義と packet の形は MIT の Mesa（`src/broadcom/`）・Broadcom の公開の文書・device tree の binding から取り、file ごとに license を監査する。**改訂（2026-10-04 ユーザー、クリックの回答「事実として使う」）**: V3D・HVS・pixelvalve・HDMI の register の offset と bit は GPL の header にしか無いので、値はハードウェアの事実として使ってよい。名前は一括で独自に改名し、配置・comment・構造は写さず自分で書き、WS の最後の類似の監査で確かめる。zedBSD の code は Zlib。詳細は [WS141](ws141/ws.md) の「ライセンスの扱い」。範囲は WS141 と [WS037](ws037/ws.md)（nvrtx、2026-10-04 ユーザー「やりかたはVC4と同じです」。GSP の firmware は `userland/firmware/`）と [WS214](ws214/ws.md)（Pi 4 の HVS の plane、2026-10-12 ユーザー（クリック）「WS214 にも広げる」: 公開の文書の無い HVS5 の scaled の plane の値も同じ規則で使う、値ごとの出典は `plan/ws214/hvs-values.md`）と [WS039](ws039/ws.md)（AMD RDNA の amdrdna、2026-10-15 ユーザー「値は事実として使い、名前・構造・comment は写さない、をこの WS にも広げます。」: Linux の amdgpu の GPL の file の値も同じ規則で使う、MIT の file・Mesa の RADV・ACO は file ごとに license を監査して出典として使う）だけ（他の WS の GPL の参照には適用しない）。
 
+- 2026-10-30 ユーザーから、WS291 p021 の P4 に plan/ws141/temp/ の利用（Mesa（MIT）の照合用の file を plan/ws141/temp/mesa/ に置き、V3D の host 試験を compile・実行する）を許可する、という趣旨の指示を受けた。temp は git に入れない。
+
 ## MIT・GPL の出典のデータの引用（2026-10-15 ユーザー）
 
 ユーザー:「レイテンシの表は、データなので、引用で済むように思います。引用元を明示すればいいと思います。」（nvrtx の compiler の `sm75-isa.h`・`sm75-schedule.c` の Collabora の MIT の表示について）
