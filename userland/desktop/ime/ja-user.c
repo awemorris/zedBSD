@@ -29,9 +29,10 @@
 
 #include "ja.h"
 
+#include <keiland/keiland_thread.h>
+
 #include <errno.h>
 #include <fcntl.h>
-#include <pthread.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <string.h>
@@ -57,7 +58,7 @@
  * is one, for the one dictionary the input method keeps.
  */
 struct user_writer {
-	pthread_t thread;
+	struct kl_thread *thread;
 	int started;
 	int stopping;
 	char *pending;
@@ -78,21 +79,27 @@ static int user_compare_stamps(const void *left, const void *right);
 static int user_write_all(int descriptor, const char *bytes, size_t length);
 static int user_serialize(const struct ja_user *user, char **text, size_t *length);
 static int user_write_file(const char *path, const char *text, size_t length);
-static void *user_writer_run(void *argument);
+static void user_writer_run(void *argument);
 static void user_writer_flush(void);
+static void user_writer_init(void);
+static int user_writer_ready(void);
 
 /* The one writer thread (see struct user_writer); zero until the first save that waits. */
 static struct user_writer user_writer;
 
 /* Guards user_writer; user_writer_wake tells the thread a text waits or the end is asked. */
-static pthread_mutex_t user_writer_lock = PTHREAD_MUTEX_INITIALIZER;
-static pthread_cond_t user_writer_wake = PTHREAD_COND_INITIALIZER;
+static struct kl_mutex user_writer_lock = KL_MUTEX_INIT;
+static struct kl_cond user_writer_wake;
+
+/* Whether user_writer_wake was made (0) or why it was not; set once by user_writer_init. */
+static struct kl_once user_writer_once = KL_ONCE_INIT;
+static int user_writer_wake_error;
 
 /*
  * Held around each write of the file, so that a save made at once
  * (ja_user_save) and the thread's never write the temporary file together.
  */
-static pthread_mutex_t user_writer_file_lock = PTHREAD_MUTEX_INITIALIZER;
+static struct kl_mutex user_writer_file_lock = KL_MUTEX_INIT;
 
 /*
  * Opens the user dictionary at a path, reading the file if there is one.
@@ -248,11 +255,11 @@ ja_user_save(
 		return error;
 
 	/* Written in place of the old file, never together with the writer thread. */
-	(void)pthread_mutex_lock(&user_writer_file_lock);
+	kl_mutex_lock(&user_writer_file_lock);
 
 	error = user_write_file(user->path, text, length);
 
-	(void)pthread_mutex_unlock(&user_writer_file_lock);
+	kl_mutex_unlock(&user_writer_file_lock);
 
 	free(text);
 
@@ -278,6 +285,8 @@ ja_user_save_later(
 {
 	char *text;
 	size_t length;
+	struct kl_thread_options options;
+	int ready;
 	int error;
 
 	/* The file's text. */
@@ -285,8 +294,11 @@ ja_user_save_later(
 	if (error != 0)
 		return error;
 
+	/* The thread's condition, made the first time; without it no thread starts. */
+	ready = user_writer_ready();
+
 	/* The text waits for the thread, in place of an older one; the thread starts the first time. */
-	(void)pthread_mutex_lock(&user_writer_lock);
+	kl_mutex_lock(&user_writer_lock);
 
 	free(user_writer.pending);
 	user_writer.pending = text;
@@ -295,26 +307,36 @@ ja_user_save_later(
 	error = 0;
 	if (!user_writer.started) {
 		user_writer.stopping = 0;
-		error = pthread_create(&user_writer.thread, NULL, user_writer_run, NULL);
-		if (error == 0)
-			user_writer.started = 1;
+		if (ready != 0) {
+			error = ready;
+		} else {
+			/* The thread: its name, what it runs and its priority. */
+			memset(&options, 0, sizeof(options));
+			options.name = "ime-dict-write";
+			options.run = user_writer_run;
+			options.argument = NULL;
+			options.priority = KL_THREAD_PRIORITY_NORMAL;
+			error = kl_thread_start(&options, &user_writer.thread);
+			if (error == 0)
+				user_writer.started = 1;
+		}
 	}
 	if (error == 0)
-		(void)pthread_cond_signal(&user_writer_wake);
+		kl_cond_signal(&user_writer_wake);
 	if (error != 0) {
 		user_writer.pending = NULL;
 		user_writer.pending_length = 0;
 	}
 
-	(void)pthread_mutex_unlock(&user_writer_lock);
+	kl_mutex_unlock(&user_writer_lock);
 
 	/* Without a thread the file is written now, as before. */
 	if (error != 0) {
-		(void)pthread_mutex_lock(&user_writer_file_lock);
+		kl_mutex_lock(&user_writer_file_lock);
 
 		error = user_write_file(user->path, text, length);
 
-		(void)pthread_mutex_unlock(&user_writer_file_lock);
+		kl_mutex_unlock(&user_writer_file_lock);
 
 		free(text);
 		if (error != 0)
@@ -479,7 +501,7 @@ user_write_file(
  * The writer thread: writes the newest waiting text, again while more
  * come, and ends when asked once nothing waits.
  */
-static void *
+static void
 user_writer_run(
 	void *argument)
 {
@@ -492,34 +514,31 @@ user_writer_run(
 	/* Each text in turn. */
 	for (;;) {
 		/* Waits for a text, or for the end. */
-		(void)pthread_mutex_lock(&user_writer_lock);
+		kl_mutex_lock(&user_writer_lock);
 
 		while (user_writer.pending == NULL && !user_writer.stopping)
-			(void)pthread_cond_wait(&user_writer_wake, &user_writer_lock);
+			kl_cond_wait(&user_writer_wake, &user_writer_lock);
 		text = user_writer.pending;
 		length = user_writer.pending_length;
 		user_writer.pending = NULL;
 		user_writer.pending_length = 0;
 		memcpy(path, user_writer.path, sizeof(path));
 
-		(void)pthread_mutex_unlock(&user_writer_lock);
+		kl_mutex_unlock(&user_writer_lock);
 
 		/* Nothing waits and the end was asked. */
 		if (text == NULL)
 			break;
 
 		/* The file, written away from the keys; a failure leaves the old file. */
-		(void)pthread_mutex_lock(&user_writer_file_lock);
+		kl_mutex_lock(&user_writer_file_lock);
 
 		(void)user_write_file(path, text, length);
 
-		(void)pthread_mutex_unlock(&user_writer_file_lock);
+		kl_mutex_unlock(&user_writer_file_lock);
 
 		free(text);
 	}
-
-	/* Succeeded: every text was written. */
-	return NULL;
 }
 
 /* Waits for the writer thread to write what waits and end (nothing when it never started). */
@@ -530,29 +549,49 @@ user_writer_flush(
 	int started;
 
 	/* Asks the thread to end once nothing waits. */
-	(void)pthread_mutex_lock(&user_writer_lock);
+	kl_mutex_lock(&user_writer_lock);
 
 	started = user_writer.started;
 	if (started) {
 		user_writer.stopping = 1;
-		(void)pthread_cond_signal(&user_writer_wake);
+		kl_cond_signal(&user_writer_wake);
 	}
 
-	(void)pthread_mutex_unlock(&user_writer_lock);
+	kl_mutex_unlock(&user_writer_lock);
 
 	/* A thread that never started has nothing to write. */
 	if (!started)
 		return;
 
 	/* The last write, then the thread is gone; a later save starts another. */
-	(void)pthread_join(user_writer.thread, NULL);
+	(void)kl_thread_join(user_writer.thread);
+	user_writer.thread = NULL;
 
-	(void)pthread_mutex_lock(&user_writer_lock);
+	kl_mutex_lock(&user_writer_lock);
 
 	user_writer.started = 0;
 	user_writer.stopping = 0;
 
-	(void)pthread_mutex_unlock(&user_writer_lock);
+	kl_mutex_unlock(&user_writer_lock);
+}
+
+/* Makes the writer's condition, once for the program. */
+static void
+user_writer_init(
+	void)
+{
+	/* The condition (a static one cannot be made by its bytes). */
+	user_writer_wake_error = kl_cond_init(&user_writer_wake);
+}
+
+/* Makes the writer's condition the first time: 0, or why it cannot be. */
+static int
+user_writer_ready(
+	void)
+{
+	/* Once for the program; every later call sees the first one's outcome. */
+	kl_once(&user_writer_once, user_writer_init);
+	return user_writer_wake_error;
 }
 
 /*

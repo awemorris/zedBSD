@@ -102,4 +102,34 @@ userland/desktop/libkeiland/ui/picker-model.c userland/desktop/libkeiland/audio/
 
 ## 結果
 
-（実装の担当が書く）
+実装の担当、2026-10-30（host の `date`）。
+
+流した command と最後の行:
+
+- Linux: `make -j16 -f userland/desktop/keiland-linux.mk KEILAND_LINUX_BUILD=build/ws327-p012-linux .../lib/libkeiland.so .../libexec/keiland-ime` → `status=0`、`warning:` 0 件。
+- host 試験: `sh plan/ws327/tests/host-apps.sh build/ws327-p012-linux ime picker` → `ime: PASS (host-engine: 230 passed, 0 failed)`・`picker: PASS (picker-model-host-test: PASS)`・`ws327-host-apps: PASS`。
+- zedBSD: `build-zedbsd.sh p012 {amd64,arm64,riscv64} "keiland-ime"` → 各 `make=0 warnings=0`。
+- `python3 -I plan/ws327/tests/check-layers.py userland/desktop/ime/ userland/desktop/libkeiland/` → `ws327-check-layers: PASS`（T1・N1 とも 0）。
+- `sh plan/ws327/tests/check-base.sh p012` → `ws327-check-base: PASS`。`git diff --check` は出力なし。
+
+突然変異（git の外で控えを取り、壊し、戻して `cmp`）:
+
+1. `keiui_picker_fini` の止めの `kl_cond_signal` を消す → picker の試験が FAIL（`picker-run: FAIL`）。捕まった。
+2. `user_writer_flush` の `kl_thread_join` を消す → ime の試験は PASS のまま（230 件）。**見逃し**（時機による、と phase.md が予告した形。
+   ime の試験は join の有無で結果が変わらない時機だった）。
+3. `user_writer_ready` が常に ENOMEM を返す → ime の試験は PASS のまま（同期で書く道に落ちても 230 件が通る事を確認）。
+4. `audio.c` の `kl_mutex_try` を 1 つ `pthread_mutex_trylock` に戻す → check-layers が `T1 FAIL audio.c:358: pthread_mutex_trylock`。捕まった。
+5. 4 つとも戻して `cmp` で一致を確認し、戻した後に host 試験と check-layers を再度流して PASS。
+
+自分で決めた点:
+
+- `ja_user_save_later` の `struct kl_thread_options options` は関数の先頭の宣言に置き、`ready` は lock の前に取る（phase.md の通り）。
+  `ready != 0` の時は thread を作らず `error = ready`、後の「今すぐ書く」道は今のまま。
+- `user_writer_run` の末尾の comment「Succeeded: every text was written.」は `return NULL;` と一緒に消した（return が無くなったため）。
+- `audio.c` は `<keiland/keiland.h>` が既に `keiland_thread.h` を含むが、phase.md の表に従い明示の include に置き換えた。
+- `picker.h` の `#include <pthread.h>` は消し、`keiland_thread.h` は足していない（`<keiland/keiland.h>` 経由）。
+
+未実施: audio.c の動き（QEMU）は p016。FreeBSD の build は p016。
+
+Q1 へ: ws095 の `plan/ws095/tests/host-engine.sh` は ja-user.c を `-pthread` だけで build するので、移した後は link できない（閉じた WS、削除の候補）。
+host-apps.sh の ime が同じ試験を層と一緒に build する。
