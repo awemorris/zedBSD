@@ -8,7 +8,8 @@
 # IMGBUILD is the image's build:
 #   plan/tools/guest/test-image.sh plan/ws327/tests/config-amd64-aat.mk IMGBUILD \
 #       --file /usr/share/keiland/wallpaper.png=userland/desktop/wallpapers/Birch-Lake.png
-# OUT under build/ (a new directory each run).  GUEST_RUNTIME (default build/ws327-apps-run) keeps the guest apart
+# OUT under build/ (a new directory each run).  WS327_ONLY=REGEX runs only aat_ws327.py's items matching it.
+# GUEST_RUNTIME (default build/ws327-apps-run) keeps the guest apart
 # from others; VENUS_RENDERER names the Venus renderer (default the worktree's build/ws035-sq-venus/install).
 # The judgement is the verdicts the helpers draw from the session's log and the screenshots (aat shot) over SSH; the
 # QEMU console is not read.  Prints each verdict and "ws327-guest-apps: PASS" (no fail) or "FAIL".
@@ -55,17 +56,27 @@ fi
 if [ $failed = 0 ]; then
 	# The session's desktop is up (the runner waits for it too), then the scenarios and the checks of this workstream.
 	timeout 120 python3 plan/tools/aat/aat --qemu check > "$out/check.log" 2>&1 || failed=1
-	# shellcheck disable=SC2086
-	timeout 5400 plan/tools/aat/run-aat.sh qemu "$top/$out/aat" $scenarios > "$out/aat.log" 2>&1
-	timeout 900 python3 plan/tools/aat/scenarios/helpers_mailer.py --outdir "$top/$out/mail-code" \
-		--only 'apps.mailer.sign-in-code' -- --qemu > "$out/mail-code.log" 2>&1
-	timeout 1800 python3 plan/ws327/tests/aat_ws327.py --outdir "$top/$out/ws327" -- --qemu > "$out/ws327.log" 2>&1
+	if [ -z "${WS327_ONLY:-}" ]; then
+		# shellcheck disable=SC2086
+		timeout 5400 plan/tools/aat/run-aat.sh qemu "$top/$out/aat" $scenarios > "$out/aat.log" 2>&1
+		timeout 900 python3 plan/tools/aat/scenarios/helpers_mailer.py --outdir "$top/$out/mail-code" \
+			--only 'apps.mailer.sign-in-code' -- --qemu > "$out/mail-code.log" 2>&1
+		timeout 1800 python3 plan/ws327/tests/aat_ws327.py --outdir "$top/$out/ws327" -- --qemu > "$out/ws327.log" 2>&1
+	else
+		# Only this workstream's checks that match WS327_ONLY (a regular expression of their ids), with the AAT's
+		# input helper started as the runner starts it.
+		timeout 120 python3 plan/tools/aat/aat --qemu start > "$out/input-start.log" 2>&1 || failed=1
+		timeout 1800 python3 plan/ws327/tests/aat_ws327.py --outdir "$top/$out/ws327" --only "$WS327_ONLY" -- --qemu \
+			> "$out/ws327.log" 2>&1
+	fi
 	timeout 120 python3 -I plan/tools/guest/guest.py run 'ps -A -o pid,args' > "$out/ps-end.txt" 2>&1
 fi
 timeout 120 python3 -I plan/tools/guest/guest.py stop > "$out/stop.log" 2>&1
 
 # The verdicts: a fail anywhere fails the run; needs-person is a picture to look at (listed).
-for file in "$out/aat/verdicts.tsv" "$out/mail-code/verdicts.tsv" "$out/ws327/verdicts.tsv"; do
+files="$out/aat/verdicts.tsv $out/mail-code/verdicts.tsv $out/ws327/verdicts.tsv"
+[ -n "${WS327_ONLY:-}" ] && files="$out/ws327/verdicts.tsv"
+for file in $files; do
 	if [ ! -s "$file" ]; then
 		echo "no verdicts in $file"
 		failed=1
