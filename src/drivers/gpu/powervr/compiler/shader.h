@@ -202,7 +202,9 @@ struct powervr_shader_key {
  * vertex input register vertex_index_reg or instance_index_reg, after
  * the attributes' registers; POWERVR_SHADER_NO_REG when not read.  The
  * vertex index includes the draw's first vertex or vertex offset, the
- * instance index the first instance.
+ * instance index the first instance.  Discards is 1 for a fragment
+ * program that may discard its fragment (it gives the depth and
+ * visibility unit its feedback, so its draws pass punch-through).
  *
  * A fragment program with a shared program (shared_length not 0) has
  * it in the same code at shared_offset (16-byte aligned, after the
@@ -225,6 +227,7 @@ struct powervr_shader_program {
 	uint32_t uses_w;
 	uint32_t vertex_index_reg;
 	uint32_t instance_index_reg;
+	uint32_t discards;
 	uint32_t workgroup[3];
 	struct powervr_shader_request requests[POWERVR_SHADER_REQUESTS];
 	uint32_t request_count;

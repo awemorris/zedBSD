@@ -854,7 +854,7 @@ build_command_buffer(
 			}
 		} else if (entry->opcode == GPU_OP_CMD_DISPATCH) {
 			error = build_dispatch(build, entry->values[0]);
-		} else if (entry->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || entry->opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER ||
+		} else if (entry->opcode == GPU_OP_CMD_COPY_BUFFER || entry->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE || entry->opcode == GPU_OP_CMD_COPY_IMAGE_TO_BUFFER ||
 		    entry->opcode == GPU_OP_CMD_COPY_IMAGE || entry->opcode == GPU_OP_CMD_BLIT_IMAGE || entry->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 			/*
 			 * A transfer: the dispatches before it run first; the firmware

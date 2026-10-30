@@ -236,6 +236,28 @@ reader_region(
 				if (block == stop)
 					return reader->error;
 			}
+		} else if (opcode == OP_KILL || opcode == OP_TERMINATE_INVOCATION) {
+			/*
+			 * A kill of a fragment shader: the discard is set and the
+			 * fragment goes on as a demoted one (its outputs are
+			 * dropped by the feedback at the end).  Its arm ends here;
+			 * at the outermost level the function returns.
+			 *
+			 * Procedure referenced:
+			 * Mesa 26.2.5 src/imagination/pco/pco_nir.c
+			 * (discard_is_demote, nir_lower_terminate_to_demote) and
+			 * pco_nir_pvfio.c (lower_isp_fb: a demote stores true to
+			 * the discard).
+			 */
+			if (reader->discard == 0)
+				return ENOTSUP;
+			condition = shader_spirv_constant_operand(UINT32_MAX);
+			shader_spirv_emit(reader, POWERVR_IR_MOVE, reader->discard, &condition, NULL, NULL, 0, 0);
+			if (stop == 0 && reader->loop_count == 0) {
+				reader->returned = 0;
+				*returned = 1;
+			}
+			return reader->error;
 		} else if (opcode == OP_RETURN || opcode == OP_RETURN_VALUE) {
 			/* A return only ends the function from its outermost level. */
 			if (reader->loop_count != 0 || stop != 0)
@@ -249,7 +271,7 @@ reader_region(
 			*returned = 1;
 			return reader->error;
 		} else {
-			/* Switches, kills and unreachable blocks are outside the subset. */
+			/* Switches and unreachable blocks are outside the subset. */
 			return ENOTSUP;
 		}
 

@@ -25,6 +25,7 @@ struct ir_run {
 	uint32_t values[POWERVR_IR_VALUES][4][32];
 	uint32_t outputs[IR_RUN_OUTPUTS][32];
 	uint32_t pixels[4][32];
+	uint32_t dropped[32];
 	uint32_t (*shared)(struct ir_run *run, uint32_t request, uint32_t word);
 	uint32_t (*input)(struct ir_run *run, unsigned lane, uint32_t reg);
 	uint32_t (*iterate)(struct ir_run *run, unsigned lane, uint32_t coefficient, unsigned flags);

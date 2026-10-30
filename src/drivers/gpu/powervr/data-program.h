@@ -19,6 +19,7 @@
 #ifndef KERN_DRIVERS_GPU_POWERVR_DATA_PROGRAM_H
 #define KERN_DRIVERS_GPU_POWERVR_DATA_PROGRAM_H
 
+#include <stdbool.h>
 #include <stdint.h>
 
 #include "drivers/gpu/powervr/descriptor-set.h"
@@ -81,14 +82,17 @@ struct powervr_data_state {
 
 /*
  * One attribute load of a vertex program: the device address of the
- * attribute of vertex 0, the bytes between vertices, the words of one
- * attribute and the first vertex input register they land in.
+ * attribute of vertex (or instance) 0, the bytes between vertices (or
+ * instances), the words of one attribute, the first vertex input
+ * register they land in, and whether the instance index rather than the
+ * vertex index picks the element (a divisor of one).
  */
 struct powervr_data_vertex_dma {
 	uint64_t address;
 	uint32_t stride;
 	uint32_t words;
 	uint32_t reg;
+	bool instance;
 };
 
 /* A vertex program: its data and code words and the data sequencer temporaries it uses. */

@@ -32,6 +32,7 @@ struct machine_run {
 	uint32_t predicate[32];
 	uint32_t outputs[MACHINE_RUN_OUTPUTS][32];
 	uint32_t pixels[4][32];
+	uint32_t dropped[32];
 	uint32_t shareds[MACHINE_RUN_SHAREDS];
 	uint8_t shared_written[MACHINE_RUN_SHAREDS];
 	uint32_t (*shared_word)(const struct powervr_shader_program *program, uint32_t request, uint32_t word);

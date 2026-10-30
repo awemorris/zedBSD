@@ -160,6 +160,14 @@ enum powervr_ir_opcode {
 	 */
 	POWERVR_IR_PIXEL_BLEND,
 
+	/*
+	 * Tells the depth and visibility unit whether the fragment stays:
+	 * source 0 a Boolean word, not zero when the shader discarded it.
+	 * Once, before the colour outputs, in a fragment shader that
+	 * discards (whose draws pass punch-through).
+	 */
+	POWERVR_IR_FEEDBACK,
+
 	POWERVR_IR_OPCODE_COUNT
 };
 

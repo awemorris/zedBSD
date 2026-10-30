@@ -39,6 +39,7 @@ static int blend_sum_kind(const struct powervr_shader_blend *blend, uint32_t *ki
 static struct powervr_ir_operand saturate(struct shader_spirv_reader *reader, struct powervr_ir_operand x);
 static int attribute_words(struct shader_spirv_reader *reader, uint32_t location, uint32_t words, uint32_t *format_words);
 static uint32_t color_format_known(uint32_t format);
+static int module_kills(const struct shader_spirv_reader *reader);
 
 /*
  * Places the interface variables: each register-class variable gets
@@ -345,6 +346,24 @@ shader_spirv_reader_entry_prologue(
 		}
 	}
 
+	/*
+	 * A fragment shader that discards keeps its discard in a value of its
+	 * own, false from the start; a kill makes it true and the end gives
+	 * it to the depth and visibility unit (see the epilogue).
+	 *
+	 * Procedure referenced:
+	 * Mesa 26.2.5 src/imagination/pco/pco_nir_pvfio.c (lower_isp_fb and
+	 * its discard_cond_reg: false before the first block, true at each
+	 * demote, a discard being a demote there (pco_nir.c
+	 * discard_is_demote), read by the one isp_feedback_pco).
+	 */
+	if (reader->stage == POWERVR_SHADER_FRAGMENT && module_kills(reader)) {
+		reader->discard = shader_spirv_new_value(reader, 1);
+		word = shader_spirv_constant_operand(0);
+		shader_spirv_emit(reader, POWERVR_IR_MOVE, reader->discard, &word, NULL, NULL, 0, 0);
+		reader->program->discards = 1;
+	}
+
 	/* Refuses a workgroup the core's task cannot hold as one row. */
 	if (reader->stage == POWERVR_SHADER_COMPUTE) {
 		if (reader->program->workgroup[1] != 1 || reader->program->workgroup[2] != 1)
@@ -373,6 +392,18 @@ shader_spirv_reader_entry_epilogue(
 	uint32_t component;
 	uint32_t words;
 	int error;
+
+	/*
+	 * The discard, before the colours, as the feedback that keeps or drops the fragment.
+	 *
+	 * Procedure referenced:
+	 * Mesa 26.2.5 src/imagination/pco/pco_nir_pvfio.c (lower_isp_fb:
+	 * the isp_feedback_pco before the first output store).
+	 */
+	if (reader->discard != 0) {
+		word = shader_spirv_value_operand(reader->discard, 0);
+		shader_spirv_emit(reader, POWERVR_IR_FEEDBACK, 0, &word, NULL, NULL, 0, 0);
+	}
 
 	/* Each output variable. */
 	for (index = 1; index < reader->bound; index++) {
@@ -914,5 +945,30 @@ color_format_known(
 		return 2;
 
 	/* Not a format the pixel output packs. */
+	return 0;
+}
+
+/* Reports whether the module has a kill (OpKill or OpTerminateInvocation) anywhere past its header. */
+static int
+module_kills(
+	const struct shader_spirv_reader *reader)
+{
+	size_t at;
+	uint32_t length;
+	uint32_t opcode;
+
+	/* Each instruction in turn. */
+	at = SPIRV_HEADER_WORDS;
+	while (at < reader->count) {
+		length = reader->words[at] >> 16;
+		opcode = reader->words[at] & 0xffffU;
+		if (opcode == OP_KILL || opcode == OP_TERMINATE_INVOCATION)
+			return 1;
+		if (length == 0)
+			return 0;
+		at += length;
+	}
+
+	/* No kill. */
 	return 0;
 }

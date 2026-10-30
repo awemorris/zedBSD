@@ -6,13 +6,16 @@
  */
 
 /*
- * The executor's transfer commands: vkCmdCopyBufferToImage,
- * vkCmdCopyImageToBuffer, vkCmdCopyImage, vkCmdBlitImage (scaled,
- * mirrored, nearest or linear) and vkCmdClearColorImage, recorded with
- * their regions and run as transfers on the session's transfer context.
+ * The executor's transfer commands: vkCmdCopyBuffer,
+ * vkCmdCopyBufferToImage, vkCmdCopyImageToBuffer, vkCmdCopyImage,
+ * vkCmdBlitImage (scaled, mirrored, nearest or linear) and
+ * vkCmdClearColorImage, recorded with their regions and run as transfers
+ * on the session's transfer context.
  *
- * Each region names level 0 and layer 0 of its image; other subresources
- * are refused (ENOTSUP) when recorded.
+ * Each region names layer 0 of its image, and level 0 but for a blit and
+ * a copy between a buffer and an image, which may name any level; other
+ * subresources are refused (ENOTSUP) when recorded.  A buffer copy moves whole 32-bit
+ * words at 4-byte aligned offsets; others are refused (ENOTSUP).
  */
 
 #include <stdbool.h>
@@ -26,11 +29,22 @@
 #include <uapi/gpu-op.h>
 
 #include "drivers/gpu/powervr/transfer-job.h"
+#include "drivers/gpu/powervr/transfer-program.h"
 #include "drivers/gpu/powervr/vk/vk.h"
 #include "drivers/gpu/i915/vk/vk-codec.inc"
 
 /* The most regions one transfer command records. */
 #define TRANSFER_REGIONS_MAX		8U
+
+/*
+ * The words a buffer copy moves in each row of its rectangles (a row of
+ * 4 KiB), and the most rows of one rectangle.
+ *
+ * Values referenced: Mesa 26.2.5 src/imagination/vulkan/rogue/pvr_blit.c
+ * (PVR_MAX_TRANSFER_SIZE_IN_TEXELS 2048, the most of either edge).
+ */
+#define BUFFER_ROW_WORDS		1024U
+#define BUFFER_ROWS_MAX			2048U
 
 /* What a transfer record keeps: its regions, and a clear's colour. */
 struct transfer_data {
@@ -42,22 +56,28 @@ struct transfer_data {
 		VkImageBlit blits[TRANSFER_REGIONS_MAX];
 		VkBufferImageCopy buffers[TRANSFER_REGIONS_MAX];
 		VkImageSubresourceRange ranges[TRANSFER_REGIONS_MAX];
+		VkBufferCopy spans[TRANSFER_REGIONS_MAX];
 	} regions;
 };
 
-/* The working state of one run: the request and the views it names. */
+/* The working state of one run: the request, the views it names and their layouts (a buffer's, a further level's). */
 struct transfer_work {
 	struct powervr_transfer_request request;
 	struct powervr_view_shape view;
 	struct powervr_image_layout layout;
+	struct powervr_image_layout level_layout;
 };
 
 static int hold(struct powervr_vk_session *session, struct powervr_vk_record *entry, enum i915_vk_object_kind kind, uint64_t identity);
 static int first_subresource(uint32_t level, uint32_t layer, uint32_t count);
-static int image_surface(const struct powervr_vk_image *image, struct powervr_render_surface *surface);
-static int image_view(const struct powervr_vk_image *image, struct powervr_view_shape *view);
+static int first_layer(uint32_t layer, uint32_t count);
+static int image_surface(const struct powervr_vk_image *image, uint32_t level, struct powervr_render_surface *surface);
+static int level_edges(const struct powervr_vk_image *image, uint32_t level, uint32_t *width, uint32_t *height, uint32_t *padded_width);
+static int image_view(const struct powervr_vk_image *image, uint32_t level, struct powervr_view_shape *view, struct powervr_image_layout *level_layout);
 static void blit_request(const VkImageBlit *blit, uint32_t filter, struct powervr_transfer_request *request);
 static int run_one(struct powervr_vk_session *session, struct powervr_transfer_request *request);
+static int buffer_copy_run(struct powervr_vk_session *session, const struct powervr_vk_record *entry, const VkBufferCopy *span, struct transfer_work *work);
+static void buffer_rows(struct transfer_work *work, uint64_t source, uint64_t destination, uint32_t width, uint32_t height);
 
 /*
  * Records one transfer command: its objects (the source as object 0,
@@ -121,6 +141,31 @@ powervr_vk_record_transfer(
 		return 0;
 	}
 
+	/* A buffer copy: [source][destination][u32 count][u64 count]{VkBufferCopy}, whole aligned words. */
+	if (opcode == GPU_OP_CMD_COPY_BUFFER) {
+		source = drv_i915_wire_read_u64(reader);
+		destination = drv_i915_wire_read_u64(reader);
+		(void)drv_i915_wire_read_u32(reader);
+		count = drv_i915_wire_read_u64(reader);
+		if (reader->error != 0 || count > TRANSFER_REGIONS_MAX)
+			return EINVAL;
+		for (index = 0; index < count; index++)
+			i915_vkc_dec_VkBufferCopy(reader, &session->arena, &data->regions.spans[index]);
+		data->count = (uint32_t)count;
+		if (reader->error != 0)
+			return EINVAL;
+		error = hold(session, entry, I915_VK_OBJ_BUFFER, source);
+		if (error == 0)
+			error = hold(session, entry, I915_VK_OBJ_BUFFER, destination);
+		if (error != 0)
+			return error;
+		for (index = 0; index < count; index++) {
+			if (((data->regions.spans[index].srcOffset | data->regions.spans[index].dstOffset | data->regions.spans[index].size) & 3U) != 0)
+				return ENOTSUP;
+		}
+		return 0;
+	}
+
 	/* The two resources, as each command lays them out. */
 	source_kind = I915_VK_OBJ_IMAGE;
 	destination_kind = I915_VK_OBJ_IMAGE;
@@ -170,7 +215,7 @@ powervr_vk_record_transfer(
 	if (error != 0)
 		return error;
 
-	/* Level 0 and layer 0 of each image; a blit only of the same size, unflipped. */
+	/* Layer 0 of each image, and level 0 of both images of a copy between images. */
 	refused = 0;
 	for (index = 0; refused == 0 && index < count; index++) {
 		if (opcode == GPU_OP_CMD_COPY_IMAGE) {
@@ -179,14 +224,14 @@ powervr_vk_record_transfer(
 				refused = first_subresource(data->regions.copies[index].dstSubresource.mipLevel, data->regions.copies[index].dstSubresource.baseArrayLayer, data->regions.copies[index].dstSubresource.layerCount);
 		} else if (opcode == GPU_OP_CMD_BLIT_IMAGE) {
 			blit = &data->regions.blits[index];
-			refused = first_subresource(blit->srcSubresource.mipLevel, blit->srcSubresource.baseArrayLayer, blit->srcSubresource.layerCount);
+			refused = first_layer(blit->srcSubresource.baseArrayLayer, blit->srcSubresource.layerCount);
 			if (refused == 0)
-				refused = first_subresource(blit->dstSubresource.mipLevel, blit->dstSubresource.baseArrayLayer, blit->dstSubresource.layerCount);
+				refused = first_layer(blit->dstSubresource.baseArrayLayer, blit->dstSubresource.layerCount);
 			if (refused == 0 && (blit->srcOffsets[0].x < 0 || blit->srcOffsets[0].y < 0 || blit->srcOffsets[1].x < 0 || blit->srcOffsets[1].y < 0 ||
 			    blit->dstOffsets[0].x < 0 || blit->dstOffsets[0].y < 0 || blit->dstOffsets[1].x < 0 || blit->dstOffsets[1].y < 0))
 				refused = EINVAL;
 		} else {
-			refused = first_subresource(data->regions.buffers[index].imageSubresource.mipLevel, data->regions.buffers[index].imageSubresource.baseArrayLayer, data->regions.buffers[index].imageSubresource.layerCount);
+			refused = first_layer(data->regions.buffers[index].imageSubresource.baseArrayLayer, data->regions.buffers[index].imageSubresource.layerCount);
 		}
 	}
 	if (refused != 0)
@@ -225,11 +270,15 @@ powervr_vk_transfer_run(
 	error = 0;
 	for (index = 0; error == 0 && index < data->count; index++) {
 		kern_memset(&work->request, 0, sizeof(work->request));
-		if (entry->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
+		if (entry->opcode == GPU_OP_CMD_COPY_BUFFER) {
+			/* A buffer copy runs its own transfers. */
+			error = buffer_copy_run(session, entry, &data->regions.spans[index], work);
+			continue;
+		} else if (entry->opcode == GPU_OP_CMD_CLEAR_COLOR_IMAGE) {
 			/* The whole of level 0 to the colour. */
 			image = entry->objects[0]->payload;
 			work->request.kind = POWERVR_TRANSFER_CLEAR;
-			error = image_surface(image, &work->request.destination);
+			error = image_surface(image, 0, &work->request.destination);
 			work->request.area.width = image->shape.width;
 			work->request.area.height = image->shape.height;
 			kern_memcpy(work->request.colour, data->colour, sizeof(work->request.colour));
@@ -238,9 +287,15 @@ powervr_vk_transfer_run(
 			image = entry->objects[1]->payload;
 			other = entry->objects[0]->payload;
 			work->request.kind = POWERVR_TRANSFER_COPY;
-			error = image_surface(image, &work->request.destination);
-			if (error == 0)
-				error = image_view(other, &work->view);
+			if (entry->opcode == GPU_OP_CMD_BLIT_IMAGE) {
+				error = image_surface(image, data->regions.blits[index].dstSubresource.mipLevel, &work->request.destination);
+				if (error == 0)
+					error = image_view(other, data->regions.blits[index].srcSubresource.mipLevel, &work->view, &work->level_layout);
+			} else {
+				error = image_surface(image, 0, &work->request.destination);
+				if (error == 0)
+					error = image_view(other, 0, &work->view, &work->level_layout);
+			}
 			/* A copy moves raw texels: the two formats need the same texel size. */
 			if (error == 0 && entry->opcode == GPU_OP_CMD_COPY_IMAGE && other->format->texel_bytes != image->format->texel_bytes)
 				error = ENOTSUP;
@@ -272,7 +327,7 @@ powervr_vk_transfer_run(
 			work->request.kind = POWERVR_TRANSFER_COPY;
 			if (error == 0 && entry->opcode == GPU_OP_CMD_COPY_BUFFER_TO_IMAGE) {
 				/* The buffer as a linear view, read from its first texel. */
-				error = image_surface(image, &work->request.destination);
+				error = image_surface(image, copy->imageSubresource.mipLevel, &work->request.destination);
 				kern_memset(&work->layout, 0, sizeof(work->layout));
 				work->layout.row_pitch = row * image->format->texel_bytes;
 				work->layout.padded_width = row;
@@ -295,7 +350,7 @@ powervr_vk_transfer_run(
 				work->request.source = &work->view;
 			} else if (error == 0) {
 				/* The buffer as a linear destination, written from its first texel. */
-				error = image_view(image, &work->view);
+				error = image_view(image, copy->imageSubresource.mipLevel, &work->view, &work->level_layout);
 				work->request.destination.format = image->format;
 				work->request.destination.address = address;
 				work->request.destination.width = row;
@@ -369,43 +424,144 @@ first_subresource(
 	return 0;
 }
 
-/* Describes level 0 of an image as a destination. */
+/*
+ * Refuses a layer but the first: the images have one layer (the
+ * remaining layers from layer 0, VK_REMAINING_ARRAY_LAYERS, are it).
+ */
+static int
+first_layer(
+	uint32_t layer,
+	uint32_t count)
+{
+	/* Layer 0, one layer or all of them. */
+	if (layer != 0 || (count != 1 && count != VK_REMAINING_ARRAY_LAYERS))
+		return ENOTSUP;
+
+	/* Succeeded: the first layer. */
+	return 0;
+}
+
+/*
+ * Works out a level of a twiddled image as an image of its own: the
+ * level's edges (halved per level, at least one) and its padded row,
+ * which must be the power of two the level's own width rounds up to
+ * (the core twiddles a surface by its edges rounded up), else ENOTSUP.
+ *
+ * Procedure referenced: Mesa 26.2.5 src/imagination/vulkan/pvr_image.c
+ * (pvr_image_plane_setup_mip_levels: each level's physical extent the
+ * level-0 one halved) and src/imagination/vulkan/rogue/pvr_blit.c
+ * (pvr_setup_transfer_surface: a level as a surface of its own at the
+ * level's offset).
+ */
+static int
+level_edges(
+	const struct powervr_vk_image *image,
+	uint32_t level,
+	uint32_t *width,
+	uint32_t *height,
+	uint32_t *padded_width)
+{
+	uint32_t padded_height;
+	uint32_t power;
+
+	/* A level the image has. */
+	if (level >= image->shape.levels || level >= POWERVR_IMAGE_LEVELS_MAX)
+		return EINVAL;
+
+	/* The level's edges and padded edges. */
+	*width = image->shape.width >> level;
+	if (*width == 0)
+		*width = 1;
+	*height = image->shape.height >> level;
+	if (*height == 0)
+		*height = 1;
+	*padded_width = image->layout.padded_width >> level;
+	if (*padded_width == 0)
+		*padded_width = 1;
+	padded_height = image->layout.padded_height >> level;
+	if (padded_height == 0)
+		padded_height = 1;
+
+	/* Level 0 is the image itself; a level beyond it must twiddle as its padded edges. */
+	if (level == 0)
+		return 0;
+	if (image->shape.linear)
+		return ENOTSUP;
+	power = 1;
+	while (power < *width)
+		power <<= 1;
+	if (power != *padded_width)
+		return ENOTSUP;
+	power = 1;
+	while (power < *height)
+		power <<= 1;
+	if (power != padded_height)
+		return ENOTSUP;
+
+	/* Succeeded: the level's edges. */
+	return 0;
+}
+
+/* Describes one level of an image as a destination: the level's place, edges and rows. */
 static int
 image_surface(
 	const struct powervr_vk_image *image,
+	uint32_t level,
 	struct powervr_render_surface *surface)
 {
 	uint64_t address;
+	uint32_t width;
+	uint32_t height;
+	uint32_t padded;
 	int error;
 
-	/* The image's memory. */
+	/* The level's edges, and the image's memory. */
+	error = level_edges(image, level, &width, &height, &padded);
+	if (error != 0)
+		return error;
 	error = powervr_vk_image_address(image, &address);
 	if (error != 0)
 		return error;
 
-	/* Its format, address, edges and rows. */
+	/* Its format, the level's address, edges and rows. */
 	surface->format = image->format;
-	surface->address = address;
-	surface->width = image->shape.width;
-	surface->height = image->shape.height;
+	surface->address = address + image->layout.level_offset[level];
+	surface->width = width;
+	surface->height = height;
 	surface->linear = image->shape.linear;
 	surface->row_pitch = image->layout.row_pitch;
 	surface->padded_width = image->layout.padded_width;
+	if (level != 0) {
+		surface->padded_width = padded;
+		surface->row_pitch = padded * image->format->texel_bytes;
+	}
 
 	/* Succeeded: the surface. */
 	return 0;
 }
 
-/* Describes level 0 of an image as a source view. */
+/*
+ * Describes one level of an image as a source view: level 0 as the
+ * image, a further level as an image of one level of its own at the
+ * level's offset, its layout written to level_layout.
+ */
 static int
 image_view(
 	const struct powervr_vk_image *image,
-	struct powervr_view_shape *view)
+	uint32_t level,
+	struct powervr_view_shape *view,
+	struct powervr_image_layout *level_layout)
 {
 	uint64_t address;
+	uint32_t width;
+	uint32_t height;
+	uint32_t padded;
 	int error;
 
-	/* The image's memory. */
+	/* The level's edges, and the image's memory. */
+	error = level_edges(image, level, &width, &height, &padded);
+	if (error != 0)
+		return error;
 	error = powervr_vk_image_address(image, &address);
 	if (error != 0)
 		return error;
@@ -421,6 +577,24 @@ image_view(
 	view->level_count = 1;
 	view->layer_count = 1;
 	view->linear = image->shape.linear;
+
+	/* A further level: an image of its own of that level. */
+	if (level != 0) {
+		kern_memset(level_layout, 0, sizeof(*level_layout));
+		level_layout->row_pitch = padded * image->format->texel_bytes;
+		level_layout->padded_width = padded;
+		level_layout->padded_height = image->layout.padded_height >> level;
+		if (level_layout->padded_height == 0)
+			level_layout->padded_height = 1;
+		level_layout->padded_depth = 1;
+		level_layout->layer_bytes = (uint64_t)level_layout->row_pitch * level_layout->padded_height;
+		level_layout->bytes = level_layout->layer_bytes;
+		view->layout = level_layout;
+		view->address = address + image->layout.level_offset[level];
+		view->width = width;
+		view->height = height;
+		view->image_levels = 1;
+	}
 
 	/* Succeeded: the view. */
 	return 0;
@@ -492,4 +666,119 @@ run_one(
 
 	/* Succeeded: the region is done. */
 	return 0;
+}
+
+/*
+ * Runs one region of a buffer copy: the words as rows of BUFFER_ROW_WORDS
+ * 32-bit texels in rectangles of up to BUFFER_ROWS_MAX rows, then the
+ * words left over as one shorter row, each a same-format copy between
+ * linear surfaces.
+ *
+ * Procedure referenced:
+ * Mesa 26.2.5 src/imagination/vulkan/rogue/pvr_blit.c
+ * (pvr_cmd_copy_buffer_region: the buffer copy
+ * as transfers of linear rectangles of raw texels, the remainder as a
+ * row of its own).
+ */
+static int
+buffer_copy_run(
+	struct powervr_vk_session *session,
+	const struct powervr_vk_record *entry,
+	const VkBufferCopy *span,
+	struct transfer_work *work)
+{
+	const struct powervr_vk_buffer *source_buffer;
+	const struct powervr_vk_buffer *destination_buffer;
+	uint64_t source;
+	uint64_t destination;
+	uint64_t words;
+	uint64_t rows;
+	uint64_t done;
+	uint32_t height;
+	uint32_t left;
+	int error;
+
+	/* The two buffers' memory at the region's offsets. */
+	source_buffer = entry->objects[0]->payload;
+	destination_buffer = entry->objects[1]->payload;
+	error = powervr_vk_buffer_address(source_buffer, &source);
+	if (error == 0)
+		error = powervr_vk_buffer_address(destination_buffer, &destination);
+	if (error != 0)
+		return error;
+	source += span->srcOffset;
+	destination += span->dstOffset;
+
+	/* The whole rows, a rectangle of up to BUFFER_ROWS_MAX at a time. */
+	words = span->size / 4U;
+	rows = words / BUFFER_ROW_WORDS;
+	for (done = 0; done < rows; done += height) {
+		height = BUFFER_ROWS_MAX;
+		if (rows - done < BUFFER_ROWS_MAX)
+			height = (uint32_t)(rows - done);
+		buffer_rows(work, source + done * BUFFER_ROW_WORDS * 4U, destination + done * BUFFER_ROW_WORDS * 4U, BUFFER_ROW_WORDS, height);
+		error = run_one(session, &work->request);
+		if (error != 0)
+			return error;
+	}
+
+	/* The words left over, as one row. */
+	left = (uint32_t)(words % BUFFER_ROW_WORDS);
+	if (left != 0) {
+		buffer_rows(work, source + rows * BUFFER_ROW_WORDS * 4U, destination + rows * BUFFER_ROW_WORDS * 4U, left, 1);
+		error = run_one(session, &work->request);
+		if (error != 0)
+			return error;
+	}
+
+	/* Succeeded: the region is copied. */
+	return 0;
+}
+
+/* Fills the request and the source view of a copy of a rectangle of 32-bit words between two linear places. */
+static void
+buffer_rows(
+	struct transfer_work *work,
+	uint64_t source,
+	uint64_t destination,
+	uint32_t width,
+	uint32_t height)
+{
+	const struct powervr_format *format;
+
+	/* The raw 32-bit texels on both sides. */
+	format = powervr_transfer_raw_format(4);
+
+	/* The source: a linear view of the rows. */
+	kern_memset(&work->layout, 0, sizeof(work->layout));
+	work->layout.row_pitch = width * 4U;
+	work->layout.padded_width = width;
+	work->layout.padded_height = height;
+	work->layout.padded_depth = 1;
+	work->layout.layer_bytes = (uint64_t)work->layout.row_pitch * height;
+	work->layout.bytes = work->layout.layer_bytes;
+	kern_memset(&work->view, 0, sizeof(work->view));
+	work->view.format = format;
+	work->view.layout = &work->layout;
+	work->view.address = source;
+	work->view.width = width;
+	work->view.height = height;
+	work->view.image_levels = 1;
+	work->view.level_count = 1;
+	work->view.layer_count = 1;
+	work->view.linear = 1;
+
+	/* The destination: the same rows, linear, copied from the source's corner. */
+	kern_memset(&work->request, 0, sizeof(work->request));
+	work->request.kind = POWERVR_TRANSFER_COPY;
+	work->request.destination.format = format;
+	work->request.destination.address = destination;
+	work->request.destination.width = width;
+	work->request.destination.height = height;
+	work->request.destination.linear = 1;
+	work->request.destination.row_pitch = width * 4U;
+	work->request.destination.padded_width = width;
+	work->request.area.width = width;
+	work->request.area.height = height;
+	work->request.source = &work->view;
 }

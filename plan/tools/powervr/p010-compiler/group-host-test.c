@@ -589,6 +589,31 @@ main(void)
 		}
 	}
 
+	/*
+	 * The alpha feedback of a discarding fragment shader (Mesa's alphaf):
+	 * main, the back end's vistest (backend_op 0b100 at 0:7..5, pwen 0,
+	 * vistest_op atst 1 at 0:1, ifb 0 = 0x82), sources zero, zero and 7
+	 * of the special bank, run where p0 holds (e1_z1, 1), under the
+	 * overlap check; then the alpha test with its own feedback and p0
+	 * written (alphatst: pwen 0:2, ifb 0:0 = 0x87).
+	 */
+	{
+		static const uint8_t alphaf[] = { 0x82 };
+		static const uint8_t alphatst[] = { 0x87 };
+		struct powervr_usc_operation part;
+
+		operation = blank(MACHINE_FEEDBACK);
+		operation.condition = POWERVR_USC_RUN_IF_PREDICATE;
+		ok = shader_backend_group(&operation, 0, &group) == 0;
+		ok = ok && group.unit == POWERVR_USC_UNIT_MAIN && group.condition == 1 && group.overlap_check == 1;
+		ok = ok && group.write_0 == 0 && group.write_1 == 0;
+		ok = ok && slot_is(&group.source[0], 0, 0) && slot_is(&group.source[1], 0, 0) && slot_is(&group.source[2], 0, 7);
+		ok = ok && phase_is(&group, POWERVR_USC_PHASE_BACKEND, alphaf, 1);
+		check(ok, "alpha feedback where p0 holds");
+		ok = powervr_usc_visibility_test(1, 1, 1, &part) == 0 && part.length == 1 && memcmp(part.bytes, alphatst, 1) == 0;
+		check(ok, "alpha test with its feedback, writing p0");
+	}
+
 	printf("powervr compiler group host test: %u passed, %u failed\n", passed, failed);
 	return failed == 0 ? 0 : 1;
 }

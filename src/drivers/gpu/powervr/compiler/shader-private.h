@@ -99,7 +99,8 @@ struct shader_spirv_loop {
  *
  * The id table and pools are filled by the first pass over the module's
  * declarations; the second pass walks the entry point's blocks and
- * writes the intermediate form.
+ * writes the intermediate form.  Discard is the value a fragment
+ * shader that discards keeps its discard in (0 for none).
  */
 struct shader_spirv_reader {
 	const uint32_t *words;
@@ -123,6 +124,7 @@ struct shader_spirv_reader {
 	uint32_t push_request;
 	uint32_t push_words;
 	uint32_t returned;
+	uint32_t discard;
 	uint32_t output_values[POWERVR_SHADER_OUTPUTS * 4U];
 	struct powervr_ir_shader *shader;
 	struct powervr_shader_program *program;
@@ -189,7 +191,8 @@ enum machine_kind {
 	MACHINE_CONDITION,
 	MACHINE_BRANCH,
 	MACHINE_ITERATE_SAMPLE,
-	MACHINE_SUM_OF_PRODUCTS
+	MACHINE_SUM_OF_PRODUCTS,
+	MACHINE_FEEDBACK
 };
 
 /*

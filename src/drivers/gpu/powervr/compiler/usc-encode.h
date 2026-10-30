@@ -305,6 +305,7 @@ int powervr_usc_fence(unsigned address_source, unsigned data_return, struct powe
 int powervr_usc_atomic(unsigned kind, unsigned source, unsigned destination, unsigned data_return, struct powervr_usc_operation *operation);
 int powervr_usc_sample(unsigned normalised, unsigned data_return, unsigned dimensions, unsigned channels, unsigned lod_mode, struct powervr_usc_operation *operation);
 int powervr_usc_emit_pixel(unsigned free_partition, struct powervr_usc_operation *operation);
+int powervr_usc_visibility_test(unsigned predicate_write, unsigned alpha_test, unsigned feedback, struct powervr_usc_operation *operation);
 int powervr_usc_iterate(unsigned destination, unsigned coefficient, unsigned perspective, unsigned w_coefficient, unsigned mode, unsigned count, unsigned data_return, struct powervr_usc_operation *operation);
 int powervr_usc_iterate_sample(unsigned destination, unsigned coefficient, unsigned perspective, unsigned w_coefficient, unsigned image, unsigned sampler, unsigned mode, unsigned dimensions, unsigned channels, unsigned normalised, unsigned data_return, unsigned schedule, unsigned half, struct powervr_usc_operation *operation);
 int powervr_usc_vertex_output(unsigned kind, unsigned write_select, unsigned source, unsigned immediate, unsigned address, struct powervr_usc_operation *operation);

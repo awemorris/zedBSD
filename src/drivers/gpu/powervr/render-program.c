@@ -614,6 +614,7 @@ powervr_render_vertex_pds(
 	dma.stride = POWERVR_RENDER_VERTEX_WORDS * 4U;
 	dma.words = POWERVR_RENDER_VERTEX_WORDS;
 	dma.reg = 0;
+	dma.instance = false;
 	error = powervr_data_vertex_build(&dma, 1, POWERVR_SHADER_NO_REG, POWERVR_SHADER_NO_REG, task, program);
 	if (error != 0)
 		return error;

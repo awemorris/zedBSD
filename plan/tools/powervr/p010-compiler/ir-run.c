@@ -247,6 +247,10 @@ ir_run(
 				if (instruction->immediate < IR_RUN_OUTPUTS)
 					run->outputs[instruction->immediate][lane] = a;
 				break;
+			case POWERVR_IR_FEEDBACK:
+				/* The lane's fragment is dropped when the discard is not zero. */
+				run->dropped[lane] = a != 0;
+				break;
 			case POWERVR_IR_SAMPLE:
 				run->sample(run, instruction->immediate, instruction->immediate_2, a, b, result);
 				break;

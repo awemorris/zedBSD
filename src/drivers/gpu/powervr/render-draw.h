@@ -68,10 +68,11 @@
 #define POWERVR_DRAW_VIEWPORT_WORDS	6U
 #define POWERVR_DRAW_SCISSOR_WORDS	2U
 
-/* One vertex binding: its number and stride. */
+/* One vertex binding: its number, its stride and whether it steps per instance rather than per vertex. */
 struct powervr_draw_binding {
 	uint32_t binding;
 	uint32_t stride;
+	bool instance;
 };
 
 /* One vertex attribute: its location, binding, format and offset. */
@@ -85,7 +86,8 @@ struct powervr_draw_attribute {
 /*
  * The fixed state of a graphics pipeline and the keys its shaders are
  * compiled with.  The viewport and scissor are the static ones unless
- * dynamic.  Blending lives in the fragment key.
+ * dynamic.  Blending lives in the fragment key.  Discards is set once
+ * the fragment shader is compiled, when it may discard its fragment.
  */
 struct powervr_draw_fixed {
 	uint32_t topology;
@@ -95,6 +97,7 @@ struct powervr_draw_fixed {
 	bool depth_write;
 	uint32_t depth_compare;
 	bool blending;
+	bool discards;
 	bool dynamic_viewport;
 	bool dynamic_scissor;
 	VkViewport viewport;

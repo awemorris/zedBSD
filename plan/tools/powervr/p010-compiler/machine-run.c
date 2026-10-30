@@ -59,7 +59,8 @@ enum {
 	KIND_CONDITION,
 	KIND_BRANCH,
 	KIND_ITERATE_SAMPLE,
-	KIND_SUM_OF_PRODUCTS
+	KIND_SUM_OF_PRODUCTS,
+	KIND_FEEDBACK
 };
 
 static float as_float(uint32_t word);
@@ -125,6 +126,16 @@ machine_run_program(
 		/* Control first. */
 		if (operation->kind == KIND_END || operation->kind == KIND_VERTEX_END)
 			break;
+
+		/* The alpha feedback passes the lanes it runs on; an enabled lane it skips is dropped. */
+		if (operation->kind == KIND_FEEDBACK) {
+			for (lane = 0; lane < 32; lane++) {
+				if ((enabled >> lane & 1U) != 0)
+					run->dropped[lane] = (taking >> lane & 1U) == 0;
+			}
+			pc++;
+			continue;
+		}
 		if (operation->kind == KIND_BRANCH) {
 			any = 0;
 			if (operation->variant == 1) {

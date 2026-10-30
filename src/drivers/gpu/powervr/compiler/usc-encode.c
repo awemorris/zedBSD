@@ -959,6 +959,53 @@ powervr_usc_emit_pixel(
 }
 
 /*
+ * Encodes the back end's visibility test: the alpha test (alpha_test 1)
+ * or the depth feedback (0), the predicate it writes (predicate_write),
+ * and with feedback 1 the alpha test's own feedback to the depth and
+ * visibility unit (Mesa's alphatst; 0 for alphaf, the feedback alone).
+ */
+int
+powervr_usc_visibility_test(
+	unsigned predicate_write,
+	unsigned alpha_test,
+	unsigned feedback,
+	struct powervr_usc_operation *operation)
+{
+	/*
+	 * Values referenced:
+	 * Mesa 26.2.5 src/imagination/pco/pco_isa.py
+	 * (I_BACKEND pieces backend_op 0:7..5 with vistest 0b100,
+	 * rsvd0_vistest 0:4..3, pwen_vistest 0:2, vistest_op 0:1 with
+	 * depthf 0 and atst 1, ifb 0:0; I_VISTEST_ATST, I_VISTEST_DEPTHF)
+	 * and src/imagination/pco/pco_map.py (encode_map of O_ALPHAF: ifb
+	 * false, of O_ALPHATST: ifb true, pwen when p0 is written).
+	 */
+	static const struct usc_piece pieces[] = {
+		{ 0, 5, 3, 0, 0 },
+		{ 0, 2, 1, 1, 0 },
+		{ 0, 1, 1, 2, 0 },
+		{ 0, 0, 1, 3, 0 }
+	};
+	static const struct usc_layout layout = { 1, 4, 4, { 3, 1, 1, 1 }, pieces };
+	uint32_t values[4];
+	int error;
+
+	/* Collects the fields in the layout's order. */
+	values[0] = 4;
+	values[1] = predicate_write;
+	values[2] = alpha_test;
+	values[3] = feedback;
+
+	/* Places the fields after checking each fits. */
+	error = operation_build(&layout, values, operation);
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the one-byte test. */
+	return 0;
+}
+
+/*
  * Encodes the control unit's direct iteration of fragment varyings
  * from coefficient registers into temporaries.
  *
