@@ -91,17 +91,43 @@ arm64_bsp_map_devices(
 }
 
 /*
- * Leaves the stall watch's report on the framebuffer.
- *
- * The Pi 5's compositor (HVS6) is laid out differently from the Pi 4's the
- * watch writes into, so the board offers none.
+ * Leaves the stall watch's report on the framebuffer: the Pi 5's
+ * compositor (HVS6) is laid out differently from the Pi 4's, which is the
+ * only one the board support knows, so the board offers none.
  */
-volatile uint32_t *
-arm64_bsp_watch_compositor(
+void
+arm64_bsp_watch_init(
 	void)
 {
-	/* Succeeded: no compositor the watch knows. */
-	return NULL;
+	/* Succeeded: nothing to map. */
+	return;
+}
+
+/*
+ * Reports the compositor's planes: none the watch knows.
+ */
+unsigned
+arm64_bsp_watch_planes(
+	struct arm64_watch_plane *planes,
+	unsigned capacity)
+{
+	/* No plane is reported. */
+	(void)planes;
+	(void)capacity;
+
+	/* Succeeded: none. */
+	return 0;
+}
+
+/*
+ * Shows one plane alone: never asked, since no plane is reported.
+ */
+void
+arm64_bsp_watch_show_alone(
+	const struct arm64_watch_plane *plane)
+{
+	/* Nothing to show. */
+	(void)plane;
 }
 
 /*
