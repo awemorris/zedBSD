@@ -10,7 +10,9 @@
  *
  * The driver moves data through the controller's FIFO by programmed I/O
  * and polls the controller's raw interrupt status; it takes no interrupt
- * and uses no DMA.  It brings one SD memory card up from the idle state
+ * and uses no DMA.  The FIFO of a run is served with preemption off: a
+ * FIFO left full stops the card clock in the middle of a block, and the
+ * reads that met it failed their data CRC.  It brings one SD memory card up from the idle state
  * (identification at 400 kHz, the bus widened to four lines, high speed
  * when the card and the slot allow it) and publishes it as one disk.  A
  * request is moved with one single-block or multiple-block command per run
@@ -34,6 +36,7 @@
 #include <kern/kcrt.h>
 #include <kern/klog.h>
 #include <kern/lock.h>
+#include <kern/sched.h>
 #include <uapi/errno.h>
 #include <uapi/sysctl.h>
 
@@ -457,6 +460,7 @@ static int send_command(struct dw_mmc_unit *unit, struct dw_mmc_command *command
 static int send_app_command(struct dw_mmc_unit *unit, struct dw_mmc_command *command);
 static int wait_command_done(struct dw_mmc_unit *unit);
 static int move_data(struct dw_mmc_unit *unit, struct dw_mmc_command *command);
+static int serve_fifo(struct dw_mmc_unit *unit, struct dw_mmc_command *command);
 static int wait_raw_status(struct dw_mmc_unit *unit, uint32_t wanted);
 static void read_fifo(struct dw_mmc_unit *unit, uint8_t *data, uint32_t bytes);
 static void write_fifo(struct dw_mmc_unit *unit, const uint8_t *data, uint32_t bytes);
@@ -1239,6 +1243,38 @@ wait_command_done(
 }
 
 /*
+ * Moves a command's data through the FIFO with preemption off.
+ *
+ * A thread switch in the middle of a run leaves the FIFO full (or, for a
+ * write, empty) for as long as another thread runs, and the controller
+ * stops the card clock until the FIFO is served.  On the VisionFive 2 the
+ * reads that met a full FIFO were the ones that failed their data CRC
+ * (status a4), at 49.5 MHz and at 24.75 MHz; with preemption off no read
+ * failed at 24.75 MHz.  Interrupts stay on: a handler is short next to a
+ * thread's quantum.  A run of DW_MMC_RUN_BLOCKS blocks keeps preemption off
+ * for about 5 ms at 24.75 MHz.
+ */
+static int
+move_data(
+	struct dw_mmc_unit *unit,
+	struct dw_mmc_command *command)
+{
+	int error;
+
+	/* Serves the FIFO until the run has moved, without giving the CPU away. */
+	kern_preempt_disable();
+	error = serve_fifo(unit, command);
+	kern_preempt_enable();
+
+	/* Reports why the data did not move. */
+	if (error != 0)
+		return error;
+
+	/* Succeeded: the data has moved. */
+	return 0;
+}
+
+/*
  * Moves a command's data through the FIFO, a threshold's worth at a time,
  * then waits for the end of the data and for the automatic stop.
  *
@@ -1247,7 +1283,7 @@ wait_command_done(
  * dwmmc_exec_command).
  */
 static int
-move_data(
+serve_fifo(
 	struct dw_mmc_unit *unit,
 	struct dw_mmc_command *command)
 {
