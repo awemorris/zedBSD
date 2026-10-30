@@ -3,7 +3,7 @@
 # ws307-p008 boot loader が UFS から kernel を読む
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §5.9（loader の FAT・firmware の FAT）・§5.10。Queue: q1665 / q1665-i01（担当 P4、2026-10-29）。
-- Status: in-progress（2026-10-29 Q1 の判定: 512 と 4096 の段は受け入れを満たした。残り: 512 の disk の j3 の sync の確かめ。q1665-i07 で一度確かめた後に UFS の直しが入ったので、q1698-i01 で今の tree での確かめ直しを p004 の試験に入れた（未実行））
+- Status: cleared（2026-10-30 Q1 の判定。512 と 4096 の段の受け入れは 2026-10-29、512 の j3 の sync は UFS の直しの後に q1711-i01 の p004 の試験で 3 回 ok、merge f9914c44e）
 - 出典: 2026-10-28 ユーザー「P4に、ESPにカーネルをインストールすると回答してしまいましたが、ブートローダがUFSからカーネルをロードできるようにしたいです。そのphaseを作ってほしいです。」
 
 ## 結果（2026-10-29、P4）
@@ -71,4 +71,4 @@
 ## q1711-i01（2026-10-30、P6、worktree p6-ws307）: 512 の j3 の sync の確かめ直し
 
 - p004 の試験が兼ねた（UFS の遅さの直し 6387b82a0 の後の tree、main 5aca73738 から作った `build/ws307-p004/installer-image.img`）。`plan/ws307/tests/p004-gtk.sh` の run2・run3・run4 の 3 回とも `HOST j3-sync ok`: install-admin で NVMe 512 に導入した root（native UFS、j3）に 2,867,200 byte を書き、rename、`sync`、mount のまま guest を止め、host の `ufs-cat`（`plan/ws307/tests/host/ufs-cat.c`＋`bootloader/common/ufs-read.c`、512 byte の block）が同じ cksum で読んだ（run4 は `build/ws307-test/p004.oeVctS`）。
-- これで p008 の残りは無い（`video=640x480` の観察は Q1 の判断のまま）。判定は Q1。
+- これで p008 の残りは無い（`video=640x480` の観察は Q1 の判断のまま）。2026-10-30 Q1 の判定で cleared。

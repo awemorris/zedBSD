@@ -3,7 +3,7 @@
 # ws307-p004 package の header・.pc と pkgconf、導入先で GTK4 の app を build する
 
 - 親: [WS307](../ws.md)。仕様: [spec.md](../spec.md) §6.2（U13、T18）。Queue: q1698 / q1698-i01（担当 P4、2026-10-30、worktree `/home/awe/zedBSD-worktrees/p4-ws307o`、branch `agent/p4-ws307o`、基点 main d3abf7c27）。
-- Status: in-progress（q1711-i01 の QEMU の run4 で PASS（GTK4 と C++ の build と実行、j3-sync）。Q1 の判定待ち）
+- Status: cleared（2026-10-30 Q1 の判定。q1711-i01 の QEMU の run4 PASS（`build/ws307-test/p004.oeVctS`）、merge f9914c44e。案 B は F-WS307-clang-libcxx-driver（Q1 が登録））
 - ユーザーの回答（2026-10-30、原文、ws.md）:「clangとlibcxxのビルドは許可しますが、導入先というのはどういう意味なのかわかりません。zedBSDホストでのセルフビルドのことですか？」→ Q1 の解釈: 導入先 = installer で入れた zedBSD（その上の self build）。ユーザーに確認中で、違えば Q1 が知らせる。clang・libcxx の package の build は許可（共有の toolchain の tree は lock のまま、自分の worktree の `build/` で）。
 
 ## 実装（commit 2aad28963）
