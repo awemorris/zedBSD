@@ -48,7 +48,7 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 | [p005](phase005/phase.md) | RDNA: NGG A（passthrough、wave32 1 つの subgroup） | p004 | cleared（2026-10-27 13:52 Q1 判定、q1611。受け入れ: export の EXEC の wait の修正、1 体 pixel 差 0、6500 体 8 pixel、hang 回復、GPU 41.4 ms） |
 | [p006](phase006/phase.md) | RDNA: NGG B+C（primitive の culling と頂点の詰め直し・属性の後回しを Mesa の形で一緒に。2026-10-27 14:50 Q1: compaction 無しの culling は GFX10 で止まる（仮説 A）ので p007 と統合） | p005 | in-progress（q1668: big-1000 35.5 → 57〜59 fps（Linux 87）、subs-1000 1 submit 48 → 39 µs（Linux 10）、scene-1500 209・scene-6500 49.6（Linux 200.4・50.1）） |
 | p007 | RDNA: NGG C（vertex の詰め直しと属性の後回し、wave をまたぐ subgroup）、目標 GPU 約 20 ms | p006 | p006 に統合（2026-10-27 14:50 Q1。目標 GPU 約 20 ms は p006 の受け入れへ） |
-| p008〜p009 | RDNA: HTILE、guard band、CPU 側の record（2.3 ms）の短縮 | p007 | — |
+| p008〜p009 | RDNA: HTILE、guard band、CPU 側の record（2.3 ms）の短縮 | p007 | 実機が戻るまで止め（2026-10-30 Q1: RX 5600 XT が抜かれている） |
 | [p010](phase010/phase.md) | NVIDIA（RTX 2070）: nvrtx の起動、desktop の計測と 60 fps、Linux の NVK の基準 | 機械の入れ替え（2026-10-29 ユーザー）、P2 | cleared（2026-10-30 14:10 P7 q1712-i01: WS309 の後の main 5aca73738 で frame-ops 2 回、launch 63・64、type 61・62、output 68・65、drag 61・60、home 63・64、wiseview 65・60 fps、scroll・hover・keys は入力の間隔） |
 | [p010a](phase010a/phase.md) | NVIDIA: nvrtx の executor に mview が要る物（depth・index の draw・instance・mip・uniform buffer・cull） | p010 | cleared（2026-10-29 10:48 q1670-i04: 実機で depth・texture が参照と一致、scene-5000 42.2 fps。残り: instance の rate の実機の個別の確かめ） |
 | [p011](phase011/phase.md) | NVIDIA: Linux（NVK）で約 50 fps の scene（qs40 ×5000）での差の計測と 50 fps（p012〜p019 は改善の予備）。GPU の待ちを lock の外へ出す件（非同期の submit）は 2026-10-29 Q1 の判断でこの p011 で行う（WS250 は担当が無く止まっている。WS250 の design.md の期限の STOP・session ごとの worker と食い違わない形にし、WS250 はその上に作る） | p010a | cleared（2026-10-30 Q1 の判定: NVK と揺れの内で同等、文の「50 fps 以上」は未達（49.5〜49.7 fps）。2026-10-29: scene-5000 は 49.1〜49.5 fps で、同じ機械の NVK の単独の run 49.1・平均 50.1 と揺れの内で並ぶ。残りは GPU 19.5 ms、50 fps を明らかに超えるのは p012 以降の予備（vertex の program の質）。2026-10-30 q1693-i01: compiler の FFMA と operand の直読み（VS 108 → 59 命令）でも GPU の時間は不変、49.50・49.69 fps。固定機能で決まる見込み） |
@@ -257,4 +257,5 @@ GPU ごとに同じ手順（desktop の 60 fps、重い 3D の model の 50 fps�
 - 結果: p010 cleared（WS309 の後の main 5aca73738 で frame-ops 2 回、frame で決まる段は全部 60 fps 以上）。p012 uncleared（頂点の側の固定機能の hardware の限界、
   NVK と同等。Q1 の判断「(A) の時は、p012 を uncleared … として記録し、ws.md の残りへ進んでください。」）。道具: `plan/ws291/tests/rtx-desk-main.sh`・
   `rtx-scene-main.sh`・`rtx-thermal.sh`・`rtx-files.sh`（NVMe の kernel を読み戻し、main の desktop の program を入れて測り、終わりに戻して照合）。
+- Q1 の指示（2026-10-30）: 「RDNA の p006・p008・p009 は、RX 5600 XT が抜かれていて実機が無いので、今回は進めません。ws.md に「実機が戻るまで止め」と記録してください。」→ p006・p008・p009 は実機（RX 5600 XT）が戻るまで止め。規約の見直しは RDNA の後。
 - 再開点（14:45 P7）: NVIDIA の段の残りは無い。ws.md の残りは p008〜p009（RDNA、RX 5600 XT を挿し直すまで実機が無い）、p020（PowerVR、VF2 の割り当てが要る）、最後の規約の見直し。
