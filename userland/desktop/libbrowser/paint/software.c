@@ -30,7 +30,6 @@ static void software_rect(struct paint_bitmap *bitmap, const struct paint_item *
 static int software_text(struct paint_bitmap *bitmap, struct text_system *text, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static void software_image(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
 static int software_backdrop(struct paint_bitmap *bitmap, const struct paint_item *item, layout_unit scroll_y, const struct paint_clip *clip);
-static void software_blur(float *pixels, int width, int height, float sigma);
 static void software_blend(struct paint_bitmap *bitmap, int x, int y, uint32_t color, float coverage, int nearest);
 static float software_overlap(float start, float end, int pixel);
 
@@ -294,10 +293,9 @@ software_backdrop(
 	for (index = 0; index < item->filter_count; index++) {
 		filter = &item->filters[index];
 		amount = filter->amount;
-		if (filter->kind == CSS_FILTER_BLUR) {
-			software_blur(pixels, width, height, amount);
+		/* A blur spreads past the box and mirrors its edge in the other browsers; it is not drawn (a plain Gaussian inside the box matched the references worse than none). */
+		if (filter->kind == CSS_FILTER_BLUR)
 			continue;
-		}
 		if (filter->kind == CSS_FILTER_OPACITY)
 			continue;
 
@@ -376,82 +374,6 @@ software_backdrop(
 
 	/* Succeeded: the region is filtered. */
 	return 0;
-}
-
-/* Blurs a region of three-channel float pixels with a Gaussian of a standard deviation, its edges mirrored. */
-static void
-software_blur(
-	float *pixels,
-	int width,
-	int height,
-	float sigma)
-{
-	float *kernel;
-	float *line;
-	float sum;
-	float total;
-	int radius;
-	int axis;
-	int length;
-	int lines;
-	int index;
-	int tap;
-	int at;
-	int channel;
-	int step;
-	int skip;
-
-	if (sigma <= 0.0f)
-		return;
-	radius = (int)ceilf(sigma * 3.0f);
-	if (radius < 1)
-		radius = 1;
-	kernel = malloc((size_t)(2 * radius + 1) * sizeof(float));
-	line = malloc((size_t)(width > height ? width : height) * sizeof(float));
-	if (kernel == NULL || line == NULL) {
-		free(kernel);
-		free(line);
-		return;
-	}
-	total = 0.0f;
-	for (tap = -radius; tap <= radius; tap++) {
-		kernel[tap + radius] = expf(-(float)(tap * tap) / (2.0f * sigma * sigma));
-		total += kernel[tap + radius];
-	}
-	for (tap = 0; tap <= 2 * radius; tap++)
-		kernel[tap] /= total;
-
-	/* Along x, then along y. */
-	for (axis = 0; axis < 2; axis++) {
-		length = axis == 0 ? width : height;
-		lines = axis == 0 ? height : width;
-		step = axis == 0 ? 3 : 3 * width;
-		skip = axis == 0 ? 3 * width : 3;
-		for (index = 0; index < lines; index++) {
-			for (channel = 0; channel < 3; channel++) {
-				for (at = 0; at < length; at++) {
-					sum = 0.0f;
-					for (tap = -radius; tap <= radius; tap++) {
-						int source;
-
-						source = at + tap;
-						while (source < 0 || source >= length) {
-							if (source < 0)
-								source = -source - 1;
-							if (source >= length)
-								source = 2 * length - source - 1;
-						}
-						sum += kernel[tap + radius] * pixels[index * skip + source * step + channel];
-					}
-					line[at] = sum;
-				}
-				for (at = 0; at < length; at++)
-					pixels[index * skip + at * step + channel] = line[at];
-			}
-		}
-	}
-	free(kernel);
-	free(line);
 }
 
 /* Fills a rectangle, its edges covering the pixels they cross by area. */
