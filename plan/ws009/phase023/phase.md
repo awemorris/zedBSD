@@ -105,3 +105,9 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 
 - **gpu.md と食い違う見込み（統合で直す）**: `device_id` は物理の device ごとでなく node ごと（同じ GPU の render と display の node は別の id）。gpu.md と骨格の spec が「device_id で同じ device と分かる」と仮定していないか確かめ、合わせる。
 - `GPU_BLOB_CREATE` は `flags` を書き戻す（HOST_BLOB の無い node で GPU_BLOB_HOST を落とす）が header は入力だけ。`GPU_RESOURCE_MAP` は resource の種類を見ない。`GPU_RESOURCE_DESTROY` は map 中 EBUSY、display の使用中は待つ、投入済みの仕事は見ない、export した descriptor は取り消さない。
+
+## p016 から（2026-10-30 Q1、統合で直す）
+
+- gpu-capabilities.md は GPU_CAP_JOB_CAPACITY を「timeline があと幾つ予約を取れるか」と書くが、`gpu_capacity_ioctl` の `available` は 0 か 1。
+- gpu-submission.md の ECANCELED（取り下げた予約）は、flags 0 の cancel が record を捨てるので wait は ENOENT。ECANCELED は既に待っていた thread だけ。文を正確にする。
+- job の callback は venus だけ読んだ。他の driver の errno・timeline の範囲は未確かめ。
