@@ -59,7 +59,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p020](phase020/phase.md) | deblocking: h264sw-deblock（試験 test-deblock） | cleared（2026-10-30 Q1、main 9fa35fc76。test-deblock 3313 checks、突然変異約 35 で残りは観測できない 1 つ） | p003、p008 |
 | [ws326-p021](phase021/phase.md) | decoder の全体の流れと最初の全体の試験: h264sw-decoder（試験 —） | in-progress（q1755、Opus） | p002〜p020 |
 | [ws326-p022](phase022/phase.md) | JVT の適合の試験: —（試験 —） | planned | p021 |
-| [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | planned | p021（p022 を推す） |
+| [ws326-p023](phase023/phase.md) | libmedia の backend と backend の切り替え: h264sw-backend（試験 —） | in-progress（q1756、p021 と並べて） | p021（p022 を推す） |
 | [ws326-p024](phase024/phase.md) | 速さの設計と最初の最適化: —（試験 —） | planned | p022、p023 |
 | ws326-p026 | H.265 でも使える部分を codec に依らない名前の module へ移す（設計 Opus、移しは Sonnet 可、試験は全単体と適合の前後の一致） | planned | p022 |
 | [ws326-p025](phase025/phase.md) | 規約の全文の見直し: —（試験 —） | planned | p023・p026（と速さの Phase） |

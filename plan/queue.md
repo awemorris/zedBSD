@@ -376,7 +376,7 @@
 | --- | --- | --- | --- | --- |
 | q1736 / q1736-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-seq`・branch `agent/p3-seq`、QEMU（OVMF）） | [ws307](ws307/ws.md) p007 の残り → WS307 の完了 | 上のユーザーの指示 | cleared（515766eaa・c8c98ef5d、merge db69ae87e。p007-install-entry PASS、WS307 completed） |
 | q1737 / q1737-i01 | P3（同じ worktree、q1736 の後） | [ws331](ws331/ws.md) p006 規約の全文の見直し → WS331 の完了 | 上のユーザーの指示 | in-progress |
-| q1738 / q1738-i01 | P3（同じ worktree、q1737 の後） | [ws332](ws332/ws.md) p003（率を仮定する残り）→ p004 規約 → WS332 の完了 | 上のユーザーの指示 | pending |
+| q1738 / q1738-i01 | P6（2026-10-31 Q1 が P3 から移した、worktree `/home/awe/zedBSD-worktrees/p6-ws332`・branch `agent/p6-ws332`） | [ws332](ws332/ws.md) p003（率を仮定する残り）→ p004 規約 → WS332 の完了 | 上のユーザーの指示 | in-progress |
 | q1739 / q1739-i01 | P3（同じ worktree、q1738 の後、実装は phase-runner-low を標準廉価実装手順で） | [ws326](ws326/ws.md) p015・p017 以降 | 上のユーザーの指示 | canceled（2026-10-31 WS326 を昼までに終える指示で Q1 が直に回す、q1748 以降） |
 | q1740 / q1740-i01 | P6（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p6-ws291`・branch `agent/p6-ws291`、QEMU） | [BUG-370](bugs/BUG-370.md)（Photos で保存すると全面表示が閉じる） | 上のユーザーの指示 | cleared（acf7ff71a・3dc13b2e5、BUG-370 closed） |
 | q1741 / q1741-i01 | P6（同じ worktree、q1740 の後、実機 10.0.10.3） | [ws291-p014](ws291/phase014/phase.md) | 上のユーザーの指示 | in-progress・返却（4b7d0551c: big-1000 67〜69 → 85〜91 fps、NVK 136 に未達。残りは kernel の decode の短縮と WSI の block-linear） |
@@ -429,3 +429,4 @@
 | --- | --- | --- | --- | --- |
 | q1754 / q1754-i01 | P7（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p7-ws333`・branch `agent/p7-ws333`、host と build） | [ws333](ws333/ws.md) p003 → p006 | kernel の口の header の案と review、cpuperf の枠組みの kernel の実装と host 試験。UAPI（p004）は作らない | in-progress |
 | q1755 / q1755-i01 | O-p021（phase-runner-high、Opus、worktree `/home/awe/zedBSD-worktrees/o-ws326-p021`・branch `agent/o-ws326-p021`） | [ws326-p021](ws326/phase021/phase.md) | phase.md のとおり。h264sw-reflist.h の非存在の frame の印だけ header を直してよい（新しい BASE を記録） | in-progress |
+| q1756 / q1756-i01 | S-p023（phase-runner-low、worktree `/home/awe/zedBSD-worktrees/s-ws326-p023`・branch `agent/s-ws326-p023`） | [ws326-p023](ws326/phase023/phase.md) | phase.md のとおり。p021 と並べ、実 stream の試験は p021 の merge の後 | in-progress |

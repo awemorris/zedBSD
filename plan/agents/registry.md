@@ -9,8 +9,8 @@
 | P2 | phase-runner-high | Bug の一括 (q1750-i01: BUG-363・344・366・354・328・352) | `/home/awe/zedBSD-worktrees/p2-bugs` / `agent/p2-bugs` | in-progress（2026-10-31 起動、QEMU） | 806ff2ca2（merge 62eeb340e、WS291 p020） |
 | P4 | phase-runner-high | Bug の 2 つ目の束 (q1753-i01: BUG-351・349・362・368・359) | `/home/awe/zedBSD-worktrees/p4-bugs` / `agent/p4-bugs` | in-progress（2026-10-31 起動、QEMU） | b2e2993de（merge 54a134140。agent/p4-ws291pi は f2f87ac1b まで未 merge） |
 | P5 | kernel-and-driver-designer | ws318 p001 (q1752-i01) | `/home/awe/zedBSD-worktrees/p5-ws318` / `agent/p5-ws318` | in-progress（2026-10-31 起動） | 3f1e3c655（merge 843847185、WS306 p001） |
-| P6 | phase-runner-high | 返却（q1740 BUG-370・q1743 BUG-376 cleared、q1741 WS291 p014 返却） | `/home/awe/zedBSD-worktrees/p6-ws291` / `agent/p6-ws291` | 返却（2026-10-31 03:1x） | 3dc13b2e5（merge、WS291 p014・BUG-370・376） |
-| P3 | phase-runner-high | q1736 WS307 → q1737 WS331 p006 → q1738 WS332 → q1739 WS326 | `/home/awe/zedBSD-worktrees/p3-seq` / `agent/p3-seq` | in-progress（2026-10-31 起動） | 823ce7bde（merge ccd7bf2d2） |
+| P6 | phase-runner-high | ws332 p003 → p004 → 完了 (q1738-i01) | `/home/awe/zedBSD-worktrees/p6-ws332` / `agent/p6-ws332` | in-progress（2026-10-31 起動） | 3dc13b2e5（merge 71aca4b70） |
+| P3 | phase-runner-high | q1737 WS331 p006（q1736 WS307 は cleared、q1738 は P6 へ、q1739 は canceled） | `/home/awe/zedBSD-worktrees/p3-seq` / `agent/p3-seq` | in-progress（2026-10-31 起動） | 823ce7bde（merge ccd7bf2d2） |
 | P8 | phase-runner-low | ws074 p260 自走 (q1727-i02) | `/home/awe/zedBSD-worktrees/p8-ws074` / `agent/p8-ws074` | in-progress（2026-10-31 起動し直し） | fccca00dc |
 | P7 | phase-runner-high | ws333 p003 → p006 (q1754-i01) | `/home/awe/zedBSD-worktrees/p7-ws333` / `agent/p7-ws333` | in-progress（2026-10-31 起動） | cb2f410a4（merge 52aa284ba） |
 

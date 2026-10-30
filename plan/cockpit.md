@@ -1,7 +1,7 @@
 # Cockpit
 
 ユーザーが監視する状況の一枚（2026-10-30 ユーザーの指示、[master.md](master.md) の「Cockpit の運用」）。書き手は Q1 だけ。
-最終更新: 2026-10-31 03:05（Q1）
+最終更新: 2026-10-31 03:07（Q1）
 
 ## 担当（P1〜P8）
 
@@ -11,14 +11,14 @@
 | --- | --- | --- | --- | --- |
 | P1 | [WS299](ws299/ws.md) | 5330 の NVMe の読み書きを Debian の 95% 以上に | q1744: 残りの Phase（先読み・UFS・HMB など）を依存の順に（5330 は P1 専用） | WS291 p022（i915、32.6 fps 対 Linux 50.6）は電力の上限が主因で WS333 待ち。in-progress のまま返却 |
 | P2 | Bug | open の小さな Bug をまとめて直す（QEMU と host） | q1750: BUG-363（/etc/hosts）→ BUG-344（fscanf）→ BUG-366（MAP_FIXED）→ BUG-354（top の %CPU）→ BUG-328（静的な route・DNS）→ BUG-352（default route 2 つ） | WS291 p020（PowerVR、c13 45.8 fps 対 目標 50）は返却。branch agent/p2-ws291v は BUG-375 の直しの後に main へ |
-| P3 | [WS331](ws331/ws.md)・[WS332](ws332/ws.md) | driver から HAL への直の依存を除く・tick の周波数の API | q1737: WS331 p006 規約の全文の見直し → WS331 の完了 | q1738: WS332 p003・p004 → 完了（WS307 は完了、WS326 は Q1 が直に回す） |
+| P3 | [WS331](ws331/ws.md) | driver から HAL への直の依存を除く | q1737: p006 規約の全文の見直し（約 230 file、規約の担当 3 つを並べる）→ WS331 の完了 | 返却（WS332 は P6 へ移した） |
 | P4 | Bug | open の Bug の 2 つ目の束（QEMU と host） | q1753: BUG-351（/dev/acpi の権限）→ BUG-349（Venus の capability）→ BUG-362（SPIR-V の precise）→ BUG-368（APIC の fatal）→ BUG-359（xHCI の時間切れ） | 午後: Pi 5 の実機（image は完成）。BUG-374 は目視待ち |
 | P5 | [WS318](ws318/ws.md) | libmedia の作り直し（Vulkan の device の共有・codec の指定・encoder・カメラ・libavcodec の内部の fallback） | q1752: p001 設計（design-reviewer と問いの一覧まで） | WS306 の設計は済み（main 843847185、問い Q306-7・9 は下の 0b）。WS326 の後にすぐ実装に入れるよう先に設計 |
-| P6 | — | — | 返却（03:1x）。BUG-370・BUG-376 を直して closed、WS291 p014 で RTX の big-1000 を 67〜69 → 85〜91 fps | 次の割当を Q1 が決める |
+| P6 | [WS332](ws332/ws.md) | tick の周波数を API で扱う | q1738: p003（率を仮定する残りの literal）→ p004 規約 → WS332 の完了 | BUG-370・376 は closed、WS291 p014 で RTX big-1000 85〜91 fps |
 | P7 | [WS333](ws333/ws.md) | /dev/thermal で統一する電力・熱の枠組み | q1754: p003 kernel の口の header の案と review → p006 cpuperf の枠組み（kernel、host 試験） | p011（x86 の CPU の driver）・p014（5330 の受け入れ）へ。BUG-371・372・373・375 は直して closed |
 | P8 | [WS074](ws074/ws.md) | Web ブラウザ（libbrowser）: Interop 2025 で Chromium が通る試験を全部通す | 自走の 2 回目。zedBSD の image で libbrowser の build と QEMU の起動を確かめる | 要素の scroll、baseline・subgrid、View Transitions の残り。今 3,472 のうち 2,386（68.72%） |
 
-実装の担当（WS326）: O-p021（Opus、[WS326](ws326/ws.md) p021 全体の流れと最初の全体の試験）。p015・p017・p019 は cleared。
+実装の担当（WS326）: O-p021（Opus、[WS326](ws326/ws.md) p021 全体の流れと最初の全体の試験）、S-p023（Sonnet、p023 libmedia の backend、p021 と並べて）。p015・p017・p019 は cleared。
 
 ## WS ごとの進捗
 
