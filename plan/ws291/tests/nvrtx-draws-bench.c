@@ -357,10 +357,24 @@ sim_texture(uint64_t hash, const uint8_t *handle_bytes)
 	return hash;
 }
 
-/* One draw's state: the methods' values, then each group's bound buffers (buffer 0 by its bytes, the others by place). */
+/* A program's address (SET_PIPELINE_PROGRAM_ADDRESS_A and _B of the six program types): hashed by the program's bytes instead. */
+static int
+sim_program_address(uint32_t method)
+{
+	if (method < 0x2000U || method >= 0x2000U + 6U * 0x40U)
+		return 0;
+	return ((method & 0x3fU) == 0x14U || (method & 0x3fU) == 0x18U);
+}
+
+/*
+ * One draw's state: the methods' values (a program's address by the
+ * program's first bytes), then each group's bound buffers (buffer 0 by its
+ * bytes, the others by place).
+ */
 static void
 sim_snapshot(void)
 {
+	uint64_t program;
 	uint64_t hash;
 	uint32_t method;
 	unsigned group;
@@ -371,7 +385,21 @@ sim_snapshot(void)
 	for (method = 0; method < 0x1000U; method++) {
 		if (sim_transient(method << 2))
 			continue;
+		if (sim_program_address(method << 2))
+			continue;
 		hash = sim_fnv(hash, &sim_regs[method], 4);
+	}
+
+	/* Each enabled program by its first bytes (its header and the start of its code), not by where it lies. */
+	for (group = 0; group < 6; group++) {
+		program = ((uint64_t)sim_regs[(0x2014U + group * 0x40U) >> 2] << 32) | sim_regs[(0x2018U + group * 0x40U) >> 2];
+		if ((sim_regs[(0x2000U + group * 0x40U) >> 2] & 1U) == 0U || program == 0U)
+			continue;
+		cpu = gpu_cpu(program);
+		if (cpu != NULL)
+			hash = sim_fnv(hash, cpu, 256);
+		else
+			hash = sim_fnv(hash, &program, 8);
 	}
 	for (group = 0; group < 5; group++) {
 		for (slot = 0; slot < 8; slot++) {

@@ -1,0 +1,13 @@
+--- a/src/drivers/gpu/nvrtx/vk/vk-execute.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+@@ -1307,6 +1307,10 @@
+ 	if (x1 <= x0 || y1 <= y0)
+ 		return 0;
+ 
++	/* DIAG: no copy onto the target (the time a run takes without it). */
++	if (x1 > x0)
++		return 0;
++
+ 	/* The shadow's area onto the target, then ordered before what follows. */
+ 	execute_shadow_copy(&state->resolve, &state->target, x0, y0, x1, y1, &quad);
+ 	quad.source_tiled = true;
