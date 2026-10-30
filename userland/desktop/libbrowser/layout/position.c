@@ -496,8 +496,15 @@ layout_content_width(
 		 * margin contributes zero to an intrinsic size; its resolved value
 		 * only places the child in the deliberately very wide measuring box.
 		 */
-		if (child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO)
-			width += child->margin[CSS_LEFT];
+		if (child->style.margin[CSS_LEFT].unit != CSS_UNIT_AUTO) {
+			/* In a right-to-left box the left margin took the room the box left over: its own value counts. */
+			if (box->style.direction == CSS_DIRECTION_RTL && child->floating == CSS_FLOAT_NONE && !child->atomic &&
+			    box->style.display != CSS_DISPLAY_FLEX && box->style.display != CSS_DISPLAY_INLINE_FLEX &&
+			    box->style.display != CSS_DISPLAY_GRID && box->style.display != CSS_DISPLAY_INLINE_GRID)
+				width += child->style.margin[CSS_LEFT].unit == CSS_UNIT_PX ? layout_from_px(child->style.margin[CSS_LEFT].value) : 0;
+			else
+				width += child->margin[CSS_LEFT];
+		}
 		width += position_frame(child);
 		if (child->style.margin[CSS_RIGHT].unit != CSS_UNIT_AUTO)
 			width += child->margin[CSS_RIGHT];

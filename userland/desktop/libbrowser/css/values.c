@@ -2016,9 +2016,10 @@ values_single(
 
 	/* An inset or a size with anchor functions is kept as a sum the layout finishes. */
 	if (((property >= CSS_PROP_TOP && property <= CSS_PROP_LEFT) ||
-	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT)) && css_anchor_mentioned(tokens, count)) {
-		error = css_anchor_parse(parse, tokens, count, property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT,
-		    &value->anchor);
+	    (property >= CSS_PROP_WIDTH && property <= CSS_PROP_MAX_HEIGHT) ||
+	    (property >= CSS_PROP_MARGIN_TOP && property <= CSS_PROP_MARGIN_LEFT)) && css_anchor_mentioned(tokens, count)) {
+		error = css_anchor_parse(parse, tokens, count, property != CSS_PROP_TOP && property != CSS_PROP_RIGHT &&
+		    property != CSS_PROP_BOTTOM && property != CSS_PROP_LEFT, &value->anchor);
 		if (error != 0)
 			return error;
 		value->kind = CSS_VALUE_ANCHOR;

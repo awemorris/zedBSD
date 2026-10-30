@@ -5615,6 +5615,13 @@ cascade_anchor(
 		slot = CSS_ANCHOR_SLOT_MAX_HEIGHT;
 		length = &style->max_height;
 		break;
+	case CSS_PROP_MARGIN_TOP:
+	case CSS_PROP_MARGIN_RIGHT:
+	case CSS_PROP_MARGIN_BOTTOM:
+	case CSS_PROP_MARGIN_LEFT:
+		slot = CSS_ANCHOR_SLOT_MARGIN_TOP + (property - CSS_PROP_MARGIN_TOP);
+		length = &style->margin[property - CSS_PROP_MARGIN_TOP];
+		break;
 	default:
 		return;
 	}

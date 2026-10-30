@@ -248,6 +248,10 @@ enum css_anchor_slot {
 	CSS_ANCHOR_SLOT_MIN_HEIGHT,
 	CSS_ANCHOR_SLOT_MAX_WIDTH,
 	CSS_ANCHOR_SLOT_MAX_HEIGHT,
+	CSS_ANCHOR_SLOT_MARGIN_TOP,
+	CSS_ANCHOR_SLOT_MARGIN_RIGHT,
+	CSS_ANCHOR_SLOT_MARGIN_BOTTOM,
+	CSS_ANCHOR_SLOT_MARGIN_LEFT,
 	CSS_ANCHOR_SLOTS
 };
 
@@ -612,7 +616,7 @@ struct css_try_style {
 	struct css_length min_height;
 	struct css_length max_width;
 	struct css_length max_height;
-	const struct css_anchor_expr *anchor[10];
+	const struct css_anchor_expr *anchor[CSS_ANCHOR_SLOTS];
 	int position_area;
 	struct vm_string *position_anchor;
 	int justify_self;
@@ -1086,6 +1090,7 @@ const char *const *css_grid_shorthand_longhands(const struct vm_string *name);
 const char *const *css_flex_shorthand_longhands(const struct vm_string *name);
 int css_flex_shorthand_parts(const struct vm_string *shorthand, const struct vm_string *value, struct wb_units *canonical, struct wb_units parts[3], int *found);
 int css_position_area_serialize(int packed, struct wb_units *out);
+int css_position_area_serialize_declared(int packed, struct wb_units *out);
 int css_try_fallbacks_serialize(const struct css_try_list *list, struct wb_units *out);
 int css_try_order_serialize(int order, struct wb_units *out);
 const char *const *css_anchor_shorthand_longhands(const struct vm_string *name);
