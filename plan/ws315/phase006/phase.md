@@ -1,7 +1,7 @@
 <!-- awesome-plan project=zedbsd record=ws315-p006 -->
 # ws315-p006: TCP の受けの buffer の自動調整（F-WS315-rcvbuf）
 
-Status: in-progress（2026-10-30 09:25 P3 q1696-i01 ラップアップ（利用の上限、Q1 の指示）: 実装・host・build・QEMU は済み、5330 の同時の send の退行が未解決。下の「引き継ぎ」から再開。08:35 着手）
+Status: in-progress（2026-10-30 09:16 P3 q1696-i01 ラップアップ（利用の上限、Q1 の指示）: 実装・host・build・QEMU は済み、5330 の同時の send の退行が未解決。下の「引き継ぎ」から再開。08:35 着手）
 Parent: [WS315](../ws.md)
 Queue: q1696 / q1696-i01（P3）
 依存: p003（5330 の同時の送受信の測り）、WS221 p010・p012（10GbE の recv、SACK）
@@ -83,11 +83,11 @@ Queue: q1696 / q1696-i01（P3）
   （374 KB / 2 ms ≈ 1.5 Gbit/s）。Linux は送りの buffer が数 MB なので延びを吸収する。倍率を下げると queue（窓 − BDP）が減り send が戻る方向（1.25 倍で 1645）。
 - 証拠: build/ws315-hw/{p006-k1,p006-g10}/summary.txt・extra.txt、kernel は build/ws315-p006-{k1,g10,g12}-vmunix。
 
-## 引き継ぎ（2026-10-30 09:25、次のセッションが自動で再開する点）
+## 引き継ぎ（2026-10-30 09:16、次のセッションが自動で再開する点）
 
 - 最後の commit: この節を含む commit（Q1 に送る SHA）。その前の実装 8b9523b20。tcp.c は倍率を `TCP_RECEIVE_AUTO_GROWTH_EIGHTHS`（既定 16 = 2 倍、k1 と同じ動き）にまとめた形で commit 済み。
   未 commit の source は無い。g10・g12 の kernel は倍率の行を一時に 10・12 に書き換えて build し、16 に戻した（`build/p006-g10`・`build/p006-g12`）。
-- 機械の状態: 5330 は Debian で起動している（09:2x に uname で確かめた）。NVMe の zedBSD の kernel は g10（vmunix.old は k1）、userland は p003 の img1 のまま、zedbsd.cfg に CFG_ADD の行は無い。
+- 機械の状態: 5330 は Debian で起動している（09:16 に uname で確かめた）。NVMe の zedBSD の kernel は g10（vmunix.old は k1）、userland は p003 の img1 のまま、zedbsd.cfg に CFG_ADD の行は無い。
   10.0.10.3（RDNA 機）は使っていない（lock は取っていない、kernel は触っていない）。QEMU は止まっている。
 - 次の 1 手: (1) g12（1.5 倍、`build/ws315-p006-g12-vmunix` は build 済み・未試験）を 5330 で測る: `ssh solaris10-man uname -a` で Debian を確かめ、
   `MODE=--nvme-kernel sh plan/ws315/tests/5330-rtl.sh build/ws315-p006-g12-vmunix p006-g12 30`。(2) 同時の send を戻す手: 倍率をさらに下げる（1.0〜1.125）か、
