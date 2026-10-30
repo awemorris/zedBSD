@@ -20,7 +20,7 @@ p001 の分類に従い、KERN_CLOCK_HZ を使う所を時間の単位の API �
 | 28bf15354 | 2026-10-30 ユーザーの承認を受けて hal.h の comment の語だけを直した（RTC の節の「the kernel's KERN_CLOCK_HZ is the same number」→ `kern_clock_tick_rate()`。宣言・型・約束は変えていない） |
 | fd89791b0 | platform/x68k/vmunix.mk の FPU の検査（4 か所）を、68881/68882 の mnemonic の並び（変数 `X68K_FPU_INSN_PATTERN`）に当てる形に。syscall.o の switch の jump table の値 0x04c0 を objdump が `ff1 %d0` と読み、旧い `f[a-z]` の検査が落ちたため |
 | b73d872e9 | i915 の host の代役（tests/contracts/host_kernel.c・tests/display/host-kernel.c）に変換の stub |
-| 末尾の commit | wlan の UAPI（`deadline_ticks` → `deadline_ns`、CLOCK_MONOTONIC の ns、`WLAN_ABI_VERSION` 2。kernel の wlan.c と userland/base/wifi を同じ commit で）、plan/ws332/tests（boot.sh と config）、この記録 |
+| b3b05b2be | wlan の UAPI（`deadline_ticks` → `deadline_ns`、CLOCK_MONOTONIC の ns、`WLAN_ABI_VERSION` 2。kernel の wlan.c と userland/base/wifi を同じ commit で）、plan/ws332/tests（boot.sh と config）、この記録 |
 
 挙動: 変換の丸めの向き（待つ側は切り上げ、報告する側は切り捨て）は元の式と同じ。元の式との違いは、元が溢れていた値で飽和すること、TCP の keepalive の ms→tick が切り捨てから切り上げになったこと（1000・100 Hz では割り切れるので値は同じ）、
 RLIMIT_CPU を秒で比べるようにしたこと（同値）、powervr の core の clock の log を us で出すこと、wlan の UAPI の期限の単位。
