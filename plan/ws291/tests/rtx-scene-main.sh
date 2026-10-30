@@ -8,7 +8,8 @@
 # after) the runs of RUNS, each REPS times, 12 s, game content, mailbox, 4 images: scene (5000 copies), cull (5000 copies,
 # every triangle culled: the vertex work alone), one (1 copy), big (scene of 6500 copies); their MVIEW SPIN and
 # STAGES lines and the kernel's performance lines.  Then the files and the NVMe kernel put back, checked by cksum, and
-# Debian again.  OUT/summary.txt holds what is printed.
+# Debian again.  DIAG (a pattern): the kernel's last lines matching it are printed after each run (a diagnostic kernel's).
+# OUT/summary.txt holds what is printed.
 # Copyright (C) 2026 Awe Morris; SPDX-License-Identifier: Zlib
 set -u
 out=${1:?usage: rtx-scene-main.sh OUT VMUNIX}
@@ -41,7 +42,12 @@ run() {
 	line=$(grep -E 'MVIEW (SPIN|FAILED)' "$out/$set_name/$name.txt" | head -1)
 	stages=$(grep -E 'MVIEW STAGES' "$out/$set_name/$name.txt" | head -1)
 	scan=$(grep -c 'KWL SCANOUT' "$out/$set_name/$name.txt")
-	say "$set_name $name ${line:-no result} | ${stages:-} | scanout lines $scan"
+	diag=
+	if [ -n "${DIAG:-}" ]; then
+		ip=$($M zedbsd 2> /dev/null | tail -1)
+		diag=$(z "dmesg | grep -E '$DIAG' | tail -2" 2>&1 | tr '\n' ' ')
+	fi
+	say "$set_name $name ${line:-no result} | ${stages:-} | scanout lines $scan${diag:+ | $diag}"
 }
 
 say "start $(date +%H:%M)"

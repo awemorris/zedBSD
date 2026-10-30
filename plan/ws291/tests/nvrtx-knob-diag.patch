@@ -1,0 +1,36 @@
+diff --git a/src/drivers/gpu/nvrtx/vk/vk-execute.c b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+index b007116f8..4d9988cb5 100644
+--- a/src/drivers/gpu/nvrtx/vk/vk-execute.c
++++ b/src/drivers/gpu/nvrtx/vk/vk-execute.c
+@@ -237,8 +237,14 @@ struct nvrtx_vk_execute {
+ 	/* The owner's generation: the shader model of the programs and the 3D class of the push buffers. */
+ 	uint32_t shader_model;
+ 	uint32_t threed_class;
++	uint32_t diag;
+ };
+ 
++/* DIAG (not for commit): the knob each new executor sets, round robin. */
++static uint32_t execute_diag_count;
++static const uint32_t execute_diag_method[] = { 0U, 0x0f14U, 0x0f14U, 0x0f14U, 0x0f98U, 0x0f98U, 0x1284U };
++static const uint32_t execute_diag_value[] = { 0U, 0x00000000U, 0xffffffffU, 0x20202020U, 0x00200020U, 0x00080004U, 0x00ff0080U };
++
+ /*
+  * What a command buffer's records have bound so far, and the pass they
+  * are in; push_bytes are the command buffer's push constant bytes.  A
+@@ -692,6 +698,16 @@ execute_begin(
+ 	execute->at = 0U;
+ 	if (!execute->class_ready)
+ 		execute->at = nvrtx_push_draw_init_class(push, 0U, execute->va + EXECUTE_ZERO_AT, execute->threed_class);
++	if (execute->diag == 0U) {
++		execute->diag = __atomic_add_fetch(&execute_diag_count, 1U, __ATOMIC_RELAXED);
++		kern_logf("nvrtx: DIAG session %u method %x value %08x\n", execute->diag,
++			  execute_diag_method[execute->diag % 7U], execute_diag_value[execute->diag % 7U]);
++	}
++	if (execute_diag_method[execute->diag % 7U] != 0U) {
++		nvrtx_put32(push, execute->at, 0x20000000U | (1U << 16) | (execute_diag_method[execute->diag % 7U] >> 2));
++		nvrtx_put32(push, execute->at + 4U, execute_diag_value[execute->diag % 7U]);
++		execute->at += 8U;
++	}
+ 	execute->at = nvrtx_push_draw_textures(push, execute->at, execute->va + EXECUTE_HEADERS_AT, EXECUTE_POOL_ENTRIES,
+ 					       execute->va + EXECUTE_SAMPLERS_AT, EXECUTE_POOL_ENTRIES);
+ 
