@@ -3,7 +3,7 @@
 # ws327-p007 委譲の設計（標準廉価実装手順 §4.4〜§4.8）
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §13・§14。Queue: q1697 / q1697-i02（担当 P2、2026-10-30）。
-- Status: in-progress（2026-10-30。成果は揃った、cleared の判定は Q1）
+- Status: cleared（2026-10-30 Q1 の判定、ws.md の表）
 - Disposition: normal
 - ユーザーの指示（2026-10-30、原文）: 「P2をいったんラップアップして、標準廉価実装手順を適用するようにWS237のphaseを整理しなおして、再起動してほしいです。」
   （Q1 の解釈: WS327 の事。手順は main の `docs/agent/spec-module-delegation.md`。）

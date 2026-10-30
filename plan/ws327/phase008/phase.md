@@ -3,7 +3,7 @@
 # ws327-p008 Mailer の移行の確かめと Mail の host 試験の直し
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §6.2・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007。
-- Status: in-progress
+- Status: cleared（2026-10-30 Q1 の判定、ws.md の表）
 - Disposition: normal
 
 ## 1. 読む物

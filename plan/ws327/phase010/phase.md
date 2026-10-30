@@ -3,7 +3,7 @@
 # ws327-p010 Photos の移行（縮小の thread と取り込みの thread）
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §1.1・§6.1・§6.3・§13。担当: 実装の担当（Sonnet 5.5 high）。依存: p007。
-- Status: planned
+- Status: cleared（2026-10-30 Q1 の判定、ws.md の表）
 - Disposition: normal
 
 ## 1. 読む物

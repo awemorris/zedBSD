@@ -3,7 +3,7 @@
 # ws327-p003 network の層（`keiland_socket.h`、KL_VERSION 104）と host 試験
 
 - 親: [WS327](../ws.md)。設計: [design.md](../design.md) §4。Queue: q1697 / q1697-i01（担当 P2、2026-10-30）。
-- Status: in-progress（2026-10-30 P2: 受け入れの全項目を確かめた。cleared の候補、判定は Q1）
+- Status: cleared（2026-10-30 Q1 の判定、ws.md の表）
 - Disposition: normal
 
 ## 目的・受け入れ

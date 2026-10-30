@@ -21,35 +21,29 @@
 **判断が解決した時（2026-10-30 ユーザー「判断事項が解決されたらcockpit.mdをアップデートするようにmaster.mdに記録してください。」）**: ユーザーが答えたら、同じ turn のうちに cockpit.md を直して commit する。その項目を「ユーザーの判断を待つ事」から外し、「決まった事」の節へ一行（日付・WS・決定の要約・記録した ws.md か ticket の link）で移す。決定で変わった担当の予定・WS の進捗の表も同じ時に直す。「決まった事」の節もセッションをまたいで残し、消すのはユーザーの指示か確認の後。
 
 <!-- master:agents:start -->
-**2026-10-30 引き継ぎ（週間の利用の上限でセッションが終わる。次のセッションの Q1 はここから自動で再開する）**: ユーザー「P3,P5,P4をラップアップして、進捗を報告してください。次のセッションで自動再開できるように、ハンドオーバーしてください。」
-再開の手順: (1) 下の表の各担当の branch の最後の SHA を `git cat-file -t` で確かめ、未 merge の物を registry で見る。(2) ラップアップした担当（P3・P4・P5）は同じ名前・同じ worktree で起動し、ws.md の Resume point から続けさせる。(3) P1・P2 と Sonnet の p007 は、終わっていなければ同じ worktree で再起動（未 commit の差分は担当が読んで続ける）。(4) /tmp/zedbsd-rdna.lock の中身で 10.0.10.3 の状態を確かめる。
+**引き継ぎ（2026-10-30 13:2x、Q1）**: 今動いている担当は無い（全員返却・ラップアップ済み、成果は全部 main に merge 済み）。次のセッションの Q1 は [cockpit.md](cockpit.md) と下の表から再開する。
+再開の手順: (1) `git log -1` と registry の SHA を確かめる。(2) 下の「次のセッションの始めにする事」を順に。(3) 担当は同じ名前・同じ worktree で起動し、表の「次の 1 手」の記録から続けさせる。(4) 10.0.10.3 は `/tmp/zedbsd-rdna.lock` を見る（今は free、Debian、NVMe の kernel は vmunix-va1）。5330 は Debian（NVMe の zedBSD の kernel は WS315 の f1）。
 
-| 担当 | Queue | WS と次の手 | 実機 |
+| 担当 | 最後の Queue | WS と次の 1 手（記録の場所） | 実機 |
 | --- | --- | --- | --- |
-| P1 | q1705-i01 返却（12:3x、ラップアップ） | [ws009](ws009/ws.md): p025〜p027 cleared、p028 は DOC-T60 済み・build/boot の再現の途中（main 6bfc2c1e3）。次の 1 手は phase028/phase.md（`P028_BOOT_ONLY=… p028-reproduce.sh native` → hybrid uefi bios → 完了の形と移す物・消す物）。その後 WS296（P6 の 1809873bd を元に組み直す案は phase028.md の末尾）→ WS297。Q1 の残り: p1-ws009r の build/tmp/p028-20261030-110805（4.5 GB）・build/tmp/p028-run.out の削除 | — |
-| P2 | q1703-i01 返却（ラップアップ） | [ws327](ws327/ws.md): p016 in-progress（main 52ce25740）。済み: 境界・build・host 試験・FreeBSD・閉じた WS の試験・Win32 の一覧・network_finish。残り（phase016/phase.md の引き継ぎ）: image を作り直して音の device 無しで QEMU の回帰、Video Player の PAUSE と Photos の import の FAIL の解析、未到達の回帰、BUG-367 の後に 08-network の流し直しと 08-network.png → p017 | QEMU |
-| P3 | q1707-i01 返却（停止、ユーザーの指示） | BUG-367・BUG-369 closed（main 701b21b19・e1c714fb5）。WS221（Jumbo frame）・WS299（5330 の NVMe）は次の割り当てまで待つ。Q1 の残り: p3-ws315 の build/bug369・build/bug369-cfg*・build/bug367*・build/arm64（worktree の中の物）の削除 | — |
-| P4 | q1698-i01 返却（09:13） | [ws307](ws307/ws.md)（main fbdd143a8 に merge、branch agent/p4-ws307o 520360247）: p002 cleared（upload）。p015 sleep Never 実装・host 試験 PASS、QEMU は host の負荷で 2 回未達（load の低い時に 3 回目）。p004 pkgconf と各 package の開発の file、clang・libcxx は build 済み、installer-image を 1 本だけ build → p004-gtk.sh（並行の make は不可）。p008 は p004-gtk.sh の j3 で確かめ直し。p014 は p007 の C を後で。p007 は driver の設計の下書き（改訂 3、SMEP・SMAP の下の 1:1 の map を HAL を変えずに作れるか）。Q1 の残り: proposed/hal-uefi-variables.md・hal-fw-variables.md の削除（link を外してから）。CI の別件 2 つは phase002 | QEMU |
-| P5 | q1700-i01 返却（09:13、計測は未実施） | [ws291](ws291/ws.md) NVIDIA: kernel の build だけ（vmunix-m0）、引き継ぎ c59e5a60e（main 12a2cc467）。次の 1 手は [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ、rtx-desk-profile.sh を 2 回、p012 を立てる） | 10.0.10.3 は free |
-| Sonnet | — | [ws326](ws326/ws.md): cleared 20 Phase（p007 参照の list も main 5d43ad00d）。次: p015（補間と重み）・p017（B の direct）を Sonnet で並べて起動 → p019 → p021 の前に reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
+| P1 | q1705-i01 返却 | [WS009](ws009/ws.md) 文書: p028 の build・boot の再現の途中。次は [phase028](ws009/phase028/phase.md) の引き継ぎ（native の boot だけ → hybrid・uefi・bios → WS009 の完了の形）。その後 [WS296](ws296/ws.md)（P6 の 1809873bd を元に組み直す案は phase028 の末尾）→ [WS297](ws297/ws.md)（ユーザー: 1 WS ずつ） | QEMU |
+| P2 | q1703-i01 返却 | [WS327](ws327/ws.md) thread と socket の wrapper: p016 受け入れの途中。次は [phase016](ws327/phase016/phase.md) の引き継ぎ（image を作り直し音の device 無しで QEMU の回帰、Video Player の PAUSE・Photos の import の FAIL の解析、08-network の流し直し（BUG-367 は直った））→ p017 | QEMU |
+| P3 | q1707-i01 返却（停止） | BUG-367・BUG-369 を閉じた。次の候補は [WS221](ws221/ws.md) Jumbo frame・[WS299](ws299/ws.md) 5330 の NVMe（ユーザー: WS315 の後） | 5330・10.0.10.3 |
+| P4 | q1698-i01 返却 | [WS307](ws307/ws.md) installer: ws.md の Resume point（p015 の QEMU の 3 回目 → p004 GTK4 の試験 → p008 → p014 → p007 firmware 変数の driver の設計の続き） | QEMU |
+| P5 | q1700-i01 返却 | [WS291](ws291/ws.md) NVIDIA: [phase010](ws291/phase010/phase.md) の「q1700-i01」節（main の userland を NVMe に入れ desktop を測る → p012 以降） | 10.0.10.3 |
+| P6・P7 | 返却 | P7 は [WS313](ws313/ws.md) C5 の実機の試験（VF2 が空いてから）。P6 は未割当 | — |
+| Sonnet | — | [WS326](ws326/ws.md) H.264 decoder: 20 Phase cleared。次は p015（補間と重み）・p017（B の direct）を並べて起動 → p019 → reflist の header の直し（[phase021](ws326/phase021/phase.md) の p007 の引き継ぎ）→ p021（Opus）→ p022 → p026・p023〜p025 | — |
 
-予定（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS315 の後に WS221 と WS299。WS328 は WS074 と調整してから p001。
-**次のセッションの始めにする事（2026-10-30 ユーザー）**:
-1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）に取り組む（ユーザー「BUG-363は、次回のセッション開始時に取り組むようにスケジュールしておいてください。」）。
-2. （済み）WS315 p006 の同時の send の退行は解決し WS315 は completed（2026-10-30 834d10d88）。
-3. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（ユーザー「WS250は流してよいです。」。fault の app・isolate の道は Future Work へ）。
-4. （済み 2026-10-30: WS309 p015 の判断 1〜4 はユーザーが決めた。p015 の実装を担当に割り当てる）旧: ユーザーに [WS309 p015](ws309/phase015/phase.md) の「要る判断」1〜4 を聞く（ユーザー「WS309の判断は、次回セッション開始時に聞いてくれるように記録してください。」。聞く前に AGENTS.md §3 の前置き: WS の番号と説明・状態・決まっていない事・用語の説明）。
-5. 上の表の担当（P1・P2・P4・P5）と WS326 の Sonnet（p015・p017）を再開。
-6. WS328（libbrowser のベクトル描画と SVG）を p001 の設計（Opus）から始める（2026-10-30 ユーザー「WS328に関しては、WS074を止めてWS328を先に実装する、です。」）。WS074 は WS328 の後。
-7. WS309 p015（ゲームモードの V2、判断 1〜4 は決まった）を担当に割り当てる。
+**次のセッションの始めにする事**（ユーザーの指示の原文は各 ws.md・ticket）:
+1. [BUG-363](bugs/BUG-363.md)（image に /etc/hosts が無い）。
+2. [WS250](ws250/ws.md) の QEMU の起動の回帰を流して completed に（fault の app・isolate の道は Future Work へ）。
+3. [WS328](ws328/ws.md)（libbrowser のベクトル描画と SVG）を p001 の設計（Opus）から。WS074 は止めたまま、WS328 の後。
+4. [WS309](ws309/ws.md) p015（ゲームモードの V2、判断 1〜4 は決まった）を担当に。
+5. 上の表の P1・P2・P4・P5 と WS326 の Sonnet を再開。
+6. Q1 の片付け（worktree の build の一時物）: p1-ws009r の build/tmp/p028-20261030-110805・p028-run.out、p2-ws327 の build/tmp/p016-base-src・plan/ws327/tests/__pycache__、p3-ws315 の build/bug367*・bug369*・build/arm64、s-ws327-p008 の build/tmp/stale、s-ws327-p011 の build/tmp/stale-llvm、s-ws327-p009 の build/tmp/aborted-llvm、終わった s-ws326-*・s-ws327-*・s-ws009-* の worktree。
 
-止めたまま: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS299](ws299/ws.md)（継続の判断待ち）。
-main に未 merge の branch は [registry](agents/registry.md) の試験待ちの欄。web の GET は「統合の注意」の条件で可。HAL の差分の承認は無い。
-**終わりの条件と機械の割当（2026-10-29 23:2x ユーザー）**: 「P6の結果はマージしてOKです。別なツリーのセッションで再開したときに試験から継続できるように、P6からハンドオーバーしてください。」「P5は、NVDECが実機video appで動いて、WS completedになったら、P5は終了して返却してください。」「P4は、先にUFSが遅いバグを修正してください。…」（q1688）「P3は、お願いしてあるネットワークの改善が終わったら、終了して返却してください。」「P2は、WS068が完了したら、終了して返却してください。」「P1は、WS309が完了したら、終了して返却してください。」「P3で、2.5GのUSBが遅いことは、ドライバの問題と思いますので、5330を使って修正してほしいです。」（q1689）「GPUドライバの改善は、ゴールがまだ見えないので、先にP3のネットワークを優先して、デスクトップ機に割り当てて、P3の作業を完了させるようにスケジューリングしてください。そのあとに、P5のNVDECを完了させます。そのあと、デスクトップ機では、RTXドライバの最適化に進んでください。エージェントは再利用しても新規で立ててもOKです。」「VF2を他のエージェントが使わなくなるのを待って、実機でP7のODROID-C5のテストを行います。」「centrisのNICの設定は、変更してOKです。」
-- 解釈（Q1）: 10.0.10.3 は P3 の WS221 p010 が終わるまで P3 が専有、次に P5（WS243 p006 の実機）、その後 RTX の driver の最適化（WS291 の NVIDIA の段）。VF2 は P3 が手放した後に C5 の試験へ。
-- WS068（2026-10-29 ユーザー「WS068ですが、i915の試験を受け入れ条件から外して、VenusのみでOKとします。また、残りが大きい件は了解しましたので、phaseに分解して、目標を管理しながら、空いた時間に細々と取り組んで、WS完了に近づいていけるように、準備してください。」）: 受け入れは Venus のみ。P2 が残りを Phase に分けて返却し、以後は手の空いた担当が Phase ごとに進める（前の「P2 は WS068 の完了で返却」を置き換える、Q1 の解釈）。
-- WS221（2026-10-29 ユーザー「P3は、SACKの実装を優先してください。ATRを有効にした評価で進めます。」）: centris の ixgbe の ATR は有効に戻し、評価は ATR 有効で。P3 は zedBSD の TCP の SACK を先に実装し、その後 q1689（5330 の NCM）。
-- WS221 p014・WS315（2026-10-30 ユーザー「xHCIの改修は行いましょう。たとえ今回効果がなくても、価値がある実装だと考えます。Realtek方式については、NCMでどこまで速度が上がるか観察してから、ぜひ実装しましょう。…」原文は ws315/ws.md）: xHCI の 1 endpoint に複数の要求は効果が無くても入れる。その後 Realtek の vendor mode の driver（WS315）。
+**予定**（ユーザーの決定、各 ws.md）: WS326 の後に WS318（すぐ）と WS329（H.264 encoder）、WS329 の後に WS330（H.265）。WS009 → WS296 → WS297 を 1 つずつ（標準廉価実装手順）。WS328 → WS074。
+**止めたまま**: [WS305](ws305/ws.md) VFIO、[WS304](ws304/ws.md) Pi 5 の NVMe、[WS290](ws290/ws.md) GHCI（保留）、[WS317](ws317/ws.md) hotplugd（今は取り組まない）。HAL の差分の承認は無い。
 <!-- master:agents:end -->
 
 **ユーザー不在の間の自律実行（2026-10-29 12:4x ユーザー「夜まで寝ます。しばらく質問に回答できないので、疑問で止まったphaseがあれば、質問はメッセージ表示だけしてクリック回答にはせず、別なphaseに移って作業を進めてください。」）**: 判断が要る Phase は uncleared・止めにして理由と要る判断を記録し、Q1 は問いをメッセージで書くだけ（クリックの問いにしない）。担当は別の Phase に移る。
@@ -74,24 +68,24 @@ main に未 merge の branch は [registry](agents/registry.md) の試験待ち�
 ### Focus と優先順位
 
 <!-- master:focus:start -->
-- 公開は rev.5 まで（実質のベータ2）。次に何をやるか（以前の「ベータ3・ベータ4」の段は取り消し）は Q1 とユーザーが整理中。下の「保留の WS」はその整理の対象。
-- **Keiland の thread の整理**（[WS309](ws309/ws.md)、incomplete）: 設計は確定（design.md、J1 は V2 swapchain 共有）、p001〜p010・p019 cleared（2026-10-29）、P1 が p011 から実装中。構成の表とユーザーの決定の原文は ws309/ws.md（手書きの照合の pool の N は 2026-10-29 ユーザーの回答「CPU 数で固定 (推し)」で決定済み）。ゲームモードは Vulkan display（VK_KHR_display）の仕様の中で実装する（ユーザー「工数が多くてもかまいません。」）。
-- **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は重い scene で Linux と同等（scene-1500 201.8 対 200.4 fps、scene-6500 49.2 対 50.1）、小さな submit の多い run（big・subs）は Linux の 1/3〜1/10。次は案 4・5（ユーザーの判断）、その後 NVIDIA → PowerVR、Linux 以上の後に WS306。
-- **5330 の電源と性能**（[WS299](ws299/ws.md)）: direct の書き 88%、UFS の file の書き 52%、CPU の速さは Debian の 70〜90%（idle が C1 だけ・HWP 無し・hybrid を知らない、別の WS が要る）。継続はユーザーの判断。その後は WS300 → WS052 → WS301 → WS302 → 熱と fan（[pm-plan.md](agents/P1/pm-plan.md)）。
-- **GHCI 1.0 の driver**（[WS290](ws290/ws.md)）: 保留（FPGA 側の設計の完了と、ユーザーの明示の再開の指示を待つ）。p017 は実装・host 試験・QEMU 済み、残りは実機（p014・M9）と p015。
-- **インストーラ**（[WS307](ws307/ws.md)）: 仕様は確定（spec.md）、実装 p002〜p014 はユーザーの指示の後。
-- 達成: fg021 ZYBO（2026-10-23）、fg020 VisionFive 2（2026-10-22）、fg019 ベータ2（2026-10-17 OSC）、fg018 Linux 標準 GTK4（WS114）、fg010 OSC のデモ、fg012〜fg016。Pi 5（WS278・WS279）も completed。取り下げ: fg022 KC705 の GPU の board（WS288 の終了）。
-- 実機の使い分け（2026-10-27 10:49 ユーザー）: デスクトップは GPU の driver の開発（今後は Linux＋VFIO の passthrough）、Keiland の app は VM で開発して VF2 で速さを詰める、5330 は Intel GPU・電源管理・Alder Lake。
+- 公開は rev.5 まで（実質のベータ2）。次に何をやるかは Q1 とユーザーが整理中。「保留の WS」はその整理の対象。
+- 実装の進め方: 外部の標準仕様に基づく物と、手順に分けられる大きな仕事は標準廉価実装手順（[docs/agent/spec-module-delegation.md](../docs/agent/spec-module-delegation.md)、Opus が設計、Sonnet 5.5 high が実装）。今の対象は WS326・WS327・WS009・WS328、次に WS296・WS297・WS329・WS330。
+- **H.264 の software の decoder**（[WS326](ws326/ws.md)）: 20 Phase cleared、全体の流れと適合の試験へ。共通部分は H.265 でも使える汎用の名前にする（ユーザー）。
+- **libkeiland の thread と socket**（[WS327](ws327/ws.md)）: 実装は全部 cleared、受け入れの途中。
+- **文書**（[WS009](ws009/ws.md)）: /dev/gpu の UAPI の文書（DOC-54）は完成、残りは build・boot の再現だけ。
+- **GPU の描画の速さ**（[WS291](ws291/ws.md)）: RDNA は Linux と同等、NVIDIA は scene-5000 で NVK と同等（49.5〜49.7 fps）、50 fps を明らかに超える改善と desktop の測り直しが残り。
+- **インストーラ**（[WS307](ws307/ws.md)）: app と通しの試験は済み、残りは sleep の QEMU、GTK4 のセルフビルド、firmware 変数の driver、規約。
+- 達成: WS315（Realtek USB 2.5G、5330 で Linux 並み）、WS314（libkeiland の fd の除去）、WS243（NVDEC 1080p60）（2026-10-30）。fg021 ZYBO、fg020 VisionFive 2、fg019 ベータ2 など。
+- 実機の使い分け（2026-10-27 ユーザー）: デスクトップ（10.0.10.3）は GPU の driver、Keiland の app は VM で開発して VF2 で速さを詰める、5330 は Intel GPU・電源・Alder Lake と USB の NIC。
 <!-- master:focus:end -->
 
 <!-- master:priority:start -->
 優先順位（依存による順とは別。Queue の権限は変えない）:
-1. WS309（Keiland の thread の整理）: P1（q1662-i02）が p005 から実装。
-2. WS291: P2（q1663）が案 5 → 案 4。並べて WS221（P3）・WS307（P4）・設計の全般（P5）・実装だけ（P6）。
-3. WS299: ユーザーの継続の判断の後（UFS の書き・mkfs の write-through・p007・p008、または区切る）。
-4. すぐ取り組む物（2026-10-27 ユーザー）: WS221（Jumbo frame、p008・p009 は WS220 から移した物）、WS242（RTX 30/40）・WS243（NVDEC）・WS250（nvrtx の取り消しと復帰）、WS223（全画面は合成、推しで実装）、WS009 の DOC-54（/dev/gpu の UAPI の文書）。
-5. WS307 の実装、WS217（画面の回転、開き直した）: ユーザーの指示の時。
-6. WS290・WS292・WS226: WS290 の再開の後。WS295・WS296・WS068: ユーザーの指示の時。保留の WS（WS297 を含む）: Q1 とユーザーの整理の後。
+1. 次のセッションの始めにする事（上の 1〜6）。
+2. 標準廉価実装手順の WS: WS326 → WS318 → WS329 → WS330、WS009 → WS296 → WS297、WS328 → WS074、WS327 の受け入れ。
+3. WS309 p015（ゲームモードの V2）、WS291 の NVIDIA の段、WS307 の残り。
+4. WS221（Jumbo frame）・WS299（5330 の NVMe）: 担当の割り当ての時（P3 は停止中）。
+5. WS290・WS292・WS226: WS290 の再開の後。保留の WS: Q1 とユーザーの整理の後。
 <!-- master:priority:end -->
 
 ### ユーザーの未決
