@@ -126,7 +126,7 @@ source. Subscriber callbacks are required to be bounded and nonblocking, and
 unsubscribe joins already admitted callbacks. A user-space `EVIOCGRAB` affects
 only evdev readers, not this console subscriber.
 
-Stable `jis-*` position symbols let PC-98 and X68000 retain physical identity
+Stable `jis-*` position symbols let PC-98 retain physical identity
 when modifiers change between make, repeat, and break. A console-only symbol
 which has no code in the frozen public subset remains internal to the console
 subscriber and does not fabricate an evdev capability or event.
