@@ -37,7 +37,7 @@ p021（最初の全体の試験、module の間の誤りがここで出る）・
 | [ws326-p003](phase003/phase.md) | 共有の表と parameter set: h264sw-tables、h264sw-ps（試験 test-tables、test-ps） | cleared（2026-10-30 Q1、main a29ef7eaa。test-tables 846・test-ps 41887 checks） | p002 |
 | [ws326-p004](phase004/phase.md) | slice header: h264sw-slice（試験 test-slice） | cleared（2026-10-30 Q1、main a10770ab8。test-slice 141694 checks） | p003 |
 | [ws326-p005](phase005/phase.md) | frame と POC: h264sw-frame、h264sw-poc（試験 test-frame、test-poc） | cleared（2026-10-30 Q1、main 405626548。test-frame 284・test-poc 382 checks、突然変異 17 のうち 16 を検出（残りは観測できない padding）） | p003、p004 |
-| [ws326-p006](phase006/phase.md) | DPB（marking・gap・出力の順）: h264sw-dpb（試験 test-dpb） | planned | p005 |
+| [ws326-p006](phase006/phase.md) | DPB（marking・gap・出力の順）: h264sw-dpb（試験 test-dpb） | 実装済み・試験 PASS（2026-10-30、Q1 の受け入れ待ち。test-dpb 129447 checks、突然変異 24 のうち 23 を検出（残りは同値）） | p005 |
 | [ws326-p007](phase007/phase.md) | reference picture list: h264sw-reflist（試験 test-reflist） | planned | p006 |
 | [ws326-p008](phase008/phase.md) | macroblock の型と neighbour: h264sw-mb（試験 test-mb） | cleared（2026-10-30 Q1、main bc2cf3321。test-mb 1938 checks） | p001 |
 | [ws326-p009](phase009/phase.md) | CAVLC: h264sw-cavlc（試験 test-cavlc） | cleared（2026-10-30 Q1、main 7a918c446。test-cavlc 87868 checks。Kraft の和は仕様の表どおり 1 未満の列がある（phase.md の記述の誤り、Q1 が Sonnet の値を採った）） | p002、p008 |
