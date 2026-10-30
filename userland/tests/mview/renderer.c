@@ -2715,8 +2715,8 @@ renderer_buffer_free(
 
 /*
  * Reads the processor's cycle counter; the clock a user program can read
- * has only tick resolution.  On arm64 (the Linux arm64 package, WS112) the
- * virtual counter of the generic timer.
+ * has only tick resolution.  On arm64 (the Linux arm64 package) the virtual
+ * counter of the generic timer, on riscv64 the time counter.
  */
 static uint64_t
 renderer_cycles(
@@ -2726,6 +2726,14 @@ renderer_cycles(
 	uint64_t value;
 
 	__asm__ volatile("mrs %0, cntvct_el0" : "=r"(value));
+
+	/* Succeeded: the counter. */
+	return value;
+#elif defined(__riscv)
+	uint64_t value;
+
+	/* The time counter, which the kernel lets user mode read (scounteren.TM). */
+	__asm__ volatile("rdtime %0" : "=r"(value));
 
 	/* Succeeded: the counter. */
 	return value;
