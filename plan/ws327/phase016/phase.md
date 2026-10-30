@@ -135,6 +135,15 @@ p013・p014 の「Q1 へ」と p016 の確かめ（`kl_cond_wait_for`・`kl_sock
 または実装・build の側で直せる）。Q1 に判断を頼む物: S7（Win32 の poll の時間を QPC で測り待ち直すか。W1 と揃える実装の直し、走らせられない）、
 S9（`kl_socket_close(NULL)` の comment を p017 で header に足す）、W5・S8（Windows の Makefile を作る時の約束、Future Work の候補）。
 
+Q1 の判断（2026-10-30）: S7 は直す、S9 は p017 で header の comment に（API・ABI・KL_VERSION は変えない）、W5・S8 は Q1 が Future Work
+（F-WS327-win32-build）に。
+- S7 を直した: `socket-win32.c` の `kl_socket_poll` が開始の QPC と時間の tick を覚え、`select` が時間の前に 0 で返れば残り（切り上げの ms）を
+  待ち直す（`socket_clock`・`socket_poll_left` を足した）。waits が 0 の時は `Sleep` でなく `kl_thread_sleep`。`sh plan/ws327/tests/build-win32.sh`
+  → x86_64・i686 とも compile warning 0・link PASS、`ws327-win32: PASS`。走らせていない（決定 3）。
+- F-WS327-win32-build の文案（一行）: 「libkeiland の Windows の build（Makefile）を作る時の約束: `-lws2_32 -liphlpapi`、Windows 10 を前提
+  （`_WIN32_WINNT=0x0A00`、`SetThreadDescription`・`inet_pton`・`WSA_FLAG_NO_HANDLE_INHERIT`）、libkeiland の DLL は thread の生きている間に
+  unload しない（FLS の callback が消えた code を指す）。WS327 design §5.4 W5・S8」
+
 （以下 QEMU・FreeBSD は続き）
 
 ## Q1 から（2026-10-30）: 移行で壊れた閉じた WS の試験

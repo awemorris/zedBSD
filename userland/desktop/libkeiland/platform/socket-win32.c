@@ -117,6 +117,8 @@ static int socket_make(int domain, int type, SOCKET *handle);
 static int socket_no_inherit(SOCKET handle);
 static int socket_set_int(SOCKET handle, int level, int name, int value);
 static int socket_poll_check(struct kl_socket_wait *waits, size_t count, int milliseconds);
+static void socket_clock(ULONGLONG *rate, ULONGLONG *now);
+static int socket_poll_left(ULONGLONG rate, ULONGLONG start, ULONGLONG wanted);
 static void socket_poll_fill(const struct kl_socket_wait *waits, size_t count, fd_set *readable, fd_set *writable, fd_set *failed);
 static int socket_in_set(const fd_set *set, SOCKET handle);
 static unsigned socket_poll_found(const struct kl_socket_wait *wait, const fd_set *readable, const fd_set *writable, const fd_set *failed);
@@ -1227,9 +1229,13 @@ kl_socket_close(
  * A socket's READABLE goes in the read set, WRITABLE in the write set, and
  * every socket in the exception set (a connect that failed shows there:
  * FAILED).  A waker is ends[0] in the read set.  The time is a timeval
- * (NULL for KL_SOCKET_FOREVER).  With no waits it only sleeps, since select
- * with no socket at all is WSAEINVAL.  A waker found readable is read empty
- * and then made quiet (struct kl_socket_waker).
+ * (NULL for KL_SOCKET_FOREVER).  select may end on the system's tick, a
+ * little before the time, so the time is measured with the performance
+ * counter and a select that found nothing early waits again for the rest
+ * (as kl_thread_sleep does).  With no waits it only sleeps
+ * (kl_thread_sleep), since select with no socket at all is WSAEINVAL.  A
+ * waker found readable is read empty and then made quiet (struct
+ * kl_socket_waker).
  */
 int
 kl_socket_poll(
@@ -1240,6 +1246,9 @@ kl_socket_poll(
 {
 	struct timeval limit;
 	struct timeval *limit_pointer;
+	ULONGLONG rate;
+	ULONGLONG start;
+	ULONGLONG wanted;
 	unsigned char *room;
 	fd_set *readable;
 	fd_set *writable;
@@ -1247,6 +1256,7 @@ kl_socket_poll(
 	size_t set_bytes;
 	size_t index;
 	unsigned found;
+	int left;
 	int status;
 	int wsa;
 	int error;
@@ -1264,10 +1274,10 @@ kl_socket_poll(
 	if (error != 0)
 		return error;
 
-	/* No waits: only the time passes (select with no socket is WSAEINVAL). */
+	/* No waits: only the time passes, all of it (select with no socket is WSAEINVAL). */
 	if (count == 0U) {
 		if (milliseconds > 0)
-			Sleep((DWORD)milliseconds);
+			kl_thread_sleep((uint32_t)milliseconds);
 		return 0;
 	}
 
@@ -1282,24 +1292,45 @@ kl_socket_poll(
 	writable = (fd_set *)(void *)(room + set_bytes);
 	failed = (fd_set *)(void *)(room + set_bytes * 2U);
 
-	/* The sockets and wakers in the sets. */
-	socket_poll_fill(waits, count, readable, writable, failed);
-
-	/* The time: none (forever), or seconds and microseconds. */
-	limit_pointer = NULL;
-	if (milliseconds != KL_SOCKET_FOREVER) {
-		limit.tv_sec = milliseconds / SOCKET_MS_SECOND;
-		limit.tv_usec = (milliseconds % SOCKET_MS_SECOND) * SOCKET_US_MILLISECOND;
-		limit_pointer = &limit;
+	/* Where the counter stands, and the counter's ticks of the whole time (rounded up; seconds apart so that it cannot overflow). */
+	socket_clock(&rate, &start);
+	wanted = 0;
+	if (milliseconds > 0) {
+		wanted = ((ULONGLONG)milliseconds / 1000U) * rate;
+		wanted += (((ULONGLONG)milliseconds % 1000U) * rate + 999U) / 1000U;
 	}
 
-	/* The wait (its first argument is ignored on Windows). */
-	status = select(0, readable, writable, failed, limit_pointer);
-	if (status == SOCKET_ERROR) {
-		wsa = WSAGetLastError();
-		free(room);
-		error = socket_error(wsa);
-		return error;
+	/* Waits until something is ready or the counter has run the whole time. */
+	left = milliseconds;
+	for (;;) {
+		/* The sockets and wakers in the sets (select leaves only the ready ones in them). */
+		socket_poll_fill(waits, count, readable, writable, failed);
+
+		/* The time: none (forever), or what is left, in seconds and microseconds. */
+		limit_pointer = NULL;
+		if (milliseconds != KL_SOCKET_FOREVER) {
+			limit.tv_sec = left / SOCKET_MS_SECOND;
+			limit.tv_usec = (left % SOCKET_MS_SECOND) * SOCKET_US_MILLISECOND;
+			limit_pointer = &limit;
+		}
+
+		/* The wait (its first argument is ignored on Windows). */
+		status = select(0, readable, writable, failed, limit_pointer);
+		if (status == SOCKET_ERROR) {
+			wsa = WSAGetLastError();
+			free(room);
+			error = socket_error(wsa);
+			return error;
+		}
+
+		/* Something is ready, or there is no time to run out. */
+		if (status > 0 || milliseconds == KL_SOCKET_FOREVER)
+			break;
+
+		/* Nothing: the time ran out, or select ended early and the rest is waited for. */
+		left = socket_poll_left(rate, start, wanted);
+		if (left == 0)
+			break;
 	}
 
 	/* What each wait found; none when the time ran out. */
@@ -1772,6 +1803,59 @@ socket_poll_check(
 
 	/* Succeeded: the waits are well formed. */
 	return 0;
+}
+
+/*
+ * The performance counter's rate (ticks a second; never 0 on Windows XP and
+ * later, 1000 if it were) and where it stands.
+ */
+static void
+socket_clock(
+	ULONGLONG *rate,
+	ULONGLONG *now)
+{
+	LARGE_INTEGER frequency;
+	LARGE_INTEGER counter;
+
+	/* The rate, and the counter now. */
+	(void)QueryPerformanceFrequency(&frequency);
+	(void)QueryPerformanceCounter(&counter);
+	*rate = (ULONGLONG)frequency.QuadPart;
+	if (*rate == 0U)
+		*rate = 1000U;
+	*now = (ULONGLONG)counter.QuadPart;
+}
+
+/*
+ * The milliseconds left of a wait of wanted counter ticks from start,
+ * rounded up so that the last wait does not end early; 0 once the counter
+ * has run them all.
+ */
+static int
+socket_poll_left(
+	ULONGLONG rate,
+	ULONGLONG start,
+	ULONGLONG wanted)
+{
+	ULONGLONG now;
+	ULONGLONG same_rate;
+	ULONGLONG elapsed;
+	ULONGLONG left;
+	ULONGLONG milliseconds;
+
+	/* How far the counter ran (its rate is the same as at the start). */
+	socket_clock(&same_rate, &now);
+	elapsed = now - start;
+	if (elapsed >= wanted)
+		return 0;
+
+	/* The rest in whole milliseconds, rounded up; never more than the whole wait, which was an int. */
+	left = wanted - elapsed;
+	milliseconds = (left / rate) * 1000U;
+	milliseconds += ((left % rate) * 1000U + rate - 1U) / rate;
+	if (milliseconds > (ULONGLONG)INT_MAX)
+		milliseconds = (ULONGLONG)INT_MAX;
+	return (int)milliseconds;
 }
 
 /* Puts each wait's sockets in the three sets (each has room for count entries). */

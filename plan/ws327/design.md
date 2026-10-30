@@ -506,7 +506,7 @@ Win32 の層は mingw の compile と link まで（決定 3、走らせてい�
 | S4 | socket | bind の乗っ取り | `SO_EXCLUSIVEADDRUSE` を付けないので他の process が `SO_REUSEADDR` で同じ port に bind できる（waker の listen だけは付ける） | listen する server の app が出たら再検討（今の app は client だけ） |
 | S5 | socket | ready の意味 | `POLLHUP` は select に無い。FIN は readable、RST は readable と writable。「閉じた socket の WRITABLE」は未確認 | header の READABLE（終わり）・FAILED は守れる。WRITABLE は実機で確かめる時に |
 | S6 | socket | `select` の socket の数 | `fd_set` を `fd_count` と配列の malloc で作るので `FD_SETSIZE`（64）に縛られない（code で確かめた、走らせていない） | 実装の内 |
-| S7 | socket | `kl_socket_poll` の時間 | `select` の timeval と、waits が 0 の時の `Sleep` は tick で早く返りうる。POSIX の poll は早く返らない | header は「for so many milliseconds」で「at least」と言わない。W1 と揃えるなら socket-win32.c で QPC で測り待ち直す（実装の直し、header は変えない） |
+| S7 | socket | `kl_socket_poll` の時間 | `select` の timeval と、waits が 0 の時の `Sleep` は tick で早く返りうる。POSIX の poll は早く返らない | 直した（p016、Q1 の判断 2026-10-30）: QPC で測り、時間の前に何も無く返った select は残りを待ち直す。waits が 0 は `kl_thread_sleep`。header は変えない |
 | S8 | socket | link と版 | `-lws2_32 -liphlpapi`、`inet_pton` は Vista 以降、`WSA_FLAG_NO_HANDLE_INHERIT` は 7 SP1 以降。Windows 10 を前提（`_WIN32_WINNT=0x0A00`） | Windows の Makefile（範囲の外）の約束 |
 | S9 | socket | `kl_socket_close(NULL)` | 両方の層で何もしない（Mailer が頼る） | header の comment に「NULL は何もしない」を足す（p017 へ持ち越し、design-reviewer #9） |
 
