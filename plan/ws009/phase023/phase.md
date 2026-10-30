@@ -128,3 +128,7 @@ gpu-doc-rules.md 6 節。commit は `git commit -m WIP -- docs/reference/gpu*.md
 
 - COMMIT の `sequence` が lease ごとに数え直すか: gpu-display.md は数え直すと書くが bcm2711 の code は戻さない。統合で事実に合わせる。
 - plane_state の comment「storage of this open」と code（blob か scanout の allocation だけ、他は EINVAL）の食い違い。cursor の EOPNOTSUPP は header の GPU_DISPLAY_HAS_CURSOR でなく op の有無。REFRESH の ENODEV は記録された誤りも含む。
+
+## p020 から（2026-10-30 Q1）
+
+- gpu-op.h の先頭の comment は executor を i915・bcm2711 だけと書き、file の名前も古い（i915 は vk/vk-transport.c など）。video の節も nvrtx・bcm2711 の decode と capset の bit の門を書いていない。sysctl.h の `hw.gpu.start` は bcm2711 の Pi 5 の start を書いていない。
