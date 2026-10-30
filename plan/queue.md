@@ -259,4 +259,4 @@
 
 | Queue | 担当 | Phase | 範囲 | 結果 |
 | --- | --- | --- | --- | --- |
-| q1715 / q1715-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291`・branch `agent/p3-ws291`、基点 main、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」 基準はユーザーの未回答の間 Q1 の既定: zedBSD の今の fps で 40 fps 前後の scene を決め、50 fps 以上へ | in-progress |
+| q1715 / q1715-i01 | P3（phase-runner-high、worktree `/home/awe/zedBSD-worktrees/p3-ws291`・branch `agent/p3-ws291`、基点 main、実機 VF2） | [ws291](ws291/ws.md) p020 PowerVR の model 50 fps | ユーザー「WS291のPowerVRの最適化ですが、VF2が空いているので、P3で実行してOKです。」 基準はユーザーの未回答の間 Q1 の既定: zedBSD の今の fps で 40 fps 前後の scene を決め、50 fps 以上へ | uncleared（2026-10-30 返却。VF2 の HDMI に画面が無く loader の framebuffer が無い（元の kernel でも同じ、10-28 から）。fps は未計測。a7e9379f5） |
